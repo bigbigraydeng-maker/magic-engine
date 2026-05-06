@@ -314,7 +314,7 @@ describe('executeJob', () => {
 
     const upsertCall = mockSupabase._upsert.mock.calls[0][0]
     expect(upsertCall.has_geo_block).toBe(false)
-    expect(upsertCall.geo_detection_method).toBeNull()
+    expect(upsertCall).not.toHaveProperty('geo_detection_method')
   })
 
   // ── Unrecoverable error ──────────────────────────────────────────────────
@@ -472,16 +472,17 @@ describe('crawlAndClassifyPages — database writes', () => {
 
     expect(upsertArg).toMatchObject({
       client_id: 'client-abc',
-      job_id: 'job-123',
       url,
       title: 'About Us',
       page_type: 'about',
       topics: ['company', 'team'],
       primary_keyword: 'about us',
-      classification_confidence: 0.95,
       has_geo_block: false,
-      status_code: 200,
+      crawl_status: 'crawled',
     })
+    expect(upsertArg).not.toHaveProperty('job_id')
+    expect(upsertArg).not.toHaveProperty('classification_confidence')
+    expect(upsertArg).not.toHaveProperty('status_code')
   })
 
   it('computes word_count from markdown content', async () => {
@@ -573,8 +574,9 @@ describe('crawlAndClassifyPages — database writes', () => {
 
     const upsertArg = mockSupabase._upsert.mock.calls[0][0]
     expect(upsertArg.has_geo_block).toBe(true)
-    expect(upsertArg.geo_detection_method).toBe('aria-hidden attribute')
-    expect(upsertArg.geo_confidence).toBe(0.95)
+    expect(upsertArg.crawl_status).toBe('crawled')
+    expect(upsertArg).not.toHaveProperty('geo_detection_method')
+    expect(upsertArg).not.toHaveProperty('geo_confidence')
   })
 
   it('respects maxPages option and does not crawl more than the limit', async () => {

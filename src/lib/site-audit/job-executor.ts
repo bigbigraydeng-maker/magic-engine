@@ -157,26 +157,27 @@ export async function crawlAndClassifyPages(
       : 0
 
     // Step 4: Upsert to client_site_pages
+    let urlPath = '/'
+    try { urlPath = new URL(crawl.url).pathname || '/' } catch { /* keep default */ }
+
     try {
       const { error: upsertError } = await supabase
         .from('client_site_pages')
         .upsert(
           {
             client_id: clientId,
-            job_id: jobId,
             url: crawl.url,
+            path: urlPath,
             title: crawl.title,
             markdown_content: crawl.markdown,
             word_count: wordCount,
             page_type: pageType,
             topics,
             primary_keyword: primaryKeyword,
-            classification_confidence: classificationConfidence,
             has_geo_block: hasGeoBlock,
-            geo_detection_method: geoDetectionMethod,
-            geo_confidence: geoConfidence,
-            status_code: crawl.statusCode,
+            crawl_status: 'crawled',
             crawled_at: crawl.crawledAt.toISOString(),
+            last_crawled_at: crawl.crawledAt.toISOString(),
           },
           { onConflict: 'client_id,url' }
         )
