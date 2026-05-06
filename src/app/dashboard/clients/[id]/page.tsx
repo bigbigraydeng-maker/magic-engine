@@ -8,6 +8,7 @@ import { CampaignPanel } from './_components/CampaignPanel';
 import { GenerationDrawer } from './_components/GenerationDrawer';
 import { ReelsStudio } from './_components/ReelsStudio';
 import { SiteAuditPanel } from './_components/SiteAuditPanel';
+import { ClientStatusCards } from './_components/ClientStatusCards';
 
 interface Client {
   id: string;
@@ -166,6 +167,9 @@ export default function ClientDetailPage() {
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
       />
+
+      {/* Status Cards */}
+      <ClientStatusCards clientId={clientId} />
 
       {/* Tabs */}
       <div className="border-b border-gray-200">
