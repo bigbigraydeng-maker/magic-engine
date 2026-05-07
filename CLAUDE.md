@@ -479,7 +479,7 @@ AI Tracker 每周运行
 | **Phase 8.D** | DNZ诊断策略层 | 客户域名全量采集+策略分析 | ✅ 完成 | 2026-05-07 | Stage 1-4✅ P8.0.7✅ P8.0.8✅ — 全部完成 |
 | **Phase 8.1** | 三维内容策略分析 | AI弱项×SEMrush关键词×现有页面三维交叉策略 | ✅ 完成 | 2026-05-07 | 101 tests · scorer + analyzer + generate + list + UI |
 | **Phase 8.2** | 策略驱动内容执行 | existing_pages_context注入 + 升级现有页面流程 + 审计扩展 | ✅ 完成 | 2026-05-07 | 48 tests · pages-context + upgrade-generator + upgrade API + 升级UI + content-auditor扩展 |
-| **Phase 9.0** | Visual Queue UX Polish | 生成队列UI优化（平滑倒计时、进度、卡片） | 🔄 进行中 | — | 1Hz刷新 + 环形进度 + 动画 |
+| **Phase 9.0** | Visual Queue UX Polish | 生成队列UI优化（平滑倒计时、进度、卡片） | 🔄 进行中 | — | P9.0.1-9✅（SVG环+CSS动画+弧形队列卡）· 待P9.0.2+测试+浮动卡 |
 | **Phase 9** | 报告化 + 客户Portal | 月报PDF自动生成 + 客户自助门户 | 📋 规划中 | — | 权威度追踪 + 邮件发送 |
 | **Phase 10+** | 多语言 + Academy沉淀 | 国际化 + 课程化 + 可能的SaaS模块 | 📋 远期规划 | — | WordPress/Webflow插件 |
 
@@ -496,6 +496,7 @@ AI Tracker 每周运行
 | **P8.3.1** | 客户接入向导（5步：基本信息→Brief上传→DNZ采集→审核→激活） | 2-3天 | ⭐⭐ |
 | **P7.4.15** | Week 2 CTS Tours AI Tracker 复跑（2026-05-12） | 1h | ⭐⭐ |
 | **Phase 8.Q.4** | 批量编辑 UI | 1天 | ⭐ |
+| **P9.0.2** | generation-config.ts 补全 `getStagesForType` + `getCancelThresholdMs` | 2h | ⭐ |
 
 **完成后进入**：Phase 8.3 客户接入向导（详见 ROADMAP.md § Phase 8.3）
 
@@ -506,6 +507,12 @@ AI Tracker 每周运行
 > 每当完成一个 Phase 或上线新功能时，自动在此记录。格式：**[完成日期]** — Phase ID + 功能描述 + Commit 引用
 
 #### 2026-05-07
+
+- **Phase 9.0 P9.0.8–P9.0.9** — Visual Queue UX Polish CSS 动画 + 队列卡优化
+  ```
+  feat(visual-queue): P9.0.1-P9.0.3 UX polish
+  ```
+  核心交付：`globals.css` 新增 `scale-pop`/`pulse-subtle`/`slide-in-x` 动画 · queued 状态改为 SVG 弧形环（橙色 #N）+ `animate-pulse-subtle` + `animate-slide-in-x` · generating 状态加 slide-in-x · completed 缩略图加 scale-pop
 
 - **Phase 8.2** — 策略驱动内容执行 P8.2.1–P8.2.3 全部完成
   ```

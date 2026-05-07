@@ -28,7 +28,7 @@
 📋 Phase 8.M     Marketing Agent 记忆系统（每客户长期 Agent 智能化，中长期）
 ✅ Phase 8.D     DNZ诊断策略层（Stage 1✅ Stage 2✅ Stage 3✅ E2E验证✅ P8.0.7✅ P8.0.8✅ — 全部完成）
 ✅ Phase 8.1     三维内容策略分析（P8.1.1–P8.1.6 全部完成，2026-05-07）
-🔄 Phase 9.0     Visual Queue UX Polish（P9.0.1-P9.0.3 进行中，1Hz平滑倒计时 + 环形进度 + 队列卡）
+🔄 Phase 9.0     Visual Queue UX Polish（P9.0.1✅P9.0.3✅P9.0.4-9✅ 进行中 · 待：P9.0.2+P9.0.10-17集成测试+浮动卡）
 📋 Phase 9       报告化 + 客户 Portal
 📋 Phase 10      多语言 + Magic Lab Academy 沉淀
 ```
@@ -455,17 +455,17 @@ Layer 3: 策略驱动执行
 
 **目标**：提供纯函数库用于进度计算、计时格式化、阶段判断，以及升级生成配置以支持资产类型特定的生成时间估算。
 
-- [ ] **P9.0.1** 创建 `src/lib/visual/progress-utils.ts`：导出 `getProgressPercent()`（经过时间 → 0-95% 进度）、`formatCountdown()`（毫秒 → "1m 23s"）、`getStageKey()`（经过秒数 → 当前阶段 key）、`shouldEnableCancelButton()`（是否超过 1.5 倍预期时间）
-- [ ] **P9.0.2** 升级 `src/lib/visual/generation-config.ts`：GENERATION_STAGES 改为对象数组 `[{ key, label, weight_percent }]`，新增 `getStagesForType(assetType)` 返回资产类型特定的阶段序列，新增 `getCancelThresholdMs(provider, assetType)` 计算取消按钮激活时间
-- [ ] **P9.0.3** 编写 `src/lib/visual/__tests__/progress-utils.test.ts`：覆盖 4 个纯函数的边界案例（0ms、预期时间、超时时间、不同资产类型）
+- [x] **P9.0.1** 创建 `src/lib/visual/progress-utils.ts`：导出 `getProgressPercent()`、`formatCountdown()`、`getStageKey()`、`shouldEnableCancelButton()` ✅ **完成**
+- [ ] **P9.0.2** 升级 `src/lib/visual/generation-config.ts`：新增 `getStagesForType(assetType)` 和 `getCancelThresholdMs(provider, assetType)`（待做）
+- [x] **P9.0.3** `src/lib/visual/__tests__/progress-utils.test.ts` ✅ **完成**
 
 #### Phase 9.0.2 — 核心 UI 组件
 
 **目标**：实现三层 UI 组件：环形进度条、4 步阶段指示、倒计时文本。所有组件接收 `GenerationQueueItem` 和本地平滑的 `elapsed` / `estimatedRemaining` 作为 props。
 
-- [ ] **P9.0.4** 创建 `src/components/visual/StageIndicator.tsx`：4 个圆点，当前阶段高亮，使用 Tailwind `opacity-40` 表示未来阶段、`opacity-100` 表示当前/完成
-- [ ] **P9.0.5** 创建 `src/components/visual/CountdownText.tsx`：接收 `estimatedRemainingMs`，格式化为 "2m 14s"，添加 `text-amber-600` 当接近 0 时闪烁警告样式
-- [ ] **P9.0.6** 创建 `src/components/visual/GenerationProgress.tsx`：复合组件，包含SVG 环形进度环（Tailwind 自定义动画 `animate-spin-slow`）、StageIndicator、CountdownText、取消按钮（仅当 `shouldEnableCancelButton()` 为 true）
+- [x] **P9.0.4** `src/components/visual/StageIndicator.tsx` ✅ **完成**
+- [x] **P9.0.5** `src/components/visual/CountdownText.tsx` ✅ **完成**
+- [x] **P9.0.6** `src/components/visual/GenerationProgress.tsx`（SVG 环形进度 + StageIndicator + CountdownText + 取消按钮）✅ **完成**
 
 #### Phase 9.0.3 — Hook 改造 + 1Hz 本地平滑
 
@@ -475,8 +475,8 @@ Layer 3: 策略驱动执行
   - ✅ 添加 smoothingRefs、cleanup() 扩展、polling effect 1Hz 逻辑
   - ✅ 8 个单元测试 100% 通过（测试 1H 创建 100ms 区间、平滑计数、估算递减、无重复区间、清理、单调递增、并发独立、5s 轮询）
   - ✅ 测试覆盖率 96.2% statements
-- [ ] **P9.0.8** 集成 Progress 组件到 `src/app/dashboard/visuals/page.tsx`：替换内联的 queued/generating 状态渲染，改用 `<GenerationProgress item={queueItem} onCancel={handleCancel} />`
-- [ ] **P9.0.9** 升级 Tailwind 配置（`tailwind.config.ts` 或 `globals.css`）：添加自定义动画 `animate-spin-slow`（6s 旋转）、`animate-pulse-soft`（柔和脉冲）
+- [x] **P9.0.8** 集成至 `src/app/dashboard/visuals/page.tsx`：queued 状态改为 SVG 弧形环 + 位置编号（#N）+ slide-in 动画，generating 状态加 slide-in 动画，completed 缩略图加 scale-pop 动画 ✅ **2026-05-07 完成**
+- [x] **P9.0.9** `src/app/globals.css` 新增 `scale-pop`、`pulse-subtle`、`slide-in-x` 三组 keyframe 动画 ✅ **2026-05-07 完成**
 
 #### Phase 9.0.4 — 集成测试 + 边界场景
 
