@@ -178,6 +178,8 @@ export default function ContentBoardPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batching, setBatching] = useState(false);
   const [batchMsg, setBatchMsg] = useState('');
+  const [batchTargetStatus, setBatchTargetStatus] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Modal edit state
   const [editMode, setEditMode] = useState(false);
@@ -359,21 +361,60 @@ export default function ContentBoardPage() {
     setSelectedIds(selectedIds.size === posts.length ? new Set() : new Set(posts.map(p => p.id)));
   };
 
-  const batchUpdate = async (ids: string[], status: 'approved' | 'rejected') => {
+  const batchUpdate = async (ids: string[], status: string) => {
     if (ids.length === 0) return;
+    const prevPosts = posts;
+    setPosts(prev => {
+      const mapped = prev.map(p => ids.includes(p.id) ? { ...p, status } : p);
+      // Remove posts that no longer match the active status filter
+      if (!selectedStatus) return mapped;
+      const allowed = selectedStatus.split(',');
+      return mapped.filter(p => allowed.includes(p.status));
+    });
+    setSelectedIds(new Set());
+    setBatchTargetStatus('');
     setBatching(true);
     setBatchMsg('');
     try {
       const res = await fetch('/api/posts/batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ post_ids: ids, status }),
+        body: JSON.stringify({ post_ids: ids, action: 'updateStatus', status }),
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      setBatchMsg(`✓ 已${status === 'approved' ? '批准' : '拒绝'} ${json.updated} 条`);
-      await fetchPosts();
+      const label = ({ draft: '草稿', approved: '已批准', scheduled: '已排期', published: '已发布', rejected: '已拒绝' } as Record<string, string>)[status] ?? status;
+      setBatchMsg(`✓ 已更新 ${json.updated} 条至"${label}"`);
     } catch (err) {
+      setPosts(prevPosts);
+      setSelectedIds(new Set(ids));
+      setBatchMsg(`✗ ${(err as Error).message}`);
+    } finally {
+      setBatching(false);
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    const ids = Array.from(selectedIds);
+    setShowDeleteConfirm(false);
+    const prevPosts = posts;
+    const prevSelectedIds = new Set(selectedIds);
+    setPosts(prev => prev.filter(p => !ids.includes(p.id)));
+    setSelectedIds(new Set());
+    setBatching(true);
+    setBatchMsg('');
+    try {
+      const res = await fetch('/api/posts/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ post_ids: ids, action: 'delete' }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error);
+      setBatchMsg(`✓ 已删除 ${json.deleted} 条内容`);
+    } catch (err) {
+      setPosts(prevPosts);
+      setSelectedIds(prevSelectedIds);
       setBatchMsg(`✗ ${(err as Error).message}`);
     } finally {
       setBatching(false);
@@ -491,16 +532,34 @@ export default function ContentBoardPage() {
 
       {/* Batch action bar */}
       {someSelected && viewMode === 'list' && (
-        <div className="flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3">
+        <div className="flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 flex-wrap gap-y-2">
           <span className="text-sm font-medium text-indigo-700">已选 {selectedIds.size} 条</span>
-          <div className="flex gap-2 ml-auto">
-            <button onClick={() => batchUpdate(Array.from(selectedIds), 'approved')} disabled={batching}
-              className="bg-green-600 hover:bg-green-700 text-white text-sm px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors font-medium">
-              {batching ? '处理中…' : `✓ 批准 (${selectedIds.size})`}
+          <div className="flex gap-2 ml-auto flex-wrap">
+            <select
+              value={batchTargetStatus}
+              onChange={e => setBatchTargetStatus(e.target.value)}
+              className="border border-indigo-300 rounded-lg px-3 py-1.5 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            >
+              <option value="">— 修改状态 —</option>
+              <option value="draft">草稿</option>
+              <option value="approved">已批准</option>
+              <option value="scheduled">已排期</option>
+              <option value="published">已发布</option>
+              <option value="rejected">已拒绝</option>
+            </select>
+            <button
+              onClick={() => batchTargetStatus && batchUpdate(Array.from(selectedIds), batchTargetStatus)}
+              disabled={!batchTargetStatus || batching}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors font-medium"
+            >
+              {batching ? '处理中…' : '应用'}
             </button>
-            <button onClick={() => batchUpdate(Array.from(selectedIds), 'rejected')} disabled={batching}
-              className="bg-red-500 hover:bg-red-600 text-white text-sm px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors font-medium">
-              ✕ 拒绝
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={batching}
+              className="bg-red-500 hover:bg-red-600 text-white text-sm px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors font-medium"
+            >
+              🗑 删除 ({selectedIds.size})
             </button>
             <button onClick={() => setSelectedIds(new Set())} className="text-sm text-gray-500 hover:text-gray-700 px-2">取消</button>
           </div>
@@ -786,7 +845,7 @@ export default function ContentBoardPage() {
                   </button>
                 </div>
                 {previewStatus === 'generating' && (
-                  <p className="text-xs text-gray-400">WaveSpeed Flux-dev 生成中，通常 1-3 分钟，请耐心等待…</p>
+                  <p className="text-xs text-gray-400">Visual Studio 生成中，通常 1-3 分钟，请耐心等待…</p>
                 )}
                 {previewStatus === 'failed' && (
                   <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2">
@@ -818,6 +877,33 @@ export default function ContentBoardPage() {
                   </button>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Confirm Dialog ─────────────────────────────────────────── */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowDeleteConfirm(false)}>
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-base font-bold text-gray-900 mb-2">确认删除内容</h3>
+            <p className="text-sm text-gray-600 mb-1">
+              即将永久删除 <strong>{selectedIds.size}</strong> 条内容，此操作不可撤销。
+            </p>
+            <p className="text-xs text-gray-400 mb-5">已发布至平台的内容不会被自动撤回。</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="flex-1 border border-gray-300 text-gray-700 text-sm py-2 rounded-lg hover:bg-gray-50 font-medium transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleBatchDelete}
+                className="flex-1 bg-red-600 hover:bg-red-700 text-white text-sm py-2 rounded-lg font-medium transition-colors"
+              >
+                确认删除
+              </button>
             </div>
           </div>
         </div>
