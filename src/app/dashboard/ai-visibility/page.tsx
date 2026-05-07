@@ -43,7 +43,7 @@ export default function AiVisibilityIndexPage() {
       <div>
         <h1 className="text-2xl font-bold text-gray-900">AI Visibility Tracker</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Track how your clients rank across ChatGPT and Google AI responses.
+          Track how your clients rank across major AI assistants and search responses.
         </p>
       </div>
 

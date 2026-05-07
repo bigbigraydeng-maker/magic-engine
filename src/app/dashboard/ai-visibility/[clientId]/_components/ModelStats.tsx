@@ -1,13 +1,7 @@
 'use client';
 
 import type { AiVisibilityRun } from '@/types/magic-engine';
-
-const ENGINE_NAMES: Record<string, string> = {
-  openai: 'ChatGPT',
-  perplexity: 'Perplexity',
-  google: 'Google AI',
-  anthropic: 'Claude',
-};
+import { getEngineDisplayName } from '@/lib/ai-tracker/engine-display-names';
 
 interface Props {
   runs: AiVisibilityRun[];
@@ -92,7 +86,7 @@ export function ModelStats({ runs, brandName }: Props) {
                   </span>
                 </td>
                 <td className="px-5 py-4 text-sm text-gray-700">
-                  {ENGINE_NAMES[s.engine] ?? s.engine}
+                  {getEngineDisplayName(s.engine)}
                 </td>
                 <td className="px-5 py-4 text-sm text-gray-700">{s.total}</td>
                 <td className="px-5 py-4 text-sm">

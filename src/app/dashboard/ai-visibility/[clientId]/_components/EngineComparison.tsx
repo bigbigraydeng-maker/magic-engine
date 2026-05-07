@@ -1,13 +1,7 @@
 'use client';
 
 import type { AiVisibilityRun } from '@/types/magic-engine';
-
-const ENGINE_NAMES: Record<string, string> = {
-  openai: 'ChatGPT',
-  perplexity: 'Perplexity',
-  google: 'Google AI',
-  anthropic: 'Claude',
-};
+import { getEngineDisplayName } from '@/lib/ai-tracker/engine-display-names';
 
 // Tailwind-safe colour maps per engine
 const ENGINE_CARD_STYLE: Record<string, string> = {
@@ -31,7 +25,7 @@ interface Props {
 
 /**
  * Tab 2: Engine Comparison
- * Side-by-side performance stats for ChatGPT vs Google AI (and others if present).
+ * Side-by-side performance stats per AI engine (display names per CLAUDE.md §三).
  * Reference: ROADMAP.md P7.1.14
  */
 export function EngineComparison({ runs, brandName }: Props) {
@@ -80,7 +74,7 @@ export function EngineComparison({ runs, brandName }: Props) {
             className={`rounded-xl border p-5 ${ENGINE_CARD_STYLE[s.engine] ?? 'border-gray-200 bg-white text-gray-900'}`}
           >
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold">{ENGINE_NAMES[s.engine] ?? s.engine}</h3>
+              <h3 className="text-lg font-bold">{getEngineDisplayName(s.engine)}</h3>
               <span className={`text-xs px-2 py-1 rounded-full font-medium ${ENGINE_BADGE_STYLE[s.engine] ?? 'bg-gray-100 text-gray-600'}`}>
                 {s.total} runs
               </span>
@@ -145,7 +139,7 @@ export function EngineComparison({ runs, brandName }: Props) {
                 <tr key={run.id} className={run.error_message ? 'bg-red-50' : 'hover:bg-gray-50'}>
                   <td className="px-4 py-2.5">
                     <span className={`font-medium ${ENGINE_BADGE_STYLE[run.ai_engine] ?? ''} px-2 py-0.5 rounded`}>
-                      {ENGINE_NAMES[run.ai_engine] ?? run.ai_engine}
+                      {getEngineDisplayName(run.ai_engine)}
                     </span>
                   </td>
                   <td className="px-4 py-2.5 font-mono text-gray-500">{run.ai_model}</td>

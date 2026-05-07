@@ -1,13 +1,7 @@
 'use client';
 
 import type { AiVisibilitySnapshot } from '@/types/magic-engine';
-
-const ENGINE_NAMES: Record<string, string> = {
-  openai: 'ChatGPT',
-  perplexity: 'Perplexity',
-  google: 'Google AI',
-  anthropic: 'Claude',
-};
+import { getEngineDisplayName } from '@/lib/ai-tracker/engine-display-names';
 
 interface BrandEntry {
   name: string;
@@ -96,7 +90,7 @@ export function RankingsTable({ snapshot, brandName }: Props) {
                   key={engine}
                   className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider"
                 >
-                  {ENGINE_NAMES[engine] ?? engine}
+                  {getEngineDisplayName(engine)}
                 </th>
               ))}
             </tr>
