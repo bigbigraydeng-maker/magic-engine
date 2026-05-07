@@ -364,7 +364,13 @@ export default function ContentBoardPage() {
   const batchUpdate = async (ids: string[], status: string) => {
     if (ids.length === 0) return;
     const prevPosts = posts;
-    setPosts(prev => prev.map(p => ids.includes(p.id) ? { ...p, status } : p));
+    setPosts(prev => {
+      const mapped = prev.map(p => ids.includes(p.id) ? { ...p, status } : p);
+      // Remove posts that no longer match the active status filter
+      if (!selectedStatus) return mapped;
+      const allowed = selectedStatus.split(',');
+      return mapped.filter(p => allowed.includes(p.status));
+    });
     setSelectedIds(new Set());
     setBatchTargetStatus('');
     setBatching(true);
@@ -839,7 +845,7 @@ export default function ContentBoardPage() {
                   </button>
                 </div>
                 {previewStatus === 'generating' && (
-                  <p className="text-xs text-gray-400">WaveSpeed Flux-dev 生成中，通常 1-3 分钟，请耐心等待…</p>
+                  <p className="text-xs text-gray-400">Visual Studio 生成中，通常 1-3 分钟，请耐心等待…</p>
                 )}
                 {previewStatus === 'failed' && (
                   <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2">
