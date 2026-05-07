@@ -42,7 +42,7 @@ export default function ClientsPage() {
           <p className="text-sm text-gray-500 mt-1">{clients.length} client(s) total</p>
         </div>
         <Link
-          href="/dashboard/clients/onboarding"
+          href="/dashboard/clients/new"
           className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
         >
           + New Client
@@ -63,7 +63,7 @@ export default function ClientsPage() {
           <div className="py-12 text-center space-y-3">
             <p className="text-gray-400 text-sm">No clients yet.</p>
             <Link
-              href="/dashboard/clients/onboarding"
+              href="/dashboard/clients/new"
               className="inline-block text-sm text-indigo-600 hover:text-indigo-800 font-medium underline underline-offset-2"
             >
               Add your first client →

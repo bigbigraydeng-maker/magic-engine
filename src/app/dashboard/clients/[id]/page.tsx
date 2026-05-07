@@ -60,13 +60,15 @@ export default function ClientDetailPage() {
   });
   const [savingAirtable, setSavingAirtable] = useState(false);
   const [airtableMsg, setAirtableMsg] = useState('');
+  const [hasActiveBrief, setHasActiveBrief] = useState<boolean | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [clientRes, postsRes] = await Promise.all([
+      const [clientRes, postsRes, briefRes] = await Promise.all([
         fetch(`/api/clients/${clientId}`),
         fetch(`/api/clients/${clientId}/posts`),
+        fetch(`/api/clients/${clientId}/brief?status=active`),
       ]);
       if (clientRes.ok) {
         const { client: c } = await clientRes.json();
@@ -83,6 +85,12 @@ export default function ClientDetailPage() {
       if (postsRes.ok) {
         const { posts: p } = await postsRes.json();
         setPosts(p ?? []);
+      }
+      if (briefRes.ok) {
+        const briefJson = await briefRes.json();
+        setHasActiveBrief(Boolean(briefJson.brief));
+      } else {
+        setHasActiveBrief(false);
       }
     } finally {
       setLoading(false);
@@ -134,6 +142,26 @@ export default function ClientDetailPage() {
 
   return (
     <div className="p-6 space-y-4">
+      {/* Master Brief reminder banner */}
+      {hasActiveBrief === false && (
+        <div className="flex items-start gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg">
+          <span className="text-lg">⚠️</span>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-amber-900">No active Master Brief</p>
+            <p className="text-xs text-amber-800">
+              Upload brand documents and generate a Master Brief to unlock content
+              generation. Open the <strong>Master Brief</strong> tab to get started.
+            </p>
+          </div>
+          <button
+            onClick={() => setActiveTab('brief')}
+            className="text-xs font-semibold text-amber-700 hover:text-amber-900 underline whitespace-nowrap"
+          >
+            Go to Master Brief →
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center gap-3">
         <Link href="/dashboard/clients" className="text-gray-400 hover:text-gray-600 text-sm">

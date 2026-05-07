@@ -459,7 +459,7 @@ AI Tracker 每周运行
 
 ## 十五、Phase 索引与功能日志（A+C 格式）⭐（日常查阅）
 
-> **最后更新**：2026-05-05  
+> **最后更新**：2026-05-07  
 > **用途**：快速查阅所有 Phase 的目标、交付物、当前状态 + 完成功能自动记录
 
 ### A. Phase 概览表（速查）
@@ -479,6 +479,7 @@ AI Tracker 每周运行
 | **Phase 8.D** | DNZ诊断策略层 | 客户域名全量采集+策略分析 | ✅ 完成 | 2026-05-07 | Stage 1-4✅ P8.0.7✅ P8.0.8✅ — 全部完成 |
 | **Phase 8.1** | 三维内容策略分析 | AI弱项×SEMrush关键词×现有页面三维交叉策略 | ✅ 完成 | 2026-05-07 | 101 tests · scorer + analyzer + generate + list + UI |
 | **Phase 8.2** | 策略驱动内容执行 | existing_pages_context注入 + 升级现有页面流程 + 审计扩展 | ✅ 完成 | 2026-05-07 | 48 tests · pages-context + upgrade-generator + upgrade API + 升级UI + content-auditor扩展 |
+| **Phase 8.3** | 客户接入向导（5步集成DNZ） | 一站式新客户建档：基本信息→Brief→DNZ→审核→激活 | 🔄 进行中 | — | P8.3.1✅ · P8.3.2待做（Magic Link 鉴权） |
 | **Phase 9.0** | Visual Queue UX Polish | 生成队列UI优化（平滑倒计时、进度、卡片） | 🔄 进行中 | — | P9.0.1-9✅（SVG环+CSS动画+弧形队列卡）· 待P9.0.2+测试+浮动卡 |
 | **Phase 9** | 报告化 + 客户Portal | 月报PDF自动生成 + 客户自助门户 | 📋 规划中 | — | 权威度追踪 + 邮件发送 |
 | **Phase 10+** | 多语言 + Academy沉淀 | 国际化 + 课程化 + 可能的SaaS模块 | 📋 远期规划 | — | WordPress/Webflow插件 |
@@ -493,12 +494,11 @@ AI Tracker 每周运行
 
 | 任务 ID | 内容 | 预计工时 | 优先级 |
 |---------|------|---------|--------|
-| **P8.3.1** | 客户接入向导（5步：基本信息→Brief上传→DNZ采集→审核→激活） | 2-3天 | ⭐⭐ |
+| **P8.3.2** | Dashboard Magic Link 鉴权（防止数据泄露） | 1-2天 | ⭐⭐ |
 | **P7.4.15** | Week 2 CTS Tours AI Tracker 复跑（2026-05-12） | 1h | ⭐⭐ |
-| **Phase 8.Q.4** | 批量编辑 UI | 1天 | ⭐ |
 | **P9.0.2** | generation-config.ts 补全 `getStagesForType` + `getCancelThresholdMs` | 2h | ⭐ |
 
-**完成后进入**：Phase 8.3 客户接入向导（详见 ROADMAP.md § Phase 8.3）
+**完成后进入**：Phase 8.3.2 简单鉴权（详见 ROADMAP.md § Phase 8.3）
 
 ---
 
@@ -507,6 +507,12 @@ AI Tracker 每周运行
 > 每当完成一个 Phase 或上线新功能时，自动在此记录。格式：**[完成日期]** — Phase ID + 功能描述 + Commit 引用
 
 #### 2026-05-07
+
+- **P8.3.1** — 客户接入向导（5步集成 DNZ）完成
+  ```
+  feat(onboarding): 5-step client onboarding wizard with DNZ integration [P8.3.1]
+  ```
+  核心交付：`/dashboard/clients/new` 5 步向导（Basic Info → Brief Upload → DNZ Crawl → Review → Activate）+ `useSiteAuditPolling` hook（5s 轮询 + 终态停止）+ Master Brief reminder banner（客户主页缺活动 brief 时显示）+ 删除旧 `/onboarding` 3 步流程
 
 - **Phase 9.0 P9.0.8–P9.0.9** — Visual Queue UX Polish CSS 动画 + 队列卡优化
   ```

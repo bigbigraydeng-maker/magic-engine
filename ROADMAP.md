@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-07 · 当前阶段：**Phase 8.2 全部完成（P8.2.1–P8.2.3 ✅）→ 下一步：Phase 8.3 客户接入向导**
+> 最后更新：2026-05-07 · 当前阶段：**Phase 8.3.1 完成（5步客户接入向导 ✅）→ 下一步：P8.3.2 Magic Link 鉴权**
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -431,7 +431,7 @@ Layer 3: 策略驱动执行
 
 **目标**：5 分钟完成新客户建档，DNZ 采集作为标准步骤嵌入，确保每个客户上线前即有内容现状数据。
 
-- [ ] **P8.3.1** 向导 `/dashboard/clients/new`：Step 1 基本信息 → Step 2 上传 Brief 文件 → Step 3 触发 DNZ 采集 → Step 4 审核采集结果 → Step 5 激活（生成 Master Brief + active GEO Directive）
+- [x] **P8.3.1** 向导 `/dashboard/clients/new`：Step 1 基本信息 → Step 2 上传 Brief 文件 → Step 3 触发 DNZ 采集 → Step 4 审核采集结果 → Step 5 激活（生成 Master Brief + active GEO Directive）✅ **2026-05-07 完成**
 - [ ] **P8.3.2** Dashboard 简单鉴权（Magic Link，防止数据泄露）
 
 **验收标准**：
