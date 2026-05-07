@@ -475,7 +475,7 @@ AI Tracker 每周运行
 | **Phase 8.6-8.9, 8.11** | SEO完整可见度 | DataForSEO外链、排名、本地、基准、成本追踪 | ✅ 完成 | 2026-05-01 | Link + SERP + Local + Baseline + Billing intelligence |
 | **Phase 8.C.1** | 月报整合 | 6大数据源聚合月度报告 | ✅ 完成 | 2026-05-01 | Unified reporting page |
 | **Phase 8.R** | Reels Studio | TikTok/Reels短视频生成全链路 | ✅ 完成 | 2026-05-02 | I2V + 提示词 + 对话修改 |
-| **Phase 8.Q** | 内容质控提升 | Brief编辑、版本管理、提示词预览 | 🔄 进行中 | — | 8.Q.1✅ 8.Q.2✅ 8.Q.3部分✅ |
+| **Phase 8.Q** | 内容质控提升 | Brief编辑、版本管理、提示词预览 | ✅ 完成 | 2026-05-07 | 8.Q.1✅ 8.Q.2✅ 8.Q.3部分✅ 8.Q.4✅ |
 | **Phase 8.D** | DNZ诊断策略层 | 客户域名全量采集+策略分析 | ✅ 完成 | 2026-05-07 | Stage 1-4✅ P8.0.7✅ P8.0.8✅ — 全部完成 |
 | **Phase 8.1** | 三维内容策略分析 | AI弱项×SEMrush关键词×现有页面三维交叉策略 | ✅ 完成 | 2026-05-07 | 101 tests · scorer + analyzer + generate + list + UI |
 | **Phase 8.2** | 策略驱动内容执行 | existing_pages_context注入 + 升级现有页面流程 + 审计扩展 | ✅ 完成 | 2026-05-07 | 48 tests · pages-context + upgrade-generator + upgrade API + 升级UI + content-auditor扩展 |
@@ -495,8 +495,6 @@ AI Tracker 每周运行
 |---------|------|---------|--------|
 | **P8.3.1** | 客户接入向导（5步：基本信息→Brief上传→DNZ采集→审核→激活） | 2-3天 | ⭐⭐ |
 | **P7.4.15** | Week 2 CTS Tours AI Tracker 复跑（2026-05-12） | 1h | ⭐⭐ |
-| **Phase 8.Q.4** | 批量编辑 UI | 1天 | ⭐ |
-
 **完成后进入**：Phase 8.3 客户接入向导（详见 ROADMAP.md § Phase 8.3）
 
 ---
@@ -521,6 +519,12 @@ AI Tracker 每周运行
   核心交付：`content_strategy_items` 表迁移 + 共享类型 + `scorer.ts`（41 tests）+ `analyzer.ts`（23 tests）+ `POST /strategy/generate`（16 tests）+ `GET /strategy`（21 tests）+ 策略面板 UI（stats卡片 + 过滤Tab + StrategyCard）· 共 101 tests，100% pass
 
 - **Phase 8.D** — DNZ 诊断策略层全部完成（P8.0.7 GEO计数修复 + P8.0.8 页面清单UI）
+
+- **Phase 8.Q.4** — 内容帖子批量编辑 UI 完成
+  ```
+  feat(content): P8.Q.4 batch edit UI with status dropdown and delete
+  ```
+  核心交付：批量 API 扩展（支持全5种状态 + `action:'delete'`）+ 状态下拉框 + 应用按钮 + 删除按钮 + 二次确认弹窗 + 乐观 UI 更新（失败自动回滚）
 
 #### 2026-05-05
 
