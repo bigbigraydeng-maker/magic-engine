@@ -526,12 +526,29 @@ function AssetCell({
 
   // Queued state (waiting to start generation)
   if (genState?.queued && !genState.generating) {
+    const pos = genState.queuePosition
+    const r = 38
+    const circ = 2 * Math.PI * r
     return (
-      <div className="flex flex-col items-center gap-1 py-1">
-        <div className="w-5 h-5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
-        <span className="text-[9px] text-amber-600 font-medium text-center">
-          Queued {genState.queuePosition}
-        </span>
+      <div className="flex flex-col items-center gap-1 py-1 animate-slide-in-x">
+        <div className="relative w-12 h-12">
+          <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
+            <circle cx="50" cy="50" r={r} fill="none" stroke="#fde68a" strokeWidth="8" />
+            <circle
+              cx="50" cy="50" r={r} fill="none" stroke="#f59e0b" strokeWidth="8"
+              strokeDasharray={circ} strokeDashoffset={circ * 0.72}
+              strokeLinecap="round"
+              className="animate-pulse-subtle"
+            />
+          </svg>
+          <div className="absolute inset-0 flex items-center justify-center">
+            {pos !== undefined
+              ? <span className="text-xs font-bold text-amber-600">#{pos}</span>
+              : <span className="text-[8px] text-amber-500">…</span>
+            }
+          </div>
+        </div>
+        <span className="text-[9px] text-amber-600 font-medium">等待中</span>
       </div>
     )
   }
@@ -549,7 +566,7 @@ function AssetCell({
     const currentStageIndex = Math.floor((progressPercent / 100) * 4)
 
     return (
-      <div className="flex items-center justify-center py-2">
+      <div className="flex items-center justify-center py-2 animate-slide-in-x">
         <GenerationProgress
           currentStageIndex={currentStageIndex}
           totalStages={4}
@@ -630,7 +647,7 @@ function AssetCell({
             <img
               src={readyAsset.storage_url}
               alt=""
-              className={`w-14 h-14 object-cover rounded cursor-pointer ring-1 transition-all ${isExternalEdit ? 'ring-amber-400 opacity-70' : 'ring-gray-200 hover:ring-blue-400'}`}
+              className={`w-14 h-14 object-cover rounded cursor-pointer ring-1 transition-all animate-scale-pop ${isExternalEdit ? 'ring-amber-400 opacity-70' : 'ring-gray-200 hover:ring-blue-400'}`}
               onClick={() => window.open(readyAsset.storage_url!, '_blank')}
             />
             {/* Version badge */}
