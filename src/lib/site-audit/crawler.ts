@@ -366,6 +366,8 @@ export async function crawlPages(
 
 /**
  * Resolve a list of sitemap URLs (possibly sitemap indexes) into page URLs.
+ * If a URL points to a sitemap index (<sitemapindex>), recursively fetches
+ * each child sitemap to extract actual page URLs.
  */
 async function resolveSitemapUrls(sitemapUrls: string[], origin: string): Promise<string[]> {
   const all: string[] = []
@@ -374,8 +376,22 @@ async function resolveSitemapUrls(sitemapUrls: string[], origin: string): Promis
       const res = await fetch(url)
       if (!res.ok) continue
       const xml = await res.text()
-      const locs = parseLocsFromXml(xml)
-      all.push(...locs)
+      if (/<sitemapindex/i.test(xml)) {
+        // This is a sitemap index — recurse into each child sitemap
+        const childUrls = parseLocsFromXml(xml)
+        for (const childUrl of childUrls) {
+          try {
+            const childRes = await fetch(childUrl)
+            if (!childRes.ok) continue
+            const childXml = await childRes.text()
+            all.push(...parseLocsFromXml(childXml))
+          } catch {
+            // skip unreachable child sitemap
+          }
+        }
+      } else {
+        all.push(...parseLocsFromXml(xml))
+      }
     } catch {
       // skip
     }
