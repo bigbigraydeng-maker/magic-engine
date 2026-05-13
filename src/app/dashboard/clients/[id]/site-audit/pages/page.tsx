@@ -119,6 +119,7 @@ export default function SiteAuditPagesPage() {
   const [error, setError] = useState<string | null>(null)
   const [currentJobId, setCurrentJobId] = useState<string | null>(null)
   const [currentJobStatus, setCurrentJobStatus] = useState<JobStatus | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   // Fetch latest job status on mount
   useEffect(() => {
@@ -145,11 +146,13 @@ export default function SiteAuditPagesPage() {
         const data = await res.json() as { job?: { id: string; status: JobStatus } | null }
         if (data?.job) setCurrentJobStatus(data.job.status)
         if (data?.job?.status === 'completed') {
-          // Refresh page data after crawl completes
+          // Refresh stats and page table after crawl completes
           fetch(`/api/clients/${clientId}/site-audit/pages/stats`)
             .then(r => r.ok ? r.json() : null)
             .then(s => { if (s) setStats(s) })
             .catch(() => {})
+          setOffset(0)
+          setRefreshKey(k => k + 1)
         }
       } catch { /* ignore */ }
     }
@@ -189,7 +192,7 @@ export default function SiteAuditPagesPage() {
     } finally {
       setLoading(false)
     }
-  }, [clientId, selectedType, offset])
+  }, [clientId, selectedType, offset, refreshKey])
 
   useEffect(() => { fetchPages() }, [fetchPages])
 

@@ -366,37 +366,41 @@ export async function crawlPages(
 
 /**
  * Resolve a list of sitemap URLs (possibly sitemap indexes) into page URLs.
- * If a URL points to a sitemap index (<sitemapindex>), recursively fetches
- * each child sitemap to extract actual page URLs.
+ * Handles arbitrarily nested sitemap indexes up to MAX_SITEMAP_DEPTH levels.
  */
 async function resolveSitemapUrls(sitemapUrls: string[], origin: string): Promise<string[]> {
   const all: string[] = []
   for (const url of sitemapUrls) {
-    try {
-      const res = await fetch(url)
-      if (!res.ok) continue
-      const xml = await res.text()
-      if (/<sitemapindex/i.test(xml)) {
-        // This is a sitemap index — recurse into each child sitemap
-        const childUrls = parseLocsFromXml(xml)
-        for (const childUrl of childUrls) {
-          try {
-            const childRes = await fetch(childUrl)
-            if (!childRes.ok) continue
-            const childXml = await childRes.text()
-            all.push(...parseLocsFromXml(childXml))
-          } catch {
-            // skip unreachable child sitemap
-          }
-        }
-      } else {
-        all.push(...parseLocsFromXml(xml))
-      }
-    } catch {
-      // skip
-    }
+    all.push(...(await fetchSitemapPageUrls(url, 0)))
   }
   return all
+}
+
+const MAX_SITEMAP_DEPTH = 3
+
+/**
+ * Recursively fetch page URLs from a sitemap or sitemap index.
+ * If the fetched XML is a <sitemapindex>, recurses into each child.
+ * Depth-limited to MAX_SITEMAP_DEPTH to guard against malformed cycles.
+ */
+async function fetchSitemapPageUrls(url: string, depth: number): Promise<string[]> {
+  if (depth >= MAX_SITEMAP_DEPTH) return []
+  try {
+    const res = await fetch(url)
+    if (!res.ok) return []
+    const xml = await res.text()
+    if (/<sitemapindex/i.test(xml)) {
+      const childUrls = parseLocsFromXml(xml)
+      const nested: string[] = []
+      for (const childUrl of childUrls) {
+        nested.push(...(await fetchSitemapPageUrls(childUrl, depth + 1)))
+      }
+      return nested
+    }
+    return parseLocsFromXml(xml)
+  } catch {
+    return []
+  }
 }
 
 /**
