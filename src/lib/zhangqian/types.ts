@@ -26,6 +26,13 @@ export interface DiscoveredSocial {
   handle: string | null            // e.g. "@oztopbuilding" — null if URL-only
   url: string                       // canonical profile URL
   confidence: number                // 0–1: how sure are we this is the right account
+  // ── Real metrics from Apify scrapers (P8.12.S1.6a) — null when not scraped ──
+  /** Real follower count from the platform scraper. */
+  followers_count?: number | null
+  /** Posts published in the last 30 days. */
+  posts_last_30d?: number | null
+  /** Engagement rate as a 0–1 decimal (0.035 = 3.5%). */
+  engagement_rate?: number | null
 }
 
 export interface DiscoveredGbp {
@@ -141,6 +148,21 @@ export interface AiVisibilityResult {
   client_mentioned: boolean
 }
 
+/**
+ * Meta (Facebook/Instagram) ad activity, populated by the fetch_meta_ads
+ * tool via Apify's Facebook Ads Library scraper (P8.12.S1.6a).
+ */
+export interface DiscoveredMetaAds {
+  /** Number of currently active ads found in the Ad Library. */
+  active_ads_count: number
+  /** Ad creative formats observed, e.g. ['image', 'video', 'carousel']. */
+  ad_types: string[]
+  /** Coarse spend signal derived from the Ad Library. */
+  estimated_spend: 'low' | 'medium' | 'high' | 'unknown'
+  /** Up to 3 sample ad headlines / copy. */
+  top_ad_copy: string[]
+}
+
 export interface DiagnosisBlock {
   executive_summary: string  // Chinese narrative ~3-5 sentences
   crisis_type: string | null // e.g. "TYPE_E 声誉陷阱" or null if no crisis
@@ -183,6 +205,9 @@ export interface DiscoveryReport {
 
   /** AI visibility test results — agent tests 2-3 questions and records who appears */
   ai_visibility_results?: AiVisibilityResult[] | null
+
+  /** Meta ad activity — populated by fetch_meta_ads (P8.12.S1.6a); null when not checked */
+  meta_ads?: DiscoveredMetaAds | null
 
   /** Deep diagnostic block with scores, narrative, and action plan */
   diagnosis?: DiagnosisBlock | null

@@ -15,6 +15,7 @@ import {
   SocialCard,
   GbpCard,
   ReviewPlatformsCard,
+  MetaAdsCard,
   AiVisibilityCard,
   ActionPlanCard,
   DiagnosisCard,
@@ -164,6 +165,7 @@ function DiscoveryReviewCards({
         <SocialCard socials={p.social_profiles} />
         <GbpCard gbp={p.gbp} />
         <ReviewPlatformsCard platforms={p.review_platforms} />
+        <MetaAdsCard ads={p.meta_ads} />
       </div>
 
       {/* Action plan — full width */}

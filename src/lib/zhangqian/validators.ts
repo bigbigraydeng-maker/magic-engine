@@ -18,6 +18,7 @@ import type {
   DiscoveredKeyword,
   DiscoveredCompetitor,
   DiscoveredAiQuestion,
+  DiscoveredMetaAds,
   ReviewSample,
   SocialPlatform,
   KeywordType,
@@ -163,6 +164,16 @@ function isSocial(v: unknown): v is DiscoveredSocial {
   if (v.handle !== undefined && v.handle !== null && !isString(v.handle)) return false
   if (!isString(v.url) || !v.url.startsWith('http')) return false
   if (!isNumber(v.confidence) || !inRange(v.confidence, 0, 1)) return false
+  // Optional Apify metrics (P8.12.S1.6a) — coerce bad values to null, never reject the row.
+  if (v.followers_count !== undefined && v.followers_count !== null && !isNumber(v.followers_count)) {
+    v.followers_count = null
+  }
+  if (v.posts_last_30d !== undefined && v.posts_last_30d !== null && !isNumber(v.posts_last_30d)) {
+    v.posts_last_30d = null
+  }
+  if (v.engagement_rate !== undefined && v.engagement_rate !== null && !isNumber(v.engagement_rate)) {
+    v.engagement_rate = null
+  }
   return true
 }
 
@@ -260,6 +271,22 @@ function isAiQuestion(v: unknown): v is DiscoveredAiQuestion {
   return true
 }
 
+/**
+ * Lenient guard for the optional meta_ads block (P8.12.S1.6a).
+ * An unknown estimated_spend is coerced to 'unknown' rather than rejected.
+ */
+function isMetaAds(v: unknown): v is DiscoveredMetaAds {
+  if (!isRecord(v)) return false
+  if (!isNumber(v.active_ads_count)) return false
+  if (!Array.isArray(v.ad_types) || !v.ad_types.every(isString)) return false
+  if (!isString(v.estimated_spend)
+      || !['low', 'medium', 'high', 'unknown'].includes(v.estimated_spend)) {
+    v.estimated_spend = 'unknown'
+  }
+  if (!Array.isArray(v.top_ad_copy) || !v.top_ad_copy.every(isString)) return false
+  return true
+}
+
 // ─── Top-level validator ──────────────────────────────────────────────────────
 
 /**
@@ -339,6 +366,7 @@ export function validateDiscoveryReport(
       // New optional fields — pass through as-is (no strict validation)
       semrush_snapshot: isRecord(v.semrush_snapshot) ? v.semrush_snapshot as DiscoveryReport['semrush_snapshot'] : null,
       ai_visibility_results: Array.isArray(v.ai_visibility_results) ? v.ai_visibility_results as DiscoveryReport['ai_visibility_results'] : null,
+      meta_ads: isMetaAds(v.meta_ads) ? v.meta_ads : null,
       diagnosis: isRecord(v.diagnosis) ? v.diagnosis as DiagnosisBlock : null,
     },
   }

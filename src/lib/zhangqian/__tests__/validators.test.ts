@@ -155,3 +155,86 @@ describe('validateDiscoveryReport — 回归', () => {
     expect(validateDiscoveryReport(report).ok).toBe(false)
   })
 })
+
+// ---------------------------------------------------------------------------
+// 3. social_profiles Apify 指标字段（P8.12.S1.6a）
+// ---------------------------------------------------------------------------
+
+describe('validateDiscoveryReport — social_profiles Apify 指标', () => {
+  it('有效的 followers_count / posts_last_30d / engagement_rate 原样保留', () => {
+    const r = validateDiscoveryReport(makeValidReport([
+      { ...validSocial, followers_count: 267, posts_last_30d: 4, engagement_rate: 0.021 },
+    ]))
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.value.social_profiles[0].followers_count).toBe(267)
+      expect(r.value.social_profiles[0].posts_last_30d).toBe(4)
+      expect(r.value.social_profiles[0].engagement_rate).toBe(0.021)
+    }
+  })
+
+  it('非数字的指标被 coerce 成 null，条目仍保留', () => {
+    const r = validateDiscoveryReport(makeValidReport([
+      { ...validSocial, followers_count: 'lots', engagement_rate: 'high' },
+    ]))
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.value.social_profiles).toHaveLength(1)
+      expect(r.value.social_profiles[0].followers_count).toBeNull()
+      expect(r.value.social_profiles[0].engagement_rate).toBeNull()
+    }
+  })
+
+  it('未提供指标字段时不报错（字段可选）', () => {
+    expect(validateDiscoveryReport(makeValidReport([validSocial])).ok).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 4. meta_ads（P8.12.S1.6a）
+// ---------------------------------------------------------------------------
+
+describe('validateDiscoveryReport — meta_ads', () => {
+  it('有效 meta_ads 原样保留', () => {
+    const report = makeValidReport([validSocial])
+    report.meta_ads = {
+      active_ads_count: 6,
+      ad_types: ['image', 'video'],
+      estimated_spend: 'medium',
+      top_ad_copy: ['EOFY Sale'],
+    }
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.value.meta_ads?.active_ads_count).toBe(6)
+      expect(r.value.meta_ads?.estimated_spend).toBe('medium')
+    }
+  })
+
+  it('meta_ads 缺失 → null，报告仍通过', () => {
+    const r = validateDiscoveryReport(makeValidReport([validSocial]))
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.meta_ads).toBeNull()
+  })
+
+  it('未知 estimated_spend 被 coerce 成 unknown', () => {
+    const report = makeValidReport([validSocial])
+    report.meta_ads = {
+      active_ads_count: 3,
+      ad_types: [],
+      estimated_spend: 'astronomical',
+      top_ad_copy: [],
+    }
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.meta_ads?.estimated_spend).toBe('unknown')
+  })
+
+  it('损坏的 meta_ads（active_ads_count 非数字）→ null，报告不作废', () => {
+    const report = makeValidReport([validSocial])
+    report.meta_ads = { active_ads_count: 'many', ad_types: [], estimated_spend: 'low', top_ad_copy: [] }
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.meta_ads).toBeNull()
+  })
+})

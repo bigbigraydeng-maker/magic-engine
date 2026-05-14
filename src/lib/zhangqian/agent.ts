@@ -19,6 +19,8 @@ import { getAnthropicClient, MODEL_SONNET, parseJsonResponse } from '@/lib/anthr
 import { fetchUrlAsMarkdown } from '@/lib/brief/jina'
 import { verifyBusinessRegistration } from '@/lib/abr/client'
 import { aggregateLocalReviews } from '@/lib/local-reviews/client'
+import { scrapeInstagramProfile, scrapeFacebookPage, scrapeTiktokProfile } from '@/lib/apify/social-scraper'
+import { scrapeCompetitorMetaAds } from '@/lib/apify/ad-library'
 import type { DiscoveryReport } from './types'
 import { ZHANGQIAN_SYSTEM_PROMPT, buildUserPrompt } from './prompts'
 import { validateDiscoveryReport } from './validators'
@@ -129,6 +131,53 @@ const FETCH_LOCAL_REVIEWS_TOOL: Anthropic.Messages.Tool = {
   },
 }
 
+/**
+ * Client-side tool: fetch real social metrics (followers, recent posts,
+ * engagement) for a profile via Apify scrapers. Backed by
+ * src/lib/apify/social-scraper.ts.
+ */
+const FETCH_SOCIAL_METRICS_TOOL: Anthropic.Messages.Tool = {
+  name: 'fetch_social_metrics',
+  description:
+    'Fetch real follower count, recent post volume, and engagement rate for a social profile via Apify scrapers. Supports instagram, facebook, tiktok. Call this for the 1-2 most important social accounts you found — it returns hard numbers instead of guesses. Each call is a paid API call, so do not call it for every minor profile.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      platform: {
+        type: 'string',
+        enum: ['instagram', 'facebook', 'tiktok'],
+        description: 'Which platform the profile is on.',
+      },
+      handle_or_url: {
+        type: 'string',
+        description:
+          'For instagram/tiktok: the handle (with or without @). For facebook: the full page URL.',
+      },
+    },
+    required: ['platform', 'handle_or_url'],
+  },
+}
+
+/**
+ * Client-side tool: check a business's Meta (Facebook/Instagram) ad activity
+ * via the Apify Ad Library scraper. Backed by src/lib/apify/ad-library.ts.
+ */
+const FETCH_META_ADS_TOOL: Anthropic.Messages.Tool = {
+  name: 'fetch_meta_ads',
+  description:
+    'Check whether a business is actively running Facebook/Instagram ads via the Meta Ad Library. Returns active ad count, ad formats, a coarse spend signal, and sample ad copy. Use this once for the target business to gauge paid-social activity — key evidence for the "where is the money going" diagnosis.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      query: {
+        type: 'string',
+        description: 'Business brand name or domain to search the Ad Library for.',
+      },
+    },
+    required: ['query'],
+  },
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 export interface RunZhangqianOptions {
@@ -179,6 +228,7 @@ export async function runZhangqian(
   let webSearchCalls = 0
   let fetchUrlCalls = 0
   let connectorCalls = 0
+  let apifyCalls = 0
   let truncated = false
 
   await onProgress('Zhangqian dispatched — researching homepage…')
@@ -205,6 +255,8 @@ export async function runZhangqian(
         FETCH_URL_TOOL,
         VERIFY_BUSINESS_REGISTRATION_TOOL,
         FETCH_LOCAL_REVIEWS_TOOL,
+        FETCH_SOCIAL_METRICS_TOOL,
+        FETCH_META_ADS_TOOL,
       ],
       messages,
     })
@@ -240,6 +292,7 @@ export async function runZhangqian(
         webSearchCalls,
         fetchUrlCalls,
         connectorCalls,
+        apifyCalls,
         truncated,
         startedAt,
       })
@@ -260,6 +313,7 @@ export async function runZhangqian(
         webSearchCalls,
         fetchUrlCalls,
         connectorCalls,
+        apifyCalls,
         truncated,
         startedAt,
       })
@@ -293,12 +347,20 @@ export async function runZhangqian(
           connectorCalls++
           toolResults.push(await handleFetchLocalReviews(toolUse, onProgress))
           break
+        case 'fetch_social_metrics':
+          apifyCalls++
+          toolResults.push(await handleFetchSocialMetrics(toolUse, onProgress))
+          break
+        case 'fetch_meta_ads':
+          apifyCalls++
+          toolResults.push(await handleFetchMetaAds(toolUse, onProgress))
+          break
         default:
           // Unknown tool — return error so Claude can recover
           toolResults.push({
             type: 'tool_result',
             tool_use_id: toolUse.id,
-            content: `Unknown tool: ${toolUse.name}. 'web_search' is server-side; client-handled tools are 'fetch_url', 'verify_business_registration', 'fetch_local_reviews'.`,
+            content: `Unknown tool: ${toolUse.name}. 'web_search' is server-side; client-handled tools are 'fetch_url', 'verify_business_registration', 'fetch_local_reviews', 'fetch_social_metrics', 'fetch_meta_ads'.`,
             is_error: true,
           })
       }
@@ -342,6 +404,8 @@ export async function runZhangqian(
     totalOutputTokens,
     webSearchCalls,
     fetchUrlCalls,
+    connectorCalls,
+    apifyCalls,
     truncated,
     startedAt,
   })
@@ -357,6 +421,7 @@ interface FinalizeArgs {
   webSearchCalls: number
   fetchUrlCalls: number
   connectorCalls: number
+  apifyCalls: number
   truncated: boolean
   startedAt: number
 }
@@ -369,7 +434,7 @@ function finalizeReport(args: FinalizeArgs): RunZhangqianResult {
 
   const meta: DiscoveryReport['meta'] = {
     model: MODEL_SONNET,
-    tool_calls: args.webSearchCalls + args.fetchUrlCalls + args.connectorCalls,
+    tool_calls: args.webSearchCalls + args.fetchUrlCalls + args.connectorCalls + args.apifyCalls,
     cost_usd: Number(costUsd.toFixed(4)),
     duration_ms: Date.now() - args.startedAt,
     truncated: args.truncated,
@@ -561,5 +626,100 @@ async function handleFetchLocalReviews(
     content: snapshots.length > 0
       ? JSON.stringify(snapshots)
       : 'No local review data found. Base gbp / review_platforms on other sources — do not guess ratings.',
+  }
+}
+
+/** Resolve a `fetch_social_metrics` tool call via the Apify social scrapers. */
+async function handleFetchSocialMetrics(
+  toolUse: Anthropic.Messages.ToolUseBlock,
+  onProgress: ProgressFn,
+): Promise<Anthropic.Messages.ToolResultBlockParam> {
+  const input = toolUse.input as { platform?: string; handle_or_url?: string }
+  const platform = input.platform
+  const target = typeof input.handle_or_url === 'string' ? input.handle_or_url.trim() : ''
+
+  if (!target || (platform !== 'instagram' && platform !== 'facebook' && platform !== 'tiktok')) {
+    return {
+      type: 'tool_result',
+      tool_use_id: toolUse.id,
+      content:
+        'fetch_social_metrics requires `platform` ("instagram" | "facebook" | "tiktok") and `handle_or_url`.',
+      is_error: true,
+    }
+  }
+
+  await onProgress(`Fetching ${platform} metrics…`)
+
+  try {
+    // Each scraper returns followersCount / postsLast30Days / engagementRate;
+    // normalise to the snake_case fields Claude writes into DiscoveredSocial.
+    let raw: { followersCount: number; postsLast30Days: number; engagementRate: number }
+    if (platform === 'instagram') {
+      raw = await scrapeInstagramProfile(target.replace(/^@/, ''))
+    } else if (platform === 'tiktok') {
+      raw = await scrapeTiktokProfile(target)
+    } else {
+      raw = await scrapeFacebookPage(target)
+    }
+    return {
+      type: 'tool_result',
+      tool_use_id: toolUse.id,
+      content: JSON.stringify({
+        followers_count: raw.followersCount,
+        posts_last_30d: raw.postsLast30Days,
+        engagement_rate: raw.engagementRate,
+      }),
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    // Non-fatal: let Claude continue and leave that profile's metric fields null.
+    return {
+      type: 'tool_result',
+      tool_use_id: toolUse.id,
+      content: `fetch_social_metrics failed for ${platform}: ${message}. Leave that profile's metric fields null — do not guess.`,
+    }
+  }
+}
+
+/** Resolve a `fetch_meta_ads` tool call via the Apify Meta Ad Library scraper. */
+async function handleFetchMetaAds(
+  toolUse: Anthropic.Messages.ToolUseBlock,
+  onProgress: ProgressFn,
+): Promise<Anthropic.Messages.ToolResultBlockParam> {
+  const input = toolUse.input as { query?: string }
+  const query = typeof input.query === 'string' ? input.query.trim() : ''
+
+  if (!query) {
+    return {
+      type: 'tool_result',
+      tool_use_id: toolUse.id,
+      content: 'fetch_meta_ads requires a `query` string (brand name or domain).',
+      is_error: true,
+    }
+  }
+
+  await onProgress('Checking Meta Ad Library…')
+
+  try {
+    const ads = await scrapeCompetitorMetaAds(query)
+    // Normalise to the snake_case DiscoveredMetaAds shape.
+    return {
+      type: 'tool_result',
+      tool_use_id: toolUse.id,
+      content: JSON.stringify({
+        active_ads_count: ads.activeAdsCount,
+        ad_types: ads.adTypes,
+        estimated_spend: ads.estimatedSpend,
+        top_ad_copy: ads.topAdCopy,
+      }),
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    // Non-fatal: let Claude continue and set meta_ads to null.
+    return {
+      type: 'tool_result',
+      tool_use_id: toolUse.id,
+      content: `fetch_meta_ads failed: ${message}. Set meta_ads to null — do not guess ad activity.`,
+    }
   }
 }

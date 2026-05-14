@@ -20,6 +20,7 @@ import type {
   SemrushSnapshot,
   DiscoveredReviewPlatform,
   DiscoveredRegistration,
+  DiscoveredMetaAds,
 } from '@/lib/zhangqian/types'
 import { useState } from 'react'
 
@@ -464,6 +465,19 @@ export function SocialCard({ socials }: { socials: DiscoveredSocial[] }) {
               >
                 {s.url}
               </a>
+              {(s.followers_count != null || s.posts_last_30d != null || s.engagement_rate != null) && (
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {s.followers_count != null && (
+                    <span className="text-xs text-gray-500">{s.followers_count.toLocaleString()} 粉丝</span>
+                  )}
+                  {s.posts_last_30d != null && (
+                    <span className="text-xs text-gray-500">近30天 {s.posts_last_30d} 帖</span>
+                  )}
+                  {s.engagement_rate != null && (
+                    <span className="text-xs text-gray-500">互动率 {(s.engagement_rate * 100).toFixed(1)}%</span>
+                  )}
+                </div>
+              )}
             </div>
             <ConfidenceBar value={s.confidence} />
           </li>
@@ -699,6 +713,58 @@ export function ReviewPlatformsCard({ platforms }: { platforms: DiscoveredReview
       <ul className="space-y-2.5">
         {platforms.map((p, i) => <ReviewPlatformItem key={i} platform={p} />)}
       </ul>
+    </CardShell>
+  )
+}
+
+// ─── MetaAdsCard ──────────────────────────────────────────────────────────────
+
+const SPEND_LABELS: Record<DiscoveredMetaAds['estimated_spend'], string> = {
+  low:     '低',
+  medium:  '中',
+  high:    '高',
+  unknown: '未知',
+}
+
+export function MetaAdsCard({ ads }: { ads: DiscoveredMetaAds | null | undefined }) {
+  if (!ads) {
+    return (
+      <CardShell title="Meta 广告投放">
+        <p className="text-sm text-gray-400 text-center py-4">未检测到 Facebook/Instagram 广告投放</p>
+      </CardShell>
+    )
+  }
+  return (
+    <CardShell title="Meta 广告投放">
+      <div className="flex flex-wrap gap-4">
+        <div className="text-center">
+          <p className="text-lg font-bold text-indigo-700">{ads.active_ads_count}</p>
+          <p className="text-xs text-gray-500">活跃广告</p>
+        </div>
+        <div className="text-center">
+          <p className="text-lg font-bold text-indigo-700">{SPEND_LABELS[ads.estimated_spend]}</p>
+          <p className="text-xs text-gray-500">投放力度</p>
+        </div>
+      </div>
+      {ads.ad_types.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {ads.ad_types.map((t, i) => (
+            <Badge key={i} className="bg-gray-100 text-gray-600">{t}</Badge>
+          ))}
+        </div>
+      )}
+      {ads.top_ad_copy.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-gray-500 mb-1">广告文案样本</p>
+          <ul className="space-y-1">
+            {ads.top_ad_copy.map((copy, i) => (
+              <li key={i} className="text-xs text-gray-700 leading-relaxed flex items-start gap-1">
+                <span className="text-indigo-400 mt-0.5">•</span>{copy}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </CardShell>
   )
 }
