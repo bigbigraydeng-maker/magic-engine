@@ -18,7 +18,10 @@ import { requireBearerToken } from '@/lib/validation-utils'
 import { chatWithLuban } from '@/lib/luban/agent'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60
+// 鲁班 tool loop 单轮可能跨：初次 Claude 调用（~20s）+ generate_content 工具内
+// 同步跑 generateBlogPost（~20-40s）+ 收尾 Claude 调用（~20s）。给足预算避免在
+// 落库草稿后、聊天回复持久化前超时。
+export const maxDuration = 180
 
 interface LubanMessageRow {
   id: string
