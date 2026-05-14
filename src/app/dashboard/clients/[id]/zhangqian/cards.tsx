@@ -18,6 +18,8 @@ import type {
   DiagnosisBlock,
   AiVisibilityResult,
   SemrushSnapshot,
+  DiscoveredReviewPlatform,
+  DiscoveredRegistration,
 } from '@/lib/zhangqian/types'
 import { useState } from 'react'
 
@@ -512,6 +514,49 @@ export function GbpCard({ gbp }: { gbp: ClientDiscoveryRow['payload']['gbp'] }) 
   )
 }
 
+// ─── RegistrationBlock ────────────────────────────────────────────────────────
+
+function RegistrationBlock({ registration }: { registration: DiscoveredRegistration }) {
+  const statusStyle: Record<DiscoveredRegistration['status'], string> = {
+    active:    'bg-green-100 text-green-700',
+    cancelled: 'bg-red-100 text-red-700',
+    unknown:   'bg-gray-100 text-gray-600',
+  }
+  const statusLabel: Record<DiscoveredRegistration['status'], string> = {
+    active: '有效', cancelled: '已注销', unknown: '状态未知',
+  }
+  const years = registration.registered_since
+    ? Math.floor((Date.now() - new Date(registration.registered_since).getTime()) / (365.25 * 864e5))
+    : null
+  return (
+    <div className="rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2.5">
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <p className="text-xs font-semibold text-emerald-800">工商注册（官方验证）</p>
+        <Badge className={statusStyle[registration.status]}>{statusLabel[registration.status]}</Badge>
+      </div>
+      <div className="flex flex-col gap-0.5 text-xs text-emerald-900">
+        <p><span className="text-emerald-500">{registration.identifier_type}：</span>{registration.identifier}</p>
+        {registration.entity_name && (
+          <p><span className="text-emerald-500">实体名：</span>{registration.entity_name}</p>
+        )}
+        {registration.entity_type && (
+          <p><span className="text-emerald-500">实体类型：</span>{registration.entity_type}</p>
+        )}
+        {registration.registered_since && (
+          <p>
+            <span className="text-emerald-500">注册时间：</span>
+            {registration.registered_since}
+            {years != null && years > 0 && `（约 ${years} 年）`}
+          </p>
+        )}
+        {registration.gst_registered != null && (
+          <p><span className="text-emerald-500">GST：</span>{registration.gst_registered ? '已注册' : '未注册'}</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── BusinessCard ─────────────────────────────────────────────────────────────
 
 export function BusinessCard({ discovery }: { discovery: ClientDiscoveryRow }) {
@@ -548,6 +593,7 @@ export function BusinessCard({ discovery }: { discovery: ClientDiscoveryRow }) {
           </ul>
         </div>
       )}
+      {biz.registration && <RegistrationBlock registration={biz.registration} />}
     </CardShell>
   )
 }
@@ -559,6 +605,100 @@ export function NotesCard({ notes }: { notes: string }) {
   return (
     <CardShell title="探索备注">
       <p className="text-xs text-gray-600 leading-relaxed whitespace-pre-wrap">{notes}</p>
+    </CardShell>
+  )
+}
+
+// ─── ReviewPlatformsCard ──────────────────────────────────────────────────────
+
+const REVIEW_PLATFORM_LABELS: Record<DiscoveredReviewPlatform['platform'], string> = {
+  google:        'Google',
+  productreview: 'ProductReview',
+  trustpilot:    'Trustpilot',
+  yelp:          'Yelp',
+  facebook:      'Facebook',
+  other:         '其他平台',
+}
+
+function RatingDistribution({ dist }: { dist: Record<'1' | '2' | '3' | '4' | '5', number> }) {
+  const total = Object.values(dist).reduce((sum, n) => sum + n, 0)
+  if (total === 0) return null
+  return (
+    <div className="flex flex-col gap-0.5">
+      {(['5', '4', '3', '2', '1'] as const).map(star => {
+        const pct = Math.round((dist[star] / total) * 100)
+        return (
+          <div key={star} className="flex items-center gap-1.5 text-xs">
+            <span className="text-gray-400 w-6">{star}★</span>
+            <div className="flex-1 h-1.5 rounded-full bg-gray-100 overflow-hidden">
+              <div className="h-full rounded-full bg-amber-400" style={{ width: `${pct}%` }} />
+            </div>
+            <span className="text-gray-400 w-8 text-right">{dist[star]}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function ReviewPlatformItem({ platform }: { platform: DiscoveredReviewPlatform }) {
+  const negatives = platform.recent_negative_samples ?? []
+  return (
+    <li className="rounded-lg border border-gray-100 p-3 flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <a
+          href={platform.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm font-medium text-indigo-600 hover:underline"
+        >
+          {REVIEW_PLATFORM_LABELS[platform.platform]}
+        </a>
+        <div className="flex items-center gap-1.5 text-xs">
+          {platform.rating != null && (
+            <span className="font-semibold text-gray-800">{platform.rating.toFixed(1)} ★</span>
+          )}
+          {platform.review_count != null && (
+            <span className="text-gray-400">({platform.review_count} 条)</span>
+          )}
+        </div>
+      </div>
+      {platform.response_rate != null && (
+        <p className="text-xs text-gray-500">商家回复率：{Math.round(platform.response_rate * 100)}%</p>
+      )}
+      {platform.rating_distribution && <RatingDistribution dist={platform.rating_distribution} />}
+      {negatives.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs font-semibold text-red-600">近期负面评价样本</p>
+          {negatives.map((r, i) => (
+            <div key={i} className="rounded bg-red-50 border border-red-100 px-2 py-1.5">
+              <div className="flex items-center gap-1.5 text-xs">
+                <span className="text-red-500 font-medium">{r.rating}★</span>
+                {r.author && <span className="text-gray-500">{r.author}</span>}
+                {r.date && <span className="text-gray-400">· {r.date}</span>}
+              </div>
+              <p className="text-xs text-gray-700 mt-0.5 leading-relaxed">{r.text}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </li>
+  )
+}
+
+export function ReviewPlatformsCard({ platforms }: { platforms: DiscoveredReviewPlatform[] }) {
+  if (!platforms || platforms.length === 0) {
+    return (
+      <CardShell title="评价平台">
+        <p className="text-sm text-gray-400 text-center py-4">未发现第三方评价平台</p>
+      </CardShell>
+    )
+  }
+  return (
+    <CardShell title="评价平台">
+      <ul className="space-y-2.5">
+        {platforms.map((p, i) => <ReviewPlatformItem key={i} platform={p} />)}
+      </ul>
     </CardShell>
   )
 }

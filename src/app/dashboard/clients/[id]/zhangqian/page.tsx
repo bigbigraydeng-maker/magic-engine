@@ -14,6 +14,7 @@ import {
   CompetitorsCard,
   SocialCard,
   GbpCard,
+  ReviewPlatformsCard,
   AiVisibilityCard,
   ActionPlanCard,
   DiagnosisCard,
@@ -162,6 +163,7 @@ function DiscoveryReviewCards({
         />
         <SocialCard socials={p.social_profiles} />
         <GbpCard gbp={p.gbp} />
+        <ReviewPlatformsCard platforms={p.review_platforms} />
       </div>
 
       {/* Action plan — full width */}
