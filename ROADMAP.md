@@ -714,7 +714,7 @@ Layer 5: Export（新增）— P8.10.S5
 - [x] **P8.12.S3.1.6** 回归测试：build 通过 + 5 单元测试通过 + `callClaudeChat` 未动（brief refinement 不受影响）；⚠️ UI 端到端实测待 dev 环境
 
 📋 **补充（MVP 上线后）**
-- [ ] **P8.12.S3.2** 鲁班 `generate_content` skill — 执行类任务直接产出并落库到 SEO/社媒模块（依赖 S3.1）
+- [x] **P8.12.S3.2** 鲁班 `generate_content` skill — 执行类任务直接产出并落库到 SEO/社媒模块（依赖 S3.1）
 - [ ] **P8.12.S3.3** 跨 Agent `check_local_compliance` skill（`src/lib/compliance/`）— AU 广告法 / trades license / AFSL 合规风险提示（定位风险提示非背书）
 - [ ] **P8.12.S3.4** 鲁班 `publish_to_gbp` skill — 依赖 GBP API 写权限申请，未通过则降级为「生成草稿 + 人工发布」（弹性项）
 - [ ] **P8.12.S3.5** 本地行业目录竞品发现 connector（Yellow Pages AU / Localsearch via Jina）— 优先级最低，弹性缓冲

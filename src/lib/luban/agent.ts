@@ -134,7 +134,7 @@ export async function chatWithLuban(
 
   // 3. 调 Claude（tool loop — 鲁班可自主调用 add_work_log 等工具）
   const systemPrompt = buildLubanSystemPrompt(ctx)
-  const { tools, handlers } = buildLubanTools({ supabase, itemId, clientId })
+  const { tools, handlers } = buildLubanTools({ supabase, itemId, clientId, item: ctx.item })
   const result = await callClaudeWithTools({
     systemPrompt,
     messages: [...history, { role: 'user', content: trimmed }],
