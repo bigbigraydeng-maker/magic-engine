@@ -52,6 +52,19 @@ const SOCIAL_PLATFORMS: ReadonlySet<SocialPlatform> = new Set<SocialPlatform>([
   'instagram', 'facebook', 'linkedin', 'youtube', 'tiktok', 'twitter', 'pinterest',
 ])
 
+/**
+ * Common aliases LLMs emit for known platforms — coerced before the enum
+ * check so a cosmetic naming drift (e.g. Twitter → "x") doesn't drop the row.
+ */
+const SOCIAL_PLATFORM_ALIASES: Record<string, SocialPlatform> = {
+  x: 'twitter', 'x.com': 'twitter', 'twitter.com': 'twitter',
+  fb: 'facebook', meta: 'facebook', 'facebook.com': 'facebook',
+  ig: 'instagram', insta: 'instagram', 'instagram.com': 'instagram',
+  yt: 'youtube', 'youtube.com': 'youtube',
+  li: 'linkedin', 'linkedin.com': 'linkedin',
+  'tik tok': 'tiktok', 'tiktok.com': 'tiktok',
+}
+
 const KEYWORD_TYPES: ReadonlySet<KeywordType> = new Set<KeywordType>([
   'brand', 'category', 'long_tail', 'local', 'transactional',
 ])
@@ -138,7 +151,14 @@ function isReviewSample(v: unknown): v is ReviewSample {
 
 function isSocial(v: unknown): v is DiscoveredSocial {
   if (!isRecord(v)) return false
-  if (!isString(v.platform) || !SOCIAL_PLATFORMS.has(v.platform as SocialPlatform)) return false
+  if (!isString(v.platform)) return false
+  // Coerce common aliases (e.g. "x" → "twitter") before the enum check; a
+  // genuinely unknown platform returns false so the caller drops just that row.
+  if (!SOCIAL_PLATFORMS.has(v.platform as SocialPlatform)) {
+    const alias = SOCIAL_PLATFORM_ALIASES[v.platform.toLowerCase().trim()]
+    if (!alias) return false
+    v.platform = alias
+  }
   // handle is optional nullable (some platforms expose URL only)
   if (v.handle !== undefined && v.handle !== null && !isString(v.handle)) return false
   if (!isString(v.url) || !v.url.startsWith('http')) return false
@@ -264,9 +284,11 @@ export function validateDiscoveryReport(
     return { ok: false, error: 'business block is invalid (check required fields)' }
   }
 
-  if (!Array.isArray(v.social_profiles) || !v.social_profiles.every(isSocial)) {
-    return { ok: false, error: 'social_profiles must be an array of DiscoveredSocial' }
-  }
+  // social_profiles: tolerate a missing/null field as an empty array, and
+  // filter row-by-row rather than rejecting the whole report — a single bad
+  // social entry must not waste an otherwise-complete discovery run.
+  const socialProfiles: DiscoveredSocial[] =
+    (Array.isArray(v.social_profiles) ? v.social_profiles : []).filter(isSocial)
 
   if (v.gbp !== null && !isGbp(v.gbp)) {
     return { ok: false, error: 'gbp must be null or a valid DiscoveredGbp' }
@@ -307,7 +329,7 @@ export function validateDiscoveryReport(
       schema_version: 1,
       domain: v.domain,
       business: v.business,
-      social_profiles: v.social_profiles,
+      social_profiles: socialProfiles,
       gbp: v.gbp,
       review_platforms: v.review_platforms,
       seed_keywords: v.seed_keywords,
