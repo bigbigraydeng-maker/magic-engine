@@ -38,11 +38,26 @@ export interface DiscoveredGbp {
   confidence: number                // 0–1
 }
 
+/** A sampled negative review surfaced as concrete diagnosis evidence. */
+export interface ReviewSample {
+  rating: number                    // 1–5
+  text: string
+  date: string | null               // upstream-provided, free-form
+  author: string | null
+}
+
 export interface DiscoveredReviewPlatform {
   platform: 'google' | 'productreview' | 'trustpilot' | 'yelp' | 'facebook' | 'other'
   url: string
   rating: number | null             // platform-specific scale
   review_count: number | null
+  // ── Enriched by the fetch_local_reviews connector (P8.12.S1.2) ──
+  /** Star-rating breakdown (review count per star), if the source exposes it. */
+  rating_distribution?: Record<'1' | '2' | '3' | '4' | '5', number> | null
+  /** Sample reviews with rating <= 2, used as concrete diagnosis evidence. */
+  recent_negative_samples?: ReviewSample[] | null
+  /** Owner response rate, 0–1; null when the source does not expose it. */
+  response_rate?: number | null
 }
 
 export type KeywordType = 'brand' | 'category' | 'long_tail' | 'local' | 'transactional'
@@ -79,6 +94,22 @@ export interface DiscoveredAiQuestion {
   rationale: string
 }
 
+/**
+ * Verified business registration, populated by the
+ * verify_business_registration connector (P8.12.S1.1).
+ * Sourced from the ABR (AU) or NZBN (NZ) official registry — never guessed.
+ */
+export interface DiscoveredRegistration {
+  country: 'AU' | 'NZ'
+  identifier: string                 // ABN (11 digits) or NZBN (13 digits)
+  identifier_type: 'ABN' | 'NZBN'
+  entity_name: string | null         // legal entity name
+  entity_type: string | null         // e.g. "Australian Private Company"
+  status: 'active' | 'cancelled' | 'unknown'
+  registered_since: string | null    // ISO date — anchors "registration age"
+  gst_registered: boolean | null      // null = registry does not expose GST
+}
+
 export interface DiscoveredBusiness {
   name: string                      // brand name (not domain)
   industry: string[]                // 1–3 industry tags, broad to specific
@@ -91,6 +122,8 @@ export interface DiscoveredBusiness {
   target_audience: string[]          // e.g. ["builders", "home owners", "designers"]
   unique_selling_points: string[]    // e.g. ["one-team install", "free measure"]
   confidence: number                 // 0–1
+  /** Verified registry record (ABR/NZBN); null when not found or not checked. */
+  registration?: DiscoveredRegistration | null
 }
 
 // ─── New diagnostic types ─────────────────────────────────────────────────────

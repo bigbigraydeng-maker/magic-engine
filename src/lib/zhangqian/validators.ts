@@ -11,12 +11,14 @@
 import type {
   DiscoveryReport,
   DiscoveredBusiness,
+  DiscoveredRegistration,
   DiscoveredSocial,
   DiscoveredGbp,
   DiscoveredReviewPlatform,
   DiscoveredKeyword,
   DiscoveredCompetitor,
   DiscoveredAiQuestion,
+  ReviewSample,
   SocialPlatform,
   KeywordType,
   CompetitorRelevance,
@@ -72,6 +74,10 @@ const REVIEW_PLATFORMS: ReadonlySet<DiscoveredReviewPlatform['platform']> = new 
   DiscoveredReviewPlatform['platform']
 >(['google', 'productreview', 'trustpilot', 'yelp', 'facebook', 'other'])
 
+const REGISTRATION_STATUSES: ReadonlySet<DiscoveredRegistration['status']> = new Set<
+  DiscoveredRegistration['status']
+>(['active', 'cancelled', 'unknown'])
+
 // ─── Field-level guards ───────────────────────────────────────────────────────
 
 function isBusiness(v: unknown): v is DiscoveredBusiness {
@@ -91,6 +97,42 @@ function isBusiness(v: unknown): v is DiscoveredBusiness {
   if (!isStringArray(v.target_audience)) return false
   if (!isStringArray(v.unique_selling_points)) return false
   if (!isNumber(v.confidence) || !inRange(v.confidence, 0, 1)) return false
+  // Optional verified registration (P8.12.S1.1) — coerce, never reject the
+  // whole report over a malformed registration sub-object.
+  if (v.registration !== undefined) {
+    v.registration = isRegistration(v.registration) ? v.registration : null
+  }
+  return true
+}
+
+/**
+ * Lenient guard for the optional registration sub-object. Nullable string
+ * fields accept undefined/null/string; an unknown status is coerced to
+ * 'unknown' rather than rejected.
+ */
+function isRegistration(v: unknown): v is DiscoveredRegistration {
+  if (!isRecord(v)) return false
+  if (v.country !== 'AU' && v.country !== 'NZ') return false
+  if (!isString(v.identifier) || v.identifier.length === 0) return false
+  if (v.identifier_type !== 'ABN' && v.identifier_type !== 'NZBN') return false
+  if (v.entity_name !== undefined && v.entity_name !== null && !isString(v.entity_name)) return false
+  if (v.entity_type !== undefined && v.entity_type !== null && !isString(v.entity_type)) return false
+  if (!isString(v.status) || !REGISTRATION_STATUSES.has(v.status as DiscoveredRegistration['status'])) {
+    v.status = 'unknown'
+  }
+  if (v.registered_since !== undefined && v.registered_since !== null && !isString(v.registered_since)) return false
+  if (v.gst_registered !== undefined && v.gst_registered !== null
+      && typeof v.gst_registered !== 'boolean') return false
+  return true
+}
+
+/** Guard for a single sampled negative review. */
+function isReviewSample(v: unknown): v is ReviewSample {
+  if (!isRecord(v)) return false
+  if (!isNumber(v.rating)) return false
+  if (!isString(v.text)) return false
+  if (v.date !== undefined && v.date !== null && !isString(v.date)) return false
+  if (v.author !== undefined && v.author !== null && !isString(v.author)) return false
   return true
 }
 
@@ -133,6 +175,19 @@ function isReviewPlatform(v: unknown): v is DiscoveredReviewPlatform {
   // rating/review_count are optional: allow undefined, null, or number
   if (v.rating !== undefined && v.rating !== null && !isNumber(v.rating)) return false
   if (v.review_count !== undefined && v.review_count !== null && !isNumber(v.review_count)) return false
+  // Optional enrichment fields (P8.12.S1.2) — coerce to null/clean array,
+  // never reject the row over malformed enrichment data.
+  if (v.rating_distribution !== undefined && !isRecord(v.rating_distribution)) {
+    v.rating_distribution = null
+  }
+  if (v.recent_negative_samples !== undefined) {
+    v.recent_negative_samples = Array.isArray(v.recent_negative_samples)
+      ? v.recent_negative_samples.filter(isReviewSample)
+      : null
+  }
+  if (v.response_rate !== undefined && v.response_rate !== null && !isNumber(v.response_rate)) {
+    v.response_rate = null
+  }
   return true
 }
 

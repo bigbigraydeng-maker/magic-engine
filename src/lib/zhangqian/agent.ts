@@ -17,6 +17,8 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { getAnthropicClient, MODEL_SONNET, parseJsonResponse } from '@/lib/anthropic/client'
 import { fetchUrlAsMarkdown } from '@/lib/brief/jina'
+import { verifyBusinessRegistration } from '@/lib/abr/client'
+import { aggregateLocalReviews } from '@/lib/local-reviews/client'
 import type { DiscoveryReport } from './types'
 import { ZHANGQIAN_SYSTEM_PROMPT, buildUserPrompt } from './prompts'
 import { validateDiscoveryReport } from './validators'
@@ -70,6 +72,63 @@ const FETCH_URL_TOOL: Anthropic.Messages.Tool = {
   },
 }
 
+/**
+ * Client-side tool: verify a business against the official government
+ * registry (ABR for AU, NZBN for NZ). Backed by src/lib/abr/client.ts.
+ */
+const VERIFY_BUSINESS_REGISTRATION_TOOL: Anthropic.Messages.Tool = {
+  name: 'verify_business_registration',
+  description:
+    'Verify a business against the official government registry — ABR for AU, NZBN for NZ. Accepts an ABN/NZBN number OR a business name to fuzzy-search. Returns the verified legal entity name, entity type, registration status, registration date, and GST status. Call this once to populate business.registration with real data instead of guessing.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      query: {
+        type: 'string',
+        description:
+          'An ABN (11 digits) / NZBN (13 digits), or a business / entity name to search.',
+      },
+      market: {
+        type: 'string',
+        enum: ['AU', 'NZ'],
+        description: 'Which registry to query.',
+      },
+      state: {
+        type: 'string',
+        description:
+          'Optional AU state code (e.g. "QLD") to narrow a name search. Ignored for NZ.',
+      },
+    },
+    required: ['query', 'market'],
+  },
+}
+
+/**
+ * Client-side tool: aggregate real review data from Google Business
+ * Profile and ProductReview.com.au. Backed by src/lib/local-reviews/client.ts.
+ */
+const FETCH_LOCAL_REVIEWS_TOOL: Anthropic.Messages.Tool = {
+  name: 'fetch_local_reviews',
+  description:
+    'Aggregate real review data from Google Business Profile and ProductReview.com.au. Returns verified ratings, review counts, and sample negative reviews. Use this instead of guessing reputation numbers.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      business_query: {
+        type: 'string',
+        description:
+          'Business name plus city and state, e.g. "Oztop Building Supplies Slacks Creek QLD".',
+      },
+      productreview_url: {
+        type: 'string',
+        description:
+          'Optional ProductReview.com.au listing URL, if you have already found it.',
+      },
+    },
+    required: ['business_query'],
+  },
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 export interface RunZhangqianOptions {
@@ -119,6 +178,7 @@ export async function runZhangqian(
   let totalOutputTokens = 0
   let webSearchCalls = 0
   let fetchUrlCalls = 0
+  let connectorCalls = 0
   let truncated = false
 
   await onProgress('Zhangqian dispatched — researching homepage…')
@@ -140,7 +200,12 @@ export async function runZhangqian(
       model: MODEL_SONNET,
       max_tokens: MAX_OUTPUT_TOKENS,
       system: ZHANGQIAN_SYSTEM_PROMPT,
-      tools: [WEB_SEARCH_TOOL, FETCH_URL_TOOL],
+      tools: [
+        WEB_SEARCH_TOOL,
+        FETCH_URL_TOOL,
+        VERIFY_BUSINESS_REGISTRATION_TOOL,
+        FETCH_LOCAL_REVIEWS_TOOL,
+      ],
       messages,
     })
 
@@ -174,6 +239,7 @@ export async function runZhangqian(
         totalOutputTokens,
         webSearchCalls,
         fetchUrlCalls,
+        connectorCalls,
         truncated,
         startedAt,
       })
@@ -193,6 +259,7 @@ export async function runZhangqian(
         totalOutputTokens,
         webSearchCalls,
         fetchUrlCalls,
+        connectorCalls,
         truncated,
         startedAt,
       })
@@ -213,51 +280,27 @@ export async function runZhangqian(
     const toolResults: Anthropic.Messages.ToolResultBlockParam[] = []
 
     for (const toolUse of toolUseBlocks) {
-      if (toolUse.name !== 'fetch_url') {
-        // Unknown tool — return error so Claude can recover
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: toolUse.id,
-          content: `Unknown tool: ${toolUse.name}. Only 'fetch_url' is client-handled; 'web_search' is server-side.`,
-          is_error: true,
-        })
-        continue
-      }
-
-      const input = toolUse.input as { url?: string }
-      const url = input.url
-      if (!url || typeof url !== 'string') {
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: toolUse.id,
-          content: 'fetch_url requires a string `url` parameter.',
-          is_error: true,
-        })
-        continue
-      }
-
-      fetchUrlCalls++
-      await onProgress(`Fetching ${truncateForProgress(url)}…`)
-
-      try {
-        const fetched = await withTimeout(fetchUrlAsMarkdown(url), FETCH_URL_TIMEOUT_MS)
-        // Cap markdown at ~50KB to control token use
-        const markdown = fetched.markdown.length > 50_000
-          ? fetched.markdown.slice(0, 50_000) + '\n\n[truncated — content exceeded 50KB]'
-          : fetched.markdown
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: toolUse.id,
-          content: `Title: ${fetched.title || '(none)'}\n\n${markdown}`,
-        })
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: toolUse.id,
-          content: `fetch_url failed: ${message}`,
-          is_error: true,
-        })
+      switch (toolUse.name) {
+        case 'fetch_url':
+          fetchUrlCalls++
+          toolResults.push(await handleFetchUrl(toolUse, onProgress))
+          break
+        case 'verify_business_registration':
+          connectorCalls++
+          toolResults.push(await handleVerifyRegistration(toolUse, onProgress))
+          break
+        case 'fetch_local_reviews':
+          connectorCalls++
+          toolResults.push(await handleFetchLocalReviews(toolUse, onProgress))
+          break
+        default:
+          // Unknown tool — return error so Claude can recover
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: toolUse.id,
+            content: `Unknown tool: ${toolUse.name}. 'web_search' is server-side; client-handled tools are 'fetch_url', 'verify_business_registration', 'fetch_local_reviews'.`,
+            is_error: true,
+          })
       }
     }
 
@@ -313,6 +356,7 @@ interface FinalizeArgs {
   totalOutputTokens: number
   webSearchCalls: number
   fetchUrlCalls: number
+  connectorCalls: number
   truncated: boolean
   startedAt: number
 }
@@ -325,7 +369,7 @@ function finalizeReport(args: FinalizeArgs): RunZhangqianResult {
 
   const meta: DiscoveryReport['meta'] = {
     model: MODEL_SONNET,
-    tool_calls: args.webSearchCalls + args.fetchUrlCalls,
+    tool_calls: args.webSearchCalls + args.fetchUrlCalls + args.connectorCalls,
     cost_usd: Number(costUsd.toFixed(4)),
     duration_ms: Date.now() - args.startedAt,
     truncated: args.truncated,
@@ -402,4 +446,120 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 function truncateForProgress(url: string): string {
   if (url.length <= 60) return url
   return url.slice(0, 57) + '…'
+}
+
+// ─── Client-side tool handlers ───────────────────────────────────────────────
+
+type ProgressFn = (note: string) => void | Promise<void>
+
+/** Resolve a `fetch_url` tool call via Jina Reader. */
+async function handleFetchUrl(
+  toolUse: Anthropic.Messages.ToolUseBlock,
+  onProgress: ProgressFn,
+): Promise<Anthropic.Messages.ToolResultBlockParam> {
+  const input = toolUse.input as { url?: string }
+  const url = input.url
+  if (!url || typeof url !== 'string') {
+    return {
+      type: 'tool_result',
+      tool_use_id: toolUse.id,
+      content: 'fetch_url requires a string `url` parameter.',
+      is_error: true,
+    }
+  }
+
+  await onProgress(`Fetching ${truncateForProgress(url)}…`)
+
+  try {
+    const fetched = await withTimeout(fetchUrlAsMarkdown(url), FETCH_URL_TIMEOUT_MS)
+    // Cap markdown at ~50KB to control token use
+    const markdown = fetched.markdown.length > 50_000
+      ? fetched.markdown.slice(0, 50_000) + '\n\n[truncated — content exceeded 50KB]'
+      : fetched.markdown
+    return {
+      type: 'tool_result',
+      tool_use_id: toolUse.id,
+      content: `Title: ${fetched.title || '(none)'}\n\n${markdown}`,
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return {
+      type: 'tool_result',
+      tool_use_id: toolUse.id,
+      content: `fetch_url failed: ${message}`,
+      is_error: true,
+    }
+  }
+}
+
+/** Resolve a `verify_business_registration` tool call via the ABR/NZBN connector. */
+async function handleVerifyRegistration(
+  toolUse: Anthropic.Messages.ToolUseBlock,
+  onProgress: ProgressFn,
+): Promise<Anthropic.Messages.ToolResultBlockParam> {
+  const input = toolUse.input as { query?: string; market?: string; state?: string }
+  const query = typeof input.query === 'string' ? input.query.trim() : ''
+  const market = input.market === 'AU' || input.market === 'NZ' ? input.market : null
+
+  if (!query || !market) {
+    return {
+      type: 'tool_result',
+      tool_use_id: toolUse.id,
+      content: 'verify_business_registration requires `query` (string) and `market` ("AU" or "NZ").',
+      is_error: true,
+    }
+  }
+
+  await onProgress(`Verifying business registration (${market})…`)
+
+  // verifyBusinessRegistration is non-fatal by contract — never throws.
+  const registration = await verifyBusinessRegistration({
+    query,
+    market,
+    state: typeof input.state === 'string' ? input.state : undefined,
+  })
+
+  return {
+    type: 'tool_result',
+    tool_use_id: toolUse.id,
+    content: registration
+      ? JSON.stringify(registration)
+      : `No ${market === 'AU' ? 'ABR' : 'NZBN'} registration found for "${query}". Set business.registration to null — do not guess one.`,
+  }
+}
+
+/** Resolve a `fetch_local_reviews` tool call via the GBP + ProductReview connector. */
+async function handleFetchLocalReviews(
+  toolUse: Anthropic.Messages.ToolUseBlock,
+  onProgress: ProgressFn,
+): Promise<Anthropic.Messages.ToolResultBlockParam> {
+  const input = toolUse.input as { business_query?: string; productreview_url?: string }
+  const businessQuery =
+    typeof input.business_query === 'string' ? input.business_query.trim() : ''
+
+  if (!businessQuery) {
+    return {
+      type: 'tool_result',
+      tool_use_id: toolUse.id,
+      content: 'fetch_local_reviews requires a `business_query` string (brand + city + state).',
+      is_error: true,
+    }
+  }
+
+  await onProgress('Aggregating local reviews…')
+
+  // aggregateLocalReviews is non-fatal by contract — never throws.
+  const snapshots = await aggregateLocalReviews({
+    businessQuery,
+    productReviewUrl:
+      typeof input.productreview_url === 'string' ? input.productreview_url : undefined,
+  })
+
+  return {
+    type: 'tool_result',
+    tool_use_id: toolUse.id,
+    content: snapshots.length > 0
+      ? JSON.stringify(snapshots)
+      : 'No local review data found. Base gbp / review_platforms on other sources — do not guess ratings.',
+  }
 }
