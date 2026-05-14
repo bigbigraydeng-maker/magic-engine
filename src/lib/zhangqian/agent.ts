@@ -21,6 +21,7 @@ import { verifyBusinessRegistration } from '@/lib/abr/client'
 import { aggregateLocalReviews } from '@/lib/local-reviews/client'
 import { scrapeInstagramProfile, scrapeFacebookPage, scrapeTiktokProfile } from '@/lib/apify/social-scraper'
 import { scrapeCompetitorMetaAds } from '@/lib/apify/ad-library'
+import { scrapeGoogleSerp } from '@/lib/apify/google-search-scraper'
 import type { DiscoveryReport } from './types'
 import { ZHANGQIAN_SYSTEM_PROMPT, buildUserPrompt } from './prompts'
 import { validateDiscoveryReport } from './validators'
@@ -178,6 +179,31 @@ const FETCH_META_ADS_TOOL: Anthropic.Messages.Tool = {
   },
 }
 
+/**
+ * Client-side tool: scrape a Google SERP for a query via the Apify Google
+ * Search scraper. Backed by src/lib/apify/google-search-scraper.ts.
+ */
+const FETCH_SERP_RESULTS_TOOL: Anthropic.Messages.Tool = {
+  name: 'fetch_serp_results',
+  description:
+    'Scrape a real Google search results page for a query — organic ranking, paid advertiser domains, and the Google AI Mode answer. Use this for the 1-2 most important category/local queries to see who ranks, who buys ads, and whether the brand appears in Google\'s AI answer. Each call is a paid API call — pick high-signal queries, do not run it for every keyword.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      query: {
+        type: 'string',
+        description: 'The search query to scrape, e.g. "vinyl flooring brisbane".',
+      },
+      country: {
+        type: 'string',
+        enum: ['AU', 'NZ'],
+        description: 'Which Google country domain to search. Defaults to AU.',
+      },
+    },
+    required: ['query'],
+  },
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 export interface RunZhangqianOptions {
@@ -257,6 +283,7 @@ export async function runZhangqian(
         FETCH_LOCAL_REVIEWS_TOOL,
         FETCH_SOCIAL_METRICS_TOOL,
         FETCH_META_ADS_TOOL,
+        FETCH_SERP_RESULTS_TOOL,
       ],
       messages,
     })
@@ -355,12 +382,16 @@ export async function runZhangqian(
           apifyCalls++
           toolResults.push(await handleFetchMetaAds(toolUse, onProgress))
           break
+        case 'fetch_serp_results':
+          apifyCalls++
+          toolResults.push(await handleFetchSerpResults(toolUse, onProgress))
+          break
         default:
           // Unknown tool — return error so Claude can recover
           toolResults.push({
             type: 'tool_result',
             tool_use_id: toolUse.id,
-            content: `Unknown tool: ${toolUse.name}. 'web_search' is server-side; client-handled tools are 'fetch_url', 'verify_business_registration', 'fetch_local_reviews', 'fetch_social_metrics', 'fetch_meta_ads'.`,
+            content: `Unknown tool: ${toolUse.name}. 'web_search' is server-side; client-handled tools are 'fetch_url', 'verify_business_registration', 'fetch_local_reviews', 'fetch_social_metrics', 'fetch_meta_ads', 'fetch_serp_results'.`,
             is_error: true,
           })
       }
@@ -720,6 +751,45 @@ async function handleFetchMetaAds(
       type: 'tool_result',
       tool_use_id: toolUse.id,
       content: `fetch_meta_ads failed: ${message}. Set meta_ads to null — do not guess ad activity.`,
+    }
+  }
+}
+
+/** Resolve a `fetch_serp_results` tool call via the Apify Google Search scraper. */
+async function handleFetchSerpResults(
+  toolUse: Anthropic.Messages.ToolUseBlock,
+  onProgress: ProgressFn,
+): Promise<Anthropic.Messages.ToolResultBlockParam> {
+  const input = toolUse.input as { query?: string; country?: string }
+  const query = typeof input.query === 'string' ? input.query.trim() : ''
+  const country = input.country === 'NZ' ? 'nz' : 'au'
+
+  if (!query) {
+    return {
+      type: 'tool_result',
+      tool_use_id: toolUse.id,
+      content: 'fetch_serp_results requires a `query` string.',
+      is_error: true,
+    }
+  }
+
+  await onProgress(`Scraping Google SERP for "${query}"…`)
+
+  try {
+    // scrapeGoogleSerp already returns the snake_case DiscoveredSerpResult shape.
+    const serp = await scrapeGoogleSerp(query, country)
+    return {
+      type: 'tool_result',
+      tool_use_id: toolUse.id,
+      content: JSON.stringify(serp),
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    // Non-fatal: let Claude continue without this SERP snapshot.
+    return {
+      type: 'tool_result',
+      tool_use_id: toolUse.id,
+      content: `fetch_serp_results failed for "${query}": ${message}. Continue without this SERP snapshot.`,
     }
   }
 }

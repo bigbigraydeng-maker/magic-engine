@@ -16,6 +16,7 @@ import {
   GbpCard,
   ReviewPlatformsCard,
   MetaAdsCard,
+  SerpResultsCard,
   AiVisibilityCard,
   ActionPlanCard,
   DiagnosisCard,
@@ -166,6 +167,7 @@ function DiscoveryReviewCards({
         <GbpCard gbp={p.gbp} />
         <ReviewPlatformsCard platforms={p.review_platforms} />
         <MetaAdsCard ads={p.meta_ads} />
+        <SerpResultsCard results={p.serp_results} />
       </div>
 
       {/* Action plan — full width */}

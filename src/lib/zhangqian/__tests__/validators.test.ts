@@ -238,3 +238,53 @@ describe('validateDiscoveryReport — meta_ads', () => {
     if (r.ok) expect(r.value.meta_ads).toBeNull()
   })
 })
+
+// ---------------------------------------------------------------------------
+// 5. serp_results（P8.12.S1.6c）
+// ---------------------------------------------------------------------------
+
+describe('validateDiscoveryReport — serp_results', () => {
+  const validSerp = {
+    query: 'vinyl flooring brisbane',
+    organic_results: [{ position: 1, title: 'X', url: 'https://x.com', description: 'd' }],
+    paid_advertiser_domains: ['carpetcourt.com.au'],
+    ai_overview_text: 'AI 回答文本',
+    ai_overview_sources: ['https://src.com'],
+  }
+
+  it('有效 serp_results 原样保留', () => {
+    const report = makeValidReport([validSocial])
+    report.serp_results = [validSerp]
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.value.serp_results).toHaveLength(1)
+      expect(r.value.serp_results?.[0].query).toBe('vinyl flooring brisbane')
+    }
+  })
+
+  it('serp_results 缺失 → null，报告仍通过', () => {
+    const r = validateDiscoveryReport(makeValidReport([validSocial]))
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.serp_results).toBeNull()
+  })
+
+  it('ai_overview_text 缺失被 coerce 成 null', () => {
+    const report = makeValidReport([validSocial])
+    report.serp_results = [{ ...validSerp, ai_overview_text: undefined }]
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.serp_results?.[0].ai_overview_text).toBeNull()
+  })
+
+  it('损坏的 serp 条目被逐条过滤，报告不作废', () => {
+    const report = makeValidReport([validSocial])
+    report.serp_results = [
+      validSerp,
+      { query: '', organic_results: [], paid_advertiser_domains: [], ai_overview_text: null, ai_overview_sources: [] },
+    ]
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.serp_results).toHaveLength(1)
+  })
+})

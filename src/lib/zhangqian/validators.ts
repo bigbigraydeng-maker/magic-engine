@@ -19,6 +19,7 @@ import type {
   DiscoveredCompetitor,
   DiscoveredAiQuestion,
   DiscoveredMetaAds,
+  DiscoveredSerpResult,
   ReviewSample,
   SocialPlatform,
   KeywordType,
@@ -287,6 +288,22 @@ function isMetaAds(v: unknown): v is DiscoveredMetaAds {
   return true
 }
 
+/** Lenient guard for one entry of the optional serp_results array (P8.12.S1.6c). */
+function isSerpResult(v: unknown): v is DiscoveredSerpResult {
+  if (!isRecord(v)) return false
+  if (!isString(v.query) || v.query.length === 0) return false
+  if (!Array.isArray(v.organic_results)) return false
+  if (!Array.isArray(v.paid_advertiser_domains)
+      || !v.paid_advertiser_domains.every(isString)) return false
+  // ai_overview_text is nullable — coerce a missing/bad value to null.
+  if (v.ai_overview_text !== null && !isString(v.ai_overview_text)) {
+    v.ai_overview_text = null
+  }
+  if (!Array.isArray(v.ai_overview_sources)
+      || !v.ai_overview_sources.every(isString)) return false
+  return true
+}
+
 // ─── Top-level validator ──────────────────────────────────────────────────────
 
 /**
@@ -367,6 +384,7 @@ export function validateDiscoveryReport(
       semrush_snapshot: isRecord(v.semrush_snapshot) ? v.semrush_snapshot as DiscoveryReport['semrush_snapshot'] : null,
       ai_visibility_results: Array.isArray(v.ai_visibility_results) ? v.ai_visibility_results as DiscoveryReport['ai_visibility_results'] : null,
       meta_ads: isMetaAds(v.meta_ads) ? v.meta_ads : null,
+      serp_results: Array.isArray(v.serp_results) ? v.serp_results.filter(isSerpResult) : null,
       diagnosis: isRecord(v.diagnosis) ? v.diagnosis as DiagnosisBlock : null,
     },
   }

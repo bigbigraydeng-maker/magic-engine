@@ -21,6 +21,7 @@ import type {
   DiscoveredReviewPlatform,
   DiscoveredRegistration,
   DiscoveredMetaAds,
+  DiscoveredSerpResult,
 } from '@/lib/zhangqian/types'
 import { useState } from 'react'
 
@@ -765,6 +766,60 @@ export function MetaAdsCard({ ads }: { ads: DiscoveredMetaAds | null | undefined
           </ul>
         </div>
       )}
+    </CardShell>
+  )
+}
+
+// ─── SerpResultsCard ──────────────────────────────────────────────────────────
+
+function SerpResultItem({ serp }: { serp: DiscoveredSerpResult }) {
+  return (
+    <li className="rounded-lg border border-gray-100 p-3 flex flex-col gap-2">
+      <p className="text-sm font-medium text-gray-800">&quot;{serp.query}&quot;</p>
+      {serp.ai_overview_text && (
+        <div className="rounded bg-violet-50 border border-violet-100 px-2.5 py-2">
+          <p className="text-xs font-semibold text-violet-700 mb-0.5">Google AI 回答</p>
+          <p className="text-xs text-violet-900 leading-relaxed">{serp.ai_overview_text}</p>
+        </div>
+      )}
+      {serp.organic_results.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-gray-500 mb-1">自然排名 TOP</p>
+          <ul className="space-y-0.5">
+            {serp.organic_results.slice(0, 5).map((r, i) => (
+              <li key={i} className="flex items-start gap-1.5 text-xs">
+                <span className="text-gray-400 w-5 shrink-0">#{r.position}</span>
+                <span className="text-gray-700 truncate">{r.title}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {serp.paid_advertiser_domains.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-xs text-gray-500">投广告：</span>
+          {serp.paid_advertiser_domains.map((d, i) => (
+            <Badge key={i} className="bg-amber-100 text-amber-700">{d}</Badge>
+          ))}
+        </div>
+      )}
+    </li>
+  )
+}
+
+export function SerpResultsCard({ results }: { results: DiscoveredSerpResult[] | null | undefined }) {
+  if (!results || results.length === 0) {
+    return (
+      <CardShell title="Google 搜索结果">
+        <p className="text-sm text-gray-400 text-center py-4">未抓取 Google 搜索结果</p>
+      </CardShell>
+    )
+  }
+  return (
+    <CardShell title="Google 搜索结果">
+      <ul className="space-y-2.5">
+        {results.map((s, i) => <SerpResultItem key={i} serp={s} />)}
+      </ul>
     </CardShell>
   )
 }

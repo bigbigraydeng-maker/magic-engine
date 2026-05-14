@@ -695,9 +695,9 @@ Layer 5: Export（新增）— P8.10.S5
 - [x] **P8.12.S1.4** 华佗 `lookup_local_budget_benchmark` skill — 客户预算 vs 行业基准对比强化进 prompt（`benchmarks.ts` 增强）
 - [x] **P8.12.S1.5** Google Trends 本地热度 connector（`src/lib/gtrends/`，gl=au/nz via SerpAPI）接入华佗 Lookup
 - [ ] **P8.12.S1.6** 张骞 Apify 商业情报扩展 — 社媒真实指标 + FB 广告 + 小红书 + Google Search（张骞按需调用，非每次全跑）
-  - [ ] **S1.6a** 接入 4 个现成 Apify 封装（IG/FB/TikTok `social-scraper.ts` + FB 广告 `ad-library.ts`）→ 张骞新 tool `fetch_social_metrics` / `fetch_meta_ads` + `DiscoveredSocial` 加粉丝/帖子/互动率 + `DiscoveredMetaAds` + 前端渲染
+  - [x] **S1.6a** 接入 4 个现成 Apify 封装（IG/FB/TikTok `social-scraper.ts` + FB 广告 `ad-library.ts`）→ 张骞新 tool `fetch_social_metrics` / `fetch_meta_ads` + `DiscoveredSocial` 加粉丝/帖子/互动率 + `DiscoveredMetaAds` + 前端渲染
   - [ ] **S1.6b** 小红书 RedNote scraper（新封装 `apify/xiaohongshu-scraper.ts`，actor `zhorex/rednote-xiaohongshu-scraper`）+ `SocialPlatform` 枚举加 `xiaohongshu` + 接入（⚠️ 该 actor 无评价，先小范围实测）
-  - [ ] **S1.6c** Google Search Results scraper（新封装，SERP organic/paid + AI Overview）→ 服务「AI 可见度」维度
+  - [x] **S1.6c** Google Search Results scraper（新封装 `apify/google-search-scraper.ts`，SERP organic/paid + AI Overview）→ 服务「AI 可见度」维度
 - 依赖：S1.1/S1.2/S1.5 三个 connector 互相独立可并行；S1.3/S1.4 同在华佗侧建议同人顺序做；S1.6 a→b→c 顺序做
 
 **Sprint 2 — 数据飞轮（P8.12.S2，~10–14 人天，真护城河）📋 补充（MVP 上线后）**：

@@ -163,6 +163,29 @@ export interface DiscoveredMetaAds {
   top_ad_copy: string[]
 }
 
+/**
+ * A Google SERP snapshot for one query, populated by the fetch_serp_results
+ * tool via Apify's Google Search scraper (P8.12.S1.6c). Captures organic
+ * ranking, paid advertisers, and the Google AI Mode answer — the AI Mode
+ * answer feeds the "AI visibility" diagnosis dimension.
+ */
+export interface DiscoveredSerpResult {
+  query: string
+  /** Top organic results for the query. */
+  organic_results: Array<{
+    position: number
+    title: string
+    url: string
+    description: string
+  }>
+  /** Domains that ran paid ads for this query. */
+  paid_advertiser_domains: string[]
+  /** Google AI Mode answer text; null when Google did not surface one. */
+  ai_overview_text: string | null
+  /** Source URLs cited in the AI Mode answer. */
+  ai_overview_sources: string[]
+}
+
 export interface DiagnosisBlock {
   executive_summary: string  // Chinese narrative ~3-5 sentences
   crisis_type: string | null // e.g. "TYPE_E 声誉陷阱" or null if no crisis
@@ -208,6 +231,9 @@ export interface DiscoveryReport {
 
   /** Meta ad activity — populated by fetch_meta_ads (P8.12.S1.6a); null when not checked */
   meta_ads?: DiscoveredMetaAds | null
+
+  /** Google SERP snapshots — populated by fetch_serp_results (P8.12.S1.6c); null when not checked */
+  serp_results?: DiscoveredSerpResult[] | null
 
   /** Deep diagnostic block with scores, narrative, and action plan */
   diagnosis?: DiagnosisBlock | null
