@@ -11,6 +11,8 @@
  */
 
 import type { PrescriptionContent } from '@/types/diagnostic'
+import type { SeasonalCalendarData } from './seasonal-calendar'
+import type { GTrendsInterestSummary } from '@/lib/gtrends/client'
 
 // ─── Industry Benchmark ────────────────────────────────────────────────────────
 
@@ -122,6 +124,10 @@ export interface HuatuoLookupContext {
   industry_category: string | null
   /** SEMrush 历史趋势摘要（P8.10.S3.2 接入；null 表示无数据） */
   trend_summary?: TrendSummaryLite | null
+  /** AU/NZ 季节营销日历（P8.12.S1.3 接入；null 表示无数据） */
+  seasonal_calendar?: SeasonalCalendarData | null
+  /** 行业搜索热度趋势（Google Trends，P8.12.S1.5 接入；null 表示无数据） */
+  industry_interest?: GTrendsInterestSummary | null
 }
 
 /**

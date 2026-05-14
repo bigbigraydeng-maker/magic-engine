@@ -27,6 +27,8 @@ import { fetchBenchmarks, extractBenchmarkIds } from './benchmarks'
 import { mapIndustryToCategory } from './industry-mapper'
 import { getDomainTrafficTrend } from '@/lib/semrush/client'
 import { summarizeTrend } from './trends'
+import { getSeasonalCalendar } from './seasonal-calendar'
+import { getIndustryInterestTrend } from '@/lib/gtrends/client'
 import { coerceWeaknesses } from './weakness-utils'
 
 // re-export 供 refine route 等使用
@@ -113,11 +115,13 @@ export async function runHuatuo(
   let totalOutputTokens = 0
   let passes = 0
 
-  // ── Step 1: Lookup（基准库 + SEMrush 历史趋势，并行）──────────────────────
-  await onProgress('查询行业基准库 + SEMrush 历史趋势…')
+  // ── Step 1: Lookup（基准库 + SEMrush 历史趋势 + Google Trends，并行）────────
+  await onProgress('查询行业基准库 + SEMrush 历史趋势 + 行业搜索热度…')
   const industryCategory = mapIndustryToCategory(discovery.business.industry)
+  // Google Trends 查询用客户行业关键词（兜底用业务名）
+  const interestQuery = discovery.business.industry[0] ?? discovery.business.name
 
-  const [benchmarks, trendPoints] = await Promise.all([
+  const [benchmarks, trendPoints, industryInterest] = await Promise.all([
     fetchBenchmarks(supabase, {
       industryCategory,
       businessSize: 'small',
@@ -125,14 +129,22 @@ export async function runHuatuo(
     }),
     // 趋势失败不阻塞 — getDomainTrafficTrend 内部已 try/catch 返回 []
     getDomainTrafficTrend(discovery.domain, undefined, 12),
+    // Google Trends 失败不阻塞 — getIndustryInterestTrend 内部已兜底返回 no_data
+    getIndustryInterestTrend(interestQuery, 'AU'),
   ])
 
   const trendSummary = summarizeTrend(trendPoints)
+
+  // 季节日历为纯静态查表（无外部依赖），同步获取未来 90 天本地营销节点
+  const currentMonth = new Date().toISOString().slice(0, 7)  // YYYY-MM
+  const seasonalCalendar = getSeasonalCalendar('AU', currentMonth)
 
   const lookup: HuatuoLookupContext = {
     benchmarks,
     industry_category: industryCategory,
     trend_summary: trendSummary,
+    seasonal_calendar: seasonalCalendar,
+    industry_interest: industryInterest,
   }
 
   // ── Step 2: Generate（pass 1）────────────────────────────────────────────

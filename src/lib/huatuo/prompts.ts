@@ -14,6 +14,8 @@ import type { HuatuoLookupContext, TrendSummaryLite, SelfGradeWeakness } from '.
 import { formatBenchmarksForPrompt } from './benchmarks'
 import { categoryToChineseName } from './industry-mapper'
 import { formatTrendForPrompt, type TrendSummary } from './trends'
+import { formatSeasonalCalendarForPrompt } from './seasonal-calendar'
+import { formatInterestForPrompt } from '@/lib/gtrends/client'
 
 // ─── Generation prompt（生成阶段）──────────────────────────────────────────────
 
@@ -282,10 +284,16 @@ export function buildHuatuoGenerationPrompt(
     : ''
 
   const industryName = categoryToChineseName(lookup.industry_category)
-  const benchmarksTable = formatBenchmarksForPrompt(lookup.benchmarks, industryName)
+  const benchmarksTable = formatBenchmarksForPrompt(lookup.benchmarks, industryName, intake.monthly_budget_aud)
   const trendSection = lookup.trend_summary
     ? formatTrendForPrompt(lookup.trend_summary as TrendSummary)
     : '## 域名历史流量趋势（SEMrush）\n\n**未拉取**（趋势数据可选）。'
+  const seasonalSection = lookup.seasonal_calendar
+    ? formatSeasonalCalendarForPrompt(lookup.seasonal_calendar)
+    : '## 未来 90 天本地营销节点\n\n**未拉取**（季节日历可选）。'
+  const interestSection = lookup.industry_interest
+    ? formatInterestForPrompt(lookup.industry_interest)
+    : '## 行业搜索热度趋势（Google Trends）\n\n**未拉取**（搜索热度数据可选）。'
 
   const priorityDims = intake.priority_dimensions.length > 0
     ? intake.priority_dimensions.join(', ')
@@ -325,6 +333,10 @@ ${findingsText}
 ${benchmarksTable}
 
 ${trendSection}
+
+${seasonalSection}
+
+${interestSection}
 ${prior.block}
 ## 客户意向
 - **业务目标**：${intake.business_goal}
@@ -357,7 +369,7 @@ export function buildHuatuoSelfGradePrompt(
   const prevWeaknesses = options?.previousWeaknesses ?? []
 
   const industryName = categoryToChineseName(lookup.industry_category)
-  const benchmarksTable = formatBenchmarksForPrompt(lookup.benchmarks, industryName)
+  const benchmarksTable = formatBenchmarksForPrompt(lookup.benchmarks, industryName, intake.monthly_budget_aud)
 
   const prevSection = passNum > 1 && prevWeaknesses.length > 0
     ? `\n## PASS=${passNum}\n## PREVIOUS_WEAKNESSES（上一轮自评指出的问题，本轮应已修复）\n${prevWeaknesses.map((w, i) => `${i + 1}. [${w.dimension} | ${w.severity}] ${w.text}`).join('\n')}\n`

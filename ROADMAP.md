@@ -689,11 +689,11 @@ Layer 5: Export（新增）— P8.10.S5
 **🔥 MVP 范围（2026-05-14 定）**：仅 **S3.1 鲁班 tool loop 升级**——它是鲁班后续所有 connector/skill 的基础设施，且本身是可独立上线的小功能。其余 13 项（S1 全部、S2 全部、S3.2–S3.5）为 MVP 上线后的「补充」，按三个 agent 逐一扩展。
 
 **Sprint 1 — 快速差异化（P8.12.S1，~8–11 人天，低风险不碰架构）📋 补充（MVP 上线后）**：
-- [ ] **P8.12.S1.1** ABN/NZBN 商业注册验证 connector（`src/lib/abr/`）+ 张骞 `verify_business_registration` skill — 官方免费 API，验证企业真实性 / 注册年限 / GST 状态 / 实体类型 ⭐ 性价比最高
-- [ ] **P8.12.S1.2** 本地评价聚合 connector（`src/lib/local-reviews/`，GBP via SerpAPI + ProductReview.com.au via Jina）+ 张骞 `fetch_local_reviews` skill
-- [ ] **P8.12.S1.3** 华佗 `apply_seasonal_calendar` skill（`src/lib/huatuo/seasonal-calendar.ts`）— 澳洲财年 7/1、EOFY、南半球季节、行业旺季静态日历注入处方 ⭐ 纯静态知识零依赖
-- [ ] **P8.12.S1.4** 华佗 `lookup_local_budget_benchmark` skill — 客户预算 vs 行业基准对比强化进 prompt（`benchmarks.ts` 增强）
-- [ ] **P8.12.S1.5** Google Trends 本地热度 connector（`src/lib/gtrends/`，gl=au/nz via SerpAPI）接入华佗 Lookup
+- [x] **P8.12.S1.1** ABN/NZBN 商业注册验证 connector（`src/lib/abr/`）+ 张骞 `verify_business_registration` skill — 官方免费 API，验证企业真实性 / 注册年限 / GST 状态 / 实体类型 ⭐ 性价比最高
+- [x] **P8.12.S1.2** 本地评价聚合 connector（`src/lib/local-reviews/`，GBP via SerpAPI + ProductReview.com.au via Jina）+ 张骞 `fetch_local_reviews` skill
+- [x] **P8.12.S1.3** 华佗 `apply_seasonal_calendar` skill（`src/lib/huatuo/seasonal-calendar.ts`）— 澳洲财年 7/1、EOFY、南半球季节、行业旺季静态日历注入处方 ⭐ 纯静态知识零依赖
+- [x] **P8.12.S1.4** 华佗 `lookup_local_budget_benchmark` skill — 客户预算 vs 行业基准对比强化进 prompt（`benchmarks.ts` 增强）
+- [x] **P8.12.S1.5** Google Trends 本地热度 connector（`src/lib/gtrends/`，gl=au/nz via SerpAPI）接入华佗 Lookup
 - 依赖：S1.1/S1.2/S1.5 三个 connector 互相独立可并行；S1.3/S1.4 同在华佗侧建议同人顺序做
 
 **Sprint 2 — 数据飞轮（P8.12.S2，~10–14 人天，真护城河）📋 补充（MVP 上线后）**：
@@ -1021,6 +1021,19 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
 > 此日志从 CLAUDE.md §十五.C 迁移至此（2026-05-10），CLAUDE.md 不再维护历史日志。
 
 ### 2026-05-14
+
+- **P8.12.S1.1 / S1.2** — 张骞 AU/NZ 本地数据连接器二连（Sprint 1）：
+  - **S1.1 商业注册验证**：新增 `src/lib/abr/`（types + client + 19 单元测试）。统一封装 AU 的 ABR ABN Lookup（JSONP）与 NZ 的 NZBN API v5；`verifyBusinessRegistration` 高层兜底（缺凭证 / 网络错 / 无匹配均返回 null，不阻塞发现）。张骞新增 `verify_business_registration` 工具，`DiscoveredBusiness.registration` 字段（真实实体名 / 实体类型 / 注册年限 / GST 状态，不再由大模型编造）。
+  - **S1.2 本地评价聚合**：新增 `src/lib/local-reviews/`（types + client + 13 单元测试）。GBP via SerpAPI `google_maps` engine + ProductReview.com.au via Jina Reader（反爬优雅降级返回 null）；`aggregateLocalReviews` 高层非致命兜底。张骞新增 `fetch_local_reviews` 工具，`DiscoveredReviewPlatform` 扩展 `rating_distribution` / `recent_negative_samples` / `response_rate`（差评样本作为诊断实证依据）。
+  - 两项共新增 32 个单元测试，validators.ts 宽松校验新可选字段，prompts.ts 研究协议 step 1/4 + 工具说明 + 输出示例同步更新，build 通过。新增环境变量 `ABR_GUID` / `NZBN_API_KEY` / `SERPAPI_API_KEY`。
+  `feat(zhangqian): AU/NZ 本地数据连接器 — ABN/NZBN 注册验证 + 本地评价聚合 [P8.12.S1.1/S1.2]`
+
+- **P8.12.S1.3 / S1.4 / S1.5** — 华佗 AU/NZ 本地化三连（Sprint 1，顺序实现）：
+  - **S1.3 季节日历**：新增 `src/lib/huatuo/seasonal-calendar.ts`（AU/NZ 公假 + 电商大促 + 南半球季节静态日历），`HuatuoLookupContext.seasonal_calendar` 字段，agent.ts Lookup 阶段同步注入，prompts.ts 嵌入「未来 90 天本地营销节点」段落。顺带修复 `filterNext90Days` 月索引误与年份比较的 bug，改用绝对月份索引 + 2 年日历支持跨年窗口。
+  - **S1.4 预算定位**：`benchmarks.ts` 新增 `formatBudgetComparison`（客户月预算 vs 行业典型月预算区间，输出 ratio + 处方铺开范围指导），`formatBenchmarksForPrompt` 增加可选 `customerBudgetAud` 参数，生成 + 自评两处 prompt 均传入 `intake.monthly_budget_aud`。
+  - **S1.5 Google Trends connector**：新增 `src/lib/gtrends/client.ts`（SerpAPI `google_trends` engine，TIMESERIES 12 个月搜索兴趣曲线，gl=AU/NZ），高层 `getIndustryInterestTrend` 非致命兜底，`HuatuoLookupContext.industry_interest` 字段，agent.ts Lookup 并入 Promise.all，prompts.ts 嵌入「行业搜索热度趋势」段落。
+  - 三项共新增 43 个单元测试（seasonal-calendar 16 + benchmarks 9 + gtrends 18），build 通过。
+  `feat(huatuo): AU/NZ 本地化三连 — 季节日历 + 预算定位 + Google Trends [P8.12.S1.3/S1.4/S1.5]`
 
 - **P8.12.S3.1** — 鲁班 tool loop 升级（Phase 8.12 MVP）：`callClaudeChat` 单轮对话 → `callClaudeWithTools` 通用 tool loop。新增 `src/lib/luban/tools.ts` + 首个工具 `add_work_log`（鲁班自主把对话结论写入 execution_logs）。`chatWithLuban` 签名/返回结构保持兼容，`callClaudeChat` 未动（brief refinement 不受影响）。新增 5 个单元测试覆盖 tool loop 核心路径。
   待办：UI 端到端实测「鲁班自主调用 add_work_log」需在 dev 环境完成。

@@ -70,6 +70,7 @@ export async function fetchBenchmarks(
 export function formatBenchmarksForPrompt(
   benchmarks: HuatuoLookupContext['benchmarks'],
   industryName: string,
+  customerBudgetAud?: number,
 ): string {
   const lines: string[] = [
     `## 行业基准数据（${industryName}，AU/NZ 小型企业）`,
@@ -100,7 +101,51 @@ export function formatBenchmarksForPrompt(
 
   lines.push('')
   lines.push('**重要**：KPI target_value 必须落在该行业 P50–P90 区间内，超出者标记 realism_confidence ≤ 0.5。')
+
+  if (customerBudgetAud != null) {
+    lines.push('')
+    lines.push(formatBudgetComparison(benchmarks, customerBudgetAud))
+  }
+
   return lines.join('\n')
+}
+
+/**
+ * 把"客户月预算 vs 行业典型月预算"折叠成一段中文指导。
+ * 给华佗一个明确的预算定位锚点，避免开出与预算严重不匹配的处方。
+ */
+function formatBudgetComparison(
+  benchmarks: HuatuoLookupContext['benchmarks'],
+  customerBudgetAud: number,
+): string {
+  const typicalBudgets = ALL_DIMENSIONS
+    .map(d => benchmarks[d]?.typical_monthly_budget_aud)
+    .filter((v): v is number => v != null && v > 0)
+
+  if (typicalBudgets.length === 0) {
+    return `## 预算定位\n\n客户月预算 AUD ${customerBudgetAud}。行业无典型预算基准，请按预算规模保守估算 action 覆盖范围。`
+  }
+
+  const typicalMin = Math.min(...typicalBudgets)
+  const typicalMax = Math.max(...typicalBudgets)
+  const typicalMid = Math.round((typicalMin + typicalMax) / 2)
+  const ratio = customerBudgetAud / typicalMid
+
+  const guidance =
+    ratio < 0.5  ? '预算显著低于行业典型水平 — 处方应聚焦 1–2 个高杠杆维度，严格控制 action 数量，不要铺开多维度。' :
+    ratio < 1    ? '预算略低于行业典型水平 — 需精选优先维度，单维度 action 数量从紧。' :
+    ratio <= 1.5 ? '预算与行业典型水平匹配 — 可覆盖客户指定的全部优先维度。' :
+                   '预算高于行业典型水平 — 可在优先维度加大投入，或并行推进多个维度。'
+
+  return [
+    '## 预算定位',
+    '',
+    `- 客户月预算：AUD ${customerBudgetAud}`,
+    `- 行业典型月预算区间：AUD ${typicalMin} – ${typicalMax}（中位约 ${typicalMid}）`,
+    `- 预算比值：${ratio.toFixed(2)}×`,
+    '',
+    `**指导**：${guidance}`,
+  ].join('\n')
 }
 
 /**
