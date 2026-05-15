@@ -334,33 +334,31 @@ export function validateDiscoveryReport(
   const socialProfiles: DiscoveredSocial[] =
     (Array.isArray(v.social_profiles) ? v.social_profiles : []).filter(isSocial)
 
-  if (v.gbp !== null && !isGbp(v.gbp)) {
-    return { ok: false, error: 'gbp must be null or a valid DiscoveredGbp' }
+  // gbp: coerce a malformed object to null rather than rejecting the whole report.
+  const gbpValue: DiscoveredGbp | null = isGbp(v.gbp) ? v.gbp : null
+
+  // review_platforms: filter row-by-row, never reject the whole report over one bad row.
+  const reviewPlatforms: DiscoveredReviewPlatform[] =
+    (Array.isArray(v.review_platforms) ? v.review_platforms : []).filter(isReviewPlatform)
+
+  // seed_keywords / competitors / ai_tracker_questions: filter bad entries, then enforce
+  // the quality floor on what survives — a single malformed entry must not waste a $1+ run.
+  const seedKeywords: DiscoveredKeyword[] =
+    (Array.isArray(v.seed_keywords) ? v.seed_keywords : []).filter(isKeyword)
+  if (seedKeywords.length < 3) {
+    return { ok: false, error: `seed_keywords must contain at least 3 valid entries (got ${seedKeywords.length})` }
   }
 
-  if (!Array.isArray(v.review_platforms) || !v.review_platforms.every(isReviewPlatform)) {
-    return { ok: false, error: 'review_platforms must be an array of DiscoveredReviewPlatform' }
+  const competitorsArr: DiscoveredCompetitor[] =
+    (Array.isArray(v.competitors) ? v.competitors : []).filter(isCompetitor)
+  if (competitorsArr.length < 3) {
+    return { ok: false, error: `competitors must contain at least 3 valid entries (got ${competitorsArr.length})` }
   }
 
-  if (!Array.isArray(v.seed_keywords) || !v.seed_keywords.every(isKeyword)) {
-    return { ok: false, error: 'seed_keywords must be an array of DiscoveredKeyword' }
-  }
-  if (v.seed_keywords.length < 3) {
-    return { ok: false, error: `seed_keywords must contain at least 3 entries (got ${v.seed_keywords.length})` }
-  }
-
-  if (!Array.isArray(v.competitors) || !v.competitors.every(isCompetitor)) {
-    return { ok: false, error: 'competitors must be an array of DiscoveredCompetitor' }
-  }
-  if (v.competitors.length < 3) {
-    return { ok: false, error: `competitors must contain at least 3 entries (got ${v.competitors.length})` }
-  }
-
-  if (!Array.isArray(v.ai_tracker_questions) || !v.ai_tracker_questions.every(isAiQuestion)) {
-    return { ok: false, error: 'ai_tracker_questions must be an array of DiscoveredAiQuestion' }
-  }
-  if (v.ai_tracker_questions.length < 5) {
-    return { ok: false, error: `ai_tracker_questions must contain at least 5 entries (got ${v.ai_tracker_questions.length})` }
+  const aiQuestions: DiscoveredAiQuestion[] =
+    (Array.isArray(v.ai_tracker_questions) ? v.ai_tracker_questions : []).filter(isAiQuestion)
+  if (aiQuestions.length < 5) {
+    return { ok: false, error: `ai_tracker_questions must contain at least 5 valid entries (got ${aiQuestions.length})` }
   }
 
   if (!isString(v.notes)) {
@@ -374,11 +372,11 @@ export function validateDiscoveryReport(
       domain: v.domain,
       business: v.business,
       social_profiles: socialProfiles,
-      gbp: v.gbp,
-      review_platforms: v.review_platforms,
-      seed_keywords: v.seed_keywords,
-      competitors: v.competitors,
-      ai_tracker_questions: v.ai_tracker_questions,
+      gbp: gbpValue,
+      review_platforms: reviewPlatforms,
+      seed_keywords: seedKeywords,
+      competitors: competitorsArr,
+      ai_tracker_questions: aiQuestions,
       notes: v.notes,
       // New optional fields — pass through as-is (no strict validation)
       semrush_snapshot: isRecord(v.semrush_snapshot) ? v.semrush_snapshot as DiscoveryReport['semrush_snapshot'] : null,

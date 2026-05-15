@@ -288,3 +288,102 @@ describe('validateDiscoveryReport — serp_results', () => {
     if (r.ok) expect(r.value.serp_results).toHaveLength(1)
   })
 })
+
+// ---------------------------------------------------------------------------
+// 6. hot fix: 5 个一票否决点全部改成 coerce / filter（gbp + 4 array fields）
+// ---------------------------------------------------------------------------
+
+describe('validateDiscoveryReport — gbp 宽容处理 (hot fix)', () => {
+  it('有效 gbp 原样保留', () => {
+    const report = makeValidReport([validSocial])
+    report.gbp = {
+      place_id: 'ChIJabc',
+      business_name: 'X',
+      address: 'Y',
+      rating: 4.5,
+      review_count: 76,
+      google_maps_url: 'https://maps.google.com/...',
+      confidence: 0.9,
+    }
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.gbp?.business_name).toBe('X')
+  })
+
+  it('损坏的 gbp（缺 business_name）→ null，报告不作废（核心 hot fix）', () => {
+    const report = makeValidReport([validSocial])
+    // 模拟 Claude 输出的 gbp 缺关键字段（用户实测踩到的场景）
+    report.gbp = { rating: 4.5, review_count: 76, confidence: 0.9 }
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.gbp).toBeNull()
+  })
+
+  it('gbp 为 null 时通过', () => {
+    expect(validateDiscoveryReport(makeValidReport([validSocial])).ok).toBe(true)
+  })
+})
+
+describe('validateDiscoveryReport — array 字段逐条过滤 (hot fix)', () => {
+  it('review_platforms 含坏条目时丢弃坏的，报告仍通过', () => {
+    const report = makeValidReport([validSocial])
+    report.review_platforms = [
+      { platform: 'google', url: 'https://maps.google.com/x', rating: 4.2, review_count: 50 },
+      { platform: 'google' }, // 缺 url，坏条目
+    ]
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.review_platforms).toHaveLength(1)
+  })
+
+  it('seed_keywords 含坏条目但合规数仍 ≥ 3 → 通过', () => {
+    const report = makeValidReport([validSocial])
+    report.seed_keywords = [
+      { keyword: 'a', type: 'category', rationale: 'r' },
+      { keyword: 'b', type: 'category', rationale: 'r' },
+      { keyword: 'c', type: 'category', rationale: 'r' },
+      { keyword: '' }, // 坏：keyword 为空
+    ]
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.seed_keywords).toHaveLength(3)
+  })
+
+  it('seed_keywords 过滤后不足 3 条仍被拒（质量底线保留）', () => {
+    const report = makeValidReport([validSocial])
+    report.seed_keywords = [
+      { keyword: 'a', type: 'category', rationale: 'r' },
+      { keyword: '' },
+      { keyword: '' },
+    ]
+    expect(validateDiscoveryReport(report).ok).toBe(false)
+  })
+
+  it('competitors 含坏条目时过滤，合规数 ≥ 3 通过', () => {
+    const report = makeValidReport([validSocial])
+    report.competitors = [
+      { domain: 'a.com', name: 'A', relevance: 'direct', rationale: 'r' },
+      { domain: 'b.com', name: 'B', relevance: 'direct', rationale: 'r' },
+      { domain: 'c.com', name: 'C', relevance: 'direct', rationale: 'r' },
+      { domain: '', name: '' }, // 坏：domain/name 空
+    ]
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.competitors).toHaveLength(3)
+  })
+
+  it('ai_tracker_questions 含坏条目时过滤，合规数 ≥ 5 通过', () => {
+    const report = makeValidReport([validSocial])
+    report.ai_tracker_questions = [
+      { question: 'q1', category: 'brand', market: 'AU', rationale: 'r' },
+      { question: 'q2', category: 'brand', market: 'AU', rationale: 'r' },
+      { question: 'q3', category: 'brand', market: 'AU', rationale: 'r' },
+      { question: 'q4', category: 'brand', market: 'AU', rationale: 'r' },
+      { question: 'q5', category: 'brand', market: 'AU', rationale: 'r' },
+      { question: '' }, // 坏
+    ]
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.ai_tracker_questions).toHaveLength(5)
+  })
+})
