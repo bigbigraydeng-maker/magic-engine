@@ -6,7 +6,18 @@ export interface MetaAdData {
   topAdCopy: string[]     // up to 3 headlines
 }
 
-export async function scrapeCompetitorMetaAds(domain: string): Promise<MetaAdData> {
+/**
+ * Scrape Meta Ad Library for a business's active ads.
+ *
+ * @param domain  brand name or domain to search the Ad Library for
+ * @param country two-letter Meta Ad Library country code (default 'AU').
+ *                Pass the brand's home market (e.g. 'SG', 'GB', 'US') for
+ *                multi-market brands whose AU activity is sparse.
+ */
+export async function scrapeCompetitorMetaAds(
+  domain: string,
+  country: string = 'AU',
+): Promise<MetaAdData> {
   const apiToken = process.env.APIFY_API_KEY
   if (!apiToken) throw new Error('APIFY_API_KEY is not set')
 
@@ -16,7 +27,7 @@ export async function scrapeCompetitorMetaAds(domain: string): Promise<MetaAdDat
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        startUrls: [{ url: `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=AU&q=${encodeURIComponent(domain)}&search_type=keyword_unordered` }],
+        startUrls: [{ url: `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=${encodeURIComponent(country)}&q=${encodeURIComponent(domain)}&search_type=keyword_unordered` }],
         maxItems: 20,
       }),
     },

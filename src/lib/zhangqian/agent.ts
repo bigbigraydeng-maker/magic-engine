@@ -166,13 +166,17 @@ const FETCH_SOCIAL_METRICS_TOOL: Anthropic.Messages.Tool = {
 const FETCH_META_ADS_TOOL: Anthropic.Messages.Tool = {
   name: 'fetch_meta_ads',
   description:
-    'Check whether a business is actively running Facebook/Instagram ads via the Meta Ad Library. Returns active ad count, ad formats, a coarse spend signal, and sample ad copy. Use this once for the target business to gauge paid-social activity — key evidence for the "where is the money going" diagnosis.',
+    'Check whether a business is actively running Facebook/Instagram ads via the Meta Ad Library. Returns active ad count, ad formats, a coarse spend signal, and sample ad copy. Use this once for the target business to gauge paid-social activity. For multi-market brands whose AU activity is sparse, also try the brand\'s home market (e.g. country="SG" / "GB" / "US") to see real paid-social activity outside AU.',
   input_schema: {
     type: 'object' as const,
     properties: {
       query: {
         type: 'string',
         description: 'Business brand name or domain to search the Ad Library for.',
+      },
+      country: {
+        type: 'string',
+        description: 'Two-letter Meta Ad Library country code. Defaults to "AU". Set to e.g. "SG" / "GB" / "US" for non-AU/NZ home markets.',
       },
     },
     required: ['query'],
@@ -717,8 +721,11 @@ async function handleFetchMetaAds(
   toolUse: Anthropic.Messages.ToolUseBlock,
   onProgress: ProgressFn,
 ): Promise<Anthropic.Messages.ToolResultBlockParam> {
-  const input = toolUse.input as { query?: string }
+  const input = toolUse.input as { query?: string; country?: string }
   const query = typeof input.query === 'string' ? input.query.trim() : ''
+  const country = typeof input.country === 'string' && input.country.trim().length > 0
+    ? input.country.trim().toUpperCase()
+    : 'AU'
 
   if (!query) {
     return {
@@ -729,10 +736,10 @@ async function handleFetchMetaAds(
     }
   }
 
-  await onProgress('Checking Meta Ad Library…')
+  await onProgress(`Checking Meta Ad Library (${country})…`)
 
   try {
-    const ads = await scrapeCompetitorMetaAds(query)
+    const ads = await scrapeCompetitorMetaAds(query, country)
     // Normalise to the snake_case DiscoveredMetaAds shape.
     return {
       type: 'tool_result',

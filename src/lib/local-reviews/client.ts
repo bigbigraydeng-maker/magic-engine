@@ -37,6 +37,31 @@ function mapsUrlFromPlaceId(placeId: string): string {
 }
 
 /**
+ * Extract a brand token from a SerpAPI-style query like "Apapaya Wantirna South VIC".
+ * Assumption: the brand name is the first whitespace-separated token (geo terms trail).
+ */
+function brandTokenFromQuery(query: string): string {
+  return (query.trim().split(/\s+/)[0] || '').toLowerCase()
+}
+
+/**
+ * Does the SerpAPI-returned place title actually correspond to the brand we asked for?
+ * SerpAPI google_maps falls back to fuzzy matching — without this check we surface
+ * a same-city different-business place as if it were the target brand. Brand tokens
+ * shorter than 3 chars are not reliable enough to filter on (would cause false
+ * negatives), so we let them through.
+ *
+ * Real regression: query="Apapaya Wantirna South VIC" → SerpAPI returned a nearby
+ * unrelated business → we surfaced it as Apapaya's GBP with a Google Maps link to
+ * the wrong place.
+ */
+function titleMatchesBrand(title: string | undefined, brand: string): boolean {
+  if (!title) return false
+  if (brand.length < 3) return true
+  return title.toLowerCase().includes(brand)
+}
+
+/**
  * Fetch Google Business Profile reputation for a business query
  * (e.g. "Oztop Building Supplies Slacks Creek QLD").
  *
@@ -61,8 +86,12 @@ export async function fetchGbpReviews(
 
   // A specific business query yields `place_results`; an ambiguous one
   // yields `local_results` (no review samples available there).
+  // ⚠️ SerpAPI's "match" is fuzzy — verify the returned title actually contains
+  // the brand token from the query before trusting it (see titleMatchesBrand).
+  const brand = brandTokenFromQuery(query)
+
   const place = data.place_results
-  if (place?.place_id) {
+  if (place?.place_id && titleMatchesBrand(place.title, brand)) {
     const samples = (place.user_reviews?.most_relevant ?? [])
       .filter(r => typeof r.rating === 'number' && r.rating <= NEGATIVE_RATING_CEILING)
       .slice(0, MAX_NEGATIVE_SAMPLES)
@@ -86,7 +115,7 @@ export async function fetchGbpReviews(
   }
 
   const first = data.local_results?.[0]
-  if (first?.place_id) {
+  if (first?.place_id && titleMatchesBrand(first.title, brand)) {
     return {
       source: 'google',
       url: mapsUrlFromPlaceId(first.place_id),
