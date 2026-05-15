@@ -78,7 +78,7 @@ function DispatchPanel({
         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
-        预计费用 ~$1.00 / 约3分钟
+        预计费用 ~$1.50 / 约 5-8 分钟
       </div>
       <button
         onClick={onDispatch}
@@ -98,28 +98,74 @@ function DispatchPanel({
 
 // ─── ProgressPanel ────────────────────────────────────────────────────────────
 
-function ProgressPanel({ note, elapsedSec }: { note: string | null; elapsedSec: number }) {
-  const mins = Math.floor(elapsedSec / 60)
-  const secs = elapsedSec % 60
-  const elapsed = mins > 0
+interface ProgressStep {
+  note: string
+  startedAt: number          // ms timestamp
+  durationMs: number | null  // null = still running
+}
+
+function formatElapsed(seconds: number): string {
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return mins > 0
     ? `${mins}分${String(secs).padStart(2, '0')}秒`
     : `${secs}秒`
+}
 
+function ProgressPanel({
+  history,
+  elapsedSec,
+}: {
+  history: ProgressStep[]
+  elapsedSec: number
+}) {
   return (
-    <div className="flex flex-col items-center justify-center min-h-[420px] bg-gray-50 rounded-xl border border-gray-200 p-12 text-center gap-6">
-      <div className="relative w-16 h-16">
+    <div className="flex flex-col items-center min-h-[420px] bg-gradient-to-br from-indigo-50 via-white to-white rounded-xl border border-indigo-100 p-6 sm:p-10 gap-5">
+      {/* Spinner + emoji */}
+      <div className="relative w-20 h-20 mt-2">
         <span className="absolute inset-0 rounded-full border-4 border-indigo-100" />
         <span className="absolute inset-0 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin" />
-        <span className="absolute inset-0 flex items-center justify-center text-2xl">🗺️</span>
+        <span className="absolute inset-0 flex items-center justify-center text-3xl">🗺️</span>
       </div>
-      <div>
-        <h2 className="text-lg font-semibold text-gray-800 mb-1">张骞正在探索…</h2>
-        <p className="text-sm text-gray-500 max-w-xs mx-auto min-h-[2.5rem]">
-          {note ?? '正在启动…'}
+
+      {/* Heading + ETA hint */}
+      <div className="text-center max-w-sm">
+        <h2 className="text-lg font-semibold text-gray-900 mb-1.5">张骞正在探索…</h2>
+        <p className="text-xs text-gray-500 leading-relaxed">
+          通常需要 <strong className="text-gray-700">5-8 分钟</strong>。可以先去做别的事——完成后页面会自动更新。
         </p>
       </div>
+
+      {/* Step history (oldest at top, current at bottom with pulse) */}
+      {history.length > 0 && (
+        <div className="w-full max-w-md bg-white rounded-lg border border-gray-100 p-3 max-h-[260px] overflow-y-auto flex flex-col gap-1.5 shadow-sm">
+          {history.map((step, i) => {
+            const isComplete = step.durationMs !== null
+            const seconds = isComplete && step.durationMs != null
+              ? Math.max(1, Math.round(step.durationMs / 1000))
+              : null
+            return (
+              <div key={i} className="flex items-start gap-2 text-xs leading-relaxed">
+                <span className="mt-0.5 shrink-0 w-3 flex items-center justify-center">
+                  {isComplete
+                    ? <span className="text-green-500">✓</span>
+                    : <span className="inline-block w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />}
+                </span>
+                <span className={`flex-1 break-all ${isComplete ? 'text-gray-500' : 'text-gray-900 font-medium'}`}>
+                  {step.note}
+                </span>
+                <span className="text-gray-400 tabular-nums shrink-0">
+                  {seconds != null ? `${seconds}s` : '…'}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Total elapsed */}
       <div className="text-xs text-gray-400 tabular-nums">
-        已用时 {elapsed}
+        总用时 {formatElapsed(elapsedSec)}
       </div>
     </div>
   )
@@ -241,6 +287,7 @@ export default function ZhangqianPage() {
   const [discovery, setDiscovery] = useState<ClientDiscoveryRow | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
   const [progressNote, setProgressNote] = useState<string | null>(null)
+  const [noteHistory, setNoteHistory] = useState<ProgressStep[]>([])
   const [elapsedSec, setElapsedSec] = useState(0)
   const [pageLoading, setPageLoading] = useState(true)
   const [pageError, setPageError] = useState<string | null>(null)
@@ -297,6 +344,23 @@ export default function ZhangqianPage() {
 
   useEffect(() => () => stopPolling(), [stopPolling])
 
+  // ── Accumulate progress notes into a step history (for ProgressPanel UI) ───
+  useEffect(() => {
+    if (!progressNote) return
+    setNoteHistory(prev => {
+      // De-dupe: same note as last step → no new entry
+      if (prev.length > 0 && prev[prev.length - 1].note === progressNote) return prev
+      const now = Date.now()
+      // Mark the previous in-progress step as complete
+      const updated = prev.map((step, i) =>
+        i === prev.length - 1 && step.durationMs === null
+          ? { ...step, durationMs: now - step.startedAt }
+          : step,
+      )
+      return [...updated, { note: progressNote, startedAt: now, durationMs: null }]
+    })
+  }, [progressNote])
+
   // ── Poll status ─────────────────────────────────────────────────────────────
 
   const startPolling = useCallback((jid: string) => {
@@ -350,6 +414,7 @@ export default function ZhangqianPage() {
       if (!data.success) throw new Error(data.error ?? '派遣失败')
       setJobId(data.job_id)
       setProgressNote(null)
+      setNoteHistory([])
       setPageState('running')
       startPolling(data.job_id)
     } catch (e) {
@@ -462,7 +527,7 @@ export default function ZhangqianPage() {
         )}
 
         {pageState === 'running' && (
-          <ProgressPanel note={progressNote} elapsedSec={elapsedSec} />
+          <ProgressPanel history={noteHistory} elapsedSec={elapsedSec} />
         )}
 
         {pageState === 'reviewing' && discovery && (

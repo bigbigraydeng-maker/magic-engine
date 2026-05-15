@@ -28,11 +28,15 @@ import { validateDiscoveryReport } from './validators'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// 12 iterations gives room for: homepage + social (2) + GBP/reviews + competitors (2)
-// + competitor homepages (2) + AI visibility web searches (2) + final synthesis.
+// 22 iterations covers the full research protocol comfortably: homepage +
+// registration (2) + social profiles + metrics + meta ads (6-8) + GBP (1) +
+// local reviews (1) + competitors + their homepages (4-5) + AI visibility +
+// SERP scrape (3-4) + Google Ads transparency probe (1) + final synthesis.
+// Bumped from 12 → 22 (and cost cap 1.0 → 1.80) after mobile station case
+// showed Claude was hitting the budget and skipping high-value Apify tools.
 // Web search max_uses below is an independent per-tool cap.
-const MAX_TOOL_CALLS = 12
-const MAX_COST_USD = 1.0
+const MAX_TOOL_CALLS = 22
+const MAX_COST_USD = 1.80
 const MAX_OUTPUT_TOKENS = 8096
 const FETCH_URL_TIMEOUT_MS = 15_000
 
@@ -261,7 +265,7 @@ export async function runZhangqian(
   let apifyCalls = 0
   let truncated = false
 
-  await onProgress('Zhangqian dispatched — researching homepage…')
+  await onProgress('张骞已派遣 — 抓取主页…')
 
   for (let iteration = 0; iteration < maxToolCalls; iteration++) {
     // ── Cost gate ──────────────────────────────────────────────────────────
@@ -407,7 +411,7 @@ export async function runZhangqian(
 
   // Hit MAX_TOOL_CALLS without 'end_turn' — force one final call asking for JSON.
   truncated = true
-  await onProgress('Tool budget exhausted — finalising report…')
+  await onProgress('工具预算用尽 — 生成最终报告…')
 
   messages.push({
     role: 'user',
@@ -568,7 +572,7 @@ async function handleFetchUrl(
     }
   }
 
-  await onProgress(`Fetching ${truncateForProgress(url)}…`)
+  await onProgress(`抓取 ${truncateForProgress(url)}…`)
 
   try {
     const fetched = await withTimeout(fetchUrlAsMarkdown(url), FETCH_URL_TIMEOUT_MS)
@@ -610,7 +614,7 @@ async function handleVerifyRegistration(
     }
   }
 
-  await onProgress(`Verifying business registration (${market})…`)
+  await onProgress(`验证商业注册 (${market})…`)
 
   // verifyBusinessRegistration is non-fatal by contract — never throws.
   const registration = await verifyBusinessRegistration({
@@ -646,7 +650,7 @@ async function handleFetchLocalReviews(
     }
   }
 
-  await onProgress('Aggregating local reviews…')
+  await onProgress('聚合本地评价数据…')
 
   // aggregateLocalReviews is non-fatal by contract — never throws.
   const snapshots = await aggregateLocalReviews({
@@ -683,7 +687,7 @@ async function handleFetchSocialMetrics(
     }
   }
 
-  await onProgress(`Fetching ${platform} metrics…`)
+  await onProgress(`抓取 ${platform} 真实指标…`)
 
   try {
     // Each scraper returns followersCount / postsLast30Days / engagementRate;
@@ -736,7 +740,7 @@ async function handleFetchMetaAds(
     }
   }
 
-  await onProgress(`Checking Meta Ad Library (${country})…`)
+  await onProgress(`查询 Meta 广告库 (${country})…`)
 
   try {
     const ads = await scrapeCompetitorMetaAds(query, country)
@@ -780,7 +784,7 @@ async function handleFetchSerpResults(
     }
   }
 
-  await onProgress(`Scraping Google SERP for "${query}"…`)
+  await onProgress(`抓取 Google 搜索结果 "${query}"…`)
 
   try {
     // scrapeGoogleSerp already returns the snake_case DiscoveredSerpResult shape.
