@@ -193,13 +193,18 @@ export function DiagnosisCard({ diagnosis }: { diagnosis: DiagnosisBlock }) {
 // ─── ActionPlanCard ───────────────────────────────────────────────────────────
 
 export function ActionPlanCard({ actions }: { actions: DiagnosisBlock['actions'] }) {
+  // Defensive: diagnosis is a pass-through field in validators —
+  // Claude may emit null arrays here. Normalise before rendering.
+  const quickFix = actions?.quick_fix ?? []
+  const important = actions?.important ?? []
+  const talkToUs = actions?.talk_to_us ?? []
   return (
     <CardShell title="行动计划">
-      {actions.quick_fix.length > 0 && (
+      {quickFix.length > 0 && (
         <div>
           <p className="text-xs font-semibold text-green-700 mb-1.5">立即可做（客户自助）</p>
           <ul className="space-y-1.5">
-            {actions.quick_fix.map((item, i) => (
+            {quickFix.map((item, i) => (
               <li key={i} className="flex items-start gap-2 text-xs text-gray-700">
                 <span className="text-green-500 mt-0.5 shrink-0">✓</span>
                 <span>{item}</span>
@@ -208,11 +213,11 @@ export function ActionPlanCard({ actions }: { actions: DiagnosisBlock['actions']
           </ul>
         </div>
       )}
-      {actions.important.length > 0 && (
+      {important.length > 0 && (
         <div>
           <p className="text-xs font-semibold text-amber-700 mb-1.5">重要建设（1-3个月）</p>
           <ul className="space-y-1.5">
-            {actions.important.map((item, i) => (
+            {important.map((item, i) => (
               <li key={i} className="flex items-start gap-2 text-xs text-gray-700">
                 <span className="text-amber-500 mt-0.5 shrink-0">◆</span>
                 <span>{item}</span>
@@ -221,11 +226,11 @@ export function ActionPlanCard({ actions }: { actions: DiagnosisBlock['actions']
           </ul>
         </div>
       )}
-      {actions.talk_to_us.length > 0 && (
+      {talkToUs.length > 0 && (
         <div>
           <p className="text-xs font-semibold text-indigo-700 mb-1.5">需要专业支持</p>
           <ul className="space-y-1.5">
-            {actions.talk_to_us.map((item, i) => (
+            {talkToUs.map((item, i) => (
               <li key={i} className="flex items-start gap-2 text-xs text-gray-700">
                 <span className="text-indigo-400 mt-0.5 shrink-0">★</span>
                 <span>{item}</span>
@@ -274,7 +279,7 @@ export function KeywordsCard({
       )}
 
       {/* Top keywords from SEMrush */}
-      {semrushSnapshot && semrushSnapshot.top_keywords.length > 0 && (
+      {semrushSnapshot && (semrushSnapshot.top_keywords ?? []).length > 0 && (
         <div>
           <p className="text-xs font-semibold text-gray-500 mb-2">SEMrush 实时排名 TOP 词</p>
           <div className="overflow-x-auto">
@@ -287,7 +292,7 @@ export function KeywordsCard({
                 </tr>
               </thead>
               <tbody>
-                {semrushSnapshot.top_keywords.slice(0, 10).map((kw, i) => (
+                {(semrushSnapshot.top_keywords ?? []).slice(0, 10).map((kw, i) => (
                   <tr key={i} className="border-b border-gray-50">
                     <td className="py-1 pr-3 text-gray-800">{kw.keyword}</td>
                     <td className="py-1 px-2 text-right">
@@ -366,7 +371,7 @@ export function AiVisibilityCard({
             <div key={i} className="rounded-lg border border-gray-100 p-3">
               <p className="text-xs text-gray-700 mb-2 font-medium">"{result.question}"</p>
               <div className="flex flex-wrap gap-1 mb-1.5">
-                {result.top_brands.map((brand, j) => (
+                {(result.top_brands ?? []).map((brand, j) => (
                   <span
                     key={j}
                     className="inline-flex items-center rounded-full px-2 py-0.5 text-xs bg-gray-100 text-gray-600"
