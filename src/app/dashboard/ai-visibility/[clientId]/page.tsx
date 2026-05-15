@@ -211,11 +211,19 @@ export default function AiVisibilityPage() {
       {/* No data prompt */}
       {!snapshot && runs.length === 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-4 text-sm text-amber-700">
-          <strong>No data yet.</strong> Click ▶ Run Now above to run the first AI Visibility pass for this client.
-          {queries.length === 0 && (
-            <span className="block mt-1 text-amber-600 text-xs">
-              Tip: Go to the Queries tab first to generate industry questions.
-            </span>
+          {queries.length > 0 ? (
+            <><strong>No data yet.</strong> Click ▶ Run Now above to run the first AI Visibility pass for this client.</>
+          ) : (
+            <>
+              <strong>还没有追踪问句。</strong> 追踪问句来源于张骞 Discovery,
+              <Link
+                href={`/dashboard/clients/${clientId}/zhangqian`}
+                className="underline font-medium hover:text-amber-900"
+              >
+                先给该客户跑一次 discovery
+              </Link>
+              并确认报告,问句会自动同步过来。
+            </>
           )}
         </div>
       )}

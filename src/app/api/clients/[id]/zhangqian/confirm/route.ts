@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireBearerToken } from '@/lib/validation-utils'
 import { getLatestDiscovery } from '@/lib/zhangqian/persistor'
+import { syncAiTrackerQuestions } from '@/lib/zhangqian/sync-ai-visibility'
 import type { KeywordType } from '@/lib/zhangqian/types'
 
 // ─── Request body types ───────────────────────────────────────────────────────
@@ -64,7 +65,26 @@ export async function PATCH(
     const keywordsAdded = await upsertKeywords(clientId, body.keywords)
     await stampConfirmed(discovery.id, body.confirmed_by)
 
-    return NextResponse.json({ success: true, keywords_added: keywordsAdded, client_updated: clientUpdated })
+    // Bridge to AI Visibility — sync Zhangqian's ai_tracker_questions into
+    // the AI Visibility queries table. Non-fatal: a sync failure must not
+    // block the user's discovery confirmation.
+    let aiVisibilityQueriesAdded = 0
+    try {
+      aiVisibilityQueriesAdded = await syncAiTrackerQuestions(
+        supabaseAdmin,
+        clientId,
+        discovery.payload,
+      )
+    } catch (syncErr) {
+      console.error('[zhangqian/confirm] AI Visibility sync failed (non-fatal)', syncErr)
+    }
+
+    return NextResponse.json({
+      success: true,
+      keywords_added: keywordsAdded,
+      client_updated: clientUpdated,
+      ai_visibility_queries_added: aiVisibilityQueriesAdded,
+    })
   } catch (err: unknown) {
     console.error('[zhangqian/confirm] error', err)
     return NextResponse.json({ success: false, error: 'Failed to confirm discovery' }, { status: 500 })

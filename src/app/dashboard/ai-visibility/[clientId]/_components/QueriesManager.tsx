@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import Link from 'next/link';
 import type { AiVisibilityQuery, AiVisibilityRun } from '@/types/magic-engine';
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -27,13 +28,13 @@ interface Props {
 
 /**
  * Tab 4: Queries Manager
- * List, toggle, and manage AI Visibility queries. Generate new questions.
- * Reference: ROADMAP.md P7.1.16
+ * List + toggle AI Visibility queries. Questions are sourced from the
+ * Zhangqian discovery run (P8.12.S1.8) — the legacy "Generate Questions"
+ * button was removed in favour of a single source of truth.
+ * Reference: ROADMAP.md P7.1.16, P8.12.S1.8
  */
 export function QueriesManager({ clientId, queries, runs, onRefresh }: Props) {
   const [toggling, setToggling] = useState<string | null>(null);
-  const [generating, setGenerating] = useState(false);
-  const [genMsg, setGenMsg] = useState('');
   const [error, setError] = useState('');
 
   // Build quick lookup: query_id → last run result
@@ -62,29 +63,6 @@ export function QueriesManager({ clientId, queries, runs, onRefresh }: Props) {
     }
   }, [onRefresh]);
 
-  const handleGenerate = useCallback(async () => {
-    setGenerating(true);
-    setGenMsg('Generating questions…');
-    setError('');
-    try {
-      const res = await fetch('/api/ai-tracker/queries/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ client_id: clientId }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? 'Failed to generate');
-      setGenMsg(`✓ Generated ${json.count ?? json.questions?.length ?? 0} questions`);
-      await onRefresh();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Generation failed');
-      setGenMsg('');
-    } finally {
-      setGenerating(false);
-      setTimeout(() => setGenMsg(''), 5000);
-    }
-  }, [clientId, onRefresh]);
-
   const enabled = queries.filter(q => q.enabled);
   const disabled = queries.filter(q => !q.enabled);
 
@@ -102,20 +80,7 @@ export function QueriesManager({ clientId, queries, runs, onRefresh }: Props) {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-3">
-          {genMsg && (
-            <span className={`text-sm ${genMsg.startsWith('✓') ? 'text-green-600' : 'text-amber-600'}`}>
-              {genMsg}
-            </span>
-          )}
-          <button
-            onClick={handleGenerate}
-            disabled={generating}
-            className="bg-white border border-gray-300 hover:border-indigo-400 hover:text-indigo-700 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
-          >
-            {generating ? '⏳ Generating…' : '✨ Generate Questions'}
-          </button>
-        </div>
+        <span className="text-xs text-gray-400">问句来源于张骞 Discovery,自动同步</span>
       </div>
 
       {/* Error */}
@@ -127,11 +92,18 @@ export function QueriesManager({ clientId, queries, runs, onRefresh }: Props) {
 
       {/* Empty state */}
       {queries.length === 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 py-16 text-center space-y-2">
-          <p className="text-gray-500 text-sm font-medium">No questions yet</p>
-          <p className="text-gray-400 text-xs">
-            Click ✨ Generate Questions to auto-generate 18 AU/NZ industry questions.
+        <div className="bg-white rounded-xl border border-gray-200 py-16 text-center space-y-3">
+          <p className="text-gray-500 text-sm font-medium">还没有追踪问句</p>
+          <p className="text-gray-400 text-xs max-w-md mx-auto leading-relaxed">
+            AI Visibility 的追踪问句来源于<strong className="text-gray-600">张骞 Discovery</strong>——
+            先去给该客户跑一次 discovery 并确认报告,问句会自动同步过来。
           </p>
+          <Link
+            href={`/dashboard/clients/${clientId}/zhangqian`}
+            className="inline-flex items-center gap-1.5 mt-2 text-xs font-medium text-indigo-600 hover:text-indigo-700"
+          >
+            前往张骞 Discovery →
+          </Link>
         </div>
       )}
 

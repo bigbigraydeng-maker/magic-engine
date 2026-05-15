@@ -699,6 +699,7 @@ Layer 5: Export（新增）— P8.10.S5
   - [ ] **S1.6b** 小红书 RedNote scraper（新封装 `apify/xiaohongshu-scraper.ts`，actor `zhorex/rednote-xiaohongshu-scraper`）+ `SocialPlatform` 枚举加 `xiaohongshu` + 接入（⚠️ 该 actor 无评价，先小范围实测）
   - [x] **S1.6c** Google Search Results scraper（新封装 `apify/google-search-scraper.ts`，SERP organic/paid + AI Overview）→ 服务「AI 可见度」维度
 - [x] **P8.12.S1.7** 张骞跨国品牌处理 + GBP 精度修复 — prompt 加跨国品牌检测段；`ad-library.ts` country 参数化（不再硬编码 AU）；`local-reviews/client.ts` 加 brand-token 验证避免 SerpAPI 模糊匹配返回错误企业（Apapaya 实测 case）
+- [x] **P8.12.S1.8** 张骞 → AI Visibility 自动桥接 — confirm 时把 `payload.ai_tracker_questions` 同步到 `ai_visibility_queries`（客户专属问句取代 18 个通用 SEO 问句）；QueriesManager 去掉「Generate Questions」按钮 + empty state 改为引导去张骞 Discovery
 - 依赖：S1.1/S1.2/S1.5 三个 connector 互相独立可并行；S1.3/S1.4 同在华佗侧建议同人顺序做；S1.6 a→b→c 顺序做
 
 **Sprint 2 — 数据飞轮（P8.12.S2，~10–14 人天，真护城河）📋 补充（MVP 上线后）**：
