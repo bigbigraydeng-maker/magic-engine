@@ -20,6 +20,8 @@ import type {
   DiscoveredAiQuestion,
   DiscoveredMetaAds,
   DiscoveredSerpResult,
+  SemrushSnapshot,
+  AiVisibilityResult,
   ReviewSample,
   SocialPlatform,
   KeywordType,
@@ -304,6 +306,81 @@ function isSerpResult(v: unknown): v is DiscoveredSerpResult {
   return true
 }
 
+/**
+ * Lenient guard for the optional semrush_snapshot block.
+ * Deep-coerces: nullable numeric fields stay null/number; top_keywords MUST
+ * be an array — Claude sometimes emits `null` when no data, which used to
+ * crash KeywordsCard.length / .slice.
+ */
+function isSemrushSnapshot(v: unknown): v is SemrushSnapshot {
+  if (!isRecord(v)) return false
+  for (const key of ['monthly_traffic', 'trust_score', 'keyword_count'] as const) {
+    if (v[key] !== null && !isNumber(v[key])) v[key] = null
+  }
+  if (!Array.isArray(v.top_keywords)) {
+    v.top_keywords = []
+  } else {
+    v.top_keywords = v.top_keywords.filter((kw): kw is SemrushSnapshot['top_keywords'][number] => {
+      if (!isRecord(kw)) return false
+      if (!isString(kw.keyword)) return false
+      if (!isNumber(kw.position)) return false
+      if (kw.volume !== null && !isNumber(kw.volume)) kw.volume = null
+      return true
+    })
+  }
+  return true
+}
+
+/**
+ * Lenient guard for one entry of the optional ai_visibility_results array.
+ * Forces top_brands to a string array (Claude may emit null).
+ */
+function isAiVisibilityResult(v: unknown): v is AiVisibilityResult {
+  if (!isRecord(v)) return false
+  if (!isString(v.question)) return false
+  if (typeof v.client_mentioned !== 'boolean') return false
+  if (!Array.isArray(v.top_brands)) {
+    v.top_brands = []
+  } else {
+    v.top_brands = v.top_brands.filter(isString)
+  }
+  return true
+}
+
+/**
+ * Lenient guard for the optional diagnosis block. Deep-coerces:
+ *   scores.*    : missing / non-number → 0
+ *   actions.*   : missing / non-array → []
+ *   text fields : non-string → '' (empty allowed)
+ *   crisis_type : non-string non-null → null
+ * The UI relies on these shapes being safe to .map / .length.
+ */
+function isDiagnosis(v: unknown): v is DiagnosisBlock {
+  if (!isRecord(v)) return false
+  if (!isRecord(v.scores)) {
+    v.scores = { seo: 0, social: 0, reputation: 0, ai_visibility: 0, overall: 0 }
+  } else {
+    const scores = v.scores as Record<string, unknown>
+    for (const key of ['seo', 'social', 'reputation', 'ai_visibility', 'overall'] as const) {
+      if (!isNumber(scores[key])) scores[key] = 0
+    }
+  }
+  if (!isRecord(v.actions)) {
+    v.actions = { quick_fix: [], important: [], talk_to_us: [] }
+  } else {
+    const actions = v.actions as Record<string, unknown>
+    for (const key of ['quick_fix', 'important', 'talk_to_us'] as const) {
+      if (!Array.isArray(actions[key])) actions[key] = []
+      else actions[key] = (actions[key] as unknown[]).filter(isString)
+    }
+  }
+  for (const key of ['executive_summary', 'money_flow', 'key_finding'] as const) {
+    if (!isString(v[key])) v[key] = ''
+  }
+  if (v.crisis_type !== null && !isString(v.crisis_type)) v.crisis_type = null
+  return true
+}
+
 // ─── Top-level validator ──────────────────────────────────────────────────────
 
 /**
@@ -378,12 +455,14 @@ export function validateDiscoveryReport(
       competitors: competitorsArr,
       ai_tracker_questions: aiQuestions,
       notes: v.notes,
-      // New optional fields — pass through as-is (no strict validation)
-      semrush_snapshot: isRecord(v.semrush_snapshot) ? v.semrush_snapshot as DiscoveryReport['semrush_snapshot'] : null,
-      ai_visibility_results: Array.isArray(v.ai_visibility_results) ? v.ai_visibility_results as DiscoveryReport['ai_visibility_results'] : null,
+      // Optional pass-through fields — deep-coerced so the UI never crashes on null nested arrays.
+      semrush_snapshot: isSemrushSnapshot(v.semrush_snapshot) ? v.semrush_snapshot : null,
+      ai_visibility_results: Array.isArray(v.ai_visibility_results)
+        ? v.ai_visibility_results.filter(isAiVisibilityResult)
+        : null,
       meta_ads: isMetaAds(v.meta_ads) ? v.meta_ads : null,
       serp_results: Array.isArray(v.serp_results) ? v.serp_results.filter(isSerpResult) : null,
-      diagnosis: isRecord(v.diagnosis) ? v.diagnosis as DiagnosisBlock : null,
+      diagnosis: isDiagnosis(v.diagnosis) ? v.diagnosis : null,
     },
   }
 }

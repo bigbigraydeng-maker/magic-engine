@@ -387,3 +387,157 @@ describe('validateDiscoveryReport — array 字段逐条过滤 (hot fix)', () =>
     if (r.ok) expect(r.value.ai_tracker_questions).toHaveLength(5)
   })
 })
+
+// ---------------------------------------------------------------------------
+// 7. 深度验证 pass-through 字段（mobile station regression — semrush_snapshot
+//    / ai_visibility_results / diagnosis 的 nested array null 不再让 UI 崩）
+// ---------------------------------------------------------------------------
+
+describe('validateDiscoveryReport — semrush_snapshot 深度 coerce', () => {
+  it('top_keywords: null → coerce 成 []（mobile station 真实 case）', () => {
+    const report = makeValidReport([validSocial])
+    report.semrush_snapshot = {
+      monthly_traffic: null,
+      trust_score: null,
+      keyword_count: null,
+      top_keywords: null,
+    }
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.semrush_snapshot?.top_keywords).toEqual([])
+  })
+
+  it('top_keywords 含坏 element → 逐条过滤', () => {
+    const report = makeValidReport([validSocial])
+    report.semrush_snapshot = {
+      monthly_traffic: 1000,
+      trust_score: 25,
+      keyword_count: 50,
+      top_keywords: [
+        { keyword: 'a', position: 1, volume: 500 },
+        { position: 3, volume: 100 }, // 坏：缺 keyword
+      ],
+    }
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.semrush_snapshot?.top_keywords).toHaveLength(1)
+  })
+
+  it('numeric 字段非数字非 null → coerce 成 null', () => {
+    const report = makeValidReport([validSocial])
+    report.semrush_snapshot = {
+      monthly_traffic: 'lots',
+      trust_score: null,
+      keyword_count: null,
+      top_keywords: [],
+    }
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.semrush_snapshot?.monthly_traffic).toBeNull()
+  })
+})
+
+describe('validateDiscoveryReport — ai_visibility_results 深度 coerce', () => {
+  it('entry.top_brands: null → coerce 成 []，entry 仍保留', () => {
+    const report = makeValidReport([validSocial])
+    report.ai_visibility_results = [
+      { question: 'q?', top_brands: null, client_mentioned: false },
+    ]
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.value.ai_visibility_results).toHaveLength(1)
+      expect(r.value.ai_visibility_results?.[0].top_brands).toEqual([])
+    }
+  })
+
+  it('top_brands 含非 string → 过滤掉非 string', () => {
+    const report = makeValidReport([validSocial])
+    report.ai_visibility_results = [
+      { question: 'q?', top_brands: ['A', 123, 'B', null], client_mentioned: true },
+    ]
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.ai_visibility_results?.[0].top_brands).toEqual(['A', 'B'])
+  })
+
+  it('损坏的 entry（缺 question）→ 过滤掉，合规 entry 保留', () => {
+    const report = makeValidReport([validSocial])
+    report.ai_visibility_results = [
+      { question: 'q1', top_brands: [], client_mentioned: false },
+      { client_mentioned: false }, // 缺 question
+    ]
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.ai_visibility_results).toHaveLength(1)
+  })
+})
+
+describe('validateDiscoveryReport — diagnosis 深度 coerce', () => {
+  it('actions.quick_fix: null → coerce 成 []，报告通过', () => {
+    const report = makeValidReport([validSocial])
+    report.diagnosis = {
+      executive_summary: 's',
+      crisis_type: null,
+      scores: { seo: 50, social: 30, reputation: 60, ai_visibility: 10, overall: 38 },
+      money_flow: 'f',
+      key_finding: 'k',
+      actions: { quick_fix: null, important: ['x'], talk_to_us: [] },
+    }
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.diagnosis?.actions.quick_fix).toEqual([])
+  })
+
+  it('scores 缺字段 → coerce 成 0', () => {
+    const report = makeValidReport([validSocial])
+    report.diagnosis = {
+      executive_summary: 's',
+      crisis_type: null,
+      scores: { seo: 50 },
+      money_flow: 'f',
+      key_finding: 'k',
+      actions: { quick_fix: [], important: [], talk_to_us: [] },
+    }
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.value.diagnosis?.scores.social).toBe(0)
+      expect(r.value.diagnosis?.scores.overall).toBe(0)
+    }
+  })
+
+  it('actions 整个为 null → coerce 成空 actions 对象', () => {
+    const report = makeValidReport([validSocial])
+    report.diagnosis = {
+      executive_summary: 's',
+      crisis_type: null,
+      scores: { seo: 0, social: 0, reputation: 0, ai_visibility: 0, overall: 0 },
+      money_flow: 'f',
+      key_finding: 'k',
+      actions: null,
+    }
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.value.diagnosis?.actions.quick_fix).toEqual([])
+      expect(r.value.diagnosis?.actions.important).toEqual([])
+      expect(r.value.diagnosis?.actions.talk_to_us).toEqual([])
+    }
+  })
+
+  it('crisis_type 非 string 非 null → coerce 成 null', () => {
+    const report = makeValidReport([validSocial])
+    report.diagnosis = {
+      executive_summary: 's',
+      crisis_type: 999,
+      scores: { seo: 0, social: 0, reputation: 0, ai_visibility: 0, overall: 0 },
+      money_flow: 'f',
+      key_finding: 'k',
+      actions: { quick_fix: [], important: [], talk_to_us: [] },
+    }
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.diagnosis?.crisis_type).toBeNull()
+  })
+})
