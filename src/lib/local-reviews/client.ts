@@ -114,13 +114,17 @@ export async function fetchGbpReviews(
     }
   }
 
-  const first = data.local_results?.[0]
-  if (first?.place_id && titleMatchesBrand(first.title, brand)) {
+  // Scan all local_results for a brand-matching entry — the real match may
+  // not be the first row (Codex review P2 on PR #24).
+  const matched = data.local_results?.find(
+    r => r.place_id && titleMatchesBrand(r.title, brand),
+  )
+  if (matched?.place_id) {
     return {
       source: 'google',
-      url: mapsUrlFromPlaceId(first.place_id),
-      rating: typeof first.rating === 'number' ? first.rating : null,
-      review_count: typeof first.reviews === 'number' ? first.reviews : null,
+      url: mapsUrlFromPlaceId(matched.place_id),
+      rating: typeof matched.rating === 'number' ? matched.rating : null,
+      review_count: typeof matched.reviews === 'number' ? matched.reviews : null,
       rating_distribution: null,
       recent_negative_samples: [],
       response_rate: null,

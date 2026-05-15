@@ -172,7 +172,7 @@ describe('fetchGbpReviews', () => {
     expect(result!.rating).toBe(4.2)
   })
 
-  it('drops a local_results fallback when its title does not match the brand', async () => {
+  it('drops a local_results fallback when no entry title matches the brand', async () => {
     process.env.SERPAPI_API_KEY = 'test-key'
     mockFetch.mockImplementation(() =>
       jsonResponse({
@@ -184,6 +184,25 @@ describe('fetchGbpReviews', () => {
     const { fetchGbpReviews } = await import('../client')
 
     expect(await fetchGbpReviews('Apapaya Melbourne')).toBeNull()
+  })
+
+  it('scans all local_results and picks the first brand-matching entry, not just [0]', async () => {
+    process.env.SERPAPI_API_KEY = 'test-key'
+    // Codex review P2 on PR #24: real match may not be local_results[0].
+    mockFetch.mockImplementation(() =>
+      jsonResponse({
+        local_results: [
+          { title: 'Some Other Business', rating: 3.0, reviews: 10, place_id: 'ChIJfirst' },
+          { title: 'Apapaya Cafe', rating: 4.5, reviews: 200, place_id: 'ChIJsecond' },
+        ],
+      }),
+    )
+    const { fetchGbpReviews } = await import('../client')
+
+    const result = await fetchGbpReviews('Apapaya Melbourne')
+    expect(result).not.toBeNull()
+    expect(result!.rating).toBe(4.5)
+    expect(result!.url).toContain('place_id:ChIJsecond')
   })
 })
 
