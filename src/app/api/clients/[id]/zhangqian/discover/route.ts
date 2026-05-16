@@ -20,7 +20,7 @@ import {
   completeJob,
   failJob,
 } from '@/lib/zhangqian/persistor'
-import { getDomainMetrics, getDomainOrganicKeywords } from '@/lib/semrush/client'
+import { getDomainMetrics, getDomainOrganicKeywords, batchKeywordOverview } from '@/lib/semrush/client'
 
 // Render — agent itself runs in fire-and-forget; this handler returns in <1s
 export const maxDuration = 60
@@ -139,6 +139,28 @@ async function executeDiscoveryJob(
         raw_output,
       )
       return
+    }
+
+    // Enrich seed keywords with per-keyword SEMrush metrics (volume / KD / CPC)
+    if (report.seed_keywords.length > 0) {
+      await updateJobProgress(supabaseAdmin, jobId, { progress_note: '正在获取种子关键词 SEMrush 数据…' })
+      try {
+        const kwTexts = report.seed_keywords.map(kw => kw.keyword)
+        const enriched = await batchKeywordOverview(kwTexts)
+        const enrichMap = new Map(enriched.map(d => [d.keyword.toLowerCase(), d]))
+        report.seed_keywords = report.seed_keywords.map(kw => {
+          const d = enrichMap.get(kw.keyword.toLowerCase())
+          if (!d) return kw
+          return {
+            ...kw,
+            semrush_volume: d.volume || kw.semrush_volume,
+            semrush_kd: d.kd,
+            semrush_cpc: d.cpc,
+          }
+        })
+      } catch {
+        // Non-fatal — seed keywords saved without per-keyword SEMrush metrics
+      }
     }
 
     await completeJob(supabaseAdmin, jobId, clientId, report)

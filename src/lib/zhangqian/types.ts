@@ -76,6 +76,8 @@ export interface DiscoveredKeyword {
   estimated_volume?: number | null  // optional: rough volume guess
   semrush_rank?: number | null      // current organic rank from SEMrush
   semrush_volume?: number | null    // verified monthly search volume from SEMrush
+  semrush_kd?: number | null        // keyword difficulty 0–100
+  semrush_cpc?: number | null       // cost per click in USD
 }
 
 export type CompetitorRelevance = 'direct' | 'adjacent' | 'aspirational'

@@ -328,16 +328,37 @@ export function KeywordsCard({
                 {kw.rationale && (
                   <p className="text-xs text-gray-400 leading-relaxed mt-0.5">{kw.rationale}</p>
                 )}
-                {(kw.semrush_rank != null || kw.semrush_volume != null) && (
-                  <div className="flex gap-2 mt-0.5">
-                    {kw.semrush_rank != null && (
-                      <span className="text-xs text-blue-500">排名 #{kw.semrush_rank}</span>
-                    )}
-                    {kw.semrush_volume != null && (
-                      <span className="text-xs text-gray-400">{kw.semrush_volume.toLocaleString()} 次/月</span>
-                    )}
-                  </div>
-                )}
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {kw.semrush_volume != null && kw.semrush_volume > 0 && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+                      <span className="text-gray-400">搜索量</span>
+                      <span className="font-medium">{kw.semrush_volume >= 1000 ? `${(kw.semrush_volume / 1000).toFixed(kw.semrush_volume >= 10000 ? 0 : 1)}K` : kw.semrush_volume}</span>
+                    </span>
+                  )}
+                  {kw.semrush_kd != null && (
+                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+                      kw.semrush_kd < 30 ? 'bg-green-100 text-green-700' :
+                      kw.semrush_kd < 50 ? 'bg-yellow-100 text-yellow-700' :
+                      kw.semrush_kd < 70 ? 'bg-orange-100 text-orange-700' :
+                      'bg-red-100 text-red-700'
+                    }`}>
+                      <span className="font-normal opacity-70">KD</span>
+                      {kw.semrush_kd}
+                    </span>
+                  )}
+                  {kw.semrush_cpc != null && kw.semrush_cpc > 0 && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-600">
+                      <span className="opacity-70">CPC</span>
+                      <span className="font-medium">${kw.semrush_cpc.toFixed(2)}</span>
+                    </span>
+                  )}
+                  {kw.semrush_rank != null && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-600">
+                      <span className="opacity-70">排名</span>
+                      <span className="font-medium">#{kw.semrush_rank}</span>
+                    </span>
+                  )}
+                </div>
               </div>
             </li>
           ))}
