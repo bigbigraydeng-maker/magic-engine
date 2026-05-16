@@ -272,8 +272,19 @@ function ExecutionItemRow({
                 <span className="text-[11px] text-gray-400">{item.logs.length} 条工作记录</span>
               )}
               <div className="ml-auto flex items-center gap-2">
+                {!isDone && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenChat(item)}
+                    className="text-xs text-indigo-500 hover:text-indigo-700"
+                    title="与鲁班对话 — 起草内容、分析卡点、拆解下一步"
+                  >
+                    🔨 鲁班
+                  </button>
+                )}
                 {editable && !isDone && (
                   <button
+                    type="button"
                     onClick={() => { setEditing(true); setETitle(item.title); setEDesc(item.description) }}
                     className="text-xs text-gray-400 hover:text-indigo-600"
                     title="编辑标题和说明"
@@ -282,6 +293,7 @@ function ExecutionItemRow({
                   </button>
                 )}
                 <button
+                  type="button"
                   onClick={() => setExpanded(e => !e)}
                   className="text-xs text-gray-500 hover:text-gray-800"
                 >
@@ -293,19 +305,9 @@ function ExecutionItemRow({
         </div>
       </div>
 
-      {/* 展开区：鲁班对话入口 + 状态流转 + 工作日志 */}
+      {/* 展开区：状态流转 + 工作日志（鲁班对话入口已移到卡片头部） */}
       {expanded && (
         <div className="border-t border-gray-100 bg-gray-50 p-4 space-y-4">
-          {/* 鲁班对话入口 — 醒目 */}
-          <button
-            onClick={() => onOpenChat(item)}
-            className="w-full flex items-center gap-2.5 rounded-lg border-2 border-indigo-200 bg-indigo-50 px-3.5 py-2.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 hover:border-indigo-300 transition-colors"
-          >
-            <span className="text-base">🔨</span>
-            <span className="flex-1 text-left">与鲁班对话 — 让 AI 帮你起草内容、分析卡点、拆解下一步</span>
-            <span className="text-indigo-400">→</span>
-          </button>
-
           {/* 状态流转按钮 */}
           <div>
             <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">状态</p>
@@ -313,6 +315,7 @@ function ExecutionItemRow({
               {(['pending', 'in_progress', 'completed', 'skipped'] as ExecutionItemStatus[]).map(s => (
                 <button
                   key={s}
+                  type="button"
                   onClick={() => item.status !== s && onStatusChange(item.id, s)}
                   disabled={item.status === s}
                   className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
@@ -347,16 +350,20 @@ function ExecutionItemRow({
               />
               <div className="flex flex-col gap-1.5 shrink-0">
                 <button
+                  type="button"
                   onClick={() => void submitNote('note')}
                   disabled={addingLog || !noteText.trim()}
                   className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50"
+                  title="普通进度笔记 — 灰色显示在时间线"
                 >
                   📝 记录
                 </button>
                 <button
+                  type="button"
                   onClick={() => void submitNote('blocker')}
                   disabled={addingLog || !noteText.trim()}
                   className="text-xs px-3 py-1.5 rounded-lg bg-red-50 border border-red-200 text-red-700 font-medium hover:bg-red-100 disabled:opacity-50"
+                  title="标记被阻塞 — 红色显示在时间线，方便扫描"
                 >
                   🚧 卡点
                 </button>
@@ -370,6 +377,7 @@ function ExecutionItemRow({
       {!expanded && !isDone && (
         <div className="px-4 pb-3 -mt-1 flex justify-end">
           <button
+            type="button"
             onClick={() => onStatusChange(item.id, 'completed')}
             className="rounded-lg bg-green-50 border border-green-200 px-3 py-1.5 text-xs font-semibold text-green-700 hover:bg-green-100 transition-colors"
           >
@@ -677,8 +685,10 @@ export default function ExecutionPage() {
   const [projectLubanOpen, setProjectLubanOpen] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
 
-  const fetchItems = useCallback(async () => {
-    setLoading(true)
+  // silent=true 时不触发整页 loading skeleton — 用于状态切换/加日志后的静默刷新，
+  // 避免每次操作都把整个看板替换成 skeleton 一闪（也保留了卡片的 expanded 状态）。
+  const fetchItems = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     setError(null)
     try {
       const qs = prescriptionId ? `?prescription_id=${prescriptionId}` : ''
@@ -691,9 +701,9 @@ export default function ExecutionPage() {
       setItems(data.items ?? [])
       setPrescriptions(data.prescriptions ?? [])
     } catch (e) {
-      setError(e instanceof Error ? e.message : '加载失败')
+      if (!silent) setError(e instanceof Error ? e.message : '加载失败')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [clientId, prescriptionId])
 
@@ -713,14 +723,14 @@ export default function ExecutionPage() {
       })
       if (!res.ok) {
         setOpError(`状态更新失败（HTTP ${res.status}）`)
-        await fetchItems()   // 回滚到服务器真实状态
+        await fetchItems(true)   // 回滚到服务器真实状态
         return
       }
       // 成功 — 重新拉取拿到新的 status_change 日志
-      await fetchItems()
+      await fetchItems(true)
     } catch {
       setOpError('状态更新失败，请重试')
-      await fetchItems()     // 回滚
+      await fetchItems(true)     // 回滚
     }
   }, [clientId, fetchItems])
 
@@ -768,7 +778,7 @@ export default function ExecutionPage() {
         setOpError(msg)
         return false
       }
-      await fetchItems()
+      await fetchItems(true)
       return true
     } catch {
       setOpError('新增执行项失败，请重试')
@@ -793,7 +803,7 @@ export default function ExecutionPage() {
         setOpError(`编辑执行项失败（HTTP ${res.status}）`)
         return false
       }
-      await fetchItems()
+      await fetchItems(true)
       return true
     } catch {
       setOpError('编辑执行项失败，请重试')

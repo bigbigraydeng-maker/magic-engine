@@ -179,7 +179,9 @@ export interface ClaudeToolLoopResult {
 }
 
 const DEFAULT_MAX_TOOL_ROUNDS = 6
-const DEFAULT_PER_CALL_TIMEOUT_MS = 20_000
+// 单轮 Claude 硬超时。20s 太紧 — 鲁班 system prompt 大、工具列表长，
+// 仅初次调用本身就常 ~20s。给 60s 留余量，配合 route.ts maxDuration=180s。
+const DEFAULT_PER_CALL_TIMEOUT_MS = 60_000
 
 /** Promise.race 硬超时兜底，避免单轮 Claude 调用挂死。 */
 function withClaudeTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
