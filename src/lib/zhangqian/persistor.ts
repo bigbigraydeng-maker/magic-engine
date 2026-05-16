@@ -21,6 +21,7 @@ import type {
   DiscoveryJob,
   ClientDiscoveryRow,
 } from './types'
+import { applyReputationGuardrail } from './score-guardrails'
 
 // ─── createDiscoveryJob ──────────────────────────────────────────────────────
 
@@ -74,14 +75,24 @@ export async function completeJob(
 ): Promise<string> {
   const completedAt = new Date().toISOString()
 
+  // 落库前的确定性护栏：纠正 LLM 对 reputation 分的折中错误
+  // （例如 5 星 + 2 条评价被给 45 分 — 实际应 ≤ 5 分）。
+  const { report: guardedReport, result: clampResult } = applyReputationGuardrail(report)
+  if (clampResult?.applied) {
+    console.log(
+      `[zhangqian/persistor] reputation clamped: ${clampResult.oldReputation} → ${clampResult.newReputation} ` +
+      `(cap=${clampResult.cap}, overall ${clampResult.oldOverall} → ${clampResult.newOverall}) [client=${clientId}]`,
+    )
+  }
+
   // UPSERT discovery payload (unique constraint on client_id)
   const { data: discoveryRow, error: upsertError } = await supabase
     .from('client_discovery')
     .upsert(
       {
         client_id: clientId,
-        domain: report.domain,
-        payload: report,
+        domain: guardedReport.domain,
+        payload: guardedReport,
         cost_usd: report.meta.cost_usd,
         model: report.meta.model,
         tool_calls: report.meta.tool_calls,

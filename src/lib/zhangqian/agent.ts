@@ -25,6 +25,7 @@ import { scrapeGoogleSerp } from '@/lib/apify/google-search-scraper'
 import type { DiscoveryReport } from './types'
 import { ZHANGQIAN_SYSTEM_PROMPT, buildUserPrompt } from './prompts'
 import { validateDiscoveryReport } from './validators'
+import { ensureSerpCoverage } from './serp-coverage'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -319,7 +320,7 @@ export async function runZhangqian(
         .filter((b): b is Anthropic.Messages.TextBlock => b.type === 'text')
         .map(b => b.text)
         .join('')
-      return finalizeReport({
+      return await applyPostProcessing(finalizeReport({
         domain,
         finalText,
         totalInputTokens,
@@ -330,7 +331,7 @@ export async function runZhangqian(
         apifyCalls,
         truncated,
         startedAt,
-      })
+      }), onProgress)
     }
 
     if (response.stop_reason !== 'tool_use') {
@@ -340,7 +341,7 @@ export async function runZhangqian(
         .filter((b): b is Anthropic.Messages.TextBlock => b.type === 'text')
         .map(b => b.text)
         .join('')
-      return finalizeReport({
+      return await applyPostProcessing(finalizeReport({
         domain,
         finalText,
         totalInputTokens,
@@ -351,7 +352,7 @@ export async function runZhangqian(
         apifyCalls,
         truncated,
         startedAt,
-      })
+      }), onProgress)
     }
 
     // ── Resolve client-side tool calls (fetch_url) ─────────────────────────
@@ -436,7 +437,7 @@ export async function runZhangqian(
     .map(b => b.text)
     .join('')
 
-  return finalizeReport({
+  return await applyPostProcessing(finalizeReport({
     domain,
     finalText,
     totalInputTokens,
@@ -447,7 +448,7 @@ export async function runZhangqian(
     apifyCalls,
     truncated,
     startedAt,
-  })
+  }), onProgress)
 }
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
@@ -507,6 +508,43 @@ function finalizeReport(args: FinalizeArgs): RunZhangqianResult {
     validation_error: null,
     raw_output: args.finalText,
   }
+}
+
+/**
+ * 落库前的兜底补救：调 ensureSerpCoverage，若 LLM 跳过了 fetch_serp_results，
+ * 用 seed_keywords/ai_tracker_questions 挑词强制补跑 1-2 次（apify 极便宜）。
+ *
+ * 验证失败的 report 不补救（已是坏数据，没意义）。补救成功后更新 meta.tool_calls + cost。
+ */
+async function applyPostProcessing(
+  result: RunZhangqianResult,
+  onProgress: ProgressFn,
+): Promise<RunZhangqianResult> {
+  if (result.validation_error) return result
+
+  await onProgress('检查 SERP 覆盖率…')
+  const { report: coveredReport, result: cov } = await ensureSerpCoverage(result.report)
+
+  if (cov.apifyCallsAdded === 0) {
+    // LLM 已经跑过 SERP（最常见路径） — 直接返回
+    return { ...result, report: coveredReport }
+  }
+
+  console.log(
+    `[zhangqian/postProcess] SERP fallback fired: ${cov.queriesAdded}/${cov.apifyCallsAdded} queries 成功 ` +
+    `(+$${cov.estimatedExtraCostUsd}). errors: ${cov.errors.join(' | ') || '无'}`,
+  )
+
+  // 把补跑的 apify call + cost 加进 meta，保证 telemetry 真实
+  const updatedReport: DiscoveryReport = {
+    ...coveredReport,
+    meta: {
+      ...coveredReport.meta,
+      tool_calls: coveredReport.meta.tool_calls + cov.apifyCallsAdded,
+      cost_usd: Number((coveredReport.meta.cost_usd + cov.estimatedExtraCostUsd).toFixed(4)),
+    },
+  }
+  return { ...result, report: updatedReport }
 }
 
 /** Build an empty-skeleton report when Claude's output couldn't be used. */
