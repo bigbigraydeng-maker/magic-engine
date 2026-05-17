@@ -113,7 +113,13 @@ UI / 报告 / 客户交付物中**禁止出现真实供应商名**，只用封�
 ### Session 管理
 
 - **主动提醒开新会话**：每过一个里程碑（M1/M2/M3）后，或单会话上下文超过约一半时，**Claude 必须主动告知**
-- **新会话启动**：PM 只需说"继续 Phase 12 第 X 任务"，不用重讲背景
+- **新会话启动**：PM 只需说"继续 Phase 12 第 X 任务"，X 来自**上个 session 的告别信息**（首选）或 **CLAUDE.md § 当前焦点表第一行**（备选）
+- **会话结束信号（强制格式）**：Claude 最后一条消息**必须**包含字面量的下一会话启动咒语，例如：
+  ```
+  ✅ 已 commit & push (PR #123 状态: open)。
+  📋 下一个会话第一句话: `继续 Phase 12 第 2 任务 P12.A.2`
+  ```
+- **当前焦点维护**：每完成一个任务，必须更新 CLAUDE.md § 当前焦点表（移除已完成行 / 把下一个任务挪到第一行）
 - **会话结束前**：当前进度必须**回写**到 ROADMAP.md（禁止只留在 TodoWrite）
 
 ### Git 工作流（强约束，每个 session 必须遵守）
@@ -139,8 +145,8 @@ Claude 不能替你做这些（无法跨 session 自驱动），需要你当"调
    - **M1**：打开 Supabase 后台，确认能看到 `flywheel_actions` / `flywheel_metrics` / `flywheel_outcomes` 3 张新表
    - **M2**：打开 `http://localhost:3001/dashboard/clients/[id]/execution`，点击 GEO 任务"在 X 中执行"按钮，确认抽屉弹出
    - **M3**：在执行看板看到一条 outcome 卡片（含 baseline / after / verdict）
-5. **远程同步检查**（可选）：每个会话结束后可以打开 GitHub 看 commit 是否上去了
-6. **PR merge**：M3 通过后 Claude 会开 PR；**点 GitHub UI 的 merge 按钮是你的事**，Claude 不替你 merge 到 main
+5. **远程同步**：**Claude 自动做** — session 结尾用 `gh` CLI（`gh auth status` 验证可用 → `gh pr view` / `gh run list`）确认远程已更新，结果写进 PM-review 卡片。若 `gh` 未配置，降级为打印远程 commit URL 让 PM 自查
+6. **PR 准备 + merge**：M3 通过后 Claude 用 `gh pr create` **自动开 PR**，并提示"输入 `go merge` 我用 `gh pr merge --squash --delete-branch` 合并"。**未收到 `go merge` 指令之前 Claude 不会自动 merge 到 main**（merge 是不可逆操作，必须 PM 显式授权）
 
 ### 飞轮架构原则（不可偏离）
 
