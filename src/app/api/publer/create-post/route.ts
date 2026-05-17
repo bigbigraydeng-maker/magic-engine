@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getAccounts, uploadMediaFromUrl, schedulePost } from '@/lib/publer/client'
+import { getAdapter } from '@/lib/flywheel/adapters/registry'
+import { SOCIAL_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
+import '@/lib/flywheel/adapters/SocialContentAdapter'
 
 // POST /api/publer/create-post
 // 自动化流程用：Airtable approved → webhook → 这里
@@ -78,6 +81,22 @@ export async function POST(req: NextRequest) {
         scheduled_at: scheduledAt,
       })
       .eq('id', post_id)
+
+    // Fire-and-forget: write social flywheel action (non-fatal)
+    getAdapter('social').execute({
+      clientId,
+      actionType:    SOCIAL_ACTION_TYPE.SCHEDULE_POST,
+      executionMode: 'third_party',
+      vendor:        'publer',
+      payload: {
+        post_id,
+        publer_job_id: result.job_id,
+        platform:      account.provider,
+        scheduled_at:  scheduledAt,
+      },
+    }).catch((err: unknown) => {
+      console.error('[publer/create-post] flywheel write failed:', err)
+    })
 
     return NextResponse.json({ success: true, job_id: result.job_id, client_id: clientId })
 

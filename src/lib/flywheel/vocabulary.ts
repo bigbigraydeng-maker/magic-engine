@@ -181,26 +181,62 @@ export const ADS_METRIC_KEY = {
 
 export type AdsMetricKey = (typeof ADS_METRIC_KEY)[keyof typeof ADS_METRIC_KEY]
 
-/** Social flywheel vocabulary — to be populated in Phase 12.B.3 */
-export const SOCIAL_ACTION_TYPE = {} as const
-export const SOCIAL_METRIC_KEY  = {} as const
+// ── Social action types ───────────────────────────────────────────────────────
+
+/**
+ * Actions the Social flywheel can log in flywheel_actions.
+ *
+ * in_house actions  → content generated inside Magic Engine (SocialContentAdapter)
+ * third_party       → published / scheduled via Publer
+ */
+export const SOCIAL_ACTION_TYPE = {
+  /** Generate social media captions / copy for a campaign post (in_house) */
+  GENERATE_CONTENT: 'social.generate_content',
+
+  /** Schedule a post to be published via Publer at a future time (third_party, publer) */
+  SCHEDULE_POST: 'social.schedule_post',
+
+  /** Publish a post immediately via Publer (third_party, publer) */
+  PUBLISH_POST: 'social.publish_post',
+} as const
+
+export type SocialActionType = (typeof SOCIAL_ACTION_TYPE)[keyof typeof SOCIAL_ACTION_TYPE]
+
+// ── Social metric keys ────────────────────────────────────────────────────────
+
+/**
+ * Measurable signals stored in flywheel_metrics for the Social flywheel.
+ *
+ * Written by SocialContentAdapter.pullMetrics() from content_posts table.
+ */
+export const SOCIAL_METRIC_KEY = {
+  /** Count of content_posts with status = 'published' */
+  PUBLISHED_COUNT: 'social.posts.published_count',
+
+  /** Count of content_posts with status = 'scheduled' */
+  SCHEDULED_COUNT: 'social.posts.scheduled_count',
+} as const
+
+export type SocialMetricKey = (typeof SOCIAL_METRIC_KEY)[keyof typeof SOCIAL_METRIC_KEY]
 
 // ── Union helpers ─────────────────────────────────────────────────────────────
 
 /** All valid action_type strings across all flywheels */
-export type FlywheelActionType = GeoActionType | SeoActionType | AdsActionType
+export type FlywheelActionType = GeoActionType | SeoActionType | AdsActionType | SocialActionType
 
 /** All valid metric_key strings across all flywheels */
-export type FlywheelMetricKey = GeoMetricKey | SeoMetricKey | AdsMetricKey
+export type FlywheelMetricKey = GeoMetricKey | SeoMetricKey | AdsMetricKey | SocialMetricKey
 
 // ── Runtime validation helpers ────────────────────────────────────────────────
 
-const ALL_GEO_ACTIONS = new Set<string>(Object.values(GEO_ACTION_TYPE))
-const ALL_GEO_METRICS = new Set<string>(Object.values(GEO_METRIC_KEY))
-const ALL_SEO_ACTIONS = new Set<string>(Object.values(SEO_ACTION_TYPE))
-const ALL_SEO_METRICS = new Set<string>(Object.values(SEO_METRIC_KEY))
-const ALL_ADS_ACTIONS = new Set<string>(Object.values(ADS_ACTION_TYPE))
-const ALL_ADS_METRICS = new Set<string>(Object.values(ADS_METRIC_KEY))
+const ALL_GEO_ACTIONS    = new Set<string>(Object.values(GEO_ACTION_TYPE))
+const ALL_GEO_METRICS    = new Set<string>(Object.values(GEO_METRIC_KEY))
+const ALL_SEO_ACTIONS    = new Set<string>(Object.values(SEO_ACTION_TYPE))
+const ALL_SEO_METRICS    = new Set<string>(Object.values(SEO_METRIC_KEY))
+const ALL_ADS_ACTIONS    = new Set<string>(Object.values(ADS_ACTION_TYPE))
+const ALL_ADS_METRICS    = new Set<string>(Object.values(ADS_METRIC_KEY))
+const ALL_SOCIAL_ACTIONS = new Set<string>(Object.values(SOCIAL_ACTION_TYPE))
+const ALL_SOCIAL_METRICS = new Set<string>(Object.values(SOCIAL_METRIC_KEY))
 
 export function isValidGeoActionType(value: string): value is GeoActionType {
   return ALL_GEO_ACTIONS.has(value)
@@ -224,4 +260,12 @@ export function isValidAdsActionType(value: string): value is AdsActionType {
 
 export function isValidAdsMetricKey(value: string): value is AdsMetricKey {
   return ALL_ADS_METRICS.has(value)
+}
+
+export function isValidSocialActionType(value: string): value is SocialActionType {
+  return ALL_SOCIAL_ACTIONS.has(value)
+}
+
+export function isValidSocialMetricKey(value: string): value is SocialMetricKey {
+  return ALL_SOCIAL_METRICS.has(value)
 }

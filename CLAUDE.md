@@ -213,12 +213,11 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-18（**P12.B.2 完成** — MetaAdsAdapter 上线；Phase 12.B 2/4 任务）
+> 最后更新：2026-05-18（**P12.B.3 完成** — SocialContentAdapter 上线；Phase 12.B 3/4 任务）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P12.B.3** | 社媒内容生成 action 落库（social flywheel）| ⭐⭐⭐ |
-| **P12.B.4** | SEMrush 周快照 cron — 定时拉 domain_ranks 写 flywheel_metrics | ⭐⭐ |
+| **P12.B.4** | SEMrush 周快照 cron — 定时拉 domain_ranks 写 flywheel_metrics | ⭐⭐⭐ |
 | **M3 验证** | PM 确认 CTS execution 看板有 outcome chip | ⭐⭐ |
 | P8.3.2 | Dashboard Magic Link 鉴权 | ⭐⭐ |
 
