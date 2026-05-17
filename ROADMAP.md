@@ -37,7 +37,8 @@
                 ├─ S4 Report Composer（~2 天）
                 └─ S5 引用/证据追溯（~1 天）
 🔥 Phase 8.12    AU/NZ 本地化能力扩展（MVP：S3.1 鲁班 tool loop 开发中 · 其余 13 项 MVP 后补充）
-🔥 Phase 12      飞轮数据闭环（A 阶段活跃，~3 周）— actions/metrics/outcomes 数据骨架 + CTS GEO 端到端 demo
+✅ Phase 12.A    飞轮数据骨架 + CTS GEO 端到端 demo（15 任务全部完成，2026-05-17）
+🔄 Phase 12.B    SEO/Ads/社媒 adapter 接入（待细化）
 🔄 Phase 9.0     Visual Queue UX Polish（P9.0.1✅P9.0.3✅P9.0.4-9✅ 进行中 · 待：P9.0.2+P9.0.10-17集成测试+浮动卡）
 📋 Phase 9       报告化 + 客户 Portal
 📋 Phase 10      多语言 + Magic Lab Academy 沉淀
@@ -1067,7 +1068,7 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
 #### 收尾（任务 14-15）
 
 - [x] **P12.A.14** — 写架构 README（`docs/flywheel-architecture.md`），含"如何加新 adapter"步骤
-- [ ] **P12.A.15** — ROADMAP § 9 功能完成日志追加 Phase 12.A 总结 + 更新 CLAUDE.md 当前焦点切换到 Phase 12.B
+- [x] **P12.A.15** — ROADMAP § 9 功能完成日志追加 Phase 12.A 总结 + 更新 CLAUDE.md 当前焦点切换到 Phase 12.B ✅ 2026-05-17
 
 ### Phase 12.B —（预告，Phase 12.A 完成后再细化）
 
@@ -1159,6 +1160,32 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
   `feat(flywheel): P12.A.13 — CTS GEO 端到端验证 [P12.A.13]`
 - **P12.A.14** — 新增 docs/flywheel-architecture.md（186 行）：系统目标、四飞轮×三执行形态、3 张表、端到端数据流图、FlywheelAdapter 契约、加新 adapter 的 10 步指南（以 MetaAdsAdapter 为例）、5 条不可偏离的设计原则
   `docs(flywheel): P12.A.14 — 架构 README 与 adapter 接入指南 [P12.A.14]`
+- **P12.A.15** — ROADMAP § 9 Phase 12.A 总结追加 + CLAUDE.md 当前焦点切换到 Phase 12.B
+  `chore(roadmap): P12.A.15 — Phase 12.A 总结 + 焦点切 Phase 12.B [P12.A.15]`
+
+#### 🎉 Phase 12.A 总结（2026-05-17 完成，15 commits / 1 天）
+
+**交付物一览：**
+- 数据骨架：`flywheel_actions` / `flywheel_metrics` / `flywheel_outcomes` 三表 + `execution_target` JSONB 列（M1 地基）
+- 受控词表：6 个 GEO action_type + 5 个 metric_key 枚举，含运行时校验函数
+- Adapter 抽象：`FlywheelAdapter` 接口 + Registry，支持 in_house / third_party / external_manual 三种执行形态
+- GeoComposerAdapter：首个 adapter 实现，execute() 落库 + pullMetrics() 接口（M2 第一个 adapter）
+- 执行看板：按 `execution_target.mode` 分发三种 UX（弹抽屉 / 跳路由 / 静态标签）
+- FlywheelDrawer：POST /api/flywheel/execute → adapter.execute() 全链路（含 4 态 UI）
+- 归因系统：Job（14 测试）+ Cron 路由（7 测试），窗口内算 baseline/after/verdict/confidence
+- AI Tracker 集成：重跑时写 `flywheel_metrics`（mention_rate / avg_rank / engine_coverage）
+- Outcome UI：执行看板卡片 outcome chip（8 测试）
+- 华佗处方集成：新生成的处方天然带 `execution_target`（8 测试）
+- 存量回填脚本：6 客户 `prescription_actions.execution_target` 完整填充
+- CTS 端到端验证：真实数据跑通 action→metrics→attribution→outcome 全链路（verdict=confirmed, delta_pct=105.6%, confidence=0.95）
+- 架构文档：docs/flywheel-architecture.md（186 行），含 10 步加 adapter 指南
+
+**Phase 12.B 待细化任务（预告）：**
+- SEO adapter（in_house，复用现有博客生成）
+- Meta Ads adapter（CTS 真实广告数据接入，用 Meta MCP）
+- 社媒内容生成 action 落库
+- SEMrush 周快照写 `flywheel_metrics`
+- SerpAPI Google AI Overviews 自建第 5 runner（低优先级）
 
 ### 2026-05-14
 
