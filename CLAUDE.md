@@ -90,6 +90,76 @@ UI / 报告 / 客户交付物中**禁止出现真实供应商名**，只用封�
 
 ---
 
+## Phase 12 工作协议（飞轮数据闭环）⭐⭐⭐
+
+> 启动日期：2026-05-17。为**非技术 PM** 设计的「踩扎实」协议，不追快。详见 [ROADMAP.md § Phase 12](./ROADMAP.md)。
+
+### 协作准则（强约束，每个任务必须遵守）
+
+1. **每个任务 = 一个独立 commit**（P12.A.1 – P12.A.15 共 15 commit），便于逐条 review / revert
+2. **每完成一个任务，必须做三件事**：
+   - 在 ROADMAP.md § Phase 12 勾选对应 checkbox
+   - commit message 带 `[P12.A.X]` 后缀
+   - 在 ROADMAP.md § 9 功能完成日志追加一行 ≤30 字的「人话总结」
+3. **每个 commit 必须附 PM-review 卡片**（让 PM 不读代码也能 review）：
+   - 改了什么**用户能感知**的事？
+   - 加/改了什么**数据**？
+   - 如果这次**回滚**，会丢什么？
+4. **三个里程碑关卡，不通过不许往下**：
+   - **M1 地基**（P12.A.1–3 完成）：`npm run build` 通过 + Supabase 后台能看到 3 张新表
+   - **M2 第一个 adapter**（P12.A.4–6）：本地 dev server 点击"在 GEO 中执行"能弹抽屉、能落库
+   - **M3 端到端 demo**（P12.A.7–13）：CTS 真实数据跑出第一条 outcome 卡片
+
+### Session 管理
+
+- **主动提醒开新会话**：每过一个里程碑（M1/M2/M3）后，或单会话上下文超过约一半时，**Claude 必须主动告知**
+- **新会话启动**：PM 只需说"继续 Phase 12 第 X 任务"，不用重讲背景
+- **会话结束前**：当前进度必须**回写**到 ROADMAP.md（禁止只留在 TodoWrite）
+
+### Git 工作流（强约束，每个 session 必须遵守）
+
+- **唯一工作分支**：`feat/phase-12-flywheel`，所有 15 个任务的 commit 都在这条分支上
+- **每个 session 开头必跑 3 项检查**（任何一项失败立即停下问 PM）：
+  1. `git status` 必须干净（无未提交改动）
+  2. `git branch --show-current` 必须返回 `feat/phase-12-flywheel`
+  3. `git fetch origin && git status -sb` 必须无 diverge
+- **每个 session 结束前必做**：commit + `git push origin feat/phase-12-flywheel`，最后一句话告诉 PM "已 commit & push，可以关闭"
+- **PR 策略**：Phase 12.A 全部 15 commit 完成后**一次性开 PR 到 main**，不要每任务一个 PR
+- **绝对禁止**：force push / rebase main / 直接 commit 到 main / 删除任何 `feat/*` 或 `claude/*` 分支
+- **多 session 安全**：开新 session 前 PM 必须确认上一个 session 已关闭；同一时间禁止两个 session 同时改文件
+
+### PM 在 Phase 12 期间的手动职责（你必须做的）
+
+Claude 不能替你做这些（无法跨 session 自驱动），需要你当"调度员"：
+
+1. **会话切换**：上个 session 发出"已 commit & push，可以关闭"信号后，**你**关闭旧窗口、打开新窗口
+2. **启动咒语**：新会话第一句话固定为 `继续 Phase 12 第 X 任务`（X = 下一个 P12.A.X 编号）
+3. **PM-review 卡片决策**：每个 commit 完成后看三个问题（用户感知 / 数据改动 / 回滚损失），回 OK 或 revert
+4. **里程碑验证关卡**（不通过禁止 Claude 往下走）：
+   - **M1**：打开 Supabase 后台，确认能看到 `flywheel_actions` / `flywheel_metrics` / `flywheel_outcomes` 3 张新表
+   - **M2**：打开 `http://localhost:3001/dashboard/clients/[id]/execution`，点击 GEO 任务"在 X 中执行"按钮，确认抽屉弹出
+   - **M3**：在执行看板看到一条 outcome 卡片（含 baseline / after / verdict）
+5. **远程同步检查**（可选）：每个会话结束后可以打开 GitHub 看 commit 是否上去了
+6. **PR merge**：M3 通过后 Claude 会开 PR；**点 GitHub UI 的 merge 按钮是你的事**，Claude 不替你 merge 到 main
+
+### 飞轮架构原则（不可偏离）
+
+- **四飞轮**：`seo` / `geo` / `ads` / `social`（注意：第 4 飞轮是 GEO，**不再是** `insight_reports`）
+- **三种执行形态**：
+  - `in_house`：Magic Engine 内自研工作台（SEO 内容、GEO Composer、社媒内容制作）
+  - `third_party`：编排第三方平台（如 markisfact、Publer、Meta Ads Manager）
+  - `external_manual`：FDE 完全外部完成（reputation、newsletter、电话外呼等）
+- **数据必须回流到 Magic Engine 的统一表**（`flywheel_actions` / `flywheel_metrics` / `flywheel_outcomes`），这是核心护城河，不管 vendor 是谁
+- **6 诊断维度不动**：`seo` / `ai_visibility` / `ads` / `social` / `reputation` / `competitor`
+- `reputation` + `competitor` 维度只诊断不接入飞轮（FDE 外部完成，符合现有设计）
+
+### 试点客户分配
+
+- **CTS Tours**：GEO + SEO + Ads（已有 Meta 广告投放真实数据）
+- **Oztop**：SEO + GEO
+
+---
+
 ## 目标市场：AU / NZ ⭐
 
 - `SEMRUSH_DB` 默认 `au`；每客户可在 `clients` 表覆盖为 `nz`
@@ -124,19 +194,20 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-14
+> 最后更新：2026-05-17
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P8.12.S3.1** | 鲁班 tool loop 升级（Phase 8.12 MVP，开发中） | ⭐⭐⭐ |
-| **P8.3.2** | Dashboard Magic Link 鉴权（防止数据泄露） | ⭐⭐ |
-| **P7.4.15** | Week 2 CTS Tours AI Tracker 复跑（2026-05-12） | ⭐⭐ |
-| **P9.0.10** | `GenerationProgress.test.tsx` 集成测试（进度环/倒计时/取消按钮）| ⭐ |
+| **P12.A.1** | Phase 12 飞轮闭环 — migration：建 3 张新表 + alter `prescription_actions`（M1 起点） | ⭐⭐⭐ |
+| P12.A.2 | 受控词表 `src/lib/flywheel/vocabulary.ts`（GEO 维度的 action_type + metric_key） | ⭐⭐⭐ |
+| P12.A.3 | FlywheelAdapter 接口 + Registry（M1 终点） | ⭐⭐⭐ |
+| P8.3.2 | Dashboard Magic Link 鉴权（Phase 12 完成后做） | ⭐⭐ |
+| P7.4.15 | Week 2 CTS Tours AI Tracker 复跑（2026-05-12） | ⭐⭐ |
 
-完成后进入：Phase 8.3.2 简单鉴权（详见 ROADMAP.md § Phase 8.3）
+**Phase 12 工作协议见上方专节**。Phase 12.A 完成后回到 Phase 8.3.2 简单鉴权。
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox
 2. 更新本表（移除已完成，加入新任务）
 3. 在 ROADMAP.md § 9 功能完成日志 追加一条记录
-4. commit 引用 Phase ID：`feat(...): ... [P8.3.2]`
+4. commit 引用 Phase ID：`feat(...): ... [P12.A.X]`

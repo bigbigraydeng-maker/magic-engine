@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-13 · 当前阶段：**P8.5 Sprint 1 修复完成 ✅ → 开发 Phase 8.10 张骞 Zhangqian Discovery Agent（让客户接入从 5 步降至 2 步）**
+> 最后更新：2026-05-17 · 当前阶段：**🔥 Phase 12 飞轮数据闭环（活跃）— 建立 actions/metrics/outcomes 数据骨架，让 4 飞轮（SEO/GEO/Ads/社媒）执行后数据回流并自动归因。试点：CTS（GEO+SEO+Ads）/ Oztop（SEO+GEO）**
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -37,6 +37,7 @@
                 ├─ S4 Report Composer（~2 天）
                 └─ S5 引用/证据追溯（~1 天）
 🔥 Phase 8.12    AU/NZ 本地化能力扩展（MVP：S3.1 鲁班 tool loop 开发中 · 其余 13 项 MVP 后补充）
+🔥 Phase 12      飞轮数据闭环（A 阶段活跃，~3 周）— actions/metrics/outcomes 数据骨架 + CTS GEO 端到端 demo
 🔄 Phase 9.0     Visual Queue UX Polish（P9.0.1✅P9.0.3✅P9.0.4-9✅ 进行中 · 待：P9.0.2+P9.0.10-17集成测试+浮动卡）
 📋 Phase 9       报告化 + 客户 Portal
 📋 Phase 10      多语言 + Magic Lab Academy 沉淀
@@ -828,6 +829,14 @@ Layer 5: Export（新增）— P8.10.S5
 - [ ] **TD.4** 缺少 Supabase Row Level Security 规则
 - [ ] **TD.5** 视觉生成队列在客户端 localStorage（需迁移到服务端）
 - [ ] **TD.6** 第三方真实名在部分 UI 文案中暴露（需扫描 + 替换为封装名）
+- [ ] **TD.10** Git 本地分支堆积（20+ 个 `claude/*` 和 `feat/*` 废弃分支）
+  - 风险：误删未合并工作 = 真正丢代码
+  - 处理：单独开会话专门 triage，按"已合并到 main 的删 / 未合并的归档到 `archive/*`"两步走
+  - 优先级：MEDIUM（不阻塞 Phase 12；建议 M1 通过后处理）
+- [ ] **TD.11** `agitated-mahavira-be6d17` 等 worktree 物理目录占用磁盘空间
+  - 当前：已从 git 移除追踪 + gitignore 屏蔽，但物理目录仍在磁盘上
+  - 处理：等占用它的 Claude session 结束后手动 `rm -rf .claude/worktrees/`
+  - 优先级：LOW（不影响功能，只是磁盘清理）
 
 ### P8.C.1 月报聚合器引入的技术债（后续补齐）
 
@@ -1006,9 +1015,97 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
 
 ---
 
+## Phase 12 — 飞轮数据闭环 ⭐⭐⭐（活跃，2026-05-17 启动）
+
+> **背景**：当前诊断→处方→执行链路已建好，但 4 飞轮（SEO/GEO/Ads/社媒）执行后**没有数据回流**，没法学习、没法归因、没法沉淀经验。Phase 12 建立统一的 `actions / metrics / outcomes` 三层数据骨架 + adapter 抽象，让任何 vendor（自研 / markisfact / Publer / Meta MCP）的数据都能回流并自动归因。
+>
+> **试点客户**：CTS Tours（GEO + SEO + Ads，已有 Meta 投放数据）+ Oztop（SEO + GEO）
+>
+> **工作协议**：见 [CLAUDE.md § Phase 12 工作协议](./CLAUDE.md)
+>
+> **架构原则**：4 飞轮三种执行形态（`in_house` / `third_party` / `external_manual`）共享同一套数据层；vendor 可插拔，数据永远留在 Magic Engine。
+
+### Phase 12 决策点（2026-05-17 已确认）
+
+- **第 4 飞轮命名**：`geo_composer`（替代历史命名 `insight_reports`；月报独立为非飞轮的 `reports`）
+- **广告 vendor 策略**：先用 Meta MCP 自建 adapter；markisfact 当作"未来可插拔"的备选 adapter，硬约束是**数据必须留在 Magic Engine**
+- **社媒飞轮形态**：混合（自研内容制作 Atlas + OpenAI/Claude + 第三方发布 Publer）
+- **schema 修改可接受**：6 客户存量数据规模可控，回填脚本充分测试即可
+
+### Phase 12.A — 数据骨架 + 第一个端到端 demo（CTS GEO 飞轮）
+
+每个任务 = 1 commit。完成顺序按依赖：
+
+#### M1 地基（任务 1-3，~7 小时）
+
+- [ ] **P12.A.1** — 建 3 张新表 migration（`flywheel_actions` / `flywheel_metrics` / `flywheel_outcomes`）+ alter `prescription_actions` 加 `execution_target` JSONB 列。含 6 客户存量数据回填 SQL（把现有 `module` 映射到新 `execution_target`）
+- [ ] **P12.A.2** — 受控词表（`src/lib/flywheel/vocabulary.ts`）：所有 `action_type` + `metric_key` 枚举。**Phase 12 只列 GEO 维度**（如 `geo.deploy_directive` / `geo.query.mention_rate`），其他飞轮 Phase 12.B 补
+- [ ] **P12.A.3** — `FlywheelAdapter` 接口 + `Registry`（`src/lib/flywheel/adapters/types.ts` + `registry.ts`）
+
+> **M1 验证关卡**：`npm run build` 通过；Supabase 后台能看到 3 张新表（flywheel_actions / flywheel_metrics / flywheel_outcomes）；6 客户处方的 `execution_target` 列已填非空
+
+#### M2 第一个 adapter（任务 4-6，~11 小时）
+
+- [ ] **P12.A.4** — 实现 `GeoComposerAdapter`（in_house mode）：`.execute(action)` 把动作写入 `flywheel_actions`，`.pullMetrics()` 留接口给 P12.A.7 填
+- [ ] **P12.A.5** — 改造执行看板"在 X 中执行"按钮逻辑，按 `execution_target.mode` 分发：`in_house` 弹抽屉 / `third_party` 跳外链 + 提示回来打勾 / `external_manual` 隐藏按钮只显示"FDE 完成后请打勾"
+- [ ] **P12.A.6** — 新建 `FlywheelDrawer.tsx`：抽屉里调 `adapter.execute()`，落 `flywheel_actions` 记录
+
+> **M2 验证关卡**：本地 dev server 上，CTS 执行看板的 GEO 任务卡片，点击按钮能弹出抽屉、提交后能在 Supabase `flywheel_actions` 表看到一条新记录（带 `flywheel='geo'`、`action_type='geo.deploy_directive'`、`expected_metric` 已填）
+
+#### M3 端到端 demo（任务 7-13，~16 小时）
+
+- [ ] **P12.A.7** — AI Tracker 重跑时把结果写入 `flywheel_metrics`（`metric_key='geo.query.mention_rate'`，`source='ai_tracker'`）
+- [ ] **P12.A.8** — 归因 Job（`src/lib/flywheel/attribution/job.ts`）：扫所有 `flywheel_actions.expected_metric`，在窗口内算 baseline / after，写 `flywheel_outcomes`
+- [ ] **P12.A.9** — Cron 触发归因 Job（`src/app/api/cron/attribution/route.ts`，每 6h 跑一次）
+- [ ] **P12.A.10** — 执行看板卡片显示 outcome（"✅ Mention rate +25%, confirmed (confidence 0.8)"）
+- [ ] **P12.A.11** — 华佗处方生成器输出 `execution_target` 字段（让新生成的处方天然带 flywheel/mode/vendor）
+- [ ] **P12.A.12** — 存量数据回填脚本（一次性，6 客户的 `prescription_actions.execution_target` 完整填充并核对）
+- [ ] **P12.A.13** — CTS 端到端验证：找一个真实 GEO finding → 走完 action → 触发 AI Tracker 重跑 → outcome 显示在执行看板 UI
+
+> **M3 验证关卡**：CTS 执行看板上至少有一条 GEO action 的卡片下面显示完整 outcome（含 baseline / after / verdict / confidence）
+
+#### 收尾（任务 14-15）
+
+- [ ] **P12.A.14** — 写架构 README（`docs/flywheel-architecture.md`），含"如何加新 adapter"步骤
+- [ ] **P12.A.15** — ROADMAP § 9 功能完成日志追加 Phase 12.A 总结 + 更新 CLAUDE.md 当前焦点切换到 Phase 12.B
+
+### Phase 12.B —（预告，Phase 12.A 完成后再细化）
+
+- SEO adapter（in_house，复用现有博客生成）
+- Meta Ads adapter（in_house，复用 Meta MCP）— CTS Ads 数据接入
+- 社媒内容生成 action 落库（Atlas / OpenAI / Claude 调用都记录）
+- SEMrush 周快照写 `flywheel_metrics`
+
+### Phase 12.C —（预告）
+
+- 跨客户 outcome 聚合视图（`action_type × crisis_type × verdict_rate`）
+- 反哺华佗：处方生成时查询历史 outcome 给推荐打置信度
+- markisfact adapter（如商务谈成）
+- 社媒发布数据回流（Publer + 平台 API）
+
+### Phase 12 风险跟踪
+
+| 风险 | 等级 | 应对 |
+|---|---|---|
+| 归因窗口太短导致 verdict 都是 `too_early` | MEDIUM | 默认窗口 14 天；GEO 反馈快，CTS 试点用 7 天 |
+| AI Tracker 重跑成本（每次 query 费 token）| MEDIUM | 沿用现有 budget cap（22 tools / $1.80）|
+| 受控词表覆盖不全，FDE 想做的事没法落 action_type | HIGH | Phase 12.A 只支持 GEO 的 3-4 个 action_type；其他飞轮先用 `ExecutionLog` 自由文本兜底 |
+| 6 客户存量数据回填出错 | LOW | 先在 staging 跑回填脚本，校验 100% 通过再上生产 |
+
+---
+
 ## 8. 决策日志
 
 > 重大决策记录在此，便于追溯。
+
+### 2026-05-17
+
+- **Phase 12 飞轮数据闭环启动**：诊断/处方/执行链路已建好，但 4 飞轮执行后没数据回流。建立 `flywheel_actions` / `flywheel_metrics` / `flywheel_outcomes` 三层数据骨架 + adapter 抽象，让任何 vendor 数据都能回流并自动归因。
+- **第 4 飞轮命名定为 `geo_composer`**（替代历史命名 `insight_reports`，因为 GEO 才是真正的"动手干活的引擎"；月报独立为非飞轮的 `reports`）
+- **广告 vendor 策略**：先用 Meta MCP 自建 adapter；markisfact 当作"未来可插拔"的备选。硬约束 = **数据必须留在 Magic Engine** 自己的表里（不管 vendor 是谁）
+- **社媒飞轮形态确认为混合**：自研内容制作（Atlas + OpenAI / Claude）+ 第三方发布（Publer）
+- **Phase 12 工作协议**（写入 CLAUDE.md）：每任务 1 commit；3 个里程碑关卡（M1 地基 / M2 第一个 adapter / M3 端到端 demo）必须通过才能往下；每个 commit 附 PM-review 卡片让非技术 PM 能 review；多 session 必须主动提醒
+- **试点客户**：CTS（GEO+SEO+Ads，有 Meta 投放数据）+ Oztop（SEO+GEO）
 
 ### 2026-04-30
 - **战略**：确定 Magic Engine 三大核心：SEO + GEO + 社媒内容矩阵；GEO 为 2026 Q2 核心差异化
