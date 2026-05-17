@@ -1066,7 +1066,7 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
 
 #### 收尾（任务 14-15）
 
-- [ ] **P12.A.14** — 写架构 README（`docs/flywheel-architecture.md`），含"如何加新 adapter"步骤
+- [x] **P12.A.14** — 写架构 README（`docs/flywheel-architecture.md`），含"如何加新 adapter"步骤
 - [ ] **P12.A.15** — ROADMAP § 9 功能完成日志追加 Phase 12.A 总结 + 更新 CLAUDE.md 当前焦点切换到 Phase 12.B
 
 ### Phase 12.B —（预告，Phase 12.A 完成后再细化）
@@ -1157,6 +1157,8 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
   `feat(flywheel): P12.A.12 — 存量 execution_target 回填脚本 [P12.A.12]`
 - **P12.A.13** — CTS E2E 验证脚本 p12-a13-cts-e2e.ts：用真实 prescription 的 ai_visibility 条目 + 真实 2026-04-27 snapshot 作 baseline，跑通 execution_item→action→metrics→attribution→outcome 全链路；outcome verdict=confirmed delta_pct=105.6% confidence=0.95（after 为标记 synthetic 的占位，等下次 Tracker 周跑替换）
   `feat(flywheel): P12.A.13 — CTS GEO 端到端验证 [P12.A.13]`
+- **P12.A.14** — 新增 docs/flywheel-architecture.md（186 行）：系统目标、四飞轮×三执行形态、3 张表、端到端数据流图、FlywheelAdapter 契约、加新 adapter 的 10 步指南（以 MetaAdsAdapter 为例）、5 条不可偏离的设计原则
+  `docs(flywheel): P12.A.14 — 架构 README 与 adapter 接入指南 [P12.A.14]`
 
 ### 2026-05-14
 

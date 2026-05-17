@@ -200,13 +200,12 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-17（P12.A.13 ✅ — CTS GEO E2E 验证脚本跑通，outcome confirmed +105.6%）
+> 最后更新：2026-05-17（P12.A.14 ✅ — docs/flywheel-architecture.md 落地，含加 adapter 10 步指南）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P12.A.14** | 写架构 README（docs/flywheel-architecture.md），含「如何加新 adapter」步骤 | ⭐⭐⭐ |
+| **P12.A.15** | ROADMAP § 9 追加 Phase 12.A 总结 + 切换焦点到 Phase 12.B | ⭐⭐⭐ |
 | **M3 验证** | PM 启动 dev server 打开 CTS execution 看板，确认 "AI 可见度品牌实体数据优化" 卡片有 outcome chip | ⭐⭐⭐ |
-| **P12.A.15** | ROADMAP § 9 追加 Phase 12.A 总结 + 切换焦点到 Phase 12.B | ⭐⭐ |
 | P8.3.2 | Dashboard Magic Link 鉴权（Phase 12 完成后做） | ⭐⭐ |
 
 **Phase 12 工作协议见上方专节**。Phase 12.A 完成后回到 Phase 8.3.2 简单鉴权。
