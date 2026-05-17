@@ -200,12 +200,12 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-17（P12.A.9 ✅ — Cron 路由每 6h 触发归因 Job，7 测试全通过）
+> 最后更新：2026-05-17（P12.A.10 ✅ — 执行看板 outcome chip，8 测试全通过）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
 | **M2 验证** | PM 在本地 dev server 验证：CTS GEO 任务点击→抽屉弹出→提交→Supabase flywheel_actions 新记录 | ⭐⭐⭐ |
-| **P12.A.10** | 执行看板卡片显示 outcome（"✅ Mention rate +25%, confirmed (confidence 0.8)"） | ⭐⭐⭐ |
+| **P12.A.11** | 华佗处方生成器输出 `execution_target` 字段 | ⭐⭐⭐ |
 | P8.3.2 | Dashboard Magic Link 鉴权（Phase 12 完成后做） | ⭐⭐ |
 
 **Phase 12 工作协议见上方专节**。Phase 12.A 完成后回到 Phase 8.3.2 简单鉴权。

@@ -24,7 +24,16 @@ interface PrescriptionMeta {
 
 const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
 
-type ItemWithLogs = ExecutionItem & { logs: ExecutionLog[] }
+interface OutcomeSummary {
+  verdict: 'confirmed' | 'inconclusive' | 'reversed'
+  metric_key: string
+  delta: number | null
+  delta_pct: number | null
+  confidence: number
+  computed_at: string
+}
+
+type ItemWithLogs = ExecutionItem & { logs: ExecutionLog[]; outcome?: OutcomeSummary | null }
 
 const FIX_TYPE_META: Record<string, { icon: string; label: string; cls: string }> = {
   me_auto:     { icon: '🤖', label: 'ME 自动',  cls: 'bg-blue-100 text-blue-700' },
@@ -75,6 +84,53 @@ const LOG_KIND_META: Record<string, { icon: string; cls: string }> = {
   ai_assist:     { icon: '🤖', cls: 'text-indigo-600' },
   blocker:       { icon: '🚧', cls: 'text-red-600' },
   adjustment:    { icon: '🔧', cls: 'text-amber-600' },
+}
+
+// ---------------------------------------------------------------------------
+// OutcomeChip — P12.A.10
+// ---------------------------------------------------------------------------
+
+const METRIC_DISPLAY: Record<string, string> = {
+  'geo.query.mention_rate':      'Mention rate',
+  'geo.query.brand_prominence':  'Brand prominence',
+  'geo.query.sentiment_score':   'Sentiment score',
+  'seo.keyword.ranking':         'Keyword ranking',
+  'ads.roas':                    'ROAS',
+  'social.engagement_rate':      'Engagement rate',
+}
+
+const VERDICT_META: Record<string, { icon: string; cls: string }> = {
+  confirmed:    { icon: '✅', cls: 'bg-green-50 border-green-200 text-green-700' },
+  inconclusive: { icon: '⚠️', cls: 'bg-yellow-50 border-yellow-200 text-yellow-700' },
+  reversed:     { icon: '❌', cls: 'bg-red-50 border-red-200 text-red-700' },
+}
+
+/** Pure helper — exported for unit tests (P12.A.10) */
+export function formatOutcomeLabel(outcome: OutcomeSummary): string {
+  const metricLabel = METRIC_DISPLAY[outcome.metric_key] ?? outcome.metric_key
+  const deltaPctStr = outcome.delta_pct !== null
+    ? `${outcome.delta_pct > 0 ? '+' : ''}${Math.round(outcome.delta_pct)}%`
+    : outcome.delta !== null
+      ? `${outcome.delta > 0 ? '+' : ''}${Number(outcome.delta).toFixed(2)}`
+      : ''
+  const confidenceStr = `confidence ${outcome.confidence.toFixed(2)}`
+  return deltaPctStr
+    ? `${metricLabel} ${deltaPctStr}, ${outcome.verdict} (${confidenceStr})`
+    : `${metricLabel} ${outcome.verdict} (${confidenceStr})`
+}
+
+function OutcomeChip({ outcome }: { outcome: OutcomeSummary }) {
+  const vm = VERDICT_META[outcome.verdict] ?? VERDICT_META.inconclusive
+  const label = formatOutcomeLabel(outcome)
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border font-medium ${vm.cls}`}
+      title={`归因计算时间：${new Date(outcome.computed_at).toLocaleString('zh-CN')}`}
+    >
+      {vm.icon} {label}
+    </span>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +385,7 @@ function ExecutionItemRow({
               <span className={`text-[11px] px-1.5 py-0.5 rounded font-medium ${fixMeta.cls}`}>
                 {fixMeta.label}
               </span>
+              {item.outcome && <OutcomeChip outcome={item.outcome} />}
               {execButton}
               {item.logs.length > 0 && (
                 <span className="text-[11px] text-gray-400">{item.logs.length} 条工作记录</span>

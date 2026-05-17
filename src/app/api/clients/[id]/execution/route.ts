@@ -20,6 +20,17 @@ import type {
   ExecutionItem, ExecutionLog, PrescriptionStatus,
   DiagnosticDimension, FixType,
 } from '@/types/diagnostic'
+import type { OutcomeVerdict } from '@/lib/flywheel/adapters/types'
+
+/** Summary of the latest attribution outcome for an execution item. */
+export interface ItemOutcomeSummary {
+  verdict: OutcomeVerdict
+  metric_key: string
+  delta: number | null
+  delta_pct: number | null
+  confidence: number
+  computed_at: string
+}
 
 const VALID_DIMENSIONS: DiagnosticDimension[] = [
   'seo', 'ai_visibility', 'ads', 'social', 'reputation', 'competitor',
@@ -28,9 +39,10 @@ const VALID_FIX_TYPES: FixType[] = ['me_auto', 'fde_manual', 'third_party']
 
 export const dynamic = 'force-dynamic'
 
-/** 返回时每个 item 附带它的 logs（鲁班 P8.10.S4.1） */
+/** 返回时每个 item 附带它的 logs（鲁班 P8.10.S4.1）和最新 outcome（P12.A.10） */
 export interface ExecutionItemWithLogs extends ExecutionItem {
   logs: ExecutionLog[]
+  outcome: ItemOutcomeSummary | null
 }
 
 /** 执行项涉及的处方元数据 — 用于看板按处方分组（P8.10.S5） */
@@ -95,9 +107,53 @@ export async function GET(
       }
     }
 
+    // 拉取这些 item 的最新 flywheel_outcome（P12.A.10）
+    // 路径：execution_items → flywheel_actions.execution_item_id → flywheel_outcomes.action_id
+    let outcomeByItem: Record<string, ItemOutcomeSummary> = {}
+    if (baseItems.length > 0) {
+      const { data: actionRows } = await supabaseAdmin
+        .from('flywheel_actions')
+        .select('id, execution_item_id')
+        .in('execution_item_id', baseItems.map(i => i.id))
+
+      if (actionRows?.length) {
+        const actionToItem = new Map<string, string>(
+          (actionRows as { id: string; execution_item_id: string }[])
+            .map(a => [a.id, a.execution_item_id])
+        )
+
+        const { data: outcomeRows } = await supabaseAdmin
+          .from('flywheel_outcomes')
+          .select('action_id, metric_key, delta, delta_pct, confidence, verdict, computed_at')
+          .in('action_id', actionRows.map(a => a.id))
+          .order('computed_at', { ascending: false })
+
+        if (outcomeRows?.length) {
+          for (const row of outcomeRows as {
+            action_id: string; metric_key: string; delta: number | null
+            delta_pct: number | null; confidence: number
+            verdict: string; computed_at: string
+          }[]) {
+            const itemId = actionToItem.get(row.action_id)
+            if (itemId && !outcomeByItem[itemId]) {
+              outcomeByItem[itemId] = {
+                verdict: row.verdict as ItemOutcomeSummary['verdict'],
+                metric_key: row.metric_key,
+                delta: row.delta,
+                delta_pct: row.delta_pct,
+                confidence: row.confidence,
+                computed_at: row.computed_at,
+              }
+            }
+          }
+        }
+      }
+    }
+
     const items: ExecutionItemWithLogs[] = baseItems.map(it => ({
       ...it,
       logs: logsByItem[it.id] ?? [],
+      outcome: outcomeByItem[it.id] ?? null,
     }))
 
     // 拉取这些 item 涉及的处方元数据（按处方分组 + 补充/修订按钮用）
