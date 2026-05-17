@@ -200,12 +200,11 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-17
+> 最后更新：2026-05-17（P12.A.1 ✅）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P12.A.1** | Phase 12 飞轮闭环 — migration：建 3 张新表 + alter `prescription_actions`（M1 起点） | ⭐⭐⭐ |
-| P12.A.2 | 受控词表 `src/lib/flywheel/vocabulary.ts`（GEO 维度的 action_type + metric_key） | ⭐⭐⭐ |
+| **P12.A.2** | 受控词表 `src/lib/flywheel/vocabulary.ts`（GEO 维度的 action_type + metric_key） | ⭐⭐⭐ |
 | P12.A.3 | FlywheelAdapter 接口 + Registry（M1 终点） | ⭐⭐⭐ |
 | P8.3.2 | Dashboard Magic Link 鉴权（Phase 12 完成后做） | ⭐⭐ |
 | P7.4.15 | Week 2 CTS Tours AI Tracker 复跑（2026-05-12） | ⭐⭐ |
