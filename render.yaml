@@ -116,6 +116,26 @@ services:
           name: magic-engine
           property: host
 
+  # Flywheel attribution job — every 6 hours
+  # Computes baseline/after/verdict for every flywheel_action with an expected_metric.
+  # Reference: ROADMAP.md P12.A.9
+  - type: cron
+    name: attribution-cron
+    env: node
+    schedule: "0 */6 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -s -X POST -H "Authorization: Bearer $CRON_SECRET" \
+        https://$RENDER_EXTERNAL_URL/api/cron/attribution
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+      - key: RENDER_EXTERNAL_URL
+        fromService:
+          type: web
+          name: magic-engine
+          property: host
+
   # Weekly AI Visibility Tracker — every Monday at 1am UTC (~1pm NZST)
   # Processes all clients with enabled queries; writes runs + weekly snapshot.
   # Reference: ROADMAP.md P7.4.13
