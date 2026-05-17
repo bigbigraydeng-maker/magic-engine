@@ -1055,7 +1055,7 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
 #### M3 端到端 demo（任务 7-13，~16 小时）
 
 - [x] **P12.A.7** — AI Tracker 重跑时把结果写入 `flywheel_metrics`（`metric_key='geo.query.mention_rate'`，`source='ai_tracker'`）✅ 2026-05-17
-- [ ] **P12.A.8** — 归因 Job（`src/lib/flywheel/attribution/job.ts`）：扫所有 `flywheel_actions.expected_metric`，在窗口内算 baseline / after，写 `flywheel_outcomes`
+- [x] **P12.A.8** — 归因 Job（`src/lib/flywheel/attribution/job.ts`）：扫所有 `flywheel_actions.expected_metric`，在窗口内算 baseline / after，写 `flywheel_outcomes` ✅ 2026-05-17
 - [ ] **P12.A.9** — Cron 触发归因 Job（`src/app/api/cron/attribution/route.ts`，每 6h 跑一次）
 - [ ] **P12.A.10** — 执行看板卡片显示 outcome（"✅ Mention rate +25%, confirmed (confidence 0.8)"）
 - [ ] **P12.A.11** — 华佗处方生成器输出 `execution_target` 字段（让新生成的处方天然带 flywheel/mode/vendor）
@@ -1145,6 +1145,8 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
   `feat(flywheel): P12.A.6 — FlywheelDrawer 落库 flywheel_actions [P12.A.6]` (4941c5c)
 - **P12.A.7** — AI Tracker 重跑写 flywheel_metrics：mention_rate / avg_rank / engine_coverage，GeoComposerAdapter.pullMetrics() 实现
   `feat(flywheel): P12.A.7 — AI Tracker 重跑写 flywheel_metrics [P12.A.7]` (b1903d0)
+- **P12.A.8** — 归因 Job：扫 flywheel_actions.expected_metric，算 baseline/after/verdict/confidence，写 flywheel_outcomes（14 测试全通过）
+  `feat(flywheel): P12.A.8 — 归因 Job 写 flywheel_outcomes [P12.A.8]`
 
 ### 2026-05-14
 

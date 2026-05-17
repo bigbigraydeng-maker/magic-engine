@@ -200,12 +200,12 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-17（P12.A.7 ✅ — AI Tracker 写 flywheel_metrics + GeoComposerAdapter.pullMetrics() 实现）
+> 最后更新：2026-05-17（P12.A.8 ✅ — 归因 Job 写 flywheel_outcomes，computeVerdict，14 测试通过）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
 | **M2 验证** | PM 在本地 dev server 验证：CTS GEO 任务点击→抽屉弹出→提交→Supabase flywheel_actions 新记录 | ⭐⭐⭐ |
-| **P12.A.8** | 归因 Job（src/lib/flywheel/attribution/job.ts）：扫 flywheel_actions.expected_metric，算 baseline/after，写 flywheel_outcomes | ⭐⭐⭐ |
+| **P12.A.9** | Cron 触发归因 Job（`src/app/api/cron/attribution/route.ts`，每 6h 跑一次） | ⭐⭐⭐ |
 | P8.3.2 | Dashboard Magic Link 鉴权（Phase 12 完成后做） | ⭐⭐ |
 
 **Phase 12 工作协议见上方专节**。Phase 12.A 完成后回到 Phase 8.3.2 简单鉴权。
