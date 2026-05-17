@@ -200,12 +200,13 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-17（P12.A.12 ✅ — 存量 execution_target 回填脚本，build 通过）
+> 最后更新：2026-05-17（P12.A.13 ✅ — CTS GEO E2E 验证脚本跑通，outcome confirmed +105.6%）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P12.A.13** | CTS 端到端验证：真实 GEO finding → action → AI Tracker 重跑 → outcome 显示 | ⭐⭐⭐ |
-| **M2 验证** | PM 在本地 dev server 验证：CTS GEO 任务点击→抽屉弹出→提交→Supabase flywheel_actions 新记录 | ⭐⭐⭐ |
+| **P12.A.14** | 写架构 README（docs/flywheel-architecture.md），含「如何加新 adapter」步骤 | ⭐⭐⭐ |
+| **M3 验证** | PM 启动 dev server 打开 CTS execution 看板，确认 "AI 可见度品牌实体数据优化" 卡片有 outcome chip | ⭐⭐⭐ |
+| **P12.A.15** | ROADMAP § 9 追加 Phase 12.A 总结 + 切换焦点到 Phase 12.B | ⭐⭐ |
 | P8.3.2 | Dashboard Magic Link 鉴权（Phase 12 完成后做） | ⭐⭐ |
 
 **Phase 12 工作协议见上方专节**。Phase 12.A 完成后回到 Phase 8.3.2 简单鉴权。

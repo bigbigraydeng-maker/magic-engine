@@ -1060,7 +1060,7 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
 - [x] **P12.A.10** — 执行看板卡片显示 outcome（"✅ Mention rate +25%, confirmed (confidence 0.8)"）✅ 2026-05-17
 - [x] **P12.A.11** — 华佗处方生成器输出 `execution_target` 字段（让新生成的处方天然带 flywheel/mode/vendor）✅ 2026-05-17
 - [x] **P12.A.12** — 存量数据回填脚本（一次性，6 客户的 `prescription_actions.execution_target` 完整填充并核对）✅ 2026-05-17
-- [ ] **P12.A.13** — CTS 端到端验证：找一个真实 GEO finding → 走完 action → 触发 AI Tracker 重跑 → outcome 显示在执行看板 UI
+- [x] **P12.A.13** — CTS 端到端验证：找一个真实 GEO finding → 走完 action → 触发 AI Tracker 重跑 → outcome 显示在执行看板 UI ✅ 2026-05-17
 
 > **M3 验证关卡**：CTS 执行看板上至少有一条 GEO action 的卡片下面显示完整 outcome（含 baseline / after / verdict / confidence）
 
@@ -1155,6 +1155,8 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
   `feat(flywheel): P12.A.11 — 华佗处方输出 execution_target [P12.A.11]`
 - **P12.A.12** — 一次性回填脚本 backfill-execution-target.ts：按 (dimension, fix_type) 修正存量 execution_items.execution_target
   `feat(flywheel): P12.A.12 — 存量 execution_target 回填脚本 [P12.A.12]`
+- **P12.A.13** — CTS E2E 验证脚本 p12-a13-cts-e2e.ts：用真实 prescription 的 ai_visibility 条目 + 真实 2026-04-27 snapshot 作 baseline，跑通 execution_item→action→metrics→attribution→outcome 全链路；outcome verdict=confirmed delta_pct=105.6% confidence=0.95（after 为标记 synthetic 的占位，等下次 Tracker 周跑替换）
+  `feat(flywheel): P12.A.13 — CTS GEO 端到端验证 [P12.A.13]`
 
 ### 2026-05-14
 
