@@ -200,11 +200,12 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-17（P12.A.5 ✅ — 执行看板按钮按 mode 分发完成，FlywheelDrawer stub 已建）
+> 最后更新：2026-05-17（P12.A.6 ✅ — FlywheelDrawer 落库完成，M2 验证关卡可开始）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P12.A.6** | 填充 FlywheelDrawer.tsx：调 adapter.execute() 落库 flywheel_actions | ⭐⭐⭐ |
+| **M2 验证** | PM 在本地 dev server 验证：CTS GEO 任务点击→抽屉弹出→提交→Supabase flywheel_actions 新记录 | ⭐⭐⭐ |
+| **P12.A.7** | AI Tracker 重跑时把结果写入 flywheel_metrics（metric_key='geo.query.mention_rate'） | ⭐⭐⭐ |
 | P8.3.2 | Dashboard Magic Link 鉴权（Phase 12 完成后做） | ⭐⭐ |
 
 **Phase 12 工作协议见上方专节**。Phase 12.A 完成后回到 Phase 8.3.2 简单鉴权。

@@ -1048,7 +1048,7 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
 
 - [x] **P12.A.4** — 实现 `GeoComposerAdapter`（in_house mode）：`.execute(action)` 把动作写入 `flywheel_actions`，`.pullMetrics()` 留接口给 P12.A.7 填 ✅ 2026-05-17
 - [x] **P12.A.5** — 改造执行看板"在 X 中执行"按钮逻辑，按 `execution_target.mode` 分发：`in_house` 弹抽屉 / `third_party` 跳外链 + 提示回来打勾 / `external_manual` 隐藏按钮只显示"FDE 完成后请打勾" ✅ 2026-05-17
-- [ ] **P12.A.6** — 新建 `FlywheelDrawer.tsx`：抽屉里调 `adapter.execute()`，落 `flywheel_actions` 记录
+- [x] **P12.A.6** — 新建 `FlywheelDrawer.tsx`：抽屉里调 `adapter.execute()`，落 `flywheel_actions` 记录 ✅ 2026-05-17
 
 > **M2 验证关卡**：本地 dev server 上，CTS 执行看板的 GEO 任务卡片，点击按钮能弹出抽屉、提交后能在 Supabase `flywheel_actions` 表看到一条新记录（带 `flywheel='geo'`、`action_type='geo.deploy_directive'`、`expected_metric` 已填）
 
@@ -1141,6 +1141,8 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
   `feat(flywheel): P12.A.4 — GeoComposerAdapter (in_house mode) [P12.A.4]`
 - **P12.A.5** — 执行看板按钮按 execution_target.mode 分发：in_house 弹抽屉 / third_party 跳路由+打勾提示 / external_manual 静态标签；ExecutionItem 类型加 execution_target 字段；新建 FlywheelDrawer.tsx stub
   `feat(flywheel): P12.A.5 — 执行看板按钮按 execution_target.mode 分发 [P12.A.5]` (cd7018c)
+- **P12.A.6** — FlywheelDrawer 填充：POST /api/flywheel/execute → adapter.execute() → flywheel_actions 落库；GEO 飞轮 actionType/expectedMetric/expectedDelta 表单；form/submitting/done/error 四态
+  `feat(flywheel): P12.A.6 — FlywheelDrawer 落库 flywheel_actions [P12.A.6]` (4941c5c)
 
 ### 2026-05-14
 
