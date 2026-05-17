@@ -32,3 +32,12 @@ yarn-error.log*
 *.swp
 *.swo
 *~
+
+# Microsoft Office lock files
+~$*
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# Claude Code agent worktree experiments (multi-session artifacts)
+.claude/worktrees/
