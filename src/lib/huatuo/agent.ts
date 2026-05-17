@@ -16,7 +16,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import Anthropic from '@anthropic-ai/sdk'
 import { parseJsonResponse, MODEL_SONNET } from '@/lib/anthropic/client'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
-import type { PrescriptionContent, PrescriptionIntake, PriorPrescriptionContext } from '@/types/diagnostic'
+import type { PrescriptionContent, PrescriptionIntake, PrescriptionAction, PriorPrescriptionContext } from '@/types/diagnostic'
+import { deriveExecutionTarget } from '@/lib/flywheel/execution-target'
 import type {
   HuatuoPrescriptionResult,
   HuatuoLookupContext,
@@ -419,6 +420,20 @@ function assertNotTruncated(
  * Defensive normalization — Claude sometimes omits arrays or returns null where empty arrays expected.
  * This shields downstream code (UI rendering, .map() calls) from runtime explosions.
  */
+/**
+ * P12.A.11: Attach execution_target to every action so the prescription stored
+ * in DB natively carries flywheel routing. Falls back silently if dimension /
+ * fix_type are missing — downstream execution-generator re-derives if needed.
+ */
+function attachExecutionTarget(action: PrescriptionAction): PrescriptionAction {
+  if (action.execution_target) return action
+  if (!action.dimension || !action.fix_type) return action
+  return {
+    ...action,
+    execution_target: deriveExecutionTarget(action.dimension, action.fix_type),
+  }
+}
+
 function normalizePrescriptionContent(p: Partial<PrescriptionContent>): PrescriptionContent {
   return {
     summary: typeof p.summary === 'string' ? p.summary : '',
@@ -427,7 +442,7 @@ function normalizePrescriptionContent(p: Partial<PrescriptionContent>): Prescrip
           phase_number:   typeof ph.phase_number === 'number' ? ph.phase_number : 0,
           name:           typeof ph.name === 'string' ? ph.name : '',
           duration_weeks: typeof ph.duration_weeks === 'number' ? ph.duration_weeks : 0,
-          actions:        Array.isArray(ph.actions) ? ph.actions : [],
+          actions:        Array.isArray(ph.actions) ? ph.actions.map(attachExecutionTarget) : [],
         }))
       : [],
     kpi_targets: Array.isArray(p.kpi_targets) ? p.kpi_targets : [],

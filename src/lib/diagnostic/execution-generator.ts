@@ -24,11 +24,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type {
   ExecutionItem,
+  ExecutionTarget,
   PrescriptionAction,
   PrescriptionContent,
   DiagnosticDimension,
   FixType,
 } from '@/types/diagnostic'
+import { deriveExecutionTarget } from '@/lib/flywheel/execution-target'
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -100,6 +102,7 @@ interface ExecutionRow {
   fix_type:        FixType
   status:          'pending'
   steps_json:      Record<string, unknown>
+  execution_target: ExecutionTarget
   sort_order:      number
 }
 
@@ -132,6 +135,8 @@ function buildExecutionRows(
         description:     action.description,
         fix_type:        action.fix_type,
         status:          'pending',
+        execution_target: action.execution_target
+          ?? deriveExecutionTarget(action.dimension, action.fix_type),
         sort_order:      (phase.phase_number - 1) * 100 + idx,
         // 原始 finding_ids 字符串 + 华佗 FDE 字段存进 steps_json 留溯源
         steps_json: {

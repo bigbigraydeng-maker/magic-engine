@@ -256,6 +256,11 @@ export interface PrescriptionAction {
   dependencies?: string[]
   /** 由哪个 Magic Engine 模块承接（决定路由到哪个工作台） */
   module?: 'seo_engine' | 'social_matrix' | 'ads_intelligence' | 'insight_reports' | 'manual'
+  /**
+   * 飞轮执行路由（P12.A.11）。由 deriveExecutionTarget(dimension, fix_type) 推导，
+   * 决定执行看板该卡片走哪个 adapter / 弹什么抽屉。
+   */
+  execution_target?: ExecutionTarget
 }
 
 export interface PrescriptionPhase {
