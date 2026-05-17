@@ -1059,7 +1059,7 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
 - [x] **P12.A.9** — Cron 触发归因 Job（`src/app/api/cron/attribution/route.ts`，每 6h 跑一次）✅ 2026-05-17
 - [x] **P12.A.10** — 执行看板卡片显示 outcome（"✅ Mention rate +25%, confirmed (confidence 0.8)"）✅ 2026-05-17
 - [x] **P12.A.11** — 华佗处方生成器输出 `execution_target` 字段（让新生成的处方天然带 flywheel/mode/vendor）✅ 2026-05-17
-- [ ] **P12.A.12** — 存量数据回填脚本（一次性，6 客户的 `prescription_actions.execution_target` 完整填充并核对）
+- [x] **P12.A.12** — 存量数据回填脚本（一次性，6 客户的 `prescription_actions.execution_target` 完整填充并核对）✅ 2026-05-17
 - [ ] **P12.A.13** — CTS 端到端验证：找一个真实 GEO finding → 走完 action → 触发 AI Tracker 重跑 → outcome 显示在执行看板 UI
 
 > **M3 验证关卡**：CTS 执行看板上至少有一条 GEO action 的卡片下面显示完整 outcome（含 baseline / after / verdict / confidence）
@@ -1153,6 +1153,8 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
   `feat(flywheel): P12.A.10 — 执行看板卡片显示 outcome [P12.A.10]`
 - **P12.A.11** — 华佗新生成的处方自动带 execution_target（flywheel/mode/vendor），8 测试全通过
   `feat(flywheel): P12.A.11 — 华佗处方输出 execution_target [P12.A.11]`
+- **P12.A.12** — 一次性回填脚本 backfill-execution-target.ts：按 (dimension, fix_type) 修正存量 execution_items.execution_target
+  `feat(flywheel): P12.A.12 — 存量 execution_target 回填脚本 [P12.A.12]`
 
 ### 2026-05-14
 
