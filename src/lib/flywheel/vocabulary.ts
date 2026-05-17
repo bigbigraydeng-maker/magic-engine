@@ -119,21 +119,79 @@ export const SEO_METRIC_KEY = {
 
 export type SeoMetricKey = (typeof SEO_METRIC_KEY)[keyof typeof SEO_METRIC_KEY]
 
-/** Ads flywheel vocabulary — to be populated in Phase 12.B */
-export const ADS_ACTION_TYPE = {} as const
-export const ADS_METRIC_KEY  = {} as const
+// ── Ads action types ──────────────────────────────────────────────────────────
 
-/** Social flywheel vocabulary — to be populated in Phase 12.B */
+/**
+ * Actions the Ads flywheel can log in flywheel_actions.
+ *
+ * third_party actions → coordinated via Meta Ads Manager (MetaAdsAdapter)
+ * These map to CLAUDE.md "Fix" boundary: pause/bid/negative = auto-executable.
+ */
+export const ADS_ACTION_TYPE = {
+  /** Pause a losing campaign to stop budget bleed (third_party, meta) */
+  PAUSE_CAMPAIGN: 'ads.pause_campaign',
+
+  /** Pause an underperforming ad set (third_party, meta) */
+  PAUSE_AD_SET: 'ads.pause_ad_set',
+
+  /** Pause an underperforming individual ad (third_party, meta) */
+  PAUSE_AD: 'ads.pause_ad',
+
+  /** Adjust bid for an ad set (third_party, meta) */
+  ADJUST_BID: 'ads.adjust_bid',
+
+  /** Add a negative keyword to stop wasted spend (third_party, meta) */
+  ADD_NEGATIVE_KEYWORD: 'ads.add_negative_keyword',
+
+  /** Pull a fresh Meta Ads snapshot into flywheel_metrics (third_party, meta) */
+  META_SNAPSHOT: 'ads.meta_snapshot',
+} as const
+
+export type AdsActionType = (typeof ADS_ACTION_TYPE)[keyof typeof ADS_ACTION_TYPE]
+
+// ── Ads metric keys ───────────────────────────────────────────────────────────
+
+/**
+ * Measurable signals stored in flywheel_metrics for the Ads flywheel.
+ *
+ * Written by MetaAdsAdapter.pullMetrics() via meta_ads_snapshots table.
+ */
+export const ADS_METRIC_KEY = {
+  /** Return on Ad Spend (revenue / spend) */
+  ROAS: 'ads.account.roas',
+
+  /** Total ad spend in account currency for the period */
+  SPEND: 'ads.account.spend',
+
+  /** Total impressions served */
+  IMPRESSIONS: 'ads.account.impressions',
+
+  /** Total link clicks */
+  CLICKS: 'ads.account.clicks',
+
+  /** Cost per click (spend / clicks) */
+  CPC: 'ads.account.cpc',
+
+  /** Click-through rate (clicks / impressions, 0–1) */
+  CTR: 'ads.account.ctr',
+
+  /** Total conversion events (purchases, leads, etc.) */
+  CONVERSIONS: 'ads.account.conversions',
+} as const
+
+export type AdsMetricKey = (typeof ADS_METRIC_KEY)[keyof typeof ADS_METRIC_KEY]
+
+/** Social flywheel vocabulary — to be populated in Phase 12.B.3 */
 export const SOCIAL_ACTION_TYPE = {} as const
 export const SOCIAL_METRIC_KEY  = {} as const
 
 // ── Union helpers ─────────────────────────────────────────────────────────────
 
 /** All valid action_type strings across all flywheels */
-export type FlywheelActionType = GeoActionType | SeoActionType
+export type FlywheelActionType = GeoActionType | SeoActionType | AdsActionType
 
 /** All valid metric_key strings across all flywheels */
-export type FlywheelMetricKey = GeoMetricKey | SeoMetricKey
+export type FlywheelMetricKey = GeoMetricKey | SeoMetricKey | AdsMetricKey
 
 // ── Runtime validation helpers ────────────────────────────────────────────────
 
@@ -141,6 +199,8 @@ const ALL_GEO_ACTIONS = new Set<string>(Object.values(GEO_ACTION_TYPE))
 const ALL_GEO_METRICS = new Set<string>(Object.values(GEO_METRIC_KEY))
 const ALL_SEO_ACTIONS = new Set<string>(Object.values(SEO_ACTION_TYPE))
 const ALL_SEO_METRICS = new Set<string>(Object.values(SEO_METRIC_KEY))
+const ALL_ADS_ACTIONS = new Set<string>(Object.values(ADS_ACTION_TYPE))
+const ALL_ADS_METRICS = new Set<string>(Object.values(ADS_METRIC_KEY))
 
 export function isValidGeoActionType(value: string): value is GeoActionType {
   return ALL_GEO_ACTIONS.has(value)
@@ -156,4 +216,12 @@ export function isValidSeoActionType(value: string): value is SeoActionType {
 
 export function isValidSeoMetricKey(value: string): value is SeoMetricKey {
   return ALL_SEO_METRICS.has(value)
+}
+
+export function isValidAdsActionType(value: string): value is AdsActionType {
+  return ALL_ADS_ACTIONS.has(value)
+}
+
+export function isValidAdsMetricKey(value: string): value is AdsMetricKey {
+  return ALL_ADS_METRICS.has(value)
 }
