@@ -1106,6 +1106,12 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
 - **社媒飞轮形态确认为混合**：自研内容制作（Atlas + OpenAI / Claude）+ 第三方发布（Publer）
 - **Phase 12 工作协议**（写入 CLAUDE.md）：每任务 1 commit；3 个里程碑关卡（M1 地基 / M2 第一个 adapter / M3 端到端 demo）必须通过才能往下；每个 commit 附 PM-review 卡片让非技术 PM 能 review；多 session 必须主动提醒
 - **试点客户**：CTS（GEO+SEO+Ads，有 Meta 投放数据）+ Oztop（SEO+GEO）
+- **AI Tracker：保留自建，不切换 Apify `amernas/ai-brand-monitor`**
+  - 现状：自建 AI Tracker 覆盖 4 引擎（OpenAI/Claude/Perplexity/Gemini），`marketToLocation()` 已实现 AU/NZ 地域定位，已串通 zhangqian + master_briefs + ai_visibility_snapshots，Phase 7.1 已上线
+  - Apify actor 致命短板：**不支持 AU/NZ 地域定位**（默认美国市场视角，对 6 客户全部失真），且 actor 状态 "Under maintenance" 不能做核心数据源
+  - Apify actor 唯一独有的 Google AI Overviews 覆盖：**走自建第 5 runner 路线**（用现有 SerpAPI 调 AI Overviews API），登记到 Phase 12.B 低优先级
+- **TikTok 广告库抓取：未来用 Apify，不自建**
+  - 商品化数据采集，TikTok 反爬激进，自建维护成本极高；Phase 12.B/TikTok Ads 起手直接接 Apify TikTok actor
 
 ### 2026-04-30
 - **战略**：确定 Magic Engine 三大核心：SEO + GEO + 社媒内容矩阵；GEO 为 2026 Q2 核心差异化
