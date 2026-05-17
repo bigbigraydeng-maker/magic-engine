@@ -2,6 +2,9 @@
 // Diagnostic Engine — Core Types (P8.5.1)
 // ============================================
 
+import type { ExecutionTarget } from '@/lib/flywheel/adapters/types'
+export type { ExecutionTarget }
+
 export type DiagnosticDimension =
   | 'seo'
   | 'ai_visibility'
@@ -184,6 +187,7 @@ export interface ExecutionItem {
   fix_type: FixType
   status: ExecutionItemStatus
   steps_json: Record<string, unknown> | null
+  execution_target: ExecutionTarget | null
   assigned_to: string | null
   due_date: string | null
   started_at: string | null

@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import type { ExecutionItem, ExecutionItemStatus, ExecutionLog, PrescriptionStatus } from '@/types/diagnostic'
+import type { ExecutionItem, ExecutionItemStatus, ExecutionLog, PrescriptionStatus, ExecutionTarget } from '@/types/diagnostic'
+import { FlywheelDrawer } from './_components/FlywheelDrawer'
 import { LubanChatDrawer } from './_components/LubanChatDrawer'
 import { InlinePrescriptionDrawer } from './_components/InlinePrescriptionDrawer'
 import { ProjectLubanDrawer } from './_components/ProjectLubanDrawer'
@@ -44,12 +45,28 @@ const PHASE_LABELS: Record<number, { name: string; color: string }> = {
   3: { name: 'Phase 3 — 长期增长',  color: 'bg-teal-600'   },
 }
 
-// module → 工作台跳转
+// module → 工作台跳转（legacy fallback，适用于 execution_target 为 null 的旧数据）
 const MODULE_ROUTE: Record<string, { label: string; path: (clientId: string) => string }> = {
   seo_engine:       { label: 'SEO 引擎',  path: c => `/dashboard/clients/${c}/site-audit/pages` },
   social_matrix:    { label: '社媒矩阵',  path: c => `/dashboard/clients/${c}?tab=reels` },
   ads_intelligence: { label: '广告',      path: c => `/dashboard/clients/${c}?tab=campaigns` },
   insight_reports:  { label: '数据报告',  path: c => `/dashboard/clients/${c}` },
+}
+
+// flywheel → in_house 按钮标签
+const FLYWHEEL_IN_HOUSE_LABEL: Record<string, string> = {
+  seo:    'SEO 引擎',
+  geo:    'GEO Composer',
+  ads:    '广告工作台',
+  social: '社媒矩阵',
+}
+
+// flywheel → third_party 跳转路由
+const FLYWHEEL_THIRD_PARTY_ROUTE: Record<string, { label: string; path: (clientId: string) => string }> = {
+  ads:    { label: '广告平台',  path: c => `/dashboard/clients/${c}?tab=campaigns` },
+  social: { label: '社媒平台',  path: c => `/dashboard/clients/${c}?tab=reels` },
+  seo:    { label: 'SEO 工具', path: c => `/dashboard/clients/${c}/site-audit/pages` },
+  geo:    { label: 'GEO 工具', path: c => `/dashboard/clients/${c}` },
 }
 
 const LOG_KIND_META: Record<string, { icon: string; cls: string }> = {
@@ -152,6 +169,7 @@ function ExecutionItemRow({
   onStatusChange,
   onAddLog,
   onOpenChat,
+  onOpenFlywheel,
   onEditItem,
 }: {
   item: ItemWithLogs
@@ -159,6 +177,7 @@ function ExecutionItemRow({
   onStatusChange: (id: string, status: ExecutionItemStatus) => void
   onAddLog: (id: string, content: string, kind: 'note' | 'blocker') => Promise<void>
   onOpenChat: (item: ItemWithLogs) => void
+  onOpenFlywheel: (item: ItemWithLogs, target: ExecutionTarget) => void
   onEditItem: (itemId: string, fields: { title?: string; description?: string }) => Promise<boolean>
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -176,6 +195,56 @@ function ExecutionItemRow({
   const moduleKey = typeof stepsJson?.module === 'string' ? stepsJson.module : null
   const moduleRoute = moduleKey ? MODULE_ROUTE[moduleKey] : null
   const isDone    = item.status === 'completed' || item.status === 'skipped'
+  const execTarget = item.execution_target
+
+  // 按 execution_target.mode 分发"执行"按钮 UI
+  const execButton = (() => {
+    if (execTarget?.mode === 'in_house') {
+      const label = FLYWHEEL_IN_HOUSE_LABEL[execTarget.flywheel] ?? execTarget.flywheel
+      return (
+        <button
+          onClick={() => onOpenFlywheel(item, execTarget)}
+          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+        >
+          在 {label} 中执行 →
+        </button>
+      )
+    }
+    if (execTarget?.mode === 'third_party') {
+      const route = FLYWHEEL_THIRD_PARTY_ROUTE[execTarget.flywheel]
+      if (!route) return null
+      return (
+        <span className="inline-flex items-center gap-1.5 flex-wrap">
+          <Link
+            href={route.path(item.client_id)}
+            className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+          >
+            在 {route.label} 中执行 →
+          </Link>
+          <span className="text-[10px] text-amber-600 font-medium">完成后请回来打勾 ✓</span>
+        </span>
+      )
+    }
+    if (execTarget?.mode === 'external_manual') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] text-gray-400 border border-gray-200 rounded px-1.5 py-0.5">
+          👤 FDE 完成后请打勾
+        </span>
+      )
+    }
+    // Fallback：旧数据用 moduleRoute
+    if (moduleRoute) {
+      return (
+        <Link
+          href={moduleRoute.path(item.client_id)}
+          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+        >
+          在 {moduleRoute.label} 中执行 →
+        </Link>
+      )
+    }
+    return null
+  })()
 
   const submitNote = async (kind: 'note' | 'blocker') => {
     if (!noteText.trim()) return
@@ -260,14 +329,7 @@ function ExecutionItemRow({
               <span className={`text-[11px] px-1.5 py-0.5 rounded font-medium ${fixMeta.cls}`}>
                 {fixMeta.label}
               </span>
-              {moduleRoute && (
-                <Link
-                  href={moduleRoute.path(item.client_id)}
-                  className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium"
-                >
-                  在 {moduleRoute.label} 中执行 →
-                </Link>
-              )}
+              {execButton}
               {item.logs.length > 0 && (
                 <span className="text-[11px] text-gray-400">{item.logs.length} 条工作记录</span>
               )}
@@ -408,6 +470,7 @@ function PhaseColumn({
   onStatusChange,
   onAddLog,
   onOpenChat,
+  onOpenFlywheel,
   onAddItem,
   onEditItem,
 }: {
@@ -419,6 +482,7 @@ function PhaseColumn({
   onStatusChange: (id: string, status: ExecutionItemStatus) => void
   onAddLog: (id: string, content: string, kind: 'note' | 'blocker') => Promise<void>
   onOpenChat: (item: ItemWithLogs) => void
+  onOpenFlywheel: (item: ItemWithLogs, target: ExecutionTarget) => void
   onAddItem: (prescriptionId: string, phase: number, fields: AddItemFields) => Promise<boolean>
   onEditItem: (itemId: string, fields: { title?: string; description?: string }) => Promise<boolean>
 }) {
@@ -474,6 +538,7 @@ function PhaseColumn({
               onStatusChange={onStatusChange}
               onAddLog={onAddLog}
               onOpenChat={onOpenChat}
+              onOpenFlywheel={onOpenFlywheel}
               onEditItem={onEditItem}
             />
           ))}
@@ -563,6 +628,7 @@ function PrescriptionGroup({
   onStatusChange,
   onAddLog,
   onOpenChat,
+  onOpenFlywheel,
   onDerive,
   onAddItem,
   onEditItem,
@@ -572,6 +638,7 @@ function PrescriptionGroup({
   onStatusChange: (id: string, status: ExecutionItemStatus) => void
   onAddLog: (id: string, content: string, kind: 'note' | 'blocker') => Promise<void>
   onOpenChat: (item: ItemWithLogs) => void
+  onOpenFlywheel: (item: ItemWithLogs, target: ExecutionTarget) => void
   onDerive: (mode: 'supplement' | 'revision', priorId: string, priorLabel: string) => void
   onAddItem: (prescriptionId: string, phase: number, fields: AddItemFields) => Promise<boolean>
   onEditItem: (itemId: string, fields: { title?: string; description?: string }) => Promise<boolean>
@@ -642,6 +709,7 @@ function PrescriptionGroup({
               onStatusChange={onStatusChange}
               onAddLog={onAddLog}
               onOpenChat={onOpenChat}
+              onOpenFlywheel={onOpenFlywheel}
               onAddItem={onAddItem}
               onEditItem={onEditItem}
             />
@@ -669,6 +737,8 @@ export default function ExecutionPage() {
   const [opError, setOpError] = useState<string | null>(null)       // 操作错误（内联横幅）
   // 当前打开鲁班对话的执行项（null = 抽屉关闭）
   const [chatItem, setChatItem] = useState<ItemWithLogs | null>(null)
+  // 当前打开飞轮执行抽屉的执行项 + target
+  const [flywheelState, setFlywheelState] = useState<{ item: ItemWithLogs; target: ExecutionTarget } | null>(null)
   // 内联补充/修订抽屉
   const [deriveDrawer, setDeriveDrawer] = useState<
     { mode: 'supplement' | 'revision'; priorId: string; priorLabel: string } | null
@@ -932,12 +1002,23 @@ export default function ExecutionPage() {
             onStatusChange={handleStatusChange}
             onAddLog={handleAddLog}
             onOpenChat={setChatItem}
+            onOpenFlywheel={(item, target) => setFlywheelState({ item, target })}
             onDerive={(mode, priorId, priorLabel) => setDeriveDrawer({ mode, priorId, priorLabel })}
             onAddItem={handleAddItem}
             onEditItem={handleEditItem}
           />
         ))}
       </div>
+
+      {/* 飞轮执行抽屉（in_house 模式） */}
+      {flywheelState && (
+        <FlywheelDrawer
+          clientId={clientId}
+          item={flywheelState.item}
+          target={flywheelState.target}
+          onClose={() => setFlywheelState(null)}
+        />
+      )}
 
       {/* 鲁班对话抽屉 */}
       {chatItem && (
