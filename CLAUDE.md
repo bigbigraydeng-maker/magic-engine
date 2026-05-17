@@ -200,13 +200,13 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-17（P12.A.3 ✅ — M1 地基完成，等待 PM 验证关卡）
+> 最后更新：2026-05-17（P12.A.4 ✅ — GeoComposerAdapter 完成，M2 第一个 adapter 进行中）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P12.A.4** | 实现 GeoComposerAdapter（in_house mode） | ⭐⭐⭐ |
+| **P12.A.5** | 改造执行看板按钮逻辑（in_house 弹抽屉 / third_party 跳外链 / external_manual 只显勾选） | ⭐⭐⭐ |
+| P12.A.6 | 新建 FlywheelDrawer.tsx，调 adapter.execute() 落库 | ⭐⭐⭐ |
 | P8.3.2 | Dashboard Magic Link 鉴权（Phase 12 完成后做） | ⭐⭐ |
-| P7.4.15 | Week 2 CTS Tours AI Tracker 复跑（2026-05-12） | ⭐⭐ |
 
 **Phase 12 工作协议见上方专节**。Phase 12.A 完成后回到 Phase 8.3.2 简单鉴权。
 
