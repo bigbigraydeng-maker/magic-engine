@@ -6,6 +6,19 @@
 
 ---
 
+## 产品战略方向（2026-05-18 确立）⭐
+
+> **DataForSEO 提供数据地基 → Magic Engine 在上面跑自动化执行引擎 → 同时覆盖 Google SEO + AI 搜索两个战场**
+
+Magic Engine 的核心护城河不是数据（数据可以买），而是**执行自动化**：诊断发现问题后，平台自动生成并执行修复动作，结果回流归因，形成飞轮。
+
+竞品定位：
+- **SEMrush**：数据基础设施（Magic Engine 的上游，不是竞争对手）
+- **Search Atlas / OTTO**：最接近的竞品方向，但 OTTO 只覆盖 Google SEO 一个战场，**Magic Engine 同时覆盖 Google SEO + AI 搜索（GEO），这是 2026 真正的差异化窗口**
+- **DataForSEO**：数据层供应商，替代 SEMrush 直连 API，节省 96–99% 数据成本
+
+---
+
 ## 项目定位
 
 Magic Engine 是 Magic Lab 2026 旗舰产品，**四大模块**（不偏离）：
@@ -200,13 +213,15 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-17（**Phase 12.A 全部完成 🎉** — 15/15 任务交付，飞轮数据骨架 + CTS GEO 端到端 demo 上线）
+> 最后更新：2026-05-18（**P12.B.1 完成** — SeoContentAdapter 上线；Phase 12.B 1/4 任务）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **Phase 12.B** | SEO adapter + Meta Ads adapter + 社媒落库 + SEMrush 周快照（见 ROADMAP Phase 12.B 细化后展开） | ⭐⭐⭐ |
-| **M3 验证** | PM 启动 dev server 打开 CTS execution 看板，确认 "AI 可见度品牌实体数据优化" 卡片有 outcome chip | ⭐⭐ |
-| P8.3.2 | Dashboard Magic Link 鉴权（Phase 12.B 开始前可穿插） | ⭐⭐ |
+| **P12.B.2** | Meta Ads adapter（MetaAdsAdapter，CTS 真实广告数据，用 Meta MCP）| ⭐⭐⭐ |
+| **P12.B.3** | 社媒内容生成 action 落库（social flywheel）| ⭐⭐⭐ |
+| **P12.B.4** | SEMrush 周快照 cron — 定时拉 domain_ranks 写 flywheel_metrics | ⭐⭐ |
+| **M3 验证** | PM 确认 CTS execution 看板有 outcome chip | ⭐⭐ |
+| P8.3.2 | Dashboard Magic Link 鉴权 | ⭐⭐ |
 
 **Phase 12 工作协议见上方专节**。Phase 12.A 完成后回到 Phase 8.3.2 简单鉴权。
 

@@ -1070,12 +1070,42 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
 - [x] **P12.A.14** — 写架构 README（`docs/flywheel-architecture.md`），含"如何加新 adapter"步骤
 - [x] **P12.A.15** — ROADMAP § 9 功能完成日志追加 Phase 12.A 总结 + 更新 CLAUDE.md 当前焦点切换到 Phase 12.B ✅ 2026-05-17
 
-### Phase 12.B —（预告，Phase 12.A 完成后再细化）
+### Phase 12.B — SEO / Ads / 社媒 adapter 接入
 
-- SEO adapter（in_house，复用现有博客生成）
-- Meta Ads adapter（in_house，复用 Meta MCP）— CTS Ads 数据接入
-- 社媒内容生成 action 落库（Atlas / OpenAI / Claude 调用都记录）
-- SEMrush 周快照写 `flywheel_metrics`
+每个任务 = 1 commit。
+
+- [x] **P12.B.1** — SEO adapter（`SeoContentAdapter`）：vocabulary 填 SEO_ACTION_TYPE + SEO_METRIC_KEY；execute() 落 flywheel_actions；pullMetrics() 拉 SEMrush domain_ranks + blog_posts 计数写 flywheel_metrics；9 个单元测试全过；build 通过 ✅ 2026-05-18
+- [ ] **P12.B.2** — Meta Ads adapter（`MetaAdsAdapter`）：CTS 真实广告账户接入，Meta MCP；execute() 落 flywheel_actions；pullMetrics() 拉 ROAS / spend / impressions
+- [ ] **P12.B.3** — 社媒内容 action 落库：博客发布 / 社媒内容生成时自动写 flywheel_actions（social flywheel）
+- [ ] **P12.B.4** — SEMrush 周快照 cron：定时拉 domain_ranks 写 flywheel_metrics（所有客户）
+
+---
+
+### Phase 8.S — SEMrush → DataForSEO 关键词接口迁移（成本优化）
+
+> 登记于 2026-05-18。背景：SEMrush 关键词 API 按 units 计费（10 units/词 ≈ $0.05/词），DataForSEO Labs 同等接口按 task 计费（$0.01–0.02/task，批量无限词）；实测相同数据量节省 96–99%。
+> 迁移优先级：按当前用量成本从高到低排序。
+
+- [ ] **P8.S.1** — `getRelatedKeywords`（`phrase_related`）→ `dataforseo_labs/google/related_keywords/live`
+  - 最高优先：500 units/次，日志里已有 4 次重复调用（浪费 1500 units）
+  - 验收：同一种子词返回 50 条关键词，含 volume / KD / CPC / intent，单次成本 ≤ $0.02
+- [ ] **P8.S.2** — `getDomainOrganicKeywords`（`domain_organic`）→ `dataforseo_labs/google/ranked_keywords/live`
+  - 验收：输入域名返回 ≥50 条排名词，含 position，格式与现有 `SemrushKeywordData` 接口兼容
+- [ ] **P8.S.3** — `getKeywordGap`（`phrase_kgap`）→ `dataforseo_labs/google/domain_intersection/live`
+  - 验收：输入客户域名 + 3 竞品域名，返回竞品有排名但客户无排名的关键词列表
+- [ ] **P8.S.4** — `getDomainCompetitors`（`domain_organic_organic`）→ `dataforseo_labs/google/competitors_domain/live`
+  - 验收：输入域名返回 ≥5 个竞品域名，含 overlap_score
+- [ ] **P8.S.5** — `getQuestionKeywords`（`phrase_questions`）→ `dataforseo_labs/google/keyword_suggestions/live`（过滤 question intent）
+  - 验收：FAQ 内容选题流程产出结果正常，含 "how/what/why" 类问题词
+- [ ] **P8.S.6** — `getDomainMetrics`（`domain_ranks`）→ `dataforseo_labs/google/domain_rank_overview/live`
+  - 验收：返回 organic_keywords / organic_traffic / authority_score，误差与 SEMrush ≤20%
+- [ ] **P8.S.7** — `getDomainTrafficTrend`（`domain_rank_history`）→ `dataforseo_labs/google/historical_rank_overview/live`
+  - 验收：12 个月趋势数据正常返回，用于华佗 Agent KPI 锚点
+- [ ] **P8.S.8** — `batchKeywordOverview`（`phrase_these`）→ `keywords_data/google_ads/search_volume/live` + `bulk_keyword_difficulty`（两次 task 合并）
+  - 低优先：批量 overview 数据量通常少，暂缓至前 7 项完成后评估
+
+> **⚠️ 注意**：DataForSEO KD 分数算法与 SEMrush 不同，数值不可横向比较。切换后需在客户报告 + UI 中注明口径变更，或统一改用 DataForSEO KD 标准。
+> **保留 SEMrush API key**：`batchKeywordOverview` P8.S.8 完成前 + 任何降级回退用。
 
 ### Phase 12.C —（预告）
 
@@ -1098,6 +1128,10 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
 ## 8. 决策日志
 
 > 重大决策记录在此，便于追溯。
+
+### 2026-05-18
+
+- **SEMrush → DataForSEO 关键词接口迁移决策**（Phase 8.S）：通过 Apify SEO actor 三方对比测试 + DataForSEO 调研确认，项目现有 8 个 SEMrush 接口中 7 个可完整替换为 DataForSEO Labs 等效接口，节省 96–99% 成本（SEMrush 按词计费 vs DataForSEO 按 task 计费）。数据质量相同（DataForSEO Labs 同源 SEMrush），唯一差异为 KD 算法口径不同，需在报告层注明。迁移顺序：P8.S.1（related-keywords，最贵）→ P8.S.2-4（domain 系列）→ P8.S.5-7（长尾/趋势）→ P8.S.8（batch overview，最低优先）。
 
 ### 2026-05-17
 
@@ -1162,6 +1196,8 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
   `docs(flywheel): P12.A.14 — 架构 README 与 adapter 接入指南 [P12.A.14]`
 - **P12.A.15** — ROADMAP § 9 Phase 12.A 总结追加 + CLAUDE.md 当前焦点切换到 Phase 12.B
   `chore(roadmap): P12.A.15 — Phase 12.A 总结 + 焦点切 Phase 12.B [P12.A.15]`
+- **P12.B.1** — SEO adapter：vocabulary 填 4 action_type + 4 metric_key；SeoContentAdapter execute()+pullMetrics()（SEMrush domain_ranks + blog 计数）；9 单元测试；build 通过
+  `feat(flywheel): P12.B.1 — SeoContentAdapter SEO 飞轮落库 [P12.B.1]`
 
 #### 🎉 Phase 12.A 总结（2026-05-17 完成，15 commits / 1 天）
 

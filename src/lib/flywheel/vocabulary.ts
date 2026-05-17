@@ -70,9 +70,54 @@ export type GeoMetricKey = (typeof GEO_METRIC_KEY)[keyof typeof GEO_METRIC_KEY]
 
 // ── Placeholder stubs for other flywheels (Phase 12.B) ───────────────────────
 
-/** SEO flywheel vocabulary — to be populated in Phase 12.B */
-export const SEO_ACTION_TYPE = {} as const
-export const SEO_METRIC_KEY  = {} as const
+// ── SEO action types ──────────────────────────────────────────────────────────
+
+/**
+ * Actions the SEO flywheel can log in flywheel_actions.
+ *
+ * in_house actions  → executed inside Magic Engine (SeoContentAdapter)
+ * external_manual   → FDE completes off-platform (e.g. link building)
+ */
+export const SEO_ACTION_TYPE = {
+  /** Generate and persist a new blog post targeting a keyword (in_house) */
+  PUBLISH_BLOG: 'seo.publish_blog',
+
+  /** Re-optimise an existing blog post after keyword data refreshes (in_house) */
+  REFRESH_BLOG: 'seo.refresh_blog',
+
+  /** Pull a fresh SEMrush domain snapshot into flywheel_metrics (in_house) */
+  SEMRUSH_SNAPSHOT: 'seo.semrush_snapshot',
+
+  /** FDE manually builds back-links on external sites (external_manual) */
+  BUILD_BACKLINKS: 'seo.build_backlinks',
+} as const
+
+export type SeoActionType = (typeof SEO_ACTION_TYPE)[keyof typeof SEO_ACTION_TYPE]
+
+// ── SEO metric keys ───────────────────────────────────────────────────────────
+
+/**
+ * Measurable signals stored in flywheel_metrics for the SEO flywheel.
+ *
+ * Written by:
+ *   - SeoContentAdapter.pullMetrics() via SEMrush domain_ranks API
+ *   - Blog publish hooks via SeoContentAdapter.execute()
+ */
+export const SEO_METRIC_KEY = {
+  /** Total number of organic keywords the domain ranks for (SEMrush Or) */
+  ORGANIC_KEYWORDS: 'seo.domain.organic_keywords',
+
+  /** Estimated monthly organic traffic (SEMrush Ot) */
+  ORGANIC_TRAFFIC: 'seo.domain.organic_traffic',
+
+  /** SEMrush Authority Score 0–100 (SEMrush As) */
+  AUTHORITY_SCORE: 'seo.domain.authority_score',
+
+  /** Count of published blog posts tracked in blog_posts table */
+  PUBLISHED_POSTS: 'seo.content.published_posts',
+} as const
+
+export type SeoMetricKey = (typeof SEO_METRIC_KEY)[keyof typeof SEO_METRIC_KEY]
 
 /** Ads flywheel vocabulary — to be populated in Phase 12.B */
 export const ADS_ACTION_TYPE = {} as const
@@ -85,15 +130,17 @@ export const SOCIAL_METRIC_KEY  = {} as const
 // ── Union helpers ─────────────────────────────────────────────────────────────
 
 /** All valid action_type strings across all flywheels */
-export type FlywheelActionType = GeoActionType
+export type FlywheelActionType = GeoActionType | SeoActionType
 
 /** All valid metric_key strings across all flywheels */
-export type FlywheelMetricKey = GeoMetricKey
+export type FlywheelMetricKey = GeoMetricKey | SeoMetricKey
 
 // ── Runtime validation helpers ────────────────────────────────────────────────
 
 const ALL_GEO_ACTIONS = new Set<string>(Object.values(GEO_ACTION_TYPE))
 const ALL_GEO_METRICS = new Set<string>(Object.values(GEO_METRIC_KEY))
+const ALL_SEO_ACTIONS = new Set<string>(Object.values(SEO_ACTION_TYPE))
+const ALL_SEO_METRICS = new Set<string>(Object.values(SEO_METRIC_KEY))
 
 export function isValidGeoActionType(value: string): value is GeoActionType {
   return ALL_GEO_ACTIONS.has(value)
@@ -101,4 +148,12 @@ export function isValidGeoActionType(value: string): value is GeoActionType {
 
 export function isValidGeoMetricKey(value: string): value is GeoMetricKey {
   return ALL_GEO_METRICS.has(value)
+}
+
+export function isValidSeoActionType(value: string): value is SeoActionType {
+  return ALL_SEO_ACTIONS.has(value)
+}
+
+export function isValidSeoMetricKey(value: string): value is SeoMetricKey {
+  return ALL_SEO_METRICS.has(value)
 }
