@@ -22,6 +22,7 @@ import { runPerplexity } from './runners/perplexity'
 import { runGemini } from './runners/gemini'
 import { parseRanking } from './parser'
 import { supabaseAdmin } from '../supabase'
+import { writeTrackerFlywheelMetrics } from '../flywheel/metrics/writeTrackerMetrics'
 import type {
   AiEngine,
   AiVisibilityQuery,
@@ -123,7 +124,19 @@ export async function runTracker(
   // 4. Aggregate weekly snapshot (only if we got at least one successful run)
   console.log('[runTracker] Aggregating snapshot...')
   if (result.runs_succeeded > 0) {
-    result.snapshot_id = await aggregateSnapshot(client.id, brandName)
+    const agg = await aggregateSnapshot(client.id, brandName)
+    result.snapshot_id = agg?.snapshotId ?? null
+
+    // 5. Write GEO flywheel metrics so attribution job can compute outcomes
+    if (agg) {
+      await writeTrackerFlywheelMetrics(client.id, {
+        snapshotId: agg.snapshotId,
+        mentionsCount: agg.mentionsCount,
+        totalRuns: agg.totalRuns,
+        avgRank: agg.avgRank,
+        engineCoverage: agg.engineCoverage,
+      })
+    }
   }
 
   result.total_latency_ms = Date.now() - startTime
@@ -340,11 +353,20 @@ async function processOne(input: ProcessOneInput): Promise<void> {
   }
 }
 
+interface AggregateResult {
+  snapshotId: string
+  mentionsCount: number
+  totalRuns: number
+  avgRank: number | null
+  engineCoverage: number
+}
+
 /**
  * Aggregate this week's runs into ai_visibility_snapshots.
  * Uses Monday of the current week as the snapshot key.
+ * Returns metric data alongside the snapshot id for flywheel writes.
  */
-async function aggregateSnapshot(clientId: string, brandName: string): Promise<string | null> {
+async function aggregateSnapshot(clientId: string, brandName: string): Promise<AggregateResult | null> {
   const weekOf = mondayOfThisWeek().toISOString().slice(0, 10) // YYYY-MM-DD
 
   // Pull all runs for this client this week
@@ -367,6 +389,12 @@ async function aggregateSnapshot(clientId: string, brandName: string): Promise<s
   const modelsCovered = Array.from(
     new Set(runs.map(r => (r as { ai_model: string }).ai_model))
   )
+  // Distinct engines where brand appeared at least once
+  const engineCoverage = new Set(
+    runs
+      .filter(r => (r as { client_brand_rank: number | null }).client_brand_rank !== null)
+      .map(r => (r as { ai_engine: string }).ai_engine)
+  ).size
 
   // Build a compact ranking_table for reporting:
   //   { brands: [{ name, mentions, avg_rank, by_engine }] }
@@ -397,7 +425,7 @@ async function aggregateSnapshot(clientId: string, brandName: string): Promise<s
     .single<{ id: string }>()
 
   if (upsertErr || !snapshot) return null
-  return snapshot.id
+  return { snapshotId: snapshot.id, mentionsCount, totalRuns, avgRank, engineCoverage }
 }
 
 /** Aggregate brand mentions across all runs into a flat ranking table. */

@@ -9,6 +9,7 @@
 
 import { supabaseAdmin } from '../../supabase'
 import { isValidGeoActionType } from '../vocabulary'
+import { writeTrackerFlywheelMetrics } from '../metrics/writeTrackerMetrics'
 import { registerAdapter } from './registry'
 import type {
   ExecuteActionInput,
@@ -70,9 +71,64 @@ export class GeoComposerAdapter implements FlywheelAdapter {
     }
   }
 
-  // Stub — P12.A.7 will pull real GEO metrics from the AI Tracker results.
-  async pullMetrics(_clientId: string, _since?: Date): Promise<FlywheelMetricRow[]> {
-    return []
+  /**
+   * Pull GEO metrics from the latest ai_visibility_snapshots row and write
+   * them to flywheel_metrics. Called by the metrics-cron job.
+   *
+   * Uses the most recent snapshot (any week) unless `since` is provided.
+   */
+  async pullMetrics(clientId: string, since?: Date): Promise<FlywheelMetricRow[]> {
+    let query = supabaseAdmin
+      .from('ai_visibility_snapshots')
+      .select('id, week_of, avg_rank, mentions_count, total_runs, models_covered, created_at')
+      .eq('client_id', clientId)
+      .order('week_of', { ascending: false })
+      .limit(1)
+
+    if (since) {
+      query = query.gte('created_at', since.toISOString())
+    }
+
+    const { data, error } = await query.maybeSingle()
+
+    if (error || !data) return []
+
+    // Recompute engine_coverage: we only have models_covered here (not per-run
+    // engine-level data), so use model count as a lower-bound proxy.
+    const engineCoverage: number = Array.isArray(data.models_covered)
+      ? data.models_covered.length
+      : 0
+
+    await writeTrackerFlywheelMetrics(clientId, {
+      snapshotId: data.id as string,
+      mentionsCount: (data.mentions_count as number) ?? 0,
+      totalRuns: (data.total_runs as number) ?? 0,
+      avgRank: (data.avg_rank as number | null) ?? null,
+      engineCoverage,
+    })
+
+    // Return the rows that were written (re-query would add latency; return
+    // a minimal representation for the caller to log/inspect).
+    const now = new Date().toISOString()
+    const base = {
+      clientId,
+      flywheel: 'geo' as const,
+      source: 'ai_tracker',
+      sourceRef: { snapshot_id: data.id },
+      measuredAt: now,
+    }
+    const total = (data.total_runs as number) ?? 0
+    const mentions = (data.mentions_count as number) ?? 0
+    if (total === 0) return []
+
+    const rows: FlywheelMetricRow[] = [
+      { ...base, id: '', metricKey: 'geo.query.mention_rate', metricValue: mentions / total },
+      { ...base, id: '', metricKey: 'geo.engine.coverage',    metricValue: engineCoverage  },
+    ]
+    if (data.avg_rank !== null) {
+      rows.push({ ...base, id: '', metricKey: 'geo.query.avg_rank', metricValue: data.avg_rank as number })
+    }
+    return rows
   }
 }
 
