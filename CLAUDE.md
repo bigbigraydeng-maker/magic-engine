@@ -200,12 +200,11 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-17（P12.A.4 ✅ — GeoComposerAdapter 完成，M2 第一个 adapter 进行中）
+> 最后更新：2026-05-17（P12.A.5 ✅ — 执行看板按钮按 mode 分发完成，FlywheelDrawer stub 已建）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P12.A.5** | 改造执行看板按钮逻辑（in_house 弹抽屉 / third_party 跳外链 / external_manual 只显勾选） | ⭐⭐⭐ |
-| P12.A.6 | 新建 FlywheelDrawer.tsx，调 adapter.execute() 落库 | ⭐⭐⭐ |
+| **P12.A.6** | 填充 FlywheelDrawer.tsx：调 adapter.execute() 落库 flywheel_actions | ⭐⭐⭐ |
 | P8.3.2 | Dashboard Magic Link 鉴权（Phase 12 完成后做） | ⭐⭐ |
 
 **Phase 12 工作协议见上方专节**。Phase 12.A 完成后回到 Phase 8.3.2 简单鉴权。
