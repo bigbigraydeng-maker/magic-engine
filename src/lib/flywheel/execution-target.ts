@@ -27,18 +27,27 @@ import type {
 import { GEO_ACTION_TYPE } from './vocabulary'
 
 function dimensionToFlywheel(dim: DiagnosticDimension): FlywheelName {
-  if (dim === 'seo')           return 'seo'
-  if (dim === 'ai_visibility') return 'geo'
-  if (dim === 'ads')           return 'ads'
-  if (dim === 'social')        return 'social'
-  if (dim === 'reputation')    return 'geo'
-  return 'seo' // competitor
+  switch (dim) {
+    case 'seo':           return 'seo'
+    case 'ai_visibility': return 'geo'
+    case 'ads':           return 'ads'
+    case 'social':        return 'social'
+    case 'reputation':    return 'geo'
+    case 'competitor':    return 'seo'
+  }
+  // Exhaustive: TS will error here if DiagnosticDimension gains a new variant.
+  const _exhaustive: never = dim
+  return _exhaustive
 }
 
 function fixTypeToMode(fix: FixType): ExecutionMode {
-  if (fix === 'me_auto')    return 'in_house'
-  if (fix === 'third_party') return 'third_party'
-  return 'external_manual' // fde_manual
+  switch (fix) {
+    case 'me_auto':     return 'in_house'
+    case 'third_party': return 'third_party'
+    case 'fde_manual':  return 'external_manual'
+  }
+  const _exhaustive: never = fix
+  return _exhaustive
 }
 
 /**
