@@ -1040,7 +1040,7 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
 
 - [x] **P12.A.1** — 建 3 张新表 migration（`flywheel_actions` / `flywheel_metrics` / `flywheel_outcomes`）+ alter `prescription_actions` 加 `execution_target` JSONB 列。含 6 客户存量数据回填 SQL（把现有 `module` 映射到新 `execution_target`）✅ 2026-05-17
 - [x] **P12.A.2** — 受控词表（`src/lib/flywheel/vocabulary.ts`）：所有 `action_type` + `metric_key` 枚举。**Phase 12 只列 GEO 维度**（如 `geo.deploy_directive` / `geo.query.mention_rate`），其他飞轮 Phase 12.B 补 ✅ 2026-05-17
-- [ ] **P12.A.3** — `FlywheelAdapter` 接口 + `Registry`（`src/lib/flywheel/adapters/types.ts` + `registry.ts`）
+- [x] **P12.A.3** — `FlywheelAdapter` 接口 + `Registry`（`src/lib/flywheel/adapters/types.ts` + `registry.ts`）✅ 2026-05-17
 
 > **M1 验证关卡**：`npm run build` 通过；Supabase 后台能看到 3 张新表（flywheel_actions / flywheel_metrics / flywheel_outcomes）；6 客户处方的 `execution_target` 列已填非空
 
@@ -1129,6 +1129,8 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
   `feat(flywheel): P12.A.1 — 建 3 张飞轮新表 + alter execution_items [P12.A.1]` (c8b518b)
 - **P12.A.2** — GEO 受控词表：6 个 action_type 常量 + 5 个 metric_key 常量 + 运行时校验函数
   `feat(flywheel): P12.A.2 — GEO 受控词表 vocabulary.ts [P12.A.2]` (9738c04)
+- **P12.A.3** — FlywheelAdapter 接口 + Registry：types.ts 定义接口 + DTO，registry.ts 提供注册/查找/列举函数
+  `feat(flywheel): P12.A.3 — FlywheelAdapter 接口 + Registry [P12.A.3]`
 
 ### 2026-05-14
 

@@ -200,11 +200,11 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-17（P12.A.2 ✅）
+> 最后更新：2026-05-17（P12.A.3 ✅ — M1 地基完成，等待 PM 验证关卡）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P12.A.3** | FlywheelAdapter 接口 + Registry（M1 终点） | ⭐⭐⭐ |
+| **P12.A.4** | 实现 GeoComposerAdapter（in_house mode） | ⭐⭐⭐ |
 | P8.3.2 | Dashboard Magic Link 鉴权（Phase 12 完成后做） | ⭐⭐ |
 | P7.4.15 | Week 2 CTS Tours AI Tracker 复跑（2026-05-12） | ⭐⭐ |
 
