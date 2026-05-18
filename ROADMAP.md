@@ -645,7 +645,7 @@ Layer 5: Export（新增）— P8.10.S5
 - [x] **P8.10.S2.2** Competitor Collector 加 Jina 抓竞品官网（解析 USP / CTA / 落地页类型 / 类目深度）
 - [x] **P8.10.S2.3** Social Collector 加最近 30 天热门 3 条 post 内容采样（含点赞 / 评论 / hashtag）
 - [x] **P8.10.S2.4** Ads Collector 从零实现（Apify Meta Ad Library + Google Ads Transparency）
-- [ ] **P8.10.S2.5** AI Visibility 加实时调用层（诊断时同步跑 3 个核心问句，不只读 cron snapshot）
+- [x] **P8.10.S2.5** AI Visibility 加实时调用层（诊断时同步跑 3 个核心问句，不只读 cron snapshot）
 - [ ] **P8.10.S2.6** 统一 evidence schema：`{ raw, parsed, sources: [{url, fetched_at}], collected_at }`
 
 **Sprint 3 — Synthesis 层（P8.10.S3，~3 天，核心）**：
@@ -1211,6 +1211,8 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
   `feat(onboarding): P8.10.S0.12 — 2 步接入向导替换 5 步向导 [P8.10.S0.12]`
 - **P8.10.S2.4** — Ads Collector 从零实现：Apify Meta Ad Library + Google Ads Transparency 双源 + 评分（platform/volume/creative 40/35/25）+ 4 类 finding（no_ads / single-platform / low-volume / weak-creative）+ runner 接入 + 13 单元测试
   `feat(diagnostic): P8.10.S2.4 — Ads Collector + Meta/Google 双源 [P8.10.S2.4]`
+- **P8.10.S2.5** — AI Visibility 实时调用层：新 `ai-visibility-live-probe.ts`（默认 probe 接 OpenAI runner + parser，跑 3 个核心问句，45s 超时，OPENAI_API_KEY 缺失时静默降级）；collector 加 LiveProbe 注入 + 三态合并（无 snapshot→走 live 评分 / snapshot 0 mentions→附 live 证据 / snapshot 健康但 live 0→新增 `live_probe_no_mention` 高优 finding）；runner.ts 在 ai_visibility/full 模式注入默认 probe；14 测试全过；build 通过
+  `feat(diagnostic): P8.10.S2.5 — AI Visibility live probe [P8.10.S2.5]`
 
 #### 🎉 Phase 12.A 总结（2026-05-17 完成，15 commits / 1 天）
 

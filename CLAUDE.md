@@ -213,12 +213,11 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-18（**P8.10.S2 进行中** — 4/6 完成：S2.1 SEO / S2.2 Competitor / S2.3 Social / S2.4 Ads；已 push 到 `feat/phase-8-10-s2`）
+> 最后更新：2026-05-18（**P8.10.S2 进行中** — 5/6 完成：S2.1 SEO / S2.2 Competitor / S2.3 Social / S2.4 Ads / S2.5 AI Visibility live probe；已 push 到 `feat/phase-8-10-s2`）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P8.10.S2.5** | AI Visibility 加实时调用层（诊断时同步跑 3 个核心问句，不只读 cron snapshot） | ⭐⭐⭐ |
-| P8.10.S2.6 | 统一 evidence schema | ⭐⭐ |
+| **P8.10.S2.6** | 统一 evidence schema：`{ raw, parsed, sources: [{url, fetched_at}], collected_at }` | ⭐⭐⭐ |
 | P8.10.S2 PR | S2.6 完成后开 PR `feat/phase-8-10-s2` → main | ⭐⭐ |
 | P8.3.2 | Dashboard Magic Link 鉴权（S2 之后） | ⭐ |
 

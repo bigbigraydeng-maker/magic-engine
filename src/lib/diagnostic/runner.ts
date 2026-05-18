@@ -6,6 +6,7 @@ import { SocialCollector } from './collectors/social-collector'
 import { ReputationCollector } from './collectors/reputation-collector'
 import { CompetitorCollector } from './collectors/competitor-collector'
 import { AiVisibilityCollector } from './collectors/ai-visibility-collector'
+import { createDefaultLiveProbe } from './ai-visibility-live-probe'
 import { AdsCollector } from './collectors/ads-collector'
 import { computeOverallScore, isDiagnosticDimension } from './guards'
 
@@ -136,7 +137,10 @@ async function runCollectors(
     jobs.push({ dim: 'competitor', promise: new CompetitorCollector().collect(clientId, domain, keywords) })
   }
   if (module === 'ai_visibility' || module === 'full') {
-    jobs.push({ dim: 'ai_visibility', promise: new AiVisibilityCollector(supabase).collect(clientId, domain, keywords) })
+    // P8.10.S2.5: real-time probe runs alongside the snapshot read so freshly
+    // onboarded clients (no cron snapshot yet) still get a real AI signal.
+    const liveProbe = createDefaultLiveProbe(supabase)
+    jobs.push({ dim: 'ai_visibility', promise: new AiVisibilityCollector(supabase, liveProbe).collect(clientId, domain, keywords) })
   }
   if (module === 'ads' || module === 'full') {
     jobs.push({ dim: 'ads', promise: new AdsCollector(supabase).collect(clientId, domain, keywords) })
