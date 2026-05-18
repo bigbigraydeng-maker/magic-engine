@@ -642,8 +642,8 @@ Layer 5: Export（新增）— P8.10.S5
 
 **Sprint 2 — 数据源深化（P8.10.S2，~2 天）**：
 - [x] **P8.10.S2.1** SEO Collector 加 DataForSEO backlinks 详情 + SERP rankings 抓取
-- [ ] **P8.10.S2.2** Competitor Collector 加 Jina 抓竞品官网（解析 USP / CTA / 落地页类型 / 类目深度）
-- [ ] **P8.10.S2.3** Social Collector 加最近 30 天热门 3 条 post 内容采样（含点赞 / 评论 / hashtag）
+- [x] **P8.10.S2.2** Competitor Collector 加 Jina 抓竞品官网（解析 USP / CTA / 落地页类型 / 类目深度）
+- [x] **P8.10.S2.3** Social Collector 加最近 30 天热门 3 条 post 内容采样（含点赞 / 评论 / hashtag）
 - [ ] **P8.10.S2.4** Ads Collector 从零实现（Apify Meta Ad Library + Google Ads Transparency）
 - [ ] **P8.10.S2.5** AI Visibility 加实时调用层（诊断时同步跑 3 个核心问句，不只读 cron snapshot）
 - [ ] **P8.10.S2.6** 统一 evidence schema：`{ raw, parsed, sources: [{url, fetched_at}], collected_at }`

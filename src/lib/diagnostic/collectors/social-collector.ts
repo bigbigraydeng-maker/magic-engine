@@ -4,8 +4,14 @@ import {
   scrapeFacebookPage,
   scrapeTiktokProfile,
 } from '@/lib/apify/social-scraper'
+import type { SocialPostSample } from '@/lib/apify/social-scraper'
 import type { CollectorResult, NewFinding } from '../types'
 import { MAX_COLLECTOR_TIMEOUT_MS, SOCIAL_CACHE_TTL_DAYS } from '../constants'
+
+// P8.10.S2.3: extended return shape — samples flow to Synthesis layer (S3)
+export interface SocialCollectorResult extends CollectorResult {
+  post_samples: SocialPostSample[]
+}
 
 // ─── Scoring constants ────────────────────────────────────────────────────────
 // FREQ + ENGAGE intentionally sum to 0.80, not 1.0.
@@ -38,9 +44,9 @@ export class SocialCollector {
     clientId: string,
     _domain: string,
     _keywords: string[],
-  ): Promise<CollectorResult> {
+  ): Promise<SocialCollectorResult> {
     try {
-      if (await this.hasFreshCache(clientId)) return { score: null, findings: [] }
+      if (await this.hasFreshCache(clientId)) return { score: null, findings: [], post_samples: [] }
 
       const handles = await this.fetchSocialHandles(clientId)
       const configured = [
@@ -50,16 +56,16 @@ export class SocialCollector {
       ].filter(Boolean)
 
       if (configured.length === 0) {
-        return { score: null, findings: [this.makeMissingPresenceFinding(clientId)] }
+        return { score: null, findings: [this.makeMissingPresenceFinding(clientId)], post_samples: [] }
       }
 
-      const timeout = new Promise<CollectorResult>(resolve =>
-        setTimeout(() => resolve({ score: null, findings: [] }), this.timeoutMs),
+      const timeout = new Promise<SocialCollectorResult>(resolve =>
+        setTimeout(() => resolve({ score: null, findings: [], post_samples: [] }), this.timeoutMs),
       )
 
       return await Promise.race([this.collectAndScore(clientId, handles), timeout])
     } catch {
-      return { score: null, findings: [] }
+      return { score: null, findings: [], post_samples: [] }
     }
   }
 
@@ -88,38 +94,44 @@ export class SocialCollector {
   private async collectAndScore(
     clientId: string,
     handles: SocialHandles,
-  ): Promise<CollectorResult> {
+  ): Promise<SocialCollectorResult> {
     const platformScores: number[] = []
     const findings: NewFinding[] = []
+    const post_samples: SocialPostSample[] = []
 
     // Run configured platforms concurrently; each is fault-tolerant
     const jobs = await Promise.allSettled([
       handles.instagramHandle
         ? scrapeInstagramProfile(handles.instagramHandle).then(p => ({
-            platform: 'Instagram',
+            platform: 'Instagram' as const,
             posts: p.postsLast30Days,
             engagementRate: p.engagementRate,
+            topPosts: p.topPosts30d,
           }))
         : Promise.resolve(null),
       handles.facebookPageUrl
         ? scrapeFacebookPage(handles.facebookPageUrl).then(p => ({
-            platform: 'Facebook',
+            platform: 'Facebook' as const,
             posts: p.postsLast30Days,
             engagementRate: p.engagementRate,
+            topPosts: p.topPosts30d,
           }))
         : Promise.resolve(null),
       handles.tiktokHandle
         ? scrapeTiktokProfile(handles.tiktokHandle).then(p => ({
-            platform: 'TikTok',
+            platform: 'TikTok' as const,
             posts: p.postsLast30Days,
             engagementRate: p.engagementRate,
+            topPosts: p.topPosts30d,
           }))
         : Promise.resolve(null),
     ])
 
     for (const result of jobs) {
       if (result.status !== 'fulfilled' || !result.value) continue
-      const { platform, posts, engagementRate } = result.value
+      const { platform, posts, engagementRate, topPosts } = result.value
+
+      post_samples.push(...topPosts)
 
       const freqScore   = this.postFrequencyScore(posts)
       const engageScore = this.engagementScore(engagementRate)
@@ -135,7 +147,7 @@ export class SocialCollector {
           severity,
           title: `Low posting frequency on ${platform}`,
           description: `Only ${posts} post${posts === 1 ? '' : 's'} published in the last 30 days on ${platform}.`,
-          evidence: { platform, posts_last_30_days: posts },
+          evidence: { platform, posts_last_30_days: posts, top_posts_30d: topPosts },
           recommendation: 'Aim for at least 3 posts per week to maintain audience engagement.',
           fix_type: 'fde_manual',
           priority_score: posts === 0 ? 90 : posts < LOW_POST_HIGH ? 70 : 50,
@@ -150,7 +162,7 @@ export class SocialCollector {
           severity: 'high',
           title: `Low engagement rate on ${platform}`,
           description: `Engagement rate is ${(engagementRate * 100).toFixed(2)}% on ${platform} — below 0.5% threshold.`,
-          evidence: { platform, engagement_rate: engagementRate },
+          evidence: { platform, engagement_rate: engagementRate, top_posts_30d: topPosts },
           recommendation: 'Create more interactive content (polls, Q&A, calls-to-action) to boost engagement.',
           fix_type: 'fde_manual',
           priority_score: 65,
@@ -158,13 +170,13 @@ export class SocialCollector {
       }
     }
 
-    if (platformScores.length === 0) return { score: null, findings }
+    if (platformScores.length === 0) return { score: null, findings, post_samples }
 
     const avgScore = platformScores.reduce((a, b) => a + b, 0) / platformScores.length
     const diversityBonus = Math.min(20, (platformScores.length - 1) * DIVERSITY_BONUS_PER_PLATFORM)
     const score = Math.min(100, Math.round(avgScore + diversityBonus))
 
-    return { score, findings }
+    return { score, findings, post_samples }
   }
 
   private async hasFreshCache(clientId: string): Promise<boolean> {
