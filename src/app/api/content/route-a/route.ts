@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getActiveBrief, formatBriefForPrompt } from '@/lib/content/brief-injector'
 import { getCampaignById, formatCampaignForPrompt } from '@/lib/content/campaign-injector'
+import { generateVisualBrief } from '@/lib/content/visual-brief-generator'
 import OpenAI from 'openai'
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+function getOpenAIClient() {
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -51,7 +54,8 @@ export async function POST(req: NextRequest) {
       ? `SEO Data: Monthly Volume ${kwRecord.volume ?? 'N/A'}, Intent: ${kwRecord.intent ?? 'N/A'}, Opportunity Score: ${kwRecord.opportunity_score ?? 'N/A'}`
       : ''
 
-    // 3. Generate V1 and V2 in parallel
+    // 3. Generate V1 and V2 text content in parallel
+    const openai = getOpenAIClient()
     const generateVariant = async (variant: 1 | 2) => {
       const variantNote = variant === 1
         ? 'Variant 1: Educational angle — explain the value and benefits clearly.'
@@ -73,8 +77,7 @@ Output ONLY valid JSON with these fields:
   "title": "...",
   "script": "...",
   "caption": "...",
-  "hashtags": ["...", "..."],
-  "visual_brief": "..."
+  "hashtags": ["...", "..."]
 }`,
           },
           {
@@ -83,8 +86,7 @@ Output ONLY valid JSON with these fields:
 Platforms: ${targetPlatforms.join(', ')}
 ${variantNote}
 
-The script should be 100-200 words. Caption 50-100 words. 8-12 hashtags including the keyword.
-Visual brief: 30-50 words describing the ideal visual.`,
+The script should be 100-200 words. Caption 50-100 words. 8-12 hashtags including the keyword.`,
           },
         ],
       })
@@ -98,11 +100,19 @@ Visual brief: 30-50 words describing the ideal visual.`,
         script: parsed.script || '',
         caption: parsed.caption || '',
         hashtags: parsed.hashtags || [],
-        visual_brief: parsed.visual_brief || '',
       }
     }
 
-    const [v1, v2] = await Promise.all([generateVariant(1), generateVariant(2)])
+    const [v1raw, v2raw] = await Promise.all([generateVariant(1), generateVariant(2)])
+
+    // 3b. Generate visual briefs (second step) — grounded in MB visual DNA
+    const [vb1, vb2] = await Promise.all([
+      generateVisualBrief({ postTitle: v1raw.title, postScript: v1raw.script, postCaption: v1raw.caption, brief, platforms: targetPlatforms, topic: keyword }),
+      generateVisualBrief({ postTitle: v2raw.title, postScript: v2raw.script, postCaption: v2raw.caption, brief, platforms: targetPlatforms, topic: keyword }),
+    ])
+
+    const v1 = { ...v1raw, visual_brief: vb1 }
+    const v2 = { ...v2raw, visual_brief: vb2 }
 
     // 4. Save to Supabase
     const postBase = {
