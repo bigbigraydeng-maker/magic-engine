@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 interface UploadedFile {
   storagePath: string;
@@ -25,7 +25,37 @@ export function BriefSourcesForm({ clientId, onGenerated }: Props) {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState('');
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [discoveryLoaded, setDiscoveryLoaded] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-prefill from 张骞 discovery data if available
+  useEffect(() => {
+    const apiKey = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? '';
+    fetch(`/api/clients/${clientId}/zhangqian/latest`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then((json: { success: boolean; discovery: { domain: string; payload: { social_profiles: { url: string }[] } } } | null) => {
+        if (!json?.success || !json.discovery) return;
+        const d = json.discovery;
+        // Pre-fill domain
+        if (d.domain) setDomain(prev => prev || d.domain);
+        // Pre-fill social profile URLs as website URLs (up to 3)
+        const socialUrls = (d.payload?.social_profiles ?? [])
+          .slice(0, 3)
+          .map((p: { url: string }) => p.url)
+          .filter(Boolean);
+        if (socialUrls.length > 0) {
+          setUrlInputs(prev => {
+            const existing = prev.filter(Boolean);
+            const merged = [...existing, ...socialUrls].slice(0, 5);
+            return merged.length < 2 ? [...merged, ''] : merged;
+          });
+        }
+        setDiscoveryLoaded(true);
+      })
+      .catch(() => { /* silent — no discovery yet */ });
+  }, [clientId]);
 
   const handleUrlChange = (i: number, val: string) => {
     setUrlInputs(prev => prev.map((u, idx) => (idx === i ? val : u)));
@@ -112,6 +142,13 @@ export function BriefSourcesForm({ clientId, onGenerated }: Props) {
 
   return (
     <div className="space-y-5">
+      {discoveryLoaded && (
+        <div className="flex items-center gap-2 text-xs text-indigo-700 bg-indigo-50 rounded-lg px-3 py-2">
+          <span>✓</span>
+          <span>已从张骞发现数据预填域名和社媒链接</span>
+        </div>
+      )}
+
       {/* Website URLs */}
       <div>
         <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
