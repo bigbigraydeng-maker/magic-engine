@@ -1,6 +1,7 @@
 import { getBusinessReviews } from '@/lib/places/client'
 import type { BusinessReviewData } from '@/lib/places/client'
 import type { CollectorResult, NewFinding } from '../types'
+import { makeEvidence, evidenceSource } from '../types'
 import { MAX_COLLECTOR_TIMEOUT_MS } from '../constants'
 
 // ---------------------------------------------------------------------------
@@ -68,7 +69,10 @@ export class ReputationCollector {
         severity: 'high',
         title: 'Low Google review rating',
         description: `Average rating is ${data.rating.toFixed(1)}/5 — below the recommended threshold of ${LOW_RATING_THRESHOLD}.`,
-        evidence: { rating: data.rating, total_reviews: data.totalReviews },
+        evidence: makeEvidence({
+          parsed: { rating: data.rating, total_reviews: data.totalReviews },
+          sources: [evidenceSource('https://business.google.com/')],
+        }),
         recommendation: 'Respond to negative reviews professionally and implement a customer feedback process to improve satisfaction.',
         fix_type: 'fde_manual',
         priority_score: 80,
@@ -83,7 +87,10 @@ export class ReputationCollector {
         severity: 'medium',
         title: 'Too few Google reviews',
         description: `Only ${data.totalReviews} review${data.totalReviews === 1 ? '' : 's'} found. More reviews build trust and improve local SEO.`,
-        evidence: { total_reviews: data.totalReviews },
+        evidence: makeEvidence({
+          parsed: { total_reviews: data.totalReviews },
+          sources: [evidenceSource('https://business.google.com/')],
+        }),
         recommendation: 'Ask satisfied customers to leave a Google review. Include a QR code or direct link in receipts or follow-up emails.',
         fix_type: 'fde_manual',
         priority_score: 55,

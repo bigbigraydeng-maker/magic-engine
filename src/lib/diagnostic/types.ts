@@ -14,3 +14,72 @@ export interface CollectorResult {
   score: number | null
   findings: NewFinding[]
 }
+
+// ---------------------------------------------------------------------------
+// P8.10.S2.6 — Unified evidence schema
+// ---------------------------------------------------------------------------
+
+/** External resource a piece of evidence was derived from. */
+export interface EvidenceSource {
+  /** Fully qualified URL of the source (API endpoint, scraped page, …). */
+  url: string
+  /** ISO timestamp at which the source was fetched. */
+  fetched_at: string
+}
+
+/**
+ * Canonical envelope every collector wraps its finding evidence in.
+ *
+ * Goals (see ROADMAP P8.10.S2.6):
+ *   - `parsed` — structured signals downstream renderers / synthesizers consume
+ *   - `raw`    — upstream payload (HTML snippet, API JSON, scrape sample) so
+ *                future re-analysis is possible without re-collecting
+ *   - `sources` — auditable list of URLs that backed the parsed signals
+ *   - `collected_at` — when collection happened, so staleness is detectable
+ */
+export interface EvidenceEnvelope {
+  raw: unknown
+  parsed: Record<string, unknown> | null
+  sources: EvidenceSource[]
+  collected_at: string
+}
+
+export interface MakeEvidenceArgs {
+  parsed?: Record<string, unknown> | null
+  raw?: unknown
+  sources?: EvidenceSource[]
+  /** Override timestamp — primarily for deterministic tests. */
+  collected_at?: string
+}
+
+/** Wraps structured evidence in the canonical envelope. */
+export function makeEvidence(args: MakeEvidenceArgs = {}): EvidenceEnvelope {
+  return {
+    raw: args.raw ?? null,
+    parsed: args.parsed ?? null,
+    sources: args.sources ?? [],
+    collected_at: args.collected_at ?? new Date().toISOString(),
+  }
+}
+
+/** Convenience constructor for an EvidenceSource with `fetched_at = now`. */
+export function evidenceSource(url: string, fetchedAt?: string): EvidenceSource {
+  return { url, fetched_at: fetchedAt ?? new Date().toISOString() }
+}
+
+/**
+ * Type guard — true when a finding's evidence already follows the envelope shape.
+ * Used by tests and downstream code that wants to safely read `parsed.*`.
+ */
+export function isEvidenceEnvelope(v: unknown): v is EvidenceEnvelope {
+  if (!v || typeof v !== 'object') return false
+  const e = v as Record<string, unknown>
+  return (
+    'raw' in e &&
+    'parsed' in e &&
+    'sources' in e &&
+    'collected_at' in e &&
+    Array.isArray(e.sources) &&
+    typeof e.collected_at === 'string'
+  )
+}

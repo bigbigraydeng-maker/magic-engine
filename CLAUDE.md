@@ -213,13 +213,13 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-18（**P8.10.S2 进行中** — 5/6 完成：S2.1 SEO / S2.2 Competitor / S2.3 Social / S2.4 Ads / S2.5 AI Visibility live probe；已 push 到 `feat/phase-8-10-s2`）
+> 最后更新：2026-05-18（**P8.10.S2 全部完成** — 6/6：S2.1 SEO / S2.2 Competitor / S2.3 Social / S2.4 Ads / S2.5 AI Visibility live probe / S2.6 unified evidence envelope；已 push 到 `feat/phase-8-10-s2`）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P8.10.S2.6** | 统一 evidence schema：`{ raw, parsed, sources: [{url, fetched_at}], collected_at }` | ⭐⭐⭐ |
-| P8.10.S2 PR | S2.6 完成后开 PR `feat/phase-8-10-s2` → main | ⭐⭐ |
-| P8.3.2 | Dashboard Magic Link 鉴权（S2 之后） | ⭐ |
+| **P8.10.S2 PR** | 开 PR `feat/phase-8-10-s2` → main（含 S2.1–S2.6 + S0.15–S0.20） | ⭐⭐⭐ |
+| P8.10.S3.1 | `competitor-analyst.ts`（Claude Sonnet 合成市场结构 + 对标路径） | ⭐⭐ |
+| P8.3.2 | Dashboard Magic Link 鉴权 | ⭐ |
 
 **Phase 12.B PR #33 已合并**(2026-05-18 02:47)，旧焦点表过期已修。
 

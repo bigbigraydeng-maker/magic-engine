@@ -239,7 +239,7 @@ describe('AiVisibilityCollector.collect() — live probe (P8.10.S2.5)', () => {
     expect(score).toBe(0)
     const f = findings.find(x => x.finding_type === 'brand_not_mentioned')
     expect(f).toBeDefined()
-    expect(f?.evidence).toMatchObject({ live_probe: { runs: 3, mentions: 0 } })
+    expect(f?.evidence).toMatchObject({ parsed: { live_probe: { runs: 3, mentions: 0 } } })
   })
 
   it('falls back to ai_visibility_not_tracked when probe is skipped and no snapshot', async () => {
@@ -279,7 +279,7 @@ describe('AiVisibilityCollector.collect() — live probe (P8.10.S2.5)', () => {
       CLIENT_ID, DOMAIN, KEYWORDS,
     )
     const f = findings.find(x => x.finding_type === 'low_ai_rank')
-    expect(f?.evidence).toMatchObject({ live_probe: { runs: 3, mentions: 2 } })
+    expect(f?.evidence).toMatchObject({ parsed: { live_probe: { runs: 3, mentions: 2 } } })
   })
 
   it('does not crash when probe throws — falls back to snapshot-only', async () => {

@@ -143,9 +143,12 @@ describe('CompetitorCollector.collect() — large traffic gap', () => {
     const f = result.findings.find(x => x.finding_type === 'traffic_gap_large')
     expect(f?.evidence).toBeDefined()
     expect(f?.evidence).toMatchObject({
-      client_traffic: expect.any(Number),
-      avg_competitor_traffic: expect.any(Number),
-      ratio: expect.any(Number),
+      parsed: {
+        client_traffic: expect.any(Number),
+        avg_competitor_traffic: expect.any(Number),
+        ratio: expect.any(Number),
+      },
+      collected_at: expect.any(String),
     })
   })
 })

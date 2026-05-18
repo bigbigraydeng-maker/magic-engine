@@ -4,7 +4,15 @@ import type { MetaAdData } from '@/lib/apify/ad-library'
 import { scrapeGoogleAdsTransparency } from '@/lib/apify/google-ads-transparency'
 import type { GoogleAdsData } from '@/lib/apify/google-ads-transparency'
 import type { CollectorResult, NewFinding } from '../types'
+import { makeEvidence, evidenceSource } from '../types'
 import { MAX_COLLECTOR_TIMEOUT_MS } from '../constants'
+
+// P8.10.S2.6: Meta + Google ads-library URLs we audit; included as evidence sources.
+const META_AD_LIBRARY_URL = 'https://www.facebook.com/ads/library/'
+const GOOGLE_ADS_TRANSPARENCY_URL = 'https://adstransparency.google.com/'
+function adsSources(): ReturnType<typeof evidenceSource>[] {
+  return [evidenceSource(META_AD_LIBRARY_URL), evidenceSource(GOOGLE_ADS_TRANSPARENCY_URL)]
+}
 
 // ─── Scoring ──────────────────────────────────────────────────────────────────
 // Score is built from three signals (all 0–100), weighted to sum to 100:
@@ -194,7 +202,7 @@ export class AdsCollector {
       severity: 'high',
       title: 'Client domain not configured',
       description: 'Cannot evaluate advertising activity without a domain — the Meta Ad Library and Google Ads Transparency Center both require a brand/domain search term.',
-      evidence: { domain: null },
+      evidence: makeEvidence({ parsed: { domain: null } }),
       recommendation: 'Open Client Settings → General and set the primary domain. Re-run diagnostic.',
       fix_type: 'fde_manual',
       priority_score: 80,
@@ -213,10 +221,14 @@ export class AdsCollector {
       severity: 'high',
       title: 'No active paid advertising detected',
       description: 'No active ads found on Meta Ad Library or Google Ads Transparency Center. Paid acquisition is a major growth lever for AU/NZ service businesses; running zero ads leaves performance entirely dependent on organic and word-of-mouth.',
-      evidence: {
-        meta: meta ? { active_ads: meta.activeAdsCount, queried: meta.domain } : { error: 'fetch_failed' },
-        google: google ? { active_ads: google.activeAdsCount, queried: google.advertiser } : { error: 'fetch_failed' },
-      },
+      evidence: makeEvidence({
+        parsed: {
+          meta: meta ? { active_ads: meta.activeAdsCount, queried: meta.domain } : { error: 'fetch_failed' },
+          google: google ? { active_ads: google.activeAdsCount, queried: google.advertiser } : { error: 'fetch_failed' },
+        },
+        raw: { meta, google },
+        sources: adsSources(),
+      }),
       recommendation: 'Start with a small Meta Ads test budget ($20–50/day) targeting the highest-intent audience, then layer Google Search ads once Meta proves profitable.',
       fix_type: 'fde_manual',
       priority_score: 80,
@@ -238,10 +250,14 @@ export class AdsCollector {
       severity: 'medium',
       title: `Running ads on ${active} only — missing ${missing}`,
       description: `Active paid advertising detected on ${active} but no ads found on ${missing}. Single-platform concentration leaves intent-based or discovery-based demand untapped and increases CAC volatility.`,
-      evidence: {
-        meta: meta ? { active_ads: meta.activeAdsCount } : null,
-        google: google ? { active_ads: google.activeAdsCount } : null,
-      },
+      evidence: makeEvidence({
+        parsed: {
+          meta: meta ? { active_ads: meta.activeAdsCount } : null,
+          google: google ? { active_ads: google.activeAdsCount } : null,
+        },
+        raw: { meta, google },
+        sources: adsSources(),
+      }),
       recommendation: missing === 'Google'
         ? 'Add Google Search ads on brand + 3–5 top commercial-intent keywords to capture bottom-funnel demand.'
         : 'Add Meta Ads on Facebook + Instagram to capture top-funnel demand and retarget site visitors.',
@@ -263,7 +279,11 @@ export class AdsCollector {
       severity: 'medium',
       title: `Low ad volume on ${platform}`,
       description: `Only ${count} active ad${count === 1 ? '' : 's'} on ${platform}. Below ${LOW_AD_VOLUME_THRESHOLD} active ads severely limits creative testing and audience exploration.`,
-      evidence: { platform, active_ads: count, sample: raw },
+      evidence: makeEvidence({
+        parsed: { platform, active_ads: count },
+        raw,
+        sources: [evidenceSource(platform === 'Meta' ? META_AD_LIBRARY_URL : GOOGLE_ADS_TRANSPARENCY_URL)],
+      }),
       recommendation: `Build out at least 3–5 active ${platform} ads covering different angles (offer, social proof, urgency) to enable proper A/B testing.`,
       fix_type: 'fde_manual',
       priority_score: 50,
@@ -282,7 +302,10 @@ export class AdsCollector {
       severity: 'medium',
       title: `Weak creative diversity on ${platform}`,
       description: `Only ${formats.length} creative format${formats.length === 1 ? '' : 's'} (${formats.join(', ') || 'none'}) detected on ${platform}. Format diversity (image + video + carousel) typically lifts CTR by 30–50% on Meta and Quality Score on Google.`,
-      evidence: { platform, formats },
+      evidence: makeEvidence({
+        parsed: { platform, formats },
+        sources: [evidenceSource(platform === 'Meta' ? META_AD_LIBRARY_URL : GOOGLE_ADS_TRANSPARENCY_URL)],
+      }),
       recommendation: platform === 'Meta'
         ? 'Add at least one video ad (Reels-style) and one carousel ad alongside static image ads.'
         : 'Add Responsive Search Ads, Performance Max, and at least one video campaign (YouTube) for full-funnel coverage.',

@@ -259,9 +259,9 @@ describe('SocialCollector.collect() — top-post samples (P8.10.S2.3)', () => {
     expect(result.post_samples.length).toBeGreaterThan(0)
     const freqFinding = result.findings.find(f => f.finding_type === 'low_posting_frequency')
     expect(freqFinding).toBeDefined()
-    const ev = freqFinding!.evidence as { top_posts_30d?: unknown[] }
-    expect(Array.isArray(ev.top_posts_30d)).toBe(true)
-    expect((ev.top_posts_30d as unknown[]).length).toBeGreaterThan(0)
+    const ev = freqFinding!.evidence as { parsed?: { top_posts_30d?: unknown[] } }
+    expect(Array.isArray(ev.parsed?.top_posts_30d)).toBe(true)
+    expect((ev.parsed!.top_posts_30d as unknown[]).length).toBeGreaterThan(0)
   })
 
   it('returns post_samples=[] when no platforms configured', async () => {

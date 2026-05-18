@@ -6,7 +6,27 @@ import {
 } from '@/lib/apify/social-scraper'
 import type { SocialPostSample } from '@/lib/apify/social-scraper'
 import type { CollectorResult, NewFinding } from '../types'
+import { makeEvidence, evidenceSource } from '../types'
 import { MAX_COLLECTOR_TIMEOUT_MS, SOCIAL_CACHE_TTL_DAYS } from '../constants'
+
+// P8.10.S2.6: profile-URL helpers so social findings carry auditable sources.
+function instagramSources(handle: string | null): ReturnType<typeof evidenceSource>[] {
+  return handle ? [evidenceSource(`https://instagram.com/${handle.replace(/^@/, '')}`)] : []
+}
+function facebookSources(url: string | null): ReturnType<typeof evidenceSource>[] {
+  return url ? [evidenceSource(url)] : []
+}
+function tiktokSources(handle: string | null): ReturnType<typeof evidenceSource>[] {
+  return handle ? [evidenceSource(`https://www.tiktok.com/@${handle.replace(/^@/, '')}`)] : []
+}
+function sourcesForPlatform(
+  platform: 'Instagram' | 'Facebook' | 'TikTok',
+  handles: { instagramHandle: string | null; facebookPageUrl: string | null; tiktokHandle: string | null },
+): ReturnType<typeof evidenceSource>[] {
+  if (platform === 'Instagram') return instagramSources(handles.instagramHandle)
+  if (platform === 'Facebook') return facebookSources(handles.facebookPageUrl)
+  return tiktokSources(handles.tiktokHandle)
+}
 
 // P8.10.S2.3: extended return shape — samples flow to Synthesis layer (S3)
 export interface SocialCollectorResult extends CollectorResult {
@@ -147,7 +167,10 @@ export class SocialCollector {
           severity,
           title: `Low posting frequency on ${platform}`,
           description: `Only ${posts} post${posts === 1 ? '' : 's'} published in the last 30 days on ${platform}.`,
-          evidence: { platform, posts_last_30_days: posts, top_posts_30d: topPosts },
+          evidence: makeEvidence({
+            parsed: { platform, posts_last_30_days: posts, top_posts_30d: topPosts },
+            sources: sourcesForPlatform(platform, handles),
+          }),
           recommendation: 'Aim for at least 3 posts per week to maintain audience engagement.',
           fix_type: 'fde_manual',
           priority_score: posts === 0 ? 90 : posts < LOW_POST_HIGH ? 70 : 50,
@@ -162,7 +185,10 @@ export class SocialCollector {
           severity: 'high',
           title: `Low engagement rate on ${platform}`,
           description: `Engagement rate is ${(engagementRate * 100).toFixed(2)}% on ${platform} — below 0.5% threshold.`,
-          evidence: { platform, engagement_rate: engagementRate, top_posts_30d: topPosts },
+          evidence: makeEvidence({
+            parsed: { platform, engagement_rate: engagementRate, top_posts_30d: topPosts },
+            sources: sourcesForPlatform(platform, handles),
+          }),
           recommendation: 'Create more interactive content (polls, Q&A, calls-to-action) to boost engagement.',
           fix_type: 'fde_manual',
           priority_score: 65,
@@ -218,7 +244,9 @@ export class SocialCollector {
       title: 'Social media accounts not linked',
       description:
         'No Instagram, Facebook Page, or TikTok account is linked for this client. Social performance (post frequency, engagement) cannot be measured until at least one platform is connected.',
-      evidence: { instagram_handle: null, facebook_page_url: null, tiktok_handle: null },
+      evidence: makeEvidence({
+        parsed: { instagram_handle: null, facebook_page_url: null, tiktok_handle: null },
+      }),
       recommendation:
         'Open Client Settings → Social and add the Instagram handle, Facebook Page URL, and/or TikTok handle. Prioritise Instagram + Facebook for AU/NZ markets.',
       fix_type: 'fde_manual',

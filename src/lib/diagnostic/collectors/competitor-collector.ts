@@ -6,6 +6,11 @@ import type { MetaAdData } from '@/lib/apify/ad-library'
 import { analyzeCompetitorSite } from '@/lib/diagnostic/competitor-site-analyzer'
 import type { CompetitorSiteSignals } from '@/lib/diagnostic/competitor-site-analyzer'
 import type { CollectorResult, NewFinding } from '../types'
+import { makeEvidence, evidenceSource } from '../types'
+
+function urlFor(domain: string): string {
+  return domain.startsWith('http') ? domain : `https://${domain}`
+}
 
 // ---------------------------------------------------------------------------
 // Extended return type
@@ -113,15 +118,21 @@ export class CompetitorCollector {
         severity: 'critical',
         title: 'Large Organic Traffic Gap vs Competitors',
         description: `Your organic traffic is only ${Math.round(ratio * 100)}% of the average competitor traffic. This represents a significant competitive disadvantage.`,
-        evidence: {
-          client_traffic: clientTraffic,
-          avg_competitor_traffic: Math.round(avgCompetitorTraffic),
-          ratio: Math.round(ratio * 1000) / 1000,
-          top_competitors: competitorList.slice(0, 3).map(c => ({
-            domain: c.domain,
-            traffic: c.organic_traffic,
-          })),
-        },
+        evidence: makeEvidence({
+          parsed: {
+            client_traffic: clientTraffic,
+            avg_competitor_traffic: Math.round(avgCompetitorTraffic),
+            ratio: Math.round(ratio * 1000) / 1000,
+            top_competitors: competitorList.slice(0, 3).map(c => ({
+              domain: c.domain,
+              traffic: c.organic_traffic,
+            })),
+          },
+          sources: [
+            evidenceSource(urlFor(domain)),
+            ...competitorList.slice(0, 3).map(c => evidenceSource(urlFor(c.domain))),
+          ],
+        }),
         recommendation:
           'Invest in content marketing and SEO to close the traffic gap. Focus on high-intent keywords where competitors rank but you do not.',
         fix_type: 'fde_manual',
@@ -143,19 +154,27 @@ export class CompetitorCollector {
           severity: 'medium',
           title: 'Competitors run richer conversion paths',
           description: `Top competitors expose ~${Math.round(avgCompCta)} call-to-action links on their homepage vs your ${clientSignals.cta_count}. Visitors arriving from search have ${Math.round((avgCompCta / Math.max(1, clientSignals.cta_count)) * 100) / 100}× more conversion entry points.`,
-          evidence: {
-            client_cta_count: clientSignals.cta_count,
-            client_cta_examples: clientSignals.cta_examples,
-            avg_competitor_cta_count: Math.round(avgCompCta * 10) / 10,
-            competitor_signals: competitorSignals
-              .filter((s): s is CompetitorSiteSignals => s !== null)
-              .map(s => ({
-                domain: s.domain,
-                cta_count: s.cta_count,
-                cta_examples: s.cta_examples.slice(0, 3),
-                landing_page_type: s.landing_page_type,
-              })),
-          },
+          evidence: makeEvidence({
+            parsed: {
+              client_cta_count: clientSignals.cta_count,
+              client_cta_examples: clientSignals.cta_examples,
+              avg_competitor_cta_count: Math.round(avgCompCta * 10) / 10,
+              competitor_signals: competitorSignals
+                .filter((s): s is CompetitorSiteSignals => s !== null)
+                .map(s => ({
+                  domain: s.domain,
+                  cta_count: s.cta_count,
+                  cta_examples: s.cta_examples.slice(0, 3),
+                  landing_page_type: s.landing_page_type,
+                })),
+            },
+            sources: [
+              evidenceSource(urlFor(domain)),
+              ...competitorSignals
+                .filter((s): s is CompetitorSiteSignals => s !== null)
+                .map(s => evidenceSource(urlFor(s.domain))),
+            ],
+          }),
           recommendation: 'Audit homepage and key landing pages — add primary CTAs (Book / Enquire / Get a quote) above the fold and in the footer. Aim for 5–8 distinct conversion paths.',
           fix_type: 'fde_manual',
           priority_score: 55,
@@ -187,7 +206,7 @@ export class CompetitorCollector {
         found === 0
           ? 'DataForSEO returned zero competitor domains. The domain likely has no organic keyword rankings yet, so the competitive landscape cannot be measured.'
           : `Only ${found} competitor domain${found === 1 ? '' : 's'} found — not enough signal to score the competitive landscape (minimum 3 needed for meaningful comparison).`,
-      evidence: { competitors_found: found, competitors_required: 3 },
+      evidence: makeEvidence({ parsed: { competitors_found: found, competitors_required: 3 } }),
       recommendation:
         found === 0
           ? 'Get the site indexed and earn organic keyword rankings first (see SEO dimension). Re-run competitor analysis once any keywords rank in top 100.'

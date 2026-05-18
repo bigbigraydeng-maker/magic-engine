@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { CollectorResult, NewFinding } from '../types'
+import { makeEvidence } from '../types'
 import {
   runProbeWithTimeout,
   type LiveProbe,
@@ -136,7 +137,7 @@ export class AiVisibilityCollector {
       title: 'AI Visibility Tracker not yet enabled',
       description:
         'No AI Visibility snapshot exists for this client — AI Tracker has never queried ChatGPT / Perplexity / Gemini for this brand. AI engine visibility is a core differentiator in the current GEO landscape; without tracking we cannot measure or improve it.',
-      evidence: { snapshots: 0 },
+      evidence: makeEvidence({ parsed: { snapshots: 0 } }),
       recommendation:
         'Enable weekly AI Tracker: configure 10–20 priority brand/category questions in Client Settings → AI Visibility, then wait for the next Monday cron run (or trigger an ad-hoc run via Run-once button).',
       fix_type: 'me_auto',
@@ -171,13 +172,15 @@ export class AiVisibilityCollector {
         severity: 'high',
         title: 'Low AI Ranking Position',
         description: `Your brand appears at an average position of ${snapshot.avg_rank.toFixed(1)} in AI responses, below the recommended threshold of 3.`,
-        evidence: {
-          avg_rank: snapshot.avg_rank,
-          mentions_count: snapshot.mentions_count,
-          total_runs: snapshot.total_runs,
-          week_of: snapshot.week_of,
-          live_probe: probeEvidence(probe),
-        },
+        evidence: makeEvidence({
+          parsed: {
+            avg_rank: snapshot.avg_rank,
+            mentions_count: snapshot.mentions_count,
+            total_runs: snapshot.total_runs,
+            week_of: snapshot.week_of,
+            live_probe: probeEvidence(probe),
+          },
+        }),
         recommendation:
           'Strengthen your brand\'s online authority by creating comprehensive FAQ content, earning mentions on authoritative sites, and implementing GEO directives in your content.',
         fix_type: 'fde_manual',
@@ -195,10 +198,12 @@ export class AiVisibilityCollector {
         severity: 'high',
         title: 'Live AI probe found no mentions',
         description: `The diagnostic-time probe ran ${probe.runs} priority question(s) on ChatGPT and your brand was not mentioned, even though last week's snapshot showed ${snapshot.mentions_count} mention(s). This may indicate a regression in AI visibility.`,
-        evidence: {
-          snapshot_mentions: snapshot.mentions_count,
-          live_probe: probeEvidence(probe),
-        },
+        evidence: makeEvidence({
+          parsed: {
+            snapshot_mentions: snapshot.mentions_count,
+            live_probe: probeEvidence(probe),
+          },
+        }),
         recommendation:
           'Re-run the AI Tracker to confirm the trend, then prioritise GEO content updates and authoritative citations to restore visibility.',
         fix_type: 'fde_manual',
@@ -224,7 +229,7 @@ export class AiVisibilityCollector {
         severity: 'critical',
         title: 'Brand Not Mentioned by AI (live probe)',
         description: `A diagnostic-time probe ran ${probe.runs} priority question(s) on ChatGPT and your brand was not mentioned. AI-powered search is growing rapidly — missing from AI results means missing a key discovery channel.`,
-        evidence: { live_probe: probeEvidence(probe) },
+        evidence: makeEvidence({ parsed: { live_probe: probeEvidence(probe) } }),
         recommendation:
           'Add GEO directives to your content, create entity-rich FAQ pages, and build citations on authoritative NZ/AU sites to improve AI visibility. Enable the weekly AI Tracker to monitor progress.',
         fix_type: 'fde_manual',
@@ -238,7 +243,7 @@ export class AiVisibilityCollector {
         severity: 'high',
         title: 'Low AI Ranking Position (live probe)',
         description: `Your brand appeared at an average position of ${probe.avg_rank.toFixed(1)} in a ${probe.runs}-question diagnostic probe, below the recommended threshold of 3.`,
-        evidence: { live_probe: probeEvidence(probe) },
+        evidence: makeEvidence({ parsed: { live_probe: probeEvidence(probe) } }),
         recommendation:
           'Strengthen your brand\'s online authority by creating comprehensive FAQ content, earning mentions on authoritative sites, and implementing GEO directives in your content.',
         fix_type: 'fde_manual',
@@ -258,7 +263,9 @@ export class AiVisibilityCollector {
       title: 'Brand Not Mentioned by AI',
       description:
         'Your brand was not mentioned in any AI engine responses this week. AI-powered search is growing rapidly — missing from AI results means missing a key discovery channel.',
-      evidence: probe && !probe.skipped ? { live_probe: probeEvidence(probe) } : null,
+      evidence: probe && !probe.skipped
+        ? makeEvidence({ parsed: { live_probe: probeEvidence(probe) } })
+        : null,
       recommendation:
         'Add GEO directives to your content, create entity-rich FAQ pages, and build citations on authoritative NZ/AU sites to improve AI visibility.',
       fix_type: 'fde_manual',

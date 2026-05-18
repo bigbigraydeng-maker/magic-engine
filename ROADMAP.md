@@ -654,7 +654,7 @@ Layer 5: Export（新增）— P8.10.S5
 - [x] **P8.10.S2.3** Social Collector 加最近 30 天热门 3 条 post 内容采样（含点赞 / 评论 / hashtag）
 - [x] **P8.10.S2.4** Ads Collector 从零实现（Apify Meta Ad Library + Google Ads Transparency）
 - [x] **P8.10.S2.5** AI Visibility 加实时调用层（诊断时同步跑 3 个核心问句，不只读 cron snapshot）
-- [ ] **P8.10.S2.6** 统一 evidence schema：`{ raw, parsed, sources: [{url, fetched_at}], collected_at }`
+- [x] **P8.10.S2.6** 统一 evidence schema：`{ raw, parsed, sources: [{url, fetched_at}], collected_at }`
 
 **Sprint 3 — Synthesis 层（P8.10.S3，~3 天，核心）**：
 - [ ] **P8.10.S3.1** 新增 `src/lib/diagnostic/synthesis/competitor-analyst.ts`（Claude Sonnet 合成市场结构 + 对标路径）
@@ -1221,6 +1221,8 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
   `feat(diagnostic): P8.10.S2.4 — Ads Collector + Meta/Google 双源 [P8.10.S2.4]`
 - **P8.10.S2.5** — AI Visibility 实时调用层：新 `ai-visibility-live-probe.ts`（默认 probe 接 OpenAI runner + parser，跑 3 个核心问句，45s 超时，OPENAI_API_KEY 缺失时静默降级）；collector 加 LiveProbe 注入 + 三态合并（无 snapshot→走 live 评分 / snapshot 0 mentions→附 live 证据 / snapshot 健康但 live 0→新增 `live_probe_no_mention` 高优 finding）；runner.ts 在 ai_visibility/full 模式注入默认 probe；14 测试全过；build 通过
   `feat(diagnostic): P8.10.S2.5 — AI Visibility live probe [P8.10.S2.5]`
+- **P8.10.S2.6** — 统一 evidence schema：`src/lib/diagnostic/types.ts` 新增 `EvidenceEnvelope { raw, parsed, sources: [{url, fetched_at}], collected_at }` + `makeEvidence()` / `evidenceSource()` / `isEvidenceEnvelope()` 工具；6 个 collector（SEO / Social / Competitor / Ads / AI Visibility / Reputation）所有 evidence 站点改用 envelope；每个 finding 附可审计的源 URL（client/competitor 域名、社媒 profile URL、Meta Ad Library、Google Ads Transparency、GBP）；9 个新单元测试 + 调整 2 处旧测试断言（社媒读 `evidence.parsed.top_posts_30d`、AI live probe 读 `evidence.parsed.live_probe`、competitor 读 `evidence.parsed.*`）；195 测试全过；build 通过
+  `feat(diagnostic): P8.10.S2.6 — unified evidence envelope [P8.10.S2.6]`
 - **P8.10.S0.15–S0.20** — 张骞/MB/视觉 brief 收尾增强（**并行 session 完成，commit message 误标 `[P8.10.S2.1]`–`[P8.10.S2.6]`，实际属于 P8.10.S0 范畴**）：Content modal 简化、`/content/generate` 重定向、张骞 confirm 跳转 `?brief=1`、MB 加视觉 DNA、BriefSourcesForm 自动预填、`visual_brief` 拆成独立第二步生成器
   - `refactor(content): remove image preview ... [P8.10.S2.1]` (2a10979) → 实际 S0.15
   - `refactor(content): redirect /content/generate ... [P8.10.S2.2]` (742d0f7) → 实际 S0.16
