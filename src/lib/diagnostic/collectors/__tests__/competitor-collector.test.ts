@@ -5,11 +5,12 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 // Mocks — vi.hoisted ensures variables are available at factory time
 // ---------------------------------------------------------------------------
 
-const { mockGetCompetitorDomains, mockGetDomainMetrics, mockScrapeCompetitorMetaAds } =
+const { mockGetCompetitorDomains, mockGetDomainMetrics, mockScrapeCompetitorMetaAds, mockAnalyzeSite } =
   vi.hoisted(() => ({
     mockGetCompetitorDomains: vi.fn(),
     mockGetDomainMetrics: vi.fn(),
     mockScrapeCompetitorMetaAds: vi.fn(),
+    mockAnalyzeSite: vi.fn(),
   }))
 
 vi.mock('@/lib/dataforseo/client', () => ({
@@ -22,6 +23,10 @@ vi.mock('@/lib/semrush/client', () => ({
 
 vi.mock('@/lib/apify/ad-library', () => ({
   scrapeCompetitorMetaAds: mockScrapeCompetitorMetaAds,
+}))
+
+vi.mock('@/lib/diagnostic/competitor-site-analyzer', () => ({
+  analyzeCompetitorSite: mockAnalyzeSite,
 }))
 
 // ---------------------------------------------------------------------------
@@ -69,6 +74,7 @@ beforeEach(() => {
   mockGetCompetitorDomains.mockResolvedValue(COMPETITOR_DOMAINS)
   mockGetDomainMetrics.mockResolvedValue(DEFAULT_COMPETITOR_METRICS)
   mockScrapeCompetitorMetaAds.mockResolvedValue(DEFAULT_AD_DATA)
+  mockAnalyzeSite.mockResolvedValue(null)  // default: site analysis off
 })
 
 // ---------------------------------------------------------------------------
@@ -231,5 +237,69 @@ describe('CompetitorCollector.collect() — Meta Ads scraping', () => {
     mockScrapeCompetitorMetaAds.mockRejectedValue(new Error('Apify error'))
     const result = await new CompetitorCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS)
     expect(typeof result.score).toBe('number')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// P8.10.S2.2 — Jina site signal analysis + content gap finding
+// ---------------------------------------------------------------------------
+
+describe('CompetitorCollector.collect() — site signals (P8.10.S2.2)', () => {
+  const sig = (domain: string, cta_count: number) => ({
+    domain,
+    fetched_at: '2026-05-18T00:00:00Z',
+    usp_candidates: ['Premium', 'Curated tours'],
+    cta_count,
+    cta_examples: Array.from({ length: Math.min(cta_count, 5) }, (_, i) => `CTA${i}`),
+    landing_page_type: 'homepage' as const,
+    category_depth: 8,
+    word_count: 600,
+  })
+
+  it('attaches site_signals to top 3 competitors when analyzer succeeds', async () => {
+    mockGetDomainMetrics.mockResolvedValue(DEFAULT_COMPETITOR_METRICS)
+    mockAnalyzeSite
+      .mockResolvedValueOnce(sig(DOMAIN, 4))            // client
+      .mockResolvedValueOnce(sig('comp-a.co.nz', 10))
+      .mockResolvedValueOnce(sig('comp-b.co.nz', 12))
+      .mockResolvedValueOnce(sig('comp-c.co.nz', 11))
+
+    const result = await new CompetitorCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS)
+    const top3 = result.competitorList.slice(0, 3)
+    expect(top3.every(c => c.site_signals !== undefined)).toBe(true)
+  })
+
+  it('emits competitor_content_gap when avg competitor CTA ≥ 2x client', async () => {
+    mockGetDomainMetrics.mockResolvedValue(DEFAULT_COMPETITOR_METRICS)
+    mockAnalyzeSite
+      .mockResolvedValueOnce(sig(DOMAIN, 2))            // client: 2 CTAs
+      .mockResolvedValueOnce(sig('comp-a.co.nz', 10))
+      .mockResolvedValueOnce(sig('comp-b.co.nz', 12))
+      .mockResolvedValueOnce(sig('comp-c.co.nz', 11))   // avg comp = 11 ≥ 2 × 2
+
+    const result = await new CompetitorCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS)
+    const f = result.findings.find(x => x.finding_type === 'competitor_content_gap')
+    expect(f).toBeDefined()
+    expect(f?.severity).toBe('medium')
+  })
+
+  it('does NOT emit competitor_content_gap when client matches or exceeds competitors', async () => {
+    mockGetDomainMetrics.mockResolvedValue(DEFAULT_COMPETITOR_METRICS)
+    mockAnalyzeSite
+      .mockResolvedValueOnce(sig(DOMAIN, 10))           // client: rich CTAs
+      .mockResolvedValueOnce(sig('comp-a.co.nz', 4))
+      .mockResolvedValueOnce(sig('comp-b.co.nz', 5))
+      .mockResolvedValueOnce(sig('comp-c.co.nz', 3))
+
+    const result = await new CompetitorCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS)
+    expect(result.findings.find(x => x.finding_type === 'competitor_content_gap')).toBeUndefined()
+  })
+
+  it('does NOT crash when site analyzer returns null for all', async () => {
+    mockGetDomainMetrics.mockResolvedValue(DEFAULT_COMPETITOR_METRICS)
+    mockAnalyzeSite.mockResolvedValue(null)
+    const result = await new CompetitorCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS)
+    expect(typeof result.score).toBe('number')
+    expect(result.findings.find(x => x.finding_type === 'competitor_content_gap')).toBeUndefined()
   })
 })

@@ -3,6 +3,8 @@ import { getCompetitorDomains } from '@/lib/dataforseo/client'
 import type { CompetitorDomain } from '@/lib/dataforseo/client'
 import { scrapeCompetitorMetaAds } from '@/lib/apify/ad-library'
 import type { MetaAdData } from '@/lib/apify/ad-library'
+import { analyzeCompetitorSite } from '@/lib/diagnostic/competitor-site-analyzer'
+import type { CompetitorSiteSignals } from '@/lib/diagnostic/competitor-site-analyzer'
 import type { CollectorResult, NewFinding } from '../types'
 
 // ---------------------------------------------------------------------------
@@ -11,7 +13,11 @@ import type { CollectorResult, NewFinding } from '../types'
 
 export interface CompetitorEntry extends CompetitorDomain {
   meta_ads?: MetaAdData
+  site_signals?: CompetitorSiteSignals  // P8.10.S2.2
 }
+
+// P8.10.S2.2: emit content_gap when competitor avg CTA count is ≥2x client's
+const CONTENT_GAP_RATIO = 2
 
 export interface CompetitorCollectorResult extends CollectorResult {
   competitorList: CompetitorEntry[]
@@ -78,6 +84,16 @@ export class CompetitorCollector {
       }
     }
 
+    // 3b. P8.10.S2.2: Fetch homepage signals for client + top 3 competitors in parallel
+    const [clientSignals, ...competitorSignals] = await Promise.all([
+      analyzeCompetitorSite(domain).catch(() => null),
+      ...top3.map(c => analyzeCompetitorSite(c.domain).catch(() => null)),
+    ])
+    top3.forEach((comp, i) => {
+      const sig = competitorSignals[i]
+      if (sig) comp.site_signals = sig
+    })
+
     // 4. Compute score
     const clientTraffic = clientMetrics?.organic_traffic ?? 0
     const avgCompetitorTraffic =
@@ -111,6 +127,40 @@ export class CompetitorCollector {
         fix_type: 'fde_manual',
         priority_score: 90,
       })
+    }
+
+    // P8.10.S2.2: Content gap — competitors carry significantly more CTAs than client
+    if (clientSignals && competitorSignals.filter(Boolean).length >= 2) {
+      const competitorCtas = competitorSignals
+        .filter((s): s is CompetitorSiteSignals => s !== null)
+        .map(s => s.cta_count)
+      const avgCompCta = competitorCtas.reduce((a, b) => a + b, 0) / competitorCtas.length
+      if (clientSignals.cta_count > 0 && avgCompCta >= clientSignals.cta_count * CONTENT_GAP_RATIO) {
+        findings.push({
+          client_id: clientId,
+          dimension: 'competitor',
+          finding_type: 'competitor_content_gap',
+          severity: 'medium',
+          title: 'Competitors run richer conversion paths',
+          description: `Top competitors expose ~${Math.round(avgCompCta)} call-to-action links on their homepage vs your ${clientSignals.cta_count}. Visitors arriving from search have ${Math.round((avgCompCta / Math.max(1, clientSignals.cta_count)) * 100) / 100}× more conversion entry points.`,
+          evidence: {
+            client_cta_count: clientSignals.cta_count,
+            client_cta_examples: clientSignals.cta_examples,
+            avg_competitor_cta_count: Math.round(avgCompCta * 10) / 10,
+            competitor_signals: competitorSignals
+              .filter((s): s is CompetitorSiteSignals => s !== null)
+              .map(s => ({
+                domain: s.domain,
+                cta_count: s.cta_count,
+                cta_examples: s.cta_examples.slice(0, 3),
+                landing_page_type: s.landing_page_type,
+              })),
+          },
+          recommendation: 'Audit homepage and key landing pages — add primary CTAs (Book / Enquire / Get a quote) above the fold and in the footer. Aim for 5–8 distinct conversion paths.',
+          fix_type: 'fde_manual',
+          priority_score: 55,
+        })
+      }
     }
 
     return { score, findings, competitorList }
