@@ -266,10 +266,10 @@ function ConfirmedBanner({
           重新运行发现
         </button>
         <Link
-          href={`/dashboard/clients/${clientId}/prescription/new`}
+          href={`/dashboard/clients/${clientId}?brief=1`}
           className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 transition-colors"
         >
-          生成处方 →
+          生成品牌 DNA →
         </Link>
       </div>
     </div>
@@ -437,8 +437,8 @@ export default function ZhangqianPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data: ConfirmResponse = await res.json()
       if (!data.success) throw new Error(data.error ?? '确认失败')
-      // Redirect to prescription flow — seeding is complete, time to generate the treatment plan
-      router.push(`/dashboard/clients/${clientId}/prescription/new`)
+      // Discovery confirmed — open MB generation drawer on the client page
+      router.push(`/dashboard/clients/${clientId}?brief=1`)
     } catch (e) {
       setPageError(e instanceof Error ? e.message : '确认失败')
     } finally {

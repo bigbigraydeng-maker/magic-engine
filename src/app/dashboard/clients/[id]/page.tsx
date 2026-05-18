@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { ContentHub } from './_components/ContentHub';
 import { GenerationDrawer } from './_components/GenerationDrawer';
@@ -178,6 +178,7 @@ function BrandHealthWidget({ clientId }: { clientId: string }) {
 
 export default function ClientDetailPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const clientId = params.id as string;
 
   const [client, setClient] = useState<Client | null>(null);
@@ -185,7 +186,8 @@ export default function ClientDetailPage() {
   const [hasActiveBrief, setHasActiveBrief] = useState<boolean | null>(null);
 
   const [generationOpen, setGenerationOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // ?brief=1 (from 张骞 confirm) auto-opens the brief settings drawer
+  const [settingsOpen, setSettingsOpen] = useState(searchParams.get('brief') === '1');
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('brief');
 
   const fetchData = useCallback(async () => {
