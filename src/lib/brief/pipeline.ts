@@ -28,6 +28,11 @@ export interface PipelineInput {
   visualStyle?: string
   brandColors?: string[]
   visualAvoid?: string[]
+  // P8.11.F.1: discovery-derived anchors. When present, they OVERRIDE the
+  // Claude-inferred keyword_seeds / competitor_domains so high-confidence
+  // 张骞 output isn't lost in regeneration.
+  seedKeywords?: string[]
+  competitorDomains?: string[]
 }
 
 export interface PipelineResult {
@@ -115,6 +120,8 @@ export async function runBriefPipeline(input: PipelineInput): Promise<PipelineRe
     websitePages,
     semrushSnapshot,
     domain: input.domain,
+    discoverySeedKeywords: input.seedKeywords,
+    discoveryCompetitorDomains: input.competitorDomains,
   })
 
   // ── 3. Call Claude ────────────────────────────────────────────────────────────
@@ -165,8 +172,13 @@ export async function runBriefPipeline(input: PipelineInput): Promise<PipelineRe
     brand_voice: briefData.brand_voice ?? null,
     target_audience: briefData.target_audience ?? null,
     platform_strategy: briefData.platform_strategy ?? null,
-    keyword_seeds: briefData.keyword_seeds ?? null,
-    competitor_domains: briefData.competitor_domains ?? null,
+    // Discovery-supplied anchors take precedence over Claude-inferred values
+    keyword_seeds: input.seedKeywords?.length
+      ? input.seedKeywords
+      : (briefData.keyword_seeds ?? null),
+    competitor_domains: input.competitorDomains?.length
+      ? input.competitorDomains
+      : (briefData.competitor_domains ?? null),
     // User-supplied visual DNA takes precedence over AI-inferred fields
     vi_colors: input.brandColors?.length
       ? { primary: input.brandColors[0], secondary: input.brandColors[1], accent: input.brandColors[2] }

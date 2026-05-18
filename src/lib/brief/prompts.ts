@@ -99,6 +99,10 @@ export interface BriefBuilderInput {
   websitePages: JinaFetchResult[]
   semrushSnapshot: DomainOverviewSnapshot | null
   domain?: string
+  // P8.11.F.1: high-confidence anchors from 张骞 discovery. When supplied,
+  // Claude is told to treat these as fixed inputs rather than rederive them.
+  discoverySeedKeywords?: string[]
+  discoveryCompetitorDomains?: string[]
 }
 
 export function buildBriefUserMessage(input: BriefBuilderInput): string {
@@ -106,6 +110,25 @@ export function buildBriefUserMessage(input: BriefBuilderInput): string {
 
   parts.push('Please generate a Master Brief based on the following brand data.')
   parts.push('')
+
+  // 0. Discovery anchors — Claude must surface these in keyword_seeds /
+  //    competitor_domains and align target_audience / competitive_notes_md
+  //    to them. Keeps high-confidence 张骞 output authoritative.
+  const hasSeedAnchors = (input.discoverySeedKeywords?.length ?? 0) > 0
+  const hasCompAnchors = (input.discoveryCompetitorDomains?.length ?? 0) > 0
+  if (hasSeedAnchors || hasCompAnchors) {
+    parts.push('## DISCOVERY ANCHORS (高置信度,必须采用)')
+    if (hasSeedAnchors) {
+      parts.push('### Seed Keywords — copy into keyword_seeds verbatim:')
+      parts.push(input.discoverySeedKeywords!.map(k => `- ${k}`).join('\n'))
+      parts.push('')
+    }
+    if (hasCompAnchors) {
+      parts.push('### Competitor Domains — copy into competitor_domains verbatim:')
+      parts.push(input.discoveryCompetitorDomains!.map(d => `- ${d}`).join('\n'))
+      parts.push('')
+    }
+  }
 
   // 1. Website content
   if (input.websitePages.length > 0) {

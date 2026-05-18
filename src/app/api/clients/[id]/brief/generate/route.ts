@@ -29,6 +29,13 @@ export async function POST(
     const visualStyle = typeof bodyAny.visual_style === 'string' ? bodyAny.visual_style.trim() || undefined : undefined
     const brandColors = Array.isArray(bodyAny.brand_colors) ? (bodyAny.brand_colors as string[]) : undefined
     const visualAvoid = Array.isArray(bodyAny.visual_avoid) ? (bodyAny.visual_avoid as string[]) : undefined
+    // P8.11.F.1: discovery-derived hints that override AI-inferred values
+    const seedKeywords = Array.isArray(bodyAny.seed_keywords)
+      ? (bodyAny.seed_keywords as unknown[]).filter((k): k is string => typeof k === 'string').slice(0, 20)
+      : undefined
+    const competitorDomains = Array.isArray(bodyAny.competitor_domains)
+      ? (bodyAny.competitor_domains as unknown[]).filter((c): c is string => typeof c === 'string').slice(0, 20)
+      : undefined
 
     if (websiteUrls.length === 0 && fileUrls.length === 0 && !domain) {
       return NextResponse.json(
@@ -45,6 +52,8 @@ export async function POST(
       visualStyle,
       brandColors,
       visualAvoid,
+      seedKeywords,
+      competitorDomains,
     })
 
     if (!result.success) {

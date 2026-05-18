@@ -15,7 +15,8 @@ import { supabaseAdmin } from '../supabase'
 import { getActiveBrief, formatBriefForPrompt } from '../content/brief-injector'
 import { getActiveGeoHtml } from '../geo/html-generator'
 import { callClaudeWithDocs, parseJsonResponse } from '../anthropic/client'
-import type { GenerateBlogRequest, BlogPost } from '@/types/magic-engine'
+import { generateVisualBrief } from '../content/visual-brief-generator'
+import type { GenerateBlogRequest, BlogPost, MasterBrief } from '@/types/magic-engine'
 
 const MODEL_USED = 'claude-sonnet-4-6'
 
@@ -40,9 +41,11 @@ OUTPUT: valid JSON only, no markdown fences. Schema:
   "meta_description": "≤155 chars summary with brand mention",
   "slug": "url-friendly-slug",
   "html_body": "full article HTML: <h1>, <h2>, <p>, <ul>, <ol>, <section class=\\"faq\\">",
-  "word_count": 1100,
-  "featured_image_prompt": "WaveSpeed image prompt for hero image"
-}`
+  "word_count": 1100
+}
+
+The hero image prompt is generated in a separate step using the brand's
+visual DNA — do NOT include it in this response.`
 
 export interface BlogGeneratorOutput {
   title: string
@@ -113,7 +116,16 @@ export async function generateBlogPost(
   const slug             = (parsed.slug ?? slugify(title)).slice(0, 120)
   const htmlBody         = parsed.html_body ?? `<h1>${title}</h1>`
   const wordCount        = parsed.word_count ?? countWords(htmlBody)
-  const imagePrompt      = parsed.featured_image_prompt ?? `professional photo: ${req.topic}`
+
+  // 7. P8.11.F.2: hero image prompt as a dedicated second step using MB visual DNA.
+  //    Mirrors the social post pipeline — keeps blog hero visually on-brand.
+  const imagePrompt = await buildHeroImagePrompt({
+    title,
+    htmlBody,
+    metaDescription,
+    topic: req.topic,
+    brief,
+  })
 
   return {
     title,
@@ -131,6 +143,45 @@ export async function generateBlogPost(
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * P8.11.F.2 — Build the hero image prompt as a dedicated second step.
+ *
+ * Reasons this is its own step (not part of the main Claude prompt):
+ *   - The blog Claude call already runs at max_tokens for body content;
+ *     adding a 60–120 word visual prompt risks truncation.
+ *   - generateVisualBrief() pulls the brand's visual DNA (style keywords,
+ *     colours, donts) directly from the Master Brief, which produces a
+ *     much more on-brand prompt than free-text in the body prompt.
+ *
+ * If no Master Brief exists, falls back to a basic prompt so the blog
+ * still ships with something usable.
+ */
+async function buildHeroImagePrompt(params: {
+  title: string
+  htmlBody: string
+  metaDescription: string
+  topic: string
+  brief: MasterBrief | null
+}): Promise<string> {
+  const { title, htmlBody, metaDescription, topic, brief } = params
+
+  if (!brief) {
+    return `Professional editorial hero image for "${title}", ${topic}, clean composition, natural lighting, high resolution`
+  }
+
+  // Extract a plain-text excerpt from the article for grounding.
+  const bodyText = htmlBody.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  return generateVisualBrief({
+    postTitle: title,
+    postScript: bodyText,
+    postCaption: metaDescription,
+    brief,
+    platforms: ['blog hero'],
+    topic,
+  })
+}
+
 
 function buildUserMessage(params: {
   brandName: string

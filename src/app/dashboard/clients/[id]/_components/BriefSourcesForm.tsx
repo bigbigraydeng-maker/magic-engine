@@ -17,6 +17,9 @@ export function BriefSourcesForm({ clientId, onGenerated }: Props) {
   const [urlInputs, setUrlInputs] = useState<string[]>(['', '']);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [domain, setDomain] = useState('');
+  // Discovery-derived hints — surfaced to the user, sent as overrides to Claude
+  const [seedKeywords, setSeedKeywords] = useState<string[]>([]);
+  const [competitorDomains, setCompetitorDomains] = useState<string[]>([]);
   // Visual DNA overrides
   const [visualStyle, setVisualStyle] = useState('');
   const [brandColors, setBrandColors] = useState('');
@@ -35,7 +38,17 @@ export function BriefSourcesForm({ clientId, onGenerated }: Props) {
       headers: { Authorization: `Bearer ${apiKey}` },
     })
       .then(r => r.ok ? r.json() : null)
-      .then((json: { success: boolean; discovery: { domain: string; payload: { social_profiles: { url: string }[] } } } | null) => {
+      .then((json: {
+        success: boolean;
+        discovery: {
+          domain: string;
+          payload: {
+            social_profiles?: { url: string }[];
+            seed_keywords?: { keyword: string }[];
+            competitors?: { domain: string }[];
+          };
+        };
+      } | null) => {
         if (!json?.success || !json.discovery) return;
         const d = json.discovery;
         // Pre-fill domain
@@ -52,6 +65,17 @@ export function BriefSourcesForm({ clientId, onGenerated }: Props) {
             return merged.length < 2 ? [...merged, ''] : merged;
           });
         }
+        // P8.11.F.1: pre-fill seed keywords + competitor domains from discovery
+        const seedKw = (d.payload?.seed_keywords ?? [])
+          .map(k => k.keyword?.trim())
+          .filter((k): k is string => Boolean(k))
+          .slice(0, 10);
+        if (seedKw.length > 0) setSeedKeywords(seedKw);
+        const compDomains = (d.payload?.competitors ?? [])
+          .map(c => c.domain?.trim())
+          .filter((c): c is string => Boolean(c))
+          .slice(0, 10);
+        if (compDomains.length > 0) setCompetitorDomains(compDomains);
         setDiscoveryLoaded(true);
       })
       .catch(() => { /* silent — no discovery yet */ });
@@ -127,6 +151,8 @@ export function BriefSourcesForm({ clientId, onGenerated }: Props) {
           visual_style: visualStyle.trim() || undefined,
           brand_colors: brandColors.trim() ? brandColors.split(',').map(s => s.trim()).filter(Boolean) : undefined,
           visual_avoid: visualAvoid.trim() ? visualAvoid.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+          seed_keywords: seedKeywords.length > 0 ? seedKeywords : undefined,
+          competitor_domains: competitorDomains.length > 0 ? competitorDomains : undefined,
         }),
       });
       const json = await res.json();
@@ -143,9 +169,16 @@ export function BriefSourcesForm({ clientId, onGenerated }: Props) {
   return (
     <div className="space-y-5">
       {discoveryLoaded && (
-        <div className="flex items-center gap-2 text-xs text-indigo-700 bg-indigo-50 rounded-lg px-3 py-2">
-          <span>✓</span>
-          <span>已从张骞发现数据预填域名和社媒链接</span>
+        <div className="flex flex-col gap-1 text-xs text-indigo-700 bg-indigo-50 rounded-lg px-3 py-2">
+          <div className="flex items-center gap-2">
+            <span>✓</span>
+            <span>已从张骞发现数据预填:</span>
+          </div>
+          <ul className="ml-5 list-disc text-indigo-600/90">
+            <li>域名、社媒链接</li>
+            {seedKeywords.length > 0 && <li>{seedKeywords.length} 个种子关键词 (将作为 MB 锚点)</li>}
+            {competitorDomains.length > 0 && <li>{competitorDomains.length} 个竞品域名 (将作为 MB 锚点)</li>}
+          </ul>
         </div>
       )}
 

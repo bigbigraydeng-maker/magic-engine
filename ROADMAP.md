@@ -1223,6 +1223,10 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
   `feat(diagnostic): P8.10.S2.5 — AI Visibility live probe [P8.10.S2.5]`
 - **P8.10.S2.6** — 统一 evidence schema：`src/lib/diagnostic/types.ts` 新增 `EvidenceEnvelope { raw, parsed, sources: [{url, fetched_at}], collected_at }` + `makeEvidence()` / `evidenceSource()` / `isEvidenceEnvelope()` 工具；6 个 collector（SEO / Social / Competitor / Ads / AI Visibility / Reputation）所有 evidence 站点改用 envelope；每个 finding 附可审计的源 URL（client/competitor 域名、社媒 profile URL、Meta Ad Library、Google Ads Transparency、GBP）；9 个新单元测试 + 调整 2 处旧测试断言（社媒读 `evidence.parsed.top_posts_30d`、AI live probe 读 `evidence.parsed.live_probe`、competitor 读 `evidence.parsed.*`）；195 测试全过；build 通过
   `feat(diagnostic): P8.10.S2.6 — unified evidence envelope [P8.10.S2.6]`
+- **P8.10.S2.F.1** — 张骞 → MB 预填扩展：`BriefSourcesForm` 自动从 `client_discovery.payload` 读 `seed_keywords` + `competitors`；`brief/generate` API + `runBriefPipeline` 新增 `seedKeywords` / `competitorDomains` 输入；prompts.ts 注入 "DISCOVERY ANCHORS" 段让 Claude 把高置信度种子词 / 竞品域名直接采用；pipeline insert 时 discovery 值覆盖 Claude 推断值；UI banner 显示预填数量；build + 174 brief/blog/content 测试通过；preview 验证 CYHB 客户 banner 显示 "8 个种子关键词 / 7 个竞品域名"
+  `feat(brief): P8.10.S2.F.1 — discovery anchors prefill seed_keywords + competitors [P8.10.S2.F.1]`
+- **P8.10.S2.F.2** — 博客 hero 图 prompt 拆成第二步：`blog/generator.ts` 移除主 Claude prompt 里的 `featured_image_prompt` 字段；新增 `buildHeroImagePrompt()` 在正文生成后调用 `generateVisualBrief()`，传入 MB 视觉 DNA + 提取的正文文本；MB 缺失时降级到基础 prompt；build 通过
+  `feat(blog): P8.10.S2.F.2 — blog hero image uses generateVisualBrief() with MB visual DNA [P8.10.S2.F.2]`
 - **P8.10.S0.15–S0.20** — 张骞/MB/视觉 brief 收尾增强（**并行 session 完成，commit message 误标 `[P8.10.S2.1]`–`[P8.10.S2.6]`，实际属于 P8.10.S0 范畴**）：Content modal 简化、`/content/generate` 重定向、张骞 confirm 跳转 `?brief=1`、MB 加视觉 DNA、BriefSourcesForm 自动预填、`visual_brief` 拆成独立第二步生成器
   - `refactor(content): remove image preview ... [P8.10.S2.1]` (2a10979) → 实际 S0.15
   - `refactor(content): redirect /content/generate ... [P8.10.S2.2]` (742d0f7) → 实际 S0.16
