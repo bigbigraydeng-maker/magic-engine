@@ -6,13 +6,14 @@ import { SocialCollector } from './collectors/social-collector'
 import { ReputationCollector } from './collectors/reputation-collector'
 import { CompetitorCollector } from './collectors/competitor-collector'
 import { AiVisibilityCollector } from './collectors/ai-visibility-collector'
+import { AdsCollector } from './collectors/ads-collector'
 import { computeOverallScore, isDiagnosticDimension } from './guards'
 
 // ---------------------------------------------------------------------------
 // Module registry
 // ---------------------------------------------------------------------------
 
-const VALID_MODULES = ['seo', 'social', 'reputation', 'competitor', 'ai_visibility', 'full'] as const
+const VALID_MODULES = ['seo', 'social', 'reputation', 'competitor', 'ai_visibility', 'ads', 'full'] as const
 export type DiagnosticModule = (typeof VALID_MODULES)[number]
 
 export function isValidModule(module: string): module is DiagnosticModule {
@@ -21,7 +22,7 @@ export function isValidModule(module: string): module is DiagnosticModule {
 
 /** Map 'full' to the concrete dimensions it runs. */
 function resolveDimensions(module: DiagnosticModule): DiagnosticDimension[] {
-  if (module === 'full') return ['seo', 'social', 'reputation', 'competitor', 'ai_visibility']
+  if (module === 'full') return ['seo', 'social', 'reputation', 'competitor', 'ai_visibility', 'ads']
   return [module as DiagnosticDimension]
 }
 
@@ -136,6 +137,9 @@ async function runCollectors(
   }
   if (module === 'ai_visibility' || module === 'full') {
     jobs.push({ dim: 'ai_visibility', promise: new AiVisibilityCollector(supabase).collect(clientId, domain, keywords) })
+  }
+  if (module === 'ads' || module === 'full') {
+    jobs.push({ dim: 'ads', promise: new AdsCollector(supabase).collect(clientId, domain, keywords) })
   }
 
   const settled = await Promise.allSettled(jobs.map(j => j.promise))

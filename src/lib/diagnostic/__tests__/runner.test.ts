@@ -147,11 +147,12 @@ describe('isValidModule()', () => {
   it('returns true for "reputation"', () => expect(isValidModule('reputation')).toBe(true))
   it('returns true for "competitor"', () => expect(isValidModule('competitor')).toBe(true))
   it('returns true for "ai_visibility"', () => expect(isValidModule('ai_visibility')).toBe(true))
+  it('returns true for "ads"', () => expect(isValidModule('ads')).toBe(true))
   it('returns true for "full"', () => expect(isValidModule('full')).toBe(true))
   it('returns false for unknown modules', () => {
-    expect(isValidModule('ads')).toBe(false)
     expect(isValidModule('')).toBe(false)
     expect(isValidModule('SEO')).toBe(false)
+    expect(isValidModule('unknown')).toBe(false)
   })
 })
 
