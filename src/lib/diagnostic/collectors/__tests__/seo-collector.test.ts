@@ -9,15 +9,47 @@ vi.mock('@/lib/semrush/client', () => ({
   getDomainOrganicKeywords: vi.fn(),
 }))
 
+vi.mock('@/lib/dataforseo/client', () => ({
+  getBacklinkSummary: vi.fn(),
+  getSerpRankings: vi.fn(),
+}))
+
+vi.mock('@/lib/diagnostic/technical-seo', () => ({
+  auditTechnicalSeo: vi.fn(),
+}))
+
 // ---------------------------------------------------------------------------
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
 import { SeoCollector } from '../seo-collector'
 import { getDomainMetrics, getDomainOrganicKeywords } from '@/lib/semrush/client'
+import { getBacklinkSummary, getSerpRankings } from '@/lib/dataforseo/client'
+import { auditTechnicalSeo } from '@/lib/diagnostic/technical-seo'
+import type { TechnicalSeoSignals } from '@/lib/diagnostic/technical-seo'
 
 const mockMetrics = vi.mocked(getDomainMetrics)
 const mockOrganicKws = vi.mocked(getDomainOrganicKeywords)
+const mockBacklinks = vi.mocked(getBacklinkSummary)
+const mockSerp = vi.mocked(getSerpRankings)
+const mockTech = vi.mocked(auditTechnicalSeo)
+
+const HEALTHY_BACKLINKS = {
+  total_backlinks: 5000,
+  referring_domains: 80,
+  rank: 320,
+  broken_backlinks: 5,
+  fetched_at: '2026-05-18T00:00:00Z',
+}
+const HEALTHY_TECH: TechnicalSeoSignals = {
+  titlePresent: true,
+  titleLength: 55,
+  h1Count: 1,
+  wordCount: 500,
+  internalLinkCount: 8,
+  score: 80,
+  issues: [],
+}
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -42,6 +74,11 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockMetrics.mockResolvedValue(HEALTHY_METRICS)
   mockOrganicKws.mockResolvedValue(KEYWORDS.map(kwData))
+  mockBacklinks.mockResolvedValue(HEALTHY_BACKLINKS)
+  mockSerp.mockResolvedValue(
+    KEYWORDS.map(k => ({ keyword: k, position: 5, url: `https://${DOMAIN}/${k.replace(/\s/g, '-')}`, fetched_at: '2026-05-18T00:00:00Z' })),
+  )
+  mockTech.mockResolvedValue(HEALTHY_TECH)
 })
 
 // ---------------------------------------------------------------------------
@@ -76,9 +113,10 @@ describe('SeoCollector.collect()', () => {
     expect(gap?.dimension).toBe('seo')
   })
 
-  it('score is 0 when coverage=0 and authority=0', async () => {
+  it('score is 0 when coverage=0, authority=0, and technical=0', async () => {
     mockMetrics.mockResolvedValue({ organic_keywords: 0, organic_traffic: 0, authority_score: 0 })
     mockOrganicKws.mockResolvedValue([])
+    mockTech.mockResolvedValue({ ...HEALTHY_TECH, score: 0, issues: [] })
     const result = await new SeoCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS)
     expect(result.score).toBe(0)
   })
@@ -123,6 +161,68 @@ describe('SeoCollector.collect()', () => {
     expect(result.findings).toHaveLength(1)
     expect(result.findings[0].finding_type).toBe('keywords_not_configured')
     expect(result.findings[0].severity).toBe('high')
+  })
+
+  // ── P8.10.S2.1: backlink & SERP findings ─────────────────────────────────
+
+  it('produces low_referring_domains (medium) when 3 ≤ referring_domains < 10', async () => {
+    mockBacklinks.mockResolvedValue({ ...HEALTHY_BACKLINKS, referring_domains: 5 })
+    const result = await new SeoCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS)
+    const f = result.findings.find(x => x.finding_type === 'low_referring_domains')
+    expect(f).toBeDefined()
+    expect(f?.severity).toBe('medium')
+  })
+
+  it('escalates low_referring_domains to high when referring_domains < 3', async () => {
+    mockBacklinks.mockResolvedValue({ ...HEALTHY_BACKLINKS, referring_domains: 1 })
+    const result = await new SeoCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS)
+    const f = result.findings.find(x => x.finding_type === 'low_referring_domains')
+    expect(f?.severity).toBe('high')
+  })
+
+  it('does NOT produce low_referring_domains when ≥ 10', async () => {
+    const result = await new SeoCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS)
+    expect(result.findings.find(x => x.finding_type === 'low_referring_domains')).toBeUndefined()
+  })
+
+  it('does NOT crash when backlinks API fails (degraded)', async () => {
+    mockBacklinks.mockRejectedValue(new Error('DataForSEO 500'))
+    const result = await new SeoCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS)
+    expect(result.score).not.toBeNull()  // SEO score still produced
+    expect(result.findings.find(x => x.finding_type === 'low_referring_domains')).toBeUndefined()
+  })
+
+  it('produces serp_invisible (high) when no target keyword ranks in top 100', async () => {
+    mockSerp.mockResolvedValue(
+      KEYWORDS.map(k => ({ keyword: k, position: null, url: null, fetched_at: 'now' })),
+    )
+    const result = await new SeoCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS)
+    const f = result.findings.find(x => x.finding_type === 'serp_invisible')
+    expect(f).toBeDefined()
+    expect(f?.severity).toBe('high')
+  })
+
+  it('produces serp_buried (medium) when avg position > 30', async () => {
+    mockSerp.mockResolvedValue(
+      KEYWORDS.map(k => ({ keyword: k, position: 55, url: 'x', fetched_at: 'now' })),
+    )
+    const result = await new SeoCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS)
+    const f = result.findings.find(x => x.finding_type === 'serp_buried')
+    expect(f).toBeDefined()
+    expect(f?.severity).toBe('medium')
+  })
+
+  it('does NOT produce serp_buried when avg position ≤ 30', async () => {
+    // Default mock has position=5
+    const result = await new SeoCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS)
+    expect(result.findings.find(x => x.finding_type === 'serp_buried')).toBeUndefined()
+  })
+
+  it('does NOT crash when SERP API fails (degraded)', async () => {
+    mockSerp.mockRejectedValue(new Error('DataForSEO 500'))
+    const result = await new SeoCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS)
+    expect(result.score).not.toBeNull()
+    expect(result.findings.find(x => x.finding_type === 'serp_invisible')).toBeUndefined()
   })
 
   it('all findings carry client_id and fix_type', async () => {

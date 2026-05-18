@@ -33,6 +33,9 @@ export type SeoFindingType =
   | 'keyword_gap_critical'
   | 'low_domain_rank'
   | 'keywords_not_configured'  // P8.5.19: no target keywords set up
+  | 'low_referring_domains'    // P8.10.S2.1: backlink profile too thin
+  | 'serp_invisible'           // P8.10.S2.1: no target keyword ranks in top 100 SERP
+  | 'serp_buried'              // P8.10.S2.1: ranked keywords avg position > 30
 
 export type AiVisibilityFindingType =
   | 'brand_not_mentioned'

@@ -1,5 +1,7 @@
 import { getDomainMetrics, getDomainOrganicKeywords } from '@/lib/semrush/client'
 import type { DomainMetrics } from '@/lib/semrush/client'
+import { getBacklinkSummary, getSerpRankings } from '@/lib/dataforseo/client'
+import type { BacklinkSummary, SerpRanking } from '@/lib/dataforseo/client'
 import { auditTechnicalSeo } from '@/lib/diagnostic/technical-seo'
 import type { TechnicalSeoSignals } from '@/lib/diagnostic/technical-seo'
 import type { CollectorResult, NewFinding } from '../types'
@@ -11,6 +13,11 @@ const AUTHORITY_WEIGHT    = 25   // was 30
 const TECHNICAL_WEIGHT    = 25   // new: Jina homepage audit signals
 const LOW_AUTHORITY_THRESHOLD = 20
 const ORGANIC_KW_LIMIT    = 200
+
+// P8.10.S2.1: backlink + SERP thresholds (informational findings, do not affect score)
+const LOW_REFERRING_DOMAINS_THRESHOLD = 10
+const BURIED_POSITION_THRESHOLD = 30
+const SERP_SAMPLE_KEYWORDS = 10   // max target keywords to query SERP for (cost cap)
 
 export class SeoCollector {
   private readonly timeoutMs: number
@@ -50,11 +57,15 @@ export class SeoCollector {
     keywords: string[],
   ): Promise<CollectorResult> {
     const db = process.env.SEMRUSH_DB ?? 'au'
+    const serpKeywords = keywords.slice(0, SERP_SAMPLE_KEYWORDS)
 
-    const [metrics, rankedKwData, technical] = await Promise.all([
+    // P8.10.S2.1: DataForSEO calls are optional — failure must NOT collapse SEO score.
+    const [metrics, rankedKwData, technical, backlinks, serpRankings] = await Promise.all([
       getDomainMetrics(domain),
       getDomainOrganicKeywords(domain, db, ORGANIC_KW_LIMIT),
       auditTechnicalSeo(domain),
+      getBacklinkSummary(domain).catch(() => null),
+      getSerpRankings(domain, serpKeywords, db).catch(() => [] as SerpRanking[]),
     ])
 
     const rankedSet = new Set(rankedKwData.map(k => k.keyword.toLowerCase()))
@@ -62,7 +73,7 @@ export class SeoCollector {
     const total = keywords.length
     const coverageRatio = matched / total
 
-    return this.buildResult(clientId, metrics, coverageRatio, total, matched, technical)
+    return this.buildResult(clientId, metrics, coverageRatio, total, matched, technical, backlinks, serpRankings)
   }
 
   private buildResult(
@@ -72,6 +83,8 @@ export class SeoCollector {
     total: number,
     matched: number,
     technical: TechnicalSeoSignals,
+    backlinks: BacklinkSummary | null,
+    serpRankings: SerpRanking[],
   ): CollectorResult {
     const authority = Math.min(100, Math.max(0, metrics.authority_score))
     const raw =
@@ -118,6 +131,78 @@ export class SeoCollector {
     for (const issue of technical.issues) {
       const f = this.makeTechnicalFinding(clientId, issue)
       if (f) findings.push(f)
+    }
+
+    // ── P8.10.S2.1: Backlink findings ─────────────────────────────────────────
+    if (backlinks && backlinks.referring_domains < LOW_REFERRING_DOMAINS_THRESHOLD) {
+      findings.push({
+        client_id: clientId,
+        dimension: 'seo',
+        finding_type: 'low_referring_domains',
+        severity: backlinks.referring_domains < 3 ? 'high' : 'medium',
+        title: 'Thin backlink profile',
+        description: `Only ${backlinks.referring_domains} referring domains linking to the site (healthy threshold: ${LOW_REFERRING_DOMAINS_THRESHOLD}+).`,
+        evidence: {
+          referring_domains: backlinks.referring_domains,
+          total_backlinks: backlinks.total_backlinks,
+          rank: backlinks.rank,
+          broken_backlinks: backlinks.broken_backlinks,
+          fetched_at: backlinks.fetched_at,
+        },
+        recommendation: 'Run digital PR, guest posting, and partnerships to grow referring domain count to 30+ within 6 months.',
+        fix_type: 'fde_manual',
+        priority_score: backlinks.referring_domains < 3 ? 70 : 50,
+      })
+    }
+
+    // ── P8.10.S2.1: SERP ranking findings ─────────────────────────────────────
+    if (serpRankings.length > 0) {
+      const ranked = serpRankings.filter(r => r.position !== null)
+      const fetched_at = serpRankings[0]?.fetched_at
+
+      if (ranked.length === 0) {
+        findings.push({
+          client_id: clientId,
+          dimension: 'seo',
+          finding_type: 'serp_invisible',
+          severity: 'high',
+          title: 'No target keywords visible in Google top 100',
+          description: `Sampled ${serpRankings.length} target keywords on Google — none ranked in the top 100 SERP positions.`,
+          evidence: {
+            sampled: serpRankings.length,
+            ranked: 0,
+            keywords: serpRankings.map(r => r.keyword),
+            fetched_at,
+          },
+          recommendation: 'Build dedicated landing pages for each priority keyword with on-page SEO and internal linking before broader strategy.',
+          fix_type: 'fde_manual',
+          priority_score: 85,
+        })
+      } else {
+        const avgPosition = Math.round(
+          ranked.reduce((s, r) => s + (r.position ?? 0), 0) / ranked.length,
+        )
+        if (avgPosition > BURIED_POSITION_THRESHOLD) {
+          findings.push({
+            client_id: clientId,
+            dimension: 'seo',
+            finding_type: 'serp_buried',
+            severity: 'medium',
+            title: 'Target keywords ranking deep in SERP',
+            description: `Ranked target keywords average position ${avgPosition} (healthy: top 30). Few users reach results past page 3.`,
+            evidence: {
+              avg_position: avgPosition,
+              ranked_count: ranked.length,
+              sampled_count: serpRankings.length,
+              positions: ranked.map(r => ({ keyword: r.keyword, position: r.position, url: r.url })),
+              fetched_at,
+            },
+            recommendation: 'Identify the highest-volume buried keywords and rebuild the corresponding landing pages with stronger on-page SEO + internal links.',
+            fix_type: 'fde_manual',
+            priority_score: 60,
+          })
+        }
+      }
     }
 
     return { score, findings }
