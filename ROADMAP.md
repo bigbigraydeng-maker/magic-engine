@@ -1227,6 +1227,8 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
   `feat(brief): P8.10.S2.F.1 — discovery anchors prefill seed_keywords + competitors [P8.10.S2.F.1]`
 - **P8.10.S2.F.2** — 博客 hero 图 prompt 拆成第二步：`blog/generator.ts` 移除主 Claude prompt 里的 `featured_image_prompt` 字段；新增 `buildHeroImagePrompt()` 在正文生成后调用 `generateVisualBrief()`，传入 MB 视觉 DNA + 提取的正文文本；MB 缺失时降级到基础 prompt；build 通过
   `feat(blog): P8.10.S2.F.2 — blog hero image uses generateVisualBrief() with MB visual DNA [P8.10.S2.F.2]`
+- **P8.10.S2.F.3** — 张骞 discovery 推断视觉品牌 DNA 自动预填 BriefSourcesForm：`zhangqian/types.ts` 加 `visual_dna` 可选字段（`style_keywords` / `colors` / `donts` 三段英文数组，无信号时返 null）；`prompts.ts` 加研究协议第 9 步 + JSON 示例 + 质量约束；`validators.ts` 加 `isVisualDna` 宽松守卫 + top-level 透传；`BriefSourcesForm.tsx` 在 fetch 类型加 visual_dna、useEffect 末尾追加三个视觉输入框预填、banner 追加视觉 DNA 行；build 通过；worktree 隔离避免冲突主线 session
+  `feat(zhangqian): P8.10.S2.F.3 — discovery infers visual DNA + prefills MB form [P8.10.S2.F.3]`
 - **P8.10.S0.15–S0.20** — 张骞/MB/视觉 brief 收尾增强（**并行 session 完成，commit message 误标 `[P8.10.S2.1]`–`[P8.10.S2.6]`，实际属于 P8.10.S0 范畴**）：Content modal 简化、`/content/generate` 重定向、张骞 confirm 跳转 `?brief=1`、MB 加视觉 DNA、BriefSourcesForm 自动预填、`visual_brief` 拆成独立第二步生成器
   - `refactor(content): remove image preview ... [P8.10.S2.1]` (2a10979) → 实际 S0.15
   - `refactor(content): redirect /content/generate ... [P8.10.S2.2]` (742d0f7) → 实际 S0.16

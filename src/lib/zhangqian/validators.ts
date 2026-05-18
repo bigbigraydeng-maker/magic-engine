@@ -381,6 +381,24 @@ function isDiagnosis(v: unknown): v is DiagnosisBlock {
   return true
 }
 
+/**
+ * Lenient guard for the optional visual_dna block (P8.10.S2.F.3).
+ * All three arrays are coerced to clean string arrays; a malformed shape
+ * is rejected so the caller stores null rather than partial garbage.
+ */
+function isVisualDna(v: unknown): v is NonNullable<DiscoveryReport['visual_dna']> {
+  if (!isRecord(v)) return false
+  const fields = ['style_keywords', 'colors', 'donts'] as const
+  for (const key of fields) {
+    if (!Array.isArray(v[key])) {
+      v[key] = []
+    } else {
+      v[key] = (v[key] as unknown[]).filter(isString).map(s => s.trim()).filter(Boolean)
+    }
+  }
+  return true
+}
+
 // ─── Top-level validator ──────────────────────────────────────────────────────
 
 /**
@@ -463,6 +481,7 @@ export function validateDiscoveryReport(
       meta_ads: isMetaAds(v.meta_ads) ? v.meta_ads : null,
       serp_results: Array.isArray(v.serp_results) ? v.serp_results.filter(isSerpResult) : null,
       diagnosis: isDiagnosis(v.diagnosis) ? v.diagnosis : null,
+      visual_dna: isVisualDna(v.visual_dna) ? v.visual_dna : null,
     },
   }
 }

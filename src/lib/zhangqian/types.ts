@@ -240,6 +240,19 @@ export interface DiscoveryReport {
   /** Deep diagnostic block with scores, narrative, and action plan */
   diagnosis?: DiagnosisBlock | null
 
+  /**
+   * Inferred visual brand DNA — auto-prefilled into the Master Brief form.
+   * Source: Claude's read of hero imagery, button colors, typography tone,
+   * photography style across the homepage + 1-2 inner pages. When the
+   * website offers no usable signal, the agent returns null rather than
+   * fabricating one. Populated by P8.10.S2.F.3.
+   */
+  visual_dna?: {
+    style_keywords: string[]   // 3–5 adjectives, e.g. 'minimalist', 'warm', 'bold'
+    colors: string[]           // 2–4 hex codes or color names sampled from the site
+    donts: string[]            // 3–5 visual DON'T guidelines, e.g. 'no stock photos'
+  } | null
+
   /** Run telemetry — written by agent.ts, not by Claude */
   meta: {
     model: string

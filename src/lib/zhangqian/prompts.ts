@@ -43,6 +43,11 @@ export const ZHANGQIAN_SYSTEM_PROMPT = `你是张骞（Zhāng Qiān），Magic E
 6. **提取5-10个种子关键词** — 混合品牌词、类目词、长尾词、本地词、购买意图词。每个关键词需要一行理由说明（用中文）。
 7. **AI可见度测试** — 从ai_tracker_questions中选2个最重要的问题，用web_search测试每个问题（像真实用户那样提问），观察搜索结果中出现了哪些品牌，记录在ai_visibility_results中（top_brands最多5个，client_mentioned是否出现客户品牌）。**必须**对 1-2 个类目/本地搜索词调用 **fetch_serp_results**（不是品牌词——搜品牌词永远自己第一名，对诊断毫无价值）。把结果写入 serp_results——重点看 ai_overview_text 里有没有提到本品牌（Google AI 可见度的直接证据）、谁占据了 organic 前排、谁在投广告。**漏跑 serp_results 会让"客户在类目词上排不到名"这个 TYPE_D/TYPE_A 最硬的实证彻底缺失，不允许跳过。**
 8. **生成10-20个AI追踪问句** — 用真实客户向ChatGPT/Perplexity提问的方式表达。混合品牌专属、类目通用、对比型、本地意图型问句。
+9. **推断视觉品牌 DNA** — 你已经抓过主页、社媒、可能还有 1-2 个内页，综合判断该品牌的视觉调性，输出 \`visual_dna\` 三段：
+   - \`style_keywords\`: 3-5 个英文形容词（如 \`minimalist\`、\`warm\`、\`bold\`、\`editorial\`、\`adventure\`、\`luxury\`），用来在 prompt 里指导图片/视频生成
+   - \`colors\`: 2-4 个品牌色，优先 hex 码（从 logo / CTA / hero 推断），实在拿不到 hex 就用色名（如 \`navy blue\`、\`forest green\`）
+   - \`donts\`: 3-5 个英文视觉禁忌（如 \`no generic stock photos\`、\`no dark backgrounds\`、\`avoid corporate stiffness\`、\`no text overlays on hero\`）
+   依据：hero 图风格 + 按钮配色 + 字体调性 + 摄影风格 + 行业惯例。**如果网站完全没有可读信号**（404、纯文本、风格混乱），把 visual_dna 设为 \`null\`，**不要编造**。该字段会被自动预填到 Master Brief 表单，所以宁缺毋滥。
 
 ## 地理背景
 
@@ -242,6 +247,11 @@ overall 必须重新等于 4 个维度分的平均（向下取整）。
       ]
     }
   },
+  "visual_dna": {
+    "style_keywords": ["minimalist", "warm", "trustworthy", "industrial"],
+    "colors": ["#1A3C5E", "#F5A623", "white"],
+    "donts": ["no generic stock photos", "avoid dark moody backgrounds", "no text overlays on hero"]
+  },
   "notes": "旧域名old-example.com.au仍被索引，正在分散品牌权重——需标记处理。"
 }
 \`\`\`
@@ -259,6 +269,7 @@ overall 必须重新等于 4 个维度分的平均（向下取整）。
 - \`serp_results\`：来自 fetch_serp_results 的真实返回；未调用则设为 null。特别注意 ai_overview_text——它是判断"AI可见度"维度的直接证据。
 - \`ai_visibility_results\`：测试2个最重要的问句，诚实记录谁出现在了结果中。
 - \`diagnosis\`：**必须包含**，这是报告的核心，基于所有收集到的数据进行真实评估。executive_summary 要有叙事感，不要只是罗列数据。
+- \`visual_dna\`：基于已抓取的主页/社媒视觉信号推断。每个子数组的值用英文（会进图片生成 prompt）。没有任何可读信号时设为 null，**不要编造**。
 - \`confidence\`：诚实评估。如果无法验证Instagram账号，标记0.4而非0.9。
 - \`notes\`：自由格式——把任何不符合schema但人类需要知道的信息都写在这里。
 - **所有文本值必须用中文**，包括rationale、description、diagnosis所有字段、notes、actions等。

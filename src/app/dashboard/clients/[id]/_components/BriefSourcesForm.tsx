@@ -46,6 +46,11 @@ export function BriefSourcesForm({ clientId, onGenerated }: Props) {
             social_profiles?: { url: string }[];
             seed_keywords?: { keyword: string }[];
             competitors?: { domain: string }[];
+            visual_dna?: {
+              style_keywords?: string[];
+              colors?: string[];
+              donts?: string[];
+            } | null;
           };
         };
       } | null) => {
@@ -76,6 +81,19 @@ export function BriefSourcesForm({ clientId, onGenerated }: Props) {
           .filter((c): c is string => Boolean(c))
           .slice(0, 10);
         if (compDomains.length > 0) setCompetitorDomains(compDomains);
+        // P8.10.S2.F.3: pre-fill visual DNA from discovery
+        const vdna = d.payload?.visual_dna;
+        if (vdna) {
+          if (vdna.style_keywords?.length) {
+            setVisualStyle(vdna.style_keywords.join(', '));
+          }
+          if (vdna.colors?.length) {
+            setBrandColors(vdna.colors.join(', '));
+          }
+          if (vdna.donts?.length) {
+            setVisualAvoid(vdna.donts.join(', '));
+          }
+        }
         setDiscoveryLoaded(true);
       })
       .catch(() => { /* silent — no discovery yet */ });
@@ -178,6 +196,7 @@ export function BriefSourcesForm({ clientId, onGenerated }: Props) {
             <li>域名、社媒链接</li>
             {seedKeywords.length > 0 && <li>{seedKeywords.length} 个种子关键词 (将作为 MB 锚点)</li>}
             {competitorDomains.length > 0 && <li>{competitorDomains.length} 个竞品域名 (将作为 MB 锚点)</li>}
+            {(visualStyle || brandColors || visualAvoid) && <li>视觉品牌 DNA (风格 / 色彩 / 禁忌)</li>}
           </ul>
         </div>
       )}
