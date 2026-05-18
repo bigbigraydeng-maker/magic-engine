@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 
 interface Client {
@@ -52,12 +52,6 @@ const routeLabels: Record<string, string> = {
   route_c: 'Route C',
 };
 
-const RATIO_OPTIONS = [
-  { value: '1:1',  label: '方形 1:1 (通用)' },
-  { value: '4:5',  label: '竖版 4:5 (Instagram 动态)' },
-  { value: '9:16', label: '故事 9:16 (TikTok / Reels)' },
-  { value: '16:9', label: '横版 16:9 (YouTube)' },
-];
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MONTH_NAMES = [
@@ -71,14 +65,6 @@ function isNewPost(created_at: string) {
   return Date.now() - new Date(created_at).getTime() < 60 * 60 * 1000;
 }
 
-function suggestRatio(platforms: string[]): string {
-  if (platforms.includes('tiktok')) return '9:16';
-  if (platforms.includes('youtube')) return '16:9';
-  if (platforms.includes('twitter')) return '16:9';
-  if (platforms.includes('instagram')) return '4:5';
-  if (platforms.includes('facebook')) return '4:5';
-  return '1:1';
-}
 
 function getCalendarDays(year: number, month: number): (number | null)[] {
   const firstDay = new Date(year, month, 1);
@@ -192,17 +178,6 @@ export default function ContentBoardPage() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
 
-  // Modal image preview state
-  const [previewRatio, setPreviewRatio] = useState('1:1');
-  const [previewStatus, setPreviewStatus] = useState<'idle' | 'generating' | 'done' | 'failed'>('idle');
-  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
-  const [previewError, setPreviewError] = useState('');
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // Cleanup polling on unmount
-  useEffect(() => {
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, []);
 
   useEffect(() => {
     fetch('/api/clients').then(r => r.json()).then(d => setClients(d.clients ?? []));
@@ -245,21 +220,12 @@ export default function ContentBoardPage() {
     setEditHashtags((post.hashtags ?? []).join(' '));
     setEditVisualBrief(post.visual_brief ?? '');
     setSaveMsg('');
-    setPreviewRatio(suggestRatio(post.platforms));
-    setPreviewStatus('idle');
-    setPreviewImageUrl(null);
-    setPreviewError('');
-    if (pollRef.current) clearInterval(pollRef.current);
   };
 
   const closeModal = () => {
     setModalPost(null);
     setEditMode(false);
     setSaveMsg('');
-    setPreviewStatus('idle');
-    setPreviewImageUrl(null);
-    setPreviewError('');
-    if (pollRef.current) clearInterval(pollRef.current);
   };
 
   // ── Save edits ────────────────────────────────────────────────────────────
@@ -300,51 +266,6 @@ export default function ContentBoardPage() {
       setSaveMsg(`✗ ${(err as Error).message}`);
     } finally {
       setSavingEdit(false);
-    }
-  };
-
-  // ── Image preview generation ──────────────────────────────────────────────
-
-  const handleGeneratePreview = async () => {
-    if (!modalPost) return;
-    setPreviewStatus('generating');
-    setPreviewImageUrl(null);
-    setPreviewError('');
-    if (pollRef.current) clearInterval(pollRef.current);
-
-    try {
-      const res = await fetch('/api/visual/image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          post_id: modalPost.id,
-          client_id: modalPost.client_id,
-          aspect_ratio: previewRatio,
-        }),
-      });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error);
-      const assetId: string = json.asset_id;
-
-      pollRef.current = setInterval(async () => {
-        try {
-          const pr = await fetch(`/api/visual/status/${assetId}`);
-          const pj = await pr.json();
-          const a = pj.asset;
-          if (a?.generation_status === 'ready') {
-            clearInterval(pollRef.current!);
-            setPreviewStatus('done');
-            setPreviewImageUrl(a.storage_url || a.provider_url || null);
-          } else if (a?.generation_status === 'failed') {
-            clearInterval(pollRef.current!);
-            setPreviewStatus('failed');
-            setPreviewError(a.error_message || '生成失败，请重试');
-          }
-        } catch { /* transient */ }
-      }, 5000);
-    } catch (err) {
-      setPreviewStatus('failed');
-      setPreviewError((err as Error).message);
     }
   };
 
@@ -826,48 +747,6 @@ export default function ContentBoardPage() {
               {!editMode && saveMsg && (
                 <p className={`text-xs ${saveMsg.startsWith('✓') ? 'text-green-600' : 'text-red-500'}`}>{saveMsg}</p>
               )}
-
-              {/* Image Preview */}
-              <div className="border-t border-gray-100 pt-4">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">图片预览生成</p>
-                <div className="flex items-center gap-2 mb-3 flex-wrap">
-                  <label className="text-xs text-gray-600 font-medium whitespace-nowrap">比例：</label>
-                  <select value={previewRatio} onChange={e => setPreviewRatio(e.target.value)}
-                    className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white">
-                    {RATIO_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                  <button onClick={handleGeneratePreview} disabled={previewStatus === 'generating'}
-                    className="bg-violet-600 hover:bg-violet-700 text-white text-xs px-4 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50 whitespace-nowrap">
-                    {previewStatus === 'generating' ? (
-                      <span className="flex items-center gap-1.5">
-                        <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
-                        </svg>
-                        生成中…
-                      </span>
-                    ) : '✨ 生成预览图'}
-                  </button>
-                </div>
-                {previewStatus === 'generating' && (
-                  <p className="text-xs text-gray-400">Visual Studio 生成中，通常 1-3 分钟，请耐心等待…</p>
-                )}
-                {previewStatus === 'failed' && (
-                  <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-                    <p className="text-xs text-red-600">{previewError}</p>
-                    <button onClick={handleGeneratePreview} className="text-xs text-red-700 underline mt-1">重试</button>
-                  </div>
-                )}
-                {previewStatus === 'done' && previewImageUrl && (
-                  <div className="mt-2">
-                    <img src={previewImageUrl} alt="Generated preview" className="w-full max-w-sm mx-auto rounded-xl border border-gray-200 shadow-sm" />
-                    <div className="flex gap-3 mt-2 justify-center">
-                      <a href={previewImageUrl} target="_blank" rel="noreferrer" className="text-xs text-indigo-600 hover:underline">↗ 查看原图</a>
-                      <button onClick={handleGeneratePreview} className="text-xs text-gray-500 hover:text-gray-700">↻ 重新生成</button>
-                    </div>
-                  </div>
-                )}
-              </div>
 
               {/* Quick approve/reject */}
               {modalPost.status === 'draft' && (

@@ -117,7 +117,7 @@ export default function GenerateContentPage() {
 
   const handlePushAirtable = async (post: GeneratedPost) => {
     if (!post.id) {
-      alert('Save post first before pushing to Airtable');
+      alert('Save post first before syncing to Content Workspace');
       return;
     }
     await fetch('/api/airtable/sync-content', {
@@ -125,7 +125,7 @@ export default function GenerateContentPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ client_id: clientId, post_ids: [post.id] }),
     });
-    alert('Pushed to Airtable!');
+    alert('Synced to Content Workspace!');
   };
 
   return (
@@ -313,7 +313,7 @@ export default function GenerateContentPage() {
                     onClick={() => handlePushAirtable(post)}
                     className="flex-1 text-xs border border-gray-300 text-gray-600 py-1.5 rounded-lg hover:bg-gray-50 font-medium"
                   >
-                    ↑ Airtable
+                    ↑ Content Workspace
                   </button>
                 </div>
               </div>

@@ -1199,18 +1199,18 @@ export default function VisualsPage() {
           disabled={!selectedClientId || syncing}
           className="text-sm px-3 py-1 bg-indigo-500 text-white rounded hover:bg-indigo-600 disabled:opacity-50"
         >
-          {syncing ? 'Syncing…' : '↓ Sync Airtable'}
+          {syncing ? 'Syncing…' : '↓ Sync Content Workspace'}
         </button>
         <button
           onClick={handlePushAirtable}
           disabled={!selectedClientId || pushing}
           className="text-sm px-3 py-1 bg-emerald-500 text-white rounded hover:bg-emerald-600 disabled:opacity-50"
-          title="Push posts not yet in Airtable"
+          title="Push posts not yet synced to Content Workspace"
         >
-          {pushing ? 'Pushing…' : '↑ Push to Airtable'}
+          {pushing ? 'Pushing…' : '↑ Push to Content Workspace'}
         </button>
         <span className="text-xs text-gray-400 ml-auto hidden md:block">
-          {posts.length} posts · Click any cell to edit · Auto-saves to Supabase + Airtable
+          {posts.length} posts · Click any cell to edit · Auto-saves
         </span>
       </div>
 
@@ -1364,7 +1364,7 @@ export default function VisualsPage() {
               {posts.length === 0 && (
                 <tr>
                   <td colSpan={10} className="text-center py-20 text-gray-400 text-sm">
-                    No posts found — sync from Airtable to get started
+                    No posts found — sync from Content Workspace to get started
                   </td>
                 </tr>
               )}
