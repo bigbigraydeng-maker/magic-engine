@@ -626,6 +626,14 @@ Layer 5: Export（新增）— P8.10.S5
 - [x] **P8.10.S0.13** 张骞进度面板（实时显示「正在搜索 Instagram… / 正在分析竞品官网…」）—— 复用 P9.0 的环形进度组件
 - [x] **P8.10.S0.14** 已有客户加 `/dashboard/clients/[id]/zhangqian` 页面，可手动重跑张骞（更新过期发现）
 
+**S0 收尾增强（2026-05-18 并行 session 完成，commit message 误标 [P8.10.S2.X]，实际属于 S0）**：
+- [x] **P8.10.S0.15** Content modal 移除图片预览区块 + Airtable 文案改为「Content Workspace」（commit 2a10979，误标 `[P8.10.S2.1]`）
+- [x] **P8.10.S0.16** 冗余 `/dashboard/content/generate` 重定向到客户列表，Content 页 「+ 生成内容」按钮修复（commit 742d0f7，误标 `[P8.10.S2.2]`）
+- [x] **P8.10.S0.17** 张骞 confirm 后跳转客户页 `?brief=1`，自动弹开 Master Brief 抽屉（commit 5227874，误标 `[P8.10.S2.3]`）
+- [x] **P8.10.S0.18** Master Brief 加视觉 DNA 字段：`formatBriefForPrompt` + `BriefSourcesForm` + pipeline + API 支持 `visual_style` / `brand_colors` / `visual_avoid`（commit fe3b279，误标 `[P8.10.S2.4]`）
+- [x] **P8.10.S0.19** `BriefSourcesForm` 挂载时自动从张骞 discovery 预填域名 + 社媒 URL（commit 62ab236，误标 `[P8.10.S2.5]`）
+- [x] **P8.10.S0.20** `visual_brief` 从 Route A/C 主调用拆出，独立第二步 `generateVisualBrief()`，使用 MB 视觉 DNA 生成 Flux-dev 级图片 prompt（commit 5226929，误标 `[P8.10.S2.6]`）
+
 **验收标准**：
 - 输入 `oztopbuildingsupplies.com.au` → 5 分钟内交付：业务一句话描述 + IG handle + GBP + 5-10 竞品 + 10-20 关键词 + 15 AI 问句
 - 报告深度匹配 Cowork 生成的 deep research（80%+）
@@ -1213,6 +1221,14 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
   `feat(diagnostic): P8.10.S2.4 — Ads Collector + Meta/Google 双源 [P8.10.S2.4]`
 - **P8.10.S2.5** — AI Visibility 实时调用层：新 `ai-visibility-live-probe.ts`（默认 probe 接 OpenAI runner + parser，跑 3 个核心问句，45s 超时，OPENAI_API_KEY 缺失时静默降级）；collector 加 LiveProbe 注入 + 三态合并（无 snapshot→走 live 评分 / snapshot 0 mentions→附 live 证据 / snapshot 健康但 live 0→新增 `live_probe_no_mention` 高优 finding）；runner.ts 在 ai_visibility/full 模式注入默认 probe；14 测试全过；build 通过
   `feat(diagnostic): P8.10.S2.5 — AI Visibility live probe [P8.10.S2.5]`
+- **P8.10.S0.15–S0.20** — 张骞/MB/视觉 brief 收尾增强（**并行 session 完成，commit message 误标 `[P8.10.S2.1]`–`[P8.10.S2.6]`，实际属于 P8.10.S0 范畴**）：Content modal 简化、`/content/generate` 重定向、张骞 confirm 跳转 `?brief=1`、MB 加视觉 DNA、BriefSourcesForm 自动预填、`visual_brief` 拆成独立第二步生成器
+  - `refactor(content): remove image preview ... [P8.10.S2.1]` (2a10979) → 实际 S0.15
+  - `refactor(content): redirect /content/generate ... [P8.10.S2.2]` (742d0f7) → 实际 S0.16
+  - `feat(zhangqian): confirm → redirect ... [P8.10.S2.3]` (5227874) → 实际 S0.17
+  - `feat(brief): add visual DNA fields ... [P8.10.S2.4]` (fe3b279) → 实际 S0.18
+  - `feat(brief): BriefSourcesForm auto-prefill ... [P8.10.S2.5]` (62ab236) → 实际 S0.19
+  - `feat(content): visual_brief split ... [P8.10.S2.6]` (5226929) → 实际 S0.20
+  - 教训：并行 session 在同一分支工作时必须先确认 ROADMAP 真实任务编号才能起 commit tag
 
 #### 🎉 Phase 12.A 总结（2026-05-17 完成，15 commits / 1 天）
 
