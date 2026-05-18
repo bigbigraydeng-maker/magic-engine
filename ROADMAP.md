@@ -1077,7 +1077,7 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
 - [x] **P12.B.1** — SEO adapter（`SeoContentAdapter`）：vocabulary 填 SEO_ACTION_TYPE + SEO_METRIC_KEY；execute() 落 flywheel_actions；pullMetrics() 拉 SEMrush domain_ranks + blog_posts 计数写 flywheel_metrics；9 个单元测试全过；build 通过 ✅ 2026-05-18
 - [x] **P12.B.2** — Meta Ads adapter（`MetaAdsAdapter`）：CTS 真实广告账户接入，Meta MCP；execute() 落 flywheel_actions；pullMetrics() 拉 ROAS / spend / impressions ✅ 2026-05-18
 - [x] **P12.B.3** — 社媒内容 action 落库：SocialContentAdapter；vocabulary 填 SOCIAL_ACTION_TYPE(3) + SOCIAL_METRIC_KEY(2)；execute() 落 flywheel_actions；pullMetrics() 统计 content_posts 发布/排期数；publer/create-post 挂 .catch() 静默写；11 单元测试；build 通过 ✅ 2026-05-18
-- [ ] **P12.B.4** — SEMrush 周快照 cron：定时拉 domain_ranks 写 flywheel_metrics（所有客户）
+- [x] **P12.B.4** — SEMrush 周快照 cron：定时拉 domain_ranks 写 flywheel_metrics（所有客户）；GET /api/cron/flywheel-seo-weekly；CRON_SECRET 鉴权；逐客户调 SeoContentAdapter.pullMetrics()；9 单元测试；build 通过 ✅ 2026-05-18
 
 ---
 
@@ -1202,6 +1202,8 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
   `feat(flywheel): P12.B.2 — MetaAdsAdapter Ads 飞轮落库 [P12.B.2]`
 - **P12.B.3** — Social adapter：SocialContentAdapter；vocabulary SOCIAL_ACTION_TYPE(3)+SOCIAL_METRIC_KEY(2)；execute()+pullMetrics()；publer/create-post 静默挂载；11 单元测试
   `feat(flywheel): P12.B.3 — SocialContentAdapter 社媒飞轮落库 [P12.B.3]`
+- **P12.B.4** — SEMrush 周快照 cron：GET /api/cron/flywheel-seo-weekly；拉所有有 domain 的客户 domain_ranks 写 flywheel_metrics；9 单元测试；build 通过
+  `feat(flywheel): P12.B.4 — SEMrush 周快照 cron [P12.B.4]`
 
 #### 🎉 Phase 12.A 总结（2026-05-17 完成，15 commits / 1 天）
 

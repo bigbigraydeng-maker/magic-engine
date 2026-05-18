@@ -213,12 +213,12 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-18（**P12.B.3 完成** — SocialContentAdapter 上线；Phase 12.B 3/4 任务）
+> 最后更新：2026-05-18（**P12.B.4 完成** — SEMrush 周快照 cron 上线；Phase 12.B 4/4 任务全部完成 🎉）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P12.B.4** | SEMrush 周快照 cron — 定时拉 domain_ranks 写 flywheel_metrics | ⭐⭐⭐ |
-| **M3 验证** | PM 确认 CTS execution 看板有 outcome chip | ⭐⭐ |
+| **M3 验证** | PM 确认 CTS execution 看板有 outcome chip | ⭐⭐⭐ |
+| **Phase 12.B PR** | 开 PR 合并 feat/phase-12b-adapters → main | ⭐⭐⭐ |
 | P8.3.2 | Dashboard Magic Link 鉴权 | ⭐⭐ |
 
 **Phase 12 工作协议见上方专节**。Phase 12.A 完成后回到 Phase 8.3.2 简单鉴权。
