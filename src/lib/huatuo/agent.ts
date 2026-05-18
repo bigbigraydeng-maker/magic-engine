@@ -31,6 +31,7 @@ import { summarizeTrend } from './trends'
 import { getSeasonalCalendar } from './seasonal-calendar'
 import { getIndustryInterestTrend } from '@/lib/gtrends/client'
 import { coerceWeaknesses } from './weakness-utils'
+import { retrieveSimilarCases } from '@/lib/case-library/retriever'
 
 // re-export 供 refine route 等使用
 export { coerceWeaknesses } from './weakness-utils'
@@ -122,7 +123,10 @@ export async function runHuatuo(
   // Google Trends 查询用客户行业关键词（兜底用业务名）
   const interestQuery = discovery.business.industry[0] ?? discovery.business.name
 
-  const [benchmarks, trendPoints, industryInterest] = await Promise.all([
+  const crisisType = intake.priority_dimensions?.[0] ?? null
+  const marketCode = 'AU'   // 默认 AU，后续可从 client 表读取
+
+  const [benchmarks, trendPoints, industryInterest, similarCases] = await Promise.all([
     fetchBenchmarks(supabase, {
       industryCategory,
       businessSize: 'small',
@@ -132,6 +136,14 @@ export async function runHuatuo(
     getDomainTrafficTrend(discovery.domain, undefined, 12),
     // Google Trends 失败不阻塞 — getIndustryInterestTrend 内部已兜底返回 no_data
     getIndustryInterestTrend(interestQuery, 'AU'),
+    // 案例库检索失败静默返回 [] — retrieveSimilarCases 内部已 try/catch
+    retrieveSimilarCases(supabase, {
+      industry_category: industryCategory,
+      crisis_type: crisisType,
+      monthly_budget_aud: intake.monthly_budget_aud,
+      market: marketCode,
+      limit: 3,
+    }),
   ])
 
   const trendSummary = summarizeTrend(trendPoints)
@@ -146,6 +158,7 @@ export async function runHuatuo(
     trend_summary: trendSummary,
     seasonal_calendar: seasonalCalendar,
     industry_interest: industryInterest,
+    similar_cases: similarCases.length > 0 ? similarCases : null,
   }
 
   // ── Step 2: Generate（pass 1）────────────────────────────────────────────

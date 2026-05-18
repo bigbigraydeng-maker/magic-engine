@@ -158,6 +158,128 @@ export async function callClaudeChat(params: {
   return { text, input_tokens: inputTok, output_tokens: outputTok, cost_usd: costUsd }
 }
 
+// ─── callClaudeWithWebSearch — Anthropic server-side web search helper ───────
+
+const WEB_SEARCH_TOOL_VERSION = 'web_search_20250305' as const
+const DEFAULT_WEB_SEARCH_MAX_USES = 5
+
+export interface WebSearchCitation {
+  url: string
+  title?: string
+}
+
+export interface ClaudeWebSearchResult {
+  text: string
+  citations: WebSearchCitation[]
+  input_tokens: number
+  output_tokens: number
+  cost_usd: number
+  web_search_calls: number
+}
+
+/**
+ * Call Claude with the server-side `web_search` tool enabled. Returns the
+ * natural-language text portion plus deduped citations harvested from
+ * `web_search_tool_result` blocks. Anthropic resolves web_search server-side,
+ * so this is a single-call API — no client-side tool loop required.
+ *
+ * Used by market-context synthesis (P8.10.S3.4) and any future module that
+ * needs Claude to ground its answer in current public web data.
+ */
+export async function callClaudeWithWebSearch(params: {
+  systemPrompt: string
+  userMessage: string
+  maxOutputTokens?: number
+  maxWebSearches?: number
+  /** ISO country code for geo-targeting (e.g. 'AU', 'NZ'). */
+  country?: string
+  /** IANA timezone (e.g. 'Australia/Sydney'). */
+  timezone?: string
+}): Promise<ClaudeWebSearchResult> {
+  const {
+    systemPrompt,
+    userMessage,
+    maxOutputTokens = 2048,
+    maxWebSearches = DEFAULT_WEB_SEARCH_MAX_USES,
+    country,
+    timezone,
+  } = params
+
+  const client = getAnthropicClient()
+
+  const userLocation = country
+    ? { type: 'approximate' as const, country, ...(timezone ? { timezone } : {}) }
+    : undefined
+
+  const tools = [
+    {
+      type: WEB_SEARCH_TOOL_VERSION,
+      name: 'web_search',
+      max_uses: maxWebSearches,
+      ...(userLocation ? { user_location: userLocation } : {}),
+    },
+  ] as unknown as Anthropic.MessageCreateParams['tools']
+
+  const message = await client.messages.create({
+    model: MODEL_SONNET,
+    max_tokens: maxOutputTokens,
+    system: systemPrompt,
+    tools,
+    messages: [{ role: 'user', content: userMessage }],
+  })
+
+  const text = message.content
+    .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+    .map(b => b.text)
+    .join('\n\n')
+    .trim()
+
+  const citations = extractWebSearchCitations(message.content)
+  const webSearchCalls = countWebSearchCalls(message.content)
+
+  const inputTok = message.usage.input_tokens
+  const outputTok = message.usage.output_tokens
+  const costUsd = (inputTok / 1_000_000) * PRICE_INPUT_PER_M
+    + (outputTok / 1_000_000) * PRICE_OUTPUT_PER_M
+
+  return {
+    text,
+    citations,
+    input_tokens: inputTok,
+    output_tokens: outputTok,
+    cost_usd: costUsd,
+    web_search_calls: webSearchCalls,
+  }
+}
+
+function extractWebSearchCitations(content: Anthropic.ContentBlock[]): WebSearchCitation[] {
+  const seen = new Set<string>()
+  const out: WebSearchCitation[] = []
+  for (const block of content) {
+    const b = block as unknown as { type: string; content?: unknown }
+    if (b.type !== 'web_search_tool_result') continue
+    if (!Array.isArray(b.content)) continue
+    for (const r of b.content) {
+      if (!r || typeof r !== 'object') continue
+      const url = (r as { url?: unknown }).url
+      if (typeof url !== 'string' || seen.has(url)) continue
+      seen.add(url)
+      const title = (r as { title?: unknown }).title
+      out.push({ url, ...(typeof title === 'string' ? { title } : {}) })
+    }
+  }
+  return out
+}
+
+function countWebSearchCalls(content: Anthropic.ContentBlock[]): number {
+  let n = 0
+  for (const block of content) {
+    const b = block as unknown as { type: string; name?: unknown }
+    if (b.type === 'server_tool_use' && b.name === 'web_search') n++
+  }
+  return n
+}
+
 // ─── callClaudeWithTools — 通用 tool loop（鲁班执行代理 P8.12.S3.1）────────────
 
 export interface ClaudeToolCall {
@@ -179,7 +301,9 @@ export interface ClaudeToolLoopResult {
 }
 
 const DEFAULT_MAX_TOOL_ROUNDS = 6
-const DEFAULT_PER_CALL_TIMEOUT_MS = 20_000
+// 单轮 Claude 硬超时。20s 太紧 — 鲁班 system prompt 大、工具列表长，
+// 仅初次调用本身就常 ~20s。给 60s 留余量，配合 route.ts maxDuration=180s。
+const DEFAULT_PER_CALL_TIMEOUT_MS = 60_000
 
 /** Promise.race 硬超时兜底，避免单轮 Claude 调用挂死。 */
 function withClaudeTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {

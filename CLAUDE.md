@@ -213,15 +213,13 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-18（**P8.10.S2 全部完成** — 6/6：S2.1 SEO / S2.2 Competitor / S2.3 Social / S2.4 Ads / S2.5 AI Visibility live probe / S2.6 unified evidence envelope；已 push 到 `feat/phase-8-10-s2`）
+> 最后更新：2026-05-18（**P8.12.S3.5 完成** — 鲁班 discover_local_competitors：Yellow Pages AU + Localsearch via Jina，31 测试全过，build 通过）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P8.10.S2 PR** | 开 PR `feat/phase-8-10-s2` → main（含 S2.1–S2.6 + S0.15–S0.20） | ⭐⭐⭐ |
-| P8.10.S3.1 | `competitor-analyst.ts`（Claude Sonnet 合成市场结构 + 对标路径） | ⭐⭐ |
-| P8.3.2 | Dashboard Magic Link 鉴权 | ⭐ |
+| **P8.3.2** | Dashboard Magic Link 鉴权 | ⭐ |
 
-**Phase 12.B PR #33 已合并**(2026-05-18 02:47)，旧焦点表过期已修。
+**Phase 8.12 Sprint 3 全部完成（S3.1–S3.5）**，P8.12.S1.6b（小红书 scraper）为下一可选扩展项。
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox

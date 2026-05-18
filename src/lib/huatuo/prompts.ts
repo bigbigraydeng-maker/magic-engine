@@ -16,6 +16,7 @@ import { categoryToChineseName } from './industry-mapper'
 import { formatTrendForPrompt, type TrendSummary } from './trends'
 import { formatSeasonalCalendarForPrompt } from './seasonal-calendar'
 import { formatInterestForPrompt } from '@/lib/gtrends/client'
+import { formatCasesForPrompt } from '@/lib/case-library/retriever'
 
 // ─── Generation prompt（生成阶段）──────────────────────────────────────────────
 
@@ -294,6 +295,7 @@ export function buildHuatuoGenerationPrompt(
   const interestSection = lookup.industry_interest
     ? formatInterestForPrompt(lookup.industry_interest)
     : '## 行业搜索热度趋势（Google Trends）\n\n**未拉取**（搜索热度数据可选）。'
+  const casesSection = formatCasesForPrompt(lookup.similar_cases ?? [])
 
   const priorityDims = intake.priority_dimensions.length > 0
     ? intake.priority_dimensions.join(', ')
@@ -337,6 +339,7 @@ ${trendSection}
 ${seasonalSection}
 
 ${interestSection}
+${casesSection ? `\n${casesSection}\n` : ''}
 ${prior.block}
 ## 客户意向
 - **业务目标**：${intake.business_goal}

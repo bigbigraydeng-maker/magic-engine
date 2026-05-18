@@ -657,23 +657,23 @@ Layer 5: Export（新增）— P8.10.S5
 - [x] **P8.10.S2.6** 统一 evidence schema：`{ raw, parsed, sources: [{url, fetched_at}], collected_at }`
 
 **Sprint 3 — Synthesis 层（P8.10.S3，~3 天，核心）**：
-- [ ] **P8.10.S3.1** 新增 `src/lib/diagnostic/synthesis/competitor-analyst.ts`（Claude Sonnet 合成市场结构 + 对标路径）
-- [ ] **P8.10.S3.2** 新增 `src/lib/diagnostic/synthesis/dimension-narrator.ts`（每维度 narrative）
-- [ ] **P8.10.S3.3** 新增 `src/lib/diagnostic/synthesis/score-explainer.ts`（每个分数的解释段落）
-- [ ] **P8.10.S3.4** 新增 `src/lib/diagnostic/synthesis/market-context.ts`（Anthropic Web Search 抓行业现状）
-- [ ] **P8.10.S3.5** 新增 `diagnostic_narratives` 表：`run_id, dimension, narrative_md, generated_at, model, cost_usd`
-- [ ] **P8.10.S3.6** Synthesis 结果注入 prescription-generator prompt（让处方更精准）
+- [x] **P8.10.S3.1** 新增 `src/lib/diagnostic/synthesis/competitor-analyst.ts`（Claude Sonnet 合成市场结构 + 对标路径）
+- [x] **P8.10.S3.2** 新增 `src/lib/diagnostic/synthesis/dimension-narrator.ts`（每维度 narrative）
+- [x] **P8.10.S3.3** 新增 `src/lib/diagnostic/synthesis/score-explainer.ts`（每个分数的解释段落）
+- [x] **P8.10.S3.4** 新增 `src/lib/diagnostic/synthesis/market-context.ts`（Anthropic Web Search 抓行业现状）
+- [x] **P8.10.S3.5** 新增 `diagnostic_narratives` 表：`run_id, dimension, narrative_md, generated_at, model, cost_usd`
+- [x] **P8.10.S3.6** Synthesis 结果注入 prescription-generator prompt（让处方更精准）
 
 **Sprint 4 — Report Composer（P8.10.S4，~2 天）**：
-- [ ] **P8.10.S4.1** `src/lib/diagnostic/report-generator.ts` — 合成完整 Markdown 报告
-- [ ] **P8.10.S4.2** 报告结构：执行摘要 / 客户基线 / 6 维度深度分析 / 竞品对比表 / 处方摘要 / 证据附录
-- [ ] **P8.10.S4.3** 新增页面 `/dashboard/clients/[id]/diagnostic/report` 渲染 Markdown（含目录 / 表格 / 折叠段）
-- [ ] **P8.10.S4.4** **保留** `/dashboard/clients/[id]/diagnostic` 6 维度评分卡作为「速览」入口
+- [x] **P8.10.S4.1** `src/lib/diagnostic/report-generator.ts` — 合成完整 Markdown + 可打印 HTML（含 7 段全部填实）
+- [x] **P8.10.S4.2** 报告结构：摘要 / 基线 / 6 维度 / 竞品 / 市场上下文 / 处方（证据改为独立 `evidence-{run_id}.json`，不内嵌）
+- [x] **P8.10.S4.3** 新增页面 `/dashboard/clients/[id]/diagnostic/report` 渲染 Markdown（含目录 / 表格 / 折叠段）
+- [x] **P8.10.S4.4** **保留** `/dashboard/clients/[id]/diagnostic` 6 维度评分卡作为「速览」入口
 
 **Sprint 5 — 引用/证据追溯层（P8.10.S5，~1 天）**：
-- [ ] **P8.10.S5.1** 每个 finding / narrative 段落带 `evidence_refs: string[]`
-- [ ] **P8.10.S5.2** UI 上标 `[1]` 可点开证据抽屉（类似 deep-research `citeturn`）
-- [ ] **P8.10.S5.3** 导出 DOCX 按钮（用 `anthropic-skills:docx` 渲染）
+- [x] **P8.10.S5.1** 每个 finding / narrative 段落带 `evidence_refs: string[]`
+- [x] **P8.10.S5.2** UI 上标 `[1]` 可点开证据抽屉（类似 deep-research `citeturn`）
+- [x] **P8.10.S5.3** 导出 DOCX 按钮（用 `anthropic-skills:docx` 渲染）
 
 **验收标准**：
 - 同一客户（Oztop）诊断报告深度 ≥ 附件 `oztop 品牌健康诊断报告.docx` 的 80%
@@ -714,9 +714,9 @@ Layer 5: Export（新增）— P8.10.S5
 
 **Sprint 2 — 数据飞轮（P8.12.S2，~10–14 人天，真护城河）📋 补充（MVP 上线后）**：
 - [x] **P8.12.S2.1** Case Library schema：新建 `prescription_cases` / `prescription_outcomes` / `local_data_cache` 三表 + RLS ⭐ 所有其他条目的硬前置，建议 S1 收尾时并行启动
-- [ ] **P8.12.S2.2** 华佗 `retrieve_similar_cases` skill（`src/lib/case-library/retriever.ts`）— 按行业 / 危机类型 / 预算档结构化检索历史处方（v0 不用 embedding）
-- [ ] **P8.12.S2.3** 效果反馈闭环：处方 KPI 90 天实际回流（`prescription_outcomes` 录入 API + cron 提醒，SEMrush 可测指标自动回填）
-- [ ] **P8.12.S2.4** 行业基准自动累积：从 outcome 聚合 P50/P75/P90 写回 `industry_benchmarks`（cron，需最低样本阈值）
+- [x] **P8.12.S2.2** 华佗 `retrieve_similar_cases` skill（`src/lib/case-library/retriever.ts`）— 按行业 / 危机类型 / 预算档结构化检索历史处方（v0 不用 embedding）
+- [x] **P8.12.S2.3** 效果反馈闭环：处方 KPI 90 天实际回流（`prescription_outcomes` 录入 API + cron 提醒，SEMrush 可测指标自动回填）
+- [x] **P8.12.S2.4** 行业基准自动累积：从 outcome 聚合 P50/P75/P90 写回 `industry_benchmarks`（cron，需最低样本阈值）
 - 依赖：S2.1 必须最先做；S2.2/S2.3 可并行（一读一写）；S2.4 串行收尾
 
 **Sprint 3 — 深化（P8.12.S3，~12–16 人天）**：
@@ -732,8 +732,8 @@ Layer 5: Export（新增）— P8.10.S5
 📋 **补充（MVP 上线后）**
 - [x] **P8.12.S3.2** 鲁班 `generate_content` skill — 执行类任务直接产出并落库到 SEO/社媒模块（依赖 S3.1）
 - [x] **P8.12.S3.3** 跨 Agent `check_local_compliance` skill（`src/lib/compliance/`）— AU 广告法 / trades license / AFSL 合规风险提示（定位风险提示非背书）【规则库部分已完成：types.ts + au-rules.ts + checkLocalCompliance；注册为鲁班 tool 待后续】
-- [ ] **P8.12.S3.4** 鲁班 `publish_to_gbp` skill — 依赖 GBP API 写权限申请，未通过则降级为「生成草稿 + 人工发布」（弹性项）
-- [ ] **P8.12.S3.5** 本地行业目录竞品发现 connector（Yellow Pages AU / Localsearch via Jina）— 优先级最低，弹性缓冲
+- [x] **P8.12.S3.4** 鲁班 `publish_to_gbp` skill — 依赖 GBP API 写权限申请，未通过则降级为「生成草稿 + 人工发布」（弹性项）
+- [x] **P8.12.S3.5** 本地行业目录竞品发现 connector（Yellow Pages AU / Localsearch via Jina）— 优先级最低，弹性缓冲
 
 **新建数据库表**（S2.1）：
 - `prescription_cases` — 处方 + 诊断快照作可检索案例，索引 `(industry_category, crisis_type, monthly_budget_aud)`
@@ -1229,6 +1229,35 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
   `feat(blog): P8.10.S2.F.2 — blog hero image uses generateVisualBrief() with MB visual DNA [P8.10.S2.F.2]`
 - **P8.10.S2.F.3** — 张骞 discovery 推断视觉品牌 DNA 自动预填 BriefSourcesForm：`zhangqian/types.ts` 加 `visual_dna` 可选字段（`style_keywords` / `colors` / `donts` 三段英文数组，无信号时返 null）；`prompts.ts` 加研究协议第 9 步 + JSON 示例 + 质量约束；`validators.ts` 加 `isVisualDna` 宽松守卫 + top-level 透传；`BriefSourcesForm.tsx` 在 fetch 类型加 visual_dna、useEffect 末尾追加三个视觉输入框预填、banner 追加视觉 DNA 行；build 通过；worktree 隔离避免冲突主线 session
   `feat(zhangqian): P8.10.S2.F.3 — discovery infers visual DNA + prefills MB form [P8.10.S2.F.3]`
+- **P8.10.S3.1** — Competitor Analyst (Synthesis 层第 1 个模块)：新增 `src/lib/diagnostic/synthesis/competitor-analyst.ts` + `analyzeCompetitorLandscape()`，Claude Sonnet 4.6 把 `CompetitorEntry[]`（含 site_signals + meta_ads）合成两段 Markdown 叙事「Market Structure」+「Benchmarking Path」，输出 JSON + cost/model/generated_at；TDD 写 12 个单测（happy path / guard rails / 输出解析 / brief 注入），全过；diagnostic 207 测试全过；build 通过
+  `feat(diagnostic): P8.10.S3.1 — competitor analyst synthesis [P8.10.S3.1]`
+- **P8.10.S3.2** — Dimension Narrator (Synthesis 层第 2 个模块)：新增 `src/lib/diagnostic/synthesis/dimension-narrator.ts` + `narrateDimension()` / `narrateAllDimensions()`，对单个 `DiagnosticDimension` (seo/ai_visibility/ads/social/reputation/competitor) 用 Claude Sonnet 4.6 生成 200–400 字三段式 Markdown 叙事「Current state / Root cause / Opportunities」，注入 findings 的 severity/recommendation/fix_type/evidence；score=null（未配置）也能产出说明；批量入口对空 findings 维度静默跳过。TDD 15 个单测全过；diagnostic 222 测试全过；build 通过
+- **P8.10.S3.3** — Score Explainer (Synthesis 层第 3 个模块)：新增 `src/lib/diagnostic/synthesis/score-explainer.ts` + `explainScores()`，单次 Claude Sonnet 4.6 调用为 overall + 每个维度产出 60–120 字 Markdown caption「为什么是这分」，锚定 findings 的 drag-down/lift-up 与 weight × gap；输入校验 0–100 + 非空维度 + null 容忍；输出 reconcile（剔除未请求的 target、查重、强制 overall 必含）；TDD 21 单测全过；diagnostic 243 测试全过
+  `feat(diagnostic): P8.10.S3.3 — score explainer synthesis [P8.10.S3.3]`
+- **P8.10.S3.4** — Market Context (Synthesis 层第 4 个模块)：在 `src/lib/anthropic/client.ts` 新增 `callClaudeWithWebSearch` helper（server-side `web_search_20250305` 工具 + citation 抓取 + cost 计算）；新增 `src/lib/diagnostic/synthesis/market-context.ts` + `gatherMarketContext()`，Claude Sonnet 用 Anthropic Web Search 抓行业现状，按 market (au→AU+Sydney / nz→NZ+Auckland) 路由 user_location，产出 `industry_overview_md` / `key_trends[3-6]` / `category_benchmarks_md` / `opportunities_md` + citations + cost；输入校验 brand/industry/market/maxSearches + focusTopics 上限 10；TDD 24 单测全过；diagnostic 267 测试全过
+  `feat(diagnostic): P8.10.S3.4 — market context synthesis [P8.10.S3.4]`
+- **P8.10.S3.5** — Synthesis 持久化层：新增 migration `20260518000002_diagnostic_narratives.sql`（表 `diagnostic_narratives`：`run_id / client_id / kind / dimension / narrative_md / metadata / model / cost_usd / generated_at`，CHECK 约束 kind 枚举，UNIQUE INDEX 用 `COALESCE(dimension, '')` 处理 NULL，RLS 沿用 client_team）；新增 `src/lib/diagnostic/synthesis/persistence.ts`：`saveCompetitorAnalysis` / `saveDimensionNarrative(s)` / `saveScoreExplanations`（cost 只挂 overall 防重复求和）/ `saveMarketContext`（dimension=NULL + metadata 存 citations/trends）/ `loadNarrativesForRun`，全部走 `upsert(onConflict='run_id,kind,dimension')`，错误只 warn 不抛；TDD 11 单测全过；diagnostic 278 测试全过；build 通过
+  `feat(diagnostic): P8.10.S3.5 — diagnostic_narratives table + persistence [P8.10.S3.5]`
+- **P8.10.S3.6** — Synthesis 结果注入 prescription-generator：`generatePrescription` 在加载 run+findings 后通过 `loadNarrativesForRun(supabase, runId)` 拉取 narratives；`buildPrescriptionPrompt` 签名加 `narratives` 可选参数；新增 `formatNarrativesForPrompt()` 按 kind 分桶渲染 4 段（Market Context / Competitor Analysis / Dimension Narratives / Score Explanations）注入 prompt；SYSTEM_PROMPT 加硬指令"必须将 Synthesis Insights 作为撰写处方的主要依据"（action description / KPI target_value / 阶段 1 快速动作 / summary 必须呼应）；narratives 为空时段落整体省略，对老 run 零影响；新增 2 个 TDD 单测 + 更新 supabase mock 支持 `diagnostic_narratives` 表的 `.eq().order().order()` 链；prescription-generator 10 测试全过 + diagnostic 280 测试全过；build 通过
+  `feat(diagnostic): P8.10.S3.6 — inject synthesis narratives into prescription prompt [P8.10.S3.6]`
+- **P8.10.S4.3 + S4.4** — `/diagnostic/report` 页落地 + 速览入口保留：新增 `src/app/dashboard/clients/[id]/diagnostic/report/page.tsx`，iframe 渲染 print-HTML + 浮层目录（H2 自动提取 + IntersectionObserver 高亮）+ 打印按钮 + evidence.json 下载；原 `/diagnostic` 6 维度评分卡作「速览入口」保留，Report 按钮从评分卡跳转到新页；S4.4 随 S4.3 一起完成
+  `feat(diagnostic): P8.10.S4.3 — /diagnostic/report page (iframe + TOC + print + evidence download) [P8.10.S4.3]`
+- **P8.10.S5.2** — 证据引用上标抽屉：report-generator 注入 `[[cite:kind:dim]]` 标记 → HTML 替换为 `<sup class="cite" data-idx>[N]</sup>`；`buildCitationRegistry` 分组 evidence_refs、顺序编号；`__cite_data__` JSON + postMessage JS 仅在有引用时注入；report/page.tsx 监听 `cite:click` message，EvidenceDrawer 展示来源 URL 列表；markdown artifact 自动 strip 标记；+4 tests，296 全绿，build 通过
+  `feat(diagnostic): P8.10.S5.2 — evidence citation drawer ([N] superscript + postMessage) [P8.10.S5.2]`
+- **P8.10.S5.3** — 导出 DOCX 按钮：新增 GET `/api/clients/[id]/diagnostic/report/docx`，拉 markdown artifact → `docx` npm 包生成 A4 Word 文档（Arial、样式化 H1-H3、bullet 列表、GFM 表格、inline bold/italic/code）；report 页头部新增 DOCX 按钮含 loading spinner，置于 Evidence 与打印按钮之间；build 通过
+  `feat(diagnostic): P8.10.S5.3 — export DOCX button + /report/docx API [P8.10.S5.3]`
+- **P8.12.S2.2** — 华佗案例库检索 skill：新增 `retriever.ts`（`retrieveSimilarCases`：industry_category 精确 + crisis_type 可选 + 预算 ±50% 区间 + market 筛选，附 outcomes KPI；`formatCasesForPrompt` 渲染案例段落）+ `saver.ts`（`savePrescriptionCase` 静默写库 + `deriveCrisisType` 从 priority_dimensions 提取）；`HuatuoLookupContext` 加 `similar_cases` 字段；agent.ts 在 Lookup Step 并行调 retriever；prompts.ts 注入案例段落；generate/route.ts `.catch()` hook 案例存档；16 新测试全过；41 case-library+huatuo 测试全过；build 通过
+  `feat(huatuo): P8.12.S2.2 — retrieve_similar_cases skill + case saver [P8.12.S2.2]`
+- **P8.12.S2.4** — 行业基准自动累积：`benchmark-accumulator.ts`（`calcPercentiles` P50/P75/P90 线性插值 + `accumulateBenchmarks` 按 industry_category/business_size/market/kpi_metric 分组）；`/api/cron/benchmark-accumulator` CRON_SECRET 鉴权；MIN_SAMPLE_THRESHOLD=5 冷启动保护；confidence 随样本量增长（封顶 0.95）；check-then-insert/update 无需 UNIQUE 约束；19 测试全过；build 通过
+  `feat(huatuo): P8.12.S2.4 — benchmark accumulator (P50/P75/P90 from outcomes → industry_benchmarks) [P8.12.S2.4]`
+- **P8.12.S3.5** — 本地行业目录竞品发现：新增 `src/lib/local-directory/`（types.ts + client.ts，Yellow Pages AU + Localsearch via Jina）；parseDirectoryMarkdown 解析 H2/H3 段、AU 电话 / 评分 / 地址、跳过导航 heading、上限 20 条；discoverLocalCompetitors 双源 Promise.allSettled + 去重 + limit；鲁班新工具 discover_local_competitors（prompts.ts 补 发按需调用段落）；31 测试全过；build 通过
+  `feat(luban): P8.12.S3.5 — local directory competitor connector (Yellow Pages AU + Localsearch via Jina) [P8.12.S3.5]`
+- **P8.12.S2.3** — 处方 KPI 反馈闭环：`outcome-recorder.ts`（`recordOutcome` + `backfillSemrushKpisForPrescription`，30/60/90 天节点 ±7 天窗口，去重写入）；`/api/clients/[id]/prescription/[pId]/outcomes` GET+POST；`/api/cron/kpi-backfill` SEMrush 自动回填（organic_keywords / organic_traffic / authority_score）；22 测试全过；build 通过
+  `feat(huatuo): P8.12.S2.3 — KPI feedback loop (outcomes API + SEMrush cron backfill) [P8.12.S2.3]`
+- **P8.10.S5.1** — 证据引用数据层：4 个 synthesis 结果类型（DimensionNarrativeResult / ScoreExplanation / CompetitorAnalystResult / MarketContextResult）加 `evidence_refs: string[]`；NarrativeRow 加 `evidence_refs` 字段，save helpers 写入 `metadata.evidence_refs`，load 时自动提取；lib/diagnostic/types.ts 新增 `extractEvidenceRefs` 工具函数；report-generator evidence.json findings + narratives 均带 refs；292 tests 全绿
+  `feat(diagnostic): P8.10.S5.1 — evidence_refs data layer on findings/narratives [P8.10.S5.1]`
+- **P8.10.S4.1 + S4.2** — Report Composer 落地：新增 `src/lib/diagnostic/report-generator.ts`，`generateReport(supabase, runId, clientId, opts)` 并发拉 run / client / findings / narratives，prescription 优先从 `prescriptions` 表按 (run_id, client_id) 读最新，缺时用 `intake` 调 `generatePrescription` fallback、无 intake 则段落省略；产出 3 件套：（1）完整 Markdown（标题 / 摘要 / 基线快照 / 6 维度详情含 score_explanation + dimension_narrative + 关键问题 / 竞品分析 / 市场上下文 / 处方建议 含 phases + KPI 表 + 预算表），narrative bucket 空则段落整体省略；（2）可打印 self-contained HTML，内嵌 `@page A4 + @media print` 规则 + h2 page-break-before + table page-break-inside avoid + 内置极简 MD→HTML 转换器（headings / paragraphs / 粗体斜体 / 列表 / GFM 表格）零外部依赖；（3）独立 `evidence-{run_id}.json`（findings 全量 + narratives 元数据），**不内嵌**到报告；TDD 12 单测全过（段落顺序 / 缺失数据"无数据"占位 / 空 narratives 段落省略 / prescription 优先读库 + fallback / HTML print CSS 校验 / 证据独立文件 / run 缺失抛错）；diagnostic 292 测试全过；tsc 无误
+  `feat(diagnostic): P8.10.S4.1 — report composer (markdown + print HTML + evidence json) [P8.10.S4.1]`
 - **P8.10.S0.15–S0.20** — 张骞/MB/视觉 brief 收尾增强（**并行 session 完成，commit message 误标 `[P8.10.S2.1]`–`[P8.10.S2.6]`，实际属于 P8.10.S0 范畴**）：Content modal 简化、`/content/generate` 重定向、张骞 confirm 跳转 `?brief=1`、MB 加视觉 DNA、BriefSourcesForm 自动预填、`visual_brief` 拆成独立第二步生成器
   - `refactor(content): remove image preview ... [P8.10.S2.1]` (2a10979) → 实际 S0.15
   - `refactor(content): redirect /content/generate ... [P8.10.S2.2]` (742d0f7) → 实际 S0.16
@@ -1276,6 +1305,9 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
   - **S1.5 Google Trends connector**：新增 `src/lib/gtrends/client.ts`（SerpAPI `google_trends` engine，TIMESERIES 12 个月搜索兴趣曲线，gl=AU/NZ），高层 `getIndustryInterestTrend` 非致命兜底，`HuatuoLookupContext.industry_interest` 字段，agent.ts Lookup 并入 Promise.all，prompts.ts 嵌入「行业搜索热度趋势」段落。
   - 三项共新增 43 个单元测试（seasonal-calendar 16 + benchmarks 9 + gtrends 18），build 通过。
   `feat(huatuo): AU/NZ 本地化三连 — 季节日历 + 预算定位 + Google Trends [P8.12.S1.3/S1.4/S1.5]`
+
+- **P8.12.S3.4** — 鲁班 `publish_to_gbp` skill：新增 `src/lib/gbp/publisher.ts`（`publishToGbp`），优先调 GBP Management API 实时发帖；`GOOGLE_GBP_ACCESS_TOKEN` / `location_name` 缺失或 API 失败时降级为草稿模式，格式化草稿落库到 execution_logs，FDE 手动发布。注册为鲁班第三个工具。10 单元测试（4 降级 + 4 实时 + 2 草稿格式），build 通过。
+  `feat(luban): P8.12.S3.4 — publish_to_gbp skill (draft degradation) [P8.12.S3.4]`
 
 - **P8.12.S3.1** — 鲁班 tool loop 升级（Phase 8.12 MVP）：`callClaudeChat` 单轮对话 → `callClaudeWithTools` 通用 tool loop。新增 `src/lib/luban/tools.ts` + 首个工具 `add_work_log`（鲁班自主把对话结论写入 execution_logs）。`chatWithLuban` 签名/返回结构保持兼容，`callClaudeChat` 未动（brief refinement 不受影响）。新增 5 个单元测试覆盖 tool loop 核心路径。
   待办：UI 端到端实测「鲁班自主调用 add_work_log」需在 dev 环境完成。

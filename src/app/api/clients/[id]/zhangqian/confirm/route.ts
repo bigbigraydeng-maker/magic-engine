@@ -58,7 +58,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'No discovery found for this client' }, { status: 404 })
     }
     if (discovery.confirmed_at !== null) {
-      return NextResponse.json({ error: 'already confirmed' }, { status: 409 })
+      return NextResponse.json({ success: true, already_confirmed: true })
     }
 
     const clientUpdated = await applyBusinessPatch(clientId, body.business)

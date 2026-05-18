@@ -178,8 +178,14 @@ function buildSupabaseMock(opts: {
   run?: unknown
   findings?: unknown[]
   insertedId?: string
+  narratives?: unknown[]
 }) {
-  const { run = MOCK_RUN, findings = MOCK_FINDINGS, insertedId = 'presc-001' } = opts
+  const {
+    run = MOCK_RUN,
+    findings = MOCK_FINDINGS,
+    insertedId = 'presc-001',
+    narratives = [],
+  } = opts
 
   return {
     from: vi.fn().mockImplementation((table: string) => {
@@ -196,6 +202,15 @@ function buildSupabaseMock(opts: {
           select: vi.fn().mockReturnThis(),
           eq:     vi.fn().mockReturnThis(),
           in:     vi.fn().mockResolvedValue({ data: findings, error: null }),
+        }
+      }
+      if (table === 'diagnostic_narratives') {
+        // Chain: .select().eq().order().order() — last .order resolves
+        const finalOrder = vi.fn().mockResolvedValue({ data: narratives, error: null })
+        const firstOrder = vi.fn().mockReturnValue({ order: finalOrder })
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq:     vi.fn().mockReturnValue({ order: firstOrder }),
         }
       }
       if (table === 'prescriptions') {
@@ -353,6 +368,96 @@ describe('generatePrescription()', () => {
     await expect(
       generatePrescription(supabase as never, RUN_ID, CLIENT_ID, INTAKE)
     ).rejects.toThrow('Claude rate limit exceeded')
+  })
+
+  // =========================================================================
+  // 9. P8.10.S3.6 — Synthesis narratives are injected into the prompt
+  // =========================================================================
+  it('injects Synthesis narratives into the prompt when present', async () => {
+    const content = makePrescriptionContent()
+    mockMessagesCreate.mockResolvedValueOnce(makeClaudeResponse(content))
+
+    const NARRATIVES = [
+      {
+        id: 'n-1',
+        run_id: RUN_ID,
+        client_id: CLIENT_ID,
+        kind: 'market_context',
+        dimension: null,
+        narrative_md: 'NZ tourism market is rebounding 18% YoY in 2026.',
+        metadata: null,
+        model: 'claude-sonnet-4-5',
+        cost_usd: 0.04,
+        generated_at: '2026-05-18T00:00:00Z',
+        created_at:   '2026-05-18T00:00:00Z',
+      },
+      {
+        id: 'n-2',
+        run_id: RUN_ID,
+        client_id: CLIENT_ID,
+        kind: 'competitor_market_structure',
+        dimension: 'competitor',
+        narrative_md: 'Three premium incumbents dominate the SERP top 10.',
+        metadata: null,
+        model: 'claude-sonnet-4-5',
+        cost_usd: 0.02,
+        generated_at: '2026-05-18T00:00:00Z',
+        created_at:   '2026-05-18T00:00:00Z',
+      },
+      {
+        id: 'n-3',
+        run_id: RUN_ID,
+        client_id: CLIENT_ID,
+        kind: 'dimension_narrative',
+        dimension: 'seo',
+        narrative_md: 'SEO is bottlenecked by thin product pages and weak internal links.',
+        metadata: null,
+        model: 'claude-sonnet-4-5',
+        cost_usd: 0.01,
+        generated_at: '2026-05-18T00:00:00Z',
+        created_at:   '2026-05-18T00:00:00Z',
+      },
+      {
+        id: 'n-4',
+        run_id: RUN_ID,
+        client_id: CLIENT_ID,
+        kind: 'score_explanation',
+        dimension: 'ai_visibility',
+        narrative_md: 'AI visibility is 35/100 because the brand appears in 1/15 questions.',
+        metadata: { score: 35 },
+        model: 'claude-sonnet-4-5',
+        cost_usd: 0,
+        generated_at: '2026-05-18T00:00:00Z',
+        created_at:   '2026-05-18T00:00:00Z',
+      },
+    ]
+
+    const supabase = buildSupabaseMock({ narratives: NARRATIVES })
+    await generatePrescription(supabase as never, RUN_ID, CLIENT_ID, INTAKE)
+
+    const call = mockMessagesCreate.mock.calls[0][0] as { messages: Array<{ content: string }> }
+    const prompt = call.messages[0].content
+
+    expect(prompt).toContain('Synthesis Insights')
+    expect(prompt).toContain('NZ tourism market is rebounding')
+    expect(prompt).toContain('Three premium incumbents')
+    expect(prompt).toContain('thin product pages')
+    expect(prompt).toContain('1/15 questions')
+  })
+
+  // =========================================================================
+  // 10. P8.10.S3.6 — Missing narratives is non-fatal
+  // =========================================================================
+  it('omits the Synthesis Insights section when no narratives exist', async () => {
+    const content = makePrescriptionContent()
+    mockMessagesCreate.mockResolvedValueOnce(makeClaudeResponse(content))
+
+    const supabase = buildSupabaseMock({ narratives: [] })
+    await generatePrescription(supabase as never, RUN_ID, CLIENT_ID, INTAKE)
+
+    const call = mockMessagesCreate.mock.calls[0][0] as { messages: Array<{ content: string }> }
+    const prompt = call.messages[0].content
+    expect(prompt).not.toContain('Synthesis Insights')
   })
 
   // =========================================================================

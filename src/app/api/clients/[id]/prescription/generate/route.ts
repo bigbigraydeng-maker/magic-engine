@@ -25,6 +25,8 @@ import type {
   ExecutionItem,
 } from '@/types/diagnostic'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
+import { savePrescriptionCase, deriveCrisisType } from '@/lib/case-library/saver'
+import { mapIndustryToCategory } from '@/lib/huatuo/industry-mapper'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -337,7 +339,21 @@ function makeHuatuoStream(
           .eq('id', prescriptionId!)
           .eq('client_id', clientId)
 
-        // 4. 通过流发完整结果给前端
+        // 4. 案例库存档（静默，不阻塞主流程）
+        savePrescriptionCase(supabaseAdmin, {
+          clientId,
+          discoveryId,
+          prescriptionId: prescriptionId!,
+          industryCategory: mapIndustryToCategory(discovery.business.industry),
+          crisisType: deriveCrisisType(intake.priority_dimensions),
+          monthlyBudgetAud: intake.monthly_budget_aud,
+          market: 'AU',
+          businessSize: 'small',
+          prescriptionSummary: result.content.summary?.slice(0, 500) ?? null,
+          selfGradeOverall: result.self_grade.overall ?? null,
+        }).catch(err => console.warn('[prescription/generate] case save failed:', err))
+
+        // 5. 通过流发完整结果给前端
         sendEvent({
           type: 'done',
           prescription_id: prescriptionId,

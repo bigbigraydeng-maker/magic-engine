@@ -31,13 +31,15 @@ interface Props {
   item: ExecutionItem
   target: ExecutionTarget
   onClose: () => void
+  /** 记录完成后，让父组件打开鲁班并预填充消息（seo/geo 专属快捷路径） */
+  onOpenLuban?: (initialMessage: string) => void
 }
 
 type Phase = 'form' | 'submitting' | 'done' | 'error'
 
 // ── component ─────────────────────────────────────────────────────────────────
 
-export function FlywheelDrawer({ clientId, item, target, onClose }: Props) {
+export function FlywheelDrawer({ clientId, item, target, onClose, onOpenLuban }: Props) {
   const flywheelLabel = FLYWHEEL_LABELS[target.flywheel] ?? target.flywheel
 
   const defaultActionType =
@@ -135,6 +137,45 @@ export function FlywheelDrawer({ clientId, item, target, onClose }: Props) {
                 )}
                 <Row label="执行时间" value={new Date(result.executedAt).toLocaleString('zh-CN')} />
               </div>
+              {/* ── 飞轮专属下一步 CTA ─────────────────────────── */}
+              {target.flywheel === 'seo' && onOpenLuban && (
+                <button
+                  onClick={() => {
+                    onClose()
+                    onOpenLuban(`请直接帮我生成并落库一篇 SEO 博客草稿，主题来自这个执行项：「${item.title}」。${item.description ? '背景：' + item.description : ''}`)
+                  }}
+                  className="w-full py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition-colors"
+                >
+                  🤖 让鲁班直接生成博客草稿 →
+                </button>
+              )}
+              {target.flywheel === 'geo' && onOpenLuban && (
+                <button
+                  onClick={() => {
+                    onClose()
+                    onOpenLuban(`请帮我为这个执行项发布一条 GBP 贴子：「${item.title}」。${item.description ? '内容背景：' + item.description : ''}`)
+                  }}
+                  className="w-full py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition-colors"
+                >
+                  🤖 让鲁班起草并发布 GBP 贴子 →
+                </button>
+              )}
+              {target.flywheel === 'social' && (
+                <a
+                  href={`/dashboard/clients/${clientId}?tab=campaigns`}
+                  className="block w-full py-2.5 rounded-lg bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700 transition-colors text-center"
+                >
+                  前往社媒矩阵创建内容 →
+                </a>
+              )}
+              {target.flywheel === 'ads' && (
+                <a
+                  href={`/dashboard/clients/${clientId}?tab=campaigns`}
+                  className="block w-full py-2.5 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-colors text-center"
+                >
+                  前往广告工作台 →
+                </a>
+              )}
               <button
                 onClick={onClose}
                 className="w-full py-2 rounded-lg bg-gray-100 text-gray-700 text-sm hover:bg-gray-200 transition-colors"

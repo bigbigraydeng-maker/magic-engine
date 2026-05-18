@@ -258,18 +258,28 @@ export default function DiagnosticPage() {
               )}
             </div>
           </div>
-          <button
-            onClick={() => void handleRunDiagnostic()}
-            disabled={isRunning || isLaunching}
-            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {isRunning || isLaunching ? (
-              <>
-                <span className="animate-spin inline-block w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full" />
-                运行中…
-              </>
-            ) : run ? '运行新诊断' : '运行首次诊断'}
-          </button>
+          <div className="flex items-center gap-2">
+            {run && (
+              <Link
+                href={`/dashboard/clients/${clientId}/diagnostic/report`}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                查看完整报告 →
+              </Link>
+            )}
+            <button
+              onClick={() => void handleRunDiagnostic()}
+              disabled={isRunning || isLaunching}
+              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isRunning || isLaunching ? (
+                <>
+                  <span className="animate-spin inline-block w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full" />
+                  运行中…
+                </>
+              ) : run ? '运行新诊断' : '运行首次诊断'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -309,7 +319,7 @@ export default function DiagnosticPage() {
                     />
                     {raw === null && (
                       <Link
-                        href={`/dashboard/clients/${clientId}/settings`}
+                        href={`/dashboard/clients/${clientId}/zhangqian`}
                         className="text-xs text-indigo-500 hover:text-indigo-700 hover:underline"
                       >
                         立即配置 →

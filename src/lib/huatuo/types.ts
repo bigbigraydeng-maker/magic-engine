@@ -13,6 +13,7 @@
 import type { PrescriptionContent } from '@/types/diagnostic'
 import type { SeasonalCalendarData } from './seasonal-calendar'
 import type { GTrendsInterestSummary } from '@/lib/gtrends/client'
+import type { SimilarCaseResult } from '@/lib/case-library/retriever'
 
 // ─── Industry Benchmark ────────────────────────────────────────────────────────
 
@@ -128,6 +129,8 @@ export interface HuatuoLookupContext {
   seasonal_calendar?: SeasonalCalendarData | null
   /** 行业搜索热度趋势（Google Trends，P8.12.S1.5 接入；null 表示无数据） */
   industry_interest?: GTrendsInterestSummary | null
+  /** 历史相似案例（Case Library，P8.12.S2.2 接入；null 或 [] 表示无数据） */
+  similar_cases?: SimilarCaseResult[] | null
 }
 
 /**

@@ -19,6 +19,7 @@ import type {
 } from '@/types/diagnostic'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import { getAnthropicClient, parseJsonResponse, MODEL_SONNET } from '@/lib/anthropic/client'
+import { loadNarrativesForRun, type NarrativeRow } from './synthesis/persistence'
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -57,6 +58,11 @@ const SYSTEM_PROMPT = `你是 Magic Engine 平台的资深数字营销策略师�
 - 每个 action 的 "phase" 字段必须等于其父 phase_number（1、2 或 3）
 - budget_allocation 各项金额之和**最多**等于客户输入的 monthly_budget_aud（绝不可超过）
 - 优先处理 critical 和 high 级别的问题，忽略 medium/low
+- 如果输入中提供了「Synthesis Insights」段落（市场上下文 / 竞品分析 / 维度叙事 / 分数解释），**必须将其作为撰写处方的主要依据**：
+  - action 的 description 要引用维度叙事中的关键事实（不是泛泛而谈）
+  - KPI 的 target_value 要参考分数解释和市场基准
+  - 阶段 1 的快速动作要呼应竞品分析中的「benchmarking path」首步
+  - summary 必须体现 market context 的核心趋势
 
 ## KPI 目标的撰写要求
 
@@ -121,7 +127,9 @@ export async function generatePrescription(
   intake: PrescriptionIntake,
 ): Promise<GeneratePrescriptionResult> {
   const [run, findings] = await fetchRunData(supabase, runId, clientId)
-  const prompt = buildPrescriptionPrompt(run, findings, intake)
+  // P8.10.S3.6 — load Synthesis narratives if present; missing is non-fatal
+  const narratives = await loadNarrativesForRun(supabase, runId)
+  const prompt = buildPrescriptionPrompt(run, findings, intake, narratives)
 
   // Init Anthropic client inside function (per CLAUDE.md — never at module top level)
   const client = getAnthropicClient()
@@ -155,6 +163,7 @@ export function buildPrescriptionPrompt(
   run: Pick<DiagnosticRun, 'id' | 'overall_score' | 'dimension_scores'>,
   findings: DiagnosticFinding[],
   intake: PrescriptionIntake,
+  narratives: NarrativeRow[] = [],
 ): string {
   const dimensionScoresText = run.dimension_scores
     ? Object.entries(run.dimension_scores)
@@ -173,6 +182,8 @@ export function buildPrescriptionPrompt(
     ? intake.priority_dimensions.join(', ')
     : 'all dimensions'
 
+  const synthesisText = formatNarrativesForPrompt(narratives)
+
   return `## Diagnostic Report
 
 Overall Score: ${run.overall_score ?? 'N/A'}/100
@@ -182,7 +193,7 @@ ${dimensionScoresText}
 
 ## Critical & High Severity Findings
 ${findingsText}
-
+${synthesisText}
 ## Client Intake
 
 Business Goal: ${intake.business_goal}
@@ -196,6 +207,69 @@ Additional Notes: ${intake.notes ?? 'None'}
 Generate a 3-phase prescription JSON for this AU/NZ business.
 Budget: AUD ${intake.monthly_budget_aud}/month — allocations must NOT exceed this total.
 Focus on the critical and high severity findings listed above.`
+}
+
+// ---------------------------------------------------------------------------
+// Synthesis injection (P8.10.S3.6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Render Synthesis-layer narratives (competitor analysis, dimension stories,
+ * score explanations, market context) into a prompt section. Returns an empty
+ * string when no narratives exist so the prompt stays clean for legacy runs.
+ *
+ * Narratives are the most expensive signal we have — they were produced by
+ * Claude Sonnet with full evidence context, so they make the prescription
+ * grounded rather than generic.
+ */
+export function formatNarrativesForPrompt(narratives: NarrativeRow[]): string {
+  if (!narratives || narratives.length === 0) return ''
+
+  const buckets: Record<string, NarrativeRow[]> = {
+    market_context: [],
+    competitor_market_structure: [],
+    competitor_benchmarking_path: [],
+    dimension_narrative: [],
+    score_explanation: [],
+  }
+  for (const n of narratives) {
+    if (buckets[n.kind]) buckets[n.kind].push(n)
+  }
+
+  const sections: string[] = []
+
+  if (buckets.market_context.length > 0) {
+    sections.push(`### Market Context\n${buckets.market_context.map(n => n.narrative_md).join('\n\n')}`)
+  }
+
+  if (buckets.competitor_market_structure.length > 0 || buckets.competitor_benchmarking_path.length > 0) {
+    const parts: string[] = []
+    for (const n of buckets.competitor_market_structure) {
+      parts.push(`**Market Structure**\n${n.narrative_md}`)
+    }
+    for (const n of buckets.competitor_benchmarking_path) {
+      parts.push(`**Benchmarking Path**\n${n.narrative_md}`)
+    }
+    sections.push(`### Competitor Analysis\n${parts.join('\n\n')}`)
+  }
+
+  if (buckets.dimension_narrative.length > 0) {
+    const parts = buckets.dimension_narrative
+      .map(n => `**${n.dimension ?? 'unknown'}**\n${n.narrative_md}`)
+      .join('\n\n')
+    sections.push(`### Dimension Narratives\n${parts}`)
+  }
+
+  if (buckets.score_explanation.length > 0) {
+    const parts = buckets.score_explanation
+      .map(n => `**${n.dimension ?? 'overall'}**: ${n.narrative_md}`)
+      .join('\n')
+    sections.push(`### Score Explanations\n${parts}`)
+  }
+
+  if (sections.length === 0) return ''
+
+  return `\n## Synthesis Insights (use these to ground every action and KPI)\n\n${sections.join('\n\n')}\n`
 }
 
 // ---------------------------------------------------------------------------

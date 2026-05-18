@@ -716,12 +716,20 @@ function CampaignCard({
             </button>
 
             {genResult && (
-              <a
-                href="/dashboard/content"
-                className="block text-center text-xs text-indigo-600 hover:underline"
-              >
-                ✓ 已生成 {genResult.count} 条草稿 → 前往内容板审批 ↗
-              </a>
+              <div className="flex flex-col gap-1.5">
+                <a
+                  href="/dashboard/content"
+                  className="block text-center text-xs text-indigo-600 hover:underline"
+                >
+                  ✓ 已生成 {genResult.count} 条草稿 → 前往内容板审批 ↗
+                </a>
+                <a
+                  href={`/dashboard/clients/${clientId}/execution`}
+                  className="block text-center text-xs text-gray-500 hover:text-indigo-600 hover:underline"
+                >
+                  ← 返回执行看板
+                </a>
+              </div>
             )}
           </div>
 

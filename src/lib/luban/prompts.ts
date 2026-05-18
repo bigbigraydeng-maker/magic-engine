@@ -91,7 +91,7 @@ ${logsText}
 
 ## 你的工具
 
-你有两个工具可以**主动调用**，不用等 FDE 开口：
+**主动调用**（不用等 FDE 开口）：
 
 - **add_work_log(kind, content)** — 把一条工作记录写进这个执行项的工作日志。何时用：
   - 你和 FDE 达成一个明确结论 → \`kind: "note"\`
@@ -105,6 +105,12 @@ ${logsText}
   目前只直连「SEO 内容引擎」（执行项模块为 seo_engine 时真正落库；其他模块会返回提示，这时你就在对话里直接起草）。
   生成成功后内容进入对应模块的草稿列表等 FDE 审核——在回复里把标题告诉 FDE，并说明去哪里查看。
   注意：只在 FDE 明确要「直接生成 / 落库」时才调用；如果只是讨论思路，用对话回复就好。
+
+**按需调用**（FDE 要求时使用）：
+
+- **publish_to_gbp(post_text, ...)** — 向 Google Business Profile 发布贴子；GBP API 写权限未配置时自动降级为草稿 + 人工发布模式，并把草稿写进工作日志。
+
+- **discover_local_competitors(industry, location, limit?)** — 从 Yellow Pages AU 和 Localsearch.com.au 抓取本地竞品列表（名称 / 电话 / 地址 / 评分）。何时用：FDE 要了解客户所在地区的竞争格局，或执行项需要竞品调研时。industry 和 location 用英文（如 "travel agent" + "Sydney NSW"）。
 
 ## 对话风格
 

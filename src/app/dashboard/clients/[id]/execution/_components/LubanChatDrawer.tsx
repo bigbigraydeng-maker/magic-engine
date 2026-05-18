@@ -27,10 +27,12 @@ interface Props {
   onClose: () => void
   /** 鲁班回复被「存为工作记录」后，通知父组件刷新该项的 logs */
   onLogSaved: () => void
+  /** 打开时预填充到输入框的第一句话（来自 FlywheelDrawer 的快捷行动） */
+  initialMessage?: string
 }
 
 export function LubanChatDrawer({
-  clientId, itemId, itemTitle, isOpen, onClose, onLogSaved,
+  clientId, itemId, itemTitle, isOpen, onClose, onLogSaved, initialMessage,
 }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
@@ -39,7 +41,7 @@ export function LubanChatDrawer({
   const [error, setError] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  // 打开时加载历史
+  // 打开时加载历史；若无历史且有预填充消息，填入输入框
   useEffect(() => {
     if (!isOpen) return
     setLoadingHistory(true)
@@ -52,12 +54,17 @@ export function LubanChatDrawer({
         })
         if (res.ok) {
           const data = await res.json() as { messages: ChatMessage[] }
-          setMessages(data.messages ?? [])
+          const history = data.messages ?? []
+          setMessages(history)
+          // 只在没有历史对话时才预填充（避免覆盖已有上下文）
+          if (history.length === 0 && initialMessage) {
+            setInput(initialMessage)
+          }
         }
       } catch {/* 加载失败就空对话 */}
       finally { setLoadingHistory(false) }
     })()
-  }, [isOpen, clientId, itemId])
+  }, [isOpen, clientId, itemId, initialMessage])
 
   // 锁定 body 滚动
   useEffect(() => {

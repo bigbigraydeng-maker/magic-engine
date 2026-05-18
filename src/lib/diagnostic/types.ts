@@ -68,6 +68,16 @@ export function evidenceSource(url: string, fetchedAt?: string): EvidenceSource 
 }
 
 /**
+ * Extracts auditable source URLs from a finding's evidence field.
+ * Returns source URLs when the evidence is an EvidenceEnvelope; returns `[]` otherwise.
+ * Used by the report composer to populate the evidence.json refs for each finding.
+ */
+export function extractEvidenceRefs(evidence: Record<string, unknown> | null | undefined): string[] {
+  if (!isEvidenceEnvelope(evidence)) return []
+  return evidence.sources.map(s => s.url).filter(Boolean)
+}
+
+/**
  * Type guard — true when a finding's evidence already follows the envelope shape.
  * Used by tests and downstream code that wants to safely read `parsed.*`.
  */
