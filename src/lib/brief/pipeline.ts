@@ -24,6 +24,10 @@ export interface PipelineInput {
   websiteUrls: string[]       // max 5
   storagePaths: string[]      // Supabase Storage paths, already uploaded
   domain?: string             // for SEMrush lookup
+  // Visual DNA overrides — if supplied, take precedence over AI-inferred vi_* fields
+  visualStyle?: string
+  brandColors?: string[]
+  visualAvoid?: string[]
 }
 
 export interface PipelineResult {
@@ -163,10 +167,17 @@ export async function runBriefPipeline(input: PipelineInput): Promise<PipelineRe
     platform_strategy: briefData.platform_strategy ?? null,
     keyword_seeds: briefData.keyword_seeds ?? null,
     competitor_domains: briefData.competitor_domains ?? null,
-    vi_colors: briefData.vi_colors ?? null,
-    vi_style_keywords: briefData.vi_style_keywords ?? null,
+    // User-supplied visual DNA takes precedence over AI-inferred fields
+    vi_colors: input.brandColors?.length
+      ? { primary: input.brandColors[0], secondary: input.brandColors[1], accent: input.brandColors[2] }
+      : (briefData.vi_colors ?? null),
+    vi_style_keywords: input.visualStyle
+      ? input.visualStyle.split(',').map(s => s.trim()).filter(Boolean)
+      : (briefData.vi_style_keywords ?? null),
     vi_dos: briefData.vi_dos ?? null,
-    vi_donts: briefData.vi_donts ?? null,
+    vi_donts: input.visualAvoid?.length
+      ? input.visualAvoid
+      : (briefData.vi_donts ?? null),
     brand_story_md: briefData.brand_story_md ?? null,
     style_guide_md: briefData.style_guide_md ?? null,
     competitive_notes_md: briefData.competitive_notes_md ?? null,

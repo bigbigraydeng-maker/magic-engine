@@ -25,6 +25,10 @@ export async function POST(
     const websiteUrls = (body.website_urls ?? []).slice(0, 5).filter(Boolean)
     const fileUrls = (body.file_urls ?? []).slice(0, 10).filter(Boolean)
     const domain = body.domain?.trim() || undefined
+    const bodyAny = body as Record<string, unknown>
+    const visualStyle = typeof bodyAny.visual_style === 'string' ? bodyAny.visual_style.trim() || undefined : undefined
+    const brandColors = Array.isArray(bodyAny.brand_colors) ? (bodyAny.brand_colors as string[]) : undefined
+    const visualAvoid = Array.isArray(bodyAny.visual_avoid) ? (bodyAny.visual_avoid as string[]) : undefined
 
     if (websiteUrls.length === 0 && fileUrls.length === 0 && !domain) {
       return NextResponse.json(
@@ -38,6 +42,9 @@ export async function POST(
       websiteUrls,
       storagePaths: fileUrls,
       domain,
+      visualStyle,
+      brandColors,
+      visualAvoid,
     })
 
     if (!result.success) {
