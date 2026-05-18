@@ -9,9 +9,9 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { Beta } from '@anthropic-ai/sdk/resources/beta/beta'
 
-export const MODEL_SONNET = 'claude-sonnet-4-5-20250929'
+export const MODEL_SONNET = 'claude-sonnet-4-6'
 
-// Pricing per million tokens (Sonnet 4.5)
+// Pricing per million tokens (Sonnet 4.6)
 const PRICE_INPUT_PER_M = 3.0    // $3 / MTok
 const PRICE_OUTPUT_PER_M = 15.0  // $15 / MTok
 

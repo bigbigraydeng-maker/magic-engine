@@ -1,7 +1,7 @@
 /**
  * Blog Generator — GEO mode MVP
  *
- * Generates a long-form blog post using GPT-4o, informed by:
+ * Generates a long-form blog post using Claude Sonnet 4.6, informed by:
  *   - The client's Master Brief (brand DNA)
  *   - The active GEO directive (primary recommendation + scenarios)
  *   - The specific AI Tracker weak-spot query being targeted
@@ -11,15 +11,13 @@
  * Reference: ROADMAP.md P7.3.4, ARCHITECTURE.md §13.4
  */
 
-import OpenAI from 'openai'
 import { supabaseAdmin } from '../supabase'
 import { getActiveBrief, formatBriefForPrompt } from '../content/brief-injector'
 import { getActiveGeoHtml } from '../geo/html-generator'
+import { callClaudeWithDocs, parseJsonResponse } from '../anthropic/client'
 import type { GenerateBlogRequest, BlogPost } from '@/types/magic-engine'
 
-// GPT-4o pricing (2026)
-const PRICE_INPUT_PER_M  = 2.50
-const PRICE_OUTPUT_PER_M = 10.00
+const MODEL_USED = 'claude-sonnet-4-6'
 
 const SYSTEM_PROMPT = `You are an expert SEO and GEO content writer for AU/NZ markets.
 Your goal: write a comprehensive, authoritative blog post that directly answers a specific question
@@ -69,11 +67,6 @@ interface ClientRow {
 export async function generateBlogPost(
   req: GenerateBlogRequest & { client_id: string; existing_pages_context?: string }
 ): Promise<BlogGeneratorOutput> {
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) throw new Error('OPENAI_API_KEY environment variable is not set')
-
-  const openai = new OpenAI({ apiKey })
-
   // 1. Load client info
   const { data: clientData } = await supabaseAdmin
     .from('clients')
@@ -104,20 +97,14 @@ export async function generateBlogPost(
     existingPagesContext: req.existing_pages_context,
   })
 
-  // 5. Call GPT-4o
-  const completion = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    response_format: { type: 'json_object' },
-    max_tokens: 4096,
-    temperature: 0.7,
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user',   content: userMessage },
-    ],
+  // 5. Call Claude Sonnet 4.6
+  const result = await callClaudeWithDocs({
+    systemPrompt: SYSTEM_PROMPT,
+    userMessage,
+    maxOutputTokens: 4096,
   })
 
-  const raw = completion.choices[0]?.message?.content ?? '{}'
-  const parsed = JSON.parse(raw) as Partial<BlogGeneratorOutput>
+  const parsed = parseJsonResponse<Partial<BlogGeneratorOutput>>(result.text)
 
   // 6. Validate and normalise output
   const title            = (parsed.title ?? req.topic).slice(0, 200)
@@ -127,13 +114,6 @@ export async function generateBlogPost(
   const htmlBody         = parsed.html_body ?? `<h1>${title}</h1>`
   const wordCount        = parsed.word_count ?? countWords(htmlBody)
   const imagePrompt      = parsed.featured_image_prompt ?? `professional photo: ${req.topic}`
-
-  // 7. Compute cost
-  const usage = completion.usage
-  const costUsd = usage
-    ? (usage.prompt_tokens / 1_000_000) * PRICE_INPUT_PER_M +
-      (usage.completion_tokens / 1_000_000) * PRICE_OUTPUT_PER_M
-    : 0
 
   return {
     title,
@@ -145,8 +125,8 @@ export async function generateBlogPost(
     featured_image_prompt: imagePrompt,
     geo_directive_id: geoResult?.directiveId ?? null,
     geo_html_snapshot: geoResult?.html ?? null,
-    cost_usd: Math.round(costUsd * 1_000_000) / 1_000_000,
-    model_used: 'gpt-4o',
+    cost_usd: Math.round(result.cost_usd * 1_000_000) / 1_000_000,
+    model_used: MODEL_USED,
   }
 }
 
