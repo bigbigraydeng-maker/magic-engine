@@ -3,6 +3,8 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { getActiveBrief, formatBriefForPrompt } from '@/lib/content/brief-injector'
 import { getCampaignById, formatCampaignForPrompt } from '@/lib/content/campaign-injector'
 import { generateVisualBrief } from '@/lib/content/visual-brief-generator'
+import { auditSocialPost } from '@/lib/content/social-quality-audit'
+import type { SocialAuditMetadata } from '@/lib/content/social-quality-audit'
 import OpenAI from 'openai'
 
 function getOpenAIClient() {
@@ -114,6 +116,35 @@ The script should be 100-200 words. Caption 50-100 words. 8-12 hashtags includin
     const v1 = { ...v1raw, visual_brief: vb1 }
     const v2 = { ...v2raw, visual_brief: vb2 }
 
+    // 3c. Quality audit for each variant (non-blocking)
+    const auditMeta: SocialAuditMetadata = {
+      brand_name:       brief.brand_name ?? null,
+      tone:             brief.tone ?? null,
+      avoid_words:      brief.avoid_words ?? null,
+      platforms:        brief.platforms ?? null,
+      primary_audience: brief.primary_audience ?? null,
+      campaign: campaign ? {
+        title:                  campaign.title ?? null,
+        offer:                  campaign.offer ?? null,
+        primary_cta:            campaign.primary_cta ?? null,
+        campaign_angle:         campaign.campaign_angle ?? null,
+        target_audience_detail: campaign.target_audience_detail ?? null,
+      } : null,
+    }
+
+    const buildAuditContent = (v: { script: string; caption: string; hashtags: string[] }) =>
+      [v.script, v.caption, v.hashtags.join(' ')].filter(Boolean).join('\n')
+
+    const [auditSettled1, auditSettled2] = await Promise.allSettled([
+      auditSocialPost(buildAuditContent(v1), targetPlatforms, 'social_a', auditMeta, keyword),
+      auditSocialPost(buildAuditContent(v2), targetPlatforms, 'social_a', auditMeta, keyword),
+    ])
+
+    const audit1 = auditSettled1.status === 'fulfilled' ? auditSettled1.value : null
+    const audit2 = auditSettled2.status === 'fulfilled' ? auditSettled2.value : null
+    if (auditSettled1.status === 'rejected') console.error('[route-a] audit v1 error:', auditSettled1.reason)
+    if (auditSettled2.status === 'rejected') console.error('[route-a] audit v2 error:', auditSettled2.reason)
+
     // 4. Save to Supabase
     const postBase = {
       client_id,
@@ -135,8 +166,18 @@ The script should be 100-200 words. Caption 50-100 words. 8-12 hashtags includin
     const { data: savedPosts, error } = await supabaseAdmin
       .from('content_posts')
       .insert([
-        { ...postBase, ...v1 },
-        { ...postBase, ...v2 },
+        {
+          ...postBase,
+          ...v1,
+          quality_score:               audit1?.rubricResult.overallScore ?? null,
+          generation_context_snapshot: audit1?.contextSnapshot ?? null,
+        },
+        {
+          ...postBase,
+          ...v2,
+          quality_score:               audit2?.rubricResult.overallScore ?? null,
+          generation_context_snapshot: audit2?.contextSnapshot ?? null,
+        },
       ])
       .select()
 

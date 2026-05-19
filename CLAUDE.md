@@ -215,7 +215,7 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-20 03:36 NZST （**P12.Q.5 完成** ✅；Reels 接入 quality rubric，auditReelsDraft 审计 fb_caption，generate route 最多 3 次 retry + qualityHint 回传，quality_score+snapshot 写入 reels_drafts；14 Vitest 测试通过，build 通过；下一任务 P12.Q.6）
+> 最后更新：2026-05-20 03:55 NZST （**P12.Q.5 完成** ✅；Reels 接入 quality rubric，auditReelsDraft 审计 fb_caption，generate route 最多 3 次 retry + qualityHint 回传，quality_score+snapshot 写入 reels_drafts；14 Vitest 测试通过，build 通过；下一任务 P12.Q.6）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
