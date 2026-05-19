@@ -1124,6 +1124,91 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
 - markisfact adapter（如商务谈成）
 - 社媒发布数据回流（Publer + 平台 API）
 
+### Phase 12.Q — 内容质量闭环 ⭐⭐⭐（已登记，未开工，2026-05-19 启动登记）
+
+> **背景**：内容生成（Blog / Social A/B/C / Reels）当前已能产出 draft，但质量不稳定且无闭环——Master Brief + Campaign 注入不完整、生成后无统一质检、retry 缺失、产物无 generation context 可追溯。Phase 12.Q 建立「campaign 上下文强化 + 统一 quality rubric + 自动质检 retry + 上下文快照持久化」四件套，让内容质量从「AI 初稿系统」升级为「可审计可优化的生产系统」。
+>
+> **试点客户**：CTS Tours
+>
+> **前置阻塞**：P8.3.2 Dashboard Magic Link 鉴权完成后才开工
+>
+> **工作协议**：见 [CLAUDE.md § Phase 12 工作协议](./CLAUDE.md)。Phase 12.Q 起每个 sub-phase 用独立分支 `feat/phase-12-{letter}-{slug}`；本 phase 实施分支为 `feat/phase-12-q-content-quality`；本登记 PR 在 `chore/roadmap-phase-12q-registration`
+
+#### Phase 12.Q 决策点（2026-05-19 已确认）
+
+- **覆盖 Phase 13 `campaign_briefs 不扩 schema` 决策**：质量上限被 campaign context 缺失卡住，6 个 nullable 字段为低风险扩展，价值收益高于保守约束
+- **Quality rubric 混合模式**：规则可判维度走 deterministic checks，质性维度（brand-fit / specificity / viral-structure-preservation）走轻量 LLM（gpt-4o-mini）；SDK client **不在 rubric 模块顶层初始化**，由 route 注入
+- **Context snapshot 不建聚合表**：扩三张现有产物表（`blog_posts` / `content_posts` / `reels_drafts`）各加 `generation_context_snapshot` + `quality_score`；不引入 `production_packages` 新概念（与 Phase 13 Production Package 是两个独立概念，不冲突）
+- **Route B 纳入 scope**：独立任务 P12.Q.4b 处理视频改写场景的 viral-structure-preservation 维度
+- **Phase 13 Pre.13 任务并入 P12.Q.1**：路线 A 同时完成 schema 扩 + Reels query 修复，Pre.13 不再单独执行
+
+#### M0 前置（必须先完成，不在 P12.Q 编号内）
+
+- [ ] **P8.3.2** — Dashboard Magic Link 鉴权（独立 phase；完成后才能开工 P12.Q.0）
+
+#### M1 地基（任务 0-1，~3 小时）
+
+- [ ] **P12.Q.0** — 产物表加 snapshot/score 列：**单 migration 内含 3 ALTER TABLE**，`blog_posts` / `content_posts` / `reels_drafts` 各加：
+  - `generation_context_snapshot JSONB NULL`
+  - `quality_score NUMERIC(4,2) NULL CHECK (quality_score IS NULL OR quality_score BETWEEN 0 AND 10)`
+  - 同步 `src/types/magic-engine.ts` 的 `BlogPost` / `ContentPost` 类型 + 组件内 `ReelsDraft` 局部类型
+- [ ] **P12.Q.1** — Campaign 上下文修复（路线 A，覆盖 Phase 13 不扩 schema 决策；含 Pre.13 工作）：
+  - ① `campaign_briefs` migration 加 `offer / target_audience_detail / proof_points / primary_cta / channel_goal / campaign_angle`（均 nullable）
+  - ② [`src/lib/content/campaign-injector.ts`](src/lib/content/campaign-injector.ts) 的 `CampaignBrief` type + `formatCampaignForPrompt` 同步注入新字段（对 null 友好）
+  - ③ Reels 生成 route 的 query 改用现有真实字段 `title / description / parsed_content / semrush_keywords / valid_from / valid_until` + 新字段；移除查不存在的 `name / objective / target_audience / key_messages / campaign_period` 引用
+
+> **M1 验证关卡**：`npm run build` 通过；Supabase 后台可见 (a) 三张产物表的 snapshot/score 列含 CHECK constraint；(b) `campaign_briefs` 6 个新字段；(c) Reels 路由 dev 跑通能拿到 campaign context（看 console log）
+
+#### M2 质量闭环（任务 2-6，~9 小时）
+
+- [ ] **P12.Q.2** — 统一 quality rubric 模块 `src/lib/content/quality-rubric.ts`：
+  - `coreDimensions` 六维：brand-fit / campaign-fit / platform-fit / specificity / CTA / dimension-goal
+  - `routeDimensions` 插槽（Route B 在 P12.Q.4b 注入 `viral-structure-preservation`）
+  - 混合实现：规则可判维度（platform-fit 长度 / CTA 存在 / dimension-goal keyword 命中）走规则；质性维度（brand-fit / specificity）走轻量 LLM
+  - 签名形如 `evaluate(content, ctx, { coreDimensions, routeDimensions?, llmClient })`，SDK client 由 route 注入，**模块顶层不引用任何 SDK**
+- [ ] **P12.Q.3** — Blog 接 `auditBlogPost` + retry（最多 2 次）：
+  - 调用形态（位置参数）：`auditBlogPost(result.html_body + '\n' + (result.geo_html_snapshot ?? ''), mode, metadata)`
+  - 不过阈值返回最后一次 + log warn，不阻塞 UX
+  - 写 `generation_context_snapshot` + `quality_score` 到 `blog_posts`
+- [ ] **P12.Q.4a** — Social Route A + C 接入 rubric（仅 coreDimensions）+ refine retry + 写 snapshot/score 到 `content_posts`
+- [ ] **P12.Q.4b** — Social Route B 接入 rubric + 注入 `viral-structure-preservation` routeDimension（保留爆款视频结构 vs 注入品牌深度，advisory 不强制阈值）+ 写 snapshot/score
+- [ ] **P12.Q.5** — Reels 接入 rubric + 写 snapshot/score 到 `reels_drafts`（schema 已在 P12.Q.1 修完，本任务只接入 rubric）
+- [ ] **P12.Q.6** — snapshot/score 写入验证 + 缺漏补齐：dev 实测五条链路（Blog / Route A / B / C / Reels），确认每条都写入 snapshot/score；若有遗漏补上
+
+> **M2 验证关卡**：五条链路都能在生成日志看到 `quality_score`，数据库里 snapshot/score 都有值，至少一次 retry 触发
+
+#### M3 端到端 demo（任务 7，~1.5 小时）
+
+- [ ] **P12.Q.7** — CTS Tours 端到端 demo + before/after 对比报告：跑一遍 Blog + Social A/B/C + Reels 全链路，记录修改前后 quality_score，写一份 demo markdown
+
+> **M3 验证关卡**：CTS Tours 的产物表里能查到带 `generation_context_snapshot` 和 `quality_score ≥ 7` 的记录；before/after 报告 markdown 写完
+
+#### Phase 12.Q 风险跟踪
+
+| 风险 | 等级 | 应对 |
+|---|---|---|
+| Campaign Brief migration 影响现有 `parsed_content` 数据 | HIGH | 全部 nullable + `ADD COLUMN IF NOT EXISTS` + injector 对 null 友好 |
+| Quality rubric 阈值过严导致 retry 死循环或 token 爆炸 | HIGH | 硬编码 max 2 次 retry，即使不过仍返回最后一次 + log warn，不阻塞 UX |
+| Reels schema 改了之后老记录读写错位 | HIGH | P12.Q.1 动 schema 前先 grep 所有 reels 相关读写点，确保字段名统一 |
+| LLM 自评维度（brand-fit / specificity / viral-structure）评分不稳 | MEDIUM | 输出含 reason text + 评分；第一版统一阈值 7，PM 在 P12.Q.7 校准 |
+| 改 prompt 后效果反而下降 | MEDIUM | P12.Q.7 必须做 before/after 对比，不通过则 revert 对应 task，不整体回退 |
+| 多次 retry 增加生成时间 | LOW | UI 显示"质量优化中…"，前端 30s 超时；后端单次 LLM 调用 15s 超时 |
+
+#### Phase 12.Q 工作量估算
+
+| 任务 | 时间 |
+|---|---|
+| P12.Q.0 | 0.5 h |
+| P12.Q.1 | 2.5 h |
+| P12.Q.2 | 2.5 h |
+| P12.Q.3 | 1.5 h |
+| P12.Q.4a | 2 h |
+| P12.Q.4b | 2 h |
+| P12.Q.5 | 1 h |
+| P12.Q.6 | 1 h |
+| P12.Q.7 | 1.5 h |
+| **Total** | **14.5 h / 约 4 个 session**（不含 P8.3.2） |
+
 ### Phase 12 风险跟踪
 
 | 风险 | 等级 | 应对 |
@@ -1163,14 +1248,14 @@ Production Item    = 订单里的具体产物
 - 现有内容表只加 `production_item_id`，**不**加 `production_package_id`
 - `campaign_id` 应用层校验（approved 前补齐），**不**做 DB 硬约束
 - `production_item_assets` 关联表 MVP **不做**
-- `campaign_briefs` schema **不扩**；Reels drift 改 Reels 代码适配现有 schema
+- ~~`campaign_briefs` schema **不扩**；Reels drift 改 Reels 代码适配现有 schema~~ **（2026-05-19 被 Phase 12.Q 覆盖：路线 A 扩 6 个 nullable 字段 + Reels query 改读真实字段，含原 Pre.13 工作）**
 - `package_type` 字段 MVP **不做**（先验证 ai_visibility/competitor/reputation 形态是否真的不同）
 
 ### Phase 13.A — Social-only MVP（6 commit）
 
 每个任务 = 1 commit。完成顺序按依赖：
 
-- [ ] **Pre.13** — `fix(reels)`：修 Reels 代码读 `title/description/parsed_content/semrush_keywords`，对齐现有 `campaign_briefs` schema（不扩 schema）
+- [ ] ~~**Pre.13** — `fix(reels)`：修 Reels 代码读 `title/description/parsed_content/semrush_keywords`，对齐现有 `campaign_briefs` schema（不扩 schema）~~ **已并入 P12.Q.1（路线 A 扩 schema 同时修 Reels query），见 Phase 12.Q**
 - [ ] **P13.A.1** — 新增 `production_packages` migration（含 RLS、index、`diagnostic_dimension` enum 复用、`generation_context_snapshot` jsonb）
 - [ ] **P13.A.2** — 新增 `production_items` migration（多 FK 到 4 张内容表、RLS、index）
 - [ ] **P13.A.3** — `ALTER content_posts / blog_posts / reels_drafts / visual_assets` 各加 `production_item_id` 单列 FK + index
@@ -1195,9 +1280,9 @@ Production Item    = 订单里的具体产物
 
 - ❌ 改写任何现有内容生成器
 - ❌ 统一 generation queue
-- ❌ 内容质量自动 review / retry 闭环（独立 Phase）
+- ❌ 内容质量自动 review / retry 闭环（**已登记为独立 Phase 12.Q，2026-05-19**）
 - ❌ Master Brief 自动更新
-- ❌ Campaign Brief schema 扩展
+- ~~❌ Campaign Brief schema 扩展~~ **（2026-05-19 被 Phase 12.Q 覆盖，加 6 个 nullable 字段）**
 - ❌ `package_type` 字段、`production_item_assets` 关联表、DB 层 campaign_id 硬约束、聚合状态字段
 
 ---
@@ -1207,6 +1292,8 @@ Production Item    = 订单里的具体产物
 > 重大决策记录在此，便于追溯。
 
 ### 2026-05-19
+
+- **Phase 12.Q 内容质量闭环登记（不开工，前置阻塞 P8.3.2）**：经 v1→v4 四轮 plan 评审定稿，9 个 commit（P12.Q.0–Q.7 含 Q.4a/Q.4b）实现 campaign 上下文强化 + 统一 quality rubric（混合模式：规则可判维度走规则，质性维度走轻量 gpt-4o-mini）+ 生成后自动质检 retry + `generation_context_snapshot` 持久化。核心决策：(1) **覆盖 Phase 13 `campaign_briefs 不扩 schema` 决策**，加 6 个 nullable 字段（offer / target_audience_detail / proof_points / primary_cta / channel_goal / campaign_angle）；理由：质量上限被 campaign context 缺失卡住，6 个 nullable 字段属低风险扩展；(2) Quality rubric 混合模式，SDK client 由 route 注入，rubric 模块顶层不引用任何 SDK；(3) Context snapshot 扩三张现有产物表（`blog_posts` / `content_posts` / `reels_drafts`），**不建 `production_packages` 聚合表**（与 Phase 13 是两个独立概念）；(4) Route B 纳入 scope（独立 task Q.4b 处理 viral-structure-preservation 维度）；(5) Phase 13 Pre.13 并入 P12.Q.1。试点客户 CTS Tours；前置阻塞 P8.3.2 Dashboard Magic Link 鉴权完成后才开工。实施分支 `feat/phase-12-q-content-quality`，本登记 PR 在 `chore/roadmap-phase-12q-registration`。
 
 - **Phase 13 Production Package 登记（不开工）**：完成两轮 RFC 评审，方案从"完整产品蓝图"收敛为"Social-only MVP 工程切片"。核心决策：(1) `dimension` 复用 `diagnostic_dimension` enum；(2) `context_mode` 不持久化，由 dimension 派生；(3) 现有内容表只加 `production_item_id` 单链，避免 `package_id + item_id` 两列冗余；(4) `campaign_id` 应用层校验而非 DB 硬约束；(5) `production_item_assets` / `package_type` / `campaign_briefs` schema 扩展 MVP 全部不做；(6) Reels schema drift 改 Reels 代码适配 `campaign_briefs`，**不**反过来扩 campaign。MVP = 6 个 commit 单 sprint 内完成。完整 RFC 见 [docs/production-package-rfc.md](docs/production-package-rfc.md)。当前未排期，等 P8.3.2 / Phase 12.B 收尾后再决定启动时机。
 
