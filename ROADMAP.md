@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-20 04:37 NZST · 当前阶段：**⚠️ P8.3.2 代码已完成，PM 需在 Render 填 `ADMIN_EMAILS` 才能上线 → 完成后解锁 Phase 12.Q**。四 Agent 架构（张骞→华佗→诸葛亮→鲁班）已确定，诸葛亮登记为 Phase 12.G。Phase 12.A/B 已完成；Phase 12.Q 内容质量闭环已登记待开工。
+> 最后更新：2026-05-20 04:38 NZST · 当前阶段：**⚠️ P8.3.2 代码已完成，PM 需在 Render 填 `ADMIN_EMAILS` 才能上线 → 完成后解锁 Phase 12.Q**。四 Agent 架构（张骞→华佗→诸葛亮→鲁班）已确定，诸葛亮登记为 Phase 12.G。Phase 12.A/B 已完成；Phase 12.Q 内容质量闭环已登记待开工。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -1503,7 +1503,7 @@ Magic Engine 护城河 = 这条链完整闭合。当前链条：张骞 ✅、华
 
 ### 任务清单（待排期，估约 3 session）
 
-- [ ] **P12.G.1** 诸葛亮 prompt 工程 + 接口层（`src/lib/zhuge/conductor.ts`）
+- [x] **P12.G.1** 诸葛亮 prompt 工程 + 接口层（`src/lib/zhuge/conductor.ts`）
 - [ ] **P12.G.2** 接入华佗诊断输出 + 张骞证据包，输出 `priority_actions`
 - [ ] **P12.G.3** 写入 `flywheel_actions` + 幂等性保护
 - [ ] **P12.G.4** 首页驾驶舱消费诸葛亮数据（替换当前静态卡片）
@@ -1929,6 +1929,8 @@ AU / NZ（当前）          新市场（未来）
 - **P12.Q.6** — 验证五条链路 snapshot/score 写入：发现 Route A/C 缺 audit 逻辑；补入 auditSocialPost（Promise.allSettled 非阻断）+ quality_score/snapshot 写入；build ✅，质量测试全绿
 - **P12.Q.7** — CTS Tours 端到端 demo + before/after 对比报告：五条链路（Blog / Route A / B / C / Reels）Before 均分 3.5 → After 均分 8.4（+4.9），retry 机制全部触发，5/5 链路 pass=true；generation_context_snapshot 样例写出；报告写入 `docs/clients/cts-tours/p12q-quality-demo-report.md`（M3 ✅）
   `docs(quality): P12.Q.7 — CTS Tours before/after demo report [P12.Q.7]`
+- **P12.G.1** — 诸葛亮接口层：types.ts（ZhugeInput/Output/PriorityAction/BusinessContext/LubanTool）+ conductor.ts（系统 prompt + buildUserPrompt + parseOutput + conductPriorityActions）；26 Vitest 测试全通过，build ✅
+  `feat(zhuge): P12.G.1 — 诸葛亮 prompt 工程 + 接口层 [P12.G.1]`
 
 ### 2026-05-23
 
