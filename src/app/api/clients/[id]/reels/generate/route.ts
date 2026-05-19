@@ -3,9 +3,10 @@
  *
  * Generate initial Reels content (4 fields) from Master Brief + optional Campaign Brief.
  * Creates a new reels_draft row and returns it with the generated content.
+ * Applies quality rubric with up to 2 retries; writes quality_score + snapshot.
  *
  * Body: { campaign_brief_id?: string }
- * Reference: ROADMAP.md P8.R.5
+ * Reference: ROADMAP.md P8.R.5, P12.Q.5
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
@@ -13,7 +14,10 @@ import {
   generateReelsContent,
   formatMasterBriefForPrompt,
 } from '@/lib/reels/generator'
+import type { ReelsContent } from '@/lib/reels/generator'
 import { formatCampaignForPrompt } from '@/lib/content/campaign-injector'
+import { auditReelsDraft } from '@/lib/reels/quality-audit'
+import type { ReelsAuditMetadata } from '@/lib/reels/quality-audit'
 
 export async function POST(
   req: NextRequest,
@@ -46,6 +50,8 @@ export async function POST(
 
     // 2. Optionally fetch campaign brief
     let campaignContext: string | undefined
+    let campaignMeta: ReelsAuditMetadata['campaign'] = null
+
     if (body.campaign_brief_id) {
       const { data: campaign } = await supabaseAdmin
         .from('campaign_briefs')
@@ -56,21 +62,39 @@ export async function POST(
 
       if (campaign) {
         campaignContext = formatCampaignForPrompt(campaign)
+        campaignMeta = {
+          title:                  campaign.title ?? null,
+          offer:                  campaign.offer ?? null,
+          primary_cta:            campaign.primary_cta ?? null,
+          campaign_angle:         campaign.campaign_angle ?? null,
+          target_audience_detail: campaign.target_audience_detail ?? null,
+        }
       }
     }
 
-    // 3. Generate prompts via Claude
+    // 3. Build audit metadata from master brief
+    const auditMeta: ReelsAuditMetadata = {
+      brand_name:       brief.brand_name ?? null,
+      tone:             brief.tone ?? null,
+      avoid_words:      Array.isArray(brief.avoid_words) ? brief.avoid_words : null,
+      platforms:        Array.isArray(brief.platforms) ? brief.platforms : null,
+      primary_audience: brief.primary_audience ?? null,
+      campaign:         campaignMeta,
+    }
+
+    // 4. Generate with quality retry (up to 3 attempts)
     const masterBriefText = formatMasterBriefForPrompt(
       brief as unknown as Record<string, unknown>
     )
 
-    const content = await generateReelsContent({
+    const { content, qualityScore, contextSnapshot } = await generateWithQualityRetry(
       masterBriefText,
       campaignContext,
-      brandName: brief.brand_name ?? 'the brand',
-    })
+      brief.brand_name ?? 'the brand',
+      auditMeta,
+    )
 
-    // 4. Upsert into reels_drafts
+    // 5. Insert into reels_drafts
     const { data: draft, error: insertErr } = await supabaseAdmin
       .from('reels_drafts')
       .insert({
@@ -81,6 +105,8 @@ export async function POST(
         i2v_video_prompt: content.i2v_video_prompt,
         fb_caption: content.fb_caption,
         status: 'draft',
+        quality_score: qualityScore,
+        generation_context_snapshot: contextSnapshot,
       })
       .select()
       .single()
@@ -130,4 +156,66 @@ export async function POST(
     console.error('[reels/generate] error:', JSON.stringify(err))
     return NextResponse.json({ success: false, error: message }, { status: 500 })
   }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Generate Reels content with up to 2 quality-rubric retries (3 attempts total).
+ * Audits fb_caption; failed dimension reasons are fed back as a hint on retry.
+ * On any audit error or missing API key, proceeds with the last generated result.
+ */
+async function generateWithQualityRetry(
+  masterBriefText: string,
+  campaignContext: string | undefined,
+  brandName: string,
+  auditMeta: ReelsAuditMetadata,
+): Promise<{
+  content: ReelsContent
+  qualityScore: number | null
+  contextSnapshot: Record<string, unknown> | null
+}> {
+  const MAX_ATTEMPTS = 3
+  let lastContent: ReelsContent | null = null
+  let qualityScore: number | null = null
+  let contextSnapshot: Record<string, unknown> | null = null
+  let qualityHint: string | undefined
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    lastContent = await generateReelsContent({
+      masterBriefText,
+      campaignContext,
+      brandName,
+      qualityHint,
+    })
+
+    try {
+      const audit = await auditReelsDraft(lastContent.fb_caption, auditMeta)
+
+      if (!audit) break  // skipped (no API key) — proceed without retry
+
+      qualityScore = audit.rubricResult.overallScore
+      contextSnapshot = { ...audit.contextSnapshot, attempts: attempt }
+
+      if (audit.rubricResult.pass || attempt === MAX_ATTEMPTS) {
+        if (!audit.rubricResult.pass) {
+          console.warn(
+            `[reels quality] Draft failed quality threshold after ${attempt} attempt(s)` +
+            ` (score: ${audit.rubricResult.overallScore}). Proceeding with last result.`
+          )
+        }
+        break
+      }
+
+      const failed = audit.rubricResult.dimensions.filter(d => !d.pass)
+      if (failed.length > 0) {
+        qualityHint = failed.map(d => `- ${d.dimension}: ${d.reason}`).join('\n')
+      }
+    } catch (err) {
+      console.error('[reels quality] Audit error (non-blocking):', err)
+      break
+    }
+  }
+
+  return { content: lastContent!, qualityScore, contextSnapshot }
 }
