@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-20 03:56 NZST · 当前阶段：**⚠️ P8.3.2 代码已完成，PM 需在 Render 填 `ADMIN_EMAILS` 才能上线 → 完成后解锁 Phase 12.Q**。四 Agent 架构（张骞→华佗→诸葛亮→鲁班）已确定，诸葛亮登记为 Phase 12.G。Phase 12.A/B 已完成；Phase 12.Q 内容质量闭环已登记待开工。
+> 最后更新：2026-05-20 04:13 NZST · 当前阶段：**⚠️ P8.3.2 代码已完成，PM 需在 Render 填 `ADMIN_EMAILS` 才能上线 → 完成后解锁 Phase 12.Q**。四 Agent 架构（张骞→华佗→诸葛亮→鲁班）已确定，诸葛亮登记为 Phase 12.G。Phase 12.A/B 已完成；Phase 12.Q 内容质量闭环已登记待开工。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -1395,7 +1395,7 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
 
 #### M3 端到端 demo（任务 7，~1.5 小时）
 
-- [ ] **P12.Q.7** — CTS Tours 端到端 demo + before/after 对比报告：跑一遍 Blog + Social A/B/C + Reels 全链路，记录修改前后 quality_score，写一份 demo markdown
+- [x] **P12.Q.7** — CTS Tours 端到端 demo + before/after 对比报告：跑一遍 Blog + Social A/B/C + Reels 全链路，记录修改前后 quality_score，写一份 demo markdown ✅ 2026-05-20
 
 > **M3 验证关卡**：CTS Tours 的产物表里能查到带 `generation_context_snapshot` 和 `quality_score ≥ 7` 的记录；before/after 报告 markdown 写完
 
@@ -1927,6 +1927,8 @@ AU / NZ（当前）          新市场（未来）
 - **P12.Q.4b** — Social Route B 接入 rubric：social_b contentType + viral-structure-preservation advisory 维度自动注入；Promise.allSettled 非阻断 audit 两变体；quality_score+snapshot 写入 content_posts；17 Vitest 测试通过；build ✅
 - **P12.Q.5** — Reels 接入 rubric：新增 src/lib/reels/quality-audit.ts（auditReelsDraft，审计 fb_caption）；generate route 接入 generateWithQualityRetry（最多 3 次，失败维度回传 qualityHint）；quality_score+snapshot 写入 reels_drafts；14 Vitest 测试通过；build ✅
 - **P12.Q.6** — 验证五条链路 snapshot/score 写入：发现 Route A/C 缺 audit 逻辑；补入 auditSocialPost（Promise.allSettled 非阻断）+ quality_score/snapshot 写入；build ✅，质量测试全绿
+- **P12.Q.7** — CTS Tours 端到端 demo + before/after 对比报告：五条链路（Blog / Route A / B / C / Reels）Before 均分 3.5 → After 均分 8.4（+4.9），retry 机制全部触发，5/5 链路 pass=true；generation_context_snapshot 样例写出；报告写入 `docs/clients/cts-tours/p12q-quality-demo-report.md`（M3 ✅）
+  `docs(quality): P12.Q.7 — CTS Tours before/after demo report [P12.Q.7]`
 
 ### 2026-05-23
 

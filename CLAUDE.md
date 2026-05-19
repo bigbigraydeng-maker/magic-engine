@@ -215,12 +215,11 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-20 03:56 NZST （**P12.Q.6 完成** ✅；审计五条链路发现 Route A/C 缺 audit；补入 auditSocialPost + quality_score/snapshot 写入；build 通过，质量测试全绿；下一任务 P12.Q.7）
+> 最后更新：2026-05-20 04:13 NZST （**Phase 12.Q 全部完成** 🎉；P12.Q.7 CTS Tours before/after 报告写完，Before 均分 3.5 → After 均分 8.4，M3 ✅；下一任务 P12.G.1）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P12.Q.7** | CTS Tours 端到端 demo + before/after 报告 | ⭐⭐ 当前 |
-| **P12.G.1–5** | 诸葛亮策略调度引擎（前置 Phase 12.Q，约 3 session） | 📋 排队 |
+| **P12.G.1–5** | 诸葛亮策略调度引擎（前置 Phase 12.Q 已完成，约 3 session） | ⭐⭐ 当前 |
 
 **状态校准（2026-05-20）**：
 - ✅ P12.Q.0：migration + TS 类型同步完成
@@ -231,13 +230,12 @@ git push origin master   # 触发 Render 部署
 - ✅ P12.Q.4b：Social Route B 接入 rubric，viral-structure-preservation advisory 维度自动注入，quality_score+snapshot 写入 content_posts；17 测试通过；build 通过
 - ✅ P12.Q.5：Reels 接入 rubric，auditReelsDraft 审计 fb_caption，quality_score+snapshot 写入 reels_drafts；14 测试通过；build 通过
 - ✅ P12.Q.6：审计五条链路，Route A/C route.ts 缺 audit；补入 auditSocialPost + quality_score/snapshot；build 通过，质量测试全绿
+- ✅ **P12.Q.7**：CTS Tours 端到端 demo before/after 报告，五链路 Before 均分 3.5 → After 均分 8.4（+4.9），5/5 pass，M3 验证关卡通过；报告写入 `docs/clients/cts-tours/p12q-quality-demo-report.md`
 - ⚠️ **PM 待操作**：Render → Environment → 加 `ADMIN_EMAILS=你的邮箱`（若还未做）
 - ⚠️ **PM 待操作**：Supabase 跑 migration `20260525000001_content_quality_snapshot_score.sql` + `20260526000001_campaign_briefs_extend.sql`
-- 📋 Phase 12.G（诸葛亮）：接口规范已锁定，Phase 12.Q 完成后开工
+- 📋 Phase 12.G（诸葛亮）：Phase 12.Q 已全部完成，可以开工
 
-下一 session 第一句话：`继续 Phase 12.Q 第 7 任务 P12.Q.7`
-
-**本 session 已完成，可以关闭。**
+下一 session 第一句话：`继续 Phase 12.G 第 1 任务 P12.G.1`
 
 **本 session 已完成，可以关闭。**
 
