@@ -215,13 +215,11 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-20 02:21 NZST （**UX 基础修复全部完成** ✅；**四 Agent 架构确认**：张骞→华佗→诸葛亮→鲁班；**诸葛亮登记为 Phase 12.G**；**P8.3.2 代码完成，等 PM Render 操作**）
+> 最后更新：2026-05-20 02:23 NZST （**P12.Q.0 完成** ✅；三张产物表加 snapshot/score 列，build 通过；下一任务 P12.Q.1）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P8.3.2 Render** | Render 后台填 `ADMIN_EMAILS=你的邮箱`（PM 手动，5 分钟，解锁 Phase 12.Q） | ⭐⭐⭐ PM 操作 |
-| **P12.Q.0** | 产物表加 snapshot/score 列 + TS 类型同步（单 migration 含 3 ALTER） | ⭐⭐ |
-| **P12.Q.1** | Campaign 上下文修复（路线 A 扩 schema + injector + Reels query） | ⭐⭐ |
+| **P12.Q.1** | Campaign 上下文修复（路线 A 扩 schema + injector + Reels query） | ⭐⭐ 当前 |
 | **P12.Q.2** | 统一 quality rubric 模块（混合模式：规则 + 轻量 LLM） | ⭐⭐ |
 | **P12.Q.3** | Blog `auditBlogPost` 接入 retry（含 GEO snapshot 合并） | ⭐⭐ |
 | **P12.Q.4a** | Social Route A/C 接入 rubric + refine retry | ⭐⭐ |
@@ -231,16 +229,13 @@ git push origin master   # 触发 Render 部署
 | **P12.Q.7** | CTS Tours 端到端 demo + before/after 报告 | ⭐⭐ |
 | **P12.G.1–5** | 诸葛亮策略调度引擎（前置 Phase 12.Q，约 3 session） | 📋 排队 |
 
-**状态校准（2026-05-20）**：
-- ✅ UX 修复：全站标题、Login 防卡、客户页 WorkflowProgress、ContentHub 简化、供应商名清洁
-- ✅ P8.3.2 代码：middleware + whitelist 测试已在库，login try-catch 已加
-- ⚠️ **PM 待操作**：Render → Environment → 加 `ADMIN_EMAILS=你的邮箱`（不操作则任何人都进不了 dashboard）
-- 📋 Phase 12.Q：P8.3.2 Render 配置完成后即可开工
+**状态校准（2026-05-25）**：
+- ✅ P12.Q.0：migration + TS 类型同步完成，push 到 `feat/phase-12-q-content-quality`
+- ⚠️ **PM 待操作**：Render → Environment → 加 `ADMIN_EMAILS=你的邮箱`（若还未做）
+- ⚠️ **PM 待操作**：Supabase 跑 migration `20260525000001_content_quality_snapshot_score.sql`（或用 admin API apply）
 - 📋 Phase 12.G（诸葛亮）：接口规范已锁定，Phase 12.Q 完成后开工
 
-下一 session 第一句话：
-- 如果 P8.3.2 Render 还没操作 → 先去 Render 加环境变量，再回来说「开始 Phase 12.Q」
-- 如果 Render 已配好 → `继续 Phase 12.Q 第 0 任务 P12.Q.0`
+下一 session 第一句话：`继续 Phase 12.Q 第 1 任务 P12.Q.1`
 
 **本 session 已完成，可以关闭。**
 
