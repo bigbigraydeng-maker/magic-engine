@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { ContentHub } from './_components/ContentHub';
 import { GenerationDrawer } from './_components/GenerationDrawer';
 import { SettingsDrawer, type SettingsTab } from './_components/SettingsDrawer';
+import { ZhugePriorityWidget } from './_components/ZhugePriorityWidget';
 import type { ClientDiscoveryRow } from '@/lib/zhangqian/types';
 
 type PillarTab = 'social' | 'seo' | 'ai_visibility' | 'ads' | 'diagnostic'
@@ -470,6 +471,9 @@ export default function ClientDetailPage() {
 
       {/* Brand Health Widget — plays seeding role, links to prescription */}
       <BrandHealthWidget clientId={clientId} />
+
+      {/* Zhuge Priority Actions — dynamic strategic work order */}
+      <ZhugePriorityWidget clientId={clientId} discoveryConfirmed={discoveryConfirmed} />
 
       {/* Master Brief warning banner */}
       {hasActiveBrief === false && (
