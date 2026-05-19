@@ -168,4 +168,76 @@ describe('auditSocialPost', () => {
     expect(ctx.brief.brand_name).toBeNull()
     expect(ctx.campaign).toBeNull()
   })
+
+  describe('Route B (social_b) — viral-structure-preservation', () => {
+    it('sets contentType to social_b', async () => {
+      mockEvaluate.mockResolvedValueOnce(PASSING_RESULT)
+
+      await auditSocialPost('Content', ['tiktok'], 'social_b', SAMPLE_METADATA)
+
+      const [, ctx] = mockEvaluate.mock.calls[0]
+      expect(ctx.contentType).toBe('social_b')
+    })
+
+    it('injects viral-structure-preservation as an advisory routeDimension', async () => {
+      mockEvaluate.mockResolvedValueOnce(PASSING_RESULT)
+
+      await auditSocialPost('Content', ['tiktok'], 'social_b', SAMPLE_METADATA)
+
+      const [, , options] = mockEvaluate.mock.calls[0]
+      expect(options.routeDimensions).toHaveLength(1)
+      expect(options.routeDimensions![0].id).toBe('viral-structure-preservation')
+      expect(options.routeDimensions![0].advisory).toBe(true)
+    })
+
+    it('does NOT inject viral-structure-preservation for social_a', async () => {
+      mockEvaluate.mockResolvedValueOnce(PASSING_RESULT)
+
+      await auditSocialPost('Content', ['facebook'], 'social_a', SAMPLE_METADATA, 'NZ tours')
+
+      const [, , options] = mockEvaluate.mock.calls[0]
+      expect(options.routeDimensions ?? []).toHaveLength(0)
+    })
+
+    it('does NOT inject viral-structure-preservation for social_c', async () => {
+      mockEvaluate.mockResolvedValueOnce(PASSING_RESULT)
+
+      await auditSocialPost('Content', ['facebook'], 'social_c', SAMPLE_METADATA)
+
+      const [, , options] = mockEvaluate.mock.calls[0]
+      expect(options.routeDimensions ?? []).toHaveLength(0)
+    })
+
+    it('returns rubricResult and contextSnapshot for social_b', async () => {
+      mockEvaluate.mockResolvedValueOnce(PASSING_RESULT)
+
+      const result = await auditSocialPost(
+        'Experience the magic of New Zealand — book your adventure today!',
+        ['tiktok'],
+        'social_b',
+        SAMPLE_METADATA,
+      )
+
+      expect(result).not.toBeNull()
+      expect(result!.rubricResult.overallScore).toBe(8)
+      expect(result!.contextSnapshot.contentType).toBe('social_b')
+    })
+
+    it('viral-structure-preservation advisory dimension does not block pass', async () => {
+      // pass=true even though viral-structure-preservation scored low (advisory)
+      const resultWithAdvisoryFail = {
+        overallScore: 7.5,
+        pass: true,
+        dimensions: [
+          { dimension: 'platform-fit',                score: 9, pass: true,  reason: 'Good.', method: 'rule' as const },
+          { dimension: 'viral-structure-preservation', score: 4, pass: true,  reason: 'Advisory only.', method: 'llm' as const },
+        ],
+      }
+      mockEvaluate.mockResolvedValueOnce(resultWithAdvisoryFail)
+
+      const result = await auditSocialPost('Content', ['tiktok'], 'social_b', SAMPLE_METADATA)
+
+      expect(result!.rubricResult.pass).toBe(true)
+    })
+  })
 })

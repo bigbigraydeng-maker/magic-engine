@@ -215,7 +215,7 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-20 03:14 NZST （**P12.Q.4a 完成** ✅；Social Route A/C quality rubric + refine retry 接入，11 Vitest 测试通过，build 通过；下一任务 P12.Q.4b）
+> 最后更新：2026-05-20 03:25 NZST （**P12.Q.4a 完成** ✅；Social Route A/C quality rubric + refine retry 接入，11 Vitest 测试通过，build 通过；下一任务 P12.Q.4b）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|

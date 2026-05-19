@@ -3,7 +3,16 @@
 
 import OpenAI from 'openai'
 import { evaluate } from '@/lib/content/quality-rubric'
-import type { RubricContext, RubricResult } from '@/lib/content/quality-rubric'
+import type { RubricContext, RubricResult, RouteDimension } from '@/lib/content/quality-rubric'
+
+// Advisory dimension injected for Route B (viral video rewrite).
+// Advisory = score is informational and does NOT affect overall pass verdict.
+const VIRAL_STRUCTURE_DIM: RouteDimension = {
+  id: 'viral-structure-preservation',
+  description:
+    "Does the rewritten content preserve the original viral video's structural hooks, pacing, and engagement triggers while aligning to brand DNA?",
+  advisory: true,
+}
 
 export interface SocialAuditMetadata {
   brand_name?: string | null
@@ -26,19 +35,20 @@ export interface SocialAuditResult {
 }
 
 /**
- * Evaluate social post quality using the standard rubric (coreDimensions only).
+ * Evaluate social post quality using the standard rubric.
+ * Route B (social_b) automatically receives the viral-structure-preservation advisory dimension.
  * Returns null when OPENAI_API_KEY is unavailable (non-blocking).
  *
  * @param content        - Concatenated script + caption + hashtags text
  * @param platforms      - Target platforms; first entry used for platform-fit rule
- * @param contentType    - 'social_a' | 'social_c'
+ * @param contentType    - 'social_a' | 'social_b' | 'social_c'
  * @param metadata       - Brand + campaign context
- * @param primaryKeyword - Route A: the target keyword; Route C: omit or pass null
+ * @param primaryKeyword - Route A: the target keyword; Route B/C: omit or pass null
  */
 export async function auditSocialPost(
   content: string,
   platforms: string[],
-  contentType: 'social_a' | 'social_c',
+  contentType: 'social_a' | 'social_b' | 'social_c',
   metadata: SocialAuditMetadata,
   primaryKeyword?: string | null,
 ): Promise<SocialAuditResult | null> {
@@ -65,7 +75,8 @@ export async function auditSocialPost(
     primaryKeyword: primaryKeyword ?? null,
   }
 
-  const rubricResult = await evaluate(content, ctx, { llmClient })
+  const routeDimensions: RouteDimension[] = contentType === 'social_b' ? [VIRAL_STRUCTURE_DIM] : []
+  const rubricResult = await evaluate(content, ctx, { llmClient, routeDimensions })
 
   const contextSnapshot: Record<string, unknown> = {
     platform,

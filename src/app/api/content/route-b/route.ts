@@ -5,6 +5,8 @@ import { analyzeViralVideo } from '@/lib/content/video-analyzer'
 import { getActiveBrief } from '@/lib/content/brief-injector'
 import { getCampaignById } from '@/lib/content/campaign-injector'
 import { rewriteForBrand } from '@/lib/content/route-b-rewriter'
+import { auditSocialPost } from '@/lib/content/social-quality-audit'
+import type { SocialAuditMetadata } from '@/lib/content/social-quality-audit'
 
 export async function POST(req: NextRequest) {
   try {
@@ -53,6 +55,35 @@ export async function POST(req: NextRequest) {
       rewriteForBrand({ analysis, brief, targetPlatforms, variant: 2, campaign: campaign ?? undefined }),
     ])
 
+    // 4b. Quality audit for each variant (non-blocking — errors must not block generation)
+    const auditMeta: SocialAuditMetadata = {
+      brand_name:       brief.brand_name ?? null,
+      tone:             brief.tone ?? null,
+      avoid_words:      brief.avoid_words ?? null,
+      platforms:        brief.platforms ?? null,
+      primary_audience: brief.primary_audience ?? null,
+      campaign: campaign ? {
+        title:                  campaign.title ?? null,
+        offer:                  campaign.offer ?? null,
+        primary_cta:            campaign.primary_cta ?? null,
+        campaign_angle:         campaign.campaign_angle ?? null,
+        target_audience_detail: campaign.target_audience_detail ?? null,
+      } : null,
+    }
+
+    const buildAuditContent = (v: { script: string; caption: string; hashtags: string[] }) =>
+      [v.script, v.caption, v.hashtags.join(' ')].filter(Boolean).join('\n')
+
+    const [auditSettled1, auditSettled2] = await Promise.allSettled([
+      auditSocialPost(buildAuditContent(variant1), targetPlatforms, 'social_b', auditMeta),
+      auditSocialPost(buildAuditContent(variant2), targetPlatforms, 'social_b', auditMeta),
+    ])
+
+    const audit1 = auditSettled1.status === 'fulfilled' ? auditSettled1.value : null
+    const audit2 = auditSettled2.status === 'fulfilled' ? auditSettled2.value : null
+    if (auditSettled1.status === 'rejected') console.error('[route-b] audit v1 error:', auditSettled1.reason)
+    if (auditSettled2.status === 'rejected') console.error('[route-b] audit v2 error:', auditSettled2.reason)
+
     // 5. 写入 Supabase content_posts
     const postBase = {
       client_id,
@@ -75,19 +106,23 @@ export async function POST(req: NextRequest) {
       .insert([
         {
           ...postBase,
-          title:        `${variant1.title} [V1]`,
-          script:       variant1.script,
-          caption:      variant1.caption,
-          hashtags:     variant1.hashtags,
-          visual_brief: variant1.visual_brief,
+          title:                       `${variant1.title} [V1]`,
+          script:                      variant1.script,
+          caption:                     variant1.caption,
+          hashtags:                    variant1.hashtags,
+          visual_brief:                variant1.visual_brief,
+          quality_score:               audit1?.rubricResult.overallScore ?? null,
+          generation_context_snapshot: audit1?.contextSnapshot ?? null,
         },
         {
           ...postBase,
-          title:        `${variant2.title} [V2]`,
-          script:       variant2.script,
-          caption:      variant2.caption,
-          hashtags:     variant2.hashtags,
-          visual_brief: variant2.visual_brief,
+          title:                       `${variant2.title} [V2]`,
+          script:                      variant2.script,
+          caption:                     variant2.caption,
+          hashtags:                    variant2.hashtags,
+          visual_brief:                variant2.visual_brief,
+          quality_score:               audit2?.rubricResult.overallScore ?? null,
+          generation_context_snapshot: audit2?.contextSnapshot ?? null,
         },
       ])
       .select()
