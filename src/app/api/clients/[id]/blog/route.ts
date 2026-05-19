@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { generateBlogPost } from '@/lib/blog/generator'
+import type { BlogGeneratorOutput } from '@/lib/blog/generator'
 import { auditExistingContent } from '@/lib/blog/content-auditor'
 import { fetchRelatedPages, buildPagesContextBlock } from '@/lib/blog/pages-context'
+import { auditBlogPost } from '@/lib/blog/quality-audit'
+import type { BlogAuditMetadata } from '@/lib/blog/quality-audit'
+import { getActiveBrief } from '@/lib/content/brief-injector'
+import { getActiveCampaigns } from '@/lib/content/campaign-injector'
 import { requireBearerToken, clampLimit } from '@/lib/validation-utils'
 import type { BlogPost, GenerateBlogRequest } from '@/types/magic-engine'
 
@@ -138,16 +143,22 @@ export async function POST(
         // action === 'new' — proceed with generation, attach audit info to response
         const relatedPages = await fetchRelatedPages(clientId, body.topic).catch(() => [])
         const existingPagesContext = buildPagesContextBlock(relatedPages)
-        const result = await generateBlogPost({ ...body, mode, client_id: clientId, existing_pages_context: existingPagesContext || undefined })
-        return await persistAndReturn(clientId, body, mode, result, audit)
+        const { result, qualityScore, contextSnapshot } = await generateWithQualityRetry(
+          { ...body, mode, client_id: clientId, existing_pages_context: existingPagesContext || undefined },
+          mode,
+        )
+        return await persistAndReturn(clientId, body, mode, result, audit, qualityScore, contextSnapshot)
       }
     }
 
     // ── Generate (no domain set, or audit skipped) ────────────────────────────
     const relatedPages = await fetchRelatedPages(clientId, body.topic).catch(() => [])
     const existingPagesContext = buildPagesContextBlock(relatedPages)
-    const result = await generateBlogPost({ ...body, mode, client_id: clientId, existing_pages_context: existingPagesContext || undefined })
-    return await persistAndReturn(clientId, body, mode, result, null)
+    const { result, qualityScore, contextSnapshot } = await generateWithQualityRetry(
+      { ...body, mode, client_id: clientId, existing_pages_context: existingPagesContext || undefined },
+      mode,
+    )
+    return await persistAndReturn(clientId, body, mode, result, null, qualityScore, contextSnapshot)
 
   } catch (err: unknown) {
     console.error('[blog POST] Unexpected error:', err)
@@ -157,12 +168,87 @@ export async function POST(
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * Generate a blog post with up to 2 quality-rubric retries (3 attempts total).
+ * If the post never passes the quality threshold, returns the last result + logs a warning.
+ * On any audit error, proceeds immediately with the last generated result (non-blocking).
+ */
+async function generateWithQualityRetry(
+  req: GenerateBlogRequest & { client_id: string; mode: string; existing_pages_context?: string },
+  mode: string,
+): Promise<{
+  result: BlogGeneratorOutput
+  qualityScore: number | null
+  contextSnapshot: Record<string, unknown> | null
+}> {
+  const [brief, campaigns] = await Promise.all([
+    getActiveBrief(req.client_id).catch(() => null),
+    getActiveCampaigns(req.client_id).catch(() => []),
+  ])
+  const campaign = campaigns[0] ?? null
+
+  const metadata: BlogAuditMetadata = {
+    brand_name:       brief?.brand_name ?? null,
+    tone:             brief?.tone ?? null,
+    avoid_words:      brief?.avoid_words ?? null,
+    platforms:        brief?.platforms ?? null,
+    primary_audience: brief?.primary_audience ?? null,
+    campaign: campaign ? {
+      title:                  campaign.title ?? null,
+      offer:                  campaign.offer ?? null,
+      primary_cta:            campaign.primary_cta ?? null,
+      campaign_angle:         campaign.campaign_angle ?? null,
+      target_audience_detail: campaign.target_audience_detail ?? null,
+    } : null,
+    primaryKeyword: req.primary_keyword ?? null,
+  }
+
+  const MAX_ATTEMPTS = 3
+  let lastResult: BlogGeneratorOutput | null = null
+  let qualityScore: number | null = null
+  let contextSnapshot: Record<string, unknown> | null = null
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    lastResult = await generateBlogPost(req)
+
+    try {
+      const content = lastResult.html_body + '\n' + (lastResult.geo_html_snapshot ?? '')
+      const audit = await auditBlogPost(content, mode, metadata)
+
+      if (!audit) break  // skipped (no API key) — proceed without retry
+
+      qualityScore = audit.rubricResult.overallScore
+      contextSnapshot = {
+        ...audit.contextSnapshot,
+        attempts: attempt,
+      }
+
+      if (audit.rubricResult.pass || attempt === MAX_ATTEMPTS) {
+        if (!audit.rubricResult.pass) {
+          console.warn(
+            `[blog quality] Post failed quality threshold after ${attempt} attempt(s)` +
+            ` (score: ${audit.rubricResult.overallScore}). Proceeding with last result.`
+          )
+        }
+        break
+      }
+    } catch (err) {
+      console.error('[blog quality] Audit error (non-blocking):', err)
+      break
+    }
+  }
+
+  return { result: lastResult!, qualityScore, contextSnapshot }
+}
+
 async function persistAndReturn(
   clientId: string,
   body: GenerateBlogRequest,
   mode: string,
-  result: Awaited<ReturnType<typeof generateBlogPost>>,
-  audit: Awaited<ReturnType<typeof auditExistingContent>> | null
+  result: BlogGeneratorOutput,
+  audit: Awaited<ReturnType<typeof auditExistingContent>> | null,
+  qualityScore: number | null,
+  contextSnapshot: Record<string, unknown> | null,
 ) {
   const { data: post, error: dbErr } = await supabaseAdmin
     .from('blog_posts')
@@ -184,6 +270,8 @@ async function persistAndReturn(
       cost_usd:           result.cost_usd,
       model_used:         result.model_used,
       status:             'draft',
+      generation_context_snapshot: contextSnapshot,
+      quality_score:      qualityScore,
     })
     .select('*')
     .single<BlogPost>()
@@ -215,11 +303,14 @@ async function persistAndReturn(
     if (itemErr) {
       console.error('[blog persistAndReturn] production_items insert error:', JSON.stringify(itemErr))
     } else if (item) {
-      await supabaseAdmin
+      supabaseAdmin
         .from('blog_posts')
         .update({ production_item_id: item.id })
         .eq('id', post.id)
-        .catch(err => console.error('[blog persistAndReturn] production_item_id back-ref error:', err))
+        .then(
+          () => {},
+          (err: unknown) => console.error('[blog persistAndReturn] production_item_id back-ref error:', err)
+        )
     }
   }
 
