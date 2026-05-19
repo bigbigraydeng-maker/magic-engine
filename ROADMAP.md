@@ -634,6 +634,30 @@ Layer 5: Export（新增）— P8.10.S5
 - [x] **P8.10.S0.19** `BriefSourcesForm` 挂载时自动从张骞 discovery 预填域名 + 社媒 URL（commit 62ab236，误标 `[P8.10.S2.5]`）
 - [x] **P8.10.S0.20** `visual_brief` 从 Route A/C 主调用拆出，独立第二步 `generateVisualBrief()`，使用 MB 视觉 DNA 生成 Flux-dev 级图片 prompt（commit 5226929，误标 `[P8.10.S2.6]`）
 
+**S0.21+ — 首跑硬化 + Advanced Discovery 入口（2026-05-19）**：
+
+战略动因（PM 2026-05-19 口述确立）：**首次发现必须 ≤5 分钟交付 70-80% 完整画像**。深度数据靠用户后续接通 Connectors（GSC / Facebook / GBP / Meta Ads）后再跑一次"Advanced Discovery"。
+
+- [x] **P8.10.S0.21** Discovery 首跑硬化（HTTP 超时全封 + 5min 硬墙 + 工具瘦身 + UI CTA）
+  - Anthropic SDK 单次 messages.create 超时 → 90s（默认 10min）
+  - SEMrush client 8 处 fetch → 20s AbortSignal
+  - Apify ad-library 3 处 fetch → 30s AbortSignal
+  - `GLOBAL_TIMEOUT_MS`：4.5min → 5min；`MAX_TOOL_CALLS`：22 → 18；`MAX_COST_USD`：$1.80 → $1.50
+  - status route + sweeper stale-timeout：10min → 6min（agent 5min + 1min buffer）
+  - 新增 `/api/cron/zhangqian-sweeper`（每 5 min 扫 stuck job），render.yaml 注册
+  - **移除首跑工具**：`fetch_meta_ads`（整删）+ `fetch_social_metrics` 去掉 facebook 平台（slow + 低命中率）—— 这两者改由 S5 走
+  - `prompts.ts` 同步：研究协议步骤 2 + 费用纪律 + JSON 示例 + 质量要求段落
+  - zhangqian 报告页加 Advanced Discovery CTA banner（链接到 connectors 页）
+
+- [ ] **P8.10.S0.22** Advanced Discovery — Phase 1：FB / GBP Connector 触发后台再跑
+  - Connector 授权回调时检测客户是否已有 basic discovery → 自动 enqueue advanced_discovery_job
+  - 复用 `runZhangqian()` 的 Tool 集，但首次跑被屏蔽的 `fetch_meta_ads` / Facebook 真实指标在此重新接入
+  - Advanced report 写入 `client_discovery.payload.advanced`（不覆盖 basic）
+
+- [ ] **P8.10.S0.23** Advanced Discovery — Phase 2：GSC / Google Ads Connector
+  - GSC 拉真实 query / impressions / CTR / position（替代 SEMrush 估算）
+  - Google Ads Transparency API 拉真实 advertiser ID + active campaigns
+
 **验收标准**：
 - 输入 `oztopbuildingsupplies.com.au` → 5 分钟内交付：业务一句话描述 + IG handle + GBP + 5-10 竞品 + 10-20 关键词 + 15 AI 问句
 - 报告深度匹配 Cowork 生成的 deep research（80%+）
@@ -1244,6 +1268,10 @@ Production Item    = 订单里的具体产物
 
 > 每次上线新功能时在此追加。格式：**[完成日期]** — Phase ID + 描述 + Commit 引用。
 > 此日志从 CLAUDE.md §十五.C 迁移至此（2026-05-10），CLAUDE.md 不再维护历史日志。
+
+### 2026-05-19
+
+- **P8.10.S0.21** — 张骞首跑硬化 + Advanced Discovery 入口：HTTP 超时全封（Anthropic SDK 90s / SEMrush 20s / Apify ad-library 30s）+ `GLOBAL_TIMEOUT_MS` 270s→300s + stale-timeout 10min→6min + 新增 `/api/cron/zhangqian-sweeper` 兜底孤儿 job + 首跑工具瘦身（删 `fetch_meta_ads` + `fetch_social_metrics` 去 facebook，`MAX_TOOL_CALLS` 22→18，`MAX_COST_USD` $1.80→$1.50）+ prompts.ts 同步 + 报告页 Advanced Discovery CTA banner
 
 ### 2026-05-17
 

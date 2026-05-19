@@ -19,8 +19,11 @@ import { getAnthropicClient, MODEL_SONNET, parseJsonResponse } from '@/lib/anthr
 import { fetchUrlAsMarkdown } from '@/lib/brief/jina'
 import { verifyBusinessRegistration } from '@/lib/abr/client'
 import { aggregateLocalReviews } from '@/lib/local-reviews/client'
-import { scrapeInstagramProfile, scrapeFacebookPage, scrapeTiktokProfile } from '@/lib/apify/social-scraper'
-import { scrapeCompetitorMetaAds } from '@/lib/apify/ad-library'
+// Facebook page + Meta Ad Library scrapers intentionally excluded from the
+// first-time discovery — they are the slowest connectors and have the lowest
+// hit rate on cold domains. They re-appear in the Phase 8.10.S5 advanced
+// pass, gated behind explicit user connector authorisation.
+import { scrapeInstagramProfile, scrapeTiktokProfile } from '@/lib/apify/social-scraper'
 import { scrapeGoogleSerp } from '@/lib/apify/google-search-scraper'
 import type { DiscoveryReport } from './types'
 import { ZHANGQIAN_SYSTEM_PROMPT, buildUserPrompt } from './prompts'
@@ -29,21 +32,25 @@ import { ensureSerpCoverage } from './serp-coverage'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// 22 iterations covers the full research protocol comfortably: homepage +
-// registration (2) + social profiles + metrics + meta ads (6-8) + GBP (1) +
-// local reviews (1) + competitors + their homepages (4-5) + AI visibility +
-// SERP scrape (3-4) + Google Ads transparency probe (1) + final synthesis.
-// Bumped from 12 → 22 (and cost cap 1.0 → 1.80) after mobile station case
-// showed Claude was hitting the budget and skipping high-value Apify tools.
-// Web search max_uses below is an independent per-tool cap.
-const MAX_TOOL_CALLS = 22
-const MAX_COST_USD = 1.80
+// First-time discovery budget. Slimmer than the historic 22-call budget
+// because Meta Ad Library + Facebook page scrapers (the two slowest connectors)
+// are deferred to the Phase 8.10.S5 advanced pass. 18 calls comfortably covers:
+// homepage + registration (2) + IG/TikTok social (2-3) + GBP local reviews (1)
+// + competitors + their homepages (4-5) + SERP scrapes (2-3) + final synthesis.
+const MAX_TOOL_CALLS = 18
+const MAX_COST_USD = 1.50
 const MAX_OUTPUT_TOKENS = 8096
 const FETCH_URL_TIMEOUT_MS = 15_000
 const LOCAL_REVIEWS_TIMEOUT_MS = 45_000
-// Hard wall-clock cap: trigger graceful finalization at 4.5 min so the
-// full round-trip (final Claude call + overhead) lands under 5 min.
-const GLOBAL_TIMEOUT_MS = 270_000
+// Per-turn Anthropic call cap. Anthropic SDK default is 10 min, which can
+// blow past our 4.5 min global wall-clock when a single tool turn stalls
+// server-side. Cap it at 90 s; a turn that needs more is almost certainly hung.
+const CLAUDE_CALL_TIMEOUT_MS = 90_000
+// Hard wall-clock cap: trigger graceful finalization at 5 min so the
+// full round-trip (final Claude call + overhead) lands under the 6-min
+// stale-job threshold. First-time users should never wait longer than this —
+// deeper analysis lives behind authorized connectors (Phase 8.10.S5).
+const GLOBAL_TIMEOUT_MS = 300_000
 
 // Sonnet 4.5 pricing per million tokens (must match anthropic/client.ts)
 const PRICE_INPUT_PER_M = 3.0
@@ -149,48 +156,26 @@ const FETCH_LOCAL_REVIEWS_TOOL: Anthropic.Messages.Tool = {
 const FETCH_SOCIAL_METRICS_TOOL: Anthropic.Messages.Tool = {
   name: 'fetch_social_metrics',
   description:
-    'Fetch real follower count, recent post volume, and engagement rate for a social profile via Apify scrapers. Supports instagram, facebook, tiktok. Call this for the 1-2 most important social accounts you found — it returns hard numbers instead of guesses. Each call is a paid API call, so do not call it for every minor profile.',
+    'Fetch real follower count, recent post volume, and engagement rate for a social profile via Apify scrapers. Supports instagram and tiktok. (Facebook is intentionally excluded from first-time discovery — it is the slowest scraper and re-appears in the Phase 8.10.S5 advanced pass once the user authorises a connector.) Call this for the 1-2 most important social accounts you found — it returns hard numbers instead of guesses. Each call is a paid API call, so do not call it for every minor profile.',
   input_schema: {
     type: 'object' as const,
     properties: {
       platform: {
         type: 'string',
-        enum: ['instagram', 'facebook', 'tiktok'],
+        enum: ['instagram', 'tiktok'],
         description: 'Which platform the profile is on.',
       },
       handle_or_url: {
         type: 'string',
-        description:
-          'For instagram/tiktok: the handle (with or without @). For facebook: the full page URL.',
+        description: 'The handle (with or without @).',
       },
     },
     required: ['platform', 'handle_or_url'],
   },
 }
 
-/**
- * Client-side tool: check a business's Meta (Facebook/Instagram) ad activity
- * via the Apify Ad Library scraper. Backed by src/lib/apify/ad-library.ts.
- */
-const FETCH_META_ADS_TOOL: Anthropic.Messages.Tool = {
-  name: 'fetch_meta_ads',
-  description:
-    'Check whether a business is actively running Facebook/Instagram ads via the Meta Ad Library. Returns active ad count, ad formats, a coarse spend signal, and sample ad copy. Use this once for the target business to gauge paid-social activity. For multi-market brands whose AU activity is sparse, also try the brand\'s home market (e.g. country="SG" / "GB" / "US") to see real paid-social activity outside AU.',
-  input_schema: {
-    type: 'object' as const,
-    properties: {
-      query: {
-        type: 'string',
-        description: 'Business brand name or domain to search the Ad Library for.',
-      },
-      country: {
-        type: 'string',
-        description: 'Two-letter Meta Ad Library country code. Defaults to "AU". Set to e.g. "SG" / "GB" / "US" for non-AU/NZ home markets.',
-      },
-    },
-    required: ['query'],
-  },
-}
+// fetch_meta_ads tool removed for first-time discovery (Phase 8.10.S5 will
+// re-introduce it on the advanced pass once the user authorises the connector).
 
 /**
  * Client-side tool: scrape a Google SERP for a query via the Apify Google
@@ -292,21 +277,23 @@ export async function runZhangqian(
     }
 
     // ── Call Claude ────────────────────────────────────────────────────────
-    const response = await client.messages.create({
-      model: MODEL_SONNET,
-      max_tokens: MAX_OUTPUT_TOKENS,
-      system: ZHANGQIAN_SYSTEM_PROMPT,
-      tools: [
-        WEB_SEARCH_TOOL,
-        FETCH_URL_TOOL,
-        VERIFY_BUSINESS_REGISTRATION_TOOL,
-        FETCH_LOCAL_REVIEWS_TOOL,
-        FETCH_SOCIAL_METRICS_TOOL,
-        FETCH_META_ADS_TOOL,
-        FETCH_SERP_RESULTS_TOOL,
-      ],
-      messages,
-    })
+    const response = await client.messages.create(
+      {
+        model: MODEL_SONNET,
+        max_tokens: MAX_OUTPUT_TOKENS,
+        system: ZHANGQIAN_SYSTEM_PROMPT,
+        tools: [
+          WEB_SEARCH_TOOL,
+          FETCH_URL_TOOL,
+          VERIFY_BUSINESS_REGISTRATION_TOOL,
+          FETCH_LOCAL_REVIEWS_TOOL,
+          FETCH_SOCIAL_METRICS_TOOL,
+          FETCH_SERP_RESULTS_TOOL,
+        ],
+        messages,
+      },
+      { timeout: CLAUDE_CALL_TIMEOUT_MS },
+    )
 
     totalInputTokens += response.usage.input_tokens
     totalOutputTokens += response.usage.output_tokens
@@ -395,9 +382,6 @@ export async function runZhangqian(
           case 'fetch_social_metrics':
             apifyCalls++
             return handleFetchSocialMetrics(toolUse, onProgress)
-          case 'fetch_meta_ads':
-            apifyCalls++
-            return handleFetchMetaAds(toolUse, onProgress)
           case 'fetch_serp_results':
             apifyCalls++
             return handleFetchSerpResults(toolUse, onProgress)
@@ -405,7 +389,7 @@ export async function runZhangqian(
             return Promise.resolve<Anthropic.Messages.ToolResultBlockParam>({
               type: 'tool_result',
               tool_use_id: toolUse.id,
-              content: `Unknown tool: ${toolUse.name}. 'web_search' is server-side; client-handled tools are 'fetch_url', 'verify_business_registration', 'fetch_local_reviews', 'fetch_social_metrics', 'fetch_meta_ads', 'fetch_serp_results'.`,
+              content: `Unknown tool: ${toolUse.name}. 'web_search' is server-side; client-handled tools are 'fetch_url', 'verify_business_registration', 'fetch_local_reviews', 'fetch_social_metrics', 'fetch_serp_results'. (Meta Ad Library + Facebook profile scrapers are gated to Phase 8.10.S5 advanced discovery.)`,
               is_error: true,
             })
         }
@@ -427,13 +411,16 @@ export async function runZhangqian(
       'using whatever you have gathered. Set `notes` to flag any incomplete sections.',
   })
 
-  const finalResponse = await client.messages.create({
-    model: MODEL_SONNET,
-    max_tokens: MAX_OUTPUT_TOKENS,
-    system: ZHANGQIAN_SYSTEM_PROMPT,
-    // Omit tools on the final call so Claude can't loop again
-    messages,
-  })
+  const finalResponse = await client.messages.create(
+    {
+      model: MODEL_SONNET,
+      max_tokens: MAX_OUTPUT_TOKENS,
+      system: ZHANGQIAN_SYSTEM_PROMPT,
+      // Omit tools on the final call so Claude can't loop again
+      messages,
+    },
+    { timeout: CLAUDE_CALL_TIMEOUT_MS },
+  )
 
   totalInputTokens += finalResponse.usage.input_tokens
   totalOutputTokens += finalResponse.usage.output_tokens
@@ -724,12 +711,12 @@ async function handleFetchSocialMetrics(
   const platform = input.platform
   const target = typeof input.handle_or_url === 'string' ? input.handle_or_url.trim() : ''
 
-  if (!target || (platform !== 'instagram' && platform !== 'facebook' && platform !== 'tiktok')) {
+  if (!target || (platform !== 'instagram' && platform !== 'tiktok')) {
     return {
       type: 'tool_result',
       tool_use_id: toolUse.id,
       content:
-        'fetch_social_metrics requires `platform` ("instagram" | "facebook" | "tiktok") and `handle_or_url`.',
+        'fetch_social_metrics requires `platform` ("instagram" | "tiktok") and `handle_or_url`. Facebook scraping is gated to Phase 8.10.S5 advanced discovery.',
       is_error: true,
     }
   }
@@ -745,10 +732,8 @@ async function handleFetchSocialMetrics(
     let raw: { followersCount: number; postsLast30Days: number; engagementRate: number }
     if (platform === 'instagram') {
       raw = await withTimeout(scrapeInstagramProfile(target.replace(/^@/, '')), SOCIAL_METRICS_TIMEOUT_MS)
-    } else if (platform === 'tiktok') {
-      raw = await withTimeout(scrapeTiktokProfile(target), SOCIAL_METRICS_TIMEOUT_MS)
     } else {
-      raw = await withTimeout(scrapeFacebookPage(target), SOCIAL_METRICS_TIMEOUT_MS)
+      raw = await withTimeout(scrapeTiktokProfile(target), SOCIAL_METRICS_TIMEOUT_MS)
     }
     return {
       type: 'tool_result',
@@ -766,52 +751,6 @@ async function handleFetchSocialMetrics(
       type: 'tool_result',
       tool_use_id: toolUse.id,
       content: `fetch_social_metrics failed for ${platform}: ${message}. Leave that profile's metric fields null — do not guess.`,
-    }
-  }
-}
-
-/** Resolve a `fetch_meta_ads` tool call via the Apify Meta Ad Library scraper. */
-async function handleFetchMetaAds(
-  toolUse: Anthropic.Messages.ToolUseBlock,
-  onProgress: ProgressFn,
-): Promise<Anthropic.Messages.ToolResultBlockParam> {
-  const input = toolUse.input as { query?: string; country?: string }
-  const query = typeof input.query === 'string' ? input.query.trim() : ''
-  const country = typeof input.country === 'string' && input.country.trim().length > 0
-    ? input.country.trim().toUpperCase()
-    : 'AU'
-
-  if (!query) {
-    return {
-      type: 'tool_result',
-      tool_use_id: toolUse.id,
-      content: 'fetch_meta_ads requires a `query` string (brand name or domain).',
-      is_error: true,
-    }
-  }
-
-  await onProgress(`查询 Meta 广告库 (${country})…`)
-
-  try {
-    const ads = await scrapeCompetitorMetaAds(query, country)
-    // Normalise to the snake_case DiscoveredMetaAds shape.
-    return {
-      type: 'tool_result',
-      tool_use_id: toolUse.id,
-      content: JSON.stringify({
-        active_ads_count: ads.activeAdsCount,
-        ad_types: ads.adTypes,
-        estimated_spend: ads.estimatedSpend,
-        top_ad_copy: ads.topAdCopy,
-      }),
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    // Non-fatal: let Claude continue and set meta_ads to null.
-    return {
-      type: 'tool_result',
-      tool_use_id: toolUse.id,
-      content: `fetch_meta_ads failed: ${message}. Set meta_ads to null — do not guess ad activity.`,
     }
   }
 }

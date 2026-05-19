@@ -218,6 +218,34 @@ function DiscoveryReviewCards({
         <SerpResultsCard results={p.serp_results} clientId={clientId} />
       </div>
 
+      {/* Phase 8.10.S5 — Advanced discovery CTA. First-time discovery covers
+          70-80% of the data picture without touching anything that needs auth.
+          For deeper signals (Facebook profile metrics, Meta Ad Library, GSC
+          impressions, etc.) the user authorises connectors and we re-run on
+          richer ground truth. */}
+      <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4">
+        <div className="flex items-start gap-3">
+          <div className="text-2xl">🔌</div>
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold text-indigo-900">
+              想要更深度的分析？接通数据源解锁 Advanced Report
+            </h3>
+            <p className="mt-1 text-xs leading-relaxed text-indigo-800">
+              本次为 <strong>基础发现</strong>（约 70-80% 的品牌健康画像，5 分钟内完成）。授权 Google Search Console / Facebook / Google Business Profile 等数据源后，可获取真实流量趋势、Meta 广告投放、Facebook 受众画像等深度信号——驱动 Advanced Report。
+            </p>
+            <div className="mt-3 flex items-center gap-3">
+              <Link
+                href={`/dashboard/clients/${clientId}/connectors`}
+                className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition-colors"
+              >
+                接通数据源 →
+              </Link>
+              <span className="text-xs text-indigo-700/70">Phase 8.10.S5</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Action plan — full width */}
       {p.diagnosis?.actions && (
         <ActionPlanCard actions={p.diagnosis.actions} />

@@ -830,7 +830,7 @@ export function MetaAdsCard({
     return (
       <CardShell title="Meta 广告投放">
         <EmptyWithCTA
-          text="未检测到 Facebook/Instagram 广告投放"
+          text="Meta 广告库扫描属于 Advanced Discovery — 接入 Meta Ads 账户后单独补跑"
           clientId={clientId}
           anchor="meta-ads"
           ctaLabel="接入 Meta Ads 账户 →"

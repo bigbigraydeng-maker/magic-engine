@@ -136,6 +136,27 @@ services:
           name: magic-engine
           property: host
 
+  # Zhangqian discovery sweeper — every 5 minutes
+  # Marks stuck pending/running discovery jobs (>10 min) as failed.
+  # The status route's stale check is reactive (UI-poll driven), so jobs
+  # whose UI was closed mid-run would otherwise sit running forever.
+  - type: cron
+    name: zhangqian-sweeper
+    env: node
+    schedule: "*/5 * * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -s -H "Authorization: Bearer $CRON_SECRET" \
+        https://$RENDER_EXTERNAL_URL/api/cron/zhangqian-sweeper
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+      - key: RENDER_EXTERNAL_URL
+        fromService:
+          type: web
+          name: magic-engine
+          property: host
+
   # Weekly AI Visibility Tracker — every Monday at 1am UTC (~1pm NZST)
   # Processes all clients with enabled queries; writes runs + weekly snapshot.
   # Reference: ROADMAP.md P7.4.13

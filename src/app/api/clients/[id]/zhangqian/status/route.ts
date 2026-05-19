@@ -13,7 +13,11 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requireBearerToken } from '@/lib/validation-utils'
 import { failJob, getJob } from '@/lib/zhangqian/persistor'
 
-const STALE_JOB_TIMEOUT_MS = 10 * 60 * 1000
+// First-time discovery should never make a user wait beyond this. The agent
+// itself is capped at 5 min internally (GLOBAL_TIMEOUT_MS in agent.ts); the
+// extra minute is buffer for the final Claude summarisation + DB write.
+// Deeper analysis lives behind connector authorisation (Phase 8.10.S5).
+const STALE_JOB_TIMEOUT_MS = 6 * 60 * 1000
 
 function isStaleRunningJob(job: { status: string; started_at: string | null; created_at: string }): boolean {
   if (job.status !== 'pending' && job.status !== 'running') return false
