@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-20 03:12 NZST · 当前阶段：**⚠️ P8.3.2 代码已完成，PM 需在 Render 填 `ADMIN_EMAILS` 才能上线 → 完成后解锁 Phase 12.Q**。四 Agent 架构（张骞→华佗→诸葛亮→鲁班）已确定，诸葛亮登记为 Phase 12.G。Phase 12.A/B 已完成；Phase 12.Q 内容质量闭环已登记待开工。
+> 最后更新：2026-05-20 03:14 NZST · 当前阶段：**⚠️ P8.3.2 代码已完成，PM 需在 Render 填 `ADMIN_EMAILS` 才能上线 → 完成后解锁 Phase 12.Q**。四 Agent 架构（张骞→华佗→诸葛亮→鲁班）已确定，诸葛亮登记为 Phase 12.G。Phase 12.A/B 已完成；Phase 12.Q 内容质量闭环已登记待开工。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -1386,7 +1386,7 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
   - 调用形态（位置参数）：`auditBlogPost(result.html_body + '\n' + (result.geo_html_snapshot ?? ''), mode, metadata)`
   - 不过阈值返回最后一次 + log warn，不阻塞 UX
   - 写 `generation_context_snapshot` + `quality_score` 到 `blog_posts`
-- [ ] **P12.Q.4a** — Social Route A + C 接入 rubric（仅 coreDimensions）+ refine retry + 写 snapshot/score 到 `content_posts`
+- [x] **P12.Q.4a** — Social Route A + C 接入 rubric（仅 coreDimensions）+ refine retry + 写 snapshot/score 到 `content_posts`
 - [ ] **P12.Q.4b** — Social Route B 接入 rubric + 注入 `viral-structure-preservation` routeDimension（保留爆款视频结构 vs 注入品牌深度，advisory 不强制阈值）+ 写 snapshot/score
 - [ ] **P12.Q.5** — Reels 接入 rubric + 写 snapshot/score 到 `reels_drafts`（schema 已在 P12.Q.1 修完，本任务只接入 rubric）
 - [ ] **P12.Q.6** — snapshot/score 写入验证 + 缺漏补齐：dev 实测五条链路（Blog / Route A / B / C / Reels），确认每条都写入 snapshot/score；若有遗漏补上
@@ -1923,6 +1923,7 @@ AU / NZ（当前）          新市场（未来）
 - **P12.Q.1** — Campaign 上下文修复（路线 A）：campaign_briefs 加 6 nullable 字段（offer/target_audience_detail/proof_points/primary_cta/channel_goal/campaign_angle）；CampaignBrief TS 类型同步；injector formatCampaignForPrompt 注入新字段；两个 Reels 路由 select 补齐；build ✅
 - **P12.Q.2** — 统一 quality rubric 模块：src/lib/content/quality-rubric.ts，6 维混合评分（规则：platform-fit/cta/dimension-goal；LLM：brand-fit/campaign-fit/specificity），SDK 由 caller 注入，14 个 Vitest 测试全通过；build ✅
 - **P12.Q.3** — Blog auditBlogPost + retry：新增 quality-audit.ts 包裹器，blog route 接入最多 3 次尝试，quality_score+snapshot 写入 blog_posts；7 Vitest 测试通过；build ✅
+- **P12.Q.4a** — Social Route A/C 接入 rubric：新增 social-quality-audit.ts；batch-generate 接入 generatePostWithQualityRetry（refine retry 最多 3 次，失败维度回传下轮 prompt）；quality_score+snapshot 写入 content_posts；11 Vitest 测试通过；build ✅
 
 ### 2026-05-23
 
