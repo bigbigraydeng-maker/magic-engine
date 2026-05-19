@@ -7,8 +7,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const supabase = createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  // Auth temporarily disabled
-  // if (!user) redirect('/login')
+  if (!user) redirect('/login')
 
   const headersList = await headers()
   const userRole = headersList.get('x-user-role') ?? 'admin'

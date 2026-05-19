@@ -443,7 +443,7 @@ Layer 3: 策略驱动执行
 **目标**：5 分钟完成新客户建档，DNZ 采集作为标准步骤嵌入，确保每个客户上线前即有内容现状数据。
 
 - [x] **P8.3.1** 向导 `/dashboard/clients/new`：Step 1 基本信息 → Step 2 上传 Brief 文件 → Step 3 触发 DNZ 采集 → Step 4 审核采集结果 → Step 5 激活（生成 Master Brief + active GEO Directive）✅ **2026-05-07 完成**
-- [ ] **P8.3.2** Dashboard 简单鉴权（Magic Link，防止数据泄露）
+- [x] **P8.3.2** Dashboard 简单鉴权（Magic Link，防止数据泄露）✅ **2026-05-19 完成** — middleware matcher + layout 守卫重新启用；23 个单元测试（whitelist + middleware 三层守卫）全过；生产前 PM 需在 Render 填 `ADMIN_EMAILS` + Supabase Auth 后台白名单 `https://crazycontent-27u3.onrender.com/auth/callback`
 
 **验收标准**：
 - 全程 < 10 分钟完成新客户建档
@@ -1271,6 +1271,7 @@ Production Item    = 订单里的具体产物
 
 ### 2026-05-19
 
+- **P8.3.2** — Dashboard Magic Link 鉴权重新启用：middleware matcher 改回 `/dashboard/:path*` + layout `redirect('/login')` 取消注释；whitelist.ts + middleware.ts 新增 23 个单元测试（fail-closed / admin / client-viewer scoping / 边界）；`/unauthorized` 已存在无需新建；Supabase 后台 Redirect URLs 白名单 + Render `ADMIN_EMAILS` 需 PM 上线前配齐
 - **P8.10.S0.21** — 张骞首跑硬化 + Advanced Discovery 入口：HTTP 超时全封（Anthropic SDK 90s / SEMrush 20s / Apify ad-library 30s）+ `GLOBAL_TIMEOUT_MS` 270s→300s + stale-timeout 10min→6min + 新增 `/api/cron/zhangqian-sweeper` 兜底孤儿 job + 首跑工具瘦身（删 `fetch_meta_ads` + `fetch_social_metrics` 去 facebook，`MAX_TOOL_CALLS` 22→18，`MAX_COST_USD` $1.80→$1.50）+ prompts.ts 同步 + 报告页 Advanced Discovery CTA banner
 
 ### 2026-05-17

@@ -40,7 +40,6 @@ export async function middleware(request: NextRequest) {
   return NextResponse.next({ request: { headers: requestHeaders } })
 }
 
-// Auth temporarily disabled — re-enable matcher when magic link is fixed
 export const config = {
-  matcher: [],
+  matcher: ['/dashboard/:path*'],
 }

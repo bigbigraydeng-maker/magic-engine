@@ -213,14 +213,14 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-19（文档轻量校准：Phase 12.A 已完成，Phase 12.B.1–B.4 已完成；当前阻塞焦点回到 P8.3.2 Dashboard Magic Link 鉴权）
+> 最后更新：2026-05-19（**P8.3.2 Magic Link 鉴权代码层完成**，剩生产环境配置 + PM 自测；P8.10.S0.22 仍是另一阻塞项）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
 | **P8.10.S0.22** | Advanced Discovery Phase 1：FB / GBP Connector 触发后台再跑 | ⭐ |
-| **P8.3.2** | Dashboard Magic Link 鉴权 | ⭐ |
+| **P8.3.2 收尾** | PM 在 Render 填 `ADMIN_EMAILS` + Supabase 后台白名单 Redirect URL，自测磁链可登录 | ⭐ |
 
-**状态校准（2026-05-19）**：P8.10.S0.21 已完成（张骞首跑硬化 + Advanced Discovery 入口 CTA banner，5min 硬墙 + 工具瘦身 + HTTP 超时全封）。下一步两条线择一：**P8.10.S0.22 Advanced Discovery Phase 1**（接通 Connector 后自动 enqueue advanced job，把 Facebook / Meta Ads 工具接回来）或 **P8.3.2 Dashboard Magic Link 鉴权**（客户数据安全阻塞）。Phase 12.A 已完成；Phase 12.B.1–B.4 已完成（SEO / Meta Ads / Social adapter + SEMrush 周快照 cron）。
+**状态校准（2026-05-19）**：P8.3.2 代码层已完成（middleware matcher + layout 守卫重新启用，23 单元测试全过，本地 dev server 验证未登录 307 跳 `/login`、`/unauthorized` 渲染正常）；剩 PM 在生产 Render 配 `ADMIN_EMAILS` + Supabase 后台加 `https://crazycontent-27u3.onrender.com/auth/callback` 到 Redirect URLs 白名单。P8.10.S0.21 已完成。Phase 12.A 已完成；Phase 12.B.1–B.4 已完成（SEO / Meta Ads / Social adapter + SEMrush 周快照 cron）。
 
 **Phase 8.12 Sprint 3 全部完成（S3.1–S3.5）**，P8.12.S1.6b（小红书 scraper）为下一可选扩展项。
 
