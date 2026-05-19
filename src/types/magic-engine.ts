@@ -213,6 +213,12 @@ export interface CampaignBrief {
   semrush_keywords?: CampaignKeywordSnapshot[] | null
   valid_from?: string | null
   valid_until?: string | null
+  offer?: string | null
+  target_audience_detail?: string | null
+  proof_points?: string | null
+  primary_cta?: string | null
+  channel_goal?: string | null
+  campaign_angle?: string | null
   created_at: string
   updated_at: string
 }

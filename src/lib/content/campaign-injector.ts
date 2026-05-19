@@ -6,7 +6,18 @@ import type { CampaignBrief, CampaignKeywordSnapshot } from '@/types/magic-engin
 
 type CampaignPromptFields = Pick<
   CampaignBrief,
-  'title' | 'description' | 'parsed_content' | 'semrush_keywords' | 'valid_from' | 'valid_until'
+  | 'title'
+  | 'description'
+  | 'parsed_content'
+  | 'semrush_keywords'
+  | 'valid_from'
+  | 'valid_until'
+  | 'offer'
+  | 'target_audience_detail'
+  | 'proof_points'
+  | 'primary_cta'
+  | 'channel_goal'
+  | 'campaign_angle'
 >
 
 export async function getActiveCampaigns(clientId: string): Promise<CampaignBrief[]> {
@@ -63,6 +74,30 @@ export function formatCampaignForPrompt(campaign: CampaignPromptFields): string 
     // Trim to avoid excessive prompt length
     const content = campaign.parsed_content.slice(0, 800)
     lines.push(`- 产品/活动详情：\n${content}${campaign.parsed_content.length > 800 ? '…' : ''}`)
+  }
+
+  if (campaign.offer) {
+    lines.push(`- 推广优惠/核心卖点：${campaign.offer}`)
+  }
+
+  if (campaign.target_audience_detail) {
+    lines.push(`- 目标受众：${campaign.target_audience_detail}`)
+  }
+
+  if (campaign.proof_points) {
+    lines.push(`- 信任背书：${campaign.proof_points}`)
+  }
+
+  if (campaign.primary_cta) {
+    lines.push(`- 行动号召：${campaign.primary_cta}`)
+  }
+
+  if (campaign.channel_goal) {
+    lines.push(`- 渠道目标：${campaign.channel_goal}`)
+  }
+
+  if (campaign.campaign_angle) {
+    lines.push(`- 推广角度：${campaign.campaign_angle}`)
   }
 
   if (keywords) {

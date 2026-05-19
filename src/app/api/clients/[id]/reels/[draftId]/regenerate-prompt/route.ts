@@ -59,7 +59,7 @@ export async function POST(
     if (draft.campaign_brief_id) {
       const { data: campaign } = await supabaseAdmin
         .from('campaign_briefs')
-        .select('title, description, parsed_content, semrush_keywords, valid_from, valid_until')
+        .select('title, description, parsed_content, semrush_keywords, valid_from, valid_until, offer, target_audience_detail, proof_points, primary_cta, channel_goal, campaign_angle')
         .eq('id', draft.campaign_brief_id)
         .eq('client_id', clientId)
         .maybeSingle()
