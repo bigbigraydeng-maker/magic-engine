@@ -197,6 +197,32 @@ async function persistAndReturn(
     )
   }
 
+  // Link to production package if specified (best-effort, non-blocking on error)
+  if (body.production_package_id) {
+    const { data: item, error: itemErr } = await supabaseAdmin
+      .from('production_items')
+      .insert({
+        package_id:    body.production_package_id,
+        client_id:     clientId,
+        content_type:  'blog_post',
+        blog_post_id:  post.id,
+        sort_order:    0,
+        status:        'ready',
+      })
+      .select('id')
+      .single()
+
+    if (itemErr) {
+      console.error('[blog persistAndReturn] production_items insert error:', JSON.stringify(itemErr))
+    } else if (item) {
+      await supabaseAdmin
+        .from('blog_posts')
+        .update({ production_item_id: item.id })
+        .eq('id', post.id)
+        .catch(err => console.error('[blog persistAndReturn] production_item_id back-ref error:', err))
+    }
+  }
+
   return NextResponse.json({
     success: true,
     action: 'new',

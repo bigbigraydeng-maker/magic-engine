@@ -54,7 +54,7 @@ export interface ReviewSample {
 }
 
 export interface DiscoveredReviewPlatform {
-  platform: 'google' | 'productreview' | 'trustpilot' | 'yelp' | 'facebook' | 'other'
+  platform: 'google' | 'productreview' | 'tripadvisor' | 'trustpilot' | 'yelp' | 'facebook' | 'other'
   url: string
   rating: number | null             // platform-specific scale
   review_count: number | null
@@ -133,6 +133,10 @@ export interface DiscoveredBusiness {
   confidence: number                 // 0–1
   /** Verified registry record (ABR/NZBN); null when not found or not checked. */
   registration?: DiscoveredRegistration | null
+  /** Phone numbers extracted via DataForSEO Domain Technologies (P8.13.B.3). */
+  phone_numbers?: string[]
+  /** Email addresses extracted via DataForSEO Domain Technologies (P8.13.B.3). */
+  emails?: string[]
 }
 
 // ─── New diagnostic types ─────────────────────────────────────────────────────
@@ -253,6 +257,76 @@ export interface DiscoveryReport {
     donts: string[]            // 3–5 visual DON'T guidelines, e.g. 'no stock photos'
   } | null
 
+  /**
+   * Technology stack detected via DataForSEO Domain Technologies (P8.13.B.1).
+   * CMS, ecommerce, analytics, chat, contact info, social graph URLs.
+   * null when not checked or domain not found.
+   */
+  technology_stack?: {
+    cms:               string | null
+    ecommerce:         string | null
+    analytics:         string[]
+    crm_marketing:     string[]
+    chat:              string | null
+    domain_rank:       number | null
+    phone_numbers:     string[]
+    emails:            string[]
+    social_graph_urls: string[]
+  } | null
+
+  /**
+   * WHOIS domain registration data via DataForSEO (P8.13.B.1).
+   * Domain age, expiry, registrar, backlink count, organic traffic estimate.
+   * null when not checked or domain not found.
+   */
+  domain_whois?: {
+    registered_at:          string | null
+    expires_at:             string | null
+    registrar:              string | null
+    domain_age_years:       number | null
+    referring_domains:      number | null
+    backlinks:              number | null
+    organic_etv:            number | null
+    organic_keywords_top10: number | null
+  } | null
+
+  /**
+   * On-page technical SEO audit for the homepage (P8.13.D.3).
+   * Populated by the fetch_onpage_audit tool; null when not checked.
+   */
+  onpage_audit?: {
+    status_code:     number | null
+    title:           string | null
+    description:     string | null
+    canonical:       string | null
+    h1:              string | null
+    internal_links:  number | null
+    external_links:  number | null
+    images_no_alt:   number | null
+    images_total:    number | null
+    word_count:      number | null
+    core_web_vitals: {
+      lcp: number | null
+      cls: number | null
+      tbt: number | null
+    } | null
+    checks: {
+      no_title:         boolean
+      no_description:   boolean
+      no_h1:            boolean
+      missing_alt_text: boolean
+      broken_links:     boolean
+      redirect_chain:   boolean
+      https:            boolean
+    }
+  } | null
+
+  /**
+   * Advanced discovery payload — populated after a connector (meta-ads / gbp)
+   * is authorized and the advanced pass runs. Never overwrites the basic fields.
+   */
+  advanced?: AdvancedDiscoveryPayload | null
+
   /** Run telemetry — written by agent.ts, not by Claude */
   meta: {
     model: string
@@ -260,6 +334,85 @@ export interface DiscoveryReport {
     cost_usd: number
     duration_ms: number
     truncated: boolean              // true if hit tool-call cap before finishing
+  }
+}
+
+// ─── Advanced discovery ───────────────────────────────────────────────────────
+
+/** Facebook profile metrics fetched during advanced discovery. */
+export interface AdvancedFacebookProfile {
+  url: string
+  page_name: string
+  followers_count: number
+  posts_last_30d: number
+  engagement_rate: number
+}
+
+/** One row from the Google Search Console Search Analytics API. */
+export interface GscQueryRow {
+  query: string
+  impressions: number
+  clicks: number
+  /** Click-through rate as a 0–1 decimal (0.05 = 5%). */
+  ctr: number
+  /** Average position in Google search results (1 = top). */
+  position: number
+}
+
+/**
+ * GSC search performance data fetched during advanced discovery (gsc connector).
+ * Replaces SEMrush keyword estimates with real GSC query data.
+ */
+export interface GscSearchData {
+  /** The GSC site URL exactly as entered by the user, e.g. "https://example.com.au/" */
+  site_url: string
+  /** Number of calendar days covered (default 28). */
+  date_range_days: number
+  /** Top queries ordered by clicks descending (up to 25 rows). */
+  rows: GscQueryRow[]
+  fetched_at: string
+}
+
+/**
+ * Google Ads Transparency Center data fetched during advanced discovery
+ * (google-ads connector). Public data — no credentials required.
+ */
+export interface DiscoveredGoogleAdsData {
+  /** Advertiser name or domain queried. */
+  advertiser: string
+  /** Count of active ads observed in the Transparency Center. */
+  active_ads_count: number
+  /** Distinct creative formats — e.g. ['text', 'image', 'video', 'shopping']. */
+  ad_formats: string[]
+  /** Distinct regions where ads were running (ISO country codes). */
+  regions: string[]
+  /** Sample headlines / preview text (up to 3). */
+  top_ad_previews: string[]
+}
+
+/**
+ * Payload written to `client_discovery.payload.advanced` after a connector
+ * is authorised. Does NOT overwrite the basic DiscoveryReport fields — it
+ * sits alongside them under the `advanced` key.
+ *
+ * Fields are optional so old rows (only meta_ads/facebook_profiles) remain
+ * valid without schema migration.
+ */
+export interface AdvancedDiscoveryPayload {
+  /** Meta Ad Library data — null when scrape failed or no ads found */
+  meta_ads: DiscoveredMetaAds | null
+  /** Facebook Page metrics — one entry per FB profile found in basic discovery */
+  facebook_profiles: AdvancedFacebookProfile[]
+  /** GSC search performance — populated by gsc connector trigger; null otherwise */
+  gsc_data?: GscSearchData | null
+  /** Google Ads Transparency scan — populated by google-ads connector; null otherwise */
+  google_ads_data?: DiscoveredGoogleAdsData | null
+  meta: {
+    duration_ms: number
+    /** Apify cost is tracked externally; Claude cost is 0 for advanced pass */
+    cost_usd: number
+    ran_at: string
+    triggered_by: string  // connector anchor that triggered this run
   }
 }
 

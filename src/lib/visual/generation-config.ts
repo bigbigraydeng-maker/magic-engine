@@ -150,12 +150,14 @@ export const GENERATION_STAGES_BY_TYPE = {
  * Used to derive cancel thresholds and progress estimates
  */
 const TYPICAL_DURATION_MS: Record<
-  'wavespeed' | 'seedance' | 'heygen',
+  'wavespeed' | 'atlas' | 'openai' | 'seedance' | 'heygen',
   Partial<Record<'image' | 'video' | 'avatar_video', number>>
 > = {
-  wavespeed: { image: 180 * 1000, video: 300 * 1000 }, // ~3 min image, ~5 min video
-  seedance: { video: 240 * 1000, avatar_video: 300 * 1000 }, // ~4 min video, ~5 min avatar
-  heygen: { avatar_video: 120 * 1000 }, // ~2 min avatar
+  wavespeed: { image: 180 * 1000, video: 300 * 1000 }, // legacy — kept for existing DB records
+  atlas:     { image: 180 * 1000, video: 300 * 1000 }, // ~3 min image, ~5 min video
+  openai:    { image: 20 * 1000 },                      // ~20s (synchronous, gpt-image-1)
+  seedance:  { video: 240 * 1000, avatar_video: 300 * 1000 },
+  heygen:    { avatar_video: 120 * 1000 },
 }
 
 /**
@@ -172,7 +174,7 @@ export function getStagesForType(
  * Falls back to POLLING_TIMEOUT_MS when provider/type combo is unknown
  */
 export function getCancelThresholdMs(
-  provider: 'wavespeed' | 'seedance' | 'heygen',
+  provider: 'wavespeed' | 'atlas' | 'openai' | 'seedance' | 'heygen',
   assetType: 'image' | 'video' | 'avatar_video'
 ): number {
   const typicalMs =

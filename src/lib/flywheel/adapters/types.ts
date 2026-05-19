@@ -49,6 +49,8 @@ export interface ExecuteActionInput {
   expectedMetric?: string
   /** Positive = improvement expected (e.g. +0.1 mention_rate) */
   expectedDelta?: number
+  /** P13.E: link this action back to the production package that triggered it */
+  productionPackageId?: string
 }
 
 /**
@@ -67,6 +69,8 @@ export interface FlywheelActionRow {
   expectedMetric?: string
   expectedDelta?: number
   executedAt: string  // ISO 8601
+  /** P13.E: traceability back to the production package that triggered this action */
+  productionPackageId?: string
 }
 
 /**

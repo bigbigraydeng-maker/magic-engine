@@ -2,7 +2,12 @@
 // 为内容生成提供短期推广上下文，与 Master Brief 配合使用
 
 import { supabaseAdmin } from '@/lib/supabase'
-import type { CampaignBrief } from '@/types/magic-engine'
+import type { CampaignBrief, CampaignKeywordSnapshot } from '@/types/magic-engine'
+
+type CampaignPromptFields = Pick<
+  CampaignBrief,
+  'title' | 'description' | 'parsed_content' | 'semrush_keywords' | 'valid_from' | 'valid_until'
+>
 
 export async function getActiveCampaigns(clientId: string): Promise<CampaignBrief[]> {
   const { data } = await supabaseAdmin
@@ -29,10 +34,10 @@ export async function getCampaignById(
   return data ?? null
 }
 
-export function formatCampaignForPrompt(campaign: CampaignBrief): string {
+export function formatCampaignForPrompt(campaign: CampaignPromptFields): string {
   const keywords = (campaign.semrush_keywords ?? [])
     .slice(0, 10)
-    .map(k => k.keyword)
+    .map((k: CampaignKeywordSnapshot) => k.keyword)
     .join(', ')
 
   const dateRange = campaign.valid_from && campaign.valid_until

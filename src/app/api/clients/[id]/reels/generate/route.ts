@@ -13,6 +13,7 @@ import {
   generateReelsContent,
   formatMasterBriefForPrompt,
 } from '@/lib/reels/generator'
+import { formatCampaignForPrompt } from '@/lib/content/campaign-injector'
 
 export async function POST(
   req: NextRequest,
@@ -21,7 +22,10 @@ export async function POST(
   const clientId = params.id
 
   try {
-    const body = await req.json().catch(() => ({})) as { campaign_brief_id?: string }
+    const body = await req.json().catch(() => ({})) as {
+      campaign_brief_id?: string
+      production_package_id?: string
+    }
 
     // 1. Fetch active master brief
     const { data: brief, error: briefErr } = await supabaseAdmin
@@ -45,19 +49,13 @@ export async function POST(
     if (body.campaign_brief_id) {
       const { data: campaign } = await supabaseAdmin
         .from('campaign_briefs')
-        .select('name, objective, target_audience, key_messages, campaign_period')
+        .select('title, description, parsed_content, semrush_keywords, valid_from, valid_until')
         .eq('id', body.campaign_brief_id)
         .eq('client_id', clientId)
         .maybeSingle()
 
       if (campaign) {
-        const parts: string[] = []
-        if (campaign.name)            parts.push(`Campaign: ${campaign.name}`)
-        if (campaign.objective)       parts.push(`Objective: ${campaign.objective}`)
-        if (campaign.target_audience) parts.push(`Target Audience: ${campaign.target_audience}`)
-        if (campaign.key_messages)    parts.push(`Key Messages: ${campaign.key_messages}`)
-        if (campaign.campaign_period) parts.push(`Period: ${campaign.campaign_period}`)
-        campaignContext = parts.join('\n')
+        campaignContext = formatCampaignForPrompt(campaign)
       }
     }
 
@@ -88,6 +86,37 @@ export async function POST(
       .single()
 
     if (insertErr) throw insertErr
+
+    // Link to production package if provided (non-blocking)
+    if (body.production_package_id && draft) {
+      supabaseAdmin
+        .from('production_items')
+        .insert({
+          package_id: body.production_package_id,
+          client_id: clientId,
+          content_type: 'reel',
+          reel_id: draft.id,
+          sort_order: 0,
+          status: 'ready',
+        })
+        .select('id')
+        .single()
+        .then(({ data: item, error: itemErr }) => {
+          if (itemErr) {
+            console.error('[reels/generate] production_items insert failed:', itemErr)
+            return
+          }
+          if (item) {
+            supabaseAdmin
+              .from('reels_drafts')
+              .update({ production_item_id: item.id })
+              .eq('id', draft.id)
+              .then(({ error: upErr }) => {
+                if (upErr) console.error('[reels/generate] production_item_id back-ref failed:', upErr)
+              })
+          }
+        })
+    }
 
     return NextResponse.json({ success: true, draft })
 

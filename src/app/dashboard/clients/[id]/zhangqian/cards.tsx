@@ -22,6 +22,9 @@ import type {
   DiscoveredRegistration,
   DiscoveredMetaAds,
   DiscoveredSerpResult,
+  GscSearchData,
+  DiscoveredGoogleAdsData,
+  AdvancedFacebookProfile,
 } from '@/lib/zhangqian/types'
 import { useState } from 'react'
 
@@ -710,6 +713,7 @@ export function NotesCard({ notes }: { notes: string }) {
 const REVIEW_PLATFORM_LABELS: Record<DiscoveredReviewPlatform['platform'], string> = {
   google:        'Google',
   productreview: 'ProductReview',
+  tripadvisor:   'Tripadvisor',
   trustpilot:    'Trustpilot',
   yelp:          'Yelp',
   facebook:      'Facebook',
@@ -830,7 +834,7 @@ export function MetaAdsCard({
     return (
       <CardShell title="Meta 广告投放">
         <EmptyWithCTA
-          text="未检测到 Facebook/Instagram 广告投放"
+          text="Meta 广告库扫描属于 Advanced Discovery — 接入 Meta Ads 账户后单独补跑"
           clientId={clientId}
           anchor="meta-ads"
           ctaLabel="接入 Meta Ads 账户 →"
@@ -934,6 +938,461 @@ export function SerpResultsCard({
       <ul className="space-y-2.5">
         {results.map((s, i) => <SerpResultItem key={i} serp={s} />)}
       </ul>
+    </CardShell>
+  )
+}
+
+// ─── GscDataCard ──────────────────────────────────────────────────────────────
+
+export function GscDataCard({ gscData }: { gscData: GscSearchData }) {
+  const totalClicks = gscData.rows.reduce((s, r) => s + r.clicks, 0)
+  const totalImpressions = gscData.rows.reduce((s, r) => s + r.impressions, 0)
+  const displayed = gscData.rows.slice(0, 15)
+
+  return (
+    <CardShell title="GSC 搜索表现（真实数据）">
+      {/* Summary metrics */}
+      <div className="rounded-lg bg-green-50 border border-green-100 p-3 flex flex-wrap gap-4">
+        <div className="text-center">
+          <p className="text-lg font-bold text-green-700">{totalClicks.toLocaleString()}</p>
+          <p className="text-xs text-green-600">总点击（{gscData.date_range_days}天）</p>
+        </div>
+        <div className="text-center">
+          <p className="text-lg font-bold text-green-700">{totalImpressions.toLocaleString()}</p>
+          <p className="text-xs text-green-600">总展示</p>
+        </div>
+        <div className="text-center">
+          <p className="text-lg font-bold text-green-700">{gscData.rows.length}</p>
+          <p className="text-xs text-green-600">查询词数</p>
+        </div>
+      </div>
+
+      <p className="text-xs text-gray-400">
+        站点：<span className="text-gray-600">{gscData.site_url}</span>
+      </p>
+
+      {/* Query table */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-gray-100">
+              <th className="text-left py-1 pr-2 text-gray-500 font-medium">查询词</th>
+              <th className="text-right py-1 px-2 text-gray-500 font-medium">点击</th>
+              <th className="text-right py-1 px-2 text-gray-500 font-medium">展示</th>
+              <th className="text-right py-1 px-2 text-gray-500 font-medium">CTR</th>
+              <th className="text-right py-1 pl-2 text-gray-500 font-medium">排名</th>
+            </tr>
+          </thead>
+          <tbody>
+            {displayed.map((row, i) => (
+              <tr key={i} className="border-b border-gray-50">
+                <td className="py-1 pr-2 text-gray-800 break-all">{row.query}</td>
+                <td className="py-1 px-2 text-right font-medium text-gray-700">{row.clicks}</td>
+                <td className="py-1 px-2 text-right text-gray-500">{row.impressions.toLocaleString()}</td>
+                <td className="py-1 px-2 text-right text-gray-500">{(row.ctr * 100).toFixed(1)}%</td>
+                <td className="py-1 pl-2 text-right">
+                  <span className={`font-medium ${
+                    row.position <= 3 ? 'text-green-600' :
+                    row.position <= 10 ? 'text-blue-600' :
+                    'text-gray-400'
+                  }`}>
+                    {row.position.toFixed(1)}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {gscData.rows.length > 15 && (
+        <p className="text-xs text-gray-400 text-right">
+          显示前 15 条，共 {gscData.rows.length} 条
+        </p>
+      )}
+    </CardShell>
+  )
+}
+
+// ─── GoogleAdsCard ────────────────────────────────────────────────────────────
+
+export function GoogleAdsCard({ adsData }: { adsData: DiscoveredGoogleAdsData }) {
+  return (
+    <CardShell title="Google Ads 透明中心">
+      <div className="flex flex-wrap gap-4">
+        <div className="text-center">
+          <p className="text-2xl font-bold text-blue-600">{adsData.active_ads_count}</p>
+          <p className="text-xs text-gray-500">活跃广告数</p>
+        </div>
+        {adsData.regions.length > 0 && (
+          <div>
+            <p className="text-xs text-gray-500 mb-1.5">投放地区</p>
+            <div className="flex flex-wrap gap-1">
+              {adsData.regions.map((r, i) => (
+                <Badge key={i} className="bg-blue-50 text-blue-700">{r}</Badge>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+      {adsData.ad_formats.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-gray-500 mb-1.5">广告格式</p>
+          <div className="flex flex-wrap gap-1">
+            {adsData.ad_formats.map((f, i) => (
+              <Badge key={i} className="bg-gray-100 text-gray-600">{f}</Badge>
+            ))}
+          </div>
+        </div>
+      )}
+      {adsData.top_ad_previews.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-gray-500 mb-1.5">广告文案预览</p>
+          <ul className="space-y-1">
+            {adsData.top_ad_previews.map((preview, i) => (
+              <li key={i} className="text-xs text-gray-700 leading-relaxed flex items-start gap-1">
+                <span className="text-blue-400 mt-0.5 shrink-0">•</span>
+                <span>{preview}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </CardShell>
+  )
+}
+
+// ─── AdvancedFacebookCard ─────────────────────────────────────────────────────
+
+export function AdvancedFacebookCard({ profiles }: { profiles: AdvancedFacebookProfile[] }) {
+  if (profiles.length === 0) return null
+  return (
+    <CardShell title="Facebook 深度数据">
+      <ul className="space-y-3">
+        {profiles.map((p, i) => (
+          <li key={i} className="rounded-lg border border-gray-100 p-3">
+            <a
+              href={p.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm font-medium text-indigo-600 hover:underline block mb-2"
+            >
+              {p.page_name}
+            </a>
+            <div className="flex flex-wrap gap-4">
+              <div className="text-center">
+                <p className="text-base font-bold text-gray-700">{p.followers_count.toLocaleString()}</p>
+                <p className="text-xs text-gray-400">粉丝</p>
+              </div>
+              <div className="text-center">
+                <p className="text-base font-bold text-gray-700">{p.posts_last_30d}</p>
+                <p className="text-xs text-gray-400">近30天帖文</p>
+              </div>
+              <div className="text-center">
+                <p className="text-base font-bold text-gray-700">{(p.engagement_rate * 100).toFixed(2)}%</p>
+                <p className="text-xs text-gray-400">互动率</p>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </CardShell>
+  )
+}
+
+// ─── TechStackCard ────────────────────────────────────────────────────────────
+
+interface TechStackData {
+  cms:               string | null
+  ecommerce:         string | null
+  analytics:         string[]
+  crm_marketing:     string[]
+  chat:              string | null
+  domain_rank:       number | null
+  phone_numbers:     string[]
+  emails:            string[]
+  social_graph_urls: string[]
+}
+
+export function TechStackCard({ data }: { data: TechStackData }) {
+  const rows: Array<{ label: string; value: string | null }> = [
+    { label: 'CMS',      value: data.cms },
+    { label: '电商平台', value: data.ecommerce },
+    { label: '聊天插件', value: data.chat },
+  ]
+
+  return (
+    <CardShell title="技术栈">
+      <div className="flex flex-col gap-2">
+        {rows.map(r =>
+          r.value ? (
+            <div key={r.label} className="flex items-center gap-2">
+              <span className="text-xs text-gray-500 w-16 shrink-0">{r.label}</span>
+              <Badge className="bg-indigo-50 text-indigo-700">{r.value}</Badge>
+            </div>
+          ) : null,
+        )}
+
+        {data.analytics.length > 0 && (
+          <div className="flex items-start gap-2">
+            <span className="text-xs text-gray-500 w-16 shrink-0 mt-0.5">分析工具</span>
+            <div className="flex flex-wrap gap-1">
+              {data.analytics.map(a => (
+                <Badge key={a} className="bg-blue-50 text-blue-700">{a}</Badge>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {data.crm_marketing.length > 0 && (
+          <div className="flex items-start gap-2">
+            <span className="text-xs text-gray-500 w-16 shrink-0 mt-0.5">CRM/营销</span>
+            <div className="flex flex-wrap gap-1">
+              {data.crm_marketing.map(c => (
+                <Badge key={c} className="bg-green-50 text-green-700">{c}</Badge>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {data.domain_rank !== null && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 w-16 shrink-0">域名权重</span>
+            <span className="text-sm font-semibold text-gray-700">{data.domain_rank}</span>
+          </div>
+        )}
+
+        {(data.phone_numbers.length > 0 || data.emails.length > 0) && (
+          <div className="mt-1 pt-2 border-t border-gray-100 flex flex-col gap-1">
+            {data.phone_numbers.map(p => (
+              <p key={p} className="text-xs text-gray-600">📞 {p}</p>
+            ))}
+            {data.emails.map(e => (
+              <p key={e} className="text-xs text-gray-600">✉️ {e}</p>
+            ))}
+          </div>
+        )}
+      </div>
+    </CardShell>
+  )
+}
+
+// ─── DomainWhoisCard ──────────────────────────────────────────────────────────
+
+interface DomainWhoisData {
+  registered_at:          string | null
+  expires_at:             string | null
+  registrar:              string | null
+  domain_age_years:       number | null
+  referring_domains:      number | null
+  backlinks:              number | null
+  organic_etv:            number | null
+  organic_keywords_top10: number | null
+}
+
+export function DomainWhoisCard({ data }: { data: DomainWhoisData }) {
+  const daysToExpiry = data.expires_at
+    ? Math.floor((Date.parse(data.expires_at) - Date.now()) / (24 * 60 * 60 * 1000))
+    : null
+  const expiryWarning = daysToExpiry !== null && daysToExpiry < 90
+
+  const formatDate = (iso: string | null) =>
+    iso ? new Date(iso).toLocaleDateString('zh-CN', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
+
+  const formatNum = (n: number | null) =>
+    n !== null ? n.toLocaleString() : '—'
+
+  return (
+    <CardShell title="域名健康">
+      <div className="flex flex-col gap-2">
+        {data.domain_age_years !== null && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 w-20 shrink-0">域名年龄</span>
+            <span className="text-sm font-semibold text-gray-700">{data.domain_age_years} 年</span>
+          </div>
+        )}
+
+        {data.expires_at && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 w-20 shrink-0">到期日期</span>
+            <span className={`text-sm font-semibold ${expiryWarning ? 'text-red-600' : 'text-gray-700'}`}>
+              {formatDate(data.expires_at)}
+              {expiryWarning && (
+                <span className="ml-1 text-xs font-medium text-red-600">⚠️ 即将到期</span>
+              )}
+            </span>
+          </div>
+        )}
+
+        {data.registrar && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 w-20 shrink-0">注册商</span>
+            <span className="text-xs text-gray-600 truncate max-w-[180px]" title={data.registrar}>
+              {data.registrar}
+            </span>
+          </div>
+        )}
+
+        <div className="mt-1 pt-2 border-t border-gray-100 grid grid-cols-2 gap-2">
+          <div>
+            <p className="text-base font-bold text-gray-700">{formatNum(data.referring_domains)}</p>
+            <p className="text-xs text-gray-400">外链域名数</p>
+          </div>
+          <div>
+            <p className="text-base font-bold text-gray-700">{formatNum(data.backlinks)}</p>
+            <p className="text-xs text-gray-400">反链总数</p>
+          </div>
+          <div>
+            <p className="text-base font-bold text-gray-700">{formatNum(data.organic_etv)}</p>
+            <p className="text-xs text-gray-400">月流量估算</p>
+          </div>
+          <div>
+            <p className="text-base font-bold text-gray-700">{formatNum(data.organic_keywords_top10)}</p>
+            <p className="text-xs text-gray-400">Top10 关键词数</p>
+          </div>
+        </div>
+      </div>
+    </CardShell>
+  )
+}
+
+// ─── OnPageAuditCard ──────────────────────────────────────────────────────────
+
+interface OnPageAuditData {
+  status_code:     number | null
+  title:           string | null
+  description:     string | null
+  canonical:       string | null
+  h1:              string | null
+  internal_links:  number | null
+  external_links:  number | null
+  images_no_alt:   number | null
+  images_total:    number | null
+  word_count:      number | null
+  core_web_vitals: {
+    lcp: number | null
+    cls: number | null
+    tbt: number | null
+  } | null
+  checks: {
+    no_title:         boolean
+    no_description:   boolean
+    no_h1:            boolean
+    missing_alt_text: boolean
+    broken_links:     boolean
+    redirect_chain:   boolean
+    https:            boolean
+  }
+}
+
+export function OnPageAuditCard({ data }: { data: OnPageAuditData }) {
+  const issues = [
+    data.checks.no_title        && '缺少 <title>',
+    data.checks.no_description  && '缺少 meta description',
+    data.checks.no_h1           && '缺少 H1',
+    data.checks.missing_alt_text && `${data.images_no_alt ?? '?'} 张图片缺 alt`,
+    data.checks.redirect_chain  && '存在重定向链',
+    !data.checks.https          && '未启用 HTTPS',
+    data.checks.broken_links    && '有断链',
+  ].filter(Boolean) as string[]
+
+  const formatMs = (ms: number | null) => (ms !== null ? `${ms.toFixed(0)} ms` : '—')
+  const formatNum = (n: number | null) => (n !== null ? n.toLocaleString() : '—')
+
+  return (
+    <CardShell title="页面 SEO 审计">
+      <div className="flex flex-col gap-3">
+
+        {/* Pass/fail badges */}
+        <div className="flex flex-wrap gap-1.5">
+          {[
+            { label: 'HTTPS',       ok: data.checks.https },
+            { label: 'Title',       ok: !data.checks.no_title },
+            { label: 'Description', ok: !data.checks.no_description },
+            { label: 'H1',          ok: !data.checks.no_h1 },
+            { label: 'Alt Text',    ok: !data.checks.missing_alt_text },
+          ].map(({ label, ok }) => (
+            <span
+              key={label}
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                ok
+                  ? 'bg-green-50 text-green-700 border border-green-200'
+                  : 'bg-red-50 text-red-700 border border-red-200'
+              }`}
+            >
+              {ok ? '✓' : '✗'} {label}
+            </span>
+          ))}
+        </div>
+
+        {/* Issues list */}
+        {issues.length > 0 && (
+          <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+            <p className="text-xs font-semibold text-amber-700 mb-1">需修复 ({issues.length})</p>
+            <ul className="space-y-0.5">
+              {issues.map(issue => (
+                <li key={issue} className="text-xs text-amber-800">• {issue}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Core Web Vitals */}
+        {data.core_web_vitals && (
+          <div>
+            <p className="text-xs text-gray-400 mb-1.5">Core Web Vitals</p>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { label: 'LCP', value: formatMs(data.core_web_vitals.lcp), warn: (data.core_web_vitals.lcp ?? 0) > 2500 },
+                { label: 'TBT', value: formatMs(data.core_web_vitals.tbt), warn: (data.core_web_vitals.tbt ?? 0) > 200 },
+                { label: 'CLS', value: data.core_web_vitals.cls !== null ? data.core_web_vitals.cls.toFixed(3) : '—', warn: (data.core_web_vitals.cls ?? 0) > 0.1 },
+              ].map(({ label, value, warn }) => (
+                <div key={label} className="text-center">
+                  <p className={`text-sm font-bold ${warn ? 'text-amber-600' : 'text-gray-700'}`}>{value}</p>
+                  <p className="text-xs text-gray-400">{label}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Counts */}
+        <div className="pt-2 border-t border-gray-100 grid grid-cols-2 gap-2 text-sm">
+          <div>
+            <p className="font-bold text-gray-700">{formatNum(data.internal_links)}</p>
+            <p className="text-xs text-gray-400">内部链接</p>
+          </div>
+          <div>
+            <p className="font-bold text-gray-700">{formatNum(data.external_links)}</p>
+            <p className="text-xs text-gray-400">外部链接</p>
+          </div>
+          <div>
+            <p className="font-bold text-gray-700">{formatNum(data.word_count)}</p>
+            <p className="text-xs text-gray-400">字数</p>
+          </div>
+          <div>
+            <p className="font-bold text-gray-700">{formatNum(data.images_total)}</p>
+            <p className="text-xs text-gray-400">图片总数</p>
+          </div>
+        </div>
+
+        {/* Title / H1 preview */}
+        {(data.title || data.h1) && (
+          <div className="pt-1 border-t border-gray-100 space-y-1">
+            {data.title && (
+              <p className="text-xs">
+                <span className="text-gray-400">Title: </span>
+                <span className="text-gray-700 truncate">{data.title}</span>
+              </p>
+            )}
+            {data.h1 && (
+              <p className="text-xs">
+                <span className="text-gray-400">H1: </span>
+                <span className="text-gray-700 truncate">{data.h1}</span>
+              </p>
+            )}
+          </div>
+        )}
+      </div>
     </CardShell>
   )
 }

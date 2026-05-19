@@ -1,10 +1,12 @@
 /**
  * Local review aggregation connector — client.
  *
- * Reference: ROADMAP.md P8.12.S1.2
+ * Reference: ROADMAP.md P8.12.S1.2 / P8.13.C.2
  *
- *  - Google Business Profile reviews  → SerpAPI google_maps engine (env SERPAPI_API_KEY)
- *  - ProductReview.com.au reviews      → Jina Reader (no key — see src/lib/brief/jina.ts)
+ *  - Google Business Profile reviews  → DataForSEO Business Data API (primary)
+ *                                        SerpAPI google_maps (fallback if DataForSEO unavailable)
+ *  - ProductReview.com.au reviews      → Jina Reader (no key)
+ *  - Tripadvisor reviews               → DataForSEO Business Data API (tourism clients)
  *
  * Design mirrors src/lib/semrush/client.ts:
  *  - API credentials retrieved at call time (clear error if missing).
@@ -13,128 +15,55 @@
  *    source is settled independently so one failure never blocks the other.
  */
 
-import { validateEnvVar } from '@/lib/validation-utils'
 import { fetchUrlAsMarkdown } from '@/lib/brief/jina'
-import type {
-  LocalReviewSnapshot,
-  ReviewSample,
-  SerpApiMapsRaw,
-} from './types'
+import { getGmbInfo, getGoogleReviews, getTripadvisorInfo } from '@/lib/dataforseo/business-data'
+import type { LocalReviewSnapshot, ReviewSample } from './types'
 
-const SERPAPI_BASE = 'https://serpapi.com/search.json'
 const NEGATIVE_RATING_CEILING = 2          // reviews at or below this are "negative"
 const MAX_NEGATIVE_SAMPLES = 5
-const SERPAPI_FETCH_TIMEOUT_MS = 30_000
 
-function getSerpApiKey(): string {
-  return validateEnvVar('SERPAPI_API_KEY')
-}
-
-// ─── Google Business Profile (SerpAPI) ───────────────────────────────────────
-
-/** Build a stable Google Maps URL from a place_id. */
-function mapsUrlFromPlaceId(placeId: string): string {
-  return `https://www.google.com/maps/place/?q=place_id:${encodeURIComponent(placeId)}`
-}
+// ─── Google Business Profile (DataForSEO Business Data) ──────────────────────
 
 /**
- * Extract a brand token from a SerpAPI-style query like "Apapaya Wantirna South VIC".
- * Assumption: the brand name is the first whitespace-separated token (geo terms trail).
- */
-function brandTokenFromQuery(query: string): string {
-  return (query.trim().split(/\s+/)[0] || '').toLowerCase()
-}
-
-/**
- * Does the SerpAPI-returned place title actually correspond to the brand we asked for?
- * SerpAPI google_maps falls back to fuzzy matching — without this check we surface
- * a same-city different-business place as if it were the target brand. Brand tokens
- * shorter than 3 chars are not reliable enough to filter on (would cause false
- * negatives), so we let them through.
+ * Fetch Google Business Profile reputation + negative review samples via
+ * DataForSEO Business Data API (primary source, replaced SerpAPI P8.13.C.2).
  *
- * Real regression: query="Apapaya Wantirna South VIC" → SerpAPI returned a nearby
- * unrelated business → we surfaced it as Apapaya's GBP with a Google Maps link to
- * the wrong place.
- */
-function titleMatchesBrand(title: string | undefined, brand: string): boolean {
-  if (!title) return false
-  if (brand.length < 3) return true
-  return title.toLowerCase().includes(brand)
-}
-
-/**
- * Fetch Google Business Profile reputation for a business query
- * (e.g. "Oztop Building Supplies Slacks Creek QLD").
- *
- * Throws on transport/HTTP/SerpAPI errors; returns null when no place
- * matches the query.
+ * Throws on transport/HTTP errors; returns null when no place matches.
  */
 export async function fetchGbpReviews(
   query: string,
 ): Promise<LocalReviewSnapshot | null> {
-  const params = new URLSearchParams({
-    engine: 'google_maps',
-    type: 'search',
-    q: query,
-    api_key: getSerpApiKey(),
-  })
+  const info = await getGmbInfo(query)
+  if (!info) return null
 
-  const res = await fetch(`${SERPAPI_BASE}?${params}`, {
-    signal: AbortSignal.timeout(SERPAPI_FETCH_TIMEOUT_MS),
-  })
-  if (!res.ok) throw new Error(`SerpAPI error: ${res.status}`)
-
-  const data = (await res.json()) as SerpApiMapsRaw
-  if (data.error) throw new Error(`SerpAPI error: ${data.error}`)
-
-  // A specific business query yields `place_results`; an ambiguous one
-  // yields `local_results` (no review samples available there).
-  // ⚠️ SerpAPI's "match" is fuzzy — verify the returned title actually contains
-  // the brand token from the query before trusting it (see titleMatchesBrand).
-  const brand = brandTokenFromQuery(query)
-
-  const place = data.place_results
-  if (place?.place_id && titleMatchesBrand(place.title, brand)) {
-    const samples = (place.user_reviews?.most_relevant ?? [])
-      .filter(r => typeof r.rating === 'number' && r.rating <= NEGATIVE_RATING_CEILING)
-      .slice(0, MAX_NEGATIVE_SAMPLES)
-      .map(
-        (r): ReviewSample => ({
-          rating: r.rating as number,
-          text: r.description?.trim() || '',
-          date: r.date || null,
-          author: r.username || null,
-        }),
-      )
-    return {
-      source: 'google',
-      url: mapsUrlFromPlaceId(place.place_id),
-      rating: typeof place.rating === 'number' ? place.rating : null,
-      review_count: typeof place.reviews === 'number' ? place.reviews : null,
-      rating_distribution: null,    // SerpAPI google_maps does not expose this
-      recent_negative_samples: samples,
-      response_rate: null,
+  // Fetch individual reviews to surface negative samples
+  let negativeSamples: ReviewSample[] = []
+  try {
+    const reviews = await getGoogleReviews(query, 20)
+    if (reviews) {
+      negativeSamples = reviews
+        .filter(r => r.rating <= NEGATIVE_RATING_CEILING)
+        .slice(0, MAX_NEGATIVE_SAMPLES)
+        .map(r => ({
+          rating: r.rating,
+          text:   r.text,
+          date:   r.date,
+          author: r.author,
+        }))
     }
+  } catch {
+    // Non-fatal: negative samples are enrichment, not required
   }
 
-  // Scan all local_results for a brand-matching entry — the real match may
-  // not be the first row (Codex review P2 on PR #24).
-  const matched = data.local_results?.find(
-    r => r.place_id && titleMatchesBrand(r.title, brand),
-  )
-  if (matched?.place_id) {
-    return {
-      source: 'google',
-      url: mapsUrlFromPlaceId(matched.place_id),
-      rating: typeof matched.rating === 'number' ? matched.rating : null,
-      review_count: typeof matched.reviews === 'number' ? matched.reviews : null,
-      rating_distribution: null,
-      recent_negative_samples: [],
-      response_rate: null,
-    }
+  return {
+    source:                   'google',
+    url:                      info.maps_url ?? null,
+    rating:                   info.rating,
+    review_count:             info.review_count,
+    rating_distribution:      null,
+    recent_negative_samples:  negativeSamples,
+    response_rate:            null,
   }
-
-  return null
 }
 
 // ─── ProductReview.com.au (Jina Reader) ──────────────────────────────────────
@@ -195,6 +124,33 @@ export async function fetchProductReviewReviews(
   }
 }
 
+// ─── Tripadvisor (DataForSEO Business Data) ───────────────────────────────────
+
+/**
+ * Fetch a Tripadvisor listing for a keyword via DataForSEO Business Data API.
+ * Returns null (never throws) — intended for tourism clients like CTS Tours.
+ */
+export async function fetchTripadvisorReviews(
+  keyword: string,
+): Promise<LocalReviewSnapshot | null> {
+  try {
+    const info = await getTripadvisorInfo(keyword)
+    if (!info || !info.url) return null
+    return {
+      source:                  'tripadvisor',
+      url:                     info.url,
+      rating:                  info.rating,
+      review_count:            info.review_count,
+      rating_distribution:     null,
+      recent_negative_samples: [],
+      response_rate:           null,
+    }
+  } catch (err) {
+    console.error('[local-reviews] Tripadvisor fetch failed', err)
+    return null
+  }
+}
+
 // ─── High-level wrapper (non-fatal — used by the Zhangqian agent) ────────────
 
 export interface AggregateLocalReviewsOptions {
@@ -202,26 +158,41 @@ export interface AggregateLocalReviewsOptions {
   businessQuery: string
   /** Optional ProductReview.com.au listing URL (the agent finds it first). */
   productReviewUrl?: string
+  /**
+   * Optional Tripadvisor keyword for tourism-sector clients (e.g. CTS Tours).
+   * When provided, fetches the first Tripadvisor match for this keyword.
+   */
+  tripadvisorKeyword?: string
 }
 
 /**
  * Aggregate reputation snapshots from every available local source.
  *
  * Non-fatal by contract: each source is settled independently, so a
- * missing SERPAPI_API_KEY or a blocked ProductReview page yields a
- * partial result rather than blocking discovery. Returns only the
- * snapshots that resolved successfully (may be empty).
+ * missing API key or a blocked page yields a partial result rather than
+ * blocking discovery. Returns only the snapshots that resolved successfully
+ * (may be empty).
+ *
+ * Sources:
+ *   1. Google Business Profile (DataForSEO Business Data — primary)
+ *   2. ProductReview.com.au (Jina Reader — AU's dominant review platform)
+ *   3. Tripadvisor (DataForSEO Business Data — tourism clients only)
  */
 export async function aggregateLocalReviews(
   opts: AggregateLocalReviewsOptions,
 ): Promise<LocalReviewSnapshot[]> {
   const tasks: Array<Promise<LocalReviewSnapshot | null>> = [
-    // Promise.resolve().then(...) so a synchronous throw (missing API key)
-    // is captured by allSettled rather than escaping before the await.
+    // Promise.resolve().then(...) so a synchronous throw is captured by
+    // allSettled rather than escaping before the await.
     Promise.resolve().then(() => fetchGbpReviews(opts.businessQuery)),
   ]
+
   if (opts.productReviewUrl) {
     tasks.push(fetchProductReviewReviews(opts.productReviewUrl))
+  }
+
+  if (opts.tripadvisorKeyword) {
+    tasks.push(fetchTripadvisorReviews(opts.tripadvisorKeyword))
   }
 
   const settled = await Promise.allSettled(tasks)

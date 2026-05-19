@@ -11,7 +11,7 @@ function getOpenAIClient() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { client_id, topic, platforms, campaign_id, execution_item_id } = await req.json()
+    const { client_id, topic, platforms, campaign_id, execution_item_id, production_package_id } = await req.json()
 
     if (!client_id || !topic) {
       return NextResponse.json(
@@ -129,10 +129,44 @@ The script should be 100-200 words. Caption should be 50-100 words. Include 8-12
       throw new Error('Content generated but failed to save — check Render logs for DB error')
     }
 
+    // 4. If a production package was specified, create production_items and back-link
+    let productionItemIds: string[] = []
+    if (production_package_id && savedPosts?.length) {
+      const { data: items, error: itemsError } = await supabaseAdmin
+        .from('production_items')
+        .insert(
+          savedPosts.map((post, idx) => ({
+            package_id: production_package_id,
+            client_id,
+            content_type: 'content_post',
+            content_post_id: post.id,
+            sort_order: idx,
+            status: 'ready',
+          }))
+        )
+        .select()
+
+      if (itemsError) {
+        console.error('[route-c] production_items insert error:', JSON.stringify(itemsError))
+      } else if (items?.length) {
+        productionItemIds = items.map(i => i.id)
+        // Update back-references (best-effort, non-blocking)
+        await Promise.all(
+          items.map((item, idx) =>
+            supabaseAdmin
+              .from('content_posts')
+              .update({ production_item_id: item.id })
+              .eq('id', savedPosts[idx].id)
+          )
+        ).catch(err => console.error('[route-c] production_item_id back-ref update error:', err))
+      }
+    }
+
     return NextResponse.json({
       success: true,
       variants: savedPosts ?? [v1, v2],
       posts: savedPosts,
+      ...(productionItemIds.length ? { production_item_ids: productionItemIds } : {}),
     })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'

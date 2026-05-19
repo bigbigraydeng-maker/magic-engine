@@ -10,7 +10,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { submitImageGeneration } from '@/lib/visual/wavespeed'
+import { submitImageGeneration } from '@/lib/visual/atlas'
 
 export async function POST(
   req: NextRequest,

@@ -20,6 +20,7 @@ import type {
   DiscoveryReport,
   DiscoveryJob,
   ClientDiscoveryRow,
+  AdvancedDiscoveryPayload,
 } from './types'
 import { applyReputationGuardrail } from './score-guardrails'
 
@@ -29,6 +30,7 @@ export async function createDiscoveryJob(
   supabase: SupabaseClient,
   clientId: string,
   domain: string,
+  jobType: 'basic' | 'advanced' = 'basic',
 ): Promise<string> {
   const { data, error } = await supabase
     .from('client_discovery_jobs')
@@ -36,6 +38,7 @@ export async function createDiscoveryJob(
       client_id: clientId,
       domain,
       status: 'pending',
+      job_type: jobType,
     })
     .select('id')
     .single()
@@ -165,6 +168,37 @@ export async function getLatestDiscovery(
     throw new Error(`Failed to read discovery: ${error.message}`)
   }
   return (data as ClientDiscoveryRow | null) ?? null
+}
+
+// ─── mergeAdvancedPayload ─────────────────────────────────────────────────────
+
+/**
+ * Merge advanced discovery results into client_discovery.payload.advanced
+ * WITHOUT overwriting the basic DiscoveryReport fields.
+ *
+ * Reads the current row, injects the `advanced` subfield, and writes back.
+ * Throws if no basic discovery exists for the client (advanced must come after basic).
+ */
+export async function mergeAdvancedPayload(
+  supabase: SupabaseClient,
+  clientId: string,
+  advanced: AdvancedDiscoveryPayload,
+): Promise<void> {
+  const existing = await getLatestDiscovery(supabase, clientId)
+  if (!existing) {
+    throw new Error(`No basic discovery found for client ${clientId} — cannot merge advanced payload`)
+  }
+
+  const updatedPayload: DiscoveryReport = { ...existing.payload, advanced }
+
+  const { error } = await supabase
+    .from('client_discovery')
+    .update({ payload: updatedPayload })
+    .eq('client_id', clientId)
+
+  if (error) {
+    throw new Error(`Failed to merge advanced payload: ${error.message}`)
+  }
 }
 
 // ─── getJob ──────────────────────────────────────────────────────────────────

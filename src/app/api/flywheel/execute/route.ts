@@ -38,14 +38,15 @@ export async function POST(req: NextRequest) {
   try {
     const adapter = getAdapter(flywheel)
     const result = await adapter.execute({
-      clientId:        body.clientId,
-      executionItemId: body.executionItemId,
-      actionType:      body.actionType,
-      executionMode:   body.executionMode,
-      vendor:          body.vendor,
-      payload:         body.payload,
-      expectedMetric:  body.expectedMetric,
-      expectedDelta:   body.expectedDelta,
+      clientId:             body.clientId,
+      executionItemId:      body.executionItemId,
+      actionType:           body.actionType,
+      executionMode:        body.executionMode,
+      vendor:               body.vendor,
+      payload:              body.payload,
+      expectedMetric:       body.expectedMetric,
+      expectedDelta:        body.expectedDelta,
+      productionPackageId:  body.productionPackageId,
     })
     return NextResponse.json(result, { status: 201 })
   } catch (err) {

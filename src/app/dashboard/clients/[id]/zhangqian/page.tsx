@@ -21,6 +21,12 @@ import {
   ActionPlanCard,
   DiagnosisCard,
   NotesCard,
+  GscDataCard,
+  GoogleAdsCard,
+  AdvancedFacebookCard,
+  TechStackCard,
+  DomainWhoisCard,
+  OnPageAuditCard,
 } from './cards'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -214,9 +220,83 @@ function DiscoveryReviewCards({
         <SocialCard socials={p.social_profiles} clientId={clientId} />
         <GbpCard gbp={p.gbp} clientId={clientId} />
         <ReviewPlatformsCard platforms={p.review_platforms} clientId={clientId} />
-        <MetaAdsCard ads={p.meta_ads} clientId={clientId} />
+        {/* Advanced meta_ads takes priority over basic (basic is null since S0.21) */}
+        <MetaAdsCard ads={p.advanced?.meta_ads ?? p.meta_ads} clientId={clientId} />
         <SerpResultsCard results={p.serp_results} clientId={clientId} />
+
+        {/* Advanced Discovery cards — rendered only when connector data is present */}
+        {p.advanced?.gsc_data && (
+          <GscDataCard gscData={p.advanced.gsc_data} />
+        )}
+        {p.advanced?.google_ads_data && (
+          <GoogleAdsCard adsData={p.advanced.google_ads_data} />
+        )}
+        {p.advanced?.facebook_profiles && p.advanced.facebook_profiles.length > 0 && (
+          <AdvancedFacebookCard profiles={p.advanced.facebook_profiles} />
+        )}
+
+        {/* P8.13.B — Technology stack + Domain WHOIS */}
+        {p.technology_stack && (
+          <TechStackCard data={p.technology_stack} />
+        )}
+        {p.domain_whois && (
+          <DomainWhoisCard data={p.domain_whois} />
+        )}
+
+        {/* P8.13.D — On-page SEO audit */}
+        {p.onpage_audit && (
+          <OnPageAuditCard data={p.onpage_audit} />
+        )}
       </div>
+
+      {/* Advanced Discovery banner — success state when advanced ran, CTA when not */}
+      {p.advanced ? (
+        <div className="rounded-lg border border-green-200 bg-green-50 p-4">
+          <div className="flex items-start gap-3">
+            <div className="text-2xl">✅</div>
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold text-green-900">
+                Advanced Discovery 已完成
+              </h3>
+              <p className="mt-1 text-xs leading-relaxed text-green-800">
+                触发来源：<strong>{p.advanced.meta.triggered_by}</strong>，
+                运行于 {new Date(p.advanced.meta.ran_at).toLocaleString('zh-CN', { timeZone: 'Pacific/Auckland' })}。
+                上方卡片已注入真实数据（GSC 查询词、Meta 广告、Facebook 受众等）。
+              </p>
+              <div className="mt-3">
+                <Link
+                  href={`/dashboard/clients/${clientId}/connectors`}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-green-300 bg-white px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-50 transition-colors"
+                >
+                  接入更多数据源 →
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4">
+          <div className="flex items-start gap-3">
+            <div className="text-2xl">🔌</div>
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold text-indigo-900">
+                想要更深度的分析？接通数据源解锁 Advanced Report
+              </h3>
+              <p className="mt-1 text-xs leading-relaxed text-indigo-800">
+                本次为 <strong>基础发现</strong>（约 70-80% 的品牌健康画像，5 分钟内完成）。授权 Google Search Console / Facebook / Google Business Profile 等数据源后，可获取真实流量趋势、Meta 广告投放、Facebook 受众画像等深度信号。
+              </p>
+              <div className="mt-3">
+                <Link
+                  href={`/dashboard/clients/${clientId}/connectors`}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition-colors"
+                >
+                  接通数据源 →
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Action plan — full width */}
       {p.diagnosis?.actions && (

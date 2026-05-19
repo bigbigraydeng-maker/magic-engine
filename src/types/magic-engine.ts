@@ -9,7 +9,7 @@ export type KeywordStatus = 'new' | 'reviewed' | 'approved' | 'rejected' | 'page
 export type PageType = 'hub' | 'guide' | 'landing' | 'faq'
 export type ContentRoute = 'route_a' | 'route_b' | 'route_c'
 export type ContentStatus = 'draft' | 'approved' | 'scheduled' | 'published' | 'rejected'
-export type VisualProvider = 'wavespeed' | 'seedance' | 'heygen'
+export type VisualProvider = 'wavespeed' | 'atlas' | 'openai' | 'seedance' | 'heygen'
 export type VisualType = 'image' | 'video' | 'avatar_video'
 export type CampaignStatus = 'active' | 'archived'
 export type ContentMode = 'brand' | 'campaign'
@@ -269,6 +269,7 @@ export interface CompetitorKeywordsRequest {
   limit?: number
   min_volume?: number
   db?: string
+  production_package_id?: string
 }
 
 export interface KeywordGapRequest {
@@ -501,6 +502,7 @@ export interface GenerateBlogRequest {
   keyword_intent?: string      // Search intent classification
   word_count_target?: number   // default 1000
   skip_audit?: boolean         // bypass content audit (e.g. user confirmed override)
+  production_package_id?: string  // if set, link generated post to this package
 }
 
 /** Result from content-auditor — returned alongside generated post */

@@ -12,6 +12,7 @@ import {
   generateReelsContent,
   formatMasterBriefForPrompt,
 } from '@/lib/reels/generator'
+import { formatCampaignForPrompt } from '@/lib/content/campaign-injector'
 
 export async function POST(
   req: NextRequest,
@@ -58,27 +59,22 @@ export async function POST(
     if (draft.campaign_brief_id) {
       const { data: campaign } = await supabaseAdmin
         .from('campaign_briefs')
-        .select('name, objective, target_audience, key_messages, campaign_period')
+        .select('title, description, parsed_content, semrush_keywords, valid_from, valid_until')
         .eq('id', draft.campaign_brief_id)
         .eq('client_id', clientId)
         .maybeSingle()
 
       if (campaign) {
-        const parts: string[] = []
-        if (campaign.name)            parts.push(`Campaign: ${campaign.name}`)
-        if (campaign.objective)       parts.push(`Objective: ${campaign.objective}`)
-        if (campaign.target_audience) parts.push(`Target Audience: ${campaign.target_audience}`)
-        if (campaign.key_messages)    parts.push(`Key Messages: ${campaign.key_messages}`)
-        if (campaign.campaign_period) parts.push(`Period: ${campaign.campaign_period}`)
-        campaignContext = parts.join('\n')
+        campaignContext = formatCampaignForPrompt(campaign)
       }
     }
 
     // 4. Generate new content
-    const content = await generateReelsContent(
-      formatMasterBriefForPrompt(brief),
-      campaignContext
-    )
+    const content = await generateReelsContent({
+      masterBriefText: formatMasterBriefForPrompt(brief as unknown as Record<string, unknown>),
+      campaignContext,
+      brandName: brief.brand_name ?? 'the brand',
+    })
 
     // 5. Update only the i2v_video_prompt (keep everything else)
     const { data: updated, error: updateErr } = await supabaseAdmin

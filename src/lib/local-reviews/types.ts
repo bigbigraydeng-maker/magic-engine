@@ -1,17 +1,18 @@
 /**
  * Local review aggregation connector — type definitions.
  *
- * Reference: ROADMAP.md P8.12.S1.2
+ * Reference: ROADMAP.md P8.12.S1.2 / P8.13.C.3
  *
- * Aggregates real reputation signals from two AU/NZ-relevant sources:
- *  - Google Business Profile (via SerpAPI google_maps engine)
- *  - ProductReview.com.au (via Jina Reader — AU's dominant review platform)
+ * Aggregates real reputation signals from AU/NZ-relevant sources:
+ *  - Google Business Profile (DataForSEO Business Data — primary; was SerpAPI)
+ *  - ProductReview.com.au (Jina Reader — AU's dominant review platform)
+ *  - Tripadvisor (DataForSEO Business Data — tourism clients / CTS Tours)
  *
  * Purpose: replace LLM-guessed ratings / review counts with verified data,
  * and surface concrete negative-review evidence for the diagnosis.
  */
 
-export type LocalReviewSource = 'google' | 'productreview'
+export type LocalReviewSource = 'google' | 'productreview' | 'tripadvisor'
 
 /** A single sampled review (used for negative-evidence excerpts). */
 export interface ReviewSample {
@@ -38,29 +39,3 @@ export interface LocalReviewSnapshot {
   response_rate: number | null               // 0–1 owner-response rate; null if unknown
 }
 
-// ─── Raw upstream response shapes (partial — only fields we read) ────────────
-
-/** Raw SerpAPI google_maps engine response (partial). */
-export interface SerpApiMapsRaw {
-  error?: string
-  place_results?: {
-    title?: string
-    rating?: number
-    reviews?: number
-    place_id?: string
-    user_reviews?: {
-      most_relevant?: Array<{
-        username?: string
-        rating?: number
-        description?: string
-        date?: string
-      }>
-    }
-  }
-  local_results?: Array<{
-    title?: string
-    rating?: number
-    reviews?: number
-    place_id?: string
-  }>
-}

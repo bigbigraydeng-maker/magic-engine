@@ -215,10 +215,11 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-19（**Phase 12.Q 内容质量闭环已登记**；P8.3.2 仍为前置阻塞）
+> 最后更新：2026-05-24（**Phase 8.13 Sprint A + B + C + D + E 全部完成** ✅；**Phase 12.Q 内容质量闭环已登记**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
+| **P8.10.S0.23 Env** | Render 加 `GOOGLE_SERVICE_ACCOUNT_CREDENTIALS` | 📋 待 PM 操作 |
 | **P8.3.2** | Dashboard Magic Link 鉴权（前置阻塞，Phase 12.Q 开工前必须完成） | ⭐⭐⭐ |
 | **P12.Q.0** | 产物表加 snapshot/score 列 + TS 类型同步（单 migration 含 3 ALTER） | ⭐⭐ |
 | **P12.Q.1** | Campaign 上下文修复（路线 A 扩 schema + injector + Reels query） | ⭐⭐ |
@@ -230,12 +231,13 @@ git push origin master   # 触发 Render 部署
 | **P12.Q.6** | snapshot/score 写入验证 + 缺漏补齐 | ⭐⭐ |
 | **P12.Q.7** | CTS Tours 端到端 demo + before/after 报告 | ⭐⭐ |
 
-**状态校准（2026-05-19）**：Phase 12.A 已完成；Phase 12.B.1–B.4 已完成（SEO / Meta Ads / Social adapter + SEMrush 周快照 cron）；**Phase 12.Q 已登记未开工**（详见 [ROADMAP § Phase 12.Q](./ROADMAP.md)）。下一 session 第一句话：
+**状态校准（2026-05-24）**：Phase 8.13 全部完成：11 个 DataForSEO 工具接入张骞；Phase 12.Q **已登记未开工**（详见 [ROADMAP § Phase 12.Q](./ROADMAP.md)）；P8.3.2 为 Phase 12.Q 前置阻塞。下一 session 第一句话：
 
+- 如果 P8.10.S0.23 未操作 → 先到 Render Dashboard 加环境变量
 - 如果 P8.3.2 还没完成 → `继续 P8.3.2 Dashboard Magic Link 鉴权`
 - 如果 P8.3.2 已完成 → `继续 Phase 12.Q 第 0 任务 P12.Q.0`
 
-**Phase 8.12 Sprint 3 全部完成（S3.1–S3.5）**，P8.12.S1.6b（小红书 scraper）为下一可选扩展项。
+**Phase 8.13 会话已完成，可以关闭。**
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox

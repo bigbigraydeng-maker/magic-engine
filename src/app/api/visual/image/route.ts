@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { submitImageGeneration } from '@/lib/visual/wavespeed'
+import { generateImage } from '@/lib/visual/openai-images'
+import { uploadFromBase64 } from '@/lib/visual/storage'
 
 export async function POST(req: NextRequest) {
   try {
-    const { post_id, client_id, variant = 1, prompt_override, aspect_ratio = '1:1' } = await req.json()
+    const { post_id, client_id, variant = 1, prompt_override, aspect_ratio = '1:1', production_package_id } = await req.json()
 
     if (!post_id || !client_id) {
       return NextResponse.json(
@@ -30,28 +31,32 @@ export async function POST(req: NextRequest) {
       ? `${post.visual_brief}. Additional requirements: ${post.revision_notes}`
       : post?.visual_brief) || ''
 
-    // 宽高映射
-    const dimensionMap: Record<string, { width: number; height: number }> = {
-      '1:1':  { width: 1024, height: 1024 },
-      '4:5':  { width: 1024, height: 1280 },
-      '16:9': { width: 1792, height: 1024 },
-      '9:16': { width: 1024, height: 1792 },
-    }
-    const { width, height } = dimensionMap[aspect_ratio] ?? { width: 1024, height: 1024 }
+    // Generate image synchronously via OpenAI gpt-image-1 (~10-30s)
+    const { b64 } = await generateImage({ prompt: basePrompt, aspect_ratio })
 
-    const { job_id } = await submitImageGeneration({ prompt: basePrompt, width, height })
+    // Upload base64 PNG directly to Supabase storage
+    const { storage_url, file_size_kb } = await uploadFromBase64({
+      base64: b64,
+      clientId: client_id,
+      postId: post_id,
+      assetType: 'image',
+      variant,
+    })
 
+    // Insert as ready immediately — no polling needed
     const { data: asset, error } = await supabaseAdmin
       .from('visual_assets')
       .insert({
         post_id,
         client_id,
         asset_type: 'image',
-        provider: 'wavespeed',
+        provider: 'openai',
         prompt_used: basePrompt,
         variant,
-        generation_status: 'generating',
-        provider_job_id: job_id,
+        generation_status: 'ready',
+        storage_url,
+        file_size_kb,
+        cost_usd: 0.04,
       })
       .select()
       .single()
@@ -65,15 +70,49 @@ export async function POST(req: NextRequest) {
         .eq('id', post_id)
     }
 
+    // Link to production package if provided (non-blocking)
+    if (production_package_id && asset) {
+      supabaseAdmin
+        .from('production_items')
+        .insert({
+          package_id: production_package_id,
+          client_id,
+          content_type: 'visual_asset',
+          visual_asset_id: asset.id,
+          sort_order: 0,
+          status: 'ready',
+        })
+        .select('id')
+        .single()
+        .then(({ data: item, error: itemErr }) => {
+          if (itemErr) {
+            console.error('[visual/image] production_items insert failed:', itemErr)
+            return
+          }
+          if (item) {
+            supabaseAdmin
+              .from('visual_assets')
+              .update({ production_item_id: item.id })
+              .eq('id', asset.id)
+              .then(({ error: upErr }) => {
+                if (upErr) console.error('[visual/image] production_item_id back-ref failed:', upErr)
+              })
+          }
+        })
+    }
+
     return NextResponse.json({
       success: true,
       asset_id: asset?.id,
-      job_id,
-      message: 'Image generation started. Poll /api/visual/status/:assetId for updates.',
+      storage_url,
+      just_completed: true,
     })
 
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
+    const message =
+      err instanceof Error
+        ? err.message
+        : (err as { message?: string })?.message ?? String(err)
     console.error('[visual/image]', err)
     return NextResponse.json({ success: false, error: message }, { status: 500 })
   }

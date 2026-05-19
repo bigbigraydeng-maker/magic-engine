@@ -172,10 +172,12 @@ async function loadReviewContext(
 
 /**
  * 跑一次项目复盘。
+ * productionPackageId — 可选，链接到 reputation 维度的 production package（P13.D）。
  */
 export async function runProjectReview(
   supabase: SupabaseClient,
   clientId: string,
+  productionPackageId?: string,
 ): Promise<RunProjectReviewResult> {
   const loaded = await loadReviewContext(supabase, clientId)
   if (!loaded) {
@@ -208,15 +210,19 @@ export async function runProjectReview(
   const summary = content.overall_assessment ?? ''
 
   // 持久化（写失败仍返回报告，但记日志）
+  const insertRow: Record<string, unknown> = {
+    client_id: clientId,
+    status:    'completed',
+    summary,
+    content,
+    meta,
+  }
+  if (productionPackageId) {
+    insertRow.production_package_id = productionPackageId
+  }
   const { error } = await supabase
     .from('project_reviews')
-    .insert({
-      client_id:  clientId,
-      status:     'completed',
-      summary,
-      content,
-      meta,
-    })
+    .insert(insertRow)
   if (error) {
     console.error('[review] persist failed:', error)
   }

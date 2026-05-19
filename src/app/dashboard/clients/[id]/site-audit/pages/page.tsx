@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { CrawlButton, type JobStatus } from '../_components/CrawlButton'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -116,6 +117,49 @@ export default function SiteAuditPagesPage() {
   const [stats, setStats] = useState<PageStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [currentJobId, setCurrentJobId] = useState<string | null>(null)
+  const [currentJobStatus, setCurrentJobStatus] = useState<JobStatus | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  // Fetch latest job status on mount
+  useEffect(() => {
+    fetch(`/api/clients/${clientId}/site-audit/status`)
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { job?: { id: string; status: JobStatus } | null } | null) => {
+        if (data?.job) {
+          setCurrentJobId(data.job.id)
+          setCurrentJobStatus(data.job.status)
+        }
+      })
+      .catch(() => {})
+  }, [clientId])
+
+  // Poll job status while active
+  useEffect(() => {
+    if (!currentJobId) return
+    if (currentJobStatus === 'completed' || currentJobStatus === 'failed') return
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/site-audit/status?jobId=${currentJobId}`)
+        if (!res.ok) return
+        const data = await res.json() as { job?: { id: string; status: JobStatus } | null }
+        if (data?.job) setCurrentJobStatus(data.job.status)
+        if (data?.job?.status === 'completed') {
+          // Refresh stats and page table after crawl completes
+          fetch(`/api/clients/${clientId}/site-audit/pages/stats`)
+            .then(r => r.ok ? r.json() : null)
+            .then(s => { if (s) setStats(s) })
+            .catch(() => {})
+          setOffset(0)
+          setRefreshKey(k => k + 1)
+        }
+      } catch { /* ignore */ }
+    }
+
+    const timer = setInterval(poll, 3000)
+    return () => clearInterval(timer)
+  }, [clientId, currentJobId, currentJobStatus])
 
   // Fetch aggregated stats once on mount
   useEffect(() => {
@@ -148,7 +192,7 @@ export default function SiteAuditPagesPage() {
     } finally {
       setLoading(false)
     }
-  }, [clientId, selectedType, offset])
+  }, [clientId, selectedType, offset, refreshKey])
 
   useEffect(() => { fetchPages() }, [fetchPages])
 
@@ -179,9 +223,19 @@ export default function SiteAuditPagesPage() {
             <span className="text-gray-300">|</span>
             <h1 className="text-base font-semibold text-gray-900">页面清单</h1>
           </div>
-          {stats && (
-            <p className="text-xs text-gray-400">共 {stats.total} 条记录</p>
-          )}
+          <div className="flex items-center gap-3">
+            {stats && (
+              <p className="text-xs text-gray-400">共 {stats.total} 条记录</p>
+            )}
+            <CrawlButton
+              clientId={clientId}
+              currentJobStatus={currentJobStatus}
+              onJobStarted={(jobId) => {
+                setCurrentJobId(jobId)
+                setCurrentJobStatus('pending')
+              }}
+            />
+          </div>
         </div>
       </div>
 

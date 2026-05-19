@@ -5,6 +5,13 @@ import { validateEnvVar } from '@/lib/validation-utils'
 
 const SEMRUSH_API_BASE = 'https://api.semrush.com'
 const DEFAULT_DB = process.env.SEMRUSH_DB || 'au'
+// SEMrush queries normally return in 1-3s. Anything past 20s is a hung
+// connection — fail fast so the calling agent doesn't blow its wall-clock budget.
+const SEMRUSH_FETCH_TIMEOUT_MS = 20_000
+
+function semrushFetchInit(extra?: RequestInit): RequestInit {
+  return { ...extra, signal: AbortSignal.timeout(SEMRUSH_FETCH_TIMEOUT_MS) }
+}
 
 /**
  * Retrieve the SEMrush API key at call time (not at module load time).
@@ -39,9 +46,9 @@ export async function batchKeywordOverview(
     display_limit: String(keywords.length),
   })
 
-  const res = await fetch(`${SEMRUSH_API_BASE}/?${params}`, {
-    next: { revalidate: 0 }
-  })
+  const res = await fetch(`${SEMRUSH_API_BASE}/?${params}`, semrushFetchInit({
+    next: { revalidate: 0 },
+  }))
 
   if (!res.ok) throw new Error(`SEMrush API error: ${res.status}`)
 
@@ -65,7 +72,7 @@ export async function getRelatedKeywords(
     display_sort: 'nq_desc',
   })
 
-  const res = await fetch(`${SEMRUSH_API_BASE}/?${params}`)
+  const res = await fetch(`${SEMRUSH_API_BASE}/?${params}`, semrushFetchInit())
   if (!res.ok) throw new Error(`SEMrush API error: ${res.status}`)
   return parseSemrushResponse(await res.text())
 }
@@ -86,7 +93,7 @@ export async function getDomainOrganicKeywords(
     display_sort: 'nq_desc',
   })
 
-  const res = await fetch(`${SEMRUSH_API_BASE}/?${params}`)
+  const res = await fetch(`${SEMRUSH_API_BASE}/?${params}`, semrushFetchInit())
   if (!res.ok) throw new Error(`SEMrush API error: ${res.status}`)
   return parseSemrushResponse(await res.text())
 }
@@ -111,7 +118,7 @@ export async function getKeywordGap(
     display_filter: `+|Ph|Co|${clientDomain}|missing`,
   })
 
-  const res = await fetch(`${SEMRUSH_API_BASE}/?${params}&${domainParams}`)
+  const res = await fetch(`${SEMRUSH_API_BASE}/?${params}&${domainParams}`, semrushFetchInit())
   if (!res.ok) throw new Error(`SEMrush API error: ${res.status}`)
   return parseSemrushResponse(await res.text())
 }
@@ -181,7 +188,7 @@ async function getDomainCompetitors(
     display_sort: 'cr_desc',
   })
 
-  const res = await fetch(`${SEMRUSH_API_BASE}/?${params}`)
+  const res = await fetch(`${SEMRUSH_API_BASE}/?${params}`, semrushFetchInit())
   if (!res.ok) return []
 
   const text = await res.text()
@@ -208,7 +215,7 @@ export async function getQuestionKeywords(
     display_sort: 'nq_desc',
   })
 
-  const res = await fetch(`${SEMRUSH_API_BASE}/?${params}`)
+  const res = await fetch(`${SEMRUSH_API_BASE}/?${params}`, semrushFetchInit())
   if (!res.ok) throw new Error(`SEMrush API error: ${res.status}`)
   return parseSemrushResponse(await res.text())
 }
@@ -232,7 +239,7 @@ export async function getDomainMetrics(
     export_columns: 'Or,Ot,As',
   })
 
-  const res = await fetch(`${SEMRUSH_API_BASE}/?${params}`)
+  const res = await fetch(`${SEMRUSH_API_BASE}/?${params}`, semrushFetchInit())
   if (!res.ok) return { organic_keywords: 0, organic_traffic: 0, authority_score: 0 }
 
   const text = await res.text()
@@ -280,7 +287,7 @@ export async function getDomainTrafficTrend(
   })
 
   try {
-    const res = await fetch(`${SEMRUSH_API_BASE}/?${params}`)
+    const res = await fetch(`${SEMRUSH_API_BASE}/?${params}`, semrushFetchInit())
     if (!res.ok) return []
 
     const text = await res.text()

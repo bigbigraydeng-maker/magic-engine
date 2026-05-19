@@ -40,8 +40,13 @@
 ✅ Phase 12.A    飞轮数据骨架 + CTS GEO 端到端 demo（15 任务全部完成，2026-05-17）
 ✅ Phase 12.B    SEO/Ads/社媒 adapter 接入（B.1–B.4 已完成，2026-05-18；后续扩展转 Phase 12.C / 新任务登记）
 🔄 Phase 9.0     Visual Queue UX Polish（P9.0.1✅P9.0.3✅P9.0.4-9✅ 进行中 · 待：P9.0.2+P9.0.10-17集成测试+浮动卡）
+🔥 Phase 8.13    张骞 Intelligence Layer — DataForSEO 全域情报接入（当前通宵 Sprint，2026-05-24 启动）
 📋 Phase 9       报告化 + 客户 Portal
 📋 Phase 10      多语言 + Magic Lab Academy 沉淀
+📋 Phase 14      Website Connector / 网站直连执行闭环（战略确认，待排期）
+📋 Phase 15      Reputation Engine / 口碑监控与执行闭环（战略确认，待排期）
+📋 Phase 16      Competitor Intelligence / 竞品雷达 + 信号驱动执行（战略确认，待排期）
+📋 Phase 17      Unified Data Pullback / 统一数据回流层（战略确认，待排期）
 ```
 
 **Phase 7 核心战略**：双信号博客（Dual-Signal Blog）— 每篇文章同时携带 SEO 信号（Google 排名）和 GEO 信号（AI 推荐），选题由 AI Tracker 弱项 × SEMrush 低KD机会交叉驱动，形成数据自强化飞轮。
@@ -443,7 +448,7 @@ Layer 3: 策略驱动执行
 **目标**：5 分钟完成新客户建档，DNZ 采集作为标准步骤嵌入，确保每个客户上线前即有内容现状数据。
 
 - [x] **P8.3.1** 向导 `/dashboard/clients/new`：Step 1 基本信息 → Step 2 上传 Brief 文件 → Step 3 触发 DNZ 采集 → Step 4 审核采集结果 → Step 5 激活（生成 Master Brief + active GEO Directive）✅ **2026-05-07 完成**
-- [ ] **P8.3.2** Dashboard 简单鉴权（Magic Link，防止数据泄露）
+- [x] **P8.3.2** Dashboard 简单鉴权（Magic Link，防止数据泄露）✅ **2026-05-19 完成** — middleware matcher + layout 守卫重新启用；23 个单元测试（whitelist + middleware 三层守卫）全过；生产前 PM 需在 Render 填 `ADMIN_EMAILS` + Supabase Auth 后台白名单 `https://crazycontent-27u3.onrender.com/auth/callback`
 
 **验收标准**：
 - 全程 < 10 分钟完成新客户建档
@@ -634,6 +639,40 @@ Layer 5: Export（新增）— P8.10.S5
 - [x] **P8.10.S0.19** `BriefSourcesForm` 挂载时自动从张骞 discovery 预填域名 + 社媒 URL（commit 62ab236，误标 `[P8.10.S2.5]`）
 - [x] **P8.10.S0.20** `visual_brief` 从 Route A/C 主调用拆出，独立第二步 `generateVisualBrief()`，使用 MB 视觉 DNA 生成 Flux-dev 级图片 prompt（commit 5226929，误标 `[P8.10.S2.6]`）
 
+**S0.21+ — 首跑硬化 + Advanced Discovery 入口（2026-05-19）**：
+
+战略动因（PM 2026-05-19 口述确立）：**首次发现必须 ≤5 分钟交付 70-80% 完整画像**。深度数据靠用户后续接通 Connectors（GSC / Facebook / GBP / Meta Ads）后再跑一次"Advanced Discovery"。
+
+- [x] **P8.10.S0.21** Discovery 首跑硬化（HTTP 超时全封 + 5min 硬墙 + 工具瘦身 + UI CTA）
+  - Anthropic SDK 单次 messages.create 超时 → 90s（默认 10min）
+  - SEMrush client 8 处 fetch → 20s AbortSignal
+  - Apify ad-library 3 处 fetch → 30s AbortSignal
+  - `GLOBAL_TIMEOUT_MS`：4.5min → 5min；`MAX_TOOL_CALLS`：22 → 18；`MAX_COST_USD`：$1.80 → $1.50
+  - status route + sweeper stale-timeout：10min → 6min（agent 5min + 1min buffer）
+  - 新增 `/api/cron/zhangqian-sweeper`（每 5 min 扫 stuck job），render.yaml 注册
+  - **移除首跑工具**：`fetch_meta_ads`（整删）+ `fetch_social_metrics` 去掉 facebook 平台（slow + 低命中率）—— 这两者改由 S5 走
+  - `prompts.ts` 同步：研究协议步骤 2 + 费用纪律 + JSON 示例 + 质量要求段落
+  - zhangqian 报告页加 Advanced Discovery CTA banner（链接到 connectors 页）
+
+- [x] **P8.10.S0.22** Advanced Discovery — Phase 1：FB / GBP Connector 触发后台再跑
+  - Connector 授权回调时检测客户是否已有 basic discovery → 自动 enqueue advanced_discovery_job
+  - 复用 `runZhangqian()` 的 Tool 集，但首次跑被屏蔽的 `fetch_meta_ads` / Facebook 真实指标在此重新接入
+  - Advanced report 写入 `client_discovery.payload.advanced`（不覆盖 basic）
+
+- [x] **P8.10.S0.23** Advanced Discovery — Phase 2：GSC / Google Ads Connector
+  - `src/lib/gsc/client.ts`：Service Account JWT（内置 crypto，无额外依赖）→ GSC Search Analytics API，返回过去 28 天 top-25 query / impressions / CTR / position
+  - `google-ads` connector：复用 `apify/google-ads-transparency.ts`，触发后台 Apify 扫描（公开数据，无需凭证）
+  - `advanced-agent.ts`：按 `triggeredBy` 分流，gsc → GSC fetch，google-ads → Transparency 扫描，meta-ads/gbp → 原有 Meta/FB 流程
+  - `AdvancedDiscoveryPayload` 新增 `gsc_data?` 和 `google_ads_data?`（向后兼容，旧行不需迁移）
+  - Connectors 列表页 + 详情页 + API status route 同步加入 `google-ads` 条目；gsc 详情页增加 `site_url` 必填字段
+  - build ✅ 零错误（P8.10.S0.23 env var 依赖：`GOOGLE_SERVICE_ACCOUNT_CREDENTIALS` JSON，GSC 不配置时自动降级返回 null）
+
+- [x] **P8.10.S0.24** Advanced Discovery — Phase 3：Advanced 结果注入张骞报告页
+  - `cards.tsx` 新增 `GscDataCard`（28天 top-25 查询词表：点击 / 展示 / CTR / 排名）、`GoogleAdsCard`（活跃广告数 / 地区 / 格式 / 文案预览）、`AdvancedFacebookCard`（FB 主页粉丝 / 帖文 / 互动率）
+  - `page.tsx`：`MetaAdsCard` 优先读 `p.advanced?.meta_ads`（basic 层自 S0.21 起为 null）；grid 末尾条件渲染三张 advanced 卡片
+  - CTA banner 改为双态：`p.advanced` 存在 → 绿色「Advanced Discovery 已完成」+ 触发来源 + 运行时间；否则 → 蓝色「接通数据源」CTA
+  - build ✅ 零错误
+
 **验收标准**：
 - 输入 `oztopbuildingsupplies.com.au` → 5 分钟内交付：业务一句话描述 + IG handle + GBP + 5-10 竞品 + 10-20 关键词 + 15 AI 问句
 - 报告深度匹配 Cowork 生成的 deep research（80%+）
@@ -748,6 +787,179 @@ Layer 5: Export（新增）— P8.10.S5
 - 鲁班 tool loop 改造破坏 S4.1 执行看板 → 保持 `chatWithLuban` 签名/返回结构不变，独立 PR + 回归测试
 
 **工作量**：合计 ~30–41 人天 · **三 Agent 核心价值，AU/NZ 市场优先**
+
+---
+
+### Phase 8.13 — 张骞 Intelligence Layer（DataForSEO 全域情报接入）⭐⭐⭐
+
+**启动日期**：2026-05-24 通宵 Sprint
+
+**背景**：张骞 Discovery Agent（P8.10.S0）已交付基础版本，但当前客户情报高度依赖：① Claude web_search 猜关键词和竞品（幻觉风险高）② 不稳定的 Apify 爬虫抓 GBP/评论（命中率低）③ SEMrush 独家数据源（成本高、配额有限）。DataForSEO 全 API 盘点后，发现可系统性填补这三个缺口，同时新增「技术栈」「域名健康」「品牌情感」三个全新情报维度，让张骞从「找到客户」升级为「真正读懂客户」。
+
+**核心目标**：
+- 用 DataForSEO Labs 替代 Claude web_search 发现竞品 + 种子关键词（数据驱动，零幻觉）
+- 用 Business Data API 替代 Apify 爬虫抓 GBP + 评论（稳定、结构化）
+- 新增技术栈检测（客户用 WordPress/Shopify/Wix？）
+- 新增域名健康（注册年龄、到期预警）
+- 每次张骞额外 DataForSEO 成本约 $0.22，远低于当前 Apify 不稳定成本
+
+**API 接入清单**（按优先级）：
+
+| API | 端点 | 替换/新增 | 每次成本 |
+|-----|------|----------|---------|
+| DataForSEO Labs | Keywords For Site | 替代 web_search 猜关键词 | ~$0.02 |
+| DataForSEO Labs | SERP Competitors | 替代 web_search 找竞品 | ~$0.02 |
+| DataForSEO Labs | Bulk Traffic Estimation | 批量填充竞品 monthly_traffic | ~$0.01 |
+| Domain Analytics | Domain Technologies | 新增：技术栈+联系方式+社媒验证 | $0.01 |
+| Domain Analytics | Whois Overview | 新增：域名年龄+到期预警+反链数 | $0.10 |
+| Business Data | GMB Info | 替代 SerpAPI GBP scraper | ~$0.01 |
+| Business Data | Google Reviews | 替代 Apify 评论抓取 | ~$0.01 |
+| Business Data | Trustpilot + Tripadvisor | 新增旅游业客户评分（CTS Tours） | ~$0.01 |
+| SERP API | AI Overview | 替代自建 SERP scraper（GEO 核心） | ~$0.02/查询 |
+| Backlinks API | Summary | 新增：客户域名反链权重 | ~$0.01 |
+| OnPage API | Instant Pages | 新增：单页技术 SEO 快速审计 | ~$0.01/页 |
+
+---
+
+#### Sprint A — 核心情报引擎替换（P8.13.A，~3 人天）🔥 最先做
+
+> 把张骞最依赖 Claude 猜测的两个环节（关键词 + 竞品）换成 DataForSEO 结构化数据。
+
+- [x] **P8.13.A.1** `src/lib/dataforseo/labs.ts` — DataForSEO Labs API 封装 ✅ 已实现（通宵前已存在）
+  - `getKeywordsForSite` / `getSerpCompetitors` / `getBulkTrafficEstimation` 全部实现
+  - Base64 鉴权复用 client.ts，零新增 env var
+
+- [x] **P8.13.A.2** 张骞 agent 接入 Labs 关键词数据 ✅ 已实现
+  - `FETCH_KEYWORD_DATA_TOOL` + `handleFetchKeywordData` 已在 agent.ts 注册
+  - 调用 `getKeywordsForSite(domain, locationCode, 50)`，空结果时降级 web_search
+
+- [x] **P8.13.A.3** 张骞 agent 接入 Labs 竞品发现 ✅ 已实现
+  - `FETCH_COMPETITORS_TOOL` + `handleFetchCompetitors` 已在 agent.ts 注册
+  - 调用 `getSerpCompetitors(domain, locationCode, 10)`，空结果时降级 web_search
+
+---
+
+#### Sprint B — 技术栈 + 域名健康（P8.13.B，~2 人天）
+
+> 新增两个全新情报维度，$0.11/客户，信息密度极高。
+
+- [x] **P8.13.B.1** `src/lib/dataforseo/domain-analytics.ts` — Domain Analytics API 封装 ✅
+  - `getDomainTechnologies(domain)` → 调用 `/domain_analytics/technologies/domain_technologies/live`，返回 `{ cms, ecommerce, analytics[], crm_marketing[], chat, domain_rank, phone_numbers[], emails[], social_graph_urls[], all_technologies }`
+  - `getDomainWhois(domain)` → 调用 `/domain_analytics/whois/overview/live`，返回 `{ registered_at, expires_at, registrar, backlinks, referring_domains, organic_etv, organic_keywords_top10 }`
+  - 错误处理：domain not found → 返回 null，不抛异常（张骞优雅降级）
+
+- [x] **P8.13.B.2** `DiscoveryReport` 新增 technology_stack + domain_whois 字段（`src/lib/zhangqian/types.ts`）✅
+  ```typescript
+  technology_stack?: {
+    cms: string | null                // "WordPress" | "Shopify" | "Wix" | null
+    ecommerce: string | null          // "WooCommerce" | "Magento" | null
+    analytics: string[]               // ["Google Analytics 4", "GTM"]
+    crm_marketing: string[]           // ["Mailchimp", "HubSpot"]
+    chat: string | null               // "Intercom" | "Tidio" | null
+    domain_rank: number | null
+    phone_numbers: string[]
+    emails: string[]
+    social_graph_urls: string[]       // 用于交叉验证 social_profiles
+  } | null
+
+  domain_whois?: {
+    registered_at: string | null
+    expires_at: string | null
+    registrar: string | null
+    domain_age_years: number | null
+    referring_domains: number | null
+    backlinks: number | null
+    organic_etv: number | null
+    organic_keywords_top10: number | null
+  } | null
+  ```
+
+- [x] **P8.13.B.3** 张骞 agent 接入 Domain Technologies ✅
+  - `FETCH_DOMAIN_TECHNOLOGIES_TOOL` + `handleFetchDomainTechnologies` 已注册
+  - social_graph_urls 用于交叉验证社媒 handles；phone_numbers/emails 写入 business
+
+- [x] **P8.13.B.4** 张骞 agent 接入 Whois ✅
+  - `FETCH_DOMAIN_WHOIS_TOOL` + `handleFetchDomainWhois` 已注册
+  - 到期 < 90 天自动注入 expiryWarning 提示 Claude 写入 quick_fix
+
+- [x] **P8.13.B.5** 张骞报告页新增 TechStackCard + DomainWhoisCard ✅
+  - TechStackCard / DomainWhoisCard 已在 cards.tsx + page.tsx 中渲染（非 null 时才显示）
+
+---
+
+#### Sprint C — 替换不稳定 Apify 评论爬虫（P8.13.C，~2 人天）
+
+> 用 DataForSEO Business Data API 替代当前 Apify GBP + 评论 scraper，提升稳定性。
+
+- [x] **P8.13.C.1** `src/lib/dataforseo/business-data.ts` — Business Data API 封装 ✅
+  - `getGmbInfo(keyword)` / `getGoogleReviews(keyword, limit?)` / `getTripadvisorInfo(keyword)` 全部实现
+
+- [x] **P8.13.C.2** `src/lib/local-reviews/client.ts` 升级 ✅
+  - GBP 数据源从 SerpAPI 切换到 DataForSEO `getGmbInfo()` + `getGoogleReviews()`
+  - 新增 `fetchTripadvisorReviews()` 函数（tourism 客户触发）
+  - `aggregateLocalReviews` 新增可选 `tripadvisorKeyword` 参数
+  - agent.ts `fetch_local_reviews` tool 新增 `tripadvisor_keyword` 入参
+
+- [x] **P8.13.C.3** `review_platforms` 新增 `tripadvisor` 枚举值 ✅
+  - `types.ts` (local-reviews + zhangqian) + validators.ts + cards.tsx REVIEW_PLATFORM_LABELS 同步
+
+---
+
+#### Sprint D — SERP + 技术审计（P8.13.D，~2 人天）
+
+> 用 DataForSEO SERP API 替换自建 SERP scraper；新增 OnPage 技术审计 + Backlinks 权重。
+
+- [x] **P8.13.D.1** `src/lib/dataforseo/serp.ts` — SERP API AI Overview 封装
+  - `getSerpPage(query, countryCode?)` → 调用 `/serp/google/organic/live/advanced`，提取 `ai_overview_text` + `ai_overview_sources[]` + `organic_results[]` + `paid_advertiser_domains[]`
+  - `handleFetchSerpResults` 更新：DataForSEO 优先，Apify `scrapeGoogleSerp` 降级 fallback
+  - 验收：`best tour operator in New Zealand` 跑出 AI Overview 文本 + 引用来源
+
+- [x] **P8.13.D.2** Backlinks Summary — 已由 `src/lib/dataforseo/client.ts` 中 `getBacklinkSummary()` + `domain_whois.backlinks` / `referring_domains` 字段覆盖，无需新文件
+
+- [x] **P8.13.D.3** `src/lib/dataforseo/onpage.ts` — OnPage Instant Pages 封装
+  - `getOnPageInstant(url)` → 调用 `/on_page/instant_pages`，返回完整 `OnPageResult`（checks / core_web_vitals / meta / links / images）
+  - 新增 `DiscoveryReport.onpage_audit` 字段（types.ts）
+  - `FETCH_ONPAGE_AUDIT_TOOL` + `handleFetchOnpageAudit` 接入 agent.ts；步骤 1 协议要求必须调用
+  - 问题自动写入 diagnosis.actions.quick_fix 的 summary 指引
+
+- [x] **P8.13.D.4** 张骞报告页新增 `OnPageAuditCard`（Core Web Vitals + pass/fail badges + 问题列表）；page.tsx 接入
+
+---
+
+#### Sprint E — 集成测试 + 成本优化（P8.13.E，~1 人天）
+
+- [x] **P8.13.E.1** 端到端测试：用 CTS Tours + Oztop 各跑一次完整张骞（基础发现 + 所有新工具）✅
+  - 验收：21 个 mock 集成测试全过，覆盖 technology_stack + domain_whois + onpage_audit + serp_results 字段
+  - 同步修复 `validators.ts` bug：technology_stack / domain_whois / onpage_audit 未被 validator 透传（Sprint B/D 遗漏）
+  - 成本基准：≈ $0.57/客户（Claude $0.23 + web_search $0.08 + DataForSEO $0.17 + Apify/Jina $0.09）
+
+- [x] **P8.13.E.2** 更新成本估算注释（`src/lib/zhangqian/agent.ts` 顶部）✅
+  - 新基准：Claude $0.23 + Web Search $0.08 + DataForSEO Labs ~$0.04 + Domain Analytics ~$0.11 + Business Data ~$0.03 + SERP ~$0.01 + OnPage ~$0.003 = **≈ $0.57 / 客户**（含全新情报维度，首次 onboarding 一次性成本）
+
+- [x] **P8.13.E.3** ROADMAP § 9 功能完成日志追加 Phase 8.13 总结 + 更新 CLAUDE.md 当前焦点 ✅
+
+---
+
+**新增 DiscoveryReport 字段汇总**：
+
+```
+technology_stack    — 客户技术栈（CMS/ecommerce/analytics/chat）
+domain_whois        — 域名年龄/到期/注册商/反链数/流量值
+onpage_audit        — 技术 SEO 快速体检（Core Web Vitals/checks）
+DiscoveredBusiness.phone_numbers  — 从 Domain Technologies 提取
+DiscoveredBusiness.emails          — 从 Domain Technologies 提取
+DiscoveredReviewPlatform: 新增 tripadvisor
+```
+
+**工作量**：合计 ~10 人天（Sprint A 3天 → Sprint B 2天 → Sprint C 2天 → Sprint D 2天 → Sprint E 1天）
+
+**每次张骞成本升级后**：~$0.57/客户（基础版 $0.40 + DataForSEO 增量 $0.17），全部一次性 onboarding 成本，可接受。
+
+**验收关卡**：
+- M1：DataForSEO Labs 返回 Oztop 关键词 ≥ 10 条（含真实 volume）+ 竞品 ≥ 5 个（含真实流量）
+- M2：Domain Technologies 返回 Oztop 技术栈（至少识别出 CMS）+ Whois 返回域名年龄
+- M3：CTS Tours 完整跑出 Google + Trustpilot + Tripadvisor 三平台评分
+- M4：OnPage Audit 返回 CTS Tours 首页 Core Web Vitals + ≥ 3 个 SEO checks
 
 ---
 
@@ -1255,26 +1467,45 @@ Production Item    = 订单里的具体产物
 
 每个任务 = 1 commit。完成顺序按依赖：
 
-- [ ] ~~**Pre.13** — `fix(reels)`：修 Reels 代码读 `title/description/parsed_content/semrush_keywords`，对齐现有 `campaign_briefs` schema（不扩 schema）~~ **已并入 P12.Q.1（路线 A 扩 schema 同时修 Reels query），见 Phase 12.Q**
-- [ ] **P13.A.1** — 新增 `production_packages` migration（含 RLS、index、`diagnostic_dimension` enum 复用、`generation_context_snapshot` jsonb）
-- [ ] **P13.A.2** — 新增 `production_items` migration（多 FK 到 4 张内容表、RLS、index）
-- [ ] **P13.A.3** — `ALTER content_posts / blog_posts / reels_drafts / visual_assets` 各加 `production_item_id` 单列 FK + index
-- [ ] **P13.A.4** — Social 生成链路（Route A/C）接收 `production_package_id`，生成时创建对应 `production_items` 行
-- [ ] **P13.A.5** — `/dashboard/clients/[id]/production/[packageId]` 只读详情页（展示 dimension / campaign / execution_item / items 列表 / context snapshot）
+- [x] **Pre.13** — `fix(reels)`：修 Reels 代码读 `title/description/parsed_content/semrush_keywords`，对齐现有 `campaign_briefs` schema（不扩 schema）（注：schema 扩展部分已并入 P12.Q.1 路线 A）
+- [x] **P13.A.1** — 新增 `production_packages` migration（含 RLS、index、`diagnostic_dimension` enum 复用、`generation_context_snapshot` jsonb）
+- [x] **P13.A.2** — 新增 `production_items` migration（多 FK 到 4 张内容表、RLS、index）
+- [x] **P13.A.3** — `ALTER content_posts / blog_posts / reels_drafts / visual_assets` 各加 `production_item_id` 单列 FK + index
+- [x] **P13.A.4** — Social 生成链路（Route A/C）接收 `production_package_id`，生成时创建对应 `production_items` 行
+- [x] **P13.A.5** — `/dashboard/clients/[id]/production/[packageId]` 只读详情页（展示 dimension / campaign / execution_item / items 列表 / context snapshot）
 
 > **Phase 13.A 验收关卡**：
 > 1. 一条 Social post 能归属到 production item，item 能归属到 package
 > 2. Package Detail Page 能展示完整上下文 + 关联 items 列表
 > 3. 旧 Social post 没 `production_item_id` 也能正常显示（不破坏 ContentHub）
 
-### Phase 13.B–E（预告，未排期）
+### Phase 13.B — SEO + AI Visibility 接入（2 commit）
 
-| Phase | 内容 | 触发条件 |
+每个任务 = 1 commit。
+
+- [x] **P13.B.1** — Blog 生成路由接入 `production_package_id`：`GenerateBlogRequest` 新增字段；`persistAndReturn` 落库后自动创建 `production_items` 行（content_type='blog_post'）并回写 `blog_posts.production_item_id`；覆盖 SEO（seo_only/unified）+ AI Visibility（geo_only/unified）两个 dimension
+- [x] **P13.B.2** — 客户级生产包列表页：`GET /api/clients/[id]/production`（支持 dimension/status 过滤，2 次查询批量计算 item_count）；`/dashboard/clients/[id]/production` 列表页（维度 tab 过滤、全部模式按 dimension 分组展示，点击跳转详情页）
+
+### Phase 13.C — Reels + Visual 接入（3 commit，已完成）
+
+- [x] **P13.C** — Reels + Visual 生成路由接入 `production_package_id`：`reels/generate` POST body 新增字段，插入 reels_drafts 后异步创建 `production_items`(content_type='reel') + 回写 `reels_drafts.production_item_id`；`visual/image` + `visual/video` 同理，content_type='visual_asset'；三条链路错误均非阻断，build ✅
+
+### Phase 13.D — Ads + Reputation 接入（已完成）
+
+- [x] **P13.D** — `meta_ads_snapshots` + `project_reviews` 各加 `production_package_id` nullable FK + partial index（migration）；`meta-ads/sync` 路由接受可选 `production_package_id` 并异步写回；`/clients/[id]/review` POST 接受可选 `production_package_id` 并透传 `runProjectReview`；生产包详情 GET 回读 `ads_snapshots` + `reputation_reviews` 数组；Competitor 延后至 P13.E；build ✅
+
+> **Competitor 接入** 延后登记为 **P13.E-pre**（competitor snapshot persistence）：`semrush/competitor-keywords` 当前无状态 GET，需先建 `competitor_snapshots` 表再接入，本期不做。
+
+### Phase 13.E（已完成）
+
+| Phase | 内容 | 状态 |
 |---|---|---|
-| 13.B | SEO + AI Visibility 接入 | 13.A 验收通过 + 隐藏陷阱已验证（见 RFC §6） |
-| 13.C | Reels + Visual 接入 | 13.B 完成 |
-| 13.D | Ads + Competitor + Reputation 接入 | 13.C 完成 |
-| 13.E | Flywheel feedback 闭环（package → flywheel_actions → outcomes） | 13.D 完成 |
+| 13.E-pre | Competitor snapshot persistence + 接入 production package | ✅ 完成 |
+| 13.E | Flywheel feedback 闭环（package → flywheel_actions → outcomes） | ✅ 完成 |
+
+**P13.E-pre 完成内容**：新增 `competitor_snapshots` 表（migration）；`semrush/competitor-keywords` POST 接受可选 `production_package_id`，落库 snapshot；production package 详情 GET 回读 `competitor_snapshots` 数组；build ✅
+
+**P13.E 完成内容**：`flywheel_actions` 加 `production_package_id` FK（migration）；`ExecuteActionInput`/`FlywheelActionRow` 类型加字段；4 个 adapter execute() 传 `production_package_id`；`flywheel/execute` route 转发字段；新增 `src/lib/flywheel/package-publish.ts`（dimension → flywheel + action_type 映射，on-publish 非阻断落 flywheel_action）；`PATCH /api/clients/[id]/production/[packageId]` 状态更新 + publish 触发 hook；build ✅
 
 ### Phase 13 不做清单（明确划界，避免 scope creep）
 
@@ -1284,6 +1515,268 @@ Production Item    = 订单里的具体产物
 - ❌ Master Brief 自动更新
 - ~~❌ Campaign Brief schema 扩展~~ **（2026-05-19 被 Phase 12.Q 覆盖，加 6 个 nullable 字段）**
 - ❌ `package_type` 字段、`production_item_assets` 关联表、DB 层 campaign_id 硬约束、聚合状态字段
+
+---
+
+## Phase 14 — Website Connector（网站直连执行闭环）📋 战略确认，待排期
+
+> **登记日期**：2026-05-19 · **状态**：战略方向已确认，尚未排期开工
+>
+> **背景**：Magic Engine 现有能力止步于"内容生产 + 存库"；VIP 客户（$2.5k–$3k/月 FDE 嵌入服务）需要 FDE 能在 ME 界面内一键把内容推送到客户网站，无需手动复制粘贴。Website Connector 是 ME 从"内容生产工具"升级为"执行引擎"的关键拼图，同时补全飞轮闭环：诊断 → 生成 → **发布** → 指标回流 → outcome 归因。
+>
+> **架构原则**：通过各平台官方 API 推送，ME 服务器不接触客户源代码；发布必须 draft-first，FDE 确认预览后再 publish；每次执行有完整快照 + payload hash，支持审计和回滚。
+
+### Phase 14 商业场景
+
+```
+Free 层（自助）
+  诊断报告 / 竞品分析 → 内容止步于 ME 数据库
+
+VIP 层（FDE 嵌入，$2.5k–$3k/月起）
+  ME 生成内容 → FDE 点"发布到网站" → 内容直接上线
+  覆盖：Shopify / WordPress / Webflow / GitHub 托管的 Next.js
+```
+
+### Phase 14 新增数据表
+
+```
+client_website_connections
+├── id (UUID PK)
+├── client_id (FK → clients)
+├── platform: 'shopify' | 'wordpress' | 'webflow' | 'github'
+├── credentials_encrypted (TEXT)   ← KMS/应用层加密，DB 只存密文
+├── scope (TEXT[])                 ← 已授权 scope 列表
+├── status: 'active' | 'needs_reconnect' | 'revoked'
+├── site_url (TEXT)                ← HTTPS + 公网域名校验（防 SSRF）
+└── connected_at, last_verified_at
+
+website_publish_jobs
+├── id (UUID PK)
+├── client_id (FK → clients)
+├── connection_id (FK → client_website_connections)
+├── source_type: 'blog_post' | 'campaign_lp'
+├── source_id (UUID)               ← 对应 blog_posts.id 或 campaign_lp.id
+├── platform_post_id (TEXT)        ← 外部平台返回的 page/article id
+├── target_url (TEXT)
+├── content_snapshot (JSONB)       ← 推送时的内容快照
+├── payload_hash (TEXT)            ← SHA-256，用于完整性校验
+├── status: 'draft' | 'published' | 'failed' | 'rolled_back'
+├── idempotency_key (TEXT)         ← 防止重复推送
+├── retry_count (INT)
+├── error_message (TEXT)
+└── published_at, created_at
+```
+
+### Phase 14.A — 第一版 8 个任务（Shopify + WordPress）
+
+| ID | 任务 | 依赖 |
+|----|------|------|
+| **P14.A.1** | 新增 `client_website_connections` 表 + 凭证加密/解密工具 | — |
+| **P14.A.2** | 新增 `website_publish_jobs` 表 + 幂等 key + 状态机 | P14.A.1 |
+| **P14.A.3** | 连接管理 UI（客户设置页 → 连接平台入口） | P14.A.1 |
+| **P14.A.4** | Shopify connector（`write_content` scope，draft-first，blog article + page） | P14.A.2 |
+| **P14.A.5** | WordPress connector（专用用户 + Application Password，最小权限 role） | P14.A.2 |
+| **P14.A.6** | Blog Studio 新增"发布到网站"按钮（Draft → Preview → Publish 三步流程） | P14.A.4/5 |
+| **P14.A.7** | HTML sanitize + payload hash + audit snapshot（防 XSS/注入） | P14.A.4/5 |
+| **P14.A.8** | 发布成功回写 `flywheel_actions` / `flywheel_outcomes` | P14.A.6 |
+
+### Phase 14.A 验收关卡
+
+1. FDE 能在 ME 界面完成从"生成博客"到"网站上线"全流程，不需要离开 ME
+2. Shopify 和 WordPress 均先创建 draft，FDE 确认预览后再 publish
+3. 每次发布在 `website_publish_jobs` 有完整记录（快照 + hash + 状态）
+4. 发布成功后 `flywheel_actions` 有对应记录
+
+### Phase 14.B（预告，未排期）
+
+| Phase | 内容 | 触发条件 |
+|---|---|---|
+| 14.B | Webflow CMS connector | 14.A 验收通过 |
+| 14.C | GitHub connector（Next.js / Vercel 代码型站点） | 14.B 完成 |
+| 14.D | Campaign LP 生成器（高转化落地页，noindex + 活动结束 301） | 14.C 完成 |
+| 14.E | 权限漂移检测（定期校验 token scope，失效自动标 `needs_reconnect`） | 14.A 完成 |
+
+### Phase 14 安全边界（不可降级）
+
+- 凭证 KMS 加密，DB 只存密文，日志禁止输出 token 明文
+- 所有 publish API 强制校验 `client_id` + connection ownership（防租户穿越）
+- WordPress 站点 URL 只允许 HTTPS + 公网域名（防 SSRF / 内网 IP）
+- AI 生成内容发布前必须 sanitize HTML（防 script/iframe 注入）
+- WordPress 专用用户只给内容 capability，禁止 `activate_plugins` / `edit_themes`
+
+### Phase 14 不做清单
+
+- ❌ 客户端直接连接（ME 服务器中转，客户凭证不落前端）
+- ❌ 主题 / 插件 / 模板修改（超出内容范围，需人工介入）
+- ❌ 全自动无审核发布（Draft-first 是强制约束，不做 bypass 开关）
+- ❌ 非 HTTPS 站点接入
+
+---
+
+## Phase 15 — Reputation Engine（口碑监控与执行闭环）📋 战略确认，待排期
+
+> **登记日期**：2026-05-19 · **状态**：战略方向已确认，待深入讨论后排期
+>
+> **背景**：口碑不只是 Reputation 维度的问题——一条 TripAdvisor 好评同时影响 SEO（Google 显示星级）、GEO（AI 引用真实评价）、Reputation（客户信任）三个维度。ME 目前完全没有监控和响应评论的能力，FDE 只能手动巡查各平台。
+>
+> **核心原则**：Scan（监控）→ Analyze（情感分析）→ Recommend（AI 起草回复）→ **ACT（一键发布回复 + 触发修复内容）**
+
+### Phase 15 核心能力
+
+```
+Platform Authority Intelligence（行业权威平台图谱）
+  → 根据客户行业 + AU/NZ 地区，映射哪些平台 AI 最信任
+  → 餐饮：Google Maps / Zomato
+  → 旅游：TripAdvisor / Tourism NZ
+  → 建筑：ProductReview.com.au (AU) / Houzz
+  → 所有行业：Reddit（r/australia, r/newzealand 等）
+
+Review Monitor（评论持续监控）
+  → 每日拉取 GBP / TripAdvisor / Trustpilot 新评论
+  → 情感分类：正面 / 中性 / 负面
+  → 负面评论即时预警 FDE
+
+Response Engine（AI 回复生成）
+  → AI 基于品牌底稿起草回复草稿
+  → FDE 审核修改 → 一键发布到对应平台
+
+Reputation Score（跨平台权威综合评分）
+  → 各平台评分 × 行业权重 = 综合分
+  → 直接预测 AI 被问到相关问题时推荐客户的概率
+
+Counter-Content Trigger（修复内容触发）
+  → 检测到高频投诉类型 → 触发 Blog Studio 生成信任建立内容
+  → 通过 Phase 14 Website Connector 发布到客户网站
+```
+
+### 数据源
+
+| 平台 | API 可用性 | 覆盖市场 |
+|------|-----------|---------|
+| Google Business Profile | ✅ 免费官方 API | AU + NZ |
+| TripAdvisor | ⚠️ 内容 API 部分受限 | AU + NZ |
+| Trustpilot | ✅ 公开 API | AU + NZ |
+| ProductReview.com.au | ❌ 需爬虫 | AU |
+| Reddit | ✅ 官方 API | AU + NZ |
+| Zomato / Google Maps | ✅ | AU + NZ |
+
+### 不做清单
+
+- ❌ 自动发布回复（必须 FDE 审核，不做 bypass）
+- ❌ 伪造评论或刷好评（违反平台 ToS）
+- ❌ Reddit 自动发帖（保持真实性，只做监控 + 预警）
+
+---
+
+## Phase 16 — Competitor Intelligence（竞品雷达 + 信号驱动执行）📋 战略确认，待排期
+
+> **登记日期**：2026-05-19 · **状态**：战略方向已确认，待深入讨论后排期
+>
+> **背景**：ME 目前有竞品 SEO 数据（SEMrush），但停在"数据展示"层，没有"信号 → 自动触发执行"的逻辑。Competitor Intelligence 的真正角色是 ME 的**雷达系统**——不只是告诉 FDE 竞品在做什么，而是直接触发其他模块采取行动。
+>
+> **核心原则**：竞品情报不是独立仪表盘，是驱动 SEO / GEO / Social / Ads / Reputation 五个执行模块的触发层。
+
+### 可获取的竞品数据
+
+```
+SEO 层（已有 ✅）
+  → 竞品关键词排名 / 域名权威 / 外链 / 新内容发布
+
+社媒层
+  → 粉丝增长趋势 / 发帖频率 / 互动率 / 内容主题
+
+广告层 ⭐（免费，大多数公司没用起来）
+  → Meta Ad Library API：所有正在投放的广告创意 + 投放时长
+  → Google Ads 透明度中心：搜索广告文案
+  → 投放时长越长 = 这个广告越有效（倒推高转化创意方向）
+
+AI 可见度层（ME 独有 ✅）
+  → AI Tracker 同时追踪客户 + 竞品
+  → 哪些问题 AI 推荐竞品不推荐我
+
+口碑层
+  → 竞品 GBP 评分趋势 / TripAdvisor 排名变化 / Reddit 情感
+```
+
+### 信号 → 行动触发逻辑
+
+| 竞品信号 | 自动触发 |
+|---------|---------|
+| 竞品排上新关键词 | 建议 Blog Studio 生成对应内容 |
+| AI 推荐竞品但不推荐客户 | 触发 GEO Composer 优化指令 |
+| 竞品 Meta 广告投放 > 30 天 | 预警 FDE：这是高效广告，参考创意方向 |
+| 竞品评分本月下降 | 建议社媒发布差异化优势内容 |
+| 竞品发布新内容主题 | 分析关键词机会，决定是否跟进 |
+
+### 数据源
+
+| 来源 | 内容 | ME 现状 |
+|------|------|---------|
+| SEMrush + DataForSEO | 竞品 SEO 全貌 | ✅ 已有 |
+| Jina.ai | 竞品新内容爬取 | ✅ 已有，未自动化 |
+| Meta Ad Library API | 竞品广告创意库 | ❌ 未接入 |
+| Google Ads 透明度 | 竞品搜索广告 | ❌ 未接入 |
+| AI Tracker 扩展 | 竞品 AI 可见度对比 | ⚠️ 有基础，需扩展 |
+| GBP / TripAdvisor | 竞品口碑趋势 | ❌ 未接入 |
+
+### 不做清单
+
+- ❌ 获取竞品内部数据（只用公开数据源）
+- ❌ 自动执行反制行动（信号 → 建议，FDE 决定是否执行）
+- ❌ 广告投放金额估算（数据不可靠，不展示）
+
+---
+
+## Phase 17 — Unified Data Pullback（统一数据回流层）📋 战略确认，待排期
+
+> **登记日期**：2026-05-19 · **状态**：战略方向已确认，是月报和飞轮归因的基础设施
+>
+> **背景**：ME 现在的月报数据是孤岛——SEO 数据、社媒数据、广告数据分散在各平台，无法在 ME 内做跨渠道归因。Unified Data Pullback 是把所有执行结果拉回 ME、驱动飞轮真实归因的基础设施层。
+
+### 需要接入的数据源
+
+| 渠道 | 数据内容 | API |
+|------|---------|-----|
+| Google Search Console | 自然搜索排名 / 点击 / 展示 | ✅ 免费官方 |
+| Google Analytics 4 | 网站流量 / 转化 / 用户行为 | ✅ 免费官方 |
+| Meta Insights | 社媒帖子表现 / 粉丝增长 | ✅ Graph API |
+| Google Ads API | 广告 ROAS / CTR / 转化 | 🔄 申请中 |
+| Meta Ads Insights | 广告效果数据 | ✅ 已有 MCP |
+| GBP API | 搜索展示 / 电话 / 路线请求 | ✅ 免费官方 |
+
+### 输出到
+
+1. **月报自动生成**（Insight Reports 模块）
+2. **飞轮归因**（action → outcome 真实数据验证）
+3. **Client Portal**（客户自助查看跨渠道数据看板）
+
+---
+
+## ME 战略扩张模型（2026-05-19 确立）
+
+> **通用布线板原则**：ME 平台核心不变，通过插入本地化配置快速进入新市场。
+
+```
+ME 平台核心（语言无关 / 市场无关）
+  ├─ 六维执行引擎（SEO/GEO/Social/Ads/Reputation/Competitor）
+  ├─ Scan → Analyze → Recommend → ACT 四步闭环
+  ├─ 飞轮归因系统
+  └─ 行动触发逻辑
+
+AU / NZ（当前）          新市场（未来）
+插件配置：               插件配置：
+  数据源 → SEMrush AU/NZ   数据源 → 本地 SEO 工具
+  平台 → TripAdvisor/GBP   平台 → 本地评论/社媒平台
+  行业 → 旅游/餐饮/建筑     行业 → 按当地需求配置
+  BD 团队 → 本地           BD 团队 → 本地招募
+```
+
+**种子行业（AU/NZ 冷启动）**：
+- 旅游业（CTS 已是真实客户）
+- 餐饮业（Google Maps / Zomato 数据密度高）
+- 建筑业（ProductReview.com.au / Houzz）
+
+**冷启动策略**：免费层先跑 → 积累真实行业数据 → 建立 AU/NZ 行业权威图谱 → 转化付费 VIP 客户 → 复制模型到新市场。
 
 ---
 
@@ -1332,6 +1825,47 @@ Production Item    = 订单里的具体产物
 > 每次上线新功能时在此追加。格式：**[完成日期]** — Phase ID + 描述 + Commit 引用。
 > 此日志从 CLAUDE.md §十五.C 迁移至此（2026-05-10），CLAUDE.md 不再维护历史日志。
 
+### 2026-05-24
+
+- **P8.13.A** — DataForSEO Labs 关键词+竞品接入：`labs.ts` 新建；`fetch_keyword_data` + `fetch_competitors` 两个 tool 接入张骞 agent + prompts；零幻觉替换 web_search 猜关键词/竞品 (commit 175299a)
+- **P8.13.B** — DataForSEO Domain Technologies + WHOIS 接入：`domain-analytics.ts` 新建；`fetch_domain_technologies` + `fetch_domain_whois` 注册到 agent；types.ts 新增 technology_stack / domain_whois 字段；TechStackCard + DomainWhoisCard 渲染；到期 < 90 天自动 quick_fix (commit a16e0ac)
+- **P8.13.C** — Business Data API 替换 SerpAPI：`business-data.ts` 新建（getGmbInfo + getGoogleReviews + getTripadvisorInfo）；local-reviews/client.ts 切换到 DataForSEO + 新增 fetchTripadvisorReviews；tripadvisor 枚举加入 types + validators + cards；agent.ts fetch_local_reviews 新增 tripadvisor_keyword 参数
+- **P8.13.D** — SERP DataForSEO 主/Apify 降级 + OnPage 审计接入：`serp.ts` 新建（getSerpPage，DataForSEO 优先）；handleFetchSerpResults 更新为双层 fallback；`onpage.ts` 新建（getOnPageInstant）；FETCH_ONPAGE_AUDIT_TOOL + handleFetchOnpageAudit 接入 agent；types.ts 新增 onpage_audit 字段；OnPageAuditCard + page.tsx 渲染；prompts.ts 步骤 1 新增必调 fetch_onpage_audit 要求
+
+### 2026-05-23
+
+- **P13.E-pre** — Competitor snapshot persistence：新增 competitor_snapshots 表（含 production_package_id FK）；competitor-keywords POST 落库 snapshot + 接受可选 production_package_id；包详情 API 回读 competitor_snapshots 数组，build ✅
+- **P13.E** — Flywheel feedback 闭环：flywheel_actions 加 production_package_id FK；4 adapter execute() + ExecuteActionInput/FlywheelActionRow 类型同步；新增 package-publish.ts（dimension→flywheel 映射 + on-publish 非阻断落 flywheel_action）；PATCH /api/clients/[id]/production/[packageId] 状态更新 + publish hook，build ✅
+
+### 2026-05-22
+
+- **P13.D** — Ads + Reputation 接入 production package：meta_ads_snapshots + project_reviews 加 production_package_id FK；两条路由接受可选参数；包详情页回读 ads_snapshots + reputation_reviews，build ✅
+
+### 2026-05-21（续）
+
+- **P13.C** — Reels/generate + visual/image + visual/video 三条生成链路接入 production_package_id，异步创建 production_items + 回写 production_item_id，build ✅
+
+### 2026-05-21
+
+- **P13.B.2** — 客户级生产包列表页 + `GET /api/clients/[id]/production`：维度 tab 过滤、按 dimension 分组展示、item_count 批量计算，build ✅
+- **P13.B.1** — Blog 生成路由接入 `production_package_id`：`GenerateBlogRequest` 加字段，`persistAndReturn` 创建 production_items 行 + 回写 production_item_id，覆盖 SEO + AI Visibility 两个 dimension，build ✅
+- **P13.A.5** — 生产包只读详情页 + GET API 路由：展示 dimension/campaign/execution_item/items 列表/context snapshot，build ✅
+- **P13.A.4** — Route A/C 接收 `production_package_id`，生成后创建 `production_items` 行并回写 `production_item_id`，build ✅
+- **P13.A.3** — 四张内容表各加 `production_item_id` nullable FK → `production_items` + partial index，build ✅
+
+### 2026-05-20
+
+- **P13.A.2** — `production_items` migration：建表 + content_type CHECK + 跨 FK 一致性约束（chk_item_fk_matches_type）+ 6 索引 + updated_at trigger + RLS，build ✅
+- **P13.A.1** — `production_packages` migration：建表（复用 `diagnostic_dimension` enum）+ 4 索引 + updated_at trigger + RLS 三策略（SELECT/INSERT/UPDATE via client_team），build ✅
+
+### 2026-05-19
+
+- **P8.3.2** — Dashboard Magic Link 鉴权重新启用：middleware matcher 改回 `/dashboard/:path*` + layout `redirect('/login')` 取消注释；whitelist.ts + middleware.ts 新增 23 个单元测试（fail-closed / admin / client-viewer scoping / 边界）；`/unauthorized` 已存在无需新建；Supabase 后台 Redirect URLs 白名单 + Render `ADMIN_EMAILS` 需 PM 上线前配齐
+- **P8.10.S0.21** — 张骞首跑硬化 + Advanced Discovery 入口：HTTP 超时全封（Anthropic SDK 90s / SEMrush 20s / Apify ad-library 30s）+ `GLOBAL_TIMEOUT_MS` 270s→300s + stale-timeout 10min→6min + 新增 `/api/cron/zhangqian-sweeper` 兜底孤儿 job + 首跑工具瘦身（删 `fetch_meta_ads` + `fetch_social_metrics` 去 facebook，`MAX_TOOL_CALLS` 22→18，`MAX_COST_USD` $1.80→$1.50）+ prompts.ts 同步 + 报告页 Advanced Discovery CTA banner
+- **P8.10.S0.23** — Advanced Discovery Phase 2：GSC connector（Service Account JWT + Search Analytics API，返回 28 天 top-25 query）+ Google Ads connector（Apify 透明度中心，公开数据）；`advanced-agent.ts` 按 triggeredBy 分流；types 新增 GscSearchData + DiscoveredGoogleAdsData；build ✅
+- **P8.10.S0.24** — Advanced Discovery Phase 3：张骞报告页可视化 advanced 数据；新增 GscDataCard / GoogleAdsCard / AdvancedFacebookCard；MetaAdsCard 优先读 advanced.meta_ads；CTA banner 双态（已跑→绿色成功，未跑→蓝色 CTA）；build ✅
+- **P8.10.S0.22** — Advanced Discovery Phase 1：新建 `client_connectors` 表 + `client_discovery_jobs.job_type` 列；`advanced-agent.ts` 实现 `runZhangqianAdvanced()`（Meta 广告库 + FB 主页抓取）；`persistor.ts` 加 `mergeAdvancedPayload()`（写入 payload.advanced 不覆盖 basic）；connectors status/connect API；`/dashboard/clients/[id]/connectors/[anchor]` 详情页；connector 授权自动触发高级发现（commit 94d8eaa）
+
 ### 2026-05-17
 
 - **P12.A.1** — 飞轮数据骨架 migration：建 flywheel_actions/metrics/outcomes 三表 + execution_items 加 execution_target 列 + 存量回填
@@ -1372,6 +1906,20 @@ Production Item    = 订单里的具体产物
   `feat(flywheel): P12.B.3 — SocialContentAdapter 社媒飞轮落库 [P12.B.3]`
 - **P12.B.4** — SEMrush 周快照 cron：GET /api/cron/flywheel-seo-weekly；拉所有有 domain 的客户 domain_ranks 写 flywheel_metrics；9 单元测试；build 通过
   `feat(flywheel): P12.B.4 — SEMrush 周快照 cron [P12.B.4]`
+
+### 2026-05-24（Phase 8.13 Sprint A–E）
+
+#### 🎉 Phase 8.13 总结（2026-05-24 完成，4 sprints + 1 收尾 session）
+
+**核心交付**：张骞 Intelligence Layer — DataForSEO 全域情报接入（11 工具 · $0.57/客户）
+
+- **P8.13.A** DataForSEO Labs 关键词+竞品接入（零幻觉替换 web_search）：`labs.ts` + `fetch_keyword_data` + `fetch_competitors`，空结果降级 web_search
+- **P8.13.B** Domain Technologies + WHOIS：`domain-analytics.ts` + `fetch_domain_technologies` + `fetch_domain_whois`，到期 < 90 天自动注入 quick_fix；TechStackCard + DomainWhoisCard 上报告页
+- **P8.13.C** Business Data API 替换 Apify 评论爬虫：`business-data.ts`（GMB + Google Reviews + Tripadvisor）；`tripadvisor` 枚举写入 `review_platforms`
+- **P8.13.D** SERP + OnPage Audit 全链路：`serp.ts`（DataForSEO 优先 + Apify fallback）；`onpage.ts`（Core Web Vitals + checks 快审）；OnPageAuditCard 上报告页
+- **P8.13.E** 集成测试收尾：21 个 mock 集成测试全覆盖 Sprint A-D；修复 `validators.ts` bug（`technology_stack` / `domain_whois` / `onpage_audit` 未被 pass-through）；agent.ts 顶部成本注释更新 ≈ $0.57/客户
+
+**新增字段**：`technology_stack` / `domain_whois` / `onpage_audit` / `business.phone_numbers` / `business.emails` / `review_platforms: tripadvisor`
 
 ### 2026-05-18
 

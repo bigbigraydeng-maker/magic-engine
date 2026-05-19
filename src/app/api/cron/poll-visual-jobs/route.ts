@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { checkImageStatus } from '@/lib/visual/wavespeed'
+import { checkImageStatus } from '@/lib/visual/atlas'
 import { checkVideoStatus } from '@/lib/visual/seedance'
 import { checkAvatarStatus } from '@/lib/visual/heygen'
 import { uploadFromUrl } from '@/lib/visual/storage'

@@ -29,7 +29,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   const clientId = params.id
 
   // ── 1. Resolve date range ─────────────────────────────────────────────────
-  let body: { since?: string; until?: string } = {}
+  let body: { since?: string; until?: string; production_package_id?: string } = {}
   try {
     body = await req.json()
   } catch {
@@ -42,6 +42,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   const since = body.since ?? thirtyDaysAgo.toISOString().slice(0, 10)
   const until = body.until ?? today.toISOString().slice(0, 10)
+  const { production_package_id: productionPackageId } = body
 
   // ── 2. Look up client's Meta ad account ID ────────────────────────────────
   const { data: client, error: clientError } = await supabaseAdmin
@@ -103,6 +104,17 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   if (insertError || !snapshot) {
     console.error('[meta-ads/sync] insert error:', insertError?.message)
     return NextResponse.json({ error: 'Failed to save snapshot.' }, { status: 500 })
+  }
+
+  // Link to production package if provided (non-blocking, P13.D)
+  if (productionPackageId && snapshot.id) {
+    supabaseAdmin
+      .from('meta_ads_snapshots')
+      .update({ production_package_id: productionPackageId })
+      .eq('id', snapshot.id)
+      .then(({ error: upErr }) => {
+        if (upErr) console.error('[meta-ads/sync] production_package_id link failed:', upErr)
+      })
   }
 
   return NextResponse.json({

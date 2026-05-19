@@ -68,7 +68,16 @@ export async function POST(
 
   try {
     const { id: clientId } = params
-    const result = await runProjectReview(supabaseAdmin, clientId)
+
+    let productionPackageId: string | undefined
+    try {
+      const body = (await req.json()) as { production_package_id?: string }
+      productionPackageId = body.production_package_id
+    } catch {
+      // body is optional
+    }
+
+    const result = await runProjectReview(supabaseAdmin, clientId, productionPackageId)
 
     return NextResponse.json({
       success: true,

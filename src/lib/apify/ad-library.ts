@@ -6,6 +6,11 @@ export interface MetaAdData {
   topAdCopy: string[]     // up to 3 headlines
 }
 
+// Hard cap each Apify HTTP call. Apify's own poll loop has a 30 s wall-clock
+// budget below, but the underlying fetch() has no native timeout — a hung
+// connection would block the entire discovery agent past its 4.5-min budget.
+const APIFY_FETCH_TIMEOUT_MS = 30_000
+
 /**
  * Scrape Meta Ad Library for a business's active ads.
  *
@@ -30,6 +35,7 @@ export async function scrapeCompetitorMetaAds(
         startUrls: [{ url: `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=${encodeURIComponent(country)}&q=${encodeURIComponent(domain)}&search_type=keyword_unordered` }],
         maxItems: 20,
       }),
+      signal: AbortSignal.timeout(APIFY_FETCH_TIMEOUT_MS),
     },
   )
 
@@ -45,12 +51,14 @@ export async function scrapeCompetitorMetaAds(
     await new Promise(r => setTimeout(r, 2000))
     const statusRes = await fetch(
       `https://api.apify.com/v2/actor-runs/${runId}?token=${apiToken}`,
+      { signal: AbortSignal.timeout(APIFY_FETCH_TIMEOUT_MS) },
     )
     const status = await statusRes.json() as { data?: { status?: string; defaultDatasetId?: string } }
     if (status.data?.status === 'SUCCEEDED') {
       const datasetId = status.data.defaultDatasetId
       const itemsRes = await fetch(
         `https://api.apify.com/v2/datasets/${datasetId}/items?token=${apiToken}&limit=20`,
+        { signal: AbortSignal.timeout(APIFY_FETCH_TIMEOUT_MS) },
       )
       const items = await itemsRes.json() as Array<{
         ad_creative_body?: string

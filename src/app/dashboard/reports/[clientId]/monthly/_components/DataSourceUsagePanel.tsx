@@ -17,6 +17,7 @@ const SERVICE_DISPLAY_MAP: Record<string, string> = {
   perplexity:   'Discovery Engine',
   google:       'Search AI Engine',
   wavespeed:    'Visual Studio',
+  atlas:        'Visual Studio',
   heygen:       'Avatar Studio',
   airtable:     'Content Workspace',
   publer:       'Publishing Hub',

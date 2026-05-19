@@ -40,8 +40,9 @@ export class SocialContentAdapter implements FlywheelAdapter {
         execution_mode:    input.executionMode,
         vendor:            input.vendor ?? null,
         payload:           input.payload ?? null,
-        expected_metric:   input.expectedMetric ?? null,
-        expected_delta:    input.expectedDelta ?? null,
+        expected_metric:        input.expectedMetric      ?? null,
+        expected_delta:         input.expectedDelta       ?? null,
+        production_package_id:  input.productionPackageId ?? null,
       })
       .select()
       .single()
@@ -51,17 +52,18 @@ export class SocialContentAdapter implements FlywheelAdapter {
     }
 
     return {
-      id:              data.id,
-      clientId:        data.client_id,
-      executionItemId: data.execution_item_id ?? undefined,
-      flywheel:        'social',
-      actionType:      data.action_type,
-      executionMode:   data.execution_mode,
-      vendor:          data.vendor ?? undefined,
-      payload:         data.payload ?? undefined,
-      expectedMetric:  data.expected_metric ?? undefined,
-      expectedDelta:   data.expected_delta ?? undefined,
-      executedAt:      data.executed_at,
+      id:                   data.id,
+      clientId:             data.client_id,
+      executionItemId:      data.execution_item_id       ?? undefined,
+      flywheel:             'social',
+      actionType:           data.action_type,
+      executionMode:        data.execution_mode,
+      vendor:               data.vendor                  ?? undefined,
+      payload:              data.payload                 ?? undefined,
+      expectedMetric:       data.expected_metric         ?? undefined,
+      expectedDelta:        data.expected_delta          ?? undefined,
+      executedAt:           data.executed_at,
+      productionPackageId:  data.production_package_id   ?? undefined,
     }
   }
 
