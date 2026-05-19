@@ -215,12 +215,11 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-20 02:36 NZST （**P12.Q.1 完成** ✅；campaign_briefs 扩 6 字段 + injector + Reels select 更新，build 通过；下一任务 P12.Q.2）
+> 最后更新：2026-05-20 02:46 NZST （**P12.Q.2 完成** ✅；quality-rubric 6 维混合模块 + 14 个 Vitest 测试全通过，build 通过；下一任务 P12.Q.3）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P12.Q.2** | 统一 quality rubric 模块（混合模式：规则 + 轻量 LLM） | ⭐⭐ 当前 |
-| **P12.Q.3** | Blog `auditBlogPost` 接入 retry（含 GEO snapshot 合并） | ⭐⭐ |
+| **P12.Q.3** | Blog `auditBlogPost` 接入 retry（含 GEO snapshot 合并） | ⭐⭐ 当前 |
 | **P12.Q.4a** | Social Route A/C 接入 rubric + refine retry | ⭐⭐ |
 | **P12.Q.4b** | Social Route B 接入 rubric + viral-structure-preservation 维度 | ⭐⭐ |
 | **P12.Q.5** | Reels 接入 rubric + 写 snapshot/score | ⭐⭐ |
@@ -228,14 +227,15 @@ git push origin master   # 触发 Render 部署
 | **P12.Q.7** | CTS Tours 端到端 demo + before/after 报告 | ⭐⭐ |
 | **P12.G.1–5** | 诸葛亮策略调度引擎（前置 Phase 12.Q，约 3 session） | 📋 排队 |
 
-**状态校准（2026-05-25）**：
+**状态校准（2026-05-20）**：
 - ✅ P12.Q.0：migration + TS 类型同步完成
 - ✅ P12.Q.1：campaign_briefs 6 字段扩展 + injector + Reels route select，build 通过
+- ✅ P12.Q.2：quality-rubric 模块（6 维混合），14 Vitest 测试全通过，build 通过
 - ⚠️ **PM 待操作**：Render → Environment → 加 `ADMIN_EMAILS=你的邮箱`（若还未做）
 - ⚠️ **PM 待操作**：Supabase 跑 migration `20260525000001_content_quality_snapshot_score.sql` + `20260526000001_campaign_briefs_extend.sql`
 - 📋 Phase 12.G（诸葛亮）：接口规范已锁定，Phase 12.Q 完成后开工
 
-下一 session 第一句话：`继续 Phase 12.Q 第 2 任务 P12.Q.2`
+下一 session 第一句话：`继续 Phase 12.Q 第 3 任务 P12.Q.3`
 
 **本 session 已完成，可以关闭。**
 
