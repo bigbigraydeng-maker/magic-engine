@@ -6,6 +6,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getActiveBrief, formatBriefForPrompt } from '@/lib/content/brief-injector'
 import { getCampaignById, formatCampaignForPrompt } from '@/lib/content/campaign-injector'
+import { auditSocialPost } from '@/lib/content/social-quality-audit'
+import type { SocialAuditMetadata } from '@/lib/content/social-quality-audit'
 import OpenAI from 'openai'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -142,12 +144,21 @@ Output ONLY valid JSON:
   "visual_brief": "..."
 }`
 
-    const generatePost = async (route: RouteType, inputText: string, variantHint: string, userPromptOverride?: string): Promise<PostDraft> => {
-      const userPrompt = userPromptOverride ?? (
+    const generatePost = async (
+      route: RouteType,
+      inputText: string,
+      variantHint: string,
+      userPromptOverride?: string,
+      refineHint?: string,
+    ): Promise<PostDraft> => {
+      const basePrompt = userPromptOverride ?? (
         route === 'route_a'
           ? `Create a social media post targeting keyword: "${inputText}"\nPlatforms: ${safePlatforms.join(', ')}\n${variantHint}\nScript: 100-200 words. Caption: 50-100 words. 8-12 hashtags including keyword.`
           : `Create a social media post about: "${inputText}"\nPlatforms: ${safePlatforms.join(', ')}\n${variantHint}\nScript: 100-200 words. Caption: 50-100 words. 8-12 relevant hashtags.`
       )
+      const userPrompt = refineHint
+        ? `${basePrompt}\n\nQuality Feedback (please address these issues in your response):\n${refineHint}`
+        : basePrompt
       const completion = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
         temperature: 0.85,
@@ -177,6 +188,79 @@ Output ONLY valid JSON:
       }
     }
 
+    // Quality audit metadata (shared across all posts in this batch)
+    const auditMeta: SocialAuditMetadata = {
+      brand_name:       brief.brand_name ?? null,
+      tone:             brief.tone ?? null,
+      avoid_words:      brief.avoid_words ?? null,
+      platforms:        brief.platforms ?? null,
+      primary_audience: brief.primary_audience ?? null,
+      campaign: {
+        title:                  campaign.title ?? null,
+        offer:                  campaign.offer ?? null,
+        primary_cta:            campaign.primary_cta ?? null,
+        campaign_angle:         campaign.campaign_angle ?? null,
+        target_audience_detail: campaign.target_audience_detail ?? null,
+      },
+    }
+
+    interface PostResult {
+      draft: PostDraft
+      qualityScore: number | null
+      contextSnapshot: Record<string, unknown> | null
+    }
+
+    const generatePostWithQualityRetry = async (
+      route: RouteType,
+      inputText: string,
+      variantHint: string,
+      userPromptOverride?: string,
+    ): Promise<PostResult> => {
+      const MAX_ATTEMPTS = 3
+      let lastDraft: PostDraft | null = null
+      let qualityScore: number | null = null
+      let contextSnapshot: Record<string, unknown> | null = null
+      let refineHint: string | undefined
+
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        lastDraft = await generatePost(route, inputText, variantHint, userPromptOverride, refineHint)
+
+        try {
+          const contentForAudit = [lastDraft.script, lastDraft.caption, lastDraft.hashtags.join(' ')]
+            .filter(Boolean)
+            .join('\n')
+          const contentType = route === 'route_a' ? 'social_a' as const : 'social_c' as const
+          const primaryKeyword = route === 'route_a' ? inputText : null
+
+          const audit = await auditSocialPost(contentForAudit, safePlatforms, contentType, auditMeta, primaryKeyword)
+          if (!audit) break
+
+          qualityScore = audit.rubricResult.overallScore
+          contextSnapshot = { ...audit.contextSnapshot, attempts: attempt }
+
+          if (audit.rubricResult.pass || attempt === MAX_ATTEMPTS) {
+            if (!audit.rubricResult.pass) {
+              console.warn(
+                `[social quality] Post failed quality threshold after ${attempt} attempt(s)` +
+                ` (score: ${audit.rubricResult.overallScore}, route: ${route}, input: ${inputText}).`
+              )
+            }
+            break
+          }
+
+          const failed = audit.rubricResult.dimensions.filter(d => !d.pass)
+          if (failed.length > 0) {
+            refineHint = failed.map(d => `- ${d.dimension}: ${d.reason}`).join('\n')
+          }
+        } catch (err) {
+          console.error('[social quality] Audit error (non-blocking):', err)
+          break
+        }
+      }
+
+      return { draft: lastDraft!, qualityScore, contextSnapshot }
+    }
+
     // Build task list
     const tasks: Array<{ route: RouteType; input: string; hint: string }> = [
       ...keywordsToUse.slice(0, route_a_count).map((kw, i) => ({
@@ -193,56 +277,58 @@ Output ONLY valid JSON:
 
     // Process in batches of 5 to avoid rate limits
     const BATCH_SIZE = 5
-    const drafts: PostDraft[] = []
+    const postResults: PostResult[] = []
 
     for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
       const batch = tasks.slice(i, i + BATCH_SIZE)
-      const results = await Promise.allSettled(
+      const settled = await Promise.allSettled(
         batch.map((t, batchIdx) => {
           const globalIdx = i + batchIdx
           const userPromptOverride = prompt_overrides?.post_user_prompts?.[globalIdx]
-          return generatePost(t.route, t.input, t.hint, userPromptOverride)
+          return generatePostWithQualityRetry(t.route, t.input, t.hint, userPromptOverride)
         })
       )
-      for (const result of results) {
-        if (result.status === 'fulfilled') drafts.push(result.value)
+      for (const r of settled) {
+        if (r.status === 'fulfilled') postResults.push(r.value)
       }
     }
 
-    const generationFailures = tasks.length - drafts.length
-    if (drafts.length === 0) {
+    const generationFailures = tasks.length - postResults.length
+    if (postResults.length === 0) {
       throw new Error(`All ${tasks.length} generation attempts failed`)
     }
 
     // 6. Bulk insert to Supabase
-    const rows = drafts.map(d => ({
+    const rows = postResults.map(r => ({
       client_id:       clientId,
-      route:           d.route,
+      route:           r.draft.route,
       platforms:       safePlatforms,
-      title:           d.title,
-      script:          d.script,
-      caption:         d.caption,
-      hashtags:        d.hashtags,
-      visual_brief:    d.visual_brief,
+      title:           r.draft.title,
+      script:          r.draft.script,
+      caption:         r.draft.caption,
+      hashtags:        r.draft.hashtags,
+      visual_brief:    r.draft.visual_brief,
       source_brief_id: brief.id,
       campaign_id:     campaign.id,
       content_mode:    'campaign',
       status:          'draft',
+      generation_context_snapshot: r.contextSnapshot,
+      quality_score:   r.qualityScore,
     }))
 
     const { data: savedPosts, error } = await supabaseAdmin
       .from('content_posts')
       .insert(rows)
-      .select('id, title, route, status, platforms, script, caption, hashtags, visual_brief, source_video_url')
+      .select('id, title, route, status, platforms, script, caption, hashtags, visual_brief, source_video_url, quality_score')
 
     if (error) throw error
 
     return NextResponse.json({
       success: true,
-      generated: drafts.length,
+      generated: postResults.length,
       saved: savedPosts?.length ?? 0,
       generation_failures: generationFailures,
-      db_failures: drafts.length - (savedPosts?.length ?? 0),
+      db_failures: postResults.length - (savedPosts?.length ?? 0),
       posts: savedPosts,
     })
 

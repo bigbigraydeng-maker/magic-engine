@@ -215,7 +215,7 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-20 03:04 NZST （**P12.Q.3 完成** ✅；Blog auditBlogPost + quality retry 接入，7 Vitest 测试通过，build 通过；下一任务 P12.Q.4a）
+> 最后更新：2026-05-20 03:12 NZST （**P12.Q.3 完成** ✅；Blog auditBlogPost + quality retry 接入，7 Vitest 测试通过，build 通过；下一任务 P12.Q.4a）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
