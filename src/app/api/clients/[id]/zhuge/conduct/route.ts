@@ -24,6 +24,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requireBearerToken } from '@/lib/validation-utils'
 import { assembleZhugeInput } from '@/lib/zhuge/assembler'
 import { conductPriorityActions } from '@/lib/zhuge/conductor'
+import { persistZhugeActions, type PersistZhugeActionsResult } from '@/lib/zhuge/action-persister'
 import type { BusinessContext } from '@/lib/zhuge/types'
 
 export const dynamic = 'force-dynamic'
@@ -77,21 +78,37 @@ export async function POST(
   }
 
   // Call the 诸葛亮 conductor
+  let output: Awaited<ReturnType<typeof conductPriorityActions>>
   try {
-    const output = await conductPriorityActions(assembled.input)
-
-    return NextResponse.json({
-      success: true,
-      output,
-      context_used: {
-        discovery_id: assembled.discovery_id,
-        diagnostic_run_id: assembled.diagnostic_run_id,
-        findings_count: assembled.findings_count,
-      },
-    })
+    output = await conductPriorityActions(assembled.input)
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[zhuge/conduct] conductor error:', msg)
     return NextResponse.json({ success: false, error: `Conductor failed: ${msg}` }, { status: 500 })
   }
+
+  // Persist priority actions to flywheel_actions (non-blocking — failure logged, not thrown)
+  let persisted: PersistZhugeActionsResult | null = null
+  try {
+    persisted = await persistZhugeActions(supabaseAdmin, {
+      clientId,
+      discoveryId: assembled.discovery_id,
+      diagnosticRunId: assembled.diagnostic_run_id,
+      output,
+    })
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[zhuge/conduct] persist error:', msg)
+  }
+
+  return NextResponse.json({
+    success: true,
+    output,
+    context_used: {
+      discovery_id: assembled.discovery_id,
+      diagnostic_run_id: assembled.diagnostic_run_id,
+      findings_count: assembled.findings_count,
+    },
+    persisted,
+  })
 }

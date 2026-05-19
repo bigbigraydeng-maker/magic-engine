@@ -215,7 +215,7 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-20 04:55 NZST （**P12.G.2 完成** — assembler + conduct API route，34 Vitest 全绿，build ✅；下一任务 P12.G.3）
+> 最后更新：2026-05-20 05:11 NZST （**P12.G.2 完成** — assembler + conduct API route，34 Vitest 全绿，build ✅；下一任务 P12.G.3）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
