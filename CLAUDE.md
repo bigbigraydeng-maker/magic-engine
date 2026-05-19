@@ -215,22 +215,22 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-20 05:11 NZST （**P12.G.2 完成** — assembler + conduct API route，34 Vitest 全绿，build ✅；下一任务 P12.G.3）
+> 最后更新：2026-05-20 05:12 NZST （**P12.G.3 完成** — action-persister + 幂等写入 flywheel_actions，49 Vitest 全绿，build ✅；下一任务 P12.G.4）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P12.G.3** | 写入 `flywheel_actions` + 幂等性保护 | ⭐⭐ 当前 |
-| **P12.G.4** | 首页驾驶舱消费诸葛亮数据（替换当前静态卡片） | ⭐ 下一步 |
-| **P12.G.5** | AI 抽屉集成：「问诸葛亮」→ 实时计算优先级 + 一键触发鲁班 | 📋 后续 |
+| **P12.G.4** | 首页驾驶舱消费诸葛亮数据（替换当前静态卡片） | ⭐⭐ 当前 |
+| **P12.G.5** | AI 抽屉集成：「问诸葛亮」→ 实时计算优先级 + 一键触发鲁班 | ⭐ 下一步 |
 
 **状态校准（2026-05-20）**：
 - ✅ P12.Q.0–Q.7：Phase 12.Q 全部完成（内容质量闭环）
 - ✅ **P12.G.1**：诸葛亮接口层 — types.ts + conductor.ts；26 Vitest 全通过；build ✅
 - ✅ **P12.G.2**：assembler.ts（从 Supabase 聚合张骞/华佗/处方）+ tools-catalog.ts（5 Luban 工具）+ POST /api/clients/[id]/zhuge/conduct；34 Vitest 全通过；build ✅
+- ✅ **P12.G.3**：action-persister.ts（buildSessionKey + persistZhugeActions + idempotency guard）；conduct route 接入非阻断 persisted 字段；49 Vitest 全通过；build ✅
 - ⚠️ **PM 待操作**：Render → Environment → 加 `ADMIN_EMAILS=你的邮箱`（若还未做）
 - ⚠️ **PM 待操作**：Supabase 跑 migration `20260525000001_content_quality_snapshot_score.sql` + `20260526000001_campaign_briefs_extend.sql`
 
-下一 session 第一句话：`继续 Phase 12.G 第 3 任务 P12.G.3`
+下一 session 第一句话：`继续 Phase 12.G 第 4 任务 P12.G.4`
 
 **本 session 已完成，可以关闭。**
 
