@@ -237,6 +237,32 @@ export interface ContentPost {
   scheduled_at?: string
   published_at?: string
   publer_post_id?: string
+  generation_context_snapshot?: Record<string, unknown> | null
+  quality_score?: number | null      // 0–10, written after quality rubric check
+}
+
+export type ReelsDraftStatus = 'draft' | 'images_ready' | 'video_generating' | 'video_ready'
+
+/** Full reels_drafts table row. */
+export interface ReelsDraft {
+  id: string
+  client_id: string
+  campaign_brief_id: string | null
+  opening_frame_prompt: string | null
+  closing_frame_prompt: string | null
+  i2v_video_prompt: string | null
+  fb_caption: string | null
+  opening_frame_url: string | null
+  closing_frame_url: string | null
+  video_url: string | null
+  provider_job_id: string | null
+  chat_history: Record<string, unknown>[]
+  status: ReelsDraftStatus
+  production_item_id: string | null
+  generation_context_snapshot: Record<string, unknown> | null
+  quality_score: number | null       // 0–10, written after quality rubric check
+  created_at: string
+  updated_at: string
 }
 
 // API Request/Response types
@@ -456,6 +482,8 @@ export interface BlogPost {
   keyword_volume: number | null      // monthly search volume
   keyword_kd: number | null          // keyword difficulty 0-100
   keyword_intent: string | null      // comparison | how_to | recommendation | decision | discovery
+  generation_context_snapshot: Record<string, unknown> | null
+  quality_score: number | null       // 0–10, written after quality rubric check
   created_at: string
   updated_at: string
 }
