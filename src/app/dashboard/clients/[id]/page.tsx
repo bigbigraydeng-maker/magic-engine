@@ -7,6 +7,7 @@ import { ContentHub } from './_components/ContentHub';
 import { GenerationDrawer } from './_components/GenerationDrawer';
 import { SettingsDrawer, type SettingsTab } from './_components/SettingsDrawer';
 import { ZhugePriorityWidget } from './_components/ZhugePriorityWidget';
+import { ZhugeDrawer } from './_components/ZhugeDrawer';
 import type { ClientDiscoveryRow } from '@/lib/zhangqian/types';
 
 type PillarTab = 'social' | 'seo' | 'ai_visibility' | 'ads' | 'diagnostic'
@@ -368,6 +369,8 @@ export default function ClientDetailPage() {
   const [settingsOpen, setSettingsOpen] = useState(searchParams.get('brief') === '1');
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('brief');
   const [pillar, setPillar] = useState<PillarTab>('social');
+  const [zhugeDrawerOpen, setZhugeDrawerOpen] = useState(false);
+  const [zhugeRefreshKey, setZhugeRefreshKey] = useState(0);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -473,7 +476,12 @@ export default function ClientDetailPage() {
       <BrandHealthWidget clientId={clientId} />
 
       {/* Zhuge Priority Actions — dynamic strategic work order */}
-      <ZhugePriorityWidget clientId={clientId} discoveryConfirmed={discoveryConfirmed} />
+      <ZhugePriorityWidget
+        clientId={clientId}
+        discoveryConfirmed={discoveryConfirmed}
+        refreshKey={zhugeRefreshKey}
+        onAskZhuge={() => setZhugeDrawerOpen(true)}
+      />
 
       {/* Master Brief warning banner */}
       {hasActiveBrief === false && (
@@ -529,6 +537,14 @@ export default function ClientDetailPage() {
         open={generationOpen}
         onClose={() => setGenerationOpen(false)}
         executionItemId={execItemId}
+      />
+
+      {/* Zhuge AI drawer — real-time conduct + Luban trigger */}
+      <ZhugeDrawer
+        clientId={clientId}
+        isOpen={zhugeDrawerOpen}
+        onClose={() => setZhugeDrawerOpen(false)}
+        onComplete={() => setZhugeRefreshKey(k => k + 1)}
       />
 
       {/* Settings drawer */}
