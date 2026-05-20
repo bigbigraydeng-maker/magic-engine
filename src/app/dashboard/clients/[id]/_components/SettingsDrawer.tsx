@@ -4,8 +4,9 @@ import { useEffect } from 'react'
 import Link from 'next/link'
 import { BriefPanel } from './BriefPanel'
 import { SiteAuditPanel } from './SiteAuditPanel'
+import { CmsPanel } from './CmsPanel'
 
-export type SettingsTab = 'brief' | 'site-audit' | 'seo-gap' | 'client-info'
+export type SettingsTab = 'brief' | 'site-audit' | 'seo-gap' | 'client-info' | 'cms'
 
 interface Client {
   id: string
@@ -28,6 +29,7 @@ const TABS: { id: SettingsTab; label: string }[] = [
   { id: 'site-audit',  label: '🔍 Site Audit' },
   { id: 'seo-gap',     label: '📊 SEO Gap' },
   { id: 'client-info', label: '👤 客户信息' },
+  { id: 'cms',         label: '🔗 网站连接' },
 ]
 
 export function SettingsDrawer({ open, onClose, clientId, client, activeTab, onTabChange }: Props) {
@@ -102,6 +104,10 @@ export function SettingsDrawer({ open, onClose, clientId, client, activeTab, onT
                 打开 SEO Gap 分析 →
               </Link>
             </div>
+          )}
+
+          {activeTab === 'cms' && (
+            <CmsPanel clientId={clientId} />
           )}
 
           {activeTab === 'client-info' && (

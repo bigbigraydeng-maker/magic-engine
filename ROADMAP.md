@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-21 02:02 NZST · 当前阶段：**⚠️ P8.3.2 代码已完成，PM 需在 Render 填 `ADMIN_EMAILS` 才能上线 → 完成后解锁 Phase 12.Q**。四 Agent 架构（张骞→华佗→诸葛亮→鲁班）已确定，诸葛亮登记为 Phase 12.G。Phase 12.A/B 已完成；Phase 12.Q 内容质量闭环已登记待开工。
+> 最后更新：2026-05-21 03:25 NZST · 当前阶段：**⚠️ P8.3.2 代码已完成，PM 需在 Render 填 `ADMIN_EMAILS` 才能上线 → 完成后解锁 Phase 12.Q**。四 Agent 架构（张骞→华佗→诸葛亮→鲁班）已确定，诸葛亮登记为 Phase 12.G。Phase 12.A/B 已完成；Phase 12.Q 内容质量闭环已登记待开工。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
