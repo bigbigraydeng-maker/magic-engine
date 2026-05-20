@@ -215,22 +215,23 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-20 13:43 NZST （**P12.G.4 完成** — ZhugePriorityWidget + latest-actions API，54 Vitest 全绿，build ✅；下一任务 P12.G.5）
+> 最后更新：2026-05-20 13:45 NZST （**P12.G.5 完成** — ZhugeDrawer + luban-router + 一键触发鲁班，57 Vitest 全绿，build ✅；Phase 12.G 全部任务完成）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P12.G.5** | AI 抽屉集成：「问诸葛亮」→ 实时计算优先级 + 一键触发鲁班 | ⭐⭐ 当前 |
+| **Phase 12.G 已完成** | P12.G.1–G.5 全部 done | ✅ |
 
 **状态校准（2026-05-20）**：
 - ✅ P12.Q.0–Q.7：Phase 12.Q 全部完成（内容质量闭环）
 - ✅ **P12.G.1**：诸葛亮接口层 — types.ts + conductor.ts；26 Vitest 全通过；build ✅
-- ✅ **P12.G.2**：assembler.ts（从 Supabase 聚合张骞/华佗/处方）+ tools-catalog.ts（5 Luban 工具）+ POST /api/clients/[id]/zhuge/conduct；34 Vitest 全通过；build ✅
-- ✅ **P12.G.3**：action-persister.ts（buildSessionKey + persistZhugeActions + idempotency guard）；conduct route 接入非阻断 persisted 字段；49 Vitest 全通过；build ✅
-- ✅ **P12.G.4**：GET /api/clients/[id]/zhuge/latest-actions + ZhugePriorityWidget（行动卡 + 重新计算）接入驾驶舱 page.tsx；54 Vitest 全通过；build ✅
+- ✅ **P12.G.2**：assembler.ts + tools-catalog.ts + POST /api/clients/[id]/zhuge/conduct；34 Vitest 全通过；build ✅
+- ✅ **P12.G.3**：action-persister.ts（buildSessionKey + persistZhugeActions + idempotency guard）；49 Vitest 全通过；build ✅
+- ✅ **P12.G.4**：GET /api/clients/[id]/zhuge/latest-actions + ZhugePriorityWidget；54 Vitest 全通过；build ✅
+- ✅ **P12.G.5**：ZhugeDrawer（AI 抽屉）+ luban-router（纯函数路由）+ display-constants（DRY）；Widget 改 onAskZhuge+refreshKey；57 Vitest 全通过；build ✅
 - ⚠️ **PM 待操作**：Render → Environment → 加 `ADMIN_EMAILS=你的邮箱`（若还未做）
 - ⚠️ **PM 待操作**：Supabase 跑 migration `20260525000001_content_quality_snapshot_score.sql` + `20260526000001_campaign_briefs_extend.sql`
 
-下一 session 第一句话：`继续 Phase 12.G 第 5 任务 P12.G.5`
+下一 session：Phase 12.G 全部完成，可以合 PR 到 main 或开始下一个 Phase（待 PM 决策）
 
 **本 session 已完成，可以关闭。**
 
