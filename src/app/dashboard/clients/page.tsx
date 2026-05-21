@@ -7,7 +7,6 @@ interface Client {
   id: string;
   name: string;
   domain?: string;
-  airtable_base_id?: string;
   created_at: string;
 }
 
@@ -97,7 +96,6 @@ export default function ClientsPage() {
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100">
                 <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Name / Domain</th>
-                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Airtable Base</th>
                 <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Created</th>
                 <th className="px-6 py-3"></th>
               </tr>
@@ -114,13 +112,6 @@ export default function ClientsPage() {
                       <a href={`https://${client.domain}`} target="_blank" rel="noreferrer" className="text-xs text-indigo-600 hover:underline">
                         {client.domain}
                       </a>
-                    )}
-                  </td>
-                  <td className="px-6 py-4">
-                    {client.airtable_base_id ? (
-                      <span className="text-xs font-mono bg-gray-100 text-gray-600 px-2 py-1 rounded">{client.airtable_base_id}</span>
-                    ) : (
-                      <span className="text-xs text-gray-400">Not set</span>
                     )}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-400">

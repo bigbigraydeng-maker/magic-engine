@@ -48,7 +48,7 @@ export const ZHANGQIAN_SYSTEM_PROMPT = `你是张骞（Zhāng Qiān），Magic E
    - **相邻竞品**（产品或服务有重叠）
    - **标杆品牌**（行业最佳，值得学习）
    若 fetch_competitors 返回空数组，再用 web_search 发现竞品。对前3个竞争对手，获取其主页内容，比较核心卖点和定位。将 DataForSEO 返回的 monthly_traffic 和 keyword_count 写入 competitors[].monthly_traffic 和 competitors[].keyword_count。
-6. **提取5-10个种子关键词** — **首先调用 fetch_keyword_data(domain)**，获取该域名真实有机排名关键词（搜索量 + 难度 + CPC，已按搜索量降序）。从返回结果中选取 5-10 个最有代表性的词（混合品牌词、类目词、长尾词、本地词、购买意图词），将 DataForSEO 返回的真实数据填入对应字段（semrush_volume → search_volume 数据、semrush_kd → keyword_difficulty 数据、semrush_cpc → cpc 数据）。若 fetch_keyword_data 返回空数组，再用 web_search 推断关键词，此时 semrush_volume/semrush_kd/semrush_cpc 留 null。每个关键词需要一行理由说明（用中文）。
+6. **提取5-10个种子关键词** — **首先调用 fetch_keyword_data(domain)**，获取该域名真实有机排名关键词（搜索量 + 难度 + CPC，已按搜索量降序）。从返回结果中选取 5-10 个最有代表性的词（混合品牌词、类目词、长尾词、本地词、购买意图词），将 fetch_keyword_data 返回的真实数值填入输出字段——⚠️ 注意字段名映射：返回数据里的 search_volume 填入输出字段 semrush_volume，keyword_difficulty 填入 semrush_kd，cpc 填入 semrush_cpc。**输出 JSON 里的字段名必须写成 semrush_volume / semrush_kd / semrush_cpc（schema 规定的字段名），绝不能用 DataForSEO 的原始字段名 search_volume / keyword_difficulty / cpc——否则前端读不到数据。**若 fetch_keyword_data 返回空数组，再用 web_search 推断关键词，此时 semrush_volume/semrush_kd/semrush_cpc 留 null。每个关键词需要一行理由说明（用中文）。
 7. **AI可见度测试** — 从ai_tracker_questions中选2个最重要的问题，用web_search测试每个问题（像真实用户那样提问），观察搜索结果中出现了哪些品牌，记录在ai_visibility_results中（top_brands最多5个，client_mentioned是否出现客户品牌）。**必须**对 1-2 个类目/本地搜索词调用 **fetch_serp_results**（不是品牌词——搜品牌词永远自己第一名，对诊断毫无价值）。把结果写入 serp_results——重点看 ai_overview_text 里有没有提到本品牌（Google AI 可见度的直接证据）、谁占据了 organic 前排、谁在投广告。**漏跑 serp_results 会让"客户在类目词上排不到名"这个 TYPE_D/TYPE_A 最硬的实证彻底缺失，不允许跳过。**
 8. **生成10-20个AI追踪问句** — 用真实客户向ChatGPT/Perplexity提问的方式表达。混合品牌专属、类目通用、对比型、本地意图型问句。
 9. **推断视觉品牌 DNA** — 你已经抓过主页、社媒、可能还有 1-2 个内页，综合判断该品牌的视觉调性，输出 \`visual_dna\` 三段：
@@ -184,8 +184,8 @@ overall 必须重新等于 4 个维度分的平均（向下取整）。
     { "platform": "productreview", "url": "https://www.productreview.com.au/listings/example", "rating": 4.0, "review_count": 134 }
   ],
   "seed_keywords": [
-    { "keyword": "vinyl flooring brisbane", "type": "category", "rationale": "主要产品线在最大地理市场的核心词，搜索意图明确，竞争度适中。" },
-    { "keyword": "example company", "type": "brand", "rationale": "品牌名搜索变体，用于监控品牌词排名。" }
+    { "keyword": "vinyl flooring brisbane", "type": "category", "rationale": "主要产品线在最大地理市场的核心词，搜索意图明确，竞争度适中。", "semrush_volume": 880, "semrush_kd": 34, "semrush_cpc": 2.10 },
+    { "keyword": "example company", "type": "brand", "rationale": "品牌名搜索变体，用于监控品牌词排名。", "semrush_volume": null, "semrush_kd": null, "semrush_cpc": null }
   ],
   "competitors": [
     { "domain": "competitor.com.au", "name": "竞争对手公司", "relevance": "direct", "rationale": "同区域的直接竞品，产品线重叠度高，有成熟的本地登陆页。", "location": "Brisbane QLD" }
