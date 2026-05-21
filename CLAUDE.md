@@ -215,25 +215,22 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-21 14:35 NZST （**P12.G.5 完成** — ZhugeDrawer + luban-router + 一键触发鲁班，57 Vitest 全绿，build ✅；Phase 12.G 全部任务完成）
+> 最后更新：2026-05-21 18:19 NZST （**Phase 12.I 已登记** — SEO Intelligence 页面 + 飞轮闭环接线，10 任务 3 里程碑；首页改版已提交 feat/landing-4step-workflow）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **Phase 12.G 已完成** | P12.G.1–G.5 全部 done | ✅ |
+| **P12.I.1** | SEO Intelligence 页面路由 + 顶部指标栏（读 flywheel_metrics） | 🔥 下一个 |
+| P12.I.2–10 | Panel A/B + 飞轮接线 + Cron 快照（见 ROADMAP § Phase 12.I） | 待排 |
 
-**状态校准（2026-05-20）**：
-- ✅ P12.Q.0–Q.7：Phase 12.Q 全部完成（内容质量闭环）
-- ✅ **P12.G.1**：诸葛亮接口层 — types.ts + conductor.ts；26 Vitest 全通过；build ✅
-- ✅ **P12.G.2**：assembler.ts + tools-catalog.ts + POST /api/clients/[id]/zhuge/conduct；34 Vitest 全通过；build ✅
-- ✅ **P12.G.3**：action-persister.ts（buildSessionKey + persistZhugeActions + idempotency guard）；49 Vitest 全通过；build ✅
-- ✅ **P12.G.4**：GET /api/clients/[id]/zhuge/latest-actions + ZhugePriorityWidget；54 Vitest 全通过；build ✅
-- ✅ **P12.G.5**：ZhugeDrawer（AI 抽屉）+ luban-router（纯函数路由）+ display-constants（DRY）；Widget 改 onAskZhuge+refreshKey；57 Vitest 全通过；build ✅
+**状态校准（2026-05-21）**：
+- ✅ Phase 12.Q / 12.G 全部完成
+- ✅ **Phase 12.I 已登记**：ROADMAP § Phase 12.I（10 任务，M1/M2/M3 三里程碑，M1 须 6/19 前上线）；设计稿 7 节
+- 📋 Phase 12.H GitHub CMS：已登记，未开工
+- ⚠️ **未跟踪文件**：`supabase/migrations/20260521000002_discovery_leads.sql`（freemium Discovery 功能，PM 留存，未提交）
 - ⚠️ **PM 待操作**：Render → Environment → 加 `ADMIN_EMAILS=你的邮箱`（若还未做）
 - ⚠️ **PM 待操作**：Supabase 跑 migration `20260525000001_content_quality_snapshot_score.sql` + `20260526000001_campaign_briefs_extend.sql`
 
-下一 session：Phase 12.G 全部完成，可以合 PR 到 main 或开始下一个 Phase（待 PM 决策）
-
-**本 session 已完成，可以关闭。**
+下一步：开 `feat/phase-12-i-seo-intelligence` 分支，开始 P12.I.1
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox
