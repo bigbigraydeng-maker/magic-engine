@@ -431,6 +431,10 @@ export async function runZhangqian(
       break
     }
 
+    // ── Progress heartbeat before each Anthropic call ─────────────────────
+    // Each Claude turn can take up to 150 s; this keeps the live feed moving.
+    await onProgress(iteration === 0 ? '张骞已出发 — 开始多维扫描…' : `第 ${iteration + 1} 轮分析中…`)
+
     // ── Call Claude ────────────────────────────────────────────────────────
     const response = await client.messages.create(
       {

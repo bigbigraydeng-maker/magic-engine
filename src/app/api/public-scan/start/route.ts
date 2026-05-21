@@ -103,9 +103,28 @@ function translateNote(note: string): { icon: string; message: string } {
 
 // ─── Background executor ──────────────────────────────────────────────────────
 
+// Hard cap: if the entire scan hasn't finished in 9 minutes, mark it failed.
+// This prevents jobs from staying in 'running' forever if the agent hangs or
+// if the process is recycled mid-scan.
+const SCAN_HARD_TIMEOUT_MS = 9 * 60 * 1000
+
 async function runScan(jobId: string, domain: string): Promise<void> {
-  // Phase 1 — DataForSEO pre-fetch (emit real data as early discoveries)
-  await addLog(jobId, 'step', '🔍', 'Gathering domain performance data…')
+  // Heartbeat: write a "still scanning" step every 45 s while running.
+  // Gives the user visible activity during the long Anthropic + Apify gaps.
+  let heartbeatMsg = 'Analysing your brand…'
+  const heartbeat = setInterval(() => {
+    void addLog(jobId, 'step', '⏳', heartbeatMsg).catch(() => {})
+  }, 45_000)
+
+  // Hard timeout — resolves as 'timeout' after 9 minutes.
+  let hardTimeoutId: ReturnType<typeof setTimeout> | undefined
+  const hardTimeout = new Promise<'timeout'>(resolve => {
+    hardTimeoutId = setTimeout(() => resolve('timeout'), SCAN_HARD_TIMEOUT_MS)
+  })
+
+  async function doScan(): Promise<void> {
+    // Phase 1 — DataForSEO pre-fetch (emit real data as early discoveries)
+    await addLog(jobId, 'step', '🔍', 'Gathering domain performance data…')
 
   let semrushContext: string | undefined
   try {
@@ -157,12 +176,13 @@ async function runScan(jobId: string, domain: string): Promise<void> {
     // Non-fatal
   }
 
-  // Phase 2 — Zhangqian agent (translate progress notes into live discoveries)
-  try {
+    // Phase 2 — Zhangqian agent (translate progress notes into live discoveries)
+    heartbeatMsg = 'Deep scanning your brand…'
     const { report, validation_error } = await runZhangqian(domain, {
       semrushContext,
       onProgress: async (note) => {
         const { icon, message } = translateNote(note)
+        heartbeatMsg = message  // keep heartbeat label in sync with latest phase
         await addLog(jobId, 'step', icon, message).catch(() => {})
       },
     })
@@ -176,6 +196,7 @@ async function runScan(jobId: string, domain: string): Promise<void> {
     }
 
     // Phase 3 — Post-completion discoveries (real data from report)
+    heartbeatMsg = 'Finalising your report…'
     const r = report as DiscoveryReport
 
     const ig = r.social_profiles?.find(s => s.platform === 'instagram')
@@ -212,14 +233,30 @@ async function runScan(jobId: string, domain: string): Promise<void> {
         completed_at: new Date().toISOString(),
       })
       .eq('id', jobId)
+  }
+
+  // Race doScan() against the hard timeout
+  try {
+    const outcome = await Promise.race([doScan(), hardTimeout])
+    if (outcome === 'timeout') {
+      await supabaseAdmin
+        .from('public_scan_jobs')
+        .update({ status: 'failed', error: 'Scan exceeded 9-minute limit — please try again.', completed_at: new Date().toISOString() })
+        .eq('id', jobId)
+    }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
-    await Promise.resolve(
-      supabaseAdmin
-        .from('public_scan_jobs')
-        .update({ status: 'failed', error: msg, completed_at: new Date().toISOString() })
-        .eq('id', jobId),
-    ).catch(() => {})
+    // Best-effort write: if this also fails, the heartbeat job stays 'running'
+    // until the next deployment (acceptable — 9-min timeout handles restarts).
+    await supabaseAdmin
+      .from('public_scan_jobs')
+      .update({ status: 'failed', error: msg, completed_at: new Date().toISOString() })
+      .eq('id', jobId)
+      .then(() => undefined)
+      .catch(() => undefined)
+  } finally {
+    clearInterval(heartbeat)
+    clearTimeout(hardTimeoutId)
   }
 }
 
