@@ -4,6 +4,17 @@ import { useState, useEffect, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 
+const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
+
+// P12.I.7 — blog generation state for an Untapped (gap) keyword row
+type BlogGenPhase = 'generating' | 'done' | 'upgrade' | 'error'
+interface BlogGenState {
+  phase: BlogGenPhase
+  postId?: string
+  existingUrl?: string
+  message?: string
+}
+
 // ─── Shared types ────────────────────────────────────────────────────────────
 
 interface SeoMetrics {
@@ -166,10 +177,52 @@ function CompetitorCard({ comp, rank }: { comp: Competitor; rank: number }) {
 
 // ─── Gap keywords table ───────────────────────────────────────────────────────
 
-function GapTable({ keywords }: { keywords: GapKeyword[] }) {
+function GapTable({ keywords, clientId }: { keywords: GapKeyword[]; clientId: string }) {
   const [search, setSearch] = useState('')
   const [intentFilter, setIntentFilter] = useState('all')
   const [shown, setShown] = useState(50)
+  const [blogGen, setBlogGen] = useState<Record<string, BlogGenState>>({})
+
+  const blogBusy = Object.values(blogGen).some(s => s.phase === 'generating')
+
+  // P12.I.7 — generate a blog post directly from an Untapped (gap) keyword
+  const handleGenerateBlog = async (kw: GapKeyword, skipAudit = false) => {
+    setBlogGen(prev => ({ ...prev, [kw.keyword]: { phase: 'generating' } }))
+    try {
+      const res = await fetch(`/api/clients/${clientId}/blog`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        body: JSON.stringify({
+          mode: 'unified',
+          topic: kw.keyword,
+          primary_keyword: kw.keyword,
+          keyword_volume: kw.search_volume ?? undefined,
+          keyword_kd: kw.keyword_difficulty ?? undefined,
+          keyword_intent: kw.intent,
+          word_count_target: 1200,
+          skip_audit: skipAudit,
+        }),
+      })
+      const j = await res.json()
+      if (!res.ok || !j.success) throw new Error(j.error ?? '生成失败')
+      if (j.action === 'upgrade' && j.audit) {
+        setBlogGen(prev => ({
+          ...prev,
+          [kw.keyword]: { phase: 'upgrade', existingUrl: j.audit.existing_url ?? undefined },
+        }))
+      } else {
+        setBlogGen(prev => ({
+          ...prev,
+          [kw.keyword]: { phase: 'done', postId: j.post?.id },
+        }))
+      }
+    } catch (e) {
+      setBlogGen(prev => ({
+        ...prev,
+        [kw.keyword]: { phase: 'error', message: e instanceof Error ? e.message : '生成失败' },
+      }))
+    }
+  }
 
   const filtered = useMemo(() =>
     keywords.filter(kw => {
@@ -210,13 +263,15 @@ function GapTable({ keywords }: { keywords: GapKeyword[] }) {
               <th className="text-right px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-20">月搜量</th>
               <th className="text-right px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-16">KD</th>
               <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-32">意图</th>
+              <th className="text-right px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-40">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {page.length === 0 ? (
-              <tr><td colSpan={4} className="text-center py-8 text-sm text-gray-400">没有符合条件的缺口词</td></tr>
+              <tr><td colSpan={5} className="text-center py-8 text-sm text-gray-400">没有符合条件的缺口词</td></tr>
             ) : page.map((kw, i) => {
               const style = INTENT_STYLE[kw.intent] ?? INTENT_STYLE.informational
+              const gen: BlogGenState | undefined = blogGen[kw.keyword]
               return (
                 <tr key={i} className="hover:bg-gray-50 transition-colors">
                   <td className="px-4 py-2.5 font-medium text-gray-900 max-w-xs truncate">{kw.keyword}</td>
@@ -224,6 +279,52 @@ function GapTable({ keywords }: { keywords: GapKeyword[] }) {
                   <td className={`px-3 py-2.5 text-right tabular-nums ${kdCls(kw.keyword_difficulty)}`}>{kw.keyword_difficulty ?? '—'}</td>
                   <td className="px-3 py-2.5">
                     <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${style.bg}`}>{style.label}</span>
+                  </td>
+                  <td className="px-3 py-2.5 text-right">
+                    {!gen && (
+                      <button
+                        onClick={() => handleGenerateBlog(kw)}
+                        disabled={blogBusy}
+                        className="inline-flex items-center gap-1 rounded-lg bg-indigo-50 border border-indigo-200 px-2.5 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        ✨ 生成博客
+                      </button>
+                    )}
+                    {gen?.phase === 'generating' && (
+                      <span className="text-xs text-indigo-400">⏳ 生成中…</span>
+                    )}
+                    {gen?.phase === 'done' && (
+                      <Link
+                        href={`/dashboard/clients/${clientId}/blog/${gen.postId}`}
+                        className="inline-flex items-center gap-1 rounded-lg bg-green-50 border border-green-200 px-2.5 py-1 text-xs font-medium text-green-700 hover:bg-green-100 transition-colors"
+                      >
+                        ✓ 查看博客 →
+                      </Link>
+                    )}
+                    {gen?.phase === 'upgrade' && (
+                      <div className="flex items-center justify-end gap-2">
+                        {gen.existingUrl && (
+                          <a href={gen.existingUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-gray-500 hover:underline">已有文章</a>
+                        )}
+                        <button
+                          onClick={() => handleGenerateBlog(kw, true)}
+                          disabled={blogBusy}
+                          className="text-xs font-medium text-indigo-600 hover:underline disabled:opacity-50"
+                        >
+                          仍要生成
+                        </button>
+                      </div>
+                    )}
+                    {gen?.phase === 'error' && (
+                      <button
+                        onClick={() => handleGenerateBlog(kw)}
+                        disabled={blogBusy}
+                        title={gen.message}
+                        className="text-xs font-medium text-red-600 hover:underline disabled:opacity-50"
+                      >
+                        ✕ 失败 · 重试
+                      </button>
+                    )}
                   </td>
                 </tr>
               )
@@ -661,7 +762,7 @@ export default function SeoIntelligencePage() {
 
                 {/* Gap keywords table */}
                 {gapKeywords.length > 0 ? (
-                  <GapTable keywords={gapKeywords} />
+                  <GapTable keywords={gapKeywords} clientId={clientId} />
                 ) : (
                   <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
                     未找到明显关键词缺口，你的覆盖已相当全面。

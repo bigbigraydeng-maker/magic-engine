@@ -5,6 +5,17 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import type { StrategyItem, ActionType, ContentMode, StrategyPriority } from '@/lib/strategy/types'
 
+const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
+
+// P12.I.7 — blog generation state for a single new_blog strategy card
+type BlogGenPhase = 'generating' | 'done' | 'upgrade' | 'error'
+interface BlogGenState {
+  phase: BlogGenPhase
+  postId?: string
+  existingUrl?: string
+  message?: string
+}
+
 // ---------------------------------------------------------------------------
 // Display helpers
 // ---------------------------------------------------------------------------
@@ -59,10 +70,16 @@ function StrategyCard({
   item,
   clientId,
   onDismiss,
+  onGenerateBlog,
+  blogGen,
+  busy,
 }: {
   item: StrategyItem
   clientId: string
   onDismiss: (id: string) => void
+  onGenerateBlog: (item: StrategyItem, skipAudit?: boolean) => void
+  blogGen: BlogGenState | undefined
+  busy: boolean
 }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5 hover:border-indigo-200 transition-colors">
@@ -136,6 +153,70 @@ function StrategyCard({
               </Link>
             </div>
           )}
+
+          {/* P12.I.7 — new_blog: generate a blog post from this opportunity */}
+          {item.action_type === 'new_blog' && (
+            <div className="mt-3">
+              {!blogGen && (
+                <button
+                  onClick={() => onGenerateBlog(item)}
+                  disabled={busy}
+                  className="inline-flex items-center gap-1 rounded-lg bg-indigo-50 border border-indigo-200 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  ✨ 生成博客
+                </button>
+              )}
+              {blogGen?.phase === 'generating' && (
+                <span className="inline-flex items-center gap-1 rounded-lg bg-indigo-50 border border-indigo-200 px-3 py-1.5 text-xs font-medium text-indigo-400">
+                  ⏳ 生成中…（约 20–30 秒）
+                </span>
+              )}
+              {blogGen?.phase === 'done' && (
+                <Link
+                  href={`/dashboard/clients/${clientId}/blog/${blogGen.postId}`}
+                  className="inline-flex items-center gap-1 rounded-lg bg-green-50 border border-green-200 px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-100 transition-colors"
+                >
+                  ✓ 已生成草稿 · 查看博客 →
+                </Link>
+              )}
+              {blogGen?.phase === 'upgrade' && (
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-xs text-amber-700">⚠ 已有类似文章，建议升级而非新建</p>
+                  <div className="flex flex-wrap gap-2">
+                    {blogGen.existingUrl && (
+                      <a
+                        href={blogGen.existingUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 rounded-lg bg-white border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-gray-400 transition-colors"
+                      >
+                        查看已有文章 →
+                      </a>
+                    )}
+                    <button
+                      onClick={() => onGenerateBlog(item, true)}
+                      disabled={busy}
+                      className="inline-flex items-center gap-1 rounded-lg bg-indigo-50 border border-indigo-200 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      仍要生成
+                    </button>
+                  </div>
+                </div>
+              )}
+              {blogGen?.phase === 'error' && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-red-600">✕ {blogGen.message}</span>
+                  <button
+                    onClick={() => onGenerateBlog(item)}
+                    disabled={busy}
+                    className="text-xs font-medium text-indigo-600 hover:underline disabled:opacity-50"
+                  >
+                    重试
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Score badge + dismiss */}
@@ -193,6 +274,7 @@ export default function StrategyPage() {
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [filterMode, setFilterMode] = useState<FilterMode>('all')
+  const [blogGen, setBlogGen] = useState<Record<string, BlogGenState>>({})
 
   const fetchItems = useCallback(async () => {
     setLoading(true)
@@ -230,6 +312,47 @@ export default function StrategyPage() {
     setItems(prev => prev.filter(i => i.id !== itemId))
     setTotal(prev => Math.max(0, prev - 1))
   }
+
+  // P12.I.7 — generate a blog post directly from a new_blog strategy item
+  const handleGenerateBlog = async (item: StrategyItem, skipAudit = false) => {
+    setBlogGen(prev => ({ ...prev, [item.id]: { phase: 'generating' } }))
+    try {
+      const res = await fetch(`/api/clients/${clientId}/blog`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        body: JSON.stringify({
+          mode: item.content_mode,
+          topic: item.proposed_title,
+          source_query_id: item.source_query_id ?? undefined,
+          primary_keyword: item.source_keyword ?? undefined,
+          keyword_volume: item.keyword_volume ?? undefined,
+          keyword_kd: item.keyword_kd ?? undefined,
+          word_count_target: 1200,
+          skip_audit: skipAudit,
+        }),
+      })
+      const j = await res.json()
+      if (!res.ok || !j.success) throw new Error(j.error ?? '生成失败')
+      if (j.action === 'upgrade' && j.audit) {
+        setBlogGen(prev => ({
+          ...prev,
+          [item.id]: { phase: 'upgrade', existingUrl: j.audit.existing_url ?? undefined },
+        }))
+      } else {
+        setBlogGen(prev => ({
+          ...prev,
+          [item.id]: { phase: 'done', postId: j.post?.id },
+        }))
+      }
+    } catch (e) {
+      setBlogGen(prev => ({
+        ...prev,
+        [item.id]: { phase: 'error', message: e instanceof Error ? e.message : '生成失败' },
+      }))
+    }
+  }
+
+  const blogBusy = Object.values(blogGen).some(s => s.phase === 'generating')
 
   const displayed = filterMode === 'all'
     ? items
@@ -325,7 +448,15 @@ export default function StrategyPage() {
         ) : (
           <div className="space-y-3">
             {displayed.map(item => (
-              <StrategyCard key={item.id} item={item} clientId={clientId} onDismiss={handleDismiss} />
+              <StrategyCard
+                key={item.id}
+                item={item}
+                clientId={clientId}
+                onDismiss={handleDismiss}
+                onGenerateBlog={handleGenerateBlog}
+                blogGen={blogGen[item.id]}
+                busy={blogBusy}
+              />
             ))}
           </div>
         )}
