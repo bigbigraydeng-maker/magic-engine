@@ -253,16 +253,18 @@ export default function GeoComposerPage() {
           </span>
         )}
 
-        <div className="ml-auto">
-          <button
-            onClick={handleGenerate}
-            disabled={generating}
-            title={directives.length === 0 ? '基于 AI Tracker 弱点 + Master Brief 生成指令' : '基于最新 AI Tracker 数据重新生成'}
-            className="text-sm font-medium px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-lg transition-colors flex items-center gap-1.5"
-          >
-            {generating ? '⏳ 生成中…' : directives.length === 0 ? '✨ 生成 GEO 指令' : '✨ 重新生成'}
-          </button>
-        </div>
+        {directives.length > 0 && (
+          <div className="ml-auto">
+            <button
+              onClick={handleGenerate}
+              disabled={generating}
+              title="基于最新 AI Tracker 数据重新生成"
+              className="text-sm font-medium px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-lg transition-colors flex items-center gap-1.5"
+            >
+              {generating ? '⏳ 生成中…' : '✨ 重新生成'}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Version selector */}
@@ -290,8 +292,17 @@ export default function GeoComposerPage() {
 
       {/* Empty state */}
       {directives.length === 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-6 text-sm text-amber-700">
-          <strong>No directives yet.</strong> Click <strong>✨ Regenerate from AI Tracker</strong> to generate your first GEO directive automatically from the client&apos;s Brief and AI Visibility data.
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-6 text-sm text-amber-700 flex flex-col items-start gap-3">
+          <p>
+            <strong>还没有任何 GEO 指令。</strong>点击下方按钮，从客户的 Master Brief 和 AI 可见度数据自动生成第一条 GEO 指令。
+          </p>
+          <button
+            onClick={handleGenerate}
+            disabled={generating}
+            className="text-sm font-medium px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-lg transition-colors flex items-center gap-1.5"
+          >
+            {generating ? '⏳ 生成中…' : '✨ 生成 GEO 指令'}
+          </button>
         </div>
       )}
 
