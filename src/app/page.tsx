@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { createServerSupabaseClient } from '@/lib/supabase-server';
 import Link from 'next/link';
+// @tier-updated: 2026-05-21 — 华佗处方 moved to Free, Luban=FDE only
 
 export const dynamic = 'force-dynamic';
 
@@ -40,10 +41,10 @@ const WORKFLOW_STEPS = [
     step: '03',
     icon: '💊',
     title: 'Action Roadmap',
-    subtitle: 'Zhuge Prescription',
-    desc: 'Prioritised fix plan tailored to your scores. Every action ranked by impact and effort, with timelines.',
-    tier: 'fde',
-    tierLabel: 'FDE',
+    subtitle: 'Huatuo Prescription',
+    desc: 'Prioritised fix plan — every issue ranked by impact and effort, with a clear 90-day timeline.',
+    tier: 'free',
+    tierLabel: 'Free',
   },
   {
     step: '04',
@@ -73,11 +74,15 @@ const FREE_FEATURES = [
     title: 'Weakness Report',
     desc: 'Plain-English explanation of what is hurting you and why it matters to your bottom line',
   },
+  {
+    icon: '💊',
+    title: 'Action Roadmap',
+    desc: 'A real, prioritised fix plan — not just a score, but exactly what to do next',
+  },
 ];
 
 // ── FDE features ────────────────────────────────────────────────────────────
 const FDE_FEATURES = [
-  { icon: '💊', title: 'Custom Action Roadmap',      desc: 'Prioritised, impact-ranked fix plan for your exact situation' },
   { icon: '⚡', title: 'Execution Board (Luban)',    desc: 'Automated content, campaigns & optimisations — tracked end-to-end' },
   { icon: '🤖', title: 'Content Engine',             desc: 'SEO blogs, social campaigns & GEO directives, all automated' },
   { icon: '📋', title: 'Monthly Intelligence Reports', desc: 'Automated performance reports delivered to your inbox' },
