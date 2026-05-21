@@ -14,10 +14,16 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { callClaudeWithTools, type ClaudeToolCall } from '@/lib/anthropic/client'
-import type { ExecutionItem, ExecutionLog, PrescriptionContent } from '@/types/diagnostic'
+import type { ExecutionItem, ExecutionLog, PrescriptionContent, DiagnosticDimension } from '@/types/diagnostic'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
-import { buildLubanSystemPrompt, type LubanContext } from './prompts'
+import type { MasterBrief, CampaignBrief } from '@/types/magic-engine'
+import { getActiveBrief } from '@/lib/content/brief-injector'
+import { getActiveCampaigns } from '@/lib/content/campaign-injector'
+import { buildLubanSystemPrompt, type LubanContext, type DiagnosticFindingLite } from './prompts'
 import { buildLubanTools } from './tools'
+
+// Max findings to load per dimension — matches MAX_FINDINGS in prompts.ts
+const FINDINGS_PER_DIMENSION = 6
 
 export interface LubanChatResult {
   reply: string
@@ -49,18 +55,20 @@ async function loadLubanContext(
 
   if (itemErr || !item) return null
 
-  // 2. 父处方（content.summary + discovery_id）
+  // 2. 父处方（content.summary + discovery_id + run_id）
   let prescriptionSummary: string | null = null
   let discoveryId: string | null = null
+  let runId: string | null = null
   {
     const { data: presc } = await supabase
       .from('prescriptions')
-      .select('content, discovery_id')
+      .select('content, discovery_id, run_id')
       .eq('id', item.prescription_id)
-      .single<{ content: PrescriptionContent | null; discovery_id: string | null }>()
+      .single<{ content: PrescriptionContent | null; discovery_id: string | null; run_id: string | null }>()
     if (presc) {
       prescriptionSummary = presc.content?.summary ?? null
       discoveryId = presc.discovery_id
+      runId = presc.run_id
     }
   }
 
@@ -68,6 +76,7 @@ async function loadLubanContext(
   let businessName: string | null = null
   let industry: string | null = null
   let crisisType: string | null = null
+  let discoveryPayload: DiscoveryReport | null = null
   if (discoveryId) {
     const { data: disc } = await supabase
       .from('client_discovery')
@@ -75,13 +84,41 @@ async function loadLubanContext(
       .eq('id', discoveryId)
       .single<{ payload: DiscoveryReport }>()
     if (disc?.payload) {
+      discoveryPayload = disc.payload
       businessName = disc.payload.business?.name ?? null
       industry = disc.payload.business?.industry?.join(' / ') ?? null
       crisisType = disc.payload.diagnosis?.crisis_type ?? null
     }
   }
 
-  // 4. 该执行项最近的工作日志
+  // 4. Master Brief + active campaigns (parallel, non-blocking)
+  const [masterBrief, activeCampaigns] = await Promise.all([
+    getActiveBrief(clientId).catch(() => null),
+    getActiveCampaigns(clientId).catch(() => []),
+  ]) as [MasterBrief | null, CampaignBrief[]]
+
+  // 5. 华佗诊断分数 + 同维度 top findings
+  let dimensionScores: Partial<Record<DiagnosticDimension, number | null>> | null = null
+  let topFindings: DiagnosticFindingLite[] = []
+  if (runId) {
+    const { data: runRow } = await supabase
+      .from('diagnostic_runs')
+      .select('dimension_scores')
+      .eq('id', runId)
+      .maybeSingle<{ dimension_scores: Partial<Record<DiagnosticDimension, number | null>> | null }>()
+    if (runRow?.dimension_scores) dimensionScores = runRow.dimension_scores
+
+    const { data: findingRows } = await supabase
+      .from('diagnostic_findings')
+      .select('dimension, severity, title, description, recommendation')
+      .eq('run_id', runId)
+      .eq('dimension', item.dimension)
+      .order('priority_score', { ascending: false })
+      .limit(FINDINGS_PER_DIMENSION)
+    topFindings = (findingRows ?? []) as DiagnosticFindingLite[]
+  }
+
+  // 6. 该执行项最近的工作日志
   const { data: logRows } = await supabase
     .from('execution_logs')
     .select('*')
@@ -103,6 +140,11 @@ async function loadLubanContext(
     industry,
     crisisType,
     recentLogs: (logRows ?? []) as ExecutionLog[],
+    discovery:       discoveryPayload,
+    masterBrief,
+    activeCampaigns,
+    dimensionScores,
+    topFindings,
   }
 }
 

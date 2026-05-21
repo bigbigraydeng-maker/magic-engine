@@ -4,22 +4,257 @@
  * 鲁班是 Magic Engine 第三个 Agent（执行代理）。
  * 张骞发现 → 华佗处方 → 鲁班执行。
  * 鲁班陪 FDE 把单个执行项落地：起草内容、分析卡点、给下一步建议。
+ *
+ * 上下文富化：在执行层对话中注入
+ *   ① 张骞发现数据（SEMrush / GBP / social / AI 可见度 / 关键词）
+ *   ② Master Brief 品牌约束（语气 / 视觉 / 内容支柱 / 平台策略）
+ *   ③ 当期 Campaign 运营方向
+ *   ④ 华佗诊断明细（6 维分数 + 同维度 findings）
  */
 
-import type { ExecutionItem, ExecutionLog } from '@/types/diagnostic'
+import type { ExecutionItem, ExecutionLog, DiagnosticDimension, DiagnosticSeverity } from '@/types/diagnostic'
+import type { DiscoveryReport } from '@/lib/zhangqian/types'
+import type { MasterBrief, CampaignBrief, ContentPillar, PlatformConfig } from '@/types/magic-engine'
+import { formatBriefForPrompt } from '@/lib/content/brief-injector'
+import { formatCampaignForPrompt } from '@/lib/content/campaign-injector'
+
+// ── Token control constants ────────────────────────────────────────────────────
+
+const MAX_KEYWORDS      = 8    // SEMrush / seed keyword rows shown
+const MAX_AI_GAPS       = 6    // AI visibility miss-queries shown
+const MAX_CAMPAIGNS     = 2    // Active campaigns injected
+const FINDING_DESC_MAX  = 200  // Characters before finding description is truncated
+
+// ── Lightweight finding type (avoids pulling full DiagnosticFinding into prompt layer) ──
+
+export interface DiagnosticFindingLite {
+  dimension:      DiagnosticDimension
+  severity:       DiagnosticSeverity
+  title:          string
+  description:    string
+  recommendation: string
+}
+
+// ── LubanContext ──────────────────────────────────────────────────────────────
 
 export interface LubanContext {
-  item: ExecutionItem
-  /** 来自父处方 */
+  item:                ExecutionItem
   prescriptionSummary: string | null
-  phaseName: string | null
-  /** 客户背景 */
-  businessName: string | null
-  industry: string | null
-  crisisType: string | null
-  /** 这个执行项已有的工作日志（FDE 记录、卡点、状态变更） */
-  recentLogs: ExecutionLog[]
+  phaseName:           string | null
+  businessName:        string | null
+  industry:            string | null
+  crisisType:          string | null
+  recentLogs:          ExecutionLog[]
+  // Enriched context — null / [] = graceful degradation, conversation still works
+  discovery:           DiscoveryReport | null
+  masterBrief:         MasterBrief | null
+  activeCampaigns:     CampaignBrief[]
+  dimensionScores:     Partial<Record<DiagnosticDimension, number | null>> | null
+  topFindings:         DiagnosticFindingLite[]
 }
+
+// ── Display maps ───────────────────────────────────────────────────────────────
+
+const DIM_CN: Record<DiagnosticDimension, string> = {
+  seo:           'SEO 自然搜索',
+  ai_visibility: 'AI 搜索可见度',
+  ads:           '付费广告',
+  social:        '社媒运营',
+  reputation:    '口碑声誉',
+  competitor:    '竞争格局',
+}
+
+const SEVERITY_CN: Record<DiagnosticSeverity, string> = {
+  critical: '🔴 严重',
+  high:     '🟠 高',
+  medium:   '🟡 中',
+  low:      '⚪ 低',
+  info:     'ℹ️ 信息',
+}
+
+// ── Section format helpers ────────────────────────────────────────────────────
+
+function formatDiscoverySection(discovery: DiscoveryReport | null): string {
+  if (!discovery) return '（张骞发现数据暂未完成，请先运行品牌扫描）'
+
+  const lines: string[] = []
+
+  // SEMrush domain snapshot
+  const s = discovery.semrush_snapshot
+  if (s) {
+    lines.push('SEMrush 域名数据：')
+    if (s.monthly_traffic != null) lines.push(`  月度访客：${s.monthly_traffic.toLocaleString()}`)
+    if (s.trust_score != null)     lines.push(`  信任分：${s.trust_score}/100`)
+    if (s.keyword_count != null)   lines.push(`  排名关键词数：${s.keyword_count}`)
+    if (s.top_keywords.length > 0) {
+      const kws = s.top_keywords
+        .slice(0, MAX_KEYWORDS)
+        .map(k => `${k.keyword}（#${k.position}${k.volume ? `，月搜${k.volume}` : ''}）`)
+        .join('，')
+      lines.push(`  主要排名词：${kws}`)
+    }
+  }
+
+  // Google Business Profile
+  if (discovery.gbp) {
+    const g = discovery.gbp
+    const parts: string[] = [g.business_name]
+    if (g.rating != null)       parts.push(`${g.rating}/5 星`)
+    if (g.review_count != null) parts.push(`${g.review_count} 条评价`)
+    lines.push(`Google Business Profile：${parts.join(' · ')}`)
+  }
+
+  // Review platforms
+  const rps = discovery.review_platforms
+    .filter(r => r.rating != null || r.review_count != null)
+    .map(r => {
+      const parts: string[] = [r.platform]
+      if (r.rating != null)       parts.push(`${r.rating}分`)
+      if (r.review_count != null) parts.push(`${r.review_count}条`)
+      return parts.join(' ')
+    })
+  if (rps.length > 0) lines.push(`评论平台：${rps.join(' | ')}`)
+
+  // Social profiles
+  if (discovery.social_profiles.length > 0) {
+    lines.push('社媒档案：')
+    for (const sp of discovery.social_profiles) {
+      const parts: string[] = [sp.platform]
+      if (sp.followers_count != null) parts.push(`${sp.followers_count.toLocaleString()} 粉丝`)
+      if (sp.posts_last_30d != null)  parts.push(`近30天 ${sp.posts_last_30d} 帖`)
+      if (sp.engagement_rate != null) parts.push(`互动率 ${(sp.engagement_rate * 100).toFixed(1)}%`)
+      lines.push(`  ${parts.join(' · ')}`)
+    }
+  }
+
+  // AI visibility gaps
+  const aiResults = discovery.ai_visibility_results ?? []
+  if (aiResults.length > 0) {
+    const gaps = aiResults.filter(r => !r.client_mentioned).slice(0, MAX_AI_GAPS)
+    if (gaps.length > 0) {
+      lines.push('AI 搜索可见度缺口（以下问句中客户未被提及）：')
+      for (const r of gaps) {
+        const competitors = r.top_brands.slice(0, 3).join('、')
+        lines.push(`  「${r.question}」→ 提及品牌：${competitors}`)
+      }
+    } else {
+      lines.push('AI 搜索可见度：测试问句均有提及客户品牌 ✓')
+    }
+  }
+
+  // Seed keyword performance
+  const rankedKws = (discovery.seed_keywords ?? [])
+    .filter(k => k.semrush_rank != null)
+    .sort((a, b) => (a.semrush_rank ?? 999) - (b.semrush_rank ?? 999))
+    .slice(0, MAX_KEYWORDS)
+  if (rankedKws.length > 0) {
+    lines.push('核心关键词表现：')
+    for (const k of rankedKws) {
+      const parts: string[] = [k.keyword]
+      if (k.semrush_rank != null)   parts.push(`排名 #${k.semrush_rank}`)
+      if (k.semrush_volume != null) parts.push(`月搜 ${k.semrush_volume}`)
+      if (k.semrush_kd != null)     parts.push(`难度 ${k.semrush_kd}`)
+      lines.push(`  ${parts.join(' · ')}`)
+    }
+  }
+
+  return lines.length > 0 ? lines.join('\n') : '（张骞发现数据暂无有效指标）'
+}
+
+function formatBriefSection(brief: MasterBrief | null): string {
+  if (!brief) return '（Master Brief 尚未建立，请先在 Social 模块完成品牌简报）'
+
+  const base = formatBriefForPrompt(brief)
+  const extra: string[] = []
+
+  // Content pillars (structured field not covered by formatBriefForPrompt)
+  if (brief.content_pillars && brief.content_pillars.length > 0) {
+    const pillars = (brief.content_pillars as ContentPillar[])
+      .map(p => `${p.name}（${Math.round(p.post_ratio * 100)}%）：${p.description}`)
+      .join('；')
+    extra.push(`内容支柱：${pillars}`)
+  }
+
+  // Platform strategy with frequencies (includes hashtag context)
+  if (brief.platform_strategy && Object.keys(brief.platform_strategy).length > 0) {
+    const active = Object.entries(brief.platform_strategy)
+      .filter(([, cfg]) => (cfg as PlatformConfig).enabled)
+      .map(([platform, cfg]) => {
+        const c = cfg as PlatformConfig
+        return `${platform}（${c.post_frequency}，${c.primary_content_type}）`
+      })
+    if (active.length > 0) extra.push(`平台发布策略：${active.join('；')}`)
+  }
+
+  // Structured brand voice (deeper than the legacy tone field)
+  if (brief.brand_voice) {
+    const bv = brief.brand_voice
+    if (bv.tone_keywords?.length > 0)  extra.push(`语气关键词：${bv.tone_keywords.join('，')}`)
+    if (bv.avoid_keywords?.length > 0) extra.push(`语气禁忌词：${bv.avoid_keywords.join('，')}`)
+    extra.push(`正式程度：${bv.formality}，Emoji 使用：${bv.emoji_usage}`)
+  }
+
+  return extra.length > 0 ? `${base}\n${extra.join('\n')}` : base
+}
+
+function formatCampaignSection(campaigns: CampaignBrief[]): string {
+  if (campaigns.length === 0) return '（当前无进行中的推广活动）'
+
+  const shown     = campaigns.slice(0, MAX_CAMPAIGNS)
+  const remaining = campaigns.length - shown.length
+  const parts     = shown.map(c => formatCampaignForPrompt(c))
+
+  let result = parts.join('\n\n---\n\n')
+  if (remaining > 0) result += `\n\n（另有 ${remaining} 个推广活动未展开）`
+  return result
+}
+
+const ALL_DIMS: DiagnosticDimension[] = [
+  'seo', 'ai_visibility', 'ads', 'social', 'reputation', 'competitor',
+]
+
+function formatDiagnosisSection(
+  scores: Partial<Record<DiagnosticDimension, number | null>> | null,
+  findings: DiagnosticFindingLite[],
+): string {
+  const lines: string[] = []
+
+  if (scores && Object.keys(scores).length > 0) {
+    lines.push('华佗 6 维诊断分数（0–100；分越低越需要优先修复）：')
+    const scored = ALL_DIMS.filter(d => d in scores)
+      .sort((a, b) => (scores[a] ?? 0) - (scores[b] ?? 0))
+    for (const d of scored) {
+      const v = scores[d]
+      const flag = v != null && v < 50 ? ' ⚠️ 偏弱' : ''
+      lines.push(`  ${DIM_CN[d]}：${v ?? '暂无数据'}${flag}`)
+    }
+    const unscored = ALL_DIMS.filter(d => !(d in scores))
+    for (const d of unscored) lines.push(`  ${DIM_CN[d]}：（暂无数据）`)
+  } else {
+    lines.push('华佗 6 维诊断分数：（诊断尚未完成）')
+  }
+
+  if (findings.length > 0) {
+    lines.push('')
+    lines.push('华佗诊断发现的具体问题（与当前执行维度相关，按严重度排序）：')
+    for (const f of findings) {
+      lines.push(`  [${SEVERITY_CN[f.severity]}] ${f.title}`)
+      if (f.description) {
+        const desc = f.description.length > FINDING_DESC_MAX
+          ? `${f.description.slice(0, FINDING_DESC_MAX)}…`
+          : f.description
+        lines.push(`    ↳ 问题：${desc}`)
+      }
+      if (f.recommendation) {
+        lines.push(`    ↳ 华佗建议：${f.recommendation}`)
+      }
+    }
+  }
+
+  return lines.join('\n')
+}
+
+// ── Existing status maps ───────────────────────────────────────────────────────
 
 const FIX_TYPE_CN: Record<string, string> = {
   me_auto:     'Magic Engine 可自动执行',
@@ -28,12 +263,14 @@ const FIX_TYPE_CN: Record<string, string> = {
 }
 
 const STATUS_CN: Record<string, string> = {
-  pending: '待处理', in_progress: '进行中', completed: '已完成', skipped: '已跳过',
+  pending:     '待处理',
+  in_progress: '进行中',
+  completed:   '已完成',
+  skipped:     '已跳过',
 }
 
-/**
- * 构建鲁班的 system prompt — 注入这个执行项的全部上下文。
- */
+// ── Main system prompt builder ─────────────────────────────────────────────────
+
 export function buildLubanSystemPrompt(ctx: LubanContext): string {
   const { item } = ctx
   const steps = (item.steps_json ?? {}) as Record<string, unknown>
@@ -72,6 +309,7 @@ Magic Engine 三个 Agent 接力：
 - **标题**：${item.title}
 - **说明**：${item.description}
 - **所属阶段**：${ctx.phaseName ?? `Phase ${item.phase}`}
+- **执行维度**：${DIM_CN[item.dimension] ?? item.dimension}
 - **执行类型**：${FIX_TYPE_CN[item.fix_type] ?? item.fix_type}
 - **当前状态**：${STATUS_CN[item.status] ?? item.status}
 - **预计工时**：${hours}
@@ -84,6 +322,22 @@ Magic Engine 三个 Agent 接力：
 - **客户**：${ctx.businessName ?? '（未知）'}${ctx.industry ? `（${ctx.industry}）` : ''}
 - **诊断危机类型**：${ctx.crisisType ?? '（未指定）'}
 - **处方整体思路**：${ctx.prescriptionSummary ?? '（无摘要）'}
+
+## 张骞发现的客观数据
+
+${formatDiscoverySection(ctx.discovery)}
+
+## 客户品牌约束（Master Brief — 内容创作必须遵守）
+
+${formatBriefSection(ctx.masterBrief)}
+
+## 当前推广活动（Campaign）
+
+${formatCampaignSection(ctx.activeCampaigns)}
+
+## 华佗诊断明细
+
+${formatDiagnosisSection(ctx.dimensionScores, ctx.topFindings)}
 
 ## 这个执行项已有的工作记录
 
@@ -119,6 +373,15 @@ ${logsText}
 - 起草内容时直接给成品，不要"你可以这样写……"绕弯子
 - 不确定客户的某个约束时，**主动问 FDE**，而不是假设
 - 如果 FDE 描述的卡点超出这个执行项范围（比如需要改处方），明确说"这个建议要回到华佗处方层调整"
+
+## 重要约束：内容创作必须有据可依
+
+**起草任何内容（文案、建议、策略）时，必须遵守以下优先级：**
+
+1. **数据驱动**：引用上方「张骞发现的客观数据」和「华佗诊断明细」作为出发点——例如"根据华佗发现社媒维度 38 分，优先修复发布频率"；"根据 AI 可见度缺口，这篇内容需要覆盖问句 X"
+2. **品牌遵守**：所有文案必须符合「客户品牌约束」中的语气、视觉风格、内容支柱比例和禁忌词
+3. **Campaign 对齐**：若当前有进行中的 Campaign，内容方向和 CTA 必须体现推广重点
+4. **有疑问先问**：以上数据不足以支撑有把握的建议时，主动向 FDE 确认，不要自行补全假设
 
 记住：你是工匠，FDE 是你的搭档。一起把活干漂亮。`
 }
