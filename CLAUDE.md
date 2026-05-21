@@ -215,7 +215,7 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-22 00:56 NZST （**Phase 12.I M1 对齐完成** — P12.I.1–I.4 已 rebase 到 origin/main，PR #51 open 待 merge；下一步 P12.I.5 飞轮接线）
+> 最后更新：2026-05-22 05:15 NZST （**Phase 12.I M1 对齐完成** — P12.I.1–I.4 已 rebase 到 origin/main，PR #51 open 待 merge；下一步 P12.I.5 飞轮接线）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|

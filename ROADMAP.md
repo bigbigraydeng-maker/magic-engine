@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-22 00:56 NZST · 当前阶段：**Phase 12.I — SEO Intelligence 页面 + 飞轮接线（P12.I.1–I.5 ✅，博客生成已接入 SEO 飞轮；P12.I.6「自主行动」执行泳道为下一步）**。M1 deadline 6/19。
+> 最后更新：2026-05-22 05:15 NZST · 当前阶段：**Phase 12.I — SEO Intelligence 页面 + 飞轮接线（P12.I.1–I.5 ✅，博客生成已接入 SEO 飞轮；P12.I.6「自主行动」执行泳道为下一步）**。M1 deadline 6/19。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -53,6 +53,7 @@
 📋 Phase 16     Competitor Intelligence / 竞品雷达 + 信号驱动执行（战略确认，待排期）
 📋 Phase 17     Unified Data Pullback / 统一数据回流层（战略确认，待排期）
 📋 Phase 18     Ads Execution Engine / 广告执行引擎（Meta + Google + TikTok，已登记）
+📋 Phase 19     API 鉴权整改 / IDOR 修复（🔴 CRITICAL 安全 — 19.A+B 须在客户建号前完成）
 ```
 
 **Phase 7 核心战略**：双信号博客（Dual-Signal Blog）— 每篇文章同时携带 SEO 信号（Google 排名）和 GEO 信号（AI 推荐），选题由 AI Tracker 弱项 × SEMrush 低KD机会交叉驱动，形成数据自强化飞轮。
@@ -1963,6 +1964,57 @@ AI 可见度层（ME 独有 ✅）
 
 ---
 
+## Phase 19 — API 鉴权整改（IDOR 修复 + 凭证泄漏封堵）🔴 CRITICAL 安全 · 📋 已登记，缓做
+
+> **登记日期**：2026-05-22 · **状态**：方案已设计 + PM 批准；实施被 PM 缓做（优先内容 / SEO），但带**硬性时间约束**（见下）
+>
+> **背景**：2026-05-22 审计发现全部 **89 个 `/api/clients/[id]/*` 路由**存在系统性横向越权（IDOR）—— 任何已登录的 dashboard 用户都能拿别的 client UUID 调任意 API 读 / 改对方数据。由 PR #51 一个 review comment（competitors-gap 路由无鉴权）引出审计，确认问题系统性。
+>
+> **根因**：`INTERNAL_API_KEY` 被以 `NEXT_PUBLIC_INTERNAL_API_KEY` 暴露（`.env.example` 第 35–37 行），约 33 个 dashboard 文件用它做 `Authorization: Bearer` 头。`NEXT_PUBLIC_*` 会被 Next.js 编译进浏览器 bundle —— bearer token 对浏览器攻击者形同公开，`requireBearerToken` 守卫虚设。
+
+### 最高危路由（19.B 优先封堵）
+
+| 路由 | 风险 |
+|------|------|
+| `users` | 用户可自我提权为 admin |
+| `cms/connect` + `connectors` | GitHub / 第三方凭证泄漏 |
+| `zhangqian/confirm` | 越权写他人 client 数据 |
+| `DELETE /api/clients/[id]` | 越权删除整个客户 |
+
+### ⚠️ 硬性时间约束（不可降级）
+
+**19.A + 19.B 必须在 PM 给 CTS / Oztop 建员工登录账号之前完成。** 当前只有内部团队能登录，IDOR 仅为内部风险；PM 计划「晚点」给客户员工建账号 —— 账号一旦建立，IDOR 立即变为外部攻击面。**建账号前先做掉 19.A + 19.B。**
+
+### 修复方案（3 层）
+
+1. **L1 鉴权切换**：浏览器侧路由的 bearer-token 鉴权 → 改用 Supabase session-cookie 鉴权，并移除全部 `NEXT_PUBLIC_INTERNAL_API_KEY`
+2. **L2 per-client 授权**：新增 `requireClientAccess(clientId)` helper，接入全部 `/api/clients/[id]/*` 路由，校验当前用户是否有权访问该 client
+3. **L3 密钥轮换**：轮换 `INTERNAL_API_KEY`
+
+> **已有地基**：`requireSession()` 已在 main（PR #51 已合并，`src/lib/auth/require-session.ts`）；`whitelist.ts` 的 `getUserPermissions()` 已返回 `allowedClientId` —— `requireClientAccess` helper 只需拼装现有能力。实施分支基于 main 切。
+
+### 实施批次（5 批 · ~19 commit）
+
+| 批次 | 范围 |
+|------|------|
+| **19.A** 地基 | `requireClientAccess` helper + 单元测试 |
+| **19.B** 最高危 | `clients/[id]` 根路由 / `users` / `cms` / `connectors`（提权 · 凭证 · 删除） |
+| **19.C** 高危业务 | `zhangqian` / `zhuge` / `diagnostic` / `prescription` / `execution` / `luban` / `blog` |
+| **19.D** 中危批量 | `brief` / `campaign` / `reels` / `geo` / `seo-*` / `site-audit` / `reports` 等无守卫路由 |
+| **19.E** 收尾 | 清除 `NEXT_PUBLIC_INTERNAL_API_KEY` + 轮换 `INTERNAL_API_KEY` |
+
+### 里程碑
+
+- **M1**：19.A 地基 —— `requireClientAccess` 单元测试全绿
+- **M2**：19.B 高危封堵完成 + CTS · Oztop 双视角冒烟测试通过
+- **M3**：19.C–E 全量整改 + 密钥轮换完成
+
+### 风险
+
+L2 授权写太严会把 CTS / Oztop 操作员锁在自己数据外。**19.B 部署前必须确认操作员邮箱已在 `ADMIN_EMAILS` / `CLIENT_VIEWERS` 白名单。**
+
+---
+
 ## ME 战略扩张模型（2026-05-19 确立）
 
 > **通用布线板原则**：ME 平台核心不变，通过插入本地化配置快速进入新市场。
@@ -1994,6 +2046,10 @@ AU / NZ（当前）          新市场（未来）
 ## 8. 决策日志
 
 > 重大决策记录在此，便于追溯。
+
+### 2026-05-22
+
+- **Phase 19 API 鉴权整改登记（不开工，PM 缓做）**：2026-05-22 审计发现全部 89 个 `/api/clients/[id]/*` 路由系统性 IDOR —— 根因为 `INTERNAL_API_KEY` 经 `NEXT_PUBLIC_INTERNAL_API_KEY` 编译进浏览器 bundle，约 33 个 dashboard 文件的 bearer-token 守卫虚设。由 PR #51 一个 review comment（competitors-gap 路由无鉴权）引出审计后发现问题系统性。方案已设计 + PM 批准：3 层修复（L1 session-cookie 鉴权 + 移除 `NEXT_PUBLIC_INTERNAL_API_KEY` / L2 `requireClientAccess` per-client 授权 helper / L3 轮换 `INTERNAL_API_KEY`），5 批 ~19 commit（19.A 地基 → 19.B 最高危 → 19.C 高危业务 → 19.D 中危批量 → 19.E 收尾）。PM 决定缓做、优先内容 / SEO，但**硬约束 = 19.A + 19.B 必须在给 CTS / Oztop 建员工登录账号之前完成**（账号一建立，IDOR 即变外部攻击面）。编号 19 已与 PM 确认。
 
 ### 2026-05-19
 
