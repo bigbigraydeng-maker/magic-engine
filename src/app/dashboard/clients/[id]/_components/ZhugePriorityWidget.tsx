@@ -16,6 +16,9 @@ export type { ZhugeActionRow };
 
 const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? '';
 
+/** Collapsed view shows this many action cards; the rest fold behind a toggle. */
+const COLLAPSED_COUNT = 2;
+
 const EXEC_MODE_ZH: Record<string, { icon: string; label: string }> = {
   in_house:        { icon: '🤖', label: '鲁班可自动执行' },
   third_party:     { icon: '🔗', label: '第三方平台' },
@@ -116,6 +119,7 @@ export function ZhugePriorityWidget({
   const [state, setState] = useState<WidgetState>('loading');
   const [actions, setActions] = useState<ZhugeActionRow[]>([]);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   const loadLatest = useCallback(async () => {
     setState('loading');
@@ -179,6 +183,9 @@ export function ZhugePriorityWidget({
   }
 
   // ── Loaded — show cached actions ──
+  const canCollapse = actions.length > COLLAPSED_COUNT;
+  const visibleActions = expanded ? actions : actions.slice(0, COLLAPSED_COUNT);
+
   return (
     <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
       {/* Widget header */}
@@ -206,12 +213,21 @@ export function ZhugePriorityWidget({
         </button>
       </div>
 
-      {/* Cached action cards */}
+      {/* Cached action cards — collapsed to COLLAPSED_COUNT until expanded */}
       <div className="space-y-2">
-        {actions.map((action) => (
+        {visibleActions.map((action) => (
           <ActionCard key={action.id} action={action} clientId={clientId} />
         ))}
       </div>
+
+      {canCollapse && (
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="w-full text-center text-xs font-medium text-gray-500 hover:text-indigo-700 border border-gray-200 hover:border-indigo-300 rounded-lg py-2 transition-colors"
+        >
+          {expanded ? '收起 ↑' : `展开剩余 ${actions.length - COLLAPSED_COUNT} 项 ↓`}
+        </button>
+      )}
     </div>
   );
 }
