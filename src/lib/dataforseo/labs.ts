@@ -492,7 +492,7 @@ export async function getKeywordsGap(
  * Monthly organic traffic estimates over a rolling window.
  * Replaces: SEMrush getDomainTrafficTrend
  *
- * DataForSEO endpoint: /dataforseo_labs/google/historical_bulk_traffic/live
+ * DataForSEO endpoint: /dataforseo_labs/google/historical_rank_overview/live
  *
  * @param domain       Target domain, e.g. "oztop.com.au"
  * @param locationCode DataForSEO location_code (default 2036 = AU)
@@ -504,13 +504,13 @@ export async function getDomainTrafficHistory(
   months: number = 12,
 ): Promise<DomainTrendPoint[]> {
   const res = await fetch(
-    `${DATAFORSEO_API_BASE}/dataforseo_labs/google/historical_bulk_traffic/live`,
+    `${DATAFORSEO_API_BASE}/dataforseo_labs/google/historical_rank_overview/live`,
     {
       method:  'POST',
       headers: { Authorization: authHeader(), 'Content-Type': 'application/json' },
       body: JSON.stringify([
         {
-          targets:       [domain],
+          target:        domain,
           location_code: locationCode,
           language_code: DEFAULT_LANGUAGE_CODE,
         },
@@ -518,29 +518,28 @@ export async function getDomainTrafficHistory(
     },
   )
 
-  if (!res.ok) throw new Error(`DataForSEO historical_bulk_traffic error: ${res.status}`)
+  if (!res.ok) throw new Error(`DataForSEO historical_rank_overview error: ${res.status}`)
 
   const json = await res.json() as {
     tasks?: Array<{
       result?: Array<{
-        target?:  string
-        metrics?: Array<{
-          year?:    number
-          month?:   number
-          organic?: { etv?: number | null }
+        target?: string
+        items?:  Array<{
+          date?:    string
+          metrics?: { organic?: { etv?: number | null } }
         }>
       }>
     }>
   }
 
   const result = json.tasks?.[0]?.result?.[0]
-  if (!result?.metrics) return []
+  if (!result?.items) return []
 
-  const points = result.metrics
-    .filter(m => m.year && m.month)
-    .map(m => ({
-      month:           `${m.year}-${String(m.month).padStart(2, '0')}`,
-      organic_traffic: Math.round(m.organic?.etv ?? 0),
+  const points = result.items
+    .filter(item => item.date)
+    .map(item => ({
+      month:           item.date!.slice(0, 7),   // "YYYY-MM-DD ..." → "YYYY-MM"
+      organic_traffic: Math.round(item.metrics?.organic?.etv ?? 0),
     }))
     .sort((a, b) => a.month.localeCompare(b.month))
 

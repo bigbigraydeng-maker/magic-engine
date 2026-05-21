@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-21 18:05 NZST · 当前阶段：**Phase 12.H — GitHub CMS 执行闭环（P1 博客推PR + P2 SEO Fix UI），当前 session 开工**。Phase 12.Q + 12.G 已完成；GitHub CMS 连接器已接通（CTS Tours chinatravel 仓库）。
+> 最后更新：2026-05-21 18:13 NZST · 当前阶段：**Phase 12.H — GitHub CMS 执行闭环（P1 博客推PR + P2 SEO Fix UI），当前 session 开工**。Phase 12.Q + 12.G 已完成；GitHub CMS 连接器已接通（CTS Tours chinatravel 仓库）。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）

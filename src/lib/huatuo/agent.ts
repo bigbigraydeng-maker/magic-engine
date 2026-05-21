@@ -310,7 +310,7 @@ export async function refineHuatuoPrescription(
       businessSize: 'small',
       market: 'AU_NZ',
     }),
-    getDomainTrafficHistory(discovery.domain, undefined, 12),
+    getDomainTrafficHistory(discovery.domain, undefined, 12).catch(() => []),
   ])
   const trendSummary = summarizeTrend(trendPoints)
   const lookup: HuatuoLookupContext = {

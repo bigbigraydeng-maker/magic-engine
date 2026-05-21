@@ -215,7 +215,7 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-21 18:05 NZST （**P12.G.5 完成** — ZhugeDrawer + luban-router + 一键触发鲁班，57 Vitest 全绿，build ✅；Phase 12.G 全部任务完成）
+> 最后更新：2026-05-21 18:13 NZST （**P12.G.5 完成** — ZhugeDrawer + luban-router + 一键触发鲁班，57 Vitest 全绿，build ✅；Phase 12.G 全部任务完成）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
