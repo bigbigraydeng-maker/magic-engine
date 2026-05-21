@@ -215,11 +215,11 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-21 21:26 NZST （**P12.I.3 完成** — Panel B 竞品对比 + SVG Venn 图 + 缺口词筛选表；/competitors-gap API；TS 无新错误）
+> 最后更新：2026-05-21 21:36 NZST （**P12.I.4 完成** — SEO Gap 页改 DataForSEO 自动拉取，移除 CSV 上传；route.ts + page.tsx 双文件改写；TS 无新错误）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P12.I.4** | SEO Gap 页改用 DataForSEO `getKeywordsGap()` 自动拉取，移除 SEMrush CSV 上传 | 🔥 M1 deadline 6/19 |
+| **P12.I.5** | 接线缺口 1+2 — 博客生成 route `persistAndReturn()` 写 `flywheel_actions(flywheel='seo')` + 持久化 `primary_keyword/volume/kd/intent` | 🔥 M1 deadline 6/19 |
 
 **状态校准（2026-05-21）**：
 - ✅ P12.Q.0–Q.7：Phase 12.Q 全部完成（内容质量闭环）
@@ -227,10 +227,11 @@ git push origin master   # 触发 Render 部署
 - ✅ **P12.I.1**：SEO Intelligence 页面路由 + 顶部指标栏；build ✅
 - ✅ **P12.I.2**：Panel A Organic Rankings 关键词表 + Intent 分布图
 - ✅ **P12.I.3**：Panel B 竞品并排对比 + SVG Venn 图 + 缺口词筛选表
+- ✅ **P12.I.4**：SEO Gap 页改 DataForSEO 自动拉取，移除 CSV 上传
 - ⚠️ **PM 待操作**：Render → Environment → 加 `ADMIN_EMAILS=你的邮箱`（若还未做）
 - ⚠️ **PM 待操作**：Supabase 跑 migration `20260525000001_content_quality_snapshot_score.sql` + `20260526000001_campaign_briefs_extend.sql`
 
-下一 session：`继续 Phase 12.I 第 4 任务 P12.I.4`
+下一 session：`继续 Phase 12.I 第 5 任务 P12.I.5`
 
 **本 session 已完成，可以关闭。**
 
