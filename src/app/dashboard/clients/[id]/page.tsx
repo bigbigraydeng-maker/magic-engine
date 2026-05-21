@@ -573,7 +573,8 @@ export default function ClientDetailPage() {
       <section>
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">SEO 工具</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <ToolCard href={`/dashboard/clients/${clientId}/strategy`}  icon="🎯" title="内容策略"   desc="根据关键词机会和竞品数据，制定博客选题与内容发布计划"  badge="in_house" />
+          <ToolCard href={`/dashboard/clients/${clientId}/strategy`}           icon="🎯" title="内容策略"        desc="根据关键词机会和竞品数据，制定博客选题与内容发布计划"  badge="in_house" />
+          <ToolCard href={`/dashboard/clients/${clientId}/seo-intelligence`}   icon="📈" title="SEO Intelligence" desc="关键词排名 · 流量趋势 · 竞品对比 · Untapped 词挖掘"    badge="in_house" />
         </div>
       </section>
 
