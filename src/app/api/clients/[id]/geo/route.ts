@@ -1,6 +1,12 @@
+import { unstable_noStore as noStore } from 'next/cache'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import type { GeoDirective } from '@/types/magic-engine'
+
+// Must never be cached — the GEO Composer re-reads this immediately after a
+// save; a cached response would re-populate the editor with stale (pre-save)
+// directive content, making edits appear to revert.
+export const dynamic = 'force-dynamic'
 
 /**
  * GET /api/clients/[id]/geo
@@ -14,6 +20,10 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  // Explicitly opt out of Next.js Data Cache — force a live Supabase read
+  // so the editor always reflects the latest saved directive.
+  noStore()
+
   try {
     const clientId = params.id
 
