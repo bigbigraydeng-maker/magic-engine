@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { requireSession } from '@/lib/auth/require-session'
 import { SEO_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 
 /**
@@ -21,6 +22,11 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await requireSession()
+  if (!session.ok) {
+    return NextResponse.json({ error: session.error }, { status: session.status })
+  }
+
   const { id: clientId } = await params
 
   const { data, error } = await supabaseAdmin

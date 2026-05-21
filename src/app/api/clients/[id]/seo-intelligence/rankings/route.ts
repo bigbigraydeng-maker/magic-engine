@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { requireSession } from '@/lib/auth/require-session'
 import { getRankedKeywords } from '@/lib/dataforseo/labs'
 
 const LOCATION_CODE_BY_DB: Record<string, number> = { au: 2036, nz: 2554 }
@@ -22,6 +23,11 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const session = await requireSession()
+  if (!session.ok) {
+    return NextResponse.json({ error: session.error }, { status: session.status })
+  }
+
   const { id: clientId } = await params
 
   const { data: client, error: clientError } = await supabaseAdmin
