@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { Suspense } from 'react';
+import Link from 'next/link';
 
 const MagicLogo = () => (
   <svg width="26" height="24" viewBox="0 0 68 64" fill="none" aria-hidden="true">
@@ -17,15 +17,24 @@ const MagicLogo = () => (
   </svg>
 );
 
+const SCAN_INCLUDES = [
+  { icon: '🔑', text: 'Real keyword rankings (DataForSEO)' },
+  { icon: '🏆', text: 'Competitor traffic & authority scores' },
+  { icon: '📱', text: 'Social following & engagement rates' },
+  { icon: '⭐', text: 'Google & review platform ratings' },
+  { icon: '🩺', text: '6-dimension brand health diagnosis' },
+  { icon: '💊', text: 'Personalised quick wins & action plan' },
+];
+
 function DiscoverForm() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const prefillUrl = searchParams.get('url') ?? '';
 
   const [url, setUrl] = useState(prefillUrl);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
-  const [done, setDone] = useState(false);
   const [error, setError] = useState('');
 
   async function handleSubmit(e: React.FormEvent) {
@@ -36,49 +45,34 @@ function DiscoverForm() {
     }
     setError('');
     setLoading(true);
+
     try {
-      await fetch('/api/discover/leads', {
+      const res = await fetch('/api/public-scan/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: url.trim(), name: name.trim(), email: email.trim() }),
       });
+
+      const data = await res.json() as { job_id?: string; error?: string };
+
+      if (!res.ok || !data.job_id) {
+        setError(data.error ?? 'Something went wrong. Please try again.');
+        setLoading(false);
+        return;
+      }
+
+      router.push(`/scan/report/${data.job_id}`);
     } catch {
-      // Silent — still show thank you
-    } finally {
+      setError('Network error. Please check your connection and try again.');
       setLoading(false);
-      setDone(true);
     }
   }
 
-  if (done) {
-    return (
-      <div className="text-center py-10">
-        <div className="text-[40px] mb-4">🎉</div>
-        <h2 className="text-[22px] font-black mb-3" style={{ color: '#ECF3FF' }}>
-          You&apos;re on the list!
-        </h2>
-        <p className="text-[14px] mb-6 max-w-xs mx-auto" style={{ color: 'rgba(120,170,230,0.55)' }}>
-          Our specialist will review your website and send your free Discovery Report within 24 hours.
-        </p>
-        <div className="space-y-3">
-          <p className="text-[12px]" style={{ color: 'rgba(120,170,230,0.35)' }}>
-            Want to talk sooner?
-          </p>
-          <a
-            href="mailto:bigbigraydeng@gmail.com?subject=Discovery%20Enquiry"
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13px] font-bold transition-all"
-            style={{
-              background: 'linear-gradient(135deg,#2855A4 0%,#183572 100%)',
-              border: '1px solid rgba(75,135,225,0.32)',
-              color: '#EEF4FF',
-            }}
-          >
-            Email Us Directly →
-          </a>
-        </div>
-      </div>
-    );
-  }
+  const inputStyle = {
+    background: 'rgba(255,255,255,0.04)',
+    border: '1px solid rgba(70,125,215,0.2)',
+    color: '#EEF4FF',
+  };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -93,13 +87,9 @@ function DiscoverForm() {
           placeholder="yourwebsite.com.au"
           required
           className="w-full px-4 py-3 rounded-xl text-[14px] outline-none transition-all"
-          style={{
-            background: 'rgba(255,255,255,0.04)',
-            border: '1px solid rgba(70,125,215,0.2)',
-            color: '#EEF4FF',
-          }}
-          onFocus={e => { e.currentTarget.style.borderColor = 'rgba(65,125,220,0.6)'; }}
-          onBlur={e => { e.currentTarget.style.borderColor = 'rgba(70,125,215,0.2)'; }}
+          style={inputStyle}
+          onFocus={e => { e.currentTarget.style.borderColor = 'rgba(65,125,220,0.6)' }}
+          onBlur={e => { e.currentTarget.style.borderColor = 'rgba(70,125,215,0.2)' }}
         />
       </div>
 
@@ -113,13 +103,9 @@ function DiscoverForm() {
           onChange={e => setName(e.target.value)}
           placeholder="Jane Smith"
           className="w-full px-4 py-3 rounded-xl text-[14px] outline-none transition-all"
-          style={{
-            background: 'rgba(255,255,255,0.04)',
-            border: '1px solid rgba(70,125,215,0.2)',
-            color: '#EEF4FF',
-          }}
-          onFocus={e => { e.currentTarget.style.borderColor = 'rgba(65,125,220,0.6)'; }}
-          onBlur={e => { e.currentTarget.style.borderColor = 'rgba(70,125,215,0.2)'; }}
+          style={inputStyle}
+          onFocus={e => { e.currentTarget.style.borderColor = 'rgba(65,125,220,0.6)' }}
+          onBlur={e => { e.currentTarget.style.borderColor = 'rgba(70,125,215,0.2)' }}
         />
       </div>
 
@@ -134,13 +120,9 @@ function DiscoverForm() {
           placeholder="jane@yourcompany.com.au"
           required
           className="w-full px-4 py-3 rounded-xl text-[14px] outline-none transition-all"
-          style={{
-            background: 'rgba(255,255,255,0.04)',
-            border: '1px solid rgba(70,125,215,0.2)',
-            color: '#EEF4FF',
-          }}
-          onFocus={e => { e.currentTarget.style.borderColor = 'rgba(65,125,220,0.6)'; }}
-          onBlur={e => { e.currentTarget.style.borderColor = 'rgba(70,125,215,0.2)'; }}
+          style={inputStyle}
+          onFocus={e => { e.currentTarget.style.borderColor = 'rgba(65,125,220,0.6)' }}
+          onBlur={e => { e.currentTarget.style.borderColor = 'rgba(70,125,215,0.2)' }}
         />
       </div>
 
@@ -151,7 +133,7 @@ function DiscoverForm() {
       <button
         type="submit"
         disabled={loading}
-        className="w-full py-3 rounded-xl text-[14px] font-bold transition-all mt-2"
+        className="w-full py-3.5 rounded-xl text-[14px] font-bold transition-all mt-2"
         style={{
           background: loading ? 'rgba(40,85,164,0.5)' : 'linear-gradient(135deg,#2855A4 0%,#183572 100%)',
           border: '1px solid rgba(75,135,225,0.32)',
@@ -159,11 +141,11 @@ function DiscoverForm() {
           cursor: loading ? 'default' : 'pointer',
         }}
       >
-        {loading ? 'Submitting…' : 'Get My Free Discovery Report →'}
+        {loading ? 'Starting your scan…' : 'Start My Free Discovery Report →'}
       </button>
 
       <p className="text-[11px] text-center" style={{ color: 'rgba(255,255,255,0.18)' }}>
-        No spam. No obligation. We&apos;ll contact you within 24 hours.
+        Takes 3–5 minutes &middot; No credit card &middot; No spam
       </p>
     </form>
   );
@@ -171,72 +153,89 @@ function DiscoverForm() {
 
 export default function DiscoverPage() {
   return (
-    <div className="min-h-screen bg-[#060E1A] flex flex-col" style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif" }}>
+    <div className="min-h-screen bg-[#060E1A] flex flex-col"
+         style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif" }}>
 
-      {/* Nav */}
       <nav className="flex items-center justify-between px-5 py-4"
            style={{ borderBottom: '1px solid rgba(70,125,215,0.08)' }}>
         <Link href="/" className="flex items-center gap-2.5">
           <MagicLogo />
           <span className="text-[15px] font-bold text-white tracking-tight">Magic Engine</span>
         </Link>
-        <Link
-          href="/"
-          className="text-[12px] transition-colors"
-          style={{ color: 'rgba(120,170,230,0.45)' }}
-        >
+        <Link href="/" className="text-[12px] transition-colors" style={{ color: 'rgba(120,170,230,0.45)' }}>
           ← Back
         </Link>
       </nav>
 
-      {/* Main */}
-      <main className="flex-1 flex items-center justify-center px-5 py-16">
-        <div className="w-full max-w-md">
-          {/* Glow */}
-          <div className="absolute pointer-events-none" aria-hidden="true" style={{
-            top: '30%', left: '50%', transform: 'translate(-50%,-50%)',
-            width: '500px', height: '300px',
-            background: 'radial-gradient(ellipse 80% 50% at 50% 50%, rgba(38,82,162,0.14) 0%, transparent 70%)',
-          }} />
+      <main className="flex-1 flex items-start justify-center px-5 py-12">
+        <div className="w-full max-w-4xl relative">
 
-          {/* Card */}
-          <div className="relative rounded-2xl px-8 py-8"
-               style={{
-                 background: 'rgba(10,20,40,0.74)',
-                 backdropFilter: 'blur(26px)',
-                 border: '1px solid rgba(70,125,215,0.18)',
-                 boxShadow: '0 32px 72px rgba(0,0,0,0.5)',
-               }}>
-            {/* Header */}
-            <div className="text-center mb-7">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-semibold mb-4"
-                   style={{ background: 'rgba(22,45,90,0.7)', border: '1px solid rgba(70,125,215,0.2)', color: '#7ABFFF' }}>
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                Free · No login required
-              </div>
-              <h1 className="text-[20px] font-black mb-2" style={{ color: '#ECF3FF' }}>
-                Request Your Free Discovery Report
-              </h1>
-              <p className="text-[13px]" style={{ color: 'rgba(120,170,230,0.5)' }}>
-                Enter your details and a specialist will send you a full brand health diagnosis within 24 hours.
-              </p>
-            </div>
-
-            <div style={{ height: '1px', background: 'linear-gradient(90deg,transparent,rgba(70,130,220,0.25),transparent)', marginBottom: '24px' }} />
-
-            <Suspense fallback={<div className="text-center text-sm" style={{ color: 'rgba(120,170,230,0.4)' }}>Loading…</div>}>
-              <DiscoverForm />
-            </Suspense>
+          {/* Background glow */}
+          <div className="fixed inset-0 pointer-events-none" aria-hidden="true">
+            <div style={{
+              position: 'absolute', top: '20%', left: '50%', transform: 'translateX(-50%)',
+              width: '600px', height: '400px',
+              background: 'radial-gradient(ellipse 80% 50% at 50% 0%, rgba(38,82,162,0.12) 0%, transparent 70%)',
+            }} />
           </div>
 
-          {/* Trust signals */}
-          <div className="mt-6 flex items-center justify-center gap-6">
-            {['No signup needed', '24hr response', 'AU / NZ specialists'].map(t => (
-              <div key={t} className="flex items-center gap-1.5">
-                <span className="text-green-400 text-[10px]">✓</span>
-                <span className="text-[10px]" style={{ color: 'rgba(120,170,230,0.35)' }}>{t}</span>
+          <div className="relative grid lg:grid-cols-2 gap-8 items-start">
+
+            {/* Left — what you get */}
+            <div className="lg:pt-2">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-semibold mb-5"
+                   style={{ background: 'rgba(22,45,90,0.7)', border: '1px solid rgba(70,125,215,0.2)', color: '#7ABFFF' }}>
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                Free · Real data · 3–5 minutes
               </div>
-            ))}
+              <h1 className="text-[28px] font-black mb-3 leading-tight" style={{ color: '#ECF3FF' }}>
+                Your Free<br />Discovery Report
+              </h1>
+              <p className="text-[13px] leading-relaxed mb-6" style={{ color: 'rgba(120,170,230,0.5)' }}>
+                Our AI maps your entire digital presence — keywords, competitors, social, reviews — and scores your brand across 6 dimensions.
+              </p>
+
+              <div className="space-y-2.5 mb-6">
+                {SCAN_INCLUDES.map(item => (
+                  <div key={item.icon} className="flex items-center gap-3">
+                    <span className="text-[16px]">{item.icon}</span>
+                    <span className="text-[12px]" style={{ color: 'rgba(160,200,255,0.65)' }}>{item.text}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="p-4 rounded-xl text-[12px] leading-relaxed"
+                   style={{ background: 'rgba(22,45,90,0.3)', border: '1px solid rgba(70,125,215,0.15)', color: 'rgba(120,170,230,0.5)' }}>
+                <span style={{ color: 'rgba(160,200,255,0.7)' }}>⏱ What happens next:</span>{' '}
+                After you submit, our AI starts scanning immediately. You&apos;ll watch discoveries appear in real time — then see your full report when it&apos;s done.
+              </div>
+            </div>
+
+            {/* Right — form */}
+            <div className="relative rounded-2xl px-8 py-8"
+                 style={{
+                   background: 'rgba(10,20,40,0.74)',
+                   backdropFilter: 'blur(26px)',
+                   border: '1px solid rgba(70,125,215,0.18)',
+                   boxShadow: '0 32px 72px rgba(0,0,0,0.5)',
+                 }}>
+              <div className="mb-6">
+                <h2 className="text-[18px] font-black mb-1.5" style={{ color: '#ECF3FF' }}>
+                  Start your scan
+                </h2>
+                <p className="text-[12px]" style={{ color: 'rgba(120,170,230,0.45)' }}>
+                  Enter your details — your report starts immediately.
+                </p>
+              </div>
+
+              <div style={{ height: '1px', background: 'linear-gradient(90deg,transparent,rgba(70,130,220,0.25),transparent)', marginBottom: '24px' }} />
+
+              <Suspense fallback={
+                <div className="text-center text-sm py-8" style={{ color: 'rgba(120,170,230,0.4)' }}>Loading…</div>
+              }>
+                <DiscoverForm />
+              </Suspense>
+            </div>
           </div>
         </div>
       </main>

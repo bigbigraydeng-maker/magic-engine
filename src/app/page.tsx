@@ -189,7 +189,7 @@ export default async function HomePage() {
             Get a free brand scan + 6-dimension health score. See exactly where you&apos;re losing customers — then decide if you want us to fix it.
           </p>
 
-          <form action="/scan" method="GET" className="flex gap-2.5 max-w-lg mx-auto">
+          <form action="/discover" method="GET" className="flex gap-2.5 max-w-lg mx-auto">
             <input
               type="text"
               name="url"
@@ -210,11 +210,11 @@ export default async function HomePage() {
                 color: '#EEF4FF',
               }}
             >
-              Scan Free →
+              Get Your Free Discovery Report →
             </button>
           </form>
           <p className="text-[11px] mt-3" style={{ color: 'rgba(255,255,255,0.18)' }}>
-            No signup &middot; No credit card &middot; Report delivered within 24 hours
+            No credit card &middot; Usually 3–5 minutes &middot; Real data, not estimates
           </p>
         </div>
       </section>
