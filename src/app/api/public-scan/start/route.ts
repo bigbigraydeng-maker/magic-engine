@@ -70,9 +70,14 @@ async function addLog(
   const current: LogEntry[] = Array.isArray(data?.progress_log) ? data.progress_log : []
   const entry: LogEntry = { type, icon, message, detail: detail ?? null, ts: new Date().toISOString() }
 
+  // Append to progress_log only — never write `status`. A heartbeat addLog can
+  // race a terminal status write (the 9-min hard timeout fires at exactly an
+  // 18×30 s heartbeat tick); writing `status: 'running'` here would clobber a
+  // 'failed'/'completed' write and strand the job. runScan() sets 'running'
+  // once explicitly instead.
   await supabaseAdmin
     .from('public_scan_jobs')
-    .update({ status: 'running', progress_log: [...current, entry] })
+    .update({ progress_log: [...current, entry] })
     .eq('id', jobId)
 }
 
@@ -109,6 +114,14 @@ function translateNote(note: string): { icon: string; message: string } {
 const SCAN_HARD_TIMEOUT_MS = 9 * 60 * 1000
 
 async function runScan(jobId: string, domain: string): Promise<void> {
+  // Promote queued → running once. addLog() deliberately no longer writes
+  // `status`, so this is the sole running-state transition.
+  await supabaseAdmin
+    .from('public_scan_jobs')
+    .update({ status: 'running' })
+    .eq('id', jobId)
+    .then(() => undefined, () => undefined)
+
   // Heartbeat: write a "still scanning" step every 30 s while running.
   // Guarantees the user sees activity at least every 30 s — covers the 75 s
   // Apify social-scraper gap and the 150 s Anthropic reasoning turns.
