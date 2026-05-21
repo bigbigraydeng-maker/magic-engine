@@ -969,6 +969,15 @@ export default function VisualsPage() {
   // Track which posts have already triggered asset refresh
   const refreshedPostIdsRef = useRef<Set<string>>(new Set())
 
+  // Optimistic UI timers — tick "elapsed" while a generation request is in flight
+  // so the cell animates instead of sitting frozen (the image route is synchronous)
+  const optimisticTimersRef = useRef<Record<string, ReturnType<typeof setInterval>>>({})
+  useEffect(() => {
+    return () => {
+      Object.values(optimisticTimersRef.current).forEach(clearInterval)
+    }
+  }, [])
+
   // Refresh assets after generation completes (once per post)
   useEffect(() => {
     const completedPostIds = Object.entries(genStates)
@@ -1026,6 +1035,8 @@ export default function VisualsPage() {
 
   const handleCancel = useCallback((postId: string) => {
     // cancelGeneration stops timers AND frees the concurrency slot atomically
+    clearInterval(optimisticTimersRef.current[postId])
+    delete optimisticTimersRef.current[postId]
     cancelGeneration(postId)
     // Clear UI state so the generate button re-appears
     setGenStates(prev => {
@@ -1036,11 +1047,23 @@ export default function VisualsPage() {
   }, [cancelGeneration])
 
   const handleGenerate = useCallback(async (post: Post) => {
+    // Ignore re-clicks while a generation for this post is already in flight
+    if (optimisticTimersRef.current[post.id]) return
+
     const assetType = assetTypeFromFormat(post.format)
     const apiPath = assetType === 'video' ? '/api/visual/video' : '/api/visual/image'
 
     // Clear dirty brief flag — generation in progress, button should hide
     setDirtyBriefs(prev => { const next = new Set(prev); next.delete(post.id); return next })
+
+    // Optimistic feedback: flip the cell to "generating" the instant the button is
+    // clicked. The image route runs synchronously (~20-60s), so without this the
+    // cell would sit frozen on the idle buttons until the request resolves.
+    const startedAt = Date.now()
+    patchGen(post.id, { generating: true, queued: false, elapsed: 0, genStatus: undefined })
+    optimisticTimersRef.current[post.id] = setInterval(() => {
+      patchGen(post.id, { elapsed: Math.floor((Date.now() - startedAt) / 1000) })
+    }, 1000)
 
     try {
       await submitGeneration(post.id, apiPath, {
@@ -1057,6 +1080,9 @@ export default function VisualsPage() {
         type: 'error',
         message: `Generation failed: ${e instanceof Error ? e.message : String(e)}`,
       })
+    } finally {
+      clearInterval(optimisticTimersRef.current[post.id])
+      delete optimisticTimersRef.current[post.id]
     }
   }, [selectedClientId, submitGeneration, patchGen])
 
