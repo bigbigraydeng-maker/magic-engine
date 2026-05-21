@@ -65,7 +65,7 @@ function DiscoverForm() {
             Want to talk sooner?
           </p>
           <a
-            href="mailto:hello@magiclab.co.nz?subject=Discovery%20Enquiry"
+            href="mailto:bigbigraydeng@gmail.com?subject=Discovery%20Enquiry"
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13px] font-bold transition-all"
             style={{
               background: 'linear-gradient(135deg,#2855A4 0%,#183572 100%)',
