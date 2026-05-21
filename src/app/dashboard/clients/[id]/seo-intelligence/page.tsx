@@ -1,8 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
+
+// ─── Shared types ────────────────────────────────────────────────────────────
 
 interface SeoMetrics {
   organic_keywords: number | null
@@ -12,52 +14,85 @@ interface SeoMetrics {
   last_updated:     string | null
 }
 
+interface RankedKeyword {
+  keyword:            string
+  position:           number | null
+  search_volume:      number | null
+  keyword_difficulty: number | null
+  cpc:                number | null
+  competition:        number | null
+  intent:             string
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function fmt(v: number | null, decimals = 0): string {
+  if (v == null) return '—'
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`
+  if (v >= 1_000)     return `${(v / 1_000).toFixed(decimals > 0 ? decimals : 1)}K`
+  return v.toFixed(decimals)
+}
+
+function domainRoot(domain: string): string {
+  return domain.replace(/^www\./, '').split('.')[0].toLowerCase()
+}
+
+type Intent = 'transactional' | 'commercial' | 'informational' | 'navigational'
+
+const INTENT_STYLE: Record<string, { bg: string; label: string }> = {
+  transactional: { bg: 'bg-green-100 text-green-700',  label: 'Transactional' },
+  commercial:    { bg: 'bg-blue-100 text-blue-700',    label: 'Commercial'    },
+  informational: { bg: 'bg-purple-100 text-purple-700', label: 'Informational' },
+  navigational:  { bg: 'bg-gray-100 text-gray-600',    label: 'Navigational'  },
+}
+
+function posLabel(p: number | null): string {
+  if (p == null) return '—'
+  return String(p)
+}
+
+function posBadgeCls(p: number | null): string {
+  if (p == null) return 'bg-gray-100 text-gray-400'
+  if (p <= 3)   return 'bg-green-100 text-green-700'
+  if (p <= 10)  return 'bg-blue-100 text-blue-700'
+  if (p <= 50)  return 'bg-yellow-100 text-yellow-700'
+  return 'bg-gray-100 text-gray-500'
+}
+
+function kdCls(kd: number | null): string {
+  if (kd == null) return 'text-gray-400'
+  if (kd <= 30)  return 'text-green-600 font-medium'
+  if (kd <= 60)  return 'text-yellow-600 font-medium'
+  return 'text-red-600 font-medium'
+}
+
 // ─── Stat Card ────────────────────────────────────────────────────────────────
 
 function StatCard({
-  icon,
-  label,
-  value,
-  sub,
-  trend,
+  icon, label, value, sub, trend,
 }: {
-  icon: string
-  label: string
-  value: string
-  sub?: string
-  trend?: 'up' | 'down' | 'neutral'
+  icon: string; label: string; value: string; sub?: string; trend?: 'up' | 'down' | 'neutral'
 }) {
   const trendIcon = trend === 'up' ? '↑' : trend === 'down' ? '↓' : null
   const trendCls  = trend === 'up' ? 'text-green-500' : trend === 'down' ? 'text-red-500' : ''
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-4 flex flex-col gap-1">
       <div className="flex items-center gap-1.5 text-gray-400 text-xs">
-        <span>{icon}</span>
-        <span>{label}</span>
+        <span>{icon}</span><span>{label}</span>
       </div>
       <div className="flex items-end gap-2">
         <p className="text-2xl font-bold text-gray-900 tabular-nums">{value}</p>
-        {trendIcon && (
-          <span className={`text-sm font-semibold mb-0.5 ${trendCls}`}>{trendIcon}</span>
-        )}
+        {trendIcon && <span className={`text-sm font-semibold mb-0.5 ${trendCls}`}>{trendIcon}</span>}
       </div>
       {sub && <p className="text-xs text-gray-400">{sub}</p>}
     </div>
   )
 }
 
-// ─── Panel placeholder ────────────────────────────────────────────────────────
+// ─── Panel B placeholder ──────────────────────────────────────────────────────
 
-function PanelPlaceholder({
-  icon,
-  title,
-  desc,
-  eta,
-}: {
-  icon: string
-  title: string
-  desc: string
-  eta: string
+function PanelPlaceholder({ icon, title, desc, eta }: {
+  icon: string; title: string; desc: string; eta: string
 }) {
   return (
     <div className="bg-white rounded-xl border border-dashed border-gray-200 p-6 flex items-start gap-4">
@@ -71,13 +106,202 @@ function PanelPlaceholder({
   )
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Intent distribution bar ──────────────────────────────────────────────────
 
-function fmt(v: number | null, decimals = 0): string {
-  if (v == null) return '—'
-  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`
-  if (v >= 1_000)     return `${(v / 1_000).toFixed(decimals > 0 ? decimals : 1)}K`
-  return v.toFixed(decimals)
+function IntentDistribution({ keywords }: { keywords: RankedKeyword[] }) {
+  const counts = useMemo(() => {
+    const tally: Record<string, number> = {}
+    for (const kw of keywords) {
+      tally[kw.intent] = (tally[kw.intent] ?? 0) + 1
+    }
+    return tally
+  }, [keywords])
+
+  const total   = keywords.length
+  const intents = ['transactional', 'commercial', 'informational', 'navigational'] as Intent[]
+
+  return (
+    <div className="flex flex-wrap gap-2 mb-4">
+      {intents.map(intent => {
+        const count = counts[intent] ?? 0
+        if (count === 0) return null
+        const pct   = total > 0 ? Math.round((count / total) * 100) : 0
+        const style = INTENT_STYLE[intent]
+        return (
+          <span
+            key={intent}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${style.bg}`}
+            style={{ borderColor: 'currentColor', opacity: 0.9 }}
+          >
+            {style.label}
+            <span className="tabular-nums">{count}</span>
+            <span className="opacity-60">({pct}%)</span>
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Rankings table ───────────────────────────────────────────────────────────
+
+const PAGE_SIZE = 50
+
+function RankingsTable({
+  keywords,
+  brandRoot,
+}: {
+  keywords: RankedKeyword[]
+  brandRoot: string
+}) {
+  const [intentFilter, setIntentFilter] = useState('all')
+  const [posFilter,    setPosFilter]    = useState('all')
+  const [brandFilter,  setBrandFilter]  = useState('all')
+  const [search,       setSearch]       = useState('')
+  const [shown,        setShown]        = useState(PAGE_SIZE)
+
+  const filtered = useMemo(() => {
+    return keywords.filter(kw => {
+      if (intentFilter !== 'all' && kw.intent !== intentFilter) return false
+
+      if (posFilter !== 'all') {
+        const p = kw.position ?? 999
+        if (posFilter === '1-3'   && !(p >= 1  && p <= 3))  return false
+        if (posFilter === '4-10'  && !(p >= 4  && p <= 10)) return false
+        if (posFilter === '11-50' && !(p >= 11 && p <= 50)) return false
+        if (posFilter === '51+'   && !(p > 50))             return false
+      }
+
+      if (brandFilter !== 'all') {
+        const isBranded = kw.keyword.toLowerCase().includes(brandRoot)
+        if (brandFilter === 'branded'     &&  !isBranded) return false
+        if (brandFilter === 'non-branded' &&   isBranded) return false
+      }
+
+      if (search && !kw.keyword.toLowerCase().includes(search.toLowerCase())) return false
+
+      return true
+    })
+  }, [keywords, intentFilter, posFilter, brandFilter, search, brandRoot])
+
+  const page = filtered.slice(0, shown)
+
+  return (
+    <div className="space-y-3">
+      <IntentDistribution keywords={keywords} />
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-2">
+        <input
+          type="text"
+          placeholder="搜索关键词…"
+          value={search}
+          onChange={e => { setSearch(e.target.value); setShown(PAGE_SIZE) }}
+          className="flex-1 min-w-[180px] border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-indigo-400"
+        />
+        <select
+          value={intentFilter}
+          onChange={e => { setIntentFilter(e.target.value); setShown(PAGE_SIZE) }}
+          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:border-indigo-400"
+        >
+          <option value="all">全部意图</option>
+          <option value="transactional">Transactional</option>
+          <option value="commercial">Commercial</option>
+          <option value="informational">Informational</option>
+          <option value="navigational">Navigational</option>
+        </select>
+        <select
+          value={posFilter}
+          onChange={e => { setPosFilter(e.target.value); setShown(PAGE_SIZE) }}
+          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:border-indigo-400"
+        >
+          <option value="all">全部排名</option>
+          <option value="1-3">前 3 名</option>
+          <option value="4-10">4–10 名</option>
+          <option value="11-50">11–50 名</option>
+          <option value="51+">51 名以后</option>
+        </select>
+        <select
+          value={brandFilter}
+          onChange={e => { setBrandFilter(e.target.value); setShown(PAGE_SIZE) }}
+          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:border-indigo-400"
+        >
+          <option value="all">品牌+非品牌</option>
+          <option value="branded">品牌词</option>
+          <option value="non-branded">非品牌词</option>
+        </select>
+      </div>
+
+      {/* Table */}
+      <div className="overflow-x-auto rounded-xl border border-gray-200">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-gray-50 border-b border-gray-200">
+              <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">关键词</th>
+              <th className="text-center px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-16">排名</th>
+              <th className="text-right px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-20">月搜量</th>
+              <th className="text-right px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-16">KD</th>
+              <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-32">意图</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {page.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="text-center py-8 text-sm text-gray-400">
+                  没有符合条件的关键词
+                </td>
+              </tr>
+            ) : (
+              page.map((kw, i) => {
+                const intentStyle = INTENT_STYLE[kw.intent] ?? INTENT_STYLE.informational
+                return (
+                  <tr key={i} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-2.5 text-gray-900 font-medium max-w-xs truncate">
+                      {kw.keyword}
+                    </td>
+                    <td className="px-3 py-2.5 text-center">
+                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold tabular-nums ${posBadgeCls(kw.position)}`}>
+                        {posLabel(kw.position)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-gray-600 tabular-nums">
+                      {fmt(kw.search_volume)}
+                    </td>
+                    <td className={`px-3 py-2.5 text-right tabular-nums ${kdCls(kw.keyword_difficulty)}`}>
+                      {kw.keyword_difficulty ?? '—'}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${intentStyle.bg}`}>
+                        {intentStyle.label}
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Load more */}
+      {shown < filtered.length && (
+        <div className="text-center">
+          <button
+            onClick={() => setShown(s => s + PAGE_SIZE)}
+            className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+          >
+            再显示 {Math.min(PAGE_SIZE, filtered.length - shown)} 条（共 {filtered.length} 条）
+          </button>
+        </div>
+      )}
+      {page.length > 0 && (
+        <p className="text-center text-xs text-gray-400">
+          显示 {page.length} / {filtered.length} 条
+          {filtered.length < keywords.length && `（已筛选，总计 ${keywords.length} 条）`}
+        </p>
+      )}
+    </div>
+  )
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -86,9 +310,16 @@ export default function SeoIntelligencePage() {
   const { id: clientId } = useParams() as { id: string }
   const router = useRouter()
 
+  // Top metrics
   const [metrics, setMetrics] = useState<SeoMetrics | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError]   = useState<string | null>(null)
+  const [error, setError]     = useState<string | null>(null)
+
+  // Rankings (Panel A)
+  const [rankings,        setRankings]        = useState<RankedKeyword[]>([])
+  const [rankingsDomain,  setRankingsDomain]  = useState('')
+  const [rankingsLoading, setRankingsLoading] = useState(true)
+  const [rankingsError,   setRankingsError]   = useState<string | null>(null)
 
   useEffect(() => {
     void (async () => {
@@ -100,6 +331,22 @@ export default function SeoIntelligencePage() {
         setError(e instanceof Error ? e.message : '加载失败')
       } finally {
         setLoading(false)
+      }
+    })()
+  }, [clientId])
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/seo-intelligence/rankings`)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json() as { domain: string; keywords: RankedKeyword[] }
+        setRankings(data.keywords)
+        setRankingsDomain(data.domain)
+      } catch (e) {
+        setRankingsError(e instanceof Error ? e.message : '排名数据加载失败')
+      } finally {
+        setRankingsLoading(false)
       }
     })()
   }, [clientId])
@@ -133,7 +380,6 @@ export default function SeoIntelligencePage() {
       </div>
 
       <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
-        {/* Error */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
             {error}
@@ -153,34 +399,12 @@ export default function SeoIntelligencePage() {
             </div>
           ) : (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <StatCard
-                icon="🔑"
-                label="收录关键词"
-                value={fmt(metrics?.organic_keywords ?? null)}
-                sub="自然搜索关键词总数"
-              />
-              <StatCard
-                icon="📈"
-                label="月均流量"
-                value={fmt(metrics?.organic_traffic ?? null)}
-                sub="估算自然搜索月访量"
-              />
-              <StatCard
-                icon="⭐"
-                label="权威分"
-                value={metrics?.authority_score != null ? String(Math.round(metrics.authority_score)) : '—'}
-                sub="0–100，越高越强"
-              />
-              <StatCard
-                icon="📝"
-                label="已发布博客"
-                value={fmt(metrics?.published_posts ?? null, 0)}
-                sub="ME 内已发布文章数"
-              />
+              <StatCard icon="🔑" label="收录关键词" value={fmt(metrics?.organic_keywords ?? null)} sub="自然搜索关键词总数" />
+              <StatCard icon="📈" label="月均流量"   value={fmt(metrics?.organic_traffic  ?? null)} sub="估算自然搜索月访量" />
+              <StatCard icon="⭐" label="权威分"     value={metrics?.authority_score != null ? String(Math.round(metrics.authority_score)) : '—'} sub="0–100，越高越强" />
+              <StatCard icon="📝" label="已发布博客" value={fmt(metrics?.published_posts  ?? null, 0)} sub="ME 内已发布文章数" />
             </div>
           )}
-
-          {/* No data hint */}
           {!loading && !error && metrics?.last_updated == null && (
             <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
               尚无 SEO 指标快照。周 Cron 任务将自动拉取数据，或联系 FDE 手动触发一次 SEMrush 同步。
@@ -188,17 +412,42 @@ export default function SeoIntelligencePage() {
           )}
         </section>
 
-        {/* ── Panel A 占位 ───────────────────────────────────────────────────── */}
+        {/* ── Panel A 「了解自己」 ─────────────────────────────────────────────── */}
         <section>
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">
             了解自己
           </p>
-          <PanelPlaceholder
-            icon="🔍"
-            title="Organic Rankings — 关键词排名表 + Intent 分布"
-            desc="展示网站自然排名的前 200 词，按搜索意图（Transactional / Informational / Navigational）分类，可筛选 Intent、排名段位、品牌/非品牌词。"
-            eta="P12.I.2 实施"
-          />
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold text-gray-900">
+                Organic Rankings — 关键词排名表
+              </h2>
+              {rankingsDomain && (
+                <span className="text-xs text-gray-400 font-mono">{rankingsDomain}</span>
+              )}
+            </div>
+
+            {rankingsLoading ? (
+              <div className="space-y-2">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="h-8 bg-gray-100 rounded animate-pulse" />
+                ))}
+              </div>
+            ) : rankingsError ? (
+              <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+                {rankingsError}
+              </div>
+            ) : rankings.length === 0 ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
+                暂无排名数据。DataForSEO 未检测到该域名的自然排名词，可能域名未开始收录或流量极低。
+              </div>
+            ) : (
+              <RankingsTable
+                keywords={rankings}
+                brandRoot={domainRoot(rankingsDomain)}
+              />
+            )}
+          </div>
         </section>
 
         {/* ── Panel B 占位 ───────────────────────────────────────────────────── */}

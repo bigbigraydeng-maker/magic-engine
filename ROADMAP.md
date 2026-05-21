@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-21 19:19 NZST · 当前阶段：**Phase 12.I — SEO Intelligence 页面 + 飞轮接线（P12.I.1 ✅ 完成，P12.I.2 Panel A 进行中）**。Phase 12.H GitHub CMS 已登记未开工；Phase 12.Q + 12.G 已完成。
+> 最后更新：2026-05-21 19:42 NZST · 当前阶段：**Phase 12.I — SEO Intelligence 页面 + 飞轮接线（P12.I.1 ✅ P12.I.2 ✅ 完成，P12.I.3 Panel B 下一步）**。Phase 12.H GitHub CMS 已登记未开工；Phase 12.Q + 12.G 已完成。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -1559,7 +1559,7 @@ SEO 诊断 → Fix 按钮 → 推 GitHub PR → 客户 merge → 元数据修复
 | ID | 任务 | 依赖 | 状态 |
 |----|------|------|------|
 | **P12.I.1** | `/dashboard/clients/[id]/seo-intelligence` 页面路由 + 顶部指标栏（读 `flywheel_metrics` WHERE flywheel='seo'） | flywheel_metrics ✅ | ✅ |
-| **P12.I.2** | Panel A「了解自己」— Organic Rankings 关键词表 + Intent 分布图 | P12.I.1 | 📋 |
+| **P12.I.2** | Panel A「了解自己」— Organic Rankings 关键词表 + Intent 分布图 | P12.I.1 | ✅ |
 | **P12.I.3** | Panel B「了解对手」— 竞品并排对比 + 关键词缺口自动 DataForSEO 拉取 + Venn 图 | P12.I.1 | 📋 |
 | **P12.I.4** | SEO Gap 页改用 DataForSEO `getKeywordsGap()` 自动拉取，移除 SEMrush CSV 上传 | DataForSEO ✅ | 📋 |
 | **P12.I.5** | 接线缺口 1+2 — 博客生成 route `persistAndReturn()` 写 `flywheel_actions(flywheel='seo')` + 持久化 `primary_keyword/volume/kd/intent` | — | 📋 |
@@ -2082,6 +2082,8 @@ AU / NZ（当前）          新市场（未来）
 - **P13.D** — Ads + Reputation 接入 production package：meta_ads_snapshots + project_reviews 加 production_package_id FK；两条路由接受可选参数；包详情页回读 ads_snapshots + reputation_reviews，build ✅
 
 ### 2026-05-21（续 2）
+
+- **P12.I.2** — Panel A「了解自己」Organic Rankings 关键词表 + Intent 分布图：`getRankedKeywords()` 调 DataForSEO ranked_keywords/live（200 词含 position）；GET `/api/clients/[id]/seo-intelligence/rankings`（24h cache）；Panel A 完整 UI：Intent 分布徽章、Intent/排名段位/品牌词三维过滤器、搜索框、50 条分页表格（关键词/排名/月搜量/KD/意图）；TS 无新增错误；build ✅
 
 - **P12.I.1** — SEO Intelligence 页面路由 + 顶部指标栏：新增 `/dashboard/clients/[id]/seo-intelligence` 页面；GET `/api/clients/[id]/seo-intelligence/metrics` 读 `flywheel_metrics(flywheel='seo')` 最新快照（4 指标：收录关键词/月均流量/权威分/已发布博客）；客户详情页「SEO 工具」区块新增导航入口；Panel A/B 占位面板；build ✅
 
