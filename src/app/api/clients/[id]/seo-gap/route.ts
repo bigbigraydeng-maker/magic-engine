@@ -1,8 +1,8 @@
 /**
  * POST /api/clients/[id]/seo-gap
- *   multipart/form-data: files[] (1–10 SEMrush keyword gap CSVs)
- *   Optional form field: title (string)
- *   Runs full analysis pipeline: parse → score → Claude → DOCX
+ *   JSON body: { title?: string }
+ *   Auto-fetches keyword gap via DataForSEO (no CSV upload required)
+ *   Pipeline: getSerpCompetitors → getKeywordsGap → analyzeSeoGap → DOCX
  *   Returns: { success, analysis_id, summary, docx_base64 }
  *
  * GET /api/clients/[id]/seo-gap
@@ -14,17 +14,30 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireBearerToken } from '@/lib/validation-utils'
-import { parseKeywordGapCsvs } from '@/lib/seo-gap/csv-parser'
+import { getSerpCompetitors, getKeywordsGap } from '@/lib/dataforseo/labs'
+import type { LabsKeyword } from '@/lib/dataforseo/labs'
 import { analyzeSeoGap } from '@/lib/seo-gap/analyzer'
 import { generateSeoGapDocx } from '@/lib/seo-gap/docx-generator'
+import type { ParsedKeyword } from '@/lib/seo-gap/csv-parser'
 
-const MAX_FILES = 10
-const MAX_FILE_SIZE_MB = 5
+const LOCATION_CODE_BY_DB: Record<string, number> = { au: 2036, nz: 2554 }
 
 interface ClientRow {
   id: string
   name: string
   domain: string | null
+  semrush_db: string | null
+}
+
+function labsKeywordToParsed(kw: LabsKeyword, competitorDomains: string[]): ParsedKeyword {
+  return {
+    keyword: kw.keyword,
+    volume: kw.search_volume ?? 0,
+    kd: kw.keyword_difficulty ?? 0,
+    cpc: kw.cpc ?? 0,
+    intent: kw.intent,
+    competitors: competitorDomains,
+  }
 }
 
 // ─── GET: List analyses ───────────────────────────────────────────────────────
@@ -76,7 +89,7 @@ export async function POST(
     // ── 1. Load client ────────────────────────────────────────────────────────
     const { data: client } = await supabaseAdmin
       .from('clients')
-      .select('id, name, domain')
+      .select('id, name, domain, semrush_db')
       .eq('id', clientId)
       .single<ClientRow>()
 
@@ -84,32 +97,14 @@ export async function POST(
       return NextResponse.json({ success: false, error: 'Client not found' }, { status: 404 })
     }
 
-    // ── 2. Parse multipart files ──────────────────────────────────────────────
-    const formData = await req.formData()
-    const rawFiles = formData.getAll('files') as File[]
-    const title = (formData.get('title') as string | null) ?? 'SEO Gap Analysis'
-
-    if (rawFiles.length === 0) {
-      return NextResponse.json({ success: false, error: 'No files provided' }, { status: 400 })
+    if (!client.domain) {
+      return NextResponse.json({ success: false, error: 'Client has no domain configured' }, { status: 400 })
     }
 
-    if (rawFiles.length > MAX_FILES) {
-      return NextResponse.json(
-        { success: false, error: `Maximum ${MAX_FILES} files allowed` },
-        { status: 400 }
-      )
-    }
-
-    const buffers: Buffer[] = []
-    for (const file of rawFiles) {
-      if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-        return NextResponse.json(
-          { success: false, error: `File ${file.name} exceeds ${MAX_FILE_SIZE_MB}MB limit` },
-          { status: 400 }
-        )
-      }
-      buffers.push(Buffer.from(await file.arrayBuffer()))
-    }
+    // ── 2. Parse request body ─────────────────────────────────────────────────
+    const body = await req.json().catch(() => ({})) as { title?: string }
+    const title = body.title ?? 'SEO Gap Analysis'
+    const locationCode = LOCATION_CODE_BY_DB[client.semrush_db ?? 'au'] ?? LOCATION_CODE_BY_DB.au
 
     // ── 3. Create pending DB record ───────────────────────────────────────────
     const { data: record, error: insertErr } = await supabaseAdmin
@@ -117,7 +112,7 @@ export async function POST(
       .insert({
         client_id: clientId,
         title,
-        csv_count: rawFiles.length,
+        csv_count: 0,
         status: 'processing',
       })
       .select('id')
@@ -130,19 +125,26 @@ export async function POST(
 
     analysisId = record.id
 
-    // ── 4. Parse CSVs ─────────────────────────────────────────────────────────
-    const parseResult = parseKeywordGapCsvs(buffers, client.domain ?? undefined)
+    // ── 4. Fetch competitors + keyword gap from DataForSEO ────────────────────
+    const serpCompetitors = await getSerpCompetitors(client.domain, locationCode, 5)
+    const competitorDomains = serpCompetitors.slice(0, 3).map(c => c.domain)
 
-    if (parseResult.keywords.length === 0) {
-      await failAnalysis(analysisId!, 'No keywords found in CSV files. Check delimiter format.')
-      return NextResponse.json({ success: false, error: 'No keywords parsed from CSVs' }, { status: 422 })
+    const gapKeywords: LabsKeyword[] = competitorDomains.length > 0
+      ? await getKeywordsGap(client.domain, competitorDomains, locationCode, 100)
+      : []
+
+    if (gapKeywords.length === 0) {
+      await failAnalysis(analysisId!, 'No keyword gap data returned from DataForSEO.')
+      return NextResponse.json({ success: false, error: 'No gap keywords found' }, { status: 422 })
     }
+
+    const parsedKeywords = gapKeywords.map(kw => labsKeywordToParsed(kw, competitorDomains))
 
     // ── 5. AI analysis ────────────────────────────────────────────────────────
     const analysis = await analyzeSeoGap({
-      rawKeywords: parseResult.keywords,
-      competitors: parseResult.competitors,
-      clientDomain: client.domain ?? 'unknown.com.au',
+      rawKeywords: parsedKeywords,
+      competitors: competitorDomains,
+      clientDomain: client.domain,
       clientName: client.name,
     })
 
@@ -157,7 +159,6 @@ export async function POST(
     const filename = `${clientId}/seo-gap-${analysisId}.docx`
     const bucket = 'reports'
 
-    // Ensure bucket exists (ignore "already exists" errors)
     await supabaseAdmin.storage.createBucket(bucket, { public: false }).catch(() => {})
 
     await supabaseAdmin.storage.from(bucket).upload(filename, docxBuffer, {

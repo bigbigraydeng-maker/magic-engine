@@ -2,10 +2,10 @@
 
 /**
  * /dashboard/clients/[id]/seo-gap
- * SEO Keyword Gap Analysis — CSV upload → AI analysis → DOCX download
+ * SEO Keyword Gap Analysis — DataForSEO auto-fetch → AI analysis → DOCX download
  */
 
-import { useState, useCallback, useRef } from 'react'
+import { useState } from 'react'
 
 interface AnalysisSummary {
   total_keywords_raw: number
@@ -39,7 +39,6 @@ interface Props {
 export default function SeoGapPage({ params }: Props) {
   const { id: clientId } = params
 
-  const [files, setFiles]               = useState<File[]>([])
   const [title, setTitle]               = useState('SEO Gap Analysis')
   const [loading, setLoading]           = useState(false)
   const [error, setError]               = useState<string | null>(null)
@@ -48,29 +47,10 @@ export default function SeoGapPage({ params }: Props) {
   const [reportUrl, setReportUrl]       = useState<string | null>(null)
   const [pastAnalyses, setPastAnalyses] = useState<PastAnalysis[] | null>(null)
   const [loadingHistory, setLoadingHistory] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-
-  // ── Drag & drop handlers ──────────────────────────────────────────────────
-
-  const onDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    const dropped = Array.from(e.dataTransfer.files).filter(f => f.name.endsWith('.csv'))
-    setFiles(prev => [...prev, ...dropped].slice(0, 10))
-  }, [])
-
-  const onFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = Array.from(e.target.files ?? []).filter(f => f.name.endsWith('.csv'))
-    setFiles(prev => [...prev, ...selected].slice(0, 10))
-  }
-
-  const removeFile = (idx: number) => {
-    setFiles(prev => prev.filter((_, i) => i !== idx))
-  }
 
   // ── Submit analysis ───────────────────────────────────────────────────────
 
   const runAnalysis = async () => {
-    if (files.length === 0) return
     setLoading(true)
     setError(null)
     setSummary(null)
@@ -78,15 +58,14 @@ export default function SeoGapPage({ params }: Props) {
     setReportUrl(null)
 
     try {
-      const formData = new FormData()
-      formData.append('title', title)
-      files.forEach(f => formData.append('files', f))
-
       const apiKey = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
       const res = await fetch(`/api/clients/${clientId}/seo-gap`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}` },
-        body: formData,
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title }),
       })
 
       const json = await res.json()
@@ -143,7 +122,7 @@ export default function SeoGapPage({ params }: Props) {
       <div>
         <h1 className="text-2xl font-bold text-white">SEO Gap Analysis</h1>
         <p className="text-gray-400 mt-1 text-sm">
-          Upload 1–10 SEMrush keyword gap CSV exports → AI analysis → DOCX report
+          Auto-fetch keyword gaps from DataForSEO → AI analysis → DOCX report
         </p>
       </div>
 
@@ -159,45 +138,10 @@ export default function SeoGapPage({ params }: Props) {
         />
       </div>
 
-      {/* Drop zone */}
-      <div
-        onDrop={onDrop}
-        onDragOver={e => e.preventDefault()}
-        onClick={() => fileInputRef.current?.click()}
-        className="border-2 border-dashed border-gray-600 hover:border-indigo-500 rounded-xl p-10 text-center cursor-pointer transition-colors"
-      >
-        <div className="text-4xl mb-3">📂</div>
-        <p className="text-gray-300 font-medium">Drop SEMrush CSV files here</p>
-        <p className="text-gray-500 text-sm mt-1">or click to select — up to 10 files, 5MB each</p>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".csv"
-          multiple
-          className="hidden"
-          onChange={onFileInput}
-        />
-      </div>
-
-      {/* File list */}
-      {files.length > 0 && (
-        <div className="space-y-2">
-          {files.map((f, i) => (
-            <div key={i} className="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-2">
-              <span className="text-sm text-gray-300 truncate">{f.name}</span>
-              <span className="text-xs text-gray-500 mr-4">{(f.size / 1024).toFixed(0)} KB</span>
-              <button onClick={() => removeFile(i)} className="text-gray-500 hover:text-red-400 text-sm">
-                ✕
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* Run button */}
       <button
         onClick={runAnalysis}
-        disabled={loading || files.length === 0}
+        disabled={loading}
         className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-semibold rounded-lg transition-colors"
       >
         {loading ? '⚙️ Analysing… (30–60 seconds)' : '🚀 Run SEO Gap Analysis'}
@@ -290,7 +234,7 @@ export default function SeoGapPage({ params }: Props) {
                   <p className="text-white text-sm font-medium">{a.title}</p>
                   <p className="text-gray-500 text-xs">
                     {new Date(a.created_at).toLocaleDateString('en-AU')} ·
-                    {a.b2c_keywords} B2C keywords · {a.competitor_count} competitors
+                    {' '}{a.b2c_keywords} B2C keywords · {a.competitor_count} competitors
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
