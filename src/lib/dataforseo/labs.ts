@@ -546,6 +546,85 @@ export async function getDomainTrafficHistory(
   return points.slice(-Math.min(months, 24))
 }
 
+// ─── Ranked keywords (organic positions for a domain) ────────────────────────
+
+/**
+ * Fetch keywords a domain currently ranks for, with organic position data.
+ *
+ * DataForSEO endpoint: /dataforseo_labs/google/ranked_keywords/live
+ *
+ * @param domain        Target domain, e.g. "ctours.com.au"
+ * @param locationCode  DataForSEO location_code (default 2036 = AU)
+ * @param limit         Max keywords to return (default 200)
+ */
+export async function getRankedKeywords(
+  domain: string,
+  locationCode: number = DEFAULT_LOCATION_CODE,
+  limit: number = 200,
+): Promise<LabsKeyword[]> {
+  const res = await fetch(
+    `${DATAFORSEO_API_BASE}/dataforseo_labs/google/ranked_keywords/live`,
+    {
+      method:  'POST',
+      headers: { Authorization: authHeader(), 'Content-Type': 'application/json' },
+      body: JSON.stringify([
+        {
+          target:        domain,
+          location_code: locationCode,
+          language_code: DEFAULT_LANGUAGE_CODE,
+          limit,
+          filters: [['ranked_serp_element.serp_item.type', '=', 'organic']],
+          order_by: ['ranked_serp_element.serp_item.rank_group,asc'],
+        },
+      ]),
+    },
+  )
+
+  if (!res.ok) throw new Error(`DataForSEO ranked_keywords error: ${res.status}`)
+
+  const json = await res.json() as {
+    tasks?: Array<{
+      result?: Array<{
+        items?: Array<{
+          keyword_data?: {
+            keyword?: string
+            keyword_info?: {
+              search_volume?: number | null
+              cpc?:           number | null
+              competition?:   number | null
+            }
+            keyword_difficulty?: number | null
+          }
+          ranked_serp_element?: {
+            serp_item?: {
+              type?:       string
+              rank_group?: number | null
+            }
+          }
+        }>
+      }>
+    }>
+  }
+
+  const items = json.tasks?.[0]?.result?.[0]?.items ?? []
+
+  return items
+    .filter(it => it.keyword_data?.keyword)
+    .map(it => {
+      const kd  = it.keyword_data!
+      const cpc = kd.keyword_info?.cpc ?? null
+      return {
+        keyword:            kd.keyword ?? '',
+        search_volume:      kd.keyword_info?.search_volume ?? null,
+        keyword_difficulty: kd.keyword_difficulty ?? null,
+        cpc,
+        competition:        kd.keyword_info?.competition ?? null,
+        intent:             deriveIntent(cpc),
+        position:           it.ranked_serp_element?.serp_item?.rank_group ?? null,
+      }
+    })
+}
+
 // ─── Domain metrics composite (replaces SEMrush getDomainMetrics) ─────────────
 
 export interface DomainMetrics {
