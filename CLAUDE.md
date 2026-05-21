@@ -215,22 +215,22 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-21 19:42 NZST （**P12.I.2 完成** — Panel A Organic Rankings 关键词表 + Intent 分布图；getRankedKeywords + /rankings API + 完整 UI；TS 无新错误）
+> 最后更新：2026-05-21 21:26 NZST （**P12.I.3 完成** — Panel B 竞品对比 + SVG Venn 图 + 缺口词筛选表；/competitors-gap API；TS 无新错误）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P12.I.3** | Panel B「了解对手」— 竞品并排对比 + 关键词缺口 Venn 图 | 🔥 M1 deadline 6/19 |
-| **P12.I.4** | SEO Gap 页改用 DataForSEO `getKeywordsGap()` 自动拉取 | 🔥 M1 deadline 6/19 |
+| **P12.I.4** | SEO Gap 页改用 DataForSEO `getKeywordsGap()` 自动拉取，移除 SEMrush CSV 上传 | 🔥 M1 deadline 6/19 |
 
 **状态校准（2026-05-21）**：
 - ✅ P12.Q.0–Q.7：Phase 12.Q 全部完成（内容质量闭环）
 - ✅ P12.G.1–G.5：诸葛亮策略调度引擎全部完成
 - ✅ **P12.I.1**：SEO Intelligence 页面路由 + 顶部指标栏；build ✅
-- ✅ **P12.I.2**：Panel A Organic Rankings 关键词表 + Intent 分布图；getRankedKeywords + /rankings API + 完整 UI
+- ✅ **P12.I.2**：Panel A Organic Rankings 关键词表 + Intent 分布图
+- ✅ **P12.I.3**：Panel B 竞品并排对比 + SVG Venn 图 + 缺口词筛选表
 - ⚠️ **PM 待操作**：Render → Environment → 加 `ADMIN_EMAILS=你的邮箱`（若还未做）
 - ⚠️ **PM 待操作**：Supabase 跑 migration `20260525000001_content_quality_snapshot_score.sql` + `20260526000001_campaign_briefs_extend.sql`
 
-下一 session：`继续 Phase 12.I 第 3 任务 P12.I.3`
+下一 session：`继续 Phase 12.I 第 4 任务 P12.I.4`
 
 **本 session 已完成，可以关闭。**
 

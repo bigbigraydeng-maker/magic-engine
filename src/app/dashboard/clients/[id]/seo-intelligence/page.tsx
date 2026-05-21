@@ -24,6 +24,22 @@ interface RankedKeyword {
   intent:             string
 }
 
+interface Competitor {
+  domain:          string
+  avg_position:    number | null
+  intersections:   number
+  monthly_traffic: number | null
+  keyword_count:   number | null
+}
+
+interface GapKeyword {
+  keyword:            string
+  search_volume:      number | null
+  keyword_difficulty: number | null
+  cpc:                number | null
+  intent:             string
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmt(v: number | null, decimals = 0): string {
@@ -89,19 +105,144 @@ function StatCard({
   )
 }
 
-// ─── Panel B placeholder ──────────────────────────────────────────────────────
+// ─── Venn diagram (SVG, no external lib) ────────────────────────────────────
 
-function PanelPlaceholder({ icon, title, desc, eta }: {
-  icon: string; title: string; desc: string; eta: string
+function VennDiagram({
+  clientOnly,
+  shared,
+  gapCount,
+}: {
+  clientOnly: number
+  shared:     number
+  gapCount:   number
 }) {
   return (
-    <div className="bg-white rounded-xl border border-dashed border-gray-200 p-6 flex items-start gap-4">
-      <span className="text-3xl flex-shrink-0">{icon}</span>
-      <div>
-        <p className="text-sm font-semibold text-gray-700">{title}</p>
-        <p className="text-xs text-gray-400 mt-1">{desc}</p>
-        <p className="text-xs text-indigo-500 mt-2 font-medium">{eta}</p>
+    <svg viewBox="0 0 420 160" className="w-full max-w-md mx-auto my-2" role="img" aria-label="关键词重叠 Venn 图">
+      <circle cx="150" cy="80" r="78" fill="#dbeafe" fillOpacity="0.75" stroke="#93c5fd" strokeWidth="2" />
+      <circle cx="270" cy="80" r="78" fill="#fed7aa" fillOpacity="0.75" stroke="#fdba74" strokeWidth="2" />
+      {/* Client-only label */}
+      <text x="95"  y="72"  textAnchor="middle" fill="#1e40af" fontSize="22" fontWeight="bold">{clientOnly}</text>
+      <text x="95"  y="91"  textAnchor="middle" fill="#3b82f6" fontSize="11">你独有</text>
+      {/* Shared label (intersection zone) */}
+      <text x="210" y="72"  textAnchor="middle" fill="#374151" fontSize="18" fontWeight="bold">{shared}</text>
+      <text x="210" y="91"  textAnchor="middle" fill="#6b7280" fontSize="10">共同词</text>
+      {/* Gap label */}
+      <text x="326" y="72"  textAnchor="middle" fill="#c2410c" fontSize="22" fontWeight="bold">{gapCount}</text>
+      <text x="326" y="91"  textAnchor="middle" fill="#ea580c" fontSize="11">竞品缺口</text>
+    </svg>
+  )
+}
+
+// ─── Competitor card ─────────────────────────────────────────────────────────
+
+function CompetitorCard({ comp, rank }: { comp: Competitor; rank: number }) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-4 flex-shrink-0 w-52">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-xs font-bold text-gray-400">#{rank}</span>
+        <span className="text-xs font-semibold text-gray-800 truncate">{comp.domain}</span>
       </div>
+      <div className="space-y-1.5 text-xs">
+        <div className="flex justify-between">
+          <span className="text-gray-400">月均流量</span>
+          <span className="font-medium text-gray-700">{fmt(comp.monthly_traffic)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-gray-400">关键词数</span>
+          <span className="font-medium text-gray-700">{fmt(comp.keyword_count, 0)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-gray-400">均排名</span>
+          <span className="font-medium text-gray-700">{comp.avg_position != null ? comp.avg_position.toFixed(1) : '—'}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-gray-400">共同词</span>
+          <span className="font-medium text-indigo-600">{comp.intersections}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Gap keywords table ───────────────────────────────────────────────────────
+
+function GapTable({ keywords }: { keywords: GapKeyword[] }) {
+  const [search, setSearch] = useState('')
+  const [intentFilter, setIntentFilter] = useState('all')
+  const [shown, setShown] = useState(50)
+
+  const filtered = useMemo(() =>
+    keywords.filter(kw => {
+      if (intentFilter !== 'all' && kw.intent !== intentFilter) return false
+      if (search && !kw.keyword.toLowerCase().includes(search.toLowerCase())) return false
+      return true
+    }),
+    [keywords, intentFilter, search],
+  )
+  const page = filtered.slice(0, shown)
+
+  return (
+    <div className="space-y-3 mt-4">
+      <div className="flex flex-wrap gap-2">
+        <input
+          type="text"
+          placeholder="搜索缺口词…"
+          value={search}
+          onChange={e => { setSearch(e.target.value); setShown(50) }}
+          className="flex-1 min-w-[160px] border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-indigo-400"
+        />
+        <select
+          value={intentFilter}
+          onChange={e => { setIntentFilter(e.target.value); setShown(50) }}
+          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:border-indigo-400"
+        >
+          <option value="all">全部意图</option>
+          <option value="transactional">Transactional</option>
+          <option value="commercial">Commercial</option>
+          <option value="informational">Informational</option>
+        </select>
+      </div>
+      <div className="overflow-x-auto rounded-xl border border-gray-200">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-gray-50 border-b border-gray-200">
+              <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">缺口关键词</th>
+              <th className="text-right px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-20">月搜量</th>
+              <th className="text-right px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-16">KD</th>
+              <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-32">意图</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {page.length === 0 ? (
+              <tr><td colSpan={4} className="text-center py-8 text-sm text-gray-400">没有符合条件的缺口词</td></tr>
+            ) : page.map((kw, i) => {
+              const style = INTENT_STYLE[kw.intent] ?? INTENT_STYLE.informational
+              return (
+                <tr key={i} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-4 py-2.5 font-medium text-gray-900 max-w-xs truncate">{kw.keyword}</td>
+                  <td className="px-3 py-2.5 text-right text-gray-600 tabular-nums">{fmt(kw.search_volume)}</td>
+                  <td className={`px-3 py-2.5 text-right tabular-nums ${kdCls(kw.keyword_difficulty)}`}>{kw.keyword_difficulty ?? '—'}</td>
+                  <td className="px-3 py-2.5">
+                    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${style.bg}`}>{style.label}</span>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      {shown < filtered.length && (
+        <div className="text-center">
+          <button onClick={() => setShown(s => s + 50)} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
+            再显示 {Math.min(50, filtered.length - shown)} 条（共 {filtered.length} 条）
+          </button>
+        </div>
+      )}
+      {page.length > 0 && (
+        <p className="text-center text-xs text-gray-400">
+          显示 {page.length} / {filtered.length} 条{filtered.length < keywords.length && `（已筛选，总计 ${keywords.length} 条）`}
+        </p>
+      )}
     </div>
   )
 }
@@ -321,6 +462,12 @@ export default function SeoIntelligencePage() {
   const [rankingsLoading, setRankingsLoading] = useState(true)
   const [rankingsError,   setRankingsError]   = useState<string | null>(null)
 
+  // Competitors + gap keywords (Panel B)
+  const [competitors,  setCompetitors]  = useState<Competitor[]>([])
+  const [gapKeywords,  setGapKeywords]  = useState<GapKeyword[]>([])
+  const [compLoading,  setCompLoading]  = useState(true)
+  const [compError,    setCompError]    = useState<string | null>(null)
+
   useEffect(() => {
     void (async () => {
       try {
@@ -347,6 +494,22 @@ export default function SeoIntelligencePage() {
         setRankingsError(e instanceof Error ? e.message : '排名数据加载失败')
       } finally {
         setRankingsLoading(false)
+      }
+    })()
+  }, [clientId])
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/seo-intelligence/competitors-gap`)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json() as { competitors: Competitor[]; gapKeywords: GapKeyword[] }
+        setCompetitors(data.competitors)
+        setGapKeywords(data.gapKeywords)
+      } catch (e) {
+        setCompError(e instanceof Error ? e.message : '竞品数据加载失败')
+      } finally {
+        setCompLoading(false)
       }
     })()
   }, [clientId])
@@ -450,17 +613,63 @@ export default function SeoIntelligencePage() {
           </div>
         </section>
 
-        {/* ── Panel B 占位 ───────────────────────────────────────────────────── */}
+        {/* ── Panel B 「了解对手」 ─────────────────────────────────────────────── */}
         <section>
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">
             了解对手
           </p>
-          <PanelPlaceholder
-            icon="🥊"
-            title="竞品并排对比 + 关键词缺口 Venn 图"
-            desc="从 DataForSEO 自动拉取竞品关键词，计算「只有竞品有、客户没有」的 Untapped 词集合，一键生成博客 → 写入飞轮执行看板。"
-            eta="P12.I.3 实施"
-          />
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <h2 className="text-sm font-semibold text-gray-900 mb-4">竞品对比 + 关键词缺口</h2>
+
+            {compLoading ? (
+              <div className="space-y-2">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="h-8 bg-gray-100 rounded animate-pulse" />
+                ))}
+              </div>
+            ) : compError ? (
+              <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{compError}</div>
+            ) : competitors.length === 0 ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
+                DataForSEO 未检测到该域名的有机竞品，可能域名流量较低或尚未被收录。
+              </div>
+            ) : (
+              <>
+                {/* Competitor cards */}
+                <div className="flex gap-3 overflow-x-auto pb-2 mb-5">
+                  {competitors.map((comp, i) => (
+                    <CompetitorCard key={comp.domain} comp={comp} rank={i + 1} />
+                  ))}
+                </div>
+
+                {/* Venn diagram */}
+                {competitors[0] && (
+                  <div className="border border-gray-100 rounded-xl p-4 bg-gray-50 mb-5">
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide text-center mb-1">
+                      关键词重叠分析（vs #{competitors[0].domain}）
+                    </p>
+                    <VennDiagram
+                      clientOnly={Math.max(0, (metrics?.organic_keywords ?? competitors[0].intersections) - competitors[0].intersections)}
+                      shared={competitors[0].intersections}
+                      gapCount={gapKeywords.length}
+                    />
+                    <p className="text-center text-xs text-gray-400 mt-1">
+                      缺口词 = 竞品排名但你尚未覆盖的关键词（共 {gapKeywords.length} 条，取前 100）
+                    </p>
+                  </div>
+                )}
+
+                {/* Gap keywords table */}
+                {gapKeywords.length > 0 ? (
+                  <GapTable keywords={gapKeywords} />
+                ) : (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
+                    未找到明显关键词缺口，你的覆盖已相当全面。
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </section>
 
         {/* ── SEO Gap 快捷入口 ───────────────────────────────────────────────── */}
