@@ -189,7 +189,7 @@ export default async function HomePage() {
             Get a free brand scan + 6-dimension health score. See exactly where you&apos;re losing customers — then decide if you want us to fix it.
           </p>
 
-          <form action="/discover" method="GET" className="flex gap-2.5 max-w-lg mx-auto">
+          <form action="/scan" method="GET" className="flex gap-2.5 max-w-lg mx-auto">
             <input
               type="text"
               name="url"
