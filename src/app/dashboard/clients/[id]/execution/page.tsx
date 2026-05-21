@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import type { ExecutionItem, ExecutionItemStatus, ExecutionLog, PrescriptionStatus, ExecutionTarget, LinkedContentPost } from '@/types/diagnostic'
@@ -107,6 +108,16 @@ const STATUS_META: Record<ExecutionItemStatus, { label: string; color: string }>
   in_progress: { label: '进行中', color: 'bg-blue-100 text-blue-700' },
   completed:   { label: '已完成', color: 'bg-green-100 text-green-700' },
   skipped:     { label: '已跳过', color: 'bg-yellow-100 text-yellow-700' },
+}
+
+const STATUS_FLOW: ExecutionItemStatus[] = ['pending', 'in_progress', 'completed', 'skipped']
+
+// 下拉菜单内每个状态项前的色点 — STATUS_META.color 太浅，单独取饱和色
+const STATUS_DOT: Record<ExecutionItemStatus, string> = {
+  pending:     'bg-gray-400',
+  in_progress: 'bg-blue-500',
+  completed:   'bg-green-500',
+  skipped:     'bg-yellow-500',
 }
 
 // 可在内容工作台（ContentStudioDrawer）生成内容的诊断维度
@@ -282,6 +293,90 @@ function FdeMetaRow({ stepsJson }: { stepsJson: Record<string, unknown> | null }
 }
 
 // ---------------------------------------------------------------------------
+// StatusDropdown — 卡片头部的状态徽章，点击弹出下拉菜单直接切换状态
+// 菜单经 Portal 渲染到 body，规避 PhaseColumn 的 overflow-hidden 裁剪
+// ---------------------------------------------------------------------------
+
+function StatusDropdown({
+  status,
+  onChange,
+}: {
+  status: ExecutionItemStatus
+  onChange: (status: ExecutionItemStatus) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos]   = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const current = STATUS_META[status]
+
+  const toggle = () => {
+    if (open) { setOpen(false); return }
+    const r = btnRef.current?.getBoundingClientRect()
+    if (!r) return
+    const MENU_W = 128
+    const MENU_H = 140
+    const flipUp = r.bottom + MENU_H > window.innerHeight
+    setPos({
+      top:  flipUp ? r.top - MENU_H - 4 : r.bottom + 4,
+      left: Math.max(8, r.right - MENU_W),
+    })
+    setOpen(true)
+  }
+
+  // fixed 菜单不跟随触发器 — 页面滚动 / 窗口缩放时直接关闭
+  useEffect(() => {
+    if (!open) return
+    const close = () => setOpen(false)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [open])
+
+  return (
+    <div className="shrink-0">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={toggle}
+        title="点击修改状态"
+        className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${current.color} hover:ring-2 hover:ring-inset hover:ring-black/10 transition`}
+      >
+        {current.label}
+        <span className="opacity-50 text-[10px]">▾</span>
+      </button>
+      {open && createPortal(
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div
+            className="fixed z-50 w-32 rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+            style={{ top: pos.top, left: pos.left }}
+          >
+            {STATUS_FLOW.map(s => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => { setOpen(false); if (s !== status) onChange(s) }}
+                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-gray-50 ${
+                  s === status ? 'font-semibold text-gray-900' : 'text-gray-600'
+                }`}
+              >
+                <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[s]}`} />
+                <span className="flex-1">{STATUS_META[s].label}</span>
+                {s === status && <span className="text-indigo-500">✓</span>}
+              </button>
+            ))}
+          </div>
+        </>,
+        document.body,
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // 单个执行项（可展开）
 // ---------------------------------------------------------------------------
 
@@ -321,7 +416,6 @@ function ExecutionItemRow({
 
   const stepsJson = item.steps_json as Record<string, unknown> | null
   const fixMeta   = FIX_TYPE_META[item.fix_type] ?? { icon: '❓', label: item.fix_type, cls: 'bg-gray-100 text-gray-600' }
-  const statusM   = STATUS_META[item.status]
   const moduleKey = typeof stepsJson?.module === 'string' ? stepsJson.module : null
   const moduleRoute = moduleKey ? MODULE_ROUTE[moduleKey] : null
   const isDone    = item.status === 'completed' || item.status === 'skipped'
@@ -472,9 +566,7 @@ function ExecutionItemRow({
                 </p>
                 <p className="text-xs text-gray-500 mt-0.5">{item.description}</p>
               </div>
-              <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full font-medium ${statusM.color}`}>
-                {statusM.label}
-              </span>
+              <StatusDropdown status={item.status} onChange={s => onStatusChange(item.id, s)} />
             </div>
           )}
 
@@ -619,31 +711,9 @@ function ExecutionItemRow({
         </div>
       )}
 
-      {/* 展开区：状态流转 + 工作日志（鲁班对话入口已移到卡片头部） */}
+      {/* 展开区：工作日志时间线（状态切换已移到卡片头部徽章） */}
       {expanded && (
         <div className="border-t border-gray-100 bg-gray-50 p-4 space-y-4">
-          {/* 状态流转按钮 */}
-          <div>
-            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">状态</p>
-            <div className="flex flex-wrap gap-2">
-              {(['pending', 'in_progress', 'completed', 'skipped'] as ExecutionItemStatus[]).map(s => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => item.status !== s && onStatusChange(item.id, s)}
-                  disabled={item.status === s}
-                  className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
-                    item.status === s
-                      ? `${STATUS_META[s].color} ring-1 ring-inset ring-gray-300 cursor-default`
-                      : 'bg-white border border-gray-200 text-gray-600 hover:border-gray-300'
-                  }`}
-                >
-                  {STATUS_META[s].label}
-                </button>
-              ))}
-            </div>
-          </div>
-
           {/* 工作日志时间线 */}
           <div>
             <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
@@ -684,19 +754,6 @@ function ExecutionItemRow({
               </div>
             </div>
           )}
-        </div>
-      )}
-
-      {/* 折叠态的快捷"标记完成" */}
-      {!expanded && !isDone && (
-        <div className="px-4 pb-3 -mt-1 flex justify-end">
-          <button
-            type="button"
-            onClick={() => onStatusChange(item.id, 'completed')}
-            className="rounded-lg bg-green-50 border border-green-200 px-3 py-1.5 text-xs font-semibold text-green-700 hover:bg-green-100 transition-colors"
-          >
-            ✓ 标记完成
-          </button>
         </div>
       )}
     </div>
