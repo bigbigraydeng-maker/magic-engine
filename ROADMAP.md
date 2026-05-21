@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-21 19:42 NZST · 当前阶段：**Phase 12.I — SEO Intelligence 页面 + 飞轮接线（P12.I.1 ✅ P12.I.2 ✅ 完成，P12.I.3 Panel B 下一步）**。Phase 12.H GitHub CMS 已登记未开工；Phase 12.Q + 12.G 已完成。
+> 最后更新：2026-05-21 21:26 NZST · 当前阶段：**Phase 12.I — SEO Intelligence 页面 + 飞轮接线（P12.I.1 ✅ P12.I.2 ✅ P12.I.3 ✅ 完成，P12.I.4 SEO Gap 自动拉取下一步）**。M1 deadline 6/19。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -1560,7 +1560,7 @@ SEO 诊断 → Fix 按钮 → 推 GitHub PR → 客户 merge → 元数据修复
 |----|------|------|------|
 | **P12.I.1** | `/dashboard/clients/[id]/seo-intelligence` 页面路由 + 顶部指标栏（读 `flywheel_metrics` WHERE flywheel='seo'） | flywheel_metrics ✅ | ✅ |
 | **P12.I.2** | Panel A「了解自己」— Organic Rankings 关键词表 + Intent 分布图 | P12.I.1 | ✅ |
-| **P12.I.3** | Panel B「了解对手」— 竞品并排对比 + 关键词缺口自动 DataForSEO 拉取 + Venn 图 | P12.I.1 | 📋 |
+| **P12.I.3** | Panel B「了解对手」— 竞品并排对比 + 关键词缺口自动 DataForSEO 拉取 + Venn 图 | P12.I.1 | ✅ |
 | **P12.I.4** | SEO Gap 页改用 DataForSEO `getKeywordsGap()` 自动拉取，移除 SEMrush CSV 上传 | DataForSEO ✅ | 📋 |
 | **P12.I.5** | 接线缺口 1+2 — 博客生成 route `persistAndReturn()` 写 `flywheel_actions(flywheel='seo')` + 持久化 `primary_keyword/volume/kd/intent` | — | 📋 |
 | **P12.I.6** | 接线缺口 4 — 执行看板新增「自主行动」泳道，支持无处方来源的 `execution_item` 渲染 + OutcomeChip | P12.I.5 | 📋 |
@@ -2082,6 +2082,8 @@ AU / NZ（当前）          新市场（未来）
 - **P13.D** — Ads + Reputation 接入 production package：meta_ads_snapshots + project_reviews 加 production_package_id FK；两条路由接受可选参数；包详情页回读 ads_snapshots + reputation_reviews，build ✅
 
 ### 2026-05-21（续 2）
+
+- **P12.I.3** — Panel B「了解对手」竞品并排对比 + 关键词缺口 Venn 图：GET `/api/clients/[id]/seo-intelligence/competitors-gap`（getSerpCompetitors top5 + getKeywordsGap top3 竞品，24h cache）；竞品卡片横向滚动；SVG Venn 图（你独有/共同词/缺口）；缺口词筛选表（意图/搜索）；TS 无新错误；build ✅
 
 - **P12.I.2** — Panel A「了解自己」Organic Rankings 关键词表 + Intent 分布图：`getRankedKeywords()` 调 DataForSEO ranked_keywords/live（200 词含 position）；GET `/api/clients/[id]/seo-intelligence/rankings`（24h cache）；Panel A 完整 UI：Intent 分布徽章、Intent/排名段位/品牌词三维过滤器、搜索框、50 条分页表格（关键词/排名/月搜量/KD/意图）；TS 无新增错误；build ✅
 
