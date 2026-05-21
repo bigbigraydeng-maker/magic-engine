@@ -9,6 +9,8 @@ import type { BlogAuditMetadata } from '@/lib/blog/quality-audit'
 import { getActiveBrief } from '@/lib/content/brief-injector'
 import { getActiveCampaigns } from '@/lib/content/campaign-injector'
 import { requireBearerToken, clampLimit } from '@/lib/validation-utils'
+import { SeoContentAdapter } from '@/lib/flywheel/adapters/SeoContentAdapter'
+import { SEO_ACTION_TYPE, SEO_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import type { BlogPost, GenerateBlogRequest } from '@/types/magic-engine'
 
 /**
@@ -258,6 +260,11 @@ async function persistAndReturn(
       topic:              body.topic.slice(0, 400),
       source_query_id:    body.source_query_id   ?? null,
       source_query_text:  body.source_query_text ?? null,
+      // P12.I.5: persist keyword metadata (SEMrush signal for SEO/unified posts)
+      primary_keyword:    body.primary_keyword   ?? null,
+      keyword_volume:     body.keyword_volume    ?? null,
+      keyword_kd:         body.keyword_kd        ?? null,
+      keyword_intent:     body.keyword_intent    ?? null,
       title:              result.title,
       meta_title:         result.meta_title,
       meta_description:   result.meta_description,
@@ -312,6 +319,27 @@ async function persistAndReturn(
           (err: unknown) => console.error('[blog persistAndReturn] production_item_id back-ref error:', err)
         )
     }
+  }
+
+  // P12.I.5: record an SEO flywheel action so blog generation feeds the flywheel
+  // data loop. Non-blocking — the post is already persisted, so a flywheel write
+  // failure must never fail the request.
+  try {
+    await new SeoContentAdapter().execute({
+      clientId,
+      actionType:    SEO_ACTION_TYPE.PUBLISH_BLOG,
+      executionMode: 'in_house',
+      payload: {
+        triggered_by:    'blog_generation',
+        blog_post_id:    post.id,
+        mode,
+        primary_keyword: body.primary_keyword ?? null,
+      },
+      expectedMetric:      SEO_METRIC_KEY.ORGANIC_TRAFFIC,
+      productionPackageId: body.production_package_id,
+    })
+  } catch (err) {
+    console.error('[blog persistAndReturn] flywheel action write failed (non-blocking):', err)
   }
 
   return NextResponse.json({
