@@ -47,7 +47,7 @@ export async function GET(
 
   const get = (key: string): number | null => latest.get(key)?.value ?? null
 
-  const allTimestamps = [...latest.values()].map(v => v.measuredAt)
+  const allTimestamps = Array.from(latest.values()).map(v => v.measuredAt)
   const lastUpdated = allTimestamps.length > 0
     ? allTimestamps.reduce((a, b) => (a > b ? a : b))
     : null
