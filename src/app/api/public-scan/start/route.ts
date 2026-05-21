@@ -109,12 +109,13 @@ function translateNote(note: string): { icon: string; message: string } {
 const SCAN_HARD_TIMEOUT_MS = 9 * 60 * 1000
 
 async function runScan(jobId: string, domain: string): Promise<void> {
-  // Heartbeat: write a "still scanning" step every 45 s while running.
-  // Gives the user visible activity during the long Anthropic + Apify gaps.
+  // Heartbeat: write a "still scanning" step every 30 s while running.
+  // Guarantees the user sees activity at least every 30 s — covers the 75 s
+  // Apify social-scraper gap and the 150 s Anthropic reasoning turns.
   let heartbeatMsg = 'Analysing your brand…'
   const heartbeat = setInterval(() => {
     void addLog(jobId, 'step', '⏳', heartbeatMsg).catch(() => {})
-  }, 45_000)
+  }, 30_000)
 
   // Hard timeout — resolves as 'timeout' after 9 minutes.
   let hardTimeoutId: ReturnType<typeof setTimeout> | undefined

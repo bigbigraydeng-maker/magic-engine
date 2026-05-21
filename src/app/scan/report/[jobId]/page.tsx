@@ -69,10 +69,17 @@ function LoadingView({ domain, log }: { domain: string; log: LogEntry[] }) {
   const secs = elapsed % 60
   const elapsedStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
 
+  // Progress bar fills 0→90% over 5 minutes, then stays at 90% until done
+  const TOTAL_ESTIMATE_S = 300
+  const progressPct = Math.min(90, Math.round((elapsed / TOTAL_ESTIMATE_S) * 90))
+
+  // Last log entry message for the "currently doing" label
+  const latestStep = log.length > 0 ? log[log.length - 1].message : 'Starting…'
+
   return (
     <div className="max-w-xl mx-auto px-5 py-12">
       {/* Header */}
-      <div className="text-center mb-8">
+      <div className="text-center mb-6">
         <div
           className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-semibold mb-4"
           style={{ background: 'rgba(22,45,90,0.7)', border: '1px solid rgba(70,125,215,0.2)', color: '#7ABFFF' }}
@@ -83,9 +90,33 @@ function LoadingView({ domain, log }: { domain: string; log: LogEntry[] }) {
         <h2 className="text-[22px] font-black mb-1" style={{ color: '#ECF3FF' }}>
           AI is mapping your brand…
         </h2>
-        <p className="text-[12px]" style={{ color: 'rgba(120,170,230,0.4)' }}>
+        <p className="text-[12px] mb-4" style={{ color: 'rgba(120,170,230,0.4)' }}>
           {elapsedStr} elapsed · Usually 3–5 minutes total
         </p>
+
+        {/* Time-based progress bar */}
+        <div className="max-w-xs mx-auto">
+          <div className="h-1.5 rounded-full overflow-hidden"
+               style={{ background: 'rgba(255,255,255,0.06)' }}>
+            <div
+              className="h-1.5 rounded-full transition-all duration-1000"
+              style={{
+                width: `${progressPct}%`,
+                background: 'linear-gradient(90deg, #2855A4, #5B9EFF)',
+              }}
+            />
+          </div>
+          <p className="text-[10px] mt-1.5 text-center" style={{ color: 'rgba(120,170,230,0.3)' }}>
+            {progressPct < 90 ? `~${Math.max(0, Math.ceil((TOTAL_ESTIMATE_S - elapsed) / 60))} min remaining` : 'Finalising report…'}
+          </p>
+        </div>
+
+        {/* Currently doing */}
+        <div className="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-[11px]"
+             style={{ background: 'rgba(10,20,40,0.5)', border: '1px solid rgba(70,125,215,0.1)' }}>
+          <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />
+          <span style={{ color: 'rgba(160,200,255,0.6)' }}>{latestStep}</span>
+        </div>
       </div>
 
       {/* Live discovery feed */}
