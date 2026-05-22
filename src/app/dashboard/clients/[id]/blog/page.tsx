@@ -5,6 +5,14 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import type { BlogOpportunity, ContentAuditResult } from '@/types/magic-engine';
 
+interface KeywordSuggestion {
+  keyword: string;
+  volume: number;
+  kd: number;
+  intent: string | null;
+  tier: 'A' | 'B';
+}
+
 const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? '';
 
 interface BlogPostSummary {
@@ -57,7 +65,9 @@ export default function ClientBlogPage() {
 
   // ── Free keyword generation form ──────────────────────────────────────────
   const [freeFormOpen, setFreeFormOpen] = useState(false);
-  const [freeKeyword, setFreeKeyword] = useState('');
+  const [selectedKeyword, setSelectedKeyword] = useState<KeywordSuggestion | null>(null);
+  const [seoKeywords, setSeoKeywords] = useState<KeywordSuggestion[]>([]);
+  const [keywordsLoading, setKeywordsLoading] = useState(false);
   const [freeMode, setFreeMode] = useState<'unified' | 'geo_only'>('unified');
   const [freeWordCount, setFreeWordCount] = useState(1200);
   const [freeGenerating, setFreeGenerating] = useState(false);
@@ -93,11 +103,27 @@ export default function ClientBlogPage() {
     }
   }, [clientId]);
 
+  const fetchKeywordSuggestions = useCallback(async () => {
+    setKeywordsLoading(true);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/blog/keyword-suggestions`, {
+        headers: { Authorization: `Bearer ${API_KEY}` },
+      });
+      if (res.ok) {
+        const j = await res.json();
+        setSeoKeywords(j.suggestions ?? []);
+      }
+    } finally {
+      setKeywordsLoading(false);
+    }
+  }, [clientId]);
+
   useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => { fetchKeywordSuggestions(); }, [fetchKeywordSuggestions]);
 
   const handleFreeGenerate = async () => {
-    const kw = freeKeyword.trim();
-    if (!kw) return;
+    if (!selectedKeyword) return;
+    const kw = selectedKeyword.keyword;
     setFreeGenerating(true);
     flash('✨ Generating blog post… this may take 20–30s', true);
     try {
@@ -115,12 +141,12 @@ export default function ClientBlogPage() {
       const j = await res.json();
       if (!res.ok || !j.success) throw new Error(j.error ?? 'Generation failed');
       if (j.action === 'upgrade' && j.audit) {
-        setUpgradeRec({ opp: { query_id: kw, query_text: kw, weakness_score: 0, engines_missing: [], total_runs_checked: 0 }, audit: j.audit as ContentAuditResult });
+        setUpgradeRec({ opp: { query_id: kw, query_text: kw, weakness_score: 0, engines_missing: [], total_runs_checked: 0, last_run_at: null, mode: 'seo_only' }, audit: j.audit as ContentAuditResult });
         setActionMsg('');
         setActionOk(null);
       } else {
         flash(`✓ Blog post created ($${j.cost_usd?.toFixed(4) ?? '?'}) — review it below`, true);
-        setFreeKeyword('');
+        setSelectedKeyword(null);
         setFreeFormOpen(false);
         await fetchAll();
       }
@@ -222,19 +248,75 @@ export default function ClientBlogPage() {
 
         {freeFormOpen && (
           <div className="border-t border-gray-100 px-5 py-4 space-y-4">
-            {/* Keyword input */}
+            {/* Keyword selector */}
             <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">
-                Keyword / Topic <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={freeKeyword}
-                onChange={e => setFreeKeyword(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !freeGenerating) void handleFreeGenerate(); }}
-                placeholder='e.g. "best guided tours New Zealand" or "NZ travel itinerary 14 days"'
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              />
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-semibold text-gray-600">
+                  Select Keyword <span className="text-red-500">*</span>
+                </label>
+                {seoKeywords.length > 0 && (
+                  <span className="text-[10px] text-gray-400">
+                    From SEO Gap Analysis · {seoKeywords.length} opportunities
+                  </span>
+                )}
+              </div>
+
+              {keywordsLoading ? (
+                <div className="flex gap-2 flex-wrap">
+                  {[1,2,3,4,5].map(i => (
+                    <div key={i} className="h-8 w-36 bg-gray-100 animate-pulse rounded-full" />
+                  ))}
+                </div>
+              ) : seoKeywords.length === 0 ? (
+                <div className="bg-gray-50 border border-dashed border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-500 text-center">
+                  No SEO keyword suggestions yet.{' '}
+                  <Link
+                    href={`/dashboard/clients/${clientId}/seo-gap`}
+                    className="text-indigo-600 hover:text-indigo-800 font-medium"
+                  >
+                    Run SEO Gap Analysis →
+                  </Link>
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {seoKeywords.map(kw => {
+                    const isSelected = selectedKeyword?.keyword === kw.keyword;
+                    const intentColor = kw.intent === 'transactional' ? 'bg-green-100 text-green-700'
+                      : kw.intent === 'informational' ? 'bg-blue-100 text-blue-700'
+                      : 'bg-gray-100 text-gray-600';
+                    return (
+                      <button
+                        key={kw.keyword}
+                        onClick={() => setSelectedKeyword(isSelected ? null : kw)}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                          isSelected
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                            : 'bg-white text-gray-700 border-gray-200 hover:border-indigo-400 hover:text-indigo-700'
+                        }`}
+                      >
+                        {isSelected && <span>✓</span>}
+                        <span>{kw.keyword}</span>
+                        {kw.volume > 0 && (
+                          <span className={`px-1 rounded text-[10px] font-semibold ${isSelected ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                            {kw.volume >= 1000 ? `${(kw.volume/1000).toFixed(1)}k` : kw.volume}
+                          </span>
+                        )}
+                        {kw.intent && (
+                          <span className={`px-1 rounded text-[10px] ${isSelected ? 'bg-indigo-500 text-white' : intentColor}`}>
+                            {kw.intent.slice(0,4)}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {selectedKeyword && (
+                <p className="text-xs text-indigo-600 mt-2 font-medium">
+                  Selected: &ldquo;{selectedKeyword.keyword}&rdquo; · Vol {selectedKeyword.volume} · KD {selectedKeyword.kd}
+                </p>
+              )}
             </div>
 
             <div className="flex flex-wrap gap-4">
@@ -283,7 +365,7 @@ export default function ClientBlogPage() {
             <div className="flex items-center gap-3 pt-1">
               <button
                 onClick={() => void handleFreeGenerate()}
-                disabled={freeGenerating || !freeKeyword.trim()}
+                disabled={freeGenerating || !selectedKeyword}
                 className="px-5 py-2 text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white rounded-lg transition-colors"
               >
                 {freeGenerating ? '⏳ Generating…' : '✨ Generate'}
