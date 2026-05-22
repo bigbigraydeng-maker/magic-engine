@@ -405,10 +405,14 @@ export async function getKeywordIdeas(
  * Find keywords where competitors rank but the client does not.
  * Replaces: SEMrush getKeywordGap
  *
- * DataForSEO endpoint: /dataforseo_labs/google/keyword_gap/live
+ * DataForSEO Labs has no dedicated keyword-gap endpoint. This uses
+ * /dataforseo_labs/google/domain_intersection/live with intersections:false,
+ * which returns keywords target1 ranks for but target2 does not — i.e. the gap.
+ * One call per competitor (target1 = competitor, target2 = client), run in
+ * parallel; results are merged, de-duplicated by keyword, and sorted by volume.
  *
  * @param clientDomain       Primary domain to find gaps for
- * @param competitorDomains  Up to 9 competitor domains to compare against
+ * @param competitorDomains  Competitor domains to compare against
  * @param locationCode       DataForSEO location_code (default 2036 = AU)
  * @param limit              Max gap keywords to return (default 100)
  */
@@ -420,34 +424,60 @@ export async function getKeywordsGap(
 ): Promise<LabsKeyword[]> {
   if (competitorDomains.length === 0) return []
 
-  const targets = [clientDomain, ...competitorDomains].map(d => ({
-    target: d,
-    type:   'site' as const,
-  }))
+  const perCompetitor = await Promise.allSettled(
+    competitorDomains.map(competitor =>
+      fetchDomainIntersectionGap(competitor, clientDomain, locationCode, limit),
+    ),
+  )
 
+  // Merge competitor results, keeping the highest-volume entry per keyword.
+  const byKeyword = new Map<string, LabsKeyword>()
+  for (const settled of perCompetitor) {
+    if (settled.status !== 'fulfilled') continue
+    for (const kw of settled.value) {
+      const existing = byKeyword.get(kw.keyword)
+      if (!existing || (kw.search_volume ?? 0) > (existing.search_volume ?? 0)) {
+        byKeyword.set(kw.keyword, kw)
+      }
+    }
+  }
+
+  return [...byKeyword.values()]
+    .sort((a, b) => (b.search_volume ?? 0) - (a.search_volume ?? 0))
+    .slice(0, limit)
+}
+
+/**
+ * One competitor-vs-client gap query via the domain_intersection endpoint.
+ * intersections:false → keywords the competitor (target1) ranks for but the
+ * client (target2) does not. Restricted to organic SERP results.
+ */
+async function fetchDomainIntersectionGap(
+  competitorDomain: string,
+  clientDomain: string,
+  locationCode: number,
+  limit: number,
+): Promise<LabsKeyword[]> {
   const res = await fetch(
-    `${DATAFORSEO_API_BASE}/dataforseo_labs/google/keyword_gap/live`,
+    `${DATAFORSEO_API_BASE}/dataforseo_labs/google/domain_intersection/live`,
     {
       method:  'POST',
       headers: { Authorization: authHeader(), 'Content-Type': 'application/json' },
       body: JSON.stringify([
         {
-          targets,
+          target1:       competitorDomain,
+          target2:       clientDomain,
           location_code: locationCode,
           language_code: DEFAULT_LANGUAGE_CODE,
+          intersections: false,
+          item_types:    ['organic'],
           limit,
-          // Only keywords where client is not ranking but ≥1 competitor is
-          filters: [
-            ['ranked_serp_element.serp_item.domain', 'not_like', `%${clientDomain}%`],
-            'and',
-            ['keyword_data.keyword_info.search_volume', '>', 0],
-          ],
         },
       ]),
     },
   )
 
-  if (!res.ok) throw new Error(`DataForSEO keyword_gap error: ${res.status}`)
+  if (!res.ok) throw new Error(`DataForSEO domain_intersection error: ${res.status}`)
 
   const json = await res.json() as {
     tasks?: Array<{
@@ -460,7 +490,9 @@ export async function getKeywordsGap(
               cpc?:           number | null
               competition?:   number | null
             }
-            keyword_difficulty?: number | null
+            keyword_properties?: {
+              keyword_difficulty?: number | null
+            }
           }
         }>
       }>
@@ -471,13 +503,14 @@ export async function getKeywordsGap(
 
   return items
     .filter(it => it.keyword_data?.keyword)
+    .filter(it => (it.keyword_data!.keyword_info?.search_volume ?? 0) > 0)
     .map(it => {
       const kd  = it.keyword_data!
       const cpc = kd.keyword_info?.cpc ?? null
       return {
         keyword:            kd.keyword ?? '',
         search_volume:      kd.keyword_info?.search_volume ?? null,
-        keyword_difficulty: kd.keyword_difficulty ?? null,
+        keyword_difficulty: kd.keyword_properties?.keyword_difficulty ?? null,
         cpc,
         competition:        kd.keyword_info?.competition ?? null,
         intent:             deriveIntent(cpc),
