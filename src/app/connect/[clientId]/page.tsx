@@ -18,6 +18,13 @@ export const metadata: Metadata = {
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+type OAuthStatus = 'success' | 'denied' | 'error' | null
+
+function toOAuthStatus(raw: string | undefined): OAuthStatus {
+  if (raw === 'success' || raw === 'denied' || raw === 'error') return raw
+  return null
+}
+
 interface Props {
   params: { clientId: string }
   searchParams: { oauth?: string }
@@ -64,7 +71,7 @@ export default async function ConnectPage({ params, searchParams }: Props) {
       clientId={clientId}
       clientName={client.name}
       connectedEmail={tokenRow?.google_email ?? null}
-      oauthStatus={searchParams.oauth ?? null}
+      oauthStatus={toOAuthStatus(searchParams.oauth)}
     />
   )
 }

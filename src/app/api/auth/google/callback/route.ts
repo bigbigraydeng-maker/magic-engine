@@ -21,11 +21,15 @@ import {
 } from '@/lib/google-oauth/client'
 import { supabaseAdmin } from '@/lib/supabase'
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function appUrl(): string {
   return process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3001'
 }
 
-function destination(flow: OAuthFlow, clientId: string, oauth: string): string {
+type OAuthResult = 'success' | 'error' | 'denied'
+
+function destination(flow: OAuthFlow, clientId: string, oauth: OAuthResult): string {
   if (flow === 'connect') {
     return `${appUrl()}/connect/${clientId}?oauth=${oauth}`
   }
@@ -48,15 +52,26 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.redirect(`${appUrl()}/dashboard?google_auth_error=denied`)
   }
 
+  // Missing code or state — route connect-flow customers away from the dashboard login wall
   if (!code || !state) {
+    if (verified?.flow === 'connect') {
+      return NextResponse.redirect(destination('connect', verified.clientId, 'error'))
+    }
     return NextResponse.redirect(`${appUrl()}/dashboard?google_auth_error=missing_params`)
   }
 
-  // Verify signed state → extract clientId + flow
+  // Verify signed state → extract clientId + flow.
+  // If state is tampered/expired we cannot trust the flow, so use a public-safe fallback.
   if (!verified) {
-    return NextResponse.redirect(`${appUrl()}/dashboard?google_auth_error=invalid_state`)
+    return NextResponse.redirect(`${appUrl()}/?google_auth_error=invalid_link`)
   }
   const { clientId, flow } = verified
+
+  // Re-validate clientId as UUID — defence-in-depth against any future refactor that
+  // might allow non-HMAC-sourced clientIds to reach this point.
+  if (!UUID_RE.test(clientId)) {
+    return NextResponse.redirect(`${appUrl()}/dashboard?google_auth_error=invalid_state`)
+  }
 
   // Exchange authorization code for tokens
   const redirectUri = `${appUrl()}/api/auth/google/callback`

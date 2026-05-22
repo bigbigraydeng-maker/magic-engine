@@ -1,10 +1,12 @@
 'use client'
 
+type OAuthStatus = 'success' | 'denied' | 'error' | null
+
 interface Props {
   clientId: string
   clientName: string
   connectedEmail: string | null
-  oauthStatus: string | null
+  oauthStatus: OAuthStatus
 }
 
 type BannerKey = 'denied' | 'error'
@@ -20,7 +22,7 @@ const BANNERS: Record<BannerKey, { tone: string; text: string }> = {
   },
 }
 
-function bannerFor(status: string | null) {
+function bannerFor(status: OAuthStatus) {
   if (status === 'denied' || status === 'error') return BANNERS[status]
   return null
 }

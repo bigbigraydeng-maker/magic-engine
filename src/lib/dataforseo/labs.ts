@@ -426,7 +426,7 @@ export async function getKeywordsGap(
   }))
 
   const res = await fetch(
-    `${DATAFORSEO_API_BASE}/dataforseo_labs/google/keywords_gap/live`,
+    `${DATAFORSEO_API_BASE}/dataforseo_labs/google/keyword_gap/live`,
     {
       method:  'POST',
       headers: { Authorization: authHeader(), 'Content-Type': 'application/json' },
@@ -447,7 +447,7 @@ export async function getKeywordsGap(
     },
   )
 
-  if (!res.ok) throw new Error(`DataForSEO keywords_gap error: ${res.status}`)
+  if (!res.ok) throw new Error(`DataForSEO keyword_gap error: ${res.status}`)
 
   const json = await res.json() as {
     tasks?: Array<{
