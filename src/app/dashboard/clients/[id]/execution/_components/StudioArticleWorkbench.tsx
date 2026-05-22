@@ -32,6 +32,8 @@ export interface ArticlePost {
   word_count: number | null
   cost_usd: number | null
   status: string
+  featured_image_url: string | null
+  featured_image_prompt: string | null
 }
 
 /** Map a raw blog_posts API row to the workbench's ArticlePost shape. */
@@ -45,6 +47,8 @@ export function toArticlePost(p: Record<string, unknown>): ArticlePost {
     word_count:       typeof p.word_count === 'number' ? p.word_count : null,
     cost_usd:         typeof p.cost_usd === 'number' ? p.cost_usd : null,
     status:           String(p.status ?? 'draft'),
+    featured_image_url:    typeof p.featured_image_url === 'string' ? p.featured_image_url : null,
+    featured_image_prompt: typeof p.featured_image_prompt === 'string' ? p.featured_image_prompt : null,
   }
 }
 
@@ -107,6 +111,12 @@ export function StudioArticleWorkbench({ clientId, post, executionItemId, onPost
   const [bodyLocal, setBodyLocal]       = useState(post.html_body)
   const [bodyDirty, setBodyDirty]       = useState(false)
 
+  // Hero image panel state
+  const [imgPrompt, setImgPrompt]           = useState(() => post.featured_image_prompt ?? '')
+  const [imgGenerating, setImgGenerating]   = useState(false)
+  const [imgError, setImgError]             = useState('')
+  const [showPromptEdit, setShowPromptEdit] = useState(false)
+
   // Publish to GitHub state
   const [publishing, setPublishing]   = useState(false)
   const [publishedPr, setPublishedPr] = useState<{ url: string; number: number } | null>(null)
@@ -166,6 +176,31 @@ export function StudioArticleWorkbench({ clientId, post, executionItemId, onPost
       setPublishError(e instanceof Error ? e.message : '推送失败，请重试')
     } finally {
       setPublishing(false)
+    }
+  }
+
+  // ── Hero image generation ───────────────────────────────────────────────────
+  const generateHeroImage = async () => {
+    setImgGenerating(true)
+    setImgError('')
+    try {
+      const promptOverride = imgPrompt.trim()
+      const res = await fetch(`/api/clients/${clientId}/blog/${post.id}/image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        body: JSON.stringify(
+          promptOverride && promptOverride !== post.featured_image_prompt
+            ? { prompt_override: promptOverride }
+            : {}
+        ),
+      })
+      const j = await res.json()
+      if (!res.ok || !j.success || !j.post) throw new Error(j.error ?? '生成失败')
+      onPostUpdated(toArticlePost(j.post))
+    } catch (e) {
+      setImgError(e instanceof Error ? e.message : '生成失败')
+    } finally {
+      setImgGenerating(false)
     }
   }
 
@@ -266,6 +301,63 @@ export function StudioArticleWorkbench({ clientId, post, executionItemId, onPost
             saving={savingField === 'meta_description'}
             onSave={v => patchField({ meta_description: v }, 'meta_description')}
           />
+
+          {/* Hero image panel */}
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-semibold text-gray-700">🖼 头图配图</label>
+              <button
+                onClick={() => setShowPromptEdit(v => !v)}
+                className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                {showPromptEdit ? '收起提示词' : '✏️ 编辑提示词'}
+              </button>
+            </div>
+
+            {post.featured_image_url ? (
+              <div className="mb-2">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={post.featured_image_url}
+                  alt={post.title}
+                  className="w-full rounded-lg object-cover max-h-52"
+                />
+              </div>
+            ) : (
+              <div className="border-2 border-dashed border-gray-200 rounded-lg h-20 flex items-center justify-center mb-2">
+                <p className="text-xs text-gray-400">尚未生成头图</p>
+              </div>
+            )}
+
+            {showPromptEdit && (
+              <textarea
+                value={imgPrompt}
+                onChange={e => setImgPrompt(e.target.value)}
+                rows={3}
+                placeholder="图片提示词（自动基于文章内容 + 品牌视觉 DNA + Campaign 生成）"
+                className="w-full text-xs text-gray-700 border border-gray-200 rounded-lg p-2 resize-none focus:outline-none focus:ring-1 focus:ring-indigo-500 mb-2"
+              />
+            )}
+
+            {imgError && (
+              <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1 mb-2">{imgError}</p>
+            )}
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => void generateHeroImage()}
+                disabled={imgGenerating}
+                className="px-4 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white rounded-lg transition-colors"
+              >
+                {imgGenerating
+                  ? '⏳ 生成中（约 20 秒）…'
+                  : post.featured_image_url
+                    ? '🔄 重新生成'
+                    : '✨ 生成配图'}
+              </button>
+              <p className="text-[11px] text-gray-400">基于 Master Brief 视觉 DNA + 当前 Campaign</p>
+            </div>
+          </div>
 
           {/* Body — preview / raw HTML edit */}
           <div className="bg-white rounded-xl border border-gray-200 p-4">

@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-22 14:31 NZST · 当前阶段：**Phase 12.I — SEO Intelligence 页面 + 飞轮接线（P12.I.1–I.5 ✅，博客生成已接入 SEO 飞轮；P12.I.6「自主行动」执行泳道为下一步）**。M1 deadline 6/19。
+> 最后更新：2026-05-22 18:44 NZST · 当前阶段：**Phase 12.I — SEO Intelligence 页面 + 飞轮接线（P12.I.1–I.5 ✅，博客生成已接入 SEO 飞轮；P12.J.1 ✅ 博客头图配图；P12.I.6「自主行动」执行泳道为下一步）**。M1 deadline 6/19。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -44,6 +44,7 @@
 ✅ Phase 12.G   诸葛亮策略调度引擎（P12.G.1–G.5 全部完成，2026-05-21）
 📋 Phase 12.H   GitHub CMS 执行闭环（P1 博客推PR + P2 SEO Fix UI，已登记未开工）
 🔥 Phase 12.I   SEO Intelligence 页面 + 飞轮闭环接线（P12.I.1–I.5 ✅，10 任务，M1 deadline 6/19）
+✅ Phase 12.J   博客头图配图生成（P12.J.1 ✅，P12.J.2 暂缓）
 📋 Phase 13     Production Package / 生产订单聚合层（已登记，待排期）
 🔄 Phase 9.0    Visual Queue UX Polish（部分完成，未收尾）
 📋 Phase 9      报告化 + 客户 Portal
@@ -1582,6 +1583,19 @@ SEO 诊断 → Fix 按钮 → 推 GitHub PR → 客户 merge → 元数据修复
 
 ---
 
+## Phase 12.J — 博客头图配图生成 ✅ 已完成
+
+> **背景**：博客生成流程已产出 `featured_image_prompt`（已注入 MB 视觉 DNA + Campaign 上下文），但从未实际生成图片。本 Phase 补齐「FDE 一键生成头图」能力，与工作台协作体验对齐。
+>
+> **登记日期**：2026-05-22
+
+| 任务 ID | 内容 | 依赖 | 状态 |
+|---------|------|------|------|
+| **P12.J.1** | 新增 `POST /api/clients/[id]/blog/[postId]/image` 路由（gpt-image-1 生成 + Supabase storage 上传）+ 工作台「🖼 头图配图」面板（展示 / 生成 / 编辑提示词）+ Campaign 视觉线索注入 `generateVisualBrief()` | — | ✅ |
+| **P12.J.2** | `buildBlogHtml` 正文前加 hero `<figure>` — 让配图真正进推送 HTML（槽位留存，暂缓） | P12.J.1 | 📋 |
+
+---
+
 ## Phase 13 — Production Package（生产订单聚合层）📋 已登记，未开工
 
 > **背景**：当前 `content_posts / blog_posts / reels_drafts / visual_assets` 各自为政，`execution_items.content_post_id` 是 1:1 链路，无法表达"一个执行项 → 一组产物"的批次语义。Production Package 是六维诊断后的**统一生产订单聚合层**，把分散产物按维度 + 上下文聚合成可审核、可追溯、可归因的批次。
@@ -2132,6 +2146,7 @@ AU / NZ（当前）          新市场（未来）
 
 - **P13.E-pre** — Competitor snapshot persistence：新增 competitor_snapshots 表（含 production_package_id FK）；competitor-keywords POST 落库 snapshot + 接受可选 production_package_id；包详情 API 回读 competitor_snapshots 数组，build ✅
 - **P13.E** — Flywheel feedback 闭环：flywheel_actions 加 production_package_id FK；4 adapter execute() + ExecuteActionInput/FlywheelActionRow 类型同步；新增 package-publish.ts（dimension→flywheel 映射 + on-publish 非阻断落 flywheel_action）；PATCH /api/clients/[id]/production/[packageId] 状态更新 + publish hook，build ✅
+- **P12.J.1** — 博客头图配图：新增 `/api/clients/[id]/blog/[postId]/image` 路由（gpt-image-1 16:9 + Supabase blog-hero/ 存储）+ 工作台「🖼 头图配图」面板（一键生成/重新生成/编辑提示词）+ `generateVisualBrief()` 注入 Campaign 视觉线索，build ✅
 
 ### 2026-05-22
 

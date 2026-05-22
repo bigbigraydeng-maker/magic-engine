@@ -17,7 +17,7 @@ import { getActiveCampaigns, formatCampaignForPrompt } from '../content/campaign
 import { getActiveGeoHtml } from '../geo/html-generator'
 import { callClaudeWithDocs, parseJsonResponse } from '../anthropic/client'
 import { generateVisualBrief } from '../content/visual-brief-generator'
-import type { GenerateBlogRequest, BlogPost, MasterBrief } from '@/types/magic-engine'
+import type { GenerateBlogRequest, BlogPost, MasterBrief, CampaignBrief } from '@/types/magic-engine'
 
 const MODEL_USED = 'claude-sonnet-4-6'
 
@@ -134,6 +134,7 @@ export async function generateBlogPost(
     metaDescription,
     topic: req.topic,
     brief,
+    campaign: campaigns[0] ?? null,
   })
 
   return {
@@ -172,12 +173,16 @@ async function buildHeroImagePrompt(params: {
   metaDescription: string
   topic: string
   brief: MasterBrief | null
+  campaign?: CampaignBrief | null
 }): Promise<string> {
-  const { title, htmlBody, metaDescription, topic, brief } = params
+  const { title, htmlBody, metaDescription, topic, brief, campaign } = params
 
   if (!brief) {
     return `Professional editorial hero image for "${title}", ${topic}, clean composition, natural lighting, high resolution`
   }
+
+  const parts = [campaign?.campaign_angle, campaign?.offer].filter(Boolean) as string[]
+  const campaignContext = parts.length > 0 ? parts.join(' · ') : (campaign?.title ?? undefined)
 
   // Extract a plain-text excerpt from the article for grounding.
   const bodyText = htmlBody.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
@@ -188,6 +193,7 @@ async function buildHeroImagePrompt(params: {
     brief,
     platforms: ['blog hero'],
     topic,
+    campaignContext,
   })
 }
 

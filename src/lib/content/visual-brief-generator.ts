@@ -42,6 +42,7 @@ export interface VisualBriefInput {
   brief: MasterBrief
   platforms: string[]
   topic: string
+  campaignContext?: string
 }
 
 /**
@@ -49,7 +50,7 @@ export interface VisualBriefInput {
  * the post content and MB visual DNA. Falls back to a basic prompt on error.
  */
 export async function generateVisualBrief(input: VisualBriefInput): Promise<string> {
-  const { postTitle, postScript, postCaption, brief, platforms, topic } = input
+  const { postTitle, postScript, postCaption, brief, platforms, topic, campaignContext } = input
 
   const visualDna = extractVisualDna(brief)
   const brandName = brief.brand_name ?? 'the brand'
@@ -64,11 +65,13 @@ Generate a single image generation prompt that:
 
 Output ONLY the prompt text — no explanation, no quotes, no JSON.`
 
+  const campaignLine = campaignContext ? `\nCURRENT CAMPAIGN: ${campaignContext}` : ''
+
   const userMessage = `POST TITLE: ${postTitle}
 POST CONTENT SUMMARY: ${postScript.slice(0, 300)}
 POST CAPTION: ${postCaption.slice(0, 150)}
 TOPIC: ${topic}
-BRAND: ${brandName}
+BRAND: ${brandName}${campaignLine}
 
 VISUAL DNA:
 ${visualDna || 'No specific visual DNA provided — infer from brand and post content'}

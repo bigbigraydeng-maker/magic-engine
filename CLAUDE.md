@@ -215,23 +215,25 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-22 14:31 NZST （**Phase 12.I M1 对齐完成** — P12.I.1–I.4 已 rebase 到 origin/main，PR #51 open 待 merge；下一步 P12.I.5 飞轮接线）
+> 最后更新：2026-05-22 18:44 NZST （**P12.I.5 ✅ + P12.J.1 ✅** — 博客飞轮接线 + 头图配图面板已完成并 merge 到 main；下一步 P12.I.6「自主行动」执行泳道）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P12.I.5** | 接线缺口 1+2 — 博客生成 route `persistAndReturn()` 写 `flywheel_actions(flywheel='seo')` + 持久化 `primary_keyword/volume/kd/intent` | 🔥 M1 deadline 6/19 |
+| **P12.I.6** | 执行看板「自主行动」泳道 — 从 `flywheel_actions` 读取 `status=pending` 卡片，支持 FDE 一键确认/拒绝 | 🔥 M2 |
 
-**状态校准（2026-05-21）**：
+**状态校准（2026-05-22）**：
 - ✅ P12.Q.0–Q.7：Phase 12.Q 全部完成（内容质量闭环）
 - ✅ P12.G.1–G.5：诸葛亮策略调度引擎全部完成
 - ✅ **P12.I.1**：SEO Intelligence 页面路由 + 顶部指标栏；build ✅
 - ✅ **P12.I.2**：Panel A Organic Rankings 关键词表 + Intent 分布图
 - ✅ **P12.I.3**：Panel B 竞品并排对比 + SVG Venn 图 + 缺口词筛选表
 - ✅ **P12.I.4**：SEO Gap 页改 DataForSEO 自动拉取，移除 CSV 上传
+- ✅ **P12.I.5**：博客生成接入 SEO 飞轮（接线缺口 1+2）
+- ✅ **P12.J.1**：博客头图配图面板 + `/api/clients/[id]/blog/[postId]/image` 路由 + Campaign 视觉注入
 - ⚠️ **PM 待操作**：Render → Environment → 加 `ADMIN_EMAILS=你的邮箱`（若还未做）
 - ⚠️ **PM 待操作**：Supabase 跑 migration `20260525000001_content_quality_snapshot_score.sql` + `20260526000001_campaign_briefs_extend.sql`
 
-下一 session：`继续 Phase 12.I 第 5 任务 P12.I.5`
+下一 session：`继续 Phase 12.I 第 6 任务 P12.I.6`
 
 **本 session 已完成，可以关闭。**
 
