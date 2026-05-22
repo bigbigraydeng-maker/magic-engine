@@ -5,8 +5,10 @@
  * authorization code for tokens, stores them in google_oauth_tokens, and
  * marks the client's GSC connector as 'partial' (OAuth done, site_url pending).
  *
- * Redirects back to /dashboard/clients/[id]/connectors/gsc on success,
- * or to /dashboard with an error param on failure.
+ * The signed state carries a `flow` field that decides where the user lands
+ * afterwards:
+ *   - 'admin'   → /dashboard/clients/[id]/connectors/gsc  (internal operator)
+ *   - 'connect' → /connect/[id]  (public customer-facing page, no login)
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -15,11 +17,19 @@ import {
   exchangeCode,
   fetchGoogleEmail,
   storeTokens,
+  type OAuthFlow,
 } from '@/lib/google-oauth/client'
 import { supabaseAdmin } from '@/lib/supabase'
 
 function appUrl(): string {
   return process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3001'
+}
+
+function destination(flow: OAuthFlow, clientId: string, oauth: string): string {
+  if (flow === 'connect') {
+    return `${appUrl()}/connect/${clientId}?oauth=${oauth}`
+  }
+  return `${appUrl()}/dashboard/clients/${clientId}/connectors/gsc?oauth=${oauth}`
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -28,8 +38,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const state = searchParams.get('state')
   const error = searchParams.get('error')
 
+  const verified = state ? verifyState(state) : null
+
   // User denied consent
   if (error) {
+    if (verified?.flow === 'connect') {
+      return NextResponse.redirect(destination('connect', verified.clientId, 'denied'))
+    }
     return NextResponse.redirect(`${appUrl()}/dashboard?google_auth_error=denied`)
   }
 
@@ -37,11 +52,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.redirect(`${appUrl()}/dashboard?google_auth_error=missing_params`)
   }
 
-  // Verify signed state → extract clientId
-  const clientId = verifyState(state)
-  if (!clientId) {
+  // Verify signed state → extract clientId + flow
+  if (!verified) {
     return NextResponse.redirect(`${appUrl()}/dashboard?google_auth_error=invalid_state`)
   }
+  const { clientId, flow } = verified
 
   // Exchange authorization code for tokens
   const redirectUri = `${appUrl()}/api/auth/google/callback`
@@ -50,9 +65,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     tokens = await exchangeCode(code, redirectUri)
   } catch (err) {
     console.error('[google/callback] token exchange failed:', err)
-    return NextResponse.redirect(
-      `${appUrl()}/dashboard/clients/${clientId}/connectors/gsc?oauth=error`,
-    )
+    return NextResponse.redirect(destination(flow, clientId, 'error'))
   }
 
   // Fetch the Google account email for display
@@ -77,8 +90,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       { onConflict: 'client_id,anchor' },
     )
 
-  // Redirect back to the GSC connector detail page
-  return NextResponse.redirect(
-    `${appUrl()}/dashboard/clients/${clientId}/connectors/gsc?oauth=success`,
-  )
+  // Redirect back to where the flow started
+  return NextResponse.redirect(destination(flow, clientId, 'success'))
 }

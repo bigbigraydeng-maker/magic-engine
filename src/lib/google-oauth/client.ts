@@ -49,15 +49,22 @@ function clientSecret(): string {
   return s
 }
 
-export function buildState(clientId: string): string {
+export type OAuthFlow = 'admin' | 'connect'
+
+export interface VerifiedState {
+  clientId: string
+  flow: OAuthFlow
+}
+
+export function buildState(clientId: string, flow: OAuthFlow = 'admin'): string {
   const payload = Buffer.from(
-    JSON.stringify({ clientId, exp: Date.now() + STATE_TTL_MS }),
+    JSON.stringify({ clientId, flow, exp: Date.now() + STATE_TTL_MS }),
   ).toString('base64url')
   const sig = createHmac('sha256', clientSecret()).update(payload).digest('base64url')
   return `${payload}.${sig}`
 }
 
-export function verifyState(state: string): string | null {
+export function verifyState(state: string): VerifiedState | null {
   const dot = state.lastIndexOf('.')
   if (dot === -1) return null
   const payload = state.slice(0, dot)
@@ -67,9 +74,12 @@ export function verifyState(state: string): string | null {
   try {
     const data = JSON.parse(
       Buffer.from(payload, 'base64url').toString('utf8'),
-    ) as { clientId: string; exp: number }
+    ) as { clientId: string; flow?: string; exp: number }
     if (Date.now() > data.exp) return null
-    return data.clientId
+    return {
+      clientId: data.clientId,
+      flow: data.flow === 'connect' ? 'connect' : 'admin',
+    }
   } catch {
     return null
   }
