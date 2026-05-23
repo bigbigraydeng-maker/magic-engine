@@ -18,6 +18,7 @@ import type { ReelsContent } from '@/lib/reels/generator'
 import { formatCampaignForPrompt } from '@/lib/content/campaign-injector'
 import { auditReelsDraft } from '@/lib/reels/quality-audit'
 import type { ReelsAuditMetadata } from '@/lib/reels/quality-audit'
+import { getViralStyleHint } from '@/lib/reels/viral-style-advisor'
 
 export async function POST(
   req: NextRequest,
@@ -82,7 +83,22 @@ export async function POST(
       campaign:         campaignMeta,
     }
 
-    // 4. Generate with quality retry (up to 3 attempts)
+    // 4. Look up viral style hint for this client's industry (non-blocking on error)
+    let viralStyleHint: string | undefined
+    try {
+      const { data: clientRow } = await supabaseAdmin
+        .from('clients')
+        .select('industry')
+        .eq('id', clientId)
+        .maybeSingle()
+      if (clientRow?.industry) {
+        viralStyleHint = (await getViralStyleHint(clientRow.industry)) ?? undefined
+      }
+    } catch {
+      // style hint is best-effort; never block generation
+    }
+
+    // 5. Generate with quality retry (up to 3 attempts)
     const masterBriefText = formatMasterBriefForPrompt(
       brief as unknown as Record<string, unknown>
     )
@@ -92,6 +108,7 @@ export async function POST(
       campaignContext,
       brief.brand_name ?? 'the brand',
       auditMeta,
+      viralStyleHint,
     )
 
     // 5. Insert into reels_drafts
@@ -170,6 +187,7 @@ async function generateWithQualityRetry(
   campaignContext: string | undefined,
   brandName: string,
   auditMeta: ReelsAuditMetadata,
+  viralStyleHint?: string,
 ): Promise<{
   content: ReelsContent
   qualityScore: number | null
@@ -187,6 +205,7 @@ async function generateWithQualityRetry(
       campaignContext,
       brandName,
       qualityHint,
+      viralStyleHint,
     })
 
     try {

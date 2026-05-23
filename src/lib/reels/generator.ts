@@ -188,18 +188,23 @@ export async function generateReelsContent(params: {
   campaignContext?: string
   brandName: string
   qualityHint?: string
+  viralStyleHint?: string
 }): Promise<ReelsContent> {
-  const { masterBriefText, campaignContext, brandName, qualityHint } = params
+  const { masterBriefText, campaignContext, brandName, qualityHint, viralStyleHint } = params
 
   const campaignSection = campaignContext
     ? `\n\n## Campaign Brief\n${campaignContext}`
+    : ''
+
+  const viralSection = viralStyleHint
+    ? `\n\n${viralStyleHint}`
     : ''
 
   const qualitySection = qualityHint
     ? `\n\n## Quality Improvement Notes (address these in the new version)\n${qualityHint}`
     : ''
 
-  const userMessage = `## Master Brief for ${brandName}\n${masterBriefText}${campaignSection}${qualitySection}
+  const userMessage = `## Master Brief for ${brandName}\n${masterBriefText}${campaignSection}${viralSection}${qualitySection}
 
 Generate four pieces of Reels content in this exact JSON format:
 {
