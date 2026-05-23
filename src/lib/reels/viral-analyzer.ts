@@ -12,10 +12,11 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 import { GoogleAIFileManager } from '@google/generative-ai/server'
 import { exec } from 'child_process'
 import { promisify } from 'util'
-import { unlink } from 'fs/promises'
+import { unlink, access } from 'fs/promises'
 import { tmpdir } from 'os'
 import path from 'path'
 import { supabaseAdmin } from '@/lib/supabase'
+import { fetchYouTubeMetadata } from './youtube-metadata'
 
 const execAsync = promisify(exec)
 const ANALYSIS_MODEL = 'gemini-2.5-flash'
@@ -97,42 +98,128 @@ async function analyzeYouTubeVideo(url: string, apiKey: string): Promise<ViralAn
   return parseAnalysisResponse(result.response.text())
 }
 
-// ─── Non-YouTube: yt-dlp download → Gemini Files API ─────────────────────────
+// ─── Local file → Gemini Files API (used by yt-dlp download AND direct upload) ─
+
+export async function analyzeLocalVideoFile(
+  filePath: string,
+  apiKey: string,
+  mimeType: string = 'video/mp4',
+): Promise<ViralAnalysisResult> {
+  const fileManager = new GoogleAIFileManager(apiKey)
+  const uploadResult = await fileManager.uploadFile(filePath, {
+    mimeType,
+    displayName: `viral_ref_${Date.now()}`,
+  })
+
+  // Gemini Files API: file may need a moment to transition from PROCESSING to ACTIVE
+  let fileInfo = uploadResult.file
+  let attempts = 0
+  while (fileInfo.state === 'PROCESSING' && attempts < 30) {
+    await new Promise(r => setTimeout(r, 2000))
+    fileInfo = await fileManager.getFile(fileInfo.name)
+    attempts++
+  }
+  if (fileInfo.state !== 'ACTIVE') {
+    throw new Error(`Gemini file did not become ACTIVE (state: ${fileInfo.state})`)
+  }
+
+  const genAI = new GoogleGenerativeAI(apiKey)
+  const model = genAI.getGenerativeModel({ model: ANALYSIS_MODEL })
+
+  const result = await model.generateContent([
+    {
+      fileData: {
+        fileUri: fileInfo.uri,
+        mimeType,
+      },
+    },
+    { text: ANALYSIS_PROMPT },
+  ])
+
+  // Clean up uploaded file (non-blocking, best-effort)
+  fileManager.deleteFile(fileInfo.name).catch(() => {})
+
+  return parseAnalysisResponse(result.response.text())
+}
+
+// ─── Non-YouTube URL: yt-dlp download → analyzeLocalVideoFile ────────────────
 
 async function downloadAndAnalyzeVideo(url: string, apiKey: string): Promise<ViralAnalysisResult> {
   const tmpFile = path.join(tmpdir(), `viral_ref_${Date.now()}.mp4`)
 
+  // yt-dlp lives in project root on Render (downloaded by build command).
+  // Falls back to system PATH for local dev where yt-dlp is installed globally.
+  const ytDlpBin = path.join(process.cwd(), 'yt-dlp')
+  let cmd = 'yt-dlp'
+  try {
+    await access(ytDlpBin)
+    cmd = `"${ytDlpBin}"`
+  } catch {
+    // local binary missing — fall back to PATH
+  }
+
   try {
     await execAsync(
-      `yt-dlp -f "best[height<=720][ext=mp4]/best[height<=720]/best" -o "${tmpFile}" "${url}"`,
-      { timeout: 120_000 }
+      `${cmd} -f "best[height<=720][ext=mp4]/best[height<=720]/best" -o "${tmpFile}" "${url}"`,
+      { timeout: 180_000 }
     )
 
-    const fileManager = new GoogleAIFileManager(apiKey)
-    const uploadResult = await fileManager.uploadFile(tmpFile, {
-      mimeType: 'video/mp4',
-      displayName: `viral_ref_${Date.now()}`,
-    })
-
-    const genAI = new GoogleGenerativeAI(apiKey)
-    const model = genAI.getGenerativeModel({ model: ANALYSIS_MODEL })
-
-    const result = await model.generateContent([
-      {
-        fileData: {
-          fileUri: uploadResult.file.uri,
-          mimeType: 'video/mp4',
-        },
-      },
-      { text: ANALYSIS_PROMPT },
-    ])
-
-    // Clean up uploaded file (non-blocking, best-effort)
-    fileManager.deleteFile(uploadResult.file.name).catch(() => {})
-
-    return parseAnalysisResponse(result.response.text())
+    return await analyzeLocalVideoFile(tmpFile, apiKey, 'video/mp4')
   } finally {
     unlink(tmpFile).catch(() => {})
+  }
+}
+
+// ─── Direct upload entry: analyze a video file already on disk ───────────────
+
+/**
+ * Analyze a video that was uploaded directly (not via URL).
+ * Caller saves the file to disk first, then calls this with the path.
+ * The file is NOT deleted by this function — caller manages cleanup.
+ */
+export async function analyzeUploadedReference(
+  referenceId: string,
+  filePath: string,
+  mimeType: string = 'video/mp4',
+): Promise<void> {
+  const saveError = (msg: string) =>
+    supabaseAdmin
+      .from('viral_reference_library')
+      .update({ analysis_status: 'error', analysis_error: msg })
+      .eq('id', referenceId)
+      .then(() => {})
+      .catch(() => {})
+
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey) {
+    await saveError('GEMINI_API_KEY not configured on server')
+    return
+  }
+
+  await supabaseAdmin
+    .from('viral_reference_library')
+    .update({ analysis_status: 'analyzing' })
+    .eq('id', referenceId)
+
+  try {
+    const result = await analyzeLocalVideoFile(filePath, apiKey, mimeType)
+
+    await supabaseAdmin
+      .from('viral_reference_library')
+      .update({
+        style_scores: result.style_scores,
+        style_tags: result.style_tags,
+        style_description: result.style_description,
+        persona_fit: result.persona_fit,
+        key_techniques: result.key_techniques,
+        analysis_status: 'done',
+        analyzed_at: new Date().toISOString(),
+      })
+      .eq('id', referenceId)
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err)
+    console.error(`[viral-analyzer/upload] ${referenceId} failed:`, errorMsg)
+    await saveError(errorMsg)
   }
 }
 
@@ -195,15 +282,12 @@ export async function analyzeViralReference(referenceId: string, url: string): P
 
   try {
     const platform = detectPlatform(url)
-
-    if (platform !== 'youtube') {
-      await saveError('仅支持 YouTube 链接。Facebook/TikTok/Instagram 请改用 YouTube 同款视频链接投喂。')
-      return
-    }
-
     const result = platform === 'youtube'
       ? await analyzeYouTubeVideo(url, apiKey)
       : await downloadAndAnalyzeVideo(url, apiKey)
+
+    // Fetch YouTube metadata in parallel (non-blocking — returns nulls if no API key)
+    const metadata = await fetchYouTubeMetadata(url)
 
     await supabaseAdmin
       .from('viral_reference_library')
@@ -213,6 +297,11 @@ export async function analyzeViralReference(referenceId: string, url: string): P
         style_description: result.style_description,
         persona_fit: result.persona_fit,
         key_techniques: result.key_techniques,
+        view_count:    metadata.view_count,
+        like_count:    metadata.like_count,
+        published_at:  metadata.published_at,
+        video_title:   metadata.video_title,
+        channel_title: metadata.channel_title,
         analysis_status: 'done',
         analyzed_at: new Date().toISOString(),
       })

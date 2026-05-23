@@ -18,7 +18,7 @@ import type { ReelsContent } from '@/lib/reels/generator'
 import { formatCampaignForPrompt } from '@/lib/content/campaign-injector'
 import { auditReelsDraft } from '@/lib/reels/quality-audit'
 import type { ReelsAuditMetadata } from '@/lib/reels/quality-audit'
-import { getViralStyleHint } from '@/lib/reels/viral-style-advisor'
+import { getViralStyleHint, detectContentGoal } from '@/lib/reels/viral-style-advisor'
 
 export async function POST(
   req: NextRequest,
@@ -83,7 +83,7 @@ export async function POST(
       campaign:         campaignMeta,
     }
 
-    // 4. Look up viral style hint for this client's industry (non-blocking on error)
+    // 4. Look up viral style hint for this client's industry + detected content goal
     let viralStyleHint: string | undefined
     try {
       const { data: clientRow } = await supabaseAdmin
@@ -92,7 +92,10 @@ export async function POST(
         .eq('id', clientId)
         .maybeSingle()
       if (clientRow?.industry) {
-        viralStyleHint = (await getViralStyleHint(clientRow.industry)) ?? undefined
+        const contentGoal = campaignMeta
+          ? detectContentGoal(campaignMeta)
+          : 'brand'
+        viralStyleHint = (await getViralStyleHint(clientRow.industry, contentGoal)) ?? undefined
       }
     } catch {
       // style hint is best-effort; never block generation

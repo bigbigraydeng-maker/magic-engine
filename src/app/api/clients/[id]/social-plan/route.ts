@@ -2,10 +2,10 @@
  * POST /api/clients/[id]/social-plan
  *
  * Generate a Facebook social content plan (strategy + reels + posts + stories)
- * from Master Brief + optional Campaign Brief.
+ * from Master Brief + Campaign Brief + viral reference library.
  *
- * Body: { campaign_brief_id?: string }
- * Returns: { success: true, plan: SocialPlanOutput }
+ * Body: { campaign_brief_id: string }   ← required; 400 if missing
+ * Returns: { success: true, plan: SocialPlanOutput, plan_id: string }
  */
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
@@ -23,6 +23,31 @@ import { evaluate } from '@/lib/content/quality-rubric'
 import type { RubricContext } from '@/lib/content/quality-rubric'
 import type { MasterBrief } from '@/types/magic-engine'
 
+// ─── Viral reference row shape (partial select) ────────────────────────────────
+
+interface ViralRef {
+  style_scores:      Record<string, number> | null
+  style_tags:        string[] | null
+  style_description: string | null
+  key_techniques:    string[] | null
+  persona_fit:       string[] | null
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
+function formatViralInsights(refs: ViralRef[]): string {
+  if (refs.length === 0) return ''
+  const lines = refs.map((r, i) => {
+    const desc       = r.style_description ?? 'N/A'
+    const techniques = r.key_techniques?.join(', ') ?? 'N/A'
+    const tags       = r.style_tags?.join(', ') ?? 'N/A'
+    return `Ref ${i + 1}: ${desc}. Techniques: ${techniques}. Tags: ${tags}.`
+  })
+  return `VIRAL REFERENCE INSIGHTS (study these — mirror what works):\n${lines.join('\n')}`
+}
+
+// ─── Route handler ─────────────────────────────────────────────────────────────
+
 export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } }
@@ -31,6 +56,14 @@ export async function POST(
 
   try {
     const body = await req.json().catch(() => ({})) as { campaign_brief_id?: string }
+
+    // ── Update 3: campaign_brief_id is required ────────────────────────────────
+    if (!body.campaign_brief_id) {
+      return NextResponse.json(
+        { success: false, error: 'Social Plan must be tied to a Campaign. Please select a campaign first.' },
+        { status: 400 }
+      )
+    }
 
     // 1. Fetch active master brief
     const { data: brief, error: briefErr } = await supabaseAdmin
@@ -50,22 +83,38 @@ export async function POST(
       )
     }
 
-    // 2. Optionally fetch campaign brief
-    let campaignText: string | undefined
-    let campaignMeta: RubricContext['campaign'] = null
+    // 2. Fetch campaign brief
+    const campaign = await getCampaignById(clientId, body.campaign_brief_id)
+    if (!campaign) {
+      return NextResponse.json(
+        { success: false, error: 'Campaign Brief not found or does not belong to this client.' },
+        { status: 400 }
+      )
+    }
+    const campaignText = formatCampaignForPrompt(campaign)
+    const campaignMeta: RubricContext['campaign'] = {
+      title:                  campaign.title ?? null,
+      offer:                  campaign.offer ?? null,
+      primary_cta:            campaign.primary_cta ?? null,
+      campaign_angle:         campaign.campaign_angle ?? null,
+      target_audience_detail: campaign.target_audience_detail ?? null,
+    }
 
-    if (body.campaign_brief_id) {
-      const campaign = await getCampaignById(clientId, body.campaign_brief_id)
-      if (campaign) {
-        campaignText = formatCampaignForPrompt(campaign)
-        campaignMeta = {
-          title:                  campaign.title ?? null,
-          offer:                  campaign.offer ?? null,
-          primary_cta:            campaign.primary_cta ?? null,
-          campaign_angle:         campaign.campaign_angle ?? null,
-          target_audience_detail: campaign.target_audience_detail ?? null,
-        }
+    // ── Update 1: viral reference library (best-effort, silent on error) ───────
+    let viralInsightsText = ''
+    try {
+      const { data: viralRefs } = await supabaseAdmin
+        .from('viral_reference_library')
+        .select('style_scores, style_tags, style_description, key_techniques, persona_fit')
+        .eq('analysis_status', 'done')
+        .order('analyzed_at', { ascending: false })
+        .limit(3)
+
+      if (viralRefs && viralRefs.length > 0) {
+        viralInsightsText = formatViralInsights(viralRefs as ViralRef[])
       }
+    } catch (viralErr) {
+      console.warn('[social-plan] viral_reference_library fetch failed (non-blocking):', viralErr)
     }
 
     // 3. Build brief text
@@ -74,12 +123,12 @@ export async function POST(
     // 4. Strategy first, then parallel content generation
     const strategy = await generateChannelStrategy(briefText, campaignText)
     const [reels, posts, stories] = await Promise.all([
-      generateReelsScripts(strategy, briefText, campaignText),
+      generateReelsScripts(strategy, briefText, campaignText, viralInsightsText),
       generatePosts(strategy, briefText, campaignText),
       generateStories(strategy, briefText, campaignText),
     ])
 
-    // 5. Quality rubric on each post — silent failure, non-blocking verdict
+    // 5. Quality rubric on each post — silent failure, non-blocking
     const apiKey = process.env.OPENAI_API_KEY
     if (apiKey) {
       const openai = new OpenAI({ apiKey })
@@ -91,12 +140,11 @@ export async function POST(
           platforms:        Array.isArray(brief.platforms) ? brief.platforms : null,
           primary_audience: (brief as unknown as MasterBrief).primary_audience ?? null,
         },
-        campaign:     campaignMeta,
-        platform:     'facebook',
-        contentType:  'social_a',
+        campaign:      campaignMeta,
+        platform:      'facebook',
+        contentType:   'social_a',
         primaryKeyword: campaignMeta?.title ?? null,
       }
-
       await Promise.all(
         posts.map(post =>
           evaluate(post.copy, rubricCtx, { llmClient: openai })
@@ -108,8 +156,24 @@ export async function POST(
       )
     }
 
+    // ── Update 2: persist to social_plans ─────────────────────────────────────
     const plan: SocialPlanOutput = { strategy, reels, posts, stories }
-    return NextResponse.json({ success: true, plan })
+
+    const { data: savedPlan, error: insertErr } = await supabaseAdmin
+      .from('social_plans')
+      .insert({
+        client_id:   clientId,
+        campaign_id: body.campaign_brief_id,
+        platform:    'facebook',
+        wave_number: 1,
+        plan_data:   plan,
+      })
+      .select('id')
+      .single()
+
+    if (insertErr) throw insertErr
+
+    return NextResponse.json({ success: true, plan, plan_id: savedPlan.id })
 
   } catch (err: unknown) {
     const message =

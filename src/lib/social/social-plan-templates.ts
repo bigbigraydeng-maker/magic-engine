@@ -168,9 +168,11 @@ export function buildReelsPrompt(
   strategy: ChannelStrategy,
   briefText: string,
   campaignText?: string,
+  viralInsightsText?: string,
 ): string {
   const campaign = campaignText ? `\n\n## Campaign Context\n${campaignText}` : ''
-  return `## Brand Brief\n${briefText}${campaign}
+  const viral = viralInsightsText ? `\n\n${viralInsightsText}` : ''
+  return `## Brand Brief\n${briefText}${campaign}${viral}
 
 ## Channel Strategy
 Theme: ${strategy.theme}
@@ -242,6 +244,7 @@ export async function generateReelsScripts(
   strategy: ChannelStrategy,
   briefText: string,
   campaignText?: string,
+  viralInsightsText?: string,
 ): Promise<ReelsScript[]> {
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) throw new Error('OPENAI_API_KEY environment variable is not set')
@@ -253,7 +256,7 @@ export async function generateReelsScripts(
     max_tokens: 3000,
     messages: [
       { role: 'system', content: SYSTEM_REELS },
-      { role: 'user', content: buildReelsPrompt(strategy, briefText, campaignText) },
+      { role: 'user', content: buildReelsPrompt(strategy, briefText, campaignText, viralInsightsText) },
     ],
   })
 

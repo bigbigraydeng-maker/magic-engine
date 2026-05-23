@@ -15,6 +15,7 @@ import { detectPlatform, analyzeViralReference } from '@/lib/reels/viral-analyze
 interface VideoInput {
   url: string
   industry: string
+  content_goal?: 'brand' | 'sales' | 'ugc' | 'education'
   client_id?: string
   notes?: string
 }
@@ -59,6 +60,7 @@ export async function POST(req: NextRequest) {
   const rows = videos.map(v => ({
     source_url: v.url,
     industry: v.industry,
+    content_goal: v.content_goal ?? 'brand',
     client_id: v.client_id ?? null,
     platform: detectPlatform(v.url),
     notes: v.notes ?? null,

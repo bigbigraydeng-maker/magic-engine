@@ -14,11 +14,14 @@ interface StyleScores {
   offer_signal: number
 }
 
+type ContentGoal = 'brand' | 'sales' | 'ugc' | 'education'
+
 interface ViralReference {
   id: string
   source_url: string
-  platform: 'youtube' | 'facebook' | 'tiktok' | 'instagram'
+  platform: 'youtube' | 'facebook' | 'tiktok' | 'instagram' | 'upload'
   industry: string
+  content_goal: ContentGoal
   analysis_status: 'pending' | 'analyzing' | 'done' | 'error'
   analysis_error: string | null
   style_scores: StyleScores | null
@@ -26,9 +29,28 @@ interface ViralReference {
   style_description: string | null
   persona_fit: string[] | null
   key_techniques: string[] | null
+  view_count: number | null
+  like_count: number | null
+  published_at: string | null
+  video_title: string | null
+  channel_title: string | null
   notes: string | null
   created_at: string
   analyzed_at: string | null
+}
+
+const GOAL_CONFIG: Record<ContentGoal, { label: string; emoji: string; cls: string }> = {
+  brand:     { label: 'Brand',     emoji: '🎨', cls: 'bg-purple-900/60 text-purple-300' },
+  sales:     { label: 'Sales',     emoji: '💰', cls: 'bg-amber-900/60 text-amber-300' },
+  ugc:       { label: 'UGC',       emoji: '📱', cls: 'bg-teal-900/60 text-teal-300' },
+  education: { label: 'Education', emoji: '🎓', cls: 'bg-sky-900/60 text-sky-300' },
+}
+
+function formatViews(n: number | null): string | null {
+  if (n == null) return null
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
 }
 
 // ─── Score bar ────────────────────────────────────────────────────────────────
@@ -91,6 +113,7 @@ function PlatformBadge({ platform }: { platform: ViralReference['platform'] }) {
     facebook:  { label: 'Facebook',  cls: 'bg-blue-900/60 text-blue-300' },
     tiktok:    { label: 'TikTok',    cls: 'bg-gray-700 text-gray-200' },
     instagram: { label: 'Instagram', cls: 'bg-pink-900/60 text-pink-300' },
+    upload:    { label: 'Uploaded',  cls: 'bg-emerald-900/60 text-emerald-300' },
   }
   const { label, cls } = config[platform] ?? { label: platform, cls: 'bg-gray-700 text-gray-300' }
   return (
@@ -102,6 +125,8 @@ function PlatformBadge({ platform }: { platform: ViralReference['platform'] }) {
 
 function ReferenceCard({ item: r, onRetry }: { item: ViralReference; onRetry: (id: string) => void }) {
   const shortUrl = r.source_url.replace(/^https?:\/\/(www\.)?/, '').slice(0, 50)
+  const goalCfg = GOAL_CONFIG[r.content_goal]
+  const views = formatViews(r.view_count)
 
   return (
     <div className="bg-gray-800 rounded-xl p-4 border border-gray-700 space-y-3">
@@ -111,15 +136,28 @@ function ReferenceCard({ item: r, onRetry }: { item: ViralReference; onRetry: (i
           <div className="flex items-center gap-2 flex-wrap">
             <PlatformBadge platform={r.platform} />
             <StatusBadge status={r.analysis_status} />
+            <span className={`text-xs px-2 py-0.5 rounded font-medium ${goalCfg.cls}`}>
+              {goalCfg.emoji} {goalCfg.label}
+            </span>
             <span className="text-xs text-gray-500 capitalize">{r.industry}</span>
+            {views && (
+              <span className="text-xs text-yellow-300 font-medium">
+                ▶ {views}
+              </span>
+            )}
           </div>
+          {r.video_title && (
+            <p className="mt-1.5 text-xs text-gray-300 truncate" title={r.video_title}>
+              {r.video_title}
+            </p>
+          )}
           <a
             href={r.source_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="block mt-1.5 text-xs text-blue-400 hover:text-blue-300 truncate"
+            className="block mt-0.5 text-xs text-blue-400 hover:text-blue-300 truncate"
           >
-            {shortUrl}
+            {r.channel_title ? `${r.channel_title} · ${shortUrl}` : shortUrl}
           </a>
         </div>
       </div>
@@ -214,8 +252,14 @@ export default function ViralReferencesPage() {
   // Add video form
   const [addUrls, setAddUrls] = useState('')
   const [addIndustry, setAddIndustry] = useState<'travel' | 'flooring'>('travel')
+  const [addGoal, setAddGoal] = useState<ContentGoal>('brand')
   const [adding, setAdding] = useState(false)
   const [addMsg, setAddMsg] = useState('')
+
+  // Upload file form
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadMsg, setUploadMsg] = useState('')
 
   const fetchRefs = useCallback(async () => {
     try {
@@ -263,7 +307,7 @@ export default function ViralReferencesPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          videos: urls.map(url => ({ url, industry: addIndustry })),
+          videos: urls.map(url => ({ url, industry: addIndustry, content_goal: addGoal })),
         }),
       })
       const data = await res.json()
@@ -278,6 +322,41 @@ export default function ViralReferencesPage() {
       setAddMsg('❌ 网络错误，请重试')
     } finally {
       setAdding(false)
+    }
+  }
+
+  const uploadVideo = async () => {
+    if (!uploadFile) {
+      setUploadMsg('请先选择视频文件')
+      return
+    }
+    setUploading(true)
+    setUploadMsg('')
+    try {
+      const fd = new FormData()
+      fd.append('file', uploadFile)
+      fd.append('industry', addIndustry)
+      fd.append('content_goal', addGoal)
+
+      const res = await fetch('/api/admin/viral-references/upload', {
+        method: 'POST',
+        body: fd,
+      })
+      const data = await res.json()
+      if (data.success) {
+        setUploadMsg(`✅ ${uploadFile.name} 已上传，正在分析…`)
+        setUploadFile(null)
+        // Reset the file input
+        const input = document.getElementById('viral-upload-input') as HTMLInputElement | null
+        if (input) input.value = ''
+        fetchRefs()
+      } else {
+        setUploadMsg(`❌ ${data.error}`)
+      }
+    } catch {
+      setUploadMsg('❌ 上传失败，文件可能太大或网络中断')
+    } finally {
+      setUploading(false)
     }
   }
 
@@ -346,7 +425,7 @@ export default function ViralReferencesPage() {
             rows={3}
             className="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 resize-none focus:outline-none focus:border-indigo-500"
           />
-          <div className="flex flex-col gap-2 shrink-0">
+          <div className="flex flex-col gap-2 shrink-0 w-44">
             <select
               value={addIndustry}
               onChange={e => setAddIndustry(e.target.value as 'travel' | 'flooring')}
@@ -354,6 +433,16 @@ export default function ViralReferencesPage() {
             >
               <option value="travel">✈️ Travel</option>
               <option value="flooring">🪵 Flooring</option>
+            </select>
+            <select
+              value={addGoal}
+              onChange={e => setAddGoal(e.target.value as ContentGoal)}
+              className="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+            >
+              <option value="brand">🎨 Brand / Inspiration</option>
+              <option value="sales">💰 Sales / Conversion</option>
+              <option value="ugc">📱 UGC / Social Proof</option>
+              <option value="education">🎓 Education / How-to</option>
             </select>
             <button
               onClick={addVideos}
@@ -367,6 +456,42 @@ export default function ViralReferencesPage() {
         {addMsg && (
           <p className={`text-sm ${addMsg.startsWith('✅') ? 'text-green-400' : 'text-red-400'}`}>
             {addMsg}
+          </p>
+        )}
+      </div>
+
+      {/* Upload File Panel */}
+      <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium text-white">📁 直接上传视频文件</p>
+          <p className="text-xs text-gray-500">
+            行业 / 类型用上方的选择 · 适合 Facebook 短链 / 私密视频 / 手机录屏
+          </p>
+        </div>
+        <div className="flex gap-3 items-center">
+          <input
+            id="viral-upload-input"
+            type="file"
+            accept="video/mp4,video/quicktime,video/webm,video/x-matroska,video/mpeg"
+            onChange={e => setUploadFile(e.target.files?.[0] ?? null)}
+            className="flex-1 text-sm text-gray-300 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-gray-700 file:text-white hover:file:bg-gray-600 file:cursor-pointer"
+          />
+          <button
+            onClick={uploadVideo}
+            disabled={uploading || !uploadFile}
+            className="shrink-0 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            {uploading ? 'Uploading…' : 'Upload & Analyze'}
+          </button>
+        </div>
+        {uploadFile && !uploadMsg && (
+          <p className="text-xs text-gray-400">
+            已选：{uploadFile.name} ({(uploadFile.size / 1024 / 1024).toFixed(1)} MB)
+          </p>
+        )}
+        {uploadMsg && (
+          <p className={`text-sm ${uploadMsg.startsWith('✅') ? 'text-green-400' : 'text-red-400'}`}>
+            {uploadMsg}
           </p>
         )}
       </div>
