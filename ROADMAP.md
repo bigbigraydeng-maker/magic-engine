@@ -2142,6 +2142,10 @@ AU / NZ（当前）          新市场（未来）
 - **P8.13.C** — Business Data API 替换 SerpAPI：`business-data.ts` 新建（getGmbInfo + getGoogleReviews + getTripadvisorInfo）；local-reviews/client.ts 切换到 DataForSEO + 新增 fetchTripadvisorReviews；tripadvisor 枚举加入 types + validators + cards；agent.ts fetch_local_reviews 新增 tripadvisor_keyword 参数
 - **P8.13.D** — SERP DataForSEO 主/Apify 降级 + OnPage 审计接入：`serp.ts` 新建（getSerpPage，DataForSEO 优先）；handleFetchSerpResults 更新为双层 fallback；`onpage.ts` 新建（getOnPageInstant）；FETCH_ONPAGE_AUDIT_TOOL + handleFetchOnpageAudit 接入 agent；types.ts 新增 onpage_audit 字段；OnPageAuditCard + page.tsx 渲染；prompts.ts 步骤 1 新增必调 fetch_onpage_audit 要求
 
+### 2026-05-29
+
+- **P11.R（爆款参考库冷启动）** — 新建 `viral_reference_library` 表（7维风格分数+style_tags+key_techniques）+ `clients.industry` 列；`viral-analyzer.ts` Gemini 2.0 Flash VLM 管道（YouTube 直接 URL / Facebook 走 yt-dlp 下载→Files API 上传）；`viral-style-advisor.ts` 按行业查 top-5 参考格式化风格提示；`POST /api/admin/viral-references` 批量导入+异步分析；Reel 生成路由接入（查客户 industry→注入 viralStyleHint 到 generateReelsContent prompt）；commit `4db0c8a`
+
 ### 2026-05-25
 
 - **P12.Q.0** — 产物表加 snapshot/score 列：blog_posts / content_posts / reels_drafts 各加 generation_context_snapshot JSONB + quality_score NUMERIC(4,2)；新增 ReelsDraft interface；build ✅
