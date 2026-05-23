@@ -108,6 +108,12 @@ function LoadingView({ domain, log }: { domain: string; log: LogEntry[] }) {
   const progressPct = Math.min(90, Math.round((elapsed / 300) * 90))
   const latestStep = log.length > 0 ? log[log.length - 1].message : 'Starting…'
 
+  const phase =
+    elapsed < 60  ? 'Reading your website…' :
+    elapsed < 150 ? 'Checking keyword rankings & search visibility…' :
+    elapsed < 240 ? 'Mapping competitors & social signals…' :
+                    'Diagnosing brand health across 6 dimensions…'
+
   return (
     <div className="max-w-xl mx-auto px-5 py-12">
       <div className="text-center mb-6">
@@ -121,6 +127,9 @@ function LoadingView({ domain, log }: { domain: string; log: LogEntry[] }) {
         <h2 className="text-[22px] font-black mb-1" style={{ color: '#ECF3FF' }}>
           AI is mapping your brand…
         </h2>
+        <p className="text-[13px] mb-1 transition-opacity duration-500" style={{ color: 'rgba(160,200,255,0.7)' }}>
+          {phase}
+        </p>
         <p className="text-[12px] mb-4" style={{ color: 'rgba(120,170,230,0.4)' }}>
           {elapsedStr} elapsed · Usually 3–5 minutes total
         </p>
@@ -522,7 +531,20 @@ function FailedView({ domain }: { domain: string }) {
 export default function ProspectPage() {
   const [data, setData] = useState<ReportResponse | null>(null)
   const [notFound, setNotFound] = useState(false)
+  const [showReadyToast, setShowReadyToast] = useState(false)
+  const prevStatusRef = useRef<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    const prev = prevStatusRef.current
+    const curr = data?.status ?? null
+    prevStatusRef.current = curr
+    if (curr === 'completed' && (prev === 'queued' || prev === 'running')) {
+      setShowReadyToast(true)
+      const t = setTimeout(() => setShowReadyToast(false), 2000)
+      return () => clearTimeout(t)
+    }
+  }, [data?.status])
 
   useEffect(() => {
     async function poll() {
@@ -575,6 +597,21 @@ export default function ProspectPage() {
           </div>
         )}
       </nav>
+
+      {showReadyToast && (
+        <div
+          className="fixed top-20 left-1/2 -translate-x-1/2 z-20 px-4 py-2.5 rounded-full text-[13px] font-semibold pointer-events-none"
+          style={{
+            background: 'rgba(34,197,94,0.18)',
+            border: '1px solid rgba(34,197,94,0.4)',
+            color: '#4ade80',
+            backdropFilter: 'blur(12px)',
+            boxShadow: '0 8px 32px rgba(34,197,94,0.25)',
+          }}
+        >
+          Your Discovery Report is ready ✨
+        </div>
+      )}
 
       <main className="flex-1">
         {notFound && (
