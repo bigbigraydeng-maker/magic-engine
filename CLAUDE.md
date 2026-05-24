@@ -215,7 +215,7 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-24 18:33 NZST （**Phase 14.A.5 ✅ 完成**：WordPress connector 全链路 — wordpress-client + markWordpressConnectionTested + /cms/wordpress 升级 + /cms/publish-wordpress）
+> 最后更新：2026-05-24 20:51 NZST （**Phase 14.A.5 ✅ 完成**：WordPress connector 全链路 — wordpress-client + markWordpressConnectionTested + /cms/wordpress 升级 + /cms/publish-wordpress）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|

@@ -41,6 +41,7 @@ import {
   getOrCreateDefaultBlog,
 } from '@/lib/cms/shopify-client'
 import { sanitizeHtml } from '@/lib/cms/html-sanitizer'
+import { CMS_ACTION_TYPE } from '@/lib/cms/vocabulary'
 
 interface RouteContext {
   params: { id: string }
@@ -304,6 +305,27 @@ async function handlePublish(clientId: string, body: PublishRequestBody): Promis
       published_at: new Date().toISOString(),
     })
     .eq('id', job_id)
+
+  // Record in flywheel_actions so the SEO flywheel tracks the content publish.
+  void supabaseAdmin
+    .from('flywheel_actions')
+    .insert({
+      client_id:      clientId,
+      flywheel:       'seo',
+      action_type:    CMS_ACTION_TYPE.CONTENT_INSERT,
+      execution_mode: 'in_house',
+      status:         'done',
+      payload:        {
+        job_id,
+        platform:    'shopify',
+        platform_id,
+        target_type: targetType,
+        source_id:   snapshot.source_id ?? null,
+      },
+    })
+    .then(({ error }) => {
+      if (error) console.error('[publish-shopify] flywheel insert failed', error.message)
+    })
 
   return NextResponse.json({
     success:    true,

@@ -41,6 +41,7 @@ import {
   publishWordpressPage,
 } from '@/lib/cms/wordpress-client'
 import { sanitizeHtml } from '@/lib/cms/html-sanitizer'
+import { CMS_ACTION_TYPE } from '@/lib/cms/vocabulary'
 
 interface RouteContext {
   params: { id: string }
@@ -312,10 +313,32 @@ async function handlePublish(clientId: string, body: PublishRequestBody): Promis
     await publishWordpressPage(config, platform_id)
   }
 
+  const now = new Date().toISOString()
+
   await supabaseAdmin
     .from('website_publish_jobs')
-    .update({ status: 'published', published_at: new Date().toISOString() })
+    .update({ status: 'published', published_at: now })
     .eq('id', job_id)
+
+  // Record in flywheel_actions so the SEO flywheel tracks the content publish.
+  void supabaseAdmin
+    .from('flywheel_actions')
+    .insert({
+      client_id:      clientId,
+      flywheel:       'seo',
+      action_type:    CMS_ACTION_TYPE.CONTENT_INSERT,
+      execution_mode: 'in_house',
+      status:         'done',
+      payload:        {
+        job_id,
+        platform:  'wordpress',
+        platform_id,
+        source_id: job.content_snapshot ? (job.content_snapshot as Record<string, unknown>).source_id : null,
+      },
+    })
+    .then(({ error }) => {
+      if (error) console.error('[publish-wordpress] flywheel insert failed', error.message)
+    })
 
   return NextResponse.json({ success: true, job_id, platform_id, status: 'published' })
 }
