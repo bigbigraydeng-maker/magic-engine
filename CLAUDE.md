@@ -215,7 +215,7 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-24 18:20 NZST （**Phase 14.A.4 ✅ 完成**：Shopify connector 全链路 — guard/client/store/API routes + 17 单测全绿）
+> 最后更新：2026-05-24 18:32 NZST （**Phase 14.A.4 ✅ 完成**：Shopify connector 全链路 — guard/client/store/API routes + 17 单测全绿）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|

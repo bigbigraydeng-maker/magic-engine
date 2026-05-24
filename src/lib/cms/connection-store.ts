@@ -312,6 +312,29 @@ export async function getWordpressConnection(
   }
 }
 
+export async function markWordpressConnectionTested(
+  clientId:  string,
+  success:   boolean,
+  errorMsg?: string,
+): Promise<WordpressConnectionStatus | null> {
+  const { data, error: dbErr } = await supabaseAdmin
+    .from('cms_connections')
+    .update({
+      status:         success ? CMS_STATUS.CONNECTED : CMS_STATUS.ERROR,
+      last_error:     success ? null : (errorMsg ?? 'Unknown error'),
+      last_tested_at: new Date().toISOString(),
+    })
+    .eq('client_id', clientId)
+    .eq('provider', CMS_PROVIDER.WORDPRESS)
+    .select()
+    .maybeSingle()
+
+  if (dbErr) throw new Error(`cms_connections update (wordpress) failed: ${dbErr.message}`)
+  if (!data)  return null
+
+  return rowToWordpressStatus(data as CmsConnectionRow)
+}
+
 export async function deleteWordpressConnection(clientId: string): Promise<void> {
   const { error } = await supabaseAdmin
     .from('cms_connections')
