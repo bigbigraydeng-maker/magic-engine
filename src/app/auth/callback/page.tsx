@@ -1,12 +1,10 @@
 'use client'
 
-export const dynamic = 'force-dynamic'
-
-import { useEffect, useRef } from 'react'
+import { Suspense, useEffect, useRef } from 'react'
 import { createBrowserClient } from '@supabase/ssr'
 import { useSearchParams } from 'next/navigation'
 
-export default function AuthCallbackPage() {
+function AuthCallbackInner() {
   const searchParams = useSearchParams()
   const handled = useRef(false)
 
@@ -23,8 +21,6 @@ export default function AuthCallbackPage() {
     const safePath = next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard'
 
     async function finish() {
-      // getSession() auto-processes hash-fragment tokens (implicit flow).
-      // If ?code= is present (PKCE flow), exchange it first.
       const code = searchParams.get('code')
       if (code) {
         const { error } = await supabase.auth.exchangeCodeForSession(code)
@@ -34,8 +30,6 @@ export default function AuthCallbackPage() {
           return
         }
       } else {
-        // For implicit-flow magic links, Supabase puts tokens in the hash.
-        // getSession() picks them up automatically from window.location.hash.
         const { data: { session } } = await supabase.auth.getSession()
         if (!session) {
           window.location.href = '/login?error=auth_failed'
@@ -43,7 +37,6 @@ export default function AuthCallbackPage() {
         }
       }
 
-      // Ask the server where this user should go (portal / dashboard / prospect)
       try {
         const res = await fetch(`/api/auth/session-route?next=${encodeURIComponent(safePath)}`)
         if (res.ok) {
@@ -65,5 +58,17 @@ export default function AuthCallbackPage() {
     <div className="min-h-screen bg-gray-950 flex items-center justify-center">
       <p className="text-gray-400 text-sm">Authenticating…</p>
     </div>
+  )
+}
+
+export default function AuthCallbackPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <p className="text-gray-400 text-sm">Authenticating…</p>
+      </div>
+    }>
+      <AuthCallbackInner />
+    </Suspense>
   )
 }
