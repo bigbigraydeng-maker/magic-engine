@@ -174,6 +174,122 @@ function OutcomeChip({ outcome }: { outcome: OutcomeSummary }) {
 }
 
 // ---------------------------------------------------------------------------
+// ActiveCampaignBanner — FDE 工作上下文锚点
+// ---------------------------------------------------------------------------
+//
+// Master Brief（品牌 DNA）× Campaign Brief（活动目标）= 内容生产的上下文基座。
+// 看板顶部常驻显示，让 FDE 在执行任务时随时看到当前服务的 Campaign。
+// 多 Campaign 时全部展示（通常 1–2 条），无 Campaign 时显示 amber 警告。
+
+interface ActiveCampaignLite {
+  id: string
+  title: string
+  description?: string | null
+  valid_from?: string | null
+  valid_until?: string | null
+  semrush_keywords?: unknown[] | null
+}
+
+function ActiveCampaignBanner({ clientId }: { clientId: string }) {
+  const [campaigns, setCampaigns] = useState<ActiveCampaignLite[]>([])
+  const [loaded, setLoaded]       = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/campaign?status=active`)
+        if (!res.ok) { if (!cancelled) setLoaded(true); return }
+        const json = await res.json() as { campaigns?: ActiveCampaignLite[] }
+        if (!cancelled) {
+          setCampaigns(json.campaigns ?? [])
+          setLoaded(true)
+        }
+      } catch {
+        if (!cancelled) setLoaded(true)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [clientId])
+
+  // Skeleton 阶段不渲染，避免布局抖动
+  if (!loaded) return null
+
+  // 无活跃 Campaign — amber 警告
+  if (campaigns.length === 0) {
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="text-lg shrink-0">⚠</span>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-amber-900">尚无活跃 Campaign</p>
+            <p className="text-xs text-amber-700">
+              内容生成将仅依据品牌 DNA — 建议为本期工作设置一个 Campaign 提供清晰目标
+            </p>
+          </div>
+        </div>
+        <Link
+          href={`/dashboard/clients/${clientId}`}
+          className="shrink-0 text-xs font-semibold text-amber-700 hover:text-amber-900 underline whitespace-nowrap"
+        >
+          前往设置 →
+        </Link>
+      </div>
+    )
+  }
+
+  // 有活跃 Campaign — 蓝色条
+  return (
+    <div className="rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-white px-4 py-3">
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">
+            ⚓ 当前 Campaign 上下文
+          </span>
+          <span className="text-[10px] text-gray-400">
+            ({campaigns.length === 1 ? '1 个活跃' : `${campaigns.length} 个并行`})
+          </span>
+        </div>
+        <Link
+          href={`/dashboard/clients/${clientId}`}
+          className="shrink-0 text-xs font-medium text-indigo-600 hover:text-indigo-800 whitespace-nowrap"
+        >
+          管理 Campaign →
+        </Link>
+      </div>
+      <div className="space-y-1.5">
+        {campaigns.map(c => {
+          const dateLabel = (() => {
+            if (c.valid_from && c.valid_until) return `${c.valid_from} → ${c.valid_until}`
+            if (c.valid_from)  return `${c.valid_from} 起`
+            if (c.valid_until) return `至 ${c.valid_until}`
+            return null
+          })()
+          const keywordCount = Array.isArray(c.semrush_keywords) ? c.semrush_keywords.length : 0
+          return (
+            <div key={c.id} className="flex items-start gap-2">
+              <span className="inline-flex items-center text-[10px] font-bold bg-green-100 text-green-700 rounded-full px-1.5 py-0.5 mt-0.5 shrink-0">
+                进行中
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-gray-900 truncate">{c.title}</p>
+                {c.description && (
+                  <p className="text-[11px] text-gray-500 line-clamp-1 leading-snug">{c.description}</p>
+                )}
+                <div className="flex items-center gap-3 mt-0.5 text-[10px] text-gray-400">
+                  {dateLabel && <span>📅 {dateLabel}</span>}
+                  {keywordCount > 0 && <span>🔑 {keywordCount} 关键词</span>}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // ProgressBar
 // ---------------------------------------------------------------------------
 
@@ -1295,6 +1411,9 @@ export default function ExecutionPage() {
             <button onClick={() => setOpError(null)} className="text-red-400 hover:text-red-600 text-lg leading-none">×</button>
           </div>
         )}
+
+        {/* Campaign 上下文锚点 — FDE 执行任务时随时可见 */}
+        <ActiveCampaignBanner clientId={clientId} />
 
         <ProgressBar completed={completedCount} total={items.length} />
 
