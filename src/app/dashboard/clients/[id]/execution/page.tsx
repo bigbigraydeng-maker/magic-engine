@@ -17,6 +17,7 @@ import {
   isAutonomousItem,
   type GroupData,
   type ItemWithLogs,
+  type MarketingPlanMeta,
   type OutcomeSummary,
   type PrescriptionMeta,
 } from './execution-view-model'
@@ -1041,7 +1042,7 @@ function PrescriptionGroup({
   onAddItem: (prescriptionId: string, phase: number, fields: AddItemFields) => Promise<boolean>
   onEditItem: (itemId: string, fields: { title?: string; description?: string }) => Promise<boolean>
 }) {
-  const { items, label, archived, derivable, pid, meta, editable } = group
+  const { items, label, archived, derivable, pid, meta, marketingPlanMeta, editable, kind } = group
 
   // 该处方内按 phase 分组
   const byPhase: Record<number, ItemWithLogs[]> = {}
@@ -1049,16 +1050,26 @@ function PrescriptionGroup({
     ;(byPhase[it.phase ?? 1] ??= []).push(it)
   }
   const completed = items.filter(i => i.status === 'completed').length
-  const genDate = meta?.generated_at
-    ? new Date(meta.generated_at).toLocaleDateString('zh-CN', { timeZone: 'Pacific/Auckland' })
-    : null
 
-  const labelCls =
-    label === '原处方'        ? 'bg-indigo-100 text-indigo-700' :
-    label === '补充处方'      ? 'bg-blue-100 text-blue-700' :
-    label === '修订版'        ? 'bg-amber-100 text-amber-700' :
-    label === '飞轮自主行动'  ? 'bg-green-100 text-green-700' :
-                                'bg-gray-200 text-gray-500'
+  // 分组日期 — 处方用 generated_at，Marketing Plan 用 approved_at
+  const groupDate = (() => {
+    const iso = meta?.generated_at ?? marketingPlanMeta?.approved_at ?? null
+    if (!iso) return null
+    return new Date(iso).toLocaleDateString('zh-CN', { timeZone: 'Pacific/Auckland' })
+  })()
+  const dateLabel = kind === 'marketing_plan' ? '批准于' : '生成于'
+
+  const labelCls = (() => {
+    if (kind === 'marketing_plan') {
+      return archived ? 'bg-gray-100 text-gray-500' : 'bg-purple-100 text-purple-700'
+    }
+    if (kind === 'autonomous') return 'bg-green-100 text-green-700'
+    // prescription
+    if (label === '原处方')        return 'bg-indigo-100 text-indigo-700'
+    if (label === '补充处方')      return 'bg-blue-100 text-blue-700'
+    if (label === '修订版')        return 'bg-amber-100 text-amber-700'
+    return 'bg-gray-200 text-gray-500'
+  })()
 
   return (
     <div className={`rounded-xl border ${archived ? 'border-gray-200 opacity-75' : 'border-gray-300'} bg-white overflow-hidden`}>
@@ -1067,7 +1078,12 @@ function PrescriptionGroup({
         <span className={`text-xs font-semibold rounded-full px-2.5 py-1 ${labelCls}`}>
           {label}
         </span>
-        {genDate && <span className="text-xs text-gray-400">生成于 {genDate}</span>}
+        {groupDate && <span className="text-xs text-gray-400">{dateLabel} {groupDate}</span>}
+        {kind === 'marketing_plan' && marketingPlanMeta?.start_date && marketingPlanMeta.end_date && (
+          <span className="text-xs text-gray-400">
+            📅 {marketingPlanMeta.start_date} → {marketingPlanMeta.end_date}
+          </span>
+        )}
         <span className="text-xs text-gray-400">{completed}/{items.length} 完成</span>
 
         {/* 派生按钮 — 仅已批准的活跃处方。内联抽屉，不跳转 */}
@@ -1132,6 +1148,7 @@ export default function ExecutionPage() {
 
   const [items, setItems]     = useState<ItemWithLogs[]>([])
   const [prescriptions, setPrescriptions] = useState<PrescriptionMeta[]>([])
+  const [marketingPlans, setMarketingPlans] = useState<MarketingPlanMeta[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState<string | null>(null)       // 页面加载错误（整页）
   const [opError, setOpError] = useState<string | null>(null)       // 操作错误（内联横幅）
@@ -1183,14 +1200,34 @@ export default function ExecutionPage() {
     setError(null)
     try {
       const qs = prescriptionId ? `?prescription_id=${prescriptionId}` : ''
-      const res = await fetch(`/api/clients/${clientId}/execution${qs}`, {
-        headers: { Authorization: `Bearer ${API_KEY}` },
-        cache: 'no-store',
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json() as { items: ItemWithLogs[]; prescriptions?: PrescriptionMeta[] }
+      // 并行拉 execution items + marketing plans，互不阻塞
+      const [execRes, mpRes] = await Promise.all([
+        fetch(`/api/clients/${clientId}/execution${qs}`, {
+          headers: { Authorization: `Bearer ${API_KEY}` },
+          cache: 'no-store',
+        }),
+        fetch(`/api/clients/${clientId}/marketing-plan`, { cache: 'no-store' }).catch(() => null),
+      ])
+      if (!execRes.ok) throw new Error(`HTTP ${execRes.status}`)
+      const data = await execRes.json() as { items: ItemWithLogs[]; prescriptions?: PrescriptionMeta[] }
       setItems(data.items ?? [])
       setPrescriptions(data.prescriptions ?? [])
+
+      // Marketing Plan meta — 失败不阻塞主流程
+      if (mpRes && mpRes.ok) {
+        try {
+          const mpJson = await mpRes.json() as {
+            success: boolean
+            plans?: { id: string; title: string; status: MarketingPlanMeta['status']; start_date: string | null; end_date: string | null; approved_at: string | null }[]
+          }
+          if (mpJson.success && mpJson.plans) {
+            setMarketingPlans(mpJson.plans.map(p => ({
+              id: p.id, title: p.title, status: p.status,
+              start_date: p.start_date, end_date: p.end_date, approved_at: p.approved_at,
+            })))
+          }
+        } catch { /* non-fatal */ }
+      }
     } catch (e) {
       if (!silent) setError(e instanceof Error ? e.message : '加载失败')
     } finally {
@@ -1303,7 +1340,7 @@ export default function ExecutionPage() {
   }, [clientId, fetchItems])
 
   const completedCount = items.filter(i => i.status === 'completed').length
-  const prescriptionGroups = buildExecutionGroups(items, prescriptions)
+  const prescriptionGroups = buildExecutionGroups(items, prescriptions, marketingPlans)
 
   // ── Loading ───────────────────────────────────────────────────────────────
   if (loading) {
@@ -1393,6 +1430,12 @@ export default function ExecutionPage() {
             >
               🔨 项目级鲁班
             </button>
+            <Link
+              href={`/dashboard/clients/${clientId}/marketing-plan`}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-medium text-purple-700 hover:bg-purple-100 transition-colors"
+            >
+              📋 Marketing Plan
+            </Link>
             <Link
               href={`/dashboard/clients/${clientId}/prescription/new`}
               className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-indigo-300 hover:text-indigo-700 transition-colors"

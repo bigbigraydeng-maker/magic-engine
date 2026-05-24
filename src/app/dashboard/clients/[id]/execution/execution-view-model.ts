@@ -6,6 +6,8 @@ import type {
 } from '@/types/diagnostic'
 
 export const AUTONOMOUS_GROUP_ID = '__autonomous__'
+/** Marketing Plan 任务分组前缀 — 实际 pid 形如 'mp:<plan_id>' */
+export const MARKETING_PLAN_GROUP_PREFIX = 'mp:'
 
 export interface PrescriptionMeta {
   id: string
@@ -13,6 +15,16 @@ export interface PrescriptionMeta {
   supplements_id: string | null
   supersedes_id: string | null
   generated_at: string | null
+}
+
+/** Marketing Plan 分组的 meta — 与 PrescriptionMeta 区分 */
+export interface MarketingPlanMeta {
+  id: string
+  title: string
+  status: 'draft' | 'approved' | 'completed' | 'archived'
+  start_date: string | null
+  end_date: string | null
+  approved_at: string | null
 }
 
 export interface OutcomeSummary {
@@ -36,11 +48,15 @@ export interface GroupData {
   pid: string
   items: ItemWithLogs[]
   meta?: PrescriptionMeta
+  /** Marketing Plan 分组的 meta（与 meta 互斥）*/
+  marketingPlanMeta?: MarketingPlanMeta
   label: string
   weight: number
   archived: boolean
   derivable: boolean
   editable: boolean    // 是否允许新增/编辑执行项（自主行动泳道为 false）
+  /** 来源类型 — 用于 UI 显示不同 badge */
+  kind: 'prescription' | 'marketing_plan' | 'autonomous'
 }
 
 const METRIC_DISPLAY: Record<string, string> = {
@@ -70,22 +86,46 @@ export function isAutonomousItem(item: ItemWithLogs): boolean {
   return item.source_kind === 'flywheel_action' || item.prescription_id === AUTONOMOUS_GROUP_ID
 }
 
+/**
+ * 计算 item 所属分组的 pid：
+ *   - 自主行动 → AUTONOMOUS_GROUP_ID
+ *   - marketing_plan 来源 → 'mp:' + marketing_plan_id
+ *   - 否则 → prescription_id（兜底用空字符串）
+ */
+function pidForItem(item: ItemWithLogs): string {
+  if (isAutonomousItem(item)) return AUTONOMOUS_GROUP_ID
+  if (item.source === 'marketing_plan' && item.marketing_plan_id) {
+    return MARKETING_PLAN_GROUP_PREFIX + item.marketing_plan_id
+  }
+  return item.prescription_id ?? ''
+}
+
 export function buildExecutionGroups(
   items: ItemWithLogs[],
   prescriptions: PrescriptionMeta[],
+  marketingPlans: MarketingPlanMeta[] = [],
 ): GroupData[] {
   const presMap = new Map(prescriptions.map(p => [p.id, p]))
-  const itemsByPrescription: Record<string, ItemWithLogs[]> = {}
+  const mpMap = new Map(marketingPlans.map(p => [p.id, p]))
+  const itemsByGroup: Record<string, ItemWithLogs[]> = {}
   for (const item of items) {
-    const pid = isAutonomousItem(item) ? AUTONOMOUS_GROUP_ID : item.prescription_id
-    ;(itemsByPrescription[pid] ??= []).push(item)
+    const pid = pidForItem(item)
+    ;(itemsByGroup[pid] ??= []).push(item)
   }
 
-  return Object.entries(itemsByPrescription)
-    .map(([pid, groupItems]) => buildGroup(pid, groupItems, presMap.get(pid)))
+  return Object.entries(itemsByGroup)
+    .map(([pid, groupItems]) => {
+      if (pid.startsWith(MARKETING_PLAN_GROUP_PREFIX)) {
+        const planId = pid.slice(MARKETING_PLAN_GROUP_PREFIX.length)
+        return buildMarketingPlanGroup(pid, groupItems, mpMap.get(planId))
+      }
+      return buildGroup(pid, groupItems, presMap.get(pid))
+    })
     .sort((a, b) =>
       a.weight - b.weight ||
-      (a.meta?.generated_at ?? '').localeCompare(b.meta?.generated_at ?? ''),
+      (a.meta?.generated_at ?? a.marketingPlanMeta?.approved_at ?? '').localeCompare(
+        b.meta?.generated_at ?? b.marketingPlanMeta?.approved_at ?? '',
+      ),
     )
 }
 
@@ -98,6 +138,7 @@ function buildGroup(
     return {
       pid, items: groupItems, label: '飞轮自主行动',
       weight: 0, archived: false, derivable: false, editable: false,
+      kind: 'autonomous',
     }
   }
 
@@ -109,5 +150,32 @@ function buildGroup(
     else                              { label = '原处方';   weight = 1; derivable = meta.status === 'approved' }
   }
 
-  return { pid, items: groupItems, meta, label, weight, archived, derivable, editable: !archived }
+  return {
+    pid, items: groupItems, meta, label, weight, archived, derivable,
+    editable: !archived,
+    kind: 'prescription',
+  }
+}
+
+function buildMarketingPlanGroup(
+  pid: string,
+  groupItems: ItemWithLogs[],
+  mpMeta?: MarketingPlanMeta,
+): GroupData {
+  // weight = 4：排在原处方（1）/修订（2）/补充（3）之后、其他处方（5）之前
+  const archived = mpMeta?.status === 'archived' || mpMeta?.status === 'completed'
+  const label = mpMeta?.title
+    ? `📋 ${mpMeta.title}`
+    : '📋 Marketing Plan'
+  return {
+    pid,
+    items: groupItems,
+    marketingPlanMeta: mpMeta,
+    label,
+    weight: archived ? 8 : 4,
+    archived,
+    derivable: false,    // Marketing Plan 不派生（重新生成走 generator）
+    editable: !archived,
+    kind: 'marketing_plan',
+  }
 }
