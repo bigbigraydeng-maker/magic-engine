@@ -125,6 +125,7 @@ export async function GET(
       success: true,
       actions,
       generated_at: session.generated_at,
+      output,
     })
   }
 
@@ -144,12 +145,12 @@ export async function GET(
   }
 
   if (!latestRow) {
-    return NextResponse.json({ success: true, actions: [], generated_at: null })
+    return NextResponse.json({ success: true, actions: [], generated_at: null, output: null })
   }
 
   const sessionKey = (latestRow.payload as { zhuge_session_key?: string }).zhuge_session_key
   if (!sessionKey) {
-    return NextResponse.json({ success: true, actions: [], generated_at: null })
+    return NextResponse.json({ success: true, actions: [], generated_at: null, output: null })
   }
 
   const { data: legacyActions, error: legacyError } = await supabaseAdmin
@@ -171,5 +172,6 @@ export async function GET(
     success: true,
     actions: sorted,
     generated_at: latestRow.executed_at as string,
+    output: null,
   })
 }

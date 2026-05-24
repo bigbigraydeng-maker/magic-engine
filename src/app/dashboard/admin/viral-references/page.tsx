@@ -316,6 +316,13 @@ export default function ViralReferencesPage() {
   const [uploading, setUploading] = useState(false)
   const [uploadMsg, setUploadMsg] = useState('')
 
+  // Auto-discover form
+  const [discoverKeywords, setDiscoverKeywords] = useState('')
+  const [discoverMinViews, setDiscoverMinViews] = useState(50000)
+  const [discoverLimit, setDiscoverLimit] = useState(20)
+  const [discovering, setDiscovering] = useState(false)
+  const [discoverMsg, setDiscoverMsg] = useState('')
+
   const fetchRefs = useCallback(async () => {
     try {
       const res = await fetch('/api/admin/viral-references')
@@ -418,6 +425,44 @@ export default function ViralReferencesPage() {
       setUploadMsg('❌ 上传失败，文件可能太大或网络中断')
     } finally {
       setUploading(false)
+    }
+  }
+
+  const discoverVideos = async () => {
+    const kw = discoverKeywords.trim()
+    if (!kw) { setDiscoverMsg('请输入搜索关键词'); return }
+
+    setDiscovering(true)
+    setDiscoverMsg('')
+    try {
+      const res = await fetch('/api/admin/viral-references/discover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          keywords:     kw,
+          industry:     addIndustry,
+          content_goal: addGoal,
+          min_views:    discoverMinViews,
+          limit:        discoverLimit,
+          is_our_video: addIsOur,
+        }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        const parts: string[] = []
+        if (data.queued > 0)          parts.push(`✅ ${data.queued} 条新视频已加入分析队列`)
+        if (data.skipped > 0)         parts.push(`${data.skipped} 条已在库中（跳过）`)
+        if (data.below_threshold > 0) parts.push(`${data.below_threshold} 条播放量不足（跳过）`)
+        if (data.queued === 0)        parts.push('未发现符合条件的新视频，可尝试调整关键词或降低最低播放量')
+        setDiscoverMsg(parts.join(' · '))
+        if (data.queued > 0) fetchRefs()
+      } else {
+        setDiscoverMsg(`❌ ${data.error}`)
+      }
+    } catch {
+      setDiscoverMsg('❌ 网络错误，请重试')
+    } finally {
+      setDiscovering(false)
     }
   }
 
@@ -610,6 +655,63 @@ export default function ViralReferencesPage() {
         {uploadMsg && (
           <p className={`text-sm ${uploadMsg.startsWith('✅') ? 'text-green-400' : 'text-red-400'}`}>
             {uploadMsg}
+          </p>
+        )}
+      </div>
+
+      {/* Auto-Discover Panel */}
+      <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium text-white">🔍 YouTube 自动发现</p>
+          <p className="text-xs text-gray-500">
+            使用上方选择的行业 / 类型 · 约 120 配额/次 · 免费额度 10,000/天
+          </p>
+        </div>
+        <div className="flex gap-3 flex-wrap">
+          {/* Keywords */}
+          <input
+            type="text"
+            value={discoverKeywords}
+            onChange={e => setDiscoverKeywords(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && discoverVideos()}
+            placeholder="搜索关键词，如：luxury travel New Zealand tour"
+            className="flex-1 min-w-64 bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+          />
+          {/* Min views */}
+          <select
+            value={discoverMinViews}
+            onChange={e => setDiscoverMinViews(Number(e.target.value))}
+            className="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+            title="最低播放量过滤"
+          >
+            <option value={10000}>▶ 1万+</option>
+            <option value={50000}>▶ 5万+</option>
+            <option value={100000}>▶ 10万+</option>
+            <option value={500000}>▶ 50万+</option>
+            <option value={1000000}>▶ 100万+</option>
+          </select>
+          {/* Limit */}
+          <select
+            value={discoverLimit}
+            onChange={e => setDiscoverLimit(Number(e.target.value))}
+            className="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+            title="最多抓取数量"
+          >
+            <option value={10}>10 条</option>
+            <option value={20}>20 条</option>
+            <option value={30}>30 条</option>
+          </select>
+          <button
+            onClick={discoverVideos}
+            disabled={discovering || !discoverKeywords.trim()}
+            className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors shrink-0"
+          >
+            {discovering ? '搜索中…' : '🔍 Discover & Analyze'}
+          </button>
+        </div>
+        {discoverMsg && (
+          <p className={`text-sm ${discoverMsg.startsWith('✅') ? 'text-green-400' : discoverMsg.startsWith('❌') ? 'text-red-400' : 'text-indigo-300'}`}>
+            {discoverMsg}
           </p>
         )}
       </div>

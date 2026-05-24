@@ -65,7 +65,7 @@ export async function submitVideoGeneration(params: {
 
 export async function checkVideoStatus(jobId: string): Promise<VideoJobResult> {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 3000)
+  const timeout = setTimeout(() => controller.abort(), 15000)
 
   try {
     const res = await fetch(`${ATLAS_BASE}/model/prediction/${jobId}`, {
@@ -102,16 +102,18 @@ export async function submitI2VGeneration(params: {
   opening_frame_url: string
   closing_frame_url: string
   duration?: number
-  resolution?: '720p' | '1080p'
+  resolution?: '480p' | '720p' | '1080p'
   aspect_ratio?: '9:16' | '16:9' | '1:1'
+  generate_audio?: boolean
 }): Promise<{ job_id: string }> {
   const {
     prompt,
     opening_frame_url,
     closing_frame_url,
-    duration = 6,
+    duration = 15,
     resolution = '720p',
     aspect_ratio = '9:16',
+    generate_audio = false,
   } = params
 
   const controller = new AbortController()
@@ -133,6 +135,7 @@ export async function submitI2VGeneration(params: {
         // Atlas I2V: first_frame_image + last_frame_image
         first_frame_image: opening_frame_url,
         last_frame_image: closing_frame_url,
+        generate_audio,
       }),
       signal: controller.signal,
     })
