@@ -17,7 +17,8 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import type { SocialPlanOutput, ReelsScript, Post, Story } from '@/lib/social/social-plan-templates'
+import type { SocialPlanOutput, ReelsScript, Post, Story, GenerationConfig } from '@/lib/social/social-plan-templates'
+import { DEFAULT_CONFIG } from '@/lib/social/social-plan-templates'
 
 interface Props {
   clientId: string
@@ -43,6 +44,11 @@ export function SocialPlanSection({ clientId, campaignId, campaignName }: Props)
   const [planHistory, setPlanHistory]       = useState<PlanRecord[]>([])
   const [historyLoaded, setHistoryLoaded]   = useState(false)
 
+  // FDE generation config (customisable before generating)
+  const [config, setConfig]                 = useState<GenerationConfig>(DEFAULT_CONFIG)
+  const [settingsOpen, setSettingsOpen]     = useState(false)
+  const [angleFocusInput, setAngleFocusInput] = useState('')
+
   // Load history on mount / when campaign changes
   useEffect(() => {
     if (!campaignId) { setHistoryLoaded(true); return }
@@ -67,10 +73,18 @@ export function SocialPlanSection({ clientId, campaignId, campaignName }: Props)
     setLoading(true)
     setError(null)
     try {
+      const payload = {
+        campaign_brief_id: campaignId,
+        platform:          config.platform,
+        reels_count:       config.reels_count,
+        posts_count:       config.posts_count,
+        stories_count:     config.stories_count,
+        ...(angleFocusInput.trim() ? { angle_focus: angleFocusInput.trim() } : {}),
+      }
       const res = await fetch(`/api/clients/${clientId}/social-plan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaign_brief_id: campaignId }),
+        body: JSON.stringify(payload),
       })
       const json = await res.json() as {
         success: boolean
@@ -108,30 +122,147 @@ export function SocialPlanSection({ clientId, campaignId, campaignName }: Props)
         <div>
           <h3 className="text-sm font-bold text-indigo-900">📋 Social Plan Studio</h3>
           <p className="text-[11px] text-gray-500 mt-0.5">
-            Strategy → 3 Reels Storyboard · 5 Posts · 3 Stories · 一键生成
+            Strategy → {config.reels_count} Reels · {config.posts_count} Posts · {config.stories_count} Stories
+            &nbsp;·&nbsp;
+            <span className="capitalize text-indigo-500 font-medium">{config.platform}</span>
           </p>
         </div>
-        {campaignId ? (
-          <button
-            onClick={generate}
-            disabled={loading}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-xs font-semibold rounded-lg transition-colors"
-          >
-            {loading ? (
-              <>
-                <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                生成中…（约 50s）
-              </>
-            ) : (
-              <>✦ {plan ? '重新生成' : '生成 Social Plan'}</>
-            )}
-          </button>
-        ) : (
-          <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-1.5">
-            ⚠ 请先设置活跃 Campaign
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {campaignId && (
+            <button
+              onClick={() => setSettingsOpen(v => !v)}
+              title="生成设置"
+              className={`flex items-center gap-1 px-3 py-2 text-xs font-medium rounded-lg border transition-colors ${
+                settingsOpen
+                  ? 'bg-indigo-100 border-indigo-300 text-indigo-700'
+                  : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-300'
+              }`}
+            >
+              ⚙ 设置
+              <span className="text-[10px]">{settingsOpen ? '▲' : '▼'}</span>
+            </button>
+          )}
+          {campaignId ? (
+            <button
+              onClick={generate}
+              disabled={loading}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-xs font-semibold rounded-lg transition-colors"
+            >
+              {loading ? (
+                <>
+                  <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                  生成中…（约 50s）
+                </>
+              ) : (
+                <>✦ {plan ? '重新生成' : '生成 Social Plan'}</>
+              )}
+            </button>
+          ) : (
+            <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-1.5">
+              ⚠ 请先设置活跃 Campaign
+            </span>
+          )}
+        </div>
       </div>
+
+      {/* FDE Settings Panel */}
+      {settingsOpen && campaignId && (
+        <div className="px-5 py-4 bg-slate-50 border-b border-slate-200 space-y-3">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">⚙ 生成设置 — FDE 可调</p>
+
+          {/* Platform */}
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-slate-500 w-20 shrink-0">平台</span>
+            <div className="flex gap-1">
+              {(['facebook', 'instagram', 'tiktok'] as const).map(p => (
+                <button
+                  key={p}
+                  onClick={() => setConfig(c => ({ ...c, platform: p }))}
+                  className={`px-3 py-1 text-xs rounded-full border font-medium transition-colors capitalize ${
+                    config.platform === p
+                      ? 'bg-indigo-600 text-white border-indigo-600'
+                      : 'bg-white text-slate-600 border-slate-300 hover:border-indigo-400'
+                  }`}
+                >
+                  {p === 'facebook' ? 'Facebook' : p === 'instagram' ? 'Instagram' : 'TikTok'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Reels count */}
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-slate-500 w-20 shrink-0">Reels 数量</span>
+            <div className="flex gap-1">
+              {[1, 2, 3, 4, 5].map(n => (
+                <button
+                  key={n}
+                  onClick={() => setConfig(c => ({ ...c, reels_count: n }))}
+                  className={`w-8 h-8 text-xs rounded-lg border font-medium transition-colors ${
+                    config.reels_count === n
+                      ? 'bg-indigo-600 text-white border-indigo-600'
+                      : 'bg-white text-slate-600 border-slate-300 hover:border-indigo-400'
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Posts count */}
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-slate-500 w-20 shrink-0">Posts 数量</span>
+            <div className="flex gap-1">
+              {[0, 3, 5, 7, 10].map(n => (
+                <button
+                  key={n}
+                  onClick={() => setConfig(c => ({ ...c, posts_count: n }))}
+                  className={`px-3 py-1 text-xs rounded-full border font-medium transition-colors ${
+                    config.posts_count === n
+                      ? 'bg-indigo-600 text-white border-indigo-600'
+                      : 'bg-white text-slate-600 border-slate-300 hover:border-indigo-400'
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Stories count */}
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-slate-500 w-20 shrink-0">Stories 数量</span>
+            <div className="flex gap-1">
+              {[0, 2, 3, 5].map(n => (
+                <button
+                  key={n}
+                  onClick={() => setConfig(c => ({ ...c, stories_count: n }))}
+                  className={`px-3 py-1 text-xs rounded-full border font-medium transition-colors ${
+                    config.stories_count === n
+                      ? 'bg-indigo-600 text-white border-indigo-600'
+                      : 'bg-white text-slate-600 border-slate-300 hover:border-indigo-400'
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Angle focus hint */}
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-slate-500 w-20 shrink-0">内容侧重</span>
+            <input
+              type="text"
+              value={angleFocusInput}
+              onChange={e => setAngleFocusInput(e.target.value)}
+              placeholder="可选：如 seasonal promotion、price launch…"
+              className="flex-1 text-xs border border-slate-300 rounded-lg px-3 py-1.5 bg-white text-slate-700 placeholder-slate-400 focus:outline-none focus:border-indigo-400"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Error */}
       {error && (
@@ -291,12 +422,14 @@ function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) 
 }
 
 const ANGLE_TAG_COLOR: Record<string, string> = {
-  price_attack:  'bg-rose-50 text-rose-700 border-rose-200',
-  speed_attack:  'bg-orange-50 text-orange-700 border-orange-200',
-  trust_attack:  'bg-emerald-50 text-emerald-700 border-emerald-200',
-  pet_floor:     'bg-purple-50 text-purple-700 border-purple-200',
-  scarcity:      'bg-amber-50 text-amber-700 border-amber-200',
-  seasonal:      'bg-sky-50 text-sky-700 border-sky-200',
+  price_attack:   'bg-rose-50 text-rose-700 border-rose-200',
+  speed_attack:   'bg-orange-50 text-orange-700 border-orange-200',
+  trust_attack:   'bg-emerald-50 text-emerald-700 border-emerald-200',
+  scarcity:       'bg-amber-50 text-amber-700 border-amber-200',
+  seasonal:       'bg-sky-50 text-sky-700 border-sky-200',
+  education:      'bg-violet-50 text-violet-700 border-violet-200',
+  social_proof:   'bg-teal-50 text-teal-700 border-teal-200',
+  aspirational:   'bg-purple-50 text-purple-700 border-purple-200',
 }
 
 // Accept both the new storyboard schema and the legacy frame-prompt schema

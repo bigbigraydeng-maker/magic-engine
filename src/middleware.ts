@@ -31,11 +31,12 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(loginUrl)
     }
 
-    // Look up ALL clients this user can access
+    // Look up ALL clients this user can access via portal (access_type = portal or both)
     const { data: portalUsers } = await supabaseAdmin
       .from('client_portal_users')
       .select('client_id')
       .eq('email', (user.email ?? '').toLowerCase())
+      .in('access_type', ['portal', 'both'])
 
     if (!portalUsers || portalUsers.length === 0) {
       return NextResponse.redirect(new URL('/unauthorized', request.url))
@@ -79,7 +80,7 @@ export async function middleware(request: NextRequest) {
     .from('client_portal_users')
     .select('client_id')
     .eq('email', email)
-    .in('access_type', ['dashboard', 'both'])
+    .in('access_type', ['dashboard', 'fde', 'both'])
 
   // Fallback: CLIENT_VIEWERS env var (backward compat — keeps existing Render configs working)
   const envPerms = getUserPermissions(email)

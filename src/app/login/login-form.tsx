@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { createBrowserClient } from '@supabase/ssr'
 
 export default function LoginForm({ next, authFailed }: { next: string; authFailed?: boolean }) {
   const [email, setEmail] = useState('')
@@ -25,23 +24,10 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
     window.history.replaceState(null, '', window.location.pathname + window.location.search)
   }, [])
 
-  async function handleGoogleLogin() {
+  function handleGoogleLogin() {
     setGoogleLoading(true)
     setError('')
-    const supabase = createBrowserClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    )
-    const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`
-    const { error: oauthError } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo },
-    })
-    if (oauthError) {
-      setError('Google login failed. Please try again.')
-      setGoogleLoading(false)
-    }
-    // On success, Supabase redirects the browser — no further action needed here.
+    window.location.href = `/api/auth/google-login?next=${encodeURIComponent(next)}`
   }
 
   async function handleSubmit(e: React.FormEvent) {

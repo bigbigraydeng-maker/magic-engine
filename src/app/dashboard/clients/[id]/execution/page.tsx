@@ -17,6 +17,7 @@ import {
   isAutonomousItem,
   type GroupData,
   type ItemWithLogs,
+  type MarketingPlanMeta,
   type OutcomeSummary,
   type PrescriptionMeta,
 } from './execution-view-model'
@@ -170,6 +171,122 @@ function OutcomeChip({ outcome }: { outcome: OutcomeSummary }) {
     >
       {vm.icon} {label}
     </span>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ActiveCampaignBanner — FDE 工作上下文锚点
+// ---------------------------------------------------------------------------
+//
+// Master Brief（品牌 DNA）× Campaign Brief（活动目标）= 内容生产的上下文基座。
+// 看板顶部常驻显示，让 FDE 在执行任务时随时看到当前服务的 Campaign。
+// 多 Campaign 时全部展示（通常 1–2 条），无 Campaign 时显示 amber 警告。
+
+interface ActiveCampaignLite {
+  id: string
+  title: string
+  description?: string | null
+  valid_from?: string | null
+  valid_until?: string | null
+  semrush_keywords?: unknown[] | null
+}
+
+function ActiveCampaignBanner({ clientId }: { clientId: string }) {
+  const [campaigns, setCampaigns] = useState<ActiveCampaignLite[]>([])
+  const [loaded, setLoaded]       = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/campaign?status=active`)
+        if (!res.ok) { if (!cancelled) setLoaded(true); return }
+        const json = await res.json() as { campaigns?: ActiveCampaignLite[] }
+        if (!cancelled) {
+          setCampaigns(json.campaigns ?? [])
+          setLoaded(true)
+        }
+      } catch {
+        if (!cancelled) setLoaded(true)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [clientId])
+
+  // Skeleton 阶段不渲染，避免布局抖动
+  if (!loaded) return null
+
+  // 无活跃 Campaign — amber 警告
+  if (campaigns.length === 0) {
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="text-lg shrink-0">⚠</span>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-amber-900">尚无活跃 Campaign</p>
+            <p className="text-xs text-amber-700">
+              内容生成将仅依据品牌 DNA — 建议为本期工作设置一个 Campaign 提供清晰目标
+            </p>
+          </div>
+        </div>
+        <Link
+          href={`/dashboard/clients/${clientId}`}
+          className="shrink-0 text-xs font-semibold text-amber-700 hover:text-amber-900 underline whitespace-nowrap"
+        >
+          前往设置 →
+        </Link>
+      </div>
+    )
+  }
+
+  // 有活跃 Campaign — 蓝色条
+  return (
+    <div className="rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-white px-4 py-3">
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">
+            ⚓ 当前 Campaign 上下文
+          </span>
+          <span className="text-[10px] text-gray-400">
+            ({campaigns.length === 1 ? '1 个活跃' : `${campaigns.length} 个并行`})
+          </span>
+        </div>
+        <Link
+          href={`/dashboard/clients/${clientId}`}
+          className="shrink-0 text-xs font-medium text-indigo-600 hover:text-indigo-800 whitespace-nowrap"
+        >
+          管理 Campaign →
+        </Link>
+      </div>
+      <div className="space-y-1.5">
+        {campaigns.map(c => {
+          const dateLabel = (() => {
+            if (c.valid_from && c.valid_until) return `${c.valid_from} → ${c.valid_until}`
+            if (c.valid_from)  return `${c.valid_from} 起`
+            if (c.valid_until) return `至 ${c.valid_until}`
+            return null
+          })()
+          const keywordCount = Array.isArray(c.semrush_keywords) ? c.semrush_keywords.length : 0
+          return (
+            <div key={c.id} className="flex items-start gap-2">
+              <span className="inline-flex items-center text-[10px] font-bold bg-green-100 text-green-700 rounded-full px-1.5 py-0.5 mt-0.5 shrink-0">
+                进行中
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-gray-900 truncate">{c.title}</p>
+                {c.description && (
+                  <p className="text-[11px] text-gray-500 line-clamp-1 leading-snug">{c.description}</p>
+                )}
+                <div className="flex items-center gap-3 mt-0.5 text-[10px] text-gray-400">
+                  {dateLabel && <span>📅 {dateLabel}</span>}
+                  {keywordCount > 0 && <span>🔑 {keywordCount} 关键词</span>}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -925,7 +1042,7 @@ function PrescriptionGroup({
   onAddItem: (prescriptionId: string, phase: number, fields: AddItemFields) => Promise<boolean>
   onEditItem: (itemId: string, fields: { title?: string; description?: string }) => Promise<boolean>
 }) {
-  const { items, label, archived, derivable, pid, meta, editable } = group
+  const { items, label, archived, derivable, pid, meta, marketingPlanMeta, editable, kind } = group
 
   // 该处方内按 phase 分组
   const byPhase: Record<number, ItemWithLogs[]> = {}
@@ -933,16 +1050,26 @@ function PrescriptionGroup({
     ;(byPhase[it.phase ?? 1] ??= []).push(it)
   }
   const completed = items.filter(i => i.status === 'completed').length
-  const genDate = meta?.generated_at
-    ? new Date(meta.generated_at).toLocaleDateString('zh-CN', { timeZone: 'Pacific/Auckland' })
-    : null
 
-  const labelCls =
-    label === '原处方'        ? 'bg-indigo-100 text-indigo-700' :
-    label === '补充处方'      ? 'bg-blue-100 text-blue-700' :
-    label === '修订版'        ? 'bg-amber-100 text-amber-700' :
-    label === '飞轮自主行动'  ? 'bg-green-100 text-green-700' :
-                                'bg-gray-200 text-gray-500'
+  // 分组日期 — 处方用 generated_at，Marketing Plan 用 approved_at
+  const groupDate = (() => {
+    const iso = meta?.generated_at ?? marketingPlanMeta?.approved_at ?? null
+    if (!iso) return null
+    return new Date(iso).toLocaleDateString('zh-CN', { timeZone: 'Pacific/Auckland' })
+  })()
+  const dateLabel = kind === 'marketing_plan' ? '批准于' : '生成于'
+
+  const labelCls = (() => {
+    if (kind === 'marketing_plan') {
+      return archived ? 'bg-gray-100 text-gray-500' : 'bg-purple-100 text-purple-700'
+    }
+    if (kind === 'autonomous') return 'bg-green-100 text-green-700'
+    // prescription
+    if (label === '原处方')        return 'bg-indigo-100 text-indigo-700'
+    if (label === '补充处方')      return 'bg-blue-100 text-blue-700'
+    if (label === '修订版')        return 'bg-amber-100 text-amber-700'
+    return 'bg-gray-200 text-gray-500'
+  })()
 
   return (
     <div className={`rounded-xl border ${archived ? 'border-gray-200 opacity-75' : 'border-gray-300'} bg-white overflow-hidden`}>
@@ -951,7 +1078,12 @@ function PrescriptionGroup({
         <span className={`text-xs font-semibold rounded-full px-2.5 py-1 ${labelCls}`}>
           {label}
         </span>
-        {genDate && <span className="text-xs text-gray-400">生成于 {genDate}</span>}
+        {groupDate && <span className="text-xs text-gray-400">{dateLabel} {groupDate}</span>}
+        {kind === 'marketing_plan' && marketingPlanMeta?.start_date && marketingPlanMeta.end_date && (
+          <span className="text-xs text-gray-400">
+            📅 {marketingPlanMeta.start_date} → {marketingPlanMeta.end_date}
+          </span>
+        )}
         <span className="text-xs text-gray-400">{completed}/{items.length} 完成</span>
 
         {/* 派生按钮 — 仅已批准的活跃处方。内联抽屉，不跳转 */}
@@ -1016,6 +1148,7 @@ export default function ExecutionPage() {
 
   const [items, setItems]     = useState<ItemWithLogs[]>([])
   const [prescriptions, setPrescriptions] = useState<PrescriptionMeta[]>([])
+  const [marketingPlans, setMarketingPlans] = useState<MarketingPlanMeta[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState<string | null>(null)       // 页面加载错误（整页）
   const [opError, setOpError] = useState<string | null>(null)       // 操作错误（内联横幅）
@@ -1067,14 +1200,34 @@ export default function ExecutionPage() {
     setError(null)
     try {
       const qs = prescriptionId ? `?prescription_id=${prescriptionId}` : ''
-      const res = await fetch(`/api/clients/${clientId}/execution${qs}`, {
-        headers: { Authorization: `Bearer ${API_KEY}` },
-        cache: 'no-store',
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json() as { items: ItemWithLogs[]; prescriptions?: PrescriptionMeta[] }
+      // 并行拉 execution items + marketing plans，互不阻塞
+      const [execRes, mpRes] = await Promise.all([
+        fetch(`/api/clients/${clientId}/execution${qs}`, {
+          headers: { Authorization: `Bearer ${API_KEY}` },
+          cache: 'no-store',
+        }),
+        fetch(`/api/clients/${clientId}/marketing-plan`, { cache: 'no-store' }).catch(() => null),
+      ])
+      if (!execRes.ok) throw new Error(`HTTP ${execRes.status}`)
+      const data = await execRes.json() as { items: ItemWithLogs[]; prescriptions?: PrescriptionMeta[] }
       setItems(data.items ?? [])
       setPrescriptions(data.prescriptions ?? [])
+
+      // Marketing Plan meta — 失败不阻塞主流程
+      if (mpRes && mpRes.ok) {
+        try {
+          const mpJson = await mpRes.json() as {
+            success: boolean
+            plans?: { id: string; title: string; status: MarketingPlanMeta['status']; start_date: string | null; end_date: string | null; approved_at: string | null }[]
+          }
+          if (mpJson.success && mpJson.plans) {
+            setMarketingPlans(mpJson.plans.map(p => ({
+              id: p.id, title: p.title, status: p.status,
+              start_date: p.start_date, end_date: p.end_date, approved_at: p.approved_at,
+            })))
+          }
+        } catch { /* non-fatal */ }
+      }
     } catch (e) {
       if (!silent) setError(e instanceof Error ? e.message : '加载失败')
     } finally {
@@ -1187,7 +1340,7 @@ export default function ExecutionPage() {
   }, [clientId, fetchItems])
 
   const completedCount = items.filter(i => i.status === 'completed').length
-  const prescriptionGroups = buildExecutionGroups(items, prescriptions)
+  const prescriptionGroups = buildExecutionGroups(items, prescriptions, marketingPlans)
 
   // ── Loading ───────────────────────────────────────────────────────────────
   if (loading) {
@@ -1278,6 +1431,12 @@ export default function ExecutionPage() {
               🔨 项目级鲁班
             </button>
             <Link
+              href={`/dashboard/clients/${clientId}/marketing-plan`}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-medium text-purple-700 hover:bg-purple-100 transition-colors"
+            >
+              📋 Marketing Plan
+            </Link>
+            <Link
               href={`/dashboard/clients/${clientId}/prescription/new`}
               className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-indigo-300 hover:text-indigo-700 transition-colors"
             >
@@ -1295,6 +1454,9 @@ export default function ExecutionPage() {
             <button onClick={() => setOpError(null)} className="text-red-400 hover:text-red-600 text-lg leading-none">×</button>
           </div>
         )}
+
+        {/* Campaign 上下文锚点 — FDE 执行任务时随时可见 */}
+        <ActiveCampaignBanner clientId={clientId} />
 
         <ProgressBar completed={completedCount} total={items.length} />
 

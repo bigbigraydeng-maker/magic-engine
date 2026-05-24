@@ -178,9 +178,13 @@ export interface PriorPrescriptionContext {
 
 export type ExecutionItemStatus = 'pending' | 'in_progress' | 'completed' | 'skipped'
 
+/** 执行项来源 — diagnostic（处方派发）或 marketing_plan（营销计划派发）*/
+export type ExecutionItemSource = 'diagnostic' | 'marketing_plan'
+
 export interface ExecutionItem {
   id: string
-  prescription_id: string
+  /** 处方派发任务时有值；marketing_plan 来源时为 null */
+  prescription_id: string | null
   client_id: string
   finding_id: string | null
   dimension: DiagnosticDimension
@@ -200,6 +204,10 @@ export interface ExecutionItem {
   updated_at: string
   /** 关联的内容帖子 ID。社媒/SEO 内容类执行项的产出物。published 后自动 mark completed。 */
   content_post_id: string | null
+  /** 来源类型 — 决定看板分组和徽章显示 */
+  source: ExecutionItemSource
+  /** marketing_plan 来源时有值，作为分组键 */
+  marketing_plan_id: string | null
 }
 
 /** 内容飞轮闭环 — 执行看板 row 上展示的关联内容预览（execution GET 时 embed） */
