@@ -415,7 +415,7 @@ export default function ProductionPackageListPage() {
         ) : packages.length === 0 ? (
           <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center text-gray-400">
             <p className="text-sm font-medium">暂无生产包</p>
-            <p className="text-xs mt-1">通过社媒、博客生成路由指定 production_package_id 后，包会自动出现在这里。</p>
+            <p className="text-xs mt-1">批准一份 Marketing Plan 后，系统会按维度自动建立生产包；也可点击「新建生产包」手动建立临时批次。</p>
           </div>
         ) : dimFilter !== 'all' ? (
           // Single dimension — flat list

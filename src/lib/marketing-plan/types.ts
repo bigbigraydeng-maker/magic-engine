@@ -142,4 +142,6 @@ export interface DispatchResult {
   marketing_plan_id: string
   tasks_created: number
   task_ids: string[]
+  packages_created: number
+  package_ids: string[]
 }

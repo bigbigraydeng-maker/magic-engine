@@ -80,13 +80,78 @@ function buildExecutionTarget(task: PlanTask): {
     : { mode: 'in_house', flywheel: 'social', module: 'social_matrix' }
 }
 
+// ─── 维度标签（用于自动生产包标题）──────────────────────────────────────────────
+
+const DIMENSION_LABEL: Record<string, string> = {
+  social: '社媒内容',
+  seo:    '博客内容',
+}
+
+// ─── 自动建生产包（按维度分组）────────────────────────────────────────────────────
+
+async function createProductionPackagesFromPlan(
+  plan: MarketingPlan,
+  tasks: PlanTask[],
+  executionItemIds: string[],
+): Promise<{ packages_created: number; package_ids: string[] }> {
+  // Resolve master_brief_id — required NOT NULL on production_packages
+  let masterBriefId = plan.master_brief_id
+  if (!masterBriefId) {
+    const { data } = await supabaseAdmin
+      .from('master_briefs')
+      .select('id')
+      .eq('client_id', plan.client_id)
+      .limit(1)
+      .maybeSingle()
+    masterBriefId = data?.id ?? null
+  }
+  if (!masterBriefId) {
+    console.warn('[task-dispatcher] No master_brief found for client, skipping package creation')
+    return { packages_created: 0, package_ids: [] }
+  }
+
+  // Group execution_item ids by dimension
+  const grouped: Record<string, string[]> = {}
+  tasks.forEach((task, i) => {
+    const dim = kindToDimension(task.kind)
+    if (!grouped[dim]) grouped[dim] = []
+    grouped[dim].push(executionItemIds[i])
+  })
+
+  const inserts = Object.entries(grouped).map(([dim, itemIds]) => ({
+    client_id:                   plan.client_id,
+    master_brief_id:             masterBriefId as string,
+    marketing_plan_id:           plan.id,
+    campaign_id:                 plan.campaign_id,
+    dimension:                   dim,
+    title:                       `${plan.title} — ${DIMENSION_LABEL[dim] ?? dim}`,
+    brief:                       null,
+    status:                      'draft',
+    source_payload:              { marketing_plan_id: plan.id, execution_item_ids: itemIds },
+    generation_context_snapshot: {},
+  }))
+
+  const { data, error } = await supabaseAdmin
+    .from('production_packages')
+    .insert(inserts)
+    .select('id')
+
+  if (error) {
+    console.error('[task-dispatcher] Failed to create production packages:', error)
+    return { packages_created: 0, package_ids: [] }
+  }
+
+  const packageIds = (data ?? []).map(r => r.id as string)
+  return { packages_created: packageIds.length, package_ids: packageIds }
+}
+
 // ─── 主派发函数 ────────────────────────────────────────────────────────────────
 
 export async function dispatchPlanTasks(plan: MarketingPlan): Promise<DispatchResult> {
   const tasks = plan.plan_data?.tasks ?? []
 
   if (tasks.length === 0) {
-    return { marketing_plan_id: plan.id, tasks_created: 0, task_ids: [] }
+    return { marketing_plan_id: plan.id, tasks_created: 0, task_ids: [], packages_created: 0, package_ids: [] }
   }
 
   const rows = tasks.map((task, idx) => ({
@@ -118,10 +183,14 @@ export async function dispatchPlanTasks(plan: MarketingPlan): Promise<DispatchRe
 
   const ids = (data ?? []).map(r => r.id as string)
 
+  const { packages_created, package_ids } = await createProductionPackagesFromPlan(plan, tasks, ids)
+
   return {
     marketing_plan_id: plan.id,
     tasks_created:     ids.length,
     task_ids:          ids,
+    packages_created,
+    package_ids,
   }
 }
 

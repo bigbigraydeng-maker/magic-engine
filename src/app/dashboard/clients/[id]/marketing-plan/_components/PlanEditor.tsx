@@ -114,12 +114,15 @@ export function PlanEditor({ clientId, plan, onUpdated }: Props) {
       const json = await res.json() as {
         success: boolean
         plan?: MarketingPlan
-        dispatch?: { tasks_created: number }
+        dispatch?: { tasks_created: number; packages_created: number }
         error?: string
       }
       if (!json.success || !json.plan) throw new Error(json.error ?? 'Approve failed')
       onUpdated(json.plan)
-      setMessage(`✓ Plan 已批准，派发了 ${json.dispatch?.tasks_created ?? 0} 个任务到执行看板`, true)
+      const pkgNote = (json.dispatch?.packages_created ?? 0) > 0
+        ? `，自动建立 ${json.dispatch!.packages_created} 个生产包`
+        : ''
+      setMessage(`✓ Plan 已批准，派发了 ${json.dispatch?.tasks_created ?? 0} 个任务到执行看板${pkgNote}`, true)
     } catch (err) {
       setMessage(`✗ ${(err as Error).message}`, false)
     } finally {

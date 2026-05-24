@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-25 06:39 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。
+> 最后更新：2026-05-25 06:46 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2044,6 +2044,51 @@ AI 可见度层（ME 独有 ✅）
 ### 风险
 
 L2 授权写太严会把 CTS / Oztop 操作员锁在自己数据外。**19.B 部署前必须确认操作员邮箱已在 `ADMIN_EMAILS` / `CLIENT_VIEWERS` 白名单。**
+
+---
+
+## Phase 20 — Magic Token Coin & Self-Serve Portal（C 端变现引擎）📋 已登记，待排期
+
+> **登记日期**：2026-05-25 · **状态**：方案已完整讨论，所有关键决策已拍板，待 PM 排期开工
+>
+> **背景**：Magic Engine 当前只服务 FDE 陪跑客户（人工建档、月度合约）。Phase 20 新增 C 端自助层，让 AU/NZ 本地商家从广告进来后，用 Magic Token Coin（MTC）自助体验和购买内容生成服务，形成 Tier 1（免费 Discovery）→ Tier 2（MTC 自助）→ Tier 3（FDE 全托管）的完整漏斗。
+>
+> **完整 spec**：见 [PHASE_20_MTC_SPEC.md](./PHASE_20_MTC_SPEC.md)
+
+### Phase 20 核心决策（已拍板）
+
+| 决策项 | 结论 |
+|--------|------|
+| 计量单位 | Magic Token Coin（MTC） |
+| 汇率 | $29 NZD = 300 MTC（1 MTC ≈ $0.097 NZD） |
+| 充值包 | $29 / 300 MTC · $79 / 1,200 MTC · $199 / 3,500 MTC |
+| 注册赠送 | 100 MTC（验证邮箱后发放，防刷号） |
+| 有效期 | 每次购买单独计时，12 个月，FIFO 扣款 |
+| 月费 | 无（Tier 2 纯 Token 制） |
+| 支付系统 | Stripe（一次性支付） |
+| 用户体系 | 复用 `clients` 表，新增 `source` 字段区分 fde / self_serve |
+| Kanban | 不对 C 端开放，全部导流 FDE Talk to Us |
+| 视频 | 仅 Seedance 2.0 I2V，封顶 15s |
+| 生成失败 | 100% 退还 MTC |
+| 提示词可见性 | 可见但限制导出 |
+
+### Phase 20 开发批次
+
+| 批次 | 内容 | 工作量 |
+|------|------|--------|
+| **20.A** 地基 | DB migrations + Stripe Webhook + 注册流程 + MTC 余额 API | ~1 周 |
+| **20.B** 界面 | 注册/登录页 + 钱包页 + Checkout 流程 + 生成 API 扣费接入 | ~1 周 |
+| **20.C** 收尾 | Talk to Us 触发 + Magic Lab Class 入口 + 过期提醒邮件 + 管理员视图 | ~3–4 天 |
+
+### Phase 20 里程碑
+
+- **M1**：DB 三张新表 + Stripe test mode 支付成功写入 `mtc_purchases`
+- **M2**：注册 → 验证邮箱 → 余额 100 → 充值 $29 → 余额 400 → 生成图片 → 余额 390
+- **M3**：完整用户路径跑通 + Talk to Us 情境触发 + 管理员 C 端用户视图
+
+### Phase 20 前置条件
+
+双信号博客质量验证（手动，用 CTS Tours 真实关键词跑一遍，通过后才开放 C 端）
 
 ---
 
