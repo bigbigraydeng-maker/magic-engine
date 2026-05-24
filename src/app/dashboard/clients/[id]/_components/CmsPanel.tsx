@@ -1,40 +1,84 @@
 'use client'
 
 /**
- * CmsPanel — GitHub CMS Connector configuration UI.
+ * CmsPanel — Website CMS Connector configuration UI.
  *
- * Rendered inside SettingsDrawer when the '🔗 网站连接' tab is active.
+ * Rendered inside SettingsDrawer under the '🔗 网站连接' tab.
  *
- * Workflow:
- *  1. On mount, fetch current connection status from /api/clients/[id]/cms/status
- *  2. If not connected: show a form to enter repo details + GitHub PAT
- *  3. If connected: show status badge + repo info + Test/Disconnect buttons
+ * Phase 14.A.3: multi-provider entry point — FDE picks GitHub, WordPress, or
+ * (coming soon) Shopify and manages credentials per-provider on the same
+ * `cms_connections` table.
  *
- * Security: the PAT is sent only in the POST /cms/connect body (HTTPS),
- * never stored in React state after the form submits, and never echoed back
- * in the status response (only the last-four hint is shown).
+ * Security: tokens / app passwords are POSTed once over HTTPS and never stored
+ * in React state after submit; status endpoints only ever return the last-four
+ * character hint.
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import type { CmsConnectionStatus } from '@/lib/cms/vocabulary'
+import type {
+  CmsConnectionStatus,
+  WordpressConnectionStatus,
+} from '@/lib/cms/vocabulary'
 
 interface Props {
   clientId: string
 }
 
-type PanelState =
+type ProviderTab = 'github' | 'wordpress' | 'shopify'
+
+const PROVIDER_TABS: { id: ProviderTab; label: string; soon?: boolean }[] = [
+  { id: 'github',    label: 'GitHub' },
+  { id: 'wordpress', label: 'WordPress' },
+  { id: 'shopify',   label: 'Shopify', soon: true },
+]
+
+export function CmsPanel({ clientId }: Props) {
+  const [activeProvider, setActiveProvider] = useState<ProviderTab>('github')
+
+  return (
+    <div className="space-y-5">
+      {/* Provider tabs */}
+      <div className="flex items-center gap-1 border-b border-gray-200">
+        {PROVIDER_TABS.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveProvider(tab.id)}
+            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              activeProvider === tab.id
+                ? 'border-indigo-600 text-indigo-700'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {tab.label}
+            {tab.soon && (
+              <span className="ml-1.5 text-[10px] text-gray-400 font-normal">即将推出</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {activeProvider === 'github'    && <GithubProviderPanel    clientId={clientId} />}
+      {activeProvider === 'wordpress' && <WordpressProviderPanel clientId={clientId} />}
+      {activeProvider === 'shopify'   && <ShopifyComingSoonPanel />}
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// GitHub provider (existing flow — unchanged behavior, just lifted into its
+// own panel so the same drawer can switch between providers)
+// ════════════════════════════════════════════════════════════════════════════
+
+type GithubPanelState =
   | { phase: 'loading' }
   | { phase: 'error'; message: string }
   | { phase: 'disconnected' }
   | { phase: 'connected'; status: CmsConnectionStatus }
 
-// ─── CmsPanel ────────────────────────────────────────────────────────────────
-
-export function CmsPanel({ clientId }: Props) {
-  const [state, setState]   = useState<PanelState>({ phase: 'loading' })
+function GithubProviderPanel({ clientId }: { clientId: string }) {
+  const [state, setState]       = useState<GithubPanelState>({ phase: 'loading' })
   const [formOpen, setFormOpen] = useState(false)
 
-  // ── Fetch status ─────────────────────────────────────────────────────────
   const fetchStatus = useCallback(async () => {
     setState({ phase: 'loading' })
     try {
@@ -43,12 +87,9 @@ export function CmsPanel({ clientId }: Props) {
       })
       const json = await res.json() as { success: boolean; data: CmsConnectionStatus | null; error?: string }
       if (!json.success) throw new Error(json.error ?? 'Failed to load status')
-
-      if (!json.data) {
-        setState({ phase: 'disconnected' })
-      } else {
-        setState({ phase: 'connected', status: json.data })
-      }
+      setState(json.data
+        ? { phase: 'connected', status: json.data }
+        : { phase: 'disconnected' })
     } catch (err) {
       setState({ phase: 'error', message: err instanceof Error ? err.message : 'Load failed' })
     }
@@ -56,28 +97,12 @@ export function CmsPanel({ clientId }: Props) {
 
   useEffect(() => { fetchStatus() }, [fetchStatus])
 
-  // ── Render ────────────────────────────────────────────────────────────────
-  if (state.phase === 'loading') {
-    return (
-      <div className="flex items-center justify-center py-16 gap-2 text-gray-400">
-        <span className="animate-spin text-lg">⟳</span>
-        <span className="text-sm">加载中…</span>
-      </div>
-    )
-  }
-
-  if (state.phase === 'error') {
-    return (
-      <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">
-        {state.message}
-        <button onClick={fetchStatus} className="ml-3 underline text-red-500">重试</button>
-      </div>
-    )
-  }
+  if (state.phase === 'loading') return <LoadingRow />
+  if (state.phase === 'error')   return <ErrorRow message={state.message} onRetry={fetchStatus} />
 
   if (state.phase === 'connected') {
     return (
-      <ConnectedView
+      <GithubConnectedView
         clientId={clientId}
         status={state.status}
         onRefresh={fetchStatus}
@@ -86,12 +111,11 @@ export function CmsPanel({ clientId }: Props) {
     )
   }
 
-  // disconnected
   return (
-    <div className="space-y-6">
-      <IntroCard />
+    <div className="space-y-5">
+      <GithubIntroCard />
       {formOpen ? (
-        <ConnectForm
+        <GithubConnectForm
           clientId={clientId}
           onConnected={(s) => setState({ phase: 'connected', status: s })}
           onCancel={() => setFormOpen(false)}
@@ -108,9 +132,7 @@ export function CmsPanel({ clientId }: Props) {
   )
 }
 
-// ─── IntroCard ────────────────────────────────────────────────────────────────
-
-function IntroCard() {
+function GithubIntroCard() {
   return (
     <div className="rounded-xl bg-indigo-50 border border-indigo-200 p-5 space-y-2">
       <p className="text-sm font-semibold text-indigo-800">GitHub CMS 连接器</p>
@@ -127,15 +149,13 @@ function IntroCard() {
   )
 }
 
-// ─── ConnectForm ─────────────────────────────────────────────────────────────
-
-interface ConnectFormProps {
+interface GithubConnectFormProps {
   clientId:    string
   onConnected: (s: CmsConnectionStatus) => void
   onCancel:    () => void
 }
 
-function ConnectForm({ clientId, onConnected, onCancel }: ConnectFormProps) {
+function GithubConnectForm({ clientId, onConnected, onCancel }: GithubConnectFormProps) {
   const [repoOwner,    setRepoOwner]    = useState('')
   const [repoName,     setRepoName]     = useState('')
   const [branch,       setBranch]       = useState('main')
@@ -149,10 +169,7 @@ function ConnectForm({ clientId, onConnected, onCancel }: ConnectFormProps) {
     setError(null)
     setSaving(true)
 
-    const paths = contentPaths
-      .split('\n')
-      .map(p => p.trim())
-      .filter(Boolean)
+    const paths = contentPaths.split('\n').map(p => p.trim()).filter(Boolean)
 
     try {
       const res  = await fetch(`/api/clients/${clientId}/cms/connect`, {
@@ -181,11 +198,7 @@ function ConnectForm({ clientId, onConnected, onCancel }: ConnectFormProps) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner message={error} />}
 
       <div className="grid grid-cols-2 gap-4">
         <FormField label="仓库所有者 (GitHub Owner)" required>
@@ -248,38 +261,21 @@ function ConnectForm({ clientId, onConnected, onCancel }: ConnectFormProps) {
         </p>
       </FormField>
 
-      <div className="flex gap-3 pt-2">
-        <button
-          type="submit"
-          disabled={saving}
-          className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
-        >
-          {saving ? '保存中…' : '保存连接'}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="px-5 py-2.5 border border-gray-300 hover:bg-gray-50 text-sm font-medium rounded-xl transition-colors"
-        >
-          取消
-        </button>
-      </div>
+      <FormActions saving={saving} onCancel={onCancel} />
     </form>
   )
 }
 
-// ─── ConnectedView ────────────────────────────────────────────────────────────
-
-interface ConnectedViewProps {
+interface GithubConnectedViewProps {
   clientId:     string
   status:       CmsConnectionStatus
   onRefresh:    () => void
   onDisconnect: () => void
 }
 
-function ConnectedView({ clientId, status, onRefresh, onDisconnect }: ConnectedViewProps) {
-  const [testing,      setTesting]      = useState(false)
-  const [testResult,   setTestResult]   = useState<string | null>(null)
+function GithubConnectedView({ clientId, status, onRefresh, onDisconnect }: GithubConnectedViewProps) {
+  const [testing,       setTesting]       = useState(false)
+  const [testResult,    setTestResult]    = useState<string | null>(null)
   const [disconnecting, setDisconnecting] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
@@ -292,11 +288,7 @@ function ConnectedView({ clientId, status, onRefresh, onDisconnect }: ConnectedV
         headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''}` },
       })
       const json = await res.json() as { success: boolean; error?: string }
-      if (json.success) {
-        setTestResult('✅ 连接成功 — 仓库可访问')
-      } else {
-        setTestResult(`❌ ${json.error ?? '连接失败'}`)
-      }
+      setTestResult(json.success ? '✅ 连接成功 — 仓库可访问' : `❌ ${json.error ?? '连接失败'}`)
       onRefresh()
     } catch {
       setTestResult('❌ 网络错误，请重试')
@@ -319,86 +311,444 @@ function ConnectedView({ clientId, status, onRefresh, onDisconnect }: ConnectedV
     }
   }
 
-  const statusColor =
-    status.status === 'connected' ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
-    : status.status === 'error'   ? 'bg-red-100 text-red-700 border-red-200'
-    :                               'bg-gray-100 text-gray-600 border-gray-200'
-
   return (
     <div className="space-y-5">
-      {/* Status badge */}
-      <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold ${statusColor}`}>
-        <span>{status.status === 'connected' ? '●' : '○'}</span>
-        <span>
-          {status.status === 'connected' ? '已连接'
-           : status.status === 'error'   ? '连接错误'
-           :                               '未验证'}
-        </span>
-      </div>
+      <StatusBadge status={status.status} />
 
-      {/* Repo info */}
-      <div className="rounded-xl bg-gray-50 border border-gray-200 divide-y divide-gray-200">
-        {[
-          { label: '仓库', value: `${status.repoOwner}/${status.repoName}` },
-          { label: '分支', value: status.branch },
+      <InfoTable
+        rows={[
+          { label: '仓库',          value: `${status.repoOwner}/${status.repoName}` },
+          { label: '分支',          value: status.branch },
           { label: 'Token (末四位)', value: status.tokenHint ? `····${status.tokenHint}` : '—' },
-          { label: '最后测试', value: status.lastTestedAt
+          {
+            label: '最后测试',
+            value: status.lastTestedAt
               ? new Date(status.lastTestedAt).toLocaleString('zh-CN')
-              : '从未测试' },
-        ].map(({ label, value }) => (
-          <div key={label} className="flex items-center justify-between px-4 py-3 text-sm">
-            <span className="text-gray-500">{label}</span>
-            <span className="font-mono text-xs font-medium text-gray-900">{value}</span>
-          </div>
-        ))}
-      </div>
+              : '从未测试',
+          },
+        ]}
+      />
 
-      {/* Last error */}
-      {status.lastError && (
-        <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-xs text-red-700">
-          <span className="font-semibold">错误：</span>{status.lastError}
-        </div>
-      )}
+      {status.lastError && <LastErrorRow message={status.lastError} />}
+      {testResult       && <TestResultRow message={testResult} />}
 
-      {/* Test result */}
-      {testResult && (
-        <div className="rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">
-          {testResult}
-        </div>
-      )}
-
-      {/* Actions */}
-      <div className="flex gap-3">
-        <button
-          onClick={handleTest}
-          disabled={testing}
-          className="flex-1 py-2.5 border border-indigo-600 text-indigo-600 hover:bg-indigo-50 disabled:opacity-50 text-sm font-semibold rounded-xl transition-colors"
-        >
-          {testing ? '测试中…' : '🔄 测试连接'}
-        </button>
-
-        {!confirmDelete ? (
-          <button
-            onClick={() => setConfirmDelete(true)}
-            className="px-5 py-2.5 border border-red-300 text-red-600 hover:bg-red-50 text-sm font-medium rounded-xl transition-colors"
-          >
-            断开
-          </button>
-        ) : (
-          <button
-            onClick={handleDisconnect}
-            disabled={disconnecting}
-            className="px-5 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
-          >
-            {disconnecting ? '断开中…' : '确认断开'}
-          </button>
-        )}
-      </div>
+      <ConnectionActions
+        testing={testing}
+        confirmDelete={confirmDelete}
+        disconnecting={disconnecting}
+        onTest={handleTest}
+        onConfirmDeleteRequest={() => setConfirmDelete(true)}
+        onConfirmDelete={handleDisconnect}
+      />
     </div>
   )
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// WordPress provider (Phase 14.A.3 — new)
+// ════════════════════════════════════════════════════════════════════════════
+
+type WpPanelState =
+  | { phase: 'loading' }
+  | { phase: 'error'; message: string }
+  | { phase: 'disconnected' }
+  | { phase: 'connected'; status: WordpressConnectionStatus }
+
+function WordpressProviderPanel({ clientId }: { clientId: string }) {
+  const [state, setState]       = useState<WpPanelState>({ phase: 'loading' })
+  const [formOpen, setFormOpen] = useState(false)
+
+  const fetchStatus = useCallback(async () => {
+    setState({ phase: 'loading' })
+    try {
+      const res  = await fetch(`/api/clients/${clientId}/cms/wordpress`, {
+        headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''}` },
+      })
+      const json = await res.json() as { success: boolean; data: WordpressConnectionStatus | null; error?: string }
+      if (!json.success) throw new Error(json.error ?? 'Failed to load status')
+      setState(json.data
+        ? { phase: 'connected', status: json.data }
+        : { phase: 'disconnected' })
+    } catch (err) {
+      setState({ phase: 'error', message: err instanceof Error ? err.message : 'Load failed' })
+    }
+  }, [clientId])
+
+  useEffect(() => { fetchStatus() }, [fetchStatus])
+
+  if (state.phase === 'loading') return <LoadingRow />
+  if (state.phase === 'error')   return <ErrorRow message={state.message} onRetry={fetchStatus} />
+
+  if (state.phase === 'connected') {
+    return (
+      <WordpressConnectedView
+        clientId={clientId}
+        status={state.status}
+        onDisconnect={() => setState({ phase: 'disconnected' })}
+      />
+    )
+  }
+
+  return (
+    <div className="space-y-5">
+      <WordpressIntroCard />
+      {formOpen ? (
+        <WordpressConnectForm
+          clientId={clientId}
+          onConnected={(s) => setState({ phase: 'connected', status: s })}
+          onCancel={() => setFormOpen(false)}
+        />
+      ) : (
+        <button
+          onClick={() => setFormOpen(true)}
+          className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl transition-colors"
+        >
+          🔗 连接 WordPress 站点
+        </button>
+      )}
+    </div>
+  )
+}
+
+function WordpressIntroCard() {
+  return (
+    <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-5 space-y-2">
+      <p className="text-sm font-semibold text-emerald-800">WordPress 连接器</p>
+      <p className="text-sm text-emerald-700 leading-relaxed">
+        连接客户 WordPress 站点后，Magic Engine 可以将博客 / 落地页以草稿（Draft）形式
+        推送到站点。FDE 在 WP 后台确认预览后再发布上线，全程留痕、可审计、可回滚。
+      </p>
+      <ul className="text-xs text-emerald-600 space-y-1 mt-2">
+        <li>✓ 使用 WP 5.6+ 原生 Application Password，无需安装插件</li>
+        <li>✓ 推荐为 Magic Engine 创建独立用户（最小权限）</li>
+        <li>✓ Application Password 加密存储，从不明文出现在日志中</li>
+        <li>✓ 默认 Draft-first，不会自动发布</li>
+      </ul>
+    </div>
+  )
+}
+
+interface WordpressConnectFormProps {
+  clientId:    string
+  onConnected: (s: WordpressConnectionStatus) => void
+  onCancel:    () => void
+}
+
+function WordpressConnectForm({ clientId, onConnected, onCancel }: WordpressConnectFormProps) {
+  const [siteUrl,     setSiteUrl]     = useState('')
+  const [username,    setUsername]    = useState('')
+  const [appPassword, setAppPassword] = useState('')
+  const [saving,      setSaving]      = useState(false)
+  const [error,       setError]       = useState<string | null>(null)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    setSaving(true)
+
+    try {
+      const res  = await fetch(`/api/clients/${clientId}/cms/wordpress`, {
+        method:  'POST',
+        headers: {
+          'Content-Type':  'application/json',
+          Authorization:   `Bearer ${process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''}`,
+        },
+        body: JSON.stringify({
+          site_url:     siteUrl.trim(),
+          username:     username.trim(),
+          app_password: appPassword.trim(),
+        }),
+      })
+      const json = await res.json() as { success: boolean; data?: WordpressConnectionStatus; error?: string }
+      if (!json.success) throw new Error(json.error ?? 'Save failed')
+      onConnected(json.data!)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {error && <ErrorBanner message={error} />}
+
+      <FormField label="站点 URL (HTTPS only)" required>
+        <input
+          type="url"
+          value={siteUrl}
+          onChange={e => setSiteUrl(e.target.value)}
+          placeholder="https://example.com"
+          className={INPUT_CLASS}
+          required
+        />
+        <p className="mt-1 text-xs text-gray-400">
+          必须是 HTTPS + 公网域名。请勿带路径或末尾斜杠。
+        </p>
+      </FormField>
+
+      <FormField label="WordPress 用户名" required>
+        <input
+          value={username}
+          onChange={e => setUsername(e.target.value)}
+          placeholder="magic-engine"
+          className={INPUT_CLASS}
+          required
+          autoComplete="username"
+        />
+        <p className="mt-1 text-xs text-gray-400">
+          建议为 Magic Engine 单独创建一个低权限用户（仅 publish_posts），不要复用 admin 账号。
+        </p>
+      </FormField>
+
+      <FormField label="Application Password" required>
+        <input
+          type="password"
+          value={appPassword}
+          onChange={e => setAppPassword(e.target.value)}
+          placeholder="xxxx xxxx xxxx xxxx xxxx xxxx"
+          className={INPUT_CLASS + ' font-mono'}
+          required
+          minLength={10}
+          autoComplete="new-password"
+        />
+        <p className="mt-1 text-xs text-gray-400">
+          在 WP 后台「用户 → 个人资料 → Application Passwords」中生成。
+          加密存储，不会明文出现在日志或界面中。
+        </p>
+      </FormField>
+
+      <FormActions saving={saving} onCancel={onCancel} />
+    </form>
+  )
+}
+
+interface WordpressConnectedViewProps {
+  clientId:     string
+  status:       WordpressConnectionStatus
+  onDisconnect: () => void
+}
+
+function WordpressConnectedView({ clientId, status, onDisconnect }: WordpressConnectedViewProps) {
+  const [disconnecting, setDisconnecting] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  const handleDisconnect = async () => {
+    setDisconnecting(true)
+    try {
+      await fetch(`/api/clients/${clientId}/cms/wordpress`, {
+        method:  'DELETE',
+        headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''}` },
+      })
+      onDisconnect()
+    } catch {
+      setDisconnecting(false)
+      setConfirmDelete(false)
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <StatusBadge status={status.status} />
+
+      <InfoTable
+        rows={[
+          { label: '站点 URL',                    value: status.siteUrl },
+          { label: '用户名',                       value: status.username },
+          { label: 'Application Password (末四位)', value: status.tokenHint ? `····${status.tokenHint}` : '—' },
+          {
+            label: '最后测试',
+            value: status.lastTestedAt
+              ? new Date(status.lastTestedAt).toLocaleString('zh-CN')
+              : '尚未测试（P14.A.5 上线后将启用）',
+          },
+        ]}
+      />
+
+      {status.lastError && <LastErrorRow message={status.lastError} />}
+
+      <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-800">
+        ⚠️ 连接已保存，但「测试连接」与「推送到 WordPress」功能将在 P14.A.5 上线。
+      </div>
+
+      <ConnectionActions
+        testing={false}
+        testDisabled
+        confirmDelete={confirmDelete}
+        disconnecting={disconnecting}
+        onTest={() => { /* disabled until A.5 */ }}
+        onConfirmDeleteRequest={() => setConfirmDelete(true)}
+        onConfirmDelete={handleDisconnect}
+      />
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Shopify (P14.A.4 — placeholder)
+// ════════════════════════════════════════════════════════════════════════════
+
+function ShopifyComingSoonPanel() {
+  return (
+    <div className="rounded-xl bg-gray-50 border border-gray-200 p-6 text-center space-y-2">
+      <p className="text-3xl">🛍️</p>
+      <p className="text-sm font-semibold text-gray-800">Shopify 连接器</p>
+      <p className="text-xs text-gray-500 leading-relaxed max-w-md mx-auto">
+        即将上线（P14.A.4）。届时可通过 Shopify Admin API 推送博客文章和页面，
+        默认 Draft-first，FDE 在 Shopify 后台确认后发布。
+      </p>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Shared sub-components
+// ════════════════════════════════════════════════════════════════════════════
+
+function LoadingRow() {
+  return (
+    <div className="flex items-center justify-center py-16 gap-2 text-gray-400">
+      <span className="animate-spin text-lg">⟳</span>
+      <span className="text-sm">加载中…</span>
+    </div>
+  )
+}
+
+function ErrorRow({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">
+      {message}
+      <button onClick={onRetry} className="ml-3 underline text-red-500">重试</button>
+    </div>
+  )
+}
+
+function ErrorBanner({ message }: { message: string }) {
+  return (
+    <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+      {message}
+    </div>
+  )
+}
+
+function StatusBadge({ status }: { status: 'connected' | 'disconnected' | 'error' }) {
+  const style =
+    status === 'connected' ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+    : status === 'error'   ? 'bg-red-100 text-red-700 border-red-200'
+    :                        'bg-gray-100 text-gray-600 border-gray-200'
+
+  const label =
+    status === 'connected' ? '已连接'
+    : status === 'error'   ? '连接错误'
+    :                        '未验证'
+
+  return (
+    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold ${style}`}>
+      <span>{status === 'connected' ? '●' : '○'}</span>
+      <span>{label}</span>
+    </div>
+  )
+}
+
+function InfoTable({ rows }: { rows: Array<{ label: string; value: React.ReactNode }> }) {
+  return (
+    <div className="rounded-xl bg-gray-50 border border-gray-200 divide-y divide-gray-200">
+      {rows.map(({ label, value }) => (
+        <div key={label} className="flex items-center justify-between px-4 py-3 text-sm gap-4">
+          <span className="text-gray-500 shrink-0">{label}</span>
+          <span className="font-mono text-xs font-medium text-gray-900 text-right break-all">{value}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function LastErrorRow({ message }: { message: string }) {
+  return (
+    <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-xs text-red-700">
+      <span className="font-semibold">错误：</span>{message}
+    </div>
+  )
+}
+
+function TestResultRow({ message }: { message: string }) {
+  return (
+    <div className="rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">
+      {message}
+    </div>
+  )
+}
+
+interface ConnectionActionsProps {
+  testing:                boolean
+  testDisabled?:          boolean
+  confirmDelete:          boolean
+  disconnecting:          boolean
+  onTest:                 () => void
+  onConfirmDeleteRequest: () => void
+  onConfirmDelete:        () => void
+}
+
+function ConnectionActions({
+  testing,
+  testDisabled,
+  confirmDelete,
+  disconnecting,
+  onTest,
+  onConfirmDeleteRequest,
+  onConfirmDelete,
+}: ConnectionActionsProps) {
+  return (
+    <div className="flex gap-3">
+      <button
+        onClick={onTest}
+        disabled={testing || testDisabled}
+        className="flex-1 py-2.5 border border-indigo-600 text-indigo-600 hover:bg-indigo-50 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-semibold rounded-xl transition-colors"
+        title={testDisabled ? '将随 P14.A.5 启用' : undefined}
+      >
+        {testing ? '测试中…' : '🔄 测试连接'}
+      </button>
+
+      {!confirmDelete ? (
+        <button
+          onClick={onConfirmDeleteRequest}
+          className="px-5 py-2.5 border border-red-300 text-red-600 hover:bg-red-50 text-sm font-medium rounded-xl transition-colors"
+        >
+          断开
+        </button>
+      ) : (
+        <button
+          onClick={onConfirmDelete}
+          disabled={disconnecting}
+          className="px-5 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
+        >
+          {disconnecting ? '断开中…' : '确认断开'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+function FormActions({ saving, onCancel }: { saving: boolean; onCancel: () => void }) {
+  return (
+    <div className="flex gap-3 pt-2">
+      <button
+        type="submit"
+        disabled={saving}
+        className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
+      >
+        {saving ? '保存中…' : '保存连接'}
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="px-5 py-2.5 border border-gray-300 hover:bg-gray-50 text-sm font-medium rounded-xl transition-colors"
+      >
+        取消
+      </button>
+    </div>
+  )
+}
 
 function FormField({
   label,

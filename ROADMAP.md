@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-24 17:41 NZST · 当前阶段：**Phase 12.I 全部完成 ✅（P12.I.1–I.10 + P12.J.1 + P12.J.2 + P12.K.1 + P12.I.fix）；待 PM 决策下一 Phase**。
+> 最后更新：2026-05-24 18:03 NZST · 当前阶段：**Phase 12.I 全部完成 ✅（P12.I.1–I.10 + P12.J.1 + P12.J.2 + P12.K.1 + P12.I.fix）；待 PM 决策下一 Phase**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -1751,7 +1751,7 @@ website_publish_jobs
 |----|------|------|
 | ✅ **P14.A.1** | ~~新增 `client_website_connections` 表~~ → **扩展现有 `cms_connections` 表加 WP 形态字段**（复用已有 AES-256-GCM crypto） | — |
 | ✅ **P14.A.2** | 新增 `website_publish_jobs` 表（FK → `cms_connections`）+ `(connection_id, idempotency_key)` 幂等约束 + 状态机 `draft → published\|failed; published → rolled_back` + `src/lib/website-publish/vocabulary.ts`（含 `canTransition` / `payloadHash` / `buildIdempotencyKey`，9 单测全绿） | P14.A.1 |
-| **P14.A.3** | 连接管理 UI（客户设置页 → 连接平台入口） | P14.A.1 |
+| ✅ **P14.A.3** | 连接管理 UI — 客户设置抽屉「🔗 网站连接」标签升级为多供应商 Tab（GitHub 保留 / WordPress 全功能上线 / Shopify「即将推出」占位）；新增 `src/lib/cms/url-guard.ts`（HTTPS + 公网域名 + 私网 IP / IPv6 / IP 字面量 / 单标签主机一律拒绝，39 单测全绿）；`connection-store.ts` 扩展 `upsertWordpressConnection` / `getWordpressConnectionStatus` / `getWordpressConnection`（含明文 AppPassword 解密，server-only）/ `deleteWordpressConnection`；新增 `/api/clients/[id]/cms/wordpress` GET/POST/DELETE（INTERNAL_API_KEY 鉴权、save 时再校验 site_url、用户输入错误透传到 UI、DB 错误打日志吞掉）；Application Password 走现有 AES-256-GCM crypto 加密入库，UI 仅显示末四位。**测试 / 推送功能留 P14.A.5**，已在 WP 已连接面板加 amber 提示「将在 P14.A.5 启用」 | P14.A.1 |
 | **P14.A.4** | Shopify connector（`write_content` scope，draft-first，blog article + page） | P14.A.2 |
 | **P14.A.5** | WordPress connector（专用用户 + Application Password，最小权限 role） | P14.A.2 |
 | **P14.A.6** | Blog Studio 新增"发布到网站"按钮（Draft → Preview → Publish 三步流程） | P14.A.4/5 |
@@ -2130,6 +2130,7 @@ AU / NZ（当前）          新市场（未来）
 
 - **P14.A.1** — 扩展 `cms_connections` 表加 WP 形态（`site_url`/`username`，per-provider CHECK），新增 `CMS_PROVIDER.WORDPRESS` + `WordpressConnectionStatus` 类型；复用已有 AES-256-GCM crypto（`CMS_TOKEN_ENCRYPTION_KEY`）零新代码；migration `20260531000001_cms_connections_wordpress.sql`
 - **P14.A.2** — `website_publish_jobs` 表（FK 到 `cms_connections`），4 态状态机 CHECK（draft/published/failed/rolled_back）、`(connection_id, idempotency_key)` UNIQUE 防重复推送、SHA-256 `payload_hash`、`content_snapshot` JSON 快照；配套 `src/lib/website-publish/vocabulary.ts` 提供 `canTransition` / `payloadHash`（canonical JSON，键序无关）/ `buildIdempotencyKey`，9 个单测全绿；migration `20260531000002_website_publish_jobs.sql`
+- **P14.A.3** — 客户设置抽屉「🔗 网站连接」标签升级多供应商 Tab（GitHub 现状保留 / WordPress 全功能上线 / Shopify「即将推出」占位）；新 `src/lib/cms/url-guard.ts` HTTPS+公网域名校验（拒绝 IP 字面量 / 私网 / IPv6 / `.local`/`.internal`/单标签主机），39 单测全绿；`connection-store.ts` 加 wordpress 系列函数（upsert/get-status/get（含解密 server-only）/delete）；新 `/api/clients/[id]/cms/wordpress` GET/POST/DELETE（INTERNAL_API_KEY 鉴权、site_url 保存时再校验、用户输入错误透传 UI、DB 错误吞掉）；Application Password 走现有 AES-256-GCM crypto，仅显示末四位。Test/Publish 留 P14.A.5（UI 已加 amber 提示）
 
 ### 2026-05-25（Phase 13.A — Prospect 注册流程）
 
