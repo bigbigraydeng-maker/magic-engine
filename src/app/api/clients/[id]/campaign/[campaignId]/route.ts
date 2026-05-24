@@ -21,6 +21,26 @@ export async function GET(_req: NextRequest, { params }: RouteContext) {
   return NextResponse.json({ success: true, campaign: data })
 }
 
+// DELETE /api/clients/[id]/campaign/[campaignId]
+export async function DELETE(_req: NextRequest, { params }: RouteContext) {
+  const { id: clientId, campaignId } = params
+
+  try {
+    const { error } = await supabaseAdmin
+      .from('campaign_briefs')
+      .delete()
+      .eq('id', campaignId)
+      .eq('client_id', clientId)
+
+    if (error) throw new Error(error.message)
+
+    return NextResponse.json({ success: true })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error'
+    return NextResponse.json({ success: false, error: message }, { status: 500 })
+  }
+}
+
 // PATCH /api/clients/[id]/campaign/[campaignId]
 export async function PATCH(req: NextRequest, { params }: RouteContext) {
   const { id: clientId, campaignId } = params

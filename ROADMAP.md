@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-24 22:32 NZST · 当前阶段：**Phase 12.I 全部完成 ✅（P12.I.1–I.10 + P12.J.1 + P12.J.2 + P12.K.1 + P12.I.fix）；待 PM 决策下一 Phase**。
+> 最后更新：2026-05-25 05:46 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -1749,14 +1749,14 @@ website_publish_jobs
 
 | ID | 任务 | 依赖 |
 |----|------|------|
-| **P14.A.1** | 新增 `client_website_connections` 表 + 凭证加密/解密工具 | — |
-| **P14.A.2** | 新增 `website_publish_jobs` 表 + 幂等 key + 状态机 | P14.A.1 |
-| **P14.A.3** | 连接管理 UI（客户设置页 → 连接平台入口） | P14.A.1 |
-| **P14.A.4** | Shopify connector（`write_content` scope，draft-first，blog article + page） | P14.A.2 |
-| **P14.A.5** | WordPress connector（专用用户 + Application Password，最小权限 role） | P14.A.2 |
-| **P14.A.6** | Blog Studio 新增"发布到网站"按钮（Draft → Preview → Publish 三步流程） | P14.A.4/5 |
-| **P14.A.7** | HTML sanitize + payload hash + audit snapshot（防 XSS/注入） | P14.A.4/5 |
-| **P14.A.8** | 发布成功回写 `flywheel_actions` / `flywheel_outcomes` | P14.A.6 |
+| ✅ **P14.A.1** | ~~新增 `client_website_connections` 表~~ → **扩展现有 `cms_connections` 表加 WP 形态字段**（复用已有 AES-256-GCM crypto） | — |
+| ✅ **P14.A.2** | 新增 `website_publish_jobs` 表（FK → `cms_connections`）+ `(connection_id, idempotency_key)` 幂等约束 + 状态机 `draft → published\|failed; published → rolled_back` + `src/lib/website-publish/vocabulary.ts`（含 `canTransition` / `payloadHash` / `buildIdempotencyKey`，9 单测全绿） | P14.A.1 |
+| ✅ **P14.A.3** | 连接管理 UI — 客户设置抽屉「🔗 网站连接」标签升级为多供应商 Tab（GitHub 保留 / WordPress 全功能上线 / Shopify「即将推出」占位）；新增 `src/lib/cms/url-guard.ts`（HTTPS + 公网域名 + 私网 IP / IPv6 / IP 字面量 / 单标签主机一律拒绝，39 单测全绿）；`connection-store.ts` 扩展 `upsertWordpressConnection` / `getWordpressConnectionStatus` / `getWordpressConnection`（含明文 AppPassword 解密，server-only）/ `deleteWordpressConnection`；新增 `/api/clients/[id]/cms/wordpress` GET/POST/DELETE（INTERNAL_API_KEY 鉴权、save 时再校验 site_url、用户输入错误透传到 UI、DB 错误打日志吞掉）；Application Password 走现有 AES-256-GCM crypto 加密入库，UI 仅显示末四位。**测试 / 推送功能留 P14.A.5**，已在 WP 已连接面板加 amber 提示「将在 P14.A.5 启用」 | P14.A.1 |
+| ✅ **P14.A.4** | Shopify connector（`write_content` scope，draft-first，blog article + page）— `shopify-guard`（SSRF 防护 17 单测）+ `shopify-client`（Admin REST 2024-01）+ `html-sanitizer`（MVP strip）+ vocab/store 扩展 + `/cms/shopify` CRUD + `/cms/publish-shopify`（两步 draft→publish，幂等写 website_publish_jobs） | P14.A.2 |
+| ✅ **P14.A.5** | WordPress connector（专用用户 + Application Password，最小权限 role）— `wordpress-client`（DNS SSRF guard + testWordpressConnection + draft-first post/page + publish）+ `markWordpressConnectionTested`（connection-store）+ `/cms/wordpress` 升级（POST 加凭据测试 + 状态回写）+ `/cms/publish-wordpress`（两步 draft→publish，幂等，租户隔离） | P14.A.2 |
+| ✅ **P14.A.6** | Blog Studio 新增"发布到网站"按钮（Draft → Preview → Publish 三步流程）— 新增 `PublishToWebsitePanel` 组件 + `/cms/providers` 聚合状态路由；自动检测已连接平台，WordPress/Shopify 三步流程，GitHub 单步 PR | P14.A.4/5 |
+| ✅ **P14.A.7** | HTML sanitize 升级为 allowlist 模式（两遍扫描：Pass1 危险元素块删除 + Pass2 标签/属性白名单重写）；payload hash 已在 P14.A.4/5 实现；audit snapshot 写入 `website_publish_jobs.content_snapshot` | P14.A.4/5 |
+| ✅ **P14.A.8** | 发布成功回写 `flywheel_actions`（flywheel=seo, action_type=cms_content_insert, execution_mode=in_house）— WordPress + Shopify 两个 publish 路由均已加；GitHub 路由早于 P14.A 已有 | P14.A.6 |
 
 ### Phase 14.A 验收关卡
 
@@ -2126,6 +2126,12 @@ AU / NZ（当前）          新市场（未来）
 - **架构确认：四 Agent 链 + 诸葛亮命名** — C Agent 正式命名为「诸葛亮」（策略调度引擎）；确认定位：输入张骞证据+华佗诊断→输出 priority_actions→flywheel_actions，不直接执行；AI 抽屉为 UX 层（正交），首页驾驶舱与鲁班看板为两个缩放层级（不冲突）；登记为 Phase 12.G（接口规范已确认）
 - **P8.3.2 代码收尾** — login try-catch 修复；middleware+whitelist 测试已在代码库；**剩余 PM 操作**：Render 后台填 `ADMIN_EMAILS=你的邮箱` + Supabase Auth Redirect URLs 加 `/auth/callback`
 
+### 2026-05-31（Phase 14.A — Website Connector，插队 13.A）
+
+- **P14.A.1** — 扩展 `cms_connections` 表加 WP 形态（`site_url`/`username`，per-provider CHECK），新增 `CMS_PROVIDER.WORDPRESS` + `WordpressConnectionStatus` 类型；复用已有 AES-256-GCM crypto（`CMS_TOKEN_ENCRYPTION_KEY`）零新代码；migration `20260531000001_cms_connections_wordpress.sql`
+- **P14.A.2** — `website_publish_jobs` 表（FK 到 `cms_connections`），4 态状态机 CHECK（draft/published/failed/rolled_back）、`(connection_id, idempotency_key)` UNIQUE 防重复推送、SHA-256 `payload_hash`、`content_snapshot` JSON 快照；配套 `src/lib/website-publish/vocabulary.ts` 提供 `canTransition` / `payloadHash`（canonical JSON，键序无关）/ `buildIdempotencyKey`，9 个单测全绿；migration `20260531000002_website_publish_jobs.sql`
+- **P14.A.3** — 客户设置抽屉「🔗 网站连接」标签升级多供应商 Tab（GitHub 现状保留 / WordPress 全功能上线 / Shopify「即将推出」占位）；新 `src/lib/cms/url-guard.ts` HTTPS+公网域名校验（拒绝 IP 字面量 / 私网 / IPv6 / `.local`/`.internal`/单标签主机），39 单测全绿；`connection-store.ts` 加 wordpress 系列函数（upsert/get-status/get（含解密 server-only）/delete）；新 `/api/clients/[id]/cms/wordpress` GET/POST/DELETE（INTERNAL_API_KEY 鉴权、site_url 保存时再校验、用户输入错误透传 UI、DB 错误吞掉）；Application Password 走现有 AES-256-GCM crypto，仅显示末四位。Test/Publish 留 P14.A.5（UI 已加 amber 提示）
+
 ### 2026-05-25（Phase 13.A — Prospect 注册流程）
 
 - **P13.A.1（去 Apify）** — `agent.ts` 移除 `scrapeInstagramProfile`/`scrapeTiktokProfile` import + `FETCH_SOCIAL_METRICS_TOOL` + `handleFetchSocialMetrics()`；从 tools 数组和 switch case 中删除；社媒指标改由 web_search + fetch_url（Jina）原生发现；零外部 API 调用
@@ -2134,6 +2140,11 @@ AU / NZ（当前）          新市场（未来）
 - **P13.A.4（prospect 报告看板）** — 新建 `/prospect/page.tsx`：轮询 `/api/prospect/report`（按 email 查最新 scan）→ 扫描中显示 LoadingView + 实时日志流 → 完成显示 Discovery Report（含健康评分 / 竞品 / 关键词 / 社媒评价）→ 处方区域显示 `PrescriptionGate`（Talk to Us CTA）
 - **P13.A.5（prospect report API）** — 新建 `GET /api/prospect/report`：Supabase session 鉴权 → 按 user.email 查 public_scan_jobs 最新行 → 返回 status + progress_log + result
 - **P13.A.6（middleware + auth callback）** — middleware 加 `/prospect` 路由块（仅验证 Supabase auth，无角色要求）；matcher 加 `/prospect/:path*`；auth/callback 加 prospect 检测（有 public_scan_jobs 记录 + 无 portal/dashboard 权限 → 重定向 /prospect）；build ✅
+- **P14.A.4（Shopify connector）** — migration 扩展 provider shape 约束加 shopify；shopify-guard（SSRF 防护 17 单测全绿）；shopify-client（Admin REST 2024-01：testConnection / listBlogs / getOrCreateDefaultBlog / createArticleDraft / publishArticle / createPageDraft / publishPage）；html-sanitizer MVP；vocabulary 加 SHOPIFY + ShopifyConnectionStatus；connection-store 加 Shopify CRUD；/cms/shopify CRUD + 保存即测 token；/cms/publish-shopify 两步 draft→publish，幂等写 website_publish_jobs；TS 零错误，17 tests ✅
+- **P14.A.5（WordPress connector）** — `wordpress-client.ts`（dns.promises.lookup SSRF guard；testWordpressConnection 验证 publish role；createWordpressPostDraft/Page draft-first；publishWordpressPost/Page status='publish'）；connection-store 加 `markWordpressConnectionTested`；/cms/wordpress 升级（保存即测）；/cms/publish-wordpress（两步 draft→publish，幂等，租户隔离，sanitizeHtml）；TS 新文件零错误
+- **P14.A.6（Blog Studio 三步发布 UI）** — 新 `GET /api/clients/[id]/cms/providers` 聚合三平台状态；新 `PublishToWebsitePanel` 组件（WordPress/Shopify Draft→Preview→Publish 三步，GitHub 单步 PR）；blog/[postId]/page.tsx 替换旧 GitHub-only 按钮
+- **P14.A.7（html-sanitizer allowlist 升级）** — 三遍扫描：Pass1 危险块删除（script/style/iframe/form/svg/math/…）+ Pass2 标签/属性白名单重写（仅允许 ~40 安全标签，href/src 限 https?，rel=noopener 强制注入）+ Pass3 未知关闭标签清除；零外部依赖
+- **P14.A.8（飞轮回写）** — WordPress + Shopify publish 路由在成功 publish 后 insert `flywheel_actions`（flywheel=seo, action_type=cms_content_insert, execution_mode=in_house）；失败仅打日志不阻断响应
 
 ### 2026-05-24
 

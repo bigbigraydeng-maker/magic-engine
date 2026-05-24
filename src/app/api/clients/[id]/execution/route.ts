@@ -327,6 +327,8 @@ function buildAutonomousItem(
     created_at: action.created_at,
     updated_at: action.created_at,
     content_post_id: null,
+    source: 'diagnostic',           // 自主行动用 sentinel prescription_id，归类为 diagnostic 来源
+    marketing_plan_id: null,
     logs: [],
     outcome,
     linked_post: null,

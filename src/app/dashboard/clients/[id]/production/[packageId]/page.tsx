@@ -216,6 +216,37 @@ function VisualAssetCard({ asset }: { asset: VisualAsset }) {
   )
 }
 
+const QUICK_ACTIONS: Record<DiagnosticDimension, { label: string; desc: string; path: string }> = {
+  social:        { label: '去社媒工作台', desc: '在 Content Hub 生成社媒帖子，完成后归入此包', path: '/pages' },
+  seo:           { label: '去博客工作台', desc: '在 Blog Studio 生成 SEO 博客，完成后归入此包', path: '/blog' },
+  ai_visibility: { label: '去博客工作台', desc: '在 Blog Studio 生成 GEO 博客，完成后归入此包', path: '/blog' },
+  ads:           { label: '去广告看板',   desc: '同步广告快照或新建广告系列，完成后归入此包', path: '/ads' },
+  competitor:    { label: '去竞品分析',   desc: '在 SEO Intelligence 拉取竞品关键词数据',      path: '/seo-intelligence' },
+  reputation:    { label: '去口碑评估',   desc: '执行口碑评估，完成后归入此包',               path: '/reviews' },
+}
+
+function QuickActions({
+  dimension, clientId, packageId,
+}: { dimension: DiagnosticDimension; clientId: string; packageId: string }) {
+  const action = QUICK_ACTIONS[dimension]
+  if (!action) return null
+  const href = `/dashboard/clients/${clientId}${action.path}?pkg=${packageId}`
+  return (
+    <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center gap-4">
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-indigo-900">暂无产出物 — 准备好开始生成了吗？</p>
+        <p className="text-xs text-indigo-600 mt-0.5">{action.desc}</p>
+      </div>
+      <Link
+        href={href}
+        className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+      >
+        {action.label} →
+      </Link>
+    </div>
+  )
+}
+
 function ItemCard({ item, clientId }: { item: ProductionItem; clientId: string }) {
   const statusMeta  = ITEM_STATUS_META[item.status] ?? { label: item.status, cls: 'bg-gray-100 text-gray-600' }
   const typeLabel   = CONTENT_TYPE_LABEL[item.content_type]
@@ -428,10 +459,7 @@ export default function ProductionPackageDetailPage() {
             </h2>
           </div>
           {items.length === 0 ? (
-            <div className="bg-white rounded-xl border border-dashed border-gray-200 p-8 text-center text-gray-400">
-              <p className="text-sm">暂无产出物</p>
-              <p className="text-xs mt-1">通过社媒、博客或广告生成路由并指定此包 ID 后，产出物将自动出现在这里。</p>
-            </div>
+            <QuickActions dimension={pkg.dimension} clientId={clientId} packageId={packageId} />
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
               {items.map(item => (

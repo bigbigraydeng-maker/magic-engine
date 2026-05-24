@@ -307,7 +307,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   })
 
   // Determine origin for magic link redirect
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '')
+  const appUrl = (process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL)?.replace(/\/$/, '')
     ?? `${req.headers.get('x-forwarded-proto') ?? 'https'}://${req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? 'localhost:3001'}`
 
   const redirectTo = `${appUrl}/auth/callback?next=/prospect`

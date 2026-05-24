@@ -221,6 +221,7 @@ function CampaignCard({
   const [expanded, setExpanded] = useState(false)
   const [enriching, setEnriching] = useState(false)
   const [archiving, setArchiving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [uploadingFile, setUploadingFile] = useState(false)
   const [urlInput, setUrlInput] = useState('')
   const [msg, setMsg] = useState('')
@@ -434,6 +435,19 @@ function CampaignCard({
       if (json.success) onArchived(campaign.id)
     } finally {
       setArchiving(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!confirm(`永久删除活动「${campaign.title}」？此操作不可撤销，相关内容草稿不受影响。`)) return
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/campaign/${campaign.id}`, { method: 'DELETE' })
+      const json = await res.json()
+      if (json.success) onArchived(campaign.id) // reuse remove-from-list callback
+      else setMsg(`✗ 删除失败: ${json.error}`)
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -746,14 +760,21 @@ function CampaignCard({
             </p>
           )}
 
-          {/* Archive */}
-          <div className="flex justify-end pt-1 border-t border-gray-50">
+          {/* Archive / Delete */}
+          <div className="flex justify-end items-center gap-4 pt-1 border-t border-gray-50">
             <button
               onClick={handleArchive}
-              disabled={archiving}
-              className="text-xs text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
+              disabled={archiving || deleting}
+              className="text-xs text-gray-400 hover:text-amber-600 transition-colors disabled:opacity-50"
             >
               {archiving ? '归档中…' : '归档活动'}
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={archiving || deleting}
+              className="text-xs text-red-400 hover:text-red-600 font-medium transition-colors disabled:opacity-50"
+            >
+              {deleting ? '删除中…' : '🗑 永久删除'}
             </button>
           </div>
         </div>
