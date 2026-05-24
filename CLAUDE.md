@@ -215,22 +215,24 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-24 17:16 NZST （**Phase 13.A Prospect 注册流程全部完成 ✅** — P13.A.1–A.6，build 通过）
+> 最后更新：2026-05-24 17:27 NZST （**Phase 14.A 启动，插队 13.A**；P14.A.1 ✅ 完成）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **PM 验证** | 测试 /discover 表单 → 收邮件 → 点 magic link → 看到 /prospect 报告页 | ⚠️ PM 操作 |
-| **PM 操作** | Supabase Auth → Redirect URLs 加 `https://your-domain.com/auth/callback` | ⚠️ PM 操作 |
+| **P14.A.2** | 新增 `website_publish_jobs` 表 + 幂等 key + 状态机 | 🔥 下一 commit |
+| **P14.A.3** | 连接管理 UI（客户设置页 → 连接 WordPress 入口） | 紧随 A.2 |
+| **P14.A.5** | WordPress connector 本体（REST API + Application Password 鉴权） | 依赖 A.2 |
+| **P14.A.6** | Blog Studio 新增「发布到 WordPress」按钮 | 依赖 A.5 |
+| **PM 操作** | Supabase 跑 migration `20260531000001_cms_connections_wordpress.sql` | ⚠️ PM 操作 |
+| **PM 待办（旧）** | 测试 /discover 表单 → magic link → /prospect 报告页（13.A 验收） | ⚠️ 13.A 验收 |
+| **PM 待办（旧）** | Render → `ADMIN_EMAILS=你的邮箱`；Supabase 跑 `20260523000003_campaign_visual_direction.sql` | ⚠️ PM 操作 |
 
-**状态校准（2026-05-25）**：
-- ✅ **Phase 13.A P13.A.1–A.6**：Prospect 注册流程全部完成（去 Apify + Magic Link + /prospect 看板 + 处方门控）
-- ✅ P12.Q / P12.G / P12.I / P12.J / P12.K：全部完成（见前次状态）
-- ⚠️ **PM 待操作（旧）**：Render → `ADMIN_EMAILS=你的邮箱`（若还未做）
-- ⚠️ **PM 待操作（旧）**：Supabase 跑 migration `20260523000003_campaign_visual_direction.sql`
+**状态校准（2026-05-31）**：
+- ✅ **Phase 14.A.1**：扩展 `cms_connections` 表加 WP 形态字段（site_url/username + per-provider CHECK），新增 `WORDPRESS` provider 与 `WordpressConnectionStatus` 类型；复用已有 AES-256-GCM crypto（零新加密代码）
+- ✅ Phase 13.A P13.A.1–A.6：代码完成，等 PM 端到端验证
+- 架构决策：WP 复用 `cms_connections` 而非新建 `client_website_connections`（ROADMAP 字面计划已对齐）
 
-下一 session：`继续 Phase 13.A 验证，或告诉我新需求`
-
-**本 session 已完成，可以关闭。**
+下一 session：`继续 Phase 14.A 第 2 任务 P14.A.2`
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox

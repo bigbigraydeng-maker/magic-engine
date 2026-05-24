@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-24 17:16 NZST · 当前阶段：**Phase 12.I 全部完成 ✅（P12.I.1–I.10 + P12.J.1 + P12.J.2 + P12.K.1 + P12.I.fix）；待 PM 决策下一 Phase**。
+> 最后更新：2026-05-24 17:27 NZST · 当前阶段：**Phase 12.I 全部完成 ✅（P12.I.1–I.10 + P12.J.1 + P12.J.2 + P12.K.1 + P12.I.fix）；待 PM 决策下一 Phase**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -1749,7 +1749,7 @@ website_publish_jobs
 
 | ID | 任务 | 依赖 |
 |----|------|------|
-| **P14.A.1** | 新增 `client_website_connections` 表 + 凭证加密/解密工具 | — |
+| ✅ **P14.A.1** | ~~新增 `client_website_connections` 表~~ → **扩展现有 `cms_connections` 表加 WP 形态字段**（复用已有 AES-256-GCM crypto） | — |
 | **P14.A.2** | 新增 `website_publish_jobs` 表 + 幂等 key + 状态机 | P14.A.1 |
 | **P14.A.3** | 连接管理 UI（客户设置页 → 连接平台入口） | P14.A.1 |
 | **P14.A.4** | Shopify connector（`write_content` scope，draft-first，blog article + page） | P14.A.2 |
@@ -2125,6 +2125,10 @@ AU / NZ（当前）          新市场（未来）
 - **UX 基础修复（两个 session）** — 全站标题 CrazyContent→Magic Engine；login-form try/finally 防卡死；BriefSourcesForm/zhangqian cards/Step2BriefUpload 客户可见供应商名替换；ContentHub 移除内嵌 Reels/图片 子Tab 改跳转快捷卡；客户页新增 WorkflowProgress（张骞→MB→执行）进度条；SEO 页标题/注释去 SEMrush 改 Keyword Intelligence（commits 34fe7fb, e7b2aff）
 - **架构确认：四 Agent 链 + 诸葛亮命名** — C Agent 正式命名为「诸葛亮」（策略调度引擎）；确认定位：输入张骞证据+华佗诊断→输出 priority_actions→flywheel_actions，不直接执行；AI 抽屉为 UX 层（正交），首页驾驶舱与鲁班看板为两个缩放层级（不冲突）；登记为 Phase 12.G（接口规范已确认）
 - **P8.3.2 代码收尾** — login try-catch 修复；middleware+whitelist 测试已在代码库；**剩余 PM 操作**：Render 后台填 `ADMIN_EMAILS=你的邮箱` + Supabase Auth Redirect URLs 加 `/auth/callback`
+
+### 2026-05-31（Phase 14.A — Website Connector，插队 13.A）
+
+- **P14.A.1** — 扩展 `cms_connections` 表加 WP 形态（`site_url`/`username`，per-provider CHECK），新增 `CMS_PROVIDER.WORDPRESS` + `WordpressConnectionStatus` 类型；复用已有 AES-256-GCM crypto（`CMS_TOKEN_ENCRYPTION_KEY`）零新代码；migration `20260531000001_cms_connections_wordpress.sql`
 
 ### 2026-05-25（Phase 13.A — Prospect 注册流程）
 

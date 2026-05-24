@@ -8,7 +8,8 @@
 // ─── Provider ────────────────────────────────────────────────────────────────
 
 export const CMS_PROVIDER = {
-  GITHUB: 'github',
+  GITHUB:    'github',
+  WORDPRESS: 'wordpress',
 } as const
 
 export type CmsProvider = (typeof CMS_PROVIDER)[keyof typeof CMS_PROVIDER]
@@ -53,6 +54,24 @@ export interface CmsConnectionStatus {
   tokenHint: string | null
   status:    CmsStatus
   lastError: string | null
+  lastTestedAt: string | null
+}
+
+/**
+ * WordPress-specific connection display data.
+ * Returned by the wordpress-aware variant of getConnectionStatus (added in P14.A.5).
+ */
+export interface WordpressConnectionStatus {
+  connected:    boolean
+  provider:     typeof CMS_PROVIDER.WORDPRESS
+  /** Site origin, e.g. https://example.com (no trailing slash). */
+  siteUrl:      string
+  /** WP username paired with the Application Password. */
+  username:     string
+  /** Last four characters of the stored Application Password, for display only. */
+  tokenHint:    string | null
+  status:       CmsStatus
+  lastError:    string | null
   lastTestedAt: string | null
 }
 
