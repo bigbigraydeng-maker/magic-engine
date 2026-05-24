@@ -542,6 +542,14 @@ export default function ClientDetailPage() {
         </div>
       )}
 
+      {/* ── 推广活动（Campaign 基座）──────────────────────────────────────────
+          Master Brief × Campaign = FDE 工作的上下文基座。
+          所有内容生产（社媒/博客/广告）应当在某个活跃 Campaign 下进行。 */}
+      <section>
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">推广活动</p>
+        <ContentHub clientId={clientId} />
+      </section>
+
       {/* ── Zone A: 内容生产 ─────────────────────────────────────────────────── */}
       <section>
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">内容生产</p>
