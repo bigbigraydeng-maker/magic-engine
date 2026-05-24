@@ -36,7 +36,7 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
     setError('')
 
     try {
-      const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`
+      const redirectTo = `${window.location.origin}/auth/implicit-callback?next=${encodeURIComponent(next)}`
 
       // Send magic link server-side (no PKCE) so it works regardless of which
       // browser or email client the user clicks the link from.

@@ -1,6 +1,15 @@
 import PortalLoginForm from './portal-login-form'
 
-export default function PortalLoginPage() {
+interface Props {
+  searchParams: { next?: string; error?: string }
+}
+
+export default function PortalLoginPage({ searchParams }: Props) {
+  const next = searchParams.next?.startsWith('/portal')
+    ? searchParams.next
+    : '/portal'
+  const hasError = searchParams.error === 'auth_failed'
+
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
@@ -11,7 +20,7 @@ export default function PortalLoginPage() {
         </div>
 
         <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-          <PortalLoginForm />
+          <PortalLoginForm next={next} authFailed={hasError} />
         </div>
 
         <p className="mt-6 text-center text-xs text-gray-400">

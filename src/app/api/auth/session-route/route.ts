@@ -27,11 +27,14 @@ export async function GET(request: NextRequest) {
   const email = user.email.toLowerCase()
 
   // Portal users take priority
-  const { data: portalUser } = await supabaseAdmin
+  const { data: accessRows } = await supabaseAdmin
     .from('client_portal_users')
-    .select('client_id')
+    .select('client_id, access_type')
     .eq('email', email)
-    .maybeSingle()
+
+  const portalUser = accessRows?.find(row =>
+    row.access_type === 'portal' || row.access_type === 'both'
+  )
 
   if (portalUser?.client_id) {
     return NextResponse.json({ redirect: `/portal/${portalUser.client_id}` })

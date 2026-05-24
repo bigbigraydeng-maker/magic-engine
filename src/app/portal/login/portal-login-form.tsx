@@ -1,9 +1,13 @@
 'use client'
 
 import { useState } from 'react'
-import { createBrowserClient } from '@supabase/ssr'
 
-export default function PortalLoginForm() {
+interface Props {
+  next: string
+  authFailed?: boolean
+}
+
+export default function PortalLoginForm({ next, authFailed }: Props) {
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
   const [error, setError] = useState('')
@@ -15,20 +19,17 @@ export default function PortalLoginForm() {
     setError('')
 
     try {
-      const supabase = createBrowserClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      )
-
-      // Redirect to /portal after auth — callback will route to correct client
-      const redirectTo = `${window.location.origin}/auth/callback?next=/portal`
-
-      const { error: otpError } = await supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: redirectTo, shouldCreateUser: false },
+      const redirectTo = `${window.location.origin}/auth/implicit-callback?next=${encodeURIComponent(next)}`
+      const res = await fetch('/api/auth/magic-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          redirectTo,
+        }),
       })
 
-      if (otpError) {
+      if (!res.ok) {
         setError('Unable to send link. Please check your email address.')
       } else {
         setSent(true)
@@ -72,7 +73,11 @@ export default function PortalLoginForm() {
         />
       </div>
 
-      {error && <p className="text-red-500 text-sm">{error}</p>}
+      {(error || authFailed) && (
+        <p className="text-red-500 text-sm">
+          {error || 'Authentication failed. Please request a new login link.'}
+        </p>
+      )}
 
       <button
         type="submit"

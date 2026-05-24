@@ -23,9 +23,11 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get('code')
   const next = searchParams.get('next') ?? '/dashboard'
   const safePath = next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard'
+  const loginPath = safePath.startsWith('/portal') ? '/portal/login' : '/login'
+  const failedUrl = `${origin}${loginPath}?error=auth_failed&next=${encodeURIComponent(safePath)}`
 
   if (!code) {
-    return NextResponse.redirect(`${origin}/login?error=auth_failed`)
+    return NextResponse.redirect(failedUrl)
   }
 
   const cookieStore = cookies()
@@ -50,7 +52,7 @@ export async function GET(request: NextRequest) {
 
   if (error) {
     console.error('[auth/callback] exchangeCodeForSession:', error.message)
-    return NextResponse.redirect(`${origin}/login?error=auth_failed`)
+    return NextResponse.redirect(failedUrl)
   }
 
   // Determine redirect destination based on user type

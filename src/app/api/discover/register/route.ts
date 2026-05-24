@@ -242,12 +242,14 @@ async function runScan(jobId: string, domain: string): Promise<void> {
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
-    await supabaseAdmin
-      .from('public_scan_jobs')
-      .update({ status: 'failed', error: msg, completed_at: new Date().toISOString() })
-      .eq('id', jobId)
-      .then(() => undefined)
-      .catch(() => undefined)
+    try {
+      await supabaseAdmin
+        .from('public_scan_jobs')
+        .update({ status: 'failed', error: msg, completed_at: new Date().toISOString() })
+        .eq('id', jobId)
+    } catch {
+      // Ignore failure while recording the failure state.
+    }
   } finally {
     clearInterval(heartbeat)
     clearTimeout(hardTimeoutId)
@@ -310,7 +312,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const appUrl = (process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL)?.replace(/\/$/, '')
     ?? `${req.headers.get('x-forwarded-proto') ?? 'https'}://${req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? 'localhost:3001'}`
 
-  const redirectTo = `${appUrl}/auth/callback?next=/prospect`
+  const redirectTo = `${appUrl}/auth/implicit-callback?next=/prospect`
 
   // Send magic link (creates user if not exists)
   const { error: otpError } = await supabaseAdmin.auth.signInWithOtp({

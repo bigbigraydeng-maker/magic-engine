@@ -25,8 +25,12 @@ export async function middleware(request: NextRequest) {
 
   // ── Portal routes (/portal/*) ─────────────────────────────────────────────
   if (path.startsWith('/portal')) {
+    if (path === '/portal/login') {
+      return NextResponse.next({ request: { headers: requestHeaders } })
+    }
+
     if (!user) {
-      const loginUrl = new URL('/login', request.url)
+      const loginUrl = new URL('/portal/login', request.url)
       loginUrl.searchParams.set('next', path)
       return NextResponse.redirect(loginUrl)
     }

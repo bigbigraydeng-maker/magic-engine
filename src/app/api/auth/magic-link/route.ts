@@ -40,9 +40,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid redirectTo URL.' }, { status: 400 })
   }
 
+  const { data: portalUsers } = await supabaseAdmin
+    .from('client_portal_users')
+    .select('id')
+    .eq('email', email)
+    .limit(1)
+
   // Allow account creation for known admin / portal users so first-time logins work.
   // Unknown emails keep shouldCreateUser: false to prevent account farming.
-  const isKnownUser = getUserPermissions(email) !== null
+  const isKnownUser = getUserPermissions(email) !== null || (portalUsers?.length ?? 0) > 0
   const shouldCreateUser = isKnownUser
 
   const { error } = await supabaseAdmin.auth.signInWithOtp({
