@@ -34,6 +34,16 @@ const DIMENSION_LABELS: Record<DiagnosticDimension, string> = {
   competitor:    '竞品',
 }
 
+// Routes to the most relevant connector/config page for each dimension
+const DIMENSION_CONFIG_ANCHOR: Record<DiagnosticDimension, string> = {
+  seo:           'connectors/gsc',
+  ai_visibility: 'zhangqian',
+  ads:           'connectors/google-ads',
+  social:        'connectors/social',
+  reputation:    'connectors/gbp',
+  competitor:    'zhangqian',
+}
+
 const ALL_DIMENSIONS: DiagnosticDimension[] = [
   'seo', 'ai_visibility', 'social', 'reputation', 'competitor', 'ads',
 ]
@@ -359,7 +369,7 @@ export default function DiagnosticPage() {
                     />
                     {raw === null && (
                       <Link
-                        href={`/dashboard/clients/${clientId}/zhangqian`}
+                        href={`/dashboard/clients/${clientId}/${DIMENSION_CONFIG_ANCHOR[dim]}`}
                         className="text-xs text-indigo-500 hover:text-indigo-700 hover:underline"
                       >
                         立即配置 →

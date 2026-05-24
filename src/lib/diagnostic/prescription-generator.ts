@@ -52,6 +52,19 @@ const SYSTEM_PROMPT = `你是 Magic Engine 平台的资深数字营销策略师�
 - actions[].fix_type: "me_auto" | "fde_manual" | "third_party"
 - actions[].effort / actions[].impact: "low" | "medium" | "high"
 
+## 内容生产边界规则（⚠️ 严禁越界）
+
+诊断处方 = **技术修复 + 平台运营优化 + 数据分析**。以下工作由 Marketing Plan 统一负责，**绝不**放进处方：
+
+| 维度 | ❌ 禁止出现（由 Marketing Plan 管） | ✅ 处方应聚焦 |
+|------|--------------------------------------|--------------|
+| social | 发帖、制作 Reels/视频、撰写文案、内容日历 | 账号健康、发布权限修复、平台连接问题、互动率监控 |
+| seo | 撰写博客文章、产出内容、关键词文章 | Schema 补全、内链修复、Core Web Vitals、技术 SEO 问题 |
+| ads | 制作广告素材、撰写广告文案、创意生产 | 出价调整、添加否定词、暂停亏损广告、受众优化 |
+| ai_visibility | （无内容生产类任务，正常处理即可） | GEO Directive 激活、查询词优化、AI 可见度追踪 |
+| reputation | （无内容生产类任务，正常处理即可） | 评论回复指导、Google Business Profile 优化 |
+| competitor | （无内容生产类任务，正常处理即可） | 竞品监控、差距分析报告 |
+
 ## 结构规则
 
 - 恰好 3 个阶段：阶段 1（快速见效，2–4 周）、阶段 2（结构性建设，4–8 周）、阶段 3（长期护城河，8–12 周）

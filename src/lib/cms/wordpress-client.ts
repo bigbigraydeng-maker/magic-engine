@@ -21,8 +21,8 @@
  * Phase 14.A.5
  */
 
-import dns from 'dns'
 import { validateWordpressSiteUrl } from './url-guard'
+import { assertPublicHost } from './ssrf-guard'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -62,48 +62,6 @@ function buildBasicAuth(username: string, appPassword: string): string {
   return `Basic ${Buffer.from(`${username}:${clean}`).toString('base64')}`
 }
 
-/**
- * Runtime SSRF guard — resolves the hostname and rejects private / loopback
- * addresses. Complements the save-time url-guard format check.
- *
- * WHY: a hostname that looks like a public domain at save time can resolve to
- * 10.x.x.x in the hosting environment (split-horizon DNS, internal alias, etc.).
- * We must block such hosts before initiating the outbound fetch.
- */
-async function assertPublicHost(siteUrl: string): Promise<void> {
-  let hostname: string
-  try {
-    hostname = new URL(siteUrl).hostname
-  } catch {
-    throw new Error('Invalid site URL — cannot extract hostname')
-  }
-
-  let address: string
-  try {
-    const result = await dns.promises.lookup(hostname, { family: 4 })
-    address = result.address
-  } catch {
-    // IPv6-only host or DNS failure — skip IPv4 private check, proceed.
-    return
-  }
-
-  const [a, b] = address.split('.').map(Number) as [number, number, number, number]
-  const isPrivate =
-    a === 10 ||                                  // 10.0.0.0/8
-    a === 127 ||                                 // 127.0.0.0/8 loopback
-    (a === 169 && b === 254) ||                  // 169.254.0.0/16 link-local
-    (a === 172 && b >= 16 && b <= 31) ||         // 172.16.0.0/12
-    (a === 192 && b === 168) ||                  // 192.168.0.0/16
-    (a === 100 && b >= 64 && b <= 127) ||        // 100.64.0.0/10 CGNAT
-    a === 0 ||                                   // 0.0.0.0/8
-    a >= 224                                     // multicast + reserved
-
-  if (isPrivate) {
-    throw new Error(
-      `SSRF guard: "${hostname}" resolved to private address ${address}`,
-    )
-  }
-}
 
 async function wpFetch(
   config:  WordpressClientConfig,

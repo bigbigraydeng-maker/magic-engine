@@ -12,6 +12,7 @@
  */
 
 import { shopifyAdminBase } from './shopify-guard'
+import { assertPublicHost } from './ssrf-guard'
 
 const API_VERSION = '2024-01'
 
@@ -55,6 +56,8 @@ async function shopifyFetch(
   path:    string,
   options: RequestInit = {},
 ): Promise<Response> {
+  await assertPublicHost(config.shopUrl)
+
   const base = shopifyAdminBase(config.shopUrl, API_VERSION)
   const url  = `${base}${path}`
 
