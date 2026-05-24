@@ -215,25 +215,27 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-24 18:32 NZST （**Phase 14.A.4 ✅ 完成**：Shopify connector 全链路 — guard/client/store/API routes + 17 单测全绿）
+> 最后更新：2026-05-24 18:33 NZST （**Phase 14.A.5 ✅ 完成**：WordPress connector 全链路 — wordpress-client + markWordpressConnectionTested + /cms/wordpress 升级 + /cms/publish-wordpress）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P14.A.5** | WordPress connector 本体（REST API publish + Application Password 鉴权 + DNS-resolve SSRF 再校验 + 测试连接按钮启用） | 🔥 下一 commit |
-| **P14.A.6** | Blog Studio 新增「发布到网站」按钮（Draft → Preview → Publish 三步） | 依赖 A.4/5 |
-| **PM 操作** | Supabase 跑 migration `20260531000001_cms_connections_wordpress.sql` + `20260531000002_website_publish_jobs.sql` + `20260601000001_cms_connections_shopify.sql` | ⚠️ PM 操作 |
-| **PM 验证** | /dashboard/clients/[id] → 设置 → 🔗 网站连接 → WordPress Tab → 填表保存（site_url 必须 HTTPS+公网域名）→ 看到末四位 hint | ⚠️ PM 操作 |
+| **P14.A.6** | Blog Studio 新增「发布到网站」按钮（Draft → Preview → Publish 三步，支持 WP + Shopify） | 🔥 下一 commit |
+| **P14.A.7** | HTML sanitize + payload hash + audit snapshot（防 XSS/注入，replace MVP regex） | 依赖 A.4/5 |
+| **P14.A.8** | 发布成功回写 `flywheel_actions` / `flywheel_outcomes` | 依赖 A.6 |
+| **PM 操作** | Supabase 跑 3 个 migration（见状态校准） | ⚠️ PM 操作 |
 | **PM 待办（旧）** | 测试 /discover 表单 → magic link → /prospect 报告页（13.A 验收） | ⚠️ 13.A 验收 |
 | **PM 待办（旧）** | Render → `ADMIN_EMAILS=你的邮箱`；Supabase 跑 `20260523000003_campaign_visual_direction.sql` | ⚠️ PM 操作 |
 
 **状态校准（2026-05-24）**：
+- ✅ **Phase 14.A.5**：`wordpress-client.ts`（DNS SSRF guard + testWordpressConnection + draft-first + publish）+ `markWordpressConnectionTested` + `/cms/wordpress` 升级（POST 保存即测）+ `/cms/publish-wordpress`（两步 draft→publish，幂等，租户隔离）
 - ✅ **Phase 14.A.4**：shopify-guard（SSRF 防护 17 单测）+ shopify-client（Admin REST 2024-01）+ html-sanitizer MVP + vocabulary SHOPIFY + connection-store Shopify CRUD + `/cms/shopify` GET/POST/DELETE + `/cms/publish-shopify`（两步 draft→publish，幂等 website_publish_jobs）
 - ✅ **Phase 14.A.3**：`CmsPanel.tsx` 多供应商 Tab（GitHub/WordPress/Shopify占位）+ url-guard 39 单测 + connection-store 加 wordpress 系列 + `/cms/wordpress` GET/POST/DELETE
 - ✅ Phase 14.A.2：`website_publish_jobs` 表 + 状态机 + 幂等 + vocabulary 9 单测
 - ✅ Phase 14.A.1：`cms_connections` 已加 WP 形态字段
 - ✅ Phase 13.A P13.A.1–A.6：代码完成，等 PM 端到端验证
+- ⚠️ **PM 待跑 migration**：`20260531000001`（WP schema）+ `20260531000002`（publish_jobs）+ `20260601000001`（shopify shape）
 
-下一 session：`继续 Phase 14.A 第 5 任务 P14.A.5`
+下一 session：`继续 Phase 14.A 第 6 任务 P14.A.6`
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox
