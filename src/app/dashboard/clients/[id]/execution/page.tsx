@@ -109,11 +109,13 @@ const STATUS_DOT: Record<ExecutionItemStatus, string> = {
 // 可在内容工作台（ContentStudioDrawer）生成内容的诊断维度
 const CONTENT_STUDIO_DIMENSIONS = new Set<string>(['seo', 'ai_visibility', 'social'])
 
-const PHASE_LABELS: Record<number, { name: string; color: string }> = {
+const PHASE_LABELS: Record<number, { name: string; color: string; talkToUs?: boolean }> = {
   1: { name: 'Phase 1 — 即时修复',  color: 'bg-indigo-600' },
   2: { name: 'Phase 2 — 结构改善',  color: 'bg-purple-600' },
-  3: { name: 'Phase 3 — 长期增长',  color: 'bg-teal-600'   },
+  3: { name: 'Phase 3 — 长期增长',  color: 'bg-teal-600', talkToUs: true },
 }
+
+const TALK_TO_US_HREF = '/discover'
 
 // module → 工作台跳转（legacy fallback，适用于 execution_target 为 null 的旧数据）
 // path 接 (clientId, itemId) — itemId 透传给目标页（ContentHub 等）用于自动关联生成的内容
@@ -816,6 +818,20 @@ function PhaseColumn({
       {/* 列体 — 卡片纵向堆叠 */}
       {open && (
         <div className="bg-gray-50 p-2.5 space-y-2.5 flex-1 min-h-[80px]">
+          {/* Phase 3 Talk to Us 提示横幅 */}
+          {meta.talkToUs && (
+            <div className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 flex items-center justify-between gap-2">
+              <p className="text-[11px] text-teal-700 leading-snug">
+                💬 这些行动建议先与我们沟通，制定专属策略后再执行
+              </p>
+              <a
+                href={TALK_TO_US_HREF}
+                className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-teal-700 border border-teal-300 rounded px-2 py-0.5 hover:bg-teal-100 transition-colors whitespace-nowrap"
+              >
+                Talk to Us →
+              </a>
+            </div>
+          )}
           {items.length === 0 && !adding && (
             <p className="text-xs text-gray-400 text-center py-6">此阶段暂无执行项</p>
           )}
@@ -1249,6 +1265,12 @@ export default function ExecutionPage() {
             <p className="text-xs text-gray-400 mt-0.5">鲁班执行代理 · 按阶段跟踪处方落地进度</p>
           </div>
           <div className="flex items-center gap-2">
+            <a
+              href={TALK_TO_US_HREF}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-700 transition-colors"
+            >
+              💬 Talk to Us
+            </a>
             {items.length > 0 && (
               <button
                 onClick={() => void handleDownloadDocx()}
