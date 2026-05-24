@@ -1,0 +1,240 @@
+'use client'
+
+/**
+ * PlanGenerator — Modal that triggers AI generation of a Marketing Plan.
+ *
+ * 用户输入：
+ *   - title（必填）
+ *   - start_date / end_date（必填）
+ *   - campaign_id（可选 — 默认取最新活跃 Campaign）
+ *   - intensity（light/standard/aggressive）
+ *   - focus_note（可选 — 引导 AI）
+ *
+ * 提交后调用 POST /marketing-plan/generate，~30-60s 返回。
+ */
+
+import { useState, useEffect } from 'react'
+import type { MarketingPlan } from '@/lib/marketing-plan/types'
+
+interface CampaignLite {
+  id: string
+  title: string
+}
+
+interface Props {
+  clientId: string
+  onGenerated: (plan: MarketingPlan) => void
+  onCancel: () => void
+}
+
+const INPUT = 'w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors'
+
+export function PlanGenerator({ clientId, onGenerated, onCancel }: Props) {
+  const [title, setTitle] = useState('')
+  const [campaigns, setCampaigns] = useState<CampaignLite[]>([])
+  const [campaignId, setCampaignId] = useState<string>('')
+  const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [endDate, setEndDate] = useState(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 30)
+    return d.toISOString().slice(0, 10)
+  })
+  const [intensity, setIntensity] = useState<'light' | 'standard' | 'aggressive'>('standard')
+  const [focusNote, setFocusNote] = useState('')
+
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState('')
+
+  // 载入活跃 Campaign 供选择
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/campaign?status=active`)
+        if (!res.ok) return
+        const json = await res.json() as { campaigns?: CampaignLite[] }
+        if (!cancelled) {
+          const list = json.campaigns ?? []
+          setCampaigns(list)
+          // 默认选第一个 + 用其标题预填 Plan 标题
+          if (list[0]) {
+            setCampaignId(list[0].id)
+            setTitle(`${list[0].title} · 营销计划`)
+          }
+        }
+      } catch {
+        /* non-fatal */
+      }
+    })()
+    return () => { cancelled = true }
+  }, [clientId])
+
+  const submit = async () => {
+    if (!title.trim()) { setError('请填写 Plan 标题'); return }
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch(`/api/clients/${clientId}/marketing-plan/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title:       title.trim(),
+          campaign_id: campaignId || undefined,
+          start_date:  startDate,
+          end_date:    endDate,
+          intensity,
+          focus_note:  focusNote.trim() || undefined,
+        }),
+      })
+      const json = await res.json() as { success: boolean; plan?: MarketingPlan; error?: string }
+      if (!json.success || !json.plan) {
+        throw new Error(json.error ?? 'Plan generation failed')
+      }
+      onGenerated(json.plan)
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/40 z-40" onClick={loading ? undefined : onCancel} />
+      <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[560px] max-w-[90vw] max-h-[90vh] overflow-y-auto bg-white rounded-2xl shadow-2xl">
+
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h3 className="text-base font-bold text-gray-900">✦ 生成 Marketing Plan</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Strategy Engine 根据 Master Brief + Campaign + SEO 机会生成结构化计划
+            </p>
+          </div>
+          <button
+            disabled={loading}
+            onClick={onCancel}
+            className="text-gray-400 hover:text-gray-600 text-xl leading-none disabled:opacity-50"
+          >
+            ×
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-6 py-4 space-y-4">
+          {/* Plan 标题 */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Plan 标题 *</label>
+            <input
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder='例: "98年故事" — 6月营销计划'
+              className={INPUT}
+            />
+          </div>
+
+          {/* Campaign 选择 */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">关联 Campaign（可选）</label>
+            <select
+              value={campaignId}
+              onChange={e => setCampaignId(e.target.value)}
+              className={INPUT}
+            >
+              <option value="">不关联（仅用品牌 DNA）</option>
+              {campaigns.map(c => (
+                <option key={c.id} value={c.id}>{c.title}</option>
+              ))}
+            </select>
+            {campaigns.length === 0 && (
+              <p className="text-[11px] text-amber-600 mt-1">
+                ⚠ 没有活跃 Campaign — 建议先在客户主页创建一个推广活动以提供清晰目标
+              </p>
+            )}
+          </div>
+
+          {/* 时间范围 */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">开始日期 *</label>
+              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className={INPUT} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">结束日期 *</label>
+              <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className={INPUT} />
+            </div>
+          </div>
+
+          {/* 强度 */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">内容强度</label>
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                ['light',      '轻量',  '少而精'],
+                ['standard',   '标准',  '常规节奏'],
+                ['aggressive', '猛烈',  '高频投放'],
+              ] as const).map(([v, label, sub]) => (
+                <button
+                  key={v}
+                  onClick={() => setIntensity(v)}
+                  type="button"
+                  className={`rounded-lg border-2 px-3 py-2 text-left transition-colors ${
+                    intensity === v
+                      ? 'border-indigo-500 bg-indigo-50'
+                      : 'border-gray-200 bg-white hover:border-indigo-300'
+                  }`}
+                >
+                  <p className="text-xs font-semibold text-gray-900">{label}</p>
+                  <p className="text-[10px] text-gray-500">{sub}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Focus note */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              FDE 关注点（可选）<span className="text-gray-400 font-normal ml-1">— 引导 AI</span>
+            </label>
+            <textarea
+              value={focusNote}
+              onChange={e => setFocusNote(e.target.value)}
+              rows={2}
+              placeholder='例: "本月重点突破 NZ 退休群体，社媒侧重 Reels 视频"'
+              className={`${INPUT} resize-none`}
+            />
+          </div>
+
+          {error && (
+            <p className="text-xs text-red-600">⚠ {error}</p>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-3 border-t border-gray-100 flex items-center justify-end gap-2">
+          <button
+            onClick={onCancel}
+            disabled={loading}
+            className="text-sm text-gray-500 hover:text-gray-700 px-4 py-2 disabled:opacity-50"
+          >
+            取消
+          </button>
+          <button
+            onClick={submit}
+            disabled={loading || !title.trim()}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-5 py-2 rounded-lg disabled:opacity-50 flex items-center gap-2"
+          >
+            {loading ? (
+              <>
+                <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                Strategy Engine 制定中…（约 30-60s）
+              </>
+            ) : (
+              <>✦ 生成 Plan 草稿</>
+            )}
+          </button>
+        </div>
+      </div>
+    </>
+  )
+}
