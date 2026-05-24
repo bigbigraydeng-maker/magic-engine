@@ -43,19 +43,92 @@ export type AngleTag =
  *   1. FDE copies storyboard_image_prompt → ChatGPT Image → generates 9-panel storyboard image
  *   2. FDE uploads storyboard image + copies seedance_i2v_prompt → Seedance 2.0 → 15-second Reel video
  *
- * scene_structure: exactly 9 strings (Panels 1–8 + Brand Panel)
- * storyboard_image_prompt: complete standalone ChatGPT Image prompt (200–400 words)
+ * scene_names:    8 short titles for Panels 1–8 (AI generated)
+ * scene_structure: exactly 9 strings (Panels 1–8 + Brand Panel) (AI generated)
+ * style_guide:    visual direction for the whole piece (AI generated)
+ * storyboard_image_prompt: assembled programmatically by buildStoryboardImagePrompt()
  * seedance_i2v_prompt: complete Seedance I2V prompt (200–350 words, 8 sections)
  */
 export interface ReelsScript {
   title: string
   hook_line: string
+  scene_names: string[]
   scene_structure: string[]
+  style_guide: {
+    overall_look: string
+    color_grade: string
+    lighting: string
+    atmosphere: string
+  }
   storyboard_image_prompt: string
   seedance_i2v_prompt: string
   caption: string
   hashtags: string[]
   angle_tag: AngleTag
+}
+
+/** Shape returned by the AI — storyboard_image_prompt is assembled programmatically after. */
+type ReelsScriptRaw = Omit<ReelsScript, 'storyboard_image_prompt'>
+
+// ─── Storyboard prompt builder ─────────────────────────────────────────────────
+
+interface StoryboardBuilderParams {
+  brandName: string
+  campaignTitle: string
+  sceneNames: string[]
+  sceneStructure: string[]
+  styleGuide: {
+    overall_look: string
+    color_grade: string
+    lighting: string
+    atmosphere: string
+  }
+}
+
+/**
+ * Programmatically assembles the complete ChatGPT Image prompt for the 9-panel storyboard.
+ * Deterministic — no AI involved. Matches storyboard skill v2 document structure.
+ */
+export function buildStoryboardImagePrompt(p: StoryboardBuilderParams): string {
+  function expandScene(raw: string): string {
+    return raw.split(' | ').map(part => part.trim()).join('\n')
+  }
+
+  const sceneSections = p.sceneNames.map((name, i) => {
+    const raw = p.sceneStructure[i] ?? ''
+    return `SCENE ${i + 1} — "${name}"\n${expandScene(raw)}`
+  }).join('\n\n')
+
+  const brandPanel = `PANEL 9 — BRAND LOGO PANEL (bottom-right, final panel — always fixed)\n${p.sceneStructure[8] ?? ''}`
+
+  return `Create a professional video production storyboard document as a single image.
+This is for ${p.brandName}'s "${p.campaignTitle}" social media Reels (15 seconds).
+
+DOCUMENT LAYOUT:
+- Portrait (tall) format document, dark charcoal background (#1a1a1a), white and gold typography
+- Title bar at top: "${p.brandName.toUpperCase()} | ${p.campaignTitle} | 15s Reels Storyboard"
+- 9 panels in a 3x3 grid
+- Each panel thumbnail must be in 9:16 VERTICAL portrait orientation — tall, not wide
+- Style guide bar at the very bottom
+
+${sceneSections}
+
+${brandPanel}
+
+BOTTOM STYLE GUIDE BAR (spans full width):
+OVERALL LOOK: ${p.styleGuide.overall_look}
+COLOR GRADE: ${p.styleGuide.color_grade}
+LIGHTING: ${p.styleGuide.lighting}
+ATMOSPHERE: ${p.styleGuide.atmosphere}
+
+RENDERING REQUIREMENTS:
+- All text annotations in English only — no Chinese characters anywhere
+- Each thumbnail must be 9:16 vertical portrait orientation within its panel cell
+- No real human faces visible in any thumbnail
+- Photorealistic quality in every thumbnail
+- Thin gold divider lines between all panels
+- Document should look like a professional film production storyboard
+- Total document image: portrait (tall) format, high resolution`.trim()
 }
 
 export type PostType = 'educational' | 'promotional' | 'storytelling' | 'engagement'
@@ -134,30 +207,24 @@ Each JSON object MUST have ALL of these keys (no omissions):
    MUST start with a number OR create immediate curiosity/surprise.
    Examples: "7 signs your lawn needs help now", "Most homeowners never know this trick…"
 
-3. scene_structure: string[] — EXACTLY 9 strings.
+3. scene_names: string[] — EXACTLY 8 strings. Short evocative title for each of the 8 story panels.
+   Examples: ["The Problem Revealed", "Moment of Doubt", "Discovery", "The Solution", "Transformation", "Social Proof", "The Result", "The Invitation"]
+   All English. No Chinese.
+
+4. scene_structure: string[] — EXACTLY 9 strings.
    Panels 1–8: "Thumbnail: 9:16 vertical — [vivid environment, NO human faces] | STORY: [overlay text] | CAMERA: [camera action] | MOOD: [emotional tone]"
    Panel 9: "BRAND PANEL: [hex color] background. [Brand name] in large serif. [Benefit anchor 1]. [Benefit anchor 2]. No faces."
    All English. No Chinese. No human faces or bodies anywhere.
 
-4. storyboard_image_prompt: string — A COMPLETE, SELF-CONTAINED ChatGPT Image prompt (200–400 words).
-   This will be pasted DIRECTLY into ChatGPT Image with no editing — include every detail needed.
-   Use this structure:
-   "Create a professional video production storyboard document as a single image. This is for [ACTUAL BRAND NAME]'s '[ACTUAL CAMPAIGN TITLE]' Facebook Reels (15 seconds, [angle_tag] concept: [title]).
-   DOCUMENT LAYOUT: Portrait orientation. Dark charcoal #1a1a1a background. Clean sans-serif typography. Title header bar: '[Brand] | [Campaign] | 15-sec Reel Storyboard'.
-   3×3 PANEL GRID — 9 panels total, each labeled SCENE [N]:
-   SCENE 1: [Expand scene_structure[0] into 3–4 sentences of precise visual direction — colors, objects, composition, lighting. 9:16 vertical thumbnail. No faces.]
-   SCENE 2: [Same for scene_structure[1].]
-   SCENE 3: [Same for scene_structure[2].]
-   SCENE 4: [Same for scene_structure[3].]
-   SCENE 5: [Same for scene_structure[4].]
-   SCENE 6: [Same for scene_structure[5].]
-   SCENE 7: [Same for scene_structure[6].]
-   SCENE 8: [Same for scene_structure[7].]
-   SCENE 9 — BRAND LOGO PANEL: [Expand scene_structure[8] — brand hex color background, brand name typography, anchor text, minimal layout.]
-   BOTTOM STYLE GUIDE BAR: Color swatches ([brand hex colors if known]), font specimen, brand tagline.
-   RENDERING REQUIREMENTS: English text labels only. Each panel thumbnail 9:16 vertical. No human faces or bodies. Photorealistic environments and objects. Print-ready quality."
+5. style_guide: object with exactly these 4 keys:
+   {
+     "overall_look": "<2–3 sentences on the complete visual aesthetic — colour palette, textures, composition style>",
+     "color_grade": "<specific LUT or grade: e.g. 'warm golden hour, desaturated shadows, cream highlights'>",
+     "lighting": "<quality and direction: e.g. 'soft natural window light from camera-left, warm diffused'>",
+     "atmosphere": "<emotional tone of the visual world: e.g. 'aspirational calm, quiet luxury, energetic optimism'>"
+   }
 
-5. seedance_i2v_prompt: string — A COMPLETE Seedance 2.0 Image-to-Video prompt (200–350 words).
+6. seedance_i2v_prompt: string — A COMPLETE Seedance 2.0 Image-to-Video prompt (200–350 words).
    Used AFTER the storyboard image is generated to animate it into a 15-second video.
    MUST include all 8 sections with these exact labels:
    OVERALL NARRATIVE ARC: [2–3 sentences on the emotional journey from panel 1 to panel 9.]
@@ -169,17 +236,17 @@ Each JSON object MUST have ALL of these keys (no omissions):
    BRAND PANEL: Hold final brand panel for 3 seconds. [Describe brand panel appearance.]
    TECHNICAL REQUIREMENTS: 9:16 vertical. 15 seconds total. Facebook Reels silent autoplay optimised. No human faces. English only.
 
-6. caption: string — Facebook Reels caption. AU/NZ English. 2–3 short paragraphs. Clear CTA. 5–8 hashtags at end.
+7. caption: string — Facebook Reels caption. AU/NZ English. 2–3 short paragraphs. Clear CTA. 5–8 hashtags at end.
 
-7. hashtags: string[] — standalone array of 5–8 hashtags.
+8. hashtags: string[] — standalone array of 5–8 hashtags.
 
-8. angle_tag: one of "price_attack"|"speed_attack"|"trust_attack"|"pet_floor"|"scarcity"|"seasonal"
+9. angle_tag: one of "price_attack"|"speed_attack"|"trust_attack"|"pet_floor"|"scarcity"|"seasonal"
    Choose 3 different angle_tags across the 3 reels.
 
 CRITICAL RULES:
 - All text fields in English only — zero Chinese characters
+- scene_names MUST be EXACTLY 8 strings
 - scene_structure MUST be EXACTLY 9 strings
-- storyboard_image_prompt MUST be 200–400 words (complete standalone prompt)
 - seedance_i2v_prompt MUST be 200–350 words with all 8 labelled sections
 - No human faces or bodies in any visual description
 Return ONLY a raw JSON array — no markdown, no code fences, no explanation.`
@@ -241,9 +308,9 @@ Tone: ${strategy.tone_guidance}
 Generate 3 Facebook Reels scripts with ALL required fields.
 
 IMPORTANT:
-- Use the ACTUAL brand name and campaign title from the brief above when writing storyboard_image_prompt (not placeholders).
+- scene_names: exactly 8 short evocative titles for Panels 1–8 (Panel 9 is always the brand panel).
 - scene_structure MUST be exactly 9 strings; index 8 MUST be the brand panel.
-- storyboard_image_prompt: write as a complete, ready-to-paste ChatGPT Image prompt (200–400 words) — expand each scene_structure entry into 3–4 sentences of visual direction.
+- style_guide: fill all 4 keys with specific, concrete visual direction (not generic).
 - seedance_i2v_prompt: write exactly 200–350 words covering all 8 required sections (OVERALL NARRATIVE ARC, PACING AND TIMING, CAMERA MOVEMENT STYLE, COLOR GRADE, LIGHTING, TRANSITIONS, BRAND PANEL, TECHNICAL REQUIREMENTS).
 - Choose 3 distinct angle_tags across the 3 reels.`
 }
@@ -321,11 +388,43 @@ export async function generateReelsScripts(
   })
 
   const raw = resp.choices[0].message.content ?? '[]'
-  const scripts = parseOpenAIJson<ReelsScript[]>(raw)
-  return scripts.map(s => ({
-    ...s,
-    scene_structure: normaliseSceneStructure(s.scene_structure),
-  }))
+  const rawScripts = parseOpenAIJson<ReelsScriptRaw[]>(raw)
+
+  // Extract brand name and campaign title for the storyboard prompt builder
+  const brandName = briefText.match(/品牌名称：(.+)/)?.[1]?.trim()
+    ?? briefText.match(/Brand(?:\s+Name)?:\s*(.+)/i)?.[1]?.trim()
+    ?? 'Brand'
+  const campaignTitleBase = campaignText?.match(/推广主题：(.+)/)?.[1]?.trim()
+    ?? campaignText?.match(/Campaign(?:\s+Title)?:\s*(.+)/i)?.[1]?.trim()
+    ?? ''
+
+  return rawScripts.map(reel => {
+    const sceneStructure = normaliseSceneStructure(reel.scene_structure)
+    const sceneNames = Array.isArray(reel.scene_names)
+      ? reel.scene_names.slice(0, 8)
+      : Array.from({ length: 8 }, (_, i) => `Scene ${i + 1}`)
+    while (sceneNames.length < 8) sceneNames.push(`Scene ${sceneNames.length + 1}`)
+
+    const storyboard_image_prompt = buildStoryboardImagePrompt({
+      brandName,
+      campaignTitle: campaignTitleBase || reel.title,
+      sceneNames,
+      sceneStructure,
+      styleGuide: reel.style_guide ?? {
+        overall_look: 'Clean, modern, aspirational',
+        color_grade: 'Neutral with warm highlights',
+        lighting: 'Soft natural diffused light',
+        atmosphere: 'Calm and professional',
+      },
+    })
+
+    return {
+      ...reel,
+      scene_names: sceneNames,
+      scene_structure: sceneStructure,
+      storyboard_image_prompt,
+    }
+  })
 }
 
 export async function generatePosts(

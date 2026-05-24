@@ -23,7 +23,16 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 if (!supabaseServiceKey) {
   throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY — server cannot start without it');
 }
-export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false,
+    // Use implicit flow so signInWithOtp does NOT generate a PKCE code_challenge.
+    // If PKCE is used server-side, the code_verifier is stored in MemoryStorage and
+    // is lost after the request — the user's callback can never retrieve it.
+    flowType: 'implicit',
+  },
+});
 
 /**
  * Helper function to handle Supabase errors

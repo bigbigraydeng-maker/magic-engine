@@ -14,10 +14,19 @@ import { submitI2VGeneration } from '@/lib/visual/seedance'
 type RouteContext = { params: { id: string; draftId: string } }
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: RouteContext
 ) {
   const { id: clientId, draftId } = params
+
+  // Optional body params: duration (seconds, default 15) and resolution
+  let duration = 15
+  let resolution: '720p' | '1080p' = '720p'
+  try {
+    const body = await req.json() as { duration?: number; resolution?: string }
+    if (body.duration && [6, 10, 15].includes(body.duration)) duration = body.duration
+    if (body.resolution === '1080p') resolution = '1080p'
+  } catch { /* body is optional */ }
 
   try {
     // 1. Load draft
@@ -57,8 +66,9 @@ export async function POST(
     const { job_id } = await submitI2VGeneration({
       prompt: draft.i2v_video_prompt,
       opening_frame_url: draft.opening_frame_url,
-      closing_frame_url: draft.closing_frame_url ?? draft.opening_frame_url, // storyboard uses same image
-      duration: 6,
+      closing_frame_url: draft.closing_frame_url ?? draft.opening_frame_url,
+      duration,
+      resolution,
       aspect_ratio: '9:16',
     })
 

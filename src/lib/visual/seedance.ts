@@ -65,7 +65,7 @@ export async function submitVideoGeneration(params: {
 
 export async function checkVideoStatus(jobId: string): Promise<VideoJobResult> {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 3000)
+  const timeout = setTimeout(() => controller.abort(), 15000)
 
   try {
     const res = await fetch(`${ATLAS_BASE}/model/prediction/${jobId}`, {
