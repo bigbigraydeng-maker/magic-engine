@@ -215,22 +215,29 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-24 23:23 NZST （**Phase 13.A Prospect 注册流程全部完成 ✅** — P13.A.1–A.6，build 通过）
+> 最后更新：2026-05-25 00:00 NZST （**Phase 14.A 全部 8 任务 ✅ 完成**；Phase 13.A Prospect 注册流程 ✅）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **PM 验证** | 测试 /discover 表单 → 收邮件 → 点 magic link → 看到 /prospect 报告页 | ⚠️ PM 操作 |
-| **PM 操作** | Supabase Auth → Redirect URLs 加 `https://your-domain.com/auth/callback` | ⚠️ PM 操作 |
+| **PM 验收 M3** | 打开 Blog Studio 博客详情页 → 点击「发布到网站」→ 选 WordPress → 草稿 → 预览 → 确认发布 | ⚠️ PM 操作 |
+| **PM 操作** | Supabase 跑 3 个 migration（见状态校准） | ⚠️ PM 操作 |
+| **PM 合并** | 输入 `go merge` 合并 Phase 14.A PR（全部 8 commit 完成） | ⚠️ PM 决定 |
+| **PM 待办（旧）** | 测试 /discover 表单 → magic link → /prospect 报告页（13.A 验收） | ⚠️ 13.A 验收 |
+| **PM 待办（旧）** | Render → `ADMIN_EMAILS=你的邮箱`；Supabase 跑 `20260523000003_campaign_visual_direction.sql` | ⚠️ PM 操作 |
 
-**状态校准（2026-05-25）**：
-- ✅ **Phase 13.A P13.A.1–A.6**：Prospect 注册流程全部完成（去 Apify + Magic Link + /prospect 看板 + 处方门控）
-- ✅ P12.Q / P12.G / P12.I / P12.J / P12.K：全部完成（见前次状态）
-- ⚠️ **PM 待操作（旧）**：Render → `ADMIN_EMAILS=你的邮箱`（若还未做）
-- ⚠️ **PM 待操作（旧）**：Supabase 跑 migration `20260523000003_campaign_visual_direction.sql`
+**状态校准（2026-05-24）**：
+- ✅ **Phase 14.A.8**：WordPress + Shopify publish 路由在最终发布后 insert `flywheel_actions`（seo/cms_content_insert/in_house）
+- ✅ **Phase 14.A.7**：html-sanitizer 升级为 allowlist 两遍扫描（Pass1 危险块 + Pass2 标签/属性白名单 + Pass3 关闭标签）
+- ✅ **Phase 14.A.6**：`PublishToWebsitePanel` 组件 + `/cms/providers` 聚合路由；Blog Studio 三步 Draft→Preview→Publish
+- ✅ **Phase 14.A.5**：wordpress-client + markWordpressConnectionTested + /cms/wordpress 升级 + /cms/publish-wordpress
+- ✅ **Phase 14.A.4**：shopify-guard + shopify-client + /cms/shopify + /cms/publish-shopify
+- ✅ **Phase 14.A.3**：CmsPanel 多供应商 Tab + url-guard + /cms/wordpress CRUD
+- ✅ **Phase 14.A.2**：website_publish_jobs 表 + 状态机 + 幂等 + vocabulary
+- ✅ **Phase 14.A.1**：cms_connections 扩展 WP 形态
+- ✅ Phase 13.A P13.A.1–A.6：代码完成，等 PM 端到端验证
+- ⚠️ **PM 待跑 migration**：`20260531000001`（WP schema）+ `20260531000002`（publish_jobs）+ `20260601000001`（shopify shape）
 
-下一 session：`继续 Phase 13.A 验证，或告诉我新需求`
-
-**本 session 已完成，可以关闭。**
+下一 session：`继续 Phase 14，告诉我新需求或输入 go merge 合并 PR`
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox

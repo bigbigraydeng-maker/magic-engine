@@ -20,7 +20,8 @@ export async function GET(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
 
   if (!user?.email) {
-    return NextResponse.json({ redirect: '/login?error=auth_failed' })
+    // Session not readable server-side — let middleware handle the unauthenticated redirect cleanly
+    return NextResponse.json({ redirect: safePath })
   }
 
   const email = user.email.toLowerCase()

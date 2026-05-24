@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useParams } from 'next/navigation'
+import { useState, useEffect, useCallback } from 'react'
+import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 
 // ---------------------------------------------------------------------------
@@ -31,6 +31,11 @@ interface ListResponse {
   success: boolean
   packages: PackageSummary[]
   error?: string
+}
+
+interface CampaignOption {
+  id: string
+  name: string
 }
 
 // ---------------------------------------------------------------------------
@@ -72,6 +77,178 @@ const STATUS_META: Record<PackageStatus, { label: string; cls: string }> = {
   measured:           { label: '已归因', cls: 'text-teal-600' },
   archived:           { label: '已归档', cls: 'text-gray-400' },
   failed:             { label: '失败',   cls: 'text-red-600' },
+}
+
+// ---------------------------------------------------------------------------
+// Create modal
+// ---------------------------------------------------------------------------
+
+const DIMENSION_OPTIONS: { value: DiagnosticDimension; label: string }[] = [
+  { value: 'seo',           label: 'SEO' },
+  { value: 'ai_visibility', label: 'AI 可见度' },
+  { value: 'ads',           label: '广告' },
+  { value: 'social',        label: '社媒' },
+  { value: 'reputation',    label: '口碑' },
+  { value: 'competitor',    label: '竞品' },
+]
+
+interface CreatePackageModalProps {
+  clientId: string
+  onClose: () => void
+  onCreated: (packageId: string) => void
+}
+
+function CreatePackageModal({ clientId, onClose, onCreated }: CreatePackageModalProps) {
+  const [dimension,  setDimension]  = useState<DiagnosticDimension>('social')
+  const [title,      setTitle]      = useState('')
+  const [brief,      setBrief]      = useState('')
+  const [campaignId, setCampaignId] = useState('')
+  const [campaigns,  setCampaigns]  = useState<CampaignOption[]>([])
+  const [submitting, setSubmitting] = useState(false)
+  const [error,      setError]      = useState<string | null>(null)
+
+  useEffect(() => {
+    void fetch(`/api/clients/${clientId}/campaign`, {
+      headers: { Authorization: `Bearer ${API_KEY}` },
+    })
+      .then(r => r.json())
+      .then((json: { success?: boolean; campaigns?: { id: string; name: string }[] }) => {
+        if (json.success && Array.isArray(json.campaigns)) {
+          setCampaigns(json.campaigns.map(c => ({ id: c.id, name: c.name })))
+        }
+      })
+      .catch(() => {/* non-critical */})
+  }, [clientId])
+
+  const handleSubmit = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!title.trim()) { setError('标题不能为空'); return }
+    setSubmitting(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/production`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${API_KEY}`,
+        },
+        body: JSON.stringify({
+          dimension,
+          title: title.trim(),
+          brief: brief.trim() || undefined,
+          campaign_id: campaignId || undefined,
+        }),
+      })
+      const json = await res.json() as { success: boolean; package?: { id: string }; error?: string }
+      if (!json.success || !json.package) {
+        setError(json.error ?? '创建失败，请重试')
+      } else {
+        onCreated(json.package.id)
+      }
+    } catch {
+      setError('网络错误，请重试')
+    } finally {
+      setSubmitting(false)
+    }
+  }, [clientId, dimension, title, brief, campaignId, onCreated])
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-md bg-white rounded-2xl shadow-xl p-6 space-y-5"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-bold text-gray-900">新建生产包</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Dimension */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">维度</label>
+            <div className="flex flex-wrap gap-2">
+              {DIMENSION_OPTIONS.map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setDimension(opt.value)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                    dimension === opt.value
+                      ? 'bg-gray-900 text-white border-gray-900'
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Title */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">标题 *</label>
+            <input
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder="例：CTS Tours 5月社媒批次"
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              autoFocus
+            />
+          </div>
+
+          {/* Brief */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">简报（可选）</label>
+            <textarea
+              value={brief}
+              onChange={e => setBrief(e.target.value)}
+              placeholder="本批次的目标、主题或注意事项..."
+              rows={3}
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            />
+          </div>
+
+          {/* Campaign */}
+          {campaigns.length > 0 && (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">关联 Campaign（可选）</label>
+              <select
+                value={campaignId}
+                onChange={e => setCampaignId(e.target.value)}
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+              >
+                <option value="">不关联</option>
+                {campaigns.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {error && <p className="text-xs text-red-600">{error}</p>}
+
+          <div className="flex gap-3 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+            >
+              {submitting ? '创建中...' : '创建'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -120,11 +297,13 @@ function PackageCard({ pkg, clientId }: { pkg: PackageSummary; clientId: string 
 export default function ProductionPackageListPage() {
   const params   = useParams<{ id: string }>()
   const clientId = params.id
+  const router   = useRouter()
 
-  const [packages, setPackages] = useState<PackageSummary[]>([])
-  const [loading,  setLoading]  = useState(true)
-  const [error,    setError]    = useState<string | null>(null)
-  const [dimFilter, setDimFilter] = useState<DiagnosticDimension | 'all'>('all')
+  const [packages,   setPackages]   = useState<PackageSummary[]>([])
+  const [loading,    setLoading]    = useState(true)
+  const [error,      setError]      = useState<string | null>(null)
+  const [dimFilter,  setDimFilter]  = useState<DiagnosticDimension | 'all'>('all')
+  const [showModal,  setShowModal]  = useState(false)
 
   useEffect(() => {
     void (async () => {
@@ -163,6 +342,7 @@ export default function ProductionPackageListPage() {
   const dimensionsWithData = ALL_DIMENSIONS.filter(d => (grouped[d]?.length ?? 0) > 0)
 
   return (
+    <>
     <div className="min-h-screen bg-gray-50">
       {/* Top nav */}
       <div className="bg-white border-b border-gray-200 px-6 py-4">
@@ -176,12 +356,20 @@ export default function ProductionPackageListPage() {
           </nav>
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <h1 className="text-xl font-bold text-gray-900">生产包总览</h1>
-            <Link
-              href={`/dashboard/clients/${clientId}`}
-              className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1"
-            >
-              ← 返回
-            </Link>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowModal(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+              >
+                + 新建生产包
+              </button>
+              <Link
+                href={`/dashboard/clients/${clientId}`}
+                className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1"
+              >
+                ← 返回
+              </Link>
+            </div>
           </div>
         </div>
       </div>
@@ -259,5 +447,17 @@ export default function ProductionPackageListPage() {
 
       </div>
     </div>
+
+    {showModal && (
+      <CreatePackageModal
+        clientId={clientId}
+        onClose={() => setShowModal(false)}
+        onCreated={(packageId) => {
+          setShowModal(false)
+          router.push(`/dashboard/clients/${clientId}/production/${packageId}`)
+        }}
+      />
+    )}
+    </>
   )
 }

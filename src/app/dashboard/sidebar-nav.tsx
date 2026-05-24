@@ -27,7 +27,7 @@ const adminSections: NavSection[] = [
     title: '工具',
     items: [
       { href: '/dashboard/visuals',               label: 'Launch Hub',     emoji: '🚀' },
-      { href: '/dashboard/analytics',             label: 'Analytics',      emoji: '📈' },
+      {                                             label: 'Analytics',      emoji: '📈', soon: true },
       { href: '/dashboard/reports',               label: 'Reports',        emoji: '📊' },
       { href: '/dashboard/admin/billing-monitor',   label: 'Billing Monitor',  emoji: '💳' },
       { href: '/dashboard/admin/viral-references',  label: 'Viral References', emoji: '🎬' },
