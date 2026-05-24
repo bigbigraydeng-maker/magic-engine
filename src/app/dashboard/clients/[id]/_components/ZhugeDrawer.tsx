@@ -7,7 +7,7 @@
  * 展示优先行动清单，每条 in_house 行动附「触发鲁班」一键跳转按钮。
  */
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { getLubanRoute } from '@/lib/zhuge/luban-router'
 import {
   FLYWHEEL_BADGE,
@@ -101,6 +101,7 @@ function ActionDetailCard({
 // ── Main drawer ───────────────────────────────────────────────────────────────
 
 type DrawerPhase = 'idle' | 'loading' | 'done' | 'error'
+type DrawerSource = 'cached' | 'fresh' | null
 
 export interface ZhugeDrawerProps {
   clientId: string
@@ -113,6 +114,7 @@ export interface ZhugeDrawerProps {
 export function ZhugeDrawer({ clientId, isOpen, onClose, onComplete }: ZhugeDrawerProps) {
   const [phase, setPhase] = useState<DrawerPhase>('idle')
   const [output, setOutput] = useState<ZhugeOutput | null>(null)
+  const [source, setSource] = useState<DrawerSource>(null)
   const [error, setError] = useState<string | null>(null)
   // Prevents double-firing in StrictMode / re-renders
   const hasRunRef = useRef(false)
@@ -130,10 +132,43 @@ export function ZhugeDrawer({ clientId, isOpen, onClose, onComplete }: ZhugeDraw
     return () => { document.body.style.overflow = orig }
   }, [isOpen])
 
-  // Auto-run conduct when drawer opens
+  const runConduct = useCallback(async () => {
+    setPhase('loading')
+    setOutput(null)
+    setSource(null)
+    setError(null)
+
+    try {
+      const res = await fetch(`/api/clients/${clientId}/zhuge/conduct`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${API_KEY}`,
+        },
+        body: JSON.stringify({}),
+      })
+      const data = await res.json() as {
+        success: boolean
+        output?: ZhugeOutput
+        error?: string
+      }
+      if (!res.ok || !data.success) {
+        throw new Error(data.error ?? `Error ${res.status}`)
+      }
+      setOutput(data.output ?? null)
+      setSource('fresh')
+      setPhase('done')
+      onCompleteRef.current()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setPhase('error')
+    }
+  }, [clientId])
+
+  // On open: read persisted session first; only run LLM if no history exists.
   useEffect(() => {
     if (!isOpen) {
-      // Reset so the next open triggers a fresh run
+      // Reset so the next open triggers a fresh load
       hasRunRef.current = false
       return
     }
@@ -142,35 +177,34 @@ export function ZhugeDrawer({ clientId, isOpen, onClose, onComplete }: ZhugeDraw
 
     setPhase('loading')
     setOutput(null)
+    setSource(null)
     setError(null)
 
     void (async () => {
       try {
-        const res = await fetch(`/api/clients/${clientId}/zhuge/conduct`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${API_KEY}`,
-          },
-          body: JSON.stringify({}),
+        const res = await fetch(`/api/clients/${clientId}/zhuge/latest-actions`, {
+          headers: { Authorization: `Bearer ${API_KEY}` },
         })
-        const data = await res.json() as {
-          success: boolean
-          output?: ZhugeOutput
-          error?: string
+        if (res.ok) {
+          const data = await res.json() as {
+            success: boolean
+            output?: ZhugeOutput | null
+          }
+          if (data.success && data.output) {
+            setOutput(data.output)
+            setSource('cached')
+            setPhase('done')
+            return
+          }
         }
-        if (!res.ok || !data.success) {
-          throw new Error(data.error ?? `Error ${res.status}`)
-        }
-        setOutput(data.output ?? null)
-        setPhase('done')
-        onCompleteRef.current()
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-        setPhase('error')
+        // No persisted session — fall back to a fresh conduct call.
+        await runConduct()
+      } catch {
+        // Network/parse failure on the cache read — still try a fresh run.
+        await runConduct()
       }
     })()
-  }, [isOpen, clientId])
+  }, [isOpen, clientId, runConduct])
 
   if (!isOpen) return null
 
@@ -191,12 +225,25 @@ export function ZhugeDrawer({ clientId, isOpen, onClose, onComplete }: ZhugeDraw
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-gray-900">诸葛亮 · 本周战略建议</p>
             <p className="text-xs text-gray-400 mt-0.5">
-              {phase === 'loading' && '正在分析张骞证据 + 华佗诊断，约 20–40 秒…'}
-              {phase === 'done' && output && `已生成 ${output.top_actions.length} 条建议 · 点击「前往工作台」直接执行`}
+              {phase === 'loading' && (source === null
+                ? '读取上一次战略建议…'
+                : '正在分析张骞证据 + 华佗诊断，约 20–40 秒…')}
+              {phase === 'done' && output && (source === 'cached'
+                ? `上一次结果 · ${output.top_actions.length} 条建议 · 如需更新点「重新分析」`
+                : `已生成 ${output.top_actions.length} 条建议 · 点击「前往工作台」直接执行`)}
               {phase === 'error' && '分析失败，请检查张骞扫描是否已完成'}
               {phase === 'idle' && ''}
             </p>
           </div>
+          {phase === 'done' && (
+            <button
+              onClick={() => { void runConduct() }}
+              className="flex-shrink-0 text-xs font-medium text-gray-500 hover:text-indigo-700 border border-gray-200 hover:border-indigo-300 rounded-lg px-2.5 py-1 transition-colors"
+              title="重新调用 Strategy Engine，覆盖上一次结果"
+            >
+              🔄 重新分析
+            </button>
+          )}
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-700 text-lg px-2 flex-shrink-0"
