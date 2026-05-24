@@ -12,8 +12,9 @@
 import { supabaseAdmin } from '../supabase'
 import { encryptToken, decryptToken, tokenLastFour } from './crypto'
 import { CMS_STATUS, CMS_PROVIDER } from './vocabulary'
-import type { CmsConnectionStatus, WordpressConnectionStatus } from './vocabulary'
+import type { CmsConnectionStatus, WordpressConnectionStatus, ShopifyConnectionStatus } from './vocabulary'
 import { validateWordpressSiteUrl } from './url-guard'
+import { validateShopifyShopUrl } from './shopify-guard'
 
 // ─── Row type ────────────────────────────────────────────────────────────────
 
@@ -329,6 +330,150 @@ function rowToWordpressStatus(row: CmsConnectionRow): WordpressConnectionStatus 
     username:     row.username ?? '',
     tokenHint:    row.token_last_four,
     status:       row.status as WordpressConnectionStatus['status'],
+    lastError:    row.last_error,
+    lastTestedAt: row.last_tested_at,
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shopify connection — same table, same crypto.
+// Phase 14.A.4: write_content scope (write_blogs + write_pages).
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface UpsertShopifyConnectionParams {
+  clientId:   string
+  /** Shop URL — will be validated and normalized to https://host. */
+  shopUrl:    string
+  /** Plain-text Admin API access token — encrypted before storage. */
+  plainToken: string
+}
+
+export async function upsertShopifyConnection(
+  params: UpsertShopifyConnectionParams,
+): Promise<ShopifyConnectionStatus> {
+  const { clientId, shopUrl, plainToken } = params
+
+  const guard = validateShopifyShopUrl(shopUrl)
+  if (!guard.ok || !guard.normalizedUrl) {
+    throw new Error(guard.error ?? 'Invalid shop_url')
+  }
+  if (plainToken.trim().length < 10) {
+    throw new Error('access_token required (min 10 chars)')
+  }
+
+  const encrypted = encryptToken(plainToken)
+  const hint      = tokenLastFour(plainToken)
+
+  const { data, error } = await supabaseAdmin
+    .from('cms_connections')
+    .upsert(
+      {
+        client_id:       clientId,
+        provider:        CMS_PROVIDER.SHOPIFY,
+        site_url:        guard.normalizedUrl,
+        username:        null,
+        repo_owner:      null,
+        repo_name:       null,
+        default_branch:  null,
+        content_paths:   [],
+        encrypted_token: encrypted,
+        token_last_four: hint,
+        status:          CMS_STATUS.DISCONNECTED,
+        last_error:      null,
+        last_tested_at:  null,
+      },
+      { onConflict: 'client_id,provider' },
+    )
+    .select()
+    .single()
+
+  if (error) throw new Error(`cms_connections upsert (shopify) failed: ${error.message}`)
+
+  return rowToShopifyStatus(data as CmsConnectionRow)
+}
+
+export async function getShopifyConnectionStatus(
+  clientId: string,
+): Promise<ShopifyConnectionStatus | null> {
+  const { data, error } = await supabaseAdmin
+    .from('cms_connections')
+    .select('*')
+    .eq('client_id', clientId)
+    .eq('provider', CMS_PROVIDER.SHOPIFY)
+    .maybeSingle()
+
+  if (error) throw new Error(`cms_connections select (shopify) failed: ${error.message}`)
+  if (!data)  return null
+
+  return rowToShopifyStatus(data as CmsConnectionRow)
+}
+
+/**
+ * Server-only — returns the decrypted Admin API access token.
+ * Used by the Shopify publish connector. NEVER import from browser modules.
+ */
+export async function getShopifyConnection(
+  clientId: string,
+): Promise<(ShopifyConnectionStatus & { plainToken: string }) | null> {
+  const { data, error } = await supabaseAdmin
+    .from('cms_connections')
+    .select('*')
+    .eq('client_id', clientId)
+    .eq('provider', CMS_PROVIDER.SHOPIFY)
+    .maybeSingle()
+
+  if (error) throw new Error(`cms_connections select (shopify) failed: ${error.message}`)
+  if (!data)  return null
+
+  const row        = data as CmsConnectionRow
+  const plainToken = decryptToken(row.encrypted_token)
+
+  return {
+    ...rowToShopifyStatus(row),
+    plainToken,
+  }
+}
+
+export async function markShopifyConnectionTested(
+  clientId: string,
+  success:  boolean,
+  errorMsg?: string,
+): Promise<ShopifyConnectionStatus | null> {
+  const { data, error: dbErr } = await supabaseAdmin
+    .from('cms_connections')
+    .update({
+      status:         success ? CMS_STATUS.CONNECTED : CMS_STATUS.ERROR,
+      last_error:     success ? null : (errorMsg ?? 'Unknown error'),
+      last_tested_at: new Date().toISOString(),
+    })
+    .eq('client_id', clientId)
+    .eq('provider', CMS_PROVIDER.SHOPIFY)
+    .select()
+    .maybeSingle()
+
+  if (dbErr) throw new Error(`cms_connections update (shopify) failed: ${dbErr.message}`)
+  if (!data)  return null
+
+  return rowToShopifyStatus(data as CmsConnectionRow)
+}
+
+export async function deleteShopifyConnection(clientId: string): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from('cms_connections')
+    .delete()
+    .eq('client_id', clientId)
+    .eq('provider', CMS_PROVIDER.SHOPIFY)
+
+  if (error) throw new Error(`cms_connections delete (shopify) failed: ${error.message}`)
+}
+
+function rowToShopifyStatus(row: CmsConnectionRow): ShopifyConnectionStatus {
+  return {
+    connected:    row.status === CMS_STATUS.CONNECTED,
+    provider:     CMS_PROVIDER.SHOPIFY,
+    shopUrl:      row.site_url ?? '',
+    tokenHint:    row.token_last_four,
+    status:       row.status as ShopifyConnectionStatus['status'],
     lastError:    row.last_error,
     lastTestedAt: row.last_tested_at,
   }
