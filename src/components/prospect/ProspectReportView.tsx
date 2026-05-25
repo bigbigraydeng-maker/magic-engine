@@ -1,54 +1,58 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import type { DiscoveryReport, DiagnosisBlock } from '@/lib/zhangqian/types'
+import { useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
+import type { DiagnosisBlock, DiscoveryReport } from '@/lib/zhangqian/types'
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-export function scoreColor(v: number) { return v < 40 ? '#ef4444' : v < 65 ? '#eab308' : '#22c55e' }
-export function scoreLabel(v: number) { return v < 40 ? 'Critical' : v < 65 ? 'Needs Work' : 'Good' }
-
-export function fmt(n: number | null | undefined): string {
-  if (n == null) return '—'
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`
-  return String(n)
+export function scoreColor(value: number) {
+  if (value < 40) return '#dc2626'
+  if (value < 65) return '#ca8a04'
+  return '#059669'
 }
 
-// ─── Section helpers ──────────────────────────────────────────────────────────
+export function scoreLabel(value: number) {
+  if (value < 40) return 'Critical'
+  if (value < 65) return 'Needs work'
+  return 'Good'
+}
 
-export function SectionCard({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+export function fmt(value: number | null | undefined): string {
+  if (value == null) return '-'
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}k`
+  return String(value)
+}
+
+function SectionCard({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
-    <div
-      className={`rounded-2xl p-6 ${className}`}
-      style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(70,125,215,0.12)' }}
-    >
+    <section className={`rounded-lg border border-slate-200 bg-white p-5 shadow-sm sm:p-6 ${className}`}>
       {children}
-    </div>
+    </section>
   )
 }
 
-export function SectionLabel({ icon, label }: { icon: string; label: string }) {
+function SectionHeader({ eyebrow, title, body }: { eyebrow: string; title: string; body?: string }) {
   return (
-    <p className="text-[10px] uppercase tracking-wider font-semibold mb-4 flex items-center gap-1.5"
-       style={{ color: 'rgba(120,170,230,0.4)' }}>
-      <span>{icon}</span> {label}
-    </p>
+    <div className="mb-5 border-b border-slate-200 pb-4">
+      <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">{eyebrow}</p>
+      <h2 className="mt-2 text-2xl font-black text-slate-950">{title}</h2>
+      {body && <p className="mt-2 text-sm leading-6 text-slate-600">{body}</p>}
+    </div>
   )
 }
 
 function ScoreBar({ label, value, showScores }: { label: string; value: number; showScores: boolean }) {
   return (
-    <div className="space-y-1.5">
-      <div className="flex justify-between items-center">
-        <span className="text-[12px]" style={{ color: 'rgba(200,225,255,0.6)' }}>{label}</span>
-        <span className="text-[12px] font-bold tabular-nums" style={{ color: scoreColor(value) }}>
-          {value} <span className="text-[9px] font-normal opacity-60">{scoreLabel(value)}</span>
+    <div>
+      <div className="mb-2 flex items-center justify-between gap-4">
+        <span className="text-sm font-bold text-slate-800">{label}</span>
+        <span className="text-sm font-black tabular-nums" style={{ color: scoreColor(value) }}>
+          {value} <span className="text-xs font-semibold">{scoreLabel(value)}</span>
         </span>
       </div>
-      <div className="h-2 rounded-full" style={{ background: 'rgba(255,255,255,0.06)' }}>
+      <div className="h-2 rounded-lg bg-slate-100">
         <div
-          className="h-2 rounded-full transition-all duration-700"
+          className="h-2 rounded-lg transition-all duration-700"
           style={{ width: showScores ? `${value}%` : '0%', background: scoreColor(value) }}
         />
       </div>
@@ -56,45 +60,52 @@ function ScoreBar({ label, value, showScores }: { label: string; value: number; 
   )
 }
 
-// ─── Prescription gate CTA ────────────────────────────────────────────────────
+function MetricCard({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+      <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">{label}</p>
+      <p className="mt-5 text-2xl font-black text-slate-950">{value}</p>
+    </div>
+  )
+}
 
 export function PrescriptionGate() {
   return (
     <SectionCard>
-      <SectionLabel icon="💊" label="Action Plan & Prescriptions" />
-      <div className="rounded-xl p-6 text-center"
-           style={{ background: 'rgba(22,45,90,0.3)', border: '1px dashed rgba(70,125,215,0.3)' }}>
-        <div className="text-[28px] mb-3">🔒</div>
-        <h3 className="text-[15px] font-black mb-2" style={{ color: '#ECF3FF' }}>
-          Your Personalised Action Plan
-        </h3>
-        <p className="text-[12px] mb-5 max-w-xs mx-auto" style={{ color: 'rgba(120,170,230,0.55)' }}>
-          Based on your Discovery Report, our strategists have identified quick wins and a 90-day roadmap tailored to your brand.
-        </p>
+      <SectionHeader
+        eyebrow="Next step"
+        title="Turn this report into execution."
+        body="The public report shows the diagnosis. The next step is a prioritised action plan your team can approve and track."
+      />
+      <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
+        <div className="grid gap-3 sm:grid-cols-3">
+          {['Prioritise', 'Execute', 'Prove'].map((step, index) => (
+            <div key={step} className="rounded-lg bg-slate-950 p-4 text-white">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+                {String(index + 1).padStart(2, '0')}
+              </p>
+              <p className="mt-5 text-sm font-black">{step}</p>
+            </div>
+          ))}
+        </div>
         <a
-          href="mailto:hello@magiclab.com.au?subject=Action Plan — Discovery Report"
-          className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[13px] font-bold transition-all"
-          style={{
-            background: 'linear-gradient(135deg,#2855A4 0%,#183572 100%)',
-            border: '1px solid rgba(75,135,225,0.32)',
-            color: '#EEF4FF',
-          }}
+          href="mailto:hello@magiclab.com.au?subject=Action Plan - Discovery Report"
+          className="flex h-12 items-center justify-center rounded-lg bg-slate-950 px-5 text-sm font-black text-white"
         >
-          Talk to Us — Get My Action Plan →
+          Talk to us
         </a>
-        <p className="text-[10px] mt-3" style={{ color: 'rgba(255,255,255,0.2)' }}>
-          Free 30-minute strategy call · No commitment required
-        </p>
       </div>
     </SectionCard>
   )
 }
 
-// ─── Full report view ─────────────────────────────────────────────────────────
-
 export function ReportView({ report }: { report: DiscoveryReport }) {
   const [showScores, setShowScores] = useState(false)
-  useEffect(() => { setTimeout(() => setShowScores(true), 300) }, [])
+
+  useEffect(() => {
+    const timer = setTimeout(() => setShowScores(true), 300)
+    return () => clearTimeout(timer)
+  }, [])
 
   const diagnosis = report.diagnosis as DiagnosisBlock | null | undefined
   const snap = report.semrush_snapshot
@@ -106,258 +117,251 @@ export function ReportView({ report }: { report: DiscoveryReport }) {
   const overallScore = diagnosis?.scores?.overall ?? null
   const crisisType = diagnosis?.crisis_type ?? null
   const keyFinding = diagnosis?.key_finding ?? null
+  const quickFixes = diagnosis?.actions.quick_fix ?? []
   const dimensionScores = diagnosis?.scores
-    ? Object.entries(diagnosis.scores).filter(([k]) => k !== 'overall') as [string, number][]
+    ? (Object.entries(diagnosis.scores).filter(([key]) => key !== 'overall') as [string, number][])
     : []
 
   const yourTraffic = snap?.monthly_traffic ?? null
-  const maxTraffic = Math.max(yourTraffic ?? 0, ...competitors.map(c => c.monthly_traffic ?? 0)) || 1
+  const maxTraffic = Math.max(yourTraffic ?? 0, ...competitors.map(item => item.monthly_traffic ?? 0)) || 1
+  const businessName = report.business?.name ?? report.domain
+  const location = [
+    report.business?.location?.city,
+    report.business?.location?.region,
+  ].filter(Boolean).join(', ')
 
   return (
-    <div className="max-w-2xl mx-auto px-5 py-10 space-y-5">
+    <div className="px-5 py-8 sm:px-8">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <section className="rounded-lg bg-slate-950 p-6 text-white sm:p-8">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200">
+            Discovery report
+          </p>
+          <div className="mt-4 grid gap-6 md:grid-cols-[1fr_auto] md:items-start">
+            <div>
+              <h1 className="max-w-3xl text-4xl font-black leading-tight sm:text-5xl">
+                {businessName}
+              </h1>
+              <p className="mt-3 text-sm leading-6 text-slate-300">
+                {[report.business?.industry?.join(' / '), location].filter(Boolean).join(' - ') || report.domain}
+              </p>
+              {keyFinding && (
+                <p className="mt-6 max-w-2xl border-l-2 border-cyan-300 pl-4 text-base leading-7 text-slate-200">
+                  {keyFinding}
+                </p>
+              )}
+            </div>
 
-      {/* ── Hero ─────────────────────────────────────────────────────── */}
-      <SectionCard>
-        <div className="flex items-start justify-between gap-4 mb-4">
-          <div className="flex-1">
-            {crisisType && (
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider mb-3"
-                   style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.25)', color: '#f87171' }}>
-                🔴 {crisisType}
+            {overallScore !== null && (
+              <div className="rounded-lg border border-white/10 bg-white/[0.08] p-5 text-center">
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Overall</p>
+                <p className="mt-3 text-6xl font-black tabular-nums" style={{ color: scoreColor(overallScore) }}>
+                  {overallScore}
+                </p>
+                <p className="mt-1 text-xs font-bold uppercase tracking-[0.12em]" style={{ color: scoreColor(overallScore) }}>
+                  {scoreLabel(overallScore)}
+                </p>
               </div>
             )}
-            <h2 className="text-[18px] font-black mb-0.5" style={{ color: '#ECF3FF' }}>
-              {report.business?.name ?? report.domain}
-            </h2>
-            <p className="text-[11px] mb-1" style={{ color: 'rgba(120,170,230,0.4)' }}>
-              {report.business?.industry?.join(' · ')}
-              {report.business?.location?.city ? ` · ${report.business.location.city}` : ''}
-              {report.business?.location?.region ? `, ${report.business.location.region}` : ''}
-            </p>
           </div>
-          {overallScore !== null && (
-            <div className="text-right flex-shrink-0">
-              <div className="text-[44px] font-black leading-none tabular-nums"
-                   style={{ color: scoreColor(overallScore) }}>
-                {overallScore}
+        </section>
+
+        <SectionCard>
+          <SectionHeader eyebrow="Snapshot" title="Signal summary" />
+          <div className="grid gap-3">
+            {snap?.trust_score != null && <MetricCard label="Authority" value={snap.trust_score} />}
+            {snap?.monthly_traffic != null && <MetricCard label="Monthly traffic" value={fmt(snap.monthly_traffic)} />}
+            {report.gbp?.review_count != null && <MetricCard label="Reviews" value={report.gbp.review_count} />}
+            {socials.length > 0 && (
+              <MetricCard
+                label="Social reach"
+                value={fmt(socials.reduce((sum, item) => sum + (item.followers_count ?? 0), 0))}
+              />
+            )}
+            {snap?.trust_score == null && snap?.monthly_traffic == null && report.gbp?.review_count == null && socials.length === 0 && (
+              <p className="text-sm leading-6 text-slate-600">
+                The report found enough qualitative signals to build a diagnosis, but not enough public metrics for a full snapshot.
+              </p>
+            )}
+          </div>
+        </SectionCard>
+      </div>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="space-y-6">
+          {dimensionScores.length > 0 && (
+            <SectionCard>
+              <SectionHeader
+                eyebrow="Brand health"
+                title="Where the business is strong or exposed"
+                body={crisisType ? `Primary diagnosis: ${crisisType}` : undefined}
+              />
+              <div className="space-y-5">
+                {dimensionScores.map(([dimension, score]) => (
+                  <ScoreBar
+                    key={dimension}
+                    label={dimension.replace(/_/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase())}
+                    value={score}
+                    showScores={showScores}
+                  />
+                ))}
               </div>
-              <div className="text-[10px]" style={{ color: 'rgba(255,255,255,0.25)' }}>/100</div>
-              <div className="text-[10px] font-bold mt-0.5 uppercase tracking-wide"
-                   style={{ color: scoreColor(overallScore) }}>
-                {scoreLabel(overallScore)}
+            </SectionCard>
+          )}
+
+          {competitors.length > 0 && (
+            <SectionCard>
+              <SectionHeader
+                eyebrow="Competitor landscape"
+                title="How visible the market looks"
+                body="Traffic estimates are directional and used to prioritise where to investigate first."
+              />
+              <div className="space-y-4">
+                {yourTraffic != null && (
+                  <TrafficRow
+                    label={`${report.domain} (you)`}
+                    value={yourTraffic}
+                    maxValue={maxTraffic}
+                    active
+                    showScores={showScores}
+                  />
+                )}
+                {competitors.slice(0, 5).map(competitor => (
+                  <TrafficRow
+                    key={competitor.domain}
+                    label={competitor.name ?? competitor.domain}
+                    value={competitor.monthly_traffic ?? 0}
+                    maxValue={maxTraffic}
+                    showScores={showScores}
+                  />
+                ))}
               </div>
-            </div>
+            </SectionCard>
+          )}
+
+          {keywords.length > 0 && (
+            <SectionCard>
+              <SectionHeader eyebrow="Search visibility" title="Keyword opportunities" />
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[560px] text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
+                      <th className="pb-3 text-left">Keyword</th>
+                      <th className="pb-3 text-right">Rank</th>
+                      <th className="pb-3 text-right">Volume</th>
+                      <th className="pb-3 text-right">Difficulty</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {keywords.slice(0, 8).map((keyword, index) => (
+                      <tr key={`${keyword.keyword}-${index}`} className="border-b border-slate-100">
+                        <td className="py-3 pr-4 font-bold text-slate-800">{keyword.keyword}</td>
+                        <td className="py-3 text-right font-semibold tabular-nums text-slate-600">
+                          {keyword.semrush_rank ? `#${keyword.semrush_rank}` : '-'}
+                        </td>
+                        <td className="py-3 text-right tabular-nums text-slate-600">
+                          {keyword.semrush_volume ? fmt(keyword.semrush_volume) : keyword.estimated_volume ? `~${fmt(keyword.estimated_volume)}` : '-'}
+                        </td>
+                        <td className="py-3 text-right tabular-nums text-slate-600">
+                          {keyword.semrush_kd ?? '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </SectionCard>
           )}
         </div>
 
-        {keyFinding && (
-          <div className="pt-4" style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-            <p className="text-[12px] italic" style={{ color: 'rgba(160,200,255,0.5)' }}>
-              &ldquo;{keyFinding}&rdquo;
-            </p>
-          </div>
-        )}
-
-        {(snap?.monthly_traffic || snap?.trust_score || report.gbp?.review_count || socials.length > 0) && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
-            {snap?.trust_score != null && (
-              <div className="rounded-xl p-3 text-center"
-                   style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(70,125,215,0.1)' }}>
-                <div className="text-[18px] font-black" style={{ color: '#A5C8FF' }}>{snap.trust_score}</div>
-                <div className="text-[9px] uppercase tracking-wide mt-0.5" style={{ color: 'rgba(120,170,230,0.4)' }}>Authority</div>
-              </div>
-            )}
-            {snap?.monthly_traffic != null && (
-              <div className="rounded-xl p-3 text-center"
-                   style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(70,125,215,0.1)' }}>
-                <div className="text-[18px] font-black" style={{ color: '#A5C8FF' }}>{fmt(snap.monthly_traffic)}</div>
-                <div className="text-[9px] uppercase tracking-wide mt-0.5" style={{ color: 'rgba(120,170,230,0.4)' }}>Monthly Traffic</div>
-              </div>
-            )}
-            {report.gbp?.review_count != null && (
-              <div className="rounded-xl p-3 text-center"
-                   style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(70,125,215,0.1)' }}>
-                <div className="text-[18px] font-black" style={{ color: '#A5C8FF' }}>{report.gbp.review_count}</div>
-                <div className="text-[9px] uppercase tracking-wide mt-0.5" style={{ color: 'rgba(120,170,230,0.4)' }}>Reviews</div>
-              </div>
-            )}
-            {socials.length > 0 && (
-              <div className="rounded-xl p-3 text-center"
-                   style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(70,125,215,0.1)' }}>
-                <div className="text-[18px] font-black" style={{ color: '#A5C8FF' }}>
-                  {fmt(socials.reduce((sum, s) => sum + (s.followers_count ?? 0), 0))}
-                </div>
-                <div className="text-[9px] uppercase tracking-wide mt-0.5" style={{ color: 'rgba(120,170,230,0.4)' }}>Social Reach</div>
-              </div>
-            )}
-          </div>
-        )}
-      </SectionCard>
-
-      {/* ── 6-Dimension scores ─────────────────────────────────────────── */}
-      {dimensionScores.length > 0 && (
-        <SectionCard>
-          <SectionLabel icon="🩺" label="Brand Health Scores" />
-          <div className="space-y-4">
-            {dimensionScores.map(([dim, score]) => (
-              <ScoreBar
-                key={dim}
-                label={dim.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                value={score}
-                showScores={showScores}
-              />
-            ))}
-          </div>
-          {diagnosis?.quick_fixes && diagnosis.quick_fixes.length > 0 && (
-            <div className="mt-5 pt-4" style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-              <p className="text-[10px] uppercase tracking-wider font-semibold mb-3"
-                 style={{ color: 'rgba(120,170,230,0.4)' }}>⚡ Quick Wins</p>
-              <div className="space-y-2">
-                {diagnosis.quick_fixes.slice(0, 4).map((fix, i) => (
-                  <div key={i} className="flex items-start gap-2 text-[12px]"
-                       style={{ color: 'rgba(160,200,255,0.65)' }}>
-                    <span className="flex-shrink-0 text-[10px] mt-0.5 font-bold"
-                          style={{ color: '#4ade80' }}>#{i + 1}</span>
-                    {fix}
+        <div className="space-y-6">
+          {quickFixes.length > 0 && (
+            <SectionCard>
+              <SectionHeader eyebrow="Quick wins" title="What to fix first" />
+              <div className="space-y-3">
+                {quickFixes.slice(0, 5).map((fix, index) => (
+                  <div key={`${fix}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">
+                      Priority {index + 1}
+                    </p>
+                    <p className="mt-2 text-sm font-bold leading-6 text-slate-900">{fix}</p>
                   </div>
                 ))}
               </div>
-            </div>
+            </SectionCard>
           )}
-        </SectionCard>
-      )}
 
-      {/* ── Competitors ────────────────────────────────────────────────── */}
-      {competitors.length > 0 && (
-        <SectionCard>
-          <SectionLabel icon="🏆" label="Competitor Landscape" />
-          <div className="space-y-3">
-            {yourTraffic != null && (
-              <div className="flex items-center gap-3">
-                <div className="w-28 text-[11px] font-semibold truncate" style={{ color: '#A5C8FF' }}>
-                  {report.domain} <span className="text-[9px] opacity-50">(you)</span>
-                </div>
-                <div className="flex-1 h-2 rounded-full" style={{ background: 'rgba(255,255,255,0.06)' }}>
-                  <div className="h-2 rounded-full transition-all duration-700"
-                       style={{ width: showScores ? `${(yourTraffic / maxTraffic) * 100}%` : '0%', background: '#4ade80' }} />
-                </div>
-                <div className="text-[11px] tabular-nums w-14 text-right" style={{ color: '#4ade80' }}>
-                  {fmt(yourTraffic)}/mo
-                </div>
-              </div>
-            )}
-            {competitors.slice(0, 5).map(comp => (
-              <div key={comp.domain} className="flex items-center gap-3">
-                <div className="w-28 text-[11px] truncate" style={{ color: 'rgba(200,225,255,0.55)' }}>
-                  {comp.name ?? comp.domain}
-                </div>
-                <div className="flex-1 h-2 rounded-full" style={{ background: 'rgba(255,255,255,0.06)' }}>
-                  <div className="h-2 rounded-full transition-all duration-700"
-                       style={{ width: showScores ? `${((comp.monthly_traffic ?? 0) / maxTraffic) * 100}%` : '0%', background: '#ef4444' }} />
-                </div>
-                <div className="text-[11px] tabular-nums w-14 text-right" style={{ color: 'rgba(239,68,68,0.7)' }}>
-                  {comp.monthly_traffic ? `${fmt(comp.monthly_traffic)}/mo` : '—'}
-                </div>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-      )}
-
-      {/* ── Keywords ───────────────────────────────────────────────────── */}
-      {keywords.length > 0 && (
-        <SectionCard>
-          <SectionLabel icon="🔑" label="Keyword Rankings" />
-          <div className="overflow-x-auto">
-            <table className="w-full text-[11px]">
-              <thead>
-                <tr style={{ color: 'rgba(120,170,230,0.4)' }}>
-                  <th className="text-left pb-2 font-semibold">Keyword</th>
-                  <th className="text-right pb-2 font-semibold">Rank</th>
-                  <th className="text-right pb-2 font-semibold">Volume/mo</th>
-                  <th className="text-right pb-2 font-semibold">Difficulty</th>
-                </tr>
-              </thead>
-              <tbody>
-                {keywords.slice(0, 8).map((kw, i) => (
-                  <tr key={i} style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
-                    <td className="py-2 pr-4" style={{ color: 'rgba(200,225,255,0.7)' }}>{kw.keyword}</td>
-                    <td className="py-2 text-right tabular-nums" style={{
-                      color: kw.semrush_rank ? (kw.semrush_rank <= 10 ? '#4ade80' : kw.semrush_rank <= 30 ? '#eab308' : '#ef4444') : 'rgba(120,170,230,0.3)',
-                    }}>
-                      {kw.semrush_rank ? `#${kw.semrush_rank}` : '—'}
-                    </td>
-                    <td className="py-2 text-right tabular-nums" style={{ color: 'rgba(160,200,255,0.5)' }}>
-                      {kw.semrush_volume ? fmt(kw.semrush_volume) : kw.estimated_volume ? `~${fmt(kw.estimated_volume)}` : '—'}
-                    </td>
-                    <td className="py-2 text-right tabular-nums" style={{
-                      color: !kw.semrush_kd ? 'rgba(120,170,230,0.3)' : kw.semrush_kd < 30 ? '#4ade80' : kw.semrush_kd < 60 ? '#eab308' : '#ef4444',
-                    }}>
-                      {kw.semrush_kd ?? '—'}
-                    </td>
-                  </tr>
+          {(socials.length > 0 || reviewPlatforms.length > 0 || report.gbp) && (
+            <SectionCard>
+              <SectionHeader eyebrow="Reputation" title="Social and review footprint" />
+              <div className="space-y-3">
+                {socials.map(profile => (
+                  <InfoRow
+                    key={profile.platform}
+                    label={profile.platform}
+                    value={profile.followers_count ? `${fmt(profile.followers_count)} followers` : profile.handle ?? '-'}
+                  />
                 ))}
-              </tbody>
-            </table>
-          </div>
-        </SectionCard>
-      )}
-
-      {/* ── Social & Reviews ───────────────────────────────────────────── */}
-      {(socials.length > 0 || reviewPlatforms.length > 0 || report.gbp) && (
-        <SectionCard>
-          <SectionLabel icon="📱" label="Social & Reputation" />
-          <div className="space-y-4">
-            {socials.length > 0 && (
-              <div className="space-y-2">
-                {socials.map(s => (
-                  <div key={s.platform} className="flex items-center justify-between py-2"
-                       style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[14px]">{
-                        s.platform === 'instagram' ? '📸' :
-                        s.platform === 'tiktok' ? '🎵' :
-                        s.platform === 'facebook' ? '👥' :
-                        s.platform === 'linkedin' ? '💼' :
-                        s.platform === 'youtube' ? '▶️' : '🔗'
-                      }</span>
-                      <span className="text-[12px] capitalize" style={{ color: 'rgba(200,225,255,0.6)' }}>
-                        {s.platform}
-                      </span>
-                    </div>
-                    <span className="text-[12px] font-semibold tabular-nums" style={{ color: '#A5C8FF' }}>
-                      {s.followers_count ? `${fmt(s.followers_count)} followers` : s.handle ?? '—'}
-                    </span>
-                  </div>
+                {report.gbp && (
+                  <InfoRow
+                    label="Business profile"
+                    value={`${report.gbp.rating ? `${report.gbp.rating}/5` : '-'}${report.gbp.review_count ? ` - ${report.gbp.review_count} reviews` : ''}`}
+                  />
+                )}
+                {reviewPlatforms.map(platform => (
+                  <InfoRow
+                    key={platform.platform}
+                    label={platform.platform}
+                    value={`${platform.rating ? `${platform.rating}/5` : '-'}${platform.review_count ? ` - ${platform.review_count} reviews` : ''}`}
+                  />
                 ))}
               </div>
-            )}
-            {report.gbp && (
-              <div className="flex items-center justify-between">
-                <span className="text-[12px]" style={{ color: 'rgba(200,225,255,0.6)' }}>⭐ Google Business</span>
-                <span className="text-[12px] font-semibold" style={{ color: '#A5C8FF' }}>
-                  {report.gbp.rating ? `${report.gbp.rating}/5` : '—'}
-                  {report.gbp.review_count ? ` · ${report.gbp.review_count} reviews` : ''}
-                </span>
-              </div>
-            )}
-            {reviewPlatforms.map(rp => (
-              <div key={rp.platform} className="flex items-center justify-between">
-                <span className="text-[12px] capitalize" style={{ color: 'rgba(200,225,255,0.6)' }}>
-                  📋 {rp.platform}
-                </span>
-                <span className="text-[12px] font-semibold" style={{ color: '#A5C8FF' }}>
-                  {rp.rating ? `${rp.rating}/5` : '—'}
-                  {rp.review_count ? ` · ${rp.review_count} reviews` : ''}
-                </span>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-      )}
+            </SectionCard>
+          )}
 
-      {/* ── Prescription gate ──────────────────────────────────────────── */}
-      <PrescriptionGate />
+          <PrescriptionGate />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function TrafficRow({
+  label,
+  value,
+  maxValue,
+  active = false,
+  showScores,
+}: {
+  label: string
+  value: number
+  maxValue: number
+  active?: boolean
+  showScores: boolean
+}) {
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between gap-4">
+        <p className={`truncate text-sm font-bold ${active ? 'text-emerald-800' : 'text-slate-800'}`}>{label}</p>
+        <p className={`text-sm font-black tabular-nums ${active ? 'text-emerald-700' : 'text-slate-600'}`}>
+          {value ? `${fmt(value)}/mo` : '-'}
+        </p>
+      </div>
+      <div className="h-2 rounded-lg bg-slate-100">
+        <div
+          className={`h-2 rounded-lg transition-all duration-700 ${active ? 'bg-emerald-500' : 'bg-slate-400'}`}
+          style={{ width: showScores ? `${(value / maxValue) * 100}%` : '0%' }}
+        />
+      </div>
+    </div>
+  )
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+      <p className="text-sm font-bold capitalize text-slate-800">{label}</p>
+      <p className="text-right text-sm font-semibold text-slate-600">{value}</p>
     </div>
   )
 }
