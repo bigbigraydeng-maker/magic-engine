@@ -25,8 +25,13 @@ export async function GET(request: NextRequest) {
   }
 
   const email = user.email.toLowerCase()
+  const adminPerms = getUserPermissions(email)
+  if (adminPerms?.role === 'admin') {
+    const adminPath = safePath.startsWith('/dashboard') ? safePath : '/dashboard'
+    return NextResponse.json({ redirect: adminPath })
+  }
 
-  // Portal users take priority
+  // Non-admin portal users take priority
   const { data: accessRows } = await supabaseAdmin
     .from('client_portal_users')
     .select('client_id, access_type')
@@ -43,12 +48,6 @@ export async function GET(request: NextRequest) {
   // Honour explicit /prospect next param (magic link from /discover)
   if (safePath === '/prospect') {
     return NextResponse.json({ redirect: '/prospect' })
-  }
-
-  // Admin users go to dashboard
-  const adminPerms = getUserPermissions(email)
-  if (adminPerms?.role === 'admin') {
-    return NextResponse.json({ redirect: safePath })
   }
 
   // Prospects: have a public_scan_jobs record but no portal/dashboard access

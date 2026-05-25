@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-26 01:11 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。
+> 最后更新：2026-05-26 01:22 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -13,6 +13,7 @@
 - [x] **P13.UI.3 website homepage production upgrade** - Replace the public homepage with the new Magic Engine product narrative and shared website-to-portal visual language.
 - [x] **P13.UI.4 discover page UI refresh** - Upgrade `/discover` into the shared prospect entry experience aligned with the new homepage and portal visual language.
 - [x] **P13.UI.5 prospect report UI refresh** - Upgrade `/prospect` loading, empty, failed, and completed report states into the shared prospect-to-portal report experience.
+- [x] **P13.A.8 admin auth priority repair** - Ensure `ADMIN_EMAILS` accounts route to the admin dashboard before portal/prospect bindings; remove accidental CTS portal binding for the admin email.
 
 ## 当前进度速览
 
@@ -2195,6 +2196,7 @@ AU / NZ（当前）          新市场（未来）
 - **P13.A.4（prospect 报告看板）** — 新建 `/prospect/page.tsx`：轮询 `/api/prospect/report`（按 email 查最新 scan）→ 扫描中显示 LoadingView + 实时日志流 → 完成显示 Discovery Report（含健康评分 / 竞品 / 关键词 / 社媒评价）→ 处方区域显示 `PrescriptionGate`（Talk to Us CTA）
 - **P13.A.5（prospect report API）** — 新建 `GET /api/prospect/report`：Supabase session 鉴权 → 按 user.email 查 public_scan_jobs 最新行 → 返回 status + progress_log + result
 - **P13.A.6（middleware + auth callback）** — middleware 加 `/prospect` 路由块（仅验证 Supabase auth，无角色要求）；matcher 加 `/prospect/:path*`；auth/callback 加 prospect 检测（有 public_scan_jobs 记录 + 无 portal/dashboard 权限 → 重定向 /prospect）；build ✅
+- **P13.A.8（admin auth priority）** — 修复 admin 邮箱同时存在 portal/prospect 关系时被客户账号抢走的问题；`ADMIN_EMAILS` 优先进入 dashboard；清理 `bigbigraydeng@gmail.com` 的 CTS portal 绑定
 - **P13.UI.4** — `/discover` 升级为新版官网一致的 prospect 入口；移除真实供应商名；表单、成功页、诊断产物预览统一视觉语言
 - **P13.UI.5** — `/prospect` 报告页升级：扫描中、无报告、失败、完成报告四态统一为新版 prospect-to-portal 体验；报告卡片改为浅色可读版
 - **P14.A.4（Shopify connector）** — migration 扩展 provider shape 约束加 shopify；shopify-guard（SSRF 防护 17 单测全绿）；shopify-client（Admin REST 2024-01：testConnection / listBlogs / getOrCreateDefaultBlog / createArticleDraft / publishArticle / createPageDraft / publishPage）；html-sanitizer MVP；vocabulary 加 SHOPIFY + ShopifyConnectionStatus；connection-store 加 Shopify CRUD；/cms/shopify CRUD + 保存即测 token；/cms/publish-shopify 两步 draft→publish，幂等写 website_publish_jobs；TS 零错误，17 tests ✅
