@@ -678,15 +678,15 @@ describe('checkSeoCompliance', () => {
       expect(result.passed[7]).toBe(false)
     })
 
-    it('FAIL: ld+json schema present but type is BlogPosting not Article', () => {
+    it('PASS: ld+json schema with @type=BlogPosting is accepted (subtype of Article)', () => {
       const html = buildPerfectSeoHtml({ schemaType: 'BlogPosting' })
       const result = checkSeoCompliance(html, {
         primaryKeyword: 'china tours new zealand',
         metaTitle: 'China Tours New Zealand: Expert Guide for Travelers',
         metaDescription: 'Discover china tours new zealand. Book now today and save big.',
       })
-      // BlogPosting is NOT Article — should fail
-      expect(result.passed[7]).toBe(false)
+      // BlogPosting is a valid Article subtype in schema.org — must pass
+      expect(result.passed[7]).toBe(true)
     })
 
     it('FAIL: ld+json schema present but JSON is empty object', () => {

@@ -40,7 +40,7 @@ import {
   publishShopifyPage,
   getOrCreateDefaultBlog,
 } from '@/lib/cms/shopify-client'
-import { sanitizeHtml } from '@/lib/cms/html-sanitizer'
+import { prepareCmsContent } from '@/lib/cms/html-sanitizer'
 import { CMS_ACTION_TYPE } from '@/lib/cms/vocabulary'
 
 interface RouteContext {
@@ -174,9 +174,9 @@ async function handleDraft(clientId: string, body: DraftRequestBody): Promise<Ne
     return NextResponse.json({ success: false, error: 'Blog post not found', code: 'NOT_FOUND' }, { status: 404 })
   }
 
-  const title    = typeof post.title   === 'string' ? post.title   : 'Untitled'
-  const rawHtml  = typeof post.content === 'string' ? post.content : (typeof post.body === 'string' ? post.body : '')
-  const bodyHtml = sanitizeHtml(rawHtml)
+  const title    = typeof post.title     === 'string' ? post.title     : 'Untitled'
+  const rawHtml  = typeof post.html_body === 'string' ? post.html_body : ''
+  const bodyHtml = prepareCmsContent(rawHtml)
   const summary  = typeof post.meta_description === 'string' ? post.meta_description : undefined
 
   const snapshot    = { title, bodyHtml, summary, source_type, source_id, target_type }

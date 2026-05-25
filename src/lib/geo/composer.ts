@@ -290,7 +290,7 @@ function buildUserMessage(input: {
   ]
 
   if (audienceLocation) {
-    lines.push(`Location: ${audienceLocation} — IMPORTANT: use this city/region (not Sydney or any other city) in all scenario trigger questions and response text.`)
+    lines.push(`Location: ${audienceLocation} — IMPORTANT: all scenario trigger questions and response text MUST reference "${audienceLocation}" as the location. Do not substitute any other city or region.`)
   }
 
   if (brief?.core_proposition) {

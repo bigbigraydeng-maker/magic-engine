@@ -394,11 +394,11 @@ function checkSchemaJsonLd(html: string): { passed: boolean; detail: string } {
   }
 
   const schemaContent = schemaMatch[1]
-  // Allow for whitespace and single/double quotes: "@type" : "Article" or "@type":"Article"
-  const hasArticleType = /"@type"\s*:\s*"Article"/i.test(schemaContent)
+  // Accept both "Article" and "BlogPosting" — both are valid Article schema subtypes.
+  const hasArticleType = /"@type"\s*:\s*"(?:Article|BlogPosting)"/i.test(schemaContent)
 
   if (!hasArticleType) {
-    return { passed: false, detail: 'Schema found but @type is not "Article".' }
+    return { passed: false, detail: 'Schema found but @type is not "Article" or "BlogPosting".' }
   }
 
   return { passed: true, detail: 'Article schema JSON-LD is present.' }

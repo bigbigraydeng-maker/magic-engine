@@ -40,7 +40,7 @@ import {
   createWordpressPageDraft,
   publishWordpressPage,
 } from '@/lib/cms/wordpress-client'
-import { sanitizeHtml } from '@/lib/cms/html-sanitizer'
+import { prepareCmsContent } from '@/lib/cms/html-sanitizer'
 import { CMS_ACTION_TYPE } from '@/lib/cms/vocabulary'
 
 interface RouteContext {
@@ -207,10 +207,9 @@ async function handleDraft(clientId: string, body: DraftRequestBody): Promise<Ne
   }
 
   const title   = typeof post.title            === 'string' ? post.title            : 'Untitled'
-  const rawHtml = typeof post.html_body        === 'string' ? post.html_body        :
-                  typeof post.content          === 'string' ? post.content          : ''
+  const rawHtml = typeof post.html_body        === 'string' ? post.html_body        : ''
   const excerpt = typeof post.meta_description === 'string' ? post.meta_description : undefined
-  const content = sanitizeHtml(rawHtml)
+  const content = prepareCmsContent(rawHtml)
 
   const snapshot    = { title, content, excerpt, source_type, source_id, target_type }
   const payloadHash = sha256(JSON.stringify(snapshot))

@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-26 03:06 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
+> 最后更新：2026-05-26 03:42 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -1704,6 +1704,44 @@ Production Item    = 订单里的具体产物
 > **背景**：Magic Engine 现有能力止步于"内容生产 + 存库"；VIP 客户（$2.5k–$3k/月 FDE 嵌入服务）需要 FDE 能在 ME 界面内一键把内容推送到客户网站，无需手动复制粘贴。Website Connector 是 ME 从"内容生产工具"升级为"执行引擎"的关键拼图，同时补全飞轮闭环：诊断 → 生成 → **发布** → 指标回流 → outcome 归因。
 >
 > **架构原则**：通过各平台官方 API 推送，ME 服务器不接触客户源代码；发布必须 draft-first，FDE 确认预览后再 publish；每次执行有完整快照 + payload hash，支持审计和回滚。
+
+### Phase 14 CMS 连接器框架（平台无关，2026-05-26 确立）⭐
+
+> **战略背景**：2026-05-26 首次为 Oztop 手动发布 WP 博客，完整踩过 15 步操作流程，系统性发现 7 个平台集成问题。WordPress 作为第一参考实现，Shopify / Webflow / 其他平台复用同一五层架构。
+
+**五层通用架构：**
+
+```
+Layer 1  连接鉴权      WordPress=App Password · Shopify=OAuth · Webflow=OAuth
+Layer 2  内容清洗      平台感知：Strip H1 / Strip Schema JSON-LD / Fix GEO City / 字段映射
+Layer 3  SEO 配置     WordPress=Yoast REST API · Shopify=原生字段 · Webflow=原生字段
+Layer 4  发布流程      统一 Draft→Preview→Publish 三步；幂等 + 快照 + rollback
+Layer 5  发布后动作    Google Search Console 收录（平台无关）+ Flywheel Action 回写
+```
+
+**WordPress 参考实现 — 7 个已验证问题清单：**
+
+| # | 问题 | 根因 | 通用解法 |
+|---|---|---|---|
+| 1 | IP 被 SiteGround 封锁 | Render 共享 IP 触发 nginx ipr 规则 | 静态出口 IP 或 ME WP Connector Plugin |
+| 2 | H1 标签重复 | WP 标题已是 H1，ME body 含第二个 | Layer 2 内容清洗：strip `<h1>` |
+| 3 | Schema JSON-LD 被 `<br>` 污染 | WP wpautop filter 注入换行 | Layer 2 清洗：删除整个 `<script type="application/ld+json">` |
+| 4 | GEO 城市硬编码 "Sydney" | geo-directive-generator.ts bug | 动态注入 `client.location` |
+| 5 | 文章无内链 | ME 不知道客户网站 URL 结构 | Phase 14.F Site Knowledge Graph |
+| 6 | SEO 配置（Yoast）需手动 | 无 API 集成 | Layer 3：Yoast REST API 自动配置 |
+| 7 | GSC 收录需手动提交 | 无 OAuth 集成 | Layer 5：GSC API + OAuth |
+
+**Shopify 对应实现（已有 Phase 14.A.4 基础）：**
+- Layer 1 ✅（已完成）
+- Layer 2：HTML → Shopify Article body_html 字段映射
+- Layer 3：Shopify Admin API SEO title/description 原生字段
+- Layer 5：同一 GSC API + Flywheel 回写
+
+**开发优先级：**
+1. 🔴 修 4 个 Bug（GEO城市 + H1 + Schema + Layer2清洗），1–2天
+2. 🟡 Phase 14.F Site Knowledge Graph，3–5天
+3. 🟢 Layer 3 Yoast API + Layer 5 GSC API，1–2周
+4. 🔵 Render 静态 IP（解除 SiteGround 封锁），基础设施
 
 ### Phase 14 商业场景
 

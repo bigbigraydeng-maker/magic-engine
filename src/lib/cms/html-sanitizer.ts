@@ -1,10 +1,16 @@
 /**
  * html-sanitizer — allowlist-based HTML sanitizer for content pushed to external CMS platforms.
  *
- * Phase 14.A.7: upgraded from MVP regex-only to a two-pass approach:
- *   Pass 1 — remove inherently dangerous elements (script, iframe, style, form, svg, math, …).
- *   Pass 2 — strip any remaining tags not in the allowlist, preserving their inner content.
- *   Pass 3 — strip any remaining attributes not in the per-tag allowlist.
+ * Phase 14.A.7: upgraded from MVP regex-only to a three-pass approach.
+ * Bug-fix update: JSON-LD schema blocks (<script type="application/ld+json">) are now
+ *   extracted before sanitisation and re-injected afterwards so they survive Pass 2/3.
+ *
+ * Sanitisation pipeline:
+ *   Pre-pass  — extract JSON-LD blocks to null-char placeholders.
+ *   Pass 1    — remove inherently dangerous elements (script, iframe, style, form, svg, …).
+ *   Pass 2    — strip any remaining tags not in the allowlist, preserving their inner content.
+ *   Pass 3    — strip any remaining attributes not in the per-tag allowlist.
+ *   Post-pass — restore JSON-LD blocks from placeholders.
  *
  * No external dependencies — uses only Node.js built-ins and string manipulation.
  *
@@ -13,11 +19,20 @@
  *                     target, rel, width, height, colspan, rowspan.
  */
 
+// ─── Pre-pass: extract JSON-LD blocks before sanitisation ────────────────────
+
+// Matches <script type="application/ld+json">…</script> blocks that should be preserved.
+const JSONLD_BLOCK_RE = /<script\s[^>]*type=['"]application\/ld\+json['"][^>]*>[\s\S]*?<\/script\s*>/gi
+
 // ─── Pass 1: remove dangerous element blocks (tag + content) ─────────────────
 
+// Strip all remaining <script> blocks (JSON-LD already extracted by pre-pass).
+const DANGEROUS_SCRIPT_RE = /<script[^>]*>[\s\S]*?<\/script\s*>/gi
+
+// Strip other dangerous block elements.
 const DANGEROUS_BLOCK_RE = new RegExp(
-  '<(?:script|style|iframe|object|embed|applet|form|svg|math|template)' +
-  '\\b[^>]*>[\\s\\S]*?<\\/(?:script|style|iframe|object|embed|applet|form|svg|math|template)\\s*>',
+  '<(?:style|iframe|object|embed|applet|form|svg|math|template)' +
+  '\\b[^>]*>[\\s\\S]*?<\\/(?:style|iframe|object|embed|applet|form|svg|math|template)\\s*>',
   'gi',
 )
 
@@ -132,8 +147,16 @@ function rewriteAttributes(html: string): string {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export function sanitizeHtml(input: string): string {
+  // Pre-pass: extract JSON-LD blocks — Pass 2/3 would strip <script> tags regardless of type.
+  const jsonLdBlocks: string[] = []
+  let out = input.replace(JSONLD_BLOCK_RE, (match) => {
+    const idx = jsonLdBlocks.push(match) - 1
+    return `\x00JSONLD${idx}\x00`
+  })
+
   // Pass 1: remove dangerous block/void elements and dangerous attribute patterns.
-  let out = input
+  out = out
+    .replace(DANGEROUS_SCRIPT_RE, '')
     .replace(DANGEROUS_BLOCK_RE, '')
     .replace(DANGEROUS_VOID_RE, '')
     .replace(EVENT_HANDLER_RE, '')
@@ -147,5 +170,29 @@ export function sanitizeHtml(input: string): string {
     ALLOWED_TAGS.has(tag.toLowerCase()) ? `</${tag}>` : '',
   )
 
+  // Post-pass: restore JSON-LD blocks.
+  jsonLdBlocks.forEach((block, i) => {
+    out = out.replace(`\x00JSONLD${i}\x00`, block)
+  })
+
   return out
+}
+
+/**
+ * Strip the first H1 element from HTML before CMS publishing.
+ * WordPress and Shopify both render the post `title` field as an H1 automatically,
+ * so keeping H1 in the body would create a duplicate heading.
+ */
+export function stripLeadingH1(html: string): string {
+  return html.replace(/<h1[^>]*>[\s\S]*?<\/h1>/i, '').replace(/^\s+/, '')
+}
+
+/**
+ * Layer-2 CMS content preparation pipeline.
+ * Run this instead of bare sanitizeHtml() in every CMS publish route:
+ *   1. Strip duplicate H1 (CMS title field adds one automatically).
+ *   2. Sanitize HTML (allowlist tags/attrs, strip scripts except JSON-LD).
+ */
+export function prepareCmsContent(html: string): string {
+  return sanitizeHtml(stripLeadingH1(html))
 }
