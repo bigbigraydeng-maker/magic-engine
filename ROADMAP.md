@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-25 18:10 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。
+> 最后更新：2026-05-26 00:22 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -10,6 +10,7 @@
 ### Active hotfix registration - 2026-05-25
 
 - [x] **P13.A.7 portal/prospect magic link repair** - Fix `/portal/login` being routed to internal admin login; add browser callback for magic-link hash sessions; allow `client_portal_users` emails to create first-time Auth users; add regression tests.
+- [x] **P13.UI.3 website homepage production upgrade** - Replace the public homepage with the new Magic Engine product narrative and shared website-to-portal visual language.
 
 ## 当前进度速览
 
@@ -2166,6 +2167,7 @@ AU / NZ（当前）          新市场（未来）
 
 ## 9. 功能完成日志
 
+- **P13.UI.3** — Website homepage upgraded to shared UI language
 - **P13.A.7** — Portal magic link can reach client portal
 
 > 每次上线新功能时在此追加。格式：**[完成日期]** — Phase ID + 描述 + Commit 引用。
