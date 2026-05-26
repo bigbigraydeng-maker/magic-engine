@@ -19,6 +19,8 @@ import type { MarketingPlan } from '@/lib/marketing-plan/types'
 interface CampaignLite {
   id: string
   title: string
+  valid_from: string | null
+  valid_until: string | null
 }
 
 interface Props {
@@ -44,6 +46,8 @@ export function PlanGenerator({ clientId, onGenerated, onCancel }: Props) {
 
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
+  const [generatingFocus, setGeneratingFocus] = useState(false)
+  const [focusGenError, setFocusGenError] = useState('')
 
   // 载入活跃 Campaign 供选择
   useEffect(() => {
@@ -56,10 +60,12 @@ export function PlanGenerator({ clientId, onGenerated, onCancel }: Props) {
         if (!cancelled) {
           const list = json.campaigns ?? []
           setCampaigns(list)
-          // 默认选第一个 + 用其标题预填 Plan 标题
+          // 默认选第一个 + 用其标题预填 Plan 标题 + 继承日期
           if (list[0]) {
             setCampaignId(list[0].id)
             setTitle(`${list[0].title} · 营销计划`)
+            if (list[0].valid_from) setStartDate(list[0].valid_from)
+            if (list[0].valid_until) setEndDate(list[0].valid_until)
           }
         }
       } catch {
@@ -68,6 +74,37 @@ export function PlanGenerator({ clientId, onGenerated, onCancel }: Props) {
     })()
     return () => { cancelled = true }
   }, [clientId])
+
+  // Campaign 切换时继承日期
+  const handleCampaignChange = (id: string) => {
+    setCampaignId(id)
+    const campaign = campaigns.find(c => c.id === id)
+    if (campaign?.valid_from) setStartDate(campaign.valid_from)
+    if (campaign?.valid_until) setEndDate(campaign.valid_until)
+  }
+
+  // 当前选中 Campaign 是否有日期（决定日期字段是否只读）
+  const selectedCampaign = campaigns.find(c => c.id === campaignId)
+  const campaignHasDates = Boolean(selectedCampaign?.valid_from && selectedCampaign?.valid_until)
+
+  const generateFocus = async () => {
+    setGeneratingFocus(true)
+    setFocusGenError('')
+    try {
+      const res = await fetch(`/api/clients/${clientId}/marketing-plan/generate-focus`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaign_id: campaignId || undefined }),
+      })
+      const json = await res.json() as { success: boolean; focus_note?: string; error?: string }
+      if (!json.success || !json.focus_note) throw new Error(json.error ?? '生成失败')
+      setFocusNote(json.focus_note)
+    } catch (err) {
+      setFocusGenError((err as Error).message)
+    } finally {
+      setGeneratingFocus(false)
+    }
+  }
 
   const submit = async () => {
     if (!title.trim()) { setError('请填写 Plan 标题'); return }
@@ -138,7 +175,7 @@ export function PlanGenerator({ clientId, onGenerated, onCancel }: Props) {
             <label className="block text-xs font-medium text-gray-600 mb-1">关联 Campaign（可选）</label>
             <select
               value={campaignId}
-              onChange={e => setCampaignId(e.target.value)}
+              onChange={e => handleCampaignChange(e.target.value)}
               className={INPUT}
             >
               <option value="">不关联（仅用品牌 DNA）</option>
@@ -156,12 +193,34 @@ export function PlanGenerator({ clientId, onGenerated, onCancel }: Props) {
           {/* 时间范围 */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">开始日期 *</label>
-              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className={INPUT} />
+              <label className="block text-xs font-medium text-gray-600 mb-1 flex items-center gap-1">
+                开始日期 *
+                {campaignHasDates && (
+                  <span className="text-[10px] text-indigo-500 font-normal">🔒 继承自 Campaign</span>
+                )}
+              </label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={e => setStartDate(e.target.value)}
+                readOnly={campaignHasDates}
+                className={`${INPUT} ${campaignHasDates ? 'bg-indigo-50 text-indigo-700 cursor-default' : ''}`}
+              />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">结束日期 *</label>
-              <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className={INPUT} />
+              <label className="block text-xs font-medium text-gray-600 mb-1 flex items-center gap-1">
+                结束日期 *
+                {campaignHasDates && (
+                  <span className="text-[10px] text-indigo-500 font-normal">🔒 继承自 Campaign</span>
+                )}
+              </label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={e => setEndDate(e.target.value)}
+                readOnly={campaignHasDates}
+                className={`${INPUT} ${campaignHasDates ? 'bg-indigo-50 text-indigo-700 cursor-default' : ''}`}
+              />
             </div>
           </div>
 
@@ -193,16 +252,36 @@ export function PlanGenerator({ clientId, onGenerated, onCancel }: Props) {
 
           {/* Focus note */}
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              FDE 关注点（可选）<span className="text-gray-400 font-normal ml-1">— 引导 AI</span>
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium text-gray-600">
+                FDE 关注点（可选）<span className="text-gray-400 font-normal ml-1">— 引导 AI 生成方向</span>
+              </label>
+              <button
+                type="button"
+                onClick={generateFocus}
+                disabled={generatingFocus || loading}
+                className="flex items-center gap-1 text-[11px] text-indigo-600 hover:text-indigo-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {generatingFocus ? (
+                  <>
+                    <span className="w-2.5 h-2.5 border border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                    生成中…
+                  </>
+                ) : (
+                  <>✦ AI Generate</>
+                )}
+              </button>
+            </div>
             <textarea
               value={focusNote}
               onChange={e => setFocusNote(e.target.value)}
-              rows={2}
-              placeholder='例: "本月重点突破 NZ 退休群体，社媒侧重 Reels 视频"'
+              rows={3}
+              placeholder='例: "本月重点突破 NZ 退休群体，社媒侧重 Reels 视频"&#10;或点击 ✦ AI Generate 自动起草'
               className={`${INPUT} resize-none`}
             />
+            {focusGenError && (
+              <p className="text-[11px] text-red-500 mt-1">⚠ {focusGenError}</p>
+            )}
           </div>
 
           {error && (
