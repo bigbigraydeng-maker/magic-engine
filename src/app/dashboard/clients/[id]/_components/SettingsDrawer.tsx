@@ -23,11 +23,11 @@ interface Props {
   onTabChange: (tab: SettingsTab) => void
 }
 
-const TABS: { id: SettingsTab; label: string }[] = [
-  { id: 'brief',       label: '✨ Master Brief' },
-  { id: 'client-info', label: '👤 客户信息' },
-  { id: 'cms',         label: '🔗 网站连接' },
-  { id: 'users',       label: '🔑 用户权限' },
+const TABS: { id: SettingsTab; label: string; code: string }[] = [
+  { id: 'brief',       label: 'Master Brief', code: 'MB' },
+  { id: 'client-info', label: '客户信息', code: 'CI' },
+  { id: 'cms',         label: '网站连接', code: 'CN' },
+  { id: 'users',       label: '用户权限', code: 'US' },
 ]
 
 export function SettingsDrawer({ open, onClose, clientId, client, activeTab, onTabChange }: Props) {
@@ -41,47 +41,48 @@ export function SettingsDrawer({ open, onClose, clientId, client, activeTab, onT
 
   return (
     <>
-      {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/25 z-40 transition-opacity"
+        className="fixed inset-0 z-40 bg-slate-950/35 backdrop-blur-sm"
         onClick={onClose}
       />
 
-      {/* Drawer panel */}
-      <div className="fixed right-0 top-0 h-full w-[700px] max-w-[92vw] bg-white shadow-2xl z-50 flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <span className="text-gray-400">⚙️</span>
-            <h2 className="text-sm font-semibold text-gray-900">设置 — {client.name}</h2>
+      <div className="fixed inset-y-0 right-0 z-50 flex w-full flex-col overflow-hidden border-l border-slate-200 bg-[#f6f7f2] shadow-2xl lg:w-[min(1120px,calc(100vw-360px))]">
+        <div className="flex flex-shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-5 py-5">
+          <div className="min-w-0">
+            <p className="text-[11px] font-black uppercase tracking-[0.14em] text-cyan-800">Client settings</p>
+            <h2 className="mt-1 truncate text-2xl font-black text-slate-950">设置 — {client.name}</h2>
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors text-lg leading-none"
+            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-lg font-black text-slate-400 transition hover:border-slate-300 hover:text-slate-700"
+            aria-label="Close settings"
           >
-            ×
+            x
           </button>
         </div>
 
-        {/* Tab nav */}
-        <div className="flex border-b border-gray-200 px-6 flex-shrink-0">
+        <div className="flex flex-shrink-0 gap-2 overflow-x-auto border-b border-slate-200 px-5 py-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {TABS.map(tab => (
             <button
               key={tab.id}
               onClick={() => onTabChange(tab.id)}
-              className={`px-3 py-3 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+              className={`flex min-h-11 items-center gap-2 whitespace-nowrap rounded-lg border px-3 text-sm font-black transition-colors ${
                 activeTab === tab.id
-                  ? 'border-indigo-600 text-indigo-700'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'border-cyan-200 bg-cyan-50 text-cyan-900'
+                  : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-900'
               }`}
             >
+              <span className={`flex h-6 w-6 items-center justify-center rounded-md text-[9px] font-black ${
+                activeTab === tab.id ? 'bg-cyan-700 text-white' : 'bg-slate-100 text-slate-500'
+              }`}>
+                {tab.code}
+              </span>
               {tab.label}
             </button>
           ))}
         </div>
 
-        {/* Scrollable content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
           {activeTab === 'brief' && (
             <BriefPanel clientId={clientId} />
           )}
@@ -95,25 +96,28 @@ export function SettingsDrawer({ open, onClose, clientId, client, activeTab, onT
           )}
 
           {activeTab === 'client-info' && (
-            <div className="space-y-6">
-              <div className="bg-gray-50 rounded-xl divide-y divide-gray-200">
+            <div className="max-w-3xl space-y-4">
+              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <p className="text-[11px] font-black uppercase tracking-[0.14em] text-cyan-800">Client profile</p>
+                <h3 className="mt-1 text-xl font-black text-slate-950">{client.name}</h3>
+              </div>
+              <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white shadow-sm">
                 {[
                   { label: '客户名称', value: client.name },
                   {
                     label: '网站域名',
                     value: client.domain
-                      ? <a href={`https://${client.domain}`} target="_blank" rel="noreferrer"
-                          className="text-indigo-600 hover:underline">{client.domain}</a>
-                      : <span className="text-gray-400">未设置</span>,
+                      ? <a href={`https://${client.domain}`} target="_blank" rel="noreferrer" className="font-black text-cyan-800 hover:text-cyan-950">{client.domain}</a>
+                      : <span className="font-semibold text-slate-400">未设置</span>,
                   },
                   {
                     label: '创建时间',
                     value: new Date(client.created_at).toLocaleDateString('zh-CN'),
                   },
                 ].map(({ label, value }) => (
-                  <div key={label} className="flex items-center justify-between px-4 py-3 text-sm">
-                    <span className="text-gray-500">{label}</span>
-                    <span className="font-medium text-gray-900">{value}</span>
+                  <div key={label} className="flex items-center justify-between gap-6 px-5 py-4 text-sm">
+                    <span className="font-black text-slate-400">{label}</span>
+                    <span className="text-right font-semibold text-slate-950">{value}</span>
                   </div>
                 ))}
               </div>

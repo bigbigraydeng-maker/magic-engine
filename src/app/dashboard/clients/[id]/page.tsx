@@ -128,24 +128,24 @@ function BrandHealthWidget({ clientId }: { clientId: string }) {
   // ── Loading ──
   if (status === 'loading') {
     return (
-      <div className="animate-pulse rounded-xl border border-gray-200 bg-white p-4 h-16" />
+      <div className="h-32 animate-pulse rounded-xl border border-slate-200 bg-white p-4" />
     );
   }
 
   // ── No discovery yet ──
   if (status === 'none') {
     return (
-      <div className="rounded-xl border border-dashed border-indigo-200 bg-indigo-50 p-4 flex items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-4 rounded-xl border border-dashed border-cyan-200 bg-cyan-50 p-4">
         <div className="flex items-center gap-3">
-          <span className="text-2xl">🗺️</span>
+          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-950 text-xs font-black text-white">DI</span>
           <div>
-            <p className="text-sm font-semibold text-indigo-900">品牌健康扫描未完成</p>
-            <p className="text-xs text-indigo-600">张骞发现 Agent 将自动分析品牌现状，生成诊断报告</p>
+            <p className="text-sm font-black text-slate-950">品牌健康扫描未完成</p>
+            <p className="text-xs font-semibold text-slate-500">张骞发现 Agent 将自动分析品牌现状，生成诊断报告</p>
           </div>
         </div>
         <Link
           href={`/dashboard/clients/${clientId}/zhangqian`}
-          className="shrink-0 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 transition-colors"
+          className="shrink-0 rounded-lg bg-slate-950 px-4 py-2 text-sm font-black text-white transition-colors hover:bg-slate-800"
         >
           启动发现 →
         </Link>
@@ -156,17 +156,17 @@ function BrandHealthWidget({ clientId }: { clientId: string }) {
   // ── Awaiting confirmation ──
   if (status === 'reviewing') {
     return (
-      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 flex items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
         <div className="flex items-center gap-3">
-          <span className="text-2xl">⏳</span>
+          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-100 text-xs font-black text-amber-800">QA</span>
           <div>
-            <p className="text-sm font-semibold text-amber-900">发现报告待确认</p>
-            <p className="text-xs text-amber-700">张骞已完成扫描，请核查数据后确认导入</p>
+            <p className="text-sm font-black text-amber-950">发现报告待确认</p>
+            <p className="text-xs font-semibold text-amber-700">张骞已完成扫描，请核查数据后确认导入</p>
           </div>
         </div>
         <Link
           href={`/dashboard/clients/${clientId}/zhangqian`}
-          className="shrink-0 rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 transition-colors"
+          className="shrink-0 rounded-lg bg-amber-600 px-4 py-2 text-sm font-black text-white transition-colors hover:bg-amber-700"
         >
           查看 &amp; 确认 →
         </Link>
@@ -181,18 +181,18 @@ function BrandHealthWidget({ clientId }: { clientId: string }) {
   const crisisBadge = crisisType ? CRISIS_BADGE[crisisType] : null;
 
   return (
-    <div className="rounded-xl border border-green-200 bg-white p-4">
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-lg">🩺</span>
-        <p className="text-sm font-semibold text-gray-900">品牌健康快照</p>
+    <div className="rounded-xl border border-cyan-200 bg-white p-5 shadow-sm">
+      <div className="mb-2 flex items-center gap-3">
+        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-cyan-50 text-xs font-black text-cyan-800">BH</span>
+        <p className="text-sm font-black text-slate-950">品牌健康快照</p>
         {crisisBadge && (
-          <span className={`ml-auto text-xs font-semibold border rounded-full px-2 py-0.5 ${crisisBadge.cls}`}>
+          <span className={`ml-auto rounded-full border px-2 py-0.5 text-xs font-bold ${crisisBadge.cls}`}>
             {crisisBadge.label}
           </span>
         )}
       </div>
       {discovery?.generated_at && (
-        <p className="text-xs text-gray-400 mb-3">
+        <p className="mb-3 text-xs font-semibold text-slate-400">
           发现于 {new Date(discovery.generated_at).toLocaleDateString('zh-CN', { timeZone: 'Pacific/Auckland' })}
         </p>
       )}
@@ -200,12 +200,12 @@ function BrandHealthWidget({ clientId }: { clientId: string }) {
       {scores && <RadarChart scores={scores} />}
 
       {scores && (
-        <div className="mt-2 grid grid-cols-3 gap-x-2 gap-y-1 border-t border-gray-100 pt-3">
+        <div className="mt-2 grid grid-cols-3 gap-x-2 gap-y-1 border-t border-slate-100 pt-3">
           {HEALTH_DIMS.map(({ key, label }) => {
             const v = scores[key] as number | undefined ?? null;
             return (
               <div key={key} className="flex items-center justify-between gap-1">
-                <span className="text-[11px] text-gray-400">{label}</span>
+                <span className="text-[11px] font-semibold text-slate-400">{label}</span>
                 <span className="text-[11px] font-bold tabular-nums" style={{ color: scoreColor(v) }}>
                   {v ?? '—'}
                 </span>
@@ -222,16 +222,15 @@ function BrandHealthWidget({ clientId }: { clientId: string }) {
 
 type ToolBadge = 'in_house' | 'external'
 
-const BADGE_CONFIG: Record<ToolBadge, { icon: string; label: string; cls: string }> = {
-  in_house: { icon: '🖥️', label: '系统内',  cls: 'bg-indigo-50 text-indigo-600 border-indigo-100' },
-  external: { icon: '📞', label: '外部执行', cls: 'bg-amber-50  text-amber-600  border-amber-100'  },
+const BADGE_CONFIG: Record<ToolBadge, { label: string; cls: string }> = {
+  in_house: { label: '系统内',  cls: 'bg-cyan-50 text-cyan-800 border-cyan-100' },
+  external: { label: '外部执行', cls: 'bg-amber-50 text-amber-700 border-amber-100'  },
 }
 
 function ToolCard({
-  href, icon, title, desc, badge, soon,
+  href, title, desc, badge, soon,
 }: {
   href?: string
-  icon: string
   title: string
   desc: string
   badge: ToolBadge
@@ -239,25 +238,27 @@ function ToolCard({
 }) {
   const b = BADGE_CONFIG[badge]
   const inner = (
-    <div className={`flex items-center gap-3 p-4 rounded-xl border bg-white transition-all ${
+    <div className={`flex items-center gap-3 rounded-xl border bg-white p-4 transition-all ${
       soon
-        ? 'border-dashed border-gray-200 opacity-60 cursor-not-allowed'
+        ? 'cursor-not-allowed border-dashed border-slate-200 opacity-60'
         : href
-          ? 'border-gray-200 hover:border-indigo-300 hover:shadow-sm group cursor-pointer'
-          : 'border-gray-200'
+          ? 'group cursor-pointer border-slate-200 hover:border-cyan-300 hover:shadow-sm'
+          : 'border-slate-200'
     }`}>
-      <span className="text-2xl flex-shrink-0">{icon}</span>
+      <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-slate-950 text-[11px] font-black text-white">
+        {title.slice(0, 2).toUpperCase()}
+      </span>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
-          <p className="text-sm font-semibold text-gray-900">{title}</p>
-          <span className={`text-[10px] font-medium border rounded-full px-1.5 py-0.5 leading-none ${b.cls}`}>
-            {b.icon} {b.label}
+          <p className="text-sm font-black text-slate-950">{title}</p>
+          <span className={`rounded-full border px-1.5 py-0.5 text-[10px] font-bold leading-none ${b.cls}`}>
+            {b.label}
           </span>
-          {soon && <span className="text-[10px] bg-gray-100 text-gray-400 rounded-full px-1.5 py-0.5 leading-none">Soon</span>}
+          {soon && <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold leading-none text-slate-400">Soon</span>}
         </div>
-        <p className="text-xs text-gray-500">{desc}</p>
+        <p className="text-xs font-semibold text-slate-500">{desc}</p>
       </div>
-      {href && !soon && <span className="text-gray-300 group-hover:text-indigo-400 transition-colors flex-shrink-0">→</span>}
+      {href && !soon && <span className="flex-shrink-0 text-slate-300 transition-colors group-hover:text-cyan-700">→</span>}
     </div>
   )
   if (href && !soon) return <Link href={href}>{inner}</Link>
@@ -307,26 +308,27 @@ function WorkflowProgress({
   const firstPending = steps.findIndex(s => !s.done)
 
   return (
-    <div className="flex items-center gap-0 bg-white border border-gray-200 rounded-xl px-5 py-3">
+    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="flex min-w-max items-center gap-0">
       {steps.map((step, i) => {
         const isActive = i === firstPending
         const isDone   = step.done
         const inner = (
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors ${
-            isActive ? 'bg-indigo-50' : ''
+          <div className={`flex items-center gap-2 rounded-lg px-3 py-2 transition-colors ${
+            isActive ? 'bg-cyan-50' : ''
           }`}>
-            <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
-              isDone  ? 'bg-green-500 text-white'
-              : isActive ? 'bg-indigo-600 text-white'
-              : 'bg-gray-200 text-gray-400'
+            <div className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[11px] font-black ${
+              isDone  ? 'bg-emerald-500 text-white'
+              : isActive ? 'bg-slate-950 text-white'
+              : 'bg-slate-100 text-slate-400'
             }`}>
               {isDone ? '✓' : i + 1}
             </div>
             <div>
-              <p className={`text-xs font-semibold leading-none ${
-                isDone ? 'text-green-700' : isActive ? 'text-indigo-700' : 'text-gray-400'
+              <p className={`text-xs font-black leading-none ${
+                isDone ? 'text-emerald-700' : isActive ? 'text-slate-950' : 'text-slate-400'
               }`}>{step.label}</p>
-              <p className="text-[10px] text-gray-400 mt-0.5">{step.sublabel}</p>
+              <p className="mt-0.5 text-[10px] font-semibold text-slate-400">{step.sublabel}</p>
             </div>
           </div>
         )
@@ -338,12 +340,13 @@ function WorkflowProgress({
             }
             {i < steps.length - 1 && (
               <div className={`w-8 h-px mx-1 flex-shrink-0 ${
-                steps[i].done ? 'bg-green-300' : 'bg-gray-200'
+                steps[i].done ? 'bg-emerald-300' : 'bg-slate-200'
               }`} />
             )}
           </div>
         )
       })}
+      </div>
     </div>
   )
 }
@@ -453,36 +456,38 @@ export default function ClientDetailPage() {
   }
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="min-h-screen space-y-5 bg-[#f6f7f2] px-4 py-5 md:px-6">
       {/* Page header */}
-      <div className="flex items-center gap-3">
-        <Link href="/dashboard/clients" className="text-gray-400 hover:text-gray-600 text-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+        <Link href="/dashboard/clients" className="text-sm font-semibold text-slate-400 hover:text-slate-700">
           ← Clients
         </Link>
-        <span className="text-gray-300">/</span>
-        <h1 className="text-2xl font-bold text-gray-900">{client.name}</h1>
+        <span className="text-slate-300">/</span>
+        <h1 className="text-3xl font-black text-slate-950">{client.name}</h1>
         {client.domain && (
           <a
             href={`https://${client.domain}`}
             target="_blank"
             rel="noreferrer"
-            className="text-xs text-indigo-500 hover:text-indigo-700 font-mono"
+            className="rounded-full border border-cyan-100 bg-cyan-50 px-2 py-1 font-mono text-xs font-bold text-cyan-800 hover:border-cyan-200"
           >
-            {client.domain} ↗
+            {client.domain}
           </a>
         )}
-        <div className="ml-auto flex items-center gap-2">
+        </div>
+        <div className="flex flex-wrap items-center gap-2 lg:ml-auto">
           <button
             onClick={() => openSettings('brief')}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 border border-gray-200 hover:border-gray-300 rounded-lg transition-colors"
+            className="flex min-h-11 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-950"
           >
-            ⚙️ 设置
+            设置
           </button>
           <button
             onClick={() => setGenerationOpen(true)}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            className="min-h-11 rounded-lg bg-slate-950 px-5 text-sm font-black text-white transition-colors hover:bg-slate-800"
           >
-            🚀 生成内容
+            生成内容
           </button>
         </div>
       </div>
@@ -505,7 +510,7 @@ export default function ClientDetailPage() {
 
       {/* Brand Health (left) + Zhuge Priority Actions (right) — side-by-side cards */}
       {discoveryStatus === 'confirmed' ? (
-        <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4 items-start">
+        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[320px_1fr]">
           <BrandHealthWidget clientId={clientId} />
           <ZhugePriorityWidget
             clientId={clientId}
@@ -525,17 +530,17 @@ export default function ClientDetailPage() {
 
       {/* Master Brief warning banner */}
       {hasActiveBrief === false && (
-        <div className="flex items-start gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg">
-          <span className="text-lg">⚠️</span>
+        <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <span className="mt-1 h-2 w-2 rounded-full bg-amber-500" />
           <div className="flex-1">
-            <p className="text-sm font-semibold text-amber-900">尚未配置 Master Brief</p>
-            <p className="text-xs text-amber-800">
+            <p className="text-sm font-black text-amber-950">尚未配置 Master Brief</p>
+            <p className="text-xs font-semibold text-amber-800">
               请先上传品牌文件并生成 Master Brief，才能开始内容生产。
             </p>
           </div>
           <button
             onClick={() => openSettings('brief')}
-            className="text-xs font-semibold text-amber-700 hover:text-amber-900 underline whitespace-nowrap"
+            className="whitespace-nowrap text-xs font-black text-amber-800 hover:text-amber-950"
           >
             配置 Master Brief →
           </button>
@@ -546,45 +551,45 @@ export default function ClientDetailPage() {
           Master Brief × Campaign = FDE 工作的上下文基座。
           所有内容生产（社媒/博客/广告）应当在某个活跃 Campaign 下进行。 */}
       <section>
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">推广活动</p>
+        <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-cyan-800">推广活动</p>
         <ContentHub clientId={clientId} />
       </section>
 
       {/* ── Zone A: 内容生产 ─────────────────────────────────────────────────── */}
       <section>
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">内容生产</p>
+        <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-cyan-800">内容生产</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          <ToolCard href={`/dashboard/clients/${clientId}/marketing-plan`} icon="📋" title="Marketing Plan" desc="AI 生成营销计划 → 派发任务到鲁班"   badge="in_house" />
-          <ToolCard href={`/dashboard/clients/${clientId}/blog`}           icon="📝" title="博客"           desc="双信号博客生产与管理"            badge="in_house" />
-          <ToolCard href={`/dashboard/content?client=${clientId}`}         icon="📱" title="社媒矩阵"       desc="Campaign · 排期 · 多平台发布"    badge="in_house" />
-          <ToolCard href={`/dashboard/geo-composer/${clientId}`}           icon="🌐" title="GEO Composer"  desc="部署 AI 搜索优化指令"            badge="in_house" />
-          <ToolCard href={`/dashboard/ai-visibility/${clientId}`}          icon="🤖" title="AI 可见度追踪" desc="监控 AI 搜索中的品牌曝光"         badge="in_house" />
-          <ToolCard href={`/dashboard/clients/${clientId}/connectors`}     icon="🔗" title="广告连接器"    desc="连接 Meta · Google 广告账户"      badge="in_house" />
-          <ToolCard href={`/dashboard/visuals?client=${clientId}`}         icon="🚀" title="Launch Hub"    desc="Reels · 图片 · 视频素材生产"      badge="in_house" />
-          <ToolCard href={`/dashboard/clients/${clientId}/production`}     icon="📦" title="内容生产包"    desc="查看各维度内容包状态 · 生成内容后自动归集" badge="in_house" />
+          <ToolCard href={`/dashboard/clients/${clientId}/marketing-plan`} title="Marketing Plan" desc="AI 生成营销计划 → 派发任务到鲁班"   badge="in_house" />
+          <ToolCard href={`/dashboard/clients/${clientId}/blog`}           title="博客"           desc="双信号博客生产与管理"            badge="in_house" />
+          <ToolCard href={`/dashboard/content?client=${clientId}`}         title="社媒矩阵"       desc="Campaign · 排期 · 多平台发布"    badge="in_house" />
+          <ToolCard href={`/dashboard/geo-composer/${clientId}`}           title="GEO Composer"  desc="部署 AI 搜索优化指令"            badge="in_house" />
+          <ToolCard href={`/dashboard/ai-visibility/${clientId}`}          title="AI 可见度追踪" desc="监控 AI 搜索中的品牌曝光"         badge="in_house" />
+          <ToolCard href={`/dashboard/clients/${clientId}/connectors`}     title="广告连接器"    desc="连接 Meta · Google 广告账户"      badge="in_house" />
+          <ToolCard href={`/dashboard/visuals?client=${clientId}`}         title="Launch Hub"    desc="Reels · 图片 · 视频素材生产"      badge="in_house" />
+          <ToolCard href={`/dashboard/clients/${clientId}/production`}     title="内容生产包"    desc="查看各维度内容包状态 · 生成内容后自动归集" badge="in_house" />
         </div>
       </section>
 
       {/* ── Zone B: 诊断与分析 ───────────────────────────────────────────────── */}
       <section>
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">诊断与分析</p>
+        <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-cyan-800">诊断与分析</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          <ToolCard href={`/dashboard/clients/${clientId}/zhangqian`}          icon="🗺️" title="张骞发现"       desc="扫描社媒、评价、关键词、竞品，生成品牌现状全景报告"  badge="in_house" />
-          <ToolCard href={`/dashboard/clients/${clientId}/diagnostic`}         icon="🩺" title="华佗深度诊断"   desc="从 SEO/社媒/口碑/广告/AI可见/竞品六维打分，找到核心病灶"  badge="in_house" />
-          <ToolCard href={`/dashboard/clients/${clientId}/prescription/new`}   icon="💊" title="诸葛亮处方"     desc="基于华佗诊断结果，生成优先级排序的具体执行行动路线图"  badge="in_house" />
-          <ToolCard href={`/dashboard/clients/${clientId}/site-audit/pages`}   icon="🔍" title="站点审计"       desc="逐页检查标题/描述/H1/图片ALT等 SEO 技术项，输出修复清单"  badge="in_house" />
-          <ToolCard href={`/dashboard/clients/${clientId}/seo-gap`}            icon="📊" title="SEO Gap 分析"   desc="对比竞品，找出客户未覆盖但流量大的关键词机会"  badge="in_house" />
-          <ToolCard                                                             icon="⭐" title="口碑管理"       desc="Google 评价 · 公众号舆情"        badge="external" soon />
-          <ToolCard                                                             icon="🏆" title="竞品追踪"       desc="持续监控竞品动态"                 badge="external" soon />
+          <ToolCard href={`/dashboard/clients/${clientId}/zhangqian`}          title="张骞发现"       desc="扫描社媒、评价、关键词、竞品，生成品牌现状全景报告"  badge="in_house" />
+          <ToolCard href={`/dashboard/clients/${clientId}/diagnostic`}         title="华佗深度诊断"   desc="从 SEO/社媒/口碑/广告/AI可见/竞品六维打分，找到核心病灶"  badge="in_house" />
+          <ToolCard href={`/dashboard/clients/${clientId}/prescription/new`}   title="诸葛亮处方"     desc="基于华佗诊断结果，生成优先级排序的具体执行行动路线图"  badge="in_house" />
+          <ToolCard href={`/dashboard/clients/${clientId}/site-audit/pages`}   title="站点审计"       desc="逐页检查标题/描述/H1/图片ALT等 SEO 技术项，输出修复清单"  badge="in_house" />
+          <ToolCard href={`/dashboard/clients/${clientId}/seo-gap`}            title="SEO Gap 分析"   desc="对比竞品，找出客户未覆盖但流量大的关键词机会"  badge="in_house" />
+          <ToolCard                                                             title="口碑管理"       desc="Google 评价 · 公众号舆情"        badge="external" soon />
+          <ToolCard                                                             title="竞品追踪"       desc="持续监控竞品动态"                 badge="external" soon />
         </div>
       </section>
 
       {/* ── Zone C: SEO 工具 ──────────────────────────────────────────────────── */}
       <section>
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">SEO 工具</p>
+        <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-cyan-800">SEO 工具</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <ToolCard href={`/dashboard/clients/${clientId}/strategy`}           icon="🎯" title="内容策略"        desc="根据关键词机会和竞品数据，制定博客选题与内容发布计划"  badge="in_house" />
-          <ToolCard href={`/dashboard/clients/${clientId}/seo-intelligence`}   icon="📈" title="SEO Intelligence" desc="关键词排名 · 流量趋势 · 竞品对比 · Untapped 词挖掘"    badge="in_house" />
+          <ToolCard href={`/dashboard/clients/${clientId}/strategy`}           title="内容策略"        desc="根据关键词机会和竞品数据，制定博客选题与内容发布计划"  badge="in_house" />
+          <ToolCard href={`/dashboard/clients/${clientId}/seo-intelligence`}   title="SEO Intelligence" desc="关键词排名 · 流量趋势 · 竞品对比 · Untapped 词挖掘"    badge="in_house" />
         </div>
       </section>
 

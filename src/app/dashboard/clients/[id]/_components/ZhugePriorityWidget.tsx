@@ -19,10 +19,10 @@ const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? '';
 /** Collapsed view shows this many action cards; the rest fold behind a toggle. */
 const COLLAPSED_COUNT = 2;
 
-const EXEC_MODE_ZH: Record<string, { icon: string; label: string }> = {
-  in_house:        { icon: '🤖', label: '鲁班可自动执行' },
-  third_party:     { icon: '🔗', label: '第三方平台' },
-  external_manual: { icon: '👤', label: 'FDE 人工执行' },
+const EXEC_MODE_ZH: Record<string, { label: string }> = {
+  in_house:        { label: '鲁班可自动执行' },
+  third_party:     { label: '外部平台' },
+  external_manual: { label: 'FDE 人工执行' },
 };
 
 const ACTION_TYPE_ZH: Record<string, string> = {
@@ -47,45 +47,45 @@ function ActionCard({ action, clientId }: { action: ZhugeActionRow; clientId: st
     cls: 'bg-gray-100 text-gray-600 border-gray-200',
   };
   const p = action.payload;
-  const execMode = EXEC_MODE_ZH[action.execution_mode] ?? { icon: '❓', label: action.execution_mode };
+  const execMode = EXEC_MODE_ZH[action.execution_mode] ?? { label: action.execution_mode };
   const actionNameZh = ACTION_TYPE_ZH[action.action_type] ?? action.action_type;
   const route = getLubanRoute(p.executable_by ?? null, clientId);
 
   return (
-    <div className="flex gap-3 p-4 rounded-xl border border-gray-200 bg-white hover:border-indigo-200 hover:shadow-sm transition-all">
-      <div className="flex-shrink-0 w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold flex items-center justify-center mt-0.5">
+    <div className="flex gap-4 rounded-xl border border-slate-200 bg-white p-4 transition-all hover:border-cyan-200 hover:shadow-sm">
+      <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-cyan-50 text-sm font-black text-cyan-800">
         {p.rank}
       </div>
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap mb-1.5">
-          <span className={`text-xs font-semibold border rounded-full px-2 py-0.5 ${fw.cls}`}>
+          <span className={`rounded-full border px-2 py-0.5 text-xs font-black ${fw.cls}`}>
             {fw.label}
           </span>
-          <span className="text-sm font-semibold text-gray-800">
+          <span className="text-base font-black text-slate-950">
             {actionNameZh}
           </span>
           <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
-            <span className={`text-xs font-medium rounded px-1.5 py-0.5 ${IMPACT_CLS[p.expected_impact] ?? ''}`}>
+            <span className={`rounded px-1.5 py-0.5 text-xs font-bold ${IMPACT_CLS[p.expected_impact] ?? ''}`}>
               {IMPACT_ZH[p.expected_impact] ?? p.expected_impact}
             </span>
-            <span className={`text-xs font-medium rounded px-1.5 py-0.5 ${EFFORT_CLS[p.effort] ?? ''}`}>
+            <span className={`rounded px-1.5 py-0.5 text-xs font-bold ${EFFORT_CLS[p.effort] ?? ''}`}>
               {EFFORT_ZH[p.effort] ?? p.effort}
             </span>
           </div>
         </div>
 
-        <p className="text-sm text-gray-600 leading-relaxed mb-2">{p.why_now}</p>
+        <p className="mb-3 text-sm font-semibold leading-relaxed text-slate-600">{p.why_now}</p>
 
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5 text-xs text-gray-400">
-            <span>{execMode.icon}</span>
+          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-400">
+            <span className="h-2 w-2 rounded-full bg-cyan-300" />
             <span>{execMode.label}</span>
           </div>
           {route.kind === 'navigate' && (
             <Link
               href={route.href}
-              className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 border border-indigo-200 hover:border-indigo-400 rounded-lg px-3 py-1 transition-colors shrink-0"
+              className="shrink-0 rounded-lg border border-cyan-200 px-3 py-1.5 text-xs font-black text-cyan-800 transition-colors hover:border-cyan-300 hover:bg-cyan-50"
             >
               {route.label}
             </Link>
@@ -151,19 +151,19 @@ export function ZhugePriorityWidget({
   // ── Loading skeleton ──
   if (state === 'loading') {
     return (
-      <div className="animate-pulse rounded-xl border border-gray-200 bg-white p-4 h-24" />
+      <div className="h-28 animate-pulse rounded-xl border border-slate-200 bg-white p-4" />
     );
   }
 
   // ── Empty (no prior session) ──
   if (state === 'empty') {
     return (
-      <div className="rounded-xl border border-dashed border-indigo-200 bg-indigo-50 p-5 flex items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-4 rounded-xl border border-dashed border-cyan-200 bg-cyan-50 p-5">
         <div className="flex items-center gap-3">
-          <span className="text-2xl">🧠</span>
+          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-950 text-xs font-black text-white">ST</span>
           <div>
-            <p className="text-sm font-semibold text-indigo-900">诸葛亮 · 优先行动</p>
-            <p className="text-xs text-indigo-600 mt-0.5">
+            <p className="text-sm font-black text-slate-950">诸葛亮 · 优先行动</p>
+            <p className="mt-0.5 text-xs font-semibold text-slate-500">
               {discoveryConfirmed
                 ? '尚无分析结果。点击「询问诸葛亮」打开 AI 分析抽屉。'
                 : '请先完成张骞品牌扫描，再询问诸葛亮。'}
@@ -173,7 +173,7 @@ export function ZhugePriorityWidget({
         {discoveryConfirmed && (
           <button
             onClick={onAskZhuge}
-            className="shrink-0 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 transition-colors"
+            className="shrink-0 rounded-lg bg-slate-950 px-4 py-2 text-sm font-black text-white transition-colors hover:bg-slate-800"
           >
             询问诸葛亮 →
           </button>
@@ -187,15 +187,15 @@ export function ZhugePriorityWidget({
   const visibleActions = expanded ? actions : actions.slice(0, COLLAPSED_COUNT);
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
+    <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       {/* Widget header */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <span className="text-lg">🧠</span>
+          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-cyan-50 text-xs font-black text-cyan-800">ST</span>
           <div>
-            <p className="text-sm font-semibold text-gray-900">诸葛亮 · 优先行动清单</p>
+            <p className="text-base font-black text-slate-950">诸葛亮 · 优先行动清单</p>
             {generatedAt && (
-              <p className="text-xs text-gray-400">
+              <p className="text-xs font-semibold text-slate-400">
                 生成于{' '}
                 {new Date(generatedAt).toLocaleDateString('zh-CN', {
                   timeZone: 'Pacific/Auckland',
@@ -207,9 +207,9 @@ export function ZhugePriorityWidget({
         </div>
         <button
           onClick={onAskZhuge}
-          className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-indigo-700 border border-gray-200 hover:border-indigo-300 rounded-lg px-3 py-1.5 transition-colors"
+          className="flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 transition-colors hover:border-cyan-200 hover:text-cyan-800"
         >
-          🧠 重新计算
+          重新计算
         </button>
       </div>
 
@@ -223,7 +223,7 @@ export function ZhugePriorityWidget({
       {canCollapse && (
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="w-full text-center text-xs font-medium text-gray-500 hover:text-indigo-700 border border-gray-200 hover:border-indigo-300 rounded-lg py-2 transition-colors"
+          className="w-full rounded-lg border border-slate-200 py-2 text-center text-xs font-black text-slate-500 transition-colors hover:border-cyan-200 hover:text-cyan-800"
         >
           {expanded ? '收起 ↑' : `展开剩余 ${actions.length - COLLAPSED_COUNT} 项 ↓`}
         </button>

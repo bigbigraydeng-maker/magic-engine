@@ -75,69 +75,69 @@ export function BriefPanel({ clientId }: Props) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-48">
-        <div className="animate-pulse text-sm text-gray-400">Loading brief…</div>
+      <div className="flex h-48 items-center justify-center">
+        <div className="animate-pulse text-sm font-semibold text-slate-400">Loading brief...</div>
       </div>
     );
   }
 
   return (
-    <div className={`flex gap-5 h-[calc(100vh-220px)] min-h-[500px] print:h-auto print:block`}>
-      {/* Left panel — full width in document mode, 60% in edit mode */}
-      <div className={viewMode === 'document' && brief ? 'flex-1 overflow-y-auto' : 'flex-[3] overflow-y-auto'}>
+    <div className="grid min-h-0 gap-5 print:block xl:grid-cols-[minmax(0,1.25fr)_390px]">
+      {/* Left panel — full width in document mode */}
+      <div className={viewMode === 'document' && brief ? 'min-w-0 xl:col-span-2' : 'min-w-0'}>
         {!brief ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="mb-4">
-              <h3 className="text-base font-semibold text-gray-900">Generate Master Brief</h3>
-              <p className="text-xs text-gray-500 mt-1">
-                Provide brand data sources. Claude will analyze them and generate a complete brand strategy document.
+              <h3 className="text-base font-black text-slate-950">Generate Master Brief</h3>
+              <p className="mt-1 text-xs font-semibold text-slate-500">
+                Provide brand data sources. Strategy Engine will analyze them and generate a complete brand strategy document.
               </p>
             </div>
             <BriefSourcesForm clientId={clientId} onGenerated={handleGenerated} />
           </div>
         ) : (
-          <div className="bg-white rounded-xl border border-gray-200">
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             {/* Brief header: title + view toggle + actions */}
-            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
-              <h3 className="text-base font-semibold text-gray-900">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+              <h3 className="text-xl font-black text-slate-950">
                 {brief.brand_name ?? 'Master Brief'}
               </h3>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2">
                 {/* View mode toggle */}
-                <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs">
+                <div className="flex overflow-hidden rounded-lg border border-slate-200 bg-white text-xs">
                   <button
                     onClick={() => setViewMode('edit')}
-                    className={`px-3 py-1.5 font-medium transition-colors ${
+                    className={`px-4 py-2 font-black transition-colors ${
                       viewMode === 'edit'
-                        ? 'bg-indigo-600 text-white'
-                        : 'text-gray-500 hover:bg-gray-50'
+                        ? 'bg-slate-950 text-white'
+                        : 'text-slate-500 hover:bg-slate-50'
                     }`}
                   >
-                    ✏️ Edit
+                    Edit
                   </button>
                   <button
                     onClick={() => setViewMode('document')}
-                    className={`px-3 py-1.5 font-medium transition-colors ${
+                    className={`px-4 py-2 font-black transition-colors ${
                       viewMode === 'document'
-                        ? 'bg-indigo-600 text-white'
-                        : 'text-gray-500 hover:bg-gray-50'
+                        ? 'bg-slate-950 text-white'
+                        : 'text-slate-500 hover:bg-slate-50'
                     }`}
                   >
-                    📄 Document
+                    Document
                   </button>
                 </div>
                 {viewMode === 'document' && (
                   <button
                     onClick={() => window.print()}
-                    className="text-xs text-gray-400 hover:text-gray-700 transition-colors px-2 py-1.5 border border-gray-200 rounded-lg"
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-black text-slate-500 transition-colors hover:text-slate-800"
                     title="Print or save as PDF"
                   >
-                    🖨️ Print
+                    Print
                   </button>
                 )}
                 <button
                   onClick={() => setBrief(null)}
-                  className="text-xs text-gray-400 hover:text-indigo-600 transition-colors"
+                  className="rounded-lg px-3 py-2 text-xs font-black text-slate-400 transition-colors hover:bg-slate-50 hover:text-cyan-800"
                   title="Generate a new brief"
                 >
                   + New
@@ -156,7 +156,7 @@ export function BriefPanel({ clientId }: Props) {
                 />
               </div>
             ) : (
-              <div className="p-6 overflow-y-auto max-h-[calc(100vh-280px)] print:max-h-none print:overflow-visible">
+              <div className="p-6 print:overflow-visible">
                 <BriefDocument brief={brief} />
               </div>
             )}
@@ -166,7 +166,7 @@ export function BriefPanel({ clientId }: Props) {
 
       {/* Right panel — hidden in document mode */}
       {viewMode === 'edit' && (
-        <div className="flex-[2] bg-white rounded-xl border border-gray-200 flex flex-col overflow-hidden print:hidden">
+        <div className="min-h-[520px] rounded-xl border border-slate-200 bg-white shadow-sm print:hidden xl:sticky xl:top-5 xl:h-[calc(100vh-190px)]">
           <BriefChat
             briefId={brief?.id ?? ''}
             clientId={clientId}
