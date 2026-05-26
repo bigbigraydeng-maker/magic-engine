@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-26 16:22 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
+> 最后更新：2026-05-26 18:01 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -14,6 +14,7 @@
 - [x] **P13.UI.4 discover page UI refresh** - Upgrade `/discover` into the shared prospect entry experience aligned with the new homepage and portal visual language.
 - [x] **P13.UI.5 prospect report UI refresh** - Upgrade `/prospect` loading, empty, failed, and completed report states into the shared prospect-to-portal report experience.
 - [x] **P13.A.8 admin auth priority repair** - Ensure `ADMIN_EMAILS` accounts route to the admin dashboard before portal/prospect bindings; remove accidental CTS portal binding for the admin email.
+- [x] **P13.UI.6 portal client experience refresh** - Upgrade `/portal/[clientId]` overview, monthly report, content library, and portal navigation into the shared Magic Engine client-facing UI system.
 
 ## 当前进度速览
 
@@ -2482,6 +2483,7 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 - **P13.A.8（admin auth priority）** — 修复 admin 邮箱同时存在 portal/prospect 关系时被客户账号抢走的问题；`ADMIN_EMAILS` 优先进入 dashboard；清理 `bigbigraydeng@gmail.com` 的 CTS portal 绑定
 - **P13.UI.4** — `/discover` 升级为新版官网一致的 prospect 入口；移除真实供应商名；表单、成功页、诊断产物预览统一视觉语言
 - **P13.UI.5** — `/prospect` 报告页升级：扫描中、无报告、失败、完成报告四态统一为新版 prospect-to-portal 体验；报告卡片改为浅色可读版
+- **P13.UI.6** — `/portal/[clientId]` 客户端 overview、monthly report、content library 与导航升级为新版 Magic Engine client portal 视觉语言
 - **P14.A.4（Shopify connector）** — migration 扩展 provider shape 约束加 shopify；shopify-guard（SSRF 防护 17 单测全绿）；shopify-client（Admin REST 2024-01：testConnection / listBlogs / getOrCreateDefaultBlog / createArticleDraft / publishArticle / createPageDraft / publishPage）；html-sanitizer MVP；vocabulary 加 SHOPIFY + ShopifyConnectionStatus；connection-store 加 Shopify CRUD；/cms/shopify CRUD + 保存即测 token；/cms/publish-shopify 两步 draft→publish，幂等写 website_publish_jobs；TS 零错误，17 tests ✅
 - **P14.A.5（WordPress connector）** — `wordpress-client.ts`（dns.promises.lookup SSRF guard；testWordpressConnection 验证 publish role；createWordpressPostDraft/Page draft-first；publishWordpressPost/Page status='publish'）；connection-store 加 `markWordpressConnectionTested`；/cms/wordpress 升级（保存即测）；/cms/publish-wordpress（两步 draft→publish，幂等，租户隔离，sanitizeHtml）；TS 新文件零错误
 - **P14.A.6（Blog Studio 三步发布 UI）** — 新 `GET /api/clients/[id]/cms/providers` 聚合三平台状态；新 `PublishToWebsitePanel` 组件（WordPress/Shopify Draft→Preview→Publish 三步，GitHub 单步 PR）；blog/[postId]/page.tsx 替换旧 GitHub-only 按钮

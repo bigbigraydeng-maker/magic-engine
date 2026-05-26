@@ -1,9 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
-import { useRouter } from 'next/navigation'
 
 interface Props {
   clientId: string
@@ -11,10 +10,18 @@ interface Props {
 }
 
 const NAV_ITEMS = (clientId: string) => [
-  { href: `/portal/${clientId}`,         label: 'Overview' },
-  { href: `/portal/${clientId}/report`,  label: 'Monthly Report' },
-  { href: `/portal/${clientId}/content`, label: 'Content' },
+  { href: `/portal/${clientId}`, label: 'Overview' },
+  { href: `/portal/${clientId}/report`, label: 'Monthly report' },
+  { href: `/portal/${clientId}/content`, label: 'Content library' },
 ]
+
+function LogoMark() {
+  return (
+    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-sm font-black text-slate-950">
+      M
+    </div>
+  )
+}
 
 export default function PortalNav({ clientId, clientName }: Props) {
   const pathname = usePathname()
@@ -30,45 +37,53 @@ export default function PortalNav({ clientId, clientName }: Props) {
   }
 
   return (
-    <header className="bg-white border-b border-gray-200 sticky top-0 z-20">
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-6">
-        {/* Brand */}
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <span className="text-lg">✨</span>
-          <span className="text-sm font-semibold text-gray-900 hidden sm:block">
-            {clientName}
-          </span>
+    <header className="sticky top-0 z-20 border-b border-white/10 bg-slate-950 text-white">
+      <div className="mx-auto flex min-h-[72px] w-full max-w-6xl flex-col gap-4 px-5 py-4 sm:px-8 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-center justify-between gap-4">
+          <Link href={`/portal/${clientId}`} className="flex min-w-0 items-center gap-3">
+            <LogoMark />
+            <div className="min-w-0">
+              <p className="text-sm font-black">Magic Engine</p>
+              <p className="truncate text-xs font-semibold text-slate-400">{clientName}</p>
+            </div>
+          </Link>
+          <button
+            onClick={() => void handleSignOut()}
+            className="rounded-lg border border-white/15 px-3 py-2 text-xs font-bold text-slate-200 transition hover:border-white/30 hover:text-white lg:hidden"
+          >
+            Sign out
+          </button>
         </div>
 
-        {/* Nav links */}
-        <nav className="flex items-center gap-1 flex-1">
-          {NAV_ITEMS(clientId).map(item => {
-            const active = item.href === `/portal/${clientId}`
-              ? pathname === item.href
-              : pathname.startsWith(item.href)
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                  active
-                    ? 'bg-indigo-50 text-indigo-700'
-                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-                }`}
-              >
-                {item.label}
-              </Link>
-            )
-          })}
-        </nav>
+        <div className="flex items-center gap-3">
+          <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto rounded-lg bg-white/[0.06] p-1">
+            {NAV_ITEMS(clientId).map(item => {
+              const active = item.href === `/portal/${clientId}`
+                ? pathname === item.href
+                : pathname.startsWith(item.href)
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`flex h-9 shrink-0 items-center rounded-lg px-3 text-sm font-bold transition ${
+                    active
+                      ? 'bg-white text-slate-950'
+                      : 'text-slate-300 hover:bg-white/[0.08] hover:text-white'
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              )
+            })}
+          </nav>
 
-        {/* Sign out */}
-        <button
-          onClick={() => void handleSignOut()}
-          className="text-xs text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0"
-        >
-          Sign out
-        </button>
+          <button
+            onClick={() => void handleSignOut()}
+            className="hidden h-9 shrink-0 items-center rounded-lg border border-white/15 px-3 text-xs font-bold text-slate-200 transition hover:border-white/30 hover:text-white lg:flex"
+          >
+            Sign out
+          </button>
+        </div>
       </div>
     </header>
   )
