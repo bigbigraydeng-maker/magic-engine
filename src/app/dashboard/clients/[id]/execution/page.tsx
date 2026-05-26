@@ -39,18 +39,43 @@ const POST_STATUS_META: Record<string, { label: string; cls: string }> = {
   rejected:  { label: '已拒绝', cls: 'bg-red-100 text-red-700' },
 }
 
-function LinkedContentCard({ post }: { post: LinkedContentPost }) {
+function LinkedContentCard({ post, clientId }: { post: LinkedContentPost; clientId: string }) {
+  const [generating, setGenerating] = useState(false)
+  const [genMsg, setGenMsg] = useState<string | null>(null)
+  const [localAssetUrl, setLocalAssetUrl] = useState<string | null>(post.visual_asset_url)
+
   const meta = POST_STATUS_META[post.status] ?? { label: post.status, cls: 'bg-gray-100 text-gray-600' }
   const scheduledLabel = post.scheduled_at
     ? new Date(post.scheduled_at).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
     : null
+
+  const handleGenerateImage = async () => {
+    setGenerating(true)
+    setGenMsg(null)
+    try {
+      const res = await fetch('/api/visual/image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ post_id: post.id, client_id: clientId, aspect_ratio: '1:1' }),
+      })
+      const json = await res.json() as { success: boolean; storage_url?: string; error?: string }
+      if (!json.success) throw new Error(json.error ?? '生成失败')
+      setLocalAssetUrl(json.storage_url ?? null)
+      setGenMsg('✓ 已生成')
+    } catch (e) {
+      setGenMsg(`✗ ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setGenerating(false)
+    }
+  }
+
   return (
     <div className="mt-2 rounded-lg border border-indigo-100 bg-indigo-50/40 p-2.5 flex gap-3 items-start">
       {/* Thumbnail */}
-      {post.visual_asset_url ? (
+      {localAssetUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={post.visual_asset_url}
+          src={localAssetUrl}
           alt={post.title}
           className="w-16 h-16 rounded-md object-cover border border-indigo-200 flex-shrink-0 bg-white"
         />
@@ -78,6 +103,31 @@ function LinkedContentCard({ post }: { post: LinkedContentPost }) {
           ))}
           {scheduledLabel && (
             <span className="text-[10px] text-blue-600 font-medium">📅 {scheduledLabel}</span>
+          )}
+        </div>
+        {/* Action row */}
+        <div className="flex items-center gap-2 mt-2 flex-wrap">
+          {post.status === 'draft' && !localAssetUrl && (
+            <button
+              onClick={() => void handleGenerateImage()}
+              disabled={generating}
+              className="text-xs px-2 py-1 rounded bg-violet-100 text-violet-700 hover:bg-violet-200 disabled:opacity-50 font-medium transition-colors"
+            >
+              {generating ? '生成中…' : '🎨 生成图片'}
+            </button>
+          )}
+          <Link
+            href={`/dashboard/content?client=${clientId}&highlight=${post.id}`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs px-2 py-1 rounded bg-white border border-indigo-200 text-indigo-600 hover:bg-indigo-50 font-medium transition-colors"
+          >
+            查看详情 →
+          </Link>
+          {genMsg && (
+            <span className={`text-[11px] ${genMsg.startsWith('✓') ? 'text-green-600' : 'text-red-500'}`}>
+              {genMsg}
+            </span>
           )}
         </div>
       </div>
@@ -543,6 +593,7 @@ function ExecutionItemCard({
 
 function TaskDetailDrawer({
   item,
+  clientId,
   editable,
   onClose,
   onStatusChange,
@@ -554,6 +605,7 @@ function TaskDetailDrawer({
   onDeleteItem,
 }: {
   item:           ItemWithLogs | null
+  clientId:       string
   editable:       boolean
   onClose:        () => void
   onStatusChange: (id: string, status: ExecutionItemStatus) => void
@@ -725,7 +777,7 @@ function TaskDetailDrawer({
         </div>
 
         {/* 关联内容 */}
-        {item.linked_post && <LinkedContentCard post={item.linked_post} />}
+        {item.linked_post && <LinkedContentCard post={item.linked_post} clientId={clientId} />}
 
         {/* Outcome chip */}
         {item.outcome && <OutcomeChip outcome={item.outcome} />}
@@ -1536,6 +1588,7 @@ export default function ExecutionPage() {
       {/* 右侧任务详情抽屉 */}
       <TaskDetailDrawer
         item={detailItem}
+        clientId={clientId}
         editable={detailEditable}
         onClose={() => setDetailItem(null)}
         onStatusChange={handleStatusChange}
