@@ -18,6 +18,14 @@ type CampaignPromptFields = Pick<
   | 'primary_cta'
   | 'channel_goal'
   | 'campaign_angle'
+  // Campaign-level visual direction (narrows/extends MB vi_*, must never contradict)
+  | 'vi_mood'
+  | 'vi_color_accent'
+  | 'vi_specific_dos'
+  | 'vi_specific_donts'
+  | 'vi_reference_note'
+  | 'vi_input_notes'
+  | 'vi_input_file_urls'
 >
 
 export async function getActiveCampaigns(clientId: string): Promise<CampaignBrief[]> {
@@ -101,6 +109,35 @@ export function formatCampaignForPrompt(campaign: CampaignPromptFields): string 
 
   if (keywords) {
     lines.push(`- 推广关键词：${keywords}`)
+  }
+
+  // Campaign-level visual direction — narrows or extends the brand DNA from MB.
+  // Always layered ON TOP of MB vi_* fields, never contradicting them.
+  const visualLines: string[] = []
+  if (campaign.vi_mood) {
+    visualLines.push(`- 活动情绪基调：${campaign.vi_mood}`)
+  }
+  if (campaign.vi_color_accent) {
+    visualLines.push(`- 活动主色 / 重点色：${campaign.vi_color_accent}`)
+  }
+  if (campaign.vi_specific_dos?.length) {
+    visualLines.push(`- 活动专属视觉要做：${campaign.vi_specific_dos.join('、')}`)
+  }
+  if (campaign.vi_specific_donts?.length) {
+    visualLines.push(`- 活动专属视觉禁止：${campaign.vi_specific_donts.join('、')}`)
+  }
+  if (campaign.vi_reference_note) {
+    visualLines.push(`- 视觉参考说明：${campaign.vi_reference_note}`)
+  }
+  if (campaign.vi_input_notes) {
+    visualLines.push(`- 视觉灵感笔记：${campaign.vi_input_notes}`)
+  }
+  if (campaign.vi_input_file_urls?.length) {
+    visualLines.push(`- 视觉参考素材：${campaign.vi_input_file_urls.length} 个文件已上传（已审核）`)
+  }
+
+  if (visualLines.length > 0) {
+    lines.push('', '活动视觉指令（与品牌 vi_* 配合，可细化但绝不可冲突）：', ...visualLines)
   }
 
   return lines.join('\n')

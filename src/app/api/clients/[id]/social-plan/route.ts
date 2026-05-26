@@ -23,9 +23,12 @@ import {
   generateReelsScripts,
   generatePosts,
   generateStories,
+  extractBrandVisualDNA,
+  extractCampaignVisualDirection,
   DEFAULT_CONFIG,
 } from '@/lib/social/social-plan-templates'
 import type { SocialPlanOutput, GenerationConfig } from '@/lib/social/social-plan-templates'
+import type { CampaignBrief } from '@/types/magic-engine'
 import { evaluate } from '@/lib/content/quality-rubric'
 import type { RubricContext } from '@/lib/content/quality-rubric'
 import type { MasterBrief } from '@/types/magic-engine'
@@ -245,12 +248,17 @@ export async function POST(
       ...(body.angle_focus ? { angle_focus: body.angle_focus } : {}),
     }
 
+    // 3c. Extract structured visual DNA from MB + campaign (locked constraints
+    //     for deterministic Post/Story image prompt assembly — SP-VI.1).
+    const brandDNA = extractBrandVisualDNA(brief as unknown as MasterBrief)
+    const campaignDirection = extractCampaignVisualDirection(campaign as CampaignBrief)
+
     // 4. Strategy first, then parallel content generation
     const strategy = await generateChannelStrategy(briefText, campaignText, genConfig)
     const [reels, posts, stories] = await Promise.all([
       generateReelsScripts(strategy, briefText, campaignText, viralInsightsText, genConfig),
-      generatePosts(strategy, briefText, campaignText, genConfig),
-      generateStories(strategy, briefText, campaignText, genConfig),
+      generatePosts(strategy, brandDNA, campaignDirection, briefText, campaignText, genConfig),
+      generateStories(strategy, brandDNA, campaignDirection, briefText, campaignText, genConfig),
     ])
 
     // 5. Quality rubric on each post — silent failure, non-blocking

@@ -10,6 +10,7 @@
 
 import OpenAI from 'openai'
 import { callClaudeWithDocs, parseJsonResponse } from '@/lib/anthropic/client'
+import type { MasterBrief, CampaignBrief } from '@/types/magic-engine'
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -153,17 +154,68 @@ RENDERING REQUIREMENTS:
 
 export type PostType = 'educational' | 'promotional' | 'storytelling' | 'engagement'
 
+/**
+ * Facebook Post image aspect ratio.
+ * - '1:1' square — default for standard FB feed posts
+ * - '4:5' portrait — when subject is vertically oriented (tall buildings, portrait composition)
+ * Never 9:16 — that is Story/Reel format, not Post.
+ */
+export type PostImageFormat = '1:1' | '4:5'
+
+/**
+ * Facebook Post — generated as part of a Marketing Plan.
+ *
+ * Image prompt assembly is deterministic (mirrors Reels storyboard pattern):
+ *   1. AI generates structured creative inputs (image_subject, image_composition, …)
+ *   2. buildPostImagePrompt() assembles the final image_prompt programmatically,
+ *      layering MB vi_* + Campaign vi_* + AI creative on top of brand DNA rules.
+ *
+ * Older records (created before SP-VI.1) only have `image_prompt`; the new
+ * creative fields are optional for backward compatibility.
+ */
 export interface Post {
   content_type: PostType
   copy: string
-  image_prompt: string
   hashtags: string[]
+
+  /** Final assembled image prompt — published as-is to image generators. */
+  image_prompt: string
+
+  // === Structured creative inputs (AI-generated, SP-VI.1+) ===
+  /** Exact location + specific named foreground element + scene depth (20–35 words). */
+  image_subject?: string
+  /** Camera angle + lens character + composition principle + depth (15–25 words). */
+  image_composition?: string
+  /** Light source, quality, direction (10–20 words). */
+  image_lighting?: string
+  /** 2–3 mood words drawn from brand vi_style_keywords. */
+  image_mood_words?: string[]
+  /** Aspect ratio — defaults to '1:1' for FB feed. */
+  image_format?: PostImageFormat
 }
 
+/**
+ * Facebook Story — generated as part of a Marketing Plan.
+ *
+ * Same deterministic-builder pattern as Post, but format is always 9:16 vertical.
+ * The new creative fields are optional for backward compatibility with pre-SP-VI.1 records.
+ */
 export interface Story {
   copy: string
   cta: string
+
+  /** Final assembled image prompt — published as-is to image generators. */
   visual_prompt: string
+
+  // === Structured creative inputs (AI-generated, SP-VI.1+) ===
+  /** Exact location + specific named foreground element + scene depth (20–35 words). */
+  story_subject?: string
+  /** Camera angle + lens character + composition principle + depth (15–25 words). */
+  story_composition?: string
+  /** Light source, quality, direction (10–20 words). */
+  story_lighting?: string
+  /** 2–3 mood words drawn from brand vi_style_keywords. */
+  story_mood_words?: string[]
 }
 
 export interface SocialPlanOutput {
@@ -171,6 +223,201 @@ export interface SocialPlanOutput {
   reels: ReelsScript[]
   posts: Post[]
   stories: Story[]
+}
+
+// ─── Brand & Campaign Visual DNA ───────────────────────────────────────────────
+
+/**
+ * Brand-level visual DNA, extracted from the active Master Brief.
+ * This is the NON-NEGOTIABLE constraint layer — every Post/Story image prompt
+ * must respect these rules. Campaign visual direction can narrow or extend these,
+ * but must never contradict them.
+ */
+export interface VisualBrandDNA {
+  brandName: string
+  /** vi_style_keywords joined — photography style language for prompt header. */
+  photographyStyle: string
+  /** Comma-separated brand colors from vi_colors (primary / secondary / accent / background). */
+  colorPalette: string
+  /** vi_dos joined — what every image MUST contain or honour. */
+  visualDos: string
+  /** vi_donts joined — what no image may ever contain. */
+  visualDonts: string
+}
+
+/**
+ * Campaign-level visual direction, extracted from the campaign brief.
+ * Layered on top of VisualBrandDNA. All fields are optional — if a campaign
+ * doesn't specify a vi_* field, the brand DNA value carries through unchanged.
+ */
+export interface CampaignVisualDirection {
+  campaignTitle: string
+  /** Campaign mood tone — overrides/refines brand mood for the duration of the campaign. */
+  mood?: string
+  /** Campaign-specific accent color (e.g. "warm amber for October Discovery"). */
+  colorAccent?: string
+  /** Additional visual rules specific to this campaign. */
+  specificDos?: string
+  /** Additional visual exclusions specific to this campaign. */
+  specificDonts?: string
+  /** Free-text reference note (composition, mood-board direction). */
+  referenceNote?: string
+}
+
+/** Extracts the visual DNA struct from a Master Brief row. */
+export function extractBrandVisualDNA(brief: MasterBrief): VisualBrandDNA {
+  const photographyStyle = brief.vi_style_keywords?.join(', ')
+    || brief.visual_style
+    || 'Cinematic editorial photography'
+
+  const colorPalette = (() => {
+    if (brief.vi_colors) {
+      const { primary, secondary, accent, background } = brief.vi_colors
+      return [primary, secondary, accent, background].filter(Boolean).join(', ')
+    }
+    return brief.color_palette?.join(', ') || ''
+  })()
+
+  const visualDos = brief.vi_dos?.join('; ') || ''
+  const visualDonts = brief.vi_donts?.join('; ') || brief.image_preference || ''
+
+  return {
+    brandName: brief.brand_name || 'Brand',
+    photographyStyle,
+    colorPalette,
+    visualDos,
+    visualDonts,
+  }
+}
+
+/** Extracts the campaign visual direction struct from a Campaign Brief row. */
+export function extractCampaignVisualDirection(campaign: CampaignBrief): CampaignVisualDirection {
+  return {
+    campaignTitle: campaign.title,
+    ...(campaign.vi_mood          ? { mood:          campaign.vi_mood }          : {}),
+    ...(campaign.vi_color_accent  ? { colorAccent:   campaign.vi_color_accent }  : {}),
+    ...(campaign.vi_specific_dos?.length   ? { specificDos:   campaign.vi_specific_dos.join('; ') }   : {}),
+    ...(campaign.vi_specific_donts?.length ? { specificDonts: campaign.vi_specific_donts.join('; ') } : {}),
+    ...(campaign.vi_reference_note ? { referenceNote: campaign.vi_reference_note } : {}),
+  }
+}
+
+// ─── Post & Story image prompt builders ────────────────────────────────────────
+
+interface PostImageBuilderParams {
+  brand:    VisualBrandDNA
+  campaign: CampaignVisualDirection
+  post: {
+    contentType: PostType
+    subject:     string
+    composition: string
+    lighting:    string
+    moodWords:   string[]
+    format:      PostImageFormat
+  }
+}
+
+interface StoryImageBuilderParams {
+  brand:    VisualBrandDNA
+  campaign: CampaignVisualDirection
+  story: {
+    subject:     string
+    composition: string
+    lighting:    string
+    moodWords:   string[]
+  }
+}
+
+/**
+ * Deterministically assembles the final image prompt for a Facebook Post.
+ *
+ * Layers in order:
+ *   1. Brand photography style (from MB vi_style_keywords)
+ *   2. AI-generated subject + composition + lighting
+ *   3. Brand color palette + campaign color accent
+ *   4. AI mood words + campaign mood
+ *   5. MUST DO rules (MB vi_dos + campaign vi_specific_dos)
+ *   6. EXCLUSIONS (MB vi_donts + campaign vi_specific_donts + standard exclusions)
+ *   7. Format spec + technical requirements
+ *
+ * Output is copy-paste ready for ChatGPT Image / Visual Studio.
+ */
+export function buildPostImagePrompt(p: PostImageBuilderParams): string {
+  const formatLabel = p.post.format === '4:5' ? '4:5 portrait' : '1:1 square'
+  const moodPhrase = p.post.moodWords.join(', ')
+
+  const colorLine = p.campaign.colorAccent
+    ? `Color palette: ${p.brand.colorPalette || 'brand standard'}, with ${p.campaign.colorAccent} as the campaign accent.`
+    : p.brand.colorPalette
+      ? `Color palette: ${p.brand.colorPalette}.`
+      : ''
+
+  const moodLine = p.campaign.mood
+    ? `Mood: ${moodPhrase} — ${p.campaign.mood}.`
+    : `Mood: ${moodPhrase}.`
+
+  const mustDoLines: string[] = []
+  if (p.brand.visualDos)         mustDoLines.push(`Brand rules: ${p.brand.visualDos}.`)
+  if (p.campaign.specificDos)    mustDoLines.push(`Campaign rules: ${p.campaign.specificDos}.`)
+  if (p.campaign.referenceNote)  mustDoLines.push(`Reference: ${p.campaign.referenceNote}.`)
+
+  const exclusionLines: string[] = []
+  if (p.brand.visualDonts)       exclusionLines.push(`Brand exclusions: ${p.brand.visualDonts}.`)
+  if (p.campaign.specificDonts)  exclusionLines.push(`Campaign exclusions: ${p.campaign.specificDonts}.`)
+  exclusionLines.push('No people, no tourist crowds, no human faces. No text, no signs, no watermarks, no logos.')
+
+  return [
+    `${p.brand.photographyStyle} photography.`,
+    `${p.post.subject}`,
+    `${p.post.composition}`,
+    `${p.post.lighting}`,
+    colorLine,
+    moodLine,
+    mustDoLines.length ? `\nVISUAL RULES (MUST follow):\n${mustDoLines.join('\n')}` : '',
+    `\nEXCLUSIONS:\n${exclusionLines.join('\n')}`,
+    `\n${formatLabel} format. Ultra-high resolution. Photorealistic. Cinematic color grade.`,
+  ].filter(Boolean).join('\n').trim()
+}
+
+/**
+ * Deterministically assembles the final image prompt for a Facebook Story.
+ * Same layering as Post, but format is locked to 9:16 vertical.
+ */
+export function buildStoryImagePrompt(p: StoryImageBuilderParams): string {
+  const moodPhrase = p.story.moodWords.join(', ')
+
+  const colorLine = p.campaign.colorAccent
+    ? `Color palette: ${p.brand.colorPalette || 'brand standard'}, with ${p.campaign.colorAccent} as the campaign accent.`
+    : p.brand.colorPalette
+      ? `Color palette: ${p.brand.colorPalette}.`
+      : ''
+
+  const moodLine = p.campaign.mood
+    ? `Mood: ${moodPhrase} — ${p.campaign.mood}.`
+    : `Mood: ${moodPhrase}.`
+
+  const mustDoLines: string[] = []
+  if (p.brand.visualDos)         mustDoLines.push(`Brand rules: ${p.brand.visualDos}.`)
+  if (p.campaign.specificDos)    mustDoLines.push(`Campaign rules: ${p.campaign.specificDos}.`)
+  if (p.campaign.referenceNote)  mustDoLines.push(`Reference: ${p.campaign.referenceNote}.`)
+
+  const exclusionLines: string[] = []
+  if (p.brand.visualDonts)       exclusionLines.push(`Brand exclusions: ${p.brand.visualDonts}.`)
+  if (p.campaign.specificDonts)  exclusionLines.push(`Campaign exclusions: ${p.campaign.specificDonts}.`)
+  exclusionLines.push('No people, no tourist crowds, no human faces. No text, no signs, no watermarks, no logos.')
+  exclusionLines.push('Leave clean upper 20% and lower 20% margins for Story overlay text.')
+
+  return [
+    `${p.brand.photographyStyle} photography.`,
+    `${p.story.subject}`,
+    `${p.story.composition}`,
+    `${p.story.lighting}`,
+    colorLine,
+    moodLine,
+    mustDoLines.length ? `\nVISUAL RULES (MUST follow):\n${mustDoLines.join('\n')}` : '',
+    `\nEXCLUSIONS:\n${exclusionLines.join('\n')}`,
+    `\n9:16 vertical format. Ultra-high resolution. Photorealistic. Cinematic color grade.`,
+  ].filter(Boolean).join('\n').trim()
 }
 
 // ─── JSON parse helpers ────────────────────────────────────────────────────────
@@ -403,25 +650,142 @@ Return ONLY a raw JSON array — no markdown, no code fences, no explanation.`
 function buildPostsSystemPrompt(config: GenerationConfig): string {
   const pl = platformLabel(config.platform)
   const n  = config.posts_count
-  return `You are a ${pl} copywriter for AU/NZ brands.
-Produce ${n} ${pl} post${n > 1 ? 's' : ''} as a JSON array. Each post object must have:
-  content_type: "educational"|"promotional"|"storytelling"|"engagement"
-  copy: ${pl} post copy (AU/NZ English, 80–300 words, include a clear CTA)
-  image_prompt: detailed AI image-generation prompt (9:16 vertical, no human faces, vivid, cinematic)
-  hashtags: array of 5–8 relevant hashtags
-Cover a variety of content types across the ${n} post${n > 1 ? 's' : ''}.
-Return ONLY a raw JSON array — no markdown, no code fences.`
+  return `You are a senior ${pl} content creator and visual director for AU/NZ brands.
+Produce ${n} ${pl} post${n > 1 ? 's' : ''} as a JSON array. These posts are PUBLISHED DIRECTLY without
+manual visual review — every image must be brand-compliant from the first token.
+
+IMAGES ARE ASSEMBLED PROGRAMMATICALLY. You output STRUCTURED CREATIVE INPUTS (image_subject,
+image_composition, image_lighting, image_mood_words, image_format). Do NOT output an image_prompt
+field — it is built deterministically by the system from your inputs + brand vi_* + campaign vi_*.
+
+Each JSON object MUST have ALL of these keys (no omissions):
+
+1. content_type: "educational" | "promotional" | "storytelling" | "engagement"
+   Cover variety across the ${n} post${n > 1 ? 's' : ''}.
+
+2. copy: string — ${pl} post copy
+   - AU/NZ English (travelling, colour, organise, etc.)
+   - 80–300 words
+   - Must include a clear, specific CTA at the end
+   - Tone must match the brand's tone from the Master Brief
+   - Must respect the brief's avoid_words list — zero violations
+   - Must reflect the active campaign's offer and primary_cta
+
+3. hashtags: string[] — 5–8 relevant, on-brand hashtags
+
+4. image_format: "1:1" | "4:5"
+   - DEFAULT "1:1" (square) — standard Facebook feed post
+   - Use "4:5" (portrait) ONLY when the subject is vertically oriented (tall building, vertical artefact, portrait composition)
+   - NEVER use "9:16" — that is Story / Reel format, not Post
+
+5. image_subject: string — 20–35 words
+   - Name the EXACT location (not "China" or "ancient city" — name it precisely:
+     "Xi'an's 14th-century South Gate at dusk", "Yangshuo karst peaks above the Li River at Xingping bend")
+   - Name ONE specific tactile foreground element (not "textiles" — "hand-thrown clay tea bowl with hairline celadon glaze")
+   - Add scene depth (background context that gives it dimension)
+   - Must align with the campaign's vi_mood and vi_reference_note if provided in the brief
+
+6. image_composition: string — 15–25 words
+   - Camera angle: ground-level / low-angle / eye-level / slight elevation / overhead
+   - Lens character: 24mm wide (grand scale), 35mm normal (intimate), 85mm (compressed detail)
+   - Composition principle: rule of thirds / symmetrical / leading lines / frame within frame
+   - Depth field: sharp foreground with blurred background / full sharpness / layered planes
+
+7. image_lighting: string — 10–20 words
+   - Name the exact light condition (NOT "warm light" alone):
+     pre-dawn cool blue-grey / golden hour amber raking / overcast dramatic diffuse /
+     lantern firelight / mid-morning crisp high-contrast
+   - Quality + direction (backlit / side-lit / top-down / soft fill)
+
+8. image_mood_words: string[] — EXACTLY 2–3 mood words
+   - MUST be drawn from or consistent with the brand's vi_style_keywords in the brief
+   - Each word earns its place — no generic atmospheric fluff
+   - Examples (only if brand-aligned): private, vast, ancient, intimate, earned, serene, alive, unhurried
+
+VISUAL COMPLIANCE — read the brief's "视觉品牌 DNA" section and the campaign's "活动视觉指令" section.
+Every image_subject / composition / lighting / mood field MUST:
+  - Be consistent with the brand's vi_style_keywords (photography style)
+  - Honour the brand's vi_dos (must-do list)
+  - Avoid everything in the brand's vi_donts (must-not list)
+  - Apply the campaign's vi_mood, vi_color_accent, vi_specific_dos / vi_specific_donts on top
+  - If campaign vi_* contradicts brand vi_* — FOLLOW THE BRAND. Campaign refines, never contradicts.
+
+CRITICAL RULES (violations will fail brand review and block publication):
+- All image-related fields in English only — zero Chinese characters
+- FORBIDDEN words in image_subject / composition / lighting: "picturesque", "showcasing", "vibrant"
+  used alone, "bustling", "stunning". These produce generic stock-photo output.
+- No human faces or bodies anywhere in image_subject (silhouettes from behind / hands only / empty scenes)
+- No text, signs, banners, watermarks, logos, or UI elements in any image_subject
+- Generic descriptions ("a market scene", "a beautiful temple") will FAIL — be specific or rewrite
+- Could this image_subject describe a competitor's content? If yes → rewrite until it can only be this brand
+
+Return ONLY a raw JSON array — no markdown, no code fences, no explanation.`
 }
 
 function buildStoriesSystemPrompt(config: GenerationConfig): string {
   const pl = platformLabel(config.platform)
   const n  = config.stories_count
-  return `You are a ${pl} Stories copywriter for AU/NZ brands.
-Produce ${n} ${pl} Stories as a JSON array. Each story object must have:
-  copy: short punchy overlay text (≤30 words, AU/NZ English)
-  cta: swipe-up or tap call-to-action text (≤10 words)
-  visual_prompt: AI image-generation prompt (9:16 portrait, no human faces, vivid)
-Return ONLY a raw JSON array — no markdown, no code fences.`
+  return `You are a senior ${pl} Stories creator and visual director for AU/NZ brands.
+Produce ${n} ${pl} Stories as a JSON array. These Stories are PUBLISHED DIRECTLY without
+manual visual review — every image must be brand-compliant from the first token.
+
+IMAGES ARE ASSEMBLED PROGRAMMATICALLY. You output STRUCTURED CREATIVE INPUTS (story_subject,
+story_composition, story_lighting, story_mood_words). Do NOT output a visual_prompt field —
+it is built deterministically by the system from your inputs + brand vi_* + campaign vi_*.
+
+Each JSON object MUST have ALL of these keys (no omissions):
+
+1. copy: string — Story overlay text
+   - AU/NZ English
+   - ≤30 words, short and punchy
+   - Designed to be readable at a glance over the image (no fine print)
+   - Must respect the brief's avoid_words list
+
+2. cta: string — Story CTA
+   - ≤10 words
+   - Must start with an action verb (Tap / Swipe / See / Discover / Book / Learn)
+   - Tied to the active campaign's primary_cta where possible
+
+3. story_subject: string — 20–35 words
+   - Name the EXACT location precisely (not generic — "Mutianyu Great Wall watchtower in pre-dawn mist",
+     not "Great Wall scene")
+   - Name ONE specific tactile foreground element
+   - Add scene depth — Stories work best with strong vertical depth
+   - Must align with the campaign's vi_mood and vi_reference_note if provided
+
+4. story_composition: string — 15–25 words
+   - Camera angle suited to 9:16 vertical: low-angle vertical, ground-level looking up, overhead
+   - Lens: 24mm wide (vertical scale), 35mm normal (immersive), 85mm (compressed detail)
+   - Composition: strong vertical leading lines / vertical thirds / frame within frame
+   - Depth: layered planes (Stories reward depth in vertical composition)
+
+5. story_lighting: string — 10–20 words
+   - Name the exact light condition (NOT "warm light" alone)
+   - Quality + direction
+   - Stories often benefit from dramatic backlighting or rim light for stop-scroll power
+
+6. story_mood_words: string[] — EXACTLY 2–3 mood words
+   - MUST align with brand vi_style_keywords
+   - Stories can lean slightly more dramatic / kinetic than Posts
+
+VISUAL COMPLIANCE — read the brief's "视觉品牌 DNA" section and the campaign's "活动视觉指令" section.
+Every story_subject / composition / lighting / mood field MUST:
+  - Be consistent with the brand's vi_style_keywords
+  - Honour the brand's vi_dos
+  - Avoid everything in the brand's vi_donts
+  - Apply the campaign's vi_mood, vi_color_accent, vi_specific_dos / vi_specific_donts on top
+  - If campaign vi_* contradicts brand vi_* — FOLLOW THE BRAND.
+
+CRITICAL RULES (violations will fail brand review and block publication):
+- All image-related fields in English only — zero Chinese characters
+- FORBIDDEN words in story_subject / composition / lighting: "picturesque", "showcasing",
+  "vibrant" used alone, "bustling", "stunning"
+- No human faces or bodies in any story_subject (silhouettes / hands only / empty scenes)
+- No text, signs, watermarks, logos in any story_subject
+- Format is locked to 9:16 vertical — leave clean upper 20% and lower 20% margins for overlay text
+- Generic descriptions will FAIL — be specific or rewrite
+
+Return ONLY a raw JSON array — no markdown, no code fences, no explanation.`
 }
 
 // ─── Prompt builders ───────────────────────────────────────────────────────────
@@ -495,7 +859,17 @@ Campaign Focus: ${strategy.campaign_focus}
 Tone: ${strategy.tone_guidance}
 
 Produce ${n} ${pl} post${n > 1 ? 's' : ''} covering a variety of content types (educational, promotional, storytelling, engagement).
-Each post must have copy (AU/NZ English, 80–300 words, with a clear CTA), image_prompt (9:16 vertical, no faces), and 5–8 hashtags.
+
+REQUIRED FIELDS per post:
+- content_type, copy (80–300 words AU/NZ English, clear CTA), hashtags (5–8)
+- image_format: "1:1" (default) or "4:5" — NEVER "9:16"
+- image_subject (20–35 words, exact location + specific foreground + scene depth)
+- image_composition (15–25 words, angle + lens + composition + depth)
+- image_lighting (10–20 words, specific light condition + quality + direction)
+- image_mood_words (2–3 mood words aligned with brand vi_style_keywords)
+
+DO NOT output an image_prompt field — it is assembled programmatically from your inputs.
+Every image field MUST be consistent with the brand's vi_* DNA and the campaign's 活动视觉指令.
 
 Return a JSON array of ${n} Post object${n > 1 ? 's' : ''}.`
 }
@@ -516,7 +890,18 @@ Theme: ${strategy.theme}
 Campaign Focus: ${strategy.campaign_focus}
 Tone: ${strategy.tone_guidance}
 
-Produce ${n} ${pl} Stories. Each must have copy (≤30 words, AU/NZ English), cta (≤10 words), and visual_prompt (9:16 portrait, no faces).
+Produce ${n} ${pl} Stories.
+
+REQUIRED FIELDS per story:
+- copy (≤30 words AU/NZ English, punchy overlay)
+- cta (≤10 words, action verb start)
+- story_subject (20–35 words, exact vertical-friendly location + specific foreground + scene depth)
+- story_composition (15–25 words, vertical-suited angle + lens + composition + depth)
+- story_lighting (10–20 words, specific light condition + quality + direction)
+- story_mood_words (2–3 mood words aligned with brand vi_style_keywords)
+
+DO NOT output a visual_prompt field — it is assembled programmatically (locked to 9:16 vertical).
+Every image field MUST be consistent with the brand's vi_* DNA and the campaign's 活动视觉指令.
 
 Return a JSON array of ${n} Story object${n > 1 ? 's' : ''}.`
 }
@@ -597,8 +982,15 @@ export async function generateReelsScripts(
   })
 }
 
+/** Raw shape returned by the AI for Posts — image_prompt is assembled programmatically after. */
+type PostRaw = Omit<Post, 'image_prompt'> & Required<Pick<Post,
+  'image_subject' | 'image_composition' | 'image_lighting' | 'image_mood_words' | 'image_format'
+>>
+
 export async function generatePosts(
   strategy: ChannelStrategy,
+  brand: VisualBrandDNA,
+  campaign: CampaignVisualDirection,
   briefText: string,
   campaignText?: string,
   config: GenerationConfig = DEFAULT_CONFIG,
@@ -610,7 +1002,8 @@ export async function generatePosts(
   const resp = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
     temperature: 0.8,
-    max_tokens: Math.max(2000, config.posts_count * 700),
+    // Posts now carry 5 structured visual fields per item → bump per-post budget.
+    max_tokens: Math.max(3000, config.posts_count * 1000),
     messages: [
       { role: 'system', content: buildPostsSystemPrompt(config) },
       { role: 'user', content: buildPostPrompt(strategy, briefText, campaignText, config) },
@@ -618,11 +1011,46 @@ export async function generatePosts(
   })
 
   const raw = resp.choices[0].message.content ?? '[]'
-  return parseOpenAIJson<Post[]>(raw)
+  const rawPosts = parseOpenAIJson<PostRaw[]>(raw)
+
+  return rawPosts.map(p => {
+    const image_format: PostImageFormat = p.image_format === '4:5' ? '4:5' : '1:1'
+    const moodWords = Array.isArray(p.image_mood_words) ? p.image_mood_words.slice(0, 3) : []
+    const image_prompt = buildPostImagePrompt({
+      brand,
+      campaign,
+      post: {
+        contentType: p.content_type,
+        subject:     p.image_subject     ?? '',
+        composition: p.image_composition ?? '',
+        lighting:    p.image_lighting    ?? '',
+        moodWords,
+        format:      image_format,
+      },
+    })
+    return {
+      content_type:      p.content_type,
+      copy:              p.copy,
+      hashtags:          p.hashtags,
+      image_subject:     p.image_subject,
+      image_composition: p.image_composition,
+      image_lighting:    p.image_lighting,
+      image_mood_words:  moodWords,
+      image_format,
+      image_prompt,
+    }
+  })
 }
+
+/** Raw shape returned by the AI for Stories — visual_prompt is assembled programmatically after. */
+type StoryRaw = Omit<Story, 'visual_prompt'> & Required<Pick<Story,
+  'story_subject' | 'story_composition' | 'story_lighting' | 'story_mood_words'
+>>
 
 export async function generateStories(
   strategy: ChannelStrategy,
+  brand: VisualBrandDNA,
+  campaign: CampaignVisualDirection,
   briefText: string,
   campaignText?: string,
   config: GenerationConfig = DEFAULT_CONFIG,
@@ -634,7 +1062,8 @@ export async function generateStories(
   const resp = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
     temperature: 0.8,
-    max_tokens: Math.max(1000, config.stories_count * 400),
+    // Stories now carry 4 structured visual fields per item → bump per-story budget.
+    max_tokens: Math.max(1500, config.stories_count * 700),
     messages: [
       { role: 'system', content: buildStoriesSystemPrompt(config) },
       { role: 'user', content: buildStoryPrompt(strategy, briefText, campaignText, config) },
@@ -642,7 +1071,30 @@ export async function generateStories(
   })
 
   const raw = resp.choices[0].message.content ?? '[]'
-  return parseOpenAIJson<Story[]>(raw)
+  const rawStories = parseOpenAIJson<StoryRaw[]>(raw)
+
+  return rawStories.map(s => {
+    const moodWords = Array.isArray(s.story_mood_words) ? s.story_mood_words.slice(0, 3) : []
+    const visual_prompt = buildStoryImagePrompt({
+      brand,
+      campaign,
+      story: {
+        subject:     s.story_subject     ?? '',
+        composition: s.story_composition ?? '',
+        lighting:    s.story_lighting    ?? '',
+        moodWords,
+      },
+    })
+    return {
+      copy:              s.copy,
+      cta:               s.cta,
+      story_subject:     s.story_subject,
+      story_composition: s.story_composition,
+      story_lighting:    s.story_lighting,
+      story_mood_words:  moodWords,
+      visual_prompt,
+    }
+  })
 }
 
 // ─── Internal helpers ──────────────────────────────────────────────────────────
