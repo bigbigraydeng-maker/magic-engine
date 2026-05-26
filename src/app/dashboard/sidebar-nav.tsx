@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation'
 type NavItem = {
   href?: string
   label: string
-  emoji: string
+  mark: string
   exact?: boolean
   soon?: boolean
 }
@@ -19,19 +19,19 @@ type NavSection = {
 const adminSections: NavSection[] = [
   {
     items: [
-      { href: '/dashboard', label: 'Overview', emoji: '🏠', exact: true },
-      { href: '/dashboard/clients', label: 'Clients', emoji: '👥' },
+      { href: '/dashboard', label: 'Overview', mark: 'OV', exact: true },
+      { href: '/dashboard/clients', label: 'Clients', mark: 'CL' },
     ],
   },
   {
-    title: '工具',
+    title: 'Operate',
     items: [
-      { href: '/dashboard/visuals',               label: 'Launch Hub',     emoji: '🚀' },
-      {                                             label: 'Analytics',      emoji: '📈', soon: true },
-      { href: '/dashboard/reports',               label: 'Reports',        emoji: '📊' },
-      { href: '/dashboard/admin/billing-monitor',   label: 'Billing Monitor',  emoji: '💳' },
-      { href: '/dashboard/admin/viral-references',  label: 'Viral References', emoji: '🎬' },
-      { href: '/dashboard/admin/users',             label: 'User Console',     emoji: '👤' },
+      { href: '/dashboard/visuals', label: 'Launch Hub', mark: 'LH' },
+      { label: 'Analytics', mark: 'AN', soon: true },
+      { href: '/dashboard/reports', label: 'Reports', mark: 'RP' },
+      { href: '/dashboard/admin/billing-monitor', label: 'Billing Monitor', mark: 'BM' },
+      { href: '/dashboard/admin/viral-references', label: 'Viral References', mark: 'VR' },
+      { href: '/dashboard/admin/users', label: 'User Console', mark: 'UC' },
     ],
   },
 ]
@@ -41,60 +41,80 @@ interface Props {
   allowedClientId: string | null
 }
 
+function Mark({ value, active = false }: { value: string; active?: boolean }) {
+  return (
+    <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[10px] font-black ${
+      active ? 'bg-slate-950 text-white' : 'bg-white/[0.08] text-slate-300'
+    }`}>
+      {value}
+    </span>
+  )
+}
+
 export default function SidebarNav({ userRole, allowedClientId }: Props) {
   const pathname = usePathname()
 
   if (userRole === 'client-viewer' && allowedClientId) {
+    const href = `/dashboard/clients/${allowedClientId}`
+    const isActive = pathname === href || pathname.startsWith(href + '/')
     return (
       <nav className="flex-1 px-3 py-4">
         <Link
-          href={`/dashboard/clients/${allowedClientId}`}
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+          href={href}
+          className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-bold transition ${
+            isActive
+              ? 'bg-white text-slate-950'
+              : 'text-slate-300 hover:bg-white/[0.08] hover:text-white'
+          }`}
         >
-          <span className="text-base">👥</span>
-          My Client
+          <Mark value="CL" active={isActive} />
+          My client
         </Link>
       </nav>
     )
   }
 
   return (
-    <nav className="flex-1 px-3 py-4 space-y-5 overflow-y-auto">
-      {adminSections.map((section, si) => (
-        <div key={si}>
+    <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4">
+      {adminSections.map((section, sectionIndex) => (
+        <div key={sectionIndex}>
           {section.title && (
-            <p className="px-3 mb-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-widest">
+            <p className="mb-2 px-3 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
               {section.title}
             </p>
           )}
-          <div className="space-y-0.5">
+          <div className="space-y-1">
             {section.items.map((item) => {
               if (item.soon || !item.href) {
                 return (
                   <div
                     key={item.label}
-                    className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 opacity-40 cursor-not-allowed select-none"
+                    className="flex select-none items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-bold text-slate-600"
                   >
-                    <span className="text-base">{item.emoji}</span>
+                    <Mark value={item.mark} />
                     <span className="flex-1">{item.label}</span>
-                    <span className="text-[10px] bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded">Soon</span>
+                    <span className="rounded-md bg-white/[0.06] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.1em] text-slate-500">
+                      Soon
+                    </span>
                   </div>
                 )
               }
+
               const isActive = item.exact
                 ? pathname === item.href
                 : pathname === item.href || pathname.startsWith(item.href + '/')
+
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-bold transition ${
                     isActive
-                      ? 'bg-indigo-600 text-white'
-                      : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                      ? 'bg-white text-slate-950'
+                      : 'text-slate-300 hover:bg-white/[0.08] hover:text-white'
                   }`}
                 >
-                  <span className="text-base">{item.emoji}</span>
+                  <Mark value={item.mark} active={isActive} />
                   {item.label}
                 </Link>
               )

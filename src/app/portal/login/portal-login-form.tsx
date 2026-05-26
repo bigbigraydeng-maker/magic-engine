@@ -43,14 +43,14 @@ export default function PortalLoginForm({ next, authFailed }: Props) {
 
   if (sent) {
     return (
-      <div className="text-center">
-        <div className="text-4xl mb-4">📬</div>
-        <h2 className="text-xl font-semibold text-gray-900 mb-2">Check your email</h2>
-        <p className="text-gray-500 text-sm">
-          We sent a login link to{' '}
-          <span className="font-medium text-gray-700">{email}</span>.
-          <br />
-          Link expires in 15 minutes.
+      <div className="py-4">
+        <div className="mb-5 flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-100 text-sm font-black text-emerald-900">
+          OK
+        </div>
+        <h2 className="text-2xl font-black text-slate-950">Check your email</h2>
+        <p className="mt-3 text-sm leading-6 text-slate-600">
+          We sent a secure login link to <span className="font-bold text-slate-950">{email}</span>.
+          The link expires in 15 minutes.
         </p>
       </div>
     )
@@ -59,22 +59,22 @@ export default function PortalLoginForm({ next, authFailed }: Props) {
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+        <label htmlFor="portal-email" className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
           Email address
         </label>
         <input
-          id="email"
+          id="portal-email"
           type="email"
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@company.com"
-          className="w-full px-4 py-2.5 rounded-lg bg-white border border-gray-300 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+          className="mt-1.5 h-12 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-slate-950 focus:ring-4 focus:ring-slate-950/5"
         />
       </div>
 
       {(error || authFailed) && (
-        <p className="text-red-500 text-sm">
+        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
           {error || 'Authentication failed. Please request a new login link.'}
         </p>
       )}
@@ -82,9 +82,13 @@ export default function PortalLoginForm({ next, authFailed }: Props) {
       <button
         type="submit"
         disabled={loading}
-        className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-medium rounded-lg transition-colors"
+        className={`flex h-12 w-full items-center justify-center rounded-lg text-sm font-black transition ${
+          loading
+            ? 'cursor-wait bg-slate-300 text-slate-600'
+            : 'bg-slate-950 text-white hover:bg-slate-800'
+        }`}
       >
-        {loading ? 'Sending…' : 'Send magic link'}
+        {loading ? 'Sending...' : 'Send magic link'}
       </button>
     </form>
   )

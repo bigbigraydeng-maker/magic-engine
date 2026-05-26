@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 
 export default function LoginForm({ next, authFailed }: { next: string; authFailed?: boolean }) {
   const [email, setEmail] = useState('')
@@ -9,7 +9,6 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
 
-  // Parse Supabase hash-fragment errors (e.g. #error_code=otp_expired)
   useEffect(() => {
     const hash = window.location.hash
     if (!hash) return
@@ -20,7 +19,6 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
     } else if (code) {
       setError('Authentication failed. Please try again.')
     }
-    // Clean hash from URL without reload
     window.history.replaceState(null, '', window.location.pathname + window.location.search)
   }, [])
 
@@ -37,9 +35,6 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
 
     try {
       const redirectTo = `${window.location.origin}/auth/implicit-callback?next=${encodeURIComponent(next)}`
-
-      // Send magic link server-side (no PKCE) so it works regardless of which
-      // browser or email client the user clicks the link from.
       const res = await fetch('/api/auth/magic-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -60,12 +55,14 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
 
   if (sent) {
     return (
-      <div className="text-center">
-        <div className="text-4xl mb-4">📬</div>
-        <h2 className="text-xl font-semibold text-white mb-2">Check your email</h2>
-        <p className="text-gray-400 text-sm">
-          Magic link sent to <span className="text-indigo-400">{email}</span>.
-          <br />Link expires in 15 minutes.
+      <div className="py-4">
+        <div className="mb-5 flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-100 text-sm font-black text-emerald-900">
+          OK
+        </div>
+        <h2 className="text-2xl font-black text-slate-950">Check your email</h2>
+        <p className="mt-3 text-sm leading-6 text-slate-600">
+          Magic link sent to <span className="font-bold text-slate-950">{email}</span>.
+          The link expires in 15 minutes.
         </p>
       </div>
     )
@@ -73,12 +70,11 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
 
   return (
     <div className="space-y-4">
-      {/* Google Sign-In */}
       <button
         type="button"
         onClick={handleGoogleLogin}
         disabled={googleLoading}
-        className="w-full flex items-center justify-center gap-3 py-2.5 px-4 bg-white hover:bg-gray-100 disabled:opacity-60 text-gray-900 font-medium rounded-lg transition-colors"
+        className="flex h-12 w-full items-center justify-center gap-3 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-950 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60"
       >
         <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
           <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4"/>
@@ -86,18 +82,18 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
           <path d="M3.964 10.706A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.706V4.962H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.038l3.007-2.332z" fill="#FBBC05"/>
           <path d="M9 3.583c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.962L3.964 7.294C4.672 5.163 6.656 3.583 9 3.583z" fill="#EA4335"/>
         </svg>
-        {googleLoading ? 'Redirecting…' : 'Continue with Google'}
+        {googleLoading ? 'Redirecting...' : 'Continue with Google'}
       </button>
 
       <div className="flex items-center gap-3">
-        <div className="flex-1 h-px bg-gray-700" />
-        <span className="text-xs text-gray-500">or</span>
-        <div className="flex-1 h-px bg-gray-700" />
+        <div className="h-px flex-1 bg-slate-200" />
+        <span className="text-xs font-bold uppercase tracking-[0.12em] text-slate-400">or</span>
+        <div className="h-px flex-1 bg-slate-200" />
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-1">
+          <label htmlFor="email" className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
             Email address
           </label>
           <input
@@ -107,12 +103,12 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@magiclab.com"
-            className="w-full px-4 py-2.5 rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            className="mt-1.5 h-12 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-slate-950 focus:ring-4 focus:ring-slate-950/5"
           />
         </div>
 
         {(error || authFailed) && (
-          <p className="text-red-400 text-sm">
+          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
             {error || 'Authentication failed. Please try again.'}
           </p>
         )}
@@ -120,9 +116,13 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
         <button
           type="submit"
           disabled={loading}
-          className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-medium rounded-lg transition-colors"
+          className={`flex h-12 w-full items-center justify-center rounded-lg text-sm font-black transition ${
+            loading
+              ? 'cursor-wait bg-slate-300 text-slate-600'
+              : 'bg-slate-950 text-white hover:bg-slate-800'
+          }`}
         >
-          {loading ? 'Sending…' : 'Send magic link'}
+          {loading ? 'Sending...' : 'Send magic link'}
         </button>
       </form>
     </div>
