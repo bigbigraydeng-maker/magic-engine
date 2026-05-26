@@ -171,9 +171,12 @@ export async function storeTokens(
   if (tokens.refresh_token) {
     row.refresh_token = tokens.refresh_token
   }
-  await supabaseAdmin
+  const { error } = await supabaseAdmin
     .from('google_oauth_tokens')
     .upsert(row, { onConflict: 'client_id' })
+  if (error) {
+    throw new Error(`Failed to store OAuth tokens for ${clientId}: ${error.message}`)
+  }
 }
 
 // ─── Token retrieval + auto-refresh ──────────────────────────────────────────
