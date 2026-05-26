@@ -381,7 +381,195 @@ export default function ConnectorDetailPage() {
             ← 返回 Connectors
           </button>
         )}
+
+        {/* Snapshot preview + sync button — GSC and GA4 only */}
+        {(anchor === 'gsc' || anchor === 'ga4') && (
+          <SnapshotSyncPanel anchor={anchor} clientId={clientId} />
+        )}
       </div>
     </div>
   )
+}
+
+// ─── SnapshotSyncPanel ────────────────────────────────────────────────────────
+
+interface GscSnapshot {
+  total_clicks: number
+  total_impressions: number
+  avg_ctr: number
+  avg_position: number
+  period_start: string
+  period_end: string
+  synced_at: string
+  top_queries: Array<{ query?: string; clicks: number }>
+}
+
+interface Ga4Snapshot {
+  total_sessions: number
+  total_users: number
+  total_pageviews: number
+  bounce_rate: number
+  period_start: string
+  period_end: string
+  synced_at: string
+  top_sources: Array<{ source: string; medium: string; sessions: number }>
+}
+
+type AnySnapshot = GscSnapshot | Ga4Snapshot
+
+function isGsc(s: AnySnapshot): s is GscSnapshot {
+  return 'total_clicks' in s
+}
+
+function SnapshotSyncPanel({ anchor, clientId }: { anchor: string; clientId: string }) {
+  const [snapshot, setSnapshot] = useState<AnySnapshot | null>(null)
+  const [loadingSnap, setLoadingSnap] = useState(true)
+  const [syncing, setSyncing]         = useState(false)
+  const [syncMsg, setSyncMsg]         = useState<{ ok: boolean; text: string } | null>(null)
+
+  const fetchLatest = async () => {
+    try {
+      const res = await fetch(`/api/clients/${clientId}/${anchor}/snapshots?limit=1`, {
+        headers: { Authorization: `Bearer ${API_KEY}` },
+      })
+      if (res.ok) {
+        const data = await res.json() as { latest: AnySnapshot | null }
+        setSnapshot(data.latest ?? null)
+      }
+    } finally {
+      setLoadingSnap(false)
+    }
+  }
+
+  useEffect(() => { void fetchLatest() }, [clientId, anchor]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSync = async () => {
+    setSyncing(true)
+    setSyncMsg(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/${anchor}/sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${API_KEY}`,
+        },
+        body: JSON.stringify({}),
+      })
+      const data = await res.json() as { success: boolean; error?: string }
+      if (data.success) {
+        setSyncMsg({ ok: true, text: '✓ 同步成功' })
+        setLoadingSnap(true)
+        await fetchLatest()
+      } else {
+        setSyncMsg({ ok: false, text: data.error ?? '同步失败，请检查连接配置' })
+      }
+    } catch {
+      setSyncMsg({ ok: false, text: '网络错误，请重试' })
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-slate-800">
+            {anchor === 'gsc' ? '🔎 Search Console 数据快照' : '📈 Analytics 4 数据快照'}
+          </p>
+          <p className="text-xs text-slate-500 mt-0.5">点击「立即同步」拉取最近 28 天数据</p>
+        </div>
+        <button
+          onClick={() => void handleSync()}
+          disabled={syncing}
+          className="shrink-0 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {syncing ? '同步中…' : '立即同步'}
+        </button>
+      </div>
+
+      {syncMsg && (
+        <p className={`text-xs ${syncMsg.ok ? 'text-green-700' : 'text-red-600'}`}>
+          {syncMsg.text}
+        </p>
+      )}
+
+      {loadingSnap ? (
+        <div className="h-16 rounded-lg bg-white border border-slate-100 animate-pulse" />
+      ) : snapshot ? (
+        <div className="rounded-lg border border-slate-100 bg-white p-3 space-y-2">
+          <p className="text-[10px] text-slate-400">
+            {snapshot.period_start} – {snapshot.period_end}
+            {' · '}
+            上次同步：{new Date(snapshot.synced_at).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}
+          </p>
+
+          {isGsc(snapshot) ? (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <SnapMetric label="点击量"   value={fmtNum(snapshot.total_clicks)} />
+                <SnapMetric label="展示量"   value={fmtNum(snapshot.total_impressions)} />
+                <SnapMetric label="平均 CTR" value={`${(snapshot.avg_ctr * 100).toFixed(1)}%`} />
+                <SnapMetric label="平均排名" value={snapshot.avg_position.toFixed(1)} />
+              </div>
+              {snapshot.top_queries.length > 0 && (
+                <div>
+                  <p className="text-[10px] text-slate-400 mb-1">热门关键词</p>
+                  <div className="space-y-0.5">
+                    {snapshot.top_queries.slice(0, 3).map((q, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 text-[11px]">
+                        <span className="text-slate-600 truncate">{q.query ?? '—'}</span>
+                        <span className="text-slate-400 shrink-0">{fmtNum(q.clicks)} 点击</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <SnapMetric label="会话数"   value={fmtNum((snapshot as Ga4Snapshot).total_sessions)} />
+                <SnapMetric label="用户数"   value={fmtNum((snapshot as Ga4Snapshot).total_users)} />
+                <SnapMetric label="页面浏览" value={fmtNum((snapshot as Ga4Snapshot).total_pageviews)} />
+                <SnapMetric label="跳出率"   value={`${((snapshot as Ga4Snapshot).bounce_rate * 100).toFixed(1)}%`} />
+              </div>
+              {(snapshot as Ga4Snapshot).top_sources.length > 0 && (
+                <div>
+                  <p className="text-[10px] text-slate-400 mb-1">主要流量来源</p>
+                  <div className="space-y-0.5">
+                    {(snapshot as Ga4Snapshot).top_sources.slice(0, 3).map((s, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 text-[11px]">
+                        <span className="text-slate-600 truncate">
+                          {s.source}{s.medium && s.medium !== '(none)' ? ` / ${s.medium}` : ''}
+                        </span>
+                        <span className="text-slate-400 shrink-0">{fmtNum(s.sessions)} 会话</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      ) : (
+        <p className="text-xs text-slate-400">暂无快照数据 — 连接成功后点击「立即同步」</p>
+      )}
+    </div>
+  )
+}
+
+function SnapMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-slate-100 bg-slate-50 px-2 py-1.5">
+      <p className="text-[9px] uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="text-sm font-bold leading-tight text-slate-700">{value}</p>
+    </div>
+  )
+}
+
+function fmtNum(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
 }
