@@ -26,6 +26,15 @@ export const GSC_SCOPES = [
   'email',
 ]
 
+export const GA4_SCOPE = 'https://www.googleapis.com/auth/analytics.readonly'
+
+/** Combined scopes for the recommended "connect Google" flow — grants GSC + GA4 in one consent. */
+export const COMBINED_GOOGLE_SCOPES = [
+  'https://www.googleapis.com/auth/webmasters.readonly',
+  'https://www.googleapis.com/auth/analytics.readonly',
+  'email',
+]
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface RawTokenResponse {
@@ -87,12 +96,16 @@ export function verifyState(state: string): VerifiedState | null {
 
 // ─── OAuth URL ────────────────────────────────────────────────────────────────
 
-export function buildAuthUrl(state: string, redirectUri: string): string {
+export function buildAuthUrl(
+  state: string,
+  redirectUri: string,
+  scopes: string[] = GSC_SCOPES,
+): string {
   const params = new URLSearchParams({
     client_id:     process.env.GOOGLE_CLIENT_ID ?? '',
     redirect_uri:  redirectUri,
     response_type: 'code',
-    scope:         GSC_SCOPES.join(' '),
+    scope:         scopes.join(' '),
     access_type:   'offline',
     prompt:        'consent',   // always return refresh_token
     state,
