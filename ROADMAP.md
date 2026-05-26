@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-27 05:29 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
+> 最后更新：2026-05-27 06:09 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -66,7 +66,7 @@
 📋 Phase 14     Website Connector / 网站直连执行闭环（⭐ WordPress 连接器近期优先 — P14.A.5）
 📋 Phase 15     Reputation Engine / 口碑监控与执行闭环（战略确认，待排期）
 📋 Phase 16     Competitor Intelligence / 竞品雷达 + 信号驱动执行（战略确认，待排期）
-📋 Phase 17     Unified Data Pullback / 统一数据回流层（战略确认，待排期）
+🔥 Phase 17     Unified Data Pullback / 统一数据回流层（Phase 17.A 进行中）
 📋 Phase 18     Ads Execution Engine / 广告执行引擎（Meta + Google + TikTok，已登记）
 📋 Phase 19     API 鉴权整改 / IDOR 修复（🔴 CRITICAL 安全 — 19.A+B 须在客户建号前完成）
 📋 Phase 21     AI Content Factory / AI 内容工厂（旗舰能力 — FDE 客户默认产能引擎）
@@ -2005,9 +2005,9 @@ AI 可见度层（ME 独有 ✅）
 
 ---
 
-## Phase 17 — Unified Data Pullback（统一数据回流层）📋 战略确认，待排期
+## Phase 17 — Unified Data Pullback（统一数据回流层）🔥 进行中
 
-> **登记日期**：2026-05-19 · **状态**：战略方向已确认，是月报和飞轮归因的基础设施
+> **登记日期**：2026-05-19 · **开工日期**：2026-06-03 · **状态**：Phase 17.A 进行中
 >
 > **背景**：ME 现在的月报数据是孤岛——SEO 数据、社媒数据、广告数据分散在各平台，无法在 ME 内做跨渠道归因。Unified Data Pullback 是把所有执行结果拉回 ME、驱动飞轮真实归因的基础设施层。
 
@@ -2027,6 +2027,21 @@ AI 可见度层（ME 独有 ✅）
 1. **月报自动生成**（Insight Reports 模块）
 2. **飞轮归因**（action → outcome 真实数据验证）
 3. **Client Portal**（客户自助查看跨渠道数据看板）
+
+### Phase 17.A — GSC Performance Snapshots（Google Search Console 数据回流）
+
+| ID | 任务 | 状态 |
+|----|------|------|
+| **P17.A.1** | `gsc_performance_snapshots` 表 + GSC sync 路由 + snapshots 读取路由 | ✅ 完成 2026-06-03 |
+| **P17.A.2** | GA4 OAuth scope 扩展 + `ga4_traffic_snapshots` 表 + sync 路由 | 📋 待开工 |
+| **P17.A.3** | GSC 数据 UI 展示（执行看板 / 月报 section）+ connector page 触发按钮 | 📋 待开工 |
+| **P17.A.4** | 飞轮归因桥接：flywheel_action → gsc_snapshot baseline vs after 对比 | 📋 待开工 |
+
+**P17.A.1 实施内容**：
+- `supabase/migrations/20260603000003_gsc_performance_snapshots.sql`：新表（client_id + period_start/end + 总量指标 + top_queries/pages JSONB）
+- `src/lib/gsc/client.ts`：新增 `fetchGscSnapshot()` 并行拉取 query + page 两个维度（各 50 行）
+- `POST /api/clients/[id]/gsc/sync`：从 connector config 取 site_url → 调 GSC API → upsert 快照
+- `GET /api/clients/[id]/gsc/snapshots`：读取历史快照列表，供报告 / 看板使用
 
 ---
 
@@ -2462,6 +2477,10 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 
 > 每次上线新功能时在此追加。格式：**[完成日期]** — Phase ID + 描述 + Commit 引用。
 > 此日志从 CLAUDE.md §十五.C 迁移至此（2026-05-10），CLAUDE.md 不再维护历史日志。
+
+### 2026-06-03
+
+- **P17.A.1** — GSC 数据回流基础设施：新表 `gsc_performance_snapshots`（含 top_queries/pages JSONB）+ `fetchGscSnapshot()` 并行拉取两维度 + POST `/gsc/sync` + GET `/gsc/snapshots` [feat/phase-17-a-gsc-pullback]
 
 ### 2026-05-20
 
