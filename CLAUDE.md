@@ -215,22 +215,22 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-27 06:31 NZST （**P17.A.1 ✅ 完成**；Phase 17.A GSC 数据回流进行中）
+> 最后更新：2026-05-27 06:33 NZST （**P17.A.1/A.2/A.3 ✅ 完成**；Phase 17.A 进行中，剩 P17.A.4）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P17.A.2** | GA4 OAuth scope 扩展 + `ga4_traffic_snapshots` 表 + sync 路由 | 🔥 下一任务 |
-| **PM 操作** | Supabase 跑 migration `20260603000003_gsc_performance_snapshots.sql` | ⚠️ PM 操作 |
+| **P17.A.4** | 飞轮归因桥接：flywheel_action → gsc_snapshot baseline vs after 对比 | 🔥 下一任务 |
+| **PM 操作** | Supabase 跑 migration `20260603000003_gsc_performance_snapshots.sql` + `20260604000001_ga4_traffic_snapshots.sql` | ⚠️ PM 操作 |
 | **PM 操作（旧）** | Supabase 跑 3 个 CMS migration：`20260531000001` + `20260531000002` + `20260601000001` | ⚠️ PM 操作 |
 | **PM 合并（旧）** | 输入 `go merge` 合并 Phase 14.A PR | ⚠️ PM 决定 |
 
-**状态校准（2026-06-03）**：
+**状态校准（2026-05-27）**：
 - ✅ **P17.A.1**：`gsc_performance_snapshots` 表 + `fetchGscSnapshot()` + POST `/gsc/sync` + GET `/gsc/snapshots`
-- 📋 **P17.A.2**：GA4 接入（下一任务）
-- 📋 **P17.A.3**：GSC 数据 UI 展示
-- 📋 **P17.A.4**：飞轮归因桥接
+- ✅ **P17.A.2**：GA4 接入：`ga4_traffic_snapshots` + `fetchGa4Snapshot()` + POST `/ga4/sync` + GET `/ga4/snapshots`
+- ✅ **P17.A.3**：GSC/GA4 快照 UI：`DataPullbackSection`（执行看板）+ connector 详情页同步按钮
+- 📋 **P17.A.4**：飞轮归因桥接（下一任务）
 
-下一 session：`继续 Phase 17.A 第 2 任务 P17.A.2`
+下一 session：`继续 Phase 17.A 第 4 任务 P17.A.4`
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox
