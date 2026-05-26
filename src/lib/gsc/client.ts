@@ -29,6 +29,37 @@ const MAX_ROWS                = 25
 const SNAPSHOT_ROWS           = 50   // per dimension for snapshots
 const FETCH_TIMEOUT_MS        = 20_000
 
+// ─── Error class ──────────────────────────────────────────────────────────────
+
+export class GscApiError extends Error {
+  constructor(
+    public readonly httpStatus: number,
+    public readonly googleStatus: string,
+    public readonly googleReason: string,
+    message: string,
+    public readonly detail: string = '',
+  ) {
+    super(message)
+    this.name = 'GscApiError'
+  }
+}
+
+function parseGoogleError(rawBody: string): { googleStatus: string; googleReason: string; message: string } {
+  try {
+    const json = JSON.parse(rawBody) as {
+      error?: { status?: string; message?: string; errors?: Array<{ reason?: string }> }
+    }
+    const err = json.error ?? {}
+    return {
+      googleStatus: err.status ?? '',
+      googleReason: err.errors?.[0]?.reason ?? '',
+      message:      err.message ?? rawBody.slice(0, 200),
+    }
+  } catch {
+    return { googleStatus: '', googleReason: '', message: rawBody.slice(0, 200) }
+  }
+}
+
 // ─── Service-account shape (legacy) ──────────────────────────────────────────
 
 interface ServiceAccount {
@@ -160,14 +191,13 @@ export async function fetchGscSnapshot(
   const periodEnd   = toIsoDate(new Date())
   const periodStart = toIsoDate(daysAgo(periodDays))
 
+  // GscApiError propagates to caller — null return is reserved for "no token"
   const [queries, pages] = await Promise.all([
     querySearchAnalytics(token, siteUrl, periodStart, periodEnd, 'query'),
     querySearchAnalytics(token, siteUrl, periodStart, periodEnd, 'page'),
   ])
 
-  if (!queries && !pages) return null
-
-  const allRows = queries ?? []
+  const allRows = queries
   const totalClicks      = allRows.reduce((s, r) => s + r.clicks, 0)
   const totalImpressions = allRows.reduce((s, r) => s + r.impressions, 0)
   const avgCtr           = totalImpressions > 0
@@ -185,8 +215,8 @@ export async function fetchGscSnapshot(
     total_impressions: totalImpressions,
     avg_ctr:           Math.round(avgCtr * 10000) / 10000,
     avg_position:      Math.round(avgPosition * 100) / 100,
-    top_queries:       (queries ?? []).slice(0, SNAPSHOT_ROWS),
-    top_pages:         (pages ?? []).slice(0, SNAPSHOT_ROWS),
+    top_queries:       queries.slice(0, SNAPSHOT_ROWS),
+    top_pages:         pages.slice(0, SNAPSHOT_ROWS),
     synced_at:         new Date().toISOString(),
   }
 }
@@ -197,7 +227,7 @@ async function querySearchAnalytics(
   startDate: string,
   endDate: string,
   dimension: 'query' | 'page',
-): Promise<GscSnapshotRow[] | null> {
+): Promise<GscSnapshotRow[]> {
   const controller = new AbortController()
   const timer      = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
 
@@ -219,8 +249,10 @@ async function querySearchAnalytics(
     )
 
     if (!res.ok) {
-      console.warn(`[gsc/client] ${dimension} query returned ${res.status} for ${siteUrl}`)
-      return null
+      const rawBody = await res.text()
+      const { googleStatus, googleReason, message } = parseGoogleError(rawBody)
+      console.warn(`[gsc/client] ${dimension} query returned ${res.status} for ${siteUrl}: ${rawBody.slice(0, 200)}`)
+      throw new GscApiError(res.status, googleStatus, googleReason, message, rawBody.slice(0, 500))
     }
 
     const data = await res.json() as {
@@ -235,8 +267,10 @@ async function querySearchAnalytics(
       position:    r.position,
     } as GscSnapshotRow))
   } catch (err) {
-    console.warn(`[gsc/client] ${dimension} fetch failed:`, err instanceof Error ? err.message : err)
-    return null
+    if (err instanceof GscApiError) throw err
+    const msg = err instanceof Error ? err.message : String(err)
+    console.warn(`[gsc/client] ${dimension} fetch failed:`, msg)
+    throw new GscApiError(0, 'NETWORK_ERROR', 'networkError', msg)
   } finally {
     clearTimeout(timer)
   }
