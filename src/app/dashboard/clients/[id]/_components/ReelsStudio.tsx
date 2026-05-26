@@ -88,7 +88,7 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated }: P
   const openingFileRef = useRef<HTMLInputElement>(null)
   const closingFileRef = useRef<HTMLInputElement>(null)
 
-  // Frame generation (Visual Studio) — stores Atlas job IDs while polling
+  // Frame generation (Visual Studio) stores visual job IDs while polling.
   const [frameJobs, setFrameJobs] = useState<{ opening?: string; closing?: string }>({})
   const [generatingFrame, setGeneratingFrame] = useState<{ opening: boolean; closing: boolean }>({
     opening: false,
@@ -98,7 +98,7 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated }: P
   // Video generation state
   const [generatingVideo, setGeneratingVideo] = useState(false)
 
-  // Publer publish modal (video_ready)
+  // Publishing Hub modal (video_ready)
   const [reelPubModal, setReelPubModal] = useState(false)
   const [reelAccounts, setReelAccounts] = useState<Array<{ id: string; name: string; provider: string }>>([])
   const [reelScheduleForm, setReelScheduleForm] = useState({ account_id: '', scheduled_at: '', caption: '' })
@@ -539,7 +539,7 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated }: P
 
           {/* Main editor + chat */}
           {activeDraft ? (
-            <div className="flex-1 min-w-0 flex gap-4">
+            <div className="flex min-w-0 flex-1 flex-col gap-4 lg:flex-row">
               {/* Left: editable fields + frames + video */}
               <div className="flex-1 min-w-0 space-y-4">
                 {/* Four editable fields */}
@@ -569,7 +569,7 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated }: P
                   <p className="text-xs text-gray-400 mb-4">
                     Generate from prompt with Visual Studio, or upload your own image (9:16)
                   </p>
-                  <div className="grid grid-cols-2 gap-5">
+                  <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                     {(['opening', 'closing'] as const).map(type => {
                       const url = type === 'opening'
                         ? activeDraft.opening_frame_url
@@ -737,7 +737,7 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated }: P
               </div>
 
               {/* Right: chat panel */}
-              <div className="w-80 flex-shrink-0 flex flex-col bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="flex w-full flex-shrink-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white lg:w-80">
                 <div className="px-4 py-3 border-b border-gray-100">
                   <h3 className="text-sm font-semibold text-gray-900">✏️ AI Refinement</h3>
                   <p className="text-xs text-gray-400 mt-0.5">
@@ -821,7 +821,7 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated }: P
         </div>
       )}
 
-      {/* Publer 发布 modal */}
+      {/* Publishing Hub modal */}
       {reelPubModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl">

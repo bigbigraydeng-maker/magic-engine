@@ -23,8 +23,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const roleLabel = userRole === 'client-viewer' ? 'Client view' : 'Admin cockpit'
 
   return (
-    <div className="flex h-screen bg-[#f6f7f2] text-slate-950">
-      <aside className="flex min-h-screen w-72 shrink-0 flex-col border-r border-white/10 bg-slate-950 text-white">
+    <div className="flex min-h-screen bg-[#f6f7f2] text-slate-950">
+      <aside className="hidden min-h-screen w-72 shrink-0 flex-col border-r border-white/10 bg-slate-950 text-white md:flex">
         <div className="border-b border-white/10 px-5 py-5">
           <div className="flex items-center gap-3">
             <LogoMark />
@@ -63,7 +63,26 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </div>
       </aside>
 
-      <main className="min-w-0 flex-1 overflow-auto bg-[#f6f7f2]">
+      <main className="min-w-0 flex-1 bg-[#f6f7f2]">
+        <header className="sticky top-0 z-30 border-b border-slate-200 bg-[#f6f7f2]/95 px-4 py-3 backdrop-blur md:hidden">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <LogoMark />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-black">Magic Engine</p>
+                <p className="text-xs font-semibold text-slate-500">{roleLabel}</p>
+              </div>
+            </div>
+            <form action="/auth/signout" method="POST">
+              <button
+                type="submit"
+                className="h-9 rounded-lg border border-slate-300 px-3 text-xs font-black text-slate-700"
+              >
+                Sign out
+              </button>
+            </form>
+          </div>
+        </header>
         {children}
       </main>
     </div>

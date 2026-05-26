@@ -1,19 +1,10 @@
 'use client'
 
 /**
- * ContentStudioDrawer — diagnosis-driven content workbench.
+ * ContentStudioDrawer is the diagnosis-driven content workbench.
  *
- * Launched from an execution-kanban item. The drawer is the WHY → DO bridge:
- * the diagnosis produced this task, and the FDE generates the content that
- * solves it here, without bouncing to another page.
- *
- * Two modes:
- *   📝 SEO 文章  — StudioArticleTab (one-shot blog generation)
- *   🎬 社媒视频  — embedded ReelsStudio (prompts → frames → video → caption)
- *
- * Every generation auto-injects Master Brief + the active Campaign. On success
- * the drawer logs an `ai_assist` entry back to the execution item and bumps a
- * `pending` item to `in_progress`, closing the flywheel loop.
+ * The diagnosis explains why the task exists; this drawer gives the FDE a
+ * focused place to generate the content that resolves it.
  */
 
 import { useState, useEffect, useCallback } from 'react'
@@ -35,7 +26,7 @@ interface Props {
   clientId: string
   item: ExecutionItem
   onClose: () => void
-  /** Called after content is generated — parent silently refreshes the kanban. */
+  /** Called after content is generated; parent silently refreshes the kanban. */
   onContentGenerated: () => void
 }
 
@@ -49,7 +40,7 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
   const [campaign, setCampaign]     = useState<ActiveCampaign | null>(null)
   const [campaignLoaded, setCampaignLoaded] = useState(false)
 
-  // Fetch the active campaign once — used both for the header assurance line
+  // Fetch the active campaign once; used both for the header assurance line
   // and as ReelsStudio's default-selected campaign.
   useEffect(() => {
     let cancelled = false
@@ -63,7 +54,7 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
           }
         }
       } catch {
-        /* non-fatal — generation still works on Master Brief alone */
+        /* non-fatal; generation still works on Master Brief alone */
       } finally {
         if (!cancelled) setCampaignLoaded(true)
       }
@@ -99,58 +90,62 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
         onClick={onClose}
         aria-hidden="true"
       />
-      <div className="fixed right-0 top-0 h-full w-[78vw] min-w-[860px] max-w-[1500px] bg-gray-50 shadow-2xl z-50 flex flex-col">
+      <div className="fixed inset-y-0 right-0 z-50 flex h-full w-full flex-col overflow-hidden bg-[#f6f7f2] shadow-2xl md:w-[calc(100vw-18rem)] xl:max-w-[1500px]">
 
-        {/* Header — the WHY */}
-        <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-start gap-4">
-          <div className="flex-1 min-w-0">
-            <span className="inline-block text-[11px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-2 py-0.5">
-              📌 为这个诊断任务生成内容
-            </span>
-            <h2 className="text-base font-bold text-gray-900 mt-1.5 truncate">{item.title}</h2>
-            {item.description && item.description !== item.title && (
-              <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{item.description}</p>
-            )}
-            <p className="text-[11px] text-gray-400 mt-1.5">
-              ✓ 自动注入 Master Brief（客户 DNA）
-              {campaignLoaded && (
-                campaign
-                  ? <> · ✓ 当前 Campaign：<strong className="text-gray-600">{campaign.name}</strong></>
-                  : <> · <span className="text-amber-600">⚠ 无活跃 Campaign（仅依据品牌 DNA）</span></>
+        {/* Header: the WHY */}
+        <div className="border-b border-slate-200 bg-[#f6f7f2] px-4 py-4 sm:px-6">
+          <div className="flex items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <span className="inline-flex rounded-md border border-cyan-200 bg-cyan-50 px-2 py-1 text-[11px] font-black uppercase tracking-[0.12em] text-cyan-800">
+                Content workbench
+              </span>
+              <h2 className="mt-2 text-lg font-black leading-tight text-slate-950 sm:text-xl">{item.title}</h2>
+              {item.description && item.description !== item.title && (
+                <p className="mt-1 max-w-4xl text-sm leading-6 text-slate-600">{item.description}</p>
               )}
-            </p>
+              <p className="mt-2 text-xs font-semibold text-slate-500">
+                Master Brief is injected automatically
+                {campaignLoaded && (
+                  campaign
+                    ? <> · Campaign: <strong className="text-slate-700">{campaign.name}</strong></>
+                    : <> · <span className="text-amber-700">No active campaign; using brand DNA only</span></>
+                )}
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-lg font-black text-slate-400 transition hover:border-slate-300 hover:text-slate-700"
+              aria-label="Close workbench"
+            >
+              x
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-2xl leading-none shrink-0"
-            aria-label="关闭工作台"
-          >
-            ×
-          </button>
         </div>
 
         {/* Tabs */}
-        <div className="bg-white border-b border-gray-200 px-6 flex gap-1">
-          {([['article', '📝 SEO 文章'], ['video', '🎬 社媒视频']] as const).map(([val, label]) => (
-            <button
-              key={val}
-              onClick={() => setTab(val)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                tab === val
-                  ? 'border-indigo-600 text-indigo-700'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="border-b border-slate-200 bg-white px-4 sm:px-6">
+          <div className="flex gap-2 overflow-x-auto">
+            {([['article', 'SEO article'], ['video', 'Social video']] as const).map(([val, label]) => (
+              <button
+                key={val}
+                onClick={() => setTab(val)}
+                className={`shrink-0 border-b-2 px-3 py-3 text-sm font-black transition-colors ${
+                  tab === val
+                    ? 'border-slate-950 text-slate-950'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
           {!campaignLoaded ? (
             <div className="flex justify-center py-20">
-              <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-slate-950" />
             </div>
           ) : tab === 'article' ? (
             <StudioArticleTab
@@ -170,7 +165,7 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
                 clientId={clientId}
                 defaultCampaignId={campaign?.id}
                 onDraftGenerated={() =>
-                  linkContentToItem('🤖 已在内容工作台生成社媒视频草稿（Reel）')
+                  linkContentToItem('Generated a social video draft in Content Studio')
                 }
               />
             </div>

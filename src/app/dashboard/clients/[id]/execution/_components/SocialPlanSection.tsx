@@ -9,8 +9,8 @@
  *   • Sub-tabs: Reels (3) | Posts (5) | Stories (3)
  *
  * Reel cards show the 9-panel storyboard production flow:
- *   Step 1 → storyboard_image_prompt (copy → ChatGPT Image → 9-panel storyboard)
- *   Step 2 → seedance_i2v_prompt (upload storyboard + copy → Seedance 2.0 → 15s video)
+ *   Step 1 -> storyboard_image_prompt (copy -> Visual Studio -> 9-panel storyboard)
+ *   Step 2 -> seedance_i2v_prompt (upload storyboard + copy -> Video Studio -> 15s video)
  *
  * Plan history is loaded on mount from GET /api/clients/[id]/social-plan.
  * Generating a new plan prepends it to history (old plans stay visible).
@@ -138,51 +138,51 @@ export function SocialPlanSection({ clientId, campaignId, campaignName }: Props)
   }
 
   return (
-    <div className="mb-6 rounded-xl border border-indigo-100 bg-white shadow-sm overflow-hidden">
+    <div className="mb-6 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
 
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-3.5 bg-gradient-to-r from-indigo-50 to-white border-b border-indigo-100">
-        <div>
-          <h3 className="text-sm font-bold text-indigo-900">📋 Social Plan Studio</h3>
-          <p className="text-[11px] text-gray-500 mt-0.5">
-            Strategy → {config.reels_count} Reels · {config.posts_count} Posts · {config.stories_count} Stories
-            &nbsp;·&nbsp;
-            <span className="capitalize text-indigo-500 font-medium">{config.platform}</span>
+      <div className="flex flex-col gap-3 border-b border-slate-200 bg-[#f6f7f2] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        <div className="min-w-0">
+          <h3 className="text-base font-black text-slate-950">Social Plan Studio</h3>
+          <p className="mt-1 text-xs font-semibold text-slate-500">
+            Strategy to {config.reels_count} Reels, {config.posts_count} Posts, {config.stories_count} Stories
+            <span className="mx-2 text-slate-300">/</span>
+            <span className="capitalize text-cyan-700">{config.platform}</span>
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {campaignId && (
             <button
               onClick={() => setSettingsOpen(v => !v)}
               title="生成设置"
-              className={`flex items-center gap-1 px-3 py-2 text-xs font-medium rounded-lg border transition-colors ${
+              className={`flex h-10 items-center gap-2 rounded-lg border px-3 text-xs font-black transition-colors ${
                 settingsOpen
-                  ? 'bg-indigo-100 border-indigo-300 text-indigo-700'
-                  : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-300'
+                  ? 'border-slate-950 bg-slate-950 text-white'
+                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
               }`}
             >
-              ⚙ 设置
-              <span className="text-[10px]">{settingsOpen ? '▲' : '▼'}</span>
+              Settings
+              <span className="text-[10px]">{settingsOpen ? 'Up' : 'Down'}</span>
             </button>
           )}
           {campaignId ? (
             <button
               onClick={generate}
               disabled={loading}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-xs font-semibold rounded-lg transition-colors"
+              className="flex h-10 items-center gap-2 rounded-lg bg-slate-950 px-4 text-xs font-black text-white transition hover:bg-slate-800 disabled:opacity-60"
             >
               {loading ? (
                 <>
                   <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                  生成中…（约 50s）
+                  Generating...
                 </>
               ) : (
-                <>✦ {plan ? '重新生成' : '生成 Social Plan'}</>
+                <>{plan ? 'Regenerate' : 'Generate plan'}</>
               )}
             </button>
           ) : (
-            <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-1.5">
-              ⚠ 请先设置活跃 Campaign
+            <span className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">
+              Active campaign required
             </span>
           )}
         </div>
@@ -190,21 +190,21 @@ export function SocialPlanSection({ clientId, campaignId, campaignName }: Props)
 
       {/* FDE Settings Panel */}
       {settingsOpen && campaignId && (
-        <div className="px-5 py-4 bg-slate-50 border-b border-slate-200 space-y-3">
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">⚙ 生成设置 — FDE 可调</p>
+        <div className="space-y-4 border-b border-slate-200 bg-white px-4 py-4 sm:px-5">
+          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">Generation settings</p>
 
           {/* Platform */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-500 w-20 shrink-0">平台</span>
-            <div className="flex gap-1">
+          <div className="grid gap-2 sm:grid-cols-[96px_1fr] sm:items-center">
+            <span className="text-xs font-bold text-slate-500">Platform</span>
+            <div className="flex flex-wrap gap-1">
               {(['facebook', 'instagram', 'tiktok'] as const).map(p => (
                 <button
                   key={p}
                   onClick={() => setConfig(c => ({ ...c, platform: p }))}
-                  className={`px-3 py-1 text-xs rounded-full border font-medium transition-colors capitalize ${
+                  className={`rounded-full border px-3 py-1 text-xs font-bold capitalize transition-colors ${
                     config.platform === p
-                      ? 'bg-indigo-600 text-white border-indigo-600'
-                      : 'bg-white text-slate-600 border-slate-300 hover:border-indigo-400'
+                      ? 'border-slate-950 bg-slate-950 text-white'
+                      : 'border-slate-300 bg-white text-slate-600 hover:border-slate-500'
                   }`}
                 >
                   {p === 'facebook' ? 'Facebook' : p === 'instagram' ? 'Instagram' : 'TikTok'}
@@ -214,17 +214,17 @@ export function SocialPlanSection({ clientId, campaignId, campaignName }: Props)
           </div>
 
           {/* Reels count */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-500 w-20 shrink-0">Reels 数量</span>
-            <div className="flex gap-1">
+          <div className="grid gap-2 sm:grid-cols-[96px_1fr] sm:items-center">
+            <span className="text-xs font-bold text-slate-500">Reels</span>
+            <div className="flex flex-wrap gap-1">
               {[1, 2, 3, 4, 5].map(n => (
                 <button
                   key={n}
                   onClick={() => setConfig(c => ({ ...c, reels_count: n }))}
                   className={`w-8 h-8 text-xs rounded-lg border font-medium transition-colors ${
                     config.reels_count === n
-                      ? 'bg-indigo-600 text-white border-indigo-600'
-                      : 'bg-white text-slate-600 border-slate-300 hover:border-indigo-400'
+                      ? 'border-slate-950 bg-slate-950 text-white'
+                      : 'border-slate-300 bg-white text-slate-600 hover:border-slate-500'
                   }`}
                 >
                   {n}
@@ -234,17 +234,17 @@ export function SocialPlanSection({ clientId, campaignId, campaignName }: Props)
           </div>
 
           {/* Posts count */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-500 w-20 shrink-0">Posts 数量</span>
-            <div className="flex gap-1">
+          <div className="grid gap-2 sm:grid-cols-[96px_1fr] sm:items-center">
+            <span className="text-xs font-bold text-slate-500">Posts</span>
+            <div className="flex flex-wrap gap-1">
               {[0, 3, 5, 7, 10].map(n => (
                 <button
                   key={n}
                   onClick={() => setConfig(c => ({ ...c, posts_count: n }))}
-                  className={`px-3 py-1 text-xs rounded-full border font-medium transition-colors ${
+                  className={`rounded-full border px-3 py-1 text-xs font-bold transition-colors ${
                     config.posts_count === n
-                      ? 'bg-indigo-600 text-white border-indigo-600'
-                      : 'bg-white text-slate-600 border-slate-300 hover:border-indigo-400'
+                      ? 'border-slate-950 bg-slate-950 text-white'
+                      : 'border-slate-300 bg-white text-slate-600 hover:border-slate-500'
                   }`}
                 >
                   {n}
@@ -254,17 +254,17 @@ export function SocialPlanSection({ clientId, campaignId, campaignName }: Props)
           </div>
 
           {/* Stories count */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-500 w-20 shrink-0">Stories 数量</span>
-            <div className="flex gap-1">
+          <div className="grid gap-2 sm:grid-cols-[96px_1fr] sm:items-center">
+            <span className="text-xs font-bold text-slate-500">Stories</span>
+            <div className="flex flex-wrap gap-1">
               {[0, 2, 3, 5].map(n => (
                 <button
                   key={n}
                   onClick={() => setConfig(c => ({ ...c, stories_count: n }))}
-                  className={`px-3 py-1 text-xs rounded-full border font-medium transition-colors ${
+                  className={`rounded-full border px-3 py-1 text-xs font-bold transition-colors ${
                     config.stories_count === n
-                      ? 'bg-indigo-600 text-white border-indigo-600'
-                      : 'bg-white text-slate-600 border-slate-300 hover:border-indigo-400'
+                      ? 'border-slate-950 bg-slate-950 text-white'
+                      : 'border-slate-300 bg-white text-slate-600 hover:border-slate-500'
                   }`}
                 >
                   {n}
@@ -274,14 +274,14 @@ export function SocialPlanSection({ clientId, campaignId, campaignName }: Props)
           </div>
 
           {/* Angle focus hint */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-500 w-20 shrink-0">内容侧重</span>
+          <div className="grid gap-2 sm:grid-cols-[96px_1fr] sm:items-center">
+            <span className="text-xs font-bold text-slate-500">Angle focus</span>
             <input
               type="text"
               value={angleFocusInput}
               onChange={e => setAngleFocusInput(e.target.value)}
-              placeholder="可选：如 seasonal promotion、price launch…"
-              className="flex-1 text-xs border border-slate-300 rounded-lg px-3 py-1.5 bg-white text-slate-700 placeholder-slate-400 focus:outline-none focus:border-indigo-400"
+              placeholder="Optional: seasonal promotion, price launch..."
+              className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-700 placeholder-slate-400 focus:border-slate-500 focus:outline-none"
             />
           </div>
         </div>
@@ -289,35 +289,35 @@ export function SocialPlanSection({ clientId, campaignId, campaignName }: Props)
 
       {/* Error */}
       {error && (
-        <div className="px-5 py-3 text-xs text-red-700 bg-red-50 border-b border-red-100">
-          ⚠ {error}
+        <div className="border-b border-red-100 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700 sm:px-5">
+          {error}
         </div>
       )}
 
       {/* Loading state (first generation, no plan yet) */}
       {loading && !plan && (
-        <div className="px-5 py-10 text-center text-sm text-gray-400">
-          <div className="w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          Strategy Engine 制定策略中，Content Engine 生成9格分镜内容…
+        <div className="px-4 py-10 text-center text-sm font-semibold text-slate-500 sm:px-5">
+          <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-slate-950" />
+          Strategy Engine is preparing the plan. Content Engine is drafting the production set.
         </div>
       )}
 
       {/* Results */}
       {plan && (
-        <div className="px-5 py-4 space-y-4">
+        <div className="space-y-4 px-4 py-4 sm:px-5">
 
           {/* History pill selector */}
           {planHistory.length > 1 && (
             <div className="flex items-center gap-2 overflow-x-auto pb-1">
-              <span className="text-[10px] font-bold text-gray-400 uppercase shrink-0">历史:</span>
+              <span className="shrink-0 text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">History</span>
               {planHistory.map((rec, i) => (
                 <button
                   key={rec.id}
                   onClick={() => { setPlan(rec.plan_data); setPlanId(rec.id) }}
                   className={`shrink-0 text-[10px] font-medium rounded-full px-2.5 py-1 border transition-colors ${
                     planId === rec.id
-                      ? 'bg-indigo-600 text-white border-indigo-600'
-                      : 'bg-white text-gray-500 border-gray-200 hover:border-indigo-300'
+                      ? 'border-slate-950 bg-slate-950 text-white'
+                      : 'border-slate-200 bg-white text-slate-500 hover:border-slate-400'
                   }`}
                 >
                   #{planHistory.length - i}&nbsp;
@@ -328,52 +328,52 @@ export function SocialPlanSection({ clientId, campaignId, campaignName }: Props)
           )}
 
           {/* Storyboard workflow notice */}
-          <div className="rounded-lg bg-amber-50 border border-amber-100 px-3.5 py-2.5 text-[11px] text-amber-800 leading-relaxed">
-            📌 以下为 <strong>9格 Storyboard 制作流程</strong>（推荐）。帧图模式请使用下方 <strong>Reels Studio</strong>。
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-[11px] font-semibold leading-relaxed text-amber-900">
+            Recommended workflow: use this 9-panel storyboard flow, then use Reels Studio below for frame-based production.
           </div>
 
           {/* Strategy card */}
-          <div className="rounded-lg bg-indigo-50 border border-indigo-100 p-4 space-y-1.5">
-            <div className="flex items-center gap-2 text-xs font-bold text-indigo-800 uppercase tracking-wide">
-              <span>🎯 Strategy</span>
+          <div className="space-y-2 rounded-lg border border-slate-200 bg-[#f6f7f2] p-4">
+            <div className="flex flex-wrap items-center gap-2 text-xs font-black uppercase tracking-[0.12em] text-slate-500">
+              <span>Strategy</span>
               {planId && (
-                <span className="ml-auto font-normal text-indigo-400 normal-case">
-                  plan_id: {planId.slice(0, 8)}…
+                <span className="ml-auto font-mono text-[11px] font-semibold normal-case text-slate-400">
+                  plan id: {planId.slice(0, 8)}
                 </span>
               )}
             </div>
-            <p className="text-sm text-gray-800 font-medium leading-snug">{plan.strategy.theme}</p>
-            <div className="flex flex-wrap gap-1.5 mt-1">
+            <p className="text-base font-semibold leading-7 text-slate-900">{plan.strategy.theme}</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
               {(plan.strategy.content_pillars ?? []).map((p, i) => (
-                <span key={i} className="text-[11px] bg-white border border-indigo-200 text-indigo-700 rounded-full px-2.5 py-0.5">
+                <span key={i} className="rounded-full border border-cyan-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-cyan-800">
                   {p}
                 </span>
               ))}
             </div>
-            <p className="text-[11px] text-gray-500 mt-1">
+            <p className="mt-2 text-xs leading-5 text-slate-500">
               <strong>Tone:</strong> {plan.strategy.tone_guidance}
             </p>
             {campaignName && (
-              <p className="text-[11px] text-gray-500">
+              <p className="text-xs text-slate-500">
                 <strong>Campaign:</strong> {campaignName}
               </p>
             )}
           </div>
 
           {/* Sub-tabs */}
-          <div className="flex gap-1 border-b border-gray-200 -mx-5 px-5">
+          <div className="-mx-4 flex gap-2 overflow-x-auto border-b border-slate-200 px-4 sm:-mx-5 sm:px-5">
             {([
-              ['reels',   `🎬 Reels (${plan.reels.length})`],
-              ['posts',   `📝 Posts (${plan.posts.length})`],
-              ['stories', `⚡ Stories (${plan.stories.length})`],
+              ['reels',   `Reels (${plan.reels.length})`],
+              ['posts',   `Posts (${plan.posts.length})`],
+              ['stories', `Stories (${plan.stories.length})`],
             ] as const).map(([val, label]) => (
               <button
                 key={val}
                 onClick={() => setPlanTab(val)}
-                className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px transition-colors ${
+                className={`-mb-px shrink-0 border-b-2 px-3 py-2.5 text-xs font-black transition-colors ${
                   planTab === val
-                    ? 'border-indigo-600 text-indigo-700'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                    ? 'border-slate-950 text-slate-950'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
                 }`}
               >
                 {label}
@@ -427,15 +427,15 @@ export function SocialPlanSection({ clientId, campaignId, campaignName }: Props)
 
       {/* Empty state */}
       {!loading && !plan && !error && campaignId && historyLoaded && (
-        <div className="px-5 py-6 text-center text-xs text-gray-400">
-          点击"生成 Social Plan"一键产出本月 Facebook 内容策略（9格分镜 + Posts + Stories）
+        <div className="px-4 py-8 text-center text-xs font-semibold text-slate-400 sm:px-5">
+          Generate a Social Plan to create this campaign's reels, posts, and stories.
         </div>
       )}
 
       {/* History loading spinner */}
       {!historyLoaded && (
-        <div className="px-5 py-4 flex justify-center">
-          <div className="w-5 h-5 border-2 border-indigo-300 border-t-transparent rounded-full animate-spin" />
+        <div className="flex justify-center px-4 py-4 sm:px-5">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-slate-950" />
         </div>
       )}
     </div>
@@ -460,28 +460,28 @@ function SaveToBoardBar({
   const savedCount = isSuccess ? parseInt(msg!.split(':')[1], 10) : 0
 
   return (
-    <div className="flex items-center gap-3 flex-wrap">
+    <div className="flex flex-wrap items-center gap-3">
       <button
         onClick={onSave}
         disabled={saving || count === 0}
-        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 transition-colors"
+        className="flex min-h-9 items-center gap-1.5 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-1.5 text-xs font-black text-cyan-800 transition-colors hover:bg-cyan-100 disabled:opacity-50"
       >
         {saving ? (
-          <><span className="w-3 h-3 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" /> 保存中…</>
+          <><span className="h-3 w-3 animate-spin rounded-full border-2 border-cyan-500 border-t-transparent" /> Saving...</>
         ) : (
-          <>💾 保存全部 {label} 到内容板</>
+          <>Save all {label} to content board</>
         )}
       </button>
       {isSuccess && (
-        <span className="text-xs text-emerald-700">
-          ✓ 已保存 {savedCount} 条 {label}，
+        <span className="text-xs font-semibold text-cyan-800">
+          Saved {savedCount} {label}.
           <a href={`/dashboard/content?client=${clientId}`} className="underline font-medium ml-1">
-            前往内容板生成图片 →
+            Open content board
           </a>
         </span>
       )}
       {isError && (
-        <span className="text-xs text-red-600">⚠ {msg!.replace('error:', '')}</span>
+        <span className="text-xs font-semibold text-red-600">{msg!.replace('error:', '')}</span>
       )}
     </div>
   )
@@ -499,10 +499,10 @@ function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) 
   return (
     <button
       onClick={handleCopy}
-      className="text-[10px] font-semibold border rounded px-1.5 py-0.5 transition-colors text-indigo-500 border-indigo-200 hover:text-indigo-700 hover:border-indigo-400"
+      className="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-black text-slate-500 transition-colors hover:border-slate-400 hover:text-slate-800"
       title="Copy to clipboard"
     >
-      {copied ? '✓ Copied' : label}
+      {copied ? 'Copied' : label}
     </button>
   )
 }
@@ -556,14 +556,14 @@ function ReelCard({
 
   // Editable prompts — user can tweak before generating
   const [editStoryboard, setEditStoryboard] = useState(r.storyboard_image_prompt ?? '')
-  const [editSeedance,   setEditSeedance]   = useState(r.seedance_i2v_prompt ?? '')
+  const [editVideoPrompt, setEditVideoPrompt] = useState(r.seedance_i2v_prompt ?? '')
 
   // Video generation parameters
   const [duration,       setDuration]       = useState<6 | 10 | 15>(15)
   const [resolution,     setResolution]     = useState<'480p' | '720p' | '1080p'>('720p')
   const [generateAudio,  setGenerateAudio]  = useState(false)
 
-  // ── Poll video generation (Seedance, every 15s) ─────────────────────────────
+  // Poll video generation, every 15s.
   useEffect(() => {
     if (makeStep !== 'video' || !draftId) return
     const id = setInterval(async () => {
@@ -596,7 +596,7 @@ function ReelCard({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           storyboard_prompt: editStoryboard,
-          i2v_prompt:        editSeedance,
+          i2v_prompt:        editVideoPrompt,
           caption:           reel.caption,
           campaign_brief_id: campaignId,
         }),
@@ -606,7 +606,7 @@ function ReelCard({
       const newDraftId = cd.draft.id
       setDraftId(newDraftId)
 
-      // 2. Generate storyboard image via gpt-image-1 (synchronous, ~15–25s)
+      // 2. Generate storyboard image via Visual Studio (synchronous, ~15-25s)
       setMakeStep('storyboard_generating')
       const sr = await fetch(
         `/api/clients/${clientId}/reels/${newDraftId}/generate-storyboard`,
@@ -621,11 +621,11 @@ function ReelCard({
       setMakeError(e instanceof Error ? e.message : String(e))
       setMakeStep('error')
     }
-  }, [editStoryboard, editSeedance, reel.caption, clientId, campaignId])
+  }, [editStoryboard, editVideoPrompt, reel.caption, clientId, campaignId])
 
-  // ── Step B: submit Seedance I2V job (user reviews storyboard first) ─────────
+  // Step B: submit Video Studio job after the user reviews the storyboard.
   const handleMakeVideo = useCallback(async () => {
-    if (!draftId || !editSeedance) return
+    if (!draftId || !editVideoPrompt) return
     setMakeError(null)
     try {
       const vr = await fetch(
@@ -643,7 +643,7 @@ function ReelCard({
       setMakeError(e instanceof Error ? e.message : String(e))
       setMakeStep('error')
     }
-  }, [draftId, editSeedance, clientId, duration, resolution, generateAudio])
+  }, [draftId, editVideoPrompt, clientId, duration, resolution, generateAudio])
 
   // ── Shared parameter bar (used in both idle and storyboard_ready) ───────────
   const ParamBar = (
@@ -740,36 +740,36 @@ function ReelCard({
         </div>
       )}
 
-      <div className="border border-gray-200 rounded-lg overflow-hidden">
+      <div className="overflow-hidden rounded-lg border border-slate-200">
 
         {/* Accordion header */}
         <button
           onClick={() => setOpen(o => !o)}
-          className="w-full flex items-center gap-3 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-left transition-colors"
+          className="flex w-full items-center gap-3 bg-white px-4 py-3 text-left transition-colors hover:bg-[#f6f7f2]"
         >
-          <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-bold flex items-center justify-center shrink-0">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-950 text-[10px] font-black text-white">
             {index + 1}
           </span>
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-gray-800 truncate">{reel.title}</p>
-            {hookLine && <p className="text-[11px] text-gray-500 truncate">🎣 {hookLine}</p>}
+            <p className="truncate text-xs font-black text-slate-900">{reel.title}</p>
+            {hookLine && <p className="truncate text-[11px] font-semibold text-slate-500">{hookLine}</p>}
           </div>
           {r.angle_tag && (
             <span className={`text-[10px] font-semibold border rounded px-1.5 py-0.5 shrink-0 ${angleColor}`}>
               {r.angle_tag.replace('_', ' ')}
             </span>
           )}
-          <span className="text-gray-400 text-xs ml-1">{open ? '▲' : '▼'}</span>
+          <span className="ml-1 text-xs font-black text-slate-400">{open ? 'Close' : 'Open'}</span>
         </button>
 
         {/* Expanded content */}
         {open && (
-          <div className="px-4 py-3 space-y-3 border-t border-gray-100 bg-white">
+          <div className="space-y-3 border-t border-slate-100 bg-white px-4 py-3">
 
             {/* Hook line */}
             {hookLine && (
               <div className="rounded-lg bg-gray-50 px-3 py-2.5">
-                <p className="text-[10px] font-bold text-gray-400 uppercase mb-0.5">🎣 Hook Line (前1.5秒)</p>
+                <p className="mb-0.5 text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">Hook line</p>
                 <p className="text-sm font-semibold text-gray-900 leading-snug">"{hookLine}"</p>
               </div>
             )}
@@ -778,37 +778,37 @@ function ReelCard({
             {hasNewFormat && (
               <>
                 {/* Step 1: Storyboard prompt (editable) */}
-                <div className="rounded-lg border border-blue-100 overflow-hidden">
-                  <div className="flex items-start justify-between gap-2 px-3 py-2 bg-blue-50 border-b border-blue-100">
-                    <p className="text-[10px] font-bold text-blue-800 leading-snug">
-                      🎨 Storyboard 提示词
-                      <span className="ml-1 font-normal text-blue-500">（可直接编辑）</span>
+                <div className="overflow-hidden rounded-lg border border-slate-200">
+                  <div className="flex items-start justify-between gap-2 border-b border-slate-200 bg-[#f6f7f2] px-3 py-2">
+                    <p className="text-[10px] font-black uppercase tracking-[0.1em] leading-snug text-slate-600">
+                      Storyboard prompt
+                      <span className="ml-1 font-semibold normal-case tracking-normal text-slate-400">(editable)</span>
                     </p>
-                    <CopyButton text={editStoryboard} label="📋 复制" />
+                    <CopyButton text={editStoryboard} label="Copy" />
                   </div>
                   <textarea
                     value={editStoryboard}
                     onChange={e => setEditStoryboard(e.target.value)}
                     rows={10}
-                    className="w-full px-3 py-2.5 text-[10px] text-blue-900 leading-relaxed font-mono bg-white resize-y border-0 outline-none focus:ring-1 focus:ring-blue-200"
+                    className="w-full resize-y border-0 bg-white px-3 py-2.5 font-mono text-[10px] leading-relaxed text-slate-800 outline-none focus:ring-1 focus:ring-slate-300"
                     spellCheck={false}
                   />
                 </div>
 
-                {/* Step 2: Seedance prompt (editable) */}
-                <div className="rounded-lg border border-purple-100 overflow-hidden">
-                  <div className="flex items-start justify-between gap-2 px-3 py-2 bg-purple-50 border-b border-purple-100">
-                    <p className="text-[10px] font-bold text-purple-800 leading-snug">
-                      🎬 Seedance I2V 提示词
-                      <span className="ml-1 font-normal text-purple-500">（可直接编辑）</span>
+                {/* Step 2: video prompt (editable) */}
+                <div className="overflow-hidden rounded-lg border border-slate-200">
+                  <div className="flex items-start justify-between gap-2 border-b border-slate-200 bg-[#f6f7f2] px-3 py-2">
+                    <p className="text-[10px] font-black uppercase tracking-[0.1em] leading-snug text-slate-600">
+                      Video Studio prompt
+                      <span className="ml-1 font-semibold normal-case tracking-normal text-slate-400">(editable)</span>
                     </p>
-                    <CopyButton text={editSeedance} label="🎬 复制" />
+                    <CopyButton text={editVideoPrompt} label="Copy" />
                   </div>
                   <textarea
-                    value={editSeedance}
-                    onChange={e => setEditSeedance(e.target.value)}
+                    value={editVideoPrompt}
+                    onChange={e => setEditVideoPrompt(e.target.value)}
                     rows={8}
-                    className="w-full px-3 py-2.5 text-[10px] text-purple-900 leading-relaxed font-mono bg-white resize-y border-0 outline-none focus:ring-1 focus:ring-purple-200"
+                    className="w-full resize-y border-0 bg-white px-3 py-2.5 font-mono text-[10px] leading-relaxed text-slate-800 outline-none focus:ring-1 focus:ring-slate-300"
                     spellCheck={false}
                   />
                 </div>
@@ -836,7 +836,7 @@ function ReelCard({
                 {r.i2v_video_prompt && (
                   <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-2.5">
                     <div className="flex items-center gap-1 mb-1">
-                      <span className="text-[10px] font-bold text-gray-400 uppercase">🎬 I2V Prompt</span>
+                      <span className="text-[10px] font-bold text-gray-400 uppercase">Video prompt</span>
                       <CopyButton text={r.i2v_video_prompt} />
                     </div>
                     <p className="text-[10px] text-indigo-800 leading-relaxed">{r.i2v_video_prompt}</p>
@@ -957,7 +957,7 @@ function ReelCard({
 
                 <button
                   onClick={handleMakeVideo}
-                  disabled={!editSeedance}
+                  disabled={!editVideoPrompt}
                   className="w-full py-2 text-xs font-bold bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 text-white rounded-lg transition-all"
                 >
                   🎬 生成 Reel 视频 &nbsp;·&nbsp; {duration}s · {resolution} · 9:16{generateAudio ? ' · 🎵' : ''}
