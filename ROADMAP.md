@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-27 04:55 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
+> 最后更新：2026-05-27 05:01 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -19,6 +19,7 @@
 - [x] **P13.UI.8 admin workspace mobile refresh** - Align the admin content workspace and Content Studio drawer with the shared Magic Engine UI language; repair mobile usability.
 - [x] **P13.UI.9 execution board drawer polish** - Clean up execution board sidebar scrolling, header actions, and task detail drawer so the admin workspace reads as one Magic Engine surface.
 - [x] **P13.UI.10 client workspace settings polish** - Upgrade the client detail workspace and Settings / Master Brief drawer so the page, modal, tabs, chat, and action cards share one Magic Engine UI system.
+- [x] **P13.UI.11 collapsible admin sidebar** - Add a persistent desktop collapse mode for the Magic Engine admin sidebar so FDE operation pages get more working width without losing navigation.
 
 ## 当前进度速览
 
@@ -2492,6 +2493,7 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 - **P13.UI.8** — admin mobile shell、Content Studio drawer、Social Plan Studio 与 Reels Studio 改为响应式新版工作区；移除右侧抽屉硬宽度
 - **P13.UI.9** — execution board 修复 sidebar 内部滚动条、header action 旧按钮、task detail drawer 旧样式与主内容硬挤压
 - **P13.UI.10** — client workspace 与 Settings/Master Brief 抽屉统一新版视觉；修复 modal 多重滚动、旧按钮、供应商直露与行动卡旧样式
+- **P13.UI.11** — admin sidebar 增加桌面端折叠模式并持久化，让 execution / client / content 等 FDE 操作页获得更多横向空间
 - **P14.A.4（Shopify connector）** — migration 扩展 provider shape 约束加 shopify；shopify-guard（SSRF 防护 17 单测全绿）；shopify-client（Admin REST 2024-01：testConnection / listBlogs / getOrCreateDefaultBlog / createArticleDraft / publishArticle / createPageDraft / publishPage）；html-sanitizer MVP；vocabulary 加 SHOPIFY + ShopifyConnectionStatus；connection-store 加 Shopify CRUD；/cms/shopify CRUD + 保存即测 token；/cms/publish-shopify 两步 draft→publish，幂等写 website_publish_jobs；TS 零错误，17 tests ✅
 - **P14.A.5（WordPress connector）** — `wordpress-client.ts`（dns.promises.lookup SSRF guard；testWordpressConnection 验证 publish role；createWordpressPostDraft/Page draft-first；publishWordpressPost/Page status='publish'）；connection-store 加 `markWordpressConnectionTested`；/cms/wordpress 升级（保存即测）；/cms/publish-wordpress（两步 draft→publish，幂等，租户隔离，sanitizeHtml）；TS 新文件零错误
 - **P14.A.6（Blog Studio 三步发布 UI）** — 新 `GET /api/clients/[id]/cms/providers` 聚合三平台状态；新 `PublishToWebsitePanel` 组件（WordPress/Shopify Draft→Preview→Publish 三步，GitHub 单步 PR）；blog/[postId]/page.tsx 替换旧 GitHub-only 按钮

@@ -39,6 +39,7 @@ const adminSections: NavSection[] = [
 interface Props {
   userRole: string
   allowedClientId: string | null
+  collapsed?: boolean
 }
 
 function Mark({ value, active = false }: { value: string; active?: boolean }) {
@@ -51,34 +52,37 @@ function Mark({ value, active = false }: { value: string; active?: boolean }) {
   )
 }
 
-export default function SidebarNav({ userRole, allowedClientId }: Props) {
+export default function SidebarNav({ userRole, allowedClientId, collapsed = false }: Props) {
   const pathname = usePathname()
 
   if (userRole === 'client-viewer' && allowedClientId) {
     const href = `/dashboard/clients/${allowedClientId}`
     const isActive = pathname === href || pathname.startsWith(href + '/')
     return (
-      <nav className="flex-1 px-3 py-4">
+      <nav className={`flex-1 px-3 py-4 ${collapsed ? 'space-y-2' : ''}`}>
         <Link
           href={href}
-          className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-bold transition ${
+          title="My client"
+          className={`flex items-center rounded-lg py-2.5 text-sm font-bold transition ${
             isActive
               ? 'bg-white text-slate-950'
               : 'text-slate-300 hover:bg-white/[0.08] hover:text-white'
-          }`}
+          } ${collapsed ? 'justify-center px-0' : 'gap-3 px-3'}`}
         >
           <Mark value="CL" active={isActive} />
-          My client
+          {!collapsed && 'My client'}
         </Link>
       </nav>
     )
   }
 
   return (
-    <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <nav className={`flex-1 overflow-y-auto px-3 py-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${
+      collapsed ? 'space-y-3' : 'space-y-5'
+    }`}>
       {adminSections.map((section, sectionIndex) => (
         <div key={sectionIndex}>
-          {section.title && (
+          {section.title && !collapsed && (
             <p className="mb-2 px-3 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
               {section.title}
             </p>
@@ -89,13 +93,20 @@ export default function SidebarNav({ userRole, allowedClientId }: Props) {
                 return (
                   <div
                     key={item.label}
-                    className="flex select-none items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-bold text-slate-600"
+                    title={item.soon ? `${item.label} - Soon` : item.label}
+                    className={`flex select-none items-center rounded-lg py-2.5 text-sm font-bold text-slate-600 ${
+                      collapsed ? 'justify-center px-0' : 'gap-3 px-3'
+                    }`}
                   >
                     <Mark value={item.mark} />
-                    <span className="flex-1">{item.label}</span>
-                    <span className="rounded-md bg-white/[0.06] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.1em] text-slate-500">
-                      Soon
-                    </span>
+                    {!collapsed && (
+                      <>
+                        <span className="flex-1">{item.label}</span>
+                        <span className="rounded-md bg-white/[0.06] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.1em] text-slate-500">
+                          Soon
+                        </span>
+                      </>
+                    )}
                   </div>
                 )
               }
@@ -108,14 +119,15 @@ export default function SidebarNav({ userRole, allowedClientId }: Props) {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-bold transition ${
+                  title={item.label}
+                  className={`flex items-center rounded-lg py-2.5 text-sm font-bold transition ${
                     isActive
                       ? 'bg-white text-slate-950'
                       : 'text-slate-300 hover:bg-white/[0.08] hover:text-white'
-                  }`}
+                  } ${collapsed ? 'justify-center px-0' : 'gap-3 px-3'}`}
                 >
                   <Mark value={item.mark} active={isActive} />
-                  {item.label}
+                  {!collapsed && item.label}
                 </Link>
               )
             })}
