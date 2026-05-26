@@ -80,8 +80,8 @@ function LinkedContentCard({ post, clientId }: { post: LinkedContentPost; client
           className="w-16 h-16 rounded-md object-cover border border-indigo-200 flex-shrink-0 bg-white"
         />
       ) : (
-        <div className="w-16 h-16 rounded-md bg-white border border-dashed border-indigo-200 flex items-center justify-center text-2xl flex-shrink-0">
-          📝
+        <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-md border border-dashed border-cyan-200 bg-white text-[10px] font-black text-cyan-800">
+          DOC
         </div>
       )}
       {/* Body */}
@@ -113,7 +113,7 @@ function LinkedContentCard({ post, clientId }: { post: LinkedContentPost; client
               disabled={generating}
               className="text-xs px-2 py-1 rounded bg-violet-100 text-violet-700 hover:bg-violet-200 disabled:opacity-50 font-medium transition-colors"
             >
-              {generating ? '生成中…' : '🎨 生成图片'}
+              {generating ? '生成中…' : '生成图片'}
             </button>
           )}
           <Link
@@ -135,10 +135,10 @@ function LinkedContentCard({ post, clientId }: { post: LinkedContentPost; client
   )
 }
 
-const FIX_TYPE_META: Record<string, { icon: string; label: string; cls: string }> = {
-  me_auto:     { icon: '🤖', label: 'ME 自动',  cls: 'bg-blue-100 text-blue-700' },
-  fde_manual:  { icon: '👤', label: 'FDE 手动', cls: 'bg-purple-100 text-purple-700' },
-  third_party: { icon: '🔗', label: '第三方',   cls: 'bg-gray-100 text-gray-600' },
+const FIX_TYPE_META: Record<string, { label: string; cls: string }> = {
+  me_auto:     { label: 'ME 自动',  cls: 'bg-blue-100 text-blue-700' },
+  fde_manual:  { label: 'FDE 手动', cls: 'bg-cyan-50 text-cyan-800' },
+  third_party: { label: '第三方',   cls: 'bg-gray-100 text-gray-600' },
 }
 
 const STATUS_META: Record<ExecutionItemStatus, { label: string; color: string }> = {
@@ -195,12 +195,12 @@ const FLYWHEEL_THIRD_PARTY_ROUTE: Record<string, { label: string; path: (clientI
   geo:    { label: 'GEO 工具', path: (c, _i) => `/dashboard/clients/${c}` },
 }
 
-const LOG_KIND_META: Record<string, { icon: string; cls: string }> = {
-  note:          { icon: '📝', cls: 'text-gray-600' },
-  status_change: { icon: '🔄', cls: 'text-blue-600' },
-  ai_assist:     { icon: '🤖', cls: 'text-indigo-600' },
-  blocker:       { icon: '🚧', cls: 'text-red-600' },
-  adjustment:    { icon: '🔧', cls: 'text-amber-600' },
+const LOG_KIND_META: Record<string, { label: string; cls: string }> = {
+  note:          { label: 'Note', cls: 'text-slate-600' },
+  status_change: { label: 'Status', cls: 'text-blue-700' },
+  ai_assist:     { label: 'Assist', cls: 'text-cyan-800' },
+  blocker:       { label: 'Blocker', cls: 'text-red-700' },
+  adjustment:    { label: 'Adjust', cls: 'text-amber-700' },
 }
 
 // ---------------------------------------------------------------------------
@@ -384,7 +384,7 @@ function WorklogTimeline({ logs, clientId }: { logs: ExecutionLog[]; clientId: s
   return (
     <ul className="space-y-2">
       {logs.map(log => {
-        const m = LOG_KIND_META[log.kind] ?? { icon: '·', cls: 'text-gray-500' }
+        const m = LOG_KIND_META[log.kind] ?? { label: 'Log', cls: 'text-slate-500' }
         const when = new Date(log.created_at).toLocaleString('zh-CN', {
           timeZone: 'Pacific/Auckland', month: '2-digit', day: '2-digit',
           hour: '2-digit', minute: '2-digit',
@@ -395,7 +395,9 @@ function WorklogTimeline({ logs, clientId }: { logs: ExecutionLog[]; clientId: s
         const displayContent = log.content.replace(BLOG_REF_RE, '')
         return (
           <li key={log.id} className="flex gap-2 text-xs">
-            <span className="shrink-0">{m.icon}</span>
+            <span className="mt-0.5 h-fit shrink-0 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-slate-400">
+              {m.label}
+            </span>
             <div className="flex-1 min-w-0">
               <span className={`${m.cls} break-words`}>{displayContent}</span>
               {blogPostId && (
@@ -557,21 +559,23 @@ function ExecutionItemCard({
       tabIndex={0}
       onClick={() => onOpenDetail(item)}
       onKeyDown={e => e.key === 'Enter' && onOpenDetail(item)}
-      className={`rounded-lg border p-2.5 cursor-pointer transition-all select-none ${
+      className={`cursor-pointer select-none rounded-lg border p-2.5 transition-all ${
         isActive
-          ? 'border-indigo-400 bg-indigo-50 shadow-sm'
-          : 'border-gray-200 bg-white hover:border-indigo-200 hover:shadow-sm'
+          ? 'border-cyan-300 bg-cyan-50 shadow-sm'
+          : 'border-slate-200 bg-white hover:border-cyan-200 hover:shadow-sm'
       }`}
     >
       <div className="flex items-start gap-2">
-        <span className="text-base shrink-0 mt-0.5">{fixMeta.icon}</span>
+        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-slate-950 text-[9px] font-black text-white">
+          {fixMeta.label.slice(0, 2).toUpperCase()}
+        </span>
         <div className="flex-1 min-w-0">
-          <p className="text-xs font-medium text-gray-900 line-clamp-2 leading-tight">{item.title}</p>
+          <p className="line-clamp-2 text-xs font-black leading-tight text-slate-900">{item.title}</p>
           {item.description && (
-            <p className="text-[11px] text-gray-400 line-clamp-1 mt-0.5">{item.description}</p>
+            <p className="mt-0.5 line-clamp-1 text-[11px] font-semibold text-slate-400">{item.description}</p>
           )}
         </div>
-        <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded font-medium ${statusMeta.color}`}>
+        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold ${statusMeta.color}`}>
           {statusMeta.label}
         </span>
       </div>
@@ -580,7 +584,7 @@ function ExecutionItemCard({
           <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${dimMeta.cls}`}>{dimMeta.label}</span>
         )}
         {dueDate && <span className="text-[10px] text-gray-400">{dueDate}</span>}
-        {hasAiAssist && <span className="text-[10px] text-indigo-600 font-medium">🤖 AI草稿</span>}
+        {hasAiAssist && <span className="text-[10px] font-bold text-cyan-700">AI 草稿</span>}
         {logCount > 0 && <span className="text-[10px] text-gray-400">{logCount} 条日志</span>}
       </div>
     </div>
@@ -648,9 +652,9 @@ function TaskDetailDrawer({
       return (
         <button
           onClick={() => onOpenFlywheel(item, execTarget)}
-          className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-50 transition-colors"
+          className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-cyan-200 bg-cyan-50 px-3 text-xs font-black text-cyan-800 transition-colors hover:bg-cyan-100"
         >
-          ▶ 在 {label} 中执行
+          Run in {label}
         </button>
       )
     }
@@ -660,16 +664,16 @@ function TaskDetailDrawer({
       return (
         <a href={route.path(item.client_id, item.id)}
           target="_blank" rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-50 transition-colors"
+          className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-cyan-200 bg-cyan-50 px-3 text-xs font-black text-cyan-800 transition-colors hover:bg-cyan-100"
         >
-          ↗ 在 {route.label} 中执行
+          Open in {route.label}
         </a>
       )
     }
     if (execTarget.mode === 'external_manual') {
       return (
-        <span className="inline-flex items-center gap-1 text-[11px] text-gray-400 border border-gray-200 rounded px-1.5 py-0.5">
-          👤 FDE 完成后请打勾
+        <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-500">
+          Mark complete after FDE work
         </span>
       )
     }
@@ -685,10 +689,13 @@ function TaskDetailDrawer({
   }
 
   const drawerContent = (
-    <div className="fixed right-0 top-[73px] bottom-0 z-30 flex flex-col w-full sm:w-[440px] bg-white border-l border-gray-200 shadow-2xl overflow-hidden">
+    <div className="fixed inset-y-0 right-0 z-50 flex w-full flex-col overflow-hidden border-l border-slate-200 bg-[#f6f7f2] shadow-2xl sm:w-[420px] lg:w-[480px]">
       {/* 抽屉头 */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 shrink-0">
-        <span className="text-lg">{fixMeta.icon}</span>
+      <div className="shrink-0 border-b border-slate-200 px-4 py-4">
+        <div className="flex items-start gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-cyan-200 bg-cyan-50 text-base font-black text-cyan-800">
+          {fixMeta.label.slice(0, 2).toUpperCase()}
+        </span>
         <div className="flex-1 min-w-0">
           {editingTitle ? (
             <div className="flex items-center gap-1.5">
@@ -705,29 +712,36 @@ function TaskDetailDrawer({
                   }
                   if (e.key === 'Escape') setEditingTitle(false)
                 }}
-                className="flex-1 text-sm font-medium border-b border-indigo-400 focus:outline-none px-0 py-0 bg-transparent"
+                className="flex-1 bg-transparent px-0 py-0 text-sm font-black text-slate-950 border-b border-cyan-500 focus:outline-none"
               />
-              <button onClick={() => setEditingTitle(false)} className="text-gray-400 text-xs">✕</button>
+              <button onClick={() => setEditingTitle(false)} className="text-xs font-black text-slate-400">x</button>
             </div>
           ) : (
             <div className="flex items-center gap-1 group/title">
-              <p className="text-sm font-semibold text-gray-900 truncate">{item.title}</p>
+              <p className="truncate text-base font-black leading-tight text-slate-950">{item.title}</p>
               {!isReadonly && (
                 <button
                   onClick={() => { setEditTitle(item.title); setEditingTitle(true) }}
-                  className="opacity-0 group-hover/title:opacity-100 text-gray-400 hover:text-indigo-500 text-xs transition-opacity"
+                  className="text-xs font-black text-slate-300 opacity-0 transition-opacity hover:text-cyan-700 group-hover/title:opacity-100"
                   title="编辑标题"
-                >✎</button>
+                >Edit</button>
               )}
             </div>
           )}
           <FdeMetaRow stepsJson={item.steps_json} />
         </div>
-        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none shrink-0 ml-1">×</button>
+        <button
+          onClick={onClose}
+          className="ml-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-lg font-black text-slate-400 transition hover:border-slate-300 hover:text-slate-700"
+          aria-label="Close task detail"
+        >
+          x
+        </button>
+        </div>
       </div>
 
       {/* 主体（可滚动） */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+      <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
         {/* 状态控制 */}
         {!isReadonly
           ? <StatusDropdown status={item.status} onChange={status => onStatusChange(item.id, status)} />
@@ -752,7 +766,7 @@ function TaskDetailDrawer({
                 value={editDesc}
                 onChange={e => setEditDesc(e.target.value)}
                 rows={4}
-                className="w-full rounded-lg border border-gray-300 px-2.5 py-2 text-xs focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs text-slate-700 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
               />
               <div className="flex gap-2">
                 <button onClick={() => setEditingDesc(false)}
@@ -765,7 +779,7 @@ function TaskDetailDrawer({
                     }
                     setEditingDesc(false)
                   }}
-                  className="flex-1 rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-700"
+                  className="flex-1 rounded bg-slate-950 px-2 py-1 text-xs font-black text-white hover:bg-slate-800"
                 >保存</button>
               </div>
             </div>
@@ -786,16 +800,16 @@ function TaskDetailDrawer({
         <div className="flex flex-wrap gap-2 pt-1">
           <button
             onClick={() => onOpenChat(item)}
-            className="inline-flex items-center gap-1 text-xs font-medium text-gray-700 border border-gray-200 rounded-lg px-3 py-1.5 hover:border-indigo-300 hover:text-indigo-700 transition-colors"
+            className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
           >
-            🔨 鲁班
+            Luban
           </button>
           {CONTENT_STUDIO_DIMENSIONS.has(item.dimension ?? '') && (
             <button
               onClick={() => onOpenStudio(item)}
-              className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 border border-emerald-200 rounded-lg px-3 py-1.5 hover:bg-emerald-50 transition-colors"
+              className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-cyan-200 bg-cyan-50 px-3 text-xs font-black text-cyan-800 transition hover:bg-cyan-100"
             >
-              ✨ 生成内容
+              Generate content
             </button>
           )}
           {execButton}
@@ -814,17 +828,17 @@ function TaskDetailDrawer({
               onChange={e => setNoteText(e.target.value)}
               rows={2}
               placeholder="记录执行进度，或标记卡点…"
-              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-xs focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+              className="min-h-20 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-700 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
             />
-            <div className="flex flex-col gap-1.5 shrink-0">
+            <div className="flex shrink-0 flex-col gap-1.5">
               <button type="button" onClick={() => void submitNote('note')}
                 disabled={addingLog || !noteText.trim()}
-                className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50"
-              >📝 记录</button>
+                className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-black text-white hover:bg-slate-800 disabled:opacity-50"
+              >Record</button>
               <button type="button" onClick={() => void submitNote('blocker')}
                 disabled={addingLog || !noteText.trim()}
-                className="text-xs px-3 py-1.5 rounded-lg bg-red-50 border border-red-200 text-red-700 font-medium hover:bg-red-100 disabled:opacity-50"
-              >🚧 卡点</button>
+                className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-black text-red-700 hover:bg-red-100 disabled:opacity-50"
+              >Blocker</button>
             </div>
           </div>
         )}
@@ -846,7 +860,7 @@ function TaskDetailDrawer({
             ) : (
               <button onClick={() => setConfirmDelete(true)}
                 className="text-xs text-red-400 hover:text-red-600 transition-colors"
-              >🗑 移除此任务</button>
+              >移除此任务</button>
             )}
           </div>
         )}
@@ -954,7 +968,7 @@ function PhaseColumn({
           {meta.talkToUs && (
             <div className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 flex items-center justify-between gap-2">
               <p className="text-[11px] text-teal-700 leading-snug">
-                💬 这些行动建议先与我们沟通，制定专属策略后再执行
+                这些行动建议先与我们沟通，制定专属策略后再执行
               </p>
               <a
                 href={TALK_TO_US_HREF}
@@ -1449,7 +1463,7 @@ export default function ExecutionPage() {
       <div className="min-h-screen bg-gray-50 p-6">
         <div className="max-w-4xl mx-auto">
           <div className="bg-white rounded-xl border border-gray-200 p-12 text-center space-y-3">
-            <p className="text-4xl">📋</p>
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-800">No prescription</p>
             <h2 className="font-semibold text-gray-900">暂无执行计划</h2>
             <p className="text-sm text-gray-500">
               请先生成并批准一份处方，系统将自动创建执行计划。
@@ -1468,26 +1482,27 @@ export default function ExecutionPage() {
 
   // ── Main render ───────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#f6f7f2]">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
+      <div className="sticky top-0 z-10 border-b border-slate-200 bg-[#f6f7f2]/95 px-4 py-4 backdrop-blur md:px-6">
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-gray-900">执行看板</h1>
-            <p className="text-xs text-gray-400 mt-0.5">鲁班执行代理 · 按阶段跟踪处方落地进度</p>
+            <p className="text-[11px] font-black uppercase tracking-[0.14em] text-cyan-800">Execution board</p>
+            <h1 className="mt-1 text-2xl font-black text-slate-950">执行看板</h1>
+            <p className="mt-1 text-sm font-semibold text-slate-500">按阶段跟踪处方落地、内容生成与执行证明</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <a
               href={TALK_TO_US_HREF}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-700 transition-colors"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-slate-950 px-4 text-xs font-black text-white transition-colors hover:bg-slate-800"
             >
-              💬 Talk to Us
+              Talk to Us
             </a>
             {items.length > 0 && (
               <button
                 onClick={() => void handleDownloadDocx()}
                 disabled={isDocxLoading}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isDocxLoading ? (
                   <span className="animate-spin inline-block w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full" />
@@ -1501,33 +1516,33 @@ export default function ExecutionPage() {
             )}
             <button
               onClick={() => setReviewOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-indigo-300 hover:text-indigo-700 transition-colors"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-950"
             >
-              📋 复盘
+              复盘
             </button>
             <button
               onClick={() => setProjectLubanOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-indigo-300 hover:text-indigo-700 transition-colors"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-950"
             >
-              🔨 项目级鲁班
+              项目级鲁班
             </button>
             <Link
               href={`/dashboard/clients/${clientId}/marketing-plan`}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-medium text-purple-700 hover:bg-purple-100 transition-colors"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-cyan-200 bg-cyan-50 px-3 text-xs font-black text-cyan-800 transition-colors hover:bg-cyan-100"
             >
-              📋 Marketing Plan
+              Marketing Plan
             </Link>
             <Link
               href={`/dashboard/clients/${clientId}/prescription/new`}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-indigo-300 hover:text-indigo-700 transition-colors"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-950"
             >
-              ＋ 新处方
+              + 新处方
             </Link>
           </div>
         </div>
       </div>
 
-      <div className={`max-w-7xl mx-auto px-6 py-6 space-y-4 transition-all duration-200 ${detailItem ? 'pr-[452px]' : ''}`}>
+      <div className="mx-auto max-w-7xl space-y-4 px-4 py-6 transition-all duration-200 md:px-6">
         {/* 操作错误提示（状态变更 / 加日志失败时） */}
         {opError && (
           <div className="rounded-xl border border-red-200 bg-red-50 p-3 flex items-center justify-between gap-3 text-sm text-red-700">

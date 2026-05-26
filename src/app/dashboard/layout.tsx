@@ -24,7 +24,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="flex min-h-screen bg-[#f6f7f2] text-slate-950">
-      <aside className="hidden min-h-screen w-72 shrink-0 flex-col border-r border-white/10 bg-slate-950 text-white md:flex">
+      <aside className="sticky top-0 hidden h-screen w-72 shrink-0 flex-col overflow-hidden border-r border-white/10 bg-slate-950 text-white md:flex">
         <div className="border-b border-white/10 px-5 py-5">
           <div className="flex items-center gap-3">
             <LogoMark />

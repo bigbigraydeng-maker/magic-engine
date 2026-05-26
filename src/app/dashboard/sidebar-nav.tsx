@@ -75,7 +75,7 @@ export default function SidebarNav({ userRole, allowedClientId }: Props) {
   }
 
   return (
-    <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4">
+    <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {adminSections.map((section, sectionIndex) => (
         <div key={sectionIndex}>
           {section.title && (
