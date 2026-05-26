@@ -115,6 +115,17 @@ export const SEO_METRIC_KEY = {
 
   /** Count of published blog posts tracked in blog_posts table */
   PUBLISHED_POSTS: 'seo.content.published_posts',
+
+  // ── GSC-backed attribution metrics (P17.A.4) ──────────────────────────────
+
+  /** Total GSC clicks over the 28-day snapshot window */
+  GSC_CLICKS: 'seo.gsc.clicks',
+
+  /** Total GSC impressions over the 28-day snapshot window */
+  GSC_IMPRESSIONS: 'seo.gsc.impressions',
+
+  /** Average ranking position across all tracked queries (lower = better) */
+  GSC_AVG_POSITION: 'seo.gsc.avg_position',
 } as const
 
 export type SeoMetricKey = (typeof SEO_METRIC_KEY)[keyof typeof SEO_METRIC_KEY]

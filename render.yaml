@@ -196,3 +196,23 @@ services:
           type: web
           name: magic-engine
           property: host
+
+  # Daily Google data pullback — every day at 3am UTC (~3pm NZST)
+  # Syncs GSC + GA4 snapshots for all clients with connected Google connectors.
+  # Reference: ROADMAP.md P17.A.4
+  - type: cron
+    name: google-data-pullback-daily
+    env: node
+    schedule: "0 3 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -s -H "Authorization: Bearer $CRON_SECRET" \
+        https://$RENDER_EXTERNAL_URL/api/cron/google-data-pullback-daily
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+      - key: RENDER_EXTERNAL_URL
+        fromService:
+          type: web
+          name: magic-engine
+          property: host

@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-27 06:33 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
+> 最后更新：2026-05-27 06:48 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2035,7 +2035,8 @@ AI 可见度层（ME 独有 ✅）
 | **P17.A.1** | `gsc_performance_snapshots` 表 + GSC sync 路由 + snapshots 读取路由 | ✅ 完成 2026-06-03 |
 | **P17.A.2** | GA4 OAuth scope 扩展 + `ga4_traffic_snapshots` 表 + sync 路由 | ✅ 完成 2026-06-04 |
 | **P17.A.3** | GSC 数据 UI 展示（执行看板 / 月报 section）+ connector page 触发按钮 | ✅ 完成 2026-05-27 |
-| **P17.A.4** | 飞轮归因桥接：flywheel_action → gsc_snapshot baseline vs after 对比 | 📋 待开工 |
+| **P17.A.4** | 飞轮归因桥接：flywheel_action → gsc_snapshot baseline vs after 对比 | ✅ 完成 2026-06-05 |
+| **P17.A.5（日常同步）** | 每日 GSC + GA4 cron job：`google-data-pullback-daily`（每天 3am UTC） | ✅ 完成 2026-06-05 |
 
 **P17.A.1 实施内容**：
 - `supabase/migrations/20260603000003_gsc_performance_snapshots.sql`：新表（client_id + period_start/end + 总量指标 + top_queries/pages JSONB）
@@ -2477,6 +2478,11 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 
 > 每次上线新功能时在此追加。格式：**[完成日期]** — Phase ID + 描述 + Commit 引用。
 > 此日志从 CLAUDE.md §十五.C 迁移至此（2026-05-10），CLAUDE.md 不再维护历史日志。
+
+### 2026-06-05
+
+- **P17.A.4** — GSC 归因桥接：`gsc-bridge.ts`（runGscAttributionForClient：SEO action → GSC before/after → 3 维 flywheel_outcomes）+ POST `/flywheel/gsc-attribution` + vocabulary 扩充 3 GSC metric keys + attribution cron pass-2 接线 [P17.A.4]
+- **P17.A.5** — 每日 Google 数据回流 cron：`google-data-pullback-daily`（遍历所有已连接 GSC/GA4 connector，自动快照写库）+ render.yaml 注册（每天 3am UTC）[P17.A.4]
 
 ### 2026-05-27
 
