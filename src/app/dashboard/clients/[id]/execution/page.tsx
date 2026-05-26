@@ -353,7 +353,15 @@ function ProgressBar({ completed, total }: { completed: number; total: number })
     <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-4">
       <div className="flex-1">
         <div className="flex justify-between items-center mb-1">
-          <span className="text-sm font-medium text-gray-700">整体执行进度</span>
+          <span
+            className="text-sm font-medium text-gray-700 inline-flex items-center gap-1.5"
+            title="统计范围：所有 FDE 执行项 + 飞轮自主行动。项目级鲁班抽屉里的数字只含 FDE 执行项，会比这里少。"
+          >
+            整体执行进度
+            <span className="text-[10px] font-normal text-gray-400 border border-gray-200 rounded px-1 py-px">
+              含飞轮自主行动
+            </span>
+          </span>
           <span className="text-sm font-bold text-indigo-700">{pct}%</span>
         </div>
         <div className="w-full bg-gray-100 rounded-full h-2">

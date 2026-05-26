@@ -215,15 +215,25 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-27 05:29 NZST （**Phase 14.A 全部 8 任务 ✅ 完成**；Phase 13.A Prospect 注册流程 ✅）
+> 最后更新：2026-05-27 06:27 NZST （**Phase 17.A 开工**：Google 三件套数据回流；Phase 14.A 已完成；Marketing Plan 草稿删除按钮代码丢失需重做）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
+| **P17.A.1** | 扩展 OAuth scopes：`GSC_SCOPES` → `SCOPES_BY_SERVICE`（gsc/ga4/ads/all），改造 connect/callback 路由支持多服务 | 🔥 今晚开工 |
+| **P17.A.2** | 新建 GA4 客户端 lib + 一个最简调用（30 天 sessions）验证 OzTop token | 🔥 今晚 |
+| **MP 删除按钮重做** | 旧 session 写的代码丢失，需在独立 PR 重做（不要混进 17.A） | ⚠️ 另起 PR |
 | **PM 验收 M3** | 打开 Blog Studio 博客详情页 → 点击「发布到网站」→ 选 WordPress → 草稿 → 预览 → 确认发布 | ⚠️ PM 操作 |
 | **PM 操作** | Supabase 跑 3 个 migration（见状态校准） | ⚠️ PM 操作 |
 | **PM 合并** | 输入 `go merge` 合并 Phase 14.A PR（全部 8 commit 完成） | ⚠️ PM 决定 |
-| **PM 待办（旧）** | 测试 /discover 表单 → magic link → /prospect 报告页（13.A 验收） | ⚠️ 13.A 验收 |
-| **PM 待办（旧）** | Render → `ADMIN_EMAILS=你的邮箱`；Supabase 跑 `20260523000003_campaign_visual_direction.sql` | ⚠️ PM 操作 |
+
+**Phase 17.A 关键背景（新会话必读）**：
+- ⚠️ **不要建新 Phase**：Phase 17 已存在（Unified Data Pullback），17.A 是它的第一个子阶段
+- ⚠️ **Phase 23 已被占用**（Cross-Agent Memory Layer），不能用这个号
+- ✅ **60% 基础设施已存在**：`google_oauth_tokens` 表、OAuth lib（HMAC + auto refresh）、connect/callback 路由、GSC 客户端、UI 都有
+- ❌ **当前限制**：只支持 GSC scope（`GSC_SCOPES` in `src/lib/google-oauth/client.ts:24`），未扩展 GA4 + Ads
+- 🎯 **架构原则**：多租户从第一天写死，跨客户学习层预留接口（Phase 22 接入点），不依赖第三方仪表盘
+- 📋 **OzTop 三个账号**：PM 已被 OzTop 管理员加权限，可用自己 Gmail 授权 ME 拿到所有数据
+- 🌳 **工作分支**：`feat/phase-17-a-google-data-pullback`，必须用 worktree 隔离
 
 **状态校准（2026-05-24）**：
 - ✅ **Phase 14.A.8**：WordPress + Shopify publish 路由在最终发布后 insert `flywheel_actions`（seo/cms_content_insert/in_house）
@@ -237,7 +247,7 @@ git push origin master   # 触发 Render 部署
 - ✅ Phase 13.A P13.A.1–A.6：代码完成，等 PM 端到端验证
 - ⚠️ **PM 待跑 migration**：`20260531000001`（WP schema）+ `20260531000002`（publish_jobs）+ `20260601000001`（shopify shape）
 
-下一 session：`继续 Phase 14，告诉我新需求或输入 go merge 合并 PR`
+下一 session：`继续 Phase 17.A 第 1 任务 P17.A.1`
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox

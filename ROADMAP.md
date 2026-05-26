@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-27 05:29 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
+> 最后更新：2026-05-27 06:27 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2005,28 +2005,58 @@ AI 可见度层（ME 独有 ✅）
 
 ---
 
-## Phase 17 — Unified Data Pullback（统一数据回流层）📋 战略确认，待排期
+## Phase 17 — Unified Data Pullback（统一数据回流层）🚧 Phase 17.A 开工中（2026-05-27）
 
-> **登记日期**：2026-05-19 · **状态**：战略方向已确认，是月报和飞轮归因的基础设施
+> **登记日期**：2026-05-19 · **17.A 开工日期**：2026-05-27 · **状态**：Phase 17.A（Google 三件套）开始实施
 >
 > **背景**：ME 现在的月报数据是孤岛——SEO 数据、社媒数据、广告数据分散在各平台，无法在 ME 内做跨渠道归因。Unified Data Pullback 是把所有执行结果拉回 ME、驱动飞轮真实归因的基础设施层。
+>
+> **战略意义升级（2026-05-27 PM 确认）**：这一层不只是月报数据源，更是 ME 跨客户学习护城河的**数据底座**。多租户 + 匿名化跨客户模式识别（Phase 22 接入点）从 Phase 17.A 第一天开始预留架构。
 
 ### 需要接入的数据源
 
-| 渠道 | 数据内容 | API |
-|------|---------|-----|
-| Google Search Console | 自然搜索排名 / 点击 / 展示 | ✅ 免费官方 |
-| Google Analytics 4 | 网站流量 / 转化 / 用户行为 | ✅ 免费官方 |
-| Meta Insights | 社媒帖子表现 / 粉丝增长 | ✅ Graph API |
-| Google Ads API | 广告 ROAS / CTR / 转化 | 🔄 申请中 |
-| Meta Ads Insights | 广告效果数据 | ✅ 已有 MCP |
-| GBP API | 搜索展示 / 电话 / 路线请求 | ✅ 免费官方 |
+| 渠道 | 数据内容 | API | 子 Phase |
+|------|---------|-----|---------|
+| Google Search Console | 自然搜索排名 / 点击 / 展示 | ✅ 免费官方 | **17.A** |
+| Google Analytics 4 | 网站流量 / 转化 / 用户行为 | ✅ 免费官方 | **17.A** |
+| Google Ads API | 广告 ROAS / CTR / 转化 | 🔄 申请中（OAuth 可先建） | **17.A** |
+| Meta Insights | 社媒帖子表现 / 粉丝增长 | ✅ Graph API | 17.B |
+| Meta Ads Insights | 广告效果数据 | ✅ 已有 MCP | 17.B |
+| GBP API | 搜索展示 / 电话 / 路线请求 | ✅ 免费官方 | 17.C |
 
 ### 输出到
 
 1. **月报自动生成**（Insight Reports 模块）
 2. **飞轮归因**（action → outcome 真实数据验证）
 3. **Client Portal**（客户自助查看跨渠道数据看板）
+4. **跨客户学习层**（Phase 22 接入点，匿名化聚合）
+
+---
+
+### Phase 17.A — Google 三件套（GSC + GA4 + Google Ads）🚧 实施中
+
+> **开工日期**：2026-05-27 · **工作分支**：`feat/phase-17-a-google-data-pullback`
+>
+> **现状审计（2026-05-27 完成）**：约 60% 基础设施已存在（OAuth lib、tokens 表、connect/callback 路由、GSC 客户端、UI）。当前限制：只支持 GSC scope，未扩展到 GA4 + Ads。
+
+**M1 地基**（任务 P17.A.1–A.2，PM 验证关卡：能拿到 OzTop 真实 GA4 数据）
+
+- [ ] **P17.A.1**：扩展 OAuth scopes —— 把 `GSC_SCOPES` 改为 `SCOPES_BY_SERVICE`（`gsc/ga4/ads/all`），改造 connect/callback 路由支持多服务一次授权
+- [ ] **P17.A.2**：新建 GA4 客户端 lib（`src/lib/ga4/client.ts`）+ 一个最简单的测试调用（拿过去 30 天 sessions），验证 OzTop token 真的有 GA4 权限
+
+**M2 数据沉淀**（任务 P17.A.3–A.4，PM 验证关卡：Supabase 后台能看到 OzTop 每日数据）
+
+- [ ] **P17.A.3**：新建 `client_metrics_daily` 表（多租户 + 跨客户学习预留字段：`industry_segment`、`anonymized_pattern_key`）
+- [ ] **P17.A.4**：每日 sync cron job（先做 GSC + GA4，Ads 等 token 拿到后补）
+
+**M3 第一个洞察 UI**（任务 P17.A.5，PM 验证关卡：在客户主页看到真实数据）
+
+- [ ] **P17.A.5**：客户主页「数据」tab，展示 GSC top queries + GA4 daily traffic + 「排名 11-20 位的快速夺旗机会」清单
+
+**架构原则（不可偏离）**：
+- 多租户从第一天写死，所有 metrics 表必须按 `client_id` 隔离
+- 跨客户学习层预留接口，但 Phase 17.A 不实现（Phase 22 接入）
+- 不依赖第三方仪表盘，数据归属 ME
 
 ---
 
