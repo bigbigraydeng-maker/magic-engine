@@ -66,9 +66,7 @@ export function PublishToWebsitePanel({ clientId, postId, onSuccess }: Props) {
   useEffect(() => {
     void (async () => {
       try {
-        const res  = await fetch(`/api/clients/${clientId}/cms/providers`, {
-          headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''}` },
-        })
+        const res  = await fetch(`/api/clients/${clientId}/cms/providers`)
         const json = await res.json() as { success: boolean; providers?: Providers }
         if (json.success && json.providers) setProviders(json.providers)
       } finally {
@@ -82,8 +80,6 @@ export function PublishToWebsitePanel({ clientId, postId, onSuccess }: Props) {
   if (providers?.shopify?.status    === 'connected') connectedPlatforms.push('shopify')
   if (providers?.github?.status     === 'connected') connectedPlatforms.push('github')
 
-  const authHeader = { Authorization: `Bearer ${process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''}` }
-
   const handleCreateDraft = async (platform: Platform) => {
     setSelectedPlatform(platform)
     setPhase('drafting')
@@ -94,7 +90,7 @@ export function PublishToWebsitePanel({ clientId, postId, onSuccess }: Props) {
         // GitHub: single-step PR creation.
         const res  = await fetch(`/api/clients/${clientId}/cms/publish-blog`, {
           method:  'POST',
-          headers: { 'Content-Type': 'application/json', ...authHeader },
+          headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({ blog_post_id: postId }),
         })
         const json = await res.json() as {
@@ -116,7 +112,7 @@ export function PublishToWebsitePanel({ clientId, postId, onSuccess }: Props) {
 
       const res  = await fetch(endpoint, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
           action:      'draft',
           source_type: 'blog_post',
@@ -153,7 +149,7 @@ export function PublishToWebsitePanel({ clientId, postId, onSuccess }: Props) {
 
       const res  = await fetch(endpoint, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
           action:      'publish',
           job_id:      draftResult.job_id,

@@ -6,8 +6,6 @@ import Link from 'next/link'
 import type { StrategyItem, ActionType, ContentMode, StrategyPriority } from '@/lib/strategy/types'
 import { buildStrategyBlogRequest } from '@/lib/blog/request-builders'
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 interface BlogGenerationResponse {
   success: boolean
   action?: 'new' | 'upgrade'
@@ -286,7 +284,7 @@ export default function StrategyPage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/blog`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildStrategyBlogRequest(item)),
       })
       const data = await res.json() as BlogGenerationResponse

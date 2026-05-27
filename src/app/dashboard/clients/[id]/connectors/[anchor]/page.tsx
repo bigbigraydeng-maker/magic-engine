@@ -4,8 +4,6 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useState, useEffect } from 'react'
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 // ─── Connector config per anchor ─────────────────────────────────────────────
 
 interface ConnectorMeta {
@@ -168,9 +166,7 @@ export default function ConnectorDetailPage() {
 
     void (async () => {
       try {
-        const res  = await fetch(`/api/clients/${clientId}/connectors/status`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        })
+        const res  = await fetch(`/api/clients/${clientId}/connectors/status`)
         if (!res.ok) return
         const data = await res.json() as {
           connectors: Array<{ anchor: string; status: string; config: Record<string, unknown> | null }>
@@ -201,9 +197,7 @@ export default function ConnectorDetailPage() {
     setGscSitesError(null)
     void (async () => {
       try {
-        const res = await fetch(`/api/clients/${clientId}/gsc/sites`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        })
+        const res = await fetch(`/api/clients/${clientId}/gsc/sites`)
         const data = await res.json() as {
           success: boolean
           sites?: Array<{ siteUrl: string; permissionLevel: string }>
@@ -247,10 +241,7 @@ export default function ConnectorDetailPage() {
         `/api/clients/${clientId}/connectors/${anchor}/connect`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${API_KEY}`,
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             config: meta.fields.length > 0
               ? { ...fieldValues, ...(oauthEmail ? { google_email: oauthEmail } : {}) }
@@ -520,9 +511,7 @@ function SnapshotSyncPanel({ anchor, clientId }: { anchor: string; clientId: str
 
   const fetchLatest = async () => {
     try {
-      const res = await fetch(`/api/clients/${clientId}/${anchor}/snapshots?limit=1`, {
-        headers: { Authorization: `Bearer ${API_KEY}` },
-      })
+      const res = await fetch(`/api/clients/${clientId}/${anchor}/snapshots?limit=1`)
       if (res.ok) {
         const data = await res.json() as { latest: AnySnapshot | null }
         setSnapshot(data.latest ?? null)
@@ -540,10 +529,7 @@ function SnapshotSyncPanel({ anchor, clientId }: { anchor: string; clientId: str
     try {
       const res = await fetch(`/api/clients/${clientId}/${anchor}/sync`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${API_KEY}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       })
       const data = await res.json() as { success: boolean; error?: string }

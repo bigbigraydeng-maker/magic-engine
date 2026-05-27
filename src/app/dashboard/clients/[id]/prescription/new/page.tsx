@@ -12,8 +12,6 @@ import { coerceWeaknesses } from '@/lib/huatuo/weakness-utils'
 // Constants
 // ---------------------------------------------------------------------------
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 const URGENCY_OPTIONS: Array<{ value: PrescriptionIntake['timeline_urgency']; label: string; desc: string }> = [
   { value: 'immediate',  label: '⚡ 即刻',   desc: '1–2 周内启动' },
   { value: 'short_term', label: '📅 短期',   desc: '1–3 个月' },
@@ -155,7 +153,6 @@ export default function NewPrescriptionPage() {
     void (async () => {
       try {
         const res = await fetch(`/api/clients/${clientId}/prescription/${prescriptionId}`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
           cache: 'no-store',
         })
         if (!res.ok || cancelled) return
@@ -184,9 +181,7 @@ export default function NewPrescriptionPage() {
     void (async () => {
       setDiscoveryLoading(true)
       try {
-        const res = await fetch(`/api/clients/${clientId}/zhangqian/latest`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        })
+        const res = await fetch(`/api/clients/${clientId}/zhangqian/latest`)
         if (!res.ok) return
         const data = await res.json() as { success: boolean; discovery: ClientDiscoveryRow }
         if (data.success && data.discovery?.confirmed_at) {
@@ -211,7 +206,6 @@ export default function NewPrescriptionPage() {
     void (async () => {
       try {
         const res = await fetch(`/api/clients/${clientId}/prescriptions/latest-draft`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
           cache: 'no-store',
         })
         if (!res.ok) return
@@ -266,7 +260,7 @@ export default function NewPrescriptionPage() {
 
       const res = await fetch(`/api/clients/${clientId}/prescription/generate`, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(body),
         cache:   'no-store',
       })
@@ -326,7 +320,7 @@ export default function NewPrescriptionPage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/prescription/${prescriptionId}`, {
         method:  'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ status: 'approved' }),
       })
       // 409 = 已经批准过 → 自愈：切到已批准态并跳转看板
@@ -374,7 +368,7 @@ export default function NewPrescriptionPage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/prescription/${prescriptionId}/refine`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ human_comments: humanComments.trim() || undefined }),
         cache: 'no-store',
       })
@@ -448,7 +442,7 @@ export default function NewPrescriptionPage() {
     if (!prescriptionId) return
     await fetch(`/api/clients/${clientId}/prescription/${prescriptionId}`, {
       method:  'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+      headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ status: 'rejected', rejection_note: '用户要求重新生成' }),
     })
     setStep(1)

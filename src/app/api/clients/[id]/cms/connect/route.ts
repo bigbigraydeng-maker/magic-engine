@@ -18,7 +18,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requireBearerToken } from '@/lib/validation-utils'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { upsertConnection, deleteConnection } from '@/lib/cms/connection-store'
 
 interface RouteContext {
@@ -28,12 +28,11 @@ interface RouteContext {
 // ─── POST ─────────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest, { params }: RouteContext) {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
-  }
-
   const clientId = params.id
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error }, { status: access.status })
+  }
   if (!clientId) {
     return NextResponse.json(
       { success: false, error: 'client id required', code: 'INVALID_INPUT' },
@@ -106,12 +105,11 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 // ─── DELETE ───────────────────────────────────────────────────────────────────
 
 export async function DELETE(req: NextRequest, { params }: RouteContext) {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
-  }
-
   const clientId = params.id
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error }, { status: access.status })
+  }
   if (!clientId) {
     return NextResponse.json(
       { success: false, error: 'client id required', code: 'INVALID_INPUT' },

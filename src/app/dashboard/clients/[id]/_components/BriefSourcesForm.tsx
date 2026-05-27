@@ -33,10 +33,7 @@ export function BriefSourcesForm({ clientId, onGenerated }: Props) {
 
   // Auto-prefill from 张骞 discovery data if available
   useEffect(() => {
-    const apiKey = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? '';
-    fetch(`/api/clients/${clientId}/zhangqian/latest`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    })
+    fetch(`/api/clients/${clientId}/zhangqian/latest`)
       .then(r => r.ok ? r.json() : null)
       .then((json: {
         success: boolean;

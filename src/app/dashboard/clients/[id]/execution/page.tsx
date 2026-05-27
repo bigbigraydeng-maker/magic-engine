@@ -28,8 +28,6 @@ import { DataPullbackSection } from './_components/DataPullbackSection'
 // Constants
 // ---------------------------------------------------------------------------
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 // ── 帖子状态徽章配色（与 content 板对齐）─────────────────────────────────────────
 
 const POST_STATUS_META: Record<string, { label: string; cls: string }> = {
@@ -616,7 +614,7 @@ function TaskDetailDrawer({
   onOpenStudio,
   onEditItem,
   onDeleteItem,
-  workbenchOpen = false,
+  railOpen = false,
 }: {
   item:           ItemWithLogs | null
   clientId:       string
@@ -629,7 +627,7 @@ function TaskDetailDrawer({
   onOpenStudio:   (item: ItemWithLogs) => void
   onEditItem:     (itemId: string, fields: { title?: string; description?: string }) => Promise<boolean>
   onDeleteItem:   (itemId: string) => Promise<void>
-  workbenchOpen?:  boolean
+  railOpen?:       boolean
 }) {
   const [mounted, setMounted]           = useState(false)
   const [addingLog, setAddingLog]       = useState(false)
@@ -701,7 +699,7 @@ function TaskDetailDrawer({
 
   const drawerContent = (
     <div className={`fixed inset-y-0 z-[70] flex w-full flex-col overflow-hidden border-l border-slate-200 bg-[#f6f7f2] shadow-2xl transition-[right] duration-200 sm:w-[420px] lg:w-[480px] ${
-      workbenchOpen
+      railOpen
         ? 'right-0 lg:right-[min(780px,calc(100vw-30rem))] xl:right-[min(880px,48vw)]'
         : 'right-0'
     }`}>
@@ -1241,9 +1239,7 @@ export default function ExecutionPage() {
     setIsDocxLoading(true)
     try {
       const qs = prescriptionId ? `?prescription_id=${prescriptionId}` : ''
-      const res = await fetch(`/api/clients/${clientId}/execution/docx${qs}`, {
-        headers: { Authorization: `Bearer ${API_KEY}` },
-      })
+      const res = await fetch(`/api/clients/${clientId}/execution/docx${qs}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
@@ -1271,7 +1267,6 @@ export default function ExecutionPage() {
       // 并行拉 execution items + marketing plans，互不阻塞
       const [execRes, mpRes] = await Promise.all([
         fetch(`/api/clients/${clientId}/execution${qs}`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
           cache: 'no-store',
         }),
         fetch(`/api/clients/${clientId}/marketing-plan`, { cache: 'no-store' }).catch(() => null),
@@ -1321,7 +1316,7 @@ export default function ExecutionPage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/execution/${itemId}`, {
         method:  'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ status }),
         cache:   'no-store',
       })
@@ -1344,7 +1339,7 @@ export default function ExecutionPage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/execution/${itemId}/log`, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ content, kind }),
         cache:   'no-store',
       })
@@ -1376,7 +1371,7 @@ export default function ExecutionPage() {
         : { prescription_id: prescriptionId, phase, ...fields }
       const res = await fetch(`/api/clients/${clientId}/execution`, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(body),
         cache:   'no-store',
       })
@@ -1403,7 +1398,7 @@ export default function ExecutionPage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/execution/${itemId}`, {
         method:  'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(fields),
         cache:   'no-store',
       })
@@ -1425,7 +1420,6 @@ export default function ExecutionPage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/execution/${itemId}`, {
         method:  'DELETE',
-        headers: { Authorization: `Bearer ${API_KEY}` },
         cache:   'no-store',
       })
       if (!res.ok) {
@@ -1625,15 +1619,32 @@ export default function ExecutionPage() {
         onClose={() => {
           setDetailItem(null)
           setStudioItem(null)
+          setChatItem(null)
+          setLubanInitialMessage('')
+          setFlywheelState(null)
         }}
         onStatusChange={handleStatusChange}
         onAddLog={handleAddLog}
-        onOpenChat={item => setChatItem(item)}
-        onOpenFlywheel={(item, target) => setFlywheelState({ item, target })}
-        onOpenStudio={item => setStudioItem(item)}
+        onOpenChat={item => {
+          setChatItem(item)
+          setStudioItem(null)
+          setFlywheelState(null)
+        }}
+        onOpenFlywheel={(item, target) => {
+          setFlywheelState({ item, target })
+          setStudioItem(null)
+          setChatItem(null)
+          setLubanInitialMessage('')
+        }}
+        onOpenStudio={item => {
+          setStudioItem(item)
+          setChatItem(null)
+          setLubanInitialMessage('')
+          setFlywheelState(null)
+        }}
         onEditItem={handleEditItem}
         onDeleteItem={handleDeleteItem}
-        workbenchOpen={!!studioItem}
+        railOpen={!!studioItem || !!chatItem || !!flywheelState}
       />
 
       {/* 飞轮执行抽屉（in_house 模式） */}
@@ -1646,6 +1657,7 @@ export default function ExecutionPage() {
           onOpenLuban={(msg) => {
             setLubanInitialMessage(msg)
             setChatItem(flywheelState.item)
+            setStudioItem(null)
             setFlywheelState(null)
           }}
         />

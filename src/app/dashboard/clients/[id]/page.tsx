@@ -13,8 +13,6 @@ import type { ClientDiscoveryRow } from '@/lib/zhangqian/types';
 import { ClientDataTab } from './_components/ClientDataTab';
 
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? '';
-
 interface Client {
   id: string;
   name: string;
@@ -108,9 +106,7 @@ function BrandHealthWidget({ clientId }: { clientId: string }) {
   useEffect(() => {
     void (async () => {
       try {
-        const res = await fetch(`/api/clients/${clientId}/zhangqian/latest`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        });
+        const res = await fetch(`/api/clients/${clientId}/zhangqian/latest`);
         if (res.status === 404) { setStatus('none'); return; }
         if (!res.ok) { setStatus('none'); return; }
         const data = await res.json() as { success: boolean; discovery: ClientDiscoveryRow };
@@ -229,20 +225,22 @@ const BADGE_CONFIG: Record<ToolBadge, { label: string; cls: string }> = {
 }
 
 function ToolCard({
-  href, title, desc, badge, soon,
+  href, onClick, title, desc, badge, soon,
 }: {
   href?: string
+  onClick?: () => void
   title: string
   desc: string
   badge: ToolBadge
   soon?: boolean
 }) {
   const b = BADGE_CONFIG[badge]
+  const interactive = !soon && (!!href || !!onClick)
   const inner = (
     <div className={`flex items-center gap-3 rounded-xl border bg-white p-4 transition-all ${
       soon
         ? 'cursor-not-allowed border-dashed border-slate-200 opacity-60'
-        : href
+        : interactive
           ? 'group cursor-pointer border-slate-200 hover:border-cyan-300 hover:shadow-sm'
           : 'border-slate-200'
     }`}>
@@ -259,10 +257,11 @@ function ToolCard({
         </div>
         <p className="text-xs font-semibold text-slate-500">{desc}</p>
       </div>
-      {href && !soon && <span className="flex-shrink-0 text-slate-300 transition-colors group-hover:text-cyan-700">→</span>}
+      {interactive && <span className="flex-shrink-0 text-slate-300 transition-colors group-hover:text-cyan-700">→</span>}
     </div>
   )
   if (href && !soon) return <Link href={href}>{inner}</Link>
+  if (onClick && !soon) return <button className="w-full text-left" onClick={onClick}>{inner}</button>
   return inner
 }
 
@@ -387,15 +386,9 @@ export default function ClientDetailPage() {
       const [clientRes, briefRes, discoveryRes, diagnosticRes, prescriptionRes] = await Promise.all([
         fetch(`/api/clients/${clientId}`),
         fetch(`/api/clients/${clientId}/brief?status=active`),
-        fetch(`/api/clients/${clientId}/zhangqian/latest`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        }).catch(() => null),
-        fetch(`/api/clients/${clientId}/diagnostic/latest`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        }).catch(() => null),
-        fetch(`/api/clients/${clientId}/prescriptions/latest-draft`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        }).catch(() => null),
+        fetch(`/api/clients/${clientId}/zhangqian/latest`).catch(() => null),
+        fetch(`/api/clients/${clientId}/diagnostic/latest`).catch(() => null),
+        fetch(`/api/clients/${clientId}/prescriptions/latest-draft`).catch(() => null),
       ]);
       if (clientRes.ok) {
         const { client: c } = await clientRes.json();
@@ -485,12 +478,6 @@ export default function ClientDetailPage() {
             className="flex min-h-11 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-950"
           >
             设置
-          </button>
-          <button
-            onClick={() => setGenerationOpen(true)}
-            className="min-h-11 rounded-lg bg-slate-950 px-5 text-sm font-black text-white transition-colors hover:bg-slate-800"
-          >
-            生成内容
           </button>
         </div>
       </div>
@@ -602,6 +589,7 @@ export default function ClientDetailPage() {
               <ToolCard href={`/dashboard/clients/${clientId}/connectors`}     title="广告连接器"    desc="连接 Meta · Google 广告账户"      badge="in_house" />
               <ToolCard href={`/dashboard/visuals?client=${clientId}`}         title="Launch Hub"    desc="Reels · 图片 · 视频素材生产"      badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/production`}     title="内容生产包"    desc="查看各维度内容包状态 · 生成内容后自动归集" badge="in_house" />
+              <ToolCard onClick={() => setGenerationOpen(true)}              title="生成单条内容" desc="按关键词 · 视频 · 话题快速生成一条社媒帖子"  badge="in_house" />
             </div>
           </section>
 

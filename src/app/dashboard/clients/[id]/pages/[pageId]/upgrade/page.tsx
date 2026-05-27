@@ -61,7 +61,7 @@ export default function UpgradePage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/pages/${pageId}/upgrade`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ topic, mode }),
       })
       if (!res.ok) {
@@ -84,7 +84,7 @@ export default function UpgradePage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/blog`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           topic,
           mode,

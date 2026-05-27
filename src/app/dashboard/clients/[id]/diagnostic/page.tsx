@@ -23,8 +23,6 @@ interface LatestResponse {
 // Constants
 // ---------------------------------------------------------------------------
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 const DIMENSION_LABELS: Record<DiagnosticDimension, string> = {
   seo:           'SEO',
   ai_visibility: 'AI 可见度',
@@ -155,9 +153,7 @@ export default function DiagnosticPage() {
     setPageLoading(true)
     setPageError(null)
     try {
-      const res = await fetch(`/api/clients/${clientId}/diagnostic/latest`, {
-        headers: { Authorization: `Bearer ${API_KEY}` },
-      })
+      const res = await fetch(`/api/clients/${clientId}/diagnostic/latest`)
       if (res.status === 404) {
         setRun(null)
         setFindings([])
@@ -183,10 +179,7 @@ export default function DiagnosticPage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/diagnostic/run`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${API_KEY}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ module: 'full' }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -202,9 +195,7 @@ export default function DiagnosticPage() {
   const handleDownloadDocx = async () => {
     setIsDocxLoading(true)
     try {
-      const res = await fetch(`/api/clients/${clientId}/diagnostic/report/docx`, {
-        headers: { Authorization: `Bearer ${API_KEY}` },
-      })
+      const res = await fetch(`/api/clients/${clientId}/diagnostic/report/docx`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)

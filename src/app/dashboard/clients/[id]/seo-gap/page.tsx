@@ -58,11 +58,9 @@ export default function SeoGapPage({ params }: Props) {
     setReportUrl(null)
 
     try {
-      const apiKey = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
       const res = await fetch(`/api/clients/${clientId}/seo-gap`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ title }),
@@ -86,10 +84,7 @@ export default function SeoGapPage({ params }: Props) {
   const loadHistory = async () => {
     setLoadingHistory(true)
     try {
-      const apiKey = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-      const res = await fetch(`/api/clients/${clientId}/seo-gap`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      })
+      const res = await fetch(`/api/clients/${clientId}/seo-gap`)
       const json = await res.json()
       if (json.success) setPastAnalyses(json.analyses)
     } catch {

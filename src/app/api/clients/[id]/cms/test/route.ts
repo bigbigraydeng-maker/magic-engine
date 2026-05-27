@@ -12,7 +12,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requireBearerToken } from '@/lib/validation-utils'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { getConnection, markConnectionTested } from '@/lib/cms/connection-store'
 import { GithubClient, GitHubApiError } from '@/lib/cms/github-client'
 
@@ -21,12 +21,12 @@ interface RouteContext {
 }
 
 export async function POST(req: NextRequest, { params }: RouteContext) {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+  const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
-  const clientId = params.id
   if (!clientId) {
     return NextResponse.json(
       { success: false, error: 'client id required', code: 'INVALID_INPUT' },

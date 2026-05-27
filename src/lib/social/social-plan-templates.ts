@@ -631,6 +631,67 @@ Each JSON object MUST have ALL of these keys (no omissions):
      "Practical Buyer - Planner"   → clear problem-to-solution arc, benefit-forward text overlays
      "Practical Buyer - Converter" → fast pace, explicit offer in scene 6–7, urgent CTA at scene 8
 
+   opening_hook → DUAL TARGET: apply to BOTH scene_structure[0] (Panel 1) AND seedance_i2v_prompt Scene 1.
+   ⚡ ALIGNMENT RULE: Seedance animates the storyboard Panel 1 image — both must describe the SAME visual moment.
+      scene_structure[0] Thumbnail sets WHAT is on screen; Seedance Scene 1 Action sets HOW it moves.
+      If they contradict each other, Seedance will mis-animate Panel 1.
+   (When "Opening Hook" appears in VIRAL REFERENCE INSIGHTS, mirror its type across BOTH outputs)
+
+     "visual_shock"
+       scene_structure[0]: Thumbnail — extreme close-up or unexpected angle that creates visual surprise (dramatic, unexpected subject);
+                           CAMERA — static locked-off (shock comes from subject, not camera movement); MOOD — jarring, arresting
+       seedance_i2v_prompt Scene 1 Action: hard cut pattern interrupt at 0.0s, no lead-in
+       ⚠️ CRITICAL START INSTRUCTION: "Video MUST begin with the dramatic unexpected close-up — no gentle pan-in, straight cut at 0.0s"
+
+     "ugc_selfie"
+       scene_structure[0]: Thumbnail — intimate scene with minimal production feel, suggesting creator POV (real environment, not studio);
+                           CAMERA — slight handheld tilt, eye-level direct; MOOD — raw, authentic, unpolished
+       seedance_i2v_prompt Scene 1 Action: handheld, slightly shaky, intimate close framing at 0.0s
+       ⚠️ CRITICAL START INSTRUCTION: "Video MUST begin with authentic direct-to-camera moment — no cinematic sweeping open"
+
+     "text_overlay_question"
+       scene_structure[0]: Thumbnail — clean visual with generous open space (top or center) for text to dominate;
+                           STORY — write the hook question itself as the STORY overlay text;
+                           CAMERA — static locked-off, question is the hero; MOOD — provocative, curious
+       seedance_i2v_prompt Scene 1 Text Overlay: bold question/statement at VERY BOTTOM, appears at exactly 0.0s before any motion
+       ⚠️ CRITICAL START INSTRUCTION: "Text question overlay must render at frame 1 — visual is static background for the text"
+
+     "product_reveal"
+       scene_structure[0]: Thumbnail — extreme close-up of the product detail, isolated or minimal background, no wide shot;
+                           CAMERA — macro/tight, subject fills most of the frame; MOOD — precise, premium, immediate
+       seedance_i2v_prompt Scene 1 Action: immediate product close-up at 0.0s — skip establishing shot entirely
+       ⚠️ CRITICAL START INSTRUCTION: "Video MUST begin with tight product detail — no environment reveal before the product"
+
+     "testimonial_start"
+       scene_structure[0]: Thumbnail — authentic real-world setting (home, workspace, outdoors — no polished studio);
+                           CAMERA — eye-level direct, slight handheld authenticity; MOOD — genuine, unscripted, real
+       seedance_i2v_prompt Scene 1 Action: authentic real-environment framing at 0.0s, unpolished feel
+       ⚠️ CRITICAL START INSTRUCTION: "Video MUST open with authentic testimonial-style moment — no glossy cinematic open"
+
+     "sound_cue"
+       scene_structure[0]: Thumbnail — visually anticipatory moment just before the expected audio hit (tension, pre-beat stillness);
+                           CAMERA — static, held still, waiting for the beat drop; MOOD — anticipatory, electric
+       seedance_i2v_prompt Scene 1 Audio: music drop or distinctive sound fires at exactly 0.0s, first visual cut driven by audio
+       ⚠️ CRITICAL START INSTRUCTION: "Audio hook fires at frame 1 — Seedance must sync first visual cut to the sound beat"
+
+     "problem_statement"
+       scene_structure[0]: Thumbnail — the problem environment clearly visible (damaged, worn, broken, or pain-point scene);
+                           CAMERA — wide establishing the problem context; MOOD — frustration, recognition, empathy
+       seedance_i2v_prompt Scene 1 Visual: pain point environment at 0.0s, no solution teased yet
+       ⚠️ CRITICAL START INSTRUCTION: "Video MUST open with viewer's pain point — solution is revealed later, NOT in Scene 1"
+
+     "scenic_beauty"
+       scene_structure[0]: Thumbnail — wide landscape or environment with strong visual depth and natural splendor;
+                           CAMERA — slow sweeping or held wide, grand scale; MOOD — awe, wonder, aspirational
+       seedance_i2v_prompt Scene 1 Action: slow cinematic wide reveal at 0.0s, no abrupt cuts in opening 2s
+       ⚠️ CRITICAL START INSTRUCTION: "Video MUST begin with stunning environment wide-shot — hold the beauty, no rush"
+
+   opening_hook feel → BOTH Panel 1 CAMERA and Seedance Scene 1 Action modifier:
+     "abrupt-cut"    → Panel 1 CAMERA: "static locked-off / snap-to-subject — no gradual motion"
+                       Seedance Scene 1 Action: hard cut / jump-cut — no smooth pan or fade in
+     "smooth-reveal" → Panel 1 CAMERA: "slow push-in / gentle pan / gradual reveal motion"
+                       Seedance Scene 1 Action: gradual reveal, slow push-in, or cinematic slide — no jump-cuts
+
 7. caption: string — Facebook Reels caption. AU/NZ English. 2–3 short paragraphs. Clear CTA. 5–8 hashtags at end.
 
 8. hashtags: string[] — standalone array of 5–8 hashtags.

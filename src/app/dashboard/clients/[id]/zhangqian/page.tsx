@@ -29,8 +29,6 @@ import {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 // ─── Page state type ──────────────────────────────────────────────────────────
 
 type PageState = 'idle' | 'running' | 'reviewing' | 'confirmed'
@@ -386,20 +384,13 @@ export default function ZhangqianPage() {
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startTimeRef = useRef<number>(0)
 
-  const authHeaders = {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${API_KEY}`,
-  }
-
   // ── Fetch latest ────────────────────────────────────────────────────────────
 
   const fetchLatest = useCallback(async () => {
     setPageLoading(true)
     setPageError(null)
     try {
-      const res = await fetch(`/api/clients/${clientId}/zhangqian/latest`, {
-        headers: { Authorization: `Bearer ${API_KEY}` },
-      })
+      const res = await fetch(`/api/clients/${clientId}/zhangqian/latest`)
       if (res.status === 404) {
         setDiscovery(null)
         setPageState('idle')
@@ -462,7 +453,6 @@ export default function ZhangqianPage() {
       try {
         const res = await fetch(
           `/api/clients/${clientId}/zhangqian/status?job_id=${encodeURIComponent(jid)}`,
-          { headers: { Authorization: `Bearer ${API_KEY}` } },
         )
         if (!res.ok) return
         const data: StatusResponse = await res.json()
@@ -494,7 +484,7 @@ export default function ZhangqianPage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/zhangqian/discover`, {
         method: 'POST',
-        headers: authHeaders,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -519,7 +509,7 @@ export default function ZhangqianPage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/zhangqian/confirm`, {
         method: 'PATCH',
-        headers: authHeaders,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ confirmed_by: 'user' }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -537,9 +527,7 @@ export default function ZhangqianPage() {
   const handleDownloadDocx = async () => {
     setIsDocxLoading(true)
     try {
-      const res = await fetch(`/api/clients/${clientId}/zhangqian/docx`, {
-        headers: { Authorization: `Bearer ${API_KEY}` },
-      })
+      const res = await fetch(`/api/clients/${clientId}/zhangqian/docx`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)

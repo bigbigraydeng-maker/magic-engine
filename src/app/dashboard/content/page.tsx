@@ -404,9 +404,7 @@ export default function ContentBoardPage() {
     setPendingPostId(null);
     // Fire-and-forget: 拉取该客户的执行项给关联下拉框用
     setExecItems([]);
-    fetch(`/api/clients/${post.client_id}/execution`, {
-      headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''}` },
-    })
+    fetch(`/api/clients/${post.client_id}/execution`)
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         if (d?.items) setExecItems(d.items as ExecutionItemLite[]);

@@ -14,7 +14,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { generatePageUpgrade } from '@/lib/blog/upgrade-generator'
 import { getPageSeoIntelligence } from '@/lib/blog/page-seo-intelligence'
-import { requireBearerToken } from '@/lib/validation-utils'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 export const maxDuration = 60
 
@@ -41,12 +41,13 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string; pageId: string } }
 ): Promise<NextResponse> {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ error: auth.error }, { status: auth.status })
+  const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
-  const { id: clientId, pageId } = params
+  const { pageId } = params
 
   try {
     // Step 1: Fetch page and verify ownership

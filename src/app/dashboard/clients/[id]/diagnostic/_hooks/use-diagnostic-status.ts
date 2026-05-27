@@ -45,15 +45,12 @@ export function useDiagnosticStatus(
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const isTerminalRef = useRef(false)
 
-  const apiKey = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
   const poll = useCallback(async () => {
     if (!runId || isTerminalRef.current) return
 
     try {
       const res = await fetch(
         `/api/clients/${clientId}/diagnostic/runs/${runId}/status`,
-        { headers: { Authorization: `Bearer ${apiKey}` } },
       )
       if (!res.ok) return
 
@@ -78,7 +75,7 @@ export function useDiagnosticStatus(
     } catch {
       // non-fatal — keep polling
     }
-  }, [clientId, runId, apiKey])
+  }, [clientId, runId])
 
   const startPolling = useCallback(() => {
     if (intervalRef.current !== null) clearInterval(intervalRef.current)

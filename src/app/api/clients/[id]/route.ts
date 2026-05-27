@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { guardAdmin } from '@/lib/auth/require-admin'
 
 const SELECT_FIELDS = 'id, name, domain, created_at, semrush_db, plan_tier'
 
@@ -7,6 +9,9 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const access = await requireDashboardClientAccess(params.id)
+  if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
+
   try {
     const { data, error } = await supabaseAdmin
       .from('clients')
@@ -25,18 +30,11 @@ export async function GET(
 }
 
 export async function DELETE(
-  req: NextRequest,
+  _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const host = req.headers.get('host') ?? ''
-  const origin = req.headers.get('origin') ?? ''
-  const referer = req.headers.get('referer') ?? ''
-  const callerOk =
-    (origin && (origin.includes(host) || origin.includes('localhost'))) ||
-    (referer && (referer.includes(host) || referer.includes('localhost')))
-  if (!callerOk) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  const guard = await guardAdmin()
+  if (guard) return guard
 
   try {
     const { error } = await supabaseAdmin
@@ -56,6 +54,9 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const guard = await guardAdmin()
+  if (guard) return guard
+
   try {
     const body = await req.json()
     const allowed = ['name', 'domain', 'semrush_db', 'plan_tier']
