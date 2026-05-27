@@ -21,7 +21,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireBearerToken } from '@/lib/validation-utils'
-import { fetchGscSnapshot } from '@/lib/gsc/client'
+import { fetchGscSnapshot, GscApiError } from '@/lib/gsc/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -77,12 +77,23 @@ export async function POST(
   }
 
   // Fetch snapshot from GSC API
-  const snapshot = await fetchGscSnapshot(siteUrl, clientId, periodDays)
+  let snapshot
+  try {
+    snapshot = await fetchGscSnapshot(siteUrl, clientId, periodDays)
+  } catch (err) {
+    if (err instanceof GscApiError) {
+      return NextResponse.json(
+        { success: false, error: translateGscError(err) },
+        { status: 422 },
+      )
+    }
+    throw err
+  }
 
   if (!snapshot) {
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch data from Google Search Console. Check OAuth token and site_url.' },
-      { status: 502 },
+      { success: false, error: 'Google OAuth token 未找到，请先在连接页面完成 Google 授权' },
+      { status: 422 },
     )
   }
 
@@ -125,4 +136,43 @@ export async function POST(
     query_count:       snapshot.top_queries.length,
     page_count:        snapshot.top_pages.length,
   })
+}
+
+function translateGscError(err: GscApiError): string {
+  const { httpStatus, googleStatus, googleReason, message } = err
+
+  if (
+    googleReason === 'accessNotConfigured' ||
+    googleStatus === 'SERVICE_DISABLED' ||
+    message.toLowerCase().includes('has not been used') ||
+    message.toLowerCase().includes('not been used in project')
+  ) {
+    return 'Google Cloud Search Console API 未启用，请联系管理员在 Google Cloud Console 中启用 Search Console API'
+  }
+
+  if (
+    httpStatus === 403 &&
+    (message.toLowerCase().includes('insufficient authentication scopes') ||
+     googleReason === 'insufficientPermissions')
+  ) {
+    return 'Google 授权缺少 Search Console 权限，请在连接页面重新授权，并在授权时勾选「查看 Search Console 数据」'
+  }
+
+  if (httpStatus === 403) {
+    return 'Google 账号没有该 Property 的访问权限，请确认已在 Google Search Console 中验证该网站'
+  }
+
+  if (httpStatus === 401) {
+    return 'Google OAuth token 已过期或无效，请在连接页面重新授权'
+  }
+
+  if (httpStatus === 404) {
+    return 'GSC Property 不存在，请检查 site_url 格式（URL 前缀：https://example.com/ 或 Domain 属性：sc-domain:example.com）'
+  }
+
+  if (httpStatus === 0) {
+    return 'Google Search Console API 请求失败（网络错误），请稍后重试'
+  }
+
+  return `Google Search Console API 错误 (${httpStatus})：${message.slice(0, 200)}`
 }

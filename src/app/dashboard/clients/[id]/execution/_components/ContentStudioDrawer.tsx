@@ -39,6 +39,12 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
   const [campaign, setCampaign]     = useState<ActiveCampaign | null>(null)
   const [campaignLoaded, setCampaignLoaded] = useState(false)
 
+  useEffect(() => {
+    const orig = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = orig }
+  }, [])
+
   // Fetch the active campaign once; used both for the header assurance line
   // and as ReelsStudio's default-selected campaign.
   useEffect(() => {
@@ -89,7 +95,7 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
         onClick={onClose}
         aria-hidden="true"
       />
-      <div className="fixed inset-y-0 right-0 z-[80] flex h-full w-full flex-col overflow-hidden border-l border-slate-200 bg-[#f6f7f2] shadow-2xl sm:w-[min(960px,calc(100vw-2rem))] lg:w-[min(1120px,calc(100vw-5rem))] xl:w-[min(1280px,74vw)]">
+      <div className="fixed inset-y-0 right-0 z-[80] flex h-full w-full flex-col overflow-hidden overscroll-contain border-l border-slate-200 bg-[#f6f7f2] shadow-2xl sm:w-[min(960px,calc(100vw-2rem))] lg:w-[min(1120px,calc(100vw-5rem))] xl:w-[min(1280px,74vw)]">
 
         {/* Header: the WHY */}
         <div className="border-b border-slate-200 bg-[#f6f7f2] px-4 py-4 sm:px-6">
@@ -145,7 +151,7 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
         </div>
 
         {/* Body */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
           {!campaignLoaded ? (
             <div className="flex justify-center py-20">
               <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-slate-950" />

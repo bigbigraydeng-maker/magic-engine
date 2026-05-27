@@ -64,12 +64,12 @@ const CONNECTOR_META: Record<string, ConnectorMeta> = {
   gsc: {
     name: 'Google Search Console',
     emoji: '🔎',
-    description: '接入 GSC 后，张骞将拉取真实 query、展示量、点击率、平均排名，替代 SEMrush 关键词估算。\n\n点击下方按钮用 Google 账号授权，授权完成后填入 GSC Property URL 即可完成连接。',
+    description: '接入 GSC 后，张骞将拉取真实 query、展示量、点击率、平均排名，替代 SEMrush 关键词估算。\n\n点击下方按钮用 Google 账号授权，授权完成后从下拉列表选择对应的 GSC Property 即可完成连接。',
     fields: [
       {
         key: 'site_url',
-        label: 'GSC Property URL',
-        placeholder: 'https://example.com.au/',
+        label: 'GSC Property',
+        placeholder: 'https://example.com.au/ 或 sc-domain:example.com.au',
         required: true,
       },
     ],
@@ -154,6 +154,12 @@ export default function ConnectorDetailPage() {
   const [oauthDone, setOauthDone]     = useState(false)
   const [oauthChecked, setOauthChecked] = useState(false)
 
+  // GSC sites dropdown — populated from /api/clients/[id]/gsc/sites once OAuth is done
+  const [gscSites, setGscSites]               = useState<Array<{ siteUrl: string; permissionLevel: string }> | null>(null)
+  const [gscSitesLoading, setGscSitesLoading] = useState(false)
+  const [gscSitesError, setGscSitesError]     = useState<string | null>(null)
+  const [gscManualMode, setGscManualMode]     = useState(false)
+
   // On mount for OAuth connectors: check existing status + handle ?oauth= param
   useEffect(() => {
     if (!meta?.oauthAnchor) return
@@ -187,6 +193,35 @@ export default function ConnectorDetailPage() {
     })()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // GSC only: once OAuth is done, fetch the list of sites this user can access
+  useEffect(() => {
+    if (anchor !== 'gsc' || !oauthDone) return
+    setGscSitesLoading(true)
+    setGscSitesError(null)
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/gsc/sites`, {
+          headers: { Authorization: `Bearer ${API_KEY}` },
+        })
+        const data = await res.json() as {
+          success: boolean
+          sites?: Array<{ siteUrl: string; permissionLevel: string }>
+          error?: string
+        }
+        if (data.success && data.sites) {
+          setGscSites(data.sites)
+        } else {
+          setGscSitesError(data.error ?? '无法获取 GSC 网站列表')
+        }
+      } catch (err) {
+        setGscSitesError(err instanceof Error ? err.message : '网络错误')
+      } finally {
+        setGscSitesLoading(false)
+      }
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [oauthDone, anchor])
 
   if (!meta) {
     return (
@@ -305,23 +340,79 @@ export default function ConnectorDetailPage() {
         {meta.fields.length > 0 && (!meta.oauthAnchor || oauthDone) && (
           <div className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
             <h2 className="text-sm font-semibold text-gray-900">配置信息</h2>
-            {meta.fields.map(f => (
-              <div key={f.key}>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
-                  {f.label}
-                  {f.required && <span className="text-red-500 ml-1">*</span>}
-                </label>
-                <input
-                  type="text"
-                  placeholder={f.placeholder}
-                  value={fieldValues[f.key] ?? ''}
-                  onChange={e =>
-                    setFieldValues(prev => ({ ...prev, [f.key]: e.target.value }))
-                  }
-                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                />
-              </div>
-            ))}
+            {meta.fields.map(f => {
+              const isGscSiteField = anchor === 'gsc' && f.key === 'site_url'
+              const showDropdown   = isGscSiteField
+                && !gscManualMode
+                && gscSites !== null
+                && gscSites.length > 0
+
+              return (
+                <div key={f.key}>
+                  <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                    {f.label}
+                    {f.required && <span className="text-red-500 ml-1">*</span>}
+                  </label>
+
+                  {isGscSiteField && gscSitesLoading && (
+                    <div className="h-9 w-full rounded-lg bg-gray-100 animate-pulse" />
+                  )}
+
+                  {isGscSiteField && !gscSitesLoading && gscSitesError && (
+                    <p className="text-xs text-amber-700 mb-2">
+                      ⚠ 无法获取已授权的 GSC 网站列表（{gscSitesError}）。请手动输入 Property。
+                    </p>
+                  )}
+
+                  {showDropdown ? (
+                    <>
+                      <select
+                        value={fieldValues[f.key] ?? ''}
+                        onChange={e =>
+                          setFieldValues(prev => ({ ...prev, [f.key]: e.target.value }))
+                        }
+                        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      >
+                        <option value="">— 选择已授权的 Property —</option>
+                        {gscSites!.map(s => (
+                          <option key={s.siteUrl} value={s.siteUrl}>
+                            {s.siteUrl} ({s.permissionLevel})
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => setGscManualMode(true)}
+                        className="mt-2 text-xs text-indigo-600 hover:underline"
+                      >
+                        手动输入 Property URL
+                      </button>
+                    </>
+                  ) : (!isGscSiteField || !gscSitesLoading) && (
+                    <>
+                      <input
+                        type="text"
+                        placeholder={f.placeholder}
+                        value={fieldValues[f.key] ?? ''}
+                        onChange={e =>
+                          setFieldValues(prev => ({ ...prev, [f.key]: e.target.value }))
+                        }
+                        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                      {isGscSiteField && gscSites !== null && gscSites.length > 0 && gscManualMode && (
+                        <button
+                          type="button"
+                          onClick={() => setGscManualMode(false)}
+                          className="mt-2 text-xs text-indigo-600 hover:underline"
+                        >
+                          ← 从下拉列表选择
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
 

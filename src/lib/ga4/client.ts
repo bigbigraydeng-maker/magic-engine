@@ -20,6 +20,37 @@ const FETCH_TIMEOUT_MS  = 20_000
 const SNAPSHOT_ROWS     = 50
 const DEFAULT_PERIOD_DAYS = 28
 
+// ─── Error class ──────────────────────────────────────────────────────────────
+
+export class Ga4ApiError extends Error {
+  constructor(
+    public readonly httpStatus: number,
+    public readonly googleStatus: string,
+    public readonly googleReason: string,
+    message: string,
+    public readonly detail: string = '',
+  ) {
+    super(message)
+    this.name = 'Ga4ApiError'
+  }
+}
+
+function parseGoogleError(rawBody: string): { googleStatus: string; googleReason: string; message: string } {
+  try {
+    const json = JSON.parse(rawBody) as {
+      error?: { status?: string; message?: string; errors?: Array<{ reason?: string }> }
+    }
+    const err = json.error ?? {}
+    return {
+      googleStatus: err.status ?? '',
+      googleReason: err.errors?.[0]?.reason ?? '',
+      message:      err.message ?? rawBody.slice(0, 200),
+    }
+  } catch {
+    return { googleStatus: '', googleReason: '', message: rawBody.slice(0, 200) }
+  }
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface Ga4PageRow {
@@ -103,8 +134,6 @@ export async function fetchGa4Snapshot(
     }),
   ])
 
-  if (!totals) return null
-
   const mv = totals.rows?.[0]?.metricValues ?? []
 
   return {
@@ -117,12 +146,12 @@ export async function fetchGa4Snapshot(
     total_pageviews:      parseInt(mv[3]?.value ?? '0', 10),
     avg_session_duration: Math.round(parseFloat(mv[4]?.value ?? '0') * 100) / 100,
     bounce_rate:          Math.round(parseFloat(mv[5]?.value ?? '0') * 10000) / 10000,
-    top_pages: (topPages?.rows ?? []).map(r => ({
+    top_pages: (topPages.rows ?? []).map(r => ({
       page:      r.dimensionValues?.[0]?.value ?? '',
       pageviews: parseInt(r.metricValues?.[0]?.value ?? '0', 10),
       sessions:  parseInt(r.metricValues?.[1]?.value ?? '0', 10),
     })),
-    top_sources: (topSources?.rows ?? []).map(r => ({
+    top_sources: (topSources.rows ?? []).map(r => ({
       source:      r.dimensionValues?.[0]?.value ?? '',
       medium:      r.dimensionValues?.[1]?.value ?? '',
       sessions:    parseInt(r.metricValues?.[0]?.value ?? '0', 10),
@@ -147,7 +176,7 @@ async function runReport(
   startDate:   string,
   endDate:     string,
   opts:        ReportOptions,
-): Promise<Ga4ReportResponse | null> {
+): Promise<Ga4ReportResponse> {
   const body: Record<string, unknown> = {
     dateRanges: [{ startDate, endDate }],
     metrics:    opts.metrics.map(name => ({ name })),
@@ -178,14 +207,18 @@ async function runReport(
     })
 
     if (!res.ok) {
-      console.warn(`[ga4/client] runReport returned ${res.status} for ${propertyId}`)
-      return null
+      const rawBody = await res.text()
+      const { googleStatus, googleReason, message } = parseGoogleError(rawBody)
+      console.warn(`[ga4/client] runReport returned ${res.status} for ${propertyId}: ${rawBody.slice(0, 200)}`)
+      throw new Ga4ApiError(res.status, googleStatus, googleReason, message, rawBody.slice(0, 500))
     }
 
     return res.json() as Promise<Ga4ReportResponse>
   } catch (err) {
-    console.warn('[ga4/client] fetch failed:', err instanceof Error ? err.message : err)
-    return null
+    if (err instanceof Ga4ApiError) throw err
+    const msg = err instanceof Error ? err.message : String(err)
+    console.warn('[ga4/client] fetch failed:', msg)
+    throw new Ga4ApiError(0, 'NETWORK_ERROR', 'networkError', msg)
   } finally {
     clearTimeout(timer)
   }

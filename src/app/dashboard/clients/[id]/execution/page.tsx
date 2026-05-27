@@ -1621,7 +1621,10 @@ export default function ExecutionPage() {
         onAddLog={handleAddLog}
         onOpenChat={item => setChatItem(item)}
         onOpenFlywheel={(item, target) => setFlywheelState({ item, target })}
-        onOpenStudio={item => setStudioItem(item)}
+        onOpenStudio={item => {
+          setStudioItem(item)
+          setDetailItem(null)
+        }}
         onEditItem={handleEditItem}
         onDeleteItem={handleDeleteItem}
       />
