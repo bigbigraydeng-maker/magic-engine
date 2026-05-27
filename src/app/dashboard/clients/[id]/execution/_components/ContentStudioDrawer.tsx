@@ -85,11 +85,11 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
   return (
     <>
       <div
-        className="fixed inset-0 bg-black/40 z-40"
+        className="fixed inset-0 z-[70] bg-slate-950/45 backdrop-blur-sm"
         onClick={onClose}
         aria-hidden="true"
       />
-      <div className="fixed inset-y-0 right-0 z-50 flex h-full w-full flex-col overflow-hidden bg-[#f6f7f2] shadow-2xl md:w-[calc(100vw-18rem)] xl:max-w-[1500px]">
+      <div className="fixed inset-y-0 right-0 z-[80] flex h-full w-full flex-col overflow-hidden border-l border-slate-200 bg-[#f6f7f2] shadow-2xl sm:w-[min(960px,calc(100vw-2rem))] lg:w-[min(1120px,calc(100vw-5rem))] xl:w-[min(1280px,74vw)]">
 
         {/* Header: the WHY */}
         <div className="border-b border-slate-200 bg-[#f6f7f2] px-4 py-4 sm:px-6">
