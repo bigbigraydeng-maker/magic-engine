@@ -101,6 +101,7 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
   const taskKind     = resolveTaskKind(item)
   const taskPlatform = resolveTaskPlatform(item)
   const showBrief    = briefCardVisible(mode, taskKind)
+  const isTaskMode   = showBrief && taskKind !== null
   const [loading, setLoading]               = useState(false)
   const [plan, setPlan]                     = useState<SocialPlanOutput | null>(null)
   const [planId, setPlanId]                 = useState<string | null>(null)
@@ -267,61 +268,63 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
         </div>
       )}
 
-      {/* Header */}
-      <div className="flex flex-col gap-3 border-b border-slate-200 bg-[#f6f7f2] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-        <div className="min-w-0">
-          <h3 className="text-base font-black text-slate-950">Social Plan Studio</h3>
-          <p className="mt-1 text-xs font-semibold text-slate-500">
-            {mode === 'video'
-              ? `Strategy to ${config.reels_count} Reels`
-              : mode === 'social'
-                ? `Strategy to ${config.posts_count} Posts, ${config.stories_count} Stories`
-                : `Strategy to ${config.reels_count} Reels, ${config.posts_count} Posts, ${config.stories_count} Stories`
-            }
-            <span className="mx-2 text-slate-300">/</span>
-            <span className="capitalize text-cyan-700">{config.platform}</span>
-          </p>
+      {/* Header — batch mode only; hidden when working on a specific task */}
+      {!isTaskMode && (
+        <div className="flex flex-col gap-3 border-b border-slate-200 bg-[#f6f7f2] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <div className="min-w-0">
+            <h3 className="text-base font-black text-slate-950">Social Plan Studio</h3>
+            <p className="mt-1 text-xs font-semibold text-slate-500">
+              {mode === 'video'
+                ? `Strategy to ${config.reels_count} Reels`
+                : mode === 'social'
+                  ? `Strategy to ${config.posts_count} Posts, ${config.stories_count} Stories`
+                  : `Strategy to ${config.reels_count} Reels, ${config.posts_count} Posts, ${config.stories_count} Stories`
+              }
+              <span className="mx-2 text-slate-300">/</span>
+              <span className="capitalize text-cyan-700">{config.platform}</span>
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {campaignId && (
+              <button
+                onClick={() => setSettingsOpen(v => !v)}
+                title="生成设置"
+                className={`flex h-10 items-center gap-2 rounded-lg border px-3 text-xs font-black transition-colors ${
+                  settingsOpen
+                    ? 'border-slate-950 bg-slate-950 text-white'
+                    : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                Settings
+                <span className="text-[10px]">{settingsOpen ? 'Up' : 'Down'}</span>
+              </button>
+            )}
+            {campaignId ? (
+              <button
+                onClick={() => void generate()}
+                disabled={loading}
+                className="flex h-10 items-center gap-2 rounded-lg bg-slate-950 px-4 text-xs font-black text-white transition hover:bg-slate-800 disabled:opacity-60"
+              >
+                {loading ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>{plan ? 'Regenerate' : 'Generate plan'}</>
+                )}
+              </button>
+            ) : (
+              <span className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">
+                Active campaign required
+              </span>
+            )}
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {campaignId && (
-            <button
-              onClick={() => setSettingsOpen(v => !v)}
-              title="生成设置"
-              className={`flex h-10 items-center gap-2 rounded-lg border px-3 text-xs font-black transition-colors ${
-                settingsOpen
-                  ? 'border-slate-950 bg-slate-950 text-white'
-                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-              }`}
-            >
-              Settings
-              <span className="text-[10px]">{settingsOpen ? 'Up' : 'Down'}</span>
-            </button>
-          )}
-          {campaignId ? (
-            <button
-              onClick={() => void generate()}
-              disabled={loading}
-              className="flex h-10 items-center gap-2 rounded-lg bg-slate-950 px-4 text-xs font-black text-white transition hover:bg-slate-800 disabled:opacity-60"
-            >
-              {loading ? (
-                <>
-                  <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                  Generating...
-                </>
-              ) : (
-                <>{plan ? 'Regenerate' : 'Generate plan'}</>
-              )}
-            </button>
-          ) : (
-            <span className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">
-              Active campaign required
-            </span>
-          )}
-        </div>
-      </div>
+      )}
 
-      {/* FDE Settings Panel */}
-      {settingsOpen && campaignId && (
+      {/* FDE Settings Panel — batch mode only */}
+      {!isTaskMode && settingsOpen && campaignId && (
         <div className="space-y-4 border-b border-slate-200 bg-white px-4 py-4 sm:px-5">
           <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">Generation settings</p>
 
@@ -436,6 +439,28 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
 
       {/* Results */}
       {plan && (
+        isTaskMode ? (
+          /* ── Task mode: single card + Launch Hub ───────────────────────────── */
+          <div className="space-y-4 px-4 py-4 sm:px-5">
+            {taskKind === 'social_post' && plan.posts[0] && (
+              <PostCard
+                post={plan.posts[0]}
+                clientId={clientId}
+                launchHubPlatform={taskPlatform ?? config.platform}
+                dueDate={item?.due_date ?? undefined}
+              />
+            )}
+            {taskKind === 'social_story' && plan.stories[0] && (
+              <StoryCard index={0} story={plan.stories[0]} clientId={clientId}
+                launchHubPlatform={taskPlatform ?? config.platform}
+                dueDate={item?.due_date ?? undefined}
+              />
+            )}
+            {taskKind === 'social_reel' && plan.reels[0] && (
+              <ReelCard index={0} reel={plan.reels[0]} clientId={clientId} campaignId={campaignId} />
+            )}
+          </div>
+        ) : (
         <div className="space-y-4 px-4 py-4 sm:px-5">
 
           {/* History pill selector */}
@@ -559,6 +584,7 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
             </div>
           )}
         </div>
+        ) /* end of batch-mode ternary branch */
       )}
 
       {/* Empty state */}
@@ -1195,7 +1221,12 @@ const POST_TYPE_COLOR: Record<string, string> = {
   engagement:   'bg-blue-50 text-blue-700 border-blue-200',
 }
 
-function PostCard({ post, clientId }: { post: Post; clientId: string }) {
+function PostCard({ post, clientId, launchHubPlatform, dueDate }: {
+  post: Post
+  clientId: string
+  launchHubPlatform?: string
+  dueDate?: string
+}) {
   const [open, setOpen]             = useState(false)
   const [generatingImg, setGen]     = useState(false)
   const [imgUrl, setImgUrl]         = useState<string | null>(null)
@@ -1303,6 +1334,16 @@ function PostCard({ post, clientId }: { post: Post; clientId: string }) {
                 <span key={hi} className="text-[10px] bg-blue-50 text-blue-600 rounded px-1.5 py-0.5">{h}</span>
               ))}
             </div>
+
+            {launchHubPlatform && (
+              <LaunchHubScheduler
+                platform={launchHubPlatform}
+                caption={post.copy ?? ''}
+                hashtags={post.hashtags}
+                imageUrl={imgUrl}
+                dueDate={dueDate}
+              />
+            )}
           </div>
         )}
       </div>
@@ -1310,7 +1351,13 @@ function PostCard({ post, clientId }: { post: Post; clientId: string }) {
   )
 }
 
-function StoryCard({ index, story, clientId }: { index: number; story: Story; clientId: string }) {
+function StoryCard({ index, story, clientId, launchHubPlatform, dueDate }: {
+  index: number
+  story: Story
+  clientId: string
+  launchHubPlatform?: string
+  dueDate?: string
+}) {
   const [generatingImg, setGen]     = useState(false)
   const [imgUrl, setImgUrl]         = useState<string | null>(null)
   const [imgError, setImgError]     = useState<string | null>(null)
@@ -1381,9 +1428,213 @@ function StoryCard({ index, story, clientId }: { index: number; story: Story; cl
               {imgError && <p className="text-[11px] text-red-500">⚠ {imgError}</p>}
             </div>
           )}
+
+          {launchHubPlatform && (
+            <div className="pt-1">
+              <LaunchHubScheduler
+                platform={launchHubPlatform}
+                caption={story.copy ?? ''}
+                hashtags={[]}
+                imageUrl={imgUrl}
+                dueDate={dueDate}
+              />
+            </div>
+          )}
         </div>
       </div>
     </>
+  )
+}
+
+// ─── LaunchHubScheduler ────────────────────────────────────────────────────────
+// Three-state inline scheduler:
+//   idle      → collapsed button "发到 Launch Hub"
+//   review    → shows full content preview (image + caption + hashtags) + time picker
+//   sent      → success confirmation
+//
+// FDE reviews everything before the final "确认排期发布" click.
+
+function LaunchHubScheduler({
+  platform, caption, hashtags, imageUrl, dueDate,
+}: {
+  platform: string
+  caption: string
+  hashtags: string[]
+  imageUrl: string | null
+  dueDate?: string
+}) {
+  type Phase = 'idle' | 'review' | 'sent'
+  const [phase, setPhase]           = useState<Phase>('idle')
+  const [scheduledAt, setScheduledAt] = useState(() => {
+    if (dueDate) return `${dueDate}T12:00`
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    d.setHours(12, 0, 0, 0)
+    return d.toISOString().slice(0, 16)
+  })
+  const [sending, setSending]       = useState(false)
+  const [errorMsg, setErrorMsg]     = useState<string | null>(null)
+  const [captionExpanded, setCaptionExpanded] = useState(false)
+
+  const handleConfirm = async () => {
+    setSending(true)
+    setErrorMsg(null)
+    try {
+      const res = await fetch('/api/publer/quick-post', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          caption,
+          hashtags,
+          image_url: imageUrl ?? undefined,
+          platform,
+          scheduled_at: new Date(scheduledAt).toISOString(),
+        }),
+      })
+      const json = await res.json() as { success: boolean; error?: string }
+      if (!json.success) throw new Error(json.error ?? 'Schedule failed')
+      setPhase('sent')
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const platformLabel = platform.charAt(0).toUpperCase() + platform.slice(1)
+
+  // ── sent ──────────────────────────────────────────────────────────────────────
+  if (phase === 'sent') {
+    return (
+      <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-3 space-y-1">
+        <p className="text-xs font-black text-green-700">✅ 已排期到 Launch Hub</p>
+        <div className="flex items-center gap-2 text-[11px] text-green-600">
+          <span className="rounded border border-green-200 bg-white px-1.5 py-0.5 font-semibold capitalize">{platformLabel}</span>
+          <span>
+            {new Date(scheduledAt).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+          </span>
+          {!imageUrl && <span className="text-amber-600 font-medium">纯文字帖</span>}
+        </div>
+      </div>
+    )
+  }
+
+  // ── idle ──────────────────────────────────────────────────────────────────────
+  if (phase === 'idle') {
+    return (
+      <button
+        onClick={() => setPhase('review')}
+        className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-black text-slate-700 hover:bg-white hover:border-slate-300 transition-colors"
+      >
+        <span>🚀</span>
+        <span>发到 Launch Hub</span>
+        <span className="ml-auto text-slate-400 font-semibold">{platformLabel}</span>
+        {!imageUrl && <span className="text-[10px] font-medium text-amber-600">无配图</span>}
+      </button>
+    )
+  }
+
+  // ── review ────────────────────────────────────────────────────────────────────
+  const captionPreview = caption.length > 120 && !captionExpanded
+    ? caption.slice(0, 120) + '…'
+    : caption
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 shadow-sm">
+
+      {/* Panel header */}
+      <div className="flex items-center justify-between border-b border-slate-200 bg-[#f6f7f2] px-4 py-2.5">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">发到 Launch Hub</span>
+          <span className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-bold capitalize text-slate-600">{platformLabel}</span>
+        </div>
+        <button
+          onClick={() => { setPhase('idle'); setErrorMsg(null) }}
+          className="text-xs text-slate-400 hover:text-slate-700 transition-colors"
+          aria-label="关闭"
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* Content preview */}
+      <div className="border-b border-slate-100 bg-white px-4 py-3 space-y-2.5">
+        <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">内容预览</p>
+
+        {/* Image + caption side by side when image exists */}
+        <div className="flex gap-3">
+          {imageUrl && (
+            <img
+              src={imageUrl}
+              alt="preview"
+              className="h-20 w-20 shrink-0 rounded-lg border border-slate-200 object-cover"
+            />
+          )}
+          <div className="flex-1 min-w-0 space-y-1.5">
+            <p className="text-xs leading-5 text-slate-800 whitespace-pre-line">{captionPreview}</p>
+            {caption.length > 120 && (
+              <button
+                onClick={() => setCaptionExpanded(v => !v)}
+                className="text-[10px] text-cyan-700 hover:underline font-semibold"
+              >
+                {captionExpanded ? '收起' : '展开全文'}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Hashtags */}
+        {hashtags.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {hashtags.map((h, i) => (
+              <span key={i} className="text-[10px] bg-blue-50 text-blue-600 rounded px-1.5 py-0.5">{h}</span>
+            ))}
+          </div>
+        )}
+
+        {!imageUrl && (
+          <p className="text-[11px] font-medium text-amber-700">⚠ 无配图 — 将发送纯文字帖</p>
+        )}
+      </div>
+
+      {/* Schedule time + confirm */}
+      <div className="bg-white px-4 py-3 space-y-3">
+        <div className="space-y-1">
+          <label className="text-[10px] font-bold text-slate-500">排期发布时间</label>
+          <input
+            type="datetime-local"
+            value={scheduledAt}
+            onChange={e => setScheduledAt(e.target.value)}
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-700 focus:border-slate-600 focus:outline-none"
+          />
+        </div>
+
+        {errorMsg && (
+          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-medium text-red-700">
+            ⚠ {errorMsg}
+          </p>
+        )}
+
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setPhase('idle'); setErrorMsg(null) }}
+            className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 hover:bg-slate-50 transition-colors"
+          >
+            取消
+          </button>
+          <button
+            onClick={() => void handleConfirm()}
+            disabled={sending}
+            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-xs font-black text-white transition hover:bg-slate-800 disabled:opacity-60"
+          >
+            {sending
+              ? <><span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" /> 排期中…</>
+              : <>✓ 确认排期发布</>
+            }
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 

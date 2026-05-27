@@ -9,6 +9,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { revokePlanTasks } from '@/lib/marketing-plan/task-dispatcher'
 import type { MarketingPlanData, MarketingPlanStatus } from '@/lib/marketing-plan/types'
 
 interface PatchBody {
@@ -101,6 +102,9 @@ export async function DELETE(
   { params }: { params: { id: string; planId: string } }
 ) {
   try {
+    // 先清除该 Plan 下所有 pending 的执行项（已开工/已完成的保留）
+    const { revoked } = await revokePlanTasks(params.planId)
+
     // 软删除 — 改 status 而非真删，保留历史
     const { data, error } = await supabaseAdmin
       .from('marketing_plans')
@@ -111,7 +115,7 @@ export async function DELETE(
       .single()
 
     if (error) throw error
-    return NextResponse.json({ success: true, archived_id: data.id })
+    return NextResponse.json({ success: true, archived_id: data.id, revoked_tasks: revoked })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return NextResponse.json({ success: false, error: message }, { status: 500 })

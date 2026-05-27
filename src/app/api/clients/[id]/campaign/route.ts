@@ -9,14 +9,14 @@ export async function GET(
   const clientId = params.id
   const status = req.nextUrl.searchParams.get('status') ?? 'active'
 
-  const query = supabaseAdmin
+  let query = supabaseAdmin
     .from('campaign_briefs')
     .select('*')
     .eq('client_id', clientId)
     .order('created_at', { ascending: false })
 
   if (status !== 'all') {
-    query.eq('status', status)
+    query = query.eq('status', status)
   }
 
   const { data, error } = await query
