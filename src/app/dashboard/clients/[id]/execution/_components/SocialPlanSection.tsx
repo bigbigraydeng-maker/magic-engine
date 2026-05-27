@@ -19,6 +19,60 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { SocialPlanOutput, ReelsScript, Post, Story, GenerationConfig } from '@/lib/social/social-plan-templates'
 import { DEFAULT_CONFIG } from '@/lib/social/social-plan-templates'
+import type { ExecutionItem } from '@/types/diagnostic'
+
+// ─── Task-kind helpers ─────────────────────────────────────────────────────────
+
+type SocialTaskKind = 'social_post' | 'social_reel' | 'social_story'
+
+const KIND_LABELS: Record<SocialTaskKind, string> = {
+  social_post:  '图文帖子',
+  social_reel:  '短视频 Reel',
+  social_story: 'Story',
+}
+
+const KIND_PLAN_CONFIG: Record<SocialTaskKind, Pick<GenerationConfig, 'posts_count' | 'stories_count' | 'reels_count'>> = {
+  social_post:  { posts_count: 1, stories_count: 0, reels_count: 0 },
+  social_reel:  { posts_count: 0, stories_count: 0, reels_count: 1 },
+  social_story: { posts_count: 0, stories_count: 1, reels_count: 0 },
+}
+
+const KIND_TAB: Record<SocialTaskKind, PlanTab> = {
+  social_post:  'posts',
+  social_reel:  'reels',
+  social_story: 'stories',
+}
+
+const SUPPORTED_PLATFORMS = new Set(['facebook', 'instagram', 'tiktok'])
+
+function resolveTaskKind(item: ExecutionItem | undefined): SocialTaskKind | null {
+  const kind = item?.steps_json?.kind
+  if (kind === 'social_post' || kind === 'social_reel' || kind === 'social_story') return kind
+  return null
+}
+
+function resolveTaskPlatform(item: ExecutionItem | undefined): GenerationConfig['platform'] | null {
+  const p = item?.steps_json?.platform as string | undefined
+  return p && SUPPORTED_PLATFORMS.has(p) ? (p as GenerationConfig['platform']) : null
+}
+
+function briefCardVisible(mode: Props['mode'], taskKind: SocialTaskKind | null): boolean {
+  if (!taskKind) return false
+  if (mode === 'all') return true
+  if (mode === 'social') return taskKind === 'social_post' || taskKind === 'social_story'
+  if (mode === 'video') return taskKind === 'social_reel'
+  return false
+}
+
+// ─── GenerateOverrides ─────────────────────────────────────────────────────────
+
+interface GenerateOverrides {
+  platform?: GenerationConfig['platform']
+  posts_count?: number
+  stories_count?: number
+  reels_count?: number
+  angle_focus?: string
+}
 
 interface Props {
   clientId: string
@@ -30,6 +84,8 @@ interface Props {
    *  'all'    → all three (default, legacy usage)
    */
   mode?: 'all' | 'social' | 'video'
+  /** When opened from a specific Kanban task, pass the item so the brief card appears. */
+  item?: ExecutionItem
 }
 
 interface PlanRecord {
@@ -41,7 +97,10 @@ interface PlanRecord {
 
 type PlanTab = 'reels' | 'posts' | 'stories'
 
-export function SocialPlanSection({ clientId, campaignId, campaignName, mode = 'all' }: Props) {
+export function SocialPlanSection({ clientId, campaignId, campaignName, mode = 'all', item }: Props) {
+  const taskKind     = resolveTaskKind(item)
+  const taskPlatform = resolveTaskPlatform(item)
+  const showBrief    = briefCardVisible(mode, taskKind)
   const [loading, setLoading]               = useState(false)
   const [plan, setPlan]                     = useState<SocialPlanOutput | null>(null)
   const [planId, setPlanId]                 = useState<string | null>(null)
@@ -97,18 +156,19 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
     }
   }
 
-  async function generate() {
+  async function generate(overrides?: GenerateOverrides) {
     if (!campaignId) return
     setLoading(true)
     setError(null)
     try {
+      const angleText = overrides?.angle_focus?.trim() || angleFocusInput.trim()
       const payload = {
         campaign_brief_id: campaignId,
-        platform:          config.platform,
-        reels_count:       config.reels_count,
-        posts_count:       config.posts_count,
-        stories_count:     config.stories_count,
-        ...(angleFocusInput.trim() ? { angle_focus: angleFocusInput.trim() } : {}),
+        platform:          overrides?.platform   ?? config.platform,
+        reels_count:       overrides?.reels_count   ?? config.reels_count,
+        posts_count:       overrides?.posts_count   ?? config.posts_count,
+        stories_count:     overrides?.stories_count ?? config.stories_count,
+        ...(angleText ? { angle_focus: angleText } : {}),
       }
       const res = await fetch(`/api/clients/${clientId}/social-plan`, {
         method: 'POST',
@@ -143,8 +203,69 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
     }
   }
 
+  async function generateFocused() {
+    if (!campaignId || !taskKind || !item) return
+    const overrides: GenerateOverrides = {
+      ...KIND_PLAN_CONFIG[taskKind],
+      angle_focus: item.description || item.title,
+      ...(taskPlatform ? { platform: taskPlatform } : {}),
+    }
+    // Mirror overrides into visible config/input so Settings panel stays in sync
+    setConfig(c => ({
+      ...c,
+      posts_count:   overrides.posts_count   ?? c.posts_count,
+      stories_count: overrides.stories_count ?? c.stories_count,
+      reels_count:   overrides.reels_count   ?? c.reels_count,
+      ...(overrides.platform ? { platform: overrides.platform } : {}),
+    }))
+    setAngleFocusInput(overrides.angle_focus ?? '')
+    setPlanTab(KIND_TAB[taskKind])
+    await generate(overrides)
+  }
+
   return (
     <div className="mb-6 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+
+      {/* Task Brief Card — only when opened from a specific content task */}
+      {showBrief && item && taskKind && (
+        <div className="border-b border-cyan-200 bg-cyan-50 px-4 py-4 sm:px-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-black uppercase tracking-[0.12em] text-cyan-700">
+              任务摘要
+            </span>
+            <span className="rounded-full border border-cyan-300 bg-white px-2 py-0.5 text-[10px] font-bold text-cyan-800">
+              {KIND_LABELS[taskKind]}
+            </span>
+            {taskPlatform && (
+              <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold capitalize text-slate-600">
+                {taskPlatform}
+              </span>
+            )}
+            {item.due_date && (
+              <span className="ml-auto text-[10px] font-semibold text-slate-400">
+                截止 {new Date(item.due_date).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })}
+              </span>
+            )}
+          </div>
+          <h4 className="mt-2 text-sm font-black leading-snug text-slate-950">{item.title}</h4>
+          {item.description && item.description !== item.title && (
+            <p className="mt-1 line-clamp-3 text-xs leading-5 text-slate-600">{item.description}</p>
+          )}
+          <button
+            onClick={() => void generateFocused()}
+            disabled={loading || !campaignId}
+            className="mt-3 flex items-center gap-2 rounded-lg bg-cyan-700 px-4 py-2 text-xs font-black text-white transition hover:bg-cyan-800 disabled:opacity-50"
+          >
+            {loading
+              ? <><span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />生成中…</>
+              : `生成这条${KIND_LABELS[taskKind]}`
+            }
+          </button>
+          {!campaignId && (
+            <p className="mt-1.5 text-[11px] font-semibold text-amber-700">需要先设置 Active Campaign 才能生成</p>
+          )}
+        </div>
+      )}
 
       {/* Header */}
       <div className="flex flex-col gap-3 border-b border-slate-200 bg-[#f6f7f2] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
@@ -178,7 +299,7 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
           )}
           {campaignId ? (
             <button
-              onClick={generate}
+              onClick={() => void generate()}
               disabled={loading}
               className="flex h-10 items-center gap-2 rounded-lg bg-slate-950 px-4 text-xs font-black text-white transition hover:bg-slate-800 disabled:opacity-60"
             >
