@@ -10,13 +10,13 @@
 
 import { callClaudeChat } from '@/lib/anthropic/client'
 import { jsonrepair } from 'jsonrepair'
+import { formatMemoryForPrompt } from '@/lib/memory/format'
 import type {
   ZhugeInput,
   ZhugeOutput,
   PriorityAction,
   DiagnosticScores,
   LubanTool,
-  MemoryContext,
 } from './types'
 import type { DiagnosticFinding } from '@/types/diagnostic'
 import type { BusinessContext } from './types'
@@ -82,7 +82,7 @@ function buildUserPrompt(input: ZhugeInput): string {
   const toolLines = formatTools(availableLubanTools)
   const contextLines = formatBusinessContext(businessContext)
   const evidenceSummary = formatEvidenceSummary(input)
-  const memorySection = formatMemoryContext(memoryContext)
+  const memorySection = formatMemoryForPrompt(memoryContext)
 
   return `## Client
 Name: ${client.name}
@@ -107,51 +107,6 @@ ${toolLines}
 ${memorySection}
 ---
 Produce the prioritised work order now. Return ONLY the JSON object.`
-}
-
-function formatMemoryContext(memory?: MemoryContext): string {
-  if (!memory?.has_content) return ''
-
-  const parts: string[] = ['\n## Client Memory (L3 Long-term Learning)']
-  parts.push('Use this to refine your recommendations — prefer proven patterns, avoid failures, respect past decisions.\n')
-
-  if (memory.preferences.length > 0) {
-    parts.push('### Content Preferences')
-    for (const p of memory.preferences) {
-      const fw = p.flywheel ? ` [${p.flywheel}]` : ''
-      parts.push(`  - [${p.preference_type}${fw}] ${p.content}`)
-    }
-  }
-
-  if (memory.proven_patterns.length > 0) {
-    parts.push('### Proven Winning Patterns')
-    for (const p of memory.proven_patterns) {
-      const fw = p.flywheel ? ` [${p.flywheel}]` : ''
-      const metric = p.performance_metric ? ` → ${p.performance_metric}` : ''
-      parts.push(`  - [${p.pattern_type}${fw}] ${p.pattern_content}${metric}`)
-    }
-  }
-
-  if (memory.failed_experiments.length > 0) {
-    parts.push('### Failed Experiments (DO NOT repeat)')
-    for (const e of memory.failed_experiments) {
-      const dim = e.dimension ? ` [${e.dimension}]` : ''
-      parts.push(`  - ${dim} ${e.experiment_description} → failed because: ${e.failure_reason}`)
-    }
-  }
-
-  if (memory.recent_decisions.length > 0) {
-    parts.push('### Recent Decisions')
-    for (const d of memory.recent_decisions) {
-      const outcome = d.outcome_verdict ? ` (outcome: ${d.outcome_verdict})` : ''
-      const alts = d.alternatives_rejected.length > 0
-        ? ` (rejected: ${d.alternatives_rejected.join(', ')})`
-        : ''
-      parts.push(`  - Chose "${d.chosen_action}"${alts}${outcome}: ${d.reasoning}`)
-    }
-  }
-
-  return parts.join('\n') + '\n'
 }
 
 function formatScores(scores: DiagnosticScores): string {

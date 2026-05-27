@@ -18,6 +18,7 @@ import { parseJsonResponse, MODEL_SONNET } from '@/lib/anthropic/client'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import type { PrescriptionContent, PrescriptionIntake, PrescriptionAction, PriorPrescriptionContext } from '@/types/diagnostic'
 import { deriveExecutionTarget } from '@/lib/flywheel/execution-target'
+import type { MemoryContext } from '@/lib/memory/types'
 import type {
   HuatuoPrescriptionResult,
   HuatuoLookupContext,
@@ -100,6 +101,11 @@ export interface RunHuatuoOptions {
   onProgress?: (note: string) => void | Promise<void>
   /** 补充/修订模式：携带原处方全文 + 执行进度（P8.10.S5） */
   priorContext?: PriorPrescriptionContext
+  /**
+   * Phase 23.D.2 — L3 记忆层注入（可选 — 无记忆时行为与旧版完全一致）。
+   * 华佗用它来：避开已知失败实验、引用已验证获胜模式、参考过往诊断决策。
+   */
+  memoryContext?: MemoryContext
 }
 
 /**
@@ -172,7 +178,7 @@ export async function runHuatuo(
   try {
     pass1 = await withHardTimeout(
       '处方生成',
-      generatePrescription(client, discovery, intake, lookup, options.priorContext),
+      generatePrescription(client, discovery, intake, lookup, options.priorContext, options.memoryContext),
       CLAUDE_TIMEOUT_GENERATION_MS,
     )
   } catch (err) {
@@ -218,7 +224,12 @@ export async function runHuatuo(
           '处方精修',
           generatePrescriptionWithFeedback(
             client, discovery, intake, lookup,
-            { previousContent: content, weaknesses: selfGrade.weaknesses, priorContext: options.priorContext },
+            {
+              previousContent: content,
+              weaknesses: selfGrade.weaknesses,
+              priorContext: options.priorContext,
+              memoryContext: options.memoryContext,
+            },
           ),
           CLAUDE_TIMEOUT_GENERATION_MS,
         )
@@ -281,6 +292,8 @@ export interface RefineHuatuoOptions {
   previousPasses?: number
   /** 上一轮自评结果；自评失败时作为兜底，防止评分归零。 */
   previousSelfGrade?: SelfGrade | null
+  /** Phase 23.D.2 — L3 记忆层注入（与生成阶段共享） */
+  memoryContext?: MemoryContext
 }
 
 /**
@@ -338,6 +351,7 @@ export async function refineHuatuoPrescription(
         previousContent,
         weaknesses: previousWeaknesses,
         humanComments: options.humanComments,
+        memoryContext: options.memoryContext,
       },
     ),
     CLAUDE_TIMEOUT_GENERATION_MS,
@@ -403,8 +417,9 @@ async function generatePrescription(
   intake: PrescriptionIntake,
   lookup: HuatuoLookupContext,
   priorContext?: PriorPrescriptionContext,
+  memoryContext?: MemoryContext,
 ): Promise<ClaudeCallResult<PrescriptionContent>> {
-  const userPrompt = buildHuatuoGenerationPrompt(discovery, intake, lookup, priorContext)
+  const userPrompt = buildHuatuoGenerationPrompt(discovery, intake, lookup, priorContext, memoryContext)
   const message = await client.messages.create({
     model: MODEL_SONNET,
     max_tokens: MAX_OUTPUT_TOKENS_GENERATION,
@@ -480,11 +495,12 @@ async function generatePrescriptionWithFeedback(
     weaknesses: SelfGradeWeakness[]
     humanComments?: string
     priorContext?: PriorPrescriptionContext
+    memoryContext?: MemoryContext
   },
 ): Promise<ClaudeCallResult<PrescriptionContent>> {
   // 精修 prompt 强调"针对性修复 + 保持紧凑"
   // 防止 Claude 看到 8 条 weaknesses 后过度扩写超出 8192 max_tokens
-  const basePrompt = buildHuatuoGenerationPrompt(discovery, intake, lookup, feedback.priorContext)
+  const basePrompt = buildHuatuoGenerationPrompt(discovery, intake, lookup, feedback.priorContext, feedback.memoryContext)
 
   // 人工意见（如有）— 比 AI 自评 weaknesses 优先级更高
   const humanCommentsBlock = feedback.humanComments && feedback.humanComments.trim()

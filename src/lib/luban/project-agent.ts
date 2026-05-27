@@ -21,6 +21,8 @@ import {
   buildProjectLubanSystemPrompt,
   type ProjectLubanContext, type ProjectItemLite, type ProjectLogLite,
 } from './project-prompts'
+import { loadMemoryForClient } from '@/lib/memory'
+import type { MemoryContext } from '@/lib/memory/types'
 
 export interface ProjectLubanChatResult {
   reply: string
@@ -149,6 +151,11 @@ async function loadProjectContext(
     projectAgeDays = Math.max(0, Math.round((Date.now() - earliest) / 86_400_000))
   }
 
+  // 7. Phase 23.D.2 — L3 记忆层（非阻塞）
+  const memoryContext: MemoryContext = await loadMemoryForClient(supabase, clientId, {
+    maxRecentDecisions: 5,
+  })
+
   return {
     businessName,
     industry,
@@ -160,6 +167,7 @@ async function loadProjectContext(
     items,
     recentLogs,
     projectAgeDays,
+    memoryContext,
   }
 }
 

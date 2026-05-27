@@ -27,6 +27,7 @@ import type {
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import { savePrescriptionCase, deriveCrisisType } from '@/lib/case-library/saver'
 import { mapIndustryToCategory } from '@/lib/huatuo/industry-mapper'
+import { loadMemoryForClient } from '@/lib/memory'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -306,10 +307,16 @@ function makeHuatuoStream(
         return
       }
 
-      // 2. 执行华佗（补充/修订模式带 priorContext）
+      // Phase 23.D.2: Non-blocking memory load
+      const memoryContext = await loadMemoryForClient(supabaseAdmin, clientId, {
+        maxRecentDecisions: 5,
+      })
+
+      // 2. 执行华佗（补充/修订模式带 priorContext，附 L3 记忆上下文）
       try {
         const result = await runHuatuo(supabaseAdmin, discovery, intake, {
           priorContext: priorMeta?.priorContext,
+          memoryContext,
           onProgress: async (note) => {
             sendEvent({ type: 'progress', note })
             if (prescriptionId) {

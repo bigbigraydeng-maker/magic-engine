@@ -21,6 +21,7 @@ import {
   failJob,
 } from '@/lib/zhangqian/persistor'
 import { getDomainMetrics, getKeywordsForSite, bulkKeywordVolume } from '@/lib/dataforseo/labs'
+import { loadMemoryForClient } from '@/lib/memory'
 
 // Render — agent itself runs in fire-and-forget; this handler returns in <1s
 export const maxDuration = 60
@@ -129,9 +130,17 @@ async function executeDiscoveryJob(
     // Non-fatal — continue without domain context
   }
 
+  // Phase 23.D.2: Non-blocking memory load — failure returns empty context.
+  // Cold-start scans return has_content=false naturally, so this is safe for
+  // both first-time and re-discovery flows.
+  const memoryContext = await loadMemoryForClient(supabaseAdmin, clientId, {
+    maxRecentDecisions: 3,
+  })
+
   try {
     const { report, validation_error, raw_output } = await runZhangqian(domain, {
       semrushContext,
+      memoryContext,
       onProgress: async (note) => {
         await updateJobProgress(supabaseAdmin, jobId, { progress_note: note })
       },

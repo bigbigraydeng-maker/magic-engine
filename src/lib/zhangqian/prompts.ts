@@ -202,18 +202,30 @@ export const ZHANGQIAN_SYSTEM_PROMPT = `你是张骞（Zhāng Qiān），Magic E
 
 /**
  * Build the user message for the Zhangqian agent.
- * Accepts optional pre-fetched SEMrush context to surface real data.
+ * Accepts optional pre-fetched SEMrush context to surface real data,
+ * and optional MemoryContext (Phase 23.D.2) when re-discovering an
+ * existing client — guides Scout to weight signals it has previously seen.
  */
-export function buildUserPrompt(domain: string, semrushContext?: string): string {
+export function buildUserPrompt(
+  domain: string,
+  semrushContext?: string,
+  memorySection?: string,
+): string {
   const semrushSection = semrushContext
     ? `\n\n## SEMrush 预获取数据\n\n以下是从SEMrush实时获取的该域名数据，请在分析中直接引用这些数字，不要猜测：\n\n${semrushContext}\n`
     : ''
 
-  return `请研究并分析该域名的业务：${domain}${semrushSection}
+  // Phase 23.D.2: Scout 主要用 preferences/failed_experiments 提示
+  // 「客户偏好哪类受众」「过去什么实验失败过」—— 仅作为参考信号，
+  // 不能凌驾于实际抓取数据。recent_decisions 对 Scout 价值小，不注入。
+  const memoryBlock = memorySection ?? ''
+
+  return `请研究并分析该域名的业务：${domain}${semrushSection}${memoryBlock}
 
 从 fetch_url 获取主页开始，然后按研究协议逐步进行。在15次工具调用内完成，输出最终JSON。
 
 记住：
 1. 所有文本值（描述、理由等）必须用中文
-2. 必须测试2个AI追踪问句，记录谁出现在搜索结果中`
+2. 必须测试2个AI追踪问句，记录谁出现在搜索结果中
+3. 若上方提供了「Client Memory」，把它作为**辅助线索**（如客户偏好的目标受众），但**不要让记忆覆盖实际抓取证据**——你是发现代理，记忆是上一轮结论，新数据优先`
 }

@@ -18,6 +18,8 @@ import { formatSeasonalCalendarForPrompt } from './seasonal-calendar'
 import { formatInterestForPrompt } from '@/lib/gtrends/client'
 import { formatCasesForPrompt } from '@/lib/case-library/retriever'
 import { formatConfidenceForPrompt } from '@/lib/case-library/outcome-confidence'
+import { formatMemoryForPrompt } from '@/lib/memory/format'
+import type { MemoryContext } from '@/lib/memory/types'
 
 // ─── Generation prompt（生成阶段）──────────────────────────────────────────────
 
@@ -266,12 +268,14 @@ ${prior.executionSummary}
 /**
  * 构建生成阶段的 user message。
  * priorContext 非空时进入"补充/修订"模式。
+ * memoryContext 非空时附加 L3 记忆段（Phase 23.D.2）。
  */
 export function buildHuatuoGenerationPrompt(
   discovery: DiscoveryReport,
   intake: PrescriptionIntake,
   lookup: HuatuoLookupContext,
   priorContext?: PriorPrescriptionContext,
+  memoryContext?: MemoryContext,
 ): string {
   const d = discovery.diagnosis
   const scores = d?.scores
@@ -332,6 +336,10 @@ export function buildHuatuoGenerationPrompt(
       ? '# 任务：生成处方的修订版（v2）'
       : '# 任务：为以下客户开具 90 天三阶段数字营销处方'
 
+  // Phase 23.D.2: 注入 L3 记忆（华佗主要参考 proven_patterns / failed_experiments / recent_decisions；
+  // preferences 与处方策略相关性较弱，但保留以提供完整上下文）
+  const memorySection = formatMemoryForPrompt(memoryContext)
+
   return `${taskTitle}
 
 ## 客户画像
@@ -356,6 +364,7 @@ ${seasonalSection}
 ${interestSection}
 ${casesSection ? `\n${casesSection}\n` : ''}
 ${confidenceSection ? `\n${confidenceSection}\n` : ''}
+${memorySection}
 ${prior.block}
 ## 客户意向
 - **业务目标**：${intake.business_goal}

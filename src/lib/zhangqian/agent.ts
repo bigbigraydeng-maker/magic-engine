@@ -27,6 +27,8 @@ import { getKeywordsForSite, getSerpCompetitors } from '@/lib/dataforseo/labs'
 import { getDomainTechnologies, getDomainWhois } from '@/lib/dataforseo/domain-analytics'
 import { getSerpPage } from '@/lib/dataforseo/serp'
 import { getOnPageInstant } from '@/lib/dataforseo/onpage'
+import { formatMemoryForPrompt } from '@/lib/memory/format'
+import type { MemoryContext } from '@/lib/memory/types'
 import type { DiscoveryReport } from './types'
 import { ZHANGQIAN_SYSTEM_PROMPT, buildUserPrompt } from './prompts'
 import { validateDiscoveryReport } from './validators'
@@ -347,6 +349,11 @@ export interface RunZhangqianOptions {
   onProgress?: (note: string) => void | Promise<void>
   /** Pre-fetched SEMrush context string to include in the user prompt. */
   semrushContext?: string
+  /**
+   * Phase 23.D.2 — Optional L3 memory snapshot. Only meaningful for
+   * re-discovery on an existing client. Absent for cold-start scans.
+   */
+  memoryContext?: MemoryContext
 }
 
 export interface RunZhangqianResult {
@@ -377,9 +384,16 @@ export async function runZhangqian(
   const startedAt = Date.now()
   const deadline = startedAt + GLOBAL_TIMEOUT_MS
 
+  // Phase 23.D.2: render memory once (empty when no context/no content)
+  // Scout doesn't need recent_decisions — those are about strategy choices,
+  // not data signals — keep them out to save tokens.
+  const memorySection = formatMemoryForPrompt(options.memoryContext, {
+    includeRecentDecisions: false,
+  })
+
   // Conversation messages — grows each turn
   const messages: Anthropic.Messages.MessageParam[] = [
-    { role: 'user', content: buildUserPrompt(domain, options.semrushContext) },
+    { role: 'user', content: buildUserPrompt(domain, options.semrushContext, memorySection) },
   ]
 
   let totalInputTokens = 0

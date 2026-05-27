@@ -17,6 +17,8 @@ import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import type { MasterBrief, CampaignBrief, ContentPillar, PlatformConfig } from '@/types/magic-engine'
 import { formatBriefForPrompt } from '@/lib/content/brief-injector'
 import { formatCampaignForPrompt } from '@/lib/content/campaign-injector'
+import { formatMemoryForPrompt } from '@/lib/memory/format'
+import type { MemoryContext } from '@/lib/memory/types'
 
 // ── Token control constants ────────────────────────────────────────────────────
 
@@ -51,6 +53,8 @@ export interface LubanContext {
   activeCampaigns:     CampaignBrief[]
   dimensionScores:     Partial<Record<DiagnosticDimension, number | null>> | null
   topFindings:         DiagnosticFindingLite[]
+  /** Phase 23.D.2 — L3 记忆层快照（has_content=false 时不输出，行为兼容旧版） */
+  memoryContext:       MemoryContext
 }
 
 // ── Display maps ───────────────────────────────────────────────────────────────
@@ -338,7 +342,7 @@ ${formatCampaignSection(ctx.activeCampaigns)}
 ## 华佗诊断明细
 
 ${formatDiagnosisSection(ctx.dimensionScores, ctx.topFindings)}
-
+${formatMemoryForPrompt(ctx.memoryContext, { headingLevel: '##' })}
 ## 这个执行项已有的工作记录
 
 ${logsText}

@@ -7,6 +7,8 @@
  */
 
 import type { DiagnosticDimension } from '@/types/diagnostic'
+import { formatMemoryForPrompt } from '@/lib/memory/format'
+import type { MemoryContext } from '@/lib/memory/types'
 
 /** 单个执行项的精简视图（喂给 prompt 用） */
 export interface ProjectItemLite {
@@ -43,6 +45,8 @@ export interface ProjectLubanContext {
   recentLogs: ProjectLogLite[]
   /** 项目启动至今天数 */
   projectAgeDays: number | null
+  /** Phase 23.D.2 — L3 记忆层快照 */
+  memoryContext: MemoryContext
 }
 
 const DIMENSION_CN: Record<DiagnosticDimension, string> = {
@@ -166,7 +170,7 @@ ${itemsText}
 ## 最近的工作记录（跨所有执行项）
 
 ${logsText}
-
+${formatMemoryForPrompt(ctx.memoryContext, { headingLevel: '##' })}
 ## 对话风格
 
 - 用中文，像同事一样自然对话

@@ -7,3 +7,4 @@ export {
   saveDecisionHistory,
   updateDecisionOutcome,
 } from './service'
+export { formatMemoryForPrompt, type FormatMemoryOptions } from './format'

@@ -53,6 +53,13 @@ function makeBaseCtx(overrides?: Partial<LubanContext>): LubanContext {
     activeCampaigns: [],
     dimensionScores: null,
     topFindings: [],
+    memoryContext: {
+      preferences: [],
+      proven_patterns: [],
+      failed_experiments: [],
+      recent_decisions: [],
+      has_content: false,
+    },
     ...overrides,
   }
 }

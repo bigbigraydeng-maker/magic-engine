@@ -21,6 +21,8 @@ import { getActiveBrief } from '@/lib/content/brief-injector'
 import { getActiveCampaigns } from '@/lib/content/campaign-injector'
 import { buildLubanSystemPrompt, type LubanContext, type DiagnosticFindingLite } from './prompts'
 import { buildLubanTools } from './tools'
+import { loadMemoryForClient } from '@/lib/memory'
+import type { MemoryContext } from '@/lib/memory/types'
 
 // Max findings to load per dimension — matches MAX_FINDINGS in prompts.ts
 const FINDINGS_PER_DIMENSION = 6
@@ -91,11 +93,12 @@ async function loadLubanContext(
     }
   }
 
-  // 4. Master Brief + active campaigns (parallel, non-blocking)
-  const [masterBrief, activeCampaigns] = await Promise.all([
+  // 4. Master Brief + active campaigns + L3 memory (parallel, non-blocking)
+  const [masterBrief, activeCampaigns, memoryContext] = await Promise.all([
     getActiveBrief(clientId).catch(() => null),
     getActiveCampaigns(clientId).catch(() => []),
-  ]) as [MasterBrief | null, CampaignBrief[]]
+    loadMemoryForClient(supabase, clientId, { maxRecentDecisions: 3 }),
+  ]) as [MasterBrief | null, CampaignBrief[], MemoryContext]
 
   // 5. 华佗诊断分数 + 同维度 top findings
   let dimensionScores: Partial<Record<DiagnosticDimension, number | null>> | null = null
@@ -145,6 +148,7 @@ async function loadLubanContext(
     activeCampaigns,
     dimensionScores,
     topFindings,
+    memoryContext,
   }
 }
 

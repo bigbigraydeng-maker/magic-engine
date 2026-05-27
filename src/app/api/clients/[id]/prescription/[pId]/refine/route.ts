@@ -21,6 +21,7 @@ import { refineHuatuoPrescription, coerceWeaknesses } from '@/lib/huatuo/agent'
 import type { PrescriptionIntake, PrescriptionContent } from '@/types/diagnostic'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import type { SelfGrade, SelfGradeWeakness } from '@/lib/huatuo/types'
+import { loadMemoryForClient } from '@/lib/memory'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -163,6 +164,11 @@ function makeRefineStream(
 
       sendEvent({ type: 'started', prescription_id: prescriptionId })
 
+      // Phase 23.D.2: Non-blocking memory load
+      const memoryContext = await loadMemoryForClient(supabaseAdmin, clientId, {
+        maxRecentDecisions: 5,
+      })
+
       try {
         const result = await refineHuatuoPrescription(
           supabaseAdmin, discovery, intake, previousContent, previousWeaknesses,
@@ -170,6 +176,7 @@ function makeRefineStream(
             humanComments,
             previousPasses,
             previousSelfGrade,
+            memoryContext,
             onProgress: async (note) => {
               sendEvent({ type: 'progress', note })
               await supabaseAdmin
