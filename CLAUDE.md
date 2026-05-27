@@ -215,23 +215,21 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-28 02:53 NZST （**Phase 17.A P17.A.1–A.4 + A.5(cron) 全部 ✅ 完成**；Phase 17.A 全部交付，等 PM 验收 M2 + merge）
+> 最后更新：2026-05-28 03:26 NZST （**Phase 17.A P17.A.1–A.6 全部 ✅ 完成 + merge**；Phase 19 IDOR 修复 ✅ 完成；等 PM 决定下一 Phase）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **PM 验收 M2** | 打开 Supabase 后台，确认 `gsc_performance_snapshots` + `ga4_traffic_snapshots` 有 OzTop 数据行 | ⚠️ PM 操作 |
-| **PM 操作** | Supabase 跑 migration `20260603000003_gsc_performance_snapshots.sql` + `20260604000001_ga4_traffic_snapshots.sql` | ⚠️ PM 操作 |
-| **PM 合并** | 输入 `go merge` 合并 Phase 17.A PR（全部 P17.A.1–A.5 完成） | ⚠️ PM 决定 |
-| **P17.A.6（待排）** | 客户主页「数据」tab：GSC top queries + GA4 daily traffic + 快速夺旗机会清单（原 P17.A.5 UI） | 📋 下一任务 |
+| **PM 决定** | 选择下一个 Phase：Phase 18.A（Meta Ads MVP）或 Phase 17.B（Meta Insights 社媒数据回流）| ⚠️ PM 决定 |
 
-**状态校准（2026-06-05）**：
-- ✅ **P17.A.1**：`gsc_performance_snapshots` 表 + `fetchGscSnapshot()` + POST `/gsc/sync` + GET `/gsc/snapshots`
-- ✅ **P17.A.2**：GA4 接入：`ga4_traffic_snapshots` + `fetchGa4Snapshot()` + POST `/ga4/sync` + GET `/ga4/snapshots`
-- ✅ **P17.A.3**：GSC/GA4 快照 UI：`DataPullbackSection`（执行看板）+ connector 详情页同步按钮
-- ✅ **P17.A.4**：GSC 归因桥接：`gsc-bridge.ts` + POST `/flywheel/gsc-attribution` + vocabulary 3 GSC keys + attribution cron pass-2
-- ✅ **P17.A.5（cron）**：每日自动同步：`google-data-pullback-daily` cron + render.yaml 注册
+**已完成全景（最近两个 Phase）**：
+- ✅ **Phase 17.A**（P17.A.1–A.6 全部 merge）：GSC/GA4 数据回流 + 飞轮归因桥接 + 每日 cron + 客户「数据」tab
+- ✅ **Phase 19.A–E**（PR #95）：89 个 `/api/clients/[id]/*` 路由 IDOR 封堵 + NEXT_PUBLIC 密钥泄漏清除
 
-下一 session：`继续 Phase 17.A 验收 merge，或开始 P17.A.6 UI 层`
+**下一个候选**：
+- 📋 **Phase 18.A** — Meta Ads MVP：诊断→Fix 按钮接线 Meta MCP（P18.A.1–A.3）
+- 📋 **Phase 17.B** — Meta Insights 社媒数据回流（补全 Phase 17 数据源矩阵）
+
+下一 session：`开始 Phase 18.A` 或 `开始 Phase 17.B`（等 PM 决定）
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox

@@ -44,3 +44,8 @@ yarn-error.log*
 
 # Second Brain / Claude session logs
 Second-Brain/
+
+# Google Service Account / OAuth credentials (never commit private keys)
+gen-lang-client-*.json
+*-credentials.json
+service-account*.json

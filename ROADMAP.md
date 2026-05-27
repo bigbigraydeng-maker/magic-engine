@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-28 02:53 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
+> 最后更新：2026-05-28 03:26 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -68,9 +68,9 @@
 📋 Phase 14     Website Connector / 网站直连执行闭环（⭐ WordPress 连接器近期优先 — P14.A.5）
 📋 Phase 15     Reputation Engine / 口碑监控与执行闭环（战略确认，待排期）
 📋 Phase 16     Competitor Intelligence / 竞品雷达 + 信号驱动执行（战略确认，待排期）
-🔥 Phase 17     Unified Data Pullback / 统一数据回流层（Phase 17.A 进行中）
+✅ Phase 17     Unified Data Pullback / 统一数据回流层（Phase 17.A ✅ 全部完成 2026-05-27）
 📋 Phase 18     Ads Execution Engine / 广告执行引擎（Meta + Google + TikTok，已登记）
-📋 Phase 19     API 鉴权整改 / IDOR 修复（🔴 CRITICAL 安全 — 19.A+B 须在客户建号前完成）
+✅ Phase 19     API 鉴权整改 / IDOR 修复（🟢 19.A–E 全部完成 2026-05-27，PR #95）
 📋 Phase 21     AI Content Factory / AI 内容工厂（旗舰能力 — FDE 客户默认产能引擎）
 📋 Phase 22     Data Intelligence Engine / 数据智能引擎（旗舰能力 — 学习引擎）
 📋 Phase 23     Cross-Agent Memory Layer / 跨 Agent 记忆层（旗舰能力 — 升级自 Phase 8.M，补 L3 长期学习）
@@ -2009,7 +2009,7 @@ AI 可见度层（ME 独有 ✅）
 
 ## Phase 17 — Unified Data Pullback（统一数据回流层）🔥 进行中
 
-> **登记日期**：2026-05-19 · **开工日期**：2026-06-03 · **状态**：Phase 17.A 进行中
+> **登记日期**：2026-05-19 · **开工日期**：2026-06-03 · **状态**：Phase 17.A ✅ 全部完成（P17.A.1–A.6 均已 merge，2026-05-27）
 >
 > **背景**：ME 现在的月报数据是孤岛——SEO 数据、社媒数据、广告数据分散在各平台，无法在 ME 内做跨渠道归因。Unified Data Pullback 是把所有执行结果拉回 ME、驱动飞轮真实归因的基础设施层。
 
@@ -2039,6 +2039,7 @@ AI 可见度层（ME 独有 ✅）
 | **P17.A.3** | GSC 数据 UI 展示（执行看板 / 月报 section）+ connector page 触发按钮 | ✅ 完成 2026-05-27 |
 | **P17.A.4** | 飞轮归因桥接：flywheel_action → gsc_snapshot baseline vs after 对比 | ✅ 完成 2026-06-05 |
 | **P17.A.5（日常同步）** | 每日 GSC + GA4 cron job：`google-data-pullback-daily`（每天 3am UTC） | ✅ 完成 2026-06-05 |
+| **P17.A.6** | 客户主页「数据」tab：GSC top queries + GA4 traffic + 快速夺旗机会清单 | ✅ 完成 2026-05-27 |
 
 **P17.A.1 实施内容**：
 - `supabase/migrations/20260603000003_gsc_performance_snapshots.sql`：新表（client_id + period_start/end + 总量指标 + top_queries/pages JSONB）
@@ -2488,6 +2489,7 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 
 ### 2026-05-27
 
+- **P17.A.6** — 客户主页「数据」tab：三 tab 切换器（概览/数据/工具）+ `ClientDataTab`（GSC 4 指标格 + top-10 关键词表、GA4 4 指标格 + top-10 来源/页面表、快速夺旗机会清单 position>10 && impressions>50） [feat/phase-17-a6-data-tab, PR #93]
 - **P17.A.3** — GSC/GA4 快照 UI：`DataPullbackSection`（执行看板数据回流卡）+ connector 详情页「立即同步」按钮 + 快照指标预览 [feat/phase-17-a-gsc-pullback]
 - **P13.UI.17** — Inline prescription supplement/revision drawer upgraded to the shared right-rail shell with stronger overlay layering, contained scrolling, and refreshed Magic Engine controls.
 - **P13.UI.18** — Zhangqian customer-facing discovery report gained Save PDF + DOCX downloads; DOCX export refreshed into Magic Engine deliverable language and dashboard Zhangqian export controls aligned.
