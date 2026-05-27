@@ -10,8 +10,6 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
@@ -49,7 +47,6 @@ export function LubanChatDrawer({
     void (async () => {
       try {
         const res = await fetch(`/api/clients/${clientId}/execution/${itemId}/luban`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
           cache: 'no-store',
         })
         if (res.ok) {
@@ -91,7 +88,7 @@ export function LubanChatDrawer({
     try {
       const res = await fetch(`/api/clients/${clientId}/execution/${itemId}/luban`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text }),
       })
       const data = await res.json() as { success: boolean; reply?: string; error?: string }
@@ -114,7 +111,7 @@ export function LubanChatDrawer({
     try {
       const res = await fetch(`/api/clients/${clientId}/execution/${itemId}/log`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ kind: 'ai_assist', author: 'luban', content }),
       })
       if (!res.ok) return

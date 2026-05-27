@@ -13,8 +13,6 @@ import { ReelsStudio } from '../../_components/ReelsStudio'
 import { StudioArticleTab } from './StudioArticleTab'
 import { SocialPlanSection } from './SocialPlanSection'
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 type StudioTab = 'article' | 'social' | 'video'
 
 interface ActiveCampaign {
@@ -73,14 +71,14 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
     const content = blogPostId ? `${summary} [blog:${blogPostId}]` : summary
     fetch(`/api/clients/${clientId}/execution/${item.id}/log`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ kind: 'ai_assist', author: 'luban', content }),
     }).catch(() => { /* non-blocking */ })
 
     if (item.status === 'pending') {
       fetch(`/api/clients/${clientId}/execution/${item.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'in_progress' }),
       }).catch(() => { /* non-blocking */ })
     }

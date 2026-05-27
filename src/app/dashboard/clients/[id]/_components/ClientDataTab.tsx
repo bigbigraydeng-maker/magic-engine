@@ -3,8 +3,6 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface GscTopQuery {
@@ -357,12 +355,8 @@ export function ClientDataTab({ clientId }: { clientId: string }) {
     let cancelled = false
     void (async () => {
       const [gscRes, ga4Res] = await Promise.allSettled([
-        fetch(`/api/clients/${clientId}/gsc/snapshots?limit=1`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        }),
-        fetch(`/api/clients/${clientId}/ga4/snapshots?limit=1`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        }),
+        fetch(`/api/clients/${clientId}/gsc/snapshots?limit=1`),
+        fetch(`/api/clients/${clientId}/ga4/snapshots?limit=1`),
       ])
 
       if (cancelled) return

@@ -66,8 +66,6 @@ interface PackageDetailResponse {
 // Constants
 // ---------------------------------------------------------------------------
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 const DIMENSION_LABEL: Record<DiagnosticDimension, string> = {
   seo:           'SEO',
   ai_visibility: 'AI 可见度',
@@ -316,9 +314,7 @@ export default function ProductionPackageDetailPage() {
   useEffect(() => {
     void (async () => {
       try {
-        const res = await fetch(`/api/clients/${clientId}/production/${packageId}`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        })
+        const res = await fetch(`/api/clients/${clientId}/production/${packageId}`)
         const json = await res.json() as PackageDetailResponse
         if (!json.success) {
           setError(json.error ?? '加载失败')

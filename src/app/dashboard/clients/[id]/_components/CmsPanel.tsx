@@ -82,9 +82,7 @@ function GithubProviderPanel({ clientId }: { clientId: string }) {
   const fetchStatus = useCallback(async () => {
     setState({ phase: 'loading' })
     try {
-      const res  = await fetch(`/api/clients/${clientId}/cms/status`, {
-        headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''}` },
-      })
+      const res  = await fetch(`/api/clients/${clientId}/cms/status`)
       const json = await res.json() as { success: boolean; data: CmsConnectionStatus | null; error?: string }
       if (!json.success) throw new Error(json.error ?? 'Failed to load status')
       setState(json.data
@@ -174,10 +172,7 @@ function GithubConnectForm({ clientId, onConnected, onCancel }: GithubConnectFor
     try {
       const res  = await fetch(`/api/clients/${clientId}/cms/connect`, {
         method:  'POST',
-        headers: {
-          'Content-Type':  'application/json',
-          Authorization:   `Bearer ${process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           repo_owner:     repoOwner.trim(),
           repo_name:      repoName.trim(),
@@ -285,7 +280,6 @@ function GithubConnectedView({ clientId, status, onRefresh, onDisconnect }: Gith
     try {
       const res  = await fetch(`/api/clients/${clientId}/cms/test`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''}` },
       })
       const json = await res.json() as { success: boolean; error?: string }
       setTestResult(json.success ? '✅ 连接成功 — 仓库可访问' : `❌ ${json.error ?? '连接失败'}`)
@@ -301,8 +295,7 @@ function GithubConnectedView({ clientId, status, onRefresh, onDisconnect }: Gith
     setDisconnecting(true)
     try {
       await fetch(`/api/clients/${clientId}/cms/connect`, {
-        method:  'DELETE',
-        headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''}` },
+        method: 'DELETE',
       })
       onDisconnect()
     } catch {
@@ -361,9 +354,7 @@ function WordpressProviderPanel({ clientId }: { clientId: string }) {
   const fetchStatus = useCallback(async () => {
     setState({ phase: 'loading' })
     try {
-      const res  = await fetch(`/api/clients/${clientId}/cms/wordpress`, {
-        headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''}` },
-      })
+      const res  = await fetch(`/api/clients/${clientId}/cms/wordpress`)
       const json = await res.json() as { success: boolean; data: WordpressConnectionStatus | null; error?: string }
       if (!json.success) throw new Error(json.error ?? 'Failed to load status')
       setState(json.data
@@ -449,10 +440,7 @@ function WordpressConnectForm({ clientId, onConnected, onCancel }: WordpressConn
     try {
       const res  = await fetch(`/api/clients/${clientId}/cms/wordpress`, {
         method:  'POST',
-        headers: {
-          'Content-Type':  'application/json',
-          Authorization:   `Bearer ${process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           site_url:     siteUrl.trim(),
           username:     username.trim(),
@@ -540,8 +528,7 @@ function WordpressConnectedView({ clientId, status, onDisconnect }: WordpressCon
     setTestResult(null)
     try {
       const res  = await fetch(`/api/clients/${clientId}/cms/wordpress/test`, {
-        method:  'POST',
-        headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''}` },
+        method: 'POST',
       })
       const json = await res.json() as { success: boolean; ok: boolean; displayName?: string; error?: string }
       if (json.success && json.ok) {
@@ -560,8 +547,7 @@ function WordpressConnectedView({ clientId, status, onDisconnect }: WordpressCon
     setDisconnecting(true)
     try {
       await fetch(`/api/clients/${clientId}/cms/wordpress`, {
-        method:  'DELETE',
-        headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''}` },
+        method: 'DELETE',
       })
       onDisconnect()
     } catch {

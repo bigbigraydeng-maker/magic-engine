@@ -8,7 +8,8 @@ import { auditBlogPost } from '@/lib/blog/quality-audit'
 import type { BlogAuditMetadata } from '@/lib/blog/quality-audit'
 import { getActiveBrief } from '@/lib/content/brief-injector'
 import { getActiveCampaigns } from '@/lib/content/campaign-injector'
-import { requireBearerToken, clampLimit } from '@/lib/validation-utils'
+import { clampLimit } from '@/lib/validation-utils'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { SeoContentAdapter } from '@/lib/flywheel/adapters/SeoContentAdapter'
 import { SEO_ACTION_TYPE, SEO_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import type { BlogPost, GenerateBlogRequest } from '@/types/magic-engine'
@@ -51,13 +52,13 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+  const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
   try {
-    const clientId = params.id
     const status = req.nextUrl.searchParams.get('status')
     const limit = clampLimit(req.nextUrl.searchParams.get('limit'))
 
@@ -91,13 +92,13 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+  const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
   try {
-    const clientId = params.id
     const body = (await req.json()) as GenerateBlogRequest
 
     if (!body.topic?.trim()) {

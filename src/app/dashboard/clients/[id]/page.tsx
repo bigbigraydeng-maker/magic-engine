@@ -13,8 +13,6 @@ import type { ClientDiscoveryRow } from '@/lib/zhangqian/types';
 import { ClientDataTab } from './_components/ClientDataTab';
 
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? '';
-
 interface Client {
   id: string;
   name: string;
@@ -108,9 +106,7 @@ function BrandHealthWidget({ clientId }: { clientId: string }) {
   useEffect(() => {
     void (async () => {
       try {
-        const res = await fetch(`/api/clients/${clientId}/zhangqian/latest`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        });
+        const res = await fetch(`/api/clients/${clientId}/zhangqian/latest`);
         if (res.status === 404) { setStatus('none'); return; }
         if (!res.ok) { setStatus('none'); return; }
         const data = await res.json() as { success: boolean; discovery: ClientDiscoveryRow };
@@ -387,15 +383,9 @@ export default function ClientDetailPage() {
       const [clientRes, briefRes, discoveryRes, diagnosticRes, prescriptionRes] = await Promise.all([
         fetch(`/api/clients/${clientId}`),
         fetch(`/api/clients/${clientId}/brief?status=active`),
-        fetch(`/api/clients/${clientId}/zhangqian/latest`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        }).catch(() => null),
-        fetch(`/api/clients/${clientId}/diagnostic/latest`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        }).catch(() => null),
-        fetch(`/api/clients/${clientId}/prescriptions/latest-draft`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        }).catch(() => null),
+        fetch(`/api/clients/${clientId}/zhangqian/latest`).catch(() => null),
+        fetch(`/api/clients/${clientId}/diagnostic/latest`).catch(() => null),
+        fetch(`/api/clients/${clientId}/prescriptions/latest-draft`).catch(() => null),
       ]);
       if (clientRes.ok) {
         const { client: c } = await clientRes.json();

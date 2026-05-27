@@ -34,8 +34,6 @@ interface CitationPanel {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 /**
  * Injects sequential `id` attributes into every <h2> in the HTML string and
  * returns the modified HTML plus a TOC entry list extracted from those tags.
@@ -190,9 +188,7 @@ export default function DiagnosticReportPage() {
     setError(null)
     try {
       const qs = runIdParam ? `?run_id=${encodeURIComponent(runIdParam)}` : ''
-      const res = await fetch(`/api/clients/${clientId}/diagnostic/report${qs}`, {
-        headers: { Authorization: `Bearer ${API_KEY}` },
-      })
+      const res = await fetch(`/api/clients/${clientId}/diagnostic/report${qs}`)
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as { error?: string }
         throw new Error(body.error ?? `HTTP ${res.status}`)
@@ -231,9 +227,7 @@ export default function DiagnosticReportPage() {
     setDocxLoading(true)
     try {
       const qs = runIdParam ? `?run_id=${encodeURIComponent(runIdParam)}` : ''
-      const res = await fetch(`/api/clients/${clientId}/diagnostic/report/docx${qs}`, {
-        headers: { Authorization: `Bearer ${API_KEY}` },
-      })
+      const res = await fetch(`/api/clients/${clientId}/diagnostic/report/docx${qs}`)
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as { error?: string }
         throw new Error(body.error ?? `HTTP ${res.status}`)

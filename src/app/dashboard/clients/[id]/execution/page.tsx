@@ -28,8 +28,6 @@ import { DataPullbackSection } from './_components/DataPullbackSection'
 // Constants
 // ---------------------------------------------------------------------------
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 // ── 帖子状态徽章配色（与 content 板对齐）─────────────────────────────────────────
 
 const POST_STATUS_META: Record<string, { label: string; cls: string }> = {
@@ -1241,9 +1239,7 @@ export default function ExecutionPage() {
     setIsDocxLoading(true)
     try {
       const qs = prescriptionId ? `?prescription_id=${prescriptionId}` : ''
-      const res = await fetch(`/api/clients/${clientId}/execution/docx${qs}`, {
-        headers: { Authorization: `Bearer ${API_KEY}` },
-      })
+      const res = await fetch(`/api/clients/${clientId}/execution/docx${qs}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
@@ -1271,7 +1267,6 @@ export default function ExecutionPage() {
       // 并行拉 execution items + marketing plans，互不阻塞
       const [execRes, mpRes] = await Promise.all([
         fetch(`/api/clients/${clientId}/execution${qs}`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
           cache: 'no-store',
         }),
         fetch(`/api/clients/${clientId}/marketing-plan`, { cache: 'no-store' }).catch(() => null),
@@ -1321,7 +1316,7 @@ export default function ExecutionPage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/execution/${itemId}`, {
         method:  'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ status }),
         cache:   'no-store',
       })
@@ -1344,7 +1339,7 @@ export default function ExecutionPage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/execution/${itemId}/log`, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ content, kind }),
         cache:   'no-store',
       })
@@ -1376,7 +1371,7 @@ export default function ExecutionPage() {
         : { prescription_id: prescriptionId, phase, ...fields }
       const res = await fetch(`/api/clients/${clientId}/execution`, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(body),
         cache:   'no-store',
       })
@@ -1403,7 +1398,7 @@ export default function ExecutionPage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/execution/${itemId}`, {
         method:  'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(fields),
         cache:   'no-store',
       })
@@ -1425,7 +1420,6 @@ export default function ExecutionPage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/execution/${itemId}`, {
         method:  'DELETE',
-        headers: { Authorization: `Bearer ${API_KEY}` },
         cache:   'no-store',
       })
       if (!res.ok) {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireBearerToken } from '@/lib/validation-utils'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import type { RankedKeyword, SeoGapAnalysis } from '@/lib/seo-gap/analyzer'
 
 export interface KeywordSuggestion {
@@ -22,16 +22,17 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+  const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
   try {
     const { data, error } = await supabaseAdmin
       .from('seo_analyses')
       .select('analysis_json')
-      .eq('client_id', params.id)
+      .eq('client_id', clientId)
       .eq('status', 'completed')
       .order('created_at', { ascending: false })
       .limit(1)

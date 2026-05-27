@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { guardAdmin } from '@/lib/auth/require-admin'
 
 type Params = { params: { id: string } }
 
 // GET /api/clients/[id]/users — list all users with access to this client
 export async function GET(_req: NextRequest, { params }: Params) {
+  const guard = await guardAdmin()
+  if (guard) return guard
+
   const { data, error } = await supabaseAdmin
     .from('client_portal_users')
     .select('id, email, display_name, access_type, created_at')
@@ -17,6 +21,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
 // POST /api/clients/[id]/users — add or update a user's access
 export async function POST(req: NextRequest, { params }: Params) {
+  const guard = await guardAdmin()
+  if (guard) return guard
+
   const body = await req.json()
   const email: string = (body.email ?? '').toLowerCase().trim()
   const display_name: string = (body.display_name ?? '').trim()
@@ -42,6 +49,9 @@ export async function POST(req: NextRequest, { params }: Params) {
 
 // DELETE /api/clients/[id]/users — remove a user by email
 export async function DELETE(req: NextRequest, { params }: Params) {
+  const guard = await guardAdmin()
+  if (guard) return guard
+
   const body = await req.json()
   const email: string = (body.email ?? '').toLowerCase().trim()
 
