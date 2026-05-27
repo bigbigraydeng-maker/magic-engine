@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-28 05:27 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
+> 最后更新：2026-05-28 05:29 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2465,13 +2465,15 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 
 ### Phase 23 五个子任务
 
-| 子任务 | 内容 | 工作量 |
-|---|---|---|
-| 23.A | 4 张新表 migration + Memory Service 接口层 | ~3 天 |
-| 23.B | FDE 标注 UI（在 luban 看板 + 生成结果卡片上加"标记好/差/为何"按钮） | ~2 天 |
-| 23.C | 自动抽取器：从 flywheel_outcomes + Data Engine 输出抽取 learned_preferences | ~3 天 |
-| 23.D | 5 个 Agent 接入 memory 注入（zhangqian / huatuo / zhuge / luban / AI Factory） | ~3 天 |
-| 23.E | Memory 浏览/编辑/导出（FDE 可看到客户的累积记忆，可纠正可清除） | ~2 天 |
+| 子任务 | 内容 | 工作量 | 状态 |
+|---|---|---|---|
+| 23.A | 4 张新表 migration + Memory Service 接口层 | ~3 天 | ✅ 完成 2026-06-10 |
+| 23.B | FDE 标注 UI（在 luban 看板 + 生成结果卡片上加"标记好/差/为何"按钮） | ~2 天 | 📋 待排期 |
+| 23.C | 自动抽取器：从 flywheel_outcomes + Data Engine 输出抽取 learned_preferences | ~3 天 | 📋 待排期 |
+| 23.D | **诸葛亮**记忆注入（memoryContext 注入 prompt；decision_history 自动写入） | ~1 天 | ✅ 完成 2026-06-10 |
+| 23.E | Memory 浏览/编辑/导出（FDE 可看到客户的累积记忆，可纠正可清除） | ~2 天 | 📋 待排期 |
+
+> **注**：23.D 仅完成了诸葛亮（Zhuge）注入；张骞/华佗/鲁班/AI Factory 5 Agent 完整注入留 23.D.2。
 
 **总工作量预估：~13 天 / 2-3 周**
 
@@ -2517,6 +2519,7 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 
 ## 9. 功能完成日志
 
+- **P23.A+D** — L3 记忆层地基：4 张新表 + MemoryService + 诸葛亮 prompt 注入 + 决策历史自动写入
 - **P13.UI.3** — Website homepage upgraded to shared UI language
 - **P13.A.7** — Portal magic link can reach client portal
 

@@ -215,22 +215,21 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-28 05:27 NZST （**Phase 12.C ✅ merge；Phase 17.A ✅ merge；Phase 19 IDOR ✅**；等 PM 决定下一 Phase）
+> 最后更新：2026-05-28 05:29 NZST （**Phase 23.A+D ✅ commit & push**；branch: feat/phase-23-memory-layer；等 PM merge + 决定 23.B/23.C/23.D.2 顺序）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **PM 决定** | 选择下一个 Phase：Phase 18.A（Meta Ads MVP）或 Phase 17.B（Meta Insights 社媒数据回流）| ⚠️ PM 决定 |
+| **P23.B** | FDE 标注 UI：luban 看板 + 生成结果卡片加"标记好/差/为何"按钮 | ⬅️ 下一个 |
+| **P23.D.2** | 其余 4 Agent 注入：张骞/华佗/鲁班/AI Factory | 次优先 |
+| **P23.C** | 自动抽取器：从 flywheel_outcomes 抽取 learned_preferences | 后续 |
 
 **已完成全景（最近几个 Phase）**：
+- ✅ **Phase 23.A+D**（1 commit）：4 张 L3 记忆表 + MemoryService + 诸葛亮 prompt 注入 + 决策历史自动写入
 - ✅ **Phase 12.C**（P12.C.1–3 merge）：飞轮聚合视图 + 华佗置信度反哺 + Publer engagement 回流
 - ✅ **Phase 17.A**（P17.A.1–A.6 全部 merge）：GSC/GA4 数据回流 + 飞轮归因桥接 + 每日 cron + 客户「数据」tab
 - ✅ **Phase 19.A–E**（PR #95）：89 个 `/api/clients/[id]/*` 路由 IDOR 封堵 + NEXT_PUBLIC 密钥泄漏清除
 
-**下一个候选**：
-- 📋 **Phase 18.A** — Meta Ads MVP：诊断→Fix 按钮接线 Meta MCP（P18.A.1–A.3）
-- 📋 **Phase 17.B** — Meta Insights 社媒数据回流（补全 Phase 17 数据源矩阵）
-
-下一 session：`开始 Phase 18.A` 或 `开始 Phase 17.B`（等 PM 决定）
+下一 session：`继续 Phase 23 P23.B FDE 标注 UI`（或等 PM merge 后确认路线图）
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox
