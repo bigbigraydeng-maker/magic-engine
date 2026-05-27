@@ -74,6 +74,15 @@ interface GenerateOverrides {
   angle_focus?: string
 }
 
+interface BackgroundGenerateParams {
+  campaignId: string
+  platform: GenerationConfig['platform']
+  posts_count: number
+  stories_count: number
+  reels_count: number
+  angle_focus?: string
+}
+
 interface Props {
   clientId: string
   campaignId: string | undefined
@@ -86,6 +95,8 @@ interface Props {
   mode?: 'all' | 'social' | 'video'
   /** When opened from a specific Kanban task, pass the item so the brief card appears. */
   item?: ExecutionItem
+  /** When set, clicking "生成这条X" hands off to the parent and closes the drawer immediately. */
+  onBackgroundGenerate?: (params: BackgroundGenerateParams) => void
 }
 
 interface PlanRecord {
@@ -97,7 +108,7 @@ interface PlanRecord {
 
 type PlanTab = 'reels' | 'posts' | 'stories'
 
-export function SocialPlanSection({ clientId, campaignId, campaignName, mode = 'all', item }: Props) {
+export function SocialPlanSection({ clientId, campaignId, campaignName, mode = 'all', item, onBackgroundGenerate }: Props) {
   const taskKind     = resolveTaskKind(item)
   const taskPlatform = resolveTaskPlatform(item)
   const showBrief    = briefCardVisible(mode, taskKind)
@@ -211,7 +222,21 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
       angle_focus: item.description || item.title,
       ...(taskPlatform ? { platform: taskPlatform } : {}),
     }
-    // Mirror overrides into visible config/input so Settings panel stays in sync
+
+    if (onBackgroundGenerate) {
+      // Background mode: hand off to parent which closes the drawer and tracks progress
+      onBackgroundGenerate({
+        campaignId,
+        platform: overrides.platform ?? config.platform,
+        posts_count: overrides.posts_count ?? config.posts_count,
+        stories_count: overrides.stories_count ?? config.stories_count,
+        reels_count: overrides.reels_count ?? config.reels_count,
+        ...(overrides.angle_focus ? { angle_focus: overrides.angle_focus } : {}),
+      })
+      return
+    }
+
+    // Foreground mode (original behavior — keeps drawer open during generation)
     setConfig(c => ({
       ...c,
       posts_count:   overrides.posts_count   ?? c.posts_count,
