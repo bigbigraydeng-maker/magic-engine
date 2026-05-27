@@ -639,7 +639,7 @@ export default function ViralReferencesPage() {
     if (!groups.has(k)) groups.set(k, [])
     groups.get(k)!.push(r)
   }
-  for (const [k, arr] of groups) {
+  for (const [k, arr] of Array.from(groups.entries())) {
     if (arr.length === 0) continue
     const sum: StyleScores = { energy: 0, luxury: 0, authenticity: 0, emotional: 0, humor: 0, urgency: 0, offer_signal: 0 }
     for (const r of arr) {

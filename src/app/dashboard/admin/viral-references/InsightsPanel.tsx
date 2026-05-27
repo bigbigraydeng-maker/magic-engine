@@ -54,7 +54,7 @@ function freqMap(items: string[]): Map<string, number> {
 }
 
 function sortedEntries(m: Map<string, number>): [string, number][] {
-  return [...m.entries()].sort((a, b) => b[1] - a[1])
+  return Array.from(m.entries()).sort((a, b) => b[1] - a[1])
 }
 
 const SCORE_LABELS: Record<keyof StyleScores, string> = {
@@ -167,11 +167,11 @@ function ScoreBar({ dim, value, compareValue }: {
 function IndustryComparisonMatrix({ poolByIndustry }: {
   poolByIndustry: Map<string, ViralReferenceForInsights[]>
 }) {
-  const industries = [...poolByIndustry.keys()]
+  const industries = Array.from(poolByIndustry.keys())
   if (industries.length < 2) return null
 
   const avgByIndustry = new Map<string, StyleScores>()
-  for (const [ind, pool] of poolByIndustry) {
+  for (const [ind, pool] of Array.from(poolByIndustry.entries())) {
     const sum: StyleScores = { energy: 0, luxury: 0, authenticity: 0, emotional: 0, humor: 0, urgency: 0, offer_signal: 0 }
     for (const r of pool) {
       for (const k of Object.keys(sum) as (keyof StyleScores)[]) sum[k] += r.style_scores![k]
@@ -398,7 +398,7 @@ export function InsightsPanel({ refs }: Props) {
 
   const industries = useMemo(() => {
     const s = new Set(learnable.map(r => r.industry))
-    return [...s].sort()
+    return Array.from(s).sort()
   }, [learnable])
 
   const [industry, setIndustry] = useState<string>('')
