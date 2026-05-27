@@ -215,22 +215,24 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-28 06:04 NZST （**Phase 23.A+D+B+D.2+C ✅ commit & push**；branch: feat/phase-23-memory-layer；等 PM merge + 决定 23.E 顺序）
+> 最后更新：2026-05-28 06:14 NZST （**Phase 23 全部 ✅ commit & push (A+B+C+D+D.2+E)**；branch: feat/phase-23-memory-layer；PR #112 等 PM merge）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P23.E** | Memory 浏览/编辑/导出：FDE 查看、纠错、清空客户记忆 | ⬅️ 下一个 |
+| **— Phase 23 全部完成 —** | 等 PM merge PR #112 后开始下一 Phase（候选：Phase 21 AI Factory / Phase 22 Data Engine） | 等 PM 决定 |
 
 **已完成全景（最近几个 Phase）**：
-- ✅ **Phase 23.C**（1 commit）：L3 记忆自动抽取器 — outcomes→patterns/failed/preferences + decision verdict 回填 + cron + 手动触发
-- ✅ **Phase 23.D.2**（1 commit）：张骞/华佗/鲁班 三 Agent 注入 L3 记忆 + 共享 `formatMemoryForPrompt`（AI Factory 待 Phase 21）
-- ✅ **Phase 23.A+D**（1 commit）：4 张 L3 记忆表 + MemoryService + 诸葛亮 prompt 注入 + 决策历史自动写入
-- ✅ **Phase 23.B**（1 commit）：FDE 标注 UI — POST `/api/clients/[id]/memory/annotate` + MemoryAnnotationPanel 组件
+- ✅ **Phase 23 完整闭环**（5 commit on PR #112）：
+  - **23.A+D**：4 张 L3 记忆表 + MemoryService + 诸葛亮注入 + 决策历史自动写入
+  - **23.B**：FDE 标注 UI（执行看板抽屉一键标记）
+  - **23.D.2**：张骞/华佗/鲁班 注入 L3 记忆 + 共享 `formatMemoryForPrompt`
+  - **23.C**：自动抽取器（cron + 手动触发；outcomes→patterns/failed/preferences）
+  - **23.E**：FDE 仪表盘客户记忆库页（四 tab 浏览 + 行级编辑 + 抽取/导出）
 - ✅ **Phase 12.C**（P12.C.1–3 merge）：飞轮聚合视图 + 华佗置信度反哺 + Publer engagement 回流
 - ✅ **Phase 17.A**（P17.A.1–A.6 全部 merge）：GSC/GA4 数据回流 + 飞轮归因桥接 + 每日 cron + 客户「数据」tab
 - ✅ **Phase 19.A–E**（PR #95）：89 个 `/api/clients/[id]/*` 路由 IDOR 封堵 + NEXT_PUBLIC 密钥泄漏清除
 
-下一 session：`继续 Phase 23 P23.E 记忆浏览/编辑`（或等 PM merge）
+下一 session：`继续 Phase 21 AI Factory` 或 `继续 Phase 22 Data Engine`（等 PM merge PR #112 + 决定方向）
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox
