@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-28 04:09 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
+> 最后更新：2026-05-28 04:49 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2164,6 +2164,62 @@ AI 可见度层（ME 独有 ✅）
 ### 风险
 
 L2 授权写太严会把 CTS / Oztop 操作员锁在自己数据外。**19.B 部署前必须确认操作员邮箱已在 `ADMIN_EMAILS` / `CLIENT_VIEWERS` 白名单。**
+
+---
+
+## Phase 24 — Execution Loop Closure（执行闭环修复）📋 已登记，2026-06-06 启动
+
+> **登记日期**：2026-06-06 · **状态**：开发中
+>
+> **背景**：诸葛亮推荐行动当前不进看板、不定时刷新；GEO 部署页忽略 CMS connector 只给手动复制粘贴。月报依赖执行看板作为数据来源，三个断点必须修复。
+
+### 三个子任务
+
+| ID | 内容 | 文件 |
+|----|------|------|
+| **P24.A** | 诸葛亮推荐自动写入执行看板 | `action-persister.ts` + migration |
+| **P24.B** | 诸葛亮每周定时重新计算 | `cron/zhuge-recalculate/route.ts` + `render.yaml` |
+| **P24.C** | GEO 部署页接入 CMS connector 一键部署 | `deploy/page.tsx` + `DeploymentForm.tsx` |
+
+### P24.A — 诸葛亮推荐写入执行看板
+
+**Schema 变更**（`execution_items` 表）：
+- `prescription_id` 改为 nullable（支持无处方来源的 zhuge 行）
+- 新增 `source TEXT CHECK (IN ('zhuge','fde','luban'))` 默认 `'fde'`
+- 新增 `action_type TEXT`（存储 zhuge 的 action_type slug）
+- 新增 `zhuge_session_id UUID` FK → `zhuge_sessions(id) ON DELETE SET NULL`
+- `execution_item_status` 枚举新增 `'superseded'`
+
+**重复处理逻辑**：
+- 同一 `client_id + action_type` 若已有 pending 的 fde/luban 行 → 跳过（不覆盖人工项）
+- 若已有 pending 的 zhuge 行（旧 session）→ 先标记为 `superseded` 再插新行
+- 同一 session 重复调用（幂等）→ 跳过
+
+- [ ] P24.A.1 migration: `20260606000001_execution_items_zhuge_source.sql`
+- [ ] P24.A.2 `action-persister.ts` 新增 `writeExecutionItems` + 接入 `persistZhugeActions`
+- [ ] P24.A.3 `__tests__/action-persister.test.ts` 补充测试（TDD 先写）
+
+### P24.B — 诸葛亮每周定时重新计算
+
+- 查询 `client_discovery` 有 `confirmed_at IS NOT NULL` 的客户
+- 对每个客户调用 `assembleZhugeInput` → `conductPriorityActions` → `persistZhugeActions`（触发 P24.A 看板写入）
+- `x-cron-secret` 验证（与现有 cron 一致）
+- `render.yaml` 新增 `zhuge-weekly-recalculate`，每周一 3am UTC
+
+- [ ] P24.B.1 `src/app/api/cron/zhuge-recalculate/route.ts`
+- [ ] P24.B.2 `render.yaml` 追加 cron 定义
+
+### P24.C — GEO 部署页接入 CMS connector
+
+- `deploy/page.tsx`：加载时并行拉取 `/api/clients/[id]/cms/providers`
+- `DeploymentForm.tsx`：
+  - 无 connector → 顶部显示「连接网站可一键部署」引导横幅
+  - 有活跃 WordPress/Shopify → 显示「一键部署」区块
+  - 点击后调用 `/api/clients/[id]/cms/publish-geo-snippet` 注入 snippet 并自动 `recordDeployment`
+- 新增 `src/app/api/clients/[id]/cms/publish-geo-snippet/route.ts`（复用 wordpress-client / shopify-client 底层逻辑）
+
+- [ ] P24.C.1 `deploy/page.tsx` + `DeploymentForm.tsx` 改造
+- [ ] P24.C.2 `publish-geo-snippet/route.ts` 新增路由
 
 ---
 
