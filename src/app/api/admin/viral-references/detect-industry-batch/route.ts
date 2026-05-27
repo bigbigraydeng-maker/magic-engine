@@ -8,6 +8,7 @@
 import { NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { supabaseAdmin } from '@/lib/supabase'
+import { guardAdmin } from '@/lib/auth/require-admin'
 
 const KNOWN_INDUSTRIES = [
   'travel', 'flooring', 'real_estate', 'food', 'fashion',
@@ -54,6 +55,9 @@ async function inferIndustry(
 }
 
 export async function POST() {
+  const guard = await guardAdmin()
+  if (guard) return guard
+
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) {
     return NextResponse.json({ success: false, error: 'OPENAI_API_KEY not configured' }, { status: 500 })

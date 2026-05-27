@@ -128,7 +128,7 @@ export async function fetchGa4Snapshot(
     }),
     runReport(token, normalized, periodStart, periodEnd, {
       dimensions: ['sessionSource', 'sessionMedium'],
-      metrics:    ['sessions', 'conversions'],
+      metrics:    ['sessions', 'keyEvents'],
       orderBy:    'sessions',
       limit:      SNAPSHOT_ROWS,
     }),
