@@ -158,6 +158,13 @@ export default function ConnectorDetailPage() {
   const [gscSitesError, setGscSitesError]     = useState<string | null>(null)
   const [gscManualMode, setGscManualMode]     = useState(false)
 
+  // Publer account binding state (only used when anchor === 'publer')
+  const [publerAccounts, setPublerAccounts]         = useState<Array<{ id: string; provider: string; name: string }>>([])
+  const [publerAccountsLoading, setPublerAccountsLoading] = useState(false)
+  const [publerSelectedIds, setPublerSelectedIds]   = useState<Record<string, string>>({})
+  const [publerSaving, setPublerSaving]             = useState(false)
+  const [publerSaveResult, setPublerSaveResult]     = useState<{ ok: boolean; error?: string } | null>(null)
+
   // On mount for OAuth connectors: check existing status + handle ?oauth= param
   useEffect(() => {
     if (!meta?.oauthAnchor) return
@@ -189,6 +196,22 @@ export default function ConnectorDetailPage() {
     })()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Publer only: fetch workspace accounts + existing binding config on mount
+  useEffect(() => {
+    if (anchor !== 'publer') return
+    setPublerAccountsLoading(true)
+    void Promise.all([
+      fetch('/api/publer/accounts').then(r => r.json() as Promise<{ accounts?: Array<{ id: string; provider: string; name: string }> }>),
+      fetch(`/api/clients/${clientId}/connectors/status`).then(r => r.ok ? r.json() as Promise<{ connectors?: Array<{ anchor: string; config: Record<string, unknown> | null }> }> : null),
+    ]).then(([accountsData, statusData]) => {
+      setPublerAccounts(accountsData.accounts ?? [])
+      const row = statusData?.connectors?.find(c => c.anchor === 'publer')
+      const existing = (row?.config?.publer_account_ids as Record<string, string> | undefined) ?? {}
+      setPublerSelectedIds(existing)
+    }).finally(() => setPublerAccountsLoading(false))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchor])
 
   // GSC only: once OAuth is done, fetch the list of sites this user can access
   useEffect(() => {
@@ -259,6 +282,33 @@ export default function ConnectorDetailPage() {
       setResult({ ok: false, error: '网络错误，请重试' })
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handlePublerSave = async () => {
+    setPublerSaving(true)
+    setPublerSaveResult(null)
+    try {
+      const res = await fetch(
+        `/api/clients/${clientId}/connectors/publer/connect`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+        config: {
+          publer_account_ids: Object.fromEntries(
+            Object.entries(publerSelectedIds).filter(([, v]) => v !== '')
+          ),
+        },
+      }),
+        },
+      )
+      const data = await res.json() as { success: boolean; error?: string }
+      setPublerSaveResult(data.success ? { ok: true } : { ok: false, error: data.error ?? '保存失败' })
+    } catch {
+      setPublerSaveResult({ ok: false, error: '网络错误，请重试' })
+    } finally {
+      setPublerSaving(false)
     }
   }
 
@@ -404,6 +454,69 @@ export default function ConnectorDetailPage() {
                 </div>
               )
             })}
+          </div>
+        )}
+
+        {/* Publer: account binding per client */}
+        {anchor === 'publer' && (
+          <div className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">绑定该客户的 Publishing Hub 账号</h2>
+              <p className="text-xs text-gray-500 mt-1">
+                选择该客户在 Publishing Hub 中对应的社媒账号，确保内容发布到正确的账户而非其他客户账号。
+              </p>
+            </div>
+
+            {publerAccountsLoading ? (
+              <div className="space-y-2">
+                <div className="h-9 w-full rounded-lg bg-gray-100 animate-pulse" />
+                <div className="h-9 w-full rounded-lg bg-gray-100 animate-pulse" />
+              </div>
+            ) : publerAccounts.length === 0 ? (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                ⚠ Publishing Hub workspace 中暂无社媒账号，请先在 Publer 后台授权客户的 Instagram / Facebook 等账号。
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {Array.from(new Set(publerAccounts.map(a => a.provider))).sort().map(provider => {
+                  const providerAccounts = publerAccounts.filter(a => a.provider === provider)
+                  return (
+                    <div key={provider}>
+                      <label className="block text-xs font-medium text-gray-700 mb-1.5 capitalize">
+                        {provider}
+                      </label>
+                      <select
+                        value={publerSelectedIds[provider] ?? ''}
+                        onChange={e => setPublerSelectedIds(prev => ({
+                          ...prev,
+                          [provider]: e.target.value,
+                        }))}
+                        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="">— 未绑定（不发布到此平台）—</option>
+                        {providerAccounts.map(a => (
+                          <option key={a.id} value={a.id}>{a.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )
+                })}
+
+                <button
+                  onClick={() => void handlePublerSave()}
+                  disabled={publerSaving}
+                  className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {publerSaving ? '保存中…' : '💾 保存账号绑定'}
+                </button>
+
+                {publerSaveResult && (
+                  <p className={`text-xs ${publerSaveResult.ok ? 'text-green-600' : 'text-red-600'}`}>
+                    {publerSaveResult.ok ? '✓ 账号绑定已保存，后续发布将使用以上账号' : publerSaveResult.error}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
 

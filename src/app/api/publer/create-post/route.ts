@@ -10,7 +10,7 @@ import '@/lib/flywheel/adapters/SocialContentAdapter'
 // 用 post_id 找最新 ready 素材，自动选第一个匹配平台的 Publer 账号
 export async function POST(req: NextRequest) {
   try {
-    const { post_id, client_id: requestClientId, schedule_at } = await req.json()
+    const { post_id, schedule_at } = await req.json()
     if (!post_id) {
       return NextResponse.json({ success: false, error: 'post_id required' }, { status: 400 })
     }
@@ -43,14 +43,51 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'No ready asset found' }, { status: 400 })
     }
 
+    // Look up client's configured Publer account IDs (set via Connectors > Publer)
+    const { data: connectorRow } = await supabaseAdmin
+      .from('client_connectors')
+      .select('config')
+      .eq('client_id', post.client_id)
+      .eq('anchor', 'publer')
+      .maybeSingle()
+
+    // Runtime-validate the JSONB shape before trusting it
+    const rawConfig = connectorRow?.config
+    const rawIds =
+      rawConfig && typeof rawConfig === 'object' && !Array.isArray(rawConfig)
+        ? (rawConfig as Record<string, unknown>).publer_account_ids
+        : undefined
+    const configuredIds: Record<string, string> =
+      rawIds && typeof rawIds === 'object' && !Array.isArray(rawIds)
+        ? (rawIds as Record<string, string>)
+        : {}
+
     const accounts = await getAccounts()
     const postPlatforms: string[] = Array.isArray(post.platforms)
       ? post.platforms
       : (post.platforms ? [post.platforms] : [])
 
-    const account = postPlatforms.length > 0
-      ? accounts.find(a => postPlatforms.includes(a.provider)) ?? accounts[0]
-      : accounts[0]
+    // Normalise platform strings to lowercase to match Publer's provider field
+    const platforms = postPlatforms.map(p => p.toLowerCase())
+
+    let account: typeof accounts[0] | undefined
+
+    // If connector is configured, use the bound account — fail if it's stale
+    const configuredPlatform = platforms.find(p => configuredIds[p])
+    if (configuredPlatform) {
+      account = accounts.find(a => a.id === configuredIds[configuredPlatform])
+      if (!account) {
+        return NextResponse.json({
+          success: false,
+          error: `Publer account binding for "${configuredPlatform}" is stale. Please reconfigure the Publishing Hub connector for this client.`,
+        }, { status: 400 })
+      }
+    } else {
+      // Connector not yet configured — fall back to first platform match (backward compat)
+      account = platforms.length > 0
+        ? accounts.find(a => platforms.includes(a.provider?.toLowerCase() ?? '')) ?? accounts[0]
+        : accounts[0]
+    }
 
     if (!account) {
       return NextResponse.json({ success: false, error: 'No Publer account found' }, { status: 400 })
@@ -72,7 +109,6 @@ export async function POST(req: NextRequest) {
       scheduledAt,
     })
 
-    const clientId = requestClientId || post.client_id
     await supabaseAdmin
       .from('content_posts')
       .update({
@@ -84,7 +120,7 @@ export async function POST(req: NextRequest) {
 
     // Fire-and-forget: write social flywheel action (non-fatal)
     getAdapter('social').execute({
-      clientId,
+      clientId: post.client_id,
       actionType:    SOCIAL_ACTION_TYPE.SCHEDULE_POST,
       executionMode: 'third_party',
       vendor:        'publer',
@@ -98,7 +134,7 @@ export async function POST(req: NextRequest) {
       console.error('[publer/create-post] flywheel write failed:', err)
     })
 
-    return NextResponse.json({ success: true, job_id: result.job_id, client_id: clientId })
+    return NextResponse.json({ success: true, job_id: result.job_id, client_id: post.client_id })
 
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
