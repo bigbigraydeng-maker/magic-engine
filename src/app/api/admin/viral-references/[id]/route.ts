@@ -5,6 +5,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { guardAdmin } from '@/lib/auth/require-admin'
 
 const ALLOWED_FIELDS = ['industry'] as const
 
@@ -12,6 +13,9 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const guard = await guardAdmin()
+  if (guard) return guard
+
   const { id } = params
   if (!id) return NextResponse.json({ success: false, error: 'Missing id' }, { status: 400 })
 

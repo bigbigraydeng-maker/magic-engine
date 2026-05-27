@@ -49,6 +49,7 @@ export async function PATCH(
       description?: string
       note?: string
       content_post_id?: string | null // 内容飞轮闭环：关联/解除关联 content_post
+      sort_order?: number             // Phase 20.D：拖拽排序
     }
 
     const newTitle = typeof body.title === 'string' ? body.title.trim() : undefined
@@ -56,10 +57,11 @@ export async function PATCH(
     const hasStatus = body.status != null
     const hasEdit = newTitle !== undefined || newDesc !== undefined
     const hasContentLink = body.content_post_id !== undefined // null 表示解除关联
+    const hasSort = typeof body.sort_order === 'number'
 
-    if (!hasStatus && !hasEdit && !hasContentLink) {
+    if (!hasStatus && !hasEdit && !hasContentLink && !hasSort) {
       return NextResponse.json(
-        { success: false, error: 'status / title / description / content_post_id 至少要有一项' },
+        { success: false, error: 'status / title / description / content_post_id / sort_order 至少要有一项' },
         { status: 400 },
       )
     }
@@ -115,6 +117,8 @@ export async function PATCH(
       }
       patch.content_post_id = body.content_post_id
     }
+    // Phase 20.D: sort_order update (drag-reorder, no log entry)
+    if (hasSort) patch.sort_order = body.sort_order
 
     const { data, error } = await supabaseAdmin
       .from('execution_items')

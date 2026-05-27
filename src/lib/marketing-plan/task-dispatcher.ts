@@ -18,12 +18,26 @@ import type {
   MarketingPlan,
   PlanTask,
   PlanTaskKind,
+  PlanTaskRequires,
 } from './types'
 
 // ─── 推导 dimension ────────────────────────────────────────────────────────────
 
 function kindToDimension(kind: PlanTaskKind): 'social' | 'seo' {
   return kind === 'blog_article' ? 'seo' : 'social'
+}
+
+// ─── 推导 requires（Phase 20.D 素材依赖标注）──────────────────────────────────────
+//
+// 默认规则（可被 task.requires 显式覆盖）：
+//   social_reel / social_story → client_video（需要视频素材）
+//   social_post                → client_photo（需要图片素材）
+//   blog_article               → none（ME 可全自动生成）
+
+function kindToRequires(kind: PlanTaskKind): PlanTaskRequires {
+  if (kind === 'social_reel' || kind === 'social_story') return 'client_video'
+  if (kind === 'social_post') return 'client_photo'
+  return 'none'  // blog_article
 }
 
 // ─── 推导 phase ────────────────────────────────────────────────────────────────
@@ -48,6 +62,7 @@ function dueDateToPhase(dueDate: string): number {
 // 让"内容工作台"知道这是个 Marketing Plan 任务，并可以推导出正确的生成模式。
 
 function buildStepsJson(task: PlanTask): Record<string, unknown> {
+  const requires = task.requires ?? kindToRequires(task.kind)
   return {
     source: 'marketing_plan',
     kind: task.kind,
@@ -55,6 +70,7 @@ function buildStepsJson(task: PlanTask): Record<string, unknown> {
     topic: task.topic ?? null,
     source_blog_topic_index: task.source_blog_topic_index ?? null,
     source_strategy_item_id: task.source_strategy_item_id ?? null,
+    requires,                  // Phase 20.D: 素材依赖标注
     // FDE meta（供执行看板 FdeMetaRow 显示）
     estimated_hours: task.kind === 'blog_article' ? 4 : 1,
     required_skills:

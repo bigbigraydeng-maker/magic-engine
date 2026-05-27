@@ -1,8 +1,10 @@
 /**
- * 诸葛亮 Action Persister — P12.G.3
+ * 诸葛亮 Action Persister — P12.G.3 / P24.A.2
  *
  * After the conductor produces a ZhugeOutput, this module persists each
- * PriorityAction to flywheel_actions with idempotency protection.
+ * PriorityAction to:
+ *   1. flywheel_actions  — 4 flywheel-mapped dimensions (seo/geo/ads/social)
+ *   2. execution_items   — ALL 6 dimensions (P24.A: full execution kanban)
  *
  * Idempotency: a 16-char session key derived from (client_id, discovery_id,
  * diagnostic_run_id) is stored in payload->>'zhuge_session_key'.
@@ -18,7 +20,7 @@
  *   reputation    → skip  (external_manual, no flywheel ingest)
  *   competitor    → skip  (external_manual, no flywheel ingest)
  *
- * Reference: ROADMAP.md P12.G.3
+ * Reference: ROADMAP.md P12.G.3, P24.A
  */
 
 import { createHash } from 'crypto'
@@ -63,6 +65,13 @@ export interface PersistZhugeActionsResult {
   session_key: string
 }
 
+export interface WriteExecutionItemsResult {
+  /** Number of execution_items rows inserted in this call. */
+  inserted: number
+  /** Number of old zhuge items marked superseded. */
+  superseded: number
+}
+
 // ── Session key ───────────────────────────────────────────────────────────────
 
 /**
@@ -83,16 +92,20 @@ export function buildSessionKey(
 // ── Persister ─────────────────────────────────────────────────────────────────
 
 /**
- * Persists ZhugeOutput in two places:
+ * Persists ZhugeOutput in three places:
  *
  * 1. `zhuge_sessions` — stores the FULL output (all 6 dimensions) so the
  *    ZhugePriorityWidget can restore after navigation. Uses upsert so a
  *    fresh conduct call always overwrites the previous session for the same
- *    (client, session_key) pair.
+ *    (client, session_key) pair. Returns the row ID for execution_items FK.
  *
- * 2. `flywheel_actions` — still inserts the 4 flywheel-mapped dimensions
+ * 2. `flywheel_actions` — inserts the 4 flywheel-mapped dimensions
  *    (seo / geo / ads / social) for the data flywheel pipeline. Idempotency
  *    guard prevents duplicates on repeated opens of the drawer.
+ *
+ * 3. `execution_items` — inserts ALL 6 dimensions so 诸葛亮 recommendations
+ *    appear on the execution kanban (P24.A). Deduplication prevents
+ *    overwriting FDE/luban items; old zhuge items are superseded.
  */
 export async function persistZhugeActions(
   supabase: SupabaseClient,
@@ -105,21 +118,30 @@ export async function persistZhugeActions(
   )
 
   // ── 1. Upsert full output into zhuge_sessions (all dimensions) ──────────────
-  const { error: sessionError } = await supabase
-    .from('zhuge_sessions')
-    .upsert(
-      {
-        client_id:    input.clientId,
-        session_key:  sessionKey,
-        output:       input.output,
-        generated_at: input.output.generated_at,
-      },
-      { onConflict: 'client_id,session_key' },
-    )
+  let zhugeSessionId: string | null = null
+  try {
+    const { data: sessionRow, error: sessionError } = await supabase
+      .from('zhuge_sessions')
+      .upsert(
+        {
+          client_id:    input.clientId,
+          session_key:  sessionKey,
+          output:       input.output,
+          generated_at: input.output.generated_at,
+        },
+        { onConflict: 'client_id,session_key' },
+      )
+      .select('id')
+      .single()
 
-  if (sessionError) {
-    // Non-fatal: log but continue — flywheel_actions insert still proceeds
-    console.warn('[action-persister] zhuge_sessions upsert failed:', sessionError.message)
+    if (sessionError) {
+      console.warn('[action-persister] zhuge_sessions upsert failed:', sessionError.message)
+    } else {
+      zhugeSessionId = (sessionRow as { id: string } | null)?.id ?? null
+    }
+  } catch (err: unknown) {
+    // Non-fatal: continue even if session upsert fails
+    console.warn('[action-persister] zhuge_sessions upsert threw:', err instanceof Error ? err.message : String(err))
   }
 
   // ── 2. Idempotency check for flywheel_actions ───────────────────────────────
@@ -135,6 +157,10 @@ export async function persistZhugeActions(
   }
 
   if (existing && existing.length > 0) {
+    // ── 3a. Execution items (idempotent path — still need to write items if new session) ──
+    void writeExecutionItems(supabase, input.clientId, zhugeSessionId, input.output.top_actions).catch(
+      (err: unknown) => console.warn('[action-persister] execution_items write failed (idempotent path):', err instanceof Error ? err.message : String(err)),
+    )
     return {
       inserted: 0,
       idempotent: true,
@@ -148,22 +174,27 @@ export async function persistZhugeActions(
     (a) => DIMENSION_TO_FLYWHEEL[a.dimension] !== undefined,
   )
 
-  if (insertable.length === 0) {
-    return { inserted: 0, idempotent: false, action_ids: [], session_key: sessionKey }
+  let ids: string[] = []
+
+  if (insertable.length > 0) {
+    const rows = insertable.map((action) => buildRow(action, input.clientId, sessionKey, input))
+
+    const { data: inserted, error: insertError } = await supabase
+      .from('flywheel_actions')
+      .insert(rows)
+      .select('id')
+
+    if (insertError) {
+      throw new Error(`DB error inserting flywheel_actions: ${insertError.message}`)
+    }
+
+    ids = (inserted as { id: string }[]).map((r) => r.id)
   }
 
-  const rows = insertable.map((action) => buildRow(action, input.clientId, sessionKey, input))
-
-  const { data: inserted, error: insertError } = await supabase
-    .from('flywheel_actions')
-    .insert(rows)
-    .select('id')
-
-  if (insertError) {
-    throw new Error(`DB error inserting flywheel_actions: ${insertError.message}`)
-  }
-
-  const ids = (inserted as { id: string }[]).map((r) => r.id)
+  // ── 3b. Write to execution_items (all 6 dimensions, non-blocking) ───────────
+  void writeExecutionItems(supabase, input.clientId, zhugeSessionId, input.output.top_actions).catch(
+    (err: unknown) => console.warn('[action-persister] execution_items write failed:', err instanceof Error ? err.message : String(err)),
+  )
 
   return {
     inserted: ids.length,
@@ -203,4 +234,121 @@ function buildRow(
     expected_delta: null as number | null,
     executed_at: input.output.generated_at,
   }
+}
+
+// ── Execution-items helpers ────────────────────────────────────────────────────
+
+const EXECUTION_MODE_TO_FIX_TYPE: Record<ExecutionMode, 'me_auto' | 'fde_manual' | 'third_party'> = {
+  in_house:        'me_auto',
+  third_party:     'third_party',
+  external_manual: 'fde_manual',
+}
+
+/** Convert an ExecutionMode to the diagnostic_fix_type enum value. */
+export function executionModeToFixType(mode: ExecutionMode): 'me_auto' | 'fde_manual' | 'third_party' {
+  return EXECUTION_MODE_TO_FIX_TYPE[mode] ?? 'fde_manual'
+}
+
+/**
+ * Convert a dot-namespaced action_type slug to a human-readable title.
+ * e.g. 'seo.fix_meta_titles' → 'Fix Meta Titles'
+ */
+export function actionTypeToTitle(actionType: string): string {
+  const slug = actionType.includes('.') ? actionType.split('.').pop()! : actionType
+  return slug.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+// ── writeExecutionItems ────────────────────────────────────────────────────────
+
+/**
+ * Write PriorityActions to the execution_items kanban table (P24.A).
+ *
+ * Writes ALL dimensions (including reputation + competitor) unlike
+ * flywheel_actions which skips those two.
+ *
+ * Deduplication logic:
+ *   - Existing pending `source='fde'` or `source='luban'` row → skip (don't overwrite human work)
+ *   - Existing pending `source='zhuge'` row (old session) → mark superseded, insert new
+ *   - No existing pending row → insert new
+ */
+export async function writeExecutionItems(
+  supabase: SupabaseClient,
+  clientId: string,
+  zhugeSessionId: string | null,
+  actions: PriorityAction[],
+): Promise<WriteExecutionItemsResult> {
+  if (actions.length === 0) return { inserted: 0, superseded: 0 }
+
+  const actionTypes = actions.map((a) => a.action_type)
+
+  // Fetch any existing pending rows for these action types for this client
+  const { data: existingRows, error: selectErr } = await supabase
+    .from('execution_items')
+    .select('id, action_type, source, zhuge_session_id')
+    .eq('client_id', clientId)
+    .eq('status', 'pending')
+    .in('action_type', actionTypes)
+
+  if (selectErr) {
+    throw new Error(`execution_items dedup check failed: ${selectErr.message}`)
+  }
+
+  type ExistingRow = { id: string; action_type: string; source: string; zhuge_session_id: string | null }
+  const byActionType = new Map<string, ExistingRow>()
+  for (const row of (existingRows as ExistingRow[] | null) ?? []) {
+    byActionType.set(row.action_type, row)
+  }
+
+  const toSupersede: string[] = []
+  const toInsert: PriorityAction[] = []
+
+  for (const action of actions) {
+    const existing = byActionType.get(action.action_type)
+    if (!existing) {
+      toInsert.push(action)
+    } else if (existing.source === 'zhuge') {
+      // Old zhuge item from a different session: supersede it, insert fresh
+      toSupersede.push(existing.id)
+      toInsert.push(action)
+    }
+    // else fde/luban pending: leave it alone
+  }
+
+  if (toSupersede.length > 0) {
+    const { error: updateErr } = await supabase
+      .from('execution_items')
+      .update({ status: 'superseded' })
+      .in('id', toSupersede)
+
+    if (updateErr) {
+      throw new Error(`execution_items supersede failed: ${updateErr.message}`)
+    }
+  }
+
+  if (toInsert.length > 0) {
+    const rows = toInsert.map((action) => ({
+      prescription_id:  null,
+      client_id:        clientId,
+      finding_id:       null,
+      dimension:        action.dimension,
+      title:            actionTypeToTitle(action.action_type),
+      description:      action.why_now,
+      fix_type:         executionModeToFixType(action.execution_mode),
+      action_type:      action.action_type,
+      status:           'pending',
+      source:           'zhuge',
+      zhuge_session_id: zhugeSessionId,
+      sort_order:       action.rank,
+    }))
+
+    const { error: insertErr } = await supabase
+      .from('execution_items')
+      .insert(rows)
+
+    if (insertErr) {
+      throw new Error(`execution_items insert failed: ${insertErr.message}`)
+    }
+  }
+
+  return { inserted: toInsert.length, superseded: toSupersede.length }
 }

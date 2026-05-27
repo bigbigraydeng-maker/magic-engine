@@ -32,6 +32,7 @@ import { getSeasonalCalendar } from './seasonal-calendar'
 import { getIndustryInterestTrend } from '@/lib/gtrends/client'
 import { coerceWeaknesses } from './weakness-utils'
 import { retrieveSimilarCases } from '@/lib/case-library/retriever'
+import { fetchOutcomeConfidenceMap } from '@/lib/case-library/outcome-confidence'
 
 // re-export 供 refine route 等使用
 export { coerceWeaknesses } from './weakness-utils'
@@ -126,7 +127,7 @@ export async function runHuatuo(
   const crisisType = intake.priority_dimensions?.[0] ?? null
   const marketCode = 'AU'   // 默认 AU，后续可从 client 表读取
 
-  const [benchmarks, trendPoints, industryInterest, similarCases] = await Promise.all([
+  const [benchmarks, trendPoints, industryInterest, similarCases, outcomeConfidence] = await Promise.all([
     fetchBenchmarks(supabase, {
       industryCategory,
       businessSize: 'small',
@@ -144,6 +145,8 @@ export async function runHuatuo(
       market: marketCode,
       limit: 3,
     }),
+    // 飞轮归因置信度 — 失败静默返回 {} — fetchOutcomeConfidenceMap 内部已 try/catch
+    fetchOutcomeConfidenceMap(supabase),
   ])
 
   const trendSummary = summarizeTrend(trendPoints)
@@ -159,6 +162,7 @@ export async function runHuatuo(
     seasonal_calendar: seasonalCalendar,
     industry_interest: industryInterest,
     similar_cases: similarCases.length > 0 ? similarCases : null,
+    outcome_confidence: outcomeConfidence,
   }
 
   // ── Step 2: Generate（pass 1）────────────────────────────────────────────

@@ -14,8 +14,6 @@ import type { AiEngine } from '@/types/magic-engine'
  * Body:  { client_id: string }
  * Response: same shape as /api/ai-tracker/run on success
  */
-export const maxDuration = 300
-
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as {
@@ -46,13 +44,22 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const result = await runTracker({
+    // Fire-and-forget: Render is a persistent Node.js process so the promise
+    // continues running after the HTTP response is sent. The client gets an
+    // instant acknowledgement and can navigate away freely.
+    void runTracker({
       client_id: body.client_id,
       query_ids: body.query_ids,
-      engines: body.engines,
+      engines:   body.engines,
+    }).catch(err => {
+      console.error(
+        '[ai-tracker/run-dashboard] background run failed:',
+        body.client_id,
+        err instanceof Error ? err.message : err,
+      )
     })
 
-    return NextResponse.json({ success: true, ...result })
+    return NextResponse.json({ success: true, status: 'started' })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return NextResponse.json(

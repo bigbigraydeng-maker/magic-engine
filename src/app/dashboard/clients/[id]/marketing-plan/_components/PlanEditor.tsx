@@ -31,6 +31,7 @@ interface Props {
   clientId: string
   plan: MarketingPlan
   onUpdated: (plan: MarketingPlan) => void
+  onArchived?: (planId: string) => void
 }
 
 const PLATFORM_LABEL: Record<SocialPlatform, string> = {
@@ -47,12 +48,13 @@ const TASK_KIND_META: Record<PlanTask['kind'], { icon: string; label: string; cl
   blog_article: { icon: '📰', label: '博客文章',  cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
 }
 
-export function PlanEditor({ clientId, plan, onUpdated }: Props) {
+export function PlanEditor({ clientId, plan, onUpdated, onArchived }: Props) {
   // 本地 draft — 编辑时改本地，保存后回写
   const [draft, setDraft] = useState<MarketingPlanData>(plan.plan_data)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [approving, setApproving] = useState(false)
+  const [archiving, setArchiving] = useState(false)
   const [msg, setMsg] = useState('')
   const [msgOk, setMsgOk] = useState<boolean | null>(null)
 
@@ -130,6 +132,23 @@ export function PlanEditor({ clientId, plan, onUpdated }: Props) {
     }
   }
 
+  // ── Archive（归档 + 清除 pending 任务）──────────────────────────────────
+  const archive = async () => {
+    if (!confirm('归档此计划并清除所有"待处理"执行项？已开工/已完成的任务会保留。此操作不可撤销。')) return
+    setArchiving(true)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/marketing-plan/${plan.id}`, {
+        method: 'DELETE',
+      })
+      const json = await res.json() as { success: boolean; revoked_tasks?: number; error?: string }
+      if (!json.success) throw new Error(json.error ?? 'Archive failed')
+      onArchived?.(plan.id)
+    } catch (err) {
+      setMessage(`✗ ${(err as Error).message}`, false)
+      setArchiving(false)
+    }
+  }
+
   // ── 编辑辅助 ────────────────────────────────────────────────────────────
   const updateSocialPlatform = (platform: SocialPlatform, field: keyof PlatformContentMix, value: number | string | null) => {
     setDraft(d => {
@@ -200,12 +219,22 @@ export function PlanEditor({ clientId, plan, onUpdated }: Props) {
             </>
           )}
           {plan.status === 'approved' && (
-            <Link
-              href={`/dashboard/clients/${clientId}/execution`}
-              className="text-sm bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded-lg font-medium"
-            >
-              查看执行看板 →
-            </Link>
+            <>
+              <button
+                onClick={archive}
+                disabled={archiving}
+                className="text-xs border border-red-200 text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors"
+                title="归档此计划并清除所有待处理任务，然后可重新生成"
+              >
+                {archiving ? '归档中…' : '🗑 归档并清除任务'}
+              </button>
+              <Link
+                href={`/dashboard/clients/${clientId}/execution`}
+                className="text-sm bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded-lg font-medium"
+              >
+                查看执行看板 →
+              </Link>
+            </>
           )}
         </div>
       </div>

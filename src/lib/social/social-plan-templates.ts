@@ -57,6 +57,17 @@ export type AngleTag =
   | 'social_proof'
   | 'aspirational'
 
+/** Content angle for Posts — drives copy focus AND image_subject direction. */
+export type PostAngleTag =
+  | 'price_attack'
+  | 'trust_attack'
+  | 'education'
+  | 'social_proof'
+  | 'aspirational'
+  | 'scarcity'
+  | 'seasonal'
+  | 'storytelling'
+
 /**
  * One Facebook Reel script — 9-panel storyboard format.
  *
@@ -192,6 +203,8 @@ export interface Post {
   image_mood_words?: string[]
   /** Aspect ratio — defaults to '1:1' for FB feed. */
   image_format?: PostImageFormat
+  /** Content angle — primary differentiator; drives copy focus and image creative direction. */
+  angle_tag?: PostAngleTag
 }
 
 /**
@@ -763,6 +776,20 @@ Each JSON object MUST have ALL of these keys (no omissions):
    - Each word earns its place — no generic atmospheric fluff
    - Examples (only if brand-aligned): private, vast, ancient, intimate, earned, serene, alive, unhurried
 
+9. angle_tag: one of "price_attack"|"trust_attack"|"education"|"social_proof"|"aspirational"|"scarcity"|"seasonal"|"storytelling"
+   This is the PRIMARY differentiator — copy AND image_subject MUST both reflect the assigned angle:
+   - price_attack  → copy: value/price emphasis, ROI; image: clean product or value-signaling composition
+   - trust_attack  → copy: proof points, reviews, certifications; image: authentic un-staged real-world scene
+   - education     → copy: teach a specific useful fact or process; image: process step, technique, or close-up detail
+   - social_proof  → copy: real results, community, shared experience; image: intimate authentic moment
+   - aspirational  → copy: dream outcome, lifestyle vision; image: wide, grand, premium lifestyle scene
+   - scarcity      → copy: urgency, limited time/spots/stock; image: exclusive or near-sold-out visual cue
+   - seasonal      → copy: season/event/moment tie-in, timely relevance; image: strong seasonal visual markers
+   - storytelling  → copy: narrative journey or transformation arc; image: evocative moment-in-time scene
+
+   MANDATORY: use the EXACT angle_tag assigned for your post number in the user message.
+   Each post's angle_tag MUST differ from every other post in this batch.
+
 VISUAL COMPLIANCE — read the brief's "视觉品牌 DNA" section and the campaign's "活动视觉指令" section.
 Every image_subject / composition / lighting / mood field MUST:
   - Be consistent with the brand's vi_style_keywords (photography style)
@@ -902,6 +929,18 @@ IMPORTANT:
 - Choose ${n} distinct angle_tag${n > 1 ? 's' : ''} across the ${n} reel${n > 1 ? 's' : ''}.`
 }
 
+/** Fixed rotation of angles for Posts — guarantees variety when cycling through N posts. */
+const POST_ANGLE_SEQUENCE: PostAngleTag[] = [
+  'aspirational',
+  'education',
+  'social_proof',
+  'price_attack',
+  'trust_attack',
+  'storytelling',
+  'scarcity',
+  'seasonal',
+]
+
 export function buildPostPrompt(
   strategy: ChannelStrategy,
   briefText: string,
@@ -911,6 +950,21 @@ export function buildPostPrompt(
   const pl = platformLabel(config.platform)
   const n  = config.posts_count
   const campaign = campaignText ? `\n\n## Campaign Context\n${campaignText}` : ''
+
+  const pillars = strategy.content_pillars.length > 0
+    ? strategy.content_pillars
+    : ['Brand Awareness', 'Product Value', 'Customer Stories']
+
+  const angleFocusHint = config.angle_focus
+    ? `\nFDE FOCUS HINT: "${config.angle_focus}" — weave this theme into all posts' copy while maintaining distinct angles per post.\n`
+    : ''
+
+  const assignments = Array.from({ length: n }, (_, i) => {
+    const pillar = pillars[i % pillars.length]
+    const angle  = POST_ANGLE_SEQUENCE[i % POST_ANGLE_SEQUENCE.length]
+    return `  Post ${i + 1}: Content Pillar = "${pillar}" | angle_tag = "${angle}"`
+  }).join('\n')
+
   return `## Brand Brief\n${briefText}${campaign}
 
 ## Channel Strategy
@@ -918,11 +972,20 @@ Theme: ${strategy.theme}
 Content Pillars: ${strategy.content_pillars.join(', ')}
 Campaign Focus: ${strategy.campaign_focus}
 Tone: ${strategy.tone_guidance}
+${angleFocusHint}
+## POST ASSIGNMENTS (MANDATORY — each post MUST follow its assigned pillar and angle_tag exactly)
+${assignments}
 
-Produce ${n} ${pl} post${n > 1 ? 's' : ''} covering a variety of content types (educational, promotional, storytelling, engagement).
+Produce ${n} ${pl} post${n > 1 ? 's' : ''} following the assignments above.
+Each post MUST be GENUINELY DIFFERENT from every other post in:
+- copy topic and persuasion angle (driven by assigned content_pillar + angle_tag)
+- image_subject (different location, different foreground element, different depth context)
+- image_composition (different camera angle and lens choice)
+- image_lighting (different light condition and time of day)
 
 REQUIRED FIELDS per post:
 - content_type, copy (80–300 words AU/NZ English, clear CTA), hashtags (5–8)
+- angle_tag (MUST match your assigned angle_tag above — no substitutions)
 - image_format: "1:1" (default) or "4:5" — NEVER "9:16"
 - image_subject (20–35 words, exact location + specific foreground + scene depth)
 - image_composition (15–25 words, angle + lens + composition + depth)
@@ -1099,6 +1162,7 @@ export async function generatePosts(
       image_mood_words:  moodWords,
       image_format,
       image_prompt,
+      ...(p.angle_tag ? { angle_tag: p.angle_tag } : {}),
     }
   })
 }

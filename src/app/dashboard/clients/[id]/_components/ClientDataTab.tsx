@@ -113,7 +113,7 @@ function GscSection({ snapshot }: { snapshot: GscSnapshot }) {
     <div className="rounded-xl border border-slate-200 bg-white p-5">
       <div className="mb-4 flex items-center gap-2">
         <span className="text-base leading-none">🔎</span>
-        <SectionTitle>Search Console 概览</SectionTitle>
+        <SectionTitle>搜索洞察 概览</SectionTitle>
         <span className="ml-auto text-[10px] text-slate-400">{period}</span>
       </div>
 
@@ -172,7 +172,7 @@ function Ga4Section({ snapshot }: { snapshot: Ga4Snapshot }) {
     <div className="rounded-xl border border-slate-200 bg-white p-5">
       <div className="mb-4 flex items-center gap-2">
         <span className="text-base leading-none">📈</span>
-        <SectionTitle>Analytics 4 概览</SectionTitle>
+        <SectionTitle>数据分析 概览</SectionTitle>
         <span className="ml-auto text-[10px] text-slate-400">{period}</span>
       </div>
 
@@ -388,7 +388,7 @@ export function ClientDataTab({ clientId }: { clientId: string }) {
         <span className="text-3xl">📡</span>
         <p className="text-sm font-black text-slate-700">暂无数据</p>
         <p className="max-w-xs text-xs font-semibold text-slate-400">
-          请先在连接页面完成 Google 授权并同步，数据同步后将在此展示。
+          请先在连接页面完成平台授权并同步，数据同步后将在此展示。
         </p>
         <Link
           href={`/dashboard/clients/${clientId}/connectors`}

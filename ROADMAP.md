@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-28 10:46 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
+> 最后更新：2026-05-28 10:48 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅；Phase 19 IDOR 修复 ✅；Phase 20.D 六支柱看板入口 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -69,11 +69,13 @@
 📋 Phase 14     Website Connector / 网站直连执行闭环（⭐ WordPress 连接器近期优先 — P14.A.5）
 📋 Phase 15     Reputation Engine / 口碑监控与执行闭环（战略确认，待排期）
 📋 Phase 16     Competitor Intelligence / 竞品雷达 + 信号驱动执行（战略确认，待排期）
-🔥 Phase 17     Unified Data Pullback / 统一数据回流层（Phase 17.A 进行中）
+✅ Phase 17     Unified Data Pullback / 统一数据回流层（Phase 17.A ✅ 全部完成 2026-05-27）
 📋 Phase 18     Ads Execution Engine / 广告执行引擎（Meta + Google + TikTok，已登记）
-📋 Phase 19     API 鉴权整改 / IDOR 修复（🔴 CRITICAL 安全 — 19.A+B 须在客户建号前完成）
+✅ Phase 19     API 鉴权整改 / IDOR 修复（🟢 19.A–E 全部完成 2026-05-27，PR #95）
+✅ Phase 20.D   统一看板入口 / 六支柱 FDE 手动录入 + 拖拽排序 + 客户 Portal 分组（Phase 20 子任务 — 2026-05-28 实施）
 📋 Phase 21     AI Content Factory / AI 内容工厂（旗舰能力 — FDE 客户默认产能引擎）
-📋 Phase 22     Data Intelligence Engine / 数据智能引擎（旗舰能力 — 学习引擎）
+📋 Phase 22     Data Intelligence Engine / 数据智能引擎（旗舰能力 — 采集+分析+反馈学习引擎）
+📋 Phase 22.D   主动任务生成器 / AnomalyDetector + 诸葛亮 Proactive（Phase 22 子模块）
 📋 Phase 23     Cross-Agent Memory Layer / 跨 Agent 记忆层（旗舰能力 — 升级自 Phase 8.M，补 L3 长期学习）
 ```
 
@@ -1350,12 +1352,17 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
 > **⚠️ 注意**：DataForSEO KD 分数算法与 SEMrush 不同，数值不可横向比较。切换后需在客户报告 + UI 中注明口径变更，或统一改用 DataForSEO KD 标准。
 > **保留 SEMrush API key**：`batchKeywordOverview` P8.S.8 完成前 + 任何降级回退用。
 
-### Phase 12.C —（预告）
+### Phase 12.C — 飞轮数据闭环（聚合 + 置信度 + 社媒回流）
 
-- 跨客户 outcome 聚合视图（`action_type × crisis_type × verdict_rate`）
-- 反哺华佗：处方生成时查询历史 outcome 给推荐打置信度
-- markisfact adapter（如商务谈成）
-- 社媒发布数据回流（Publer + 平台 API）
+> 启动：2026-05-28。飞轮骨架（12.A）+ adapter（12.B）已就绪，现在让数据「活起来」。
+>
+> 工作分支：`feat/phase-12-c-flywheel-closure`
+
+- [x] **P12.C.1** — 跨客户 outcome 聚合视图：GET /api/admin/flywheel/aggregate，按 action_type 统计 verdict_rate；Admin Dashboard「飞轮成效」卡片展示 top 5
+- [x] **P12.C.2** — 反哺华佗置信度：`src/lib/case-library/outcome-confidence.ts` 计算历史成功率，注入处方生成 prompt（含「历史成功率 X%，基于 N 案例」标签）
+- [x] **P12.C.3** — 社媒发布数据回流：Publer API 拉取帖子 likes/comments/shares，写入 flywheel_metrics；cron `social-engagement-pullback` 每日 4am UTC
+
+> **范围说明**：markisfact adapter 已从 Phase 12.C scope 移除，待商务谈成后单独登记。
 
 ### Phase 12.Q — 内容质量闭环 ⭐⭐⭐（已登记，未开工，2026-05-19 启动登记）
 
@@ -2010,7 +2017,7 @@ AI 可见度层（ME 独有 ✅）
 
 ## Phase 17 — Unified Data Pullback（统一数据回流层）🔥 进行中
 
-> **登记日期**：2026-05-19 · **开工日期**：2026-06-03 · **状态**：Phase 17.A 进行中
+> **登记日期**：2026-05-19 · **开工日期**：2026-06-03 · **状态**：Phase 17.A ✅ 全部完成（P17.A.1–A.6 均已 merge，2026-05-27）
 >
 > **背景**：ME 现在的月报数据是孤岛——SEO 数据、社媒数据、广告数据分散在各平台，无法在 ME 内做跨渠道归因。Unified Data Pullback 是把所有执行结果拉回 ME、驱动飞轮真实归因的基础设施层。
 
@@ -2040,6 +2047,7 @@ AI 可见度层（ME 独有 ✅）
 | **P17.A.3** | GSC 数据 UI 展示（执行看板 / 月报 section）+ connector page 触发按钮 | ✅ 完成 2026-05-27 |
 | **P17.A.4** | 飞轮归因桥接：flywheel_action → gsc_snapshot baseline vs after 对比 | ✅ 完成 2026-06-05 |
 | **P17.A.5（日常同步）** | 每日 GSC + GA4 cron job：`google-data-pullback-daily`（每天 3am UTC） | ✅ 完成 2026-06-05 |
+| **P17.A.6** | 客户主页「数据」tab：GSC top queries + GA4 traffic + 快速夺旗机会清单 | ✅ 完成 2026-05-27 |
 
 **P17.A.1 实施内容**：
 - `supabase/migrations/20260603000003_gsc_performance_snapshots.sql`：新表（client_id + period_start/end + 总量指标 + top_queries/pages JSONB）
@@ -2159,6 +2167,180 @@ AI 可见度层（ME 独有 ✅）
 ### 风险
 
 L2 授权写太严会把 CTS / Oztop 操作员锁在自己数据外。**19.B 部署前必须确认操作员邮箱已在 `ADMIN_EMAILS` / `CLIENT_VIEWERS` 白名单。**
+
+---
+
+## Phase 20.D — Unified Six-Pillar Kanban / 六支柱统一执行看板 ✅ 已实施（2026-05-28）
+
+> **原编号 Phase 24 已更正为 Phase 20.D**（UI 改动量不足以单独立 Phase，归入 Phase 20 子任务）
+> **登记日期**：2026-05-27 · **实施日期**：2026-05-28 · **触发**：OzTop 技术 SEO 修复（Yoast noindex 批量配置）无法写入执行看板，根因是看板只接受 `diagnostic` 和 `marketing_plan` 两个来源，六支柱的 FDE 手动执行工作没有入口。
+
+### 核心问题
+
+看板（`execution_items`）当前只有两个入口：
+- `source='diagnostic'` → 诊断处方自动生成
+- `source='marketing_plan'` → Marketing Plan 审批后派发
+
+**缺失的六个入口**：SEO 技术任务 / GEO 执行任务 / Ads 修复任务 / Reputation 任务 / Competitor 任务 / FDE 手动录入
+
+结果：FDE 执行了大量客户可见的有价值工作（技术 SEO 修复、GBP 更新、竞品分析等），客户完全看不到，无法建立信任感和透明度。
+
+### 目标
+
+> **让看板成为六支柱所有执行工作的统一出口，每条 FDE 工作记录客户都能看到。**
+
+### 架构方案
+
+**数据层（最小改动）**：
+
+```sql
+-- 新增 source 枚举值（替换 CHECK 约束为更宽松的版本）
+ALTER TABLE execution_items
+  DROP CONSTRAINT execution_items_source_check;
+
+ALTER TABLE execution_items
+  ADD CONSTRAINT execution_items_source_check
+  CHECK (source IN (
+    'diagnostic',       -- 原有：诊断处方
+    'marketing_plan',   -- 原有：Marketing Plan
+    'fde_manual'        -- 新增：FDE 手动录入（任意支柱）
+  ));
+
+-- fde_manual 允许两个 FK 都为 NULL
+ALTER TABLE execution_items
+  DROP CONSTRAINT execution_items_source_consistency;
+
+ALTER TABLE execution_items
+  ADD CONSTRAINT execution_items_source_consistency
+  CHECK (
+    (source = 'diagnostic'     AND prescription_id IS NOT NULL AND marketing_plan_id IS NULL) OR
+    (source = 'marketing_plan' AND marketing_plan_id IS NOT NULL AND prescription_id IS NULL) OR
+    (source = 'fde_manual'     AND prescription_id IS NULL AND marketing_plan_id IS NULL)
+  );
+```
+
+**API 层**：
+```
+POST /api/clients/[id]/execution/manual
+Body: { title, description, dimension, fix_type?, due_date?, notes? }
+→ 插入 execution_items(source='fde_manual', dimension, status='completed')
+→ 同步写 flywheel_actions(flywheel, action_type='fde.manual_task', execution_mode='external_manual')
+```
+
+**UI 层**（每个支柱页面）：
+- 「+ 记录 FDE 工作」按钮（简单表单：标题 + 描述 + 日期）
+- 执行看板新增「FDE 手动」来源标签（区别于诊断/Marketing Plan）
+- 客户 Portal 看板：显示所有来源的已完成任务
+
+### 六支柱入口映射
+
+| 支柱 | dimension | 典型 FDE 任务 | 从哪里录入 |
+|------|-----------|-------------|-----------|
+| SEO | `seo` | noindex 修复、robots.txt、sitemap 提交 | SEO Intelligence 页 |
+| GEO | `ai_visibility` | llms.txt、Schema 标记、GEO Directive 部署 | AI Tracker 页 |
+| Ads | `ads` | 暂停亏损词、调整出价、创建否定词 | Ads Intelligence 页 |
+| Social | `social` | 手动发帖、内容审核、账号配置 | 社媒内容矩阵 |
+| Reputation | `reputation` | GBP 回复、差评处理、信任徽章 | Reputation（待建） |
+| Competitor | `competitor` | 竞品分析、差距报告、策略调整 | Competitor（待建） |
+| 通用 | 任意 | 临时 FDE 工作（跨支柱） | 执行看板顶部「+ 录入」 |
+
+### 实施内容（2026-05-28 完成）
+
+**五项确认优化（来自 ME_Kanban_Evolution_Final.docx 2026-05-28 版）：**
+- [x] **统一入口**：执行看板顶部「＋ 录入工作」按钮 → `FdeManualEntryModal`
+- [x] **FDE 手动分组**：`source='fde_manual'` 任务在「📝 FDE 录入工作」分组，平铺显示
+- [x] **拖拽排序**：`FdeManualGroup` 内 HTML5 drag-to-reorder，PATCH `sort_order`
+- [x] **客户 Portal 可见性**：Portal 新增「Active execution work」按支柱分组展示（SEO/GEO/Ads/Social/Reputation/Competitor）
+- [x] **素材依赖标注**：`PlanTask.requires` 字段（none/client_photo/client_video/client_info）+ `kindToRequires()` 自动推导 + kanban 卡片显示徽章
+- ⏸ **Blocked 状态**：暂缓，用任务描述文字记录卡点原因
+
+**相关文件：**
+- `supabase/migrations/20260603000001_execution_items_fde_manual.sql`
+- `src/app/api/clients/[id]/execution/manual/route.ts`
+- `src/app/dashboard/clients/[id]/execution/_components/FdeManualEntryModal.tsx`
+- `src/app/dashboard/clients/[id]/execution/execution-view-model.ts`（新增 `FDE_MANUAL_GROUP_ID`、`fde_manual` 分组）
+- `src/app/dashboard/clients/[id]/execution/page.tsx`（新增按钮 + 分组渲染 + 拖拽 + 录入 Modal）
+- `src/app/portal/[clientId]/page.tsx`（新增 execution tasks section）
+- `src/lib/marketing-plan/types.ts`（新增 `PlanTaskRequires` + `requires` 字段）
+- `src/lib/marketing-plan/task-dispatcher.ts`（新增 `kindToRequires()`）
+- `src/types/diagnostic.ts`（`ExecutionItemSource` 加 `'fde_manual'`）
+
+### 里程碑
+
+- [x] **M1**：数据库 migration 完成 + `POST /manual` API 通过测试
+- [x] **M2**：执行看板显示 `fde_manual` 来源任务 + FDE 能手动录入
+- [x] **M3**：客户 Portal 按支柱分组展示 FDE 工作记录（透明度闭环）
+
+### 优先级依据
+
+- OzTop、CTS 客户 FDE 工作已在执行，但客户完全不可见 → 直接影响客户感知价值
+- 开发量小（1 个 migration + 1 个 API + UI 上加按钮），ROI 极高
+- 是 Phase 15（Reputation）/ Phase 16（Competitor）的前置基础设施
+
+### Phase 编号修正记录（2026-05-28）
+
+| 原草案写法 | 正式修正 | 说明 |
+|-----------|---------|------|
+| Phase 24（统一入口 + 拖拽 + Portal）| **Phase 20.D** | UI 改动量不足以单独立 Phase |
+| Phase 22 = Agent Memory | **Phase 22 = Data Intelligence Engine** | 22 是采集+分析+反馈，不是记忆层 |
+| Phase 22 = 主动任务注入 | **Phase 22.D = 主动任务生成器** | 主动任务是 Phase 22 的一个子模块（22.D）|
+| Phase 23（未命名）| **Phase 23 = Cross-Agent Memory Layer** | L3 长期学习，升级自原 Phase 8.M |
+
+---
+
+## Phase 24 — Execution Loop Closure（执行闭环修复）📋 已登记，2026-06-06 启动
+
+> **登记日期**：2026-06-06 · **状态**：开发中
+>
+> **背景**：诸葛亮推荐行动当前不进看板、不定时刷新；GEO 部署页忽略 CMS connector 只给手动复制粘贴。月报依赖执行看板作为数据来源，三个断点必须修复。
+
+### 三个子任务
+
+| ID | 内容 | 文件 |
+|----|------|------|
+| **P24.A** | 诸葛亮推荐自动写入执行看板 | `action-persister.ts` + migration |
+| **P24.B** | 诸葛亮每周定时重新计算 | `cron/zhuge-recalculate/route.ts` + `render.yaml` |
+| **P24.C** | GEO 部署页接入 CMS connector 一键部署 | `deploy/page.tsx` + `DeploymentForm.tsx` |
+
+### P24.A — 诸葛亮推荐写入执行看板
+
+**Schema 变更**（`execution_items` 表）：
+- `prescription_id` 改为 nullable（支持无处方来源的 zhuge 行）
+- 新增 `source TEXT CHECK (IN ('zhuge','fde','luban'))` 默认 `'fde'`
+- 新增 `action_type TEXT`（存储 zhuge 的 action_type slug）
+- 新增 `zhuge_session_id UUID` FK → `zhuge_sessions(id) ON DELETE SET NULL`
+- `execution_item_status` 枚举新增 `'superseded'`
+
+**重复处理逻辑**：
+- 同一 `client_id + action_type` 若已有 pending 的 fde/luban 行 → 跳过（不覆盖人工项）
+- 若已有 pending 的 zhuge 行（旧 session）→ 先标记为 `superseded` 再插新行
+- 同一 session 重复调用（幂等）→ 跳过
+
+- [ ] P24.A.1 migration: `20260606000001_execution_items_zhuge_source.sql`
+- [ ] P24.A.2 `action-persister.ts` 新增 `writeExecutionItems` + 接入 `persistZhugeActions`
+- [ ] P24.A.3 `__tests__/action-persister.test.ts` 补充测试（TDD 先写）
+
+### P24.B — 诸葛亮每周定时重新计算
+
+- 查询 `client_discovery` 有 `confirmed_at IS NOT NULL` 的客户
+- 对每个客户调用 `assembleZhugeInput` → `conductPriorityActions` → `persistZhugeActions`（触发 P24.A 看板写入）
+- `x-cron-secret` 验证（与现有 cron 一致）
+- `render.yaml` 新增 `zhuge-weekly-recalculate`，每周一 3am UTC
+
+- [ ] P24.B.1 `src/app/api/cron/zhuge-recalculate/route.ts`
+- [ ] P24.B.2 `render.yaml` 追加 cron 定义
+
+### P24.C — GEO 部署页接入 CMS connector
+
+- `deploy/page.tsx`：加载时并行拉取 `/api/clients/[id]/cms/providers`
+- `DeploymentForm.tsx`：
+  - 无 connector → 顶部显示「连接网站可一键部署」引导横幅
+  - 有活跃 WordPress/Shopify → 显示「一键部署」区块
+  - 点击后调用 `/api/clients/[id]/cms/publish-geo-snippet` 注入 snippet 并自动 `recordDeployment`
+- 新增 `src/app/api/clients/[id]/cms/publish-geo-snippet/route.ts`（复用 wordpress-client / shopify-client 底层逻辑）
+
+- [ ] P24.C.1 `deploy/page.tsx` + `DeploymentForm.tsx` 改造
+- [ ] P24.C.2 `publish-geo-snippet/route.ts` 新增路由
 
 ---
 
@@ -2357,6 +2539,31 @@ AI Content Factory  ←──反馈──  Data Engine  ←──分析──  �
 - ❌ 不依赖第三方仪表盘（Looker、Tableau 等）— 数据归属 ME 是核心护城河
 - ❌ 不只服务 AI Factory 产出 — 6 大支柱所有执行都要被采集和学习
 
+### Phase 22.D — 主动任务生成器（AnomalyDetector + 诸葛亮 Proactive）📋 待开发
+
+> **登记日期**：2026-05-28 · **前置**：Phase 22.A/B 数据采集在跑
+>
+> **架构**（两层分离，职责不混淆）：
+> - **第一层 AnomalyDetectorJob**（纯规则，每日 cron，无 AI）：扫描 `flywheel_metrics`，输出标准化 `AnomalySignal`
+> - **第二层 POST /api/ai/zhugeliang/proactive**（诸葛亮判断）：决策是否打扰客户、生成什么任务
+> - 输出写入 `flywheel_actions(source: "proactive_signal")`，看板显示 ⚡ 系统检测 badge
+
+**内置检测规则（MVP）：**
+
+| 飞轮 | 指标 | 阈值 | Severity |
+|------|------|------|---------|
+| SEO | avg_position | 下跌 > 5 位（连续 3 天）| high |
+| GEO | ai_visibility_score | 下降 > 15% | high |
+| Ads | Meta CPA | 上涨 > 30%（环比）| high |
+| Social | engagement_rate | 下降 > 40%（环比）| medium |
+| SEO | total_clicks | 下降 > 20%（周环比）| medium |
+
+**子任务：**
+- `22.D.1` anomaly_signals 表 migration + AnomalyDetectorJob 规则引擎骨架 (~1 天)
+- `22.D.2` POST /api/ai/zhugeliang/proactive endpoint (~1 天)
+- `22.D.3` /api/cron/anomaly-detector cron route (~0.5 天)
+- `22.D.4` 看板 UI：主动任务显示 ⚡ 系统检测 badge (~0.5 天)
+
 ---
 
 ## Phase 23 — Cross-Agent Memory Layer（旗舰能力 · 升级自 Phase 8.M）📋 战略确认，待排期
@@ -2459,6 +2666,19 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 - **P13.UI.3** — Website homepage upgraded to shared UI language
 - **P13.A.7** — Portal magic link can reach client portal
 
+### 2026-05-28（Phase 20.D — 六支柱统一看板入口）
+
+- **Phase 20.D 实施完成** — 执行看板新增「＋ 录入工作」统一入口（FDE 可从任意支柱直接录入工作，不绑定处方/Marketing Plan）；migration `20260603000001` 添加 `fde_manual` 来源；`FdeManualEntryModal` 组件；看板新增「📝 FDE 录入工作」分组（平铺 + 拖拽排序）；客户 Portal 新增「Active execution work」按支柱分组展示（透明度闭环）；`PlanTask.requires` 素材依赖标注（none/client_photo/client_video/client_info）；Phase 编号修正：Phase 24→Phase 20.D、Phase 22 明确为 Data Intelligence Engine、新增 Phase 22.D 主动任务生成器
+- **ROADMAP 编号修正登记** — 文档化 Phase 24/22/22.D/23 正式命名，与 ME_Kanban_Evolution_Final.docx 保持一致
+
+- **P13.UI.19** — Execution detail status menu is now contained inside the right-side FDE drawer instead of using a body-level floating portal over the board.
+
+### 2026-05-27（OzTop 技术 SEO 修复 + FDE 看板需求登记）
+
+- **OzTop Yoast 归档页 noindex 批量修复** — FDE 执行；在 oztopbuildingsupplies.com.au WP 后台完成 11 项 Taxonomy/Archive 关闭操作，预计消灭 150–180 个「已抓取未收录」URL（原计 211 个）：Tags ✅ Product tags ✅ Categories ✅ Product categories ✅ Brands ×2 ✅ Product Colour ✅ Product Flooring Colours ✅ Product shipping classes ✅ Author archives ✅ Date archives ✅ Format archives ✅ Media pages ✅；llms.txt 确认已开启（GEO 信号激活）
+- **发现：Brands 分类重复** — 站点同时安装两个 Brand 插件，生成 `/brand/` 和 `/brands/` 两套重复 URL；两者均已 noindex，但需在下一次 FDE 会话清理重复插件并做 301 合并
+- **新需求登记 `FDE-KANBAN-1`** — 技术 SEO 执行任务缺乏看板归宿：诊断引擎发现的技术 SEO findings（noindex 问题、robots.txt 泄漏、sitemap 异常等）当前不会自动生成看板卡片；FDE 执行的技术 SEO 工作只能手动记录 ROADMAP，无法与 Marketing Plan 内容任务在同一看板追踪。**需求**：SEO 诊断 findings → 自动生成 `task_type: technical_seo` 看板任务，与内容任务并排显示；待排入 Phase 12.I 或 Phase 15 SEO 执行闭环
+
 ### 2026-05-26（Oztop 手动发布 + Site Knowledge Graph 设计）
 
 - **Oztop Pet Flooring 发布** — 手动发布「Pet Friendly Flooring in Brisbane」至 oztopbuildingsupplies.com.au；确认 SiteGround IP 封锁根因（nginx ipr 封 Render IP 74.220.48.245）；修复 Astra 全大写 CSS；修正 GEO 指令 Sydney→Brisbane 6 处；Yoast SEO 配置完成（focus keyphrase / SEO title / slug / meta description）；Google Search Console 提交收录；已发布 URL：`/pet-friendly-flooring-brisbane/`
@@ -2487,12 +2707,9 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 - **P17.A.4** — GSC 归因桥接：`gsc-bridge.ts`（runGscAttributionForClient：SEO action → GSC before/after → 3 维 flywheel_outcomes）+ POST `/flywheel/gsc-attribution` + vocabulary 扩充 3 GSC metric keys + attribution cron pass-2 接线 [P17.A.4]
 - **P17.A.5** — 每日 Google 数据回流 cron：`google-data-pullback-daily`（遍历所有已连接 GSC/GA4 connector，自动快照写库）+ render.yaml 注册（每天 3am UTC）[P17.A.4]
 
-### 2026-05-28
-
-- **P13.UI.19** — Execution detail status menu is now contained inside the right-side FDE drawer instead of using a body-level floating portal over the board.
-
 ### 2026-05-27
 
+- **P17.A.6** — 客户主页「数据」tab：三 tab 切换器（概览/数据/工具）+ `ClientDataTab`（GSC 4 指标格 + top-10 关键词表、GA4 4 指标格 + top-10 来源/页面表、快速夺旗机会清单 position>10 && impressions>50） [feat/phase-17-a6-data-tab, PR #93]
 - **P17.A.3** — GSC/GA4 快照 UI：`DataPullbackSection`（执行看板数据回流卡）+ connector 详情页「立即同步」按钮 + 快照指标预览 [feat/phase-17-a-gsc-pullback]
 - **P13.UI.17** — Inline prescription supplement/revision drawer upgraded to the shared right-rail shell with stronger overlay layering, contained scrolling, and refreshed Magic Engine controls.
 - **P13.UI.18** — Zhangqian customer-facing discovery report gained Save PDF + DOCX downloads; DOCX export refreshed into Magic Engine deliverable language and dashboard Zhangqian export controls aligned.
@@ -2671,6 +2888,12 @@ client_decision_history      -- 为什么之前选 X 不选 Y
   `feat(flywheel): P12.B.3 — SocialContentAdapter 社媒飞轮落库 [P12.B.3]`
 - **P12.B.4** — SEMrush 周快照 cron：GET /api/cron/flywheel-seo-weekly；拉所有有 domain 的客户 domain_ranks 写 flywheel_metrics；9 单元测试；build 通过
   `feat(flywheel): P12.B.4 — SEMrush 周快照 cron [P12.B.4]`
+- **P12.C.1** — 跨客户 outcome 聚合：outcome-aggregate.ts 纯函数层（7 测试）；GET /api/admin/flywheel/aggregate；/dashboard/admin/flywheel 飞轮成效卡片（verdict bar + 置信度 badge）
+  `feat(flywheel): outcome aggregate API + Admin 飞轮成效卡片 [P12.C.1]`
+- **P12.C.2** — 反哺华佗置信度：outcome-confidence.ts（8 测试）；HuatuoLookupContext 新增 outcome_confidence；agent.ts 并行拉取；prompts.ts 注入「历史成效数据」段落；处方 action 末尾附置信度标签
+  `feat(huatuo): 飞轮归因置信度反哺处方生成 [P12.C.2]`
+- **P12.C.3** — 社媒 engagement 回流：engagement-pullback.ts（7 测试）；Publer GET /posts/{id}；GET /api/cron/social-engagement-pullback；vocabulary 新增 POST_LIKES/COMMENTS/SHARES；render.yaml 注册每日 4am UTC cron
+  `feat(social): Publer engagement pullback → flywheel_metrics [P12.C.3]`
 
 ### 2026-05-24（Phase 8.13 Sprint A–E）
 

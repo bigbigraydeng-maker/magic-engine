@@ -21,11 +21,17 @@ import { DeployedPagesList } from '../_components/DeployedPagesList';
 import { useDeploymentApi } from '@/lib/hooks/use-deployment-api';
 import { DEPLOYMENT_CONFIG } from '@/lib/deployment-constants';
 import type { GeoDirective } from '@/types/magic-engine';
+import type { WordpressConnectionStatus, ShopifyConnectionStatus } from '@/lib/cms/vocabulary';
 
 interface ClientData {
   id: string;
   name: string;
   domain?: string;
+}
+
+export interface CmsProviders {
+  wordpress: WordpressConnectionStatus | null;
+  shopify: ShopifyConnectionStatus | null;
 }
 
 export default function DeploymentPage() {
@@ -34,6 +40,7 @@ export default function DeploymentPage() {
 
   const [client, setClient] = useState<ClientData | null>(null);
   const [directive, setDirective] = useState<GeoDirective | null>(null);
+  const [cmsProviders, setCmsProviders] = useState<CmsProviders>({ wordpress: null, shopify: null });
   const [pageLoading, setPageLoading] = useState(true);
   const [pageError, setPageError] = useState('');
 
@@ -46,14 +53,15 @@ export default function DeploymentPage() {
     revokeDeployment,
   } = useDeploymentApi();
 
-  // Load client and active directive
+  // Load client, active directive, and CMS provider status in parallel
   const loadData = useCallback(async () => {
     setPageLoading(true);
     setPageError('');
     try {
-      const [clientRes, geoRes] = await Promise.all([
+      const [clientRes, geoRes, cmsRes] = await Promise.all([
         fetch(`/api/clients/${clientId}`),
         fetch(`/api/clients/${clientId}/geo`),
+        fetch(`/api/clients/${clientId}/cms/providers`).catch(() => null),
       ]);
 
       if (!clientRes.ok) throw new Error('Failed to load client');
@@ -66,6 +74,17 @@ export default function DeploymentPage() {
       const directives: GeoDirective[] = geoData.directives ?? [];
       const active = directives.find((d) => d.status === 'active') ?? null;
       setDirective(active);
+
+      // CMS providers — non-blocking, best-effort
+      if (cmsRes?.ok) {
+        const cmsData = await cmsRes.json();
+        if (cmsData.success) {
+          setCmsProviders({
+            wordpress: cmsData.providers?.wordpress ?? null,
+            shopify:   cmsData.providers?.shopify   ?? null,
+          });
+        }
+      }
 
       // Load deployments
       await fetchDeployments(clientId);
@@ -140,6 +159,7 @@ export default function DeploymentPage() {
           <DeploymentForm
             clientId={clientId}
             directive={directive}
+            cmsProviders={cmsProviders}
             onDeploymentRecorded={handleDeploymentRecorded}
             loading={pageLoading}
           />

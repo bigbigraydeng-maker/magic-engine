@@ -2,9 +2,9 @@
  * Component: DeploymentForm
  *
  * Form for entering a page URL and showing GEO directive snippet.
- * User can copy snippet and click to mark deployment as complete.
+ * Also supports one-click deployment to connected WordPress / Shopify CMS.
  *
- * Reference: ROADMAP.md P7.3.22
+ * Reference: ROADMAP.md P7.3.22, P24.C
  */
 
 'use client';
@@ -16,17 +16,34 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { DEPLOYMENT_CONFIG } from '@/lib/deployment-constants';
 import { generateDirectiveHtml } from '@/lib/geo/html-generator';
 import type { GeoDirective } from '@/types/magic-engine';
+import type { CmsProviders } from '../deploy/page';
 
 interface DeploymentFormProps {
   clientId: string;
   directive: GeoDirective | null;
+  cmsProviders?: CmsProviders;
   onDeploymentRecorded?: () => void;
   loading?: boolean;
 }
 
+type CmsProvider = 'wordpress' | 'shopify';
+
+interface CmsPublishState {
+  loading: boolean;
+  success: boolean;
+  error: string | null;
+  publishedUrl: string | null;
+}
+
+const CMS_LABELS: Record<CmsProvider, string> = {
+  wordpress: 'WordPress',
+  shopify:   'Shopify',
+};
+
 export function DeploymentForm({
   clientId,
   directive,
+  cmsProviders,
   onDeploymentRecorded,
   loading = false,
 }: DeploymentFormProps) {
@@ -35,11 +52,28 @@ export function DeploymentForm({
   const [showConfirm, setShowConfirm] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [feedback, setFeedback] = useState<{ message: string; isSuccess: boolean } | null>(null);
+  const [cmsPublish, setCmsPublish] = useState<CmsPublishState>({
+    loading: false,
+    success: false,
+    error: null,
+    publishedUrl: null,
+  });
 
   const snippet = useMemo(() => {
     if (!directive) return '';
     return generateDirectiveHtml(directive);
   }, [directive]);
+
+  // Detect which CMS providers are actively connected
+  const connectedProviders = useMemo<CmsProvider[]>(() => {
+    if (!cmsProviders) return [];
+    const list: CmsProvider[] = [];
+    if (cmsProviders.wordpress?.connected) list.push('wordpress');
+    if (cmsProviders.shopify?.connected)   list.push('shopify');
+    return list;
+  }, [cmsProviders]);
+
+  const hasConnectedCms = connectedProviders.length > 0;
 
   const handleRecordDeployment = async () => {
     setIsRecording(true);
@@ -66,6 +100,29 @@ export function DeploymentForm({
     }
   };
 
+  const handleCmsPublish = async (provider: CmsProvider) => {
+    setCmsPublish({ loading: true, success: false, error: null, publishedUrl: null });
+    try {
+      const res = await fetch(`/api/clients/${clientId}/cms/publish-geo-snippet`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider }),
+      });
+
+      const data = await res.json() as { success: boolean; published_url?: string; error?: string };
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error ?? 'Failed to publish to CMS');
+      }
+
+      setCmsPublish({ loading: false, success: true, error: null, publishedUrl: data.published_url ?? null });
+      onDeploymentRecorded?.();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'CMS publish failed';
+      setCmsPublish({ loading: false, success: false, error: message, publishedUrl: null });
+    }
+  };
+
   if (!directive) {
     return (
       <div className="p-6 bg-amber-50 border border-amber-200 rounded-lg">
@@ -78,7 +135,71 @@ export function DeploymentForm({
 
   return (
     <div className="space-y-6">
-      {/* Input Section */}
+
+      {/* CMS Banner — shown when no CMS is connected */}
+      {cmsProviders !== undefined && !hasConnectedCms && (
+        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-3">
+          <span className="text-blue-500 text-xl mt-0.5">🔗</span>
+          <div>
+            <p className="text-blue-800 font-medium text-sm">Connect your website for one-click deployment</p>
+            <p className="text-blue-600 text-xs mt-1">
+              Link a WordPress or Shopify store in{' '}
+              <a href={`/dashboard/clients/${clientId}/settings`} className="underline hover:text-blue-800">
+                Settings → Website Connection
+              </a>{' '}
+              to deploy this snippet automatically.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* One-Click CMS Deploy — shown when a CMS is connected */}
+      {hasConnectedCms && (
+        <div className="bg-white border border-green-200 rounded-lg p-6">
+          <h3 className="text-lg font-semibold mb-1">One-Click Deploy</h3>
+          <p className="text-sm text-gray-500 mb-4">
+            Publish the GEO snippet directly to your connected website.
+          </p>
+
+          <div className="flex flex-wrap gap-3">
+            {connectedProviders.map((provider) => (
+              <button
+                key={provider}
+                onClick={() => handleCmsPublish(provider)}
+                disabled={cmsPublish.loading || loading}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition font-medium text-sm"
+              >
+                {cmsPublish.loading
+                  ? 'Publishing…'
+                  : `Deploy to ${CMS_LABELS[provider]}`}
+              </button>
+            ))}
+          </div>
+
+          {cmsPublish.success && (
+            <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded text-green-700 text-sm">
+              Published successfully!{' '}
+              {cmsPublish.publishedUrl && (
+                <a
+                  href={cmsPublish.publishedUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:text-green-900"
+                >
+                  View page →
+                </a>
+              )}
+            </div>
+          )}
+          {cmsPublish.error && (
+            <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+              {cmsPublish.error}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Manual Install Section */}
       <div className="bg-white border border-gray-200 rounded-lg p-6">
         <h3 className="text-lg font-semibold mb-4">Add Page</h3>
 
@@ -107,15 +228,9 @@ export function DeploymentForm({
         </h3>
 
         <div className="space-y-4 text-sm text-gray-600">
-          <p>
-            1. Copy the snippet below
-          </p>
-          <p>
-            2. Paste it into your page {'<head>'} or {'<body>'} tag
-          </p>
-          <p>
-            3. Click "{DEPLOYMENT_CONFIG.LABELS.MARK_DEPLOYED}" to confirm installation
-          </p>
+          <p>1. Copy the snippet below</p>
+          <p>2. Paste it into your page {'<head>'} or {'<body>'} tag</p>
+          <p>3. Click "{DEPLOYMENT_CONFIG.LABELS.MARK_DEPLOYED}" to confirm installation</p>
         </div>
 
         <div className="mt-6">

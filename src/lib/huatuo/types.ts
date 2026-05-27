@@ -14,6 +14,7 @@ import type { PrescriptionContent } from '@/types/diagnostic'
 import type { SeasonalCalendarData } from './seasonal-calendar'
 import type { GTrendsInterestSummary } from '@/lib/gtrends/client'
 import type { SimilarCaseResult } from '@/lib/case-library/retriever'
+import type { OutcomeConfidenceMap } from '@/lib/case-library/outcome-confidence'
 
 // ─── Industry Benchmark ────────────────────────────────────────────────────────
 
@@ -131,6 +132,8 @@ export interface HuatuoLookupContext {
   industry_interest?: GTrendsInterestSummary | null
   /** 历史相似案例（Case Library，P8.12.S2.2 接入；null 或 [] 表示无数据） */
   similar_cases?: SimilarCaseResult[] | null
+  /** 飞轮归因成功率（P12.C.2 接入；空对象表示无历史数据） */
+  outcome_confidence?: OutcomeConfidenceMap
 }
 
 /**

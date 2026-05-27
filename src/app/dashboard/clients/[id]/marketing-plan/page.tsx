@@ -55,6 +55,11 @@ export default function MarketingPlanPage() {
     setPlans(prev => prev.map(p => p.id === plan.id ? plan : p))
   }
 
+  const handleArchived = (planId: string) => {
+    setPlans(prev => prev.filter(p => p.id !== planId))
+    setSelectedId(null)
+  }
+
   const selected = plans.find(p => p.id === selectedId) ?? null
 
   return (
@@ -147,6 +152,7 @@ export default function MarketingPlanPage() {
                 clientId={clientId}
                 plan={selected}
                 onUpdated={handleUpdated}
+                onArchived={handleArchived}
               />
             ) : (
               <div className="rounded-xl border border-dashed border-gray-200 bg-white py-20 text-center">
