@@ -616,6 +616,7 @@ function TaskDetailDrawer({
   onOpenStudio,
   onEditItem,
   onDeleteItem,
+  workbenchOpen = false,
 }: {
   item:           ItemWithLogs | null
   clientId:       string
@@ -628,6 +629,7 @@ function TaskDetailDrawer({
   onOpenStudio:   (item: ItemWithLogs) => void
   onEditItem:     (itemId: string, fields: { title?: string; description?: string }) => Promise<boolean>
   onDeleteItem:   (itemId: string) => Promise<void>
+  workbenchOpen?:  boolean
 }) {
   const [mounted, setMounted]           = useState(false)
   const [addingLog, setAddingLog]       = useState(false)
@@ -698,7 +700,11 @@ function TaskDetailDrawer({
   }
 
   const drawerContent = (
-    <div className="fixed inset-y-0 right-0 z-50 flex w-full flex-col overflow-hidden border-l border-slate-200 bg-[#f6f7f2] shadow-2xl sm:w-[420px] lg:w-[480px]">
+    <div className={`fixed inset-y-0 z-[70] flex w-full flex-col overflow-hidden border-l border-slate-200 bg-[#f6f7f2] shadow-2xl transition-[right] duration-200 sm:w-[420px] lg:w-[480px] ${
+      workbenchOpen
+        ? 'right-0 lg:right-[min(780px,calc(100vw-30rem))] xl:right-[min(880px,48vw)]'
+        : 'right-0'
+    }`}>
       {/* 抽屉头 */}
       <div className="shrink-0 border-b border-slate-200 px-4 py-4">
         <div className="flex items-start gap-3">
@@ -1616,17 +1622,18 @@ export default function ExecutionPage() {
         item={detailItem}
         clientId={clientId}
         editable={detailEditable}
-        onClose={() => setDetailItem(null)}
+        onClose={() => {
+          setDetailItem(null)
+          setStudioItem(null)
+        }}
         onStatusChange={handleStatusChange}
         onAddLog={handleAddLog}
         onOpenChat={item => setChatItem(item)}
         onOpenFlywheel={(item, target) => setFlywheelState({ item, target })}
-        onOpenStudio={item => {
-          setStudioItem(item)
-          setDetailItem(null)
-        }}
+        onOpenStudio={item => setStudioItem(item)}
         onEditItem={handleEditItem}
         onDeleteItem={handleDeleteItem}
+        workbenchOpen={!!studioItem}
       />
 
       {/* 飞轮执行抽屉（in_house 模式） */}
