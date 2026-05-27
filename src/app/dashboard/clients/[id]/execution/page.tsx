@@ -550,10 +550,12 @@ function ExecutionItemCard({
   item,
   isActive,
   onOpenDetail,
+  isBackgroundGenerating = false,
 }: {
   item:         ItemWithLogs
   isActive:     boolean
   onOpenDetail: (item: ItemWithLogs) => void
+  isBackgroundGenerating?: boolean
 }) {
   const fixMeta     = FIX_TYPE_META[item.fix_type ?? ''] ?? FIX_TYPE_META.fde_manual
   const statusMeta  = STATUS_META[item.status]
@@ -571,7 +573,9 @@ function ExecutionItemCard({
       className={`cursor-pointer select-none rounded-lg border p-2.5 transition-all ${
         isActive
           ? 'border-cyan-300 bg-cyan-50 shadow-sm'
-          : 'border-slate-200 bg-white hover:border-cyan-200 hover:shadow-sm'
+          : isBackgroundGenerating
+            ? 'border-cyan-200 bg-cyan-50/50 shadow-sm'
+            : 'border-slate-200 bg-white hover:border-cyan-200 hover:shadow-sm'
       }`}
     >
       <div className="flex items-start gap-2">
@@ -593,7 +597,13 @@ function ExecutionItemCard({
           <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${dimMeta.cls}`}>{dimMeta.label}</span>
         )}
         {dueDate && <span className="text-[10px] text-gray-400">{dueDate}</span>}
-        {hasAiAssist && <span className="text-[10px] font-bold text-cyan-700">AI 草稿</span>}
+        {isBackgroundGenerating && (
+          <span className="flex items-center gap-1 text-[10px] font-bold text-cyan-700">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-500" />
+            制作中
+          </span>
+        )}
+        {!isBackgroundGenerating && hasAiAssist && <span className="text-[10px] font-bold text-cyan-700">AI 草稿</span>}
         {logCount > 0 && <span className="text-[10px] text-gray-400">{logCount} 条日志</span>}
       </div>
     </div>
@@ -924,6 +934,7 @@ function PhaseColumn({
   activeDetailId,
   onOpenDetail,
   onAddItem,
+  bgGeneratingIds,
 }: {
   phase: number
   items: ItemWithLogs[]
@@ -934,6 +945,7 @@ function PhaseColumn({
   activeDetailId: string | null
   onOpenDetail: (item: ItemWithLogs) => void
   onAddItem: (prescriptionId: string, phase: number, fields: AddItemFields) => Promise<boolean>
+  bgGeneratingIds?: Set<string>
 }) {
   const [open, setOpen] = useState(defaultOpen)
   const [adding, setAdding] = useState(false)
@@ -1002,6 +1014,7 @@ function PhaseColumn({
               item={item}
               isActive={activeDetailId === item.id}
               onOpenDetail={onOpenDetail}
+              isBackgroundGenerating={bgGeneratingIds?.has(item.id) ?? false}
             />
           ))}
 
@@ -1206,6 +1219,7 @@ function PrescriptionGroup({
   onDerive,
   onOpenDetail,
   onAddItem,
+  bgGeneratingIds,
 }: {
   group: GroupData
   defaultOpen: boolean
@@ -1213,6 +1227,7 @@ function PrescriptionGroup({
   onDerive: (mode: 'supplement' | 'revision', priorId: string, priorLabel: string) => void
   onOpenDetail: (item: ItemWithLogs) => void
   onAddItem: (prescriptionId: string, phase: number, fields: AddItemFields) => Promise<boolean>
+  bgGeneratingIds?: Set<string>
 }) {
   const { items, label, archived, derivable, pid, meta, marketingPlanMeta, editable, kind } = group
 
@@ -1297,6 +1312,7 @@ function PrescriptionGroup({
               activeDetailId={activeDetailId}
               onOpenDetail={onOpenDetail}
               onAddItem={onAddItem}
+              bgGeneratingIds={bgGeneratingIds}
             />
           ))}
         </div>
@@ -1345,6 +1361,8 @@ export default function ExecutionPage() {
   const [activeDimension, setActiveDimension] = useState<string>('all')
   // Phase 20.D: FDE 手动录入
   const [showManualEntry, setShowManualEntry] = useState(false)
+  // 后台生成中的执行项 ID 集合（关闭 drawer 后仍在 AI 生成，kanban 卡片显示"制作中"）
+  const [bgGeneratingIds, setBgGeneratingIds] = useState<Set<string>>(new Set())
 
   const handleDownloadDocx = async () => {
     setIsDocxLoading(true)
@@ -1581,6 +1599,56 @@ export default function ExecutionPage() {
     }
   }, [clientId])
 
+  // 后台社媒内容生成（关闭 ContentStudioDrawer 后继续跑，完成后刷新看板）
+  const handleBackgroundGenerate = useCallback((
+    itemId: string,
+    params: {
+      campaignId: string
+      platform: string
+      posts_count: number
+      stories_count: number
+      reels_count: number
+      angle_focus?: string
+    },
+  ) => {
+    setBgGeneratingIds(prev => { const s = new Set(prev); s.add(itemId); return s })
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/social-plan`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            campaign_brief_id: params.campaignId,
+            platform: params.platform,
+            posts_count: params.posts_count,
+            stories_count: params.stories_count,
+            reels_count: params.reels_count,
+            ...(params.angle_focus ? { angle_focus: params.angle_focus } : {}),
+          }),
+        })
+        const json = await res.json() as { success: boolean; error?: string }
+        if (json.success) {
+          await fetch(`/api/clients/${clientId}/execution/${itemId}/log`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: 'ai_assist', author: 'luban', content: '社媒内容已在后台生成完成，可打开工作台查看' }),
+          }).catch(() => {})
+          const curItem = items.find(i => i.id === itemId)
+          if (curItem?.status === 'pending') {
+            await fetch(`/api/clients/${clientId}/execution/${itemId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: 'in_progress' }),
+            }).catch(() => {})
+          }
+        }
+      } catch { /* non-fatal */ } finally {
+        setBgGeneratingIds(prev => { const s = new Set(prev); s.delete(itemId); return s })
+        void fetchItems(true)
+      }
+    })()
+  }, [clientId, items, fetchItems])
+
   const filteredItems       = activeDimension === 'all' ? items : items.filter(i => i.dimension === activeDimension)
   const availableDimensions = Array.from(new Set(items.map(i => i.dimension).filter(Boolean))) as string[]
   const completedCount      = filteredItems.filter(i => i.status === 'completed').length
@@ -1781,6 +1849,7 @@ export default function ExecutionPage() {
               onDerive={(mode, priorId, priorLabel) => setDeriveDrawer({ mode, priorId, priorLabel })}
               onOpenDetail={item => { setDetailItem(item); setDetailEditable(group.editable) }}
               onAddItem={handleAddItem}
+              bgGeneratingIds={bgGeneratingIds}
             />
           )
         })}
@@ -1884,6 +1953,7 @@ export default function ExecutionPage() {
           item={studioItem}
           onClose={() => setStudioItem(null)}
           onContentGenerated={() => void fetchItems(true)}
+          onBackgroundGenerate={handleBackgroundGenerate}
         />
       )}
 
