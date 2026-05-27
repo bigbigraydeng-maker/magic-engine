@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-28 00:39 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
+> 最后更新：2026-05-28 10:46 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -20,6 +20,7 @@
 - [x] **P13.UI.9 execution board drawer polish** - Clean up execution board sidebar scrolling, header actions, and task detail drawer so the admin workspace reads as one Magic Engine surface.
 - [x] **P13.UI.17 inline prescription rail refresh** - Align the supplement/revision prescription drawer with the upgraded Magic Engine rail shell and stop it from fighting the execution board scroll layer.
 - [x] **P13.UI.18 Zhangqian discovery deliverable refresh** - Align the customer-facing Zhangqian discovery report and downloadable PDF/DOCX deliverables with the shared Magic Engine visual language.
+- [x] **P13.UI.19 inline status menu containment** - Keep the execution detail status menu inside the right-side FDE drawer instead of letting it float over the board layer.
 
 ## 当前进度速览
 
@@ -2485,6 +2486,10 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 
 - **P17.A.4** — GSC 归因桥接：`gsc-bridge.ts`（runGscAttributionForClient：SEO action → GSC before/after → 3 维 flywheel_outcomes）+ POST `/flywheel/gsc-attribution` + vocabulary 扩充 3 GSC metric keys + attribution cron pass-2 接线 [P17.A.4]
 - **P17.A.5** — 每日 Google 数据回流 cron：`google-data-pullback-daily`（遍历所有已连接 GSC/GA4 connector，自动快照写库）+ render.yaml 注册（每天 3am UTC）[P17.A.4]
+
+### 2026-05-28
+
+- **P13.UI.19** — Execution detail status menu is now contained inside the right-side FDE drawer instead of using a body-level floating portal over the board.
 
 ### 2026-05-27
 

@@ -447,9 +447,8 @@ function FdeMetaRow({ stepsJson }: { stepsJson: Record<string, unknown> | null }
   )
 }
 
-// ---------------------------------------------------------------------------
-// StatusDropdown — 卡片头部的状态徽章，点击弹出下拉菜单直接切换状态
-// 菜单经 Portal 渲染到 body，规避 PhaseColumn 的 overflow-hidden 裁剪
+// StatusDropdown - compact status switcher scoped to the active drawer/card.
+// Keep the menu local so it never floats over a lower board layer.
 // ---------------------------------------------------------------------------
 
 function StatusDropdown({
@@ -460,72 +459,48 @@ function StatusDropdown({
   onChange: (status: ExecutionItemStatus) => void
 }) {
   const [open, setOpen] = useState(false)
-  const [pos, setPos]   = useState<{ top: number; left: number }>({ top: 0, left: 0 })
-  const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const current = STATUS_META[status]
 
-  const toggle = () => {
-    if (open) { setOpen(false); return }
-    const r = btnRef.current?.getBoundingClientRect()
-    if (!r) return
-    const MENU_W = 128
-    const MENU_H = 140
-    const flipUp = r.bottom + MENU_H > window.innerHeight
-    setPos({
-      top:  flipUp ? r.top - MENU_H - 4 : r.bottom + 4,
-      left: Math.max(8, r.right - MENU_W),
-    })
-    setOpen(true)
-  }
-
-  // fixed 菜单不跟随触发器 — 页面滚动 / 窗口缩放时直接关闭
   useEffect(() => {
     if (!open) return
-    const close = () => setOpen(false)
-    window.addEventListener('scroll', close, true)
-    window.addEventListener('resize', close)
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', closeOnOutsideClick)
     return () => {
-      window.removeEventListener('scroll', close, true)
-      window.removeEventListener('resize', close)
+      document.removeEventListener('mousedown', closeOnOutsideClick)
     }
   }, [open])
 
   return (
-    <div className="shrink-0">
+    <div ref={menuRef} className="relative inline-block shrink-0">
       <button
-        ref={btnRef}
         type="button"
-        onClick={toggle}
-        title="点击修改状态"
+        onClick={() => setOpen(v => !v)}
+        title="Change status"
         className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${current.color} hover:ring-2 hover:ring-inset hover:ring-black/10 transition`}
       >
         {current.label}
-        <span className="opacity-50 text-[10px]">▾</span>
+        <span className="opacity-50 text-[10px]">v</span>
       </button>
-      {open && createPortal(
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div
-            className="fixed z-50 w-32 rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
-            style={{ top: pos.top, left: pos.left }}
-          >
-            {STATUS_FLOW.map(s => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => { setOpen(false); if (s !== status) onChange(s) }}
-                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-gray-50 ${
-                  s === status ? 'font-semibold text-gray-900' : 'text-gray-600'
-                }`}
-              >
-                <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[s]}`} />
-                <span className="flex-1">{STATUS_META[s].label}</span>
-                {s === status && <span className="text-indigo-500">✓</span>}
-              </button>
-            ))}
-          </div>
-        </>,
-        document.body,
+      {open && (
+        <div className="absolute left-0 top-full z-[90] mt-1 w-36 rounded-lg border border-slate-200 bg-white py-1 shadow-xl shadow-slate-900/10">
+          {STATUS_FLOW.map(s => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => { setOpen(false); if (s !== status) onChange(s) }}
+              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-slate-50 ${
+                s === status ? 'font-semibold text-slate-950' : 'text-slate-600'
+              }`}
+            >
+              <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[s]}`} />
+              <span className="flex-1">{STATUS_META[s].label}</span>
+              {s === status && <span className="text-indigo-500">*</span>}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   )
