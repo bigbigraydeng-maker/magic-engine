@@ -16,12 +16,14 @@ import {
   formatOutcomeLabel,
   isAutonomousItem,
   MARKETING_PLAN_GROUP_PREFIX,
+  FDE_MANUAL_GROUP_ID,
   type GroupData,
   type ItemWithLogs,
   type MarketingPlanMeta,
   type OutcomeSummary,
   type PrescriptionMeta,
 } from './execution-view-model'
+import { FdeManualEntryModal } from './_components/FdeManualEntryModal'
 import { DataPullbackSection } from './_components/DataPullbackSection'
 import { MemoryAnnotationPanel } from './_components/MemoryAnnotationPanel'
 
@@ -549,10 +551,12 @@ function ExecutionItemCard({
   item,
   isActive,
   onOpenDetail,
+  isBackgroundGenerating = false,
 }: {
   item:         ItemWithLogs
   isActive:     boolean
   onOpenDetail: (item: ItemWithLogs) => void
+  isBackgroundGenerating?: boolean
 }) {
   const fixMeta     = FIX_TYPE_META[item.fix_type ?? ''] ?? FIX_TYPE_META.fde_manual
   const statusMeta  = STATUS_META[item.status]
@@ -570,7 +574,9 @@ function ExecutionItemCard({
       className={`cursor-pointer select-none rounded-lg border p-2.5 transition-all ${
         isActive
           ? 'border-cyan-300 bg-cyan-50 shadow-sm'
-          : 'border-slate-200 bg-white hover:border-cyan-200 hover:shadow-sm'
+          : isBackgroundGenerating
+            ? 'border-cyan-200 bg-cyan-50/50 shadow-sm'
+            : 'border-slate-200 bg-white hover:border-cyan-200 hover:shadow-sm'
       }`}
     >
       <div className="flex items-start gap-2">
@@ -592,7 +598,13 @@ function ExecutionItemCard({
           <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${dimMeta.cls}`}>{dimMeta.label}</span>
         )}
         {dueDate && <span className="text-[10px] text-gray-400">{dueDate}</span>}
-        {hasAiAssist && <span className="text-[10px] font-bold text-cyan-700">AI 草稿</span>}
+        {isBackgroundGenerating && (
+          <span className="flex items-center gap-1 text-[10px] font-bold text-cyan-700">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-500" />
+            制作中
+          </span>
+        )}
+        {!isBackgroundGenerating && hasAiAssist && <span className="text-[10px] font-bold text-cyan-700">AI 草稿</span>}
         {logCount > 0 && <span className="text-[10px] text-gray-400">{logCount} 条日志</span>}
       </div>
     </div>
@@ -933,6 +945,7 @@ function PhaseColumn({
   activeDetailId,
   onOpenDetail,
   onAddItem,
+  bgGeneratingIds,
 }: {
   phase: number
   items: ItemWithLogs[]
@@ -943,6 +956,7 @@ function PhaseColumn({
   activeDetailId: string | null
   onOpenDetail: (item: ItemWithLogs) => void
   onAddItem: (prescriptionId: string, phase: number, fields: AddItemFields) => Promise<boolean>
+  bgGeneratingIds?: Set<string>
 }) {
   const [open, setOpen] = useState(defaultOpen)
   const [adding, setAdding] = useState(false)
@@ -1011,6 +1025,7 @@ function PhaseColumn({
               item={item}
               isActive={activeDetailId === item.id}
               onOpenDetail={onOpenDetail}
+              isBackgroundGenerating={bgGeneratingIds?.has(item.id) ?? false}
             />
           ))}
 
@@ -1097,6 +1112,112 @@ function PhaseColumn({
 }
 
 // ---------------------------------------------------------------------------
+// FdeManualGroup — Phase 20.D：FDE 手动录入任务的平铺分组（可拖拽排序）
+// ---------------------------------------------------------------------------
+
+const REQUIRES_META: Record<string, { icon: string; label: string; cls: string }> = {
+  client_photo: { icon: '📷', label: '需要照片', cls: 'bg-yellow-50 text-yellow-700 border border-yellow-200' },
+  client_video: { icon: '🎬', label: '需要视频', cls: 'bg-orange-50 text-orange-700 border border-orange-200' },
+  client_info:  { icon: '📄', label: '需要资料', cls: 'bg-sky-50 text-sky-700 border border-sky-200' },
+  none:         { icon: '✅', label: '可自动生成', cls: 'bg-green-50 text-green-700 border border-green-200' },
+}
+
+function FdeManualGroup({
+  group,
+  activeDetailId,
+  onOpenDetail,
+  onReorder,
+}: {
+  group:          GroupData
+  activeDetailId: string | null
+  onOpenDetail:   (item: ItemWithLogs) => void
+  onReorder:      (draggedId: string, targetId: string) => void
+}) {
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
+  const completed = group.items.filter(i => i.status === 'completed').length
+
+  return (
+    <div className="rounded-xl border border-indigo-200 bg-white overflow-hidden">
+      {/* Group header */}
+      <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-3 flex-wrap bg-indigo-50/40">
+        <span className="text-xs font-semibold rounded-full px-2.5 py-1 bg-indigo-100 text-indigo-700">
+          📝 FDE 录入工作
+        </span>
+        <span className="text-xs text-gray-400">{completed}/{group.items.length} 完成</span>
+        <span className="text-xs text-gray-400 italic">拖拽任务可调整优先级</span>
+      </div>
+
+      {/* Flat item list */}
+      <div className="p-4 bg-gray-50 space-y-2">
+        {group.items.length === 0 && (
+          <p className="text-xs text-gray-400 text-center py-6">暂无 FDE 录入工作</p>
+        )}
+        {group.items.map(item => {
+          const dimMeta     = DIMENSION_CARD_META[item.dimension ?? '']
+          const statusMeta  = STATUS_META[item.status]
+          const fixMeta     = FIX_TYPE_META[item.fix_type ?? ''] ?? FIX_TYPE_META.fde_manual
+          const requiresKey = (item.steps_json as Record<string, unknown> | null)?.requires as string | undefined
+          const reqMeta     = requiresKey ? REQUIRES_META[requiresKey] : null
+
+          return (
+            <div
+              key={item.id}
+              draggable
+              onDragStart={e => { e.dataTransfer.setData('text/plain', item.id); e.dataTransfer.effectAllowed = 'move' }}
+              onDragOver={e => { e.preventDefault(); setDragOverId(item.id) }}
+              onDragLeave={() => setDragOverId(null)}
+              onDrop={e => {
+                e.preventDefault()
+                setDragOverId(null)
+                const draggedId = e.dataTransfer.getData('text/plain')
+                if (draggedId && draggedId !== item.id) onReorder(draggedId, item.id)
+              }}
+              role="button"
+              tabIndex={0}
+              onClick={() => onOpenDetail(item)}
+              onKeyDown={ev => ev.key === 'Enter' && onOpenDetail(item)}
+              className={`rounded-lg border p-2.5 cursor-pointer transition-all select-none ${
+                dragOverId === item.id
+                  ? 'border-indigo-400 bg-indigo-50/60 shadow-inner'
+                  : activeDetailId === item.id
+                    ? 'border-indigo-400 bg-indigo-50 shadow-sm'
+                    : 'border-gray-200 bg-white hover:border-indigo-200 hover:shadow-sm'
+              }`}
+            >
+              <div className="flex items-start gap-2">
+                {/* Drag handle */}
+                <span className="text-gray-300 text-sm mt-0.5 cursor-grab shrink-0" title="拖拽排序">⠿</span>
+                <span className="text-base shrink-0 mt-0.5">{fixMeta.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-gray-900 line-clamp-2 leading-tight">{item.title}</p>
+                  {item.description && (
+                    <p className="text-[11px] text-gray-400 line-clamp-1 mt-0.5">{item.description}</p>
+                  )}
+                </div>
+                <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded font-medium ${statusMeta.color}`}>
+                  {statusMeta.label}
+                </span>
+              </div>
+              <div className="mt-1.5 flex items-center gap-1.5 flex-wrap ml-9">
+                {dimMeta && (
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${dimMeta.cls}`}>{dimMeta.label}</span>
+                )}
+                {item.due_date && <span className="text-[10px] text-gray-400">{item.due_date}</span>}
+                {reqMeta && (
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${reqMeta.cls}`}>
+                    {reqMeta.icon} {reqMeta.label}
+                  </span>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // PrescriptionGroup — 一个处方的执行项分组（P8.10.S5）
 // ---------------------------------------------------------------------------
 
@@ -1109,6 +1230,7 @@ function PrescriptionGroup({
   onDerive,
   onOpenDetail,
   onAddItem,
+  bgGeneratingIds,
 }: {
   group: GroupData
   defaultOpen: boolean
@@ -1116,6 +1238,7 @@ function PrescriptionGroup({
   onDerive: (mode: 'supplement' | 'revision', priorId: string, priorLabel: string) => void
   onOpenDetail: (item: ItemWithLogs) => void
   onAddItem: (prescriptionId: string, phase: number, fields: AddItemFields) => Promise<boolean>
+  bgGeneratingIds?: Set<string>
 }) {
   const { items, label, archived, derivable, pid, meta, marketingPlanMeta, editable, kind } = group
 
@@ -1200,6 +1323,7 @@ function PrescriptionGroup({
               activeDetailId={activeDetailId}
               onOpenDetail={onOpenDetail}
               onAddItem={onAddItem}
+              bgGeneratingIds={bgGeneratingIds}
             />
           ))}
         </div>
@@ -1240,11 +1364,16 @@ export default function ExecutionPage() {
   const [projectLubanOpen, setProjectLubanOpen] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [isDocxLoading, setIsDocxLoading] = useState(false)
+  const [showOverflow, setShowOverflow] = useState(false)
   // 右侧详情抽屉
   const [detailItem, setDetailItem]       = useState<ItemWithLogs | null>(null)
   const [detailEditable, setDetailEditable] = useState(false)
   // 维度过滤
   const [activeDimension, setActiveDimension] = useState<string>('all')
+  // Phase 20.D: FDE 手动录入
+  const [showManualEntry, setShowManualEntry] = useState(false)
+  // 后台生成中的执行项 ID 集合（关闭 drawer 后仍在 AI 生成，kanban 卡片显示"制作中"）
+  const [bgGeneratingIds, setBgGeneratingIds] = useState<Set<string>>(new Set())
 
   const handleDownloadDocx = async () => {
     setIsDocxLoading(true)
@@ -1425,6 +1554,42 @@ export default function ExecutionPage() {
     }
   }, [clientId, fetchItems])
 
+  // Phase 20.D: FDE 手动排序（drag-to-reorder）
+  const handleReorder = useCallback(async (draggedId: string, targetId: string) => {
+    if (draggedId === targetId) return
+    const fdeItems = items.filter(i => i.source === 'fde_manual')
+    const dragIdx  = fdeItems.findIndex(i => i.id === draggedId)
+    const targIdx  = fdeItems.findIndex(i => i.id === targetId)
+    if (dragIdx === -1 || targIdx === -1) return
+
+    // Compute midpoint sort_order between adjacent items
+    const reordered = [...fdeItems]
+    const [dragged] = reordered.splice(dragIdx, 1)
+    reordered.splice(targIdx, 0, dragged)
+
+    // Assign new sort orders at intervals of 10, then PATCH only the moved item
+    const newOrders = reordered.map((it, idx) => ({ id: it.id, sort_order: (idx + 1) * 10 }))
+
+    // Optimistic update
+    setItems(prev => prev.map(it => {
+      const o = newOrders.find(x => x.id === it.id)
+      return o ? { ...it, sort_order: o.sort_order } : it
+    }))
+
+    // Persist all reordered items
+    await Promise.all(newOrders.map(({ id, sort_order }) =>
+      fetch(`/api/clients/${clientId}/execution/${id}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        body:    JSON.stringify({ sort_order }),
+      }).then(r => { if (!r.ok) throw new Error(`PATCH ${id} failed`) })
+    )).catch(async () => {
+      // rollback on any failure + surface error to FDE
+      setOpError('排序更新失败，请重试')
+      await fetchItems(true)
+    })
+  }, [items, clientId, fetchItems])
+
   // 移除执行项（仅限 pending 状态）
   const handleDeleteItem = useCallback(async (itemId: string): Promise<void> => {
     setOpError(null)
@@ -1444,6 +1609,56 @@ export default function ExecutionPage() {
       setOpError('移除失败，请重试')
     }
   }, [clientId])
+
+  // 后台社媒内容生成（关闭 ContentStudioDrawer 后继续跑，完成后刷新看板）
+  const handleBackgroundGenerate = useCallback((
+    itemId: string,
+    params: {
+      campaignId: string
+      platform: string
+      posts_count: number
+      stories_count: number
+      reels_count: number
+      angle_focus?: string
+    },
+  ) => {
+    setBgGeneratingIds(prev => { const s = new Set(prev); s.add(itemId); return s })
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/social-plan`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            campaign_brief_id: params.campaignId,
+            platform: params.platform,
+            posts_count: params.posts_count,
+            stories_count: params.stories_count,
+            reels_count: params.reels_count,
+            ...(params.angle_focus ? { angle_focus: params.angle_focus } : {}),
+          }),
+        })
+        const json = await res.json() as { success: boolean; error?: string }
+        if (json.success) {
+          await fetch(`/api/clients/${clientId}/execution/${itemId}/log`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: 'ai_assist', author: 'luban', content: '社媒内容已在后台生成完成，可打开工作台查看' }),
+          }).catch(() => {})
+          const curItem = items.find(i => i.id === itemId)
+          if (curItem?.status === 'pending') {
+            await fetch(`/api/clients/${clientId}/execution/${itemId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: 'in_progress' }),
+            }).catch(() => {})
+          }
+        }
+      } catch { /* non-fatal */ } finally {
+        setBgGeneratingIds(prev => { const s = new Set(prev); s.delete(itemId); return s })
+        void fetchItems(true)
+      }
+    })()
+  }, [clientId, items, fetchItems])
 
   const filteredItems       = activeDimension === 'all' ? items : items.filter(i => i.dimension === activeDimension)
   const availableDimensions = Array.from(new Set(items.map(i => i.dimension).filter(Boolean))) as string[]
@@ -1512,52 +1727,66 @@ export default function ExecutionPage() {
             <p className="mt-1 text-sm font-semibold text-slate-500">按阶段跟踪处方落地、内容生成与执行证明</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <a
-              href={TALK_TO_US_HREF}
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-slate-950 px-4 text-xs font-black text-white transition-colors hover:bg-slate-800"
-            >
-              Talk to Us
-            </a>
-            {items.length > 0 && (
-              <button
-                onClick={() => void handleDownloadDocx()}
-                disabled={isDocxLoading}
-                className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isDocxLoading ? (
-                  <span className="animate-spin inline-block w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full" />
-                ) : (
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
-                )}
-                下载执行方案
-              </button>
-            )}
+            {/* 主操作：录入工作 */}
             <button
-              onClick={() => setReviewOpen(true)}
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-950"
+              onClick={() => setShowManualEntry(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 transition-colors"
             >
-              复盘
+              ＋ 录入工作
             </button>
-            <button
-              onClick={() => setProjectLubanOpen(true)}
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-950"
-            >
-              项目级鲁班
-            </button>
+            {/* 主操作：Marketing Plan */}
             <Link
               href={`/dashboard/clients/${clientId}/marketing-plan`}
               className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-cyan-200 bg-cyan-50 px-3 text-xs font-black text-cyan-800 transition-colors hover:bg-cyan-100"
             >
               Marketing Plan
             </Link>
-            <Link
-              href={`/dashboard/clients/${clientId}/prescription/new`}
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-950"
-            >
-              + 新处方
-            </Link>
+            {/* 溢出菜单 */}
+            <div className="relative">
+              <button
+                onClick={() => setShowOverflow(v => !v)}
+                className="inline-flex min-h-10 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-950"
+              >
+                ···
+              </button>
+              {showOverflow && (
+                <>
+                  {/* 透明遮罩：点击外部关闭 */}
+                  <div className="fixed inset-0 z-10" onClick={() => setShowOverflow(false)} />
+                  <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                    <button
+                      onClick={() => { setReviewOpen(true); setShowOverflow(false) }}
+                      className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      复盘
+                    </button>
+                    <button
+                      onClick={() => { setProjectLubanOpen(true); setShowOverflow(false) }}
+                      className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      项目级鲁班
+                    </button>
+                    {items.length > 0 && (
+                      <button
+                        onClick={() => { void handleDownloadDocx(); setShowOverflow(false) }}
+                        disabled={isDocxLoading}
+                        className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        {isDocxLoading ? '下载中…' : '↓ 下载执行方案'}
+                      </button>
+                    )}
+                    <div className="my-1 border-t border-slate-100" />
+                    <Link
+                      href={`/dashboard/clients/${clientId}/prescription/new`}
+                      onClick={() => setShowOverflow(false)}
+                      className="block px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      ＋ 新处方
+                    </Link>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -1608,18 +1837,33 @@ export default function ExecutionPage() {
 
         <DataPullbackSection clientId={clientId} />
 
-        {/* 按处方分组 — 原处方 / 补充 / 修订 / 已归档 各成一组 */}
-        {prescriptionGroups.map(group => (
-          <PrescriptionGroup
-            key={group.pid}
-            group={group}
-            defaultOpen={true}
-            activeDetailId={detailItem?.id ?? null}
-            onDerive={(mode, priorId, priorLabel) => setDeriveDrawer({ mode, priorId, priorLabel })}
-            onOpenDetail={item => { setDetailItem(item); setDetailEditable(group.editable) }}
-            onAddItem={handleAddItem}
-          />
-        ))}
+        {/* 按处方分组 — 原处方 / 补充 / 修订 / 已归档 / Marketing Plan / FDE 各成一组 */}
+        {prescriptionGroups.map(group => {
+          // Phase 20.D: FDE 手动录入分组 — 平铺 + 拖拽排序
+          if (group.kind === 'fde_manual') {
+            return (
+              <FdeManualGroup
+                key={group.pid}
+                group={group}
+                activeDetailId={detailItem?.id ?? null}
+                onOpenDetail={item => { setDetailItem(item); setDetailEditable(true) }}
+                onReorder={handleReorder}
+              />
+            )
+          }
+          return (
+            <PrescriptionGroup
+              key={group.pid}
+              group={group}
+              defaultOpen={true}
+              activeDetailId={detailItem?.id ?? null}
+              onDerive={(mode, priorId, priorLabel) => setDeriveDrawer({ mode, priorId, priorLabel })}
+              onOpenDetail={item => { setDetailItem(item); setDetailEditable(group.editable) }}
+              onAddItem={handleAddItem}
+              bgGeneratingIds={bgGeneratingIds}
+            />
+          )
+        })}
       </div>
 
       {/* 右侧任务详情抽屉 */}
@@ -1720,8 +1964,17 @@ export default function ExecutionPage() {
           item={studioItem}
           onClose={() => setStudioItem(null)}
           onContentGenerated={() => void fetchItems(true)}
+          onBackgroundGenerate={handleBackgroundGenerate}
         />
       )}
+
+      {/* Phase 20.D: FDE 手动录入 Modal */}
+      <FdeManualEntryModal
+        clientId={clientId}
+        open={showManualEntry}
+        onClose={() => setShowManualEntry(false)}
+        onCreated={() => { setShowManualEntry(false); void fetchItems(true) }}
+      />
     </div>
   )
 }

@@ -27,6 +27,13 @@ ALTER TABLE execution_items
   ADD COLUMN IF NOT EXISTS zhuge_session_id UUID
     REFERENCES zhuge_sessions(id) ON DELETE SET NULL;
 
+-- Ensure the CHECK constraint allows 'zhuge' even on DBs where the column pre-existed.
+-- ADD COLUMN IF NOT EXISTS is skipped when the column exists, leaving the old constraint
+-- intact. Explicitly drop and recreate to guarantee the correct allowlist.
+ALTER TABLE execution_items DROP CONSTRAINT IF EXISTS execution_items_source_check;
+ALTER TABLE execution_items ADD CONSTRAINT execution_items_source_check
+  CHECK (source IN ('zhuge', 'fde', 'luban'));
+
 -- Index for fast dedup lookups by action_type (zhuge path)
 CREATE INDEX IF NOT EXISTS idx_execution_items_client_action_pending
   ON execution_items(client_id, action_type, status)

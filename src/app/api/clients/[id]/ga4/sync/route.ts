@@ -21,7 +21,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
-import { fetchGa4Snapshot } from '@/lib/ga4/client'
+import { fetchGa4Snapshot, Ga4ApiError, type Ga4SiteSnapshot } from '@/lib/ga4/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -74,7 +74,19 @@ export async function POST(
     )
   }
 
-  const snapshot = await fetchGa4Snapshot(propertyId, clientId, periodDays)
+  let snapshot: Ga4SiteSnapshot | null
+  try {
+    snapshot = await fetchGa4Snapshot(propertyId, clientId, periodDays)
+  } catch (err) {
+    if (err instanceof Ga4ApiError) {
+      const httpStatus = err.httpStatus === 401 || err.googleStatus === 'UNAUTHENTICATED' ? 401 : 400
+      return NextResponse.json(
+        { success: false, error: err.message, code: err.googleStatus },
+        { status: httpStatus },
+      )
+    }
+    throw err
+  }
 
   if (!snapshot) {
     return NextResponse.json(

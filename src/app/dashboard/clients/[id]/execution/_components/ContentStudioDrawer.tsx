@@ -20,19 +20,30 @@ interface ActiveCampaign {
   name: string
 }
 
+interface BackgroundGenerateParams {
+  campaignId: string
+  platform: string
+  posts_count: number
+  stories_count: number
+  reels_count: number
+  angle_focus?: string
+}
+
 interface Props {
   clientId: string
   item: ExecutionItem
   onClose: () => void
   /** Called after content is generated; parent silently refreshes the kanban. */
   onContentGenerated: () => void
+  /** When set, "生成这条X" closes the drawer immediately and runs generation in the background. */
+  onBackgroundGenerate?: (itemId: string, params: BackgroundGenerateParams) => void
 }
 
 function defaultTabFor(dimension: string): StudioTab {
   return dimension === 'social' ? 'social' : 'article'
 }
 
-export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerated }: Props) {
+export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerated, onBackgroundGenerate }: Props) {
   const [tab, setTab]               = useState<StudioTab>(defaultTabFor(item.dimension))
   const [campaign, setCampaign]     = useState<ActiveCampaign | null>(null)
   const [campaignLoaded, setCampaignLoaded] = useState(false)
@@ -197,6 +208,10 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
               campaignId={campaign?.id}
               campaignName={campaign?.name}
               item={item}
+              onBackgroundGenerate={onBackgroundGenerate ? (params) => {
+                onBackgroundGenerate(item.id, params)
+                onClose()
+              } : undefined}
             />
           ) : (
             // 短视频：Reels 脚本 + Video Studio

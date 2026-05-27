@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-28 06:14 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
+> 最后更新：2026-05-28 10:51 NZST · 当前阶段：**Phase 23 Cross-Agent Memory Layer 全部完成 ✅（PR #112 等 merge）；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅；Phase 14.A Website Connector 全部完成 ✅；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S、Phase 9.0、Phase 12.H 等历史功能全部已实现。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -71,8 +71,10 @@
 ✅ Phase 17     Unified Data Pullback / 统一数据回流层（Phase 17.A ✅ 全部完成 2026-05-27）
 📋 Phase 18     Ads Execution Engine / 广告执行引擎（Meta + Google + TikTok，已登记）
 ✅ Phase 19     API 鉴权整改 / IDOR 修复（🟢 19.A–E 全部完成 2026-05-27，PR #95）
+✅ Phase 20.D   统一看板入口 / 六支柱 FDE 手动录入 + 拖拽排序 + 客户 Portal 分组（Phase 20 子任务 — 2026-05-28 实施）
 📋 Phase 21     AI Content Factory / AI 内容工厂（旗舰能力 — FDE 客户默认产能引擎）
-📋 Phase 22     Data Intelligence Engine / 数据智能引擎（旗舰能力 — 学习引擎）
+📋 Phase 22     Data Intelligence Engine / 数据智能引擎（旗舰能力 — 采集+分析+反馈学习引擎）
+📋 Phase 22.D   主动任务生成器 / AnomalyDetector + 诸葛亮 Proactive（Phase 22 子模块）
 📋 Phase 23     Cross-Agent Memory Layer / 跨 Agent 记忆层（旗舰能力 — 升级自 Phase 8.M，补 L3 长期学习）
 ```
 
@@ -2167,6 +2169,124 @@ L2 授权写太严会把 CTS / Oztop 操作员锁在自己数据外。**19.B 部
 
 ---
 
+## Phase 20.D — Unified Six-Pillar Kanban / 六支柱统一执行看板 ✅ 已实施（2026-05-28）
+
+> **原编号 Phase 24 已更正为 Phase 20.D**（UI 改动量不足以单独立 Phase，归入 Phase 20 子任务）
+> **登记日期**：2026-05-27 · **实施日期**：2026-05-28 · **触发**：OzTop 技术 SEO 修复（Yoast noindex 批量配置）无法写入执行看板，根因是看板只接受 `diagnostic` 和 `marketing_plan` 两个来源，六支柱的 FDE 手动执行工作没有入口。
+
+### 核心问题
+
+看板（`execution_items`）当前只有两个入口：
+- `source='diagnostic'` → 诊断处方自动生成
+- `source='marketing_plan'` → Marketing Plan 审批后派发
+
+**缺失的六个入口**：SEO 技术任务 / GEO 执行任务 / Ads 修复任务 / Reputation 任务 / Competitor 任务 / FDE 手动录入
+
+结果：FDE 执行了大量客户可见的有价值工作（技术 SEO 修复、GBP 更新、竞品分析等），客户完全看不到，无法建立信任感和透明度。
+
+### 目标
+
+> **让看板成为六支柱所有执行工作的统一出口，每条 FDE 工作记录客户都能看到。**
+
+### 架构方案
+
+**数据层（最小改动）**：
+
+```sql
+-- 新增 source 枚举值（替换 CHECK 约束为更宽松的版本）
+ALTER TABLE execution_items
+  DROP CONSTRAINT execution_items_source_check;
+
+ALTER TABLE execution_items
+  ADD CONSTRAINT execution_items_source_check
+  CHECK (source IN (
+    'diagnostic',       -- 原有：诊断处方
+    'marketing_plan',   -- 原有：Marketing Plan
+    'fde_manual'        -- 新增：FDE 手动录入（任意支柱）
+  ));
+
+-- fde_manual 允许两个 FK 都为 NULL
+ALTER TABLE execution_items
+  DROP CONSTRAINT execution_items_source_consistency;
+
+ALTER TABLE execution_items
+  ADD CONSTRAINT execution_items_source_consistency
+  CHECK (
+    (source = 'diagnostic'     AND prescription_id IS NOT NULL AND marketing_plan_id IS NULL) OR
+    (source = 'marketing_plan' AND marketing_plan_id IS NOT NULL AND prescription_id IS NULL) OR
+    (source = 'fde_manual'     AND prescription_id IS NULL AND marketing_plan_id IS NULL)
+  );
+```
+
+**API 层**：
+```
+POST /api/clients/[id]/execution/manual
+Body: { title, description, dimension, fix_type?, due_date?, notes? }
+→ 插入 execution_items(source='fde_manual', dimension, status='completed')
+→ 同步写 flywheel_actions(flywheel, action_type='fde.manual_task', execution_mode='external_manual')
+```
+
+**UI 层**（每个支柱页面）：
+- 「+ 记录 FDE 工作」按钮（简单表单：标题 + 描述 + 日期）
+- 执行看板新增「FDE 手动」来源标签（区别于诊断/Marketing Plan）
+- 客户 Portal 看板：显示所有来源的已完成任务
+
+### 六支柱入口映射
+
+| 支柱 | dimension | 典型 FDE 任务 | 从哪里录入 |
+|------|-----------|-------------|-----------|
+| SEO | `seo` | noindex 修复、robots.txt、sitemap 提交 | SEO Intelligence 页 |
+| GEO | `ai_visibility` | llms.txt、Schema 标记、GEO Directive 部署 | AI Tracker 页 |
+| Ads | `ads` | 暂停亏损词、调整出价、创建否定词 | Ads Intelligence 页 |
+| Social | `social` | 手动发帖、内容审核、账号配置 | 社媒内容矩阵 |
+| Reputation | `reputation` | GBP 回复、差评处理、信任徽章 | Reputation（待建） |
+| Competitor | `competitor` | 竞品分析、差距报告、策略调整 | Competitor（待建） |
+| 通用 | 任意 | 临时 FDE 工作（跨支柱） | 执行看板顶部「+ 录入」 |
+
+### 实施内容（2026-05-28 完成）
+
+**五项确认优化（来自 ME_Kanban_Evolution_Final.docx 2026-05-28 版）：**
+- [x] **统一入口**：执行看板顶部「＋ 录入工作」按钮 → `FdeManualEntryModal`
+- [x] **FDE 手动分组**：`source='fde_manual'` 任务在「📝 FDE 录入工作」分组，平铺显示
+- [x] **拖拽排序**：`FdeManualGroup` 内 HTML5 drag-to-reorder，PATCH `sort_order`
+- [x] **客户 Portal 可见性**：Portal 新增「Active execution work」按支柱分组展示（SEO/GEO/Ads/Social/Reputation/Competitor）
+- [x] **素材依赖标注**：`PlanTask.requires` 字段（none/client_photo/client_video/client_info）+ `kindToRequires()` 自动推导 + kanban 卡片显示徽章
+- ⏸ **Blocked 状态**：暂缓，用任务描述文字记录卡点原因
+
+**相关文件：**
+- `supabase/migrations/20260603000001_execution_items_fde_manual.sql`
+- `src/app/api/clients/[id]/execution/manual/route.ts`
+- `src/app/dashboard/clients/[id]/execution/_components/FdeManualEntryModal.tsx`
+- `src/app/dashboard/clients/[id]/execution/execution-view-model.ts`（新增 `FDE_MANUAL_GROUP_ID`、`fde_manual` 分组）
+- `src/app/dashboard/clients/[id]/execution/page.tsx`（新增按钮 + 分组渲染 + 拖拽 + 录入 Modal）
+- `src/app/portal/[clientId]/page.tsx`（新增 execution tasks section）
+- `src/lib/marketing-plan/types.ts`（新增 `PlanTaskRequires` + `requires` 字段）
+- `src/lib/marketing-plan/task-dispatcher.ts`（新增 `kindToRequires()`）
+- `src/types/diagnostic.ts`（`ExecutionItemSource` 加 `'fde_manual'`）
+
+### 里程碑
+
+- [x] **M1**：数据库 migration 完成 + `POST /manual` API 通过测试
+- [x] **M2**：执行看板显示 `fde_manual` 来源任务 + FDE 能手动录入
+- [x] **M3**：客户 Portal 按支柱分组展示 FDE 工作记录（透明度闭环）
+
+### 优先级依据
+
+- OzTop、CTS 客户 FDE 工作已在执行，但客户完全不可见 → 直接影响客户感知价值
+- 开发量小（1 个 migration + 1 个 API + UI 上加按钮），ROI 极高
+- 是 Phase 15（Reputation）/ Phase 16（Competitor）的前置基础设施
+
+### Phase 编号修正记录（2026-05-28）
+
+| 原草案写法 | 正式修正 | 说明 |
+|-----------|---------|------|
+| Phase 24（统一入口 + 拖拽 + Portal）| **Phase 20.D** | UI 改动量不足以单独立 Phase |
+| Phase 22 = Agent Memory | **Phase 22 = Data Intelligence Engine** | 22 是采集+分析+反馈，不是记忆层 |
+| Phase 22 = 主动任务注入 | **Phase 22.D = 主动任务生成器** | 主动任务是 Phase 22 的一个子模块（22.D）|
+| Phase 23（未命名）| **Phase 23 = Cross-Agent Memory Layer** | L3 长期学习，升级自原 Phase 8.M |
+
+---
+
 ## Phase 24 — Execution Loop Closure（执行闭环修复）📋 已登记，2026-06-06 启动
 
 > **登记日期**：2026-06-06 · **状态**：开发中
@@ -2418,6 +2538,31 @@ AI Content Factory  ←──反馈──  Data Engine  ←──分析──  �
 - ❌ 不依赖第三方仪表盘（Looker、Tableau 等）— 数据归属 ME 是核心护城河
 - ❌ 不只服务 AI Factory 产出 — 6 大支柱所有执行都要被采集和学习
 
+### Phase 22.D — 主动任务生成器（AnomalyDetector + 诸葛亮 Proactive）📋 待开发
+
+> **登记日期**：2026-05-28 · **前置**：Phase 22.A/B 数据采集在跑
+>
+> **架构**（两层分离，职责不混淆）：
+> - **第一层 AnomalyDetectorJob**（纯规则，每日 cron，无 AI）：扫描 `flywheel_metrics`，输出标准化 `AnomalySignal`
+> - **第二层 POST /api/ai/zhugeliang/proactive**（诸葛亮判断）：决策是否打扰客户、生成什么任务
+> - 输出写入 `flywheel_actions(source: "proactive_signal")`，看板显示 ⚡ 系统检测 badge
+
+**内置检测规则（MVP）：**
+
+| 飞轮 | 指标 | 阈值 | Severity |
+|------|------|------|---------|
+| SEO | avg_position | 下跌 > 5 位（连续 3 天）| high |
+| GEO | ai_visibility_score | 下降 > 15% | high |
+| Ads | Meta CPA | 上涨 > 30%（环比）| high |
+| Social | engagement_rate | 下降 > 40%（环比）| medium |
+| SEO | total_clicks | 下降 > 20%（周环比）| medium |
+
+**子任务：**
+- `22.D.1` anomaly_signals 表 migration + AnomalyDetectorJob 规则引擎骨架 (~1 天)
+- `22.D.2` POST /api/ai/zhugeliang/proactive endpoint (~1 天)
+- `22.D.3` /api/cron/anomaly-detector cron route (~0.5 天)
+- `22.D.4` 看板 UI：主动任务显示 ⚡ 系统检测 badge (~0.5 天)
+
 ---
 
 ## Phase 23 — Cross-Agent Memory Layer（旗舰能力 · 升级自 Phase 8.M）📋 战略确认，待排期
@@ -2527,6 +2672,17 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 - **P23.A+D** — L3 记忆层地基：4 张新表 + MemoryService + 诸葛亮 prompt 注入 + 决策历史自动写入
 - **P13.UI.3** — Website homepage upgraded to shared UI language
 - **P13.A.7** — Portal magic link can reach client portal
+
+### 2026-05-28（Phase 20.D — 六支柱统一看板入口）
+
+- **Phase 20.D 实施完成** — 执行看板新增「＋ 录入工作」统一入口（FDE 可从任意支柱直接录入工作，不绑定处方/Marketing Plan）；migration `20260603000001` 添加 `fde_manual` 来源；`FdeManualEntryModal` 组件；看板新增「📝 FDE 录入工作」分组（平铺 + 拖拽排序）；客户 Portal 新增「Active execution work」按支柱分组展示（透明度闭环）；`PlanTask.requires` 素材依赖标注（none/client_photo/client_video/client_info）；Phase 编号修正：Phase 24→Phase 20.D、Phase 22 明确为 Data Intelligence Engine、新增 Phase 22.D 主动任务生成器
+- **ROADMAP 编号修正登记** — 文档化 Phase 24/22/22.D/23 正式命名，与 ME_Kanban_Evolution_Final.docx 保持一致
+
+### 2026-05-27（OzTop 技术 SEO 修复 + FDE 看板需求登记）
+
+- **OzTop Yoast 归档页 noindex 批量修复** — FDE 执行；在 oztopbuildingsupplies.com.au WP 后台完成 11 项 Taxonomy/Archive 关闭操作，预计消灭 150–180 个「已抓取未收录」URL（原计 211 个）：Tags ✅ Product tags ✅ Categories ✅ Product categories ✅ Brands ×2 ✅ Product Colour ✅ Product Flooring Colours ✅ Product shipping classes ✅ Author archives ✅ Date archives ✅ Format archives ✅ Media pages ✅；llms.txt 确认已开启（GEO 信号激活）
+- **发现：Brands 分类重复** — 站点同时安装两个 Brand 插件，生成 `/brand/` 和 `/brands/` 两套重复 URL；两者均已 noindex，但需在下一次 FDE 会话清理重复插件并做 301 合并
+- **新需求登记 `FDE-KANBAN-1`** — 技术 SEO 执行任务缺乏看板归宿：诊断引擎发现的技术 SEO findings（noindex 问题、robots.txt 泄漏、sitemap 异常等）当前不会自动生成看板卡片；FDE 执行的技术 SEO 工作只能手动记录 ROADMAP，无法与 Marketing Plan 内容任务在同一看板追踪。**需求**：SEO 诊断 findings → 自动生成 `task_type: technical_seo` 看板任务，与内容任务并排显示；待排入 Phase 12.I 或 Phase 15 SEO 执行闭环
 
 ### 2026-05-26（Oztop 手动发布 + Site Knowledge Graph 设计）
 

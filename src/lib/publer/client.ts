@@ -55,15 +55,19 @@ export async function schedulePost(params: {
   accountId: string
   provider: string
   assetType: string
-  media: { id: string; type: string }
+  /** null = text-only post (no media) */
+  media: { id: string; type: string } | null
   caption: string
   scheduledAt: string
 }): Promise<{ job_id: string }> {
   const { accountId, provider, assetType, media, caption, scheduledAt } = params
-  // Facebook: photo→"photo", video→"video", Instagram: video→"reel"
+  // Facebook: photo→"photo", video→"video", Instagram: video→"reel", no media→"status"
   const networkType = assetType === 'video'
     ? (provider === 'instagram' ? 'reel' : 'video')
-    : 'photo'
+    : media ? 'photo' : 'status'
+
+  const networkPayload: Record<string, unknown> = { type: networkType, text: caption }
+  if (media) networkPayload.media = [{ id: media.id, type: media.type }]
 
   const res = await fetch(`${PUBLER_BASE}/posts/schedule`, {
     method: 'POST',
@@ -72,13 +76,7 @@ export async function schedulePost(params: {
       bulk: {
         state: 'scheduled',
         posts: [{
-          networks: {
-            [provider]: {
-              type: networkType,
-              text: caption,
-              media: [{ id: media.id, type: media.type }],
-            },
-          },
+          networks: { [provider]: networkPayload },
           accounts: [{ id: accountId, scheduled_at: scheduledAt }],
         }],
       },

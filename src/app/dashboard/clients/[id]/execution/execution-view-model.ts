@@ -8,6 +8,8 @@ import type {
 export const AUTONOMOUS_GROUP_ID = '__autonomous__'
 /** Marketing Plan 任务分组前缀 — 实际 pid 形如 'mp:<plan_id>' */
 export const MARKETING_PLAN_GROUP_PREFIX = 'mp:'
+/** FDE 手动录入分组 ID — source='fde_manual' 的所有任务聚合到此组（Phase 20.D）*/
+export const FDE_MANUAL_GROUP_ID = '__fde_manual__'
 
 export interface PrescriptionMeta {
   id: string
@@ -56,7 +58,7 @@ export interface GroupData {
   derivable: boolean
   editable: boolean    // 是否允许新增/编辑执行项（自主行动泳道为 false）
   /** 来源类型 — 用于 UI 显示不同 badge */
-  kind: 'prescription' | 'marketing_plan' | 'autonomous'
+  kind: 'prescription' | 'marketing_plan' | 'autonomous' | 'fde_manual'
 }
 
 const METRIC_DISPLAY: Record<string, string> = {
@@ -89,11 +91,13 @@ export function isAutonomousItem(item: ItemWithLogs): boolean {
 /**
  * 计算 item 所属分组的 pid：
  *   - 自主行动 → AUTONOMOUS_GROUP_ID
+ *   - fde_manual 来源 → FDE_MANUAL_GROUP_ID（Phase 20.D）
  *   - marketing_plan 来源 → 'mp:' + marketing_plan_id
  *   - 否则 → prescription_id（兜底用空字符串）
  */
 function pidForItem(item: ItemWithLogs): string {
   if (isAutonomousItem(item)) return AUTONOMOUS_GROUP_ID
+  if (item.source === 'fde_manual') return FDE_MANUAL_GROUP_ID
   if (item.source === 'marketing_plan' && item.marketing_plan_id) {
     return MARKETING_PLAN_GROUP_PREFIX + item.marketing_plan_id
   }
@@ -115,6 +119,7 @@ export function buildExecutionGroups(
 
   return Object.entries(itemsByGroup)
     .map(([pid, groupItems]) => {
+      if (pid === FDE_MANUAL_GROUP_ID) return buildFdeManualGroup(groupItems)
       if (pid.startsWith(MARKETING_PLAN_GROUP_PREFIX)) {
         const planId = pid.slice(MARKETING_PLAN_GROUP_PREFIX.length)
         return buildMarketingPlanGroup(pid, groupItems, mpMap.get(planId))
@@ -177,5 +182,25 @@ function buildMarketingPlanGroup(
     derivable: false,    // Marketing Plan 不派生（重新生成走 generator）
     editable: !archived,
     kind: 'marketing_plan',
+  }
+}
+
+/**
+ * Phase 20.D — FDE 手动录入分组。
+ * weight = 7：排在所有处方/Marketing Plan 之后、飞轮自主行动（0）之前。
+ * 任务按 sort_order 排序，FDE 可拖拽调整优先级。
+ */
+function buildFdeManualGroup(groupItems: ItemWithLogs[]): GroupData {
+  // sort by sort_order ascending (already ordered from API)
+  const sorted = [...groupItems].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+  return {
+    pid:      FDE_MANUAL_GROUP_ID,
+    items:    sorted,
+    label:    '📝 FDE 录入工作',
+    weight:   7,
+    archived: false,
+    derivable: false,
+    editable:  true,
+    kind:      'fde_manual',
   }
 }

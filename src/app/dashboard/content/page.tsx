@@ -494,7 +494,7 @@ export default function ContentBoardPage() {
       const updated: ContentPost = { ...modalPost, status: newStatus };
       setModalPost(updated);
       setPosts(prev => prev.map(p => p.id === updated.id ? updated : p));
-      setPublishMsg(`✓ 已${scheduleAt ? '调度' : '发布'}到 Publer (job=${json.job_id ?? json.job_ids?.join(',') ?? 'ok'})`);
+      setPublishMsg(`✓ 已${scheduleAt ? '排期推送' : '推送'}到 Publishing Hub (job=${json.job_id ?? json.job_ids?.join(',') ?? 'ok'})`);
     } catch (err) {
       setPublishMsg(`✗ ${(err as Error).message}`);
     } finally {
@@ -659,8 +659,8 @@ export default function ContentBoardPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">内容板</h1>
-          <p className="text-sm text-gray-500 mt-1">{posts.length} 条内容</p>
+          <h1 className="text-2xl font-bold text-gray-900">🚀 Launch Hub</h1>
+          <p className="text-sm text-gray-500 mt-1">{posts.length} 条内容 · 审批 / 排期 / 推送</p>
         </div>
         <Link
           href={selectedClient ? `/dashboard/clients/${selectedClient}/execution` : '/dashboard/clients'}
@@ -771,7 +771,7 @@ export default function ContentBoardPage() {
               disabled={batchPubRunning || batching}
               className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors font-medium"
             >
-              {batchPubRunning ? '发布中…' : '🚀 发布全部到 Publer'}
+              {batchPubRunning ? '推送中…' : '🚀 全部推送 Publishing Hub'}
             </button>
             <button
               onClick={() => setShowDeleteConfirm(true)}
@@ -1076,7 +1076,7 @@ export default function ContentBoardPage() {
                       <p className={`text-[11px] ${linkMsg.startsWith('✓') ? 'text-green-600' : 'text-red-500'}`}>{linkMsg}</p>
                     )}
                     <p className="text-[10px] text-purple-600/70 leading-relaxed">
-                      关联后：帖子发布到 Publer 成功（→ status=published），执行项会自动 mark 完成 + 写工作日志。
+                      关联后：内容推送到 Publishing Hub 成功（→ status=published），执行项会自动 mark 完成 + 写工作日志。
                     </p>
                   </div>
                 );
@@ -1084,7 +1084,28 @@ export default function ContentBoardPage() {
 
               {/* 排期 + 发布到 Publer */}
               <div className="rounded-lg border border-indigo-100 bg-indigo-50/40 p-3 space-y-2.5">
-                <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wider">排期与发布</p>
+                <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wider">排期与发布 · Publishing Hub</p>
+
+                {/* 发布内容预览 */}
+                {(modalPost.caption || (modalPost.hashtags?.length ?? 0) > 0) && (
+                  <div className="rounded-lg bg-white border border-indigo-200 px-3 py-2 space-y-1">
+                    <p className="text-[10px] font-medium text-indigo-500 uppercase tracking-wider">将发布内容</p>
+                    {modalPost.platforms?.length > 0 && (
+                      <div className="flex gap-1">
+                        {modalPost.platforms.map(p => (
+                          <span key={p} className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded capitalize">{p}</span>
+                        ))}
+                      </div>
+                    )}
+                    {modalPost.caption && (
+                      <p className="text-xs text-gray-700 line-clamp-2">{modalPost.caption}</p>
+                    )}
+                    {(modalPost.hashtags?.length ?? 0) > 0 && (
+                      <p className="text-[11px] text-indigo-500">{modalPost.hashtags!.join(' ')}</p>
+                    )}
+                  </div>
+                )}
+
                 <div className="flex items-end gap-2 flex-wrap">
                   <div className="flex-1 min-w-[200px]">
                     <label className="block text-[11px] text-gray-500 mb-1">计划发布时间</label>
@@ -1105,14 +1126,14 @@ export default function ContentBoardPage() {
                   <button
                     onClick={() => void handlePublishToPubler()}
                     disabled={publishing || modalPost.status === 'draft' || modalPost.status === 'rejected'}
-                    title={modalPost.status === 'draft' ? '需先批准才能发布' : modalPost.status === 'rejected' ? '已拒绝的内容不能发布' : ''}
+                    title={modalPost.status === 'draft' ? '需先批准才能推送' : modalPost.status === 'rejected' ? '已拒绝的内容不能推送' : ''}
                     className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-4 py-1.5 rounded-lg font-semibold disabled:opacity-50"
                   >
-                    {publishing ? '发布中…' : scheduleAt ? '🚀 调度到 Publer' : '🚀 立即发布到 Publer'}
+                    {publishing ? '推送中…' : scheduleAt ? '🚀 推送到 Publishing Hub' : '🚀 立即推送 Publishing Hub'}
                   </button>
                 </div>
                 {(modalPost.status === 'draft' || modalPost.status === 'rejected') && (
-                  <p className="text-[11px] text-amber-600">⚠ 当前状态为「{modalPost.status === 'draft' ? '草稿' : '已拒绝'}」，需先批准才能发布到 Publer。</p>
+                  <p className="text-[11px] text-amber-600">⚠ 当前状态为「{modalPost.status === 'draft' ? '草稿' : '已拒绝'}」，需先批准才能推送到 Publishing Hub。</p>
                 )}
                 {scheduleMsg && (
                   <p className={`text-[11px] ${scheduleMsg.startsWith('✓') ? 'text-green-600' : 'text-red-500'}`}>{scheduleMsg}</p>
