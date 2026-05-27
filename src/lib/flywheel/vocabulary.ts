@@ -226,6 +226,17 @@ export const SOCIAL_METRIC_KEY = {
 
   /** Count of content_posts with status = 'scheduled' */
   SCHEDULED_COUNT: 'social.posts.scheduled_count',
+
+  // ── Per-post engagement (P12.C.3 — pulled from Publer daily) ─────────────
+
+  /** Like / reaction count for a specific published post */
+  POST_LIKES: 'social.post.likes',
+
+  /** Comment count for a specific published post */
+  POST_COMMENTS: 'social.post.comments',
+
+  /** Share / retweet count for a specific published post */
+  POST_SHARES: 'social.post.shares',
 } as const
 
 export type SocialMetricKey = (typeof SOCIAL_METRIC_KEY)[keyof typeof SOCIAL_METRIC_KEY]
