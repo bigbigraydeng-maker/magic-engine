@@ -15,8 +15,6 @@ interface Connector {
   docsUrl?: string
 }
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 export default function ConnectorsPage() {
   const params = useParams()
   const clientId = params.id as string
@@ -28,9 +26,7 @@ export default function ConnectorsPage() {
     void (async () => {
       setLoading(true)
       try {
-        const res = await fetch(`/api/clients/${clientId}/connectors/status`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        })
+        const res = await fetch(`/api/clients/${clientId}/connectors/status`)
         if (res.ok) {
           const data = await res.json() as { connectors: Connector[] }
           setConnectors(data.connectors ?? [])

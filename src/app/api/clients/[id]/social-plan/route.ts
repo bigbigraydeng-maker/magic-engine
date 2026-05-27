@@ -43,6 +43,7 @@ interface ViralRef {
   persona_fit:       string[] | null
   view_count?:       number | null
   video_title?:      string | null
+  opening_hook?:     { type: string; script: string; feel: string } | null
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -73,6 +74,7 @@ function formatViralInsights(refs: ViralRef[]): string {
           .join(' | ')
       : null
 
+    const hook = r.opening_hook
     const lines = [
       `REF ${i + 1}${titlePart}${viewBadge}: ${desc}`,
       `  Key Techniques : ${techniques}`,
@@ -80,6 +82,12 @@ function formatViralInsights(refs: ViralRef[]): string {
       `  Target Persona : ${personas}`,
     ]
     if (scores) lines.push(`  Style Scores   : ${scores}`)
+    if (hook?.type) {
+      const hookLine = hook.script
+        ? `  Opening Hook   : ${hook.type} — "${hook.script}" (${hook.feel})`
+        : `  Opening Hook   : ${hook.type} (${hook.feel})`
+      lines.push(hookLine)
+    }
     return lines.join('\n')
   })
   return [
@@ -194,7 +202,7 @@ export async function POST(
     //   4. Include style_scores + persona_fit so AI can map scores to Seedance fields
     let viralInsightsText = ''
     try {
-      const SELECT_FIELDS = 'style_scores, style_tags, style_description, key_techniques, persona_fit, view_count, video_title'
+      const SELECT_FIELDS = 'style_scores, style_tags, style_description, key_techniques, persona_fit, view_count, video_title, opening_hook'
 
       // Step 1: get client's industry for targeted matching
       const { data: clientRow } = await supabaseAdmin

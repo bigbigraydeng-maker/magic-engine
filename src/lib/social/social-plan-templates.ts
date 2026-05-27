@@ -631,6 +631,29 @@ Each JSON object MUST have ALL of these keys (no omissions):
      "Practical Buyer - Planner"   → clear problem-to-solution arc, benefit-forward text overlays
      "Practical Buyer - Converter" → fast pace, explicit offer in scene 6–7, urgent CTA at scene 8
 
+   opening_hook → shape Scene 1 visual + ⚠️ CRITICAL START INSTRUCTION in seedance_i2v_prompt:
+   (When "Opening Hook" appears in VIRAL REFERENCE INSIGHTS, mirror its type in your Scene 1 and hook_line)
+     "visual_shock"           → Scene 1 Action: hard cut pattern interrupt at 0.0s, no lead-in;
+                                 ⚠️ CRITICAL START INSTRUCTION: "Video MUST begin with a dramatic unexpected visual —
+                                 no gentle pan-in, no fade-up — straight-cut to Scene 1 at 0.0s"
+     "ugc_selfie"             → Scene 1 Action: handheld intimate framing, creator-style — slightly shaky, direct eye-contact feel;
+                                 ⚠️ CRITICAL START INSTRUCTION: "Video MUST begin with an authentic direct-to-camera moment at 0.0s"
+     "text_overlay_question"  → Scene 1 Text Overlay: bold question or provocative statement appears at exactly 0.0s before any
+                                 other animated element; ⚠️ CRITICAL START INSTRUCTION: "Text question overlay renders at frame 1"
+     "product_reveal"         → Scene 1 Action: immediate product close-up at 0.0s — skip establishing shot entirely;
+                                 ⚠️ CRITICAL START INSTRUCTION: "Video MUST begin with tight product detail shot at 0.0s"
+     "testimonial_start"      → Scene 1 Action: authentic person-facing framing at 0.0s, unpolished genuine delivery feel;
+                                 ⚠️ CRITICAL START INSTRUCTION: "Video MUST open with a testimonial-style moment at 0.0s"
+     "sound_cue"              → Scene 1 Audio: music drop or distinctive sound lands at exactly 0.0s driving the first cut;
+                                 ⚠️ CRITICAL START INSTRUCTION: "Audio hook fires at frame 1 — visual cut driven by sound"
+     "problem_statement"      → Scene 1 Visual/Text: pain point surfaced immediately at 0.0s before any solution shown;
+                                 ⚠️ CRITICAL START INSTRUCTION: "Video MUST open with the viewer's problem, not the solution"
+     "scenic_beauty"          → Scene 1 Action: slow cinematic wide reveal at 0.0s, no abrupt cuts in opening 2s;
+                                 ⚠️ CRITICAL START INSTRUCTION: "Video MUST begin with stunning environment wide-shot reveal"
+   opening_hook feel → Scene 1 Action modifier:
+     "abrupt-cut"    → Scene 1 Action must use hard cut / jump-cut — no smooth pan or fade
+     "smooth-reveal" → Scene 1 Action must use gradual reveal, slow push-in, or cinematic slide — no jump-cuts
+
 7. caption: string — Facebook Reels caption. AU/NZ English. 2–3 short paragraphs. Clear CTA. 5–8 hashtags at end.
 
 8. hashtags: string[] — standalone array of 5–8 hashtags.

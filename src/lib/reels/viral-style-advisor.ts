@@ -20,9 +20,11 @@ export async function getViralStyleHint(
 ): Promise<string | null> {
   // Try with exact content_goal match first
   // Filter: only learnable (good views) and NOT our own videos
+  const FIELDS = 'style_description, style_tags, key_techniques, persona_fit, view_count, video_title, channel_title, opening_hook'
+
   let { data: refs } = await supabaseAdmin
     .from('viral_reference_library')
-    .select('style_description, style_tags, key_techniques, persona_fit, view_count, video_title, channel_title')
+    .select(FIELDS)
     .eq('industry', industry)
     .eq('analysis_status', 'done')
     .eq('content_goal', contentGoal)
@@ -35,7 +37,7 @@ export async function getViralStyleHint(
   if (!refs || refs.length === 0) {
     const fallback = await supabaseAdmin
       .from('viral_reference_library')
-      .select('style_description, style_tags, key_techniques, persona_fit, view_count, video_title, channel_title')
+      .select(FIELDS)
       .eq('industry', industry)
       .eq('analysis_status', 'done')
       .eq('is_learnable', true)
@@ -47,14 +49,29 @@ export async function getViralStyleHint(
 
   if (!refs || refs.length === 0) return null
 
+  // Separate hook data for aggregated summary (top 3 hook types across all refs)
+  const hookTypes = refs
+    .map(r => (r.opening_hook as { type?: string } | null)?.type)
+    .filter((t): t is string => Boolean(t))
+  const hookFreq = new Map<string, number>()
+  for (const t of hookTypes) hookFreq.set(t, (hookFreq.get(t) ?? 0) + 1)
+  const topHooks = [...hookFreq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)
+
   const examples = refs
     .filter(r => r.style_description)
     .map((r, i) => {
+      const hook = r.opening_hook as { type?: string; script?: string; feel?: string } | null
       const parts: string[] = []
       const viewBadge = r.view_count
         ? ` [${formatViewCount(r.view_count)} views]`
         : ''
       parts.push(`${i + 1}.${viewBadge} ${r.style_description}`)
+      if (hook?.type) {
+        const hookLine = hook.script
+          ? `   Hook (first 1.5s): ${hook.type} — "${hook.script}"${hook.feel ? ` (${hook.feel})` : ''}`
+          : `   Hook (first 1.5s): ${hook.type}${hook.feel ? ` (${hook.feel})` : ''}`
+        parts.push(hookLine)
+      }
       if (r.key_techniques?.length) parts.push(`   Techniques: ${r.key_techniques.join(', ')}`)
       if (r.style_tags?.length)     parts.push(`   Tags: ${r.style_tags.join(', ')}`)
       return parts.join('\n')
@@ -67,14 +84,21 @@ export async function getViralStyleHint(
                   : contentGoal === 'education' ? 'Educational'
                   : 'Brand/Inspiration'
 
+  const hookSummaryLine = topHooks.length > 0
+    ? `Top opening hook patterns in this industry: ${topHooks.map(([t, n]) => `${t} (×${n})`).join(', ')}.`
+    : null
+
   return [
     `## Proven ${industry} ${goalLabel} Video Style References`,
     `Study these high-performing video patterns (ranked by view count) and incorporate their best elements naturally:`,
     '',
     ...examples,
     '',
+    hookSummaryLine
+      ? `OPENING HOOK GUIDANCE: ${hookSummaryLine} Mirror the dominant hook style in your opening_frame_prompt and i2v_video_prompt opening section.`
+      : null,
     `Apply the energy, visual language, and techniques above to this brief.`,
-  ].join('\n')
+  ].filter((line): line is string => line !== null).join('\n')
 }
 
 function formatViewCount(n: number): string {
