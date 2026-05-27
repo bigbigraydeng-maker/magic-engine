@@ -215,14 +215,14 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-28 05:54 NZST （**Phase 23.A+D+B+D.2 ✅ commit & push**；branch: feat/phase-23-memory-layer；等 PM merge + 决定 23.C/23.E 顺序）
+> 最后更新：2026-05-28 06:04 NZST （**Phase 23.A+D+B+D.2+C ✅ commit & push**；branch: feat/phase-23-memory-layer；等 PM merge + 决定 23.E 顺序）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P23.C** | 自动抽取器：从 flywheel_outcomes 抽取 learned_preferences | ⬅️ 下一个 |
-| **P23.E** | Memory 浏览/编辑/导出：FDE 查看、纠错、清空客户记忆 | 次优先 |
+| **P23.E** | Memory 浏览/编辑/导出：FDE 查看、纠错、清空客户记忆 | ⬅️ 下一个 |
 
 **已完成全景（最近几个 Phase）**：
+- ✅ **Phase 23.C**（1 commit）：L3 记忆自动抽取器 — outcomes→patterns/failed/preferences + decision verdict 回填 + cron + 手动触发
 - ✅ **Phase 23.D.2**（1 commit）：张骞/华佗/鲁班 三 Agent 注入 L3 记忆 + 共享 `formatMemoryForPrompt`（AI Factory 待 Phase 21）
 - ✅ **Phase 23.A+D**（1 commit）：4 张 L3 记忆表 + MemoryService + 诸葛亮 prompt 注入 + 决策历史自动写入
 - ✅ **Phase 23.B**（1 commit）：FDE 标注 UI — POST `/api/clients/[id]/memory/annotate` + MemoryAnnotationPanel 组件
@@ -230,7 +230,7 @@ git push origin master   # 触发 Render 部署
 - ✅ **Phase 17.A**（P17.A.1–A.6 全部 merge）：GSC/GA4 数据回流 + 飞轮归因桥接 + 每日 cron + 客户「数据」tab
 - ✅ **Phase 19.A–E**（PR #95）：89 个 `/api/clients/[id]/*` 路由 IDOR 封堵 + NEXT_PUBLIC 密钥泄漏清除
 
-下一 session：`继续 Phase 23 P23.C 自动抽取器` 或 `继续 Phase 23 P23.E 记忆浏览/编辑`（等 PM 决定）
+下一 session：`继续 Phase 23 P23.E 记忆浏览/编辑`（或等 PM merge）
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox

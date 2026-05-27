@@ -8,3 +8,9 @@ export {
   updateDecisionOutcome,
 } from './service'
 export { formatMemoryForPrompt, type FormatMemoryOptions } from './format'
+export {
+  runExtractorForClient,
+  runExtractorForAllClients,
+  type ExtractorResult,
+  type ExtractorBatchResult,
+} from './extractor'
