@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-27 23:19 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
+> 最后更新：2026-05-27 23:44 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -18,6 +18,8 @@
 - [x] **P13.UI.7 entry shell visual refresh** - Align `/portal/login`, `/login`, and the admin dashboard shell/sidebar with the shared Magic Engine product UI language.
 - [x] **P13.UI.8 admin workspace mobile refresh** - Align the admin content workspace and Content Studio drawer with the shared Magic Engine UI language; repair mobile usability.
 - [x] **P13.UI.9 execution board drawer polish** - Clean up execution board sidebar scrolling, header actions, and task detail drawer so the admin workspace reads as one Magic Engine surface.
+- [x] **P13.UI.17 inline prescription rail refresh** - Align the supplement/revision prescription drawer with the upgraded Magic Engine rail shell and stop it from fighting the execution board scroll layer.
+- [ ] **P13.UI.18 Zhangqian discovery deliverable refresh** - Align the customer-facing Zhangqian discovery report and downloadable PDF/DOCX deliverables with the shared Magic Engine visual language.
 
 ## 当前进度速览
 
@@ -2487,6 +2489,7 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 ### 2026-05-27
 
 - **P17.A.3** — GSC/GA4 快照 UI：`DataPullbackSection`（执行看板数据回流卡）+ connector 详情页「立即同步」按钮 + 快照指标预览 [feat/phase-17-a-gsc-pullback]
+- **P13.UI.17** — Inline prescription supplement/revision drawer upgraded to the shared right-rail shell with stronger overlay layering, contained scrolling, and refreshed Magic Engine controls.
 
 ### 2026-06-04
 

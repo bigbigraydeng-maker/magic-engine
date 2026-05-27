@@ -33,9 +33,9 @@ const URGENCY: Array<{ v: PrescriptionIntake['timeline_urgency']; label: string 
 ]
 
 const FIX_BADGE: Record<string, { label: string; cls: string }> = {
-  me_auto:     { label: 'ME',   cls: 'bg-blue-100 text-blue-700' },
-  fde_manual:  { label: 'FDE',  cls: 'bg-purple-100 text-purple-700' },
-  third_party: { label: '第三方', cls: 'bg-gray-100 text-gray-600' },
+  me_auto:     { label: 'ME',   cls: 'bg-cyan-50 text-cyan-800 ring-1 ring-cyan-200' },
+  fde_manual:  { label: 'FDE',  cls: 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200' },
+  third_party: { label: '第三方', cls: 'bg-slate-100 text-slate-600 ring-1 ring-slate-200' },
 }
 
 export function InlinePrescriptionDrawer({
@@ -176,33 +176,34 @@ export function InlinePrescriptionDrawer({
   }, [prescriptionId, clientId, onApproved, onClose])
 
   const overall = selfGrade?.overall ?? null
-  const gradeCls = overall == null ? 'bg-gray-100 text-gray-600'
-    : overall >= 8 ? 'bg-green-100 text-green-700'
-    : overall >= 6 ? 'bg-amber-100 text-amber-700'
-    : 'bg-red-100 text-red-700'
+  const gradeCls = overall == null ? 'bg-slate-100 text-slate-600 ring-1 ring-slate-200'
+    : overall >= 8 ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
+    : overall >= 6 ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200'
+    : 'bg-rose-50 text-rose-700 ring-1 ring-rose-200'
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <button onClick={onClose} aria-label="关闭" className="absolute inset-0 bg-black/40" />
+    <div className="fixed inset-0 z-[90] flex justify-end">
+      <button onClick={onClose} aria-label="关闭" className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm" />
 
-      <div className="relative bg-white w-full sm:w-[520px] h-full flex flex-col shadow-2xl">
+      <div className="relative flex h-dvh w-full flex-col overflow-hidden border-l border-slate-200 bg-[#fbfcf7] shadow-2xl sm:w-[min(760px,100vw)] xl:w-[840px]">
         {/* Header */}
-        <div className="shrink-0 border-b border-gray-200 px-5 py-3 flex items-center gap-3">
-          <span className="text-xl">{mode === 'supplement' ? '🧩' : '↻'}</span>
+        <div className="flex shrink-0 items-start gap-3 border-b border-slate-200 bg-white px-5 py-4">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-cyan-200 bg-cyan-50 text-xl">{mode === 'supplement' ? '🧩' : '↻'}</span>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-900">{modeTitle}</p>
-            <p className="text-xs text-gray-400 truncate">对【{priorLabel}】· {modeHint}</p>
+            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-cyan-800">Prescription Rail</p>
+            <p className="text-lg font-black text-slate-950">{modeTitle}</p>
+            <p className="line-clamp-2 text-sm font-semibold text-slate-500">对【{priorLabel}】· {modeHint}</p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-lg px-1" aria-label="关闭">✕</button>
+          <button onClick={onClose} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-xl font-black text-slate-400 transition-colors hover:border-slate-300 hover:text-slate-700" aria-label="关闭">✕</button>
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-5">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5">
           {/* ── Step: form ── */}
           {step === 'form' && (
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="mb-1 block text-sm font-black text-slate-700">
                   {goalLabel} <span className="text-red-500">*</span>
                 </label>
                 <textarea
@@ -210,30 +211,30 @@ export function InlinePrescriptionDrawer({
                   onChange={e => setGoal(e.target.value)}
                   rows={3}
                   placeholder={goalPlaceholder}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  {budgetLabel} <span className="text-xs font-normal text-gray-400">（可选）</span>
+                <label className="mb-1 block text-sm font-black text-slate-700">
+                  {budgetLabel} <span className="text-xs font-semibold text-slate-400">（可选）</span>
                 </label>
                 <div className="flex items-center gap-2">
-                  <span className="text-gray-500 text-sm">AUD $</span>
+                  <span className="text-sm font-bold text-slate-500">AUD $</span>
                   <input
                     type="number" min={0} max={50000} step={100}
                     value={budget}
                     onChange={e => setBudget(e.target.value)}
                     placeholder="0"
-                    className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                    className="w-36 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
                   />
-                  <span className="text-xs text-gray-400">/月</span>
+                  <span className="text-xs font-semibold text-slate-400">/月</span>
                 </div>
-                <p className="text-xs text-gray-400 mt-1">留空或填 0 = 本次调整不涉及额外预算</p>
+                <p className="mt-1 text-xs font-semibold text-slate-400">留空或填 0 = 本次调整不涉及额外预算</p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">时间紧迫度</label>
+                <label className="mb-1.5 block text-sm font-black text-slate-700">时间紧迫度</label>
                 <div className="grid grid-cols-3 gap-2">
                   {URGENCY.map(o => (
                     <button
@@ -242,8 +243,8 @@ export function InlinePrescriptionDrawer({
                       onClick={() => setUrgency(o.v)}
                       className={`rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors ${
                         urgency === o.v
-                          ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
-                          : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                          ? 'border-cyan-300 bg-cyan-50 text-cyan-800'
+                          : 'border-slate-200 bg-white text-slate-600 hover:border-cyan-200 hover:text-cyan-800'
                       }`}
                     >
                       {o.label}
@@ -253,13 +254,13 @@ export function InlinePrescriptionDrawer({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">补充说明（可选）</label>
+                <label className="mb-1 block text-sm font-black text-slate-700">补充说明（可选）</label>
                 <textarea
                   value={notes}
                   onChange={e => setNotes(e.target.value)}
                   rows={2}
                   placeholder="例：客户已有 HubSpot 账户、没有视频拍摄设备…"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
                 />
               </div>
 
@@ -272,10 +273,10 @@ export function InlinePrescriptionDrawer({
           {/* ── Step: generating ── */}
           {step === 'generating' && (
             <div className="py-12 text-center space-y-3">
-              <div className="animate-spin w-10 h-10 border-4 border-indigo-400 border-t-transparent rounded-full mx-auto" />
-              <p className="text-sm font-medium text-gray-900">诸葛亮正在{modeTitle}…</p>
-              <p className="text-sm text-gray-500 min-h-[1.5em]">{progress ?? ''}</p>
-              <p className="text-xs text-gray-400 tabular-nums">
+              <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-cyan-400 border-t-transparent" />
+              <p className="text-sm font-black text-slate-950">诸葛亮正在{modeTitle}…</p>
+              <p className="min-h-[1.5em] text-sm font-semibold text-slate-500">{progress ?? ''}</p>
+              <p className="text-xs tabular-nums text-slate-400">
                 已用时 {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')} · 通常 60–150 秒
               </p>
             </div>
@@ -286,11 +287,11 @@ export function InlinePrescriptionDrawer({
             <div className="space-y-4">
               {/* 诸葛亮自评 */}
               {selfGrade && genMeta && (
-                <div className="flex items-center gap-3 rounded-lg bg-gray-50 p-3">
+                <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3">
                   <span className={`px-2.5 py-1 rounded-lg font-bold text-base tabular-nums ${gradeCls}`}>
                     {overall?.toFixed(1)} / 10
                   </span>
-                  <div className="text-xs text-gray-500">
+                  <div className="text-xs font-semibold text-slate-500">
                     诸葛亮自评 · ${genMeta.cost_usd.toFixed(3)} · {(genMeta.duration_ms / 1000).toFixed(0)}s
                   </div>
                 </div>
@@ -298,29 +299,29 @@ export function InlinePrescriptionDrawer({
 
               {/* 摘要 */}
               <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                <p className="mb-1 text-xs font-black uppercase tracking-wide text-cyan-800">
                   {mode === 'supplement' ? '补充摘要' : '修订摘要'}
                 </p>
-                <p className="text-sm text-gray-700">{content.summary}</p>
+                <p className="text-sm font-semibold text-slate-700">{content.summary}</p>
               </div>
 
               {/* 新增动作（按 phase） */}
               {content.phases.map(phase => (
                 <div key={phase.phase_number}>
-                  <p className="text-xs font-semibold text-gray-600 mb-1.5">
+                  <p className="mb-1.5 text-xs font-black text-slate-600">
                     Phase {phase.phase_number} · {phase.name}
                   </p>
                   <div className="space-y-1.5">
                     {phase.actions.map((a: PrescriptionAction) => {
-                      const fb = FIX_BADGE[a.fix_type] ?? { label: a.fix_type, cls: 'bg-gray-100 text-gray-600' }
+                      const fb = FIX_BADGE[a.fix_type] ?? { label: a.fix_type, cls: 'bg-slate-100 text-slate-600 ring-1 ring-slate-200' }
                       return (
-                        <div key={a.id} className="flex items-start gap-2 text-xs">
-                          <span className={`shrink-0 px-1.5 py-0.5 rounded font-medium ${fb.cls}`}>{fb.label}</span>
+                        <div key={a.id} className="flex items-start gap-2 rounded-lg border border-slate-200 bg-white p-3 text-xs">
+                          <span className={`shrink-0 rounded px-1.5 py-0.5 font-black ${fb.cls}`}>{fb.label}</span>
                           <div className="flex-1 min-w-0">
-                            <p className="font-medium text-gray-900">{a.title}</p>
-                            <p className="text-gray-500">{a.description}</p>
+                            <p className="font-black text-slate-950">{a.title}</p>
+                            <p className="font-semibold text-slate-500">{a.description}</p>
                             {a.estimated_hours != null && (
-                              <span className="text-gray-400">⏱ {a.estimated_hours}h</span>
+                              <span className="font-semibold text-slate-400">⏱ {a.estimated_hours}h</span>
                             )}
                           </div>
                         </div>
@@ -333,12 +334,12 @@ export function InlinePrescriptionDrawer({
               {/* 预算分配 */}
               {content.budget_allocation.length > 0 && (
                 <div>
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">预算分配</p>
+                  <p className="mb-1 text-xs font-black uppercase tracking-wide text-cyan-800">预算分配</p>
                   <div className="space-y-1">
                     {content.budget_allocation.map(b => (
-                      <div key={b.dimension} className="flex justify-between text-xs">
-                        <span className="text-gray-600">{b.dimension}</span>
-                        <span className="text-gray-700 font-medium">AUD ${b.amount_aud}（{b.percentage}%）</span>
+                      <div key={b.dimension} className="flex justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs">
+                        <span className="font-semibold text-slate-600">{b.dimension}</span>
+                        <span className="font-black text-slate-800">AUD ${b.amount_aud}（{b.percentage}%）</span>
                       </div>
                     ))}
                   </div>
@@ -353,18 +354,18 @@ export function InlinePrescriptionDrawer({
         </div>
 
         {/* Footer 按钮 */}
-        <div className="shrink-0 border-t border-gray-200 p-4">
+        <div className="shrink-0 border-t border-slate-200 bg-white p-4">
           {step === 'form' && (
             <button
               onClick={() => void handleGenerate()}
               disabled={!goal.trim()}
-              className="w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="w-full rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-black text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
             >
               生成{modeTitle} →
             </button>
           )}
           {step === 'generating' && (
-            <button disabled className="w-full rounded-lg bg-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-400">
+            <button disabled className="w-full rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-black text-slate-400">
               诸葛亮工作中…
             </button>
           )}
@@ -372,14 +373,14 @@ export function InlinePrescriptionDrawer({
             <div className="flex gap-2">
               <button
                 onClick={() => { setStep('form'); setContent(null); setSelfGrade(null) }}
-                className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+                className="flex-1 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50"
               >
                 重新生成
               </button>
               <button
                 onClick={() => void handleApprove()}
                 disabled={approving}
-                className="flex-1 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
+                className="flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-black text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
               >
                 {approving ? '批准中…' : '✓ 批准并加入执行看板'}
               </button>
