@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-28 10:52 NZST · 当前阶段：**Phase 23 Cross-Agent Memory Layer 全部完成 ✅（PR #112 等 merge）；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅；Phase 14.A Website Connector 全部完成 ✅；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S、Phase 9.0、Phase 12.H 等历史功能全部已实现。
+> 最后更新：2026-05-28 10:54 NZST · 当前阶段：**Phase 23 Cross-Agent Memory Layer 全部完成 ✅（PR #112 等 merge）；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅；Phase 14.A Website Connector 全部完成 ✅；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S、Phase 9.0、Phase 12.H 等历史功能全部已实现。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -20,6 +20,7 @@
 - [x] **P13.UI.9 execution board drawer polish** - Clean up execution board sidebar scrolling, header actions, and task detail drawer so the admin workspace reads as one Magic Engine surface.
 - [x] **P13.UI.17 inline prescription rail refresh** - Align the supplement/revision prescription drawer with the upgraded Magic Engine rail shell and stop it from fighting the execution board scroll layer.
 - [x] **P13.UI.18 Zhangqian discovery deliverable refresh** - Align the customer-facing Zhangqian discovery report and downloadable PDF/DOCX deliverables with the shared Magic Engine visual language.
+- [x] **P13.UI.19 inline status menu containment** - Keep the execution detail status menu inside the right-side FDE drawer instead of letting it float over the board layer.
 
 ## 当前进度速览
 
@@ -2677,6 +2678,8 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 
 - **Phase 20.D 实施完成** — 执行看板新增「＋ 录入工作」统一入口（FDE 可从任意支柱直接录入工作，不绑定处方/Marketing Plan）；migration `20260603000001` 添加 `fde_manual` 来源；`FdeManualEntryModal` 组件；看板新增「📝 FDE 录入工作」分组（平铺 + 拖拽排序）；客户 Portal 新增「Active execution work」按支柱分组展示（透明度闭环）；`PlanTask.requires` 素材依赖标注（none/client_photo/client_video/client_info）；Phase 编号修正：Phase 24→Phase 20.D、Phase 22 明确为 Data Intelligence Engine、新增 Phase 22.D 主动任务生成器
 - **ROADMAP 编号修正登记** — 文档化 Phase 24/22/22.D/23 正式命名，与 ME_Kanban_Evolution_Final.docx 保持一致
+
+- **P13.UI.19** — Execution detail status menu is now contained inside the right-side FDE drawer instead of using a body-level floating portal over the board.
 
 ### 2026-05-27（OzTop 技术 SEO 修复 + FDE 看板需求登记）
 
