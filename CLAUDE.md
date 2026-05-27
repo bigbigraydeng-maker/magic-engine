@@ -215,7 +215,7 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-27 23:16 NZST （**Phase 17.A P17.A.1–A.4 + A.5(cron) 全部 ✅ 完成**；Phase 17.A 全部交付，等 PM 验收 M2 + merge）
+> 最后更新：2026-05-27 23:19 NZST （**Phase 17.A P17.A.1–A.4 + A.5(cron) 全部 ✅ 完成**；Phase 17.A 全部交付，等 PM 验收 M2 + merge）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
