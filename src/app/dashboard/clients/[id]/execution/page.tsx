@@ -616,7 +616,7 @@ function TaskDetailDrawer({
   onOpenStudio,
   onEditItem,
   onDeleteItem,
-  workbenchOpen = false,
+  railOpen = false,
 }: {
   item:           ItemWithLogs | null
   clientId:       string
@@ -629,7 +629,7 @@ function TaskDetailDrawer({
   onOpenStudio:   (item: ItemWithLogs) => void
   onEditItem:     (itemId: string, fields: { title?: string; description?: string }) => Promise<boolean>
   onDeleteItem:   (itemId: string) => Promise<void>
-  workbenchOpen?:  boolean
+  railOpen?:       boolean
 }) {
   const [mounted, setMounted]           = useState(false)
   const [addingLog, setAddingLog]       = useState(false)
@@ -701,7 +701,7 @@ function TaskDetailDrawer({
 
   const drawerContent = (
     <div className={`fixed inset-y-0 z-[70] flex w-full flex-col overflow-hidden border-l border-slate-200 bg-[#f6f7f2] shadow-2xl transition-[right] duration-200 sm:w-[420px] lg:w-[480px] ${
-      workbenchOpen
+      railOpen
         ? 'right-0 lg:right-[min(780px,calc(100vw-30rem))] xl:right-[min(880px,48vw)]'
         : 'right-0'
     }`}>
@@ -1625,15 +1625,24 @@ export default function ExecutionPage() {
         onClose={() => {
           setDetailItem(null)
           setStudioItem(null)
+          setChatItem(null)
+          setLubanInitialMessage('')
         }}
         onStatusChange={handleStatusChange}
         onAddLog={handleAddLog}
-        onOpenChat={item => setChatItem(item)}
+        onOpenChat={item => {
+          setChatItem(item)
+          setStudioItem(null)
+        }}
         onOpenFlywheel={(item, target) => setFlywheelState({ item, target })}
-        onOpenStudio={item => setStudioItem(item)}
+        onOpenStudio={item => {
+          setStudioItem(item)
+          setChatItem(null)
+          setLubanInitialMessage('')
+        }}
         onEditItem={handleEditItem}
         onDeleteItem={handleDeleteItem}
-        workbenchOpen={!!studioItem}
+        railOpen={!!studioItem || !!chatItem}
       />
 
       {/* 飞轮执行抽屉（in_house 模式） */}
@@ -1646,6 +1655,7 @@ export default function ExecutionPage() {
           onOpenLuban={(msg) => {
             setLubanInitialMessage(msg)
             setChatItem(flywheelState.item)
+            setStudioItem(null)
             setFlywheelState(null)
           }}
         />

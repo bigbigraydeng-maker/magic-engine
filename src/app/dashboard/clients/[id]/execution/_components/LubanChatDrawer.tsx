@@ -133,16 +133,16 @@ export function LubanChatDrawer({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
+    <>
       {/* 遮罩 */}
       <button
         onClick={onClose}
         aria-label="关闭"
-        className="absolute inset-0 bg-black/40"
+        className="fixed inset-0 z-[60] bg-black/40"
       />
 
       {/* 抽屉本体 — 桌面右侧 480px，移动全屏 */}
-      <div className="relative bg-white w-full sm:w-[480px] h-full flex flex-col shadow-2xl">
+      <div className="fixed inset-y-0 right-0 z-[80] flex h-full w-full flex-col overflow-hidden border-l border-slate-200 bg-white shadow-2xl transition-[width] duration-200 lg:w-[min(780px,calc(100vw-30rem))] xl:w-[min(880px,48vw)]">
         {/* Header */}
         <div className="shrink-0 border-b border-gray-200 px-4 py-3 flex items-center gap-3">
           <span className="text-xl">🔨</span>
@@ -246,6 +246,6 @@ export function LubanChatDrawer({
           </div>
         </div>
       </div>
-    </div>
+    </>
   )
 }
