@@ -215,7 +215,7 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-28 05:29 NZST （**Phase 23.A+D ✅ commit & push**；branch: feat/phase-23-memory-layer；等 PM merge + 决定 23.B/23.C/23.D.2 顺序）
+> 最后更新：2026-05-28 05:35 NZST （**Phase 23.A+D ✅ commit & push**；branch: feat/phase-23-memory-layer；等 PM merge + 决定 23.B/23.C/23.D.2 顺序）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
