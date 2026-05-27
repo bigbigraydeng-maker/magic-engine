@@ -16,6 +16,7 @@ import type {
   PriorityAction,
   DiagnosticScores,
   LubanTool,
+  MemoryContext,
 } from './types'
 import type { DiagnosticFinding } from '@/types/diagnostic'
 import type { BusinessContext } from './types'
@@ -42,6 +43,7 @@ Given a structured evidence package, produce a prioritised list of up to ${MAX_A
 3. Actions that are auto-executable by 鲁班 (prefer these — they move fast)
 4. Actions that unblock other dimensions (e.g. fixing AI visibility unlocks GEO content)
 5. Business-context fit: respect budget constraints, market (AU vs NZ), and known blockers
+6. Client Memory (when provided): prefer proven patterns, avoid failed experiments, respect past decisions
 
 ## Output rules
 - Respond with ONLY a valid JSON object — no markdown, no commentary outside the JSON
@@ -73,13 +75,14 @@ Given a structured evidence package, produce a prioritised list of up to ${MAX_A
 // ── Prompt builder ────────────────────────────────────────────────────────────
 
 function buildUserPrompt(input: ZhugeInput): string {
-  const { client, discoveryEvidence, diagnosticScores, findings, availableLubanTools, businessContext } = input
+  const { client, discoveryEvidence, diagnosticScores, findings, availableLubanTools, businessContext, memoryContext } = input
 
   const scoreLines = formatScores(diagnosticScores)
   const findingLines = formatFindings(findings)
   const toolLines = formatTools(availableLubanTools)
   const contextLines = formatBusinessContext(businessContext)
   const evidenceSummary = formatEvidenceSummary(input)
+  const memorySection = formatMemoryContext(memoryContext)
 
   return `## Client
 Name: ${client.name}
@@ -101,9 +104,54 @@ ${evidenceSummary}
 
 ## 鲁班 Available Tools
 ${toolLines}
-
+${memorySection}
 ---
 Produce the prioritised work order now. Return ONLY the JSON object.`
+}
+
+function formatMemoryContext(memory?: MemoryContext): string {
+  if (!memory?.has_content) return ''
+
+  const parts: string[] = ['\n## Client Memory (L3 Long-term Learning)']
+  parts.push('Use this to refine your recommendations — prefer proven patterns, avoid failures, respect past decisions.\n')
+
+  if (memory.preferences.length > 0) {
+    parts.push('### Content Preferences')
+    for (const p of memory.preferences) {
+      const fw = p.flywheel ? ` [${p.flywheel}]` : ''
+      parts.push(`  - [${p.preference_type}${fw}] ${p.content}`)
+    }
+  }
+
+  if (memory.proven_patterns.length > 0) {
+    parts.push('### Proven Winning Patterns')
+    for (const p of memory.proven_patterns) {
+      const fw = p.flywheel ? ` [${p.flywheel}]` : ''
+      const metric = p.performance_metric ? ` → ${p.performance_metric}` : ''
+      parts.push(`  - [${p.pattern_type}${fw}] ${p.pattern_content}${metric}`)
+    }
+  }
+
+  if (memory.failed_experiments.length > 0) {
+    parts.push('### Failed Experiments (DO NOT repeat)')
+    for (const e of memory.failed_experiments) {
+      const dim = e.dimension ? ` [${e.dimension}]` : ''
+      parts.push(`  - ${dim} ${e.experiment_description} → failed because: ${e.failure_reason}`)
+    }
+  }
+
+  if (memory.recent_decisions.length > 0) {
+    parts.push('### Recent Decisions')
+    for (const d of memory.recent_decisions) {
+      const outcome = d.outcome_verdict ? ` (outcome: ${d.outcome_verdict})` : ''
+      const alts = d.alternatives_rejected.length > 0
+        ? ` (rejected: ${d.alternatives_rejected.join(', ')})`
+        : ''
+      parts.push(`  - Chose "${d.chosen_action}"${alts}${outcome}: ${d.reasoning}`)
+    }
+  }
+
+  return parts.join('\n') + '\n'
 }
 
 function formatScores(scores: DiagnosticScores): string {

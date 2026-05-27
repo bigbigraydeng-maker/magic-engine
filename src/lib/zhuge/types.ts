@@ -12,10 +12,11 @@ import type { Client } from '@/types/magic-engine'
 import type { DiagnosticDimension, DiagnosticFinding } from '@/types/diagnostic'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import type { ExecutionMode } from '@/lib/flywheel/adapters/types'
+import type { MemoryContext } from '@/lib/memory/types'
 
 // ── Re-exports for convenience ────────────────────────────────────────────────
 
-export type { Client, DiagnosticDimension, DiagnosticFinding, ExecutionMode }
+export type { Client, DiagnosticDimension, DiagnosticFinding, ExecutionMode, MemoryContext }
 
 // ── Diagnostic scores snapshot ────────────────────────────────────────────────
 
@@ -96,6 +97,8 @@ export interface ZhugeInput {
   /** 鲁班 tools currently available for this client. */
   availableLubanTools: LubanTool[]
   businessContext: BusinessContext
+  /** Phase 23 L3 记忆层注入（可选 — 无记忆时行为与旧版完全一致）。 */
+  memoryContext?: MemoryContext
 }
 
 /** Structured work order produced by the conductor. */

@@ -26,6 +26,7 @@ import { assembleZhugeInput } from '@/lib/zhuge/assembler'
 import { conductPriorityActions } from '@/lib/zhuge/conductor'
 import { persistZhugeActions, type PersistZhugeActionsResult } from '@/lib/zhuge/action-persister'
 import type { BusinessContext } from '@/lib/zhuge/types'
+import { loadMemoryForClient } from '@/lib/memory'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -76,10 +77,13 @@ export async function POST(
     return NextResponse.json({ success: false, error: msg }, { status: 500 })
   }
 
-  // Call the 诸葛亮 conductor
+  // Phase 23.D: Load L3 memory context (non-blocking — failure returns empty context)
+  const memoryContext = await loadMemoryForClient(supabaseAdmin, clientId, { maxRecentDecisions: 5 })
+
+  // Call the 诸葛亮 conductor (with memory injected)
   let output: Awaited<ReturnType<typeof conductPriorityActions>>
   try {
-    output = await conductPriorityActions(assembled.input)
+    output = await conductPriorityActions({ ...assembled.input, memoryContext })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[zhuge/conduct] conductor error:', msg)
@@ -107,6 +111,13 @@ export async function POST(
       discovery_id: assembled.discovery_id,
       diagnostic_run_id: assembled.diagnostic_run_id,
       findings_count: assembled.findings_count,
+      memory_loaded: memoryContext.has_content,
+      memory_stats: {
+        preferences: memoryContext.preferences.length,
+        proven_patterns: memoryContext.proven_patterns.length,
+        failed_experiments: memoryContext.failed_experiments.length,
+        recent_decisions: memoryContext.recent_decisions.length,
+      },
     },
     persisted,
   })

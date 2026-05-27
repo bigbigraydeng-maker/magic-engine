@@ -27,6 +27,7 @@ import { createHash } from 'crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ZhugeOutput, PriorityAction, DiagnosticDimension } from './types'
 import type { FlywheelName, ExecutionMode } from '@/lib/flywheel/adapters/types'
+import { saveDecisionHistory } from '@/lib/memory/service'
 
 // ── Dimension mappings ────────────────────────────────────────────────────────
 
@@ -138,6 +139,14 @@ export async function persistZhugeActions(
       console.warn('[action-persister] zhuge_sessions upsert failed:', sessionError.message)
     } else {
       zhugeSessionId = (sessionRow as { id: string } | null)?.id ?? null
+
+      // Phase 23.D: 异步写入 client_decision_history（非阻塞）
+      if (zhugeSessionId && input.output.top_actions.length > 0) {
+        void writeDecisionHistory(supabase, input.clientId, zhugeSessionId, input.output)
+          .catch((err: unknown) =>
+            console.warn('[action-persister] decision_history write failed:', err instanceof Error ? err.message : String(err))
+          )
+      }
     }
   } catch (err: unknown) {
     // Non-fatal: continue even if session upsert fails
@@ -351,4 +360,35 @@ export async function writeExecutionItems(
   }
 
   return { inserted: toInsert.length, superseded: toSupersede.length }
+}
+
+// ── Decision history (Phase 23.D) ─────────────────────────────────────────────
+
+/**
+ * 将诸葛亮本次输出的 top_action 写入 client_decision_history。
+ * 每个 action 生成一条记录，alternatives_rejected = 同次会话中排名更低的其他 action_type。
+ * 全程非阻塞，失败只警告不抛出。
+ */
+async function writeDecisionHistory(
+  supabase: SupabaseClient,
+  clientId: string,
+  zhugeSessionId: string,
+  output: ZhugeOutput,
+): Promise<void> {
+  const sorted = [...output.top_actions].sort((a, b) => a.rank - b.rank)
+  const allActionTypes = sorted.map((a) => a.action_type)
+
+  for (const action of sorted) {
+    const alternatives = allActionTypes.filter((t) => t !== action.action_type)
+    const context = `rank=${action.rank}, dimension=${action.dimension}, impact=${action.expected_impact}, effort=${action.effort}`
+
+    await saveDecisionHistory(supabase, {
+      client_id: clientId,
+      zhuge_session_id: zhugeSessionId,
+      decision_context: context,
+      chosen_action: action.action_type,
+      alternatives_rejected: alternatives,
+      reasoning: action.why_now,
+    })
+  }
 }
