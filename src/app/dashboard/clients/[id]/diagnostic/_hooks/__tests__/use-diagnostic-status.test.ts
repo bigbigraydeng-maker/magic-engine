@@ -23,7 +23,6 @@ import { useDiagnosticStatus } from '../use-diagnostic-status'
 
 const CLIENT_ID = 'client-123'
 const RUN_ID = 'run-abc'
-const API_KEY = 'test-key'
 
 function makeRun(status: string, extra: Record<string, unknown> = {}) {
   return { id: RUN_ID, status, overall_score: null, dimension_scores: null, error_message: null, ...extra }
@@ -44,14 +43,12 @@ function makeResponse(body: unknown, status = 200): Response {
 beforeEach(() => {
   // shouldAdvanceTime=true lets RTL's waitFor internal timers still fire
   vi.useFakeTimers({ shouldAdvanceTime: true })
-  process.env.NEXT_PUBLIC_INTERNAL_API_KEY = API_KEY
   global.fetch = vi.fn()
 })
 
 afterEach(() => {
   vi.useRealTimers()
   vi.clearAllMocks()
-  delete process.env.NEXT_PUBLIC_INTERNAL_API_KEY
 })
 
 // ---------------------------------------------------------------------------
@@ -75,9 +72,6 @@ describe('useDiagnosticStatus()', () => {
 
     expect(global.fetch).toHaveBeenCalledWith(
       `/api/clients/${CLIENT_ID}/diagnostic/runs/${RUN_ID}/status`,
-      expect.objectContaining({
-        headers: expect.objectContaining({ Authorization: `Bearer ${API_KEY}` }),
-      }),
     )
   })
 

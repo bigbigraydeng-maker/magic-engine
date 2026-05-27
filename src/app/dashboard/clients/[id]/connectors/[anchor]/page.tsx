@@ -4,8 +4,6 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useState, useEffect } from 'react'
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 // ─── Connector config per anchor ─────────────────────────────────────────────
 
 interface ConnectorMeta {
@@ -64,12 +62,12 @@ const CONNECTOR_META: Record<string, ConnectorMeta> = {
   gsc: {
     name: 'Google Search Console',
     emoji: '🔎',
-    description: '接入 GSC 后，张骞将拉取真实 query、展示量、点击率、平均排名，替代 SEMrush 关键词估算。\n\n点击下方按钮用 Google 账号授权，授权完成后填入 GSC Property URL 即可完成连接。',
+    description: '接入 GSC 后，张骞将拉取真实 query、展示量、点击率、平均排名，替代 SEMrush 关键词估算。\n\n点击下方按钮用 Google 账号授权，授权完成后从下拉列表选择对应的 GSC Property 即可完成连接。',
     fields: [
       {
         key: 'site_url',
-        label: 'GSC Property URL',
-        placeholder: 'https://example.com.au/',
+        label: 'GSC Property',
+        placeholder: 'https://example.com.au/ 或 sc-domain:example.com.au',
         required: true,
       },
     ],
@@ -154,6 +152,12 @@ export default function ConnectorDetailPage() {
   const [oauthDone, setOauthDone]     = useState(false)
   const [oauthChecked, setOauthChecked] = useState(false)
 
+  // GSC sites dropdown — populated from /api/clients/[id]/gsc/sites once OAuth is done
+  const [gscSites, setGscSites]               = useState<Array<{ siteUrl: string; permissionLevel: string }> | null>(null)
+  const [gscSitesLoading, setGscSitesLoading] = useState(false)
+  const [gscSitesError, setGscSitesError]     = useState<string | null>(null)
+  const [gscManualMode, setGscManualMode]     = useState(false)
+
   // On mount for OAuth connectors: check existing status + handle ?oauth= param
   useEffect(() => {
     if (!meta?.oauthAnchor) return
@@ -162,9 +166,7 @@ export default function ConnectorDetailPage() {
 
     void (async () => {
       try {
-        const res  = await fetch(`/api/clients/${clientId}/connectors/status`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        })
+        const res  = await fetch(`/api/clients/${clientId}/connectors/status`)
         if (!res.ok) return
         const data = await res.json() as {
           connectors: Array<{ anchor: string; status: string; config: Record<string, unknown> | null }>
@@ -187,6 +189,33 @@ export default function ConnectorDetailPage() {
     })()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // GSC only: once OAuth is done, fetch the list of sites this user can access
+  useEffect(() => {
+    if (anchor !== 'gsc' || !oauthDone) return
+    setGscSitesLoading(true)
+    setGscSitesError(null)
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/gsc/sites`)
+        const data = await res.json() as {
+          success: boolean
+          sites?: Array<{ siteUrl: string; permissionLevel: string }>
+          error?: string
+        }
+        if (data.success && data.sites) {
+          setGscSites(data.sites)
+        } else {
+          setGscSitesError(data.error ?? '无法获取 GSC 网站列表')
+        }
+      } catch (err) {
+        setGscSitesError(err instanceof Error ? err.message : '网络错误')
+      } finally {
+        setGscSitesLoading(false)
+      }
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [oauthDone, anchor])
 
   if (!meta) {
     return (
@@ -212,10 +241,7 @@ export default function ConnectorDetailPage() {
         `/api/clients/${clientId}/connectors/${anchor}/connect`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${API_KEY}`,
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             config: meta.fields.length > 0
               ? { ...fieldValues, ...(oauthEmail ? { google_email: oauthEmail } : {}) }
@@ -305,23 +331,79 @@ export default function ConnectorDetailPage() {
         {meta.fields.length > 0 && (!meta.oauthAnchor || oauthDone) && (
           <div className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
             <h2 className="text-sm font-semibold text-gray-900">配置信息</h2>
-            {meta.fields.map(f => (
-              <div key={f.key}>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
-                  {f.label}
-                  {f.required && <span className="text-red-500 ml-1">*</span>}
-                </label>
-                <input
-                  type="text"
-                  placeholder={f.placeholder}
-                  value={fieldValues[f.key] ?? ''}
-                  onChange={e =>
-                    setFieldValues(prev => ({ ...prev, [f.key]: e.target.value }))
-                  }
-                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                />
-              </div>
-            ))}
+            {meta.fields.map(f => {
+              const isGscSiteField = anchor === 'gsc' && f.key === 'site_url'
+              const showDropdown   = isGscSiteField
+                && !gscManualMode
+                && gscSites !== null
+                && gscSites.length > 0
+
+              return (
+                <div key={f.key}>
+                  <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                    {f.label}
+                    {f.required && <span className="text-red-500 ml-1">*</span>}
+                  </label>
+
+                  {isGscSiteField && gscSitesLoading && (
+                    <div className="h-9 w-full rounded-lg bg-gray-100 animate-pulse" />
+                  )}
+
+                  {isGscSiteField && !gscSitesLoading && gscSitesError && (
+                    <p className="text-xs text-amber-700 mb-2">
+                      ⚠ 无法获取已授权的 GSC 网站列表（{gscSitesError}）。请手动输入 Property。
+                    </p>
+                  )}
+
+                  {showDropdown ? (
+                    <>
+                      <select
+                        value={fieldValues[f.key] ?? ''}
+                        onChange={e =>
+                          setFieldValues(prev => ({ ...prev, [f.key]: e.target.value }))
+                        }
+                        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      >
+                        <option value="">— 选择已授权的 Property —</option>
+                        {gscSites!.map(s => (
+                          <option key={s.siteUrl} value={s.siteUrl}>
+                            {s.siteUrl} ({s.permissionLevel})
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => setGscManualMode(true)}
+                        className="mt-2 text-xs text-indigo-600 hover:underline"
+                      >
+                        手动输入 Property URL
+                      </button>
+                    </>
+                  ) : (!isGscSiteField || !gscSitesLoading) && (
+                    <>
+                      <input
+                        type="text"
+                        placeholder={f.placeholder}
+                        value={fieldValues[f.key] ?? ''}
+                        onChange={e =>
+                          setFieldValues(prev => ({ ...prev, [f.key]: e.target.value }))
+                        }
+                        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                      {isGscSiteField && gscSites !== null && gscSites.length > 0 && gscManualMode && (
+                        <button
+                          type="button"
+                          onClick={() => setGscManualMode(false)}
+                          className="mt-2 text-xs text-indigo-600 hover:underline"
+                        >
+                          ← 从下拉列表选择
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
 
@@ -381,7 +463,190 @@ export default function ConnectorDetailPage() {
             ← 返回 Connectors
           </button>
         )}
+
+        {/* Snapshot preview + sync button — GSC and GA4 only */}
+        {(anchor === 'gsc' || anchor === 'ga4') && (
+          <SnapshotSyncPanel anchor={anchor} clientId={clientId} />
+        )}
       </div>
     </div>
   )
+}
+
+// ─── SnapshotSyncPanel ────────────────────────────────────────────────────────
+
+interface GscSnapshot {
+  total_clicks: number
+  total_impressions: number
+  avg_ctr: number
+  avg_position: number
+  period_start: string
+  period_end: string
+  synced_at: string
+  top_queries: Array<{ query?: string; clicks: number }>
+}
+
+interface Ga4Snapshot {
+  total_sessions: number
+  total_users: number
+  total_pageviews: number
+  bounce_rate: number
+  period_start: string
+  period_end: string
+  synced_at: string
+  top_sources: Array<{ source: string; medium: string; sessions: number }>
+}
+
+type AnySnapshot = GscSnapshot | Ga4Snapshot
+
+function isGsc(s: AnySnapshot): s is GscSnapshot {
+  return 'total_clicks' in s
+}
+
+function SnapshotSyncPanel({ anchor, clientId }: { anchor: string; clientId: string }) {
+  const [snapshot, setSnapshot] = useState<AnySnapshot | null>(null)
+  const [loadingSnap, setLoadingSnap] = useState(true)
+  const [syncing, setSyncing]         = useState(false)
+  const [syncMsg, setSyncMsg]         = useState<{ ok: boolean; text: string } | null>(null)
+
+  const fetchLatest = async () => {
+    try {
+      const res = await fetch(`/api/clients/${clientId}/${anchor}/snapshots?limit=1`)
+      if (res.ok) {
+        const data = await res.json() as { latest: AnySnapshot | null }
+        setSnapshot(data.latest ?? null)
+      }
+    } finally {
+      setLoadingSnap(false)
+    }
+  }
+
+  useEffect(() => { void fetchLatest() }, [clientId, anchor]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSync = async () => {
+    setSyncing(true)
+    setSyncMsg(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/${anchor}/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const data = await res.json() as { success: boolean; error?: string }
+      if (data.success) {
+        setSyncMsg({ ok: true, text: '✓ 同步成功' })
+        setLoadingSnap(true)
+        await fetchLatest()
+      } else {
+        setSyncMsg({ ok: false, text: data.error ?? '同步失败，请检查连接配置' })
+      }
+    } catch {
+      setSyncMsg({ ok: false, text: '网络错误，请重试' })
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-slate-800">
+            {anchor === 'gsc' ? '🔎 Search Console 数据快照' : '📈 Analytics 4 数据快照'}
+          </p>
+          <p className="text-xs text-slate-500 mt-0.5">点击「立即同步」拉取最近 28 天数据</p>
+        </div>
+        <button
+          onClick={() => void handleSync()}
+          disabled={syncing}
+          className="shrink-0 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {syncing ? '同步中…' : '立即同步'}
+        </button>
+      </div>
+
+      {syncMsg && (
+        <p className={`text-xs ${syncMsg.ok ? 'text-green-700' : 'text-red-600'}`}>
+          {syncMsg.text}
+        </p>
+      )}
+
+      {loadingSnap ? (
+        <div className="h-16 rounded-lg bg-white border border-slate-100 animate-pulse" />
+      ) : snapshot ? (
+        <div className="rounded-lg border border-slate-100 bg-white p-3 space-y-2">
+          <p className="text-[10px] text-slate-400">
+            {snapshot.period_start} – {snapshot.period_end}
+            {' · '}
+            上次同步：{new Date(snapshot.synced_at).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}
+          </p>
+
+          {isGsc(snapshot) ? (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <SnapMetric label="点击量"   value={fmtNum(snapshot.total_clicks)} />
+                <SnapMetric label="展示量"   value={fmtNum(snapshot.total_impressions)} />
+                <SnapMetric label="平均 CTR" value={`${(snapshot.avg_ctr * 100).toFixed(1)}%`} />
+                <SnapMetric label="平均排名" value={snapshot.avg_position.toFixed(1)} />
+              </div>
+              {snapshot.top_queries.length > 0 && (
+                <div>
+                  <p className="text-[10px] text-slate-400 mb-1">热门关键词</p>
+                  <div className="space-y-0.5">
+                    {snapshot.top_queries.slice(0, 3).map((q, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 text-[11px]">
+                        <span className="text-slate-600 truncate">{q.query ?? '—'}</span>
+                        <span className="text-slate-400 shrink-0">{fmtNum(q.clicks)} 点击</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <SnapMetric label="会话数"   value={fmtNum((snapshot as Ga4Snapshot).total_sessions)} />
+                <SnapMetric label="用户数"   value={fmtNum((snapshot as Ga4Snapshot).total_users)} />
+                <SnapMetric label="页面浏览" value={fmtNum((snapshot as Ga4Snapshot).total_pageviews)} />
+                <SnapMetric label="跳出率"   value={`${((snapshot as Ga4Snapshot).bounce_rate * 100).toFixed(1)}%`} />
+              </div>
+              {(snapshot as Ga4Snapshot).top_sources.length > 0 && (
+                <div>
+                  <p className="text-[10px] text-slate-400 mb-1">主要流量来源</p>
+                  <div className="space-y-0.5">
+                    {(snapshot as Ga4Snapshot).top_sources.slice(0, 3).map((s, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 text-[11px]">
+                        <span className="text-slate-600 truncate">
+                          {s.source}{s.medium && s.medium !== '(none)' ? ` / ${s.medium}` : ''}
+                        </span>
+                        <span className="text-slate-400 shrink-0">{fmtNum(s.sessions)} 会话</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      ) : (
+        <p className="text-xs text-slate-400">暂无快照数据 — 连接成功后点击「立即同步」</p>
+      )}
+    </div>
+  )
+}
+
+function SnapMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-slate-100 bg-slate-50 px-2 py-1.5">
+      <p className="text-[9px] uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="text-sm font-bold leading-tight text-slate-700">{value}</p>
+    </div>
+  )
+}
+
+function fmtNum(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
 }

@@ -215,7 +215,7 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-28 05:17 NZST （**Phase 20.D 六支柱统一看板入口 ✅ 代码完成**；等 PM 运行 migration + 验收）
+> 最后更新：2026-05-28 05:24 NZST （**Phase 20.D 六支柱统一看板入口 ✅ 已合并**；Phase 19 IDOR ✅ 已合并）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
@@ -223,16 +223,19 @@ git push origin master   # 触发 Render 部署
 | **PM 验收 Phase 20.D** | 执行看板顶部出现「＋ 录入工作」按钮 → 录入工作 → 看板出现「📝 FDE 录入工作」分组 → 可拖拽排序 | ⚠️ PM 验收 |
 | **PM 验收 Portal** | 客户 Portal 页面新增「Active execution work」按支柱分组 | ⚠️ PM 验收 |
 | **PM 操作（旧）** | Supabase 跑 Phase 14.A migration：`20260531000001` + `20260531000002` + `20260601000001` | ⚠️ PM 操作 |
-| **PM 合并** | 输入 `go merge` 合并当前 PR（Phase 20.D + Phase 14.A 代码已在同一分支）| ⚠️ PM 决定 |
+| **PM 决定** | 选择下一个 Phase：Phase 18.A（Meta Ads MVP）或 Phase 17.B（Meta Insights 社媒数据回流）| ⚠️ PM 决定 |
 
-**状态校准（2026-05-28）**：
+**已完成全景（最近几个 Phase）**：
 - ✅ **Phase 20.D**：`fde_manual` source migration + `/execution/manual` API + `FdeManualEntryModal` + 看板「＋ 录入工作」按钮 + FDE 分组 + 拖拽排序 + Portal 分组展示 + `PlanTask.requires` 素材标注
-- ✅ **Phase 14.A.8**：WordPress + Shopify publish 路由在最终发布后 insert `flywheel_actions`
+- ✅ **Phase 19.A–E**（PR #95）：89 个 `/api/clients/[id]/*` 路由 IDOR 封堵 + NEXT_PUBLIC 密钥泄漏清除
+- ✅ **Phase 17.A**（P17.A.1–A.6 全部 merge）：GSC/GA4 数据回流 + 飞轮归因桥接 + 每日 cron + 客户「数据」tab
 - ✅ **Phase 14.A.1–8**：全部完成，等 PM 运行 migration 验收
-- ✅ Phase 13.A P13.A.1–A.6：代码完成，等 PM 端到端验证
-- ⚠️ **PM 待跑 migration（Phase 14.A）**：`20260531000001`（WP schema）+ `20260531000002`（publish_jobs）+ `20260601000001`（shopify shape）
 
-下一 session：`继续 Phase 20.D 验收，或告诉我新需求`
+**下一个候选**：
+- 📋 **Phase 18.A** — Meta Ads MVP：诊断→Fix 按钮接线 Meta MCP（P18.A.1–A.3）
+- 📋 **Phase 17.B** — Meta Insights 社媒数据回流（补全 Phase 17 数据源矩阵）
+
+下一 session：`继续 Phase 20.D 验收` 或 `开始 Phase 18.A` 或 `开始 Phase 17.B`（等 PM 决定）
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox

@@ -17,6 +17,7 @@ import { formatTrendForPrompt, type TrendSummary } from './trends'
 import { formatSeasonalCalendarForPrompt } from './seasonal-calendar'
 import { formatInterestForPrompt } from '@/lib/gtrends/client'
 import { formatCasesForPrompt } from '@/lib/case-library/retriever'
+import { formatConfidenceForPrompt } from '@/lib/case-library/outcome-confidence'
 
 // ─── Generation prompt（生成阶段）──────────────────────────────────────────────
 
@@ -309,6 +310,7 @@ export function buildHuatuoGenerationPrompt(
     ? formatInterestForPrompt(lookup.industry_interest)
     : '## 行业搜索热度趋势（Google Trends）\n\n**未拉取**（搜索热度数据可选）。'
   const casesSection = formatCasesForPrompt(lookup.similar_cases ?? [])
+  const confidenceSection = formatConfidenceForPrompt(lookup.outcome_confidence ?? {})
 
   const priorityDims = intake.priority_dimensions.length > 0
     ? intake.priority_dimensions.join(', ')
@@ -353,6 +355,7 @@ ${seasonalSection}
 
 ${interestSection}
 ${casesSection ? `\n${casesSection}\n` : ''}
+${confidenceSection ? `\n${confidenceSection}\n` : ''}
 ${prior.block}
 ## 客户意向
 - **业务目标**：${intake.business_goal}

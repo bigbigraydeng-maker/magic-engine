@@ -10,8 +10,6 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
@@ -49,7 +47,6 @@ export function LubanChatDrawer({
     void (async () => {
       try {
         const res = await fetch(`/api/clients/${clientId}/execution/${itemId}/luban`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
           cache: 'no-store',
         })
         if (res.ok) {
@@ -91,7 +88,7 @@ export function LubanChatDrawer({
     try {
       const res = await fetch(`/api/clients/${clientId}/execution/${itemId}/luban`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text }),
       })
       const data = await res.json() as { success: boolean; reply?: string; error?: string }
@@ -114,7 +111,7 @@ export function LubanChatDrawer({
     try {
       const res = await fetch(`/api/clients/${clientId}/execution/${itemId}/log`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ kind: 'ai_assist', author: 'luban', content }),
       })
       if (!res.ok) return
@@ -133,16 +130,16 @@ export function LubanChatDrawer({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
+    <>
       {/* 遮罩 */}
       <button
         onClick={onClose}
         aria-label="关闭"
-        className="absolute inset-0 bg-black/40"
+        className="fixed inset-0 z-[60] bg-black/40"
       />
 
       {/* 抽屉本体 — 桌面右侧 480px，移动全屏 */}
-      <div className="relative bg-white w-full sm:w-[480px] h-full flex flex-col shadow-2xl">
+      <div className="fixed inset-y-0 right-0 z-[80] flex h-full w-full flex-col overflow-hidden border-l border-slate-200 bg-white shadow-2xl transition-[width] duration-200 lg:w-[min(780px,calc(100vw-30rem))] xl:w-[min(880px,48vw)]">
         {/* Header */}
         <div className="shrink-0 border-b border-gray-200 px-4 py-3 flex items-center gap-3">
           <span className="text-xl">🔨</span>
@@ -246,6 +243,6 @@ export function LubanChatDrawer({
           </div>
         </div>
       </div>
-    </div>
+    </>
   )
 }

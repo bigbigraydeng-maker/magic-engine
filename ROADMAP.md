@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-28 05:17 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
+> 最后更新：2026-05-28 05:24 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅；Phase 19 IDOR 修复 ✅；Phase 20.D 六支柱看板入口 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -16,6 +16,10 @@
 - [x] **P13.A.8 admin auth priority repair** - Ensure `ADMIN_EMAILS` accounts route to the admin dashboard before portal/prospect bindings; remove accidental CTS portal binding for the admin email.
 - [x] **P13.UI.6 portal client experience refresh** - Upgrade `/portal/[clientId]` overview, monthly report, content library, and portal navigation into the shared Magic Engine client-facing UI system.
 - [x] **P13.UI.7 entry shell visual refresh** - Align `/portal/login`, `/login`, and the admin dashboard shell/sidebar with the shared Magic Engine product UI language.
+- [x] **P13.UI.8 admin workspace mobile refresh** - Align the admin content workspace and Content Studio drawer with the shared Magic Engine UI language; repair mobile usability.
+- [x] **P13.UI.9 execution board drawer polish** - Clean up execution board sidebar scrolling, header actions, and task detail drawer so the admin workspace reads as one Magic Engine surface.
+- [x] **P13.UI.17 inline prescription rail refresh** - Align the supplement/revision prescription drawer with the upgraded Magic Engine rail shell and stop it from fighting the execution board scroll layer.
+- [x] **P13.UI.18 Zhangqian discovery deliverable refresh** - Align the customer-facing Zhangqian discovery report and downloadable PDF/DOCX deliverables with the shared Magic Engine visual language.
 
 ## 当前进度速览
 
@@ -64,10 +68,10 @@
 📋 Phase 14     Website Connector / 网站直连执行闭环（⭐ WordPress 连接器近期优先 — P14.A.5）
 📋 Phase 15     Reputation Engine / 口碑监控与执行闭环（战略确认，待排期）
 📋 Phase 16     Competitor Intelligence / 竞品雷达 + 信号驱动执行（战略确认，待排期）
-📋 Phase 17     Unified Data Pullback / 统一数据回流层（战略确认，待排期）
+✅ Phase 17     Unified Data Pullback / 统一数据回流层（Phase 17.A ✅ 全部完成 2026-05-27）
 📋 Phase 18     Ads Execution Engine / 广告执行引擎（Meta + Google + TikTok，已登记）
-📋 Phase 19     API 鉴权整改 / IDOR 修复（🔴 CRITICAL 安全 — 19.A+B 须在客户建号前完成）
-📋 Phase 20.D   统一看板入口 / 六支柱 FDE 手动录入 + 拖拽排序 + 客户 Portal 分组（Phase 20 子任务 — 2026-05-28 实施）
+✅ Phase 19     API 鉴权整改 / IDOR 修复（🟢 19.A–E 全部完成 2026-05-27，PR #95）
+✅ Phase 20.D   统一看板入口 / 六支柱 FDE 手动录入 + 拖拽排序 + 客户 Portal 分组（Phase 20 子任务 — 2026-05-28 实施）
 📋 Phase 21     AI Content Factory / AI 内容工厂（旗舰能力 — FDE 客户默认产能引擎）
 📋 Phase 22     Data Intelligence Engine / 数据智能引擎（旗舰能力 — 采集+分析+反馈学习引擎）
 📋 Phase 22.D   主动任务生成器 / AnomalyDetector + 诸葛亮 Proactive（Phase 22 子模块）
@@ -1347,12 +1351,17 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
 > **⚠️ 注意**：DataForSEO KD 分数算法与 SEMrush 不同，数值不可横向比较。切换后需在客户报告 + UI 中注明口径变更，或统一改用 DataForSEO KD 标准。
 > **保留 SEMrush API key**：`batchKeywordOverview` P8.S.8 完成前 + 任何降级回退用。
 
-### Phase 12.C —（预告）
+### Phase 12.C — 飞轮数据闭环（聚合 + 置信度 + 社媒回流）
 
-- 跨客户 outcome 聚合视图（`action_type × crisis_type × verdict_rate`）
-- 反哺华佗：处方生成时查询历史 outcome 给推荐打置信度
-- markisfact adapter（如商务谈成）
-- 社媒发布数据回流（Publer + 平台 API）
+> 启动：2026-05-28。飞轮骨架（12.A）+ adapter（12.B）已就绪，现在让数据「活起来」。
+>
+> 工作分支：`feat/phase-12-c-flywheel-closure`
+
+- [x] **P12.C.1** — 跨客户 outcome 聚合视图：GET /api/admin/flywheel/aggregate，按 action_type 统计 verdict_rate；Admin Dashboard「飞轮成效」卡片展示 top 5
+- [x] **P12.C.2** — 反哺华佗置信度：`src/lib/case-library/outcome-confidence.ts` 计算历史成功率，注入处方生成 prompt（含「历史成功率 X%，基于 N 案例」标签）
+- [x] **P12.C.3** — 社媒发布数据回流：Publer API 拉取帖子 likes/comments/shares，写入 flywheel_metrics；cron `social-engagement-pullback` 每日 4am UTC
+
+> **范围说明**：markisfact adapter 已从 Phase 12.C scope 移除，待商务谈成后单独登记。
 
 ### Phase 12.Q — 内容质量闭环 ⭐⭐⭐（已登记，未开工，2026-05-19 启动登记）
 
@@ -2005,9 +2014,9 @@ AI 可见度层（ME 独有 ✅）
 
 ---
 
-## Phase 17 — Unified Data Pullback（统一数据回流层）📋 战略确认，待排期
+## Phase 17 — Unified Data Pullback（统一数据回流层）🔥 进行中
 
-> **登记日期**：2026-05-19 · **状态**：战略方向已确认，是月报和飞轮归因的基础设施
+> **登记日期**：2026-05-19 · **开工日期**：2026-06-03 · **状态**：Phase 17.A ✅ 全部完成（P17.A.1–A.6 均已 merge，2026-05-27）
 >
 > **背景**：ME 现在的月报数据是孤岛——SEO 数据、社媒数据、广告数据分散在各平台，无法在 ME 内做跨渠道归因。Unified Data Pullback 是把所有执行结果拉回 ME、驱动飞轮真实归因的基础设施层。
 
@@ -2027,6 +2036,23 @@ AI 可见度层（ME 独有 ✅）
 1. **月报自动生成**（Insight Reports 模块）
 2. **飞轮归因**（action → outcome 真实数据验证）
 3. **Client Portal**（客户自助查看跨渠道数据看板）
+
+### Phase 17.A — GSC Performance Snapshots（Google Search Console 数据回流）
+
+| ID | 任务 | 状态 |
+|----|------|------|
+| **P17.A.1** | `gsc_performance_snapshots` 表 + GSC sync 路由 + snapshots 读取路由 | ✅ 完成 2026-06-03 |
+| **P17.A.2** | GA4 OAuth scope 扩展 + `ga4_traffic_snapshots` 表 + sync 路由 | ✅ 完成 2026-06-04 |
+| **P17.A.3** | GSC 数据 UI 展示（执行看板 / 月报 section）+ connector page 触发按钮 | ✅ 完成 2026-05-27 |
+| **P17.A.4** | 飞轮归因桥接：flywheel_action → gsc_snapshot baseline vs after 对比 | ✅ 完成 2026-06-05 |
+| **P17.A.5（日常同步）** | 每日 GSC + GA4 cron job：`google-data-pullback-daily`（每天 3am UTC） | ✅ 完成 2026-06-05 |
+| **P17.A.6** | 客户主页「数据」tab：GSC top queries + GA4 traffic + 快速夺旗机会清单 | ✅ 完成 2026-05-27 |
+
+**P17.A.1 实施内容**：
+- `supabase/migrations/20260603000003_gsc_performance_snapshots.sql`：新表（client_id + period_start/end + 总量指标 + top_queries/pages JSONB）
+- `src/lib/gsc/client.ts`：新增 `fetchGscSnapshot()` 并行拉取 query + page 两个维度（各 50 行）
+- `POST /api/clients/[id]/gsc/sync`：从 connector config 取 site_url → 调 GSC API → upsert 快照
+- `GET /api/clients/[id]/gsc/snapshots`：读取历史快照列表，供报告 / 看板使用
 
 ---
 
@@ -2258,6 +2284,62 @@ Body: { title, description, dimension, fix_type?, due_date?, notes? }
 | Phase 22 = Agent Memory | **Phase 22 = Data Intelligence Engine** | 22 是采集+分析+反馈，不是记忆层 |
 | Phase 22 = 主动任务注入 | **Phase 22.D = 主动任务生成器** | 主动任务是 Phase 22 的一个子模块（22.D）|
 | Phase 23（未命名）| **Phase 23 = Cross-Agent Memory Layer** | L3 长期学习，升级自原 Phase 8.M |
+
+---
+
+## Phase 24 — Execution Loop Closure（执行闭环修复）📋 已登记，2026-06-06 启动
+
+> **登记日期**：2026-06-06 · **状态**：开发中
+>
+> **背景**：诸葛亮推荐行动当前不进看板、不定时刷新；GEO 部署页忽略 CMS connector 只给手动复制粘贴。月报依赖执行看板作为数据来源，三个断点必须修复。
+
+### 三个子任务
+
+| ID | 内容 | 文件 |
+|----|------|------|
+| **P24.A** | 诸葛亮推荐自动写入执行看板 | `action-persister.ts` + migration |
+| **P24.B** | 诸葛亮每周定时重新计算 | `cron/zhuge-recalculate/route.ts` + `render.yaml` |
+| **P24.C** | GEO 部署页接入 CMS connector 一键部署 | `deploy/page.tsx` + `DeploymentForm.tsx` |
+
+### P24.A — 诸葛亮推荐写入执行看板
+
+**Schema 变更**（`execution_items` 表）：
+- `prescription_id` 改为 nullable（支持无处方来源的 zhuge 行）
+- 新增 `source TEXT CHECK (IN ('zhuge','fde','luban'))` 默认 `'fde'`
+- 新增 `action_type TEXT`（存储 zhuge 的 action_type slug）
+- 新增 `zhuge_session_id UUID` FK → `zhuge_sessions(id) ON DELETE SET NULL`
+- `execution_item_status` 枚举新增 `'superseded'`
+
+**重复处理逻辑**：
+- 同一 `client_id + action_type` 若已有 pending 的 fde/luban 行 → 跳过（不覆盖人工项）
+- 若已有 pending 的 zhuge 行（旧 session）→ 先标记为 `superseded` 再插新行
+- 同一 session 重复调用（幂等）→ 跳过
+
+- [ ] P24.A.1 migration: `20260606000001_execution_items_zhuge_source.sql`
+- [ ] P24.A.2 `action-persister.ts` 新增 `writeExecutionItems` + 接入 `persistZhugeActions`
+- [ ] P24.A.3 `__tests__/action-persister.test.ts` 补充测试（TDD 先写）
+
+### P24.B — 诸葛亮每周定时重新计算
+
+- 查询 `client_discovery` 有 `confirmed_at IS NOT NULL` 的客户
+- 对每个客户调用 `assembleZhugeInput` → `conductPriorityActions` → `persistZhugeActions`（触发 P24.A 看板写入）
+- `x-cron-secret` 验证（与现有 cron 一致）
+- `render.yaml` 新增 `zhuge-weekly-recalculate`，每周一 3am UTC
+
+- [ ] P24.B.1 `src/app/api/cron/zhuge-recalculate/route.ts`
+- [ ] P24.B.2 `render.yaml` 追加 cron 定义
+
+### P24.C — GEO 部署页接入 CMS connector
+
+- `deploy/page.tsx`：加载时并行拉取 `/api/clients/[id]/cms/providers`
+- `DeploymentForm.tsx`：
+  - 无 connector → 顶部显示「连接网站可一键部署」引导横幅
+  - 有活跃 WordPress/Shopify → 显示「一键部署」区块
+  - 点击后调用 `/api/clients/[id]/cms/publish-geo-snippet` 注入 snippet 并自动 `recordDeployment`
+- 新增 `src/app/api/clients/[id]/cms/publish-geo-snippet/route.ts`（复用 wordpress-client / shopify-client 底层逻辑）
+
+- [ ] P24.C.1 `deploy/page.tsx` + `DeploymentForm.tsx` 改造
+- [ ] P24.C.2 `publish-geo-snippet/route.ts` 新增路由
 
 ---
 
@@ -2617,6 +2699,26 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 > 每次上线新功能时在此追加。格式：**[完成日期]** — Phase ID + 描述 + Commit 引用。
 > 此日志从 CLAUDE.md §十五.C 迁移至此（2026-05-10），CLAUDE.md 不再维护历史日志。
 
+### 2026-06-05
+
+- **P17.A.4** — GSC 归因桥接：`gsc-bridge.ts`（runGscAttributionForClient：SEO action → GSC before/after → 3 维 flywheel_outcomes）+ POST `/flywheel/gsc-attribution` + vocabulary 扩充 3 GSC metric keys + attribution cron pass-2 接线 [P17.A.4]
+- **P17.A.5** — 每日 Google 数据回流 cron：`google-data-pullback-daily`（遍历所有已连接 GSC/GA4 connector，自动快照写库）+ render.yaml 注册（每天 3am UTC）[P17.A.4]
+
+### 2026-05-27
+
+- **P17.A.6** — 客户主页「数据」tab：三 tab 切换器（概览/数据/工具）+ `ClientDataTab`（GSC 4 指标格 + top-10 关键词表、GA4 4 指标格 + top-10 来源/页面表、快速夺旗机会清单 position>10 && impressions>50） [feat/phase-17-a6-data-tab, PR #93]
+- **P17.A.3** — GSC/GA4 快照 UI：`DataPullbackSection`（执行看板数据回流卡）+ connector 详情页「立即同步」按钮 + 快照指标预览 [feat/phase-17-a-gsc-pullback]
+- **P13.UI.17** — Inline prescription supplement/revision drawer upgraded to the shared right-rail shell with stronger overlay layering, contained scrolling, and refreshed Magic Engine controls.
+- **P13.UI.18** — Zhangqian customer-facing discovery report gained Save PDF + DOCX downloads; DOCX export refreshed into Magic Engine deliverable language and dashboard Zhangqian export controls aligned.
+
+### 2026-06-04
+
+- **P17.A.2** — GA4 数据回流：`GA4_SCOPE`/`COMBINED_GOOGLE_SCOPES` + `buildAuthUrl` scopes 参数 + `fetchGa4Snapshot()` 3 并行报告 + 新表 `ga4_traffic_snapshots` + POST `/ga4/sync` + GET `/ga4/snapshots` [feat/phase-17-a-gsc-pullback]
+
+### 2026-06-03
+
+- **P17.A.1** — GSC 数据回流基础设施：新表 `gsc_performance_snapshots`（含 top_queries/pages JSONB）+ `fetchGscSnapshot()` 并行拉取两维度 + POST `/gsc/sync` + GET `/gsc/snapshots` [feat/phase-17-a-gsc-pullback]
+
 ### 2026-05-20
 
 - **UX 基础修复（两个 session）** — 全站标题 CrazyContent→Magic Engine；login-form try/finally 防卡死；BriefSourcesForm/zhangqian cards/Step2BriefUpload 客户可见供应商名替换；ContentHub 移除内嵌 Reels/图片 子Tab 改跳转快捷卡；客户页新增 WorkflowProgress（张骞→MB→执行）进度条；SEO 页标题/注释去 SEMrush 改 Keyword Intelligence（commits 34fe7fb, e7b2aff）
@@ -2642,6 +2744,8 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 - **P13.UI.5** — `/prospect` 报告页升级：扫描中、无报告、失败、完成报告四态统一为新版 prospect-to-portal 体验；报告卡片改为浅色可读版
 - **P13.UI.6** — `/portal/[clientId]` 客户端 overview、monthly report、content library 与导航升级为新版 Magic Engine client portal 视觉语言
 - **P13.UI.7** — `/portal/login`、`/login` 与 admin dashboard sidebar/layout 统一为新版 Magic Engine 入口外壳；清理乱码 icon/loading 文案
+- **P13.UI.8** — admin mobile shell、Content Studio drawer、Social Plan Studio 与 Reels Studio 改为响应式新版工作区；移除右侧抽屉硬宽度
+- **P13.UI.9** — execution board 修复 sidebar 内部滚动条、header action 旧按钮、task detail drawer 旧样式与主内容硬挤压
 - **P14.A.4（Shopify connector）** — migration 扩展 provider shape 约束加 shopify；shopify-guard（SSRF 防护 17 单测全绿）；shopify-client（Admin REST 2024-01：testConnection / listBlogs / getOrCreateDefaultBlog / createArticleDraft / publishArticle / createPageDraft / publishPage）；html-sanitizer MVP；vocabulary 加 SHOPIFY + ShopifyConnectionStatus；connection-store 加 Shopify CRUD；/cms/shopify CRUD + 保存即测 token；/cms/publish-shopify 两步 draft→publish，幂等写 website_publish_jobs；TS 零错误，17 tests ✅
 - **P14.A.5（WordPress connector）** — `wordpress-client.ts`（dns.promises.lookup SSRF guard；testWordpressConnection 验证 publish role；createWordpressPostDraft/Page draft-first；publishWordpressPost/Page status='publish'）；connection-store 加 `markWordpressConnectionTested`；/cms/wordpress 升级（保存即测）；/cms/publish-wordpress（两步 draft→publish，幂等，租户隔离，sanitizeHtml）；TS 新文件零错误
 - **P14.A.6（Blog Studio 三步发布 UI）** — 新 `GET /api/clients/[id]/cms/providers` 聚合三平台状态；新 `PublishToWebsitePanel` 组件（WordPress/Shopify Draft→Preview→Publish 三步，GitHub 单步 PR）；blog/[postId]/page.tsx 替换旧 GitHub-only 按钮
@@ -2781,6 +2885,12 @@ client_decision_history      -- 为什么之前选 X 不选 Y
   `feat(flywheel): P12.B.3 — SocialContentAdapter 社媒飞轮落库 [P12.B.3]`
 - **P12.B.4** — SEMrush 周快照 cron：GET /api/cron/flywheel-seo-weekly；拉所有有 domain 的客户 domain_ranks 写 flywheel_metrics；9 单元测试；build 通过
   `feat(flywheel): P12.B.4 — SEMrush 周快照 cron [P12.B.4]`
+- **P12.C.1** — 跨客户 outcome 聚合：outcome-aggregate.ts 纯函数层（7 测试）；GET /api/admin/flywheel/aggregate；/dashboard/admin/flywheel 飞轮成效卡片（verdict bar + 置信度 badge）
+  `feat(flywheel): outcome aggregate API + Admin 飞轮成效卡片 [P12.C.1]`
+- **P12.C.2** — 反哺华佗置信度：outcome-confidence.ts（8 测试）；HuatuoLookupContext 新增 outcome_confidence；agent.ts 并行拉取；prompts.ts 注入「历史成效数据」段落；处方 action 末尾附置信度标签
+  `feat(huatuo): 飞轮归因置信度反哺处方生成 [P12.C.2]`
+- **P12.C.3** — 社媒 engagement 回流：engagement-pullback.ts（7 测试）；Publer GET /posts/{id}；GET /api/cron/social-engagement-pullback；vocabulary 新增 POST_LIKES/COMMENTS/SHARES；render.yaml 注册每日 4am UTC cron
+  `feat(social): Publer engagement pullback → flywheel_metrics [P12.C.3]`
 
 ### 2026-05-24（Phase 8.13 Sprint A–E）
 

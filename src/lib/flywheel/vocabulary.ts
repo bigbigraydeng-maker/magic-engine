@@ -115,6 +115,17 @@ export const SEO_METRIC_KEY = {
 
   /** Count of published blog posts tracked in blog_posts table */
   PUBLISHED_POSTS: 'seo.content.published_posts',
+
+  // ── GSC-backed attribution metrics (P17.A.4) ──────────────────────────────
+
+  /** Total GSC clicks over the 28-day snapshot window */
+  GSC_CLICKS: 'seo.gsc.clicks',
+
+  /** Total GSC impressions over the 28-day snapshot window */
+  GSC_IMPRESSIONS: 'seo.gsc.impressions',
+
+  /** Average ranking position across all tracked queries (lower = better) */
+  GSC_AVG_POSITION: 'seo.gsc.avg_position',
 } as const
 
 export type SeoMetricKey = (typeof SEO_METRIC_KEY)[keyof typeof SEO_METRIC_KEY]
@@ -215,6 +226,17 @@ export const SOCIAL_METRIC_KEY = {
 
   /** Count of content_posts with status = 'scheduled' */
   SCHEDULED_COUNT: 'social.posts.scheduled_count',
+
+  // ── Per-post engagement (P12.C.3 — pulled from Publer daily) ─────────────
+
+  /** Like / reaction count for a specific published post */
+  POST_LIKES: 'social.post.likes',
+
+  /** Comment count for a specific published post */
+  POST_COMMENTS: 'social.post.comments',
+
+  /** Share / retweet count for a specific published post */
+  POST_SHARES: 'social.post.shares',
 } as const
 
 export type SocialMetricKey = (typeof SOCIAL_METRIC_KEY)[keyof typeof SOCIAL_METRIC_KEY]

@@ -33,6 +33,12 @@ export interface StyleScores {
   offer_signal: number
 }
 
+export interface OpeningHook {
+  type: string    // e.g. "visual_shock" | "ugc_selfie" | "text_overlay_question" | ...
+  script: string  // verbatim text or voiceover in first 1.5s (empty string if none)
+  feel: string    // "abrupt-cut" | "smooth-reveal"
+}
+
 export interface ViralAnalysisResult {
   style_scores: StyleScores
   style_tags: string[]
@@ -40,6 +46,8 @@ export interface ViralAnalysisResult {
   persona_fit: string[]
   key_techniques: string[]
   detected_content_goal: 'brand' | 'sales' | 'ugc' | 'education'
+  detected_industry: string
+  opening_hook: OpeningHook
 }
 
 // ─── Prompt ───────────────────────────────────────────────────────────────────
@@ -65,6 +73,16 @@ Also provide:
     * "sales"     — pushes a specific product/tour/package with clear CTA (book/buy/reserve), often urgency or pricing
     * "ugc"       — user-generated style content, authentic testimonial-like, social proof
     * "education" — how-to/tips/explainer content that teaches viewers
+- detected_industry: identify the PRIMARY industry of this video. Use lowercase snake_case.
+    Common values: "travel", "flooring", "real_estate", "food", "fashion", "fitness", "tech", "beauty".
+    If none fit, use a short descriptive label (e.g. "home_improvement", "finance").
+- opening_hook: analyze what happens in the FIRST 1.5 SECONDS of this video (the scroll-stop moment).
+    * type: choose ONE: "visual_shock" (dramatic unexpected visuals), "ugc_selfie" (creator speaks direct to camera),
+             "text_overlay_question" (bold on-screen question or statement), "product_reveal" (immediate product close-up),
+             "testimonial_start" (real person speaking), "sound_cue" (audio hook like music drop or voice),
+             "problem_statement" (surfaces a pain point), "scenic_beauty" (stunning landscape/environment reveal)
+    * script: the verbatim text overlay or first spoken words in those 1.5s (empty string "" if none)
+    * feel: "abrupt-cut" (jump-cut, pattern interrupt) OR "smooth-reveal" (gradual, cinematic open)
 
 Respond ONLY with valid JSON — no markdown, no explanation:
 {
@@ -73,7 +91,9 @@ Respond ONLY with valid JSON — no markdown, no explanation:
   "style_description": "",
   "persona_fit": [],
   "key_techniques": [],
-  "detected_content_goal": "brand"
+  "detected_content_goal": "brand",
+  "detected_industry": "",
+  "opening_hook": { "type": "", "script": "", "feel": "" }
 }`
 
 // ─── Platform detection ───────────────────────────────────────────────────────
@@ -245,6 +265,19 @@ function parseAnalysisResponse(raw: string): ViralAnalysisResult {
     ? (rawGoal as 'brand' | 'sales' | 'ugc' | 'education')
     : 'brand'
 
+  const rawIndustry = typeof parsed.detected_industry === 'string'
+    ? parsed.detected_industry.toLowerCase().trim()
+    : ''
+
+  const rawHook = parsed.opening_hook && typeof parsed.opening_hook === 'object'
+    ? parsed.opening_hook as Record<string, unknown>
+    : {}
+  const opening_hook: OpeningHook = {
+    type:   typeof rawHook.type   === 'string' ? rawHook.type.trim()   : '',
+    script: typeof rawHook.script === 'string' ? rawHook.script.trim() : '',
+    feel:   typeof rawHook.feel   === 'string' ? rawHook.feel.trim()   : '',
+  }
+
   return {
     style_scores: {
       energy: clamp(s.energy),
@@ -260,6 +293,8 @@ function parseAnalysisResponse(raw: string): ViralAnalysisResult {
     persona_fit: Array.isArray(parsed.persona_fit) ? parsed.persona_fit : [],
     key_techniques: Array.isArray(parsed.key_techniques) ? parsed.key_techniques : [],
     detected_content_goal,
+    detected_industry: rawIndustry,
+    opening_hook,
   }
 }
 
@@ -305,6 +340,8 @@ async function finalizeAnalysis(
       persona_fit: result.persona_fit,
       key_techniques: result.key_techniques,
       detected_content_goal: result.detected_content_goal,
+      detected_industry: result.detected_industry || null,
+      opening_hook: (result.opening_hook.type) ? result.opening_hook : null,
       content_goal: finalGoal,
       is_learnable: isLearnable,
       view_count:    metadata.view_count,

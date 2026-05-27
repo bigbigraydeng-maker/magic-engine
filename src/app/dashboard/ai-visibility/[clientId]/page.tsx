@@ -75,7 +75,7 @@ export default function AiVisibilityPage() {
 
   const handleRunNow = async () => {
     setRunning(true);
-    setRunMsg('Running… (may take up to 5 minutes)');
+    setRunMsg('⏳ 正在启动 Tracker，请稍候…');
     setRunSuccess(null);
     try {
       const res = await fetch('/api/ai-tracker/run-dashboard', {
@@ -85,9 +85,11 @@ export default function AiVisibilityPage() {
       });
       const json = await res.json();
       if (json.success) {
-        setRunMsg(`✓ Done — ${json.runs_succeeded}/${json.runs_attempted} runs succeeded`);
+        // Backend fires-and-forgets: run takes ~10 min in background.
+        // Schedule an automatic data refresh after 11 minutes.
+        setRunMsg('✓ Tracker 已在后台启动（约 10 分钟）。可以离开此页，完成后刷新查看结果。');
         setRunSuccess(true);
-        await fetchAll();
+        setTimeout(() => fetchAll(), 11 * 60 * 1000);
       } else {
         setRunMsg(`Error: ${json.error ?? 'Unknown error'}`);
         setRunSuccess(false);
@@ -97,7 +99,7 @@ export default function AiVisibilityPage() {
       setRunSuccess(false);
     } finally {
       setRunning(false);
-      setTimeout(() => { setRunMsg(''); setRunSuccess(null); }, 10000);
+      setTimeout(() => { setRunMsg(''); setRunSuccess(null); }, 60000); // banner stays 60s
     }
   };
 

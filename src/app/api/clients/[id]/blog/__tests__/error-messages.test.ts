@@ -57,6 +57,10 @@ vi.mock('@/lib/blog/topic-selector', () => ({
   getWeakSpotOpportunities: vi.fn(),
 }))
 
+vi.mock('@/lib/auth/client-access', () => ({
+  requireDashboardClientAccess: vi.fn(),
+}))
+
 // ---------------------------------------------------------------------------
 // Imports after mocks
 // ---------------------------------------------------------------------------
@@ -65,6 +69,9 @@ import { GET as blogListGET, POST as blogListPOST } from '../route'
 import { GET as opportunitiesGET } from '../opportunities/route'
 import { GET as postDetailGET, PATCH as postDetailPATCH, DELETE as postDetailDELETE } from '../[postId]/route'
 import { supabaseAdmin } from '@/lib/supabase'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+
+const mockDashboardAccess = vi.mocked(requireDashboardClientAccess)
 import { generateBlogPost } from '@/lib/blog/generator'
 import { fetchRelatedPages, buildPagesContextBlock } from '@/lib/blog/pages-context'
 import { auditBlogPost } from '@/lib/blog/quality-audit'
@@ -78,7 +85,6 @@ import { getWeakSpotOpportunities } from '@/lib/blog/topic-selector'
 // ---------------------------------------------------------------------------
 
 const BASE_URL = 'http://localhost:3000'
-const VALID_TOKEN = 'test-internal-key-secret'
 
 function makeAuthedRequest(
   path: string,
@@ -86,7 +92,7 @@ function makeAuthedRequest(
 ): NextRequest {
   const initOptions: Record<string, unknown> = {
     method: options.method ?? 'GET',
-    headers: { Authorization: `Bearer ${VALID_TOKEN}` },
+    headers: {},
   }
   if (options.body) {
     initOptions.body = JSON.stringify(options.body)
@@ -133,8 +139,9 @@ const mockSeoContentAdapter = vi.mocked(SeoContentAdapter)
 const mockGetWeakSpotOpportunities = vi.mocked(getWeakSpotOpportunities)
 
 beforeEach(() => {
-  process.env.INTERNAL_API_KEY = VALID_TOKEN
   vi.resetAllMocks()
+  // Allow auth through by default — these tests focus on DB error sanitisation
+  mockDashboardAccess.mockResolvedValue({ ok: true, user: { email: 'test@test.com' } as never, role: 'admin', allowedClientId: null })
 
   // Default: supabase chain that can be overridden per test
   const mockChain = {

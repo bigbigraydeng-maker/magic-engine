@@ -56,6 +56,8 @@ interface BlogPostRow {
   source_query_text?: string | null
   geo_html_snapshot: string | null
   featured_image_url: string | null
+  pr_url?:           string | null
+  pr_number?:        number | null
 }
 
 // ─── publishBlogToGitHub ──────────────────────────────────────────────────────
@@ -138,7 +140,19 @@ export async function publishBlogToGitHub(
     return { ok: false, reason: buildGithubErr('creating PR', err), code: 'GITHUB_PR_ERROR' }
   }
 
-  // Step 6: Record in flywheel_actions
+  // Step 6: Update blog_posts status to 'pr_open' and store PR details
+  // Non-fatal: if this update fails we still return success (the PR was created).
+  const { error: updateErr } = await supabaseAdmin
+    .from('blog_posts')
+    .update({ status: 'pr_open', pr_url: pr.html_url, pr_number: pr.number })
+    .eq('id', blogPostId)
+    .eq('client_id', clientId)
+
+  if (updateErr) {
+    console.warn('[blog-publisher] PR created but failed to update blog_posts status:', updateErr.message)
+  }
+
+  // Step 7: Record in flywheel_actions
   const { data: fa, error: faErr } = await supabaseAdmin
     .from('flywheel_actions')
     .insert({

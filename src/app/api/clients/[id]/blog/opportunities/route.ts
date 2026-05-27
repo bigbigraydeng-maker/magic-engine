@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getWeakSpotOpportunities } from '@/lib/blog/topic-selector'
-import { requireBearerToken, clampLimit } from '@/lib/validation-utils'
+import { clampLimit } from '@/lib/validation-utils'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 /**
  * GET /api/clients/[id]/blog/opportunities
@@ -19,13 +20,13 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+  const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
   try {
-    const clientId = params.id
     // HIGH-1: clamp limit to prevent unbounded queries
     const limit = clampLimit(req.nextUrl.searchParams.get('limit'))
 

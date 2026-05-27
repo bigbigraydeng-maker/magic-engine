@@ -10,6 +10,8 @@ function postRoute(contentType: string): string {
 
 // POST /api/clients/[id]/social-plan/[planId]/save-to-board
 // Reads plan_data from social_plans, inserts posts[] + stories[] into content_posts as drafts.
+// When an approved marketing plan exists, also creates execution_items so they appear in the
+// execution board, and back-links content_posts.execution_item_id for the flywheel trigger.
 // Simple insert — no dedup, caller may call multiple times; UI shows saved count.
 export async function POST(
   _req: NextRequest,
@@ -32,6 +34,32 @@ export async function POST(
     const planData = planRow.plan_data as SocialPlanOutput
     const posts = planData.posts ?? []
     const stories = planData.stories ?? []
+
+    // Find the latest approved marketing plan to link execution_items.
+    // Only 'approved' is a valid status for board-linkage; no execution_items
+    // are created without it (to avoid violating the source_consistency CHECK constraint).
+    const { data: mpRow } = await supabaseAdmin
+      .from('marketing_plans')
+      .select('id')
+      .eq('client_id', clientId)
+      .eq('status', 'approved')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle<{ id: string }>()
+    const marketingPlanId = mpRow?.id ?? null
+
+    // Compute next sort_order to append new items after existing ones
+    let nextSortOrder = 200
+    if (marketingPlanId) {
+      const { data: maxRow } = await supabaseAdmin
+        .from('execution_items')
+        .select('sort_order')
+        .eq('marketing_plan_id', marketingPlanId)
+        .order('sort_order', { ascending: false })
+        .limit(1)
+        .maybeSingle<{ sort_order: number }>()
+      nextSortOrder = (maxRow?.sort_order ?? 199) + 1
+    }
 
     const postRows = posts.map((post) => ({
       client_id:         clientId,
@@ -58,20 +86,128 @@ export async function POST(
 
     let savedPosts = 0
     let savedStories = 0
+    let executionItemsCreated = 0
 
+    // ── Posts ──────────────────────────────────────────────────────────────────
     if (postRows.length > 0) {
-      const { error } = await supabaseAdmin.from('content_posts').insert(postRows)
+      const { data: insertedPosts, error } = await supabaseAdmin
+        .from('content_posts')
+        .insert(postRows)
+        .select('id, title')
       if (error) throw error
       savedPosts = postRows.length
+
+      if (marketingPlanId && insertedPosts && insertedPosts.length > 0) {
+        const typed = insertedPosts as { id: string; title: string }[]
+        const execRows = typed.map((cp, idx) => ({
+          prescription_id:   null,
+          marketing_plan_id: marketingPlanId,
+          source:            'marketing_plan',
+          client_id:         clientId,
+          finding_id:        null,
+          content_post_id:   cp.id,
+          dimension:         'social',
+          phase:             1,
+          title:             cp.title,
+          description:       posts[idx]?.copy?.slice(0, 120) ?? cp.title,
+          fix_type:          'fde_manual',
+          status:            'pending',
+          steps_json: {
+            source:          'social_plan',
+            kind:            'social_post',
+            estimated_hours: 1,
+            required_skills: ['social copywriting'],
+          },
+          execution_target:  { mode: 'in_house', flywheel: 'social', module: 'social_matrix' },
+          sort_order:        nextSortOrder + idx,
+        }))
+
+        const { data: createdExec, error: execErr } = await supabaseAdmin
+          .from('execution_items')
+          .insert(execRows)
+          .select('id, content_post_id')
+        if (execErr) {
+          console.error('[save-to-board] execution_items insert (posts):', execErr)
+        } else if (createdExec) {
+          executionItemsCreated += createdExec.length
+          // Back-link content_posts.execution_item_id so the flywheel trigger fires on publish
+          const backLinks = (createdExec as { id: string; content_post_id: string }[])
+          await Promise.all(backLinks.map(ei =>
+            supabaseAdmin
+              .from('content_posts')
+              .update({ execution_item_id: ei.id })
+              .eq('id', ei.content_post_id)
+              .then(({ error: e }) => {
+                if (e) console.error('[save-to-board] back-link (post):', e)
+              })
+          ))
+        }
+      }
     }
 
+    // ── Stories ────────────────────────────────────────────────────────────────
     if (storyRows.length > 0) {
-      const { error } = await supabaseAdmin.from('content_posts').insert(storyRows)
+      const { data: insertedStories, error } = await supabaseAdmin
+        .from('content_posts')
+        .insert(storyRows)
+        .select('id, title')
       if (error) throw error
       savedStories = storyRows.length
+
+      if (marketingPlanId && insertedStories && insertedStories.length > 0) {
+        const typed = insertedStories as { id: string; title: string }[]
+        const storyOffset = nextSortOrder + postRows.length
+        const execRows = typed.map((cp, idx) => ({
+          prescription_id:   null,
+          marketing_plan_id: marketingPlanId,
+          source:            'marketing_plan',
+          client_id:         clientId,
+          finding_id:        null,
+          content_post_id:   cp.id,
+          dimension:         'social',
+          phase:             1,
+          title:             cp.title,
+          description:       stories[idx]?.copy?.slice(0, 120) ?? cp.title,
+          fix_type:          'fde_manual',
+          status:            'pending',
+          steps_json: {
+            source:          'social_plan',
+            kind:            'social_story',
+            estimated_hours: 0.5,
+            required_skills: ['social copywriting'],
+          },
+          execution_target:  { mode: 'in_house', flywheel: 'social', module: 'social_matrix' },
+          sort_order:        storyOffset + idx,
+        }))
+
+        const { data: createdExec, error: execErr } = await supabaseAdmin
+          .from('execution_items')
+          .insert(execRows)
+          .select('id, content_post_id')
+        if (execErr) {
+          console.error('[save-to-board] execution_items insert (stories):', execErr)
+        } else if (createdExec) {
+          executionItemsCreated += createdExec.length
+          const backLinks = (createdExec as { id: string; content_post_id: string }[])
+          await Promise.all(backLinks.map(ei =>
+            supabaseAdmin
+              .from('content_posts')
+              .update({ execution_item_id: ei.id })
+              .eq('id', ei.content_post_id)
+              .then(({ error: e }) => {
+                if (e) console.error('[save-to-board] back-link (story):', e)
+              })
+          ))
+        }
+      }
     }
 
-    return NextResponse.json({ success: true, saved_posts: savedPosts, saved_stories: savedStories })
+    return NextResponse.json({
+      success: true,
+      saved_posts: savedPosts,
+      saved_stories: savedStories,
+      execution_items_created: executionItemsCreated,
+    })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[save-to-board]', err)

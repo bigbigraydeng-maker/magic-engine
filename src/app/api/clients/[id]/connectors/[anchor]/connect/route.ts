@@ -14,7 +14,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireBearerToken } from '@/lib/validation-utils'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { getLatestDiscovery } from '@/lib/zhangqian/persistor'
 
 // Anchors that unlock advanced discovery when connected.
@@ -24,12 +24,11 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string; anchor: string } },
 ): Promise<NextResponse> {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
-  }
-
   const { id: clientId, anchor } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error }, { status: access.status })
+  }
 
   // Parse optional config from request body
   let config: Record<string, unknown> | null = null

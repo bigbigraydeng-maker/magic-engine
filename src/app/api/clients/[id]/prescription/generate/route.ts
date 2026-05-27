@@ -17,7 +17,7 @@
 
 import { NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireBearerToken } from '@/lib/validation-utils'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { generatePrescription } from '@/lib/diagnostic/prescription-generator'
 import { runHuatuo } from '@/lib/huatuo/agent'
 import type {
@@ -46,15 +46,14 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } },
 ): Promise<Response> {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return new Response(JSON.stringify({ success: false, error: auth.error }), {
-      status: auth.status,
+  const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return new Response(JSON.stringify({ error: access.error }), {
+      status: access.status,
       headers: { 'Content-Type': 'application/json' },
     })
   }
-
-  const { id: clientId } = params
 
   let body: {
     run_id?: string

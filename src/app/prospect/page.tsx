@@ -37,18 +37,34 @@ function LogoMark() {
 }
 
 function PageShell({ children, reportReady = false }: { children: ReactNode; reportReady?: boolean }) {
+  const handlePrint = () => window.print()
+
   return (
-    <main className="min-h-screen bg-[#f6f7f2] text-slate-950">
-      <header className="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-[#f6f7f2]/90 px-5 py-5 backdrop-blur sm:px-8">
+    <main className="min-h-screen bg-[#f6f7f2] text-slate-950 print:bg-white">
+      <header className="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-[#f6f7f2]/90 px-5 py-5 backdrop-blur print:hidden sm:px-8">
         <Link href="/" className="flex items-center gap-3">
           <LogoMark />
           <span className="text-sm font-bold">Magic Engine</span>
         </Link>
         <div className="flex items-center gap-3">
           {reportReady && (
-            <span className="hidden rounded-lg bg-emerald-100 px-3 py-1.5 text-xs font-bold text-emerald-900 sm:inline-flex">
-              Report ready
-            </span>
+            <>
+              <span className="hidden rounded-lg bg-emerald-100 px-3 py-1.5 text-xs font-bold text-emerald-900 sm:inline-flex">
+                Report ready
+              </span>
+              <button
+                onClick={handlePrint}
+                className="hidden rounded-lg border border-cyan-200 bg-cyan-50 px-4 py-2 text-sm font-black text-cyan-900 transition-colors hover:bg-cyan-100 sm:inline-flex"
+              >
+                Save PDF
+              </button>
+              <a
+                href="/api/prospect/report/docx"
+                className="hidden rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-black text-slate-950 transition-colors hover:bg-slate-50 sm:inline-flex"
+              >
+                DOCX
+              </a>
+            </>
           )}
           <Link href="/discover" className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-bold text-slate-950">
             New scan

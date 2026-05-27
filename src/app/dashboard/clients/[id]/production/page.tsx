@@ -42,8 +42,6 @@ interface CampaignOption {
 // Constants
 // ---------------------------------------------------------------------------
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 const ALL_DIMENSIONS: DiagnosticDimension[] = [
   'seo', 'ai_visibility', 'ads', 'social', 'reputation', 'competitor',
 ]
@@ -108,9 +106,7 @@ function CreatePackageModal({ clientId, onClose, onCreated }: CreatePackageModal
   const [error,      setError]      = useState<string | null>(null)
 
   useEffect(() => {
-    void fetch(`/api/clients/${clientId}/campaign`, {
-      headers: { Authorization: `Bearer ${API_KEY}` },
-    })
+    void fetch(`/api/clients/${clientId}/campaign`)
       .then(r => r.json())
       .then((json: { success?: boolean; campaigns?: { id: string; name: string }[] }) => {
         if (json.success && Array.isArray(json.campaigns)) {
@@ -130,7 +126,6 @@ function CreatePackageModal({ clientId, onClose, onCreated }: CreatePackageModal
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${API_KEY}`,
         },
         body: JSON.stringify({
           dimension,
@@ -312,9 +307,7 @@ export default function ProductionPackageListPage() {
       try {
         const url = new URL(`/api/clients/${clientId}/production`, window.location.origin)
         if (dimFilter !== 'all') url.searchParams.set('dimension', dimFilter)
-        const res  = await fetch(url.toString(), {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        })
+        const res  = await fetch(url.toString())
         const json = await res.json() as ListResponse
         if (!json.success) {
           setError(json.error ?? '加载失败')

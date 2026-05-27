@@ -26,7 +26,39 @@ const SEARCH_ANALYTICS_BASE  = 'https://searchconsole.googleapis.com/webmasters/
 
 const DEFAULT_DATE_RANGE_DAYS = 28
 const MAX_ROWS                = 25
+const SNAPSHOT_ROWS           = 50   // per dimension for snapshots
 const FETCH_TIMEOUT_MS        = 20_000
+
+// ─── Error class ──────────────────────────────────────────────────────────────
+
+export class GscApiError extends Error {
+  constructor(
+    public readonly httpStatus: number,
+    public readonly googleStatus: string,
+    public readonly googleReason: string,
+    message: string,
+    public readonly detail: string = '',
+  ) {
+    super(message)
+    this.name = 'GscApiError'
+  }
+}
+
+function parseGoogleError(rawBody: string): { googleStatus: string; googleReason: string; message: string } {
+  try {
+    const json = JSON.parse(rawBody) as {
+      error?: { status?: string; message?: string; errors?: Array<{ reason?: string }> }
+    }
+    const err = json.error ?? {}
+    return {
+      googleStatus: err.status ?? '',
+      googleReason: err.errors?.[0]?.reason ?? '',
+      message:      err.message ?? rawBody.slice(0, 200),
+    }
+  } catch {
+    return { googleStatus: '', googleReason: '', message: rawBody.slice(0, 200) }
+  }
+}
 
 // ─── Service-account shape (legacy) ──────────────────────────────────────────
 
@@ -111,6 +143,193 @@ export async function fetchGscSearchPerformance(
   } catch (err) {
     console.warn('[gsc/client] fetch failed:', err instanceof Error ? err.message : err)
     return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// ─── Snapshot types (P17.A.1) ─────────────────────────────────────────────────
+
+export interface GscSnapshotRow {
+  query?: string
+  page?:  string
+  clicks:      number
+  impressions: number
+  ctr:         number
+  position:    number
+}
+
+export interface GscSiteSnapshot {
+  site_url:         string
+  period_start:     string
+  period_end:       string
+  total_clicks:     number
+  total_impressions: number
+  avg_ctr:          number
+  avg_position:     number
+  top_queries:      GscSnapshotRow[]
+  top_pages:        GscSnapshotRow[]
+  synced_at:        string
+}
+
+/**
+ * Pull a full GSC snapshot for a date range (site totals + top queries + top pages).
+ * Used by the data pullback sync route (P17.A.1).
+ *
+ * @param siteUrl      GSC property URL, e.g. "https://example.com.au/"
+ * @param clientId     Resolves per-client OAuth token (falls back to service account)
+ * @param periodDays   How many days back to cover (default 28)
+ */
+export async function fetchGscSnapshot(
+  siteUrl: string,
+  clientId: string,
+  periodDays: number = DEFAULT_DATE_RANGE_DAYS,
+): Promise<GscSiteSnapshot | null> {
+  const token = await resolveAccessToken(clientId)
+  if (!token) return null
+
+  const periodEnd   = toIsoDate(new Date())
+  const periodStart = toIsoDate(daysAgo(periodDays))
+
+  // GscApiError propagates to caller — null return is reserved for "no token"
+  // Fire all three requests in parallel: site-level totals + top queries + top pages.
+  // Site-level uses no dimensions → returns true aggregate (fixes P17.A bug where
+  // totals were summed from top-50 rows only, under-counting long-tail queries).
+  const [siteTotals, queries, pages] = await Promise.all([
+    querySiteTotals(token, siteUrl, periodStart, periodEnd),
+    querySearchAnalytics(token, siteUrl, periodStart, periodEnd, 'query'),
+    querySearchAnalytics(token, siteUrl, periodStart, periodEnd, 'page'),
+  ])
+
+  return {
+    site_url:          siteUrl,
+    period_start:      periodStart,
+    period_end:        periodEnd,
+    total_clicks:      siteTotals.clicks,
+    total_impressions: siteTotals.impressions,
+    avg_ctr:           Math.round(siteTotals.ctr * 10000) / 10000,
+    avg_position:      Math.round(siteTotals.position * 100) / 100,
+    top_queries:       queries.slice(0, SNAPSHOT_ROWS),
+    top_pages:         pages.slice(0, SNAPSHOT_ROWS),
+    synced_at:         new Date().toISOString(),
+  }
+}
+
+// ─── Site-level totals (no dimension breakdown) ───────────────────────────────
+
+interface SiteTotals {
+  clicks:      number
+  impressions: number
+  ctr:         number
+  position:    number
+}
+
+/**
+ * Fetch true site-level aggregate stats for a date range by calling the
+ * Search Analytics API with NO dimensions.  This is the only accurate way
+ * to get total_clicks / total_impressions — summing per-query rows misses
+ * long-tail queries that fall outside the rowLimit.
+ */
+async function querySiteTotals(
+  token: string,
+  siteUrl: string,
+  startDate: string,
+  endDate: string,
+): Promise<SiteTotals> {
+  const controller = new AbortController()
+  const timer      = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+
+  try {
+    const res = await fetch(
+      `${SEARCH_ANALYTICS_BASE}/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
+      {
+        method:  'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ startDate, endDate, rowLimit: 1 }),
+        signal: controller.signal,
+      },
+    )
+
+    if (!res.ok) {
+      const rawBody = await res.text()
+      const { googleStatus, googleReason, message } = parseGoogleError(rawBody)
+      throw new GscApiError(res.status, googleStatus, googleReason, message, rawBody.slice(0, 500))
+    }
+
+    const data = await res.json() as {
+      rows?: Array<{ clicks: number; impressions: number; ctr: number; position: number }>
+    }
+
+    // When no dimensions are set, GSC returns a single row with site-level totals
+    const row = data.rows?.[0]
+    return {
+      clicks:      row?.clicks      ?? 0,
+      impressions: row?.impressions ?? 0,
+      ctr:         row?.ctr         ?? 0,
+      position:    row?.position    ?? 0,
+    }
+  } catch (err) {
+    if (err instanceof GscApiError) throw err
+    const msg = err instanceof Error ? err.message : String(err)
+    console.warn('[gsc/client] site totals fetch failed:', msg)
+    throw new GscApiError(0, 'NETWORK_ERROR', 'networkError', msg)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// ─── Per-dimension rows (query / page) ────────────────────────────────────────
+
+async function querySearchAnalytics(
+  token: string,
+  siteUrl: string,
+  startDate: string,
+  endDate: string,
+  dimension: 'query' | 'page',
+): Promise<GscSnapshotRow[]> {
+  const controller = new AbortController()
+  const timer      = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+
+  try {
+    const res = await fetch(
+      `${SEARCH_ANALYTICS_BASE}/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
+      {
+        method:  'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          startDate,
+          endDate,
+          dimensions: [dimension],
+          rowLimit:   SNAPSHOT_ROWS,
+          orderBy:    [{ fieldName: 'clicks', sortOrder: 'DESCENDING' }],
+        }),
+        signal: controller.signal,
+      },
+    )
+
+    if (!res.ok) {
+      const rawBody = await res.text()
+      const { googleStatus, googleReason, message } = parseGoogleError(rawBody)
+      console.warn(`[gsc/client] ${dimension} query returned ${res.status} for ${siteUrl}: ${rawBody.slice(0, 200)}`)
+      throw new GscApiError(res.status, googleStatus, googleReason, message, rawBody.slice(0, 500))
+    }
+
+    const data = await res.json() as {
+      rows?: Array<{ keys: string[]; impressions: number; clicks: number; ctr: number; position: number }>
+    }
+
+    return (data.rows ?? []).map(r => ({
+      [dimension]: r.keys[0] ?? '',
+      clicks:      r.clicks,
+      impressions: r.impressions,
+      ctr:         r.ctr,
+      position:    r.position,
+    } as GscSnapshotRow))
+  } catch (err) {
+    if (err instanceof GscApiError) throw err
+    const msg = err instanceof Error ? err.message : String(err)
+    console.warn(`[gsc/client] ${dimension} fetch failed:`, msg)
+    throw new GscApiError(0, 'NETWORK_ERROR', 'networkError', msg)
   } finally {
     clearTimeout(timer)
   }

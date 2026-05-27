@@ -23,9 +23,12 @@ import {
   generateReelsScripts,
   generatePosts,
   generateStories,
+  extractBrandVisualDNA,
+  extractCampaignVisualDirection,
   DEFAULT_CONFIG,
 } from '@/lib/social/social-plan-templates'
 import type { SocialPlanOutput, GenerationConfig } from '@/lib/social/social-plan-templates'
+import type { CampaignBrief } from '@/types/magic-engine'
 import { evaluate } from '@/lib/content/quality-rubric'
 import type { RubricContext } from '@/lib/content/quality-rubric'
 import type { MasterBrief } from '@/types/magic-engine'
@@ -40,6 +43,7 @@ interface ViralRef {
   persona_fit:       string[] | null
   view_count?:       number | null
   video_title?:      string | null
+  opening_hook?:     { type: string; script: string; feel: string } | null
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -70,6 +74,7 @@ function formatViralInsights(refs: ViralRef[]): string {
           .join(' | ')
       : null
 
+    const hook = r.opening_hook
     const lines = [
       `REF ${i + 1}${titlePart}${viewBadge}: ${desc}`,
       `  Key Techniques : ${techniques}`,
@@ -77,6 +82,12 @@ function formatViralInsights(refs: ViralRef[]): string {
       `  Target Persona : ${personas}`,
     ]
     if (scores) lines.push(`  Style Scores   : ${scores}`)
+    if (hook?.type) {
+      const hookLine = hook.script
+        ? `  Opening Hook   : ${hook.type} — "${hook.script}" (${hook.feel})`
+        : `  Opening Hook   : ${hook.type} (${hook.feel})`
+      lines.push(hookLine)
+    }
     return lines.join('\n')
   })
   return [
@@ -191,7 +202,7 @@ export async function POST(
     //   4. Include style_scores + persona_fit so AI can map scores to Seedance fields
     let viralInsightsText = ''
     try {
-      const SELECT_FIELDS = 'style_scores, style_tags, style_description, key_techniques, persona_fit, view_count, video_title'
+      const SELECT_FIELDS = 'style_scores, style_tags, style_description, key_techniques, persona_fit, view_count, video_title, opening_hook'
 
       // Step 1: get client's industry for targeted matching
       const { data: clientRow } = await supabaseAdmin
@@ -245,12 +256,17 @@ export async function POST(
       ...(body.angle_focus ? { angle_focus: body.angle_focus } : {}),
     }
 
+    // 3c. Extract structured visual DNA from MB + campaign (locked constraints
+    //     for deterministic Post/Story image prompt assembly — SP-VI.1).
+    const brandDNA = extractBrandVisualDNA(brief as unknown as MasterBrief)
+    const campaignDirection = extractCampaignVisualDirection(campaign as CampaignBrief)
+
     // 4. Strategy first, then parallel content generation
     const strategy = await generateChannelStrategy(briefText, campaignText, genConfig)
     const [reels, posts, stories] = await Promise.all([
       generateReelsScripts(strategy, briefText, campaignText, viralInsightsText, genConfig),
-      generatePosts(strategy, briefText, campaignText, genConfig),
-      generateStories(strategy, briefText, campaignText, genConfig),
+      generatePosts(strategy, brandDNA, campaignDirection, briefText, campaignText, genConfig),
+      generateStories(strategy, brandDNA, campaignDirection, briefText, campaignText, genConfig),
     ])
 
     // 5. Quality rubric on each post — silent failure, non-blocking

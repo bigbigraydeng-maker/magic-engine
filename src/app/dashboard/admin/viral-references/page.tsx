@@ -17,11 +17,19 @@ interface StyleScores {
 
 type ContentGoal = 'brand' | 'sales' | 'ugc' | 'education'
 
+interface OpeningHook {
+  type: string
+  script: string
+  feel: string
+}
+
 interface ViralReference {
   id: string
   source_url: string
   platform: 'youtube' | 'facebook' | 'tiktok' | 'instagram' | 'upload'
   industry: string
+  detected_industry: string | null
+  opening_hook: OpeningHook | null
   content_goal: ContentGoal
   detected_content_goal: ContentGoal | null
   is_our_video: boolean
@@ -128,11 +136,31 @@ function PlatformBadge({ platform }: { platform: ViralReference['platform'] }) {
 
 // ─── Reference card ───────────────────────────────────────────────────────────
 
-function ReferenceCard({ item: r, onRetry, learnableAvgScores }: {
+const KNOWN_INDUSTRIES = ['travel', 'flooring', 'real_estate', 'food', 'fashion', 'fitness', 'tech', 'beauty']
+
+function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores }: {
   item: ViralReference
   onRetry: (id: string) => void
+  onUpdateIndustry: (id: string, industry: string) => Promise<void>
   learnableAvgScores: StyleScores | null
 }) {
+  const [editingIndustry, setEditingIndustry] = useState(false)
+  const [industryDraft, setIndustryDraft] = useState(r.industry)
+  const [savingIndustry, setSavingIndustry] = useState(false)
+
+  const saveIndustry = async () => {
+    if (industryDraft === r.industry) { setEditingIndustry(false); return }
+    setSavingIndustry(true)
+    await onUpdateIndustry(r.id, industryDraft)
+    setSavingIndustry(false)
+    setEditingIndustry(false)
+  }
+
+  const hasMismatch =
+    r.analysis_status === 'done' &&
+    r.detected_industry &&
+    r.detected_industry !== r.industry
+
   const shortUrl = r.source_url.replace(/^https?:\/\/(www\.)?/, '').slice(0, 50)
   const goalCfg = GOAL_CONFIG[r.content_goal]
   const views = formatViews(r.view_count)
@@ -161,7 +189,49 @@ function ReferenceCard({ item: r, onRetry, learnableAvgScores }: {
             <span className={`text-xs px-2 py-0.5 rounded font-medium ${goalCfg.cls}`}>
               {goalCfg.emoji} {goalCfg.label}
             </span>
-            <span className="text-xs text-gray-500 capitalize">{r.industry}</span>
+            {editingIndustry ? (
+              <span className="flex items-center gap-1">
+                <select
+                  value={industryDraft}
+                  onChange={e => setIndustryDraft(e.target.value)}
+                  className="bg-gray-900 border border-indigo-500 rounded px-1.5 py-0.5 text-xs text-white focus:outline-none"
+                  autoFocus
+                >
+                  {KNOWN_INDUSTRIES.map(ind => (
+                    <option key={ind} value={ind}>{ind}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={saveIndustry}
+                  disabled={savingIndustry}
+                  className="text-xs px-1.5 py-0.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded disabled:opacity-40"
+                >
+                  {savingIndustry ? '…' : '✓'}
+                </button>
+                <button
+                  onClick={() => { setEditingIndustry(false); setIndustryDraft(r.industry) }}
+                  className="text-xs px-1.5 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded"
+                >
+                  ✕
+                </button>
+              </span>
+            ) : (
+              <button
+                onClick={() => { setIndustryDraft(r.industry); setEditingIndustry(true) }}
+                title="点击修改行业分类"
+                className={`text-xs capitalize hover:text-white transition-colors ${
+                  hasMismatch ? 'text-amber-400 font-semibold' : 'text-gray-500'
+                }`}
+              >
+                {r.industry}
+                {hasMismatch && (
+                  <span className="ml-1 text-[10px] bg-amber-900/60 text-amber-300 px-1.5 py-0.5 rounded" title={`AI 识别为 "${r.detected_industry}"，与录入行业不符`}>
+                    ⚠ AI: {r.detected_industry}
+                  </span>
+                )}
+                <span className="ml-1 text-[10px] text-gray-600">✏</span>
+              </button>
+            )}
             {views && (
               <span className="text-xs text-yellow-300 font-medium">
                 ▶ {views}
@@ -212,6 +282,28 @@ function ReferenceCard({ item: r, onRetry, learnableAvgScores }: {
           {/* Style description */}
           {r.style_description && (
             <p className="text-sm text-gray-200 leading-relaxed">{r.style_description}</p>
+          )}
+
+          {/* Opening hook */}
+          {r.opening_hook?.type && (
+            <div className="flex items-start gap-2 bg-gray-900/50 rounded-lg px-3 py-2">
+              <span className="text-[10px] text-gray-500 mt-0.5 shrink-0">🎣 Hook</span>
+              <div className="min-w-0">
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-900/60 text-indigo-300 font-medium">
+                  {r.opening_hook.type.replace(/_/g, ' ')}
+                </span>
+                {r.opening_hook.feel && (
+                  <span className="ml-1.5 text-[10px] text-gray-500">
+                    {r.opening_hook.feel === 'abrupt-cut' ? '⚡ abrupt' : '🌊 smooth'}
+                  </span>
+                )}
+                {r.opening_hook.script && (
+                  <p className="text-xs text-gray-300 italic mt-1 line-clamp-1">
+                    "{r.opening_hook.script}"
+                  </p>
+                )}
+              </div>
+            </div>
           )}
 
           {/* Gap analysis (only for OUR videos) */}
@@ -301,6 +393,8 @@ export default function ViralReferencesPage() {
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [triggering, setTriggering] = useState(false)
   const [triggerMsg, setTriggerMsg] = useState('')
+  const [detectingIndustry, setDetectingIndustry] = useState(false)
+  const [detectMsg, setDetectMsg] = useState('')
   const [filter, setFilter] = useState<'all' | 'done' | 'pending' | 'error'>('all')
 
   // Add video form
@@ -471,6 +565,34 @@ export default function ViralReferencesPage() {
     fetchRefs()
   }
 
+  const handleDetectIndustryBatch = async () => {
+    setDetectingIndustry(true)
+    setDetectMsg('')
+    try {
+      const res = await fetch('/api/admin/viral-references/detect-industry-batch', { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        setDetectMsg(`✅ ${data.message}`)
+        if (data.updated > 0) fetchRefs()
+      } else {
+        setDetectMsg(`❌ ${data.error}`)
+      }
+    } catch {
+      setDetectMsg('❌ 网络错误，请重试')
+    } finally {
+      setDetectingIndustry(false)
+    }
+  }
+
+  const handleUpdateIndustry = async (id: string, industry: string) => {
+    await fetch(`/api/admin/viral-references/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ industry }),
+    })
+    fetchRefs()
+  }
+
   const triggerAnalysis = async () => {
     setTriggering(true)
     setTriggerMsg('')
@@ -517,7 +639,7 @@ export default function ViralReferencesPage() {
     if (!groups.has(k)) groups.set(k, [])
     groups.get(k)!.push(r)
   }
-  for (const [k, arr] of groups) {
+  for (const [k, arr] of Array.from(groups.entries())) {
     if (arr.length === 0) continue
     const sum: StyleScores = { energy: 0, luxury: 0, authenticity: 0, emotional: 0, humor: 0, urgency: 0, offer_signal: 0 }
     for (const r of arr) {
@@ -554,13 +676,23 @@ export default function ViralReferencesPage() {
             爆款视频风格参考库 — FDE 参考使用 · 分析结果自动注入 Reel 生成
           </p>
         </div>
-        <button
-          onClick={triggerAnalysis}
-          disabled={triggering || pending === 0}
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors shrink-0"
-        >
-          {triggering ? 'Starting…' : `Analyze Pending (${pending})`}
-        </button>
+        <div className="flex gap-2 shrink-0">
+          <button
+            onClick={handleDetectIndustryBatch}
+            disabled={detectingIndustry}
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+            title="用 AI 文字推断所有缺少 detected_industry 的已分析视频的行业（无需重新下载视频）"
+          >
+            {detectingIndustry ? '推断中…' : '🏷 补全行业识别'}
+          </button>
+          <button
+            onClick={triggerAnalysis}
+            disabled={triggering || pending === 0}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            {triggering ? 'Starting…' : `Analyze Pending (${pending})`}
+          </button>
+        </div>
       </div>
 
       {/* Add Video Panel */}
@@ -730,6 +862,13 @@ export default function ViralReferencesPage() {
         </p>
       )}
 
+      {/* Detect industry message */}
+      {detectMsg && (
+        <p className={`text-sm rounded-lg px-4 py-2.5 ${detectMsg.startsWith('✅') ? 'text-green-400 bg-green-950/40' : 'text-red-400 bg-red-950/40'}`}>
+          {detectMsg}
+        </p>
+      )}
+
       {/* Stats */}
       <div className="grid grid-cols-4 gap-3">
         {[
@@ -777,6 +916,7 @@ export default function ViralReferencesPage() {
               key={r.id}
               item={r}
               onRetry={handleRetry}
+              onUpdateIndustry={handleUpdateIndustry}
               learnableAvgScores={avgFor(r)}
             />
           ))}

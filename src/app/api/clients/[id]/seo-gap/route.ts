@@ -13,7 +13,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireBearerToken } from '@/lib/validation-utils'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { getSerpCompetitors, getKeywordsGap } from '@/lib/dataforseo/labs'
 import type { LabsKeyword } from '@/lib/dataforseo/labs'
 import { analyzeSeoGap } from '@/lib/seo-gap/analyzer'
@@ -61,16 +61,17 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+  const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
   try {
     const { data, error } = await supabaseAdmin
       .from('seo_analyses')
       .select('id, title, csv_count, competitor_count, total_keywords, b2c_keywords, cost_usd, status, report_url, created_at')
-      .eq('client_id', params.id)
+      .eq('client_id', clientId)
       .order('created_at', { ascending: false })
       .limit(20)
 
@@ -92,12 +93,11 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+  const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
   }
-
-  const clientId = params.id
   let analysisId: string | null = null
 
   try {

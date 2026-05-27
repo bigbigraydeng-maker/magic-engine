@@ -1,86 +1,84 @@
-'use client';
+'use client'
 
-import { useState, useRef, useEffect } from 'react';
-import type { MasterBrief, BriefChatMessage } from '@/types/magic-engine';
+import { useState, useRef, useEffect } from 'react'
+import type { MasterBrief, BriefChatMessage } from '@/types/magic-engine'
 
 interface Props {
-  briefId: string;
-  clientId: string;
-  disabled?: boolean;
-  onBriefUpdated: (b: MasterBrief) => void;
+  briefId: string
+  clientId: string
+  disabled?: boolean
+  onBriefUpdated: (b: MasterBrief) => void
 }
 
 export function BriefChat({ briefId, clientId, disabled = false, onBriefUpdated }: Props) {
-  const [messages, setMessages] = useState<BriefChatMessage[]>([]);
-  const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState('');
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const [messages, setMessages] = useState<BriefChatMessage[]>([])
+  const [input, setInput] = useState('')
+  const [sending, setSending] = useState(false)
+  const [error, setError] = useState('')
+  const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
 
   const handleSend = async () => {
-    const text = input.trim();
-    if (!text || sending || disabled) return;
+    const text = input.trim()
+    if (!text || sending || disabled) return
 
-    const userMsg: BriefChatMessage = { role: 'user', content: text, timestamp: new Date().toISOString() };
-    setMessages(prev => [...prev, userMsg]);
-    setInput('');
-    setSending(true);
-    setError('');
+    const userMsg: BriefChatMessage = { role: 'user', content: text, timestamp: new Date().toISOString() }
+    setMessages(prev => [...prev, userMsg])
+    setInput('')
+    setSending(true)
+    setError('')
 
     try {
       const res = await fetch(`/api/clients/${clientId}/brief/${briefId}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, history: messages }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? 'Request failed');
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Request failed')
 
       const assistantMsg: BriefChatMessage = {
         role: 'assistant',
         content: json.reasoning ?? 'Brief updated.',
         timestamp: new Date().toISOString(),
-      };
-      setMessages(prev => [...prev, assistantMsg]);
-      if (json.brief) onBriefUpdated(json.brief);
+      }
+      setMessages(prev => [...prev, assistantMsg])
+      if (json.brief) onBriefUpdated(json.brief)
     } catch (err) {
-      setError((err as Error).message);
-      // Remove the optimistically-added user message
-      setMessages(prev => prev.slice(0, -1));
-      setInput(text);
+      setError((err as Error).message)
+      setMessages(prev => prev.slice(0, -1))
+      setInput(text)
     } finally {
-      setSending(false);
+      setSending(false)
     }
-  };
+  }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
+      e.preventDefault()
+      void handleSend()
     }
-  };
+  }
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-gray-100">
-        <h3 className="text-sm font-semibold text-gray-700">Claude Refinement</h3>
-        <p className="text-xs text-gray-400 mt-0.5">
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="border-b border-slate-100 px-5 py-5">
+        <p className="text-[11px] font-black uppercase tracking-[0.14em] text-cyan-800">Strategy Engine</p>
+        <h3 className="mt-1 text-lg font-black text-slate-950">Brief Refinement</h3>
+        <p className="mt-1 text-sm font-semibold text-slate-500">
           {disabled
             ? 'Generate a brief first to enable chat.'
-            : 'Describe changes — Claude updates only the relevant fields.'}
+            : 'Describe changes. Strategy Engine updates only the relevant fields.'}
         </p>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
         {messages.length === 0 && !disabled && (
           <div className="space-y-2">
-            <p className="text-xs text-gray-400 text-center pt-4">Try asking:</p>
+            <p className="pt-4 text-center text-xs font-black uppercase tracking-[0.12em] text-slate-400">Try asking</p>
             {[
               '语气改得更年轻、更活泼',
               'Add "sustainability" to the content pillars',
@@ -90,7 +88,7 @@ export function BriefChat({ briefId, clientId, disabled = false, onBriefUpdated 
               <button
                 key={i}
                 onClick={() => setInput(ex)}
-                className="block w-full text-left text-xs text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg px-3 py-2 transition-colors"
+                className="block w-full rounded-lg border border-cyan-100 bg-cyan-50 px-3 py-3 text-left text-sm font-semibold text-cyan-900 transition-colors hover:border-cyan-200 hover:bg-cyan-100"
               >
                 {ex}
               </button>
@@ -101,10 +99,10 @@ export function BriefChat({ briefId, clientId, disabled = false, onBriefUpdated 
         {messages.map((msg, i) => (
           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
-              className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
+              className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm font-semibold ${
                 msg.role === 'user'
-                  ? 'bg-indigo-600 text-white rounded-br-md'
-                  : 'bg-gray-100 text-gray-800 rounded-bl-md'
+                  ? 'rounded-br-md bg-slate-950 text-white'
+                  : 'rounded-bl-md bg-slate-100 text-slate-800'
               }`}
             >
               {msg.content}
@@ -114,12 +112,12 @@ export function BriefChat({ briefId, clientId, disabled = false, onBriefUpdated 
 
         {sending && (
           <div className="flex justify-start">
-            <div className="bg-gray-100 rounded-2xl rounded-bl-md px-3 py-2">
-              <div className="flex gap-1 items-center h-4">
+            <div className="rounded-2xl rounded-bl-md bg-slate-100 px-3 py-2">
+              <div className="flex h-4 items-center gap-1">
                 {[0, 1, 2].map(i => (
                   <span
                     key={i}
-                    className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"
+                    className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400"
                     style={{ animationDelay: `${i * 0.15}s` }}
                   />
                 ))}
@@ -129,28 +127,27 @@ export function BriefChat({ briefId, clientId, disabled = false, onBriefUpdated 
         )}
 
         {error && (
-          <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>
+          <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{error}</p>
         )}
 
         <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
-      <div className="border-t border-gray-100 p-3">
-        <div className="flex gap-2 items-end">
+      <div className="border-t border-slate-100 p-4">
+        <div className="flex items-end gap-2">
           <textarea
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={disabled ? 'Generate a brief first…' : 'Ask Claude to refine the brief…'}
+            placeholder={disabled ? 'Generate a brief first...' : 'Ask Strategy Engine to refine the brief...'}
             disabled={disabled || sending}
             rows={2}
-            className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white resize-none disabled:opacity-60 disabled:text-gray-400 transition-colors"
+            className="flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-900 placeholder-slate-400 transition-colors focus:bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500 disabled:text-slate-400 disabled:opacity-60"
           />
           <button
-            onClick={handleSend}
+            onClick={() => void handleSend()}
             disabled={!input.trim() || disabled || sending}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-3 py-2 disabled:opacity-40 transition-colors"
+            className="rounded-xl bg-slate-950 px-4 py-3 text-white transition-colors hover:bg-slate-800 disabled:opacity-40"
             title="Send (Enter)"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -158,8 +155,8 @@ export function BriefChat({ briefId, clientId, disabled = false, onBriefUpdated 
             </svg>
           </button>
         </div>
-        <p className="text-xs text-gray-400 mt-1">Enter to send · Shift+Enter for newline</p>
+        <p className="mt-2 text-xs font-semibold text-slate-400">Enter to send · Shift+Enter for newline</p>
       </div>
     </div>
-  );
+  )
 }

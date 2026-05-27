@@ -87,18 +87,35 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const googleEmail = await fetchGoogleEmail(tokens.access_token)
 
   // Persist tokens
-  await storeTokens(clientId, tokens, googleEmail)
+  try {
+    await storeTokens(clientId, tokens, googleEmail)
+  } catch (err) {
+    console.error('[google/callback] failed to store tokens:', err)
+    return NextResponse.redirect(destination(flow, clientId, 'error'))
+  }
 
-  // Mark GSC connector as 'partial': OAuth done, site_url still needed
+  // Update GSC connector — preserve site_url and existing 'connected' status.
+  // Only set 'partial' when no site_url is recorded yet.
   const now = new Date().toISOString()
+  const { data: existing } = await supabaseAdmin
+    .from('client_connectors')
+    .select('status, config')
+    .eq('client_id', clientId)
+    .eq('anchor', 'gsc')
+    .maybeSingle<{ status: string; config: Record<string, unknown> | null }>()
+
+  const hasSiteUrl = Boolean(existing?.config?.site_url)
+  const newStatus  = existing?.status === 'connected' || hasSiteUrl ? 'connected' : 'partial'
+  const newConfig  = { ...(existing?.config ?? {}), google_email: googleEmail }
+
   await supabaseAdmin
     .from('client_connectors')
     .upsert(
       {
         client_id:    clientId,
         anchor:       'gsc',
-        status:       'partial',
-        config:       { google_email: googleEmail },
+        status:       newStatus,
+        config:       newConfig,
         connected_at: now,
         updated_at:   now,
       },
