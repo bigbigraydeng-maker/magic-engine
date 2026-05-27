@@ -8,7 +8,6 @@ import { PublishToWebsitePanel } from './_components/PublishToWebsitePanel';
 import { buildBlogHtml, computeGeoChecklist } from '@/lib/blog/html-builder';
 import type { BlogPost } from '@/types/magic-engine';
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
 
 const STATUS_COLORS: Record<string, string> = {
   draft:      'bg-amber-100 text-amber-700',
@@ -43,14 +42,12 @@ export default function BlogPostPage() {
     setTimeout(() => { setActionMsg(''); setActionOk(null); }, 5000);
   };
 
-  const authHeader = { Authorization: `Bearer ${API_KEY}` }
-
   const fetchPost = useCallback(async () => {
     setLoading(true);
     try {
       const [clientRes, postRes] = await Promise.all([
-        fetch(`/api/clients/${clientId}`, { headers: authHeader }),
-        fetch(`/api/clients/${clientId}/blog/${postId}`, { headers: authHeader }),
+        fetch(`/api/clients/${clientId}`),
+        fetch(`/api/clients/${clientId}/blog/${postId}`),
       ]);
       if (clientRes.ok) {
         const j = await clientRes.json();
@@ -71,7 +68,7 @@ export default function BlogPostPage() {
   useEffect(() => {
     if (!post || post.status !== 'generating') return
     const timer = setInterval(() => {
-      fetch(`/api/clients/${clientId}/blog/${postId}`, { headers: authHeader })
+      fetch(`/api/clients/${clientId}/blog/${postId}`)
         .then(r => r.ok ? r.json() : null)
         .then(j => { if (j?.post) setPost(j.post) })
         .catch(() => {})
@@ -85,7 +82,7 @@ export default function BlogPostPage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/blog/${postId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
       });
       const j = await res.json();

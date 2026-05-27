@@ -10,7 +10,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireBearerToken } from '@/lib/validation-utils'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 export const dynamic = 'force-dynamic'
 
@@ -83,15 +83,14 @@ interface ConnectorRow {
 }
 
 export async function GET(
-  req: NextRequest,
+  _req: NextRequest,
   { params }: { params: { id: string } },
 ): Promise<NextResponse> {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
-  }
-
   const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error }, { status: access.status })
+  }
 
   const { data: rows, error } = await supabaseAdmin
     .from('client_connectors')

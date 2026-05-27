@@ -10,7 +10,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireBearerToken } from '@/lib/validation-utils'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { getLatestDiscovery } from '@/lib/zhangqian/persistor'
 import { generateZhangqianDocx } from '@/lib/zhangqian/docx-generator'
 
@@ -18,12 +18,11 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } },
 ): Promise<NextResponse> {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
-  }
-
   const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
+  }
 
   // Fetch client name
   const { data: client, error: clientError } = await supabaseAdmin
@@ -46,14 +45,14 @@ export async function GET(
   }
 
   try {
-    const reportDate = new Date(discovery.generated_at).toLocaleDateString('zh-CN', {
+    const reportDate = new Date(discovery.generated_at).toLocaleDateString('en-AU', {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
     })
     const buffer = await generateZhangqianDocx(discovery.payload, client.name, reportDate)
-    const slug = client.name.replace(/\s+/g, '_').slice(0, 30)
-    const filename = `zhangqian_${slug}_${discovery.generated_at.slice(0, 10)}.docx`
+    const slug = client.name.replace(/[^a-z0-9-]+/gi, '_').replace(/^_+|_+$/g, '').slice(0, 40)
+    const filename = `magic_engine_discovery_${slug || 'client'}_${discovery.generated_at.slice(0, 10)}.docx`
 
     return new NextResponse(buffer, {
       status: 200,

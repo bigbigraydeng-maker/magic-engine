@@ -1,41 +1,39 @@
 /**
- * 张骞 Discovery — DOCX Report Generator
+ * Zhangqian Discovery - DOCX Report Generator
  *
- * Converts a DiscoveryReport into a professional Word document.
- * Sections: cover → diagnosis → keywords → competitors → AI visibility
- *           → social → GBP → review platforms → meta ads → action plan
+ * Converts a DiscoveryReport into a customer-ready Magic Engine document.
+ * Keep this deliverable free of internal vendor names.
  */
 
 import {
-  Document,
-  Packer,
-  Paragraph,
-  TextRun,
-  Table,
-  TableRow,
-  TableCell,
-  HeadingLevel,
   AlignmentType,
   BorderStyle,
-  ShadingType,
-  WidthType,
+  Document,
+  HeadingLevel,
+  Packer,
   PageBreak,
+  Paragraph,
+  ShadingType,
+  Table,
+  TableCell,
+  TableRow,
+  TextRun,
+  WidthType,
 } from 'docx'
 import type { DiscoveryReport } from './types'
 
-const BRAND_COLOR   = '1A5FB4'
-const ACCENT_COLOR  = '2E4057'
-const HEADER_FILL   = 'EEF2FF'
-const PAGE_WIDTH    = 9360   // A4 content width in DXA
-const CELL_BORDER   = { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC' } as const
-const CELL_BORDERS  = { top: CELL_BORDER, bottom: CELL_BORDER, left: CELL_BORDER, right: CELL_BORDER }
-
-// ─── Public API ───────────────────────────────────────────────────────────────
+const BRAND_COLOR = '020617'
+const ACCENT_COLOR = '0E7490'
+const MUTED_COLOR = '64748B'
+const HEADER_FILL = 'ECFEFF'
+const PAGE_WIDTH = 9360
+const CELL_BORDER = { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' } as const
+const CELL_BORDERS = { top: CELL_BORDER, bottom: CELL_BORDER, left: CELL_BORDER, right: CELL_BORDER }
 
 export async function generateZhangqianDocx(
   report: DiscoveryReport,
   clientName: string,
-  reportDate: string = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }),
+  reportDate: string = new Date().toLocaleDateString('en-AU', { year: 'numeric', month: 'long', day: 'numeric' }),
 ): Promise<Buffer> {
   const doc = new Document({
     sections: [{
@@ -48,7 +46,7 @@ export async function generateZhangqianDocx(
         ...socialSection(report),
         ...gbpSection(report),
         ...reviewPlatformsSection(report),
-        ...metaAdsSection(report),
+        ...paidSocialSection(report),
         ...actionPlanSection(report),
         ...(report.notes ? notesSection(report.notes) : []),
       ],
@@ -58,264 +56,256 @@ export async function generateZhangqianDocx(
   return Buffer.from(buf)
 }
 
-// ─── Cover ────────────────────────────────────────────────────────────────────
-
 function cover(clientName: string, report: DiscoveryReport, date: string): Paragraph[] {
-  const b = report.business
+  const business = report.business
   const overallScore = report.diagnosis?.scores.overall ?? null
+  const location = [business.location.city, business.location.region, business.location.country]
+    .filter(Boolean)
+    .join(', ')
 
   return [
-    h1('品牌发现报告'),
+    label('MAGIC ENGINE'),
+    h1('Discovery Report'),
     h1(clientName),
     bodyBold(report.domain),
     body(date),
-    body(' '),
-    ...(overallScore !== null ? [statLine('综合评分', `${overallScore} / 100`)] : []),
-    ...(b.industry.length ? [statLine('行业', b.industry.join(' · '))] : []),
-    statLine('市场', b.location.country),
-    ...(b.location.city || b.location.region ? [statLine('所在地', [b.location.city, b.location.region].filter(Boolean).join(', '))] : []),
-    statLine('竞品数量', String(report.competitors.length)),
-    statLine('种子关键词', String(report.seed_keywords.length)),
+    spacer(),
+    ...(overallScore !== null ? [statLine('Overall score', `${overallScore} / 100`)] : []),
+    ...(business.industry.length ? [statLine('Industry', business.industry.join(' / '))] : []),
+    ...(location ? [statLine('Market', location)] : []),
+    statLine('Competitors mapped', String(report.competitors.length)),
+    statLine('Keyword opportunities', String(report.seed_keywords.length)),
+    spacer(),
+    body('This report summarises public brand, search, social, reputation, and AI visibility signals. It is designed to support prioritised execution, not to replace human commercial judgement.'),
     pageBreak(),
   ]
 }
 
-// ─── Diagnosis Section ────────────────────────────────────────────────────────
-
 function diagnosisSection(report: DiscoveryReport): Paragraph[] {
-  const d = report.diagnosis
-  if (!d) return []
+  const diagnosis = report.diagnosis
+  if (!diagnosis) return []
 
   const rows: string[][] = [
-    ['SEO',       String(d.scores.seo)],
-    ['社媒',      String(d.scores.social)],
-    ['口碑',      String(d.scores.reputation)],
-    ['AI 可见度', String(d.scores.ai_visibility)],
-    ['综合',      String(d.scores.overall)],
+    ['SEO', String(diagnosis.scores.seo)],
+    ['Social', String(diagnosis.scores.social)],
+    ['Reputation', String(diagnosis.scores.reputation)],
+    ['AI visibility', String(diagnosis.scores.ai_visibility)],
+    ['Overall', String(diagnosis.scores.overall)],
   ]
 
   return [
-    h2('诊断摘要'),
-    ...(d.crisis_type ? [bodyBold(`危机类型：${d.crisis_type}`)] : []),
-    body(d.executive_summary),
-    body(' '),
-    bodyBold('核心发现：' + d.key_finding),
-    body(' '),
-    bodyBold('钱去了哪里：'),
-    body(d.money_flow),
-    body(' '),
-    h3('各维度评分'),
-    table(['维度', '评分'], rows),
+    h2('Executive Diagnosis'),
+    ...(diagnosis.crisis_type ? [statLine('Primary diagnosis', diagnosis.crisis_type)] : []),
+    body(diagnosis.executive_summary),
+    spacer(),
+    bodyBold(`Key finding: ${diagnosis.key_finding}`),
+    bodyBold('Where money is leaking'),
+    body(diagnosis.money_flow),
+    spacer(),
+    h3('Health scores'),
+    table(['Dimension', 'Score'], rows),
     pageBreak(),
   ]
 }
 
-// ─── Keywords Section ─────────────────────────────────────────────────────────
-
 function keywordsSection(report: DiscoveryReport): Paragraph[] {
-  const kws = report.seed_keywords
-  if (!kws.length) return []
+  const keywords = report.seed_keywords
+  if (!keywords.length) return []
 
-  const rows = kws.map(k => [
-    k.keyword,
-    k.type,
-    k.semrush_volume != null ? String(k.semrush_volume) : (k.estimated_volume != null ? `~${k.estimated_volume}` : '-'),
-    k.semrush_kd != null ? String(k.semrush_kd) : '-',
-    k.semrush_rank != null ? String(k.semrush_rank) : '-',
+  const rows = keywords.map(keyword => [
+    keyword.keyword,
+    keyword.type,
+    keyword.semrush_volume != null ? String(keyword.semrush_volume) : (keyword.estimated_volume != null ? `~${keyword.estimated_volume}` : '-'),
+    keyword.semrush_kd != null ? String(keyword.semrush_kd) : '-',
+    keyword.semrush_rank != null ? String(keyword.semrush_rank) : '-',
   ])
 
   const snap = report.semrush_snapshot
   const snapItems: Paragraph[] = snap ? [
-    h3('SEMrush 域名快照'),
-    ...(snap.monthly_traffic != null ? [statLine('月均流量', snap.monthly_traffic.toLocaleString())] : []),
-    ...(snap.keyword_count   != null ? [statLine('排名关键词数', snap.keyword_count.toLocaleString())] : []),
-    ...(snap.trust_score     != null ? [statLine('信任评分', String(snap.trust_score))] : []),
-    body(' '),
+    h3('Keyword Intelligence snapshot'),
+    ...(snap.monthly_traffic != null ? [statLine('Estimated monthly traffic', snap.monthly_traffic.toLocaleString())] : []),
+    ...(snap.keyword_count != null ? [statLine('Ranking keywords', snap.keyword_count.toLocaleString())] : []),
+    ...(snap.trust_score != null ? [statLine('Authority score', String(snap.trust_score))] : []),
+    spacer(),
   ] : []
 
   return [
-    h2('核心关键词'),
+    h2('Search Opportunities'),
     ...snapItems,
-    h3('种子关键词列表'),
-    table(['关键词', '类型', '搜索量', '难度(KD)', '当前排名'], rows),
+    h3('Seed keyword set'),
+    table(['Keyword', 'Type', 'Volume', 'Difficulty', 'Current rank'], rows),
     pageBreak(),
   ]
 }
 
-// ─── Competitors Section ──────────────────────────────────────────────────────
-
 function competitorsSection(report: DiscoveryReport): Paragraph[] {
-  const cs = report.competitors
-  if (!cs.length) return []
+  const competitors = report.competitors
+  if (!competitors.length) return []
 
-  const rows = cs.map(c => [
-    c.name,
-    c.domain,
-    c.relevance,
-    c.monthly_traffic != null ? c.monthly_traffic.toLocaleString() : '-',
-    c.trust_score     != null ? String(c.trust_score) : '-',
-    c.rationale,
+  const rows = competitors.map(competitor => [
+    competitor.name,
+    competitor.domain,
+    competitor.relevance,
+    competitor.monthly_traffic != null ? competitor.monthly_traffic.toLocaleString() : '-',
+    competitor.trust_score != null ? String(competitor.trust_score) : '-',
+    competitor.rationale,
   ])
 
   return [
-    h2('竞品分析'),
-    table(['品牌', '域名', '关系', '月均流量', '信任分', '说明'], rows),
+    h2('Competitor Landscape'),
+    table(['Brand', 'Domain', 'Relationship', 'Monthly traffic', 'Authority', 'Why it matters'], rows),
     pageBreak(),
   ]
 }
 
-// ─── AI Visibility Section ────────────────────────────────────────────────────
-
 function aiVisibilitySection(report: DiscoveryReport): Paragraph[] {
-  const qs   = report.ai_tracker_questions ?? []
-  const res  = report.ai_visibility_results ?? []
-  if (!qs.length && !res.length) return []
+  const questions = report.ai_tracker_questions ?? []
+  const results = report.ai_visibility_results ?? []
+  if (!questions.length && !results.length) return []
 
-  const items: Paragraph[] = [h2('AI 可见度')]
+  const items: Paragraph[] = [h2('AI Visibility')]
 
-  if (res.length) {
-    const rows = res.map(r => [
-      r.question,
-      r.client_mentioned ? '✓ 出现' : '✗ 未出现',
-      r.top_brands.slice(0, 3).join(', ') || '-',
+  if (results.length) {
+    const rows = results.map(result => [
+      result.question,
+      result.client_mentioned ? 'Visible' : 'Not visible',
+      result.top_brands.slice(0, 3).join(', ') || '-',
     ])
-    items.push(h3('AI 搜索可见度测试结果'))
-    items.push(table(['问题', '客户出现', '出现的品牌'], rows))
-    items.push(body(' '))
+    items.push(h3('Observed AI answer visibility'))
+    items.push(table(['Question', 'Client visibility', 'Brands surfaced'], rows))
+    items.push(spacer())
   }
 
-  if (qs.length) {
-    const rows = qs.map(q => [q.question, q.category, q.market, q.rationale])
-    items.push(h3('AI 追踪问题（待监控）'))
-    items.push(table(['问题', '类型', '市场', '用意'], rows))
+  if (questions.length) {
+    const rows = questions.map(question => [
+      question.question,
+      question.category,
+      question.market,
+      question.rationale,
+    ])
+    items.push(h3('Recommended tracking questions'))
+    items.push(table(['Question', 'Category', 'Market', 'Reason'], rows))
   }
 
   items.push(pageBreak())
   return items
 }
 
-// ─── Social Section ───────────────────────────────────────────────────────────
-
 function socialSection(report: DiscoveryReport): Paragraph[] {
-  const ss = report.social_profiles
-  if (!ss.length) return []
+  const socials = report.social_profiles
+  if (!socials.length) return []
 
-  const rows = ss.map(s => [
-    s.platform,
-    s.handle ?? '-',
-    s.followers_count != null ? s.followers_count.toLocaleString() : '-',
-    s.posts_last_30d  != null ? String(s.posts_last_30d) : '-',
-    s.engagement_rate != null ? `${(s.engagement_rate * 100).toFixed(1)}%` : '-',
-    s.url,
+  const rows = socials.map(social => [
+    social.platform,
+    social.handle ?? '-',
+    social.followers_count != null ? social.followers_count.toLocaleString() : '-',
+    social.posts_last_30d != null ? String(social.posts_last_30d) : '-',
+    social.engagement_rate != null ? `${(social.engagement_rate * 100).toFixed(1)}%` : '-',
+    social.url,
   ])
 
   return [
-    h2('社交媒体档案'),
-    table(['平台', '账号', '粉丝', '近30日发帖', '互动率', 'URL'], rows),
+    h2('Social Footprint'),
+    table(['Platform', 'Handle', 'Followers', 'Posts 30d', 'Engagement', 'URL'], rows),
     pageBreak(),
   ]
 }
-
-// ─── GBP Section ──────────────────────────────────────────────────────────────
 
 function gbpSection(report: DiscoveryReport): Paragraph[] {
-  const g = report.gbp
-  if (!g) return []
+  const profile = report.gbp
+  if (!profile) return []
 
   return [
-    h2('Google 商家档案 (GBP)'),
-    statLine('商家名称', g.business_name),
-    statLine('地址', g.address),
-    ...(g.rating       != null ? [statLine('评分', `${g.rating} / 5`)] : []),
-    ...(g.review_count != null ? [statLine('评论数', g.review_count.toLocaleString())] : []),
-    ...(g.google_maps_url ? [statLine('Google Maps', g.google_maps_url)] : []),
+    h2('Business Profile'),
+    statLine('Business name', profile.business_name),
+    statLine('Address', profile.address),
+    ...(profile.rating != null ? [statLine('Rating', `${profile.rating} / 5`)] : []),
+    ...(profile.review_count != null ? [statLine('Review count', profile.review_count.toLocaleString())] : []),
+    ...(profile.google_maps_url ? [statLine('Maps listing', profile.google_maps_url)] : []),
     pageBreak(),
   ]
 }
 
-// ─── Review Platforms Section ─────────────────────────────────────────────────
-
 function reviewPlatformsSection(report: DiscoveryReport): Paragraph[] {
-  const ps = report.review_platforms
-  if (!ps.length) return []
+  const platforms = report.review_platforms
+  if (!platforms.length) return []
 
-  const rows = ps.map(p => [
-    p.platform,
-    p.rating       != null ? String(p.rating) : '-',
-    p.review_count != null ? p.review_count.toLocaleString() : '-',
-    p.response_rate != null ? `${(p.response_rate * 100).toFixed(0)}%` : '-',
-    p.url,
+  const rows = platforms.map(platform => [
+    platform.platform,
+    platform.rating != null ? String(platform.rating) : '-',
+    platform.review_count != null ? platform.review_count.toLocaleString() : '-',
+    platform.response_rate != null ? `${(platform.response_rate * 100).toFixed(0)}%` : '-',
+    platform.url,
   ])
 
   return [
-    h2('评论平台'),
-    table(['平台', '评分', '评论数', '回复率', 'URL'], rows),
+    h2('Review Footprint'),
+    table(['Platform', 'Rating', 'Reviews', 'Response rate', 'URL'], rows),
     pageBreak(),
   ]
 }
 
-// ─── Meta Ads Section ─────────────────────────────────────────────────────────
-
-function metaAdsSection(report: DiscoveryReport): Paragraph[] {
-  const m = report.meta_ads
-  if (!m) return []
+function paidSocialSection(report: DiscoveryReport): Paragraph[] {
+  const ads = report.meta_ads
+  if (!ads) return []
 
   return [
-    h2('Meta 广告活动'),
-    statLine('在投广告数', String(m.active_ads_count)),
-    statLine('广告类型', m.ad_types.join(', ') || '-'),
-    statLine('预估投放规模', m.estimated_spend),
-    ...(m.top_ad_copy.length ? [
-      body(' '),
-      h3('广告文案样本'),
-      ...m.top_ad_copy.map(c => bullet(c)),
+    h2('Paid Social Activity'),
+    statLine('Active ads found', String(ads.active_ads_count)),
+    statLine('Creative formats', ads.ad_types.join(', ') || '-'),
+    statLine('Estimated spend signal', ads.estimated_spend),
+    ...(ads.top_ad_copy.length ? [
+      spacer(),
+      h3('Ad copy samples'),
+      ...ads.top_ad_copy.map(copy => bullet(copy)),
     ] : []),
     pageBreak(),
   ]
 }
-
-// ─── Action Plan Section ──────────────────────────────────────────────────────
 
 function actionPlanSection(report: DiscoveryReport): Paragraph[] {
   const actions = report.diagnosis?.actions
   if (!actions) return []
 
   return [
-    h2('行动计划'),
+    h2('Priority Action Plan'),
     ...(actions.quick_fix.length ? [
-      h3('立即可做（客户自助）'),
-      ...actions.quick_fix.map(a => bullet(a)),
-      body(' '),
+      h3('Immediate fixes'),
+      ...actions.quick_fix.map(action => bullet(action)),
+      spacer(),
     ] : []),
     ...(actions.important.length ? [
-      h3('重要建设（1–3 个月）'),
-      ...actions.important.map(a => bullet(a)),
-      body(' '),
+      h3('Important builds'),
+      ...actions.important.map(action => bullet(action)),
+      spacer(),
     ] : []),
     ...(actions.talk_to_us.length ? [
-      h3('需要专业支持'),
-      ...actions.talk_to_us.map(a => bullet(a)),
+      h3('Strategy support'),
+      ...actions.talk_to_us.map(action => bullet(action)),
     ] : []),
   ]
 }
-
-// ─── Notes Section ────────────────────────────────────────────────────────────
 
 function notesSection(notes: string): Paragraph[] {
   return [
     pageBreak(),
-    h2('备注'),
+    h2('Research Notes'),
     body(notes),
   ]
 }
 
-// ─── Primitive builders ───────────────────────────────────────────────────────
+function label(text: string): Paragraph {
+  return new Paragraph({
+    children: [new TextRun({ text, bold: true, font: 'Arial', size: 18, color: ACCENT_COLOR, allCaps: true })],
+    spacing: { before: 120, after: 120 },
+  })
+}
 
 function h1(text: string): Paragraph {
   return new Paragraph({
     heading: HeadingLevel.HEADING_1,
-    children: [new TextRun({ text, bold: true, font: 'Arial', size: 40, color: BRAND_COLOR })],
-    spacing: { before: 360, after: 240 },
+    children: [new TextRun({ text, bold: true, font: 'Arial', size: 42, color: BRAND_COLOR })],
+    spacing: { before: 180, after: 220 },
   })
 }
 
@@ -324,48 +314,52 @@ function h2(text: string): Paragraph {
     heading: HeadingLevel.HEADING_2,
     children: [new TextRun({ text, bold: true, font: 'Arial', size: 32, color: BRAND_COLOR })],
     spacing: { before: 300, after: 180 },
-    border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: BRAND_COLOR, space: 4 } },
+    border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: ACCENT_COLOR, space: 4 } },
   })
 }
 
 function h3(text: string): Paragraph {
   return new Paragraph({
     heading: HeadingLevel.HEADING_3,
-    children: [new TextRun({ text, bold: true, font: 'Arial', size: 26, color: ACCENT_COLOR })],
-    spacing: { before: 240, after: 120 },
+    children: [new TextRun({ text, bold: true, font: 'Arial', size: 25, color: ACCENT_COLOR })],
+    spacing: { before: 220, after: 120 },
   })
 }
 
 function body(text: string): Paragraph {
   return new Paragraph({
-    children: [new TextRun({ text, font: 'Arial', size: 24 })],
+    children: [new TextRun({ text, font: 'Arial', size: 23, color: BRAND_COLOR })],
     spacing: { after: 120 },
   })
 }
 
 function bodyBold(text: string): Paragraph {
   return new Paragraph({
-    children: [new TextRun({ text, bold: true, font: 'Arial', size: 24 })],
+    children: [new TextRun({ text, bold: true, font: 'Arial', size: 24, color: BRAND_COLOR })],
     spacing: { after: 120 },
   })
 }
 
 function bullet(text: string): Paragraph {
   return new Paragraph({
-    children: [new TextRun({ text: `• ${text}`, font: 'Arial', size: 24 })],
+    children: [new TextRun({ text: `- ${text}`, font: 'Arial', size: 23, color: BRAND_COLOR })],
     indent: { left: 360 },
     spacing: { after: 80 },
   })
 }
 
-function statLine(label: string, value: string): Paragraph {
+function statLine(labelText: string, value: string): Paragraph {
   return new Paragraph({
     children: [
-      new TextRun({ text: `${label}: `, bold: true, font: 'Arial', size: 24 }),
-      new TextRun({ text: value, font: 'Arial', size: 24 }),
+      new TextRun({ text: `${labelText}: `, bold: true, font: 'Arial', size: 23, color: BRAND_COLOR }),
+      new TextRun({ text: value, font: 'Arial', size: 23, color: MUTED_COLOR }),
     ],
     spacing: { after: 80 },
   })
+}
+
+function spacer(): Paragraph {
+  return new Paragraph({ children: [new TextRun({ text: ' ', font: 'Arial', size: 8 })], spacing: { after: 80 } })
 }
 
 function pageBreak(): Paragraph {
@@ -379,15 +373,15 @@ function table(headers: string[], rows: string[][]): Table {
 
   const headerRow = new TableRow({
     tableHeader: true,
-    children: headers.map((h, i) =>
+    children: headers.map((header, index) =>
       new TableCell({
         borders: CELL_BORDERS,
-        width: { size: colWidths[i], type: WidthType.DXA },
+        width: { size: colWidths[index], type: WidthType.DXA },
         shading: { fill: HEADER_FILL, type: ShadingType.CLEAR },
-        margins: { top: 80, bottom: 80, left: 120, right: 120 },
+        margins: { top: 90, bottom: 90, left: 120, right: 120 },
         children: [new Paragraph({
           alignment: AlignmentType.LEFT,
-          children: [new TextRun({ text: h, bold: true, font: 'Arial', size: 22 })],
+          children: [new TextRun({ text: header, bold: true, font: 'Arial', size: 21, color: BRAND_COLOR })],
         })],
       }),
     ),
@@ -395,13 +389,13 @@ function table(headers: string[], rows: string[][]): Table {
 
   const bodyRows = rows.map(row =>
     new TableRow({
-      children: Array.from({ length: colCount }, (_, i) =>
+      children: Array.from({ length: colCount }, (_, index) =>
         new TableCell({
           borders: CELL_BORDERS,
-          width: { size: colWidths[i], type: WidthType.DXA },
-          margins: { top: 80, bottom: 80, left: 120, right: 120 },
+          width: { size: colWidths[index], type: WidthType.DXA },
+          margins: { top: 90, bottom: 90, left: 120, right: 120 },
           children: [new Paragraph({
-            children: [new TextRun({ text: row[i] ?? '', font: 'Arial', size: 22 })],
+            children: [new TextRun({ text: row[index] ?? '', font: 'Arial', size: 20, color: BRAND_COLOR })],
           })],
         }),
       ),

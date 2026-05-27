@@ -4,6 +4,9 @@ import type { ExecuteActionInput, FlywheelName } from '@/lib/flywheel/adapters/t
 
 // Side-effect imports register adapters into the singleton registry.
 import '@/lib/flywheel/adapters/GeoComposerAdapter'
+import '@/lib/flywheel/adapters/SeoContentAdapter'
+import '@/lib/flywheel/adapters/SocialContentAdapter'
+import '@/lib/flywheel/adapters/MetaAdsAdapter'
 
 interface RequestBody extends ExecuteActionInput {
   flywheel: FlywheelName

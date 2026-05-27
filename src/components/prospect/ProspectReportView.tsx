@@ -131,12 +131,17 @@ export function ReportView({ report }: { report: DiscoveryReport }) {
   ].filter(Boolean).join(', ')
 
   return (
-    <div className="px-5 py-8 sm:px-8">
+    <div className="px-5 py-8 print:px-0 print:py-0 sm:px-8">
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
         <section className="rounded-lg bg-slate-950 p-6 text-white sm:p-8">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200">
-            Discovery report
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-3 py-1.5 text-xs font-black uppercase tracking-[0.16em] text-cyan-100">
+              Discovery report
+            </p>
+            <p className="rounded-lg border border-white/10 bg-white/[0.06] px-3 py-1.5 text-xs font-bold text-slate-300">
+              Export-ready deliverable
+            </p>
+          </div>
           <div className="mt-4 grid gap-6 md:grid-cols-[1fr_auto] md:items-start">
             <div>
               <h1 className="max-w-3xl text-4xl font-black leading-tight sm:text-5xl">
@@ -163,6 +168,20 @@ export function ReportView({ report }: { report: DiscoveryReport }) {
                 </p>
               </div>
             )}
+          </div>
+          <div className="mt-6 flex flex-wrap gap-2 print:hidden">
+            <button
+              onClick={() => window.print()}
+              className="inline-flex h-11 items-center rounded-lg bg-cyan-100 px-4 text-sm font-black text-cyan-950 transition-colors hover:bg-cyan-200"
+            >
+              Save PDF
+            </button>
+            <a
+              href="/api/prospect/report/docx"
+              className="inline-flex h-11 items-center rounded-lg border border-white/15 bg-white/[0.08] px-4 text-sm font-black text-white transition-colors hover:bg-white/[0.14]"
+            >
+              Download DOCX
+            </a>
           </div>
         </section>
 

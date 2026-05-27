@@ -12,15 +12,15 @@ vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: { from: vi.fn() },
 }))
 
-vi.mock('@/lib/validation-utils', () => ({
-  requireBearerToken: vi.fn(),
+vi.mock('@/lib/auth/client-access', () => ({
+  requireDashboardClientAccess: vi.fn(),
 }))
 
 // ── Imports ───────────────────────────────────────────────────────────────────
 
 import { GET } from '../route'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireBearerToken } from '@/lib/validation-utils'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -57,12 +57,12 @@ function makeActionRow(overrides: Record<string, unknown> = {}) {
 }
 
 function allowAuth() {
-  vi.mocked(requireBearerToken).mockReturnValue({ ok: true as const })
+  vi.mocked(requireDashboardClientAccess).mockResolvedValue({ ok: true, user: { email: 'test@test.com' } as never, role: 'admin', allowedClientId: null })
 }
 
 function denyAuth() {
-  vi.mocked(requireBearerToken).mockReturnValue({
-    ok: false as const,
+  vi.mocked(requireDashboardClientAccess).mockResolvedValue({
+    ok: false,
     error: 'Unauthorized',
     status: 401,
   })

@@ -30,7 +30,7 @@
 
 import { createHash } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
-import { requireBearerToken } from '@/lib/validation-utils'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getShopifyConnection } from '@/lib/cms/connection-store'
 import {
@@ -112,12 +112,12 @@ async function findConnectionRow(clientId: string) {
 // ─── POST ─────────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest, { params }: RouteContext) {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+  const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
-  const clientId = params.id
   if (!clientId) return badInput('client id required')
 
   let body: RequestBody

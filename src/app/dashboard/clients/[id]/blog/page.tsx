@@ -13,7 +13,6 @@ interface KeywordSuggestion {
   tier: 'A' | 'B';
 }
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? '';
 
 interface BlogPostSummary {
   id: string;
@@ -80,9 +79,7 @@ export default function ClientBlogPage() {
       const [clientRes, opRes, postsRes] = await Promise.all([
         fetch(`/api/clients/${clientId}`),
         fetch(`/api/clients/${clientId}/blog/opportunities`),
-        fetch(`/api/clients/${clientId}/blog?limit=50`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        }),
+        fetch(`/api/clients/${clientId}/blog?limit=50`),
       ]);
       if (clientRes.ok) {
         const j = await clientRes.json();
@@ -104,9 +101,7 @@ export default function ClientBlogPage() {
   const fetchKeywordSuggestions = useCallback(async () => {
     setKeywordsLoading(true);
     try {
-      const res = await fetch(`/api/clients/${clientId}/blog/keyword-suggestions`, {
-        headers: { Authorization: `Bearer ${API_KEY}` },
-      });
+      const res = await fetch(`/api/clients/${clientId}/blog/keyword-suggestions`);
       if (res.ok) {
         const j = await res.json();
         setSeoKeywords(j.suggestions ?? []);
@@ -134,7 +129,7 @@ export default function ClientBlogPage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/blog`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mode: freeMode,
           topic: kw,
@@ -173,7 +168,7 @@ export default function ClientBlogPage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/blog`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mode: 'geo_only',
           topic: opp.query_text,

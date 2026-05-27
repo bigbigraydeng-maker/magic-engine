@@ -29,8 +29,6 @@ import {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 // ─── Page state type ──────────────────────────────────────────────────────────
 
 type PageState = 'idle' | 'running' | 'reviewing' | 'confirmed'
@@ -386,20 +384,13 @@ export default function ZhangqianPage() {
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startTimeRef = useRef<number>(0)
 
-  const authHeaders = {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${API_KEY}`,
-  }
-
   // ── Fetch latest ────────────────────────────────────────────────────────────
 
   const fetchLatest = useCallback(async () => {
     setPageLoading(true)
     setPageError(null)
     try {
-      const res = await fetch(`/api/clients/${clientId}/zhangqian/latest`, {
-        headers: { Authorization: `Bearer ${API_KEY}` },
-      })
+      const res = await fetch(`/api/clients/${clientId}/zhangqian/latest`)
       if (res.status === 404) {
         setDiscovery(null)
         setPageState('idle')
@@ -462,7 +453,6 @@ export default function ZhangqianPage() {
       try {
         const res = await fetch(
           `/api/clients/${clientId}/zhangqian/status?job_id=${encodeURIComponent(jid)}`,
-          { headers: { Authorization: `Bearer ${API_KEY}` } },
         )
         if (!res.ok) return
         const data: StatusResponse = await res.json()
@@ -494,7 +484,7 @@ export default function ZhangqianPage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/zhangqian/discover`, {
         method: 'POST',
-        headers: authHeaders,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -519,7 +509,7 @@ export default function ZhangqianPage() {
     try {
       const res = await fetch(`/api/clients/${clientId}/zhangqian/confirm`, {
         method: 'PATCH',
-        headers: authHeaders,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ confirmed_by: 'user' }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -537,9 +527,7 @@ export default function ZhangqianPage() {
   const handleDownloadDocx = async () => {
     setIsDocxLoading(true)
     try {
-      const res = await fetch(`/api/clients/${clientId}/zhangqian/docx`, {
-        headers: { Authorization: `Bearer ${API_KEY}` },
-      })
+      const res = await fetch(`/api/clients/${clientId}/zhangqian/docx`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
@@ -557,6 +545,8 @@ export default function ZhangqianPage() {
     }
   }
 
+  const handleSavePdf = () => window.print()
+
   const handleRerun = () => {
     setDiscovery(null)
     setPageState('idle')
@@ -568,10 +558,10 @@ export default function ZhangqianPage() {
 
   if (pageLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 p-6 animate-pulse">
-        <div className="max-w-5xl mx-auto space-y-6">
-          <div className="h-7 w-48 bg-gray-200 rounded" />
-          <div className="h-96 rounded-xl bg-gray-200" />
+      <div className="min-h-screen animate-pulse bg-[#f6f7f2] p-6">
+        <div className="mx-auto max-w-6xl space-y-6">
+          <div className="h-7 w-48 rounded-lg bg-slate-200" />
+          <div className="h-96 rounded-lg bg-slate-200" />
         </div>
       </div>
     )
@@ -580,14 +570,14 @@ export default function ZhangqianPage() {
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#f6f7f2] print:bg-white">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4 sticky top-0 z-10">
-        <div className="max-w-5xl mx-auto flex items-center justify-between">
+      <div className="sticky top-0 z-10 border-b border-slate-200 bg-[#f6f7f2]/90 px-6 py-4 backdrop-blur print:hidden">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <Link
               href={`/dashboard/clients/${clientId}`}
-              className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-black text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-950"
               aria-label="返回客户页"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -596,9 +586,10 @@ export default function ZhangqianPage() {
               返回
             </Link>
             <div>
-              <h1 className="text-lg font-semibold text-gray-900">张骞发现</h1>
+              <p className="text-[11px] font-black uppercase tracking-[0.18em] text-cyan-800">Discovery Deliverable</p>
+              <h1 className="text-2xl font-black text-slate-950">张骞发现</h1>
               {discovery?.generated_at && (
-                <p className="text-xs text-gray-400 mt-0.5">
+                <p className="mt-0.5 text-xs font-semibold text-slate-500">
                   上次运行：{new Date(discovery.generated_at).toLocaleString('zh-CN', { timeZone: 'Pacific/Auckland' })}
                 </p>
               )}
@@ -607,14 +598,20 @@ export default function ZhangqianPage() {
 
           {/* Header actions when reviewing or confirmed */}
           {(pageState === 'reviewing' || pageState === 'confirmed') && (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                onClick={handleSavePdf}
+                className="inline-flex items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-4 py-2 text-sm font-black text-cyan-900 transition-colors hover:bg-cyan-100"
+              >
+                PDF
+              </button>
               <button
                 onClick={() => void handleDownloadDocx()}
                 disabled={isDocxLoading}
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isDocxLoading ? (
-                  <span className="animate-spin inline-block w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full" />
+                  <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-400 border-t-transparent" />
                 ) : (
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -626,7 +623,7 @@ export default function ZhangqianPage() {
                 <button
                   onClick={() => void handleDispatch()}
                   disabled={isDispatching}
-                  className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   重新运行
                 </button>
@@ -637,7 +634,7 @@ export default function ZhangqianPage() {
       </div>
 
       {/* Body */}
-      <div className="max-w-5xl mx-auto px-6 py-6">
+      <div className="mx-auto max-w-6xl px-6 py-6 print:max-w-none print:px-0 print:py-0">
         {/* Error banner */}
         {pageError && (
           <div className="mb-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 flex items-center justify-between gap-3">

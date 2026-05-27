@@ -18,8 +18,6 @@ import {
 } from '@/lib/zhuge/display-constants'
 import type { ZhugeOutput, PriorityAction } from '@/lib/zhuge/types'
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 // ── Action detail card ────────────────────────────────────────────────────────
 
 function ActionDetailCard({
@@ -143,7 +141,6 @@ export function ZhugeDrawer({ clientId, isOpen, onClose, onComplete }: ZhugeDraw
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${API_KEY}`,
         },
         body: JSON.stringify({}),
       })
@@ -182,9 +179,7 @@ export function ZhugeDrawer({ clientId, isOpen, onClose, onComplete }: ZhugeDraw
 
     void (async () => {
       try {
-        const res = await fetch(`/api/clients/${clientId}/zhuge/latest-actions`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        })
+        const res = await fetch(`/api/clients/${clientId}/zhuge/latest-actions`)
         if (res.ok) {
           const data = await res.json() as {
             success: boolean

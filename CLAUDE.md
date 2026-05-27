@@ -215,29 +215,23 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-28 02:51 NZST （**Phase 14.A 全部 8 任务 ✅ 完成**；Phase 13.A Prospect 注册流程 ✅）
+> 最后更新：2026-05-28 02:53 NZST （**Phase 17.A P17.A.1–A.4 + A.5(cron) 全部 ✅ 完成**；Phase 17.A 全部交付，等 PM 验收 M2 + merge）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **PM 验收 M3** | 打开 Blog Studio 博客详情页 → 点击「发布到网站」→ 选 WordPress → 草稿 → 预览 → 确认发布 | ⚠️ PM 操作 |
-| **PM 操作** | Supabase 跑 3 个 migration（见状态校准） | ⚠️ PM 操作 |
-| **PM 合并** | 输入 `go merge` 合并 Phase 14.A PR（全部 8 commit 完成） | ⚠️ PM 决定 |
-| **PM 待办（旧）** | 测试 /discover 表单 → magic link → /prospect 报告页（13.A 验收） | ⚠️ 13.A 验收 |
-| **PM 待办（旧）** | Render → `ADMIN_EMAILS=你的邮箱`；Supabase 跑 `20260523000003_campaign_visual_direction.sql` | ⚠️ PM 操作 |
+| **PM 验收 M2** | 打开 Supabase 后台，确认 `gsc_performance_snapshots` + `ga4_traffic_snapshots` 有 OzTop 数据行 | ⚠️ PM 操作 |
+| **PM 操作** | Supabase 跑 migration `20260603000003_gsc_performance_snapshots.sql` + `20260604000001_ga4_traffic_snapshots.sql` | ⚠️ PM 操作 |
+| **PM 合并** | 输入 `go merge` 合并 Phase 17.A PR（全部 P17.A.1–A.5 完成） | ⚠️ PM 决定 |
+| **P17.A.6（待排）** | 客户主页「数据」tab：GSC top queries + GA4 daily traffic + 快速夺旗机会清单（原 P17.A.5 UI） | 📋 下一任务 |
 
-**状态校准（2026-05-24）**：
-- ✅ **Phase 14.A.8**：WordPress + Shopify publish 路由在最终发布后 insert `flywheel_actions`（seo/cms_content_insert/in_house）
-- ✅ **Phase 14.A.7**：html-sanitizer 升级为 allowlist 两遍扫描（Pass1 危险块 + Pass2 标签/属性白名单 + Pass3 关闭标签）
-- ✅ **Phase 14.A.6**：`PublishToWebsitePanel` 组件 + `/cms/providers` 聚合路由；Blog Studio 三步 Draft→Preview→Publish
-- ✅ **Phase 14.A.5**：wordpress-client + markWordpressConnectionTested + /cms/wordpress 升级 + /cms/publish-wordpress
-- ✅ **Phase 14.A.4**：shopify-guard + shopify-client + /cms/shopify + /cms/publish-shopify
-- ✅ **Phase 14.A.3**：CmsPanel 多供应商 Tab + url-guard + /cms/wordpress CRUD
-- ✅ **Phase 14.A.2**：website_publish_jobs 表 + 状态机 + 幂等 + vocabulary
-- ✅ **Phase 14.A.1**：cms_connections 扩展 WP 形态
-- ✅ Phase 13.A P13.A.1–A.6：代码完成，等 PM 端到端验证
-- ⚠️ **PM 待跑 migration**：`20260531000001`（WP schema）+ `20260531000002`（publish_jobs）+ `20260601000001`（shopify shape）
+**状态校准（2026-06-05）**：
+- ✅ **P17.A.1**：`gsc_performance_snapshots` 表 + `fetchGscSnapshot()` + POST `/gsc/sync` + GET `/gsc/snapshots`
+- ✅ **P17.A.2**：GA4 接入：`ga4_traffic_snapshots` + `fetchGa4Snapshot()` + POST `/ga4/sync` + GET `/ga4/snapshots`
+- ✅ **P17.A.3**：GSC/GA4 快照 UI：`DataPullbackSection`（执行看板）+ connector 详情页同步按钮
+- ✅ **P17.A.4**：GSC 归因桥接：`gsc-bridge.ts` + POST `/flywheel/gsc-attribution` + vocabulary 3 GSC keys + attribution cron pass-2
+- ✅ **P17.A.5（cron）**：每日自动同步：`google-data-pullback-daily` cron + render.yaml 注册
 
-下一 session：`继续 Phase 14，告诉我新需求或输入 go merge 合并 PR`
+下一 session：`继续 Phase 17.A 验收 merge，或开始 P17.A.6 UI 层`
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
 
 // ---------------------------------------------------------------------------
@@ -25,6 +25,10 @@ vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: { from: vi.fn() },
 }))
 
+vi.mock('@/lib/auth/client-access', () => ({
+  requireDashboardClientAccess: vi.fn(),
+}))
+
 // ---------------------------------------------------------------------------
 // Imports after mocks
 // ---------------------------------------------------------------------------
@@ -33,21 +37,26 @@ import { POST } from '../run/route'
 import { GET as getLatest } from '../latest/route'
 import { GET as getRuns } from '../runs/route'
 import { supabaseAdmin } from '@/lib/supabase'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+
+const mockAccess = vi.mocked(requireDashboardClientAccess)
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const TEST_API_KEY = 'test-internal-key'
-const VALID_TOKEN = `Bearer ${TEST_API_KEY}`
 const CLIENT_ID = 'client-abc'
 
-beforeAll(() => { process.env.INTERNAL_API_KEY = TEST_API_KEY })
-afterAll(() => { delete process.env.INTERNAL_API_KEY })
+function allowAccess() {
+  mockAccess.mockResolvedValue({ ok: true, user: { email: 'test@test.com' } as never, role: 'admin', allowedClientId: null })
+}
 
-function makeRequest(method: string, body?: unknown, token?: string): NextRequest {
+function denyAccess() {
+  mockAccess.mockResolvedValue({ ok: false, status: 401, error: 'Unauthorized' })
+}
+
+function makeRequest(method: string, body?: unknown): NextRequest {
   const headers: Record<string, string> = { 'content-type': 'application/json' }
-  if (token !== undefined) headers['authorization'] = token
 
   return new NextRequest(`http://localhost/api/clients/${CLIENT_ID}/diagnostic/run`, {
     method,
@@ -68,25 +77,21 @@ describe('POST /api/clients/[id]/diagnostic/run', () => {
     mockIsValidModule.mockReturnValue(true)
     mockCreateDiagnosticRun.mockResolvedValue('run-new-123')
     mockExecuteDiagnosticRun.mockResolvedValue(undefined)
+    allowAccess()
   })
 
-  it('returns 401 when no Bearer token is provided', async () => {
+  it('returns 401 when no session', async () => {
+    denyAccess()
     const req = makeRequest('POST', { module: 'seo' })
     const res = await POST(req, PARAMS)
     expect(res.status).toBe(401)
-    const json = await res.json() as { success: boolean }
-    expect(json.success).toBe(false)
-  })
-
-  it('returns 401 when token is wrong', async () => {
-    const req = makeRequest('POST', { module: 'seo' }, 'Bearer wrong-token')
-    const res = await POST(req, PARAMS)
-    expect(res.status).toBe(401)
+    const json = await res.json() as { error: string }
+    expect(json.error).toBeDefined()
   })
 
   it('returns 400 for missing module field', async () => {
     mockIsValidModule.mockReturnValue(false)
-    const req = makeRequest('POST', {}, VALID_TOKEN)
+    const req = makeRequest('POST', {})
     const res = await POST(req, PARAMS)
     expect(res.status).toBe(400)
     const json = await res.json() as { success: boolean }
@@ -95,13 +100,13 @@ describe('POST /api/clients/[id]/diagnostic/run', () => {
 
   it('returns 400 for unsupported module value', async () => {
     mockIsValidModule.mockReturnValue(false)
-    const req = makeRequest('POST', { module: 'ads' }, VALID_TOKEN)
+    const req = makeRequest('POST', { module: 'ads' })
     const res = await POST(req, PARAMS)
     expect(res.status).toBe(400)
   })
 
   it('returns 202 with run_id for valid request', async () => {
-    const req = makeRequest('POST', { module: 'seo' }, VALID_TOKEN)
+    const req = makeRequest('POST', { module: 'seo' })
     const res = await POST(req, PARAMS)
     expect(res.status).toBe(202)
     const json = await res.json() as { success: boolean; run_id: string }
@@ -110,7 +115,7 @@ describe('POST /api/clients/[id]/diagnostic/run', () => {
   })
 
   it('calls createDiagnosticRun with correct clientId and module', async () => {
-    const req = makeRequest('POST', { module: 'seo' }, VALID_TOKEN)
+    const req = makeRequest('POST', { module: 'seo' })
     await POST(req, PARAMS)
     expect(mockCreateDiagnosticRun).toHaveBeenCalledWith(
       expect.anything(),
@@ -124,7 +129,7 @@ describe('POST /api/clients/[id]/diagnostic/run', () => {
     mockExecuteDiagnosticRun.mockReturnValue(
       new Promise<void>(resolve => { resolveExec = resolve }),
     )
-    const req = makeRequest('POST', { module: 'seo' }, VALID_TOKEN)
+    const req = makeRequest('POST', { module: 'seo' })
     const res = await POST(req, PARAMS)
     expect(res.status).toBe(202)
     resolveExec()
@@ -138,9 +143,11 @@ describe('POST /api/clients/[id]/diagnostic/run', () => {
 describe('GET /api/clients/[id]/diagnostic/latest', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    allowAccess()
   })
 
-  it('returns 401 when no Bearer token is provided', async () => {
+  it('returns 401 when no session', async () => {
+    denyAccess()
     const req = makeRequest('GET')
     const res = await getLatest(req, PARAMS)
     expect(res.status).toBe(401)
@@ -159,7 +166,7 @@ describe('GET /api/clients/[id]/diagnostic/latest', () => {
       }),
     } as never)
 
-    const req = makeRequest('GET', undefined, VALID_TOKEN)
+    const req = makeRequest('GET')
     const res = await getLatest(req, PARAMS)
     expect(res.status).toBe(404)
     const json = await res.json() as { success: boolean }
@@ -193,7 +200,7 @@ describe('GET /api/clients/[id]/diagnostic/latest', () => {
       } as never
     })
 
-    const req = makeRequest('GET', undefined, VALID_TOKEN)
+    const req = makeRequest('GET')
     const res = await getLatest(req, PARAMS)
     expect(res.status).toBe(200)
     const json = await res.json() as { success: boolean; run: unknown; findings: unknown[] }
@@ -210,9 +217,11 @@ describe('GET /api/clients/[id]/diagnostic/latest', () => {
 describe('GET /api/clients/[id]/diagnostic/runs', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    allowAccess()
   })
 
-  it('returns 401 when no Bearer token is provided', async () => {
+  it('returns 401 when no session', async () => {
+    denyAccess()
     const req = makeRequest('GET')
     const res = await getRuns(req, PARAMS)
     expect(res.status).toBe(401)
@@ -229,7 +238,7 @@ describe('GET /api/clients/[id]/diagnostic/runs', () => {
       }),
     } as never)
 
-    const req = makeRequest('GET', undefined, VALID_TOKEN)
+    const req = makeRequest('GET')
     const res = await getRuns(req, PARAMS)
     expect(res.status).toBe(200)
     const json = await res.json() as { success: boolean; runs: unknown[] }
@@ -252,7 +261,7 @@ describe('GET /api/clients/[id]/diagnostic/runs', () => {
       }),
     } as never)
 
-    const req = makeRequest('GET', undefined, VALID_TOKEN)
+    const req = makeRequest('GET')
     const res = await getRuns(req, PARAMS)
     expect(res.status).toBe(200)
     const json = await res.json() as { success: boolean; runs: { id: string }[] }

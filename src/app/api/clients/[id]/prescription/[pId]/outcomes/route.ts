@@ -12,7 +12,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireBearerToken } from '@/lib/validation-utils'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { recordOutcome } from '@/lib/case-library/outcome-recorder'
 import type { PrescriptionOutcome } from '@/lib/case-library/types'
 
@@ -25,13 +25,14 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string; pId: string } },
 ): Promise<NextResponse> {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+  const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
   try {
-    const { id: clientId, pId } = params
+    const { pId } = params
 
     const { data, error } = await supabaseAdmin
       .from('prescription_outcomes')
@@ -68,13 +69,14 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string; pId: string } },
 ): Promise<NextResponse> {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+  const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
   try {
-    const { id: clientId, pId } = params
+    const { pId } = params
     const body = (await req.json()) as Partial<RecordOutcomeBody>
 
     if (!body.case_id || typeof body.case_id !== 'string') {

@@ -19,8 +19,6 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
 import type { ChatMessage } from '@/lib/blog/refiner'
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 // ─── Shared article shape ─────────────────────────────────────────────────────
 
 export interface ArticlePost {
@@ -140,7 +138,7 @@ export function StudioArticleWorkbench({ clientId, post, executionItemId, onPost
     try {
       const res = await fetch(`/api/clients/${clientId}/blog/${post.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       })
       const j = await res.json()
@@ -163,7 +161,7 @@ export function StudioArticleWorkbench({ clientId, post, executionItemId, onPost
     try {
       const res = await fetch(`/api/clients/${clientId}/cms/publish-blog`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           blog_post_id:      post.id,
           execution_item_id: executionItemId,
@@ -187,7 +185,7 @@ export function StudioArticleWorkbench({ clientId, post, executionItemId, onPost
       const promptOverride = imgPrompt.trim()
       const res = await fetch(`/api/clients/${clientId}/blog/${post.id}/image`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
           promptOverride && promptOverride !== post.featured_image_prompt
             ? { prompt_override: promptOverride }
@@ -216,7 +214,7 @@ export function StudioArticleWorkbench({ clientId, post, executionItemId, onPost
     try {
       const res = await fetch(`/api/clients/${clientId}/blog/${post.id}/refine`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: msg, history: priorHistory }),
       })
       const j = await res.json()

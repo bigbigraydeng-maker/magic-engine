@@ -10,8 +10,6 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
@@ -45,7 +43,6 @@ export function ProjectLubanDrawer({ clientId, isOpen, onClose }: Props) {
     void (async () => {
       try {
         const res = await fetch(`/api/clients/${clientId}/luban`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
           cache: 'no-store',
         })
         if (res.ok) {
@@ -80,7 +77,7 @@ export function ProjectLubanDrawer({ clientId, isOpen, onClose }: Props) {
     try {
       const res = await fetch(`/api/clients/${clientId}/luban`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: trimmed }),
       })
       const data = await res.json() as { success: boolean; reply?: string; error?: string }
@@ -107,24 +104,24 @@ export function ProjectLubanDrawer({ clientId, isOpen, onClose }: Props) {
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <button onClick={onClose} aria-label="关闭" className="absolute inset-0 bg-black/40" />
+    <div className="fixed inset-0 z-[90] flex justify-end">
+      <button onClick={onClose} aria-label="关闭" className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm" />
 
-      <div className="relative bg-white w-full sm:w-[480px] h-full flex flex-col shadow-2xl">
+      <div className="relative flex h-dvh w-full flex-col overflow-hidden border-l border-slate-200 bg-[#fbfcf7] shadow-2xl sm:w-[min(680px,100vw)] xl:w-[720px]">
         {/* Header */}
-        <div className="shrink-0 border-b border-gray-200 px-4 py-3 flex items-center gap-3">
+        <div className="flex shrink-0 items-start gap-3 border-b border-slate-200 bg-white px-5 py-4">
           <span className="text-xl">🔨</span>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-gray-900">项目级鲁班</p>
             <p className="text-xs text-gray-400 truncate">俯瞰全项目 · 处方 / 执行项 / 进度</p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-lg px-2" aria-label="关闭">
+          <button onClick={onClose} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-xl font-black text-slate-400 transition-colors hover:border-slate-300 hover:text-slate-700" aria-label="关闭">
             ✕
           </button>
         </div>
 
         {/* 消息区 */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-5 py-5">
           {loadingHistory && (
             <p className="text-xs text-gray-400 text-center py-4">加载对话历史…</p>
           )}
@@ -144,7 +141,7 @@ export function ProjectLubanDrawer({ clientId, isOpen, onClose }: Props) {
                   <button
                     key={q}
                     onClick={() => void send(q)}
-                    className="block w-full text-left rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-600 hover:border-indigo-300 hover:text-indigo-700 transition-colors"
+                    className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-xs font-semibold text-slate-600 transition-colors hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-800"
                   >
                     {q}
                   </button>
@@ -158,7 +155,7 @@ export function ProjectLubanDrawer({ clientId, isOpen, onClose }: Props) {
               <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm whitespace-pre-wrap break-words ${
                 m.role === 'user'
                   ? 'bg-indigo-600 text-white rounded-br-sm'
-                  : 'bg-gray-100 text-gray-800 rounded-bl-sm'
+                  : 'bg-white text-slate-800 rounded-bl-sm ring-1 ring-slate-200'
               }`}>
                 {m.content}
               </div>
@@ -167,7 +164,7 @@ export function ProjectLubanDrawer({ clientId, isOpen, onClose }: Props) {
 
           {sending && (
             <div className="flex justify-start">
-              <div className="bg-gray-100 rounded-2xl rounded-bl-sm px-3.5 py-2.5 flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm bg-white px-3.5 py-2.5 ring-1 ring-slate-200">
                 <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                 <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                 <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
@@ -185,7 +182,7 @@ export function ProjectLubanDrawer({ clientId, isOpen, onClose }: Props) {
         </div>
 
         {/* 输入区 */}
-        <div className="shrink-0 border-t border-gray-200 p-3">
+        <div className="shrink-0 border-t border-slate-200 bg-white p-4">
           <div className="flex items-end gap-2">
             <textarea
               value={input}
@@ -194,12 +191,12 @@ export function ProjectLubanDrawer({ clientId, isOpen, onClose }: Props) {
               rows={2}
               placeholder="问鲁班项目整体情况…（Enter 发送，Shift+Enter 换行）"
               disabled={sending}
-              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm resize-none focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400 disabled:bg-gray-50"
+              className="flex-1 resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-900 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100 disabled:bg-slate-50"
             />
             <button
               onClick={() => void send(input)}
               disabled={sending || !input.trim()}
-              className="shrink-0 rounded-lg bg-indigo-600 text-white px-4 py-2 text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="shrink-0 rounded-lg bg-slate-950 px-4 py-2 text-sm font-black text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               发送
             </button>

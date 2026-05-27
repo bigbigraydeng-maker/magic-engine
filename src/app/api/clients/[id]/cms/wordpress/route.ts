@@ -22,7 +22,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requireBearerToken } from '@/lib/validation-utils'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import {
   upsertWordpressConnection,
   getWordpressConnectionStatus,
@@ -46,9 +46,10 @@ function badInput(msg: string) {
 // ─── GET ──────────────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest, { params }: RouteContext) {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+  const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
   }
   if (!params.id) return badInput('client id required')
 
@@ -68,9 +69,10 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
 // ─── POST ─────────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest, { params }: RouteContext) {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+  const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
   }
   if (!params.id) return badInput('client id required')
 
@@ -162,9 +164,10 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 // ─── DELETE ───────────────────────────────────────────────────────────────────
 
 export async function DELETE(req: NextRequest, { params }: RouteContext) {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+  const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
   }
   if (!params.id) return badInput('client id required')
 

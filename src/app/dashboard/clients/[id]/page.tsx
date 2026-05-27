@@ -10,9 +10,8 @@ import { ZhugePriorityWidget } from './_components/ZhugePriorityWidget';
 import { ZhugeDrawer } from './_components/ZhugeDrawer';
 import { NextStepCard, type DiscoveryStatus, type PrescriptionStatus } from './_components/NextStepCard';
 import type { ClientDiscoveryRow } from '@/lib/zhangqian/types';
+import { ClientDataTab } from './_components/ClientDataTab';
 
-
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? '';
 
 interface Client {
   id: string;
@@ -107,9 +106,7 @@ function BrandHealthWidget({ clientId }: { clientId: string }) {
   useEffect(() => {
     void (async () => {
       try {
-        const res = await fetch(`/api/clients/${clientId}/zhangqian/latest`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        });
+        const res = await fetch(`/api/clients/${clientId}/zhangqian/latest`);
         if (res.status === 404) { setStatus('none'); return; }
         if (!res.ok) { setStatus('none'); return; }
         const data = await res.json() as { success: boolean; discovery: ClientDiscoveryRow };
@@ -228,20 +225,22 @@ const BADGE_CONFIG: Record<ToolBadge, { label: string; cls: string }> = {
 }
 
 function ToolCard({
-  href, title, desc, badge, soon,
+  href, onClick, title, desc, badge, soon,
 }: {
   href?: string
+  onClick?: () => void
   title: string
   desc: string
   badge: ToolBadge
   soon?: boolean
 }) {
   const b = BADGE_CONFIG[badge]
+  const interactive = !soon && (!!href || !!onClick)
   const inner = (
     <div className={`flex items-center gap-3 rounded-xl border bg-white p-4 transition-all ${
       soon
         ? 'cursor-not-allowed border-dashed border-slate-200 opacity-60'
-        : href
+        : interactive
           ? 'group cursor-pointer border-slate-200 hover:border-cyan-300 hover:shadow-sm'
           : 'border-slate-200'
     }`}>
@@ -258,10 +257,11 @@ function ToolCard({
         </div>
         <p className="text-xs font-semibold text-slate-500">{desc}</p>
       </div>
-      {href && !soon && <span className="flex-shrink-0 text-slate-300 transition-colors group-hover:text-cyan-700">→</span>}
+      {interactive && <span className="flex-shrink-0 text-slate-300 transition-colors group-hover:text-cyan-700">→</span>}
     </div>
   )
   if (href && !soon) return <Link href={href}>{inner}</Link>
+  if (onClick && !soon) return <button className="w-full text-left" onClick={onClick}>{inner}</button>
   return inner
 }
 
@@ -370,6 +370,8 @@ export default function ClientDetailPage() {
 
   // ?exec=<itemId> 来自执行看板的「在社媒矩阵中执行」跳转：
   // 自动打开 GenerationDrawer 并把生成的内容关联回该执行项（内容飞轮闭环）
+  const [activeTab, setActiveTab] = useState<'overview' | 'data' | 'tools'>('overview');
+
   const execItemId = searchParams.get('exec');
   const [generationOpen, setGenerationOpen] = useState(Boolean(execItemId));
   // ?brief=1 (from 张骞 confirm) auto-opens the brief settings drawer
@@ -384,15 +386,9 @@ export default function ClientDetailPage() {
       const [clientRes, briefRes, discoveryRes, diagnosticRes, prescriptionRes] = await Promise.all([
         fetch(`/api/clients/${clientId}`),
         fetch(`/api/clients/${clientId}/brief?status=active`),
-        fetch(`/api/clients/${clientId}/zhangqian/latest`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        }).catch(() => null),
-        fetch(`/api/clients/${clientId}/diagnostic/latest`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        }).catch(() => null),
-        fetch(`/api/clients/${clientId}/prescriptions/latest-draft`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        }).catch(() => null),
+        fetch(`/api/clients/${clientId}/zhangqian/latest`).catch(() => null),
+        fetch(`/api/clients/${clientId}/diagnostic/latest`).catch(() => null),
+        fetch(`/api/clients/${clientId}/prescriptions/latest-draft`).catch(() => null),
       ]);
       if (clientRes.ok) {
         const { client: c } = await clientRes.json();
@@ -483,115 +479,144 @@ export default function ClientDetailPage() {
           >
             设置
           </button>
-          <button
-            onClick={() => setGenerationOpen(true)}
-            className="min-h-11 rounded-lg bg-slate-950 px-5 text-sm font-black text-white transition-colors hover:bg-slate-800"
-          >
-            生成内容
-          </button>
         </div>
       </div>
 
-      {/* Workflow progress bar — 3-step overview */}
-      <WorkflowProgress
-        discoveryConfirmed={discoveryConfirmed}
-        hasCompletedDiagnostic={hasCompletedDiagnostic}
-        hasPrescription={prescriptionStatus !== 'none'}
-        clientId={clientId}
-      />
-
-      {/* Dynamic next-step guidance — always shows one clear action */}
-      <NextStepCard
-        discoveryStatus={discoveryStatus}
-        hasCompletedDiagnostic={hasCompletedDiagnostic}
-        prescriptionStatus={prescriptionStatus}
-        clientId={clientId}
-      />
-
-      {/* Brand Health (left) + Zhuge Priority Actions (right) — side-by-side cards */}
-      {discoveryStatus === 'confirmed' ? (
-        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[320px_1fr]">
-          <BrandHealthWidget clientId={clientId} />
-          <ZhugePriorityWidget
-            clientId={clientId}
-            discoveryConfirmed={discoveryConfirmed}
-            refreshKey={zhugeRefreshKey}
-            onAskZhuge={() => setZhugeDrawerOpen(true)}
-          />
-        </div>
-      ) : (
-        <ZhugePriorityWidget
-          clientId={clientId}
-          discoveryConfirmed={discoveryConfirmed}
-          refreshKey={zhugeRefreshKey}
-          onAskZhuge={() => setZhugeDrawerOpen(true)}
-        />
-      )}
-
-      {/* Master Brief warning banner */}
-      {hasActiveBrief === false && (
-        <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <span className="mt-1 h-2 w-2 rounded-full bg-amber-500" />
-          <div className="flex-1">
-            <p className="text-sm font-black text-amber-950">尚未配置 Master Brief</p>
-            <p className="text-xs font-semibold text-amber-800">
-              请先上传品牌文件并生成 Master Brief，才能开始内容生产。
-            </p>
-          </div>
+      {/* ── Tab bar ──────────────────────────────────────────────────────────── */}
+      <div className="flex gap-1 rounded-xl border border-slate-200 bg-white p-1">
+        {([ ['overview', '概览'], ['data', '数据'], ['tools', '工具'] ] as const).map(([id, label]) => (
           <button
-            onClick={() => openSettings('brief')}
-            className="whitespace-nowrap text-xs font-black text-amber-800 hover:text-amber-950"
+            key={id}
+            onClick={() => setActiveTab(id)}
+            className={`flex-1 rounded-lg py-2 text-sm font-black transition-colors ${
+              activeTab === id
+                ? 'bg-slate-950 text-white'
+                : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+            }`}
           >
-            配置 Master Brief →
+            {label}
           </button>
+        ))}
+      </div>
+
+      {/* ── 概览 tab ──────────────────────────────────────────────────────────── */}
+      {activeTab === 'overview' && (
+        <>
+          {/* Workflow progress bar — 3-step overview */}
+          <WorkflowProgress
+            discoveryConfirmed={discoveryConfirmed}
+            hasCompletedDiagnostic={hasCompletedDiagnostic}
+            hasPrescription={prescriptionStatus !== 'none'}
+            clientId={clientId}
+          />
+
+          {/* Dynamic next-step guidance — always shows one clear action */}
+          <NextStepCard
+            discoveryStatus={discoveryStatus}
+            hasCompletedDiagnostic={hasCompletedDiagnostic}
+            prescriptionStatus={prescriptionStatus}
+            clientId={clientId}
+          />
+
+          {/* Brand Health (left) + Zhuge Priority Actions (right) — side-by-side cards */}
+          {discoveryStatus === 'confirmed' ? (
+            <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[320px_1fr]">
+              <BrandHealthWidget clientId={clientId} />
+              <ZhugePriorityWidget
+                clientId={clientId}
+                discoveryConfirmed={discoveryConfirmed}
+                refreshKey={zhugeRefreshKey}
+                onAskZhuge={() => setZhugeDrawerOpen(true)}
+              />
+            </div>
+          ) : (
+            <ZhugePriorityWidget
+              clientId={clientId}
+              discoveryConfirmed={discoveryConfirmed}
+              refreshKey={zhugeRefreshKey}
+              onAskZhuge={() => setZhugeDrawerOpen(true)}
+            />
+          )}
+
+          {/* Master Brief warning banner */}
+          {hasActiveBrief === false && (
+            <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+              <span className="mt-1 h-2 w-2 rounded-full bg-amber-500" />
+              <div className="flex-1">
+                <p className="text-sm font-black text-amber-950">尚未配置 Master Brief</p>
+                <p className="text-xs font-semibold text-amber-800">
+                  请先上传品牌文件并生成 Master Brief，才能开始内容生产。
+                </p>
+              </div>
+              <button
+                onClick={() => openSettings('brief')}
+                className="whitespace-nowrap text-xs font-black text-amber-800 hover:text-amber-950"
+              >
+                配置 Master Brief →
+              </button>
+            </div>
+          )}
+
+          {/* ── 推广活动（Campaign 基座）──────────────────────────────────────────
+              Master Brief × Campaign = FDE 工作的上下文基座。
+              所有内容生产（社媒/博客/广告）应当在某个活跃 Campaign 下进行。 */}
+          <section>
+            <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-cyan-800">推广活动</p>
+            <ContentHub clientId={clientId} />
+          </section>
+        </>
+      )}
+
+      {/* ── 数据 tab ──────────────────────────────────────────────────────────── */}
+      {activeTab === 'data' && (
+        <div className="max-w-4xl mx-auto">
+          <ClientDataTab clientId={clientId} />
         </div>
       )}
 
-      {/* ── 推广活动（Campaign 基座）──────────────────────────────────────────
-          Master Brief × Campaign = FDE 工作的上下文基座。
-          所有内容生产（社媒/博客/广告）应当在某个活跃 Campaign 下进行。 */}
-      <section>
-        <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-cyan-800">推广活动</p>
-        <ContentHub clientId={clientId} />
-      </section>
+      {/* ── 工具 tab ──────────────────────────────────────────────────────────── */}
+      {activeTab === 'tools' && (
+        <>
+          {/* Zone A: 内容生产 */}
+          <section>
+            <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-cyan-800">内容生产</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <ToolCard href={`/dashboard/clients/${clientId}/marketing-plan`} title="Marketing Plan" desc="AI 生成营销计划 → 派发任务到鲁班"   badge="in_house" />
+              <ToolCard href={`/dashboard/clients/${clientId}/blog`}           title="博客"           desc="双信号博客生产与管理"            badge="in_house" />
+              <ToolCard href={`/dashboard/content?client=${clientId}`}         title="社媒矩阵"       desc="Campaign · 排期 · 多平台发布"    badge="in_house" />
+              <ToolCard href={`/dashboard/geo-composer/${clientId}`}           title="GEO Composer"  desc="部署 AI 搜索优化指令"            badge="in_house" />
+              <ToolCard href={`/dashboard/ai-visibility/${clientId}`}          title="AI 可见度追踪" desc="监控 AI 搜索中的品牌曝光"         badge="in_house" />
+              <ToolCard href={`/dashboard/clients/${clientId}/connectors`}     title="广告连接器"    desc="连接 Meta · Google 广告账户"      badge="in_house" />
+              <ToolCard href={`/dashboard/visuals?client=${clientId}`}         title="Launch Hub"    desc="Reels · 图片 · 视频素材生产"      badge="in_house" />
+              <ToolCard href={`/dashboard/clients/${clientId}/production`}     title="内容生产包"    desc="查看各维度内容包状态 · 生成内容后自动归集" badge="in_house" />
+              <ToolCard onClick={() => setGenerationOpen(true)}              title="生成单条内容" desc="按关键词 · 视频 · 话题快速生成一条社媒帖子"  badge="in_house" />
+            </div>
+          </section>
 
-      {/* ── Zone A: 内容生产 ─────────────────────────────────────────────────── */}
-      <section>
-        <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-cyan-800">内容生产</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          <ToolCard href={`/dashboard/clients/${clientId}/marketing-plan`} title="Marketing Plan" desc="AI 生成营销计划 → 派发任务到鲁班"   badge="in_house" />
-          <ToolCard href={`/dashboard/clients/${clientId}/blog`}           title="博客"           desc="双信号博客生产与管理"            badge="in_house" />
-          <ToolCard href={`/dashboard/content?client=${clientId}`}         title="社媒矩阵"       desc="Campaign · 排期 · 多平台发布"    badge="in_house" />
-          <ToolCard href={`/dashboard/geo-composer/${clientId}`}           title="GEO Composer"  desc="部署 AI 搜索优化指令"            badge="in_house" />
-          <ToolCard href={`/dashboard/ai-visibility/${clientId}`}          title="AI 可见度追踪" desc="监控 AI 搜索中的品牌曝光"         badge="in_house" />
-          <ToolCard href={`/dashboard/clients/${clientId}/connectors`}     title="广告连接器"    desc="连接 Meta · Google 广告账户"      badge="in_house" />
-          <ToolCard href={`/dashboard/visuals?client=${clientId}`}         title="Launch Hub"    desc="Reels · 图片 · 视频素材生产"      badge="in_house" />
-          <ToolCard href={`/dashboard/clients/${clientId}/production`}     title="内容生产包"    desc="查看各维度内容包状态 · 生成内容后自动归集" badge="in_house" />
-        </div>
-      </section>
+          {/* Zone B: 诊断与分析 */}
+          <section>
+            <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-cyan-800">诊断与分析</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <ToolCard href={`/dashboard/clients/${clientId}/zhangqian`}          title="张骞发现"       desc="扫描社媒、评价、关键词、竞品，生成品牌现状全景报告"  badge="in_house" />
+              <ToolCard href={`/dashboard/clients/${clientId}/diagnostic`}         title="华佗深度诊断"   desc="从 SEO/社媒/口碑/广告/AI可见/竞品六维打分，找到核心病灶"  badge="in_house" />
+              <ToolCard href={`/dashboard/clients/${clientId}/prescription/new`}   title="诸葛亮处方"     desc="基于华佗诊断结果，生成优先级排序的具体执行行动路线图"  badge="in_house" />
+              <ToolCard href={`/dashboard/clients/${clientId}/site-audit/pages`}   title="站点审计"       desc="逐页检查标题/描述/H1/图片ALT等 SEO 技术项，输出修复清单"  badge="in_house" />
+              <ToolCard href={`/dashboard/clients/${clientId}/seo-gap`}            title="SEO Gap 分析"   desc="对比竞品，找出客户未覆盖但流量大的关键词机会"  badge="in_house" />
+              <ToolCard                                                             title="口碑管理"       desc="Google 评价 · 公众号舆情"        badge="external" soon />
+              <ToolCard                                                             title="竞品追踪"       desc="持续监控竞品动态"                 badge="external" soon />
+            </div>
+          </section>
 
-      {/* ── Zone B: 诊断与分析 ───────────────────────────────────────────────── */}
-      <section>
-        <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-cyan-800">诊断与分析</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          <ToolCard href={`/dashboard/clients/${clientId}/zhangqian`}          title="张骞发现"       desc="扫描社媒、评价、关键词、竞品，生成品牌现状全景报告"  badge="in_house" />
-          <ToolCard href={`/dashboard/clients/${clientId}/diagnostic`}         title="华佗深度诊断"   desc="从 SEO/社媒/口碑/广告/AI可见/竞品六维打分，找到核心病灶"  badge="in_house" />
-          <ToolCard href={`/dashboard/clients/${clientId}/prescription/new`}   title="诸葛亮处方"     desc="基于华佗诊断结果，生成优先级排序的具体执行行动路线图"  badge="in_house" />
-          <ToolCard href={`/dashboard/clients/${clientId}/site-audit/pages`}   title="站点审计"       desc="逐页检查标题/描述/H1/图片ALT等 SEO 技术项，输出修复清单"  badge="in_house" />
-          <ToolCard href={`/dashboard/clients/${clientId}/seo-gap`}            title="SEO Gap 分析"   desc="对比竞品，找出客户未覆盖但流量大的关键词机会"  badge="in_house" />
-          <ToolCard                                                             title="口碑管理"       desc="Google 评价 · 公众号舆情"        badge="external" soon />
-          <ToolCard                                                             title="竞品追踪"       desc="持续监控竞品动态"                 badge="external" soon />
-        </div>
-      </section>
-
-      {/* ── Zone C: SEO 工具 ──────────────────────────────────────────────────── */}
-      <section>
-        <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-cyan-800">SEO 工具</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <ToolCard href={`/dashboard/clients/${clientId}/strategy`}           title="内容策略"        desc="根据关键词机会和竞品数据，制定博客选题与内容发布计划"  badge="in_house" />
-          <ToolCard href={`/dashboard/clients/${clientId}/seo-intelligence`}   title="SEO Intelligence" desc="关键词排名 · 流量趋势 · 竞品对比 · Untapped 词挖掘"    badge="in_house" />
-        </div>
-      </section>
+          {/* Zone C: SEO 工具 */}
+          <section>
+            <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-cyan-800">SEO 工具</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <ToolCard href={`/dashboard/clients/${clientId}/strategy`}           title="内容策略"        desc="根据关键词机会和竞品数据，制定博客选题与内容发布计划"  badge="in_house" />
+              <ToolCard href={`/dashboard/clients/${clientId}/seo-intelligence`}   title="SEO Intelligence" desc="关键词排名 · 流量趋势 · 竞品对比 · Untapped 词挖掘"    badge="in_house" />
+            </div>
+          </section>
+        </>
+      )}
 
       {/* Generation drawer */}
       <GenerationDrawer

@@ -14,8 +14,6 @@ import { getLubanRoute } from '@/lib/zhuge/luban-router';
 
 export type { ZhugeActionRow };
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? '';
-
 /** Collapsed view shows this many action cards; the rest fold behind a toggle. */
 const COLLAPSED_COUNT = 2;
 
@@ -124,9 +122,7 @@ export function ZhugePriorityWidget({
   const loadLatest = useCallback(async () => {
     setState('loading');
     try {
-      const res = await fetch(`/api/clients/${clientId}/zhuge/latest-actions`, {
-        headers: { Authorization: `Bearer ${API_KEY}` },
-      });
+      const res = await fetch(`/api/clients/${clientId}/zhuge/latest-actions`);
       if (!res.ok) { setState('empty'); return; }
       const data = await res.json() as {
         success: boolean;

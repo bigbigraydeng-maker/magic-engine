@@ -10,7 +10,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireBearerToken } from '@/lib/validation-utils'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { failJob, getJob } from '@/lib/zhangqian/persistor'
 
 // First-time discovery should never make a user wait beyond this. GLOBAL_TIMEOUT_MS
@@ -27,11 +27,12 @@ function isStaleRunningJob(job: { status: string; started_at: string | null; cre
 
 export async function GET(
   req: NextRequest,
-  { params: _params }: { params: { id: string } },
+  { params }: { params: { id: string } },
 ): Promise<NextResponse> {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+  const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
   try {
