@@ -1627,22 +1627,30 @@ export default function ExecutionPage() {
           setStudioItem(null)
           setChatItem(null)
           setLubanInitialMessage('')
+          setFlywheelState(null)
         }}
         onStatusChange={handleStatusChange}
         onAddLog={handleAddLog}
         onOpenChat={item => {
           setChatItem(item)
           setStudioItem(null)
+          setFlywheelState(null)
         }}
-        onOpenFlywheel={(item, target) => setFlywheelState({ item, target })}
+        onOpenFlywheel={(item, target) => {
+          setFlywheelState({ item, target })
+          setStudioItem(null)
+          setChatItem(null)
+          setLubanInitialMessage('')
+        }}
         onOpenStudio={item => {
           setStudioItem(item)
           setChatItem(null)
           setLubanInitialMessage('')
+          setFlywheelState(null)
         }}
         onEditItem={handleEditItem}
         onDeleteItem={handleDeleteItem}
-        railOpen={!!studioItem || !!chatItem}
+        railOpen={!!studioItem || !!chatItem || !!flywheelState}
       />
 
       {/* 飞轮执行抽屉（in_house 模式） */}
