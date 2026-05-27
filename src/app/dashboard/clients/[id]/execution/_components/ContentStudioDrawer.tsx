@@ -39,17 +39,44 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
   const [campaign, setCampaign]     = useState<ActiveCampaign | null>(null)
   const [campaignLoaded, setCampaignLoaded] = useState(false)
 
-  // Fetch the active campaign once; used both for the header assurance line
-  // and as ReelsStudio's default-selected campaign.
+  // Fetch the campaign for this execution item.
+  // Priority: if the item was dispatched from a marketing plan, use that plan's
+  // linked campaign (avoids showing the wrong campaign when multiple are active).
+  // Fallback: first active campaign ordered by created_at DESC.
   useEffect(() => {
     let cancelled = false
     void (async () => {
       try {
+        // Path 1 — item has a marketing_plan_id; look up its campaign
+        if (item.marketing_plan_id) {
+          const mpRes = await fetch(
+            `/api/clients/${clientId}/marketing-plan/${item.marketing_plan_id}`
+          )
+          if (mpRes.ok) {
+            const mpData = await mpRes.json() as { plan?: { campaign_id: string | null } }
+            const linkedCampaignId = mpData.plan?.campaign_id
+            if (linkedCampaignId) {
+              const camRes = await fetch(
+                `/api/clients/${clientId}/campaign/${linkedCampaignId}`
+              )
+              if (camRes.ok) {
+                const camData = await camRes.json() as { campaign?: { id: string; title?: string } }
+                if (!cancelled && camData.campaign) {
+                  setCampaign({ id: camData.campaign.id, name: camData.campaign.title ?? '' })
+                  setCampaignLoaded(true)
+                  return
+                }
+              }
+            }
+          }
+        }
+
+        // Path 2 — diagnostic item or plan has no campaign; fall back to first active
         const res = await fetch(`/api/clients/${clientId}/campaign?status=active`)
         if (res.ok) {
-          const { campaigns } = await res.json() as { campaigns?: ActiveCampaign[] }
+          const { campaigns } = await res.json() as { campaigns?: Array<{ id: string; title?: string }> }
           if (!cancelled && campaigns?.[0]) {
-            setCampaign({ id: campaigns[0].id, name: campaigns[0].name })
+            setCampaign({ id: campaigns[0].id, name: campaigns[0].title ?? '' })
           }
         }
       } catch {
@@ -59,7 +86,7 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
       }
     })()
     return () => { cancelled = true }
-  }, [clientId])
+  }, [clientId, item.marketing_plan_id])
 
   // Log generated content back to the execution item + bump status to in_progress.
   // Both calls are best-effort: a logging failure must never block content work.
