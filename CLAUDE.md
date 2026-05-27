@@ -215,22 +215,23 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-28 03:55 NZST （**Phase 12.C ✅ merge；Phase 17.A ✅ merge；Phase 19 IDOR ✅**；等 PM 决定下一 Phase）
+> 最后更新：2026-05-28 04:22 NZST （**Phase 18.A ✅ 全部完成**；等 PM 合并 PR 后决定下一 Phase）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **PM 决定** | 选择下一个 Phase：Phase 18.A（Meta Ads MVP）或 Phase 17.B（Meta Insights 社媒数据回流）| ⚠️ PM 决定 |
+| **PR merge** | Phase 18.A PR 合并到 main（输入 `go merge Phase 18.A PR`）| ⚠️ 等 PM |
 
 **已完成全景（最近几个 Phase）**：
+- ✅ **Phase 18.A**（P18.A.1–3 全部完成）：Meta Ads 活动性能面板 + Fix 执行路由（pause/adjust_bid）+ 审计日志（before/after snapshot + rollback）
 - ✅ **Phase 12.C**（P12.C.1–3 merge）：飞轮聚合视图 + 华佗置信度反哺 + Publer engagement 回流
 - ✅ **Phase 17.A**（P17.A.1–A.6 全部 merge）：GSC/GA4 数据回流 + 飞轮归因桥接 + 每日 cron + 客户「数据」tab
 - ✅ **Phase 19.A–E**（PR #95）：89 个 `/api/clients/[id]/*` 路由 IDOR 封堵 + NEXT_PUBLIC 密钥泄漏清除
 
 **下一个候选**：
-- 📋 **Phase 18.A** — Meta Ads MVP：诊断→Fix 按钮接线 Meta MCP（P18.A.1–A.3）
-- 📋 **Phase 17.B** — Meta Insights 社媒数据回流（补全 Phase 17 数据源矩阵）
+- 📋 **Phase 17.B** — Meta Insights 社媒数据回流（页面级 reach/followers — 需先打通 BM 权限）
+- 📋 **Phase 18.B** — Google Ads（需 developer token）
 
-下一 session：`开始 Phase 18.A` 或 `开始 Phase 17.B`（等 PM 决定）
+下一 session：`开始 Phase 17.B` 或 `开始 Phase 18.B`（等 PM 决定）
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox

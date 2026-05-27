@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-28 03:55 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
+> 最后更新：2026-05-28 04:22 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2088,11 +2088,13 @@ AI 可见度层（ME 独有 ✅）
 
 ### Phase 18.A — Meta Ads MVP（优先开工）
 
-| ID | 任务 | 依赖 |
-|----|------|------|
-| **P18.A.1** | 广告诊断 → Fix 按钮：执行看板 Ads action 接线 Meta MCP | 诸葛亮 ✅ |
-| **P18.A.2** | 暂停亏损广告 / 调整出价 — 调用 Meta Graph API，回写 `flywheel_actions` | P18.A.1 |
-| **P18.A.3** | 操作审计日志：每次广告变更记录 before/after snapshot，支持回滚 | P18.A.2 |
+> **实施分支**：`feat/phase-18-a-meta-ads-mvp` · **开始日期**：2026-05-28
+
+| ID | 任务 | 状态 | 依赖 |
+|----|------|------|------|
+| **P18.A.1** | Campaign 性能面板 — `/meta-ads/campaigns` API 拉活动 ROAS/花费，执行看板展示 Fix 按钮 | - [x] | 诸葛亮 ✅ |
+| **P18.A.2** | Fix 执行路由 — `/meta-ads/fix` 暂停活动/调出价，调 Meta Graph API，回写 `flywheel_actions` | - [x] | P18.A.1 |
+| **P18.A.3** | 操作审计日志 — `flywheel_actions.payload` 存 before/after snapshot，UI 支持回滚 | - [x] | P18.A.2 |
 
 ### Phase 18.B — Google Ads（Developer token 到位后开工）
 
@@ -2486,6 +2488,12 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 
 > 每次上线新功能时在此追加。格式：**[完成日期]** — Phase ID + 描述 + Commit 引用。
 > 此日志从 CLAUDE.md §十五.C 迁移至此（2026-05-10），CLAUDE.md 不再维护历史日志。
+
+### 2026-05-28
+
+- **P18.A.1** — Meta Ads 活动性能面板：`/meta-ads/campaigns` 拉取账户下各广告活动近 7 天 ROAS/花费/转化，执行看板展示分级（亏损/注意/健康）Fix 按钮
+- **P18.A.2** — Meta Ads Fix 执行路由：`/meta-ads/fix`（pause_campaign / pause_ad_set / adjust_bid 三种操作；±20% 出价安全上限；回写 flywheel_actions）
+- **P18.A.3** — 操作审计日志：`flywheel_actions.payload` 存 before/after 快照 + rollback_action；`/meta-ads/rollback` 路由支持一键撤销
 
 ### 2026-06-05
 

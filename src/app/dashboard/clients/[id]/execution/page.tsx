@@ -23,6 +23,7 @@ import {
   type PrescriptionMeta,
 } from './execution-view-model'
 import { DataPullbackSection } from './_components/DataPullbackSection'
+import { MetaAdsCampaignPanel } from './_components/MetaAdsCampaignPanel'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -1596,6 +1597,8 @@ export default function ExecutionPage() {
         <ProgressBar completed={completedCount} total={filteredItems.length} />
 
         <DataPullbackSection clientId={clientId} />
+
+        <MetaAdsCampaignPanel clientId={clientId} />
 
         {/* 按处方分组 — 原处方 / 补充 / 修订 / 已归档 各成一组 */}
         {prescriptionGroups.map(group => (
