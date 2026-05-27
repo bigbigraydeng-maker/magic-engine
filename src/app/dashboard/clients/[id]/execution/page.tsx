@@ -16,12 +16,14 @@ import {
   formatOutcomeLabel,
   isAutonomousItem,
   MARKETING_PLAN_GROUP_PREFIX,
+  FDE_MANUAL_GROUP_ID,
   type GroupData,
   type ItemWithLogs,
   type MarketingPlanMeta,
   type OutcomeSummary,
   type PrescriptionMeta,
 } from './execution-view-model'
+import { FdeManualEntryModal } from './_components/FdeManualEntryModal'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -1059,6 +1061,112 @@ function PhaseColumn({
 }
 
 // ---------------------------------------------------------------------------
+// FdeManualGroup — Phase 20.D：FDE 手动录入任务的平铺分组（可拖拽排序）
+// ---------------------------------------------------------------------------
+
+const REQUIRES_META: Record<string, { icon: string; label: string; cls: string }> = {
+  client_photo: { icon: '📷', label: '需要照片', cls: 'bg-yellow-50 text-yellow-700 border border-yellow-200' },
+  client_video: { icon: '🎬', label: '需要视频', cls: 'bg-orange-50 text-orange-700 border border-orange-200' },
+  client_info:  { icon: '📄', label: '需要资料', cls: 'bg-sky-50 text-sky-700 border border-sky-200' },
+  none:         { icon: '✅', label: '可自动生成', cls: 'bg-green-50 text-green-700 border border-green-200' },
+}
+
+function FdeManualGroup({
+  group,
+  activeDetailId,
+  onOpenDetail,
+  onReorder,
+}: {
+  group:          GroupData
+  activeDetailId: string | null
+  onOpenDetail:   (item: ItemWithLogs) => void
+  onReorder:      (draggedId: string, targetId: string) => void
+}) {
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
+  const completed = group.items.filter(i => i.status === 'completed').length
+
+  return (
+    <div className="rounded-xl border border-indigo-200 bg-white overflow-hidden">
+      {/* Group header */}
+      <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-3 flex-wrap bg-indigo-50/40">
+        <span className="text-xs font-semibold rounded-full px-2.5 py-1 bg-indigo-100 text-indigo-700">
+          📝 FDE 录入工作
+        </span>
+        <span className="text-xs text-gray-400">{completed}/{group.items.length} 完成</span>
+        <span className="text-xs text-gray-400 italic">拖拽任务可调整优先级</span>
+      </div>
+
+      {/* Flat item list */}
+      <div className="p-4 bg-gray-50 space-y-2">
+        {group.items.length === 0 && (
+          <p className="text-xs text-gray-400 text-center py-6">暂无 FDE 录入工作</p>
+        )}
+        {group.items.map(item => {
+          const dimMeta     = DIMENSION_CARD_META[item.dimension ?? '']
+          const statusMeta  = STATUS_META[item.status]
+          const fixMeta     = FIX_TYPE_META[item.fix_type ?? ''] ?? FIX_TYPE_META.fde_manual
+          const requiresKey = (item.steps_json as Record<string, unknown> | null)?.requires as string | undefined
+          const reqMeta     = requiresKey ? REQUIRES_META[requiresKey] : null
+
+          return (
+            <div
+              key={item.id}
+              draggable
+              onDragStart={e => { e.dataTransfer.setData('text/plain', item.id); e.dataTransfer.effectAllowed = 'move' }}
+              onDragOver={e => { e.preventDefault(); setDragOverId(item.id) }}
+              onDragLeave={() => setDragOverId(null)}
+              onDrop={e => {
+                e.preventDefault()
+                setDragOverId(null)
+                const draggedId = e.dataTransfer.getData('text/plain')
+                if (draggedId && draggedId !== item.id) onReorder(draggedId, item.id)
+              }}
+              role="button"
+              tabIndex={0}
+              onClick={() => onOpenDetail(item)}
+              onKeyDown={ev => ev.key === 'Enter' && onOpenDetail(item)}
+              className={`rounded-lg border p-2.5 cursor-pointer transition-all select-none ${
+                dragOverId === item.id
+                  ? 'border-indigo-400 bg-indigo-50/60 shadow-inner'
+                  : activeDetailId === item.id
+                    ? 'border-indigo-400 bg-indigo-50 shadow-sm'
+                    : 'border-gray-200 bg-white hover:border-indigo-200 hover:shadow-sm'
+              }`}
+            >
+              <div className="flex items-start gap-2">
+                {/* Drag handle */}
+                <span className="text-gray-300 text-sm mt-0.5 cursor-grab shrink-0" title="拖拽排序">⠿</span>
+                <span className="text-base shrink-0 mt-0.5">{fixMeta.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-gray-900 line-clamp-2 leading-tight">{item.title}</p>
+                  {item.description && (
+                    <p className="text-[11px] text-gray-400 line-clamp-1 mt-0.5">{item.description}</p>
+                  )}
+                </div>
+                <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded font-medium ${statusMeta.color}`}>
+                  {statusMeta.label}
+                </span>
+              </div>
+              <div className="mt-1.5 flex items-center gap-1.5 flex-wrap ml-9">
+                {dimMeta && (
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${dimMeta.cls}`}>{dimMeta.label}</span>
+                )}
+                {item.due_date && <span className="text-[10px] text-gray-400">{item.due_date}</span>}
+                {reqMeta && (
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${reqMeta.cls}`}>
+                    {reqMeta.icon} {reqMeta.label}
+                  </span>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // PrescriptionGroup — 一个处方的执行项分组（P8.10.S5）
 // ---------------------------------------------------------------------------
 
@@ -1207,6 +1315,8 @@ export default function ExecutionPage() {
   const [detailEditable, setDetailEditable] = useState(false)
   // 维度过滤
   const [activeDimension, setActiveDimension] = useState<string>('all')
+  // Phase 20.D: FDE 手动录入
+  const [showManualEntry, setShowManualEntry] = useState(false)
 
   const handleDownloadDocx = async () => {
     setIsDocxLoading(true)
@@ -1390,6 +1500,42 @@ export default function ExecutionPage() {
     }
   }, [clientId, fetchItems])
 
+  // Phase 20.D: FDE 手动排序（drag-to-reorder）
+  const handleReorder = useCallback(async (draggedId: string, targetId: string) => {
+    if (draggedId === targetId) return
+    const fdeItems = items.filter(i => i.source === 'fde_manual')
+    const dragIdx  = fdeItems.findIndex(i => i.id === draggedId)
+    const targIdx  = fdeItems.findIndex(i => i.id === targetId)
+    if (dragIdx === -1 || targIdx === -1) return
+
+    // Compute midpoint sort_order between adjacent items
+    const reordered = [...fdeItems]
+    const [dragged] = reordered.splice(dragIdx, 1)
+    reordered.splice(targIdx, 0, dragged)
+
+    // Assign new sort orders at intervals of 10, then PATCH only the moved item
+    const newOrders = reordered.map((it, idx) => ({ id: it.id, sort_order: (idx + 1) * 10 }))
+
+    // Optimistic update
+    setItems(prev => prev.map(it => {
+      const o = newOrders.find(x => x.id === it.id)
+      return o ? { ...it, sort_order: o.sort_order } : it
+    }))
+
+    // Persist all reordered items
+    await Promise.all(newOrders.map(({ id, sort_order }) =>
+      fetch(`/api/clients/${clientId}/execution/${id}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        body:    JSON.stringify({ sort_order }),
+      }).then(r => { if (!r.ok) throw new Error(`PATCH ${id} failed`) })
+    )).catch(async () => {
+      // rollback on any failure + surface error to FDE
+      setOpError('排序更新失败，请重试')
+      await fetchItems(true)
+    })
+  }, [items, clientId, fetchItems])
+
   // 移除执行项（仅限 pending 状态）
   const handleDeleteItem = useCallback(async (itemId: string): Promise<void> => {
     setOpError(null)
@@ -1477,6 +1623,13 @@ export default function ExecutionPage() {
             <p className="text-xs text-gray-400 mt-0.5">鲁班执行代理 · 按阶段跟踪处方落地进度</p>
           </div>
           <div className="flex items-center gap-2">
+            {/* Phase 20.D: FDE 统一录入入口 */}
+            <button
+              onClick={() => setShowManualEntry(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 transition-colors"
+            >
+              ＋ 录入工作
+            </button>
             <a
               href={TALK_TO_US_HREF}
               className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-700 transition-colors"
@@ -1571,18 +1724,32 @@ export default function ExecutionPage() {
 
         <ProgressBar completed={completedCount} total={filteredItems.length} />
 
-        {/* 按处方分组 — 原处方 / 补充 / 修订 / 已归档 各成一组 */}
-        {prescriptionGroups.map(group => (
-          <PrescriptionGroup
-            key={group.pid}
-            group={group}
-            defaultOpen={true}
-            activeDetailId={detailItem?.id ?? null}
-            onDerive={(mode, priorId, priorLabel) => setDeriveDrawer({ mode, priorId, priorLabel })}
-            onOpenDetail={item => { setDetailItem(item); setDetailEditable(group.editable) }}
-            onAddItem={handleAddItem}
-          />
-        ))}
+        {/* 按处方分组 — 原处方 / 补充 / 修订 / 已归档 / Marketing Plan / FDE 各成一组 */}
+        {prescriptionGroups.map(group => {
+          // Phase 20.D: FDE 手动录入分组 — 平铺 + 拖拽排序
+          if (group.kind === 'fde_manual') {
+            return (
+              <FdeManualGroup
+                key={group.pid}
+                group={group}
+                activeDetailId={detailItem?.id ?? null}
+                onOpenDetail={item => { setDetailItem(item); setDetailEditable(true) }}
+                onReorder={handleReorder}
+              />
+            )
+          }
+          return (
+            <PrescriptionGroup
+              key={group.pid}
+              group={group}
+              defaultOpen={true}
+              activeDetailId={detailItem?.id ?? null}
+              onDerive={(mode, priorId, priorLabel) => setDeriveDrawer({ mode, priorId, priorLabel })}
+              onOpenDetail={item => { setDetailItem(item); setDetailEditable(group.editable) }}
+              onAddItem={handleAddItem}
+            />
+          )
+        })}
       </div>
 
       {/* 右侧任务详情抽屉 */}
@@ -1663,6 +1830,14 @@ export default function ExecutionPage() {
           onContentGenerated={() => void fetchItems(true)}
         />
       )}
+
+      {/* Phase 20.D: FDE 手动录入 Modal */}
+      <FdeManualEntryModal
+        clientId={clientId}
+        open={showManualEntry}
+        onClose={() => setShowManualEntry(false)}
+        onCreated={() => { setShowManualEntry(false); void fetchItems(true) }}
+      />
     </div>
   )
 }

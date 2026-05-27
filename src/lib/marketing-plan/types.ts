@@ -70,6 +70,9 @@ export interface PlanKPIs {
 
 export type PlanTaskKind = 'social_post' | 'social_reel' | 'social_story' | 'blog_article'
 
+/** Phase 20.D: 素材依赖标注 — FDE 执行前需准备的素材类型 */
+export type PlanTaskRequires = 'none' | 'client_photo' | 'client_video' | 'client_info'
+
 export interface PlanTask {
   /** 任务类型 — 决定 Luban kanban 上的徽章和工作台跳转目标 */
   kind: PlanTaskKind
@@ -87,6 +90,14 @@ export interface PlanTask {
   source_blog_topic_index?: number | null
   /** 关联 Strategy 数据来源 */
   source_strategy_item_id?: string | null
+  /**
+   * Phase 20.D: 素材依赖标注
+   *   'none'         — ME 可全自动生成，无需客户提供素材
+   *   'client_photo' — 需要客户提供实景照片
+   *   'client_video' — 需要客户提供视频素材或到场拍摄
+   *   'client_info'  — 需要客户提供信息（产品数据、案例等）
+   */
+  requires?: PlanTaskRequires | null
 }
 
 // ─── 完整 Plan 数据 ────────────────────────────────────────────────────────────
