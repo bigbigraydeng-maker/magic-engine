@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-28 03:41 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
+> 最后更新：2026-05-28 03:42 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2671,6 +2671,12 @@ client_decision_history      -- 为什么之前选 X 不选 Y
   `feat(flywheel): P12.B.3 — SocialContentAdapter 社媒飞轮落库 [P12.B.3]`
 - **P12.B.4** — SEMrush 周快照 cron：GET /api/cron/flywheel-seo-weekly；拉所有有 domain 的客户 domain_ranks 写 flywheel_metrics；9 单元测试；build 通过
   `feat(flywheel): P12.B.4 — SEMrush 周快照 cron [P12.B.4]`
+- **P12.C.1** — 跨客户 outcome 聚合：outcome-aggregate.ts 纯函数层（7 测试）；GET /api/admin/flywheel/aggregate；/dashboard/admin/flywheel 飞轮成效卡片（verdict bar + 置信度 badge）
+  `feat(flywheel): outcome aggregate API + Admin 飞轮成效卡片 [P12.C.1]`
+- **P12.C.2** — 反哺华佗置信度：outcome-confidence.ts（8 测试）；HuatuoLookupContext 新增 outcome_confidence；agent.ts 并行拉取；prompts.ts 注入「历史成效数据」段落；处方 action 末尾附置信度标签
+  `feat(huatuo): 飞轮归因置信度反哺处方生成 [P12.C.2]`
+- **P12.C.3** — 社媒 engagement 回流：engagement-pullback.ts（7 测试）；Publer GET /posts/{id}；GET /api/cron/social-engagement-pullback；vocabulary 新增 POST_LIKES/COMMENTS/SHARES；render.yaml 注册每日 4am UTC cron
+  `feat(social): Publer engagement pullback → flywheel_metrics [P12.C.3]`
 
 ### 2026-05-24（Phase 8.13 Sprint A–E）
 

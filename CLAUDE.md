@@ -215,23 +215,20 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-28 03:41 NZST （**Phase 17.A P17.A.1–A.4 + A.5(cron) 全部 ✅ 完成**；Phase 17.A 全部交付，等 PM 验收 M2 + merge）
+> 最后更新：2026-05-28 03:42 NZST （**Phase 12.C P12.C.1–C.3 全部 ✅ 完成**；PR 已开，等 PM merge）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **PM 验收 M2** | 打开 Supabase 后台，确认 `gsc_performance_snapshots` + `ga4_traffic_snapshots` 有 OzTop 数据行 | ⚠️ PM 操作 |
-| **PM 操作** | Supabase 跑 migration `20260603000003_gsc_performance_snapshots.sql` + `20260604000001_ga4_traffic_snapshots.sql` | ⚠️ PM 操作 |
-| **PM 合并** | 输入 `go merge` 合并 Phase 17.A PR（全部 P17.A.1–A.5 完成） | ⚠️ PM 决定 |
-| **P17.A.6（待排）** | 客户主页「数据」tab：GSC top queries + GA4 daily traffic + 快速夺旗机会清单（原 P17.A.5 UI） | 📋 下一任务 |
+| **PM 合并** | 输入 `go merge` 合并 Phase 12.C PR（全部 P12.C.1–C.3 完成） | ⚠️ PM 决定 |
+| **Phase 17.A PM 验收** | 打开 Supabase 后台，确认 `gsc_performance_snapshots` + `ga4_traffic_snapshots` 有 OzTop 数据行 | ⚠️ PM 操作 |
+| **P17.A.6（待排）** | 客户主页「数据」tab：GSC top queries + GA4 daily traffic + 快速夺旗机会清单 | 📋 下一任务 |
 
-**状态校准（2026-06-05）**：
-- ✅ **P17.A.1**：`gsc_performance_snapshots` 表 + `fetchGscSnapshot()` + POST `/gsc/sync` + GET `/gsc/snapshots`
-- ✅ **P17.A.2**：GA4 接入：`ga4_traffic_snapshots` + `fetchGa4Snapshot()` + POST `/ga4/sync` + GET `/ga4/snapshots`
-- ✅ **P17.A.3**：GSC/GA4 快照 UI：`DataPullbackSection`（执行看板）+ connector 详情页同步按钮
-- ✅ **P17.A.4**：GSC 归因桥接：`gsc-bridge.ts` + POST `/flywheel/gsc-attribution` + vocabulary 3 GSC keys + attribution cron pass-2
-- ✅ **P17.A.5（cron）**：每日自动同步：`google-data-pullback-daily` cron + render.yaml 注册
+**状态校准（Phase 12.C）**：
+- ✅ **P12.C.1**：`outcome-aggregate.ts`（7 测试）+ GET `/api/admin/flywheel/aggregate` + `/dashboard/admin/flywheel` 飞轮成效卡片
+- ✅ **P12.C.2**：`outcome-confidence.ts`（8 测试）+ 华佗 lookup 并行拉取 + prompts 注入置信度标签
+- ✅ **P12.C.3**：`engagement-pullback.ts`（7 测试）+ cron `/api/cron/social-engagement-pullback` + render.yaml 注册每日 4am UTC
 
-下一 session：`继续 Phase 17.A 验收 merge，或开始 P17.A.6 UI 层`
+下一 session：`go merge Phase 12.C PR，或继续 P17.A.6 UI 层`
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox
