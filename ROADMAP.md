@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-28 02:53 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
+> 最后更新：2026-05-28 03:34 NZST · 当前阶段：**Phase 14.A Website Connector 全部完成 ✅（P14.A.1–8）；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S（P8.S.1–7 SEMrush→DataForSEO 全部已实现）、Phase 9.0（P9.0.10–17 Visual Queue 测试 + QueueOverviewCard 全部已实现）、Phase 12.H（P12.H.1–3 GitHub CMS 闭环全部已实现）。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -1349,12 +1349,17 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
 > **⚠️ 注意**：DataForSEO KD 分数算法与 SEMrush 不同，数值不可横向比较。切换后需在客户报告 + UI 中注明口径变更，或统一改用 DataForSEO KD 标准。
 > **保留 SEMrush API key**：`batchKeywordOverview` P8.S.8 完成前 + 任何降级回退用。
 
-### Phase 12.C —（预告）
+### Phase 12.C — 飞轮数据闭环（聚合 + 置信度 + 社媒回流）
 
-- 跨客户 outcome 聚合视图（`action_type × crisis_type × verdict_rate`）
-- 反哺华佗：处方生成时查询历史 outcome 给推荐打置信度
-- markisfact adapter（如商务谈成）
-- 社媒发布数据回流（Publer + 平台 API）
+> 启动：2026-05-28。飞轮骨架（12.A）+ adapter（12.B）已就绪，现在让数据「活起来」。
+>
+> 工作分支：`feat/phase-12-c-flywheel-closure`
+
+- [x] **P12.C.1** — 跨客户 outcome 聚合视图：GET /api/admin/flywheel/aggregate，按 action_type 统计 verdict_rate；Admin Dashboard「飞轮成效」卡片展示 top 5
+- [x] **P12.C.2** — 反哺华佗置信度：`src/lib/case-library/outcome-confidence.ts` 计算历史成功率，注入处方生成 prompt（含「历史成功率 X%，基于 N 案例」标签）
+- [x] **P12.C.3** — 社媒发布数据回流：Publer API 拉取帖子 likes/comments/shares，写入 flywheel_metrics；cron `social-engagement-pullback` 每日 4am UTC
+
+> **范围说明**：markisfact adapter 已从 Phase 12.C scope 移除，待商务谈成后单独登记。
 
 ### Phase 12.Q — 内容质量闭环 ⭐⭐⭐（已登记，未开工，2026-05-19 启动登记）
 
