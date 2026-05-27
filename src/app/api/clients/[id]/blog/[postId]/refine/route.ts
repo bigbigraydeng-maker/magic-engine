@@ -14,7 +14,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireBearerToken } from '@/lib/validation-utils'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { refineBlogPost } from '@/lib/blog/refiner'
 import type { ChatMessage, BlogRefineContent } from '@/lib/blog/refiner'
 import { countWords } from '@/lib/blog/generator'
@@ -33,13 +33,14 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string; postId: string } },
 ) {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+  const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
   try {
-    const { id: clientId, postId } = params
+    const { postId } = params
     const body = (await req.json()) as { message?: string; history?: unknown }
 
     const message = (body.message ?? '').trim().slice(0, MAX_MESSAGE_CHARS)

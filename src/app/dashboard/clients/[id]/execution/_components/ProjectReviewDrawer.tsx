@@ -14,8 +14,6 @@ import type {
   DimensionReview, KpiReview, ReviewRecommendation,
 } from '@/lib/review/types'
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 interface Props {
   clientId: string
   isOpen: boolean
@@ -176,7 +174,6 @@ export function ProjectReviewDrawer({ clientId, isOpen, onClose }: Props) {
     void (async () => {
       try {
         const res = await fetch(`/api/clients/${clientId}/review`, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
           cache: 'no-store',
         })
         if (res.ok) {
@@ -203,7 +200,7 @@ export function ProjectReviewDrawer({ clientId, isOpen, onClose }: Props) {
     try {
       const res = await fetch(`/api/clients/${clientId}/review`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
       })
       const data = await res.json() as {
         success: boolean; content?: ProjectReviewContent; summary?: string; error?: string

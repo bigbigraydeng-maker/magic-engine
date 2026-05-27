@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireBearerToken, clampLimit } from '@/lib/validation-utils'
+import { clampLimit } from '@/lib/validation-utils'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 type RouteContext = { params: { id: string } }
 
@@ -19,13 +20,13 @@ type DiagnosticDimension = typeof VALID_DIMENSIONS[number]
  *   limit      — max rows (default 50, max 100)
  */
 export async function GET(req: NextRequest, { params }: RouteContext) {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+  const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
   try {
-    const clientId = params.id
     const { searchParams } = req.nextUrl
     const dimension = searchParams.get('dimension')
     const status    = searchParams.get('status')
@@ -95,13 +96,13 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
  *   execution_item_id — optional UUID
  */
 export async function POST(req: NextRequest, { params }: RouteContext) {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+  const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
   try {
-    const clientId = params.id
     const body = await req.json() as {
       dimension?: unknown
       title?: unknown

@@ -14,8 +14,6 @@ import type { PrescriptionContent, PrescriptionIntake, PrescriptionAction } from
 import type { SelfGrade, HuatuoGenerationMeta } from '@/lib/huatuo/types'
 import { readHuatuoStream } from '@/lib/huatuo/stream-client'
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 type Mode = 'supplement' | 'revision'
 type Step = 'form' | 'generating' | 'review'
 
@@ -105,7 +103,7 @@ export function InlinePrescriptionDrawer({
 
       const res = await fetch(`/api/clients/${clientId}/prescription/generate`, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(body),
         cache:   'no-store',
       })
@@ -157,7 +155,7 @@ export function InlinePrescriptionDrawer({
     try {
       const res = await fetch(`/api/clients/${clientId}/prescription/${prescriptionId}`, {
         method:  'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ status: 'approved' }),
       })
       if (!res.ok) {

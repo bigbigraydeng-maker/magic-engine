@@ -20,8 +20,6 @@ import Link from 'next/link'
 import type { ExecutionItem } from '@/types/diagnostic'
 import { StudioArticleWorkbench, toArticlePost, type ArticlePost } from './StudioArticleWorkbench'
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
-
 const WORD_COUNT_OPTIONS = [800, 1000, 1200, 1500, 2000] as const
 
 interface UpgradeNotice {
@@ -60,10 +58,7 @@ export function StudioArticleTab({ clientId, item, hasActiveCampaign, onGenerate
     try {
       const res = await fetch(`/api/clients/${clientId}/blog`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${API_KEY}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mode,
           topic: kw,

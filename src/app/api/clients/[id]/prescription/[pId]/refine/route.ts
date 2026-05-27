@@ -16,7 +16,7 @@
 
 import { NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireBearerToken } from '@/lib/validation-utils'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { refineHuatuoPrescription, coerceWeaknesses } from '@/lib/huatuo/agent'
 import type { PrescriptionIntake, PrescriptionContent } from '@/types/diagnostic'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
@@ -50,12 +50,13 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string; pId: string } },
 ): Promise<Response> {
-  const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
-  if (!auth.ok) {
-    return errorResponse(auth.status, auth.error)
+  const { id: clientId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return errorResponse(access.status, access.error)
   }
 
-  const { id: clientId, pId } = params
+  const { pId } = params
 
   // 读 body（可选 human_comments）
   let humanComments: string | undefined
