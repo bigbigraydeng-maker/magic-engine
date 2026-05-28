@@ -215,10 +215,11 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-28 10:54 NZST （**Phase 23 全部 ✅ commit & push (A+B+C+D+D.2+E)** on PR #112；已 merge origin/main 进 worktree；等 PM merge PR #112）
+> 最后更新：2026-05-28 21:31 NZST （**Phase 23 全部 ✅ commit & push (A+B+C+D+D.2+E)** on PR #112；已 merge origin/main 进 worktree；等 PM merge PR #112）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
+| **Phase 21 实施计划已登记 📋** | V2 方案 8 commits / 2 天已写入 ROADMAP（P21.E.1 / A.1 / B.1 / D.1 / A.2 / A.3 / B.2 / B.3）— 等 PM 触发开工，下一 session 第一句 `开始 Phase 21 第 1 任务 P21.E.1` | ⚠️ 等 PM 触发 |
 | **PM 操作 🔴** | Supabase 跑 migrations：`20260603000001_execution_items_fde_manual.sql` + `20260610000001_phase23_memory_tables.sql` | ⚠️ PM 操作 |
 | **PM 验收 Phase 20.D** | 执行看板顶部出现「＋ 录入工作」按钮 → 录入工作 → 看板出现「📝 FDE 录入工作」分组 → 可拖拽排序 | ⚠️ PM 验收 |
 | **PM 验收 Phase 23** | 客户主页「客户记忆库」ToolCard → 浏览页四 tab + 抽取/导出按钮；执行抽屉 outcome 下方「🧠 记忆标注」面板 | ⚠️ PM 验收 |
@@ -239,7 +240,7 @@ git push origin master   # 触发 Render 部署
 - ✅ **Phase 14.A.1–8**：全部完成，等 PM 运行 migration 验收
 
 **下一个候选**：
-- 📋 **Phase 21** — AI Factory（生产能力 — 与 Phase 23 记忆协同）
+- 📋 **Phase 21** — AI Factory（生产能力 — 与 Phase 23 记忆协同）· **V2 实施计划已登记 2026-05-28**（8 commits / 2 天，第一波 6 + 第二波 2；剔除原 21.C 直接发布管道）
 - 📋 **Phase 22** — Data Engine（学习层 — 喂养 Phase 23 抽取器）
 - 📋 **Phase 18.A** — Meta Ads MVP：诊断→Fix 按钮接线 Meta MCP（P18.A.1–A.3）
 - 📋 **Phase 17.B** — Meta Insights 社媒数据回流（补全 Phase 17 数据源矩阵）

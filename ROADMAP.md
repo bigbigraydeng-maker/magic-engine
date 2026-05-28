@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-28 10:54 NZST · 当前阶段：**Phase 23 Cross-Agent Memory Layer 全部完成 ✅（PR #112 等 merge）；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅；Phase 14.A Website Connector 全部完成 ✅；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S、Phase 9.0、Phase 12.H 等历史功能全部已实现。
+> 最后更新：2026-05-28 21:31 NZST · 当前阶段：**Phase 23 Cross-Agent Memory Layer 全部完成 ✅（PR #112 等 merge）；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅；Phase 14.A Website Connector 全部完成 ✅；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S、Phase 9.0、Phase 12.H 等历史功能全部已实现。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -73,7 +73,7 @@
 📋 Phase 18     Ads Execution Engine / 广告执行引擎（Meta + Google + TikTok，已登记）
 ✅ Phase 19     API 鉴权整改 / IDOR 修复（🟢 19.A–E 全部完成 2026-05-27，PR #95）
 ✅ Phase 20.D   统一看板入口 / 六支柱 FDE 手动录入 + 拖拽排序 + 客户 Portal 分组（Phase 20 子任务 — 2026-05-28 实施）
-📋 Phase 21     AI Content Factory / AI 内容工厂（旗舰能力 — FDE 客户默认产能引擎）
+📋 Phase 21     AI Content Factory / AI 内容工厂（旗舰能力 — FDE 客户默认产能引擎 · V2 实施计划已登记 8 commits / 2 天，待 PM 触发开工）
 📋 Phase 22     Data Intelligence Engine / 数据智能引擎（旗舰能力 — 采集+分析+反馈学习引擎）
 📋 Phase 22.D   主动任务生成器 / AnomalyDetector + 诸葛亮 Proactive（Phase 22 子模块）
 📋 Phase 23     Cross-Agent Memory Layer / 跨 Agent 记忆层（旗舰能力 — 升级自 Phase 8.M，补 L3 长期学习）
@@ -2461,9 +2461,9 @@ AU / NZ（当前）          新市场（未来）
 
 ---
 
-## Phase 21 — AI Content Factory（旗舰能力 · FDE 默认产能引擎）📋 战略确认，待排期
+## Phase 21 — AI Content Factory（旗舰能力 · FDE 默认产能引擎）📋 实施计划已登记，待开工
 
-> **登记日期**：2026-05-26 · **状态**：战略方向已确认，PM 拍板，待 Phase 20/19 收尾后排期
+> **登记日期**：2026-05-26 · **实施计划拍板**：2026-05-28（V2 方案）· **状态**：8 个子任务已拆好，待 PM 触发开工
 >
 > **战略定位**：AI Content Factory 是 ME 的**产能上限**，类比"能产 100 万双鞋的鞋厂可以接 1 万双小单"。FDE 客户（$2.5K-3K/月）默认走 AI Factory；非 FDE 客户按 token 自助调用各模块。
 >
@@ -2496,9 +2496,54 @@ AU / NZ（当前）          新市场（未来）
 | **21.D Token 预算治理** | 每客户月度成本上限 + 模型分层（战略层 Sonnet，生产层 Haiku/4o-mini）|
 | **21.E intensity = ai_factory 新档位** | 在 `light/standard/aggressive` 后加 `ai_factory` |
 
+### Phase 21 实施计划（V2 · 2026-05-28 拍板）⭐
+
+> **总量**：8 个 commits，预计 2 天 · **目标**：让 1 个 FDE 客户跑通 AI Factory（80 条/月 → 验证后扩到 800-1100 条/月）
+>
+> **核心决策**：
+> - 用 **现有 marketing-plan/task 架构** 作为入口，不另起炉灶
+> - 模型分层（Sonnet 战略 + Haiku 生产 + GPT-4o-mini 变体）控制成本
+> - 暂缓 21.C 直接发布管道（Publer 已能扛社媒主流量，等验证瓶颈后再决定）
+> - 触发器选 **手动按钮**（不自动从诸葛亮触发），避免 80 条草稿无人审就发出
+>
+> **为 Phase 22/23 预留的最小钩子**（零成本）：
+> - `generated_content.factory_generated bool` — Phase 22 区分自然 vs 工厂产出
+> - `generated_content.model_used text` — Phase 22 学习"哪个模型在该客户跑得好"
+> - **不**预留 API 层钩子（避免过度设计）
+
+#### 第一波：让一个客户跑通 AI Factory（6 commits）
+
+| ID | 任务 | 关键改动 | 预计 |
+|----|------|---------|------|
+| **P21.E.1** | `ai_factory` intensity 档位 + 超高产量 cadence 定义 | `src/lib/marketing-plan/types.ts`（enum 扩展）+ `generator.ts`（cadence：posts_per_week=14-21, reels_per_month=90-150, blogs=60-90）+ 前端 Plan 创建表单显示新选项 | 30 min |
+| **P21.A.1** | 模型路由器 `src/lib/factory/model-router.ts` | task_kind → model 映射（策略层 Sonnet / 生产层 Haiku 4.5 / 变体层 GPT-4o-mini）+ 单元测试 | 1h |
+| **P21.B.1** | 表结构 migration | 新表 `content_variants` + `generated_content` 加 `factory_generated bool` + `model_used text` | 30 min |
+| **P21.D.1** | Token 预算治理（**合并 3 件事 = 1 commit**）| migration `client_token_budgets`（client_id / month YYYY-MM / tokens_used / tokens_budget / cost_usd）+ GET/PATCH `/api/clients/[id]/token-budget` + `checkTokenBudget()` 中间件 | 1h |
+| **P21.A.2** | 批量生成 API（核心）| migration `batch_jobs`（id / client_id / plan_id / status / total / completed / failed / cost_usd）+ `POST /api/clients/[id]/factory/batch-generate`（输入：plan_id + task_ids[] 可选 + mode: all/failed_only；预算检查 → 异步 worker 调 Haiku → 写入 generated_content 标记 factory_generated）+ 注入 Visual Direction 字段（见 § Phase 23 Audit 警告）+ 注入 L3 memory（复用 `formatMemoryForPrompt`） | 2.5h |
+| **P21.A.3** | 进度端点 + Plan 看板 UI | `GET /api/clients/[id]/factory/batch-jobs/[jobId]`（轮询）+ Plan 详情页 "🏭 启动 AI Factory" 按钮 + 进度条（已完成/总数/失败 + 预估剩余）+ "仅重跑失败"按钮 | 1.5h |
+
+**第一波完成后状态**：FDE 在 Plan 详情页点 "🏭"，30 分钟内 80 条草稿落地 + factory_generated 标记 + Visual Direction 注入 + L3 memory 注入；预算超出时阻断并显示提示。
+
+#### 第二波：从 1 → 30 的变体杠杆（2 commits）
+
+| ID | 任务 | 关键改动 | 预计 |
+|----|------|---------|------|
+| **P21.B.2** | 变体生成 API | `POST /api/clients/[id]/content/[contentId]/variants`（输入：parent_content_id + variant_type[] 枚举 angle/hook/platform_fb/platform_ig/platform_tiktok）→ 调 GPT-4o-mini → 写 content_variants 表 | 1h |
+| **P21.B.3** | 变体管理 UI | 内容卡片 "⚡ 衍生变体" 下拉菜单 + 变体列表抽屉（FB/IG/TikTok 标签）+ 每个变体可单独审批 | 1h |
+
+**第二波完成后状态**：1 条审批通过的内容 → 一键产 N 个角度/钩子/平台变体，单条内容杠杆 30×。
+
+#### V1 → V2 剔除清单
+
+- ❌ **整个 21.C 多平台直接发布管道**（4 commits）→ 暂缓，先用 Publer；只在 Publer 验证为瓶颈后再开
+- ❌ 原 P21.A.4 单独的进度 UI commit → 合入 P21.A.3
+- ❌ 原 P21.D.2 单独的预算检查中间件 commit → 合入 P21.D.1
+- ❌ "图片/视频素材变体" → Visual/Video Studio 已有能力，21.B 只补"文案多角度变体"缺口
+
 ### Phase 21 不做清单
 - ❌ 不强制非 FDE 客户走 AI Factory（按 token 自由调用）
 - ❌ 不脱离 Data Engine 单独跑（Factory 是生产，Data 是反馈，必须双引擎并行）
+- ❌ MVP 阶段不自动从诸葛亮 / Plan dispatch 触发（手动按钮先跑 1-2 个月验证质量，再考虑自动化）
 
 ---
 
