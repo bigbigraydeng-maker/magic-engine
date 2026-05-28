@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-29 00:26 NZST · 当前阶段：**Phase 23 Cross-Agent Memory Layer 全部完成 ✅（PR #112 等 merge）；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅；Phase 14.A Website Connector 全部完成 ✅；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S、Phase 9.0、Phase 12.H 等历史功能全部已实现。
+> 最后更新：2026-05-29 00:28 NZST · 当前阶段：**Phase 23 Cross-Agent Memory Layer 全部完成 ✅（PR #112 等 merge）；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅；Phase 14.A Website Connector 全部完成 ✅；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S、Phase 9.0、Phase 12.H 等历史功能全部已实现。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2491,14 +2491,14 @@ Phase 25 是 Phase 20 的前置基础：
 
 #### 任务清单
 
-- [ ] **P20.0.1** Migration：`public_scan_jobs` 加 `client_id` 可空 FK
+- [x] **P20.0.1** Migration：`public_scan_jobs` 加 `client_id` 可空 FK
   - `supabase/migrations/20260530000001_self_service_onboarding.sql`
-- [ ] **P20.0.2** 新建 `POST /api/onboard/self`
+- [x] **P20.0.2** 新建 `POST /api/onboard/self`
   - 防重复 → 建 `clients` → 写 `client_discovery` → 写 `client_portal_users(portal)` → 绑定 scan job
-- [ ] **P20.0.3** `/prospect` 加转化 CTA（status=completed 才显示）
-- [ ] **P20.0.4** 新建 `/portal/[clientId]/discovery/page.tsx`（复用 zhangqian cards）
-- [ ] **P20.0.5** Portal 首页加 Discovery 摘要卡 + 六维评分
-- [ ] **P20.0.6** `PortalNav` 加 Discovery 链接
+- [x] **P20.0.3** `/prospect` 加转化 CTA（status=completed 才显示）
+- [x] **P20.0.4** 新建 `/portal/[clientId]/discovery/page.tsx`（复用 ReportView）
+- [x] **P20.0.5** Portal 首页加 Discovery 摘要卡 + 四项评分 tiles + Hero CTA
+- [x] **P20.0.6** `PortalNav` 加 Discovery 链接
 - [ ] **P20.0.7** 新建 `/portal/[clientId]/diagnosis/page.tsx`（只读）
 - [ ] **P20.0.8** 新建 `/portal/[clientId]/prescription/page.tsx`（只读）
 - [ ] **P20.0.9** 新建 `/portal/[clientId]/plan/page.tsx`（只读）
@@ -2805,6 +2805,7 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 
 ### 2026-05-28（Phase 20.D — 六支柱统一看板入口）
 
+- **Phase 20.0 P20.0.1-6 实施完成** — 打通陌生人自助入会漏斗：migration 加 `client_id` FK、`POST /api/onboard/self` 建 clients 行并写 client_discovery/portal_users、`/prospect` 加 ClaimWorkspace CTA、Portal Discovery 页面（服务端组件复用 ReportView）+ PortalNav Discovery 导航项 + 概览页 Discovery 摘要卡含四项评分
 - **Phase 20.D 实施完成** — 执行看板新增「＋ 录入工作」统一入口（FDE 可从任意支柱直接录入工作，不绑定处方/Marketing Plan）；migration `20260603000001` 添加 `fde_manual` 来源；`FdeManualEntryModal` 组件；看板新增「📝 FDE 录入工作」分组（平铺 + 拖拽排序）；客户 Portal 新增「Active execution work」按支柱分组展示（透明度闭环）；`PlanTask.requires` 素材依赖标注（none/client_photo/client_video/client_info）；Phase 编号修正：Phase 24→Phase 20.D、Phase 22 明确为 Data Intelligence Engine、新增 Phase 22.D 主动任务生成器
 - **ROADMAP 编号修正登记** — 文档化 Phase 24/22/22.D/23 正式命名，与 ME_Kanban_Evolution_Final.docx 保持一致
 
