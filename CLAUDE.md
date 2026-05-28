@@ -215,7 +215,7 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-29 00:20 NZST （**Phase 20.0 Portal 地基开工**，Phase 25 已并入 Phase 20.0）
+> 最后更新：2026-05-29 00:26 NZST （**Phase 20.0 Portal 地基开工**，Phase 25 已并入 Phase 20.0）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { supabaseAdmin } from '@/lib/supabase'
 import type { DiagnosticDimension } from '@/types/diagnostic'
+import type { DiscoveryReport } from '@/lib/zhangqian/types'
 
 interface Props {
   params: { clientId: string }
@@ -132,6 +133,16 @@ export default async function PortalOverviewPage({ params }: Props) {
     .limit(1)
     .maybeSingle()
 
+  const { data: discovery } = await supabaseAdmin
+    .from('client_discovery')
+    .select('domain, payload, generated_at')
+    .eq('client_id', clientId)
+    .order('generated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const discoveryReport = discovery?.payload as unknown as DiscoveryReport | undefined
+
   const [{ count: blogCount }, { count: socialCount }, { data: execItems }] = await Promise.all([
     supabaseAdmin
       .from('blog_posts')
@@ -193,6 +204,14 @@ export default async function PortalOverviewPage({ params }: Props) {
               >
                 View monthly report
               </Link>
+              {discoveryReport && (
+                <Link
+                  href={`/portal/${clientId}/discovery`}
+                  className="flex h-11 items-center rounded-lg border border-cyan-300/40 bg-cyan-400/10 px-4 text-sm font-black text-cyan-100"
+                >
+                  Discovery report
+                </Link>
+              )}
               <Link
                 href={`/portal/${clientId}/content`}
                 className="flex h-11 items-center rounded-lg border border-white/15 px-4 text-sm font-black text-white"
@@ -274,6 +293,57 @@ export default async function PortalOverviewPage({ params }: Props) {
           </div>
         )}
       </section>
+
+      {/* P20.0.5: Discovery Report snapshot card */}
+      {discoveryReport && (
+        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="mb-5 flex flex-col gap-3 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                Discovery report
+              </p>
+              <h2 className="mt-2 text-2xl font-black text-slate-950">
+                {discoveryReport.business?.name ?? discovery?.domain}
+              </h2>
+              {discoveryReport.diagnosis?.executive_summary && (
+                <p className="mt-2 text-sm leading-6 text-slate-600 line-clamp-3">
+                  {discoveryReport.diagnosis.executive_summary}
+                </p>
+              )}
+            </div>
+            <Link
+              href={`/portal/${clientId}/discovery`}
+              className="shrink-0 text-sm font-black text-slate-950 underline decoration-slate-300 underline-offset-4"
+            >
+              Read full report →
+            </Link>
+          </div>
+
+          {discoveryReport.diagnosis?.scores && (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {(
+                [
+                  { key: 'overall', label: 'Overall' },
+                  { key: 'seo', label: 'Search' },
+                  { key: 'ai_visibility', label: 'AI visibility' },
+                  { key: 'social', label: 'Social' },
+                ] as Array<{ key: string; label: string }>
+              ).map(({ key, label }) => {
+                const score = (discoveryReport.diagnosis?.scores as Record<string, number | undefined>)?.[key]
+                if (score == null) return null
+                const rounded = Math.round(score)
+                const tone = scoreTone(rounded)
+                return (
+                  <div key={key} className={`rounded-lg border p-3 ${tone.border} ${tone.bg}`}>
+                    <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">{label}</p>
+                    <p className={`mt-2 text-2xl font-black tabular-nums ${tone.text}`}>{rounded}</p>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Phase 20.D: Execution tasks grouped by pillar — client visibility */}
       {hasExecItems && (
