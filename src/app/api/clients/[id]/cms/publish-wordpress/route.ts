@@ -39,6 +39,8 @@ import {
   publishWordpressPost,
   createWordpressPageDraft,
   publishWordpressPage,
+  deleteWordpressPost,
+  deleteWordpressPage,
 } from '@/lib/cms/wordpress-client'
 import { prepareCmsContent } from '@/lib/cms/html-sanitizer'
 import { CMS_ACTION_TYPE } from '@/lib/cms/vocabulary'
@@ -48,7 +50,7 @@ interface RouteContext {
 }
 
 type TargetType    = 'post' | 'page'
-type PublishAction = 'draft' | 'publish'
+type PublishAction = 'draft' | 'publish' | 'rollback'
 
 interface DraftRequestBody {
   action:            'draft'
@@ -64,7 +66,13 @@ interface PublishRequestBody {
   platform_id: string
 }
 
-type RequestBody = DraftRequestBody | PublishRequestBody
+/** P14.B.2 — Delete the remote WP draft and mark the job rolled_back. */
+interface RollbackRequestBody {
+  action:  'rollback'
+  job_id:  string
+}
+
+type RequestBody = DraftRequestBody | PublishRequestBody | RollbackRequestBody
 
 function badInput(msg: string) {
   return NextResponse.json({ success: false, error: msg, code: 'INVALID_INPUT' }, { status: 400 })
@@ -132,15 +140,17 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   }
 
   const action = (body as unknown as Record<string, unknown>).action as PublishAction | undefined
-  if (action !== 'draft' && action !== 'publish') {
-    return badInput('action must be "draft" or "publish"')
+  if (action !== 'draft' && action !== 'publish' && action !== 'rollback') {
+    return badInput('action must be "draft", "publish", or "rollback"')
   }
 
   try {
     if (action === 'draft') {
       return await handleDraft(clientId, body as DraftRequestBody)
-    } else {
+    } else if (action === 'publish') {
       return await handlePublish(clientId, body as PublishRequestBody)
+    } else {
+      return await handleRollback(clientId, body as RollbackRequestBody)
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
@@ -249,10 +259,15 @@ async function handleDraft(clientId: string, body: DraftRequestBody): Promise<Ne
   let previewUrl: string
 
   if (target_type === 'post') {
+    // P14.B.6: apply default category if configured on the connection.
+    const defaultCategoryId = conn.wpDefaultCategoryId
+    const categories = defaultCategoryId ? [defaultCategoryId] : undefined
+
     const draft = await createWordpressPostDraft(config, {
       title,
       content,
       excerpt,
+      categories,
       slug:            postSlug,
       seoTitle,
       seoDescription,
@@ -357,17 +372,21 @@ async function handlePublish(clientId: string, body: PublishRequestBody): Promis
   const snapshot   = (job.content_snapshot ?? {}) as Record<string, unknown>
   const targetType = (snapshot.target_type as string) ?? 'post'
 
+  // P14.B.7: fetch the published post URL to return to UI for GSC indexing.
+  let publishedUrl: string | null = null
   if (targetType === 'post') {
-    await publishWordpressPost(config, platformId)
+    const postData = await publishWordpressPost(config, platformId)
+    publishedUrl = postData.link ?? null
   } else {
-    await publishWordpressPage(config, platformId)
+    const pageData = await publishWordpressPage(config, platformId)
+    publishedUrl = pageData.link ?? null
   }
 
   const now = new Date().toISOString()
 
   await supabaseAdmin
     .from('website_publish_jobs')
-    .update({ status: 'published', published_at: now })
+    .update({ status: 'published', published_at: now, ...(publishedUrl ? { target_url: publishedUrl } : {}) })
     .eq('id', job_id)
 
   // Record in flywheel_actions so the SEO flywheel tracks the content publish.
@@ -390,5 +409,83 @@ async function handlePublish(clientId: string, body: PublishRequestBody): Promis
       if (error) console.error('[publish-wordpress] flywheel insert failed', error.message)
     })
 
-  return NextResponse.json({ success: true, job_id, platform_id: platformId, status: 'published' })
+  return NextResponse.json({
+    success:       true,
+    job_id,
+    platform_id:   platformId,
+    status:        'published',
+    published_url: publishedUrl,
+  })
+}
+
+// ─── handleRollback ───────────────────────────────────────────────────────────
+
+/**
+ * P14.B.2 — Delete the remote WP draft and flip the job to rolled_back.
+ *
+ * Safe to call on an already-rolled-back job (idempotent).
+ * NOT safe on a published job (returns 422 — don't unpublish live pages).
+ */
+async function handleRollback(clientId: string, body: RollbackRequestBody): Promise<NextResponse> {
+  const { job_id } = body
+
+  if (typeof job_id !== 'string' || !job_id.trim()) {
+    return badInput('job_id required')
+  }
+
+  const { data: job } = await supabaseAdmin
+    .from('website_publish_jobs')
+    .select('id, client_id, status, content_snapshot, platform_post_id')
+    .eq('id', job_id)
+    .eq('client_id', clientId)
+    .maybeSingle()
+
+  if (!job) {
+    return NextResponse.json(
+      { success: false, error: 'Job not found', code: 'NOT_FOUND' },
+      { status: 404 },
+    )
+  }
+
+  if (job.status === 'rolled_back') {
+    return NextResponse.json({ success: true, job_id, status: 'rolled_back', note: 'already rolled back' })
+  }
+
+  if (job.status === 'published') {
+    return NextResponse.json(
+      { success: false, error: 'Cannot roll back a published post. To remove a live post, please delete it directly in WordPress.', code: 'INVALID_STATE' },
+      { status: 422 },
+    )
+  }
+
+  const platformId = job.platform_post_id as string | null
+  const snapshot   = (job.content_snapshot ?? {}) as Record<string, unknown>
+  const targetType = (snapshot.target_type as string) ?? 'post'
+
+  // Best-effort delete from WP — continue even if the remote post is already gone.
+  if (platformId) {
+    try {
+      const conn = await findConnection(clientId)
+      const config = {
+        siteUrl:     conn.siteUrl,
+        username:    conn.username,
+        appPassword: conn.plainAppPassword,
+      }
+      if (targetType === 'post') {
+        await deleteWordpressPost(config, platformId)
+      } else {
+        await deleteWordpressPage(config, platformId)
+      }
+    } catch (err) {
+      // Log but don't fail — the job record update below is the critical path.
+      console.warn('[publish-wordpress rollback] remote delete failed (continuing):', err instanceof Error ? err.message : err)
+    }
+  }
+
+  await supabaseAdmin
+    .from('website_publish_jobs')
+    .update({ status: 'rolled_back', published_at: null })
+    .eq('id', job_id)
+
+  return NextResponse.json({ success: true, job_id, status: 'rolled_back' })
 }

@@ -94,6 +94,7 @@ export async function generateBlogPost(
     : undefined
 
   // 3. Load active GEO directive HTML (non-blocking)
+  //    Also extract the authoritative location from audience_signals.location (P14.B.3).
   const geoResult = await getActiveGeoHtml(req.client_id)
 
   // 4. Build user message
@@ -108,6 +109,8 @@ export async function generateBlogPost(
     sourceQueryText: req.source_query_text ?? req.topic,
     wordCountTarget: targetWordCount,
     existingPagesContext: req.existing_pages_context,
+    // P14.B.3: pass authoritative location so generator uses the right city.
+    authoritativeLocation: geoResult?.authoritativeLocation ?? null,
   })
 
   // 5. Call Claude Sonnet 4.6
@@ -209,8 +212,14 @@ function buildUserMessage(params: {
   sourceQueryText: string
   wordCountTarget: number
   existingPagesContext?: string
+  /** P14.B.3: authoritative client location extracted from geo_directives.audience_signals.location */
+  authoritativeLocation?: string | null
 }): string {
-  const { brandName, domain, briefText, campaignText, fdeContext, topic, sourceQueryText, wordCountTarget, existingPagesContext } = params
+  const {
+    brandName, domain, briefText, campaignText, fdeContext,
+    topic, sourceQueryText, wordCountTarget, existingPagesContext,
+    authoritativeLocation,
+  } = params
 
   const campaignSection = campaignText
     ? `\n\n${campaignText}\n`
@@ -226,6 +235,13 @@ function buildUserMessage(params: {
     ? `\n\n${existingPagesContext}\n`
     : ''
 
+  // P14.B.3: Explicit location override prevents the generator from picking up a
+  // stale city name from the primary_recommendation text. audience_signals.location
+  // is the single authoritative source of the client's service area.
+  const locationLine = authoritativeLocation
+    ? `\nCLIENT LOCATION (authoritative — use THIS city/region, ignore any location mentioned in GEO directives): ${authoritativeLocation}`
+    : ''
+
   return `${briefText}${campaignSection}${fdeSection}${existingSection}
 TARGET QUESTION:
 "${sourceQueryText}"
@@ -233,7 +249,7 @@ TARGET QUESTION:
 BLOG TOPIC: ${topic}
 TARGET WORD COUNT: ~${wordCountTarget} words
 BRAND: ${brandName}${domain ? ` (${domain})` : ''}
-MARKET: New Zealand and Australia
+MARKET: New Zealand and Australia${locationLine}
 
 CRITICAL: The brand "${brandName}" must be mentioned naturally at least 3 times.
 The article should directly answer "${sourceQueryText}" so that when AI systems read this page,

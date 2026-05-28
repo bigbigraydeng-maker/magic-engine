@@ -39,22 +39,26 @@ interface DraftResult {
 }
 
 interface Props {
-  clientId:  string
-  postId:    string
+  clientId:       string
+  postId:         string
+  /** P14.B.5: used to show a warning when primary_keyword is missing before WP publish. */
+  primaryKeyword?: string | null
   onSuccess?: (platform: Platform, result: DoneResult) => void
 }
 
 interface DoneResult {
-  platform:   Platform
-  prUrl?:     string
-  prNumber?:  number
-  jobId?:     string
-  platformId?: string
+  platform:     Platform
+  prUrl?:       string
+  prNumber?:    number
+  jobId?:       string
+  platformId?:  string
+  /** P14.B.7: published URL returned by the WP/Shopify publish endpoint, used for GSC indexing. */
+  publishedUrl?: string
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function PublishToWebsitePanel({ clientId, postId, onSuccess }: Props) {
+export function PublishToWebsitePanel({ clientId, postId, primaryKeyword, onSuccess }: Props) {
   const [providers,        setProviders]        = useState<Providers | null>(null)
   const [loadingProviders, setLoadingProviders] = useState(true)
   const [selectedPlatform, setSelectedPlatform] = useState<Platform | null>(null)
@@ -62,6 +66,9 @@ export function PublishToWebsitePanel({ clientId, postId, onSuccess }: Props) {
   const [draftResult,      setDraftResult]      = useState<DraftResult | null>(null)
   const [errorMsg,         setErrorMsg]         = useState<string | null>(null)
   const [doneResult,       setDoneResult]       = useState<DoneResult | null>(null)
+  // P14.B.7: GSC indexing state
+  const [gscIndexing,     setGscIndexing]     = useState(false)
+  const [gscResult,       setGscResult]       = useState<{ ok: boolean; msg: string; reauthUrl?: string } | null>(null)
 
   useEffect(() => {
     void (async () => {
@@ -156,13 +163,14 @@ export function PublishToWebsitePanel({ clientId, postId, onSuccess }: Props) {
           platform_id: draftResult.platform_id,
         }),
       })
-      const json = await res.json() as { success: boolean; error?: string }
+      const json = await res.json() as { success: boolean; error?: string; published_url?: string }
       if (!json.success) throw new Error(json.error ?? 'Publish failed')
 
       const result: DoneResult = {
-        platform:   selectedPlatform,
-        jobId:      draftResult.job_id,
-        platformId: draftResult.platform_id,
+        platform:     selectedPlatform,
+        jobId:        draftResult.job_id,
+        platformId:   draftResult.platform_id,
+        publishedUrl: json.published_url ?? undefined,
       }
       setDoneResult(result)
       setPhase('done')
@@ -179,6 +187,34 @@ export function PublishToWebsitePanel({ clientId, postId, onSuccess }: Props) {
     setDraftResult(null)
     setErrorMsg(null)
     setDoneResult(null)
+    setGscResult(null)
+  }
+
+  // P14.B.7: request GSC indexing for a published post URL
+  const handleGscIndexing = async (publishedUrl: string) => {
+    setGscIndexing(true)
+    setGscResult(null)
+    try {
+      const res  = await fetch(`/api/clients/${clientId}/gsc/index-request`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ url: publishedUrl }),
+      })
+      const json = await res.json() as {
+        success: boolean; url?: string; code?: string; error?: string; reauth_url?: string
+      }
+      if (json.success) {
+        setGscResult({ ok: true, msg: '✅ 已提交 Google 收录请求 — Google 将在数小时内重新抓取' })
+      } else if (json.code === 'NEEDS_REAUTH' || json.code === 'NO_OAUTH') {
+        setGscResult({ ok: false, msg: '⚠️ Google 账户未授权索引 API，需重新连接', reauthUrl: json.reauth_url })
+      } else {
+        setGscResult({ ok: false, msg: `❌ ${json.error ?? '提交失败'}` })
+      }
+    } catch {
+      setGscResult({ ok: false, msg: '❌ 网络错误，请稍后重试' })
+    } finally {
+      setGscIndexing(false)
+    }
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -205,10 +241,36 @@ export function PublishToWebsitePanel({ clientId, postId, onSuccess }: Props) {
         </a>
       )
     }
+
+    // P14.B.7: for WP/Shopify posts that we know the published URL, offer GSC indexing.
+    const publishedUrl = doneResult.publishedUrl ?? null
+
     return (
-      <span className="text-xs font-medium text-green-600">
-        ✓ 已发布到 {PLATFORM_LABELS[doneResult.platform]}
-      </span>
+      <div className="flex flex-col gap-2">
+        <span className="text-xs font-medium text-green-600">
+          ✓ 已发布到 {PLATFORM_LABELS[doneResult.platform]}
+        </span>
+
+        {/* GSC indexing button — only when we have the published URL */}
+        {publishedUrl && !gscResult && (
+          <button
+            onClick={() => void handleGscIndexing(publishedUrl)}
+            disabled={gscIndexing}
+            className="self-start px-3 py-1.5 text-xs font-medium rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50 disabled:opacity-50 transition-colors"
+          >
+            {gscIndexing ? '提交中…' : '🔍 请求 Google 收录'}
+          </button>
+        )}
+
+        {gscResult && (
+          <div className={`text-xs px-3 py-2 rounded-lg border ${gscResult.ok ? 'bg-green-50 border-green-200 text-green-700' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
+            {gscResult.msg}
+            {gscResult.reauthUrl && (
+              <a href={gscResult.reauthUrl} className="ml-2 underline font-medium">重新连接 Google →</a>
+            )}
+          </div>
+        )}
+      </div>
     )
   }
 
@@ -257,28 +319,45 @@ export function PublishToWebsitePanel({ clientId, postId, onSuccess }: Props) {
     )
   }
 
+  // P14.B.5: show keyword warning chip only when WordPress is available and keyword missing.
+  const missingKeyword = !primaryKeyword && connectedPlatforms.includes('wordpress')
+
   // Idle: show platform selector.
   if (connectedPlatforms.length === 1) {
     const platform = connectedPlatforms[0]
     return (
-      <button onClick={() => void handleCreateDraft(platform)}
-        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition-colors">
-        📤 发布到 {PLATFORM_LABELS[platform]}
-      </button>
+      <div className="flex flex-col gap-1.5">
+        {missingKeyword && platform === 'wordpress' && (
+          <span className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium bg-orange-50 border border-orange-300 text-orange-700 rounded-md">
+            ⚠️ 缺少焦点关键词 — Yoast SEO 字段将为空
+          </span>
+        )}
+        <button onClick={() => void handleCreateDraft(platform)}
+          className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition-colors self-start">
+          📤 发布到 {PLATFORM_LABELS[platform]}
+        </button>
+      </div>
     )
   }
 
   // Multiple platforms connected: show a dropdown-style set of buttons.
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-xs text-gray-500">发布到：</span>
-      {connectedPlatforms.map(platform => (
-        <button key={platform}
-          onClick={() => void handleCreateDraft(platform)}
-          className="px-3 py-1.5 text-xs font-medium rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50 transition-colors">
-          {PLATFORM_LABELS[platform]}
-        </button>
-      ))}
+    <div className="flex flex-col gap-1.5">
+      {missingKeyword && (
+        <span className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium bg-orange-50 border border-orange-300 text-orange-700 rounded-md">
+          ⚠️ 缺少焦点关键词 — WordPress Yoast SEO 字段将为空
+        </span>
+      )}
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-gray-500">发布到：</span>
+        {connectedPlatforms.map(platform => (
+          <button key={platform}
+            onClick={() => void handleCreateDraft(platform)}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50 transition-colors">
+            {PLATFORM_LABELS[platform]}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }

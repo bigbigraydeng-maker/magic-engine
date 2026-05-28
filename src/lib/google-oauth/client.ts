@@ -28,10 +28,19 @@ export const GSC_SCOPES = [
 
 export const GA4_SCOPE = 'https://www.googleapis.com/auth/analytics.readonly'
 
-/** Combined scopes for the recommended "connect Google" flow — grants GSC + GA4 in one consent. */
+/**
+ * P14.B.7: Google Indexing API scope.
+ * Requires Google Search Console property ownership.
+ * Added to COMBINED_GOOGLE_SCOPES so new authorizations include it automatically.
+ * Existing tokens without this scope will receive 403 → route returns NEEDS_REAUTH.
+ */
+export const INDEXING_SCOPE = 'https://www.googleapis.com/auth/indexing'
+
+/** Combined scopes for the recommended "connect Google" flow — grants GSC + GA4 + Indexing in one consent. */
 export const COMBINED_GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/webmasters.readonly',
   'https://www.googleapis.com/auth/analytics.readonly',
+  INDEXING_SCOPE,
   'email',
 ]
 

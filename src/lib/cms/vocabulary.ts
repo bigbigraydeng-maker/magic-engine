@@ -74,6 +74,16 @@ export interface WordpressConnectionStatus {
   status:       CmsStatus
   lastError:    string | null
   lastTestedAt: string | null
+  /**
+   * P14.B.1: true once ME has confirmed that Yoast SEO meta keys are
+   * REST-writable on this WP site (probe via yoast-probe endpoint).
+   */
+  yoastPluginInstalled: boolean
+  /**
+   * P14.B.6: WP category ID to assign by default when publishing posts.
+   * null = uncategorized (WP default).
+   */
+  wpDefaultCategoryId: number | null
 }
 
 export interface CmsSeoFixPayload {

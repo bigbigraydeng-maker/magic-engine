@@ -69,8 +69,28 @@ export function DirectiveEditor({
   const inputClass = `w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 ${readOnly ? 'opacity-60 cursor-not-allowed' : ''}`;
   const textareaClass = `${inputClass} resize-none`;
 
+  // P14.B.3: detect city mismatch between primaryRecommendation text and audienceSignals.location.
+  const cityMismatch = detectCityMismatch(
+    primaryRecommendation,
+    (audienceSignals.location as string | undefined) ?? '',
+  );
+
   return (
     <div className="space-y-5">
+      {/* P14.B.3: City mismatch warning */}
+      {cityMismatch && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex gap-2">
+          <span className="shrink-0">⚠️</span>
+          <span>
+            <strong>Location mismatch:</strong> Primary Recommendation mentions{' '}
+            <strong>{cityMismatch}</strong> but Audience Location is{' '}
+            <strong>{((audienceSignals.location as string | undefined) ?? '').split(',')[0].trim() || '—'}</strong>.
+            {' '}Blog Generator uses <em>Audience Location</em> as the authoritative city — update
+            Primary Recommendation to match, or your directive preview will show the wrong location.
+          </span>
+        </div>
+      )}
+
       {/* Primary Recommendation */}
       <div className="bg-white rounded-xl border border-gray-200 p-5">
         <label className="block text-sm font-semibold text-gray-900 mb-1">
@@ -238,4 +258,28 @@ export function DirectiveEditor({
       </div>
     </div>
   );
+}
+
+// ─── P14.B.3 helper ───────────────────────────────────────────────────────────
+
+/**
+ * Detect if primaryRecommendation mentions a specific city (e.g. "in Sydney")
+ * that is NOT present in the audience location string.
+ * Returns the mismatched city name, or null if no mismatch found.
+ */
+function detectCityMismatch(primaryRecommendation: string, audienceLocation: string): string | null {
+  if (!audienceLocation.trim()) return null;
+
+  // Find "in City" or "near City" patterns — capitalized word(s) after "in " or "near ".
+  const pattern = /\b(?:in|near)\s+([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})?)/g;
+  const locationLower = audienceLocation.toLowerCase();
+
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(primaryRecommendation)) !== null) {
+    const city = match[1].trim();
+    if (!locationLower.includes(city.toLowerCase())) {
+      return city;
+    }
+  }
+  return null;
 }

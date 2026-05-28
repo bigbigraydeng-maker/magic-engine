@@ -109,6 +109,70 @@ async function expectJson(
   }
 }
 
+// ─── probeYoastMetaWritable ────────────────────────────────────────────────────
+
+/**
+ * P14.B.1 — Probe whether Yoast SEO meta keys are REST-writable on this WP site.
+ *
+ * Strategy: attempt to PATCH _yoast_wpseo_title on a known post with its
+ * existing value (a no-op write). If WP returns 200 the key is registered
+ * and writable; if 403 / "rest_cannot_edit_post_meta" the mu-plugin is absent.
+ *
+ * We use the most recently modified post so we don't need to know a specific ID.
+ * If no posts exist, returns { writable: false, reason: 'no_posts' }.
+ */
+export interface YoastProbeResult {
+  writable: boolean
+  reason?:  string
+}
+
+export async function probeYoastMetaWritable(
+  config: WordpressClientConfig,
+): Promise<YoastProbeResult> {
+  const guard = validateWordpressSiteUrl(config.siteUrl)
+  if (!guard.ok) return { writable: false, reason: 'invalid_url' }
+
+  try {
+    // 1. Fetch the most recent post to get a real post ID + existing title meta.
+    const listRes  = await wpFetch(config, '/posts?per_page=1&orderby=modified&order=desc&context=edit')
+    const listText = await listRes.text()
+    if (!listRes.ok) return { writable: false, reason: `list_posts_failed_${listRes.status}` }
+
+    let posts: Array<Record<string, unknown>>
+    try {
+      posts = JSON.parse(listText) as Array<Record<string, unknown>>
+    } catch {
+      return { writable: false, reason: 'list_parse_error' }
+    }
+    if (!Array.isArray(posts) || posts.length === 0) {
+      return { writable: false, reason: 'no_posts' }
+    }
+
+    const post = posts[0]
+    const postId = String(post.id ?? '')
+    if (!postId) return { writable: false, reason: 'no_post_id' }
+
+    // 2. Read the existing yoast title (may be empty string — that's fine).
+    const existingMeta = (post.meta ?? {}) as Record<string, unknown>
+    const existingTitle = typeof existingMeta._yoast_wpseo_title === 'string'
+      ? existingMeta._yoast_wpseo_title
+      : ''
+
+    // 3. PATCH the meta with the same value — a no-op write.
+    const patchRes = await wpFetch(config, `/posts/${postId}`, {
+      method: 'POST',
+      body:   JSON.stringify({ meta: { _yoast_wpseo_title: existingTitle } }),
+    })
+
+    if (patchRes.ok) return { writable: true }
+
+    const errText = await patchRes.text()
+    return { writable: false, reason: `patch_${patchRes.status}: ${errText.slice(0, 200)}` }
+  } catch (err) {
+    return { writable: false, reason: err instanceof Error ? err.message : 'unknown' }
+  }
+}
+
 // ─── testWordpressConnection ───────────────────────────────────────────────────
 
 /**
@@ -218,19 +282,26 @@ export async function createWordpressPostDraft(
 
 // ─── publishWordpressPost ─────────────────────────────────────────────────────
 
+export interface WordpressPublishResult {
+  /** The live URL of the published post/page. Present after status='publish'. */
+  link: string | null
+}
+
 /**
  * Flip a draft post to published (status='publish').
  * WP REST API uses POST (not PUT) for partial updates.
+ * Returns the live link for the published post (P14.B.7 — used to request GSC indexing).
  */
 export async function publishWordpressPost(
   config: WordpressClientConfig,
   postId: string,
-): Promise<void> {
-  const res = await wpFetch(config, `/posts/${postId}`, {
+): Promise<WordpressPublishResult> {
+  const res  = await wpFetch(config, `/posts/${postId}`, {
     method: 'POST',
     body:   JSON.stringify({ status: 'publish', date: new Date().toISOString() }),
   })
-  await expectJson(res, 'publishPost')
+  const data = await expectJson(res, 'publishPost')
+  return { link: typeof data.link === 'string' ? data.link : null }
 }
 
 // ─── createWordpressPageDraft ─────────────────────────────────────────────────
@@ -275,14 +346,49 @@ export async function createWordpressPageDraft(
 
 /**
  * Flip a draft page to published.
+ * Returns the live link (P14.B.7 — used to request GSC indexing).
  */
 export async function publishWordpressPage(
   config:  WordpressClientConfig,
   pageId:  string,
-): Promise<void> {
-  const res = await wpFetch(config, `/pages/${pageId}`, {
+): Promise<WordpressPublishResult> {
+  const res  = await wpFetch(config, `/pages/${pageId}`, {
     method: 'POST',
     body:   JSON.stringify({ status: 'publish', date: new Date().toISOString() }),
   })
-  await expectJson(res, 'publishPage')
+  const data = await expectJson(res, 'publishPage')
+  return { link: typeof data.link === 'string' ? data.link : null }
+}
+
+// ─── deleteWordpressPost / deleteWordpressPage ────────────────────────────────
+
+/**
+ * P14.B.2 — Permanently delete a WordPress post draft by moving it to trash.
+ * WP REST API DELETE with `?force=true` bypasses trash. We use force=false
+ * so FDE can still recover from WP trash if needed.
+ */
+export async function deleteWordpressPost(
+  config: WordpressClientConfig,
+  postId: string,
+): Promise<void> {
+  const res = await wpFetch(config, `/posts/${postId}`, { method: 'DELETE' })
+  // 200 = trashed, 410 = already deleted. Both are acceptable.
+  if (!res.ok && res.status !== 410) {
+    const text = await res.text()
+    throw new Error(`WordPress deletePost failed (${res.status}): ${text.slice(0, 200)}`)
+  }
+}
+
+/**
+ * P14.B.2 — Move a WordPress page draft to trash.
+ */
+export async function deleteWordpressPage(
+  config: WordpressClientConfig,
+  pageId: string,
+): Promise<void> {
+  const res = await wpFetch(config, `/pages/${pageId}`, { method: 'DELETE' })
+  if (!res.ok && res.status !== 410) {
+    const text = await res.text()
+    throw new Error(`WordPress deletePage failed (${res.status}): ${text.slice(0, 200)}`)
+  }
 }

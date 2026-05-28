@@ -518,10 +518,21 @@ interface WordpressConnectedViewProps {
 }
 
 function WordpressConnectedView({ clientId, status, onDisconnect }: WordpressConnectedViewProps) {
-  const [disconnecting, setDisconnecting] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
-  const [testing,       setTesting]       = useState(false)
-  const [testResult,    setTestResult]    = useState<string | null>(null)
+  const [disconnecting,  setDisconnecting]  = useState(false)
+  const [confirmDelete,  setConfirmDelete]  = useState(false)
+  const [testing,        setTesting]        = useState(false)
+  const [testResult,     setTestResult]     = useState<string | null>(null)
+  // P14.B.1: Yoast probe
+  const [probing,        setProbing]        = useState(false)
+  const [probeResult,    setProbeResult]    = useState<string | null>(null)
+  const [yoastInstalled, setYoastInstalled] = useState(status.yoastPluginInstalled)
+  // P14.B.6: default category
+  const [categoryEdit,   setCategoryEdit]   = useState(false)
+  const [categoryInput,  setCategoryInput]  = useState(
+    status.wpDefaultCategoryId != null ? String(status.wpDefaultCategoryId) : '',
+  )
+  const [categorySaving, setCategorySaving] = useState(false)
+  const [categoryMsg,    setCategoryMsg]    = useState<string | null>(null)
 
   const handleTest = async () => {
     setTesting(true)
@@ -556,6 +567,72 @@ function WordpressConnectedView({ clientId, status, onDisconnect }: WordpressCon
     }
   }
 
+  // P14.B.1: probe Yoast meta writability
+  const handleYoastProbe = async () => {
+    setProbing(true)
+    setProbeResult(null)
+    try {
+      const res  = await fetch(`/api/clients/${clientId}/cms/wordpress/yoast-probe`, { method: 'POST' })
+      const json = await res.json() as { success: boolean; writable?: boolean; reason?: string; error?: string }
+      if (json.success && json.writable) {
+        setYoastInstalled(true)
+        setProbeResult('✅ Yoast SEO 字段已注册 — 发布时将自动写入 SEO 标题/描述/焦点关键词')
+      } else {
+        setYoastInstalled(false)
+        const hint = json.reason ? ` (${json.reason})` : ''
+        setProbeResult(`❌ Yoast SEO 字段未注册${hint} — 请按下方说明安装 mu-plugin`)
+      }
+    } catch {
+      setProbeResult('❌ 探测失败，请检查网络')
+    } finally {
+      setProbing(false)
+    }
+  }
+
+  // P14.B.6: save default category
+  const handleCategorySave = async () => {
+    const raw = categoryInput.trim()
+    const id  = raw === '' ? null : parseInt(raw, 10)
+    if (raw !== '' && (isNaN(id!) || id! < 1)) {
+      setCategoryMsg('❌ 请输入有效的分类 ID（正整数）')
+      return
+    }
+    setCategorySaving(true)
+    setCategoryMsg(null)
+    try {
+      const res  = await fetch(`/api/clients/${clientId}/cms/wordpress/category`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ category_id: id }),
+      })
+      const json = await res.json() as { success: boolean; error?: string }
+      if (json.success) {
+        setCategoryMsg(id ? `✅ 默认分类已设为 ID ${id}` : '✅ 已清除默认分类（使用 WP 默认）')
+        setCategoryEdit(false)
+      } else {
+        setCategoryMsg(`❌ ${json.error ?? '保存失败'}`)
+      }
+    } catch {
+      setCategoryMsg('❌ 网络错误，请重试')
+    } finally {
+      setCategorySaving(false)
+    }
+  }
+
+  const YOAST_MU_PLUGIN = `<?php
+// /wp-content/mu-plugins/me-yoast-rest-api.php
+// Magic Engine — register Yoast SEO meta keys for REST write access.
+add_action('init', function () {
+    foreach (['_yoast_wpseo_title', '_yoast_wpseo_metadesc', '_yoast_wpseo_focuskw'] as $key) {
+        register_meta('post', $key, [
+            'single'        => true,
+            'type'          => 'string',
+            'show_in_rest'  => true,
+            'auth_callback' => fn() => current_user_can('edit_posts'),
+        ]);
+    }
+});`
+
   return (
     <div className="space-y-5">
       <StatusBadge status={status.status} />
@@ -585,6 +662,123 @@ function WordpressConnectedView({ clientId, status, onDisconnect }: WordpressCon
         onConfirmDeleteRequest={() => setConfirmDelete(true)}
         onConfirmDelete={handleDisconnect}
       />
+
+      {/* P14.B.1 — Yoast SEO Extension card */}
+      <div className={`rounded-xl border p-4 space-y-3 ${yoastInstalled ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className={`text-sm font-semibold ${yoastInstalled ? 'text-emerald-800' : 'text-amber-800'}`}>
+              {yoastInstalled ? '✅ SEO 扩展已启用' : '⚠️ SEO 扩展未安装'}
+            </p>
+            <p className={`text-xs mt-0.5 ${yoastInstalled ? 'text-emerald-700' : 'text-amber-700'}`}>
+              {yoastInstalled
+                ? '发布时将自动写入 SEO 标题、描述和焦点关键词到 Yoast。'
+                : '安装 mu-plugin 后，ME 发布时可自动填写 Yoast SEO 字段。'}
+            </p>
+          </div>
+          <button
+            onClick={() => void handleYoastProbe()}
+            disabled={probing}
+            className="shrink-0 px-3 py-1.5 text-xs font-medium border border-current rounded-lg disabled:opacity-50 transition-colors text-indigo-600 border-indigo-300 hover:bg-indigo-50"
+          >
+            {probing ? '检测中…' : '验证安装'}
+          </button>
+        </div>
+
+        {probeResult && (
+          <p className="text-xs text-gray-700 bg-white rounded-lg px-3 py-2 border border-gray-200">
+            {probeResult}
+          </p>
+        )}
+
+        {!yoastInstalled && (
+          <details className="text-xs">
+            <summary className="cursor-pointer text-amber-700 font-medium hover:underline">
+              查看安装说明 →
+            </summary>
+            <div className="mt-2 space-y-2">
+              <p className="text-gray-600">
+                在 WP 站点服务器上创建以下文件（mu-plugins 目录自动加载，无需激活）：
+              </p>
+              <p className="text-gray-600 font-medium">
+                路径：<code className="bg-white px-1 rounded border border-gray-200">/wp-content/mu-plugins/me-yoast-rest-api.php</code>
+              </p>
+              <div className="relative">
+                <pre className="bg-gray-900 text-green-300 rounded-lg p-3 overflow-x-auto text-[11px] leading-relaxed whitespace-pre-wrap break-all">
+                  {YOAST_MU_PLUGIN}
+                </pre>
+                <button
+                  onClick={() => { void navigator.clipboard.writeText(YOAST_MU_PLUGIN) }}
+                  className="absolute top-2 right-2 px-2 py-1 text-[10px] bg-gray-700 hover:bg-gray-600 text-gray-300 rounded"
+                >
+                  复制
+                </button>
+              </div>
+              <p className="text-gray-500">
+                安装后点击「验证安装」确认 Yoast SEO 字段已注册。
+              </p>
+            </div>
+          </details>
+        )}
+      </div>
+
+      {/* P14.B.6 — Default WP category */}
+      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-gray-800">默认发布分类</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {status.wpDefaultCategoryId != null
+                ? `当前：ID ${status.wpDefaultCategoryId}`
+                : '当前：未设置（WP 默认 — 未分类）'}
+            </p>
+          </div>
+          {!categoryEdit && (
+            <button
+              onClick={() => { setCategoryEdit(true); setCategoryMsg(null) }}
+              className="text-xs text-indigo-600 hover:underline"
+            >
+              {status.wpDefaultCategoryId != null ? '修改' : '设置'}
+            </button>
+          )}
+        </div>
+
+        {categoryEdit && (
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min={1}
+              value={categoryInput}
+              onChange={e => setCategoryInput(e.target.value)}
+              placeholder="WP 分类 ID，留空 = 不设置"
+              className="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <button
+              onClick={() => void handleCategorySave()}
+              disabled={categorySaving}
+              className="px-3 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg"
+            >
+              {categorySaving ? '保存中…' : '保存'}
+            </button>
+            <button
+              onClick={() => { setCategoryEdit(false); setCategoryMsg(null) }}
+              className="px-2 py-1.5 text-xs text-gray-500 hover:text-gray-700"
+            >
+              取消
+            </button>
+          </div>
+        )}
+
+        {categoryMsg && (
+          <p className="text-xs text-gray-700 bg-white rounded-lg px-3 py-2 border border-gray-200">
+            {categoryMsg}
+          </p>
+        )}
+
+        <p className="text-xs text-gray-400">
+          可在 WP 后台「文章 → 分类目录」找到分类 ID（鼠标悬停分类链接查看 tag_ID 参数）。
+        </p>
+      </div>
     </div>
   )
 }

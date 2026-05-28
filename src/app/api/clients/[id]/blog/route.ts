@@ -6,6 +6,7 @@ import { auditExistingContent } from '@/lib/blog/content-auditor'
 import { fetchRelatedPages, buildPagesContextBlock } from '@/lib/blog/pages-context'
 import { auditBlogPost } from '@/lib/blog/quality-audit'
 import type { BlogAuditMetadata } from '@/lib/blog/quality-audit'
+import { checkInternalLinks } from '@/lib/blog/internal-link-checker'
 import { getActiveBrief } from '@/lib/content/brief-injector'
 import { getActiveCampaigns } from '@/lib/content/campaign-injector'
 import { clampLimit } from '@/lib/validation-utils'
@@ -185,6 +186,13 @@ async function runGenerationBackground(
   postId: string,
 ) {
   try {
+    // Load client domain for internal link checker (P14.B.4).
+    const { data: clientRow } = await supabaseAdmin
+      .from('clients')
+      .select('domain')
+      .eq('id', clientId)
+      .maybeSingle<{ domain: string | null }>()
+
     const relatedPages = await fetchRelatedPages(clientId, body.topic).catch(() => [])
     const existingPagesContext = buildPagesContextBlock(relatedPages)
 
@@ -193,7 +201,10 @@ async function runGenerationBackground(
       mode,
     )
 
-    await updateGeneratedPost(postId, result, qualityScore, contextSnapshot)
+    // P14.B.4: internal link quality check — persisted to quality_check JSONB column.
+    const internalLinkCheck = checkInternalLinks(result.html_body, clientRow?.domain ?? null)
+
+    await updateGeneratedPost(postId, result, qualityScore, contextSnapshot, internalLinkCheck)
     await linkStrategyItemToPost(clientId, body.strategy_item_id, postId)
 
     if (body.production_package_id) {
@@ -233,6 +244,7 @@ async function updateGeneratedPost(
   result: BlogGeneratorOutput,
   qualityScore: number | null,
   contextSnapshot: Record<string, unknown> | null,
+  internalLinkCheck?: { count: number; level: string; pass: boolean; detail: string; computed_at: string },
 ) {
   const payload: Record<string, unknown> = {
     title:                       result.title,
@@ -249,6 +261,8 @@ async function updateGeneratedPost(
     status:                      'draft',
     generation_context_snapshot: contextSnapshot,
     quality_score:               qualityScore,
+    // P14.B.4: persist internal link QC result
+    quality_check: internalLinkCheck ? { internal_link: internalLinkCheck } : null,
   }
 
   let { error } = await supabaseAdmin
@@ -261,6 +275,7 @@ async function updateGeneratedPost(
     const fallback = { ...payload }
     delete fallback.generation_context_snapshot
     delete fallback.quality_score
+    delete fallback.quality_check
     const { error: e2 } = await supabaseAdmin
       .from('blog_posts').update(fallback).eq('id', postId)
     error = e2
@@ -400,7 +415,9 @@ function isMissingQualityColumnsError(err: SupabaseErrorLike): boolean {
     .toLowerCase()
 
   const mentionsQualityColumn =
-    text.includes('generation_context_snapshot') || text.includes('quality_score')
+    text.includes('generation_context_snapshot') ||
+    text.includes('quality_score') ||
+    text.includes('quality_check')
 
   return mentionsQualityColumn && (
     text.includes('pgrst204') ||

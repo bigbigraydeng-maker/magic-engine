@@ -19,22 +19,26 @@ import { validateShopifyShopUrl } from './shopify-guard'
 // ─── Row type ────────────────────────────────────────────────────────────────
 
 interface CmsConnectionRow {
-  id:              string
-  client_id:       string
-  provider:        string
-  repo_owner:      string | null
-  repo_name:       string | null
-  default_branch:  string | null
-  content_paths:   string[]
-  site_url:        string | null
-  username:        string | null
-  encrypted_token: string
-  token_last_four: string | null
-  status:          string
-  last_error:      string | null
-  last_tested_at:  string | null
-  created_at:      string
-  updated_at:      string
+  id:                     string
+  client_id:              string
+  provider:               string
+  repo_owner:             string | null
+  repo_name:              string | null
+  default_branch:         string | null
+  content_paths:          string[]
+  site_url:               string | null
+  username:               string | null
+  encrypted_token:        string
+  token_last_four:        string | null
+  status:                 string
+  last_error:             string | null
+  last_tested_at:         string | null
+  created_at:             string
+  updated_at:             string
+  /** P14.B.1 */
+  yoast_plugin_installed: boolean | null
+  /** P14.B.6 */
+  wp_default_category_id: number | null
 }
 
 // ─── UpsertParams ────────────────────────────────────────────────────────────
@@ -347,15 +351,56 @@ export async function deleteWordpressConnection(clientId: string): Promise<void>
 
 function rowToWordpressStatus(row: CmsConnectionRow): WordpressConnectionStatus {
   return {
-    connected:    row.status === CMS_STATUS.CONNECTED,
-    provider:     CMS_PROVIDER.WORDPRESS,
-    siteUrl:      row.site_url ?? '',
-    username:     row.username ?? '',
-    tokenHint:    row.token_last_four,
-    status:       row.status as WordpressConnectionStatus['status'],
-    lastError:    row.last_error,
-    lastTestedAt: row.last_tested_at,
+    connected:            row.status === CMS_STATUS.CONNECTED,
+    provider:             CMS_PROVIDER.WORDPRESS,
+    siteUrl:              row.site_url ?? '',
+    username:             row.username ?? '',
+    tokenHint:            row.token_last_four,
+    status:               row.status as WordpressConnectionStatus['status'],
+    lastError:            row.last_error,
+    lastTestedAt:         row.last_tested_at,
+    yoastPluginInstalled: row.yoast_plugin_installed ?? false,
+    wpDefaultCategoryId:  row.wp_default_category_id ?? null,
   }
+}
+
+// ─── P14.B.1: mark Yoast probe result ────────────────────────────────────────
+
+/**
+ * Update yoast_plugin_installed flag after probe completes.
+ * Called by the /cms/wordpress/yoast-probe route.
+ */
+export async function setYoastPluginInstalled(
+  clientId: string,
+  installed: boolean,
+): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from('cms_connections')
+    .update({ yoast_plugin_installed: installed })
+    .eq('client_id', clientId)
+    .eq('provider', CMS_PROVIDER.WORDPRESS)
+
+  if (error) throw new Error(`setYoastPluginInstalled failed: ${error.message}`)
+}
+
+// ─── P14.B.6: update default WP category ────────────────────────────────────
+
+/**
+ * Persist the default WP category ID for a client's WP connection.
+ * null clears the override (WP defaults to uncategorized).
+ * Called by the dedicated PATCH /cms/wordpress/category route.
+ */
+export async function setWpDefaultCategoryId(
+  clientId: string,
+  categoryId: number | null,
+): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from('cms_connections')
+    .update({ wp_default_category_id: categoryId })
+    .eq('client_id', clientId)
+    .eq('provider', CMS_PROVIDER.WORDPRESS)
+
+  if (error) throw new Error(`setWpDefaultCategoryId failed: ${error.message}`)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

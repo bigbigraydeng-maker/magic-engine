@@ -82,12 +82,17 @@ function buildInnerText(directive: GeoDirective): string {
  * Returns null if no active directive exists — callers should handle gracefully
  * (blog generates without GEO block rather than failing).
  *
+ * Also returns `authoritativeLocation` (P14.B.3): the value of
+ * audience_signals.location, which is the single authoritative source for the
+ * client's service area. Blog generator uses this to override any city name
+ * embedded in the primary_recommendation text.
+ *
  * Used by blog/generator.ts to inject the hidden directive into every post.
  * Reference: ROADMAP.md P7.3.1
  */
 export async function getActiveGeoHtml(
   clientId: string
-): Promise<{ html: string; directiveId: string } | null> {
+): Promise<{ html: string; directiveId: string; authoritativeLocation: string | null } | null> {
   // Dynamic import keeps supabaseAdmin server-side only;
   // this function is never called from client components.
   const { supabaseAdmin } = await import('../supabase')
@@ -99,7 +104,18 @@ export async function getActiveGeoHtml(
     .maybeSingle<GeoDirective>()
 
   if (!data) return null
-  return { html: generateDirectiveHtml(data), directiveId: data.id }
+
+  // P14.B.3: extract authoritative location from audience_signals.location.
+  const aud = data.audience_signals as GeoAudienceSignals | null
+  const authoritativeLocation = (aud && typeof aud.location === 'string' && aud.location.trim())
+    ? aud.location.trim()
+    : null
+
+  return {
+    html: generateDirectiveHtml(data),
+    directiveId: data.id,
+    authoritativeLocation,
+  }
 }
 
 /**
