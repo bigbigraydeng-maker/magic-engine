@@ -12,7 +12,8 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { callClaudeChat } from '@/lib/anthropic/client'
+import { callClaudeWithTools } from '@/lib/anthropic/client'
+import { buildProjectLubanTools } from './project-tools'
 import type {
   ExecutionItem, ExecutionLog, DiagnosticDimension,
 } from '@/types/diagnostic'
@@ -120,7 +121,7 @@ async function loadProjectContext(
     phase:             it.phase,
     dimension:         it.dimension,
     status:            it.status,
-    prescriptionLabel: prescLabelMap.get(it.prescription_id) ?? '处方',
+    prescriptionLabel: (it.prescription_id ? prescLabelMap.get(it.prescription_id) : null) ?? '处方',
   }))
 
   // 5. 最近的工作日志（跨所有执行项）
@@ -196,9 +197,12 @@ export async function chatWithProjectLuban(
   const history = (historyRows ?? []) as Array<{ role: 'user' | 'assistant'; content: string }>
 
   const systemPrompt = buildProjectLubanSystemPrompt(ctx)
-  const result = await callClaudeChat({
+  const { tools, handlers } = buildProjectLubanTools({ supabase, clientId })
+  const result = await callClaudeWithTools({
     systemPrompt,
     messages: [...history, { role: 'user', content: trimmed }],
+    tools,
+    toolHandlers: handlers,
     maxOutputTokens: 2048,
   })
 
