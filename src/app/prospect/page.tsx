@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ReportView } from '@/components/prospect/ProspectReportView'
 
@@ -219,6 +220,65 @@ function InitialLoadingView() {
   )
 }
 
+function ClaimWorkspaceBanner() {
+  const router = useRouter()
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleClaim() {
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch('/api/onboard/self', { method: 'POST' })
+      const data = await res.json() as { client_id?: string; error?: string }
+      if (!res.ok || !data.client_id) {
+        setError(data.error ?? 'Something went wrong. Please try again.')
+        return
+      }
+      router.push(`/portal/${data.client_id}`)
+    } catch {
+      setError('Network error. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <section className="mx-auto max-w-6xl px-5 pb-16 sm:px-8">
+      <div className="rounded-lg bg-slate-950 p-6 text-white sm:p-8">
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-cyan-200">
+              Your workspace is ready
+            </p>
+            <h2 className="mt-3 text-2xl font-black leading-tight sm:text-3xl">
+              Turn this report into an action plan.
+            </h2>
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              Save your Discovery Report, track your diagnosis scores, and see the recommended
+              growth actions — all in one place.
+            </p>
+            {error && (
+              <p className="mt-3 text-sm font-semibold text-red-300">{error}</p>
+            )}
+          </div>
+          <button
+            onClick={handleClaim}
+            disabled={loading}
+            className={`flex h-12 shrink-0 items-center justify-center rounded-lg px-6 text-sm font-black transition lg:w-auto w-full ${
+              loading
+                ? 'cursor-wait bg-slate-600 text-slate-400'
+                : 'bg-white text-slate-950 hover:bg-slate-100'
+            }`}
+          >
+            {loading ? 'Setting up…' : 'Enter my workspace →'}
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 export default function ProspectPage() {
   const [data, setData] = useState<ReportResponse | null>(null)
   const [notFound, setNotFound] = useState(false)
@@ -260,6 +320,7 @@ export default function ProspectPage() {
     return (
       <PageShell reportReady>
         <ReportView report={data.result} />
+        <ClaimWorkspaceBanner />
       </PageShell>
     )
   }

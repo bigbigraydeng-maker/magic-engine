@@ -215,36 +215,38 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-29 00:23 NZST （**Phase 18.A 确认为最高优先级**；社媒内容优化 hotfix commit `a9c5d0f` 已 push main）
+> 最后更新：2026-05-29 00:20 NZST （**Phase 20.0 Portal 地基开工**，Phase 25 已并入 Phase 20.0）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **PM 操作 🔴** | Supabase 跑 migrations：`20260603000001_execution_items_fde_manual.sql` + `20260610000001_phase23_memory_tables.sql` | ⚠️ PM 操作 |
-| **PM 验收 Phase 20.D** | 执行看板顶部出现「＋ 录入工作」按钮 → 录入工作 → 看板出现「📝 FDE 录入工作」分组 → 可拖拽排序 | ⚠️ PM 验收 |
-| **PM 验收 Phase 23** | 客户主页「客户记忆库」ToolCard → 浏览页四 tab + 抽取/导出按钮；执行抽屉 outcome 下方「🧠 记忆标注」面板 | ⚠️ PM 验收 |
-| **🚀 下一开工** | **Phase 18.A** — Meta Ads MVP + 飞轮数据地基（P18.A.0–A.4） | 🔴 最高优先级 |
-
-**Phase 18.A 是最高优先级的原因（2026-05-29 战略确认）**：
-- Phase 21（AI 内容飞轮）需要干净的转化数据。有机帖子点赞信噪比太低，Meta Ads CTR/转化才是有效学习信号
-- Phase 18.A.0（归因保真度机制）必须先建，否则飞轮学到的是错误规律
-- Phase 18.A → Phase 21 是强依赖，不可跳过
-
-**Phase 18.A 任务清单**：
-- P18.A.0：归因保真度机制（PostCard 发布时记录 Publer post_id + fidelity score）
-- P18.A.1：执行看板 Ads Fix 按钮 → 接线 Meta MCP
-- P18.A.2：暂停亏损广告 / 调整出价 → 回写 flywheel_actions
-- P18.A.3：操作审计日志（before/after snapshot，支持回滚）
-- P18.A.4：Meta Ads insights 回流 flywheel_metrics → Phase 21 数据源
+| **P20.0.1 ⭐** | Migration：`public_scan_jobs` 加 `client_id` FK | 进行中 |
+| **P20.0.2** | `POST /api/onboard/self` — 自动建档 + 绑定 Discovery | 20.0 |
+| **P20.0.3** | `/prospect` 加转化 CTA | 20.0 |
+| **P20.0.4–6** | Portal Discovery 页 + 首页摘要卡 + Nav | 20.0 |
+| **P20.0.7–9** | Diagnosis / Prescription / Plan 只读页 | 20.0 |
+| **PM 操作 🔴** | Supabase 跑 migrations：`20260603000001_execution_items_fde_manual.sql` + `20260610000001_phase23_memory_tables.sql` | ⚠️ 待操作 |
 
 **已完成全景（最近几个 Phase）**：
-- ✅ **社媒内容优化**（`a9c5d0f`）：Tab 按任务类型过滤 + 禁用陈腐地标 + 图片生成 Kanban 制作中标记 + content_type 幻觉修复
-- ✅ **Phase 23 完整闭环**（PR #112，5 commit）：4 张 L3 记忆表 + MemoryService + 诸葛亮/张骞/华佗/鲁班注入 + 自动抽取器 + FDE 记忆库页
-- ✅ **Phase 20.D**：FDE 手动录入 + 看板「＋ 录入工作」按钮 + 拖拽排序
-- ✅ **Phase 19.A–E**（PR #95）：89 个路由 IDOR 封堵 + NEXT_PUBLIC 密钥泄漏清除
-- ✅ **Phase 17.A**（P17.A.1–A.6）：GSC/GA4 数据回流 + 飞轮归因桥接 + 每日 cron
+- ✅ **Phase 23 完整闭环**（PR #112，5 commit）：
+  - **23.A+D**：4 张 L3 记忆表 + MemoryService + 诸葛亮注入 + 决策历史自动写入
+  - **23.B**：FDE 标注 UI（执行看板抽屉一键标记）
+  - **23.D.2**：张骞/华佗/鲁班 注入 L3 记忆 + 共享 `formatMemoryForPrompt`
+  - **23.C**：自动抽取器（cron + 手动触发；outcomes→patterns/failed/preferences）
+  - **23.E**：FDE 仪表盘客户记忆库页（四 tab 浏览 + 行级编辑 + 抽取/导出）
+- ✅ **Phase 20.D**：`fde_manual` source migration + `/execution/manual` API + `FdeManualEntryModal` + 看板「＋ 录入工作」按钮 + FDE 分组 + 拖拽排序 + Portal 分组展示 + `PlanTask.requires` 素材标注
+- ✅ **Phase 12.C**（P12.C.1–3 merge）：飞轮聚合视图 + 华佗置信度反哺 + Publer engagement 回流
+- ✅ **Phase 17.A**（P17.A.1–A.6 全部 merge）：GSC/GA4 数据回流 + 飞轮归因桥接 + 每日 cron + 客户「数据」tab
+- ✅ **Phase 19.A–E**（PR #95）：89 个 `/api/clients/[id]/*` 路由 IDOR 封堵 + NEXT_PUBLIC 密钥泄漏清除
+- ✅ **Phase 17.A**（P17.A.1–A.6 全部 merge）：GSC/GA4 数据回流 + 飞轮归因桥接 + 每日 cron + 客户「数据」tab
+- ✅ **Phase 14.A.1–8**：全部完成，等 PM 运行 migration 验收
 
-**开发路径（已确认）**：
-Phase 18.A（Meta Ads + 归因保真度）→ Phase 21（AI 内容飞轮，依赖 18.A.4 数据）→ Phase 22（Data Engine，喂养 Phase 23 抽取器）
+**下一个候选**：
+- 📋 **Phase 21** — AI Factory（生产能力 — 与 Phase 23 记忆协同）
+- 📋 **Phase 22** — Data Engine（学习层 — 喂养 Phase 23 抽取器）
+- 📋 **Phase 18.A** — Meta Ads MVP：诊断→Fix 按钮接线 Meta MCP（P18.A.1–A.3）
+- 📋 **Phase 17.B** — Meta Insights 社媒数据回流（补全 Phase 17 数据源矩阵）
+
+下一 session：`go merge` 合 PR #112 → 等 Render 部署 → `继续 Phase 21` / `继续 Phase 22` / `开始 Phase 18.A` / `开始 Phase 17.B`（等 PM 决定）
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox

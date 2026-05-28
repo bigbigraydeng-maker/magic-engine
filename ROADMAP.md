@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-29 00:23 NZST · 当前阶段：**Phase 23 Cross-Agent Memory Layer 全部完成 ✅（PR #112 等 merge）；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅；Phase 14.A Website Connector 全部完成 ✅；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S、Phase 9.0、Phase 12.H 等历史功能全部已实现。
+> 最后更新：2026-05-29 00:20 NZST · 当前阶段：**Phase 23 Cross-Agent Memory Layer 全部完成 ✅（PR #112 等 merge）；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅；Phase 14.A Website Connector 全部完成 ✅；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S、Phase 9.0、Phase 12.H 等历史功能全部已实现。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2057,17 +2057,11 @@ AI 可见度层（ME 独有 ✅）
 
 ---
 
-## Phase 18 — Ads Execution Engine（广告执行引擎）🚀 Phase 18.A 下一个开工
+## Phase 18 — Ads Execution Engine（广告执行引擎）📋 已登记，待排期
 
-> **登记日期**：2026-05-21 · **状态（更新 2026-05-29）**：Phase 18.A 确认为最高优先级，原因见下
+> **登记日期**：2026-05-21 · **状态**：战略方向确认，三平台优先级已定
 >
 > **背景**：诊断层已能发现广告问题（华佗 Ads 维度），诸葛亮能输出广告优先行动，但鲁班目前没有广告执行能力。Phase 18 补上这块缺口，让 ME 能替客户在三个广告平台上自动执行「安全可逆」的操作，同时保留人工审核入口。
->
-> **为什么 Phase 18.A 是当前最高优先级（2026-05-29 战略升级）**：
-> Phase 21（AI 内容工厂飞轮）需要干净的转化数据作为学习信号。有机帖子的点赞/分享信噪比太低——
-> 付费广告（Meta Ads）的 CTR / 转化 / ROAS 才是真正可用于机器学习的信号。
-> 因此 Phase 18.A 不只是"广告执行"，同时是 Phase 21 飞轮的**数据地基**。
-> 路径：Phase 18.A（干净数据）→ 归因保真度机制（Attribution Fidelity）→ Phase 21（内容飞轮学习）。
 
 ### 三平台优先级
 
@@ -2095,22 +2089,13 @@ AI 可见度层（ME 独有 ✅）
   - 新建广告系列
 ```
 
-### Phase 18.A — Meta Ads MVP + 飞轮数据地基（下一个开工）
+### Phase 18.A — Meta Ads MVP（优先开工）
 
-> **开工分支**：`feat/phase-18a-meta-ads`
-> **里程碑 M1**：执行看板 Ads 任务出现"Fix"按钮，点击能调用 Meta MCP 暂停一条广告
-> **里程碑 M2**：广告变更有 before/after 审计日志，可回滚
-> **里程碑 M3**：Ads CTR/转化数据回流 `flywheel_metrics`，ME 内容创意标签与表现数据成功 JOIN
-
-| ID | 任务 | 依赖 | 说明 |
-|----|------|------|------|
-| **P18.A.0** | **归因保真度机制**：PostCard / StoryCard 发布时记录 Publer post_id + fidelity score（0-100）；只有 fidelity ≥ 70 的发布才回流进飞轮学习 | - | 解决"AI 生成的内容被 FDE 大幅修改后发布，表现数据不能归因给 AI"的根本问题 |
-| **P18.A.1** | 广告诊断 → Fix 按钮：执行看板 Ads action 接线 Meta MCP | 诸葛亮 ✅ | 鲁班获得广告执行能力 |
-| **P18.A.2** | 暂停亏损广告 / 调整出价 — 调用 Meta Graph API，回写 `flywheel_actions` | P18.A.1 | Fix 边界：仅安全可逆操作（暂停/出价±20%/否定词） |
-| **P18.A.3** | 操作审计日志：每次广告变更记录 before/after snapshot，支持回滚 | P18.A.2 | 不可逆操作的安全网 |
-| **P18.A.4** | **Ads 表现数据回流**：定期拉取 Meta Ads insights（CTR / 转化 / ROAS）→ 写入 `flywheel_metrics`，关联 ME 内容创意标签（angle_tag + image_subject 摘要）→ 为 Phase 21 ContentPatternExtractor 提供输入 | P18.A.2 | **这是 Phase 21 飞轮的前置数据源** |
-
-**Phase 18.A 完成定义**：M1 + M2 + M3 均通过 PM 验收，且 `flywheel_metrics` 中有至少一条真实 CTS Meta Ads 数据。
+| ID | 任务 | 依赖 |
+|----|------|------|
+| **P18.A.1** | 广告诊断 → Fix 按钮：执行看板 Ads action 接线 Meta MCP | 诸葛亮 ✅ |
+| **P18.A.2** | 暂停亏损广告 / 调整出价 — 调用 Meta Graph API，回写 `flywheel_actions` | P18.A.1 |
+| **P18.A.3** | 操作审计日志：每次广告变更记录 before/after snapshot，支持回滚 | P18.A.2 |
 
 ### Phase 18.B — Google Ads（Developer token 到位后开工）
 
@@ -2359,6 +2344,112 @@ Body: { title, description, dimension, fix_type?, due_date?, notes? }
 
 ---
 
+## Phase 25 — ⚠️ 已并入 Phase 20.0（见上方）
+
+> **登记日期**：2026-05-29 · **状态**：方案已完整讨论，计划已拍板，明日开工
+>
+> **背景**：ME 当前只有 FDE 陪跑客户（人工建档），缺少 C 端自助入口。Phase 25 打通「陌生访客 → Discovery Report → 会员注册 → Portal 自助工作台」完整漏斗，作为 Phase 20 MTC 变现层的前置基础。全程自助，FDE Dashboard 与 Portal 完全分开。
+
+### 产品定位
+
+```
+陌生访客                注册转化             自助 Portal               变现（Phase 20）
+   │                       │                    │                          │
+/discover              自动建档              /portal/[id]               MTC Token
+输入网址               链接 Discovery        ├── Discovery Report         ├── 在线购买
+   │                   创建 client           ├── 华佗诊断                 └── Talk to Us
+张骞扫描               client_portal_users   ├── 诸葛亮处方
+   │                                         ├── Marketing Plan
+/prospect                                    └── Content / Report
+看报告（已登录）
+   │
+[进入我的工作台 CTA]
+```
+
+### 关键设计决策（已拍板）
+
+| 决策项 | 结论 |
+|--------|------|
+| Prospect 后台 vs FDE 后台 | **完全分开**：自助用户进 `/portal`，FDE 进 `/dashboard` |
+| Portal 定位 | 消费者友好 UI，4–6 步线性引导；FDE Dashboard 保持内部工具不变 |
+| 数据桥接方式 | `POST /api/onboard/self` 自动建 `clients` 记录，复制 `public_scan_jobs.result` → `client_discovery` |
+| 华佗/诸葛亮 Phase 25 范围 | **只读展示**（从已有数据读取），自助触发留待 Phase 20 MTC 门控 |
+| Portal 导航顺序 | Discovery → Overview → Diagnosis → Prescription → Plan → Content → Report |
+
+### Phase 25 子任务清单
+
+#### Phase 25.A — 漏斗打通（核心路径）
+
+- [ ] **P25.A.1** Migration：`public_scan_jobs` 加 `client_id` 可空 FK
+  - 文件：`supabase/migrations/20260530000001_self_service_onboarding.sql`
+- [ ] **P25.A.2** 新建 `POST /api/onboard/self`
+  - 文件：`src/app/api/onboard/self/route.ts`
+  - 逻辑：查已有记录防重复 → 创建 `clients` → 写 `client_discovery` → 写 `client_portal_users(access_type=portal)` → 绑定 `public_scan_jobs.client_id`
+- [ ] **P25.A.3** `/prospect` 页面加转化 CTA
+  - 文件：`src/app/prospect/page.tsx`
+  - 仅在 `status=completed` 时显示「进入我的增长工作台 →」按钮
+
+**里程碑 M1**：Johnson 在 `/prospect` 点按钮 → 进入 `/portal/[id]`，Portal Overview 正常加载
+
+#### Phase 25.B — Portal Discovery 页面
+
+- [ ] **P25.B.1** 新建 `/portal/[clientId]/discovery/page.tsx`
+  - 读 `client_discovery` → 复用 `dashboard/clients/[id]/zhangqian/cards.tsx` 所有 card 组件
+  - 无数据时显示占位
+- [ ] **P25.B.2** Portal 首页加 Discovery 摘要卡
+  - 文件：`src/app/portal/[clientId]/page.tsx`
+  - 展示 `diagnosis.scores`（overall + 六维），链接到 `/discovery`
+- [ ] **P25.B.3** PortalNav 加 Discovery 链接
+  - 文件：`src/app/portal/[clientId]/_components/PortalNav.tsx`
+
+**里程碑 M2**：Portal 里能看到完整 Discovery Report，六维评分卡在首页显示
+
+#### Phase 25.C — Portal Diagnosis 页面（只读）
+
+- [ ] **P25.C.1** 新建 `/portal/[clientId]/diagnosis/page.tsx`
+  - 读 `diagnostic_runs`（latest completed）→ 展示六维评分 + 主要发现
+  - 无数据时显示「Your diagnosis is being prepared」占位 + Talk to Us CTA
+
+#### Phase 25.D — Portal Prescription & Plan 页面（只读）
+
+- [ ] **P25.D.1** 新建 `/portal/[clientId]/prescription/page.tsx`
+  - 读 `prescriptions`（latest confirmed）→ 展示优先行动方案
+- [ ] **P25.D.2** 新建 `/portal/[clientId]/plan/page.tsx`
+  - 读 `execution_items`（non-skipped, grouped by dimension）→ 时间轴展示
+
+### 文件改动汇总
+
+| 文件 | 操作 | Phase |
+|------|------|-------|
+| `supabase/migrations/20260530000001_self_service_onboarding.sql` | 新建 | 25.A |
+| `src/app/api/onboard/self/route.ts` | 新建 | 25.A |
+| `src/app/prospect/page.tsx` | 修改（加 CTA） | 25.A |
+| `src/app/portal/[clientId]/discovery/page.tsx` | 新建 | 25.B |
+| `src/app/portal/[clientId]/page.tsx` | 修改（加摘要卡） | 25.B |
+| `src/app/portal/[clientId]/_components/PortalNav.tsx` | 修改（加链接） | 25.B |
+| `src/app/portal/[clientId]/diagnosis/page.tsx` | 新建 | 25.C |
+| `src/app/portal/[clientId]/prescription/page.tsx` | 新建 | 25.D |
+| `src/app/portal/[clientId]/plan/page.tsx` | 新建 | 25.D |
+
+**总量**：1 migration + 5 新建文件 + 3 修改文件
+
+### 风险备注
+
+| 风险 | 处理 |
+|------|------|
+| 重复点击 CTA → 重复建档 | `/api/onboard/self` 先查 `client_portal_users`，已存在直接 redirect |
+| 扫描未完成就点 Claim | CTA 只在 `status=completed` 渲染 |
+| 扫描 failed | CTA 不显示，显示"Try a new scan" |
+| `client_discovery` 30 天过期 | Phase 25 范围内不处理，留 Phase 20 补充续期机制 |
+
+### Phase 25 与 Phase 20 的关系
+
+Phase 25 是 Phase 20 的前置基础：
+- Phase 25 打通漏斗 + 建立 Portal 自助工作台（无 Token 门控）
+- Phase 20 在此基础上叠加 MTC Token 系统：功能门控 + Stripe 购买 + Talk to Us 触发
+
+---
+
 ## Phase 20 — Magic Token Coin & Self-Serve Portal（C 端变现引擎）📋 已登记，待排期
 
 > **登记日期**：2026-05-25 · **状态**：方案已完整讨论，所有关键决策已拍板，待 PM 排期开工
@@ -2388,9 +2479,32 @@ Body: { title, description, dimension, fix_type?, due_date?, notes? }
 
 | 批次 | 内容 | 工作量 |
 |------|------|--------|
-| **20.A** 地基 | DB migrations + Stripe Webhook + 注册流程 + MTC 余额 API | ~1 周 |
-| **20.B** 界面 | 注册/登录页 + 钱包页 + Checkout 流程 + 生成 API 扣费接入 | ~1 周 |
+| **20.0** Portal 地基 | Prospect→Portal 漏斗打通 + Portal 扩展页（无 MTC） | ~2–3 天 |
+| **20.A** MTC 地基 | DB migrations + Stripe Webhook + MTC 余额 API | ~1 周 |
+| **20.B** 界面 | 钱包页 + Checkout 流程 + 生成 API 扣费接入 | ~1 周 |
 | **20.C** 收尾 | Talk to Us 触发 + Magic Lab Class 入口 + 过期提醒邮件 + 管理员视图 | ~3–4 天 |
+
+### Phase 20.0 — Portal 地基（自助漏斗，无 MTC）🔜 当前开工
+
+> **前置**：Phase 13.A（/discover + /prospect）已完成 ✅
+> **目标**：打通 Prospect → Portal 会员空间完整链路，为 Phase 20.A MTC 接入铺路
+
+#### 任务清单
+
+- [ ] **P20.0.1** Migration：`public_scan_jobs` 加 `client_id` 可空 FK
+  - `supabase/migrations/20260530000001_self_service_onboarding.sql`
+- [ ] **P20.0.2** 新建 `POST /api/onboard/self`
+  - 防重复 → 建 `clients` → 写 `client_discovery` → 写 `client_portal_users(portal)` → 绑定 scan job
+- [ ] **P20.0.3** `/prospect` 加转化 CTA（status=completed 才显示）
+- [ ] **P20.0.4** 新建 `/portal/[clientId]/discovery/page.tsx`（复用 zhangqian cards）
+- [ ] **P20.0.5** Portal 首页加 Discovery 摘要卡 + 六维评分
+- [ ] **P20.0.6** `PortalNav` 加 Discovery 链接
+- [ ] **P20.0.7** 新建 `/portal/[clientId]/diagnosis/page.tsx`（只读）
+- [ ] **P20.0.8** 新建 `/portal/[clientId]/prescription/page.tsx`（只读）
+- [ ] **P20.0.9** 新建 `/portal/[clientId]/plan/page.tsx`（只读）
+
+**M1**：点 CTA → 进 `/portal/[id]` Overview 正常加载
+**M2**：`/portal/[id]/discovery` 显示完整 Discovery Report
 
 ### Phase 20 里程碑
 
@@ -2476,25 +2590,12 @@ AU / NZ（当前）          新市场（未来）
 
 ---
 
-## Phase 21 — AI Content Factory（旗舰能力 · FDE 默认产能引擎）📋 待 Phase 18.A 完成后开工
+## Phase 21 — AI Content Factory（旗舰能力 · FDE 默认产能引擎）📋 战略确认，待排期
 
-> **登记日期**：2026-05-26 · **状态（更新 2026-05-29）**：前置依赖已明确，Phase 18.A 完成后立即开工
->
-> ⚠️ **前置依赖（不可跳过）**：
-> - **Phase 18.A.0**（归因保真度机制）必须完成——否则飞轮学到的是"FDE 改过的内容"的表现，不是 ME 生成质量的表现
-> - **Phase 18.A.4**（Ads 表现数据回流）必须完成——付费广告 CTR/转化才是有效学习信号；有机帖子点赞信噪比太低，不能作为主信号
+> **登记日期**：2026-05-26 · **状态**：战略方向已确认，PM 拍板，待 Phase 20/19 收尾后排期
 >
 > **战略定位**：AI Content Factory 是 ME 的**产能上限**，类比"能产 100 万双鞋的鞋厂可以接 1 万双小单"。FDE 客户（$2.5K-3K/月）默认走 AI Factory；非 FDE 客户按 token 自助调用各模块。
 >
-> **飞轮学习架构（2026-05-29 更新）**：
-> ```
-> Phase 18.A.4：Meta Ads CTR/转化 → flywheel_metrics
->     + ME 创意标签（angle_tag × image_subject 关键词 × 光线类型）
->     → ContentPatternExtractor（Phase 21 新建）：JOIN 出"什么创意组合对这个客户有效"
->     → 注入 generatePosts() memoryContext 参数
->     → 下一次生成优先选历史高效组合
->     → 发布 → 表现数据 → 循环
-> ```
 > **颠覆点**：2026 年 AI 内容成本崩塌 100x，传统 marketing "10 帖/月 = aggressive" 思维过时。真正护城河是 **生产 × 分发 × 学习** 飞轮速度，不是单条内容质量。
 
 ### Phase 21 产能基线（FDE 客户默认）
