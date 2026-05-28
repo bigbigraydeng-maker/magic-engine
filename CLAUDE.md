@@ -215,15 +215,14 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-29 00:31 NZST （**P20.0.1–6 全部完成**，P20.0.7–9 待续）
+> 最后更新：2026-05-29 00:32 NZST （**Phase 20.0 全部 P20.0.1–9 完成** ✅，等 PM 验收 + merge）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P20.0.7 ⭐** | 新建 `/portal/[clientId]/diagnosis/page.tsx`（只读华佗） | 进行中 |
-| **P20.0.8** | 新建 `/portal/[clientId]/prescription/page.tsx`（只读诸葛亮） | 20.0 |
-| **P20.0.9** | 新建 `/portal/[clientId]/plan/page.tsx`（只读执行计划） | 20.0 |
-| **PM 操作 🔴** | Supabase 跑 migrations：`20260530000001_self_service_onboarding.sql` + `20260603000001_execution_items_fde_manual.sql` + `20260610000001_phase23_memory_tables.sql` | ⚠️ 待操作 |
-| **PM 验收 P20.0** | M1：点 CTA 进 `/portal/[id]` Overview；M2：`/portal/[id]/discovery` 显完整报告 | ⚠️ PM 验收 |
+| **PM 操作 🔴** | Supabase 跑 migration：`20260530000001_self_service_onboarding.sql`（+ 历史 20260603/20260610） | ⚠️ 待操作 |
+| **PM 验收 P20.0** | M1：Prospect CTA → Portal Overview 正常加载；M2：`/portal/[id]/discovery` 完整报告 | ⚠️ PM 验收 |
+| **go merge** | PM 输入 `go merge` 合并 Phase 20.0 PR 到 main | ⚠️ PM 授权 |
+| **PM 决定** | 下一 Phase：Phase 21（AI Factory）/ Phase 22（Data Engine）/ Phase 18.A（Meta Ads） | ⚠️ PM 决定 |
 
 **已完成全景（最近几个 Phase）**：
 - ✅ **Phase 23 完整闭环**（PR #112，5 commit）：
