@@ -1111,6 +1111,22 @@ type PostRaw = Omit<Post, 'image_prompt'> & Required<Pick<Post,
   'image_subject' | 'image_composition' | 'image_lighting' | 'image_mood_words' | 'image_format'
 >>
 
+const VALID_POST_TYPES: readonly PostType[] = ['educational', 'promotional', 'storytelling', 'engagement'] as const
+
+/**
+ * Maps any AI-returned content_type string to one of the 4 valid PostType values.
+ * Guards against hallucinations where the AI returns a content pillar name
+ * (e.g. "destination_inspiration") instead of a valid type.
+ */
+function normaliseContentType(raw: string): PostType {
+  if ((VALID_POST_TYPES as readonly string[]).includes(raw)) return raw as PostType
+  const l = raw.toLowerCase().replace(/[_\s-]+/g, '')
+  if (l.includes('edu') || l.includes('info') || l.includes('learn') || l.includes('how')) return 'educational'
+  if (l.includes('promo') || l.includes('sale') || l.includes('offer') || l.includes('price') || l.includes('scarc') || l.includes('limit')) return 'promotional'
+  if (l.includes('story') || l.includes('narr') || l.includes('journey') || l.includes('inspir') || l.includes('aspir') || l.includes('destination')) return 'storytelling'
+  return 'engagement'
+}
+
 export async function generatePosts(
   strategy: ChannelStrategy,
   brand: VisualBrandDNA,
@@ -1153,7 +1169,7 @@ export async function generatePosts(
       },
     })
     return {
-      content_type:      p.content_type,
+      content_type:      normaliseContentType(p.content_type),
       copy:              p.copy,
       hashtags:          p.hashtags,
       image_subject:     p.image_subject,

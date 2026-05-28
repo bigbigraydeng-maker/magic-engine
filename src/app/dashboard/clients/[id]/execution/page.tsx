@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
@@ -1349,6 +1349,8 @@ export default function ExecutionPage() {
   const [showManualEntry, setShowManualEntry] = useState(false)
   // 后台生成中的执行项 ID 集合（关闭 drawer 后仍在 AI 生成，kanban 卡片显示"制作中"）
   const [bgGeneratingIds, setBgGeneratingIds] = useState<Set<string>>(new Set())
+  // 图片生成中的执行项 ID 集合（drawer 还开着，但图片在 Visual Studio 渲染，kanban 卡片也要显示"制作中"）
+  const [imageGenActiveIds, setImageGenActiveIds] = useState<Set<string>>(new Set())
 
   const handleDownloadDocx = async () => {
     setIsDocxLoading(true)
@@ -1635,6 +1637,24 @@ export default function ExecutionPage() {
     })()
   }, [clientId, items, fetchItems])
 
+  // 图片生成进行中（drawer 仍开着，Visual Studio 在渲染图片）→ 同样在 kanban 卡片显示"制作中"
+  const handleImageGeneratingChange = useCallback((itemId: string, active: boolean) => {
+    setImageGenActiveIds(prev => {
+      const s = new Set(prev)
+      if (active) { s.add(itemId) } else { s.delete(itemId) }
+      return s
+    })
+  }, [])
+
+  // 合并两种"制作中"来源，传给 PrescriptionGroup → ExecutionItemCard
+  const allBgGeneratingIds = useMemo<Set<string>>(() => {
+    if (imageGenActiveIds.size === 0) return bgGeneratingIds
+    if (bgGeneratingIds.size === 0) return imageGenActiveIds
+    const merged = new Set(bgGeneratingIds)
+    imageGenActiveIds.forEach(id => merged.add(id))
+    return merged
+  }, [bgGeneratingIds, imageGenActiveIds])
+
   const filteredItems       = activeDimension === 'all' ? items : items.filter(i => i.dimension === activeDimension)
   const availableDimensions = Array.from(new Set(items.map(i => i.dimension).filter(Boolean))) as string[]
   const completedCount      = filteredItems.filter(i => i.status === 'completed').length
@@ -1835,7 +1855,7 @@ export default function ExecutionPage() {
               onDerive={(mode, priorId, priorLabel) => setDeriveDrawer({ mode, priorId, priorLabel })}
               onOpenDetail={item => { setDetailItem(item); setDetailEditable(group.editable) }}
               onAddItem={handleAddItem}
-              bgGeneratingIds={bgGeneratingIds}
+              bgGeneratingIds={allBgGeneratingIds}
             />
           )
         })}
@@ -1937,9 +1957,14 @@ export default function ExecutionPage() {
         <ContentStudioDrawer
           clientId={clientId}
           item={studioItem}
-          onClose={() => setStudioItem(null)}
+          onClose={() => {
+            // 关闭 drawer 时清除该 item 的图片生成标记
+            setImageGenActiveIds(prev => { const s = new Set(prev); s.delete(studioItem.id); return s })
+            setStudioItem(null)
+          }}
           onContentGenerated={() => void fetchItems(true)}
           onBackgroundGenerate={handleBackgroundGenerate}
+          onImageGeneratingChange={handleImageGeneratingChange}
         />
       )}
 

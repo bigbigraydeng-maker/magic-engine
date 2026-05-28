@@ -37,13 +37,15 @@ interface Props {
   onContentGenerated: () => void
   /** When set, "生成这条X" closes the drawer immediately and runs generation in the background. */
   onBackgroundGenerate?: (itemId: string, params: BackgroundGenerateParams) => void
+  /** Called when any Post/Story image generation starts (true) or all finish (false). */
+  onImageGeneratingChange?: (itemId: string, active: boolean) => void
 }
 
 function defaultTabFor(dimension: string): StudioTab {
   return dimension === 'social' ? 'social' : 'article'
 }
 
-export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerated, onBackgroundGenerate }: Props) {
+export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerated, onBackgroundGenerate, onImageGeneratingChange }: Props) {
   const [tab, setTab]               = useState<StudioTab>(defaultTabFor(item.dimension))
   const [campaign, setCampaign]     = useState<ActiveCampaign | null>(null)
   const [campaignLoaded, setCampaignLoaded] = useState(false)
@@ -212,6 +214,7 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
                 onBackgroundGenerate(item.id, params)
                 onClose()
               } : undefined}
+              onImageGeneratingChange={(active) => onImageGeneratingChange?.(item.id, active)}
             />
           ) : (
             // 短视频：Reels 脚本 + Video Studio
@@ -222,6 +225,7 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
                 campaignId={campaign?.id}
                 campaignName={campaign?.name}
                 item={item}
+                onImageGeneratingChange={(active) => onImageGeneratingChange?.(item.id, active)}
               />
               <ReelsStudio
                 clientId={clientId}

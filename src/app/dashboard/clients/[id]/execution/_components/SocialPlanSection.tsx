@@ -16,7 +16,7 @@
  * Generating a new plan prepends it to history (old plans stay visible).
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import type { SocialPlanOutput, ReelsScript, Post, Story, GenerationConfig } from '@/lib/social/social-plan-templates'
 import { DEFAULT_CONFIG } from '@/lib/social/social-plan-templates'
 import type { ExecutionItem } from '@/types/diagnostic'
@@ -53,7 +53,12 @@ function resolveTaskKind(item: ExecutionItem | undefined): SocialTaskKind | null
 
 function resolveTaskPlatform(item: ExecutionItem | undefined): GenerationConfig['platform'] | null {
   const p = item?.steps_json?.platform as string | undefined
-  return p && SUPPORTED_PLATFORMS.has(p) ? (p as GenerationConfig['platform']) : null
+  if (p && SUPPORTED_PLATFORMS.has(p)) return p as GenerationConfig['platform']
+  // Fallback: detect platform from item title prefix (e.g. "TikTok: '3 Reasons…'")
+  const title = (item?.title ?? '').toLowerCase()
+  if (/^tiktok[\s:']/.test(title)) return 'tiktok'
+  if (/^instagram[\s:']/.test(title)) return 'instagram'
+  return null
 }
 
 function briefCardVisible(mode: Props['mode'], taskKind: SocialTaskKind | null): boolean {
@@ -97,6 +102,9 @@ interface Props {
   item?: ExecutionItem
   /** When set, clicking "生成这条X" hands off to the parent and closes the drawer immediately. */
   onBackgroundGenerate?: (params: BackgroundGenerateParams) => void
+  /** Called when any Post/Story image generation starts (true) or all finish (false).
+   *  Parent uses this to show "制作中" badge on the kanban card. */
+  onImageGeneratingChange?: (active: boolean) => void
 }
 
 interface PlanRecord {
@@ -108,7 +116,7 @@ interface PlanRecord {
 
 type PlanTab = 'reels' | 'posts' | 'stories'
 
-export function SocialPlanSection({ clientId, campaignId, campaignName, mode = 'all', item, onBackgroundGenerate }: Props) {
+export function SocialPlanSection({ clientId, campaignId, campaignName, mode = 'all', item, onBackgroundGenerate, onImageGeneratingChange }: Props) {
   const taskKind     = resolveTaskKind(item)
   const taskPlatform = resolveTaskPlatform(item)
   const showBrief    = briefCardVisible(mode, taskKind)
@@ -125,6 +133,16 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
   const [config, setConfig]                 = useState<GenerationConfig>(DEFAULT_CONFIG)
   const [settingsOpen, setSettingsOpen]     = useState(false)
   const [angleFocusInput, setAngleFocusInput] = useState('')
+
+  // Image-generation in-flight counter — drives kanban "制作中" badge
+  const [imageGenCount, setImageGenCount]   = useState(0)
+  const onImageGeneratingChangeRef = useRef(onImageGeneratingChange)
+  useEffect(() => { onImageGeneratingChangeRef.current = onImageGeneratingChange }, [onImageGeneratingChange])
+  useEffect(() => {
+    onImageGeneratingChangeRef.current?.(imageGenCount > 0)
+  }, [imageGenCount])
+  const incImageGen = useCallback(() => setImageGenCount(c => c + 1), [])
+  const decImageGen = useCallback(() => setImageGenCount(c => Math.max(0, c - 1)), [])
 
   // Save-to-board state
   const [savingBoard, setSavingBoard]       = useState(false)
@@ -473,12 +491,16 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
                 clientId={clientId}
                 launchHubPlatform={taskPlatform ?? config.platform}
                 dueDate={item?.due_date ?? undefined}
+                onGenStart={incImageGen}
+                onGenEnd={decImageGen}
               />
             )}
             {taskKind === 'social_story' && plan.stories[0] && (
               <StoryCard index={0} story={plan.stories[0]} clientId={clientId}
                 launchHubPlatform={taskPlatform ?? config.platform}
                 dueDate={item?.due_date ?? undefined}
+                onGenStart={incImageGen}
+                onGenEnd={decImageGen}
               />
             )}
             {taskKind === 'social_reel' && plan.reels[0] && (
@@ -587,7 +609,7 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
                 type="posts"
               />
               {plan.posts.map((post, i) => (
-                <PostCard key={i} post={post} clientId={clientId} />
+                <PostCard key={i} post={post} clientId={clientId} onGenStart={incImageGen} onGenEnd={decImageGen} />
               ))}
             </div>
           )}
@@ -604,7 +626,7 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
                 type="stories"
               />
               {plan.stories.map((story, i) => (
-                <StoryCard key={i} index={i} story={story} clientId={clientId} />
+                <StoryCard key={i} index={i} story={story} clientId={clientId} onGenStart={incImageGen} onGenEnd={decImageGen} />
               ))}
             </div>
           )}
@@ -1246,11 +1268,13 @@ const POST_TYPE_COLOR: Record<string, string> = {
   engagement:   'bg-blue-50 text-blue-700 border-blue-200',
 }
 
-function PostCard({ post, clientId, launchHubPlatform, dueDate }: {
+function PostCard({ post, clientId, launchHubPlatform, dueDate, onGenStart, onGenEnd }: {
   post: Post
   clientId: string
   launchHubPlatform?: string
   dueDate?: string
+  onGenStart?: () => void
+  onGenEnd?: () => void
 }) {
   const [open, setOpen]             = useState(false)
   const [generatingImg, setGen]     = useState(false)
@@ -1263,6 +1287,7 @@ function PostCard({ post, clientId, launchHubPlatform, dueDate }: {
   const handleGenerate = async () => {
     setGen(true)
     setImgError(null)
+    onGenStart?.()
     try {
       const res = await fetch('/api/visual/image-preview', {
         method: 'POST',
@@ -1276,6 +1301,7 @@ function PostCard({ post, clientId, launchHubPlatform, dueDate }: {
       setImgError(e instanceof Error ? e.message : String(e))
     } finally {
       setGen(false)
+      onGenEnd?.()
     }
   }
 
@@ -1376,12 +1402,14 @@ function PostCard({ post, clientId, launchHubPlatform, dueDate }: {
   )
 }
 
-function StoryCard({ index, story, clientId, launchHubPlatform, dueDate }: {
+function StoryCard({ index, story, clientId, launchHubPlatform, dueDate, onGenStart, onGenEnd }: {
   index: number
   story: Story
   clientId: string
   launchHubPlatform?: string
   dueDate?: string
+  onGenStart?: () => void
+  onGenEnd?: () => void
 }) {
   const [generatingImg, setGen]     = useState(false)
   const [imgUrl, setImgUrl]         = useState<string | null>(null)
@@ -1391,6 +1419,7 @@ function StoryCard({ index, story, clientId, launchHubPlatform, dueDate }: {
   const handleGenerate = async () => {
     setGen(true)
     setImgError(null)
+    onGenStart?.()
     try {
       const res = await fetch('/api/visual/image-preview', {
         method: 'POST',
@@ -1404,6 +1433,7 @@ function StoryCard({ index, story, clientId, launchHubPlatform, dueDate }: {
       setImgError(e instanceof Error ? e.message : String(e))
     } finally {
       setGen(false)
+      onGenEnd?.()
     }
   }
 
