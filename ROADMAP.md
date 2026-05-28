@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-29 10:34 NZST · 当前阶段：**Phase 23 Cross-Agent Memory Layer 全部完成 ✅（PR #112 等 merge）；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅；Phase 14.A Website Connector 全部完成 ✅；Phase 13.A Prospect 注册流程 ✅**。补录核实：Phase 8.S、Phase 9.0、Phase 12.H 等历史功能全部已实现。
+> 最后更新：2026-05-29 11:07 NZST · 当前阶段：**Phase 14.B WP 发布质量改进（7项）开发中 🔄；Phase 14.A Website Connector 全部完成 ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -1744,7 +1744,7 @@ Layer 5  发布后动作    Google Search Console 收录（平台无关）+ Flyw
 | 2 | H1 标签重复 | WP 标题已是 H1，ME body 含第二个 | Layer 2 内容清洗：strip `<h1>` |
 | 3 | Schema JSON-LD 被 `<br>` 污染 | WP wpautop filter 注入换行 | Layer 2 清洗：删除整个 `<script type="application/ld+json">` |
 | 4 | GEO 城市硬编码 "Sydney" | geo-directive-generator.ts bug | 动态注入 `client.location` |
-| 5 | 文章无内链 | ME 不知道客户网站 URL 结构 | Phase 14.F Site Knowledge Graph |
+| 5 | 文章无内链 | ME 不知道客户网站 URL 结构 | Phase 14.G Site Knowledge Graph |
 | 6 | SEO 配置（Yoast）需手动 | 无 API 集成 | Layer 3：Yoast REST API 自动配置 |
 | 7 | GSC 收录需手动提交 | 无 OAuth 集成 | Layer 5：GSC API + OAuth |
 
@@ -1756,7 +1756,7 @@ Layer 5  发布后动作    Google Search Console 收录（平台无关）+ Flyw
 
 **开发优先级：**
 1. 🔴 修 4 个 Bug（GEO城市 + H1 + Schema + Layer2清洗），1–2天
-2. 🟡 Phase 14.F Site Knowledge Graph，3–5天
+2. 🟡 Phase 14.G Site Knowledge Graph，3–5天
 3. 🟢 Layer 3 Yoast API + Layer 5 GSC API，1–2周
 4. 🔵 Render 静态 IP（解除 SiteGround 封锁），基础设施
 
@@ -1821,17 +1821,39 @@ website_publish_jobs
 3. 每次发布在 `website_publish_jobs` 有完整记录（快照 + hash + 状态）
 4. 发布成功后 `flywheel_actions` 有对应记录
 
-### Phase 14.B（预告，未排期）
+### Phase 14.B — WP 发布质量改进（E2E 测试发现，7 项）⭐ 待开发
+
+> **登记日期**：2026-05-29 · **触发**：完整 Kanban→Generate→WP Publish E2E 测试后系统性总结，影响所有 WP 客户。
+>
+> **范围说明**：Yoast mu-plugin 问题影响**所有 WP 网站客户**（非 Oztop 特有），每个 WP 域名安装一次即可。
+
+| 任务 | 内容 | 优先级 |
+|------|------|--------|
+| **P14.B.1** | **Yoast SEO 字段自动写入**：WP 连接测试通过后，增加「安装 SEO 扩展」一键按钮；ME 通过 WP Application Password 上传 `me-yoast-rest-api.php` mu-plugin（注册 `_yoast_wpseo_title` / `_yoast_wpseo_metadesc` / `_yoast_wpseo_focuskw` 为 REST API 可写），`cms_connections` 表加 `yoast_plugin_installed` boolean 字段标记状态 | 🔴 高 |
+| **P14.B.2** | **取消发布自动清理 WP 草稿**：用户点「取消」时调用 `DELETE /wp-json/wp/v2/posts/{id}`，并将 `website_publish_jobs.status` 改为 `rolled_back`；防止孤儿草稿堆积在客户 WP 后台 | 🔴 高 |
+| **P14.B.3** | **GEO 指令城市一致性修复**：博客生成 system prompt 改为使用 `audience_signals.location` 作为权威城市（而非 `primary_recommendation` 文本），避免 `primary_recommendation` 里有错误城市名时污染生成内容；GEO 指令编辑界面加验证：文本城市与 `audience_signals.location` 不一致时弹橙色警告 | 🔴 高 |
+| **P14.B.4** | **Quality Check 第8项：内链检测**：检查 `html_body` 中属于客户域名的 `<a href>` 数量；≥3 条绿色通过，1-2 条橙色警告，0 条红色失败（附提示：确认 client_site_pages 已爬取） | 🟡 中 |
+| **P14.B.5** | **primary_keyword 为 null 时预发布警告**：Review 页面若 `primary_keyword` 为空，在「发布到 WordPress」按钮旁显示橙色提示「未设置 Focus Keyphrase，Yoast 关键词字段将为空」；Blog Studio 生成时自动从 topic 写入 `primary_keyword` | 🟡 中 |
+| **P14.B.6** | **WP 默认发布分类 ID**：ME Settings → Website Connection 页面增加「默认分类 ID」可选字段；发布时带入 `categories: [id]`；Oztop 示例：Flooring 分类 ID | 🟡 中 |
+| **P14.B.7** | **发布后一键 GSC 索引请求**：WP 发布成功确认后，弹出「Request GSC Indexing」按钮；调用现有 Phase 17.A 的 GSC API，写入 `flywheel_actions`（action_type=gsc_index_request） | 🟢 低 |
+
+### Phase 14.B 验收关卡
+
+- **M1（核心）**：Yoast mu-plugin 安装后，重新发布博客 → WP admin Search appearance 面板中 SEO title + Meta description + Focus keyphrase 均自动填充
+- **M2（质量）**：内链 QC 第8项在有/无内链的博客上分别显示正确状态
+- **M3（运营）**：取消发布后 WP 后台无孤儿草稿
+
+### Phase 14.C 及后续（预告，未排期）
 
 | Phase | 内容 | 触发条件 |
 |---|---|---|
-| 14.B | Webflow CMS connector | 14.A 验收通过 |
-| 14.C | GitHub connector（Next.js / Vercel 代码型站点） | 14.B 完成 |
-| 14.D | Campaign LP 生成器（高转化落地页，noindex + 活动结束 301） | 14.C 完成 |
-| 14.E | 权限漂移检测（定期校验 token scope，失效自动标 `needs_reconnect`） | 14.A 完成 |
-| 14.F | **客户网站知识图谱（Site Knowledge Graph）** | 14.A 完成 |
+| 14.C | Webflow CMS connector | 14.B 完成 |
+| 14.D | GitHub connector（Next.js / Vercel 代码型站点） | 14.C 完成 |
+| 14.E | Campaign LP 生成器（高转化落地页，noindex + 活动结束 301） | 14.D 完成 |
+| 14.F | 权限漂移检测（定期校验 token scope，失效自动标 `needs_reconnect`） | 14.A 完成 |
+| 14.G | **客户网站知识图谱（Site Knowledge Graph）** | 14.A 完成 |
 
-### Phase 14.F — 客户网站知识图谱（Site Knowledge Graph）📋 待排期
+### Phase 14.G — 客户网站知识图谱（Site Knowledge Graph）📋 待排期
 
 > **登记日期**：2026-05-26 · **触发**：Oztop 手动发布 Pet Flooring 文章时发现：博客内没有内链，因为 ME 不知道客户的产品页 URL。
 >
@@ -2836,7 +2858,7 @@ client_decision_history      -- 为什么之前选 X 不选 Y
   - 优先级比 MP-GEN-1/2/3 更根本，建议升级为独立 Phase（Phase 12.W 波次执行模型 或并入 Phase 8.M Marketing Agent 记忆系统），2-3 周内落地
 - **Campaign 字段注入缺口两个 Bug**（Oztop 清仓配置时 PM 现场审计 `campaign-injector.ts` 发现，2026-05-26）：
   - `MP-GEN-4` ⚠️ **Visual Direction（vi_mood / vi_color_accent / vi_specific_dos / vi_specific_donts / vi_reference_note）完全未被注入 prompt** — 这些字段只在 UI 面板和 AI Generate 按钮里使用，`src/lib/content/campaign-injector.ts` 的 `formatCampaignForPrompt` 没有引用，因此 Marketing Plan 生成的任务 description 完全不知道这次活动的视觉方向。FDE 即使在 ME 里精心填写 Visual Direction（或点 AI Generate 让 ME 自动起草），生成的社媒任务 description 里也不会出现"深胡桃木色 + 浅墙 + 黄铜灯具"等关键视觉指令。**Visual Direction 当前是死端输入**。修复：在 `formatCampaignForPrompt` 添加 vi_* 字段块；下游 Reel/Post/Story 任务的视觉相关描述应受其约束。同时该数据应注入到 Phase 21 AI Factory 的图片/视频生成 prompt（更关键）
-  - `MP-GEN-5` Campaign 的产品/落地页 URL（source_urls）也未被注入 prompt — Marketing Plan 任务即使提到产品也不知道客户网站的对应产品页 URL，无法生成内链锚点。修复：在 prompt 注入产品页清单，让 Claude 在任务 description 里使用（与 Phase 14.F Site Knowledge Graph 协同）
+  - `MP-GEN-5` Campaign 的产品/落地页 URL（source_urls）也未被注入 prompt — Marketing Plan 任务即使提到产品也不知道客户网站的对应产品页 URL，无法生成内链锚点。修复：在 prompt 注入产品页清单，让 Claude 在任务 description 里使用（与 Phase 14.G Site Knowledge Graph 协同）
 
 > 每次上线新功能时在此追加。格式：**[完成日期]** — Phase ID + 描述 + Commit 引用。
 > 此日志从 CLAUDE.md §十五.C 迁移至此（2026-05-10），CLAUDE.md 不再维护历史日志。

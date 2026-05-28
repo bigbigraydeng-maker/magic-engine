@@ -215,36 +215,30 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-29 10:34 NZST （**Phase 20.0 全部 P20.0.1–9 完成** ✅，等 PM 验收 + merge）
+> 最后更新：2026-05-29 11:07 NZST （**Phase 14.B WP 发布质量改进 开发中** 🔄）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **PM 操作 🔴** | Supabase 跑 migration：`20260530000001_self_service_onboarding.sql`（+ 历史 20260603/20260610） | ⚠️ 待操作 |
-| **PM 验收 P20.0** | M1：Prospect CTA → Portal Overview 正常加载；M2：`/portal/[id]/discovery` 完整报告 | ⚠️ PM 验收 |
-| **go merge** | PM 输入 `go merge` 合并 Phase 20.0 PR 到 main | ⚠️ PM 授权 |
-| **PM 决定** | 下一 Phase：Phase 21（AI Factory）/ Phase 22（Data Engine）/ Phase 18.A（Meta Ads） | ⚠️ PM 决定 |
+| **P14.B.1** | Yoast SEO 字段自动写入：WP 连接页加「安装 SEO 扩展」按钮 + mu-plugin + `yoast_plugin_installed` 字段 | 🔴 开发中 |
+| **P14.B.2** | 取消发布时 DELETE WP 草稿 + `website_publish_jobs` → `rolled_back` | 🔴 待开发 |
+| **P14.B.3** | GEO 指令城市一致性：prompt 改用 `audience_signals.location` 为权威城市 + UI 验证 | 🔴 待开发 |
+| **P14.B.4** | Quality Check 第8项：内链数量检测（≥3条客户域名链接） | 🟡 待开发 |
+| **P14.B.5** | `primary_keyword` 为 null 时预发布橙色警告 + Blog Studio 自动写入 | 🟡 待开发 |
+| **P14.B.6** | ME Settings → WP 默认发布分类 ID 字段 | 🟡 待开发 |
+| **P14.B.7** | 发布成功后一键 GSC 索引请求按钮 | 🟢 待开发 |
 
 **已完成全景（最近几个 Phase）**：
-- ✅ **Phase 23 完整闭环**（PR #112，5 commit）：
-  - **23.A+D**：4 张 L3 记忆表 + MemoryService + 诸葛亮注入 + 决策历史自动写入
-  - **23.B**：FDE 标注 UI（执行看板抽屉一键标记）
-  - **23.D.2**：张骞/华佗/鲁班 注入 L3 记忆 + 共享 `formatMemoryForPrompt`
-  - **23.C**：自动抽取器（cron + 手动触发；outcomes→patterns/failed/preferences）
-  - **23.E**：FDE 仪表盘客户记忆库页（四 tab 浏览 + 行级编辑 + 抽取/导出）
-- ✅ **Phase 20.D**：`fde_manual` source migration + `/execution/manual` API + `FdeManualEntryModal` + 看板「＋ 录入工作」按钮 + FDE 分组 + 拖拽排序 + Portal 分组展示 + `PlanTask.requires` 素材标注
-- ✅ **Phase 12.C**（P12.C.1–3 merge）：飞轮聚合视图 + 华佗置信度反哺 + Publer engagement 回流
-- ✅ **Phase 17.A**（P17.A.1–A.6 全部 merge）：GSC/GA4 数据回流 + 飞轮归因桥接 + 每日 cron + 客户「数据」tab
-- ✅ **Phase 19.A–E**（PR #95）：89 个 `/api/clients/[id]/*` 路由 IDOR 封堵 + NEXT_PUBLIC 密钥泄漏清除
-- ✅ **Phase 17.A**（P17.A.1–A.6 全部 merge）：GSC/GA4 数据回流 + 飞轮归因桥接 + 每日 cron + 客户「数据」tab
-- ✅ **Phase 14.A.1–8**：全部完成，等 PM 运行 migration 验收
+- ✅ **Phase 14.A.1–8**：WP + Shopify connector 全部完成，已推送
+- ✅ **Phase 23 完整闭环**（PR #112）：L3 记忆四表 + MemoryService + 四 Agent 注入 + 自动抽取器 + FDE 记忆库页
+- ✅ **Phase 19.A–E**：89 路由 IDOR 修复 + NEXT_PUBLIC 密钥清除
+- ✅ **Phase 17.A**：GSC/GA4 数据回流 + 每日 cron + 客户「数据」tab
 
-**下一个候选**：
-- 📋 **Phase 21** — AI Factory（生产能力 — 与 Phase 23 记忆协同）
-- 📋 **Phase 22** — Data Engine（学习层 — 喂养 Phase 23 抽取器）
-- 📋 **Phase 18.A** — Meta Ads MVP：诊断→Fix 按钮接线 Meta MCP（P18.A.1–A.3）
-- 📋 **Phase 17.B** — Meta Insights 社媒数据回流（补全 Phase 17 数据源矩阵）
+**本 Phase 结束后候选**：
+- 📋 **Phase 21** — AI Factory
+- 📋 **Phase 22** — Data Engine
+- 📋 **Phase 18.A** — Meta Ads MVP
 
-下一 session：`go merge` 合 PR #112 → 等 Render 部署 → `继续 Phase 21` / `继续 Phase 22` / `开始 Phase 18.A` / `开始 Phase 17.B`（等 PM 决定）
+下一 session 启动咒语：`继续 Phase 14.B 第 X 任务 P14.B.X`
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox
