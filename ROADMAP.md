@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-29 11:24 NZST · 当前阶段：**Phase 14.B WP 发布质量改进（7项）开发中 🔄；Phase 14.A Website Connector 全部完成 ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-29 11:28 NZST · 当前阶段：**Phase 14.B WP 发布质量改进 P14.B.0–7 全部完成 ✅ PR #120 等合并；Phase 14.A Website Connector ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -1821,21 +1821,21 @@ website_publish_jobs
 3. 每次发布在 `website_publish_jobs` 有完整记录（快照 + hash + 状态）
 4. 发布成功后 `flywheel_actions` 有对应记录
 
-### Phase 14.B — WP 发布质量改进（E2E 测试发现，7 项）⭐ 待开发
+### Phase 14.B — WP 发布质量改进（E2E 测试发现，7 项）✅ 已完成 PR #120
 
-> **登记日期**：2026-05-29 · **触发**：完整 Kanban→Generate→WP Publish E2E 测试后系统性总结，影响所有 WP 客户。
+> **登记日期**：2026-05-29 · **完成**：2026-05-30 · **触发**：完整 Kanban→Generate→WP Publish E2E 测试后系统性总结，影响所有 WP 客户。
 >
 > **范围说明**：Yoast mu-plugin 问题影响**所有 WP 网站客户**（非 Oztop 特有），每个 WP 域名安装一次即可。
 
 | 任务 | 内容 | 优先级 |
 |------|------|--------|
-| **P14.B.1** | **Yoast SEO 字段自动写入**：WP 连接测试通过后，增加「安装 SEO 扩展」一键按钮；ME 通过 WP Application Password 上传 `me-yoast-rest-api.php` mu-plugin（注册 `_yoast_wpseo_title` / `_yoast_wpseo_metadesc` / `_yoast_wpseo_focuskw` 为 REST API 可写），`cms_connections` 表加 `yoast_plugin_installed` boolean 字段标记状态 | 🔴 高 |
-| **P14.B.2** | **取消发布自动清理 WP 草稿**：用户点「取消」时调用 `DELETE /wp-json/wp/v2/posts/{id}`，并将 `website_publish_jobs.status` 改为 `rolled_back`；防止孤儿草稿堆积在客户 WP 后台 | 🔴 高 |
-| **P14.B.3** | **GEO 指令城市一致性修复**：博客生成 system prompt 改为使用 `audience_signals.location` 作为权威城市（而非 `primary_recommendation` 文本），避免 `primary_recommendation` 里有错误城市名时污染生成内容；GEO 指令编辑界面加验证：文本城市与 `audience_signals.location` 不一致时弹橙色警告 | 🔴 高 |
-| **P14.B.4** | **Quality Check 第8项：内链检测**：检查 `html_body` 中属于客户域名的 `<a href>` 数量；≥3 条绿色通过，1-2 条橙色警告，0 条红色失败（附提示：确认 client_site_pages 已爬取） | 🟡 中 |
-| **P14.B.5** | **primary_keyword 为 null 时预发布警告**：Review 页面若 `primary_keyword` 为空，在「发布到 WordPress」按钮旁显示橙色提示「未设置 Focus Keyphrase，Yoast 关键词字段将为空」；Blog Studio 生成时自动从 topic 写入 `primary_keyword` | 🟡 中 |
-| **P14.B.6** | **WP 默认发布分类 ID**：ME Settings → Website Connection 页面增加「默认分类 ID」可选字段；发布时带入 `categories: [id]`；Oztop 示例：Flooring 分类 ID | 🟡 中 |
-| **P14.B.7** | **发布后一键 GSC 索引请求**：WP 发布成功确认后，弹出「Request GSC Indexing」按钮；调用现有 Phase 17.A 的 GSC API，写入 `flywheel_actions`（action_type=gsc_index_request） | 🟢 低 |
+| ✅ **P14.B.1** | Yoast SEO 字段探测：CmsPanel Yoast 卡 + PHP snippet 复制 + 验证安装 probe 按钮；`yoast_plugin_installed` flag 持久化 | 🔴 高 |
+| ✅ **P14.B.2** | 取消发布自动清理 WP 草稿：`action:'rollback'` + `deleteWordpressPost/Page` + `rolled_back` 状态 | 🔴 高 |
+| ✅ **P14.B.3** | GEO 城市一致性：`getActiveGeoHtml` 返回 `authoritativeLocation`，blog generator 注入 CLIENT LOCATION 覆盖指令；DirectiveEditor 城市冲突警告 | 🔴 高 |
+| ✅ **P14.B.4** | 内链 QC 第8项：`internal-link-checker.ts` + `blog_posts.quality_check` JSONB 持久化 | 🟡 中 |
+| ✅ **P14.B.5** | `primary_keyword` 缺失橙色警告芯片（PublishToWebsitePanel） | 🟡 中 |
+| ✅ **P14.B.6** | WP 默认分类 ID：`wp_default_category_id` 字段 + PATCH `/cms/wordpress/category` + CmsPanel 编辑 | 🟡 中 |
+| ✅ **P14.B.7** | 发布后 GSC 索引请求按钮：Indexing API client + `/gsc/index-request` route + re-auth 降级 | 🟢 低 |
 
 ### Phase 14.B 验收关卡
 
@@ -2816,6 +2816,10 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 ---
 
 ## 9. 功能完成日志
+
+### 2026-05-30（Phase 14.B — WP 发布质量改进 7 项）
+
+- **P14.B.1–7 全部完成（PR #120）** — Yoast 探测+mu-plugin snippet、rollback 草稿、GEO 城市一致性、内链 QC check、primary_keyword 警告、WP 默认分类 ID、GSC 索引请求按钮
 
 - **P23.E** — Memory 浏览/编辑/导出：FDE 仪表盘新增「客户记忆库」页（四 tab + 行级编辑 + 抽取 + 导出 JSON）
 - **P23.C** — L3 记忆自动抽取器：从 flywheel_outcomes 推导 patterns/failed/preferences + 回填 decision_history
