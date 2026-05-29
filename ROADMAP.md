@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-29 19:56 NZST · 当前阶段：**Phase 14.B WP 发布质量改进 P14.B.0–7 全部完成 ✅ PR #120 等合并；Phase 14.A Website Connector ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-29 20:06 NZST · 当前阶段：**Phase 14.B WP 发布质量改进 P14.B.0–7 全部完成 ✅ PR #120 等合并；Phase 14.A Website Connector ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -1855,8 +1855,8 @@ website_publish_jobs
 | ✅ **P14.C.2** | 看板「忽略」按钮持久化（PATCH `status='dismissed'`） | 🔴 高 | 30m |
 | ✅ **P14.C.3** | 「重新生成策略」去重（`(client_id, proposed_title)` unique index + ON CONFLICT） | 🔴 高 | 45m |
 | ✅ **P14.C.4** | JSON-LD Schema 注入 WP/Shopify/GitHub 发布管道（用 `buildBlogHtml()` 替代 `html_body`） | 🔴 高 | 45m |
-| ⬜ **P14.C.5** | 飞轮 outcome 按 `primary_keyword` 聚合 → 反哺选题（华佗 prompt + 选题分析器读 outcomes） | 🟡 中 | 90m |
-| ⬜ **P14.C.6** | GitHub PR merge webhook 回填 `published_at` + 自动触发 GSC 索引 | 🟡 中 | 90m |
+| ✅ **P14.C.5** | 飞轮 outcome 按 `content_mode` 聚合 → 反哺选题（scorer 注入 modeBoosts） | 🟡 中 | 90m |
+| ✅ **P14.C.6** | GitHub PR merge webhook 回填 `published_at` + 自动触发 GSC 索引 | 🟡 中 | 90m |
 
 **验收关卡（M1 = P0 完成，M2 = P1 完成）：**
 - **M1**：连续生成 3 篇博客无殭尸状态；看板刷新后忽略仍生效；WP 发布的页面有 BlogPosting JSON-LD（用 Schema 测试工具验证）
@@ -2855,8 +2855,10 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 
 ## 9. 功能完成日志
 
-### 2026-05-29（Phase 14.C — SEO 生产期稳定性 P0 完成）
+### 2026-05-29（Phase 14.C — SEO 生产期稳定性 + 飞轮闭环 全部完成 6/6）
 
+- **P14.C.6** — GitHub PR merge webhook：HMAC 验签 + 回填 published_at + 自动 GSC 索引
+- **P14.C.5** — 飞轮闭环：SEO outcome 按 content_mode 聚合，scorer 按历史成功率 +2/+6/+10 boost
 - **P14.C.4** — JSON-LD BlogPosting schema 注入 WP/Shopify/GitHub 三条发布路径
 - **P14.C.3** — 「重新生成策略」加 (client_id, proposed_title) unique index，upsert ignoreDuplicates
 - **P14.C.2** — 看板「忽略」按钮持久化到 DB（PATCH status='dismissed' + 乐观更新 + 回滚）

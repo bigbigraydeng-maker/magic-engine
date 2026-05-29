@@ -30,6 +30,8 @@ services:
         value: au
       - key: GITHUB_TOKEN
         sync: false
+      - key: GITHUB_WEBHOOK_SECRET
+        sync: false
       - key: PUBLER_API_KEY
         sync: false
       - key: PUBLER_WORKSPACE_ID
