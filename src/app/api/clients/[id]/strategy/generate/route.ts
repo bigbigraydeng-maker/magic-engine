@@ -31,6 +31,8 @@ export interface GenerateResponse {
   strategy_run_id: string
   items: StrategyItem[]
   count: number
+  /** P14.C.3: candidates skipped because (client_id, proposed_title) already exists. */
+  skipped_duplicates?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -107,23 +109,34 @@ export async function POST(
     // Step 5: Sort by priority_score DESC
     scoredItems.sort((a, b) => b.priority_score - a.priority_score)
 
-    // Step 6: Bulk insert into DB, returning the server-generated rows
+    // Step 6: Upsert into DB. P14.C.3: ignore rows whose (client_id, proposed_title)
+    // already exists so re-running strategy does not pollute the kanban with
+    // duplicate candidates. Existing rows keep their current status/strategy_run_id;
+    // only genuinely new candidates are inserted.
     const { data: inserted, error: insertError } = await supabaseAdmin
       .from('content_strategy_items')
-      .insert(scoredItems)
+      .upsert(scoredItems, {
+        onConflict:        'client_id,proposed_title',
+        ignoreDuplicates:  true,
+      })
       .select()
 
-    if (insertError || !inserted) {
+    if (insertError) {
       return NextResponse.json(
-        { error: insertError?.message ?? 'Failed to insert strategy items' },
+        { error: insertError.message ?? 'Failed to insert strategy items' },
         { status: 500 }
       )
     }
 
-    const items = inserted as StrategyItem[]
+    const items = (inserted ?? []) as StrategyItem[]
 
     return NextResponse.json(
-      { strategy_run_id, items, count: items.length } satisfies GenerateResponse,
+      {
+        strategy_run_id,
+        items,
+        count:                items.length,
+        skipped_duplicates:   scoredItems.length - items.length,
+      } satisfies GenerateResponse,
       { status: 200 }
     )
   } catch (err) {
