@@ -5,6 +5,7 @@
  *
  * Query parameters:
  * - status (optional): filter by StrategyStatus
+ * - exclude_status (optional): exclude rows with this status (e.g. "dismissed")
  * - run_id (optional): filter by strategy_run_id
  * - limit (optional): integer 1-100, default 50 (clamped silently)
  * - offset (optional): integer >= 0, default 0
@@ -71,6 +72,7 @@ export async function GET(
     // Parse query parameters
     const { searchParams } = new URL(req.url)
     const statusParam = searchParams.get('status')
+    const excludeStatusParam = searchParams.get('exclude_status')
     const runIdParam = searchParams.get('run_id')
     const limitParam = searchParams.get('limit')
     const offsetParam = searchParams.get('offset')
@@ -80,6 +82,15 @@ export async function GET(
       return NextResponse.json(
         {
           error: `Invalid status "${statusParam}". Must be one of: ${VALID_STATUSES.join(', ')}`,
+        },
+        { status: 400 }
+      )
+    }
+
+    if (excludeStatusParam !== null && !isValidStatus(excludeStatusParam)) {
+      return NextResponse.json(
+        {
+          error: `Invalid exclude_status "${excludeStatusParam}". Must be one of: ${VALID_STATUSES.join(', ')}`,
         },
         { status: 400 }
       )
@@ -108,6 +119,10 @@ export async function GET(
 
     if (statusParam !== null) {
       query = query.eq('status', statusParam)
+    }
+
+    if (excludeStatusParam !== null) {
+      query = query.neq('status', excludeStatusParam)
     }
 
     if (runIdParam !== null) {
