@@ -20,6 +20,17 @@ export interface MetaAdsInsights {
   ctr: number | null
 }
 
+export interface MetaCampaignInsight {
+  campaign_id:   string
+  campaign_name: string
+  spend:         number
+  impressions:   number
+  clicks:        number
+  roas:          number | null
+  ctr:           number | null
+  cpc:           number | null
+}
+
 interface GraphInsightsData {
   spend?: string
   impressions?: string
@@ -28,6 +39,11 @@ interface GraphInsightsData {
   actions?: Array<{ action_type: string; value: string }>
   cost_per_action_type?: Array<{ action_type: string; value: string }>
   outbound_clicks_ctr?: Array<{ action_type: string; value: string }>
+}
+
+interface GraphCampaignRow extends GraphInsightsData {
+  campaign_id?:   string
+  campaign_name?: string
 }
 
 /**
@@ -82,6 +98,82 @@ export async function getAdAccountInsights(
   if (!row) return null
 
   return parseInsights(row)
+}
+
+/**
+ * Fetch campaign-level ad insights from Meta Graph API.
+ * Returns up to `limit` campaigns sorted by spend descending.
+ *
+ * @param adAccountId  e.g. "act_123456789"
+ * @param accessToken  Meta system user access token
+ * @param since        ISO date string e.g. "2026-04-01"
+ * @param until        ISO date string e.g. "2026-04-30"
+ * @param limit        Max campaigns to return (default 10)
+ */
+export async function getAdCampaignInsights(
+  adAccountId: string,
+  accessToken: string,
+  since: string,
+  until: string,
+  limit: number = 10,
+): Promise<MetaCampaignInsight[]> {
+  const fields = [
+    'campaign_id',
+    'campaign_name',
+    'spend',
+    'impressions',
+    'clicks',
+    'purchase_roas',
+    'outbound_clicks_ctr',
+  ].join(',')
+
+  const params = new URLSearchParams({
+    fields,
+    time_range: JSON.stringify({ since, until }),
+    access_token: accessToken,
+    level: 'campaign',
+    sort:  'spend_descending',
+    limit: String(limit),
+  })
+
+  const url = `${GRAPH_BASE}/${adAccountId}/insights?${params.toString()}`
+
+  let res: Response
+  try {
+    res = await fetch(url)
+  } catch (err) {
+    console.error('[meta/client] campaign fetch error:', err)
+    return []
+  }
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    console.error(`[meta/client] campaign HTTP ${res.status}:`, body.slice(0, 300))
+    return []
+  }
+
+  const json = await res.json() as { data?: GraphCampaignRow[] }
+  return (json.data ?? []).map(parseCampaignRow).filter(Boolean) as MetaCampaignInsight[]
+}
+
+function parseCampaignRow(row: GraphCampaignRow): MetaCampaignInsight | null {
+  if (!row.campaign_id) return null
+
+  const base    = parseInsights(row)
+  const ctr     = row.outbound_clicks_ctr?.[0]
+    ? parseFloat(row.outbound_clicks_ctr[0].value) / 100 || null
+    : base.ctr
+
+  return {
+    campaign_id:   row.campaign_id,
+    campaign_name: row.campaign_name ?? row.campaign_id,
+    spend:         base.spend,
+    impressions:   base.impressions,
+    clicks:        base.clicks,
+    roas:          base.roas,
+    ctr,
+    cpc:           base.cpc,
+  }
 }
 
 function parseInsights(row: GraphInsightsData): MetaAdsInsights {

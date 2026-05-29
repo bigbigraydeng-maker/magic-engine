@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-29 18:24 NZST · 当前阶段：**Phase 14.B WP 发布质量改进 P14.B.0–7 全部完成 ✅ PR #120 等合并；Phase 14.A Website Connector ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-29 22:34 NZST · 当前阶段：**Phase 14.B WP 发布质量改进 P14.B.0–7 全部完成 ✅ PR #120 等合并；Phase 14.A Website Connector ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2076,6 +2076,18 @@ AI 可见度层（ME 独有 ✅）
 - `src/lib/gsc/client.ts`：新增 `fetchGscSnapshot()` 并行拉取 query + page 两个维度（各 50 行）
 - `POST /api/clients/[id]/gsc/sync`：从 connector config 取 site_url → 调 GSC API → upsert 快照
 - `GET /api/clients/[id]/gsc/snapshots`：读取历史快照列表，供报告 / 看板使用
+
+### Phase 17.B — Meta Ads Insights 回流（广告数据拉取）
+
+> **登记日期**：2026-05-29 · **状态**：🔥 进行中（分支 `feat/phase-17b-meta-ads-insights`）
+>
+> **背景**：Phase 12.B.2 已建 `meta_ads_snapshots`（账户级汇总）+ sync 路由，但缺少 Campaign 细化、UI 展示和每日自动同步。Phase 17.B 补完这三块，使 Meta Ads 数据与 GSC/GA4 数据在「数据」tab 并列显示。
+
+| ID | 任务 | 状态 |
+|----|------|------|
+| **P17.B.1** | Campaign 级别细化：migration + `getAdCampaignInsights()` + sync 路由更新 + `GET /meta-ads/snapshots` | ⬜ 进行中 |
+| **P17.B.2** | Meta Ads UI：客户主页「数据」tab 新增广告概览卡片（花费/ROAS/CTR + Top Campaigns 表） | ⬜ 待开工 |
+| **P17.B.3** | 每日 cron：将 Meta Ads 同步加入 `google-data-pullback-daily` | ⬜ 待开工 |
 
 ---
 

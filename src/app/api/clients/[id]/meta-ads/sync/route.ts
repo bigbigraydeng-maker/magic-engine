@@ -19,7 +19,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { getAdAccountInsights } from '@/lib/meta/client'
+import { getAdAccountInsights, getAdCampaignInsights } from '@/lib/meta/client'
 
 interface RouteParams {
   params: { id: string }
@@ -72,8 +72,12 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     )
   }
 
-  // ── 4. Fetch insights from Meta Graph API ─────────────────────────────────
-  const insights = await getAdAccountInsights(adAccountId, accessToken, since, until)
+  // ── 4. Fetch account + campaign insights in parallel ─────────────────────
+  const [insights, campaigns] = await Promise.all([
+    getAdAccountInsights(adAccountId, accessToken, since, until),
+    getAdCampaignInsights(adAccountId, accessToken, since, until),
+  ])
+
   if (!insights) {
     return NextResponse.json(
       { error: 'Meta Graph API call failed. Check server logs for details.' },
@@ -85,18 +89,19 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   const { data: snapshot, error: insertError } = await supabaseAdmin
     .from('meta_ads_snapshots')
     .insert({
-      client_id: clientId,
+      client_id:    clientId,
       ad_account_id: adAccountId,
       period_start: since,
-      period_end: until,
-      spend: insights.spend,
-      impressions: insights.impressions,
-      clicks: insights.clicks,
-      conversions: insights.conversions,
-      roas: insights.roas,
-      cpc: insights.cpc,
-      ctr: insights.ctr,
-      raw_data: insights,
+      period_end:   until,
+      spend:        insights.spend,
+      impressions:  insights.impressions,
+      clicks:       insights.clicks,
+      conversions:  insights.conversions,
+      roas:         insights.roas,
+      cpc:          insights.cpc,
+      ctr:          insights.ctr,
+      campaigns:    campaigns.length > 0 ? campaigns : null,
+      raw_data:     insights,
     })
     .select('id')
     .single()
@@ -118,10 +123,11 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   }
 
   return NextResponse.json({
-    snapshotId: snapshot.id,
+    snapshotId:  (snapshot as { id: string }).id,
     adAccountId,
     periodStart: since,
-    periodEnd: until,
-    metrics: insights,
+    periodEnd:   until,
+    metrics:     insights,
+    campaigns,
   })
 }
