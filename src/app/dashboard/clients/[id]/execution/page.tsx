@@ -25,7 +25,7 @@ import {
 } from './execution-view-model'
 import { FdeManualEntryModal } from './_components/FdeManualEntryModal'
 import { DataPullbackSection } from './_components/DataPullbackSection'
-import { MemoryAnnotationPanel } from './_components/MemoryAnnotationPanel'
+// MemoryAnnotationPanel removed — Phase 20.D item 6: system handles flywheel recording automatically
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -137,10 +137,10 @@ function LinkedContentCard({ post, clientId }: { post: LinkedContentPost; client
   )
 }
 
-const FIX_TYPE_META: Record<string, { label: string; cls: string }> = {
-  me_auto:     { label: 'ME 自动',  cls: 'bg-blue-100 text-blue-700' },
-  fde_manual:  { label: 'FDE 手动', cls: 'bg-cyan-50 text-cyan-800' },
-  third_party: { label: '第三方',   cls: 'bg-gray-100 text-gray-600' },
+const FIX_TYPE_META: Record<string, { label: string; cls: string; icon?: string }> = {
+  me_auto:     { label: 'ME 自动',  cls: 'bg-blue-100 text-blue-700',  icon: '⚡' },
+  fde_manual:  { label: 'FDE 手动', cls: 'bg-cyan-50 text-cyan-800',   icon: '🛠' },
+  third_party: { label: '第三方',   cls: 'bg-gray-100 text-gray-600',  icon: '🔗' },
 }
 
 const STATUS_META: Record<ExecutionItemStatus, { label: string; color: string }> = {
@@ -644,17 +644,8 @@ function TaskDetailDrawer({
 
   const execButton = (() => {
     if (!execTarget) return null
-    if (execTarget.mode === 'in_house') {
-      const label = FLYWHEEL_IN_HOUSE_LABEL[execTarget.flywheel] ?? execTarget.flywheel
-      return (
-        <button
-          onClick={() => onOpenFlywheel(item, execTarget)}
-          className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-cyan-200 bg-cyan-50 px-3 text-xs font-black text-cyan-800 transition-colors hover:bg-cyan-100"
-        >
-          Run in {label}
-        </button>
-      )
-    }
+    // in_house flywheel recording removed (item 6) — system auto-records, no FDE manual entry
+    if (execTarget.mode === 'in_house') return null
     if (execTarget.mode === 'third_party') {
       const route = FLYWHEEL_THIRD_PARTY_ROUTE[execTarget.flywheel]
       if (!route) return null
@@ -797,17 +788,19 @@ function TaskDetailDrawer({
         {/* Outcome chip */}
         {item.outcome && <OutcomeChip outcome={item.outcome} />}
 
-        {/* Phase 23.B — 记忆标注（completed / in_progress 项可见） */}
-        {(isDone || item.status === 'in_progress') && (
-          <MemoryAnnotationPanel
-            clientId={clientId}
-            itemId={item.id}
-            dimension={item.dimension ?? null}
-            flywheel={(item.execution_target as { flywheel?: string } | null)?.flywheel ?? null}
-          />
-        )}
-
         {/* 操作按钮区 */}
+        {/* Item 5: 进行中 → 进度条代替"生成内容"按钮 */}
+        {item.status === 'in_progress' && (
+          <div className="w-full rounded-lg border border-cyan-100 bg-cyan-50/60 px-3 py-2.5">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[11px] font-black text-cyan-700 uppercase tracking-wide">制作中</span>
+              <span className="text-[10px] text-cyan-500">系统处理中…</span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-cyan-100">
+              <div className="h-full animate-pulse rounded-full bg-cyan-500" style={{ width: '70%' }} />
+            </div>
+          </div>
+        )}
         <div className="flex flex-wrap gap-2 pt-1">
           <button
             onClick={() => onOpenChat(item)}
@@ -815,7 +808,8 @@ function TaskDetailDrawer({
           >
             Luban
           </button>
-          {CONTENT_STUDIO_DIMENSIONS.has(item.dimension ?? '') && (
+          {/* Item 5: 只在 pending 显示；Item 4: 自主飞轮不显示 */}
+          {CONTENT_STUDIO_DIMENSIONS.has(item.dimension ?? '') && !isAutonomousItem(item) && item.status === 'pending' && (
             <button
               onClick={() => onOpenStudio(item)}
               className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-cyan-200 bg-cyan-50 px-3 text-xs font-black text-cyan-800 transition hover:bg-cyan-100"
@@ -823,7 +817,8 @@ function TaskDetailDrawer({
               Generate content
             </button>
           )}
-          {execButton}
+          {/* Item 4: 自主飞轮操作全部关闭；Item 6: in_house 在 execButton 内已 return null */}
+          {!isAutonomousItem(item) && execButton}
         </div>
 
         {/* 工作日志时间线 */}
@@ -1369,6 +1364,10 @@ export default function ExecutionPage() {
   const [detailEditable, setDetailEditable] = useState(false)
   // 维度过滤
   const [activeDimension, setActiveDimension] = useState<string>('all')
+  // 状态过滤（全部/待处理/进行中/已完成）
+  const [statusFilter, setStatusFilter] = useState<string>('all')
+  // 客户名（面包屑导航用）
+  const [clientName, setClientName] = useState<string | null>(null)
   // Phase 20.D: FDE 手动录入
   const [showManualEntry, setShowManualEntry] = useState(false)
   // 后台生成中的执行项 ID 集合（关闭 drawer 后仍在 AI 生成，kanban 卡片显示"制作中"）
@@ -1440,6 +1439,18 @@ export default function ExecutionPage() {
   }, [clientId, prescriptionId])
 
   useEffect(() => { void fetchItems() }, [fetchItems])
+
+  // 客户名（面包屑展示用）— 非阻塞
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}`)
+        if (!res.ok) return
+        const json = await res.json() as { client?: { name: string } }
+        if (json.client?.name) setClientName(json.client.name)
+      } catch { /* non-fatal */ }
+    })()
+  }, [clientId])
 
   // 静默刷新后同步 detailItem（保持抽屉内容最新）
   useEffect(() => {
@@ -1712,7 +1723,11 @@ export default function ExecutionPage() {
     return merged
   }, [bgGeneratingIds, imageGenActiveIds])
 
-  const filteredItems       = activeDimension === 'all' ? items : items.filter(i => i.dimension === activeDimension)
+  const filteredItems = (() => {
+    let result = activeDimension === 'all' ? items : items.filter(i => i.dimension === activeDimension)
+    if (statusFilter !== 'all') result = result.filter(i => i.status === statusFilter)
+    return result
+  })()
   const availableDimensions = Array.from(new Set(items.map(i => i.dimension).filter(Boolean))) as string[]
   const completedCount      = filteredItems.filter(i => i.status === 'completed').length
   const prescriptionGroups  = buildExecutionGroups(filteredItems, prescriptions, marketingPlans)
@@ -1771,12 +1786,30 @@ export default function ExecutionPage() {
   return (
     <div className="min-h-screen bg-[#f6f7f2]">
       {/* Header */}
-      <div className="sticky top-0 z-10 border-b border-slate-200 bg-[#f6f7f2]/95 px-4 py-4 backdrop-blur md:px-6">
+      <div className="sticky top-0 z-10 border-b border-slate-200 bg-[#f6f7f2]/95 px-4 py-3 backdrop-blur md:px-6">
+        {/* 面包屑导航 — FDE 随时知道自己在哪 */}
+        <div className="mx-auto max-w-7xl mb-2.5">
+          <nav className="flex items-center gap-1.5 text-[11px] font-semibold">
+            <Link href="/dashboard" className="text-slate-400 hover:text-indigo-600 transition-colors">← Dashboard</Link>
+            {clientName && (
+              <>
+                <span className="text-slate-300">/</span>
+                <Link
+                  href={`/dashboard/clients/${clientId}`}
+                  className="max-w-[180px] truncate text-slate-500 hover:text-indigo-600 transition-colors"
+                >
+                  {clientName}
+                </Link>
+              </>
+            )}
+            <span className="text-slate-300">/</span>
+            <span className="font-black text-slate-800">执行看板</span>
+          </nav>
+        </div>
         <div className="mx-auto flex max-w-7xl flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="text-[11px] font-black uppercase tracking-[0.14em] text-cyan-800">Execution board</p>
-            <h1 className="mt-1 text-2xl font-black text-slate-950">执行看板</h1>
-            <p className="mt-1 text-sm font-semibold text-slate-500">按阶段跟踪处方落地、内容生成与执行证明</p>
+            <h1 className="text-xl font-black text-slate-950">{clientName ?? '执行看板'}</h1>
+            <p className="mt-0.5 text-xs font-semibold text-slate-500">按阶段跟踪处方落地、内容生成与执行证明</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {/* 主操作：录入工作 */}
@@ -1879,6 +1912,38 @@ export default function ExecutionPage() {
                   }`}
                 >
                   {t.label}
+                </button>
+              ))}
+            </div>
+          )
+        })()}
+
+        {/* 状态过滤 chips */}
+        {(() => {
+          const STATUS_TABS = [
+            { v: 'all',         label: '全部' },
+            { v: 'pending',     label: '⏳ 待处理' },
+            { v: 'in_progress', label: '🔄 进行中' },
+            { v: 'completed',   label: '✅ 已完成' },
+          ]
+          const counts: Record<string, number> = {
+            pending:     items.filter(i => i.status === 'pending').length,
+            in_progress: items.filter(i => i.status === 'in_progress').length,
+            completed:   items.filter(i => i.status === 'completed').length,
+          }
+          return (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {STATUS_TABS.map(t => (
+                <button
+                  key={t.v}
+                  onClick={() => setStatusFilter(t.v)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                    statusFilter === t.v
+                      ? 'bg-slate-900 text-white'
+                      : 'bg-white border border-gray-200 text-gray-600 hover:border-slate-400 hover:text-slate-700'
+                  }`}
+                >
+                  {t.label}{t.v !== 'all' && counts[t.v] !== undefined ? ` ${counts[t.v]}` : ''}
                 </button>
               ))}
             </div>
