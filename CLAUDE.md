@@ -215,15 +215,16 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-29 20:22 NZST （**Phase 14.C P14.C.1–6 全部完成** ✅，等 PM 验收 + merge）
+> 最后更新：2026-05-29 21:14 NZST （**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成**，PR #125 等 PM merge）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **PM 操作 🔴** | Supabase 跑 migration：`20260530000003_strategy_items_unique_title.sql` | ⚠️ 待操作 |
-| **PM 配置 🔴** | Render 加环境变量 `GITHUB_WEBHOOK_SECRET`；CTS GitHub repo 加 webhook 指向 `/api/cms/github/webhook` | ⚠️ 待操作 |
-| **PM 验收** | Phase 14.C 全部 6 项：连续 3 篇无殭尸 / 忽略持久 / WP JSON-LD / PR merge 后 published_at 自动 | ⚠️ PM 验收 |
-| **go merge** | PM 输入 `go merge` 合并 Phase 14.C PR 到 main | ⚠️ PM 授权 |
-| **Phase 14.D** | SEMrush 残留清理，全面接入 DataForSEO（14.C 完成后） | 📋 已登记 |
+| **PM 操作 🔴** | Supabase 跑 migration `20260603000001_platform_oauth_connections.sql` | ⚠️ 待操作 |
+| **GBP.0** | Google Cloud：enable Business Profile API + Account Management API，配置 OAuth consent screen，创建 credentials，设 `GOOGLE_OAUTH_CLIENT_ID` + `GOOGLE_OAUTH_CLIENT_SECRET` env vars | ⚠️ PM 操作 |
+| **PM 验收 P24** | 打开 `/dashboard/clients/[id]/settings` → 点「连接 Google Business Profile」→ Google 授权页 → 完成后绿色连接卡片出现 | ⚠️ PM 验收 |
+| **go merge** | PM 输入 `go merge` 合并 Phase 24.A PR #125 到 main | ⚠️ PM 授权 |
+| **Phase 24.B** | GBP 数据摄取（reviews、insights、location data 写入 DB） | 📋 24.A merge 后 |
+| **PM 操作（旧）** | Supabase 跑 `20260530000003_strategy_items_unique_title.sql`；Render 加 `GITHUB_WEBHOOK_SECRET`；合并 Phase 14.C PR | ⚠️ 待操作 |
 
 **已完成全景（最近几个 Phase）**：
 - ✅ **Phase 14.B 全部 P14.B.0–7**（PR #120，2 commit）：

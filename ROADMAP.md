@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-29 20:22 NZST · 当前阶段：**Phase 14.B WP 发布质量改进 P14.B.0–7 全部完成 ✅ PR #120 等合并；Phase 14.A Website Connector ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-29 21:14 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2854,6 +2854,17 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 ---
 
 ## 9. 功能完成日志
+
+### 2026-05-29（Phase 24.A — Platform OAuth Connector 全部完成 8/8）
+
+- **P24.A.1** — DB migration `platform_oauth_connections` + vocabulary layer（类型、常量、`toConnectionSummary`）
+- **P24.A.2** — Token Manager：`getValidToken` auto-refresh + `markConnectionError` + 自定义异常类
+- **P24.A.3** — OAuth start 路由：CSRF state cookie（nonce:clientId，HttpOnly，SameSite=Lax，600s），302 → Google
+- **P24.A.4** — OAuth callback 路由：CSRF 验证 + token 交换 + GBP 账户 API + 加密存储 + 清 cookie + 302 → settings
+- **P24.A.5** — Connection Store CRUD：`upsertConnection` / `revokeConnection` / `listConnections` / `getConnectionById`
+- **P24.A.6** — Client API `GET+DELETE /api/clients/[id]/platform/gbp`（列出 + 撤销，含租户隔离校验）
+- **P24.A.7** — Settings 页面 `/dashboard/clients/[id]/settings` + SettingsDrawer 「平台连接」Tab
+- **P24.A.8** — GbpPanel 5 态 UI（loading / error / disconnected / needs_reconnect / connected）；80 tests 全绿 PR #125
 
 ### 2026-05-29（Phase 14.C — SEO 生产期稳定性 + 飞轮闭环 全部完成 6/6）
 
