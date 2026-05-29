@@ -86,26 +86,34 @@ export default function ClientSettingsPage() {
           <GbpPanel clientId={clientId} />
         </section>
 
-        {/* Future providers placeholder */}
-        <section className="mt-6">
-          <h2 className="mb-3 font-black text-slate-800">
-            <span className="mr-2">🔮</span>即将推出
-          </h2>
+        {/* Other connectors — managed on the legacy connectors page */}
+        <section className="mt-8">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-base">🔗</span>
+            <h2 className="font-black text-slate-800">其他平台连接</h2>
+          </div>
+          <p className="mb-3 text-xs text-slate-500">
+            以下连接器在「Connectors」页面管理（前期 Phase 14 已上线）。后续会逐步迁移到本页统一管理。
+          </p>
           <div className="space-y-2">
             {[
-              { label: 'Google Search Console', icon: '🔍' },
-              { label: 'Google Ads', icon: '📢' },
+              { anchor: 'gsc',         label: 'Google Search Console', icon: '🔍', hint: 'GSC 搜索表现 + Indexing API' },
+              { anchor: 'ga4',         label: 'Google Analytics 4',    icon: '📈', hint: '网站真实流量数据' },
+              { anchor: 'google-ads',  label: 'Google 广告（公开扫描）', icon: '📢', hint: '透明度中心抓取' },
+              { anchor: 'meta-ads',    label: 'Facebook 主页',          icon: '📊', hint: 'Meta 广告库 + 公开粉丝数' },
             ].map(p => (
-              <div
-                key={p.label}
-                className="flex items-center gap-3 rounded-lg border border-dashed border-slate-200 bg-white px-4 py-3 text-sm text-slate-400"
+              <Link
+                key={p.anchor}
+                href={`/dashboard/clients/${clientId}/connectors/${p.anchor}`}
+                className="group flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 transition hover:border-cyan-300 hover:bg-cyan-50"
               >
                 <span>{p.icon}</span>
-                <span>{p.label}</span>
-                <span className="ml-auto text-[11px] font-bold uppercase tracking-wider text-slate-300">
-                  Coming soon
-                </span>
-              </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold">{p.label}</div>
+                  <div className="text-xs text-slate-500">{p.hint}</div>
+                </div>
+                <span className="text-cyan-600 opacity-0 transition group-hover:opacity-100">→</span>
+              </Link>
             ))}
           </div>
         </section>
