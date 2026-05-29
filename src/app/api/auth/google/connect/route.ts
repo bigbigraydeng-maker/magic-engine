@@ -10,11 +10,17 @@
  *
  * On success Google redirects to /api/auth/google/callback with code + state.
  *
- * Scopes requested: webmasters.readonly (GSC) + email (display only).
+ * Scopes requested (COMBINED_GOOGLE_SCOPES):
+ *   - webmasters.readonly  (Google Search Console)
+ *   - analytics.readonly   (Google Analytics 4)
+ *   - indexing             (Google Indexing API)
+ *   - email                (display only)
+ *
+ * A single consent covers GSC + GA4 + Indexing — clients only auth once.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { buildState, buildAuthUrl } from '@/lib/google-oauth/client'
+import { buildState, buildAuthUrl, COMBINED_GOOGLE_SCOPES } from '@/lib/google-oauth/client'
 
 function appUrl(): string {
   return process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3001'
@@ -30,7 +36,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const redirectUri = `${appUrl()}/api/auth/google/callback`
   const state       = buildState(clientId, flow)
-  const authUrl     = buildAuthUrl(state, redirectUri)
+  const authUrl     = buildAuthUrl(state, redirectUri, COMBINED_GOOGLE_SCOPES)
 
   return NextResponse.redirect(authUrl)
 }
