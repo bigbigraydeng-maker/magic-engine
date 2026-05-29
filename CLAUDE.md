@@ -215,28 +215,18 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-29 21:46 NZST （**Phase 14.E P14.E.1–6 全部完成** ✅ — SEO 生产就绪硬化，等 PM 验收 + merge → CTS/Oztop 胜场启动）
+> 最后更新：2026-05-29 23:09 NZST （**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成**，PR #125 等 PM merge）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **PM 验收 14.E** | 博客详情页：品牌 mention <3 时红条+按钮锁定 / published 后"在 GSC Inspect"按钮 / webhook response 多了 sitemap_ping 字段 | ⚠️ PM 验收 |
-| **go merge** | PM 输入 `go merge` 合并 Phase 14.E PR 到 main | ⚠️ PM 授权 |
-| **SEO 胜场启动** | merge 后 CTS Tours + Oztop 高强度 SEO 文章生产开跑 | 🚀 等绿灯 |
-| **观察 7 天指标** | Google 平均索引时间 / PM 每天选图耗时 / 飞轮 mode boost 是否真在调分 / 品牌 mention 命中率 | 📋 第一周指标 |
-| **Phase 14.F** | Visual Studio 自动 hero image（若 PM 选图 >30 min/天 → 立刻做） | 📋 已登记 |
-| **Phase 14.D** | SEMrush 残留清理，全面 DataForSEO | 📋 已登记 |
-| **Phase 14.K** | IndexNow + GSC Sitemaps API 完整接入（若 Google/Bing 索引 >3 天 → 启动） | 📋 已登记 |
+| **PM 操作 🔴** | Supabase 跑 migration `20260603000001_platform_oauth_connections.sql` | ⚠️ 待操作 |
+| **GBP.0** | Google Cloud：enable Business Profile API + Account Management API，配置 OAuth consent screen，创建 credentials，设 `GOOGLE_OAUTH_CLIENT_ID` + `GOOGLE_OAUTH_CLIENT_SECRET` env vars | ⚠️ PM 操作 |
+| **PM 验收 P24** | 打开 `/dashboard/clients/[id]/settings` → 点「连接 Google Business Profile」→ Google 授权页 → 完成后绿色连接卡片出现 | ⚠️ PM 验收 |
+| **go merge** | PM 输入 `go merge` 合并 Phase 24.A PR #125 到 main | ⚠️ PM 授权 |
+| **Phase 24.B** | GBP 数据摄取（reviews、insights、location data 写入 DB） | 📋 24.A merge 后 |
+| **PM 操作（旧）** | Supabase 跑 `20260530000003_strategy_items_unique_title.sql`；Render 加 `GITHUB_WEBHOOK_SECRET`；合并 Phase 14.C PR | ⚠️ 待操作 |
 
 **已完成全景（最近几个 Phase）**：
-- ✅ **Phase 14.E 全部 P14.E.1–6**（PR #TBD，1 branch）：
-  - P14.E.1: webhook merge 后 Google + Bing sitemap ping（best-effort，过渡方案）
-  - P14.E.2: indexing-client 新增 SERVICE_DISABLED / NOT_SUPPORTED_BY_API 错误码 + 顶部文档说明 API 真实限制
-  - P14.E.3: GeoCheck 接口加 blocker 字段，brand_mentions 标 blocker
-  - P14.E.4: UI Quality Checklist 红色 ❌ + "blocks publish" 标签
-  - P14.E.5: blocker fail 时 Approve/Mark Published/Publish to Website 三按钮全锁 + 顶部红 banner
-  - P14.E.6: published 博客加"🔍 在 GSC Inspect"跳转按钮
-- ✅ **Phase 14.C 全部 P14.C.1–6**（PR #123 + hotfix #124）：
-  - 殭尸 generating 扫除 / 忽略持久化 / 重新生成去重 / JSON-LD 三通道 / 飞轮 confidence 进 scorer / GitHub merge webhook
 - ✅ **Phase 14.B 全部 P14.B.0–7**（PR #120，2 commit）：
   - P14.B.0: migration（yoast_plugin_installed, wp_default_category_id, quality_check）
   - P14.B.1: Yoast probe（mu-plugin snippet + 验证安装 按钮）
