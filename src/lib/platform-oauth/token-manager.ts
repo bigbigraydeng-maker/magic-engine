@@ -171,17 +171,19 @@ async function persistRefreshedToken(
 }
 
 async function markConnectionError(connectionId: string, message: string): Promise<void> {
-  await supabaseAdmin
-    .from('platform_oauth_connections')
-    .update({
-      status:        CONNECTION_STATUS.ERROR,
-      error_message: message.slice(0, 500),   // guard against very long messages
-      updated_at:    new Date().toISOString(),
-    })
-    .eq('id', connectionId)
-    .catch(() => { /* best-effort — never throw from error-marking */ })
+  try {
+    await supabaseAdmin
+      .from('platform_oauth_connections')
+      .update({
+        status:        CONNECTION_STATUS.ERROR,
+        error_message: message.slice(0, 500),   // guard against very long messages
+        updated_at:    new Date().toISOString(),
+      })
+      .eq('id', connectionId)
+  } catch {
+    // best-effort — never throw from error-marking
+  }
 }
-
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
