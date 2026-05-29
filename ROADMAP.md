@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-29 22:34 NZST · 当前阶段：**Phase 14.B WP 发布质量改进 P14.B.0–7 全部完成 ✅ PR #120 等合并；Phase 14.A Website Connector ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-29 22:38 NZST · 当前阶段：**Phase 14.B WP 发布质量改进 P14.B.0–7 全部完成 ✅ PR #120 等合并；Phase 14.A Website Connector ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2085,9 +2085,9 @@ AI 可见度层（ME 独有 ✅）
 
 | ID | 任务 | 状态 |
 |----|------|------|
-| **P17.B.1** | Campaign 级别细化：migration + `getAdCampaignInsights()` + sync 路由更新 + `GET /meta-ads/snapshots` | ⬜ 进行中 |
-| **P17.B.2** | Meta Ads UI：客户主页「数据」tab 新增广告概览卡片（花费/ROAS/CTR + Top Campaigns 表） | ⬜ 待开工 |
-| **P17.B.3** | 每日 cron：将 Meta Ads 同步加入 `google-data-pullback-daily` | ⬜ 待开工 |
+| **P17.B.1** | Campaign 级别细化：migration + `getAdCampaignInsights()` + sync 路由更新 + `GET /meta-ads/snapshots` | ✅ 完成 2026-05-29 |
+| **P17.B.2** | Meta Ads UI：客户主页「数据」tab 新增广告概览卡片（花费/ROAS/CTR + Top Campaigns 表） | ✅ 完成 2026-05-29 |
+| **P17.B.3** | 每日 cron：将 Meta Ads 同步加入 `google-data-pullback-daily` | ✅ 完成 2026-05-29 |
 
 ---
 
@@ -2828,6 +2828,10 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 ---
 
 ## 9. 功能完成日志
+
+### 2026-05-29（Phase 17.B — Meta Ads Insights 回流）
+
+- **P17.B.1–3 全部完成** — Campaign 细化（`getAdCampaignInsights` + migration）、数据 tab 广告卡片、每日 cron 集成
 
 ### 2026-05-30（Phase 14.B — WP 发布质量改进 7 项）
 
