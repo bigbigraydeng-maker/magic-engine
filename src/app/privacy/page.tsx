@@ -6,7 +6,7 @@ export const metadata: Metadata = {
 }
 
 const CONTACT_EMAIL = 'bigbigraydeng@gmail.com'
-const SITE_URL = 'https://crazycontent-27u3.onrender.com'
+const SITE_URL = 'https://magicengine.com.au'
 const EFFECTIVE_DATE = '22 May 2025'
 
 export default function PrivacyPage() {

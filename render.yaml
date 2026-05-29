@@ -41,7 +41,9 @@ services:
       - key: CRON_SECRET
         sync: false
       - key: NEXT_PUBLIC_APP_URL
-        value: https://crazycontent-27u3.onrender.com
+        value: https://app.magicengine.com.au
+      - key: APP_URL
+        value: https://app.magicengine.com.au
       - key: ADMIN_EMAILS
         sync: false
       - key: CLIENT_VIEWERS
