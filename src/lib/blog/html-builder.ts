@@ -74,6 +74,64 @@ function escapeHtmlAttribute(value: string): string {
 }
 
 /**
+ * P14.C.4 — Build the <script type="application/ld+json"> block for a blog post.
+ * Used by all publish routes (WP / Shopify / GitHub) so every published page
+ * carries the BlogPosting schema for Google rich-results eligibility.
+ *
+ * Returns an empty string when minimum data is missing rather than throwing,
+ * so publishing never breaks because of metadata gaps.
+ */
+export function buildArticleSchemaScript(
+  post: ArticleSchemaPost,
+  siteUrl: string,
+  publisherName?: string,
+): string {
+  if (!post.title && !post.meta_title) return ''
+
+  const url = siteUrl && post.slug ? joinUrl(siteUrl, `/blog/${post.slug}`) : undefined
+  const schema: Record<string, unknown> = {
+    '@context':     'https://schema.org',
+    '@type':        'BlogPosting',
+    'headline':     post.meta_title || post.title,
+    'description':  post.meta_description ?? undefined,
+    'url':          url,
+    'image':        post.featured_image_url ?? undefined,
+    'datePublished': post.published_at ?? post.created_at,
+    'dateModified': post.updated_at,
+  }
+
+  if (publisherName) {
+    schema.author    = { '@type': 'Organization', 'name': publisherName }
+    schema.publisher = { '@type': 'Organization', 'name': publisherName }
+  }
+
+  // Drop undefined fields so the JSON-LD output stays clean.
+  const clean = Object.fromEntries(
+    Object.entries(schema).filter(([, v]) => v !== undefined),
+  )
+
+  return `<script type="application/ld+json">\n${JSON.stringify(clean, null, 2)}\n</script>`
+}
+
+export type ArticleSchemaPost = Pick<
+  BlogPost,
+  | 'title'
+  | 'meta_title'
+  | 'meta_description'
+  | 'slug'
+  | 'featured_image_url'
+  | 'published_at'
+  | 'created_at'
+  | 'updated_at'
+>
+
+function joinUrl(base: string, path: string): string {
+  const b = base.endsWith('/') ? base.slice(0, -1) : base
+  const p = path.startsWith('/') ? path : `/${path}`
+  return b + p
+}
+
+/**
  * Build Article JSON-LD schema for SEO rich results.
  */
 function buildArticleSchema(
@@ -111,6 +169,14 @@ export interface GeoCheck {
   label: string
   pass: boolean
   detail?: string
+  /**
+   * P14.E.3: when true and pass is false, this check should hard-block
+   * publishing/approving. The UI surfaces these in red with a banner
+   * instead of the soft amber warning used for normal advisories.
+   * Currently only `brand_mentions` is wired as a blocker — GEO signal
+   * is meaningless without the brand entity appearing in the body text.
+   */
+  blocker?: boolean
 }
 
 export function computeGeoChecklist(post: BlogPost, brandName: string): GeoCheck[] {
@@ -130,7 +196,10 @@ export function computeGeoChecklist(post: BlogPost, brandName: string): GeoCheck
       key: 'brand_mentions',
       label: `Brand mentioned ≥3×`,
       pass: brandMentions >= 3,
-      detail: `"${brandName}" appears ${brandMentions} time${brandMentions !== 1 ? 's' : ''} in body text`,
+      blocker: true,
+      detail: brandMentions >= 3
+        ? `"${brandName}" appears ${brandMentions} times in body text`
+        : `"${brandName}" appears ${brandMentions} time${brandMentions !== 1 ? 's' : ''} — must be ≥3 before publish (GEO entity signal)`,
     },
     {
       key: 'h1_present',

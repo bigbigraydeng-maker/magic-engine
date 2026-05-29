@@ -30,6 +30,8 @@ services:
         value: au
       - key: GITHUB_TOKEN
         sync: false
+      - key: GITHUB_WEBHOOK_SECRET
+        sync: false
       - key: PUBLER_API_KEY
         sync: false
       - key: PUBLER_WORKSPACE_ID
@@ -150,6 +152,28 @@ services:
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
         https://$RENDER_EXTERNAL_URL/api/cron/zhangqian-sweeper
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+      - key: RENDER_EXTERNAL_URL
+        fromService:
+          type: web
+          name: magic-engine
+          property: host
+
+  # Blog generation sweeper — every 5 minutes
+  # Marks blog_posts stuck at status='generating' (>10 min) as failed.
+  # Background generation in /api/clients/[id]/blog is fire-and-forget;
+  # if Render restarts mid-run, rows would otherwise sit generating forever.
+  # Reference: ROADMAP.md P14.C.1
+  - type: cron
+    name: blog-stuck-generating-sweeper
+    env: node
+    schedule: "*/5 * * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -s -H "Authorization: Bearer $CRON_SECRET" \
+        https://$RENDER_EXTERNAL_URL/api/cron/blog-stuck-generating
     envVars:
       - key: CRON_SECRET
         sync: false

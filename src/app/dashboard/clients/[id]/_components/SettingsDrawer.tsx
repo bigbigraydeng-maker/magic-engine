@@ -3,9 +3,10 @@
 import { useEffect } from 'react'
 import { BriefPanel } from './BriefPanel'
 import { CmsPanel } from './CmsPanel'
+import Link from 'next/link'
 import { UsersPanel } from './UsersPanel'
 
-export type SettingsTab = 'brief' | 'client-info' | 'cms' | 'users'
+export type SettingsTab = 'brief' | 'client-info' | 'cms' | 'users' | 'platform'
 
 interface Client {
   id: string
@@ -28,6 +29,7 @@ const TABS: { id: SettingsTab; label: string; code: string }[] = [
   { id: 'client-info', label: '客户信息', code: 'CI' },
   { id: 'cms',         label: '网站连接', code: 'CN' },
   { id: 'users',       label: '用户权限', code: 'US' },
+  { id: 'platform',     label: '平台连接', code: 'PL' },
 ]
 
 export function SettingsDrawer({ open, onClose, clientId, client, activeTab, onTabChange }: Props) {
@@ -93,6 +95,20 @@ export function SettingsDrawer({ open, onClose, clientId, client, activeTab, onT
 
           {activeTab === 'users' && (
             <UsersPanel clientId={clientId} />
+          )}
+
+          {activeTab === 'platform' && (
+            <div className="max-w-3xl">
+              <Link
+                href={'/dashboard/clients/' + clientId + '/settings'}
+                className="inline-flex items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-bold text-cyan-800 transition hover:bg-cyan-100"
+              >
+                🔗 前往平台连接设置页面
+              </Link>
+              <p className="mt-2 text-xs text-slate-400">
+                完整的平台授权管理界面（GBP / GSC 等）在独立设置页面完成。
+              </p>
+            </div>
           )}
 
           {activeTab === 'client-info' && (

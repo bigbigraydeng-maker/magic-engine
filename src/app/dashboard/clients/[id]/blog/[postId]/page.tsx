@@ -30,6 +30,8 @@ export default function BlogPostPage() {
 
   const [post, setPost]           = useState<BlogPost | null>(null);
   const [clientName, setClientName] = useState('');
+  // P14.E: needed to build GSC URL Inspection deeplink for published posts.
+  const [clientDomain, setClientDomain] = useState<string | null>(null);
   const [loading, setLoading]     = useState(true);
   const [showGeoBlock, setShowGeoBlock] = useState(false);
   const [copied, setCopied]       = useState<'html' | 'text' | null>(null);
@@ -52,6 +54,7 @@ export default function BlogPostPage() {
       if (clientRes.ok) {
         const j = await clientRes.json();
         setClientName(j.client?.name ?? '');
+        setClientDomain(typeof j.client?.domain === 'string' ? j.client.domain : null);
       }
       if (postRes.ok) {
         const j = await postRes.json();
@@ -172,7 +175,29 @@ export default function BlogPostPage() {
   }
 
   const checks = computeGeoChecklist(post, clientName);
+  // P14.E: any check with blocker=true && pass=false hard-blocks publish/approve.
+  // Currently only `brand_mentions` is wired as a blocker.
+  const blockerChecks = checks.filter(c => c.blocker && !c.pass);
+  const hasBlocker    = blockerChecks.length > 0;
   const { body_only } = buildBlogHtml(post);
+
+  // P14.E: GSC URL Inspection helper — copies article URL to clipboard and opens GSC.
+  // Direct deeplinks to /search-console/inspect?resource_id= are unreliable (404 when
+  // the property is sc-domain or the user isn't on the right Google account).
+  // Reliable flow: copy URL → open GSC → paste in the URL Inspection bar.
+  const gscArticleUrl = (post.status === 'published' && clientDomain && post.slug)
+    ? (() => {
+        const cleanDomain = clientDomain.replace(/^https?:\/\//, '').replace(/\/$/, '')
+        return `https://${cleanDomain}/blog/${post.slug}`
+      })()
+    : null;
+
+  const handleGscInspect = async () => {
+    if (!gscArticleUrl) return;
+    try { await navigator.clipboard.writeText(gscArticleUrl); } catch {}
+    window.open('https://search.google.com/search-console/', '_blank', 'noopener,noreferrer');
+    flash('✓ 文章 URL 已复制 — 在 GSC「URL 检查」栏粘贴后点 Inspect', true);
+  };
 
   // Compose HTML for iframe preview (adds minimal styling)
   const previewHtml = `<!DOCTYPE html>
@@ -226,6 +251,22 @@ ${showGeoBlock && post.geo_html_snapshot
         </span>
       </div>
 
+      {/* P14.E: hard-block banner when any blocker check fails (skip if already published) */}
+      {hasBlocker && post.status !== 'published' && (
+        <div className="bg-red-50 border border-red-300 rounded-xl px-5 py-3 flex items-start gap-3">
+          <span className="text-red-500 text-base mt-0.5">❌</span>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-red-800">无法发布 — 质量检查阻塞</p>
+            <p className="text-xs text-red-600 mt-0.5">
+              {blockerChecks[0].label}: {blockerChecks[0].detail}
+            </p>
+            <p className="text-[11px] text-red-500 mt-1">
+              请重新生成本文，或人工编辑后再保存。Approve / Mark Published / Publish to Website 已锁定。
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Action bar */}
       <div className="flex items-center gap-2 flex-wrap bg-white border border-gray-200 rounded-xl px-5 py-3">
         <div className="flex items-center gap-2">
@@ -246,6 +287,7 @@ ${showGeoBlock && post.geo_html_snapshot
           <PublishToWebsitePanel
             clientId={clientId}
             postId={postId}
+            disabledReason={hasBlocker ? blockerChecks[0].label : undefined}
             onSuccess={(_, result) => {
               if (result.prUrl) flash(`✓ PR #${result.prNumber} 已创建`, true);
               else flash('✓ 已发布到网站', true);
@@ -258,6 +300,13 @@ ${showGeoBlock && post.geo_html_snapshot
             }`}>
             {showGeoBlock ? '🤖 Hide GEO Block' : '🤖 Show GEO Block'}
           </button>
+          {gscArticleUrl && (
+            <button onClick={handleGscInspect}
+              title="复制文章 URL 并打开 GSC — 在「URL 检查」栏粘贴后点 Inspect"
+              className="px-3 py-1.5 text-xs font-medium rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50 transition-colors">
+              🔍 GSC Inspect
+            </button>
+          )}
         </div>
 
         <div className="ml-auto flex items-center gap-2">
@@ -267,15 +316,17 @@ ${showGeoBlock && post.geo_html_snapshot
             </span>
           )}
           {post.status === 'draft' && (
-            <button onClick={() => handleStatusChange('approved')} disabled={saving}
-              className="px-3 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg transition-colors">
-              {saving ? '…' : '✓ Approve'}
+            <button onClick={() => handleStatusChange('approved')} disabled={saving || hasBlocker}
+              title={hasBlocker ? `Blocked: ${blockerChecks[0].label}` : undefined}
+              className="px-3 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg transition-colors">
+              {saving ? '…' : hasBlocker ? '🚫 Approve' : '✓ Approve'}
             </button>
           )}
           {post.status === 'approved' && (
-            <button onClick={() => handleStatusChange('published')} disabled={saving}
-              className="px-3 py-1.5 text-xs font-semibold bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white rounded-lg transition-colors">
-              {saving ? '…' : '⚡ Mark Published'}
+            <button onClick={() => handleStatusChange('published')} disabled={saving || hasBlocker}
+              title={hasBlocker ? `Blocked: ${blockerChecks[0].label}` : undefined}
+              className="px-3 py-1.5 text-xs font-semibold bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg transition-colors">
+              {saving ? '…' : hasBlocker ? '🚫 Mark Published' : '⚡ Mark Published'}
             </button>
           )}
           {post.status !== 'rejected' && (

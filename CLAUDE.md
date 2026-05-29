@@ -74,7 +74,7 @@ UI / 报告 / 客户交付物中**禁止出现真实供应商名**，只用封�
 | 网页抓取 | Jina.ai Reader |
 | 内容协作 | Airtable REST API |
 | 社媒发布 | Publer API v1 |
-| 部署 | Render（`git push origin master` 触发） |
+| 部署 | Render（监听 `main`，PR 合并后自动部署） |
 
 ---
 
@@ -206,7 +206,7 @@ Claude 不能替你做这些（无法跨 session 自驱动），需要你当"调
 npm run dev        # 开发服务器 :3001
 npm run build      # 生产构建（推送前必须通过）
 npm test           # 测试套件
-git push origin master   # 触发 Render 部署
+# Render 监听 main，PR 合并后自动部署，无需手动推
 ```
 
 文档：[ROADMAP.md](./ROADMAP.md) · [ARCHITECTURE.md](./ARCHITECTURE.md) · [PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)
@@ -215,32 +215,36 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-30 00:40 NZST （**Phase 17.B P17.B.1–3 全部完成** ✅，PR #127 待验收 + merge）
+> 最后更新：2026-05-30 01:07 NZST （**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成**，PR #125 等 PM merge）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **PM 操作 🔴** | Supabase 跑 migration：`20260530000002_phase14b_wp_publish_quality.sql`（P14.B）+ `20260611000001_phase17b_meta_ads_campaigns.sql`（P17.B） | ⚠️ 待操作 |
-| **PM 验收 P14.B** | M1：WP Settings → Yoast 卡 + 验证安装；分类 ID 编辑器；M2：发布测试 rollback / GSC 按钮 | ⚠️ PM 验收 |
-| **go merge P14.B** | PM 输入 `go merge` 合并 Phase 14.B PR #120 到 main | ⚠️ PM 授权 |
-| **验收 P17.B** | sync 触发 → 数据 tab 广告卡片出现；cron 返回 `meta_synced` 计数 | ⚠️ PM 验收 |
-| **go merge P17.B** | PM 输入 `go merge` 合并 Phase 17.B PR #127 到 main | ⚠️ PM 授权 |
-| **PM 决定** | 下一 Phase：Phase 21（AI Factory）/ Phase 22（Data Engine）/ Phase 18.A（Meta Ads Execution） | ⚠️ PM 决定 |
+| **PM 操作 🔴** | Supabase 跑 migration `20260603000001_platform_oauth_connections.sql` | ⚠️ 待操作 |
+| **GBP.0** | Google Cloud：enable Business Profile API + Account Management API，配置 OAuth consent screen，创建 credentials，设 `GOOGLE_OAUTH_CLIENT_ID` + `GOOGLE_OAUTH_CLIENT_SECRET` env vars | ⚠️ PM 操作 |
+| **PM 验收 P24** | 打开 `/dashboard/clients/[id]/settings` → 点「连接 Google Business Profile」→ Google 授权页 → 完成后绿色连接卡片出现 | ⚠️ PM 验收 |
+| **go merge** | PM 输入 `go merge` 合并 Phase 24.A PR #125 到 main | ⚠️ PM 授权 |
+| **Phase 24.B** | GBP 数据摄取（reviews、insights、location data 写入 DB） | 📋 24.A merge 后 |
+| **PM 操作（旧）** | Supabase 跑 `20260530000003_strategy_items_unique_title.sql`；Render 加 `GITHUB_WEBHOOK_SECRET`；合并 Phase 14.C PR | ⚠️ 待操作 |
 
 **已完成全景（最近几个 Phase）**：
-- ✅ **Phase 17.B 全部 P17.B.1–3**（PR #127，3 commit）：
-  - P17.B.1: Campaign 细化（`getAdCampaignInsights` + migration + snapshots GET route）
-  - P17.B.2: 数据 tab Meta Ads 卡片（花费/ROAS/CTR + Top Campaigns 表）
-  - P17.B.3: 每日 cron 集成（`google-data-pullback-daily` 现包含 Meta Ads）
-- ✅ **Phase 14.B 全部 P14.B.0–7**（PR #120）
+- ✅ **Phase 14.B 全部 P14.B.0–7**（PR #120，2 commit）：
+  - P14.B.0: migration（yoast_plugin_installed, wp_default_category_id, quality_check）
+  - P14.B.1: Yoast probe（mu-plugin snippet + 验证安装 按钮）
+  - P14.B.2: rollback WP draft（DELETE 远程草稿 + rolled_back 状态）
+  - P14.B.3: GEO 城市一致性（generator 注入 authoritativeLocation + DirectiveEditor 警告）
+  - P14.B.4: 内链 QC check（internal-link-checker.ts + quality_check JSONB）
+  - P14.B.5: primary_keyword 缺失橙色警告
+  - P14.B.6: WP 默认分类 ID（Settings UI + PATCH route）
+  - P14.B.7: GSC 索引请求按钮（Indexing API + re-auth 降级）
 - ✅ **Phase 14.A.1–8**：WP + Shopify connector 全部完成，已推送
 - ✅ **Phase 23 完整闭环**（PR #112）：L3 记忆四表 + MemoryService + 四 Agent 注入 + 自动抽取器 + FDE 记忆库页
 
 **下一候选**：
 - 📋 **Phase 21** — AI Factory
 - 📋 **Phase 22** — Data Engine
-- 📋 **Phase 18.A** — Meta Ads Execution MVP
+- 📋 **Phase 18.A** — Meta Ads MVP
 
-下一 session：`go merge` 合两个 PR → Render 部署 → `继续 Phase 21` / `继续 Phase 22` / `开始 Phase 18.A`（等 PM 决定）
+下一 session：`go merge` 合 PR #120 → Render 部署 → `继续 Phase 21` / `继续 Phase 22` / `开始 Phase 18.A`（等 PM 决定）
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox

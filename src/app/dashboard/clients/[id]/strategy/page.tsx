@@ -239,7 +239,8 @@ export default function StrategyPage() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/clients/${clientId}/strategy?limit=100`)
+      // P14.C.2: 忽略状态的候选项不应回到看板（持久化 dismissed 通过 PATCH 实现）
+      const res = await fetch(`/api/clients/${clientId}/strategy?limit=100&exclude_status=dismissed`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       setItems(data.items ?? [])
@@ -268,8 +269,28 @@ export default function StrategyPage() {
   }
 
   const handleDismiss = async (itemId: string) => {
-    setItems(prev => prev.filter(i => i.id !== itemId))
-    setTotal(prev => Math.max(0, prev - 1))
+    // P14.C.2: 乐观更新 + API 持久化。回滚条件：API 失败则恢复 UI 状态并提示。
+    const prevItems = items
+    const prevTotal = total
+    setItems(p => p.filter(i => i.id !== itemId))
+    setTotal(p => Math.max(0, p - 1))
+
+    try {
+      const res = await fetch(`/api/clients/${clientId}/strategy/${itemId}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ status: 'dismissed' }),
+      })
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({})) as { error?: string }
+        throw new Error(json.error ?? `HTTP ${res.status}`)
+      }
+    } catch (e) {
+      // Rollback on failure
+      setItems(prevItems)
+      setTotal(prevTotal)
+      flash(e instanceof Error ? `忽略失败：${e.message}` : '忽略失败', false)
+    }
   }
 
   const flash = (msg: string, ok: boolean) => {

@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-30 00:41 NZST · 当前阶段：**Phase 14.B WP 发布质量改进 P14.B.0–7 全部完成 ✅ PR #120 等合并；Phase 14.A Website Connector ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-30 01:07 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -1843,15 +1843,53 @@ website_publish_jobs
 - **M2（质量）**：内链 QC 第8项在有/无内链的博客上分别显示正确状态
 - **M3（运营）**：取消发布后 WP 后台无孤儿草稿
 
-### Phase 14.C 及后续（预告，未排期）
+### Phase 14.C — SEO 生产期稳定性 + 飞轮闭环 🔥 进行中（2026-05-29 启动）
+
+> **登记日期**：2026-05-29 · **触发**：CTS Tours + Oztop 进入 5 篇/周生产期前，4 视角并行审计发现的硬伤与飞轮断点。
+>
+> **核心目标**：让博客生成、看板管理、WP/GitHub 发布、飞轮反哺这条主链路在「5 篇/周 × 2 客户」的负载下不掉链子。
+
+| 任务 | 内容 | 优先级 | 估时 |
+|------|------|--------|------|
+| ✅ **P14.C.1** | 殭尸 `status='generating'` 自愈 cron（>10min 自动标 failed） | 🔴 高 | 30m |
+| ✅ **P14.C.2** | 看板「忽略」按钮持久化（PATCH `status='dismissed'`） | 🔴 高 | 30m |
+| ✅ **P14.C.3** | 「重新生成策略」去重（`(client_id, proposed_title)` unique index + ON CONFLICT） | 🔴 高 | 45m |
+| ✅ **P14.C.4** | JSON-LD Schema 注入 WP/Shopify/GitHub 发布管道（用 `buildBlogHtml()` 替代 `html_body`） | 🔴 高 | 45m |
+| ✅ **P14.C.5** | 飞轮 outcome 按 `content_mode` 聚合 → 反哺选题（scorer 注入 modeBoosts） | 🟡 中 | 90m |
+| ✅ **P14.C.6** | GitHub PR merge webhook 回填 `published_at` + 自动触发 GSC 索引 | 🟡 中 | 90m |
+
+**验收关卡（M1 = P0 完成，M2 = P1 完成）：**
+- **M1**：连续生成 3 篇博客无殭尸状态；看板刷新后忽略仍生效；WP 发布的页面有 BlogPosting JSON-LD（用 Schema 测试工具验证）
+- **M2**：飞轮 outcome 出现 keyword 维度的聚合；CTS GitHub PR merge 后 `published_at` 自动回填，GSC 自动收到索引请求
+
+---
+
+### Phase 14.D — SEMrush 残留清理 + DataForSEO 全面接入 📋 已登记，14.C 完成后启动
+
+> **登记日期**：2026-05-29 · **触发**：14.C 审计发现 SEMrush 仅在 `/dashboard/keywords` 手动查词页面活跃，`keywords` 表疑似无写入路径，大量变量名/注释/路由残留 SEMrush 字样但底层已切到 DataForSEO。
+>
+> **目标**：删除所有 SEMrush 代码路径，全部走 DataForSEO Labs API，统一变量命名与文档。
+
+| 任务 | 内容 | 优先级 |
+|------|------|--------|
+| ⬜ **P14.D.1** | `/dashboard/keywords` 手动查词页面切到 DataForSEO（`/api/semrush/*` 路由全部重写或 redirect 到 `/api/dataforseo/*`） | 🔴 |
+| ⬜ **P14.D.2** | 验证或删除 `keywords` 表（如果真死表 → drop；如果有用 → 加 DataForSEO 写入路径） | 🟡 |
+| ⬜ **P14.D.3** | 变量重命名：`includeSemrush` → `includeKeywordData`；注释清理 | 🟢 |
+| ⬜ **P14.D.4** | `src/app/api/semrush/*` 路由删除（确认无外部调用后） | 🟢 |
+| ⬜ **P14.D.5** | 环境变量保留 `SEMRUSH_*`（按 CLAUDE.md 规则，env var 用真实命名）但代码不再读取 | 🟢 |
+
+---
+
+### Phase 14 及后续（预告，未排期）
 
 | Phase | 内容 | 触发条件 |
 |---|---|---|
-| 14.C | Webflow CMS connector | 14.B 完成 |
-| 14.D | GitHub connector（Next.js / Vercel 代码型站点） | 14.C 完成 |
-| 14.E | Campaign LP 生成器（高转化落地页，noindex + 活动结束 301） | 14.D 完成 |
-| 14.F | 权限漂移检测（定期校验 token scope，失效自动标 `needs_reconnect`） | 14.A 完成 |
-| 14.G | **客户网站知识图谱（Site Knowledge Graph）** | 14.A 完成 |
+| 14.G | **客户网站知识图谱（Site Knowledge Graph）** | 14.A 完成（详见下方） |
+| 14.H | Webflow CMS connector | 14.C 完成 |
+| 14.I | Campaign LP 生成器（高转化落地页，noindex + 活动结束 301） | 14.H 完成 |
+| 14.J | 权限漂移检测（定期校验 token scope，失效自动标 `needs_reconnect`） | 14.A 完成 |
+
+> **注**：原 14.D（GitHub connector）已由 Phase 12.H 完成，本表已移除。
 
 ### Phase 14.G — 客户网站知识图谱（Site Knowledge Graph）📋 待排期
 
@@ -2076,18 +2114,6 @@ AI 可见度层（ME 独有 ✅）
 - `src/lib/gsc/client.ts`：新增 `fetchGscSnapshot()` 并行拉取 query + page 两个维度（各 50 行）
 - `POST /api/clients/[id]/gsc/sync`：从 connector config 取 site_url → 调 GSC API → upsert 快照
 - `GET /api/clients/[id]/gsc/snapshots`：读取历史快照列表，供报告 / 看板使用
-
-### Phase 17.B — Meta Ads Insights 回流（广告数据拉取）
-
-> **登记日期**：2026-05-29 · **状态**：🔥 进行中（分支 `feat/phase-17b-meta-ads-insights`）
->
-> **背景**：Phase 12.B.2 已建 `meta_ads_snapshots`（账户级汇总）+ sync 路由，但缺少 Campaign 细化、UI 展示和每日自动同步。Phase 17.B 补完这三块，使 Meta Ads 数据与 GSC/GA4 数据在「数据」tab 并列显示。
-
-| ID | 任务 | 状态 |
-|----|------|------|
-| **P17.B.1** | Campaign 级别细化：migration + `getAdCampaignInsights()` + sync 路由更新 + `GET /meta-ads/snapshots` | ✅ 完成 2026-05-29 |
-| **P17.B.2** | Meta Ads UI：客户主页「数据」tab 新增广告概览卡片（花费/ROAS/CTR + Top Campaigns 表） | ✅ 完成 2026-05-29 |
-| **P17.B.3** | 每日 cron：将 Meta Ads 同步加入 `google-data-pullback-daily` | ✅ 完成 2026-05-29 |
 
 ---
 
@@ -2829,9 +2855,25 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 
 ## 9. 功能完成日志
 
-### 2026-05-29（Phase 17.B — Meta Ads Insights 回流）
+### 2026-05-29（Phase 24.A — Platform OAuth Connector 全部完成 8/8）
 
-- **P17.B.1–3 全部完成** — Campaign 细化（`getAdCampaignInsights` + migration）、数据 tab 广告卡片、每日 cron 集成
+- **P24.A.1** — DB migration `platform_oauth_connections` + vocabulary layer（类型、常量、`toConnectionSummary`）
+- **P24.A.2** — Token Manager：`getValidToken` auto-refresh + `markConnectionError` + 自定义异常类
+- **P24.A.3** — OAuth start 路由：CSRF state cookie（nonce:clientId，HttpOnly，SameSite=Lax，600s），302 → Google
+- **P24.A.4** — OAuth callback 路由：CSRF 验证 + token 交换 + GBP 账户 API + 加密存储 + 清 cookie + 302 → settings
+- **P24.A.5** — Connection Store CRUD：`upsertConnection` / `revokeConnection` / `listConnections` / `getConnectionById`
+- **P24.A.6** — Client API `GET+DELETE /api/clients/[id]/platform/gbp`（列出 + 撤销，含租户隔离校验）
+- **P24.A.7** — Settings 页面 `/dashboard/clients/[id]/settings` + SettingsDrawer 「平台连接」Tab
+- **P24.A.8** — GbpPanel 5 态 UI（loading / error / disconnected / needs_reconnect / connected）；80 tests 全绿 PR #125
+
+### 2026-05-29（Phase 14.C — SEO 生产期稳定性 + 飞轮闭环 全部完成 6/6）
+
+- **P14.C.6** — GitHub PR merge webhook：HMAC 验签 + 回填 published_at + 自动 GSC 索引
+- **P14.C.5** — 飞轮闭环：SEO outcome 按 content_mode 聚合，scorer 按历史成功率 +2/+6/+10 boost
+- **P14.C.4** — JSON-LD BlogPosting schema 注入 WP/Shopify/GitHub 三条发布路径
+- **P14.C.3** — 「重新生成策略」加 (client_id, proposed_title) unique index，upsert ignoreDuplicates
+- **P14.C.2** — 看板「忽略」按钮持久化到 DB（PATCH status='dismissed' + 乐观更新 + 回滚）
+- **P14.C.1** — blog `status='generating'` 殭尸状态自愈 cron（每 5 分钟扫 > 10 分钟标 failed）
 
 ### 2026-05-30（Phase 14.B — WP 发布质量改进 7 项）
 
