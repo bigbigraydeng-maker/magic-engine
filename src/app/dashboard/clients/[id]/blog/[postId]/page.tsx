@@ -181,17 +181,23 @@ export default function BlogPostPage() {
   const hasBlocker    = blockerChecks.length > 0;
   const { body_only } = buildBlogHtml(post);
 
-  // P14.E: GSC URL Inspection deeplink — manual fallback for catalysing
-  // Google crawl, since the Indexing API does not support blog posts.
-  // Omit resource_id so GSC matches the property automatically — avoids
-  // 404 when the property is registered as sc-domain rather than URL-prefix.
-  const gscInspectUrl = (post.status === 'published' && clientDomain && post.slug)
+  // P14.E: GSC URL Inspection helper — copies article URL to clipboard and opens GSC.
+  // Direct deeplinks to /search-console/inspect?resource_id= are unreliable (404 when
+  // the property is sc-domain or the user isn't on the right Google account).
+  // Reliable flow: copy URL → open GSC → paste in the URL Inspection bar.
+  const gscArticleUrl = (post.status === 'published' && clientDomain && post.slug)
     ? (() => {
         const cleanDomain = clientDomain.replace(/^https?:\/\//, '').replace(/\/$/, '')
-        const fullUrl     = `https://${cleanDomain}/blog/${post.slug}`
-        return `https://search.google.com/search-console/inspect?resource_id=${encodeURIComponent(`sc-domain:${cleanDomain}`)}&id=${encodeURIComponent(fullUrl)}`
+        return `https://${cleanDomain}/blog/${post.slug}`
       })()
     : null;
+
+  const handleGscInspect = async () => {
+    if (!gscArticleUrl) return;
+    try { await navigator.clipboard.writeText(gscArticleUrl); } catch {}
+    window.open('https://search.google.com/search-console/', '_blank', 'noopener,noreferrer');
+    flash('✓ 文章 URL 已复制 — 在 GSC「URL 检查」栏粘贴后点 Inspect', true);
+  };
 
   // Compose HTML for iframe preview (adds minimal styling)
   const previewHtml = `<!DOCTYPE html>
@@ -294,12 +300,12 @@ ${showGeoBlock && post.geo_html_snapshot
             }`}>
             {showGeoBlock ? '🤖 Hide GEO Block' : '🤖 Show GEO Block'}
           </button>
-          {gscInspectUrl && (
-            <a href={gscInspectUrl} target="_blank" rel="noopener noreferrer"
-              title="在 Google Search Console 中检查这条 URL — 可以手动 Request Indexing 催爬"
+          {gscArticleUrl && (
+            <button onClick={handleGscInspect}
+              title="复制文章 URL 并打开 GSC — 在「URL 检查」栏粘贴后点 Inspect"
               className="px-3 py-1.5 text-xs font-medium rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50 transition-colors">
-              🔍 在 GSC Inspect →
-            </a>
+              🔍 GSC Inspect
+            </button>
           )}
         </div>
 
