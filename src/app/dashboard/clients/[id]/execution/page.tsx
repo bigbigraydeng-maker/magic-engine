@@ -11,6 +11,8 @@ import { InlinePrescriptionDrawer } from './_components/InlinePrescriptionDrawer
 import { ProjectLubanDrawer } from './_components/ProjectLubanDrawer'
 import { ProjectReviewDrawer } from './_components/ProjectReviewDrawer'
 import { ContentStudioDrawer } from './_components/ContentStudioDrawer'
+import { AdsFixDrawer } from './_components/AdsFixDrawer'
+import { AdsAuditSection } from './_components/AdsAuditSection'
 import {
   buildExecutionGroups,
   formatOutcomeLabel,
@@ -602,6 +604,7 @@ function TaskDetailDrawer({
   onOpenStudio,
   onEditItem,
   onDeleteItem,
+  onOpenAdsFixDrawer,
   railOpen = false,
 }: {
   item:           ItemWithLogs | null
@@ -615,6 +618,7 @@ function TaskDetailDrawer({
   onOpenStudio:   (item: ItemWithLogs) => void
   onEditItem:     (itemId: string, fields: { title?: string; description?: string }) => Promise<boolean>
   onDeleteItem:   (itemId: string) => Promise<void>
+  onOpenAdsFixDrawer?: (item: ItemWithLogs) => void
   railOpen?:       boolean
 }) {
   const [mounted, setMounted]           = useState(false)
@@ -648,6 +652,27 @@ function TaskDetailDrawer({
     if (execTarget.mode === 'in_house') return null
     if (execTarget.mode === 'third_party') {
       const route = FLYWHEEL_THIRD_PARTY_ROUTE[execTarget.flywheel]
+      // Ads flywheel: show both "Fix Now (Meta API)" and external link
+      if (execTarget.flywheel === 'ads' && onOpenAdsFixDrawer) {
+        return (
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => onOpenAdsFixDrawer(item)}
+              className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-orange-200 bg-orange-50 px-3 text-xs font-black text-orange-800 transition-colors hover:bg-orange-100"
+            >
+              直接执行 (Meta API)
+            </button>
+            {route && (
+              <a href={route.path(item.client_id, item.id)}
+                target="_blank" rel="noopener noreferrer"
+                className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 transition-colors hover:border-slate-300"
+              >
+                Open in {route.label}
+              </a>
+            )}
+          </div>
+        )
+      }
       if (!route) return null
       return (
         <a href={route.path(item.client_id, item.id)}
@@ -1368,6 +1393,8 @@ export default function ExecutionPage() {
   const [lubanInitialMessage, setLubanInitialMessage] = useState('')
   // 当前打开飞轮执行抽屉的执行项 + target
   const [flywheelState, setFlywheelState] = useState<{ item: ItemWithLogs; target: ExecutionTarget } | null>(null)
+  // 当前打开 Meta Ads 直接执行抽屉的执行项（P18.A.2）
+  const [adsFixItem, setAdsFixItem] = useState<ItemWithLogs | null>(null)
   // 当前打开内容工作台的执行项（null = 关闭）
   const [studioItem, setStudioItem] = useState<ItemWithLogs | null>(null)
   // 内联补充/修订抽屉
@@ -1974,6 +2001,9 @@ export default function ExecutionPage() {
 
         <DataPullbackSection clientId={clientId} />
 
+        {/* P18.A.3 — Meta Ads 操作历史与撤销 */}
+        <AdsAuditSection clientId={clientId} />
+
         {/* 按处方分组 — 原处方 / 补充 / 修订 / 已归档 / Marketing Plan / FDE 各成一组 */}
         {prescriptionGroups.map(group => {
           // Phase 20.D: FDE 手动录入分组 — 平铺 + 拖拽排序
@@ -2035,6 +2065,10 @@ export default function ExecutionPage() {
           setLubanInitialMessage('')
           setFlywheelState(null)
         }}
+        onOpenAdsFixDrawer={item => {
+          setAdsFixItem(item)
+          setDetailItem(null)
+        }}
         onEditItem={handleEditItem}
         onDeleteItem={handleDeleteItem}
         railOpen={!!studioItem || !!chatItem || !!flywheelState}
@@ -2053,6 +2087,15 @@ export default function ExecutionPage() {
             setStudioItem(null)
             setFlywheelState(null)
           }}
+        />
+      )}
+
+      {/* P18.A.2 — Meta Ads 直接执行抽屉 */}
+      {adsFixItem && (
+        <AdsFixDrawer
+          clientId={clientId}
+          item={adsFixItem}
+          onClose={() => setAdsFixItem(null)}
         />
       )}
 
