@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-29 20:06 NZST · 当前阶段：**Phase 14.B WP 发布质量改进 P14.B.0–7 全部完成 ✅ PR #120 等合并；Phase 14.A Website Connector ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-29 21:46 NZST · 当前阶段：**Phase 14.B WP 发布质量改进 P14.B.0–7 全部完成 ✅ PR #120 等合并；Phase 14.A Website Connector ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -1884,12 +1884,40 @@ website_publish_jobs
 
 | Phase | 内容 | 触发条件 |
 |---|---|---|
+| 14.E | **SEO 生产就绪硬化（sitemap ping / brand mention hard-fail / GSC inspect 按钮 / Indexing API 错误分类）** ✅ | 已完成 2026-05-30 |
+| 14.F | **Visual Studio 自动 hero image**（接入 WaveSpeed flux-dev，消除 PM 手动选图瓶颈） | PM 每天选图 >30min |
 | 14.G | **客户网站知识图谱（Site Knowledge Graph）** | 14.A 完成（详见下方） |
 | 14.H | Webflow CMS connector | 14.C 完成 |
 | 14.I | Campaign LP 生成器（高转化落地页，noindex + 活动结束 301） | 14.H 完成 |
 | 14.J | 权限漂移检测（定期校验 token scope，失效自动标 `needs_reconnect`） | 14.A 完成 |
+| 14.K | **IndexNow + GSC Sitemaps API**（替代 14.E 中 deprecated 的 ping endpoint） | Google/Bing 平均索引时间 >3 天 |
 
 > **注**：原 14.D（GitHub connector）已由 Phase 12.H 完成，本表已移除。
+
+---
+
+### Phase 14.E — SEO 生产就绪硬化 ✅ 已完成 2026-05-30
+
+> **背景**：PM 准备让 SEO 进入「胜场」高强度生产阶段（CTS Tours + Oztop 多客户多文章/周）。今晚端到端验证 Phase 14.C 闭环时发现 4 个真坑：
+> 1. Google Indexing API 对博客 URL 静默丢弃（官方仅支持 JobPosting/BroadcastEvent）
+> 2. 博客生成虽 prompt 里要求 brand ≥3，但无 hard-fail，PM 可能直接 publish 一篇没品牌实体的废文
+> 3. webhook 路由把 SERVICE_DISABLED 误归类为 NOT_VERIFIED，错误文案误导
+> 4. published 后没有"催 Google 来爬"的通道
+>
+> **目标**：让生产期间每篇文章质量有底线、催爬路径有兜底、失败原因可读。
+
+| ID | 任务 | 完成 |
+|---|---|---|
+| ✅ **P14.E.1** | webhook 路由 merge 后并行调 Google + Bing sitemap ping（deprecated endpoint 但仍工作，作过渡） | ✅ |
+| ✅ **P14.E.2** | `indexing-client.ts` 加 `SERVICE_DISABLED` / `NOT_SUPPORTED_BY_API` 错误分类 + 顶部 doc comment 说明 Google API 真实限制 | ✅ |
+| ✅ **P14.E.3** | `GeoCheck` 接口加 `blocker?: boolean` 字段，`brand_mentions` 标记为 blocker | ✅ |
+| ✅ **P14.E.4** | UI: 品牌 mention <3 时 Quality Checklist 显示 ❌ 红色 + "blocks publish" 标签 | ✅ |
+| ✅ **P14.E.5** | UI: blocker fail 时 Approve / Mark Published / Publish to Website 三按钮全部禁用 + 顶部红 banner | ✅ |
+| ✅ **P14.E.6** | UI: published 博客详情页加"🔍 在 GSC Inspect"跳转按钮（手动催爬应急通道） | ✅ |
+
+**PM 配置依赖**（一次性）：
+- ⚠️ Google Cloud 项目启用 Web Search Indexing API（**已完成 2026-05-29**）
+- 14.K 启动后追加：IndexNow API key 文件部署到客户站点 root（chinatravel / oztop 各一份）
 
 ### Phase 14.G — 客户网站知识图谱（Site Knowledge Graph）📋 待排期
 
@@ -2854,6 +2882,15 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 ---
 
 ## 9. 功能完成日志
+
+### 2026-05-30（Phase 14.E — SEO 生产就绪硬化 全部完成 6/6）
+
+- **P14.E.6** — published 博客详情页加「🔍 在 GSC Inspect」跳转按钮，手动催爬应急通道
+- **P14.E.5** — blocker fail（品牌 mention <3）时 Approve/Mark Published/Publish to Website 三按钮锁定 + 顶部红 banner
+- **P14.E.4** — Quality Checklist UI 区分 blocker fail（红 ❌）与 advisory fail（黄 ⚠️），blocker 显示 "blocks publish" 标签
+- **P14.E.3** — GeoCheck 接口加 blocker 字段，brand_mentions 标 blocker（GEO 实体信号底线）
+- **P14.E.2** — indexing-client 新增 SERVICE_DISABLED / NOT_SUPPORTED_BY_API 错误码 + 文档说明 Google API 真实限制（仅 JobPosting/BroadcastEvent）
+- **P14.E.1** — webhook merge 后 Google + Bing sitemap ping（best-effort，过渡方案；14.K 升级 IndexNow）
 
 ### 2026-05-29（Phase 14.C — SEO 生产期稳定性 + 飞轮闭环 全部完成 6/6）
 

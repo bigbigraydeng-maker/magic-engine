@@ -215,17 +215,28 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-29 20:06 NZST （**Phase 14.C P14.C.1–6 全部完成** ✅，等 PM 验收 + merge）
+> 最后更新：2026-05-29 21:46 NZST （**Phase 14.E P14.E.1–6 全部完成** ✅ — SEO 生产就绪硬化，等 PM 验收 + merge → CTS/Oztop 胜场启动）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **PM 操作 🔴** | Supabase 跑 migration：`20260530000003_strategy_items_unique_title.sql` | ⚠️ 待操作 |
-| **PM 配置 🔴** | Render 加环境变量 `GITHUB_WEBHOOK_SECRET`；CTS GitHub repo 加 webhook 指向 `/api/cms/github/webhook` | ⚠️ 待操作 |
-| **PM 验收** | Phase 14.C 全部 6 项：连续 3 篇无殭尸 / 忽略持久 / WP JSON-LD / PR merge 后 published_at 自动 | ⚠️ PM 验收 |
-| **go merge** | PM 输入 `go merge` 合并 Phase 14.C PR 到 main | ⚠️ PM 授权 |
-| **Phase 14.D** | SEMrush 残留清理，全面接入 DataForSEO（14.C 完成后） | 📋 已登记 |
+| **PM 验收 14.E** | 博客详情页：品牌 mention <3 时红条+按钮锁定 / published 后"在 GSC Inspect"按钮 / webhook response 多了 sitemap_ping 字段 | ⚠️ PM 验收 |
+| **go merge** | PM 输入 `go merge` 合并 Phase 14.E PR 到 main | ⚠️ PM 授权 |
+| **SEO 胜场启动** | merge 后 CTS Tours + Oztop 高强度 SEO 文章生产开跑 | 🚀 等绿灯 |
+| **观察 7 天指标** | Google 平均索引时间 / PM 每天选图耗时 / 飞轮 mode boost 是否真在调分 / 品牌 mention 命中率 | 📋 第一周指标 |
+| **Phase 14.F** | Visual Studio 自动 hero image（若 PM 选图 >30 min/天 → 立刻做） | 📋 已登记 |
+| **Phase 14.D** | SEMrush 残留清理，全面 DataForSEO | 📋 已登记 |
+| **Phase 14.K** | IndexNow + GSC Sitemaps API 完整接入（若 Google/Bing 索引 >3 天 → 启动） | 📋 已登记 |
 
 **已完成全景（最近几个 Phase）**：
+- ✅ **Phase 14.E 全部 P14.E.1–6**（PR #TBD，1 branch）：
+  - P14.E.1: webhook merge 后 Google + Bing sitemap ping（best-effort，过渡方案）
+  - P14.E.2: indexing-client 新增 SERVICE_DISABLED / NOT_SUPPORTED_BY_API 错误码 + 顶部文档说明 API 真实限制
+  - P14.E.3: GeoCheck 接口加 blocker 字段，brand_mentions 标 blocker
+  - P14.E.4: UI Quality Checklist 红色 ❌ + "blocks publish" 标签
+  - P14.E.5: blocker fail 时 Approve/Mark Published/Publish to Website 三按钮全锁 + 顶部红 banner
+  - P14.E.6: published 博客加"🔍 在 GSC Inspect"跳转按钮
+- ✅ **Phase 14.C 全部 P14.C.1–6**（PR #123 + hotfix #124）：
+  - 殭尸 generating 扫除 / 忽略持久化 / 重新生成去重 / JSON-LD 三通道 / 飞轮 confidence 进 scorer / GitHub merge webhook
 - ✅ **Phase 14.B 全部 P14.B.0–7**（PR #120，2 commit）：
   - P14.B.0: migration（yoast_plugin_installed, wp_default_category_id, quality_check）
   - P14.B.1: Yoast probe（mu-plugin snippet + 验证安装 按钮）
