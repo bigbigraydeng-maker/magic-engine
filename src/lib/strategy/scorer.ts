@@ -122,13 +122,28 @@ function toPriority(score: number): StrategyPriority {
 }
 
 // ---------------------------------------------------------------------------
+// P14.C.5: Flywheel feedback — apply mode-level boost based on prior outcomes
+// ---------------------------------------------------------------------------
+
+/** A 0–10 boost per content_mode, sourced from per-client SEO blog confidence. */
+export type ModeBoostMap = Partial<Record<ContentMode, number>>
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-export function scoreOpportunity(ctx: ScoringContext): ScoringResult {
+export function scoreOpportunity(
+  ctx: ScoringContext,
+  modeBoosts?: ModeBoostMap,
+): ScoringResult {
   const content_mode = determineContentMode(ctx)
   const action_type = determineActionType(ctx, content_mode)
-  const priority_score = calculateScore(ctx, content_mode, action_type)
+  const baseScore = calculateScore(ctx, content_mode, action_type)
+
+  // P14.C.5: flywheel feedback — proven-mode boost (clamped at 100 by Math.min).
+  const boost = modeBoosts?.[content_mode] ?? 0
+  const priority_score = Math.max(0, Math.min(100, baseScore + boost))
+
   const priority = toPriority(priority_score)
 
   return { priority_score, priority, action_type, content_mode }

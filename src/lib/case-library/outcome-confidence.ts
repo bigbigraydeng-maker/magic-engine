@@ -114,3 +114,119 @@ export async function fetchOutcomeConfidenceMap(
     return {}
   }
 }
+
+// ── P14.C.5: SEO blog outcome → mode-level feedback loop ─────────────────────
+
+/** Aggregated success stats per content_mode for one client's SEO blog history. */
+export type SeoBlogConfidenceByMode = Record<
+  'unified' | 'geo_only' | 'seo_only',
+  ConfidenceEntry
+>
+
+/**
+ * Per-client SEO blog confidence keyed by content_mode (unified / geo_only / seo_only).
+ *
+ * Reads the mode out of flywheel_actions.payload.mode for any SEO publish action
+ * on the given client, then aggregates outcome verdicts. Returns zero-filled
+ * entries when the client has no SEO history yet so callers can treat the result
+ * uniformly.
+ *
+ * Used by:
+ *   1. strategy/generate scorer — small priority boost for modes with proven success
+ *   2. Huatuo prompt extension — surfaces per-mode hit rate alongside global stats
+ *
+ * Reference: ROADMAP.md P14.C.5
+ */
+export async function fetchSeoBlogConfidenceByMode(
+  supabase: SupabaseClient,
+  clientId: string,
+): Promise<SeoBlogConfidenceByMode> {
+  const empty: SeoBlogConfidenceByMode = {
+    unified:  { successRate: 0, sampleSize: 0 },
+    geo_only: { successRate: 0, sampleSize: 0 },
+    seo_only: { successRate: 0, sampleSize: 0 },
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('flywheel_outcomes')
+      .select('verdict, flywheel_actions!inner(action_type, payload, client_id)')
+      .eq('flywheel_actions.client_id', clientId)
+      .eq('flywheel_actions.action_type', 'seo.publish_blog')
+
+    if (error || !data) return empty
+
+    const buckets: Record<string, { confirmed: number; total: number }> = {
+      unified:  { confirmed: 0, total: 0 },
+      geo_only: { confirmed: 0, total: 0 },
+      seo_only: { confirmed: 0, total: 0 },
+    }
+
+    for (const row of data as Array<{
+      verdict: string
+      flywheel_actions: { payload?: { mode?: string } | null } | Array<{ payload?: { mode?: string } | null }>
+    }>) {
+      const action = Array.isArray(row.flywheel_actions) ? row.flywheel_actions[0] : row.flywheel_actions
+      const mode = action?.payload?.mode
+      if (!mode || !(mode in buckets)) continue
+      buckets[mode].total++
+      if (row.verdict === 'confirmed') buckets[mode].confirmed++
+    }
+
+    return {
+      unified:  toEntry(buckets.unified),
+      geo_only: toEntry(buckets.geo_only),
+      seo_only: toEntry(buckets.seo_only),
+    }
+  } catch {
+    return empty
+  }
+}
+
+function toEntry(b: { confirmed: number; total: number }): ConfidenceEntry {
+  return {
+    successRate: b.total === 0 ? 0 : b.confirmed / b.total,
+    sampleSize:  b.total,
+  }
+}
+
+/**
+ * Compute a 0–10 priority boost for one content_mode based on its historical
+ * success rate. Requires at least 2 samples to avoid noise; caps at +10 to
+ * preserve the scorer's existing ceiling.
+ *
+ * Pure function — exported for unit testing.
+ */
+export function getModeBoost(stats: ConfidenceEntry): number {
+  if (stats.sampleSize < 2) return 0
+  if (stats.successRate >= 0.7) return 10
+  if (stats.successRate >= 0.5) return 6
+  if (stats.successRate >= 0.3) return 2
+  return 0
+}
+
+/** Markdown block for Huatuo prompt — surfaces per-mode SEO performance. */
+export function formatSeoModeConfidenceForPrompt(
+  stats: SeoBlogConfidenceByMode,
+): string {
+  const anyData = Object.values(stats).some(s => s.sampleSize > 0)
+  if (!anyData) return ''
+
+  const fmt = (mode: keyof SeoBlogConfidenceByMode): string => {
+    const s = stats[mode]
+    if (s.sampleSize === 0) return `| \`${mode}\` | — | 0 |`
+    return `| \`${mode}\` | ${Math.round(s.successRate * 100)}% | ${s.sampleSize} |`
+  }
+
+  return [
+    '## SEO 博客 — 按 content_mode 分组成效（仅本客户历史）',
+    '',
+    '当推荐 `seo.publish_blog` 类行动时，请优先选择历史成功率最高的 mode。',
+    '',
+    '| mode | 成功率 | 案例数 |',
+    '|------|--------|--------|',
+    fmt('unified'),
+    fmt('geo_only'),
+    fmt('seo_only'),
+  ].join('\n')
+}

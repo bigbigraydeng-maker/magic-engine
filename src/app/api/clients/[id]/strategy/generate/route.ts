@@ -19,6 +19,11 @@ import {
   analyzeOpportunities,
 } from '@/lib/strategy/analyzer'
 import { scoreOpportunity } from '@/lib/strategy/scorer'
+import type { ModeBoostMap } from '@/lib/strategy/scorer'
+import {
+  fetchSeoBlogConfidenceByMode,
+  getModeBoost,
+} from '@/lib/case-library/outcome-confidence'
 import type { StrategyItem, RawOpportunity } from '@/lib/strategy/types'
 
 export const maxDuration = 60
@@ -83,9 +88,19 @@ export async function POST(
       )
     }
 
+    // P14.C.5: load flywheel feedback (per-client SEO blog confidence by mode)
+    // so the scorer can boost modes that have proven to work for this client.
+    // Failure-mode: empty map → boosts default to 0 → behavior identical to pre-P14.C.5.
+    const seoModeConfidence = await fetchSeoBlogConfidenceByMode(supabaseAdmin, clientId)
+    const modeBoosts: ModeBoostMap = {
+      unified:  getModeBoost(seoModeConfidence.unified),
+      geo_only: getModeBoost(seoModeConfidence.geo_only),
+      seo_only: getModeBoost(seoModeConfidence.seo_only),
+    }
+
     // Step 4: Score each opportunity
     const scoredItems = rawOpportunities.map((opp) => {
-      const scored = scoreOpportunity(opp.scoring_context)
+      const scored = scoreOpportunity(opp.scoring_context, modeBoosts)
       return {
         client_id: clientId,
         strategy_run_id,
