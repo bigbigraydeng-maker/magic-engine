@@ -41,6 +41,8 @@ import {
   getOrCreateDefaultBlog,
 } from '@/lib/cms/shopify-client'
 import { prepareCmsContent } from '@/lib/cms/html-sanitizer'
+import { buildArticleSchemaScript } from '@/lib/blog/html-builder'
+import type { ArticleSchemaPost } from '@/lib/blog/html-builder'
 import { CMS_ACTION_TYPE } from '@/lib/cms/vocabulary'
 
 interface RouteContext {
@@ -174,10 +176,19 @@ async function handleDraft(clientId: string, body: DraftRequestBody): Promise<Ne
     return NextResponse.json({ success: false, error: 'Blog post not found', code: 'NOT_FOUND' }, { status: 404 })
   }
 
-  const title    = typeof post.title     === 'string' ? post.title     : 'Untitled'
-  const rawHtml  = typeof post.html_body === 'string' ? post.html_body : ''
-  const bodyHtml = prepareCmsContent(rawHtml)
-  const summary  = typeof post.meta_description === 'string' ? post.meta_description : undefined
+  const title       = typeof post.title             === 'string' ? post.title             : 'Untitled'
+  const rawHtml     = typeof post.html_body         === 'string' ? post.html_body         : ''
+  const geoSnapshot = typeof post.geo_html_snapshot === 'string' ? post.geo_html_snapshot : ''
+  const summary     = typeof post.meta_description  === 'string' ? post.meta_description  : undefined
+
+  // P14.C.4: JSON-LD BlogPosting schema + GEO directive injected AFTER sanitization
+  // so script tag and GEO style/aria attrs survive intact.
+  const schemaScript = buildArticleSchemaScript(post as ArticleSchemaPost, conn.shopUrl)
+  const bodyHtml     = [
+    prepareCmsContent(rawHtml),
+    geoSnapshot,
+    schemaScript,
+  ].filter(Boolean).join('\n')
 
   const snapshot    = { title, bodyHtml, summary, source_type, source_id, target_type }
   const payloadHash = sha256(JSON.stringify(snapshot))

@@ -19,7 +19,8 @@ import { getConnection } from './connection-store'
 import { GithubClient, GitHubApiError } from './github-client'
 import { CMS_ACTION_TYPE } from './vocabulary'
 import { supabaseAdmin } from '../supabase'
-import { buildBlogBodyHtml } from '../blog/html-builder'
+import { buildBlogBodyHtml, buildArticleSchemaScript } from '../blog/html-builder'
+import type { ArticleSchemaPost } from '../blog/html-builder'
 
 const ME_BLOG_BRANCH_PREFIX = 'feat/me-blog-'
 
@@ -58,6 +59,10 @@ interface BlogPostRow {
   featured_image_url: string | null
   pr_url?:           string | null
   pr_number?:        number | null
+  // P14.C.4: schema needs publication dates so Google sees valid BlogPosting
+  created_at?:      string
+  updated_at?:      string
+  published_at?:    string | null
 }
 
 // ─── publishBlogToGitHub ──────────────────────────────────────────────────────
@@ -82,10 +87,10 @@ export async function publishBlogToGitHub(
     }
   }
 
-  // Step 2: Fetch blog post
+  // Step 2: Fetch blog post (P14.C.4 — also pulls created_at/updated_at/published_at for schema)
   const { data: post, error: postErr } = await supabaseAdmin
     .from('blog_posts')
-    .select('id,client_id,title,meta_title,meta_description,slug,html_body,word_count,status,source_query_text,geo_html_snapshot,featured_image_url')
+    .select('id,client_id,title,meta_title,meta_description,slug,html_body,word_count,status,source_query_text,geo_html_snapshot,featured_image_url,created_at,updated_at,published_at')
     .eq('id', blogPostId)
     .eq('client_id', clientId)
     .single()
@@ -97,6 +102,17 @@ export async function publishBlogToGitHub(
   const typedPost = post as BlogPostRow
   const { repoOwner, repoName, branch: defaultBranch, plainToken } = conn
   const github = new GithubClient(plainToken)
+
+  // P14.C.4: load client domain so the JSON-LD schema can declare a canonical URL.
+  // Non-fatal — schema falls back to URL-less form if domain missing.
+  const { data: clientRow } = await supabaseAdmin
+    .from('clients')
+    .select('domain')
+    .eq('id', clientId)
+    .maybeSingle()
+  const siteUrl = typeof clientRow?.domain === 'string' && clientRow.domain.trim()
+    ? (clientRow.domain.startsWith('http') ? clientRow.domain : `https://${clientRow.domain}`)
+    : ''
 
   // Step 3: Create feature branch
   const shortId    = randomBytes(4).toString('hex')
@@ -118,7 +134,7 @@ export async function publishBlogToGitHub(
 
   // Step 4: Commit the new blog file (no blobSha = create new file)
   const filePath    = `content/blog/${safeSlug}.md`
-  const fileContent = formatBlogAsMarkdown(typedPost)
+  const fileContent = formatBlogAsMarkdown(typedPost, siteUrl)
   const commitMsg   = `feat(blog): add "${typedPost.title}" [Magic Engine]`
 
   try {
@@ -186,11 +202,17 @@ export async function publishBlogToGitHub(
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatBlogAsMarkdown(post: BlogPostRow): string {
+function formatBlogAsMarkdown(post: BlogPostRow, siteUrl: string): string {
   const today = new Date().toISOString().split('T')[0]
   const title = post.title.replace(/"/g, '\\"')
   const meta  = post.meta_title.replace(/"/g, '\\"')
   const desc  = post.meta_description.replace(/"/g, '\\"')
+
+  // P14.C.4: JSON-LD BlogPosting schema lives inside the article body so the
+  // client's static-site generator includes it verbatim (no template change).
+  const schemaScript = buildArticleSchemaScript(post as ArticleSchemaPost, siteUrl)
+  const body         = buildBlogBodyHtml(post)
+  const bodyWithSchema = schemaScript ? `${body}\n\n${schemaScript}` : body
 
   return `---
 title: "${title}"
@@ -202,7 +224,7 @@ status: "draft"
 wordCount: ${post.word_count ?? 0}
 ---
 
-${buildBlogBodyHtml(post)}
+${bodyWithSchema}
 `
 }
 
