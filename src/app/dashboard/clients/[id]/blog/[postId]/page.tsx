@@ -183,14 +183,13 @@ export default function BlogPostPage() {
 
   // P14.E: GSC URL Inspection deeplink — manual fallback for catalysing
   // Google crawl, since the Indexing API does not support blog posts.
-  // We try the URL-prefix property first; if the client only has a
-  // sc-domain property GSC will redirect after they click Inspect.
+  // Omit resource_id so GSC matches the property automatically — avoids
+  // 404 when the property is registered as sc-domain rather than URL-prefix.
   const gscInspectUrl = (post.status === 'published' && clientDomain && post.slug)
     ? (() => {
         const cleanDomain = clientDomain.replace(/^https?:\/\//, '').replace(/\/$/, '')
         const fullUrl     = `https://${cleanDomain}/blog/${post.slug}`
-        const resourceId  = `https://${cleanDomain}/`
-        return `https://search.google.com/search-console/inspect?resource_id=${encodeURIComponent(resourceId)}&id=${encodeURIComponent(fullUrl)}`
+        return `https://search.google.com/search-console/inspect?resource_id=${encodeURIComponent(`sc-domain:${cleanDomain}`)}&id=${encodeURIComponent(fullUrl)}`
       })()
     : null;
 
@@ -246,8 +245,8 @@ ${showGeoBlock && post.geo_html_snapshot
         </span>
       </div>
 
-      {/* P14.E: hard-block banner when any blocker check fails */}
-      {hasBlocker && (
+      {/* P14.E: hard-block banner when any blocker check fails (skip if already published) */}
+      {hasBlocker && post.status !== 'published' && (
         <div className="bg-red-50 border border-red-300 rounded-xl px-5 py-3 flex items-start gap-3">
           <span className="text-red-500 text-base mt-0.5">❌</span>
           <div className="min-w-0">
