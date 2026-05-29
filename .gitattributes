@@ -1,0 +1,5 @@
+# Timestamp-only files — resolve conflicts by keeping the most recent timestamp.
+# The custom driver picks whichever side has the later 最后更新 value (YYYY-MM-DD HH:MM).
+# Fallback: if the driver is not configured, we take "ours" to avoid blocking commits.
+CLAUDE.md   merge=timestamp-ours
+ROADMAP.md  merge=timestamp-ours
