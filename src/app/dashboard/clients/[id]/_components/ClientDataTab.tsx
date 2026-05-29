@@ -56,6 +56,29 @@ interface Ga4Snapshot {
   period_end: string
 }
 
+interface MetaCampaign {
+  campaign_id:   string
+  campaign_name: string
+  spend:         number
+  impressions:   number
+  clicks:        number
+  roas:          number | null
+  ctr:           number | null
+  cpc:           number | null
+}
+
+interface MetaAdsSnapshot {
+  spend:       number | null
+  impressions: number | null
+  clicks:      number | null
+  roas:        number | null
+  cpc:         number | null
+  ctr:         number | null
+  campaigns:   MetaCampaign[] | null
+  period_start: string
+  period_end:   string
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function fmtNum(n: number): string {
@@ -248,7 +271,67 @@ function Ga4Section({ snapshot }: { snapshot: Ga4Snapshot }) {
   )
 }
 
-// ─── Section C: 快速夺旗机会 ──────────────────────────────────────────────────
+// ─── Section C: Meta Ads 概览 ─────────────────────────────────────────────────
+
+function MetaAdsSection({ snapshot }: { snapshot: MetaAdsSnapshot }) {
+  const campaigns = (snapshot.campaigns ?? []).slice(0, 10)
+  const period    = `${snapshot.period_start} – ${snapshot.period_end}`
+  const currency  = (v: number | null) => v == null ? '—' : `$${v.toFixed(2)}`
+  const x2        = (v: number | null) => v == null ? '—' : `${v.toFixed(2)}×`
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-5">
+      <div className="mb-4 flex items-center gap-2">
+        <span className="text-base leading-none">📣</span>
+        <SectionTitle>广告 智能投放</SectionTitle>
+        <span className="ml-auto text-[10px] text-slate-400">{period}</span>
+      </div>
+
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <MetricTile label="总花费"    value={currency(snapshot.spend)} />
+        <MetricTile label="ROAS"     value={x2(snapshot.roas)} />
+        <MetricTile label="点击率"   value={snapshot.ctr == null ? '—' : pct(snapshot.ctr)} />
+        <MetricTile label="点击量"   value={snapshot.clicks == null ? '—' : fmtNum(snapshot.clicks)} />
+      </div>
+
+      {campaigns.length > 0 && (
+        <>
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            Top Campaigns（按花费排序）
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="border-b border-slate-100">
+                  <Th>广告活动</Th>
+                  <Th right>花费</Th>
+                  <Th right>ROAS</Th>
+                  <Th right>点击</Th>
+                  <Th right>CTR</Th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {campaigns.map((c) => (
+                  <tr key={c.campaign_id}>
+                    <Td>
+                      <span className="line-clamp-1 max-w-[220px] block">{c.campaign_name}</span>
+                    </Td>
+                    <Td right>{currency(c.spend)}</Td>
+                    <Td right>{x2(c.roas)}</Td>
+                    <Td right>{fmtNum(c.clicks)}</Td>
+                    <Td right>{c.ctr == null ? '—' : pct(c.ctr)}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ─── Section D: 快速夺旗机会 ──────────────────────────────────────────────────
 
 interface FlagOpportunity {
   query: string
@@ -347,22 +430,25 @@ function Skeleton() {
 type LoadState = 'loading' | 'empty' | 'ready'
 
 export function ClientDataTab({ clientId }: { clientId: string }) {
-  const [gsc, setGsc] = useState<GscSnapshot | null>(null)
-  const [ga4, setGa4] = useState<Ga4Snapshot | null>(null)
+  const [gsc,  setGsc]  = useState<GscSnapshot | null>(null)
+  const [ga4,  setGa4]  = useState<Ga4Snapshot | null>(null)
+  const [meta, setMeta] = useState<MetaAdsSnapshot | null>(null)
   const [state, setState] = useState<LoadState>('loading')
 
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const [gscRes, ga4Res] = await Promise.allSettled([
+      const [gscRes, ga4Res, metaRes] = await Promise.allSettled([
         fetch(`/api/clients/${clientId}/gsc/snapshots?limit=1`),
         fetch(`/api/clients/${clientId}/ga4/snapshots?limit=1`),
+        fetch(`/api/clients/${clientId}/meta-ads/snapshots?limit=1`),
       ])
 
       if (cancelled) return
 
-      let gscData: GscSnapshot | null = null
-      let ga4Data: Ga4Snapshot | null = null
+      let gscData:  GscSnapshot      | null = null
+      let ga4Data:  Ga4Snapshot      | null = null
+      let metaData: MetaAdsSnapshot  | null = null
 
       if (gscRes.status === 'fulfilled' && gscRes.value.ok) {
         const body = await gscRes.value.json() as { latest: GscSnapshot | null }
@@ -372,10 +458,15 @@ export function ClientDataTab({ clientId }: { clientId: string }) {
         const body = await ga4Res.value.json() as { latest: Ga4Snapshot | null }
         ga4Data = body.latest ?? null
       }
+      if (metaRes.status === 'fulfilled' && metaRes.value.ok) {
+        const body = await metaRes.value.json() as { latest: MetaAdsSnapshot | null }
+        metaData = body.latest ?? null
+      }
 
       setGsc(gscData)
       setGa4(ga4Data)
-      setState(gscData || ga4Data ? 'ready' : 'empty')
+      setMeta(metaData)
+      setState(gscData || ga4Data || metaData ? 'ready' : 'empty')
     })()
     return () => { cancelled = true }
   }, [clientId])
@@ -402,8 +493,9 @@ export function ClientDataTab({ clientId }: { clientId: string }) {
 
   return (
     <div className="space-y-6">
-      {gsc && <GscSection snapshot={gsc} />}
-      {ga4 && <Ga4Section snapshot={ga4} />}
+      {gsc  && <GscSection snapshot={gsc} />}
+      {ga4  && <Ga4Section snapshot={ga4} />}
+      {meta && <MetaAdsSection snapshot={meta} />}
       {gsc && gsc.top_queries.length > 0 && (
         <FlagOpportunitiesSection queries={gsc.top_queries} />
       )}
