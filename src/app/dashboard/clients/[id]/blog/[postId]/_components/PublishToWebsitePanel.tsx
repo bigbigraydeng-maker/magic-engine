@@ -69,6 +69,7 @@ export function PublishToWebsitePanel({ clientId, postId, primaryKeyword, onSucc
   // P14.B.7: GSC indexing state
   const [gscIndexing,     setGscIndexing]     = useState(false)
   const [gscResult,       setGscResult]       = useState<{ ok: boolean; msg: string; reauthUrl?: string } | null>(null)
+  const [rollingBack,     setRollingBack]     = useState(false)
 
   useEffect(() => {
     void (async () => {
@@ -190,6 +191,34 @@ export function PublishToWebsitePanel({ clientId, postId, primaryKeyword, onSucc
     setGscResult(null)
   }
 
+  // P14.B.2 — Delete the remote WP/Shopify draft then reset UI.
+  const handleRollback = async () => {
+    if (!selectedPlatform || !draftResult || selectedPlatform === 'github') {
+      handleReset()
+      return
+    }
+    setRollingBack(true)
+    try {
+      const endpoint = selectedPlatform === 'wordpress'
+        ? `/api/clients/${clientId}/cms/publish-wordpress`
+        : `/api/clients/${clientId}/cms/publish-shopify`
+      await fetch(endpoint, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          action:      'rollback',
+          job_id:      draftResult.job_id,
+          platform_id: draftResult.platform_id,
+        }),
+      })
+    } catch {
+      // best-effort: always reset UI even if remote delete fails
+    } finally {
+      setRollingBack(false)
+      handleReset()
+    }
+  }
+
   // P14.B.7: request GSC indexing for a published post URL
   const handleGscIndexing = async (publishedUrl: string) => {
     setGscIndexing(true)
@@ -288,9 +317,11 @@ export function PublishToWebsitePanel({ clientId, postId, primaryKeyword, onSucc
           className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-green-600 hover:bg-green-700 text-white transition-colors">
           ✓ 确认发布到 {PLATFORM_LABELS[selectedPlatform]}
         </button>
-        <button onClick={handleReset}
-          className="px-2 py-1.5 text-xs text-gray-500 hover:text-gray-700">
-          取消
+        <button
+          onClick={() => void handleRollback()}
+          disabled={rollingBack}
+          className="px-2 py-1.5 text-xs text-red-500 hover:text-red-700 disabled:opacity-40 transition-colors">
+          {rollingBack ? '删除中…' : '🗑 删除草稿'}
         </button>
       </div>
     )
