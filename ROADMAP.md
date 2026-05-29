@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-29 18:24 NZST · 当前阶段：**Phase 14.B WP 发布质量改进 P14.B.0–7 全部完成 ✅ PR #120 等合并；Phase 14.A Website Connector ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-29 19:39 NZST · 当前阶段：**Phase 14.B WP 发布质量改进 P14.B.0–7 全部完成 ✅ PR #120 等合并；Phase 14.A Website Connector ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -1843,15 +1843,53 @@ website_publish_jobs
 - **M2（质量）**：内链 QC 第8项在有/无内链的博客上分别显示正确状态
 - **M3（运营）**：取消发布后 WP 后台无孤儿草稿
 
-### Phase 14.C 及后续（预告，未排期）
+### Phase 14.C — SEO 生产期稳定性 + 飞轮闭环 🔥 进行中（2026-05-29 启动）
+
+> **登记日期**：2026-05-29 · **触发**：CTS Tours + Oztop 进入 5 篇/周生产期前，4 视角并行审计发现的硬伤与飞轮断点。
+>
+> **核心目标**：让博客生成、看板管理、WP/GitHub 发布、飞轮反哺这条主链路在「5 篇/周 × 2 客户」的负载下不掉链子。
+
+| 任务 | 内容 | 优先级 | 估时 |
+|------|------|--------|------|
+| ⬜ **P14.C.1** | 殭尸 `status='generating'` 自愈 cron（>10min 自动标 failed） | 🔴 高 | 30m |
+| ⬜ **P14.C.2** | 看板「忽略」按钮持久化（PATCH `status='dismissed'`） | 🔴 高 | 30m |
+| ⬜ **P14.C.3** | 「重新生成策略」去重（`(client_id, proposed_title)` unique index + ON CONFLICT） | 🔴 高 | 45m |
+| ⬜ **P14.C.4** | JSON-LD Schema 注入 WP/Shopify/GitHub 发布管道（用 `buildBlogHtml()` 替代 `html_body`） | 🔴 高 | 45m |
+| ⬜ **P14.C.5** | 飞轮 outcome 按 `primary_keyword` 聚合 → 反哺选题（华佗 prompt + 选题分析器读 outcomes） | 🟡 中 | 90m |
+| ⬜ **P14.C.6** | GitHub PR merge webhook 回填 `published_at` + 自动触发 GSC 索引 | 🟡 中 | 90m |
+
+**验收关卡（M1 = P0 完成，M2 = P1 完成）：**
+- **M1**：连续生成 3 篇博客无殭尸状态；看板刷新后忽略仍生效；WP 发布的页面有 BlogPosting JSON-LD（用 Schema 测试工具验证）
+- **M2**：飞轮 outcome 出现 keyword 维度的聚合；CTS GitHub PR merge 后 `published_at` 自动回填，GSC 自动收到索引请求
+
+---
+
+### Phase 14.D — SEMrush 残留清理 + DataForSEO 全面接入 📋 已登记，14.C 完成后启动
+
+> **登记日期**：2026-05-29 · **触发**：14.C 审计发现 SEMrush 仅在 `/dashboard/keywords` 手动查词页面活跃，`keywords` 表疑似无写入路径，大量变量名/注释/路由残留 SEMrush 字样但底层已切到 DataForSEO。
+>
+> **目标**：删除所有 SEMrush 代码路径，全部走 DataForSEO Labs API，统一变量命名与文档。
+
+| 任务 | 内容 | 优先级 |
+|------|------|--------|
+| ⬜ **P14.D.1** | `/dashboard/keywords` 手动查词页面切到 DataForSEO（`/api/semrush/*` 路由全部重写或 redirect 到 `/api/dataforseo/*`） | 🔴 |
+| ⬜ **P14.D.2** | 验证或删除 `keywords` 表（如果真死表 → drop；如果有用 → 加 DataForSEO 写入路径） | 🟡 |
+| ⬜ **P14.D.3** | 变量重命名：`includeSemrush` → `includeKeywordData`；注释清理 | 🟢 |
+| ⬜ **P14.D.4** | `src/app/api/semrush/*` 路由删除（确认无外部调用后） | 🟢 |
+| ⬜ **P14.D.5** | 环境变量保留 `SEMRUSH_*`（按 CLAUDE.md 规则，env var 用真实命名）但代码不再读取 | 🟢 |
+
+---
+
+### Phase 14 及后续（预告，未排期）
 
 | Phase | 内容 | 触发条件 |
 |---|---|---|
-| 14.C | Webflow CMS connector | 14.B 完成 |
-| 14.D | GitHub connector（Next.js / Vercel 代码型站点） | 14.C 完成 |
-| 14.E | Campaign LP 生成器（高转化落地页，noindex + 活动结束 301） | 14.D 完成 |
-| 14.F | 权限漂移检测（定期校验 token scope，失效自动标 `needs_reconnect`） | 14.A 完成 |
-| 14.G | **客户网站知识图谱（Site Knowledge Graph）** | 14.A 完成 |
+| 14.G | **客户网站知识图谱（Site Knowledge Graph）** | 14.A 完成（详见下方） |
+| 14.H | Webflow CMS connector | 14.C 完成 |
+| 14.I | Campaign LP 生成器（高转化落地页，noindex + 活动结束 301） | 14.H 完成 |
+| 14.J | 权限漂移检测（定期校验 token scope，失效自动标 `needs_reconnect`） | 14.A 完成 |
+
+> **注**：原 14.D（GitHub connector）已由 Phase 12.H 完成，本表已移除。
 
 ### Phase 14.G — 客户网站知识图谱（Site Knowledge Graph）📋 待排期
 
