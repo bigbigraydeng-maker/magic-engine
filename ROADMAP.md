@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-29 18:24 NZST · 当前阶段：**Phase 14.B WP 发布质量改进 P14.B.0–7 全部完成 ✅ PR #120 等合并；Phase 14.A Website Connector ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-29 19:26 NZST · 当前阶段：**Phase 14.B WP 发布质量改进 P14.B.0–7 全部完成 ✅ PR #120 等合并；Phase 14.A Website Connector ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 20.D 六支柱看板入口 ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
