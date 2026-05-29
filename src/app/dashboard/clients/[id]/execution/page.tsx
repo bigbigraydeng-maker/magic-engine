@@ -789,18 +789,38 @@ function TaskDetailDrawer({
         {item.outcome && <OutcomeChip outcome={item.outcome} />}
 
         {/* 操作按钮区 */}
-        {/* Item 5: 进行中 → 进度条代替"生成内容"按钮 */}
-        {item.status === 'in_progress' && (
-          <div className="w-full rounded-lg border border-cyan-100 bg-cyan-50/60 px-3 py-2.5">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[11px] font-black text-cyan-700 uppercase tracking-wide">制作中</span>
-              <span className="text-[10px] text-cyan-500">系统处理中…</span>
+        {/* Item 5: 进行中 → 已生成则显示工作台链接，否则显示进度条 */}
+        {item.status === 'in_progress' && (() => {
+          const socialDone = item.logs?.some(
+            l => l.kind === 'ai_assist' && l.content?.includes('社媒内容已在后台生成完成')
+          ) ?? false
+          if (socialDone) {
+            return (
+              <div className="w-full rounded-lg border border-green-100 bg-green-50/60 px-3 py-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black text-green-700 uppercase tracking-wide">已生成</span>
+                  <a
+                    href={`/dashboard/content?client=${clientId}`}
+                    className="text-[11px] font-bold text-cyan-600 hover:text-cyan-800 underline"
+                  >
+                    查看社媒工作台 →
+                  </a>
+                </div>
+              </div>
+            )
+          }
+          return (
+            <div className="w-full rounded-lg border border-cyan-100 bg-cyan-50/60 px-3 py-2.5">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] font-black text-cyan-700 uppercase tracking-wide">制作中</span>
+                <span className="text-[10px] text-cyan-500">系统处理中…</span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-cyan-100">
+                <div className="h-full animate-pulse rounded-full bg-cyan-500" style={{ width: '70%' }} />
+              </div>
             </div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-cyan-100">
-              <div className="h-full animate-pulse rounded-full bg-cyan-500" style={{ width: '70%' }} />
-            </div>
-          </div>
-        )}
+          )
+        })()}
         <div className="flex flex-wrap gap-2 pt-1">
           <button
             onClick={() => onOpenChat(item)}
