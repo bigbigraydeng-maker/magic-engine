@@ -36,7 +36,7 @@ function adminAccess() {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  process.env.GOOGLE_OAUTH_CLIENT_ID    = 'goog-client-id'
+  process.env.GOOGLE_CLIENT_ID    = 'goog-client-id'
   process.env.NEXT_PUBLIC_APP_URL       = 'https://app.magic-engine.com'
   delete process.env.APP_URL
   mocks.requireDashboardClientAccess.mockResolvedValue(adminAccess())
@@ -72,12 +72,12 @@ describe('GET /api/auth/google/gbp/start', () => {
   })
 
   describe('env config', () => {
-    it('returns 500 when GOOGLE_OAUTH_CLIENT_ID is missing', async () => {
-      delete process.env.GOOGLE_OAUTH_CLIENT_ID
+    it('returns 500 when GOOGLE_CLIENT_ID is missing', async () => {
+      delete process.env.GOOGLE_CLIENT_ID
       const res = await GET(makeRequest('client-1'))
       expect(res.status).toBe(500)
       const body = await res.json()
-      expect(body.error).toMatch(/GOOGLE_OAUTH_CLIENT_ID/)
+      expect(body.error).toMatch(/GOOGLE_CLIENT_ID/)
     })
 
     it('returns 500 when neither APP_URL nor NEXT_PUBLIC_APP_URL is set', async () => {

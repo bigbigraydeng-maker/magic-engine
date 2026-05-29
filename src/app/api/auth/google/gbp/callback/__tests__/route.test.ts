@@ -81,8 +81,8 @@ function happyFetch() {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  process.env.GOOGLE_OAUTH_CLIENT_ID     = 'goog-client-id'
-  process.env.GOOGLE_OAUTH_CLIENT_SECRET = 'goog-client-secret'
+  process.env.GOOGLE_CLIENT_ID     = 'goog-client-id'
+  process.env.GOOGLE_CLIENT_SECRET = 'goog-client-secret'
   process.env.NEXT_PUBLIC_APP_URL        = 'https://app.magic-engine.com'
   mocks.requireDashboardClientAccess.mockResolvedValue(adminAccess())
   mocks.upsert.mockResolvedValue({ error: null })

@@ -67,8 +67,8 @@ function chainResolving(result: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  process.env.GOOGLE_OAUTH_CLIENT_ID     = 'test-client-id'
-  process.env.GOOGLE_OAUTH_CLIENT_SECRET = 'test-client-secret'
+  process.env.GOOGLE_CLIENT_ID     = 'test-client-id'
+  process.env.GOOGLE_CLIENT_SECRET = 'test-client-secret'
 })
 
 // ─── getValidToken ─────────────────────────────────────────────────────────────
@@ -181,14 +181,14 @@ describe('getValidToken — error cases', () => {
     )
   })
 
-  it('throws PlatformTokenRefreshError when GOOGLE_OAUTH_CLIENT_ID is missing', async () => {
+  it('throws PlatformTokenRefreshError when GOOGLE_CLIENT_ID is missing', async () => {
     mocks.isTokenExpired.mockReturnValue(true)
-    delete process.env.GOOGLE_OAUTH_CLIENT_ID
+    delete process.env.GOOGLE_CLIENT_ID
     const chain = chainResolving({ data: VALID_ROW, error: null })
     mocks.from.mockReturnValue(chain)
 
     await expect(getValidToken('client-1', 'google_gbp')).rejects.toThrow(
-      /GOOGLE_OAUTH_CLIENT_ID/,
+      /GOOGLE_CLIENT_ID/,
     )
   })
 

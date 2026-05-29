@@ -60,13 +60,13 @@ interface RefreshResult {
 }
 
 async function refreshGoogleToken(refreshTokenPlain: string): Promise<RefreshResult> {
-  const clientId     = process.env.GOOGLE_OAUTH_CLIENT_ID
-  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET
+  const clientId     = process.env.GOOGLE_CLIENT_ID
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET
 
   if (!clientId || !clientSecret) {
     throw new PlatformTokenRefreshError(
       PLATFORM_PROVIDERS.GOOGLE_GBP,
-      'GOOGLE_OAUTH_CLIENT_ID or GOOGLE_OAUTH_CLIENT_SECRET not configured',
+      'GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not configured',
     )
   }
 

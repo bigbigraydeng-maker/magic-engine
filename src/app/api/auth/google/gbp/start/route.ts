@@ -54,12 +54,12 @@ export async function GET(req: NextRequest) {
   }
 
   // ── 3. Env config ────────────────────────────────────────────────────────
-  const googleClientId = process.env.GOOGLE_OAUTH_CLIENT_ID
+  const googleClientId = process.env.GOOGLE_CLIENT_ID
   const appUrl         = process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL
 
   if (!googleClientId) {
     return NextResponse.json(
-      { error: 'GOOGLE_OAUTH_CLIENT_ID is not configured' },
+      { error: 'GOOGLE_CLIENT_ID is not configured' },
       { status: 500 },
     )
   }
