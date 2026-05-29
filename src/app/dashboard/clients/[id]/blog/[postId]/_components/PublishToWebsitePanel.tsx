@@ -43,6 +43,12 @@ interface Props {
   postId:         string
   /** P14.B.5: used to show a warning when primary_keyword is missing before WP publish. */
   primaryKeyword?: string | null
+  /**
+   * P14.E.5: when set, all publish actions are disabled and the panel shows a
+   * locked button with the reason as tooltip. Use this for hard-blocked
+   * quality checks (e.g. brand mention &lt;3).
+   */
+  disabledReason?: string
   onSuccess?: (platform: Platform, result: DoneResult) => void
 }
 
@@ -58,7 +64,7 @@ interface DoneResult {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function PublishToWebsitePanel({ clientId, postId, primaryKeyword, onSuccess }: Props) {
+export function PublishToWebsitePanel({ clientId, postId, primaryKeyword, disabledReason, onSuccess }: Props) {
   const [providers,        setProviders]        = useState<Providers | null>(null)
   const [loadingProviders, setLoadingProviders] = useState(true)
   const [selectedPlatform, setSelectedPlatform] = useState<Platform | null>(null)
@@ -250,6 +256,20 @@ export function PublishToWebsitePanel({ clientId, postId, primaryKeyword, onSucc
 
   if (loadingProviders) {
     return <span className="text-xs text-gray-400">加载中…</span>
+  }
+
+  // P14.E.5: hard-block — show locked publish chip with tooltip.
+  if (disabledReason) {
+    return (
+      <button
+        type="button"
+        disabled
+        title={`Blocked: ${disabledReason}`}
+        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-gray-200 text-gray-500 cursor-not-allowed"
+      >
+        🚫 发布已锁定
+      </button>
+    )
   }
 
   if (connectedPlatforms.length === 0) {
