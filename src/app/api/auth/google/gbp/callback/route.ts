@@ -110,8 +110,16 @@ export async function GET(req: NextRequest) {
   }
 
   if (!tokenData.access_token || !tokenData.refresh_token) {
+    console.error('[gbp/callback] token exchange missing fields:', {
+      has_access_token:  Boolean(tokenData.access_token),
+      has_refresh_token: Boolean(tokenData.refresh_token),
+    })
     return errorRedirect(appUrl, clientId, 'token_exchange_failed')
   }
+
+  // Log scope grant for diagnostic — does the token actually have business.manage?
+  const tokenScope = (tokenData as { scope?: string }).scope ?? '(missing)'
+  console.log('[gbp/callback] token granted with scope:', tokenScope)
 
   // ── 6. Fetch GBP account info ─────────────────────────────────────────────
   const accountsRes = await fetch(GBP_ACCOUNTS_URL, {
@@ -119,6 +127,17 @@ export async function GET(req: NextRequest) {
   })
 
   if (!accountsRes.ok) {
+    // Capture status + body so we can distinguish:
+    //   403 → user not in Test users, or business.manage scope missing
+    //   429 → quota
+    //   404 → API not enabled in this GCP project
+    const errorBody = await accountsRes.text().catch(() => '(unreadable)')
+    console.error('[gbp/callback] GBP accounts API failed:', {
+      status:     accountsRes.status,
+      statusText: accountsRes.statusText,
+      body:       errorBody.slice(0, 500),
+      scope:      tokenScope,
+    })
     return errorRedirect(appUrl, clientId, 'gbp_api_failed')
   }
 
@@ -128,6 +147,7 @@ export async function GET(req: NextRequest) {
 
   const accounts = accountsData.accounts ?? []
   if (accounts.length === 0) {
+    console.warn('[gbp/callback] no GBP accounts under this Google user')
     return errorRedirect(appUrl, clientId, 'no_gbp_accounts')
   }
 
