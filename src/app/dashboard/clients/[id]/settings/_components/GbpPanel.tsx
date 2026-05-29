@@ -19,9 +19,10 @@ interface Props {
 
 type PanelState =
   | { phase: 'loading' }
-  | { phase: 'error';       message: string }
+  | { phase: 'error';            message: string }
   | { phase: 'disconnected' }
-  | { phase: 'connected';   connection: PlatformConnectionSummary }
+  | { phase: 'needs_reconnect'; connection: PlatformConnectionSummary }
+  | { phase: 'connected';       connection: PlatformConnectionSummary }
 
 export function GbpPanel({ clientId }: Props) {
   const [state,    setState]    = useState<PanelState>({ phase: 'loading' })
@@ -33,8 +34,11 @@ export function GbpPanel({ clientId }: Props) {
       const res = await fetch(`/api/clients/${clientId}/platform/gbp`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const { connections } = (await res.json()) as { connections: PlatformConnectionSummary[] }
-      const active = connections.find(c => c.status === 'active') ?? null
-      setState(active ? { phase: 'connected', connection: active } : { phase: 'disconnected' })
+      const active   = connections.find(c => c.status === 'active') ?? null
+      const errored  = connections.find(c => c.status === 'error')  ?? null
+      if (active)        setState({ phase: 'connected',       connection: active })
+      else if (errored)  setState({ phase: 'needs_reconnect', connection: errored })
+      else               setState({ phase: 'disconnected' })
     } catch (err) {
       setState({ phase: 'error', message: err instanceof Error ? err.message : String(err) })
     }
@@ -78,6 +82,38 @@ export function GbpPanel({ clientId }: Props) {
         <button onClick={loadConnections} className="mt-2 font-medium underline">
           重试
         </button>
+      </div>
+    )
+  }
+
+  // ── Needs reconnect ─────────────────────────────────────────────────────
+  if (state.phase === 'needs_reconnect') {
+    const { connection } = state
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+        <div className="flex items-start gap-4">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-amber-100 text-xl">
+            ⚠️
+          </div>
+          <div className="min-w-0 flex-1">
+            <h3 className="font-black text-slate-900">连接中断 — {connection.display_name}</h3>
+            <p className="mt-1 text-sm text-amber-700">
+              {connection.error_message ?? 'GBP 连接授权已失效，需要重新授权。'}
+            </p>
+            {connection.last_synced_at && (
+              <p className="mt-1 text-xs text-slate-400">
+                上次同步：{new Date(connection.last_synced_at).toLocaleString('zh-CN')}
+              </p>
+            )}
+            <a
+              href={'/api/auth/google/gbp/start?clientId=' + clientId}
+              className="mt-3 inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-black text-white transition hover:bg-amber-700 active:bg-amber-800"
+            >
+              <span>🔄</span>
+              重新授权
+            </a>
+          </div>
+        </div>
       </div>
     )
   }
