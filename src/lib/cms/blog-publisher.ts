@@ -176,7 +176,6 @@ export async function publishBlogToGitHub(
       flywheel:           'seo',
       action_type:        CMS_ACTION_TYPE.CONTENT_INSERT,
       execution_mode:     'in_house',
-      status:             'done',
       payload:            { blogPostId, filePath, prUrl: pr.html_url, prNumber: pr.number },
       execution_item_id:  executionItemId ?? null,
     })

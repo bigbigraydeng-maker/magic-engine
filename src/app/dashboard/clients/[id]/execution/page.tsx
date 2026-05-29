@@ -921,6 +921,7 @@ function PhaseColumn({
   onOpenDetail,
   onAddItem,
   bgGeneratingIds,
+  onReorder,
 }: {
   phase: number
   items: ItemWithLogs[]
@@ -932,6 +933,7 @@ function PhaseColumn({
   onOpenDetail: (item: ItemWithLogs) => void
   onAddItem: (prescriptionId: string, phase: number, fields: AddItemFields) => Promise<boolean>
   bgGeneratingIds?: Set<string>
+  onReorder?: (draggedId: string, targetId: string, columnItems: ItemWithLogs[]) => void
 }) {
   const [open, setOpen] = useState(defaultOpen)
   const [adding, setAdding] = useState(false)
@@ -942,6 +944,7 @@ function PhaseColumn({
   const [aPlatform, setAPlatform] = useState('facebook')
   const [aKind, setAKind]         = useState('social_post')
   const [submitting, setSubmitting] = useState(false)
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
 
   const meta      = PHASE_LABELS[phase] ?? { name: `Phase ${phase}`, color: 'bg-gray-600' }
   const completed = items.filter(i => i.status === 'completed').length
@@ -995,13 +998,28 @@ function PhaseColumn({
             <p className="text-xs text-gray-400 text-center py-6">此阶段暂无执行项</p>
           )}
           {items.map(item => (
-            <ExecutionItemCard
+            <div
               key={item.id}
-              item={item}
-              isActive={activeDetailId === item.id}
-              onOpenDetail={onOpenDetail}
-              isBackgroundGenerating={bgGeneratingIds?.has(item.id) ?? false}
-            />
+              draggable={!!onReorder}
+              onDragStart={e => { e.dataTransfer.setData('text/plain', item.id); e.dataTransfer.effectAllowed = 'move' }}
+              onDragOver={e => { if (!onReorder) return; e.preventDefault(); setDragOverId(item.id) }}
+              onDragLeave={() => setDragOverId(null)}
+              onDrop={e => {
+                if (!onReorder) return
+                e.preventDefault()
+                setDragOverId(null)
+                const draggedId = e.dataTransfer.getData('text/plain')
+                if (draggedId && draggedId !== item.id) onReorder(draggedId, item.id, items)
+              }}
+              className={dragOverId === item.id ? 'ring-2 ring-inset ring-indigo-400 rounded-lg' : undefined}
+            >
+              <ExecutionItemCard
+                item={item}
+                isActive={activeDetailId === item.id}
+                onOpenDetail={onOpenDetail}
+                isBackgroundGenerating={bgGeneratingIds?.has(item.id) ?? false}
+              />
+            </div>
           ))}
 
           {/* 加执行项表单 */}
@@ -1206,6 +1224,7 @@ function PrescriptionGroup({
   onOpenDetail,
   onAddItem,
   bgGeneratingIds,
+  onReorder,
 }: {
   group: GroupData
   defaultOpen: boolean
@@ -1214,13 +1233,17 @@ function PrescriptionGroup({
   onOpenDetail: (item: ItemWithLogs) => void
   onAddItem: (prescriptionId: string, phase: number, fields: AddItemFields) => Promise<boolean>
   bgGeneratingIds?: Set<string>
+  onReorder?: (draggedId: string, targetId: string, columnItems: ItemWithLogs[]) => void
 }) {
   const { items, label, archived, derivable, pid, meta, marketingPlanMeta, editable, kind } = group
 
-  // 该处方内按 phase 分组
+  // 该处方内按 phase 分组，并按 sort_order 排序（拖拽排序依赖此顺序）
   const byPhase: Record<number, ItemWithLogs[]> = {}
   for (const it of items) {
     ;(byPhase[it.phase ?? 1] ??= []).push(it)
+  }
+  for (const key of Object.keys(byPhase)) {
+    byPhase[Number(key)].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
   }
   const completed = items.filter(i => i.status === 'completed').length
 
@@ -1299,6 +1322,7 @@ function PrescriptionGroup({
               onOpenDetail={onOpenDetail}
               onAddItem={onAddItem}
               bgGeneratingIds={bgGeneratingIds}
+              onReorder={onReorder}
             />
           ))}
         </div>
@@ -1557,15 +1581,48 @@ export default function ExecutionPage() {
     await Promise.all(newOrders.map(({ id, sort_order }) =>
       fetch(`/api/clients/${clientId}/execution/${id}`, {
         method:  'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ sort_order }),
       }).then(r => { if (!r.ok) throw new Error(`PATCH ${id} failed`) })
     )).catch(async () => {
-      // rollback on any failure + surface error to FDE
       setOpError('排序更新失败，请重试')
       await fetchItems(true)
     })
   }, [items, clientId, fetchItems])
+
+  // 处方 Phase 列内拖拽排序（通用版，传入列内 items 作为排序上下文）
+  const handleReorderItems = useCallback(async (
+    draggedId: string,
+    targetId: string,
+    columnItems: ItemWithLogs[],
+  ) => {
+    if (draggedId === targetId) return
+    const dragIdx = columnItems.findIndex(i => i.id === draggedId)
+    const targIdx = columnItems.findIndex(i => i.id === targetId)
+    if (dragIdx === -1 || targIdx === -1) return
+
+    const reordered = [...columnItems]
+    const [dragged] = reordered.splice(dragIdx, 1)
+    reordered.splice(targIdx, 0, dragged)
+
+    const newOrders = reordered.map((it, idx) => ({ id: it.id, sort_order: (idx + 1) * 10 }))
+
+    setItems(prev => prev.map(it => {
+      const o = newOrders.find(x => x.id === it.id)
+      return o ? { ...it, sort_order: o.sort_order } : it
+    }))
+
+    await Promise.all(newOrders.map(({ id, sort_order }) =>
+      fetch(`/api/clients/${clientId}/execution/${id}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ sort_order }),
+      }).then(r => { if (!r.ok) throw new Error(`PATCH ${id} failed`) })
+    )).catch(async () => {
+      setOpError('排序更新失败，请重试')
+      await fetchItems(true)
+    })
+  }, [clientId, fetchItems])
 
   // 移除执行项（仅限 pending 状态）
   const handleDeleteItem = useCallback(async (itemId: string): Promise<void> => {
@@ -1856,6 +1913,7 @@ export default function ExecutionPage() {
               onOpenDetail={item => { setDetailItem(item); setDetailEditable(group.editable) }}
               onAddItem={handleAddItem}
               bgGeneratingIds={allBgGeneratingIds}
+              onReorder={handleReorderItems}
             />
           )
         })}

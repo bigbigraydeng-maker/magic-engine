@@ -31,6 +31,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getValidAccessToken } from '@/lib/google-oauth/client'
 import { requestIndexing } from '@/lib/gsc/indexing-client'
+import { pingSitemap, buildSitemapUrlFromDomain, type SitemapPingSummary } from '@/lib/gsc/sitemap-ping'
 
 interface GithubPullRequestEvent {
   action: string
@@ -142,18 +143,47 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'update failed' }, { status: 500 })
   }
 
-  // ── Best-effort GSC indexing request ─────────────────────────────────────
-  // Failures are logged but never break the webhook — GitHub disables receivers
-  // that don't 2xx promptly.
-  const gscResult = await tryRequestGscIndexing(match.client_id, match.slug)
+  // ── Best-effort downstream signals ─────────────────────────────────────
+  // All failures are swallowed — GitHub disables receivers that don't 2xx promptly.
+  //
+  //   1. Sitemap ping (Google + Bing) — the practical lever to get the
+  //      sitemap re-fetched and the new URL discovered. Works for any
+  //      content type. See sitemap-ping.ts for protocol caveats.
+  //   2. GSC Indexing API — kept around for JobPosting / BroadcastEvent
+  //      content. Will report NOT_SUPPORTED_BY_API for blog URLs (Google
+  //      drops the request silently at the backend); the UI surfaces the
+  //      classification and recommends the manual GSC Inspect fallback.
+  const [sitemapResult, gscResult] = await Promise.all([
+    tryPingSitemap(match.client_id),
+    tryRequestGscIndexing(match.client_id, match.slug),
+  ])
 
   return NextResponse.json({
     success:        true,
     blog_post_id:   match.id,
     pr_number:      body.pull_request.number,
     published_at:   publishedAt,
+    sitemap_ping:   sitemapResult,
     gsc_indexing:   gscResult,
   })
+}
+
+async function tryPingSitemap(clientId: string): Promise<SitemapPingSummary | { attempted: false; reason: string }> {
+  const { data: clientRow } = await supabaseAdmin
+    .from('clients')
+    .select('domain')
+    .eq('id', clientId)
+    .maybeSingle<ClientRow>()
+  const sitemapUrl = buildSitemapUrlFromDomain(clientRow?.domain)
+  if (!sitemapUrl) return { attempted: false, reason: 'no client domain' }
+  try {
+    return await pingSitemap(sitemapUrl)
+  } catch (err) {
+    return {
+      attempted: false,
+      reason: err instanceof Error ? err.message : 'sitemap ping threw unexpectedly',
+    }
+  }
 }
 
 interface GscResult {

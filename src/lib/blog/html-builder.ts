@@ -169,6 +169,14 @@ export interface GeoCheck {
   label: string
   pass: boolean
   detail?: string
+  /**
+   * P14.E.3: when true and pass is false, this check should hard-block
+   * publishing/approving. The UI surfaces these in red with a banner
+   * instead of the soft amber warning used for normal advisories.
+   * Currently only `brand_mentions` is wired as a blocker — GEO signal
+   * is meaningless without the brand entity appearing in the body text.
+   */
+  blocker?: boolean
 }
 
 export function computeGeoChecklist(post: BlogPost, brandName: string): GeoCheck[] {
@@ -188,7 +196,10 @@ export function computeGeoChecklist(post: BlogPost, brandName: string): GeoCheck
       key: 'brand_mentions',
       label: `Brand mentioned ≥3×`,
       pass: brandMentions >= 3,
-      detail: `"${brandName}" appears ${brandMentions} time${brandMentions !== 1 ? 's' : ''} in body text`,
+      blocker: true,
+      detail: brandMentions >= 3
+        ? `"${brandName}" appears ${brandMentions} times in body text`
+        : `"${brandName}" appears ${brandMentions} time${brandMentions !== 1 ? 's' : ''} — must be ≥3 before publish (GEO entity signal)`,
     },
     {
       key: 'h1_present',

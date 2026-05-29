@@ -90,17 +90,20 @@ const CONNECTOR_META: Record<string, ConnectorMeta> = {
   ga4: {
     name: 'Google Analytics 4',
     emoji: '📈',
-    description: '通过 GA4 Data API 接入，飞轮归因数据将直接来自真实 GA4，不再依赖估算。',
+    description: '通过 GA4 Data API 接入网站真实流量数据（会话、用户、页面浏览、跳出率、流量来源），飞轮归因将直接使用 GA4 真实数据。\n\n⚠️ 前置要求：请先在 Google Search Console 页面完成「Google 账号授权」（使用有 GA4 管理权限的 Google 账号），再回到这里填入 Property ID。\n\nGA4 Property ID 可在 GA4 后台 → 管理 → 媒体资源设置中找到（纯数字，如 123456789）。',
     fields: [
       {
         key: 'property_id',
         label: 'GA4 Property ID',
-        placeholder: '123456789',
-        required: false,
+        placeholder: '123456789（GA4 后台 → 管理 → 媒体资源设置）',
+        required: true,
       },
     ],
     triggersAdvanced: false,
     advancedHint: '',
+    buttonLabel: '连接 Google Analytics 4 →',
+    successLabel: '✓ Google Analytics 4 已连接',
+    savedLabel: '已保存。点击下方「立即同步」拉取最近 28 天流量数据。',
   },
   reviews: {
     name: '第三方评价平台',
