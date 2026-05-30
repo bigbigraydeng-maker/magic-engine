@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-31 03:20 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-31 03:56 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2543,6 +2543,7 @@ Phase 25 是 Phase 20 的前置基础：
 | **20.A** MTC 地基 | DB migrations + Stripe Webhook + MTC 余额 API | ~1 周 |
 | **20.B** 界面 | 钱包页 + Checkout 流程 + 生成 API 扣费接入 | ~1 周 |
 | **20.C** 收尾 | Talk to Us 触发 + Magic Lab Class 入口 + 过期提醒邮件 + 管理员视图 | ~3–4 天 |
+| **20.E** 认证+转化 | 密码/Google 登录 + 注册简化（移除 businessName）+ Discovery 结果页重设计（评分+遮罩+损失厌恶）+ leadId 贯通 | 🔄 进行中 |
 
 ### Phase 20.0 — Portal 地基（自助漏斗，无 MTC）🔜 当前开工
 
