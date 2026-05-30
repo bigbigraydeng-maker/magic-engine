@@ -170,9 +170,9 @@ function renderResult(data) {
   container.innerHTML = html;
 
   // Portal bridge CTA
-  const base = 'https://app.magicengine.com.au/login?next=/portal';
+  const base = 'https://app.magicengine.com.au/portal/login';
   document.querySelectorAll('.portal-link').forEach(a => {
-    a.href = leadId ? `${base}&lead=${encodeURIComponent(leadId)}` : base;
+    a.href = leadId ? `${base}?lead=${encodeURIComponent(leadId)}` : base;
   });
 
   // Show top opportunity in portal bridge if present
