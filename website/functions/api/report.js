@@ -112,7 +112,7 @@ function buildEmail({ lead, email }) {
           <div style="background:#16181D;border-radius:14px;padding:28px 32px;margin:28px 0;text-align:center;">
             <div style="font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,.4);margin-bottom:8px;">Top opportunity</div>
             <div style="font-size:18px;font-weight:700;color:#FBFAF7;margin-bottom:20px;">${topOpp.title}</div>
-            <a href="https://app.magicengine.com.au/login?next=/portal" style="display:inline-block;padding:13px 28px;background:#BE8A2E;color:#fff;font-weight:600;font-size:15px;border-radius:10px;text-decoration:none;">Open your portal →</a>
+            <a href="https://app.magicengine.com.au/portal/login" style="display:inline-block;padding:13px 28px;background:#BE8A2E;color:#fff;font-weight:600;font-size:15px;border-radius:10px;text-decoration:none;">Open your portal →</a>
           </div>` : ''}
 
           <hr style="border:none;border-top:1px solid rgba(22,24,29,.08);margin:28px 0;">
