@@ -12,7 +12,6 @@ import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import type { ExecutionItem } from '@/types/diagnostic'
 
-const API_KEY = process.env.NEXT_PUBLIC_INTERNAL_API_KEY ?? ''
 
 const DIMENSION_OPTIONS = [
   { v: 'seo',           label: '🔍 SEO' },
@@ -75,7 +74,7 @@ export function FdeManualEntryModal({ clientId, open, onClose, onCreated }: Prop
     try {
       const res = await fetch(`/api/clients/${clientId}/execution/manual`, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
           title:       title.trim(),
           description: description.trim() || undefined,

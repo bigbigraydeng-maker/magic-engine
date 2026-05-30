@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-30 21:51 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-31 03:20 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2179,9 +2179,9 @@ AI 可见度层（ME 独有 ✅）
 
 ---
 
-## Phase 19 — API 鉴权整改（IDOR 修复 + 凭证泄漏封堵）🔴 CRITICAL 安全 · 📋 已登记，缓做
+## Phase 19 — API 鉴权整改（IDOR 修复 + 凭证泄漏封堵）✅ 已完成（2026-05-27，PR #95）
 
-> **登记日期**：2026-05-22 · **状态**：方案已设计 + PM 批准；实施被 PM 缓做（优先内容 / SEO），但带**硬性时间约束**（见下）
+> **登记日期**：2026-05-22 · **完成日期**：2026-05-27 · **PR**：#95 · **状态**：19.A–E 全部完成
 >
 > **背景**：2026-05-22 审计发现全部 **89 个 `/api/clients/[id]/*` 路由**存在系统性横向越权（IDOR）—— 任何已登录的 dashboard 用户都能拿别的 client UUID 调任意 API 读 / 改对方数据。由 PR #51 一个 review comment（competitors-gap 路由无鉴权）引出审计，确认问题系统性。
 >
@@ -2854,6 +2854,10 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 ---
 
 ## 9. 功能完成日志
+
+### 2026-05-31（Phase 19.F — 修复 Phase 20.D 引入的鉴权回归）
+
+- **P19.F** — `execution/manual` 路由换 `requireDashboardClientAccess`；`FdeManualEntryModal` 去掉 `NEXT_PUBLIC_INTERNAL_API_KEY`/`Authorization` 头，改走 session cookie（IDOR + 凭证泄漏双修）
 
 ### 2026-05-29（Phase 24.A — Platform OAuth Connector 全部完成 8/8）
 
