@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 })
   }
 
-  const { name, email, company, message, source } = body as Record<string, string>
+  const { name, email, company, message } = body as Record<string, string>
 
   if (!name?.trim() || !email?.trim() || !message?.trim()) {
     return NextResponse.json({ error: 'Name, email, and message are required.' }, { status: 400 })
@@ -30,21 +30,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Message too long.' }, { status: 400 })
   }
 
-  const sourceLabel = source?.trim() || ''
-  const subjectPrefix =
-    sourceLabel === 'training'
-      ? 'New training enquiry'
-      : sourceLabel === 'ads'
-        ? 'New ads enquiry'
-        : 'New enquiry'
-
   const resend = new Resend(apiKey)
 
   const { error } = await resend.emails.send({
     from: 'Magic Engine Contact <onboarding@resend.dev>',
     to: [TO_EMAIL],
     replyTo: email,
-    subject: `${subjectPrefix} from ${name.trim()} — Magic Engine`,
+    subject: `New enquiry from ${name.trim()} — Magic Engine`,
     html: `
       <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
         <h2 style="margin:0 0 20px;font-size:18px;color:#0f172a">New contact form submission</h2>
@@ -61,12 +53,6 @@ export async function POST(req: NextRequest) {
           <tr>
             <td style="padding:8px 12px;background:#f8fafc;font-weight:600;color:#475569">Company</td>
             <td style="padding:8px 12px;border-left:3px solid #e2e8f0">${escapeHtml(company.trim())}</td>
-          </tr>
-          ` : ''}
-          ${sourceLabel ? `
-          <tr>
-            <td style="padding:8px 12px;background:#f8fafc;font-weight:600;color:#475569">Source</td>
-            <td style="padding:8px 12px;border-left:3px solid #e2e8f0">${escapeHtml(sourceLabel)}</td>
           </tr>
           ` : ''}
           <tr>
