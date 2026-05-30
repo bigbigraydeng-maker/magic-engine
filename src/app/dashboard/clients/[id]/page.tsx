@@ -11,6 +11,7 @@ import { ZhugeDrawer } from './_components/ZhugeDrawer';
 import { NextStepCard, type DiscoveryStatus, type PrescriptionStatus } from './_components/NextStepCard';
 import type { ClientDiscoveryRow } from '@/lib/zhangqian/types';
 import { ClientDataTab } from './_components/ClientDataTab';
+import { LocaleConfirmBanner } from './_components/LocaleConfirmBanner';
 
 
 interface Client {
@@ -453,6 +454,9 @@ export default function ClientDetailPage() {
 
   return (
     <div className="min-h-screen space-y-5 bg-[#f6f7f2] px-4 py-5 md:px-6">
+      {/* Locale confirmation banner — shown until client confirms */}
+      <LocaleConfirmBanner clientId={clientId} />
+
       {/* Page header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
         <div className="flex min-w-0 flex-wrap items-center gap-3">

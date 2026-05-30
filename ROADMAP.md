@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-30 18:11 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-30 20:11 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -77,6 +77,7 @@
 📋 Phase 22     Data Intelligence Engine / 数据智能引擎（旗舰能力 — 采集+分析+反馈学习引擎）
 📋 Phase 22.D   主动任务生成器 / AnomalyDetector + 诸葛亮 Proactive（Phase 22 子模块）
 📋 Phase 23     Cross-Agent Memory Layer / 跨 Agent 记忆层（旗舰能力 — 升级自 Phase 8.M，补 L3 长期学习）
+📋 Phase 26     Client Locale Intelligence / 客户地域智能层（国家→州→城市三层 + 业务范围 + AU/NZ 节日日历注入）
 ```
 
 **Phase 7 核心战略**：双信号博客（Dual-Signal Blog）— 每篇文章同时携带 SEO 信号（Google 排名）和 GEO 信号（AI 推荐），选题由 AI Tracker 弱项 × SEMrush 低KD机会交叉驱动，形成数据自强化飞轮。
@@ -2850,6 +2851,51 @@ client_decision_history      -- 为什么之前选 X 不选 Y
              ▼
          产出更聪明的内容 → 飞轮自强化
 ```
+
+---
+
+## Phase 26 — Client Locale Intelligence（客户地域智能层）📋 已登记，实施中
+
+> **登记日期**：2026-06-12 · **状态**：实施中，分支 `feat/phase-26-locale-intelligence`
+>
+> **战略定位**：为所有 AI 生成模块提供统一的地域上下文注入基础设施。客户的物理位置（国家→州→城市）+ 业务覆盖范围（本地/州级/全国）驱动节日日历、季节信号、文化上下文、DataForSEO 参数，让每一条生成内容都自动携带正确的市场背景。
+>
+> **核心设计原则**：confirm-don't-fill（让客户确认预填信息，而不是填空）。
+
+### 数据模型
+
+```sql
+ALTER TABLE clients
+  ADD COLUMN country             VARCHAR(2)   DEFAULT 'AU',
+  ADD COLUMN state_code          VARCHAR(10),
+  ADD COLUMN city                VARCHAR(100),
+  ADD COLUMN business_scope      VARCHAR(20)  DEFAULT 'local',
+  ADD COLUMN locale_confirmed_at TIMESTAMPTZ;
+-- business_scope: 'local' | 'state' | 'national'
+-- semrush_db 字段保留，兼容现有 DataForSEO 调用
+```
+
+**AU 州代码**：`VIC` / `NSW` / `QLD` / `WA` / `SA` / `TAS` / `ACT` / `NT`
+
+**NZ 省代码**：`AKL` / `WLG` / `CAN` / `OTG` / `HKB` / `NLS` / `MBR` / `STH` / `TRK` / `WKO`
+
+### 业务范围
+
+| scope | 含义 | 节日注入策略 |
+|-------|------|------------|
+| `local` | 仅服务本城市/本区 | 本城市事件 + 本州节日 + 全国节日 |
+| `state` | 服务整个州/省 | 本州所有节日 + 全国节日 |
+| `national` | 服务全澳或全新西兰 | 所有州重要节日 + 全国节日 |
+
+### Phase 26 任务清单
+
+- [x] **P26.1** — DB migration：`clients` 表加 5 列（country / state_code / city / business_scope / locale_confirmed_at）（2026-06-12 完成）
+- [x] **P26.2** — AU/NZ 静态节日日历（`src/lib/locale/calendar.ts`，2026–2027 完整数据）（2026-06-12 完成）
+- [x] **P26.3** — `getClientLocale()` 服务（`src/lib/locale/client-locale.ts`）（2026-06-12 完成）
+- [x] **P26.4** — 客户确认 UI：Dashboard 顶部提示条 + 确认弹窗（预填 + 一键确认）（2026-06-12 完成）
+- [x] **P26.5** — Settings 页面地域设置区块（2026-06-12 完成）
+- [x] **P26.6** — Storyboard 生成器接入 `getClientLocale()`（2026-06-12 完成）
+- [x] **P26.7** — 博客/GEO 生成器接入 `getClientLocale()`（2026-06-12 完成）
 
 ---
 
