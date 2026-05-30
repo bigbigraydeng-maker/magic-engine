@@ -44,6 +44,10 @@ services:
         value: https://app.magicengine.com.au
       - key: APP_URL
         value: https://app.magicengine.com.au
+      - key: OPENAI_BASE_URL
+        value: https://gateway.ai.cloudflare.com/v1/bbd84393da8e5707ba617749dc17117c/magic-engine/openai
+      - key: ANTHROPIC_BASE_URL
+        value: https://gateway.ai.cloudflare.com/v1/bbd84393da8e5707ba617749dc17117c/magic-engine/anthropic
       - key: ADMIN_EMAILS
         sync: false
       - key: CLIENT_VIEWERS
