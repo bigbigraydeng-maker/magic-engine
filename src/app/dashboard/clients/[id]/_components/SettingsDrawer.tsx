@@ -5,6 +5,7 @@ import { BriefPanel } from './BriefPanel'
 import { CmsPanel } from './CmsPanel'
 import Link from 'next/link'
 import { UsersPanel } from './UsersPanel'
+import { LocaleConfirmBanner } from './LocaleConfirmBanner'
 
 export type SettingsTab = 'brief' | 'client-info' | 'cms' | 'users' | 'platform'
 
@@ -136,6 +137,12 @@ export function SettingsDrawer({ open, onClose, clientId, client, activeTab, onT
                     <span className="text-right font-semibold text-slate-950">{value}</span>
                   </div>
                 ))}
+              </div>
+
+              {/* Locale settings */}
+              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <p className="mb-3 text-[11px] font-black uppercase tracking-[0.14em] text-cyan-800">业务地域设置</p>
+                <LocaleConfirmBanner clientId={clientId} />
               </div>
             </div>
           )}

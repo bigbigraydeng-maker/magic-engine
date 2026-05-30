@@ -17,6 +17,7 @@ import { getActiveCampaigns, formatCampaignForPrompt } from '../content/campaign
 import { getActiveGeoHtml } from '../geo/html-generator'
 import { callClaudeWithDocs, parseJsonResponse } from '../anthropic/client'
 import { generateVisualBrief } from '../content/visual-brief-generator'
+import { getClientLocale, formatLocaleForPrompt } from '../locale/client-locale'
 import type { GenerateBlogRequest, BlogPost, MasterBrief, CampaignBrief } from '@/types/magic-engine'
 
 const MODEL_USED = 'claude-sonnet-4-6'
@@ -81,10 +82,11 @@ export async function generateBlogPost(
 
   if (!clientData) throw new Error('Client not found')
 
-  // 2. Load Master Brief + active Campaign in parallel
-  const [brief, campaigns] = await Promise.all([
+  // 2. Load Master Brief + active Campaign + locale in parallel
+  const [brief, campaigns, locale] = await Promise.all([
     getActiveBrief(req.client_id),
     getActiveCampaigns(req.client_id).catch(() => []),
+    getClientLocale(req.client_id).catch(() => null),
   ])
   const briefText = brief
     ? formatBriefForPrompt(brief)
@@ -109,8 +111,8 @@ export async function generateBlogPost(
     sourceQueryText: req.source_query_text ?? req.topic,
     wordCountTarget: targetWordCount,
     existingPagesContext: req.existing_pages_context,
-    // P14.B.3: pass authoritative location so generator uses the right city.
     authoritativeLocation: geoResult?.authoritativeLocation ?? null,
+    localeText: locale ? formatLocaleForPrompt(locale) : null,
   })
 
   // 5. Call Claude Sonnet 4.6
@@ -212,13 +214,13 @@ function buildUserMessage(params: {
   sourceQueryText: string
   wordCountTarget: number
   existingPagesContext?: string
-  /** P14.B.3: authoritative client location extracted from geo_directives.audience_signals.location */
   authoritativeLocation?: string | null
+  localeText?: string | null
 }): string {
   const {
     brandName, domain, briefText, campaignText, fdeContext,
     topic, sourceQueryText, wordCountTarget, existingPagesContext,
-    authoritativeLocation,
+    authoritativeLocation, localeText,
   } = params
 
   const campaignSection = campaignText
@@ -249,7 +251,7 @@ TARGET QUESTION:
 BLOG TOPIC: ${topic}
 TARGET WORD COUNT: ~${wordCountTarget} words
 BRAND: ${brandName}${domain ? ` (${domain})` : ''}
-MARKET: New Zealand and Australia${locationLine}
+MARKET: New Zealand and Australia${locationLine}${localeText ? `\n\nLOCALE CONTEXT:\n${localeText}` : ''}
 
 CRITICAL: The brand "${brandName}" must be mentioned naturally at least 3 times.
 The article should directly answer "${sourceQueryText}" so that when AI systems read this page,

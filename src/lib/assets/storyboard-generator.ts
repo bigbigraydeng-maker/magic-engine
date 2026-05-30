@@ -11,6 +11,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { callClaudeWithDocs } from '@/lib/anthropic/client'
 import { getActiveBrief, formatBriefForPrompt } from '@/lib/content/brief-injector'
+import { getClientLocale, formatLocaleForPrompt } from '@/lib/locale/client-locale'
 import type { VisionMetadata } from './vision-analyzer'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -151,10 +152,16 @@ export async function generateStoryboard(params: {
 }): Promise<StoryboardResult> {
   const { clientId, theme, selection } = params
 
-  const brief = await getActiveBrief(clientId)
+  const [brief, locale] = await Promise.all([
+    getActiveBrief(clientId),
+    getClientLocale(clientId).catch(() => null),
+  ])
   const briefText = brief
     ? formatBriefForPrompt(brief)
     : '(No brand brief available — use general professional AU/NZ business tone)'
+  const localeText = locale
+    ? formatLocaleForPrompt(locale)
+    : 'Market: Australia · Season: current · AU/NZ English spelling'
 
   const { hook, middle, cta } = selection
 
@@ -173,6 +180,9 @@ ${theme}
 
 ## Brand Brief
 ${briefText}
+
+## Market & Locale Context
+${localeText}
 
 ## Selected Images (in order)
 ${assetDescriptions}
