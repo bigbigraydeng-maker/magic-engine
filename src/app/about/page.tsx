@@ -178,6 +178,9 @@ export default function AboutPage() {
             <Link href="/terms" className="hover:text-slate-950">
               Terms of Service
             </Link>
+            <Link href="/contact" className="hover:text-slate-950">
+              Contact
+            </Link>
           </nav>
         </div>
       </footer>

@@ -234,9 +234,9 @@ export default async function HomePage() {
             <Link href="/terms" className="hover:text-slate-950">
               Terms of Service
             </Link>
-            <a href="mailto:raydeng@magicengine.com.au" className="hover:text-slate-950">
+            <Link href="/contact" className="hover:text-slate-950">
               Contact
-            </a>
+            </Link>
           </nav>
         </div>
       </footer>
