@@ -215,13 +215,16 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-31 03:33 NZST （**Phase 18.A Meta Ads 执行引擎 ✅ 完成 — ±20% 安全闸补齐，待 PR；Phase 20 MTC 自助计费 ✅ PR #146 merged**）
+> 最后更新：2026-05-31 11:15 NZST （**Phase 18.A Meta Ads 执行引擎 ✅ 完成 — ±20% 安全闸补齐，待 PR；Phase 20 MTC 自助计费 ✅ PR #146 merged**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
 | **Phase 21 P21.1** | AI Content Factory MVP 已规划（见 ROADMAP）；开工第一步 = 模型分层路由（`anthropic/client.ts` 加 `MODEL_HAIKU` + 新建 `src/lib/ai/model-router.ts`） | 🚀 进行中 |
 | **PM 操作（Meta Ads）🔴** | Render 设 `META_SYSTEM_USER_TOKEN`（长效 System User Token），否则执行看板「直接执行 (Meta API)」返回 424 | ⚠️ 待操作 |
-| **PM 验收 P20** | Render 部署完成后：`https://app.magicengine.com.au/portal/register` 注册测试账户 → 验证邮件 → 跳转 `/wallet?welcome=1` 显示 500 MTC | ⚠️ PM 验收 |
+| **✅ Phase 20 Tier 2 闭环** | 注册 → magic-link 登录 → wallet 500 MTC 已验证通（2026-05-31）；前置已补：SMTP/RLS/列名(#159)/bonus 路径(#160)/登录入口(#155) | ✅ 完成 |
+| **Phase 20 下一步 🚀** | **客户自助生产工作区**（Tier 2 核心 — portal 当前只读，客户登录后无处"花 MTC 干活"，从零建） | 📋 待开始 |
+| **统一后台架构（方向 A）** | admin/FDE/client 同壳 + capability 显隐 + 多租户隔离；前置 = 授权地基（统一 `resolveAccess` + repository scope + 逐表 RLS）。下次 architect 出完整方案 | 📋 待设计 |
+| **P20 收尾优化** | (a) callback 改 `verifyOtp(token_hash)`+ 邮件模板，让注册确认直接进 wallet；(b) #157 结果页待 merge；(c) ROADMAP 3353 行拆分（CHANGELOG/DECISIONS/archive） | 📋 待优化 |
 | **PM 操作 🔴** | Supabase 跑 migration `20260603000001_platform_oauth_connections.sql`（Phase 24.A） | ⚠️ 待操作 |
 | **GBP.0** | Google Cloud：enable Business Profile API + Account Management API，配置 OAuth consent screen，设 env vars | ⚠️ PM 操作 |
 | **Phase 24.B** | GBP 数据摄取（reviews、insights、location data 写入 DB） | 📋 待开始 |
