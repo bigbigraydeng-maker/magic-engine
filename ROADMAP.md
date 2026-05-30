@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-30 20:04 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-30 20:10 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2889,13 +2889,13 @@ ALTER TABLE clients
 
 ### Phase 26 任务清单
 
-- [ ] **P26.1** — DB migration：`clients` 表加 5 列（country / state_code / city / business_scope / locale_confirmed_at）
-- [ ] **P26.2** — AU/NZ 静态节日日历（`src/lib/locale/calendar.ts`，2026–2027 完整数据）
-- [ ] **P26.3** — `getClientLocale()` 服务（`src/lib/locale/client-locale.ts`）
-- [ ] **P26.4** — 客户确认 UI：Dashboard 顶部提示条 + 确认弹窗（预填 + 一键确认）
-- [ ] **P26.5** — Settings 页面地域设置区块
-- [ ] **P26.6** — Storyboard 生成器接入 `getClientLocale()`
-- [ ] **P26.7** — 博客/GEO 生成器接入 `getClientLocale()`
+- [x] **P26.1** — DB migration：`clients` 表加 5 列（country / state_code / city / business_scope / locale_confirmed_at）（2026-06-12 完成）
+- [x] **P26.2** — AU/NZ 静态节日日历（`src/lib/locale/calendar.ts`，2026–2027 完整数据）（2026-06-12 完成）
+- [x] **P26.3** — `getClientLocale()` 服务（`src/lib/locale/client-locale.ts`）（2026-06-12 完成）
+- [x] **P26.4** — 客户确认 UI：Dashboard 顶部提示条 + 确认弹窗（预填 + 一键确认）（2026-06-12 完成）
+- [x] **P26.5** — Settings 页面地域设置区块（2026-06-12 完成）
+- [x] **P26.6** — Storyboard 生成器接入 `getClientLocale()`（2026-06-12 完成）
+- [x] **P26.7** — 博客/GEO 生成器接入 `getClientLocale()`（2026-06-12 完成）
 
 ---
 
