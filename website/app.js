@@ -286,11 +286,11 @@ async function handleEmailSubmit(e) {
 /* ── No-website toggle ── */
 function toggleNoWebsite() {
   const panel = document.querySelector('.nw-panel');
-  const urlInput = document.getElementById('url-input');
+  const urlBar = document.querySelector('.disc-url-bar');
   if (!panel) return;
   panel.classList.toggle('open');
   const isOpen = panel.classList.contains('open');
-  if (urlInput) urlInput.style.display = isOpen ? 'none' : '';
+  if (urlBar) urlBar.style.display = isOpen ? 'none' : '';
   const toggle = document.querySelector('.nw-toggle');
   if (toggle) toggle.textContent = isOpen ? '↑ I have a website' : '↓ I don\'t have a website';
 }
