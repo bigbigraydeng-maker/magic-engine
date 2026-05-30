@@ -215,33 +215,30 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-30 20:22 NZST （**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成**，PR #125 等 PM merge）
+> 最后更新：2026-05-30 20:26 NZST （**Phase 20 MTC 自助计费 ✅ PR #146 merged；website 注册入口修复 ✅ PR #144 merged**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **PM 操作 🔴** | Supabase 跑 migration `20260603000001_platform_oauth_connections.sql` | ⚠️ 待操作 |
-| **GBP.0** | Google Cloud：enable Business Profile API + Account Management API，配置 OAuth consent screen，创建 credentials，设 `GOOGLE_OAUTH_CLIENT_ID` + `GOOGLE_OAUTH_CLIENT_SECRET` env vars | ⚠️ PM 操作 |
-| **PM 验收 P24** | 打开 `/dashboard/clients/[id]/settings` → 点「连接 Google Business Profile」→ Google 授权页 → 完成后绿色连接卡片出现 | ⚠️ PM 验收 |
-| **go merge** | PM 输入 `go merge` 合并 Phase 24.A PR #125 到 main | ⚠️ PM 授权 |
-| **Phase 24.B** | GBP 数据摄取（reviews、insights、location data 写入 DB） | 📋 24.A merge 后 |
+| **PM 验收 P20** | Render 部署完成后：`https://app.magicengine.com.au/portal/register` 注册测试账户 → 验证邮件 → 跳转 `/wallet?welcome=1` 显示 500 MTC | ⚠️ PM 验收 |
+| **PM 操作 🔴** | Supabase 跑 migration `20260603000001_platform_oauth_connections.sql`（Phase 24.A） | ⚠️ 待操作 |
+| **GBP.0** | Google Cloud：enable Business Profile API + Account Management API，配置 OAuth consent screen，设 env vars | ⚠️ PM 操作 |
+| **Phase 24.B** | GBP 数据摄取（reviews、insights、location data 写入 DB） | 📋 待开始 |
 | **PM 操作（旧）** | Supabase 跑 `20260530000003_strategy_items_unique_title.sql`；Render 加 `GITHUB_WEBHOOK_SECRET`；合并 Phase 14.C PR | ⚠️ 待操作 |
 
 **已完成全景（最近几个 Phase）**：
-- ✅ **Phase 14.B 全部 P14.B.0–7**（PR #120，2 commit）：
-  - P14.B.0: migration（yoast_plugin_installed, wp_default_category_id, quality_check）
-  - P14.B.1: Yoast probe（mu-plugin snippet + 验证安装 按钮）
-  - P14.B.2: rollback WP draft（DELETE 远程草稿 + rolled_back 状态）
-  - P14.B.3: GEO 城市一致性（generator 注入 authoritativeLocation + DirectiveEditor 警告）
-  - P14.B.4: 内链 QC check（internal-link-checker.ts + quality_check JSONB）
-  - P14.B.5: primary_keyword 缺失橙色警告
-  - P14.B.6: WP 默认分类 ID（Settings UI + PATCH route）
-  - P14.B.7: GSC 索引请求按钮（Indexing API + re-auth 降级）
-- ✅ **Phase 14.A.1–8**：WP + Shopify connector 全部完成，已推送
-- ✅ **Phase 23 完整闭环**（PR #112）：L3 记忆四表 + MemoryService + 四 Agent 注入 + 自动抽取器 + FDE 记忆库页
+- ✅ **Phase 20 MTC 自助计费**（PR #144 + #146，2026-05-31）：
+  - 注册页 `/portal/register`、钱包页 `/portal/[id]/wallet`
+  - Stripe Checkout 三档套餐（$99/$249/$599 NZD）
+  - 500 MTC 欢迎礼包自动发放（首次登录）
+  - website 修复：无网站模式提交按钮 + 导航注册入口
+- ✅ **Phase 24.A 全部 8 任务**（PR #125）：Platform OAuth Connector
+- ✅ **Phase 14.B 全部 P14.B.0–7**（PR #120）：WP 连接器扩展
+- ✅ **Phase 23 完整闭环**（PR #112）：L3 记忆四表 + MemoryService
 
 **下一候选**：
 - 📋 **Phase 21** — AI Factory
 - 📋 **Phase 22** — Data Engine
+- 📋 **Phase 24.B** — GBP 数据摄取
 - 📋 **Phase 18.A** — Meta Ads MVP
 
 下一 session：`go merge` 合 PR #120 → Render 部署 → `继续 Phase 21` / `继续 Phase 22` / `开始 Phase 18.A`（等 PM 决定）
