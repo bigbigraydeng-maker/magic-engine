@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getUserPermissions } from '@/lib/auth/whitelist'
+import { grantSignupBonus } from '@/lib/mtc/grant-signup-bonus'
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
@@ -42,7 +43,16 @@ export async function GET(request: NextRequest) {
   )
 
   if (portalUser?.client_id) {
-    return NextResponse.json({ redirect: `/portal/${portalUser.client_id}` })
+    // Grant 500 MTC welcome bonus on first login for self_serve clients.
+    // Idempotent (checks email_verified_at internally). Covers magic-link + Google
+    // login paths — /auth/callback's grant only fires on the PKCE confirmation flow,
+    // which fails for server-side signUp, so the bonus must also live here.
+    const bonusGranted = await grantSignupBonus(portalUser.client_id).catch(() => false)
+    return NextResponse.json({
+      redirect: bonusGranted
+        ? `/portal/${portalUser.client_id}/wallet?welcome=1`
+        : `/portal/${portalUser.client_id}`,
+    })
   }
 
   // Honour explicit /prospect next param (magic link from /discover)
