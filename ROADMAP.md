@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-30 21:51 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-31 03:02 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2650,9 +2650,9 @@ AU / NZ（当前）          新市场（未来）
 
 ---
 
-## Phase 21 — AI Content Factory（旗舰能力 · FDE 默认产能引擎）📋 战略确认，待排期
+## Phase 21 — AI Content Factory（旗舰能力 · FDE 默认产能引擎）📋 MVP 计划已登记，待开工 P21.1
 
-> **登记日期**：2026-05-26 · **状态**：战略方向已确认，PM 拍板，待 Phase 20/19 收尾后排期
+> **登记日期**：2026-05-26 · **MVP 计划登记**：2026-05-31 · **状态**：垂直 MVP 闭环已规划（试点 CTS Tours + Oztop），待开工 P21.1
 >
 > **战略定位**：AI Content Factory 是 ME 的**产能上限**，类比"能产 100 万双鞋的鞋厂可以接 1 万双小单"。FDE 客户（$2.5K-3K/月）默认走 AI Factory；非 FDE 客户按 token 自助调用各模块。
 >
@@ -2685,7 +2685,54 @@ AU / NZ（当前）          新市场（未来）
 | **21.D Token 预算治理** | 每客户月度成本上限 + 模型分层（战略层 Sonnet，生产层 Haiku/4o-mini）|
 | **21.E intensity = ai_factory 新档位** | 在 `light/standard/aggressive` 后加 `ai_factory` |
 
-### Phase 21 不做清单
+### Phase 21 实施现状（2026-05-31 重新盘点）
+
+> **关键发现**：Phase 21 **不是从零开始**。盘点代码后确认大部分积木已存在，真正缺的是 3 块「连接组织」。原五大子系统拆成可执行子任务（见下表），并标注现状。
+
+**已建积木（直接复用，无需重写）**：
+- 文本生成管道：`batch-generate` 路由（gpt-4o-mini，1-30 帖并发 + 质量重试 `auditSocialPost`）+ 双信号博客
+- **视觉素材智能层（原 21.B 的视觉部分已完成，此前未登记）**：`client_assets` + `asset_storyboards` 表（migration `20260612000001`）、`vision-analyzer` cron、assets/storyboard API、素材库 UI、Seedance/Kling/Runway prompt 字段 ⚠️ DB 是否已 apply 待 PM 在 Supabase 确认
+- 视觉生成：wavespeed / seedance / heygen + reels 工作流
+- 发布：Publer 管道 + engagement 回拉
+- 计费：MTC FIFO 扣费（`deductMtc` + `MTC_RATES` 已含全部服务定价 = 原 21.D 定价层已就绪）
+- 飞轮回流：`production_packages` + `SocialContentAdapter` + `package-publish`
+- L3 记忆注入器：`formatMemoryForPrompt`（已接张骞/华佗/鲁班，AI Factory 待接）
+- LLM 可观测：Cloudflare AI Gateway 代理
+
+**3 块缺失连接组织（Phase 21 真正要建的）**：
+1. **模型分层路由** — 加 Haiku 档（战略层 Sonnet / 生产层 Haiku），现 `anthropic/client.ts` 只有单档 Sonnet
+2. **变体扇出 + 多平台 reformat** — 一条核心内容 → N 平台变体（原 21.B 的「100 变体 × reformat」缺口）
+3. **量产编排器 + 预算熔断** — 批量调度 + 月度成本上限
+
+### Phase 21 MVP 闭环（垂直切片，先证明飞轮再放量）
+
+> **切入策略**（PM 2026-05-31 拍板）：选试点客户（**CTS Tours + Oztop 两个都上**），小批量（~20-30 帖/周）跑通端到端闭环：核心主题 → 分层量产编排（Sonnet 策略 + Haiku 生产）+ 记忆注入 → 一条扇出多平台变体 → 匹配视觉素材 → 生产包聚合 → 发布 → 飞轮 outcome 回流 + MTC 逐服务扣费。**先证明飞轮，再谈 800-1100/月放量。**
+
+| 子任务 | 内容 | 对应原子系统 | 现状 |
+|---|---|---|---|
+| **chore** | ROADMAP 校正登记（本 PR） | — | 🚧 进行中 |
+| **P21.1** | 模型分层路由：`anthropic/client.ts` 加 `MODEL_HAIKU` + 新建 `src/lib/ai/model-router.ts` | 21.A | 📋 |
+| **P21.2** | AI Factory 服务层 + 记忆注入：新建 `src/lib/ai-factory/`，量产调用接 `formatMemoryForPrompt` | 21.A | 📋 |
+| **P21.3** | 变体扇出 + 多平台 reformat 引擎（一主题 → N 平台变体） | 21.B 缺口 | 📋 |
+| **P21.4** | `ai_factory` intensity 档位：`marketing-plan/types.ts:147` + plan generator | 21.E | 📋 |
+| **P21.5** | 量产编排器 + `production_packages` 聚合 | 21.A/21.C | 📋 |
+| **P21.6** | Token 预算治理 + 熔断（叠在 `deductMtc` 上，月度成本上限） | 21.D | 📋 |
+| **P21.7** | 发布 + 飞轮 outcome 回流接线 | 21.C | 📋 |
+| **P21.8** | FDE 触发 UI（内部一键量产） | 21.A | 📋 |
+| **P21.9** | CTS + Oztop 端到端 MVP 验收 | — | 📋 |
+
+**里程碑关卡（不过不许往下，PM 验证）**：
+- **M1 产能内核**（P21.1-2）：`npm run build` 通过 + 单测证明 Sonnet/Haiku 分层路由 + 记忆注入生效
+- **M2 扇出闭环**（P21.3-5）：本地 dev 触发一个主题 → 生成多平台变体 → 落生产包
+- **M3 端到端飞轮**（P21.6-9）：CTS/Oztop 真实跑出 20-30 帖 → 发布 → 飞轮 outcome 卡片 + MTC 扣费正确
+
+**Git 工作流**：每子任务 1 commit 带 `[P21.x]` tag；M3 全过后一次性开 PR；分支 `feat/phase-21-ai-factory`（本 chore 登记走 `chore/roadmap-phase-21-registration`，已在 worktree 分支 `claude/objective-galileo-a1decb` 上）。
+
+### Phase 21 不做清单（MVP 边界 — 控制工作量）
+- ❌ MVP 不接 Meta/TikTok/YouTube 直连 API（先走已有 Publer 管道，省去 rate limit/审核地狱）
+- ❌ MVP 不追 800-1100/月满产能（先 20-30/周证明闭环）
+- ❌ MVP 不做 50×100 素材规模化（先跑通单素材 → 多变体路径）
+- ❌ MVP 不做非 FDE 自助 UI（先 FDE 内部触发）
 - ❌ 不强制非 FDE 客户走 AI Factory（按 token 自由调用）
 - ❌ 不脱离 Data Engine 单独跑（Factory 是生产，Data 是反馈，必须双引擎并行）
 
@@ -2854,6 +2901,11 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 ---
 
 ## 9. 功能完成日志
+
+### 2026-05-31（Phase 21 MVP 计划登记 + 21.B 视觉素材层补登记）
+
+- **chore** — 盘点代码后确认 Phase 21 大部分积木已存在，真正缺 3 块连接组织（模型分层路由 / 变体扇出 reformat / 量产编排+熔断）；原五大子系统拆成 P21.1-9 可执行子任务 + MVP 垂直闭环 + M1/M2/M3 里程碑写入 ROADMAP
+- **21.B 视觉素材智能层补登记** — `client_assets`+`asset_storyboards` 表、vision-analyzer cron、assets/storyboard API、素材库 UI 早已建成但从未登记（migration `20260612000001`）；⚠️ DB 是否已 apply 待 PM 在 Supabase 确认
 
 ### 2026-05-29（Phase 24.A — Platform OAuth Connector 全部完成 8/8）
 
