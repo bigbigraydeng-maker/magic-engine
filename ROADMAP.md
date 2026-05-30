@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-31 03:51 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-31 11:24 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2903,6 +2903,14 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 ---
 
 ## 9. 功能完成日志
+
+### 2026-05-31（Phase 20 Tier 2 — 注册→登录→Wallet 500 MTC 闭环打通 ✅）
+
+- **根因排查链** — 三层 bug 串联：① `self-register` 路由写错列名 `website_url`→`domain`（#159）→ 注册落库失败；② SMTP 未配置 → magic-link 邮件发不出去；③ 500 MTC bonus 只挂在 PKCE callback，magic-link/Google OAuth 路径没触发（#160 补到 `session-route`）
+- **P20.E 系列 hotfix（5 个 PR）** — #155 C 端登录入口统一 `/portal/login` + nav 注册入口；#158 website Google Ads API 重申请合规（企业邮箱 + About Us + Footer）；#159 列名 bug 修复；#160 bonus 路径修复（session-route 覆盖 magic-link + Google 路径）
+- **基础设施补齐** — Supabase 配 SMTP（Resend）；RLS 策略确认 portal_users 读权限
+- **✅ 验证通过** — 注册测试账户 → 收验证邮件 → 点链接 → 跳转 `/portal/[id]/wallet?welcome=1` → 显示 500 MTC 余额
+- **遗留待优化（不阻塞后续）** — (a) callback 改 `verifyOtp(token_hash)` 让注册确认直达 wallet；(b) #157 结果页 PR 待 merge；(c) ROADMAP 行数超 3300 行待拆 CHANGELOG/DECISIONS/archive
 
 ### 2026-05-31（Phase 18.A — Meta Ads 执行引擎 ✅ 完成 + ±20% 安全闸补齐）
 
