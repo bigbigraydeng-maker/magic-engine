@@ -5,9 +5,9 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { MTC_PACKAGES } from '@/lib/mtc/types'
 
 const PRICE_IDS: Record<string, string | undefined> = {
-  starter_29: process.env.STRIPE_PRICE_ID_STARTER,
-  growth_79: process.env.STRIPE_PRICE_ID_GROWTH,
-  scale_199: process.env.STRIPE_PRICE_ID_SCALE,
+  starter_99: process.env.STRIPE_PRICE_ID_STARTER,
+  growth_249: process.env.STRIPE_PRICE_ID_GROWTH,
+  scale_599: process.env.STRIPE_PRICE_ID_SCALE,
 }
 
 // POST /api/mtc/checkout
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-05-28.basil' })
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' })
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://magicengine.com.au'
 

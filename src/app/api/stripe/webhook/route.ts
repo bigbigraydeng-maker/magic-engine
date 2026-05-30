@@ -5,24 +5,24 @@ import type { PackageKey } from '@/lib/mtc/types'
 
 const PACKAGE_MTC: Record<string, { packageKey: PackageKey; mtcAmount: number; amountNzd: number }> = {
   [process.env.STRIPE_PRICE_ID_STARTER ?? 'price_starter']: {
-    packageKey: 'starter_29',
-    mtcAmount: 300,
-    amountNzd: 29,
+    packageKey: 'starter_99',
+    mtcAmount: 1000,
+    amountNzd: 99,
   },
   [process.env.STRIPE_PRICE_ID_GROWTH ?? 'price_growth']: {
-    packageKey: 'growth_79',
-    mtcAmount: 1200,
-    amountNzd: 79,
+    packageKey: 'growth_249',
+    mtcAmount: 2800,
+    amountNzd: 249,
   },
   [process.env.STRIPE_PRICE_ID_SCALE ?? 'price_scale']: {
-    packageKey: 'scale_199',
-    mtcAmount: 3500,
-    amountNzd: 199,
+    packageKey: 'scale_599',
+    mtcAmount: 7500,
+    amountNzd: 599,
   },
 }
 
 export async function POST(request: NextRequest) {
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-05-28.basil' })
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' })
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!
 
   const body = await request.text()

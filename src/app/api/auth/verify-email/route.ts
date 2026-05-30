@@ -49,10 +49,10 @@ export async function POST(request: NextRequest) {
     .insert({
       client_id: clientId,
       stripe_payment_intent_id: null,
-      package_key: 'bonus_100',
+      package_key: 'bonus_500',
       amount_nzd: 0,
-      mtc_amount: 100,
-      mtc_remaining: 100,
+      mtc_amount: 500,
+      mtc_remaining: 500,
       purchased_at: purchasedAt.toISOString(),
       expires_at: expiresAt.toISOString(),
       status: 'completed',
@@ -76,5 +76,5 @@ export async function POST(request: NextRequest) {
     notes: 'Welcome bonus — email verified',
   })
 
-  return NextResponse.json({ ok: true, bonusGranted: true, mtcBalance: 100 })
+  return NextResponse.json({ ok: true, bonusGranted: true, mtcBalance: 500 })
 }
