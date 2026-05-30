@@ -11,6 +11,7 @@ import { ZhugeDrawer } from './_components/ZhugeDrawer';
 import { NextStepCard, type DiscoveryStatus, type PrescriptionStatus } from './_components/NextStepCard';
 import type { ClientDiscoveryRow } from '@/lib/zhangqian/types';
 import { ClientDataTab } from './_components/ClientDataTab';
+import { LocaleConfirmBanner } from './_components/LocaleConfirmBanner';
 
 
 interface Client {
@@ -453,6 +454,9 @@ export default function ClientDetailPage() {
 
   return (
     <div className="min-h-screen space-y-5 bg-[#f6f7f2] px-4 py-5 md:px-6">
+      {/* Locale confirmation banner — shown until client confirms */}
+      <LocaleConfirmBanner clientId={clientId} />
+
       {/* Page header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
         <div className="flex min-w-0 flex-wrap items-center gap-3">
@@ -587,6 +591,7 @@ export default function ClientDetailPage() {
               <ToolCard href={`/dashboard/geo-composer/${clientId}`}           title="GEO Composer"  desc="部署 AI 搜索优化指令"            badge="in_house" />
               <ToolCard href={`/dashboard/ai-visibility/${clientId}`}          title="AI 可见度追踪" desc="监控 AI 搜索中的品牌曝光"         badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/connectors`}     title="广告连接器"    desc="连接 Meta · Google 广告账户"      badge="in_house" />
+              <ToolCard href={`/dashboard/clients/${clientId}/assets`}          title="素材库"        desc="上传图片 → Vision AI 自动分析 → Hook/Middle/CTA 评分 → 视频提示词"  badge="in_house" />
               <ToolCard href={`/dashboard/visuals?client=${clientId}`}         title="Launch Hub"    desc="Reels · 图片 · 视频素材生产"      badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/production`}     title="内容生产包"    desc="查看各维度内容包状态 · 生成内容后自动归集" badge="in_house" />
               <ToolCard onClick={() => setGenerationOpen(true)}              title="生成单条内容" desc="按关键词 · 视频 · 话题快速生成一条社媒帖子"  badge="in_house" />

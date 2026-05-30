@@ -11,7 +11,8 @@
     {
       "name": "website",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["serve", "C:\\Users\\Zhong\\Documents\\Claude Big Ray\\magic-engine\\website", "-p", "4000"],
+<<<<<<< HEAD
+      "runtimeArgs": ["serve", "website", "-p", "4000"],
       "port": 4000,
       "autoPort": false
     }

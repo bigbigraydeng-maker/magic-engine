@@ -1,0 +1,260 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Free 张骞 Discovery — Magic Engine</title>
+  <meta name="description" content="Run your free 张骞 Discovery report. See exactly how your Australian or New Zealand business appears across Google, AI assistants, social and review sites.">
+  <link rel="canonical" href="https://magicengine.com.au/discover">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<!-- ── Navigation ── -->
+<nav class="nav">
+  <div class="container">
+    <div class="nav-inner">
+      <a href="/" class="nav-logo">
+        <svg width="28" height="26" viewBox="0 0 68 64" fill="none" aria-hidden="true">
+          <polygon points="3,60 13,6 22,6 12,60" fill="#BE8A2E"/>
+          <polygon points="13,6 22,6 33,38 24,38" fill="#9A6F1E"/>
+          <polygon points="46,6 55,6 44,38 35,38" fill="#9A6F1E"/>
+          <polygon points="46,6 55,6 65,60 55,60" fill="#BE8A2E"/>
+          <polygon points="24,38 33,38 34,48 35,38 44,38 34,60" fill="#7A5518"/>
+        </svg>
+        <span data-en="Magic Engine" data-zh="魔力引擎">Magic Engine</span>
+      </a>
+      <ul class="nav-links">
+        <li><a href="/discover" data-en="Free Discovery" data-zh="免费探查" style="color:var(--gold-dark);">Free Discovery</a></li>
+        <li><a href="/features" data-en="Features" data-zh="功能">Features</a></li>
+        <li><a href="/about" data-en="About" data-zh="关于">About</a></li>
+      </ul>
+      <div class="nav-actions">
+        <button class="btn-lang" id="lang-toggle" onclick="toggleLang()" aria-label="Switch language">中文</button>
+        <a href="https://app.magicengine.com.au/portal/register" class="btn-register" data-en="Sign up free" data-zh="免费注册">Sign up free</a>
+        <a href="https://app.magicengine.com.au/login?next=/portal" class="btn-portal" data-en="Client portal" data-zh="客户入口">Client portal</a>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<!-- ════════════════════════════════════
+     STATE 1 — FORM
+════════════════════════════════════ -->
+<div id="state-form" class="discover-state active">
+  <div class="container">
+    <div class="disc-hero">
+      <div class="section-label" data-en="Free · No sign-up required" data-zh="免费 · 无需注册">Free · No sign-up required</div>
+      <h1 class="serif" data-en="Run your free 张骞 Discovery" data-zh="开始你的免费张骞探查">Run your free 张骞 Discovery</h1>
+      <p data-en="Enter your website URL. 张骞 will scan your Google presence, AI mentions, social footprint, ad signals and reviews — and return with a plain-English report." data-zh="输入你的网址，张骞会扫描你在 Google、AI 助手、社媒、广告信号和评价中的表现，并返回一份清晰的报告。">
+        Enter your website URL. 张骞 will scan your Google presence, AI mentions, social footprint, ad signals and reviews — and return with a plain-English report.
+      </p>
+
+      <div class="disc-form-wrap">
+        <form id="discover-form" novalidate>
+          <div class="disc-url-bar">
+            <input
+              type="text"
+              id="url-input"
+              placeholder="yourwebsite.com.au"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="none"
+              spellcheck="false"
+              aria-label="Your website URL"
+              data-en="yourwebsite.com.au"
+              data-zh="yourwebsite.com.au"
+            >
+            <button type="submit" id="discover-btn" class="btn-primary" data-en="Start discovery →" data-zh="开始探查 →">Start discovery →</button>
+          </div>
+
+          <!-- No website toggle -->
+          <button type="button" class="nw-toggle">↓ I don't have a website</button>
+
+          <!-- No-website panel (hidden by default) -->
+          <div class="nw-panel" id="nw-panel">
+            <div class="fld">
+              <label for="nw-what" data-en="What does your business do?" data-zh="你的业务是什么？">What does your business do?</label>
+              <input type="text" id="nw-what" placeholder="e.g. Plumbing, café, accounting…" data-en="e.g. Plumbing, café, accounting…" data-zh="例：管道工、咖啡馆、会计…">
+            </div>
+            <div class="fld">
+              <label for="nw-where" data-en="Where do you serve customers?" data-zh="你在哪里服务客户？">Where do you serve customers?</label>
+              <input type="text" id="nw-where" placeholder="e.g. Auckland CBD, Melbourne, nationally…" data-en="e.g. Auckland CBD, Melbourne, nationally…" data-zh="例：奥克兰市中心、墨尔本、全国…">
+            </div>
+            <div class="fld" style="margin-bottom:0;">
+              <label for="nw-who" data-en="Who are your target customers?" data-zh="你的目标客户是谁？">Who are your target customers?</label>
+              <textarea id="nw-who" rows="2" placeholder="e.g. Small businesses, homeowners, parents…" data-en="e.g. Small businesses, homeowners, parents…" data-zh="例：小企业、房主、家长…"></textarea>
+            </div>
+          </div>
+        </form>
+
+        <p class="url-hint" style="text-align:center;margin-top:14px;" data-en="Takes about 2 minutes · Results appear on-screen · Full report sent by email" data-zh="约 2 分钟 · 结果直接显示 · 完整报告发送到邮箱">Takes about 2 minutes · Results appear on-screen · Full report sent by email</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Security / trust strip -->
+  <div style="background:var(--paper-dim);border-top:1px solid rgba(22,24,29,.07);padding:20px 0;margin-top:32px;">
+    <div class="container" style="display:flex;justify-content:center;gap:32px;flex-wrap:wrap;">
+      <span class="tiny muted" data-en="🔒 We only read public data — no passwords required" data-zh="🔒 我们只读取公开数据——无需密码">🔒 We only read public data — no passwords required</span>
+      <span class="tiny muted" data-en="🇦🇺 Built for AU/NZ business" data-zh="🇦🇺 专为澳新业务打造">🇦🇺 Built for AU/NZ business</span>
+      <span class="tiny muted" data-en="✉ Full report delivered within 24 hours" data-zh="✉ 完整报告 24 小时内送达">✉ Full report delivered within 24 hours</span>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════
+     STATE 2 — PROGRESS
+════════════════════════════════════ -->
+<div id="state-progress" class="discover-state">
+  <div class="container">
+    <div class="progress-wrap">
+      <div class="spinner" aria-hidden="true"></div>
+      <h2 class="serif" data-en="张骞 is on the road…" data-zh="张骞正在路上…">张骞 is on the road…</h2>
+      <p class="sub" data-en="Scouting every corner of your digital presence." data-zh="正在探查你数字存在的每个角落。">Scouting every corner of your digital presence.</p>
+      <ul class="progress-steps" role="list" aria-live="polite">
+        <li class="ps active">
+          <span class="ps-dot" aria-hidden="true"></span>
+          <span data-en="Scanning your online footprint…" data-zh="扫描你的网络足迹…">Scanning your online footprint…</span>
+        </li>
+        <li class="ps">
+          <span class="ps-dot" aria-hidden="true"></span>
+          <span data-en="Checking Google search visibility…" data-zh="检查 Google 搜索可见度…">Checking Google search visibility…</span>
+        </li>
+        <li class="ps">
+          <span class="ps-dot" aria-hidden="true"></span>
+          <span data-en="Analysing AI assistant mentions…" data-zh="分析 AI 助手提及…">Analysing AI assistant mentions…</span>
+        </li>
+        <li class="ps">
+          <span class="ps-dot" aria-hidden="true"></span>
+          <span data-en="Reviewing social & ad signals…" data-zh="审查社媒与广告信号…">Reviewing social & ad signals…</span>
+        </li>
+        <li class="ps">
+          <span class="ps-dot" aria-hidden="true"></span>
+          <span data-en="Writing your discovery report…" data-zh="撰写探查报告…">Writing your discovery report…</span>
+        </li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════
+     STATE 3 — RESULT
+════════════════════════════════════ -->
+<div id="state-result" class="discover-state">
+  <div class="container">
+    <div class="result-wrap">
+
+      <!-- Teaser findings injected by JS -->
+      <div id="teaser-container"></div>
+
+      <!-- Portal bridge -->
+      <div class="portal-bridge">
+        <div>
+          <strong id="opportunity-title" data-en="Your top opportunity is waiting" data-zh="你的最大机会正在等待">Your top opportunity is waiting</strong>
+          <p data-en="Create your free account to get the full report and start fixing your visibility." data-zh="创建免费账户，获取完整报告并开始修复你的可见度。">Create your free account to get the full report and start fixing your visibility.</p>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;align-items:center;">
+          <a href="https://app.magicengine.com.au/portal/register" class="btn-primary portal-register-link" data-en="Create free account →" data-zh="创建免费账户 →">Create free account →</a>
+          <a href="https://app.magicengine.com.au/login?next=/portal" class="portal-signin-link portal-link" data-en="Already a client? Sign in" data-zh="已有账户？立即登录">Already a client? Sign in</a>
+        </div>
+      </div>
+
+      <!-- Email capture -->
+      <div class="email-capture">
+        <h2 class="serif" data-en="Get your full report — within 24 hours" data-zh="获取完整报告——24小时内">Get your full report — within 24 hours</h2>
+        <p class="sub" data-en="We'll email you all findings, prioritised fixes, and your local opportunity window." data-zh="我们将通过邮件发送所有发现、优先修复项，以及你的本地机会窗口。">We'll email you all findings, prioritised fixes, and your local opportunity window.</p>
+
+        <div class="email-form-wrap">
+          <form id="email-form" novalidate>
+            <div class="email-bar">
+              <input
+                type="email"
+                id="email-input"
+                placeholder="your@email.com.au"
+                autocomplete="email"
+                aria-label="Email address"
+                data-en="your@email.com.au"
+                data-zh="your@email.com.au"
+              >
+              <button type="submit" id="email-btn" class="btn-primary" data-en="Send my full report →" data-zh="发送完整报告 →">Send my full report →</button>
+            </div>
+            <label class="consent-row">
+              <input type="checkbox" id="consent-checkbox" name="consent">
+              <span data-en="I agree to receive my report and occasional updates from Magic Engine. You can unsubscribe any time." data-zh="我同意接收报告及 Magic Engine 的不定期更新。可随时退订。">
+                I agree to receive my report and occasional updates from Magic Engine. You can unsubscribe any time.
+              </span>
+            </label>
+          </form>
+        </div>
+
+        <!-- Success state (hidden) -->
+        <div class="email-sent" role="status" aria-live="polite">
+          <div style="font-size:1.5rem;margin-bottom:8px;">✅</div>
+          <strong data-en="Report on its way!" data-zh="报告已发出！">Report on its way!</strong>
+          <p style="margin-top:6px;font-size:.88rem;color:#1F7A55;" data-en="Check your inbox within 24 hours. Check spam if you don't see it." data-zh="请在 24 小时内查看收件箱，如未收到请检查垃圾邮件。">Check your inbox within 24 hours. Check spam if you don't see it.</p>
+        </div>
+      </div>
+
+      <!-- Run another -->
+      <div style="text-align:center;margin-top:24px;">
+        <button onclick="showState('form');document.getElementById('url-input').value='';document.getElementById('url-input').focus();"
+                class="btn-secondary" data-en="Run another discovery" data-zh="重新探查">Run another discovery</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ── Footer ── -->
+<footer class="site-footer">
+  <div class="container">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <a href="/" class="nav-logo" style="color:rgba(255,255,255,.8);text-decoration:none;">
+          <svg width="24" height="22" viewBox="0 0 68 64" fill="none" aria-hidden="true">
+            <polygon points="3,60 13,6 22,6 12,60" fill="#BE8A2E"/>
+            <polygon points="13,6 22,6 33,38 24,38" fill="#9A6F1E"/>
+            <polygon points="46,6 55,6 44,38 35,38" fill="#9A6F1E"/>
+            <polygon points="46,6 55,6 65,60 55,60" fill="#BE8A2E"/>
+            <polygon points="24,38 33,38 34,48 35,38 44,38 34,60" fill="#7A5518"/>
+          </svg>
+          <span style="color:rgba(255,255,255,.8);">Magic Engine</span>
+        </a>
+        <p data-en="AI-era visibility for ambitious Australian and New Zealand businesses." data-zh="为有野心的澳新企业提供 AI 时代可见度解决方案。">AI-era visibility for ambitious Australian and New Zealand businesses.</p>
+      </div>
+      <div class="footer-col">
+        <h4 data-en="Product" data-zh="产品">Product</h4>
+        <ul>
+          <li><a href="/discover" data-en="Free Discovery" data-zh="免费探查">Free Discovery</a></li>
+          <li><a href="/features" data-en="Features" data-zh="功能">Features</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4 data-en="Company" data-zh="公司">Company</h4>
+        <ul>
+          <li><a href="/about" data-en="About" data-zh="关于我们">About</a></li>
+          <li><a href="mailto:raydeng@magicengine.com.au" data-en="Contact" data-zh="联系我们">Contact</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4 data-en="Legal" data-zh="法律">Legal</h4>
+        <ul>
+          <li><a href="/privacy" data-en="Privacy Policy" data-zh="隐私政策">Privacy Policy</a></li>
+          <li><a href="/terms" data-en="Terms of Service" data-zh="服务条款">Terms of Service</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <div class="footer-entity">
+        ABC Plus Home Pty Limited · ABN 45 674 442 445 · 98 Beatrice Ave, Ascot, Brisbane QLD 4007, Australia · raydeng@magicengine.com.au
+      </div>
+      <div class="footer-copy">© 2026 Magic Engine</div>
+    </div>
+  </div>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>

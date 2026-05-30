@@ -3,10 +3,10 @@
 import { useEffect, useState } from 'react'
 
 export default function LoginForm({ next, authFailed }: { next: string; authFailed?: boolean }) {
-  const [email, setEmail] = useState('')
-  const [sent, setSent] = useState(false)
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [email, setEmail]           = useState('')
+  const [sent, setSent]             = useState(false)
+  const [error, setError]           = useState('')
+  const [loading, setLoading]       = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
 
   useEffect(() => {
@@ -32,7 +32,6 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
     e.preventDefault()
     setLoading(true)
     setError('')
-
     try {
       const redirectTo = `${window.location.origin}/auth/implicit-callback?next=${encodeURIComponent(next)}`
       const res = await fetch('/api/auth/magic-link', {
@@ -40,7 +39,6 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim().toLowerCase(), redirectTo }),
       })
-
       if (!res.ok) {
         setError('Unable to send link. Please try again.')
       } else {
@@ -55,26 +53,41 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
 
   if (sent) {
     return (
-      <div className="py-4">
-        <div className="mb-5 flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-100 text-sm font-black text-emerald-900">
-          OK
+      <div className="py-2">
+        <div
+          className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg text-sm font-black"
+          style={{ background: '#EAF3EE', color: '#1F7A55' }}
+        >
+          ✓
         </div>
-        <h2 className="text-2xl font-black text-slate-950">Check your email</h2>
-        <p className="mt-3 text-sm leading-6 text-slate-600">
-          Magic link sent to <span className="font-bold text-slate-950">{email}</span>.
-          The link expires in 15 minutes.
+        <h3
+          className="text-xl font-black"
+          style={{ fontFamily: "'Fraunces', Georgia, serif", color: '#16181D', letterSpacing: '-.02em' }}
+        >
+          Check your email
+        </h3>
+        <p className="mt-2 text-sm leading-6" style={{ color: 'rgba(22,24,29,.60)' }}>
+          Magic link sent to{' '}
+          <span className="font-semibold" style={{ color: '#16181D' }}>{email}</span>.
+          {' '}Expires in 15 minutes.
         </p>
       </div>
     )
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-3">
+      {/* Google */}
       <button
         type="button"
         onClick={handleGoogleLogin}
         disabled={googleLoading}
-        className="flex h-12 w-full items-center justify-center gap-3 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-950 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60"
+        className="flex h-12 w-full items-center justify-center gap-3 rounded-xl border text-sm font-semibold transition"
+        style={{
+          background: '#fff',
+          border: '1.5px solid rgba(22,24,29,.15)',
+          color: '#16181D',
+        }}
       >
         <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
           <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4"/>
@@ -82,18 +95,24 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
           <path d="M3.964 10.706A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.706V4.962H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.038l3.007-2.332z" fill="#FBBC05"/>
           <path d="M9 3.583c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.962L3.964 7.294C4.672 5.163 6.656 3.583 9 3.583z" fill="#EA4335"/>
         </svg>
-        {googleLoading ? 'Redirecting...' : 'Continue with Google'}
+        {googleLoading ? 'Redirecting…' : 'Continue with Google'}
       </button>
 
-      <div className="flex items-center gap-3">
-        <div className="h-px flex-1 bg-slate-200" />
-        <span className="text-xs font-bold uppercase tracking-[0.12em] text-slate-400">or</span>
-        <div className="h-px flex-1 bg-slate-200" />
+      {/* Divider */}
+      <div className="flex items-center gap-3 my-1">
+        <div className="h-px flex-1" style={{ background: 'rgba(22,24,29,.12)' }} />
+        <span className="text-xs font-bold uppercase tracking-[0.12em]" style={{ color: 'rgba(22,24,29,.35)' }}>or</span>
+        <div className="h-px flex-1" style={{ background: 'rgba(22,24,29,.12)' }} />
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      {/* Email form */}
+      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
         <div>
-          <label htmlFor="email" className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
+          <label
+            htmlFor="email"
+            className="block text-xs font-bold uppercase tracking-[0.12em] mb-1.5"
+            style={{ color: 'rgba(22,24,29,.55)' }}
+          >
             Email address
           </label>
           <input
@@ -102,13 +121,22 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@magiclab.com"
-            className="mt-1.5 h-12 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-slate-950 focus:ring-4 focus:ring-slate-950/5"
+            placeholder="you@example.com"
+            className="h-12 w-full rounded-xl border bg-white px-3 text-sm outline-none transition"
+            style={{
+              border: '1.5px solid rgba(22,24,29,.14)',
+              color: '#16181D',
+            }}
+            onFocus={e => { e.currentTarget.style.borderColor = '#BE8A2E'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(190,138,46,.12)' }}
+            onBlur={e  => { e.currentTarget.style.borderColor = 'rgba(22,24,29,.14)'; e.currentTarget.style.boxShadow = 'none' }}
           />
         </div>
 
         {(error || authFailed) && (
-          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
+          <p
+            className="rounded-xl border px-3 py-2 text-sm font-semibold"
+            style={{ background: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C' }}
+          >
             {error || 'Authentication failed. Please try again.'}
           </p>
         )}
@@ -116,13 +144,14 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
         <button
           type="submit"
           disabled={loading}
-          className={`flex h-12 w-full items-center justify-center rounded-lg text-sm font-black transition ${
-            loading
-              ? 'cursor-wait bg-slate-300 text-slate-600'
-              : 'bg-slate-950 text-white hover:bg-slate-800'
-          }`}
+          className="flex h-12 w-full items-center justify-center rounded-xl text-sm font-bold transition"
+          style={{
+            background: loading ? 'rgba(190,138,46,.5)' : '#BE8A2E',
+            color: '#fff',
+            cursor: loading ? 'wait' : 'pointer',
+          }}
         >
-          {loading ? 'Sending...' : 'Send magic link'}
+          {loading ? 'Sending…' : 'Send magic link →'}
         </button>
       </form>
     </div>
