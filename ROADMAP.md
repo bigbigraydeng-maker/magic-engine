@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-30 15:20 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-30 18:04 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -73,6 +73,7 @@
 📋 Phase 18     Ads Execution Engine / 广告执行引擎（Meta + Google + TikTok，已登记）
 ✅ Phase 19     API 鉴权整改 / IDOR 修复（🟢 19.A–E 全部完成 2026-05-27，PR #95）
 ✅ Phase 20.D   统一看板入口 / 六支柱 FDE 手动录入 + 拖拽排序 + 客户 Portal 分组（Phase 20 子任务 — 2026-05-28 实施）
+🔄 Phase 21.B   Visual Asset Intelligence / 视觉素材智能层（图片理解→视频流水线，实施中 P21.B.1–7）
 📋 Phase 21     AI Content Factory / AI 内容工厂（旗舰能力 — FDE 客户默认产能引擎）
 📋 Phase 22     Data Intelligence Engine / 数据智能引擎（旗舰能力 — 采集+分析+反馈学习引擎）
 📋 Phase 22.D   主动任务生成器 / AnomalyDetector + 诸葛亮 Proactive（Phase 22 子模块）
@@ -2688,6 +2689,38 @@ AU / NZ（当前）          新市场（未来）
 ### Phase 21 不做清单
 - ❌ 不强制非 FDE 客户走 AI Factory（按 token 自由调用）
 - ❌ 不脱离 Data Engine 单独跑（Factory 是生产，Data 是反馈，必须双引擎并行）
+
+---
+
+## Phase 21.B — Visual Asset Intelligence（视觉素材智能层）🔄 实施中
+
+> **登记日期**：2026-05-30 · **状态**：已开工，分支 `feat/phase-21b-visual-asset-intelligence`
+>
+> **战略定位**：让 Magic Engine"比客户更了解客户自己的图片库"。客户上传真实图片 → 系统自动理解内容、打标签、筛选最佳素材、注入 Brand Brief + NZ/AU 地域信号，生成比手动 ChatGPT 提示词更精准的视频制作 Storyboard。核心差异化：系统已知道这是谁的品牌、服务哪个市场、历史什么风格跑赢。
+>
+> **价值主张**：从"一堆图片" → 自动变成"可直接生产短视频的流水线"，把视频素材制作时间从数小时压缩到几分钟。
+>
+> **技术路径**：Supabase Storage（上传）→ GPT-4o Vision（分析，批量后台 job，Supabase Edge Function + pg_cron）→ `client_assets` 表（metadata JSONB）→ Hook/Middle/CTA 评分引擎 → 主题选图（Claude Haiku）→ Storyboard + Prompt 生成（Claude Sonnet，注入 Brand Brief + NZ/AU 信号）→ 输出给 Seedance / Kling / Runway。
+>
+> **里程碑**：
+> - **M1**（P21.B.1–2）：Supabase 能看到 `client_assets` 表 + `/dashboard/clients/[id]/assets` 上传 UI 可用
+> - **M2**（P21.B.3–4）：上传 50 张图 → 全部自动打标 + 三类评分完成
+> - **M3**（P21.B.5–7）：输入主题 → 输出完整 Storyboard + 视频提示词
+
+### Phase 21.B 任务清单
+
+- [ ] **P21.B.1** — DB migration：`client_assets` 表 + `asset_storyboards` 表（~0.5 天）
+- [ ] **P21.B.2** — 上传 UI：`/dashboard/clients/[id]/assets` 页面 + Supabase Storage 集成（~1 天）
+- [ ] **P21.B.3** — Vision 分析引擎：Supabase Edge Function + pg_cron 批量 job + GPT-4o Vision + metadata 写入（~1 天）
+- [ ] **P21.B.4** — 评分引擎：Hook / Middle / CTA 三类评分算法（纯 DB 计算，~0.5 天）
+- [ ] **P21.B.5** — 主题选图引擎：输入主题 → 自动选 Hook + 中间 + 尾帧（Claude Haiku，~1 天）
+- [ ] **P21.B.6** — Storyboard 生成器：scene 结构 + Brand Brief + NZ/AU 信号注入 + Seedance/Kling/Runway prompt 输出（~1 天）
+- [ ] **P21.B.7** — UI：素材库卡片展示 + Storyboard 预览卡 + prompt 复制/导出（~1 天）
+
+### Phase 21.B 不做清单（MVP 约束）
+- ❌ 不做自动剪辑 / 自动配音 / 自动字幕 / 自动发布
+- ❌ 不预设行业标签（Vision AI 全自动生成，不硬编码行业 schema）
+- ❌ 不限制上传数量（排队处理，前端显示 analyzing 状态）
 
 ---
 
