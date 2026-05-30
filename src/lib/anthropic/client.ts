@@ -11,6 +11,7 @@ import type { Beta } from '@anthropic-ai/sdk/resources/beta/beta'
 import { jsonrepair } from 'jsonrepair'
 
 export const MODEL_SONNET = 'claude-sonnet-4-6'
+export const MODEL_HAIKU = 'claude-haiku-4-5-20251001'
 
 // Pricing per million tokens (Sonnet 4.6)
 const PRICE_INPUT_PER_M = 3.0    // $3 / MTok
