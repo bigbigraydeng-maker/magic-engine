@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-31 03:51 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-31 04:40 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2158,6 +2158,23 @@ AI 可见度层（ME 独有 ✅）
 | **P18.A.3** | 操作审计日志：每次广告变更记录 before/after snapshot，支持回滚 | P18.A.2 | ✅ |
 
 **落地代码**：`meta-ads/{execute,actions,sync,snapshots}` 路由 + `lib/meta/{client,guardrails}.ts` + 执行看板 `AdsFixDrawer`（直接执行抽屉）/ `AdsAuditSection`（历史 + 撤销）。±20% 安全闸由 `checkBudgetWithinSafeRange` 在服务端强制（12 单测）。
+
+> **运营状态（2026-05-31 更新）— 代码已完成，但还没真正上线**：`execute` / `sync` 路由目前返回 424，因为 `META_SYSTEM_USER_TOKEN` 尚未生成。Token 必须在 Meta Agency Business Manager 里生成，而该 BM 虽已建好（**"Magic Engine Agency"**），目前处于**受限状态**（设置页红字「你不能使用这个业务资产组合投放广告」），需先解除限制（大概率**企业验证 Business Verification** 或申请复核）。**解除 BM 限制 = 当前唯一关键路径。**
+>
+> **代理模型决策（PM 2026-05-31 拍板）**：
+> - **CTS（特殊 · 自管）**：原用 PM 个人 FB 账户投放，决定收编。BM 解锁后把个人广告账户 + pixel **认领（claim）进 Agency BM**（保留历史投放/转化/受众，迁入前勿删勿清理）。
+> - **其他客户（授权）**：走 partner access，客户拥有广告账户 + pixel 并授权给 Agency，全部分配给同一个 System User。
+>
+> **Meta App**：已建，App ID `1752513682785923`（App Secret 不入库）。
+>
+> **PM 操作清单（按顺序，前一步没完别做后一步）**：
+> 1. ⚠️ 解除 Agency BM 限制（设置页点「查看详情」按提示完成验证/复核）← 当前卡点
+> 2. 把 app `1752513682785923` 加进 BM（账户 → 应用）
+> 3. 建 System User → CTS 认领广告账户+pixel / 其他客户请求授权 → 分配给 System User → 生成 Token
+> 4. Token 填 Render `META_SYSTEM_USER_TOKEN`；广告账户 ID 填 `clients.meta_ad_account_id`
+> 5. `execute` / `sync` 路由解除 424 → Phase 18.A 真正上线
+>
+> **代码侧待排（不依赖 BM）**：把 Phase 24.A Platform OAuth Connector 扩展到 Meta（`/api/ads/callback/meta` + Meta adapter），给"授权模式"客户铺路 —— 独立分支、独立 Phase，PM 决定何时开工。
 
 ### Phase 18.B — Google Ads（Developer token 到位后开工）
 
