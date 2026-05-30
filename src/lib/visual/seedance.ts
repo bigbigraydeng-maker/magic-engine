@@ -1,9 +1,20 @@
 // Seedance 2.0 Video Generation Client
-// Via Atlas Cloud API — $0.022/秒，Fast mode (text-to-video)
+// Via Atlas Cloud API — Fast mode (text-to-video / image-to-video)
 // 异步生成，需轮询状态
 
 const ATLAS_BASE = 'https://api.atlascloud.ai/api/v1'
 const API_KEY = process.env.ATLAS_CLOUD_API_KEY!
+
+// Cost per second by resolution (USD). 720p is the baseline Atlas rate.
+const COST_PER_SECOND: Record<string, number> = {
+  '480p': 0.014,
+  '720p': 0.022,
+  '1080p': 0.044,
+}
+
+export function videoCostUsd(durationSeconds: number, resolution: string): number {
+  return durationSeconds * (COST_PER_SECOND[resolution] ?? 0.022)
+}
 
 export interface VideoJobResult {
   job_id: string
@@ -17,7 +28,7 @@ export interface VideoJobResult {
 export async function submitVideoGeneration(params: {
   prompt: string
   duration?: number
-  resolution?: '720p' | '1080p'
+  resolution?: '480p' | '720p' | '1080p'
   aspect_ratio?: '9:16' | '16:9' | '1:1'
 }): Promise<{ job_id: string }> {
   const {
@@ -83,7 +94,7 @@ export async function checkVideoStatus(jobId: string): Promise<VideoJobResult> {
       status: mapStatus(d?.status),
       video_url: d?.outputs?.[0],
       duration_seconds: d?.duration,
-      cost_usd: d?.duration ? d.duration * 0.022 : undefined,
+      cost_usd: d?.duration ? videoCostUsd(d.duration, d?.resolution ?? '720p') : undefined,
       error: d?.error || undefined,
     }
   } finally {

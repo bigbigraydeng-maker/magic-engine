@@ -72,6 +72,12 @@ export default function PortalLoginPage({ searchParams }: Props) {
               <p className="mt-2 text-sm leading-6 text-slate-600">
                 Enter the email invited to your client portal. We will send a private login link.
               </p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                New customer?{' '}
+                <Link href="/portal/register" className="font-bold text-slate-950 underline underline-offset-4">
+                  Create a free account
+                </Link>
+              </p>
             </div>
 
             <PortalLoginForm next={next} authFailed={hasError} />
