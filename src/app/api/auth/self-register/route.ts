@@ -5,7 +5,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 // POST /api/auth/self-register
 // Body: { email, password, businessName, websiteUrl? }
 // Creates a self_serve client + Supabase auth user + portal access.
-// Does NOT grant 100 MTC yet — that happens on email verification.
+// Does NOT grant MTC yet — that happens on first login via auth/callback.
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null)
   const { email, password, businessName, websiteUrl } = body ?? {}
@@ -49,17 +49,21 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  // Create Supabase auth user — triggers confirmation email automatically
-  const supabaseAuth = createClient(
+  // Use signUp (not admin.createUser) so we can set emailRedirectTo.
+  // This ensures the verification link goes to /auth/callback?next=/portal
+  // rather than the bare SITE_URL.
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.magicengine.com.au'
+  const supabaseAnon = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } },
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
   )
 
-  const { data: authData, error: authError } = await supabaseAuth.auth.admin.createUser({
+  const { data: authData, error: authError } = await supabaseAnon.auth.signUp({
     email: email.toLowerCase().trim(),
     password,
-    email_confirm: false, // require email verification
+    options: {
+      emailRedirectTo: `${appUrl}/auth/callback?next=/portal`,
+    },
   })
 
   if (authError || !authData.user) {
@@ -86,7 +90,7 @@ export async function POST(request: NextRequest) {
 
   if (clientError || !client) {
     // Roll back auth user on failure
-    await supabaseAuth.auth.admin.deleteUser(authData.user.id)
+    await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
     console.error('[self-register] client insert failed:', clientError)
     return NextResponse.json({ error: 'Registration failed' }, { status: 500 })
   }
