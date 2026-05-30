@@ -215,11 +215,12 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-31 03:02 NZST （**Phase 20 MTC 自助计费 ✅ PR #146 merged；website 注册入口修复 ✅ PR #144 merged**）
+> 最后更新：2026-05-31 03:33 NZST （**Phase 18.A Meta Ads 执行引擎 ✅ 完成 — ±20% 安全闸补齐，待 PR；Phase 20 MTC 自助计费 ✅ PR #146 merged**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
 | **Phase 21 P21.1** | AI Content Factory MVP 已规划（见 ROADMAP）；开工第一步 = 模型分层路由（`anthropic/client.ts` 加 `MODEL_HAIKU` + 新建 `src/lib/ai/model-router.ts`） | 🚀 进行中 |
+| **PM 操作（Meta Ads）🔴** | Render 设 `META_SYSTEM_USER_TOKEN`（长效 System User Token），否则执行看板「直接执行 (Meta API)」返回 424 | ⚠️ 待操作 |
 | **PM 验收 P20** | Render 部署完成后：`https://app.magicengine.com.au/portal/register` 注册测试账户 → 验证邮件 → 跳转 `/wallet?welcome=1` 显示 500 MTC | ⚠️ PM 验收 |
 | **PM 操作 🔴** | Supabase 跑 migration `20260603000001_platform_oauth_connections.sql`（Phase 24.A） | ⚠️ 待操作 |
 | **GBP.0** | Google Cloud：enable Business Profile API + Account Management API，配置 OAuth consent screen，设 env vars | ⚠️ PM 操作 |
@@ -227,6 +228,7 @@ npm test           # 测试套件
 | **PM 操作（旧）** | Supabase 跑 `20260530000003_strategy_items_unique_title.sql`；Render 加 `GITHUB_WEBHOOK_SECRET`；合并 Phase 14.C PR | ⚠️ 待操作 |
 
 **已完成全景（最近几个 Phase）**：
+- ✅ **Phase 18.A Meta Ads 执行引擎**（待 PR，2026-05-31）：执行看板「直接执行 (Meta API)」→ 暂停/调预算/恢复 → 写 `flywheel_actions` + 审计撤销；±20% 出价硬限补齐（`lib/meta/guardrails.ts`，服务端强拦 + 12 单测）
 - ✅ **Phase 20 MTC 自助计费**（PR #144 + #146，2026-05-31）：
   - 注册页 `/portal/register`、钱包页 `/portal/[id]/wallet`
   - Stripe Checkout 三档套餐（$99/$249/$599 NZD）
@@ -240,7 +242,7 @@ npm test           # 测试套件
 - 🚀 **Phase 21** — AI Factory（MVP 计划已登记，开工 P21.1）
 - 📋 **Phase 22** — Data Engine（与 Phase 21 双引擎并行）
 - 📋 **Phase 24.B** — GBP 数据摄取
-- 📋 **Phase 18.A** — Meta Ads MVP
+- 📋 **Phase 18.B** — Google Ads（Developer token 到位后）
 
 下一 session：`继续 Phase 21 第 1 任务 P21.1`（模型分层路由）
 

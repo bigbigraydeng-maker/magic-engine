@@ -206,6 +206,11 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
                     需要在 Render 环境变量中设置 META_SYSTEM_USER_TOKEN（长效 System User Token）
                   </p>
                 ) : null}
+                {errorMsg.toLowerCase().includes('safety limit') ? (
+                  <p className="mt-2 text-xs text-red-600">
+                    调整幅度超过安全上限（当前日预算的 ±20%）。如需更大幅度调整，请走 Talk to Us 人工审核。
+                  </p>
+                ) : null}
               </div>
               <button
                 onClick={() => { setPhase('confirm'); setErrorMsg('') }}
@@ -316,6 +321,9 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
                       <p className="text-xs text-slate-400">
                         仅适用于开启了 CBO（广告系列预算优化）的广告系列。
                         如需调整广告组预算，请前往 Meta Ads Manager 操作。
+                      </p>
+                      <p className="text-xs font-semibold text-amber-600">
+                        ⚠ 单次调整幅度限当前日预算的 ±20%；超出需走 Talk to Us 人工审核。
                       </p>
                     </div>
                   )}

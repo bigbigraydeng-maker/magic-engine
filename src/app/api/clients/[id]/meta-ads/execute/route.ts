@@ -28,6 +28,7 @@ import {
   setCampaignStatus,
   setCampaignDailyBudget,
 } from '@/lib/meta/client'
+import { checkBudgetWithinSafeRange } from '@/lib/meta/guardrails'
 import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
 
 const SUPPORTED_ACTION_TYPES = new Set([
@@ -132,6 +133,27 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     }
     // Meta API expects budget in minor currency units (cents for USD/AUD)
     const budgetCents = Math.round(newBudget * 100)
+
+    // ±20% hard safety limit — larger swings must go through Talk to Us (manual review)
+    const currentCents = parseInt(beforeDetails.daily_budget, 10)
+    const guard = checkBudgetWithinSafeRange(currentCents, budgetCents)
+    if (!guard.ok) {
+      return NextResponse.json(
+        {
+          error:
+            `Budget change exceeds the ±20% safety limit. ` +
+            `Current daily budget is $${(currentCents / 100).toFixed(2)}; ` +
+            `allowed range is $${(guard.allowedMinCents / 100).toFixed(2)}–$${(guard.allowedMaxCents / 100).toFixed(2)}. ` +
+            `Larger changes require manual review (Talk to Us).`,
+          code: 'exceeds_safe_adjustment',
+          current_daily_budget: currentCents,
+          allowed_min: guard.allowedMinCents,
+          allowed_max: guard.allowedMaxCents,
+        },
+        { status: 422 },
+      )
+    }
+
     metaSuccess = await setCampaignDailyBudget(campaign_id, accessToken, budgetCents)
     after = { ...before, daily_budget: String(budgetCents) }
   } else {

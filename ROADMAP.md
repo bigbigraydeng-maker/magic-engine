@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-31 03:02 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-31 03:33 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2117,9 +2117,9 @@ AI 可见度层（ME 独有 ✅）
 
 ---
 
-## Phase 18 — Ads Execution Engine（广告执行引擎）📋 已登记，待排期
+## Phase 18 — Ads Execution Engine（广告执行引擎）🔄 18.A ✅ 完成 · 18.B/C 待排期
 
-> **登记日期**：2026-05-21 · **状态**：战略方向确认，三平台优先级已定
+> **登记日期**：2026-05-21 · **状态**：18.A Meta Ads MVP 已完成（2026-05-31）；18.B Google Ads / 18.C TikTok 待排期
 >
 > **背景**：诊断层已能发现广告问题（华佗 Ads 维度），诸葛亮能输出广告优先行动，但鲁班目前没有广告执行能力。Phase 18 补上这块缺口，让 ME 能替客户在三个广告平台上自动执行「安全可逆」的操作，同时保留人工审核入口。
 
@@ -2149,13 +2149,15 @@ AI 可见度层（ME 独有 ✅）
   - 新建广告系列
 ```
 
-### Phase 18.A — Meta Ads MVP（优先开工）
+### Phase 18.A — Meta Ads MVP ✅ 已完成（2026-05-31）
 
-| ID | 任务 | 依赖 |
-|----|------|------|
-| **P18.A.1** | 广告诊断 → Fix 按钮：执行看板 Ads action 接线 Meta MCP | 诸葛亮 ✅ |
-| **P18.A.2** | 暂停亏损广告 / 调整出价 — 调用 Meta Graph API，回写 `flywheel_actions` | P18.A.1 |
-| **P18.A.3** | 操作审计日志：每次广告变更记录 before/after snapshot，支持回滚 | P18.A.2 |
+| ID | 任务 | 依赖 | 状态 |
+|----|------|------|------|
+| **P18.A.1** | 广告诊断 → Fix 按钮：执行看板 Ads action 接线 Meta MCP | 诸葛亮 ✅ | ✅ |
+| **P18.A.2** | 暂停亏损广告 / 调整出价 — 调用 Meta Graph API，回写 `flywheel_actions`（含 ±20% 硬限） | P18.A.1 | ✅ |
+| **P18.A.3** | 操作审计日志：每次广告变更记录 before/after snapshot，支持回滚 | P18.A.2 | ✅ |
+
+**落地代码**：`meta-ads/{execute,actions,sync,snapshots}` 路由 + `lib/meta/{client,guardrails}.ts` + 执行看板 `AdsFixDrawer`（直接执行抽屉）/ `AdsAuditSection`（历史 + 撤销）。±20% 安全闸由 `checkBudgetWithinSafeRange` 在服务端强制（12 单测）。
 
 ### Phase 18.B — Google Ads（Developer token 到位后开工）
 
@@ -2173,9 +2175,9 @@ AI 可见度层（ME 独有 ✅）
 
 ### 安全边界
 
-- 所有操作必须校验 `client_id` + 广告账户 ownership（防租户穿越）
-- 出价调整幅度硬限 ±20%（超出必须走 Talk to Us）
-- 每次操作在 `flywheel_actions` 有完整记录 + before/after snapshot
+- 所有操作必须校验 `client_id` + 广告账户 ownership（防租户穿越）✅ `requireDashboardClientAccess`
+- 出价调整幅度硬限 ±20%（超出必须走 Talk to Us）✅ `checkBudgetWithinSafeRange`（服务端强拦 + 12 单测）
+- 每次操作在 `flywheel_actions` 有完整记录 + before/after snapshot ✅
 
 ---
 
@@ -2901,6 +2903,11 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 ---
 
 ## 9. 功能完成日志
+
+### 2026-05-31（Phase 18.A — Meta Ads 执行引擎 ✅ 完成 + ±20% 安全闸补齐）
+
+- **盘点确认** — P18.A.1/2/3 代码早已建成（execute / actions / sync / snapshots 路由 + AdsFixDrawer + AdsAuditSection，均已接线执行看板），属 ROADMAP 漏勾的 drift
+- **P18.A.2 安全闸补齐** — 预算调整加 ±20% 硬限：纯函数 `lib/meta/guardrails.ts`（12 单测全绿），execute 路由服务端强拦超限（422 + Talk to Us 文案），AdsFixDrawer 加区间提示 + 超限友好报错
 
 ### 2026-05-31（Phase 21 MVP 计划登记 + 21.B 视觉素材层补登记）
 
