@@ -138,6 +138,22 @@ h3.serif { font-size: clamp(1.2rem, 2vw, 1.6rem); }
 }
 .btn-portal:hover { background: #2a2d35; }
 
+.btn-register {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 9px 16px;
+  background: var(--gold); color: var(--white);
+  font-weight: 600; font-size: .82rem;
+  border-radius: var(--r-md); text-decoration: none;
+  transition: background var(--t);
+}
+.btn-register:hover { background: var(--gold-light); }
+
+.portal-signin-link {
+  font-size: .82rem; color: var(--ink-light); text-decoration: none;
+  transition: color var(--t); white-space: nowrap;
+}
+.portal-signin-link:hover { color: var(--ink); text-decoration: underline; }
+
 /* ── Inputs ── */
 .input-field {
   width: 100%; padding: 13px 18px;
@@ -618,6 +634,15 @@ h3.serif { font-size: clamp(1.2rem, 2vw, 1.6rem); }
   text-align: center;
 }
 .nav-mobile-portal:active { background: #2a2d35 !important; }
+
+.nav-mobile-register {
+  margin-top: 4px;
+  background: var(--gold) !important;
+  color: var(--white) !important;
+  text-align: center;
+  font-weight: 600 !important;
+}
+.nav-mobile-register:active { background: var(--gold-light) !important; }
 
 /* ── Responsive ── */
 @media (max-width: 900px) {

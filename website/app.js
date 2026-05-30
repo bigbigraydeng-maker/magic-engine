@@ -286,11 +286,11 @@ async function handleEmailSubmit(e) {
 /* ── No-website toggle ── */
 function toggleNoWebsite() {
   const panel = document.querySelector('.nw-panel');
-  const urlBar = document.querySelector('.disc-url-bar');
+  const urlInput = document.getElementById('url-input');
   if (!panel) return;
   panel.classList.toggle('open');
   const isOpen = panel.classList.contains('open');
-  if (urlBar) urlBar.style.display = isOpen ? 'none' : '';
+  if (urlInput) urlInput.style.display = isOpen ? 'none' : '';
   const toggle = document.querySelector('.nw-toggle');
   if (toggle) toggle.textContent = isOpen ? '↑ I have a website' : '↓ I don\'t have a website';
 }
@@ -351,6 +351,9 @@ document.addEventListener('DOMContentLoaded', () => {
       <a href="/features"  data-en="Features"       data-zh="功能">Features</a>
       <a href="/about"     data-en="About"           data-zh="关于">About</a>
       <div class="nav-mobile-divider"></div>
+      <a href="https://app.magicengine.com.au/portal/register"
+         class="nav-mobile-register"
+         data-en="Sign up free" data-zh="免费注册">Sign up free</a>
       <a href="https://app.magicengine.com.au/login?next=/portal"
          class="nav-mobile-portal"
          data-en="Client portal" data-zh="客户入口">Client portal</a>
