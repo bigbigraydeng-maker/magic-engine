@@ -25,7 +25,7 @@ export async function middleware(request: NextRequest) {
 
   // ── Portal routes (/portal/*) ─────────────────────────────────────────────
   if (path.startsWith('/portal')) {
-    if (path === '/portal/login') {
+    if (path === '/portal/login' || path === '/portal/register') {
       return NextResponse.next({ request: { headers: requestHeaders } })
     }
 
