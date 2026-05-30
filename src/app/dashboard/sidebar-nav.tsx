@@ -30,6 +30,7 @@ const adminSections: NavSection[] = [
       { label: 'Analytics', mark: 'AN', soon: true },
       { href: '/dashboard/reports', label: 'Reports', mark: 'RP' },
       { href: '/dashboard/admin/billing-monitor', label: 'Billing Monitor', mark: 'BM' },
+      { href: '/dashboard/admin/ai-gateway', label: 'AI Gateway', mark: 'AG' },
       { href: '/dashboard/admin/viral-references', label: 'Viral References', mark: 'VR' },
       { href: '/dashboard/admin/users', label: 'User Console', mark: 'UC' },
     ],

@@ -48,6 +48,8 @@ services:
         value: https://gateway.ai.cloudflare.com/v1/bbd84393da8e5707ba617749dc17117c/magic-engine/openai
       - key: ANTHROPIC_BASE_URL
         value: https://gateway.ai.cloudflare.com/v1/bbd84393da8e5707ba617749dc17117c/magic-engine/anthropic
+      - key: CLOUDFLARE_MGMT_TOKEN
+        sync: false
       - key: ADMIN_EMAILS
         sync: false
       - key: CLIENT_VIEWERS
