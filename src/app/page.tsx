@@ -263,6 +263,7 @@ export default async function HomePage() {
       />
       <main className="min-h-screen overflow-x-hidden" style={{ background: '#FBF8F3', color: '#1A1A1A' }}>
 
+<<<<<<< HEAD
         {/* ── NAV ── */}
         <header
           className="sticky top-0 z-50 border-b"
@@ -310,6 +311,25 @@ export default async function HomePage() {
               </Link>
             </div>
           </div>
+=======
+        <header className="relative z-10 flex items-center justify-between px-5 py-5 sm:px-8">
+          <Link href="/" className="flex items-center gap-3">
+            <LogoMark />
+            <span className="text-sm font-bold">Magic Engine</span>
+          </Link>
+          <nav className="hidden items-center gap-6 text-sm font-semibold text-slate-300 md:flex">
+            <a href="#product">Product</a>
+            <a href="#outcomes">Outcomes</a>
+            <Link href="/about">About</Link>
+            <Link href="/portal/login">Portal</Link>
+          </nav>
+          <Link
+            href="/discover"
+            className="rounded-lg bg-white px-4 py-2 text-sm font-bold text-slate-950"
+          >
+            Start diagnosis
+          </Link>
+>>>>>>> 3dabdbf (fix(website): Google Ads API 重申请 — 企业邮箱 + About Us 页 + 首页 Footer)
         </header>
 
         {/* ── HERO ── */}
@@ -414,6 +434,7 @@ export default async function HomePage() {
           </div>
         </section>
 
+<<<<<<< HEAD
         {/* ── FLYWHEEL ── */}
         <section id="flywheel" className="py-20 sm:py-28">
           <div className="mx-auto max-w-[1200px] px-6 lg:px-8">
@@ -711,5 +732,54 @@ export default async function HomePage() {
         </footer>
       </main>
     </>
+=======
+      <section id="outcomes" className="grid gap-5 px-5 pb-10 sm:px-8 lg:grid-cols-[1fr_380px]">
+        <div className="rounded-lg border border-slate-200 bg-white p-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+            Product promise
+          </p>
+          <h2 className="mt-2 max-w-2xl text-3xl font-black leading-tight">
+            Not another dashboard. A managed execution system.
+          </h2>
+          <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-600">
+            Magic Engine starts with diagnosis, but the product is the execution loop after that:
+            prioritised work, customer approvals, shipped actions, and monthly proof.
+          </p>
+        </div>
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">
+            Customer experience
+          </p>
+          <p className="mt-3 text-3xl font-black leading-tight text-emerald-950">
+            Website promise, portal proof.
+          </p>
+          <p className="mt-3 text-sm leading-6 text-emerald-900">
+            Prospects see the operating model before they buy. Clients later see the same language:
+            opportunity, execution, approval, result.
+          </p>
+        </div>
+      </section>
+
+      <footer className="border-t border-slate-200 bg-white px-5 py-8 sm:px-8">
+        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 text-sm text-slate-500 sm:flex-row">
+          <p>© {new Date().getFullYear()} Magic Lab. All rights reserved.</p>
+          <nav className="flex gap-6">
+            <Link href="/about" className="hover:text-slate-950">
+              About
+            </Link>
+            <Link href="/privacy" className="hover:text-slate-950">
+              Privacy Policy
+            </Link>
+            <Link href="/terms" className="hover:text-slate-950">
+              Terms of Service
+            </Link>
+            <a href="mailto:raydeng@magicengine.com.au" className="hover:text-slate-950">
+              Contact
+            </a>
+          </nav>
+        </div>
+      </footer>
+    </main>
+>>>>>>> 3dabdbf (fix(website): Google Ads API 重申请 — 企业邮箱 + About Us 页 + 首页 Footer)
   )
 }
