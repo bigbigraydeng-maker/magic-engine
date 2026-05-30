@@ -86,6 +86,26 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # Vision Asset Intelligence analyzer — every 2 minutes
+  # Picks up pending client_assets, runs GPT-4o-mini Vision, writes scores.
+  # Reference: ROADMAP.md P21.B.3
+  - type: cron
+    name: vision-analyzer
+    env: node
+    schedule: "*/2 * * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -s -X POST -H "Authorization: Bearer $CRON_SECRET" \
+        https://$RENDER_EXTERNAL_URL/api/cron/vision-analyzer
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+      - key: RENDER_EXTERNAL_URL
+        fromService:
+          type: web
+          name: magic-engine
+          property: host
+
   # Poll visual generation jobs every 2 minutes
   - type: cron
     name: poll-visual-jobs

@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-30 18:04 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-30 18:48 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2709,10 +2709,10 @@ AU / NZ（当前）          新市场（未来）
 
 ### Phase 21.B 任务清单
 
-- [ ] **P21.B.1** — DB migration：`client_assets` 表 + `asset_storyboards` 表（~0.5 天）
-- [ ] **P21.B.2** — 上传 UI：`/dashboard/clients/[id]/assets` 页面 + Supabase Storage 集成（~1 天）
-- [ ] **P21.B.3** — Vision 分析引擎：Supabase Edge Function + pg_cron 批量 job + GPT-4o Vision + metadata 写入（~1 天）
-- [ ] **P21.B.4** — 评分引擎：Hook / Middle / CTA 三类评分算法（纯 DB 计算，~0.5 天）
+- [x] **P21.B.1** — DB migration：`client_assets` 表 + `asset_storyboards` 表（2026-06-12 完成，Supabase 已跑）
+- [x] **P21.B.2** — 上传 UI：`/dashboard/clients/[id]/assets` 页面 + Supabase Storage 集成（2026-06-12 完成）
+- [x] **P21.B.3** — Vision 分析引擎：Render cron 每 2 分钟 + GPT-4o-mini Vision + metadata 写入（2026-06-12 完成）
+- [x] **P21.B.4** — 评分引擎：Hook / Middle / CTA 三类评分算法，内嵌于 `lib/assets/vision-analyzer.ts`（2026-06-12 完成）
 - [ ] **P21.B.5** — 主题选图引擎：输入主题 → 自动选 Hook + 中间 + 尾帧（Claude Haiku，~1 天）
 - [ ] **P21.B.6** — Storyboard 生成器：scene 结构 + Brand Brief + NZ/AU 信号注入 + Seedance/Kling/Runway prompt 输出（~1 天）
 - [ ] **P21.B.7** — UI：素材库卡片展示 + Storyboard 预览卡 + prompt 复制/导出（~1 天）
