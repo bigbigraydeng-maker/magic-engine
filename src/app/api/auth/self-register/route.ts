@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
     .from('clients')
     .insert({
       name: businessName.trim(),
-      website_url: websiteUrl?.trim() ?? null,
+      domain: (websiteUrl?.trim() || '').replace(/^https?:\/\//i, '').replace(/\/.*$/, '').toLowerCase() || null,
       source: 'self_serve',
     })
     .select('id')
