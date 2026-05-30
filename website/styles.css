@@ -416,6 +416,12 @@ h3.serif { font-size: clamp(1.2rem, 2vw, 1.6rem); }
 .disc-url-bar input::placeholder { color: var(--ink-muted); }
 .disc-url-bar .btn-primary { border-radius: calc(var(--r-xl) - 4px); }
 
+.disc-submit-btn {
+  width: 100%; justify-content: center;
+  margin-top: 16px;
+  border-radius: var(--r-md);
+}
+
 .nw-toggle {
   font-size: .8rem; color: var(--ink-muted);
   cursor: pointer; background: none; border: none; padding: 0;
