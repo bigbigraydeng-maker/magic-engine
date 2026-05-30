@@ -215,11 +215,12 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-30 20:26 NZST （**Phase 20 MTC 自助计费 ✅ PR #146 merged；website 注册入口修复 ✅ PR #144 merged**）
+> 最后更新：2026-05-31 02:59 NZST （**Phase 20 MTC 自助计费 ✅ PR #146 merged；website 注册入口修复 ✅ PR #144 merged**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **PM 验收 P20** | Render 部署完成后：`https://app.magicengine.com.au/portal/register` 注册测试账户 → 验证邮件 → 跳转 `/wallet?welcome=1` 显示 500 MTC | ⚠️ PM 验收 |
+| **PM 配置 🔴 P20** | Supabase → Authentication → URL Configuration：Site URL=`https://app.magicengine.com.au`，Redirect URLs 加 `/auth/callback` + `/auth/implicit-callback`（**不配则 magic link 仍跳错页 — 决定性前置**） | ⚠️ 必做 |
+| **PM 验收 P20** | 上一步配好 + Render 部署后：`/portal/register` 注册 → 点验证邮件 → 跳 `/wallet?welcome=1` 显示 500 MTC | ⚠️ PM 验收 |
 | **PM 操作 🔴** | Supabase 跑 migration `20260603000001_platform_oauth_connections.sql`（Phase 24.A） | ⚠️ 待操作 |
 | **GBP.0** | Google Cloud：enable Business Profile API + Account Management API，配置 OAuth consent screen，设 env vars | ⚠️ PM 操作 |
 | **Phase 24.B** | GBP 数据摄取（reviews、insights、location data 写入 DB） | 📋 待开始 |
@@ -230,7 +231,8 @@ npm test           # 测试套件
   - 注册页 `/portal/register`、钱包页 `/portal/[id]/wallet`
   - Stripe Checkout 三档套餐（$99/$249/$599 NZD）
   - 500 MTC 欢迎礼包自动发放（首次登录）
-  - website 修复：无网站模式提交按钮 + 导航注册入口
+  - website 修复：无网站模式提交按钮(#148) + 注册入口 + 全站 Client portal 链接统一指向 `/portal/login`
+  - magic link 跳转修复：self-register 改 signUp + emailRedirectTo(#149)
 - ✅ **Phase 24.A 全部 8 任务**（PR #125）：Platform OAuth Connector
 - ✅ **Phase 14.B 全部 P14.B.0–7**（PR #120）：WP 连接器扩展
 - ✅ **Phase 23 完整闭环**（PR #112）：L3 记忆四表 + MemoryService

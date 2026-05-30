@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-30 20:22 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-31 02:59 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2523,9 +2523,8 @@ Phase 25 是 Phase 20 的前置基础：
 | 决策项 | 结论 |
 |--------|------|
 | 计量单位 | Magic Token Coin（MTC） |
-| 汇率 | $29 NZD = 300 MTC（1 MTC ≈ $0.097 NZD） |
-| 充值包 | $29 / 300 MTC · $79 / 1,200 MTC · $199 / 3,500 MTC |
-| 注册赠送 | 100 MTC（验证邮箱后发放，防刷号） |
+| 套餐定价 | Starter $99 / 1,000 MTC · Growth $249 / 2,800 MTC · Scale $599 / 7,500 MTC（阶梯定价，买越多单价越低） |
+| 注册赠送 | 500 MTC（首次登录验证邮箱后发放，防刷号） |
 | 有效期 | 每次购买单独计时，12 个月，FIFO 扣款 |
 | 月费 | 无（Tier 2 纯 Token 制） |
 | 支付系统 | Stripe（一次性支付） |
@@ -2854,6 +2853,13 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 ---
 
 ## 9. 功能完成日志
+
+### 2026-05-31（Phase 20 收尾 — 注册闭环修复 + C 端登录入口统一）
+
+- **self-register magic link 修复** — `admin.createUser` 改为 `supabaseAnon.auth.signUp` + `emailRedirectTo:/auth/callback?next=/portal`，验证邮件不再跳回旧 Render 域名；rollback 改用 `supabaseAdmin`（PR #149）
+- **C 端登录入口统一** — 全站 13 处 Client portal / Sign in / 报告邮件链接从 `/login?next=/portal`（带 Google OAuth 的内部页）统一指向 `/portal/login`（C 端专用 magic link 页）
+- **Phase 20 定价同步** — 决策表更正为实际套餐（$99/1,000 · $249/2,800 · $599/7,500 MTC）+ 注册赠送 500 MTC（原登记 100 MTC / $29 套餐已过时）
+- **Phase 20.C 核对结论** — Talk to Us 仅有文案、MTC 过期提醒邮件 / 管理员 C 端用户视图均未实现；三项不阻塞核心闭环，登记为后续优化
 
 ### 2026-05-29（Phase 24.A — Platform OAuth Connector 全部完成 8/8）
 

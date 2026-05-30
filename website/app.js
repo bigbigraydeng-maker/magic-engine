@@ -170,9 +170,9 @@ function renderResult(data) {
   container.innerHTML = html;
 
   // Portal bridge CTA
-  const base = 'https://app.magicengine.com.au/login?next=/portal';
+  const base = 'https://app.magicengine.com.au/portal/login';
   document.querySelectorAll('.portal-link').forEach(a => {
-    a.href = leadId ? `${base}&lead=${encodeURIComponent(leadId)}` : base;
+    a.href = leadId ? `${base}?lead=${encodeURIComponent(leadId)}` : base;
   });
 
   // Show top opportunity in portal bridge if present
@@ -354,7 +354,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <a href="https://app.magicengine.com.au/portal/register"
          class="nav-mobile-register"
          data-en="Sign up free" data-zh="免费注册">Sign up free</a>
-      <a href="https://app.magicengine.com.au/login?next=/portal"
+      <a href="https://app.magicengine.com.au/portal/login"
          class="nav-mobile-portal"
          data-en="Client portal" data-zh="客户入口">Client portal</a>
     `;
