@@ -306,8 +306,58 @@ function handleHeroSubmit(e) {
   }
 }
 
+/* ── Mobile nav ── */
+function toggleMobileMenu() {
+  const burger = document.querySelector('.nav-burger');
+  const menu   = document.getElementById('nav-mobile');
+  if (!burger || !menu) return;
+  const isOpen = menu.classList.toggle('open');
+  burger.classList.toggle('open', isOpen);
+  burger.setAttribute('aria-expanded', String(isOpen));
+  document.body.style.overflow = isOpen ? 'hidden' : '';
+}
+
+function closeMobileMenu() {
+  const burger = document.querySelector('.nav-burger');
+  const menu   = document.getElementById('nav-mobile');
+  if (!burger || !menu) return;
+  menu.classList.remove('open');
+  burger.classList.remove('open');
+  burger.setAttribute('aria-expanded', 'false');
+  document.body.style.overflow = '';
+}
+
 /* ── Init ── */
 document.addEventListener('DOMContentLoaded', () => {
+
+  // Inject hamburger + mobile nav drawer into every page
+  const navInner = document.querySelector('.nav-inner');
+  const navEl    = document.querySelector('.nav');
+  if (navInner && navEl) {
+    const burger = document.createElement('button');
+    burger.className = 'nav-burger';
+    burger.setAttribute('aria-label', 'Open navigation menu');
+    burger.setAttribute('aria-expanded', 'false');
+    burger.innerHTML = '<span></span><span></span><span></span>';
+    burger.addEventListener('click', toggleMobileMenu);
+    navInner.appendChild(burger);
+
+    const mobileNav = document.createElement('nav');
+    mobileNav.id = 'nav-mobile';
+    mobileNav.className = 'nav-mobile';
+    mobileNav.setAttribute('aria-label', 'Mobile navigation');
+    mobileNav.innerHTML = `
+      <a href="/discover" data-en="Free Discovery" data-zh="免费探查">Free Discovery</a>
+      <a href="/features"  data-en="Features"       data-zh="功能">Features</a>
+      <a href="/about"     data-en="About"           data-zh="关于">About</a>
+      <div class="nav-mobile-divider"></div>
+      <a href="https://app.magicengine.com.au/login?next=/portal"
+         class="nav-mobile-portal"
+         data-en="Client portal" data-zh="客户入口">Client portal</a>
+    `;
+    mobileNav.querySelectorAll('a').forEach(a => a.addEventListener('click', closeMobileMenu));
+    navEl.insertAdjacentElement('afterend', mobileNav);
+  }
 
   // Hero form
   document.getElementById('hero-url-form')?.addEventListener('submit', handleHeroSubmit);

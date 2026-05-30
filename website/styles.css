@@ -495,23 +495,108 @@ h3.serif { font-size: clamp(1.2rem, 2vw, 1.6rem); }
 .gold    { color: var(--gold); }
 .green   { color: var(--green); }
 
+/* ── Hamburger button ── */
+.nav-burger {
+  display: none;
+  flex-direction: column; justify-content: center; align-items: center;
+  gap: 5px; width: 40px; height: 40px;
+  background: none; border: none; cursor: pointer;
+  padding: 0; flex-shrink: 0; border-radius: var(--r-sm);
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-burger span {
+  display: block; width: 20px; height: 2px;
+  background: var(--ink); border-radius: 2px;
+  transition: transform 220ms ease, opacity 220ms ease;
+}
+.nav-burger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+.nav-burger.open span:nth-child(2) { opacity: 0; transform: scaleX(0); }
+.nav-burger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+/* ── Mobile nav drawer ── */
+.nav-mobile {
+  display: none;
+  position: fixed; top: var(--nav-h); left: 0; right: 0; bottom: 0;
+  background: var(--paper); z-index: 99;
+  padding: 12px 16px 48px;
+  flex-direction: column; gap: 2px;
+  overflow-y: auto;
+  border-top: 1px solid rgba(22,24,29,.07);
+  animation: slideDown 200ms ease;
+}
+.nav-mobile.open { display: flex; }
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.nav-mobile a {
+  display: block; padding: 16px 18px;
+  font-size: 1.02rem; font-weight: 500;
+  color: var(--ink); text-decoration: none;
+  border-radius: var(--r-md);
+  transition: background var(--t);
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-mobile a:active { background: rgba(22,24,29,.07); }
+.nav-mobile-divider {
+  height: 1px; background: rgba(22,24,29,.08); margin: 10px 0;
+}
+.nav-mobile-portal {
+  margin-top: 4px;
+  background: var(--ink) !important;
+  color: var(--white) !important;
+  text-align: center;
+}
+.nav-mobile-portal:active { background: #2a2d35 !important; }
+
 /* ── Responsive ── */
 @media (max-width: 900px) {
-  .three-grid   { grid-template-columns: 1fr; }
-  .testi-grid   { grid-template-columns: 1fr; }
-  .local-grid   { grid-template-columns: 1fr; }
-  .features-grid{ grid-template-columns: 1fr; }
-  .footer-inner { grid-template-columns: 1fr 1fr; }
+  .three-grid    { grid-template-columns: 1fr; }
+  .testi-grid    { grid-template-columns: 1fr; }
+  .local-grid    { grid-template-columns: 1fr; }
+  .features-grid { grid-template-columns: 1fr; }
+  .footer-inner  { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 640px) {
-  section { padding: 52px 0; }
-  .nav-links  { display: none; }
-  .how-grid   { grid-template-columns: 1fr; }
+  /* Nav */
+  .nav-links               { display: none; }
+  .nav-actions .btn-portal { display: none; }
+  .nav-burger              { display: flex; }
+
+  /* Layout */
+  section    { padding: 48px 0; }
+  .hero      { padding: 48px 0 40px; }
+  .container { padding: 0 16px; }
+
+  /* Hero inline URL bar */
+  .url-bar {
+    flex-direction: column; border-radius: var(--r-md);
+    padding: 12px; gap: 10px;
+  }
+  .url-bar .btn-primary { width: 100%; justify-content: center; border-radius: var(--r-md); }
+
+  /* Grids */
+  .how-grid     { grid-template-columns: 1fr; }
   .footer-inner { grid-template-columns: 1fr; }
-  .email-bar  { flex-direction: column; }
-  .cta-block  { padding: 40px 24px; }
-  .disc-url-bar { flex-direction: column; border-radius: var(--r-md); padding: 12px; }
+
+  /* Forms */
+  .email-bar { flex-direction: column; }
+  .email-bar .btn-primary { width: 100%; justify-content: center; }
+
+  /* CTA */
+  .cta-block { padding: 40px 20px; }
+
+  /* Discover page */
+  .disc-hero { padding: 40px 0 28px; }
+  .disc-url-bar {
+    flex-direction: column; border-radius: var(--r-md); padding: 12px;
+  }
   .disc-url-bar .btn-primary { border-radius: var(--r-md); width: 100%; justify-content: center; }
+  .result-wrap { padding: 24px 0 48px; }
   .portal-bridge { flex-direction: column; }
-  .email-capture { padding: 28px 24px; }
+  .email-capture { padding: 28px 20px; }
+  .email-capture h2 { font-size: 1.2rem; }
+
+  /* Features page */
+  .features-hero { padding: 48px 0 36px; }
 }
