@@ -28,9 +28,13 @@ const workflow = [
 
 function LogoMark() {
   return (
-    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-950 text-sm font-black text-white">
-      M
-    </div>
+    <svg width="28" height="26" viewBox="0 0 68 64" fill="none" aria-hidden="true">
+      <polygon points="3,60 13,6 22,6 12,60"  fill="#BE8A2E"/>
+      <polygon points="13,6 22,6 33,38 24,38" fill="#9A6F1E"/>
+      <polygon points="46,6 55,6 44,38 35,38" fill="#9A6F1E"/>
+      <polygon points="46,6 55,6 65,60 55,60" fill="#BE8A2E"/>
+      <polygon points="24,38 33,38 34,48 35,38 44,38 34,60" fill="#7A5518"/>
+    </svg>
   )
 }
 
