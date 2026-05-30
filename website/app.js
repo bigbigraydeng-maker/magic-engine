@@ -161,6 +161,7 @@ function animateScore(el, target) {
     if (cur < target) requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
+  setTimeout(() => { el.textContent = target; }, 1600); // guarantee final value even if rAF is throttled (background tab)
 }
 
 /* ── Render result ── */
@@ -169,7 +170,7 @@ function renderResult(data) {
   const container = document.getElementById('teaser-container');
   if (!container) return;
 
-  const list = teaser || [];
+  const list = teaser || data.findings || []; // tolerate DEMO fallback (carries 'findings', not 'teaser')
   const score = computeScore(list, totalCount);
 
   let html = '';
