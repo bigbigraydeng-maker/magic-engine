@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   description: 'Terms and conditions for using Magic Engine.',
 }
 
-const CONTACT_EMAIL = 'bigbigraydeng@gmail.com'
+const CONTACT_EMAIL = 'raydeng@magicengine.com.au'
 const EFFECTIVE_DATE = '22 May 2025'
 
 export default function TermsPage() {

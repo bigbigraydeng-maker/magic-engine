@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   description: 'How Magic Engine collects, uses, and protects your data.',
 }
 
-const CONTACT_EMAIL = 'bigbigraydeng@gmail.com'
+const CONTACT_EMAIL = 'raydeng@magicengine.com.au'
 const SITE_URL = 'https://magicengine.com.au'
 const EFFECTIVE_DATE = '22 May 2025'
 
@@ -271,6 +271,8 @@ export default function PrivacyPage() {
           </p>
           <address className="mt-4 not-italic text-gray-700">
             <strong>Magic Lab</strong>
+            <br />
+            98 Beatrice Terrace, Ascot, Brisbane, Queensland, Australia
             <br />
             Email:{' '}
             <a href={`mailto:${CONTACT_EMAIL}`} className="text-indigo-600 underline">
