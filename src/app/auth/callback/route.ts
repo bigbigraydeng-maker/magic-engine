@@ -16,6 +16,7 @@ import { cookies } from 'next/headers'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getUserPermissions } from '@/lib/auth/whitelist'
 import { getPublicOrigin } from '@/lib/auth/public-origin'
+import { grantSignupBonus } from '@/lib/mtc/grant-signup-bonus'
 
 export async function GET(request: NextRequest) {
   const origin = getPublicOrigin(request)
@@ -82,7 +83,11 @@ export async function GET(request: NextRequest) {
       )
 
       if (portalRow?.client_id) {
-        destination = `/portal/${portalRow.client_id}`
+        // Grant 500 MTC welcome bonus on first login for self_serve clients
+        const bonusGranted = await grantSignupBonus(portalRow.client_id).catch(() => false)
+        destination = bonusGranted
+          ? `/portal/${portalRow.client_id}/wallet?welcome=1`
+          : `/portal/${portalRow.client_id}`
       } else if (dashboardRow?.client_id) {
         destination = `/dashboard/clients/${dashboardRow.client_id}`
       } else if (safePath === '/prospect') {
