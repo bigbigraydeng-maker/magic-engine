@@ -24,6 +24,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { fanOutToPlatforms, type FanOutInput } from '@/lib/ai-factory'
 import { deductMtc } from '@/lib/mtc/deduct'
+import { checkFactoryBudget } from '@/lib/mtc/factory-budget'
 import type { SupportedPlatform, ContentType } from '@/lib/ai-factory'
 
 const VALID_PLATFORMS: SupportedPlatform[] = ['facebook', 'instagram', 'linkedin', 'tiktok', 'google']
@@ -85,6 +86,17 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           .maybeSingle()
       : Promise.resolve({ data: null }),
   ])
+
+  // P21.6 — 月度预算熔断：提前检查本月消耗量，超限则 429
+  const estimatedPosts = platforms.length   // 每平台 1 帖（默认 variants=1）
+  const budget = await checkFactoryBudget(clientId, estimatedPosts)
+  if (!budget.allowed) {
+    return NextResponse.json({
+      success: false,
+      error:   `本月 AI Factory 已达上限（${budget.usedThisMonth}/${budget.limit} 帖）。请下月继续或联系 Magic Lab 提升配额。`,
+      budget:  { used: budget.usedThisMonth, limit: budget.limit, remaining: budget.remaining },
+    }, { status: 429 })
+  }
 
   // Run fan-out (supabaseAdmin used server-side — no user session needed)
   const fanOutInput: FanOutInput = {
