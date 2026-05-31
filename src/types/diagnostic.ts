@@ -178,8 +178,8 @@ export interface PriorPrescriptionContext {
 
 export type ExecutionItemStatus = 'pending' | 'in_progress' | 'completed' | 'skipped'
 
-/** 执行项来源 — diagnostic（处方派发）/ marketing_plan（营销计划派发）/ fde_manual（FDE 手动录入）*/
-export type ExecutionItemSource = 'diagnostic' | 'marketing_plan' | 'fde_manual'
+/** 执行项来源 — diagnostic（处方派发）/ marketing_plan（营销计划派发）/ fde_manual（FDE 手动录入）/ proactive_signal（诸葛亮主动检测）*/
+export type ExecutionItemSource = 'diagnostic' | 'marketing_plan' | 'fde_manual' | 'proactive_signal' | 'zhuge' | 'luban' | 'fde'
 
 export interface ExecutionItem {
   id: string

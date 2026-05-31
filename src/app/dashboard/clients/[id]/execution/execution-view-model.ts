@@ -97,6 +97,7 @@ export function isAutonomousItem(item: ItemWithLogs): boolean {
  */
 function pidForItem(item: ItemWithLogs): string {
   if (isAutonomousItem(item)) return AUTONOMOUS_GROUP_ID
+  if (item.source === 'proactive_signal') return AUTONOMOUS_GROUP_ID
   if (item.source === 'fde_manual') return FDE_MANUAL_GROUP_ID
   if (item.source === 'marketing_plan' && item.marketing_plan_id) {
     return MARKETING_PLAN_GROUP_PREFIX + item.marketing_plan_id

@@ -582,6 +582,9 @@ function ExecutionItemCard({
             制作中
           </span>
         )}
+        {item.source === 'proactive_signal' && (
+          <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">⚡ 系统检测</span>
+        )}
         {!isBackgroundGenerating && hasAiAssist && <span className="text-[10px] font-bold text-cyan-700">AI 草稿</span>}
         {logCount > 0 && <span className="text-[10px] text-gray-400">{logCount} 条日志</span>}
       </div>
@@ -783,6 +786,9 @@ function TaskDetailDrawer({
             </div>
           )}
           <FdeMetaRow stepsJson={item.steps_json} />
+          {item.source === 'proactive_signal' && (
+            <span className="mt-1 inline-block text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">⚡ 系统检测 · 诸葛亮主动发现</span>
+          )}
         </div>
         <button
           onClick={onClose}
