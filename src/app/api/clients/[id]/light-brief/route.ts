@@ -5,11 +5,29 @@ import { invalidateBriefCache } from '@/lib/brief/completion'
 
 // GET /api/clients/[id]/light-brief
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { id: string } },
 ) {
   const access = await requireDashboardClientAccess(params.id)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
+
+  // Admins and non-self_serve users (FDE / dashboard) are never gated by Brief.
+  // Only self_serve users need to complete the brief before accessing features.
+  if (access.role === 'admin') {
+    return NextResponse.json({ brief_fields: null, brief_completed_at: 'admin' })
+  }
+
+  const email = (access.user.email ?? '').toLowerCase().trim()
+  const { data: portalRow } = await supabaseAdmin
+    .from('client_portal_users')
+    .select('access_type')
+    .eq('email', email)
+    .eq('client_id', params.id)
+    .maybeSingle()
+
+  if (portalRow?.access_type !== 'self_serve') {
+    return NextResponse.json({ brief_fields: null, brief_completed_at: 'bypass' })
+  }
 
   const { data, error } = await supabaseAdmin
     .from('clients')
