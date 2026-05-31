@@ -631,7 +631,7 @@ function TaskDetailDrawer({
   const [confirmDelete, setConfirmDelete] = useState(false)
   // P21.8 — AI Factory 一键量产
   const [factoryLoading, setFactoryLoading] = useState(false)
-  const [factoryResult, setFactoryResult]   = useState<{ saved: number } | null>(null)
+  const [factoryResult, setFactoryResult]   = useState<{ successCount: number; packageId: string | null } | null>(null)
   const [factoryError, setFactoryError]     = useState<string | null>(null)
 
   useEffect(() => { setMounted(true) }, [])
@@ -667,9 +667,9 @@ function TaskDetailDrawer({
           executionItemId: item.id,
         }),
       })
-      const data = await res.json() as { success: boolean; saved?: number; error?: string }
+      const data = await res.json() as { success: boolean; successCount?: number; packageId?: string; error?: string }
       if (!data.success) throw new Error(data.error ?? '量产失败')
-      setFactoryResult({ saved: data.saved ?? 0 })
+      setFactoryResult({ successCount: data.successCount ?? 0, packageId: data.packageId ?? null })
     } catch (err) {
       setFactoryError(err instanceof Error ? err.message : '量产失败，请重试')
     } finally {
@@ -920,9 +920,16 @@ function TaskDetailDrawer({
         {/* P21.8 — AI Factory 量产结果反馈 */}
         {factoryResult && (
           <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-bold text-green-700">
-            ✅ 已生成 {factoryResult.saved} 条草稿 — 前往
-            <a href={`/dashboard/content?client=${clientId}`} className="ml-1 underline hover:text-green-900">
-              内容库
+            ✅ 已生成 {factoryResult.successCount} 条草稿 — 前往
+            <a
+              href={
+                factoryResult.packageId
+                  ? `/dashboard/clients/${clientId}/production/${factoryResult.packageId}`
+                  : `/dashboard/content?client=${clientId}`
+              }
+              className="ml-1 underline hover:text-green-900"
+            >
+              生产包
             </a>
             查看
           </div>
