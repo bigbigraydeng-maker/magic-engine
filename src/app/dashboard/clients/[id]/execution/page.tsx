@@ -629,6 +629,10 @@ function TaskDetailDrawer({
   const [editingDesc, setEditingDesc]   = useState(false)
   const [editDesc, setEditDesc]         = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  // P21.8 — AI Factory 一键量产
+  const [factoryLoading, setFactoryLoading] = useState(false)
+  const [factoryResult, setFactoryResult]   = useState<{ saved: number } | null>(null)
+  const [factoryError, setFactoryError]     = useState<string | null>(null)
 
   useEffect(() => { setMounted(true) }, [])
 
@@ -640,6 +644,38 @@ function TaskDetailDrawer({
   }, [item?.id])
 
   if (!mounted || !item) return null
+
+  // P21.8 — AI Factory 一键量产处理器
+  const stepsJson = item.steps_json as Record<string, unknown> | null
+  const factoryTopic    = typeof stepsJson?.topic === 'string' ? stepsJson.topic : null
+  const factoryPlatform = typeof stepsJson?.platform === 'string' ? stepsJson.platform : null
+  const isFactoryTask   = stepsJson?.source === 'marketing_plan' && !!factoryTopic
+
+  async function handleFactoryFanOut() {
+    if (!factoryTopic) return
+    setFactoryLoading(true)
+    setFactoryResult(null)
+    setFactoryError(null)
+    try {
+      const platforms = factoryPlatform ? [factoryPlatform] : undefined
+      const res = await fetch(`/api/clients/${clientId}/ai-factory/fan-out`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic:          factoryTopic,
+          platforms,
+          executionItemId: item.id,
+        }),
+      })
+      const data = await res.json() as { success: boolean; saved?: number; error?: string }
+      if (!data.success) throw new Error(data.error ?? '量产失败')
+      setFactoryResult({ saved: data.saved ?? 0 })
+    } catch (err) {
+      setFactoryError(err instanceof Error ? err.message : '量产失败，请重试')
+    } finally {
+      setFactoryLoading(false)
+    }
+  }
 
   const fixMeta      = FIX_TYPE_META[item.fix_type ?? ''] ?? FIX_TYPE_META.fde_manual
   const isDone       = item.status === 'completed' || item.status === 'skipped'
@@ -864,7 +900,38 @@ function TaskDetailDrawer({
           )}
           {/* Item 4: 自主飞轮操作全部关闭；Item 6: in_house 在 execButton 内已 return null */}
           {!isAutonomousItem(item) && execButton}
+
+          {/* P21.8 — AI Factory 一键量产（仅 marketing_plan 来源且有 topic 的任务） */}
+          {isFactoryTask && !isDone && (
+            <button
+              onClick={() => void handleFactoryFanOut()}
+              disabled={factoryLoading}
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 text-xs font-black text-violet-800 transition hover:bg-violet-100 disabled:opacity-60"
+            >
+              {factoryLoading ? (
+                <><span className="h-2 w-2 animate-spin rounded-full border border-violet-500 border-t-transparent" />量产中…</>
+              ) : (
+                <>⚡ 一键量产</>
+              )}
+            </button>
+          )}
         </div>
+
+        {/* P21.8 — AI Factory 量产结果反馈 */}
+        {factoryResult && (
+          <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-bold text-green-700">
+            ✅ 已生成 {factoryResult.saved} 条草稿 — 前往
+            <a href={`/dashboard/content?client=${clientId}`} className="ml-1 underline hover:text-green-900">
+              内容库
+            </a>
+            查看
+          </div>
+        )}
+        {factoryError && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">
+            ❌ {factoryError}
+          </div>
+        )}
 
         {/* 工作日志时间线 */}
         {(item.logs?.length ?? 0) > 0 && (

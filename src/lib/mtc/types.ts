@@ -24,6 +24,7 @@ export type ServiceKey =
   | 'competitor_report'
   | 'master_brief_update'
   | 'bonus_registration'
+  | 'ai_factory_post'
 
 export const MTC_RATES: Record<ServiceKey, number> = {
   blog_seo: 40,
@@ -47,6 +48,7 @@ export const MTC_RATES: Record<ServiceKey, number> = {
   competitor_report: 40,
   master_brief_update: 20,
   bonus_registration: 100,
+  ai_factory_post: 5,   // P21.8 — AI Factory 量产帖子，与 social_post 同价
 }
 
 export interface MtcPackage {
