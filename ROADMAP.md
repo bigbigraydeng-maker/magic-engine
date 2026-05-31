@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-31 20:17 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-01 01:09 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -3004,7 +3004,87 @@ ALTER TABLE execution_items ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
 
 ---
 
+## Phase 29 — Unified User Experience（统一用户体验 · Portal/Dashboard 合并 + Self-Serve 准入门）📋 已登记，待开工
+
+> **登记日期**：2026-06-01 · **状态**：待实施 · **战略优先级**：🚀 HIGH — 系统正式对外前必须完成
+
+### 背景与核心决策
+
+| 决策 | 内容 |
+|------|------|
+| 废弃 Portal/Dashboard 双轨 | `/portal/*` 全量 301 redirect → `/dashboard/clients/*`，代码层只维护一套界面 |
+| 新增 `self_serve` 用户身份 | 公开注册用户，`access_type = 'self_serve'`，不需要 FDE 创建账户 |
+| 轻量 Brief 强制门槛 | 5 字段未填完：内容生成、执行看板、Launch Hub 三模块均软锁定（Banner + 灰色卡片）|
+| MTC Token 自服务 | 与 Phase 20 打通，`self_serve` 用户购买 Token 包自助消费 |
+| FDE 录入账户继续存在 | `access_type = 'fde'` 不变，仅 FDE 可见执行看板完整功能 |
+
+### 轻量 Brief — 5 字段
+
+```
+company_name       公司名
+industry           行业（下拉，与现有 clients 表 industry 对齐）
+target_audience    目标受众（1 句话）
+core_differentiator  核心差异化（1 句话）
+brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witty）
+```
+
+**触发锁定边界**：
+
+| 模块 | Brief 未完成时行为 |
+|------|-----------------|
+| 内容生成（博客 / 社媒 / Reels） | Banner 提示 + 「生成」按钮禁用 |
+| 执行看板 | Banner 提示，可浏览但无法触发任何动作 |
+| Launch Hub | Banner 提示，发布按钮禁用 |
+| 诊断 / 关键词 / 数据看板 | ✅ 不锁定，开放浏览 |
+
+### Phase 29 任务清单
+
+#### P29.A — 数据层（前置必须）
+
+- [ ] **P29.A.1** — DB migration：`access_type` CHECK 加 `self_serve`；`clients` 表加 `brief_completed_at TIMESTAMPTZ`；`brief_fields JSONB` 存 5 字段
+- [ ] **P29.A.2** — 纯函数 `src/lib/brief/completion.ts`：`isBriefComplete(clientId)` → 查 `brief_completed_at IS NOT NULL`，结果可缓存 5 分钟
+
+#### P29.B — Portal 废弃
+
+- [ ] **P29.B.1** — `/app/portal` 目录所有路由加 301 redirect middleware → `/dashboard/clients/[id]`
+- [ ] **P29.B.2** — `requireDashboardClientAccess()` 在 `access_type` check 加 `self_serve`（允许 self_serve 用户访问 dashboard 路由）
+- [ ] **P29.B.3** — 注册流程直接落 `access_type = 'self_serve'`（修改 Phase 20 注册 API）
+
+#### P29.C — Brief 门槛 UI
+
+- [ ] **P29.C.1** — Brief 填写页 `/dashboard/clients/[id]/brief`：5 字段表单 + 保存 → `brief_completed_at = NOW()`
+- [ ] **P29.C.2** — `BriefGateBanner` 通用组件：检查 `isBriefComplete`，未完成时显示 Banner + 内容操作区覆盖半透明蒙层
+- [ ] **P29.C.3** — 接入内容生成页（博客 / 社媒 / Reels Studio）
+- [ ] **P29.C.4** — 接入执行看板顶部
+- [ ] **P29.C.5** — 接入 Launch Hub
+
+#### P29.D — 后续优化（非 MVP 必须）
+
+- [ ] **P29.D.1** — AI Agent 辅助补 Brief：给出公司名 / 网址后 AI 自动提议 5 字段（可编辑确认）
+- [ ] **P29.D.2** — Brief 完成后可随时在 Settings 页完善为 Full Brief
+
+### 里程碑
+
+| 里程碑 | 完成条件 |
+|--------|---------|
+| **M1 数据地基** | P29.A 全完成：migration 跑通，`brief_completed_at` 字段存在，`isBriefComplete` 函数可调用 |
+| **M2 Portal 废弃** | P29.B 全完成：访问 `/portal/*` 自动 redirect，`self_serve` 用户能登录 dashboard |
+| **M3 Brief 门槛上线** | P29.C 全完成：新注册用户未填 Brief 时，内容生成/看板/Launch Hub 均显示 Banner |
+
+### Git 工作流
+
+- 分支：`feat/phase-29-unified-ux`
+- 每子任务独立 commit，格式：`feat(ux): P29.X.Y — <描述>`
+- M3 完成后开 PR → main
+
+---
+
 ## 9. 功能完成日志
+
+### 2026-06-01（Phase 29 战略决策登记 + P21.B 看板来源标记上线）
+
+- **Phase 29 登记** — Portal/Dashboard 双轨废弃、`self_serve` 用户身份、轻量 Brief 5 字段门槛、MTC 自服务打通；P29.A/B/C/D 任务清单写入 ROADMAP；Linear MAG-56 ~ MAG-64
+- **P21.B 来源标记** — Reels Studio 草稿卡片补「📋 来自素材库」紫色徽章；reels 列表 API select 补 `source_storyboard_id`；`send-to-kanban` 引导文案修正指向 `/execution`
 
 ### 2026-05-31（Phase 18.A — Meta Ads 执行引擎 ✅ 完成 + ±20% 安全闸补齐）
 
