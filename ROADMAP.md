@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-01 01:47 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-01 01:57 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -3042,7 +3042,7 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 #### P29.A — 数据层（前置必须）
 
 - [x] **P29.A.1** — DB migration：`access_type` CHECK 加 `self_serve`；`clients` 表加 `brief_completed_at TIMESTAMPTZ`；`brief_fields JSONB` 存 5 字段 ✅ 2026-06-01
-- [ ] **P29.A.2** — 纯函数 `src/lib/brief/completion.ts`：`isBriefComplete(clientId)` → 查 `brief_completed_at IS NOT NULL`，结果可缓存 5 分钟
+- [x] **P29.A.2** — 纯函数 `src/lib/brief/completion.ts`：`isBriefComplete(clientId)` → 查 `brief_completed_at IS NOT NULL`，结果可缓存 5 分钟 ✅ 2026-06-01
 
 #### P29.B — Portal 废弃
 
