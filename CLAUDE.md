@@ -233,7 +233,7 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-31 20:17 NZST （**Phase 21 全部 9 任务 ✅ M1/M2/M3 三里程碑全闭环 — 下一步 Phase 22 Data Engine 或 Phase 24.B GBP 数据摄取**）
+> 最后更新：2026-06-01 02:47 NZST （**P22.A.4 ✅ Competitor 域名基准快照 — Phase 22.A 四任务全完成，下一步 22.D AnomalyDetector 或 Phase 24.B**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
@@ -243,25 +243,23 @@ npm test           # 测试套件
 | **PM 操作 🔴** | Supabase 跑 migration `20260603000001_platform_oauth_connections.sql`（Phase 24.A） | ⚠️ 待操作 |
 | **GBP.0** | Google Cloud：enable Business Profile API + Account Management API，配置 OAuth consent screen，设 env vars | ⚠️ PM 操作 |
 | **Phase 24.B** | GBP 数据摄取（reviews、insights、location data 写入 DB） | 📋 待开始 |
-| **PM 操作（旧）** | Supabase 跑 `20260530000003_strategy_items_unique_title.sql`；Render 加 `GITHUB_WEBHOOK_SECRET`；合并 Phase 14.C PR | ⚠️ 待操作 |
+| **Phase 22.D.1** | AnomalyDetector：anomaly_signals 表 + 规则引擎骨架（依赖 22.A 全完成 ✅） | 📋 待开始 |
 
 **已完成全景（最近几个 Phase）**：
-- ✅ **Phase 21 全部 P21.1–9**（2026-05-31）：AI Factory 三里程碑全闭环：M1 模型分层路由+记忆注入、M2 变体扇出+量产编排器、M3 月度熔断+FDE 一键量产 UI+飞轮 outcome 回流接线；TypeScript 零新增错误
-- ✅ **Phase 21 P21.6+P21.8**（PR #171，2026-05-31）：月度预算熔断（500 帖/月）+ 执行看板「⚡ 一键量产」按钮
-- ✅ **Phase 21 P21.4 ai_factory intensity 档位**（2026-05-31）：Marketing Plan 加第 4 档强度「AI 工厂/全速量产」
-- ✅ **Phase 21 P21.1/P21.2/P21.3 AI Factory 内核 + 变体扇出**（2026-05-31）：MODEL_HAIKU + 分层路由 + 22 单测全绿
-- ✅ **Phase 18.A Meta Ads 执行引擎**（待 PR，2026-05-31）：执行看板「直接执行 (Meta API)」→ ±20% 安全闸
+- ✅ **P22.A.4 Competitor 域名基准快照**（2026-06-01，PR #183）：CompetitorSnapshotAdapter → flywheel_metrics(competitor.domain.organic_traffic)；7 单测全绿
+- ✅ **Phase 21 全部 P21.1–9**（2026-05-31）：AI Factory 三里程碑全闭环
+- ✅ **Phase 21 P21.6+P21.8**（PR #171，2026-05-31）：月度预算熔断 + 一键量产按钮
+- ✅ **Phase 18.A Meta Ads 执行引擎**（待 PR，2026-05-31）：直接执行 (Meta API) → ±20% 安全闸
 - ✅ **Phase 20 MTC 自助计费**（PR #144 + #146，2026-05-31）：注册页 + 钱包页 + Stripe Checkout
 - ✅ **Phase 24.A 全部 8 任务**（PR #125）：Platform OAuth Connector
-- ✅ **Phase 14.B 全部 P14.B.0–7**（PR #120）：WP 连接器扩展
 - ✅ **Phase 23 完整闭环**（PR #112）：L3 记忆四表 + MemoryService
 
 **下一候选**：
-- 📋 **Phase 22** — Data Intelligence Engine（与 Phase 21 双引擎并行，PM 确认优先级后开始）
+- 📋 **Phase 22.D.1** — AnomalyDetector 规则引擎骨架（22.A 全完成 → 可开工）
 - 📋 **Phase 24.B** — GBP 数据摄取（依赖 PM 完成 GBP.0 + migration）
 - 📋 **Phase 18.B** — Google Ads（Developer token 到位后）
 
-下一 session：`继续 Phase 22`（Data Intelligence Engine）或 `继续 Phase 24.B`（GBP 数据摄取）
+下一 session：`继续 Phase 22.D.1`（AnomalyDetector）或 `继续 Phase 24.B`（GBP 数据摄取）
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox
