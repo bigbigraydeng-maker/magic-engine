@@ -241,24 +241,41 @@ export const SOCIAL_METRIC_KEY = {
 
 export type SocialMetricKey = (typeof SOCIAL_METRIC_KEY)[keyof typeof SOCIAL_METRIC_KEY]
 
+// ── Competitor metric keys ────────────────────────────────────────────────────
+
+/**
+ * Measurable signals stored in flywheel_metrics for competitor tracking.
+ *
+ * Written by CompetitorSnapshotAdapter.pullMetrics() via DataForSEO
+ * bulk_traffic_estimation. Enables AnomalyDetector (22.D.1) to signal
+ * when a competitor's traffic surges relative to the client's baseline.
+ */
+export const COMPETITOR_METRIC_KEY = {
+  /** Estimated monthly organic traffic for a competitor domain (DataForSEO ETV) */
+  ORGANIC_TRAFFIC: 'competitor.domain.organic_traffic',
+} as const
+
+export type CompetitorMetricKey = (typeof COMPETITOR_METRIC_KEY)[keyof typeof COMPETITOR_METRIC_KEY]
+
 // ── Union helpers ─────────────────────────────────────────────────────────────
 
 /** All valid action_type strings across all flywheels */
 export type FlywheelActionType = GeoActionType | SeoActionType | AdsActionType | SocialActionType
 
 /** All valid metric_key strings across all flywheels */
-export type FlywheelMetricKey = GeoMetricKey | SeoMetricKey | AdsMetricKey | SocialMetricKey
+export type FlywheelMetricKey = GeoMetricKey | SeoMetricKey | AdsMetricKey | SocialMetricKey | CompetitorMetricKey
 
 // ── Runtime validation helpers ────────────────────────────────────────────────
 
-const ALL_GEO_ACTIONS    = new Set<string>(Object.values(GEO_ACTION_TYPE))
-const ALL_GEO_METRICS    = new Set<string>(Object.values(GEO_METRIC_KEY))
-const ALL_SEO_ACTIONS    = new Set<string>(Object.values(SEO_ACTION_TYPE))
-const ALL_SEO_METRICS    = new Set<string>(Object.values(SEO_METRIC_KEY))
-const ALL_ADS_ACTIONS    = new Set<string>(Object.values(ADS_ACTION_TYPE))
-const ALL_ADS_METRICS    = new Set<string>(Object.values(ADS_METRIC_KEY))
-const ALL_SOCIAL_ACTIONS = new Set<string>(Object.values(SOCIAL_ACTION_TYPE))
-const ALL_SOCIAL_METRICS = new Set<string>(Object.values(SOCIAL_METRIC_KEY))
+const ALL_GEO_ACTIONS        = new Set<string>(Object.values(GEO_ACTION_TYPE))
+const ALL_GEO_METRICS        = new Set<string>(Object.values(GEO_METRIC_KEY))
+const ALL_SEO_ACTIONS        = new Set<string>(Object.values(SEO_ACTION_TYPE))
+const ALL_SEO_METRICS        = new Set<string>(Object.values(SEO_METRIC_KEY))
+const ALL_ADS_ACTIONS        = new Set<string>(Object.values(ADS_ACTION_TYPE))
+const ALL_ADS_METRICS        = new Set<string>(Object.values(ADS_METRIC_KEY))
+const ALL_SOCIAL_ACTIONS     = new Set<string>(Object.values(SOCIAL_ACTION_TYPE))
+const ALL_SOCIAL_METRICS     = new Set<string>(Object.values(SOCIAL_METRIC_KEY))
+const ALL_COMPETITOR_METRICS = new Set<string>(Object.values(COMPETITOR_METRIC_KEY))
 
 export function isValidGeoActionType(value: string): value is GeoActionType {
   return ALL_GEO_ACTIONS.has(value)
@@ -290,4 +307,8 @@ export function isValidSocialActionType(value: string): value is SocialActionTyp
 
 export function isValidSocialMetricKey(value: string): value is SocialMetricKey {
   return ALL_SOCIAL_METRICS.has(value)
+}
+
+export function isValidCompetitorMetricKey(value: string): value is CompetitorMetricKey {
+  return ALL_COMPETITOR_METRICS.has(value)
 }
