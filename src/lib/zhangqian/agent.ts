@@ -294,7 +294,10 @@ const FETCH_DOMAIN_WHOIS_TOOL: Anthropic.Messages.Tool = {
 const FETCH_SERP_RESULTS_TOOL: Anthropic.Messages.Tool = {
   name: 'fetch_serp_results',
   description:
-    'Fetch a real Google SERP page via DataForSEO — organic ranking, paid advertiser domains, and the Google AI Overview answer. Use for 1-2 high-signal category/local queries to diagnose visibility. Each call is a paid API call (~$0.005), pick queries carefully.',
+    'Fetch a real Google SERP page via DataForSEO — organic ranking, paid advertiser domains, Google AI Overview, Local Pack listings (up to 3), and People Also Ask questions (up to 4). ' +
+    'Use for 1-2 high-signal category/local queries to diagnose visibility. Each call is a paid API call (~$0.005), pick queries carefully. ' +
+    'Use local_pack to check whether the client appears in the Google map pack (critical for local businesses). ' +
+    'Use people_also_ask as FAQ Schema seed content — these are real user questions around the topic.',
   input_schema: {
     type: 'object' as const,
     properties: {

@@ -36,6 +36,15 @@ export interface DfseSerpResult {
   paid_advertiser_domains: string[]
   ai_overview_text:        string | null
   ai_overview_sources:     string[]
+  /** Up to 3 Local Pack listings — present when Google shows a local map pack. */
+  local_pack?:             Array<{
+    name:         string
+    rating:       number | null
+    review_count: number | null
+    address:      string | null
+  }>
+  /** Up to 4 People Also Ask question texts — useful as FAQ Schema seed content. */
+  people_also_ask?:        string[]
 }
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
@@ -92,6 +101,9 @@ export async function getSerpPage(
           url?:                   string | null
           description?:           string | null
           domain?:                string | null
+          rating?:                number | null
+          reviews_count?:         number | null
+          address?:               string | null
           ai_overview?: {
             text?:         string | null
             references?: Array<{
@@ -129,12 +141,30 @@ export async function getSerpPage(
     .map(r => r.url ?? '')
     .filter(Boolean)
 
+  const localPack = items
+    .filter(it => it.type === 'local_pack')
+    .slice(0, 3)
+    .map(it => ({
+      name:         it.title        ?? '',
+      rating:       it.rating       ?? null,
+      review_count: it.reviews_count ?? null,
+      address:      it.address      ?? null,
+    }))
+
+  const peopleAlsoAsk = items
+    .filter(it => it.type === 'people_also_ask')
+    .slice(0, 4)
+    .map(it => it.title ?? '')
+    .filter(Boolean)
+
   return {
     query,
     organic_results:         organicResults,
     paid_advertiser_domains: paidDomains,
     ai_overview_text:        aiOverviewText,
     ai_overview_sources:     aiOverviewSources,
+    ...(localPack.length > 0      && { local_pack:       localPack }),
+    ...(peopleAlsoAsk.length > 0  && { people_also_ask:  peopleAlsoAsk }),
   }
 }
 
