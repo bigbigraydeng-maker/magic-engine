@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-01 02:44 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-01 02:50 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -3004,9 +3004,9 @@ ALTER TABLE execution_items ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
 
 ---
 
-## Phase 29 — Unified User Experience（统一用户体验 · Portal/Dashboard 合并 + Self-Serve 准入门）📋 已登记，待开工
+## Phase 29 — Unified User Experience（统一用户体验 · Portal/Dashboard 合并 + Self-Serve 准入门）✅ 已完成（2026-06-01，M1/M2/M3 全闭环）
 
-> **登记日期**：2026-06-01 · **状态**：待实施 · **战略优先级**：🚀 HIGH — 系统正式对外前必须完成
+> **登记日期**：2026-06-01 · **状态**：✅ 完成 · **战略优先级**：🚀 HIGH
 
 ### 背景与核心决策
 
@@ -3081,10 +3081,13 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 
 ## 9. 功能完成日志
 
-### 2026-06-01（Phase 29 战略决策登记 + P21.B 看板来源标记上线）
+### 2026-06-01（Phase 29 ✅ 全闭环 M1/M2/M3 + P21.B 看板来源标记上线）
 
-- **Phase 29 登记** — Portal/Dashboard 双轨废弃、`self_serve` 用户身份、轻量 Brief 5 字段门槛、MTC 自服务打通；P29.A/B/C/D 任务清单写入 ROADMAP；Linear MAG-56 ~ MAG-64
-- **P21.B 来源标记** — Reels Studio 草稿卡片补「📋 来自素材库」紫色徽章；reels 列表 API select 补 `source_storyboard_id`；`send-to-kanban` 引导文案修正指向 `/execution`
+- **P29.A.1** — migration `20260616000001`：`access_type` CHECK 加 `self_serve`；`clients` 加 `brief_completed_at` + `brief_fields`
+- **P29.A.2** — `src/lib/brief/completion.ts`：`isBriefComplete` 纯函数 + 5min Map 缓存；12 单测全绿
+- **P29.B.1~3** — portal layout 加 `permanentRedirect`；`requireDashboardClientAccess` 加 `self_serve`；注册 API 落 `self_serve`；session-route 登录后直达 `/dashboard/clients/[id]`
+- **P29.C.1~4** — `/dashboard/clients/[id]/brief` 5字段填写页；`BriefGateBanner` 遮罩组件；接入 blog/execution/marketing-plan；`/api/clients/[id]/light-brief` GET+POST
+- **P21.B 来源标记** — Reels Studio 草稿卡片补「📋 来自素材库」紫色徽章；send-to-kanban 引导修正
 
 ### 2026-05-31（Phase 18.A — Meta Ads 执行引擎 ✅ 完成 + ±20% 安全闸补齐）
 
