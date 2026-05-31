@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-31 13:46 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-31 17:16 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -77,6 +77,10 @@
 📋 Phase 22     Data Intelligence Engine / 数据智能引擎（旗舰能力 — 采集+分析+反馈学习引擎）
 📋 Phase 22.D   主动任务生成器 / AnomalyDetector + 诸葛亮 Proactive（Phase 22 子模块）
 📋 Phase 23     Cross-Agent Memory Layer / 跨 Agent 记忆层（旗舰能力 — 升级自 Phase 8.M，补 L3 长期学习）
+📋 Phase 24     Execution Loop Closure / 执行闭环修复（Phase 24.A Platform OAuth Connector ✅ 已完成 PR #125）
+📋 Phase 26     Client Locale Intelligence / 客户地域智能层（国家→州→城市三层 + 业务范围 + AU/NZ 节日日历注入）✅ 已完成
+📋 Phase 27     Visual Reference Library / 视觉参考库（图像版 viral analyzer — FDE 上传 + 客户提供 + 竞品爬取，构建行业视觉知识库）📋 待开发
+📋 Phase 28     FDE Inbox / 待处理收件箱（⚠️ 待并入 Phase 20.D — 统一看板扩展）
 ```
 
 **Phase 7 核心战略**：双信号博客（Dual-Signal Blog）— 每篇文章同时携带 SEO 信号（Google 排名）和 GEO 信号（AI 推荐），选题由 AI Tracker 弱项 × SEMrush 低KD机会交叉驱动，形成数据自强化飞轮。
@@ -2899,6 +2903,104 @@ client_decision_history      -- 为什么之前选 X 不选 Y
              ▼
          产出更聪明的内容 → 飞轮自强化
 ```
+
+---
+
+## Phase 26 — Client Locale Intelligence（客户地域智能层）✅ 已完成
+
+> **完成日期**：2026-06-12 · **状态**：✅ 全部完成
+
+**核心功能**：为每个客户添加地域层级数据（国家 → 州/省 → 城市三层）+ 业务服务范围 + AU/NZ 节假日日历注入，使 AI 内容生成自动携带正确的地域信号。
+
+### Phase 26 任务清单
+
+- [x] **P26.1** — DB migration：`clients` 表加 `locale_country / locale_state / locale_city / service_regions TEXT[]`
+- [x] **P26.2** — 节假日日历表 `locale_holidays` + AU/NZ 公共假日种子数据
+- [x] **P26.3** — 地域信号注入博客/社媒内容生成 prompt（"This is an [city] business serving [regions]…"）
+- [x] **P26.4** — FDE Dashboard 客户档案页「地域设置」编辑 UI
+- [x] **P26.5** — AI Tracker 问句自动带地域标签（"best X in [city]"）
+- [x] **P26.6** — GEO Composer 指令自动注入地域信号（`Audience: [city] travelers`）
+- [x] **P26.7** — SerpAPI 调用自动带 `gl=au/nz` + `location=[city, country]`
+- [x] **P26.8** — 节假日日历：内容生成时检测近 14 天节假日并注入「节日相关性提示」
+
+---
+
+## Phase 27 — Visual Reference Library（视觉参考库）📋 已登记，待开发
+
+> **登记日期**：2026-06-12 · **状态**：待实施
+
+**产品定位**：图像版 viral analyzer。ME 目前有「视频爆款分析」能力（Phase 8.R / Phase 22.B），但缺少图像层面的参考积累。Visual Reference Library 让 FDE 上传竞品/客户/行业优质图片，AI 分析提取视觉模式（配色、构图、元素类型），形成可检索的视觉知识库，驱动后续图片/封面生成。
+
+**与 AI Factory 的关系**：Phase 27 是 Phase 21（AI 内容工厂）的上游数据 — 工厂生产图片时，从 Visual Reference Library 抽取视觉风格约束，提升生成质量。
+
+### 数据模型
+
+```sql
+CREATE TABLE visual_reference_library (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id         UUID NOT NULL REFERENCES clients(id),
+  source            TEXT NOT NULL CHECK (source IN ('fde_upload', 'client_provided', 'competitor_crawl')),
+  storage_url       TEXT NOT NULL,
+  industry_tags     TEXT[] NOT NULL DEFAULT '{}',
+  visual_attributes JSONB,   -- { colors: [], composition: '', elements: [], style: '' }
+  viral_score       NUMERIC(4,2),
+  analyzed_at       TIMESTAMPTZ,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+### Phase 27 任务清单
+
+- [ ] **P27.1** — DB migration：`visual_reference_library` 表
+- [ ] **P27.2** — FDE 上传 UI：Assets 页面「参考库」标签，支持批量上传 + 标注来源（FDE/客户/竞品）
+- [ ] **P27.3** — GPT-4o Vision 分析管道：提取配色 + 构图 + 元素类型 + 风格标签
+- [ ] **P27.4** — 行业标签过滤 + 相似图搜索（pgvector embedding）
+- [ ] **P27.5** — 视觉得分：参考 viral_score 逻辑，给每张图打 1-10 分
+- [ ] **P27.6** — 竞品爬取接入：URL 输入 → Jina.ai 抓取 OG 图 → 自动入库分析
+- [ ] **P27.7** — AI Factory 注入：图片/封面生成时，从参考库取 top-3 相似风格约束注入 prompt
+- [ ] **P27.8** — 参考库浏览 UI：瀑布流展示 + 筛选 + 得分排序 + 删除
+
+---
+
+## Phase 28 — FDE Inbox（待处理收件箱）📋 已登记 · ⚠️ 待并入 Phase 20.D（统一看板扩展）
+
+> **登记日期**：2026-06-12 · **状态**：待实施 · **注意**：本 Phase 应并入 Phase 20.D 子任务，不单独立 Phase
+
+**问题根源**：Magic Engine 的内容产出来源越来越多——素材库发来的视频草稿、诸葛亮新增的执行项、博客/社媒内容自动生成完成……这些「系统自动创建、尚未被人工确认」的条目，目前分散在各个模块角落，FDE 需要翻遍整个看板才能找到待处理的新内容。随着 Phase 21 AI Factory 量产能力上线，这个问题会更严重。
+
+**核心设计**：在执行看板顶部增加「📥 待处理」收件箱区域，聚合所有 `reviewed_at IS NULL` 的新建条目，时间倒序排列，FDE 处理后从收件箱消失归入对应列。
+
+### 统一的「未读」字段
+
+所有产物表统一加一列：
+
+```sql
+ALTER TABLE reels_drafts    ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+ALTER TABLE blog_posts      ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+ALTER TABLE content_posts   ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+ALTER TABLE execution_items ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+```
+
+**收件箱查询** = `reviewed_at IS NULL AND created_at > NOW() - INTERVAL '7 days'`
+
+**FDE 点开处理** → PATCH `reviewed_at = NOW()` → 条目从收件箱消失
+
+### 收件箱内容来源
+
+| 来源 | 条目类型 | 触发时机 |
+|------|---------|---------|
+| 素材库「发送到看板」 | 视频草稿 | 点击「发送到内容看板」按钮 |
+| 诸葛亮处方 | 执行项 | 处方首次生成时 |
+| AI Factory 批量生成 | 博客 / 社媒内容 | 内容生成完成后 |
+| 飞轮自动建议 | 执行项 | AnomalyDetector 触发（Phase 22.D）|
+
+### Phase 28 任务清单（待并入 Phase 20.D）
+
+- [ ] **P28.1** — DB migration：4 张产物表各加 `reviewed_at TIMESTAMPTZ`
+- [ ] **P28.2** — 执行看板顶部「📥 待处理」收件箱区域 UI（聚合查询 + 时间倒序）
+- [ ] **P28.3** — 收件箱条目点击展开 + 「标记已读」动作（PATCH reviewed_at）
+- [ ] **P28.4** — 「发送到看板」后写入 reviewed_at=NULL（已是默认，确认 reels_drafts 行为）
+- [ ] **P28.5** — 收件箱 badge 计数：侧边栏「执行看板」入口显示未读数
 
 ---
 
