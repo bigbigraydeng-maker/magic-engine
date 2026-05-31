@@ -311,3 +311,25 @@ services:
           type: web
           name: magic-engine
           property: host
+
+  # Daily anomaly detector — every day at 5am UTC (~5pm NZST / 3pm AEST)
+  # Two-step pipeline:
+  #   Step 1: AnomalyDetectorJob — scans flywheel_metrics, writes anomaly_signals
+  #   Step 2: 诸葛亮 Proactive — reads fresh signals, creates proactive execution tasks
+  # Reference: ROADMAP.md § Phase 22.D.3
+  - type: cron
+    name: anomaly-detector-daily
+    env: node
+    schedule: "0 5 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -s -H "Authorization: Bearer $CRON_SECRET" \
+        https://$RENDER_EXTERNAL_URL/api/cron/anomaly-detector
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+      - key: RENDER_EXTERNAL_URL
+        fromService:
+          type: web
+          name: magic-engine
+          property: host
