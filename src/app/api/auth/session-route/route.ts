@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
     .eq('email', email)
 
   const portalUser = accessRows?.find(row =>
-    row.access_type === 'portal' || row.access_type === 'both'
+    row.access_type === 'portal' || row.access_type === 'both' || row.access_type === 'self_serve'
   )
 
   if (portalUser?.client_id) {

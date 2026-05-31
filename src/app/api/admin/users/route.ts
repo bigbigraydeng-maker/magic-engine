@@ -10,8 +10,8 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { guardAdmin } from '@/lib/auth/require-admin'
 import { getUserPermissions } from '@/lib/auth/whitelist'
 
-const ALLOWED_TYPES = ['portal', 'dashboard', 'fde', 'both', 'all'] as const
-type AccessType = 'portal' | 'dashboard' | 'fde' | 'both'
+const ALLOWED_TYPES = ['portal', 'dashboard', 'fde', 'both', 'self_serve', 'all'] as const
+type AccessType = 'portal' | 'dashboard' | 'fde' | 'both' | 'self_serve'
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const guard = await guardAdmin()
@@ -58,8 +58,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (!body.client_id || typeof body.client_id !== 'string') {
       return NextResponse.json({ error: 'client_id is required.' }, { status: 400 })
     }
-    if (!body.access_type || !['portal', 'dashboard', 'fde', 'both'].includes(body.access_type as string)) {
-      return NextResponse.json({ error: 'access_type must be portal | dashboard | fde | both.' }, { status: 400 })
+    if (!body.access_type || !['portal', 'dashboard', 'fde', 'both', 'self_serve'].includes(body.access_type as string)) {
+      return NextResponse.json({ error: 'access_type must be portal | dashboard | fde | both | self_serve.' }, { status: 400 })
     }
 
     email        = body.email.trim().toLowerCase()

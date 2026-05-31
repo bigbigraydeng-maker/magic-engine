@@ -73,9 +73,9 @@ export async function GET(request: NextRequest) {
         .select('client_id, access_type')
         .eq('email', email)
 
-      // Portal users (access_type = 'portal' | 'both') → /portal/[clientId]
+      // Portal users (access_type = 'portal' | 'both' | 'self_serve') → /portal/[clientId]
       const portalRow = accessRows?.find(r =>
-        r.access_type === 'portal' || r.access_type === 'both'
+        r.access_type === 'portal' || r.access_type === 'both' || r.access_type === 'self_serve'
       )
       // Dashboard/FDE users (access_type = 'dashboard' | 'fde' | 'both') → /dashboard/clients/[clientId]
       const dashboardRow = accessRows?.find(r =>
