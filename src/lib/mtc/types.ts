@@ -76,3 +76,14 @@ export interface MtcBalanceResult {
 export type DeductResult =
   | { ok: true; ledgerEntryId: string }
   | { ok: false; reason: 'insufficient_balance' | 'db_error'; balance?: number }
+
+// P21.6 — monthly MTC spend cap (used by budget-guard.ts)
+export const DEFAULT_MONTHLY_MTC_CAP = 5000
+
+export interface BudgetStatus {
+  allowed: boolean
+  spent: number
+  cap: number
+  remaining: number
+  capIsCustom: boolean
+}

@@ -1,10 +1,11 @@
 /**
  * POST /api/clients/[id]/ai-factory/fan-out
  *
- * P21.8 — FDE 一键量产触发端点
+ * P21.5+P21.8 — FDE 一键量产触发端点
  *
- * 接收主题 + 平台列表，调用 fanOutToPlatforms()，把每个平台的输出
- * 批量写入 content_posts（status='draft'），同时扣 MTC 费用。
+ * 调用 runProductionBatch()，走完整聚合路线：
+ *   建 production_package(generating) → 扇出 → 落 content_posts + production_items
+ *   → finalize(ready_for_review) → 扣 MTC
  *
  * Body:
  *   topic           string   — 内容主题（必填）
@@ -16,19 +17,21 @@
  *   executionItemId string   — 关联执行项（选填）
  *
  * Returns:
- *   { success, generated, saved, posts[], totalCostUsd, totalInputTokens, totalOutputTokens, failedPlatforms[] }
+ *   { success, packageId, status, successCount, items[], failures[], totalCostUsd, budget }
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
-import { fanOutToPlatforms, type FanOutInput } from '@/lib/ai-factory'
+import { runProductionBatch } from '@/lib/ai-factory'
 import { deductMtc } from '@/lib/mtc/deduct'
-import { checkFactoryBudget } from '@/lib/mtc/factory-budget'
+import { checkBudget } from '@/lib/mtc/budget-guard'
 import type { SupportedPlatform, ContentType } from '@/lib/ai-factory'
 
 const VALID_PLATFORMS: SupportedPlatform[] = ['facebook', 'instagram', 'linkedin', 'tiktok', 'google']
 const VALID_CONTENT_TYPES: ContentType[]   = ['post', 'caption', 'reel_script', 'blog_outline', 'ad_copy']
+
+const MTC_PER_POST = 5   // ai_factory_post = 5 MTC（与 MTC_RATES 一致）
 
 type RouteContext = { params: { id: string } }
 
@@ -52,7 +55,6 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ success: false, error: 'topic 不能为空' }, { status: 400 })
   }
 
-  // Validate + allowlist platforms
   const rawPlatforms = Array.isArray(body.platforms) ? body.platforms : VALID_PLATFORMS
   const platforms = (rawPlatforms as unknown[])
     .filter((p): p is SupportedPlatform => VALID_PLATFORMS.includes(p as SupportedPlatform))
@@ -67,10 +69,21 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
   const flywheel        = typeof body.flywheel === 'string' ? body.flywheel : 'social'
   const fdeNote         = typeof body.fdeNote === 'string' ? body.fdeNote.trim() || undefined : undefined
-  const campaignId      = typeof body.campaignId === 'string' && body.campaignId ? body.campaignId : null
-  const executionItemId = typeof body.executionItemId === 'string' && body.executionItemId ? body.executionItemId : null
+  const campaignId      = typeof body.campaignId === 'string' && body.campaignId ? body.campaignId : undefined
+  const executionItemId = typeof body.executionItemId === 'string' && body.executionItemId ? body.executionItemId : undefined
 
-  // Load master brief + optional campaign brief for context injection
+  // P21.6 — 月度预算熔断（MTC 金额上限）
+  const estimatedMtc = platforms.length * MTC_PER_POST
+  const budget = await checkBudget(clientId, estimatedMtc)
+  if (!budget.allowed) {
+    return NextResponse.json({
+      success: false,
+      error:   `本月 AI Factory 预算已达上限（已用 ${budget.spent}/${budget.cap} MTC）。请下月继续或联系 Magic Lab 提升配额。`,
+      budget:  { spent: budget.spent, cap: budget.cap, remaining: budget.remaining },
+    }, { status: 429 })
+  }
+
+  // 加载 master brief + campaign brief（注入量产编排器）
   const [{ data: masterBrief }, { data: campaignBrief }] = await Promise.all([
     supabaseAdmin
       .from('master_briefs')
@@ -87,104 +100,50 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       : Promise.resolve({ data: null }),
   ])
 
-  // P21.6 — 月度预算熔断：提前检查本月消耗量，超限则 429
-  const estimatedPosts = platforms.length   // 每平台 1 帖（默认 variants=1）
-  const budget = await checkFactoryBudget(clientId, estimatedPosts)
-  if (!budget.allowed) {
-    return NextResponse.json({
-      success: false,
-      error:   `本月 AI Factory 已达上限（${budget.usedThisMonth}/${budget.limit} 帖）。请下月继续或联系 Magic Lab 提升配额。`,
-      budget:  { used: budget.usedThisMonth, limit: budget.limit, remaining: budget.remaining },
-    }, { status: 429 })
-  }
-
-  // Run fan-out (supabaseAdmin used server-side — no user session needed)
-  const fanOutInput: FanOutInput = {
-    clientId,
-    topic,
-    platforms,
-    contentType,
-    flywheel: flywheel as FanOutInput['flywheel'],
-    masterBrief:   masterBrief   ?? null,
-    campaignBrief: campaignBrief ?? null,
-    fdeNote,
-  }
-
-  const fanOutResult = await fanOutToPlatforms(supabaseAdmin, fanOutInput)
-
-  if (fanOutResult.successCount === 0) {
-    const errors = fanOutResult.results
-      .map(r => `${r.platform}: ${r.error ?? 'unknown'}`)
-      .join('; ')
-    return NextResponse.json(
-      { success: false, error: `所有平台生成失败: ${errors}` },
-      { status: 500 }
-    )
-  }
-
-  // Build content_posts rows from successful results
-  const rows = fanOutResult.results
-    .filter(r => r.result !== null)
-    .flatMap(r => {
-      const result = r.result!
-      return result.variants.map(variant => ({
-        client_id:    clientId,
-        campaign_id:  campaignId,
-        platforms:    [r.platform],
-        route:        'route_a',
-        title:        `[AI Factory] ${topic} — ${r.platform}`,
-        script:       null,
-        caption:      variant.content,
-        hashtags:     variant.hashtags,
-        visual_brief: null,
-        content_mode: 'campaign',   // content_posts CHECK: 'brand'|'campaign'
-        status:       'draft',
-        quality_score: null,
-        generation_context_snapshot: {
-          factory_job_id:    result.jobId,
-          model_used:        result.modelUsed,
-          memory_injected:   result.memoryInjected,
-          input_tokens:      result.inputTokens,
-          output_tokens:     result.outputTokens,
-          cost_usd:          result.costUsd,
-          topic,
-          content_type:      contentType,
-          flywheel,
-          fde_note:          fdeNote ?? null,
-          generated_at:      result.generatedAt,
-          execution_item_id: executionItemId,
-        },
-      }))
+  // P21.5 — runProductionBatch：建包 → 扇出 → 落库 → finalize
+  let batchResult
+  try {
+    batchResult = await runProductionBatch(supabaseAdmin, {
+      clientId,
+      topic,
+      platforms,
+      contentType,
+      flywheel:      flywheel as Parameters<typeof runProductionBatch>[1]['flywheel'],
+      masterBrief:   masterBrief   ?? null,
+      campaignBrief: campaignBrief ?? null,
+      fdeNote,
+      campaignId,
     })
-
-  const { data: savedPosts, error: insertErr } = await supabaseAdmin
-    .from('content_posts')
-    .insert(rows)
-    .select('id, title, caption, hashtags, platforms, status')
-
-  if (insertErr) {
-    console.error('[ai-factory/fan-out] DB insert error:', insertErr)
-    return NextResponse.json({ success: false, error: insertErr.message }, { status: 500 })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ success: false, error: msg }, { status: 500 })
   }
 
-  // Deduct MTC per saved post (non-blocking — failure doesn't fail the request)
-  const savedCount = savedPosts?.length ?? 0
-  if (savedCount > 0) {
-    deductMtc(clientId, 'ai_factory_post', savedCount).catch(err =>
-      console.error('[ai-factory/fan-out] MTC deduction error:', err)
+  // 扣 MTC（非阻断，按实际落库帖数扣）
+  if (batchResult.successCount > 0) {
+    deductMtc(clientId, 'ai_factory_post', batchResult.successCount).catch(e =>
+      console.error('[ai-factory/fan-out] MTC deduction error:', e)
     )
+  }
+
+  // 如果有 executionItemId，更新关联执行项的 production_package_id（best-effort, fire-and-forget）
+  if (executionItemId && batchResult.packageId) {
+    void supabaseAdmin
+      .from('execution_items')
+      .update({ production_package_id: batchResult.packageId })
+      .eq('id', executionItemId)
   }
 
   return NextResponse.json({
-    success:           true,
-    generated:         fanOutResult.successCount,
-    saved:             savedCount,
-    posts:             savedPosts ?? [],
-    totalCostUsd:      fanOutResult.totalCostUsd,
-    totalInputTokens:  fanOutResult.totalInputTokens,
-    totalOutputTokens: fanOutResult.totalOutputTokens,
-    failedPlatforms:   fanOutResult.results
-      .filter(r => r.result === null)
-      .map(r => r.platform),
-  }, { status: 201 })
+    success:           batchResult.successCount > 0,
+    packageId:         batchResult.packageId,
+    status:            batchResult.status,
+    successCount:      batchResult.successCount,
+    items:             batchResult.items,
+    failures:          batchResult.failures,
+    totalCostUsd:      batchResult.totalCostUsd,
+    totalInputTokens:  batchResult.totalInputTokens,
+    totalOutputTokens: batchResult.totalOutputTokens,
+    budget:            { spent: budget.spent, cap: budget.cap, remaining: budget.remaining },
+  }, { status: batchResult.successCount > 0 ? 201 : 500 })
 }

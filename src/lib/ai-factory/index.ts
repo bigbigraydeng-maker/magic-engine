@@ -1,6 +1,7 @@
 export { runFactoryJob } from './generator'
 export { fanOutToPlatforms } from './fan-out'
 export { reformatForPlatform } from './reformat'
+export { runProductionBatch } from './orchestrator'
 export type {
   FactoryJobInput,
   FactoryResult,
@@ -17,3 +18,8 @@ export type {
   ReformatInput,
   ReformatResult,
 } from './reformat'
+export type {
+  ProductionBatchInput,
+  ProductionBatchResult,
+  ProductionBatchItem,
+} from './orchestrator'
