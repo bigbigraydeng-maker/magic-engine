@@ -509,7 +509,7 @@ function StoryboardPanel({
                   <p className="text-[11px] text-emerald-600 mt-0.5">可在 Launch Hub → Reels Studio 查看并生成视频</p>
                 </div>
                 <Link
-                  href={`/dashboard/clients/${clientId}/production`}
+                  href={`/dashboard/clients/${clientId}/execution`}
                   className="text-[11px] px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white font-medium transition-colors shrink-0"
                 >
                   前往看板 →
