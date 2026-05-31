@@ -1391,6 +1391,7 @@ function PostCard({ post, clientId, launchHubPlatform, dueDate, onGenStart, onGe
 
             {launchHubPlatform && (
               <LaunchHubScheduler
+                clientId={clientId}
                 platform={launchHubPlatform}
                 caption={post.copy ?? ''}
                 hashtags={post.hashtags}
@@ -1490,6 +1491,7 @@ function StoryCard({ index, story, clientId, launchHubPlatform, dueDate, onGenSt
           {launchHubPlatform && (
             <div className="pt-1">
               <LaunchHubScheduler
+                clientId={clientId}
                 platform={launchHubPlatform}
                 caption={story.copy ?? ''}
                 hashtags={[]}
@@ -1513,8 +1515,9 @@ function StoryCard({ index, story, clientId, launchHubPlatform, dueDate, onGenSt
 // FDE reviews everything before the final "确认排期发布" click.
 
 function LaunchHubScheduler({
-  platform, caption, hashtags, imageUrl, dueDate,
+  clientId, platform, caption, hashtags, imageUrl, dueDate,
 }: {
+  clientId: string
   platform: string
   caption: string
   hashtags: string[]
@@ -1542,6 +1545,7 @@ function LaunchHubScheduler({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          client_id: clientId,
           caption,
           hashtags,
           image_url: imageUrl ?? undefined,
@@ -1550,7 +1554,7 @@ function LaunchHubScheduler({
         }),
       })
       const json = await res.json() as { success: boolean; error?: string }
-      if (!json.success) throw new Error(json.error ?? 'Schedule failed')
+      if (!json.success) throw new Error(json.error ?? '加入 Launch Hub 失败')
       setPhase('sent')
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : String(e))
@@ -1565,7 +1569,7 @@ function LaunchHubScheduler({
   if (phase === 'sent') {
     return (
       <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-3 space-y-1">
-        <p className="text-xs font-black text-green-700">✅ 已排期到 Launch Hub</p>
+        <p className="text-xs font-black text-green-700">✅ 已加入 Launch Hub（待审核）</p>
         <div className="flex items-center gap-2 text-[11px] text-green-600">
           <span className="rounded border border-green-200 bg-white px-1.5 py-0.5 font-semibold capitalize">{platformLabel}</span>
           <span>
@@ -1573,6 +1577,7 @@ function LaunchHubScheduler({
           </span>
           {!imageUrl && <span className="text-amber-600 font-medium">纯文字帖</span>}
         </div>
+        <p className="text-[10px] text-green-500">前往 Launch Hub 审核后再发布到 {platformLabel}</p>
       </div>
     )
   }

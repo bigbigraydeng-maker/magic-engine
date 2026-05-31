@@ -18,6 +18,7 @@ interface Post {
   format: string | null
   ratio: string | null
   created_at: string
+  source: string | null
 }
 
 interface VisualAsset {
@@ -839,7 +840,7 @@ export default function VisualsPage() {
     if (typeof window === 'undefined') return ''
     return new URLSearchParams(window.location.search).get('client') ?? ''
   })
-  const [statusFilter, setStatusFilter] = useState('approved,scheduled')
+  const [statusFilter, setStatusFilter] = useState('draft,approved,scheduled')
   const [posts, setPosts] = useState<Post[]>([])
   const [assets, setAssets] = useState<VisualAsset[]>([])
   const [genStates, setGenStates] = useState<Record<string, GenState>>({})
@@ -1184,12 +1185,13 @@ export default function VisualsPage() {
           onChange={e => setStatusFilter(e.target.value)}
           className="text-sm border border-gray-200 rounded px-2 py-1 bg-white text-gray-900"
         >
+          <option value="draft,approved,scheduled">待审核 + 已批准 + 已排期</option>
+          <option value="draft">待审核（草稿）</option>
           <option value="approved,scheduled">已批准 + 已排期</option>
           <option value="approved">已批准</option>
           <option value="scheduled">已排期</option>
-          <option value="">全部</option>
-          <option value="draft">草稿</option>
           <option value="published">已发布</option>
+          <option value="">全部</option>
         </select>
         <button
           onClick={handleRefresh}
@@ -1222,8 +1224,10 @@ export default function VisualsPage() {
               </tr>
             </thead>
             <tbody>
-              {posts.map((post, idx) => (
-                <tr key={post.id} id={post.id} className="border-b border-gray-100 hover:bg-gray-50/70 align-top group">
+              {posts.map((post, idx) => {
+                const isKanbanDraft = post.status === 'draft' && post.source === 'kanban'
+                return (
+                <tr key={post.id} id={post.id} className={`border-b border-gray-100 hover:bg-gray-50/70 align-top group ${isKanbanDraft ? 'border-l-2 border-l-orange-400 bg-orange-50/30' : ''}`}>
 
                   {/* # */}
                   <td className="px-2 py-1.5 text-gray-400 text-xs border-r border-gray-100">{idx + 1}</td>
@@ -1231,6 +1235,11 @@ export default function VisualsPage() {
                   {/* Status */}
                   <td className="px-2 py-1.5 border-r border-gray-100">
                     <EditableStatus value={post.status} onSave={v => patchPost(post.id, { status: v })} />
+                    {isKanbanDraft && (
+                      <span className="mt-1 inline-block text-[9px] font-bold bg-orange-100 text-orange-600 border border-orange-200 rounded px-1 py-0.5">
+                        📥 来自看板
+                      </span>
+                    )}
                   </td>
 
                   {/* Format */}
@@ -1348,7 +1357,7 @@ export default function VisualsPage() {
                     />
                   </td>
                 </tr>
-              ))}
+              )})}
 
               {posts.length === 0 && (
                 <tr>

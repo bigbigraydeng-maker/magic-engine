@@ -12,7 +12,7 @@ export async function GET(
 
     let query = supabaseAdmin
       .from('content_posts')
-      .select('id, title, status, route, platforms, caption, hashtags, visual_brief, scheduled_at, format, ratio, created_at')
+      .select('id, title, status, route, platforms, caption, hashtags, visual_brief, scheduled_at, format, ratio, created_at, source')
       .eq('client_id', params.id)
       .order('scheduled_at', { ascending: true, nullsFirst: false })
       .limit(200)
