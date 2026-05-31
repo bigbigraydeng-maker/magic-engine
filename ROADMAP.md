@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-31 11:24 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-31 12:51 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2075,9 +2075,11 @@ AI 可见度层（ME 独有 ✅）
 
 ---
 
-## Phase 17 — Unified Data Pullback（统一数据回流层）🔥 进行中
+## Phase 17 — Unified Data Pullback（统一数据回流层）🔥 17.A ✅ 已交付上线 · 其余数据源持续接入
 
-> **登记日期**：2026-05-19 · **开工日期**：2026-06-03 · **状态**：Phase 17.A ✅ 全部完成（P17.A.1–A.6 均已 merge，2026-05-27）
+> **登记日期**：2026-05-19 · **开工日期**：2026-06-03 · **状态**：Phase 17.A ✅ 全部完成（P17.A.1–A.6 均已 merge，2026-05-27）；GSC + GA4 数据回流已上线，Meta / Google Ads / GBP 数据源陆续接入。
+>
+> **Linear**：Project「Phase 17 — Unified Data Pullback」(MAG-27 ~ MAG-32 已交付 · 扩展面 = Meta Insights / Google Ads / GBP 数据源)
 >
 > **背景**：ME 现在的月报数据是孤岛——SEO 数据、社媒数据、广告数据分散在各平台，无法在 ME 内做跨渠道归因。Unified Data Pullback 是把所有执行结果拉回 ME、驱动飞轮真实归因的基础设施层。
 
@@ -2350,7 +2352,24 @@ Body: { title, description, dimension, fix_type?, due_date?, notes? }
 
 ---
 
-## Phase 24 — Execution Loop Closure（执行闭环修复）📋 已登记，2026-06-06 启动
+## Phase 24 — GBP / Google Business Profile 接入 📋 24.A ✅ · 24.B 待开始
+
+> **状态**：24.A Platform OAuth Connector ✅（PR #125，8/8 任务，详见 §9 2026-05-29）；24.B GBP 数据摄取 📋 待开始（被 GBP.0 配额闸门阻塞）。
+>
+> **范围**：通过 Platform OAuth Connector 连接 GBP，摄取 reviews / insights / location data 写入 DB。
+>
+> **前置闸门 GBP.0（⚠️ PM 操作 · 关键路径）**：Google Cloud 启用 Business Profile API + Account Management API + OAuth consent screen + env vars。GBP API 默认 0 QPM，须填表申请正式配额（3-7 天审核），否则调用全部被拒。
+>
+> **子任务**：
+> - [x] **24.A** Platform OAuth Connector（8 任务，PR #125）
+> - [ ] **GBP.0** Google Cloud 启用 API + OAuth consent + env vars（⚠️ PM 操作）
+> - [ ] **24.B** GBP 数据摄取（reviews / insights / location data → DB；被 GBP.0 阻塞）
+>
+> **Linear**：Project「Phase 24 — GBP」(MAG-21 GBP.0 · MAG-22 24.B)
+
+---
+
+## Phase 26 — Execution Loop Closure（执行闭环修复）📋 已登记，2026-06-06 启动
 
 > **登记日期**：2026-06-06 · **状态**：开发中
 >
@@ -2360,11 +2379,11 @@ Body: { title, description, dimension, fix_type?, due_date?, notes? }
 
 | ID | 内容 | 文件 |
 |----|------|------|
-| **P24.A** | 诸葛亮推荐自动写入执行看板 | `action-persister.ts` + migration |
-| **P24.B** | 诸葛亮每周定时重新计算 | `cron/zhuge-recalculate/route.ts` + `render.yaml` |
-| **P24.C** | GEO 部署页接入 CMS connector 一键部署 | `deploy/page.tsx` + `DeploymentForm.tsx` |
+| **P26.A** | 诸葛亮推荐自动写入执行看板 | `action-persister.ts` + migration |
+| **P26.B** | 诸葛亮每周定时重新计算 | `cron/zhuge-recalculate/route.ts` + `render.yaml` |
+| **P26.C** | GEO 部署页接入 CMS connector 一键部署 | `deploy/page.tsx` + `DeploymentForm.tsx` |
 
-### P24.A — 诸葛亮推荐写入执行看板
+### P26.A — 诸葛亮推荐写入执行看板
 
 **Schema 变更**（`execution_items` 表）：
 - `prescription_id` 改为 nullable（支持无处方来源的 zhuge 行）
@@ -2378,21 +2397,21 @@ Body: { title, description, dimension, fix_type?, due_date?, notes? }
 - 若已有 pending 的 zhuge 行（旧 session）→ 先标记为 `superseded` 再插新行
 - 同一 session 重复调用（幂等）→ 跳过
 
-- [ ] P24.A.1 migration: `20260606000001_execution_items_zhuge_source.sql`
-- [ ] P24.A.2 `action-persister.ts` 新增 `writeExecutionItems` + 接入 `persistZhugeActions`
-- [ ] P24.A.3 `__tests__/action-persister.test.ts` 补充测试（TDD 先写）
+- [ ] P26.A.1 migration: `20260606000001_execution_items_zhuge_source.sql`
+- [ ] P26.A.2 `action-persister.ts` 新增 `writeExecutionItems` + 接入 `persistZhugeActions`
+- [ ] P26.A.3 `__tests__/action-persister.test.ts` 补充测试（TDD 先写）
 
-### P24.B — 诸葛亮每周定时重新计算
+### P26.B — 诸葛亮每周定时重新计算
 
 - 查询 `client_discovery` 有 `confirmed_at IS NOT NULL` 的客户
-- 对每个客户调用 `assembleZhugeInput` → `conductPriorityActions` → `persistZhugeActions`（触发 P24.A 看板写入）
+- 对每个客户调用 `assembleZhugeInput` → `conductPriorityActions` → `persistZhugeActions`（触发 P26.A 看板写入）
 - `x-cron-secret` 验证（与现有 cron 一致）
 - `render.yaml` 新增 `zhuge-weekly-recalculate`，每周一 3am UTC
 
-- [ ] P24.B.1 `src/app/api/cron/zhuge-recalculate/route.ts`
-- [ ] P24.B.2 `render.yaml` 追加 cron 定义
+- [ ] P26.B.1 `src/app/api/cron/zhuge-recalculate/route.ts`
+- [ ] P26.B.2 `render.yaml` 追加 cron 定义
 
-### P24.C — GEO 部署页接入 CMS connector
+### P26.C — GEO 部署页接入 CMS connector
 
 - `deploy/page.tsx`：加载时并行拉取 `/api/clients/[id]/cms/providers`
 - `DeploymentForm.tsx`：
@@ -2401,8 +2420,8 @@ Body: { title, description, dimension, fix_type?, due_date?, notes? }
   - 点击后调用 `/api/clients/[id]/cms/publish-geo-snippet` 注入 snippet 并自动 `recordDeployment`
 - 新增 `src/app/api/clients/[id]/cms/publish-geo-snippet/route.ts`（复用 wordpress-client / shopify-client 底层逻辑）
 
-- [ ] P24.C.1 `deploy/page.tsx` + `DeploymentForm.tsx` 改造
-- [ ] P24.C.2 `publish-geo-snippet/route.ts` 新增路由
+- [ ] P26.C.1 `deploy/page.tsx` + `DeploymentForm.tsx` 改造
+- [ ] P26.C.2 `publish-geo-snippet/route.ts` 新增路由
 
 ---
 
