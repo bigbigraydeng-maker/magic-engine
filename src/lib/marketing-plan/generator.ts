@@ -133,7 +133,9 @@ ${
       ? `  → CONSERVATIVE cadence per active platform: posts_per_week=2-3, reels_per_month=2-3, stories_per_week=2-3. Blogs: 1 per 4 weeks. Use when brand wants premium scarcity feel.`
       : intensity === 'aggressive'
         ? `  → HIGH VOLUME cadence per active platform: posts_per_week=5-7, reels_per_month=6-10, stories_per_week=5-7. Blogs: 2-3 per 4 weeks. Use for launches, clearances, rapid-cycle campaigns. Volume is critical — quality should still be high, but do NOT under-deliver on quantity. For sub-2-week campaign windows, scale volumes proportionally but keep daily cadence high.`
-        : `  → BALANCED cadence per active platform: posts_per_week=3-5, reels_per_month=4-6, stories_per_week=3-5. Blogs: 1-2 per 4 weeks. Sustainable steady-state cadence.`
+        : intensity === 'ai_factory'
+          ? `  → AI FACTORY full-throttle cadence per active platform: posts_per_week=7-8, reels_per_month=8-12, stories_per_week=7. Blogs: 3-4 per 4 weeks. This tier powers the AI Content Factory production pipeline — maximum sustainable volume for FDE managed clients. Spread tasks densely and evenly; every slot will be mass-produced downstream by the factory. Keep quality bar high — volume must NOT come at the cost of brand fit.`
+          : `  → BALANCED cadence per active platform: posts_per_week=3-5, reels_per_month=4-6, stories_per_week=3-5. Blogs: 1-2 per 4 weeks. Sustainable steady-state cadence.`
   }
 ${request.focus_note ? `- FDE Focus Note: ${request.focus_note}` : ''}
 

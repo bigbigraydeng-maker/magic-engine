@@ -143,8 +143,8 @@ export interface GeneratePlanRequest {
   end_date: string
   /** 用户指定的关注点（可选，注入到 prompt 引导 AI）*/
   focus_note?: string
-  /** 期望的内容强度 — light/standard/aggressive */
-  intensity?: 'light' | 'standard' | 'aggressive'
+  /** 期望的内容强度 — light/standard/aggressive/ai_factory（ai_factory = AI Factory 全速量产档）*/
+  intensity?: 'light' | 'standard' | 'aggressive' | 'ai_factory'
 }
 
 // ─── 派发结果 ──────────────────────────────────────────────────────────────────

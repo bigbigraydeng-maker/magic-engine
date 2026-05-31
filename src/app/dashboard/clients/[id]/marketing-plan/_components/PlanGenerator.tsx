@@ -41,7 +41,7 @@ export function PlanGenerator({ clientId, onGenerated, onCancel }: Props) {
     d.setDate(d.getDate() + 30)
     return d.toISOString().slice(0, 10)
   })
-  const [intensity, setIntensity] = useState<'light' | 'standard' | 'aggressive'>('standard')
+  const [intensity, setIntensity] = useState<'light' | 'standard' | 'aggressive' | 'ai_factory'>('standard')
   const [focusNote, setFocusNote] = useState('')
 
   const [loading, setLoading] = useState(false)
@@ -227,11 +227,12 @@ export function PlanGenerator({ clientId, onGenerated, onCancel }: Props) {
           {/* 强度 */}
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">内容强度</label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-4 gap-2">
               {([
-                ['light',      '轻量',  '少而精'],
-                ['standard',   '标准',  '常规节奏'],
-                ['aggressive', '猛烈',  '高频投放'],
+                ['light',      '轻量',     '少而精'],
+                ['standard',   '标准',     '常规节奏'],
+                ['aggressive', '猛烈',     '高频投放'],
+                ['ai_factory', 'AI 工厂',  '全速量产'],
               ] as const).map(([v, label, sub]) => (
                 <button
                   key={v}
