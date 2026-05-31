@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-31 12:51 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-31 13:28 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -1266,7 +1266,7 @@ Phase 11.3（数据量 ≥ 500 条 / 跨 3+ 客户）：XGBoost v1.0
 
 ---
 
-## Phase 12 — 飞轮数据闭环 ⭐⭐⭐（活跃，2026-05-17 启动）
+## Phase 12 — 飞轮数据闭环 ⭐⭐⭐（活跃 · 三层骨架 + 四飞轮 adapter ✅ 已交付 · 剩 12.G 诸葛亮调度 / 12.Q 内容质量闭环，2026-05-17 启动）
 
 > **背景**：当前诊断→处方→执行链路已建好，但 4 飞轮（SEO/GEO/Ads/社媒）执行后**没有数据回流**，没法学习、没法归因、没法沉淀经验。Phase 12 建立统一的 `actions / metrics / outcomes` 三层数据骨架 + adapter 抽象，让任何 vendor（自研 / markisfact / Publer / Meta MCP）的数据都能回流并自动归因。
 >
@@ -1714,9 +1714,9 @@ Production Item    = 订单里的具体产物
 
 ---
 
-## Phase 14 — Website Connector（网站直连执行闭环）📋 战略确认，待排期
+## Phase 14 — Website Connector（网站直连执行闭环）🔥 14.B WordPress 连接器 ✅ 已交付（PR #120）· 14.C 其余平台待排期
 
-> **登记日期**：2026-05-19 · **状态**：战略方向已确认，尚未排期开工
+> **登记日期**：2026-05-19 · **状态**：14.B WordPress 连接器已交付上线（PR #120）· 14.C 其余平台（Shopify / Webflow）待排期
 >
 > **背景**：Magic Engine 现有能力止步于"内容生产 + 存库"；VIP 客户（$2.5k–$3k/月 FDE 嵌入服务）需要 FDE 能在 ME 界面内一键把内容推送到客户网站，无需手动复制粘贴。Website Connector 是 ME 从"内容生产工具"升级为"执行引擎"的关键拼图，同时补全飞轮闭环：诊断 → 生成 → **发布** → 指标回流 → outcome 归因。
 >
@@ -2531,9 +2531,9 @@ Phase 25 是 Phase 20 的前置基础：
 
 ---
 
-## Phase 20 — Magic Token Coin & Self-Serve Portal（C 端变现引擎）📋 已登记，待排期
+## Phase 20 — Magic Token Coin & Self-Serve Portal（C 端变现引擎）🔥 20.0 / 20.A / 20.B ✅ 已交付（PR #144/#146）· 剩 Tier 2 自助生产工作区 + 20.C 收尾
 
-> **登记日期**：2026-05-25 · **状态**：方案已完整讨论，所有关键决策已拍板，待 PM 排期开工
+> **登记日期**：2026-05-25 · **状态**：MTC 地基 + 注册/钱包界面已交付上线（PR #144/#146，注册→magic-link→wallet 500 MTC 已验证 2026-05-31）· 剩 Tier 2 客户自助生产工作区（核心）+ 20.C 收尾
 >
 > **背景**：Magic Engine 当前只服务 FDE 陪跑客户（人工建档、月度合约）。Phase 20 新增 C 端自助层，让 AU/NZ 本地商家从广告进来后，用 Magic Token Coin（MTC）自助体验和购买内容生成服务，形成 Tier 1（免费 Discovery）→ Tier 2（MTC 自助）→ Tier 3（FDE 全托管）的完整漏斗。
 >
