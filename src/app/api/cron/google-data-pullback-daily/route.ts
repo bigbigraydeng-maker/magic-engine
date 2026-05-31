@@ -22,6 +22,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { fetchGscSnapshot } from '@/lib/gsc/client'
 import { fetchGa4Snapshot } from '@/lib/ga4/client'
 import { getAdAccountInsights, getAdCampaignInsights } from '@/lib/meta/client'
+import { SEO_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 900
@@ -207,6 +208,45 @@ async function syncGsc(
       .single()
 
     if (error) return { success: false, error: error.message }
+
+    // Write GSC totals into flywheel_metrics so AnomalyDetectorJob can read them.
+    // No unique constraint on (client_id, metric_key, measured_at), so delete today's
+    // existing rows first then insert fresh values — both steps are non-fatal.
+    const today      = new Date().toISOString().slice(0, 10)
+    const todayStart = `${today}T00:00:00.000Z`
+    const todayEnd   = `${today}T23:59:59.999Z`
+    const gscMetricKeys = [
+      SEO_METRIC_KEY.GSC_CLICKS,
+      SEO_METRIC_KEY.GSC_IMPRESSIONS,
+      SEO_METRIC_KEY.GSC_AVG_POSITION,
+    ]
+    await supabaseAdmin
+      .from('flywheel_metrics')
+      .delete()
+      .eq('client_id', clientId)
+      .in('metric_key', gscMetricKeys)
+      .gte('measured_at', todayStart)
+      .lte('measured_at', todayEnd)
+      .then(() => {}, () => {})
+
+    const metricsRows = [
+      { metric_key: SEO_METRIC_KEY.GSC_CLICKS,       metric_value: snapshot.total_clicks },
+      { metric_key: SEO_METRIC_KEY.GSC_IMPRESSIONS,  metric_value: snapshot.total_impressions },
+      { metric_key: SEO_METRIC_KEY.GSC_AVG_POSITION, metric_value: snapshot.avg_position },
+    ].map(m => ({
+      client_id:    clientId,
+      flywheel:     'seo' as const,
+      metric_key:   m.metric_key,
+      metric_value: m.metric_value,
+      source:       'gsc_pullback',
+      measured_at:  new Date().toISOString(),
+    }))
+
+    await supabaseAdmin
+      .from('flywheel_metrics')
+      .insert(metricsRows)
+      .then(() => {}, () => { /* non-fatal — snapshot already saved */ })
+
     return { success: true, snapshot_id: (data as { id: string }).id }
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' }
