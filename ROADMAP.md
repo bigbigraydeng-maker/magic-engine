@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-31 19:14 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-31 19:59 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2722,9 +2722,9 @@ AU / NZ（当前）          新市场（未来）
 | **P21.3** | 变体扇出 + 多平台 reformat 引擎（一主题 → N 平台变体） | 21.B 缺口 | ✅ 完成 |
 | **P21.4** | `ai_factory` intensity 档位：`marketing-plan/types.ts:147` + plan generator | 21.E | ✅ 完成 |
 | **P21.5** | 量产编排器 + `production_packages` 聚合 | 21.A/21.C | ✅ 完成（`task-dispatcher.ts` `createProductionPackagesFromPlan`） |
-| **P21.6** | Token 预算治理 + 熔断（叠在 `deductMtc` 上，月度成本上限） | 21.D | 📋 |
-| **P21.7** | 发布 + 飞轮 outcome 回流接线 | 21.C | 📋 |
-| **P21.8** | FDE 触发 UI（内部一键量产） | 21.A | 📋 |
+| **P21.6** | Token 预算治理 + 熔断（叠在 `deductMtc` 上，月度成本上限） | 21.D | ✅ 完成（`lib/mtc/factory-budget.ts`，500 帖/月软熔断） |
+| **P21.7** | 发布 + 飞轮 outcome 回流接线 | 21.C | ✅ 完成（`social-post-publish.ts` + `/content-posts/[id]/publish` + webhook 加 outcome 写） |
+| **P21.8** | FDE 触发 UI（内部一键量产） | 21.A | ✅ 完成（执行看板「⚡ 一键量产」按钮 + `/ai-factory/fan-out` API） |
 | **P21.9** | CTS + Oztop 端到端 MVP 验收 | — | 📋 |
 
 **里程碑关卡（不过不许往下，PM 验证）**：
@@ -3021,6 +3021,10 @@ ALTER TABLE execution_items ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
 ### 2026-05-31（Phase 21 P21.4 — ai_factory intensity 档位 ✅）
 
 - **P21.4** — Marketing Plan 加第 4 档强度 `ai_factory`（全速量产）：`types.ts` 联合类型 + `generator.ts` 新 cadence 分支（posts 7-8/周，对齐 MVP 20-30/周上限）+ `PlanGenerator.tsx` UI 加「AI 工厂」按钮（grid 3→4 列）；编译通过
+
+### 2026-05-31（Phase 21 P21.7 — AI Factory 社交帖发布 + 飞轮 outcome 回流接线 ✅）
+
+- **P21.7** — `social-post-publish.ts`（scheduleSocialPost 文字帖→Publer + logSocialPublishedAction 飞轮写）+ `/api/clients/[id]/content-posts/[postId]/publish`（FDE 手动发布端点）+ publer-published webhook 加 outcome 回写；构建零错误
 
 ### 2026-05-31（Phase 21 P21.3 — 变体扇出 + 多平台 reformat 引擎 ✅）
 
