@@ -215,7 +215,7 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-31 13:46 NZST （**P21.4 ai_factory intensity 档位 ✅ — M2 扇出闭环进行中；P21.1/2/3/4 已完成，下一步 P21.5 量产编排器**）
+> 最后更新：2026-05-31 19:41 NZST （**P21.4 ai_factory intensity 档位 ✅ — M2 扇出闭环进行中；P21.1/2/3/4 已完成，下一步 P21.5 量产编排器**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
@@ -228,6 +228,7 @@ npm test           # 测试套件
 | **PM 操作（旧）** | Supabase 跑 `20260530000003_strategy_items_unique_title.sql`；Render 加 `GITHUB_WEBHOOK_SECRET`；合并 Phase 14.C PR | ⚠️ 待操作 |
 
 **已完成全景（最近几个 Phase）**：
+- ✅ **Phase 21 P21.B 看板来源标记**（2026-05-31）：素材库 storyboard 发到看板的草稿，在 Reels Studio 卡片补「📋 来自素材库」徽章（读已存在的 `source_storyboard_id`）；无需 migration；编译通过
 - ✅ **Phase 21 P21.4 ai_factory intensity 档位**（2026-05-31）：Marketing Plan 加第 4 档强度「AI 工厂/全速量产」（types + generator cadence + UI 按钮）；编译通过
 - ✅ **Phase 21 P21.3 变体扇出引擎**（2026-05-31）：`fanOutToPlatforms`（5 平台并发，单平台失败不阻断）+ `reformatForPlatform`（Haiku reformat，5 平台格式规则）；22 单测全绿
 - ✅ **Phase 21 P21.1/P21.2 AI Factory 内核**（2026-05-31）：MODEL_HAIKU + 模型分层路由 + AI Factory 服务层 + 记忆注入；M1 产能内核完成
