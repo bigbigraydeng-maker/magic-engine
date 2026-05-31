@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-31 17:16 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-31 19:14 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2721,7 +2721,7 @@ AU / NZ（当前）          新市场（未来）
 | **P21.2** | AI Factory 服务层 + 记忆注入：新建 `src/lib/ai-factory/`，量产调用接 `formatMemoryForPrompt` | 21.A | ✅ 完成 |
 | **P21.3** | 变体扇出 + 多平台 reformat 引擎（一主题 → N 平台变体） | 21.B 缺口 | ✅ 完成 |
 | **P21.4** | `ai_factory` intensity 档位：`marketing-plan/types.ts:147` + plan generator | 21.E | ✅ 完成 |
-| **P21.5** | 量产编排器 + `production_packages` 聚合 | 21.A/21.C | 📋 |
+| **P21.5** | 量产编排器 + `production_packages` 聚合 | 21.A/21.C | ✅ 完成（`task-dispatcher.ts` `createProductionPackagesFromPlan`） |
 | **P21.6** | Token 预算治理 + 熔断（叠在 `deductMtc` 上，月度成本上限） | 21.D | 📋 |
 | **P21.7** | 发布 + 飞轮 outcome 回流接线 | 21.C | 📋 |
 | **P21.8** | FDE 触发 UI（内部一键量产） | 21.A | 📋 |
