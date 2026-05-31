@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-01 01:57 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-01 02:16 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -3046,9 +3046,9 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 
 #### P29.B — Portal 废弃
 
-- [ ] **P29.B.1** — `/app/portal` 目录所有路由加 301 redirect middleware → `/dashboard/clients/[id]`
-- [ ] **P29.B.2** — `requireDashboardClientAccess()` 在 `access_type` check 加 `self_serve`（允许 self_serve 用户访问 dashboard 路由）
-- [ ] **P29.B.3** — 注册流程直接落 `access_type = 'self_serve'`（修改 Phase 20 注册 API）
+- [x] **P29.B.1** — `/app/portal` 目录所有路由加 301 redirect middleware → `/dashboard/clients/[id]` ✅ 2026-06-01
+- [x] **P29.B.2** — `requireDashboardClientAccess()` 在 `access_type` check 加 `self_serve`（允许 self_serve 用户访问 dashboard 路由）✅ 2026-06-01
+- [x] **P29.B.3** — 注册流程直接落 `access_type = 'self_serve'`（修改 Phase 20 注册 API）✅ 2026-06-01
 
 #### P29.C — Brief 门槛 UI
 
