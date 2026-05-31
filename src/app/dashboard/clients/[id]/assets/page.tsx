@@ -311,6 +311,8 @@ function StoryboardPanel({
   const [result, setResult] = useState<GenerateResult | null>(null)
   const [history, setHistory] = useState<StoryboardRow[]>([])
   const [activePrompt, setActivePrompt] = useState<'seedance' | 'kling' | 'runway'>('seedance')
+  const [sending, setSending] = useState(false)
+  const [sentDraftId, setSentDraftId] = useState<string | null>(null)
 
   // Load history
   useEffect(() => {
@@ -320,11 +322,31 @@ function StoryboardPanel({
       .catch(() => undefined)
   }, [clientId, result])
 
+  const sendToKanban = async () => {
+    if (!result?.storyboard?.id) return
+    setSending(true)
+    setSentDraftId(null)
+    try {
+      const res = await fetch(
+        `/api/clients/${clientId}/assets/storyboard/${result.storyboard.id}/send-to-kanban`,
+        { method: 'POST' }
+      )
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error)
+      setSentDraftId(json.draft_id)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '发送失败')
+    } finally {
+      setSending(false)
+    }
+  }
+
   const generate = async () => {
     if (!theme.trim()) return
     setGenerating(true)
     setError(null)
     setResult(null)
+    setSentDraftId(null)
     try {
       const res = await fetch(`/api/clients/${clientId}/assets/storyboard`, {
         method: 'POST',
@@ -476,6 +498,34 @@ function StoryboardPanel({
             <div className="bg-zinc-950 rounded-lg p-3 border border-zinc-800">
               <p className="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap">{promptText}</p>
             </div>
+          </div>
+
+          {/* Send to Kanban */}
+          <div className="border-t border-zinc-700 pt-4">
+            {sentDraftId ? (
+              <div className="flex items-center justify-between bg-emerald-950/40 border border-emerald-700/40 rounded-lg px-4 py-3">
+                <div>
+                  <p className="text-xs font-medium text-emerald-300">✓ 已发送到内容看板</p>
+                  <p className="text-[11px] text-emerald-600 mt-0.5">可在 Launch Hub → Reels Studio 查看并生成视频</p>
+                </div>
+                <Link
+                  href={`/dashboard/clients/${clientId}/production`}
+                  className="text-[11px] px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white font-medium transition-colors shrink-0"
+                >
+                  前往看板 →
+                </Link>
+              </div>
+            ) : (
+              <button
+                onClick={sendToKanban}
+                disabled={sending}
+                className="w-full py-2.5 rounded-lg text-sm font-medium transition-colors
+                  bg-violet-700 hover:bg-violet-600 text-white
+                  disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed"
+              >
+                {sending ? '发送中…' : '📋 发送到内容看板'}
+              </button>
+            )}
           </div>
         </div>
       )}
