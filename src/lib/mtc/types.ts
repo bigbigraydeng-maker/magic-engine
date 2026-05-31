@@ -62,6 +62,28 @@ export const MTC_PACKAGES: MtcPackage[] = [
   { key: 'scale_599',   amountNzd: 599, mtcAmount: 7500, label: 'Scale — 7,500 MTC' },
 ]
 
+// ── Phase 21.6 — monthly budget governance ───────────────────────────────────
+
+/**
+ * Global fallback monthly MTC spend cap, used when a client has no explicit
+ * clients.monthly_mtc_cap set. Sized for the AI Factory pilot (~20-30 posts/week):
+ * blanket cap that trips runaway batch generation before it drains MTC.
+ */
+export const DEFAULT_MONTHLY_MTC_CAP = 5000
+
+export interface BudgetStatus {
+  /** false = circuit breaker tripped, generation must halt */
+  allowed: boolean
+  /** MTC already debited this calendar month */
+  spent: number
+  /** Effective cap (per-client override or global default) */
+  cap: number
+  /** MTC headroom before the cap (never negative) */
+  remaining: number
+  /** true when the per-client override was used, false when global default applied */
+  capIsCustom: boolean
+}
+
 export interface MtcBalanceResult {
   balance: number
   batches: Array<{
