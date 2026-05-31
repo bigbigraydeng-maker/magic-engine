@@ -10,6 +10,12 @@ export interface KeywordSnapshotClient {
   semrush_db: string | null
 }
 
+export interface LocalPackInput {
+  keyword: string
+  /** 1–3, or null if not in pack */
+  rank: number | null
+}
+
 export interface KeywordSnapshotRow {
   client_id: string
   domain: string
@@ -25,6 +31,8 @@ export interface KeywordSnapshotRow {
   semrush_db: string | null
   snapshot_date: string
   measured_at: string
+  /** Position in Google Local Pack (1–3). NULL if not present in Local Pack. */
+  local_pack_rank: number | null
 }
 
 export interface KeywordSnapshotResult {
@@ -49,10 +57,12 @@ export function buildKeywordSnapshotRows(
   client: KeywordSnapshotClient,
   keywords: LabsKeyword[],
   measuredAt = new Date(),
+  localPackRanks: LocalPackInput[] = [],
 ): KeywordSnapshotRow[] {
   const measuredAtIso = measuredAt.toISOString()
   const snapshotDate = measuredAtIso.slice(0, 10)
   const locationCode = locationCodeForDb(client.semrush_db)
+  const packMap = new Map(localPackRanks.map(lp => [lp.keyword, lp.rank]))
 
   return keywords
     .filter(kw => kw.keyword.trim().length > 0)
@@ -66,11 +76,12 @@ export function buildKeywordSnapshotRows(
       cpc: kw.cpc,
       competition: kw.competition,
       intent: kw.intent,
-      source: 'dataforseo',
+      source: 'dataforseo' as const,
       location_code: locationCode,
       semrush_db: client.semrush_db,
       snapshot_date: snapshotDate,
       measured_at: measuredAtIso,
+      local_pack_rank: packMap.get(kw.keyword) ?? null,
     }))
 }
 
