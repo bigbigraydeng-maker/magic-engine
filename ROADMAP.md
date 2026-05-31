@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-01 03:17 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-01 03:33 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2804,7 +2804,7 @@ AI Content Factory  ←──反馈──  Data Engine  ←──分析──  �
 - ✅ `22.D.1` anomaly_signals 表 migration + AnomalyDetectorJob 规则引擎骨架 (~1 天) — 完成 2026-06-17
 - ✅ `22.D.2` POST /api/ai/zhugeliang/proactive endpoint (~1 天) — 完成 2026-06-17
 - ✅ `22.D.3` /api/cron/anomaly-detector cron route (~0.5 天) — 完成 2026-06-17
-- `22.D.4` 看板 UI：主动任务显示 ⚡ 系统检测 badge (~0.5 天)
+- ✅ `22.D.4` 看板 UI：主动任务显示 ⚡ 系统检测 badge (~0.5 天) — 完成 2026-06-01
 
 ---
 
@@ -3080,6 +3080,10 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-06-01（P22.D.4 — 看板⚡系统检测 badge 上线）
+
+- **P22.D.4 完成** — ExecutionItemSource 类型扩展（含 proactive_signal/zhuge/luban/fde）；execution-view-model 路由 proactive_signal 到自主行动分组；ExecutionItemCard + TaskDetailDrawer 新增琥珀色「⚡ 系统检测」badge；TypeScript 零新增错误
 
 ### 2026-06-17（P22.D.1/D.2/D.3 — AnomalyDetector 三件套上线）
 
