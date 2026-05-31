@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
     email: email.toLowerCase().trim(),
     password,
     options: {
-      emailRedirectTo: `${appUrl}/auth/callback?next=/portal`,
+      emailRedirectTo: `${appUrl}/auth/callback?next=/dashboard`,
     },
   })
 
@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
     email: email.toLowerCase().trim(),
     client_id: client.id,
     display_name: businessName.trim(),
-    access_type: 'portal',
+    access_type: 'self_serve',
   })
 
   if (portalError) {

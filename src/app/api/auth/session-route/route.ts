@@ -48,10 +48,11 @@ export async function GET(request: NextRequest) {
     // login paths — /auth/callback's grant only fires on the PKCE confirmation flow,
     // which fails for server-side signUp, so the bonus must also live here.
     const bonusGranted = await grantSignupBonus(portalUser.client_id).catch(() => false)
+    // P29.B.1 — unified into dashboard; portal routes do a 308 permanentRedirect
     return NextResponse.json({
       redirect: bonusGranted
-        ? `/portal/${portalUser.client_id}/wallet?welcome=1`
-        : `/portal/${portalUser.client_id}`,
+        ? `/dashboard/clients/${portalUser.client_id}/wallet?welcome=1`
+        : `/dashboard/clients/${portalUser.client_id}`,
     })
   }
 

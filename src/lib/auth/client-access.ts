@@ -62,7 +62,7 @@ async function getDashboardClientIds(email: string): Promise<
     .from('client_portal_users')
     .select('client_id')
     .eq('email', email)
-    .in('access_type', ['dashboard', 'both'])
+    .in('access_type', ['dashboard', 'both', 'self_serve'])
 
   if (error) {
     console.error('[auth client-access] client lookup failed:', error)

@@ -1,5 +1,5 @@
 import { headers } from 'next/headers'
-import { redirect } from 'next/navigation'
+import { redirect, permanentRedirect } from 'next/navigation'
 import { supabaseAdmin } from '@/lib/supabase'
 import PortalNav from './_components/PortalNav'
 
@@ -9,6 +9,9 @@ interface Props {
 }
 
 export default async function PortalLayout({ children, params }: Props) {
+  // P29.B.1 — portal routes unified into dashboard; 308 permanent redirect
+  permanentRedirect(`/dashboard/clients/${params.clientId}`)
+
   const headerStore = headers()
   const allowedClientId = headerStore.get('x-allowed-client-id')
 
