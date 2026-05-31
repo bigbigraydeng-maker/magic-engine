@@ -12,6 +12,7 @@
 import { supabaseAdmin } from '../../supabase'
 import { getDomainMetrics } from '../../dataforseo/labs'
 import { isValidSeoActionType, SEO_METRIC_KEY } from '../vocabulary'
+import { aggregateSerpPositionMetrics } from '../../seo-intelligence/serp-position-aggregator'
 import { registerAdapter } from './registry'
 import type {
   ExecuteActionInput,
@@ -147,14 +148,17 @@ export class SeoContentAdapter implements FlywheelAdapter {
       })
     }
 
-    if (toInsert.length === 0) return []
-
-    // Write metrics to DB; log on failure but don't throw — partial data is
-    // better than no data.
-    const { error } = await supabaseAdmin.from('flywheel_metrics').insert(toInsert)
-    if (error) {
-      console.error('[SeoContentAdapter] pullMetrics insert error:', error.message)
+    if (toInsert.length > 0) {
+      // Write domain-level metrics; log on failure but don't throw.
+      const { error } = await supabaseAdmin.from('flywheel_metrics').insert(toInsert)
+      if (error) {
+        console.error('[SeoContentAdapter] pullMetrics insert error:', error.message)
+      }
     }
+
+    // P22.A.2: aggregate SERP position from keyword_snapshots (zero extra API cost)
+    const serpResult = await aggregateSerpPositionMetrics(clientId)
+    returned.push(...serpResult.rows)
 
     return returned
   }

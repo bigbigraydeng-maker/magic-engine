@@ -126,6 +126,21 @@ export const SEO_METRIC_KEY = {
 
   /** Average ranking position across all tracked queries (lower = better) */
   GSC_AVG_POSITION: 'seo.gsc.avg_position',
+
+  // ── SERP keyword snapshot metrics (P22.A.2) ──────────────────────────────
+
+  /**
+   * Average position across all ranked keywords in the latest keyword_snapshots
+   * batch for the client (DataForSEO Labs; lower = better).
+   * Powers AnomalyDetector rule: avg_position decline > 5 positions over 3 days.
+   */
+  SERP_AVG_POSITION: 'seo.serp.avg_position',
+
+  /**
+   * Count of keywords in the top-10 positions in the latest keyword_snapshots batch.
+   * Useful for tracking how many keywords are on page 1.
+   */
+  SERP_TOP10_COUNT: 'seo.serp.top10_count',
 } as const
 
 export type SeoMetricKey = (typeof SEO_METRIC_KEY)[keyof typeof SEO_METRIC_KEY]
