@@ -215,11 +215,11 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-31 13:46 NZST （**P21.4 ai_factory intensity 档位 ✅ — M2 扇出闭环进行中；P21.1/2/3/4 已完成，下一步 P21.5 量产编排器**）
+> 最后更新：2026-05-31 16:47 NZST （**P21.5 量产编排器 ✅ — M2 扇出闭环达成；P21.1–5 已完成，下一步 P21.6 Token 预算治理 + 熔断**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **Phase 21 P21.5** | 量产编排器 + `production_packages` 聚合（M2 扇出闭环收尾任务） | 🚀 进行中 |
+| **Phase 21 P21.6** | Token 预算治理 + 熔断（叠在 `deductMtc` 上，月度成本上限） | 🚀 下一个 |
 | **PM 操作（Meta Ads）🔴** | Render 设 `META_SYSTEM_USER_TOKEN`（长效 System User Token），否则执行看板「直接执行 (Meta API)」返回 424 | ⚠️ 待操作 |
 | **PM 验收 P20** | Render 部署完成后：`https://app.magicengine.com.au/portal/register` 注册测试账户 → 验证邮件 → 跳转 `/wallet?welcome=1` 显示 500 MTC | ⚠️ PM 验收 |
 | **PM 操作 🔴** | Supabase 跑 migration `20260603000001_platform_oauth_connections.sql`（Phase 24.A） | ⚠️ 待操作 |
@@ -228,6 +228,7 @@ npm test           # 测试套件
 | **PM 操作（旧）** | Supabase 跑 `20260530000003_strategy_items_unique_title.sql`；Render 加 `GITHUB_WEBHOOK_SECRET`；合并 Phase 14.C PR | ⚠️ 待操作 |
 
 **已完成全景（最近几个 Phase）**：
+- ✅ **Phase 21 P21.5 量产编排器 + production_packages 聚合**（2026-05-31）：`orchestrator.ts` runProductionBatch — 建包→扇出→落 content_posts+production_items+回链→finalize 写成本快照；单平台失败不阻断；12 单测全绿 + build ✅。**M2 扇出闭环达成**
 - ✅ **Phase 21 P21.4 ai_factory intensity 档位**（2026-05-31）：Marketing Plan 加第 4 档强度「AI 工厂/全速量产」（types + generator cadence + UI 按钮）；编译通过
 - ✅ **Phase 21 P21.3 变体扇出引擎**（2026-05-31）：`fanOutToPlatforms`（5 平台并发，单平台失败不阻断）+ `reformatForPlatform`（Haiku reformat，5 平台格式规则）；22 单测全绿
 - ✅ **Phase 21 P21.1/P21.2 AI Factory 内核**（2026-05-31）：MODEL_HAIKU + 模型分层路由 + AI Factory 服务层 + 记忆注入；M1 产能内核完成
@@ -238,12 +239,13 @@ npm test           # 测试套件
 - ✅ **Phase 23 完整闭环**（PR #112）：L3 记忆四表 + MemoryService
 
 **下一候选**：
-- 🚀 **Phase 21 P21.5** — 量产编排器 + production_packages 聚合（M2 扇出闭环收尾）
+- 🚀 **Phase 21 P21.6** — Token 预算治理 + 熔断（叠在 deductMtc 上，月度成本上限）
+- 📋 **Phase 21 P21.7** — 发布 + 飞轮 outcome 回流接线
 - 📋 **Phase 22** — Data Engine（与 Phase 21 双引擎并行）
 - 📋 **Phase 24.B** — GBP 数据摄取
 - 📋 **Phase 18.B** — Google Ads（Developer token 到位后）
 
-下一 session：`继续 Phase 21 第 5 任务 P21.5`（量产编排器 + production_packages 聚合）
+下一 session：`继续 Phase 21 第 6 任务 P21.6`（Token 预算治理 + 熔断）
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox
