@@ -233,10 +233,11 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-31 20:17 NZST （**Phase 21 全部 9 任务 ✅ M1/M2/M3 三里程碑全闭环 — 下一步 Phase 22 Data Engine 或 Phase 24.B GBP 数据摄取**）
+> 最后更新：2026-06-01 02:13 NZST （**Phase 22.A P22.A.1–2 ✅ — 下一步 P22.A.3（Local Pack 持久化）或 Phase 24.B**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
+| **P22.A.3** | P22.A.1 持久化补完：keyword_snapshots 加 `local_pack_rank` / `paa_questions` 字段，让 Local Pack 出现率可趋势追踪（AnomalyDetector 需要 `seo.serp.local_pack_presence` 指标） | 📋 下一个 |
 | **M3 PM 验收** | CTS/Oztop 执行看板点「⚡ 一键量产」→ 生成 20-30 帖 → 标 published → 确认飞轮 outcome 卡片出现 + MTC 扣费正确 | ⚠️ PM 验收 |
 | **PM 操作（Meta Ads）🔴** | Render 设 `META_SYSTEM_USER_TOKEN`（长效 System User Token），否则执行看板「直接执行 (Meta API)」返回 424 | ⚠️ 待操作 |
 | **PM 验收 P20** | Render 部署完成后：`https://app.magicengine.com.au/portal/register` 注册测试账户 → 验证邮件 → 跳转 `/wallet?welcome=1` 显示 500 MTC | ⚠️ PM 验收 |
@@ -246,10 +247,10 @@ npm test           # 测试套件
 | **PM 操作（旧）** | Supabase 跑 `20260530000003_strategy_items_unique_title.sql`；Render 加 `GITHUB_WEBHOOK_SECRET`；合并 Phase 14.C PR | ⚠️ 待操作 |
 
 **已完成全景（最近几个 Phase）**：
+- ✅ **Phase 22.A P22.A.1–2**（2026-06-01）：Data Intelligence Engine 采集层启动；Local Pack + PAA 解析（零 API 成本）+ keyword_snapshots → flywheel_metrics 排名聚合（avg_position + top10_count）；11 单测全绿；AnomalyDetector 数据管道打通
 - ✅ **Phase 21 全部 P21.1–9**（2026-05-31）：AI Factory 三里程碑全闭环：M1 模型分层路由+记忆注入、M2 变体扇出+量产编排器、M3 月度熔断+FDE 一键量产 UI+飞轮 outcome 回流接线；TypeScript 零新增错误
 - ✅ **Phase 21 P21.6+P21.8**（PR #171，2026-05-31）：月度预算熔断（500 帖/月）+ 执行看板「⚡ 一键量产」按钮
 - ✅ **Phase 21 P21.4 ai_factory intensity 档位**（2026-05-31）：Marketing Plan 加第 4 档强度「AI 工厂/全速量产」
-- ✅ **Phase 21 P21.1/P21.2/P21.3 AI Factory 内核 + 变体扇出**（2026-05-31）：MODEL_HAIKU + 分层路由 + 22 单测全绿
 - ✅ **Phase 18.A Meta Ads 执行引擎**（待 PR，2026-05-31）：执行看板「直接执行 (Meta API)」→ ±20% 安全闸
 - ✅ **Phase 20 MTC 自助计费**（PR #144 + #146，2026-05-31）：注册页 + 钱包页 + Stripe Checkout
 - ✅ **Phase 24.A 全部 8 任务**（PR #125）：Platform OAuth Connector
@@ -257,11 +258,11 @@ npm test           # 测试套件
 - ✅ **Phase 23 完整闭环**（PR #112）：L3 记忆四表 + MemoryService
 
 **下一候选**：
-- 📋 **Phase 22** — Data Intelligence Engine（与 Phase 21 双引擎并行，PM 确认优先级后开始）
+- 📋 **Phase 22.A.3** — Local Pack 持久化（serp_features 落库，让 GEO 信号可追踪趋势）
 - 📋 **Phase 24.B** — GBP 数据摄取（依赖 PM 完成 GBP.0 + migration）
-- 📋 **Phase 18.B** — Google Ads（Developer token 到位后）
+- 📋 **Phase 22.D** — AnomalyDetector（依赖 22.A avg_position 有连续 2 周数据）
 
-下一 session：`继续 Phase 22`（Data Intelligence Engine）或 `继续 Phase 24.B`（GBP 数据摄取）
+下一 session：`继续 Phase 22 P22.A.3`（Local Pack 持久化）或 `继续 Phase 24.B`（GBP 数据摄取）
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox

@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-31 20:17 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-01 02:13 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2744,13 +2744,24 @@ AU / NZ（当前）          新市场（未来）
 
 ---
 
-## Phase 22 — Data Intelligence Engine（旗舰能力 · 与 AI Factory 同级别双引擎）📋 战略确认，待排期
+## Phase 22 — Data Intelligence Engine（旗舰能力 · 与 AI Factory 同级别双引擎）🔄 进行中
 
-> **登记日期**：2026-05-26 · **状态**：战略方向已确认，PM 明确为"与 AI Factory 同等量级独立旗舰"
+> **登记日期**：2026-05-26 · **状态**：22.A 采集层实施中（P22.A.1–2 ✅）
 >
 > **战略定位**：Data Engine 不是 AI Factory 的子模块，是 ME 商业护城河的**双引擎之一**。AI Factory 解决"产出"，Data Engine 解决"学习"。两者结合 = 自强化飞轮。
 >
 > **覆盖范围**：6 大功能支柱全覆盖（SEO / GEO / Ads / Social / Reputation / Competitor），不限于 AI Factory 产出的内容。
+
+### Phase 22.A 采集层任务清单
+
+| ID | 内容 | 状态 |
+|----|------|------|
+| **P22.A.1** | DataForSEO SERP Local Pack（≤3条）+ PAA（≤4条）解析，零额外 API 成本 | ✅ 完成（cherry-pick） |
+| **P22.A.2** | keyword_snapshots → flywheel_metrics SERP 排名聚合（avg_position + top10_count），接入 flywheel-seo-weekly cron | ✅ 完成 |
+| **P22.A.3** | P22.A.1 持久化补完：serp_features 表 or keyword_snapshots 加 local_pack_rank / paa_questions 字段，让 Local Pack 出现率可追踪趋势 | 📋 待开始 |
+| **P22.A.4** | Competitor 域名基准快照：对客户竞争对手做 DataForSEO 域名快照，写 flywheel_metrics(competitor.organic_traffic) | 📋 待排期 |
+
+**22.A 完成标准**：flywheel_metrics 有 seo.serp.avg_position 连续 2 周数据 + Local Pack 可趋势追踪 → 22.B 分析层可开工。
 
 ### Phase 22 三层架构
 
@@ -3033,6 +3044,11 @@ ALTER TABLE execution_items ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
 ### 2026-05-31（Phase 21 P21.3 — 变体扇出 + 多平台 reformat 引擎 ✅）
 
 - **P21.3** — `fan-out.ts`（fanOutToPlatforms，Promise.allSettled 并发，单平台失败不阻断）+ `reformat.ts`（reformatForPlatform，Haiku reformat，5 平台专属格式规则）；22 单测全绿，TypeScript 零新增错误
+
+### 2026-06-01（Phase 22.A P22.A.1–2 — Data Intelligence Engine 采集层启动 ✅）
+
+- **P22.A.1** — DataForSEO SERP 响应额外解析 `local_pack`（≤3条 Google 地图包）+ `people_also_ask`（≤4条 PAA 问题）；零额外 API 成本；4 单测全绿（cherry-pick from claude/laughing-germain-64e879）
+- **P22.A.2** — `aggregateSerpPositionMetrics`：从 `keyword_snapshots` 最新批次聚合 `seo.serp.avg_position`（均值位置）+ `seo.serp.top10_count`（Top 10 词数）写入 `flywheel_metrics`；接入 `SeoContentAdapter.pullMetrics()` → 由 `flywheel-seo-weekly` cron 自动触发；11 单测全绿；为 AnomalyDetector（22.D.1）排名下跌检测打通数据管道
 
 ### 2026-05-31（Phase 19.F — 修复 Phase 20.D 引入的鉴权回归）
 
