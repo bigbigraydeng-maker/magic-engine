@@ -25,6 +25,7 @@ interface ReelsDraft {
   video_url: string | null
   chat_history: Array<{ role: 'user' | 'assistant'; content: string }>
   campaign_brief_id: string | null
+  source_storyboard_id: string | null
   created_at: string
 }
 
@@ -534,9 +535,16 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
                     ? d.fb_caption.slice(0, 40) + '…'
                     : `Reel ${new Date(d.created_at).toLocaleDateString()}`}
                 </p>
-                <span className={`inline-block mt-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${STATUS_COLORS[d.status]}`}>
-                  {STATUS_LABELS[d.status]}
-                </span>
+                <div className="mt-1 flex flex-wrap items-center gap-1">
+                  <span className={`inline-block text-[10px] font-medium px-1.5 py-0.5 rounded-full ${STATUS_COLORS[d.status]}`}>
+                    {STATUS_LABELS[d.status]}
+                  </span>
+                  {d.source_storyboard_id && (
+                    <span className="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">
+                      📋 来自素材库
+                    </span>
+                  )}
+                </div>
               </button>
             ))}
           </div>

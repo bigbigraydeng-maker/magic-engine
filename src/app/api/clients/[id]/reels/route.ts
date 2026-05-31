@@ -15,7 +15,7 @@ export async function GET(
 
   const { data, error } = await supabaseAdmin
     .from('reels_drafts')
-    .select('id, status, fb_caption, created_at, updated_at, campaign_brief_id, video_url')
+    .select('id, status, fb_caption, created_at, updated_at, campaign_brief_id, video_url, source_storyboard_id')
     .eq('client_id', clientId)
     .order('created_at', { ascending: false })
     .limit(20)
