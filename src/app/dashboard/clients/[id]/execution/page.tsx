@@ -27,6 +27,7 @@ import {
 } from './execution-view-model'
 import { FdeManualEntryModal } from './_components/FdeManualEntryModal'
 import { DataPullbackSection } from './_components/DataPullbackSection'
+import { BriefGateBanner } from '../_components/BriefGateBanner'
 // MemoryAnnotationPanel removed — Phase 20.D item 6: system handles flywheel recording automatically
 
 // ---------------------------------------------------------------------------
@@ -1905,6 +1906,7 @@ export default function ExecutionPage() {
 
   // ── Main render ───────────────────────────────────────────────────────────
   return (
+    <BriefGateBanner featureLabel="execution kanban">
     <div className="min-h-screen bg-[#f6f7f2]">
       {/* Header */}
       <div className="sticky top-0 z-10 border-b border-slate-200 bg-[#f6f7f2]/95 px-4 py-3 backdrop-blur md:px-6">
@@ -2237,5 +2239,6 @@ export default function ExecutionPage() {
         onCreated={() => { setShowManualEntry(false); void fetchItems(true) }}
       />
     </div>
+    </BriefGateBanner>
   )
 }

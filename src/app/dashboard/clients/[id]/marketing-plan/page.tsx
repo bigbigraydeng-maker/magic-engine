@@ -15,6 +15,7 @@ import Link from 'next/link'
 import type { MarketingPlan } from '@/lib/marketing-plan/types'
 import { PlanGenerator } from './_components/PlanGenerator'
 import { PlanEditor } from './_components/PlanEditor'
+import { BriefGateBanner } from '../_components/BriefGateBanner'
 
 const STATUS_META: Record<MarketingPlan['status'], { label: string; cls: string }> = {
   draft:     { label: '草稿',   cls: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
@@ -63,6 +64,7 @@ export default function MarketingPlanPage() {
   const selected = plans.find(p => p.id === selectedId) ?? null
 
   return (
+    <BriefGateBanner featureLabel="Marketing Plan & content generation">
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto space-y-5">
 
@@ -173,5 +175,6 @@ export default function MarketingPlanPage() {
         />
       )}
     </div>
+    </BriefGateBanner>
   )
 }
