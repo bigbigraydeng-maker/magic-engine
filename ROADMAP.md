@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-31 13:46 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-31 19:40 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2915,6 +2915,7 @@ client_decision_history      -- 为什么之前选 X 不选 Y
 - **P21.1** — `MODEL_HAIKU` 常量 + `src/lib/ai/model-router.ts`（routeModel / calcCost，strategy→Sonnet / production→Haiku，11 单测全绿）
 - **P21.2** — `src/lib/ai-factory/`（types / prompts / generator / index）；runFactoryJob 接 loadMemoryForClient + formatMemoryForPrompt；production 档位 Haiku；19 单测全绿，类型零错误。M1 产能内核完成
 - **21.B 视觉素材智能层补登记** — `client_assets`+`asset_storyboards` 表、vision-analyzer cron、assets/storyboard API、素材库 UI 早已建成但从未登记（migration `20260612000001`）；⚠️ DB 是否已 apply 待 PM 在 Supabase 确认
+- **P21.B 看板来源标记** — 素材库 storyboard「发送到内容看板」生成的草稿，在 Reels Studio 卡片上补「📋 来自素材库」徽章（读已存在的 `source_storyboard_id`）：reels 列表 API select 补字段 + `ReelsDraft` interface + 卡片渲染；无需 migration（列已建于 `20260612000003`）；`next build` 编译通过
 
 ### 2026-05-31（Phase 21 P21.4 — ai_factory intensity 档位 ✅）
 
