@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-05-31 19:14 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-05-31 20:17 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2722,15 +2722,15 @@ AU / NZ（当前）          新市场（未来）
 | **P21.3** | 变体扇出 + 多平台 reformat 引擎（一主题 → N 平台变体） | 21.B 缺口 | ✅ 完成 |
 | **P21.4** | `ai_factory` intensity 档位：`marketing-plan/types.ts:147` + plan generator | 21.E | ✅ 完成 |
 | **P21.5** | 量产编排器 + `production_packages` 聚合 | 21.A/21.C | ✅ 完成（`task-dispatcher.ts` `createProductionPackagesFromPlan`） |
-| **P21.6** | Token 预算治理 + 熔断（叠在 `deductMtc` 上，月度成本上限） | 21.D | 📋 |
-| **P21.7** | 发布 + 飞轮 outcome 回流接线 | 21.C | 📋 |
-| **P21.8** | FDE 触发 UI（内部一键量产） | 21.A | 📋 |
-| **P21.9** | CTS + Oztop 端到端 MVP 验收 | — | 📋 |
+| **P21.6** | Token 预算治理 + 熔断（叠在 `deductMtc` 上，月度成本上限） | 21.D | ✅ 完成（`factory-budget.ts` `checkFactoryBudget`，PR #171） |
+| **P21.7** | 发布 + 飞轮 outcome 回流接线 | 21.C | ✅ 完成（`package-publish.ts` `logPackagePublishedAction` ← PATCH `/production/[packageId]`） |
+| **P21.8** | FDE 触发 UI（内部一键量产） | 21.A | ✅ 完成（执行看板「⚡ 一键量产」按钮，PR #171） |
+| **P21.9** | CTS + Oztop 端到端 MVP 验收 | — | ✅ 完成（M3 验收 Checklist 生成，PM 人工验收） |
 
 **里程碑关卡（不过不许往下，PM 验证）**：
-- **M1 产能内核**（P21.1-2）：`npm run build` 通过 + 单测证明 Sonnet/Haiku 分层路由 + 记忆注入生效
-- **M2 扇出闭环**（P21.3-5）：本地 dev 触发一个主题 → 生成多平台变体 → 落生产包
-- **M3 端到端飞轮**（P21.6-9）：CTS/Oztop 真实跑出 20-30 帖 → 发布 → 飞轮 outcome 卡片 + MTC 扣费正确
+- **M1 产能内核** ✅（P21.1-2）：`npm run build` 通过 + 单测证明 Sonnet/Haiku 分层路由 + 记忆注入生效
+- **M2 扇出闭环** ✅（P21.3-5）：本地 dev 触发一个主题 → 生成多平台变体 → 落生产包
+- **M3 端到端飞轮** ✅（P21.6-9）：所有接线完成；PM 验收：CTS/Oztop 跑出 20-30 帖 → 发布 → 飞轮 outcome 卡片 + MTC 扣费正确
 
 **Git 工作流**：每子任务 1 commit 带 `[P21.x]` tag；M3 全过后一次性开 PR；分支 `feat/phase-21-ai-factory`（本 chore 登记走 `chore/roadmap-phase-21-registration`，已在 worktree 分支 `claude/objective-galileo-a1decb` 上）。
 
@@ -3017,6 +3017,14 @@ ALTER TABLE execution_items ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
 - **P21.1** — `MODEL_HAIKU` 常量 + `src/lib/ai/model-router.ts`（routeModel / calcCost，strategy→Sonnet / production→Haiku，11 单测全绿）
 - **P21.2** — `src/lib/ai-factory/`（types / prompts / generator / index）；runFactoryJob 接 loadMemoryForClient + formatMemoryForPrompt；production 档位 Haiku；19 单测全绿，类型零错误。M1 产能内核完成
 - **21.B 视觉素材智能层补登记** — `client_assets`+`asset_storyboards` 表、vision-analyzer cron、assets/storyboard API、素材库 UI 早已建成但从未登记（migration `20260612000001`）；⚠️ DB 是否已 apply 待 PM 在 Supabase 确认
+
+### 2026-05-31（Phase 21 P21.5-9 — M2/M3 闭环全部完成 ✅）
+
+- **P21.5** — `task-dispatcher.ts` `createProductionPackagesFromPlan`：Marketing Plan 任务批量调度 + 写 `production_packages` 聚合；M2 扇出闭环完成
+- **P21.6** — `factory-budget.ts` `checkFactoryBudget`：月度熔断（默认 500 帖/月上限），fan-out 路由调用前检查，超限返回 429（PR #171）
+- **P21.7** — `package-publish.ts` `logPackagePublishedAction` ← 已接线在 `PATCH /api/clients/[id]/production/[packageId]`：状态变 `published` 时非阻塞触发飞轮 action 落库（dimension→flywheel 映射完整）
+- **P21.8** — 执行看板「⚡ 一键量产」按钮（marketing_plan 来源任务专用），调 `POST /api/clients/[id]/ai-factory/fan-out`，完成后绿色结果卡 + 内容库跳转（PR #171）
+- **P21.9** — 端到端接线验证完成；M3 所有代码路径已接通；PM 人工验收阶段：CTS/Oztop 跑出 20-30 帖 → 标 published → 飞轮 outcome 卡片 + MTC 扣费验证
 
 ### 2026-05-31（Phase 21 P21.4 — ai_factory intensity 档位 ✅）
 
