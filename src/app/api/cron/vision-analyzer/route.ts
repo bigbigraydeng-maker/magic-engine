@@ -35,28 +35,39 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  // 1. Claim a batch: set status='analyzing' atomically
-  const { data: claimed, error: claimErr } = await supabaseAdmin
+  // 1. Claim a batch: PostgREST UPDATE does not support .order().limit(),
+  //    so we SELECT the IDs first, then UPDATE by ID.
+  const { data: pending, error: selectErr } = await supabaseAdmin
     .from('client_assets')
-    .update({ status: 'analyzing' })
+    .select('id, storage_url, original_filename')
     .eq('status', 'pending')
     .is('archived_at', null)
     .order('created_at', { ascending: true })
     .limit(BATCH_SIZE)
-    .select('id, storage_url, original_filename')
+
+  if (selectErr) {
+    console.error('[vision-analyzer] select error:', selectErr.message)
+    return NextResponse.json({ error: selectErr.message }, { status: 500 })
+  }
+
+  const batch = pending ?? []
+  if (batch.length === 0) {
+    return NextResponse.json({ ok: true, processed: 0, message: 'No pending assets' })
+  }
+
+  // Mark as 'analyzing' so a concurrent run won't double-process
+  const { error: claimErr } = await supabaseAdmin
+    .from('client_assets')
+    .update({ status: 'analyzing' })
+    .in('id', batch.map(a => a.id))
 
   if (claimErr) {
     console.error('[vision-analyzer] claim error:', claimErr.message)
     return NextResponse.json({ error: claimErr.message }, { status: 500 })
   }
 
-  const batch = claimed ?? []
-  if (batch.length === 0) {
-    return NextResponse.json({ ok: true, processed: 0, message: 'No pending assets' })
-  }
-
   let succeeded = 0
-  let failed = 0
+  let failed    = 0
   const errors: string[] = []
 
   for (const asset of batch) {
