@@ -3,6 +3,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import {
+  MePanel,
+  MePanelHeader,
+  MePill,
+  MeTrend,
+  MeButton,
+} from '@/components/ui/me-primitives';
+import { GOLD_GRADIENT, cx } from '@/components/ui/me-theme';
 import { RankingsTable } from './_components/RankingsTable';
 import { EngineComparison } from './_components/EngineComparison';
 import { ModelStats } from './_components/ModelStats';
@@ -15,6 +23,69 @@ interface Client {
   id: string;
   name: string;
   domain?: string;
+}
+
+// AI engine display config — order matches design dashboard
+type AiEngineKey = 'openai' | 'anthropic' | 'perplexity' | 'google';
+interface EngineConfig {
+  key: AiEngineKey;
+  badge: string;
+  name: string;
+}
+const AI_ENGINES: EngineConfig[] = [
+  { key: 'openai',     badge: 'GPT', name: 'ChatGPT' },
+  { key: 'anthropic',  badge: 'CL',  name: 'Claude' },
+  { key: 'perplexity', badge: 'PX',  name: 'Perplexity' },
+  { key: 'google',     badge: 'AIO', name: 'Google AIO' },
+];
+
+interface EngineStat {
+  cfg: EngineConfig;
+  scorePct: number | null;       // 0–100 mention rate
+  avgRank: number | null;        // average client_brand_rank where mentioned
+  dir: 'up' | 'down' | 'flat';   // trend hint from rank
+  trendLabel: string;            // rank shown beside trend arrow
+  totalRuns: number;
+  mentionRuns: number;
+}
+
+/**
+ * Aggregate runs by engine into score % + avg rank.
+ * Score = (mentioned runs / total successful runs) × 100.
+ */
+function aggregateByEngine(runs: AiVisibilityRun[]): EngineStat[] {
+  return AI_ENGINES.map(cfg => {
+    const engineRuns = runs.filter(r => r.ai_engine === cfg.key);
+    const successful = engineRuns.filter(r => !r.error_message);
+    const mentioned = successful.filter(r => r.client_brand_rank != null);
+    const ranks = mentioned
+      .map(r => r.client_brand_rank as number)
+      .filter(n => Number.isFinite(n));
+    const avgRank = ranks.length > 0 ? ranks.reduce((a, b) => a + b, 0) / ranks.length : null;
+    const scorePct = successful.length > 0
+      ? Math.round((mentioned.length / successful.length) * 100)
+      : null;
+    // Trend heuristic: low rank → up (improving), mid → flat, high/none → down
+    let dir: 'up' | 'down' | 'flat' = 'flat';
+    let trendLabel = '—';
+    if (avgRank != null) {
+      trendLabel = `#${avgRank.toFixed(1)}`;
+      if (avgRank <= 3) dir = 'up';
+      else if (avgRank <= 5) dir = 'flat';
+      else dir = 'down';
+    } else {
+      dir = 'down';
+    }
+    return {
+      cfg,
+      scorePct,
+      avgRank,
+      dir,
+      trendLabel,
+      totalRuns: engineRuns.length,
+      mentionRuns: mentioned.length,
+    };
+  });
 }
 
 /**
@@ -104,10 +175,10 @@ export default function AiVisibilityPage() {
   };
 
   const tabs: { id: Tab; label: string }[] = [
-    { id: 'rankings', label: '🏆 Rankings' },
-    { id: 'engines', label: '⚖️ Engine Comparison' },
-    { id: 'models', label: '🤖 By Model' },
-    { id: 'queries', label: `❓ Queries${queries.length > 0 ? ` (${queries.length})` : ''}` },
+    { id: 'rankings', label: 'Rankings' },
+    { id: 'engines',  label: 'Engine comparison' },
+    { id: 'models',   label: 'By model' },
+    { id: 'queries',  label: queries.length > 0 ? `Queries (${queries.length})` : 'Queries' },
   ];
 
   const brandName = client?.name ?? '';
@@ -115,12 +186,12 @@ export default function AiVisibilityPage() {
   // ── Loading skeleton ──────────────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="p-6 space-y-4">
-        <div className="animate-pulse space-y-3">
-          <div className="h-8 bg-me-stone rounded w-64" />
-          <div className="h-4 bg-me-stone rounded w-40" />
-          <div className="grid grid-cols-4 gap-3">
-            {[1, 2, 3, 4].map(i => <div key={i} className="h-20 bg-me-stone rounded-xl" />)}
+      <div className="font-sans px-8 py-7">
+        <div className="animate-pulse space-y-4">
+          <div className="h-8 w-64 rounded bg-me-stone" />
+          <div className="h-4 w-40 rounded bg-me-stone" />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {[1, 2, 3, 4].map(i => <div key={i} className="h-32 rounded-[24px] bg-me-stone" />)}
           </div>
         </div>
       </div>
@@ -130,143 +201,332 @@ export default function AiVisibilityPage() {
   // ── Not found ─────────────────────────────────────────────────────────────
   if (!client) {
     return (
-      <div className="p-6 space-y-3">
-        <p className="text-me-charcoal/55">Client not found.</p>
-        <Link href="/dashboard/ai-visibility" className="text-me-ochre hover:underline text-sm">
+      <div className="font-sans px-8 py-7 space-y-3">
+        <p className="text-[13.5px] text-black/55">Client not found.</p>
+        <Link href="/dashboard/ai-visibility" className="text-[13px] font-semibold text-me-ochre hover:underline">
           ← Back to AI Visibility
         </Link>
       </div>
     );
   }
 
+  const engineStats = aggregateByEngine(runs);
+  const overallPct = snapshot && snapshot.total_runs > 0
+    ? Math.round((snapshot.mentions_count / snapshot.total_runs) * 100)
+    : null;
+  const overallPctDisplay = overallPct == null ? '—' : `${overallPct}%`;
+  const overallDashArray = overallPct == null ? '0 100' : `${overallPct} 100`;
+
   // ── Main page ─────────────────────────────────────────────────────────────
   return (
-    <div className="p-6 space-y-4">
-      {/* Header */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <Link href="/dashboard/ai-visibility" className="text-me-charcoal/45 hover:text-me-charcoal/60 text-sm flex-shrink-0">
-          ← AI Visibility
-        </Link>
-        <span className="text-me-charcoal/35">/</span>
-        <h1 className="font-display text-2xl font-bold tracking-tight text-me-charcoal/90">{client.name}</h1>
-        {client.domain && (
-          <a
-            href={`https://${client.domain}`}
-            target="_blank"
-            rel="noreferrer"
-            className="text-xs text-me-ochre hover:text-me-ochre font-mono"
-          >
-            {client.domain} ↗
-          </a>
-        )}
-        <div className="ml-auto flex items-center gap-3 flex-shrink-0">
+    <div className="font-sans">
+      {/* Topbar */}
+      <header className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b border-black/10 bg-[#FBF8F3]/80 px-8 py-5 backdrop-blur-md">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[12.5px] font-semibold text-black/45">
+            <Link href="/dashboard/ai-visibility" className="hover:text-me-ochre">
+              AI Visibility
+            </Link>
+            <span className="text-black/25">/</span>
+            <span className="truncate text-me-charcoal">{client.name}</span>
+          </div>
+          <h1 className="mt-1 font-display text-2xl font-semibold tracking-tight text-me-charcoal">
+            {client.name}
+          </h1>
+          <p className="mt-[3px] text-[13px] text-black/55">
+            Weekly brand tracking across ChatGPT, Claude, Perplexity &amp; Google AIO
+            {client.domain && (
+              <>
+                {' · '}
+                <a
+                  href={`https://${client.domain}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-mono text-me-ochre hover:underline"
+                >
+                  {client.domain} ↗
+                </a>
+              </>
+            )}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
           {runMsg && (
-            <span className={`text-sm ${
-              runSuccess === true ? 'text-[#5C8A4A]' :
-              runSuccess === false ? 'text-[#C2453A]' :
-              'text-me-ochre'
-            }`}>
+            <span
+              className={cx(
+                'text-[12.5px] font-semibold',
+                runSuccess === true && 'text-[#5C8A4A]',
+                runSuccess === false && 'text-[#C2453A]',
+                runSuccess == null && 'text-me-ochre',
+              )}
+            >
               {runMsg}
             </span>
           )}
-          <button
+          <MeButton
+            size="sm"
             onClick={handleRunNow}
             disabled={running}
-            className="bg-me-ochre hover:bg-me-ochre disabled:bg-me-ochre/70 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-1.5"
           >
             {running ? (
-              <><span className="inline-block animate-spin">⏳</span> Running…</>
+              <>
+                <span className="inline-block animate-spin">⏳</span> Running…
+              </>
             ) : (
               <>▶ Run Now</>
             )}
-          </button>
+          </MeButton>
         </div>
-      </div>
+      </header>
 
-      {/* Stats strip — only shown when snapshot exists */}
-      {snapshot && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {[
-            { label: 'Week of', value: snapshot.week_of },
-            {
-              label: 'Avg Brand Rank',
-              value: snapshot.avg_rank != null ? `#${snapshot.avg_rank.toFixed(1)}` : '—',
-            },
-            {
-              label: 'Mention Rate',
-              value: snapshot.total_runs > 0
-                ? `${((snapshot.mentions_count / snapshot.total_runs) * 100).toFixed(0)}%`
-                : '—',
-              sub: `${snapshot.mentions_count}/${snapshot.total_runs} runs`,
-            },
-            { label: 'AI Models', value: snapshot.models_covered.length },
-          ].map(s => (
-            <div key={s.label} className="bg-white rounded-xl border border-black/10 p-4">
-              <p className="text-xs text-me-charcoal/55">{s.label}</p>
-              <p className="text-xl font-bold text-me-charcoal/90 mt-1">{s.value}</p>
-              {s.sub && <p className="text-xs text-me-charcoal/45 mt-0.5">{s.sub}</p>}
+      <div className="px-8 py-7 space-y-6">
+        {/* No data prompt */}
+        {!snapshot && runs.length === 0 && (
+          <MePanel className="border-me-ochre/30 bg-me-ochre/8">
+            <div className="text-[13.5px] text-me-charcoal">
+              {queries.length > 0 ? (
+                <>
+                  <strong className="font-semibold">No data yet.</strong>{' '}
+                  Click ▶ Run Now above to run the first AI Visibility pass for this client.
+                </>
+              ) : (
+                <>
+                  <strong className="font-semibold">还没有追踪问句。</strong> 追踪问句来源于张骞 Discovery,{' '}
+                  <Link
+                    href={`/dashboard/clients/${clientId}/zhangqian`}
+                    className="font-semibold text-me-ochre underline hover:no-underline"
+                  >
+                    先给该客户跑一次 discovery
+                  </Link>
+                  ,问句会自动同步过来。
+                </>
+              )}
             </div>
-          ))}
-        </div>
-      )}
+          </MePanel>
+        )}
 
-      {/* No data prompt */}
-      {!snapshot && runs.length === 0 && (
-        <div className="bg-me-ochre/10 border border-me-ochre/30 rounded-xl px-5 py-4 text-sm text-me-ochre">
-          {queries.length > 0 ? (
-            <><strong>No data yet.</strong> Click ▶ Run Now above to run the first AI Visibility pass for this client.</>
-          ) : (
-            <>
-              <strong>还没有追踪问句。</strong> 追踪问句来源于张骞 Discovery,
-              <Link
-                href={`/dashboard/clients/${clientId}/zhangqian`}
-                className="underline font-medium hover:text-me-ochre"
-              >
-                先给该客户跑一次 discovery
-              </Link>
-              并确认报告,问句会自动同步过来。
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Tabs */}
-      <div className="border-b border-black/10">
-        <nav className="flex gap-1 overflow-x-auto">
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                activeTab === tab.id
-                  ? 'border-me-ochre text-me-ochre'
-                  : 'border-transparent text-me-charcoal/55 hover:text-me-charcoal/75 hover:border-black/15'
-              }`}
-            >
-              {tab.label}
-            </button>
+        {/* Engine donut row — 4 cards */}
+        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {engineStats.map(stat => (
+            <EngineDonutCard key={stat.cfg.key} stat={stat} />
           ))}
-        </nav>
+        </section>
+
+        {/* Overall visibility + Snapshot meta */}
+        {snapshot && (
+          <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <MePanel className="lg:col-span-2">
+              <MePanelHeader
+                title="Overall visibility"
+                right={
+                  overallPct != null ? (
+                    <MePill tone="track">{`${overallPct}% mention rate`}</MePill>
+                  ) : (
+                    <MePill tone="attn">No baseline yet</MePill>
+                  )
+                }
+              />
+              <div className="flex flex-wrap items-center gap-6 pt-1">
+                <svg viewBox="0 0 42 42" className="h-[110px] w-[110px] flex-none">
+                  <defs>
+                    <linearGradient id="me-ai-vis-gold" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#EBCB8B" />
+                      <stop offset="55%" stopColor="#C4912E" />
+                      <stop offset="100%" stopColor="#A6781F" />
+                    </linearGradient>
+                  </defs>
+                  <circle cx="21" cy="21" r="15.9" fill="none" stroke="#EAE6DF" strokeWidth="5" />
+                  <circle
+                    cx="21"
+                    cy="21"
+                    r="15.9"
+                    fill="none"
+                    stroke="url(#me-ai-vis-gold)"
+                    strokeWidth="5"
+                    strokeLinecap="round"
+                    strokeDasharray={overallDashArray}
+                    transform="rotate(-90 21 21)"
+                  />
+                </svg>
+                <div>
+                  <div
+                    className="font-display text-[42px] font-bold tabular-nums leading-none"
+                    style={{
+                      backgroundImage: GOLD_GRADIENT,
+                      WebkitBackgroundClip: 'text',
+                      WebkitTextFillColor: 'transparent',
+                    }}
+                  >
+                    {overallPctDisplay}
+                  </div>
+                  <p className="mt-1.5 text-[12.5px] leading-snug text-black/55">
+                    brand mention rate
+                    <br />
+                    across {AI_ENGINES.length} AI engines
+                  </p>
+                </div>
+                <div className="ml-auto grid grid-cols-2 gap-x-8 gap-y-3 text-right">
+                  <div>
+                    <div className="font-display text-[18px] font-bold tabular-nums text-me-charcoal">
+                      {snapshot.avg_rank != null ? `#${snapshot.avg_rank.toFixed(1)}` : '—'}
+                    </div>
+                    <div className="text-[11.5px] text-black/55">Avg brand rank</div>
+                  </div>
+                  <div>
+                    <div className="font-display text-[18px] font-bold tabular-nums text-me-charcoal">
+                      {snapshot.models_covered.length}
+                    </div>
+                    <div className="text-[11.5px] text-black/55">AI models</div>
+                  </div>
+                  <div>
+                    <div className="font-display text-[18px] font-bold tabular-nums text-me-charcoal">
+                      {snapshot.mentions_count}
+                      <span className="text-black/35">/{snapshot.total_runs}</span>
+                    </div>
+                    <div className="text-[11.5px] text-black/55">Mentions / runs</div>
+                  </div>
+                  <div>
+                    <div className="font-display text-[18px] font-bold tabular-nums text-me-charcoal">
+                      {snapshot.week_of}
+                    </div>
+                    <div className="text-[11.5px] text-black/55">Week of</div>
+                  </div>
+                </div>
+              </div>
+            </MePanel>
+
+            {/* Snapshot summary side card */}
+            <MePanel>
+              <MePanelHeader title="This week" right={<MePill tone="exec">{`${runs.length} runs`}</MePill>} />
+              <div className="divide-y divide-black/[.06]">
+                {engineStats.map(stat => (
+                  <div key={stat.cfg.key} className="flex items-center justify-between py-3">
+                    <div className="flex items-center gap-2.5">
+                      <span className="grid h-7 w-7 place-items-center rounded-md bg-me-stone text-[10px] font-black text-black/60">
+                        {stat.cfg.badge}
+                      </span>
+                      <span className="text-[13.5px] font-semibold text-me-charcoal">
+                        {stat.cfg.name}
+                      </span>
+                    </div>
+                    <MeTrend dir={stat.dir}>{stat.trendLabel}</MeTrend>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-3 text-[11.5px] text-black/40">
+                Avg client brand rank · last {runs.length} runs
+              </p>
+            </MePanel>
+          </section>
+        )}
+
+        {/* Tabs */}
+        <div className="border-b border-black/10">
+          <nav className="flex flex-wrap gap-1">
+            {tabs.map(tab => {
+              const isOn = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={cx(
+                    '-mb-px border-b-2 px-4 py-2.5 text-[13px] font-semibold transition',
+                    isOn
+                      ? 'border-me-ochre text-me-ochre'
+                      : 'border-transparent text-black/55 hover:text-me-charcoal',
+                  )}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+
+        {/* Tab content */}
+        {activeTab === 'rankings' && (
+          <RankingsTable snapshot={snapshot} brandName={brandName} />
+        )}
+        {activeTab === 'engines' && (
+          <EngineComparison runs={runs} brandName={brandName} />
+        )}
+        {activeTab === 'models' && (
+          <ModelStats runs={runs} brandName={brandName} />
+        )}
+        {activeTab === 'queries' && (
+          <QueriesManager
+            clientId={clientId}
+            queries={queries}
+            runs={runs}
+            onRefresh={fetchAll}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Per-engine donut card ───────────────────────────────────────────────────
+
+function EngineDonutCard({ stat }: { stat: EngineStat }) {
+  const pctDisplay = stat.scorePct == null ? '—' : `${stat.scorePct}%`;
+  const dashArray = stat.scorePct == null ? '0 100' : `${stat.scorePct} 100`;
+  const gradId = `me-engine-gold-${stat.cfg.key}`;
+
+  return (
+    <MePanel>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className="grid h-9 w-9 place-items-center rounded-md bg-me-stone text-[11px] font-black text-black/60">
+            {stat.cfg.badge}
+          </span>
+          <div>
+            <div className="text-[14px] font-semibold text-me-charcoal">{stat.cfg.name}</div>
+            <div className="text-[12px] text-black/55">Mention rate</div>
+          </div>
+        </div>
+        <MeTrend dir={stat.dir}>{stat.trendLabel}</MeTrend>
       </div>
 
-      {/* Tab content */}
-      {activeTab === 'rankings' && (
-        <RankingsTable snapshot={snapshot} brandName={brandName} />
-      )}
-      {activeTab === 'engines' && (
-        <EngineComparison runs={runs} brandName={brandName} />
-      )}
-      {activeTab === 'models' && (
-        <ModelStats runs={runs} brandName={brandName} />
-      )}
-      {activeTab === 'queries' && (
-        <QueriesManager
-          clientId={clientId}
-          queries={queries}
-          runs={runs}
-          onRefresh={fetchAll}
-        />
-      )}
-    </div>
+      <div className="mt-4 flex items-center gap-4">
+        <svg viewBox="0 0 42 42" className="h-[78px] w-[78px] flex-none">
+          <defs>
+            <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#EBCB8B" />
+              <stop offset="55%" stopColor="#C4912E" />
+              <stop offset="100%" stopColor="#A6781F" />
+            </linearGradient>
+          </defs>
+          <circle cx="21" cy="21" r="15.9" fill="none" stroke="#EAE6DF" strokeWidth="5" />
+          <circle
+            cx="21"
+            cy="21"
+            r="15.9"
+            fill="none"
+            stroke={`url(#${gradId})`}
+            strokeWidth="5"
+            strokeLinecap="round"
+            strokeDasharray={dashArray}
+            transform="rotate(-90 21 21)"
+          />
+        </svg>
+        <div className="min-w-0">
+          <div
+            className="font-display text-[28px] font-bold tabular-nums leading-none"
+            style={{
+              backgroundImage: GOLD_GRADIENT,
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+            }}
+          >
+            {pctDisplay}
+          </div>
+          <p className="mt-1 text-[11.5px] leading-snug text-black/55">
+            {stat.mentionRuns}/{stat.totalRuns} runs
+          </p>
+        </div>
+      </div>
+    </MePanel>
   );
 }
