@@ -343,7 +343,7 @@ export function buildLubanTools(ctx: LubanToolContext): LubanToolset {
 
         // 草稿降级模式 — 写进工作日志供 FDE 手动发布
         const draftContent = result.draft_text ?? ''
-        await ctx.supabase
+        const { error: logError } = await ctx.supabase
           .from('execution_logs')
           .insert({
             execution_item_id: ctx.itemId,
@@ -357,7 +357,9 @@ export function buildLubanTools(ctx: LubanToolContext): LubanToolset {
               degradation_reason: result.degradation_reason,
             },
           })
-          .catch(err => console.error('[luban/publish_to_gbp] log write failed:', err))
+        if (logError) {
+          console.error('[luban/publish_to_gbp] log write failed:', logError)
+        }
 
         return (
           `📋 GBP 直接发布条件未满足（${result.degradation_reason ?? '权限未配置'}），` +

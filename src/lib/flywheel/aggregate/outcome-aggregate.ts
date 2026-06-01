@@ -52,7 +52,7 @@ export function buildAggregateRows(rows: OutcomeRow[]): AggregateEntry[] {
     byType.set(r.action_type, bucket)
   }
   const result: AggregateEntry[] = []
-  for (const [action_type, bucket] of byType) {
+  for (const [action_type, bucket] of Array.from(byType.entries())) {
     result.push({ action_type, ...computeVerdictStats(bucket) })
   }
   return result

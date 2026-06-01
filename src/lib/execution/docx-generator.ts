@@ -114,7 +114,7 @@ function coverSection(clientName: string, items: ExecutionItemWithLogs[], date: 
 
 // ─── Phase section ────────────────────────────────────────────────────────────
 
-function phaseSection(phase: number, phaseName: string, items: ExecutionItemWithLogs[]): Paragraph[] {
+function phaseSection(phase: number, phaseName: string, items: ExecutionItemWithLogs[]): Array<Paragraph | Table> {
   if (!items.length) return []
 
   const rows = items.map(item => [
@@ -126,7 +126,7 @@ function phaseSection(phase: number, phaseName: string, items: ExecutionItemWith
     item.due_date ? item.due_date.slice(0, 10) : '-',
   ])
 
-  const result: Paragraph[] = [
+  const result: Array<Paragraph | Table> = [
     h2(`Phase ${phase} — ${phaseName}`),
     table(['任务', '维度', '执行方式', '状态', '负责人', '截止日期'], rows),
   ]
