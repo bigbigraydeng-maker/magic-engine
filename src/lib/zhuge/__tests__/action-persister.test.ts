@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   buildSessionKey,
   persistZhugeActions,
+  writeExecutionItems,
+  actionTypeToTitle,
+  executionModeToFixType,
   type PersistZhugeActionsInput,
 } from '../action-persister'
 import type { PriorityAction, ZhugeOutput, DiagnosticDimension } from '../types'
@@ -367,5 +370,285 @@ describe('persistZhugeActions()', () => {
 
     const expected = buildSessionKey('client-abc', 'disc-xyz', 'run-999')
     expect(result.session_key).toBe(expected)
+  })
+})
+
+// ── actionTypeToTitle ─────────────────────────────────────────────────────────
+
+describe('actionTypeToTitle()', () => {
+  it('converts dot-namespaced slug to title case', () => {
+    expect(actionTypeToTitle('seo.fix_meta_titles')).toBe('Fix Meta Titles')
+  })
+
+  it('handles single-segment slug (no dot)', () => {
+    expect(actionTypeToTitle('fix_meta_titles')).toBe('Fix Meta Titles')
+  })
+
+  it('handles geo namespace correctly', () => {
+    expect(actionTypeToTitle('geo.deploy_directive')).toBe('Deploy Directive')
+  })
+
+  it('handles ads namespace with multiple underscores', () => {
+    expect(actionTypeToTitle('ads.pause_underperforming_ad_sets')).toBe('Pause Underperforming Ad Sets')
+  })
+
+  it('returns single word capitalised for single-word slug', () => {
+    expect(actionTypeToTitle('seo.optimize')).toBe('Optimize')
+  })
+})
+
+// ── executionModeToFixType ────────────────────────────────────────────────────
+
+describe('executionModeToFixType()', () => {
+  it('maps in_house → me_auto', () => {
+    expect(executionModeToFixType('in_house')).toBe('me_auto')
+  })
+
+  it('maps third_party → third_party', () => {
+    expect(executionModeToFixType('third_party')).toBe('third_party')
+  })
+
+  it('maps external_manual → fde_manual', () => {
+    expect(executionModeToFixType('external_manual')).toBe('fde_manual')
+  })
+})
+
+// ── writeExecutionItems ───────────────────────────────────────────────────────
+
+/** Build a minimal Supabase mock tuned for writeExecutionItems call chains.
+ *
+ * writeExecutionItems issues at most 3 queries, all on execution_items:
+ *   1. select().eq().eq().in()       — dedup check (always)
+ *   2. update().in()                 — supersede old zhuge rows (only if needed)
+ *   3. insert()                      — insert new rows (only if toInsert.length > 0)
+ *
+ * We route by call order within the execution_items table.
+ */
+function makeExecutionItemsMock(opts: {
+  existingPending?: Array<{ id: string; action_type: string; source: string; zhuge_session_id: string | null }>
+  selectError?: string
+  updateError?: string
+  insertError?: string
+}) {
+  const existing = opts.existingPending ?? []
+
+  const selectChain = {
+    select: vi.fn().mockReturnThis(),
+    eq:     vi.fn().mockReturnThis(),
+    in:     vi.fn().mockResolvedValue({
+      data:  existing,
+      error: opts.selectError ? { message: opts.selectError } : null,
+    }),
+  }
+
+  const updateChain = {
+    update: vi.fn().mockReturnThis(),
+    in:     vi.fn().mockResolvedValue({ error: opts.updateError ? { message: opts.updateError } : null }),
+  }
+
+  const insertChain = {
+    insert: vi.fn().mockResolvedValue({ error: opts.insertError ? { message: opts.insertError } : null }),
+  }
+
+  // Route by call order: 1st → select, 2nd → update, 3rd → insert
+  let callCount = 0
+  const supabase = {
+    from: vi.fn((_table: string) => {
+      callCount++
+      if (callCount === 1) return selectChain
+      if (callCount === 2) return updateChain
+      return insertChain
+    }),
+    _selectChain: selectChain,
+    _updateChain: updateChain,
+    _insertChain: insertChain,
+  }
+  return supabase
+}
+
+/**
+ * Build a mock where no supersede step exists (no old zhuge rows).
+ * Routes: 1st call → select, 2nd call → insert (skipping update).
+ */
+function makeExecutionItemsMockNoSupersede(opts: {
+  existingPending?: Array<{ id: string; action_type: string; source: string; zhuge_session_id: string | null }>
+  selectError?: string
+  insertError?: string
+}) {
+  const existing = opts.existingPending ?? []
+
+  const selectChain = {
+    select: vi.fn().mockReturnThis(),
+    eq:     vi.fn().mockReturnThis(),
+    in:     vi.fn().mockResolvedValue({
+      data:  existing,
+      error: opts.selectError ? { message: opts.selectError } : null,
+    }),
+  }
+
+  const insertChain = {
+    insert: vi.fn().mockResolvedValue({ error: opts.insertError ? { message: opts.insertError } : null }),
+  }
+
+  let callCount = 0
+  const supabase = {
+    from: vi.fn((_table: string) => {
+      callCount++
+      if (callCount === 1) return selectChain
+      return insertChain
+    }),
+    _selectChain: selectChain,
+    _insertChain: insertChain,
+  }
+  return supabase
+}
+
+describe('writeExecutionItems()', () => {
+  it('inserts all actions when no existing pending items', async () => {
+    const supabase = makeExecutionItemsMockNoSupersede({ existingPending: [] })
+    const actions: PriorityAction[] = [
+      makeAction('seo', 'seo.fix_meta_titles'),
+      makeAction('ai_visibility', 'geo.deploy_directive'),
+      makeAction('reputation', 'reputation.monitoring', 'external_manual'),
+    ]
+
+    const result = await writeExecutionItems(supabase as never, 'client-1', 'session-1', actions)
+
+    expect(result.inserted).toBe(3)
+    expect(result.superseded).toBe(0)
+    const insertedRows = supabase._insertChain.insert.mock.calls[0][0] as Array<{
+      source: string; action_type: string; client_id: string; status: string
+    }>
+    expect(insertedRows).toHaveLength(3)
+    expect(insertedRows.every(r => r.source === 'zhuge')).toBe(true)
+    expect(insertedRows.every(r => r.status === 'pending')).toBe(true)
+    expect(insertedRows.every(r => r.client_id === 'client-1')).toBe(true)
+  })
+
+  it('skips actions where fde/luban pending row exists', async () => {
+    // fde row exists for seo action; ads has no existing row → only ads inserted
+    const supabase = makeExecutionItemsMockNoSupersede({
+      existingPending: [
+        { id: 'fde-1', action_type: 'seo.fix_meta_titles', source: 'fde', zhuge_session_id: null },
+      ],
+    })
+    const actions: PriorityAction[] = [
+      makeAction('seo', 'seo.fix_meta_titles'),
+      makeAction('ads', 'ads.pause_losers', 'third_party'),
+    ]
+
+    const result = await writeExecutionItems(supabase as never, 'client-1', null, actions)
+
+    expect(result.inserted).toBe(1)
+    expect(result.superseded).toBe(0)
+    const insertedRows = supabase._insertChain.insert.mock.calls[0][0] as Array<{ action_type: string }>
+    expect(insertedRows).toHaveLength(1)
+    expect(insertedRows[0].action_type).toBe('ads.pause_losers')
+  })
+
+  it('supersedes old zhuge pending row and inserts fresh one for same action_type', async () => {
+    // Old zhuge row → supersede then insert. Uses the full 3-step mock.
+    const supabase = makeExecutionItemsMock({
+      existingPending: [
+        { id: 'old-zhuge-1', action_type: 'seo.fix_meta_titles', source: 'zhuge', zhuge_session_id: 'old-session' },
+      ],
+    })
+    const actions: PriorityAction[] = [
+      makeAction('seo', 'seo.fix_meta_titles'),
+    ]
+
+    const result = await writeExecutionItems(supabase as never, 'client-1', 'new-session', actions)
+
+    expect(result.superseded).toBe(1)
+    expect(result.inserted).toBe(1)
+
+    // Verify supersede update was called with the old id
+    const updateIn = supabase._updateChain.in.mock.calls[0]
+    expect(updateIn[0]).toBe('id')
+    expect(updateIn[1]).toContain('old-zhuge-1')
+
+    // Verify insert has the new session id
+    const insertedRows = supabase._insertChain.insert.mock.calls[0][0] as Array<{ zhuge_session_id: string }>
+    expect(insertedRows[0].zhuge_session_id).toBe('new-session')
+  })
+
+  it('returns { inserted: 0, superseded: 0 } for empty actions', async () => {
+    const supabase = makeExecutionItemsMockNoSupersede({})
+    const result = await writeExecutionItems(supabase as never, 'client-1', null, [])
+    expect(result).toEqual({ inserted: 0, superseded: 0 })
+    // No DB calls should be made
+    expect(supabase.from).not.toHaveBeenCalled()
+  })
+
+  it('sets zhuge_session_id on inserted rows when session is provided', async () => {
+    const supabase = makeExecutionItemsMockNoSupersede({ existingPending: [] })
+    await writeExecutionItems(supabase as never, 'client-1', 'ses-abc', [
+      makeAction('social', 'social.post_schedule'),
+    ])
+
+    const insertedRows = supabase._insertChain.insert.mock.calls[0][0] as Array<{ zhuge_session_id: string | null }>
+    expect(insertedRows[0].zhuge_session_id).toBe('ses-abc')
+  })
+
+  it('sets zhuge_session_id to null when session is null', async () => {
+    const supabase = makeExecutionItemsMockNoSupersede({ existingPending: [] })
+    await writeExecutionItems(supabase as never, 'client-1', null, [
+      makeAction('seo', 'seo.fix'),
+    ])
+
+    const insertedRows = supabase._insertChain.insert.mock.calls[0][0] as Array<{ zhuge_session_id: string | null }>
+    expect(insertedRows[0].zhuge_session_id).toBeNull()
+  })
+
+  it('sets sort_order from action.rank', async () => {
+    const supabase = makeExecutionItemsMockNoSupersede({ existingPending: [] })
+    const action: PriorityAction = { ...makeAction('seo', 'seo.fix'), rank: 3 }
+    await writeExecutionItems(supabase as never, 'client-1', null, [action])
+
+    const rows = supabase._insertChain.insert.mock.calls[0][0] as Array<{ sort_order: number }>
+    expect(rows[0].sort_order).toBe(3)
+  })
+
+  it('maps fix_type correctly: in_house → me_auto, third_party → third_party, external_manual → fde_manual', async () => {
+    const supabase = makeExecutionItemsMockNoSupersede({ existingPending: [] })
+    await writeExecutionItems(supabase as never, 'client-1', null, [
+      makeAction('seo',        'seo.fix',       'in_house'),
+      makeAction('ads',        'ads.pause',     'third_party'),
+      makeAction('reputation', 'rep.monitor',   'external_manual'),
+    ])
+
+    const rows = supabase._insertChain.insert.mock.calls[0][0] as Array<{ fix_type: string }>
+    expect(rows[0].fix_type).toBe('me_auto')
+    expect(rows[1].fix_type).toBe('third_party')
+    expect(rows[2].fix_type).toBe('fde_manual')
+  })
+
+  it('throws when DB select (dedup check) fails', async () => {
+    const supabase = makeExecutionItemsMockNoSupersede({ selectError: 'table not found' })
+    await expect(
+      writeExecutionItems(supabase as never, 'client-1', null, [makeAction('seo', 'seo.fix')]),
+    ).rejects.toThrow('table not found')
+  })
+
+  it('throws when supersede update fails', async () => {
+    const supabase = makeExecutionItemsMock({
+      existingPending: [
+        { id: 'old-1', action_type: 'seo.fix', source: 'zhuge', zhuge_session_id: 'old' },
+      ],
+      updateError: 'update forbidden',
+    })
+    await expect(
+      writeExecutionItems(supabase as never, 'client-1', 'new', [makeAction('seo', 'seo.fix')]),
+    ).rejects.toThrow('update forbidden')
+  })
+
+  it('throws when insert fails', async () => {
+    const supabase = makeExecutionItemsMockNoSupersede({
+      existingPending: [],
+      insertError: 'FK violation on dimension',
+    })
+    await expect(
+      writeExecutionItems(supabase as never, 'client-1', null, [makeAction('seo', 'seo.fix')]),
+    ).rejects.toThrow('FK violation on dimension')
   })
 })

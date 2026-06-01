@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-01 13:52 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-01 14:26 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2382,9 +2382,9 @@ Body: { title, description, dimension, fix_type?, due_date?, notes? }
 - 若已有 pending 的 zhuge 行（旧 session）→ 先标记为 `superseded` 再插新行
 - 同一 session 重复调用（幂等）→ 跳过
 
-- [ ] P24.A.1 migration: `20260606000001_execution_items_zhuge_source.sql`
-- [ ] P24.A.2 `action-persister.ts` 新增 `writeExecutionItems` + 接入 `persistZhugeActions`
-- [ ] P24.A.3 `__tests__/action-persister.test.ts` 补充测试（TDD 先写）
+- [x] P24.A.1 migration: `20260606000001_execution_items_zhuge_source.sql`
+- [x] P24.A.2 `action-persister.ts` 新增 `writeExecutionItems` + 接入 `persistZhugeActions`
+- [x] P24.A.3 `__tests__/action-persister.test.ts` 补充测试（TDD 先写）
 
 ### P24.B — 诸葛亮每周定时重新计算
 
@@ -3094,6 +3094,12 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-06-01（P24.A — 诸葛亮推荐写入执行看板 ✅）
+
+- **P24.A.1** — migration `20260606000001_execution_items_zhuge_source.sql`：`prescription_id` nullable；`source` CHECK；`action_type`；`zhuge_session_id` FK；`superseded` 枚举
+- **P24.A.2** — `writeExecutionItems()`：fde/luban 行跳过；zhuge 旧行标 superseded 再插新行；`executionModeToFixType()` + `actionTypeToTitle()` 工具函数；接入 `persistZhugeActions` 非阻塞调用
+- **P24.A.3** — `__tests__/action-persister.test.ts` 补充 14 测（`writeExecutionItems` + `actionTypeToTitle` + `executionModeToFixType`）；34 单测全绿 ✅
 
 ### 2026-06-01（P22.D.4 — 执行看板 ⚡ 系统检测 badge ✅）
 

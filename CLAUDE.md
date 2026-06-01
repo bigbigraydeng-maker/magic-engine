@@ -233,21 +233,23 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-06-01 13:52 NZST （**P22.D.4 ✅ 执行看板 ⚡ 系统检测 badge — ProactiveSignalGroup + ExecutionItemCard badge + TaskDetailDrawer 提示条 + 类型扩展，10 单测全绿，P22.D 四子任务全部完成 🎉 下一步 Phase 24.B GBP 数据摄取**）
+> 最后更新：2026-06-01 14:26 NZST （**P24.A ✅ 诸葛亮推荐写入执行看板 — P24.A.1–3 全部完成，migration + writeExecutionItems + 14 新测，34 测全绿，下一步 P24.B 诸葛亮每周重算 cron 或 Phase 18.B**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
 | **M3 PM 验收** | CTS/Oztop 执行看板点「⚡ 一键量产」→ 生成 20-30 帖 → 标 published → 确认飞轮 outcome 卡片出现 + MTC 扣费正确 | ⚠️ PM 验收 |
 | **PM 操作（Meta Ads）🔴** | Render 设 `META_SYSTEM_USER_TOKEN`（长效 System User Token），否则执行看板「直接执行 (Meta API)」返回 424 | ⚠️ 待操作 |
 | **PM 验收 P20** | Render 部署完成后：`https://app.magicengine.com.au/portal/register` 注册测试账户 → 验证邮件 → 跳转 `/wallet?welcome=1` 显示 500 MTC | ⚠️ PM 验收 |
-| **PM 操作 🔴** | Supabase 跑 migration `20260603000001_platform_oauth_connections.sql`（Phase 24.A） | ⚠️ 待操作 |
+| **PM 操作 🔴** | Supabase 跑 migration `20260603000001_platform_oauth_connections.sql`（Phase 24.A OAuth Connector） | ⚠️ 待操作 |
 | **PM 操作 🔴** | Supabase 跑 migration `20260617000001_phase22d_anomaly_signals.sql`（P22.D.1） | ⚠️ 待操作 |
 | **PM 操作 🔴** | Supabase 跑 migration `20260617000002_execution_items_proactive_source.sql`（P22.D.2） | ⚠️ 待操作 |
 | **PM 操作 🔴** | Render：新增 Cron Job `/api/cron/anomaly-detector`，schedule `0 4 * * *`，Header `Authorization: Bearer $CRON_SECRET`（P22.D.3） | ⚠️ 待操作 |
 | **GBP.0** | Google Cloud：enable Business Profile API + Account Management API，配置 OAuth consent screen，设 env vars | ⚠️ PM 操作 |
-| **Phase 24.B** | GBP 数据摄取（reviews、insights、location data 写入 DB） | 📋 待开始 |
+| **Phase 24.B** | 诸葛亮每周定时重新计算 cron（依赖 P24.A 已完成 ✅） | 📋 待开始 |
+| **Phase 24.C** | GEO 部署页接入 CMS connector（WordPress/Shopify 一键部署 GEO snippet） | 📋 待开始 |
 
 **已完成全景（最近几个 Phase）**：
+- ✅ **P24.A.1–3 诸葛亮推荐写入执行看板**（2026-06-01）：migration zhuge source；`writeExecutionItems()` fde/luban 跳过 + zhuge supersede 逻辑；`actionTypeToTitle` + `executionModeToFixType`；14 新单测，34 全绿
 - ✅ **P22.D.4 执行看板 ⚡ 系统检测 badge**（2026-06-01）：ProactiveSignalGroup 组件（橙色主题，weight=0.5 排最顶）；ExecutionItemCard ⚡ badge；TaskDetailDrawer 来源提示条；ExecutionItemSource 扩展 + anomaly_signal_id 字段；10 单测全绿
 - ✅ **P22.D.3 anomaly-detector cron GET 接线**（2026-06-01）：GET /api/cron/anomaly-detector；AnomalyDetectorJob → proactive endpoint 逐客户调用；弹性容错；10 单测全绿
 - ✅ **P22.D.2 诸葛亮 Proactive Advisory API**（2026-06-01）：POST /api/ai/zhugeliang/proactive；Claude Haiku 生成 advisory JSON；validateAdvisories() 过滤；写 execution_items(source='proactive_signal')；signal ack；11 单测全绿
@@ -262,10 +264,11 @@ npm test           # 测试套件
 - ✅ **Phase 23 完整闭环**（PR #112）：L3 记忆四表 + MemoryService
 
 **下一候选**：
-- 📋 **Phase 24.B** — GBP 数据摄取（依赖 PM 完成 GBP.0 + migration）
+- 📋 **Phase 24.B** — 诸葛亮每周重算 cron（P24.A 完成 → 可立即开始，半天工作量）
+- 📋 **Phase 24.C** — GEO 部署页接入 CMS connector（WordPress/Shopify 一键部署）
 - 📋 **Phase 18.B** — Google Ads（Developer token 到位后）
 
-下一 session：`继续 Phase 24.B`（GBP 数据摄取，依赖 PM 完成 GBP.0）或等 PM 确认下一优先级
+下一 session：`继续 Phase 24.B`（诸葛亮每周重算 cron）或 `继续 Phase 24.C`（GEO 部署页 CMS）
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox
