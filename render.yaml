@@ -60,7 +60,7 @@ services:
           name: magic-engine
           property: host
 
-  - type: background
+  - type: worker
     name: magic-engine-tasks
     env: node
     plan: standard
