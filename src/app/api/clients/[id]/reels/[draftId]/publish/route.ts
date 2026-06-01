@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getAccounts, uploadMediaFromUrl, schedulePost } from '@/lib/publer/client'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 // POST /api/clients/[id]/reels/[draftId]/publish
 // 将 video_ready 状态的 Reel 视频通过 Publer 安排发布
@@ -8,6 +9,11 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string; draftId: string } }
 ) {
+  const access = await requireDashboardClientAccess(params.id)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
+  }
+
   try {
     const { account_id, scheduled_at, caption: captionOverride } = await req.json()
     if (!account_id || !scheduled_at) {

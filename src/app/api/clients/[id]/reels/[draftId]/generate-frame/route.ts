@@ -11,11 +11,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { submitImageGeneration } from '@/lib/visual/atlas'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 export async function POST(
   req: NextRequest,
   { params }: { params: { id: string; draftId: string } }
 ) {
+  const access = await requireDashboardClientAccess(params.id)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error }, { status: access.status })
+  }
+
   try {
     const { frame_type } = await req.json() as { frame_type?: string }
 

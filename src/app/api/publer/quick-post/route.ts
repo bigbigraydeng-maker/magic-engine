@@ -10,6 +10,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 interface QuickPostBody {
   client_id: string
@@ -31,6 +32,11 @@ export async function POST(req: NextRequest) {
         { success: false, error: 'client_id, caption, platform, scheduled_at are required' },
         { status: 400 },
       )
+    }
+
+    const access = await requireDashboardClientAccess(client_id)
+    if (!access.ok) {
+      return NextResponse.json({ success: false, error: access.error }, { status: access.status })
     }
 
     const fullCaption = hashtags?.length

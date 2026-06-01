@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { generateImage } from '@/lib/visual/openai-images'
 import { uploadFromBase64 } from '@/lib/visual/storage'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,6 +13,11 @@ export async function POST(req: NextRequest) {
         { success: false, error: 'post_id and client_id required' },
         { status: 400 }
       )
+    }
+
+    const access = await requireDashboardClientAccess(client_id)
+    if (!access.ok) {
+      return NextResponse.json({ success: false, error: access.error }, { status: access.status })
     }
 
     const { data: post } = await supabaseAdmin
