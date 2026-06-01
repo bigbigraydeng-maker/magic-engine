@@ -2,7 +2,7 @@
 // Maintained by Claude · Last updated: 2026-05-28
 
 export type PhaseStatus = 'done' | 'active' | 'planned' | 'paused'
-export type FlywheelTag = 'seo' | 'geo' | 'ads' | 'social' | 'infra' | 'ux' | 'security'
+export type FlywheelTag = 'seo' | 'geo' | 'ads' | 'social' | 'content' | 'infra' | 'ux' | 'security'
 
 export interface SubTask {
   id: string

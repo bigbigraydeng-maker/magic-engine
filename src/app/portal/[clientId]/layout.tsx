@@ -26,11 +26,12 @@ export default async function PortalLayout({ children, params }: Props) {
     .eq('id', params.clientId)
     .single()
 
-  if (!client) redirect('/unauthorized')
+  const clientName = client?.name
+  if (!clientName) redirect('/unauthorized')
 
   return (
     <div className="min-h-screen bg-[#f6f7f2] text-slate-950">
-      <PortalNav clientId={params.clientId} clientName={client.name} />
+      <PortalNav clientId={params.clientId} clientName={clientName} />
       <main className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 lg:py-8">
         {children}
       </main>

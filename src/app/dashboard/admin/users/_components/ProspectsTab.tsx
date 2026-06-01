@@ -228,7 +228,7 @@ export default function ProspectsTab() {
                   <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Scan Result</h4>
                   <div className="rounded-xl overflow-hidden overflow-y-auto max-h-[600px]"
                        style={{ background: '#060E1A' }}>
-                    <ReportView report={selected.result as DiscoveryReport} />
+                    <ReportView report={selected.result as unknown as DiscoveryReport} />
                   </div>
                 </div>
               )}

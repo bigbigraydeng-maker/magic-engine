@@ -20,6 +20,7 @@ const TAG_COLORS: Record<FlywheelTag, string> = {
   geo:      '#e0e7ff',
   ads:      '#fef3c7',
   social:   '#fce7f3',
+  content:  '#f0fdf4',
   infra:    '#f3f4f6',
   ux:       '#ecfdf5',
   security: '#fee2e2',

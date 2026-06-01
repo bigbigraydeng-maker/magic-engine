@@ -6,9 +6,14 @@
  */
 
 describe('pollStatus API response handling', () => {
+  type PollStatusResponse =
+    | { success: true; asset: { id: string; generation_status: string; storage_url?: string; error_message?: string }; still_processing?: boolean }
+    | { success: false; error: string; asset?: undefined }
+  const getGenerationStatus = (response: PollStatusResponse) => response.asset?.generation_status
+
   it('should correctly identify ready status from d.asset.generation_status', () => {
     // API response structure (what the backend actually returns)
-    const apiResponse = {
+    const apiResponse: PollStatusResponse = {
       success: true,
       asset: {
         id: 'asset123',
@@ -23,7 +28,7 @@ describe('pollStatus API response handling', () => {
   })
 
   it('should correctly identify failed status from d.asset.generation_status', () => {
-    const apiResponse = {
+    const apiResponse: PollStatusResponse = {
       success: true,
       asset: {
         id: 'asset123',
@@ -36,7 +41,7 @@ describe('pollStatus API response handling', () => {
   })
 
   it('should correctly identify processing status and continue polling', () => {
-    const apiResponse = {
+    const apiResponse: PollStatusResponse = {
       success: true,
       asset: {
         id: 'asset123',
@@ -45,14 +50,14 @@ describe('pollStatus API response handling', () => {
       still_processing: true,
     }
 
-    const status = apiResponse.asset?.generation_status
+    const status = getGenerationStatus(apiResponse)
     // Should NOT stop polling when status is 'processing'
     expect(status).toBe('processing')
     expect(status === 'ready' || status === 'failed').toBe(false)
   })
 
   it('should handle pending status correctly', () => {
-    const apiResponse = {
+    const apiResponse: PollStatusResponse = {
       success: true,
       asset: {
         id: 'asset123',
@@ -61,19 +66,19 @@ describe('pollStatus API response handling', () => {
       still_processing: true,
     }
 
-    const status = apiResponse.asset?.generation_status
+    const status = getGenerationStatus(apiResponse)
     expect(status).toBe('pending')
     // Should continue polling
     expect(status === 'ready' || status === 'failed').toBe(false)
   })
 
   it('should not crash with missing asset field', () => {
-    const apiResponse = {
+    const apiResponse: PollStatusResponse = {
       success: false,
       error: 'Asset not found',
     }
 
-    const status = apiResponse.asset?.generation_status
+    const status = getGenerationStatus(apiResponse)
     // Should safely return undefined, not crash
     expect(status).toBeUndefined()
   })
