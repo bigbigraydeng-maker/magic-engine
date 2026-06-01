@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-01 13:14 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-01 13:22 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2795,7 +2795,7 @@ AI Content Factory  ←──反馈──  Data Engine  ←──分析──  �
 - ❌ 不依赖第三方仪表盘（Looker、Tableau 等）— 数据归属 ME 是核心护城河
 - ❌ 不只服务 AI Factory 产出 — 6 大支柱所有执行都要被采集和学习
 
-### Phase 22.D — 主动任务生成器（AnomalyDetector + 诸葛亮 Proactive）📋 待开发
+### Phase 22.D — 主动任务生成器（AnomalyDetector + 诸葛亮 Proactive）🔄 实施中
 
 > **登记日期**：2026-05-28 · **前置**：Phase 22.A/B 数据采集在跑
 >
@@ -2815,7 +2815,7 @@ AI Content Factory  ←──反馈──  Data Engine  ←──分析──  �
 | SEO | total_clicks | 下降 > 20%（周环比）| medium |
 
 **子任务：**
-- `22.D.1` anomaly_signals 表 migration + AnomalyDetectorJob 规则引擎骨架 (~1 天)
+- [x] `22.D.1` anomaly_signals 表 migration + AnomalyDetectorJob 规则引擎骨架（5 规则：SEO 位置/点击、GEO mention率、Ads CPA、Social 发布量；14 单测全绿）✅
 - `22.D.2` POST /api/ai/zhugeliang/proactive endpoint (~1 天)
 - `22.D.3` /api/cron/anomaly-detector cron route (~0.5 天)
 - `22.D.4` 看板 UI：主动任务显示 ⚡ 系统检测 badge (~0.5 天)
@@ -3094,6 +3094,10 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-06-01（P22.D.1 — AnomalyDetector 规则引擎骨架 ✅）
+
+- **P22.D.1** — `anomaly_signals` 表 migration（`20260617000001`）；`AnomalyDetectorJob.run(clientId)` 5 MVP 规则（SEO avg_position 连续3天跌5位 / GSC点击WoW跌20% / GEO mention率跌15% / Ads CPA MoM涨30% / Social发布量跌40%）；Promise.allSettled 防单规则崩溃；`types.ts` AnomalySignal/DetectionRule 接口；14 单测全绿
 
 ### 2026-06-01（P22.A.4 + P22.A.5 — 竞品快照 + Meta Ads 飞轮接线 ✅）
 
