@@ -16,7 +16,7 @@
  * Reference: ROADMAP.md P7.1.2, ARCHITECTURE.md §12
  */
 
-import OpenAI from 'openai'
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 import { supabaseAdmin } from '../supabase'
 import type {
   GenerateQuestionsRequest,
@@ -122,12 +122,7 @@ export async function generateQuestionsForClient(
     contextHint,
   })
 
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) {
-    throw new Error('OPENAI_API_KEY environment variable is not set')
-  }
-
-  const openai = new OpenAI({ apiKey })
+  const openai = getOpenAIClient()
 
   const completion = await openai.chat.completions.create({
     model: 'gpt-4o-mini',

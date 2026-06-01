@@ -4,6 +4,7 @@
  */
 
 import OpenAI from 'openai';
+import { getOpenAIClient } from '@/lib/ai/openai-client';
 
 export type Platform = 'facebook' | 'xiaohongshu';
 export type Language = 'zh' | 'en';
@@ -28,7 +29,7 @@ export interface GenerationOutput {
  * Generate captions for a given topic and platform
  */
 export async function generateCaptions(input: GenerationInput): Promise<GenerationOutput> {
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  const openai = getOpenAIClient()
   const prompt = buildPrompt(input);
 
   try {
@@ -187,7 +188,7 @@ export async function generateImageQueries(input: {
   keywords: string[];
   platform: Platform;
 }): Promise<string[]> {
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  const openai = getOpenAIClient()
   const prompt = `For the topic "${input.topic}" with keywords [${input.keywords.join(', ')}],
 generate 3 different search queries that would find relevant, high-quality images suitable for ${input.platform}.
 Return only the 3 search queries, one per line, without numbering or explanation.`;
@@ -226,7 +227,7 @@ export async function validateOpenAIKey(): Promise<boolean> {
     return false;
   }
 
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  const openai = getOpenAIClient()
   try {
     // Make a minimal API call to validate the key
     await openai.models.list();

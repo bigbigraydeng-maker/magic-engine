@@ -8,6 +8,7 @@
  */
 
 import OpenAI from 'openai'
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 import { marketToLocation, type RunnerInput, type RunnerOutput } from './types'
 
 // gpt-4o-search-preview pricing per million tokens (mirrors gpt-4o)
@@ -17,8 +18,7 @@ const SEARCH_MODEL = 'gpt-4o-search-preview'
 
 export async function runOpenAI(input: RunnerInput): Promise<RunnerOutput> {
   const start = Date.now()
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) {
+  if (!process.env.OPENAI_API_KEY) {
     return errorOutput(start, 'OPENAI_API_KEY environment variable is not set')
   }
 
@@ -38,7 +38,7 @@ export async function runOpenAI(input: RunnerInput): Promise<RunnerOutput> {
       : undefined
 
   try {
-    const client = new OpenAI({ apiKey })
+    const client = getOpenAIClient()
     // The web_search_options field is supported by gpt-4o-search-preview
     // models but isn't in the public type definition for chat.completions.
     // Cast to unknown to bypass — the runtime API accepts it.

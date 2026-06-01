@@ -8,7 +8,7 @@
  * All SDK clients are initialised inside functions — never at module top-level.
  */
 
-import OpenAI from 'openai'
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 import { callClaudeWithDocs, parseJsonResponse } from '@/lib/anthropic/client'
 import type { MasterBrief, CampaignBrief } from '@/types/magic-engine'
 
@@ -1076,9 +1076,7 @@ export async function generateReelsScripts(
   viralInsightsText?: string,
   config: GenerationConfig = DEFAULT_CONFIG,
 ): Promise<ReelsScript[]> {
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) throw new Error('OPENAI_API_KEY environment variable is not set')
-  const openai = new OpenAI({ apiKey })
+  const openai = getOpenAIClient()
 
   const resp = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
@@ -1159,9 +1157,7 @@ export async function generatePosts(
   campaignText?: string,
   config: GenerationConfig = DEFAULT_CONFIG,
 ): Promise<Post[]> {
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) throw new Error('OPENAI_API_KEY environment variable is not set')
-  const openai = new OpenAI({ apiKey })
+  const openai = getOpenAIClient()
 
   const resp = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
@@ -1220,9 +1216,7 @@ export async function generateStories(
   campaignText?: string,
   config: GenerationConfig = DEFAULT_CONFIG,
 ): Promise<Story[]> {
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) throw new Error('OPENAI_API_KEY environment variable is not set')
-  const openai = new OpenAI({ apiKey })
+  const openai = getOpenAIClient()
 
   const resp = await openai.chat.completions.create({
     model: 'gpt-4o-mini',

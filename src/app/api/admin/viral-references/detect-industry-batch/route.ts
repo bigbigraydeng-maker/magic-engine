@@ -6,7 +6,7 @@
  * Processes up to 50 records per call, batched 10 at a time in parallel.
  */
 import { NextResponse } from 'next/server'
-import OpenAI from 'openai'
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 import { supabaseAdmin } from '@/lib/supabase'
 import { guardAdmin } from '@/lib/auth/require-admin'
 
@@ -16,7 +16,7 @@ const KNOWN_INDUSTRIES = [
 ]
 
 async function inferIndustry(
-  client: OpenAI,
+  client: ReturnType<typeof getOpenAIClient>,
   record: {
     video_title: string | null
     channel_title: string | null
@@ -58,11 +58,6 @@ export async function POST() {
   const guard = await guardAdmin()
   if (guard) return guard
 
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) {
-    return NextResponse.json({ success: false, error: 'OPENAI_API_KEY not configured' }, { status: 500 })
-  }
-
   const { data: records, error } = await supabaseAdmin
     .from('viral_reference_library')
     .select('id, video_title, channel_title, style_description, style_tags, key_techniques')
@@ -75,7 +70,7 @@ export async function POST() {
     return NextResponse.json({ success: true, updated: 0, message: 'All records already have detected_industry' })
   }
 
-  const client = new OpenAI({ apiKey })
+  const client = getOpenAIClient()
 
   // Process in batches of 10 in parallel
   const BATCH = 10

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import OpenAI from 'openai'
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 import { buildMonthlyReport } from '@/lib/reports/monthly-aggregator'
 
 /**
@@ -73,7 +73,7 @@ Each recommendation must:
 Focus on the most impactful AI visibility improvements for the AU/NZ market.`
 
     // Instantiate inside handler
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+    const openai = getOpenAIClient()
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o',

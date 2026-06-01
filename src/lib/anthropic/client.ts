@@ -17,12 +17,16 @@ export const MODEL_HAIKU = 'claude-haiku-4-5-20251001'
 const PRICE_INPUT_PER_M = 3.0    // $3 / MTok
 const PRICE_OUTPUT_PER_M = 15.0  // $15 / MTok
 
+const CF_ACCOUNT_ID = 'bbd84393da8e5707ba617749dc17117c'
+const CF_GATEWAY_ID = 'magic-engine'
+const CF_GATEWAY_BASE = `https://gateway.ai.cloudflare.com/v1/${CF_ACCOUNT_ID}/${CF_GATEWAY_ID}/anthropic`
+
 export function getAnthropicClient(): Anthropic {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) {
     throw new Error('ANTHROPIC_API_KEY environment variable is not set')
   }
-  return new Anthropic({ apiKey })
+  return new Anthropic({ apiKey, baseURL: CF_GATEWAY_BASE })
 }
 
 export interface ClaudeDocInput {

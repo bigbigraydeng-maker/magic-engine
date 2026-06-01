@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getActiveBrief, formatBriefForPrompt } from '@/lib/content/brief-injector'
 import { getCampaignById, formatCampaignForPrompt } from '@/lib/content/campaign-injector'
-import OpenAI from 'openai'
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 
 interface PreviewRequest {
   platforms: string[]
@@ -72,7 +72,7 @@ export async function POST(
     const campaignText = formatCampaignForPrompt(campaign)
 
     // Instantiate client inside handler (per project convention)
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+    const openai = getOpenAIClient()
 
     // Build keyword list for Route A — mirrors batch-generate exactly
     const campaignKeywords = (campaign.semrush_keywords ?? [])

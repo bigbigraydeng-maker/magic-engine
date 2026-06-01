@@ -11,7 +11,7 @@
  * Reference: ROADMAP.md P7.3 content strategy
  */
 
-import OpenAI from 'openai'
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 import { fetchUrlAsMarkdown } from '@/lib/brief/jina'
 import { supabaseAdmin } from '@/lib/supabase'
 
@@ -129,8 +129,7 @@ export async function auditExistingContent(
   }
 
   // 3. GPT-4o mini intent comparison
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) {
+  if (!process.env.OPENAI_API_KEY) {
     // Graceful fallback: can't audit without OpenAI — don't block generation
     return {
       action: 'new',
@@ -143,7 +142,6 @@ export async function auditExistingContent(
   }
 
   return compareIntentWithGPT({
-    apiKey,
     topic,
     queryText,
     candidates: filtered,
@@ -267,15 +265,14 @@ function slugToTitle(url: string): string {
 // ─── GPT Intent Comparison ────────────────────────────────────────────────────
 
 async function compareIntentWithGPT(params: {
-  apiKey: string
   topic: string
   queryText?: string
   candidates: CandidateArticle[]
   allDiscovered: CandidateArticle[]
 }): Promise<ContentAuditResult> {
-  const { apiKey, topic, queryText, candidates, allDiscovered } = params
+  const { topic, queryText, candidates, allDiscovered } = params
 
-  const openai = new OpenAI({ apiKey })
+  const openai = getOpenAIClient()
 
   const articleList = candidates
     .map((c, i) => `${i + 1}. "${c.title}" — ${c.url}`)

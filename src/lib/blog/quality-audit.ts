@@ -1,7 +1,7 @@
 // Blog post quality audit — wraps evaluate() with blog-specific context.
 // SDK client is created internally; callers pass only content, mode, and metadata.
 
-import OpenAI from 'openai'
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 import { evaluate } from '@/lib/content/quality-rubric'
 import type { RubricContext, RubricResult } from '@/lib/content/quality-rubric'
 
@@ -38,13 +38,12 @@ export async function auditBlogPost(
   mode: string,
   metadata: BlogAuditMetadata,
 ): Promise<BlogAuditResult | null> {
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) {
+  if (!process.env.OPENAI_API_KEY) {
     console.warn('[blog quality] Audit skipped: OPENAI_API_KEY not available')
     return null
   }
 
-  const llmClient = new OpenAI({ apiKey })
+  const llmClient = getOpenAIClient()
 
   const ctx: RubricContext = {
     brief: {

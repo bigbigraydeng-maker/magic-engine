@@ -1,4 +1,4 @@
-import OpenAI from 'openai'
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 
 export type PageType = 'landing' | 'product' | 'service' | 'blog' | 'contact' | 'about' | 'other'
 
@@ -32,7 +32,7 @@ export async function classifyPage(
   // Truncate markdown to first 3000 chars to avoid token limits
   const truncatedMarkdown = markdown.slice(0, 3000)
 
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  const openai = getOpenAIClient()
 
   const systemPrompt = `You are a page classifier for website content analysis. Classify pages into categories and extract key metadata.
 

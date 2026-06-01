@@ -14,7 +14,7 @@
  * Returns: { success: true, plan: SocialPlanOutput, plan_id: string }
  */
 import { NextRequest, NextResponse } from 'next/server'
-import OpenAI from 'openai'
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 import { supabaseAdmin } from '@/lib/supabase'
 import { formatBriefForPrompt } from '@/lib/content/brief-injector'
 import { formatCampaignForPrompt, getCampaignById } from '@/lib/content/campaign-injector'
@@ -279,9 +279,8 @@ export async function POST(
     ])
 
     // 5. Quality rubric on each post — silent failure, non-blocking
-    const apiKey = process.env.OPENAI_API_KEY
-    if (apiKey) {
-      const openai = new OpenAI({ apiKey })
+    if (process.env.OPENAI_API_KEY) {
+      const openai = getOpenAIClient()
       const rubricCtx: RubricContext = {
         brief: {
           brand_name:       (brief as unknown as MasterBrief).brand_name ?? null,

@@ -5,12 +5,8 @@
  * is grounded in both the specific post copy AND the brand's visual guidelines.
  */
 
-import OpenAI from 'openai'
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 import type { MasterBrief } from '@/types/magic-engine'
-
-function getOpenAIClient(): OpenAI {
-  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-}
 
 function extractVisualDna(brief: MasterBrief): string {
   const styleKeywords = brief.vi_style_keywords?.join(', ')

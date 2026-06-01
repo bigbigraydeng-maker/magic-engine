@@ -1,4 +1,4 @@
-import OpenAI from 'openai'
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 import type { VideoAnalysis } from './video-analyzer'
 import type { MasterBrief, CampaignBrief } from '@/types/magic-engine'
 import { formatCampaignForPrompt } from './campaign-injector'
@@ -20,7 +20,7 @@ export async function rewriteForBrand(params: {
   variant: 1 | 2
   campaign?: CampaignBrief
 }): Promise<ContentPackage> {
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  const openai = getOpenAIClient()
   const { analysis, brief, targetPlatforms, variant, campaign } = params
   const campaignText = campaign ? `\n${formatCampaignForPrompt(campaign)}` : ''
 

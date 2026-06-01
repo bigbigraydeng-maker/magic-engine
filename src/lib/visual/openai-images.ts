@@ -1,7 +1,7 @@
 // OpenAI gpt-image-1 — synchronous image generation
 // Returns base64 PNG immediately; no job polling needed.
 
-import OpenAI from 'openai'
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 
 type ImageSize = '1024x1024' | '1536x1024' | '1024x1536'
 
@@ -19,7 +19,7 @@ export async function generateImage(params: {
   const { prompt, aspect_ratio = '1:1' } = params
   const size = ASPECT_RATIO_MAP[aspect_ratio] ?? '1024x1024'
 
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  const client = getOpenAIClient()
 
   const response = await client.images.generate({
     model: 'gpt-image-1',

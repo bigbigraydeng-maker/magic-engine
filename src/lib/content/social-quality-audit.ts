@@ -1,7 +1,7 @@
 // Social post quality audit — wraps evaluate() with social-specific context.
 // SDK client is created internally; callers pass content, platforms, contentType, and metadata.
 
-import OpenAI from 'openai'
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 import { evaluate } from '@/lib/content/quality-rubric'
 import type { RubricContext, RubricResult, RouteDimension } from '@/lib/content/quality-rubric'
 
@@ -52,13 +52,12 @@ export async function auditSocialPost(
   metadata: SocialAuditMetadata,
   primaryKeyword?: string | null,
 ): Promise<SocialAuditResult | null> {
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) {
+  if (!process.env.OPENAI_API_KEY) {
     console.warn('[social quality] Audit skipped: OPENAI_API_KEY not available')
     return null
   }
 
-  const llmClient = new OpenAI({ apiKey })
+  const llmClient = getOpenAIClient()
   const platform = platforms[0] ?? 'facebook'
 
   const ctx: RubricContext = {

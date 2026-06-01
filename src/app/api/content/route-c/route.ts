@@ -5,11 +5,7 @@ import { getCampaignById, formatCampaignForPrompt } from '@/lib/content/campaign
 import { generateVisualBrief } from '@/lib/content/visual-brief-generator'
 import { auditSocialPost } from '@/lib/content/social-quality-audit'
 import type { SocialAuditMetadata } from '@/lib/content/social-quality-audit'
-import OpenAI from 'openai'
-
-function getOpenAIClient() {
-  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-}
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 
 export async function POST(req: NextRequest) {
   try {

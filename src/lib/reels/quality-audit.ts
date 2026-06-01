@@ -2,7 +2,7 @@
 // Audits fb_caption as the primary content string.
 // SDK client is created internally; callers pass content and metadata.
 
-import OpenAI from 'openai'
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 import { evaluate } from '@/lib/content/quality-rubric'
 import type { RubricContext, RubricResult } from '@/lib/content/quality-rubric'
 
@@ -35,13 +35,12 @@ export async function auditReelsDraft(
   fbCaption: string,
   metadata: ReelsAuditMetadata,
 ): Promise<ReelsAuditResult | null> {
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) {
+  if (!process.env.OPENAI_API_KEY) {
     console.warn('[reels quality] Audit skipped: OPENAI_API_KEY not available')
     return null
   }
 
-  const llmClient = new OpenAI({ apiKey })
+  const llmClient = getOpenAIClient()
 
   const ctx: RubricContext = {
     brief: {

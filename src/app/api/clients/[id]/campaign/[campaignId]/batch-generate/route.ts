@@ -8,9 +8,7 @@ import { getActiveBrief, formatBriefForPrompt } from '@/lib/content/brief-inject
 import { getCampaignById, formatCampaignForPrompt } from '@/lib/content/campaign-injector'
 import { auditSocialPost } from '@/lib/content/social-quality-audit'
 import type { SocialAuditMetadata } from '@/lib/content/social-quality-audit'
-import OpenAI from 'openai'
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 
 interface BatchGenerateRequest {
   platforms: string[]          // ['facebook', 'tiktok']
@@ -44,6 +42,8 @@ export async function POST(
   try {
     const body: BatchGenerateRequest = await req.json()
     const { platforms, direction_note, route_a_count, route_c_count, prompt_overrides } = body
+
+    const openai = getOpenAIClient()
 
     // Validate + allowlist platforms — never store arbitrary user strings in DB
     const VALID_PLATFORMS = ['facebook', 'tiktok', 'instagram', 'youtube', 'twitter'] as const

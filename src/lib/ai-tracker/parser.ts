@@ -10,7 +10,7 @@
  * Reference: ROADMAP.md P7.1.8, P7.1.12, ARCHITECTURE.md §12.4
  */
 
-import OpenAI from 'openai'
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 import type { BrandMention } from '@/types/magic-engine'
 
 // gpt-4o-mini pricing per million tokens
@@ -71,11 +71,6 @@ export async function parseRanking(input: {
     return { brands: [], client_brand_rank: null, parse_cost_usd: 0 }
   }
 
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) {
-    throw new Error('OPENAI_API_KEY environment variable is not set')
-  }
-
   const userMessage = [
     `## AI assistant's response`,
     rawResponse,
@@ -87,7 +82,7 @@ export async function parseRanking(input: {
     `they appear. Return JSON in the format defined in the system prompt.`,
   ].join('\n')
 
-  const client = new OpenAI({ apiKey })
+  const client = getOpenAIClient()
   const completion = await client.chat.completions.create({
     model: PARSER_MODEL,
     response_format: { type: 'json_object' },

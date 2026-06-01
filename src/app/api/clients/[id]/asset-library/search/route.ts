@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import OpenAI from 'openai'
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
@@ -124,7 +124,7 @@ async function rankWithLlm(
   topN: number,
 ): Promise<Recommendation[]> {
   try {
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+    const client = getOpenAIClient()
     const candidates = assets.map((a) => ({
       id: a.id,
       filename: a.original_filename,

@@ -10,7 +10,7 @@
  * Reference: ROADMAP.md P7.2.2, ARCHITECTURE.md §11.5
  */
 
-import OpenAI from 'openai'
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 import { supabaseAdmin } from '../supabase'
 import type {
   GeoScenario,
@@ -107,9 +107,6 @@ interface RunWeakSpot {
 export async function generateGeoDirective(
   req: GenerateGeoDirectiveRequest
 ): Promise<ComposerOutput> {
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) throw new Error('OPENAI_API_KEY environment variable is not set')
-
   // 1. Load client
   const { data: client, error: clientErr } = await supabaseAdmin
     .from('clients')
@@ -157,7 +154,7 @@ export async function generateGeoDirective(
   })
 
   // 5. Call GPT-4o-mini
-  const openai = new OpenAI({ apiKey })
+  const openai = getOpenAIClient()
   const completion = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
     response_format: { type: 'json_object' },

@@ -2,7 +2,7 @@
 // 输入：转录文本 + 元数据
 // 输出：结构化的视频解析卡
 
-import OpenAI from 'openai'
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 
 export interface VideoAnalysis {
   hook: string
@@ -46,7 +46,7 @@ export async function analyzeViralVideo(
   transcript: string,
   metadata: { title?: string; duration?: number; platform: string }
 ): Promise<VideoAnalysis> {
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  const openai = getOpenAIClient()
   const prompt = `你是一位顶级社媒内容策略师，专门分析爆款视频的内容结构。
 
 分析以下视频的转录文本，提炼出7个维度的关键信息。

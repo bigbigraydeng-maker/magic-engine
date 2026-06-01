@@ -30,6 +30,7 @@ export async function GET(request: Request) {
 
   if (!res.ok) {
     const text = await res.text()
+    console.error('[ai-gateway] CF API error', res.status, text)
     return NextResponse.json({ error: `CF API ${res.status}: ${text}` }, { status: 502 })
   }
 

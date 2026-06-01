@@ -8,7 +8,7 @@
  * Routed via Cloudflare AI Gateway (OPENAI_BASE_URL env var picked up by SDK).
  */
 
-import OpenAI from 'openai'
+import { getOpenAIClient } from '@/lib/ai/openai-client'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -50,7 +50,7 @@ Required JSON shape:
 // ─── Vision analysis ──────────────────────────────────────────────────────────
 
 export async function analyseImage(imageUrl: string): Promise<VisionMetadata> {
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  const client = getOpenAIClient()
 
   const response = await client.chat.completions.create({
     model: 'gpt-4o-mini',
