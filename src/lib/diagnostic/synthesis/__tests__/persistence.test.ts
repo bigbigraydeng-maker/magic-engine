@@ -89,6 +89,7 @@ function competitorResult(): CompetitorAnalystResult {
     cost_usd: 0.0123,
     model_used: 'claude-sonnet-4-6',
     generated_at: GEN_AT,
+    evidence_refs: [],
   }
 }
 
@@ -99,15 +100,16 @@ function dimensionResult(dim: 'seo' | 'social' = 'seo'): DimensionNarrativeResul
     cost_usd: 0.004,
     model_used: 'claude-sonnet-4-6',
     generated_at: GEN_AT,
+    evidence_refs: [],
   }
 }
 
 function scoreResult(): ScoreExplainerResult {
   return {
     explanations: [
-      { target: 'overall', score: 55, explanation_md: 'The 55/100 reflects...' },
-      { target: 'seo', score: 42, explanation_md: 'SEO 42/100 because thin content.' },
-      { target: 'social', score: 68, explanation_md: 'Social 68/100, low engagement drag.' },
+      { target: 'overall', score: 55, explanation_md: 'The 55/100 reflects...', evidence_refs: [] },
+      { target: 'seo', score: 42, explanation_md: 'SEO 42/100 because thin content.', evidence_refs: [] },
+      { target: 'social', score: 68, explanation_md: 'Social 68/100, low engagement drag.', evidence_refs: [] },
     ],
     cost_usd: 0.0089,
     model_used: 'claude-sonnet-4-6',
@@ -124,12 +126,13 @@ function marketResult(): MarketContextResult {
     category_benchmarks_md: '## Benchmarks\nTypical NPS ~50.',
     opportunities_md: '## Opportunities\nLean into Maori-led tours.',
     citations: [
-      { url: 'https://example.nz/report', title: 'NZ Tourism 2026', cited_text: 'snippet' },
+      { url: 'https://example.nz/report', title: 'NZ Tourism 2026' },
     ],
     web_search_calls: 3,
     cost_usd: 0.045,
     model_used: 'claude-sonnet-4-6',
     generated_at: GEN_AT,
+    evidence_refs: ['https://example.nz/report'],
   }
 }
 
