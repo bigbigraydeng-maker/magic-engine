@@ -167,6 +167,30 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
   const [savingBoard, setSavingBoard]       = useState(false)
   const [boardMsg, setBoardMsg]             = useState<string | null>(null)
 
+  // Task mode: bound content_post id + its existing assets (used to restore
+  // the gallery after drawer closes / page reloads).
+  const [taskPostId, setTaskPostId]         = useState<string | undefined>(undefined)
+  const [taskAssets, setTaskAssets]         = useState<GalleryAsset[] | undefined>(undefined)
+
+  // Load the persisted content_post for this execution item (task mode only).
+  useEffect(() => {
+    if (!isTaskMode || !item?.id) return
+    fetch(`/api/clients/${clientId}/posts?execution_item_id=${item.id}`)
+      .then(r => r.json() as Promise<{ posts?: { id: string }[] }>)
+      .then(data => {
+        const postId = data.posts?.[0]?.id
+        if (postId) {
+          setTaskPostId(postId)
+          // Now load this post's gallery
+          fetch(`/api/clients/${clientId}/visual-assets?post_id=${postId}`)
+            .then(r => r.json() as Promise<{ success: boolean; assets?: GalleryAsset[] }>)
+            .then(data => { if (data.success) setTaskAssets(data.assets ?? []) })
+            .catch(() => { /* non-fatal */ })
+        }
+      })
+      .catch(() => { /* non-fatal */ })
+  }, [isTaskMode, clientId, item?.id])
+
   // Load history on mount / when campaign changes
   useEffect(() => {
     if (!campaignId) { setHistoryLoaded(true); return }
@@ -530,6 +554,8 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
                 onGenStart={incImageGen}
                 onGenEnd={decImageGen}
                 onBackgroundImageGenerate={onBackgroundImageGenerate}
+                postId={taskPostId}
+                initialAssets={taskAssets}
               />
             )}
             {taskKind === 'social_story' && plan.stories[0] && (
@@ -538,6 +564,8 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
                 onGenStart={incImageGen}
                 onGenEnd={decImageGen}
                 onBackgroundImageGenerate={onBackgroundImageGenerate}
+                postId={taskPostId}
+                initialAssets={taskAssets}
               />
             )}
             {taskKind === 'social_reel' && plan.reels[0] && (
