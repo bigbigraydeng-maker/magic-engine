@@ -239,6 +239,7 @@ export type SocialActionType = (typeof SOCIAL_ACTION_TYPE)[keyof typeof SOCIAL_A
  * Measurable signals stored in flywheel_metrics for the Social flywheel.
  *
  * Written by SocialContentAdapter.pullMetrics() from content_posts table.
+ * Written by TikTokAdapter.pullMetrics() from Apify TikTok profile scraper.
  */
 export const SOCIAL_METRIC_KEY = {
   /** Count of content_posts with status = 'published' */
@@ -257,6 +258,17 @@ export const SOCIAL_METRIC_KEY = {
 
   /** Share / retweet count for a specific published post */
   POST_SHARES: 'social.post.shares',
+
+  // ── TikTok profile metrics (P22.A.4 — pulled from Apify daily) ───────────
+
+  /** Total TikTok follower count */
+  TIKTOK_FOLLOWERS: 'social.tiktok.followers',
+
+  /** Number of TikTok posts published in the last 30 days */
+  TIKTOK_POSTS_LAST_30D: 'social.tiktok.posts_last_30d',
+
+  /** TikTok engagement rate (0–1), avg (likes+comments) per post / followers */
+  TIKTOK_ENGAGEMENT_RATE: 'social.tiktok.engagement_rate',
 } as const
 
 export type SocialMetricKey = (typeof SOCIAL_METRIC_KEY)[keyof typeof SOCIAL_METRIC_KEY]
