@@ -74,15 +74,10 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -X POST -H "Authorization: Bearer $CRON_SECRET" \
-        https://$RENDER_EXTERNAL_URL/api/cron/vision-analyzer
+        https://app.magicengine.com.au/api/cron/vision-analyzer
     envVars:
       - key: CRON_SECRET
         sync: false
-      - key: RENDER_EXTERNAL_URL
-        fromService:
-          type: web
-          name: magic-engine
-          property: host
 
   # Poll visual generation jobs every 2 minutes
   - type: cron
