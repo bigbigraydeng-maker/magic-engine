@@ -1393,30 +1393,22 @@ function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd, onB
 
   return (
     <>
-      {lightboxOpen && imgUrl && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
-          onClick={() => setLightbox(false)}
-        >
-          <div className="relative max-w-sm w-full" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setLightbox(false)} className="absolute -top-8 right-0 text-white text-sm font-bold hover:text-gray-300">✕ 关闭</button>
-            <img src={imgUrl} alt="generated" className="w-full rounded-lg shadow-2xl" />
-            <a href={imgUrl} download target="_blank" rel="noreferrer" className="mt-2 block text-center text-[11px] text-indigo-300 hover:text-white" onClick={e => e.stopPropagation()}>↓ 下载图片</a>
-          </div>
-        </div>
-      )}
+      <ImageLightbox url={lightboxUrl} onClose={() => setLightbox(null)} maxWidth="max-w-sm" />
       <div className="border border-gray-200 rounded-lg overflow-hidden">
         <button
           onClick={() => setOpen(o => !o)}
           className="w-full flex items-center gap-3 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-left transition-colors"
         >
-          {imgUrl && (
-            <img src={imgUrl} alt="" className="w-8 h-8 rounded object-cover border border-gray-200 shrink-0" />
+          {selectedUrl && (
+            <img src={selectedUrl} alt="" className="w-8 h-8 rounded object-cover border border-gray-200 shrink-0" />
           )}
           <span className={`text-[10px] font-bold border rounded px-1.5 py-0.5 shrink-0 ${colorClass}`}>
             {post.content_type}
           </span>
           <p className="flex-1 text-xs text-gray-700 truncate">{(post.copy ?? '').slice(0, 80)}…</p>
+          {assets.length > 0 && (
+            <span className="text-[10px] font-bold text-purple-600 shrink-0">{assets.length} 张图</span>
+          )}
           <span className="text-gray-400 text-xs">{open ? '▲' : '▼'}</span>
         </button>
         {open && (
@@ -1432,7 +1424,7 @@ function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd, onB
               />
             </div>
 
-            {/* 可编辑 Image prompt */}
+            {/* 可编辑 Image prompt — 始终可见，便于改提示词再生成 */}
             <div className="rounded-lg border border-violet-100 overflow-hidden">
               <div className="flex items-start justify-between gap-2 px-3 py-2 bg-violet-50 border-b border-violet-100">
                 <p className="text-[10px] font-bold text-violet-800">🎨 Image Prompt</p>
@@ -1446,39 +1438,35 @@ function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd, onB
               />
             </div>
 
-            {/* Generation button / result */}
-            {!imgUrl && (
-              <div className="space-y-1.5">
-                <button
-                  onClick={() => void handleGenerate()}
-                  disabled={generatingImg}
-                  className="w-full py-2 text-xs font-bold bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 disabled:opacity-50 text-white rounded-lg transition-all"
-                >
-                  {generatingImg ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <Spinner color="indigo" /> Visual Studio 生成图片中…（约 15s）
-                    </span>
-                  ) : '🎨 生成图片（Visual Studio）'}
-                </button>
-                {imgError && <p className="text-[11px] text-red-500">⚠ {imgError}</p>}
-              </div>
+            {/* 画廊：已生成的所有图片 */}
+            {assets.length > 0 && (
+              <ImageGalleryGrid
+                assets={assets}
+                aspectRatio="1:1"
+                onSelect={handleSelect}
+                onOpenLightbox={url => setLightbox(url)}
+                selecting={selecting}
+              />
             )}
 
-            {imgUrl && (
-              <div className="rounded-lg border border-green-200 bg-green-50 p-2.5 space-y-2">
-                <p className="text-[10px] font-bold text-green-700">✅ 图片已生成 — 点击放大</p>
-                <button onClick={() => setLightbox(true)} className="block group relative w-fit">
-                  <img src={imgUrl} alt="generated" className="w-full max-w-[180px] rounded border border-green-200 group-hover:opacity-90 transition-opacity" />
-                  <span className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    <span className="bg-black/60 text-white text-[10px] font-bold rounded px-2 py-1">🔍 放大</span>
+            {/* 生成按钮 — 常驻，每次点击追加一张 */}
+            <div className="space-y-1.5">
+              <button
+                onClick={() => void handleGenerate()}
+                disabled={generatingImg}
+                className="w-full py-2 text-xs font-bold bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 disabled:opacity-50 text-white rounded-lg transition-all"
+              >
+                {generatingImg ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <Spinner color="indigo" /> Visual Studio 生成中…（约 15s）
                   </span>
-                </button>
-                <button
-                  onClick={() => { setImgUrl(null); setImgError(null) }}
-                  className="text-[10px] text-gray-400 hover:text-gray-600 underline"
-                >重新生成</button>
-              </div>
-            )}
+                ) : assets.length === 0
+                  ? '🎨 生成图片（Visual Studio）'
+                  : `🎨 再生成一张（已有 ${assets.length} 张）`
+                }
+              </button>
+              {imgError && <p className="text-[11px] text-red-500">⚠ {imgError}</p>}
+            </div>
 
             <div className="flex flex-wrap gap-1">
               {post.hashtags.map((h, hi) => (
@@ -1492,7 +1480,7 @@ function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd, onB
                 platform={launchHubPlatform}
                 caption={editedCopy}
                 hashtags={post.hashtags}
-                imageUrl={imgUrl}
+                imageUrl={selectedUrl}
               />
             )}
           </div>
@@ -1707,6 +1695,70 @@ function LaunchHubScheduler({
 }
 
 // ─── Utility micro-components ──────────────────────────────────────────────────
+
+function ImageLightbox({ url, onClose, maxWidth }: {
+  url: string | null
+  onClose: () => void
+  maxWidth: string
+}) {
+  if (!url) return null
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+      onClick={onClose}
+    >
+      <div className={`relative ${maxWidth} w-full`} onClick={e => e.stopPropagation()}>
+        <button onClick={onClose} className="absolute -top-8 right-0 text-white text-sm font-bold hover:text-gray-300">✕ 关闭</button>
+        <img src={url} alt="preview" className="w-full rounded-lg shadow-2xl" />
+        <a href={url} download target="_blank" rel="noreferrer" className="mt-2 block text-center text-[11px] text-indigo-300 hover:text-white" onClick={e => e.stopPropagation()}>↓ 下载图片</a>
+      </div>
+    </div>
+  )
+}
+
+function ImageGalleryGrid({ assets, aspectRatio, onSelect, onOpenLightbox, selecting }: {
+  assets: GalleryAsset[]
+  aspectRatio: '1:1' | '9:16'
+  onSelect: (assetId: string) => void
+  onOpenLightbox: (url: string) => void
+  selecting: boolean
+}) {
+  const sizeClass = aspectRatio === '9:16' ? 'h-32' : 'h-24'
+  const ratioStyle = aspectRatio === '9:16' ? { aspectRatio: '9/16' } : { aspectRatio: '1/1' }
+  return (
+    <div className="rounded-lg border border-purple-100 bg-purple-50/40 p-2.5">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10px] font-bold text-purple-700 uppercase tracking-wide">已生成 — 点击图片选定主图</p>
+        <span className="text-[10px] text-purple-500">{assets.length} 张</span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {assets.map(asset => (
+          <div key={asset.id} className="relative">
+            <button
+              onClick={() => onSelect(asset.id)}
+              disabled={selecting}
+              className={`block rounded border-2 transition-all overflow-hidden ${
+                asset.is_selected
+                  ? 'border-green-500 ring-2 ring-green-200'
+                  : 'border-gray-200 hover:border-purple-400'
+              } disabled:opacity-60`}
+              style={ratioStyle}
+            >
+              <img src={asset.storage_url} alt="" className={`${sizeClass} object-cover`} style={ratioStyle} />
+            </button>
+            {asset.is_selected && (
+              <span className="absolute -top-1.5 -right-1.5 bg-green-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center shadow">✓</span>
+            )}
+            <button
+              onClick={() => onOpenLightbox(asset.storage_url)}
+              className="absolute bottom-0.5 right-0.5 bg-black/60 text-white text-[9px] font-bold rounded px-1.5 py-0.5 hover:bg-black/80"
+            >🔍</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 function Spinner({ color }: { color: 'indigo' | 'purple' }) {
   const ring = color === 'purple'
