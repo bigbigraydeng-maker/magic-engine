@@ -233,7 +233,7 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-06-01 02:47 NZST （**P22.A.4 ✅ Competitor 域名基准快照 — Phase 22.A 四任务全完成，下一步 22.D AnomalyDetector 或 Phase 24.B**）
+> 最后更新：2026-06-01 13:14 NZST （**P22.A.4 ✅ Competitor 域名基准快照 — Phase 22.A 四任务全完成，下一步 22.D AnomalyDetector 或 Phase 24.B**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
@@ -246,6 +246,7 @@ npm test           # 测试套件
 | **Phase 22.D.1** | AnomalyDetector：anomaly_signals 表 + 规则引擎骨架（依赖 22.A 全完成 ✅） | 📋 待开始 |
 
 **已完成全景（最近几个 Phase）**：
+- ✅ **P22.A.5 Meta Ads flywheel 接线**（2026-06-01，PR #183）：syncMeta() → MetaAdsAdapter.pullMetrics() 每日写入 flywheel_metrics；7 单测全绿
 - ✅ **P22.A.4 Competitor 域名基准快照**（2026-06-01，PR #183）：CompetitorSnapshotAdapter → flywheel_metrics(competitor.domain.organic_traffic)；7 单测全绿
 - ✅ **Phase 21 全部 P21.1–9**（2026-05-31）：AI Factory 三里程碑全闭环
 - ✅ **Phase 21 P21.6+P21.8**（PR #171，2026-05-31）：月度预算熔断 + 一键量产按钮
