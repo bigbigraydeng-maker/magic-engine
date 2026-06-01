@@ -58,11 +58,6 @@ export async function GET(
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
-  const access = await requireDashboardClientAccess(clientId)
-  if (!access.ok) {
-    return NextResponse.json({ error: access.error }, { status: access.status })
-  }
-
   const { data: client, error: clientError } = await supabaseAdmin
     .from('clients')
     .select('id, domain, semrush_db, industry')
