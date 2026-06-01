@@ -22,7 +22,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { fetchGscSnapshot } from '@/lib/gsc/client'
 import { fetchGa4Snapshot } from '@/lib/ga4/client'
 import { getAdAccountInsights, getAdCampaignInsights } from '@/lib/meta/client'
-import { SEO_METRIC_KEY } from '@/lib/flywheel/vocabulary'
+import { SEO_METRIC_KEY, GA4_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import { MetaAdsAdapter } from '@/lib/flywheel/adapters/MetaAdsAdapter'
 
 export const dynamic = 'force-dynamic'
