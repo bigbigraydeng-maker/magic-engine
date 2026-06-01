@@ -250,6 +250,89 @@ interface ActiveCampaignLite {
   valid_from?: string | null
   valid_until?: string | null
   semrush_keywords?: unknown[] | null
+  source_urls?: string[] | null
+}
+
+function CampaignRow({ c, clientId }: { c: ActiveCampaignLite; clientId: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const dateLabel = (() => {
+    if (c.valid_from && c.valid_until) return `${c.valid_from} → ${c.valid_until}`
+    if (c.valid_from)  return `${c.valid_from} 起`
+    if (c.valid_until) return `至 ${c.valid_until}`
+    return null
+  })()
+  const keywords     = Array.isArray(c.semrush_keywords) ? (c.semrush_keywords as string[]) : []
+  const sourceUrls   = Array.isArray(c.source_urls) ? c.source_urls : []
+
+  return (
+    <div className="rounded-lg border border-indigo-100 bg-white/70">
+      {/* Clickable summary row */}
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-start gap-2 px-3 py-2 text-left hover:bg-indigo-50/50 transition-colors rounded-lg"
+      >
+        <span className="inline-flex items-center text-[10px] font-bold bg-green-100 text-green-700 rounded-full px-1.5 py-0.5 mt-0.5 shrink-0">
+          进行中
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-gray-900">{c.title}</p>
+          {!expanded && c.description && (
+            <p className="text-[11px] text-gray-500 line-clamp-1 leading-snug">{c.description}</p>
+          )}
+          <div className="flex items-center gap-3 mt-0.5 text-[10px] text-gray-400">
+            {dateLabel && <span>📅 {dateLabel}</span>}
+            {keywords.length > 0 && <span>🔑 {keywords.length} 关键词</span>}
+          </div>
+        </div>
+        <span className="shrink-0 text-[10px] text-indigo-400 font-semibold mt-0.5">
+          {expanded ? '▲ 收起' : '▼ 详情'}
+        </span>
+      </button>
+
+      {/* Expanded detail */}
+      {expanded && (
+        <div className="px-3 pb-3 space-y-2 border-t border-indigo-100 pt-2">
+          {c.description && (
+            <div>
+              <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider mb-0.5">活动目标</p>
+              <p className="text-[11px] text-gray-700 leading-relaxed whitespace-pre-wrap">{c.description}</p>
+            </div>
+          )}
+          {keywords.length > 0 && (
+            <div>
+              <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider mb-1">核心关键词</p>
+              <div className="flex flex-wrap gap-1">
+                {keywords.slice(0, 20).map((kw, i) => (
+                  <span key={i} className="text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-200 rounded px-1.5 py-0.5">{String(kw)}</span>
+                ))}
+                {keywords.length > 20 && (
+                  <span className="text-[10px] text-gray-400">+{keywords.length - 20} 更多</span>
+                )}
+              </div>
+            </div>
+          )}
+          {sourceUrls.length > 0 && (
+            <div>
+              <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider mb-1">参考资料</p>
+              <div className="space-y-0.5">
+                {sourceUrls.map((url, i) => (
+                  <p key={i} className="text-[10px] text-gray-500 truncate">{url}</p>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end pt-1">
+            <Link
+              href={`/dashboard/clients/${clientId}`}
+              className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-800 underline"
+            >
+              在客户页编辑 →
+            </Link>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function ActiveCampaignBanner({ clientId }: { clientId: string }) {
@@ -274,7 +357,6 @@ function ActiveCampaignBanner({ clientId }: { clientId: string }) {
     return () => { cancelled = true }
   }, [clientId])
 
-  // Skeleton 阶段不渲染，避免布局抖动
   if (!loaded) return null
 
   // 无活跃 Campaign — amber 警告
@@ -300,52 +382,21 @@ function ActiveCampaignBanner({ clientId }: { clientId: string }) {
     )
   }
 
-  // 有活跃 Campaign — 蓝色条
+  // 有活跃 Campaign — 蓝色条，每行可内联展开详情
   return (
     <div className="rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-white px-4 py-3">
-      <div className="flex items-center justify-between gap-3 mb-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">
-            ⚓ 当前 Campaign 上下文
-          </span>
-          <span className="text-[10px] text-gray-400">
-            ({campaigns.length === 1 ? '1 个活跃' : `${campaigns.length} 个并行`})
-          </span>
-        </div>
-        <Link
-          href={`/dashboard/clients/${clientId}`}
-          className="shrink-0 text-xs font-medium text-indigo-600 hover:text-indigo-800 whitespace-nowrap"
-        >
-          管理 Campaign →
-        </Link>
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">
+          ⚓ 当前 Campaign 上下文
+        </span>
+        <span className="text-[10px] text-gray-400">
+          ({campaigns.length === 1 ? '1 个活跃' : `${campaigns.length} 个并行`}) · 点击行查看详情
+        </span>
       </div>
       <div className="space-y-1.5">
-        {campaigns.map(c => {
-          const dateLabel = (() => {
-            if (c.valid_from && c.valid_until) return `${c.valid_from} → ${c.valid_until}`
-            if (c.valid_from)  return `${c.valid_from} 起`
-            if (c.valid_until) return `至 ${c.valid_until}`
-            return null
-          })()
-          const keywordCount = Array.isArray(c.semrush_keywords) ? c.semrush_keywords.length : 0
-          return (
-            <div key={c.id} className="flex items-start gap-2">
-              <span className="inline-flex items-center text-[10px] font-bold bg-green-100 text-green-700 rounded-full px-1.5 py-0.5 mt-0.5 shrink-0">
-                进行中
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-gray-900 truncate">{c.title}</p>
-                {c.description && (
-                  <p className="text-[11px] text-gray-500 line-clamp-1 leading-snug">{c.description}</p>
-                )}
-                <div className="flex items-center gap-3 mt-0.5 text-[10px] text-gray-400">
-                  {dateLabel && <span>📅 {dateLabel}</span>}
-                  {keywordCount > 0 && <span>🔑 {keywordCount} 关键词</span>}
-                </div>
-              </div>
-            </div>
-          )
-        })}
+        {campaigns.map(c => (
+          <CampaignRow key={c.id} c={c} clientId={clientId} />
+        ))}
       </div>
     </div>
   )
@@ -1622,6 +1673,8 @@ export default function ExecutionPage() {
   const [imageGenActiveIds, setImageGenActiveIds] = useState<Set<string>>(new Set())
   // 后台图片生成任务（关抽屉后继续跑）：itemId → count（同一任务可能有多张并发）
   const [bgImageGenCount, setBgImageGenCount] = useState(0)
+  // 指南针浮动面板
+  const [compassOpen, setCompassOpen] = useState(false)
   const handleDownloadDocx = async () => {
     setIsDocxLoading(true)
     try {
@@ -2112,6 +2165,86 @@ export default function ExecutionPage() {
           </div>
         </div>
       )}
+
+      {/* 指南针：浮动进度按钮 + 面板 */}
+      <div className={`fixed z-[99] transition-all duration-200 ${bgImageGenCount > 0 ? 'bottom-20 right-5' : 'bottom-5 right-5'}`}>
+        {compassOpen && (
+          <>
+            <div className="fixed inset-0" onClick={() => setCompassOpen(false)} />
+            <div className="absolute bottom-12 right-0 w-72 rounded-xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+              <div className="px-4 py-3 bg-slate-900 flex items-center justify-between">
+                <span className="text-xs font-black text-white">🧭 执行进度总览</span>
+                <button onClick={() => setCompassOpen(false)} className="text-slate-400 hover:text-white text-sm">✕</button>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {(() => {
+                  const DIM_META: Record<string, { label: string; emoji: string }> = {
+                    social:        { label: '社媒', emoji: '📱' },
+                    seo:           { label: 'SEO', emoji: '🔍' },
+                    ai_visibility: { label: 'GEO', emoji: '🤖' },
+                    ads:           { label: '广告', emoji: '📢' },
+                    reputation:    { label: '口碑', emoji: '⭐' },
+                    competitor:    { label: '竞品', emoji: '🔭' },
+                  }
+                  const dims = Array.from(new Set(items.map(i => i.dimension).filter(Boolean))) as string[]
+                  if (dims.length === 0) {
+                    return (
+                      <div className="px-4 py-6 text-center text-xs text-slate-400">暂无执行项</div>
+                    )
+                  }
+                  return dims.map(dim => {
+                    const dimItems  = items.filter(i => i.dimension === dim)
+                    const done      = dimItems.filter(i => i.status === 'completed').length
+                    const inProg    = dimItems.filter(i => i.status === 'in_progress').length
+                    const total     = dimItems.length
+                    const pct       = total === 0 ? 0 : Math.round(done / total * 100)
+                    const meta      = DIM_META[dim] ?? { label: dim, emoji: '📋' }
+                    return (
+                      <div key={dim} className="px-4 py-2.5">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[11px] font-semibold text-slate-700">{meta.emoji} {meta.label}</span>
+                          <span className="text-[10px] text-slate-400">
+                            {done}/{total}
+                            {inProg > 0 && <span className="ml-1 text-blue-500">·{inProg} 进行中</span>}
+                          </span>
+                        </div>
+                        <div className="w-full bg-slate-100 rounded-full h-1.5">
+                          <div
+                            className="h-1.5 rounded-full transition-all duration-500"
+                            style={{
+                              width: `${pct}%`,
+                              backgroundColor: pct === 100 ? '#22c55e' : pct > 0 ? '#6366f1' : '#e2e8f0',
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )
+                  })
+                })()}
+                <div className="px-4 py-2.5 bg-slate-50">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-black text-slate-700">总计</span>
+                    <span className="text-[11px] font-bold text-indigo-700">
+                      {items.filter(i => i.status === 'completed').length} / {items.length} 已完成
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+        <button
+          onClick={() => setCompassOpen(v => !v)}
+          title="执行进度总览"
+          className={`flex h-10 w-10 items-center justify-center rounded-full shadow-lg border transition-all duration-200 text-base ${
+            compassOpen
+              ? 'bg-slate-900 border-slate-700 text-white shadow-slate-900/30'
+              : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 shadow-slate-200/60'
+          }`}
+        >
+          🧭
+        </button>
+      </div>
 
       {/* Header */}
       <div className="sticky top-0 z-10 border-b border-slate-200 bg-[#f6f7f2]/95 px-4 py-3 backdrop-blur md:px-6">
