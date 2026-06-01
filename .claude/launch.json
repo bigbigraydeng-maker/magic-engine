@@ -7,14 +7,6 @@
       "runtimeArgs": ["run", "dev"],
       "port": 3001,
       "autoPort": false
-    },
-    {
-      "name": "website",
-      "runtimeExecutable": "npx",
-<<<<<<< HEAD
-      "runtimeArgs": ["serve", "website", "-p", "4000"],
-      "port": 4000,
-      "autoPort": false
     }
   ]
 }
