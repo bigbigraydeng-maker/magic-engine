@@ -39,21 +39,15 @@ export default function PortalLoginForm({ next, authFailed }: Props) {
   if (sent) {
     return (
       <div className="py-2">
-        <div
-          className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg text-sm font-black"
-          style={{ background: '#EAF3EE', color: '#1F7A55' }}
-        >
+        <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-[#EAF3EE] text-sm font-black text-[#1F7A55]">
           ✓
         </div>
-        <h3
-          className="text-xl font-black"
-          style={{ fontFamily: "'Fraunces', Georgia, serif", color: '#16181D', letterSpacing: '-.02em' }}
-        >
+        <h3 className="font-display text-xl font-bold tracking-tight text-me-charcoal">
           Check your email
         </h3>
-        <p className="mt-2 text-sm leading-6" style={{ color: 'rgba(22,24,29,.60)' }}>
+        <p className="mt-2 text-sm leading-6 text-me-charcoal/60">
           Secure login link sent to{' '}
-          <span className="font-semibold" style={{ color: '#16181D' }}>{email}</span>.
+          <span className="font-semibold text-me-charcoal">{email}</span>.
           {' '}Expires in 15 minutes.
         </p>
       </div>
@@ -65,8 +59,7 @@ export default function PortalLoginForm({ next, authFailed }: Props) {
       <div>
         <label
           htmlFor="portal-email"
-          className="block text-xs font-bold uppercase tracking-[0.12em] mb-1.5"
-          style={{ color: 'rgba(22,24,29,.55)' }}
+          className="mb-1.5 block text-xs font-bold uppercase tracking-[0.12em] text-me-charcoal/55"
         >
           Email address
         </label>
@@ -77,18 +70,12 @@ export default function PortalLoginForm({ next, authFailed }: Props) {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@company.com"
-          className="h-12 w-full rounded-xl border bg-white px-3 text-sm outline-none transition"
-          style={{ border: '1.5px solid rgba(22,24,29,.14)', color: '#16181D' }}
-          onFocus={e => { e.currentTarget.style.borderColor = '#BE8A2E'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(190,138,46,.12)' }}
-          onBlur={e  => { e.currentTarget.style.borderColor = 'rgba(22,24,29,.14)'; e.currentTarget.style.boxShadow = 'none' }}
+          className="h-12 w-full rounded-xl border-[1.5px] border-me-charcoal/14 bg-white px-3 text-sm text-me-charcoal outline-none transition focus:border-me-ochre focus:shadow-[0_0_0_3px_rgba(196,145,46,.12)]"
         />
       </div>
 
       {(error || authFailed) && (
-        <p
-          className="rounded-xl border px-3 py-2 text-sm font-semibold"
-          style={{ background: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C' }}
-        >
+        <p className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-sm font-semibold text-[#B91C1C]">
           {error || 'Authentication failed. Please request a new login link.'}
         </p>
       )}
@@ -96,12 +83,8 @@ export default function PortalLoginForm({ next, authFailed }: Props) {
       <button
         type="submit"
         disabled={loading}
-        className="flex h-12 w-full items-center justify-center rounded-xl text-sm font-bold transition"
-        style={{
-          background: loading ? 'rgba(190,138,46,.5)' : '#BE8A2E',
-          color: '#fff',
-          cursor: loading ? 'wait' : 'pointer',
-        }}
+        className="flex h-12 w-full items-center justify-center rounded-xl text-sm font-bold text-[#2A2008] shadow-[0_18px_50px_rgba(196,145,46,.22)] transition active:translate-y-px disabled:cursor-wait disabled:opacity-60"
+        style={{ background: 'linear-gradient(135deg,#EBCB8B,#C4912E 55%,#A6781F)' }}
       >
         {loading ? 'Sending…' : 'Send magic link →'}
       </button>

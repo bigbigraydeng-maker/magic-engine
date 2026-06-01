@@ -2,6 +2,9 @@
 
 import { useState } from 'react'
 
+const INPUT_CLS = 'mt-1.5 h-12 w-full rounded-xl border-[1.5px] border-me-charcoal/14 bg-white px-3 text-sm text-me-charcoal outline-none transition focus:border-me-ochre focus:shadow-[0_0_0_3px_rgba(196,145,46,.12)]'
+const LABEL_CLS = 'text-xs font-bold uppercase tracking-[0.12em] text-me-charcoal/55'
+
 export default function RegisterForm() {
   const [form, setForm] = useState({
     businessName: '',
@@ -50,21 +53,15 @@ export default function RegisterForm() {
   if (done) {
     return (
       <div className="py-2">
-        <div
-          className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg text-sm font-black"
-          style={{ background: '#EAF3EE', color: '#1F7A55' }}
-        >
+        <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-[#EAF3EE] text-sm font-black text-[#1F7A55]">
           ✓
         </div>
-        <h3
-          className="text-xl font-black"
-          style={{ fontFamily: "'Fraunces', Georgia, serif", color: '#16181D', letterSpacing: '-.02em' }}
-        >
+        <h3 className="font-display text-xl font-bold tracking-tight text-me-charcoal">
           Check your email
         </h3>
-        <p className="mt-2 text-sm leading-6" style={{ color: 'rgba(22,24,29,.60)' }}>
+        <p className="mt-2 text-sm leading-6 text-me-charcoal/60">
           Confirmation link sent to{' '}
-          <span className="font-semibold" style={{ color: '#16181D' }}>{form.email}</span>.
+          <span className="font-semibold text-me-charcoal">{form.email}</span>.
           {' '}Click the link to activate your account and receive your <strong>500 MTC</strong> welcome bonus.
         </p>
       </div>
@@ -74,9 +71,7 @@ export default function RegisterForm() {
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <label htmlFor="businessName" className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
-          Business name
-        </label>
+        <label htmlFor="businessName" className={LABEL_CLS}>Business name</label>
         <input
           id="businessName"
           name="businessName"
@@ -85,17 +80,12 @@ export default function RegisterForm() {
           value={form.businessName}
           onChange={handleChange}
           placeholder="Acme Co"
-          className="mt-1.5 h-12 w-full rounded-xl border bg-white px-3 text-sm outline-none transition"
-          style={{ border: '1.5px solid rgba(22,24,29,.14)', color: '#16181D' }}
-          onFocus={e => { e.currentTarget.style.borderColor = '#BE8A2E'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(190,138,46,.12)' }}
-          onBlur={e  => { e.currentTarget.style.borderColor = 'rgba(22,24,29,.14)'; e.currentTarget.style.boxShadow = 'none' }}
+          className={INPUT_CLS}
         />
       </div>
 
       <div>
-        <label htmlFor="email" className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
-          Email address
-        </label>
+        <label htmlFor="email" className={LABEL_CLS}>Email address</label>
         <input
           id="email"
           name="email"
@@ -104,17 +94,12 @@ export default function RegisterForm() {
           value={form.email}
           onChange={handleChange}
           placeholder="you@company.com"
-          className="mt-1.5 h-12 w-full rounded-xl border bg-white px-3 text-sm outline-none transition"
-          style={{ border: '1.5px solid rgba(22,24,29,.14)', color: '#16181D' }}
-          onFocus={e => { e.currentTarget.style.borderColor = '#BE8A2E'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(190,138,46,.12)' }}
-          onBlur={e  => { e.currentTarget.style.borderColor = 'rgba(22,24,29,.14)'; e.currentTarget.style.boxShadow = 'none' }}
+          className={INPUT_CLS}
         />
       </div>
 
       <div>
-        <label htmlFor="password" className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
-          Password
-        </label>
+        <label htmlFor="password" className={LABEL_CLS}>Password</label>
         <input
           id="password"
           name="password"
@@ -124,16 +109,13 @@ export default function RegisterForm() {
           value={form.password}
           onChange={handleChange}
           placeholder="At least 8 characters"
-          className="mt-1.5 h-12 w-full rounded-xl border bg-white px-3 text-sm outline-none transition"
-          style={{ border: '1.5px solid rgba(22,24,29,.14)', color: '#16181D' }}
-          onFocus={e => { e.currentTarget.style.borderColor = '#BE8A2E'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(190,138,46,.12)' }}
-          onBlur={e  => { e.currentTarget.style.borderColor = 'rgba(22,24,29,.14)'; e.currentTarget.style.boxShadow = 'none' }}
+          className={INPUT_CLS}
         />
       </div>
 
       <div>
-        <label htmlFor="websiteUrl" className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
-          Website URL <span className="font-medium text-slate-400">(optional)</span>
+        <label htmlFor="websiteUrl" className={LABEL_CLS}>
+          Website URL <span className="font-medium text-me-charcoal/40">(optional)</span>
         </label>
         <input
           id="websiteUrl"
@@ -142,18 +124,12 @@ export default function RegisterForm() {
           value={form.websiteUrl}
           onChange={handleChange}
           placeholder="https://yoursite.com.au"
-          className="mt-1.5 h-12 w-full rounded-xl border bg-white px-3 text-sm outline-none transition"
-          style={{ border: '1.5px solid rgba(22,24,29,.14)', color: '#16181D' }}
-          onFocus={e => { e.currentTarget.style.borderColor = '#BE8A2E'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(190,138,46,.12)' }}
-          onBlur={e  => { e.currentTarget.style.borderColor = 'rgba(22,24,29,.14)'; e.currentTarget.style.boxShadow = 'none' }}
+          className={INPUT_CLS}
         />
       </div>
 
       {error && (
-        <p
-          className="rounded-xl border px-3 py-2 text-sm font-semibold"
-          style={{ background: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C' }}
-        >
+        <p className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-sm font-semibold text-[#B91C1C]">
           {error}
         </p>
       )}
@@ -161,12 +137,8 @@ export default function RegisterForm() {
       <button
         type="submit"
         disabled={loading}
-        className="flex h-12 w-full items-center justify-center rounded-xl text-sm font-bold transition"
-        style={{
-          background: loading ? 'rgba(190,138,46,.5)' : '#BE8A2E',
-          color: '#fff',
-          cursor: loading ? 'wait' : 'pointer',
-        }}
+        className="flex h-12 w-full items-center justify-center rounded-xl text-sm font-bold text-[#2A2008] shadow-[0_18px_50px_rgba(196,145,46,.22)] transition active:translate-y-px disabled:cursor-wait disabled:opacity-60"
+        style={{ background: 'linear-gradient(135deg,#EBCB8B,#C4912E 55%,#A6781F)' }}
       >
         {loading ? 'Creating account…' : 'Create account — free'}
       </button>

@@ -39,16 +39,13 @@ export default function WalletPurchase({ clientId, packageKey }: Props) {
       <button
         onClick={handlePurchase}
         disabled={loading}
-        className={`flex h-11 w-full items-center justify-center rounded-lg text-sm font-black transition ${
-          loading
-            ? 'cursor-wait bg-slate-200 text-slate-500'
-            : 'bg-slate-950 text-white hover:bg-slate-800'
-        }`}
+        className="flex h-11 w-full items-center justify-center rounded-xl text-sm font-bold text-[#2A2008] shadow-[0_12px_36px_rgba(196,145,46,.18)] transition active:translate-y-px disabled:cursor-wait disabled:opacity-60"
+        style={{ background: 'linear-gradient(135deg,#EBCB8B,#C4912E 55%,#A6781F)' }}
       >
         {loading ? 'Loading…' : 'Purchase'}
       </button>
       {error && (
-        <p className="mt-2 text-xs font-semibold text-red-600">{error}</p>
+        <p className="mt-2 text-xs font-semibold text-[#C2453A]">{error}</p>
       )}
     </div>
   )
