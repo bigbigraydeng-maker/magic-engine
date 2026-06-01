@@ -943,6 +943,14 @@ function TaskDetailDrawer({
               Generate content
             </button>
           )}
+          {CONTENT_STUDIO_DIMENSIONS.has(item.dimension ?? '') && !isAutonomousItem(item) && item.status === 'in_progress' && item.logs?.some(l => l.kind === 'ai_assist' && l.content?.includes('社媒内容已在后台生成完成')) && (
+            <button
+              onClick={() => onOpenStudio(item)}
+              className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-green-200 bg-green-50 px-3 text-xs font-black text-green-800 transition hover:bg-green-100"
+            >
+              查看 / 调整内容
+            </button>
+          )}
           {/* Item 4: 自主飞轮操作全部关闭；Item 6: in_house 在 execButton 内已 return null */}
           {!isAutonomousItem(item) && execButton}
 

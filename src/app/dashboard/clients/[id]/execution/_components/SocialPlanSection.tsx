@@ -159,10 +159,12 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
         const records = data.plans ?? []
         if (records.length) {
           setPlanHistory(records)
-          // In task mode, don't pre-load historical plan — only show explicitly generated content
-          if (!isTaskMode) {
-            setPlan(records[0].plan_data)
-            setPlanId(records[0].id)
+          // Always pre-load the most recent plan so FDE can review/edit generated content
+          setPlan(records[0].plan_data)
+          setPlanId(records[0].id)
+          // Auto-switch to the tab matching the task kind
+          if (isTaskMode && taskKind) {
+            setPlanTab(KIND_TAB[taskKind])
           }
         }
       })
@@ -298,16 +300,29 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
           {item.description && item.description !== item.title && (
             <p className="mt-1 line-clamp-3 text-xs leading-5 text-slate-600">{item.description}</p>
           )}
-          <button
-            onClick={() => void generateFocused()}
-            disabled={loading || !campaignId}
-            className="mt-3 flex items-center gap-2 rounded-lg bg-cyan-700 px-4 py-2 text-xs font-black text-white transition hover:bg-cyan-800 disabled:opacity-50"
-          >
-            {loading
-              ? <><span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />生成中…</>
-              : `生成这条${KIND_LABELS[taskKind]}`
-            }
-          </button>
+          {item.status === 'in_progress' ? (
+            <div className="mt-3 flex items-center gap-3">
+              <span className="text-[11px] font-semibold text-green-700">✓ 内容已生成，可在下方查看和调整</span>
+              <button
+                onClick={() => void generateFocused()}
+                disabled={loading || !campaignId}
+                className="text-[11px] font-bold text-slate-400 hover:text-slate-600 underline disabled:opacity-50"
+              >
+                {loading ? '生成中…' : '重新生成'}
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => void generateFocused()}
+              disabled={loading || !campaignId}
+              className="mt-3 flex items-center gap-2 rounded-lg bg-cyan-700 px-4 py-2 text-xs font-black text-white transition hover:bg-cyan-800 disabled:opacity-50"
+            >
+              {loading
+                ? <><span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />生成中…</>
+                : `生成这条${KIND_LABELS[taskKind]}`
+              }
+            </button>
+          )}
           {!campaignId && (
             <p className="mt-1.5 text-[11px] font-semibold text-amber-700">需要先设置 Active Campaign 才能生成</p>
           )}
@@ -493,7 +508,6 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
                 post={plan.posts[0]}
                 clientId={clientId}
                 launchHubPlatform={taskPlatform ?? config.platform}
-                dueDate={item?.due_date ?? undefined}
                 onGenStart={incImageGen}
                 onGenEnd={decImageGen}
               />
@@ -501,7 +515,6 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
             {taskKind === 'social_story' && plan.stories[0] && (
               <StoryCard index={0} story={plan.stories[0]} clientId={clientId}
                 launchHubPlatform={taskPlatform ?? config.platform}
-                dueDate={item?.due_date ?? undefined}
                 onGenStart={incImageGen}
                 onGenEnd={decImageGen}
               />
@@ -1271,11 +1284,10 @@ const POST_TYPE_COLOR: Record<string, string> = {
   engagement:   'bg-blue-50 text-blue-700 border-blue-200',
 }
 
-function PostCard({ post, clientId, launchHubPlatform, dueDate, onGenStart, onGenEnd }: {
+function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd }: {
   post: Post
   clientId: string
   launchHubPlatform?: string
-  dueDate?: string
   onGenStart?: () => void
   onGenEnd?: () => void
 }) {
@@ -1284,6 +1296,8 @@ function PostCard({ post, clientId, launchHubPlatform, dueDate, onGenStart, onGe
   const [imgUrl, setImgUrl]         = useState<string | null>(null)
   const [imgError, setImgError]     = useState<string | null>(null)
   const [lightboxOpen, setLightbox] = useState(false)
+  const [editedCopy, setEditedCopy]           = useState(post.copy)
+  const [editedImagePrompt, setEditedImagePrompt] = useState(post.image_prompt)
 
   const colorClass = POST_TYPE_COLOR[post.content_type] ?? 'bg-gray-50 text-gray-700 border-gray-200'
 
@@ -1295,7 +1309,7 @@ function PostCard({ post, clientId, launchHubPlatform, dueDate, onGenStart, onGe
       const res = await fetch('/api/visual/image-preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: post.image_prompt, client_id: clientId, aspect_ratio: '1:1' }),
+        body: JSON.stringify({ prompt: editedImagePrompt, client_id: clientId, aspect_ratio: '1:1' }),
       })
       const json = await res.json() as { success: boolean; image_url?: string; error?: string }
       if (!json.success) throw new Error(json.error ?? '生成失败')
@@ -1338,15 +1352,29 @@ function PostCard({ post, clientId, launchHubPlatform, dueDate, onGenStart, onGe
         </button>
         {open && (
           <div className="px-4 py-3 space-y-2.5 border-t border-gray-100 bg-white">
-            <p className="text-[11px] text-gray-700 leading-relaxed whitespace-pre-line">{post.copy}</p>
+            {/* 可编辑文案 */}
+            <div>
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">文案</label>
+              <textarea
+                value={editedCopy}
+                onChange={e => setEditedCopy(e.target.value)}
+                rows={4}
+                className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-[11px] text-gray-800 leading-relaxed focus:border-cyan-400 focus:outline-none focus:ring-1 focus:ring-cyan-400"
+              />
+            </div>
 
-            {/* Image prompt + generate */}
+            {/* 可编辑 Image prompt */}
             <div className="rounded-lg border border-violet-100 overflow-hidden">
               <div className="flex items-start justify-between gap-2 px-3 py-2 bg-violet-50 border-b border-violet-100">
                 <p className="text-[10px] font-bold text-violet-800">🎨 Image Prompt</p>
-                <CopyButton text={post.image_prompt} label="📋 复制" />
+                <CopyButton text={editedImagePrompt} label="📋 复制" />
               </div>
-              <p className="px-3 py-2.5 text-[10px] text-violet-900 italic leading-relaxed font-mono bg-white">{post.image_prompt}</p>
+              <textarea
+                value={editedImagePrompt}
+                onChange={e => setEditedImagePrompt(e.target.value)}
+                rows={3}
+                className="w-full px-3 py-2.5 text-[10px] text-violet-900 italic leading-relaxed font-mono bg-white focus:outline-none focus:ring-1 focus:ring-violet-300 border-0 resize-none"
+              />
             </div>
 
             {/* Generation button / result */}
@@ -1393,10 +1421,9 @@ function PostCard({ post, clientId, launchHubPlatform, dueDate, onGenStart, onGe
               <LaunchHubScheduler
                 clientId={clientId}
                 platform={launchHubPlatform}
-                caption={post.copy ?? ''}
+                caption={editedCopy}
                 hashtags={post.hashtags}
                 imageUrl={imgUrl}
-                dueDate={dueDate}
               />
             )}
           </div>
@@ -1406,19 +1433,20 @@ function PostCard({ post, clientId, launchHubPlatform, dueDate, onGenStart, onGe
   )
 }
 
-function StoryCard({ index, story, clientId, launchHubPlatform, dueDate, onGenStart, onGenEnd }: {
+function StoryCard({ index, story, clientId, launchHubPlatform, onGenStart, onGenEnd }: {
   index: number
   story: Story
   clientId: string
   launchHubPlatform?: string
-  dueDate?: string
   onGenStart?: () => void
   onGenEnd?: () => void
 }) {
-  const [generatingImg, setGen]     = useState(false)
-  const [imgUrl, setImgUrl]         = useState<string | null>(null)
-  const [imgError, setImgError]     = useState<string | null>(null)
-  const [lightboxOpen, setLightbox] = useState(false)
+  const [generatingImg, setGen]               = useState(false)
+  const [imgUrl, setImgUrl]                   = useState<string | null>(null)
+  const [imgError, setImgError]               = useState<string | null>(null)
+  const [lightboxOpen, setLightbox]           = useState(false)
+  const [editedCopy, setEditedCopy]           = useState(story.copy)
+  const [editedVisualPrompt, setEditedVisualPrompt] = useState(story.visual_prompt)
 
   const handleGenerate = async () => {
     setGen(true)
@@ -1428,7 +1456,7 @@ function StoryCard({ index, story, clientId, launchHubPlatform, dueDate, onGenSt
       const res = await fetch('/api/visual/image-preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: story.visual_prompt, client_id: clientId, aspect_ratio: '9:16' }),
+        body: JSON.stringify({ prompt: editedVisualPrompt, client_id: clientId, aspect_ratio: '9:16' }),
       })
       const json = await res.json() as { success: boolean; image_url?: string; error?: string }
       if (!json.success) throw new Error(json.error ?? '生成失败')
@@ -1459,14 +1487,33 @@ function StoryCard({ index, story, clientId, launchHubPlatform, dueDate, onGenSt
         <span className="w-5 h-5 rounded-full bg-purple-100 text-purple-700 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">
           {index + 1}
         </span>
-        <div className="flex-1 min-w-0 space-y-1.5">
-          <p className="text-xs font-semibold text-gray-800">{story.copy}</p>
+        <div className="flex-1 min-w-0 space-y-2">
+          {/* 可编辑文案 */}
+          <div>
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">文案</label>
+            <textarea
+              value={editedCopy}
+              onChange={e => setEditedCopy(e.target.value)}
+              rows={3}
+              className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-[11px] text-gray-800 leading-relaxed focus:border-purple-400 focus:outline-none focus:ring-1 focus:ring-purple-400"
+            />
+          </div>
           <p className="text-[11px] text-indigo-600 font-medium">→ {story.cta}</p>
-          <p className="text-[11px] text-gray-400 italic leading-relaxed">{story.visual_prompt}</p>
+
+          {/* 可编辑 visual prompt */}
+          <div>
+            <label className="text-[10px] font-bold text-purple-600 uppercase tracking-wide">🎨 Visual Prompt</label>
+            <textarea
+              value={editedVisualPrompt}
+              onChange={e => setEditedVisualPrompt(e.target.value)}
+              rows={2}
+              className="mt-1 w-full rounded-lg border border-purple-100 bg-purple-50 px-3 py-2 text-[10px] text-purple-900 italic font-mono leading-relaxed focus:border-purple-300 focus:outline-none focus:ring-1 focus:ring-purple-300"
+            />
+          </div>
 
           {/* Image preview or generate button */}
           {imgUrl ? (
-            <div className="pt-1 space-y-1.5">
+            <div className="space-y-1.5">
               <button onClick={() => setLightbox(true)} className="block group relative w-fit">
                 <img src={imgUrl} alt="story" className="h-24 rounded border border-purple-200 object-cover group-hover:opacity-90 transition-opacity" style={{ aspectRatio: '9/16' }} />
                 <span className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1476,7 +1523,7 @@ function StoryCard({ index, story, clientId, launchHubPlatform, dueDate, onGenSt
               <button onClick={() => { setImgUrl(null); setImgError(null) }} className="text-[10px] text-gray-400 hover:text-gray-600 underline">重新生成</button>
             </div>
           ) : (
-            <div className="pt-1 space-y-1">
+            <div className="space-y-1">
               <button
                 onClick={() => void handleGenerate()}
                 disabled={generatingImg}
@@ -1493,10 +1540,9 @@ function StoryCard({ index, story, clientId, launchHubPlatform, dueDate, onGenSt
               <LaunchHubScheduler
                 clientId={clientId}
                 platform={launchHubPlatform}
-                caption={story.copy ?? ''}
+                caption={editedCopy}
                 hashtags={[]}
                 imageUrl={imgUrl}
-                dueDate={dueDate}
               />
             </div>
           )}
@@ -1507,37 +1553,25 @@ function StoryCard({ index, story, clientId, launchHubPlatform, dueDate, onGenSt
 }
 
 // ─── LaunchHubScheduler ────────────────────────────────────────────────────────
-// Three-state inline scheduler:
-//   idle      → collapsed button "发到 Launch Hub"
-//   review    → shows full content preview (image + caption + hashtags) + time picker
-//   sent      → success confirmation
+// 车间交付按钮：把内容作为 draft 写入 content_posts，交给 Launch Hub 审核发布。
+// 不在车间排期——排期是市场（Launch Hub）的职责。
 //
-// FDE reviews everything before the final "确认排期发布" click.
+// States: idle → sending → sent
 
 function LaunchHubScheduler({
-  clientId, platform, caption, hashtags, imageUrl, dueDate,
+  clientId, platform, caption, hashtags, imageUrl,
 }: {
   clientId: string
   platform: string
   caption: string
   hashtags: string[]
   imageUrl: string | null
-  dueDate?: string
 }) {
-  type Phase = 'idle' | 'review' | 'sent'
-  const [phase, setPhase]           = useState<Phase>('idle')
-  const [scheduledAt, setScheduledAt] = useState(() => {
-    if (dueDate) return `${dueDate}T12:00`
-    const d = new Date()
-    d.setDate(d.getDate() + 1)
-    d.setHours(12, 0, 0, 0)
-    return d.toISOString().slice(0, 16)
-  })
-  const [sending, setSending]       = useState(false)
-  const [errorMsg, setErrorMsg]     = useState<string | null>(null)
-  const [captionExpanded, setCaptionExpanded] = useState(false)
+  const [sent, setSent]         = useState(false)
+  const [sending, setSending]   = useState(false)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  const handleConfirm = async () => {
+  const handleDeliver = async () => {
     setSending(true)
     setErrorMsg(null)
     try {
@@ -1550,12 +1584,12 @@ function LaunchHubScheduler({
           hashtags,
           image_url: imageUrl ?? undefined,
           platform,
-          scheduled_at: new Date(scheduledAt).toISOString(),
+          draft_only: true,
         }),
       })
       const json = await res.json() as { success: boolean; error?: string }
-      if (!json.success) throw new Error(json.error ?? '加入 Launch Hub 失败')
-      setPhase('sent')
+      if (!json.success) throw new Error(json.error ?? '交付失败')
+      setSent(true)
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : String(e))
     } finally {
@@ -1565,138 +1599,33 @@ function LaunchHubScheduler({
 
   const platformLabel = platform.charAt(0).toUpperCase() + platform.slice(1)
 
-  // ── sent ──────────────────────────────────────────────────────────────────────
-  if (phase === 'sent') {
+  if (sent) {
     return (
-      <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-3 space-y-1">
-        <p className="text-xs font-black text-green-700">✅ 已加入 Launch Hub（待审核）</p>
-        <div className="flex items-center gap-2 text-[11px] text-green-600">
-          <span className="rounded border border-green-200 bg-white px-1.5 py-0.5 font-semibold capitalize">{platformLabel}</span>
-          <span>
-            {new Date(scheduledAt).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-          </span>
-          {!imageUrl && <span className="text-amber-600 font-medium">纯文字帖</span>}
-        </div>
-        <p className="text-[10px] text-green-500">前往 Launch Hub 审核后再发布到 {platformLabel}</p>
+      <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2.5 space-y-1">
+        <p className="text-xs font-black text-green-700">✅ 已交付 Launch Hub（草稿待审核）</p>
+        <p className="text-[10px] text-green-600">前往 Launch Hub 审核后安排发布到 {platformLabel}</p>
       </div>
     )
   }
-
-  // ── idle ──────────────────────────────────────────────────────────────────────
-  if (phase === 'idle') {
-    return (
-      <button
-        onClick={() => setPhase('review')}
-        className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-black text-slate-700 hover:bg-white hover:border-slate-300 transition-colors"
-      >
-        <span>🚀</span>
-        <span>发到 Launch Hub</span>
-        <span className="ml-auto text-slate-400 font-semibold">{platformLabel}</span>
-        {!imageUrl && <span className="text-[10px] font-medium text-amber-600">无配图</span>}
-      </button>
-    )
-  }
-
-  // ── review ────────────────────────────────────────────────────────────────────
-  const captionPreview = caption.length > 120 && !captionExpanded
-    ? caption.slice(0, 120) + '…'
-    : caption
 
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 shadow-sm">
-
-      {/* Panel header */}
-      <div className="flex items-center justify-between border-b border-slate-200 bg-[#f6f7f2] px-4 py-2.5">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">发到 Launch Hub</span>
-          <span className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-bold capitalize text-slate-600">{platformLabel}</span>
-        </div>
-        <button
-          onClick={() => { setPhase('idle'); setErrorMsg(null) }}
-          className="text-xs text-slate-400 hover:text-slate-700 transition-colors"
-          aria-label="关闭"
-        >
-          ✕
-        </button>
-      </div>
-
-      {/* Content preview */}
-      <div className="border-b border-slate-100 bg-white px-4 py-3 space-y-2.5">
-        <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">内容预览</p>
-
-        {/* Image + caption side by side when image exists */}
-        <div className="flex gap-3">
-          {imageUrl && (
-            <img
-              src={imageUrl}
-              alt="preview"
-              className="h-20 w-20 shrink-0 rounded-lg border border-slate-200 object-cover"
-            />
-          )}
-          <div className="flex-1 min-w-0 space-y-1.5">
-            <p className="text-xs leading-5 text-slate-800 whitespace-pre-line">{captionPreview}</p>
-            {caption.length > 120 && (
-              <button
-                onClick={() => setCaptionExpanded(v => !v)}
-                className="text-[10px] text-cyan-700 hover:underline font-semibold"
-              >
-                {captionExpanded ? '收起' : '展开全文'}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Hashtags */}
-        {hashtags.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {hashtags.map((h, i) => (
-              <span key={i} className="text-[10px] bg-blue-50 text-blue-600 rounded px-1.5 py-0.5">{h}</span>
-            ))}
-          </div>
-        )}
-
-        {!imageUrl && (
-          <p className="text-[11px] font-medium text-amber-700">⚠ 无配图 — 将发送纯文字帖</p>
-        )}
-      </div>
-
-      {/* Schedule time + confirm */}
-      <div className="bg-white px-4 py-3 space-y-3">
-        <div className="space-y-1">
-          <label className="text-[10px] font-bold text-slate-500">排期发布时间</label>
-          <input
-            type="datetime-local"
-            value={scheduledAt}
-            onChange={e => setScheduledAt(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-700 focus:border-slate-600 focus:outline-none"
-          />
-        </div>
-
-        {errorMsg && (
-          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-medium text-red-700">
-            ⚠ {errorMsg}
-          </p>
-        )}
-
-        <div className="flex gap-2">
-          <button
-            onClick={() => { setPhase('idle'); setErrorMsg(null) }}
-            className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 hover:bg-slate-50 transition-colors"
-          >
-            取消
-          </button>
-          <button
-            onClick={() => void handleConfirm()}
-            disabled={sending}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-xs font-black text-white transition hover:bg-slate-800 disabled:opacity-60"
-          >
-            {sending
-              ? <><span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" /> 排期中…</>
-              : <>✓ 确认排期发布</>
-            }
-          </button>
-        </div>
-      </div>
+    <div className="space-y-1.5">
+      {!imageUrl && (
+        <p className="text-[10px] font-medium text-amber-600">⚠ 建议先生成配图再交付</p>
+      )}
+      {errorMsg && (
+        <p className="text-[11px] text-red-500">⚠ {errorMsg}</p>
+      )}
+      <button
+        onClick={() => void handleDeliver()}
+        disabled={sending}
+        className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2.5 text-xs font-black text-slate-700 hover:bg-white hover:border-slate-400 transition-colors disabled:opacity-50"
+      >
+        {sending
+          ? <><span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-400 border-t-slate-800" />交付中…</>
+          : <>🚀 交付到 Launch Hub<span className="ml-auto text-[10px] font-semibold text-slate-400">{platformLabel} · 草稿</span></>
+        }
+      </button>
     </div>
   )
 }
