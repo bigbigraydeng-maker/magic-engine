@@ -15,7 +15,7 @@ import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { getLatestDiscovery } from '@/lib/zhangqian/persistor'
 import { syncAiTrackerQuestions } from '@/lib/zhangqian/sync-ai-visibility'
 import { getActiveBrief } from '@/lib/content/brief-injector'
-import type { KeywordType, DiscoveryPayload } from '@/lib/zhangqian/types'
+import type { DiscoveredCompetitor, DiscoveryReport, KeywordType } from '@/lib/zhangqian/types'
 
 // ─── Request body types ───────────────────────────────────────────────────────
 
@@ -83,7 +83,7 @@ export async function PATCH(
     // Merge discovered competitors into the active master brief. Non-fatal.
     let competitorsMerged = 0
     try {
-      competitorsMerged = await mergeCompetitorsIntoBrief(clientId, discovery.payload as DiscoveryPayload)
+      competitorsMerged = await mergeCompetitorsIntoBrief(clientId, discovery.payload as DiscoveryReport)
     } catch (mergeErr) {
       console.error('[zhangqian/confirm] competitor merge failed (non-fatal)', mergeErr)
     }
@@ -175,20 +175,20 @@ const COMPETITOR_BLOCKLIST = new Set([
  */
 async function mergeCompetitorsIntoBrief(
   clientId: string,
-  payload: DiscoveryPayload,
+  payload: DiscoveryReport,
 ): Promise<number> {
   const activeBrief = await getActiveBrief(clientId)
   if (!activeBrief) return 0
 
   const discovered = (payload.competitors ?? [])
-    .filter(c => c.relevance === 'direct' || c.relevance === 'adjacent')
-    .map(c => c.domain.replace(/^https?:\/\//, '').replace(/\/$/, '').toLowerCase())
-    .filter(d => !COMPETITOR_BLOCKLIST.has(d))
+    .filter((c: DiscoveredCompetitor) => c.relevance === 'direct' || c.relevance === 'adjacent')
+    .map((c: DiscoveredCompetitor) => c.domain.replace(/^https?:\/\//, '').replace(/\/$/, '').toLowerCase())
+    .filter((d: string) => !COMPETITOR_BLOCKLIST.has(d))
 
   if (discovered.length === 0) return 0
 
   const existing: string[] = ((activeBrief.competitor_domains as string[] | null) ?? [])
-    .map(d => d.replace(/^https?:\/\//, '').replace(/\/$/, '').toLowerCase())
+    .map((d: string) => d.replace(/^https?:\/\//, '').replace(/\/$/, '').toLowerCase())
 
   const existingSet = new Set(existing)
   const toAdd = discovered.filter(d => !existingSet.has(d))
