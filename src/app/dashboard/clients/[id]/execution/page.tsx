@@ -1955,6 +1955,13 @@ export default function ExecutionPage() {
             >
               Marketing Plan
             </Link>
+            {/* 项目级鲁班 — 常驻按钮 */}
+            <button
+              onClick={() => setProjectLubanOpen(true)}
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 text-xs font-black text-violet-800 transition-colors hover:bg-violet-100"
+            >
+              🤖 鲁班
+            </button>
             {/* 溢出菜单 */}
             <div className="relative">
               <button
@@ -1973,12 +1980,6 @@ export default function ExecutionPage() {
                       className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
                     >
                       复盘
-                    </button>
-                    <button
-                      onClick={() => { setProjectLubanOpen(true); setShowOverflow(false) }}
-                      className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                    >
-                      项目级鲁班
                     </button>
                     {items.length > 0 && (
                       <button
