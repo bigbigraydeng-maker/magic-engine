@@ -100,6 +100,13 @@ export default function PortalLoginForm({ next, authFailed }: Props) {
       >
         {loading ? 'Sending…' : 'Send magic link →'}
       </button>
+
+      <p className="text-center text-xs text-me-charcoal/45">
+        Have a password?{' '}
+        <a href="/portal/forgot-password" className="font-semibold text-me-ochre no-underline hover:underline">
+          Reset it →
+        </a>
+      </p>
       </form>
     </div>
   )
