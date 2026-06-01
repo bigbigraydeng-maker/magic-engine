@@ -26,7 +26,14 @@ export function getAnthropicClient(): Anthropic {
   if (!apiKey) {
     throw new Error('ANTHROPIC_API_KEY environment variable is not set')
   }
-  return new Anthropic({ apiKey, baseURL: CF_GATEWAY_BASE })
+  // If CF_AIG_TOKEN is set, send cf-aig-authorization header (required when the
+  // CF AI Gateway is configured as "Authenticated"; otherwise every call 401s).
+  const aigToken = process.env.CF_AIG_TOKEN
+  return new Anthropic({
+    apiKey,
+    baseURL: CF_GATEWAY_BASE,
+    defaultHeaders: aigToken ? { 'cf-aig-authorization': `Bearer ${aigToken}` } : undefined,
+  })
 }
 
 export interface ClaudeDocInput {

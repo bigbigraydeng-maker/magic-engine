@@ -4,6 +4,10 @@
  *
  * CF Gateway URL: https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/openai
  * All requests are logged in the AI Gateway dashboard automatically.
+ *
+ * If CF_AIG_TOKEN is set, sends cf-aig-authorization header (required when the
+ * Gateway is configured as "Authenticated" in the Cloudflare dashboard).
+ * Without the token an Authenticated Gateway returns 401 on every call.
  */
 
 import OpenAI from 'openai'
@@ -17,5 +21,10 @@ export function getOpenAIClient(): OpenAI {
   if (!apiKey) {
     throw new Error('OPENAI_API_KEY environment variable is not set')
   }
-  return new OpenAI({ apiKey, baseURL: CF_GATEWAY_BASE })
+  const aigToken = process.env.CF_AIG_TOKEN
+  return new OpenAI({
+    apiKey,
+    baseURL: CF_GATEWAY_BASE,
+    defaultHeaders: aigToken ? { 'cf-aig-authorization': `Bearer ${aigToken}` } : undefined,
+  })
 }
