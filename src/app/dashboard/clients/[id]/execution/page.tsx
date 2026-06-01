@@ -1817,13 +1817,15 @@ export default function ExecutionPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ kind: 'ai_assist', author: 'luban', content: '社媒内容已在后台生成完成，可打开工作台查看' }),
           }).catch(() => {})
-          const curItem = items.find(i => i.id === itemId)
-          if (curItem?.status === 'pending') {
+          // 读取 DB 最新状态（不依赖可能已过期的 items 快照），确保状态持久写入后再刷新
+          const statusRes = await fetch(`/api/clients/${clientId}/execution/${itemId}`).catch(() => null)
+          const statusJson = statusRes?.ok ? await statusRes.json() as { item?: { status: string } } : null
+          if (!statusJson?.item || statusJson.item.status === 'pending') {
             await fetch(`/api/clients/${clientId}/execution/${itemId}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ status: 'in_progress' }),
-            }).catch(() => {})
+            })
           }
         }
       } catch { /* non-fatal */ } finally {

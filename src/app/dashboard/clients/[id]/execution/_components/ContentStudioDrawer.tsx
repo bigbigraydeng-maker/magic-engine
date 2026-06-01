@@ -138,8 +138,8 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
   }, [clientId, item.marketing_plan_id])
 
   // Log generated content back to the execution item + bump status to in_progress.
-  // Both calls are best-effort: a logging failure must never block content work.
-  const linkContentToItem = useCallback((summary: string, blogPostId?: string) => {
+  // Log is best-effort; status PATCH is awaited so the kanban reflects the change reliably.
+  const linkContentToItem = useCallback(async (summary: string, blogPostId?: string) => {
     const content = blogPostId ? `${summary} [blog:${blogPostId}]` : summary
     fetch(`/api/clients/${clientId}/execution/${item.id}/log`, {
       method: 'POST',
@@ -148,7 +148,7 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
     }).catch(() => { /* non-blocking */ })
 
     if (item.status === 'pending') {
-      fetch(`/api/clients/${clientId}/execution/${item.id}`, {
+      await fetch(`/api/clients/${clientId}/execution/${item.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'in_progress' }),
@@ -261,7 +261,7 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
                 clientId={clientId}
                 defaultCampaignId={campaign?.id}
                 onDraftGenerated={() =>
-                  linkContentToItem('Generated a social video draft in Content Studio')
+                  void linkContentToItem('Generated a social video draft in Content Studio')
                 }
                 readonly={readonly}
               />
