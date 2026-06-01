@@ -840,7 +840,7 @@ export default function VisualsPage() {
     if (typeof window === 'undefined') return ''
     return new URLSearchParams(window.location.search).get('client') ?? ''
   })
-  const [statusFilter, setStatusFilter] = useState('draft,approved,scheduled')
+  const [statusFilter, setStatusFilter] = useState('in_progress,draft,approved,scheduled')
   const [posts, setPosts] = useState<Post[]>([])
   const [assets, setAssets] = useState<VisualAsset[]>([])
   const [genStates, setGenStates] = useState<Record<string, GenState>>({})
@@ -1185,7 +1185,9 @@ export default function VisualsPage() {
           onChange={e => setStatusFilter(e.target.value)}
           className="text-sm border border-gray-200 rounded px-2 py-1 bg-white text-gray-900"
         >
+          <option value="in_progress,draft,approved,scheduled">进行中 + 待审核 + 已批准 + 已排期</option>
           <option value="draft,approved,scheduled">待审核 + 已批准 + 已排期</option>
+          <option value="in_progress">进行中</option>
           <option value="draft">待审核（草稿）</option>
           <option value="approved,scheduled">已批准 + 已排期</option>
           <option value="approved">已批准</option>
