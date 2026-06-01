@@ -174,7 +174,7 @@ export const ADS_ACTION_TYPE = {
   /** Pull a fresh Meta Ads snapshot into flywheel_metrics (third_party, meta) */
   META_SNAPSHOT: 'ads.meta_snapshot',
 
-  /** Re-enable a paused TikTok campaign (undo of PAUSE_CAMPAIGN) */
+  /** Re-enable a paused Google Ads / TikTok campaign (undo of PAUSE_CAMPAIGN) */
   REACTIVATE_CAMPAIGN: 'ads.reactivate_campaign',
 } as const
 
@@ -208,6 +208,9 @@ export const ADS_METRIC_KEY = {
 
   /** Total conversion events (purchases, leads, etc.) */
   CONVERSIONS: 'ads.account.conversions',
+
+  /** Cost per acquisition / conversion (spend / conversions) */
+  CPA: 'ads.account.cpa',
 } as const
 
 export type AdsMetricKey = (typeof ADS_METRIC_KEY)[keyof typeof ADS_METRIC_KEY]
@@ -269,6 +272,9 @@ export const SOCIAL_METRIC_KEY = {
 
   /** TikTok engagement rate (0–1), avg (likes+comments) per post / followers */
   TIKTOK_ENGAGEMENT_RATE: 'social.tiktok.engagement_rate',
+
+  /** Account-level engagement rate (likes+comments+shares / reach, 0–1) */
+  ENGAGEMENT_RATE: 'social.account.engagement_rate',
 } as const
 
 export type SocialMetricKey = (typeof SOCIAL_METRIC_KEY)[keyof typeof SOCIAL_METRIC_KEY]

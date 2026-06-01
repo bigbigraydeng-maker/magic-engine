@@ -42,7 +42,7 @@ const SUPPORTED_ACTION_TYPES = new Set([
   ADS_ACTION_TYPE.PAUSE_CAMPAIGN,
   ADS_ACTION_TYPE.ADJUST_BID,
   ADS_ACTION_TYPE.ADD_NEGATIVE_KEYWORD,
-  'google_ads.reactivate_campaign',   // undo of pause
+  ADS_ACTION_TYPE.REACTIVATE_CAMPAIGN,
 ])
 
 interface RouteParams {
@@ -88,6 +88,20 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     )
   }
 
+  // Validate numeric format to prevent GAQL injection (GAQL does not support parameterised queries)
+  if (!/^\d{1,15}$/.test(campaign_id)) {
+    return NextResponse.json(
+      { error: 'campaign_id must be a numeric string (1–15 digits)' },
+      { status: 400 },
+    )
+  }
+  if (!/^\d{1,15}$/.test(google_ads_customer_id)) {
+    return NextResponse.json(
+      { error: 'google_ads_customer_id must be a numeric string (1–15 digits)' },
+      { status: 400 },
+    )
+  }
+
   if (!SUPPORTED_ACTION_TYPES.has(action_type)) {
     return NextResponse.json(
       {
@@ -96,6 +110,9 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
       { status: 422 },
     )
   }
+
+  // TODO P18.D: Validate google_ads_customer_id against clients.google_ads_customer_id column
+  // to prevent IDOR — currently trusts caller-supplied value (acceptable at P18.B skeleton stage).
 
   // ── Credentials ───────────────────────────────────────────────────────────
   const creds = loadGoogleAdsCreds(google_ads_customer_id)
@@ -134,7 +151,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     apiSuccess = await setCampaignStatus(creds, campaign_id, 'PAUSED')
     after = { ...before, status: 'PAUSED' }
 
-  } else if (action_type === 'google_ads.reactivate_campaign') {
+  } else if (action_type === ADS_ACTION_TYPE.REACTIVATE_CAMPAIGN) {
     apiSuccess = await setCampaignStatus(creds, campaign_id, 'ENABLED')
     after = { ...before, status: 'ENABLED' }
 

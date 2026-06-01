@@ -35,9 +35,9 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Ne
   // ── Query params ──────────────────────────────────────────────────────────
   const url = new URL(req.url)
   const customerId = url.searchParams.get('google_ads_customer_id')
-  if (!customerId) {
+  if (!customerId || !/^\d{1,15}$/.test(customerId)) {
     return NextResponse.json(
-      { error: 'google_ads_customer_id query param is required' },
+      { error: 'google_ads_customer_id must be a numeric string (1–15 digits)' },
       { status: 400 },
     )
   }

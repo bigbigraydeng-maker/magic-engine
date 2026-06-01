@@ -110,10 +110,13 @@ export class TikTokAdapter implements FlywheelAdapter {
 
     const { error: insertErr } = await supabaseAdmin
       .from('flywheel_metrics')
-      .insert(toInsert)
+      .upsert(toInsert, {
+        onConflict: 'client_id,metric_key,measured_at',
+        ignoreDuplicates: true,
+      })
 
     if (insertErr) {
-      console.error('[TikTokAdapter] pullMetrics insert error:', insertErr.message)
+      console.error('[TikTokAdapter] pullMetrics upsert error:', insertErr.message)
     }
 
     return returned

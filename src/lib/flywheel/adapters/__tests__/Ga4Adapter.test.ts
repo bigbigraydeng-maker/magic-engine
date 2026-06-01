@@ -10,7 +10,7 @@ import { clearRegistry } from '../registry'
 
 // ── Mock supabaseAdmin ────────────────────────────────────────────────────────
 
-const mockMetricsInsert = vi.fn().mockResolvedValue({ error: null })
+const mockMetricsUpsert = vi.fn().mockResolvedValue({ error: null })
 
 // ga4_traffic_snapshots chain:
 //   no since:   .select().eq().order().limit(1).maybeSingle()
@@ -28,7 +28,7 @@ const mockSnapshotSelect = vi.fn(() => ({ eq: mockSnapshotEq }))
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
     from: vi.fn((table: string) => {
-      if (table === 'flywheel_metrics')       return { insert: mockMetricsInsert }
+      if (table === 'flywheel_metrics')       return { upsert: mockMetricsUpsert }
       if (table === 'ga4_traffic_snapshots')  return { select: mockSnapshotSelect }
       return {}
     }),
@@ -95,7 +95,7 @@ describe('Ga4Adapter', () => {
     const result = await new Ga4Adapter().pullMetrics('client-abc')
 
     expect(result).toEqual([])
-    expect(mockMetricsInsert).not.toHaveBeenCalled()
+    expect(mockMetricsUpsert).not.toHaveBeenCalled()
   })
 
   it('returns [] when snapshot query errors', async () => {
@@ -105,7 +105,7 @@ describe('Ga4Adapter', () => {
     const result = await new Ga4Adapter().pullMetrics('client-abc')
 
     expect(result).toEqual([])
-    expect(mockMetricsInsert).not.toHaveBeenCalled()
+    expect(mockMetricsUpsert).not.toHaveBeenCalled()
   })
 
   it('inserts 5 metrics for a full snapshot row', async () => {
@@ -115,9 +115,9 @@ describe('Ga4Adapter', () => {
     const result = await new Ga4Adapter().pullMetrics('client-abc')
 
     expect(result).toHaveLength(5)
-    expect(mockMetricsInsert).toHaveBeenCalledOnce()
+    expect(mockMetricsUpsert).toHaveBeenCalledOnce()
 
-    const inserted = mockMetricsInsert.mock.calls[0][0] as Array<{
+    const inserted = mockMetricsUpsert.mock.calls[0][0] as Array<{
       metric_key: string
       metric_value: number
       flywheel: string
@@ -134,7 +134,7 @@ describe('Ga4Adapter', () => {
     const { Ga4Adapter } = await import('../Ga4Adapter')
     await new Ga4Adapter().pullMetrics('client-abc')
 
-    const inserted = mockMetricsInsert.mock.calls[0][0] as Array<{ metric_key: string; metric_value: number }>
+    const inserted = mockMetricsUpsert.mock.calls[0][0] as Array<{ metric_key: string; metric_value: number }>
     const keys = inserted.map(r => r.metric_key)
 
     expect(keys).toContain(SEO_METRIC_KEY.GA4_SESSIONS)
@@ -150,7 +150,7 @@ describe('Ga4Adapter', () => {
     const { Ga4Adapter } = await import('../Ga4Adapter')
     await new Ga4Adapter().pullMetrics('client-abc')
 
-    const inserted = mockMetricsInsert.mock.calls[0][0] as Array<{ metric_key: string; metric_value: number }>
+    const inserted = mockMetricsUpsert.mock.calls[0][0] as Array<{ metric_key: string; metric_value: number }>
     const byKey = Object.fromEntries(inserted.map(r => [r.metric_key, r.metric_value]))
 
     expect(byKey[SEO_METRIC_KEY.GA4_SESSIONS]).toBe(4200)
@@ -166,7 +166,7 @@ describe('Ga4Adapter', () => {
     const { Ga4Adapter } = await import('../Ga4Adapter')
     await new Ga4Adapter().pullMetrics('client-abc')
 
-    const inserted = mockMetricsInsert.mock.calls[0][0] as Array<{
+    const inserted = mockMetricsUpsert.mock.calls[0][0] as Array<{
       source_ref: { snapshot_id: string; property_id: string; period_start: string; period_end: string }
     }>
     expect(inserted[0].source_ref.snapshot_id).toBe('snap-uuid-1')
@@ -185,7 +185,7 @@ describe('Ga4Adapter', () => {
     const result = await new Ga4Adapter().pullMetrics('client-abc')
 
     expect(result).toHaveLength(3)  // sessions + users + pageviews only
-    const inserted = mockMetricsInsert.mock.calls[0][0] as Array<{ metric_key: string }>
+    const inserted = mockMetricsUpsert.mock.calls[0][0] as Array<{ metric_key: string }>
     expect(inserted.map(r => r.metric_key)).not.toContain(SEO_METRIC_KEY.GA4_BOUNCE_RATE)
     expect(inserted.map(r => r.metric_key)).not.toContain(SEO_METRIC_KEY.GA4_AVG_SESSION_DURATION)
   })
@@ -207,12 +207,12 @@ describe('Ga4Adapter', () => {
     const result = await new Ga4Adapter().pullMetrics('client-abc')
 
     expect(result).toEqual([])
-    expect(mockMetricsInsert).not.toHaveBeenCalled()
+    expect(mockMetricsUpsert).not.toHaveBeenCalled()
   })
 
   it('logs error but does not throw when flywheel_metrics insert fails', async () => {
     mockSnapshotMaybeSingle.mockResolvedValue({ data: SNAPSHOT_ROW, error: null })
-    mockMetricsInsert.mockResolvedValue({ error: { message: 'DB timeout' } })
+    mockMetricsUpsert.mockResolvedValue({ error: { message: 'DB timeout' } })
 
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 

@@ -103,10 +103,13 @@ export class Ga4Adapter implements FlywheelAdapter {
 
     const { error: insertErr } = await supabaseAdmin
       .from('flywheel_metrics')
-      .insert(toInsert)
+      .upsert(toInsert, {
+        onConflict: 'client_id,metric_key,measured_at',
+        ignoreDuplicates: true,
+      })
 
     if (insertErr) {
-      console.error('[Ga4Adapter] pullMetrics insert error:', insertErr.message)
+      console.error('[Ga4Adapter] pullMetrics upsert error:', insertErr.message)
     }
 
     return returned

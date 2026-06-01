@@ -10,7 +10,7 @@ import { clearRegistry } from '../registry'
 
 // ── Mock supabaseAdmin ────────────────────────────────────────────────────────
 
-const mockMetricsInsert = vi.fn().mockResolvedValue({ error: null })
+const mockMetricsUpsert = vi.fn().mockResolvedValue({ error: null })
 
 // clients chain:  .select().eq().maybeSingle()
 const mockClientMaybeSingle = vi.fn()
@@ -20,7 +20,7 @@ const mockClientSelect = vi.fn(() => ({ eq: mockClientEq }))
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
     from: vi.fn((table: string) => {
-      if (table === 'flywheel_metrics') return { insert: mockMetricsInsert }
+      if (table === 'flywheel_metrics') return { upsert: mockMetricsUpsert }
       if (table === 'clients')          return { select: mockClientSelect }
       return {}
     }),
@@ -90,7 +90,7 @@ describe('TikTokAdapter', () => {
 
     expect(result).toEqual([])
     expect(mockScrapeTiktok).not.toHaveBeenCalled()
-    expect(mockMetricsInsert).not.toHaveBeenCalled()
+    expect(mockMetricsUpsert).not.toHaveBeenCalled()
   })
 
   it('returns [] when client row not found', async () => {
@@ -135,7 +135,7 @@ describe('TikTokAdapter', () => {
     const result = await new TikTokAdapter().pullMetrics('client-abc')
 
     expect(result).toEqual([])
-    expect(mockMetricsInsert).not.toHaveBeenCalled()
+    expect(mockMetricsUpsert).not.toHaveBeenCalled()
     expect(consoleSpy).toHaveBeenCalledWith(
       expect.stringContaining('[TikTokAdapter]'),
       expect.stringContaining('APIFY_API_KEY not configured'),
@@ -154,9 +154,9 @@ describe('TikTokAdapter', () => {
     const result = await new TikTokAdapter().pullMetrics('client-abc')
 
     expect(result).toHaveLength(3)
-    expect(mockMetricsInsert).toHaveBeenCalledOnce()
+    expect(mockMetricsUpsert).toHaveBeenCalledOnce()
 
-    const inserted = mockMetricsInsert.mock.calls[0][0] as Array<{
+    const inserted = mockMetricsUpsert.mock.calls[0][0] as Array<{
       metric_key: string
       metric_value: number
       flywheel: string
@@ -174,7 +174,7 @@ describe('TikTokAdapter', () => {
     const { TikTokAdapter } = await import('../TikTokAdapter')
     await new TikTokAdapter().pullMetrics('client-abc')
 
-    const inserted = mockMetricsInsert.mock.calls[0][0] as Array<{ metric_key: string }>
+    const inserted = mockMetricsUpsert.mock.calls[0][0] as Array<{ metric_key: string }>
     const keys = inserted.map(r => r.metric_key)
 
     expect(keys).toContain(SOCIAL_METRIC_KEY.TIKTOK_FOLLOWERS)
@@ -189,7 +189,7 @@ describe('TikTokAdapter', () => {
     const { TikTokAdapter } = await import('../TikTokAdapter')
     await new TikTokAdapter().pullMetrics('client-abc')
 
-    const inserted = mockMetricsInsert.mock.calls[0][0] as Array<{ metric_key: string; metric_value: number }>
+    const inserted = mockMetricsUpsert.mock.calls[0][0] as Array<{ metric_key: string; metric_value: number }>
     const byKey = Object.fromEntries(inserted.map(r => [r.metric_key, r.metric_value]))
 
     expect(byKey[SOCIAL_METRIC_KEY.TIKTOK_FOLLOWERS]).toBe(12500)
@@ -216,7 +216,7 @@ describe('TikTokAdapter', () => {
     const { TikTokAdapter } = await import('../TikTokAdapter')
     await new TikTokAdapter().pullMetrics('client-abc')
 
-    const inserted = mockMetricsInsert.mock.calls[0][0] as Array<{
+    const inserted = mockMetricsUpsert.mock.calls[0][0] as Array<{
       source_ref: { handle: string; scraped_at: string }
     }>
     expect(inserted[0].source_ref.handle).toBe('@kiwibrand')
@@ -226,7 +226,7 @@ describe('TikTokAdapter', () => {
   it('logs error but does not throw when flywheel_metrics insert fails', async () => {
     mockClientMaybeSingle.mockResolvedValue({ data: CLIENT_ROW, error: null })
     mockScrapeTiktok.mockResolvedValue(TIKTOK_PROFILE)
-    mockMetricsInsert.mockResolvedValue({ error: { message: 'Insert failed' } })
+    mockMetricsUpsert.mockResolvedValue({ error: { message: 'Insert failed' } })
 
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
