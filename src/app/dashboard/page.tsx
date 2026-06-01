@@ -27,27 +27,87 @@ interface RecentPost {
 interface ClientLite {
   id: string;
   name: string;
+  domain: string | null;
+}
+
+// AI engine display config — order matters (renders top-to-bottom)
+type AiEngineKey = 'openai' | 'anthropic' | 'perplexity' | 'google';
+interface EngineConfig {
+  key: AiEngineKey;
+  id: string;        // short badge code
+  name: string;      // display name
+}
+const AI_ENGINES: EngineConfig[] = [
+  { key: 'openai',     id: 'GPT', name: 'ChatGPT' },
+  { key: 'anthropic',  id: 'CL',  name: 'Claude' },
+  { key: 'perplexity', id: 'PX',  name: 'Perplexity' },
+  { key: 'google',     id: 'AIO', name: 'Google AIO' },
+];
+
+type Tone = 'track' | 'exec' | 'attn' | 'sched' | 'rej';
+
+interface EngineRow {
+  id: string;
+  name: string;
+  rank: string;       // '#2' or '—'
+  dir: 'up' | 'down' | 'flat';
+  tone: Tone;
+}
+
+interface AiVisibility {
+  livePercent: number | null;        // 0–100; null = no data
+  monthlyChange: string | null;      // '+23% MoM' or null
+  monthlyChangeDir: 'up' | 'down' | 'flat';
+  engines: EngineRow[];
+}
+
+interface FlywheelPhase {
+  key: 'diagnose' | 'prioritise' | 'execute' | 'measure';
+  label: string;
+  pct: number; // 0–100
+}
+
+// Rank → trend direction & status tone heuristic.
+function rankToDir(rank: number): { dir: 'up' | 'down' | 'flat'; tone: Tone } {
+  if (rank <= 3) return { dir: 'up',   tone: 'track' };
+  if (rank <= 5) return { dir: 'flat', tone: 'exec'  };
+  return { dir: 'down', tone: 'attn' };
 }
 
 async function getOverviewData() {
   const now = new Date();
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
 
   const [
-    clientsRes,
+    clientsCountRes,
+    activeClientsRes,
     recentPostsRes,
     contentInFlightRes,
     contentThisMonthRes,
     pendingReviewRes,
     flywheelRes,
     keywordRes,
+    mentionRateCurrentRes,
+    mentionRatePreviousRes,
+    aiEngineRunsRes,
+    prescriptionsRes,
+    execItemsRes,
+    outcomesRes,
   ] = await Promise.all([
+    // Onboarding gate uses count-only query — does NOT pull rows
     supabaseAdmin
       .from('clients')
-      .select('id, name, created_at')
-      .order('created_at', { ascending: false }),
+      .select('*', { count: 'exact', head: true }),
+
+    // Top 6 most recently active clients (proxied by created_at desc)
+    supabaseAdmin
+      .from('clients')
+      .select('id, name, domain, created_at')
+      .order('created_at', { ascending: false })
+      .limit(6),
 
     supabaseAdmin
       .from('content_posts')
@@ -78,28 +138,170 @@ async function getOverviewData() {
     supabaseAdmin
       .from('keyword_intelligence_runs')
       .select('*', { count: 'exact', head: true }),
+
+    // AI Visibility Index — current 7-day mention_rate values across all clients
+    supabaseAdmin
+      .from('flywheel_metrics')
+      .select('metric_value')
+      .eq('flywheel', 'geo')
+      .eq('metric_key', 'geo.query.mention_rate')
+      .gte('measured_at', sevenDaysAgo),
+
+    // Previous 7-day window (7–14 days ago) for MoM-style delta
+    supabaseAdmin
+      .from('flywheel_metrics')
+      .select('metric_value')
+      .eq('flywheel', 'geo')
+      .eq('metric_key', 'geo.query.mention_rate')
+      .gte('measured_at', fourteenDaysAgo)
+      .lt('measured_at', sevenDaysAgo),
+
+    // 4-engine ranking — last 7 days of AI Tracker runs
+    supabaseAdmin
+      .from('ai_visibility_runs')
+      .select('ai_engine, client_brand_rank, ran_at')
+      .gte('ran_at', sevenDaysAgo),
+
+    // Flywheel phase 1: Diagnose — clients with a prescription
+    supabaseAdmin
+      .from('prescriptions')
+      .select('client_id'),
+
+    // Flywheel phases 2 & 3: Prioritise / Execute — execution_items per client
+    supabaseAdmin
+      .from('execution_items')
+      .select('client_id, status'),
+
+    // Flywheel phase 4: Measure — clients with at least one outcome
+    supabaseAdmin
+      .from('flywheel_outcomes')
+      .select('client_id'),
   ]);
 
-  const clients: ClientLite[] = (clientsRes.data ?? []).map(c => ({
-    id: c.id as string,
-    name: c.name as string,
-  }));
-  const activeClients = clients.slice(0, 6);
+  const totalClientCount = clientsCountRes.count ?? 0;
 
-  // Flywheel loop progress (per loop) — last 7 days
+  const activeClients: ClientLite[] = ((activeClientsRes.data ?? []) as Array<{
+    id: string;
+    name: string;
+    domain: string | null;
+  }>).map(c => ({
+    id: c.id,
+    name: c.name,
+    domain: c.domain ?? null,
+  }));
+
+  // ── Per-flywheel action counts (last 7 days) ────────────────────────────────
   const flywheelCounts: Record<string, number> = { seo: 0, geo: 0, ads: 0, social: 0 };
   for (const action of flywheelRes.data ?? []) {
     const key = (action as { flywheel: string }).flywheel;
     if (key in flywheelCounts) flywheelCounts[key] = (flywheelCounts[key] ?? 0) + 1;
   }
-
-  // Mini flywheel — diagnose/prioritise/execute/measure as a rough phase proxy
   const totalFlywheel = Object.values(flywheelCounts).reduce((a, b) => a + b, 0);
+
+  // ── AI Visibility Index (avg mention_rate × 100) ───────────────────────────
+  const currentRates = ((mentionRateCurrentRes.data ?? []) as Array<{ metric_value: number }>)
+    .map(r => Number(r.metric_value))
+    .filter(v => Number.isFinite(v));
+  const previousRates = ((mentionRatePreviousRes.data ?? []) as Array<{ metric_value: number }>)
+    .map(r => Number(r.metric_value))
+    .filter(v => Number.isFinite(v));
+
+  const avgRate = (xs: number[]): number | null =>
+    xs.length === 0 ? null : xs.reduce((a, b) => a + b, 0) / xs.length;
+
+  const currentAvg = avgRate(currentRates);
+  const previousAvg = avgRate(previousRates);
+
+  const livePercent = currentAvg === null ? null : Math.round(currentAvg * 100);
+
+  let monthlyChange: string | null = null;
+  let monthlyChangeDir: 'up' | 'down' | 'flat' = 'flat';
+  if (currentAvg !== null && previousAvg !== null && previousAvg > 0) {
+    const deltaPct = ((currentAvg - previousAvg) / previousAvg) * 100;
+    const rounded = Math.round(deltaPct);
+    if (rounded > 0) {
+      monthlyChange = `+${rounded}% WoW`;
+      monthlyChangeDir = 'up';
+    } else if (rounded < 0) {
+      monthlyChange = `${rounded}% WoW`;
+      monthlyChangeDir = 'down';
+    } else {
+      monthlyChange = `0% WoW`;
+      monthlyChangeDir = 'flat';
+    }
+  }
+
+  // ── Per-engine ranking — average client_brand_rank where mentioned ─────────
+  type EngineAgg = { sum: number; count: number };
+  const engineAgg: Record<AiEngineKey, EngineAgg> = {
+    openai:     { sum: 0, count: 0 },
+    anthropic:  { sum: 0, count: 0 },
+    perplexity: { sum: 0, count: 0 },
+    google:     { sum: 0, count: 0 },
+  };
+  for (const row of (aiEngineRunsRes.data ?? []) as Array<{
+    ai_engine: string;
+    client_brand_rank: number | null;
+  }>) {
+    const engine = row.ai_engine as AiEngineKey;
+    if (!(engine in engineAgg)) continue;
+    if (row.client_brand_rank === null || !Number.isFinite(row.client_brand_rank)) continue;
+    engineAgg[engine].sum += row.client_brand_rank;
+    engineAgg[engine].count += 1;
+  }
+
+  const engines: EngineRow[] = AI_ENGINES.map(cfg => {
+    const agg = engineAgg[cfg.key];
+    if (agg.count === 0) {
+      return { id: cfg.id, name: cfg.name, rank: '—', dir: 'flat', tone: 'attn' };
+    }
+    const avg = agg.sum / agg.count;
+    const rankNum = Math.round(avg);
+    const { dir, tone } = rankToDir(rankNum);
+    return { id: cfg.id, name: cfg.name, rank: `#${rankNum}`, dir, tone };
+  });
+
+  const aiVisibility: AiVisibility = {
+    livePercent,
+    monthlyChange,
+    monthlyChangeDir,
+    engines,
+  };
+
+  // ── 4-phase mini-flywheel — per-client coverage ratios ─────────────────────
+  const clientsWithDiagnose = new Set<string>(
+    ((prescriptionsRes.data ?? []) as Array<{ client_id: string }>).map(r => r.client_id),
+  );
+  const clientsWithPrioritise = new Set<string>();
+  const clientsWithExecute = new Set<string>();
+  for (const row of (execItemsRes.data ?? []) as Array<{
+    client_id: string;
+    status: string;
+  }>) {
+    if (row.status === 'pending' || row.status === 'in_progress') {
+      clientsWithPrioritise.add(row.client_id);
+    } else if (row.status === 'completed') {
+      clientsWithExecute.add(row.client_id);
+    }
+  }
+  const clientsWithMeasure = new Set<string>(
+    ((outcomesRes.data ?? []) as Array<{ client_id: string }>).map(r => r.client_id),
+  );
+
+  const phasePct = (n: number): number =>
+    totalClientCount === 0 ? 0 : Math.round((n / totalClientCount) * 100);
+
+  const flywheelPhases: FlywheelPhase[] = [
+    { key: 'diagnose',   label: 'Diagnose',   pct: phasePct(clientsWithDiagnose.size) },
+    { key: 'prioritise', label: 'Prioritise', pct: phasePct(clientsWithPrioritise.size) },
+    { key: 'execute',    label: 'Execute',    pct: phasePct(clientsWithExecute.size) },
+    { key: 'measure',    label: 'Measure',    pct: phasePct(clientsWithMeasure.size) },
+  ];
 
   const recentPosts: RecentPost[] = ((recentPostsRes.data as unknown) as RecentPost[]) ?? [];
 
   return {
-    activeClientCount: clients.length,
+    activeClientCount: totalClientCount,
     activeClients,
     contentInFlight: contentInFlightRes.count ?? 0,
     contentThisMonth: contentThisMonthRes.count ?? 0,
@@ -107,13 +309,14 @@ async function getOverviewData() {
     keywordCount: keywordRes.count ?? 0,
     flywheelCounts,
     totalFlywheel,
+    aiVisibility,
+    flywheelPhases,
     recentPosts,
     oneDayAgo,
   };
 }
 
 // Status → tone mapping
-type Tone = 'track' | 'exec' | 'attn' | 'sched' | 'rej';
 function statusTone(status: string | null | undefined): Tone {
   switch (status) {
     case 'approved':
@@ -145,25 +348,6 @@ function formatDate(iso: string): string {
   });
 }
 
-const FLYWHEEL_PHASES = [
-  { key: 'diagnose',   label: 'Diagnose',   pct: 100 },
-  { key: 'prioritise', label: 'Prioritise', pct: 86 },
-  { key: 'execute',    label: 'Execute',    pct: 64 },
-  { key: 'measure',    label: 'Measure',    pct: 38 },
-] as const;
-
-// TODO: wire AI visibility data from /api/clients/[id]/visibility once implemented
-const AI_VISIBILITY_DEMO = {
-  livePercent: 72,
-  monthlyChange: '+23% MoM',
-  engines: [
-    { id: 'GPT', name: 'ChatGPT',    rank: '#2', dir: 'up' as const,   tone: 'track' as Tone },
-    { id: 'CL',  name: 'Claude',     rank: '#3', dir: 'up' as const,   tone: 'track' as Tone },
-    { id: 'PX',  name: 'Perplexity', rank: '#5', dir: 'flat' as const, tone: 'exec'  as Tone },
-    { id: 'AIO', name: 'Google AIO', rank: '#9', dir: 'down' as const, tone: 'attn'  as Tone },
-  ],
-};
-
 export default async function OverviewPage() {
   const data = await getOverviewData();
   const {
@@ -174,11 +358,18 @@ export default async function OverviewPage() {
     keywordCount,
     flywheelCounts,
     totalFlywheel,
+    aiVisibility,
+    flywheelPhases,
     recentPosts,
   } = data;
 
   // Loop progress rough estimate: how many flywheels have produced actions this week
   const liveLoops = Object.values(flywheelCounts).filter(n => n > 0).length;
+
+  const livePercentDisplay =
+    aiVisibility.livePercent === null ? '—' : `${aiVisibility.livePercent}%`;
+  const donutDashArray =
+    aiVisibility.livePercent === null ? '0 100' : `${aiVisibility.livePercent} 100`;
 
   return (
     <div className="font-sans">
@@ -239,7 +430,7 @@ export default async function OverviewPage() {
             }
           />
           <MeStatCard
-            value={`${AI_VISIBILITY_DEMO.livePercent}%`}
+            value={livePercentDisplay}
             label="AI-visibility index"
             tone="ochre"
             goldValue
@@ -250,7 +441,11 @@ export default async function OverviewPage() {
               </svg>
             }
             footer={
-              <MeTrend dir="up">{AI_VISIBILITY_DEMO.monthlyChange}</MeTrend>
+              aiVisibility.monthlyChange ? (
+                <MeTrend dir={aiVisibility.monthlyChangeDir}>{aiVisibility.monthlyChange}</MeTrend>
+              ) : (
+                <span className="text-[11.5px] text-black/40">No tracker data yet</span>
+              )
             }
           />
           <MeStatCard
@@ -337,7 +532,7 @@ export default async function OverviewPage() {
                 right={<MePill tone="exec">{liveLoops || totalFlywheel ? `${liveLoops} active loops` : 'No loops yet'}</MePill>}
               />
               <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
-                {FLYWHEEL_PHASES.map(phase => (
+                {flywheelPhases.map(phase => (
                   <div key={phase.key} className="space-y-2">
                     <div className="flex items-baseline justify-between">
                       <span className="text-[12.5px] font-semibold text-black/65">{phase.label}</span>
@@ -355,8 +550,7 @@ export default async function OverviewPage() {
                 ))}
               </div>
               <p className="mt-3 text-[11.5px] text-black/40">
-                {/* TODO: wire real per-phase progress once `flywheel_outcomes` rollup is ready */}
-                Demo progress — rollup view coming from flywheel outcomes.
+                Share of clients reaching each phase ({activeClientCount} total).
               </p>
             </div>
           </MePanel>
@@ -365,7 +559,15 @@ export default async function OverviewPage() {
           <MePanel className="lg:col-span-2">
             <MePanelHeader
               title="AI visibility"
-              right={<MePill tone="track">{AI_VISIBILITY_DEMO.monthlyChange}</MePill>}
+              right={
+                aiVisibility.monthlyChange ? (
+                  <MePill tone={aiVisibility.monthlyChangeDir === 'down' ? 'rej' : 'track'}>
+                    {aiVisibility.monthlyChange}
+                  </MePill>
+                ) : (
+                  <MePill tone="attn">No baseline yet</MePill>
+                )
+              }
             />
 
             {/* Donut */}
@@ -387,7 +589,7 @@ export default async function OverviewPage() {
                   stroke="url(#me-dash-gold)"
                   strokeWidth="5"
                   strokeLinecap="round"
-                  strokeDasharray={`${AI_VISIBILITY_DEMO.livePercent} 100`}
+                  strokeDasharray={donutDashArray}
                   transform="rotate(-90 21 21)"
                 />
               </svg>
@@ -400,19 +602,19 @@ export default async function OverviewPage() {
                     WebkitTextFillColor: 'transparent',
                   }}
                 >
-                  {AI_VISIBILITY_DEMO.livePercent}%
+                  {livePercentDisplay}
                 </div>
                 <p className="mt-1.5 text-[12px] leading-snug text-black/55">
-                  of buildable
+                  brand mention rate
                   <br />
-                  opportunities live
+                  across AI engines
                 </p>
               </div>
             </div>
 
             {/* Engines */}
             <div className="mt-5 divide-y divide-black/[.06]">
-              {AI_VISIBILITY_DEMO.engines.map(engine => (
+              {aiVisibility.engines.map(engine => (
                 <div key={engine.id} className="flex items-center justify-between py-[11px]">
                   <div className="flex items-center gap-2.5">
                     <span className="grid h-7 w-7 place-items-center rounded-md bg-me-stone text-[10px] font-black text-black/60">
@@ -425,8 +627,7 @@ export default async function OverviewPage() {
               ))}
             </div>
             <p className="mt-3 text-[11.5px] text-black/40">
-              {/* TODO: wire real AI visibility ranks from ai_visibility_runs */}
-              Demo data — connecting to AI Tracker.
+              Avg rank across {AI_ENGINES.length} engines · last 7 days
             </p>
           </MePanel>
         </div>
@@ -498,8 +699,8 @@ export default async function OverviewPage() {
           </Link>
         </section>
 
-        {/* Quick chips footer — keeps inventory tags discoverable */}
-        {activeClients.length > 0 && (
+        {/* Quick chips footer — top 6 most recently active clients */}
+        {activeClientCount > 0 && (
           <section>
             <p className="mb-2 text-[10.5px] font-black uppercase tracking-[.16em] text-black/40">
               Jump to a client
@@ -507,7 +708,12 @@ export default async function OverviewPage() {
             <div className="flex flex-wrap gap-2">
               {activeClients.map(c => (
                 <Link key={c.id} href={`/dashboard/clients/${c.id}`}>
-                  <MeChip>{c.name}</MeChip>
+                  <MeChip>
+                    <span className="font-semibold">{c.name}</span>
+                    {c.domain && (
+                      <span className="ml-1.5 text-black/40">· {c.domain}</span>
+                    )}
+                  </MeChip>
                 </Link>
               ))}
               <Link href="/dashboard/clients">
@@ -518,7 +724,7 @@ export default async function OverviewPage() {
         )}
 
         {/* Bottom CTA when no clients */}
-        {activeClients.length === 0 && (
+        {activeClientCount === 0 && (
           <MePanel className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <span className="grid h-11 w-11 place-items-center rounded-xl bg-me-stone text-2xl text-me-ochre">
