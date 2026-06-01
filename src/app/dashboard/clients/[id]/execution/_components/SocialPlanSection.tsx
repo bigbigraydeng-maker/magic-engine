@@ -118,6 +118,7 @@ export interface GalleryAsset {
   prompt_used: string | null
   is_selected: boolean
   created_at: string
+  generation_status?: string
 }
 
 interface ImageGenerateParams {
@@ -1381,6 +1382,22 @@ function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd, onB
       .catch(() => { /* non-fatal */ })
   }, [clientId, postId, initialAssets])
 
+  // Poll every 3 s while any asset is still generating.
+  useEffect(() => {
+    if (!postId) return
+    const hasGenerating = assets.some(
+      a => a.generation_status === 'generating' || a.generation_status === 'queued_for_retry'
+    )
+    if (!hasGenerating) return
+    const timer = setTimeout(() => {
+      fetch(`/api/clients/${clientId}/visual-assets?post_id=${postId}`)
+        .then(r => r.json() as Promise<{ success: boolean; assets?: GalleryAsset[] }>)
+        .then(data => { if (data.success && data.assets) setAssets(data.assets) })
+        .catch(() => { /* non-fatal */ })
+    }, 3000)
+    return () => clearTimeout(timer)
+  }, [clientId, postId, assets])
+
   // 从素材库选定一张 → 入画廊
   const handlePickFromLibrary = async (clientAssetId: string) => {
     if (!postId || pickingFromLibrary) return
@@ -1413,6 +1430,7 @@ function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd, onB
     onGenStart?.()
     try {
       if (onBackgroundImageGenerate) {
+        // Returns immediately with a 'generating' asset; polling takes over.
         const asset = await onBackgroundImageGenerate({
           prompt: editedImagePrompt,
           aspectRatio: '1:1',
@@ -1435,6 +1453,7 @@ function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd, onB
             prompt_used: editedImagePrompt,
             is_selected: prev.length === 0,
             created_at: new Date().toISOString(),
+            generation_status: 'ready',
           }])
         }
       }
@@ -1527,7 +1546,7 @@ function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd, onB
                 >
                   {generatingImg ? (
                     <span className="flex items-center justify-center gap-2">
-                      <Spinner color="indigo" /> Visual Studio 生成中…（约 15s）
+                      <Spinner color="indigo" /> 提交中…
                     </span>
                   ) : assets.length === 0
                     ? '🎨 生成图片（Visual Studio）'
@@ -1609,6 +1628,22 @@ function StoryCard({ index, story, clientId, launchHubPlatform, onGenStart, onGe
       .catch(() => { /* non-fatal */ })
   }, [clientId, postId, initialAssets])
 
+  // Poll every 3 s while any asset is still generating.
+  useEffect(() => {
+    if (!postId) return
+    const hasGenerating = assets.some(
+      a => a.generation_status === 'generating' || a.generation_status === 'queued_for_retry'
+    )
+    if (!hasGenerating) return
+    const timer = setTimeout(() => {
+      fetch(`/api/clients/${clientId}/visual-assets?post_id=${postId}`)
+        .then(r => r.json() as Promise<{ success: boolean; assets?: GalleryAsset[] }>)
+        .then(data => { if (data.success && data.assets) setAssets(data.assets) })
+        .catch(() => { /* non-fatal */ })
+    }, 3000)
+    return () => clearTimeout(timer)
+  }, [clientId, postId, assets])
+
   const handlePickFromLibrary = async (clientAssetId: string) => {
     if (!postId || pickingFromLibrary) return
     setPickingFromLibrary(true)
@@ -1660,6 +1695,7 @@ function StoryCard({ index, story, clientId, launchHubPlatform, onGenStart, onGe
             prompt_used: editedVisualPrompt,
             is_selected: prev.length === 0,
             created_at: new Date().toISOString(),
+            generation_status: 'ready',
           }])
         }
       }
@@ -2032,29 +2068,44 @@ function ImageGalleryGrid({ assets, aspectRatio, onSelect, onOpenLightbox, selec
         <span className="text-[10px] text-purple-500">{assets.length} 张</span>
       </div>
       <div className="flex flex-wrap gap-2">
-        {assets.map(asset => (
-          <div key={asset.id} className="relative">
-            <button
-              onClick={() => onSelect(asset.id)}
-              disabled={selecting}
-              className={`block rounded border-2 transition-all overflow-hidden ${
-                asset.is_selected
-                  ? 'border-green-500 ring-2 ring-green-200'
-                  : 'border-gray-200 hover:border-purple-400'
-              } disabled:opacity-60`}
-              style={ratioStyle}
-            >
-              <img src={asset.storage_url} alt="" className={`${sizeClass} object-cover`} style={ratioStyle} />
-            </button>
-            {asset.is_selected && (
-              <span className="absolute -top-1.5 -right-1.5 bg-green-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center shadow">✓</span>
-            )}
-            <button
-              onClick={() => onOpenLightbox(asset.storage_url)}
-              className="absolute bottom-0.5 right-0.5 bg-black/60 text-white text-[9px] font-bold rounded px-1.5 py-0.5 hover:bg-black/80"
-            >🔍</button>
-          </div>
-        ))}
+        {assets.map(asset => {
+          const isGenerating = asset.generation_status === 'generating' || asset.generation_status === 'queued_for_retry'
+          return (
+            <div key={asset.id} className="relative">
+              {isGenerating ? (
+                <div
+                  className={`rounded border-2 border-dashed border-purple-300 bg-purple-50 flex flex-col items-center justify-center gap-1 ${sizeClass}`}
+                  style={ratioStyle}
+                >
+                  <span className="w-5 h-5 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-[9px] text-purple-500 font-medium">生成中…</span>
+                </div>
+              ) : (
+                <>
+                  <button
+                    onClick={() => onSelect(asset.id)}
+                    disabled={selecting}
+                    className={`block rounded border-2 transition-all overflow-hidden ${
+                      asset.is_selected
+                        ? 'border-green-500 ring-2 ring-green-200'
+                        : 'border-gray-200 hover:border-purple-400'
+                    } disabled:opacity-60`}
+                    style={ratioStyle}
+                  >
+                    <img src={asset.storage_url} alt="" className={`${sizeClass} object-cover`} style={ratioStyle} />
+                  </button>
+                  {asset.is_selected && (
+                    <span className="absolute -top-1.5 -right-1.5 bg-green-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center shadow">✓</span>
+                  )}
+                  <button
+                    onClick={() => onOpenLightbox(asset.storage_url)}
+                    className="absolute bottom-0.5 right-0.5 bg-black/60 text-white text-[9px] font-bold rounded px-1.5 py-0.5 hover:bg-black/80"
+                  >🔍</button>
+                </>
+              )}
+            </div>
+          )
+        })}
       </div>
     </div>
   )

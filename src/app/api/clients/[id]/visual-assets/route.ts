@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { generateImage } from '@/lib/visual/openai-images'
-import { uploadFromBase64 } from '@/lib/visual/storage'
+import { submitImageGeneration } from '@/lib/visual/atlas'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 // Shape returned to the gallery UI (PostCard / StoryCard).
@@ -11,6 +10,7 @@ interface GalleryAsset {
   prompt_used: string | null
   is_selected: boolean
   created_at: string
+  generation_status: string
 }
 
 function mapAsset(row: {
@@ -19,20 +19,22 @@ function mapAsset(row: {
   prompt_used: string | null
   is_selected: boolean | null
   created_at: string
+  generation_status: string | null
 }): GalleryAsset {
   return {
-    id:          row.id,
-    storage_url: row.storage_url ?? '',
-    prompt_used: row.prompt_used,
-    is_selected: row.is_selected ?? false,
-    created_at:  row.created_at,
+    id:                row.id,
+    storage_url:       row.storage_url ?? '',
+    prompt_used:       row.prompt_used,
+    is_selected:       row.is_selected ?? false,
+    created_at:        row.created_at,
+    generation_status: row.generation_status ?? 'ready',
   }
 }
 
 // GET /api/clients/[id]/visual-assets?post_id=xxx
-// Returns every ready image asset for a content post, selected one first.
-// Used by Social Plan Studio cards to restore the gallery after the drawer
-// closes / the page reloads.
+// Returns all image assets for a content post (including generating/failed),
+// selected first. Used by Social Plan Studio cards to restore gallery after
+// drawer closes / page reloads, and for polling generation status.
 export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
@@ -52,12 +54,11 @@ export async function GET(
 
     const { data, error } = await supabaseAdmin
       .from('visual_assets')
-      .select('id, storage_url, prompt_used, is_selected, created_at')
+      .select('id, storage_url, prompt_used, is_selected, created_at, generation_status')
       .eq('client_id', params.id)
       .eq('post_id', postId)
       .eq('asset_type', 'image')
-      .eq('generation_status', 'ready')
-      .not('storage_url', 'is', null)
+      .in('generation_status', ['ready', 'generating', 'queued_for_retry'])
       .order('is_selected', { ascending: false })
       .order('created_at', { ascending: true })
 
@@ -72,9 +73,10 @@ export async function GET(
 }
 
 // POST /api/clients/[id]/visual-assets
-// Generates a fresh image from a raw prompt and persists it to visual_assets,
-// linked to a content post. Each call appends a new variant — the gallery
-// accumulates rather than overwriting. Returns the created asset.
+// Submits an async image generation job to Atlas and immediately persists a
+// visual_asset row with generation_status = 'generating'. Returns the asset
+// row at once — the caller polls GET until status = 'ready'.
+// The cron /api/cron/poll-visual-jobs picks up 'generating' rows and finalises them.
 // Body: { post_id: string, prompt: string, aspect_ratio?: string }
 export async function POST(
   req: NextRequest,
@@ -99,7 +101,13 @@ export async function POST(
       return NextResponse.json({ success: false, error: access.error }, { status: access.status })
     }
 
-    // Next variant number = current count + 1 (smallint, monotonic per post).
+    // Resolve aspect ratio to pixel dimensions (Atlas requires width/height).
+    const [w, h] = resolvePixelDimensions(aspect_ratio)
+
+    // Submit async job to Atlas — returns immediately with a job_id.
+    const { job_id } = await submitImageGeneration({ prompt, width: w, height: h })
+
+    // Next variant number = current count + 1.
     const { count } = await supabaseAdmin
       .from('visual_assets')
       .select('id', { count: 'exact', head: true })
@@ -108,34 +116,21 @@ export async function POST(
 
     const variant = (count ?? 0) + 1
 
-    const { b64 } = await generateImage({ prompt, aspect_ratio })
-
-    const { storage_url, file_size_kb } = await uploadFromBase64({
-      base64:    b64,
-      clientId:  params.id,
-      postId:    post_id,
-      assetType: 'image',
-      // storage helper types variant as 1|2 for legacy callers; the DB column
-      // is smallint and accepts any positive int. Cast keeps strict mode happy.
-      variant:   variant as 1 | 2,
-    })
-
     const { data: asset, error } = await supabaseAdmin
       .from('visual_assets')
       .insert({
         post_id,
         client_id:         params.id,
         asset_type:        'image',
-        provider:          'openai',
+        provider:          'wavespeed',
+        provider_job_id:   job_id,
         prompt_used:       prompt,
         variant,
-        generation_status: 'ready',
-        storage_url,
-        file_size_kb,
-        cost_usd:          0.04,
+        generation_status: 'generating',
         is_selected:       false,
+        queued_at:         new Date().toISOString(),
       })
-      .select('id, storage_url, prompt_used, is_selected, created_at')
+      .select('id, storage_url, prompt_used, is_selected, created_at, generation_status')
       .single()
 
     if (error) throw error
@@ -146,4 +141,14 @@ export async function POST(
     console.error('[clients/visual-assets POST]', err)
     return NextResponse.json({ success: false, error: message }, { status: 500 })
   }
+}
+
+function resolvePixelDimensions(aspectRatio: string): [number, number] {
+  const map: Record<string, [number, number]> = {
+    '1:1':  [1024, 1024],
+    '4:5':  [896, 1120],
+    '9:16': [720, 1280],
+    '16:9': [1280, 720],
+  }
+  return map[aspectRatio] ?? [1024, 1024]
 }
