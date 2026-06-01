@@ -23,6 +23,7 @@ import { fetchGscSnapshot } from '@/lib/gsc/client'
 import { fetchGa4Snapshot } from '@/lib/ga4/client'
 import { getAdAccountInsights, getAdCampaignInsights } from '@/lib/meta/client'
 import { SEO_METRIC_KEY } from '@/lib/flywheel/vocabulary'
+import { MetaAdsAdapter } from '@/lib/flywheel/adapters/MetaAdsAdapter'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 900
@@ -335,6 +336,11 @@ async function syncMeta(
       .single()
 
     if (error) return { success: false, error: error.message }
+
+    // Write Meta Ads metrics into flywheel_metrics so AnomalyDetectorJob can read them.
+    // pullMetrics() reads the latest meta_ads_snapshots row (just inserted above).
+    await new MetaAdsAdapter().pullMetrics(clientId).catch(() => { /* non-fatal */ })
+
     return { success: true, snapshot_id: (data as { id: string }).id }
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' }
