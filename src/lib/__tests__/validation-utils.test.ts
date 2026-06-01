@@ -89,6 +89,16 @@ describe('clampLimit', () => {
 describe('requireBearerToken', () => {
   let savedKey: string | undefined
 
+  const expectAuthFailure = (
+    result: ReturnType<typeof requireBearerToken>,
+    status: 401 | 500,
+  ) => {
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(status)
+    }
+  }
+
   beforeEach(() => {
     savedKey = process.env.INTERNAL_API_KEY
     process.env.INTERNAL_API_KEY = 'secret-test-key'
@@ -104,26 +114,22 @@ describe('requireBearerToken', () => {
 
   it('returns { ok: false, status: 401 } when header is missing', () => {
     const result = requireBearerToken(undefined)
-    expect(result.ok).toBe(false)
-    expect(result.status).toBe(401)
+    expectAuthFailure(result, 401)
   })
 
   it('returns { ok: false, status: 401 } when token is wrong', () => {
     const result = requireBearerToken('Bearer wrong-token')
-    expect(result.ok).toBe(false)
-    expect(result.status).toBe(401)
+    expectAuthFailure(result, 401)
   })
 
   it('returns { ok: false, status: 401 } for non-Bearer scheme', () => {
     const result = requireBearerToken('Basic secret-test-key')
-    expect(result.ok).toBe(false)
-    expect(result.status).toBe(401)
+    expectAuthFailure(result, 401)
   })
 
   it('returns { ok: false, status: 401 } for empty Bearer token', () => {
     const result = requireBearerToken('Bearer ')
-    expect(result.ok).toBe(false)
-    expect(result.status).toBe(401)
+    expectAuthFailure(result, 401)
   })
 
   it('returns { ok: true } when token matches INTERNAL_API_KEY', () => {
@@ -134,9 +140,8 @@ describe('requireBearerToken', () => {
   it('returns { ok: false, status: 500 } when INTERNAL_API_KEY env var is not set', () => {
     delete process.env.INTERNAL_API_KEY
     const result = requireBearerToken('Bearer anything')
-    expect(result.ok).toBe(false)
     // Config error, not auth error
-    expect(result.status).toBe(500)
+    expectAuthFailure(result, 500)
   })
 
   it('error message does NOT reveal token value', () => {
