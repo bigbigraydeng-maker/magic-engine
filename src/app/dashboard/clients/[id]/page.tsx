@@ -12,8 +12,7 @@ import { NextStepCard, type DiscoveryStatus, type PrescriptionStatus } from './_
 import type { ClientDiscoveryRow } from '@/lib/zhangqian/types';
 import { ClientDataTab } from './_components/ClientDataTab';
 import { LocaleConfirmBanner } from './_components/LocaleConfirmBanner';
-import { BriefGateBanner } from '@/components/brief/BriefGateBanner';
-import { GoalBanner } from './_components/GoalBanner';
+import { IntelligenceSummarySection } from './_components/intelligence/IntelligenceSummarySection';
 
 
 interface Client {
@@ -546,6 +545,9 @@ export default function ClientDetailPage() {
               onAskZhuge={() => setZhugeDrawerOpen(true)}
             />
           )}
+
+          {/* Data Intelligence — 7 trend cards + insights */}
+          <IntelligenceSummarySection clientId={clientId} variant="full" />
 
           {/* Master Brief warning banner */}
           {hasActiveBrief === false && (

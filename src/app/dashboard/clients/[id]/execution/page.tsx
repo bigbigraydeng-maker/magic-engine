@@ -29,7 +29,7 @@ import {
 } from './execution-view-model'
 import { FdeManualEntryModal } from './_components/FdeManualEntryModal'
 import { DataPullbackSection } from './_components/DataPullbackSection'
-import { AnomalySignalPanel } from './_components/AnomalySignalPanel'
+import { IntelligenceSummarySection } from '../_components/intelligence/IntelligenceSummarySection'
 import { BriefGateBanner } from '../_components/BriefGateBanner'
 // MemoryAnnotationPanel removed — Phase 20.D item 6: system handles flywheel recording automatically
 
@@ -2419,6 +2419,9 @@ export default function ExecutionPage() {
         <AnomalySignalPanel clientId={clientId} />
 
         <DataPullbackSection clientId={clientId} />
+
+        {/* Data Intelligence compact — key signals + top insights */}
+        <IntelligenceSummarySection clientId={clientId} variant="compact" />
 
         {/* P18.A.3 — Meta Ads 操作历史与撤销 */}
         <AdsAuditSection clientId={clientId} />
