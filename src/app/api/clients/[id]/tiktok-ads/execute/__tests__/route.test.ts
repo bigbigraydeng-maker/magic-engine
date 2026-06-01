@@ -160,12 +160,12 @@ describe('POST /api/clients/[id]/tiktok-ads/execute', () => {
     expect(res.status).toBe(502)
   })
 
-  // ── tiktok_ads.reactivate_campaign ────────────────────────────────────────
+  // ── ads.reactivate_campaign ───────────────────────────────────────────────
 
   it('reactivates campaign and returns after status ENABLE', async () => {
     mocks.getCampaign.mockResolvedValue({ ...CAMPAIGN_DETAILS, status: 'DISABLE' })
     const res = await POST(
-      makeRequest({ action_type: 'tiktok_ads.reactivate_campaign', campaign_id: CAMPAIGN_ID }),
+      makeRequest({ action_type: 'ads.reactivate_campaign', campaign_id: CAMPAIGN_ID }),
       routeCtx()
     )
     expect(res.status).toBe(200)

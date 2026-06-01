@@ -156,6 +156,9 @@ export const ADS_ACTION_TYPE = {
 
   /** Pull a fresh Meta Ads snapshot into flywheel_metrics (third_party, meta) */
   META_SNAPSHOT: 'ads.meta_snapshot',
+
+  /** Re-enable a paused TikTok campaign (undo of PAUSE_CAMPAIGN) */
+  REACTIVATE_CAMPAIGN: 'ads.reactivate_campaign',
 } as const
 
 export type AdsActionType = (typeof ADS_ACTION_TYPE)[keyof typeof ADS_ACTION_TYPE]

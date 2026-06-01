@@ -4,7 +4,7 @@
  * P18.C.2+3: Execute a TikTok Ads action (pause, reactivate, adjust budget).
  *
  * Body JSON:
- *   action_type             — 'ads.pause_campaign' | 'ads.adjust_bid' | 'tiktok_ads.reactivate_campaign'
+ *   action_type             — 'ads.pause_campaign' | 'ads.adjust_bid' | 'ads.reactivate_campaign'
  *   campaign_id             — TikTok campaign ID string
  *   tiktok_advertiser_id    — TikTok advertiser account ID (overrides env)
  *   params?                 — extra params:
@@ -34,7 +34,7 @@ import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
 const SUPPORTED_ACTION_TYPES = new Set([
   ADS_ACTION_TYPE.PAUSE_CAMPAIGN,
   ADS_ACTION_TYPE.ADJUST_BID,
-  'tiktok_ads.reactivate_campaign',  // undo of pause — not in vocab (undo path only)
+  ADS_ACTION_TYPE.REACTIVATE_CAMPAIGN,
 ])
 
 interface RouteParams {
@@ -87,6 +87,9 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     )
   }
 
+  // TODO P18.D: Validate tiktok_advertiser_id against clients.tiktok_ad_account_id
+  // to prevent IDOR — currently trusts caller-supplied value (acceptable at P18.C skeleton stage).
+
   // ── Credentials ───────────────────────────────────────────────────────────
   const creds = loadTikTokAdsCreds(tiktok_advertiser_id)
   if (!creds) {
@@ -102,7 +105,13 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
   }
 
   // ── Fetch before-state ────────────────────────────────────────────────────
-  const beforeDetails = await getCampaign(creds, campaign_id)
+  let beforeDetails: Awaited<ReturnType<typeof getCampaign>>
+  try {
+    beforeDetails = await getCampaign(creds, campaign_id)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ error: `TikTok API error: ${msg}` }, { status: 502 })
+  }
   if (!beforeDetails) {
     return NextResponse.json(
       { error: 'Failed to fetch campaign details from TikTok. Check campaign_id and access token.' },
@@ -122,45 +131,50 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
   let after: typeof before
   let actionSuccess: boolean
 
-  if (action_type === ADS_ACTION_TYPE.PAUSE_CAMPAIGN) {
-    actionSuccess = await setCampaignStatus(creds, campaign_id, 'DISABLE')
-    after = { ...before, status: 'DISABLE' }
+  try {
+    if (action_type === ADS_ACTION_TYPE.PAUSE_CAMPAIGN) {
+      actionSuccess = await setCampaignStatus(creds, campaign_id, 'DISABLE')
+      after = { ...before, status: 'DISABLE' }
 
-  } else if (action_type === 'tiktok_ads.reactivate_campaign') {
-    actionSuccess = await setCampaignStatus(creds, campaign_id, 'ENABLE')
-    after = { ...before, status: 'ENABLE' }
+    } else if (action_type === ADS_ACTION_TYPE.REACTIVATE_CAMPAIGN) {
+      actionSuccess = await setCampaignStatus(creds, campaign_id, 'ENABLE')
+      after = { ...before, status: 'ENABLE' }
 
-  } else if (action_type === ADS_ACTION_TYPE.ADJUST_BID) {
-    const newBudget = actionParams.new_daily_budget
-    if (!newBudget || newBudget <= 0) {
-      return NextResponse.json(
-        { error: 'params.new_daily_budget is required and must be positive for ads.adjust_bid' },
-        { status: 400 },
-      )
+    } else if (action_type === ADS_ACTION_TYPE.ADJUST_BID) {
+      const newBudget = actionParams.new_daily_budget
+      if (!newBudget || newBudget <= 0) {
+        return NextResponse.json(
+          { error: 'params.new_daily_budget is required and must be positive for ads.adjust_bid' },
+          { status: 400 },
+        )
+      }
+
+      if (before.budget_mode === 'BUDGET_MODE_INFINITE') {
+        return NextResponse.json(
+          { error: 'Cannot adjust budget: campaign uses BUDGET_MODE_INFINITE (no daily budget)' },
+          { status: 422 },
+        )
+      }
+
+      // Safety guardrail: ±20% limit
+      const guardrail = checkBudgetWithinSafeRange(before.budget, newBudget)
+      if (!guardrail.ok) {
+        return NextResponse.json(
+          { error: guardrail.reason, minBudget: guardrail.minBudget, maxBudget: guardrail.maxBudget },
+          { status: 422 },
+        )
+      }
+
+      actionSuccess = await setCampaignBudget(creds, campaign_id, newBudget)
+      after = { ...before, budget: newBudget }
+
+    } else {
+      // Should never reach here — SUPPORTED_ACTION_TYPES guard above
+      return NextResponse.json({ error: 'Internal: unhandled action_type' }, { status: 500 })
     }
-
-    if (before.budget_mode === 'BUDGET_MODE_INFINITE') {
-      return NextResponse.json(
-        { error: 'Cannot adjust budget: campaign uses BUDGET_MODE_INFINITE (no daily budget)' },
-        { status: 422 },
-      )
-    }
-
-    // Safety guardrail: ±20% limit
-    const guardrail = checkBudgetWithinSafeRange(before.budget, newBudget)
-    if (!guardrail.ok) {
-      return NextResponse.json(
-        { error: guardrail.reason, minBudget: guardrail.minBudget, maxBudget: guardrail.maxBudget },
-        { status: 422 },
-      )
-    }
-
-    actionSuccess = await setCampaignBudget(creds, campaign_id, newBudget)
-    after = { ...before, budget: newBudget }
-
-  } else {
-    // Should never reach here — SUPPORTED_ACTION_TYPES guard above
-    return NextResponse.json({ error: 'Internal: unhandled action_type' }, { status: 500 })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ error: `TikTok API error: ${msg}` }, { status: 502 })
   }
 
   if (!actionSuccess) {
