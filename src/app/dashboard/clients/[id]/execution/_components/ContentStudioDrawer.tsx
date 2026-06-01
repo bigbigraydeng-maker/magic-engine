@@ -74,7 +74,7 @@ function tabsForItem(item: ExecutionItem): { tabs: TabDef[]; defaultTab: StudioT
   // SEO, ai_visibility, ads, reputation, competitor, or unknown → show all 3
   return {
     tabs: [['article', 'SEO 文章'], ['social', '图文帖子'], ['video', '短视频']],
-    defaultTab: item.dimension === 'social' ? 'social' : 'article',
+    defaultTab: 'article',
   }
 }
 

@@ -673,9 +673,10 @@ function TaskDetailDrawer({
   }, [item, clientId])
 
   if (!mounted || !item) return null
+  const activeItem = item
 
   // P21.8 — AI Factory 一键量产处理器
-  const stepsJson = item.steps_json as Record<string, unknown> | null
+  const stepsJson = activeItem.steps_json as Record<string, unknown> | null
   const factoryTopic    = typeof stepsJson?.topic === 'string' ? stepsJson.topic : null
   const factoryPlatform = typeof stepsJson?.platform === 'string' ? stepsJson.platform : null
   const isFactoryTask   = stepsJson?.source === 'marketing_plan' && !!factoryTopic
@@ -693,7 +694,7 @@ function TaskDetailDrawer({
         body: JSON.stringify({
           topic:          factoryTopic,
           platforms,
-          executionItemId: item.id,
+          executionItemId: activeItem.id,
         }),
       })
       const data = await res.json() as { success: boolean; successCount?: number; packageId?: string; error?: string }
