@@ -137,7 +137,7 @@ describe('buildExecutionGroups', () => {
     ])
 
     expect(groups[0].pid).toBe(AUTONOMOUS_GROUP_ID)
-    expect(groups[0].label).toBe('自主行动')
+    expect(groups[0].label).toBe('飞轮自主行动')
     expect(groups[0].items).toHaveLength(1)
     expect(groups[1].label).toBe('原处方')
   })

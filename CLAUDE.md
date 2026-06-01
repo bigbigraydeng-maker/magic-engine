@@ -2,6 +2,10 @@
 
 > 每次打开新会话：先看底部 **§ 当前焦点** → 按需读 [ROADMAP.md](./ROADMAP.md)。
 
+**⚠️ 必读规则（每次会话开始前强制执行）：**
+- [`~/.claude/rules/coding-style.md`](~/.claude/rules/coding-style.md) — 含「删除代码前的强制流程」，**PM 反问 ≠ 删除指令**
+- [`~/.claude/rules/development-workflow.md`](~/.claude/rules/development-workflow.md) — 含「删除决策：先读意图，再动手」步骤 0.5
+
 **输出语言**：对话和说明**一律用中文**，**无论用户用什么语言提问**（包括纯英文）。代码 / 变量 / 注释保持英文。
 
 ---
@@ -233,7 +237,7 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-06-01 17:41 NZST （**Phase 22 PR #187 open — 22.D 全闭环 + 22.A.1/A.3 GSC/Meta flywheel_metrics 接通**）
+> 最后更新：2026-06-02 01:08 NZST （**Phase 22 PR #187 open — 22.D 全闭环 + 22.A.1/A.3 GSC/Meta flywheel_metrics 接通**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
