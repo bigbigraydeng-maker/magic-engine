@@ -105,6 +105,9 @@ interface Props {
   /** Called when any Post/Story image generation starts (true) or all finish (false).
    *  Parent uses this to show "制作中" badge on the kanban card. */
   onImageGeneratingChange?: (active: boolean) => void
+  /** When set, image generation is handed off to the parent (runs in background after drawer closes).
+   *  Parent receives the prompt + aspectRatio, handles fetch + DB write, returns image_url via promise. */
+  onBackgroundImageGenerate?: (params: { prompt: string; aspectRatio: string }) => Promise<string>
 }
 
 interface PlanRecord {
@@ -116,7 +119,7 @@ interface PlanRecord {
 
 type PlanTab = 'reels' | 'posts' | 'stories'
 
-export function SocialPlanSection({ clientId, campaignId, campaignName, mode = 'all', item, onBackgroundGenerate, onImageGeneratingChange }: Props) {
+export function SocialPlanSection({ clientId, campaignId, campaignName, mode = 'all', item, onBackgroundGenerate, onImageGeneratingChange, onBackgroundImageGenerate }: Props) {
   const taskKind     = resolveTaskKind(item)
   const taskPlatform = resolveTaskPlatform(item)
   const showBrief    = briefCardVisible(mode, taskKind)
@@ -510,6 +513,7 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
                 launchHubPlatform={taskPlatform ?? config.platform}
                 onGenStart={incImageGen}
                 onGenEnd={decImageGen}
+                onBackgroundImageGenerate={onBackgroundImageGenerate}
               />
             )}
             {taskKind === 'social_story' && plan.stories[0] && (
@@ -517,6 +521,7 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
                 launchHubPlatform={taskPlatform ?? config.platform}
                 onGenStart={incImageGen}
                 onGenEnd={decImageGen}
+                onBackgroundImageGenerate={onBackgroundImageGenerate}
               />
             )}
             {taskKind === 'social_reel' && plan.reels[0] && (
@@ -1284,12 +1289,13 @@ const POST_TYPE_COLOR: Record<string, string> = {
   engagement:   'bg-blue-50 text-blue-700 border-blue-200',
 }
 
-function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd }: {
+function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd, onBackgroundImageGenerate }: {
   post: Post
   clientId: string
   launchHubPlatform?: string
   onGenStart?: () => void
   onGenEnd?: () => void
+  onBackgroundImageGenerate?: (params: { prompt: string; aspectRatio: string }) => Promise<string>
 }) {
   const [open, setOpen]             = useState(false)
   const [generatingImg, setGen]     = useState(false)
@@ -1306,14 +1312,20 @@ function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd }: {
     setImgError(null)
     onGenStart?.()
     try {
-      const res = await fetch('/api/visual/image-preview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: editedImagePrompt, client_id: clientId, aspect_ratio: '1:1' }),
-      })
-      const json = await res.json() as { success: boolean; image_url?: string; error?: string }
-      if (!json.success) throw new Error(json.error ?? '生成失败')
-      setImgUrl(json.image_url ?? null)
+      let imageUrl: string
+      if (onBackgroundImageGenerate) {
+        imageUrl = await onBackgroundImageGenerate({ prompt: editedImagePrompt, aspectRatio: '1:1' })
+      } else {
+        const res = await fetch('/api/visual/image-preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: editedImagePrompt, client_id: clientId, aspect_ratio: '1:1' }),
+        })
+        const json = await res.json() as { success: boolean; image_url?: string; error?: string }
+        if (!json.success) throw new Error(json.error ?? '生成失败')
+        imageUrl = json.image_url ?? ''
+      }
+      setImgUrl(imageUrl)
     } catch (e) {
       setImgError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -1433,13 +1445,14 @@ function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd }: {
   )
 }
 
-function StoryCard({ index, story, clientId, launchHubPlatform, onGenStart, onGenEnd }: {
+function StoryCard({ index, story, clientId, launchHubPlatform, onGenStart, onGenEnd, onBackgroundImageGenerate }: {
   index: number
   story: Story
   clientId: string
   launchHubPlatform?: string
   onGenStart?: () => void
   onGenEnd?: () => void
+  onBackgroundImageGenerate?: (params: { prompt: string; aspectRatio: string }) => Promise<string>
 }) {
   const [generatingImg, setGen]               = useState(false)
   const [imgUrl, setImgUrl]                   = useState<string | null>(null)
@@ -1453,14 +1466,20 @@ function StoryCard({ index, story, clientId, launchHubPlatform, onGenStart, onGe
     setImgError(null)
     onGenStart?.()
     try {
-      const res = await fetch('/api/visual/image-preview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: editedVisualPrompt, client_id: clientId, aspect_ratio: '9:16' }),
-      })
-      const json = await res.json() as { success: boolean; image_url?: string; error?: string }
-      if (!json.success) throw new Error(json.error ?? '生成失败')
-      setImgUrl(json.image_url ?? null)
+      let imageUrl: string
+      if (onBackgroundImageGenerate) {
+        imageUrl = await onBackgroundImageGenerate({ prompt: editedVisualPrompt, aspectRatio: '9:16' })
+      } else {
+        const res = await fetch('/api/visual/image-preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: editedVisualPrompt, client_id: clientId, aspect_ratio: '9:16' }),
+        })
+        const json = await res.json() as { success: boolean; image_url?: string; error?: string }
+        if (!json.success) throw new Error(json.error ?? '生成失败')
+        imageUrl = json.image_url ?? ''
+      }
+      setImgUrl(imageUrl)
     } catch (e) {
       setImgError(e instanceof Error ? e.message : String(e))
     } finally {

@@ -1548,6 +1548,8 @@ export default function ExecutionPage() {
   const [bgGeneratingIds, setBgGeneratingIds] = useState<Set<string>>(new Set())
   // 图片生成中的执行项 ID 集合（drawer 还开着，但图片在 Visual Studio 渲染，kanban 卡片也要显示"制作中"）
   const [imageGenActiveIds, setImageGenActiveIds] = useState<Set<string>>(new Set())
+  // 后台图片生成任务（关抽屉后继续跑）：itemId → count（同一任务可能有多张并发）
+  const [bgImageGenCount, setBgImageGenCount] = useState(0)
 
   const handleDownloadDocx = async () => {
     setIsDocxLoading(true)
@@ -1897,6 +1899,43 @@ export default function ExecutionPage() {
     })
   }, [])
 
+  // 后台图片生成：关抽屉后继续跑，完成后把 image_url 写入 content_posts.visual_brief
+  const handleBackgroundImageGenerate = useCallback(async (
+    itemId: string,
+    params: { prompt: string; aspectRatio: string },
+  ): Promise<string> => {
+    setBgImageGenCount(c => c + 1)
+    try {
+      const res = await fetch('/api/visual/image-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: params.prompt, client_id: clientId, aspect_ratio: params.aspectRatio }),
+      })
+      const json = await res.json() as { success: boolean; image_url?: string; error?: string }
+      if (!json.success) throw new Error(json.error ?? '生成失败')
+      const imageUrl = json.image_url ?? ''
+
+      // 写入 content_posts.visual_brief（找该 item 关联的 post）
+      if (imageUrl) {
+        const postsRes = await fetch(`/api/clients/${clientId}/posts?execution_item_id=${itemId}`).catch(() => null)
+        if (postsRes?.ok) {
+          const postsJson = await postsRes.json() as { posts?: { id: string }[] }
+          const postId = postsJson.posts?.[0]?.id
+          if (postId) {
+            await fetch(`/api/posts/${postId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ visual_brief: imageUrl }),
+            }).catch(() => {})
+          }
+        }
+      }
+      return imageUrl
+    } finally {
+      setBgImageGenCount(c => Math.max(0, c - 1))
+    }
+  }, [clientId])
+
   // 合并两种"制作中"来源，传给 PrescriptionGroup → ExecutionItemCard
   const allBgGeneratingIds = useMemo<Set<string>>(() => {
     if (imageGenActiveIds.size === 0) return bgGeneratingIds
@@ -2067,6 +2106,16 @@ export default function ExecutionPage() {
           <div className="rounded-xl border border-red-200 bg-red-50 p-3 flex items-center justify-between gap-3 text-sm text-red-700">
             <span>{opError}</span>
             <button onClick={() => setOpError(null)} className="text-red-400 hover:text-red-600 text-lg leading-none">×</button>
+          </div>
+        )}
+
+        {/* 全局图片后台生成提示条 */}
+        {bgImageGenCount > 0 && (
+          <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 flex items-center gap-3">
+            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-violet-400 border-t-violet-800 shrink-0" />
+            <span className="text-xs font-black text-violet-800">
+              🎨 Visual Studio 图片生成中（{bgImageGenCount} 张）…关闭窗口不影响生成，完成后自动保存到 Launch Hub
+            </span>
           </div>
         )}
 
@@ -2292,6 +2341,7 @@ export default function ExecutionPage() {
           onContentGenerated={() => void fetchItems(true)}
           onBackgroundGenerate={handleBackgroundGenerate}
           onImageGeneratingChange={handleImageGeneratingChange}
+          onBackgroundImageGenerate={handleBackgroundImageGenerate}
           readonly={isAutonomousItem(studioItem)}
         />
       )}
