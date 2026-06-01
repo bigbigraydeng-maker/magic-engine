@@ -125,8 +125,8 @@ export function DeploymentForm({
 
   if (!directive) {
     return (
-      <div className="p-6 bg-amber-50 border border-amber-200 rounded-lg">
-        <p className="text-amber-700">
+      <div className="p-6 bg-me-ochre/10 border border-me-ochre/30 rounded-lg">
+        <p className="text-me-ochre">
           No active GEO directive found. Create one in the GEO Composer first.
         </p>
       </div>
@@ -138,13 +138,13 @@ export function DeploymentForm({
 
       {/* CMS Banner — shown when no CMS is connected */}
       {cmsProviders !== undefined && !hasConnectedCms && (
-        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-3">
-          <span className="text-blue-500 text-xl mt-0.5">🔗</span>
+        <div className="p-4 bg-me-ochre/10 border border-me-ochre/30 rounded-lg flex items-start gap-3">
+          <span className="text-me-ochre text-xl mt-0.5">🔗</span>
           <div>
-            <p className="text-blue-800 font-medium text-sm">Connect your website for one-click deployment</p>
-            <p className="text-blue-600 text-xs mt-1">
+            <p className="text-me-ochre font-medium text-sm">Connect your website for one-click deployment</p>
+            <p className="text-me-ochre text-xs mt-1">
               Link a WordPress or Shopify store in{' '}
-              <a href={`/dashboard/clients/${clientId}/settings`} className="underline hover:text-blue-800">
+              <a href={`/dashboard/clients/${clientId}/settings`} className="underline hover:text-me-ochre">
                 Settings → Website Connection
               </a>{' '}
               to deploy this snippet automatically.
@@ -155,9 +155,9 @@ export function DeploymentForm({
 
       {/* One-Click CMS Deploy — shown when a CMS is connected */}
       {hasConnectedCms && (
-        <div className="bg-white border border-green-200 rounded-lg p-6">
+        <div className="bg-white border border-[#5C8A4A]/30 rounded-lg p-6">
           <h3 className="text-lg font-semibold mb-1">One-Click Deploy</h3>
-          <p className="text-sm text-gray-500 mb-4">
+          <p className="text-sm text-me-charcoal/55 mb-4">
             Publish the GEO snippet directly to your connected website.
           </p>
 
@@ -167,7 +167,7 @@ export function DeploymentForm({
                 key={provider}
                 onClick={() => handleCmsPublish(provider)}
                 disabled={cmsPublish.loading || loading}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition font-medium text-sm"
+                className="px-4 py-2 bg-[#5C8A4A] text-white rounded-lg hover:bg-[#5C8A4A] disabled:bg-me-stone disabled:cursor-not-allowed transition font-medium text-sm"
               >
                 {cmsPublish.loading
                   ? 'Publishing…'
@@ -177,14 +177,14 @@ export function DeploymentForm({
           </div>
 
           {cmsPublish.success && (
-            <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded text-green-700 text-sm">
+            <div className="mt-3 p-3 bg-[#5C8A4A]/10 border border-[#5C8A4A]/30 rounded text-[#5C8A4A] text-sm">
               Published successfully!{' '}
               {cmsPublish.publishedUrl && (
                 <a
                   href={cmsPublish.publishedUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="underline hover:text-green-900"
+                  className="underline hover:text-[#5C8A4A]"
                 >
                   View page →
                 </a>
@@ -192,7 +192,7 @@ export function DeploymentForm({
             </div>
           )}
           {cmsPublish.error && (
-            <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+            <div className="mt-3 p-3 bg-[#C2453A]/10 border border-[#C2453A]/30 rounded text-[#C2453A] text-sm">
               {cmsPublish.error}
             </div>
           )}
@@ -200,7 +200,7 @@ export function DeploymentForm({
       )}
 
       {/* Manual Install Section */}
-      <div className="bg-white border border-gray-200 rounded-lg p-6">
+      <div className="bg-white border border-black/10 rounded-lg p-6">
         <h3 className="text-lg font-semibold mb-4">Add Page</h3>
 
         <div className="space-y-4">
@@ -214,7 +214,7 @@ export function DeploymentForm({
           <button
             onClick={() => setShowConfirm(true)}
             disabled={!isUrlValid || loading || isRecording || pageUrl.length === 0}
-            className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition font-medium"
+            className="w-full px-4 py-2 bg-me-ochre text-white rounded-lg hover:bg-me-ochre disabled:bg-me-stone disabled:cursor-not-allowed transition font-medium"
           >
             {isRecording ? 'Recording...' : DEPLOYMENT_CONFIG.LABELS.MARK_DEPLOYED}
           </button>
@@ -222,12 +222,12 @@ export function DeploymentForm({
       </div>
 
       {/* Snippet Display */}
-      <div className="bg-white border border-gray-200 rounded-lg p-6">
+      <div className="bg-white border border-black/10 rounded-lg p-6">
         <h3 className="text-lg font-semibold mb-4">
           {DEPLOYMENT_CONFIG.LABELS.INSTALL_SNIPPET}
         </h3>
 
-        <div className="space-y-4 text-sm text-gray-600">
+        <div className="space-y-4 text-sm text-me-charcoal/60">
           <p>1. Copy the snippet below</p>
           <p>2. Paste it into your page {'<head>'} or {'<body>'} tag</p>
           <p>3. Click "{DEPLOYMENT_CONFIG.LABELS.MARK_DEPLOYED}" to confirm installation</p>
@@ -247,8 +247,8 @@ export function DeploymentForm({
         <div
           className={`p-4 rounded-lg ${
             feedback.isSuccess
-              ? 'bg-green-50 text-green-700 border border-green-200'
-              : 'bg-red-50 text-red-700 border border-red-200'
+              ? 'bg-[#5C8A4A]/10 text-[#5C8A4A] border border-[#5C8A4A]/30'
+              : 'bg-[#C2453A]/10 text-[#C2453A] border border-[#C2453A]/30'
           }`}
         >
           {feedback.message}

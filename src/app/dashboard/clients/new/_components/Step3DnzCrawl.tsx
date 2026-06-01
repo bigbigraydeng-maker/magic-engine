@@ -76,9 +76,9 @@ export default function Step3DnzCrawl({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-slate-900 mb-1">Site Audit (DNZ Crawl)</h2>
-        <p className="text-slate-600 text-sm">
-          We&apos;ll crawl <span className="font-mono text-slate-800">{domain}</span> to map
+        <h2 className="text-2xl font-bold text-me-charcoal/90 mb-1">Site Audit (DNZ Crawl)</h2>
+        <p className="text-me-charcoal/60 text-sm">
+          We&apos;ll crawl <span className="font-mono text-me-charcoal/75">{domain}</span> to map
           existing content. This typically takes 2–5 minutes for up to 100 pages.
         </p>
       </div>
@@ -88,7 +88,7 @@ export default function Step3DnzCrawl({
           <button
             type="button"
             onClick={() => startCrawl()}
-            className="px-8 py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg"
+            className="px-8 py-3 bg-me-ochre hover:bg-me-ochre text-white font-semibold rounded-lg"
           >
             ▶ Start Crawl
           </button>
@@ -96,39 +96,39 @@ export default function Step3DnzCrawl({
       )}
 
       {starting && (
-        <div className="text-center py-8 text-slate-500 text-sm">Starting crawl…</div>
+        <div className="text-center py-8 text-me-charcoal/55 text-sm">Starting crawl…</div>
       )}
 
       {jobId && job && (
-        <div className="bg-slate-50 border border-slate-200 rounded-lg p-5 space-y-4">
+        <div className="bg-me-ivory border border-black/10 rounded-lg p-5 space-y-4">
           {/* Status row */}
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-slate-700">
+            <span className="text-sm font-medium text-me-charcoal/75">
               Status:{' '}
               <span
                 className={
                   job.status === 'completed'
-                    ? 'text-emerald-700'
+                    ? 'text-[#5C8A4A]'
                     : job.status === 'failed'
-                      ? 'text-red-700'
-                      : 'text-blue-700'
+                      ? 'text-[#C2453A]'
+                      : 'text-me-ochre'
                 }
               >
                 {job.status}
               </span>
             </span>
             {etaSec != null && etaSec > 0 && (
-              <span className="text-xs text-slate-500">
+              <span className="text-xs text-me-charcoal/55">
                 ~{Math.ceil(etaSec / 60)} min remaining
               </span>
             )}
           </div>
 
           {/* Progress bar */}
-          <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+          <div className="w-full bg-me-stone rounded-full h-2 overflow-hidden">
             <div
               className={`h-full transition-all duration-500 ${
-                job.status === 'failed' ? 'bg-red-400' : 'bg-blue-500'
+                job.status === 'failed' ? 'bg-[#C2453A]/70' : 'bg-me-ochre'
               }`}
               style={{ width: `${progressPercent}%` }}
             />
@@ -137,27 +137,27 @@ export default function Step3DnzCrawl({
           {/* Counts */}
           <div className="grid grid-cols-3 gap-3 text-center">
             <div>
-              <p className="text-xs text-slate-500">Discovered</p>
-              <p className="text-xl font-bold text-slate-900">
+              <p className="text-xs text-me-charcoal/55">Discovered</p>
+              <p className="text-xl font-bold text-me-charcoal/90">
                 {job.total_urls_discovered ?? 0}
               </p>
             </div>
             <div>
-              <p className="text-xs text-slate-500">Crawled</p>
-              <p className="text-xl font-bold text-slate-900">
+              <p className="text-xs text-me-charcoal/55">Crawled</p>
+              <p className="text-xl font-bold text-me-charcoal/90">
                 {job.total_pages_classified ?? 0}
               </p>
             </div>
             <div>
-              <p className="text-xs text-slate-500">GEO Detected</p>
-              <p className="text-xl font-bold text-emerald-700">
+              <p className="text-xs text-me-charcoal/55">GEO Detected</p>
+              <p className="text-xl font-bold text-[#5C8A4A]">
                 {status?.geoDetectedCount ?? 0}
               </p>
             </div>
           </div>
 
           {job.error_message && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+            <div className="p-3 bg-[#C2453A]/10 border border-[#C2453A]/30 rounded text-xs text-[#C2453A]">
               {job.error_message}
             </div>
           )}
@@ -167,7 +167,7 @@ export default function Step3DnzCrawl({
               type="button"
               onClick={() => startCrawl(true)}
               disabled={starting}
-              className="text-xs text-blue-600 hover:text-blue-800 underline disabled:opacity-50"
+              className="text-xs text-me-ochre hover:text-me-ochre underline disabled:opacity-50"
             >
               {starting ? 'Starting…' : '↺ Re-crawl'}
             </button>
@@ -176,7 +176,7 @@ export default function Step3DnzCrawl({
       )}
 
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+        <div className="p-3 bg-[#C2453A]/10 border border-[#C2453A]/30 rounded-lg text-sm text-[#C2453A]">
           {error}
         </div>
       )}
@@ -185,7 +185,7 @@ export default function Step3DnzCrawl({
         <button
           type="button"
           onClick={onBack}
-          className="px-6 py-3 text-slate-600 hover:text-slate-900 font-medium"
+          className="px-6 py-3 text-me-charcoal/60 hover:text-me-charcoal/90 font-medium"
         >
           ← Back
         </button>
@@ -193,7 +193,7 @@ export default function Step3DnzCrawl({
           <button
             type="button"
             onClick={onSkip}
-            className="px-6 py-3 text-slate-600 hover:text-slate-900 font-medium border border-slate-300 rounded-lg"
+            className="px-6 py-3 text-me-charcoal/60 hover:text-me-charcoal/90 font-medium border border-black/15 rounded-lg"
           >
             Skip crawl
           </button>
@@ -201,7 +201,7 @@ export default function Step3DnzCrawl({
             type="button"
             onClick={handleContinue}
             disabled={!isTerminal && isInProgress}
-            className="px-6 py-3 bg-blue-500 hover:bg-blue-600 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors"
+            className="px-6 py-3 bg-me-ochre hover:bg-me-ochre disabled:bg-me-stone disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors"
           >
             Continue to Step 4 →
           </button>

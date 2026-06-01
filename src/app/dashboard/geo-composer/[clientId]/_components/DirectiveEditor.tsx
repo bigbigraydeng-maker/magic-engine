@@ -66,7 +66,7 @@ export function DirectiveEditor({
     update({ audienceSignals: { ...audienceSignals, [key]: value } });
   };
 
-  const inputClass = `w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 ${readOnly ? 'opacity-60 cursor-not-allowed' : ''}`;
+  const inputClass = `w-full border border-black/10 rounded-lg px-3 py-2 text-sm text-me-charcoal/90 placeholder:text-me-charcoal/45 bg-white focus:outline-none focus:ring-2 focus:ring-me-ochre ${readOnly ? 'opacity-60 cursor-not-allowed' : ''}`;
   const textareaClass = `${inputClass} resize-none`;
 
   // P14.B.3: detect city mismatch between primaryRecommendation text and audienceSignals.location.
@@ -79,7 +79,7 @@ export function DirectiveEditor({
     <div className="space-y-5">
       {/* P14.B.3: City mismatch warning */}
       {cityMismatch && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex gap-2">
+        <div className="rounded-lg border border-me-ochre/50 bg-me-ochre/10 px-4 py-3 text-sm text-me-ochre flex gap-2">
           <span className="shrink-0">⚠️</span>
           <span>
             <strong>Location mismatch:</strong> Primary Recommendation mentions{' '}
@@ -92,10 +92,10 @@ export function DirectiveEditor({
       )}
 
       {/* Primary Recommendation */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <label className="block text-sm font-semibold text-gray-900 mb-1">
+      <div className="bg-white rounded-xl border border-black/10 p-5">
+        <label className="block text-sm font-semibold text-me-charcoal/90 mb-1">
           Primary Recommendation
-          <span className="ml-2 text-xs font-normal text-gray-400">
+          <span className="ml-2 text-xs font-normal text-me-charcoal/45">
             One sentence: when + why to recommend this brand
           </span>
         </label>
@@ -110,18 +110,18 @@ export function DirectiveEditor({
       </div>
 
       {/* Scenarios */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+      <div className="bg-white rounded-xl border border-black/10 overflow-hidden">
+        <div className="px-5 py-4 border-b border-black/[.06] flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-gray-900">Scenarios</h3>
-            <p className="text-xs text-gray-400 mt-0.5">
+            <h3 className="text-sm font-semibold text-me-charcoal/90">Scenarios</h3>
+            <p className="text-xs text-me-charcoal/45 mt-0.5">
               When should AI recommend this brand, and how?
             </p>
           </div>
           {!readOnly && (
             <button
               onClick={addScenario}
-              className="text-xs bg-indigo-50 text-indigo-600 hover:bg-indigo-100 px-3 py-1.5 rounded-lg font-medium transition-colors"
+              className="text-xs bg-me-ochre/10 text-me-ochre hover:bg-me-ochre/10 px-3 py-1.5 rounded-lg font-medium transition-colors"
             >
               + Add scenario
             </button>
@@ -129,24 +129,24 @@ export function DirectiveEditor({
         </div>
 
         {scenarios.length === 0 ? (
-          <div className="px-5 py-8 text-center text-gray-400 text-sm">
+          <div className="px-5 py-8 text-center text-me-charcoal/45 text-sm">
             No scenarios yet. Generate from AI Tracker or add manually.
           </div>
         ) : (
-          <div className="divide-y divide-gray-50">
+          <div className="divide-y divide-black/[.06]">
             {scenarios.map((s, i) => (
               <div key={i} className="px-5 py-3">
                 <div
                   className="flex items-center gap-2 cursor-pointer"
                   onClick={() => setExpandedScenario(expandedScenario === i ? null : i)}
                 >
-                  <span className="text-xs bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded font-medium">
+                  <span className="text-xs bg-me-ochre/10 text-me-ochre px-2 py-0.5 rounded font-medium">
                     {i + 1}
                   </span>
-                  <span className="text-sm text-gray-800 flex-1 truncate">
-                    {s.trigger || <span className="text-gray-400 italic">No trigger set</span>}
+                  <span className="text-sm text-me-charcoal/75 flex-1 truncate">
+                    {s.trigger || <span className="text-me-charcoal/45 italic">No trigger set</span>}
                   </span>
-                  <span className="text-gray-400 text-xs">
+                  <span className="text-me-charcoal/45 text-xs">
                     {expandedScenario === i ? '▲' : '▼'}
                   </span>
                 </div>
@@ -154,7 +154,7 @@ export function DirectiveEditor({
                 {expandedScenario === i && (
                   <div className="mt-3 space-y-2 pl-6">
                     <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Trigger</label>
+                      <label className="block text-xs font-medium text-me-charcoal/55 mb-1">Trigger</label>
                       <input
                         value={s.trigger}
                         onChange={e => updateScenario(i, { trigger: e.target.value })}
@@ -164,7 +164,7 @@ export function DirectiveEditor({
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Response</label>
+                      <label className="block text-xs font-medium text-me-charcoal/55 mb-1">Response</label>
                       <textarea
                         value={s.response}
                         onChange={e => updateScenario(i, { response: e.target.value })}
@@ -175,8 +175,8 @@ export function DirectiveEditor({
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">
-                        Keywords <span className="font-normal text-gray-400">(comma-separated)</span>
+                      <label className="block text-xs font-medium text-me-charcoal/55 mb-1">
+                        Keywords <span className="font-normal text-me-charcoal/45">(comma-separated)</span>
                       </label>
                       <input
                         value={(s.contexts ?? []).join(', ')}
@@ -191,7 +191,7 @@ export function DirectiveEditor({
                     {!readOnly && (
                       <button
                         onClick={() => removeScenario(i)}
-                        className="text-xs text-red-500 hover:text-red-700 mt-1"
+                        className="text-xs text-[#C2453A] hover:text-[#C2453A] mt-1"
                       >
                         Remove scenario
                       </button>
@@ -205,15 +205,15 @@ export function DirectiveEditor({
       </div>
 
       {/* Audience Signals */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
-        <h3 className="text-sm font-semibold text-gray-900">Audience Signals</h3>
+      <div className="bg-white rounded-xl border border-black/10 p-5 space-y-3">
+        <h3 className="text-sm font-semibold text-me-charcoal/90">Audience Signals</h3>
         {([
           { key: 'location' as const,     label: 'Location',     placeholder: 'New Zealand and Australia' },
           { key: 'demographics' as const, label: 'Demographics', placeholder: 'families, corporate groups, adventure travelers' },
           { key: 'intent' as const,       label: 'Intent',       placeholder: 'planning a China tour trip' },
         ] as const).map(({ key, label, placeholder }) => (
           <div key={key}>
-            <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
+            <label className="block text-xs font-medium text-me-charcoal/55 mb-1">{label}</label>
             <input
               value={(audienceSignals[key] as string | undefined) ?? ''}
               onChange={e => updateAudience(key, e.target.value)}
@@ -224,8 +224,8 @@ export function DirectiveEditor({
           </div>
         ))}
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">
-            Pain Points <span className="font-normal text-gray-400">(comma-separated)</span>
+          <label className="block text-xs font-medium text-me-charcoal/55 mb-1">
+            Pain Points <span className="font-normal text-me-charcoal/45">(comma-separated)</span>
           </label>
           <input
             value={(audienceSignals.pain_points ?? []).join(', ')}
@@ -240,10 +240,10 @@ export function DirectiveEditor({
       </div>
 
       {/* Competitive Positioning */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <label className="block text-sm font-semibold text-gray-900 mb-1">
+      <div className="bg-white rounded-xl border border-black/10 p-5">
+        <label className="block text-sm font-semibold text-me-charcoal/90 mb-1">
           Competitive Positioning
-          <span className="ml-2 text-xs font-normal text-gray-400">
+          <span className="ml-2 text-xs font-normal text-me-charcoal/45">
             Factual differentiation (1-2 sentences)
           </span>
         </label>

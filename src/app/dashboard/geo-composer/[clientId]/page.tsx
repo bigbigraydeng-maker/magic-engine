@@ -14,9 +14,9 @@ interface Client {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  active:   'bg-green-100 text-green-700',
-  draft:    'bg-amber-100 text-amber-700',
-  archived: 'bg-gray-100 text-gray-500',
+  active:   'bg-[#5C8A4A]/12 text-[#5C8A4A]',
+  draft:    'bg-me-ochre/10 text-me-ochre',
+  archived: 'bg-me-ivory text-me-charcoal/55',
 };
 
 /**
@@ -181,10 +181,10 @@ export default function GeoComposerPage() {
     return (
       <div className="p-6">
         <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-gray-200 rounded w-64" />
+          <div className="h-8 bg-me-stone rounded w-64" />
           <div className="grid grid-cols-2 gap-6">
-            <div className="h-96 bg-gray-200 rounded-xl" />
-            <div className="h-96 bg-gray-200 rounded-xl" />
+            <div className="h-96 bg-me-stone rounded-xl" />
+            <div className="h-96 bg-me-stone rounded-xl" />
           </div>
         </div>
       </div>
@@ -198,14 +198,14 @@ export default function GeoComposerPage() {
     <div className="p-6 space-y-4">
       {/* Header */}
       <div className="flex items-center gap-3 flex-wrap">
-        <Link href="/dashboard/geo-composer" className="text-gray-400 hover:text-gray-600 text-sm flex-shrink-0">
+        <Link href="/dashboard/geo-composer" className="text-me-charcoal/45 hover:text-me-charcoal/60 text-sm flex-shrink-0">
           ← GEO Composer
         </Link>
-        <span className="text-gray-300">/</span>
-        <h1 className="text-2xl font-bold text-gray-900">{client?.name ?? clientId}</h1>
+        <span className="text-me-charcoal/35">/</span>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-me-charcoal/90">{client?.name ?? clientId}</h1>
         {client?.domain && (
           <a href={`https://${client.domain}`} target="_blank" rel="noreferrer"
-            className="text-xs text-indigo-500 hover:text-indigo-700 font-mono">
+            className="text-xs text-me-ochre hover:text-me-ochre font-mono">
             {client.domain} ↗
           </a>
         )}
@@ -213,7 +213,7 @@ export default function GeoComposerPage() {
 
       {/* Master Brief warning */}
       {hasMasterBrief === false && (
-        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-700">
+        <div className="flex items-center gap-2 bg-me-ochre/10 border border-me-ochre/30 rounded-lg px-4 py-2.5 text-sm text-me-ochre">
           <span>⚠</span>
           <span>
             此客户尚未创建 Master Brief，生成内容质量会受影响。
@@ -230,25 +230,25 @@ export default function GeoComposerPage() {
       <div className="flex items-center gap-3 flex-wrap">
         {activeDirective ? (
           <div className="flex items-center gap-2">
-            <span className="text-sm bg-green-50 text-green-700 border border-green-200 px-3 py-1.5 rounded-full font-medium">
+            <span className="text-sm bg-[#5C8A4A]/10 text-[#5C8A4A] border border-[#5C8A4A]/30 px-3 py-1.5 rounded-full font-medium">
               ✓ Active: Directive v{activeDirective.version} · {(activeDirective.deployed_pages ?? []).length} page{(activeDirective.deployed_pages ?? []).length !== 1 ? 's' : ''} deployed
             </span>
             <Link
               href={`/dashboard/geo-composer/${clientId}/deploy`}
-              className="text-sm font-medium px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+              className="text-sm font-medium px-3 py-1.5 bg-[#5C8A4A] hover:bg-[#5C8A4A] text-white rounded-lg transition-colors"
             >
               部署 Snippet →
             </Link>
           </div>
         ) : (
-          <span className="text-sm bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-full font-medium">
+          <span className="text-sm bg-me-ochre/10 text-me-ochre border border-me-ochre/30 px-3 py-1.5 rounded-full font-medium">
             ⚠ 尚无 active 指令 — 在下方生成并激活
           </span>
         )}
 
         {/* Action message */}
         {actionMsg && (
-          <span className={`text-sm font-medium ${actionOk ? 'text-green-600' : 'text-red-600'}`}>
+          <span className={`text-sm font-medium ${actionOk ? 'text-[#5C8A4A]' : 'text-[#C2453A]'}`}>
             {actionMsg}
           </span>
         )}
@@ -258,7 +258,7 @@ export default function GeoComposerPage() {
             onClick={handleGenerate}
             disabled={generating}
             title={directives.length === 0 ? '基于 AI Tracker 弱点 + Master Brief 生成指令' : '基于最新 AI Tracker 数据重新生成'}
-            className="text-sm font-medium px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-lg transition-colors flex items-center gap-1.5"
+            className="text-sm font-medium px-4 py-2 bg-me-ochre hover:bg-me-ochre disabled:bg-me-ochre/70 text-white rounded-lg transition-colors flex items-center gap-1.5"
           >
             {generating ? '⏳ 生成中…' : directives.length === 0 ? '✨ 生成 GEO 指令' : '✨ 重新生成'}
           </button>
@@ -268,15 +268,15 @@ export default function GeoComposerPage() {
       {/* Version selector */}
       {directives.length > 1 && (
         <div className="flex items-center gap-2 text-sm">
-          <span className="text-gray-500">Version:</span>
+          <span className="text-me-charcoal/55">Version:</span>
           {directives.map(d => (
             <button
               key={d.id}
               onClick={() => loadDirective(d)}
               className={`px-3 py-1 rounded-lg text-xs font-medium border transition-colors ${
                 selected?.id === d.id
-                  ? 'bg-indigo-600 text-white border-indigo-600'
-                  : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-300'
+                  ? 'bg-me-ochre text-white border-me-ochre'
+                  : 'bg-white border-black/10 text-me-charcoal/60 hover:border-me-ochre/50'
               }`}
             >
               v{d.version}
@@ -290,7 +290,7 @@ export default function GeoComposerPage() {
 
       {/* Empty state */}
       {directives.length === 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-6 text-sm text-amber-700">
+        <div className="bg-me-ochre/10 border border-me-ochre/30 rounded-xl px-5 py-6 text-sm text-me-ochre">
           <strong>No directives yet.</strong> Click <strong>✨ Regenerate from AI Tracker</strong> to generate your first GEO directive automatically from the client&apos;s Brief and AI Visibility data.
         </div>
       )}
@@ -302,7 +302,7 @@ export default function GeoComposerPage() {
             {/* Left: editor */}
             <div>
               {isReadOnly && (
-                <div className="mb-3 text-xs text-gray-400 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                <div className="mb-3 text-xs text-me-charcoal/45 bg-me-ivory border border-black/10 rounded-lg px-3 py-2">
                   This directive is archived. Select a draft or active version to edit.
                 </div>
               )}
@@ -329,19 +329,19 @@ export default function GeoComposerPage() {
 
           {/* Bottom action bar */}
           {!isReadOnly && (
-            <div className="flex items-center justify-between bg-white border border-gray-200 rounded-xl px-5 py-4">
-              <p className="text-sm text-gray-500">
+            <div className="flex items-center justify-between bg-white border border-black/10 rounded-xl px-5 py-4">
+              <p className="text-sm text-me-charcoal/55">
                 v{selected.version} ·{' '}
                 <span className={`font-medium px-2 py-0.5 rounded-full text-xs ${STATUS_COLORS[selected.status]}`}>
                   {selected.status}
                 </span>
-                {isDirty && <span className="ml-2 text-amber-600 text-xs">Unsaved changes</span>}
+                {isDirty && <span className="ml-2 text-me-ochre text-xs">Unsaved changes</span>}
               </p>
               <div className="flex items-center gap-3">
                 <button
                   onClick={handleSave}
                   disabled={saving || !isDirty}
-                  className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg text-gray-700 hover:border-indigo-400 hover:text-indigo-700 disabled:opacity-40 transition-colors"
+                  className="px-4 py-2 text-sm font-medium border border-black/15 rounded-lg text-me-charcoal/75 hover:border-me-ochre/50 hover:text-me-ochre disabled:opacity-40 transition-colors"
                 >
                   {saving ? 'Saving…' : 'Save Draft'}
                 </button>
@@ -350,7 +350,7 @@ export default function GeoComposerPage() {
                     onClick={handleActivate}
                     disabled={activating || isDirty}
                     title={isDirty ? 'Save your changes first' : 'Activate this directive'}
-                    className="px-4 py-2 text-sm font-medium bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white rounded-lg transition-colors"
+                    className="px-4 py-2 text-sm font-medium bg-[#5C8A4A] hover:bg-[#5C8A4A] disabled:bg-[#5C8A4A]/70 text-white rounded-lg transition-colors"
                   >
                     {activating ? 'Activating…' : '⚡ Activate'}
                   </button>

@@ -32,14 +32,14 @@ interface GatewayResponse {
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 const PROVIDERS: Record<string, { label: string; color: string; bg: string; dot: string }> = {
-  openai:      { label: 'OpenAI',      color: 'text-emerald-700', bg: 'bg-emerald-50',  dot: 'bg-emerald-500' },
-  anthropic:   { label: 'Anthropic',   color: 'text-amber-700',   bg: 'bg-amber-50',    dot: 'bg-amber-500'   },
-  perplexity:  { label: 'Perplexity',  color: 'text-blue-700',    bg: 'bg-blue-50',     dot: 'bg-blue-500'    },
-  'workers-ai':{ label: 'Workers AI',  color: 'text-violet-700',  bg: 'bg-violet-50',   dot: 'bg-violet-500'  },
+  openai:      { label: 'OpenAI',      color: 'text-[#5C8A4A]', bg: 'bg-[#5C8A4A]/10',  dot: 'bg-[#5C8A4A]' },
+  anthropic:   { label: 'Anthropic',   color: 'text-me-ochre',   bg: 'bg-me-ochre/10',    dot: 'bg-me-ochre'   },
+  perplexity:  { label: 'Perplexity',  color: 'text-me-ochre',    bg: 'bg-me-ochre/10',     dot: 'bg-me-ochre'    },
+  'workers-ai':{ label: 'Workers AI',  color: 'text-me-ochre',  bg: 'bg-me-ochre/10',   dot: 'bg-me-ochre'  },
 }
 
 function providerInfo(p: string) {
-  return PROVIDERS[p] ?? { label: p, color: 'text-gray-700', bg: 'bg-gray-100', dot: 'bg-gray-400' }
+  return PROVIDERS[p] ?? { label: p, color: 'text-me-charcoal/75', bg: 'bg-me-ivory', dot: 'bg-me-charcoal/25' }
 }
 
 function fmt(n: number | null | undefined, digits = 0) {
@@ -80,10 +80,10 @@ function MetricCard({ label, value, sub, accent }: {
   label: string; value: string; sub?: string; accent?: string
 }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white px-5 py-4">
-      <p className="text-xs font-medium uppercase tracking-wide text-gray-400">{label}</p>
-      <p className={`mt-1.5 text-2xl font-bold ${accent ?? 'text-gray-900'}`}>{value}</p>
-      {sub && <p className="mt-0.5 text-xs text-gray-400">{sub}</p>}
+    <div className="rounded-lg border border-black/10 bg-white px-5 py-4">
+      <p className="text-xs font-medium uppercase tracking-wide text-me-charcoal/45">{label}</p>
+      <p className={`mt-1.5 text-2xl font-bold ${accent ?? 'text-me-charcoal/90'}`}>{value}</p>
+      {sub && <p className="mt-0.5 text-xs text-me-charcoal/45">{sub}</p>}
     </div>
   )
 }
@@ -99,11 +99,11 @@ function ProviderBadge({ provider }: { provider: string }) {
 }
 
 function StatusPill({ status }: { status: number | null }) {
-  if (status == null) return <span className="text-xs text-gray-300">—</span>
+  if (status == null) return <span className="text-xs text-me-charcoal/35">—</span>
   const ok = status >= 200 && status < 300
   return (
     <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-bold tabular-nums ${
-      ok ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'
+      ok ? 'bg-[#5C8A4A]/12 text-[#5C8A4A]' : 'bg-[#C2453A]/10 text-[#C2453A]'
     }`}>
       {status}
     </span>
@@ -112,8 +112,8 @@ function StatusPill({ status }: { status: number | null }) {
 
 function CachePill({ cached }: { cached: boolean }) {
   return cached
-    ? <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-bold bg-sky-100 text-sky-700">HIT</span>
-    : <span className="text-xs text-gray-300">MISS</span>
+    ? <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-bold bg-me-ochre/10 text-me-ochre">HIT</span>
+    : <span className="text-xs text-me-charcoal/35">MISS</span>
 }
 
 // ─── per-provider summary bar ─────────────────────────────────────────────────
@@ -131,8 +131,8 @@ function ProviderSummaryRow({ logs }: { logs: GatewayLog[] }) {
   const maxCount = Math.max(...entries.map(([, v]) => v.count), 1)
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-5">
-      <h2 className="mb-4 text-sm font-semibold text-gray-700">Provider 分布</h2>
+    <div className="rounded-lg border border-black/10 bg-white p-5">
+      <h2 className="mb-4 text-sm font-semibold text-me-charcoal/75">Provider 分布</h2>
       <div className="space-y-3">
         {entries.map(([prov, stats]) => {
           const info = providerInfo(prov)
@@ -140,12 +140,12 @@ function ProviderSummaryRow({ logs }: { logs: GatewayLog[] }) {
           return (
             <div key={prov} className="flex items-center gap-3">
               <span className={`w-24 shrink-0 text-xs font-semibold ${info.color}`}>{info.label}</span>
-              <div className="flex-1 h-2 rounded-full bg-gray-100 overflow-hidden">
+              <div className="flex-1 h-2 rounded-full bg-me-ivory overflow-hidden">
                 <div className={`h-full rounded-full ${info.dot}`} style={{ width: `${pct}%` }} />
               </div>
-              <span className="w-8 text-right text-xs tabular-nums text-gray-500">{stats.count}</span>
-              <span className="w-20 text-right text-xs tabular-nums text-gray-400">{fmtCost(stats.cost)}</span>
-              <span className="w-24 text-right text-xs tabular-nums text-gray-400">{fmt(stats.tokens)} tok</span>
+              <span className="w-8 text-right text-xs tabular-nums text-me-charcoal/55">{stats.count}</span>
+              <span className="w-20 text-right text-xs tabular-nums text-me-charcoal/45">{fmtCost(stats.cost)}</span>
+              <span className="w-24 text-right text-xs tabular-nums text-me-charcoal/45">{fmt(stats.tokens)} tok</span>
             </div>
           )
         })}
@@ -211,23 +211,23 @@ export default function AIGatewayPage() {
   const totalPages = resultInfo ? Math.ceil(resultInfo.total_count / perPage) : 1
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-me-ivory p-6">
       <div className="mx-auto max-w-7xl space-y-6">
 
         {/* ── Header ── */}
         <div className="flex items-start justify-between">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <h1 className="text-2xl font-bold text-gray-900">AI Gateway 监控</h1>
-              <span className="flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
+              <h1 className="font-display text-2xl font-bold tracking-tight text-me-charcoal/90">AI Gateway 监控</h1>
+              <span className="flex items-center gap-1.5 rounded-full bg-[#5C8A4A]/10 px-2.5 py-0.5 text-xs font-medium text-[#5C8A4A]">
                 <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#5C8A4A]/70 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-[#5C8A4A]" />
                 </span>
                 Live
               </span>
             </div>
-            <p className="text-sm text-gray-400">
+            <p className="text-sm text-me-charcoal/45">
               Cloudflare AI Gateway · <span className="font-mono">magic-engine</span>
               {lastRefresh && (
                 <> · 上次刷新 {lastRefresh.toLocaleTimeString('zh-CN')}</>
@@ -237,17 +237,17 @@ export default function AIGatewayPage() {
           <button
             onClick={() => { setPage(1); fetchLogs(1) }}
             disabled={loading}
-            className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50 transition"
+            className="flex items-center gap-2 rounded-lg border border-black/10 bg-white px-4 py-2 text-sm font-medium text-me-charcoal/75 shadow-sm hover:bg-me-ivory disabled:opacity-50 transition"
           >
             {loading
-              ? <><span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500" /> 刷新中</>
+              ? <><span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-black/15 border-t-me-ochre" /> 刷新中</>
               : '刷新'}
           </button>
         </div>
 
         {/* ── Error ── */}
         {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="rounded-lg border border-[#C2453A]/30 bg-[#C2453A]/10 px-4 py-3 text-sm text-[#C2453A]">
             <span className="font-semibold">错误：</span>{error}
           </div>
         )}
@@ -263,7 +263,7 @@ export default function AIGatewayPage() {
             label="缓存命中率"
             value={hitRate != null ? `${hitRate}%` : '—'}
             sub={`${cacheHits} 次命中`}
-            accent={hitRate != null && hitRate >= 20 ? 'text-sky-600' : 'text-gray-900'}
+            accent={hitRate != null && hitRate >= 20 ? 'text-me-ochre' : 'text-me-charcoal/90'}
           />
           <MetricCard label="输入 Token" value={fmt(totalTokIn)} sub="prompt" />
           <MetricCard label="输出 Token" value={fmt(totalTokOut)} sub="completion" />
@@ -271,12 +271,12 @@ export default function AIGatewayPage() {
             label="总费用"
             value={fmtCost(totalCost)}
             sub="USD · 本页"
-            accent="text-gray-900"
+            accent="text-me-charcoal/90"
           />
           <MetricCard
             label="平均延迟"
             value={fmtMs(avgLatency)}
-            accent={avgLatency != null && avgLatency > 5000 ? 'text-amber-600' : 'text-gray-900'}
+            accent={avgLatency != null && avgLatency > 5000 ? 'text-me-ochre' : 'text-me-charcoal/90'}
           />
         </div>
 
@@ -284,18 +284,18 @@ export default function AIGatewayPage() {
         {logs.length > 0 && <ProviderSummaryRow logs={logs} />}
 
         {/* ── Logs table ── */}
-        <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+        <div className="rounded-lg border border-black/10 bg-white overflow-hidden">
 
           {/* table header */}
-          <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3 gap-4">
+          <div className="flex items-center justify-between border-b border-black/[.06] px-5 py-3 gap-4">
             {/* provider filter tabs */}
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setFilterProvider('all')}
                 className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
                   filterProvider === 'all'
-                    ? 'bg-gray-900 text-white'
-                    : 'text-gray-500 hover:bg-gray-100'
+                    ? 'bg-me-charcoal/90 text-white'
+                    : 'text-me-charcoal/55 hover:bg-me-ivory'
                 }`}
               >
                 全部 {logs.length > 0 && <span className="ml-1 opacity-70">{logs.length}</span>}
@@ -310,7 +310,7 @@ export default function AIGatewayPage() {
                     className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
                       filterProvider === p
                         ? `${info.bg} ${info.color}`
-                        : 'text-gray-500 hover:bg-gray-100'
+                        : 'text-me-charcoal/55 hover:bg-me-ivory'
                     }`}
                   >
                     {info.label} <span className="ml-1 opacity-60">{count}</span>
@@ -321,11 +321,11 @@ export default function AIGatewayPage() {
 
             {/* pagination */}
             {totalPages > 1 && (
-              <div className="flex shrink-0 items-center gap-2 text-xs text-gray-500">
+              <div className="flex shrink-0 items-center gap-2 text-xs text-me-charcoal/55">
                 <button
                   onClick={() => setPage(p => Math.max(1, p - 1))}
                   disabled={page === 1}
-                  className="rounded border border-gray-200 px-2 py-1 hover:bg-gray-50 disabled:opacity-40"
+                  className="rounded border border-black/10 px-2 py-1 hover:bg-me-ivory disabled:opacity-40"
                 >
                   ← 上页
                 </button>
@@ -333,7 +333,7 @@ export default function AIGatewayPage() {
                 <button
                   onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                   disabled={page === totalPages}
-                  className="rounded border border-gray-200 px-2 py-1 hover:bg-gray-50 disabled:opacity-40"
+                  className="rounded border border-black/10 px-2 py-1 hover:bg-me-ivory disabled:opacity-40"
                 >
                   下页 →
                 </button>
@@ -343,8 +343,8 @@ export default function AIGatewayPage() {
 
           {/* loading */}
           {loading && logs.length === 0 && (
-            <div className="flex items-center justify-center gap-2 py-20 text-sm text-gray-400">
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-200 border-t-blue-500" />
+            <div className="flex items-center justify-center gap-2 py-20 text-sm text-me-charcoal/45">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/10 border-t-me-ochre" />
               加载中…
             </div>
           )}
@@ -353,8 +353,8 @@ export default function AIGatewayPage() {
           {!loading && logs.length === 0 && !error && (
             <div className="py-20 text-center">
               <p className="text-4xl mb-3">📡</p>
-              <p className="text-sm font-medium text-gray-500">暂无日志记录</p>
-              <p className="mt-1 text-xs text-gray-400">
+              <p className="text-sm font-medium text-me-charcoal/55">暂无日志记录</p>
+              <p className="mt-1 text-xs text-me-charcoal/45">
                 OpenAI / Anthropic 请求经 AI Gateway 后会自动出现在这里
               </p>
             </div>
@@ -365,7 +365,7 @@ export default function AIGatewayPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50/60 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  <tr className="border-b border-black/[.06] bg-me-ivory/60 text-xs font-semibold uppercase tracking-wide text-me-charcoal/45">
                     <th className="px-4 py-3 text-left">时间</th>
                     <th className="px-4 py-3 text-left">Provider</th>
                     <th className="px-4 py-3 text-left">模型</th>
@@ -381,18 +381,18 @@ export default function AIGatewayPage() {
                   {visible.map((log, idx) => (
                     <tr
                       key={log.id}
-                      className={`border-b border-gray-50 transition hover:bg-gray-50/80 ${
-                        idx % 2 === 0 ? '' : 'bg-gray-50/30'
+                      className={`border-b border-black/[.04] transition hover:bg-me-ivory/80 ${
+                        idx % 2 === 0 ? '' : 'bg-me-ivory/30'
                       }`}
                     >
-                      <td className="px-4 py-3 font-mono text-xs text-gray-400 whitespace-nowrap">
+                      <td className="px-4 py-3 font-mono text-xs text-me-charcoal/45 whitespace-nowrap">
                         {fmtTime(log.created_at)}
                       </td>
                       <td className="px-4 py-3">
                         <ProviderBadge provider={log.provider} />
                       </td>
                       <td className="px-4 py-3 max-w-[160px]">
-                        <span className="font-mono text-xs text-gray-700 truncate block" title={log.model ?? ''}>
+                        <span className="font-mono text-xs text-me-charcoal/75 truncate block" title={log.model ?? ''}>
                           {modelShort(log.model)}
                         </span>
                       </td>
@@ -402,19 +402,19 @@ export default function AIGatewayPage() {
                       <td className="px-4 py-3 text-center">
                         <CachePill cached={log.cached} />
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-gray-600">
+                      <td className="px-4 py-3 text-right font-mono text-xs text-me-charcoal/60">
                         {fmt(log.tokens_in)}
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-gray-600">
+                      <td className="px-4 py-3 text-right font-mono text-xs text-me-charcoal/60">
                         {fmt(log.tokens_out)}
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-gray-700">
+                      <td className="px-4 py-3 text-right font-mono text-xs text-me-charcoal/75">
                         {fmtCost(log.cost)}
                       </td>
                       <td className={`px-4 py-3 text-right font-mono text-xs ${
                         log.latency != null && log.latency > 8000
-                          ? 'text-amber-600 font-semibold'
-                          : 'text-gray-600'
+                          ? 'text-me-ochre font-semibold'
+                          : 'text-me-charcoal/60'
                       }`}>
                         {fmtMs(log.latency)}
                       </td>
@@ -427,7 +427,7 @@ export default function AIGatewayPage() {
 
           {/* footer */}
           {visible.length > 0 && (
-            <div className="border-t border-gray-100 px-5 py-2.5 text-xs text-gray-400 flex justify-between">
+            <div className="border-t border-black/[.06] px-5 py-2.5 text-xs text-me-charcoal/45 flex justify-between">
               <span>显示 {visible.length} 条 / 共 {resultInfo?.total_count ?? logs.length} 条</span>
               <span>每 30 秒自动刷新</span>
             </div>

@@ -31,7 +31,7 @@ export default function AnalyticsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">Analytics</h1>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-white">Analytics</h1>
         <div className="flex gap-2">
           {TIME_RANGES.map((r) => (
             <Button
@@ -48,7 +48,7 @@ export default function AnalyticsPage() {
 
       {error ? (
         <Card>
-          <p className="text-sm text-gray-400 text-center py-8">
+          <p className="text-sm text-me-charcoal/45 text-center py-8">
             No analytics data available yet. Generate and publish content to see analytics.
           </p>
         </Card>
@@ -66,24 +66,24 @@ export default function AnalyticsPage() {
             <Card title="Facebook">
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Posts</span>
-                  <span className="text-gray-200">{data.platformBreakdown.facebook.posts}</span>
+                  <span className="text-me-charcoal/45">Posts</span>
+                  <span className="text-me-charcoal/25">{data.platformBreakdown.facebook.posts}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Engagement</span>
-                  <span className="text-gray-200">{data.platformBreakdown.facebook.engagement}</span>
+                  <span className="text-me-charcoal/45">Engagement</span>
+                  <span className="text-me-charcoal/25">{data.platformBreakdown.facebook.engagement}</span>
                 </div>
               </div>
             </Card>
             <Card title="Xiaohongshu">
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Posts</span>
-                  <span className="text-gray-200">{data.platformBreakdown.xiaohongshu.posts}</span>
+                  <span className="text-me-charcoal/45">Posts</span>
+                  <span className="text-me-charcoal/25">{data.platformBreakdown.xiaohongshu.posts}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Engagement</span>
-                  <span className="text-gray-200">{data.platformBreakdown.xiaohongshu.engagement}</span>
+                  <span className="text-me-charcoal/45">Engagement</span>
+                  <span className="text-me-charcoal/25">{data.platformBreakdown.xiaohongshu.engagement}</span>
                 </div>
               </div>
             </Card>
@@ -92,17 +92,17 @@ export default function AnalyticsPage() {
           {/* Top Posts */}
           <Card title="Top Posts">
             {data.topPosts.length === 0 ? (
-              <p className="text-sm text-gray-500">No posts collected yet.</p>
+              <p className="text-sm text-me-charcoal/55">No posts collected yet.</p>
             ) : (
               <div className="space-y-3">
                 {data.topPosts.map((post) => (
-                  <div key={post.id} className="p-3 bg-gray-700/30 rounded">
+                  <div key={post.id} className="p-3 bg-me-charcoal/30 rounded">
                     <div className="flex items-center justify-between mb-2">
                       <Badge variant={post.platform === 'facebook' ? 'info' : 'error'}>{post.platform}</Badge>
-                      <span className="text-xs text-gray-500">{new Date(post.collected_at).toLocaleDateString()}</span>
+                      <span className="text-xs text-me-charcoal/55">{new Date(post.collected_at).toLocaleDateString()}</span>
                     </div>
-                    <p className="text-sm text-gray-200 line-clamp-2">{post.content}</p>
-                    <div className="flex gap-4 mt-2 text-xs text-gray-400">
+                    <p className="text-sm text-me-charcoal/25 line-clamp-2">{post.content}</p>
+                    <div className="flex gap-4 mt-2 text-xs text-me-charcoal/45">
                       <span>{post.metrics.likes} likes</span>
                       <span>{post.metrics.comments} comments</span>
                       <span>{post.metrics.shares} shares</span>

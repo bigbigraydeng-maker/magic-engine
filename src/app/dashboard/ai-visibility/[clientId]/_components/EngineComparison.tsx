@@ -5,17 +5,17 @@ import { getEngineDisplayName } from '@/lib/ai-tracker/engine-display-names';
 
 // Tailwind-safe colour maps per engine
 const ENGINE_CARD_STYLE: Record<string, string> = {
-  openai: 'border-green-200 bg-green-50 text-green-900',
-  google: 'border-blue-200 bg-blue-50 text-blue-900',
-  perplexity: 'border-purple-200 bg-purple-50 text-purple-900',
-  anthropic: 'border-orange-200 bg-orange-50 text-orange-900',
+  openai: 'border-[#5C8A4A]/30 bg-[#5C8A4A]/10 text-[#5C8A4A]',
+  google: 'border-me-ochre/30 bg-me-ochre/10 text-me-ochre',
+  perplexity: 'border-me-ochre/30 bg-me-ochre/10 text-me-ochre',
+  anthropic: 'border-me-ochre/30 bg-me-ochre/10 text-me-ochre',
 };
 
 const ENGINE_BADGE_STYLE: Record<string, string> = {
-  openai: 'bg-green-100 text-green-700',
-  google: 'bg-blue-100 text-blue-700',
-  perplexity: 'bg-purple-100 text-purple-700',
-  anthropic: 'bg-orange-100 text-orange-700',
+  openai: 'bg-[#5C8A4A]/12 text-[#5C8A4A]',
+  google: 'bg-me-ochre/10 text-me-ochre',
+  perplexity: 'bg-me-ochre/10 text-me-ochre',
+  anthropic: 'bg-me-ochre/10 text-me-ochre',
 };
 
 interface Props {
@@ -31,8 +31,8 @@ interface Props {
 export function EngineComparison({ runs, brandName }: Props) {
   if (runs.length === 0) {
     return (
-      <div className="bg-white rounded-xl border border-gray-200 py-16 text-center">
-        <p className="text-gray-400 text-sm">No run data yet. Click ▶ Run Now to start.</p>
+      <div className="bg-white rounded-xl border border-black/10 py-16 text-center">
+        <p className="text-me-charcoal/45 text-sm">No run data yet. Click ▶ Run Now to start.</p>
       </div>
     );
   }
@@ -71,11 +71,11 @@ export function EngineComparison({ runs, brandName }: Props) {
         {stats.map(s => (
           <div
             key={s.engine}
-            className={`rounded-xl border p-5 ${ENGINE_CARD_STYLE[s.engine] ?? 'border-gray-200 bg-white text-gray-900'}`}
+            className={`rounded-xl border p-5 ${ENGINE_CARD_STYLE[s.engine] ?? 'border-black/10 bg-white text-me-charcoal/90'}`}
           >
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold">{getEngineDisplayName(s.engine)}</h3>
-              <span className={`text-xs px-2 py-1 rounded-full font-medium ${ENGINE_BADGE_STYLE[s.engine] ?? 'bg-gray-100 text-gray-600'}`}>
+              <span className={`text-xs px-2 py-1 rounded-full font-medium ${ENGINE_BADGE_STYLE[s.engine] ?? 'bg-me-ivory text-me-charcoal/60'}`}>
                 {s.total} runs
               </span>
             </div>
@@ -116,54 +116,54 @@ export function EngineComparison({ runs, brandName }: Props) {
       </div>
 
       {/* Recent run log */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="px-5 py-4 border-b border-gray-100">
-          <h3 className="text-sm font-semibold text-gray-900">Recent Run Log</h3>
-          <p className="text-xs text-gray-400 mt-0.5">Last {Math.min(runs.length, 30)} entries</p>
+      <div className="bg-white rounded-xl border border-black/10 overflow-hidden">
+        <div className="px-5 py-4 border-b border-black/[.06]">
+          <h3 className="text-sm font-semibold text-me-charcoal/90">Recent Run Log</h3>
+          <p className="text-xs text-me-charcoal/45 mt-0.5">Last {Math.min(runs.length, 30)} entries</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
-              <tr className="bg-gray-50 border-b border-gray-100">
-                <th className="text-left px-4 py-2 text-gray-500 font-semibold uppercase tracking-wider">Engine</th>
-                <th className="text-left px-4 py-2 text-gray-500 font-semibold uppercase tracking-wider">Model</th>
-                <th className="text-left px-4 py-2 text-gray-500 font-semibold uppercase tracking-wider">Brand Rank</th>
-                <th className="text-left px-4 py-2 text-gray-500 font-semibold uppercase tracking-wider">Brands Found</th>
-                <th className="text-left px-4 py-2 text-gray-500 font-semibold uppercase tracking-wider">Latency</th>
-                <th className="text-left px-4 py-2 text-gray-500 font-semibold uppercase tracking-wider">Time</th>
-                <th className="text-left px-4 py-2 text-gray-500 font-semibold uppercase tracking-wider">Status</th>
+              <tr className="bg-me-ivory border-b border-black/[.06]">
+                <th className="text-left px-4 py-2 text-me-charcoal/55 font-semibold uppercase tracking-wider">Engine</th>
+                <th className="text-left px-4 py-2 text-me-charcoal/55 font-semibold uppercase tracking-wider">Model</th>
+                <th className="text-left px-4 py-2 text-me-charcoal/55 font-semibold uppercase tracking-wider">Brand Rank</th>
+                <th className="text-left px-4 py-2 text-me-charcoal/55 font-semibold uppercase tracking-wider">Brands Found</th>
+                <th className="text-left px-4 py-2 text-me-charcoal/55 font-semibold uppercase tracking-wider">Latency</th>
+                <th className="text-left px-4 py-2 text-me-charcoal/55 font-semibold uppercase tracking-wider">Time</th>
+                <th className="text-left px-4 py-2 text-me-charcoal/55 font-semibold uppercase tracking-wider">Status</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="divide-y divide-black/[.06]">
               {runs.slice(0, 30).map(run => (
-                <tr key={run.id} className={run.error_message ? 'bg-red-50' : 'hover:bg-gray-50'}>
+                <tr key={run.id} className={run.error_message ? 'bg-[#C2453A]/10' : 'hover:bg-me-ivory'}>
                   <td className="px-4 py-2.5">
                     <span className={`font-medium ${ENGINE_BADGE_STYLE[run.ai_engine] ?? ''} px-2 py-0.5 rounded`}>
                       {getEngineDisplayName(run.ai_engine)}
                     </span>
                   </td>
-                  <td className="px-4 py-2.5 font-mono text-gray-500">{run.ai_model}</td>
+                  <td className="px-4 py-2.5 font-mono text-me-charcoal/55">{run.ai_model}</td>
                   <td className="px-4 py-2.5">
                     {run.client_brand_rank != null ? (
-                      <span className="text-amber-700 font-bold">#{run.client_brand_rank}</span>
+                      <span className="text-me-ochre font-bold">#{run.client_brand_rank}</span>
                     ) : (
-                      <span className="text-gray-300">—</span>
+                      <span className="text-me-charcoal/35">—</span>
                     )}
                   </td>
-                  <td className="px-4 py-2.5 text-gray-600">
+                  <td className="px-4 py-2.5 text-me-charcoal/60">
                     {Array.isArray(run.brands_mentioned) ? run.brands_mentioned.length : 0}
                   </td>
-                  <td className="px-4 py-2.5 text-gray-600">
+                  <td className="px-4 py-2.5 text-me-charcoal/60">
                     {run.latency_ms != null ? `${(run.latency_ms / 1000).toFixed(1)}s` : '—'}
                   </td>
-                  <td className="px-4 py-2.5 text-gray-400">
+                  <td className="px-4 py-2.5 text-me-charcoal/45">
                     {run.ran_at ? new Date(run.ran_at).toLocaleString() : '—'}
                   </td>
                   <td className="px-4 py-2.5">
                     {run.error_message ? (
-                      <span className="text-red-600" title={run.error_message}>❌</span>
+                      <span className="text-[#C2453A]" title={run.error_message}>❌</span>
                     ) : (
-                      <span className="text-green-600">✓</span>
+                      <span className="text-[#5C8A4A]">✓</span>
                     )}
                   </td>
                 </tr>

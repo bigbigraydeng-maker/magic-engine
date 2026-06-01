@@ -128,8 +128,8 @@ export default function Step5Activate({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-slate-900 mb-1">Activate Client</h2>
-        <p className="text-slate-600 text-sm">
+        <h2 className="text-2xl font-bold text-me-charcoal/90 mb-1">Activate Client</h2>
+        <p className="text-me-charcoal/60 text-sm">
           We&apos;ll generate the Master Brief and an initial GEO Directive in parallel.
           This typically takes 1–2 minutes.
         </p>
@@ -140,7 +140,7 @@ export default function Step5Activate({
           <button
             type="button"
             onClick={() => setStarted(true)}
-            className="px-8 py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg"
+            className="px-8 py-3 bg-me-ochre hover:bg-me-ochre text-white font-semibold rounded-lg"
           >
             ▶ Activate Now
           </button>
@@ -165,7 +165,7 @@ export default function Step5Activate({
       )}
 
       {done && (briefStatus === 'failed' || directiveStatus === 'failed') && (
-        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+        <div className="p-3 bg-me-ochre/10 border border-me-ochre/30 rounded-lg text-xs text-me-ochre">
           ⚠️ One or more pipelines failed. You can retry from the client dashboard
           (Master Brief tab / GEO Composer) after onboarding completes.
         </div>
@@ -176,7 +176,7 @@ export default function Step5Activate({
           type="button"
           onClick={onBack}
           disabled={started && !done}
-          className="px-6 py-3 text-slate-600 hover:text-slate-900 disabled:opacity-30 font-medium"
+          className="px-6 py-3 text-me-charcoal/60 hover:text-me-charcoal/90 disabled:opacity-30 font-medium"
         >
           ← Back
         </button>
@@ -184,7 +184,7 @@ export default function Step5Activate({
           type="button"
           onClick={handleFinish}
           disabled={!started || !done}
-          className="px-6 py-3 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-300 text-white font-semibold rounded-lg"
+          className="px-6 py-3 bg-[#5C8A4A] hover:bg-[#5C8A4A] disabled:bg-me-stone text-white font-semibold rounded-lg"
         >
           {done ? 'Go to client dashboard →' : 'Working…'}
         </button>
@@ -212,19 +212,19 @@ function PipelineRow({
   }[state]
 
   const tone = {
-    idle: 'border-slate-200 bg-slate-50',
-    running: 'border-blue-200 bg-blue-50',
-    success: 'border-emerald-200 bg-emerald-50',
-    failed: 'border-red-200 bg-red-50',
+    idle: 'border-black/10 bg-me-ivory',
+    running: 'border-me-ochre/30 bg-me-ochre/10',
+    success: 'border-[#5C8A4A]/30 bg-[#5C8A4A]/10',
+    failed: 'border-[#C2453A]/30 bg-[#C2453A]/10',
   }[state]
 
   return (
     <div className={`flex items-start gap-3 p-4 rounded-lg border ${tone}`}>
       <span className={`text-xl ${state === 'running' ? 'animate-pulse' : ''}`}>{icon}</span>
       <div className="flex-1">
-        <p className="text-sm font-semibold text-slate-900">{label}</p>
-        <p className="text-xs text-slate-600">{description}</p>
-        {error && <p className="text-xs text-red-700 mt-1">{error}</p>}
+        <p className="text-sm font-semibold text-me-charcoal/90">{label}</p>
+        <p className="text-xs text-me-charcoal/60">{description}</p>
+        {error && <p className="text-xs text-[#C2453A] mt-1">{error}</p>}
       </div>
     </div>
   )

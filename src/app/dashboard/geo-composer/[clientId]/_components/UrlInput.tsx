@@ -45,14 +45,14 @@ export function UrlInput({
         onBlur={() => setTouched(true)}
         placeholder={placeholder}
         disabled={disabled}
-        className={`w-full px-4 py-2 border rounded-lg font-mono text-sm text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed transition ${
+        className={`w-full px-4 py-2 border rounded-lg font-mono text-sm text-me-charcoal/90 disabled:bg-me-ivory disabled:cursor-not-allowed transition ${
           isError
-            ? 'border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500'
-            : 'border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500'
+            ? 'border-[#C2453A] focus:outline-none focus:ring-2 focus:ring-[#C2453A]'
+            : 'border-black/15 focus:outline-none focus:ring-2 focus:ring-me-ochre'
         }`}
       />
       {isError && (
-        <p className="mt-2 text-sm text-red-600">
+        <p className="mt-2 text-sm text-[#C2453A]">
           {DEPLOYMENT_CONFIG.ERRORS.INVALID_URL}
         </p>
       )}

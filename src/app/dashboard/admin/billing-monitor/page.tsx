@@ -69,26 +69,26 @@ export default function BillingMonitorPage() {
   }, [selectedMonth])
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-me-ivory py-8 px-4 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl">
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center gap-3 mb-4">
             <span className="text-3xl">💳</span>
-            <h1 className="text-3xl font-bold text-gray-900">Billing Monitor</h1>
+            <h1 className="font-display text-3xl font-bold tracking-tight text-me-charcoal/90">Billing Monitor</h1>
           </div>
-          <p className="text-gray-600">Track DataForSEO API usage and costs by client and month</p>
+          <p className="text-me-charcoal/60">Track DataForSEO API usage and costs by client and month</p>
         </div>
 
         {/* Month Selector */}
         <div className="mb-8 bg-white rounded-lg shadow p-6">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
+          <label className="block text-sm font-medium text-me-charcoal/75 mb-2">
             Select Month
           </label>
           <select
             value={selectedMonth}
             onChange={(e) => setSelectedMonth(e.target.value)}
-            className="block w-full rounded-md border border-gray-300 bg-white text-gray-900 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+            className="block w-full rounded-md border border-black/15 bg-white text-me-charcoal/90 px-3 py-2 shadow-sm focus:border-me-ochre focus:outline-none focus:ring-me-ochre"
           >
             {availableMonths.map((month) => (
               <option key={month} value={month}>
@@ -100,7 +100,7 @@ export default function BillingMonitorPage() {
 
         {/* Error Message */}
         {error && (
-          <div className="mb-8 rounded-md bg-red-50 p-4 text-red-700">
+          <div className="mb-8 rounded-md bg-[#C2453A]/10 p-4 text-[#C2453A]">
             {error}
           </div>
         )}
@@ -111,24 +111,24 @@ export default function BillingMonitorPage() {
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-3 mb-8">
               {/* Total Cost Card */}
               <div className="rounded-lg bg-white shadow p-6">
-                <p className="text-sm font-medium text-gray-600">Total Cost</p>
-                <p className="mt-2 text-3xl font-bold text-gray-900">
+                <p className="text-sm font-medium text-me-charcoal/60">Total Cost</p>
+                <p className="mt-2 text-3xl font-display font-bold tracking-tight text-me-charcoal/90">
                   ${billingData.totalCost.toFixed(2)}
                 </p>
               </div>
 
               {/* Total API Calls Card */}
               <div className="rounded-lg bg-white shadow p-6">
-                <p className="text-sm font-medium text-gray-600">Total API Calls</p>
-                <p className="mt-2 text-3xl font-bold text-gray-900">
+                <p className="text-sm font-medium text-me-charcoal/60">Total API Calls</p>
+                <p className="mt-2 text-3xl font-display font-bold tracking-tight text-me-charcoal/90">
                   {billingData.totalApiCalls.toLocaleString()}
                 </p>
               </div>
 
               {/* Services Count Card */}
               <div className="rounded-lg bg-white shadow p-6">
-                <p className="text-sm font-medium text-gray-600">Services</p>
-                <p className="mt-2 text-3xl font-bold text-gray-900">
+                <p className="text-sm font-medium text-me-charcoal/60">Services</p>
+                <p className="mt-2 text-3xl font-display font-bold tracking-tight text-me-charcoal/90">
                   {Object.keys(billingData.costsByService).length}
                 </p>
               </div>
@@ -136,14 +136,14 @@ export default function BillingMonitorPage() {
 
             {/* Costs by Service */}
             <div className="mb-8 bg-white rounded-lg shadow overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-semibold text-gray-900">Costs by Service</h2>
+              <div className="px-6 py-4 border-b border-black/10">
+                <h2 className="text-lg font-semibold text-me-charcoal/90">Costs by Service</h2>
               </div>
-              <div className="divide-y divide-gray-200">
+              <div className="divide-y divide-black/10">
                 {Object.entries(billingData.costsByService).map(([service, cost]) => (
                   <div key={service} className="px-6 py-4 flex justify-between">
-                    <span className="text-gray-900">{service}</span>
-                    <span className="font-semibold text-gray-900">
+                    <span className="text-me-charcoal/90">{service}</span>
+                    <span className="font-semibold text-me-charcoal/90">
                       ${Number(cost).toFixed(2)}
                     </span>
                   </div>
@@ -153,43 +153,43 @@ export default function BillingMonitorPage() {
 
             {/* Detailed Breakdown */}
             <div className="bg-white rounded-lg shadow overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-semibold text-gray-900">Breakdown by Client & Service</h2>
+              <div className="px-6 py-4 border-b border-black/10">
+                <h2 className="text-lg font-semibold text-me-charcoal/90">Breakdown by Client & Service</h2>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full">
-                  <thead className="bg-gray-50">
+                  <thead className="bg-me-ivory">
                     <tr>
-                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-me-charcoal/90">
                         Client ID
                       </th>
-                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-me-charcoal/90">
                         Service
                       </th>
-                      <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">
+                      <th className="px-6 py-3 text-right text-sm font-semibold text-me-charcoal/90">
                         API Calls
                       </th>
-                      <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">
+                      <th className="px-6 py-3 text-right text-sm font-semibold text-me-charcoal/90">
                         Cost (USD)
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-200">
+                  <tbody className="divide-y divide-black/10">
                     {billingData.byClient.map((log, idx) => (
-                      <tr key={idx} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 text-sm text-gray-900">
+                      <tr key={idx} className="hover:bg-me-ivory">
+                        <td className="px-6 py-4 text-sm text-me-charcoal/90">
                           <Link
                             href={`/dashboard/clients/${log.clientId}`}
-                            className="text-blue-600 hover:text-blue-800"
+                            className="text-me-ochre hover:text-me-ochre"
                           >
                             {log.clientId.substring(0, 8)}...
                           </Link>
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-900">{log.service}</td>
-                        <td className="px-6 py-4 text-sm text-right text-gray-900">
+                        <td className="px-6 py-4 text-sm text-me-charcoal/90">{log.service}</td>
+                        <td className="px-6 py-4 text-sm text-right text-me-charcoal/90">
                           {log.apiCalls.toLocaleString()}
                         </td>
-                        <td className="px-6 py-4 text-sm text-right font-medium text-gray-900">
+                        <td className="px-6 py-4 text-sm text-right font-medium text-me-charcoal/90">
                           ${log.costUsd.toFixed(2)}
                         </td>
                       </tr>
@@ -204,8 +204,8 @@ export default function BillingMonitorPage() {
         {/* Loading State */}
         {loading && (
           <div className="flex items-center justify-center py-12">
-            <div className="inline-flex items-center gap-2 text-gray-600">
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600"></div>
+            <div className="inline-flex items-center gap-2 text-me-charcoal/60">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-black/15 border-t-me-ochre"></div>
               Loading billing data...
             </div>
           </div>

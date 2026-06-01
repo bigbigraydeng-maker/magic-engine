@@ -40,25 +40,25 @@ interface ExecutionItemLite {
 }
 
 const statusColors: Record<string, string> = {
-  draft:     'bg-yellow-100 text-yellow-800',
-  approved:  'bg-green-100 text-green-800',
-  scheduled: 'bg-blue-100 text-blue-800',
-  published: 'bg-gray-100 text-gray-700',
-  rejected:  'bg-red-100 text-red-800',
+  draft:     'bg-me-ochre/10 text-me-ochre',
+  approved:  'bg-[#5C8A4A]/12 text-[#5C8A4A]',
+  scheduled: 'bg-me-ochre/10 text-me-ochre',
+  published: 'bg-me-ivory text-me-charcoal/75',
+  rejected:  'bg-[#C2453A]/10 text-[#C2453A]',
 };
 
 const statusDotColors: Record<string, string> = {
-  draft:     'bg-yellow-400',
-  approved:  'bg-green-500',
-  scheduled: 'bg-blue-500',
-  published: 'bg-gray-400',
-  rejected:  'bg-red-400',
+  draft:     'bg-me-gold',
+  approved:  'bg-[#5C8A4A]',
+  scheduled: 'bg-me-ochre',
+  published: 'bg-me-charcoal/25',
+  rejected:  'bg-[#C2453A]/70',
 };
 
 const routeColors: Record<string, string> = {
-  route_a: 'bg-purple-100 text-purple-700',
-  route_b: 'bg-orange-100 text-orange-700',
-  route_c: 'bg-teal-100 text-teal-700',
+  route_a: 'bg-me-ochre/10 text-me-ochre',
+  route_b: 'bg-me-ochre/10 text-me-ochre',
+  route_c: 'bg-me-gold/20 text-me-ochre',
 };
 
 const routeLabels: Record<string, string> = {
@@ -129,13 +129,13 @@ function CalendarCell({
   const hiddenCount = dayPosts.length - visible.length;
 
   return (
-    <div className={`min-h-[96px] border-b border-r border-gray-100 p-1.5 ${
-      day ? 'bg-white hover:bg-gray-50/60' : 'bg-gray-50/40'
+    <div className={`min-h-[96px] border-b border-r border-black/[.06] p-1.5 ${
+      day ? 'bg-white hover:bg-me-ivory/60' : 'bg-me-ivory/40'
     }`}>
       {day && (
         <>
           <div className={`text-xs font-semibold mb-1 w-6 h-6 flex items-center justify-center rounded-full ${
-            isToday ? 'bg-indigo-600 text-white' : 'text-gray-500'
+            isToday ? 'bg-me-ochre text-white' : 'text-me-charcoal/55'
           }`}>
             {day}
           </div>
@@ -145,14 +145,14 @@ function CalendarCell({
                 key={post.id}
                 onClick={() => onOpen(post)}
                 title={post.title}
-                className={`w-full text-left text-[10px] leading-tight px-1.5 py-0.5 rounded flex items-center gap-1 truncate group ${statusColors[post.status] ?? 'bg-gray-100 text-gray-600'}`}
+                className={`w-full text-left text-[10px] leading-tight px-1.5 py-0.5 rounded flex items-center gap-1 truncate group ${statusColors[post.status] ?? 'bg-me-ivory text-me-charcoal/60'}`}
               >
-                <span className={`flex-shrink-0 w-1.5 h-1.5 rounded-full ${statusDotColors[post.status] ?? 'bg-gray-400'}`} />
+                <span className={`flex-shrink-0 w-1.5 h-1.5 rounded-full ${statusDotColors[post.status] ?? 'bg-me-charcoal/25'}`} />
                 <span className="truncate">{post.title}</span>
               </button>
             ))}
             {hiddenCount > 0 && (
-              <div className="text-[10px] text-gray-400 px-1">+{hiddenCount} more</div>
+              <div className="text-[10px] text-me-charcoal/45 px-1">+{hiddenCount} more</div>
             )}
           </div>
         </>
@@ -659,12 +659,12 @@ export default function ContentBoardPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">🚀 Launch Hub</h1>
-          <p className="text-sm text-gray-500 mt-1">{posts.length} 条内容 · 审批 / 排期 / 推送</p>
+          <h1 className="font-display text-2xl font-bold tracking-tight text-me-charcoal/90">🚀 Launch Hub</h1>
+          <p className="text-sm text-me-charcoal/55 mt-1">{posts.length} 条内容 · 审批 / 排期 / 推送</p>
         </div>
         <Link
           href={selectedClient ? `/dashboard/clients/${selectedClient}/execution` : '/dashboard/clients'}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          className="bg-me-ochre hover:bg-me-ochre text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
         >
           + 生成内容
         </Link>
@@ -673,23 +673,23 @@ export default function ContentBoardPage() {
       {/* View toggle + filters */}
       <div className="flex gap-3 flex-wrap items-center">
         {/* View toggle */}
-        <div className="flex rounded-lg border border-gray-200 bg-white overflow-hidden">
+        <div className="flex rounded-lg border border-black/10 bg-white overflow-hidden">
           <button
             onClick={() => handleViewMode('list')}
             className={`px-3 py-1.5 text-sm font-medium transition-colors ${
               viewMode === 'list'
-                ? 'bg-indigo-600 text-white'
-                : 'text-gray-600 hover:bg-gray-50'
+                ? 'bg-me-ochre text-white'
+                : 'text-me-charcoal/60 hover:bg-me-ivory'
             }`}
           >
             ☰ 列表
           </button>
           <button
             onClick={() => handleViewMode('calendar')}
-            className={`px-3 py-1.5 text-sm font-medium transition-colors border-l border-gray-200 ${
+            className={`px-3 py-1.5 text-sm font-medium transition-colors border-l border-black/10 ${
               viewMode === 'calendar'
-                ? 'bg-indigo-600 text-white'
-                : 'text-gray-600 hover:bg-gray-50'
+                ? 'bg-me-ochre text-white'
+                : 'text-me-charcoal/60 hover:bg-me-ivory'
             }`}
           >
             📅 日历
@@ -700,7 +700,7 @@ export default function ContentBoardPage() {
         <select
           value={selectedClient}
           onChange={e => setSelectedClient(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+          className="border border-black/15 rounded-lg px-3 py-2 text-sm text-me-charcoal/90 focus:outline-none focus:ring-2 focus:ring-me-ochre bg-white"
         >
           <option value="">全部客户</option>
           {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -711,7 +711,7 @@ export default function ContentBoardPage() {
           <select
             value={selectedStatus}
             onChange={e => setSelectedStatus(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+            className="border border-black/15 rounded-lg px-3 py-2 text-sm text-me-charcoal/90 focus:outline-none focus:ring-2 focus:ring-me-ochre bg-white"
           >
             <option value="draft">草稿（待审批）</option>
             <option value="approved">已批准</option>
@@ -723,27 +723,27 @@ export default function ContentBoardPage() {
         )}
 
         {viewMode === 'calendar' && (
-          <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">
+          <span className="text-xs text-me-charcoal/45 bg-me-ivory px-2 py-1 rounded">
             日历显示：已批准 + 已排期
           </span>
         )}
       </div>
 
       {batchMsg && (
-        <p className={`text-sm px-1 ${batchMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>
+        <p className={`text-sm px-1 ${batchMsg.startsWith('✓') ? 'text-[#5C8A4A]' : 'text-[#C2453A]'}`}>
           {batchMsg}
         </p>
       )}
 
       {/* Batch action bar */}
       {someSelected && viewMode === 'list' && (
-        <div className="flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 flex-wrap gap-y-2">
-          <span className="text-sm font-medium text-indigo-700">已选 {selectedIds.size} 条</span>
+        <div className="flex items-center gap-3 bg-me-ochre/10 border border-me-ochre/30 rounded-xl px-4 py-3 flex-wrap gap-y-2">
+          <span className="text-sm font-medium text-me-ochre">已选 {selectedIds.size} 条</span>
           <div className="flex gap-2 ml-auto flex-wrap">
             <select
               value={batchTargetStatus}
               onChange={e => setBatchTargetStatus(e.target.value)}
-              className="border border-indigo-300 rounded-lg px-3 py-1.5 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              className="border border-me-ochre/50 rounded-lg px-3 py-1.5 text-sm text-me-charcoal/75 bg-white focus:outline-none focus:ring-2 focus:ring-me-ochre"
             >
               <option value="">— 修改状态 —</option>
               <option value="draft">草稿</option>
@@ -755,44 +755,44 @@ export default function ContentBoardPage() {
             <button
               onClick={() => batchTargetStatus && batchUpdate(Array.from(selectedIds), batchTargetStatus)}
               disabled={!batchTargetStatus || batching}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors font-medium"
+              className="bg-me-ochre hover:bg-me-ochre text-white text-sm px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors font-medium"
             >
               {batching ? '处理中…' : '应用'}
             </button>
             <button
               onClick={() => void handleBatchGenerateImages()}
               disabled={batchImgRunning || batching}
-              className="bg-violet-600 hover:bg-violet-700 text-white text-sm px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors font-medium"
+              className="bg-me-ochre hover:bg-me-ochre text-white text-sm px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors font-medium"
             >
               {batchImgRunning ? '生成中…' : '🎨 生成全部图片'}
             </button>
             <button
               onClick={() => void handleBatchPublish()}
               disabled={batchPubRunning || batching}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors font-medium"
+              className="bg-[#5C8A4A] hover:bg-[#5C8A4A] text-white text-sm px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors font-medium"
             >
               {batchPubRunning ? '推送中…' : '🚀 全部推送 Publishing Hub'}
             </button>
             <button
               onClick={() => setShowDeleteConfirm(true)}
               disabled={batching}
-              className="bg-red-500 hover:bg-red-600 text-white text-sm px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors font-medium"
+              className="bg-[#C2453A] hover:bg-[#C2453A] text-white text-sm px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors font-medium"
             >
               🗑 删除 ({selectedIds.size})
             </button>
-            <button onClick={() => setSelectedIds(new Set())} className="text-sm text-gray-500 hover:text-gray-700 px-2">取消</button>
+            <button onClick={() => setSelectedIds(new Set())} className="text-sm text-me-charcoal/55 hover:text-me-charcoal/75 px-2">取消</button>
           </div>
         </div>
       )}
       {(batchImgMsg || batchPubMsg) && (
         <div className="flex gap-4 flex-wrap">
           {batchImgMsg && (
-            <p className={`text-sm ${batchImgMsg.startsWith('✓') ? 'text-green-600' : batchImgMsg.startsWith('✗') ? 'text-red-600' : 'text-amber-600'}`}>
+            <p className={`text-sm ${batchImgMsg.startsWith('✓') ? 'text-[#5C8A4A]' : batchImgMsg.startsWith('✗') ? 'text-[#C2453A]' : 'text-me-ochre'}`}>
               🎨 {batchImgMsg}
             </p>
           )}
           {batchPubMsg && (
-            <p className={`text-sm ${batchPubMsg.startsWith('✓') ? 'text-green-600' : 'text-amber-600'}`}>
+            <p className={`text-sm ${batchPubMsg.startsWith('✓') ? 'text-[#5C8A4A]' : 'text-me-ochre'}`}>
               🚀 {batchPubMsg}
             </p>
           )}
@@ -801,24 +801,24 @@ export default function ContentBoardPage() {
 
       {/* ── CALENDAR VIEW ─────────────────────────────────────────────────── */}
       {viewMode === 'calendar' && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-black/10 overflow-hidden">
           {/* Month navigation */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-            <button onClick={prevMonth} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-600">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-black/[.06]">
+            <button onClick={prevMonth} className="p-1.5 hover:bg-me-ivory rounded-lg text-me-charcoal/60">
               ‹
             </button>
-            <h2 className="text-sm font-semibold text-gray-800">
+            <h2 className="text-sm font-semibold text-me-charcoal/75">
               {MONTH_NAMES[calMonth]} {calYear}
             </h2>
-            <button onClick={nextMonth} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-600">
+            <button onClick={nextMonth} className="p-1.5 hover:bg-me-ivory rounded-lg text-me-charcoal/60">
               ›
             </button>
           </div>
 
           {/* Legend */}
-          <div className="flex gap-3 px-4 py-2 border-b border-gray-100 flex-wrap">
+          <div className="flex gap-3 px-4 py-2 border-b border-black/[.06] flex-wrap">
             {Object.entries(statusDotColors).map(([s, col]) => (
-              <span key={s} className="flex items-center gap-1 text-xs text-gray-500">
+              <span key={s} className="flex items-center gap-1 text-xs text-me-charcoal/55">
                 <span className={`w-2 h-2 rounded-full ${col}`} />
                 {s === 'draft' ? '草稿' : s === 'approved' ? '已批准' : s === 'scheduled' ? '已排期' : s === 'published' ? '已发布' : '已拒绝'}
               </span>
@@ -826,9 +826,9 @@ export default function ContentBoardPage() {
           </div>
 
           {/* Weekday headers */}
-          <div className="grid grid-cols-7 border-b border-gray-100">
+          <div className="grid grid-cols-7 border-b border-black/[.06]">
             {WEEKDAYS.map(d => (
-              <div key={d} className="text-center text-xs font-medium text-gray-400 py-2 border-r border-gray-100 last:border-r-0">
+              <div key={d} className="text-center text-xs font-medium text-me-charcoal/45 py-2 border-r border-black/[.06] last:border-r-0">
                 {d}
               </div>
             ))}
@@ -836,7 +836,7 @@ export default function ContentBoardPage() {
 
           {/* Calendar grid */}
           {loading ? (
-            <div className="py-20 text-center text-gray-400 text-sm">加载中…</div>
+            <div className="py-20 text-center text-me-charcoal/45 text-sm">加载中…</div>
           ) : (
             <div className="grid grid-cols-7">
               {calDays.map((day, idx) => (
@@ -857,8 +857,8 @@ export default function ContentBoardPage() {
             const unscheduled = posts.filter(p => !p.scheduled_at);
             if (unscheduled.length === 0) return null;
             return (
-              <div className="border-t border-gray-100 px-4 py-3">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+              <div className="border-t border-black/[.06] px-4 py-3">
+                <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wider mb-2">
                   未排期 ({unscheduled.length})
                 </p>
                 <div className="flex flex-wrap gap-1.5">
@@ -867,7 +867,7 @@ export default function ContentBoardPage() {
                       key={p.id}
                       onClick={() => openModal(p)}
                       title={p.title}
-                      className={`text-xs px-2.5 py-1 rounded-full max-w-[180px] truncate ${statusColors[p.status] ?? 'bg-gray-100 text-gray-600'}`}
+                      className={`text-xs px-2.5 py-1 rounded-full max-w-[180px] truncate ${statusColors[p.status] ?? 'bg-me-ivory text-me-charcoal/60'}`}
                     >
                       {p.title}
                     </button>
@@ -882,20 +882,20 @@ export default function ContentBoardPage() {
       {/* ── LIST VIEW ─────────────────────────────────────────────────────── */}
       {viewMode === 'list' && (
         loading ? (
-          <div className="py-12 text-center text-gray-400">加载中…</div>
+          <div className="py-12 text-center text-me-charcoal/45">加载中…</div>
         ) : posts.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-200 py-16 text-center text-gray-400">
+          <div className="bg-white rounded-xl border border-black/10 py-16 text-center text-me-charcoal/45">
             <p className="text-lg mb-2">暂无内容</p>
             {selectedStatus === 'draft' && (
-              <p className="text-sm text-gray-400">前往客户推广活动，批量生成内容草稿</p>
+              <p className="text-sm text-me-charcoal/45">前往客户推广活动，批量生成内容草稿</p>
             )}
           </div>
         ) : (
           <>
             <div className="flex items-center gap-2 px-1">
               <input type="checkbox" checked={allSelected} onChange={toggleSelectAll}
-                className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
-              <span className="text-xs text-gray-500">{allSelected ? '取消全选' : `全选 (${posts.length})`}</span>
+                className="w-4 h-4 rounded border-black/15 text-me-ochre focus:ring-me-ochre" />
+              <span className="text-xs text-me-charcoal/55">{allSelected ? '取消全选' : `全选 (${posts.length})`}</span>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -903,17 +903,17 @@ export default function ContentBoardPage() {
                 <div
                   key={post.id}
                   className={`bg-white rounded-xl border p-5 hover:shadow-md transition-shadow cursor-pointer ${
-                    selectedIds.has(post.id) ? 'border-indigo-400 ring-2 ring-indigo-100' : 'border-gray-200'
+                    selectedIds.has(post.id) ? 'border-me-ochre/50 ring-2 ring-me-ochre/20' : 'border-black/10'
                   }`}
                   onClick={() => toggleSelect(post.id)}
                 >
                   <div className="flex items-start gap-3">
                     <input type="checkbox" checked={selectedIds.has(post.id)}
                       onChange={() => toggleSelect(post.id)} onClick={e => e.stopPropagation()}
-                      className="mt-0.5 w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 flex-shrink-0" />
+                      className="mt-0.5 w-4 h-4 rounded border-black/15 text-me-ochre focus:ring-me-ochre flex-shrink-0" />
                     {/* 视觉资产缩略图 */}
                     {post.visual_asset_url ? (
-                      <div className="relative w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden bg-gray-100 border border-gray-200">
+                      <div className="relative w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden bg-me-ivory border border-black/10">
                         {post.visual_asset_type === 'video' ? (
                           // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/media-has-caption
                           <video src={post.visual_asset_url} className="w-full h-full object-cover" muted />
@@ -926,40 +926,40 @@ export default function ContentBoardPage() {
                         )}
                       </div>
                     ) : (
-                      <div className="w-20 h-20 flex-shrink-0 rounded-lg bg-gray-50 border border-dashed border-gray-300 flex items-center justify-center text-2xl text-gray-300">
+                      <div className="w-20 h-20 flex-shrink-0 rounded-lg bg-me-ivory border border-dashed border-black/15 flex items-center justify-center text-2xl text-me-charcoal/35">
                         📝
                       </div>
                     )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-start gap-1.5 flex-1 min-w-0">
-                          <h3 className="text-sm font-semibold text-gray-900 leading-snug">{post.title}</h3>
+                          <h3 className="text-sm font-semibold text-me-charcoal/90 leading-snug">{post.title}</h3>
                           {isNewPost(post.created_at) && (
-                            <span className="flex-shrink-0 text-xs bg-emerald-500 text-white px-1.5 py-0.5 rounded font-bold tracking-wide">NEW</span>
+                            <span className="flex-shrink-0 text-xs bg-[#5C8A4A] text-white px-1.5 py-0.5 rounded font-bold tracking-wide">NEW</span>
                           )}
                         </div>
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${statusColors[post.status] ?? 'bg-gray-100 text-gray-600'}`}>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${statusColors[post.status] ?? 'bg-me-ivory text-me-charcoal/60'}`}>
                           {post.status === 'draft' ? '草稿' : post.status === 'approved' ? '已批准' : post.status === 'scheduled' ? '已排期' : post.status === 'published' ? '已发布' : post.status === 'rejected' ? '已拒绝' : post.status}
                         </span>
                       </div>
                       <div className="flex flex-wrap gap-1.5 mt-2">
-                        <span className={`text-xs px-2 py-0.5 rounded font-medium ${routeColors[post.route] ?? 'bg-gray-100 text-gray-600'}`}>
+                        <span className={`text-xs px-2 py-0.5 rounded font-medium ${routeColors[post.route] ?? 'bg-me-ivory text-me-charcoal/60'}`}>
                           {routeLabels[post.route] ?? post.route}
                         </span>
                         {post.platforms?.map(p => (
-                          <span key={p} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded capitalize">{p}</span>
+                          <span key={p} className="text-xs bg-me-ivory text-me-charcoal/60 px-2 py-0.5 rounded capitalize">{p}</span>
                         ))}
                       </div>
-                      {post.caption && <p className="text-xs text-gray-500 mt-3 line-clamp-2">{post.caption}</p>}
+                      {post.caption && <p className="text-xs text-me-charcoal/55 mt-3 line-clamp-2">{post.caption}</p>}
                       {post.scheduled_at && (
-                        <p className="text-xs text-blue-500 mt-2">
+                        <p className="text-xs text-me-ochre mt-2">
                           📅 {new Date(post.scheduled_at).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}
                         </p>
                       )}
-                      <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-100">
-                        <span className="text-xs text-gray-400">{new Date(post.created_at).toLocaleDateString()}</span>
+                      <div className="flex items-center justify-between mt-4 pt-3 border-t border-black/[.06]">
+                        <span className="text-xs text-me-charcoal/45">{new Date(post.created_at).toLocaleDateString()}</span>
                         <div className="flex gap-2" onClick={e => e.stopPropagation()}>
-                          <button onClick={() => openModal(post)} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">查看详情</button>
+                          <button onClick={() => openModal(post)} className="text-xs text-me-ochre hover:text-me-ochre font-medium">查看详情</button>
                         </div>
                       </div>
                     </div>
@@ -977,34 +977,34 @@ export default function ContentBoardPage() {
           <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
 
             {/* Modal header */}
-            <div className="sticky top-0 bg-white rounded-t-2xl border-b border-gray-100 px-6 py-4 flex items-start justify-between gap-3">
+            <div className="sticky top-0 bg-white rounded-t-2xl border-b border-black/[.06] px-6 py-4 flex items-start justify-between gap-3">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-base font-bold text-gray-900 truncate">{modalPost.title}</h2>
+                  <h2 className="text-base font-bold text-me-charcoal/90 truncate">{modalPost.title}</h2>
                   {isNewPost(modalPost.created_at) && (
-                    <span className="text-xs bg-emerald-500 text-white px-1.5 py-0.5 rounded font-bold tracking-wide flex-shrink-0">NEW</span>
+                    <span className="text-xs bg-[#5C8A4A] text-white px-1.5 py-0.5 rounded font-bold tracking-wide flex-shrink-0">NEW</span>
                   )}
                 </div>
-                <p className="text-xs text-gray-400 mt-0.5">
+                <p className="text-xs text-me-charcoal/45 mt-0.5">
                   {new Date(modalPost.created_at).toLocaleString()} · {modalPost.clients?.name ?? ''}
                   {modalPost.scheduled_at && (
-                    <span className="ml-2 text-blue-500">📅 {new Date(modalPost.scheduled_at).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                    <span className="ml-2 text-me-ochre">📅 {new Date(modalPost.scheduled_at).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
                   )}
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 {!editMode ? (
                   <button onClick={() => setEditMode(true)}
-                    className="text-xs text-indigo-600 hover:text-indigo-800 border border-indigo-200 hover:border-indigo-400 px-3 py-1.5 rounded-lg font-medium transition-colors">
+                    className="text-xs text-me-ochre hover:text-me-ochre border border-me-ochre/30 hover:border-me-ochre/50 px-3 py-1.5 rounded-lg font-medium transition-colors">
                     ✏️ 编辑
                   </button>
                 ) : (
                   <button onClick={() => { setEditMode(false); setSaveMsg(''); }}
-                    className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg font-medium transition-colors">
+                    className="text-xs text-me-charcoal/55 hover:text-me-charcoal/75 border border-black/10 px-3 py-1.5 rounded-lg font-medium transition-colors">
                     取消
                   </button>
                 )}
-                <button onClick={closeModal} className="text-gray-400 hover:text-gray-600 text-xl leading-none w-7 h-7 flex items-center justify-center">×</button>
+                <button onClick={closeModal} className="text-me-charcoal/45 hover:text-me-charcoal/60 text-xl leading-none w-7 h-7 flex items-center justify-center">×</button>
               </div>
             </div>
 
@@ -1013,8 +1013,8 @@ export default function ContentBoardPage() {
               {/* Visual asset preview */}
               {modalPost.visual_asset_url && (
                 <div>
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">视觉资产</p>
-                  <div className="rounded-lg overflow-hidden border border-gray-200 bg-gray-50 max-h-80 flex items-center justify-center">
+                  <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wider mb-1">视觉资产</p>
+                  <div className="rounded-lg overflow-hidden border border-black/10 bg-me-ivory max-h-80 flex items-center justify-center">
                     {modalPost.visual_asset_type === 'video' ? (
                       // eslint-disable-next-line jsx-a11y/media-has-caption
                       <video src={modalPost.visual_asset_url} controls className="max-h-80 object-contain" />
@@ -1038,11 +1038,11 @@ export default function ContentBoardPage() {
                   && it.status !== 'skipped'
                 );
                 return (
-                  <div className="rounded-lg border border-purple-100 bg-purple-50/40 p-3 space-y-2">
-                    <p className="text-xs font-semibold text-purple-700 uppercase tracking-wider">🔗 关联处方执行项</p>
+                  <div className="rounded-lg border border-me-ochre/30 bg-me-ochre/40 p-3 space-y-2">
+                    <p className="text-xs font-semibold text-me-ochre uppercase tracking-wider">🔗 关联处方执行项</p>
                     {modalPost.execution_item_id ? (
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs text-gray-700 bg-white rounded-lg border border-purple-200 px-2.5 py-1">
+                        <span className="text-xs text-me-charcoal/75 bg-white rounded-lg border border-me-ochre/30 px-2.5 py-1">
                           {linkedItem
                             ? `Phase ${linkedItem.phase} · ${linkedItem.title}`
                             : `已关联执行项 #${modalPost.execution_item_id.slice(0, 8)}`}
@@ -1050,7 +1050,7 @@ export default function ContentBoardPage() {
                         <button
                           onClick={() => void handleLinkExecutionItem(null)}
                           disabled={linkingItem}
-                          className="text-xs text-red-600 hover:text-red-800 underline disabled:opacity-50"
+                          className="text-xs text-[#C2453A] hover:text-[#C2453A] underline disabled:opacity-50"
                         >
                           解除关联
                         </button>
@@ -1060,7 +1060,7 @@ export default function ContentBoardPage() {
                         onChange={e => { if (e.target.value) void handleLinkExecutionItem(e.target.value); }}
                         disabled={linkingItem}
                         defaultValue=""
-                        className="w-full border border-purple-300 rounded-lg px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-purple-400 disabled:opacity-50"
+                        className="w-full border border-me-ochre/50 rounded-lg px-3 py-1.5 text-xs text-me-charcoal/75 bg-white focus:outline-none focus:ring-2 focus:ring-me-ochre disabled:opacity-50"
                       >
                         <option value="">— 选择要关联的处方执行项 —</option>
                         {linkable.map(it => (
@@ -1070,12 +1070,12 @@ export default function ContentBoardPage() {
                         ))}
                       </select>
                     ) : (
-                      <p className="text-[11px] text-gray-400">该客户暂无可关联的待办执行项</p>
+                      <p className="text-[11px] text-me-charcoal/45">该客户暂无可关联的待办执行项</p>
                     )}
                     {linkMsg && (
-                      <p className={`text-[11px] ${linkMsg.startsWith('✓') ? 'text-green-600' : 'text-red-500'}`}>{linkMsg}</p>
+                      <p className={`text-[11px] ${linkMsg.startsWith('✓') ? 'text-[#5C8A4A]' : 'text-[#C2453A]'}`}>{linkMsg}</p>
                     )}
-                    <p className="text-[10px] text-purple-600/70 leading-relaxed">
+                    <p className="text-[10px] text-me-ochre/70 leading-relaxed">
                       关联后：内容推送到 Publishing Hub 成功（→ status=published），执行项会自动 mark 完成 + 写工作日志。
                     </p>
                   </div>
@@ -1083,43 +1083,43 @@ export default function ContentBoardPage() {
               })()}
 
               {/* 排期 + 发布到 Publer */}
-              <div className="rounded-lg border border-indigo-100 bg-indigo-50/40 p-3 space-y-2.5">
-                <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wider">排期与发布 · Publishing Hub</p>
+              <div className="rounded-lg border border-me-ochre/30 bg-me-ochre/40 p-3 space-y-2.5">
+                <p className="text-xs font-semibold text-me-ochre uppercase tracking-wider">排期与发布 · Publishing Hub</p>
 
                 {/* 发布内容预览 */}
                 {(modalPost.caption || (modalPost.hashtags?.length ?? 0) > 0) && (
-                  <div className="rounded-lg bg-white border border-indigo-200 px-3 py-2 space-y-1">
-                    <p className="text-[10px] font-medium text-indigo-500 uppercase tracking-wider">将发布内容</p>
+                  <div className="rounded-lg bg-white border border-me-ochre/30 px-3 py-2 space-y-1">
+                    <p className="text-[10px] font-medium text-me-ochre uppercase tracking-wider">将发布内容</p>
                     {modalPost.platforms?.length > 0 && (
                       <div className="flex gap-1">
                         {modalPost.platforms.map(p => (
-                          <span key={p} className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded capitalize">{p}</span>
+                          <span key={p} className="text-[10px] bg-me-ochre/10 text-me-ochre px-1.5 py-0.5 rounded capitalize">{p}</span>
                         ))}
                       </div>
                     )}
                     {modalPost.caption && (
-                      <p className="text-xs text-gray-700 line-clamp-2">{modalPost.caption}</p>
+                      <p className="text-xs text-me-charcoal/75 line-clamp-2">{modalPost.caption}</p>
                     )}
                     {(modalPost.hashtags?.length ?? 0) > 0 && (
-                      <p className="text-[11px] text-indigo-500">{modalPost.hashtags!.join(' ')}</p>
+                      <p className="text-[11px] text-me-ochre">{modalPost.hashtags!.join(' ')}</p>
                     )}
                   </div>
                 )}
 
                 <div className="flex items-end gap-2 flex-wrap">
                   <div className="flex-1 min-w-[200px]">
-                    <label className="block text-[11px] text-gray-500 mb-1">计划发布时间</label>
+                    <label className="block text-[11px] text-me-charcoal/55 mb-1">计划发布时间</label>
                     <input
                       type="datetime-local"
                       value={scheduleAt}
                       onChange={e => setScheduleAt(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                      className="w-full border border-black/15 rounded-lg px-3 py-1.5 text-xs text-me-charcoal/75 bg-white focus:outline-none focus:ring-2 focus:ring-me-ochre"
                     />
                   </div>
                   <button
                     onClick={() => void handleSaveSchedule()}
                     disabled={savingSchedule}
-                    className="bg-white border border-indigo-300 hover:bg-indigo-50 text-indigo-700 text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-50"
+                    className="bg-white border border-me-ochre/50 hover:bg-me-ochre/10 text-me-ochre text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-50"
                   >
                     {savingSchedule ? '保存中…' : '💾 保存排期'}
                   </button>
@@ -1127,67 +1127,67 @@ export default function ContentBoardPage() {
                     onClick={() => void handlePublishToPubler()}
                     disabled={publishing || modalPost.status === 'draft' || modalPost.status === 'rejected'}
                     title={modalPost.status === 'draft' ? '需先批准才能推送' : modalPost.status === 'rejected' ? '已拒绝的内容不能推送' : ''}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-4 py-1.5 rounded-lg font-semibold disabled:opacity-50"
+                    className="bg-me-ochre hover:bg-me-ochre text-white text-xs px-4 py-1.5 rounded-lg font-semibold disabled:opacity-50"
                   >
                     {publishing ? '推送中…' : scheduleAt ? '🚀 推送到 Publishing Hub' : '🚀 立即推送 Publishing Hub'}
                   </button>
                 </div>
                 {(modalPost.status === 'draft' || modalPost.status === 'rejected') && (
-                  <p className="text-[11px] text-amber-600">⚠ 当前状态为「{modalPost.status === 'draft' ? '草稿' : '已拒绝'}」，需先批准才能推送到 Publishing Hub。</p>
+                  <p className="text-[11px] text-me-ochre">⚠ 当前状态为「{modalPost.status === 'draft' ? '草稿' : '已拒绝'}」，需先批准才能推送到 Publishing Hub。</p>
                 )}
                 {scheduleMsg && (
-                  <p className={`text-[11px] ${scheduleMsg.startsWith('✓') ? 'text-green-600' : 'text-red-500'}`}>{scheduleMsg}</p>
+                  <p className={`text-[11px] ${scheduleMsg.startsWith('✓') ? 'text-[#5C8A4A]' : 'text-[#C2453A]'}`}>{scheduleMsg}</p>
                 )}
                 {publishMsg && (
-                  <p className={`text-[11px] ${publishMsg.startsWith('✓') ? 'text-green-600' : 'text-red-500'}`}>{publishMsg}</p>
+                  <p className={`text-[11px] ${publishMsg.startsWith('✓') ? 'text-[#5C8A4A]' : 'text-[#C2453A]'}`}>{publishMsg}</p>
                 )}
               </div>
 
               {/* Script */}
               <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Script</p>
+                <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wider mb-1">Script</p>
                 {editMode ? (
                   <textarea value={editScript} onChange={e => setEditScript(e.target.value)} rows={5}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-y" />
+                    className="w-full border border-black/15 rounded-lg px-3 py-2 text-xs text-me-charcoal/75 focus:outline-none focus:ring-2 focus:ring-me-ochre resize-y" />
                 ) : modalPost.script ? (
-                  <p className="text-gray-700 whitespace-pre-wrap bg-gray-50 rounded-lg p-3 text-xs">{modalPost.script}</p>
-                ) : <p className="text-gray-400 italic text-xs">（无）</p>}
+                  <p className="text-me-charcoal/75 whitespace-pre-wrap bg-me-ivory rounded-lg p-3 text-xs">{modalPost.script}</p>
+                ) : <p className="text-me-charcoal/45 italic text-xs">（无）</p>}
               </div>
 
               {/* Caption */}
               <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Caption</p>
+                <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wider mb-1">Caption</p>
                 {editMode ? (
                   <textarea value={editCaption} onChange={e => setEditCaption(e.target.value)} rows={4}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-y" />
+                    className="w-full border border-black/15 rounded-lg px-3 py-2 text-xs text-me-charcoal/75 focus:outline-none focus:ring-2 focus:ring-me-ochre resize-y" />
                 ) : modalPost.caption ? (
-                  <p className="text-gray-700 whitespace-pre-wrap bg-gray-50 rounded-lg p-3 text-xs">{modalPost.caption}</p>
-                ) : <p className="text-gray-400 italic text-xs">（无）</p>}
+                  <p className="text-me-charcoal/75 whitespace-pre-wrap bg-me-ivory rounded-lg p-3 text-xs">{modalPost.caption}</p>
+                ) : <p className="text-me-charcoal/45 italic text-xs">（无）</p>}
               </div>
 
               {/* Hashtags */}
               <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Hashtags</p>
+                <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wider mb-1">Hashtags</p>
                 {editMode ? (
                   <input type="text" value={editHashtags} onChange={e => setEditHashtags(e.target.value)}
                     placeholder="#tag1 #tag2 #tag3（空格分隔）"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                    className="w-full border border-black/15 rounded-lg px-3 py-2 text-xs text-me-charcoal/75 focus:outline-none focus:ring-2 focus:ring-me-ochre" />
                 ) : modalPost.hashtags?.length ? (
-                  <p className="text-indigo-600 text-xs">{modalPost.hashtags.join(' ')}</p>
-                ) : <p className="text-gray-400 italic text-xs">（无）</p>}
+                  <p className="text-me-ochre text-xs">{modalPost.hashtags.join(' ')}</p>
+                ) : <p className="text-me-charcoal/45 italic text-xs">（无）</p>}
               </div>
 
               {/* Visual Brief */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Visual Brief</p>
+                  <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wider">Visual Brief</p>
                   {!editMode && modalPost.visual_brief && (
                     <div className="flex items-center gap-2">
                       <select
                         value={imageAspectRatio}
                         onChange={e => setImageAspectRatio(e.target.value)}
                         disabled={generatingImage}
-                        className="border border-gray-300 rounded px-2 py-1 text-xs text-gray-700 bg-white focus:outline-none focus:ring-1 focus:ring-violet-400 disabled:opacity-50"
+                        className="border border-black/15 rounded px-2 py-1 text-xs text-me-charcoal/75 bg-white focus:outline-none focus:ring-1 focus:ring-me-ochre disabled:opacity-50"
                       >
                         <option value="1:1">1:1 方形</option>
                         <option value="4:5">4:5 竖版</option>
@@ -1197,7 +1197,7 @@ export default function ContentBoardPage() {
                       <button
                         onClick={() => void handleGenerateImage()}
                         disabled={generatingImage}
-                        className="bg-violet-600 hover:bg-violet-700 text-white text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-50 transition-colors whitespace-nowrap"
+                        className="bg-me-ochre hover:bg-me-ochre text-white text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-50 transition-colors whitespace-nowrap"
                       >
                         {generatingImage ? '生成中…' : '🎨 生成图片'}
                       </button>
@@ -1206,12 +1206,12 @@ export default function ContentBoardPage() {
                 </div>
                 {editMode ? (
                   <textarea value={editVisualBrief} onChange={e => setEditVisualBrief(e.target.value)} rows={3}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-y" />
+                    className="w-full border border-black/15 rounded-lg px-3 py-2 text-xs text-me-charcoal/75 focus:outline-none focus:ring-2 focus:ring-me-ochre resize-y" />
                 ) : modalPost.visual_brief ? (
-                  <p className="text-gray-700 bg-gray-50 rounded-lg p-3 text-xs">{modalPost.visual_brief}</p>
-                ) : <p className="text-gray-400 italic text-xs">（无）</p>}
+                  <p className="text-me-charcoal/75 bg-me-ivory rounded-lg p-3 text-xs">{modalPost.visual_brief}</p>
+                ) : <p className="text-me-charcoal/45 italic text-xs">（无）</p>}
                 {imageGenMsg && (
-                  <p className={`text-[11px] mt-1.5 ${imageGenMsg.startsWith('✓') ? 'text-green-600' : imageGenMsg.startsWith('✗') ? 'text-red-500' : 'text-amber-600'}`}>
+                  <p className={`text-[11px] mt-1.5 ${imageGenMsg.startsWith('✓') ? 'text-[#5C8A4A]' : imageGenMsg.startsWith('✗') ? 'text-[#C2453A]' : 'text-me-ochre'}`}>
                     {imageGenMsg}
                   </p>
                 )}
@@ -1221,37 +1221,37 @@ export default function ContentBoardPage() {
               {editMode && (
                 <div className="flex items-center gap-3 pt-1">
                   <button onClick={handleSaveEdit} disabled={savingEdit}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-5 py-2 rounded-lg font-medium transition-colors disabled:opacity-50">
+                    className="bg-me-ochre hover:bg-me-ochre text-white text-sm px-5 py-2 rounded-lg font-medium transition-colors disabled:opacity-50">
                     {savingEdit ? '保存中…' : '💾 保存修改'}
                   </button>
-                  {saveMsg && <span className={`text-xs ${saveMsg.startsWith('✓') ? 'text-green-600' : 'text-red-500'}`}>{saveMsg}</span>}
+                  {saveMsg && <span className={`text-xs ${saveMsg.startsWith('✓') ? 'text-[#5C8A4A]' : 'text-[#C2453A]'}`}>{saveMsg}</span>}
                 </div>
               )}
               {!editMode && saveMsg && (
-                <p className={`text-xs ${saveMsg.startsWith('✓') ? 'text-green-600' : 'text-red-500'}`}>{saveMsg}</p>
+                <p className={`text-xs ${saveMsg.startsWith('✓') ? 'text-[#5C8A4A]' : 'text-[#C2453A]'}`}>{saveMsg}</p>
               )}
 
               {/* Quick approve/reject */}
               {modalPost.status === 'draft' && (
-                <div className="pt-2 border-t border-gray-100 space-y-3">
+                <div className="pt-2 border-t border-black/[.06] space-y-3">
                   {rejectNotesId === modalPost.id ? (
                     <div className="space-y-2">
-                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">修改意见（可选）</p>
+                      <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wider">修改意见（可选）</p>
                       <textarea
                         value={rejectNotes}
                         onChange={e => setRejectNotes(e.target.value)}
                         rows={3}
                         placeholder="说明需要修改的地方…"
-                        className="w-full border border-red-200 rounded-lg px-3 py-2 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-red-300 resize-none"
+                        className="w-full border border-[#C2453A]/30 rounded-lg px-3 py-2 text-xs text-me-charcoal/75 focus:outline-none focus:ring-2 focus:ring-[#C2453A]/50 resize-none"
                         autoFocus
                       />
                       <div className="flex gap-2">
                         <button onClick={handleRejectWithNotes}
-                          className="flex-1 bg-red-500 hover:bg-red-600 text-white text-sm py-2 rounded-lg font-medium transition-colors">
+                          className="flex-1 bg-[#C2453A] hover:bg-[#C2453A] text-white text-sm py-2 rounded-lg font-medium transition-colors">
                           确认拒绝
                         </button>
                         <button onClick={() => { setRejectNotesId(null); setRejectNotes(''); }}
-                          className="px-4 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg transition-colors">
+                          className="px-4 text-sm text-me-charcoal/55 hover:text-me-charcoal/75 border border-black/10 rounded-lg transition-colors">
                           取消
                         </button>
                       </div>
@@ -1259,11 +1259,11 @@ export default function ContentBoardPage() {
                   ) : (
                     <div className="flex gap-2">
                       <button onClick={() => { const id = modalPost.id; closeModal(); batchUpdate([id], 'approved'); }} disabled={batching}
-                        className="flex-1 bg-green-600 hover:bg-green-700 text-white text-sm py-2 rounded-lg font-medium transition-colors disabled:opacity-50">
+                        className="flex-1 bg-[#5C8A4A] hover:bg-[#5C8A4A] text-white text-sm py-2 rounded-lg font-medium transition-colors disabled:opacity-50">
                         ✓ 批准此条
                       </button>
                       <button onClick={() => { setRejectNotesId(modalPost.id); setRejectNotes(''); }} disabled={batching}
-                        className="flex-1 bg-red-500 hover:bg-red-600 text-white text-sm py-2 rounded-lg font-medium transition-colors disabled:opacity-50">
+                        className="flex-1 bg-[#C2453A] hover:bg-[#C2453A] text-white text-sm py-2 rounded-lg font-medium transition-colors disabled:opacity-50">
                         ✕ 拒绝此条
                       </button>
                     </div>
@@ -1279,21 +1279,21 @@ export default function ContentBoardPage() {
       {showDeleteConfirm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowDeleteConfirm(false)}>
           <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl" onClick={e => e.stopPropagation()}>
-            <h3 className="text-base font-bold text-gray-900 mb-2">确认删除内容</h3>
-            <p className="text-sm text-gray-600 mb-1">
+            <h3 className="text-base font-bold text-me-charcoal/90 mb-2">确认删除内容</h3>
+            <p className="text-sm text-me-charcoal/60 mb-1">
               即将永久删除 <strong>{selectedIds.size}</strong> 条内容，此操作不可撤销。
             </p>
-            <p className="text-xs text-gray-400 mb-5">已发布至平台的内容不会被自动撤回。</p>
+            <p className="text-xs text-me-charcoal/45 mb-5">已发布至平台的内容不会被自动撤回。</p>
             <div className="flex gap-3">
               <button
                 onClick={() => setShowDeleteConfirm(false)}
-                className="flex-1 border border-gray-300 text-gray-700 text-sm py-2 rounded-lg hover:bg-gray-50 font-medium transition-colors"
+                className="flex-1 border border-black/15 text-me-charcoal/75 text-sm py-2 rounded-lg hover:bg-me-ivory font-medium transition-colors"
               >
                 取消
               </button>
               <button
                 onClick={handleBatchDelete}
-                className="flex-1 bg-red-600 hover:bg-red-700 text-white text-sm py-2 rounded-lg font-medium transition-colors"
+                className="flex-1 bg-[#C2453A] hover:bg-[#C2453A] text-white text-sm py-2 rounded-lg font-medium transition-colors"
               >
                 确认删除
               </button>

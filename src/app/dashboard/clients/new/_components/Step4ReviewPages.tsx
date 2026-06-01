@@ -51,16 +51,16 @@ export default function Step4ReviewPages({ clientId, onContinue, onBack }: Props
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-slate-900 mb-1">Review Crawled Pages</h2>
-        <p className="text-slate-600 text-sm">
+        <h2 className="text-2xl font-bold text-me-charcoal/90 mb-1">Review Crawled Pages</h2>
+        <p className="text-me-charcoal/60 text-sm">
           Confirm the snapshot looks reasonable. You can refine later from the client dashboard.
         </p>
       </div>
 
-      {loading && <div className="text-center py-12 text-slate-500 text-sm">Loading pages…</div>}
+      {loading && <div className="text-center py-12 text-me-charcoal/55 text-sm">Loading pages…</div>}
 
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+        <div className="p-3 bg-[#C2453A]/10 border border-[#C2453A]/30 rounded-lg text-sm text-[#C2453A]">
           {error}
         </div>
       )}
@@ -69,17 +69,17 @@ export default function Step4ReviewPages({ clientId, onContinue, onBack }: Props
         <>
           {/* Summary */}
           <div className="grid grid-cols-3 gap-3">
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-center">
-              <p className="text-xs text-slate-500">Total Pages</p>
-              <p className="text-2xl font-bold text-slate-900">{total}</p>
+            <div className="bg-me-ivory border border-black/10 rounded-lg p-4 text-center">
+              <p className="text-xs text-me-charcoal/55">Total Pages</p>
+              <p className="text-2xl font-bold text-me-charcoal/90">{total}</p>
             </div>
-            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 text-center">
-              <p className="text-xs text-emerald-700">GEO Detected</p>
-              <p className="text-2xl font-bold text-emerald-800">{geoCount}</p>
+            <div className="bg-[#5C8A4A]/10 border border-[#5C8A4A]/30 rounded-lg p-4 text-center">
+              <p className="text-xs text-[#5C8A4A]">GEO Detected</p>
+              <p className="text-2xl font-bold text-[#5C8A4A]">{geoCount}</p>
             </div>
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
-              <p className="text-xs text-blue-700">Top Type</p>
-              <p className="text-lg font-bold text-blue-800 truncate">
+            <div className="bg-me-ochre/10 border border-me-ochre/30 rounded-lg p-4 text-center">
+              <p className="text-xs text-me-ochre">Top Type</p>
+              <p className="text-lg font-bold text-me-ochre truncate">
                 {Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—'}
               </p>
             </div>
@@ -93,7 +93,7 @@ export default function Step4ReviewPages({ clientId, onContinue, onBack }: Props
                 .map(([type, count]) => (
                   <span
                     key={type}
-                    className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-full"
+                    className="px-2.5 py-1 bg-me-ivory text-me-charcoal/75 rounded-full"
                   >
                     {type}: <span className="font-semibold">{count}</span>
                   </span>
@@ -103,7 +103,7 @@ export default function Step4ReviewPages({ clientId, onContinue, onBack }: Props
 
           {/* Low-page warning */}
           {total < 5 && total > 0 && (
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+            <div className="p-3 bg-me-ochre/10 border border-me-ochre/30 rounded-lg text-xs text-me-ochre">
               ⚠️ Only {total} page(s) were crawled. The Master Brief will have limited
               context — consider adding manual reference URLs in Step 2 or re-running
               the crawl from the client dashboard later.
@@ -111,7 +111,7 @@ export default function Step4ReviewPages({ clientId, onContinue, onBack }: Props
           )}
 
           {total === 0 && (
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+            <div className="p-3 bg-me-ochre/10 border border-me-ochre/30 rounded-lg text-xs text-me-ochre">
               ⚠️ No pages were crawled (sitemap.xml may be missing). You can still
               continue, but the Master Brief will rely on uploaded files only.
             </div>
@@ -119,17 +119,17 @@ export default function Step4ReviewPages({ clientId, onContinue, onBack }: Props
 
           {/* Page table */}
           {pages.length > 0 && (
-            <div className="border border-slate-200 rounded-lg overflow-hidden">
+            <div className="border border-black/10 rounded-lg overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200">
-                    <th className="text-left px-4 py-2 text-xs font-semibold text-slate-600">URL</th>
-                    <th className="text-left px-4 py-2 text-xs font-semibold text-slate-600 w-24">Type</th>
-                    <th className="text-right px-4 py-2 text-xs font-semibold text-slate-600 w-24">Words</th>
-                    <th className="text-center px-4 py-2 text-xs font-semibold text-slate-600 w-16">GEO</th>
+                  <tr className="bg-me-ivory border-b border-black/10">
+                    <th className="text-left px-4 py-2 text-xs font-semibold text-me-charcoal/60">URL</th>
+                    <th className="text-left px-4 py-2 text-xs font-semibold text-me-charcoal/60 w-24">Type</th>
+                    <th className="text-right px-4 py-2 text-xs font-semibold text-me-charcoal/60 w-24">Words</th>
+                    <th className="text-center px-4 py-2 text-xs font-semibold text-me-charcoal/60 w-16">GEO</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-black/10">
                   {pages.slice(0, 20).map((page) => (
                     <tr key={page.id}>
                       <td className="px-4 py-2">
@@ -137,21 +137,21 @@ export default function Step4ReviewPages({ clientId, onContinue, onBack }: Props
                           href={page.url}
                           target="_blank"
                           rel="noreferrer"
-                          className="text-blue-600 hover:underline text-xs truncate block max-w-md"
+                          className="text-me-ochre hover:underline text-xs truncate block max-w-md"
                           title={page.url}
                         >
                           {page.title ?? page.url}
                         </a>
                       </td>
-                      <td className="px-4 py-2 text-xs text-slate-600">{page.page_type}</td>
-                      <td className="px-4 py-2 text-xs text-right font-mono text-slate-600">
+                      <td className="px-4 py-2 text-xs text-me-charcoal/60">{page.page_type}</td>
+                      <td className="px-4 py-2 text-xs text-right font-mono text-me-charcoal/60">
                         {page.word_count ?? 0}
                       </td>
                       <td className="px-4 py-2 text-center text-xs">
                         {page.has_geo_block ? (
-                          <span className="text-emerald-600">✓</span>
+                          <span className="text-[#5C8A4A]">✓</span>
                         ) : (
-                          <span className="text-slate-300">—</span>
+                          <span className="text-me-charcoal/35">—</span>
                         )}
                       </td>
                     </tr>
@@ -167,7 +167,7 @@ export default function Step4ReviewPages({ clientId, onContinue, onBack }: Props
         <button
           type="button"
           onClick={onBack}
-          className="px-6 py-3 text-slate-600 hover:text-slate-900 font-medium"
+          className="px-6 py-3 text-me-charcoal/60 hover:text-me-charcoal/90 font-medium"
         >
           ← Back
         </button>
@@ -175,7 +175,7 @@ export default function Step4ReviewPages({ clientId, onContinue, onBack }: Props
           type="button"
           onClick={onContinue}
           disabled={loading}
-          className="px-6 py-3 bg-blue-500 hover:bg-blue-600 disabled:bg-slate-400 text-white font-semibold rounded-lg"
+          className="px-6 py-3 bg-me-ochre hover:bg-me-ochre disabled:bg-me-charcoal/25 text-white font-semibold rounded-lg"
         >
           Looks good, activate →
         </button>

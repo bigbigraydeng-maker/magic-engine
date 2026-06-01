@@ -20,17 +20,17 @@ export default function StepIndicator({ currentStep, totalSteps, labels }: Props
               <div
                 className={`flex items-center justify-center w-10 h-10 rounded-full font-semibold text-sm transition-all ${
                   isComplete
-                    ? 'bg-emerald-500 text-white'
+                    ? 'bg-[#5C8A4A] text-white'
                     : isActive
-                      ? 'bg-blue-500 text-white ring-4 ring-blue-100'
-                      : 'bg-slate-200 text-slate-500'
+                      ? 'bg-me-ochre text-white ring-4 ring-me-ochre/20'
+                      : 'bg-me-stone text-me-charcoal/55'
                 }`}
               >
                 {isComplete ? '✓' : stepNum}
               </div>
               <span
                 className={`mt-2 text-xs font-medium whitespace-nowrap ${
-                  isActive ? 'text-blue-700' : isComplete ? 'text-emerald-700' : 'text-slate-400'
+                  isActive ? 'text-me-ochre' : isComplete ? 'text-[#5C8A4A]' : 'text-me-charcoal/45'
                 }`}
               >
                 {labels[index]}
@@ -40,7 +40,7 @@ export default function StepIndicator({ currentStep, totalSteps, labels }: Props
             {stepNum < totalSteps && (
               <div
                 className={`flex-1 h-0.5 mx-2 mb-6 transition-all ${
-                  isComplete ? 'bg-emerald-500' : 'bg-slate-200'
+                  isComplete ? 'bg-[#5C8A4A]' : 'bg-me-stone'
                 }`}
               />
             )}

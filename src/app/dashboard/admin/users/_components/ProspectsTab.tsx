@@ -22,10 +22,10 @@ interface ProspectDetail extends Prospect {
 }
 
 const STATUS_STYLES: Record<string, string> = {
-  completed: 'bg-green-100 text-green-700',
-  running:   'bg-blue-100  text-blue-700',
-  queued:    'bg-gray-100  text-gray-600',
-  failed:    'bg-red-100   text-red-700',
+  completed: 'bg-[#5C8A4A]/12 text-[#5C8A4A]',
+  running:   'bg-me-ochre/10  text-me-ochre',
+  queued:    'bg-me-ivory  text-me-charcoal/60',
+  failed:    'bg-[#C2453A]/10   text-[#C2453A]',
 }
 
 const STATUSES = ['all', 'completed', 'running', 'queued', 'failed'] as const
@@ -79,8 +79,8 @@ export default function ProspectsTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Discovery Prospects</h2>
-          <p className="text-sm text-gray-500 mt-0.5">Users who submitted a free scan via /discover — {total} total</p>
+          <h2 className="text-lg font-semibold text-me-charcoal/90">Discovery Prospects</h2>
+          <p className="text-sm text-me-charcoal/55 mt-0.5">Users who submitted a free scan via /discover — {total} total</p>
         </div>
         {/* Status filter */}
         <div className="flex gap-1.5">
@@ -90,8 +90,8 @@ export default function ProspectsTab() {
               onClick={() => { setStatusFilter(s); setPage(1) }}
               className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-colors capitalize ${
                 statusFilter === s
-                  ? 'bg-indigo-600 text-white border-indigo-600'
-                  : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
+                  ? 'bg-me-ochre text-white border-me-ochre'
+                  : 'bg-white text-me-charcoal/60 border-black/15 hover:border-black/20'
               }`}
             >
               {s}
@@ -100,44 +100,44 @@ export default function ProspectsTab() {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-black/10 overflow-hidden">
         {loading ? (
-          <div className="p-8 text-center text-sm text-gray-400">Loading…</div>
+          <div className="p-8 text-center text-sm text-me-charcoal/45">Loading…</div>
         ) : error ? (
-          <div className="p-8 text-center text-sm text-red-500">{error}</div>
+          <div className="p-8 text-center text-sm text-[#C2453A]">{error}</div>
         ) : prospects.length === 0 ? (
-          <div className="p-8 text-center text-sm text-gray-400">No prospects found.</div>
+          <div className="p-8 text-center text-sm text-me-charcoal/45">No prospects found.</div>
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-100 bg-gray-50">
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Email</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Domain</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Name</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Submitted</th>
+              <tr className="border-b border-black/[.06] bg-me-ivory">
+                <th className="text-left px-4 py-3 text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide">Email</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide">Domain</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide">Name</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide">Status</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide">Submitted</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="divide-y divide-black/[.06]">
               {prospects.map(p => (
-                <tr key={p.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3 text-gray-900 font-medium">{p.email}</td>
-                  <td className="px-4 py-3 text-gray-600">{p.domain}</td>
-                  <td className="px-4 py-3 text-gray-500">{p.name || '—'}</td>
+                <tr key={p.id} className="hover:bg-me-ivory transition-colors">
+                  <td className="px-4 py-3 text-me-charcoal/90 font-medium">{p.email}</td>
+                  <td className="px-4 py-3 text-me-charcoal/60">{p.domain}</td>
+                  <td className="px-4 py-3 text-me-charcoal/55">{p.name || '—'}</td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${STATUS_STYLES[p.status] ?? STATUS_STYLES.queued}`}>
                       {p.status}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">
+                  <td className="px-4 py-3 text-me-charcoal/45 text-xs whitespace-nowrap">
                     {new Date(p.created_at).toLocaleDateString('en-NZ')}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <button
                       onClick={() => { void openDetail(p.id) }}
                       disabled={detailLoading}
-                      className="text-xs text-indigo-600 hover:text-indigo-800 hover:underline transition-colors disabled:opacity-40"
+                      className="text-xs text-me-ochre hover:text-me-ochre hover:underline transition-colors disabled:opacity-40"
                     >
                       View →
                     </button>
@@ -151,20 +151,20 @@ export default function ProspectsTab() {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-gray-500">
+        <div className="flex items-center justify-between text-sm text-me-charcoal/55">
           <span>Page {page} of {totalPages}</span>
           <div className="flex gap-2">
             <button
               onClick={() => setPage(p => Math.max(1, p - 1))}
               disabled={page === 1}
-              className="px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-colors"
+              className="px-3 py-1.5 border border-black/15 rounded-lg hover:bg-me-ivory disabled:opacity-40 transition-colors"
             >
               ← Prev
             </button>
             <button
               onClick={() => setPage(p => Math.min(totalPages, p + 1))}
               disabled={page === totalPages}
-              className="px-3 py-1.5 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-colors"
+              className="px-3 py-1.5 border border-black/15 rounded-lg hover:bg-me-ivory disabled:opacity-40 transition-colors"
             >
               Next →
             </button>
@@ -179,14 +179,14 @@ export default function ProspectsTab() {
             className="w-full max-w-2xl h-full bg-white shadow-2xl overflow-y-auto"
             onClick={e => e.stopPropagation()}
           >
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-start justify-between z-10">
+            <div className="sticky top-0 bg-white border-b border-black/10 px-6 py-4 flex items-start justify-between z-10">
               <div>
-                <h3 className="text-base font-bold text-gray-900">{selected.domain}</h3>
-                <p className="text-sm text-gray-500">{selected.email}</p>
+                <h3 className="text-base font-bold text-me-charcoal/90">{selected.domain}</h3>
+                <p className="text-sm text-me-charcoal/55">{selected.email}</p>
               </div>
               <button
                 onClick={() => setSelected(null)}
-                className="text-gray-400 hover:text-gray-600 text-xl leading-none mt-0.5"
+                className="text-me-charcoal/45 hover:text-me-charcoal/60 text-xl leading-none mt-0.5"
               >
                 ✕
               </button>
@@ -195,27 +195,27 @@ export default function ProspectsTab() {
             <div className="px-6 py-5 space-y-6">
               {/* Meta */}
               <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><span className="text-gray-500">Status</span>
+                <div><span className="text-me-charcoal/55">Status</span>
                   <span className={`ml-2 px-2 py-0.5 rounded-full text-xs font-medium capitalize ${STATUS_STYLES[selected.status]}`}>
                     {selected.status}
                   </span>
                 </div>
-                <div><span className="text-gray-500">Submitted:</span> <span className="text-gray-900 ml-1">{new Date(selected.created_at).toLocaleString('en-NZ')}</span></div>
-                {selected.name && <div><span className="text-gray-500">Name:</span> <span className="text-gray-900 ml-1">{selected.name}</span></div>}
-                {selected.completed_at && <div><span className="text-gray-500">Completed:</span> <span className="text-gray-900 ml-1">{new Date(selected.completed_at).toLocaleString('en-NZ')}</span></div>}
-                {selected.error && <div className="col-span-2"><span className="text-red-500">Error:</span> <span className="text-gray-700 ml-1 text-xs">{selected.error}</span></div>}
+                <div><span className="text-me-charcoal/55">Submitted:</span> <span className="text-me-charcoal/90 ml-1">{new Date(selected.created_at).toLocaleString('en-NZ')}</span></div>
+                {selected.name && <div><span className="text-me-charcoal/55">Name:</span> <span className="text-me-charcoal/90 ml-1">{selected.name}</span></div>}
+                {selected.completed_at && <div><span className="text-me-charcoal/55">Completed:</span> <span className="text-me-charcoal/90 ml-1">{new Date(selected.completed_at).toLocaleString('en-NZ')}</span></div>}
+                {selected.error && <div className="col-span-2"><span className="text-[#C2453A]">Error:</span> <span className="text-me-charcoal/75 ml-1 text-xs">{selected.error}</span></div>}
               </div>
 
               {/* Progress log */}
               {selected.progress_log && selected.progress_log.length > 0 && (
                 <div>
-                  <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Scan Progress</h4>
+                  <h4 className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide mb-2">Scan Progress</h4>
                   <div className="space-y-1.5 max-h-48 overflow-y-auto">
                     {selected.progress_log.map((log, i) => (
-                      <div key={i} className="flex items-start gap-2 text-xs text-gray-600">
+                      <div key={i} className="flex items-start gap-2 text-xs text-me-charcoal/60">
                         <span>{log.icon}</span>
                         <span>{log.message}</span>
-                        <span className="ml-auto text-gray-400 shrink-0">{new Date(log.ts).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}</span>
+                        <span className="ml-auto text-me-charcoal/45 shrink-0">{new Date(log.ts).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
                     ))}
                   </div>
@@ -225,7 +225,7 @@ export default function ProspectsTab() {
               {/* Report preview — same view as the prospect sees */}
               {selected.result && (
                 <div>
-                  <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Scan Result</h4>
+                  <h4 className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide mb-2">Scan Result</h4>
                   <div className="rounded-xl overflow-hidden overflow-y-auto max-h-[600px]"
                        style={{ background: '#060E1A' }}>
                     <ReportView report={selected.result as unknown as DiscoveryReport} />

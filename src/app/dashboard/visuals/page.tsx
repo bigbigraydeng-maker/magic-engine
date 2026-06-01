@@ -107,20 +107,20 @@ const PLATFORM_EMOJI: Record<string, string> = {
 }
 
 const FORMAT_STYLE: Record<string, string> = {
-  reel:     'bg-purple-100 text-purple-700',
-  video:    'bg-purple-100 text-purple-700',
-  feed:     'bg-sky-100 text-sky-700',
-  image:    'bg-sky-100 text-sky-700',
-  story:    'bg-pink-100 text-pink-700',
-  carousel: 'bg-amber-100 text-amber-700',
+  reel:     'bg-me-ochre/10 text-me-ochre',
+  video:    'bg-me-ochre/10 text-me-ochre',
+  feed:     'bg-me-ochre/10 text-me-ochre',
+  image:    'bg-me-ochre/10 text-me-ochre',
+  story:    'bg-[#C2453A]/10 text-[#C2453A]',
+  carousel: 'bg-me-ochre/10 text-me-ochre',
 }
 
 const STATUS_STYLE: Record<string, string> = {
-  draft:     'bg-gray-100 text-gray-500',
-  approved:  'bg-green-100 text-green-700',
-  scheduled: 'bg-blue-100 text-blue-600',
-  published: 'bg-emerald-100 text-emerald-700',
-  rejected:  'bg-red-100 text-red-600',
+  draft:     'bg-me-ivory text-me-charcoal/55',
+  approved:  'bg-[#5C8A4A]/12 text-[#5C8A4A]',
+  scheduled: 'bg-me-ochre/10 text-me-ochre',
+  published: 'bg-[#5C8A4A]/12 text-[#5C8A4A]',
+  rejected:  'bg-[#C2453A]/10 text-[#C2453A]',
 }
 
 const STATUSES = ['draft', 'approved', 'scheduled', 'published', 'rejected']
@@ -172,7 +172,7 @@ function EditableText({
         onChange={e => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={e => e.key === 'Enter' && commit()}
-        className="w-full text-sm px-1 py-0.5 border border-blue-400 rounded focus:ring-1 focus:ring-blue-400 outline-none bg-white text-gray-900 placeholder:text-gray-500"
+        className="w-full text-sm px-1 py-0.5 border border-me-ochre/50 rounded focus:ring-1 focus:ring-me-ochre outline-none bg-white text-me-charcoal/90 placeholder:text-me-charcoal/55"
       />
     )
   }
@@ -180,9 +180,9 @@ function EditableText({
     <div
       onClick={() => { setDraft(value ?? ''); setEditing(true) }}
       title={value ?? ''}
-      className="cursor-text min-h-[22px] text-sm text-gray-900 px-1 py-0.5 rounded hover:bg-blue-50 truncate"
+      className="cursor-text min-h-[22px] text-sm text-me-charcoal/90 px-1 py-0.5 rounded hover:bg-me-ochre/10 truncate"
     >
-      {value || <span className="text-gray-300 italic text-xs">{placeholder}</span>}
+      {value || <span className="text-me-charcoal/35 italic text-xs">{placeholder}</span>}
     </div>
   )
 }
@@ -205,7 +205,7 @@ function EditableTextarea({
         value={draft}
         onChange={e => setDraft(e.target.value)}
         onBlur={commit}
-        className="w-full text-xs px-1 py-0.5 border border-blue-400 rounded focus:ring-1 focus:ring-blue-400 outline-none resize-y min-h-[64px] bg-white text-gray-900 placeholder:text-gray-500"
+        className="w-full text-xs px-1 py-0.5 border border-me-ochre/50 rounded focus:ring-1 focus:ring-me-ochre outline-none resize-y min-h-[64px] bg-white text-me-charcoal/90 placeholder:text-me-charcoal/55"
       />
     )
   }
@@ -213,9 +213,9 @@ function EditableTextarea({
     <div
       onClick={() => { setDraft(value ?? ''); setEditing(true) }}
       title={value ?? ''}
-      className="cursor-text min-h-[22px] text-xs text-gray-900 px-1 py-0.5 rounded hover:bg-blue-50 line-clamp-2 overflow-hidden"
+      className="cursor-text min-h-[22px] text-xs text-me-charcoal/90 px-1 py-0.5 rounded hover:bg-me-ochre/10 line-clamp-2 overflow-hidden"
     >
-      {value || <span className="text-gray-300 italic">{placeholder}</span>}
+      {value || <span className="text-me-charcoal/35 italic">{placeholder}</span>}
     </div>
   )
 }
@@ -239,14 +239,14 @@ function EditableDatetime({
         value={draft}
         onChange={e => setDraft(e.target.value)}
         onBlur={() => commit(draft)}
-        className="text-xs px-1 py-0.5 border border-blue-400 rounded outline-none w-36 bg-white text-gray-900"
+        className="text-xs px-1 py-0.5 border border-me-ochre/50 rounded outline-none w-36 bg-white text-me-charcoal/90"
       />
     )
   }
   return (
     <div
       onClick={() => { setDraft(value ? toDatetimeLocal(value) : ''); setEditing(true) }}
-      className="cursor-text min-h-[22px] text-xs text-gray-900 px-1 py-0.5 rounded hover:bg-blue-50 whitespace-nowrap"
+      className="cursor-text min-h-[22px] text-xs text-me-charcoal/90 px-1 py-0.5 rounded hover:bg-me-ochre/10 whitespace-nowrap"
     >
       {fmtDateNZ(value)}
     </div>
@@ -274,7 +274,7 @@ function EditableHashtags({
         onBlur={commit}
         onKeyDown={e => e.key === 'Enter' && commit()}
         placeholder="#tag1 #tag2"
-        className="w-full text-xs px-1 py-0.5 border border-blue-400 rounded focus:ring-1 focus:ring-blue-400 outline-none bg-white text-gray-900 placeholder:text-gray-500"
+        className="w-full text-xs px-1 py-0.5 border border-me-ochre/50 rounded focus:ring-1 focus:ring-me-ochre outline-none bg-white text-me-charcoal/90 placeholder:text-me-charcoal/55"
       />
     )
   }
@@ -287,7 +287,7 @@ function EditableHashtags({
     <div
       onClick={() => { setDraft(str); setEditing(true) }}
       title={str}
-      className="cursor-text min-h-[22px] text-xs px-1 py-0.5 rounded hover:bg-blue-50 text-blue-500 flex items-center gap-1 flex-wrap"
+      className="cursor-text min-h-[22px] text-xs px-1 py-0.5 rounded hover:bg-me-ochre/10 text-me-ochre flex items-center gap-1 flex-wrap"
     >
       {tags.length > 0 ? (
         <>
@@ -297,11 +297,11 @@ function EditableHashtags({
             </span>
           ))}
           {hiddenCount > 0 && (
-            <span className="text-gray-400 text-[10px]">+{hiddenCount}</span>
+            <span className="text-me-charcoal/45 text-[10px]">+{hiddenCount}</span>
           )}
         </>
       ) : (
-        <span className="text-gray-300 italic">—</span>
+        <span className="text-me-charcoal/35 italic">—</span>
       )}
     </div>
   )
@@ -319,7 +319,7 @@ function EditableStatus({
         value={value}
         onChange={e => { onSave(e.target.value); setEditing(false) }}
         onBlur={() => setEditing(false)}
-        className="text-xs border border-blue-400 rounded px-1 outline-none bg-white w-full text-gray-900"
+        className="text-xs border border-me-ochre/50 rounded px-1 outline-none bg-white w-full text-me-charcoal/90"
       >
         {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
@@ -328,7 +328,7 @@ function EditableStatus({
   return (
     <span
       onClick={() => setEditing(true)}
-      className={`cursor-pointer text-xs px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap ${STATUS_STYLE[value] ?? 'bg-gray-100 text-gray-500'}`}
+      className={`cursor-pointer text-xs px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap ${STATUS_STYLE[value] ?? 'bg-me-ivory text-me-charcoal/55'}`}
     >
       {value}
     </span>
@@ -348,7 +348,7 @@ function EditableFormat({
         value={value ?? ''}
         onChange={e => { onSave(e.target.value); setEditing(false) }}
         onBlur={() => setEditing(false)}
-        className="text-xs border border-blue-400 rounded px-1 outline-none bg-white w-full text-gray-900"
+        className="text-xs border border-me-ochre/50 rounded px-1 outline-none bg-white w-full text-me-charcoal/90"
       >
         <option value="">—</option>
         {formats.map(f => <option key={f} value={f}>{f}</option>)}
@@ -358,7 +358,7 @@ function EditableFormat({
   return (
     <span
       onClick={() => setEditing(true)}
-      className={`cursor-pointer text-xs px-1.5 py-0.5 rounded font-medium capitalize ${value ? FORMAT_STYLE[value.toLowerCase()] ?? 'bg-gray-100 text-gray-600' : 'text-gray-300'}`}
+      className={`cursor-pointer text-xs px-1.5 py-0.5 rounded font-medium capitalize ${value ? FORMAT_STYLE[value.toLowerCase()] ?? 'bg-me-ivory text-me-charcoal/60' : 'text-me-charcoal/35'}`}
     >
       {value || '—'}
     </span>
@@ -387,14 +387,14 @@ function EditablePlatforms({
         onBlur={commit}
         onKeyDown={e => e.key === 'Enter' && commit()}
         placeholder="instagram facebook tiktok…"
-        className="w-full text-xs px-1 py-0.5 border border-blue-400 rounded focus:ring-1 focus:ring-blue-400 outline-none bg-white text-gray-900 placeholder:text-gray-500"
+        className="w-full text-xs px-1 py-0.5 border border-me-ochre/50 rounded focus:ring-1 focus:ring-me-ochre outline-none bg-white text-me-charcoal/90 placeholder:text-me-charcoal/55"
       />
     )
   }
   return (
     <div
       onClick={() => { setDraft((value ?? []).join(' ')); setEditing(true) }}
-      className="cursor-text flex gap-0.5 flex-wrap min-h-[22px] px-1 py-0.5 rounded hover:bg-blue-50"
+      className="cursor-text flex gap-0.5 flex-wrap min-h-[22px] px-1 py-0.5 rounded hover:bg-me-ochre/10"
     >
       {(value ?? []).length > 0 ? (
         (value ?? []).map(p => (
@@ -403,7 +403,7 @@ function EditablePlatforms({
           </span>
         ))
       ) : (
-        <span className="text-gray-300 italic text-xs">—</span>
+        <span className="text-me-charcoal/35 italic text-xs">—</span>
       )}
     </div>
   )
@@ -534,9 +534,9 @@ function AssetCell({
       <div className="flex flex-col items-center gap-1 py-1 animate-slide-in-x">
         <div className="relative w-12 h-12">
           <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
-            <circle cx="50" cy="50" r={r} fill="none" stroke="#fde68a" strokeWidth="8" />
+            <circle cx="50" cy="50" r={r} fill="none" stroke="#EBCB8B" strokeWidth="8" />
             <circle
-              cx="50" cy="50" r={r} fill="none" stroke="#f59e0b" strokeWidth="8"
+              cx="50" cy="50" r={r} fill="none" stroke="#C4912E" strokeWidth="8"
               strokeDasharray={circ} strokeDashoffset={circ * 0.72}
               strokeLinecap="round"
               className="animate-pulse-subtle"
@@ -544,12 +544,12 @@ function AssetCell({
           </svg>
           <div className="absolute inset-0 flex items-center justify-center">
             {pos !== undefined
-              ? <span className="text-xs font-bold text-amber-600">#{pos}</span>
-              : <span className="text-[8px] text-amber-500">…</span>
+              ? <span className="text-xs font-bold text-me-ochre">#{pos}</span>
+              : <span className="text-[8px] text-me-ochre">…</span>
             }
           </div>
         </div>
-        <span className="text-[9px] text-amber-600 font-medium">等待中</span>
+        <span className="text-[9px] text-me-ochre font-medium">等待中</span>
       </div>
     )
   }
@@ -585,12 +585,12 @@ function AssetCell({
       <div className="flex flex-col items-center gap-1">
         <div className="text-center">
           <div className="text-lg">⏱</div>
-          <span className="text-[9px] text-orange-600 font-medium">Timeout</span>
+          <span className="text-[9px] text-me-ochre font-medium">Timeout</span>
         </div>
         <button
           onClick={onGenerate}
           title="Retry generation"
-          className="text-[9px] px-1.5 py-0.5 bg-orange-500 text-white rounded hover:bg-orange-600"
+          className="text-[9px] px-1.5 py-0.5 bg-me-ochre text-white rounded hover:bg-me-ochre"
         >
           ↻ Retry
         </button>
@@ -604,7 +604,7 @@ function AssetCell({
       <div className="flex flex-col items-center gap-1">
         <div className="text-center">
           <div className="text-lg">✕</div>
-          <span className="text-[9px] text-red-600 font-medium">Failed</span>
+          <span className="text-[9px] text-[#C2453A] font-medium">Failed</span>
         </div>
         <div className="flex gap-1 flex-col items-center text-[9px]">
           <button
@@ -614,18 +614,18 @@ function AssetCell({
               code: genState.errorCode,
               retryCount: genState.retryCount ?? 0,
             })}
-            className="px-1.5 py-0.5 bg-red-100 text-red-700 rounded hover:bg-red-200"
+            className="px-1.5 py-0.5 bg-[#C2453A]/10 text-[#C2453A] rounded hover:bg-[#C2453A]/10"
           >
             Details
           </button>
           <button
             onClick={onGenerate}
-            className="px-1.5 py-0.5 bg-red-500 text-white rounded hover:bg-red-600"
+            className="px-1.5 py-0.5 bg-[#C2453A] text-white rounded hover:bg-[#C2453A]"
           >
             ↻ Retry
           </button>
           {genState.retryCount !== undefined && genState.retryCount > 0 && (
-            <span className="text-[8px] text-gray-500">
+            <span className="text-[8px] text-me-charcoal/55">
               Attempt {genState.retryCount + 1}/{GENERATION_CONFIG.MAX_AUTO_RETRIES + 1}
             </span>
           )}
@@ -648,21 +648,21 @@ function AssetCell({
             <img
               src={readyAsset.storage_url}
               alt=""
-              className={`w-14 h-14 object-cover rounded cursor-pointer ring-1 transition-all animate-scale-pop ${isExternalEdit ? 'ring-amber-400 opacity-70' : 'ring-gray-200 hover:ring-blue-400'}`}
+              className={`w-14 h-14 object-cover rounded cursor-pointer ring-1 transition-all animate-scale-pop ${isExternalEdit ? 'ring-me-ochre opacity-70' : 'ring-black/10 hover:ring-me-ochre'}`}
               onClick={() => window.open(readyAsset.storage_url!, '_blank')}
             />
             {/* Version badge */}
             <button
               onClick={openVersionHistory}
               title="View version history"
-              className="absolute -top-1.5 -right-1.5 bg-gray-700 text-white text-[8px] px-1 py-0 rounded-full leading-4 hover:bg-gray-900"
+              className="absolute -top-1.5 -right-1.5 bg-me-charcoal/60 text-white text-[8px] px-1 py-0 rounded-full leading-4 hover:bg-me-charcoal/90"
             >
               v{versionNum}
             </button>
             {/* External edit indicator */}
             {isExternalEdit && (
               <div className="absolute -bottom-1 left-0 right-0 text-center">
-                <span className="text-[8px] bg-amber-100 text-amber-700 px-1 rounded">外编中</span>
+                <span className="text-[8px] bg-me-ochre/10 text-me-ochre px-1 rounded">外编中</span>
               </div>
             )}
           </div>
@@ -671,14 +671,14 @@ function AssetCell({
           <div className="flex gap-1 text-[10px]">
             <button
               onClick={() => onSchedule(readyAsset.id)}
-              className="px-1.5 py-0.5 bg-green-500 text-white rounded hover:bg-green-600 whitespace-nowrap"
+              className="px-1.5 py-0.5 bg-[#5C8A4A] text-white rounded hover:bg-[#5C8A4A] whitespace-nowrap"
             >
               → Publer
             </button>
             <button
               onClick={onGenerate}
               title="Regenerate"
-              className="px-1.5 py-0.5 bg-gray-400 text-white rounded hover:bg-gray-500 whitespace-nowrap"
+              className="px-1.5 py-0.5 bg-me-charcoal/25 text-white rounded hover:bg-me-charcoal/35 whitespace-nowrap"
             >
               ↻
             </button>
@@ -690,7 +690,7 @@ function AssetCell({
             download
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[9px] px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 whitespace-nowrap w-full text-center"
+            className="text-[9px] px-1.5 py-0.5 bg-me-ochre/10 text-me-ochre rounded hover:bg-me-ochre/10 whitespace-nowrap w-full text-center"
           >
             ⬇ Download
           </a>
@@ -702,8 +702,8 @@ function AssetCell({
             title={isExternalEdit ? 'Clear external edit flag' : 'Mark for external editing'}
             className={`text-[9px] px-1.5 py-0.5 rounded whitespace-nowrap w-full text-center disabled:opacity-50 ${
               isExternalEdit
-                ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                ? 'bg-me-ochre/10 text-me-ochre hover:bg-me-ochre/10'
+                : 'bg-me-ivory text-me-charcoal/60 hover:bg-me-stone'
             }`}
           >
             {markingEdit ? '…' : isExternalEdit ? '✏ 外编中' : '✏ 标记外编'}
@@ -716,15 +716,15 @@ function AssetCell({
             title="Upload final edited version"
             className={`text-[9px] px-1.5 py-0.5 rounded whitespace-nowrap w-full text-center disabled:opacity-50 ${
               isExternalEdit
-                ? 'bg-green-500 text-white hover:bg-green-600'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                ? 'bg-[#5C8A4A] text-white hover:bg-[#5C8A4A]'
+                : 'bg-me-ivory text-me-charcoal/60 hover:bg-me-stone'
             }`}
           >
             {uploadingVersion ? '上传中…' : '⬆ 上传最终版'}
           </button>
 
           {readyAsset.cost_usd && (
-            <span className="text-[8px] text-gray-400">${readyAsset.cost_usd.toFixed(2)}</span>
+            <span className="text-[8px] text-me-charcoal/45">${readyAsset.cost_usd.toFixed(2)}</span>
           )}
 
           <input
@@ -748,38 +748,38 @@ function AssetCell({
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowVersionModal(false)}>
             <div className="bg-white rounded-xl p-5 w-full max-w-sm shadow-xl" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold text-gray-800">版本历史</h3>
-                <button onClick={() => setShowVersionModal(false)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
+                <h3 className="text-sm font-semibold text-me-charcoal/75">版本历史</h3>
+                <button onClick={() => setShowVersionModal(false)} className="text-me-charcoal/45 hover:text-me-charcoal/60 text-lg leading-none">×</button>
               </div>
               {loadingVersions ? (
                 <div className="flex justify-center py-6">
-                  <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                  <div className="w-5 h-5 border-2 border-me-ochre/50 border-t-transparent rounded-full animate-spin" />
                 </div>
               ) : versions.length === 0 ? (
-                <p className="text-xs text-gray-400 text-center py-4">暂无版本记录</p>
+                <p className="text-xs text-me-charcoal/45 text-center py-4">暂无版本记录</p>
               ) : (
                 <div className="space-y-2 max-h-80 overflow-y-auto">
                   {versions.map(v => (
-                    <div key={v.id} className="flex items-start gap-3 p-2 rounded-lg border border-gray-100 hover:bg-gray-50">
+                    <div key={v.id} className="flex items-start gap-3 p-2 rounded-lg border border-black/[.06] hover:bg-me-ivory">
                       <a href={v.storage_url} target="_blank" rel="noopener noreferrer">
-                        <img src={v.storage_url} alt={`v${v.version_num}`} className="w-12 h-12 object-cover rounded flex-shrink-0 ring-1 ring-gray-200" />
+                        <img src={v.storage_url} alt={`v${v.version_num}`} className="w-12 h-12 object-cover rounded flex-shrink-0 ring-1 ring-black/10" />
                       </a>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-medium text-gray-700">v{v.version_num}</span>
+                          <span className="text-xs font-medium text-me-charcoal/75">v{v.version_num}</span>
                           <span className={`text-[9px] px-1 py-0 rounded-full ${
-                            v.edit_type === 'ai_generated' ? 'bg-blue-100 text-blue-600' :
-                            v.edit_type === 'external_edit' ? 'bg-amber-100 text-amber-700' :
-                            'bg-gray-100 text-gray-600'
+                            v.edit_type === 'ai_generated' ? 'bg-me-ochre/10 text-me-ochre' :
+                            v.edit_type === 'external_edit' ? 'bg-me-ochre/10 text-me-ochre' :
+                            'bg-me-ivory text-me-charcoal/60'
                           }`}>
                             {v.edit_type === 'ai_generated' ? 'AI生成' :
                              v.edit_type === 'external_edit' ? '外编' : '手动上传'}
                           </span>
                         </div>
                         {v.edit_notes && (
-                          <p className="text-[10px] text-gray-500 mt-0.5 truncate">{v.edit_notes}</p>
+                          <p className="text-[10px] text-me-charcoal/55 mt-0.5 truncate">{v.edit_notes}</p>
                         )}
-                        <p className="text-[9px] text-gray-400 mt-0.5">
+                        <p className="text-[9px] text-me-charcoal/45 mt-0.5">
                           {new Date(v.created_at).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                         </p>
                       </div>
@@ -788,7 +788,7 @@ function AssetCell({
                         download
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-[9px] text-blue-500 hover:text-blue-700 flex-shrink-0 mt-1"
+                        className="text-[9px] text-me-ochre hover:text-me-ochre flex-shrink-0 mt-1"
                       >
                         ⬇
                       </a>
@@ -810,14 +810,14 @@ function AssetCell({
     <div className="flex flex-col items-center gap-1">
       <button
         onClick={onGenerate}
-        className="text-xs px-2 py-1 bg-indigo-500 text-white rounded hover:bg-indigo-600 whitespace-nowrap w-full"
+        className="text-xs px-2 py-1 bg-me-ochre text-white rounded hover:bg-me-ochre whitespace-nowrap w-full"
       >
         {type === 'video' ? '▶ Gen Video' : '🖼 Gen Image'}
       </button>
       <button
         onClick={() => fileRef.current?.click()}
         disabled={uploading}
-        className="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 whitespace-nowrap w-full disabled:opacity-50"
+        className="text-xs px-2 py-1 bg-me-ivory text-me-charcoal/75 rounded hover:bg-me-stone whitespace-nowrap w-full disabled:opacity-50"
       >
         {uploading ? '上传中…' : '⬆ Upload'}
       </button>
@@ -1167,15 +1167,15 @@ export default function VisualsPage() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
+    <div className="flex flex-col h-screen bg-me-ivory">
 
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 py-2.5 bg-white border-b border-gray-200 flex-shrink-0">
-        <h1 className="text-sm font-semibold text-gray-700 mr-1">🚀 Launch Hub</h1>
+      <div className="flex items-center gap-3 px-4 py-2.5 bg-white border-b border-black/10 flex-shrink-0">
+        <h1 className="text-sm font-semibold text-me-charcoal/75 mr-1">🚀 Launch Hub</h1>
         <select
           value={selectedClientId}
           onChange={e => setSelectedClientId(e.target.value)}
-          className="text-sm border border-gray-200 rounded px-2 py-1 bg-white text-gray-900"
+          className="text-sm border border-black/10 rounded px-2 py-1 bg-white text-me-charcoal/90"
         >
           <option value="">Select client…</option>
           {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -1183,7 +1183,7 @@ export default function VisualsPage() {
         <select
           value={statusFilter}
           onChange={e => setStatusFilter(e.target.value)}
-          className="text-sm border border-gray-200 rounded px-2 py-1 bg-white text-gray-900"
+          className="text-sm border border-black/10 rounded px-2 py-1 bg-white text-me-charcoal/90"
         >
           <option value="in_progress,draft,approved,scheduled">进行中 + 待审核 + 已批准 + 已排期</option>
           <option value="draft,approved,scheduled">待审核 + 已批准 + 已排期</option>
@@ -1198,11 +1198,11 @@ export default function VisualsPage() {
         <button
           onClick={handleRefresh}
           disabled={!selectedClientId || refreshing}
-          className="text-sm px-3 py-1 bg-indigo-500 text-white rounded hover:bg-indigo-600 disabled:opacity-50"
+          className="text-sm px-3 py-1 bg-me-ochre text-white rounded hover:bg-me-ochre disabled:opacity-50"
         >
           {refreshing ? '刷新中…' : '↻ 刷新'}
         </button>
-        <span className="text-xs text-gray-400 ml-auto hidden md:block">
+        <span className="text-xs text-me-charcoal/45 ml-auto hidden md:block">
           {posts.length} posts · Click any cell to edit · Auto-saves
         </span>
       </div>
@@ -1211,50 +1211,50 @@ export default function VisualsPage() {
       {selectedClientId ? (
         <div className="flex-1 overflow-auto">
           <table className="border-collapse bg-white text-sm" style={{ minWidth: 1280, width: '100%' }}>
-            <thead className="sticky top-0 z-10 bg-gray-50">
-              <tr className="text-xs text-gray-500 uppercase tracking-wide">
-                <th className="w-9 px-2 py-2 text-left font-medium border-b border-r border-gray-200">#</th>
-                <th className="w-24 px-2 py-2 text-left font-medium border-b border-r border-gray-200">Status</th>
-                <th className="w-[90px] px-2 py-2 text-left font-medium border-b border-r border-gray-200">Format</th>
-                <th className="w-16 px-2 py-2 text-left font-medium border-b border-r border-gray-200">Platform</th>
-                <th className="w-36 px-2 py-2 text-left font-medium border-b border-r border-gray-200">Date (NZT)</th>
-                <th className="w-40 max-w-[160px] px-2 py-2 text-left font-medium border-b border-r border-gray-200">Headline</th>
-                <th className="min-w-[200px] px-2 py-2 text-left font-medium border-b border-r border-gray-200">Caption</th>
-                <th className="min-w-[220px] px-2 py-2 text-left font-medium border-b border-r border-gray-200">Prompt + Dimensions</th>
-                <th className="min-w-[140px] px-2 py-2 text-left font-medium border-b border-r border-gray-200">Hashtags</th>
-                <th className="w-24 px-2 py-2 text-center font-medium border-b border-gray-200">Asset</th>
+            <thead className="sticky top-0 z-10 bg-me-ivory">
+              <tr className="text-xs text-me-charcoal/55 uppercase tracking-wide">
+                <th className="w-9 px-2 py-2 text-left font-medium border-b border-r border-black/10">#</th>
+                <th className="w-24 px-2 py-2 text-left font-medium border-b border-r border-black/10">Status</th>
+                <th className="w-[90px] px-2 py-2 text-left font-medium border-b border-r border-black/10">Format</th>
+                <th className="w-16 px-2 py-2 text-left font-medium border-b border-r border-black/10">Platform</th>
+                <th className="w-36 px-2 py-2 text-left font-medium border-b border-r border-black/10">Date (NZT)</th>
+                <th className="w-40 max-w-[160px] px-2 py-2 text-left font-medium border-b border-r border-black/10">Headline</th>
+                <th className="min-w-[200px] px-2 py-2 text-left font-medium border-b border-r border-black/10">Caption</th>
+                <th className="min-w-[220px] px-2 py-2 text-left font-medium border-b border-r border-black/10">Prompt + Dimensions</th>
+                <th className="min-w-[140px] px-2 py-2 text-left font-medium border-b border-r border-black/10">Hashtags</th>
+                <th className="w-24 px-2 py-2 text-center font-medium border-b border-black/10">Asset</th>
               </tr>
             </thead>
             <tbody>
               {posts.map((post, idx) => {
                 const isKanbanDraft = post.status === 'draft' && post.source === 'kanban'
                 return (
-                <tr key={post.id} id={post.id} className={`border-b border-gray-100 hover:bg-gray-50/70 align-top group ${isKanbanDraft ? 'border-l-2 border-l-orange-400 bg-orange-50/30' : ''}`}>
+                <tr key={post.id} id={post.id} className={`border-b border-black/[.06] hover:bg-me-ivory/70 align-top group ${isKanbanDraft ? 'border-l-2 border-l-me-ochre bg-me-ochre/30' : ''}`}>
 
                   {/* # */}
-                  <td className="px-2 py-1.5 text-gray-400 text-xs border-r border-gray-100">{idx + 1}</td>
+                  <td className="px-2 py-1.5 text-me-charcoal/45 text-xs border-r border-black/[.06]">{idx + 1}</td>
 
                   {/* Status */}
-                  <td className="px-2 py-1.5 border-r border-gray-100">
+                  <td className="px-2 py-1.5 border-r border-black/[.06]">
                     <EditableStatus value={post.status} onSave={v => patchPost(post.id, { status: v })} />
                     {isKanbanDraft && (
-                      <span className="mt-1 inline-block text-[9px] font-bold bg-orange-100 text-orange-600 border border-orange-200 rounded px-1 py-0.5">
+                      <span className="mt-1 inline-block text-[9px] font-bold bg-me-ochre/10 text-me-ochre border border-me-ochre/30 rounded px-1 py-0.5">
                         📥 来自看板
                       </span>
                     )}
                   </td>
 
                   {/* Format */}
-                  <td className="px-2 py-1.5 border-r border-gray-100">
+                  <td className="px-2 py-1.5 border-r border-black/[.06]">
                     <EditableFormat
                       value={post.format}
                       onSave={v => patchPost(post.id, { format: v })}
                     />
-                    {post.ratio && <div className="text-[10px] text-gray-400 mt-0.5">{post.ratio}</div>}
+                    {post.ratio && <div className="text-[10px] text-me-charcoal/45 mt-0.5">{post.ratio}</div>}
                   </td>
 
                   {/* Platform */}
-                  <td className="px-2 py-1.5 border-r border-gray-100 relative">
+                  <td className="px-2 py-1.5 border-r border-black/[.06] relative">
                     <EditablePlatforms
                       value={post.platforms}
                       onSave={v => patchPost(post.id, { platforms: v })}
@@ -1262,7 +1262,7 @@ export default function VisualsPage() {
                   </td>
 
                   {/* Date */}
-                  <td className="px-2 py-1.5 border-r border-gray-100">
+                  <td className="px-2 py-1.5 border-r border-black/[.06]">
                     <EditableDatetime
                       value={post.scheduled_at}
                       onSave={v => patchPost(post.id, { scheduled_at: v })}
@@ -1270,7 +1270,7 @@ export default function VisualsPage() {
                   </td>
 
                   {/* Headline — capped width */}
-                  <td className="px-2 py-1.5 border-r border-gray-100 w-40 max-w-[160px]">
+                  <td className="px-2 py-1.5 border-r border-black/[.06] w-40 max-w-[160px]">
                     <EditableText
                       value={post.title}
                       onSave={v => patchPost(post.id, { title: v })}
@@ -1279,7 +1279,7 @@ export default function VisualsPage() {
                   </td>
 
                   {/* Caption */}
-                  <td className="px-2 py-1.5 border-r border-gray-100">
+                  <td className="px-2 py-1.5 border-r border-black/[.06]">
                     <EditableTextarea
                       value={post.caption}
                       onSave={v => patchPost(post.id, { caption: v })}
@@ -1288,7 +1288,7 @@ export default function VisualsPage() {
                   </td>
 
                   {/* Prompt + Dimensions */}
-                  <td className="px-2 py-1.5 border-r border-gray-100">
+                  <td className="px-2 py-1.5 border-r border-black/[.06]">
                     {(() => {
                       const hint = getDimensionHint(post.format, post.platforms)
                       const briefDirty = dirtyBriefs.has(post.id)
@@ -1298,12 +1298,12 @@ export default function VisualsPage() {
                           {(post.format || hint) && (
                             <div className="flex items-center gap-1 mb-1 flex-wrap">
                               {post.format && (
-                                <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium capitalize ${FORMAT_STYLE[post.format.toLowerCase()] ?? 'bg-gray-100 text-gray-600'}`}>
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium capitalize ${FORMAT_STYLE[post.format.toLowerCase()] ?? 'bg-me-ivory text-me-charcoal/60'}`}>
                                   {post.format}
                                 </span>
                               )}
                               {hint && (
-                                <span className="text-[10px] text-gray-400 font-mono">{hint}</span>
+                                <span className="text-[10px] text-me-charcoal/45 font-mono">{hint}</span>
                               )}
                             </div>
                           )}
@@ -1316,14 +1316,14 @@ export default function VisualsPage() {
                           {briefDirty && !isGenerating && (
                             <button
                               onClick={() => handleGenerate(post)}
-                              className="mt-1 w-full text-[9px] px-1.5 py-0.5 bg-indigo-500 text-white rounded hover:bg-indigo-600 flex items-center justify-center gap-1 animate-pulse-once"
+                              className="mt-1 w-full text-[9px] px-1.5 py-0.5 bg-me-ochre text-white rounded hover:bg-me-ochre flex items-center justify-center gap-1 animate-pulse-once"
                             >
                               🔄 Regen with new prompt
                             </button>
                           )}
                           {briefDirty && isGenerating && (
-                            <div className="mt-1 text-[9px] text-indigo-500 flex items-center gap-1">
-                              <span className="inline-block w-2.5 h-2.5 border border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                            <div className="mt-1 text-[9px] text-me-ochre flex items-center gap-1">
+                              <span className="inline-block w-2.5 h-2.5 border border-me-ochre/50 border-t-transparent rounded-full animate-spin" />
                               Generating…
                             </div>
                           )}
@@ -1333,7 +1333,7 @@ export default function VisualsPage() {
                   </td>
 
                   {/* Hashtags */}
-                  <td className="px-2 py-1.5 border-r border-gray-100">
+                  <td className="px-2 py-1.5 border-r border-black/[.06]">
                     <EditableHashtags
                       value={post.hashtags}
                       onSave={v => patchPost(post.id, { hashtags: v })}
@@ -1363,7 +1363,7 @@ export default function VisualsPage() {
 
               {posts.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="text-center py-20 text-gray-400 text-sm">
+                  <td colSpan={10} className="text-center py-20 text-me-charcoal/45 text-sm">
                     No posts found — sync from Content Workspace to get started
                   </td>
                 </tr>
@@ -1372,7 +1372,7 @@ export default function VisualsPage() {
           </table>
         </div>
       ) : (
-        <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">
+        <div className="flex-1 flex items-center justify-center text-me-charcoal/45 text-sm">
           Select a client to view their content
         </div>
       )}
@@ -1384,11 +1384,11 @@ export default function VisualsPage() {
             <h2 className="text-base font-semibold mb-4">Schedule to Publer</h2>
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Account</label>
+                <label className="text-xs text-me-charcoal/55 block mb-1">Account</label>
                 <select
                   value={scheduleForm.account_id}
                   onChange={e => setScheduleForm(f => ({ ...f, account_id: e.target.value }))}
-                  className="w-full border rounded px-2 py-1.5 text-sm text-gray-900 bg-white"
+                  className="w-full border rounded px-2 py-1.5 text-sm text-me-charcoal/90 bg-white"
                 >
                   <option value="">Select account…</option>
                   {publerAccounts.map(a => (
@@ -1397,35 +1397,35 @@ export default function VisualsPage() {
                 </select>
               </div>
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Schedule Time (NZT)</label>
+                <label className="text-xs text-me-charcoal/55 block mb-1">Schedule Time (NZT)</label>
                 <input
                   type="datetime-local"
                   value={scheduleForm.scheduled_at}
                   onChange={e => setScheduleForm(f => ({ ...f, scheduled_at: e.target.value }))}
-                  className="w-full border rounded px-2 py-1.5 text-sm text-gray-900 bg-white"
+                  className="w-full border rounded px-2 py-1.5 text-sm text-me-charcoal/90 bg-white"
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Caption</label>
+                <label className="text-xs text-me-charcoal/55 block mb-1">Caption</label>
                 <textarea
                   value={scheduleForm.caption}
                   onChange={e => setScheduleForm(f => ({ ...f, caption: e.target.value }))}
                   rows={4}
-                  className="w-full border rounded px-2 py-1.5 text-sm text-gray-900 bg-white resize-none"
+                  className="w-full border rounded px-2 py-1.5 text-sm text-me-charcoal/90 bg-white resize-none"
                 />
               </div>
             </div>
             <div className="flex gap-2 mt-5 justify-end">
               <button
                 onClick={() => setPubModal(null)}
-                className="px-3 py-1.5 text-sm border rounded hover:bg-gray-50"
+                className="px-3 py-1.5 text-sm border rounded hover:bg-me-ivory"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSchedule}
                 disabled={!scheduleForm.account_id || scheduleLoading}
-                className="px-3 py-1.5 text-sm bg-green-500 text-white rounded disabled:opacity-50 hover:bg-green-600 flex items-center gap-2"
+                className="px-3 py-1.5 text-sm bg-[#5C8A4A] text-white rounded disabled:opacity-50 hover:bg-[#5C8A4A] flex items-center gap-2"
               >
                 {scheduleLoading ? (
                   <>
@@ -1445,16 +1445,16 @@ export default function VisualsPage() {
       {errorModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg p-6 w-full max-w-md shadow-xl">
-            <h3 className="text-base font-semibold text-red-600 mb-2">Generation Failed</h3>
-            <p className="text-sm text-gray-700 mb-4 leading-relaxed">{errorModal.message}</p>
+            <h3 className="text-base font-semibold text-[#C2453A] mb-2">Generation Failed</h3>
+            <p className="text-sm text-me-charcoal/75 mb-4 leading-relaxed">{errorModal.message}</p>
             {errorModal.code && (
-              <div className="mb-4 p-2 bg-gray-50 rounded border border-gray-200">
-                <p className="text-xs text-gray-500 font-medium mb-1">Error Code:</p>
-                <p className="text-xs text-gray-700 font-mono">{errorModal.code}</p>
+              <div className="mb-4 p-2 bg-me-ivory rounded border border-black/10">
+                <p className="text-xs text-me-charcoal/55 font-medium mb-1">Error Code:</p>
+                <p className="text-xs text-me-charcoal/75 font-mono">{errorModal.code}</p>
               </div>
             )}
-            <div className="mb-4 p-2 bg-gray-50 rounded border border-gray-200">
-              <p className="text-xs text-gray-500 font-medium">
+            <div className="mb-4 p-2 bg-me-ivory rounded border border-black/10">
+              <p className="text-xs text-me-charcoal/55 font-medium">
                 {errorModal.retryCount >= GENERATION_CONFIG.MAX_AUTO_RETRIES
                   ? `All ${GENERATION_CONFIG.MAX_AUTO_RETRIES} auto-retries exhausted`
                   : `Attempt: ${errorModal.retryCount + 1} / ${GENERATION_CONFIG.MAX_AUTO_RETRIES + 1}`}
@@ -1463,7 +1463,7 @@ export default function VisualsPage() {
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setErrorModal(null)}
-                className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 font-medium"
+                className="px-3 py-1.5 text-sm border border-black/15 rounded hover:bg-me-ivory font-medium"
               >
                 Dismiss
               </button>
@@ -1475,7 +1475,7 @@ export default function VisualsPage() {
                     setErrorModal(null)
                   }
                 }}
-                className="px-3 py-1.5 text-sm bg-red-500 text-white rounded hover:bg-red-600 font-medium"
+                className="px-3 py-1.5 text-sm bg-[#C2453A] text-white rounded hover:bg-[#C2453A] font-medium"
               >
                 Retry Now
               </button>
@@ -1496,8 +1496,8 @@ export default function VisualsPage() {
       {toast && (
         <div className={`fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 z-40 animate-in fade-in-0 slide-in-from-bottom-4 ${
           toast.type === 'success'
-            ? 'bg-green-50 text-green-800 border border-green-200'
-            : 'bg-red-50 text-red-800 border border-red-200'
+            ? 'bg-[#5C8A4A]/10 text-[#5C8A4A] border border-[#5C8A4A]/30'
+            : 'bg-[#C2453A]/10 text-[#C2453A] border border-[#C2453A]/30'
         }`}>
           {toast.type === 'success' ? (
             <svg className="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">

@@ -113,7 +113,7 @@ export default function DeploymentPage() {
       <div className="max-w-6xl mx-auto px-4 py-8">
         <div className="text-center">
           <div className="inline-block animate-spin">⏳</div>
-          <p className="mt-2 text-gray-600">Loading deployment assistant...</p>
+          <p className="mt-2 text-me-charcoal/60">Loading deployment assistant...</p>
         </div>
       </div>
     );
@@ -122,12 +122,12 @@ export default function DeploymentPage() {
   if (pageError) {
     return (
       <div className="max-w-6xl mx-auto px-4 py-8">
-        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-          <p className="text-red-700 font-medium">Error</p>
-          <p className="text-red-600 text-sm mt-1">{pageError}</p>
+        <div className="p-4 bg-[#C2453A]/10 border border-[#C2453A]/30 rounded-lg">
+          <p className="text-[#C2453A] font-medium">Error</p>
+          <p className="text-[#C2453A] text-sm mt-1">{pageError}</p>
           <button
             onClick={loadData}
-            className="mt-3 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition text-sm"
+            className="mt-3 px-4 py-2 bg-[#C2453A] text-white rounded hover:bg-[#C2453A] transition text-sm"
           >
             Retry
           </button>
@@ -141,12 +141,12 @@ export default function DeploymentPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold">{DEPLOYMENT_CONFIG.LABELS.PAGE_TITLE}</h1>
-          {client && <p className="text-gray-600 mt-2">{client.name}</p>}
+          <h1 className="font-display text-3xl font-bold tracking-tight text-me-charcoal/90">{DEPLOYMENT_CONFIG.LABELS.PAGE_TITLE}</h1>
+          {client && <p className="text-me-charcoal/60 mt-2">{client.name}</p>}
         </div>
         <Link
           href={`/dashboard/geo-composer/${clientId}`}
-          className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition text-sm"
+          className="px-4 py-2 border border-black/15 rounded-lg hover:bg-me-ivory transition text-sm"
         >
           ← Back to Composer
         </Link>
@@ -166,13 +166,13 @@ export default function DeploymentPage() {
         </div>
 
         {/* Right: Deployed Pages List */}
-        <div className="bg-white border border-gray-200 rounded-lg p-6">
+        <div className="bg-white border border-black/10 rounded-lg p-6">
           <h3 className="text-lg font-semibold mb-4">
             {DEPLOYMENT_CONFIG.LABELS.DEPLOYED_PAGES}
           </h3>
 
           {deploymentsError && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+            <div className="mb-4 p-3 bg-[#C2453A]/10 border border-[#C2453A]/30 rounded text-[#C2453A] text-sm">
               {deploymentsError}
             </div>
           )}

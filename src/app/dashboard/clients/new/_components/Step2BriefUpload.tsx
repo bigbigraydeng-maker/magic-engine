@@ -90,8 +90,8 @@ export default function Step2BriefUpload({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-slate-900 mb-1">Upload Brief Materials</h2>
-        <p className="text-slate-600 text-sm">
+        <h2 className="text-2xl font-bold text-me-charcoal/90 mb-1">Upload Brief Materials</h2>
+        <p className="text-me-charcoal/60 text-sm">
           Upload existing brand documents (PDF, DOCX, TXT) and reference URLs.
           We&apos;ll use these in Step 5 to generate the Master Brief.
         </p>
@@ -99,15 +99,15 @@ export default function Step2BriefUpload({
 
       {/* File upload */}
       <div>
-        <label className="block text-sm font-medium text-slate-700 mb-2">
-          Brand Documents <span className="text-slate-400">(optional, max 10 files)</span>
+        <label className="block text-sm font-medium text-me-charcoal/75 mb-2">
+          Brand Documents <span className="text-me-charcoal/45">(optional, max 10 files)</span>
         </label>
 
         <label
           className={`block w-full border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
             uploading
-              ? 'border-blue-300 bg-blue-50 cursor-wait'
-              : 'border-slate-300 hover:border-blue-400 bg-slate-50'
+              ? 'border-me-ochre/50 bg-me-ochre/10 cursor-wait'
+              : 'border-black/15 hover:border-me-ochre/50 bg-me-ivory'
           }`}
         >
           <input
@@ -121,14 +121,14 @@ export default function Step2BriefUpload({
               e.target.value = ''
             }}
           />
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-me-charcoal/60">
             {uploading ? 'Uploading…' : '📎 Click to add a file'}
           </p>
-          <p className="text-xs text-slate-400 mt-1">PDF · DOCX · TXT</p>
+          <p className="text-xs text-me-charcoal/45 mt-1">PDF · DOCX · TXT</p>
         </label>
 
         {uploadError && (
-          <p className="mt-2 text-sm text-red-600">{uploadError}</p>
+          <p className="mt-2 text-sm text-[#C2453A]">{uploadError}</p>
         )}
 
         {uploadedFiles.length > 0 && (
@@ -136,13 +136,13 @@ export default function Step2BriefUpload({
             {uploadedFiles.map((f) => (
               <li
                 key={f.path}
-                className="flex items-center justify-between px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-sm"
+                className="flex items-center justify-between px-3 py-2 bg-[#5C8A4A]/10 border border-[#5C8A4A]/30 rounded-lg text-sm"
               >
-                <span className="text-emerald-800 truncate">📄 {f.name}</span>
+                <span className="text-[#5C8A4A] truncate">📄 {f.name}</span>
                 <button
                   type="button"
                   onClick={() => removeFile(f.path)}
-                  className="text-emerald-600 hover:text-red-600 text-xs ml-3"
+                  className="text-[#5C8A4A] hover:text-[#C2453A] text-xs ml-3"
                 >
                   Remove
                 </button>
@@ -154,8 +154,8 @@ export default function Step2BriefUpload({
 
       {/* Reference URLs */}
       <div>
-        <label className="block text-sm font-medium text-slate-700 mb-2">
-          Reference URLs <span className="text-slate-400">(optional, max 5)</span>
+        <label className="block text-sm font-medium text-me-charcoal/75 mb-2">
+          Reference URLs <span className="text-me-charcoal/45">(optional, max 5)</span>
         </label>
         <div className="space-y-2">
           {websiteUrls.map((url, i) => (
@@ -165,14 +165,14 @@ export default function Step2BriefUpload({
                 value={url}
                 onChange={(e) => updateUrl(i, e.target.value)}
                 placeholder="https://example.com/about"
-                className="flex-1 px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-900 hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="flex-1 px-4 py-2 rounded-lg border border-black/15 bg-white text-me-charcoal/90 hover:border-black/20 focus:outline-none focus:ring-2 focus:ring-me-ochre"
                 disabled={loading}
               />
               {websiteUrls.length > 1 && (
                 <button
                   type="button"
                   onClick={() => removeUrl(i)}
-                  className="px-3 text-slate-400 hover:text-red-600"
+                  className="px-3 text-me-charcoal/45 hover:text-[#C2453A]"
                   aria-label="Remove URL"
                 >
                   ✕
@@ -185,7 +185,7 @@ export default function Step2BriefUpload({
           <button
             type="button"
             onClick={addUrl}
-            className="mt-2 text-sm text-blue-600 hover:text-blue-700 font-medium"
+            className="mt-2 text-sm text-me-ochre hover:text-me-ochre font-medium"
           >
             + Add another URL
           </button>
@@ -194,7 +194,7 @@ export default function Step2BriefUpload({
 
       {/* Skip notice */}
       {!hasInputs && (
-        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+        <div className="p-3 bg-me-ochre/10 border border-me-ochre/30 rounded-lg text-xs text-me-ochre">
           ⚠️ You can skip this step, but the Master Brief will rely solely on Site Audit
           and Keyword Intelligence. We strongly recommend uploading at least one document or URL.
         </div>
@@ -206,7 +206,7 @@ export default function Step2BriefUpload({
           type="button"
           onClick={onBack}
           disabled={loading}
-          className="px-6 py-3 text-slate-600 hover:text-slate-900 font-medium"
+          className="px-6 py-3 text-me-charcoal/60 hover:text-me-charcoal/90 font-medium"
         >
           ← Back
         </button>
@@ -215,7 +215,7 @@ export default function Step2BriefUpload({
             type="button"
             onClick={onSkip}
             disabled={loading}
-            className="px-6 py-3 text-slate-600 hover:text-slate-900 font-medium border border-slate-300 rounded-lg"
+            className="px-6 py-3 text-me-charcoal/60 hover:text-me-charcoal/90 font-medium border border-black/15 rounded-lg"
           >
             Skip for now
           </button>
@@ -223,7 +223,7 @@ export default function Step2BriefUpload({
             type="button"
             onClick={submit}
             disabled={loading || uploading}
-            className="px-6 py-3 bg-blue-500 hover:bg-blue-600 disabled:bg-slate-400 text-white font-semibold rounded-lg transition-colors"
+            className="px-6 py-3 bg-me-ochre hover:bg-me-ochre disabled:bg-me-charcoal/25 text-white font-semibold rounded-lg transition-colors"
           >
             Continue to Step 3 →
           </button>

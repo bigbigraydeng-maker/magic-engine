@@ -39,21 +39,21 @@ export function CodeSnippetBox({
   };
 
   return (
-    <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
+    <div className="bg-me-ivory border border-black/10 rounded-lg overflow-hidden">
       {title && (
-        <div className="flex justify-between items-center px-4 py-3 border-b border-gray-200 bg-gray-100">
-          <span className="text-sm font-semibold text-gray-700">{title}</span>
+        <div className="flex justify-between items-center px-4 py-3 border-b border-black/10 bg-me-ivory">
+          <span className="text-sm font-semibold text-me-charcoal/75">{title}</span>
           {copyable && (
             <button
               onClick={handleCopy}
-              className="text-xs px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 transition"
+              className="text-xs px-3 py-1 bg-white border border-black/15 rounded hover:bg-me-ivory transition"
             >
               {copied ? DEPLOYMENT_CONFIG.LABELS.COPIED : DEPLOYMENT_CONFIG.LABELS.COPY_SNIPPET}
             </button>
           )}
         </div>
       )}
-      <pre className="p-4 overflow-x-auto bg-gray-900 text-gray-100 text-sm leading-relaxed">
+      <pre className="p-4 overflow-x-auto bg-me-charcoal/90 text-me-ivory text-sm leading-relaxed">
         <code className={`language-${language}`}>{code}</code>
       </pre>
     </div>

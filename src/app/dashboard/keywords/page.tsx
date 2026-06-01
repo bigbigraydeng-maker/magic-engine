@@ -22,12 +22,12 @@ interface Keyword {
 }
 
 const statusColors: Record<string, string> = {
-  new: 'bg-blue-100 text-blue-700',
-  approved: 'bg-green-100 text-green-700',
-  rejected: 'bg-red-100 text-red-700',
-  reviewed: 'bg-yellow-100 text-yellow-700',
-  published: 'bg-gray-100 text-gray-600',
-  page_created: 'bg-purple-100 text-purple-700',
+  new: 'bg-me-ochre/10 text-me-ochre',
+  approved: 'bg-[#5C8A4A]/12 text-[#5C8A4A]',
+  rejected: 'bg-[#C2453A]/10 text-[#C2453A]',
+  reviewed: 'bg-me-ochre/10 text-me-ochre',
+  published: 'bg-me-ivory text-me-charcoal/60',
+  page_created: 'bg-me-ochre/10 text-me-ochre',
 };
 
 export default function KeywordsPage() {
@@ -149,33 +149,33 @@ export default function KeywordsPage() {
   return (
     <div className="p-6 space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">关键词情报</h1>
-        <p className="text-sm text-gray-500 mt-1">SEO keyword library — discover, approve & track keywords across clients</p>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-me-charcoal/90">关键词情报</h1>
+        <p className="text-sm text-me-charcoal/55 mt-1">SEO keyword library — discover, approve & track keywords across clients</p>
       </div>
 
       {/* Keyword Fetch Panel */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
+      <div className="bg-white rounded-xl border border-black/10 p-5">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-semibold text-gray-900">🔍 关键词抓取</h2>
+          <h2 className="text-base font-semibold text-me-charcoal/90">🔍 关键词抓取</h2>
         </div>
         <form onSubmit={handleFetch} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Client</label>
+              <label className="block text-xs font-medium text-me-charcoal/60 mb-1">Client</label>
               <select
                 value={fetchClient}
                 onChange={(e) => setFetchClient(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full border border-black/15 rounded-lg px-3 py-2 text-sm text-me-charcoal/90 placeholder:text-me-charcoal/45 bg-white focus:outline-none focus:ring-2 focus:ring-me-ochre"
               >
                 {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Domain</label>
+              <label className="block text-xs font-medium text-me-charcoal/60 mb-1">Domain</label>
               <input
                 value={domain}
                 onChange={(e) => setDomain(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full border border-black/15 rounded-lg px-3 py-2 text-sm text-me-charcoal/90 placeholder:text-me-charcoal/45 bg-white focus:outline-none focus:ring-2 focus:ring-me-ochre"
                 placeholder="ctstours.co.nz"
               />
             </div>
@@ -183,7 +183,7 @@ export default function KeywordsPage() {
 
           {/* Mode */}
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-2">Mode</label>
+            <label className="block text-xs font-medium text-me-charcoal/60 mb-2">Mode</label>
             <div className="flex gap-4">
               {(['related', 'gap', 'domain'] as const).map((m) => (
                 <label key={m} className="flex items-center gap-2 cursor-pointer">
@@ -193,34 +193,34 @@ export default function KeywordsPage() {
                     value={m}
                     checked={mode === m}
                     onChange={() => setMode(m)}
-                    className="text-indigo-600 focus:ring-indigo-500"
+                    className="text-me-ochre focus:ring-me-ochre"
                   />
-                  <span className="text-sm text-gray-700 capitalize">{m}</span>
+                  <span className="text-sm text-me-charcoal/75 capitalize">{m}</span>
                 </label>
               ))}
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
+            <label className="block text-xs font-medium text-me-charcoal/60 mb-1">
               {mode === 'related' ? 'Seed Keyword' : mode === 'gap' ? 'Competitor Domains (one per line)' : 'Keywords (one per line)'}
             </label>
             <textarea
               rows={3}
               value={seedKeywords}
               onChange={(e) => setSeedKeywords(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+              className="w-full border border-black/15 rounded-lg px-3 py-2 text-sm text-me-charcoal/90 placeholder:text-me-charcoal/45 bg-white focus:outline-none focus:ring-2 focus:ring-me-ochre resize-none"
               placeholder={mode === 'related' ? 'New Zealand tours' : mode === 'gap' ? 'competitor1.com\ncompetitor2.com' : 'keyword 1\nkeyword 2'}
             />
           </div>
 
-          {fetchError && <p className="text-sm text-red-600">{fetchError}</p>}
-          {fetchSuccess && <p className="text-sm text-green-600">{fetchSuccess}</p>}
+          {fetchError && <p className="text-sm text-[#C2453A]">{fetchError}</p>}
+          {fetchSuccess && <p className="text-sm text-[#5C8A4A]">{fetchSuccess}</p>}
 
           <button
             type="submit"
             disabled={fetching}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg text-sm font-medium disabled:opacity-50 flex items-center gap-2"
+            className="bg-me-ochre hover:bg-me-ochre text-white px-6 py-2 rounded-lg text-sm font-medium disabled:opacity-50 flex items-center gap-2"
           >
             {fetching ? (
               <><span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full inline-block" /> Fetching...</>
@@ -234,7 +234,7 @@ export default function KeywordsPage() {
         <select
           value={selectedClient}
           onChange={(e) => setSelectedClient(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="border border-black/15 rounded-lg px-3 py-2 text-sm text-me-charcoal/90 bg-white focus:outline-none focus:ring-2 focus:ring-me-ochre"
         >
           <option value="">All Clients</option>
           {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -242,7 +242,7 @@ export default function KeywordsPage() {
         <select
           value={selectedStatus}
           onChange={(e) => setSelectedStatus(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="border border-black/15 rounded-lg px-3 py-2 text-sm text-me-charcoal/90 bg-white focus:outline-none focus:ring-2 focus:ring-me-ochre"
         >
           <option value="">All Status</option>
           <option value="new">New</option>
@@ -253,7 +253,7 @@ export default function KeywordsPage() {
         <select
           value={selectedIntent}
           onChange={(e) => setSelectedIntent(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="border border-black/15 rounded-lg px-3 py-2 text-sm text-me-charcoal/90 bg-white focus:outline-none focus:ring-2 focus:ring-me-ochre"
         >
           <option value="">All Intent</option>
           <option value="informational">Informational</option>
@@ -261,44 +261,44 @@ export default function KeywordsPage() {
           <option value="transactional">Transactional</option>
           <option value="navigational">Navigational</option>
         </select>
-        <span className="text-sm text-gray-400">{displayedKeywords.length} keywords</span>
+        <span className="text-sm text-me-charcoal/45">{displayedKeywords.length} keywords</span>
       </div>
 
       {/* Keywords Table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+      <div className="bg-white rounded-xl border border-black/10 overflow-x-auto">
         {loading ? (
-          <div className="py-12 text-center text-gray-400 text-sm">Loading...</div>
+          <div className="py-12 text-center text-me-charcoal/45 text-sm">Loading...</div>
         ) : displayedKeywords.length === 0 ? (
-          <div className="py-12 text-center text-gray-400 text-sm">No keywords found. Use the keyword fetch panel above to get started.</div>
+          <div className="py-12 text-center text-me-charcoal/45 text-sm">No keywords found. Use the keyword fetch panel above to get started.</div>
         ) : (
           <table className="w-full min-w-[800px]">
             <thead>
-              <tr className="bg-gray-50 border-b border-gray-100">
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Keyword</th>
-                <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Volume</th>
-                <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">KD</th>
-                <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">CPC</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Intent</th>
-                <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Score</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
-                <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Actions</th>
+              <tr className="bg-me-ivory border-b border-black/[.06]">
+                <th className="text-left px-4 py-3 text-xs font-semibold text-me-charcoal/55 uppercase">Keyword</th>
+                <th className="text-right px-4 py-3 text-xs font-semibold text-me-charcoal/55 uppercase">Volume</th>
+                <th className="text-right px-4 py-3 text-xs font-semibold text-me-charcoal/55 uppercase">KD</th>
+                <th className="text-right px-4 py-3 text-xs font-semibold text-me-charcoal/55 uppercase">CPC</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-me-charcoal/55 uppercase">Intent</th>
+                <th className="text-right px-4 py-3 text-xs font-semibold text-me-charcoal/55 uppercase">Score</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-me-charcoal/55 uppercase">Status</th>
+                <th className="px-4 py-3 text-xs font-semibold text-me-charcoal/55 uppercase">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="divide-y divide-black/[.06]">
               {displayedKeywords.map((kw) => {
                 const currentStatus = pendingStatus[kw.id] ?? kw.status;
                 return (
-                  <tr key={kw.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900">{kw.keyword}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600 text-right">{kw.volume?.toLocaleString() ?? '—'}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600 text-right">{kw.kd ?? '—'}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600 text-right">{kw.cpc ? `$${kw.cpc.toFixed(2)}` : '—'}</td>
-                    <td className="px-4 py-3 text-sm text-gray-500 capitalize">{kw.intent ?? '—'}</td>
+                  <tr key={kw.id} className="hover:bg-me-ivory transition-colors">
+                    <td className="px-4 py-3 text-sm font-medium text-me-charcoal/90">{kw.keyword}</td>
+                    <td className="px-4 py-3 text-sm text-me-charcoal/60 text-right">{kw.volume?.toLocaleString() ?? '—'}</td>
+                    <td className="px-4 py-3 text-sm text-me-charcoal/60 text-right">{kw.kd ?? '—'}</td>
+                    <td className="px-4 py-3 text-sm text-me-charcoal/60 text-right">{kw.cpc ? `$${kw.cpc.toFixed(2)}` : '—'}</td>
+                    <td className="px-4 py-3 text-sm text-me-charcoal/55 capitalize">{kw.intent ?? '—'}</td>
                     <td className="px-4 py-3 text-right">
-                      <span className="text-sm font-bold text-indigo-600">{kw.opportunity_score ?? '—'}</span>
+                      <span className="text-sm font-bold text-me-ochre">{kw.opportunity_score ?? '—'}</span>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColors[currentStatus] ?? 'bg-gray-100 text-gray-600'}`}>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColors[currentStatus] ?? 'bg-me-ivory text-me-charcoal/60'}`}>
                         {currentStatus}
                       </span>
                     </td>
@@ -307,7 +307,7 @@ export default function KeywordsPage() {
                         <button
                           onClick={() => handleStatusUpdate(kw.id, 'approved')}
                           disabled={currentStatus === 'approved'}
-                          className="text-xs px-2 py-1 bg-green-50 text-green-700 rounded hover:bg-green-100 disabled:opacity-40 font-medium"
+                          className="text-xs px-2 py-1 bg-[#5C8A4A]/10 text-[#5C8A4A] rounded hover:bg-[#5C8A4A]/12 disabled:opacity-40 font-medium"
                           title="Approve"
                         >
                           ✅
@@ -315,7 +315,7 @@ export default function KeywordsPage() {
                         <button
                           onClick={() => handleStatusUpdate(kw.id, 'rejected')}
                           disabled={currentStatus === 'rejected'}
-                          className="text-xs px-2 py-1 bg-red-50 text-red-700 rounded hover:bg-red-100 disabled:opacity-40 font-medium"
+                          className="text-xs px-2 py-1 bg-[#C2453A]/10 text-[#C2453A] rounded hover:bg-[#C2453A]/10 disabled:opacity-40 font-medium"
                           title="Reject"
                         >
                           ❌

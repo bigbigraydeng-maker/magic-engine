@@ -20,8 +20,8 @@ export function ModelStats({ runs, brandName }: Props) {
 
   if (models.length === 0) {
     return (
-      <div className="bg-white rounded-xl border border-gray-200 py-16 text-center">
-        <p className="text-gray-400 text-sm">No run data yet. Click ▶ Run Now to start.</p>
+      <div className="bg-white rounded-xl border border-black/10 py-16 text-center">
+        <p className="text-me-charcoal/45 text-sm">No run data yet. Click ▶ Run Now to start.</p>
       </div>
     );
   }
@@ -55,56 +55,56 @@ export function ModelStats({ runs, brandName }: Props) {
   });
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <div className="px-5 py-4 border-b border-gray-100">
-        <h2 className="text-base font-semibold text-gray-900">By AI Model</h2>
-        <p className="text-xs text-gray-400 mt-0.5">
+    <div className="bg-white rounded-xl border border-black/10 overflow-hidden">
+      <div className="px-5 py-4 border-b border-black/[.06]">
+        <h2 className="text-base font-semibold text-me-charcoal/90">By AI Model</h2>
+        <p className="text-xs text-me-charcoal/45 mt-0.5">
           Performance, cost, and latency breakdown per underlying model
         </p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
-            <tr className="bg-gray-50 border-b border-gray-100">
-              <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Model</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Platform</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Runs</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Success</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Brand Rate</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Avg Rank</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Avg Latency</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Avg Tokens</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Cost</th>
+            <tr className="bg-me-ivory border-b border-black/[.06]">
+              <th className="text-left px-5 py-3 text-xs font-semibold text-me-charcoal/55 uppercase tracking-wider">Model</th>
+              <th className="text-left px-5 py-3 text-xs font-semibold text-me-charcoal/55 uppercase tracking-wider">Platform</th>
+              <th className="text-left px-5 py-3 text-xs font-semibold text-me-charcoal/55 uppercase tracking-wider">Runs</th>
+              <th className="text-left px-5 py-3 text-xs font-semibold text-me-charcoal/55 uppercase tracking-wider">Success</th>
+              <th className="text-left px-5 py-3 text-xs font-semibold text-me-charcoal/55 uppercase tracking-wider">Brand Rate</th>
+              <th className="text-left px-5 py-3 text-xs font-semibold text-me-charcoal/55 uppercase tracking-wider">Avg Rank</th>
+              <th className="text-left px-5 py-3 text-xs font-semibold text-me-charcoal/55 uppercase tracking-wider">Avg Latency</th>
+              <th className="text-left px-5 py-3 text-xs font-semibold text-me-charcoal/55 uppercase tracking-wider">Avg Tokens</th>
+              <th className="text-left px-5 py-3 text-xs font-semibold text-me-charcoal/55 uppercase tracking-wider">Total Cost</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-50">
+          <tbody className="divide-y divide-black/[.06]">
             {stats.map(s => (
-              <tr key={s.model} className="hover:bg-gray-50">
+              <tr key={s.model} className="hover:bg-me-ivory">
                 <td className="px-5 py-4">
-                  <span className="font-mono text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">
+                  <span className="font-mono text-xs bg-me-ivory text-me-charcoal/75 px-2 py-1 rounded">
                     {s.model}
                   </span>
                 </td>
-                <td className="px-5 py-4 text-sm text-gray-700">
+                <td className="px-5 py-4 text-sm text-me-charcoal/75">
                   {getEngineDisplayName(s.engine)}
                 </td>
-                <td className="px-5 py-4 text-sm text-gray-700">{s.total}</td>
+                <td className="px-5 py-4 text-sm text-me-charcoal/75">{s.total}</td>
                 <td className="px-5 py-4 text-sm">
-                  <span className={s.success === s.total ? 'text-green-600 font-medium' : 'text-amber-600 font-medium'}>
+                  <span className={s.success === s.total ? 'text-[#5C8A4A] font-medium' : 'text-me-ochre font-medium'}>
                     {s.total > 0 ? `${((s.success / s.total) * 100).toFixed(0)}%` : '—'}
                   </span>
                 </td>
-                <td className="px-5 py-4 text-sm text-gray-700">{s.mentionRate.toFixed(0)}%</td>
-                <td className="px-5 py-4 text-sm font-semibold text-amber-700">
+                <td className="px-5 py-4 text-sm text-me-charcoal/75">{s.mentionRate.toFixed(0)}%</td>
+                <td className="px-5 py-4 text-sm font-semibold text-me-ochre">
                   {s.avgRank != null ? `#${s.avgRank.toFixed(1)}` : '—'}
                 </td>
-                <td className="px-5 py-4 text-sm text-gray-600">
+                <td className="px-5 py-4 text-sm text-me-charcoal/60">
                   {s.avgLatency != null ? `${(s.avgLatency / 1000).toFixed(1)}s` : '—'}
                 </td>
-                <td className="px-5 py-4 text-sm text-gray-600">
+                <td className="px-5 py-4 text-sm text-me-charcoal/60">
                   {s.avgTokens != null ? s.avgTokens.toFixed(0) : '—'}
                 </td>
-                <td className="px-5 py-4 text-sm font-mono text-gray-600">
+                <td className="px-5 py-4 text-sm font-mono text-me-charcoal/60">
                   ${s.totalCost.toFixed(4)}
                 </td>
               </tr>

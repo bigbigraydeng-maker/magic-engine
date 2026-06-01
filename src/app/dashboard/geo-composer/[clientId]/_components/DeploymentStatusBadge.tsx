@@ -20,9 +20,9 @@ export function DeploymentStatusBadge({ status, size = 'md' }: DeploymentStatusB
   };
 
   const statusColors = {
-    active: 'bg-green-100 text-green-700',
-    pending: 'bg-amber-100 text-amber-700',
-    revoked: 'bg-gray-100 text-gray-500',
+    active: 'bg-[#5C8A4A]/12 text-[#5C8A4A]',
+    pending: 'bg-me-ochre/10 text-me-ochre',
+    revoked: 'bg-me-ivory text-me-charcoal/55',
   };
 
   const statusLabels = {

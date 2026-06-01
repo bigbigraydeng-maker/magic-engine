@@ -52,9 +52,9 @@ export function DeployedPagesList({
 
   if (deployments.length === 0) {
     return (
-      <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
-        <p className="text-gray-600">No deployed pages yet</p>
-        <p className="text-sm text-gray-500 mt-2">
+      <div className="bg-me-ivory border border-black/10 rounded-lg p-8 text-center">
+        <p className="text-me-charcoal/60">No deployed pages yet</p>
+        <p className="text-sm text-me-charcoal/55 mt-2">
           Add pages above to track your GEO directive deployments
         </p>
       </div>
@@ -67,13 +67,13 @@ export function DeployedPagesList({
         {deployments.map((deployment) => (
           <div
             key={deployment.id}
-            className="flex justify-between items-center p-4 bg-white border border-gray-200 rounded-lg hover:shadow-sm transition"
+            className="flex justify-between items-center p-4 bg-white border border-black/10 rounded-lg hover:shadow-sm transition"
           >
             <div className="flex-1 min-w-0">
-              <p className="font-mono text-sm text-blue-600 truncate hover:text-blue-800">
+              <p className="font-mono text-sm text-me-ochre truncate hover:text-me-ochre">
                 {deployment.page_url}
               </p>
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-me-charcoal/55 mt-1">
                 Deployed {new Date(deployment.deployed_at).toLocaleDateString()}
               </p>
             </div>
@@ -85,7 +85,7 @@ export function DeployedPagesList({
                 <button
                   onClick={() => handleRevokeClick(deployment)}
                   disabled={loading || revoking === deployment.id}
-                  className="px-3 py-1 text-sm border border-red-300 text-red-600 rounded hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                  className="px-3 py-1 text-sm border border-[#C2453A]/50 text-[#C2453A] rounded hover:bg-[#C2453A]/10 disabled:opacity-50 disabled:cursor-not-allowed transition"
                 >
                   {revoking === deployment.id ? 'Revoking...' : DEPLOYMENT_CONFIG.LABELS.REVOKE}
                 </button>

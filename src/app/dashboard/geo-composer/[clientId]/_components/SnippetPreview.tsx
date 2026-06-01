@@ -75,9 +75,9 @@ export function SnippetPreview({
   return (
     <div className="space-y-4">
       {/* Platform selector */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-900">HTML Snippet</h3>
+      <div className="bg-white rounded-xl border border-black/10 overflow-hidden">
+        <div className="px-5 py-4 border-b border-black/[.06] flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-me-charcoal/90">HTML Snippet</h3>
           <div className="flex items-center gap-1">
             {(Object.keys(PLATFORM_LABELS) as Platform[]).map(p => (
               <button
@@ -85,8 +85,8 @@ export function SnippetPreview({
                 onClick={() => setPlatform(p)}
                 className={`px-3 py-1 text-xs rounded-lg font-medium transition-colors ${
                   platform === p
-                    ? 'bg-indigo-600 text-white'
-                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                    ? 'bg-me-ochre text-white'
+                    : 'text-me-charcoal/55 hover:text-me-charcoal/75 hover:bg-me-ivory'
                 }`}
               >
                 {PLATFORM_LABELS[p]}
@@ -98,7 +98,7 @@ export function SnippetPreview({
         {/* Code block */}
         <div className="relative">
           <pre className={`p-5 text-xs font-mono leading-relaxed overflow-x-auto max-h-72 whitespace-pre-wrap break-words ${
-            isEmpty ? 'text-gray-300' : 'text-gray-700 bg-gray-50'
+            isEmpty ? 'text-me-charcoal/35' : 'text-me-charcoal/75 bg-me-ivory'
           }`}>
             {isEmpty
               ? '<!-- Fill in the fields on the left to generate your snippet -->'
@@ -109,8 +109,8 @@ export function SnippetPreview({
               onClick={handleCopy}
               className={`absolute top-3 right-3 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
                 copied
-                  ? 'bg-green-500 text-white'
-                  : 'bg-white border border-gray-300 text-gray-700 hover:border-indigo-400 hover:text-indigo-700'
+                  ? 'bg-[#5C8A4A] text-white'
+                  : 'bg-white border border-black/15 text-me-charcoal/75 hover:border-me-ochre/50 hover:text-me-ochre'
               }`}
             >
               {copied ? '✓ Copied!' : 'Copy'}
@@ -121,14 +121,14 @@ export function SnippetPreview({
 
       {/* Installation instructions */}
       {!isEmpty && (
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-900 mb-3">
+        <div className="bg-white rounded-xl border border-black/10 p-5">
+          <h3 className="text-sm font-semibold text-me-charcoal/90 mb-3">
             Installation — {PLATFORM_LABELS[platform]}
           </h3>
           <ol className="space-y-1.5">
             {PLATFORM_INSTRUCTIONS[platform].map((step, i) => (
-              <li key={i} className="flex items-start gap-2 text-sm text-gray-600">
-                <span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-50 text-indigo-600 text-xs font-bold flex items-center justify-center mt-0.5">
+              <li key={i} className="flex items-start gap-2 text-sm text-me-charcoal/60">
+                <span className="flex-shrink-0 w-5 h-5 rounded-full bg-me-ochre/10 text-me-ochre text-xs font-bold flex items-center justify-center mt-0.5">
                   {i + 1}
                 </span>
                 {step}

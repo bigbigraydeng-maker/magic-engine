@@ -52,20 +52,20 @@ export default function AiVisibilityIndexPage() {
     <div className="p-6 space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">AI 可见度</h1>
-        <p className="text-sm text-gray-500 mt-1">{active.desc}</p>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-me-charcoal/90">AI 可见度</h1>
+        <p className="text-sm text-me-charcoal/55 mt-1">{active.desc}</p>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
+      <div className="flex gap-1 bg-me-ivory p-1 rounded-lg w-fit">
         {TABS.map(t => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
             className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
               tab === t.id
-                ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-500 hover:text-gray-700'
+                ? 'bg-white text-me-charcoal/90 shadow-sm'
+                : 'text-me-charcoal/55 hover:text-me-charcoal/75'
             }`}
           >
             {t.label}
@@ -75,7 +75,7 @@ export default function AiVisibilityIndexPage() {
 
       {/* Error */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+        <div className="bg-[#C2453A]/10 border border-[#C2453A]/30 rounded-lg px-4 py-3 text-sm text-[#C2453A]">
           {error}
         </div>
       )}
@@ -84,13 +84,13 @@ export default function AiVisibilityIndexPage() {
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {[1, 2, 3].map(i => (
-            <div key={i} className="animate-pulse bg-white rounded-xl border border-gray-200 p-5 h-24" />
+            <div key={i} className="animate-pulse bg-white rounded-xl border border-black/10 p-5 h-24" />
           ))}
         </div>
       ) : clients.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-200 py-16 text-center">
-          <p className="text-gray-400 text-sm">No clients found.</p>
-          <Link href="/dashboard/clients" className="text-indigo-600 hover:underline text-sm mt-2 block">
+        <div className="bg-white rounded-xl border border-black/10 py-16 text-center">
+          <p className="text-me-charcoal/45 text-sm">No clients found.</p>
+          <Link href="/dashboard/clients" className="text-me-ochre hover:underline text-sm mt-2 block">
             → Add a client first
           </Link>
         </div>
@@ -100,24 +100,24 @@ export default function AiVisibilityIndexPage() {
             <Link
               key={client.id}
               href={clientHref(client.id)}
-              className="bg-white rounded-xl border border-gray-200 p-5 hover:border-indigo-300 hover:shadow-sm transition-all group"
+              className="bg-white rounded-xl border border-black/10 p-5 hover:border-me-ochre/50 hover:shadow-sm transition-all group"
             >
               <div className="flex items-start justify-between">
                 <div className="min-w-0 flex-1">
-                  <h2 className="text-base font-semibold text-gray-900 group-hover:text-indigo-700 truncate">
+                  <h2 className="text-base font-semibold text-me-charcoal/90 group-hover:text-me-ochre truncate">
                     {client.name}
                   </h2>
                   {client.domain && (
-                    <p className="text-xs text-gray-400 mt-0.5 truncate">{client.domain}</p>
+                    <p className="text-xs text-me-charcoal/45 mt-0.5 truncate">{client.domain}</p>
                   )}
                 </div>
-                <span className="text-gray-300 group-hover:text-indigo-400 text-lg ml-2 flex-shrink-0">→</span>
+                <span className="text-me-charcoal/35 group-hover:text-me-ochre/80 text-lg ml-2 flex-shrink-0">→</span>
               </div>
               <div className="mt-3 flex items-center gap-2">
                 <span className={`text-xs px-2 py-0.5 rounded-full ${
                   tab === 'tracker'
-                    ? 'bg-indigo-50 text-indigo-600'
-                    : 'bg-violet-50 text-violet-600'
+                    ? 'bg-me-ochre/10 text-me-ochre'
+                    : 'bg-me-ochre/10 text-me-ochre'
                 }`}>
                   {badgeLabel}
                 </span>

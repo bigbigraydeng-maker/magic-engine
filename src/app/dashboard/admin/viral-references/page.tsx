@@ -53,10 +53,10 @@ interface ViralReference {
 }
 
 const GOAL_CONFIG: Record<ContentGoal, { label: string; emoji: string; cls: string }> = {
-  brand:     { label: 'Brand',     emoji: '🎨', cls: 'bg-purple-900/60 text-purple-300' },
-  sales:     { label: 'Sales',     emoji: '💰', cls: 'bg-amber-900/60 text-amber-300' },
-  ugc:       { label: 'UGC',       emoji: '📱', cls: 'bg-teal-900/60 text-teal-300' },
-  education: { label: 'Education', emoji: '🎓', cls: 'bg-sky-900/60 text-sky-300' },
+  brand:     { label: 'Brand',     emoji: '🎨', cls: 'bg-me-ochre/50 text-me-ochre/70' },
+  sales:     { label: 'Sales',     emoji: '💰', cls: 'bg-me-ochre/50 text-me-gold' },
+  ugc:       { label: 'UGC',       emoji: '📱', cls: 'bg-me-ochre/60 text-me-gold' },
+  education: { label: 'Education', emoji: '🎓', cls: 'bg-me-ochre/50 text-me-gold' },
 }
 
 function formatViews(n: number | null): string | null {
@@ -79,26 +79,26 @@ const SCORE_LABELS: Record<keyof StyleScores, string> = {
 }
 
 const SCORE_COLORS: Record<keyof StyleScores, string> = {
-  energy:       'bg-orange-500',
-  luxury:       'bg-purple-500',
-  authenticity: 'bg-green-500',
-  emotional:    'bg-pink-500',
-  humor:        'bg-yellow-500',
-  urgency:      'bg-red-500',
-  offer_signal: 'bg-blue-500',
+  energy:       'bg-me-ochre',
+  luxury:       'bg-me-ochre',
+  authenticity: 'bg-[#5C8A4A]',
+  emotional:    'bg-[#C2453A]',
+  humor:        'bg-me-ochre',
+  urgency:      'bg-[#C2453A]',
+  offer_signal: 'bg-me-ochre',
 }
 
 function ScoreBar({ dimension, value }: { dimension: keyof StyleScores; value: number }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs text-gray-400 w-20 shrink-0">{SCORE_LABELS[dimension]}</span>
-      <div className="flex-1 bg-gray-700 rounded-full h-1.5">
+      <span className="text-xs text-me-charcoal/45 w-20 shrink-0">{SCORE_LABELS[dimension]}</span>
+      <div className="flex-1 bg-me-charcoal/60 rounded-full h-1.5">
         <div
           className={`${SCORE_COLORS[dimension]} h-1.5 rounded-full transition-all`}
           style={{ width: `${(value / 10) * 100}%` }}
         />
       </div>
-      <span className="text-xs text-gray-300 w-6 text-right">{value}</span>
+      <span className="text-xs text-me-charcoal/35 w-6 text-right">{value}</span>
     </div>
   )
 }
@@ -107,10 +107,10 @@ function ScoreBar({ dimension, value }: { dimension: keyof StyleScores; value: n
 
 function StatusBadge({ status }: { status: ViralReference['analysis_status'] }) {
   const config = {
-    pending:   { label: 'Pending',   cls: 'bg-gray-700 text-gray-300' },
-    analyzing: { label: 'Analyzing…', cls: 'bg-yellow-900 text-yellow-300 animate-pulse' },
-    done:      { label: 'Done',      cls: 'bg-green-900 text-green-300' },
-    error:     { label: 'Error',     cls: 'bg-red-900 text-red-300' },
+    pending:   { label: 'Pending',   cls: 'bg-me-charcoal/60 text-me-charcoal/35' },
+    analyzing: { label: 'Analyzing…', cls: 'bg-me-ochre/70 text-me-gold animate-pulse' },
+    done:      { label: 'Done',      cls: 'bg-[#5C8A4A]/70 text-[#5C8A4A]/70' },
+    error:     { label: 'Error',     cls: 'bg-[#C2453A]/70 text-[#C2453A]/70' },
   }
   const { label, cls } = config[status]
   return (
@@ -122,13 +122,13 @@ function StatusBadge({ status }: { status: ViralReference['analysis_status'] }) 
 
 function PlatformBadge({ platform }: { platform: ViralReference['platform'] }) {
   const config = {
-    youtube:   { label: 'YouTube',   cls: 'bg-red-900/60 text-red-300' },
-    facebook:  { label: 'Facebook',  cls: 'bg-blue-900/60 text-blue-300' },
-    tiktok:    { label: 'TikTok',    cls: 'bg-gray-700 text-gray-200' },
-    instagram: { label: 'Instagram', cls: 'bg-pink-900/60 text-pink-300' },
-    upload:    { label: 'Uploaded',  cls: 'bg-emerald-900/60 text-emerald-300' },
+    youtube:   { label: 'YouTube',   cls: 'bg-[#C2453A]/50 text-[#C2453A]/70' },
+    facebook:  { label: 'Facebook',  cls: 'bg-me-ochre/60 text-me-ochre/80' },
+    tiktok:    { label: 'TikTok',    cls: 'bg-me-charcoal/60 text-me-charcoal/25' },
+    instagram: { label: 'Instagram', cls: 'bg-[#C2453A]/50 text-[#C2453A]/70' },
+    upload:    { label: 'Uploaded',  cls: 'bg-[#5C8A4A]/50 text-[#5C8A4A]/70' },
   }
-  const { label, cls } = config[platform] ?? { label: platform, cls: 'bg-gray-700 text-gray-300' }
+  const { label, cls } = config[platform] ?? { label: platform, cls: 'bg-me-charcoal/60 text-me-charcoal/35' }
   return (
     <span className={`text-xs px-2 py-0.5 rounded font-medium ${cls}`}>{label}</span>
   )
@@ -170,10 +170,10 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
   return (
     <div className={`rounded-xl p-4 border space-y-3 ${
       isOurs
-        ? 'bg-rose-950/30 border-rose-800/60'
+        ? 'bg-[#C2453A]/50 border-[#C2453A]/50'
         : !r.is_learnable && r.analysis_status === 'done'
-          ? 'bg-gray-900/60 border-gray-700/60 opacity-70'
-          : 'bg-gray-800 border-gray-700'
+          ? 'bg-me-charcoal/60 border-me-charcoal/50 opacity-70'
+          : 'bg-me-charcoal/75 border-me-charcoal'
     }`}>
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
@@ -182,7 +182,7 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
             <PlatformBadge platform={r.platform} />
             <StatusBadge status={r.analysis_status} />
             {isOurs && (
-              <span className="text-xs px-2 py-0.5 rounded font-bold bg-rose-700 text-white">
+              <span className="text-xs px-2 py-0.5 rounded font-bold bg-[#C2453A] text-white">
                 🎯 OUR VIDEO
               </span>
             )}
@@ -194,7 +194,7 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
                 <select
                   value={industryDraft}
                   onChange={e => setIndustryDraft(e.target.value)}
-                  className="bg-gray-900 border border-indigo-500 rounded px-1.5 py-0.5 text-xs text-white focus:outline-none"
+                  className="bg-me-charcoal/90 border border-me-ochre rounded px-1.5 py-0.5 text-xs text-white focus:outline-none"
                   autoFocus
                 >
                   {KNOWN_INDUSTRIES.map(ind => (
@@ -204,13 +204,13 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
                 <button
                   onClick={saveIndustry}
                   disabled={savingIndustry}
-                  className="text-xs px-1.5 py-0.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded disabled:opacity-40"
+                  className="text-xs px-1.5 py-0.5 bg-me-ochre hover:bg-me-ochre text-white rounded disabled:opacity-40"
                 >
                   {savingIndustry ? '…' : '✓'}
                 </button>
                 <button
                   onClick={() => { setEditingIndustry(false); setIndustryDraft(r.industry) }}
-                  className="text-xs px-1.5 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded"
+                  className="text-xs px-1.5 py-0.5 bg-me-charcoal/60 hover:bg-me-charcoal/45 text-me-charcoal/35 rounded"
                 >
                   ✕
                 </button>
@@ -220,31 +220,31 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
                 onClick={() => { setIndustryDraft(r.industry); setEditingIndustry(true) }}
                 title="点击修改行业分类"
                 className={`text-xs capitalize hover:text-white transition-colors ${
-                  hasMismatch ? 'text-amber-400 font-semibold' : 'text-gray-500'
+                  hasMismatch ? 'text-me-gold font-semibold' : 'text-me-charcoal/55'
                 }`}
               >
                 {r.industry}
                 {hasMismatch && (
-                  <span className="ml-1 text-[10px] bg-amber-900/60 text-amber-300 px-1.5 py-0.5 rounded" title={`AI 识别为 "${r.detected_industry}"，与录入行业不符`}>
+                  <span className="ml-1 text-[10px] bg-me-ochre/50 text-me-gold px-1.5 py-0.5 rounded" title={`AI 识别为 "${r.detected_industry}"，与录入行业不符`}>
                     ⚠ AI: {r.detected_industry}
                   </span>
                 )}
-                <span className="ml-1 text-[10px] text-gray-600">✏</span>
+                <span className="ml-1 text-[10px] text-me-charcoal/60">✏</span>
               </button>
             )}
             {views && (
-              <span className="text-xs text-yellow-300 font-medium">
+              <span className="text-xs text-me-gold font-medium">
                 ▶ {views}
               </span>
             )}
             {!isOurs && !r.is_learnable && r.analysis_status === 'done' && (
-              <span className="text-xs px-2 py-0.5 rounded bg-gray-700 text-gray-400" title={`view count below threshold (${r.view_threshold_min})`}>
+              <span className="text-xs px-2 py-0.5 rounded bg-me-charcoal/60 text-me-charcoal/45" title={`view count below threshold (${r.view_threshold_min})`}>
                 ⊘ Not learnable
               </span>
             )}
           </div>
           {r.video_title && (
-            <p className="mt-1.5 text-xs text-gray-300 truncate" title={r.video_title}>
+            <p className="mt-1.5 text-xs text-me-charcoal/35 truncate" title={r.video_title}>
               {r.video_title}
             </p>
           )}
@@ -252,7 +252,7 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
             href={r.source_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="block mt-0.5 text-xs text-blue-400 hover:text-blue-300 truncate"
+            className="block mt-0.5 text-xs text-me-ochre/80 hover:text-me-ochre/80 truncate"
           >
             {r.channel_title ? `${r.channel_title} · ${shortUrl}` : shortUrl}
           </a>
@@ -262,13 +262,13 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
       {/* Error */}
       {r.analysis_status === 'error' && (
         <div className="flex items-start justify-between gap-2">
-          <p className="text-xs text-red-400 bg-red-950/30 rounded p-2 flex-1">
+          <p className="text-xs text-[#C2453A]/70 bg-[#C2453A]/50 rounded p-2 flex-1">
             {r.analysis_error ?? 'Unknown error'}
           </p>
           {r.platform === 'youtube' && (
             <button
               onClick={() => onRetry(r.id)}
-              className="shrink-0 px-2.5 py-1.5 bg-gray-700 hover:bg-gray-600 text-xs text-white rounded-lg transition-colors"
+              className="shrink-0 px-2.5 py-1.5 bg-me-charcoal/60 hover:bg-me-charcoal/45 text-xs text-white rounded-lg transition-colors"
             >
               Retry
             </button>
@@ -281,24 +281,24 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
         <>
           {/* Style description */}
           {r.style_description && (
-            <p className="text-sm text-gray-200 leading-relaxed">{r.style_description}</p>
+            <p className="text-sm text-me-charcoal/25 leading-relaxed">{r.style_description}</p>
           )}
 
           {/* Opening hook */}
           {r.opening_hook?.type && (
-            <div className="flex items-start gap-2 bg-gray-900/50 rounded-lg px-3 py-2">
-              <span className="text-[10px] text-gray-500 mt-0.5 shrink-0">🎣 Hook</span>
+            <div className="flex items-start gap-2 bg-me-charcoal/50 rounded-lg px-3 py-2">
+              <span className="text-[10px] text-me-charcoal/55 mt-0.5 shrink-0">🎣 Hook</span>
               <div className="min-w-0">
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-900/60 text-indigo-300 font-medium">
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-me-ochre/60 text-me-ochre/80 font-medium">
                   {r.opening_hook.type.replace(/_/g, ' ')}
                 </span>
                 {r.opening_hook.feel && (
-                  <span className="ml-1.5 text-[10px] text-gray-500">
+                  <span className="ml-1.5 text-[10px] text-me-charcoal/55">
                     {r.opening_hook.feel === 'abrupt-cut' ? '⚡ abrupt' : '🌊 smooth'}
                   </span>
                 )}
                 {r.opening_hook.script && (
-                  <p className="text-xs text-gray-300 italic mt-1 line-clamp-1">
+                  <p className="text-xs text-me-charcoal/35 italic mt-1 line-clamp-1">
                     "{r.opening_hook.script}"
                   </p>
                 )}
@@ -308,8 +308,8 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
 
           {/* Gap analysis (only for OUR videos) */}
           {showGap && (
-            <div className="rounded-lg border border-rose-700/50 bg-rose-950/40 p-3">
-              <p className="text-xs font-semibold text-rose-300 mb-2">
+            <div className="rounded-lg border border-[#C2453A]/50 bg-[#C2453A]/50 p-3">
+              <p className="text-xs font-semibold text-[#C2453A]/70 mb-2">
                 Gap vs Top Viral References ({r.industry} {r.content_goal})
               </p>
               <div className="space-y-1">
@@ -318,11 +318,11 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
                   const avg = learnableAvgScores![dim]
                   const diff = ours - avg
                   const sign = diff > 0 ? '+' : ''
-                  const cls = Math.abs(diff) < 1 ? 'text-gray-400'
-                            : diff > 0 ? 'text-green-400' : 'text-amber-400'
+                  const cls = Math.abs(diff) < 1 ? 'text-me-charcoal/45'
+                            : diff > 0 ? 'text-[#5C8A4A]/70' : 'text-me-gold'
                   return (
                     <div key={dim} className="flex justify-between text-xs">
-                      <span className="text-gray-400 capitalize">{SCORE_LABELS[dim]}</span>
+                      <span className="text-me-charcoal/45 capitalize">{SCORE_LABELS[dim]}</span>
                       <span className={`font-mono ${cls}`}>
                         {ours.toFixed(1)} vs {avg.toFixed(1)} ({sign}{diff.toFixed(1)})
                       </span>
@@ -344,10 +344,10 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
           <div className="space-y-2">
             {r.key_techniques && r.key_techniques.length > 0 && (
               <div>
-                <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Key Techniques</p>
+                <p className="text-[10px] text-me-charcoal/55 uppercase tracking-widest mb-1">Key Techniques</p>
                 <div className="flex flex-wrap gap-1.5">
                   {r.key_techniques.map(t => (
-                    <span key={t} className="text-xs bg-indigo-900/50 text-indigo-300 px-2 py-0.5 rounded">
+                    <span key={t} className="text-xs bg-me-ochre/50 text-me-ochre/80 px-2 py-0.5 rounded">
                       {t}
                     </span>
                   ))}
@@ -356,10 +356,10 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
             )}
             {r.style_tags && r.style_tags.length > 0 && (
               <div>
-                <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Style Tags</p>
+                <p className="text-[10px] text-me-charcoal/55 uppercase tracking-widest mb-1">Style Tags</p>
                 <div className="flex flex-wrap gap-1.5">
                   {r.style_tags.map(t => (
-                    <span key={t} className="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded">
+                    <span key={t} className="text-xs bg-me-charcoal/60 text-me-charcoal/35 px-2 py-0.5 rounded">
                       {t}
                     </span>
                   ))}
@@ -368,10 +368,10 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
             )}
             {r.persona_fit && r.persona_fit.length > 0 && (
               <div>
-                <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Persona Fit</p>
+                <p className="text-[10px] text-me-charcoal/55 uppercase tracking-widest mb-1">Persona Fit</p>
                 <div className="flex flex-wrap gap-1.5">
                   {r.persona_fit.map(p => (
-                    <span key={p} className="text-xs bg-emerald-900/50 text-emerald-300 px-2 py-0.5 rounded">
+                    <span key={p} className="text-xs bg-[#5C8A4A]/50 text-[#5C8A4A]/70 px-2 py-0.5 rounded">
                       {p}
                     </span>
                   ))}
@@ -671,8 +671,8 @@ export default function ViralReferencesPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white">Viral Reference Library</h1>
-          <p className="text-sm text-gray-400 mt-1">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-white">Viral Reference Library</h1>
+          <p className="text-sm text-me-charcoal/45 mt-1">
             爆款视频风格参考库 — FDE 参考使用 · 分析结果自动注入 Reel 生成
           </p>
         </div>
@@ -680,7 +680,7 @@ export default function ViralReferencesPage() {
           <button
             onClick={handleDetectIndustryBatch}
             disabled={detectingIndustry}
-            className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+            className="px-4 py-2 bg-me-ochre hover:bg-me-ochre disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
             title="用 AI 文字推断所有缺少 detected_industry 的已分析视频的行业（无需重新下载视频）"
           >
             {detectingIndustry ? '推断中…' : '🏷 补全行业识别'}
@@ -688,7 +688,7 @@ export default function ViralReferencesPage() {
           <button
             onClick={triggerAnalysis}
             disabled={triggering || pending === 0}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+            className="px-4 py-2 bg-me-ochre hover:bg-me-ochre disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
           >
             {triggering ? 'Starting…' : `Analyze Pending (${pending})`}
           </button>
@@ -696,7 +696,7 @@ export default function ViralReferencesPage() {
       </div>
 
       {/* Add Video Panel */}
-      <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
+      <div className="bg-me-charcoal/75 border border-me-charcoal rounded-xl p-4 space-y-3">
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium text-white">投喂新视频</p>
           <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
@@ -704,9 +704,9 @@ export default function ViralReferencesPage() {
               type="checkbox"
               checked={addIsOur}
               onChange={e => setAddIsOur(e.target.checked)}
-              className="w-4 h-4 rounded border-gray-600 bg-gray-900 accent-rose-500"
+              className="w-4 h-4 rounded border-me-charcoal bg-me-charcoal/90 accent-[#C2453A]"
             />
-            <span className={addIsOur ? 'text-rose-300 font-medium' : 'text-gray-400'}>
+            <span className={addIsOur ? 'text-[#C2453A]/70 font-medium' : 'text-me-charcoal/45'}>
               🎯 This is OUR video (gap analysis, not learning)
             </span>
           </label>
@@ -717,13 +717,13 @@ export default function ViralReferencesPage() {
             onChange={e => setAddUrls(e.target.value)}
             placeholder={"每行粘贴一条链接：\nhttps://youtube.com/shorts/...\nhttps://www.facebook.com/share/..."}
             rows={3}
-            className="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 resize-none focus:outline-none focus:border-indigo-500"
+            className="flex-1 bg-me-charcoal/90 border border-me-charcoal rounded-lg px-3 py-2 text-sm text-white placeholder:text-me-charcoal/45 resize-none focus:outline-none focus:border-me-ochre"
           />
           <div className="flex flex-col gap-2 shrink-0 w-44">
             <select
               value={addIndustry}
               onChange={e => setAddIndustry(e.target.value as 'travel' | 'flooring')}
-              className="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+              className="bg-me-charcoal/90 border border-me-charcoal rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-me-ochre"
             >
               <option value="travel">✈️ Travel</option>
               <option value="flooring">🪵 Flooring</option>
@@ -731,7 +731,7 @@ export default function ViralReferencesPage() {
             <select
               value={addGoal}
               onChange={e => setAddGoal(e.target.value as ContentGoal)}
-              className="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+              className="bg-me-charcoal/90 border border-me-charcoal rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-me-ochre"
               title="Default 'Auto-detect' lets Gemini classify the video. Pick a specific goal to override."
             >
               <option value="brand">🤖 Auto-detect (recommended)</option>
@@ -742,24 +742,24 @@ export default function ViralReferencesPage() {
             <button
               onClick={addVideos}
               disabled={adding || !addUrls.trim()}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+              className="px-4 py-2 bg-me-ochre hover:bg-me-ochre disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
             >
               {adding ? 'Adding…' : 'Add & Analyze'}
             </button>
           </div>
         </div>
         {addMsg && (
-          <p className={`text-sm ${addMsg.startsWith('✅') ? 'text-green-400' : 'text-red-400'}`}>
+          <p className={`text-sm ${addMsg.startsWith('✅') ? 'text-[#5C8A4A]/70' : 'text-[#C2453A]/70'}`}>
             {addMsg}
           </p>
         )}
       </div>
 
       {/* Upload File Panel */}
-      <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
+      <div className="bg-me-charcoal/75 border border-me-charcoal rounded-xl p-4 space-y-3">
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium text-white">📁 直接上传视频文件</p>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-me-charcoal/55">
             行业 / 类型用上方的选择 · 适合 Facebook 短链 / 私密视频 / 手机录屏
           </p>
         </div>
@@ -769,33 +769,33 @@ export default function ViralReferencesPage() {
             type="file"
             accept="video/mp4,video/quicktime,video/webm,video/x-matroska,video/mpeg"
             onChange={e => setUploadFile(e.target.files?.[0] ?? null)}
-            className="flex-1 text-sm text-gray-300 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-gray-700 file:text-white hover:file:bg-gray-600 file:cursor-pointer"
+            className="flex-1 text-sm text-me-charcoal/35 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-me-charcoal/60 file:text-white hover:file:bg-me-charcoal/45 file:cursor-pointer"
           />
           <button
             onClick={uploadVideo}
             disabled={uploading || !uploadFile}
-            className="shrink-0 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+            className="shrink-0 px-4 py-2 bg-[#5C8A4A] hover:bg-[#5C8A4A] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
           >
             {uploading ? 'Uploading…' : 'Upload & Analyze'}
           </button>
         </div>
         {uploadFile && !uploadMsg && (
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-me-charcoal/45">
             已选：{uploadFile.name} ({(uploadFile.size / 1024 / 1024).toFixed(1)} MB)
           </p>
         )}
         {uploadMsg && (
-          <p className={`text-sm ${uploadMsg.startsWith('✅') ? 'text-green-400' : 'text-red-400'}`}>
+          <p className={`text-sm ${uploadMsg.startsWith('✅') ? 'text-[#5C8A4A]/70' : 'text-[#C2453A]/70'}`}>
             {uploadMsg}
           </p>
         )}
       </div>
 
       {/* Auto-Discover Panel */}
-      <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
+      <div className="bg-me-charcoal/75 border border-me-charcoal rounded-xl p-4 space-y-3">
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium text-white">🔍 YouTube 自动发现</p>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-me-charcoal/55">
             使用上方选择的行业 / 类型 · 约 120 配额/次 · 免费额度 10,000/天
           </p>
         </div>
@@ -807,13 +807,13 @@ export default function ViralReferencesPage() {
             onChange={e => setDiscoverKeywords(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && discoverVideos()}
             placeholder="搜索关键词，如：luxury travel New Zealand tour"
-            className="flex-1 min-w-64 bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+            className="flex-1 min-w-64 bg-me-charcoal/90 border border-me-charcoal rounded-lg px-3 py-2 text-sm text-white placeholder:text-me-charcoal/45 focus:outline-none focus:border-me-ochre"
           />
           {/* Min views */}
           <select
             value={discoverMinViews}
             onChange={e => setDiscoverMinViews(Number(e.target.value))}
-            className="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+            className="bg-me-charcoal/90 border border-me-charcoal rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-me-ochre"
             title="最低播放量过滤"
           >
             <option value={10000}>▶ 1万+</option>
@@ -826,7 +826,7 @@ export default function ViralReferencesPage() {
           <select
             value={discoverLimit}
             onChange={e => setDiscoverLimit(Number(e.target.value))}
-            className="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+            className="bg-me-charcoal/90 border border-me-charcoal rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-me-ochre"
             title="最多抓取数量"
           >
             <option value={10}>10 条</option>
@@ -836,13 +836,13 @@ export default function ViralReferencesPage() {
           <button
             onClick={discoverVideos}
             disabled={discovering || !discoverKeywords.trim()}
-            className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors shrink-0"
+            className="px-4 py-2 bg-me-ochre hover:bg-me-ochre disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors shrink-0"
           >
             {discovering ? '搜索中…' : '🔍 Discover & Analyze'}
           </button>
         </div>
         {discoverMsg && (
-          <p className={`text-sm ${discoverMsg.startsWith('✅') ? 'text-green-400' : discoverMsg.startsWith('❌') ? 'text-red-400' : 'text-indigo-300'}`}>
+          <p className={`text-sm ${discoverMsg.startsWith('✅') ? 'text-[#5C8A4A]/70' : discoverMsg.startsWith('❌') ? 'text-[#C2453A]/70' : 'text-me-ochre/80'}`}>
             {discoverMsg}
           </p>
         )}
@@ -850,21 +850,21 @@ export default function ViralReferencesPage() {
 
       {/* Fetch error */}
       {fetchError && (
-        <p className="text-sm text-red-400 bg-red-950/40 rounded-lg px-4 py-2.5">
+        <p className="text-sm text-[#C2453A]/70 bg-[#C2453A]/50 rounded-lg px-4 py-2.5">
           API Error: {fetchError}
         </p>
       )}
 
       {/* Trigger message */}
       {triggerMsg && (
-        <p className="text-sm text-indigo-300 bg-indigo-950/40 rounded-lg px-4 py-2.5">
+        <p className="text-sm text-me-ochre/80 bg-me-ochre/50 rounded-lg px-4 py-2.5">
           {triggerMsg}
         </p>
       )}
 
       {/* Detect industry message */}
       {detectMsg && (
-        <p className={`text-sm rounded-lg px-4 py-2.5 ${detectMsg.startsWith('✅') ? 'text-green-400 bg-green-950/40' : 'text-red-400 bg-red-950/40'}`}>
+        <p className={`text-sm rounded-lg px-4 py-2.5 ${detectMsg.startsWith('✅') ? 'text-[#5C8A4A]/70 bg-[#5C8A4A]/50' : 'text-[#C2453A]/70 bg-[#C2453A]/50'}`}>
           {detectMsg}
         </p>
       )}
@@ -873,13 +873,13 @@ export default function ViralReferencesPage() {
       <div className="grid grid-cols-4 gap-3">
         {[
           { label: 'Total',     value: total,     cls: 'text-white' },
-          { label: 'Analyzed',  value: done,      cls: 'text-green-400' },
-          { label: 'Analyzing', value: analyzing, cls: 'text-yellow-400' },
-          { label: 'Errors',    value: errors,    cls: 'text-red-400' },
+          { label: 'Analyzed',  value: done,      cls: 'text-[#5C8A4A]/70' },
+          { label: 'Analyzing', value: analyzing, cls: 'text-me-gold' },
+          { label: 'Errors',    value: errors,    cls: 'text-[#C2453A]/70' },
         ].map(s => (
-          <div key={s.label} className="bg-gray-800 rounded-xl p-4 border border-gray-700 text-center">
+          <div key={s.label} className="bg-me-charcoal/75 rounded-xl p-4 border border-me-charcoal text-center">
             <p className={`text-2xl font-bold ${s.cls}`}>{s.value}</p>
-            <p className="text-xs text-gray-500 mt-1">{s.label}</p>
+            <p className="text-xs text-me-charcoal/55 mt-1">{s.label}</p>
           </div>
         ))}
       </div>
@@ -895,8 +895,8 @@ export default function ViralReferencesPage() {
             onClick={() => setFilter(f)}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize ${
               filter === f
-                ? 'bg-gray-700 text-white'
-                : 'text-gray-500 hover:text-gray-300'
+                ? 'bg-me-charcoal/60 text-white'
+                : 'text-me-charcoal/55 hover:text-me-charcoal/35'
             }`}
           >
             {f === 'all' ? `All (${total})` : f === 'done' ? `Done (${done})` : f === 'pending' ? `Pending (${pending})` : `Errors (${errors})`}
@@ -906,9 +906,9 @@ export default function ViralReferencesPage() {
 
       {/* Grid */}
       {loading ? (
-        <div className="text-center py-12 text-gray-500">Loading…</div>
+        <div className="text-center py-12 text-me-charcoal/55">Loading…</div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-12 text-gray-500">No references found.</div>
+        <div className="text-center py-12 text-me-charcoal/55">No references found.</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filtered.map(r => (

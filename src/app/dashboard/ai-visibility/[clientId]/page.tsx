@@ -117,10 +117,10 @@ export default function AiVisibilityPage() {
     return (
       <div className="p-6 space-y-4">
         <div className="animate-pulse space-y-3">
-          <div className="h-8 bg-gray-200 rounded w-64" />
-          <div className="h-4 bg-gray-200 rounded w-40" />
+          <div className="h-8 bg-me-stone rounded w-64" />
+          <div className="h-4 bg-me-stone rounded w-40" />
           <div className="grid grid-cols-4 gap-3">
-            {[1, 2, 3, 4].map(i => <div key={i} className="h-20 bg-gray-200 rounded-xl" />)}
+            {[1, 2, 3, 4].map(i => <div key={i} className="h-20 bg-me-stone rounded-xl" />)}
           </div>
         </div>
       </div>
@@ -131,8 +131,8 @@ export default function AiVisibilityPage() {
   if (!client) {
     return (
       <div className="p-6 space-y-3">
-        <p className="text-gray-500">Client not found.</p>
-        <Link href="/dashboard/ai-visibility" className="text-indigo-600 hover:underline text-sm">
+        <p className="text-me-charcoal/55">Client not found.</p>
+        <Link href="/dashboard/ai-visibility" className="text-me-ochre hover:underline text-sm">
           ← Back to AI Visibility
         </Link>
       </div>
@@ -144,17 +144,17 @@ export default function AiVisibilityPage() {
     <div className="p-6 space-y-4">
       {/* Header */}
       <div className="flex items-center gap-3 flex-wrap">
-        <Link href="/dashboard/ai-visibility" className="text-gray-400 hover:text-gray-600 text-sm flex-shrink-0">
+        <Link href="/dashboard/ai-visibility" className="text-me-charcoal/45 hover:text-me-charcoal/60 text-sm flex-shrink-0">
           ← AI Visibility
         </Link>
-        <span className="text-gray-300">/</span>
-        <h1 className="text-2xl font-bold text-gray-900">{client.name}</h1>
+        <span className="text-me-charcoal/35">/</span>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-me-charcoal/90">{client.name}</h1>
         {client.domain && (
           <a
             href={`https://${client.domain}`}
             target="_blank"
             rel="noreferrer"
-            className="text-xs text-indigo-500 hover:text-indigo-700 font-mono"
+            className="text-xs text-me-ochre hover:text-me-ochre font-mono"
           >
             {client.domain} ↗
           </a>
@@ -162,9 +162,9 @@ export default function AiVisibilityPage() {
         <div className="ml-auto flex items-center gap-3 flex-shrink-0">
           {runMsg && (
             <span className={`text-sm ${
-              runSuccess === true ? 'text-green-600' :
-              runSuccess === false ? 'text-red-600' :
-              'text-amber-600'
+              runSuccess === true ? 'text-[#5C8A4A]' :
+              runSuccess === false ? 'text-[#C2453A]' :
+              'text-me-ochre'
             }`}>
               {runMsg}
             </span>
@@ -172,7 +172,7 @@ export default function AiVisibilityPage() {
           <button
             onClick={handleRunNow}
             disabled={running}
-            className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-1.5"
+            className="bg-me-ochre hover:bg-me-ochre disabled:bg-me-ochre/70 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-1.5"
           >
             {running ? (
               <><span className="inline-block animate-spin">⏳</span> Running…</>
@@ -201,10 +201,10 @@ export default function AiVisibilityPage() {
             },
             { label: 'AI Models', value: snapshot.models_covered.length },
           ].map(s => (
-            <div key={s.label} className="bg-white rounded-xl border border-gray-200 p-4">
-              <p className="text-xs text-gray-500">{s.label}</p>
-              <p className="text-xl font-bold text-gray-900 mt-1">{s.value}</p>
-              {s.sub && <p className="text-xs text-gray-400 mt-0.5">{s.sub}</p>}
+            <div key={s.label} className="bg-white rounded-xl border border-black/10 p-4">
+              <p className="text-xs text-me-charcoal/55">{s.label}</p>
+              <p className="text-xl font-bold text-me-charcoal/90 mt-1">{s.value}</p>
+              {s.sub && <p className="text-xs text-me-charcoal/45 mt-0.5">{s.sub}</p>}
             </div>
           ))}
         </div>
@@ -212,7 +212,7 @@ export default function AiVisibilityPage() {
 
       {/* No data prompt */}
       {!snapshot && runs.length === 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-4 text-sm text-amber-700">
+        <div className="bg-me-ochre/10 border border-me-ochre/30 rounded-xl px-5 py-4 text-sm text-me-ochre">
           {queries.length > 0 ? (
             <><strong>No data yet.</strong> Click ▶ Run Now above to run the first AI Visibility pass for this client.</>
           ) : (
@@ -220,7 +220,7 @@ export default function AiVisibilityPage() {
               <strong>还没有追踪问句。</strong> 追踪问句来源于张骞 Discovery,
               <Link
                 href={`/dashboard/clients/${clientId}/zhangqian`}
-                className="underline font-medium hover:text-amber-900"
+                className="underline font-medium hover:text-me-ochre"
               >
                 先给该客户跑一次 discovery
               </Link>
@@ -231,7 +231,7 @@ export default function AiVisibilityPage() {
       )}
 
       {/* Tabs */}
-      <div className="border-b border-gray-200">
+      <div className="border-b border-black/10">
         <nav className="flex gap-1 overflow-x-auto">
           {tabs.map(tab => (
             <button
@@ -239,8 +239,8 @@ export default function AiVisibilityPage() {
               onClick={() => setActiveTab(tab.id)}
               className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                 activeTab === tab.id
-                  ? 'border-indigo-600 text-indigo-700'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ? 'border-me-ochre text-me-ochre'
+                  : 'border-transparent text-me-charcoal/55 hover:text-me-charcoal/75 hover:border-black/15'
               }`}
             >
               {tab.label}

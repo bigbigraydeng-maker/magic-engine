@@ -27,7 +27,7 @@ export function TrendSparkline({ data, width = 320, height = 100 }: Props) {
   if (validPoints.length < 2) {
     return (
       <div
-        className="flex items-center justify-center text-xs text-gray-400"
+        className="flex items-center justify-center text-xs text-me-charcoal/45"
         style={{ width, height }}
       >
         Not enough data
@@ -62,7 +62,7 @@ export function TrendSparkline({ data, width = 320, height = 100 }: Props) {
   const first = validPoints[0].avg_rank as number;
   const last  = validPoints[validPoints.length - 1].avg_rank as number;
   const improved = last < first;
-  const lineColor = improved ? '#22c55e' : last > first ? '#f59e0b' : '#6366f1';
+  const lineColor = improved ? '#5C8A4A' : last > first ? '#C4912E' : '#C4912E';
 
   return (
     <svg width={width} height={height} role="img" aria-label="4-week rank trend">
@@ -74,8 +74,8 @@ export function TrendSparkline({ data, width = 320, height = 100 }: Props) {
       </defs>
 
       {/* Y-axis labels (min/max rank) */}
-      <text x={padX - 4} y={padY + 4}         fontSize={9} fill="#9ca3af" textAnchor="end">{minR.toFixed(1)}</text>
-      <text x={padX - 4} y={padY + chartH + 4} fontSize={9} fill="#9ca3af" textAnchor="end">{maxR.toFixed(1)}</text>
+      <text x={padX - 4} y={padY + 4}         fontSize={9} fill="rgba(26,26,26,0.45)" textAnchor="end">{minR.toFixed(1)}</text>
+      <text x={padX - 4} y={padY + chartH + 4} fontSize={9} fill="rgba(26,26,26,0.45)" textAnchor="end">{maxR.toFixed(1)}</text>
 
       {/* Area fill */}
       <path d={areaD} fill="url(#sparkGrad)" />
@@ -103,7 +103,7 @@ export function TrendSparkline({ data, width = 320, height = 100 }: Props) {
           x={toX(i)}
           y={height - 1}
           fontSize={8}
-          fill="#9ca3af"
+          fill="rgba(26,26,26,0.45)"
           textAnchor="middle"
         >
           {d.week_of.slice(5)}  {/* MM-DD */}
