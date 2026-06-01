@@ -106,8 +106,24 @@ interface Props {
    *  Parent uses this to show "制作中" badge on the kanban card. */
   onImageGeneratingChange?: (active: boolean) => void
   /** When set, image generation is handed off to the parent (runs in background after drawer closes).
-   *  Parent receives the prompt + aspectRatio, handles fetch + DB write, returns image_url via promise. */
-  onBackgroundImageGenerate?: (params: { prompt: string; aspectRatio: string }) => Promise<string>
+   *  Parent receives the prompt + aspectRatio + post_id (optional), persists to visual_assets DB,
+   *  returns the created asset. When post_id is omitted, parent falls back to non-persistent preview
+   *  (used in batch mode where no specific content_post is bound to the card). */
+  onBackgroundImageGenerate?: (params: ImageGenerateParams) => Promise<GalleryAsset>
+}
+
+export interface GalleryAsset {
+  id: string
+  storage_url: string
+  prompt_used: string | null
+  is_selected: boolean
+  created_at: string
+}
+
+interface ImageGenerateParams {
+  prompt: string
+  aspectRatio: string
+  postId?: string
 }
 
 interface PlanRecord {
@@ -1289,33 +1305,54 @@ const POST_TYPE_COLOR: Record<string, string> = {
   engagement:   'bg-blue-50 text-blue-700 border-blue-200',
 }
 
-function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd, onBackgroundImageGenerate }: {
+function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd, onBackgroundImageGenerate, postId, initialAssets }: {
   post: Post
   clientId: string
   launchHubPlatform?: string
   onGenStart?: () => void
   onGenEnd?: () => void
-  onBackgroundImageGenerate?: (params: { prompt: string; aspectRatio: string }) => Promise<string>
+  onBackgroundImageGenerate?: (params: ImageGenerateParams) => Promise<GalleryAsset>
+  /** Persisted content_post id — when present, the gallery is loaded from / saved to visual_assets. */
+  postId?: string
+  /** Pre-fetched gallery assets (avoids a per-card fetch when the parent already loaded them). */
+  initialAssets?: GalleryAsset[]
 }) {
   const [open, setOpen]             = useState(false)
   const [generatingImg, setGen]     = useState(false)
-  const [imgUrl, setImgUrl]         = useState<string | null>(null)
+  const [assets, setAssets]         = useState<GalleryAsset[]>(initialAssets ?? [])
   const [imgError, setImgError]     = useState<string | null>(null)
-  const [lightboxOpen, setLightbox] = useState(false)
+  const [lightboxUrl, setLightbox]  = useState<string | null>(null)
   const [editedCopy, setEditedCopy]           = useState(post.copy)
   const [editedImagePrompt, setEditedImagePrompt] = useState(post.image_prompt)
+  const [selecting, setSelecting]   = useState(false)
 
-  const colorClass = POST_TYPE_COLOR[post.content_type] ?? 'bg-gray-50 text-gray-700 border-gray-200'
+  // Load gallery on mount when bound to a persisted post but parent didn't pre-fetch.
+  useEffect(() => {
+    if (!postId || initialAssets) return
+    fetch(`/api/clients/${clientId}/visual-assets?post_id=${postId}`)
+      .then(r => r.json() as Promise<{ success: boolean; assets?: GalleryAsset[] }>)
+      .then(data => { if (data.success && data.assets) setAssets(data.assets) })
+      .catch(() => { /* non-fatal */ })
+  }, [clientId, postId, initialAssets])
+
+  const selectedAsset = assets.find(a => a.is_selected) ?? assets[0] ?? null
+  const selectedUrl   = selectedAsset?.storage_url ?? null
+  const colorClass    = POST_TYPE_COLOR[post.content_type] ?? 'bg-gray-50 text-gray-700 border-gray-200'
 
   const handleGenerate = async () => {
     setGen(true)
     setImgError(null)
     onGenStart?.()
     try {
-      let imageUrl: string
       if (onBackgroundImageGenerate) {
-        imageUrl = await onBackgroundImageGenerate({ prompt: editedImagePrompt, aspectRatio: '1:1' })
+        const asset = await onBackgroundImageGenerate({
+          prompt: editedImagePrompt,
+          aspectRatio: '1:1',
+          ...(postId ? { postId } : {}),
+        })
+        setAssets(prev => [...prev, asset])
       } else {
+        // Fallback: legacy single-image preview (batch mode, no parent handler).
         const res = await fetch('/api/visual/image-preview', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1323,14 +1360,34 @@ function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd, onB
         })
         const json = await res.json() as { success: boolean; image_url?: string; error?: string }
         if (!json.success) throw new Error(json.error ?? '生成失败')
-        imageUrl = json.image_url ?? ''
+        if (json.image_url) {
+          setAssets(prev => [...prev, {
+            id: `local-${prev.length + 1}`,
+            storage_url: json.image_url!,
+            prompt_used: editedImagePrompt,
+            is_selected: prev.length === 0,
+            created_at: new Date().toISOString(),
+          }])
+        }
       }
-      setImgUrl(imageUrl)
     } catch (e) {
       setImgError(e instanceof Error ? e.message : String(e))
     } finally {
       setGen(false)
       onGenEnd?.()
+    }
+  }
+
+  const handleSelect = async (assetId: string) => {
+    if (selecting) return
+    // 乐观更新
+    setAssets(prev => prev.map(a => ({ ...a, is_selected: a.id === assetId })))
+    if (!postId || assetId.startsWith('local-')) return // 本地态/batch 不落库
+    setSelecting(true)
+    try {
+      await fetch(`/api/visual-assets/${assetId}/select`, { method: 'PATCH' })
+    } catch { /* 乐观更新已生效 */ } finally {
+      setSelecting(false)
     }
   }
 
