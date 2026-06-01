@@ -207,28 +207,46 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
     })()
   }, [isTaskMode, clientId, item?.id])
 
-  // Load history on mount / when campaign changes
+  // Load history on mount / when campaign changes.
+  // Strategy: try campaign-scoped query first; if it returns nothing (plan may have
+  // been generated under a different campaign), fall back to the unscoped recent plans.
   useEffect(() => {
-    if (!campaignId) { setHistoryLoaded(true); return }
     setHistoryLoaded(false)
-    const url = `/api/clients/${clientId}/social-plan?campaign_id=${campaignId}`
-    fetch(url)
-      .then(r => r.json() as Promise<{ success: boolean; plans?: PlanRecord[] }>)
-      .then(data => {
+
+    async function loadHistory() {
+      try {
+        // Primary: scoped to current campaign (fast path, most relevant)
+        if (campaignId) {
+          const res = await fetch(`/api/clients/${clientId}/social-plan?campaign_id=${campaignId}`)
+          const data = await res.json() as { success: boolean; plans?: PlanRecord[] }
+          const records = data.plans ?? []
+          if (records.length) {
+            setPlanHistory(records)
+            setPlan(records[0].plan_data)
+            setPlanId(records[0].id)
+            if (isTaskMode && taskKind) setPlanTab(KIND_TAB[taskKind])
+            return
+          }
+        }
+
+        // Fallback: unscoped — catches plans saved under a different campaign or null campaign_id
+        const res = await fetch(`/api/clients/${clientId}/social-plan`)
+        const data = await res.json() as { success: boolean; plans?: PlanRecord[] }
         const records = data.plans ?? []
         if (records.length) {
           setPlanHistory(records)
-          // Always pre-load the most recent plan so FDE can review/edit generated content
           setPlan(records[0].plan_data)
           setPlanId(records[0].id)
-          // Auto-switch to the tab matching the task kind
-          if (isTaskMode && taskKind) {
-            setPlanTab(KIND_TAB[taskKind])
-          }
+          if (isTaskMode && taskKind) setPlanTab(KIND_TAB[taskKind])
         }
-      })
-      .catch(() => { /* non-fatal */ })
-      .finally(() => setHistoryLoaded(true))
+      } catch {
+        /* non-fatal */
+      } finally {
+        setHistoryLoaded(true)
+      }
+    }
+
+    void loadHistory()
   }, [clientId, campaignId])
 
   async function handleSaveToBoard(type: 'posts' | 'stories') {
