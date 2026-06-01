@@ -237,7 +237,7 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-06-02 01:08 NZST （**Phase 22 PR #187 open — 22.D 全闭环 + 22.A.1/A.3 GSC/Meta flywheel_metrics 接通**）
+> 最后更新：2026-06-02 02:45 NZST （**Phase 22 PR #187 open — 22.D 全闭环 + 22.A.1/A.3 GSC/Meta flywheel_metrics 接通**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
