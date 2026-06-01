@@ -4,7 +4,7 @@ import { MePanel } from '@/components/ui/me-primitives'
 import WalletPurchase from './_components/WalletPurchase'
 
 interface Props {
-  params: { clientId: string }
+  params: { id: string }
   searchParams: { [key: string]: string | string[] | undefined }
 }
 
@@ -37,7 +37,7 @@ const TOKEN_COSTS = [
 ]
 
 export default async function WalletPage({ params, searchParams }: Props) {
-  const { clientId } = params
+  const { id: clientId } = params
   const balance = await getMtcBalance(clientId)
 
   const isWelcome   = searchParams.welcome === '1'

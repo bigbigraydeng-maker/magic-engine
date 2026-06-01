@@ -62,8 +62,8 @@ export async function POST(request: NextRequest) {
       price_id: priceId,
       package_key: packageKey,
     },
-    success_url: `${appUrl}/portal/${clientId}/wallet?success=1&package=${packageKey}`,
-    cancel_url: `${appUrl}/portal/${clientId}/wallet?cancelled=1`,
+    success_url: `${appUrl}/dashboard/clients/${clientId}/wallet?success=1&package=${packageKey}`,
+    cancel_url: `${appUrl}/dashboard/clients/${clientId}/wallet?cancelled=1`,
     customer_email: session.user.email ?? undefined,
   })
 

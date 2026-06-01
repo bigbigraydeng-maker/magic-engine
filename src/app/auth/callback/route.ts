@@ -86,7 +86,7 @@ export async function GET(request: NextRequest) {
         // Grant 500 MTC welcome bonus on first login for self_serve clients
         const bonusGranted = await grantSignupBonus(portalRow.client_id).catch(() => false)
         destination = bonusGranted
-          ? `/portal/${portalRow.client_id}/wallet?welcome=1`
+          ? `/dashboard/clients/${portalRow.client_id}/wallet?welcome=1`
           : `/portal/${portalRow.client_id}`
       } else if (dashboardRow?.client_id) {
         destination = `/dashboard/clients/${dashboardRow.client_id}`
