@@ -4,6 +4,16 @@ import { logPackagePublishedAction } from '@/lib/flywheel/package-publish'
 
 type RouteContext = { params: { id: string; packageId: string } }
 
+interface ProductionPackageDetail {
+  id: string
+  client_id: string
+  campaign_id: string | null
+  execution_item_id: string | null
+  dimension: string
+  status: string
+  [key: string]: unknown
+}
+
 const VALID_STATUSES = new Set([
   'draft', 'generating', 'ready_for_review', 'revision_requested',
   'approved', 'scheduled', 'published', 'measured', 'archived', 'failed',
@@ -15,7 +25,7 @@ export async function GET(_req: NextRequest, { params }: RouteContext) {
   const { id: clientId, packageId } = params
 
   // 1. Fetch the package (scoped to client for safety)
-  const { data: pkg, error: pkgError } = await supabaseAdmin
+  const { data: pkgRaw, error: pkgError } = await supabaseAdmin
     .from('production_packages')
     .select(
       'id, client_id, master_brief_id, dimension, campaign_id, diagnostic_run_id, ' +
@@ -26,9 +36,10 @@ export async function GET(_req: NextRequest, { params }: RouteContext) {
     .eq('client_id', clientId)
     .single()
 
-  if (pkgError || !pkg) {
+  if (pkgError || !pkgRaw) {
     return NextResponse.json({ success: false, error: 'Production package not found' }, { status: 404 })
   }
+  const pkg = pkgRaw as unknown as ProductionPackageDetail
 
   // 2. Parallel: campaign + execution_item lookups (only if FK present)
   const [campaignResult, executionItemResult] = await Promise.all([

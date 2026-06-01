@@ -5,6 +5,11 @@ import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 type RouteContext = { params: { id: string } }
 
+interface ProductionPackageListRow {
+  id: string
+  [key: string]: unknown
+}
+
 const VALID_DIMENSIONS = ['seo', 'ai_visibility', 'ads', 'social', 'reputation', 'competitor'] as const
 type DiagnosticDimension = typeof VALID_DIMENSIONS[number]
 
@@ -52,7 +57,7 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
       return NextResponse.json({ success: false, error: 'Failed to retrieve packages' }, { status: 500 })
     }
 
-    const safePackages = packages ?? []
+    const safePackages = (packages ?? []) as unknown as ProductionPackageListRow[]
 
     // Batch-fetch item counts for all returned packages
     let itemCountMap: Record<string, number> = {}
