@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { generateImage } from '@/lib/visual/openai-images'
 import { uploadFromBase64 } from '@/lib/visual/storage'
+import { requireSession } from '@/lib/auth/require-session'
 
 interface BatchResult {
   post_id: string
@@ -15,6 +16,11 @@ interface BatchResult {
 // Processes sequentially to avoid OpenAI rate limits.
 // On success per post: inserts visual_assets + upgrades content_posts.status to 'approved'.
 export async function POST(req: NextRequest) {
+  const session = await requireSession()
+  if (!session.ok) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
+  }
+
   try {
     const { post_ids } = await req.json() as { post_ids?: string[] }
 

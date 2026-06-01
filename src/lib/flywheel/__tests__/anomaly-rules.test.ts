@@ -126,15 +126,79 @@ describe('seo-clicks-drop', () => {
   })
 })
 
+// ── seo-ga4-sessions-drop ──────────────────────────────────────────────────
+
+describe('seo-ga4-sessions-drop', () => {
+  const rule = ruleById('seo-ga4-sessions-drop')
+
+  it('returns null when history < 7', () => {
+    expect(rule.detect(800, [1000, 1000, 1000])).toBeNull()
+  })
+
+  it('returns null when drop is <= 20%', () => {
+    // Avg = 1000, current = 801 → -19.9% (not > 20%)
+    expect(rule.detect(801, [1000, 1000, 1000, 1000, 1000, 1000, 1000])).toBeNull()
+  })
+
+  it('fires when GA4 sessions drop > 20%', () => {
+    // Avg = 1000, current = 700 → -30%
+    const result = rule.detect(700, [1000, 1000, 1000, 1000, 1000, 1000, 1000])
+    expect(result).not.toBeNull()
+    expect(result!.deltaPct).toBeLessThan(-20)
+    expect(result!.description).toContain('sessions dropped')
+  })
+
+  it('handles mixed history values correctly', () => {
+    // Avg of last 7 = 900, current = 600 → -33.3%
+    const result = rule.detect(600, [800, 900, 950, 900, 900, 900, 950])
+    expect(result).not.toBeNull()
+    expect(result!.deltaPct).toBeLessThan(-20)
+  })
+})
+
+// ── seo-ga4-bounce-rate-spike ──────────────────────────────────────────────
+
+describe('seo-ga4-bounce-rate-spike', () => {
+  const rule = ruleById('seo-ga4-bounce-rate-spike')
+
+  it('returns null when history < 7', () => {
+    expect(rule.detect(0.8, [0.6, 0.6, 0.6])).toBeNull()
+  })
+
+  it('returns null when rise is <= 15%', () => {
+    // Avg = 0.6, current = 0.69 → +15% (not > 15%)
+    expect(rule.detect(0.69, [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6])).toBeNull()
+  })
+
+  it('fires when bounce rate rises > 15%', () => {
+    // Avg = 0.6, current = 0.75 → +25%
+    const result = rule.detect(0.75, [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6])
+    expect(result).not.toBeNull()
+    expect(result!.deltaPct).toBeGreaterThan(15)
+    expect(result!.description).toContain('bounce rate rose')
+  })
+
+  it('returns null when bounce rate falls (improvement)', () => {
+    // Lower bounce rate = better, should not fire
+    expect(rule.detect(0.3, [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6])).toBeNull()
+  })
+})
+
 // ── ANOMALY_RULES registry ─────────────────────────────────────────────────
 
 describe('ANOMALY_RULES registry', () => {
-  it('contains exactly 5 rules', () => {
-    expect(ANOMALY_RULES).toHaveLength(5)
+  it('contains exactly 7 rules', () => {
+    expect(ANOMALY_RULES).toHaveLength(7)
   })
 
   it('all rule ids are unique', () => {
     const ids = ANOMALY_RULES.map(r => r.id)
     expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('includes the 2 new GA4 rules from P22.B.1', () => {
+    const ids = ANOMALY_RULES.map(r => r.id)
+    expect(ids).toContain('seo-ga4-sessions-drop')
+    expect(ids).toContain('seo-ga4-bounce-rate-spike')
   })
 })

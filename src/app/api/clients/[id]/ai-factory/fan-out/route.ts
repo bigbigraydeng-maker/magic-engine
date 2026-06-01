@@ -119,9 +119,9 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ success: false, error: msg }, { status: 500 })
   }
 
-  // 扣 MTC（非阻断，按实际落库帖数扣）
+  // 扣 MTC（非阻断，按实际落库帖数 × 单价扣）
   if (batchResult.successCount > 0) {
-    deductMtc(clientId, 'ai_factory_post', batchResult.successCount).catch(e =>
+    deductMtc(clientId, 'ai_factory_post', batchResult.successCount * MTC_PER_POST).catch(e =>
       console.error('[ai-factory/fan-out] MTC deduction error:', e)
     )
   }

@@ -1,12 +1,20 @@
 'use client'
 
+import Link from 'next/link'
 import { useState } from 'react'
 
 type Status = 'idle' | 'submitting' | 'success' | 'error'
 
-export default function ContactForm() {
+type ContactFormProps = {
+  source?: string
+  defaultMessage?: string
+}
+
+export default function ContactForm({ source, defaultMessage }: ContactFormProps) {
   const [status, setStatus] = useState<Status>('idle')
   const [errorMsg, setErrorMsg] = useState('')
+  const isTrainingLead = source === 'training'
+  const isAdsLead = source === 'ads'
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -19,6 +27,7 @@ export default function ContactForm() {
       email: (form.elements.namedItem('email') as HTMLInputElement).value,
       company: (form.elements.namedItem('company') as HTMLInputElement).value,
       message: (form.elements.namedItem('message') as HTMLTextAreaElement).value,
+      source: (form.elements.namedItem('source') as HTMLInputElement).value,
     }
 
     try {
@@ -41,6 +50,96 @@ export default function ContactForm() {
   }
 
   if (status === 'success') {
+    if (isTrainingLead) {
+      return (
+        <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-8">
+          <div className="flex items-start gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-cyan-100">
+              <svg className="h-6 w-6 text-cyan-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-lg font-black text-cyan-950">Training enquiry received</h3>
+              <p className="mt-2 text-sm leading-6 text-cyan-900">
+                Thanks. We&rsquo;ll reply within one business day with a suggested workshop format,
+                the right language setup, and the next step that fits your team.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-3 rounded-lg border border-cyan-200 bg-white p-4 text-sm text-cyan-950 sm:grid-cols-2">
+            <p className="font-semibold">What happens next</p>
+            <ul className="grid gap-2 text-cyan-900">
+              <li>We review your team size, language mix, and timing.</li>
+              <li>We suggest a workshop shape that stays practical and local.</li>
+              <li>If needed, we keep it to a consult before anything bigger.</li>
+            </ul>
+          </div>
+
+          <div className="mt-6 flex flex-wrap gap-3">
+            <Link
+              href="/training"
+              className="inline-flex h-11 items-center rounded-lg bg-cyan-950 px-4 text-sm font-bold text-white"
+            >
+              Back to training
+            </Link>
+            <a
+              href="mailto:raydeng@magicengine.com.au"
+              className="inline-flex h-11 items-center rounded-lg border border-cyan-300 px-4 text-sm font-bold text-cyan-950"
+            >
+              Email us directly
+            </a>
+          </div>
+        </div>
+      )
+    }
+
+    if (isAdsLead) {
+      return (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-8">
+          <div className="flex items-start gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-amber-100">
+              <svg className="h-6 w-6 text-amber-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-lg font-black text-amber-950">Ads enquiry received</h3>
+              <p className="mt-2 text-sm leading-6 text-amber-900">
+                Thanks. We&rsquo;ll reply within one business day with a suggested AU/NZ campaign
+                shape, the right market focus, and the next step that fits your launch window.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-3 rounded-lg border border-amber-200 bg-white p-4 text-sm text-amber-950 sm:grid-cols-2">
+            <p className="font-semibold">What happens next</p>
+            <ul className="grid gap-2 text-amber-900">
+              <li>We review target market, offer, budget, and timing.</li>
+              <li>We suggest a light launch path that stays practical and local.</li>
+              <li>If needed, we keep it as a consult before any heavier build.</li>
+            </ul>
+          </div>
+
+          <div className="mt-6 flex flex-wrap gap-3">
+            <Link
+              href="/"
+              className="inline-flex h-11 items-center rounded-lg bg-amber-950 px-4 text-sm font-bold text-white"
+            >
+              Back to home
+            </Link>
+            <a
+              href="mailto:raydeng@magicengine.com.au"
+              className="inline-flex h-11 items-center rounded-lg border border-amber-300 px-4 text-sm font-bold text-amber-950"
+            >
+              Email us directly
+            </a>
+          </div>
+        </div>
+      )
+    }
+
     return (
       <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-8 text-center">
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100">
@@ -58,6 +157,7 @@ export default function ContactForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
+      <input type="hidden" name="source" value={source ?? ''} />
       <div className="grid gap-5 sm:grid-cols-2">
         <div>
           <label htmlFor="name" className="mb-1.5 block text-sm font-semibold text-slate-700">
@@ -112,6 +212,7 @@ export default function ContactForm() {
           name="message"
           required
           rows={6}
+          defaultValue={defaultMessage}
           placeholder="Tell us about your business and what you're looking for…"
           className="w-full resize-none rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
         />

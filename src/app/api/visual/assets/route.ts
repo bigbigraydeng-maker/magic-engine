@@ -1,10 +1,15 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { requireSession } from '@/lib/auth/require-session'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/visual/assets — recent visual assets for history panel
 export async function GET() {
+  const session = await requireSession()
+  if (!session.ok) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
   try {
     const { data, error } = await supabaseAdmin
       .from('visual_assets')

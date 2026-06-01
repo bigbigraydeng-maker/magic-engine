@@ -638,6 +638,9 @@ function TaskDetailDrawer({
   const [factoryLoading, setFactoryLoading] = useState(false)
   const [factoryResult, setFactoryResult]   = useState<{ successCount: number; packageId: string | null } | null>(null)
   const [factoryError, setFactoryError]     = useState<string | null>(null)
+  // 「存入工作台」补救按钮（方案 A：socialDone 但 content_posts 未入库时使用）
+  const [saveToBoardLoading, setSaveToboardLoading] = useState(false)
+  const [saveToBoard_done, setSaveToBoardDone]      = useState(false)
 
   useEffect(() => { setMounted(true) }, [])
 
@@ -646,7 +649,28 @@ function TaskDetailDrawer({
     setEditingTitle(false)
     setEditingDesc(false)
     setConfirmDelete(false)
+    setSaveToboardLoading(false)
+    setSaveToBoardDone(false)
   }, [item?.id])
+
+  const handleSaveToBoard = useCallback(async () => {
+    if (!item) return
+    setSaveToboardLoading(true)
+    try {
+      // Fetch the most recent social plan for this client
+      const planRes = await fetch(`/api/clients/${clientId}/social-plan`)
+      const planJson = await planRes.json() as { success: boolean; plans?: { id: string }[] }
+      const planId = planJson.plans?.[0]?.id
+      if (!planId) { setSaveToboardLoading(false); return }
+      await fetch(`/api/clients/${clientId}/social-plan/${planId}/save-to-board`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      setSaveToBoardDone(true)
+    } catch { /* non-fatal */ } finally {
+      setSaveToboardLoading(false)
+    }
+  }, [item, clientId])
 
   if (!mounted || !item) return null
 
@@ -868,12 +892,25 @@ function TaskDetailDrawer({
               <div className="w-full rounded-lg border border-green-100 bg-green-50/60 px-3 py-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-black text-green-700 uppercase tracking-wide">已生成</span>
-                  <a
-                    href={`/dashboard/content?client=${clientId}`}
-                    className="text-[11px] font-bold text-cyan-600 hover:text-cyan-800 underline"
-                  >
-                    查看社媒工作台 →
-                  </a>
+                  <div className="flex items-center gap-3">
+                    {!saveToBoard_done ? (
+                      <button
+                        onClick={() => void handleSaveToBoard()}
+                        disabled={saveToBoardLoading}
+                        className="text-[11px] font-bold text-amber-600 hover:text-amber-800 underline disabled:opacity-50"
+                      >
+                        {saveToBoardLoading ? '同步中…' : '存入工作台'}
+                      </button>
+                    ) : (
+                      <span className="text-[11px] font-bold text-green-600">✓ 已同步</span>
+                    )}
+                    <a
+                      href={`/dashboard/content?client=${clientId}`}
+                      className="text-[11px] font-bold text-cyan-600 hover:text-cyan-800 underline"
+                    >
+                      查看社媒工作台 →
+                    </a>
+                  </div>
                 </div>
               </div>
             )
@@ -904,6 +941,14 @@ function TaskDetailDrawer({
               className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-cyan-200 bg-cyan-50 px-3 text-xs font-black text-cyan-800 transition hover:bg-cyan-100"
             >
               Generate content
+            </button>
+          )}
+          {CONTENT_STUDIO_DIMENSIONS.has(item.dimension ?? '') && !isAutonomousItem(item) && item.status === 'in_progress' && item.logs?.some(l => l.kind === 'ai_assist' && l.content?.includes('社媒内容已在后台生成完成')) && (
+            <button
+              onClick={() => onOpenStudio(item)}
+              className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-green-200 bg-green-50 px-3 text-xs font-black text-green-800 transition hover:bg-green-100"
+            >
+              查看 / 调整内容
             </button>
           )}
           {/* Item 4: 自主飞轮操作全部关闭；Item 6: in_house 在 execButton 内已 return null */}
@@ -1503,6 +1548,8 @@ export default function ExecutionPage() {
   const [bgGeneratingIds, setBgGeneratingIds] = useState<Set<string>>(new Set())
   // 图片生成中的执行项 ID 集合（drawer 还开着，但图片在 Visual Studio 渲染，kanban 卡片也要显示"制作中"）
   const [imageGenActiveIds, setImageGenActiveIds] = useState<Set<string>>(new Set())
+  // 后台图片生成任务（关抽屉后继续跑）：itemId → count（同一任务可能有多张并发）
+  const [bgImageGenCount, setBgImageGenCount] = useState(0)
 
   const handleDownloadDocx = async () => {
     setIsDocxLoading(true)
@@ -1811,8 +1858,15 @@ export default function ExecutionPage() {
             ...(params.angle_focus ? { angle_focus: params.angle_focus } : {}),
           }),
         })
-        const json = await res.json() as { success: boolean; error?: string }
+        const json = await res.json() as { success: boolean; plan_id?: string; error?: string }
         if (json.success) {
+          // Save generated plan to content_posts so it appears in Launch Hub
+          if (json.plan_id) {
+            await fetch(`/api/clients/${clientId}/social-plan/${json.plan_id}/save-to-board`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+            }).catch(() => {})
+          }
           await fetch(`/api/clients/${clientId}/execution/${itemId}/log`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1844,6 +1898,43 @@ export default function ExecutionPage() {
       return s
     })
   }, [])
+
+  // 后台图片生成：关抽屉后继续跑，完成后把 image_url 写入 content_posts.visual_brief
+  const handleBackgroundImageGenerate = useCallback(async (
+    itemId: string,
+    params: { prompt: string; aspectRatio: string },
+  ): Promise<string> => {
+    setBgImageGenCount(c => c + 1)
+    try {
+      const res = await fetch('/api/visual/image-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: params.prompt, client_id: clientId, aspect_ratio: params.aspectRatio }),
+      })
+      const json = await res.json() as { success: boolean; image_url?: string; error?: string }
+      if (!json.success) throw new Error(json.error ?? '生成失败')
+      const imageUrl = json.image_url ?? ''
+
+      // 写入 content_posts.visual_brief（找该 item 关联的 post）
+      if (imageUrl) {
+        const postsRes = await fetch(`/api/clients/${clientId}/posts?execution_item_id=${itemId}`).catch(() => null)
+        if (postsRes?.ok) {
+          const postsJson = await postsRes.json() as { posts?: { id: string }[] }
+          const postId = postsJson.posts?.[0]?.id
+          if (postId) {
+            await fetch(`/api/posts/${postId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ visual_brief: imageUrl }),
+            }).catch(() => {})
+          }
+        }
+      }
+      return imageUrl
+    } finally {
+      setBgImageGenCount(c => Math.max(0, c - 1))
+    }
+  }, [clientId])
 
   // 合并两种"制作中"来源，传给 PrescriptionGroup → ExecutionItemCard
   const allBgGeneratingIds = useMemo<Set<string>>(() => {
@@ -2015,6 +2106,16 @@ export default function ExecutionPage() {
           <div className="rounded-xl border border-red-200 bg-red-50 p-3 flex items-center justify-between gap-3 text-sm text-red-700">
             <span>{opError}</span>
             <button onClick={() => setOpError(null)} className="text-red-400 hover:text-red-600 text-lg leading-none">×</button>
+          </div>
+        )}
+
+        {/* 全局图片后台生成提示条 */}
+        {bgImageGenCount > 0 && (
+          <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 flex items-center gap-3">
+            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-violet-400 border-t-violet-800 shrink-0" />
+            <span className="text-xs font-black text-violet-800">
+              🎨 Visual Studio 图片生成中（{bgImageGenCount} 张）…关闭窗口不影响生成，完成后自动保存到 Launch Hub
+            </span>
           </div>
         )}
 
@@ -2240,6 +2341,7 @@ export default function ExecutionPage() {
           onContentGenerated={() => void fetchItems(true)}
           onBackgroundGenerate={handleBackgroundGenerate}
           onImageGeneratingChange={handleImageGeneratingChange}
+          onBackgroundImageGenerate={handleBackgroundImageGenerate}
           readonly={isAutonomousItem(studioItem)}
         />
       )}

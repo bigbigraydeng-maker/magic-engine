@@ -8,11 +8,12 @@ export async function GET(
 ) {
   try {
     const { searchParams } = new URL(req.url)
-    const statusParam = searchParams.get('status')
+    const statusParam          = searchParams.get('status')
+    const executionItemIdParam = searchParams.get('execution_item_id')
 
     let query = supabaseAdmin
       .from('content_posts')
-      .select('id, title, status, route, platforms, caption, hashtags, visual_brief, scheduled_at, format, ratio, created_at, source')
+      .select('id, title, status, route, platforms, caption, hashtags, visual_brief, scheduled_at, format, ratio, created_at, source, execution_item_id')
       .eq('client_id', params.id)
       .order('scheduled_at', { ascending: true, nullsFirst: false })
       .limit(200)
@@ -21,6 +22,9 @@ export async function GET(
       const statuses = statusParam.split(',').map(s => s.trim()).filter(Boolean)
       if (statuses.length === 1) query = query.eq('status', statuses[0])
       else if (statuses.length > 1) query = query.in('status', statuses)
+    }
+    if (executionItemIdParam) {
+      query = query.eq('execution_item_id', executionItemIdParam).limit(1)
     }
 
     const { data, error } = await query

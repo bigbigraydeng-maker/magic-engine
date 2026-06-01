@@ -215,15 +215,15 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-05-23（**P12.I.10 已完成**；Phase 12.I 代码完成，下一步 PM 验证 + PR 准备）
+> 最后更新：2026-06-01（Website Public Root Sync P29.WEB.1 已完成，下一步还是 optional ads landing page）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P12.I.M3** | PM 验证 SEO Intelligence：周快照、Position Changes、Intent 优先策略；通过后准备 PR | ⭐⭐ |
+| **P29.ADS.2** | Optional ads landing page：如果投放跑顺，再补一个独立 `/ads` landing page；当前先保持 contact flow 轻量 | ⭐⭐ |
 
-**状态校准（2026-05-23）**：Phase 12.Q 已完成；P12.I.1–I.10 已完成；Phase 12.I 进入 M3 验证 + PR 准备。下一 session 第一句话：
+**状态校准（2026-06-01）**：P29.SEO.9 已完成，P29.ADS.1 已完成，P29.GEO.1-3 已完成，P29.WEB.1 已完成；下一步转向 optional ads landing page。下一 session 第一句话：
 
-- `继续 Phase 12.I M3 验证与 PR 准备`
+- `继续 Website Ads Launch Prep P29.ADS.2`
 
 **Phase 8.12 Sprint 3 全部完成（S3.1–S3.5）**，P8.12.S1.6b（小红书 scraper）为下一可选扩展项。
 

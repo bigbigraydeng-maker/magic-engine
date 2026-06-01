@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 
 export const metadata: Metadata = {
-  title: 'About Us — Magic Engine',
+  title: 'About Us',
   description:
     'Magic Engine is an AI-powered marketing execution platform for AU/NZ growth teams. Learn about our company, mission, and the platform we build.',
 }

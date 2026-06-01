@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { generateImage } from '@/lib/visual/openai-images'
 import { uploadFromBase64 } from '@/lib/visual/storage'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 // POST /api/visual/image-preview
 // Generates an image from a raw prompt and returns the storage URL.
@@ -19,6 +20,11 @@ export async function POST(req: NextRequest) {
         { success: false, error: 'prompt and client_id required' },
         { status: 400 }
       )
+    }
+
+    const access = await requireDashboardClientAccess(client_id)
+    if (!access.ok) {
+      return NextResponse.json({ success: false, error: access.error }, { status: access.status })
     }
 
     const { b64 } = await generateImage({ prompt, aspect_ratio })

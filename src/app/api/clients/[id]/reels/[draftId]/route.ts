@@ -6,6 +6,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 type RouteContext = { params: { id: string; draftId: string } }
 
@@ -16,6 +17,11 @@ export async function GET(
   { params }: RouteContext
 ) {
   const { id: clientId, draftId } = params
+
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error }, { status: access.status })
+  }
 
   const { data, error } = await supabaseAdmin
     .from('reels_drafts')
@@ -46,6 +52,11 @@ export async function PATCH(
   { params }: RouteContext
 ) {
   const { id: clientId, draftId } = params
+
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error }, { status: access.status })
+  }
 
   let body: Record<string, unknown>
   try {

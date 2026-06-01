@@ -40,6 +40,8 @@ interface Props {
   onBackgroundGenerate?: (itemId: string, params: BackgroundGenerateParams) => void
   /** Called when any Post/Story image generation starts (true) or all finish (false). */
   onImageGeneratingChange?: (itemId: string, active: boolean) => void
+  /** When set, image generation runs in background after drawer closes; returns image_url. */
+  onBackgroundImageGenerate?: (itemId: string, params: { prompt: string; aspectRatio: string }) => Promise<string>
   /** When true, hides content-generation controls — used for autonomous flywheel tasks. */
   readonly?: boolean
 }
@@ -76,7 +78,7 @@ function tabsForItem(item: ExecutionItem): { tabs: TabDef[]; defaultTab: StudioT
   }
 }
 
-export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerated, onBackgroundGenerate, onImageGeneratingChange, readonly = false }: Props) {
+export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerated, onBackgroundGenerate, onImageGeneratingChange, onBackgroundImageGenerate, readonly = false }: Props) {
   const { tabs: visibleTabs, defaultTab } = tabsForItem(item)
   const [tab, setTab]               = useState<StudioTab>(defaultTab)
   const [campaign, setCampaign]     = useState<ActiveCampaign | null>(null)
@@ -245,6 +247,9 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
                 onClose()
               } : undefined}
               onImageGeneratingChange={(active) => onImageGeneratingChange?.(item.id, active)}
+              onBackgroundImageGenerate={onBackgroundImageGenerate
+                ? (params) => onBackgroundImageGenerate(item.id, params)
+                : undefined}
             />
           ) : (
             // 短视频：Reels 脚本 + Video Studio

@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { submitI2VGeneration } from '@/lib/visual/seedance'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 type RouteContext = { params: { id: string; draftId: string } }
 
@@ -18,6 +19,11 @@ export async function POST(
   { params }: RouteContext
 ) {
   const { id: clientId, draftId } = params
+
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error }, { status: access.status })
+  }
 
   // Optional body params: duration, resolution, generate_audio
   let duration = 15
