@@ -25,7 +25,8 @@ const makeChainable = (terminalFn: () => unknown) => {
       if (prop === 'then' || prop === 'catch' || prop === 'finally') {
         return (...args: unknown[]) => {
           const p = terminalFn() as Promise<unknown>
-          return (p as unknown as Record<string, unknown>)[String(prop)]?.(...args)
+          const method = (p as unknown as Record<string, unknown>)[String(prop)] as ((...a: unknown[]) => unknown) | undefined
+          return method?.(...args)
         }
       }
       return () => new Proxy({}, handler)

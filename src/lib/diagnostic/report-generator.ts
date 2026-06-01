@@ -125,7 +125,7 @@ function buildCitationRegistry(
   }
   const registry = new Map<string, { idx: number; refs: string[] }>()
   let counter = 0
-  for (const [key, refs] of grouped) {
+  for (const [key, refs] of Array.from(grouped)) {
     registry.set(key, { idx: ++counter, refs })
   }
   return registry

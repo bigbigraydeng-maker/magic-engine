@@ -75,7 +75,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   ].filter(Boolean).join('\n')
 
   // 6. Download campaign visual reference files (text + PDF)
-  const campaignDocsBlocks: Anthropic.ContentBlockParam[] = []
+  const campaignDocsBlocks: Anthropic.ContentBlock[] = []
   const campaignTextSnippets: string[] = []
 
   for (const filePath of viInputFilePaths.slice(0, 3)) {
@@ -91,7 +91,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         campaignDocsBlocks.push({
           type: 'document',
           source: { type: 'base64', media_type: 'application/pdf', data: buffer.toString('base64') },
-        } as unknown as Anthropic.ContentBlockParam)
+        } as unknown as Anthropic.ContentBlock)
       } else {
         // txt / docx treated as plain text
         campaignTextSnippets.push(await blob.text())

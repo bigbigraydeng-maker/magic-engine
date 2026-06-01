@@ -81,7 +81,7 @@ function cover(clientName: string, report: DiscoveryReport, date: string): Parag
   ]
 }
 
-function diagnosisSection(report: DiscoveryReport): Paragraph[] {
+function diagnosisSection(report: DiscoveryReport): (Paragraph | Table)[] {
   const diagnosis = report.diagnosis
   if (!diagnosis) return []
 
@@ -108,7 +108,7 @@ function diagnosisSection(report: DiscoveryReport): Paragraph[] {
   ]
 }
 
-function keywordsSection(report: DiscoveryReport): Paragraph[] {
+function keywordsSection(report: DiscoveryReport): (Paragraph | Table)[] {
   const keywords = report.seed_keywords
   if (!keywords.length) return []
 
@@ -138,7 +138,7 @@ function keywordsSection(report: DiscoveryReport): Paragraph[] {
   ]
 }
 
-function competitorsSection(report: DiscoveryReport): Paragraph[] {
+function competitorsSection(report: DiscoveryReport): (Paragraph | Table)[] {
   const competitors = report.competitors
   if (!competitors.length) return []
 
@@ -158,12 +158,12 @@ function competitorsSection(report: DiscoveryReport): Paragraph[] {
   ]
 }
 
-function aiVisibilitySection(report: DiscoveryReport): Paragraph[] {
+function aiVisibilitySection(report: DiscoveryReport): (Paragraph | Table)[] {
   const questions = report.ai_tracker_questions ?? []
   const results = report.ai_visibility_results ?? []
   if (!questions.length && !results.length) return []
 
-  const items: Paragraph[] = [h2('AI Visibility')]
+  const items: (Paragraph | Table)[] = [h2('AI Visibility')]
 
   if (results.length) {
     const rows = results.map(result => [
@@ -191,7 +191,7 @@ function aiVisibilitySection(report: DiscoveryReport): Paragraph[] {
   return items
 }
 
-function socialSection(report: DiscoveryReport): Paragraph[] {
+function socialSection(report: DiscoveryReport): (Paragraph | Table)[] {
   const socials = report.social_profiles
   if (!socials.length) return []
 
@@ -226,7 +226,7 @@ function gbpSection(report: DiscoveryReport): Paragraph[] {
   ]
 }
 
-function reviewPlatformsSection(report: DiscoveryReport): Paragraph[] {
+function reviewPlatformsSection(report: DiscoveryReport): (Paragraph | Table)[] {
   const platforms = report.review_platforms
   if (!platforms.length) return []
 

@@ -26,7 +26,8 @@ const makeChainable = (): object => {
         // Make it thenable — delegate to mockQuery()
         return (...args: unknown[]) => {
           const p = mockQuery() as Promise<unknown>
-          return (p as unknown as Record<string, unknown>)[String(prop)]?.(...args)
+          const method = (p as unknown as Record<string, unknown>)[String(prop)] as ((...a: unknown[]) => unknown) | undefined
+          return method?.(...args)
         }
       }
       // Every other accessor (eq, select, from, order…) returns the same proxy

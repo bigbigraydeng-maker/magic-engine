@@ -77,11 +77,12 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     )
   }
 
-  if (!SUPPORTED_ACTION_TYPES.has(action_type)) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (!SUPPORTED_ACTION_TYPES.has(action_type as any)) {
     return NextResponse.json(
       {
         error: `Unsupported action_type: "${action_type}". ` +
-               `Supported: ${[...SUPPORTED_ACTION_TYPES].join(', ')}`,
+               `Supported: ${Array.from(SUPPORTED_ACTION_TYPES).join(', ')}`,
       },
       { status: 422 },
     )

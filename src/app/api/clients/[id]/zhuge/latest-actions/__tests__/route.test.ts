@@ -157,7 +157,7 @@ describe('GET /api/clients/[id]/zhuge/latest-actions', () => {
               single: vi.fn().mockResolvedValue({ data: { id: CLIENT_ID }, error: null }),
             }),
           }),
-        } as ReturnType<typeof supabaseAdmin.from>
+        } as unknown as ReturnType<typeof supabaseAdmin.from>
       }
       // flywheel_actions: no row
       return {
@@ -167,7 +167,7 @@ describe('GET /api/clients/[id]/zhuge/latest-actions', () => {
         order: vi.fn().mockReturnThis(),
         limit: vi.fn().mockReturnThis(),
         maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
-      } as ReturnType<typeof supabaseAdmin.from>
+      } as unknown as ReturnType<typeof supabaseAdmin.from>
     })
 
     const [req, ctx] = makeRequest()
@@ -211,9 +211,9 @@ describe('GET /api/clients/[id]/zhuge/latest-actions', () => {
     }
 
     vi.mocked(supabaseAdmin.from)
-      .mockReturnValueOnce(clientsMock as ReturnType<typeof supabaseAdmin.from>)
-      .mockReturnValueOnce(latestMock as ReturnType<typeof supabaseAdmin.from>)
-      .mockReturnValueOnce(sessionMock as ReturnType<typeof supabaseAdmin.from>)
+      .mockReturnValueOnce(clientsMock as unknown as ReturnType<typeof supabaseAdmin.from>)
+      .mockReturnValueOnce(latestMock as unknown as ReturnType<typeof supabaseAdmin.from>)
+      .mockReturnValueOnce(sessionMock as unknown as ReturnType<typeof supabaseAdmin.from>)
 
     const [req, ctx] = makeRequest()
     const res = await GET(req, ctx)
@@ -236,7 +236,7 @@ describe('GET /api/clients/[id]/zhuge/latest-actions', () => {
               single: vi.fn().mockResolvedValue({ data: { id: CLIENT_ID }, error: null }),
             }),
           }),
-        } as ReturnType<typeof supabaseAdmin.from>
+        } as unknown as ReturnType<typeof supabaseAdmin.from>
       }
       return {
         select: vi.fn().mockReturnThis(),
@@ -248,7 +248,7 @@ describe('GET /api/clients/[id]/zhuge/latest-actions', () => {
           data: { payload: {}, executed_at: '2026-05-20T00:00:00Z' },
           error: null,
         }),
-      } as ReturnType<typeof supabaseAdmin.from>
+      } as unknown as ReturnType<typeof supabaseAdmin.from>
     })
 
     const [req, ctx] = makeRequest()

@@ -120,7 +120,6 @@ function makeFinding(
     fix_type: 'me_auto',
     priority_score: 80,
     created_at: '2025-01-01T00:00:00Z',
-    execution_target: null,
   }
 }
 

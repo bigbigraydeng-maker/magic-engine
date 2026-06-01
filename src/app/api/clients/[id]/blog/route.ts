@@ -13,7 +13,7 @@ import { clampLimit } from '@/lib/validation-utils'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { SeoContentAdapter } from '@/lib/flywheel/adapters/SeoContentAdapter'
 import { SEO_ACTION_TYPE, SEO_METRIC_KEY } from '@/lib/flywheel/vocabulary'
-import type { BlogPost, GenerateBlogRequest } from '@/types/magic-engine'
+import type { BlogPost, BlogMode, GenerateBlogRequest } from '@/types/magic-engine'
 
 /**
  * GET /api/clients/[id]/blog
@@ -182,7 +182,7 @@ export async function POST(
 async function runGenerationBackground(
   clientId: string,
   body: GenerateBlogRequest,
-  mode: string,
+  mode: BlogMode,
   postId: string,
 ) {
   try {
@@ -231,11 +231,12 @@ async function runGenerationBackground(
 
   } catch (err) {
     console.error('[blog background] Generation failed for post', postId, ':', err)
-    await supabaseAdmin
-      .from('blog_posts')
-      .update({ status: 'failed' })
-      .eq('id', postId)
-      .catch(e => console.error('[blog background] status→failed update error:', e))
+    await Promise.resolve(
+      supabaseAdmin
+        .from('blog_posts')
+        .update({ status: 'failed' })
+        .eq('id', postId),
+    ).catch((e: unknown) => console.error('[blog background] status→failed update error:', e))
   }
 }
 

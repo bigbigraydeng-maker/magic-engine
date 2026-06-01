@@ -2,6 +2,8 @@
 // Magic Engine — Core Types
 // ============================================
 
+export type { ContentAuditResult } from '@/lib/blog/content-auditor'
+
 export type ClientPlan = 'starter' | 'growth' | 'enterprise'
 export type KeywordIntent = 'informational' | 'commercial' | 'transactional' | 'navigational'
 export type KeywordSource = 'semrush_batch' | 'semrush_related' | 'semrush_gap' | 'campaign' | 'master_brief' | 'manual'
@@ -466,7 +468,7 @@ export interface GenerateGeoDirectiveRequest {
 // ============================================
 
 export type BlogMode   = 'unified' | 'geo_only' | 'seo_only'
-export type BlogStatus = 'draft' | 'approved' | 'published' | 'rejected'
+export type BlogStatus = 'draft' | 'approved' | 'published' | 'rejected' | 'generating' | 'failed'
 
 /** Full blog_posts table row. */
 export interface BlogPost {
