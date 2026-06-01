@@ -27,6 +27,7 @@ import {
 } from './execution-view-model'
 import { FdeManualEntryModal } from './_components/FdeManualEntryModal'
 import { DataPullbackSection } from './_components/DataPullbackSection'
+import { AnomalySignalPanel } from './_components/AnomalySignalPanel'
 import { BriefGateBanner } from '../_components/BriefGateBanner'
 // MemoryAnnotationPanel removed — Phase 20.D item 6: system handles flywheel recording automatically
 
@@ -2081,6 +2082,9 @@ export default function ExecutionPage() {
         })()}
 
         <ProgressBar completed={completedCount} total={filteredItems.length} />
+
+        {/* Phase 22.D — AnomalyDetector 信号面板 */}
+        <AnomalySignalPanel clientId={clientId} />
 
         <DataPullbackSection clientId={clientId} />
 

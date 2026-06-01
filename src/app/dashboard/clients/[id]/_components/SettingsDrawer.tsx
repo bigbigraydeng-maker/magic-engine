@@ -6,6 +6,7 @@ import { CmsPanel } from './CmsPanel'
 import Link from 'next/link'
 import { UsersPanel } from './UsersPanel'
 import { LocaleConfirmBanner } from './LocaleConfirmBanner'
+import { MtcBudgetPanel } from './MtcBudgetPanel'
 
 export type SettingsTab = 'brief' | 'client-info' | 'cms' | 'users' | 'platform'
 
@@ -144,6 +145,9 @@ export function SettingsDrawer({ open, onClose, clientId, client, activeTab, onT
                 <p className="mb-3 text-[11px] font-black uppercase tracking-[0.14em] text-cyan-800">业务地域设置</p>
                 <LocaleConfirmBanner clientId={clientId} />
               </div>
+
+              {/* AI Factory monthly MTC budget */}
+              <MtcBudgetPanel clientId={clientId} />
             </div>
           )}
         </div>

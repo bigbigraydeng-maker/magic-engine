@@ -3,7 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { guardAdmin } from '@/lib/auth/require-admin'
 
-const SELECT_FIELDS = 'id, name, domain, created_at, semrush_db, plan_tier'
+const SELECT_FIELDS = 'id, name, domain, created_at, semrush_db, plan_tier, monthly_mtc_cap'
 
 export async function GET(
   _req: NextRequest,
@@ -59,7 +59,7 @@ export async function PATCH(
 
   try {
     const body = await req.json()
-    const allowed = ['name', 'domain', 'semrush_db', 'plan_tier']
+    const allowed = ['name', 'domain', 'semrush_db', 'plan_tier', 'monthly_mtc_cap']
     const update: Record<string, unknown> = {}
     for (const key of allowed) {
       if (key in body) update[key] = body[key]

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { GscTrendSection } from './GscTrendSection'
+import { Ga4TrendSection } from './Ga4TrendSection'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -494,7 +496,9 @@ export function ClientDataTab({ clientId }: { clientId: string }) {
   return (
     <div className="space-y-6">
       {gsc  && <GscSection snapshot={gsc} />}
+      <GscTrendSection clientId={clientId} />
       {ga4  && <Ga4Section snapshot={ga4} />}
+      <Ga4TrendSection clientId={clientId} />
       {meta && <MetaAdsSection snapshot={meta} />}
       {gsc && gsc.top_queries.length > 0 && (
         <FlagOpportunitiesSection queries={gsc.top_queries} />
