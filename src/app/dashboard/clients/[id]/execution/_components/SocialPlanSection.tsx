@@ -207,29 +207,38 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
     })()
   }, [isTaskMode, clientId, item?.id])
 
-  // Load history on mount / when campaign changes
+  // Load history on mount / when task or campaign changes.
+  //
+  // Priority:
+  //   1. item.id  → exact match via execution_item_id (zero ambiguity)
+  //   2. campaignId → campaign-scoped (legacy: plans saved before this fix)
+  //   3. neither   → mark loaded, show empty state
+  //
+  // We never fall back to "all plans for client" because that would show
+  // content from a different campaign/task, which is worse than showing nothing.
   useEffect(() => {
-    if (!campaignId) { setHistoryLoaded(true); return }
+    const itemId = item?.id
+    if (!itemId && !campaignId) { setHistoryLoaded(true); return }
     setHistoryLoaded(false)
-    const url = `/api/clients/${clientId}/social-plan?campaign_id=${campaignId}`
+
+    const url = itemId
+      ? `/api/clients/${clientId}/social-plan?execution_item_id=${itemId}`
+      : `/api/clients/${clientId}/social-plan?campaign_id=${campaignId}`
+
     fetch(url)
       .then(r => r.json() as Promise<{ success: boolean; plans?: PlanRecord[] }>)
       .then(data => {
         const records = data.plans ?? []
         if (records.length) {
           setPlanHistory(records)
-          // Always pre-load the most recent plan so FDE can review/edit generated content
           setPlan(records[0].plan_data)
           setPlanId(records[0].id)
-          // Auto-switch to the tab matching the task kind
-          if (isTaskMode && taskKind) {
-            setPlanTab(KIND_TAB[taskKind])
-          }
+          if (isTaskMode && taskKind) setPlanTab(KIND_TAB[taskKind])
         }
       })
       .catch(() => { /* non-fatal */ })
       .finally(() => setHistoryLoaded(true))
-  }, [clientId, campaignId])
+  }, [clientId, item?.id, campaignId])
 
   async function handleSaveToBoard(type: 'posts' | 'stories') {
     if (!planId) return
@@ -258,11 +267,12 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
       const angleText = overrides?.angle_focus?.trim() || angleFocusInput.trim()
       const payload = {
         campaign_brief_id: campaignId,
-        platform:          overrides?.platform   ?? config.platform,
+        platform:          overrides?.platform      ?? config.platform,
         reels_count:       overrides?.reels_count   ?? config.reels_count,
         posts_count:       overrides?.posts_count   ?? config.posts_count,
         stories_count:     overrides?.stories_count ?? config.stories_count,
         ...(angleText ? { angle_focus: angleText } : {}),
+        ...(item?.id ? { execution_item_id: item.id } : {}),
       }
       const res = await fetch(`/api/clients/${clientId}/social-plan`, {
         method: 'POST',

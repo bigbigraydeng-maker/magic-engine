@@ -97,6 +97,11 @@ function formatViralInsights(refs: ViralRef[]): string {
 }
 
 // ─── GET: plan history ─────────────────────────────────────────────────────────
+//
+// Query priority (most → least precise):
+//   1. ?execution_item_id=<uuid>  — exact match, single task (preferred)
+//   2. ?campaign_id=<uuid>        — campaign-scoped history (legacy)
+//   3. (no params)                — most recent 5 for the client
 
 export async function GET(
   req: NextRequest,
@@ -104,17 +109,20 @@ export async function GET(
 ) {
   const clientId = params.id
   const { searchParams } = new URL(req.url)
-  const campaignId = searchParams.get('campaign_id')
+  const executionItemId = searchParams.get('execution_item_id')
+  const campaignId      = searchParams.get('campaign_id')
 
   try {
     let query = supabaseAdmin
       .from('social_plans')
-      .select('id, campaign_id, wave_number, created_at, plan_data')
+      .select('id, campaign_id, execution_item_id, wave_number, created_at, plan_data')
       .eq('client_id', clientId)
       .order('created_at', { ascending: false })
       .limit(5)
 
-    if (campaignId) {
+    if (executionItemId) {
+      query = query.eq('execution_item_id', executionItemId)
+    } else if (campaignId) {
       query = query.eq('campaign_id', campaignId)
     }
 
@@ -143,12 +151,13 @@ export async function POST(
 
   try {
     const body = await req.json().catch(() => ({})) as {
-      campaign_brief_id?: string
-      platform?:          string
-      reels_count?:       number
-      posts_count?:       number
-      stories_count?:     number
-      angle_focus?:       string
+      campaign_brief_id?:  string
+      platform?:           string
+      reels_count?:        number
+      posts_count?:        number
+      stories_count?:      number
+      angle_focus?:        string
+      execution_item_id?:  string
     }
 
     // ── campaign_brief_id is required ─────────────────────────────────────────
@@ -303,11 +312,12 @@ export async function POST(
     const { data: savedPlan, error: insertErr } = await supabaseAdmin
       .from('social_plans')
       .insert({
-        client_id:   clientId,
-        campaign_id: body.campaign_brief_id,
-        platform:    'facebook',
-        wave_number: 1,
-        plan_data:   plan,
+        client_id:          clientId,
+        campaign_id:        body.campaign_brief_id,
+        platform:           'facebook',
+        wave_number:        1,
+        plan_data:          plan,
+        ...(body.execution_item_id ? { execution_item_id: body.execution_item_id } : {}),
       })
       .select('id')
       .single()

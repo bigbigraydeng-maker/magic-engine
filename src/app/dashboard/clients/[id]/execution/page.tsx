@@ -1853,11 +1853,12 @@ export default function ExecutionPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            campaign_brief_id: params.campaignId,
-            platform: params.platform,
-            posts_count: params.posts_count,
-            stories_count: params.stories_count,
-            reels_count: params.reels_count,
+            campaign_brief_id:  params.campaignId,
+            platform:           params.platform,
+            posts_count:        params.posts_count,
+            stories_count:      params.stories_count,
+            reels_count:        params.reels_count,
+            execution_item_id:  itemId,
             ...(params.angle_focus ? { angle_focus: params.angle_focus } : {}),
           }),
         })
