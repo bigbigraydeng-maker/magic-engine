@@ -126,6 +126,23 @@ export const SEO_METRIC_KEY = {
 
   /** Average ranking position across all tracked queries (lower = better) */
   GSC_AVG_POSITION: 'seo.gsc.avg_position',
+
+  // ── GA4-backed traffic metrics (P22.A.2) ─────────────────────────────────
+
+  /** Total GA4 sessions over the 28-day snapshot window */
+  GA4_SESSIONS: 'seo.ga4.sessions',
+
+  /** Total GA4 users over the 28-day snapshot window */
+  GA4_USERS: 'seo.ga4.users',
+
+  /** Total GA4 pageviews over the 28-day snapshot window */
+  GA4_PAGEVIEWS: 'seo.ga4.pageviews',
+
+  /** Average session duration in seconds (GA4) */
+  GA4_AVG_SESSION_DURATION: 'seo.ga4.avg_session_duration',
+
+  /** Bounce rate 0–1 (GA4) */
+  GA4_BOUNCE_RATE: 'seo.ga4.bounce_rate',
 } as const
 
 export type SeoMetricKey = (typeof SEO_METRIC_KEY)[keyof typeof SEO_METRIC_KEY]
