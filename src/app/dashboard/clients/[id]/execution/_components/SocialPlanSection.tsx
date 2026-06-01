@@ -1353,6 +1353,9 @@ function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd, onB
   const [editedCopy, setEditedCopy]           = useState(post.copy)
   const [editedImagePrompt, setEditedImagePrompt] = useState(post.image_prompt)
   const [selecting, setSelecting]   = useState(false)
+  // 素材库选图 modal
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickingFromLibrary, setPickingFromLibrary] = useState(false)
 
   // Load gallery on mount when bound to a persisted post but parent didn't pre-fetch.
   useEffect(() => {
@@ -1362,6 +1365,28 @@ function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd, onB
       .then(data => { if (data.success && data.assets) setAssets(data.assets) })
       .catch(() => { /* non-fatal */ })
   }, [clientId, postId, initialAssets])
+
+  // 从素材库选定一张 → 入画廊
+  const handlePickFromLibrary = async (clientAssetId: string) => {
+    if (!postId || pickingFromLibrary) return
+    setPickingFromLibrary(true)
+    setImgError(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/visual-assets/from-library`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ post_id: postId, client_asset_id: clientAssetId }),
+      })
+      const json = await res.json() as { success: boolean; asset?: GalleryAsset; error?: string }
+      if (!json.success || !json.asset) throw new Error(json.error ?? '入库失败')
+      setAssets(prev => [...prev, json.asset!])
+      setPickerOpen(false)
+    } catch (e) {
+      setImgError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setPickingFromLibrary(false)
+    }
+  }
 
   const selectedAsset = assets.find(a => a.is_selected) ?? assets[0] ?? null
   const selectedUrl   = selectedAsset?.storage_url ?? null
@@ -1479,22 +1504,44 @@ function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd, onB
 
             {/* 生成按钮 — 常驻，每次点击追加一张 */}
             <div className="space-y-1.5">
-              <button
-                onClick={() => void handleGenerate()}
-                disabled={generatingImg}
-                className="w-full py-2 text-xs font-bold bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 disabled:opacity-50 text-white rounded-lg transition-all"
-              >
-                {generatingImg ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <Spinner color="indigo" /> Visual Studio 生成中…（约 15s）
-                  </span>
-                ) : assets.length === 0
-                  ? '🎨 生成图片（Visual Studio）'
-                  : `🎨 再生成一张（已有 ${assets.length} 张）`
-                }
-              </button>
+              <div className="flex gap-1.5">
+                <button
+                  onClick={() => void handleGenerate()}
+                  disabled={generatingImg}
+                  className="flex-1 py-2 text-xs font-bold bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 disabled:opacity-50 text-white rounded-lg transition-all"
+                >
+                  {generatingImg ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <Spinner color="indigo" /> Visual Studio 生成中…（约 15s）
+                    </span>
+                  ) : assets.length === 0
+                    ? '🎨 生成图片（Visual Studio）'
+                    : `🎨 再生成一张（已有 ${assets.length} 张）`
+                  }
+                </button>
+                {postId && (
+                  <button
+                    onClick={() => setPickerOpen(true)}
+                    title="从客户素材库选一张真实照片"
+                    className="shrink-0 px-3 py-2 text-xs font-bold border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg transition-colors"
+                  >
+                    📚 从素材库选
+                  </button>
+                )}
+              </div>
               {imgError && <p className="text-[11px] text-red-500">⚠ {imgError}</p>}
             </div>
+
+            {/* 素材库选图 Modal */}
+            {pickerOpen && postId && (
+              <AssetLibraryPicker
+                clientId={clientId}
+                imagePrompt={editedImagePrompt}
+                onClose={() => setPickerOpen(false)}
+                onPick={handlePickFromLibrary}
+                picking={pickingFromLibrary}
+              />
+            )}
 
             <div className="flex flex-wrap gap-1">
               {post.hashtags.map((h, hi) => (
@@ -1536,6 +1583,8 @@ function StoryCard({ index, story, clientId, launchHubPlatform, onGenStart, onGe
   const [editedCopy, setEditedCopy]           = useState(story.copy)
   const [editedVisualPrompt, setEditedVisualPrompt] = useState(story.visual_prompt)
   const [selecting, setSelecting]             = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickingFromLibrary, setPickingFromLibrary] = useState(false)
 
   useEffect(() => {
     if (!postId || initialAssets) return
@@ -1544,6 +1593,27 @@ function StoryCard({ index, story, clientId, launchHubPlatform, onGenStart, onGe
       .then(data => { if (data.success && data.assets) setAssets(data.assets) })
       .catch(() => { /* non-fatal */ })
   }, [clientId, postId, initialAssets])
+
+  const handlePickFromLibrary = async (clientAssetId: string) => {
+    if (!postId || pickingFromLibrary) return
+    setPickingFromLibrary(true)
+    setImgError(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/visual-assets/from-library`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ post_id: postId, client_asset_id: clientAssetId }),
+      })
+      const json = await res.json() as { success: boolean; asset?: GalleryAsset; error?: string }
+      if (!json.success || !json.asset) throw new Error(json.error ?? '入库失败')
+      setAssets(prev => [...prev, json.asset!])
+      setPickerOpen(false)
+    } catch (e) {
+      setImgError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setPickingFromLibrary(false)
+    }
+  }
 
   const selectedAsset = assets.find(a => a.is_selected) ?? assets[0] ?? null
   const selectedUrl   = selectedAsset?.storage_url ?? null
@@ -1642,18 +1712,40 @@ function StoryCard({ index, story, clientId, launchHubPlatform, onGenStart, onGe
 
           {/* 生成按钮 — 常驻 */}
           <div className="space-y-1">
-            <button
-              onClick={() => void handleGenerate()}
-              disabled={generatingImg}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:opacity-50 transition-colors"
-            >
-              {generatingImg
-                ? <><Spinner color="purple" /> 生成中…</>
-                : assets.length === 0 ? '🎨 生成 Story 图片' : `🎨 再生成一张（已有 ${assets.length} 张）`
-              }
-            </button>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                onClick={() => void handleGenerate()}
+                disabled={generatingImg}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:opacity-50 transition-colors"
+              >
+                {generatingImg
+                  ? <><Spinner color="purple" /> 生成中…</>
+                  : assets.length === 0 ? '🎨 生成 Story 图片' : `🎨 再生成一张（已有 ${assets.length} 张）`
+                }
+              </button>
+              {postId && (
+                <button
+                  onClick={() => setPickerOpen(true)}
+                  title="从客户素材库选一张真实照片"
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
+                >
+                  📚 从素材库选
+                </button>
+              )}
+            </div>
             {imgError && <p className="text-[11px] text-red-500">⚠ {imgError}</p>}
           </div>
+
+          {/* 素材库选图 Modal */}
+          {pickerOpen && postId && (
+            <AssetLibraryPicker
+              clientId={clientId}
+              imagePrompt={editedVisualPrompt}
+              onClose={() => setPickerOpen(false)}
+              onPick={handlePickFromLibrary}
+              picking={pickingFromLibrary}
+            />
+          )}
 
           {launchHubPlatform && (
             <div className="pt-1">
@@ -1751,6 +1843,143 @@ function LaunchHubScheduler({
 }
 
 // ─── Utility micro-components ──────────────────────────────────────────────────
+
+interface AssetRecommendation {
+  id: string
+  storage_url: string
+  original_filename: string | null
+  reason: string
+  quality_score: number
+}
+
+function AssetLibraryPicker({ clientId, imagePrompt, onClose, onPick, picking }: {
+  clientId: string
+  imagePrompt: string
+  onClose: () => void
+  onPick: (clientAssetId: string) => void
+  picking: boolean
+}) {
+  const [loading, setLoading]             = useState(true)
+  const [recommendations, setRecs]        = useState<AssetRecommendation[]>([])
+  const [error, setError]                 = useState<string | null>(null)
+  const [zoomUrl, setZoomUrl]             = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    fetch(`/api/clients/${clientId}/asset-library/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_prompt: imagePrompt, limit: 12 }),
+    })
+      .then(r => r.json() as Promise<{ success: boolean; recommendations?: AssetRecommendation[]; error?: string }>)
+      .then(data => {
+        if (cancelled) return
+        if (!data.success) {
+          setError(data.error ?? '加载失败')
+          setRecs([])
+        } else {
+          setRecs(data.recommendations ?? [])
+        }
+      })
+      .catch(e => {
+        if (cancelled) return
+        setError(e instanceof Error ? e.message : String(e))
+      })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [clientId, imagePrompt])
+
+  return (
+    <>
+      <ImageLightbox url={zoomUrl} onClose={() => setZoomUrl(null)} maxWidth="max-w-2xl" />
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+        onClick={onClose}
+      >
+        <div
+          className="relative w-full max-w-3xl max-h-[85vh] flex flex-col bg-white rounded-xl shadow-2xl overflow-hidden"
+          onClick={e => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="flex items-start justify-between gap-3 px-5 py-3 border-b border-gray-200 bg-emerald-50">
+            <div className="min-w-0">
+              <h3 className="text-sm font-black text-emerald-900">📚 从客户素材库选图</h3>
+              <p className="text-[11px] text-emerald-700 mt-0.5 truncate">
+                AI 根据 image prompt 推荐：「{imagePrompt.slice(0, 80)}…」
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="shrink-0 text-gray-400 hover:text-gray-700 text-xl font-bold"
+              aria-label="关闭"
+            >✕</button>
+          </div>
+
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto px-5 py-4">
+            {loading && (
+              <div className="flex items-center justify-center gap-2 py-12 text-xs text-gray-500">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-400 border-t-emerald-800" />
+                Content Engine 正在匹配素材…
+              </div>
+            )}
+            {error && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-xs text-red-700">
+                ⚠ {error}
+              </div>
+            )}
+            {!loading && !error && recommendations.length === 0 && (
+              <div className="text-center py-12 text-xs text-gray-500">
+                <p className="font-semibold mb-1">素材库为空</p>
+                <p className="text-[11px]">该客户尚未上传或分析素材。</p>
+              </div>
+            )}
+            {!loading && recommendations.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {recommendations.map(rec => (
+                  <div
+                    key={rec.id}
+                    className="border border-gray-200 rounded-lg overflow-hidden bg-white hover:border-emerald-400 transition-colors"
+                  >
+                    <div className="relative aspect-square bg-gray-100">
+                      <img src={rec.storage_url} alt={rec.original_filename ?? ''} className="w-full h-full object-cover" />
+                      <button
+                        onClick={() => setZoomUrl(rec.storage_url)}
+                        className="absolute top-1 right-1 bg-black/60 text-white text-[9px] font-bold rounded px-1.5 py-0.5 hover:bg-black/80"
+                      >🔍</button>
+                    </div>
+                    <div className="px-2 py-2 space-y-1">
+                      <p className="text-[10px] text-gray-700 line-clamp-2 leading-tight">{rec.reason}</p>
+                      {rec.original_filename && (
+                        <p className="text-[9px] text-gray-400 truncate">{rec.original_filename}</p>
+                      )}
+                      <button
+                        onClick={() => onPick(rec.id)}
+                        disabled={picking}
+                        className="w-full mt-1 py-1.5 text-[11px] font-bold rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                      >
+                        {picking ? '加入中…' : '✓ 选这张'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="px-5 py-2.5 border-t border-gray-200 bg-gray-50">
+            <p className="text-[10px] text-gray-500">
+              💡 来自客户素材库的真实照片 — 比 AI 生图更可信，特别适合旅游、产品等需要真实场景的内容
+            </p>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
 
 function ImageLightbox({ url, onClose, maxWidth }: {
   url: string | null
