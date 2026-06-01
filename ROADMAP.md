@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-01 19:16 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-01 20:18 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -3108,6 +3108,13 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-06-01（Phase 22.A.2 ✅ GA4 → flywheel_metrics 闭环 + cron 集成测试）
+
+- **P22.A.2** — GA4 每日采集 → `flywheel_metrics` 通路在 main 已运行（`google-data-pullback-daily` cron 每天 3am UTC，`fetchGa4Snapshot()` → `ga4_traffic_snapshots` upsert → `Ga4Adapter.pullMetrics()` 写入 5 个 GA4 metric_key：sessions/users/pageviews/avg_session_duration/bounce_rate）
+- 本 PR 补 `src/app/api/cron/google-data-pullback-daily/__tests__/route.test.ts`（8 单测，覆盖 auth gate + 空 work map + GA4 happy path + snapshot null + flywheel_metrics 写失败 non-fatal + bad config skip），让 P22.A.2 在 cron route 级别有显式回归保护
+- AnomalyDetector 已有 `seo-ga4-sessions-drop` / `seo-ga4-bounce-rate-spike` 两条 GA4 规则消费这些指标，端到端闭环达成
+- 旧 PR #196（feat/phase-22-a2-ga4-flywheel）已被 PR #206 (Phase 22.B) + 本 PR 取代，建议关闭
 
 ### 2026-06-01（Website SEO Optimization P29.SEO.6 完成）
 
