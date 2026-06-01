@@ -45,9 +45,15 @@ const KIND_TAB: Record<SocialTaskKind, PlanTab> = {
 
 const SUPPORTED_PLATFORMS = new Set(['facebook', 'instagram', 'tiktok'])
 
-function resolveTaskKind(item: ExecutionItem | undefined): SocialTaskKind | null {
+function resolveTaskKind(item: ExecutionItem | undefined, mode?: Props['mode']): SocialTaskKind | null {
   const kind = item?.steps_json?.kind
   if (kind === 'social_post' || kind === 'social_reel' || kind === 'social_story') return kind
+  // Fallback: if an item exists but has no kind, infer from mode so task-mode
+  // features (auto-create content_post, asset library picker) still activate.
+  if (item) {
+    if (mode === 'video') return 'social_reel'
+    if (mode === 'social' || mode === 'all') return 'social_post'
+  }
   return null
 }
 
@@ -137,7 +143,7 @@ interface PlanRecord {
 type PlanTab = 'reels' | 'posts' | 'stories'
 
 export function SocialPlanSection({ clientId, campaignId, campaignName, mode = 'all', item, onBackgroundGenerate, onImageGeneratingChange, onBackgroundImageGenerate }: Props) {
-  const taskKind     = resolveTaskKind(item)
+  const taskKind     = resolveTaskKind(item, mode)
   const taskPlatform = resolveTaskPlatform(item)
   const showBrief    = briefCardVisible(mode, taskKind)
   const isTaskMode   = showBrief && taskKind !== null
