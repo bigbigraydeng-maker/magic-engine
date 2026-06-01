@@ -50,7 +50,8 @@ export async function GET(
   }
 
   const rawDays = req.nextUrl.searchParams.get('days')
-  const days = Math.min(parseInt(rawDays ?? '30', 10) || 30, MAX_DAYS)
+  const parsed = parseInt(rawDays ?? '30', 10)
+  const days = Math.min(Math.max(isNaN(parsed) || parsed <= 0 ? 30 : parsed, 1), MAX_DAYS)
 
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
 

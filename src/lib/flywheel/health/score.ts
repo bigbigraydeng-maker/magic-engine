@@ -7,7 +7,7 @@
  *   - 4 flywheels × 25 points each = 100 max
  *   - Per flywheel: compare latest value vs 30-day rolling average
  *   - Trend scoring: no data → neutral (12.5); improving → higher; degrading → lower
- *   - Active anomaly penalty: subtract 2 per fresh/high anomaly signal (max -20 total)
+ *   - Active anomaly penalty: subtract 2 per fresh anomaly signal (max -20 total)
  *   - Result clamped [0, 100]
  *
  * Scoring bands:
@@ -69,11 +69,11 @@ export const HEALTH_METRICS: Record<FlywheelName, { key: string; lowerIsBetter: 
   ],
   ads: [
     { key: 'ads.account.roas',       lowerIsBetter: false },
-    { key: 'ads.account.cpa',        lowerIsBetter: true  },
+    { key: 'ads.account.cpa',        lowerIsBetter: true  }, // pending ADS_METRIC_KEY.CPA (P18.B vocab)
     { key: 'ads.account.ctr',        lowerIsBetter: false },
   ],
   social: [
-    { key: 'social.account.engagement_rate', lowerIsBetter: false },
+    { key: 'social.account.engagement_rate', lowerIsBetter: false }, // pending SOCIAL_METRIC_KEY.ENGAGEMENT_RATE (P18.B vocab)
     { key: 'social.posts.published_count',   lowerIsBetter: false },
   ],
 }

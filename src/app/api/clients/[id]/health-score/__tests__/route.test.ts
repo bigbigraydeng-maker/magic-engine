@@ -34,8 +34,6 @@ const makeChainable = (terminalFn: () => unknown) => {
   return new Proxy({}, handler)
 }
 
-let callIndex = 0
-
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
     from: (table: string) => {
@@ -81,7 +79,6 @@ const HEALTHY_METRICS = [
 describe('GET /api/clients/[id]/health-score', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    callIndex = 0
     mocks.requireDashboardClientAccess.mockResolvedValue(adminAccess())
     mockMetricsQuery.mockResolvedValue({ data: HEALTHY_METRICS, error: null })
     mockAnomalyCount.mockResolvedValue({ count: 0, error: null })
