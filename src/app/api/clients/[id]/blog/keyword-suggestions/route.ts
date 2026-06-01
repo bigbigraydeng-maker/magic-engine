@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import type { RankedKeyword, SeoGapAnalysis } from '@/lib/seo-gap/analyzer'
+import { getActiveBrief } from '@/lib/content/brief-injector'
+import {
+  buildBusinessKeywordTerms,
+  extractBriefSeedTerms,
+  isBusinessRelevantKeyword,
+} from '@/lib/seo-intelligence/keyword-relevance'
 
 export interface KeywordSuggestion {
   keyword: string
@@ -29,6 +35,20 @@ export async function GET(
   }
 
   try {
+    const [{ data: client }, activeBrief] = await Promise.all([
+      supabaseAdmin
+        .from('clients')
+        .select('domain, industry')
+        .eq('id', clientId)
+        .maybeSingle(),
+      getActiveBrief(clientId).catch(() => null),
+    ])
+    const businessTerms = buildBusinessKeywordTerms({
+      domain: (client?.domain as string | null) ?? null,
+      industry: (client?.industry as string | null) ?? null,
+      seedTerms: extractBriefSeedTerms(activeBrief as Record<string, unknown> | null),
+    })
+
     const { data, error } = await supabaseAdmin
       .from('seo_analyses')
       .select('analysis_json')
@@ -63,7 +83,9 @@ export async function GET(
         tier: 'A' as const,
       }))
 
-    const suggestions: KeywordSuggestion[] = [...tierB, ...tierA].slice(0, 15)
+    const suggestions: KeywordSuggestion[] = [...tierB, ...tierA]
+      .filter((suggestion) => isBusinessRelevantKeyword(suggestion.keyword, businessTerms))
+      .slice(0, 15)
 
     return NextResponse.json({ success: true, suggestions })
   } catch (err: unknown) {

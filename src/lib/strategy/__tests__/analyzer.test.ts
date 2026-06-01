@@ -430,6 +430,78 @@ describe('analyzeOpportunities', () => {
     expect(upgrade!.scoring_context.ai_weak).toBe(true)
   })
 
+  it('does not attach a broad first-trip query to every generic China tour page', async () => {
+    const pages: ClientSitePageSummary[] = [
+      {
+        id: 'china-tours',
+        url: 'https://example.com/china-tours',
+        title: 'China Tours from New Zealand',
+        page_type: 'service',
+        topics: ['china', 'tours', 'new zealand'],
+        primary_keyword: 'china tours nz',
+        word_count: 300,
+        has_geo_block: false,
+      },
+      {
+        id: 'yunnan-tours',
+        url: 'https://example.com/yunnan-tours',
+        title: 'Yunnan Tours from New Zealand',
+        page_type: 'service',
+        topics: ['china', 'yunnan', 'tours'],
+        primary_keyword: 'yunnan tours nz',
+        word_count: 300,
+        has_geo_block: false,
+      },
+    ]
+    const weakQueries: WeakAIQuery[] = [
+      {
+        id: 'q-first-trip',
+        question: 'How do I plan my first trip to China from New Zealand?',
+        avg_rank: 5,
+        weak_model_count: 3,
+      },
+    ]
+
+    const result = await analyzeOpportunities(CLIENT_ID, pages, weakQueries, [])
+    const upgradesForQuery = result.filter(
+      o => o.source_query_id === 'q-first-trip' && o.source_page_id !== null,
+    )
+    const newBlog = result.find(
+      o => o.source_query_id === 'q-first-trip' && o.source_page_id === null,
+    )
+
+    expect(upgradesForQuery).toHaveLength(0)
+    expect(newBlog).toBeDefined()
+  })
+
+  it('keeps a specific query-to-page match when non-generic tokens overlap', async () => {
+    const page: ClientSitePageSummary = {
+      id: 'small-group',
+      url: 'https://example.com/small-group-china-tours',
+      title: 'Small Group China Tours',
+      page_type: 'service',
+      topics: ['small group', 'china tours'],
+      primary_keyword: 'small group china tours',
+      word_count: 300,
+      has_geo_block: false,
+    }
+    const weakQueries: WeakAIQuery[] = [
+      {
+        id: 'q-small-group',
+        question: 'Small group China tours versus large coach tours for New Zealand travellers',
+        avg_rank: 5,
+        weak_model_count: 3,
+      },
+    ]
+
+    const result = await analyzeOpportunities(CLIENT_ID, [page], weakQueries, [])
+    const upgrade = result.find(o => o.source_page_id === 'small-group')
+
+    expect(upgrade).toBeDefined()
+    expect(upgrade!.source_query_id).toBe('q-small-group')
+    expect(upgrade!.scoring_context.ai_weak).toBe(true)
+  })
+
   // Max 50 opportunities returned
   it('returns at most 50 opportunities', async () => {
     // Create 60 pages all needing upgrade

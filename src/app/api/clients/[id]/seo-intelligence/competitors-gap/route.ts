@@ -3,6 +3,11 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { getSerpCompetitors, getKeywordsGap, type LabsCompetitor, type LabsKeyword } from '@/lib/dataforseo/labs'
 import { getActiveBrief } from '@/lib/content/brief-injector'
+import {
+  buildBusinessKeywordTerms,
+  extractBriefSeedTerms,
+  isBusinessRelevantKeyword,
+} from '@/lib/seo-intelligence/keyword-relevance'
 
 const LOCATION_CODE_BY_DB: Record<string, number> = { au: 2036, nz: 2554 }
 
@@ -48,6 +53,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id: clientId } = await params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
+  }
 
   const access = await requireDashboardClientAccess(clientId)
   if (!access.ok) {
@@ -56,7 +65,7 @@ export async function GET(
 
   const { data: client, error: clientError } = await supabaseAdmin
     .from('clients')
-    .select('id, domain, semrush_db')
+    .select('id, domain, semrush_db, industry')
     .eq('id', clientId)
     .single()
 
@@ -75,6 +84,11 @@ export async function GET(
 
   // Read competitor_domains from active master brief (written by Zhangqian discovery + manual brief)
   const activeBrief = await getActiveBrief(clientId)
+  const businessTerms = buildBusinessKeywordTerms({
+    domain: client.domain,
+    industry: (client.industry as string | null) ?? null,
+    seedTerms: extractBriefSeedTerms(activeBrief as Record<string, unknown> | null),
+  })
   const knownDomains: string[] = ((activeBrief?.competitor_domains as string[] | null) ?? [])
     .map(d => d.replace(/^https?:\/\//, '').replace(/\/$/, '').toLowerCase())
 
@@ -114,9 +128,12 @@ export async function GET(
 
     // ── Step 3: Keyword gap using top 3 competitor domains
     const top3       = competitors.slice(0, 3).map(c => c.domain)
-    const gapKeywords: LabsKeyword[] = top3.length > 0
-      ? await getKeywordsGap(client.domain, top3, locationCode, 100)
+    const rawGapKeywords: LabsKeyword[] = top3.length > 0
+      ? await getKeywordsGap(client.domain, top3, locationCode, 200)
       : []
+    const gapKeywords = rawGapKeywords
+      .filter(keyword => isBusinessRelevantKeyword(keyword.keyword, businessTerms))
+      .slice(0, 100)
 
     return NextResponse.json(
       { domain: client.domain, competitors, gapKeywords },

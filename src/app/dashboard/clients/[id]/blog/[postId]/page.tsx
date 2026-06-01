@@ -287,6 +287,7 @@ ${showGeoBlock && post.geo_html_snapshot
           <PublishToWebsitePanel
             clientId={clientId}
             postId={postId}
+            primaryKeyword={post.primary_keyword}
             disabledReason={hasBlocker ? blockerChecks[0].label : undefined}
             onSuccess={(_, result) => {
               if (result.prUrl) flash(`✓ PR #${result.prNumber} 已创建`, true);

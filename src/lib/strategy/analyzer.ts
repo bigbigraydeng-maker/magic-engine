@@ -110,11 +110,54 @@ export async function fetchKeywordOpportunities(clientId: string): Promise<Keywo
 // Topic matching helpers
 // ---------------------------------------------------------------------------
 
+const STOP_TOKENS = new Set([
+  'and',
+  'are',
+  'best',
+  'for',
+  'from',
+  'how',
+  'the',
+  'this',
+  'what',
+  'when',
+  'where',
+  'which',
+  'who',
+  'why',
+  'with',
+])
+
+const GENERIC_TOPIC_TOKENS = new Set([
+  'china',
+  'new',
+  'nz',
+  'operator',
+  'tour',
+  'travel',
+  'traveller',
+  'trip',
+  'zealand',
+])
+
+function normalizeToken(token: string): string {
+  if (token.endsWith('ies') && token.length > 4) {
+    return `${token.slice(0, -3)}y`
+  }
+  if (token.endsWith('s') && !token.endsWith('ss') && token.length > 4) {
+    return token.slice(0, -1)
+  }
+  return token
+}
+
 function tokenize(text: string): string[] {
-  return text
+  const matches = text
     .toLowerCase()
-    .split(/[\s,_-]+/)
-    .filter(t => t.length > 2)
+    .match(/[a-z0-9]+/g)
+
+  return (matches ?? [])
+    .map(normalizeToken)
+    .filter(t => t.length > 2 && !STOP_TOKENS.has(t))
 }
 
 function topicsOverlap(questionTokens: string[], page: ClientSitePageSummary): boolean {
@@ -127,7 +170,18 @@ function topicsOverlap(questionTokens: string[], page: ClientSitePageSummary): b
     .join(' ')
     .toLowerCase()
 
-  return questionTokens.some(token => pageText.includes(token))
+  const pageTokenSet = new Set(tokenize(pageText))
+  const uniqueQuestionTokens = Array.from(new Set(questionTokens))
+  const strongTokens = uniqueQuestionTokens.filter(token => !GENERIC_TOPIC_TOKENS.has(token))
+  const genericTokens = uniqueQuestionTokens.filter(token => GENERIC_TOPIC_TOKENS.has(token))
+  const matchedStrongCount = strongTokens.filter(token => pageTokenSet.has(token)).length
+  const matchedGenericCount = genericTokens.filter(token => pageTokenSet.has(token)).length
+
+  if (strongTokens.length === 0) {
+    return matchedGenericCount >= 2
+  }
+
+  return matchedStrongCount >= 2 || (matchedStrongCount >= 1 && matchedGenericCount >= 1)
 }
 
 function findMatchingKeyword(
