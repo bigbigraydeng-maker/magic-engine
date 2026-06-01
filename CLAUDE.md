@@ -233,7 +233,7 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-06-01 13:31 NZST （**P22.D.2 ✅ 诸葛亮 Proactive API — anomaly_signals → Claude Haiku → execution_items(proactive_signal) + 11 单测全绿，下一步 22.D.3 cron 接线或 Phase 24.B**）
+> 最后更新：2026-06-01 13:44 NZST （**P22.D.3 ✅ anomaly-detector cron GET 接线 — AnomalyDetectorJob → proactive endpoint 逐客户调用 + 10 单测全绿，P22.D 三层全闭环，下一步 22.D.4 看板 badge 或 Phase 24.B**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
@@ -243,11 +243,13 @@ npm test           # 测试套件
 | **PM 操作 🔴** | Supabase 跑 migration `20260603000001_platform_oauth_connections.sql`（Phase 24.A） | ⚠️ 待操作 |
 | **PM 操作 🔴** | Supabase 跑 migration `20260617000001_phase22d_anomaly_signals.sql`（P22.D.1） | ⚠️ 待操作 |
 | **PM 操作 🔴** | Supabase 跑 migration `20260617000002_execution_items_proactive_source.sql`（P22.D.2） | ⚠️ 待操作 |
+| **PM 操作 🔴** | Render：新增 Cron Job `/api/cron/anomaly-detector`，schedule `0 4 * * *`，Header `Authorization: Bearer $CRON_SECRET`（P22.D.3） | ⚠️ 待操作 |
 | **GBP.0** | Google Cloud：enable Business Profile API + Account Management API，配置 OAuth consent screen，设 env vars | ⚠️ PM 操作 |
-| **Phase 22.D.3** | /api/cron/anomaly-detector cron route：每日跑 AnomalyDetectorJob → 调 proactive endpoint | 📋 待开始 |
+| **Phase 22.D.4** | 执行看板 ⚡ 系统检测 badge：source='proactive_signal' 任务显示检测来源标签 | 📋 待开始 |
 | **Phase 24.B** | GBP 数据摄取（reviews、insights、location data 写入 DB） | 📋 待开始 |
 
 **已完成全景（最近几个 Phase）**：
+- ✅ **P22.D.3 anomaly-detector cron GET 接线**（2026-06-01）：GET /api/cron/anomaly-detector；AnomalyDetectorJob → proactive endpoint 逐客户调用；弹性容错；10 单测全绿
 - ✅ **P22.D.2 诸葛亮 Proactive Advisory API**（2026-06-01）：POST /api/ai/zhugeliang/proactive；Claude Haiku 生成 advisory JSON；validateAdvisories() 过滤；写 execution_items(source='proactive_signal')；signal ack；11 单测全绿
 - ✅ **P22.D.1 AnomalyDetector 规则引擎骨架**（2026-06-01）：anomaly_signals 表 migration；AnomalyDetectorJob 5 规则（SEO位置/点击/GEO mention率/Ads CPA/Social发布量）；Promise.allSettled 防崩溃；14 单测全绿
 - ✅ **P22.A.5 Meta Ads flywheel 接线**（2026-06-01，PR #183）：syncMeta() → MetaAdsAdapter.pullMetrics() 每日写入 flywheel_metrics；7 单测全绿
@@ -260,11 +262,11 @@ npm test           # 测试套件
 - ✅ **Phase 23 完整闭环**（PR #112）：L3 记忆四表 + MemoryService
 
 **下一候选**：
-- 📋 **Phase 22.D.3** — /api/cron/anomaly-detector（22.D.2 完成 → 可开工，只需半天）
+- 📋 **Phase 22.D.4** — 执行看板 ⚡ 系统检测 badge（22.D.3 完成 → P22.D 最后一块，半天工作量）
 - 📋 **Phase 24.B** — GBP 数据摄取（依赖 PM 完成 GBP.0 + migration）
 - 📋 **Phase 18.B** — Google Ads（Developer token 到位后）
 
-下一 session：`继续 Phase 22.D.3`（anomaly-detector cron）或 `继续 Phase 24.B`（GBP 数据摄取）
+下一 session：`继续 Phase 22.D.4`（执行看板 proactive_signal badge）或 `继续 Phase 24.B`（GBP 数据摄取）
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox
