@@ -1398,6 +1398,19 @@ function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd, onB
     return () => clearTimeout(timer)
   }, [clientId, postId, assets])
 
+  // Debounce autosave: persist copy + image_prompt to content_posts after 500 ms of inactivity.
+  useEffect(() => {
+    if (!postId) return
+    const timer = setTimeout(() => {
+      fetch(`/api/clients/${clientId}/posts/${postId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ caption: editedCopy, visual_brief: editedImagePrompt }),
+      }).catch(() => { /* non-fatal — next keystroke will retry */ })
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [clientId, postId, editedCopy, editedImagePrompt])
+
   // 从素材库选定一张 → 入画廊
   const handlePickFromLibrary = async (clientAssetId: string) => {
     if (!postId || pickingFromLibrary) return
@@ -1643,6 +1656,19 @@ function StoryCard({ index, story, clientId, launchHubPlatform, onGenStart, onGe
     }, 3000)
     return () => clearTimeout(timer)
   }, [clientId, postId, assets])
+
+  // Debounce autosave: persist copy + visual_prompt to content_posts after 500 ms of inactivity.
+  useEffect(() => {
+    if (!postId) return
+    const timer = setTimeout(() => {
+      fetch(`/api/clients/${clientId}/posts/${postId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ caption: editedCopy, visual_brief: editedVisualPrompt }),
+      }).catch(() => { /* non-fatal — next keystroke will retry */ })
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [clientId, postId, editedCopy, editedVisualPrompt])
 
   const handlePickFromLibrary = async (clientAssetId: string) => {
     if (!postId || pickingFromLibrary) return
