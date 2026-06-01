@@ -5,7 +5,7 @@ import { MonthlyReportAggregator } from '../aggregator'
 let queryChain: any = null
 let sectionsMockData: any = []
 
-const mockSupabase = {
+const mockSupabase: any = {
   from: vi.fn(function(table?: string) {
     queryChain = { table, isSingle: false }
     return mockSupabase
@@ -533,7 +533,7 @@ describe('MonthlyReportAggregator', () => {
     it('should return success response when all collectors succeed', async () => {
       const mockCollectors = aggregator['collectors']
       mockCollectors.forEach((collector) => {
-        vi.spyOn(collector, 'execute').mockResolvedValueOnce({
+        vi.spyOn(collector as any, 'execute').mockResolvedValueOnce({
           datasource_type: collector.datasource_type,
           data: {},
         })
@@ -598,7 +598,7 @@ describe('MonthlyReportAggregator', () => {
     it('should return error when all collectors fail', async () => {
       const mockCollectors = aggregator['collectors']
       mockCollectors.forEach((collector) => {
-        vi.spyOn(collector, 'execute').mockRejectedValueOnce(new Error('Failed'))
+        vi.spyOn(collector as any, 'execute').mockRejectedValueOnce(new Error('Failed'))
       })
 
       mockSupabase.single.mockResolvedValueOnce({ data: null, error: null }) // getExistingReportId
@@ -613,7 +613,7 @@ describe('MonthlyReportAggregator', () => {
     it('should return error when report fetch fails', async () => {
       const mockCollectors = aggregator['collectors']
       mockCollectors.forEach((collector) => {
-        vi.spyOn(collector, 'execute').mockResolvedValueOnce({
+        vi.spyOn(collector as any, 'execute').mockResolvedValueOnce({
           datasource_type: collector.datasource_type,
           data: {},
         })
@@ -632,7 +632,7 @@ describe('MonthlyReportAggregator', () => {
     it('should include sections in response', async () => {
       const mockCollectors = aggregator['collectors']
       mockCollectors.forEach((collector) => {
-        vi.spyOn(collector, 'execute').mockResolvedValueOnce({
+        vi.spyOn(collector as any, 'execute').mockResolvedValueOnce({
           datasource_type: collector.datasource_type,
           data: {},
         })
@@ -676,7 +676,7 @@ describe('MonthlyReportAggregator', () => {
     it('should update report with health metrics', async () => {
       const mockCollectors = aggregator['collectors']
       mockCollectors.forEach((collector) => {
-        vi.spyOn(collector, 'execute').mockResolvedValueOnce({
+        vi.spyOn(collector as any, 'execute').mockResolvedValueOnce({
           datasource_type: collector.datasource_type,
           data: {},
         })
