@@ -97,16 +97,16 @@ function pct(n: number): string {
 
 function MetricTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-slate-100 bg-white px-2 py-1.5">
-      <p className="text-[9px] uppercase tracking-wide text-slate-400">{label}</p>
-      <p className="text-sm font-bold leading-tight text-slate-800">{value}</p>
+    <div className="rounded-md border border-black/[.06] bg-white px-2 py-1.5">
+      <p className="text-[9px] uppercase tracking-wide text-me-charcoal/45">{label}</p>
+      <p className="text-sm font-bold leading-tight text-me-charcoal/75">{value}</p>
     </div>
   )
 }
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
-    <p className="mb-3 text-[10px] font-black uppercase tracking-[0.14em] text-cyan-800">
+    <p className="mb-3 text-[10px] font-black uppercase tracking-[0.14em] text-me-ochre">
       {children}
     </p>
   )
@@ -114,7 +114,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {
   return (
-    <th className={`text-[10px] font-semibold uppercase tracking-wide text-slate-400 pb-1.5 ${right ? 'text-right' : 'text-left'}`}>
+    <th className={`text-[10px] font-semibold uppercase tracking-wide text-me-charcoal/45 pb-1.5 ${right ? 'text-right' : 'text-left'}`}>
       {children}
     </th>
   )
@@ -122,7 +122,7 @@ function Th({ children, right }: { children: React.ReactNode; right?: boolean })
 
 function Td({ children, right, mono }: { children: React.ReactNode; right?: boolean; mono?: boolean }) {
   return (
-    <td className={`py-1 text-[11px] text-slate-700 ${right ? 'text-right tabular-nums' : ''} ${mono ? 'font-mono' : ''}`}>
+    <td className={`py-1 text-[11px] text-me-charcoal/75 ${right ? 'text-right tabular-nums' : ''} ${mono ? 'font-mono' : ''}`}>
       {children}
     </td>
   )
@@ -135,11 +135,11 @@ function GscSection({ snapshot }: { snapshot: GscSnapshot }) {
   const period = `${snapshot.period_start} – ${snapshot.period_end}`
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5">
+    <div className="rounded-xl border border-black/10 bg-white p-5">
       <div className="mb-4 flex items-center gap-2">
         <span className="text-base leading-none">🔎</span>
         <SectionTitle>搜索洞察 概览</SectionTitle>
-        <span className="ml-auto text-[10px] text-slate-400">{period}</span>
+        <span className="ml-auto text-[10px] text-me-charcoal/45">{period}</span>
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -151,13 +151,13 @@ function GscSection({ snapshot }: { snapshot: GscSnapshot }) {
 
       {queries.length > 0 && (
         <>
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-me-charcoal/45">
             热门关键词 (top 10)
           </p>
           <div className="overflow-x-auto">
             <table className="w-full border-collapse">
               <thead>
-                <tr className="border-b border-slate-100">
+                <tr className="border-b border-black/[.06]">
                   <Th>关键词</Th>
                   <Th right>点击</Th>
                   <Th right>展示</Th>
@@ -165,7 +165,7 @@ function GscSection({ snapshot }: { snapshot: GscSnapshot }) {
                   <Th right>排名</Th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50">
+              <tbody className="divide-y divide-black/[.04]">
                 {queries.map((q, i) => (
                   <tr key={i}>
                     <Td>
@@ -194,11 +194,11 @@ function Ga4Section({ snapshot }: { snapshot: Ga4Snapshot }) {
   const period = `${snapshot.period_start} – ${snapshot.period_end}`
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5">
+    <div className="rounded-xl border border-black/10 bg-white p-5">
       <div className="mb-4 flex items-center gap-2">
         <span className="text-base leading-none">📈</span>
         <SectionTitle>数据分析 概览</SectionTitle>
-        <span className="ml-auto text-[10px] text-slate-400">{period}</span>
+        <span className="ml-auto text-[10px] text-me-charcoal/45">{period}</span>
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -211,18 +211,18 @@ function Ga4Section({ snapshot }: { snapshot: Ga4Snapshot }) {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {sources.length > 0 && (
           <div>
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-me-charcoal/45">
               流量来源 (top 10)
             </p>
             <div className="overflow-x-auto">
               <table className="w-full border-collapse">
                 <thead>
-                  <tr className="border-b border-slate-100">
+                  <tr className="border-b border-black/[.06]">
                     <Th>来源 / 媒介</Th>
                     <Th right>会话</Th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-50">
+                <tbody className="divide-y divide-black/[.04]">
                   {sources.map((s, i) => (
                     <tr key={i}>
                       <Td>
@@ -241,18 +241,18 @@ function Ga4Section({ snapshot }: { snapshot: Ga4Snapshot }) {
 
         {pages.length > 0 && (
           <div>
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-me-charcoal/45">
               热门页面 (top 10)
             </p>
             <div className="overflow-x-auto">
               <table className="w-full border-collapse">
                 <thead>
-                  <tr className="border-b border-slate-100">
+                  <tr className="border-b border-black/[.06]">
                     <Th>页面</Th>
                     <Th right>浏览量</Th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-50">
+                <tbody className="divide-y divide-black/[.04]">
                   {pages.map((p, i) => (
                     <tr key={i}>
                       <Td>
@@ -282,11 +282,11 @@ function MetaAdsSection({ snapshot }: { snapshot: MetaAdsSnapshot }) {
   const x2        = (v: number | null) => v == null ? '—' : `${v.toFixed(2)}×`
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5">
+    <div className="rounded-xl border border-black/10 bg-white p-5">
       <div className="mb-4 flex items-center gap-2">
         <span className="text-base leading-none">📣</span>
         <SectionTitle>广告 智能投放</SectionTitle>
-        <span className="ml-auto text-[10px] text-slate-400">{period}</span>
+        <span className="ml-auto text-[10px] text-me-charcoal/45">{period}</span>
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -298,13 +298,13 @@ function MetaAdsSection({ snapshot }: { snapshot: MetaAdsSnapshot }) {
 
       {campaigns.length > 0 && (
         <>
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-me-charcoal/45">
             Top Campaigns（按花费排序）
           </p>
           <div className="overflow-x-auto">
             <table className="w-full border-collapse">
               <thead>
-                <tr className="border-b border-slate-100">
+                <tr className="border-b border-black/[.06]">
                   <Th>广告活动</Th>
                   <Th right>花费</Th>
                   <Th right>ROAS</Th>
@@ -312,7 +312,7 @@ function MetaAdsSection({ snapshot }: { snapshot: MetaAdsSnapshot }) {
                   <Th right>CTR</Th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50">
+              <tbody className="divide-y divide-black/[.04]">
                 {campaigns.map((c) => (
                   <tr key={c.campaign_id}>
                     <Td>
@@ -360,13 +360,13 @@ function FlagOpportunitiesSection({ queries }: { queries: GscTopQuery[] }) {
   if (opportunities.length === 0) return null
 
   return (
-    <div className="rounded-xl border border-amber-100 bg-amber-50 p-5">
+    <div className="rounded-xl border border-me-ochre/20 bg-me-ochre/10 p-5">
       <div className="mb-4 flex items-center gap-2">
         <span className="text-base leading-none">🚩</span>
         <SectionTitle>快速夺旗机会</SectionTitle>
       </div>
 
-      <p className="mb-3 text-[11px] text-slate-500">
+      <p className="mb-3 text-[11px] text-me-charcoal/55">
         排名靠后、但曝光充足的关键词——优化 title/meta 可快速提升点击率。
         筛选条件：排名 &gt; 10，展示量 &gt; 50。
       </p>
@@ -374,16 +374,16 @@ function FlagOpportunitiesSection({ queries }: { queries: GscTopQuery[] }) {
       <div className="overflow-x-auto">
         <table className="w-full border-collapse">
           <thead>
-            <tr className="border-b border-amber-200">
+            <tr className="border-b border-me-ochre/30">
               <Th>关键词</Th>
               <Th right>展示量</Th>
               <Th right>当前排名</Th>
-              <th className="text-left text-[10px] font-semibold uppercase tracking-wide text-slate-400 pb-1.5 pl-4">
+              <th className="text-left text-[10px] font-semibold uppercase tracking-wide text-me-charcoal/45 pb-1.5 pl-4">
                 建议
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-amber-50">
+          <tbody className="divide-y divide-me-ochre/10">
             {opportunities.map((opp, i) => (
               <tr key={i}>
                 <Td>
@@ -391,7 +391,7 @@ function FlagOpportunitiesSection({ queries }: { queries: GscTopQuery[] }) {
                 </Td>
                 <Td right>{fmtNum(opp.impressions)}</Td>
                 <Td right>{opp.position.toFixed(1)}</Td>
-                <td className="py-1 pl-4 text-[11px] text-slate-500">
+                <td className="py-1 pl-4 text-[11px] text-me-charcoal/55">
                   排名靠后、曝光充足——优化 title/meta 可快速提升点击
                 </td>
               </tr>
@@ -409,16 +409,16 @@ function Skeleton() {
   return (
     <div className="space-y-6">
       {[1, 2, 3].map(i => (
-        <div key={i} className="animate-pulse rounded-xl border border-slate-200 bg-white p-5">
-          <div className="mb-4 h-4 w-40 rounded bg-slate-100" />
+        <div key={i} className="animate-pulse rounded-xl border border-black/10 bg-white p-5">
+          <div className="mb-4 h-4 w-40 rounded bg-me-ivory" />
           <div className="grid grid-cols-4 gap-2">
             {[1, 2, 3, 4].map(j => (
-              <div key={j} className="h-12 rounded-md bg-slate-100" />
+              <div key={j} className="h-12 rounded-md bg-me-ivory" />
             ))}
           </div>
           <div className="mt-4 space-y-2">
             {[1, 2, 3, 4, 5].map(k => (
-              <div key={k} className="h-6 rounded bg-slate-50" />
+              <div key={k} className="h-6 rounded bg-me-ivory" />
             ))}
           </div>
         </div>
@@ -477,15 +477,15 @@ export function ClientDataTab({ clientId }: { clientId: string }) {
 
   if (state === 'empty') {
     return (
-      <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-slate-200 bg-white py-12 text-center">
+      <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-black/10 bg-white py-12 text-center">
         <span className="text-3xl">📡</span>
-        <p className="text-sm font-black text-slate-700">暂无数据</p>
-        <p className="max-w-xs text-xs font-semibold text-slate-400">
+        <p className="text-sm font-black text-me-charcoal/75">暂无数据</p>
+        <p className="max-w-xs text-xs font-semibold text-me-charcoal/45">
           请先在连接页面完成平台授权并同步，数据同步后将在此展示。
         </p>
         <Link
           href={`/dashboard/clients/${clientId}/connectors`}
-          className="mt-1 rounded-lg bg-slate-950 px-4 py-2 text-sm font-black text-white transition-colors hover:bg-slate-800"
+          className="mt-1 rounded-lg bg-me-charcoal px-4 py-2 text-sm font-black text-white transition-colors hover:bg-me-charcoal/85"
         >
           前往连接页面 →
         </Link>

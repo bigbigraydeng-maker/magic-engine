@@ -31,11 +31,11 @@ interface RecentPost {
 // ─── Brand Diagnosis ──────────────────────────────────────────────────────────
 
 const PILLAR_COLORS = [
-  'bg-indigo-100 text-indigo-700',
+  'bg-me-ochre/15 text-me-ochre',
   'bg-purple-100 text-purple-700',
-  'bg-emerald-100 text-emerald-700',
-  'bg-amber-100 text-amber-700',
-  'bg-rose-100 text-rose-700',
+  'bg-[#5C8A4A]/12 text-[#5C8A4A]',
+  'bg-me-ochre/15 text-me-ochre',
+  'bg-[#C2453A]/12 text-[#C2453A]',
 ]
 
 function BrandDiagnosis({ brief }: { brief: MasterBrief }) {
@@ -52,39 +52,39 @@ function BrandDiagnosis({ brief }: { brief: MasterBrief }) {
     : []
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+    <div className="bg-white rounded-xl border border-black/10 overflow-hidden">
       {/* Header — always visible */}
       <button
         onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-gray-50 transition-colors"
+        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-me-ivory transition-colors"
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-gray-900">
+            <span className="text-sm font-semibold text-me-charcoal/90">
               {brief.brand_name ?? 'Unnamed Brand'}
             </span>
-            <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
+            <span className="text-xs bg-[#5C8A4A]/12 text-[#5C8A4A] px-2 py-0.5 rounded-full font-medium">
               Active Brief
             </span>
           </div>
           {brief.core_proposition && (
-            <p className="text-xs text-gray-500 mt-0.5 truncate pr-8">
+            <p className="text-xs text-me-charcoal/55 mt-0.5 truncate pr-8">
               {brief.core_proposition}
             </p>
           )}
         </div>
-        <span className="text-gray-400 text-xs flex-shrink-0 ml-3">
+        <span className="text-me-charcoal/45 text-xs flex-shrink-0 ml-3">
           {open ? '收起 ▲' : '展开 ▼'}
         </span>
       </button>
 
       {/* Expanded diagnosis */}
       {open && (
-        <div className="border-t border-gray-100 px-5 py-4 grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div className="border-t border-black/[.06] px-5 py-4 grid grid-cols-1 md:grid-cols-2 gap-5">
           {/* Content Pillars */}
           {pillars.length > 0 && (
             <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+              <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide mb-2">
                 内容支柱
               </p>
               <div className="flex flex-wrap gap-2">
@@ -103,15 +103,15 @@ function BrandDiagnosis({ brief }: { brief: MasterBrief }) {
           {/* Target Audience */}
           {audience && (
             <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+              <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide mb-2">
                 目标受众
               </p>
-              <div className="space-y-1 text-xs text-gray-700">
+              <div className="space-y-1 text-xs text-me-charcoal/75">
                 {audience.age_range && (
                   <p>年龄：{audience.age_range}{audience.location ? ` · ${audience.location}` : ''}</p>
                 )}
                 {audience.interests?.slice(0, 3).map((i, idx) => (
-                  <p key={idx} className="text-gray-500">· {i}</p>
+                  <p key={idx} className="text-me-charcoal/55">· {i}</p>
                 ))}
               </div>
             </div>
@@ -120,14 +120,14 @@ function BrandDiagnosis({ brief }: { brief: MasterBrief }) {
           {/* Active Platforms */}
           {activePlatforms.length > 0 && (
             <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+              <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide mb-2">
                 发布平台
               </p>
               <div className="flex flex-wrap gap-2">
                 {activePlatforms.map(([platform, cfg]) => (
                   <span
                     key={platform}
-                    className="text-xs bg-gray-100 text-gray-700 px-2.5 py-1 rounded-full"
+                    className="text-xs bg-me-ivory text-me-charcoal/75 px-2.5 py-1 rounded-full"
                   >
                     {platform} · {cfg.post_frequency}
                   </span>
@@ -139,7 +139,7 @@ function BrandDiagnosis({ brief }: { brief: MasterBrief }) {
           {/* Brand Voice */}
           {voice && (
             <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+              <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide mb-2">
                 品牌语气
               </p>
               <div className="flex flex-wrap gap-1.5">
@@ -151,7 +151,7 @@ function BrandDiagnosis({ brief }: { brief: MasterBrief }) {
                     {kw}
                   </span>
                 ))}
-                <span className="text-xs text-gray-400 px-2 py-0.5">
+                <span className="text-xs text-me-charcoal/45 px-2 py-0.5">
                   {voice.formality} · emoji {voice.emoji_usage}
                 </span>
               </div>
@@ -161,14 +161,14 @@ function BrandDiagnosis({ brief }: { brief: MasterBrief }) {
           {/* Keywords */}
           {keywords.length > 0 && (
             <div className="md:col-span-2">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+              <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide mb-2">
                 核心关键词
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {keywords.slice(0, 10).map(kw => (
                   <span
                     key={kw}
-                    className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-mono"
+                    className="text-xs bg-me-ivory text-me-charcoal/60 px-2 py-0.5 rounded font-mono"
                   >
                     {kw}
                   </span>
@@ -190,8 +190,8 @@ const ROUTES: { id: RouteId; icon: string; label: string; desc: string; color: s
     icon: '🔑',
     label: 'Keyword',
     desc: 'SEO 关键词 → 2 个帖子变体',
-    color: 'text-indigo-600',
-    activeClass: 'bg-indigo-600 text-white border-indigo-600',
+    color: 'text-me-ochre',
+    activeClass: 'bg-me-ochre text-white border-me-ochre',
   },
   {
     id: 'route_b',
@@ -206,8 +206,8 @@ const ROUTES: { id: RouteId; icon: string; label: string; desc: string; color: s
     icon: '💡',
     label: 'Free Topic',
     desc: '自定义话题 → 2 个帖子变体',
-    color: 'text-emerald-600',
-    activeClass: 'bg-emerald-600 text-white border-emerald-600',
+    color: 'text-[#5C8A4A]',
+    activeClass: 'bg-[#5C8A4A] text-white border-[#5C8A4A]',
   },
 ]
 
@@ -218,9 +218,9 @@ const PLATFORMS: { id: Platform; label: string }[] = [
 ]
 
 const ROUTE_COLORS: Record<string, string> = {
-  route_a: 'bg-indigo-100 text-indigo-700',
+  route_a: 'bg-me-ochre/15 text-me-ochre',
   route_b: 'bg-purple-100 text-purple-700',
-  route_c: 'bg-emerald-100 text-emerald-700',
+  route_c: 'bg-[#5C8A4A]/12 text-[#5C8A4A]',
 }
 
 const ROUTE_LABELS: Record<string, string> = {
@@ -230,11 +230,11 @@ const ROUTE_LABELS: Record<string, string> = {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  draft: 'bg-yellow-100 text-yellow-700',
-  approved: 'bg-green-100 text-green-700',
+  draft: 'bg-me-ochre/15 text-me-ochre',
+  approved: 'bg-[#5C8A4A]/12 text-[#5C8A4A]',
   scheduled: 'bg-blue-100 text-blue-700',
-  published: 'bg-gray-100 text-gray-600',
-  rejected: 'bg-red-100 text-red-700',
+  published: 'bg-me-ivory text-me-charcoal/60',
+  rejected: 'bg-[#C2453A]/12 text-[#C2453A]',
 }
 
 // ─── Result Card ──────────────────────────────────────────────────────────────
@@ -243,34 +243,34 @@ function ResultCard({ post, index }: { post: PostResult; index: number }) {
   const [open, setOpen] = useState(false)
 
   return (
-    <div className="border border-gray-200 rounded-xl overflow-hidden">
+    <div className="border border-black/10 rounded-xl overflow-hidden">
       <button
         onClick={() => setOpen(v => !v)}
-        className="w-full flex items-start justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left gap-3"
+        className="w-full flex items-start justify-between px-4 py-3 bg-me-ivory hover:bg-me-ivory transition-colors text-left gap-3"
       >
         <div className="min-w-0">
-          <span className="text-xs font-semibold text-gray-500">V{index + 1}</span>
-          <p className="text-sm font-medium text-gray-900 truncate mt-0.5">{post.title}</p>
+          <span className="text-xs font-semibold text-me-charcoal/55">V{index + 1}</span>
+          <p className="text-sm font-medium text-me-charcoal/90 truncate mt-0.5">{post.title}</p>
         </div>
-        <span className="text-gray-400 text-xs flex-shrink-0 mt-1">{open ? '▲' : '▼'}</span>
+        <span className="text-me-charcoal/45 text-xs flex-shrink-0 mt-1">{open ? '▲' : '▼'}</span>
       </button>
       {open && (
         <div className="px-4 py-4 space-y-3 text-xs">
           <div>
-            <p className="font-semibold text-gray-500 uppercase tracking-wide mb-1">脚本</p>
-            <p className="text-gray-800 whitespace-pre-wrap leading-relaxed">{post.script}</p>
+            <p className="font-semibold text-me-charcoal/55 uppercase tracking-wide mb-1">脚本</p>
+            <p className="text-me-charcoal/75 whitespace-pre-wrap leading-relaxed">{post.script}</p>
           </div>
           <div>
-            <p className="font-semibold text-gray-500 uppercase tracking-wide mb-1">Caption</p>
-            <p className="text-gray-800 leading-relaxed">{post.caption}</p>
+            <p className="font-semibold text-me-charcoal/55 uppercase tracking-wide mb-1">Caption</p>
+            <p className="text-me-charcoal/75 leading-relaxed">{post.caption}</p>
           </div>
           <div>
-            <p className="font-semibold text-gray-500 uppercase tracking-wide mb-1">Hashtags</p>
-            <p className="text-indigo-600">{post.hashtags?.join(' ')}</p>
+            <p className="font-semibold text-me-charcoal/55 uppercase tracking-wide mb-1">Hashtags</p>
+            <p className="text-me-ochre">{post.hashtags?.join(' ')}</p>
           </div>
           <div>
-            <p className="font-semibold text-gray-500 uppercase tracking-wide mb-1">视觉描述</p>
-            <p className="text-gray-600 italic">{post.visual_brief}</p>
+            <p className="font-semibold text-me-charcoal/55 uppercase tracking-wide mb-1">视觉描述</p>
+            <p className="text-me-charcoal/60 italic">{post.visual_brief}</p>
           </div>
         </div>
       )}
@@ -297,9 +297,9 @@ function PlatformSelector({
             onChange={e =>
               onChange(e.target.checked ? [...value, p.id] : value.filter(v => v !== p.id))
             }
-            className="w-3.5 h-3.5 rounded border-gray-300"
+            className="w-3.5 h-3.5 rounded border-black/15"
           />
-          <span className="text-sm text-gray-700">{p.label}</span>
+          <span className="text-sm text-me-charcoal/75">{p.label}</span>
         </label>
       ))}
     </div>
@@ -441,16 +441,16 @@ export function OperationsConsole({ clientId }: OperationsConsoleProps) {
 
       {/* ── 1. Brief status / diagnosis ── */}
       {briefLoading ? (
-        <div className="bg-gray-50 border border-gray-200 rounded-xl px-5 py-4 animate-pulse">
-          <div className="h-4 bg-gray-200 rounded w-48" />
-          <div className="h-3 bg-gray-200 rounded w-80 mt-2" />
+        <div className="bg-me-ivory border border-black/10 rounded-xl px-5 py-4 animate-pulse">
+          <div className="h-4 bg-me-stone rounded w-48" />
+          <div className="h-3 bg-me-stone rounded w-80 mt-2" />
         </div>
       ) : brief ? (
         <BrandDiagnosis brief={brief} />
       ) : (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-4 flex items-start gap-3">
+        <div className="bg-me-ochre/10 border border-me-ochre/30 rounded-xl px-5 py-4 flex items-start gap-3">
           <span className="text-xl">⚠️</span>
-          <p className="text-sm text-amber-800">
+          <p className="text-sm text-me-ochre">
             未找到 Active Master Brief。请先切换到{' '}
             <span className="font-semibold">✨ Master Brief</span> 标签生成品牌档案。
           </p>
@@ -458,9 +458,9 @@ export function OperationsConsole({ clientId }: OperationsConsoleProps) {
       )}
 
       {/* ── 2. Content Generation ── */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-black/10 overflow-hidden">
         {/* Route pill selector */}
-        <div className="px-5 py-4 border-b border-gray-100">
+        <div className="px-5 py-4 border-b border-black/[.06]">
           <div className="flex gap-2 flex-wrap">
             {ROUTES.map(route => (
               <button
@@ -470,7 +470,7 @@ export function OperationsConsole({ clientId }: OperationsConsoleProps) {
                 className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium border transition-all disabled:opacity-40 ${
                   activeRoute === route.id
                     ? route.activeClass
-                    : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:text-gray-800 bg-white'
+                    : 'border-black/10 text-me-charcoal/60 hover:border-black/15 hover:text-me-charcoal/75 bg-white'
                 }`}
               >
                 <span>{route.icon}</span>
@@ -478,13 +478,13 @@ export function OperationsConsole({ clientId }: OperationsConsoleProps) {
               </button>
             ))}
           </div>
-          <p className="text-xs text-gray-400 mt-2">{activeRouteConfig.desc}</p>
+          <p className="text-xs text-me-charcoal/45 mt-2">{activeRouteConfig.desc}</p>
         </div>
 
         {/* Input form */}
         <div className="px-5 py-5 space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+            <label className="block text-sm font-medium text-me-charcoal/75 mb-1.5">
               {inputLabel}
             </label>
             <input
@@ -493,12 +493,12 @@ export function OperationsConsole({ clientId }: OperationsConsoleProps) {
               onKeyDown={e => e.key === 'Enter' && handleGenerate()}
               placeholder={inputPlaceholder}
               disabled={loading || !brief}
-              className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+              className="w-full border border-black/10 rounded-xl px-4 py-2.5 text-sm text-me-charcoal/90 bg-white placeholder-me-charcoal/45 focus:outline-none focus:ring-2 focus:ring-me-ochre disabled:opacity-50"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">发布平台</label>
+            <label className="block text-sm font-medium text-me-charcoal/75 mb-1.5">发布平台</label>
             <PlatformSelector value={platforms} onChange={setPlatforms} />
           </div>
 
@@ -512,17 +512,17 @@ export function OperationsConsole({ clientId }: OperationsConsoleProps) {
           </GenerateButton>
 
           {error && (
-            <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3">
-              <p className="text-sm text-red-700 font-medium">生成失败</p>
-              <p className="text-xs text-red-600 mt-0.5">{error}</p>
+            <div className="bg-[#C2453A]/10 border border-[#C2453A]/20 rounded-xl px-4 py-3">
+              <p className="text-sm text-[#C2453A] font-medium">生成失败</p>
+              <p className="text-xs text-[#C2453A] mt-0.5">{error}</p>
             </div>
           )}
         </div>
 
         {/* Results */}
         {results && results.length > 0 && (
-          <div className="border-t border-gray-100 px-5 py-5">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+          <div className="border-t border-black/[.06] px-5 py-5">
+            <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide mb-3">
               生成结果（{results.length} 个变体）
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -535,44 +535,44 @@ export function OperationsConsole({ clientId }: OperationsConsoleProps) {
       </div>
 
       {/* ── 3. Recent Posts ── */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-900">最近生成的帖子</h2>
-          <a href={`/dashboard/content?client=${clientId}`} className="text-xs text-indigo-600 hover:underline">
+      <div className="bg-white rounded-xl border border-black/10 overflow-hidden">
+        <div className="px-5 py-4 border-b border-black/[.06] flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-me-charcoal/90">最近生成的帖子</h2>
+          <a href={`/dashboard/content?client=${clientId}`} className="text-xs text-me-ochre hover:underline">
             查看全部 →
           </a>
         </div>
         {postsLoading ? (
-          <div className="py-8 text-center text-gray-400 text-sm animate-pulse">加载中…</div>
+          <div className="py-8 text-center text-me-charcoal/45 text-sm animate-pulse">加载中…</div>
         ) : recentPosts.length === 0 ? (
           <div className="py-10 text-center">
-            <p className="text-gray-400 text-sm">还没有生成过帖子</p>
-            <p className="text-gray-400 text-xs mt-1">使用上方生成入口开始创作</p>
+            <p className="text-me-charcoal/45 text-sm">还没有生成过帖子</p>
+            <p className="text-me-charcoal/45 text-xs mt-1">使用上方生成入口开始创作</p>
           </div>
         ) : (
-          <div className="divide-y divide-gray-50">
+          <div className="divide-y divide-black/[.04]">
             {recentPosts.map(post => (
               <div key={post.id} className="flex items-center justify-between px-5 py-3">
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-gray-900 truncate">{post.title}</p>
+                  <p className="text-sm font-medium text-me-charcoal/90 truncate">{post.title}</p>
                   <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                     <span
                       className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-                        ROUTE_COLORS[post.route] ?? 'bg-gray-100 text-gray-600'
+                        ROUTE_COLORS[post.route] ?? 'bg-me-ivory text-me-charcoal/60'
                       }`}
                     >
                       {ROUTE_LABELS[post.route] ?? post.route}
                     </span>
-                    <span className="text-xs text-gray-400">{post.platforms?.join(', ')}</span>
-                    <span className="text-xs text-gray-300">·</span>
-                    <span className="text-xs text-gray-400">
+                    <span className="text-xs text-me-charcoal/45">{post.platforms?.join(', ')}</span>
+                    <span className="text-xs text-me-charcoal/35">·</span>
+                    <span className="text-xs text-me-charcoal/45">
                       {new Date(post.created_at).toLocaleDateString('zh-CN')}
                     </span>
                   </div>
                 </div>
                 <span
                   className={`ml-3 flex-shrink-0 text-xs px-2 py-0.5 rounded-full font-medium ${
-                    STATUS_COLORS[post.status] ?? 'bg-gray-100 text-gray-600'
+                    STATUS_COLORS[post.status] ?? 'bg-me-ivory text-me-charcoal/60'
                   }`}
                 >
                   {post.status}

@@ -55,10 +55,10 @@ const STATUS_LABELS: Record<ReelsDraft['status'], string> = {
 }
 
 const STATUS_COLORS: Record<ReelsDraft['status'], string> = {
-  draft: 'bg-gray-100 text-gray-600',
+  draft: 'bg-me-ivory text-me-charcoal/60',
   images_ready: 'bg-blue-100 text-blue-700',
-  video_generating: 'bg-amber-100 text-amber-700',
-  video_ready: 'bg-green-100 text-green-700',
+  video_generating: 'bg-me-ochre/15 text-me-ochre',
+  video_ready: 'bg-[#5C8A4A]/12 text-[#5C8A4A]',
 }
 
 // ─── Field labels ──────────────────────────────────────────────────────────────
@@ -471,8 +471,8 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
       {/* Header: campaign selector + generate button */}
       <div className="flex items-center gap-3 flex-wrap">
         <div>
-          <p className="text-sm font-semibold text-gray-900">🎬 Reels Studio</p>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <p className="text-sm font-semibold text-me-charcoal/90">🎬 Reels Studio</p>
+          <p className="text-xs text-me-charcoal/55 mt-0.5">
             读取 Master Brief + Campaign Brief → 生成提示词 → 参考帧 → 视频 → Publishing Hub
           </p>
         </div>
@@ -482,7 +482,7 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
               <select
                 value={selectedCampaignId}
                 onChange={e => setSelectedCampaignId(e.target.value)}
-                className="text-xs border border-gray-200 rounded-lg px-3 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="text-xs border border-black/10 rounded-lg px-3 py-2 text-me-charcoal/75 focus:outline-none focus:ring-2 focus:ring-me-ochre"
               >
                 <option value="">No campaign (brief only)</option>
                 {campaigns.map(c => (
@@ -493,7 +493,7 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
             <button
               onClick={handleGenerate}
               disabled={generating}
-              className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-1.5"
+              className="bg-me-ochre hover:bg-me-ochre/90 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-1.5"
             >
               {generating ? (
                 <>
@@ -508,16 +508,16 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
       </div>
 
       {drafts.length === 0 && !generating ? (
-        <div className="bg-white rounded-xl border border-dashed border-gray-300 py-16 flex flex-col items-center gap-3">
+        <div className="bg-white rounded-xl border border-dashed border-black/15 py-16 flex flex-col items-center gap-3">
           <p className="text-3xl">🎬</p>
-          <p className="text-sm font-medium text-gray-700">No Reels yet</p>
-          <p className="text-xs text-gray-400">{readonly ? 'This task was executed automatically.' : 'Click “Generate New Reel” to get started'}</p>
+          <p className="text-sm font-medium text-me-charcoal/75">No Reels yet</p>
+          <p className="text-xs text-me-charcoal/45">{readonly ? 'This task was executed automatically.' : 'Click “Generate New Reel” to get started'}</p>
         </div>
       ) : (
         <div className="flex gap-4">
           {/* Draft list — narrow sidebar */}
           <div className="w-56 flex-shrink-0 space-y-2">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">
+            <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide px-1">
               Drafts
             </p>
             {drafts.map(d => (
@@ -526,11 +526,11 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
                 onClick={() => setActiveDraft(d)}
                 className={`w-full text-left px-3 py-2.5 rounded-lg border transition-colors ${
                   activeDraft?.id === d.id
-                    ? 'border-indigo-300 bg-indigo-50'
-                    : 'border-gray-200 bg-white hover:border-indigo-200'
+                    ? 'border-me-ochre/40 bg-me-ochre/10'
+                    : 'border-black/10 bg-white hover:border-me-ochre/30'
                 }`}
               >
-                <p className="text-xs font-medium text-gray-800 truncate">
+                <p className="text-xs font-medium text-me-charcoal/75 truncate">
                   {d.fb_caption
                     ? d.fb_caption.slice(0, 40) + '…'
                     : `Reel ${new Date(d.created_at).toLocaleDateString()}`}
@@ -574,11 +574,11 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
                 ))}
 
                 {/* Reference frames — generate from prompt OR upload manually */}
-                <div className="bg-white rounded-xl border border-gray-200 p-5">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-0.5">
+                <div className="bg-white rounded-xl border border-black/10 p-5">
+                  <h3 className="text-sm font-semibold text-me-charcoal/90 mb-0.5">
                     Reference Frames
                   </h3>
-                  <p className="text-xs text-gray-400 mb-4">
+                  <p className="text-xs text-me-charcoal/45 mb-4">
                     Generate from prompt with Visual Studio, or upload your own image (9:16)
                   </p>
                   <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
@@ -596,7 +596,7 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
 
                       return (
                         <div key={type} className="space-y-2">
-                          <p className="text-xs font-semibold text-gray-600 capitalize">
+                          <p className="text-xs font-semibold text-me-charcoal/60 capitalize">
                             {type} Frame
                           </p>
 
@@ -607,14 +607,14 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
                               <img
                                 src={url}
                                 alt={`${type} frame`}
-                                className="w-full aspect-[9/16] object-cover rounded-lg border border-gray-200"
+                                className="w-full aspect-[9/16] object-cover rounded-lg border border-black/10"
                               />
                               {/* Hover overlay with replace options */}
                               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex flex-col items-center justify-center gap-2 p-3">
                                 <button
                                   onClick={() => handleGenerateFrame(type)}
                                   disabled={!hasPrompt || busy}
-                                  className="w-full text-xs font-medium text-white bg-indigo-600/80 hover:bg-indigo-600 disabled:opacity-40 py-1.5 rounded-md transition-colors"
+                                  className="w-full text-xs font-medium text-white bg-me-ochre/80 hover:bg-me-ochre disabled:opacity-40 py-1.5 rounded-md transition-colors"
                                 >
                                   🎨 Regenerate
                                 </button>
@@ -628,21 +628,21 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
                               </div>
                             </div>
                           ) : isGenerating ? (
-                            <div className="w-full aspect-[9/16] border-2 border-indigo-200 bg-indigo-50 rounded-lg flex flex-col items-center justify-center gap-2">
+                            <div className="w-full aspect-[9/16] border-2 border-me-ochre/30 bg-me-ochre/10 rounded-lg flex flex-col items-center justify-center gap-2">
                               <span className="text-3xl animate-spin">⏳</span>
-                              <p className="text-xs text-indigo-500 text-center px-2">
+                              <p className="text-xs text-me-ochre text-center px-2">
                                 Visual Studio is generating…
                               </p>
                             </div>
                           ) : isUploading ? (
-                            <div className="w-full aspect-[9/16] border-2 border-gray-200 bg-gray-50 rounded-lg flex flex-col items-center justify-center gap-2">
+                            <div className="w-full aspect-[9/16] border-2 border-black/10 bg-me-ivory rounded-lg flex flex-col items-center justify-center gap-2">
                               <span className="text-3xl animate-pulse">📤</span>
-                              <p className="text-xs text-gray-400">Uploading…</p>
+                              <p className="text-xs text-me-charcoal/45">Uploading…</p>
                             </div>
                           ) : (
-                            <div className="w-full aspect-[9/16] border-2 border-dashed border-gray-200 rounded-lg flex flex-col items-center justify-center gap-1">
+                            <div className="w-full aspect-[9/16] border-2 border-dashed border-black/10 rounded-lg flex flex-col items-center justify-center gap-1">
                               <span className="text-3xl">🖼️</span>
-                              <p className="text-xs text-gray-400">No frame yet</p>
+                              <p className="text-xs text-me-charcoal/45">No frame yet</p>
                             </div>
                           )}
 
@@ -653,13 +653,13 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
                                 onClick={() => handleGenerateFrame(type)}
                                 disabled={!hasPrompt}
                                 title={hasPrompt ? 'Generate from prompt' : 'Write a prompt above first'}
-                                className="flex-1 text-xs font-medium bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white py-1.5 rounded-md transition-colors"
+                                className="flex-1 text-xs font-medium bg-me-ochre hover:bg-me-ochre/90 disabled:opacity-40 disabled:cursor-not-allowed text-white py-1.5 rounded-md transition-colors"
                               >
                                 🎨 Generate
                               </button>
                               <button
                                 onClick={() => fileRef.current?.click()}
-                                className="flex-1 text-xs font-medium border border-gray-300 hover:border-gray-400 text-gray-600 hover:text-gray-800 py-1.5 rounded-md transition-colors"
+                                className="flex-1 text-xs font-medium border border-black/15 hover:border-black/25 text-me-charcoal/60 hover:text-me-charcoal/75 py-1.5 rounded-md transition-colors"
                               >
                                 📸 Upload
                               </button>
@@ -684,9 +684,9 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
                 </div>
 
                 {/* Video section */}
-                <div className="bg-white rounded-xl border border-gray-200 p-5">
+                <div className="bg-white rounded-xl border border-black/10 p-5">
                   <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-semibold text-gray-900">Video Studio</h3>
+                    <h3 className="text-sm font-semibold text-me-charcoal/90">Video Studio</h3>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[activeDraft.status]}`}>
                       {STATUS_LABELS[activeDraft.status]}
                     </span>
@@ -697,7 +697,7 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
                       <video
                         src={activeDraft.video_url}
                         controls
-                        className="w-full max-w-xs rounded-lg border border-gray-200"
+                        className="w-full max-w-xs rounded-lg border border-black/10"
                       />
                       <div className="flex items-center gap-3">
                         <a
@@ -705,13 +705,13 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
                           download
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-block text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                          className="inline-block text-xs text-me-ochre hover:text-me-ochre font-medium"
                         >
                           ↓ Download video
                         </a>
                         <button
                           onClick={openReelPublish}
-                          className="text-xs px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors"
+                          className="text-xs px-3 py-1.5 bg-[#5C8A4A] hover:bg-[#5C8A4A] text-white rounded-lg font-medium transition-colors"
                         >
                           📅 安排发布
                         </button>
@@ -719,11 +719,11 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
                     </div>
                   ) : activeDraft.status === 'video_generating' ? (
                     <div className="space-y-2">
-                      <div className="flex items-center gap-2 text-amber-600">
+                      <div className="flex items-center gap-2 text-me-ochre">
                         <span className="animate-spin text-base">⏳</span>
                         <span className="text-sm font-medium">Video Studio is generating your Reel…</span>
                       </div>
-                      <p className="text-xs text-gray-500">You can safely close this page. We'll notify you when it's ready. Check back in the Content library.</p>
+                      <p className="text-xs text-me-charcoal/55">You can safely close this page. We'll notify you when it's ready. Check back in the Content library.</p>
                     </div>
                   ) : (
                     <button
@@ -741,7 +741,7 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
                   )}
 
                   {(!activeDraft.opening_frame_url || !activeDraft.closing_frame_url) && (
-                    <p className="text-xs text-gray-400 mt-2">
+                    <p className="text-xs text-me-charcoal/45 mt-2">
                       Upload both reference frames to enable video generation.
                     </p>
                   )}
@@ -749,10 +749,10 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
               </div>
 
               {/* Right: chat panel */}
-              <div className="flex w-full flex-shrink-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white lg:w-80">
-                <div className="px-4 py-3 border-b border-gray-100">
-                  <h3 className="text-sm font-semibold text-gray-900">✏️ AI Refinement</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">
+              <div className="flex w-full flex-shrink-0 flex-col overflow-hidden rounded-xl border border-black/10 bg-white lg:w-80">
+                <div className="px-4 py-3 border-b border-black/[.06]">
+                  <h3 className="text-sm font-semibold text-me-charcoal/90">✏️ AI Refinement</h3>
+                  <p className="text-xs text-me-charcoal/45 mt-0.5">
                     Ask Strategy Engine to change any field
                   </p>
                 </div>
@@ -762,10 +762,10 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
                   {(!activeDraft.chat_history || activeDraft.chat_history.length === 0) ? (
                     <div className="text-center py-8">
                       <p className="text-2xl mb-2">💬</p>
-                      <p className="text-xs text-gray-400">
+                      <p className="text-xs text-me-charcoal/45">
                         e.g. &ldquo;Change opening frame to show a Great Wall sunrise&rdquo;
                       </p>
-                      <p className="text-xs text-gray-400 mt-1">
+                      <p className="text-xs text-me-charcoal/45 mt-1">
                         &ldquo;Make the caption more playful&rdquo;
                       </p>
                     </div>
@@ -778,8 +778,8 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
                         <div
                           className={`max-w-[85%] rounded-xl px-3 py-2 text-xs leading-relaxed ${
                             msg.role === 'user'
-                              ? 'bg-indigo-600 text-white'
-                              : 'bg-gray-100 text-gray-700'
+                              ? 'bg-me-ochre text-white'
+                              : 'bg-me-ivory text-me-charcoal/75'
                           }`}
                         >
                           {msg.content}
@@ -789,7 +789,7 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
                   )}
                   {chatLoading && (
                     <div className="flex justify-start">
-                      <div className="bg-gray-100 text-gray-400 text-xs rounded-xl px-3 py-2 animate-pulse">
+                      <div className="bg-me-ivory text-me-charcoal/45 text-xs rounded-xl px-3 py-2 animate-pulse">
                         Strategy Engine is thinking…
                       </div>
                     </div>
@@ -798,7 +798,7 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
                 </div>
 
                 {/* Chat input */}
-                <div className="px-4 py-3 border-t border-gray-100">
+                <div className="px-4 py-3 border-t border-black/[.06]">
                   <div className="flex gap-2">
                     <input
                       type="text"
@@ -812,12 +812,12 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
                       }}
                       placeholder="Change something…"
                       disabled={chatLoading}
-                      className="flex-1 text-xs text-gray-900 border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+                      className="flex-1 text-xs text-me-charcoal/90 border border-black/10 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-me-ochre disabled:opacity-50"
                     />
                     <button
                       onClick={handleChat}
                       disabled={chatLoading || !chatInput.trim()}
-                      className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white px-3 py-2 rounded-lg text-sm transition-colors"
+                      className="bg-me-ochre hover:bg-me-ochre/90 disabled:opacity-40 text-white px-3 py-2 rounded-lg text-sm transition-colors"
                     >
                       →
                     </button>
@@ -826,7 +826,7 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
               </div>
             </div>
           ) : (
-            <div className="flex-1 flex items-center justify-center py-20 text-gray-400 text-sm">
+            <div className="flex-1 flex items-center justify-center py-20 text-me-charcoal/45 text-sm">
               Select a draft to edit, or generate a new Reel ↑
             </div>
           )}
@@ -840,11 +840,11 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
             <h2 className="text-base font-semibold mb-4">📅 安排发布到 Publishing Hub</h2>
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-gray-500 block mb-1">发布账号</label>
+                <label className="text-xs text-me-charcoal/55 block mb-1">发布账号</label>
                 <select
                   value={reelScheduleForm.account_id}
                   onChange={e => setReelScheduleForm(f => ({ ...f, account_id: e.target.value }))}
-                  className="w-full border rounded px-2 py-1.5 text-sm text-gray-900 bg-white"
+                  className="w-full border rounded px-2 py-1.5 text-sm text-me-charcoal/90 bg-white"
                 >
                   <option value="">选择账号…</option>
                   {reelAccounts.map(a => (
@@ -853,35 +853,35 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
                 </select>
               </div>
               <div>
-                <label className="text-xs text-gray-500 block mb-1">发布时间（NZT）</label>
+                <label className="text-xs text-me-charcoal/55 block mb-1">发布时间（NZT）</label>
                 <input
                   type="datetime-local"
                   value={reelScheduleForm.scheduled_at}
                   onChange={e => setReelScheduleForm(f => ({ ...f, scheduled_at: e.target.value }))}
-                  className="w-full border rounded px-2 py-1.5 text-sm text-gray-900 bg-white"
+                  className="w-full border rounded px-2 py-1.5 text-sm text-me-charcoal/90 bg-white"
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-500 block mb-1">文案（Facebook Caption）</label>
+                <label className="text-xs text-me-charcoal/55 block mb-1">文案（Facebook Caption）</label>
                 <textarea
                   value={reelScheduleForm.caption}
                   onChange={e => setReelScheduleForm(f => ({ ...f, caption: e.target.value }))}
                   rows={4}
-                  className="w-full border rounded px-2 py-1.5 text-sm text-gray-900 bg-white resize-none"
+                  className="w-full border rounded px-2 py-1.5 text-sm text-me-charcoal/90 bg-white resize-none"
                 />
               </div>
             </div>
             <div className="flex gap-2 mt-5 justify-end">
               <button
                 onClick={() => setReelPubModal(false)}
-                className="px-3 py-1.5 text-sm border rounded hover:bg-gray-50"
+                className="px-3 py-1.5 text-sm border rounded hover:bg-me-ivory"
               >
                 取消
               </button>
               <button
                 onClick={handleReelPublish}
                 disabled={!reelScheduleForm.account_id || reelScheduleLoading}
-                className="px-3 py-1.5 text-sm bg-green-500 text-white rounded disabled:opacity-50 hover:bg-green-600 flex items-center gap-2"
+                className="px-3 py-1.5 text-sm bg-[#5C8A4A] text-white rounded disabled:opacity-50 hover:bg-[#5C8A4A] flex items-center gap-2"
               >
                 {reelScheduleLoading ? (
                   <>
@@ -921,14 +921,14 @@ function EditableField({ label, value, saving, rows, onSave }: EditableFieldProp
   }, [value])
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-4">
+    <div className="bg-white rounded-xl border border-black/10 p-4">
       <div className="flex items-center justify-between mb-2">
-        <label className="text-xs font-semibold text-gray-700">{label}</label>
+        <label className="text-xs font-semibold text-me-charcoal/75">{label}</label>
         {dirty && (
           <button
             onClick={() => { onSave(localValue); setDirty(false) }}
             disabled={saving}
-            className="text-xs font-medium text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
+            className="text-xs font-medium text-me-ochre hover:text-me-ochre disabled:opacity-50"
           >
             {saving ? 'Saving…' : 'Save'}
           </button>
@@ -947,7 +947,7 @@ function EditableField({ label, value, saving, rows, onSave }: EditableFieldProp
             setDirty(false)
           }
         }}
-        className="w-full text-xs text-gray-700 border-none outline-none resize-none leading-relaxed placeholder-gray-300"
+        className="w-full text-xs text-me-charcoal/75 border-none outline-none resize-none leading-relaxed placeholder-me-charcoal/35"
         placeholder={`Enter ${label.toLowerCase()}…`}
       />
     </div>

@@ -23,8 +23,8 @@ const ROUTES: { id: RouteId; label: string; icon: string; inputLabel: string; in
 const PLATFORMS = ['facebook', 'tiktok', 'instagram']
 
 const CAMPAIGN_BORDER_COLORS = [
-  'border-l-blue-500', 'border-l-emerald-500', 'border-l-purple-500',
-  'border-l-amber-500', 'border-l-rose-500',
+  'border-l-[#3E6E8C]', 'border-l-[#5C8A4A]', 'border-l-me-ochre',
+  'border-l-me-gold', 'border-l-[#C2453A]',
 ]
 
 export function GenerationDrawer({ clientId, open, onClose, executionItemId }: Props) {
@@ -142,14 +142,14 @@ export function GenerationDrawer({ clientId, open, onClose, executionItemId }: P
       {/* Drawer */}
       <div className="fixed right-0 top-0 h-full w-full max-w-[480px] bg-white z-50 shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-black/[.06] flex-shrink-0">
           <div>
-            <h2 className="text-base font-semibold text-gray-900">生成单条内容</h2>
+            <h2 className="text-base font-semibold text-me-charcoal/90">生成单条内容</h2>
             {hasBrief === false && (
-              <p className="text-xs text-amber-600 mt-0.5">⚠️ 尚无 Master Brief，生成将缺少品牌上下文</p>
+              <p className="text-xs text-me-ochre mt-0.5">⚠️ 尚无 Master Brief，生成将缺少品牌上下文</p>
             )}
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+          <button onClick={onClose} className="text-me-charcoal/45 hover:text-me-charcoal/60 text-xl leading-none">×</button>
         </div>
 
         {/* Scrollable body */}
@@ -157,11 +157,11 @@ export function GenerationDrawer({ clientId, open, onClose, executionItemId }: P
 
           {/* 来自执行看板的提示横幅 */}
           {executionItemId && (
-            <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 flex items-start gap-2">
+            <div className="rounded-lg border border-me-ochre/30 bg-me-ochre/10 px-3 py-2.5 flex items-start gap-2">
               <span className="text-base">🔗</span>
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold text-indigo-800">来自执行看板</p>
-                <p className="text-[11px] text-indigo-600 leading-relaxed mt-0.5">
+                <p className="text-xs font-semibold text-me-ochre">来自执行看板</p>
+                <p className="text-[11px] text-me-ochre leading-relaxed mt-0.5">
                   生成的内容会自动关联回该执行项；帖子发布后，执行项会自动标记为「已完成」。
                 </p>
               </div>
@@ -170,7 +170,7 @@ export function GenerationDrawer({ clientId, open, onClose, executionItemId }: P
 
           {/* Step 1: Route */}
           <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">1 · 生成路线</p>
+            <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide mb-2">1 · 生成路线</p>
             <div className="grid grid-cols-3 gap-2">
               {ROUTES.map(r => (
                 <button
@@ -178,8 +178,8 @@ export function GenerationDrawer({ clientId, open, onClose, executionItemId }: P
                   onClick={() => handleRouteChange(r.id)}
                   className={`flex flex-col items-center py-3 px-2 rounded-xl border-2 transition-colors text-center ${
                     route === r.id
-                      ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                      ? 'border-me-ochre bg-me-ochre/10 text-me-ochre'
+                      : 'border-black/10 text-me-charcoal/60 hover:border-black/15'
                   }`}
                 >
                   <span className="text-xl mb-1">{r.icon}</span>
@@ -191,26 +191,26 @@ export function GenerationDrawer({ clientId, open, onClose, executionItemId }: P
 
           {/* Step 2: Content Mode */}
           <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">2 · 内容模式</p>
+            <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide mb-2">2 · 内容模式</p>
             <div className="space-y-2">
               {(['brand', 'campaign'] as ContentMode[]).map(m => (
                 <label
                   key={m}
                   className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-colors ${
-                    mode === m ? 'border-indigo-600 bg-indigo-50' : 'border-gray-200 hover:border-gray-300'
+                    mode === m ? 'border-me-ochre bg-me-ochre/10' : 'border-black/10 hover:border-black/15'
                   }`}
                 >
                   <input
                     type="radio"
                     checked={mode === m}
                     onChange={() => handleModeChange(m)}
-                    className="mt-0.5 accent-indigo-600"
+                    className="mt-0.5 accent-me-ochre"
                   />
                   <div>
-                    <p className="text-sm font-medium text-gray-800">
+                    <p className="text-sm font-medium text-me-charcoal/75">
                       {m === 'brand' ? '品牌内容' : '推广活动内容'}
                     </p>
-                    <p className="text-xs text-gray-400 mt-0.5">
+                    <p className="text-xs text-me-charcoal/45 mt-0.5">
                       {m === 'brand'
                         ? '仅读取 Master Brief，适合长期品牌内容'
                         : '读取 MB + 推广活动，适合当下产品推广'}
@@ -224,7 +224,7 @@ export function GenerationDrawer({ clientId, open, onClose, executionItemId }: P
             {mode === 'campaign' && (
               <div className="mt-3">
                 {campaigns.length === 0 ? (
-                  <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2">
+                  <p className="text-xs text-me-ochre bg-me-ochre/10 rounded-lg px-3 py-2">
                     当前无进行中的活动。请先在「推广活动」tab 中创建活动。
                   </p>
                 ) : (
@@ -236,20 +236,20 @@ export function GenerationDrawer({ clientId, open, onClose, executionItemId }: P
                           CAMPAIGN_BORDER_COLORS[i % CAMPAIGN_BORDER_COLORS.length]
                         } ${
                           selectedCampaignId === c.id
-                            ? 'border-indigo-600 bg-indigo-50'
-                            : 'border-gray-200 hover:border-gray-300'
+                            ? 'border-me-ochre bg-me-ochre/10'
+                            : 'border-black/10 hover:border-black/15'
                         }`}
                       >
                         <input
                           type="radio"
                           checked={selectedCampaignId === c.id}
                           onChange={() => setSelectedCampaignId(c.id)}
-                          className="accent-indigo-600"
+                          className="accent-me-ochre"
                         />
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-gray-800 truncate">{c.title}</p>
+                          <p className="text-sm font-medium text-me-charcoal/75 truncate">{c.title}</p>
                           {c.valid_from && (
-                            <p className="text-xs text-gray-400">{c.valid_from} → {c.valid_until ?? '—'}</p>
+                            <p className="text-xs text-me-charcoal/45">{c.valid_from} → {c.valid_until ?? '—'}</p>
                           )}
                         </div>
                       </label>
@@ -262,7 +262,7 @@ export function GenerationDrawer({ clientId, open, onClose, executionItemId }: P
 
           {/* Step 3: Input */}
           <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+            <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide mb-2">
               3 · {activeRoute.inputLabel}
             </p>
             <input
@@ -270,13 +270,13 @@ export function GenerationDrawer({ clientId, open, onClose, executionItemId }: P
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && !generating && handleGenerate()}
               placeholder={activeRoute.inputPlaceholder}
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors"
+              className="w-full bg-me-ivory border border-black/10 rounded-xl px-4 py-2.5 text-sm text-me-charcoal/90 placeholder-me-charcoal/45 focus:outline-none focus:ring-2 focus:ring-me-ochre focus:bg-white transition-colors"
             />
           </div>
 
           {/* Step 4: Platforms */}
           <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">4 · 发布平台</p>
+            <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide mb-2">4 · 发布平台</p>
             <div className="flex gap-2">
               {PLATFORMS.map(p => (
                 <button
@@ -284,8 +284,8 @@ export function GenerationDrawer({ clientId, open, onClose, executionItemId }: P
                   onClick={() => togglePlatform(p)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium border-2 transition-colors capitalize ${
                     platforms.includes(p)
-                      ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                      : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                      ? 'border-me-ochre bg-me-ochre/10 text-me-ochre'
+                      : 'border-black/10 text-me-charcoal/55 hover:border-black/15'
                   }`}
                 >
                   {p}
@@ -295,21 +295,21 @@ export function GenerationDrawer({ clientId, open, onClose, executionItemId }: P
           </div>
 
           {error && (
-            <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>
+            <p className="text-xs text-[#C2453A] bg-[#C2453A]/10 rounded-lg px-3 py-2">{error}</p>
           )}
 
           {/* Success state */}
           {savedCount !== null && (
-            <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-4 text-center space-y-3">
-              <p className="text-sm font-semibold text-green-700">
+            <div className="bg-[#5C8A4A]/10 border border-[#5C8A4A]/30 rounded-xl px-4 py-4 text-center space-y-3">
+              <p className="text-sm font-semibold text-[#5C8A4A]">
                 ✓ 已保存 {savedCount} 条内容草稿
               </p>
-              <p className="text-xs text-green-600">
+              <p className="text-xs text-[#5C8A4A]">
                 前往内容板批量检查和审批
               </p>
               <a
                 href={`/dashboard/content?client=${clientId}`}
-                className="inline-block text-xs bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                className="inline-block text-xs bg-[#5C8A4A] hover:bg-[#5C8A4A] text-white px-4 py-2 rounded-lg font-medium transition-colors"
               >
                 前往内容板 →
               </a>
@@ -318,11 +318,11 @@ export function GenerationDrawer({ clientId, open, onClose, executionItemId }: P
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-gray-100 flex-shrink-0 space-y-2">
+        <div className="px-6 py-4 border-t border-black/[.06] flex-shrink-0 space-y-2">
           {savedCount !== null ? (
             <button
               onClick={() => { setSavedCount(null); setInput(''); setError('') }}
-              className="w-full py-3 rounded-xl text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
+              className="w-full py-3 rounded-xl text-sm font-medium border border-black/10 text-me-charcoal/60 hover:bg-me-ivory transition-colors"
             >
               再生成一条
             </button>
@@ -330,7 +330,7 @@ export function GenerationDrawer({ clientId, open, onClose, executionItemId }: P
             <button
               onClick={handleGenerate}
               disabled={generating || !input.trim() || platforms.length === 0}
-              className="w-full py-3 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 transition-colors"
+              className="w-full py-3 rounded-xl text-sm font-semibold bg-me-ochre hover:bg-me-ochre/90 text-white disabled:opacity-50 transition-colors"
             >
               {generating ? (
                 <span className="flex items-center justify-center gap-2">
@@ -340,7 +340,7 @@ export function GenerationDrawer({ clientId, open, onClose, executionItemId }: P
               ) : '生成并保存草稿'}
             </button>
           )}
-          <p className="text-center text-xs text-gray-400">
+          <p className="text-center text-xs text-me-charcoal/45">
             批量生成请前往「推广活动」tab 使用一键生成
           </p>
         </div>

@@ -38,20 +38,20 @@ export function CmsPanel({ clientId }: Props) {
   return (
     <div className="space-y-5">
       {/* Provider tabs */}
-      <div className="flex items-center gap-1 border-b border-gray-200">
+      <div className="flex items-center gap-1 border-b border-black/10">
         {PROVIDER_TABS.map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveProvider(tab.id)}
             className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
               activeProvider === tab.id
-                ? 'border-indigo-600 text-indigo-700'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+                ? 'border-me-ochre text-me-ochre'
+                : 'border-transparent text-me-charcoal/55 hover:text-me-charcoal/75'
             }`}
           >
             {tab.label}
             {tab.soon && (
-              <span className="ml-1.5 text-[10px] text-gray-400 font-normal">即将推出</span>
+              <span className="ml-1.5 text-[10px] text-me-charcoal/45 font-normal">即将推出</span>
             )}
           </button>
         ))}
@@ -121,7 +121,7 @@ function GithubProviderPanel({ clientId }: { clientId: string }) {
       ) : (
         <button
           onClick={() => setFormOpen(true)}
-          className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl transition-colors"
+          className="w-full py-3 bg-me-ochre hover:bg-me-ochre/90 text-white text-sm font-semibold rounded-xl transition-colors"
         >
           🔗 连接 GitHub 仓库
         </button>
@@ -132,13 +132,13 @@ function GithubProviderPanel({ clientId }: { clientId: string }) {
 
 function GithubIntroCard() {
   return (
-    <div className="rounded-xl bg-indigo-50 border border-indigo-200 p-5 space-y-2">
-      <p className="text-sm font-semibold text-indigo-800">GitHub CMS 连接器</p>
-      <p className="text-sm text-indigo-700 leading-relaxed">
+    <div className="rounded-xl bg-me-ochre/10 border border-me-ochre/30 p-5 space-y-2">
+      <p className="text-sm font-semibold text-me-ochre">GitHub CMS 连接器</p>
+      <p className="text-sm text-me-ochre leading-relaxed">
         连接客户 GitHub 仓库后，Magic Engine 可以自动将 SEO 修复（标题、描述）
         作为 Pull Request 提交到仓库。只需合并 PR，网站即刻更新。
       </p>
-      <ul className="text-xs text-indigo-600 space-y-1 mt-2">
+      <ul className="text-xs text-me-ochre space-y-1 mt-2">
         <li>✓ 无需手动编辑代码文件</li>
         <li>✓ 每次修复都有独立 PR，可审查可回滚</li>
         <li>✓ PAT 加密存储，从不明文出现在日志中</li>
@@ -250,7 +250,7 @@ function GithubConnectForm({ clientId, onConnected, onCancel }: GithubConnectFor
           minLength={10}
           autoComplete="new-password"
         />
-        <p className="mt-1 text-xs text-gray-400">
+        <p className="mt-1 text-xs text-me-charcoal/45">
           需要 <code>contents:write</code> + <code>pull_requests:write</code> 权限。
           PAT 加密后存储，不会明文出现在日志中。
         </p>
@@ -392,7 +392,7 @@ function WordpressProviderPanel({ clientId }: { clientId: string }) {
       ) : (
         <button
           onClick={() => setFormOpen(true)}
-          className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl transition-colors"
+          className="w-full py-3 bg-me-ochre hover:bg-me-ochre/90 text-white text-sm font-semibold rounded-xl transition-colors"
         >
           🔗 连接 WordPress 站点
         </button>
@@ -403,13 +403,13 @@ function WordpressProviderPanel({ clientId }: { clientId: string }) {
 
 function WordpressIntroCard() {
   return (
-    <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-5 space-y-2">
-      <p className="text-sm font-semibold text-emerald-800">WordPress 连接器</p>
-      <p className="text-sm text-emerald-700 leading-relaxed">
+    <div className="rounded-xl bg-[#5C8A4A]/10 border border-[#5C8A4A]/30 p-5 space-y-2">
+      <p className="text-sm font-semibold text-[#5C8A4A]">WordPress 连接器</p>
+      <p className="text-sm text-[#5C8A4A] leading-relaxed">
         连接客户 WordPress 站点后，Magic Engine 可以将博客 / 落地页以草稿（Draft）形式
         推送到站点。FDE 在 WP 后台确认预览后再发布上线，全程留痕、可审计、可回滚。
       </p>
-      <ul className="text-xs text-emerald-600 space-y-1 mt-2">
+      <ul className="text-xs text-[#5C8A4A] space-y-1 mt-2">
         <li>✓ 使用 WP 5.6+ 原生 Application Password，无需安装插件</li>
         <li>✓ 推荐为 Magic Engine 创建独立用户（最小权限）</li>
         <li>✓ Application Password 加密存储，从不明文出现在日志中</li>
@@ -470,7 +470,7 @@ function WordpressConnectForm({ clientId, onConnected, onCancel }: WordpressConn
           className={INPUT_CLASS}
           required
         />
-        <p className="mt-1 text-xs text-gray-400">
+        <p className="mt-1 text-xs text-me-charcoal/45">
           必须是 HTTPS + 公网域名。请勿带路径或末尾斜杠。
         </p>
       </FormField>
@@ -484,7 +484,7 @@ function WordpressConnectForm({ clientId, onConnected, onCancel }: WordpressConn
           required
           autoComplete="username"
         />
-        <p className="mt-1 text-xs text-gray-400">
+        <p className="mt-1 text-xs text-me-charcoal/45">
           建议为 Magic Engine 单独创建一个低权限用户（仅 publish_posts），不要复用 admin 账号。
         </p>
       </FormField>
@@ -500,7 +500,7 @@ function WordpressConnectForm({ clientId, onConnected, onCancel }: WordpressConn
           minLength={10}
           autoComplete="new-password"
         />
-        <p className="mt-1 text-xs text-gray-400">
+        <p className="mt-1 text-xs text-me-charcoal/45">
           在 WP 后台「用户 → 个人资料 → Application Passwords」中生成。
           加密存储，不会明文出现在日志或界面中。
         </p>
@@ -664,13 +664,13 @@ add_action('init', function () {
       />
 
       {/* P14.B.1 — Yoast SEO Extension card */}
-      <div className={`rounded-xl border p-4 space-y-3 ${yoastInstalled ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+      <div className={`rounded-xl border p-4 space-y-3 ${yoastInstalled ? 'border-[#5C8A4A]/30 bg-[#5C8A4A]/10' : 'border-me-ochre/30 bg-me-ochre/10'}`}>
         <div className="flex items-center justify-between">
           <div>
-            <p className={`text-sm font-semibold ${yoastInstalled ? 'text-emerald-800' : 'text-amber-800'}`}>
+            <p className={`text-sm font-semibold ${yoastInstalled ? 'text-[#5C8A4A]' : 'text-me-ochre'}`}>
               {yoastInstalled ? '✅ SEO 扩展已启用' : '⚠️ SEO 扩展未安装'}
             </p>
-            <p className={`text-xs mt-0.5 ${yoastInstalled ? 'text-emerald-700' : 'text-amber-700'}`}>
+            <p className={`text-xs mt-0.5 ${yoastInstalled ? 'text-[#5C8A4A]' : 'text-me-ochre'}`}>
               {yoastInstalled
                 ? '发布时将自动写入 SEO 标题、描述和焦点关键词到 Yoast。'
                 : '安装 mu-plugin 后，ME 发布时可自动填写 Yoast SEO 字段。'}
@@ -679,42 +679,42 @@ add_action('init', function () {
           <button
             onClick={() => void handleYoastProbe()}
             disabled={probing}
-            className="shrink-0 px-3 py-1.5 text-xs font-medium border border-current rounded-lg disabled:opacity-50 transition-colors text-indigo-600 border-indigo-300 hover:bg-indigo-50"
+            className="shrink-0 px-3 py-1.5 text-xs font-medium border border-current rounded-lg disabled:opacity-50 transition-colors text-me-ochre border-me-ochre/40 hover:bg-me-ochre/10"
           >
             {probing ? '检测中…' : '验证安装'}
           </button>
         </div>
 
         {probeResult && (
-          <p className="text-xs text-gray-700 bg-white rounded-lg px-3 py-2 border border-gray-200">
+          <p className="text-xs text-me-charcoal/75 bg-white rounded-lg px-3 py-2 border border-black/10">
             {probeResult}
           </p>
         )}
 
         {!yoastInstalled && (
           <details className="text-xs">
-            <summary className="cursor-pointer text-amber-700 font-medium hover:underline">
+            <summary className="cursor-pointer text-me-ochre font-medium hover:underline">
               查看安装说明 →
             </summary>
             <div className="mt-2 space-y-2">
-              <p className="text-gray-600">
+              <p className="text-me-charcoal/60">
                 在 WP 站点服务器上创建以下文件（mu-plugins 目录自动加载，无需激活）：
               </p>
-              <p className="text-gray-600 font-medium">
-                路径：<code className="bg-white px-1 rounded border border-gray-200">/wp-content/mu-plugins/me-yoast-rest-api.php</code>
+              <p className="text-me-charcoal/60 font-medium">
+                路径：<code className="bg-white px-1 rounded border border-black/10">/wp-content/mu-plugins/me-yoast-rest-api.php</code>
               </p>
               <div className="relative">
-                <pre className="bg-gray-900 text-green-300 rounded-lg p-3 overflow-x-auto text-[11px] leading-relaxed whitespace-pre-wrap break-all">
+                <pre className="bg-me-charcoal/90 text-me-gold rounded-lg p-3 overflow-x-auto text-[11px] leading-relaxed whitespace-pre-wrap break-all">
                   {YOAST_MU_PLUGIN}
                 </pre>
                 <button
                   onClick={() => { void navigator.clipboard.writeText(YOAST_MU_PLUGIN) }}
-                  className="absolute top-2 right-2 px-2 py-1 text-[10px] bg-gray-700 hover:bg-gray-600 text-gray-300 rounded"
+                  className="absolute top-2 right-2 px-2 py-1 text-[10px] bg-me-charcoal/75 hover:bg-me-charcoal/60 text-me-charcoal/35 rounded"
                 >
                   复制
                 </button>
               </div>
-              <p className="text-gray-500">
+              <p className="text-me-charcoal/55">
                 安装后点击「验证安装」确认 Yoast SEO 字段已注册。
               </p>
             </div>
@@ -723,11 +723,11 @@ add_action('init', function () {
       </div>
 
       {/* P14.B.6 — Default WP category */}
-      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-2">
+      <div className="rounded-xl border border-black/10 bg-me-ivory p-4 space-y-2">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm font-semibold text-gray-800">默认发布分类</p>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <p className="text-sm font-semibold text-me-charcoal/75">默认发布分类</p>
+            <p className="text-xs text-me-charcoal/55 mt-0.5">
               {status.wpDefaultCategoryId != null
                 ? `当前：ID ${status.wpDefaultCategoryId}`
                 : '当前：未设置（WP 默认 — 未分类）'}
@@ -736,7 +736,7 @@ add_action('init', function () {
           {!categoryEdit && (
             <button
               onClick={() => { setCategoryEdit(true); setCategoryMsg(null) }}
-              className="text-xs text-indigo-600 hover:underline"
+              className="text-xs text-me-ochre hover:underline"
             >
               {status.wpDefaultCategoryId != null ? '修改' : '设置'}
             </button>
@@ -751,18 +751,18 @@ add_action('init', function () {
               value={categoryInput}
               onChange={e => setCategoryInput(e.target.value)}
               placeholder="WP 分类 ID，留空 = 不设置"
-              className="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="flex-1 px-3 py-1.5 border border-black/15 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-me-ochre"
             />
             <button
               onClick={() => void handleCategorySave()}
               disabled={categorySaving}
-              className="px-3 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg"
+              className="px-3 py-1.5 text-xs font-semibold bg-me-ochre hover:bg-me-ochre/90 disabled:opacity-50 text-white rounded-lg"
             >
               {categorySaving ? '保存中…' : '保存'}
             </button>
             <button
               onClick={() => { setCategoryEdit(false); setCategoryMsg(null) }}
-              className="px-2 py-1.5 text-xs text-gray-500 hover:text-gray-700"
+              className="px-2 py-1.5 text-xs text-me-charcoal/55 hover:text-me-charcoal/75"
             >
               取消
             </button>
@@ -770,12 +770,12 @@ add_action('init', function () {
         )}
 
         {categoryMsg && (
-          <p className="text-xs text-gray-700 bg-white rounded-lg px-3 py-2 border border-gray-200">
+          <p className="text-xs text-me-charcoal/75 bg-white rounded-lg px-3 py-2 border border-black/10">
             {categoryMsg}
           </p>
         )}
 
-        <p className="text-xs text-gray-400">
+        <p className="text-xs text-me-charcoal/45">
           可在 WP 后台「文章 → 分类目录」找到分类 ID（鼠标悬停分类链接查看 tag_ID 参数）。
         </p>
       </div>
@@ -789,10 +789,10 @@ add_action('init', function () {
 
 function ShopifyComingSoonPanel() {
   return (
-    <div className="rounded-xl bg-gray-50 border border-gray-200 p-6 text-center space-y-2">
+    <div className="rounded-xl bg-me-ivory border border-black/10 p-6 text-center space-y-2">
       <p className="text-3xl">🛍️</p>
-      <p className="text-sm font-semibold text-gray-800">Shopify 连接器</p>
-      <p className="text-xs text-gray-500 leading-relaxed max-w-md mx-auto">
+      <p className="text-sm font-semibold text-me-charcoal/75">Shopify 连接器</p>
+      <p className="text-xs text-me-charcoal/55 leading-relaxed max-w-md mx-auto">
         即将上线（P14.A.4）。届时可通过 Shopify Admin API 推送博客文章和页面，
         默认 Draft-first，FDE 在 Shopify 后台确认后发布。
       </p>
@@ -806,7 +806,7 @@ function ShopifyComingSoonPanel() {
 
 function LoadingRow() {
   return (
-    <div className="flex items-center justify-center py-16 gap-2 text-gray-400">
+    <div className="flex items-center justify-center py-16 gap-2 text-me-charcoal/45">
       <span className="animate-spin text-lg">⟳</span>
       <span className="text-sm">加载中…</span>
     </div>
@@ -815,16 +815,16 @@ function LoadingRow() {
 
 function ErrorRow({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
-    <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">
+    <div className="rounded-xl bg-[#C2453A]/10 border border-[#C2453A]/30 p-4 text-sm text-[#C2453A]">
       {message}
-      <button onClick={onRetry} className="ml-3 underline text-red-500">重试</button>
+      <button onClick={onRetry} className="ml-3 underline text-[#C2453A]">重试</button>
     </div>
   )
 }
 
 function ErrorBanner({ message }: { message: string }) {
   return (
-    <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+    <div className="rounded-lg bg-[#C2453A]/10 border border-[#C2453A]/30 px-4 py-3 text-sm text-[#C2453A]">
       {message}
     </div>
   )
@@ -832,9 +832,9 @@ function ErrorBanner({ message }: { message: string }) {
 
 function StatusBadge({ status }: { status: 'connected' | 'disconnected' | 'error' }) {
   const style =
-    status === 'connected' ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
-    : status === 'error'   ? 'bg-red-100 text-red-700 border-red-200'
-    :                        'bg-gray-100 text-gray-600 border-gray-200'
+    status === 'connected' ? 'bg-[#5C8A4A]/12 text-[#5C8A4A] border-[#5C8A4A]/30'
+    : status === 'error'   ? 'bg-[#C2453A]/12 text-[#C2453A] border-[#C2453A]/30'
+    :                        'bg-me-ivory text-me-charcoal/60 border-black/10'
 
   const label =
     status === 'connected' ? '已连接'
@@ -851,11 +851,11 @@ function StatusBadge({ status }: { status: 'connected' | 'disconnected' | 'error
 
 function InfoTable({ rows }: { rows: Array<{ label: string; value: React.ReactNode }> }) {
   return (
-    <div className="rounded-xl bg-gray-50 border border-gray-200 divide-y divide-gray-200">
+    <div className="rounded-xl bg-me-ivory border border-black/10 divide-y divide-black/10">
       {rows.map(({ label, value }) => (
         <div key={label} className="flex items-center justify-between px-4 py-3 text-sm gap-4">
-          <span className="text-gray-500 shrink-0">{label}</span>
-          <span className="font-mono text-xs font-medium text-gray-900 text-right break-all">{value}</span>
+          <span className="text-me-charcoal/55 shrink-0">{label}</span>
+          <span className="font-mono text-xs font-medium text-me-charcoal/90 text-right break-all">{value}</span>
         </div>
       ))}
     </div>
@@ -864,7 +864,7 @@ function InfoTable({ rows }: { rows: Array<{ label: string; value: React.ReactNo
 
 function LastErrorRow({ message }: { message: string }) {
   return (
-    <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-xs text-red-700">
+    <div className="rounded-lg bg-[#C2453A]/10 border border-[#C2453A]/30 px-4 py-3 text-xs text-[#C2453A]">
       <span className="font-semibold">错误：</span>{message}
     </div>
   )
@@ -902,7 +902,7 @@ function ConnectionActions({
       <button
         onClick={onTest}
         disabled={testing || testDisabled}
-        className="flex-1 py-2.5 border border-indigo-600 text-indigo-600 hover:bg-indigo-50 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-semibold rounded-xl transition-colors"
+        className="flex-1 py-2.5 border border-me-ochre text-me-ochre hover:bg-me-ochre/10 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-semibold rounded-xl transition-colors"
         title={testDisabled ? '将随 P14.A.5 启用' : undefined}
       >
         {testing ? '测试中…' : '🔄 测试连接'}
@@ -911,7 +911,7 @@ function ConnectionActions({
       {!confirmDelete ? (
         <button
           onClick={onConfirmDeleteRequest}
-          className="px-5 py-2.5 border border-red-300 text-red-600 hover:bg-red-50 text-sm font-medium rounded-xl transition-colors"
+          className="px-5 py-2.5 border border-[#C2453A]/40 text-[#C2453A] hover:bg-[#C2453A]/10 text-sm font-medium rounded-xl transition-colors"
         >
           断开
         </button>
@@ -919,7 +919,7 @@ function ConnectionActions({
         <button
           onClick={onConfirmDelete}
           disabled={disconnecting}
-          className="px-5 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
+          className="px-5 py-2.5 bg-[#C2453A] hover:bg-[#C2453A] disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
         >
           {disconnecting ? '断开中…' : '确认断开'}
         </button>
@@ -934,14 +934,14 @@ function FormActions({ saving, onCancel }: { saving: boolean; onCancel: () => vo
       <button
         type="submit"
         disabled={saving}
-        className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
+        className="flex-1 py-2.5 bg-me-ochre hover:bg-me-ochre/90 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
       >
         {saving ? '保存中…' : '保存连接'}
       </button>
       <button
         type="button"
         onClick={onCancel}
-        className="px-5 py-2.5 border border-gray-300 hover:bg-gray-50 text-sm font-medium rounded-xl transition-colors"
+        className="px-5 py-2.5 border border-black/15 hover:bg-me-ivory text-sm font-medium rounded-xl transition-colors"
       >
         取消
       </button>
@@ -960,9 +960,9 @@ function FormField({
 }) {
   return (
     <div className="space-y-1.5">
-      <label className="text-xs font-medium text-gray-700">
+      <label className="text-xs font-medium text-me-charcoal/75">
         {label}
-        {required && <span className="ml-1 text-red-500">*</span>}
+        {required && <span className="ml-1 text-[#C2453A]">*</span>}
       </label>
       {children}
     </div>
@@ -970,6 +970,6 @@ function FormField({
 }
 
 const INPUT_CLASS =
-  'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 ' +
-  'focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ' +
-  'placeholder-gray-400'
+  'w-full px-3 py-2 border border-black/15 rounded-lg text-sm text-me-charcoal/90 ' +
+  'focus:outline-none focus:ring-2 focus:ring-me-ochre focus:border-transparent ' +
+  'placeholder-me-charcoal/45'

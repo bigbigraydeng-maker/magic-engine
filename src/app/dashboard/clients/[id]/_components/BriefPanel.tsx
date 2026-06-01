@@ -76,7 +76,7 @@ export function BriefPanel({ clientId }: Props) {
   if (loading) {
     return (
       <div className="flex h-48 items-center justify-center">
-        <div className="animate-pulse text-sm font-semibold text-slate-400">Loading brief...</div>
+        <div className="animate-pulse text-sm font-semibold text-me-charcoal/45">Loading brief...</div>
       </div>
     );
   }
@@ -86,31 +86,31 @@ export function BriefPanel({ clientId }: Props) {
       {/* Left panel — full width in document mode */}
       <div className={viewMode === 'document' && brief ? 'min-w-0 xl:col-span-2' : 'min-w-0'}>
         {!brief ? (
-          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="rounded-xl border border-black/10 bg-white p-5 shadow-sm">
             <div className="mb-4">
-              <h3 className="text-base font-black text-slate-950">Generate Master Brief</h3>
-              <p className="mt-1 text-xs font-semibold text-slate-500">
+              <h3 className="font-display text-base font-semibold tracking-tight text-me-charcoal">Generate Master Brief</h3>
+              <p className="mt-1 text-xs font-semibold text-me-charcoal/55">
                 Provide brand data sources. Strategy Engine will analyze them and generate a complete brand strategy document.
               </p>
             </div>
             <BriefSourcesForm clientId={clientId} onGenerated={handleGenerated} />
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="overflow-hidden rounded-xl border border-black/10 bg-white shadow-sm">
             {/* Brief header: title + view toggle + actions */}
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
-              <h3 className="text-xl font-black text-slate-950">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-black/[.06] px-5 py-4">
+              <h3 className="font-display text-xl font-semibold tracking-tight text-me-charcoal">
                 {brief.brand_name ?? 'Master Brief'}
               </h3>
               <div className="flex flex-wrap items-center gap-2">
                 {/* View mode toggle */}
-                <div className="flex overflow-hidden rounded-lg border border-slate-200 bg-white text-xs">
+                <div className="flex overflow-hidden rounded-lg border border-black/10 bg-white text-xs">
                   <button
                     onClick={() => setViewMode('edit')}
                     className={`px-4 py-2 font-black transition-colors ${
                       viewMode === 'edit'
-                        ? 'bg-slate-950 text-white'
-                        : 'text-slate-500 hover:bg-slate-50'
+                        ? 'bg-me-charcoal text-white'
+                        : 'text-me-charcoal/55 hover:bg-me-ivory'
                     }`}
                   >
                     Edit
@@ -119,8 +119,8 @@ export function BriefPanel({ clientId }: Props) {
                     onClick={() => setViewMode('document')}
                     className={`px-4 py-2 font-black transition-colors ${
                       viewMode === 'document'
-                        ? 'bg-slate-950 text-white'
-                        : 'text-slate-500 hover:bg-slate-50'
+                        ? 'bg-me-charcoal text-white'
+                        : 'text-me-charcoal/55 hover:bg-me-ivory'
                     }`}
                   >
                     Document
@@ -129,7 +129,7 @@ export function BriefPanel({ clientId }: Props) {
                 {viewMode === 'document' && (
                   <button
                     onClick={() => window.print()}
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-black text-slate-500 transition-colors hover:text-slate-800"
+                    className="rounded-lg border border-black/10 px-3 py-2 text-xs font-black text-me-charcoal/55 transition-colors hover:text-me-charcoal/75"
                     title="Print or save as PDF"
                   >
                     Print
@@ -137,7 +137,7 @@ export function BriefPanel({ clientId }: Props) {
                 )}
                 <button
                   onClick={() => setBrief(null)}
-                  className="rounded-lg px-3 py-2 text-xs font-black text-slate-400 transition-colors hover:bg-slate-50 hover:text-cyan-800"
+                  className="rounded-lg px-3 py-2 text-xs font-black text-me-charcoal/45 transition-colors hover:bg-me-ivory hover:text-me-ochre"
                   title="Generate a new brief"
                 >
                   + New
@@ -166,7 +166,7 @@ export function BriefPanel({ clientId }: Props) {
 
       {/* Right panel — hidden in document mode */}
       {viewMode === 'edit' && (
-        <div className="min-h-[520px] rounded-xl border border-slate-200 bg-white shadow-sm print:hidden xl:sticky xl:top-5 xl:h-[calc(100vh-190px)]">
+        <div className="min-h-[520px] rounded-xl border border-black/10 bg-white shadow-sm print:hidden xl:sticky xl:top-5 xl:h-[calc(100vh-190px)]">
           <BriefChat
             briefId={brief?.id ?? ''}
             clientId={clientId}

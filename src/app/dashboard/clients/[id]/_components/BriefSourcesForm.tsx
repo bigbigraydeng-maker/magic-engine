@@ -184,12 +184,12 @@ export function BriefSourcesForm({ clientId, onGenerated }: Props) {
   return (
     <div className="space-y-5">
       {discoveryLoaded && (
-        <div className="flex flex-col gap-1 text-xs text-indigo-700 bg-indigo-50 rounded-lg px-3 py-2">
+        <div className="flex flex-col gap-1 text-xs text-me-ochre bg-me-ochre/10 rounded-lg px-3 py-2">
           <div className="flex items-center gap-2">
             <span>✓</span>
             <span>已从张骞发现数据预填:</span>
           </div>
-          <ul className="ml-5 list-disc text-indigo-600/90">
+          <ul className="ml-5 list-disc text-me-ochre/90">
             <li>域名、社媒链接</li>
             {seedKeywords.length > 0 && <li>{seedKeywords.length} 个种子关键词 (将作为 MB 锚点)</li>}
             {competitorDomains.length > 0 && <li>{competitorDomains.length} 个竞品域名 (将作为 MB 锚点)</li>}
@@ -200,8 +200,8 @@ export function BriefSourcesForm({ clientId, onGenerated }: Props) {
 
       {/* Website URLs */}
       <div>
-        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-          Website URLs <span className="font-normal normal-case text-gray-400">(homepage, about, products — max 5)</span>
+        <label className="block text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide mb-2">
+          Website URLs <span className="font-normal normal-case text-me-charcoal/45">(homepage, about, products — max 5)</span>
         </label>
         <div className="space-y-2">
           {urlInputs.map((url, i) => (
@@ -210,12 +210,12 @@ export function BriefSourcesForm({ clientId, onGenerated }: Props) {
                 value={url}
                 onChange={e => handleUrlChange(i, e.target.value)}
                 placeholder="https://example.com/about"
-                className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors"
+                className="flex-1 bg-me-ivory border border-black/10 rounded-lg px-3 py-2 text-sm text-me-charcoal/90 placeholder-me-charcoal/45 focus:outline-none focus:ring-2 focus:ring-me-ochre focus:bg-white transition-colors"
               />
               {urlInputs.length > 1 && (
                 <button
                   onClick={() => removeUrlRow(i)}
-                  className="text-gray-400 hover:text-red-500 px-2 text-lg leading-none"
+                  className="text-me-charcoal/45 hover:text-[#C2453A] px-2 text-lg leading-none"
                   title="Remove"
                 >×</button>
               )}
@@ -225,7 +225,7 @@ export function BriefSourcesForm({ clientId, onGenerated }: Props) {
         {urlInputs.length < 5 && (
           <button
             onClick={addUrlRow}
-            className="mt-2 text-xs text-indigo-600 hover:text-indigo-800"
+            className="mt-2 text-xs text-me-ochre hover:text-me-charcoal"
           >
             + Add URL
           </button>
@@ -234,80 +234,80 @@ export function BriefSourcesForm({ clientId, onGenerated }: Props) {
 
       {/* Domain */}
       <div>
-        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-          Domain <span className="font-normal normal-case text-gray-400">(for keyword + competitor data)</span>
+        <label className="block text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide mb-2">
+          Domain <span className="font-normal normal-case text-me-charcoal/45">(for keyword + competitor data)</span>
         </label>
         <input
           value={domain}
           onChange={e => setDomain(e.target.value)}
           placeholder="example.com"
-          className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors"
+          className="w-full bg-me-ivory border border-black/10 rounded-lg px-3 py-2 text-sm text-me-charcoal/90 placeholder-me-charcoal/45 focus:outline-none focus:ring-2 focus:ring-me-ochre focus:bg-white transition-colors"
         />
       </div>
 
       {/* Visual DNA */}
-      <div className="border border-gray-100 rounded-xl p-4 bg-gray-50 space-y-3">
+      <div className="border border-black/[.06] rounded-xl p-4 bg-me-ivory space-y-3">
         <div>
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-            视觉品牌 DNA <span className="font-normal normal-case text-gray-400">（用于图片/视频生成 — 文件或手动输入均可）</span>
+          <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide">
+            视觉品牌 DNA <span className="font-normal normal-case text-me-charcoal/45">（用于图片/视频生成 — 文件或手动输入均可）</span>
           </p>
-          <p className="text-xs text-gray-400 mt-0.5">
+          <p className="text-xs text-me-charcoal/45 mt-0.5">
             上传品牌 VI 手册 / 视觉指南，系统将从中自动提取色系、风格和禁忌；也可在下方手动填写覆盖
           </p>
         </div>
 
         {/* Visual system file upload */}
         <div>
-          <label className="block text-xs text-gray-500 mb-1 font-medium">
-            视觉系统文件 <span className="font-normal text-gray-400">（VI 手册、品牌指南 PDF / DOCX）</span>
+          <label className="block text-xs text-me-charcoal/55 mb-1 font-medium">
+            视觉系统文件 <span className="font-normal text-me-charcoal/45">（VI 手册、品牌指南 PDF / DOCX）</span>
           </label>
           <div
-            className="border-2 border-dashed border-indigo-200 rounded-lg p-3 text-center cursor-pointer hover:border-indigo-400 bg-white transition-colors"
+            className="border-2 border-dashed border-me-ochre/30 rounded-lg p-3 text-center cursor-pointer hover:border-me-ochre/60 bg-white transition-colors"
             onClick={() => fileInputRef.current?.click()}
           >
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-me-charcoal/55">
               {uploading ? '上传中…' : '点击上传品牌 VI / 视觉指南文件（Claude 将从中提炼视觉 DNA）'}
             </p>
           </div>
           {uploadedFiles.length > 0 && (
             <ul className="mt-2 space-y-1">
               {uploadedFiles.map((f, i) => (
-                <li key={i} className="flex items-center justify-between text-xs text-gray-600 bg-white rounded px-3 py-1.5 border border-gray-100">
+                <li key={i} className="flex items-center justify-between text-xs text-me-charcoal/60 bg-white rounded px-3 py-1.5 border border-black/[.06]">
                   <span className="truncate max-w-xs">{f.filename} ({(f.sizeBytes / 1024).toFixed(0)} KB)</span>
-                  <button onClick={() => removeFile(i)} className="text-gray-400 hover:text-red-500 ml-2">×</button>
+                  <button onClick={() => removeFile(i)} className="text-me-charcoal/45 hover:text-[#C2453A] ml-2">×</button>
                 </li>
               ))}
             </ul>
           )}
         </div>
 
-        <div className="border-t border-gray-200 pt-3 space-y-2">
-          <p className="text-xs text-gray-400">或手动填写（会覆盖文件中提取的值）</p>
+        <div className="border-t border-black/10 pt-3 space-y-2">
+          <p className="text-xs text-me-charcoal/45">或手动填写（会覆盖文件中提取的值）</p>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">视觉风格关键词</label>
+            <label className="block text-xs text-me-charcoal/55 mb-1">视觉风格关键词</label>
             <input
               value={visualStyle}
               onChange={e => setVisualStyle(e.target.value)}
               placeholder="e.g. clean, minimalist, warm, luxury, adventure"
-              className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+              className="w-full bg-white border border-black/10 rounded-lg px-3 py-2 text-sm text-me-charcoal/90 placeholder-me-charcoal/45 focus:outline-none focus:ring-2 focus:ring-me-ochre transition-colors"
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">品牌色（逗号分隔 hex 或色名）</label>
+            <label className="block text-xs text-me-charcoal/55 mb-1">品牌色（逗号分隔 hex 或色名）</label>
             <input
               value={brandColors}
               onChange={e => setBrandColors(e.target.value)}
               placeholder="e.g. #1A3C5E, #F5A623, navy blue"
-              className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+              className="w-full bg-white border border-black/10 rounded-lg px-3 py-2 text-sm text-me-charcoal/90 placeholder-me-charcoal/45 focus:outline-none focus:ring-2 focus:ring-me-ochre transition-colors"
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">视觉禁止（逗号分隔）</label>
+            <label className="block text-xs text-me-charcoal/55 mb-1">视觉禁止（逗号分隔）</label>
             <input
               value={visualAvoid}
               onChange={e => setVisualAvoid(e.target.value)}
               placeholder="e.g. dark backgrounds, stock photos, text overlays"
-              className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+              className="w-full bg-white border border-black/10 rounded-lg px-3 py-2 text-sm text-me-charcoal/90 placeholder-me-charcoal/45 focus:outline-none focus:ring-2 focus:ring-me-ochre transition-colors"
             />
           </div>
         </div>
@@ -324,16 +324,16 @@ export function BriefSourcesForm({ clientId, onGenerated }: Props) {
       />
 
       {/* Errors / Warnings */}
-      {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
+      {error && <p className="text-sm text-[#C2453A] bg-[#C2453A]/10 rounded-lg px-3 py-2">{error}</p>}
       {warnings.map((w, i) => (
-        <p key={i} className="text-xs text-amber-700 bg-amber-50 rounded px-3 py-1.5">{w}</p>
+        <p key={i} className="text-xs text-me-ochre bg-me-ochre/10 rounded px-3 py-1.5">{w}</p>
       ))}
 
       {/* Generate Button */}
       <button
         onClick={handleGenerate}
         disabled={generating || uploading}
-        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-xl disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
+        className="w-full bg-me-ochre hover:bg-me-ochre/90 text-white font-semibold py-2.5 rounded-xl disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
       >
         {generating ? (
           <>

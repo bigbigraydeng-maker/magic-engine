@@ -77,69 +77,69 @@ export function MtcBudgetPanel({ clientId }: { clientId: string }) {
 
   if (loading) {
     return (
-      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <p className="text-[11px] font-black uppercase tracking-[0.14em] text-cyan-800">AI 工厂月度预算</p>
-        <p className="mt-3 text-sm text-slate-400">加载中…</p>
+      <div className="rounded-xl border border-black/10 bg-white p-5 shadow-sm">
+        <p className="text-[11px] font-black uppercase tracking-[0.14em] text-me-ochre">AI 工厂月度预算</p>
+        <p className="mt-3 text-sm text-me-charcoal/45">加载中…</p>
       </div>
     )
   }
 
   if (error || !data) {
     return (
-      <div className="rounded-xl border border-red-100 bg-red-50 p-5 shadow-sm">
-        <p className="text-[11px] font-black uppercase tracking-[0.14em] text-red-700">AI 工厂月度预算</p>
-        <p className="mt-2 text-sm text-red-600">{error ?? '数据加载失败'}</p>
+      <div className="rounded-xl border border-[#C2453A]/20 bg-[#C2453A]/10 p-5 shadow-sm">
+        <p className="text-[11px] font-black uppercase tracking-[0.14em] text-[#C2453A]">AI 工厂月度预算</p>
+        <p className="mt-2 text-sm text-[#C2453A]">{error ?? '数据加载失败'}</p>
       </div>
     )
   }
 
   const barColor =
     data.pct >= 100
-      ? 'bg-red-500'
+      ? 'bg-[#C2453A]'
       : data.pct >= 80
-      ? 'bg-amber-400'
-      : 'bg-cyan-500'
+      ? 'bg-me-gold'
+      : 'bg-me-ochre'
 
   const pctClamped = Math.min(data.pct, 100)
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <p className="text-[11px] font-black uppercase tracking-[0.14em] text-cyan-800">AI 工厂月度预算</p>
+    <div className="rounded-xl border border-black/10 bg-white p-5 shadow-sm">
+      <p className="text-[11px] font-black uppercase tracking-[0.14em] text-me-ochre">AI 工厂月度预算</p>
 
       {/* Usage bar */}
       <div className="mt-3">
         <div className="mb-1 flex items-baseline justify-between">
-          <span className="text-sm font-bold text-slate-700">
+          <span className="text-sm font-bold text-me-charcoal/75">
             本月已用{' '}
-            <span className={data.pct >= 100 ? 'text-red-600' : data.pct >= 80 ? 'text-amber-600' : 'text-slate-950'}>
+            <span className={data.pct >= 100 ? 'text-[#C2453A]' : data.pct >= 80 ? 'text-me-ochre' : 'text-me-charcoal'}>
               {data.spend.toLocaleString()}
             </span>{' '}
             / {data.cap.toLocaleString()} MTC
           </span>
-          <span className={`text-xs font-black ${data.pct >= 100 ? 'text-red-600' : data.pct >= 80 ? 'text-amber-600' : 'text-slate-400'}`}>
+          <span className={`text-xs font-black ${data.pct >= 100 ? 'text-[#C2453A]' : data.pct >= 80 ? 'text-me-ochre' : 'text-me-charcoal/45'}`}>
             {data.pct}%
           </span>
         </div>
-        <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+        <div className="h-2.5 w-full overflow-hidden rounded-full bg-me-ivory">
           <div
             className={`h-full rounded-full transition-all ${barColor}`}
             style={{ width: `${pctClamped}%` }}
           />
         </div>
-        <p className="mt-1 text-xs text-slate-400">
+        <p className="mt-1 text-xs text-me-charcoal/45">
           剩余 {data.remaining.toLocaleString()} MTC
           {data.pct >= 100 && (
-            <span className="ml-2 font-bold text-red-500">已超上限，AI 工厂已暂停</span>
+            <span className="ml-2 font-bold text-[#C2453A]">已超上限，AI 工厂已暂停</span>
           )}
           {data.pct >= 80 && data.pct < 100 && (
-            <span className="ml-2 font-bold text-amber-500">接近上限，请注意</span>
+            <span className="ml-2 font-bold text-me-ochre">接近上限，请注意</span>
           )}
         </p>
       </div>
 
       {/* Cap editor */}
-      <div className="mt-4 border-t border-slate-100 pt-4">
-        <label className="mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-500">
+      <div className="mt-4 border-t border-black/[.06] pt-4">
+        <label className="mb-1.5 block text-xs font-black uppercase tracking-wide text-me-charcoal/55">
           月度上限（MTC）
         </label>
         <div className="flex items-center gap-2">
@@ -148,25 +148,25 @@ export function MtcBudgetPanel({ clientId }: { clientId: string }) {
             min={1}
             value={editCap}
             onChange={e => { setEditCap(e.target.value); setSaveOk(false); setSaveError(null) }}
-            className="w-32 rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold text-slate-800 focus:border-cyan-400 focus:outline-none"
+            className="w-32 rounded-lg border border-black/10 px-3 py-2 text-sm font-bold text-me-charcoal/75 focus:border-me-ochre focus:outline-none"
           />
           <button
             onClick={handleSave}
             disabled={saving}
-            className="rounded-lg bg-cyan-600 px-3 py-2 text-xs font-black text-white transition hover:bg-cyan-700 disabled:opacity-50"
+            className="rounded-lg bg-me-ochre px-3 py-2 text-xs font-black text-white transition hover:bg-me-ochre disabled:opacity-50"
           >
             {saving ? '保存中…' : '保存'}
           </button>
           {saveOk && (
-            <span className="text-xs font-bold text-emerald-600">✓ 已保存</span>
+            <span className="text-xs font-bold text-[#5C8A4A]">✓ 已保存</span>
           )}
         </div>
         {saveError && (
-          <p className="mt-1 text-xs text-red-500">{saveError}</p>
+          <p className="mt-1 text-xs text-[#C2453A]">{saveError}</p>
         )}
         <button
           onClick={handleReset}
-          className="mt-1.5 text-xs text-slate-400 underline hover:text-slate-600"
+          className="mt-1.5 text-xs text-me-charcoal/45 underline hover:text-me-charcoal/60"
         >
           重置为默认（{DEFAULT_MONTHLY_MTC_CAP.toLocaleString()}）
         </button>

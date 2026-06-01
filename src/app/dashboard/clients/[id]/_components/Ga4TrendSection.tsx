@@ -81,8 +81,8 @@ function Sparkline({
 function TrendRow({ date, value }: { date: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-2 px-1 py-1 text-[11px]">
-      <span className="font-mono text-slate-400">{date}</span>
-      <span className="font-bold tabular-nums text-slate-700">{value}</span>
+      <span className="font-mono text-me-charcoal/45">{date}</span>
+      <span className="font-bold tabular-nums text-me-charcoal/75">{value}</span>
     </div>
   )
 }
@@ -99,7 +99,7 @@ function computeDelta(
   const positive = diff > 0
   const abs = Math.abs(diff)
   const label = `${positive ? '+' : '-'}${abs >= 1000 ? `${(abs / 1000).toFixed(1)}K` : abs}`
-  return { label, cls: positive ? 'text-emerald-600' : 'text-red-500' }
+  return { label, cls: positive ? 'text-[#5C8A4A]' : 'text-[#C2453A]' }
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
@@ -136,25 +136,25 @@ export function Ga4TrendSection({ clientId }: { clientId: string }) {
 
   if (loading) {
     return (
-      <div className="animate-pulse rounded-xl border border-slate-200 bg-white p-5">
-        <div className="mb-3 h-3 w-44 rounded bg-slate-100" />
-        <div className="h-20 rounded bg-slate-50" />
+      <div className="animate-pulse rounded-xl border border-black/10 bg-white p-5">
+        <div className="mb-3 h-3 w-44 rounded bg-me-ivory" />
+        <div className="h-20 rounded bg-me-ivory" />
       </div>
     )
   }
 
   if (error || points.length === 0) {
     return (
-      <div className="flex items-center justify-between gap-4 rounded-xl border border-dashed border-slate-200 bg-white p-5">
+      <div className="flex items-center justify-between gap-4 rounded-xl border border-dashed border-black/10 bg-white p-5">
         <div>
-          <p className="text-sm font-black text-slate-500">暂无 GA4 历史趋势数据</p>
-          <p className="mt-0.5 text-[11px] text-slate-400">
+          <p className="text-sm font-black text-me-charcoal/55">暂无 GA4 历史趋势数据</p>
+          <p className="mt-0.5 text-[11px] text-me-charcoal/45">
             请先连接 Google Analytics 4 并完成至少一次同步
           </p>
         </div>
         <Link
           href={`/dashboard/clients/${clientId}/connectors`}
-          className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-black text-slate-600 transition-colors hover:bg-slate-50"
+          className="shrink-0 rounded-lg border border-black/10 px-3 py-1.5 text-xs font-black text-me-charcoal/60 transition-colors hover:bg-me-ivory"
         >
           前往连接 →
         </Link>
@@ -176,29 +176,29 @@ export function Ga4TrendSection({ clientId }: { clientId: string }) {
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5">
+    <div className="rounded-xl border border-black/10 bg-white p-5">
       <div className="mb-4 flex items-center gap-2">
         <span className="text-base leading-none">📈</span>
-        <p className="text-[10px] font-black uppercase tracking-[0.14em] text-cyan-800">
+        <p className="text-[10px] font-black uppercase tracking-[0.14em] text-me-ochre">
           数据分析 历史趋势
         </p>
-        <span className="ml-auto text-[10px] text-slate-400">最近 {points.length} 期</span>
+        <span className="ml-auto text-[10px] text-me-charcoal/45">最近 {points.length} 期</span>
       </div>
 
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
         {/* Sessions */}
         <div>
           <div className="mb-1 flex items-baseline gap-2">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">总会话数</p>
-            <span className="text-lg font-black tabular-nums text-slate-800">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-me-charcoal/45">总会话数</p>
+            <span className="text-lg font-black tabular-nums text-me-charcoal/75">
               {fmt(latest.total_sessions)}
             </span>
             {sessionDelta && (
               <span className={`text-[11px] font-bold ${sessionDelta.cls}`}>{sessionDelta.label}</span>
             )}
           </div>
-          <Sparkline values={sessionValues} color="#10b981" gradId="ga4-sessions-grad" />
-          <div className="mt-2 max-h-28 divide-y divide-slate-50 overflow-y-auto rounded border border-slate-50">
+          <Sparkline values={sessionValues} color="#5C8A4A" gradId="ga4-sessions-grad" />
+          <div className="mt-2 max-h-28 divide-y divide-black/[.04] overflow-y-auto rounded border border-black/[.04]">
             {[...points].reverse().map(p => (
               <TrendRow key={p.period_end} date={p.period_end} value={fmt(p.total_sessions)} />
             ))}
@@ -208,16 +208,16 @@ export function Ga4TrendSection({ clientId }: { clientId: string }) {
         {/* Users */}
         <div>
           <div className="mb-1 flex items-baseline gap-2">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">总用户数</p>
-            <span className="text-lg font-black tabular-nums text-slate-800">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-me-charcoal/45">总用户数</p>
+            <span className="text-lg font-black tabular-nums text-me-charcoal/75">
               {fmt(latest.total_users)}
             </span>
             {userDelta && (
               <span className={`text-[11px] font-bold ${userDelta.cls}`}>{userDelta.label}</span>
             )}
           </div>
-          <Sparkline values={userValues} color="#3b82f6" gradId="ga4-users-grad" />
-          <div className="mt-2 max-h-28 divide-y divide-slate-50 overflow-y-auto rounded border border-slate-50">
+          <Sparkline values={userValues} color="#3E6E8C" gradId="ga4-users-grad" />
+          <div className="mt-2 max-h-28 divide-y divide-black/[.04] overflow-y-auto rounded border border-black/[.04]">
             {[...points].reverse().map(p => (
               <TrendRow key={p.period_end} date={p.period_end} value={fmt(p.total_users)} />
             ))}

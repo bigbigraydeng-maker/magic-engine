@@ -65,10 +65,10 @@ export function BriefChat({ briefId, clientId, disabled = false, onBriefUpdated 
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="border-b border-slate-100 px-5 py-5">
-        <p className="text-[11px] font-black uppercase tracking-[0.14em] text-cyan-800">Strategy Engine</p>
-        <h3 className="mt-1 text-lg font-black text-slate-950">Brief Refinement</h3>
-        <p className="mt-1 text-sm font-semibold text-slate-500">
+      <div className="border-b border-black/[.06] px-5 py-5">
+        <p className="text-[11px] font-black uppercase tracking-[0.14em] text-me-ochre">Strategy Engine</p>
+        <h3 className="mt-1 font-display text-lg font-semibold tracking-tight text-me-charcoal">Brief Refinement</h3>
+        <p className="mt-1 text-sm font-semibold text-me-charcoal/55">
           {disabled
             ? 'Generate a brief first to enable chat.'
             : 'Describe changes. Strategy Engine updates only the relevant fields.'}
@@ -78,7 +78,7 @@ export function BriefChat({ briefId, clientId, disabled = false, onBriefUpdated 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
         {messages.length === 0 && !disabled && (
           <div className="space-y-2">
-            <p className="pt-4 text-center text-xs font-black uppercase tracking-[0.12em] text-slate-400">Try asking</p>
+            <p className="pt-4 text-center text-xs font-black uppercase tracking-[0.12em] text-me-charcoal/45">Try asking</p>
             {[
               '语气改得更年轻、更活泼',
               'Add "sustainability" to the content pillars',
@@ -88,7 +88,7 @@ export function BriefChat({ briefId, clientId, disabled = false, onBriefUpdated 
               <button
                 key={i}
                 onClick={() => setInput(ex)}
-                className="block w-full rounded-lg border border-cyan-100 bg-cyan-50 px-3 py-3 text-left text-sm font-semibold text-cyan-900 transition-colors hover:border-cyan-200 hover:bg-cyan-100"
+                className="block w-full rounded-lg border border-me-ochre/20 bg-me-ochre/10 px-3 py-3 text-left text-sm font-semibold text-me-charcoal/90 transition-colors hover:border-me-ochre/30 hover:bg-me-ochre/15"
               >
                 {ex}
               </button>
@@ -101,8 +101,8 @@ export function BriefChat({ briefId, clientId, disabled = false, onBriefUpdated 
             <div
               className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm font-semibold ${
                 msg.role === 'user'
-                  ? 'rounded-br-md bg-slate-950 text-white'
-                  : 'rounded-bl-md bg-slate-100 text-slate-800'
+                  ? 'rounded-br-md bg-me-charcoal text-white'
+                  : 'rounded-bl-md bg-me-ivory text-me-charcoal/75'
               }`}
             >
               {msg.content}
@@ -112,12 +112,12 @@ export function BriefChat({ briefId, clientId, disabled = false, onBriefUpdated 
 
         {sending && (
           <div className="flex justify-start">
-            <div className="rounded-2xl rounded-bl-md bg-slate-100 px-3 py-2">
+            <div className="rounded-2xl rounded-bl-md bg-me-ivory px-3 py-2">
               <div className="flex h-4 items-center gap-1">
                 {[0, 1, 2].map(i => (
                   <span
                     key={i}
-                    className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400"
+                    className="h-1.5 w-1.5 animate-bounce rounded-full bg-me-charcoal/45"
                     style={{ animationDelay: `${i * 0.15}s` }}
                   />
                 ))}
@@ -127,13 +127,13 @@ export function BriefChat({ briefId, clientId, disabled = false, onBriefUpdated 
         )}
 
         {error && (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{error}</p>
+          <p className="rounded-lg bg-[#C2453A]/10 px-3 py-2 text-xs font-semibold text-[#C2453A]">{error}</p>
         )}
 
         <div ref={bottomRef} />
       </div>
 
-      <div className="border-t border-slate-100 p-4">
+      <div className="border-t border-black/[.06] p-4">
         <div className="flex items-end gap-2">
           <textarea
             value={input}
@@ -142,12 +142,12 @@ export function BriefChat({ briefId, clientId, disabled = false, onBriefUpdated 
             placeholder={disabled ? 'Generate a brief first...' : 'Ask Strategy Engine to refine the brief...'}
             disabled={disabled || sending}
             rows={2}
-            className="flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-900 placeholder-slate-400 transition-colors focus:bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500 disabled:text-slate-400 disabled:opacity-60"
+            className="flex-1 resize-none rounded-xl border border-black/10 bg-me-ivory px-3 py-3 text-sm font-semibold text-me-charcoal/90 placeholder-me-charcoal/45 transition-colors focus:bg-white focus:outline-none focus:ring-2 focus:ring-me-ochre disabled:text-me-charcoal/45 disabled:opacity-60"
           />
           <button
             onClick={() => void handleSend()}
             disabled={!input.trim() || disabled || sending}
-            className="rounded-xl bg-slate-950 px-4 py-3 text-white transition-colors hover:bg-slate-800 disabled:opacity-40"
+            className="rounded-xl bg-me-charcoal px-4 py-3 text-white transition-colors hover:bg-me-charcoal/85 disabled:opacity-40"
             title="Send (Enter)"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -155,7 +155,7 @@ export function BriefChat({ briefId, clientId, disabled = false, onBriefUpdated 
             </svg>
           </button>
         </div>
-        <p className="mt-2 text-xs font-semibold text-slate-400">Enter to send · Shift+Enter for newline</p>
+        <p className="mt-2 text-xs font-semibold text-me-charcoal/45">Enter to send · Shift+Enter for newline</p>
       </div>
     </div>
   )

@@ -46,38 +46,38 @@ export function SettingsDrawer({ open, onClose, clientId, client, activeTab, onT
   return (
     <>
       <div
-        className="fixed inset-0 z-40 bg-slate-950/35 backdrop-blur-sm"
+        className="fixed inset-0 z-40 bg-me-charcoal/35 backdrop-blur-sm"
         onClick={onClose}
       />
 
-      <div className="fixed inset-y-0 right-0 z-50 flex w-full flex-col overflow-hidden border-l border-slate-200 bg-[#f6f7f2] shadow-2xl lg:w-[min(1120px,calc(100vw-360px))]">
-        <div className="flex flex-shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-5 py-5">
+      <div className="fixed inset-y-0 right-0 z-50 flex w-full flex-col overflow-hidden border-l border-black/10 bg-me-ivory shadow-2xl lg:w-[min(1120px,calc(100vw-360px))]">
+        <div className="flex flex-shrink-0 items-start justify-between gap-4 border-b border-black/10 px-5 py-5">
           <div className="min-w-0">
-            <p className="text-[11px] font-black uppercase tracking-[0.14em] text-cyan-800">Client settings</p>
-            <h2 className="mt-1 truncate text-2xl font-black text-slate-950">设置 — {client.name}</h2>
+            <p className="text-[11px] font-black uppercase tracking-[0.14em] text-me-ochre">Client settings</p>
+            <h2 className="mt-1 truncate font-display text-2xl font-bold tracking-tight text-me-charcoal">设置 — {client.name}</h2>
           </div>
           <button
             onClick={onClose}
-            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-lg font-black text-slate-400 transition hover:border-slate-300 hover:text-slate-700"
+            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-black/10 bg-white text-lg font-black text-me-charcoal/45 transition hover:border-black/20 hover:text-me-charcoal/75"
             aria-label="Close settings"
           >
             x
           </button>
         </div>
 
-        <div className="flex flex-shrink-0 gap-2 overflow-x-auto border-b border-slate-200 px-5 py-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="flex flex-shrink-0 gap-2 overflow-x-auto border-b border-black/10 px-5 py-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {TABS.map(tab => (
             <button
               key={tab.id}
               onClick={() => onTabChange(tab.id)}
               className={`flex min-h-11 items-center gap-2 whitespace-nowrap rounded-lg border px-3 text-sm font-black transition-colors ${
                 activeTab === tab.id
-                  ? 'border-cyan-200 bg-cyan-50 text-cyan-900'
-                  : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-900'
+                  ? 'border-me-ochre/30 bg-me-ochre/10 text-me-charcoal'
+                  : 'border-black/10 bg-white text-me-charcoal/55 hover:border-black/20 hover:text-me-charcoal'
               }`}
             >
               <span className={`flex h-6 w-6 items-center justify-center rounded-md text-[9px] font-black ${
-                activeTab === tab.id ? 'bg-cyan-700 text-white' : 'bg-slate-100 text-slate-500'
+                activeTab === tab.id ? 'bg-me-ochre text-white' : 'bg-me-stone text-me-charcoal/55'
               }`}>
                 {tab.code}
               </span>
@@ -103,11 +103,11 @@ export function SettingsDrawer({ open, onClose, clientId, client, activeTab, onT
             <div className="max-w-3xl">
               <Link
                 href={'/dashboard/clients/' + clientId + '/settings'}
-                className="inline-flex items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-bold text-cyan-800 transition hover:bg-cyan-100"
+                className="inline-flex items-center gap-2 rounded-lg border border-me-ochre/30 bg-me-ochre/10 px-3 py-2 text-sm font-bold text-me-ochre transition hover:bg-me-ochre/15"
               >
                 🔗 前往平台连接设置页面
               </Link>
-              <p className="mt-2 text-xs text-slate-400">
+              <p className="mt-2 text-xs text-me-charcoal/45">
                 完整的平台授权管理界面（GBP / GSC 等）在独立设置页面完成。
               </p>
             </div>
@@ -115,18 +115,18 @@ export function SettingsDrawer({ open, onClose, clientId, client, activeTab, onT
 
           {activeTab === 'client-info' && (
             <div className="max-w-3xl space-y-4">
-              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                <p className="text-[11px] font-black uppercase tracking-[0.14em] text-cyan-800">Client profile</p>
-                <h3 className="mt-1 text-xl font-black text-slate-950">{client.name}</h3>
+              <div className="rounded-xl border border-black/10 bg-white p-5 shadow-sm">
+                <p className="text-[11px] font-black uppercase tracking-[0.14em] text-me-ochre">Client profile</p>
+                <h3 className="mt-1 font-display text-xl font-semibold tracking-tight text-me-charcoal">{client.name}</h3>
               </div>
-              <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="divide-y divide-black/[.06] rounded-xl border border-black/10 bg-white shadow-sm">
                 {[
                   { label: '客户名称', value: client.name },
                   {
                     label: '网站域名',
                     value: client.domain
-                      ? <a href={`https://${client.domain}`} target="_blank" rel="noreferrer" className="font-black text-cyan-800 hover:text-cyan-950">{client.domain}</a>
-                      : <span className="font-semibold text-slate-400">未设置</span>,
+                      ? <a href={`https://${client.domain}`} target="_blank" rel="noreferrer" className="font-black text-me-ochre hover:text-me-charcoal">{client.domain}</a>
+                      : <span className="font-semibold text-me-charcoal/45">未设置</span>,
                   },
                   {
                     label: '创建时间',
@@ -134,15 +134,15 @@ export function SettingsDrawer({ open, onClose, clientId, client, activeTab, onT
                   },
                 ].map(({ label, value }) => (
                   <div key={label} className="flex items-center justify-between gap-6 px-5 py-4 text-sm">
-                    <span className="font-black text-slate-400">{label}</span>
-                    <span className="text-right font-semibold text-slate-950">{value}</span>
+                    <span className="font-black text-me-charcoal/45">{label}</span>
+                    <span className="text-right font-semibold text-me-charcoal">{value}</span>
                   </div>
                 ))}
               </div>
 
               {/* Locale settings */}
-              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                <p className="mb-3 text-[11px] font-black uppercase tracking-[0.14em] text-cyan-800">业务地域设置</p>
+              <div className="rounded-xl border border-black/10 bg-white p-5 shadow-sm">
+                <p className="mb-3 text-[11px] font-black uppercase tracking-[0.14em] text-me-ochre">业务地域设置</p>
                 <LocaleConfirmBanner clientId={clientId} />
               </div>
 

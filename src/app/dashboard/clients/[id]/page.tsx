@@ -35,10 +35,10 @@ const HEALTH_DIMS = [
 ] as const;
 
 function scoreColor(v: number | null): string {
-  if (v == null) return '#9ca3af';
-  if (v >= 60) return '#16a34a';
-  if (v >= 40) return '#d97706';
-  return '#dc2626';
+  if (v == null) return '#B7B1A5';
+  if (v >= 60) return '#5C8A4A';
+  if (v >= 40) return '#C4912E';
+  return '#C2453A';
 }
 
 function RadarChart({ scores }: { scores: Record<string, number> }) {
@@ -66,25 +66,25 @@ function RadarChart({ scores }: { scores: Record<string, number> }) {
         }).join(' ');
         return (
           <polygon key={pct} points={pts}
-            fill={pct === 100 ? '#f9fafb' : 'none'}
-            stroke="#e5e7eb" strokeWidth="0.75" />
+            fill={pct === 100 ? '#FBF8F3' : 'none'}
+            stroke="#EAE6DF" strokeWidth="0.75" />
         );
       })}
       {HEALTH_DIMS.map((_, i) => {
         const [x, y] = pt(i, maxR);
-        return <line key={i} x1={cx} y1={cy} x2={x.toFixed(1)} y2={y.toFixed(1)} stroke="#e5e7eb" strokeWidth="0.75" />;
+        return <line key={i} x1={cx} y1={cy} x2={x.toFixed(1)} y2={y.toFixed(1)} stroke="#EAE6DF" strokeWidth="0.75" />;
       })}
-      <polygon points={scorePoly} fill="rgba(99,102,241,0.18)" stroke="#6366f1" strokeWidth="2" strokeLinejoin="round" />
+      <polygon points={scorePoly} fill="rgba(196,145,46,0.18)" stroke="#C4912E" strokeWidth="2" strokeLinejoin="round" />
       {HEALTH_DIMS.map((d, i) => {
         const [x, y] = pt(i, ((scores[d.key] ?? 0) / 100) * maxR);
-        return <circle key={i} cx={x.toFixed(1)} cy={y.toFixed(1)} r="3.5" fill="#6366f1" stroke="white" strokeWidth="1.5" />;
+        return <circle key={i} cx={x.toFixed(1)} cy={y.toFixed(1)} r="3.5" fill="#C4912E" stroke="white" strokeWidth="1.5" />;
       })}
       {HEALTH_DIMS.map((d, i) => {
         const [lx, ly] = pt(i, maxR + 19);
         const v = scores[d.key] as number | undefined ?? null;
         return (
           <g key={i}>
-            <text x={lx.toFixed(1)} y={(ly - 4).toFixed(1)} textAnchor="middle" fontSize="9" fill="#4b5563" fontWeight="600">{d.label}</text>
+            <text x={lx.toFixed(1)} y={(ly - 4).toFixed(1)} textAnchor="middle" fontSize="9" fill="#1A1A1A" fontWeight="600">{d.label}</text>
             <text x={lx.toFixed(1)} y={(ly + 8).toFixed(1)} textAnchor="middle" fontSize="9" fill={scoreColor(v)} fontWeight="700">{v ?? '—'}</text>
           </g>
         );
@@ -94,10 +94,10 @@ function RadarChart({ scores }: { scores: Record<string, number> }) {
 }
 
 const CRISIS_BADGE: Record<string, { label: string; cls: string }> = {
-  'TYPE_E 声誉陷阱': { label: '声誉陷阱', cls: 'bg-red-100 text-red-700 border-red-200' },
-  'TYPE_D 数字缺失': { label: '数字缺失', cls: 'bg-orange-100 text-orange-700 border-orange-200' },
-  'TYPE_B 社媒空洞': { label: '社媒空洞', cls: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
-  'TYPE_A AI不可见': { label: 'AI不可见', cls: 'bg-purple-100 text-purple-700 border-purple-200' },
+  'TYPE_E 声誉陷阱': { label: '声誉陷阱', cls: 'bg-[#C2453A]/12 text-[#C2453A] border-[#C2453A]/30' },
+  'TYPE_D 数字缺失': { label: '数字缺失', cls: 'bg-me-ochre/15 text-me-ochre border-me-ochre/30' },
+  'TYPE_B 社媒空洞': { label: '社媒空洞', cls: 'bg-me-gold/30 text-me-ochre border-me-ochre/30' },
+  'TYPE_A AI不可见': { label: 'AI不可见', cls: 'bg-[#3E6E8C]/12 text-[#3E6E8C] border-[#3E6E8C]/30' },
 };
 
 function BrandHealthWidget({ clientId }: { clientId: string }) {
@@ -126,24 +126,24 @@ function BrandHealthWidget({ clientId }: { clientId: string }) {
   // ── Loading ──
   if (status === 'loading') {
     return (
-      <div className="h-32 animate-pulse rounded-xl border border-slate-200 bg-white p-4" />
+      <div className="h-32 animate-pulse rounded-xl border border-black/10 bg-white p-4" />
     );
   }
 
   // ── No discovery yet ──
   if (status === 'none') {
     return (
-      <div className="flex items-center justify-between gap-4 rounded-xl border border-dashed border-cyan-200 bg-cyan-50 p-4">
+      <div className="flex items-center justify-between gap-4 rounded-xl border border-dashed border-me-ochre/30 bg-me-ochre/10 p-4">
         <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-950 text-xs font-black text-white">DI</span>
+          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-me-charcoal text-xs font-black text-white">DI</span>
           <div>
-            <p className="text-sm font-black text-slate-950">品牌健康扫描未完成</p>
-            <p className="text-xs font-semibold text-slate-500">张骞发现 Agent 将自动分析品牌现状，生成诊断报告</p>
+            <p className="text-sm font-black text-me-charcoal">品牌健康扫描未完成</p>
+            <p className="text-xs font-semibold text-me-charcoal/55">张骞发现 Agent 将自动分析品牌现状，生成诊断报告</p>
           </div>
         </div>
         <Link
           href={`/dashboard/clients/${clientId}/zhangqian`}
-          className="shrink-0 rounded-lg bg-slate-950 px-4 py-2 text-sm font-black text-white transition-colors hover:bg-slate-800"
+          className="shrink-0 rounded-lg bg-me-charcoal px-4 py-2 text-sm font-black text-white transition-colors hover:bg-me-charcoal/85"
         >
           启动发现 →
         </Link>
@@ -154,17 +154,17 @@ function BrandHealthWidget({ clientId }: { clientId: string }) {
   // ── Awaiting confirmation ──
   if (status === 'reviewing') {
     return (
-      <div className="flex items-center justify-between gap-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+      <div className="flex items-center justify-between gap-4 rounded-xl border border-me-ochre/30 bg-me-ochre/10 p-4">
         <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-100 text-xs font-black text-amber-800">QA</span>
+          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-me-ochre/15 text-xs font-black text-me-ochre">QA</span>
           <div>
-            <p className="text-sm font-black text-amber-950">发现报告待确认</p>
-            <p className="text-xs font-semibold text-amber-700">张骞已完成扫描，请核查数据后确认导入</p>
+            <p className="text-sm font-black text-me-charcoal">发现报告待确认</p>
+            <p className="text-xs font-semibold text-me-ochre">张骞已完成扫描，请核查数据后确认导入</p>
           </div>
         </div>
         <Link
           href={`/dashboard/clients/${clientId}/zhangqian`}
-          className="shrink-0 rounded-lg bg-amber-600 px-4 py-2 text-sm font-black text-white transition-colors hover:bg-amber-700"
+          className="shrink-0 rounded-lg bg-me-ochre px-4 py-2 text-sm font-black text-white transition-colors hover:bg-me-ochre/90"
         >
           查看 &amp; 确认 →
         </Link>
@@ -179,10 +179,10 @@ function BrandHealthWidget({ clientId }: { clientId: string }) {
   const crisisBadge = crisisType ? CRISIS_BADGE[crisisType] : null;
 
   return (
-    <div className="rounded-xl border border-cyan-200 bg-white p-5 shadow-sm">
+    <div className="rounded-xl border border-me-ochre/30 bg-white p-5 shadow-sm">
       <div className="mb-2 flex items-center gap-3">
-        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-cyan-50 text-xs font-black text-cyan-800">BH</span>
-        <p className="text-sm font-black text-slate-950">品牌健康快照</p>
+        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-me-ochre/10 text-xs font-black text-me-ochre">BH</span>
+        <p className="text-sm font-black text-me-charcoal">品牌健康快照</p>
         {crisisBadge && (
           <span className={`ml-auto rounded-full border px-2 py-0.5 text-xs font-bold ${crisisBadge.cls}`}>
             {crisisBadge.label}
@@ -190,7 +190,7 @@ function BrandHealthWidget({ clientId }: { clientId: string }) {
         )}
       </div>
       {discovery?.generated_at && (
-        <p className="mb-3 text-xs font-semibold text-slate-400">
+        <p className="mb-3 text-xs font-semibold text-me-charcoal/45">
           发现于 {new Date(discovery.generated_at).toLocaleDateString('zh-CN', { timeZone: 'Pacific/Auckland' })}
         </p>
       )}
@@ -198,12 +198,12 @@ function BrandHealthWidget({ clientId }: { clientId: string }) {
       {scores && <RadarChart scores={scores} />}
 
       {scores && (
-        <div className="mt-2 grid grid-cols-3 gap-x-2 gap-y-1 border-t border-slate-100 pt-3">
+        <div className="mt-2 grid grid-cols-3 gap-x-2 gap-y-1 border-t border-black/[.06] pt-3">
           {HEALTH_DIMS.map(({ key, label }) => {
             const v = scores[key] as number | undefined ?? null;
             return (
               <div key={key} className="flex items-center justify-between gap-1">
-                <span className="text-[11px] font-semibold text-slate-400">{label}</span>
+                <span className="text-[11px] font-semibold text-me-charcoal/45">{label}</span>
                 <span className="text-[11px] font-bold tabular-nums" style={{ color: scoreColor(v) }}>
                   {v ?? '—'}
                 </span>
@@ -221,8 +221,8 @@ function BrandHealthWidget({ clientId }: { clientId: string }) {
 type ToolBadge = 'in_house' | 'external'
 
 const BADGE_CONFIG: Record<ToolBadge, { label: string; cls: string }> = {
-  in_house: { label: '系统内',  cls: 'bg-cyan-50 text-cyan-800 border-cyan-100' },
-  external: { label: '外部执行', cls: 'bg-amber-50 text-amber-700 border-amber-100'  },
+  in_house: { label: '系统内',  cls: 'bg-me-ochre/10 text-me-ochre border-me-ochre/20' },
+  external: { label: '外部执行', cls: 'bg-me-ochre/10 text-me-ochre border-me-ochre/20'  },
 }
 
 function ToolCard({
@@ -240,25 +240,25 @@ function ToolCard({
   const inner = (
     <div className={`flex items-center gap-3 rounded-xl border bg-white p-4 transition-all ${
       soon
-        ? 'cursor-not-allowed border-dashed border-slate-200 opacity-60'
+        ? 'cursor-not-allowed border-dashed border-black/10 opacity-60'
         : interactive
-          ? 'group cursor-pointer border-slate-200 hover:border-cyan-300 hover:shadow-sm'
-          : 'border-slate-200'
+          ? 'group cursor-pointer border-black/10 hover:border-me-ochre/40 hover:shadow-sm'
+          : 'border-black/10'
     }`}>
-      <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-slate-950 text-[11px] font-black text-white">
+      <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-me-charcoal text-[11px] font-black text-white">
         {title.slice(0, 2).toUpperCase()}
       </span>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
-          <p className="text-sm font-black text-slate-950">{title}</p>
+          <p className="text-sm font-black text-me-charcoal">{title}</p>
           <span className={`rounded-full border px-1.5 py-0.5 text-[10px] font-bold leading-none ${b.cls}`}>
             {b.label}
           </span>
-          {soon && <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold leading-none text-slate-400">Soon</span>}
+          {soon && <span className="rounded-full bg-me-ivory px-1.5 py-0.5 text-[10px] font-bold leading-none text-me-charcoal/45">Soon</span>}
         </div>
-        <p className="text-xs font-semibold text-slate-500">{desc}</p>
+        <p className="text-xs font-semibold text-me-charcoal/55">{desc}</p>
       </div>
-      {interactive && <span className="flex-shrink-0 text-slate-300 transition-colors group-hover:text-cyan-700">→</span>}
+      {interactive && <span className="flex-shrink-0 text-me-charcoal/35 transition-colors group-hover:text-me-ochre">→</span>}
     </div>
   )
   if (href && !soon) return <Link href={href}>{inner}</Link>
@@ -309,27 +309,27 @@ function WorkflowProgress({
   const firstPending = steps.findIndex(s => !s.done)
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div className="overflow-x-auto rounded-xl border border-black/10 bg-white px-4 py-4 shadow-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <div className="flex min-w-max items-center gap-0">
       {steps.map((step, i) => {
         const isActive = i === firstPending
         const isDone   = step.done
         const inner = (
           <div className={`flex items-center gap-2 rounded-lg px-3 py-2 transition-colors ${
-            isActive ? 'bg-cyan-50' : ''
+            isActive ? 'bg-me-ochre/10' : ''
           }`}>
             <div className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[11px] font-black ${
-              isDone  ? 'bg-emerald-500 text-white'
-              : isActive ? 'bg-slate-950 text-white'
-              : 'bg-slate-100 text-slate-400'
+              isDone  ? 'bg-[#5C8A4A] text-white'
+              : isActive ? 'bg-me-charcoal text-white'
+              : 'bg-me-ivory text-me-charcoal/45'
             }`}>
               {isDone ? '✓' : i + 1}
             </div>
             <div>
               <p className={`text-xs font-black leading-none ${
-                isDone ? 'text-emerald-700' : isActive ? 'text-slate-950' : 'text-slate-400'
+                isDone ? 'text-[#5C8A4A]' : isActive ? 'text-me-charcoal' : 'text-me-charcoal/45'
               }`}>{step.label}</p>
-              <p className="mt-0.5 text-[10px] font-semibold text-slate-400">{step.sublabel}</p>
+              <p className="mt-0.5 text-[10px] font-semibold text-me-charcoal/45">{step.sublabel}</p>
             </div>
           </div>
         )
@@ -341,7 +341,7 @@ function WorkflowProgress({
             }
             {i < steps.length - 1 && (
               <div className={`w-8 h-px mx-1 flex-shrink-0 ${
-                steps[i].done ? 'bg-emerald-300' : 'bg-slate-200'
+                steps[i].done ? 'bg-[#5C8A4A]/70' : 'bg-me-stone'
               }`} />
             )}
           </div>
@@ -434,8 +434,8 @@ export default function ClientDetailPage() {
     return (
       <div className="p-6">
         <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-gray-200 rounded w-48" />
-          <div className="h-4 bg-gray-200 rounded w-64" />
+          <div className="h-8 bg-me-stone rounded w-48" />
+          <div className="h-4 bg-me-stone rounded w-64" />
         </div>
       </div>
     );
@@ -444,8 +444,8 @@ export default function ClientDetailPage() {
   if (!client) {
     return (
       <div className="p-6">
-        <p className="text-gray-500">Client not found.</p>
-        <Link href="/dashboard/clients" className="text-indigo-600 hover:underline text-sm mt-2 block">
+        <p className="text-me-charcoal/55">Client not found.</p>
+        <Link href="/dashboard/clients" className="text-me-ochre hover:underline text-sm mt-2 block">
           ← Back to clients
         </Link>
       </div>
@@ -460,17 +460,17 @@ export default function ClientDetailPage() {
       {/* Page header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
         <div className="flex min-w-0 flex-wrap items-center gap-3">
-        <Link href="/dashboard/clients" className="text-sm font-semibold text-slate-400 hover:text-slate-700">
+        <Link href="/dashboard/clients" className="text-sm font-semibold text-me-charcoal/45 hover:text-me-charcoal/75">
           ← Clients
         </Link>
-        <span className="text-slate-300">/</span>
-        <h1 className="text-3xl font-black text-slate-950">{client.name}</h1>
+        <span className="text-me-charcoal/35">/</span>
+        <h1 className="font-display text-3xl font-bold tracking-tight text-me-charcoal">{client.name}</h1>
         {client.domain && (
           <a
             href={`https://${client.domain}`}
             target="_blank"
             rel="noreferrer"
-            className="rounded-full border border-cyan-100 bg-cyan-50 px-2 py-1 font-mono text-xs font-bold text-cyan-800 hover:border-cyan-200"
+            className="rounded-full border border-me-ochre/20 bg-me-ochre/10 px-2 py-1 font-mono text-xs font-bold text-me-ochre hover:border-me-ochre/30"
           >
             {client.domain}
           </a>
@@ -479,7 +479,7 @@ export default function ClientDetailPage() {
         <div className="flex flex-wrap items-center gap-2 lg:ml-auto">
           <button
             onClick={() => openSettings('brief')}
-            className="flex min-h-11 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-950"
+            className="flex min-h-11 items-center gap-1.5 rounded-lg border border-black/10 bg-white px-4 text-sm font-black text-me-charcoal/75 transition-colors hover:border-black/15 hover:text-me-charcoal"
           >
             设置
           </button>
@@ -487,15 +487,15 @@ export default function ClientDetailPage() {
       </div>
 
       {/* ── Tab bar ──────────────────────────────────────────────────────────── */}
-      <div className="flex gap-1 rounded-xl border border-slate-200 bg-white p-1">
+      <div className="flex gap-1 rounded-xl border border-black/10 bg-white p-1">
         {([ ['overview', '概览'], ['data', '数据'], ['tools', '工具'] ] as const).map(([id, label]) => (
           <button
             key={id}
             onClick={() => setActiveTab(id)}
             className={`flex-1 rounded-lg py-2 text-sm font-black transition-colors ${
               activeTab === id
-                ? 'bg-slate-950 text-white'
-                : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                ? 'bg-me-charcoal text-white'
+                : 'text-me-charcoal/55 hover:bg-me-ivory hover:text-me-charcoal/90'
             }`}
           >
             {label}
@@ -544,17 +544,17 @@ export default function ClientDetailPage() {
 
           {/* Master Brief warning banner */}
           {hasActiveBrief === false && (
-            <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-              <span className="mt-1 h-2 w-2 rounded-full bg-amber-500" />
+            <div className="flex items-start gap-3 rounded-xl border border-me-ochre/30 bg-me-ochre/10 px-4 py-3">
+              <span className="mt-1 h-2 w-2 rounded-full bg-me-ochre" />
               <div className="flex-1">
-                <p className="text-sm font-black text-amber-950">尚未配置 Master Brief</p>
-                <p className="text-xs font-semibold text-amber-800">
+                <p className="text-sm font-black text-me-charcoal">尚未配置 Master Brief</p>
+                <p className="text-xs font-semibold text-me-ochre">
                   请先上传品牌文件并生成 Master Brief，才能开始内容生产。
                 </p>
               </div>
               <button
                 onClick={() => openSettings('brief')}
-                className="whitespace-nowrap text-xs font-black text-amber-800 hover:text-amber-950"
+                className="whitespace-nowrap text-xs font-black text-me-ochre hover:text-me-charcoal"
               >
                 配置 Master Brief →
               </button>
@@ -565,7 +565,7 @@ export default function ClientDetailPage() {
               Master Brief × Campaign = FDE 工作的上下文基座。
               所有内容生产（社媒/博客/广告）应当在某个活跃 Campaign 下进行。 */}
           <section>
-            <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-cyan-800">推广活动</p>
+            <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">推广活动</p>
             <ContentHub clientId={clientId} />
           </section>
         </>
@@ -583,7 +583,7 @@ export default function ClientDetailPage() {
         <>
           {/* Zone A: 内容生产 */}
           <section>
-            <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-cyan-800">内容生产</p>
+            <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">内容生产</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               <ToolCard href={`/dashboard/clients/${clientId}/marketing-plan`} title="Marketing Plan" desc="AI 生成营销计划 → 派发任务到鲁班"   badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/blog`}           title="博客"           desc="双信号博客生产与管理"            badge="in_house" />
@@ -600,7 +600,7 @@ export default function ClientDetailPage() {
 
           {/* Zone B: 诊断与分析 */}
           <section>
-            <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-cyan-800">诊断与分析</p>
+            <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">诊断与分析</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               <ToolCard href={`/dashboard/clients/${clientId}/zhangqian`}          title="张骞发现"       desc="扫描社媒、评价、关键词、竞品，生成品牌现状全景报告"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/diagnostic`}         title="华佗深度诊断"   desc="从 SEO/社媒/口碑/广告/AI可见/竞品六维打分，找到核心病灶"  badge="in_house" />
@@ -615,7 +615,7 @@ export default function ClientDetailPage() {
 
           {/* Zone C: SEO 工具 */}
           <section>
-            <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-cyan-800">SEO 工具</p>
+            <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">SEO 工具</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <ToolCard href={`/dashboard/clients/${clientId}/strategy`}           title="内容策略"        desc="根据关键词机会和竞品数据，制定博客选题与内容发布计划"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/seo-intelligence`}   title="SEO Intelligence" desc="关键词排名 · 流量趋势 · 竞品对比 · Untapped 词挖掘"    badge="in_house" />

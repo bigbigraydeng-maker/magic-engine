@@ -37,23 +37,23 @@ export function BriefDocument({ brief }: Props) {
   return (
     <div className="brief-document max-w-4xl mx-auto print:max-w-none">
       {/* ── Document Header ── */}
-      <div className="mb-8 pb-6 border-b-2 border-gray-200 print:pb-4">
+      <div className="mb-8 pb-6 border-b-2 border-black/10 print:pb-4">
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 print:text-2xl">
+            <h1 className="text-3xl font-bold text-me-charcoal/90 print:text-2xl">
               {brief.brand_name ?? 'Master Brief'}
             </h1>
             {brief.core_proposition && (
-              <p className="mt-2 text-base text-gray-600 max-w-2xl leading-relaxed">
+              <p className="mt-2 text-base text-me-charcoal/60 max-w-2xl leading-relaxed">
                 {brief.core_proposition}
               </p>
             )}
           </div>
           <div className="flex flex-col items-end gap-1.5 shrink-0 ml-6">
             <StatusBadge status={brief.status} />
-            <span className="text-xs text-gray-400">Version {brief.version}</span>
+            <span className="text-xs text-me-charcoal/45">Version {brief.version}</span>
             {brief.created_at && (
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-me-charcoal/45">
                 {new Date(brief.created_at).toLocaleDateString('en-AU', {
                   year: 'numeric', month: 'long', day: 'numeric',
                 })}
@@ -171,9 +171,9 @@ function Section({
 }) {
   return (
     <div className="print:break-inside-avoid">
-      <div className="flex items-baseline gap-3 mb-4 pb-2 border-b border-gray-200">
-        <span className="text-xs font-mono text-gray-400 select-none">{number}</span>
-        <h2 className="text-base font-bold text-gray-900 uppercase tracking-wide">{title}</h2>
+      <div className="flex items-baseline gap-3 mb-4 pb-2 border-b border-black/10">
+        <span className="text-xs font-mono text-me-charcoal/45 select-none">{number}</span>
+        <h2 className="text-base font-bold text-me-charcoal/90 uppercase tracking-wide">{title}</h2>
       </div>
       <div className="pl-6 print:pl-4">{children}</div>
     </div>
@@ -184,17 +184,17 @@ function Section({
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">{children}</p>
+    <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wider mb-1.5">{children}</p>
   )
 }
 
 function Chip({ label, variant = 'gray' }: { label: string; variant?: 'gray' | 'indigo' | 'green' | 'red' | 'amber' }) {
   const cls = {
-    gray:   'bg-gray-100 text-gray-700',
-    indigo: 'bg-indigo-50 text-indigo-700',
-    green:  'bg-green-50 text-green-700',
-    red:    'bg-red-50 text-red-600',
-    amber:  'bg-amber-50 text-amber-700',
+    gray:   'bg-me-ivory text-me-charcoal/75',
+    indigo: 'bg-me-ochre/10 text-me-ochre',
+    green:  'bg-[#5C8A4A]/10 text-[#5C8A4A]',
+    red:    'bg-[#C2453A]/10 text-[#C2453A]',
+    amber:  'bg-me-ochre/10 text-me-ochre',
   }[variant]
   return (
     <span className={`inline-block text-xs px-2.5 py-1 rounded-full font-medium ${cls}`}>{label}</span>
@@ -203,10 +203,10 @@ function Chip({ label, variant = 'gray' }: { label: string; variant?: 'gray' | '
 
 function StatusBadge({ status }: { status: string }) {
   const cls = status === 'active'
-    ? 'bg-green-100 text-green-700 border border-green-200'
+    ? 'bg-[#5C8A4A]/12 text-[#5C8A4A] border border-[#5C8A4A]/30'
     : status === 'draft'
-      ? 'bg-amber-100 text-amber-700 border border-amber-200'
-      : 'bg-gray-100 text-gray-600 border border-gray-200'
+      ? 'bg-me-ochre/15 text-me-ochre border border-me-ochre/30'
+      : 'bg-me-ivory text-me-charcoal/60 border border-black/10'
   return (
     <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${cls}`}>
       {status === 'active' ? '✓ Active' : status === 'draft' ? '⏳ Draft' : status}
@@ -272,19 +272,19 @@ function AudienceSection({ audience }: { audience: TargetAudience }) {
         {audience.age_range && (
           <div>
             <FieldLabel>Age Range</FieldLabel>
-            <p className="text-gray-800 font-medium">{audience.age_range}</p>
+            <p className="text-me-charcoal/75 font-medium">{audience.age_range}</p>
           </div>
         )}
         {audience.location && (
           <div>
             <FieldLabel>Primary Location</FieldLabel>
-            <p className="text-gray-800 font-medium">{audience.location}</p>
+            <p className="text-me-charcoal/75 font-medium">{audience.location}</p>
           </div>
         )}
         {audience.gender && (
           <div>
             <FieldLabel>Gender</FieldLabel>
-            <p className="text-gray-800 font-medium">{audience.gender}</p>
+            <p className="text-me-charcoal/75 font-medium">{audience.gender}</p>
           </div>
         )}
       </div>
@@ -301,8 +301,8 @@ function AudienceSection({ audience }: { audience: TargetAudience }) {
           <FieldLabel>Pain Points</FieldLabel>
           <ul className="space-y-1.5">
             {audience.pain_points.map(p => (
-              <li key={p} className="text-sm text-gray-700 flex items-start gap-2">
-                <span className="text-amber-500 mt-0.5 shrink-0">▸</span>
+              <li key={p} className="text-sm text-me-charcoal/75 flex items-start gap-2">
+                <span className="text-me-ochre mt-0.5 shrink-0">▸</span>
                 <span>{p}</span>
               </li>
             ))}
@@ -331,31 +331,31 @@ function PillarsSection({ pillars }: { pillars: ContentPillar[] }) {
         {pillars.map(p => {
           const pct = Math.round((p.post_ratio ?? 0) * 100)
           return (
-            <div key={p.id} className="border border-gray-100 rounded-xl p-4 bg-gray-50">
+            <div key={p.id} className="border border-black/[.06] rounded-xl p-4 bg-me-ivory">
               <div className="flex items-center justify-between mb-2">
-                <span className="font-semibold text-gray-800 text-sm">{p.name}</span>
-                <span className="text-sm font-bold text-indigo-600">{pct}%</span>
+                <span className="font-semibold text-me-charcoal/75 text-sm">{p.name}</span>
+                <span className="text-sm font-bold text-me-ochre">{pct}%</span>
               </div>
               {/* Ratio bar */}
-              <div className="w-full h-1 bg-gray-200 rounded-full mb-2">
+              <div className="w-full h-1 bg-me-stone rounded-full mb-2">
                 <div
-                  className="h-1 bg-indigo-400 rounded-full transition-all"
+                  className="h-1 bg-me-ochre/80 rounded-full transition-all"
                   style={{ width: `${pct}%` }}
                 />
               </div>
               {p.description && (
-                <p className="text-xs text-gray-500 mb-2 leading-relaxed">{p.description}</p>
+                <p className="text-xs text-me-charcoal/55 mb-2 leading-relaxed">{p.description}</p>
               )}
               <div className="flex flex-wrap gap-1 mb-2">
                 {p.content_types?.map(t => <Chip key={t} label={t} variant="indigo" />)}
               </div>
               {(p.example_topics?.length ?? 0) > 0 && (
                 <div>
-                  <p className="text-xs text-gray-400 mb-1">Example topics:</p>
-                  <ul className="text-xs text-gray-600 space-y-0.5">
+                  <p className="text-xs text-me-charcoal/45 mb-1">Example topics:</p>
+                  <ul className="text-xs text-me-charcoal/60 space-y-0.5">
                     {(p.example_topics ?? []).map(t => (
                       <li key={t} className="flex items-start gap-1.5">
-                        <span className="text-gray-300 shrink-0">–</span>{t}
+                        <span className="text-me-charcoal/35 shrink-0">–</span>{t}
                       </li>
                     ))}
                   </ul>
@@ -383,11 +383,11 @@ function PlatformSection({ strategy }: { strategy: Record<string, PlatformConfig
       <FieldLabel>Platform Strategy</FieldLabel>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         {active.map(([platform, cfg]) => (
-          <div key={platform} className="border border-gray-100 rounded-lg p-3 bg-white">
-            <p className="text-sm font-semibold text-gray-800 capitalize mb-0.5">{platform}</p>
-            <p className="text-xs text-gray-500">{cfg.post_frequency}</p>
+          <div key={platform} className="border border-black/[.06] rounded-lg p-3 bg-white">
+            <p className="text-sm font-semibold text-me-charcoal/75 capitalize mb-0.5">{platform}</p>
+            <p className="text-xs text-me-charcoal/55">{cfg.post_frequency}</p>
             {cfg.primary_content_type && (
-              <p className="text-xs text-gray-400 mt-0.5">{cfg.primary_content_type}</p>
+              <p className="text-xs text-me-charcoal/45 mt-0.5">{cfg.primary_content_type}</p>
             )}
           </div>
         ))}
@@ -414,7 +414,7 @@ function KeywordsSection({ seeds, competitors }: { seeds: string[]; competitors:
           <FieldLabel>Competitor Domains</FieldLabel>
           <div className="flex flex-wrap gap-1.5">
             {competitors.map(d => (
-              <span key={d} className="text-xs font-mono px-2.5 py-1 bg-gray-100 text-gray-600 rounded-lg">
+              <span key={d} className="text-xs font-mono px-2.5 py-1 bg-me-ivory text-me-charcoal/60 rounded-lg">
                 {d}
               </span>
             ))}
@@ -430,8 +430,8 @@ function KeywordsSection({ seeds, competitors }: { seeds: string[]; competitors:
 const INTENT_COLORS: Record<string, string> = {
   informational:  'text-blue-600 bg-blue-50',
   commercial:     'text-purple-600 bg-purple-50',
-  transactional:  'text-green-600 bg-green-50',
-  navigational:   'text-gray-600 bg-gray-100',
+  transactional:  'text-[#5C8A4A] bg-[#5C8A4A]/10',
+  navigational:   'text-me-charcoal/60 bg-me-ivory',
 }
 
 function SemrushSection({ snapshot }: { snapshot: SemrushSnapshot }) {
@@ -440,32 +440,32 @@ function SemrushSection({ snapshot }: { snapshot: SemrushSnapshot }) {
       {snapshot.top_keywords.length > 0 && (
         <div>
           <FieldLabel>Top Organic Keywords — from Keyword Intelligence</FieldLabel>
-          <div className="overflow-x-auto rounded-xl border border-gray-200">
+          <div className="overflow-x-auto rounded-xl border border-black/10">
             <table className="w-full text-xs">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="bg-me-ivory border-b border-black/10">
                 <tr>
-                  <th className="px-3 py-2.5 text-left font-semibold text-gray-600">Keyword</th>
-                  <th className="px-3 py-2.5 text-right font-semibold text-gray-600">Volume</th>
-                  <th className="px-3 py-2.5 text-right font-semibold text-gray-600">KD</th>
-                  <th className="px-3 py-2.5 text-right font-semibold text-gray-600">CPC</th>
-                  <th className="px-3 py-2.5 text-center font-semibold text-gray-600">Intent</th>
+                  <th className="px-3 py-2.5 text-left font-semibold text-me-charcoal/60">Keyword</th>
+                  <th className="px-3 py-2.5 text-right font-semibold text-me-charcoal/60">Volume</th>
+                  <th className="px-3 py-2.5 text-right font-semibold text-me-charcoal/60">KD</th>
+                  <th className="px-3 py-2.5 text-right font-semibold text-me-charcoal/60">CPC</th>
+                  <th className="px-3 py-2.5 text-center font-semibold text-me-charcoal/60">Intent</th>
                 </tr>
               </thead>
               <tbody>
                 {snapshot.top_keywords.map((kw, i) => (
-                  <tr key={kw.keyword} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
-                    <td className="px-3 py-2 font-medium text-gray-900">{kw.keyword}</td>
-                    <td className="px-3 py-2 text-right text-gray-600 tabular-nums">
+                  <tr key={kw.keyword} className={i % 2 === 0 ? 'bg-white' : 'bg-me-ivory/50'}>
+                    <td className="px-3 py-2 font-medium text-me-charcoal/90">{kw.keyword}</td>
+                    <td className="px-3 py-2 text-right text-me-charcoal/60 tabular-nums">
                       {kw.volume.toLocaleString()}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       <KdBadge kd={kw.kd} />
                     </td>
-                    <td className="px-3 py-2 text-right text-gray-600 tabular-nums">
+                    <td className="px-3 py-2 text-right text-me-charcoal/60 tabular-nums">
                       ${kw.cpc.toFixed(2)}
                     </td>
                     <td className="px-3 py-2 text-center">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${INTENT_COLORS[kw.intent] ?? 'text-gray-600 bg-gray-100'}`}>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${INTENT_COLORS[kw.intent] ?? 'text-me-charcoal/60 bg-me-ivory'}`}>
                         {kw.intent}
                       </span>
                     </td>
@@ -481,7 +481,7 @@ function SemrushSection({ snapshot }: { snapshot: SemrushSnapshot }) {
           <FieldLabel>Organic Search Competitors — from Keyword Intelligence</FieldLabel>
           <div className="flex flex-wrap gap-1.5">
             {snapshot.competitor_domains.map(d => (
-              <span key={d} className="text-xs font-mono px-2.5 py-1 bg-gray-100 text-gray-600 rounded-lg">
+              <span key={d} className="text-xs font-mono px-2.5 py-1 bg-me-ivory text-me-charcoal/60 rounded-lg">
                 {d}
               </span>
             ))}
@@ -494,10 +494,10 @@ function SemrushSection({ snapshot }: { snapshot: SemrushSnapshot }) {
 
 function KdBadge({ kd }: { kd: number }) {
   const color = kd <= 30
-    ? 'text-green-700'
+    ? 'text-[#5C8A4A]'
     : kd <= 60
-      ? 'text-amber-700'
-      : 'text-red-700'
+      ? 'text-me-ochre'
+      : 'text-[#C2453A]'
   return <span className={`font-semibold ${color}`}>{kd}</span>
 }
 
@@ -521,11 +521,11 @@ function VisualSection({
               hex ? (
                 <div key={name} className="text-center">
                   <div
-                    className="w-12 h-12 rounded-xl border border-gray-200 shadow-sm mb-1"
+                    className="w-12 h-12 rounded-xl border border-black/10 shadow-sm mb-1"
                     style={{ backgroundColor: hex }}
                   />
-                  <p className="text-xs text-gray-500 capitalize">{name}</p>
-                  <p className="text-xs font-mono text-gray-400">{hex}</p>
+                  <p className="text-xs text-me-charcoal/55 capitalize">{name}</p>
+                  <p className="text-xs font-mono text-me-charcoal/45">{hex}</p>
                 </div>
               ) : null
             )}
@@ -547,7 +547,7 @@ function VisualSection({
               <FieldLabel>Visual DOs</FieldLabel>
               <ul className="space-y-1.5">
                 {dos.map(d => (
-                  <li key={d} className="text-sm text-green-700 flex items-start gap-2">
+                  <li key={d} className="text-sm text-[#5C8A4A] flex items-start gap-2">
                     <span className="shrink-0 font-bold">✓</span><span>{d}</span>
                   </li>
                 ))}
@@ -559,7 +559,7 @@ function VisualSection({
               <FieldLabel>Visual DON&apos;Ts</FieldLabel>
               <ul className="space-y-1.5">
                 {donts.map(d => (
-                  <li key={d} className="text-sm text-red-600 flex items-start gap-2">
+                  <li key={d} className="text-sm text-[#C2453A] flex items-start gap-2">
                     <span className="shrink-0 font-bold">✕</span><span>{d}</span>
                   </li>
                 ))}
@@ -578,25 +578,25 @@ function MarkdownBlock({ content }: { content: string }) {
   const blocks = content.trim().split(/\n{2,}/)
 
   return (
-    <div className="space-y-2 text-sm text-gray-700 leading-relaxed">
+    <div className="space-y-2 text-sm text-me-charcoal/75 leading-relaxed">
       {blocks.map((block, i) => {
         if (block.startsWith('### ')) {
           return (
-            <h3 key={i} className="font-semibold text-gray-800 text-sm mt-3">
+            <h3 key={i} className="font-semibold text-me-charcoal/75 text-sm mt-3">
               {block.slice(4)}
             </h3>
           )
         }
         if (block.startsWith('## ')) {
           return (
-            <h2 key={i} className="font-bold text-gray-900 text-base mt-4">
+            <h2 key={i} className="font-bold text-me-charcoal/90 text-base mt-4">
               {block.slice(3)}
             </h2>
           )
         }
         if (block.startsWith('# ')) {
           return (
-            <h1 key={i} className="font-bold text-gray-900 text-lg mt-4">
+            <h1 key={i} className="font-bold text-me-charcoal/90 text-lg mt-4">
               {block.slice(2)}
             </h1>
           )
@@ -635,7 +635,7 @@ function applyInline(text: string): React.ReactNode {
     <>
       {parts.map((part, i) =>
         part.startsWith('**') && part.endsWith('**') ? (
-          <strong key={i} className="font-semibold text-gray-900">
+          <strong key={i} className="font-semibold text-me-charcoal/90">
             {part.slice(2, -2)}
           </strong>
         ) : (
@@ -671,7 +671,7 @@ function SourcesSection({
                   href={u}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-indigo-600 hover:underline text-xs font-mono"
+                  className="text-me-ochre hover:underline text-xs font-mono"
                 >
                   {u}
                 </a>
@@ -685,14 +685,14 @@ function SourcesSection({
           <FieldLabel>Uploaded Files</FieldLabel>
           <ul className="space-y-0.5">
             {fileUrls.map(f => (
-              <li key={f} className="text-xs font-mono text-gray-500">
+              <li key={f} className="text-xs font-mono text-me-charcoal/55">
                 {f.split('/').pop() ?? f}
               </li>
             ))}
           </ul>
         </div>
       )}
-      <div className="flex gap-4 text-xs text-gray-400 pt-1">
+      <div className="flex gap-4 text-xs text-me-charcoal/45 pt-1">
         {model && <span>Model: {model}</span>}
         {tokens && <span>Tokens: {tokens.toLocaleString()}</span>}
       </div>

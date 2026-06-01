@@ -57,22 +57,22 @@ export function BriefEditor({ brief, briefId, clientId, onUpdated, onActivate }:
   return (
     <div className="space-y-3">
       {/* Status bar */}
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-3 border-b border-black/[.06] pb-4">
         <div className="flex items-center gap-2">
-          <span className={`rounded-full px-2.5 py-1 text-xs font-black ${isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+          <span className={`rounded-full px-2.5 py-1 text-xs font-black ${isActive ? 'bg-[#5C8A4A]/12 text-[#5C8A4A]' : 'bg-me-ochre/15 text-me-ochre'}`}>
             {isActive ? 'Active' : 'Draft'}
           </span>
-          <span className="text-xs font-bold text-slate-400">v{brief.version}</span>
+          <span className="text-xs font-bold text-me-charcoal/45">v{brief.version}</span>
           {brief.model_used && (
-            <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-500">Strategy Engine</span>
+            <span className="rounded-full bg-me-ivory px-2 py-1 text-xs font-bold text-me-charcoal/55">Strategy Engine</span>
           )}
-          {saveMsg && <span className="text-xs font-bold text-emerald-700">{saveMsg}</span>}
+          {saveMsg && <span className="text-xs font-bold text-[#5C8A4A]">{saveMsg}</span>}
         </div>
         {!isActive && (
           <button
             onClick={handleActivate}
             disabled={activating}
-            className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+            className="rounded-lg bg-[#5C8A4A] px-3 py-2 text-xs font-black text-white transition-colors hover:bg-[#5C8A4A] disabled:opacity-50"
           >
             {activating ? 'Activating...' : 'Set as Active'}
           </button>
@@ -183,16 +183,16 @@ function Section({ label, id, open, toggle, children }: {
 }) {
   const isOpen = open === id;
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-100 bg-white">
+    <div className="overflow-hidden rounded-xl border border-black/[.06] bg-white">
       <button
         onClick={() => toggle(id)}
-        className="flex w-full items-center justify-between px-4 py-4 text-sm font-black text-slate-700 transition-colors hover:bg-slate-50"
+        className="flex w-full items-center justify-between px-4 py-4 text-sm font-black text-me-charcoal/75 transition-colors hover:bg-me-ivory"
       >
         <span>{label}</span>
-        <span className="text-xs font-black text-slate-400">{isOpen ? 'UP' : 'DN'}</span>
+        <span className="text-xs font-black text-me-charcoal/45">{isOpen ? 'UP' : 'DN'}</span>
       </button>
       {isOpen && (
-        <div className="space-y-4 border-t border-slate-50 px-4 pb-5 pt-4">
+        <div className="space-y-4 border-t border-black/[.04] px-4 pb-5 pt-4">
           {children}
         </div>
       )}
@@ -201,20 +201,20 @@ function Section({ label, id, open, toggle, children }: {
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
-  return <p className="mb-1.5 text-xs font-black uppercase tracking-[0.1em] text-slate-500">{children}</p>;
+  return <p className="mb-1.5 text-xs font-black uppercase tracking-[0.1em] text-me-charcoal/55">{children}</p>;
 }
 
 function EmptyState({ hint = 'Generate a brief or ask Strategy Engine to fill this in.' }: { hint?: string }) {
-  return <p className="py-1 text-sm font-semibold italic text-slate-400">{hint}</p>;
+  return <p className="py-1 text-sm font-semibold italic text-me-charcoal/45">{hint}</p>;
 }
 
 function Chip({ label, color = 'gray' }: { label: string; color?: 'gray' | 'indigo' | 'green' | 'red' | 'amber' }) {
   const colors = {
-    gray:   'bg-slate-100 text-slate-600',
-    indigo: 'bg-cyan-50 text-cyan-800',
-    green:  'bg-emerald-50 text-emerald-700',
-    red:    'bg-red-50 text-red-700',
-    amber:  'bg-amber-50 text-amber-700',
+    gray:   'bg-me-ivory text-me-charcoal/60',
+    indigo: 'bg-me-ochre/10 text-me-ochre',
+    green:  'bg-[#5C8A4A]/10 text-[#5C8A4A]',
+    red:    'bg-[#C2453A]/10 text-[#C2453A]',
+    amber:  'bg-me-ochre/10 text-me-ochre',
   };
   return (
     <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-bold ${colors[color]}`}>{label}</span>
@@ -265,13 +265,13 @@ function AudienceDisplay({ audience }: { audience: TargetAudience | null }) {
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
         {audience.age_range && (
-          <div><span className="text-gray-500 text-xs font-semibold uppercase tracking-wide">Age </span><span className="text-gray-800">{audience.age_range}</span></div>
+          <div><span className="text-me-charcoal/55 text-xs font-semibold uppercase tracking-wide">Age </span><span className="text-me-charcoal/75">{audience.age_range}</span></div>
         )}
         {audience.location && (
-          <div><span className="text-gray-500 text-xs font-semibold uppercase tracking-wide">Location </span><span className="text-gray-800">{audience.location}</span></div>
+          <div><span className="text-me-charcoal/55 text-xs font-semibold uppercase tracking-wide">Location </span><span className="text-me-charcoal/75">{audience.location}</span></div>
         )}
         {audience.gender && (
-          <div><span className="text-gray-500 text-xs font-semibold uppercase tracking-wide">Gender </span><span className="text-gray-800">{audience.gender}</span></div>
+          <div><span className="text-me-charcoal/55 text-xs font-semibold uppercase tracking-wide">Gender </span><span className="text-me-charcoal/75">{audience.gender}</span></div>
         )}
       </div>
       {audience.interests?.length > 0 && (
@@ -287,8 +287,8 @@ function AudienceDisplay({ audience }: { audience: TargetAudience | null }) {
           <FieldLabel>Pain Points</FieldLabel>
           <ul className="space-y-1">
             {audience.pain_points.map(p => (
-              <li key={p} className="text-sm text-gray-700 flex gap-1.5 items-start">
-                <span className="text-amber-500 mt-0.5">•</span>{p}
+              <li key={p} className="text-sm text-me-charcoal/75 flex gap-1.5 items-start">
+                <span className="text-me-ochre mt-0.5">•</span>{p}
               </li>
             ))}
           </ul>
@@ -313,12 +313,12 @@ function PillarsDisplay({ pillars }: { pillars: ContentPillar[] | null }) {
       <FieldLabel>Content Pillars</FieldLabel>
       <div className="space-y-2">
         {pillars.map(p => (
-          <div key={p.id} className="bg-gray-50 rounded-lg px-3 py-2.5">
+          <div key={p.id} className="bg-me-ivory rounded-lg px-3 py-2.5">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-sm font-semibold text-gray-800">{p.name}</span>
-              <span className="text-xs text-indigo-600 font-medium">{Math.round(p.post_ratio * 100)}%</span>
+              <span className="text-sm font-semibold text-me-charcoal/75">{p.name}</span>
+              <span className="text-xs text-me-ochre font-medium">{Math.round(p.post_ratio * 100)}%</span>
             </div>
-            <p className="text-xs text-gray-500 mb-1.5">{p.description}</p>
+            <p className="text-xs text-me-charcoal/55 mb-1.5">{p.description}</p>
             <div className="flex flex-wrap gap-1">
               {p.content_types?.map(t => <Chip key={t} label={t} color="indigo" />)}
             </div>
@@ -338,9 +338,9 @@ function PlatformDisplay({ strategy }: { strategy: Record<string, { enabled: boo
       <FieldLabel>Platform Strategy</FieldLabel>
       <div className="grid grid-cols-2 gap-2">
         {enabled.map(([platform, cfg]) => (
-          <div key={platform} className="bg-gray-50 rounded-lg px-3 py-2">
-            <p className="text-xs font-semibold text-gray-700 capitalize">{platform}</p>
-            <p className="text-xs text-gray-500">{cfg.post_frequency} · {cfg.primary_content_type}</p>
+          <div key={platform} className="bg-me-ivory rounded-lg px-3 py-2">
+            <p className="text-xs font-semibold text-me-charcoal/75 capitalize">{platform}</p>
+            <p className="text-xs text-me-charcoal/55">{cfg.post_frequency} · {cfg.primary_content_type}</p>
           </div>
         ))}
       </div>
@@ -361,8 +361,8 @@ function VisualDisplay({ colors, styleKeywords, dos, donts }: {
           <div className="flex gap-2">
             {Object.entries(colors).map(([name, hex]) => hex ? (
               <div key={name} className="text-center">
-                <div className="w-8 h-8 rounded-lg border border-gray-200 shadow-sm" style={{ backgroundColor: hex }} />
-                <p className="text-xs text-gray-400 mt-1 capitalize">{name}</p>
+                <div className="w-8 h-8 rounded-lg border border-black/10 shadow-sm" style={{ backgroundColor: hex }} />
+                <p className="text-xs text-me-charcoal/45 mt-1 capitalize">{name}</p>
               </div>
             ) : null)}
           </div>
@@ -382,7 +382,7 @@ function VisualDisplay({ colors, styleKeywords, dos, donts }: {
             <div>
               <FieldLabel>Visual DOs</FieldLabel>
               <ul className="space-y-1">
-                {dos.map(d => <li key={d} className="text-xs text-green-700 flex gap-1"><span>✓</span>{d}</li>)}
+                {dos.map(d => <li key={d} className="text-xs text-[#5C8A4A] flex gap-1"><span>✓</span>{d}</li>)}
               </ul>
             </div>
           )}
@@ -390,7 +390,7 @@ function VisualDisplay({ colors, styleKeywords, dos, donts }: {
             <div>
               <FieldLabel>Visual DON&apos;Ts</FieldLabel>
               <ul className="space-y-1">
-                {donts.map(d => <li key={d} className="text-xs text-red-600 flex gap-1"><span>✕</span>{d}</li>)}
+                {donts.map(d => <li key={d} className="text-xs text-[#C2453A] flex gap-1"><span>✕</span>{d}</li>)}
               </ul>
             </div>
           )}
@@ -407,7 +407,7 @@ function EditableText({ label, value: initial, onSave, saving, multiline = false
   multiline?: boolean; rows?: number; placeholder?: string;
 }) {
   const [val, setVal] = useState(initial);
-  const base = 'w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors';
+  const base = 'w-full bg-me-ivory border border-black/10 rounded-lg px-3 py-2 text-sm text-me-charcoal/90 placeholder-me-charcoal/45 focus:outline-none focus:ring-2 focus:ring-me-ochre focus:bg-white transition-colors';
   return (
     <div>
       <FieldLabel>{label}</FieldLabel>
@@ -449,7 +449,7 @@ function EditableList({ label, values, onSave, saving, placeholder }: {
         onChange={e => setText(e.target.value)}
         rows={4}
         placeholder={placeholder}
-        className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white resize-none transition-colors"
+        className="w-full bg-me-ivory border border-black/10 rounded-lg px-3 py-2 text-sm text-me-charcoal/90 placeholder-me-charcoal/45 focus:outline-none focus:ring-2 focus:ring-me-ochre focus:bg-white resize-none transition-colors"
       />
       {isDirty && (
         <div className="flex justify-end mt-1">
@@ -465,7 +465,7 @@ function SaveButton({ onClick, saving }: { onClick: () => void; saving: boolean 
     <button
       onClick={onClick}
       disabled={saving}
-      className="text-xs bg-gray-800 hover:bg-gray-900 text-white px-3 py-1.5 rounded-lg disabled:opacity-50 whitespace-nowrap transition-colors"
+      className="text-xs bg-me-charcoal/85 hover:bg-me-charcoal/90 text-white px-3 py-1.5 rounded-lg disabled:opacity-50 whitespace-nowrap transition-colors"
     >
       {saving ? 'Saving…' : 'Save'}
     </button>

@@ -31,21 +31,21 @@ function ActionDetailCard({
 }) {
   const fw = FLYWHEEL_BADGE[action.dimension] ?? {
     label: action.dimension,
-    cls: 'bg-gray-100 text-gray-600 border-gray-200',
+    cls: 'bg-me-ivory text-me-charcoal/60 border-black/10',
   }
   const route = getLubanRoute(action.executable_by, clientId)
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+    <div className="rounded-xl border border-black/10 bg-white p-4 space-y-3">
       {/* Rank + badges row */}
       <div className="flex items-center gap-2 flex-wrap">
-        <div className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold flex items-center justify-center flex-shrink-0">
+        <div className="w-6 h-6 rounded-full bg-me-ochre/15 text-me-ochre text-xs font-bold flex items-center justify-center flex-shrink-0">
           {action.rank}
         </div>
         <span className={`text-xs font-semibold border rounded-full px-2 py-0.5 ${fw.cls}`}>
           {fw.label}
         </span>
-        <span className="text-sm font-semibold text-gray-800 font-mono flex-1 min-w-0 truncate">
+        <span className="text-sm font-semibold text-me-charcoal/75 font-mono flex-1 min-w-0 truncate">
           {action.action_type}
         </span>
         <span className={`text-xs font-medium rounded px-1.5 py-0.5 ${IMPACT_CLS[action.expected_impact] ?? ''}`}>
@@ -57,7 +57,7 @@ function ActionDetailCard({
       </div>
 
       {/* Why now */}
-      <p className="text-sm text-gray-700 leading-relaxed">{action.why_now}</p>
+      <p className="text-sm text-me-charcoal/75 leading-relaxed">{action.why_now}</p>
 
       {/* Evidence refs */}
       {action.evidence_refs.length > 0 && (
@@ -65,7 +65,7 @@ function ActionDetailCard({
           {action.evidence_refs.map((ref, i) => (
             <span
               key={i}
-              className="text-[11px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded font-mono"
+              className="text-[11px] bg-me-ivory text-me-charcoal/55 px-2 py-0.5 rounded font-mono"
             >
               {ref}
             </span>
@@ -78,12 +78,12 @@ function ActionDetailCard({
         <a
           href={route.href}
           onClick={onNavigate}
-          className="flex items-center justify-center gap-1.5 w-full py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition-colors"
+          className="flex items-center justify-center gap-1.5 w-full py-2.5 rounded-lg bg-me-ochre text-white text-sm font-semibold hover:bg-me-ochre/90 transition-colors"
         >
           🖥️ 前往工作台 · {route.label}
         </a>
       ) : (
-        <div className="flex items-center gap-2 text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-2">
+        <div className="flex items-center gap-2 text-xs text-me-charcoal/45 bg-me-ivory rounded-lg px-3 py-2">
           <span>{action.execution_mode === 'external_manual' ? '📞' : '🔗'}</span>
           <span>
             {action.execution_mode === 'external_manual'
@@ -215,11 +215,11 @@ export function ZhugeDrawer({ clientId, isOpen, onClose, onComplete }: ZhugeDraw
       {/* Drawer panel */}
       <div className="relative bg-white w-full sm:w-[520px] h-full flex flex-col shadow-2xl">
         {/* Header */}
-        <div className="shrink-0 border-b border-gray-200 px-5 py-4 flex items-center gap-3">
+        <div className="shrink-0 border-b border-black/10 px-5 py-4 flex items-center gap-3">
           <span className="text-xl">🧠</span>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-900">诸葛亮 · 本周战略建议</p>
-            <p className="text-xs text-gray-400 mt-0.5">
+            <p className="text-sm font-semibold text-me-charcoal/90">诸葛亮 · 本周战略建议</p>
+            <p className="text-xs text-me-charcoal/45 mt-0.5">
               {phase === 'loading' && (source === null
                 ? '读取上一次战略建议…'
                 : '正在分析张骞证据 + 华佗诊断，约 20–40 秒…')}
@@ -233,7 +233,7 @@ export function ZhugeDrawer({ clientId, isOpen, onClose, onComplete }: ZhugeDraw
           {phase === 'done' && (
             <button
               onClick={() => { void runConduct() }}
-              className="flex-shrink-0 text-xs font-medium text-gray-500 hover:text-indigo-700 border border-gray-200 hover:border-indigo-300 rounded-lg px-2.5 py-1 transition-colors"
+              className="flex-shrink-0 text-xs font-medium text-me-charcoal/55 hover:text-me-ochre border border-black/10 hover:border-me-ochre/40 rounded-lg px-2.5 py-1 transition-colors"
               title="重新调用 Strategy Engine，覆盖上一次结果"
             >
               🔄 重新分析
@@ -241,7 +241,7 @@ export function ZhugeDrawer({ clientId, isOpen, onClose, onComplete }: ZhugeDraw
           )}
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-700 text-lg px-2 flex-shrink-0"
+            className="text-me-charcoal/45 hover:text-me-charcoal/75 text-lg px-2 flex-shrink-0"
             aria-label="关闭"
           >
             ✕
@@ -254,10 +254,10 @@ export function ZhugeDrawer({ clientId, isOpen, onClose, onComplete }: ZhugeDraw
           {/* ── Loading ── */}
           {phase === 'loading' && (
             <div className="flex flex-col items-center justify-center py-20 gap-5">
-              <div className="animate-spin w-10 h-10 border-[3px] border-indigo-200 border-t-indigo-600 rounded-full" />
+              <div className="animate-spin w-10 h-10 border-[3px] border-me-ochre/30 border-t-me-ochre rounded-full" />
               <div className="text-center">
-                <p className="text-sm font-semibold text-gray-800">诸葛亮运筹中…</p>
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-sm font-semibold text-me-charcoal/75">诸葛亮运筹中…</p>
+                <p className="text-xs text-me-charcoal/45 mt-1">
                   调用 Strategy Engine，分析张骞证据 + 华佗诊断
                 </p>
               </div>
@@ -266,11 +266,11 @@ export function ZhugeDrawer({ clientId, isOpen, onClose, onComplete }: ZhugeDraw
 
           {/* ── Error ── */}
           {phase === 'error' && (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-center space-y-2">
+            <div className="rounded-xl border border-[#C2453A]/30 bg-[#C2453A]/10 p-5 text-center space-y-2">
               <p className="text-2xl">⚠️</p>
-              <p className="text-sm font-semibold text-red-800">分析失败</p>
-              <p className="text-xs text-red-600 break-all">{error}</p>
-              <p className="text-xs text-gray-500 mt-2">
+              <p className="text-sm font-semibold text-[#C2453A]">分析失败</p>
+              <p className="text-xs text-[#C2453A] break-all">{error}</p>
+              <p className="text-xs text-me-charcoal/55 mt-2">
                 请确认张骞品牌扫描已完成后关闭抽屉重试。
               </p>
             </div>
@@ -279,7 +279,7 @@ export function ZhugeDrawer({ clientId, isOpen, onClose, onComplete }: ZhugeDraw
           {/* ── Done — action cards ── */}
           {phase === 'done' && output && (
             <>
-              <p className="text-xs text-gray-500 pb-1">
+              <p className="text-xs text-me-charcoal/55 pb-1">
                 本周战略建议 · 按紧迫程度排序 · 点击「前往工作台」执行对应任务
               </p>
 
@@ -292,7 +292,7 @@ export function ZhugeDrawer({ clientId, isOpen, onClose, onComplete }: ZhugeDraw
                 />
               ))}
 
-              <div className="pt-2 text-center text-[11px] text-gray-400">
+              <div className="pt-2 text-center text-[11px] text-me-charcoal/45">
                 Strategy Engine · {output.input_tokens + output.output_tokens} tokens ·
                 生成于 {new Date(output.generated_at).toLocaleString('zh-CN', { timeZone: 'Pacific/Auckland' })}
               </div>

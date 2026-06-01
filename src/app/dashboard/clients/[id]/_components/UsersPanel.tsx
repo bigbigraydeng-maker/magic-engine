@@ -12,7 +12,7 @@ interface ClientUser {
 
 const ACCESS_LABELS: Record<string, { label: string; desc: string; color: string }> = {
   portal:    { label: 'Portal 只读', desc: '只能查看客户 Portal',          color: 'bg-blue-50 text-blue-700 border-blue-200' },
-  dashboard: { label: 'Dashboard',   desc: '可访问后台内容板、社媒矩阵',    color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+  dashboard: { label: 'Dashboard',   desc: '可访问后台内容板、社媒矩阵',    color: 'bg-me-ochre/10 text-me-ochre border-me-ochre/30' },
   both:      { label: '全部权限',    desc: 'Portal + Dashboard 均可访问',  color: 'bg-purple-50 text-purple-700 border-purple-200' },
 }
 
@@ -88,27 +88,27 @@ export function UsersPanel({ clientId }: { clientId: string }) {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-sm font-semibold text-gray-900">用户访问权限</h3>
-        <p className="text-xs text-gray-500 mt-0.5">管理哪些邮箱可以访问该客户的 Portal 或后台内容板</p>
+        <h3 className="text-sm font-semibold text-me-charcoal/90">用户访问权限</h3>
+        <p className="text-xs text-me-charcoal/55 mt-0.5">管理哪些邮箱可以访问该客户的 Portal 或后台内容板</p>
       </div>
 
       {/* User list */}
       <div className="space-y-2">
         {loading ? (
-          <p className="text-sm text-gray-400 py-4 text-center">加载中…</p>
+          <p className="text-sm text-me-charcoal/45 py-4 text-center">加载中…</p>
         ) : users.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-gray-200 py-8 text-center text-sm text-gray-400">
+          <div className="rounded-xl border border-dashed border-black/10 py-8 text-center text-sm text-me-charcoal/45">
             暂无授权用户
           </div>
         ) : (
           users.map(u => {
             const badge = ACCESS_LABELS[u.access_type]
             return (
-              <div key={u.id} className="flex items-center justify-between gap-3 bg-gray-50 rounded-xl px-4 py-3">
+              <div key={u.id} className="flex items-center justify-between gap-3 bg-me-ivory rounded-xl px-4 py-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-gray-900 truncate">{u.email}</p>
+                  <p className="text-sm font-medium text-me-charcoal/90 truncate">{u.email}</p>
                   {u.display_name && (
-                    <p className="text-xs text-gray-400">{u.display_name}</p>
+                    <p className="text-xs text-me-charcoal/45">{u.display_name}</p>
                   )}
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
@@ -118,7 +118,7 @@ export function UsersPanel({ clientId }: { clientId: string }) {
                   <button
                     onClick={() => handleDelete(u.email)}
                     disabled={deletingEmail === u.email}
-                    className="text-xs text-red-500 hover:text-red-700 disabled:opacity-40 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors"
+                    className="text-xs text-[#C2453A] hover:text-[#C2453A] disabled:opacity-40 px-2 py-1 rounded-lg hover:bg-[#C2453A]/10 transition-colors"
                   >
                     {deletingEmail === u.email ? '…' : '移除'}
                   </button>
@@ -130,35 +130,35 @@ export function UsersPanel({ clientId }: { clientId: string }) {
       </div>
 
       {/* Add user form */}
-      <form onSubmit={handleAdd} className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
-        <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">添加用户</p>
+      <form onSubmit={handleAdd} className="rounded-xl border border-black/10 bg-white p-4 space-y-3">
+        <p className="text-xs font-semibold text-me-charcoal/75 uppercase tracking-wider">添加用户</p>
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">邮箱 *</label>
+            <label className="block text-xs text-me-charcoal/55 mb-1">邮箱 *</label>
             <input
               type="email"
               required
               value={email}
               onChange={e => setEmail(e.target.value)}
               placeholder="client@example.com"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full border border-black/15 rounded-lg px-3 py-2 text-sm text-me-charcoal/90 focus:outline-none focus:ring-2 focus:ring-me-ochre"
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">显示名称</label>
+            <label className="block text-xs text-me-charcoal/55 mb-1">显示名称</label>
             <input
               type="text"
               value={displayName}
               onChange={e => setDisplayName(e.target.value)}
               placeholder="例：New Asian Marketing"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full border border-black/15 rounded-lg px-3 py-2 text-sm text-me-charcoal/90 focus:outline-none focus:ring-2 focus:ring-me-ochre"
             />
           </div>
         </div>
 
         <div>
-          <label className="block text-xs text-gray-500 mb-1">访问权限 *</label>
+          <label className="block text-xs text-me-charcoal/55 mb-1">访问权限 *</label>
           <div className="grid grid-cols-3 gap-2">
             {(Object.entries(ACCESS_LABELS) as [string, typeof ACCESS_LABELS[string]][]).map(([key, cfg]) => (
               <button
@@ -168,7 +168,7 @@ export function UsersPanel({ clientId }: { clientId: string }) {
                 className={`text-left rounded-lg border p-2.5 transition-colors ${
                   accessType === key
                     ? `${cfg.color} border-current`
-                    : 'border-gray-200 hover:border-gray-300 text-gray-600'
+                    : 'border-black/10 hover:border-black/15 text-me-charcoal/60'
                 }`}
               >
                 <p className="text-xs font-semibold">{cfg.label}</p>
@@ -182,12 +182,12 @@ export function UsersPanel({ clientId }: { clientId: string }) {
           <button
             type="submit"
             disabled={adding}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-5 py-2 rounded-lg font-medium disabled:opacity-50 transition-colors"
+            className="bg-me-ochre hover:bg-me-ochre/90 text-white text-sm px-5 py-2 rounded-lg font-medium disabled:opacity-50 transition-colors"
           >
             {adding ? '添加中…' : '+ 添加用户'}
           </button>
           {msg && (
-            <span className={`text-xs ${msg.startsWith('✓') ? 'text-green-600' : 'text-red-500'}`}>
+            <span className={`text-xs ${msg.startsWith('✓') ? 'text-[#5C8A4A]' : 'text-[#C2453A]'}`}>
               {msg}
             </span>
           )}

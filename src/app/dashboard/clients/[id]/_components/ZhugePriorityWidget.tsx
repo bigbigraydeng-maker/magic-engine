@@ -42,7 +42,7 @@ const ACTION_TYPE_ZH: Record<string, string> = {
 function ActionCard({ action, clientId }: { action: ZhugeActionRow; clientId: string }) {
   const fw = FLYWHEEL_BADGE[action.flywheel] ?? {
     label: action.flywheel,
-    cls: 'bg-gray-100 text-gray-600 border-gray-200',
+    cls: 'bg-me-ivory text-me-charcoal/60 border-black/10',
   };
   const p = action.payload;
   const execMode = EXEC_MODE_ZH[action.execution_mode] ?? { label: action.execution_mode };
@@ -50,8 +50,8 @@ function ActionCard({ action, clientId }: { action: ZhugeActionRow; clientId: st
   const route = getLubanRoute(p.executable_by ?? null, clientId);
 
   return (
-    <div className="flex gap-4 rounded-xl border border-slate-200 bg-white p-4 transition-all hover:border-cyan-200 hover:shadow-sm">
-      <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-cyan-50 text-sm font-black text-cyan-800">
+    <div className="flex gap-4 rounded-xl border border-black/10 bg-white p-4 transition-all hover:border-me-ochre/30 hover:shadow-sm">
+      <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-me-ochre/10 text-sm font-black text-me-ochre">
         {p.rank}
       </div>
 
@@ -60,7 +60,7 @@ function ActionCard({ action, clientId }: { action: ZhugeActionRow; clientId: st
           <span className={`rounded-full border px-2 py-0.5 text-xs font-black ${fw.cls}`}>
             {fw.label}
           </span>
-          <span className="text-base font-black text-slate-950">
+          <span className="text-base font-black text-me-charcoal">
             {actionNameZh}
           </span>
           <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
@@ -73,17 +73,17 @@ function ActionCard({ action, clientId }: { action: ZhugeActionRow; clientId: st
           </div>
         </div>
 
-        <p className="mb-3 text-sm font-semibold leading-relaxed text-slate-600">{p.why_now}</p>
+        <p className="mb-3 text-sm font-semibold leading-relaxed text-me-charcoal/60">{p.why_now}</p>
 
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-400">
-            <span className="h-2 w-2 rounded-full bg-cyan-300" />
+          <div className="flex items-center gap-1.5 text-xs font-bold text-me-charcoal/45">
+            <span className="h-2 w-2 rounded-full bg-me-ochre/70" />
             <span>{execMode.label}</span>
           </div>
           {route.kind === 'navigate' && (
             <Link
               href={route.href}
-              className="shrink-0 rounded-lg border border-cyan-200 px-3 py-1.5 text-xs font-black text-cyan-800 transition-colors hover:border-cyan-300 hover:bg-cyan-50"
+              className="shrink-0 rounded-lg border border-me-ochre/30 px-3 py-1.5 text-xs font-black text-me-ochre transition-colors hover:border-me-ochre/40 hover:bg-me-ochre/10"
             >
               {route.label}
             </Link>
@@ -147,19 +147,19 @@ export function ZhugePriorityWidget({
   // ── Loading skeleton ──
   if (state === 'loading') {
     return (
-      <div className="h-28 animate-pulse rounded-xl border border-slate-200 bg-white p-4" />
+      <div className="h-28 animate-pulse rounded-xl border border-black/10 bg-white p-4" />
     );
   }
 
   // ── Empty (no prior session) ──
   if (state === 'empty') {
     return (
-      <div className="flex items-center justify-between gap-4 rounded-xl border border-dashed border-cyan-200 bg-cyan-50 p-5">
+      <div className="flex items-center justify-between gap-4 rounded-xl border border-dashed border-me-ochre/30 bg-me-ochre/10 p-5">
         <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-950 text-xs font-black text-white">ST</span>
+          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-me-charcoal text-xs font-black text-white">ST</span>
           <div>
-            <p className="text-sm font-black text-slate-950">诸葛亮 · 优先行动</p>
-            <p className="mt-0.5 text-xs font-semibold text-slate-500">
+            <p className="text-sm font-black text-me-charcoal">诸葛亮 · 优先行动</p>
+            <p className="mt-0.5 text-xs font-semibold text-me-charcoal/55">
               {discoveryConfirmed
                 ? '尚无分析结果。点击「询问诸葛亮」打开 AI 分析抽屉。'
                 : '请先完成张骞品牌扫描，再询问诸葛亮。'}
@@ -169,7 +169,7 @@ export function ZhugePriorityWidget({
         {discoveryConfirmed && (
           <button
             onClick={onAskZhuge}
-            className="shrink-0 rounded-lg bg-slate-950 px-4 py-2 text-sm font-black text-white transition-colors hover:bg-slate-800"
+            className="shrink-0 rounded-lg bg-me-charcoal px-4 py-2 text-sm font-black text-white transition-colors hover:bg-me-charcoal/85"
           >
             询问诸葛亮 →
           </button>
@@ -183,15 +183,15 @@ export function ZhugePriorityWidget({
   const visibleActions = expanded ? actions : actions.slice(0, COLLAPSED_COUNT);
 
   return (
-    <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="space-y-3 rounded-xl border border-black/10 bg-white p-5 shadow-sm">
       {/* Widget header */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-cyan-50 text-xs font-black text-cyan-800">ST</span>
+          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-me-ochre/10 text-xs font-black text-me-ochre">ST</span>
           <div>
-            <p className="text-base font-black text-slate-950">诸葛亮 · 优先行动清单</p>
+            <p className="text-base font-black text-me-charcoal">诸葛亮 · 优先行动清单</p>
             {generatedAt && (
-              <p className="text-xs font-semibold text-slate-400">
+              <p className="text-xs font-semibold text-me-charcoal/45">
                 生成于{' '}
                 {new Date(generatedAt).toLocaleDateString('zh-CN', {
                   timeZone: 'Pacific/Auckland',
@@ -203,7 +203,7 @@ export function ZhugePriorityWidget({
         </div>
         <button
           onClick={onAskZhuge}
-          className="flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 transition-colors hover:border-cyan-200 hover:text-cyan-800"
+          className="flex min-h-10 items-center gap-1.5 rounded-lg border border-black/10 bg-white px-3 text-xs font-black text-me-charcoal/60 transition-colors hover:border-me-ochre/30 hover:text-me-ochre"
         >
           重新计算
         </button>
@@ -219,7 +219,7 @@ export function ZhugePriorityWidget({
       {canCollapse && (
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="w-full rounded-lg border border-slate-200 py-2 text-center text-xs font-black text-slate-500 transition-colors hover:border-cyan-200 hover:text-cyan-800"
+          className="w-full rounded-lg border border-black/10 py-2 text-center text-xs font-black text-me-charcoal/55 transition-colors hover:border-me-ochre/30 hover:text-me-ochre"
         >
           {expanded ? '收起 ↑' : `展开剩余 ${actions.length - COLLAPSED_COUNT} 项 ↓`}
         </button>

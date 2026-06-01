@@ -157,11 +157,11 @@ export function SiteAuditPanel({ clientId }: SiteAuditPanelProps) {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
+      <div className="bg-white rounded-xl border border-black/10 p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-base font-semibold text-gray-900">Site Audit</h2>
-            <p className="text-xs text-gray-500 mt-1">
+            <h2 className="text-base font-semibold text-me-charcoal/90">Site Audit</h2>
+            <p className="text-xs text-me-charcoal/55 mt-1">
               爬取网站内容、分析页面结构、检测地理位置标记。新客户接入时必须执行。
             </p>
           </div>
@@ -184,8 +184,8 @@ export function SiteAuditPanel({ clientId }: SiteAuditPanelProps) {
       />
 
       {/* Info Box */}
-      <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
-        <p className="text-xs text-indigo-900">
+      <div className="bg-me-ochre/10 border border-me-ochre/30 rounded-xl p-4">
+        <p className="text-xs text-me-charcoal">
           <strong>❓ Site Audit 用于什么？</strong>
           <br />
           获取网站内容清单、页面主题分类、地理位置标记状态，为后续的内容生成、GEO 优化、SEO 分析提供基础数据。
