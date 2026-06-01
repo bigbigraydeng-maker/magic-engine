@@ -60,32 +60,6 @@ services:
           name: magic-engine
           property: host
 
-  - type: worker
-    name: magic-engine-tasks
-    env: node
-    plan: standard
-    buildCommand: npm install
-    startCommand: npm run process-tasks
-    envVars:
-      - key: NEXT_PUBLIC_SUPABASE_URL
-        sync: false
-      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: ANTHROPIC_API_KEY
-        sync: false
-      - key: ATLAS_API_KEY
-        sync: false
-      - key: SEMRUSH_API_KEY
-        sync: false
-      - key: PUBLER_API_KEY
-        sync: false
-      - key: CRON_SECRET
-        sync: false
-
   # Vision Asset Intelligence analyzer — every 2 minutes
   # Picks up pending client_assets, runs GPT-4o-mini Vision, writes scores.
   # Reference: ROADMAP.md P21.B.3
