@@ -33,6 +33,7 @@ const adminSections: NavSection[] = [
       { href: '/dashboard/admin/ai-gateway', label: 'AI Gateway', mark: 'AG' },
       { href: '/dashboard/admin/viral-references', label: 'Viral References', mark: 'VR' },
       { href: '/dashboard/admin/users', label: 'User Console', mark: 'UC' },
+      { href: '/dashboard/industry-baselines', label: 'Industry Baselines', mark: 'IB' },
     ],
   },
 ]

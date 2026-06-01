@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-02 05:25 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-02 10:38 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -39,6 +39,50 @@
 
 - [x] **P29.WEB.1** public root site alignment - update the `website/` homepage, about page, and discovery flow to the current AI upgrade / GEO / training positioning, then add dedicated static `/geo` and `/training` pages so the real public site matches the current offer.
 - [x] **P29.WEB.2** bilingual route split - add dedicated `/cn/` public pages and language-aware link routing so English and Chinese browsing stay within the same language.
+
+### Phase 30 — Industry Baseline Engine（行业基准数据引擎）⭐⭐ 2026-06-02
+
+> **目标**：为华佗诊断 + Goal/Strategy 层提供可信的行业基准分（P50/P75/P90），让客户诊断结果有行业对标坐标。
+> **方法论**：复用现有 Collector 公式对行业代表域名打分，基准分与客户诊断分天然可比。
+> **试点行业**：tourism_operator，细分为 inbound（NZ 入境游）和 outbound（NZ 出境游，对标 CTS Tours）。
+
+#### 细分定义
+
+| 细分 ID | 含义 | 对标客户 | 代表域名数 |
+|---------|------|---------|-----------|
+| `inbound_tour_operator` | 带游客来 AU/NZ 的运营商 | — | 9 个 |
+| `outbound_tour_operator` | 卖给 Kiwi 的海外线路运营商 | CTS Tours | 7 个 |
+
+#### S1 — 域名清单（✅ 完成 2026-06-02）
+
+**Inbound 清单（9 个，AU/NZ 本土运营商）**：
+`hakatours.com` / `discovernewzealand.com` / `moatrek.com` / `kiwiexperience.com` / `aatkings.com` / `firstlighttravel.com` / `newzealandtours.travel` / `arohatours.co.nz` / `adventuretours.com.au`
+
+**Outbound 清单（7 个，NZ → 海外目的地运营商）**：
+`ctstours.co.nz` / `wendywutours.co.nz` / `worldjourneys.co.nz` / `onthegotours.com` / `inspiringvacations.com` / `rdtravel.co.nz` + 1 TBD
+
+> 注：域名清单由 DataForSEO SERP 半自动抽取 + PM 核验。脚本：`scripts/p30-s1-tourism-domain-list.ts` / `scripts/p30-s1-outbound-domain-list.ts`
+
+#### S2 — Collector 采集（📋 待开始）
+
+- [ ] **P30.S2.1** 对 inbound 清单 9 个域名逐一跑 `SeoCollector`，关键词用行业通用词（"tour operator new zealand" 等），记录 score + findings
+- [ ] **P30.S2.2** 对 outbound 清单 7 个域名逐一跑 `SeoCollector`，关键词用目的地词（"china tour nz" 等），记录 score + findings
+- [ ] **P30.S2.3** 两个细分各计算 P50/P75/P90，写入 `industry_benchmarks` 表（`industry=inbound_tour_operator` / `outbound_tour_operator`，`dimension=seo`，`market=nz`）
+
+#### S3 — 域名管理 UI（📋 待开始）
+
+- [ ] **P30.S3.1** `/dashboard/industry-baselines` 管理页：列出所有行业 + 细分 + 当前域名清单
+- [ ] **P30.S3.2** 域名增删 UI：每个细分可手工添加/删除域名，保存后下次跑 collector 自动生效
+- [ ] **P30.S3.3** 「重新采集」按钮：手动触发该细分的 collector 跑批，更新 P50/P75/P90
+- [ ] **P30.S3.4** 分数展示：每个域名显示上次采集时间 + SEO 分，方便 PM 判断清单质量
+
+#### S4 — 扩展更多行业（📋 规划中）
+
+- [ ] **P30.S4.1** restaurant_operator（AU/NZ 餐厅）
+- [ ] **P30.S4.2** real_estate_agency（AU/NZ 房产中介）
+- [ ] **P30.S4.3** health_clinic（AU/NZ 诊所/健康服务）
+
+---
 
 ### Website Self-Serve Auth - 2026-06-02
 
