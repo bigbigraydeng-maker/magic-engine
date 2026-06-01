@@ -18,6 +18,11 @@ import { getUserPermissions } from '@/lib/auth/whitelist'
 import { getPublicOrigin } from '@/lib/auth/public-origin'
 import { grantSignupBonus } from '@/lib/mtc/grant-signup-bonus'
 import { resolveSelfServeLanding } from '@/lib/auth/self-serve-routing'
+import { ensureSelfServeClientForEmail } from '@/lib/auth/self-serve-client'
+
+function stringMetadata(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
 
 export async function GET(request: NextRequest) {
   const origin = getPublicOrigin(request)
@@ -25,7 +30,10 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get('code')
   const next = searchParams.get('next') ?? '/dashboard'
   const safePath = next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard'
-  const loginPath = safePath.startsWith('/portal') || safePath === '/prospect' ? '/portal/login' : '/login'
+  const selfServeIntent = searchParams.get('intent') === 'self_serve'
+  const loginPath = selfServeIntent
+    ? '/portal/register'
+    : safePath.startsWith('/portal') || safePath === '/prospect' ? '/portal/login' : '/login'
   const failedUrl = `${origin}${loginPath}?error=auth_failed&next=${encodeURIComponent(safePath)}`
 
   if (!code) {
@@ -75,14 +83,31 @@ export async function GET(request: NextRequest) {
         .eq('email', email)
 
       // Portal users (access_type = 'portal' | 'both' | 'self_serve') → /portal/[clientId]
-      const selfServeRow = accessRows?.find(r => r.access_type === 'self_serve')
+      let selfServeRow = accessRows?.find(r => r.access_type === 'self_serve')
       const portalRow = accessRows?.find(r => r.access_type === 'portal' || r.access_type === 'both')
       // Dashboard/FDE users (access_type = 'dashboard' | 'fde' | 'both') → /dashboard/clients/[clientId]
       const dashboardRow = accessRows?.find(r =>
         r.access_type === 'dashboard' || r.access_type === 'fde' || r.access_type === 'both'
       )
+      let selfServeRegistrationFailed = false
 
-      if (selfServeRow?.client_id) {
+      if (!selfServeRow?.client_id && !portalRow && !dashboardRow && selfServeIntent) {
+        try {
+          const displayName =
+            stringMetadata(user.user_metadata?.full_name) ??
+            stringMetadata(user.user_metadata?.name)
+          const ensured = await ensureSelfServeClientForEmail({ email, displayName })
+          selfServeRow = { client_id: ensured.clientId, access_type: 'self_serve' }
+        } catch (err) {
+          console.error('[auth/callback] self-serve Google registration failed:', err)
+          selfServeRegistrationFailed = true
+          destination = `/portal/register?error=auth_failed&next=${encodeURIComponent(safePath)}`
+        }
+      }
+
+      if (selfServeRegistrationFailed) {
+        // Keep the failure destination set above.
+      } else if (selfServeRow?.client_id) {
         // Grant 500 MTC welcome bonus on first login for self_serve clients
         const bonusGranted = await grantSignupBonus(selfServeRow.client_id).catch(() => false)
         destination = await resolveSelfServeLanding(selfServeRow.client_id, safePath, bonusGranted)

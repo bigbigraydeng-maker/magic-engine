@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-02 02:45 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-02 05:25 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -39,6 +39,11 @@
 
 - [x] **P29.WEB.1** public root site alignment - update the `website/` homepage, about page, and discovery flow to the current AI upgrade / GEO / training positioning, then add dedicated static `/geo` and `/training` pages so the real public site matches the current offer.
 - [x] **P29.WEB.2** bilingual route split - add dedicated `/cn/` public pages and language-aware link routing so English and Chinese browsing stay within the same language.
+
+### Website Self-Serve Auth - 2026-06-02
+
+- [x] **P29.AUTH.1** Google self-serve registration - add Google entry points to portal register/login, route self-serve OAuth callbacks into a new Magic Engine workspace when no existing access row exists, and keep the existing 500 MTC welcome bonus path intact.
+- Completion log: Google self-serve registration now connects portal entry points to workspace creation and the 500 MTC welcome bonus path.
 
 ### Active hotfix registration - 2026-05-25
 

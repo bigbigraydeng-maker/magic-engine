@@ -16,9 +16,13 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const next = searchParams.get('next') ?? '/dashboard'
   const safePath = next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard'
+  const selfServeIntent = searchParams.get('intent') === 'self_serve'
 
   const origin = getPublicOrigin(request)
-  const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent(safePath)}`
+  const callbackUrl = new URL(`${origin}/auth/callback`)
+  callbackUrl.searchParams.set('next', safePath)
+  if (selfServeIntent) callbackUrl.searchParams.set('intent', 'self_serve')
+  const redirectTo = callbackUrl.toString()
 
   const cookieStore = cookies()
   type PendingCookie = { name: string; value: string; options?: Record<string, unknown> }
@@ -45,7 +49,14 @@ export async function GET(request: NextRequest) {
   })
 
   if (error || !data.url) {
-    return NextResponse.redirect(`${origin}/login?error=auth_failed`)
+    const failedPath = selfServeIntent
+      ? '/portal/register'
+      : safePath.startsWith('/portal') || safePath === '/prospect'
+        ? '/portal/login'
+        : '/login'
+    return NextResponse.redirect(
+      `${origin}${failedPath}?error=auth_failed&next=${encodeURIComponent(safePath)}`,
+    )
   }
 
   // Redirect to Google OAuth URL, carrying the PKCE code verifier in cookies

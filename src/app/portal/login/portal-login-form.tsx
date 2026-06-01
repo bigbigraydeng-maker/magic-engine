@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { GoogleSelfServeButton } from '@/components/auth/GoogleSelfServeButton'
 
 interface Props {
   next: string
@@ -55,7 +56,18 @@ export default function PortalLoginForm({ next, authFailed }: Props) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3">
+      <GoogleSelfServeButton next={next} label="Continue with Google" />
+
+      <div className="flex items-center gap-3">
+        <div className="h-px flex-1 bg-me-charcoal/10" />
+        <span className="text-xs font-bold uppercase tracking-[0.12em] text-me-charcoal/35">
+          or
+        </span>
+        <div className="h-px flex-1 bg-me-charcoal/10" />
+      </div>
+
+      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
       <div>
         <label
           htmlFor="portal-email"
@@ -88,6 +100,7 @@ export default function PortalLoginForm({ next, authFailed }: Props) {
       >
         {loading ? 'Sending…' : 'Send magic link →'}
       </button>
-    </form>
+      </form>
+    </div>
   )
 }

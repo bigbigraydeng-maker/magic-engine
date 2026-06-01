@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { GoogleSelfServeButton } from '@/components/auth/GoogleSelfServeButton'
 
 const INPUT_CLS = 'mt-1.5 h-12 w-full rounded-xl border-[1.5px] border-me-charcoal/14 bg-white px-3 text-sm text-me-charcoal outline-none transition focus:border-me-ochre focus:shadow-[0_0_0_3px_rgba(196,145,46,.12)]'
 const LABEL_CLS = 'text-xs font-bold uppercase tracking-[0.12em] text-me-charcoal/55'
@@ -80,7 +81,18 @@ export default function RegisterForm({ next, fromProspect }: RegisterFormProps) 
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <div className="space-y-4">
+      <GoogleSelfServeButton next={next} label="Continue with Google" />
+
+      <div className="flex items-center gap-3">
+        <div className="h-px flex-1 bg-me-charcoal/10" />
+        <span className="text-xs font-bold uppercase tracking-[0.12em] text-me-charcoal/35">
+          or
+        </span>
+        <div className="h-px flex-1 bg-me-charcoal/10" />
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-4">
       <div>
         <label htmlFor="businessName" className={LABEL_CLS}>Business name</label>
         <input
@@ -153,6 +165,7 @@ export default function RegisterForm({ next, fromProspect }: RegisterFormProps) 
       >
         {loading ? 'Creating account…' : 'Create account — free'}
       </button>
-    </form>
+      </form>
+    </div>
   )
 }
