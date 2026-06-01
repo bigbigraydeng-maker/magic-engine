@@ -233,7 +233,7 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-06-01 13:22 NZST （**P22.D.1 ✅ AnomalyDetector 规则引擎骨架 — anomaly_signals 表 + 5 MVP 规则 + 14 单测全绿，下一步 22.D.2 诸葛亮 Proactive 或 Phase 24.B**）
+> 最后更新：2026-06-01 13:31 NZST （**P22.D.2 ✅ 诸葛亮 Proactive API — anomaly_signals → Claude Haiku → execution_items(proactive_signal) + 11 单测全绿，下一步 22.D.3 cron 接线或 Phase 24.B**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
@@ -242,11 +242,13 @@ npm test           # 测试套件
 | **PM 验收 P20** | Render 部署完成后：`https://app.magicengine.com.au/portal/register` 注册测试账户 → 验证邮件 → 跳转 `/wallet?welcome=1` 显示 500 MTC | ⚠️ PM 验收 |
 | **PM 操作 🔴** | Supabase 跑 migration `20260603000001_platform_oauth_connections.sql`（Phase 24.A） | ⚠️ 待操作 |
 | **PM 操作 🔴** | Supabase 跑 migration `20260617000001_phase22d_anomaly_signals.sql`（P22.D.1） | ⚠️ 待操作 |
+| **PM 操作 🔴** | Supabase 跑 migration `20260617000002_execution_items_proactive_source.sql`（P22.D.2） | ⚠️ 待操作 |
 | **GBP.0** | Google Cloud：enable Business Profile API + Account Management API，配置 OAuth consent screen，设 env vars | ⚠️ PM 操作 |
-| **Phase 22.D.2** | POST /api/ai/zhugeliang/proactive：读 anomaly_signals WHERE status=new → 诸葛亮 AI 生成 advisory | 📋 待开始 |
+| **Phase 22.D.3** | /api/cron/anomaly-detector cron route：每日跑 AnomalyDetectorJob → 调 proactive endpoint | 📋 待开始 |
 | **Phase 24.B** | GBP 数据摄取（reviews、insights、location data 写入 DB） | 📋 待开始 |
 
 **已完成全景（最近几个 Phase）**：
+- ✅ **P22.D.2 诸葛亮 Proactive Advisory API**（2026-06-01）：POST /api/ai/zhugeliang/proactive；Claude Haiku 生成 advisory JSON；validateAdvisories() 过滤；写 execution_items(source='proactive_signal')；signal ack；11 单测全绿
 - ✅ **P22.D.1 AnomalyDetector 规则引擎骨架**（2026-06-01）：anomaly_signals 表 migration；AnomalyDetectorJob 5 规则（SEO位置/点击/GEO mention率/Ads CPA/Social发布量）；Promise.allSettled 防崩溃；14 单测全绿
 - ✅ **P22.A.5 Meta Ads flywheel 接线**（2026-06-01，PR #183）：syncMeta() → MetaAdsAdapter.pullMetrics() 每日写入 flywheel_metrics；7 单测全绿
 - ✅ **P22.A.4 Competitor 域名基准快照**（2026-06-01，PR #183）：CompetitorSnapshotAdapter → flywheel_metrics(competitor.domain.organic_traffic)；7 单测全绿
@@ -258,11 +260,11 @@ npm test           # 测试套件
 - ✅ **Phase 23 完整闭环**（PR #112）：L3 记忆四表 + MemoryService
 
 **下一候选**：
-- 📋 **Phase 22.D.2** — POST /api/ai/zhugeliang/proactive（22.D.1 完成 → 可开工）
+- 📋 **Phase 22.D.3** — /api/cron/anomaly-detector（22.D.2 完成 → 可开工，只需半天）
 - 📋 **Phase 24.B** — GBP 数据摄取（依赖 PM 完成 GBP.0 + migration）
 - 📋 **Phase 18.B** — Google Ads（Developer token 到位后）
 
-下一 session：`继续 Phase 22.D.2`（诸葛亮 Proactive API）或 `继续 Phase 24.B`（GBP 数据摄取）
+下一 session：`继续 Phase 22.D.3`（anomaly-detector cron）或 `继续 Phase 24.B`（GBP 数据摄取）
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox
