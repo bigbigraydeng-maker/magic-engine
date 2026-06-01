@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-01 13:44 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-01 13:52 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2818,7 +2818,7 @@ AI Content Factory  ←──反馈──  Data Engine  ←──分析──  �
 - [x] `22.D.1` anomaly_signals 表 migration + AnomalyDetectorJob 规则引擎骨架（5 规则：SEO 位置/点击、GEO mention率、Ads CPA、Social 发布量；14 单测全绿）✅
 - [x] `22.D.2` POST /api/ai/zhugeliang/proactive endpoint：读 anomaly_signals WHERE status=new → Claude Haiku → 写 execution_items(source='proactive_signal') → ack signals；11 单测全绿 ✅
 - [x] `22.D.3` GET /api/cron/anomaly-detector：逐客户跑 AnomalyDetectorJob → 有信号则调 proactive endpoint；10 单测全绿 ✅
-- `22.D.4` 看板 UI：主动任务显示 ⚡ 系统检测 badge (~0.5 天)
+- [x] `22.D.4` 看板 UI：proactive_signal 分组 + ⚡ 系统检测 badge（ExecutionItemCard + TaskDetailDrawer 提示条 + ProactiveSignalGroup 组件；10 单测全绿）✅
 
 ---
 
@@ -3094,6 +3094,10 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-06-01（P22.D.4 — 执行看板 ⚡ 系统检测 badge ✅）
+
+- **P22.D.4** — 执行看板 proactive_signal 分组：新增 `ProactiveSignalGroup` 组件（橙色主题，sort_order 由 severity 确定）；`ExecutionItemCard` 加 `⚡ 系统检测` badge；`TaskDetailDrawer` 加橙色来源提示条；`ExecutionItemSource` 类型扩展 + `ExecutionItem.anomaly_signal_id` 字段；`buildProactiveSignalGroup()` weight=0.5 排在所有处方之前；10 单测全绿（含 proactive 分组专项测试）。P22.D 四子任务全部完成 ✅
 
 ### 2026-06-01（P22.D.3 — anomaly-detector cron 接线 ✅）
 

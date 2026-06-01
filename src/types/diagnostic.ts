@@ -178,8 +178,14 @@ export interface PriorPrescriptionContext {
 
 export type ExecutionItemStatus = 'pending' | 'in_progress' | 'completed' | 'skipped'
 
-/** 执行项来源 — diagnostic（处方派发）/ marketing_plan（营销计划派发）/ fde_manual（FDE 手动录入）*/
-export type ExecutionItemSource = 'diagnostic' | 'marketing_plan' | 'fde_manual'
+/**
+ * 执行项来源 —
+ *   diagnostic        处方派发
+ *   marketing_plan    营销计划派发
+ *   fde_manual        FDE 手动录入
+ *   proactive_signal  系统检测主动 advisory（P22.D.2）
+ */
+export type ExecutionItemSource = 'diagnostic' | 'marketing_plan' | 'fde_manual' | 'proactive_signal'
 
 export interface ExecutionItem {
   id: string
@@ -208,6 +214,8 @@ export interface ExecutionItem {
   source: ExecutionItemSource
   /** marketing_plan 来源时有值，作为分组键 */
   marketing_plan_id: string | null
+  /** proactive_signal 来源时有值 — 关联触发此 advisory 的 anomaly_signal（P22.D.2）*/
+  anomaly_signal_id: string | null
 }
 
 /** 内容飞轮闭环 — 执行看板 row 上展示的关联内容预览（execution GET 时 embed） */

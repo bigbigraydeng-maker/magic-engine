@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { AUTONOMOUS_GROUP_ID, buildExecutionGroups, formatOutcomeLabel } from '../execution-view-model'
+import { AUTONOMOUS_GROUP_ID, PROACTIVE_SIGNAL_GROUP_ID, buildExecutionGroups, formatOutcomeLabel } from '../execution-view-model'
 
 type OutcomeSummary = Parameters<typeof formatOutcomeLabel>[0]
 type ExecutionGroupItem = Parameters<typeof buildExecutionGroups>[0][number]
@@ -135,8 +135,46 @@ describe('buildExecutionGroups', () => {
     ])
 
     expect(groups[0].pid).toBe(AUTONOMOUS_GROUP_ID)
-    expect(groups[0].label).toBe('自主行动')
+    expect(groups[0].label).toBe('飞轮自主行动')
     expect(groups[0].items).toHaveLength(1)
     expect(groups[1].label).toBe('原处方')
+  })
+
+  // P22.D.4 — 系统检测主动 advisory 分组
+  it('puts proactive_signal items in a dedicated group (weight 0.5, before prescriptions)', () => {
+    const groups = buildExecutionGroups([
+      // regular prescription item
+      itemBase,
+      // proactive_signal item
+      {
+        ...itemBase,
+        id:           'advisory-1',
+        prescription_id: null,
+        source:       'proactive_signal' as const,
+        sort_order:   10,
+        title:        'Ads CPA doubled — pause underperforming ad sets',
+      },
+    ], [
+      {
+        id: 'prescription-1',
+        status: 'approved',
+        supplements_id: null,
+        supersedes_id: null,
+        generated_at: '2026-05-21T00:00:00Z',
+      },
+    ])
+
+    const proactiveGroup = groups.find(g => g.pid === PROACTIVE_SIGNAL_GROUP_ID)
+    const prescriptionGroup = groups.find(g => g.pid === 'prescription-1')
+
+    expect(proactiveGroup).toBeDefined()
+    expect(proactiveGroup?.kind).toBe('proactive_signal')
+    expect(proactiveGroup?.label).toBe('⚡ 系统检测')
+    expect(proactiveGroup?.items).toHaveLength(1)
+    expect(proactiveGroup?.items[0].id).toBe('advisory-1')
+    expect(proactiveGroup?.editable).toBe(false)
+    expect(proactiveGroup?.derivable).toBe(false)
+    // proactive group (weight=0.5) sorts before prescription (weight=1)
+    expect(proactiveGroup!.weight).toBeLessThan(prescriptionGroup!.weight)
   })
 })

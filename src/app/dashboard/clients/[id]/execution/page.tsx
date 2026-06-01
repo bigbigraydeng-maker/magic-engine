@@ -571,6 +571,12 @@ function ExecutionItemCard({
         </span>
       </div>
       <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+        {/* P22.D.4 — 系统检测来源 badge */}
+        {item.source === 'proactive_signal' && (
+          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 border border-orange-200">
+            ⚡ 系统检测
+          </span>
+        )}
         {dimMeta && (
           <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${dimMeta.cls}`}>{dimMeta.label}</span>
         )}
@@ -795,6 +801,19 @@ function TaskDetailDrawer({
 
       {/* 主体（可滚动） */}
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+        {/* P22.D.4 — 系统检测 advisory 来源提示条 */}
+        {item.source === 'proactive_signal' && (
+          <div className="flex items-center gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2">
+            <span className="text-base shrink-0">⚡</span>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-orange-800">系统检测 · 主动建议</p>
+              <p className="text-[11px] text-orange-600 leading-snug">
+                由 Magic Engine 异常检测引擎自动识别并生成，请评估后标记状态
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* 状态控制 */}
         {!isReadonly
           ? <StatusDropdown status={item.status} onChange={status => onStatusChange(item.id, status)} />
@@ -1315,6 +1334,91 @@ function FdeManualGroup({
                     {reqMeta.icon} {reqMeta.label}
                   </span>
                 )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ProactiveSignalGroup — P22.D.4：系统检测主动 advisory 分组
+// ---------------------------------------------------------------------------
+//
+// 平铺展示，无拖拽排序，sort_order 由 proactive route 写入时已按 severity 确定。
+// FDE 可 mark complete/skip，不可编辑标题/说明（advisory 由系统生成）。
+
+function ProactiveSignalGroup({
+  group,
+  activeDetailId,
+  onOpenDetail,
+}: {
+  group:          GroupData
+  activeDetailId: string | null
+  onOpenDetail:   (item: ItemWithLogs) => void
+}) {
+  const completed = group.items.filter(i => i.status === 'completed' || i.status === 'skipped').length
+
+  return (
+    <div className="rounded-xl border border-orange-200 bg-white overflow-hidden">
+      {/* Group header */}
+      <div className="px-5 py-3 border-b border-orange-100 flex items-center gap-3 flex-wrap bg-orange-50/60">
+        <span className="inline-flex items-center gap-1 text-xs font-bold rounded-full px-2.5 py-1 bg-orange-100 text-orange-700 border border-orange-200">
+          ⚡ 系统检测建议
+        </span>
+        <span className="text-xs text-gray-400">{completed}/{group.items.length} 已处理</span>
+        <span className="text-xs text-orange-500 italic">由 Magic Engine 异常检测引擎自动生成</span>
+      </div>
+
+      {/* Flat item list */}
+      <div className="p-4 bg-orange-50/20 space-y-2">
+        {group.items.length === 0 && (
+          <p className="text-xs text-gray-400 text-center py-6">暂无系统检测建议</p>
+        )}
+        {group.items.map(item => {
+          const dimMeta    = DIMENSION_CARD_META[item.dimension ?? '']
+          const statusMeta = STATUS_META[item.status]
+          const fixMeta    = FIX_TYPE_META[item.fix_type ?? ''] ?? FIX_TYPE_META.fde_manual
+
+          return (
+            <div
+              key={item.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => onOpenDetail(item)}
+              onKeyDown={ev => ev.key === 'Enter' && onOpenDetail(item)}
+              className={`rounded-lg border p-2.5 cursor-pointer transition-all select-none ${
+                activeDetailId === item.id
+                  ? 'border-orange-400 bg-orange-50 shadow-sm'
+                  : 'border-orange-100 bg-white hover:border-orange-300 hover:shadow-sm'
+              }`}
+            >
+              <div className="flex items-start gap-2">
+                <span className="text-base shrink-0 mt-0.5">{fixMeta.icon ?? '⚡'}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1 py-px rounded bg-orange-100 text-orange-700 border border-orange-200 shrink-0">
+                      ⚡
+                    </span>
+                    <p className="text-xs font-semibold text-gray-900 line-clamp-2 leading-tight">{item.title}</p>
+                  </div>
+                  {item.description && (
+                    <p className="text-[11px] text-gray-400 line-clamp-1 mt-0.5">{item.description}</p>
+                  )}
+                </div>
+                <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded font-medium ${statusMeta.color}`}>
+                  {statusMeta.label}
+                </span>
+              </div>
+              <div className="mt-1.5 flex items-center gap-1.5 flex-wrap ml-7">
+                {dimMeta && (
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${dimMeta.cls}`}>{dimMeta.label}</span>
+                )}
+                <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${FIX_TYPE_META[item.fix_type ?? '']?.cls ?? 'bg-gray-100 text-gray-600'}`}>
+                  {fixMeta.label}
+                </span>
               </div>
             </div>
           )
@@ -2078,8 +2182,23 @@ export default function ExecutionPage() {
         {/* P18.A.3 — Meta Ads 操作历史与撤销 */}
         <AdsAuditSection clientId={clientId} />
 
-        {/* 按处方分组 — 原处方 / 补充 / 修订 / 已归档 / Marketing Plan / FDE 各成一组 */}
+        {/* 按处方分组 — 系统检测 / 原处方 / 补充 / 修订 / 已归档 / Marketing Plan / FDE 各成一组 */}
         {prescriptionGroups.map(group => {
+          // P22.D.4: 系统检测主动 advisory 分组
+          if (group.kind === 'proactive_signal') {
+            return (
+              <ProactiveSignalGroup
+                key={group.pid}
+                group={group}
+                activeDetailId={detailItem?.id ?? null}
+                onOpenDetail={item => {
+                  // proactive_signal 任务只能 mark status，不可编辑内容
+                  setDetailItem(item)
+                  setDetailEditable(false)
+                }}
+              />
+            )
+          }
           // Phase 20.D: FDE 手动录入分组 — 平铺 + 拖拽排序
           if (group.kind === 'fde_manual') {
             return (

@@ -10,6 +10,8 @@ export const AUTONOMOUS_GROUP_ID = '__autonomous__'
 export const MARKETING_PLAN_GROUP_PREFIX = 'mp:'
 /** FDE 手动录入分组 ID — source='fde_manual' 的所有任务聚合到此组（Phase 20.D）*/
 export const FDE_MANUAL_GROUP_ID = '__fde_manual__'
+/** 系统检测主动 advisory 分组 ID — source='proactive_signal' 的所有任务（P22.D.4）*/
+export const PROACTIVE_SIGNAL_GROUP_ID = '__proactive_signal__'
 
 export interface PrescriptionMeta {
   id: string
@@ -58,7 +60,7 @@ export interface GroupData {
   derivable: boolean
   editable: boolean    // 是否允许新增/编辑执行项（自主行动泳道为 false）
   /** 来源类型 — 用于 UI 显示不同 badge */
-  kind: 'prescription' | 'marketing_plan' | 'autonomous' | 'fde_manual'
+  kind: 'prescription' | 'marketing_plan' | 'autonomous' | 'fde_manual' | 'proactive_signal'
 }
 
 const METRIC_DISPLAY: Record<string, string> = {
@@ -98,6 +100,7 @@ export function isAutonomousItem(item: ItemWithLogs): boolean {
 function pidForItem(item: ItemWithLogs): string {
   if (isAutonomousItem(item)) return AUTONOMOUS_GROUP_ID
   if (item.source === 'fde_manual') return FDE_MANUAL_GROUP_ID
+  if (item.source === 'proactive_signal') return PROACTIVE_SIGNAL_GROUP_ID
   if (item.source === 'marketing_plan' && item.marketing_plan_id) {
     return MARKETING_PLAN_GROUP_PREFIX + item.marketing_plan_id
   }
@@ -120,6 +123,7 @@ export function buildExecutionGroups(
   return Object.entries(itemsByGroup)
     .map(([pid, groupItems]) => {
       if (pid === FDE_MANUAL_GROUP_ID) return buildFdeManualGroup(groupItems)
+      if (pid === PROACTIVE_SIGNAL_GROUP_ID) return buildProactiveSignalGroup(groupItems)
       if (pid.startsWith(MARKETING_PLAN_GROUP_PREFIX)) {
         const planId = pid.slice(MARKETING_PLAN_GROUP_PREFIX.length)
         return buildMarketingPlanGroup(pid, groupItems, mpMap.get(planId))
@@ -202,5 +206,25 @@ function buildFdeManualGroup(groupItems: ItemWithLogs[]): GroupData {
     derivable: false,
     editable:  true,
     kind:      'fde_manual',
+  }
+}
+
+/**
+ * P22.D.4 — 系统检测主动 advisory 分组。
+ * weight = 0.5：出现在看板最顶部（自主行动 weight=0 之后、处方 weight=1 之前）。
+ * 按 sort_order 排序（高 severity 靠前，由 proactive route 写入时确定）。
+ * 不可编辑、不可派生（advisory 由系统生成，FDE 只能 mark complete/skip）。
+ */
+function buildProactiveSignalGroup(groupItems: ItemWithLogs[]): GroupData {
+  const sorted = [...groupItems].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+  return {
+    pid:      PROACTIVE_SIGNAL_GROUP_ID,
+    items:    sorted,
+    label:    '⚡ 系统检测',
+    weight:   0.5,
+    archived: false,
+    derivable: false,
+    editable:  false,
+    kind:      'proactive_signal',
   }
 }
