@@ -8,11 +8,18 @@ import { buildStrategyBlogRequest } from '@/lib/blog/request-builders'
 
 interface BlogGenerationResponse {
   success: boolean
-  action?: 'new' | 'upgrade'
+  action?: 'new' | 'upgrade' | 'queued'
+  post_id?: string
   post?: { id: string; cost_usd?: number | null } | null
   audit?: { reason?: string } | null
   error?: string
   cost_usd?: number | null
+}
+
+interface StrategyGenerateResponse {
+  count?: number
+  skipped_duplicates?: number
+  error?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -259,8 +266,10 @@ export default function StrategyPage() {
     setError(null)
     try {
       const res = await fetch(`/api/clients/${clientId}/strategy/generate`, { method: 'POST' })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json().catch(() => ({})) as StrategyGenerateResponse
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
       await fetchItems()
+      flash(`Strategy refreshed: ${data.count ?? 0} new, ${data.skipped_duplicates ?? 0} duplicate candidates skipped.`, true)
     } catch (e) {
       setError(e instanceof Error ? e.message : '生成失败')
     } finally {
@@ -316,7 +325,7 @@ export default function StrategyPage() {
         return
       }
 
-      const postId = data.post?.id ?? null
+      const postId = data.post_id ?? data.post?.id ?? null
       setItems(prev => prev.map(i =>
         i.id === item.id
           ? { ...i, status: 'done', linked_blog_post_id: postId ?? i.linked_blog_post_id }
