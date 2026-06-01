@@ -22,7 +22,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { fetchGscSnapshot } from '@/lib/gsc/client'
 import { fetchGa4Snapshot } from '@/lib/ga4/client'
 import { getAdAccountInsights, getAdCampaignInsights } from '@/lib/meta/client'
-import { SEO_METRIC_KEY } from '@/lib/flywheel/vocabulary'
+import { SEO_METRIC_KEY, GA4_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import { MetaAdsAdapter } from '@/lib/flywheel/adapters/MetaAdsAdapter'
 
 export const dynamic = 'force-dynamic'
@@ -288,6 +288,48 @@ async function syncGa4(
       .single()
 
     if (error) return { success: false, error: error.message }
+
+    // Write GA4 metrics into flywheel_metrics so AnomalyDetectorJob and
+    // Data Intelligence rules can read them (Phase 22.A.2).
+    // delete-then-insert: same pattern as syncGsc — no unique constraint on
+    // (client_id, metric_key, measured_at), so replace today's rows.
+    const today      = new Date().toISOString().slice(0, 10)
+    const todayStart = `${today}T00:00:00.000Z`
+    const todayEnd   = `${today}T23:59:59.999Z`
+    const ga4MetricKeys = [
+      GA4_METRIC_KEY.SESSIONS,
+      GA4_METRIC_KEY.BOUNCE_RATE,
+      GA4_METRIC_KEY.PAGEVIEWS,
+      GA4_METRIC_KEY.NEW_USERS,
+    ]
+    await supabaseAdmin
+      .from('flywheel_metrics')
+      .delete()
+      .eq('client_id', clientId)
+      .in('metric_key', ga4MetricKeys)
+      .gte('measured_at', todayStart)
+      .lte('measured_at', todayEnd)
+      .then(() => {}, () => {})
+
+    const ga4Rows = [
+      { metric_key: GA4_METRIC_KEY.SESSIONS,    metric_value: snapshot.total_sessions },
+      { metric_key: GA4_METRIC_KEY.BOUNCE_RATE, metric_value: snapshot.bounce_rate },
+      { metric_key: GA4_METRIC_KEY.PAGEVIEWS,   metric_value: snapshot.total_pageviews },
+      { metric_key: GA4_METRIC_KEY.NEW_USERS,   metric_value: snapshot.total_new_users },
+    ].map(m => ({
+      client_id:    clientId,
+      flywheel:     'seo' as const,
+      metric_key:   m.metric_key,
+      metric_value: m.metric_value,
+      source:       'ga4_pullback',
+      measured_at:  new Date().toISOString(),
+    }))
+
+    await supabaseAdmin
+      .from('flywheel_metrics')
+      .insert(ga4Rows)
+      .then(() => {}, () => { /* non-fatal — snapshot already saved */ })
+
     return { success: true, snapshot_id: (data as { id: string }).id }
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' }

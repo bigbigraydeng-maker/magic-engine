@@ -192,6 +192,33 @@ export const ADS_METRIC_KEY = {
 
 export type AdsMetricKey = (typeof ADS_METRIC_KEY)[keyof typeof ADS_METRIC_KEY]
 
+// ── GA4 metric keys ───────────────────────────────────────────────────────────
+
+/**
+ * Measurable signals stored in flywheel_metrics for GA4 web analytics.
+ *
+ * Written by:
+ *   - google-data-pullback-daily cron → syncGa4() after snapshot upsert
+ *   - Source tag: 'ga4_pullback'
+ *
+ * Phase 22.A.2
+ */
+export const GA4_METRIC_KEY = {
+  /** Total sessions in the 28-day snapshot window */
+  SESSIONS: 'seo.ga4.sessions',
+
+  /** Bounce rate over the 28-day snapshot window (0–1) */
+  BOUNCE_RATE: 'seo.ga4.bounce_rate',
+
+  /** Total pageviews in the 28-day snapshot window */
+  PAGEVIEWS: 'seo.ga4.pageviews',
+
+  /** Total new users in the 28-day snapshot window */
+  NEW_USERS: 'seo.ga4.new_users',
+} as const
+
+export type Ga4MetricKey = (typeof GA4_METRIC_KEY)[keyof typeof GA4_METRIC_KEY]
+
 // ── Social action types ───────────────────────────────────────────────────────
 
 /**
@@ -247,7 +274,7 @@ export type SocialMetricKey = (typeof SOCIAL_METRIC_KEY)[keyof typeof SOCIAL_MET
 export type FlywheelActionType = GeoActionType | SeoActionType | AdsActionType | SocialActionType
 
 /** All valid metric_key strings across all flywheels */
-export type FlywheelMetricKey = GeoMetricKey | SeoMetricKey | AdsMetricKey | SocialMetricKey
+export type FlywheelMetricKey = GeoMetricKey | SeoMetricKey | Ga4MetricKey | AdsMetricKey | SocialMetricKey
 
 // ── Runtime validation helpers ────────────────────────────────────────────────
 
@@ -255,6 +282,7 @@ const ALL_GEO_ACTIONS    = new Set<string>(Object.values(GEO_ACTION_TYPE))
 const ALL_GEO_METRICS    = new Set<string>(Object.values(GEO_METRIC_KEY))
 const ALL_SEO_ACTIONS    = new Set<string>(Object.values(SEO_ACTION_TYPE))
 const ALL_SEO_METRICS    = new Set<string>(Object.values(SEO_METRIC_KEY))
+const ALL_GA4_METRICS    = new Set<string>(Object.values(GA4_METRIC_KEY))
 const ALL_ADS_ACTIONS    = new Set<string>(Object.values(ADS_ACTION_TYPE))
 const ALL_ADS_METRICS    = new Set<string>(Object.values(ADS_METRIC_KEY))
 const ALL_SOCIAL_ACTIONS = new Set<string>(Object.values(SOCIAL_ACTION_TYPE))
@@ -274,6 +302,10 @@ export function isValidSeoActionType(value: string): value is SeoActionType {
 
 export function isValidSeoMetricKey(value: string): value is SeoMetricKey {
   return ALL_SEO_METRICS.has(value)
+}
+
+export function isValidGa4MetricKey(value: string): value is Ga4MetricKey {
+  return ALL_GA4_METRICS.has(value)
 }
 
 export function isValidAdsActionType(value: string): value is AdsActionType {

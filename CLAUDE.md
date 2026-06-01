@@ -233,32 +233,32 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-06-01 13:11 NZST （**Phase 22 PR #187 open — 22.D 全闭环 + 22.A.1/A.3 GSC/Meta flywheel_metrics 接通**）
+> 最后更新：2026-06-01 16:09 NZST （**Phase 22.A.2 ✅ — GA4 flywheel_metrics 接通（9 TDD）**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
 | **PM 操作 🔴** | Supabase 跑 migration `20260616000001_phase29_self_serve_brief.sql` | ⚠️ 待操作 |
 | **PM 操作（Meta Ads）🔴** | Render 设 `META_SYSTEM_USER_TOKEN`（长效 System User Token），否则执行看板「直接执行 (Meta API)」返回 424 | ⚠️ 待操作 |
 | **PM 操作 🔴** | Supabase 跑 migration `20260603000001_platform_oauth_connections.sql`（Phase 24.A） | ⚠️ 待操作 |
-| **Phase 22 merge** | PR #187 审核通过后合并（Phase 22.D + 22.A.1/A.3） | ⚠️ 待合并 |
-| **Phase 22.A.2** | GA4 每日采集 — vocabulary 补 ga4.* + GA4 Reporting API 写 flywheel_metrics | 📋 待开始 |
+| **PR merge 顺序** | PR #187（22.D）→ PR #190（22.B）→ PR #192（22.C）→ PR #194（24）→ PR #195（22.A.2） | ⚠️ 待合并 |
 | **GBP.0** | Google Cloud：enable Business Profile API + Account Management API | ⚠️ PM 操作 |
-| **Phase 24.B** | GBP 数据摂取（reviews、insights、location data 写入 DB） | 📋 待开始 |
+| **Phase 24.B（GBP）** | GBP 数据摂取（reviews、insights、location data 写入 DB） | 📋 待开始（依赖 GBP.0）|
 
 **已完成全景（最近几个 Phase）**：
-- ✅ **Phase 22.D + 22.A.1/A.3**（2026-06-01，PR #187 open）：AnomalyDetector 5 规则引擎 + 诸葛亮 Proactive + 每日 cron + 看板 ⚡ badge + GSC/Meta flywheel_metrics 接通
-- ✅ **Phase 29 全闭环**（2026-06-01）：M1 DB地基 + M2 Portal废弃 + M3 Brief门槛；self_serve身份 + BriefGateBanner 接入博客/执行看板/Marketing Plan
-- ✅ **Phase 21 全部 P21.1–9**（2026-05-31）：AI Factory 三里程碑全闭环：M1 模型分层路由+记忆注入、M2 变体扇出+量产编排器、M3 月度熔断+FDE 一键量产 UI+飞轮 outcome 回流接线
-- ✅ **Phase 20 MTC 自助计费**（PR #144 + #146，2026-05-31）：注册页 + 钱包页 + Stripe Checkout
-- ✅ **Phase 24.A 全部 8 任务**（PR #125）：Platform OAuth Connector
-- ✅ **Phase 23 完整闭环**（PR #112）：L3 记忆四表 + MemoryService
+- ✅ **Phase 22.A.2**（2026-06-01，PR #195）：GA4 metric_key 四个（seo.ga4.*）+ syncGa4() flywheel_metrics 写入 + 9 TDD 全绿
+- ✅ **Phase 24 全闭环**（2026-06-01，PR #194）：诸葛亮→看板写入（P24.A）+ 每周重算 cron（P24.B）+ GEO CMS 一键部署（P24.C）+ TDD 10 tests
+- ✅ **Phase 22.C 全闭环**（2026-06-01，PR #192）：narrative API（Strategy Engine）+ AI Factory 数据信号注入 + NarrativeBlock UI
+- ✅ **Phase 22.B 全闭环**（2026-06-01，PR #190）：Data Intelligence Engine — 趋势 API + 洞察规则引擎（41 TDD）+ summary API + TrendCard/Sparkline SVG + IntelligenceSummarySection
+- ✅ **Phase 22.D + 22.A.1/A.3**（2026-06-01，PR #187）：AnomalyDetector 5 规则引擎 + 诸葛亮 Proactive + 每日 cron + 看板 ⚡ badge + GSC/Meta flywheel_metrics 接通
+- ✅ **Phase 29 全闭环**（2026-06-01）：M1 DB地基 + M2 Portal废弃 + M3 Brief门槛；self_serve身份 + BriefGateBanner
+- ✅ **Phase 21 全部 P21.1–9**（2026-05-31）：AI Factory 三里程碑全闭环
 
 **下一候选**：
-- 📋 **Phase 22.A.2** — GA4 每日采集（merge PR #187 后继续）
-- 📋 **Phase 24.B** — GBP 数据摂取（依赖 PM 完成 GBP.0 + migration）
+- 📋 **Phase 24.B（GBP）** — GBP 数据摂取（依赖 PM 完成 GBP.0 + migration）
+- 📋 **Phase 22.A.4** — TikTok Insights 采集（social.tiktok.* metric_key）
 - 📋 **Phase 18.B** — Google Ads（Developer token 到位后）
 
-下一 session：`继续 Phase 22`（Data Intelligence Engine）或 `继续 Phase 24.B`（GBP 数据摄取）
+下一 session：`继续 Phase 24.B（GBP）`（GBP 数据摄取）或 `继续 Phase 22.A.4`（TikTok Insights）
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox
