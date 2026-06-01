@@ -1,7 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import SidebarNav from './sidebar-nav'
+import { usePathname } from 'next/navigation'
+import { MeMarkDefs, MeMark } from '@/components/ui/me-mark'
+import { cx } from '@/components/ui/me-theme'
+import Link from 'next/link'
 
 interface Props {
   children: React.ReactNode
@@ -11,133 +13,160 @@ interface Props {
   roleLabel: string
 }
 
-function LogoMark() {
-  return (
-    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-sm font-black text-slate-950">
-      M
-    </div>
+// ── Nav definition ────────────────────────────────────────────────────────────
+
+type NavItem = { key: string; label: string; href?: string; mark: string; soon?: boolean }
+type NavSection = { title?: string; items: NavItem[] }
+
+const ADMIN_SECTIONS: NavSection[] = [
+  {
+    items: [
+      { key: 'overview',  label: 'Overview', mark: 'OV', href: '/dashboard' },
+      { key: 'clients',   label: 'Clients',  mark: 'CL', href: '/dashboard/clients' },
+    ],
+  },
+  {
+    title: 'Operate',
+    items: [
+      { key: 'launch-hub',       label: 'Launch Hub',      mark: 'LH', href: '/dashboard/visuals' },
+      { key: 'analytics',        label: 'Analytics',       mark: 'AN', soon: true },
+      { key: 'reports',          label: 'Reports',         mark: 'RP', href: '/dashboard/reports' },
+      { key: 'billing-monitor',  label: 'Billing Monitor', mark: 'BM', href: '/dashboard/admin/billing-monitor' },
+      { key: 'ai-gateway',       label: 'AI Gateway',      mark: 'AG', href: '/dashboard/admin/ai-gateway' },
+      { key: 'viral-references', label: 'Viral References',mark: 'VR', href: '/dashboard/admin/viral-references' },
+    ],
+  },
+]
+
+// ── Sidebar nav item ──────────────────────────────────────────────────────────
+
+function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+  const cls = cx(
+    'flex items-center gap-3 rounded-[10px] px-3 py-[10px] text-[13.5px] font-medium transition',
+    active
+      ? 'bg-[#C4912E]/16 text-[#EBCB8B]'
+      : item.soon
+        ? 'cursor-default text-white/25'
+        : 'text-white/55 hover:bg-white/[.06] hover:text-[#FBF8F3]',
   )
+  const mark = (
+    <span className={cx(
+      'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[10px] font-black',
+      active ? 'bg-[#C4912E]/25 text-[#EBCB8B]' : 'bg-white/[.08] text-white/40',
+    )}>
+      {item.mark}
+    </span>
+  )
+  const inner = (
+    <>
+      {mark}
+      <span className="flex-1">{item.label}</span>
+      {item.soon && (
+        <span className="rounded bg-white/[.06] px-1.5 py-0.5 text-[9px] font-black uppercase tracking-widest text-white/25">
+          Soon
+        </span>
+      )}
+    </>
+  )
+
+  if (item.soon || !item.href) return <div className={cls}>{inner}</div>
+  return <Link href={item.href} className={cls}>{inner}</Link>
 }
 
-const LOOP_STEPS = ['Diagnose', 'Execute', 'Prove']
+// ── DashboardShell ────────────────────────────────────────────────────────────
 
-export default function DashboardShell({
-  children,
-  userEmail,
-  userRole,
-  allowedClientId,
-  roleLabel,
-}: Props) {
-  const [collapsed, setCollapsed] = useState(false)
-  const [hydrated, setHydrated] = useState(false)
+export default function DashboardShell({ children, userEmail, userRole, allowedClientId }: Props) {
+  const pathname = usePathname()
 
-  useEffect(() => {
-    setCollapsed(window.localStorage.getItem('magic-engine:dashboard-sidebar') === 'collapsed')
-    setHydrated(true)
-  }, [])
+  const activeKey = (() => {
+    for (const section of ADMIN_SECTIONS) {
+      for (const item of section.items) {
+        if (!item.href) continue
+        const exact = item.key === 'overview'
+        if (exact ? pathname === item.href : (pathname === item.href || pathname.startsWith(item.href + '/'))) {
+          return item.key
+        }
+      }
+    }
+    return ''
+  })()
 
-  const toggleCollapsed = () => {
-    setCollapsed((value) => {
-      const next = !value
-      window.localStorage.setItem('magic-engine:dashboard-sidebar', next ? 'collapsed' : 'expanded')
-      return next
-    })
-  }
-
-  const isCollapsed = hydrated && collapsed
+  // Client-viewer: simplified single-link sidebar
+  const isClientViewer = userRole === 'client-viewer' && allowedClientId
 
   return (
-    <div className="flex min-h-screen bg-[#f6f7f2] text-slate-950">
-      <aside
-        className={`sticky top-0 hidden h-screen shrink-0 flex-col overflow-hidden border-r border-white/10 bg-slate-950 text-white transition-[width] duration-200 md:flex ${
-          isCollapsed ? 'w-20' : 'w-72'
-        }`}
-      >
-        <div className={`border-b border-white/10 py-5 ${isCollapsed ? 'px-3' : 'px-5'}`}>
-          <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'}`}>
-            <LogoMark />
-            {!isCollapsed && (
-              <div className="min-w-0">
-                <h1 className="text-sm font-black">Magic Engine</h1>
-                <p className="mt-0.5 text-xs font-semibold text-slate-400">{roleLabel}</p>
-              </div>
-            )}
-          </div>
+    <div className="grid min-h-screen bg-[#FBF8F3] font-sans [grid-template-columns:248px_1fr] max-[720px]:grid-cols-1">
+      <MeMarkDefs />
 
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            className={`mt-4 flex h-9 w-full items-center rounded-lg border border-white/10 bg-white/[0.06] text-xs font-black text-slate-300 transition hover:border-white/25 hover:text-white ${
-              isCollapsed ? 'justify-center' : 'justify-between px-3'
-            }`}
-            aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            {!isCollapsed && <span>Collapse menu</span>}
-            <span aria-hidden="true">{isCollapsed ? '>>' : '<<'}</span>
-          </button>
+      {/* Sidebar */}
+      <aside className="sticky top-0 hidden h-screen flex-col bg-[#0D0D0D] md:flex">
+        {/* Logo */}
+        <Link href="/dashboard" className="flex items-center gap-[11px] px-5 pb-5 pt-4">
+          <MeMark className="h-7 w-8 flex-none" />
+          <span className="leading-none">
+            <span className="block whitespace-nowrap font-display text-[15px] font-bold text-[#FBF8F3]">
+              Magic Engine
+            </span>
+            <span className="mt-[3px] block text-[10px] tracking-[.04em] text-white/35">
+              Admin cockpit
+            </span>
+          </span>
+        </Link>
 
-          <div className={`mt-4 rounded-lg border border-white/10 bg-white/[0.06] ${isCollapsed ? 'p-2' : 'p-3'}`}>
-            {!isCollapsed && (
-              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-cyan-200">
-                Operating loop
-              </p>
-            )}
-            <div className={isCollapsed ? 'space-y-1' : 'mt-3 grid grid-cols-3 gap-1'}>
-              {LOOP_STEPS.map(step => (
-                <div
-                  key={step}
-                  title={step}
-                  className={`rounded-md bg-slate-950/70 text-center font-bold text-slate-300 ${
-                    isCollapsed ? 'px-2 py-2 text-[10px]' : 'px-2 py-2 text-[11px]'
-                  }`}
-                >
-                  {isCollapsed ? step.slice(0, 1) : step}
+        {/* Nav */}
+        <nav className="flex-1 overflow-y-auto px-3 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {isClientViewer ? (
+            <NavLink
+              item={{ key: 'clients', label: 'My client', mark: 'CL', href: `/dashboard/clients/${allowedClientId}` }}
+              active={pathname.startsWith(`/dashboard/clients/${allowedClientId}`)}
+            />
+          ) : (
+            ADMIN_SECTIONS.map((section, i) => (
+              <div key={i} className="mb-4">
+                {section.title && (
+                  <p className="mb-1.5 px-3 text-[9.5px] font-black uppercase tracking-[.16em] text-white/22">
+                    {section.title}
+                  </p>
+                )}
+                <div className="space-y-[2px]">
+                  {section.items.map(item => (
+                    <NavLink key={item.key} item={item} active={item.key === activeKey} />
+                  ))}
                 </div>
-              ))}
-            </div>
-          </div>
-        </div>
+              </div>
+            ))
+          )}
+        </nav>
 
-        <SidebarNav userRole={userRole} allowedClientId={allowedClientId} collapsed={isCollapsed} />
-
-        <div className={`border-t border-white/10 py-4 ${isCollapsed ? 'px-3' : 'px-4'}`}>
-          {!isCollapsed && <p className="truncate text-xs font-semibold text-slate-400">{userEmail}</p>}
-          <form action="/auth/signout" method="POST" className={isCollapsed ? '' : 'mt-3'}>
+        {/* Footer */}
+        <div className="border-t border-white/[.07] px-4 py-3.5">
+          <p className="truncate text-[11px] text-white/30">{userEmail}</p>
+          <form action="/auth/signout" method="POST" className="mt-2.5">
             <button
               type="submit"
-              className={`flex h-10 w-full items-center rounded-lg border border-white/10 text-sm font-bold text-slate-200 transition hover:border-white/25 hover:text-white ${
-                isCollapsed ? 'justify-center px-0' : 'justify-between px-3'
-              }`}
-              title="Sign out"
+              className="flex h-9 w-full items-center justify-between rounded-lg border border-white/[.08] px-3 text-[12.5px] font-semibold text-white/40 transition hover:border-white/20 hover:text-white/70"
             >
-              {isCollapsed ? 'SO' : 'Sign out'}
-              {!isCollapsed && <span aria-hidden="true">-&gt;</span>}
+              Sign out <span aria-hidden="true">→</span>
             </button>
           </form>
         </div>
       </aside>
 
-      <main className="min-w-0 flex-1 bg-[#f6f7f2]">
-        <header className="sticky top-0 z-30 border-b border-slate-200 bg-[#f6f7f2]/95 px-4 py-3 backdrop-blur md:hidden">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-3">
-              <LogoMark />
-              <div className="min-w-0">
-                <p className="truncate text-sm font-black">Magic Engine</p>
-                <p className="text-xs font-semibold text-slate-500">{roleLabel}</p>
-              </div>
-            </div>
-            <form action="/auth/signout" method="POST">
-              <button
-                type="submit"
-                className="h-9 rounded-lg border border-slate-300 px-3 text-xs font-black text-slate-700"
-              >
-                Sign out
-              </button>
-            </form>
-          </div>
-        </header>
+      {/* Mobile topbar */}
+      <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-black/10 bg-[#FBF8F3]/90 px-4 py-3 backdrop-blur md:hidden">
+        <div className="flex items-center gap-2.5">
+          <MeMark className="h-6 w-7" />
+          <span className="font-display text-sm font-bold">Magic Engine</span>
+        </div>
+        <form action="/auth/signout" method="POST">
+          <button type="submit" className="rounded-lg border border-black/15 px-3 py-1.5 text-xs font-semibold text-black/60">
+            Sign out
+          </button>
+        </form>
+      </header>
+
+      {/* Main content */}
+      <main className="min-w-0 flex-col">
         {children}
       </main>
     </div>

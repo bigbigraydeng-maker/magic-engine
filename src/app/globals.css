@@ -1,24 +1,15 @@
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* App is light-mode only — do NOT inherit OS dark-mode, otherwise inputs render
-   white text on white background (or autofill blue-on-white). */
+/* App is light-mode only — do NOT inherit OS dark-mode */
 :root {
   color-scheme: light;
-  --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 214, 219, 220;
-  --background-end-rgb: 255, 255, 255;
 }
 
 body {
-  color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-    to bottom,
-    rgb(var(--background-start-rgb)),
-    rgb(var(--background-end-rgb))
-  );
+  color: #1A1A1A;
+  background-color: #FBF8F3;
 }
 
 /* Force readable text inside ALL form controls, regardless of OS theme. */
