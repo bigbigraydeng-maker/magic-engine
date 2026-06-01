@@ -386,7 +386,7 @@ function checkParagraphStructure(html: string): { passed: boolean; detail: strin
  * (allowing for whitespace variations around the colon and quotes).
  */
 function checkSchemaJsonLd(html: string): { passed: boolean; detail: string } {
-  const scriptRegex = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/is
+  const scriptRegex = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/i
   const schemaMatch = scriptRegex.exec(html)
 
   if (!schemaMatch) {

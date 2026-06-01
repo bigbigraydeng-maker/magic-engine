@@ -57,7 +57,7 @@ function buildSupabaseChain(resolvedValue: { data: unknown; error: unknown }) {
     get(target, prop) {
       // Preserve native Promise behaviour (then, catch, finally, Symbol.toStringTag…)
       if (prop in target || typeof prop === 'symbol') {
-        const val = (target as Record<string | symbol, unknown>)[prop]
+        const val = (target as unknown as Record<string | symbol, unknown>)[prop]
         return typeof val === 'function' ? val.bind(target) : val
       }
       // Any other property access (select, eq, in, order, limit, neq…) returns
@@ -85,9 +85,9 @@ function setupSupabaseMock(
   mockFrom.mockImplementation(() => {
     callCount++
     if (callCount === 1) {
-      return buildSupabaseChain({ data: queriesData, error: queriesError }) as ReturnType<typeof supabaseAdmin.from>
+      return buildSupabaseChain({ data: queriesData, error: queriesError }) as unknown as ReturnType<typeof supabaseAdmin.from>
     }
-    return buildSupabaseChain({ data: runsData, error: runsError }) as ReturnType<typeof supabaseAdmin.from>
+    return buildSupabaseChain({ data: runsData, error: runsError }) as unknown as ReturnType<typeof supabaseAdmin.from>
   })
 }
 

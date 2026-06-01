@@ -157,7 +157,7 @@ export async function accumulateBenchmarks(
   }
 
   // ── 3. For each group: validate → calc → upsert ──────────────────────────
-  for (const [, group] of groups) {
+  for (const [, group] of Array.from(groups.entries())) {
     if (group.values.length < minSamples) {
       result.groupsSkipped++
       continue

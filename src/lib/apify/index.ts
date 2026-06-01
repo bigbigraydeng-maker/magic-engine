@@ -1,5 +1,5 @@
 export * from './client'
 export * from './social-scraper'
-export * from './ad-library'
+export { scrapeCompetitorMetaAds } from './ad-library'
 export * from './industry-platform-map'
 export * from './types'
