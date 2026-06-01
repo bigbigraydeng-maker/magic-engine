@@ -8,6 +8,13 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { computeVerdict } from '../job'
+import type { supabaseAdmin } from '@/lib/supabase'
+
+type SupabaseQuery = ReturnType<typeof supabaseAdmin.from>
+
+function asSupabaseQuery(chain: Record<string, unknown>): SupabaseQuery {
+  return chain as unknown as SupabaseQuery
+}
 
 // ── Fluent mock builder ───────────────────────────────────────────────────────
 
@@ -23,7 +30,9 @@ function makeChain(terminal: Partial<Record<string, () => Promise<ChainResult>>>
     chain[m] = vi.fn().mockReturnValue(chain)
   }
   for (const [method, impl] of Object.entries(terminal)) {
-    chain[method] = vi.fn().mockImplementation(impl)
+    if (impl) {
+      chain[method] = vi.fn().mockImplementation(impl)
+    }
   }
   return chain
 }
@@ -129,7 +138,7 @@ describe('runAttributionJob', () => {
     // Override from to return data:[] for the actions query
     const chain = makeChain()
     ;(chain as Record<string, unknown>)['not'] = vi.fn().mockReturnValue({ data: [], error: null })
-    vi.mocked(supabaseAdmin.from).mockReturnValueOnce(chain as ReturnType<typeof supabaseAdmin.from>)
+    vi.mocked(supabaseAdmin.from).mockReturnValueOnce(asSupabaseQuery(chain))
 
     const { runAttributionJob } = await import('../job')
     const result = await runAttributionJob()
@@ -151,7 +160,7 @@ describe('runAttributionJob', () => {
       error: null,
     })
     vi.mocked(supabaseAdmin.from).mockReturnValueOnce(
-      actionsChain as ReturnType<typeof supabaseAdmin.from>
+      asSupabaseQuery(actionsChain)
     )
 
     // baseline maybySingle → null (no baseline)
@@ -177,7 +186,7 @@ describe('runAttributionJob', () => {
       error: null,
     })
     vi.mocked(supabaseAdmin.from).mockReturnValueOnce(
-      actionsChain as ReturnType<typeof supabaseAdmin.from>
+      asSupabaseQuery(actionsChain)
     )
 
     // baseline → exists
@@ -206,7 +215,7 @@ describe('runAttributionJob', () => {
       error: null,
     })
     vi.mocked(supabaseAdmin.from).mockReturnValueOnce(
-      actionsChain as ReturnType<typeof supabaseAdmin.from>
+      asSupabaseQuery(actionsChain)
     )
 
     // baseline → 0.30
@@ -237,7 +246,7 @@ describe('runAttributionJob', () => {
       error: null,
     })
     vi.mocked(supabaseAdmin.from).mockReturnValueOnce(
-      actionsChain as ReturnType<typeof supabaseAdmin.from>
+      asSupabaseQuery(actionsChain)
     )
 
     maybeSingleQueue.push(async () => ({ data: { metric_value: 0.30 }, error: null }))
