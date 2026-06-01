@@ -61,6 +61,60 @@ export interface GroupData {
   kind: 'prescription' | 'marketing_plan' | 'autonomous' | 'fde_manual'
 }
 
+// ─── Dimension grouping (new Kanban view) ──────────────────────────────────────
+
+export interface DimensionGroup {
+  dimension: string
+  label: string
+  icon: string
+  items: ItemWithLogs[]
+  /** weight controls display order */
+  weight: number
+}
+
+const DIMENSION_META: Record<string, { label: string; icon: string; weight: number }> = {
+  social:        { label: '社媒内容',  icon: '📱', weight: 1 },
+  seo:           { label: 'SEO 内容', icon: '📝', weight: 2 },
+  ai_visibility: { label: 'GEO 内容', icon: '🌐', weight: 3 },
+  ads:           { label: '广告',     icon: '📣', weight: 4 },
+  reputation:    { label: '口碑',     icon: '⭐', weight: 5 },
+  competitor:    { label: '竞品监控', icon: '🔍', weight: 6 },
+}
+
+/**
+ * Groups non-autonomous execution items by dimension.
+ * Autonomous/flywheel items are excluded — they belong in Analytics, not the Kanban.
+ * Items with unknown dimensions fall into their own group at the end.
+ */
+export function buildDimensionGroups(items: ItemWithLogs[]): DimensionGroup[] {
+  const byDimension: Record<string, ItemWithLogs[]> = {}
+
+  for (const item of items) {
+    if (isAutonomousItem(item)) continue   // flywheel — not for FDE kanban
+    if (item.source === 'proactive_signal') continue
+    const dim = item.dimension ?? 'other'
+    ;(byDimension[dim] ??= []).push(item)
+  }
+
+  return Object.entries(byDimension)
+    .map(([dimension, dimItems]): DimensionGroup => {
+      const meta = DIMENSION_META[dimension]
+      return {
+        dimension,
+        label:  meta?.label ?? dimension,
+        icon:   meta?.icon  ?? '📌',
+        weight: meta?.weight ?? 99,
+        items:  dimItems.sort((a, b) => {
+          // pending first, then in_progress, then completed/skipped
+          const order: Record<string, number> = { pending: 0, in_progress: 1, completed: 2, skipped: 3 }
+          return (order[a.status ?? ''] ?? 9) - (order[b.status ?? ''] ?? 9)
+            || (a.sort_order ?? 0) - (b.sort_order ?? 0)
+        }),
+      }
+    })
+    .sort((a, b) => a.weight - b.weight)
+}
+
 const METRIC_DISPLAY: Record<string, string> = {
   'geo.query.mention_rate':      'Mention rate',
   'geo.query.brand_prominence':  'Brand prominence',

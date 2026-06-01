@@ -15,11 +15,13 @@ import { AdsFixDrawer } from './_components/AdsFixDrawer'
 import { AdsAuditSection } from './_components/AdsAuditSection'
 import {
   buildExecutionGroups,
+  buildDimensionGroups,
   formatOutcomeLabel,
   isAutonomousItem,
   MARKETING_PLAN_GROUP_PREFIX,
   FDE_MANUAL_GROUP_ID,
   type GroupData,
+  type DimensionGroup,
   type ItemWithLogs,
   type MarketingPlanMeta,
   type OutcomeSummary,
@@ -1500,6 +1502,98 @@ function PrescriptionGroup({
 }
 
 // ---------------------------------------------------------------------------
+// DimensionGroupSection — collapsible dimension group with 5-item preview
+// ---------------------------------------------------------------------------
+
+const PREVIEW_COUNT = 5
+
+function DimensionGroupSection({
+  group,
+  activeDetailId,
+  onOpenDetail,
+  bgGeneratingIds,
+}: {
+  group: DimensionGroup
+  activeDetailId: string | null
+  onOpenDetail: (item: ItemWithLogs) => void
+  bgGeneratingIds?: Set<string>
+}) {
+  const [expanded, setExpanded] = useState(false)
+
+  const pending     = group.items.filter(i => i.status === 'pending').length
+  const inProgress  = group.items.filter(i => i.status === 'in_progress').length
+  const completed   = group.items.filter(i => i.status === 'completed').length
+  const total       = group.items.length
+
+  const visibleItems = expanded ? group.items : group.items.slice(0, PREVIEW_COUNT)
+  const hiddenCount  = total - PREVIEW_COUNT
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+      {/* Group header */}
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center gap-3 px-5 py-3.5 bg-gray-50 border-b border-gray-100 hover:bg-gray-100 transition-colors text-left"
+      >
+        <span className="text-base">{group.icon}</span>
+        <span className="text-sm font-black text-gray-900">{group.label}</span>
+        <div className="flex items-center gap-2 ml-2">
+          {inProgress > 0 && (
+            <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+              {inProgress} 进行中
+            </span>
+          )}
+          {pending > 0 && (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+              {pending} 待处理
+            </span>
+          )}
+          {completed > 0 && (
+            <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-700">
+              {completed} 已完成
+            </span>
+          )}
+        </div>
+        <span className="ml-auto text-xs text-gray-400">
+          {expanded ? '▲ 收起' : `▼ 展开 · 共 ${total} 条`}
+        </span>
+      </button>
+
+      {/* Items */}
+      <div className="divide-y divide-gray-100 px-4 py-2 space-y-2">
+        {visibleItems.map(item => (
+          <ExecutionItemCard
+            key={item.id}
+            item={item}
+            isActive={item.id === activeDetailId}
+            onOpenDetail={onOpenDetail}
+            isBackgroundGenerating={bgGeneratingIds?.has(item.id) ?? false}
+          />
+        ))}
+      </div>
+
+      {/* Show more / show less */}
+      {!expanded && hiddenCount > 0 && (
+        <button
+          onClick={() => setExpanded(true)}
+          className="w-full py-2.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 transition-colors border-t border-gray-100"
+        >
+          还有 {hiddenCount} 条 · 点击展开
+        </button>
+      )}
+      {expanded && total > PREVIEW_COUNT && (
+        <button
+          onClick={() => setExpanded(false)}
+          className="w-full py-2.5 text-xs font-semibold text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors border-t border-gray-100"
+        >
+          收起
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -1997,6 +2091,11 @@ export default function ExecutionPage() {
   })()
   const availableDimensions = Array.from(new Set(items.map(i => i.dimension).filter(Boolean))) as string[]
   const completedCount      = filteredItems.filter(i => i.status === 'completed').length
+
+  // New dimension-based grouping — excludes autonomous/flywheel items
+  const dimensionGroups = buildDimensionGroups(filteredItems)
+
+  // Legacy prescription groups — kept for derive/supplement/revision flows only
   const prescriptionGroups  = buildExecutionGroups(filteredItems, prescriptions, marketingPlans)
     .filter(g => g.items.length > 0)
 
@@ -2279,34 +2378,30 @@ export default function ExecutionPage() {
         {/* P18.A.3 — Meta Ads 操作历史与撤销 */}
         <AdsAuditSection clientId={clientId} />
 
-        {/* 按处方分组 — 原处方 / 补充 / 修订 / 已归档 / Marketing Plan / FDE 各成一组 */}
-        {prescriptionGroups.map(group => {
-          // Phase 20.D: FDE 手动录入分组 — 平铺 + 拖拽排序
-          if (group.kind === 'fde_manual') {
-            return (
-              <FdeManualGroup
-                key={group.pid}
-                group={group}
-                activeDetailId={detailItem?.id ?? null}
-                onOpenDetail={item => openDetailAndRemember(item, true)}
-                onReorder={handleReorder}
-              />
-            )
-          }
-          return (
-            <PrescriptionGroup
-              key={group.pid}
-              group={group}
-              defaultOpen={true}
-              activeDetailId={detailItem?.id ?? null}
-              onDerive={(mode, priorId, priorLabel) => setDeriveDrawer({ mode, priorId, priorLabel })}
-              onOpenDetail={item => openDetailAndRemember(item, group.editable)}
-              onAddItem={handleAddItem}
-              bgGeneratingIds={allBgGeneratingIds}
-              onReorder={handleReorderItems}
-            />
-          )
-        })}
+        {/* 按工作类型分组 — 社媒 / SEO / GEO / 广告 / 口碑 / 竞品（飞轮自主任务已过滤）*/}
+        {dimensionGroups.map(group => (
+          <DimensionGroupSection
+            key={group.dimension}
+            group={group}
+            activeDetailId={detailItem?.id ?? null}
+            onOpenDetail={item => {
+              const legacy = prescriptionGroups.find(g => g.items.some(i => i.id === item.id))
+              openDetailAndRemember(item, legacy?.editable ?? true)
+            }}
+            bgGeneratingIds={allBgGeneratingIds}
+          />
+        ))}
+
+        {/* FDE 手动录入分组 — 平铺 + 拖拽排序（仍保留） */}
+        {prescriptionGroups.filter(g => g.kind === 'fde_manual').map(group => (
+          <FdeManualGroup
+            key={group.pid}
+            group={group}
+            activeDetailId={detailItem?.id ?? null}
+            onOpenDetail={item => openDetailAndRemember(item, true)}
+            onReorder={handleReorder}
+          />
+        ))}
       </div>
 
       {/* 右侧任务详情抽屉 */}
