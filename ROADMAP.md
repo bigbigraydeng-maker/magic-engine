@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-01 14:26 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-01 14:37 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2393,8 +2393,9 @@ Body: { title, description, dimension, fix_type?, due_date?, notes? }
 - `x-cron-secret` 验证（与现有 cron 一致）
 - `render.yaml` 新增 `zhuge-weekly-recalculate`，每周一 3am UTC
 
-- [ ] P24.B.1 `src/app/api/cron/zhuge-recalculate/route.ts`
-- [ ] P24.B.2 `render.yaml` 追加 cron 定义
+- [x] P24.B.1 `src/app/api/cron/zhuge-recalculate/route.ts`
+- [x] P24.B.2 `render.yaml` 追加 cron 定义
+- [x] P24.B.3 `route.test.ts` — 11 单测全绿（auth / empty / happy-path / skip / error resilience / DB error）
 
 ### P24.C — GEO 部署页接入 CMS connector
 
@@ -3094,6 +3095,12 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-06-01（P24.B — 诸葛亮每周重算 cron ✅）
+
+- **P24.B.1** — `GET /api/cron/zhuge-recalculate`：查 `client_discovery.confirmed_at IS NOT NULL` 的客户，逐客户串行调用 assembleZhugeInput → conductPriorityActions → persistZhugeActions；NO_DISCOVERY/CLIENT_NOT_FOUND 标 skipped，其他异常标 error 不中断批次；maxDuration=900（15 分钟）
+- **P24.B.2** — `render.yaml` 追加 `zhuge-weekly-recalculate` cron（`"0 3 * * 1"` = 每周一 3am UTC），curl GET 带 Bearer header
+- **P24.B.3** — 11 单测全绿（auth / 空客户短路 / happy-path 流程顺序 / NO_DISCOVERY skip / CLIENT_NOT_FOUND skip / conduct 失败 error + 继续 / persist 失败 error / discovery DB 错误 500）
 
 ### 2026-06-01（P24.A — 诸葛亮推荐写入执行看板 ✅）
 
