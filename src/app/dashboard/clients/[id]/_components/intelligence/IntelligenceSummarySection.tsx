@@ -3,10 +3,10 @@
  *
  * Fetches /intelligence/summary and /intelligence/insights in parallel
  * and renders:
- *   variant='full'    — 7 TrendCards grid + full InsightList
+ *   variant='full'    — 7 TrendCards grid + full InsightList + NarrativeBlock (AI summary)
  *   variant='compact' — 3 TrendCards (top 3 spotlight) + InsightList (top 3)
  *
- * Phase 22.B.7
+ * Phase 22.B.7 / Phase 22.C.3 (NarrativeBlock)
  */
 
 'use client'
@@ -14,6 +14,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { TrendCard } from './TrendCard'
 import { InsightList } from './InsightList'
+import { NarrativeBlock } from './NarrativeBlock'
 import type { MetricSummaryTile, InsightCard } from '@/lib/flywheel/intelligence/types'
 
 // ─── API shapes ───────────────────────────────────────────────────────────────
@@ -137,6 +138,9 @@ export function IntelligenceSummarySection({
           <InsightList insights={insights} limit={insightLimit} />
         </div>
       )}
+
+      {/* Phase 22.C.3 — AI Monthly Narrative (full variant only, lazy-loaded) */}
+      {variant === 'full' && <NarrativeBlock clientId={clientId} />}
     </section>
   )
 }

@@ -38,6 +38,12 @@ export interface FactoryJobInput {
   fdeNote?: string
   /** 期望生成的变体数量（1-5），默认 1 */
   variants?: number
+  /**
+   * Phase 22.C.2 — Pre-formatted Data Intelligence signal block.
+   * Produced by loadIntelligenceContext() and injected into system prompt.
+   * Optional — factory works fine without it.
+   */
+  intelligenceBlock?: string | null
 }
 
 export interface FactoryVariant {
