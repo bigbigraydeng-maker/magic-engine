@@ -1490,30 +1490,48 @@ function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd, onB
   )
 }
 
-function StoryCard({ index, story, clientId, launchHubPlatform, onGenStart, onGenEnd, onBackgroundImageGenerate }: {
+function StoryCard({ index, story, clientId, launchHubPlatform, onGenStart, onGenEnd, onBackgroundImageGenerate, postId, initialAssets }: {
   index: number
   story: Story
   clientId: string
   launchHubPlatform?: string
   onGenStart?: () => void
   onGenEnd?: () => void
-  onBackgroundImageGenerate?: (params: { prompt: string; aspectRatio: string }) => Promise<string>
+  onBackgroundImageGenerate?: (params: ImageGenerateParams) => Promise<GalleryAsset>
+  postId?: string
+  initialAssets?: GalleryAsset[]
 }) {
   const [generatingImg, setGen]               = useState(false)
-  const [imgUrl, setImgUrl]                   = useState<string | null>(null)
+  const [assets, setAssets]                   = useState<GalleryAsset[]>(initialAssets ?? [])
   const [imgError, setImgError]               = useState<string | null>(null)
-  const [lightboxOpen, setLightbox]           = useState(false)
+  const [lightboxUrl, setLightbox]            = useState<string | null>(null)
   const [editedCopy, setEditedCopy]           = useState(story.copy)
   const [editedVisualPrompt, setEditedVisualPrompt] = useState(story.visual_prompt)
+  const [selecting, setSelecting]             = useState(false)
+
+  useEffect(() => {
+    if (!postId || initialAssets) return
+    fetch(`/api/clients/${clientId}/visual-assets?post_id=${postId}`)
+      .then(r => r.json() as Promise<{ success: boolean; assets?: GalleryAsset[] }>)
+      .then(data => { if (data.success && data.assets) setAssets(data.assets) })
+      .catch(() => { /* non-fatal */ })
+  }, [clientId, postId, initialAssets])
+
+  const selectedAsset = assets.find(a => a.is_selected) ?? assets[0] ?? null
+  const selectedUrl   = selectedAsset?.storage_url ?? null
 
   const handleGenerate = async () => {
     setGen(true)
     setImgError(null)
     onGenStart?.()
     try {
-      let imageUrl: string
       if (onBackgroundImageGenerate) {
-        imageUrl = await onBackgroundImageGenerate({ prompt: editedVisualPrompt, aspectRatio: '9:16' })
+        const asset = await onBackgroundImageGenerate({
+          prompt: editedVisualPrompt,
+          aspectRatio: '9:16',
+          ...(postId ? { postId } : {}),
+        })
+        setAssets(prev => [...prev, asset])
       } else {
         const res = await fetch('/api/visual/image-preview', {
           method: 'POST',
@@ -1522,9 +1540,16 @@ function StoryCard({ index, story, clientId, launchHubPlatform, onGenStart, onGe
         })
         const json = await res.json() as { success: boolean; image_url?: string; error?: string }
         if (!json.success) throw new Error(json.error ?? '生成失败')
-        imageUrl = json.image_url ?? ''
+        if (json.image_url) {
+          setAssets(prev => [...prev, {
+            id: `local-${prev.length + 1}`,
+            storage_url: json.image_url!,
+            prompt_used: editedVisualPrompt,
+            is_selected: prev.length === 0,
+            created_at: new Date().toISOString(),
+          }])
+        }
       }
-      setImgUrl(imageUrl)
     } catch (e) {
       setImgError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -1533,20 +1558,21 @@ function StoryCard({ index, story, clientId, launchHubPlatform, onGenStart, onGe
     }
   }
 
+  const handleSelect = async (assetId: string) => {
+    if (selecting) return
+    setAssets(prev => prev.map(a => ({ ...a, is_selected: a.id === assetId })))
+    if (!postId || assetId.startsWith('local-')) return
+    setSelecting(true)
+    try {
+      await fetch(`/api/visual-assets/${assetId}/select`, { method: 'PATCH' })
+    } catch { /* 乐观更新已生效 */ } finally {
+      setSelecting(false)
+    }
+  }
+
   return (
     <>
-      {lightboxOpen && imgUrl && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
-          onClick={() => setLightbox(false)}
-        >
-          <div className="relative max-w-xs w-full" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setLightbox(false)} className="absolute -top-8 right-0 text-white text-sm font-bold hover:text-gray-300">✕ 关闭</button>
-            <img src={imgUrl} alt="story" className="w-full rounded-lg shadow-2xl" />
-            <a href={imgUrl} download target="_blank" rel="noreferrer" className="mt-2 block text-center text-[11px] text-indigo-300 hover:text-white" onClick={e => e.stopPropagation()}>↓ 下载图片</a>
-          </div>
-        </div>
-      )}
+      <ImageLightbox url={lightboxUrl} onClose={() => setLightbox(null)} maxWidth="max-w-xs" />
       <div className="border border-gray-200 rounded-lg px-4 py-3 bg-white flex gap-3">
         <span className="w-5 h-5 rounded-full bg-purple-100 text-purple-700 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">
           {index + 1}
@@ -1564,7 +1590,7 @@ function StoryCard({ index, story, clientId, launchHubPlatform, onGenStart, onGe
           </div>
           <p className="text-[11px] text-indigo-600 font-medium">→ {story.cta}</p>
 
-          {/* 可编辑 visual prompt */}
+          {/* 可编辑 visual prompt — 始终可见 */}
           <div>
             <label className="text-[10px] font-bold text-purple-600 uppercase tracking-wide">🎨 Visual Prompt</label>
             <textarea
@@ -1575,29 +1601,31 @@ function StoryCard({ index, story, clientId, launchHubPlatform, onGenStart, onGe
             />
           </div>
 
-          {/* Image preview or generate button */}
-          {imgUrl ? (
-            <div className="space-y-1.5">
-              <button onClick={() => setLightbox(true)} className="block group relative w-fit">
-                <img src={imgUrl} alt="story" className="h-24 rounded border border-purple-200 object-cover group-hover:opacity-90 transition-opacity" style={{ aspectRatio: '9/16' }} />
-                <span className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                  <span className="bg-black/60 text-white text-[9px] font-bold rounded px-1.5 py-0.5">🔍 放大</span>
-                </span>
-              </button>
-              <button onClick={() => { setImgUrl(null); setImgError(null) }} className="text-[10px] text-gray-400 hover:text-gray-600 underline">重新生成</button>
-            </div>
-          ) : (
-            <div className="space-y-1">
-              <button
-                onClick={() => void handleGenerate()}
-                disabled={generatingImg}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:opacity-50 transition-colors"
-              >
-                {generatingImg ? <><Spinner color="purple" /> 生成中…</> : '🎨 生成 Story 图片'}
-              </button>
-              {imgError && <p className="text-[11px] text-red-500">⚠ {imgError}</p>}
-            </div>
+          {/* 画廊 */}
+          {assets.length > 0 && (
+            <ImageGalleryGrid
+              assets={assets}
+              aspectRatio="9:16"
+              onSelect={handleSelect}
+              onOpenLightbox={url => setLightbox(url)}
+              selecting={selecting}
+            />
           )}
+
+          {/* 生成按钮 — 常驻 */}
+          <div className="space-y-1">
+            <button
+              onClick={() => void handleGenerate()}
+              disabled={generatingImg}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:opacity-50 transition-colors"
+            >
+              {generatingImg
+                ? <><Spinner color="purple" /> 生成中…</>
+                : assets.length === 0 ? '🎨 生成 Story 图片' : `🎨 再生成一张（已有 ${assets.length} 张）`
+              }
+            </button>
+            {imgError && <p className="text-[11px] text-red-500">⚠ {imgError}</p>}
+          </div>
 
           {launchHubPlatform && (
             <div className="pt-1">
@@ -1606,7 +1634,7 @@ function StoryCard({ index, story, clientId, launchHubPlatform, onGenStart, onGe
                 platform={launchHubPlatform}
                 caption={editedCopy}
                 hashtags={[]}
-                imageUrl={imgUrl}
+                imageUrl={selectedUrl}
               />
             </div>
           )}
