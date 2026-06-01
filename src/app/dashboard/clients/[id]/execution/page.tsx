@@ -397,9 +397,24 @@ function WorklogTimeline({ logs, clientId }: { logs: ExecutionLog[]; clientId: s
   if (logs.length === 0) {
     return <p className="text-xs text-gray-400 py-2">暂无工作记录</p>
   }
+
+  // Deduplicate consecutive ai_assist logs with identical content — keep only the latest.
+  const deduped = logs.reduce<ExecutionLog[]>((acc, log) => {
+    if (log.kind === 'ai_assist') {
+      const existingIdx = acc.findIndex(l => l.kind === 'ai_assist' && l.content === log.content)
+      if (existingIdx !== -1) {
+        // Replace older entry with the newer one (logs are ordered oldest-first from API)
+        acc[existingIdx] = log
+        return acc
+      }
+    }
+    acc.push(log)
+    return acc
+  }, [])
+
   return (
     <ul className="space-y-2">
-      {logs.map(log => {
+      {deduped.map(log => {
         const m = LOG_KIND_META[log.kind] ?? { label: 'Log', cls: 'text-slate-500' }
         const when = new Date(log.created_at).toLocaleString('zh-CN', {
           timeZone: 'Pacific/Auckland', month: '2-digit', day: '2-digit',
@@ -640,10 +655,6 @@ function TaskDetailDrawer({
   const [factoryLoading, setFactoryLoading] = useState(false)
   const [factoryResult, setFactoryResult]   = useState<{ successCount: number; packageId: string | null } | null>(null)
   const [factoryError, setFactoryError]     = useState<string | null>(null)
-  // 「存入工作台」补救按钮（方案 A：socialDone 但 content_posts 未入库时使用）
-  const [saveToBoardLoading, setSaveToboardLoading] = useState(false)
-  const [saveToBoard_done, setSaveToBoardDone]      = useState(false)
-
   useEffect(() => { setMounted(true) }, [])
 
   useEffect(() => {
@@ -651,28 +662,7 @@ function TaskDetailDrawer({
     setEditingTitle(false)
     setEditingDesc(false)
     setConfirmDelete(false)
-    setSaveToboardLoading(false)
-    setSaveToBoardDone(false)
   }, [item?.id])
-
-  const handleSaveToBoard = useCallback(async () => {
-    if (!item) return
-    setSaveToboardLoading(true)
-    try {
-      // Fetch the most recent social plan for this client
-      const planRes = await fetch(`/api/clients/${clientId}/social-plan`)
-      const planJson = await planRes.json() as { success: boolean; plans?: { id: string }[] }
-      const planId = planJson.plans?.[0]?.id
-      if (!planId) { setSaveToboardLoading(false); return }
-      await fetch(`/api/clients/${clientId}/social-plan/${planId}/save-to-board`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      })
-      setSaveToBoardDone(true)
-    } catch { /* non-fatal */ } finally {
-      setSaveToboardLoading(false)
-    }
-  }, [item, clientId])
 
   if (!mounted || !item) return null
   const activeItem = item
@@ -894,26 +884,13 @@ function TaskDetailDrawer({
             return (
               <div className="w-full rounded-lg border border-green-100 bg-green-50/60 px-3 py-2.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-black text-green-700 uppercase tracking-wide">已生成</span>
-                  <div className="flex items-center gap-3">
-                    {!saveToBoard_done ? (
-                      <button
-                        onClick={() => void handleSaveToBoard()}
-                        disabled={saveToBoardLoading}
-                        className="text-[11px] font-bold text-amber-600 hover:text-amber-800 underline disabled:opacity-50"
-                      >
-                        {saveToBoardLoading ? '同步中…' : '存入工作台'}
-                      </button>
-                    ) : (
-                      <span className="text-[11px] font-bold text-green-600">✓ 已同步</span>
-                    )}
-                    <a
-                      href={`/dashboard/content?client=${clientId}`}
-                      className="text-[11px] font-bold text-cyan-600 hover:text-cyan-800 underline"
-                    >
-                      查看社媒工作台 →
-                    </a>
-                  </div>
+                  <span className="text-[11px] font-black text-green-700 uppercase tracking-wide">✓ 内容已生成</span>
+                  <a
+                    href={`/dashboard/content?client=${clientId}`}
+                    className="text-[11px] font-bold text-cyan-600 hover:text-cyan-800 underline"
+                  >
+                    打开工作台 →
+                  </a>
                 </div>
               </div>
             )
@@ -1645,9 +1622,6 @@ export default function ExecutionPage() {
   const [imageGenActiveIds, setImageGenActiveIds] = useState<Set<string>>(new Set())
   // 后台图片生成任务（关抽屉后继续跑）：itemId → count（同一任务可能有多张并发）
   const [bgImageGenCount, setBgImageGenCount] = useState(0)
-  // 「最近工作」chip：用户上次打开的执行项 ID（localStorage 持久化，跨刷新记住「上次在改」）
-  const [lastOpenItemId, setLastOpenItemId] = useState<string | null>(null)
-
   const handleDownloadDocx = async () => {
     setIsDocxLoading(true)
     try {
@@ -2054,35 +2028,11 @@ export default function ExecutionPage() {
     return merged
   }, [bgGeneratingIds, imageGenActiveIds])
 
-  // ── 「最近工作」chip ──────────────────────────────────────────────────────
-  // localStorage key（按客户隔离），记住 FDE 上次在改哪一项
-  const lastOpenStorageKey = `me:exec:${clientId}:lastOpenItem`
-
-  // 挂载时读 localStorage（try/catch 防 SSR / 隐私模式报错）
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(lastOpenStorageKey)
-      if (saved) setLastOpenItemId(saved)
-    } catch { /* localStorage 不可用时静默 */ }
-  }, [lastOpenStorageKey])
-
-  // 打开 detail 抽屉 + 记录「上次在改」（chip 与卡片共用）
+  // 打开 detail 抽屉
   const openDetailAndRemember = useCallback((item: ItemWithLogs, editable: boolean) => {
     setDetailItem(item)
     setDetailEditable(editable)
-    setLastOpenItemId(item.id)
-    try {
-      localStorage.setItem(lastOpenStorageKey, item.id)
-    } catch { /* localStorage 不可用时静默 */ }
-  }, [lastOpenStorageKey])
-
-  // 派生最近工作项：进行中 OR 有过 AI 协助记录，按 updated_at 倒序取前 6
-  const recentItems = useMemo<ItemWithLogs[]>(() => {
-    return items
-      .filter(i => i.status === 'in_progress' || (i.logs?.some(l => l.kind === 'ai_assist') ?? false))
-      .sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? ''))
-      .slice(0, 6)
-  }, [items])
+  }, [])
 
   const filteredItems = (() => {
     let result = activeDimension === 'all' ? items : items.filter(i => i.dimension === activeDimension)
@@ -2261,45 +2211,6 @@ export default function ExecutionPage() {
           <div className="rounded-xl border border-red-200 bg-red-50 p-3 flex items-center justify-between gap-3 text-sm text-red-700">
             <span>{opError}</span>
             <button onClick={() => setOpError(null)} className="text-red-400 hover:text-red-600 text-lg leading-none">×</button>
-          </div>
-        )}
-
-        {/* 📌 最近工作 — FDE 切回上次在改的任务，避免在长看板里找 */}
-        {recentItems.length > 0 && (
-          <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
-            <div className="mb-2 flex items-center gap-1.5">
-              <span className="text-xs font-black text-slate-700">📌 最近工作</span>
-              <span className="rounded-full bg-slate-100 px-1.5 text-[10px] font-bold text-slate-500">{recentItems.length}</span>
-            </div>
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {recentItems.map(item => {
-                const isLast = item.id === lastOpenItemId
-                const generating = allBgGeneratingIds.has(item.id)
-                const title = item.title.length > 24 ? `${item.title.slice(0, 24)}…` : item.title
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => openDetailAndRemember(item, true)}
-                    title={item.title}
-                    className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
-                      isLast
-                        ? 'border-violet-300 bg-violet-50 text-violet-800 hover:bg-violet-100'
-                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white'
-                    }`}
-                  >
-                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[item.status]}`} />
-                    <span className="max-w-[180px] truncate">{title}</span>
-                    {isLast && <span className="shrink-0 text-[10px] font-bold text-violet-500">上次在改</span>}
-                    {generating && (
-                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-violet-100 px-1.5 text-[10px] font-bold text-violet-700">
-                        <span className="h-2 w-2 animate-spin rounded-full border border-violet-400 border-t-violet-700" />
-                        制作中
-                      </span>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
           </div>
         )}
 
