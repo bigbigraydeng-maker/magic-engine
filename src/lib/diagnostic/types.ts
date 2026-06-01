@@ -38,6 +38,7 @@ export interface EvidenceSource {
  *   - `collected_at` — when collection happened, so staleness is detectable
  */
 export interface EvidenceEnvelope {
+  [key: string]: unknown
   raw: unknown
   parsed: Record<string, unknown> | null
   sources: EvidenceSource[]
