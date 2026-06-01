@@ -9,7 +9,6 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { Database } from '@/lib/database.types'
 import { JobRunner } from './job-runner'
 import { discoverSitemapUrls as crawlerDiscoverUrls, crawlPages } from './crawler'
 import { classifyPage } from './classifier'
@@ -76,7 +75,7 @@ export async function discoverSitemapUrls(domain: string): Promise<string[]> {
  * Individual page failures are captured; they never abort the entire batch.
  */
 export async function crawlAndClassifyPages(
-  supabase: SupabaseClient<Database>,
+  supabase: SupabaseClient,
   clientId: string,
   urls: string[],
   jobId: string,
@@ -229,7 +228,7 @@ export async function crawlAndClassifyPages(
  *   5b. JobRunner.failJob         — on unrecoverable error
  */
 export async function executeJob(
-  supabase: SupabaseClient<Database>,
+  supabase: SupabaseClient,
   jobId: string,
   options?: ExecuteJobOptions
 ): Promise<void> {

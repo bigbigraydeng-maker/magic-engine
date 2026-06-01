@@ -36,6 +36,10 @@ vi.mock('@/lib/site-audit/job-runner', () => ({
 import { supabaseAdmin } from '@/lib/supabase'
 import { JobRunner } from '@/lib/site-audit/job-runner'
 
+function setSupabaseFromMock(mockFromFn: ReturnType<typeof vi.fn>) {
+  ;(supabaseAdmin as unknown as { from: typeof mockFromFn }).from = mockFromFn
+}
+
 describe('GET /api/clients/[id]/site-audit/status', () => {
   const mockClientId = 'client-123'
   const mockJob: SiteAuditJob = {
@@ -79,7 +83,7 @@ describe('GET /api/clients/[id]/site-audit/status', () => {
           })),
         })),
       }))
-      vi.mocked(supabaseAdmin).from = mockFromFn
+      setSupabaseFromMock(mockFromFn)
 
       const request = new NextRequest('http://localhost:3000/api/clients/unknown-id/site-audit/status')
       const response = await GET(request, { params: { id: 'unknown-id' } })
@@ -101,7 +105,7 @@ describe('GET /api/clients/[id]/site-audit/status', () => {
           })),
         })),
       }))
-      vi.mocked(supabaseAdmin).from = mockFromFn
+      setSupabaseFromMock(mockFromFn)
 
       const request = new NextRequest('http://localhost:3000/api/clients/client-123/site-audit/status')
       const response = await GET(request, { params: { id: mockClientId } })
@@ -124,7 +128,7 @@ describe('GET /api/clients/[id]/site-audit/status', () => {
           })),
         })),
       }))
-      vi.mocked(supabaseAdmin).from = mockFromFn
+      setSupabaseFromMock(mockFromFn)
     })
 
     it('should return job details when job query succeeds', async () => {
@@ -202,7 +206,7 @@ describe('GET /api/clients/[id]/site-audit/status', () => {
           })),
         })),
       }))
-      vi.mocked(supabaseAdmin).from = mockFromFn
+      setSupabaseFromMock(mockFromFn)
     })
 
     it('should calculate progressPercent correctly for pending job', async () => {
@@ -287,7 +291,7 @@ describe('GET /api/clients/[id]/site-audit/status', () => {
           })),
         })),
       }))
-      vi.mocked(supabaseAdmin).from = mockFromFn
+      setSupabaseFromMock(mockFromFn)
     })
 
     it('should calculate etaSec based on remaining pages and speed', async () => {
@@ -383,7 +387,7 @@ describe('GET /api/clients/[id]/site-audit/status', () => {
           })),
         })),
       }))
-      vi.mocked(supabaseAdmin).from = mockFromFn
+      setSupabaseFromMock(mockFromFn)
     })
 
     it('should only return jobs belonging to the specified client', async () => {
@@ -420,7 +424,7 @@ describe('GET /api/clients/[id]/site-audit/status', () => {
           })),
         })),
       }))
-      vi.mocked(supabaseAdmin).from = mockFromFn
+      setSupabaseFromMock(mockFromFn)
     })
 
     it('should return proper status response for in_progress job', async () => {
@@ -495,7 +499,7 @@ describe('GET /api/clients/[id]/site-audit/status', () => {
           })),
         })),
       }))
-      vi.mocked(supabaseAdmin).from = mockFromFn
+      setSupabaseFromMock(mockFromFn)
     })
 
     it('should return 500 on unexpected error during client lookup', async () => {
@@ -506,7 +510,7 @@ describe('GET /api/clients/[id]/site-audit/status', () => {
           })),
         })),
       }))
-      vi.mocked(supabaseAdmin).from = mockFromFn
+      setSupabaseFromMock(mockFromFn)
 
       const request = new NextRequest('http://localhost:3000/api/clients/client-123/site-audit/status')
       const response = await GET(request, { params: { id: mockClientId } })

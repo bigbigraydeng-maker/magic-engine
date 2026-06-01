@@ -1,5 +1,4 @@
 import { SupabaseClient } from '@supabase/supabase-js'
-import type { Database } from '@/lib/database.types'
 
 export type JobStatus = 'pending' | 'in_progress' | 'completed' | 'failed'
 
@@ -50,7 +49,7 @@ export interface UpdateProgressInput {
 }
 
 export class JobRunner {
-  constructor(private supabase: SupabaseClient<Database>) {}
+  constructor(private supabase: SupabaseClient) {}
 
   async createJob(
     clientId: string,

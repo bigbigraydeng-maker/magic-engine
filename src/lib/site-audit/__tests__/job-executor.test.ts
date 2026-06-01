@@ -42,6 +42,7 @@ import {
   crawlPages,
 } from '../crawler'
 import { classifyPage } from '../classifier'
+import type { ClassificationResult } from '../classifier'
 import { detectGEOBlock } from '../geo-detector'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -81,7 +82,7 @@ function makeCrawlResult(
   }
 }
 
-function makeClassification(overrides: Record<string, unknown> = {}) {
+function makeClassification(overrides: Partial<ClassificationResult> = {}): ClassificationResult {
   return {
     page_type: 'landing',
     topics: ['topic1', 'topic2'],
