@@ -1900,13 +1900,35 @@ export default function ExecutionPage() {
     })
   }, [])
 
-  // 后台图片生成：关抽屉后继续跑，完成后把 image_url 写入 content_posts.visual_brief
+  // 后台图片生成：关抽屉后继续跑。
+  // 有 post_id → 走 POST /clients/[id]/visual-assets（落库 visual_assets，追加为新 variant）
+  // 无 post_id → 降级到 /api/visual/image-preview（batch mode 临时图）
   const handleBackgroundImageGenerate = useCallback(async (
-    itemId: string,
-    params: { prompt: string; aspectRatio: string },
-  ): Promise<string> => {
+    _itemId: string,
+    params: { prompt: string; aspectRatio: string; postId?: string },
+  ): Promise<import('./_components/SocialPlanSection').GalleryAsset> => {
     setBgImageGenCount(c => c + 1)
     try {
+      if (params.postId) {
+        // 持久化路径
+        const res = await fetch(`/api/clients/${clientId}/visual-assets`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            post_id:      params.postId,
+            prompt:       params.prompt,
+            aspect_ratio: params.aspectRatio,
+          }),
+        })
+        const json = await res.json() as {
+          success: boolean
+          asset?: import('./_components/SocialPlanSection').GalleryAsset
+          error?: string
+        }
+        if (!json.success || !json.asset) throw new Error(json.error ?? '生成失败')
+        return json.asset
+      }
+      // 降级：batch mode 临时图
       const res = await fetch('/api/visual/image-preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1914,24 +1936,13 @@ export default function ExecutionPage() {
       })
       const json = await res.json() as { success: boolean; image_url?: string; error?: string }
       if (!json.success) throw new Error(json.error ?? '生成失败')
-      const imageUrl = json.image_url ?? ''
-
-      // 写入 content_posts.visual_brief（找该 item 关联的 post）
-      if (imageUrl) {
-        const postsRes = await fetch(`/api/clients/${clientId}/posts?execution_item_id=${itemId}`).catch(() => null)
-        if (postsRes?.ok) {
-          const postsJson = await postsRes.json() as { posts?: { id: string }[] }
-          const postId = postsJson.posts?.[0]?.id
-          if (postId) {
-            await fetch(`/api/posts/${postId}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ visual_brief: imageUrl }),
-            }).catch(() => {})
-          }
-        }
+      return {
+        id:          `local-${Date.now()}`,
+        storage_url: json.image_url ?? '',
+        prompt_used: params.prompt,
+        is_selected: true,
+        created_at:  new Date().toISOString(),
       }
-      return imageUrl
     } finally {
       setBgImageGenCount(c => Math.max(0, c - 1))
     }
@@ -2009,6 +2020,17 @@ export default function ExecutionPage() {
   return (
     <BriefGateBanner featureLabel="execution kanban">
     <div className="min-h-screen bg-[#f6f7f2]">
+      {/* 悬浮：图片后台生成 toast — 关抽屉/刷新页面都不影响 */}
+      {bgImageGenCount > 0 && (
+        <div className="fixed bottom-5 right-5 z-[100] flex items-center gap-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 shadow-xl">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-violet-400 border-t-violet-800 shrink-0" />
+          <div className="min-w-0">
+            <p className="text-xs font-black text-violet-800">🎨 Visual Studio 生成中（{bgImageGenCount} 张）</p>
+            <p className="text-[10px] text-violet-600 mt-0.5">关窗口不影响，完成后自动保存到画廊</p>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="sticky top-0 z-10 border-b border-slate-200 bg-[#f6f7f2]/95 px-4 py-3 backdrop-blur md:px-6">
         {/* 面包屑导航 — FDE 随时知道自己在哪 */}
@@ -2107,16 +2129,6 @@ export default function ExecutionPage() {
           <div className="rounded-xl border border-red-200 bg-red-50 p-3 flex items-center justify-between gap-3 text-sm text-red-700">
             <span>{opError}</span>
             <button onClick={() => setOpError(null)} className="text-red-400 hover:text-red-600 text-lg leading-none">×</button>
-          </div>
-        )}
-
-        {/* 全局图片后台生成提示条 */}
-        {bgImageGenCount > 0 && (
-          <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 flex items-center gap-3">
-            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-violet-400 border-t-violet-800 shrink-0" />
-            <span className="text-xs font-black text-violet-800">
-              🎨 Visual Studio 图片生成中（{bgImageGenCount} 张）…关闭窗口不影响生成，完成后自动保存到 Launch Hub
-            </span>
           </div>
         )}
 
