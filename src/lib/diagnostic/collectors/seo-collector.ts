@@ -78,7 +78,7 @@ export class SeoCollector {
     const [rankedKwData, technical, backlinks, serpRankings] = await Promise.all([
       getKeywordsForSite(domain, locationCode, ORGANIC_KW_LIMIT),
       auditTechnicalSeo(domain),
-      getBacklinkSummary(domain).catch(() => null as typeof backlinks),
+      getBacklinkSummary(domain).catch((): BacklinkSummary | null => null),
       getSerpRankings(domain, serpKeywords, db).catch(() => [] as SerpRanking[]),
     ])
 
