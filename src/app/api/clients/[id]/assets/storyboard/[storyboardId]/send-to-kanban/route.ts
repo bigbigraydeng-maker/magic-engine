@@ -17,6 +17,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
+export const dynamic = 'force-dynamic'
+
 type RouteContext = { params: { id: string; storyboardId: string } }
 
 export async function POST(req: NextRequest, { params }: RouteContext) {
