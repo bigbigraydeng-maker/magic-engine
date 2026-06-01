@@ -173,22 +173,37 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
   const [taskAssets, setTaskAssets]         = useState<GalleryAsset[] | undefined>(undefined)
 
   // Load the persisted content_post for this execution item (task mode only).
+  // If none exists yet (common for marketing-plan tasks where save-to-board
+  // was never run), auto-create an empty draft so the gallery + asset-library
+  // picker have a stable post_id to bind to.
   useEffect(() => {
     if (!isTaskMode || !item?.id) return
-    fetch(`/api/clients/${clientId}/posts?execution_item_id=${item.id}`)
-      .then(r => r.json() as Promise<{ posts?: { id: string }[] }>)
-      .then(data => {
-        const postId = data.posts?.[0]?.id
+    const itemId = item.id
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/posts?execution_item_id=${itemId}`)
+        const data = await res.json() as { posts?: { id: string }[] }
+        let postId = data.posts?.[0]?.id
+
+        if (!postId) {
+          // Auto-create empty draft bound to this execution_item.
+          const createRes = await fetch(`/api/clients/${clientId}/posts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ execution_item_id: itemId }),
+          })
+          const createJson = await createRes.json() as { post?: { id: string }; error?: string }
+          postId = createJson.post?.id
+        }
+
         if (postId) {
           setTaskPostId(postId)
-          // Now load this post's gallery
-          fetch(`/api/clients/${clientId}/visual-assets?post_id=${postId}`)
-            .then(r => r.json() as Promise<{ success: boolean; assets?: GalleryAsset[] }>)
-            .then(data => { if (data.success) setTaskAssets(data.assets ?? []) })
-            .catch(() => { /* non-fatal */ })
+          const assetsRes = await fetch(`/api/clients/${clientId}/visual-assets?post_id=${postId}`)
+          const assetsJson = await assetsRes.json() as { success: boolean; assets?: GalleryAsset[] }
+          if (assetsJson.success) setTaskAssets(assetsJson.assets ?? [])
         }
-      })
-      .catch(() => { /* non-fatal */ })
+      } catch { /* non-fatal — gallery / picker just stays empty */ }
+    })()
   }, [isTaskMode, clientId, item?.id])
 
   // Load history on mount / when campaign changes
