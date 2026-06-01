@@ -233,7 +233,7 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-06-01 14:37 NZST （**P24.B ✅ 诸葛亮每周重算 cron — 路由 + render.yaml + 11 单测全绿，P24.A+P24.B 全部完成，下一步 Phase 24.C GEO 部署页 CMS**）
+> 最后更新：2026-06-01 16:07 NZST （**P24.C ✅ GEO 部署页 CMS Connector — deploy page + DeploymentForm + publish-geo-snippet 路由 + 11 单测全绿，Phase 24 全部 A+B+C 完成 🎉**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
@@ -245,9 +245,10 @@ npm test           # 测试套件
 | **PM 操作 🔴** | Supabase 跑 migration `20260617000002_execution_items_proactive_source.sql`（P22.D.2） | ⚠️ 待操作 |
 | **PM 操作 🔴** | Render：新增 Cron Job `/api/cron/anomaly-detector`，schedule `0 4 * * *`，Header `Authorization: Bearer $CRON_SECRET`（P22.D.3） | ⚠️ 待操作 |
 | **GBP.0** | Google Cloud：enable Business Profile API + Account Management API，配置 OAuth consent screen，设 env vars | ⚠️ PM 操作 |
-| **Phase 24.C** | GEO 部署页接入 CMS connector（WordPress/Shopify 一键部署 GEO snippet） | 📋 待开始 |
+| **Phase 18.B** | Google Ads（Developer token 到位后） | 📋 待开始 |
 
 **已完成全景（最近几个 Phase）**：
+- ✅ **P24.C GEO 部署页 CMS Connector**（2026-06-01）：deploy page 并行拉 `/cms/providers`；DeploymentForm 无 connector → 引导横幅，有 → 一键部署按钮；`POST publish-geo-snippet` 路由；11 单测全绿。Phase 24 全部完成 🎉
 - ✅ **P24.B 诸葛亮每周重算 cron**（2026-06-01）：`GET /api/cron/zhuge-recalculate` assemble→conduct→persist 串行逐客户；NO_DISCOVERY/CLIENT_NOT_FOUND skip；其他异常 error 不中断；`render.yaml` `0 3 * * 1`；11 单测全绿
 - ✅ **P24.A.1–3 诸葛亮推荐写入执行看板**（2026-06-01）：migration zhuge source；`writeExecutionItems()` fde/luban 跳过 + zhuge supersede 逻辑；`actionTypeToTitle` + `executionModeToFixType`；14 新单测，34 全绿
 - ✅ **P22.D.4 执行看板 ⚡ 系统检测 badge**（2026-06-01）：ProactiveSignalGroup 组件（橙色主题，weight=0.5 排最顶）；ExecutionItemCard ⚡ badge；TaskDetailDrawer 来源提示条；ExecutionItemSource 扩展 + anomaly_signal_id 字段；10 单测全绿

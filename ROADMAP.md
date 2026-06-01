@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-01 14:37 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-01 16:07 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2406,8 +2406,9 @@ Body: { title, description, dimension, fix_type?, due_date?, notes? }
   - 点击后调用 `/api/clients/[id]/cms/publish-geo-snippet` 注入 snippet 并自动 `recordDeployment`
 - 新增 `src/app/api/clients/[id]/cms/publish-geo-snippet/route.ts`（复用 wordpress-client / shopify-client 底层逻辑）
 
-- [ ] P24.C.1 `deploy/page.tsx` + `DeploymentForm.tsx` 改造
-- [ ] P24.C.2 `publish-geo-snippet/route.ts` 新增路由
+- [x] P24.C.1 `deploy/page.tsx` + `DeploymentForm.tsx` 改造
+- [x] P24.C.2 `publish-geo-snippet/route.ts` 新增路由
+- [x] P24.C.3 `route.test.ts` — 11 单测全绿（auth / input validation / happy-path WP + Shopify / no-connection / DB error）
 
 ---
 
@@ -3095,6 +3096,12 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-06-01（P24.C — GEO 部署页 CMS Connector ✅）
+
+- **P24.C.1** — `deploy/page.tsx` 并行拉取 `/cms/providers`，传 `cmsProviders` 给 DeploymentForm；`DeploymentForm.tsx` 无 connector → 引导横幅（Settings → Website Connection），有 connector → 「一键部署」区块（connectedProviders.map → Deploy to WordPress/Shopify 按钮）+ 调用 `publish-geo-snippet` + `onDeploymentRecorded` 回调
+- **P24.C.2** — `POST /api/clients/[id]/cms/publish-geo-snippet`：拉取 active `geo_directives` → `generateDirectiveHtml` → `prepareCmsContent` → 调 wordpress/shopify-client 创建并发布 page → `recordDeployment` 写 `deployed_pages` 数组；`NO_CONNECTION` / `CONNECTION_NOT_VERIFIED` → 422；decrypt 错误 → 422；其余 → 500
+- **P24.C.3** — 11 单测全绿（auth / input validation / WP happy-path + 参数验证 / Shopify happy-path / NO_CONNECTION / CONNECTION_NOT_VERIFIED / directive DB 错误 500）。Phase 24 全部 A+B+C 完成 ✅
 
 ### 2026-06-01（P24.B — 诸葛亮每周重算 cron ✅）
 
