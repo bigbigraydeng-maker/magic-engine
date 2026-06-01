@@ -103,11 +103,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       failed++
 
       // Mark as error so it doesn't stay stuck at 'analyzing'
-      await supabaseAdmin
-        .from('client_assets')
-        .update({ status: 'error', error_message: msg })
-        .eq('id', asset.id)
-        .catch(() => undefined)
+      try {
+        await supabaseAdmin
+          .from('client_assets')
+          .update({ status: 'error', error_message: msg })
+          .eq('id', asset.id)
+      } catch {
+        // best-effort status update
+      }
     }
   }
 

@@ -56,8 +56,10 @@ function makeMockSupabase(opts: {
           order: vi.fn().mockReturnThis(),
         }
         // Make the chain awaitable on the final call
-        ;(chain as unknown as Promise<unknown>).then = (resolve: (v: unknown) => void) =>
+        ;(chain as unknown as Promise<unknown>).then = ((resolve: (v: unknown) => void) => {
           resolve(selectResult)
+          return Promise.resolve(selectResult)
+        }) as Promise<unknown>['then']
         // Make .order() chainable and ultimately resolve
         chain.order.mockImplementation(() => chain)
         chain.eq.mockImplementation(() => chain)

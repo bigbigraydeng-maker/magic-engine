@@ -28,7 +28,7 @@ export async function generateImage(params: {
     size,
   })
 
-  const b64 = response.data[0]?.b64_json
+  const b64 = response.data?.[0]?.b64_json
   if (!b64) throw new Error('OpenAI returned no image data')
 
   return { b64, size }

@@ -198,14 +198,14 @@ test.describe('P8.11 Billing Monitor', () => {
     if (detailTable) {
       const tableData = await extractTableData(page);
       if (tableData.headers && tableData.headers.length > 0) {
-        const headerText = tableData.headers.map((h) =>
+        const headerText = tableData.headers.map((h: string | null | undefined) =>
           h?.toLowerCase()
         );
         const hasRequiredColumns =
-          headerText.some((h) => h?.includes('client')) ||
-          headerText.some((h) => h?.includes('service')) ||
-          headerText.some((h) => h?.includes('api')) ||
-          headerText.some((h) => h?.includes('cost'));
+          headerText.some((h: string | undefined) => h?.includes('client')) ||
+          headerText.some((h: string | undefined) => h?.includes('service')) ||
+          headerText.some((h: string | undefined) => h?.includes('api')) ||
+          headerText.some((h: string | undefined) => h?.includes('cost'));
         expect(hasRequiredColumns).toBeTruthy();
       }
     }

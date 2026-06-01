@@ -55,7 +55,7 @@ export async function getViralStyleHint(
     .filter((t): t is string => Boolean(t))
   const hookFreq = new Map<string, number>()
   for (const t of hookTypes) hookFreq.set(t, (hookFreq.get(t) ?? 0) + 1)
-  const topHooks = [...hookFreq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)
+  const topHooks = Array.from(hookFreq.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3)
 
   const examples = refs
     .filter(r => r.style_description)

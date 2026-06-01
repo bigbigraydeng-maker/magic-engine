@@ -1167,9 +1167,7 @@ describe('E2E Suite 9 — Job lifecycle state machine', () => {
 
     await executeJob(mockSupabase as unknown as SupabaseClient, CTS_JOB_ID)
 
-    expect(mockRunner.startJob).toHaveBeenCalledBefore
-      ? expect(mockRunner.startJob).toHaveBeenCalled()
-      : expect(mockRunner.startJob).toHaveBeenCalled()
+    expect(mockRunner.startJob).toHaveBeenCalled()
     expect(mockRunner.completeJob).toHaveBeenCalledWith(CTS_JOB_ID)
     expect(mockRunner.failJob).not.toHaveBeenCalled()
   })

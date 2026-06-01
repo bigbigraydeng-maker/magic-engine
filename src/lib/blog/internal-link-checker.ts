@@ -58,7 +58,7 @@ export function checkInternalLinks(
   }
 
   // Deduplicate — count unique URL targets, not raw occurrences.
-  const unique = [...new Set(internalLinks)]
+  const unique = Array.from(new Set(internalLinks))
   const count  = unique.length
 
   let level: InternalLinkCheckResult['level']

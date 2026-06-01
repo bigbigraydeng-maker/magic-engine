@@ -1005,7 +1005,7 @@ export default function VisualsPage() {
 
     // If visual_brief changed, mark this post as needing regeneration
     if ('visual_brief' in fields) {
-      setDirtyBriefs(prev => new Set([...prev, postId]))
+      setDirtyBriefs(prev => new Set([...Array.from(prev), postId]))
     }
 
     try {

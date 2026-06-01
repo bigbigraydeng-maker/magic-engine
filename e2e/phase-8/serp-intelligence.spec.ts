@@ -80,10 +80,10 @@ test.describe('P8.7 SERP Intelligence', () => {
     const tableData = await extractTableData(page);
     if (tableData.headers && tableData.headers.length > 0) {
       const hasTrendData =
-        tableData.headers.some((h) =>
+        tableData.headers.some((h: string | null | undefined) =>
           h?.toLowerCase().includes('trend')
         ) ||
-        tableData.headers.some((h) =>
+        tableData.headers.some((h: string | null | undefined) =>
           h?.toLowerCase().includes('rank')
         );
       expect(hasTrendData || tableData.rows.length > 0).toBeTruthy();

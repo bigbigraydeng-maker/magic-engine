@@ -72,7 +72,7 @@ export async function GET(): Promise<NextResponse> {
   const buffer = await generateZhangqianDocx(data.result, clientName, reportDate)
   const filename = `magic_engine_discovery_${filenamePart(clientName)}_${(data.completed_at ?? data.created_at).slice(0, 10)}.docx`
 
-  return new NextResponse(buffer, {
+  return new NextResponse(new Uint8Array(buffer), {
     status: 200,
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

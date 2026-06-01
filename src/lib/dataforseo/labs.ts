@@ -442,7 +442,7 @@ export async function getKeywordsGap(
     }
   }
 
-  return [...byKeyword.values()]
+  return Array.from(byKeyword.values())
     .sort((a, b) => (b.search_volume ?? 0) - (a.search_volume ?? 0))
     .slice(0, limit)
 }

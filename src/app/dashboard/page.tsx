@@ -110,7 +110,7 @@ async function getDashboardData() {
 
   let totalCritical = 0;
   let totalHigh = 0;
-  for (const run of latestDiagByClient.values()) {
+  for (const run of Array.from(latestDiagByClient.values())) {
     totalCritical += run.critical_count;
     totalHigh += run.high_count;
   }

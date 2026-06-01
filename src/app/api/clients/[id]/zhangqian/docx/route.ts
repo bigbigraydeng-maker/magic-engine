@@ -54,7 +54,7 @@ export async function GET(
     const slug = client.name.replace(/[^a-z0-9-]+/gi, '_').replace(/^_+|_+$/g, '').slice(0, 40)
     const filename = `magic_engine_discovery_${slug || 'client'}_${discovery.generated_at.slice(0, 10)}.docx`
 
-    return new NextResponse(buffer, {
+    return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

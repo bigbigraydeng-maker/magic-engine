@@ -262,12 +262,14 @@ async function runScan(jobId: string, domain: string): Promise<void> {
     const msg = err instanceof Error ? err.message : String(err)
     // Best-effort write: if this also fails, the heartbeat job stays 'running'
     // until the next deployment (acceptable — 9-min timeout handles restarts).
-    await supabaseAdmin
-      .from('public_scan_jobs')
-      .update({ status: 'failed', error: msg, completed_at: new Date().toISOString() })
-      .eq('id', jobId)
-      .then(() => undefined)
-      .catch(() => undefined)
+    try {
+      await supabaseAdmin
+        .from('public_scan_jobs')
+        .update({ status: 'failed', error: msg, completed_at: new Date().toISOString() })
+        .eq('id', jobId)
+    } catch {
+      // best-effort failure write
+    }
   } finally {
     clearInterval(heartbeat)
     clearTimeout(hardTimeoutId)

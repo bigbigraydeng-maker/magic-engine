@@ -429,7 +429,7 @@ describe('getPreparedUploads', () => {
 
     // Should have called .eq() for both project_id and status
     const eqCalls = eqMock.mock.calls;
-    expect(eqCalls.some(([col, val]: [string, string]) => col === 'project_id' && val === PROJECT_ID)).toBe(true);
-    expect(eqCalls.some(([col, val]: [string, string]) => col === 'status' && val === 'prepared')).toBe(true);
+    expect(eqCalls.some(([col, val]) => col === 'project_id' && val === PROJECT_ID)).toBe(true);
+    expect(eqCalls.some(([col, val]) => col === 'status' && val === 'prepared')).toBe(true);
   });
 });

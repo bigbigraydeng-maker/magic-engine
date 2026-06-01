@@ -11,11 +11,13 @@ export async function POST(req: NextRequest) {
     }
 
     // Try to save to discovery_leads table (table may not exist yet — silent failure)
-    await supabaseAdmin
-      .from('discovery_leads')
-      .insert({ url, name: name ?? null, email, created_at: new Date().toISOString() })
-      .then(() => {})
-      .catch(() => {});
+    try {
+      await supabaseAdmin
+        .from('discovery_leads')
+        .insert({ url, name: name ?? null, email, created_at: new Date().toISOString() })
+    } catch {
+      // silent failure: lead capture must not block the public flow
+    }
 
     return NextResponse.json({ success: true });
   } catch {

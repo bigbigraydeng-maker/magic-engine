@@ -209,13 +209,16 @@ export async function analyzeUploadedReference(
   filePath: string,
   mimeType: string = 'video/mp4',
 ): Promise<void> {
-  const saveError = (msg: string) =>
-    supabaseAdmin
-      .from('viral_reference_library')
-      .update({ analysis_status: 'error', analysis_error: msg })
-      .eq('id', referenceId)
-      .then(() => {})
-      .catch(() => {})
+  const saveError = async (msg: string) => {
+    try {
+      await supabaseAdmin
+        .from('viral_reference_library')
+        .update({ analysis_status: 'error', analysis_error: msg })
+        .eq('id', referenceId)
+    } catch {
+      // best-effort status update
+    }
+  }
 
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {
@@ -363,13 +366,16 @@ async function finalizeAnalysis(
  */
 export async function analyzeViralReference(referenceId: string, url: string): Promise<void> {
   // Helper: always persist errors to DB so UI reflects actual state
-  const saveError = (msg: string) =>
-    supabaseAdmin
-      .from('viral_reference_library')
-      .update({ analysis_status: 'error', analysis_error: msg })
-      .eq('id', referenceId)
-      .then(() => {})
-      .catch(() => {})
+  const saveError = async (msg: string) => {
+    try {
+      await supabaseAdmin
+        .from('viral_reference_library')
+        .update({ analysis_status: 'error', analysis_error: msg })
+        .eq('id', referenceId)
+    } catch {
+      // best-effort status update
+    }
+  }
 
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {

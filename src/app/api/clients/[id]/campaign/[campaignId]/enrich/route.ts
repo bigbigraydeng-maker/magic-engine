@@ -102,7 +102,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
       // Sort by volume desc, keep top 40
       semrush_keywords.push(
-        ...[...byKeyword.values()]
+        ...Array.from(byKeyword.values())
           .sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0))
           .slice(0, 40)
       )

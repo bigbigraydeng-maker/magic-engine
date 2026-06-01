@@ -59,7 +59,9 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   // Fetch a valid OAuth access token for this client.
   let accessToken: string
   try {
-    accessToken = await getValidAccessToken(clientId)
+    const token = await getValidAccessToken(clientId)
+    if (!token) throw new Error('No valid access token')
+    accessToken = token
   } catch {
     // No OAuth connection — guide user to connect.
     const state       = buildState(clientId, 'connect')
