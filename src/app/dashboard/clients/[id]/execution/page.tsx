@@ -638,6 +638,9 @@ function TaskDetailDrawer({
   const [factoryLoading, setFactoryLoading] = useState(false)
   const [factoryResult, setFactoryResult]   = useState<{ successCount: number; packageId: string | null } | null>(null)
   const [factoryError, setFactoryError]     = useState<string | null>(null)
+  // 「存入工作台」补救按钮（方案 A：socialDone 但 content_posts 未入库时使用）
+  const [saveToBoardLoading, setSaveToboardLoading] = useState(false)
+  const [saveToBoard_done, setSaveToBoardDone]      = useState(false)
 
   useEffect(() => { setMounted(true) }, [])
 
@@ -646,7 +649,28 @@ function TaskDetailDrawer({
     setEditingTitle(false)
     setEditingDesc(false)
     setConfirmDelete(false)
+    setSaveToboardLoading(false)
+    setSaveToBoardDone(false)
   }, [item?.id])
+
+  const handleSaveToBoard = useCallback(async () => {
+    if (!item) return
+    setSaveToboardLoading(true)
+    try {
+      // Fetch the most recent social plan for this client
+      const planRes = await fetch(`/api/clients/${clientId}/social-plan`)
+      const planJson = await planRes.json() as { success: boolean; plans?: { id: string }[] }
+      const planId = planJson.plans?.[0]?.id
+      if (!planId) { setSaveToboardLoading(false); return }
+      await fetch(`/api/clients/${clientId}/social-plan/${planId}/save-to-board`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      setSaveToBoardDone(true)
+    } catch { /* non-fatal */ } finally {
+      setSaveToboardLoading(false)
+    }
+  }, [item, clientId])
 
   if (!mounted || !item) return null
 
@@ -868,12 +892,25 @@ function TaskDetailDrawer({
               <div className="w-full rounded-lg border border-green-100 bg-green-50/60 px-3 py-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-black text-green-700 uppercase tracking-wide">已生成</span>
-                  <a
-                    href={`/dashboard/content?client=${clientId}`}
-                    className="text-[11px] font-bold text-cyan-600 hover:text-cyan-800 underline"
-                  >
-                    查看社媒工作台 →
-                  </a>
+                  <div className="flex items-center gap-3">
+                    {!saveToBoard_done ? (
+                      <button
+                        onClick={() => void handleSaveToBoard()}
+                        disabled={saveToBoardLoading}
+                        className="text-[11px] font-bold text-amber-600 hover:text-amber-800 underline disabled:opacity-50"
+                      >
+                        {saveToBoardLoading ? '同步中…' : '存入工作台'}
+                      </button>
+                    ) : (
+                      <span className="text-[11px] font-bold text-green-600">✓ 已同步</span>
+                    )}
+                    <a
+                      href={`/dashboard/content?client=${clientId}`}
+                      className="text-[11px] font-bold text-cyan-600 hover:text-cyan-800 underline"
+                    >
+                      查看社媒工作台 →
+                    </a>
+                  </div>
                 </div>
               </div>
             )
@@ -1811,8 +1848,15 @@ export default function ExecutionPage() {
             ...(params.angle_focus ? { angle_focus: params.angle_focus } : {}),
           }),
         })
-        const json = await res.json() as { success: boolean; error?: string }
+        const json = await res.json() as { success: boolean; plan_id?: string; error?: string }
         if (json.success) {
+          // Save generated plan to content_posts so it appears in Launch Hub
+          if (json.plan_id) {
+            await fetch(`/api/clients/${clientId}/social-plan/${json.plan_id}/save-to-board`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+            }).catch(() => {})
+          }
           await fetch(`/api/clients/${clientId}/execution/${itemId}/log`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
