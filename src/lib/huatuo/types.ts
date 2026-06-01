@@ -142,8 +142,8 @@ export interface HuatuoLookupContext {
  */
 export interface TrendSummaryLite {
   has_data: boolean
-  latest: { month: string; organic_traffic: number; organic_keywords: number } | null
-  earliest: { month: string; organic_traffic: number; organic_keywords: number } | null
+  latest: { month: string; organic_traffic: number } | null
+  earliest: { month: string; organic_traffic: number } | null
   growth_pct_3m: number | null
   growth_pct_6m: number | null
   growth_pct_12m: number | null

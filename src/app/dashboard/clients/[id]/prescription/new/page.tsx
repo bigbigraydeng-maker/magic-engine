@@ -1451,7 +1451,7 @@ function TrendCard({ summary }: { summary: TrendSummaryLite }) {
         />
         <MetricCell
           label="最近关键词数"
-          value={summary.latest?.organic_keywords.toLocaleString() ?? '—'}
+          value="—"
           unit="个"
         />
       </div>
