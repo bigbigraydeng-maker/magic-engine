@@ -1,13 +1,60 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
+import {
+  MePanel,
+  MePill,
+  MeButton,
+  MeChip,
+} from '@/components/ui/me-primitives';
+import { GOLD_GRADIENT, cx } from '@/components/ui/me-theme';
 
 interface Client {
   id: string;
   name: string;
   domain?: string;
   created_at: string;
+  semrush_db?: string;
+  plan_tier?: string;
+}
+
+type FilterKey = 'all' | 'active' | 'onboarding';
+
+// Onboarding cutoff: anyone created within last 7 days = onboarding
+const ONBOARDING_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+function isOnboarding(client: Client): boolean {
+  const ageMs = Date.now() - new Date(client.created_at).getTime();
+  return ageMs < ONBOARDING_WINDOW_MS;
+}
+
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(s => s[0]?.toUpperCase() ?? '')
+    .join('') || 'C';
+}
+
+// Phase tone for a single status pill
+function statusPill(client: Client) {
+  if (isOnboarding(client)) {
+    return { tone: 'exec' as const, label: 'Onboarding' };
+  }
+  return { tone: 'track' as const, label: 'On track' };
+}
+
+// Flywheel mini-progress (4 loops). Demo values until real rollup is wired.
+// TODO: replace with per-client `flywheel_actions` rollup once Phase 12 outcomes view is ready
+function demoFlywheel(_client: Client) {
+  return [
+    { key: 'seo',    label: 'SEO',    pct: 78 },
+    { key: 'geo',    label: 'GEO',    pct: 62 },
+    { key: 'social', label: 'Social', pct: 44 },
+    { key: 'ads',    label: 'Ads',    pct: 28 },
+  ];
 }
 
 export default function ClientsPage() {
@@ -16,6 +63,8 @@ export default function ClientsPage() {
   const [error, setError] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [filter, setFilter] = useState<FilterKey>('all');
+  const [search, setSearch] = useState('');
 
   const fetchClients = useCallback(async () => {
     setLoading(true);
@@ -52,121 +101,306 @@ export default function ClientsPage() {
     }
   };
 
-  const confirmingClient = clients.find(c => c.id === confirmDeleteId);
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return clients.filter(c => {
+      const matchesSearch =
+        !term ||
+        c.name.toLowerCase().includes(term) ||
+        (c.domain ?? '').toLowerCase().includes(term);
+      if (!matchesSearch) return false;
+      if (filter === 'all') return true;
+      const onboarding = isOnboarding(c);
+      if (filter === 'onboarding') return onboarding;
+      return !onboarding;
+    });
+  }, [clients, filter, search]);
+
+  const counts = useMemo(() => {
+    const onboarding = clients.filter(isOnboarding).length;
+    return {
+      all: clients.length,
+      active: clients.length - onboarding,
+      onboarding,
+    };
+  }, [clients]);
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="font-sans">
+      {/* Topbar */}
+      <header className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b border-black/10 bg-[#FBF8F3]/80 px-8 py-5 backdrop-blur-md">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Clients</h1>
-          <p className="text-sm text-gray-500 mt-1">{clients.length} client(s) total</p>
+          <h1 className="font-display text-2xl font-semibold tracking-tight text-me-charcoal">
+            Clients
+          </h1>
+          <p className="mt-[3px] text-[13px] text-black/55">
+            Brand briefs, onboarding and per-client settings
+          </p>
         </div>
-        <Link
-          href="/dashboard/clients/new"
-          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-        >
-          + New Client
-        </Link>
-      </div>
+        <MeButton href="/dashboard/clients/new" size="sm">
+          <span className="text-base leading-none">+</span> Add client
+        </MeButton>
+      </header>
 
-      {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center justify-between">
-          <span>{error}</span>
-          <button onClick={() => setError('')} className="text-red-400 hover:text-red-600 ml-3">✕</button>
-        </div>
-      )}
-
-      {/* Client List */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        {loading ? (
-          <div className="py-12 text-center text-gray-400 text-sm">Loading...</div>
-        ) : clients.length === 0 ? (
-          <div className="py-12 text-center space-y-3">
-            <p className="text-gray-400 text-sm">No clients yet.</p>
-            <Link
-              href="/dashboard/clients/new"
-              className="inline-block text-sm text-indigo-600 hover:text-indigo-800 font-medium underline underline-offset-2"
-            >
-              Add your first client →
-            </Link>
-          </div>
-        ) : (
-          <table className="w-full">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-100">
-                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Name / Domain</th>
-                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Created</th>
-                <th className="px-6 py-3"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {clients.map((client) => (
-                <tr
-                  key={client.id}
-                  className={`transition-colors ${confirmDeleteId === client.id ? 'bg-red-50' : 'hover:bg-gray-50'}`}
+      <div className="px-8 py-7 space-y-6">
+        {/* Toolbar */}
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Segmented tabs */}
+          <div className="inline-flex items-center gap-1 rounded-xl border border-black/10 bg-white p-1 shadow-[0_1px_2px_rgba(26,26,26,.04)]">
+            {[
+              { key: 'all',         label: 'All clients' },
+              { key: 'active',      label: 'Active' },
+              { key: 'onboarding',  label: 'Onboarding' },
+            ].map(tab => {
+              const active = filter === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setFilter(tab.key as FilterKey)}
+                  className={cx(
+                    'rounded-lg px-3.5 py-1.5 text-[12.5px] font-semibold transition',
+                    active
+                      ? 'bg-me-charcoal text-[#FBF8F3]'
+                      : 'text-black/55 hover:bg-me-stone',
+                  )}
                 >
-                  <td className="px-6 py-4">
-                    <p className="text-sm font-medium text-gray-900">{client.name}</p>
-                    {client.domain && (
-                      <a href={`https://${client.domain}`} target="_blank" rel="noreferrer" className="text-xs text-indigo-600 hover:underline">
-                        {client.domain}
-                      </a>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-400">
-                    {new Date(client.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    {confirmDeleteId === client.id ? (
-                      <span className="inline-flex items-center gap-2">
-                        <span className="text-xs text-red-600 font-medium mr-1">Delete &quot;{client.name}&quot;?</span>
+                  {tab.label}
+                  <span className={cx(
+                    'ml-1.5 tabular-nums',
+                    active ? 'text-[#FBF8F3]/65' : 'text-black/35',
+                  )}>
+                    {counts[tab.key as FilterKey]}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Search */}
+          <label className="flex flex-1 min-w-[220px] items-center gap-2 rounded-xl border border-black/10 bg-white px-3.5 py-2 text-[13px] shadow-[0_1px_2px_rgba(26,26,26,.04)] focus-within:border-me-ochre/50">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 text-black/40">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3-3" />
+            </svg>
+            <input
+              type="search"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search clients…"
+              className="flex-1 bg-transparent text-me-charcoal outline-none placeholder:text-black/35"
+            />
+          </label>
+        </div>
+
+        {/* Error banner */}
+        {error && (
+          <div className="flex items-center justify-between rounded-2xl border border-[#C2453A]/30 bg-[#C2453A]/10 px-4 py-3 text-[13px] font-semibold text-[#902F26]">
+            <span>{error}</span>
+            <button
+              onClick={() => setError('')}
+              className="text-[#902F26]/65 hover:text-[#902F26]"
+              type="button"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* Loading state */}
+        {loading ? (
+          <MePanel>
+            <div className="py-10 text-center text-[13px] text-black/40">Loading clients…</div>
+          </MePanel>
+        ) : filtered.length === 0 ? (
+          /* Empty state */
+          <MePanel>
+            <div className="space-y-3 py-10 text-center">
+              <p className="text-[13.5px] text-black/55">
+                {clients.length === 0
+                  ? 'No clients yet.'
+                  : 'No clients match your filters.'}
+              </p>
+              {clients.length === 0 ? (
+                <MeButton href="/dashboard/clients/new" size="sm">
+                  Add your first client →
+                </MeButton>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => { setFilter('all'); setSearch(''); }}
+                  className="text-[13px] font-semibold text-me-ochre hover:underline"
+                >
+                  Reset filters
+                </button>
+              )}
+            </div>
+          </MePanel>
+        ) : (
+          /* Client cards grid */
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            {filtered.map(client => {
+              const pill = statusPill(client);
+              const flywheel = demoFlywheel(client);
+              const confirming = confirmDeleteId === client.id;
+
+              return (
+                <MePanel
+                  key={client.id}
+                  className={cx(confirming && 'ring-2 ring-[#C2453A]/30')}
+                >
+                  {/* Header row: avatar + name + status pill */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3.5">
+                      <span
+                        className="grid h-12 w-12 flex-none place-items-center rounded-xl font-display text-[15px] font-bold text-[#2A2008]"
+                        style={{ background: GOLD_GRADIENT }}
+                      >
+                        {initials(client.name)}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="font-display text-[17px] font-semibold tracking-tight text-me-charcoal truncate">
+                          {client.name}
+                        </div>
+                        {client.domain ? (
+                          <a
+                            href={`https://${client.domain}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-0.5 inline-block text-[12.5px] text-me-ochre hover:underline truncate"
+                          >
+                            {client.domain}
+                          </a>
+                        ) : (
+                          <span className="mt-0.5 block text-[12.5px] text-black/40">
+                            No domain set
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <MePill tone={pill.tone}>{pill.label}</MePill>
+                  </div>
+
+                  {/* Channel chips */}
+                  <div className="mt-4 flex flex-wrap gap-1.5">
+                    <MeChip gold>SEO</MeChip>
+                    <MeChip gold>GEO</MeChip>
+                    <MeChip>Social</MeChip>
+                    <MeChip>Ads</MeChip>
+                  </div>
+
+                  {/* Flywheel mini bars */}
+                  <div className="mt-5 grid grid-cols-2 gap-x-5 gap-y-3 sm:grid-cols-4">
+                    {flywheel.map(loop => (
+                      <div key={loop.key} className="space-y-1.5">
+                        <div className="flex items-baseline justify-between">
+                          <span className="text-[11.5px] font-semibold text-black/55">{loop.label}</span>
+                          <span className="font-display text-[12px] font-bold tabular-nums text-black/70">
+                            {loop.pct}%
+                          </span>
+                        </div>
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-me-stone">
+                          <div
+                            className="h-full rounded-full"
+                            style={{ width: `${loop.pct}%`, background: GOLD_GRADIENT }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Footer actions */}
+                  <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-black/[.06] pt-4">
+                    {confirming ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[12px] font-semibold text-[#C2453A]">
+                          Delete &quot;{client.name}&quot;?
+                        </span>
                         <button
+                          type="button"
                           onClick={() => handleDelete(client.id)}
                           disabled={deleting}
-                          className="text-xs bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white px-3 py-1 rounded font-medium transition-colors"
+                          className="rounded-lg bg-[#C2453A] px-3 py-1.5 text-[12px] font-semibold text-white transition hover:bg-[#A53127] disabled:cursor-wait disabled:opacity-60"
                         >
                           {deleting ? 'Deleting…' : 'Yes, delete'}
                         </button>
                         <button
+                          type="button"
                           onClick={() => setConfirmDeleteId(null)}
                           disabled={deleting}
-                          className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 rounded border border-gray-200 transition-colors"
+                          className="rounded-lg border border-black/15 px-3 py-1.5 text-[12px] font-semibold text-black/55 transition hover:bg-me-stone disabled:opacity-60"
                         >
                           Cancel
                         </button>
-                      </span>
+                      </div>
                     ) : (
-                      <span className="inline-flex items-center gap-4">
-                        <Link
-                          href={`/dashboard/clients/${client.id}`}
-                          className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
-                        >
-                          View →
-                        </Link>
-                        <button
-                          onClick={() => setConfirmDeleteId(client.id)}
-                          className="text-xs text-gray-400 hover:text-red-500 transition-colors"
-                          title="Delete client"
-                        >
-                          🗑
-                        </button>
-                      </span>
+                      <>
+                        <div className="flex flex-wrap gap-2">
+                          <MeButton href={`/dashboard/clients/${client.id}/brief`} size="sm">
+                            Open brand brief
+                          </MeButton>
+                          <MeButton
+                            href={`/portal/${client.id}`}
+                            size="sm"
+                            variant="ghost"
+                          >
+                            View portal
+                          </MeButton>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Link
+                            href={`/dashboard/clients/${client.id}`}
+                            className="text-[12.5px] font-semibold text-me-ochre hover:underline"
+                          >
+                            Open →
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(client.id)}
+                            className="text-[15px] text-black/30 transition hover:text-[#C2453A]"
+                            title="Delete client"
+                          >
+                            🗑
+                          </button>
+                        </div>
+                      </>
                     )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                </MePanel>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Onboarding CTA — keeps the design's "5 minutes" hook */}
+        {!loading && clients.length > 0 && (
+          <MePanel className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <span className="grid h-11 w-11 flex-none place-items-center rounded-xl bg-me-stone text-2xl text-me-ochre">
+                +
+              </span>
+              <div>
+                <p className="font-display text-[15px] font-semibold text-me-charcoal">
+                  Onboard a new client in 5 minutes
+                </p>
+                <p className="mt-1 text-[12.5px] text-black/55">
+                  Paste a website + industry — Magic Engine scans it and drafts a brand brief v1.
+                </p>
+              </div>
+            </div>
+            <MeButton href="/dashboard/clients/new" variant="secondary" size="sm">
+              Start onboarding
+            </MeButton>
+          </MePanel>
+        )}
+
+        {/* Safety note */}
+        {!loading && clients.length > 0 && (
+          <p className="text-[11.5px] text-black/40">
+            Deleting a client removes all associated data — briefs, content, and visibility runs.
+          </p>
         )}
       </div>
-
-      {/* Safety note */}
-      {clients.length > 0 && (
-        <p className="text-xs text-gray-400">
-          Deleting a client removes all associated data including briefs, content, and visibility runs.
-        </p>
-      )}
     </div>
   );
 }

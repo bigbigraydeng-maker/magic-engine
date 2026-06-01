@@ -1,384 +1,542 @@
 import { supabaseAdmin } from '@/lib/supabase';
 import Link from 'next/link';
+import {
+  MePanel,
+  MePanelHeader,
+  MeStatCard,
+  MePill,
+  MeTrend,
+  MeButton,
+  MeChip,
+} from '@/components/ui/me-primitives';
+import { GOLD_GRADIENT } from '@/components/ui/me-theme';
 
 export const dynamic = 'force-dynamic';
 
-interface ClientRow {
+interface RecentPost {
   id: string;
-  name: string;
-  diag: {
-    overall_score: number | null;
-    critical_count: number;
-    high_count: number;
-    completed_at: string | null;
-  } | null;
+  title: string | null;
+  status: string | null;
+  route: string | null;
+  platforms: string[] | null;
+  created_at: string;
+  client_id: string;
+  clients?: { id: string; name: string } | null;
 }
 
-async function getDashboardData() {
+interface ClientLite {
+  id: string;
+  name: string;
+}
+
+async function getOverviewData() {
   const now = new Date();
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
 
   const [
-    reviewCountRes,
-    pendingExecRes,
-    publishQueueRes,
-    pipelineRes,
-    flywheelRes,
     clientsRes,
-    newLeadsRes,
-    latestDiagRes,
+    recentPostsRes,
+    contentInFlightRes,
+    contentThisMonthRes,
+    pendingReviewRes,
+    flywheelRes,
+    keywordRes,
   ] = await Promise.all([
+    supabaseAdmin
+      .from('clients')
+      .select('id, name, created_at')
+      .order('created_at', { ascending: false }),
+
+    supabaseAdmin
+      .from('content_posts')
+      .select('id, title, status, route, platforms, created_at, client_id, clients(id, name)')
+      .order('created_at', { ascending: false })
+      .limit(6),
+
+    supabaseAdmin
+      .from('content_posts')
+      .select('*', { count: 'exact', head: true })
+      .in('status', ['draft', 'generating', 'pending_review']),
+
+    supabaseAdmin
+      .from('content_posts')
+      .select('*', { count: 'exact', head: true })
+      .gte('created_at', thirtyDaysAgo),
+
     supabaseAdmin
       .from('production_packages')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'ready_for_review'),
 
     supabaseAdmin
-      .from('execution_items')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'pending'),
-
-    supabaseAdmin
-      .from('website_publish_jobs')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'draft'),
-
-    supabaseAdmin
-      .from('production_packages')
-      .select('status')
-      .gte('created_at', thirtyDaysAgo),
-
-    supabaseAdmin
       .from('flywheel_actions')
-      .select('flywheel')
+      .select('flywheel, executed_at')
       .gte('executed_at', sevenDaysAgo),
 
     supabaseAdmin
-      .from('clients')
-      .select('id, name')
-      .order('name'),
-
-    supabaseAdmin
-      .from('discovery_leads')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'new')
-      .gte('created_at', thirtyDaysAgo),
-
-    supabaseAdmin
-      .from('diagnostic_runs')
-      .select('client_id, overall_score, critical_count, high_count, completed_at')
-      .eq('status', 'completed')
-      .order('completed_at', { ascending: false })
-      .limit(200),
+      .from('keyword_intelligence_runs')
+      .select('*', { count: 'exact', head: true }),
   ]);
 
-  const pipelineCounts: Record<string, number> = {};
-  for (const pkg of pipelineRes.data ?? []) {
-    const s = (pkg as { status: string }).status;
-    pipelineCounts[s] = (pipelineCounts[s] ?? 0) + 1;
-  }
+  const clients: ClientLite[] = (clientsRes.data ?? []).map(c => ({
+    id: c.id as string,
+    name: c.name as string,
+  }));
+  const activeClients = clients.slice(0, 6);
 
+  // Flywheel loop progress (per loop) — last 7 days
   const flywheelCounts: Record<string, number> = { seo: 0, geo: 0, ads: 0, social: 0 };
   for (const action of flywheelRes.data ?? []) {
-    const k = (action as { flywheel: string }).flywheel;
-    flywheelCounts[k] = (flywheelCounts[k] ?? 0) + 1;
+    const key = (action as { flywheel: string }).flywheel;
+    if (key in flywheelCounts) flywheelCounts[key] = (flywheelCounts[key] ?? 0) + 1;
   }
 
-  type DiagRow = { client_id: string; overall_score: number | null; critical_count: number; high_count: number; completed_at: string | null };
-  const latestDiagByClient = new Map<string, DiagRow>();
-  for (const run of (latestDiagRes.data ?? []) as DiagRow[]) {
-    if (!latestDiagByClient.has(run.client_id)) {
-      latestDiagByClient.set(run.client_id, run);
-    }
-  }
+  // Mini flywheel — diagnose/prioritise/execute/measure as a rough phase proxy
+  const totalFlywheel = Object.values(flywheelCounts).reduce((a, b) => a + b, 0);
 
-  type ClientData = { id: string; name: string };
-  const clientRoster: ClientRow[] = (clientsRes.data ?? []).map((c: ClientData) => {
-    const d = latestDiagByClient.get(c.id) ?? null;
-    return {
-      id: c.id,
-      name: c.name,
-      diag: d ? {
-        overall_score: d.overall_score,
-        critical_count: d.critical_count,
-        high_count: d.high_count,
-        completed_at: d.completed_at,
-      } : null,
-    };
-  });
-
-  let totalCritical = 0;
-  let totalHigh = 0;
-  for (const run of Array.from(latestDiagByClient.values())) {
-    totalCritical += run.critical_count;
-    totalHigh += run.high_count;
-  }
+  const recentPosts: RecentPost[] = ((recentPostsRes.data as unknown) as RecentPost[]) ?? [];
 
   return {
-    reviewCount: reviewCountRes.count ?? 0,
-    pendingExec: pendingExecRes.count ?? 0,
-    publishQueue: publishQueueRes.count ?? 0,
-    pipelineCounts,
+    activeClientCount: clients.length,
+    activeClients,
+    contentInFlight: contentInFlightRes.count ?? 0,
+    contentThisMonth: contentThisMonthRes.count ?? 0,
+    pendingReview: pendingReviewRes.count ?? 0,
+    keywordCount: keywordRes.count ?? 0,
     flywheelCounts,
-    clientRoster,
-    newLeads: newLeadsRes.count ?? 0,
-    totalCritical,
-    totalHigh,
-    totalClients: (clientsRes.data ?? []).length,
+    totalFlywheel,
+    recentPosts,
+    oneDayAgo,
   };
 }
 
-function ScoreBadge({ score }: { score: number | null }) {
-  if (score === null) {
-    return <span className="text-xs text-gray-300 font-mono">—</span>;
+// Status → tone mapping
+type Tone = 'track' | 'exec' | 'attn' | 'sched' | 'rej';
+function statusTone(status: string | null | undefined): Tone {
+  switch (status) {
+    case 'approved':
+    case 'published':
+    case 'scheduled':
+      return 'track';
+    case 'draft':
+    case 'generating':
+    case 'pending_review':
+      return 'exec';
+    case 'rejected':
+    case 'failed':
+      return 'rej';
+    default:
+      return 'attn';
   }
-  const cls =
-    score >= 80 ? 'bg-emerald-100 text-emerald-700' :
-    score >= 60 ? 'bg-yellow-100 text-yellow-700' :
-    score >= 40 ? 'bg-orange-100 text-orange-700' :
-    'bg-red-100 text-red-700';
-  return (
-    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full tabular-nums ${cls}`}>
-      {score}
-    </span>
-  );
 }
 
-const PIPELINE_STAGES = [
-  { key: 'draft',            label: 'Draft',           bar: 'bg-gray-300' },
-  { key: 'generating',       label: 'Generating',      bar: 'bg-blue-400' },
-  { key: 'ready_for_review', label: 'Awaiting Review', bar: 'bg-yellow-400' },
-  { key: 'approved',         label: 'Approved',        bar: 'bg-emerald-400' },
-  { key: 'published',        label: 'Published',       bar: 'bg-indigo-500' },
-  { key: 'failed',           label: 'Failed',          bar: 'bg-red-400' },
-];
+function statusLabel(status: string | null | undefined): string {
+  if (!status) return 'unknown';
+  return status.replace(/_/g, ' ');
+}
 
-const FLYWHEELS = [
-  { key: 'seo',    label: 'SEO',    bar: 'bg-blue-500' },
-  { key: 'geo',    label: 'GEO',    bar: 'bg-violet-500' },
-  { key: 'ads',    label: 'Ads',    bar: 'bg-orange-500' },
-  { key: 'social', label: 'Social', bar: 'bg-pink-500' },
-];
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-AU', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  });
+}
+
+const FLYWHEEL_PHASES = [
+  { key: 'diagnose',   label: 'Diagnose',   pct: 100 },
+  { key: 'prioritise', label: 'Prioritise', pct: 86 },
+  { key: 'execute',    label: 'Execute',    pct: 64 },
+  { key: 'measure',    label: 'Measure',    pct: 38 },
+] as const;
+
+// TODO: wire AI visibility data from /api/clients/[id]/visibility once implemented
+const AI_VISIBILITY_DEMO = {
+  livePercent: 72,
+  monthlyChange: '+23% MoM',
+  engines: [
+    { id: 'GPT', name: 'ChatGPT',    rank: '#2', dir: 'up' as const,   tone: 'track' as Tone },
+    { id: 'CL',  name: 'Claude',     rank: '#3', dir: 'up' as const,   tone: 'track' as Tone },
+    { id: 'PX',  name: 'Perplexity', rank: '#5', dir: 'flat' as const, tone: 'exec'  as Tone },
+    { id: 'AIO', name: 'Google AIO', rank: '#9', dir: 'down' as const, tone: 'attn'  as Tone },
+  ],
+};
 
 export default async function OverviewPage() {
-  const data = await getDashboardData();
+  const data = await getOverviewData();
   const {
-    reviewCount, pendingExec, publishQueue,
-    pipelineCounts, flywheelCounts, clientRoster,
-    newLeads, totalCritical, totalHigh, totalClients,
+    activeClientCount,
+    activeClients,
+    contentInFlight,
+    pendingReview,
+    keywordCount,
+    flywheelCounts,
+    totalFlywheel,
+    recentPosts,
   } = data;
 
-  const pipelineTotal = Object.values(pipelineCounts).reduce((a, b) => a + b, 0);
-  const maxFlywheel = Math.max(...Object.values(flywheelCounts), 1);
-  const today = new Date().toLocaleDateString('en-AU', {
-    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-  });
-
-  const attentionCards = [
-    {
-      value: totalCritical + totalHigh,
-      label: 'Open Findings',
-      sub: totalCritical > 0 ? `${totalCritical} critical` : `${totalHigh} high`,
-      href: '/dashboard/clients',
-      urgent: totalCritical > 0,
-      activeClass: 'border-red-300 bg-red-50',
-      numClass: 'text-red-600',
-    },
-    {
-      value: reviewCount,
-      label: 'Awaiting Review',
-      sub: 'content packages',
-      href: '/dashboard/content',
-      urgent: reviewCount > 5,
-      activeClass: 'border-yellow-300 bg-yellow-50',
-      numClass: 'text-yellow-600',
-    },
-    {
-      value: pendingExec,
-      label: 'Pending Executions',
-      sub: 'across all clients',
-      href: '/dashboard/clients',
-      urgent: pendingExec > 10,
-      activeClass: 'border-orange-300 bg-orange-50',
-      numClass: 'text-orange-600',
-    },
-    {
-      value: newLeads,
-      label: 'New Leads',
-      sub: 'last 30 days',
-      href: '/dashboard/admin/prospects',
-      urgent: newLeads > 0,
-      activeClass: 'border-blue-300 bg-blue-50',
-      numClass: 'text-blue-600',
-    },
-  ];
+  // Loop progress rough estimate: how many flywheels have produced actions this week
+  const liveLoops = Object.values(flywheelCounts).filter(n => n > 0).length;
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-end justify-between">
+    <div className="font-sans">
+      {/* Topbar */}
+      <header className="sticky top-0 z-20 flex items-center justify-between gap-5 border-b border-black/10 bg-[#FBF8F3]/80 px-8 py-5 backdrop-blur-md">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Command Center</h1>
-          <p className="text-xs text-gray-400 mt-0.5">{today}</p>
+          <h1 className="font-display text-2xl font-semibold tracking-tight text-me-charcoal">
+            Overview
+          </h1>
+          <p className="mt-[3px] text-[13px] text-black/55">
+            Magic Engine admin · execution &amp; visibility across all clients
+          </p>
         </div>
-        <span className="text-xs text-gray-400">{totalClients} clients total</span>
-      </div>
+        <div className="hidden items-center gap-3 md:flex">
+          <MePill tone="track">{activeClientCount} clients</MePill>
+        </div>
+      </header>
 
-      {/* Needs Attention */}
-      <section>
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Needs Attention</p>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {attentionCards.map(card => (
-            <Link key={card.label} href={card.href}>
-              <div className={`rounded-lg border p-4 hover:shadow-sm transition-shadow cursor-pointer ${
-                card.urgent ? card.activeClass : 'border-gray-200 bg-white'
-              }`}>
-                <div className={`text-3xl font-bold tabular-nums ${card.urgent ? card.numClass : 'text-gray-400'}`}>
-                  {card.value}
-                </div>
-                <div className="text-xs font-medium text-gray-700 mt-1.5">{card.label}</div>
-                <div className="text-xs text-gray-400 mt-0.5">{card.sub}</div>
-              </div>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      {/* Pipeline + Flywheel */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-        <div className="lg:col-span-3 bg-white border border-gray-200 rounded-lg p-5">
-          <div className="flex items-baseline justify-between mb-4">
-            <h2 className="text-sm font-semibold text-gray-700">Production Pipeline</h2>
-            <span className="text-xs text-gray-400">{pipelineTotal} packages · 30 days</span>
-          </div>
-          <div className="space-y-2.5">
-            {PIPELINE_STAGES.map(stage => {
-              const count = pipelineCounts[stage.key] ?? 0;
-              const pct = pipelineTotal === 0 ? 0 : (count / pipelineTotal) * 100;
-              return (
-                <div key={stage.key} className="flex items-center gap-3">
-                  <div className="w-28 text-right text-xs text-gray-400 shrink-0">{stage.label}</div>
-                  <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
-                    <div
-                      className={`${stage.bar} h-2 rounded-full transition-all`}
-                      style={{ width: count === 0 ? '0%' : `${Math.max(pct, 3)}%` }}
-                    />
-                  </div>
-                  <div className="w-6 text-right text-xs font-medium text-gray-600 shrink-0 tabular-nums">
-                    {count}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="lg:col-span-2 bg-white border border-gray-200 rounded-lg p-5">
-          <div className="flex items-baseline justify-between mb-4">
-            <h2 className="text-sm font-semibold text-gray-700">Flywheel Activity</h2>
-            <span className="text-xs text-gray-400">last 7 days</span>
-          </div>
-          <div className="space-y-3.5">
-            {FLYWHEELS.map(f => {
-              const count = flywheelCounts[f.key] ?? 0;
-              const pct = count === 0 ? 0 : Math.max((count / maxFlywheel) * 100, 5);
-              return (
-                <div key={f.key} className="flex items-center gap-3">
-                  <div className="w-10 text-xs text-gray-500 font-medium">{f.label}</div>
-                  <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
-                    <div className={`${f.bar} h-2 rounded-full`} style={{ width: `${pct}%` }} />
-                  </div>
-                  <div className="w-5 text-right text-xs font-medium text-gray-600 tabular-nums">{count}</div>
-                </div>
-              );
-            })}
-          </div>
-          {publishQueue > 0 && (
-            <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between">
-              <span className="text-xs text-gray-500">Publish queue</span>
-              <span className="text-xs font-semibold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">
-                {publishQueue} queued
-              </span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Client Roster */}
-      <section>
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Client Roster</p>
-          <Link href="/dashboard/clients" className="text-xs text-indigo-600 hover:underline">
-            All clients →
-          </Link>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-100">
-                <th className="text-left text-xs font-medium text-gray-400 px-4 py-2.5">Client</th>
-                <th className="text-center text-xs font-medium text-gray-400 px-3 py-2.5">Score</th>
-                <th className="text-center text-xs font-medium text-gray-400 px-3 py-2.5">Issues</th>
-                <th className="text-left text-xs font-medium text-gray-400 px-3 py-2.5">Last Diagnostic</th>
-                <th className="px-4 py-2.5" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {clientRoster.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-xs text-gray-400">
-                    No clients yet.{' '}
-                    <Link href="/dashboard/clients/new" className="text-indigo-600 hover:underline">
-                      Add one
-                    </Link>
-                  </td>
-                </tr>
+      <div className="px-8 py-7 space-y-6">
+        {/* 4-up StatCards */}
+        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <MeStatCard
+            value={activeClientCount}
+            label="Active clients"
+            tone="stone"
+            icon={
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-[18px] w-[18px]">
+                <circle cx="9" cy="8" r="3.2" />
+                <path d="M3.5 20a5.5 5.5 0 0 1 11 0" />
+                <circle cx="17" cy="8" r="2.6" opacity=".5" />
+              </svg>
+            }
+            footer={
+              activeClients.length > 0 ? (
+                <span className="text-[11.5px] text-black/55">
+                  {activeClients.slice(0, 3).map(c => c.name).join(' · ')}
+                  {activeClients.length > 3 ? ` · +${activeClients.length - 3}` : ''}
+                </span>
               ) : (
-                clientRoster.map(c => (
-                  <tr key={c.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900">{c.name}</td>
-                    <td className="px-3 py-3 text-center">
-                      <ScoreBadge score={c.diag?.overall_score ?? null} />
-                    </td>
-                    <td className="px-3 py-3 text-center">
-                      {c.diag ? (
-                        <span className="text-xs">
-                          {c.diag.critical_count > 0 && (
-                            <span className="text-red-600 font-semibold">{c.diag.critical_count}C </span>
-                          )}
-                          {c.diag.high_count > 0 && (
-                            <span className="text-orange-600 font-semibold">{c.diag.high_count}H</span>
-                          )}
-                          {c.diag.critical_count === 0 && c.diag.high_count === 0 && (
-                            <span className="text-gray-300">—</span>
-                          )}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-300">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 text-xs text-gray-400">
-                      {c.diag?.completed_at
-                        ? new Date(c.diag.completed_at).toLocaleDateString('en-AU', {
-                            day: 'numeric', month: 'short', year: 'numeric',
-                          })
-                        : 'Never run'}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <Link
-                        href={`/dashboard/clients/${c.id}/diagnostic`}
-                        className="text-xs text-indigo-600 hover:underline"
+                <span className="text-[11.5px] text-black/40">No clients yet</span>
+              )
+            }
+          />
+          <MeStatCard
+            value={contentInFlight}
+            label="Content in flight"
+            tone="ochre"
+            icon={
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-[18px] w-[18px]">
+                <rect x="4" y="3" width="16" height="18" rx="2" />
+                <path d="M8 8h8M8 12h8M8 16h5" />
+              </svg>
+            }
+            footer={
+              <MeTrend dir="up">
+                {pendingReview} awaiting review
+              </MeTrend>
+            }
+          />
+          <MeStatCard
+            value={`${AI_VISIBILITY_DEMO.livePercent}%`}
+            label="AI-visibility index"
+            tone="ochre"
+            goldValue
+            icon={
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-[18px] w-[18px]">
+                <path d="M3 17l5-5 4 3 6-7" />
+                <path d="M3 21h18" />
+              </svg>
+            }
+            footer={
+              <MeTrend dir="up">{AI_VISIBILITY_DEMO.monthlyChange}</MeTrend>
+            }
+          />
+          <MeStatCard
+            value={liveLoops > 0 ? `${liveLoops}/4` : '0/4'}
+            label="Loop progress"
+            tone="track"
+            icon={
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-[18px] w-[18px]">
+                <path d="M21 12a9 9 0 1 1-3-6.7" />
+                <path d="M21 4v5h-5" />
+              </svg>
+            }
+            footer={
+              <span className="text-[11.5px] text-black/55">
+                {totalFlywheel} actions · last 7 days
+              </span>
+            }
+          />
+        </section>
+
+        {/* Recent content + Mini flywheel  /  AI Visibility */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+          {/* Recent content + Mini flywheel */}
+          <MePanel className="lg:col-span-3 space-y-6">
+            <div>
+              <MePanelHeader
+                title="Recent content"
+                right={
+                  <Link
+                    href="/dashboard/visuals"
+                    className="text-[12.5px] font-semibold text-me-ochre hover:underline"
+                  >
+                    View all →
+                  </Link>
+                }
+              />
+              <div className="divide-y divide-black/[.06]">
+                {recentPosts.length === 0 ? (
+                  <div className="py-8 text-center text-[13px] text-black/40">
+                    No content yet. Get started from the{' '}
+                    <Link href="/dashboard/clients" className="font-semibold text-me-ochre hover:underline">
+                      Clients
+                    </Link>{' '}
+                    page.
+                  </div>
+                ) : (
+                  recentPosts.slice(0, 5).map(post => {
+                    const clientName = post.clients?.name ?? '—';
+                    const platforms = (post.platforms ?? []).join(' · ') || 'Multi-channel';
+                    return (
+                      <div
+                        key={post.id}
+                        className="flex items-center justify-between gap-4 py-[14px] first:pt-0 last:pb-0"
                       >
-                        Diagnose →
-                      </Link>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                        <div className="min-w-0">
+                          <div className="font-display text-[14.5px] font-semibold tracking-tight text-me-charcoal line-clamp-1">
+                            {post.title ?? 'Untitled post'}
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-black/55">
+                            <span>{clientName}</span>
+                            <span className="text-black/20">·</span>
+                            <span>{post.route ?? 'Free topic'}</span>
+                            <span className="text-black/20">·</span>
+                            <span>{platforms}</span>
+                          </div>
+                        </div>
+                        <div className="flex flex-none flex-col items-end gap-1.5">
+                          <MePill tone={statusTone(post.status)}>{statusLabel(post.status)}</MePill>
+                          <span className="text-[11.5px] text-black/40 tabular-nums">
+                            {formatDate(post.created_at)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Mini flywheel */}
+            <div className="border-t border-black/[.06] pt-5">
+              <MePanelHeader
+                title="Execution flywheel"
+                right={<MePill tone="exec">{liveLoops || totalFlywheel ? `${liveLoops} active loops` : 'No loops yet'}</MePill>}
+              />
+              <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
+                {FLYWHEEL_PHASES.map(phase => (
+                  <div key={phase.key} className="space-y-2">
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-[12.5px] font-semibold text-black/65">{phase.label}</span>
+                      <span className="font-display text-[13px] font-bold tabular-nums text-me-charcoal">
+                        {phase.pct}%
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-me-stone">
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: `${phase.pct}%`, background: GOLD_GRADIENT }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-3 text-[11.5px] text-black/40">
+                {/* TODO: wire real per-phase progress once `flywheel_outcomes` rollup is ready */}
+                Demo progress — rollup view coming from flywheel outcomes.
+              </p>
+            </div>
+          </MePanel>
+
+          {/* AI Visibility (donut + engine list) */}
+          <MePanel className="lg:col-span-2">
+            <MePanelHeader
+              title="AI visibility"
+              right={<MePill tone="track">{AI_VISIBILITY_DEMO.monthlyChange}</MePill>}
+            />
+
+            {/* Donut */}
+            <div className="flex items-center gap-5 pt-1">
+              <svg viewBox="0 0 42 42" className="h-[110px] w-[110px] flex-none">
+                <defs>
+                  <linearGradient id="me-dash-gold" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#EBCB8B" />
+                    <stop offset="55%" stopColor="#C4912E" />
+                    <stop offset="100%" stopColor="#A6781F" />
+                  </linearGradient>
+                </defs>
+                <circle cx="21" cy="21" r="15.9" fill="none" stroke="#EAE6DF" strokeWidth="5" />
+                <circle
+                  cx="21"
+                  cy="21"
+                  r="15.9"
+                  fill="none"
+                  stroke="url(#me-dash-gold)"
+                  strokeWidth="5"
+                  strokeLinecap="round"
+                  strokeDasharray={`${AI_VISIBILITY_DEMO.livePercent} 100`}
+                  transform="rotate(-90 21 21)"
+                />
+              </svg>
+              <div>
+                <div
+                  className="font-display text-4xl font-bold tabular-nums leading-none"
+                  style={{
+                    backgroundImage: GOLD_GRADIENT,
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                  }}
+                >
+                  {AI_VISIBILITY_DEMO.livePercent}%
+                </div>
+                <p className="mt-1.5 text-[12px] leading-snug text-black/55">
+                  of buildable
+                  <br />
+                  opportunities live
+                </p>
+              </div>
+            </div>
+
+            {/* Engines */}
+            <div className="mt-5 divide-y divide-black/[.06]">
+              {AI_VISIBILITY_DEMO.engines.map(engine => (
+                <div key={engine.id} className="flex items-center justify-between py-[11px]">
+                  <div className="flex items-center gap-2.5">
+                    <span className="grid h-7 w-7 place-items-center rounded-md bg-me-stone text-[10px] font-black text-black/60">
+                      {engine.id}
+                    </span>
+                    <span className="text-[13.5px] font-semibold text-me-charcoal">{engine.name}</span>
+                  </div>
+                  <MeTrend dir={engine.dir}>{engine.rank}</MeTrend>
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 text-[11.5px] text-black/40">
+              {/* TODO: wire real AI visibility ranks from ai_visibility_runs */}
+              Demo data — connecting to AI Tracker.
+            </p>
+          </MePanel>
         </div>
-      </section>
+
+        {/* 3-up Quick Actions */}
+        <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <Link
+            href="/dashboard/clients"
+            className="group rounded-[24px] p-5 transition hover:-translate-y-[1px]"
+            style={{ background: GOLD_GRADIENT, boxShadow: '0 18px 50px rgba(196,145,46,.22)' }}
+          >
+            <div className="flex items-start gap-4">
+              <div className="grid h-11 w-11 flex-none place-items-center rounded-xl bg-black/15 text-[#2A2008]">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+                  <path d="M13 2 4 14h7l-1 8 9-12h-7z" />
+                </svg>
+              </div>
+              <div className="min-w-0">
+                <h4 className="font-display text-[16px] font-bold text-[#2A2008]">Generate content</h4>
+                <p className="mt-1 text-[12.5px] text-[#2A2008]/75">
+                  Route A / B / C · campaign or free topic
+                </p>
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            href="/dashboard/clients"
+            className="group rounded-[24px] border border-black/10 bg-white p-5 shadow-card transition hover:-translate-y-[1px]"
+          >
+            <div className="flex items-start gap-4">
+              <div className="grid h-11 w-11 flex-none place-items-center rounded-xl bg-me-ochre/12 text-me-ochre">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="m20 20-3-3" />
+                </svg>
+              </div>
+              <div className="min-w-0">
+                <h4 className="font-display text-[16px] font-bold text-me-charcoal">Fetch keywords</h4>
+                <p className="mt-1 text-[12.5px] text-black/55">
+                  Pull fresh AU / NZ keyword data
+                  {keywordCount > 0 && (
+                    <span className="ml-1 text-black/35">· {keywordCount} runs total</span>
+                  )}
+                </p>
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            href="/dashboard/visuals"
+            className="group rounded-[24px] border border-black/10 bg-white p-5 shadow-card transition hover:-translate-y-[1px]"
+          >
+            <div className="flex items-start gap-4">
+              <div className="grid h-11 w-11 flex-none place-items-center rounded-xl bg-me-ochre/12 text-me-ochre">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <circle cx="8.5" cy="9" r="1.8" />
+                  <path d="m4 17 5-4 5 3 6-5" />
+                </svg>
+              </div>
+              <div className="min-w-0">
+                <h4 className="font-display text-[16px] font-bold text-me-charcoal">Generate visuals</h4>
+                <p className="mt-1 text-[12.5px] text-black/55">
+                  AI images &amp; video for the next batch
+                </p>
+              </div>
+            </div>
+          </Link>
+        </section>
+
+        {/* Quick chips footer — keeps inventory tags discoverable */}
+        {activeClients.length > 0 && (
+          <section>
+            <p className="mb-2 text-[10.5px] font-black uppercase tracking-[.16em] text-black/40">
+              Jump to a client
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {activeClients.map(c => (
+                <Link key={c.id} href={`/dashboard/clients/${c.id}`}>
+                  <MeChip>{c.name}</MeChip>
+                </Link>
+              ))}
+              <Link href="/dashboard/clients">
+                <MeChip gold>All clients →</MeChip>
+              </Link>
+            </div>
+          </section>
+        )}
+
+        {/* Bottom CTA when no clients */}
+        {activeClients.length === 0 && (
+          <MePanel className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <span className="grid h-11 w-11 place-items-center rounded-xl bg-me-stone text-2xl text-me-ochre">
+                +
+              </span>
+              <div>
+                <p className="font-display text-[15px] font-semibold text-me-charcoal">
+                  Onboard your first client in 5 minutes
+                </p>
+                <p className="mt-1 text-[12.5px] text-black/55">
+                  Paste a website + industry — Magic Engine drafts a brand brief v1.
+                </p>
+              </div>
+            </div>
+            <MeButton href="/dashboard/clients" size="sm">Start onboarding</MeButton>
+          </MePanel>
+        )}
+      </div>
     </div>
   );
 }
