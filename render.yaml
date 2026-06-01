@@ -87,15 +87,10 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://$RENDER_EXTERNAL_URL/api/cron/poll-visual-jobs
+        https://app.magicengine.com.au/api/cron/poll-visual-jobs
     envVars:
       - key: CRON_SECRET
         sync: false
-      - key: RENDER_EXTERNAL_URL
-        fromService:
-          type: web
-          name: magic-engine
-          property: host
 
   # Site Audit job maintenance (cleanup, watchdog, recovery)
   # Runs daily at 2 AM UTC (~2 PM NZST)
@@ -111,15 +106,10 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -X POST -H "x-cron-secret: $CRON_SECRET" \
-        https://$RENDER_EXTERNAL_URL/api/cron/site-audit-jobs
+        https://app.magicengine.com.au/api/cron/site-audit-jobs
     envVars:
       - key: CRON_SECRET
         sync: false
-      - key: RENDER_EXTERNAL_URL
-        fromService:
-          type: web
-          name: magic-engine
-          property: host
 
   # Flywheel attribution job — every 6 hours
   # Computes baseline/after/verdict for every flywheel_action with an expected_metric.
@@ -131,15 +121,10 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -X POST -H "Authorization: Bearer $CRON_SECRET" \
-        https://$RENDER_EXTERNAL_URL/api/cron/attribution
+        https://app.magicengine.com.au/api/cron/attribution
     envVars:
       - key: CRON_SECRET
         sync: false
-      - key: RENDER_EXTERNAL_URL
-        fromService:
-          type: web
-          name: magic-engine
-          property: host
 
   # Zhangqian discovery sweeper — every 5 minutes
   # Marks stuck pending/running discovery jobs (>10 min) as failed.
@@ -152,15 +137,10 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://$RENDER_EXTERNAL_URL/api/cron/zhangqian-sweeper
+        https://app.magicengine.com.au/api/cron/zhangqian-sweeper
     envVars:
       - key: CRON_SECRET
         sync: false
-      - key: RENDER_EXTERNAL_URL
-        fromService:
-          type: web
-          name: magic-engine
-          property: host
 
   # Blog generation sweeper — every 5 minutes
   # Marks blog_posts stuck at status='generating' (>10 min) as failed.
@@ -174,15 +154,10 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://$RENDER_EXTERNAL_URL/api/cron/blog-stuck-generating
+        https://app.magicengine.com.au/api/cron/blog-stuck-generating
     envVars:
       - key: CRON_SECRET
         sync: false
-      - key: RENDER_EXTERNAL_URL
-        fromService:
-          type: web
-          name: magic-engine
-          property: host
 
   # Weekly AI Visibility Tracker — every Monday at 1am UTC (~1pm NZST)
   # Processes all clients with enabled queries; writes runs + weekly snapshot.
@@ -194,15 +169,10 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://$RENDER_EXTERNAL_URL/api/cron/ai-tracker-weekly
+        https://app.magicengine.com.au/api/cron/ai-tracker-weekly
     envVars:
       - key: CRON_SECRET
         sync: false
-      - key: RENDER_EXTERNAL_URL
-        fromService:
-          type: web
-          name: magic-engine
-          property: host
 
   # Weekly SEO keyword snapshots — every Monday at 2am UTC (~2pm NZST)
   # Stores DataForSEO ranked keyword rows for SEO Intelligence trends.
@@ -214,15 +184,10 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://$RENDER_EXTERNAL_URL/api/cron/keyword-snapshots-weekly
+        https://app.magicengine.com.au/api/cron/keyword-snapshots-weekly
     envVars:
       - key: CRON_SECRET
         sync: false
-      - key: RENDER_EXTERNAL_URL
-        fromService:
-          type: web
-          name: magic-engine
-          property: host
 
   # Daily social engagement pullback — every day at 4am UTC
   # Pulls Publer post likes/comments/shares into flywheel_metrics.
@@ -234,15 +199,10 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://$RENDER_EXTERNAL_URL/api/cron/social-engagement-pullback
+        https://app.magicengine.com.au/api/cron/social-engagement-pullback
     envVars:
       - key: CRON_SECRET
         sync: false
-      - key: RENDER_EXTERNAL_URL
-        fromService:
-          type: web
-          name: magic-engine
-          property: host
 
   # Daily Google data pullback — every day at 3am UTC (~3pm NZST)
   # Syncs GSC + GA4 snapshots for all clients with connected Google connectors.
@@ -254,15 +214,10 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://$RENDER_EXTERNAL_URL/api/cron/google-data-pullback-daily
+        https://app.magicengine.com.au/api/cron/google-data-pullback-daily
     envVars:
       - key: CRON_SECRET
         sync: false
-      - key: RENDER_EXTERNAL_URL
-        fromService:
-          type: web
-          name: magic-engine
-          property: host
 
   # Weekly 诸葛亮 recalculation — every Monday at 3am UTC
   # Re-runs priority analysis for all clients with confirmed discovery,
@@ -275,15 +230,10 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://$RENDER_EXTERNAL_URL/api/cron/zhuge-recalculate
+        https://app.magicengine.com.au/api/cron/zhuge-recalculate
     envVars:
       - key: CRON_SECRET
         sync: false
-      - key: RENDER_EXTERNAL_URL
-        fromService:
-          type: web
-          name: magic-engine
-          property: host
 
   # Daily anomaly detector — every day at 5am UTC (~5pm NZST / 3pm AEST)
   # Two-step pipeline:
@@ -297,12 +247,7 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://$RENDER_EXTERNAL_URL/api/cron/anomaly-detector
+        https://app.magicengine.com.au/api/cron/anomaly-detector
     envVars:
       - key: CRON_SECRET
         sync: false
-      - key: RENDER_EXTERNAL_URL
-        fromService:
-          type: web
-          name: magic-engine
-          property: host
