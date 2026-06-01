@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-01 03:53 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-01 13:05 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2786,7 +2786,7 @@ AI Content Factory  ←──反馈──  Data Engine  ←──分析──  �
 **子任务：**
 - ✅ `22.A.1` GSC 每日稳定化 — `syncGsc()` 补写 `seo.gsc.clicks` / `seo.gsc.impressions` / `seo.gsc.avg_position` 到 flywheel_metrics (~0.5 天) — 完成 2026-06-01
 - `22.A.2` GA4 每日采集 — vocabulary 补 `ga4.*` metric_key + google-data-pullback-daily 路由补 GA4 Reporting API 调用 (~1 天)
-- `22.A.3` Meta Ads 每日 cron — `/api/cron/meta-ads-pullback` 触发 MetaAdsAdapter.pullMetrics() (~0.5 天)
+- ✅ `22.A.3` Meta Ads 每日 cron — `syncMeta()` 成功后调 `MetaAdsAdapter.pullMetrics()` 写 ads.account.* 到 flywheel_metrics (~0.5 天) — 完成 2026-06-01
 - `22.A.4` TikTok Insights 采集 — TikTokAdapter.pullMetrics() + social.tiktok.* metric_key (~1.5 天)
 
 ---
@@ -3090,6 +3090,10 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-06-01（P22.A.1/A.3 — GSC + Meta Ads 数据接通 flywheel_metrics）
+
+- **P22.A.3 完成** — `google-data-pullback-daily` 的 `syncMeta()` 在成功写 `meta_ads_snapshots` 后，调 `MetaAdsAdapter.pullMetrics()` 将 ROAS / spend / impressions / clicks / cpc / ctr / conversions 写入 `flywheel_metrics`；`ads-cpa-spike` 规则从此有每日数据
 
 ### 2026-06-01（P22.A.1 — GSC 数据接通 flywheel_metrics）
 
