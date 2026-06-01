@@ -171,12 +171,18 @@ export default function ClientBlogPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          mode: 'geo_only',
+          mode: opp.primary_keyword ? 'unified' : 'geo_only',
           topic: opp.query_text,
           source_query_id: opp.query_id,
           source_query_text: opp.query_text,
           word_count_target: 1000,
           skip_audit: skipAudit,
+          ...(opp.primary_keyword && {
+            primary_keyword:  opp.primary_keyword,
+            keyword_volume:   opp.keyword_volume,
+            keyword_kd:       opp.keyword_kd,
+            keyword_intent:   opp.keyword_intent,
+          }),
         }),
       });
       const j = await res.json();

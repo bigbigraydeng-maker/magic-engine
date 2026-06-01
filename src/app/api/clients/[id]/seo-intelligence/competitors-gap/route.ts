@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireSession } from '@/lib/auth/require-session'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { getSerpCompetitors, getKeywordsGap, type LabsCompetitor, type LabsKeyword } from '@/lib/dataforseo/labs'
 import { getActiveBrief } from '@/lib/content/brief-injector'
 
@@ -47,12 +47,12 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await requireSession()
-  if (!session.ok) {
-    return NextResponse.json({ error: session.error }, { status: session.status })
-  }
-
   const { id: clientId } = await params
+
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
+  }
 
   const { data: client, error: clientError } = await supabaseAdmin
     .from('clients')
