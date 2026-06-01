@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-01 02:47 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-01 13:13 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2756,8 +2756,9 @@ AU / NZ（当前）          新市场（未来）
 | **P22.A.2** | keyword_snapshots → flywheel_metrics SERP 排名聚合（avg_position + top10_count），接入 flywheel-seo-weekly cron | ✅ 完成（feat/phase-22-data-engine） |
 | **P22.A.3** | keyword_snapshots 加 local_pack_rank / paa_questions 字段，让 Local Pack 出现率可趋势追踪 | ✅ 完成（claude/relaxed-diffie-3c6f8f） |
 | **P22.A.4** | Competitor 域名基准快照：CompetitorSnapshotAdapter.pullMetrics() 读 clients.competitor_domains → getBulkTrafficEstimation → flywheel_metrics(competitor.domain.organic_traffic) | ✅ 完成（PR #183） |
+| **P22.A.5** | Meta Ads flywheel 接线：google-data-pullback-daily 的 syncMeta() 成功写入 meta_ads_snapshots 后，调用 MetaAdsAdapter.pullMetrics() 把 ROAS/spend/impressions 等写入 flywheel_metrics；让 AnomalyDetector 22.D.1 可检测 Ads CPA/ROAS 异常 | 🔄 实施中 |
 
-**22.A 完成标准**：flywheel_metrics 有 seo.serp.avg_position 连续 2 周数据 + Local Pack 可趋势追踪 + Competitor 流量基准 → 22.B 分析层 + 22.D AnomalyDetector 可开工。
+**22.A 完成标准**：flywheel_metrics 有 seo.serp.avg_position 连续 2 周数据 + Local Pack 可趋势追踪 + Competitor 流量基准 + Meta Ads 指标每日写入 → 22.B 分析层 + 22.D AnomalyDetector 可开工。
 
 > **登记日期**：2026-05-26 · **状态（原）**：战略方向已确认，PM 明确为"与 AI Factory 同等量级独立旗舰"
 >

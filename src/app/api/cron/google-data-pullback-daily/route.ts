@@ -22,6 +22,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { fetchGscSnapshot } from '@/lib/gsc/client'
 import { fetchGa4Snapshot } from '@/lib/ga4/client'
 import { getAdAccountInsights, getAdCampaignInsights } from '@/lib/meta/client'
+import { MetaAdsAdapter } from '@/lib/flywheel/adapters/MetaAdsAdapter'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 900
@@ -295,6 +296,13 @@ async function syncMeta(
       .single()
 
     if (error) return { success: false, error: error.message }
+
+    // P22.A.5 — flush fresh snapshot into flywheel_metrics so AnomalyDetector
+    // (22.D.1) can track ROAS / CPA trends. Failure is non-fatal.
+    await new MetaAdsAdapter().pullMetrics(clientId).catch(err => {
+      console.error('[google-data-pullback-daily] MetaAdsAdapter.pullMetrics error:', (err as Error).message)
+    })
+
     return { success: true, snapshot_id: (data as { id: string }).id }
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' }
