@@ -630,7 +630,7 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
                 type="posts"
               />
               {plan.posts.map((post, i) => (
-                <PostCard key={i} post={post} clientId={clientId} onGenStart={incImageGen} onGenEnd={decImageGen} />
+                <PostCard key={i} post={post} clientId={clientId} onGenStart={incImageGen} onGenEnd={decImageGen} onBackgroundImageGenerate={onBackgroundImageGenerate} />
               ))}
             </div>
           )}
@@ -647,7 +647,7 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
                 type="stories"
               />
               {plan.stories.map((story, i) => (
-                <StoryCard key={i} index={i} story={story} clientId={clientId} onGenStart={incImageGen} onGenEnd={decImageGen} />
+                <StoryCard key={i} index={i} story={story} clientId={clientId} onGenStart={incImageGen} onGenEnd={decImageGen} onBackgroundImageGenerate={onBackgroundImageGenerate} />
               ))}
             </div>
           )}
