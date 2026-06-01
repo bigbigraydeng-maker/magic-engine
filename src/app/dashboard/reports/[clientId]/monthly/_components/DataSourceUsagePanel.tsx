@@ -1,13 +1,13 @@
 /**
- * §9 Data Source Usage — monthly API cost by service
+ * §9 Data Source Usage — rpanel card (ME design system)
  * Reference: ROADMAP.md P8.C.1, P8.11
  *
  * CRITICAL: SERVICE_DISPLAY_MAP must be used to hide real vendor names (CLAUDE.md §三)
  */
 import type { DataSourceUsageData } from '@/lib/reports/monthly-aggregator'
-import { EmptyState } from './Shared'
+import { EmptyState, RBar } from './Shared'
+import { MePill } from '@/components/ui/me-primitives'
 
-/** Maps internal service keys → client-facing display names (CLAUDE.md §三) */
 const SERVICE_DISPLAY_MAP: Record<string, string> = {
   dataforseo:   'Link / SERP / Local Intelligence',
   semrush:      'Keyword Intelligence',
@@ -30,51 +30,42 @@ function displayName(service: string): string {
 export function DataSourceUsagePanel({ data }: { data: DataSourceUsageData | null }) {
   if (!data) {
     return (
-      <div className="bg-white rounded-xl border border-black/10 p-5">
+      <div className="rounded-[24px] border border-black/10 bg-white p-5 shadow-[0_1px_2px_rgba(26,26,26,.04),0_8px_28px_rgba(26,26,26,.06)]">
         <EmptyState message="暂无数据源使用记录 — 本月数据上线后自动填充" />
       </div>
     )
   }
 
+  const maxCalls = Math.max(...data.services.map(s => s.api_calls), 1)
+
   return (
-    <div className="bg-white rounded-xl border border-black/10 p-5 space-y-4">
-      <div className="flex items-center gap-8 flex-wrap">
-        <div>
-          <p className="text-xs text-me-charcoal/55">Total Cost This Month</p>
-          <p className="text-2xl font-bold text-me-charcoal/90">${data.total_cost_usd.toFixed(4)}</p>
-        </div>
-        <div>
-          <p className="text-xs text-me-charcoal/55">Total API Calls</p>
-          <p className="text-2xl font-bold text-me-charcoal/90">{data.total_calls.toLocaleString()}</p>
-        </div>
+    <div className="rounded-[24px] border border-black/10 bg-white p-5 shadow-[0_1px_2px_rgba(26,26,26,.04),0_8px_28px_rgba(26,26,26,.06)]">
+      {/* header row */}
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="font-display text-[15px] font-semibold text-[#1A1A1A]">Data source usage</h3>
+        <MePill tone="track">Healthy</MePill>
       </div>
 
-      {data.services.length > 0 && (
-        <div className="overflow-x-auto rounded-lg border border-black/[.06]">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-me-ivory border-b border-black/[.06]">
-                <th className="text-left px-4 py-2 text-xs font-semibold text-me-charcoal/55">Module</th>
-                <th className="text-center px-3 py-2 text-xs font-semibold text-me-charcoal/55">API Calls</th>
-                <th className="text-right px-4 py-2 text-xs font-semibold text-me-charcoal/55">Cost (USD)</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-black/[.06]">
-              {data.services.map((svc, i) => (
-                <tr key={i} className="hover:bg-me-ivory/50">
-                  <td className="px-4 py-2 text-xs text-me-charcoal/75">{displayName(svc.service)}</td>
-                  <td className="px-3 py-2 text-center text-xs text-me-charcoal/60">{svc.api_calls.toLocaleString()}</td>
-                  <td className="px-4 py-2 text-right text-xs font-mono text-me-charcoal/90">${svc.cost_usd.toFixed(4)}</td>
-                </tr>
-              ))}
-              <tr className="bg-me-ivory font-semibold">
-                <td className="px-4 py-2 text-xs text-me-charcoal/75">Total</td>
-                <td className="px-3 py-2 text-center text-xs text-me-charcoal/75">{data.total_calls.toLocaleString()}</td>
-                <td className="px-4 py-2 text-right text-xs font-mono text-me-charcoal/90">${data.total_cost_usd.toFixed(4)}</td>
-              </tr>
-            </tbody>
-          </table>
+      {/* bar rows */}
+      {data.services.length > 0 ? (
+        <div className="space-y-3">
+          {data.services.map((svc, i) => (
+            <div key={i} className="flex items-center justify-between gap-3 text-[13px]">
+              <span className="min-w-0 flex-1 truncate text-black/60">{displayName(svc.service)}</span>
+              <RBar pct={Math.round((svc.api_calls / maxCalls) * 100)} label={`$${svc.cost_usd.toFixed(3)}`} />
+            </div>
+          ))}
+          <div className="flex items-center justify-between border-t border-black/[.06] pt-3 text-[12.5px]">
+            <span className="text-black/60">Total API calls</span>
+            <span className="font-display font-semibold text-[#1A1A1A]">{data.total_calls.toLocaleString()}</span>
+          </div>
+          <div className="flex items-center justify-between text-[12.5px]">
+            <span className="text-black/60">Total cost (USD)</span>
+            <span className="font-display font-semibold text-[#1A1A1A]">${data.total_cost_usd.toFixed(4)}</span>
+          </div>
         </div>
+      ) : (
+        <EmptyState message="No data sources used this month." />
       )}
     </div>
   )

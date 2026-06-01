@@ -1551,6 +1551,8 @@ export default function ExecutionPage() {
   const [imageGenActiveIds, setImageGenActiveIds] = useState<Set<string>>(new Set())
   // 后台图片生成任务（关抽屉后继续跑）：itemId → count（同一任务可能有多张并发）
   const [bgImageGenCount, setBgImageGenCount] = useState(0)
+  // 「最近工作」chip：用户上次打开的执行项 ID（localStorage 持久化，跨刷新记住「上次在改」）
+  const [lastOpenItemId, setLastOpenItemId] = useState<string | null>(null)
 
   const handleDownloadDocx = async () => {
     setIsDocxLoading(true)
@@ -1957,6 +1959,36 @@ export default function ExecutionPage() {
     return merged
   }, [bgGeneratingIds, imageGenActiveIds])
 
+  // ── 「最近工作」chip ──────────────────────────────────────────────────────
+  // localStorage key（按客户隔离），记住 FDE 上次在改哪一项
+  const lastOpenStorageKey = `me:exec:${clientId}:lastOpenItem`
+
+  // 挂载时读 localStorage（try/catch 防 SSR / 隐私模式报错）
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(lastOpenStorageKey)
+      if (saved) setLastOpenItemId(saved)
+    } catch { /* localStorage 不可用时静默 */ }
+  }, [lastOpenStorageKey])
+
+  // 打开 detail 抽屉 + 记录「上次在改」（chip 与卡片共用）
+  const openDetailAndRemember = useCallback((item: ItemWithLogs, editable: boolean) => {
+    setDetailItem(item)
+    setDetailEditable(editable)
+    setLastOpenItemId(item.id)
+    try {
+      localStorage.setItem(lastOpenStorageKey, item.id)
+    } catch { /* localStorage 不可用时静默 */ }
+  }, [lastOpenStorageKey])
+
+  // 派生最近工作项：进行中 OR 有过 AI 协助记录，按 updated_at 倒序取前 6
+  const recentItems = useMemo<ItemWithLogs[]>(() => {
+    return items
+      .filter(i => i.status === 'in_progress' || (i.logs?.some(l => l.kind === 'ai_assist') ?? false))
+      .sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? ''))
+      .slice(0, 6)
+  }, [items])
+
   const filteredItems = (() => {
     let result = activeDimension === 'all' ? items : items.filter(i => i.dimension === activeDimension)
     if (statusFilter !== 'all') result = result.filter(i => i.status === statusFilter)
@@ -2132,6 +2164,45 @@ export default function ExecutionPage() {
           </div>
         )}
 
+        {/* 📌 最近工作 — FDE 切回上次在改的任务，避免在长看板里找 */}
+        {recentItems.length > 0 && (
+          <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+            <div className="mb-2 flex items-center gap-1.5">
+              <span className="text-xs font-black text-slate-700">📌 最近工作</span>
+              <span className="rounded-full bg-slate-100 px-1.5 text-[10px] font-bold text-slate-500">{recentItems.length}</span>
+            </div>
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {recentItems.map(item => {
+                const isLast = item.id === lastOpenItemId
+                const generating = allBgGeneratingIds.has(item.id)
+                const title = item.title.length > 24 ? `${item.title.slice(0, 24)}…` : item.title
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => openDetailAndRemember(item, true)}
+                    title={item.title}
+                    className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                      isLast
+                        ? 'border-violet-300 bg-violet-50 text-violet-800 hover:bg-violet-100'
+                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white'
+                    }`}
+                  >
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[item.status]}`} />
+                    <span className="max-w-[180px] truncate">{title}</span>
+                    {isLast && <span className="shrink-0 text-[10px] font-bold text-violet-500">上次在改</span>}
+                    {generating && (
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-violet-100 px-1.5 text-[10px] font-bold text-violet-700">
+                        <span className="h-2 w-2 animate-spin rounded-full border border-violet-400 border-t-violet-700" />
+                        制作中
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Campaign 上下文锚点 — FDE 执行任务时随时可见 */}
         <ActiveCampaignBanner clientId={clientId} />
 
@@ -2216,7 +2287,7 @@ export default function ExecutionPage() {
                 key={group.pid}
                 group={group}
                 activeDetailId={detailItem?.id ?? null}
-                onOpenDetail={item => { setDetailItem(item); setDetailEditable(true) }}
+                onOpenDetail={item => openDetailAndRemember(item, true)}
                 onReorder={handleReorder}
               />
             )
@@ -2228,7 +2299,7 @@ export default function ExecutionPage() {
               defaultOpen={true}
               activeDetailId={detailItem?.id ?? null}
               onDerive={(mode, priorId, priorLabel) => setDeriveDrawer({ mode, priorId, priorLabel })}
-              onOpenDetail={item => { setDetailItem(item); setDetailEditable(group.editable) }}
+              onOpenDetail={item => openDetailAndRemember(item, group.editable)}
               onAddItem={handleAddItem}
               bgGeneratingIds={allBgGeneratingIds}
               onReorder={handleReorderItems}
