@@ -39,14 +39,20 @@ export async function generateZhangqianDocx(
     sections: [{
       children: [
         ...cover(clientName, report, reportDate),
+        ...businessSection(report),
         ...diagnosisSection(report),
         ...keywordsSection(report),
         ...competitorsSection(report),
         ...aiVisibilitySection(report),
+        ...serpResultsSection(report),
         ...socialSection(report),
         ...gbpSection(report),
         ...reviewPlatformsSection(report),
         ...paidSocialSection(report),
+        ...advancedSection(report),
+        ...techStackSection(report),
+        ...domainWhoisSection(report),
+        ...onpageAuditSection(report),
         ...actionPlanSection(report),
         ...(report.notes ? notesSection(report.notes) : []),
       ],
@@ -79,6 +85,47 @@ function cover(clientName: string, report: DiscoveryReport, date: string): Parag
     body('This report summarises public brand, search, social, reputation, and AI visibility signals. It is designed to support prioritised execution, not to replace human commercial judgement.'),
     pageBreak(),
   ]
+}
+
+function businessSection(report: DiscoveryReport): (Paragraph | Table)[] {
+  const business = report.business
+  const items: (Paragraph | Table)[] = [h2('Business Overview')]
+
+  if (business.description) {
+    items.push(body(business.description))
+    items.push(spacer())
+  }
+
+  const infoRows: string[][] = []
+  if (business.target_audience.length) {
+    infoRows.push(['Target audience', business.target_audience.join(', ')])
+  }
+  if (business.unique_selling_points.length) {
+    infoRows.push(['Unique selling points', business.unique_selling_points.join('; ')])
+  }
+  if (business.registration) {
+    const reg = business.registration
+    infoRows.push([
+      `${reg.identifier_type}`,
+      `${reg.identifier} — ${reg.entity_type ?? reg.entity_name ?? '-'} (${reg.status})`,
+    ])
+    if (reg.registered_since) {
+      infoRows.push(['Registered since', reg.registered_since])
+    }
+  }
+  if (business.phone_numbers?.length) {
+    infoRows.push(['Phone', business.phone_numbers.join(', ')])
+  }
+  if (business.emails?.length) {
+    infoRows.push(['Email', business.emails.join(', ')])
+  }
+
+  if (infoRows.length) {
+    items.push(table(['Field', 'Detail'], infoRows))
+  }
+
+  items.push(pageBreak())
+  return items
 }
 
 function diagnosisSection(report: DiscoveryReport): (Paragraph | Table)[] {
@@ -117,7 +164,9 @@ function keywordsSection(report: DiscoveryReport): (Paragraph | Table)[] {
     keyword.type,
     keyword.semrush_volume != null ? String(keyword.semrush_volume) : (keyword.estimated_volume != null ? `~${keyword.estimated_volume}` : '-'),
     keyword.semrush_kd != null ? String(keyword.semrush_kd) : '-',
-    keyword.semrush_rank != null ? String(keyword.semrush_rank) : '-',
+    keyword.semrush_rank != null ? `#${keyword.semrush_rank}` : '-',
+    keyword.semrush_cpc != null ? `$${keyword.semrush_cpc.toFixed(2)}` : '-',
+    keyword.rationale,
   ])
 
   const snap = report.semrush_snapshot
@@ -133,7 +182,7 @@ function keywordsSection(report: DiscoveryReport): (Paragraph | Table)[] {
     h2('Search Opportunities'),
     ...snapItems,
     h3('Seed keyword set'),
-    table(['Keyword', 'Type', 'Volume', 'Difficulty', 'Current rank'], rows),
+    table(['Keyword', 'Type', 'Volume', 'Difficulty', 'Rank', 'CPC', 'Rationale'], rows),
     pageBreak(),
   ]
 }
@@ -191,6 +240,44 @@ function aiVisibilitySection(report: DiscoveryReport): (Paragraph | Table)[] {
   return items
 }
 
+function serpResultsSection(report: DiscoveryReport): (Paragraph | Table)[] {
+  const results = report.serp_results
+  if (!results?.length) return []
+
+  const items: (Paragraph | Table)[] = [h2('SERP Snapshots')]
+
+  for (const serp of results) {
+    items.push(h3(`Query: "${serp.query}"`))
+
+    if (serp.organic_results.length) {
+      const rows = serp.organic_results.map(r => [
+        String(r.position),
+        r.title,
+        r.url,
+        r.description,
+      ])
+      items.push(table(['#', 'Title', 'URL', 'Description'], rows))
+      items.push(spacer())
+    }
+
+    if (serp.paid_advertiser_domains.length) {
+      items.push(bodyBold(`Paid advertisers: ${serp.paid_advertiser_domains.join(', ')}`))
+    }
+
+    if (serp.ai_overview_text) {
+      items.push(h3('Google AI Mode answer'))
+      items.push(body(serp.ai_overview_text))
+      if (serp.ai_overview_sources.length) {
+        items.push(bodyBold(`Sources: ${serp.ai_overview_sources.join(', ')}`))
+      }
+      items.push(spacer())
+    }
+  }
+
+  items.push(pageBreak())
+  return items
+}
+
 function socialSection(report: DiscoveryReport): (Paragraph | Table)[] {
   const socials = report.social_profiles
   if (!socials.length) return []
@@ -230,7 +317,7 @@ function reviewPlatformsSection(report: DiscoveryReport): (Paragraph | Table)[] 
   const platforms = report.review_platforms
   if (!platforms.length) return []
 
-  const rows = platforms.map(platform => [
+  const summaryRows = platforms.map(platform => [
     platform.platform,
     platform.rating != null ? String(platform.rating) : '-',
     platform.review_count != null ? platform.review_count.toLocaleString() : '-',
@@ -238,15 +325,38 @@ function reviewPlatformsSection(report: DiscoveryReport): (Paragraph | Table)[] 
     platform.url,
   ])
 
-  return [
+  const items: (Paragraph | Table)[] = [
     h2('Review Footprint'),
-    table(['Platform', 'Rating', 'Reviews', 'Response rate', 'URL'], rows),
-    pageBreak(),
+    table(['Platform', 'Rating', 'Reviews', 'Response rate', 'URL'], summaryRows),
   ]
+
+  // Include negative review samples if present
+  const negativeSamples = platforms.flatMap(p =>
+    (p.recent_negative_samples ?? []).map(s => ({
+      platform: p.platform,
+      ...s,
+    })),
+  )
+  if (negativeSamples.length) {
+    items.push(spacer())
+    items.push(h3('Sample low-rated reviews'))
+    const sampleRows = negativeSamples.map(s => [
+      s.platform,
+      String(s.rating),
+      s.author ?? '-',
+      s.date ?? '-',
+      s.text.slice(0, 200),
+    ])
+    items.push(table(['Platform', 'Stars', 'Author', 'Date', 'Review'], sampleRows))
+  }
+
+  items.push(pageBreak())
+  return items
 }
 
 function paidSocialSection(report: DiscoveryReport): Paragraph[] {
-  const ads = report.meta_ads
+  // Advanced meta_ads takes priority over basic (same as UI)
+  const ads = report.advanced?.meta_ads ?? report.meta_ads
   if (!ads) return []
 
   return [
@@ -261,6 +371,161 @@ function paidSocialSection(report: DiscoveryReport): Paragraph[] {
     ] : []),
     pageBreak(),
   ]
+}
+
+function advancedSection(report: DiscoveryReport): (Paragraph | Table)[] {
+  const adv = report.advanced
+  if (!adv) return []
+
+  const items: (Paragraph | Table)[] = []
+
+  // GSC data
+  if (adv.gsc_data?.rows.length) {
+    const gsc = adv.gsc_data
+    const rows = gsc.rows.map(r => [
+      r.query,
+      r.impressions.toLocaleString(),
+      r.clicks.toLocaleString(),
+      `${(r.ctr * 100).toFixed(1)}%`,
+      r.position.toFixed(1),
+    ])
+    items.push(h2('Search Console Performance'))
+    items.push(statLine('Site', gsc.site_url))
+    items.push(statLine('Period', `${gsc.date_range_days} days`))
+    items.push(spacer())
+    items.push(table(['Query', 'Impressions', 'Clicks', 'CTR', 'Position'], rows))
+    items.push(pageBreak())
+  }
+
+  // Google Ads (Transparency Center)
+  if (adv.google_ads_data) {
+    const gads = adv.google_ads_data
+    items.push(h2('Google Ads Activity'))
+    items.push(statLine('Advertiser', gads.advertiser))
+    items.push(statLine('Active ads', String(gads.active_ads_count)))
+    items.push(statLine('Formats', gads.ad_formats.join(', ') || '-'))
+    items.push(statLine('Regions', gads.regions.join(', ') || '-'))
+    if (gads.top_ad_previews.length) {
+      items.push(spacer())
+      items.push(h3('Ad previews'))
+      for (const preview of gads.top_ad_previews) {
+        items.push(bullet(preview))
+      }
+    }
+    items.push(pageBreak())
+  }
+
+  // Facebook profiles (advanced)
+  if (adv.facebook_profiles.length) {
+    const rows = adv.facebook_profiles.map(p => [
+      p.page_name,
+      p.followers_count.toLocaleString(),
+      String(p.posts_last_30d),
+      `${(p.engagement_rate * 100).toFixed(1)}%`,
+      p.url,
+    ])
+    items.push(h2('Facebook Page Metrics'))
+    items.push(table(['Page', 'Followers', 'Posts 30d', 'Engagement', 'URL'], rows))
+    items.push(pageBreak())
+  }
+
+  return items
+}
+
+function techStackSection(report: DiscoveryReport): (Paragraph | Table)[] {
+  const tech = report.technology_stack
+  if (!tech) return []
+
+  const rows: string[][] = []
+  if (tech.cms) rows.push(['CMS', tech.cms])
+  if (tech.ecommerce) rows.push(['E-commerce', tech.ecommerce])
+  if (tech.analytics.length) rows.push(['Analytics', tech.analytics.join(', ')])
+  if (tech.crm_marketing.length) rows.push(['CRM / Marketing', tech.crm_marketing.join(', ')])
+  if (tech.chat) rows.push(['Chat', tech.chat])
+  if (tech.domain_rank != null) rows.push(['Domain rank', String(tech.domain_rank)])
+  if (tech.phone_numbers.length) rows.push(['Phone numbers', tech.phone_numbers.join(', ')])
+  if (tech.emails.length) rows.push(['Emails', tech.emails.join(', ')])
+
+  if (!rows.length) return []
+
+  return [
+    h2('Technology Stack'),
+    table(['Category', 'Detail'], rows),
+    pageBreak(),
+  ]
+}
+
+function domainWhoisSection(report: DiscoveryReport): (Paragraph | Table)[] {
+  const whois = report.domain_whois
+  if (!whois) return []
+
+  const rows: string[][] = []
+  if (whois.registered_at) rows.push(['Registered', whois.registered_at])
+  if (whois.expires_at) rows.push(['Expires', whois.expires_at])
+  if (whois.registrar) rows.push(['Registrar', whois.registrar])
+  if (whois.domain_age_years != null) rows.push(['Domain age', `${whois.domain_age_years} years`])
+  if (whois.referring_domains != null) rows.push(['Referring domains', whois.referring_domains.toLocaleString()])
+  if (whois.backlinks != null) rows.push(['Backlinks', whois.backlinks.toLocaleString()])
+  if (whois.organic_etv != null) rows.push(['Organic ETV (est.)', whois.organic_etv.toLocaleString()])
+  if (whois.organic_keywords_top10 != null) rows.push(['Top-10 keywords', whois.organic_keywords_top10.toLocaleString()])
+
+  if (!rows.length) return []
+
+  return [
+    h2('Domain Intelligence'),
+    table(['Metric', 'Value'], rows),
+    pageBreak(),
+  ]
+}
+
+function onpageAuditSection(report: DiscoveryReport): (Paragraph | Table)[] {
+  const audit = report.onpage_audit
+  if (!audit) return []
+
+  const items: (Paragraph | Table)[] = [h2('On-Page SEO Audit')]
+
+  const metaRows: string[][] = []
+  if (audit.status_code != null) metaRows.push(['HTTP status', String(audit.status_code)])
+  if (audit.title) metaRows.push(['Title tag', audit.title])
+  if (audit.description) metaRows.push(['Meta description', audit.description])
+  if (audit.canonical) metaRows.push(['Canonical', audit.canonical])
+  if (audit.h1) metaRows.push(['H1', audit.h1])
+  if (audit.word_count != null) metaRows.push(['Word count', audit.word_count.toLocaleString()])
+  if (audit.internal_links != null) metaRows.push(['Internal links', audit.internal_links.toLocaleString()])
+  if (audit.external_links != null) metaRows.push(['External links', audit.external_links.toLocaleString()])
+  if (audit.images_total != null) metaRows.push(['Images', audit.images_total.toLocaleString()])
+  if (audit.images_no_alt != null) metaRows.push(['Images missing alt', audit.images_no_alt.toLocaleString()])
+
+  if (metaRows.length) {
+    items.push(table(['Field', 'Value'], metaRows))
+    items.push(spacer())
+  }
+
+  if (audit.core_web_vitals) {
+    const cwv = audit.core_web_vitals
+    const cwvRows: string[][] = []
+    if (cwv.lcp != null) cwvRows.push(['LCP (ms)', String(cwv.lcp)])
+    if (cwv.cls != null) cwvRows.push(['CLS', String(cwv.cls)])
+    if (cwv.tbt != null) cwvRows.push(['TBT (ms)', String(cwv.tbt)])
+    if (cwvRows.length) {
+      items.push(h3('Core Web Vitals'))
+      items.push(table(['Metric', 'Value'], cwvRows))
+      items.push(spacer())
+    }
+  }
+
+  const failedChecks = Object.entries(audit.checks)
+    .filter(([, failed]) => failed)
+    .map(([key]) => key.replace(/_/g, ' '))
+  if (failedChecks.length) {
+    items.push(h3('Issues detected'))
+    for (const check of failedChecks) {
+      items.push(bullet(check))
+    }
+  }
+
+  items.push(pageBreak())
+  return items
 }
 
 function actionPlanSection(report: DiscoveryReport): Paragraph[] {
