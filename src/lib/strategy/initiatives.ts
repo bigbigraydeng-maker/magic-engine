@@ -105,6 +105,18 @@ export async function sumBudgetPercent(
     .reduce((sum, r) => sum + (r.budget_percent ?? 0), 0)
 }
 
+async function validateSupportsInitiativeParent(
+  supabase: SupabaseClient,
+  goalId: string,
+  supportsInitiativeId: string,
+): Promise<string | null> {
+  const parent = await getInitiativeById(supabase, supportsInitiativeId)
+  if (!parent) return 'supports_initiative_id not found'
+  if (parent.tier !== 'terminal') return 'supports_initiative_id must be a terminal initiative'
+  if (parent.goal_id !== goalId) return 'supports_initiative_id must belong to the same goal'
+  return null
+}
+
 /**
  * Create an initiative under a goal.
  * Auto-computes:
@@ -150,11 +162,13 @@ export async function createInitiative(
     return { ok: false, error: 'Supporting initiative must specify supports_initiative_id (a terminal initiative)' }
   }
 
+  if (tier === 'terminal' && input.supports_initiative_id) {
+    return { ok: false, error: 'Terminal initiative cannot specify supports_initiative_id' }
+  }
+
   if (input.supports_initiative_id) {
-    const parent = await getInitiativeById(supabase, input.supports_initiative_id)
-    if (!parent) return { ok: false, error: 'supports_initiative_id not found' }
-    if (parent.tier !== 'terminal') return { ok: false, error: 'supports_initiative_id must be a terminal initiative' }
-    if (parent.goal_id !== input.goal_id) return { ok: false, error: 'supports_initiative_id must belong to the same goal' }
+    const parentError = await validateSupportsInitiativeParent(supabase, input.goal_id, input.supports_initiative_id)
+    if (parentError) return { ok: false, error: parentError }
   }
 
   // Budget constraint
@@ -217,6 +231,19 @@ export async function updateInitiative(
 ): Promise<CreateInitiativeResult> {
   const existing = await getInitiativeById(supabase, id)
   if (!existing) return { ok: false, error: 'Initiative not found' }
+
+  if (patch.supports_initiative_id !== undefined) {
+    if (existing.tier === 'terminal' && patch.supports_initiative_id) {
+      return { ok: false, error: 'Terminal initiative cannot specify supports_initiative_id' }
+    }
+    if (existing.tier === 'supporting' && existing.initiative_type !== 'unassigned' && !patch.supports_initiative_id) {
+      return { ok: false, error: 'Supporting initiative must specify supports_initiative_id (a terminal initiative)' }
+    }
+    if (patch.supports_initiative_id) {
+      const parentError = await validateSupportsInitiativeParent(supabase, existing.goal_id, patch.supports_initiative_id)
+      if (parentError) return { ok: false, error: parentError }
+    }
+  }
 
   // Budget re-check if changing budget_percent
   if (patch.budget_percent !== undefined && patch.budget_percent !== null) {
