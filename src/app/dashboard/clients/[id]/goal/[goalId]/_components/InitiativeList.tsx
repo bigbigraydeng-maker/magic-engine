@@ -33,15 +33,15 @@ const ALL_INITIATIVE_TYPES: InitiativeType[] = [
 ]
 
 const TIER_COLOR: Record<string, string> = {
-  terminal: 'bg-blue-500/20 text-blue-300',
-  supporting: 'bg-purple-500/20 text-purple-300',
+  terminal: 'bg-me-ochre/15 text-me-ochre',
+  supporting: 'bg-status-sched/15 text-status-sched',
 }
 
 const POSTURE_COLOR: Record<string, string> = {
-  offensive: 'bg-rose-500/20 text-rose-300',
-  defensive: 'bg-emerald-500/20 text-emerald-300',
-  fast:      'bg-amber-500/20 text-amber-300',
-  slow:      'bg-slate-500/20 text-slate-400',
+  offensive: 'bg-status-rej/15 text-status-rej',
+  defensive: 'bg-status-track/15 text-status-track',
+  fast:      'bg-status-exec/15 text-status-exec',
+  slow:      'bg-me-stone text-me-charcoal/55',
 }
 
 interface Props {
@@ -89,29 +89,29 @@ export function InitiativeList({ goal, canEdit }: Props) {
   }
 
   return (
-    <div className="rounded-xl border border-white/10 bg-slate-900/60 p-6">
-      <div className="flex items-center justify-between mb-4">
+    <div className="rounded-xl border border-black/10 bg-white p-6 shadow-sm">
+      <div className="mb-4 flex items-center justify-between">
         <div>
-          <h3 className="text-base font-semibold text-white">Initiatives</h3>
-          <p className="mt-0.5 text-xs text-slate-500">
+          <h3 className="font-display text-base font-bold text-me-charcoal">Initiatives</h3>
+          <p className="mt-0.5 text-xs font-semibold text-me-charcoal/55">
             {realInitiatives.length} initiative(s) · {totalBudgetPct.toFixed(0)}% of budget allocated · {remainingBudgetPct.toFixed(0)}% remaining
           </p>
         </div>
         {canEdit && (
           <button
             onClick={() => { setEditing(null); setDrawerOpen(true) }}
-            className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2 text-sm font-medium text-white"
+            className="rounded-lg bg-me-ochre px-4 py-2 text-sm font-black text-white transition-colors hover:bg-me-ochre/90"
           >
             + Add Initiative
           </button>
         )}
       </div>
 
-      {loading && <p className="text-sm text-slate-500">Loading…</p>}
+      {loading && <p className="text-sm font-semibold text-me-charcoal/55">Loading…</p>}
 
       {!loading && realInitiatives.length === 0 && (
-        <div className="rounded-lg border border-dashed border-white/15 bg-slate-900/40 p-6 text-center">
-          <p className="text-sm text-slate-500">
+        <div className="rounded-lg border border-dashed border-black/15 bg-me-ivory p-6 text-center">
+          <p className="text-sm font-semibold text-me-charcoal/55">
             No initiatives yet. Add 2-5 initiatives spanning multiple workstreams to drive this goal.
           </p>
         </div>
@@ -126,46 +126,46 @@ export function InitiativeList({ goal, canEdit }: Props) {
               key={item.id}
               type="button"
               onClick={() => canEdit ? (setEditing(item), setDrawerOpen(true)) : null}
-              className={`w-full text-left rounded-lg border border-white/10 bg-slate-900/40 p-4 hover:bg-slate-900/70 transition-colors ${
+              className={`w-full rounded-lg border border-black/10 bg-white p-4 text-left transition-colors hover:border-me-ochre/40 hover:bg-me-ivory ${
                 canEdit ? 'cursor-pointer' : 'cursor-default'
               }`}
             >
               <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium text-white text-sm">{item.title}</span>
-                    <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase ${TIER_COLOR[tier]}`}>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-black text-me-charcoal">{item.title}</span>
+                    <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${TIER_COLOR[tier]}`}>
                       {tier}
                     </span>
                     {item.posture && (
-                      <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase ${POSTURE_COLOR[item.posture]}`}>
+                      <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${POSTURE_COLOR[item.posture]}`}>
                         {item.posture}
                       </span>
                     )}
                     {item.hypothesis_polished_by_ai && (
-                      <span className="rounded bg-blue-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-blue-300 uppercase">
+                      <span className="rounded-full bg-me-ochre/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-me-ochre">
                         AI润色
                       </span>
                     )}
                   </div>
-                  <div className="mt-1 text-xs text-slate-400">
+                  <div className="mt-1 text-xs font-semibold text-me-charcoal/55">
                     {label?.zh ?? item.initiative_type} · {label?.en ?? ''}
                   </div>
                   {item.hypothesis && (
-                    <p className="mt-2 text-xs text-slate-400 line-clamp-3 whitespace-pre-wrap">
+                    <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-xs font-semibold text-me-charcoal/55">
                       {item.hypothesis.length > 220
                         ? item.hypothesis.slice(0, 220) + '…'
                         : item.hypothesis}
                     </p>
                   )}
                 </div>
-                <div className="flex flex-col items-end gap-2 shrink-0">
+                <div className="flex shrink-0 flex-col items-end gap-2">
                   <div className="text-right">
-                    <div className="text-sm font-semibold text-white">
+                    <div className="text-sm font-black text-me-charcoal">
                       {item.budget_percent != null ? `${item.budget_percent}%` : '—'}
                     </div>
                     {item.budget_amount != null && (
-                      <div className="text-[10px] text-slate-500">
+                      <div className="text-[10px] font-semibold text-me-charcoal/45">
                         {goal.budget_currency} {item.budget_amount.toLocaleString()}
                       </div>
                     )}
@@ -174,7 +174,7 @@ export function InitiativeList({ goal, canEdit }: Props) {
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); handleArchive(item.id) }}
-                      className="text-[10px] text-slate-500 hover:text-red-400"
+                      className="text-[10px] font-bold text-me-charcoal/45 hover:text-status-rej"
                     >
                       Archive
                     </button>

@@ -129,32 +129,32 @@ export function InitiativeFormDrawer({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/60" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
       <div
-        className="w-full max-w-2xl h-full overflow-y-auto bg-slate-950 border-l border-white/10"
+        className="h-full w-full max-w-2xl overflow-y-auto border-l border-black/10 bg-white shadow-card"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="sticky top-0 z-10 bg-slate-950 border-b border-white/10 px-6 py-4 flex items-center justify-between">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-black/10 bg-white px-6 py-4">
           <div>
-            <h2 className="text-base font-semibold text-white">
+            <h2 className="font-display text-base font-bold text-me-charcoal">
               {editing ? 'Edit Initiative' : 'Add Initiative'}
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Under Goal: <span className="text-slate-400">{goal.title}</span>
+            <p className="mt-0.5 text-xs font-semibold text-me-charcoal/55">
+              Under Goal: <span className="font-bold text-me-charcoal/75">{goal.title}</span>
             </p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">×</button>
+          <button onClick={onClose} className="text-xl text-me-charcoal/55 hover:text-me-charcoal">×</button>
         </div>
 
-        <div className="p-6 space-y-6">
+        <div className="space-y-6 p-6">
           {/* Initiative Type */}
           <div className="space-y-2">
-            <label className="text-xs text-slate-400 uppercase tracking-wide">Type</label>
+            <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">Type</label>
             {editing ? (
-              <p className="text-sm text-slate-300">
+              <p className="text-sm font-semibold text-me-charcoal/80">
                 {INITIATIVE_TYPE_LABEL[type]?.zh} · {INITIATIVE_TYPE_LABEL[type]?.en}
-                <span className="text-slate-600 text-xs ml-2">(cannot change after creation — archive and recreate instead)</span>
+                <span className="ml-2 text-xs font-semibold text-me-charcoal/45">(cannot change after creation — archive and recreate instead)</span>
               </p>
             ) : (
               <div className="grid grid-cols-1 gap-2">
@@ -166,21 +166,21 @@ export function InitiativeFormDrawer({
                       key={t}
                       type="button"
                       onClick={() => setType(t)}
-                      className={`text-left rounded-lg border px-3 py-2 transition-colors ${
+                      className={`rounded-lg border px-3 py-2 text-left transition-colors ${
                         type === t
-                          ? 'border-blue-500 bg-blue-500/10'
-                          : 'border-white/10 hover:border-white/20 hover:bg-white/[0.03]'
+                          ? 'border-me-ochre bg-me-ochre/10'
+                          : 'border-black/10 hover:border-me-ochre/40 hover:bg-me-ivory'
                       }`}
                     >
                       <div className="flex items-center gap-2">
-                        <span className="font-medium text-white text-sm">{label?.zh}</span>
-                        <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase ${
-                          tierBadge === 'terminal' ? 'bg-blue-500/20 text-blue-300' : 'bg-purple-500/20 text-purple-300'
+                        <span className="text-sm font-black text-me-charcoal">{label?.zh}</span>
+                        <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                          tierBadge === 'terminal' ? 'bg-me-ochre/15 text-me-ochre' : 'bg-status-sched/15 text-status-sched'
                         }`}>
                           {tierBadge}
                         </span>
                       </div>
-                      <div className="text-xs text-slate-500 mt-0.5">{label?.description}</div>
+                      <div className="mt-0.5 text-xs font-semibold text-me-charcoal/55">{label?.description}</div>
                     </button>
                   )
                 })}
@@ -191,20 +191,20 @@ export function InitiativeFormDrawer({
           {/* Supports (only for supporting initiatives) */}
           {isSupporting && (
             <div className="space-y-2">
-              <label className="text-xs text-slate-400 uppercase tracking-wide">
-                Supports Terminal Initiative <span className="text-rose-400">*</span>
+              <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">
+                Supports Terminal Initiative <span className="text-status-rej">*</span>
               </label>
               <select
                 value={supportsId}
                 onChange={e => setSupportsId(e.target.value)}
-                className="w-full rounded-lg bg-slate-900 border border-white/10 px-3 py-2 text-sm text-white"
+                className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal focus:border-me-ochre focus:outline-none"
               >
                 <option value="">— Select which terminal this supports —</option>
                 {terminals.filter(t => !initiative || t.id !== initiative.id).map(t => (
                   <option key={t.id} value={t.id}>{t.title}</option>
                 ))}
               </select>
-              <p className="text-[11px] text-slate-500">
+              <p className="text-[11px] font-semibold text-me-charcoal/55">
                 Supporting initiative 是弹药库 — 它的成果会喂给一个 terminal，不直接驱动 Goal verdict。
               </p>
             </div>
@@ -212,35 +212,35 @@ export function InitiativeFormDrawer({
 
           {/* Title */}
           <div className="space-y-2">
-            <label className="text-xs text-slate-400 uppercase tracking-wide">Title</label>
+            <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">Title</label>
             <input
               value={title}
               onChange={e => setTitle(e.target.value)}
               placeholder="e.g. Meta Ads 抢 Wendy Wu 同源词"
-              className="w-full rounded-lg bg-slate-900 border border-white/10 px-3 py-2 text-sm text-white placeholder:text-slate-600"
+              className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
             />
           </div>
 
           {/* Posture */}
           <div className="space-y-2">
-            <label className="text-xs text-slate-400 uppercase tracking-wide">Posture 战术姿态</label>
+            <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">Posture 战术姿态</label>
             <div className="grid grid-cols-2 gap-2">
               {POSTURE_OPTIONS.map(p => (
                 <button
                   key={p.value}
                   type="button"
                   onClick={() => setPosture(p.value === posture ? '' : p.value)}
-                  className={`text-left rounded-lg border px-3 py-2 transition-colors ${
+                  className={`rounded-lg border px-3 py-2 text-left transition-colors ${
                     posture === p.value
-                      ? 'border-blue-500 bg-blue-500/10'
-                      : 'border-white/10 hover:border-white/20 hover:bg-white/[0.03]'
+                      ? 'border-me-ochre bg-me-ochre/10'
+                      : 'border-black/10 hover:border-me-ochre/40 hover:bg-me-ivory'
                   }`}
                 >
                   <div className="flex items-center gap-2">
                     <span>{p.emoji}</span>
-                    <span className="text-sm font-medium text-white">{p.label}</span>
+                    <span className="text-sm font-black text-me-charcoal">{p.label}</span>
                   </div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">{p.description}</div>
+                  <div className="mt-0.5 text-[11px] font-semibold text-me-charcoal/55">{p.description}</div>
                 </button>
               ))}
             </div>
@@ -248,7 +248,7 @@ export function InitiativeFormDrawer({
 
           {/* Budget */}
           <div className="space-y-2">
-            <label className="text-xs text-slate-400 uppercase tracking-wide">
+            <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">
               Budget % of Goal · 剩余 {remainingBudgetPct.toFixed(0)}%
             </label>
             <div className="flex items-center gap-3">
@@ -259,11 +259,11 @@ export function InitiativeFormDrawer({
                 value={budgetPct}
                 onChange={e => setBudgetPct(e.target.value)}
                 placeholder="e.g. 30"
-                className="w-32 rounded-lg bg-slate-900 border border-white/10 px-3 py-2 text-sm text-white"
+                className="w-32 rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
               />
-              <span className="text-sm text-slate-500">%</span>
+              <span className="text-sm font-semibold text-me-charcoal/55">%</span>
               {budgetPct && goal.budget_amount != null && (
-                <span className="text-xs text-slate-400">
+                <span className="text-xs font-semibold text-me-charcoal/55">
                   ≈ {goal.budget_currency} {Math.round(goal.budget_amount * parseFloat(budgetPct) / 100).toLocaleString()}
                 </span>
               )}
@@ -273,14 +273,14 @@ export function InitiativeFormDrawer({
           {/* Hypothesis + AI polish */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <label className="text-xs text-slate-400 uppercase tracking-wide">
+              <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">
                 Hypothesis · 为什么押这一条
               </label>
               <button
                 type="button"
                 onClick={handlePolish}
                 disabled={!editing || polishing || !hypothesis.trim()}
-                className="rounded-md bg-purple-600/80 hover:bg-purple-500 disabled:opacity-30 disabled:cursor-not-allowed px-3 py-1 text-xs font-medium text-white"
+                className="rounded-md bg-me-ochre/90 px-3 py-1 text-xs font-black text-white transition-colors hover:bg-me-ochre disabled:cursor-not-allowed disabled:opacity-30"
                 title={!editing ? 'Save draft first, then polish' : ''}
               >
                 {polishing ? '诸葛亮润色中…' : '🪄 让诸葛亮润色'}
@@ -291,26 +291,26 @@ export function InitiativeFormDrawer({
               onChange={e => setHypothesis(e.target.value)}
               rows={8}
               placeholder="e.g. 因为 CTS 已经在 china tour nz 拿到第 4 名，Wendy Wu 第 1，预期投 Meta 广告抢 retargeting + 中文落地页 60 天内把转化率 +30%..."
-              className="w-full rounded-lg bg-slate-900 border border-white/10 px-3 py-2 text-sm text-white placeholder:text-slate-600 resize-none font-mono leading-relaxed"
+              className="w-full resize-none rounded-lg border border-black/15 bg-white px-3 py-2 font-mono text-sm leading-relaxed text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
             />
-            <p className="text-[11px] text-slate-500">
+            <p className="text-[11px] font-semibold text-me-charcoal/55">
               90 天后归因看 hypothesis 是否被验证 — 写得越具体越能学到东西。
-              {!editing && <span className="block mt-1 text-amber-400">先保存草稿，再用诸葛亮润色（润色需要 initiative 上下文）。</span>}
+              {!editing && <span className="mt-1 block font-bold text-me-ochre">先保存草稿，再用诸葛亮润色（润色需要 initiative 上下文）。</span>}
             </p>
           </div>
 
           {error && (
-            <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-4 py-2 text-sm text-red-400">
+            <div className="rounded-xl border border-status-rej/30 bg-status-rej/10 px-4 py-2 text-sm font-semibold text-status-rej">
               {error}
             </div>
           )}
 
           {/* Footer actions */}
-          <div className="flex justify-end gap-2 pt-4 border-t border-white/10">
+          <div className="flex justify-end gap-2 border-t border-black/10 pt-4">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm text-slate-400 hover:text-white"
+              className="px-4 py-2 text-sm font-black text-me-charcoal/55 hover:text-me-charcoal"
             >
               Cancel
             </button>
@@ -318,7 +318,7 @@ export function InitiativeFormDrawer({
               type="button"
               onClick={handleSave}
               disabled={saving || !title.trim() || (isSupporting && !supportsId)}
-              className="rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-30 disabled:cursor-not-allowed px-6 py-2 text-sm font-medium text-white"
+              className="rounded-lg bg-me-ochre px-6 py-2 text-sm font-black text-white transition-colors hover:bg-me-ochre/90 disabled:cursor-not-allowed disabled:opacity-30"
             >
               {saving ? 'Saving…' : editing ? 'Save' : 'Create Initiative'}
             </button>

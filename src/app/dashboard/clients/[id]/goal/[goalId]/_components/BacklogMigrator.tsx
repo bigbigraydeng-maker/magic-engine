@@ -94,46 +94,46 @@ export function BacklogMigrator({ clientId, goal }: Props) {
   if (count === 0) return null
 
   return (
-    <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.04] p-4">
+    <div className="rounded-xl border border-status-exec/30 bg-status-exec/10 p-4">
       <button
         type="button"
         onClick={toggleExpand}
-        className="w-full flex items-center justify-between text-left"
+        className="flex w-full items-center justify-between text-left"
       >
         <div>
-          <h3 className="text-sm font-semibold text-amber-300">
+          <h3 className="text-sm font-black text-status-exec">
             ⚠️ Unassigned Backlog
-            {count !== null && <span className="ml-2 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px]">{count}</span>}
+            {count !== null && <span className="ml-2 rounded-full bg-status-exec/20 px-1.5 py-0.5 text-[10px] font-bold">{count}</span>}
           </h3>
-          <p className="text-[11px] text-slate-500 mt-0.5">
+          <p className="mt-0.5 text-[11px] font-semibold text-me-charcoal/55">
             老 actions 还未归类到 Initiative — FDE 选择性迁移到上方的 Initiative。
           </p>
         </div>
-        <span className="text-slate-500 text-xs">{expanded ? '▲' : '▼'}</span>
+        <span className="text-xs text-me-charcoal/55">{expanded ? '▲' : '▼'}</span>
       </button>
 
       {expanded && (
         <div className="mt-4 space-y-3">
-          {loading && <p className="text-xs text-slate-500">Loading backlog…</p>}
+          {loading && <p className="text-xs font-semibold text-me-charcoal/55">Loading backlog…</p>}
 
           {!loading && actions.length === 0 && (
-            <p className="text-xs text-slate-500">Backlog 已清空 — 不需要操作。</p>
+            <p className="text-xs font-semibold text-me-charcoal/55">Backlog 已清空 — 不需要操作。</p>
           )}
 
           {actions.length > 0 && (
             <>
-              <div className="max-h-72 overflow-y-auto rounded-lg border border-white/5 bg-slate-900/40 divide-y divide-white/5">
+              <div className="max-h-72 divide-y divide-black/5 overflow-y-auto rounded-lg border border-black/10 bg-white">
                 {actions.map(a => (
-                  <label key={a.id} className="flex items-start gap-3 px-3 py-2 hover:bg-white/[0.03] cursor-pointer">
+                  <label key={a.id} className="flex cursor-pointer items-start gap-3 px-3 py-2 hover:bg-me-ivory">
                     <input
                       type="checkbox"
                       checked={selectedIds.has(a.id)}
                       onChange={() => toggleSelect(a.id)}
                       className="mt-0.5"
                     />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-medium text-slate-200 truncate">{a.title}</div>
-                      <div className="text-[10px] text-slate-500 mt-0.5">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-xs font-bold text-me-charcoal">{a.title}</div>
+                      <div className="mt-0.5 text-[10px] font-semibold text-me-charcoal/55">
                         {a.dimension} · {a.status}
                       </div>
                     </div>
@@ -141,13 +141,13 @@ export function BacklogMigrator({ clientId, goal }: Props) {
                 ))}
               </div>
 
-              <div className="flex items-end gap-2 pt-2 border-t border-white/10">
+              <div className="flex items-end gap-2 border-t border-black/10 pt-2">
                 <div className="flex-1 space-y-1">
-                  <label className="text-[11px] text-slate-500">Migrate to Initiative</label>
+                  <label className="text-[11px] font-black uppercase tracking-wide text-me-charcoal/55">Migrate to Initiative</label>
                   <select
                     value={targetInitiativeId}
                     onChange={e => setTargetInitiativeId(e.target.value)}
-                    className="w-full rounded-lg bg-slate-900 border border-white/10 px-3 py-1.5 text-xs text-white"
+                    className="w-full rounded-lg border border-black/15 bg-white px-3 py-1.5 text-xs font-semibold text-me-charcoal focus:border-me-ochre focus:outline-none"
                   >
                     <option value="">— Choose target initiative —</option>
                     {terminals.map(t => (
@@ -161,13 +161,13 @@ export function BacklogMigrator({ clientId, goal }: Props) {
                   type="button"
                   onClick={handleMigrate}
                   disabled={migrating || selectedIds.size === 0 || !targetInitiativeId}
-                  className="rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-30 px-4 py-1.5 text-xs font-medium text-white"
+                  className="rounded-lg bg-me-ochre px-4 py-1.5 text-xs font-black text-white transition-colors hover:bg-me-ochre/90 disabled:opacity-30"
                 >
                   {migrating ? 'Migrating…' : `Migrate ${selectedIds.size}`}
                 </button>
               </div>
 
-              {error && <p className="text-xs text-red-400">{error}</p>}
+              {error && <p className="text-xs font-semibold text-status-rej">{error}</p>}
             </>
           )}
         </div>

@@ -123,19 +123,19 @@ function AddDomainModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
       <form
-        className="w-full max-w-lg rounded-xl bg-slate-900 border border-white/10 p-6 space-y-4"
+        className="w-full max-w-lg space-y-4 rounded-xl border border-black/10 bg-white p-6 shadow-card"
         onClick={e => e.stopPropagation()}
         onSubmit={submit}
       >
-        <h3 className="text-base font-semibold text-white">Add Competitor Domain</h3>
-        <p className="text-xs text-slate-400">{labelSubIndustry(subIndustry)}</p>
+        <h3 className="font-display text-base font-bold text-me-charcoal">Add Competitor Domain</h3>
+        <p className="text-xs font-semibold text-me-charcoal/55">{labelSubIndustry(subIndustry)}</p>
 
         <div className="space-y-1">
-          <label className="text-xs text-slate-400">Domain</label>
+          <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">Domain</label>
           <input
-            className="w-full rounded-lg bg-slate-800 border border-white/10 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+            className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
             placeholder="e.g. competitorname.co.nz"
             value={domain}
             onChange={e => setDomain(e.target.value)}
@@ -145,18 +145,18 @@ function AddDomainModal({
         </div>
 
         <div className="space-y-2">
-          <label className="text-xs text-slate-400">Keywords</label>
-          <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+          <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">Keywords</label>
+          <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-me-charcoal/80">
             <input type="radio" checked={useSharedKw} onChange={() => setUseSharedKw(true)} />
             Use shared keywords for this sub-industry ({existingKeywords.length} keywords)
           </label>
-          <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+          <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-me-charcoal/80">
             <input type="radio" checked={!useSharedKw} onChange={() => setUseSharedKw(false)} />
             Custom keywords (one per line)
           </label>
           {!useSharedKw && (
             <textarea
-              className="w-full rounded-lg bg-slate-800 border border-white/10 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 h-24 resize-none"
+              className="h-24 w-full resize-none rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
               placeholder={'china tour nz\nchina travel packages nz'}
               value={customKw}
               onChange={e => setCustomKw(e.target.value)}
@@ -165,34 +165,34 @@ function AddDomainModal({
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs text-slate-400">Notes (optional)</label>
+          <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">Notes (optional)</label>
           <input
-            className="w-full rounded-lg bg-slate-800 border border-white/10 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none"
+            className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
             placeholder="e.g. Direct competitor, China-focused"
             value={notes}
             onChange={e => setNotes(e.target.value)}
           />
         </div>
 
-        <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+        <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-me-charcoal/80">
           <input type="checkbox" checked={isClient} onChange={e => setIsClient(e.target.checked)} />
           This is a Magic Engine client domain
         </label>
 
-        {err && <p className="text-xs text-red-400">{err}</p>}
+        {err && <p className="text-xs font-semibold text-status-rej">{err}</p>}
 
         <div className="flex gap-2 pt-1">
           <button
             type="submit"
             disabled={saving}
-            className="flex-1 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 px-4 py-2 text-sm font-medium text-white transition-colors"
+            className="flex-1 rounded-lg bg-me-ochre px-4 py-2 text-sm font-black text-white transition-colors hover:bg-me-ochre/90 disabled:opacity-50"
           >
             {saving ? 'Adding…' : 'Add Domain'}
           </button>
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
+            className="px-4 py-2 text-sm font-black text-me-charcoal/55 transition-colors hover:text-me-charcoal"
           >
             Cancel
           </button>
@@ -229,47 +229,47 @@ function DomainRow({
   }
 
   return (
-    <tr className="border-t border-white/5 hover:bg-white/[0.02] transition-colors">
-      <td className="py-2.5 px-4">
+    <tr className="border-t border-black/5 transition-colors hover:bg-me-ivory">
+      <td className="px-4 py-2.5">
         <div className="flex items-center gap-2">
-          <span className="text-sm text-white font-mono">{domain.domain}</span>
+          <span className="font-mono text-sm font-semibold text-me-charcoal">{domain.domain}</span>
           {domain.is_client && (
-            <span className="rounded px-1.5 py-0.5 bg-blue-500/20 text-blue-300 text-[10px] font-semibold">CLIENT</span>
+            <span className="rounded-full bg-me-ochre/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-me-ochre">CLIENT</span>
           )}
           {domain.notes && (
-            <span className="text-xs text-slate-500 truncate max-w-[180px]" title={domain.notes}>{domain.notes}</span>
+            <span className="max-w-[180px] truncate text-xs font-semibold text-me-charcoal/45" title={domain.notes}>{domain.notes}</span>
           )}
         </div>
       </td>
-      <td className="py-2.5 px-4 text-center">
+      <td className="px-4 py-2.5 text-center">
         {domain.seo_score !== null ? (
-          <span className="text-sm font-semibold text-white">{domain.seo_score}</span>
+          <span className="text-sm font-black text-me-charcoal">{domain.seo_score}</span>
         ) : (
-          <span className="text-xs text-slate-500">—</span>
+          <span className="text-xs font-semibold text-me-charcoal/45">—</span>
         )}
       </td>
-      <td className="py-2.5 px-4 text-center">
-        <span className={`text-xs ${stale ? 'text-amber-400' : 'text-slate-400'}`}>
+      <td className="px-4 py-2.5 text-center">
+        <span className={`text-xs font-semibold ${stale ? 'text-status-exec' : 'text-me-charcoal/55'}`}>
           {stale && domain.last_collected_at ? '⚠ ' : ''}
           {formatDate(domain.last_collected_at)}
         </span>
       </td>
-      <td className="py-2.5 px-4 text-center text-xs text-slate-500">
+      <td className="px-4 py-2.5 text-center text-xs font-semibold text-me-charcoal/45">
         {domain.keywords.length}
       </td>
-      <td className="py-2.5 px-4">
+      <td className="px-4 py-2.5">
         <div className="flex items-center justify-end gap-2">
           <button
             onClick={handleCollect}
             disabled={collecting}
-            className="rounded-md bg-white/[0.06] hover:bg-white/10 disabled:opacity-40 px-3 py-1 text-xs text-slate-300 transition-colors"
+            className="rounded-md border border-black/10 bg-white px-3 py-1 text-xs font-black text-me-charcoal/75 transition-colors hover:border-black/15 hover:text-me-charcoal disabled:opacity-40"
           >
             {collecting ? 'Running…' : 'Refresh'}
           </button>
           <button
             onClick={handleDelete}
             disabled={deleting}
-            className="rounded-md hover:bg-red-500/20 disabled:opacity-40 px-3 py-1 text-xs text-red-400 hover:text-red-300 transition-colors"
+            className="rounded-md px-3 py-1 text-xs font-black text-status-rej transition-colors hover:bg-status-rej/10 disabled:opacity-40"
           >
             Remove
           </button>
@@ -311,12 +311,12 @@ function SubIndustryPanel({
   }
 
   return (
-    <div className="rounded-xl border border-white/10 bg-slate-900/60 overflow-hidden">
+    <div className="overflow-hidden rounded-xl border border-black/10 bg-white shadow-sm">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+      <div className="flex items-center justify-between border-b border-black/10 px-4 py-3">
         <div>
-          <h3 className="text-sm font-semibold text-white">{labelSubIndustry(subIndustry)}</h3>
-          <p className="text-xs text-slate-500 mt-0.5">{domains.length} domains</p>
+          <h3 className="font-display text-sm font-bold text-me-charcoal">{labelSubIndustry(subIndustry)}</h3>
+          <p className="mt-0.5 text-xs font-semibold text-me-charcoal/45">{domains.length} domains</p>
         </div>
 
         {/* Percentile badges + trend */}
@@ -324,36 +324,36 @@ function SubIndustryPanel({
           <div className="flex items-center gap-4">
             <TrendSparkline subIndustry={subIndustry} />
             <div className="text-center">
-              <div className="text-[10px] text-slate-500 uppercase tracking-wide">P50</div>
-              <div className="text-base font-bold text-white">{stats.p50}</div>
+              <div className="text-[10px] font-black uppercase tracking-wide text-me-charcoal/45">P50</div>
+              <div className="text-base font-bold text-me-charcoal">{stats.p50}</div>
             </div>
             <div className="text-center">
-              <div className="text-[10px] text-slate-500 uppercase tracking-wide">P75</div>
-              <div className="text-base font-bold text-emerald-400">{stats.p75}</div>
+              <div className="text-[10px] font-black uppercase tracking-wide text-me-charcoal/45">P75</div>
+              <div className="text-base font-bold text-status-track">{stats.p75}</div>
             </div>
             <div className="text-center">
-              <div className="text-[10px] text-slate-500 uppercase tracking-wide">P90</div>
-              <div className="text-base font-bold text-blue-400">{stats.p90}</div>
+              <div className="text-[10px] font-black uppercase tracking-wide text-me-charcoal/45">P90</div>
+              <div className="text-base font-bold text-me-ochre">{stats.p90}</div>
             </div>
             <div className="text-center">
-              <div className="text-[10px] text-slate-500 uppercase tracking-wide">n</div>
-              <div className="text-base font-bold text-slate-400">{stats.n}</div>
+              <div className="text-[10px] font-black uppercase tracking-wide text-me-charcoal/45">n</div>
+              <div className="text-base font-bold text-me-charcoal/55">{stats.n}</div>
             </div>
           </div>
         ) : (
-          <span className="text-xs text-slate-500">No scores yet</span>
+          <span className="text-xs font-semibold text-me-charcoal/45">No scores yet</span>
         )}
       </div>
 
       {/* Domain table */}
       <table className="w-full">
         <thead>
-          <tr className="text-[10px] text-slate-500 uppercase tracking-wide">
-            <th className="text-left py-2 px-4">Domain</th>
-            <th className="text-center py-2 px-4">SEO Score</th>
-            <th className="text-center py-2 px-4">Last Collected</th>
-            <th className="text-center py-2 px-4">Keywords</th>
-            <th className="py-2 px-4"></th>
+          <tr className="text-[10px] font-black uppercase tracking-wide text-me-charcoal/45">
+            <th className="px-4 py-2 text-left">Domain</th>
+            <th className="px-4 py-2 text-center">SEO Score</th>
+            <th className="px-4 py-2 text-center">Last Collected</th>
+            <th className="px-4 py-2 text-center">Keywords</th>
+            <th className="px-4 py-2"></th>
           </tr>
         </thead>
         <tbody>
@@ -364,10 +364,10 @@ function SubIndustryPanel({
       </table>
 
       {/* Add domain */}
-      <div className="px-4 py-3 border-t border-white/5">
+      <div className="border-t border-black/5 px-4 py-3">
         <button
           onClick={() => setShowAdd(true)}
-          className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+          className="text-xs font-black text-me-ochre transition-colors hover:text-me-charcoal"
         >
           + Add competitor domain
         </button>
@@ -403,9 +403,9 @@ function TrendSparkline({ subIndustry }: { subIndustry: string }) {
       .finally(() => setLoading(false))
   }, [subIndustry])
 
-  if (loading) return <div className="h-8 w-32 animate-pulse bg-white/[0.04] rounded" />
+  if (loading) return <div className="h-8 w-32 animate-pulse rounded bg-me-ivory" />
   if (!data || data.length < 2) {
-    return <span className="text-[10px] text-slate-600 italic">需 2 周后查看趋势</span>
+    return <span className="text-[10px] font-semibold italic text-me-charcoal/45">需 2 周后查看趋势</span>
   }
 
   const W = 120, H = 32
@@ -418,18 +418,18 @@ function TrendSparkline({ subIndustry }: { subIndustry: string }) {
   const last = data[data.length - 1].p50
   const first = data[0].p50
   const delta = last - first
-  const deltaColor = delta > 0 ? 'text-emerald-400' : delta < 0 ? 'text-red-400' : 'text-slate-400'
+  const deltaColor = delta > 0 ? 'text-status-track' : delta < 0 ? 'text-status-rej' : 'text-me-charcoal/55'
   const deltaIcon = delta > 0 ? '↑' : delta < 0 ? '↓' : '→'
 
   return (
     <div className="flex items-center gap-2" title={`${data.length} weeks · P50 ${first} → ${last}`}>
       <svg width={W} height={H} className="overflow-visible">
-        <path d={path} fill="none" stroke="rgb(96 165 250)" strokeWidth="1.5" />
+        <path d={path} fill="none" stroke="#C4912E" strokeWidth="1.5" />
         {data.map((d, i) => (
-          <circle key={i} cx={x(i)} cy={y(d.p50)} r="1.5" fill="rgb(96 165 250)" />
+          <circle key={i} cx={x(i)} cy={y(d.p50)} r="1.5" fill="#C4912E" />
         ))}
       </svg>
-      <span className={`text-[10px] ${deltaColor} tabular-nums`}>
+      <span className={`text-[10px] font-bold tabular-nums ${deltaColor}`}>
         {deltaIcon} {Math.abs(delta)}
       </span>
     </div>
@@ -464,45 +464,45 @@ function CronRunsPanel({ refreshKey }: { refreshKey: number }) {
       .finally(() => setLoading(false))
   }, [refreshKey])
 
-  const statusColor = (s: string) => s === 'completed' ? 'text-emerald-400 bg-emerald-500/10'
-    : s === 'partial' ? 'text-amber-400 bg-amber-500/10'
-    : s === 'running' ? 'text-blue-400 bg-blue-500/10'
-    : 'text-red-400 bg-red-500/10'
+  const statusColor = (s: string) => s === 'completed' ? 'text-status-track bg-status-track/10'
+    : s === 'partial' ? 'text-status-exec bg-status-exec/10'
+    : s === 'running' ? 'text-status-sched bg-status-sched/10'
+    : 'text-status-rej bg-status-rej/10'
 
-  if (loading) return <div className="text-sm text-slate-500 py-8 text-center">Loading runs…</div>
+  if (loading) return <div className="py-8 text-center text-sm font-semibold text-me-charcoal/45">Loading runs…</div>
   if (runs.length === 0) return (
-    <div className="text-sm text-slate-500 py-8 text-center">
+    <div className="py-8 text-center text-sm font-semibold text-me-charcoal/45">
       No cron runs yet. Click &quot;Run all now&quot; to trigger one, or wait for the weekly schedule.
     </div>
   )
 
   return (
-    <div className="rounded-xl border border-white/10 bg-slate-900/60 overflow-hidden">
+    <div className="overflow-hidden rounded-xl border border-black/10 bg-white shadow-sm">
       <table className="w-full text-xs">
-        <thead className="text-[10px] text-slate-500 uppercase tracking-wide">
+        <thead className="text-[10px] font-black uppercase tracking-wide text-me-charcoal/45">
           <tr>
-            <th className="text-left py-2.5 px-4">Started</th>
-            <th className="text-center py-2.5 px-2">Status</th>
-            <th className="text-center py-2.5 px-2">Domains</th>
-            <th className="text-center py-2.5 px-2">Benchmarks</th>
-            <th className="text-center py-2.5 px-2">Duration</th>
-            <th className="text-left py-2.5 px-4">Trigger</th>
+            <th className="px-4 py-2.5 text-left">Started</th>
+            <th className="px-2 py-2.5 text-center">Status</th>
+            <th className="px-2 py-2.5 text-center">Domains</th>
+            <th className="px-2 py-2.5 text-center">Benchmarks</th>
+            <th className="px-2 py-2.5 text-center">Duration</th>
+            <th className="px-4 py-2.5 text-left">Trigger</th>
           </tr>
         </thead>
         <tbody>
           {runs.map(r => (
-            <tr key={r.id} className="border-t border-white/5">
-              <td className="py-2 px-4 text-slate-300 font-mono">{formatDate(r.started_at)} <span className="text-slate-500">{r.started_at.split('T')[1]?.slice(0,5)}</span></td>
-              <td className="py-2 px-2 text-center">
-                <span className={`inline-block rounded px-1.5 py-0.5 ${statusColor(r.status)}`}>{r.status}</span>
+            <tr key={r.id} className="border-t border-black/5">
+              <td className="px-4 py-2 font-mono font-semibold text-me-charcoal/80">{formatDate(r.started_at)} <span className="text-me-charcoal/45">{r.started_at.split('T')[1]?.slice(0,5)}</span></td>
+              <td className="px-2 py-2 text-center">
+                <span className={`inline-block rounded-full px-1.5 py-0.5 font-bold ${statusColor(r.status)}`}>{r.status}</span>
               </td>
-              <td className="py-2 px-2 text-center tabular-nums text-slate-300">
+              <td className="px-2 py-2 text-center font-semibold tabular-nums text-me-charcoal/80">
                 {r.domains_succeeded}/{r.domains_attempted}
-                {r.domains_failed > 0 && <span className="text-red-400 ml-1">({r.domains_failed} fail)</span>}
+                {r.domains_failed > 0 && <span className="ml-1 font-bold text-status-rej">({r.domains_failed} fail)</span>}
               </td>
-              <td className="py-2 px-2 text-center tabular-nums font-semibold text-emerald-400">{r.benchmarks_written}</td>
-              <td className="py-2 px-2 text-center tabular-nums text-slate-500">{r.duration_seconds != null ? `${r.duration_seconds}s` : '—'}</td>
-              <td className="py-2 px-4 text-slate-500">{r.triggered_by}{r.error_message && <span className="text-red-400 ml-1">⚠</span>}</td>
+              <td className="px-2 py-2 text-center font-black tabular-nums text-status-track">{r.benchmarks_written}</td>
+              <td className="px-2 py-2 text-center font-semibold tabular-nums text-me-charcoal/45">{r.duration_seconds != null ? `${r.duration_seconds}s` : '—'}</td>
+              <td className="px-4 py-2 font-semibold text-me-charcoal/45">{r.triggered_by}{r.error_message && <span className="ml-1 text-status-rej">⚠</span>}</td>
             </tr>
           ))}
         </tbody>
@@ -567,85 +567,87 @@ export default function IndustryBaselinesPage() {
   const grouped = groupBySubIndustry(domains)
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-8 space-y-6">
-      {/* Page header */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-xl font-bold text-white">Industry Baselines</h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Competitor domain watchlist for SEO benchmark scoring. Scores feed into 华佗&apos;s P50/P75/P90 benchmarks.
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          {triggerMsg && (
-            <span className={`text-xs ${triggerMsg.startsWith('✓') ? 'text-emerald-400' : 'text-red-400'}`}>
-              {triggerMsg}
-            </span>
-          )}
-          <button
-            onClick={handleTrigger}
-            disabled={triggering}
-            className="rounded-lg bg-blue-500/20 hover:bg-blue-500/30 disabled:opacity-50 border border-blue-500/40 px-4 py-2 text-xs font-semibold text-blue-200 transition-colors"
-          >
-            {triggering ? 'Starting…' : '▶ Run all now'}
-          </button>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-white/10">
-        {(['baselines', 'runs'] as const).map(tab => (
-          <button
-            key={tab}
-            onClick={() => {
-              setActiveTab(tab)
-              if (tab === 'runs') setRunsRefreshKey(k => k + 1)
-            }}
-            className={`px-4 py-2 text-sm font-semibold transition-colors border-b-2 -mb-px ${
-              activeTab === tab
-                ? 'border-blue-400 text-blue-300'
-                : 'border-transparent text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            {tab === 'baselines' ? 'Baselines' : 'Cron Runs'}
-          </button>
-        ))}
-      </div>
-
-      {activeTab === 'baselines' && (
-        <>
-          {/* Info banner */}
-          <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 px-4 py-3 text-xs text-blue-300 space-y-1">
-            <p><strong>How it works:</strong> Per-domain &quot;Refresh&quot; runs one DataForSEO call; &quot;Run all now&quot; (top right) runs the whole watchlist + writes to industry_benchmarks.</p>
-            <p>Domains marked <span className="text-amber-300">⚠</span> haven&apos;t been collected in 30+ days. Sparkline shows weekly P50 trend.</p>
+    <div className="min-h-screen bg-[#f6f7f2] px-4 py-8 md:px-6">
+      <div className="mx-auto max-w-5xl space-y-6">
+        {/* Page header */}
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="font-display text-3xl font-bold tracking-tight text-me-charcoal">Industry Baselines</h1>
+            <p className="mt-1 text-sm font-semibold text-me-charcoal/55">
+              Competitor domain watchlist for SEO benchmark scoring. Scores feed into 华佗&apos;s P50/P75/P90 benchmarks.
+            </p>
           </div>
+          <div className="flex items-center gap-3">
+            {triggerMsg && (
+              <span className={`text-xs font-bold ${triggerMsg.startsWith('✓') ? 'text-status-track' : 'text-status-rej'}`}>
+                {triggerMsg}
+              </span>
+            )}
+            <button
+              onClick={handleTrigger}
+              disabled={triggering}
+              className="rounded-lg bg-me-ochre px-4 py-2 text-xs font-black text-white transition-colors hover:bg-me-ochre/90 disabled:opacity-50"
+            >
+              {triggering ? 'Starting…' : '▶ Run all now'}
+            </button>
+          </div>
+        </div>
 
-          {loading && (
-            <div className="text-sm text-slate-500 py-8 text-center">Loading…</div>
-          )}
-
-          {error && (
-            <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-400">{error}</div>
-          )}
-
-          {!loading && !error && grouped.size === 0 && (
-            <div className="text-sm text-slate-500 py-8 text-center">No baseline domains found. Run the S2 seed migration first.</div>
-          )}
-
-          {Array.from(grouped.entries()).map(([subIndustry, subDomains]) => (
-            <SubIndustryPanel
-              key={subIndustry}
-              subIndustry={subIndustry}
-              domains={subDomains}
-              onRefresh={load}
-            />
+        {/* Tabs */}
+        <div className="flex gap-1 border-b border-black/10">
+          {(['baselines', 'runs'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => {
+                setActiveTab(tab)
+                if (tab === 'runs') setRunsRefreshKey(k => k + 1)
+              }}
+              className={`-mb-px border-b-2 px-4 py-2 text-sm font-black transition-colors ${
+                activeTab === tab
+                  ? 'border-me-ochre text-me-ochre'
+                  : 'border-transparent text-me-charcoal/45 hover:text-me-charcoal/75'
+              }`}
+            >
+              {tab === 'baselines' ? 'Baselines' : 'Cron Runs'}
+            </button>
           ))}
-        </>
-      )}
+        </div>
 
-      {activeTab === 'runs' && (
-        <CronRunsPanel refreshKey={runsRefreshKey} />
-      )}
+        {activeTab === 'baselines' && (
+          <>
+            {/* Info banner */}
+            <div className="space-y-1 rounded-xl border border-me-ochre/30 bg-me-ochre/10 px-4 py-3 text-xs font-semibold text-me-charcoal/80">
+              <p><strong className="font-black text-me-charcoal">How it works:</strong> Per-domain &quot;Refresh&quot; runs one DataForSEO call; &quot;Run all now&quot; (top right) runs the whole watchlist + writes to industry_benchmarks.</p>
+              <p>Domains marked <span className="font-bold text-status-exec">⚠</span> haven&apos;t been collected in 30+ days. Sparkline shows weekly P50 trend.</p>
+            </div>
+
+            {loading && (
+              <div className="py-8 text-center text-sm font-semibold text-me-charcoal/45">Loading…</div>
+            )}
+
+            {error && (
+              <div className="rounded-xl border border-status-rej/30 bg-status-rej/10 px-4 py-3 text-sm font-semibold text-status-rej">{error}</div>
+            )}
+
+            {!loading && !error && grouped.size === 0 && (
+              <div className="py-8 text-center text-sm font-semibold text-me-charcoal/45">No baseline domains found. Run the S2 seed migration first.</div>
+            )}
+
+            {Array.from(grouped.entries()).map(([subIndustry, subDomains]) => (
+              <SubIndustryPanel
+                key={subIndustry}
+                subIndustry={subIndustry}
+                domains={subDomains}
+                onRefresh={load}
+              />
+            ))}
+          </>
+        )}
+
+        {activeTab === 'runs' && (
+          <CronRunsPanel refreshKey={runsRefreshKey} />
+        )}
+      </div>
     </div>
   )
 }

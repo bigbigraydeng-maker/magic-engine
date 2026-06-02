@@ -18,11 +18,11 @@
 import { useState } from 'react'
 import type { GoalRow, GoalVerdict } from '@/types/strategy'
 
-const VERDICT_BADGE: Record<GoalVerdict, { label: string; color: string; emoji: string }> = {
-  confirmed:    { label: 'Confirmed',    color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30', emoji: '✅' },
-  partial:      { label: 'Partial',      color: 'bg-amber-500/20 text-amber-300 border-amber-500/30',       emoji: '🟡' },
-  reversed:     { label: 'Reversed',     color: 'bg-rose-500/20 text-rose-300 border-rose-500/30',           emoji: '❌' },
-  inconclusive: { label: 'Inconclusive', color: 'bg-slate-500/20 text-slate-400 border-slate-500/30',       emoji: '➖' },
+const VERDICT_BADGE: Record<GoalVerdict, { label: string; color: string; emoji: string; textClass: string }> = {
+  confirmed:    { label: 'Confirmed',    color: 'bg-status-track/10 text-status-track border-status-track/30', emoji: '✅', textClass: 'text-status-track' },
+  partial:      { label: 'Partial',      color: 'bg-status-exec/10 text-status-exec border-status-exec/30',     emoji: '🟡', textClass: 'text-status-exec' },
+  reversed:     { label: 'Reversed',     color: 'bg-status-rej/10 text-status-rej border-status-rej/30',       emoji: '❌', textClass: 'text-status-rej' },
+  inconclusive: { label: 'Inconclusive', color: 'bg-me-stone text-me-taupe border-me-taupe/30',                emoji: '➖', textClass: 'text-me-taupe' },
 }
 
 interface Props {
@@ -46,19 +46,19 @@ export function VerdictPanel({ goal, onJudged }: Props) {
   const daysOverdue = Math.floor((Date.now() - dueDate.getTime()) / 86_400_000)
 
   return (
-    <div className={`rounded-xl border p-6 ${
+    <div className={`rounded-xl border p-6 shadow-sm ${
       goal.status === 'expired'
-        ? 'border-amber-500/40 bg-amber-500/[0.05]'
-        : 'border-blue-500/30 bg-blue-500/[0.04]'
+        ? 'border-status-exec/40 bg-status-exec/10'
+        : 'border-me-ochre/30 bg-me-ochre/10'
     }`}>
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h3 className="text-base font-semibold text-white">
+          <h3 className="font-display text-base font-bold text-me-charcoal">
             {goal.status === 'expired'
               ? `⚠️ Goal Expired ${daysOverdue} day(s) ago`
               : '📊 Goal in progress'}
           </h3>
-          <p className="mt-1 text-sm text-slate-400">
+          <p className="mt-1 text-sm font-semibold text-me-charcoal/55">
             {goal.status === 'expired'
               ? 'Supply current value of primary metric to compute verdict and archive this goal.'
               : 'Goal still active. You can submit an early verdict if needed (or wait until period ends).'}
@@ -67,10 +67,10 @@ export function VerdictPanel({ goal, onJudged }: Props) {
         <button
           type="button"
           onClick={() => setModalOpen(true)}
-          className={`shrink-0 rounded-lg px-4 py-2 text-sm font-medium text-white ${
+          className={`shrink-0 rounded-lg px-4 py-2 text-sm font-black text-white transition-colors ${
             goal.status === 'expired'
-              ? 'bg-amber-600 hover:bg-amber-500'
-              : 'bg-blue-600 hover:bg-blue-500'
+              ? 'bg-status-exec hover:bg-status-exec/90'
+              : 'bg-me-ochre hover:bg-me-ochre/90'
           }`}
         >
           Submit Verdict
@@ -95,23 +95,23 @@ function VerdictResult({ goal }: { goal: GoalRow }) {
   const badge = VERDICT_BADGE[goal.verdict]
 
   return (
-    <div className={`rounded-xl border p-6 ${badge.color}`}>
+    <div className={`rounded-xl border p-6 shadow-sm ${badge.color}`}>
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
             <span className="text-3xl">{badge.emoji}</span>
             <div>
-              <div className="text-xs uppercase tracking-wide opacity-80">90-Day Verdict</div>
-              <div className="text-2xl font-bold">{badge.label}</div>
+              <div className="text-xs font-black uppercase tracking-wide opacity-80">90-Day Verdict</div>
+              <div className="font-display text-2xl font-bold">{badge.label}</div>
             </div>
           </div>
           {goal.verdict_summary && (
-            <p className="mt-4 text-sm whitespace-pre-wrap opacity-90 max-w-2xl">
+            <p className="mt-4 max-w-2xl whitespace-pre-wrap text-sm font-semibold opacity-90">
               {goal.verdict_summary}
             </p>
           )}
           {goal.verdict_at && (
-            <p className="mt-3 text-[11px] opacity-60">
+            <p className="mt-3 text-[11px] font-semibold opacity-60">
               Judged on {new Date(goal.verdict_at).toLocaleString('en-NZ')}
             </p>
           )}
@@ -170,18 +170,18 @@ function VerdictModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
       <div
-        className="w-full max-w-lg rounded-xl bg-slate-900 border border-white/10 p-6 space-y-4"
+        className="w-full max-w-lg space-y-4 rounded-xl border border-black/10 bg-white p-6 shadow-card"
         onClick={e => e.stopPropagation()}
       >
-        <h3 className="text-base font-semibold text-white">Submit Goal Verdict</h3>
-        <p className="text-xs text-slate-400">
+        <h3 className="font-display text-base font-bold text-me-charcoal">Submit Goal Verdict</h3>
+        <p className="text-xs font-semibold text-me-charcoal/55">
           {goal.title}
         </p>
 
         <div className="space-y-2">
-          <label className="text-xs text-slate-400 uppercase tracking-wide">
+          <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">
             Current value of {goal.primary_metric_label}
           </label>
           <div className="flex items-center gap-3">
@@ -190,24 +190,24 @@ function VerdictModal({
               value={currentValue}
               onChange={e => setCurrentValue(e.target.value)}
               placeholder={`Was ${goal.baseline_value}, target ${goal.target_value}`}
-              className="w-48 rounded-lg bg-slate-800 border border-white/10 px-3 py-2 text-sm text-white"
+              className="w-48 rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
               autoFocus
             />
-            <span className="text-xs text-slate-500">{goal.primary_metric_unit}</span>
+            <span className="text-xs font-semibold text-me-charcoal/55">{goal.primary_metric_unit}</span>
           </div>
-          <p className="text-[11px] text-slate-500">
+          <p className="text-[11px] font-semibold text-me-charcoal/55">
             Baseline {goal.baseline_value.toLocaleString()} → Target {goal.target_value.toLocaleString()}
           </p>
         </div>
 
         {preview && (
-          <div className="rounded-lg border border-white/10 bg-slate-950/60 px-4 py-3">
+          <div className="rounded-lg border border-black/10 bg-me-ivory px-4 py-3">
             <div className="flex items-center gap-2">
               <span className="text-xl">{VERDICT_BADGE[preview.verdict].emoji}</span>
-              <span className={`text-sm font-bold ${VERDICT_BADGE[preview.verdict].color.split(' ')[1]}`}>
+              <span className={`text-sm font-black ${VERDICT_BADGE[preview.verdict].textClass}`}>
                 {VERDICT_BADGE[preview.verdict].label}
               </span>
-              <span className="text-xs text-slate-500 ml-auto">
+              <span className="ml-auto text-xs font-semibold text-me-charcoal/55">
                 Progress {preview.pct}%
               </span>
             </div>
@@ -215,7 +215,7 @@ function VerdictModal({
         )}
 
         <div className="space-y-2">
-          <label className="text-xs text-slate-400 uppercase tracking-wide">
+          <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">
             FDE Summary (optional)
           </label>
           <textarea
@@ -223,22 +223,22 @@ function VerdictModal({
             onChange={e => setExtraSummary(e.target.value)}
             rows={4}
             placeholder="为什么达成 / 没达成？哪些 Initiative 真正起了作用？哪些假设被推翻？这段会进入历史归档用于学习。"
-            className="w-full rounded-lg bg-slate-800 border border-white/10 px-3 py-2 text-sm text-white placeholder:text-slate-600 resize-none"
+            className="w-full resize-none rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
           />
         </div>
 
         {error && (
-          <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-xs text-red-400">
+          <div className="rounded-xl border border-status-rej/30 bg-status-rej/10 px-3 py-2 text-xs font-semibold text-status-rej">
             {error}
           </div>
         )}
 
-        <div className="flex justify-end gap-2 pt-2 border-t border-white/10">
+        <div className="flex justify-end gap-2 border-t border-black/10 pt-2">
           <button
             type="button"
             onClick={onClose}
             disabled={submitting}
-            className="px-4 py-2 text-sm text-slate-400 hover:text-white disabled:opacity-50"
+            className="px-4 py-2 text-sm font-black text-me-charcoal/55 hover:text-me-charcoal disabled:opacity-50"
           >
             Cancel
           </button>
@@ -246,7 +246,7 @@ function VerdictModal({
             type="button"
             onClick={submit}
             disabled={submitting || numericCurrent == null}
-            className="rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-30 px-6 py-2 text-sm font-medium text-white"
+            className="rounded-lg bg-status-track px-6 py-2 text-sm font-black text-white transition-colors hover:bg-status-track/90 disabled:opacity-30"
           >
             {submitting ? 'Judging…' : 'Submit & Archive'}
           </button>

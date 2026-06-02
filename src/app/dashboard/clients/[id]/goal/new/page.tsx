@@ -127,308 +127,310 @@ export default function NewGoalPage() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="max-w-3xl mx-auto px-6 py-8">
-      {/* Header */}
-      <div className="mb-8 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-white">
-            New Goal
-            <span className="ml-2 inline-block rounded bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold text-amber-300 uppercase tracking-wide">
-              Beta
-            </span>
-          </h1>
-          <p className="mt-1 text-sm text-slate-400">
-            Phase 31 · 4-step wizard to set a 90-day client goal.
-          </p>
-        </div>
-      </div>
-
-      {/* Stepper */}
-      <div className="mb-6 flex items-center gap-2 text-xs">
-        {[1, 2, 3, 4].map((s, i) => (
-          <div key={s} className="flex items-center gap-2">
-            <span className={`flex h-7 w-7 items-center justify-center rounded-full font-semibold ${
-              step === s ? 'bg-blue-500 text-white'
-              : step > s ? 'bg-emerald-500/30 text-emerald-300'
-              : 'bg-white/[0.06] text-slate-500'
-            }`}>
-              {step > s ? '✓' : s}
-            </span>
-            <span className={step === s ? 'text-white font-medium' : 'text-slate-500'}>
-              {['Intent', 'Metric', 'Period & Budget', 'Confirm'][i]}
-            </span>
-            {i < 3 && <span className="text-slate-700">›</span>}
-          </div>
-        ))}
-      </div>
-
-      {error && (
-        <div className="mb-4 rounded-lg bg-red-500/10 border border-red-500/20 px-4 py-2 text-sm text-red-400">
-          {error}
-        </div>
-      )}
-
-      {/* Step 1: Intent */}
-      {step === 1 && (
-        <div className="space-y-6 rounded-xl border border-white/10 bg-slate-900/60 p-6">
+    <div className="min-h-screen bg-[#f6f7f2] px-4 py-8 md:px-6">
+      <div className="mx-auto max-w-3xl">
+        {/* Header */}
+        <div className="mb-8 flex items-center justify-between">
           <div>
-            <h2 className="text-base font-semibold text-white">Step 1 · 选择客户意图</h2>
-            <p className="mt-1 text-xs text-slate-400">老板找我们的根本目的是什么？</p>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3">
-            {INTENT_OPTIONS.map(opt => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setIntent(opt.value)}
-                className={`text-left rounded-lg border px-4 py-3 transition-all ${
-                  intent === opt.value
-                    ? 'border-blue-500 bg-blue-500/10'
-                    : 'border-white/10 hover:border-white/20 hover:bg-white/[0.04]'
-                }`}
-              >
-                <div className="flex items-start gap-3">
-                  <span className="text-2xl">{opt.emoji}</span>
-                  <div>
-                    <div className="font-semibold text-white">{opt.title}</div>
-                    <div className="text-xs text-slate-400 mt-0.5">{opt.description}</div>
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
-
-          {intent === 'awareness' && (
-            <div className="space-y-2 border-t border-white/10 pt-4">
-              <label className="text-xs text-slate-400">Awareness 子类型</label>
-              <select
-                value={awarenessSubtype ?? ''}
-                onChange={e => setAwarenessSubtype(e.target.value as AwarenessSubtype)}
-                className="w-full rounded-lg bg-slate-800 border border-white/10 px-3 py-2 text-sm text-white"
-              >
-                <option value="">— 选择子类型 —</option>
-                {AWARENESS_SUBTYPES.map(s => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          <div className="space-y-2">
-            <label className="text-xs text-slate-400">Goal 标题 (FDE 起名)</label>
-            <input
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              placeholder="e.g. CTS 2026 Q3 Sales +50%"
-              className="w-full rounded-lg bg-slate-800 border border-white/10 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-            />
+            <h1 className="flex items-center gap-2 font-display text-3xl font-bold tracking-tight text-me-charcoal">
+              New Goal
+              <span className="inline-block rounded-full bg-me-ochre/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-me-ochre">
+                Beta
+              </span>
+            </h1>
+            <p className="mt-1 text-sm font-semibold text-me-charcoal/55">
+              Phase 31 · 4-step wizard to set a 90-day client goal.
+            </p>
           </div>
         </div>
-      )}
 
-      {/* Step 2: Primary metric */}
-      {step === 2 && (
-        <div className="space-y-6 rounded-xl border border-white/10 bg-slate-900/60 p-6">
-          <div>
-            <h2 className="text-base font-semibold text-white">Step 2 · 选择主指标</h2>
-            <p className="mt-1 text-xs text-slate-400">这个数字决定 90 天后 Goal 是否达成。</p>
-          </div>
-
-          <div className="space-y-2">
-            {recommendedMetrics.map(m => (
-              <button
-                key={m.key}
-                type="button"
-                onClick={() => setSelectedMetric(m)}
-                className={`w-full text-left rounded-lg border px-4 py-3 transition-all ${
-                  selectedMetric?.key === m.key
-                    ? 'border-blue-500 bg-blue-500/10'
-                    : 'border-white/10 hover:border-white/20 hover:bg-white/[0.04]'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-medium text-white">{m.label_zh}</div>
-                    <div className="text-xs text-slate-500 mt-0.5">{m.label_en} · {m.unit}</div>
-                  </div>
-                  <span className={`rounded px-2 py-0.5 text-[10px] font-semibold ${
-                    m.measurement === 'auto'        ? 'bg-emerald-500/20 text-emerald-300'
-                    : m.measurement === 'self_report' ? 'bg-amber-500/20 text-amber-300'
-                    :                                   'bg-blue-500/20 text-blue-300'
-                  }`}>
-                    {m.measurement === 'auto' ? '系统自动测' : m.measurement === 'self_report' ? '客户自报' : 'auto+自报'}
-                  </span>
-                </div>
-                {m.note && <div className="mt-1 text-[11px] text-slate-500">注：{m.note}</div>}
-              </button>
-            ))}
-          </div>
-
-          {selectedMetric && (
-            <div className="grid grid-cols-2 gap-4 border-t border-white/10 pt-4">
-              <div className="space-y-2">
-                <label className="text-xs text-slate-400">Baseline (当前)</label>
-                <input
-                  type="number"
-                  value={baselineValue}
-                  onChange={e => setBaselineValue(e.target.value)}
-                  placeholder="e.g. 80000"
-                  className="w-full rounded-lg bg-slate-800 border border-white/10 px-3 py-2 text-sm text-white"
-                />
-                <p className="text-[11px] text-slate-500">单位: {selectedMetric.unit}</p>
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs text-slate-400">Target (90 天后)</label>
-                <input
-                  type="number"
-                  value={targetValue}
-                  onChange={e => setTargetValue(e.target.value)}
-                  placeholder="e.g. 120000"
-                  className="w-full rounded-lg bg-slate-800 border border-white/10 px-3 py-2 text-sm text-white"
-                />
-                {baselineValue && targetValue && (
-                  <p className="text-[11px] text-emerald-400">
-                    {((parseFloat(targetValue) / parseFloat(baselineValue) - 1) * 100).toFixed(0)}% growth
-                  </p>
-                )}
-              </div>
+        {/* Stepper */}
+        <div className="mb-6 flex items-center gap-2 text-xs">
+          {[1, 2, 3, 4].map((s, i) => (
+            <div key={s} className="flex items-center gap-2">
+              <span className={`flex h-7 w-7 items-center justify-center rounded-full font-black ${
+                step === s ? 'bg-me-ochre text-white'
+                : step > s ? 'bg-status-track/20 text-status-track'
+                : 'bg-me-ivory text-me-charcoal/45'
+              }`}>
+                {step > s ? '✓' : s}
+              </span>
+              <span className={step === s ? 'font-black text-me-charcoal' : 'font-semibold text-me-charcoal/45'}>
+                {['Intent', 'Metric', 'Period & Budget', 'Confirm'][i]}
+              </span>
+              {i < 3 && <span className="text-me-charcoal/25">›</span>}
             </div>
-          )}
+          ))}
         </div>
-      )}
 
-      {/* Step 3: Period & Budget & FDE reasoning */}
-      {step === 3 && (
-        <div className="space-y-6 rounded-xl border border-white/10 bg-slate-900/60 p-6">
-          <div>
-            <h2 className="text-base font-semibold text-white">Step 3 · 周期、预算、战略思考</h2>
-            <p className="mt-1 text-xs text-slate-400">90 天为推荐周期，awareness 可以倒计时到目标日。</p>
+        {error && (
+          <div className="mb-4 rounded-xl border border-status-rej/30 bg-status-rej/10 px-4 py-2 text-sm font-semibold text-status-rej">
+            {error}
           </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <label className="text-xs text-slate-400">起始日期</label>
-              <input
-                type="date"
-                value={periodStart}
-                onChange={e => setPeriodStart(e.target.value)}
-                className="w-full rounded-lg bg-slate-800 border border-white/10 px-3 py-2 text-sm text-white"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs text-slate-400">结束日期</label>
-              <input
-                type="date"
-                value={periodEnd}
-                onChange={e => setPeriodEnd(e.target.value)}
-                className="w-full rounded-lg bg-slate-800 border border-white/10 px-3 py-2 text-sm text-white"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-4">
-            <div className="col-span-2 space-y-2">
-              <label className="text-xs text-slate-400">预算 (可选)</label>
-              <input
-                type="number"
-                value={budgetAmount}
-                onChange={e => setBudgetAmount(e.target.value)}
-                placeholder="e.g. 25000"
-                className="w-full rounded-lg bg-slate-800 border border-white/10 px-3 py-2 text-sm text-white"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs text-slate-400">货币</label>
-              <select
-                value={budgetCurrency}
-                onChange={e => setBudgetCurrency(e.target.value as 'AUD' | 'NZD')}
-                className="w-full rounded-lg bg-slate-800 border border-white/10 px-3 py-2 text-sm text-white"
-              >
-                <option value="NZD">NZD</option>
-                <option value="AUD">AUD</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-xs text-slate-400">
-              FDE Reasoning (强烈建议填) — 客户为什么要做这个 Goal？我们 90 天后看回这段话
-            </label>
-            <textarea
-              value={fdeReasoning}
-              onChange={e => setFdeReasoning(e.target.value)}
-              rows={4}
-              placeholder="e.g. CTS 老板今年想拿下中国春节档，主要靠老客户复购+Wendy Wu 同源词抢量..."
-              className="w-full rounded-lg bg-slate-800 border border-white/10 px-3 py-2 text-sm text-white placeholder:text-slate-500 resize-none"
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Step 4: Confirm */}
-      {step === 4 && (
-        <div className="space-y-4 rounded-xl border border-white/10 bg-slate-900/60 p-6">
-          <h2 className="text-base font-semibold text-white">Step 4 · 确认 Goal</h2>
-
-          <dl className="space-y-3 text-sm">
-            <Row label="Intent" value={`${INTENT_OPTIONS.find(o => o.value === intent)?.emoji} ${INTENT_OPTIONS.find(o => o.value === intent)?.title}`} />
-            {awarenessSubtype && (
-              <Row label="Subtype" value={AWARENESS_SUBTYPES.find(s => s.value === awarenessSubtype)?.label ?? ''} />
-            )}
-            <Row label="Title" value={title} />
-            <Row label="Primary Metric" value={`${selectedMetric?.label_zh} (${selectedMetric?.unit})`} />
-            <Row label="Baseline → Target" value={`${baselineValue} → ${targetValue}`} highlight />
-            <Row label="Period" value={`${periodStart} → ${periodEnd}`} />
-            {budgetAmount && <Row label="Budget" value={`${budgetCurrency} ${parseFloat(budgetAmount).toLocaleString()}`} />}
-            {fdeReasoning && <Row label="FDE Reasoning" value={fdeReasoning} multiline />}
-          </dl>
-
-          <p className="text-xs text-slate-500 border-t border-white/10 pt-4">
-            Goal 会先以 <strong>draft</strong> 状态保存。下一步在 Goal 看板配 Initiative，准备好后再 <strong>Activate</strong>。
-          </p>
-        </div>
-      )}
-
-      {/* Nav buttons */}
-      <div className="mt-6 flex items-center justify-between">
-        <button
-          type="button"
-          onClick={() => step > 1 && setStep((step - 1) as 1 | 2 | 3 | 4)}
-          disabled={step === 1}
-          className="rounded-lg px-4 py-2 text-sm text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
-        >
-          ← Back
-        </button>
-
-        {step < 4 ? (
-          <button
-            type="button"
-            onClick={() => {
-              if (step === 1 && !canProceed1) return
-              if (step === 2 && !canProceed2) return
-              if (step === 3 && !canProceed3) return
-              setStep((step + 1) as 1 | 2 | 3 | 4)
-            }}
-            disabled={
-              (step === 1 && !canProceed1) ||
-              (step === 2 && !canProceed2) ||
-              (step === 3 && !canProceed3)
-            }
-            className="rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-30 disabled:cursor-not-allowed px-6 py-2 text-sm font-medium text-white"
-          >
-            Next →
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={saving}
-            className="rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-6 py-2 text-sm font-medium text-white"
-          >
-            {saving ? 'Saving…' : 'Save Draft'}
-          </button>
         )}
+
+        {/* Step 1: Intent */}
+        {step === 1 && (
+          <div className="space-y-6 rounded-xl border border-black/10 bg-white p-6 shadow-sm">
+            <div>
+              <h2 className="font-display text-base font-bold text-me-charcoal">Step 1 · 选择客户意图</h2>
+              <p className="mt-1 text-xs font-semibold text-me-charcoal/55">老板找我们的根本目的是什么？</p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3">
+              {INTENT_OPTIONS.map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setIntent(opt.value)}
+                  className={`rounded-lg border px-4 py-3 text-left transition-all ${
+                    intent === opt.value
+                      ? 'border-me-ochre bg-me-ochre/10'
+                      : 'border-black/10 hover:border-me-ochre/40 hover:bg-me-ivory'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="text-2xl">{opt.emoji}</span>
+                    <div>
+                      <div className="font-black text-me-charcoal">{opt.title}</div>
+                      <div className="mt-0.5 text-xs font-semibold text-me-charcoal/55">{opt.description}</div>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {intent === 'awareness' && (
+              <div className="space-y-2 border-t border-black/10 pt-4">
+                <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">Awareness 子类型</label>
+                <select
+                  value={awarenessSubtype ?? ''}
+                  onChange={e => setAwarenessSubtype(e.target.value as AwarenessSubtype)}
+                  className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal focus:border-me-ochre focus:outline-none"
+                >
+                  <option value="">— 选择子类型 —</option>
+                  {AWARENESS_SUBTYPES.map(s => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">Goal 标题 (FDE 起名)</label>
+              <input
+                value={title}
+                onChange={e => setTitle(e.target.value)}
+                placeholder="e.g. CTS 2026 Q3 Sales +50%"
+                className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Step 2: Primary metric */}
+        {step === 2 && (
+          <div className="space-y-6 rounded-xl border border-black/10 bg-white p-6 shadow-sm">
+            <div>
+              <h2 className="font-display text-base font-bold text-me-charcoal">Step 2 · 选择主指标</h2>
+              <p className="mt-1 text-xs font-semibold text-me-charcoal/55">这个数字决定 90 天后 Goal 是否达成。</p>
+            </div>
+
+            <div className="space-y-2">
+              {recommendedMetrics.map(m => (
+                <button
+                  key={m.key}
+                  type="button"
+                  onClick={() => setSelectedMetric(m)}
+                  className={`w-full rounded-lg border px-4 py-3 text-left transition-all ${
+                    selectedMetric?.key === m.key
+                      ? 'border-me-ochre bg-me-ochre/10'
+                      : 'border-black/10 hover:border-me-ochre/40 hover:bg-me-ivory'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-black text-me-charcoal">{m.label_zh}</div>
+                      <div className="mt-0.5 text-xs font-semibold text-me-charcoal/55">{m.label_en} · {m.unit}</div>
+                    </div>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                      m.measurement === 'auto'        ? 'bg-status-track/15 text-status-track'
+                      : m.measurement === 'self_report' ? 'bg-me-ochre/15 text-me-ochre'
+                      :                                   'bg-status-sched/15 text-status-sched'
+                    }`}>
+                      {m.measurement === 'auto' ? '系统自动测' : m.measurement === 'self_report' ? '客户自报' : 'auto+自报'}
+                    </span>
+                  </div>
+                  {m.note && <div className="mt-1 text-[11px] font-semibold text-me-charcoal/45">注：{m.note}</div>}
+                </button>
+              ))}
+            </div>
+
+            {selectedMetric && (
+              <div className="grid grid-cols-2 gap-4 border-t border-black/10 pt-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">Baseline (当前)</label>
+                  <input
+                    type="number"
+                    value={baselineValue}
+                    onChange={e => setBaselineValue(e.target.value)}
+                    placeholder="e.g. 80000"
+                    className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
+                  />
+                  <p className="text-[11px] font-semibold text-me-charcoal/45">单位: {selectedMetric.unit}</p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">Target (90 天后)</label>
+                  <input
+                    type="number"
+                    value={targetValue}
+                    onChange={e => setTargetValue(e.target.value)}
+                    placeholder="e.g. 120000"
+                    className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
+                  />
+                  {baselineValue && targetValue && (
+                    <p className="text-[11px] font-bold text-status-track">
+                      {((parseFloat(targetValue) / parseFloat(baselineValue) - 1) * 100).toFixed(0)}% growth
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Step 3: Period & Budget & FDE reasoning */}
+        {step === 3 && (
+          <div className="space-y-6 rounded-xl border border-black/10 bg-white p-6 shadow-sm">
+            <div>
+              <h2 className="font-display text-base font-bold text-me-charcoal">Step 3 · 周期、预算、战略思考</h2>
+              <p className="mt-1 text-xs font-semibold text-me-charcoal/55">90 天为推荐周期，awareness 可以倒计时到目标日。</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">起始日期</label>
+                <input
+                  type="date"
+                  value={periodStart}
+                  onChange={e => setPeriodStart(e.target.value)}
+                  className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal focus:border-me-ochre focus:outline-none"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">结束日期</label>
+                <input
+                  type="date"
+                  value={periodEnd}
+                  onChange={e => setPeriodEnd(e.target.value)}
+                  className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal focus:border-me-ochre focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div className="col-span-2 space-y-2">
+                <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">预算 (可选)</label>
+                <input
+                  type="number"
+                  value={budgetAmount}
+                  onChange={e => setBudgetAmount(e.target.value)}
+                  placeholder="e.g. 25000"
+                  className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">货币</label>
+                <select
+                  value={budgetCurrency}
+                  onChange={e => setBudgetCurrency(e.target.value as 'AUD' | 'NZD')}
+                  className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal focus:border-me-ochre focus:outline-none"
+                >
+                  <option value="NZD">NZD</option>
+                  <option value="AUD">AUD</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">
+                FDE Reasoning (强烈建议填) — 客户为什么要做这个 Goal？我们 90 天后看回这段话
+              </label>
+              <textarea
+                value={fdeReasoning}
+                onChange={e => setFdeReasoning(e.target.value)}
+                rows={4}
+                placeholder="e.g. CTS 老板今年想拿下中国春节档，主要靠老客户复购+Wendy Wu 同源词抢量..."
+                className="w-full resize-none rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Step 4: Confirm */}
+        {step === 4 && (
+          <div className="space-y-4 rounded-xl border border-black/10 bg-white p-6 shadow-sm">
+            <h2 className="font-display text-base font-bold text-me-charcoal">Step 4 · 确认 Goal</h2>
+
+            <dl className="space-y-3 text-sm">
+              <Row label="Intent" value={`${INTENT_OPTIONS.find(o => o.value === intent)?.emoji} ${INTENT_OPTIONS.find(o => o.value === intent)?.title}`} />
+              {awarenessSubtype && (
+                <Row label="Subtype" value={AWARENESS_SUBTYPES.find(s => s.value === awarenessSubtype)?.label ?? ''} />
+              )}
+              <Row label="Title" value={title} />
+              <Row label="Primary Metric" value={`${selectedMetric?.label_zh} (${selectedMetric?.unit})`} />
+              <Row label="Baseline → Target" value={`${baselineValue} → ${targetValue}`} highlight />
+              <Row label="Period" value={`${periodStart} → ${periodEnd}`} />
+              {budgetAmount && <Row label="Budget" value={`${budgetCurrency} ${parseFloat(budgetAmount).toLocaleString()}`} />}
+              {fdeReasoning && <Row label="FDE Reasoning" value={fdeReasoning} multiline />}
+            </dl>
+
+            <p className="border-t border-black/10 pt-4 text-xs font-semibold text-me-charcoal/55">
+              Goal 会先以 <strong className="text-me-charcoal">draft</strong> 状态保存。下一步在 Goal 看板配 Initiative，准备好后再 <strong className="text-me-charcoal">Activate</strong>。
+            </p>
+          </div>
+        )}
+
+        {/* Nav buttons */}
+        <div className="mt-6 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => step > 1 && setStep((step - 1) as 1 | 2 | 3 | 4)}
+            disabled={step === 1}
+            className="rounded-lg px-4 py-2 text-sm font-black text-me-charcoal/55 transition-colors hover:text-me-charcoal disabled:cursor-not-allowed disabled:opacity-30"
+          >
+            ← Back
+          </button>
+
+          {step < 4 ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (step === 1 && !canProceed1) return
+                if (step === 2 && !canProceed2) return
+                if (step === 3 && !canProceed3) return
+                setStep((step + 1) as 1 | 2 | 3 | 4)
+              }}
+              disabled={
+                (step === 1 && !canProceed1) ||
+                (step === 2 && !canProceed2) ||
+                (step === 3 && !canProceed3)
+              }
+              className="rounded-lg bg-me-ochre px-6 py-2 text-sm font-black text-white transition-colors hover:bg-me-ochre/90 disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              Next →
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={saving}
+              className="rounded-lg bg-status-track px-6 py-2 text-sm font-black text-white transition-colors hover:bg-status-track/90 disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Save Draft'}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -437,8 +439,8 @@ export default function NewGoalPage() {
 function Row({ label, value, highlight, multiline }: { label: string; value: string; highlight?: boolean; multiline?: boolean }) {
   return (
     <div className="grid grid-cols-[140px_1fr] gap-3">
-      <dt className="text-xs text-slate-500 pt-0.5">{label}</dt>
-      <dd className={`text-sm ${highlight ? 'font-semibold text-emerald-400' : 'text-white'} ${multiline ? 'whitespace-pre-wrap' : ''}`}>
+      <dt className="pt-0.5 text-xs font-black uppercase tracking-wide text-me-charcoal/45">{label}</dt>
+      <dd className={`text-sm font-semibold ${highlight ? 'font-black text-status-track' : 'text-me-charcoal'} ${multiline ? 'whitespace-pre-wrap' : ''}`}>
         {value}
       </dd>
     </div>

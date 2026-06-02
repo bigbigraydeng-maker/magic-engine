@@ -36,33 +36,33 @@ export function GoalBanner({ clientId }: Props) {
 
   if (loading) {
     return (
-      <div className="rounded-xl border border-white/10 bg-slate-900/40 p-4 mb-4 h-[68px]" />
+      <div className="mb-4 h-[68px] rounded-xl border border-black/10 bg-white p-4 shadow-sm" />
     )
   }
 
   // No active goal: show CTA
   if (!goal) {
     return (
-      <div className="rounded-xl border border-dashed border-white/15 bg-slate-900/40 p-4 mb-4 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between rounded-xl border border-dashed border-black/15 bg-white p-4 shadow-sm">
         <div>
-          <div className="text-xs text-slate-500 uppercase tracking-wide">No active goal</div>
-          <p className="text-sm text-slate-400 mt-1">
+          <div className="text-xs font-black uppercase tracking-wide text-me-charcoal/45">No active goal</div>
+          <p className="mt-1 text-sm font-semibold text-me-charcoal/55">
             Set a 90-day goal to align all execution under one north star.
           </p>
         </div>
         <div className="flex items-center gap-3">
           <Link
             href={`/dashboard/clients/${clientId}/goals/history`}
-            className="text-xs text-slate-400 hover:text-white"
+            className="text-xs font-black text-me-charcoal/55 hover:text-me-charcoal"
           >
             View History
           </Link>
           <Link
             href={`/dashboard/clients/${clientId}/goal/new`}
-            className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2 text-sm font-medium text-white"
+            className="rounded-lg bg-me-ochre px-4 py-2 text-sm font-black text-white transition-colors hover:bg-me-ochre/90"
           >
             + New Goal
-            <span className="ml-2 inline-block rounded bg-amber-500/30 px-1.5 py-0.5 text-[9px] font-bold text-amber-200 uppercase">
+            <span className="ml-2 inline-block rounded-full bg-white/25 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
               Beta
             </span>
           </Link>
@@ -76,30 +76,30 @@ export function GoalBanner({ clientId }: Props) {
   const intentEmoji = goal.intent === 'acquisition' ? '🎯' : goal.intent === 'sales' ? '💰' : '📢'
 
   return (
-    <div className="rounded-xl border border-blue-500/30 bg-blue-500/[0.04] p-4 mb-4">
+    <div className="mb-4 rounded-xl border border-me-ochre/30 bg-me-ochre/10 p-4">
       <div className="flex items-center justify-between gap-3">
-        <Link href={`/dashboard/clients/${clientId}/goal/${goal.id}`} className="flex-1 min-w-0 hover:opacity-80">
+        <Link href={`/dashboard/clients/${clientId}/goal/${goal.id}`} className="min-w-0 flex-1 hover:opacity-80">
           <div className="flex items-center gap-2">
             <span className="text-lg">{intentEmoji}</span>
-            <h3 className="text-sm font-semibold text-white">{goal.title}</h3>
+            <h3 className="text-sm font-black text-me-charcoal">{goal.title}</h3>
             {goal.is_beta && (
-              <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-amber-300 uppercase">
+              <span className="rounded-full bg-me-ochre/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-me-ochre">
                 Beta
               </span>
             )}
           </div>
-          <p className="mt-1 text-xs text-slate-400">
+          <p className="mt-1 text-xs font-semibold text-me-charcoal/55">
             {goal.primary_metric_label}:&nbsp;
-            <span className="font-medium text-slate-300">
+            <span className="font-bold text-me-charcoal/80">
               {goal.baseline_value.toLocaleString()} → {goal.target_value.toLocaleString()}
             </span>
-            <span className="text-slate-600 mx-2">·</span>
-            <span className="text-blue-300">{remaining} days remaining</span>
+            <span className="mx-2 text-me-charcoal/30">·</span>
+            <span className="font-bold text-me-ochre">{remaining} days remaining</span>
           </p>
         </Link>
         <Link
           href={`/dashboard/clients/${clientId}/goals/history`}
-          className="shrink-0 text-xs text-slate-400 hover:text-white"
+          className="shrink-0 text-xs font-black text-me-charcoal/55 hover:text-me-charcoal"
         >
           History
         </Link>
