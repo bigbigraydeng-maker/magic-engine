@@ -215,13 +215,13 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> Last updated: 2026-06-02 (P29.AUTH.1 Google self-serve registration complete; next is optional GEO use-case support)
+> Last updated: 2026-06-02 (P21.10 Production Package deep-link hotfix complete; next remains optional GEO use-case support)
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
 | **P29.GEO.7** | Tiny AU/NZ AI search local use-case page if snippet bank still needs concrete scenarios | LOW |
 
-**Status check (2026-06-02):** P29.SEO.9, P29.ADS.1-2, P29.GEO.1-6, P29.WEB.1-2, P29.SEO.14-17, P29.E.1-6, P29.C.1-5, and P29.AUTH.1 are done. Brief gate now covers Blog, Marketing Plan, single social generation, Reels Studio, execution dashboard actions, Launch Hub, and workspace production entry points for self_serve users with incomplete briefs. Google self-serve registration now creates a workspace and preserves the 500 MTC welcome bonus path. Growth work keeps optional P29.GEO.7 open; next should be the AI search local use-case support page only if we still want extra AU/NZ scenario snippets. Next session first line:
+**Status check (2026-06-02):** P29.SEO.9, P29.ADS.1-2, P29.GEO.1-6, P29.WEB.1-2, P29.SEO.14-17, P29.E.1-6, P29.C.1-5, P29.AUTH.1, and P21.10 are done. Brief gate now covers Blog, Marketing Plan, single social generation, Reels Studio, execution dashboard actions, Launch Hub, and workspace production entry points for self_serve users with incomplete briefs. Google self-serve registration now creates a workspace and preserves the 500 MTC welcome bonus path. Production Package social items now deep-link back into Launch Hub with `highlight={postId}` instead of the wrong `/pages` route. Growth work keeps optional P29.GEO.7 open; next should be the AI search local use-case support page only if we still want extra AU/NZ scenario snippets. Next session first line:
 
 - `继续 Website GEO Visibility P29.GEO.7`
 **Phase 8.12 Sprint 3 全部完成（S3.1–S3.5）**，P8.12.S1.6b（小红书 scraper）为下一可选扩展项。

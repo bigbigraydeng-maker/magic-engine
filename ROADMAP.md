@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-02 13:53 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-02 14:19 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2840,6 +2840,7 @@ AU / NZ（当前）          新市场（未来）
 | **P21.7** | 发布 + 飞轮 outcome 回流接线 | 21.C | ✅ 完成（`package-publish.ts` `logPackagePublishedAction` ← PATCH `/production/[packageId]`） |
 | **P21.8** | FDE 触发 UI（内部一键量产） | 21.A | ✅ 完成（执行看板「⚡ 一键量产」按钮，PR #171） |
 | **P21.9** | CTS + Oztop 端到端 MVP 验收 | — | ✅ 完成（M3 验收 Checklist 生成，PM 人工验收） |
+| **P21.10** | Production Package 社媒产物「查看→」深链修复（从错误 `/pages` 改为 Launch Hub 高亮帖子） | 21.C | ✅ 完成 |
 
 **里程碑关卡（不过不许往下，PM 验证）**：
 - **M1 产能内核** ✅（P21.1-2）：`npm run build` 通过 + 单测证明 Sonnet/Haiku 分层路由 + 记忆注入生效
@@ -3256,6 +3257,10 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 - **P21.7** — `package-publish.ts` `logPackagePublishedAction` ← 已接线在 `PATCH /api/clients/[id]/production/[packageId]`：状态变 `published` 时非阻塞触发飞轮 action 落库（dimension→flywheel 映射完整）
 - **P21.8** — 执行看板「⚡ 一键量产」按钮（marketing_plan 来源任务专用），调 `POST /api/clients/[id]/ai-factory/fan-out`，完成后绿色结果卡 + 内容库跳转（PR #171）
 - **P21.9** — 端到端接线验证完成；M3 所有代码路径已接通；PM 人工验收阶段：CTS/Oztop 跑出 20-30 帖 → 标 published → 飞轮 outcome 卡片 + MTC 扣费验证
+
+### 2026-06-02（Phase 21 P21.10 — Production Package 查看链接热修）
+
+- **P21.10** — Production Package 详情页里 `content_post` 的「查看→」不再误跳 `/dashboard/clients/[id]/pages`；现已改为 `/dashboard/content?client={clientId}&highlight={postId}`，从生产包可直接深链回 Launch Hub 高亮对应帖子，避免误路由 / 401
 
 ### 2026-05-31（Phase 21 P21.4 — ai_factory intensity 档位 ✅）
 

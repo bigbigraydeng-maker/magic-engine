@@ -252,7 +252,10 @@ function ItemCard({ item, clientId }: { item: ProductionItem; clientId: string }
   // Build a direct link to the content
   const contentLink = (() => {
     switch (item.content_type) {
-      case 'content_post': return item.content_post_id ? `/dashboard/clients/${clientId}/pages` : null
+      case 'content_post':
+        return item.content_post_id
+          ? `/dashboard/content?client=${clientId}&highlight=${item.content_post_id}`
+          : null
       case 'blog_post':    return item.blog_post_id    ? `/dashboard/clients/${clientId}/blog` : null
       default:             return null
     }
