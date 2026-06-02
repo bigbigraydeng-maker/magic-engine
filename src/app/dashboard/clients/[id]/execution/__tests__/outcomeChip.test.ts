@@ -1,8 +1,11 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import React from 'react'
+import { cleanup, render } from '@testing-library/react'
+import * as ts from 'typescript'
+import { afterEach, describe, expect, it } from 'vitest'
 
-import { AUTONOMOUS_GROUP_ID, buildExecutionGroups, formatOutcomeLabel } from '../execution-view-model'
+import { AUTONOMOUS_GROUP_ID, buildDimensionGroups, buildExecutionGroups, formatOutcomeLabel } from '../execution-view-model'
 
 type OutcomeSummary = Parameters<typeof formatOutcomeLabel>[0]
 type ExecutionGroupItem = Parameters<typeof buildExecutionGroups>[0][number]
@@ -10,7 +13,37 @@ type ExecutionGroupItem = Parameters<typeof buildExecutionGroups>[0][number]
 const executionPageSource = readFileSync(
   join(process.cwd(), 'src', 'app', 'dashboard', 'clients', '[id]', 'execution', 'page.tsx'),
   'utf8',
-)
+).replace(/\r\n/g, '\n')
+
+const outcomeChipSnippetStart = executionPageSource.indexOf('const VERDICT_META')
+const outcomeChipSnippetEnd = executionPageSource.indexOf('// ---------------------------------------------------------------------------\n// ActiveCampaignBanner')
+
+if (outcomeChipSnippetStart === -1 || outcomeChipSnippetEnd === -1) {
+  throw new Error('Failed to locate OutcomeChip in page.tsx')
+}
+
+const outcomeChipSnippet = executionPageSource
+  .slice(outcomeChipSnippetStart, outcomeChipSnippetEnd)
+  .trim()
+
+const compiledOutcomeChipModule = ts.transpileModule(
+  `${outcomeChipSnippet}\nreturn { OutcomeChip }`,
+  {
+    compilerOptions: {
+      jsx: ts.JsxEmit.React,
+      module: ts.ModuleKind.None,
+      target: ts.ScriptTarget.ES2020,
+    },
+  },
+).outputText
+
+const { OutcomeChip } = new Function(
+  'React',
+  'formatOutcomeLabel',
+  compiledOutcomeChipModule,
+)(React, formatOutcomeLabel) as {
+  OutcomeChip: ({ outcome }: { outcome: OutcomeSummary }) => React.ReactElement
+}
 
 const baseOutcome: OutcomeSummary = {
   verdict: 'confirmed',
@@ -59,6 +92,10 @@ const approvedPrescription = [
   },
 ]
 
+afterEach(() => {
+  cleanup()
+})
+
 describe('formatOutcomeLabel', () => {
   it('renders a positive delta_pct with a plus sign', () => {
     expect(formatOutcomeLabel(baseOutcome)).toBe('Mention rate +25%, confirmed (confidence 0.80)')
@@ -105,6 +142,13 @@ describe('formatOutcomeLabel', () => {
       confidence: 0.236,
     })).toBe('Mention rate +1%, inconclusive (confidence 0.24)')
   })
+
+  it('falls back to the raw metric key when no display mapping exists', () => {
+    expect(formatOutcomeLabel({
+      ...baseOutcome,
+      metric_key: 'unknown.metric.key',
+    })).toContain('unknown.metric.key')
+  })
 })
 
 describe('VERDICT_META fallback', () => {
@@ -136,6 +180,25 @@ describe('VERDICT_META fallback', () => {
       confidence: 0.5,
     })).toContain('reversed')
     expect(executionPageSource).toContain('bg-red-50 border-red-200 text-red-700')
+  })
+
+  it('renders unknown verdicts with inconclusive styling and confirmed verdicts with confirmed styling', () => {
+    const unknownVerdictOutcome = {
+      ...baseOutcome,
+      verdict: 'unknown_verdict',
+    } as OutcomeSummary
+
+    const { container, rerender } = render(React.createElement(OutcomeChip, { outcome: unknownVerdictOutcome }))
+    const unknownVerdictChip = container.querySelector('span')
+
+    expect(unknownVerdictChip?.className).toContain('bg-yellow-50')
+    expect(unknownVerdictChip?.className).toContain('text-yellow-700')
+
+    rerender(React.createElement(OutcomeChip, { outcome: baseOutcome }))
+
+    const confirmedChip = container.querySelector('span')
+    expect(confirmedChip?.className).toContain('bg-green-50')
+    expect(confirmedChip?.className).toContain('text-green-700')
   })
 })
 
@@ -191,5 +254,23 @@ describe('buildExecutionGroups', () => {
     expect(groups[0].items).toHaveLength(1)
     expect(groups[0].items[0].outcome).toEqual(baseOutcome)
     expect(groups[1].pid).toBe('prescription-1')
+  })
+})
+
+describe('buildDimensionGroups', () => {
+  it('treats flywheel_action source_kind items as autonomous even when prescription_id is ordinary', () => {
+    const sourceKindOnlyAutonomous: ExecutionGroupItem = {
+      ...baseItem,
+      id: 'source-kind-only-action',
+      prescription_id: 'prescription-1',
+      source_kind: 'flywheel_action',
+      flywheel_action_id: 'action-3',
+      status: 'completed',
+    }
+
+    const groups = buildDimensionGroups([baseItem, sourceKindOnlyAutonomous])
+
+    expect(groups).toHaveLength(1)
+    expect(groups[0].items.map(item => item.id)).toEqual(['item-1'])
   })
 })
