@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-02 14:19 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-02 20:48 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2841,6 +2841,7 @@ AU / NZ（当前）          新市场（未来）
 | **P21.8** | FDE 触发 UI（内部一键量产） | 21.A | ✅ 完成（执行看板「⚡ 一键量产」按钮，PR #171） |
 | **P21.9** | CTS + Oztop 端到端 MVP 验收 | — | ✅ 完成（M3 验收 Checklist 生成，PM 人工验收） |
 | **P21.10** | Production Package 社媒产物「查看→」深链修复（从错误 `/pages` 改为 Launch Hub 高亮帖子） | 21.C | ✅ 完成 |
+| **P21.22** | 诸葛亮工作台 beta 接线与回归：先把工作台入口挂到 Launch Hub / Production Package，并复测建议反馈与补发提示 | 21.C/21.UX | 🚧 进行中 |
 
 **里程碑关卡（不过不许往下，PM 验证）**：
 - **M1 产能内核** ✅（P21.1-2）：`npm run build` 通过 + 单测证明 Sonnet/Haiku 分层路由 + 记忆注入生效
