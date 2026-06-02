@@ -1,30 +1,37 @@
 /* Magic Engine — Marketing Site
-   Design tokens: Gold #BE8A2E | Ink #16181D | Paper #FBFAF7 | Green #1F7A55
-   Fonts: Fraunces (serif titles) + Inter (body)
+   Design tokens: Golden ochre #C4912E | Ink #1A1A1A | Warm ivory #FBF8F3
+   Fonts: Space Grotesk (display titles) + Inter (body)
+   (Tokens were retargeted 2026-06-02 to apply new VI to all legacy pages
+    — geo/training/ads/about/discover/ai-search/etc. — without rewriting HTML.
+    Homepage still uses its scoped #me-home `me-` system at the file bottom.)
 */
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400&family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
 
 /* ── Tokens ── */
 :root {
-  --gold:       #BE8A2E;
-  --gold-light: #D4A94B;
-  --gold-dark:  #9A6F1E;
+  /* New VI palette */
+  --gold:       #C4912E;
+  --gold-light: #EBCB8B;
+  --gold-dark:  #A6781F;
   --gold-bg:    #FBF5E8;
-  --ink:        #16181D;
-  --ink-light:  rgba(22,24,29,.70);
-  --ink-muted:  rgba(22,24,29,.45);
-  --paper:      #FBFAF7;
-  --paper-dim:  #F0EFE9;
-  --green:      #1F7A55;
-  --green-bg:   #EAF3EE;
+  --ink:        #1A1A1A;
+  --ink-light:  rgba(26,26,26,.62);
+  --ink-muted:  rgba(26,26,26,.42);
+  --paper:      #FBF8F3;
+  --paper-dim:  #EAE6DF;
+  --green:      #5C8A4A;
+  --green-bg:   rgba(92,138,74,.12);
   --red:        #C0392B;
   --white:      #FFFFFF;
 
-  --ff-serif: 'Fraunces', Georgia, serif;
+  /* New VI typography — display uses Space Grotesk, NOT Fraunces.
+     Keeping the variable name `--ff-serif` so legacy `.serif` rules still
+     pick up the new display font with zero HTML edits. */
+  --ff-serif: 'Space Grotesk', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --ff-sans:  'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 
-  --max-w:  1120px;
-  --nav-h:  64px;
+  --max-w:  1200px;
+  --nav-h:  74px;
 
   --r-sm: 6px;  --r-md: 12px;  --r-lg: 18px;  --r-xl: 28px;  --r-full: 9999px;
 
@@ -55,7 +62,7 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 section { padding: 80px 0; }
 
 /* ── Typography ── */
-.serif { font-family: var(--ff-serif); font-weight: 700; line-height: 1.1; letter-spacing: -.02em; }
+.serif { font-family: var(--ff-serif); font-weight: 600; line-height: 1.06; letter-spacing: -.022em; }
 h1.serif { font-size: clamp(2.2rem, 5vw, 3.8rem); }
 h2.serif { font-size: clamp(1.7rem, 3.5vw, 2.6rem); }
 h3.serif { font-size: clamp(1.2rem, 2vw, 1.6rem); }
@@ -67,9 +74,10 @@ h3.serif { font-size: clamp(1.2rem, 2vw, 1.6rem); }
 .nav {
   position: sticky; top: 0; z-index: 100;
   height: var(--nav-h);
-  background: rgba(251,250,247,.92);
-  backdrop-filter: blur(20px);
-  border-bottom: 1px solid rgba(22,24,29,.07);
+  background: rgba(251,248,243,.82);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid rgba(26,26,26,.08);
 }
 .nav-inner {
   display: flex; align-items: center; justify-content: space-between;
@@ -100,19 +108,20 @@ h3.serif { font-size: clamp(1.2rem, 2vw, 1.6rem); }
 
 /* ── Buttons ── */
 .btn-primary {
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; gap: 8px;
   padding: 13px 22px;
-  background: var(--gold); color: var(--white);
+  background: linear-gradient(135deg, #EBCB8B 0%, #C4912E 55%, #A6781F 100%);
+  color: #2A2008;
   font-weight: 600; font-size: .92rem;
   border-radius: var(--r-md); text-decoration: none;
-  transition: background var(--t), transform var(--t), box-shadow var(--t);
+  transition: transform var(--t), box-shadow var(--t);
   border: none; cursor: pointer; font-family: inherit;
   white-space: nowrap;
+  box-shadow: 0 12px 32px rgba(196,145,46,.20);
 }
 .btn-primary:hover {
-  background: var(--gold-light);
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(190,138,46,.30);
+  transform: translateY(-2px);
+  box-shadow: 0 18px 44px rgba(196,145,46,.30);
 }
 .btn-primary:active { transform: translateY(0); }
 .btn-primary:disabled { opacity: .6; cursor: default; transform: none; box-shadow: none; }
@@ -140,13 +149,15 @@ h3.serif { font-size: clamp(1.2rem, 2vw, 1.6rem); }
 
 .btn-register {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 9px 16px;
-  background: var(--gold); color: var(--white);
+  padding: 9px 18px;
+  background: linear-gradient(135deg, #EBCB8B 0%, #C4912E 55%, #A6781F 100%);
+  color: #2A2008;
   font-weight: 600; font-size: .82rem;
   border-radius: var(--r-md); text-decoration: none;
-  transition: background var(--t);
+  transition: transform var(--t), box-shadow var(--t);
+  box-shadow: 0 8px 22px rgba(196,145,46,.20);
 }
-.btn-register:hover { background: var(--gold-light); }
+.btn-register:hover { transform: translateY(-1px); box-shadow: 0 12px 28px rgba(196,145,46,.28); }
 
 .portal-signin-link {
   font-size: .82rem; color: var(--ink-light); text-decoration: none;
@@ -171,9 +182,9 @@ h3.serif { font-size: clamp(1.2rem, 2vw, 1.6rem); }
 /* ── Section labels ── */
 .section-label {
   display: inline-flex; align-items: center; gap: 5px;
-  font-size: .7rem; font-weight: 700;
-  letter-spacing: 1.5px; text-transform: uppercase;
-  color: var(--gold-dark); margin-bottom: 12px;
+  font-size: .72rem; font-weight: 600;
+  letter-spacing: .16em; text-transform: uppercase;
+  color: var(--gold); margin-bottom: 14px;
 }
 .section-sub {
   color: var(--ink-light); font-size: 1.05rem; line-height: 1.65;
@@ -184,18 +195,18 @@ h3.serif { font-size: clamp(1.2rem, 2vw, 1.6rem); }
 
 /* ── Hero ── */
 .hero {
-  padding: 72px 0 80px;
+  padding: 88px 0 96px;
   position: relative;
-  background-image: url('https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1600&q=75');
-  background-size: cover;
-  background-position: center 65%;
+  background: var(--paper);
+  overflow: hidden;
 }
 .hero::before {
   content: '';
   position: absolute;
-  inset: 0;
-  background: rgba(251,250,247,.88);
-  z-index: 0;
+  right: -120px; top: -120px;
+  width: 520px; height: 520px;
+  background: radial-gradient(circle, rgba(235,203,139,.40) 0%, rgba(235,203,139,.14) 35%, rgba(235,203,139,0) 70%);
+  pointer-events: none; z-index: 0;
 }
 .hero .container { position: relative; z-index: 1; }
 
