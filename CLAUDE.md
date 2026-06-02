@@ -306,7 +306,7 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-06-03 10:13 NZST （**Phase 30 + Phase 31 双 phase 同日 merged — ME 升级为"以 Goal 为中心的生意指挥平台"**）
+> 最后更新：2026-06-03 11:21 NZST （**Phase 30 + Phase 31 双 phase 同日 merged — ME 升级为"以 Goal 为中心的生意指挥平台"**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
@@ -319,6 +319,8 @@ npm test           # 测试套件
 | **GBP.0** | Google Cloud：enable Business Profile API + Account Management API | ⚠️ PM 操作 |
 
 **已完成全景（最近几个 Phase）**：
+- ✅ **QA 测试加固轮**（2026-06-02 下午，6 个 PR）：CF AI Gateway 401 修复（PR #248）+ Client portal 按钮 UI（PR #270）+ initiatives PATCH 三道闸校验（PR #290）+ outcomeChip/buildExecutionGroups 回归测试（PR #293）+ zhangqian/connectors 内部 HTTP 自调用根治（PR #297）+ Codex 协作分工规范写入 CLAUDE.md
+- ✅ **Phase 32 Goal sub_types + decrease + multi-active**（2026-06-02，PR #294）：Phase 31 自然延伸
 - ✅ **Phase 31 Strategy Layer (Beta)**（2026-06-02，PR #259）：Goal→Initiative→Action 三层骨架 + 4 步向导 + 诸葛亮 Sonnet 润色 hypothesis + 90 天 verdict 自动归档 + Goal 历史页 + 每日 cron
 - ✅ **Phase 30 Industry Baseline Engine**（2026-06-02，PR #251）：5 细分 / 44 域名 / 月度 cron 自动重跑 / 华佗实时读基准（含 city 维度命中）
 - ✅ **子牙→诸葛亮命名修复**（2026-06-02，PR #266）：清除 ME 内"子牙"残留，统一用"诸葛亮"
@@ -329,9 +331,11 @@ npm test           # 测试套件
 **下一候选（按优先级）**：
 1. 📋 **A1 reputation 评分公式修复** — Phase 31 跑通时暴露的"地基不稳"问题（CTS reputation=44 不可信）
 2. 📋 **A3 CTS/Oztop 案例沉淀** — 半天事，把跑通经验固化
-3. 📋 **Phase 22.A.2** — GA4 每日采集（merge PR #187 后继续）
-4. 📋 **Phase 24.B** — GBP 数据摂取（依赖 GBP.0 + migration）
-5. 📋 **B1 AU/NZ Marketing Index** — 战略议题，Q4 评估
+3. 📋 **QA-T1.1** — outcomeChip 3 个盲点补全（Codex 窗口 1 进行中）
+4. 📋 **QA-清理-1** — `src/app/api/clients/[id]/blog/[postId]/route.ts:140` 同款内部 HTTP+Bearer 反模式根治（参考 PR #297 模式）
+5. 📋 **Phase 22.A.2** — GA4 每日采集（merge PR #187 后继续）
+6. 📋 **Phase 24.B** — GBP 数据摂取（依赖 GBP.0 + migration）
+7. 📋 **B1 AU/NZ Marketing Index** — 战略议题，Q4 评估
 
 **ME 定位升级（2026-06-02 确立）**：
 旧 → 营销自动化平台

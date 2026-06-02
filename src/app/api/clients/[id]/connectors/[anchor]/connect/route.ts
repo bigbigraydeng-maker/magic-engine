@@ -8,14 +8,15 @@
  * Body: { config?: { page_url?: string } }
  * Returns: { success, advanced_job_id? }
  *
- * Security: Bearer token (INTERNAL_API_KEY)
+ * Security: session-cookie via requireDashboardClientAccess
  * Reference: ROADMAP.md P8.10.S0.22
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { supabaseAdmin } from '@/lib/supabase'
 import { getLatestDiscovery } from '@/lib/zhangqian/persistor'
+import { startAdvancedDiscovery } from '@/lib/zhangqian/start-advanced-discovery'
 
 // Anchors that unlock advanced discovery when connected.
 const ADVANCED_DISCOVERY_TRIGGERS = new Set(['meta-ads', 'gbp', 'gsc', 'google-ads'])
@@ -36,7 +37,7 @@ export async function POST(
     const body = await req.json() as { config?: Record<string, unknown> }
     config = body.config ?? null
   } catch {
-    // No body or non-JSON — fine, config stays null
+    // No body or non-JSON; config stays null.
   }
 
   // Upsert connector status
@@ -67,7 +68,7 @@ export async function POST(
   // Check if basic discovery exists
   const existing = await getLatestDiscovery(supabaseAdmin, clientId).catch(() => null)
   if (!existing) {
-    // No basic discovery yet — advanced will run after basic completes
+    // No basic discovery yet; advanced will run after basic completes.
     return NextResponse.json({
       success: true,
       advanced_job_id: null,
@@ -81,13 +82,10 @@ export async function POST(
     extraConfig.site_url = config.site_url
   }
 
-  // Fire-and-forget: POST to the advanced-discover endpoint internally
   const advancedJobId = await enqueueAdvancedDiscovery(clientId, anchor, extraConfig)
 
   return NextResponse.json({ success: true, advanced_job_id: advancedJobId })
 }
-
-// ─── Internal helpers ─────────────────────────────────────────────────────────
 
 async function enqueueAdvancedDiscovery(
   clientId: string,
@@ -95,30 +93,12 @@ async function enqueueAdvancedDiscovery(
   extra: Record<string, unknown> = {},
 ): Promise<string | null> {
   try {
-    // Use the advanced-discover route for job creation + execution
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : 'http://localhost:3001'
-
-    const res = await fetch(
-      `${baseUrl}/api/clients/${clientId}/zhangqian/advanced-discover`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.INTERNAL_API_KEY ?? ''}`,
-        },
-        body: JSON.stringify({ triggered_by: triggeredBy, ...extra }),
-      },
-    )
-
-    if (!res.ok) {
-      console.error(`[connectors/connect] advanced-discover returned ${res.status}`)
-      return null
-    }
-
-    const data = await res.json() as { job_id?: string }
-    return data.job_id ?? null
+    const siteUrl = typeof extra.site_url === 'string' ? extra.site_url : undefined
+    const result = await startAdvancedDiscovery(supabaseAdmin, clientId, {
+      triggeredBy,
+      siteUrl,
+    })
+    return result.jobId
   } catch (err) {
     console.error('[connectors/connect] failed to enqueue advanced discovery:', err)
     return null
