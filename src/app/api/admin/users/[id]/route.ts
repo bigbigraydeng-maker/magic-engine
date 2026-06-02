@@ -8,6 +8,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { guardAdmin } from '@/lib/auth/require-admin'
 
+// Render builds Next.js page-data for every route, which evaluates the module
+// — guardAdmin() reads cookies via next/headers and throws during build/page-
+// data collection. force-dynamic skips that phase so the build succeeds.
+// Without this: Render "Failed to collect page data for /api/admin/users/[id]".
+export const dynamic = 'force-dynamic'
+
 export async function DELETE(
   _req: NextRequest,
   { params }: { params: { id: string } },
