@@ -276,11 +276,46 @@ function stopProgress() {
   advanceStep(STEPS.length); // mark all done
 }
 
+/* ── Visibility score (computed client-side from severity mix) ── */
+function computeScore(teaser, totalCount) {
+  let score = 100;
+  (teaser || []).forEach(f => {
+    if (f.severity === 'NOW') score -= 22;
+    else if (f.severity === 'GAP') score -= 11;
+    else if (f.severity === 'GOOD') score += 3;
+  });
+  const hidden = Math.max(0, (totalCount || 0) - (teaser?.length || 0));
+  score -= hidden * 4; // unseen findings drag the score down too
+  return Math.max(12, Math.min(92, Math.round(score)));
+}
+
+function scoreVerdict(score) {
+  if (score < 35) return 'Nearly invisible where it counts';
+  if (score < 55) return 'Losing ground to your competitors';
+  if (score < 75) return 'Visible — but leaking opportunities';
+  return 'Strong — with room to dominate';
+}
+
+function animateScore(el, target) {
+  let cur = 0;
+  const step = Math.max(1, Math.round(target / 26));
+  const tick = () => {
+    cur = Math.min(target, cur + step);
+    el.textContent = cur;
+    if (cur < target) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+  setTimeout(() => { el.textContent = target; }, 1600); // guarantee final value even if rAF is throttled (background tab)
+}
+
 /* ── Render result ── */
 function renderResult(data) {
-  const { teaser, totalCount, summary, topOpportunity, isDemo } = data;
+  const { teaser, totalCount, topOpportunity, isDemo } = data;
   const container = document.getElementById('teaser-container');
   if (!container) return;
+
+  const list = teaser || data.findings || []; // tolerate DEMO fallback (carries 'findings', not 'teaser')
+  const score = computeScore(list, totalCount);
 
   let html = '';
 
@@ -288,30 +323,65 @@ function renderResult(data) {
     html += `<div class="demo-badge">Preview mode — enter your URL for a personalised report</div>`;
   }
 
-  if (summary) {
-    html += `<p class="result-summary">${escHtml(summary)}</p>`;
-  }
+  // Visibility score hero — the emotional hook
+  html += `
+    <div class="score-hero">
+      <div class="score-cap">AI-era visibility score</div>
+      <div class="score-num"><span id="score-val">0</span><span>/100</span></div>
+      <div class="score-bar"><div class="score-fill" id="score-fill"></div></div>
+      <div class="score-verdict">${escHtml(scoreVerdict(score))}</div>
+    </div>`;
 
-  (teaser || []).forEach(f => {
-    const sevLabel = f.severity === 'NOW' ? '⚡ Act now'
+  // Findings — first one enlarged as "most urgent" with a loss-aversion line
+  list.forEach((f, i) => {
+    const sevLabel = f.severity === 'NOW' ? '⚡ Most urgent'
                    : f.severity === 'GAP' ? '⚠ Gap found'
-                   : '✓ Looking good';
+                   : '✓ Strength';
+    const hero = i === 0 ? ' hero-finding' : '';
+    const loss = (i === 0 && f.severity === 'NOW')
+      ? `<div class="finding-loss">Every week, customers ask AI assistants for businesses like yours — right now it isn't naming you.</div>`
+      : '';
     html += `
-      <div class="finding ${escHtml(f.severity)}">
+      <div class="finding ${escHtml(f.severity)}${hero}">
         <div class="finding-sev">${sevLabel}</div>
         <h3>${escHtml(f.title)}</h3>
         <p>${escHtml(f.desc)}</p>
+        ${loss}
         ${f.fix ? `<div class="finding-fix">→ ${escHtml(f.fix)}</div>` : ''}
       </div>`;
   });
 
-  const shown = teaser?.length || 0;
-  const extra = (totalCount || 0) - shown;
-  if (extra > 0) {
-    html += `<div class="more-badge">+ ${extra} more findings in your full report</div>`;
+  // Locked findings — blurred and gated behind sign-up
+  const hidden = Math.max(0, (totalCount || 0) - list.length);
+  if (hidden > 0) {
+    let locked = '';
+    for (let i = 0; i < Math.min(hidden, 3); i++) {
+      locked += `
+        <div class="finding GAP locked" aria-hidden="true">
+          <div class="finding-sev">⚠ Gap found</div>
+          <h3>████████ ███████████</h3>
+          <p>███████████████ ████████ ██████████ █████ ███████████████ ████████.</p>
+        </div>`;
+    }
+    html += `
+      <div class="locked-stack">
+        ${locked}
+        <div class="unlock-overlay">
+          <div class="lock-icon">🔒</div>
+          <strong>+ ${hidden} more findings in your full report</strong>
+          <p>Create your free account to unlock every finding, prioritised fixes, and your local opportunity window.</p>
+          <a href="https://app.magicengine.com.au/portal/register" class="btn-primary">Unlock full report →</a>
+        </div>
+      </div>`;
   }
 
   container.innerHTML = html;
+
+  // Animate the score number + progress bar
+  const valEl = document.getElementById('score-val');
+  const fillEl = document.getElementById('score-fill');
+  if (valEl) animateScore(valEl, score);
+  if (fillEl) setTimeout(() => { fillEl.style.width = score + '%'; }, 80);
 
   // Portal bridge CTA
   const base = 'https://app.magicengine.com.au/portal/login?next=/prospect';

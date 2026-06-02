@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ZhugeWorkbenchFab } from '@/components/workbench/ZhugeWorkbenchFab'
-import { ZhugeWorkbenchDrawer } from '@/components/workbench/ZhugeWorkbenchDrawer'
+import { findSlots } from '@/lib/scheduling/slot-finder'
+import type { SchedulingPlatform } from '@/lib/scheduling/slot-finder'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -64,6 +64,15 @@ interface PackageDetailResponse {
   error?: string
 }
 
+// Slot suggestion per content_post (one post = one platform)
+interface PostScheduleEntry {
+  post_id: string
+  platform: SchedulingPlatform
+  suggested_at: string | null  // null = user hasn't confirmed
+  confirmed_at: string | null  // what user chose (may differ from suggested)
+  title: string
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -112,6 +121,43 @@ const CONTENT_TYPE_LABEL: Record<ContentType, string> = {
   blog_post:     '📝 博客文章',
   reel:          '🎬 短视频',
   visual_asset:  '🖼️ 视觉素材',
+}
+
+const PLATFORM_DISPLAY: Record<SchedulingPlatform, string> = {
+  facebook:  'Facebook',
+  instagram: 'Instagram',
+  linkedin:  'LinkedIn',
+  tiktok:    'TikTok',
+  google:    'Google',
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function fmtAest(isoUtc: string): string {
+  return new Date(isoUtc).toLocaleString('en-NZ', {
+    timeZone: 'Australia/Sydney',
+    day: 'numeric', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  }) + ' AEST'
+}
+
+function toDateInputValue(isoUtc: string): string {
+  // Convert to AEST local date string for <input type="datetime-local">
+  const aestDate = new Date(new Date(isoUtc).toLocaleString('en-US', { timeZone: 'Australia/Sydney' }))
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${aestDate.getFullYear()}-${pad(aestDate.getMonth() + 1)}-${pad(aestDate.getDate())}T${pad(aestDate.getHours())}:${pad(aestDate.getMinutes())}`
+}
+
+function fromDateInputValue(localAest: string): string {
+  // Parse AEST datetime-local string back to UTC ISO
+  const [datePart, timePart] = localAest.split('T')
+  const [year, month, day] = datePart.split('-').map(Number)
+  const [hour, minute] = timePart.split(':').map(Number)
+  // AEST = UTC+10
+  const utcMs = Date.UTC(year, month - 1, day, hour, minute) - 10 * 60 * 60 * 1000
+  return new Date(utcMs).toISOString()
 }
 
 // ---------------------------------------------------------------------------
@@ -251,7 +297,6 @@ function ItemCard({ item, clientId, packageId }: { item: ProductionItem; clientI
   const statusMeta  = ITEM_STATUS_META[item.status] ?? { label: item.status, cls: 'bg-gray-100 text-gray-600' }
   const typeLabel   = CONTENT_TYPE_LABEL[item.content_type]
 
-  // Build a direct link to the content
   const contentLink = (() => {
     switch (item.content_type) {
       case 'content_post':
@@ -265,7 +310,6 @@ function ItemCard({ item, clientId, packageId }: { item: ProductionItem; clientI
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3 hover:border-gray-300 transition-colors">
-      {/* Header */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500">{typeLabel}</span>
@@ -275,17 +319,12 @@ function ItemCard({ item, clientId, packageId }: { item: ProductionItem; clientI
             {statusMeta.label}
           </span>
           {contentLink && (
-            <Link
-              href={contentLink}
-              className="text-[10px] text-indigo-600 hover:underline"
-            >
+            <Link href={contentLink} className="text-[10px] text-indigo-600 hover:underline">
               查看 →
             </Link>
           )}
         </div>
       </div>
-
-      {/* Content preview */}
       {item.content != null ? (
         (() => {
           switch (item.content_type) {
@@ -304,6 +343,217 @@ function ItemCard({ item, clientId, packageId }: { item: ProductionItem; clientI
 }
 
 // ---------------------------------------------------------------------------
+// Smart Scheduling Panel
+// ---------------------------------------------------------------------------
+
+function SchedulingPanel({
+  items,
+  clientId,
+  packageId,
+  onScheduled,
+}: {
+  items: ProductionItem[]
+  clientId: string
+  packageId: string
+  onScheduled: (newStatus: string) => void
+}) {
+  // Only schedulable items are content_posts with platforms
+  const schedulablePosts = items
+    .filter(i => i.content_type === 'content_post' && i.content != null)
+    .flatMap(i => {
+      const post = i.content as ContentPost
+      const platforms = (post.platforms ?? []) as SchedulingPlatform[]
+      return platforms.map(platform => ({
+        post_id: post.id,
+        platform,
+        title: post.title || '(无标题)',
+        existing_scheduled_at: post.scheduled_at,
+      }))
+    })
+
+  // Base date: tomorrow AEST 00:00
+  const [baseDate, setBaseDate] = useState<string>(() => {
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    return tomorrow.toISOString().slice(0, 10)
+  })
+
+  const [entries, setEntries] = useState<PostScheduleEntry[]>([])
+  const [suggested, setSuggested] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [result, setResult] = useState<{ scheduled: number; failed: number } | null>(null)
+
+  const generateSuggestions = useCallback(() => {
+    const base = new Date(`${baseDate}T00:00:00+10:00`)
+    const existing = schedulablePosts
+      .filter(p => p.existing_scheduled_at)
+      .map(p => ({ platform: p.platform, scheduled_at: p.existing_scheduled_at! }))
+
+    const { suggestions } = findSlots({
+      posts: schedulablePosts.map(p => ({ id: p.post_id + '::' + p.platform, platform: p.platform })),
+      existingSchedule: existing,
+      baseDate: base,
+      windowDays: 14,
+    })
+
+    const suggestionMap = new Map(suggestions.map(s => [s.post_id, s.suggested_at]))
+
+    setEntries(schedulablePosts.map(p => ({
+      post_id: p.post_id,
+      platform: p.platform,
+      suggested_at: suggestionMap.get(p.post_id + '::' + p.platform) ?? null,
+      confirmed_at: suggestionMap.get(p.post_id + '::' + p.platform) ?? null,
+      title: p.title,
+    })))
+    setSuggested(true)
+  }, [baseDate, schedulablePosts])
+
+  const updateEntry = (postId: string, platform: SchedulingPlatform, newUtcIso: string) => {
+    setEntries(prev => prev.map(e =>
+      e.post_id === postId && e.platform === platform
+        ? { ...e, confirmed_at: newUtcIso }
+        : e
+    ))
+  }
+
+  const handleConfirmAll = async () => {
+    const assignments = entries
+      .filter(e => e.confirmed_at !== null)
+      .map(e => ({ post_id: e.post_id, scheduled_at: e.confirmed_at! }))
+
+    if (assignments.length === 0) return
+
+    setSubmitting(true)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/production/${packageId}/schedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignments, approve: true }),
+      })
+      const data = await res.json() as { success: boolean; scheduled: number; failed: number; packageStatus: string }
+      setResult({ scheduled: data.scheduled, failed: data.failed })
+      if (data.packageStatus) {
+        onScheduled(data.packageStatus)
+      }
+    } catch {
+      setResult({ scheduled: 0, failed: assignments.length })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (schedulablePosts.length === 0) {
+    return (
+      <div className="bg-gray-50 border border-dashed border-gray-300 rounded-xl p-5 text-center">
+        <p className="text-sm text-gray-500">此生产包中没有可排期的社媒帖子。</p>
+      </div>
+    )
+  }
+
+  if (result) {
+    return (
+      <div className="bg-green-50 border border-green-200 rounded-xl p-5 text-center space-y-2">
+        <p className="text-sm font-semibold text-green-800">
+          ✅ 排期完成：{result.scheduled} 条已确认
+          {result.failed > 0 && `，${result.failed} 条失败`}
+        </p>
+        <p className="text-xs text-green-600">内容状态已更新为「已批准」，可在 Content Hub 中查看发布状态。</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Base date picker */}
+      <div className="flex flex-wrap items-end gap-4">
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-gray-600">从哪天开始排期（AEST 日期）</label>
+          <input
+            type="date"
+            value={baseDate}
+            onChange={e => { setBaseDate(e.target.value); setSuggested(false) }}
+            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+        <button
+          onClick={generateSuggestions}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+        >
+          ✨ AI 建议排期
+        </button>
+      </div>
+
+      {/* Suggestions table */}
+      {suggested && entries.length > 0 && (
+        <>
+          <div className="rounded-xl border border-gray-200 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">帖子</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">平台</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">建议时间 (AEST)</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">调整</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {entries.map((entry, idx) => (
+                  <tr key={`${entry.post_id}-${entry.platform}-${idx}`} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-gray-900 text-xs truncate max-w-[180px]">{entry.title}</td>
+                    <td className="px-4 py-3">
+                      <span className="text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-full px-2 py-0.5">
+                        {PLATFORM_DISPLAY[entry.platform]}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-600">
+                      {entry.suggested_at ? fmtAest(entry.suggested_at) : (
+                        <span className="text-orange-500">⚠ 14 天内无空位</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {entry.suggested_at && (
+                        <input
+                          type="datetime-local"
+                          defaultValue={toDateInputValue(entry.suggested_at)}
+                          onChange={e => {
+                            if (e.target.value) {
+                              updateEntry(entry.post_id, entry.platform, fromDateInputValue(e.target.value))
+                            }
+                          }}
+                          className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        />
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-gray-500">
+              {entries.filter(e => e.confirmed_at).length}/{entries.length} 条可排期（平台高峰时段，最多 14 天，TikTok 每天 2 条）
+            </p>
+            <button
+              onClick={handleConfirmAll}
+              disabled={submitting || entries.every(e => !e.confirmed_at)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-5 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {submitting ? (
+                <>
+                  <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  提交中...
+                </>
+              ) : '✅ 全部确认排期'}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Main Page
 // ---------------------------------------------------------------------------
 
@@ -315,7 +565,9 @@ export default function ProductionPackageDetailPage() {
   const [data, setData] = useState<PackageDetailResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [workbenchChatOpen, setWorkbenchChatOpen] = useState(false)
+  const [pkgStatus, setPkgStatus] = useState<PackageStatus>('draft')
+  const [approving, setApproving] = useState(false)
+  const [approveError, setApproveError] = useState<string | null>(null)
 
   useEffect(() => {
     void (async () => {
@@ -326,6 +578,7 @@ export default function ProductionPackageDetailPage() {
           setError(json.error ?? '加载失败')
         } else {
           setData(json)
+          setPkgStatus(json.package.status)
         }
       } catch {
         setError('网络错误，请重试')
@@ -334,6 +587,28 @@ export default function ProductionPackageDetailPage() {
       }
     })()
   }, [clientId, packageId])
+
+  const handleApprove = async () => {
+    setApproving(true)
+    setApproveError(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/production/${packageId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'approved' }),
+      })
+      const json = await res.json() as { success: boolean; package?: { status: string }; error?: string }
+      if (json.success && json.package) {
+        setPkgStatus(json.package.status as PackageStatus)
+      } else {
+        setApproveError(json.error ?? '操作失败')
+      }
+    } catch {
+      setApproveError('网络错误，请重试')
+    } finally {
+      setApproving(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -361,7 +636,7 @@ export default function ProductionPackageDetailPage() {
 
   const { package: pkg, campaign, execution_item, items } = data
   const dimColor  = DIMENSION_COLOR[pkg.dimension] ?? 'bg-gray-100 text-gray-700 border-gray-200'
-  const pkgStatus = PKG_STATUS_META[pkg.status] ?? { label: pkg.status, cls: 'bg-gray-100 text-gray-600' }
+  const statusMeta = PKG_STATUS_META[pkgStatus] ?? { label: pkgStatus, cls: 'bg-gray-100 text-gray-600' }
   const createdAt = new Date(pkg.created_at).toLocaleDateString('en-NZ', {
     day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
   })
@@ -380,6 +655,9 @@ export default function ProductionPackageDetailPage() {
     { label: 'Launch Hub', href: `/dashboard/content?client=${clientId}${firstContentPost ? `&highlight=${firstContentPost}` : ''}` },
   ]
 
+  const canApprove = ['ready_for_review', 'revision_requested', 'draft'].includes(pkgStatus)
+  const socialPostCount = items.filter(i => i.content_type === 'content_post').length
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Top nav */}
@@ -396,17 +674,31 @@ export default function ProductionPackageDetailPage() {
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="text-xl font-bold text-gray-900">{pkg.title}</h1>
               <Badge cls={dimColor}>{DIMENSION_LABEL[pkg.dimension] ?? pkg.dimension}</Badge>
-              <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${pkgStatus.cls}`}>
-                {pkgStatus.label}
+              <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusMeta.cls}`}>
+                {statusMeta.label}
               </span>
             </div>
-            <Link
-              href={`/dashboard/clients/${clientId}`}
-              className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 shrink-0"
-            >
-              ← 返回
-            </Link>
+            <div className="flex items-center gap-3">
+              {canApprove && (
+                <button
+                  onClick={handleApprove}
+                  disabled={approving}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
+                >
+                  {approving ? '处理中...' : '✅ 批准此包'}
+                </button>
+              )}
+              <Link
+                href={`/dashboard/clients/${clientId}`}
+                className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 shrink-0"
+              >
+                ← 返回
+              </Link>
+            </div>
           </div>
+          {approveError && (
+            <p className="mt-2 text-xs text-red-600">{approveError}</p>
+          )}
         </div>
       </div>
 
@@ -418,8 +710,8 @@ export default function ProductionPackageDetailPage() {
           <div className="space-y-2.5">
             <MetaRow label="维度">{DIMENSION_LABEL[pkg.dimension] ?? pkg.dimension}</MetaRow>
             <MetaRow label="状态">
-              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${pkgStatus.cls}`}>
-                {pkgStatus.label}
+              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusMeta.cls}`}>
+                {statusMeta.label}
               </span>
             </MetaRow>
             <MetaRow label="Campaign">
@@ -456,6 +748,26 @@ export default function ProductionPackageDetailPage() {
                 <p className="text-xs text-gray-500 mt-1">{CONTENT_TYPE_LABEL[type]}</p>
               </div>
             ))}
+          </section>
+        )}
+
+        {/* P21.10 — Smart Scheduling Panel (only for social posts) */}
+        {socialPostCount > 0 && (
+          <section className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">智能排期</h2>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  AI 根据平台高峰时段 + 14 天日历自动规避内容撞车，可手动调整
+                </p>
+              </div>
+            </div>
+            <SchedulingPanel
+              items={items}
+              clientId={clientId}
+              packageId={packageId}
+              onScheduled={newStatus => setPkgStatus(newStatus as PackageStatus)}
+            />
           </section>
         )}
 

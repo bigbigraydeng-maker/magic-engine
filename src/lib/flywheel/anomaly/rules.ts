@@ -1,5 +1,5 @@
 /**
- * Built-in anomaly detection rules (Phase 22.D MVP + Phase 22.B.1 extension).
+ * Built-in anomaly detection rules (Phase 22.D MVP).
  *
  * Each rule is pure-functional: detect(current, history) → result | null.
  * No I/O, no AI. The AnomalyDetectorJob feeds metric data into these rules.
@@ -13,10 +13,6 @@
  * Ads      | Meta CPA            | rise > 30% (WoW)             | high
  * Social   | engagement_rate     | drop > 40% (WoW)             | medium
  * SEO      | total_clicks        | drop > 20% (WoW)             | medium
- *
- * P22.B.1 additions:
- * SEO      | ga4.sessions        | drop > 20% (WoW)             | medium
- * SEO      | ga4.bounce_rate     | rise > 15% (WoW)             | low
  */
 
 import type { AnomalyRule } from './types'
@@ -141,47 +137,6 @@ const seoClicksDrop: AnomalyRule = {
   },
 }
 
-/** SEO-03: GA4 sessions drop > 20% week-over-week (P22.B.1). */
-const seoGa4SessionsDrop: AnomalyRule = {
-  id: 'seo-ga4-sessions-drop',
-  flywheel: 'seo',
-  metricKey: 'seo.ga4.sessions',
-  severity: 'medium',
-  detect(current, history) {
-    if (history.length < 7) return null
-    const reference = rollingAvg(history.slice(-7))
-    const deltaPct = pctChange(current, reference)
-    if (deltaPct > -20) return null
-    return {
-      deltaPct,
-      description:
-        `GA4 sessions dropped ${Math.abs(deltaPct).toFixed(1)}% ` +
-        `(now ${current.toFixed(0)}, 7-day avg was ${reference.toFixed(0)}).`,
-    }
-  },
-}
-
-/** SEO-04: GA4 bounce rate spikes > 15% week-over-week (P22.B.1). */
-const seoGa4BounceRateSpike: AnomalyRule = {
-  id: 'seo-ga4-bounce-rate-spike',
-  flywheel: 'seo',
-  metricKey: 'seo.ga4.bounce_rate',
-  severity: 'low',
-  detect(current, history) {
-    // Bounce rate is 0–1; higher = worse
-    if (history.length < 7) return null
-    const reference = rollingAvg(history.slice(-7))
-    const deltaPct = pctChange(current, reference)
-    if (deltaPct <= 15) return null
-    return {
-      deltaPct,
-      description:
-        `GA4 bounce rate rose ${deltaPct.toFixed(1)}% ` +
-        `(now ${(current * 100).toFixed(1)}%, 7-day avg was ${(reference * 100).toFixed(1)}%).`,
-    }
-  },
-}
-
 // ── Registry ──────────────────────────────────────────────────────────────────
 
 /** All built-in rules. Add new rules here to enrol them in the detector. */
@@ -191,8 +146,6 @@ export const ANOMALY_RULES: readonly AnomalyRule[] = [
   adsCpaSpike,
   socialEngagementDrop,
   seoClicksDrop,
-  seoGa4SessionsDrop,
-  seoGa4BounceRateSpike,
 ]
 
 /** Unique metric keys that any rule needs, grouped by flywheel. */

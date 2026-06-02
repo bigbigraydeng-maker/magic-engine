@@ -3,9 +3,10 @@
  *
  * runFactoryJob():
  *   1. 加载客户 L3 记忆（loadMemoryForClient）
- *   2. 构建注入记忆的 system/user prompt（buildSystemPrompt / buildUserPrompt）
- *   3. 用 Haiku 生产层（routeModel('production')）调用 Anthropic
- *   4. 返回 FactoryResult（含 token 消耗 + USD 成本）
+ *   2. 加载 Data Intelligence 信号（Phase 22.C.2）
+ *   3. 构建注入记忆 + 数据信号的 system/user prompt
+ *   4. 用 Haiku 生产层（routeModel('production')）调用 Anthropic
+ *   5. 返回 FactoryResult（含 token 消耗 + USD 成本）
  *
  * SDK 客户端在 handler 内部初始化（遵循 CLAUDE.md 约定，禁止模块顶层初始化）。
  */
@@ -15,6 +16,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { getAnthropicClient } from '@/lib/anthropic/client'
 import { routeModel, calcCost } from '@/lib/ai/model-router'
 import { loadMemoryForClient } from '@/lib/memory/service'
+import { loadIntelligenceContext } from './intelligence-context'
 import { buildSystemPrompt, buildUserPrompt } from './prompts'
 import type { FactoryJobInput, FactoryResult, FactoryVariant } from './types'
 
@@ -33,8 +35,13 @@ export async function runFactoryJob(
     minConfidence: 0.6,
   })
 
-  // 2. 构建 prompt（记忆注入在 buildSystemPrompt 内完成）
-  const systemPrompt = buildSystemPrompt(input, memoryContext)
+  // 2. Phase 22.C.2 — 加载 Data Intelligence 信号（非阻塞，失败静默降级）
+  const intelligenceBlock = input.intelligenceBlock !== undefined
+    ? input.intelligenceBlock  // caller 已预加载（orchestrator 路径）
+    : await loadIntelligenceContext(supabase, clientId)
+
+  // 3. 构建 prompt（记忆 + intelligence 信号注入在 buildSystemPrompt 内完成）
+  const systemPrompt = buildSystemPrompt({ ...input, intelligenceBlock }, memoryContext)
   const userPrompt   = buildUserPrompt(input)
 
   // 3. 按 production 档位路由 → Haiku 4.5

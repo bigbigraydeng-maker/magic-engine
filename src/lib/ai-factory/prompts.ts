@@ -40,7 +40,9 @@ export function buildSystemPrompt(
     includeRecentDecisions: false,  // production 层不需要决策历史，省 token
   })
 
-  const brandBlock = buildBrandBlock(input)
+  const brandBlock        = buildBrandBlock(input)
+  // Phase 22.C.2 — Data Intelligence signal block (null-safe)
+  const intelligenceBlock = input.intelligenceBlock ?? null
 
   return [
     'You are a senior content strategist producing high-quality marketing content for Australian and New Zealand businesses.',
@@ -52,6 +54,7 @@ export function buildSystemPrompt(
     '',
     brandBlock,
     memorySection,
+    intelligenceBlock,
   ].filter(Boolean).join('\n')
 }
 
