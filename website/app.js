@@ -555,3 +555,185 @@ shakeStyle.textContent = `
   .shake { animation: shake .4s ease; }
 `;
 document.head.appendChild(shakeStyle);
+
+/* ════════════════════════════════════════════════════════════════════
+   NEW VI homepage interactions (2026-06-02)
+   Self-contained IIFE, guarded by #me-home so it only runs on the
+   homepage and never touches the legacy language/discover/nav logic above.
+   All classes use the `me-` prefix to match the scoped styles.
+   Flywheel copy is bilingual, read from <html lang>.
+   ════════════════════════════════════════════════════════════════════ */
+(function () {
+  "use strict";
+  const home = document.getElementById("me-home");
+  if (!home) return; // not the homepage — skip everything
+
+  const lang = (document.documentElement.lang === "zh") ? "zh" : "en";
+  const motionOff = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---------- Nav shadow on scroll ---------- */
+  const nav = document.getElementById("me-nav");
+  if (nav) {
+    const onScroll = () => nav.classList.toggle("scrolled", window.scrollY > 8);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+  }
+
+  /* ---------- Flywheel content (bilingual) ---------- */
+  const STEPS_EN = [
+    { no: "Step 01 — Diagnose", title: "Find what actually moves the needle.",
+      body: "Magic Engine scores your search, AI visibility, social, ads, reputation and competitor signals — and surfaces the highest-leverage opportunities, ranked by impact. No more guessing where to start.",
+      points: ["Six diagnostic signals, AU/NZ-first", "AI-ranked opportunity map", "Delivered in 48 hours, free"] },
+    { no: "Step 02 — Prioritise", title: "Turn a long list into a clear plan.",
+      body: "Opportunities are scored, sequenced and packaged into execution loops — so the team always knows the single most valuable thing to ship next.",
+      points: ["Impact-vs-effort sequencing", "Approval items routed to the right people", "Scope locked before work begins"] },
+    { no: "Step 03 — Execute", title: "Ship the work, not just the report.",
+      body: "Prioritised work flows into active execution loops and gets done — content, website fixes, social assets and ad decisions — tracked end-to-end, visible to you and your customers.",
+      points: ["Live execution tracking", "Real-time client portal view", "Nothing stalls in a backlog"] },
+    { no: "Step 04 — Measure", title: "Show customers exactly what changed.",
+      body: "Every loop closes with measurable proof — visibility lifts, actions shipped, results delivered — feeding straight back into the next diagnosis. The flywheel keeps turning.",
+      points: ["Outcome dashboards per client", "Before / after proof", "Insight feeds the next loop"] }
+  ];
+  const STEPS_ZH = [
+    { no: "第 01 步 — 诊断", title: "找到真正能撬动增长的点。",
+      body: "Magic Engine 为你的搜索、AI 可见度、社媒、广告、口碑和竞品信号打分，并按影响力排序，浮现最高杠杆的机会。不用再猜从哪里开始。",
+      points: ["六个诊断信号，澳新优先", "AI 排序的机会地图", "48 小时内交付，免费"] },
+    { no: "第 02 步 — 排序", title: "把长长的清单变成清晰的计划。",
+      body: "机会会被打分、排序，并打包成执行环——团队始终清楚下一个最有价值的事是什么。",
+      points: ["按影响力与工作量排序", "审批项分派给对的人", "开工前先锁定范围"] },
+    { no: "第 03 步 — 执行", title: "交付的是工作，不只是报告。",
+      body: "优先级最高的工作进入执行环并被完成——内容、网站修复、社媒素材和广告决策——全程跟踪，你和你的客户都能看到。",
+      points: ["实时执行跟踪", "客户门户实时查看", "不会卡在待办里"] },
+    { no: "第 04 步 — 度量", title: "向客户清楚展示发生了什么改变。",
+      body: "每个环都以可度量的证据收尾——可见度提升、已交付的动作、拿到的结果——并直接回流到下一次诊断。飞轮持续转动。",
+      points: ["每个客户的成果看板", "前后对比证据", "洞察反哺下一个环"] }
+  ];
+  const STEPS = lang === "zh" ? STEPS_ZH : STEPS_EN;
+  const TAB_LABEL = (no) => no.split("—")[1].trim();
+
+  const detail = document.getElementById("me-fly-detail");
+  const nodes = Array.from(document.querySelectorAll(".me-fly-node"));
+  const arc = document.getElementById("me-fly-arc");
+  const ARC_LEN = 565;
+
+  function renderStep(i) {
+    const s = STEPS[i];
+    if (!detail) return;
+    detail.innerHTML =
+      '<div class="me-step-no">' + s.no + "</div>" +
+      "<h3>" + s.title + "</h3>" +
+      "<p>" + s.body + "</p>" +
+      "<ul>" + s.points.map(function (p) {
+        return '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>' + p + "</li>";
+      }).join("") + "</ul>" +
+      '<div class="me-fly-tabs">' + STEPS.map(function (st, idx) {
+        return '<button data-go="' + idx + '"' + (idx === i ? ' class="active"' : "") + ">" + TAB_LABEL(st.no) + "</button>";
+      }).join("") + "</div>";
+
+    nodes.forEach(function (n, idx) { n.classList.toggle("active", idx === i); });
+
+    if (arc) {
+      const frac = (i + 1) / STEPS.length;
+      arc.style.transition = "stroke-dashoffset .6s cubic-bezier(.22,.61,.36,1)";
+      arc.style.strokeDashoffset = String(ARC_LEN * (1 - frac));
+    }
+    detail.querySelectorAll("[data-go]").forEach(function (b) {
+      b.addEventListener("click", function () { setStep(+b.dataset.go); });
+    });
+  }
+  function setStep(i) { renderStep(i); }
+  nodes.forEach(function (n) {
+    n.addEventListener("click", function () { setStep(+n.dataset.step); });
+  });
+  if (detail) renderStep(0);
+
+  /* ---------- Scroll-driven visibility (throttled) ---------- */
+  const watchers = [];
+  function registerWatcher(el, ratio, cb) {
+    if (!el) return;
+    watchers.push({ el: el, ratio: ratio == null ? 0.12 : ratio, cb: cb, done: false });
+  }
+  function inView(el, ratio) {
+    const r = el.getBoundingClientRect();
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    if (r.height === 0 && r.width === 0) return false;
+    const visibleTop = Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
+    const need = Math.min(r.height * ratio, vh * 0.4);
+    return r.top < vh && r.bottom > 0 && visibleTop >= Math.max(1, need);
+  }
+  let ticking = false;
+  function runWatchers() {
+    ticking = false;
+    for (let i = watchers.length - 1; i >= 0; i--) {
+      const w = watchers[i];
+      if (w.done) { watchers.splice(i, 1); continue; }
+      if (inView(w.el, w.ratio)) { w.done = true; w.cb(w.el); }
+    }
+  }
+  function requestRun() {
+    if (ticking) return;
+    ticking = true;
+    setTimeout(runWatchers, 16);
+  }
+  window.addEventListener("scroll", requestRun, { passive: true });
+  window.addEventListener("resize", requestRun);
+  let polls = 0;
+  const pollTimer = setInterval(function () {
+    runWatchers();
+    if (++polls > 40 || watchers.length === 0) clearInterval(pollTimer);
+  }, 200);
+
+  /* ---------- Reveal on scroll ---------- */
+  home.querySelectorAll(".me-reveal").forEach(function (el) {
+    if (motionOff) { el.classList.add("in"); return; }
+    registerWatcher(el, 0.1, function (t) { t.classList.add("in"); });
+  });
+
+  /* ---------- Count-up numbers ---------- */
+  function animateCount(el) {
+    const target = parseFloat(el.dataset.count);
+    const dec = parseInt(el.dataset.dec || "0", 10);
+    const prefix = el.dataset.prefix || "";
+    const suffix = el.dataset.suffix || "";
+    if (motionOff) { el.textContent = prefix + target.toFixed(dec) + suffix; return; }
+    const dur = 1300;
+    const start = Date.now();
+    const timer = setInterval(function () {
+      const t = Math.min((Date.now() - start) / dur, 1);
+      const eased = 1 - Math.pow(1 - t, 3);
+      el.textContent = prefix + (target * eased).toFixed(dec) + suffix;
+      if (t >= 1) { el.textContent = prefix + target.toFixed(dec) + suffix; clearInterval(timer); }
+    }, 32);
+  }
+  home.querySelectorAll("[data-count]").forEach(function (el) {
+    registerWatcher(el, 0.5, animateCount);
+  });
+
+  requestRun();
+  window.addEventListener("load", requestRun);
+  setTimeout(requestRun, 250);
+  setTimeout(requestRun, 800);
+
+  /* ---------- FAQ accordion ---------- */
+  home.querySelectorAll(".me-faq-item").forEach(function (item) {
+    const q = item.querySelector(".me-faq-q");
+    const a = item.querySelector(".me-faq-a");
+    if (!q || !a) return;
+    function setOpen(open) {
+      item.classList.toggle("open", open);
+      a.style.maxHeight = open ? a.scrollHeight + "px" : "0px";
+    }
+    if (item.classList.contains("open")) setOpen(true);
+    q.addEventListener("click", function () {
+      const willOpen = !item.classList.contains("open");
+      home.querySelectorAll(".me-faq-item").forEach(function (other) {
+        if (other !== item) { other.classList.remove("open"); other.querySelector(".me-faq-a").style.maxHeight = "0px"; }
+      });
+      setOpen(willOpen);
+    });
+  });
+  window.addEventListener("resize", function () {
+    const open = home.querySelector(".me-faq-item.open .me-faq-a");
+    if (open) open.style.maxHeight = open.scrollHeight + "px";
+  });
+})();

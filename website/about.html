@@ -9,6 +9,7 @@
   <meta property="og:url" content="https://magicengine.com.au/about">
   <link rel="alternate" hreflang="en" href="https://magicengine.com.au/about">
   <link rel="alternate" hreflang="zh-Hans" href="https://magicengine.com.au/cn/about">
+  <link rel="alternate" hreflang="x-default" href="https://magicengine.com.au/about">
   <link rel="stylesheet" href="/styles.css">
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
 </head>
@@ -26,17 +27,18 @@
           <polygon points="46,6 55,6 65,60 55,60" fill="#BE8A2E"/>
           <polygon points="24,38 33,38 34,48 35,38 44,38 34,60" fill="#7A5518"/>
         </svg>
-        <span>Magic Engine</span>
+        <span data-en="Magic Engine" data-zh="魔力引擎">Magic Engine</span>
       </a>
       <ul class="nav-links">
-        <li><a href="/discover">Free Discovery</a></li>
-        <li><a href="/geo">GEO</a></li>
-        <li><a href="/training">Training</a></li>
-        <li><a href="/about" style="color:var(--ink);">About</a></li>
+        <li><a href="/discover" data-en="Free Discovery" data-zh="免费探查">Free Discovery</a></li>
+        <li><a href="/geo" data-en="GEO" data-zh="GEO">GEO</a></li>
+        <li><a href="/training" data-en="Training" data-zh="培训">Training</a></li>
+        <li><a href="/about" style="color:var(--ink);" data-en="About" data-zh="关于">About</a></li>
       </ul>
       <div class="nav-actions">
-        <button class="btn-lang" id="lang-toggle" onclick="toggleLang()">中文</button>
-        <a href="https://app.magicengine.com.au/portal/login" class="btn-portal">Client portal</a>
+        <button class="btn-lang" id="lang-toggle" onclick="toggleLang()" aria-label="Switch language">中文</button>
+        <a href="/discover" class="btn-register" data-en="Get diagnosis" data-zh="开始诊断">Get diagnosis</a>
+        <a href="https://app.magicengine.com.au/portal/login" class="btn-portal" data-en="Client portal" data-zh="客户入口">Client portal</a>
       </div>
     </div>
   </div>
@@ -46,37 +48,37 @@
 <main>
   <div class="legal-wrap">
 
-    <h1 class="serif">About Magic Engine</h1>
+    <h1 class="serif" data-en="About Magic Engine" data-zh="关于 Magic Engine">About Magic Engine</h1>
 
-    <h2>Who we are</h2>
-    <p>
+    <h2 data-en="Who we are" data-zh="我们是谁">Who we are</h2>
+    <p data-en="Magic Engine is an AI upgrade, GEO, and training company built for ambitious Australian and New Zealand businesses — especially for founders and operators who know their product is good but want a clearer public surface in Google, AI assistants, social feeds, and review sites." data-zh="Magic Engine 是一家 AI 升级、GEO 和培训公司，专为有野心的澳大利亚和新西兰企业打造——尤其是那些知道自己产品过硬、但希望在 Google、AI 助手、社媒和评价网站上有更清晰公开形象的创始人和运营者。">
       Magic Engine is an AI upgrade, GEO, and training company built for ambitious Australian and New Zealand businesses — especially for founders and operators who know their product is good but want a clearer public surface in Google, AI assistants, social feeds, and review sites.
     </p>
-    <p>
+    <p data-en="We started Magic Engine on a simple observation: most businesses have no idea how they actually appear online. They've never seen the version of themselves that lives in search results and AI answers — but their customers and competitors have. We use free diagnosis, GEO, and training to close that gap." data-zh="我们创办 Magic Engine 源于一个简单的观察：大多数企业根本不知道自己在线上是什么样子。他们从未见过自己活在搜索结果和 AI 回答里的那个版本——但他们的客户和竞争对手见过。我们用免费诊断、GEO 和培训来弥补这个差距。">
       We started Magic Engine on a simple observation: most businesses have no idea how they actually appear online. They've never seen the version of themselves that lives in search results and AI answers — but their customers and competitors have. We use free diagnosis, GEO, and training to close that gap.
     </p>
 
-    <h2>Our name</h2>
-    <p>
+    <h2 data-en="Our name" data-zh="我们的名字">Our name</h2>
+    <p data-en="GEO helps your homepage, service pages, training pages, and contact flow stay readable for search engines and answer engines. The goal is not more pages — it is clearer signal." data-zh="GEO 让你的首页、服务页、培训页和联系路径更容易被搜索引擎和答案引擎读懂。目标不是更多页面，而是更清晰的信号。">
       GEO helps your homepage, service pages, training pages, and contact flow stay readable for search engines and answer engines. The goal is not more pages — it is clearer signal.
     </p>
 
-    <h2>What we do</h2>
-    <p>We help businesses do three things:</p>
+    <h2 data-en="What we do" data-zh="我们做什么">What we do</h2>
+    <p data-en="We help businesses do three things:" data-zh="我们帮助企业做三件事：">We help businesses do three things:</p>
     <ul>
-      <li><strong>Diagnose it</strong> — A free discovery report reveals how you show up across search, AI search, social, ads, reputation and against your competitors.</li>
-      <li><strong>Fix it</strong> — Magic Engine turns each finding into real work — content, website fixes, bilingual updates, training tasks and ad decisions — that you approve and we execute.</li>
-      <li><strong>Prove it</strong> — You watch your visibility improve over time inside one simple portal.</li>
+      <li><strong data-en="Diagnose it" data-zh="诊断">Diagnose it</strong> <span data-en="— A free discovery report reveals how you show up across search, AI search, social, ads, reputation and against your competitors." data-zh="— 一份免费的探查报告，揭示你在搜索、AI 搜索、社媒、广告、口碑以及与竞品对比中的真实表现。">— A free discovery report reveals how you show up across search, AI search, social, ads, reputation and against your competitors.</span></li>
+      <li><strong data-en="Fix it" data-zh="修复">Fix it</strong> <span data-en="— Magic Engine turns each finding into real work — content, website fixes, bilingual updates, training tasks and ad decisions — that you approve and we execute." data-zh="— Magic Engine 把每个发现转化为实际工作——内容、网站修复、双语更新、培训任务和广告决策——由你审批、我们执行。">— Magic Engine turns each finding into real work — content, website fixes, bilingual updates, training tasks and ad decisions — that you approve and we execute.</span></li>
+      <li><strong data-en="Prove it" data-zh="证明">Prove it</strong> <span data-en="— You watch your visibility improve over time inside one simple portal." data-zh="— 你在一个简单的门户里看着自己的可见度随时间提升。">— You watch your visibility improve over time inside one simple portal.</span></li>
     </ul>
 
-    <h2>Who we serve</h2>
-    <p>
+    <h2 data-en="Who we serve" data-zh="我们服务谁">Who we serve</h2>
+    <p data-en="We work with small and growing businesses across Australia and New Zealand, including Chinese-speaking and English-speaking teams that want one public surface to support both audiences." data-zh="我们服务于澳大利亚和新西兰各地的小型和成长型企业，包括希望用一个公开页面同时服务两类受众的中文和英文团队。">
       We work with small and growing businesses across Australia and New Zealand, including Chinese-speaking and English-speaking teams that want one public surface to support both audiences.
     </p>
 
-    <h2>Contact</h2>
+    <h2 data-en="Contact" data-zh="联系我们">Contact</h2>
     <p>
-      Have a question or want to talk to a human? Email us at <a href="mailto:raydeng@magicengine.com.au" style="color:var(--gold-dark);text-decoration:underline;">raydeng@magicengine.com.au</a>.
+      <span data-en="Have a question or want to talk to a human? Email us at" data-zh="有问题或想和真人聊聊？发邮件给我们：">Have a question or want to talk to a human? Email us at</span> <a href="mailto:raydeng@magicengine.com.au" style="color:var(--gold-dark);text-decoration:underline;">raydeng@magicengine.com.au</a>.
     </p>
 
     <div class="entity-block">
