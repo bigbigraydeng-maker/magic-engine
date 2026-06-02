@@ -237,32 +237,38 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-06-02 02:45 NZST （**Phase 22 PR #187 open — 22.D 全闭环 + 22.A.1/A.3 GSC/Meta flywheel_metrics 接通**）
+> 最后更新：2026-06-02 22:28 NZST （**Phase 30 + Phase 31 双 phase 同日 merged — ME 升级为"以 Goal 为中心的生意指挥平台"**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **PM 操作 🔴** | Supabase 跑 migration `20260616000001_phase29_self_serve_brief.sql` | ⚠️ 待操作 |
+| **A1 评分公式修复 🔴** | reputation 维度重做（TripAdvisor + ProductReview + 经营年限 + GBP rating 综合）— Phase 32 AI 参谋升级前置依赖 | 📋 高 / 3-5 天 |
+| **A3 案例沉淀** | 把 CTS/Oztop Phase 31 跑通经验固化到 Clients/ 笔记 | 📋 半天 |
+| **A2 Goal 主指标 auto-fetch** | GA4 / Brand search volume / Form submissions 自动读 current_value | 📋 中 / 1-2 天/源 |
+| **B1 AU/NZ Marketing Index** | 独立项目战略议题，Q4 2026 评估 → Q1 2027 启动 MVP | 📋 战略级 / 6-8 周 |
 | **PM 操作（Meta Ads）🔴** | Render 设 `META_SYSTEM_USER_TOKEN`（长效 System User Token），否则执行看板「直接执行 (Meta API)」返回 424 | ⚠️ 待操作 |
-| **PM 操作 🔴** | Supabase 跑 migration `20260603000001_platform_oauth_connections.sql`（Phase 24.A） | ⚠️ 待操作 |
-| **Phase 22 merge** | PR #187 审核通过后合并（Phase 22.D + 22.A.1/A.3） | ⚠️ 待合并 |
-| **Phase 22.A.2** | GA4 每日采集 — vocabulary 补 ga4.* + GA4 Reporting API 写 flywheel_metrics | 📋 待开始 |
+| **PM 操作 🔴** | GitHub repo Secrets 添加 `CRON_SECRET`（Phase 30/31 共用，月度/每日 cron 才能跑） | ⚠️ 待操作 |
 | **GBP.0** | Google Cloud：enable Business Profile API + Account Management API | ⚠️ PM 操作 |
-| **Phase 24.B** | GBP 数据摂取（reviews、insights、location data 写入 DB） | 📋 待开始 |
 
 **已完成全景（最近几个 Phase）**：
-- ✅ **Phase 22.D + 22.A.1/A.3**（2026-06-01，PR #187 open）：AnomalyDetector 5 规则引擎 + 诸葛亮 Proactive + 每日 cron + 看板 ⚡ badge + GSC/Meta flywheel_metrics 接通
-- ✅ **Phase 29 全闭环**（2026-06-01）：M1 DB地基 + M2 Portal废弃 + M3 Brief门槛；self_serve身份 + BriefGateBanner 接入博客/执行看板/Marketing Plan
-- ✅ **Phase 21 全部 P21.1–9**（2026-05-31）：AI Factory 三里程碑全闭环：M1 模型分层路由+记忆注入、M2 变体扇出+量产编排器、M3 月度熔断+FDE 一键量产 UI+飞轮 outcome 回流接线
-- ✅ **Phase 20 MTC 自助计费**（PR #144 + #146，2026-05-31）：注册页 + 钱包页 + Stripe Checkout
-- ✅ **Phase 24.A 全部 8 任务**（PR #125）：Platform OAuth Connector
-- ✅ **Phase 23 完整闭环**（PR #112）：L3 记忆四表 + MemoryService
+- ✅ **Phase 31 Strategy Layer (Beta)**（2026-06-02，PR #259）：Goal→Initiative→Action 三层骨架 + 4 步向导 + 诸葛亮 Sonnet 润色 hypothesis + 90 天 verdict 自动归档 + Goal 历史页 + 每日 cron
+- ✅ **Phase 30 Industry Baseline Engine**（2026-06-02，PR #251）：5 细分 / 44 域名 / 月度 cron 自动重跑 / 华佗实时读基准（含 city 维度命中）
+- ✅ **子牙→诸葛亮命名修复**（2026-06-02，PR #266）：清除 ME 内"子牙"残留，统一用"诸葛亮"
+- ✅ **Phase 22.D + 22.A.1/A.3**（2026-06-01，PR #187）：AnomalyDetector 5 规则 + 诸葛亮 Proactive + GSC/Meta flywheel_metrics
+- ✅ **Phase 29 全闭环**（2026-06-01）：M1 DB地基 + M2 Portal废弃 + M3 Brief门槛
+- ✅ **Phase 21 全部 P21.1–9**（2026-05-31）：AI Factory 三里程碑全闭环
 
-**下一候选**：
-- 📋 **Phase 22.A.2** — GA4 每日采集（merge PR #187 后继续）
-- 📋 **Phase 24.B** — GBP 数据摂取（依赖 PM 完成 GBP.0 + migration）
-- 📋 **Phase 18.B** — Google Ads（Developer token 到位后）
+**下一候选（按优先级）**：
+1. 📋 **A1 reputation 评分公式修复** — Phase 31 跑通时暴露的"地基不稳"问题（CTS reputation=44 不可信）
+2. 📋 **A3 CTS/Oztop 案例沉淀** — 半天事，把跑通经验固化
+3. 📋 **Phase 22.A.2** — GA4 每日采集（merge PR #187 后继续）
+4. 📋 **Phase 24.B** — GBP 数据摂取（依赖 GBP.0 + migration）
+5. 📋 **B1 AU/NZ Marketing Index** — 战略议题，Q4 评估
 
-下一 session：`继续 Phase 22`（Data Intelligence Engine）或 `继续 Phase 24.B`（GBP 数据摄取）
+**ME 定位升级（2026-06-02 确立）**：
+旧 → 营销自动化平台
+**新 → 以 Goal 为中心的生意指挥平台**（Kanban 汇总所有能帮客户达成 Goal 的因素，营销只是其中一条战线）
+
+下一 session：`继续 ME 工作 — A1 reputation 评分公式修复` 或 `继续 ME 工作 — A3 案例沉淀`
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox
