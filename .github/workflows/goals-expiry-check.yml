@@ -1,0 +1,48 @@
+name: Phase 31 — Goals Expiry Check (Daily)
+
+# 每天 03:30 UTC 扫描 active 状态但 period_end 已过期的 Goal，
+# 标记为 expired 让 FDE 在 UI 上看到"该填 verdict 了"。
+#
+# 不自动 archive — current_value 在 MVP 阶段必须 FDE/客户手动填。
+#
+# 配置：
+#   - GitHub repo Secrets 添加 CRON_SECRET（与 Phase 30 同值）
+#   - 可选 GOALS_EXPIRY_CRON_URL（默认 https://app.magicengine.com.au/api/cron/goals-expiry-check）
+
+on:
+  schedule:
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  flag-expired:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger goals expiry endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          GOALS_EXPIRY_CRON_URL: ${{ secrets.GOALS_EXPIRY_CRON_URL || 'https://app.magicengine.com.au/api/cron/goals-expiry-check' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET secret not set"
+            exit 1
+          fi
+
+          echo "Triggering: $GOALS_EXPIRY_CRON_URL"
+          response=$(curl -fsSL -w "\nHTTP_STATUS:%{http_code}" \
+            -X GET \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            --max-time 60 \
+            "$GOALS_EXPIRY_CRON_URL")
+
+          status=$(echo "$response" | tail -n1 | sed 's/HTTP_STATUS://')
+          body=$(echo "$response" | sed '$d')
+
+          echo "Status: $status"
+          echo "Body: $body"
+
+          if [ "$status" != "200" ]; then
+            echo "::error::Non-200 response from cron endpoint"
+            exit 1
+          fi

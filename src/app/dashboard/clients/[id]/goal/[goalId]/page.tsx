@@ -14,6 +14,7 @@ import Link from 'next/link'
 import type { GoalRow } from '@/types/strategy'
 import { InitiativeList } from './_components/InitiativeList'
 import { BacklogMigrator } from './_components/BacklogMigrator'
+import { VerdictPanel } from './_components/VerdictPanel'
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-NZ', {
@@ -233,6 +234,9 @@ export default function GoalDetailPage() {
           <p className="mt-2 text-sm text-slate-300 whitespace-pre-wrap">{goal.fde_reasoning}</p>
         </div>
       )}
+
+      {/* Verdict panel (M4) — visible for active/expired/archived */}
+      <VerdictPanel goal={goal} onJudged={load} />
 
       {/* Initiatives (M3) */}
       <InitiativeList goal={goal} canEdit={goal.status === 'draft' || goal.status === 'active'} />

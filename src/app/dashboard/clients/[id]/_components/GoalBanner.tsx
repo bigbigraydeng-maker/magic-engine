@@ -50,15 +50,23 @@ export function GoalBanner({ clientId }: Props) {
             Set a 90-day goal to align all execution under one north star.
           </p>
         </div>
-        <Link
-          href={`/dashboard/clients/${clientId}/goal/new`}
-          className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2 text-sm font-medium text-white"
-        >
-          + New Goal
-          <span className="ml-2 inline-block rounded bg-amber-500/30 px-1.5 py-0.5 text-[9px] font-bold text-amber-200 uppercase">
-            Beta
-          </span>
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href={`/dashboard/clients/${clientId}/goals/history`}
+            className="text-xs text-slate-400 hover:text-white"
+          >
+            View History
+          </Link>
+          <Link
+            href={`/dashboard/clients/${clientId}/goal/new`}
+            className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2 text-sm font-medium text-white"
+          >
+            + New Goal
+            <span className="ml-2 inline-block rounded bg-amber-500/30 px-1.5 py-0.5 text-[9px] font-bold text-amber-200 uppercase">
+              Beta
+            </span>
+          </Link>
+        </div>
       </div>
     )
   }
@@ -68,12 +76,9 @@ export function GoalBanner({ clientId }: Props) {
   const intentEmoji = goal.intent === 'acquisition' ? '🎯' : goal.intent === 'sales' ? '💰' : '📢'
 
   return (
-    <Link
-      href={`/dashboard/clients/${clientId}/goal/${goal.id}`}
-      className="block rounded-xl border border-blue-500/30 bg-blue-500/[0.04] hover:bg-blue-500/[0.08] p-4 mb-4 transition-colors"
-    >
-      <div className="flex items-center justify-between">
-        <div className="flex-1">
+    <div className="rounded-xl border border-blue-500/30 bg-blue-500/[0.04] p-4 mb-4">
+      <div className="flex items-center justify-between gap-3">
+        <Link href={`/dashboard/clients/${clientId}/goal/${goal.id}`} className="flex-1 min-w-0 hover:opacity-80">
           <div className="flex items-center gap-2">
             <span className="text-lg">{intentEmoji}</span>
             <h3 className="text-sm font-semibold text-white">{goal.title}</h3>
@@ -91,9 +96,14 @@ export function GoalBanner({ clientId }: Props) {
             <span className="text-slate-600 mx-2">·</span>
             <span className="text-blue-300">{remaining} days remaining</span>
           </p>
-        </div>
-        <span className="text-slate-500 text-xs">View →</span>
+        </Link>
+        <Link
+          href={`/dashboard/clients/${clientId}/goals/history`}
+          className="shrink-0 text-xs text-slate-400 hover:text-white"
+        >
+          History
+        </Link>
       </div>
-    </Link>
+    </div>
   )
 }

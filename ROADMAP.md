@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-02 18:29 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-02 20:36 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -114,6 +114,71 @@ CITY=christchurch INDUSTRY=real_estate npx tsx scripts/p30-s4-serp-probe.ts
 **Phase 30 状态：✅ 闭环完成 2026-06-02**
 
 整个机制连起来运转：每月 1 号 cron 自动重跑 44 个域名 → 写最新分 + 插历史 → 华佗诊断时按 `industry_category + city` 实时拉基准，永远反映竞品最新水准。
+
+---
+
+### Phase 31 — Strategy Layer (Beta)（Goal/Initiative 战略层）⭐⭐⭐ 2026-06-02
+
+> **ME 定位升级**：从"营销自动化平台"→ **以 Goal 为中心的生意指挥平台**。营销只是其中一条战线。Kanban 汇总"所有能帮客户达成 Goal 的因素"。
+
+**三层骨架**：
+```
+GOAL (1 active per client) → INITIATIVES (按工作流目的切，非按维度切) → ACTIONS (execution_items)
+```
+
+**关键设计**（详见 [memory: project_phase31_strategy_layer]）：
+- **3 Intent**：acquisition / sales / awareness（awareness 含 4 sub-types：new-market / event-campaign / geographic-expansion / reputation-recovery）
+- **6 Initiative Types**：demand_generation / conversion_optimization / trust_building / competitive_defense / market_education / content_asset_production
+- **Tier**：terminal / supporting（Goal verdict 只由 terminal 决定）
+- **MVP 不依赖评分公式**：现有 reputation/SEO 分有失真问题，AI 参谋仅做 hypothesis 润色，不基于诊断分推荐
+- **Beta 标记**：UI 显示 Beta 角标，FDE 可见客户端不显
+
+#### M1 — 数据模型 + 老数据兼容（✅ 完成 2026-06-02）
+
+- [x] **P31.M1.1** Migration：goals + initiatives 表 + 完整 enum 类型
+- [x] **P31.M1.2** execution_items 加 initiative_id（可空，向后兼容）
+- [x] **P31.M1.3** 零数据丢失迁移：8 客户的 284 个老 actions 自动归到 "Unassigned Backlog" placeholder Goal
+- [x] **P31.M1.4** unique index 强约束一个客户只能一个 active Goal
+
+#### M2 — Goal 设定流程（✅ 完成 2026-06-02）
+
+- [x] **P31.M2.1** Goal CRUD API（5 端点：list/create/get/delete/activate/archive）
+- [x] **P31.M2.2** 4 步向导 UI `/dashboard/clients/[id]/goal/new`
+- [x] **P31.M2.3** Goal 详情页 `/dashboard/clients/[id]/goal/[goalId]`
+- [x] **P31.M2.4** Goal Banner 挂到客户首页头部
+
+#### M3 — Initiative 配置 + AI 润色（✅ 完成 2026-06-02）
+
+- [x] **P31.M3.1** Initiative CRUD API（list/create/get/update/archive）+ budget % 校验 + tier 检查
+- [x] **P31.M3.2** Goal 详情页 Initiative 列表（type/tier/posture/AI 角标）
+- [x] **P31.M3.3** 子牙 Sonnet 润色 hypothesis（3 段结构：动作 / 假设 / 90 天验证）
+- [x] **P31.M3.4** 批量挂 actions API（bulk-assign，最多 200/次）
+- [x] **P31.M3.5** Backlog Migrator UI（多选老 action 一键迁移）
+
+#### M4 — Verdict 归因 + Goal 看板（✅ 完成 2026-06-02）
+
+- [x] **P31.M4.1** Verdict 归因 lib（progress = (current - baseline) / (target - baseline)：≥80% confirmed / 50-80% partial / <50% reversed）
+- [x] **P31.M4.2** 每日 cron `/api/cron/goals-expiry-check` + GitHub Actions 调度（标记 active → expired）
+- [x] **P31.M4.3** Judge API `/api/goals/[goalId]/judge`（FDE 填 current_value，自动判 verdict + archive）
+- [x] **P31.M4.4** VerdictPanel 组件（active/expired 显示 CTA，archived 显示 verdict badge + summary）
+- [x] **P31.M4.5** Goal 历史归档页 `/dashboard/clients/[id]/goals/history`（含 lifetime verdict 统计）
+
+> **PM 操作（一次性）**：GitHub repo Secrets 已有 `CRON_SECRET`（Phase 30 共用），无需新增。下次 03:30 UTC 自动跑首次。可在 Actions 页面手工 `Run workflow` 验证。
+
+#### Phase 32+ Backlog
+
+- [ ] **P31.X.1** 月营收"季度签字对账"流程（避免客户自报数据失真）
+- [ ] **P31.X.2** 主指标 measurement='auto' 时自动拉取 current_value（GA4 / SerpAPI / Apify）
+- [ ] **P31.X.3** AI 参谋升级：基于历史 outcome 推荐 Initiative 组合（依赖数据沉淀）
+- [ ] **P31.X.4** 评分公式重做（reputation / SEO / ai_visibility 维度独立大工程）
+- [ ] **P31.X.5** Retention / Reactivation intent（需先接通 CRM/EDM）
+- [ ] **P31.X.6** Initiative 类型扩展：Operations / Market Intelligence / Product / Partnerships
+
+---
+
+**Phase 31 状态：✅ MVP 闭环完成 2026-06-02**
+
+整个 Goal 生命周期闭环：FDE 创建 Goal → 配 2-5 个 Initiative → 子牙润色 hypothesis → 老 actions 迁移 → 90 天后 cron 自动标 expired → FDE 填 current_value → 系统判 verdict + archive → 历史归档页学习。
 
 ---
 
