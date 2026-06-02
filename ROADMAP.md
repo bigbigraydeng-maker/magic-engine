@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-02 20:07 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-02 20:43 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -25,6 +25,7 @@
 - [ ] **P29.SEO.14** AU/NZ SME service page QA pass - verify titles, canonicals, internal links, sitemap exposure, and only make tiny fixes if the new service pages need one more polish pass.
 - [x] **P29.SEO.18** post-VI SEO/GEO repair - after the new public VI, restore AI crawler access hints, real favicon assets, raw Chinese page signals, and lightweight schema/social metadata without redesigning the site.
 - [x] **P29.SEO.19** Chinese VI logo sync - replace the old polygon logo across `/cn/` public pages so the Chinese site matches the new Magic Engine VI.
+- [x] **P29.SEO.20** brand asset sync - update the public favicon and OG image to the new VI mark so social previews and browser tabs match the rest of the site.
 
 ### Website Ads Launch Prep - 2026-06-01
 
@@ -3201,6 +3202,7 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ### 2026-06-02（Website SEO Optimization P29.SEO.18 完成）
 - 新 VI 后 SEO/GEO 修复完成：补 AI search crawler robots hints、favicon/OG 资源、中文页 raw HTML 信号、中文站内链接、服务页 Service schema 和社交 meta
 - **P29.SEO.19** — 中文站导航和页脚 logo 同步新 VI 标识，修复 `/cn/` 页面仍显示旧多边形 logo 的问题
+- **P29.SEO.20** — favicon 与 OG card 重新换成新 VI，浏览器标签和社交预览现在和站点主视觉一致
 
 ### 2026-06-01（Website SEO Optimization P29.SEO.6 完成）
 

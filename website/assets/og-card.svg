@@ -14,15 +14,27 @@
   <circle cx="1010" cy="130" r="240" fill="#EBCB8B" opacity="0.25"/>
   <circle cx="170" cy="540" r="220" fill="#5C8A4A" opacity="0.12"/>
   <g transform="translate(84 84) scale(2.1)">
-    <polygon points="3,60 13,6 22,6 12,60" fill="#BE8A2E"/>
-    <polygon points="13,6 22,6 33,38 24,38" fill="#9A6F1E"/>
-    <polygon points="46,6 55,6 44,38 35,38" fill="#9A6F1E"/>
-    <polygon points="46,6 55,6 65,60 55,60" fill="#BE8A2E"/>
-    <polygon points="24,38 33,38 34,48 35,38 44,38 34,60" fill="#7A5518"/>
+    <rect width="68" height="64" rx="14" fill="#FBF8F3"/>
+    <g stroke="url(#gold)" fill="none" stroke-linecap="round" stroke-width="3.4">
+      <path d="M8,16 C20,19 31,25 46,30"/>
+      <path d="M8,24 C21,26 31,28 46,30"/>
+      <path d="M8,32 C22,33 31,33 46,30"/>
+      <path d="M8,40 C22,39 31,37 46,30"/>
+      <path d="M8,48 C20,45 31,38 46,30"/>
+    </g>
+    <g fill="url(#gold)">
+      <circle cx="8" cy="16" r="2.2"/>
+      <circle cx="8" cy="24" r="2.2"/>
+      <circle cx="8" cy="32" r="2.2"/>
+      <circle cx="8" cy="40" r="2.2"/>
+      <circle cx="8" cy="48" r="2.2"/>
+    </g>
+    <rect x="45" y="21" width="12" height="12" rx="3" fill="#FFFCF5" stroke="url(#gold)" stroke-width="1.8"/>
+    <rect x="48" y="24" width="6" height="6" rx="1.5" fill="#EBCB8B"/>
   </g>
   <text x="84" y="278" font-family="Space Grotesk, Arial, sans-serif" font-size="78" font-weight="700" fill="#1A1A1A">Magic Engine</text>
   <text x="88" y="350" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="600" fill="#8B641F">AI upgrade, GEO, and training</text>
   <text x="88" y="406" font-family="Inter, Arial, sans-serif" font-size="30" fill="#1A1A1A" opacity="0.76">For Australian and New Zealand businesses</text>
   <rect x="86" y="474" width="438" height="54" rx="27" fill="url(#gold)"/>
-  <text x="116" y="510" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="700" fill="#FFFFFF">AU/NZ · Bilingual · GEO ready</text>
+  <text x="116" y="510" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="700" fill="#FFFFFF">AU/NZ - Bilingual - GEO ready</text>
 </svg>
