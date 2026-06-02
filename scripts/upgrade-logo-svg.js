@@ -1,4 +1,4 @@
-/* Upgrade old polygon-style logo SVGs in website/*.html to new VI 5-stem mark.
+/* Upgrade old polygon-style logo SVGs in all website HTML files to new VI 5-stem mark.
    Idempotent — running twice does nothing the second time.
    Run: node scripts/upgrade-logo-svg.js
 */
@@ -42,12 +42,22 @@ function buildNewSvg({ width, height, idSuffix, strokeWidth = 5.5, dotR = 3.5 })
 // in the old logo, so we can't accidentally replace anything else.
 const OLD_SVG_RE = /<svg\s+width="(\d+)"\s+height="(\d+)"\s+viewBox="0 0 68 64"\s+fill="none"\s+aria-hidden="true">\s*<polygon points="3,60[\s\S]*?<\/svg>/g;
 
-const files = fs.readdirSync(WEBSITE_DIR).filter(f => f.endsWith('.html'));
+function listHtmlFiles(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      return listHtmlFiles(fullPath);
+    }
+    return entry.isFile() && entry.name.endsWith('.html') ? [fullPath] : [];
+  });
+}
+
+const files = listHtmlFiles(WEBSITE_DIR);
 let totalReplacements = 0;
 let filesChanged = 0;
 
-for (const file of files) {
-  const filePath = path.join(WEBSITE_DIR, file);
+for (const filePath of files) {
+  const file = path.relative(WEBSITE_DIR, filePath);
   const src = fs.readFileSync(filePath, 'utf8');
   let i = 0;
   let changed = false;
