@@ -3,7 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { guardAdmin } from '@/lib/auth/require-admin'
 
-const SELECT_FIELDS = 'id, name, domain, created_at, semrush_db, plan_tier, monthly_mtc_cap'
+const SELECT_FIELDS = 'id, name, domain, created_at, semrush_db, plan_tier, monthly_mtc_cap, country, city'
 
 export async function GET(
   _req: NextRequest,

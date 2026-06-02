@@ -17,7 +17,7 @@
  * Saved as draft only — FDE 后续在 Goal 看板点 "Activate" 才正式启动。
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import {
   GOAL_SUBTYPES_BY_INTENT,
@@ -101,6 +101,10 @@ export default function NewGoalPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
+  // B14 fix: scroll to baseline/target section when metric is selected so PM
+  // can't miss it (especially for clearance subtype where metric list is short).
+  const baselineSectionRef = useRef<HTMLDivElement | null>(null)
+
   // ── State for all steps ────────────────────────────────────────────────────
   const [intent, setIntent] = useState<GoalIntent | null>(null)
   const [subType, setSubType] = useState<GoalSubType | null>(null)
@@ -119,7 +123,34 @@ export default function NewGoalPage() {
   })
   const [budgetAmount, setBudgetAmount] = useState('')
   const [budgetCurrency, setBudgetCurrency] = useState<'AUD' | 'NZD'>('NZD')
+  const [currencyTouched, setCurrencyTouched] = useState(false)
   const [fdeReasoning, setFdeReasoning] = useState('')
+
+  // B15 fix: detect client's country and default currency accordingly.
+  // CTS (NZ) → NZD default, Oztop (AU) → AUD default.
+  const [clientCountry, setClientCountry] = useState<'AU' | 'NZ' | null>(null)
+
+  useEffect(() => {
+    // Lightweight fetch — just get client country to pick default currency
+    fetch(`/api/clients/${clientId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(j => {
+        if (!j) return
+        const country = (j.client?.country ?? '').toUpperCase()
+        if (country === 'AU' || country === 'NZ') {
+          setClientCountry(country)
+        }
+      })
+      .catch(() => { /* silent — fallback to NZD default */ })
+  }, [clientId])
+
+  // Auto-set default currency once we know client country, but only if FDE
+  // hasn't explicitly chosen a currency yet
+  useEffect(() => {
+    if (clientCountry && !currencyTouched) {
+      setBudgetCurrency(clientCountry === 'AU' ? 'AUD' : 'NZD')
+    }
+  }, [clientCountry, currencyTouched])
 
   // ── Available sub-types for the chosen intent ─────────────────────────────
   const availableSubTypes = intent ? GOAL_SUBTYPES_BY_INTENT[intent] : []
@@ -369,6 +400,10 @@ export default function NewGoalPage() {
                     setSelectedMetric(m)
                     // Auto-apply metric's default direction if exists
                     if (m.default_direction) setTargetDirection(m.default_direction)
+                    // B14 fix: scroll to baseline/target section so PM can't miss it
+                    setTimeout(() => {
+                      baselineSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                    }, 100)
                   }}
                   className={`w-full rounded-lg border px-4 py-3 text-left transition-all ${
                     selectedMetric?.key === m.key
@@ -400,7 +435,11 @@ export default function NewGoalPage() {
             </div>
 
             {selectedMetric && (
-              <div className="space-y-4 border-t border-black/10 pt-4">
+              <div ref={baselineSectionRef} className="space-y-4 border-t border-black/10 pt-4 scroll-mt-4">
+                {/* B14: prominent banner so PM can't miss this section */}
+                <div className="rounded-lg border border-status-track/30 bg-status-track/[0.06] px-3 py-2 text-[12px] font-bold text-status-track">
+                  ↓ 请填写 baseline 和 target，才能进入 Step 3
+                </div>
                 {/* Direction toggle (auto-set by sub_type / metric, but user can override) */}
                 <div className="rounded-lg border border-black/10 bg-me-ivory p-3">
                   <div className="flex items-center justify-between gap-3">
@@ -520,14 +559,25 @@ export default function NewGoalPage() {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">货币</label>
+                <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">
+                  货币
+                  {clientCountry && !currencyTouched && (
+                    <span className="ml-1.5 text-[9px] font-bold text-me-ochre">
+                      auto · {clientCountry}
+                    </span>
+                  )}
+                </label>
                 <select
                   value={budgetCurrency}
-                  onChange={e => setBudgetCurrency(e.target.value as 'AUD' | 'NZD')}
+                  onChange={e => {
+                    // B15 fix: mark currency as touched so auto-default doesn't override
+                    setCurrencyTouched(true)
+                    setBudgetCurrency(e.target.value as 'AUD' | 'NZD')
+                  }}
                   className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal focus:border-me-ochre focus:outline-none"
                 >
-                  <option value="NZD">NZD</option>
                   <option value="AUD">AUD</option>
+                  <option value="NZD">NZD</option>
                 </select>
               </div>
             </div>
