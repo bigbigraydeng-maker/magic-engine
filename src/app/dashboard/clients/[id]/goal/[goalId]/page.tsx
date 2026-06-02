@@ -12,6 +12,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import type { GoalRow } from '@/types/strategy'
+import { normalizeGoalRow } from '@/lib/strategy/normalize'
 import { InitiativeList } from './_components/InitiativeList'
 import { BacklogMigrator } from './_components/BacklogMigrator'
 import { VerdictPanel } from './_components/VerdictPanel'
@@ -53,7 +54,8 @@ export default function GoalDetailPage() {
         return
       }
       const j = await res.json()
-      setGoal(j.goal)
+      // B7 fix: normalize NUMERIC strings to numbers
+      setGoal(j.goal ? normalizeGoalRow(j.goal) : null)
     } finally {
       setLoading(false)
     }

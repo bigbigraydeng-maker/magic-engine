@@ -17,6 +17,24 @@ interface Client {
   created_at: string;
   semrush_db?: string;
   plan_tier?: string;
+  // B8: active Goal summary (newest active) + count
+  active_goal?: {
+    title: string;
+    intent: string;
+    primary_metric_label: string;
+    baseline_value: number;
+    target_value: number;
+    period_end: string;
+  } | null;
+  active_goals_count?: number;
+}
+
+function intentEmoji(intent: string): string {
+  return intent === 'acquisition' ? '🎯' : intent === 'sales' ? '💰' : intent === 'awareness' ? '📢' : '·';
+}
+
+function daysRemaining(endIso: string): number {
+  return Math.max(0, Math.round((new Date(endIso).getTime() - Date.now()) / 86_400_000));
 }
 
 type FilterKey = 'all' | 'active' | 'onboarding';
@@ -280,6 +298,31 @@ export default function ClientsPage() {
                     </div>
                     <MePill tone={pill.tone}>{pill.label}</MePill>
                   </div>
+
+                  {/* B8: Active Goal summary (if any) */}
+                  {client.active_goal && (
+                    <Link
+                      href={`/dashboard/clients/${client.id}`}
+                      className="mt-3 block rounded-lg border border-me-ochre/30 bg-me-ochre/[0.06] px-3 py-2 transition-colors hover:bg-me-ochre/10"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">{intentEmoji(client.active_goal.intent)}</span>
+                        <span className="text-[12.5px] font-black text-me-charcoal truncate">
+                          {client.active_goal.title}
+                        </span>
+                        {(client.active_goals_count ?? 0) > 1 && (
+                          <span className="rounded-full bg-me-ochre/15 px-1.5 py-0.5 text-[9px] font-bold uppercase text-me-ochre">
+                            +{(client.active_goals_count ?? 0) - 1} more
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 flex items-center gap-2 text-[10.5px] font-semibold text-me-charcoal/55">
+                        <span>{client.active_goal.primary_metric_label}: {client.active_goal.baseline_value.toLocaleString()} → {client.active_goal.target_value.toLocaleString()}</span>
+                        <span className="text-me-charcoal/25">·</span>
+                        <span className="font-bold text-me-ochre">{daysRemaining(client.active_goal.period_end)}d left</span>
+                      </div>
+                    </Link>
+                  )}
 
                   {/* Channel chips */}
                   <div className="mt-4 flex flex-wrap gap-1.5">

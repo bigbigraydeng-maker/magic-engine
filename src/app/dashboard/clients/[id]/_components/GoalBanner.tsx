@@ -13,6 +13,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import type { GoalRow } from '@/types/strategy'
+import { normalizeGoalList } from '@/lib/strategy/normalize'
 
 interface Props {
   clientId: string
@@ -33,7 +34,8 @@ export function GoalBanner({ clientId }: Props) {
   useEffect(() => {
     fetch(`/api/clients/${clientId}/goals/active-list`)
       .then(r => r.ok ? r.json() : Promise.reject())
-      .then(j => setGoals(j.goals ?? []))
+      // B7 fix: normalize NUMERIC strings to numbers
+      .then(j => setGoals(normalizeGoalList(j.goals ?? [])))
       .catch(() => setGoals([]))
       .finally(() => setLoading(false))
   }, [clientId])
