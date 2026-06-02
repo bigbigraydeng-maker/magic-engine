@@ -12,6 +12,8 @@ interface BaselineDomain {
   last_collected_at: string | null
   is_client: boolean
   notes: string | null
+  city: string | null
+  geo_scope: 'city' | 'state' | 'national' | null
 }
 
 // Group domains by sub_industry
@@ -60,8 +62,11 @@ function formatDate(iso: string | null): string {
 
 function labelSubIndustry(key: string): string {
   const labels: Record<string, string> = {
-    inbound_tour_operator: 'Inbound Tour Operator (NZ)',
-    outbound_tour_operator: 'Outbound Tour Operator (NZ → Overseas)',
+    inbound_tour_operator:    'Inbound Tour Operator — NZ (National)',
+    outbound_tour_operator:   'Outbound Tour Operator — NZ → Overseas (National)',
+    real_estate_auckland:     'Real Estate — Auckland (City)',
+    flooring_tiles_brisbane:  'Flooring & Tiles — Brisbane (City)',
+    logistics_3pl_nz:         '3PL Logistics — New Zealand (National)',
   }
   return labels[key] ?? key
 }
