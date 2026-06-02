@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
+import { useParams } from 'next/navigation'
 import type {
   InitiativeRow,
   InitiativeType,
@@ -22,6 +23,7 @@ import type {
 } from '@/types/strategy'
 import { INITIATIVE_TYPE_LABEL, INITIATIVE_TYPE_TIER } from '@/types/strategy'
 import { InitiativeFormDrawer } from './InitiativeFormDrawer'
+import { InitiativeExecutionPanel } from './InitiativeExecutionPanel'
 
 const ALL_INITIATIVE_TYPES: InitiativeType[] = [
   'demand_generation',
@@ -50,10 +52,14 @@ interface Props {
 }
 
 export function InitiativeList({ goal, canEdit }: Props) {
+  const params = useParams<{ id: string }>()
+  const clientId = params.id
+
   const [items, setItems] = useState<InitiativeRow[]>([])
   const [loading, setLoading] = useState(true)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editing, setEditing] = useState<InitiativeRow | null>(null)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -121,67 +127,93 @@ export function InitiativeList({ goal, canEdit }: Props) {
         {realInitiatives.map(item => {
           const label = INITIATIVE_TYPE_LABEL[item.initiative_type]
           const tier = INITIATIVE_TYPE_TIER[item.initiative_type]
+          const isExpanded = expandedId === item.id
           return (
-            <button
+            <div
               key={item.id}
-              type="button"
-              onClick={() => canEdit ? (setEditing(item), setDrawerOpen(true)) : null}
-              className={`w-full rounded-lg border border-black/10 bg-white p-4 text-left transition-colors hover:border-me-ochre/40 hover:bg-me-ivory ${
-                canEdit ? 'cursor-pointer' : 'cursor-default'
-              }`}
+              className="rounded-lg border border-black/10 bg-white transition-colors"
             >
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-black text-me-charcoal">{item.title}</span>
-                    <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${TIER_COLOR[tier]}`}>
-                      {tier}
-                    </span>
-                    {item.posture && (
-                      <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${POSTURE_COLOR[item.posture]}`}>
-                        {item.posture}
+              <button
+                type="button"
+                onClick={() => setExpandedId(isExpanded ? null : item.id)}
+                className="w-full p-4 text-left hover:bg-me-ivory/60 cursor-pointer"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-black text-me-charcoal">{item.title}</span>
+                      <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${TIER_COLOR[tier]}`}>
+                        {tier}
                       </span>
-                    )}
-                    {item.hypothesis_polished_by_ai && (
-                      <span className="rounded-full bg-me-ochre/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-me-ochre">
-                        AI润色
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-1 text-xs font-semibold text-me-charcoal/55">
-                    {label?.zh ?? item.initiative_type} · {label?.en ?? ''}
-                  </div>
-                  {item.hypothesis && (
-                    <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-xs font-semibold text-me-charcoal/55">
-                      {item.hypothesis.length > 220
-                        ? item.hypothesis.slice(0, 220) + '…'
-                        : item.hypothesis}
-                    </p>
-                  )}
-                </div>
-                <div className="flex shrink-0 flex-col items-end gap-2">
-                  <div className="text-right">
-                    <div className="text-sm font-black text-me-charcoal">
-                      {item.budget_percent != null ? `${item.budget_percent}%` : '—'}
+                      {item.posture && (
+                        <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${POSTURE_COLOR[item.posture]}`}>
+                          {item.posture}
+                        </span>
+                      )}
+                      {item.hypothesis_polished_by_ai && (
+                        <span className="rounded-full bg-me-ochre/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-me-ochre">
+                          AI润色
+                        </span>
+                      )}
                     </div>
-                    {item.budget_amount != null && (
-                      <div className="text-[10px] font-semibold text-me-charcoal/45">
-                        {goal.budget_currency} {item.budget_amount.toLocaleString()}
-                      </div>
+                    <div className="mt-1 text-xs font-semibold text-me-charcoal/55">
+                      {label?.zh ?? item.initiative_type} · {label?.en ?? ''}
+                    </div>
+                    {item.hypothesis && (
+                      <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-xs font-semibold text-me-charcoal/55">
+                        {item.hypothesis.length > 220
+                          ? item.hypothesis.slice(0, 220) + '…'
+                          : item.hypothesis}
+                      </p>
                     )}
                   </div>
-                  {canEdit && (
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); handleArchive(item.id) }}
-                      className="text-[10px] font-bold text-me-charcoal/45 hover:text-status-rej"
-                    >
-                      Archive
-                    </button>
-                  )}
+                  <div className="flex shrink-0 flex-col items-end gap-2">
+                    <div className="text-right">
+                      <div className="text-sm font-black text-me-charcoal">
+                        {item.budget_percent != null ? `${item.budget_percent}%` : '—'}
+                      </div>
+                      {item.budget_amount != null && (
+                        <div className="text-[10px] font-semibold text-me-charcoal/45">
+                          {goal.budget_currency} {item.budget_amount.toLocaleString()}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setEditing(item); setDrawerOpen(true) }}
+                          className="text-[10px] font-bold text-me-charcoal/45 hover:text-me-ochre"
+                        >
+                          编辑
+                        </button>
+                      )}
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleArchive(item.id) }}
+                          className="text-[10px] font-bold text-me-charcoal/45 hover:text-status-rej"
+                        >
+                          Archive
+                        </button>
+                      )}
+                      <span className="text-[10px] text-me-charcoal/35">{isExpanded ? '▲' : '▼'}</span>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </button>
+              </button>
+
+              {/* Phase 33: Execution panel — visible when card is expanded */}
+              {isExpanded && (
+                <div className="border-t border-black/8 px-4 pb-4">
+                  <InitiativeExecutionPanel
+                    initiative={item}
+                    clientId={clientId}
+                    onUpdated={load}
+                  />
+                </div>
+              )}
+            </div>
           )
         })}
       </div>

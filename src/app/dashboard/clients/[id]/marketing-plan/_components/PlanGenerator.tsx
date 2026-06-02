@@ -16,6 +16,12 @@
 import { useState, useEffect } from 'react'
 import type { MarketingPlan } from '@/lib/marketing-plan/types'
 
+interface InitiativeLite {
+  id: string
+  title: string
+  goal_title?: string
+}
+
 interface CampaignLite {
   id: string
   title: string
@@ -27,12 +33,15 @@ interface Props {
   clientId: string
   onGenerated: (plan: MarketingPlan) => void
   onCancel: () => void
+  /** Phase 33: pre-fill when opened from an Initiative card */
+  initiativeId?: string
+  defaultTitle?: string
 }
 
 const INPUT = 'w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors'
 
-export function PlanGenerator({ clientId, onGenerated, onCancel }: Props) {
-  const [title, setTitle] = useState('')
+export function PlanGenerator({ clientId, onGenerated, onCancel, initiativeId, defaultTitle }: Props) {
+  const [title, setTitle] = useState(defaultTitle ?? '')
   const [campaigns, setCampaigns] = useState<CampaignLite[]>([])
   const [campaignId, setCampaignId] = useState<string>('')
   const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10))
@@ -43,6 +52,9 @@ export function PlanGenerator({ clientId, onGenerated, onCancel }: Props) {
   })
   const [intensity, setIntensity] = useState<'light' | 'standard' | 'aggressive' | 'ai_factory'>('standard')
   const [focusNote, setFocusNote] = useState('')
+  // Phase 33: initiative linkage (controlled by prop or internal select)
+  const [selectedInitiativeId, setSelectedInitiativeId] = useState(initiativeId ?? '')
+  const [initiatives, setInitiatives] = useState<InitiativeLite[]>([])
 
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
@@ -60,10 +72,10 @@ export function PlanGenerator({ clientId, onGenerated, onCancel }: Props) {
         if (!cancelled) {
           const list = json.campaigns ?? []
           setCampaigns(list)
-          // 默认选第一个 + 用其标题预填 Plan 标题 + 继承日期
+          // 默认选第一个 + 继承日期；只有在未由 Initiative 预填 title 时才覆盖标题
           if (list[0]) {
             setCampaignId(list[0].id)
-            setTitle(`${list[0].title} · 营销计划`)
+            if (!defaultTitle) setTitle(`${list[0].title} · 营销计划`)
             if (list[0].valid_from) setStartDate(list[0].valid_from)
             if (list[0].valid_until) setEndDate(list[0].valid_until)
           }
@@ -73,7 +85,24 @@ export function PlanGenerator({ clientId, onGenerated, onCancel }: Props) {
       }
     })()
     return () => { cancelled = true }
-  }, [clientId])
+  }, [clientId, defaultTitle])
+
+  // Phase 33: 只在未从 Initiative 入口进来时，才加载 initiatives 供选择
+  useEffect(() => {
+    if (initiativeId) return  // prop 已确定，无需加载
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/initiatives`)
+        if (!res.ok) return
+        const json = await res.json() as { initiatives?: InitiativeLite[] }
+        if (!cancelled) setInitiatives(json.initiatives ?? [])
+      } catch {
+        /* non-fatal */
+      }
+    })()
+    return () => { cancelled = true }
+  }, [clientId, initiativeId])
 
   // Campaign 切换时继承日期
   const handleCampaignChange = (id: string) => {
@@ -115,12 +144,13 @@ export function PlanGenerator({ clientId, onGenerated, onCancel }: Props) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title:       title.trim(),
-          campaign_id: campaignId || undefined,
-          start_date:  startDate,
-          end_date:    endDate,
+          title:          title.trim(),
+          campaign_id:    campaignId || undefined,
+          start_date:     startDate,
+          end_date:       endDate,
           intensity,
-          focus_note:  focusNote.trim() || undefined,
+          focus_note:     focusNote.trim() || undefined,
+          initiative_id:  selectedInitiativeId || undefined,
         }),
       })
       const json = await res.json() as { success: boolean; plan?: MarketingPlan; error?: string }
@@ -189,6 +219,30 @@ export function PlanGenerator({ clientId, onGenerated, onCancel }: Props) {
               </p>
             )}
           </div>
+
+          {/* Phase 33: Initiative 归属（从 Initiative 卡片进来时只读展示；否则可选） */}
+          {initiativeId ? (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">所属 Initiative</label>
+              <p className="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700">
+                {defaultTitle?.replace(' · 营销计划', '') ?? '已关联 Initiative'}
+              </p>
+            </div>
+          ) : initiatives.length > 0 ? (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">所属 Initiative（可选）</label>
+              <select
+                value={selectedInitiativeId}
+                onChange={e => setSelectedInitiativeId(e.target.value)}
+                className={INPUT}
+              >
+                <option value="">不关联 Initiative</option>
+                {initiatives.map(i => (
+                  <option key={i.id} value={i.id}>{i.title}</option>
+                ))}
+              </select>
+            </div>
+          ) : null}
 
           {/* 时间范围 */}
           <div className="grid grid-cols-2 gap-3">

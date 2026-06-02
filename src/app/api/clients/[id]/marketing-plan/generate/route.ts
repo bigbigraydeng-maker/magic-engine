@@ -170,6 +170,7 @@ export async function POST(
         end_date:        body.end_date,
         plan_data,
         generation_meta: meta,
+        initiative_id:   body.initiative_id ?? null,
       })
       .select('*')
       .single()

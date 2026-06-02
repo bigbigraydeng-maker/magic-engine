@@ -222,6 +222,8 @@ export interface UpdateInitiativeInput {
   hypothesis_polished_by_ai?: boolean
   supports_initiative_id?: string | null
   sort_order?: number
+  /** Phase 33: Campaign UUIDs linked to this initiative */
+  campaign_ids?: string[]
 }
 
 export async function updateInitiative(
@@ -278,6 +280,7 @@ export async function updateInitiative(
   if (patch.hypothesis_polished_by_ai !== undefined) update.hypothesis_polished_by_ai = patch.hypothesis_polished_by_ai
   if (patch.supports_initiative_id !== undefined) update.supports_initiative_id = patch.supports_initiative_id
   if (patch.sort_order !== undefined) update.sort_order = patch.sort_order
+  if (patch.campaign_ids !== undefined) update.campaign_ids = patch.campaign_ids
 
   const { data, error } = await supabase
     .from('initiatives')

@@ -244,6 +244,9 @@ export interface InitiativeRow {
 
   supports_initiative_id: string | null
 
+  /** Phase 33: Campaign UUIDs linked to this initiative. */
+  campaign_ids: string[]
+
   is_archived: boolean
   sort_order: number
 
@@ -428,4 +431,14 @@ export interface CreateInitiativeInput {
   hypothesis?: string
   supports_initiative_id?: string
   sort_order?: number
+}
+
+/** Phase 33: marketing_plans row with optional initiative link */
+export interface MarketingPlanLite {
+  id: string
+  title: string
+  status: string
+  start_date: string | null
+  end_date: string | null
+  initiative_id: string | null
 }

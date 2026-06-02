@@ -145,6 +145,8 @@ export interface GeneratePlanRequest {
   focus_note?: string
   /** 期望的内容强度 — light/standard/aggressive/ai_factory（ai_factory = AI Factory 全速量产档）*/
   intensity?: 'light' | 'standard' | 'aggressive' | 'ai_factory'
+  /** Phase 33: Initiative this plan is executing against */
+  initiative_id?: string
 }
 
 // ─── 派发结果 ──────────────────────────────────────────────────────────────────
