@@ -25,7 +25,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { SeoCollector } from '@/lib/diagnostic/collectors/seo-collector'
 
-export const maxDuration = 300
+// 600s = 10 min. baseline_domains has 44 rows at writing; with serial+2s delay
+// each domain takes ~5-7s → ~310s total, dangerously close to 300s.
+// Bumped to 600 + reduced delay + parallel batches below to keep headroom.
+export const maxDuration = 600
 
 interface DomainRow {
   id: string
@@ -64,14 +67,20 @@ async function runCollection(triggeredBy: 'cron' | 'admin_manual', existingRunId
   }
 
   // 1. Create or use existing run record
-  let runId = existingRunId
+  let runId: string | undefined = existingRunId
   if (!runId) {
-    const { data: runRow } = await supabaseAdmin
+    const { data: runRow, error: insertError } = await supabaseAdmin
       .from('baseline_cron_runs')
       .insert({ status: 'running', triggered_by: triggeredBy })
       .select('id')
       .single()
-    runId = runRow?.id
+    if (insertError || !runRow) {
+      return NextResponse.json(
+        { error: `Failed to create cron run record: ${insertError?.message ?? 'unknown'}` },
+        { status: 500 },
+      )
+    }
+    runId = runRow.id
   }
 
   const startTime = Date.now()
@@ -101,18 +110,22 @@ async function runCollection(triggeredBy: 'cron' | 'admin_manual', existingRunId
       return NextResponse.json({ success: true, message: 'No baseline domains configured', run_id: runId })
     }
 
-    // 3. Score each domain (serial, 2s delay)
+    // 3. Score domains in batches of CONCURRENCY (was serial+2s → too slow)
+    // 2 concurrent + 1s between batches: ~150s for 44 domains (was ~310s)
     const collector = new SeoCollector(60_000)
     const results: PerDomainResult[] = []
     const failureDetails: PerDomainResult[] = []
     let succeeded = 0
     let failed = 0
 
-    for (const row of domains) {
+    const CONCURRENCY = 2
+    const BATCH_DELAY_MS = 1000
+
+    async function processDomain(row: DomainRow): Promise<void> {
       if (!row.keywords || row.keywords.length === 0) {
         const r: PerDomainResult = { domain: row.domain, sub_industry: row.sub_industry, score: null, error: 'no_keywords' }
-        results.push(r); failureDetails.push(r); failed++
-        continue
+        results.push(r); failureDetails.push({ ...r }); failed++
+        return
       }
 
       try {
@@ -121,39 +134,48 @@ async function runCollection(triggeredBy: 'cron' | 'admin_manual', existingRunId
 
         if (score === null) {
           const r: PerDomainResult = { domain: row.domain, sub_industry: row.sub_industry, score: null, error: 'collector_null' }
-          results.push(r); failureDetails.push(r); failed++
-        } else {
-          const collectedAt = new Date().toISOString()
-
-          // Update latest snapshot
-          await supabaseAdmin
-            .from('baseline_domains')
-            .update({ seo_score: score, last_collected_at: collectedAt })
-            .eq('id', row.id)
-
-          // Append to time-series history
-          await supabaseAdmin
-            .from('baseline_domain_score_history')
-            .insert({
-              baseline_domain_id: row.id,
-              industry:           row.industry,
-              sub_industry:       row.sub_industry,
-              domain:             row.domain,
-              dimension:          'seo',
-              score,
-              collected_at:       collectedAt,
-            })
-
-          results.push({ domain: row.domain, sub_industry: row.sub_industry, score })
-          succeeded++
+          results.push(r); failureDetails.push({ ...r }); failed++
+          return
         }
+
+        const collectedAt = new Date().toISOString()
+
+        await supabaseAdmin
+          .from('baseline_domains')
+          .update({ seo_score: score, last_collected_at: collectedAt })
+          .eq('id', row.id)
+
+        // Append history — check error so silent data gaps surface in logs
+        const { error: historyError } = await supabaseAdmin
+          .from('baseline_domain_score_history')
+          .insert({
+            baseline_domain_id: row.id,
+            industry:           row.industry,
+            sub_industry:       row.sub_industry,
+            domain:             row.domain,
+            dimension:          'seo',
+            score,
+            collected_at:       collectedAt,
+          })
+        if (historyError) {
+          console.error('[baseline cron] history insert failed', { domain: row.domain, error: historyError.message })
+        }
+
+        results.push({ domain: row.domain, sub_industry: row.sub_industry, score })
+        succeeded++
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'unknown error'
         const r: PerDomainResult = { domain: row.domain, sub_industry: row.sub_industry, score: null, error: msg }
-        results.push(r); failureDetails.push(r); failed++
+        results.push(r); failureDetails.push({ ...r }); failed++
       }
+    }
 
-      await new Promise(r => setTimeout(r, 2000))
+    for (let i = 0; i < domains.length; i += CONCURRENCY) {
+      const batch = domains.slice(i, i + CONCURRENCY)
+      await Promise.all(batch.map(processDomain))
+      if (i + CONCURRENCY < domains.length) {
+        await new Promise(r => setTimeout(r, BATCH_DELAY_MS))
+      }
     }
 
     // 4. Aggregate per industry (NOT sub_industry — so huatuo can read)
