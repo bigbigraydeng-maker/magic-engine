@@ -246,7 +246,23 @@ export default function GoalDetailPage() {
               {formatDate(goal.period_start)} → {formatDate(goal.period_end)}
             </div>
             <div className="mt-1 text-xs font-semibold text-me-charcoal/55">
-              {periodDays} days total · {goal.status === 'active' ? `${daysRemaining} remaining` : 'not started'}
+              {periodDays} days total · {(() => {
+                // B11 fix: status-aware period label
+                switch (goal.status) {
+                  case 'draft':
+                    return 'not started yet'
+                  case 'active':
+                    return `${daysRemaining} days remaining`
+                  case 'expired':
+                    return 'period ended · awaiting verdict'
+                  case 'archived':
+                    return goal.verdict_at
+                      ? `archived ${formatDate(goal.verdict_at.slice(0, 10))}`
+                      : 'archived'
+                  default:
+                    return goal.status
+                }
+              })()}
             </div>
           </div>
           <div className="rounded-xl border border-black/10 bg-white p-5 shadow-sm">

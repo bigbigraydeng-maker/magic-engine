@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-02 22:30 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-03 11:26 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -174,6 +174,7 @@ GOAL (1 active per client) → INITIATIVES (按工作流目的切，非按维度
 - [ ] **P31.X.4** 评分公式重做（reputation / SEO / ai_visibility 维度独立大工程）
 - [ ] **P31.X.5** Retention / Reactivation intent（需先接通 CRM/EDM）
 - [ ] **P31.X.6** Initiative 类型扩展：Operations / Market Intelligence / Product / Partnerships
+- [ ] **P32.X.1** [B10] Verdict Submit — 诸葛亮预生成 Summary 草稿（基于本 Goal 周期内 flywheel_actions/metrics/outcomes 自动聚合）。需要：（a）新增 flywheel ↔ goal 关联（或按 client_id + period_start/end 时间窗查询）；（b）新 API 路由 `/api/goals/[id]/verdict-draft`；（c）VerdictModal 加「让诸葛亮起草 Summary」按钮 + 编辑后采纳。工作量约 4-6 小时
 
 ---
 

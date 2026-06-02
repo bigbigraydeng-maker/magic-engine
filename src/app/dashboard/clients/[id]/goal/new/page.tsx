@@ -139,6 +139,13 @@ export default function NewGoalPage() {
     const def = availableSubTypes.find(s => s.value === newSubType)
     if (def) {
       setTargetDirection(def.default_direction)
+      // B13 fix: pre-fill title with sub-type example, FDE can edit or accept as-is
+      // Only pre-fill if title is empty or matches a previous sub-type example
+      // (so FDE's manual edits aren't overwritten)
+      const previousExamples = availableSubTypes.map(s => s.example)
+      if (!title.trim() || previousExamples.includes(title.trim())) {
+        setTitle(def.example)
+      }
     }
     // Clear metric — will be re-chosen from filtered list
     setSelectedMetric(null)
@@ -151,6 +158,13 @@ export default function NewGoalPage() {
     setSubType(null)
     setTargetDirection('increase')
     setSelectedMetric(null)
+    // B13: also clear title if it's a previous sub-type example
+    if (intent) {
+      const previousExamples = GOAL_SUBTYPES_BY_INTENT[intent].map(s => s.example)
+      if (previousExamples.includes(title.trim())) {
+        setTitle('')
+      }
+    }
   }
 
   // ── Validation per step ────────────────────────────────────────────────────
