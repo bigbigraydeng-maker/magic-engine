@@ -137,15 +137,23 @@ h3.serif { font-size: clamp(1.2rem, 2vw, 1.6rem); }
 }
 .btn-secondary:hover { border-color: var(--ink); background: rgba(22,24,29,.04); }
 
-.btn-portal {
+.btn-portal,
+.btn-portal:link,
+.btn-portal:visited {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 9px 16px;
-  background: var(--ink); color: var(--white);
+  background: var(--ink);
+  color: #FFFFFF !important;
   font-weight: 500; font-size: .82rem;
   border-radius: var(--r-md); text-decoration: none;
   transition: background var(--t);
 }
-.btn-portal:hover { background: #2a2d35; }
+.btn-portal:hover,
+.btn-portal:focus,
+.btn-portal:active {
+  background: #2a2d35;
+  color: #FFFFFF !important;
+}
 
 .btn-register {
   display: inline-flex; align-items: center; gap: 6px;
@@ -672,8 +680,12 @@ h3.serif { font-size: clamp(1.2rem, 2vw, 1.6rem); }
 @media (max-width: 640px) {
   /* Nav */
   .nav-links               { display: none; }
-  .nav-actions .btn-portal { display: none; }
   .nav-burger              { display: flex; }
+  /* Keep Client portal visible on mobile, compact size */
+  .nav-actions .btn-portal {
+    padding: 7px 12px;
+    font-size: .75rem;
+  }
 
   /* Layout */
   section    { padding: 48px 0; }
