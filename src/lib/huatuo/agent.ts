@@ -133,9 +133,14 @@ export async function runHuatuo(
   const crisisType = intake.priority_dimensions?.[0] ?? null
   const marketCode = 'AU'   // 默认 AU，后续可从 client 表读取
 
+  // P30 S5.4: pass city so fetchBenchmarks can hit city-level baselines
+  // (e.g. real_estate + auckland → real_estate_auckland).
+  const clientCity = discovery.business.location?.city ?? null
+
   const [benchmarks, trendPoints, industryInterest, similarCases, outcomeConfidence] = await Promise.all([
     fetchBenchmarks(supabase, {
       industryCategory,
+      city: clientCity,
       businessSize: 'small',
       market: 'AU_NZ',
     }),
@@ -321,9 +326,12 @@ export async function refineHuatuoPrescription(
   // Step 1: re-lookup
   await onProgress('重新查询基准库和趋势…')
   const industryCategory = mapIndustryToCategory(discovery.business.industry)
+  // P30 S5.4: pass city for city-level baseline matching
+  const clientCity = discovery.business.location?.city ?? null
   const [benchmarks, trendPoints] = await Promise.all([
     fetchBenchmarks(supabase, {
       industryCategory,
+      city: clientCity,
       businessSize: 'small',
       market: 'AU_NZ',
     }),

@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-02 13:05 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-02 13:53 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -92,6 +92,27 @@ CITY=christchurch INDUSTRY=real_estate npx tsx scripts/p30-s4-serp-probe.ts
 - [ ] **P30.S4.4** real_estate_sydney — 悉尼房产（等客户）
 - [ ] **P30.S4.5** real_estate_melbourne — 墨尔本房产（等客户）
 - [ ] **P30.S4.6** real_estate_christchurch — 基督城房产（等客户）
+
+#### S5 — 动态化基准（✅ 完成 2026-06-02）
+
+- [x] **P30.S5.1** 时序快照表 `baseline_domain_score_history`（每次 collect 插一行）
+- [x] **P30.S5.2** 月度 cron `/api/cron/baseline-domains-monthly` + GitHub Actions 调度
+- [x] **P30.S5.3** 华佗 `fetchBenchmarks` 改为实时读 baseline_domains（动态反映竞品变化）
+- [x] **P30.S5.4** 华佗 agent 调用方传 `city`，激活城市级基准命中
+
+> **PM 操作（一次性）**：GitHub repo Settings → Secrets 添加 `CRON_SECRET`（与 Render web 服务同值）。下个月 1 号 03:00 UTC 自动跑首次。可在 Actions 页面手工 `Run workflow` 验证。
+
+#### Backlog（按 FDE 使用反馈再决定）
+
+- [ ] **P30.S5.5** 前端加趋势列（domain 历史折线 / 14d 30d 涨跌）
+- [ ] **P30.S5.6** 异常预警（domain 单次掉分 >10% 报警 FDE）
+- [ ] **P30.S5.7** 客户对照视图（客户 vs 行业 P50 折线图）
+
+---
+
+**Phase 30 状态：✅ 闭环完成 2026-06-02**
+
+整个机制连起来运转：每月 1 号 cron 自动重跑 44 个域名 → 写最新分 + 插历史 → 华佗诊断时按 `industry_category + city` 实时拉基准，永远反映竞品最新水准。
 
 ---
 
