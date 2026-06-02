@@ -35,7 +35,7 @@ function stripCnPrefix(pathname) {
 function localizePath(pathname, lang) {
   const clean = stripCnPrefix(pathname);
   if (lang === 'zh') {
-    return clean === '/' ? '/cn.html' : `${CN_PREFIX}${clean}`;
+    return clean === '/' ? '/cn/' : `${CN_PREFIX}${clean}`;
   }
   return clean;
 }
