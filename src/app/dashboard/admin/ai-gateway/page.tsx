@@ -208,7 +208,14 @@ export default function AIGatewayPage() {
   // filtered view
   const visible = filterProvider === 'all' ? logs : logs.filter(l => l.provider === filterProvider)
 
-  const totalPages = resultInfo ? Math.ceil(resultInfo.total_count / perPage) : 1
+  // CF AI Gateway logs API does not reliably populate result_info.total_count
+  // (often reports 0 even when result has rows). Fall back to a heuristic when
+  // the value is missing or obviously wrong.
+  const reportedTotal = resultInfo?.total_count ?? 0
+  const totalIsReliable = reportedTotal >= logs.length && reportedTotal > 0
+  const totalPages = totalIsReliable
+    ? Math.ceil(reportedTotal / perPage)
+    : logs.length === perPage ? page + 1 : page
 
   return (
     <div className="min-h-screen bg-me-ivory p-6">
@@ -255,9 +262,11 @@ export default function AIGatewayPage() {
         {/* ── Summary metrics ── */}
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
           <MetricCard
-            label="总请求数"
-            value={resultInfo ? resultInfo.total_count.toLocaleString() : logs.length.toLocaleString()}
-            sub={`本页 ${logs.length} 条`}
+            label={totalIsReliable ? '总请求数' : '本页请求数'}
+            value={totalIsReliable
+              ? reportedTotal.toLocaleString()
+              : logs.length.toLocaleString()}
+            sub={totalIsReliable ? `本页 ${logs.length} 条` : 'CF 未返回总数'}
           />
           <MetricCard
             label="缓存命中率"
@@ -428,7 +437,9 @@ export default function AIGatewayPage() {
           {/* footer */}
           {visible.length > 0 && (
             <div className="border-t border-black/[.06] px-5 py-2.5 text-xs text-me-charcoal/45 flex justify-between">
-              <span>显示 {visible.length} 条 / 共 {resultInfo?.total_count ?? logs.length} 条</span>
+              <span>{totalIsReliable
+                ? `显示 ${visible.length} 条 / 共 ${reportedTotal} 条`
+                : `本页 ${visible.length} 条`}</span>
               <span>每 30 秒自动刷新</span>
             </div>
           )}
