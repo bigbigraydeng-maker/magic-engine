@@ -319,9 +319,10 @@ function SubIndustryPanel({
           <p className="text-xs text-slate-500 mt-0.5">{domains.length} domains</p>
         </div>
 
-        {/* Percentile badges */}
+        {/* Percentile badges + trend */}
         {stats ? (
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
+            <TrendSparkline subIndustry={subIndustry} />
             <div className="text-center">
               <div className="text-[10px] text-slate-500 uppercase tracking-wide">P50</div>
               <div className="text-base font-bold text-white">{stats.p50}</div>
@@ -385,12 +386,141 @@ function SubIndustryPanel({
   )
 }
 
+// ─── Trend Sparkline (P30 S5.1) ───────────────────────────────────────────────
+// Reads /api/baselines/score-history and draws an inline SVG showing P50 over time.
+
+interface TrendPoint { week: string; p50: number; n: number }
+
+function TrendSparkline({ subIndustry }: { subIndustry: string }) {
+  const [data, setData] = useState<TrendPoint[] | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(`/api/baselines/score-history?sub_industry=${encodeURIComponent(subIndustry)}&weeks=12`)
+      .then(r => r.ok ? r.json() : { weeks: [] })
+      .then(j => setData(j.weeks ?? []))
+      .catch(() => setData([]))
+      .finally(() => setLoading(false))
+  }, [subIndustry])
+
+  if (loading) return <div className="h-8 w-32 animate-pulse bg-white/[0.04] rounded" />
+  if (!data || data.length < 2) {
+    return <span className="text-[10px] text-slate-600 italic">需 2 周后查看趋势</span>
+  }
+
+  const W = 120, H = 32
+  const values = data.map(d => d.p50)
+  const min = Math.min(...values), max = Math.max(...values)
+  const range = Math.max(1, max - min)
+  const x = (i: number) => (i / (data.length - 1)) * W
+  const y = (v: number) => H - ((v - min) / range) * (H - 4) - 2
+  const path = data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${x(i)} ${y(d.p50)}`).join(' ')
+  const last = data[data.length - 1].p50
+  const first = data[0].p50
+  const delta = last - first
+  const deltaColor = delta > 0 ? 'text-emerald-400' : delta < 0 ? 'text-red-400' : 'text-slate-400'
+  const deltaIcon = delta > 0 ? '↑' : delta < 0 ? '↓' : '→'
+
+  return (
+    <div className="flex items-center gap-2" title={`${data.length} weeks · P50 ${first} → ${last}`}>
+      <svg width={W} height={H} className="overflow-visible">
+        <path d={path} fill="none" stroke="rgb(96 165 250)" strokeWidth="1.5" />
+        {data.map((d, i) => (
+          <circle key={i} cx={x(i)} cy={y(d.p50)} r="1.5" fill="rgb(96 165 250)" />
+        ))}
+      </svg>
+      <span className={`text-[10px] ${deltaColor} tabular-nums`}>
+        {deltaIcon} {Math.abs(delta)}
+      </span>
+    </div>
+  )
+}
+
+// ─── Cron Runs Panel (P30 S5.3) ───────────────────────────────────────────────
+
+interface CronRun {
+  id: string
+  started_at: string
+  completed_at: string | null
+  status: 'running' | 'completed' | 'partial' | 'failed'
+  domains_attempted: number
+  domains_succeeded: number
+  domains_failed: number
+  benchmarks_written: number
+  duration_seconds: number | null
+  error_message: string | null
+  triggered_by: 'cron' | 'admin_manual'
+}
+
+function CronRunsPanel({ refreshKey }: { refreshKey: number }) {
+  const [runs, setRuns] = useState<CronRun[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    fetch('/api/baselines/cron-runs?limit=20')
+      .then(r => r.ok ? r.json() : { runs: [] })
+      .then(j => setRuns(j.runs ?? []))
+      .finally(() => setLoading(false))
+  }, [refreshKey])
+
+  const statusColor = (s: string) => s === 'completed' ? 'text-emerald-400 bg-emerald-500/10'
+    : s === 'partial' ? 'text-amber-400 bg-amber-500/10'
+    : s === 'running' ? 'text-blue-400 bg-blue-500/10'
+    : 'text-red-400 bg-red-500/10'
+
+  if (loading) return <div className="text-sm text-slate-500 py-8 text-center">Loading runs…</div>
+  if (runs.length === 0) return (
+    <div className="text-sm text-slate-500 py-8 text-center">
+      No cron runs yet. Click &quot;Run all now&quot; to trigger one, or wait for the weekly schedule.
+    </div>
+  )
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-slate-900/60 overflow-hidden">
+      <table className="w-full text-xs">
+        <thead className="text-[10px] text-slate-500 uppercase tracking-wide">
+          <tr>
+            <th className="text-left py-2.5 px-4">Started</th>
+            <th className="text-center py-2.5 px-2">Status</th>
+            <th className="text-center py-2.5 px-2">Domains</th>
+            <th className="text-center py-2.5 px-2">Benchmarks</th>
+            <th className="text-center py-2.5 px-2">Duration</th>
+            <th className="text-left py-2.5 px-4">Trigger</th>
+          </tr>
+        </thead>
+        <tbody>
+          {runs.map(r => (
+            <tr key={r.id} className="border-t border-white/5">
+              <td className="py-2 px-4 text-slate-300 font-mono">{formatDate(r.started_at)} <span className="text-slate-500">{r.started_at.split('T')[1]?.slice(0,5)}</span></td>
+              <td className="py-2 px-2 text-center">
+                <span className={`inline-block rounded px-1.5 py-0.5 ${statusColor(r.status)}`}>{r.status}</span>
+              </td>
+              <td className="py-2 px-2 text-center tabular-nums text-slate-300">
+                {r.domains_succeeded}/{r.domains_attempted}
+                {r.domains_failed > 0 && <span className="text-red-400 ml-1">({r.domains_failed} fail)</span>}
+              </td>
+              <td className="py-2 px-2 text-center tabular-nums font-semibold text-emerald-400">{r.benchmarks_written}</td>
+              <td className="py-2 px-2 text-center tabular-nums text-slate-500">{r.duration_seconds != null ? `${r.duration_seconds}s` : '—'}</td>
+              <td className="py-2 px-4 text-slate-500">{r.triggered_by}{r.error_message && <span className="text-red-400 ml-1">⚠</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function IndustryBaselinesPage() {
   const [domains, setDomains] = useState<BaselineDomain[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [activeTab, setActiveTab] = useState<'baselines' | 'runs'>('baselines')
+  const [runsRefreshKey, setRunsRefreshKey] = useState(0)
+  const [triggering, setTriggering] = useState(false)
+  const [triggerMsg, setTriggerMsg] = useState('')
 
   const load = useCallback(async () => {
     try {
@@ -407,45 +537,115 @@ export default function IndustryBaselinesPage() {
 
   useEffect(() => { load() }, [load])
 
+  const handleTrigger = async () => {
+    setTriggering(true)
+    setTriggerMsg('')
+    try {
+      const res = await fetch('/api/baselines/trigger-cron', { method: 'POST' })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error ?? 'Trigger failed')
+      setTriggerMsg(`✓ Run started (${j.run_id?.slice(0, 8)}…)`)
+      // Switch to runs tab so user can see progress
+      setActiveTab('runs')
+      setRunsRefreshKey(k => k + 1)
+      // Poll for completion: refresh runs every 5s for 1 min
+      let polls = 0
+      const interval = setInterval(() => {
+        setRunsRefreshKey(k => k + 1)
+        polls++
+        if (polls > 12) clearInterval(interval)
+      }, 5000)
+      // Also refresh domain list once the run likely finished
+      setTimeout(() => load(), 60_000)
+    } catch (err: any) {
+      setTriggerMsg(`✗ ${err.message}`)
+    } finally {
+      setTriggering(false)
+    }
+  }
+
   const grouped = groupBySubIndustry(domains)
 
   return (
-    <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
+    <div className="max-w-5xl mx-auto px-6 py-8 space-y-6">
       {/* Page header */}
-      <div>
-        <h1 className="text-xl font-bold text-white">Industry Baselines</h1>
-        <p className="text-sm text-slate-400 mt-1">
-          Competitor domain watchlist for SEO benchmark scoring. Refresh individual domains on demand — scores feed into华佗&apos;s P50/P75/P90 benchmarks.
-        </p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-xl font-bold text-white">Industry Baselines</h1>
+          <p className="text-sm text-slate-400 mt-1">
+            Competitor domain watchlist for SEO benchmark scoring. Scores feed into 华佗&apos;s P50/P75/P90 benchmarks.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {triggerMsg && (
+            <span className={`text-xs ${triggerMsg.startsWith('✓') ? 'text-emerald-400' : 'text-red-400'}`}>
+              {triggerMsg}
+            </span>
+          )}
+          <button
+            onClick={handleTrigger}
+            disabled={triggering}
+            className="rounded-lg bg-blue-500/20 hover:bg-blue-500/30 disabled:opacity-50 border border-blue-500/40 px-4 py-2 text-xs font-semibold text-blue-200 transition-colors"
+          >
+            {triggering ? 'Starting…' : '▶ Run all now'}
+          </button>
+        </div>
       </div>
 
-      {/* Info banner */}
-      <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 px-4 py-3 text-xs text-blue-300 space-y-1">
-        <p><strong>How it works:</strong> Each &quot;Refresh&quot; button runs one DataForSEO call for that domain only — no bulk re-runs.</p>
-        <p>Domains marked <span className="text-amber-300">⚠</span> haven&apos;t been collected in 30+ days. Refresh them when you need fresh data.</p>
-        <p>P50/P75/P90 are calculated live from all scored domains in the group.</p>
+      {/* Tabs */}
+      <div className="flex gap-1 border-b border-white/10">
+        {(['baselines', 'runs'] as const).map(tab => (
+          <button
+            key={tab}
+            onClick={() => {
+              setActiveTab(tab)
+              if (tab === 'runs') setRunsRefreshKey(k => k + 1)
+            }}
+            className={`px-4 py-2 text-sm font-semibold transition-colors border-b-2 -mb-px ${
+              activeTab === tab
+                ? 'border-blue-400 text-blue-300'
+                : 'border-transparent text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            {tab === 'baselines' ? 'Baselines' : 'Cron Runs'}
+          </button>
+        ))}
       </div>
 
-      {loading && (
-        <div className="text-sm text-slate-500 py-8 text-center">Loading…</div>
+      {activeTab === 'baselines' && (
+        <>
+          {/* Info banner */}
+          <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 px-4 py-3 text-xs text-blue-300 space-y-1">
+            <p><strong>How it works:</strong> Per-domain &quot;Refresh&quot; runs one DataForSEO call; &quot;Run all now&quot; (top right) runs the whole watchlist + writes to industry_benchmarks.</p>
+            <p>Domains marked <span className="text-amber-300">⚠</span> haven&apos;t been collected in 30+ days. Sparkline shows weekly P50 trend.</p>
+          </div>
+
+          {loading && (
+            <div className="text-sm text-slate-500 py-8 text-center">Loading…</div>
+          )}
+
+          {error && (
+            <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-400">{error}</div>
+          )}
+
+          {!loading && !error && grouped.size === 0 && (
+            <div className="text-sm text-slate-500 py-8 text-center">No baseline domains found. Run the S2 seed migration first.</div>
+          )}
+
+          {Array.from(grouped.entries()).map(([subIndustry, subDomains]) => (
+            <SubIndustryPanel
+              key={subIndustry}
+              subIndustry={subIndustry}
+              domains={subDomains}
+              onRefresh={load}
+            />
+          ))}
+        </>
       )}
 
-      {error && (
-        <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-400">{error}</div>
+      {activeTab === 'runs' && (
+        <CronRunsPanel refreshKey={runsRefreshKey} />
       )}
-
-      {!loading && !error && grouped.size === 0 && (
-        <div className="text-sm text-slate-500 py-8 text-center">No baseline domains found. Run the S2 seed migration first.</div>
-      )}
-
-      {Array.from(grouped.entries()).map(([subIndustry, subDomains]) => (
-        <SubIndustryPanel
-          key={subIndustry}
-          subIndustry={subIndustry}
-          domains={subDomains}
-          onRefresh={load}
-        />
-      ))}
     </div>
   )
 }

@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
+import { ZhugeWorkbenchFab } from '@/components/workbench/ZhugeWorkbenchFab'
+import { ZhugeWorkbenchDrawer } from '@/components/workbench/ZhugeWorkbenchDrawer'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -245,7 +247,7 @@ function QuickActions({
   )
 }
 
-function ItemCard({ item, clientId }: { item: ProductionItem; clientId: string }) {
+function ItemCard({ item, clientId, packageId }: { item: ProductionItem; clientId: string; packageId: string }) {
   const statusMeta  = ITEM_STATUS_META[item.status] ?? { label: item.status, cls: 'bg-gray-100 text-gray-600' }
   const typeLabel   = CONTENT_TYPE_LABEL[item.content_type]
 
@@ -254,7 +256,7 @@ function ItemCard({ item, clientId }: { item: ProductionItem; clientId: string }
     switch (item.content_type) {
       case 'content_post':
         return item.content_post_id
-          ? `/dashboard/content?client=${clientId}&highlight=${item.content_post_id}`
+          ? `/dashboard/content?client=${clientId}&pkg=${packageId}&highlight=${item.content_post_id}`
           : null
       case 'blog_post':    return item.blog_post_id    ? `/dashboard/clients/${clientId}/blog` : null
       default:             return null
@@ -313,6 +315,7 @@ export default function ProductionPackageDetailPage() {
   const [data, setData] = useState<PackageDetailResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [workbenchChatOpen, setWorkbenchChatOpen] = useState(false)
 
   useEffect(() => {
     void (async () => {
@@ -370,6 +373,12 @@ export default function ProductionPackageDetailPage() {
     (acc, i) => { acc[i.content_type] = (acc[i.content_type] ?? 0) + 1; return acc },
     {} as Record<ContentType, number>
   )
+  const firstContentPost = items.find(item => item.content_type === 'content_post' && item.content_post_id)?.content_post_id ?? null
+  const quickLinks = [
+    { label: '客户概览', href: `/dashboard/clients/${clientId}` },
+    { label: 'Execution', href: `/dashboard/clients/${clientId}/execution` },
+    { label: 'Launch Hub', href: `/dashboard/content?client=${clientId}${firstContentPost ? `&highlight=${firstContentPost}` : ''}` },
+  ]
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -462,7 +471,7 @@ export default function ProductionPackageDetailPage() {
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
               {items.map(item => (
-                <ItemCard key={item.id} item={item} clientId={clientId} />
+                <ItemCard key={item.id} item={item} clientId={clientId} packageId={packageId} />
               ))}
             </div>
           )}
@@ -484,6 +493,22 @@ export default function ProductionPackageDetailPage() {
         </section>
 
       </div>
+      <ZhugeWorkbenchFab
+        clientId={clientId}
+        currentHref={`/dashboard/clients/${clientId}/production/${packageId}`}
+        clientLabel={clientId.slice(0, 8)}
+        currentAreaLabel="Production Package"
+        campaignLabel={campaign?.name ?? null}
+        taskLabel={execution_item?.title ?? null}
+        packageLabel={pkg.title}
+        quickLinks={quickLinks}
+        onOpenChat={() => setWorkbenchChatOpen(true)}
+      />
+      <ZhugeWorkbenchDrawer
+        clientId={clientId}
+        isOpen={workbenchChatOpen}
+        onClose={() => setWorkbenchChatOpen(false)}
+      />
     </div>
   )
 }

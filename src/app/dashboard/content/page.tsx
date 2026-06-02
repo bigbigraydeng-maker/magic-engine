@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { BriefGateBanner } from '@/components/brief/BriefGateBanner';
+import { ZhugeWorkbenchFab } from '@/components/workbench/ZhugeWorkbenchFab';
+import { ZhugeWorkbenchDrawer } from '@/components/workbench/ZhugeWorkbenchDrawer';
 
 interface Client {
   id: string;
@@ -166,6 +168,7 @@ function CalendarCell({
 
 export default function ContentBoardPage() {
   const searchParams = useSearchParams();
+  const packageContextId = searchParams.get('pkg') ?? '';
   const [clients, setClients] = useState<Client[]>([]);
   const [posts, setPosts] = useState<ContentPost[]>([]);
   const [loading, setLoading] = useState(true);
@@ -213,6 +216,7 @@ export default function ContentBoardPage() {
   const [imageGenMsg, setImageGenMsg] = useState('');
   const [pendingAssetId, setPendingAssetId] = useState<string | null>(null);
   const [pendingPostId, setPendingPostId] = useState<string | null>(null);
+  const [workbenchChatOpen, setWorkbenchChatOpen] = useState(false);
 
   // Batch image generation state
   const [batchImgRunning, setBatchImgRunning] = useState(false);
@@ -651,6 +655,17 @@ export default function ContentBoardPage() {
     if (calMonth === 11) { setCalYear(y => y + 1); setCalMonth(0); }
     else setCalMonth(m => m + 1);
   };
+  const selectedClientLabel = clients.find(client => client.id === selectedClient)?.name ?? '当前客户';
+  const currentHref = selectedClient
+    ? `/dashboard/content?client=${selectedClient}${packageContextId ? `&pkg=${packageContextId}` : ''}${modalPost?.id ? `&highlight=${modalPost.id}` : ''}`
+    : undefined;
+  const quickLinks = selectedClient
+    ? [
+        { label: '客户概览', href: `/dashboard/clients/${selectedClient}` },
+        { label: 'Execution', href: `/dashboard/clients/${selectedClient}/execution` },
+        { label: 'Launch Hub', href: `/dashboard/content?client=${selectedClient}` },
+      ]
+    : [];
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -1302,6 +1317,25 @@ export default function ContentBoardPage() {
             </div>
           </div>
         </div>
+      )}
+      {selectedClient && (
+        <>
+          <ZhugeWorkbenchFab
+            clientId={selectedClient}
+            currentHref={currentHref}
+            clientLabel={selectedClientLabel}
+            currentAreaLabel="Launch Hub"
+            packageLabel={packageContextId ? `Package ${packageContextId.slice(0, 8)}` : null}
+            taskLabel={modalPost?.title ?? null}
+            quickLinks={quickLinks}
+            onOpenChat={() => setWorkbenchChatOpen(true)}
+          />
+          <ZhugeWorkbenchDrawer
+            clientId={selectedClient}
+            isOpen={workbenchChatOpen}
+            onClose={() => setWorkbenchChatOpen(false)}
+          />
+        </>
       )}
       </BriefGateBanner>
     </div>
