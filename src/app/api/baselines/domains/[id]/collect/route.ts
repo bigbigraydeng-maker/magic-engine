@@ -6,10 +6,10 @@ import { SeoCollector } from '@/lib/diagnostic/collectors/seo-collector'
 // Runs SeoCollector for a single domain and writes the score back.
 // Called by FDE via the UI "Refresh" button — one domain at a time.
 export async function POST(_req: Request, { params }: { params: { id: string } }) {
-  // Fetch the domain row
+  // Fetch the domain row (need industry/sub_industry for history insert)
   const { data: row, error: fetchError } = await supabaseAdmin
     .from('baseline_domains')
-    .select('id, domain, keywords')
+    .select('id, domain, keywords, industry, sub_industry')
     .eq('id', params.id)
     .single()
 
@@ -35,15 +35,33 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     return NextResponse.json({ error: 'Collector returned null score (API timeout or no data)' }, { status: 500 })
   }
 
-  // Write score back
+  const collectedAt = new Date().toISOString()
+
+  // Write score back (latest snapshot on baseline_domains)
   const { data: updated, error: updateError } = await supabaseAdmin
     .from('baseline_domains')
-    .update({ seo_score: score, last_collected_at: new Date().toISOString() })
+    .update({ seo_score: score, last_collected_at: collectedAt })
     .eq('id', params.id)
     .select()
     .single()
 
   if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 })
+
+  // P30 S5.1: append to history (time-series, never updated)
+  // History insert failure should NOT fail the request — log and continue.
+  const { error: historyError } = await supabaseAdmin
+    .from('baseline_domain_score_history')
+    .insert({
+      baseline_domain_id: row.id,
+      industry: row.industry,
+      sub_industry: row.sub_industry,
+      domain: row.domain,
+      dimension: 'seo',
+      score,
+      collected_at: collectedAt,
+    })
+
+  if (historyError) console.error('[baselines/collect] history insert failed', historyError)
 
   return NextResponse.json({ score, updated_at: updated.last_collected_at })
 }

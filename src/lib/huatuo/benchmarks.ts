@@ -1,10 +1,15 @@
 /**
- * Benchmarks Lookup — 从 industry_benchmarks 表读取华佗 Agent 所需的基准数据。
+ * Benchmarks Lookup — 华佗 Agent 行业基准数据访问层
  *
- * 流程：
- *   1. industry_category 精确匹配
- *   2. 如果没匹配到，回退到 industry_category='_generic_smb'（如已录入）
- *   3. 全部空 → 返回 null（华佗 Agent 会标注"无基准锚定"）
+ * 优先级（P30 S5 动态化）：
+ *   1. 实时从 baseline_domains 表算 P50/P75/P90（动态、反映竞品最新状态）
+ *      → 至少 3 个域名有 seo_score 才认为可信
+ *   2. 回退到 industry_benchmarks 缓存表（兼容旧数据 / 多维度 / 已录入的种子）
+ *   3. 全部空 → 返回 null（华佗 Agent 标注"无基准锚定"）
+ *
+ * 子细分匹配（如 real_estate_auckland）：
+ *   - 调用方传 industryCategory='real_estate' + city='auckland' → 拼出 'real_estate_auckland'
+ *   - 调用方直接传 industryCategory='real_estate_auckland' 也可
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -18,49 +23,138 @@ import type {
 
 export interface BenchmarkLookupParams {
   industryCategory: string | null
-  businessSize?: BusinessSize     // 默认 'small'
-  market?: BenchmarkMarket        // 默认 'AU_NZ'
+  /** 城市级细分（如 'auckland'）；与 industryCategory 拼接为 sub_industry */
+  city?: string | null
+  businessSize?: BusinessSize     // 默认 'small'，仅用于 industry_benchmarks 回退查询
+  market?: BenchmarkMarket        // 默认 'AU_NZ'，仅用于 industry_benchmarks 回退查询
 }
 
 const ALL_DIMENSIONS: BenchmarkDimension[] = ['seo', 'social', 'reputation', 'ai_visibility']
 
+const MIN_LIVE_SAMPLE = 3   // baseline_domains 实时算法所需的最小样本
+
+function percentile(sorted: number[], p: number): number {
+  const idx = (p / 100) * (sorted.length - 1)
+  const lo = Math.floor(idx)
+  const hi = Math.ceil(idx)
+  if (lo === hi) return sorted[lo]
+  return Math.round(sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo))
+}
+
+/**
+ * 拼接 sub_industry：industry + city → 'real_estate_auckland'
+ * 没 city → 直接用 industry（如 'inbound_tour_operator'）
+ */
+function resolveSubIndustry(industryCategory: string, city?: string | null): string {
+  if (!city) return industryCategory
+  // 如果 industryCategory 已经包含 city 就直接用
+  if (industryCategory.endsWith(`_${city.toLowerCase()}`)) return industryCategory
+  return `${industryCategory}_${city.toLowerCase()}`
+}
+
+/**
+ * 实时从 baseline_domains 算 SEO 基准。
+ * 只在样本 >= MIN_LIVE_SAMPLE 时返回，否则返回 null（让回退逻辑接管）。
+ */
+async function computeLiveSeoBenchmark(
+  supabase: SupabaseClient,
+  subIndustry: string,
+): Promise<IndustryBenchmarkRow | null> {
+  const { data, error } = await supabase
+    .from('baseline_domains')
+    .select('seo_score, last_collected_at')
+    .eq('sub_industry', subIndustry)
+    .not('seo_score', 'is', null)
+
+  if (error || !data || data.length < MIN_LIVE_SAMPLE) return null
+
+  const scores = (data as Array<{ seo_score: number; last_collected_at: string | null }>)
+    .map(r => r.seo_score)
+    .sort((a, b) => a - b)
+
+  const latestCollectedAt = (data as Array<{ last_collected_at: string | null }>)
+    .map(r => r.last_collected_at)
+    .filter((v): v is string => Boolean(v))
+    .sort()
+    .pop() ?? null
+
+  return {
+    id: `live:${subIndustry}:seo`,   // 合成 ID，标记为实时计算
+    industry_category: subIndustry,
+    business_size: 'medium',
+    market: 'NZ',
+    dimension: 'seo',
+    score_p50: percentile(scores, 50),
+    score_p75: percentile(scores, 75),
+    score_p90: percentile(scores, 90),
+    realistic_3mo_growth_pct: null,
+    realistic_6mo_growth_pct: null,
+    typical_monthly_budget_aud: null,
+    source: `Live baseline_domains (n=${scores.length}${latestCollectedAt ? `, last ${latestCollectedAt.slice(0, 10)}` : ''})`,
+    source_url: null,
+    confidence: Math.min(1, parseFloat((scores.length / 10).toFixed(2))),
+    sample_size: scores.length,
+    notes: `Live computed from baseline_domains. Scores: ${scores.join(', ')}`,
+  }
+}
+
 /**
  * 拉取 4 个维度的基准（如果某维度没有，对应字段为 null）。
+ *
+ * SEO 维度优先实时算（动态反映竞品变化），其他维度仍读 industry_benchmarks 缓存。
  */
 export async function fetchBenchmarks(
   supabase: SupabaseClient,
   params: BenchmarkLookupParams,
 ): Promise<HuatuoLookupContext['benchmarks']> {
-  const { industryCategory } = params
+  const { industryCategory, city } = params
   const businessSize = params.businessSize ?? 'small'
   const market = params.market ?? 'AU_NZ'
 
-  // 空行业 → 直接返回全 null（agent 会用通用兜底逻辑）
   if (!industryCategory) {
     return { seo: null, social: null, reputation: null, ai_visibility: null }
   }
 
-  // 一次性查 4 维（按 dimension IN）
+  const subIndustry = resolveSubIndustry(industryCategory, city)
+
+  // ── SEO: 优先实时算，否则回退到缓存 ──────────────────────────────────────
+  const liveSeo = await computeLiveSeoBenchmark(supabase, subIndustry)
+
+  // ── 其他维度（social/reputation/ai_visibility）: 仍读 industry_benchmarks 缓存 ─
+  const cacheDimensions: BenchmarkDimension[] = liveSeo
+    ? ['social', 'reputation', 'ai_visibility']
+    : ALL_DIMENSIONS
+
+  // 同时查 sub_industry 和 industryCategory 两个 key，sub_industry 优先
+  const lookupKeys = subIndustry !== industryCategory
+    ? [subIndustry, industryCategory]
+    : [subIndustry]
+
   const { data, error } = await supabase
     .from('industry_benchmarks')
     .select('*')
-    .eq('industry_category', industryCategory)
+    .in('industry_category', lookupKeys)
     .eq('business_size', businessSize)
     .eq('market', market)
-    .in('dimension', ALL_DIMENSIONS)
+    .in('dimension', cacheDimensions)
 
-  if (error) {
-    console.error('[huatuo/benchmarks] lookup error', error)
-    return { seo: null, social: null, reputation: null, ai_visibility: null }
-  }
+  if (error) console.error('[huatuo/benchmarks] cache lookup error', error)
 
   const rows = (data ?? []) as IndustryBenchmarkRow[]
   const result: HuatuoLookupContext['benchmarks'] = {
-    seo: null, social: null, reputation: null, ai_visibility: null,
+    seo: liveSeo,
+    social: null,
+    reputation: null,
+    ai_visibility: null,
   }
-  for (const row of rows) {
-    result[row.dimension] = row
+
+  // sub_industry 优先：先填 sub_industry 的，再填 industryCategory 的（不覆盖）
+  for (const key of lookupKeys) {
+    for (const row of rows.filter(r => r.industry_category === key)) {
+      if (result[row.dimension] == null) result[row.dimension] = row
+    }
   }
+
   return result
 }
 
