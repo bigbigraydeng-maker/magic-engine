@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { BriefGateBanner } from '@/components/brief/BriefGateBanner';
@@ -169,6 +169,7 @@ function CalendarCell({
 export default function ContentBoardPage() {
   const searchParams = useSearchParams();
   const packageContextId = searchParams.get('pkg') ?? '';
+  const highlightPostId = searchParams.get('highlight') ?? '';
   const [clients, setClients] = useState<Client[]>([]);
   const [posts, setPosts] = useState<ContentPost[]>([]);
   const [loading, setLoading] = useState(true);
@@ -225,6 +226,7 @@ export default function ContentBoardPage() {
   // Batch Publer publish state
   const [batchPubRunning, setBatchPubRunning] = useState(false);
   const [batchPubMsg, setBatchPubMsg] = useState('');
+  const handledHighlightRef = useRef<string | null>(null);
 
 
   useEffect(() => {
@@ -388,7 +390,7 @@ export default function ContentBoardPage() {
 
   // ── Modal helpers ─────────────────────────────────────────────────────────
 
-  const openModal = (post: ContentPost) => {
+  const primeModal = useCallback((post: ContentPost) => {
     setModalPost(post);
     setEditMode(false);
     setEditTitle(post.title);
@@ -415,7 +417,46 @@ export default function ContentBoardPage() {
         if (d?.items) setExecItems(d.items as ExecutionItemLite[]);
       })
       .catch(() => { /* 静默：拉取失败时降级为「无可关联项」*/ });
+  }, []);
+
+  const openModal = (post: ContentPost) => {
+    primeModal(post);
   };
+
+  useEffect(() => {
+    if (!highlightPostId) {
+      handledHighlightRef.current = null;
+      return;
+    }
+    if (handledHighlightRef.current === highlightPostId) return;
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const res = await fetch(`/api/posts/${highlightPostId}`);
+        const json = await res.json() as { success: boolean; post?: ContentPost };
+        if (!json.success || !json.post || cancelled) return;
+
+        const targetPost = json.post;
+        if (viewMode !== 'list') setViewMode('list');
+        if (targetPost.client_id && targetPost.client_id !== selectedClient) {
+          setSelectedClient(targetPost.client_id);
+        }
+        if (selectedStatus !== targetPost.status) {
+          setSelectedStatus(targetPost.status);
+        }
+        primeModal(targetPost);
+        handledHighlightRef.current = highlightPostId;
+      } catch {
+        // Ignore deep-link hydration failures and leave the board usable.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [highlightPostId, primeModal, selectedClient, selectedStatus, viewMode]);
 
   const handleLinkExecutionItem = async (newItemId: string | null) => {
     if (!modalPost) return;

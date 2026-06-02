@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-02 21:17 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-02 22:30 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -2909,7 +2909,8 @@ AU / NZ（当前）          新市场（未来）
 | **P21.9** | CTS + Oztop 端到端 MVP 验收 | — | ✅ 完成（M3 验收 Checklist 生成，PM 人工验收） |
 | **P21.10** | Production Package 社媒产物「查看→」深链修复（从错误 `/pages` 改为 Launch Hub 高亮帖子） | 21.C | ✅ 完成 |
 | **P21.23** | 诸葛亮反馈补发修复：补齐线上 `zhuge_feedback_events` 表并给前端待补发队列加自动重试，清掉长期悬挂提示 | 21.C/21.UX | ✅ 完成 |
-| **P21.24** | Production Package 社媒产物 `查看 →` 点击回归：链接已改对，但线上真实点击仍不跳转，需要补齐 CTA 导航闭环 | 21.C/21.UX | 📋 待开始 |
+| **P21.24** | Production Package 社媒产物深链回归：`查看 →` 已能跳到 Launch Hub，但 `highlight` 仍未自动切换状态 / 打开目标帖子，FDE 还要自己找内容 | 21.C/21.UX | 🚧 进行中 |
+| **P21.25** | Phase 21 QA 回归打印版：整理 G1/G2/G3、V1/V2/V3、诸葛亮工作台与 Production Package 的真实测试记录，形成可打印报告 | 21.QA | ✅ 完成 |
 
 **里程碑关卡（不过不许往下，PM 验证）**：
 - **M1 产能内核** ✅（P21.1-2）：`npm run build` 通过 + 单测证明 Sonnet/Haiku 分层路由 + 记忆注入生效
@@ -3269,6 +3270,7 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 - 新 VI 后 SEO/GEO 修复完成：补 AI search crawler robots hints、favicon/OG 资源、中文页 raw HTML 信号、中文站内链接、服务页 Service schema 和社交 meta
 - **P29.SEO.21** — favicon 链接加版本号，Cloudflare / 浏览器缓存不再卡住旧 tab icon
 - **P21.23** — 诸葛亮反馈事件表已补到线上，Launch Hub 的“待补发”提示不再长时间挂住
+- **P21.25** — Phase 21 QA 打印版已整理，当前剩余主问题收敛到 Launch Hub 未消费 `highlight` 上下文
 
 ### 2026-06-01（Website SEO Optimization P29.SEO.6 完成）
 
