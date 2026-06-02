@@ -209,6 +209,8 @@ export interface ExecutionItem {
   source: ExecutionItemSource
   /** marketing_plan 来源时有值，作为分组键 */
   marketing_plan_id: string | null
+  /** Phase 31/33: Initiative this action belongs to (nullable for legacy items) */
+  initiative_id: string | null
 }
 
 /** 内容飞轮闭环 — 执行看板 row 上展示的关联内容预览（execution GET 时 embed） */

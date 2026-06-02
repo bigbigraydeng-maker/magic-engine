@@ -44,6 +44,7 @@ const baseItem: ExecutionGroupItem = {
   content_post_id: null,
   source: 'diagnostic',
   marketing_plan_id: null,
+  initiative_id: null,
   logs: [],
   outcome: null,
   linked_post: null,

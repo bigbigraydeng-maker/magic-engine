@@ -329,6 +329,7 @@ function buildAutonomousItem(
     content_post_id: null,
     source: 'diagnostic',           // 自主行动用 sentinel prescription_id，归类为 diagnostic 来源
     marketing_plan_id: null,
+    initiative_id: null,
     logs: [],
     outcome,
     linked_post: null,

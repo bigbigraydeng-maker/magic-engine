@@ -37,6 +37,7 @@ function makeItem(overrides?: Partial<ExecutionItem>): ExecutionItem {
     content_post_id: null,
     source: 'diagnostic',
     marketing_plan_id: null,
+    initiative_id: null,
     ...overrides,
   }
 }

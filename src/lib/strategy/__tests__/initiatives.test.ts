@@ -41,6 +41,7 @@ function makeInitiative(overrides: Partial<InitiativeRow> = {}): InitiativeRow {
     hypothesis: 'If we do X, Y happens.',
     hypothesis_polished_by_ai: false,
     supports_initiative_id: null,
+    campaign_ids: [],
     is_archived: false,
     sort_order: 0,
     created_at: '2026-06-01T00:00:00Z',

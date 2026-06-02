@@ -600,11 +600,14 @@ function ExecutionItemCard({
   isActive,
   onOpenDetail,
   isBackgroundGenerating = false,
+  initiativeLabel,
 }: {
   item:         ItemWithLogs
   isActive:     boolean
   onOpenDetail: (item: ItemWithLogs) => void
   isBackgroundGenerating?: boolean
+  /** Phase 33: Initiative title for badge — shown when item.initiative_id is set */
+  initiativeLabel?: string
 }) {
   const fixMeta     = FIX_TYPE_META[item.fix_type ?? ''] ?? FIX_TYPE_META.fde_manual
   const statusMeta  = STATUS_META[item.status]
@@ -657,6 +660,11 @@ function ExecutionItemCard({
         )}
         {!isBackgroundGenerating && hasAiAssist && <span className="text-[10px] font-bold text-cyan-700">AI 草稿</span>}
         {logCount > 0 && <span className="text-[10px] text-gray-400">{logCount} 条日志</span>}
+        {initiativeLabel && (
+          <span className="text-[10px] font-bold text-me-ochre bg-me-ochre/10 px-1.5 py-0.5 rounded truncate max-w-[120px]" title={initiativeLabel}>
+            ◈ {initiativeLabel}
+          </span>
+        )}
       </div>
     </div>
   )
@@ -1541,11 +1549,14 @@ function DimensionGroupSection({
   activeDetailId,
   onOpenDetail,
   bgGeneratingIds,
+  initiativeMap,
 }: {
   group: DimensionGroup
   activeDetailId: string | null
   onOpenDetail: (item: ItemWithLogs) => void
   bgGeneratingIds?: Set<string>
+  /** Phase 33: initiative_id → title for badge display */
+  initiativeMap?: Map<string, string>
 }) {
   const [expanded, setExpanded] = useState(false)
 
@@ -1597,6 +1608,7 @@ function DimensionGroupSection({
             isActive={item.id === activeDetailId}
             onOpenDetail={onOpenDetail}
             isBackgroundGenerating={bgGeneratingIds?.has(item.id) ?? false}
+            initiativeLabel={item.initiative_id ? initiativeMap?.get(item.initiative_id) : undefined}
           />
         ))}
       </div>
@@ -1664,6 +1676,14 @@ export default function ExecutionPage() {
   const [activeDimension, setActiveDimension] = useState<string>('all')
   // 状态过滤（全部/待处理/进行中/已完成）
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  // Phase 33: Goal filter — 'all' | goalId
+  const [goalFilter, setGoalFilter] = useState<string>('all')
+  // Phase 33: initiatives for the current client (id → title map + goal membership)
+  const [initiativeMap, setInitiativeMap] = useState<Map<string, string>>(new Map())
+  // Phase 33: goals for filter dropdown {id, title}
+  const [goalsForFilter, setGoalsForFilter] = useState<Array<{ id: string; title: string }>>([])
+  // Phase 33: goalId → Set<initiativeId> for filtering items by goal
+  const [goalInitiativeIds, setGoalInitiativeIds] = useState<Map<string, Set<string>>>(new Map())
   // 客户名（面包屑导航用）
   const [clientName, setClientName] = useState<string | null>(null)
   // Phase 20.D: FDE 手动录入
@@ -1750,6 +1770,38 @@ export default function ExecutionPage() {
         const json = await res.json() as { client?: { name: string } }
         if (json.client?.name) setClientName(json.client.name)
       } catch { /* non-fatal */ }
+    })()
+  }, [clientId])
+
+  // Phase 33: load initiatives for badge + Goal filter
+  useEffect(() => {
+    void (async () => {
+      try {
+        const [initRes, goalRes] = await Promise.all([
+          fetch(`/api/clients/${clientId}/initiatives`),
+          fetch(`/api/clients/${clientId}/goals`),
+        ])
+        if (initRes.ok) {
+          const j = await initRes.json() as {
+            initiatives?: Array<{ id: string; title: string; goal_id: string }>
+          }
+          const titleMap = new Map<string, string>()
+          const goalMap  = new Map<string, Set<string>>()
+          for (const i of j.initiatives ?? []) {
+            titleMap.set(i.id, i.title)
+            if (i.goal_id) {
+              if (!goalMap.has(i.goal_id)) goalMap.set(i.goal_id, new Set())
+              goalMap.get(i.goal_id)!.add(i.id)
+            }
+          }
+          setInitiativeMap(titleMap)
+          setGoalInitiativeIds(goalMap)
+        }
+        if (goalRes.ok) {
+          const j = await goalRes.json() as { goals?: Array<{ id: string; title: string }> }
+          setGoalsForFilter((j.goals ?? []).filter(g => g.title !== '[Migration] Unassigned Backlog'))
+        }
+      } catch { /* non-fatal — badge/filter are enhancements */ }
     })()
   }, [clientId])
 
@@ -2091,6 +2143,14 @@ export default function ExecutionPage() {
   const filteredItems = (() => {
     let result = activeDimension === 'all' ? items : items.filter(i => i.dimension === activeDimension)
     if (statusFilter !== 'all') result = result.filter(i => i.status === statusFilter)
+    if (goalFilter !== 'all') {
+      const initiativeIdsForGoal = goalInitiativeIds.get(goalFilter)
+      if (initiativeIdsForGoal) {
+        result = result.filter(i =>
+          i.initiative_id === null || initiativeIdsForGoal.has(i.initiative_id),
+        )
+      }
+    }
     return result
   })()
   const availableDimensions = Array.from(new Set(items.map(i => i.dimension).filter(Boolean))) as string[]
@@ -2382,6 +2442,36 @@ export default function ExecutionPage() {
           )
         })()}
 
+        {/* Phase 33 P33.9 — Goal filter (只在有多个 Goal 时显示) */}
+        {goalsForFilter.length > 0 && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[10px] font-bold uppercase tracking-wide text-me-charcoal/45 mr-1">按 Goal</span>
+            <button
+              onClick={() => setGoalFilter('all')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                goalFilter === 'all'
+                  ? 'bg-me-ochre text-white'
+                  : 'bg-white border border-gray-200 text-gray-600 hover:border-me-ochre/50 hover:text-me-ochre'
+              }`}
+            >
+              全部
+            </button>
+            {goalsForFilter.map(g => (
+              <button
+                key={g.id}
+                onClick={() => setGoalFilter(g.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                  goalFilter === g.id
+                    ? 'bg-me-ochre text-white'
+                    : 'bg-white border border-gray-200 text-gray-600 hover:border-me-ochre/50 hover:text-me-ochre'
+                }`}
+              >
+                {g.title}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* 状态过滤 chips */}
         {(() => {
           const STATUS_TABS = [
@@ -2438,8 +2528,40 @@ export default function ExecutionPage() {
               openDetailAndRemember(item, legacy?.editable ?? true)
             }}
             bgGeneratingIds={allBgGeneratingIds}
+            initiativeMap={initiativeMap}
           />
         ))}
+
+        {/* Phase 33 P33.10 — Unassigned Backlog: items with initiative_id=null (only shown when Goal filter active) */}
+        {goalFilter !== 'all' && (() => {
+          const unassigned = filteredItems.filter(i => i.initiative_id === null && !isAutonomousItem(i))
+          if (unassigned.length === 0) return null
+          return (
+            <div className="rounded-xl border border-dashed border-me-charcoal/20 bg-me-ivory/60 overflow-hidden">
+              <div className="flex items-center gap-3 px-5 py-3 bg-me-ivory border-b border-me-charcoal/10">
+                <span className="text-sm">📥</span>
+                <span className="text-sm font-black text-me-charcoal/70">未归类 Actions</span>
+                <span className="rounded-full bg-me-charcoal/10 px-2 py-0.5 text-[10px] font-bold text-me-charcoal/55">
+                  {unassigned.length} 条
+                </span>
+                <span className="ml-auto text-[11px] font-semibold text-me-charcoal/45">
+                  这些 actions 尚未关联到任何 Initiative — 请在 Goal 页面归类
+                </span>
+              </div>
+              <div className="divide-y divide-me-charcoal/5 px-4 py-2 space-y-2">
+                {unassigned.map(item => (
+                  <ExecutionItemCard
+                    key={item.id}
+                    item={item}
+                    isActive={item.id === detailItem?.id}
+                    onOpenDetail={i => openDetailAndRemember(i, true)}
+                    isBackgroundGenerating={allBgGeneratingIds.has(item.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          )
+        })()}
 
         {/* FDE 手动录入分组 — 平铺 + 拖拽排序（仍保留） */}
         {prescriptionGroups.filter(g => g.kind === 'fde_manual').map(group => (

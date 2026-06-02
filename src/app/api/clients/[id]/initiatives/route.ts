@@ -29,6 +29,7 @@ export async function GET(
       id:              r.id,
       title:           r.title,
       initiative_type: r.initiative_type,
+      goal_id:         r.goal_id,
       goal_title:      r.goal_title,
     }))
 
