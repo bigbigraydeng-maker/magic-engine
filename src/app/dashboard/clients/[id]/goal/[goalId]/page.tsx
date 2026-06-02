@@ -12,6 +12,8 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import type { GoalRow } from '@/types/strategy'
+import { InitiativeList } from './_components/InitiativeList'
+import { BacklogMigrator } from './_components/BacklogMigrator'
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-NZ', {
@@ -232,15 +234,13 @@ export default function GoalDetailPage() {
         </div>
       )}
 
-      {/* Initiatives placeholder (M3 will fill) */}
-      <div className="rounded-xl border border-dashed border-white/15 bg-slate-900/40 p-6 text-center">
-        <p className="text-sm text-slate-500">
-          📋 Initiative configuration coming in M3.
-        </p>
-        <p className="mt-1 text-xs text-slate-600">
-          这里会显示该 Goal 下的 Initiatives + AI 参谋建议 + 子牙润色 hypothesis 工具。
-        </p>
-      </div>
+      {/* Initiatives (M3) */}
+      <InitiativeList goal={goal} canEdit={goal.status === 'draft' || goal.status === 'active'} />
+
+      {/* Backlog migrator (M3.5) — only shows if client has unassigned actions */}
+      {goal.title !== '[Migration] Unassigned Backlog' && (
+        <BacklogMigrator clientId={clientId} goal={goal} />
+      )}
     </div>
   )
 }
