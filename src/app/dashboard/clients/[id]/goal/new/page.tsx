@@ -435,11 +435,27 @@ export default function NewGoalPage() {
                       placeholder={placeholderFor(selectedMetric, targetDirection, 'target')}
                       className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
                     />
-                    {baselineValue && targetValue && parseFloat(baselineValue) !== 0 && (
+                    {baselineValue && targetValue && (
                       <p className="text-[11px] font-bold text-status-track">
-                        {targetDirection === 'decrease'
-                          ? `${((1 - parseFloat(targetValue) / parseFloat(baselineValue)) * 100).toFixed(0)}% reduction`
-                          : `${((parseFloat(targetValue) / parseFloat(baselineValue) - 1) * 100).toFixed(0)}% growth`}
+                        {(() => {
+                          const b = parseFloat(baselineValue)
+                          const t = parseFloat(targetValue)
+                          if (!Number.isFinite(b) || !Number.isFinite(t)) return null
+                          // B4 fix: baseline=0 → "New from zero" instead of Infinity%
+                          if (b === 0) {
+                            return targetDirection === 'decrease'
+                              ? `Target: ${t.toLocaleString()} (from zero)`
+                              : `New metric · target ${t.toLocaleString()} (from zero)`
+                          }
+                          const pct = targetDirection === 'decrease'
+                            ? (1 - t / b) * 100
+                            : (t / b - 1) * 100
+                          // 守护：避免 NaN / Infinity 进 toFixed
+                          if (!Number.isFinite(pct)) return null
+                          return targetDirection === 'decrease'
+                            ? `${pct.toFixed(0)}% reduction`
+                            : `${pct.toFixed(0)}% growth`
+                        })()}
                       </p>
                     )}
                   </div>
