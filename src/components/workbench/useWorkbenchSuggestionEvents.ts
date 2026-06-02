@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SuggestionFeedbackState } from './useWorkbenchSuggestionFeedback'
 
 const STORAGE_KEY = 'me:zhuge-suggestion-events:v1'
+const FLUSH_RETRY_MS = 15000
 
 export interface SuggestionFeedbackEvent {
   localId: string
@@ -77,6 +78,13 @@ function makeLocalId() {
 export function useWorkbenchSuggestionEvents() {
   const [pendingCount, setPendingCount] = useState(0)
   const flushingRef = useRef(false)
+  const retryTimerRef = useRef<number | null>(null)
+
+  const clearRetryTimer = useCallback(() => {
+    if (retryTimerRef.current === null || typeof window === 'undefined') return
+    window.clearTimeout(retryTimerRef.current)
+    retryTimerRef.current = null
+  }, [])
 
   const flushQueue = useCallback(async () => {
     if (flushingRef.current) return
@@ -105,11 +113,18 @@ export function useWorkbenchSuggestionEvents() {
         writeQueue(queue)
       }
 
-      setPendingCount(queue.length)
     } catch {
-      setPendingCount(readQueue().length)
     } finally {
       flushingRef.current = false
+      const remaining = readQueue().length
+      setPendingCount(remaining)
+
+      if (remaining > 0 && typeof window !== 'undefined' && retryTimerRef.current === null) {
+        retryTimerRef.current = window.setTimeout(() => {
+          retryTimerRef.current = null
+          void flushQueue()
+        }, FLUSH_RETRY_MS)
+      }
     }
   }, [])
 
@@ -117,7 +132,36 @@ export function useWorkbenchSuggestionEvents() {
     const queue = readQueue()
     setPendingCount(queue.length)
     void flushQueue()
-  }, [flushQueue])
+
+    return () => {
+      clearRetryTimer()
+    }
+  }, [clearRetryTimer, flushQueue])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const retryNow = () => {
+      clearRetryTimer()
+      void flushQueue()
+    }
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        retryNow()
+      }
+    }
+
+    window.addEventListener('online', retryNow)
+    window.addEventListener('focus', retryNow)
+    document.addEventListener('visibilitychange', handleVisibility)
+
+    return () => {
+      window.removeEventListener('online', retryNow)
+      window.removeEventListener('focus', retryNow)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [clearRetryTimer, flushQueue])
 
   const trackFeedbackEvent = useCallback((event: Omit<SuggestionFeedbackEvent, 'localId' | 'recordedAt' | 'source'>) => {
     const nextEvent: SuggestionFeedbackEvent = {
@@ -130,8 +174,9 @@ export function useWorkbenchSuggestionEvents() {
     const nextQueue = [...readQueue(), nextEvent]
     writeQueue(nextQueue)
     setPendingCount(nextQueue.length)
+    clearRetryTimer()
     void flushQueue()
-  }, [flushQueue])
+  }, [clearRetryTimer, flushQueue])
 
   return {
     pendingCount,

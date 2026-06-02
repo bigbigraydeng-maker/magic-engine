@@ -215,15 +215,15 @@ git push origin master   # 触发 Render 部署
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> Last updated: 2026-06-02 (P29.SEO.21 favicon cache-bust complete; next remains optional GEO use-case support)
+> Last updated: 2026-06-02 (P21.23 done; next is P21.24 Production Package click-through regression)
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **P29.GEO.7** | Tiny AU/NZ AI search local use-case page if snippet bank still needs concrete scenarios | LOW |
+| **P21.24** | Production Package 社媒产物 `查看 →` 点击回归：链接地址已正确，但线上真实点击仍不跳转，需要补齐 CTA 导航闭环 | HIGH |
 
-**Status check (2026-06-02):** P29.SEO.9, P29.ADS.1-2, P29.GEO.1-6, P29.WEB.1-2, P29.SEO.14-21, P29.E.1-6, P29.C.1-5, P29.AUTH.1, and P21.10 are done. Post-VI public site SEO/GEO now has AI search crawler robots hints, versioned favicon links, new favicon/OG assets, raw Chinese page signals, Chinese default internal links, service schema, social meta, and the new VI logo across `/cn/` pages. Brief gate now covers Blog, Marketing Plan, single social generation, Reels Studio, execution dashboard actions, Launch Hub, and workspace production entry points for self_serve users with incomplete briefs. Google self-serve registration now creates a workspace and preserves the 500 MTC welcome bonus path. Production Package social items now deep-link back into Launch Hub with `highlight={postId}` instead of the wrong `/pages` route. Growth work keeps optional P29.GEO.7 open; next should be the AI search local use-case support page only if we still want extra AU/NZ scenario snippets. Next session first line:
+**Status check (2026-06-02):** P29.SEO.9, P29.ADS.1-2, P29.GEO.1-6, P29.WEB.1-2, P29.SEO.14-21, P29.E.1-6, P29.C.1-5, P29.AUTH.1, P21.10, P21.22, and P21.23 are done. Post-VI public site SEO/GEO now has AI search crawler robots hints, versioned favicon links, new favicon/OG assets, raw Chinese page signals, Chinese default internal links, service schema, social meta, and the new VI logo across `/cn/` pages. Brief gate now covers Blog, Marketing Plan, single social generation, Reels Studio, execution dashboard actions, Launch Hub, and workspace production entry points for self_serve users with incomplete briefs. Google self-serve registration now creates a workspace and preserves the 500 MTC welcome bonus path. Production Package social items now deep-link back into Launch Hub with `highlight={postId}` instead of the wrong `/pages` route. 诸葛亮工作台 beta 的反馈事件表已经补到线上，Launch Hub 真实点击 `已处理` 后不再长时间挂住“待补发”，数据库事件也能增长；新暴露出的下一颗 UX 雷是 Production Package 卡片里的 `查看 →` 线上真实点击仍不跳转，虽然 href 已正确指向 Launch Hub 深链。 Next session first line:
 
-- `继续 Website GEO Visibility P29.GEO.7`
+- `继续 Phase 21 P21.24 Production Package 查看跳转修复`
 **Phase 8.12 Sprint 3 全部完成（S3.1–S3.5）**，P8.12.S1.6b（小红书 scraper）为下一可选扩展项。
 
 **更新规则**（每次上线新功能）：
