@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-label="Magic Engine AI upgrade, GEO, and training for AU/NZ businesses">
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#EBCB8B"/>
+      <stop offset="0.55" stop-color="#C4912E"/>
+      <stop offset="1" stop-color="#8B641F"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.2" cy="0.2" r="0.9">
+      <stop offset="0" stop-color="#F5E5C2"/>
+      <stop offset="1" stop-color="#FBF8F3"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+  <circle cx="1010" cy="130" r="240" fill="#EBCB8B" opacity="0.25"/>
+  <circle cx="170" cy="540" r="220" fill="#5C8A4A" opacity="0.12"/>
+  <g transform="translate(84 84) scale(2.1)">
+    <polygon points="3,60 13,6 22,6 12,60" fill="#BE8A2E"/>
+    <polygon points="13,6 22,6 33,38 24,38" fill="#9A6F1E"/>
+    <polygon points="46,6 55,6 44,38 35,38" fill="#9A6F1E"/>
+    <polygon points="46,6 55,6 65,60 55,60" fill="#BE8A2E"/>
+    <polygon points="24,38 33,38 34,48 35,38 44,38 34,60" fill="#7A5518"/>
+  </g>
+  <text x="84" y="278" font-family="Space Grotesk, Arial, sans-serif" font-size="78" font-weight="700" fill="#1A1A1A">Magic Engine</text>
+  <text x="88" y="350" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="600" fill="#8B641F">AI upgrade, GEO, and training</text>
+  <text x="88" y="406" font-family="Inter, Arial, sans-serif" font-size="30" fill="#1A1A1A" opacity="0.76">For Australian and New Zealand businesses</text>
+  <rect x="86" y="474" width="438" height="54" rx="27" fill="url(#gold)"/>
+  <text x="116" y="510" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="700" fill="#FFFFFF">AU/NZ · Bilingual · GEO ready</text>
+</svg>

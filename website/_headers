@@ -3,6 +3,11 @@
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
+  X-Robots-Tag: index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1
+
+/assets/*.svg
+  Content-Type: image/svg+xml
+  Cache-Control: public, max-age=86400
 
 /api/*
   Access-Control-Allow-Origin: https://magicengine.com.au
