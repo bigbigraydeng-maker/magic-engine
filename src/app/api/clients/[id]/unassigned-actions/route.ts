@@ -9,11 +9,15 @@
 
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 export async function GET(
   _req: Request,
   { params }: { params: { id: string } },
 ) {
+  const access = await requireDashboardClientAccess(params.id)
+  if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
+
   // 找该客户的 unassigned initiative
   const { data: unassignedInit } = await supabaseAdmin
     .from('initiatives')

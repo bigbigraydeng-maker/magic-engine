@@ -9,14 +9,18 @@
 
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { getInitiativeById } from '@/lib/strategy/initiatives'
 import { getGoalById } from '@/lib/strategy/goals'
 import { polishHypothesis } from '@/lib/strategy/hypothesis-polish'
+import { requireInitiativeAccess } from '@/lib/strategy/auth-helpers'
 
 export async function POST(
   req: Request,
   { params }: { params: { id: string } },
 ) {
+  const access = await requireInitiativeAccess(params.id)
+  if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
+  const initiative = access.row
+
   let body: { rawHypothesis?: string }
   try {
     body = await req.json()
@@ -28,9 +32,6 @@ export async function POST(
   if (!rawHypothesis) {
     return NextResponse.json({ error: 'rawHypothesis is required' }, { status: 400 })
   }
-
-  const initiative = await getInitiativeById(supabaseAdmin, params.id)
-  if (!initiative) return NextResponse.json({ error: 'Initiative not found' }, { status: 404 })
 
   const goal = await getGoalById(supabaseAdmin, initiative.goal_id)
   if (!goal) return NextResponse.json({ error: 'Goal not found' }, { status: 404 })

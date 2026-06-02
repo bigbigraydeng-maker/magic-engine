@@ -10,12 +10,16 @@
 
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { getInitiativeById } from '@/lib/strategy/initiatives'
+import { requireInitiativeAccess } from '@/lib/strategy/auth-helpers'
 
 export async function POST(
   req: Request,
   { params }: { params: { id: string } },
 ) {
+  const access = await requireInitiativeAccess(params.id)
+  if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
+  const initiative = access.row
+
   let body: { execution_item_ids?: string[] }
   try {
     body = await req.json()
@@ -30,9 +34,6 @@ export async function POST(
   if (ids.length > 200) {
     return NextResponse.json({ error: 'Max 200 items per call' }, { status: 400 })
   }
-
-  const initiative = await getInitiativeById(supabaseAdmin, params.id)
-  if (!initiative) return NextResponse.json({ error: 'Initiative not found' }, { status: 404 })
 
   // Update only actions that belong to the same client (defence-in-depth)
   const { data, error } = await supabaseAdmin

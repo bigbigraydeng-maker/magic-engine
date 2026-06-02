@@ -6,12 +6,16 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { listInitiativesForGoal, createInitiative } from '@/lib/strategy/initiatives'
+import { requireGoalAccess } from '@/lib/strategy/auth-helpers'
 import type { CreateInitiativeInput } from '@/types/strategy'
 
 export async function GET(
   _req: Request,
   { params }: { params: { goalId: string } },
 ) {
+  const access = await requireGoalAccess(params.goalId)
+  if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
+
   const initiatives = await listInitiativesForGoal(supabaseAdmin, params.goalId)
   return NextResponse.json({ initiatives })
 }
@@ -20,6 +24,9 @@ export async function POST(
   req: Request,
   { params }: { params: { goalId: string } },
 ) {
+  const access = await requireGoalAccess(params.goalId)
+  if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
+
   let body: Omit<CreateInitiativeInput, 'goal_id'>
   try {
     body = await req.json()

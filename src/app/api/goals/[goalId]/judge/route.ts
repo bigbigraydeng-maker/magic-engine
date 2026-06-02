@@ -13,13 +13,17 @@
 
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { getGoalById } from '@/lib/strategy/goals'
 import { judgeGoalAndArchive, computeGoalVerdict } from '@/lib/strategy/verdict'
+import { requireGoalAccess } from '@/lib/strategy/auth-helpers'
 
 export async function POST(
   req: Request,
   { params }: { params: { goalId: string } },
 ) {
+  const access = await requireGoalAccess(params.goalId)
+  if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
+  const goal = access.row
+
   let body: { current_value?: number; extra_summary?: string }
   try {
     body = await req.json()
@@ -30,9 +34,6 @@ export async function POST(
   if (typeof body.current_value !== 'number') {
     return NextResponse.json({ error: 'current_value (number) is required' }, { status: 400 })
   }
-
-  const goal = await getGoalById(supabaseAdmin, params.goalId)
-  if (!goal) return NextResponse.json({ error: 'Goal not found' }, { status: 404 })
 
   const result = await judgeGoalAndArchive(supabaseAdmin, {
     goal,
