@@ -7,7 +7,7 @@
  *   • 新建：editing=null
  *   • 编辑：editing=existing row
  *
- * 包含子牙 (Sonnet) 润色 hypothesis 的按钮 — 必须先保存 initiative 才能润色
+ * 包含诸葛亮 (Sonnet) 润色 hypothesis 的按钮 — 必须先保存 initiative 才能润色
  * （因为润色需要 initiative_id 来读上下文）。新建时按钮 disabled，
  * 提示用户"先保存草稿，再润色"。
  */
@@ -98,7 +98,7 @@ export function InitiativeFormDrawer({
   async function handlePolish() {
     if (!editing || !initiative) return
     if (!hypothesis.trim()) {
-      setError('Write a rough hypothesis first, then let 子牙 polish it.')
+      setError('Write a rough hypothesis first, then let 诸葛亮 polish it.')
       return
     }
     setPolishing(true)
@@ -111,7 +111,7 @@ export function InitiativeFormDrawer({
       })
       if (!res.ok) {
         const j = await res.json()
-        setError(`子牙润色失败：${j.error}`)
+        setError(`诸葛亮润色失败：${j.error}`)
         return
       }
       const j = await res.json()
@@ -283,7 +283,7 @@ export function InitiativeFormDrawer({
                 className="rounded-md bg-purple-600/80 hover:bg-purple-500 disabled:opacity-30 disabled:cursor-not-allowed px-3 py-1 text-xs font-medium text-white"
                 title={!editing ? 'Save draft first, then polish' : ''}
               >
-                {polishing ? '子牙润色中…' : '🪄 让子牙润色'}
+                {polishing ? '诸葛亮润色中…' : '🪄 让诸葛亮润色'}
               </button>
             </div>
             <textarea
@@ -295,7 +295,7 @@ export function InitiativeFormDrawer({
             />
             <p className="text-[11px] text-slate-500">
               90 天后归因看 hypothesis 是否被验证 — 写得越具体越能学到东西。
-              {!editing && <span className="block mt-1 text-amber-400">先保存草稿，再用子牙润色（润色需要 initiative 上下文）。</span>}
+              {!editing && <span className="block mt-1 text-amber-400">先保存草稿，再用诸葛亮润色（润色需要 initiative 上下文）。</span>}
             </p>
           </div>
 

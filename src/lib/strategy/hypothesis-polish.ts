@@ -1,7 +1,7 @@
 /**
- * Phase 31 M3 — Initiative Hypothesis 子牙润色
+ * Phase 31 M3 — Initiative Hypothesis 诸葛亮润色
  *
- * 子牙 (Claude Sonnet) 接收 FDE 写的粗糙 hypothesis + 上下文（Goal/Initiative/客户），
+ * 诸葛亮 (Claude Sonnet) 接收 FDE 写的粗糙 hypothesis + 上下文（Goal/Initiative/客户），
  * 输出更紧凑、可在 90 天后归因时验证的版本。
  *
  * 设计原则：
@@ -45,9 +45,9 @@ export interface PolishResult {
   cost_usd?: number
 }
 
-const SYSTEM_PROMPT = `你是"子牙"，Magic Engine 的首席产品策略官 + 战略写作助手。
+const SYSTEM_PROMPT = `你是"诸葛亮"，Magic Engine 的 Strategy Conductor — 策略调度 AI。
 
-你的工作：把 FDE 粗写的 Initiative hypothesis 润色成 90 天后可归因验证的紧凑表达。
+本次任务：把 FDE 粗写的 Initiative hypothesis 润色成 90 天后可归因验证的紧凑表达。
 
 绝对原则（按重要性排序）：
 1. **不增加新信息**：禁止凭训练数据猜竞品现状、行业数据、市场趋势。FDE 没说的不能编。

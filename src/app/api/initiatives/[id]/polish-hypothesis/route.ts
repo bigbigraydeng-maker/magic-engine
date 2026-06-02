@@ -2,7 +2,7 @@
  * POST /api/initiatives/[id]/polish-hypothesis
  *
  * Body: { rawHypothesis: string }
- *   → 子牙 (Claude Sonnet) 润色，返回 { polished: string, cost_usd: number }
+ *   → 诸葛亮 (Claude Sonnet) 润色，返回 { polished: string, cost_usd: number }
  *
  * 仅返回润色结果，不直接落库。FDE 可以选择采纳后再 PATCH 该 initiative。
  */
