@@ -496,13 +496,12 @@ document.addEventListener('DOMContentLoaded', () => {
     mobileNav.className = 'nav-mobile';
     mobileNav.setAttribute('aria-label', 'Mobile navigation');
     mobileNav.innerHTML = `
-      <a href="/discover" data-en="Free Discovery" data-zh="免费探查">Free Discovery</a>
-      <a href="/features"  data-en="Features"       data-zh="功能">Features</a>
+      <a href="/discover"  data-en="Free Discovery" data-zh="免费探查">Free Discovery</a>
+      <a href="/geo"       data-en="GEO"             data-zh="GEO">GEO</a>
+      <a href="/training"  data-en="Training"        data-zh="培训">Training</a>
+      <a href="/ads"       data-en="Ads"             data-zh="广告">Ads</a>
       <a href="/about"     data-en="About"           data-zh="关于">About</a>
       <div class="nav-mobile-divider"></div>
-      <a href="https://app.magicengine.com.au/portal/register"
-         class="nav-mobile-register"
-         data-en="Sign up free" data-zh="免费注册">Sign up free</a>
       <a href="https://app.magicengine.com.au/portal/login"
          class="nav-mobile-portal"
          data-en="Client portal" data-zh="客户入口">Client portal</a>
