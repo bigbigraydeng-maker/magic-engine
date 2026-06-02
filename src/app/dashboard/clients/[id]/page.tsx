@@ -13,6 +13,7 @@ import type { ClientDiscoveryRow } from '@/lib/zhangqian/types';
 import { ClientDataTab } from './_components/ClientDataTab';
 import { LocaleConfirmBanner } from './_components/LocaleConfirmBanner';
 import { BriefGateBanner } from '@/components/brief/BriefGateBanner';
+import { GoalBanner } from './_components/GoalBanner';
 
 
 interface Client {
@@ -457,6 +458,9 @@ export default function ClientDetailPage() {
     <div className="min-h-screen space-y-5 bg-[#f6f7f2] px-4 py-5 md:px-6">
       {/* Locale confirmation banner — shown until client confirms */}
       <LocaleConfirmBanner clientId={clientId} />
+
+      {/* Phase 31 Beta: Active Goal banner */}
+      <GoalBanner clientId={clientId} />
 
       {/* Page header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
