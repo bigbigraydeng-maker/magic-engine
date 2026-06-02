@@ -23,7 +23,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { GoalRow, GoalVerdict } from '@/types/strategy'
+import type { GoalRow, GoalVerdict, TargetDirection } from '@/types/strategy'
 
 // ─── Verdict computation ─────────────────────────────────────────────────────
 
@@ -31,6 +31,8 @@ export interface ComputeVerdictInput {
   baseline_value: number
   target_value: number
   current_value: number | null
+  /** Phase 32: 'decrease' for inventory clearance / churn reduction. Defaults to 'increase'. */
+  target_direction?: TargetDirection
 }
 
 export interface ComputeVerdictResult {
@@ -41,7 +43,7 @@ export interface ComputeVerdictResult {
 }
 
 export function computeGoalVerdict(input: ComputeVerdictInput): ComputeVerdictResult {
-  const { baseline_value, target_value, current_value } = input
+  const { baseline_value, target_value, current_value, target_direction = 'increase' } = input
 
   if (current_value == null) {
     return {
@@ -63,7 +65,14 @@ export function computeGoalVerdict(input: ComputeVerdictInput): ComputeVerdictRe
     }
   }
 
-  const progress = (current_value - baseline_value) / (target_value - baseline_value)
+  // Phase 32: direction-aware progress.
+  // The standard formula (current - baseline) / (target - baseline) is mathematically
+  // direction-agnostic — when target < baseline (decrease), both numerator and denominator
+  // flip sign, so progress is still 0→1 as we approach target. We make this explicit
+  // for code clarity and to support future direction-specific logic.
+  const progress = target_direction === 'decrease'
+    ? (baseline_value - current_value) / (baseline_value - target_value)
+    : (current_value - baseline_value) / (target_value - baseline_value)
   const progress_pct = Math.round(progress * 1000) / 10  // one decimal
 
   // Confidence scales with how far we are from the threshold (more conviction
@@ -81,14 +90,15 @@ export function computeGoalVerdict(input: ComputeVerdictInput): ComputeVerdictRe
     verdict = 'reversed'
     confidence = Math.min(0.95, 0.5 + (0.50 - progress) * 0.5)
   } else {
-    // No movement or moved backward
+    // No movement or moved in wrong direction
     verdict = 'reversed'
     confidence = 0.85
   }
 
   confidence = Math.round(confidence * 100) / 100
 
-  const summary_line = `Progress ${progress_pct}% (${current_value} vs target ${target_value}, baseline ${baseline_value})`
+  const directionLabel = target_direction === 'decrease' ? ' (decrease)' : ''
+  const summary_line = `Progress ${progress_pct}%${directionLabel} (${current_value} vs target ${target_value}, baseline ${baseline_value})`
 
   return { verdict, progress_pct, confidence, summary_line }
 }
@@ -123,6 +133,7 @@ export async function judgeGoalAndArchive(
     baseline_value: goal.baseline_value,
     target_value: goal.target_value,
     current_value,
+    target_direction: goal.target_direction,  // P32: support decrease
   })
 
   const fullSummary = extra_summary

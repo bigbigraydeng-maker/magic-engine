@@ -50,6 +50,7 @@ export async function POST(
     baseline_value: goal.baseline_value,
     target_value: goal.target_value,
     current_value: body.current_value,
+    target_direction: goal.target_direction,  // P32: support decrease
   })
 
   return NextResponse.json({

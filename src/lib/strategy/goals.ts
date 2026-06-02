@@ -12,7 +12,11 @@ import type {
 } from '@/types/strategy'
 
 /**
- * Get the currently active goal for a client, if any.
+ * Get the **most-recently-activated** Goal for a client (singular focus view).
+ *
+ * Phase 32: multiple active Goals may exist. This helper returns the newest one
+ * (by created_at desc) for backward compatibility with the single-banner view.
+ * Use `listActiveGoals` when you need all of them.
  *
  * "[Migration] Unassigned Backlog" placeholders are excluded — they're
  * draft-status containers for legacy actions, not real goals.
@@ -26,6 +30,8 @@ export async function getActiveGoal(
     .select('*')
     .eq('client_id', clientId)
     .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1)
     .maybeSingle()
 
   if (error) {
@@ -33,6 +39,28 @@ export async function getActiveGoal(
     return null
   }
   return data as GoalRow | null
+}
+
+/**
+ * Phase 32: list ALL active Goals for a client (multi-Goal support).
+ * Ordered newest first. Use for the multi-Goal banner / overview.
+ */
+export async function listActiveGoals(
+  supabase: SupabaseClient,
+  clientId: string,
+): Promise<GoalRow[]> {
+  const { data, error } = await supabase
+    .from('goals')
+    .select('*')
+    .eq('client_id', clientId)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('[strategy/goals] listActiveGoals error', error)
+    return []
+  }
+  return (data ?? []) as GoalRow[]
 }
 
 /**
@@ -123,8 +151,16 @@ export async function createGoal(
     return { ok: false, error: 'target_value must differ from baseline_value' }
   }
 
-  if (input.intent === 'awareness' && !input.awareness_subtype) {
-    return { ok: false, error: 'awareness_subtype is required for awareness goals' }
+  // Phase 32: awareness_subtype is now a special case of sub_type — accept either.
+  const awarenessSubtype = input.awareness_subtype
+    ?? (input.intent === 'awareness'
+      && input.sub_type
+      && ['new_market', 'event_campaign', 'geographic_expansion', 'reputation_recovery'].includes(input.sub_type)
+      ? input.sub_type as 'new_market' | 'event_campaign' | 'geographic_expansion' | 'reputation_recovery'
+      : null)
+
+  if (input.intent === 'awareness' && !awarenessSubtype && !input.sub_type) {
+    return { ok: false, error: 'sub_type (or awareness_subtype) is required for awareness goals' }
   }
 
   // ── Insert ────────────────────────────────────────────────────────────
@@ -133,13 +169,15 @@ export async function createGoal(
     .insert({
       client_id: clientId,
       intent: input.intent,
-      awareness_subtype: input.awareness_subtype ?? null,
+      sub_type: input.sub_type ?? awarenessSubtype ?? null,  // P32
+      awareness_subtype: awarenessSubtype ?? null,
       title: input.title.trim(),
       primary_metric_key: input.primary_metric_key,
       primary_metric_label: input.primary_metric_label,
       primary_metric_unit: input.primary_metric_unit ?? null,
       baseline_value: input.baseline_value,
       target_value: input.target_value,
+      target_direction: input.target_direction ?? 'increase',  // P32
       supporting_metrics: input.supporting_metrics ?? [],
       period_start: input.period_start,
       period_end: input.period_end,
@@ -161,8 +199,8 @@ export async function createGoal(
 
 /**
  * Activate a draft Goal — moves status to 'active'.
- * The DB unique index `uniq_one_active_goal_per_client` enforces:
- *   only one active goal per client.
+ * Phase 32: 1-active-Goal restriction removed. Multiple active Goals allowed
+ * per client (e.g. CTS 4 团 + Oztop 清仓 + 月营收同时跑).
  */
 export async function activateGoal(
   supabase: SupabaseClient,
@@ -172,15 +210,6 @@ export async function activateGoal(
   if (!goal) return { ok: false, error: 'Goal not found' }
   if (goal.status !== 'draft') {
     return { ok: false, error: `Cannot activate goal in status '${goal.status}'` }
-  }
-
-  // Check no other active goal exists for this client
-  const active = await getActiveGoal(supabase, goal.client_id)
-  if (active && active.id !== goalId) {
-    return {
-      ok: false,
-      error: `Client already has an active goal: "${active.title}". Archive it first.`,
-    }
   }
 
   const { error } = await supabase

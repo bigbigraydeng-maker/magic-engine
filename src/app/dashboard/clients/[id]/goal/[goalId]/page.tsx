@@ -183,31 +183,48 @@ export default function GoalDetailPage() {
           </div>
         </div>
 
-        {/* Primary metric card */}
+        {/* Primary metric card (P32: direction-aware) */}
         <div className="rounded-xl border border-black/10 bg-white p-6 shadow-sm">
-          <div className="text-xs font-black uppercase tracking-wide text-me-charcoal/45">Primary Metric</div>
+          <div className="flex items-center gap-2">
+            <div className="text-xs font-black uppercase tracking-wide text-me-charcoal/45">Primary Metric</div>
+            {goal.target_direction === 'decrease' && (
+              <span className="rounded-full bg-status-sched/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-status-sched">
+                ↓ Decrease (清仓型)
+              </span>
+            )}
+          </div>
           <div className="mt-2 font-display text-2xl font-bold text-me-charcoal">
             {goal.primary_metric_label}
           </div>
           <div className="mt-3 grid grid-cols-3 gap-4">
             <div>
-              <div className="text-[11px] font-black uppercase text-me-charcoal/45">Baseline</div>
+              <div className="text-[11px] font-black uppercase text-me-charcoal/45">
+                {goal.target_direction === 'decrease' ? '起始库存' : 'Baseline'}
+              </div>
               <div className="text-lg font-bold text-me-charcoal/75">
                 {goal.baseline_value.toLocaleString()}
               </div>
               <div className="text-[10px] font-semibold text-me-charcoal/45">{goal.primary_metric_unit}</div>
             </div>
             <div>
-              <div className="text-[11px] font-black uppercase text-me-charcoal/45">Target</div>
+              <div className="text-[11px] font-black uppercase text-me-charcoal/45">
+                {goal.target_direction === 'decrease' ? '清空目标' : 'Target'}
+              </div>
               <div className="text-lg font-bold text-status-track">
                 {goal.target_value.toLocaleString()}
               </div>
               <div className="text-[10px] font-semibold text-me-charcoal/45">{goal.primary_metric_unit}</div>
             </div>
             <div>
-              <div className="text-[11px] font-black uppercase text-me-charcoal/45">Growth</div>
+              <div className="text-[11px] font-black uppercase text-me-charcoal/45">
+                {goal.target_direction === 'decrease' ? 'Reduction' : 'Growth'}
+              </div>
               <div className="text-lg font-bold text-me-ochre">
-                {(((goal.target_value / goal.baseline_value) - 1) * 100).toFixed(0)}%
+                {goal.baseline_value !== 0
+                  ? goal.target_direction === 'decrease'
+                    ? `${((1 - goal.target_value / goal.baseline_value) * 100).toFixed(0)}%`
+                    : `${(((goal.target_value / goal.baseline_value) - 1) * 100).toFixed(0)}%`
+                  : '—'}
               </div>
             </div>
           </div>

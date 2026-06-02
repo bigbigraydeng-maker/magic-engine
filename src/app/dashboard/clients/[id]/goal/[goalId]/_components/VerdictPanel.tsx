@@ -131,11 +131,15 @@ function VerdictModal({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
-  // Live preview of verdict
+  // Live preview of verdict (Phase 32: direction-aware)
   const numericCurrent = currentValue ? parseFloat(currentValue) : null
+  const isDecrease = goal.target_direction === 'decrease'
   const preview = numericCurrent != null
     ? (() => {
-        const progress = (numericCurrent - goal.baseline_value) / (goal.target_value - goal.baseline_value)
+        // Direction-aware progress: for decrease, (baseline - current) / (baseline - target)
+        const progress = isDecrease
+          ? (goal.baseline_value - numericCurrent) / (goal.baseline_value - goal.target_value)
+          : (numericCurrent - goal.baseline_value) / (goal.target_value - goal.baseline_value)
         const pct = Math.round(progress * 1000) / 10
         let verdict: GoalVerdict = 'inconclusive'
         if (progress >= 0.80) verdict = 'confirmed'
@@ -196,7 +200,12 @@ function VerdictModal({
             <span className="text-xs font-semibold text-me-charcoal/55">{goal.primary_metric_unit}</span>
           </div>
           <p className="text-[11px] font-semibold text-me-charcoal/55">
-            Baseline {goal.baseline_value.toLocaleString()} → Target {goal.target_value.toLocaleString()}
+            Baseline {goal.baseline_value.toLocaleString()} {isDecrease ? '↓' : '→'} Target {goal.target_value.toLocaleString()}
+            {isDecrease && (
+              <span className="ml-2 rounded-full bg-status-sched/15 px-1.5 py-0.5 text-[9px] font-bold uppercase text-status-sched">
+                Decrease
+              </span>
+            )}
           </p>
         </div>
 

@@ -1,23 +1,30 @@
 'use client'
 
 /**
- * Phase 31 M2 — Goal 设定 4 步向导
+ * Phase 31 M2 + Phase 32 — Goal 设定 4 步向导
  * URL: /dashboard/clients/[id]/goal/new
  *
- * Step 1: Intent (acquisition / sales / awareness)
- * Step 2: Primary metric (按 intent 推荐)
+ * Step 1: Intent (acquisition / sales / awareness) + Sub-type (P32) + Title
+ * Step 2: Primary metric (按 intent + sub_type 推荐) + baseline/target
  * Step 3: Period + Budget + FDE reasoning
  * Step 4: Confirm + Save as draft
+ *
+ * Phase 32 新增：
+ *   - sub_type 按 intent 分流（清仓 / 团报名 / 月营收持续 等）
+ *   - target_direction（清仓型自动 decrease）
+ *   - 主指标按 sub_type 推荐
  *
  * Saved as draft only — FDE 后续在 Goal 看板点 "Activate" 才正式启动。
  */
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import {
-  PRIMARY_METRIC_CATALOG,
+  GOAL_SUBTYPES_BY_INTENT,
+  getRecommendedMetrics,
   type GoalIntent,
-  type AwarenessSubtype,
+  type GoalSubType,
+  type TargetDirection,
   type MetricCandidate,
   type CreateGoalInput,
 } from '@/types/strategy'
@@ -33,16 +40,9 @@ const INTENT_OPTIONS: Array<{
   { value: 'acquisition', emoji: '🎯', title: '获客 Acquisition',
     description: '老板想要更多线索 / 询盘 / 试用注册' },
   { value: 'sales',       emoji: '💰', title: '销售 Sales',
-    description: '老板想要更多营收 / 订单 / 客单价' },
+    description: '老板想要更多营收 / 订单 / 清仓 / 团报名' },
   { value: 'awareness',   emoji: '📢', title: '品牌曝光 Awareness',
     description: '老板想要更多市场认知（新进入 / 活动推广）' },
-]
-
-const AWARENESS_SUBTYPES: Array<{ value: AwarenessSubtype; label: string }> = [
-  { value: 'new_market',           label: '新品牌进入（如中国车企进 NZ）' },
-  { value: 'event_campaign',       label: '活动推广（如商品博览会）' },
-  { value: 'geographic_expansion', label: '地理扩张（如 Christchurch 拓 Auckland）' },
-  { value: 'reputation_recovery',  label: '口碑修复（占位）' },
 ]
 
 // ─── Page ────────────────────────────────────────────────────────────────────
@@ -58,7 +58,8 @@ export default function NewGoalPage() {
 
   // ── State for all steps ────────────────────────────────────────────────────
   const [intent, setIntent] = useState<GoalIntent | null>(null)
-  const [awarenessSubtype, setAwarenessSubtype] = useState<AwarenessSubtype | null>(null)
+  const [subType, setSubType] = useState<GoalSubType | null>(null)
+  const [targetDirection, setTargetDirection] = useState<TargetDirection>('increase')
   const [title, setTitle] = useState('')
 
   const [selectedMetric, setSelectedMetric] = useState<MetricCandidate | null>(null)
@@ -75,31 +76,59 @@ export default function NewGoalPage() {
   const [budgetCurrency, setBudgetCurrency] = useState<'AUD' | 'NZD'>('NZD')
   const [fdeReasoning, setFdeReasoning] = useState('')
 
-  // ── Filter metrics by chosen intent ────────────────────────────────────────
-  const recommendedMetrics = intent
-    ? PRIMARY_METRIC_CATALOG.filter(m => m.recommended_for.includes(intent))
-    : []
+  // ── Available sub-types for the chosen intent ─────────────────────────────
+  const availableSubTypes = intent ? GOAL_SUBTYPES_BY_INTENT[intent] : []
+  const selectedSubTypeDef = subType
+    ? availableSubTypes.find(s => s.value === subType) ?? null
+    : null
+
+  // ── Filter metrics by intent + sub_type ────────────────────────────────────
+  const recommendedMetrics = useMemo(
+    () => intent ? getRecommendedMetrics(intent, subType) : [],
+    [intent, subType],
+  )
+
+  // ── When sub_type changes, set sensible defaults ───────────────────────────
+  function handleSubTypeChange(newSubType: GoalSubType) {
+    setSubType(newSubType)
+    const def = availableSubTypes.find(s => s.value === newSubType)
+    if (def) {
+      setTargetDirection(def.default_direction)
+    }
+    // Clear metric — will be re-chosen from filtered list
+    setSelectedMetric(null)
+    setBaselineValue('')
+    setTargetValue('')
+  }
+
+  function handleIntentChange(newIntent: GoalIntent) {
+    setIntent(newIntent)
+    setSubType(null)
+    setTargetDirection('increase')
+    setSelectedMetric(null)
+  }
 
   // ── Validation per step ────────────────────────────────────────────────────
-  const canProceed1 = !!intent && !!title.trim() && (intent !== 'awareness' || !!awarenessSubtype)
+  const canProceed1 = !!intent && !!subType && !!title.trim()
   const canProceed2 = !!selectedMetric && baselineValue !== '' && targetValue !== '' && baselineValue !== targetValue
   const canProceed3 = !!periodStart && !!periodEnd && new Date(periodEnd) > new Date(periodStart)
 
   // ── Submit handler ─────────────────────────────────────────────────────────
   async function handleSubmit() {
-    if (!intent || !selectedMetric) return
+    if (!intent || !subType || !selectedMetric) return
     setSaving(true)
     setError('')
 
     const payload: CreateGoalInput = {
       intent,
-      awareness_subtype: intent === 'awareness' ? awarenessSubtype ?? undefined : undefined,
+      sub_type: subType,
       title: title.trim(),
       primary_metric_key: selectedMetric.key,
       primary_metric_label: selectedMetric.label_zh,
       primary_metric_unit: selectedMetric.unit,
       baseline_value: parseFloat(baselineValue),
       target_value: parseFloat(targetValue),
+      target_direction: targetDirection,
       period_start: periodStart,
       period_end: periodEnd,
       budget_amount: budgetAmount ? parseFloat(budgetAmount) : undefined,
@@ -139,7 +168,7 @@ export default function NewGoalPage() {
               </span>
             </h1>
             <p className="mt-1 text-sm font-semibold text-me-charcoal/55">
-              Phase 31 · 4-step wizard to set a 90-day client goal.
+              Phase 31 + 32 · 4-step wizard. 多 Goal 并行 · 支持清仓/团报名/月营收持续等场景。
             </p>
           </div>
         </div>
@@ -156,7 +185,7 @@ export default function NewGoalPage() {
                 {step > s ? '✓' : s}
               </span>
               <span className={step === s ? 'font-black text-me-charcoal' : 'font-semibold text-me-charcoal/45'}>
-                {['Intent', 'Metric', 'Period & Budget', 'Confirm'][i]}
+                {['Intent + Type', 'Metric', 'Period & Budget', 'Confirm'][i]}
               </span>
               {i < 3 && <span className="text-me-charcoal/25">›</span>}
             </div>
@@ -169,62 +198,93 @@ export default function NewGoalPage() {
           </div>
         )}
 
-        {/* Step 1: Intent */}
+        {/* Step 1: Intent + Sub-type + Title */}
         {step === 1 && (
           <div className="space-y-6 rounded-xl border border-black/10 bg-white p-6 shadow-sm">
             <div>
-              <h2 className="font-display text-base font-bold text-me-charcoal">Step 1 · 选择客户意图</h2>
-              <p className="mt-1 text-xs font-semibold text-me-charcoal/55">老板找我们的根本目的是什么？</p>
+              <h2 className="font-display text-base font-bold text-me-charcoal">Step 1 · 客户意图 + Goal 类型</h2>
+              <p className="mt-1 text-xs font-semibold text-me-charcoal/55">先选大方向（intent），再选具体类型（sub-type）。</p>
             </div>
 
-            <div className="grid grid-cols-1 gap-3">
-              {INTENT_OPTIONS.map(opt => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setIntent(opt.value)}
-                  className={`rounded-lg border px-4 py-3 text-left transition-all ${
-                    intent === opt.value
-                      ? 'border-me-ochre bg-me-ochre/10'
-                      : 'border-black/10 hover:border-me-ochre/40 hover:bg-me-ivory'
-                  }`}
-                >
-                  <div className="flex items-start gap-3">
-                    <span className="text-2xl">{opt.emoji}</span>
-                    <div>
-                      <div className="font-black text-me-charcoal">{opt.title}</div>
-                      <div className="mt-0.5 text-xs font-semibold text-me-charcoal/55">{opt.description}</div>
+            {/* Intent selection */}
+            <div className="space-y-2">
+              <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">1.1 选择 Intent</label>
+              <div className="grid grid-cols-1 gap-3">
+                {INTENT_OPTIONS.map(opt => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => handleIntentChange(opt.value)}
+                    className={`rounded-lg border px-4 py-3 text-left transition-all ${
+                      intent === opt.value
+                        ? 'border-me-ochre bg-me-ochre/10'
+                        : 'border-black/10 hover:border-me-ochre/40 hover:bg-me-ivory'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="text-2xl">{opt.emoji}</span>
+                      <div>
+                        <div className="font-black text-me-charcoal">{opt.title}</div>
+                        <div className="mt-0.5 text-xs font-semibold text-me-charcoal/55">{opt.description}</div>
+                      </div>
                     </div>
-                  </div>
-                </button>
-              ))}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {intent === 'awareness' && (
+            {/* Sub-type selection (only after intent chosen) */}
+            {intent && (
               <div className="space-y-2 border-t border-black/10 pt-4">
-                <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">Awareness 子类型</label>
-                <select
-                  value={awarenessSubtype ?? ''}
-                  onChange={e => setAwarenessSubtype(e.target.value as AwarenessSubtype)}
-                  className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal focus:border-me-ochre focus:outline-none"
-                >
-                  <option value="">— 选择子类型 —</option>
-                  {AWARENESS_SUBTYPES.map(s => (
-                    <option key={s.value} value={s.value}>{s.label}</option>
+                <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">
+                  1.2 选择 Sub-type {availableSubTypes.length > 0 && `(${availableSubTypes.length} 个候选)`}
+                </label>
+                <div className="grid grid-cols-1 gap-2">
+                  {availableSubTypes.map(s => (
+                    <button
+                      key={s.value}
+                      type="button"
+                      onClick={() => handleSubTypeChange(s.value)}
+                      className={`rounded-lg border px-3 py-2.5 text-left transition-all ${
+                        subType === s.value
+                          ? 'border-me-ochre bg-me-ochre/10'
+                          : 'border-black/10 hover:border-me-ochre/40 hover:bg-me-ivory'
+                      }`}
+                    >
+                      <div className="flex items-start gap-2.5">
+                        <span className="text-lg">{s.emoji}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-black text-me-charcoal">{s.label_zh}</span>
+                            <span className="text-[10px] font-semibold text-me-charcoal/45">{s.label_en}</span>
+                            {s.default_direction === 'decrease' && (
+                              <span className="rounded-full bg-status-sched/15 px-1.5 py-0.5 text-[9px] font-bold uppercase text-status-sched">
+                                ↓ Decrease
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-0.5 text-xs font-semibold text-me-charcoal/55">{s.description}</div>
+                          <div className="mt-1 text-[11px] font-semibold italic text-me-charcoal/45">e.g. {s.example}</div>
+                        </div>
+                      </div>
+                    </button>
                   ))}
-                </select>
+                </div>
               </div>
             )}
 
-            <div className="space-y-2">
-              <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">Goal 标题 (FDE 起名)</label>
-              <input
-                value={title}
-                onChange={e => setTitle(e.target.value)}
-                placeholder="e.g. CTS 2026 Q3 Sales +50%"
-                className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
-              />
-            </div>
+            {/* Title (only after sub_type chosen) */}
+            {subType && (
+              <div className="space-y-2 border-t border-black/10 pt-4">
+                <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">1.3 Goal 标题（FDE 起名）</label>
+                <input
+                  value={title}
+                  onChange={e => setTitle(e.target.value)}
+                  placeholder={selectedSubTypeDef?.example ?? 'e.g. CTS 2026 春节中国团'}
+                  className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
+                />
+              </div>
+            )}
           </div>
         )}
 
@@ -233,7 +293,12 @@ export default function NewGoalPage() {
           <div className="space-y-6 rounded-xl border border-black/10 bg-white p-6 shadow-sm">
             <div>
               <h2 className="font-display text-base font-bold text-me-charcoal">Step 2 · 选择主指标</h2>
-              <p className="mt-1 text-xs font-semibold text-me-charcoal/55">这个数字决定 90 天后 Goal 是否达成。</p>
+              <p className="mt-1 text-xs font-semibold text-me-charcoal/55">
+                这个数字决定 Goal 是否达成。
+                {selectedSubTypeDef && (
+                  <> 已按 <strong className="text-me-ochre">{selectedSubTypeDef.label_zh}</strong> 推荐 {recommendedMetrics.length} 个指标。</>
+                )}
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -241,7 +306,11 @@ export default function NewGoalPage() {
                 <button
                   key={m.key}
                   type="button"
-                  onClick={() => setSelectedMetric(m)}
+                  onClick={() => {
+                    setSelectedMetric(m)
+                    // Auto-apply metric's default direction if exists
+                    if (m.default_direction) setTargetDirection(m.default_direction)
+                  }}
                   className={`w-full rounded-lg border px-4 py-3 text-left transition-all ${
                     selectedMetric?.key === m.key
                       ? 'border-me-ochre bg-me-ochre/10'
@@ -250,7 +319,12 @@ export default function NewGoalPage() {
                 >
                   <div className="flex items-center justify-between">
                     <div>
-                      <div className="font-black text-me-charcoal">{m.label_zh}</div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-black text-me-charcoal">{m.label_zh}</span>
+                        {m.default_direction === 'decrease' && (
+                          <span className="rounded-full bg-status-sched/15 px-1.5 py-0.5 text-[9px] font-bold uppercase text-status-sched">↓ Decrease</span>
+                        )}
+                      </div>
                       <div className="mt-0.5 text-xs font-semibold text-me-charcoal/55">{m.label_en} · {m.unit}</div>
                     </div>
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
@@ -267,32 +341,63 @@ export default function NewGoalPage() {
             </div>
 
             {selectedMetric && (
-              <div className="grid grid-cols-2 gap-4 border-t border-black/10 pt-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">Baseline (当前)</label>
-                  <input
-                    type="number"
-                    value={baselineValue}
-                    onChange={e => setBaselineValue(e.target.value)}
-                    placeholder="e.g. 80000"
-                    className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
-                  />
-                  <p className="text-[11px] font-semibold text-me-charcoal/45">单位: {selectedMetric.unit}</p>
+              <div className="space-y-4 border-t border-black/10 pt-4">
+                {/* Direction toggle (auto-set by sub_type / metric, but user can override) */}
+                <div className="rounded-lg border border-black/10 bg-me-ivory p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-black text-me-charcoal">
+                        指标方向：{targetDirection === 'increase' ? '↑ Increase（向上增长）' : '↓ Decrease（向下减少 — 清仓型）'}
+                      </div>
+                      <div className="mt-0.5 text-[11px] font-semibold text-me-charcoal/55">
+                        {targetDirection === 'increase'
+                          ? 'baseline 是起点，target 是目标（target > baseline）'
+                          : 'baseline 是起始库存/比例，target 是清空目标（target < baseline）'}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setTargetDirection(targetDirection === 'increase' ? 'decrease' : 'increase')}
+                      className="rounded-lg border border-black/15 bg-white px-3 py-1.5 text-xs font-black text-me-charcoal transition-colors hover:border-me-ochre/40 hover:bg-me-ivory"
+                    >
+                      切换方向
+                    </button>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">Target (90 天后)</label>
-                  <input
-                    type="number"
-                    value={targetValue}
-                    onChange={e => setTargetValue(e.target.value)}
-                    placeholder="e.g. 120000"
-                    className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
-                  />
-                  {baselineValue && targetValue && (
-                    <p className="text-[11px] font-bold text-status-track">
-                      {((parseFloat(targetValue) / parseFloat(baselineValue) - 1) * 100).toFixed(0)}% growth
-                    </p>
-                  )}
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">
+                      Baseline ({targetDirection === 'decrease' ? '起始库存/起点' : '当前'})
+                    </label>
+                    <input
+                      type="number"
+                      value={baselineValue}
+                      onChange={e => setBaselineValue(e.target.value)}
+                      placeholder={targetDirection === 'decrease' ? 'e.g. 500' : 'e.g. 80000'}
+                      className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
+                    />
+                    <p className="text-[11px] font-semibold text-me-charcoal/45">单位: {selectedMetric.unit}</p>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">
+                      Target ({targetDirection === 'decrease' ? '清空/降至目标' : '90 天后'})
+                    </label>
+                    <input
+                      type="number"
+                      value={targetValue}
+                      onChange={e => setTargetValue(e.target.value)}
+                      placeholder={targetDirection === 'decrease' ? 'e.g. 0' : 'e.g. 120000'}
+                      className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
+                    />
+                    {baselineValue && targetValue && parseFloat(baselineValue) !== 0 && (
+                      <p className="text-[11px] font-bold text-status-track">
+                        {targetDirection === 'decrease'
+                          ? `${((1 - parseFloat(targetValue) / parseFloat(baselineValue)) * 100).toFixed(0)}% reduction`
+                          : `${((parseFloat(targetValue) / parseFloat(baselineValue) - 1) * 100).toFixed(0)}% growth`}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -304,7 +409,7 @@ export default function NewGoalPage() {
           <div className="space-y-6 rounded-xl border border-black/10 bg-white p-6 shadow-sm">
             <div>
               <h2 className="font-display text-base font-bold text-me-charcoal">Step 3 · 周期、预算、战略思考</h2>
-              <p className="mt-1 text-xs font-semibold text-me-charcoal/55">90 天为推荐周期，awareness 可以倒计时到目标日。</p>
+              <p className="mt-1 text-xs font-semibold text-me-charcoal/55">90 天为推荐周期。清仓 / 团报名型可倒计时到关键日。</p>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -360,7 +465,7 @@ export default function NewGoalPage() {
                 value={fdeReasoning}
                 onChange={e => setFdeReasoning(e.target.value)}
                 rows={4}
-                placeholder="e.g. CTS 老板今年想拿下中国春节档，主要靠老客户复购+Wendy Wu 同源词抢量..."
+                placeholder="e.g. CTS 老板今年想拿下中国春节档，主要靠老客户复购 + Wendy Wu 同源词抢量..."
                 className="w-full resize-none rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
               />
             </div>
@@ -374,11 +479,12 @@ export default function NewGoalPage() {
 
             <dl className="space-y-3 text-sm">
               <Row label="Intent" value={`${INTENT_OPTIONS.find(o => o.value === intent)?.emoji} ${INTENT_OPTIONS.find(o => o.value === intent)?.title}`} />
-              {awarenessSubtype && (
-                <Row label="Subtype" value={AWARENESS_SUBTYPES.find(s => s.value === awarenessSubtype)?.label ?? ''} />
+              {selectedSubTypeDef && (
+                <Row label="Sub-type" value={`${selectedSubTypeDef.emoji} ${selectedSubTypeDef.label_zh} (${selectedSubTypeDef.label_en})`} />
               )}
               <Row label="Title" value={title} />
               <Row label="Primary Metric" value={`${selectedMetric?.label_zh} (${selectedMetric?.unit})`} />
+              <Row label="Direction" value={targetDirection === 'increase' ? '↑ Increase' : '↓ Decrease (清仓型)'} />
               <Row label="Baseline → Target" value={`${baselineValue} → ${targetValue}`} highlight />
               <Row label="Period" value={`${periodStart} → ${periodEnd}`} />
               {budgetAmount && <Row label="Budget" value={`${budgetCurrency} ${parseFloat(budgetAmount).toLocaleString()}`} />}
@@ -386,7 +492,9 @@ export default function NewGoalPage() {
             </dl>
 
             <p className="border-t border-black/10 pt-4 text-xs font-semibold text-me-charcoal/55">
-              Goal 会先以 <strong className="text-me-charcoal">draft</strong> 状态保存。下一步在 Goal 看板配 Initiative，准备好后再 <strong className="text-me-charcoal">Activate</strong>。
+              Goal 会先以 <strong className="text-me-charcoal">draft</strong> 状态保存。下一步在 Goal 详情页配 Initiative，准备好后再 <strong className="text-me-charcoal">Activate</strong>。
+              <br />
+              <span className="text-me-ochre">Phase 32: 同客户可有多个 active Goal（CTS 4 团 / Oztop 清仓 + 月营收 并行）。</span>
             </p>
           </div>
         )}
