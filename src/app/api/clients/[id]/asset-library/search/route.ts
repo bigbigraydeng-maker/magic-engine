@@ -12,7 +12,6 @@ interface AnalyzedAsset {
   id: string
   storage_url: string | null
   original_filename: string | null
-  quality_score: number | null
   vision_metadata: VisionMetadata | null
 }
 
@@ -66,7 +65,7 @@ export async function POST(
 
     const { data, error } = await supabaseAdmin
       .from('client_assets')
-      .select('id, storage_url, original_filename, quality_score, vision_metadata')
+      .select('id, storage_url, original_filename, vision_metadata')
       .eq('client_id', params.id)
       .eq('status', 'analyzed')
       .is('archived_at', null)
@@ -90,7 +89,10 @@ export async function POST(
     const picks = await rankWithLlm(image_prompt.trim(), assets, topN)
     return NextResponse.json({ success: true, recommendations: picks })
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
+    const message =
+      err instanceof Error
+        ? err.message
+        : (err as Record<string, unknown>)?.message as string | undefined ?? 'Unknown error'
     console.error('[clients/asset-library/search POST]', err)
     return NextResponse.json({ success: false, error: message }, { status: 500 })
   }
@@ -102,7 +104,7 @@ function clampLimit(limit: number): number {
 }
 
 function scoreOf(a: AnalyzedAsset): number {
-  return a.quality_score ?? a.vision_metadata?.quality_score ?? 0
+  return a.vision_metadata?.quality_score ?? 0
 }
 
 function toRecommendation(a: AnalyzedAsset, reason: string): Recommendation {
