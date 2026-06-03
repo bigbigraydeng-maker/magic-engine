@@ -1,4 +1,5 @@
 import { getMtcBalance } from '@/lib/mtc/balance'
+import type { MtcBalanceResult } from '@/lib/mtc/types'
 import LedgerSection from './_components/LedgerSection'
 
 interface Props {
@@ -7,7 +8,12 @@ interface Props {
 
 export default async function PortalWalletPage({ params }: Props) {
   const { clientId } = params
-  const balance = await getMtcBalance(clientId)
+  let balance: MtcBalanceResult
+  try {
+    balance = await getMtcBalance(clientId)
+  } catch {
+    balance = { balance: 0, batches: [] }
+  }
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 px-4 py-8 sm:px-6">

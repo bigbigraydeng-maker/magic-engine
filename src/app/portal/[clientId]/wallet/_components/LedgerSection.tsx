@@ -1,12 +1,13 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import type { ServiceKey, MtcDirection } from '@/lib/mtc/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface LedgerRow {
   id: string
-  direction: 'debit' | 'credit'
+  direction: MtcDirection
   service_key: string | null
   mtc_amount: number
   source: string
@@ -23,7 +24,7 @@ interface LedgerResponse {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const SERVICE_LABELS: Record<string, string> = {
+const SERVICE_LABELS: Record<ServiceKey, string> = {
   blog_seo: 'SEO blog post',
   blog_dual_signal: 'Dual-signal blog',
   image_single: 'AI image',
@@ -60,7 +61,7 @@ function formatDate(iso: string): string {
 
 function serviceLabel(serviceKey: string | null): string {
   if (!serviceKey) return '—'
-  return SERVICE_LABELS[serviceKey] ?? serviceKey
+  return (SERVICE_LABELS as Record<string, string>)[serviceKey] ?? serviceKey
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -214,6 +215,7 @@ export default function LedgerSection({ clientId }: Props) {
           </p>
           <div className="flex gap-2">
             <button
+              type="button"
               onClick={() => setPage((p) => Math.max(0, p - 1))}
               disabled={page <= 0 || loading}
               className="rounded-lg border border-slate-200 px-3 py-1 text-xs text-slate-500 disabled:opacity-30"
@@ -221,6 +223,7 @@ export default function LedgerSection({ clientId }: Props) {
               ← Previous
             </button>
             <button
+              type="button"
               onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
               disabled={page >= totalPages - 1 || loading}
               className="rounded-lg border border-slate-200 px-3 py-1 text-xs text-slate-500 disabled:opacity-30"
