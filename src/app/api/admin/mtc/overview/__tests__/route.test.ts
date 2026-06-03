@@ -79,14 +79,14 @@ const STUB_PURCHASES = [
 ]
 
 /**
- * All completed purchases (no expiry filter) — used for totalRevenue.
- * Includes one additional expired purchase (amount_nzd: 200) that should
- * be counted in revenue even though it no longer provides balance.
+ * All completed purchases (no expiry filter) — used for totalRevenue + totalSoldMtc.
+ * Includes one additional expired purchase that must be counted in both revenue and
+ * totalSoldMtc even though it no longer provides balance.
  */
 const STUB_ALL_COMPLETED_PURCHASES = [
-  { amount_nzd: 500 },
-  { amount_nzd: 300 },
-  { amount_nzd: 200 }, // expired batch — must still be counted in totalRevenue
+  { amount_nzd: 500, mtc_amount: 1000 },
+  { amount_nzd: 300, mtc_amount: 600  },
+  { amount_nzd: 200, mtc_amount: 400  }, // expired batch — counted in totalRevenue + totalSoldMtc
 ]
 
 const STUB_LEDGER = [
@@ -168,11 +168,11 @@ describe('GET /api/admin/mtc/overview', () => {
     expect(json.totalRevenue).toBe(1000)
   })
 
-  it('totalSoldMtc equals sum of mtc_amount across valid purchases', async () => {
+  it('totalSoldMtc equals sum of mtc_amount across ALL completed purchases (including expired)', async () => {
     const res = await GET(makeRequest())
     const json = await res.json()
-    // 1000 + 600 = 1600
-    expect(json.totalSoldMtc).toBe(1600)
+    // 1000 + 600 + 400 (expired) = 2000
+    expect(json.totalSoldMtc).toBe(2000)
   })
 
   it('totalConsumedMtc = totalSoldMtc - totalBalanceMtc', async () => {

@@ -72,7 +72,7 @@ export async function GET(_request: Request) {
 
   const { data: allCompletedPurchases, error: allPurchasesErr } = await supabaseAdmin
     .from('mtc_purchases')
-    .select('amount_nzd')
+    .select('amount_nzd, mtc_amount')
     .eq('status', 'completed')
 
   if (allPurchasesErr) {
@@ -120,7 +120,9 @@ export async function GET(_request: Request) {
   const totalRevenue    = (allCompletedPurchases ?? []).reduce(
     (sum, p) => sum + Number(p.amount_nzd), 0,
   )
-  const totalSoldMtc    = purchases.reduce((sum, p) => sum + p.mtc_amount, 0)
+  const totalSoldMtc    = (allCompletedPurchases ?? []).reduce(
+    (sum, p) => sum + (p.mtc_amount as number), 0,
+  )
   const totalConsumedMtc = totalSoldMtc - totalBalanceMtc
 
   // ── Per-client balance ────────────────────────────────────────────────────
