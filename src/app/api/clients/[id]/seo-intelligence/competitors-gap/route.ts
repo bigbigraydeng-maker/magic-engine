@@ -35,9 +35,10 @@ const GENERIC_DOMAIN_BLOCKLIST = new Set([
  * Returns top competitors + keyword gap (untapped keywords where competitors
  * rank but the client does not).
  *
- * Competitor selection priority:
- *   1. active master_briefs.competitor_domains (Brand Brief / Discovery — most accurate)
- *   2. DataForSEO auto-discovery, filtered by GENERIC_DOMAIN_BLOCKLIST
+ * Competitor selection priority (highest → lowest):
+ *   1. clients.competitor_domains (FDE hand-picked — highest weight)
+ *   2. active master_briefs.competitor_domains (Brand Brief / Discovery)
+ *   3. DataForSEO auto-discovery, filtered by GENERIC_DOMAIN_BLOCKLIST
  *
  * Response shape:
  * {
@@ -60,7 +61,7 @@ export async function GET(
 
   const { data: client, error: clientError } = await supabaseAdmin
     .from('clients')
-    .select('id, domain, semrush_db, industry')
+    .select('id, domain, semrush_db, industry, competitor_domains')
     .eq('id', clientId)
     .single()
 
@@ -84,8 +85,11 @@ export async function GET(
     industry: (client.industry as string | null) ?? null,
     seedTerms: extractBriefSeedTerms(activeBrief as Record<string, unknown> | null),
   })
-  const knownDomains: string[] = ((activeBrief?.competitor_domains as string[] | null) ?? [])
-    .map(d => d.replace(/^https?:\/\//, '').replace(/\/$/, '').toLowerCase())
+
+  // Three-tier competitor source (highest → lowest priority)
+  const normalizeDomain = (d: string) => d.replace(/^https?:\/\//, '').replace(/\/$/, '').toLowerCase()
+  const fdeDomains: string[] = ((client.competitor_domains as string[] | null) ?? []).map(normalizeDomain)
+  const briefDomains: string[] = ((activeBrief?.competitor_domains as string[] | null) ?? []).map(normalizeDomain)
 
   try {
     // ── Step 1: Discover competitors via DataForSEO (fetch more so we have
@@ -95,31 +99,32 @@ export async function GET(
     const serpMap        = new Map(filteredSerp.map(c => [c.domain, c]))
 
     // ── Step 2: Build final competitor list
-    //   Priority A — active master_briefs.competitor_domains when available
-    //   Priority B — fall back to filtered DataForSEO results
-    let competitors: LabsCompetitor[]
+    //   Priority 1 — clients.competitor_domains (FDE hand-picked, highest weight)
+    //   Priority 2 — master_briefs.competitor_domains (Brand Brief / Discovery)
+    //   Priority 3 — DataForSEO auto-discovery (lowest weight)
+    const seenDomains = new Set<string>()
+    const pickedCompetitors: LabsCompetitor[] = []
 
-    if (knownDomains.length > 0) {
-      // Map known domains to DataForSEO stats where available, stub otherwise
-      const matched = knownDomains.slice(0, 5).map(domain =>
-        serpMap.get(domain) ?? {
+    const addDomains = (domains: string[], maxTotal: number) => {
+      for (const domain of domains) {
+        if (pickedCompetitors.length >= maxTotal) break
+        if (seenDomains.has(domain)) continue
+        seenDomains.add(domain)
+        pickedCompetitors.push(serpMap.get(domain) ?? {
           domain,
           avg_position:    null,
           intersections:   0,
           monthly_traffic: null,
           keyword_count:   null,
-        }
-      )
-      // Pad with extra filtered DataForSEO results if fewer than 5 known competitors
-      const knownSet = new Set(knownDomains)
-      const extras   = filteredSerp
-        .filter(c => !knownSet.has(c.domain))
-        .slice(0, Math.max(0, 5 - matched.length))
-      competitors = [...matched, ...extras]
-    } else {
-      // No known competitors — use filtered DataForSEO auto-discovery
-      competitors = filteredSerp.slice(0, 5)
+        })
+      }
     }
+
+    addDomains(fdeDomains, 5)
+    addDomains(briefDomains, 5)
+    addDomains(filteredSerp.map(c => c.domain), 5)
+
+    const competitors = pickedCompetitors
 
     // ── Step 3: Keyword gap using top 3 competitor domains
     const top3       = competitors.slice(0, 3).map(c => c.domain)

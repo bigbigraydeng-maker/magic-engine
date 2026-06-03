@@ -39,6 +39,8 @@ export interface LabsKeyword {
   intent: string
   /** Organic rank position when returned by ranked-keywords endpoints */
   position?: number | null
+  /** Competitor domain this gap keyword was found from (gap analysis only) */
+  from_competitor?: string | null
 }
 
 export interface DomainTrendPoint {
@@ -516,9 +518,31 @@ export async function getKeywordsGap(
     }
   }
 
-  return Array.from(byKeyword.values())
+  const sorted = Array.from(byKeyword.values())
     .sort((a, b) => (b.search_volume ?? 0) - (a.search_volume ?? 0))
     .slice(0, limit)
+
+  // Batch-enrich KD: domain_intersection doesn't return keyword_difficulty,
+  // so we call bulkKeywordVolume for keywords missing KD.
+  const missingKd = sorted.filter(kw => kw.keyword_difficulty == null)
+  if (missingKd.length > 0) {
+    try {
+      const enriched = await bulkKeywordVolume(
+        missingKd.map(kw => kw.keyword),
+        locationCode,
+      )
+      const kdMap = new Map(enriched.map(e => [e.keyword, e.keyword_difficulty]))
+      for (const kw of sorted) {
+        if (kw.keyword_difficulty == null) {
+          kw.keyword_difficulty = kdMap.get(kw.keyword) ?? null
+        }
+      }
+    } catch {
+      // KD enrichment is best-effort; gap results are still useful without it
+    }
+  }
+
+  return sorted
 }
 
 /**
@@ -589,6 +613,7 @@ async function fetchDomainIntersectionGap(
         competition:        kd.keyword_info?.competition ?? null,
         intent:             deriveIntent(cpc),
         position:           null,
+        from_competitor:    competitorDomain,
       }
     })
 }

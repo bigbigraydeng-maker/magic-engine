@@ -19,6 +19,9 @@ const BUILDING_SUPPLIES_TERMS = [
   'floor', 'flooring', 'timber', 'hardwood', 'hybrid', 'laminate', 'vinyl',
   'spc', 'decking', 'tile', 'tiles', 'cladding', 'panel', 'panels', 'supplier',
   'supplies', 'building', 'renovation',
+  'carpet', 'rug', 'rugs', 'blinds', 'blind', 'curtain', 'curtains', 'shutter',
+  'shutters', 'tapware', 'bathroom', 'kitchen', 'benchtop', 'splashback',
+  'herringbone', 'engineered', 'plank', 'underlay',
 ]
 
 interface BusinessContext {

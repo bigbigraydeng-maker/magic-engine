@@ -19,7 +19,30 @@ interface SeoMetrics {
   organic_traffic:  number | null
   authority_score:  number | null
   published_posts:  number | null
+  gsc_clicks?:      number | null
+  gsc_impressions?: number | null
+  ga4_sessions?:    number | null
+  ga4_users?:       number | null
   last_updated:     string | null
+}
+
+interface PageHealthRow {
+  page:            string
+  gsc_clicks:      number | null
+  gsc_impressions: number | null
+  gsc_ctr:         number | null
+  gsc_position:    number | null
+  ga4_sessions:    number | null
+  ga4_pageviews:   number | null
+}
+
+interface PageHealthResponse {
+  pages?:      PageHealthRow[]
+  gsc_status?: 'connected' | 'no_data' | 'not_connected'
+  ga4_status?: 'connected' | 'no_data' | 'not_connected'
+  gsc_period?: string | null
+  ga4_period?: string | null
+  error?:      string
 }
 
 interface RankedKeyword {
@@ -30,6 +53,10 @@ interface RankedKeyword {
   cpc:                number | null
   competition:        number | null
   intent:             string
+  gsc_position?:      number | null
+  gsc_impressions?:   number | null
+  gsc_clicks?:        number | null
+  gsc_ctr?:           number | null
 }
 
 interface Competitor {
@@ -46,6 +73,7 @@ interface GapKeyword {
   keyword_difficulty: number | null
   cpc:                number | null
   intent:             string
+  from_competitor?:   string | null
 }
 
 interface RankingsResponse {
@@ -53,6 +81,8 @@ interface RankingsResponse {
   keywords?: RankedKeyword[]
   source?: 'live' | 'snapshot'
   snapshot_date?: string | null
+  gsc_status?: 'connected' | 'no_data' | 'not_connected'
+  gsc_period?: string | null
   warning?: string
   error?: string
 }
@@ -273,12 +303,13 @@ function GapTable({
               <th className="text-right px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-20">月搜量</th>
               <th className="text-right px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-16">KD</th>
               <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-32">意图</th>
+              <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-36">来源竞品</th>
               <th className="text-right px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-28">生成</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {page.length === 0 ? (
-              <tr><td colSpan={5} className="text-center py-8 text-sm text-gray-400">没有符合条件的缺口词</td></tr>
+              <tr><td colSpan={6} className="text-center py-8 text-sm text-gray-400">没有符合条件的缺口词</td></tr>
             ) : page.map((kw, i) => {
               const style = INTENT_STYLE[kw.intent] ?? INTENT_STYLE.informational
               const isGenerating = generatingKeyword === kw.keyword
@@ -290,6 +321,7 @@ function GapTable({
                   <td className="px-3 py-2.5">
                     <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${style.bg}`}>{style.label}</span>
                   </td>
+                  <td className="px-3 py-2.5 text-xs text-gray-500 truncate max-w-[9rem]">{kw.from_competitor ?? '—'}</td>
                   <td className="px-4 py-2.5 text-right">
                     <button
                       type="button"
@@ -546,13 +578,123 @@ function TrafficSplitRow({
   )
 }
 
+// ─── Page Health Table (Phase B2) ────────────────────────────────────────────
+
+function PageHealthTable({
+  pages,
+  loading,
+  gscStatus,
+  ga4Status,
+}: {
+  pages: PageHealthRow[]
+  loading: boolean
+  gscStatus: 'connected' | 'no_data' | 'not_connected'
+  ga4Status: 'connected' | 'no_data' | 'not_connected'
+}) {
+  const [search, setSearch] = useState('')
+  const [shown, setShown]   = useState(25)
+
+  const filtered = useMemo(() =>
+    pages.filter(p => !search || p.page.toLowerCase().includes(search.toLowerCase())),
+    [pages, search],
+  )
+  const visible = filtered.slice(0, shown)
+
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="h-8 bg-gray-100 rounded animate-pulse" />
+        ))}
+      </div>
+    )
+  }
+
+  if (gscStatus === 'not_connected' && ga4Status === 'not_connected') {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-500">
+        Search Console 和 Analytics 均未连接。连接后此处显示页面级 GSC 点击 / 曝光 + GA4 会话数据。
+      </div>
+    )
+  }
+
+  if (pages.length === 0) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+        已连接但暂无页面数据，可能在采集中（通常 48–72 小时）。
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <input
+        type="text"
+        placeholder="搜索页面路径…"
+        value={search}
+        onChange={e => { setSearch(e.target.value); setShown(25) }}
+        className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-indigo-400"
+      />
+      <div className="overflow-x-auto rounded-xl border border-gray-200">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-gray-50 border-b border-gray-200">
+              <th className="text-left  px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">页面</th>
+              <th className="text-right px-3 py-2.5 text-xs font-semibold text-teal-600 uppercase tracking-wide w-20">GSC 点击</th>
+              <th className="text-right px-3 py-2.5 text-xs font-semibold text-teal-600 uppercase tracking-wide w-20">GSC 曝光</th>
+              <th className="text-right px-3 py-2.5 text-xs font-semibold text-teal-600 uppercase tracking-wide w-16">CTR</th>
+              <th className="text-center px-3 py-2.5 text-xs font-semibold text-teal-600 uppercase tracking-wide w-20">均排名</th>
+              <th className="text-right px-3 py-2.5 text-xs font-semibold text-blue-600 uppercase tracking-wide w-20">GA4 会话</th>
+              <th className="text-right px-3 py-2.5 text-xs font-semibold text-blue-600 uppercase tracking-wide w-20">GA4 PV</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {visible.map((p, i) => (
+              <tr key={i} className="hover:bg-gray-50 transition-colors">
+                <td className="px-4 py-2.5 text-gray-900 font-medium max-w-md truncate" title={p.page}>{p.page}</td>
+                <td className="px-3 py-2.5 text-right text-teal-700 tabular-nums">{p.gsc_clicks != null ? fmt(p.gsc_clicks) : '—'}</td>
+                <td className="px-3 py-2.5 text-right text-teal-700 tabular-nums">{p.gsc_impressions != null ? fmt(p.gsc_impressions) : '—'}</td>
+                <td className="px-3 py-2.5 text-right text-teal-700 tabular-nums">{p.gsc_ctr != null ? `${(p.gsc_ctr * 100).toFixed(1)}%` : '—'}</td>
+                <td className="px-3 py-2.5 text-center">
+                  <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold tabular-nums ${posBadgeCls(p.gsc_position != null ? Math.round(p.gsc_position) : null)}`}>
+                    {p.gsc_position != null ? p.gsc_position.toFixed(1) : '—'}
+                  </span>
+                </td>
+                <td className="px-3 py-2.5 text-right text-blue-700 tabular-nums">{p.ga4_sessions != null ? fmt(p.ga4_sessions) : '—'}</td>
+                <td className="px-3 py-2.5 text-right text-blue-700 tabular-nums">{p.ga4_pageviews != null ? fmt(p.ga4_pageviews) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {shown < filtered.length && (
+        <div className="text-center">
+          <button onClick={() => setShown(s => s + 25)} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
+            再显示 {Math.min(25, filtered.length - shown)} 条（共 {filtered.length} 条）
+          </button>
+        </div>
+      )}
+      {visible.length > 0 && (
+        <p className="text-center text-xs text-gray-400">
+          显示 {visible.length} / {filtered.length} 条
+        </p>
+      )}
+    </div>
+  )
+}
+
 function RankingsTable({
   keywords,
   brandRoot,
+  gscStatus,
+  gscPeriod,
 }: {
   keywords: RankedKeyword[]
   brandRoot: string
+  gscStatus: 'connected' | 'no_data' | 'not_connected'
+  gscPeriod: string | null
 }) {
+  const hasGsc = gscStatus === 'connected'
   const [intentFilter, setIntentFilter] = useState('all')
   const [posFilter,    setPosFilter]    = useState('all')
   const [brandFilter,  setBrandFilter]  = useState('all')
@@ -644,13 +786,35 @@ function RankingsTable({
         </select>
       </div>
 
+      {/* GSC status banner */}
+      {gscStatus === 'not_connected' && (
+        <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-xs text-gray-500">
+          Search Console 未连接 — GSC 列不可用。连接后可看到 Google 真实曝光/点击数据。
+        </div>
+      )}
+      {gscStatus === 'no_data' && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-700">
+          Search Console 已连接，数据采集中（通常需要 48–72 小时）。
+        </div>
+      )}
+      {gscStatus === 'connected' && (
+        <div className="rounded-lg border border-teal-200 bg-teal-50 px-4 py-2.5 text-xs text-teal-700 flex items-center gap-2">
+          <span className="inline-block w-2 h-2 rounded-full bg-teal-500" />
+          <span>Search Console 已连接{gscPeriod ? ` (${gscPeriod})` : ''}</span>
+          <span className="text-teal-600/70">— 未匹配 GSC 数据的关键词显示「—」（GSC 仅返回 top 50 高点击词）</span>
+        </div>
+      )}
+
       {/* Table */}
       <div className="overflow-x-auto rounded-xl border border-gray-200">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
               <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">关键词</th>
-              <th className="text-center px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-16">排名</th>
+              <th className="text-center px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-16" title="DataForSEO estimated rank">DF 排名</th>
+              {hasGsc && <th className="text-center px-3 py-2.5 text-xs font-semibold text-teal-600 uppercase tracking-wide w-16" title={gscPeriod ? `GSC ${gscPeriod}` : 'GSC real position'}>GSC 排名</th>}
+              {hasGsc && <th className="text-right px-3 py-2.5 text-xs font-semibold text-teal-600 uppercase tracking-wide w-20" title="GSC impressions">曝光</th>}
+              {hasGsc && <th className="text-right px-3 py-2.5 text-xs font-semibold text-teal-600 uppercase tracking-wide w-16" title="GSC clicks">点击</th>}
               <th className="text-right px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-20">月搜量</th>
               <th className="text-right px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-16">KD</th>
               <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-32">意图</th>
@@ -659,7 +823,7 @@ function RankingsTable({
           <tbody className="divide-y divide-gray-100">
             {page.length === 0 ? (
               <tr>
-                <td colSpan={5} className="text-center py-8 text-sm text-gray-400">
+                <td colSpan={hasGsc ? 8 : 5} className="text-center py-8 text-sm text-gray-400">
                   没有符合条件的关键词
                 </td>
               </tr>
@@ -676,6 +840,23 @@ function RankingsTable({
                         {posLabel(kw.position)}
                       </span>
                     </td>
+                    {hasGsc && (
+                      <td className="px-3 py-2.5 text-center">
+                        <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold tabular-nums ${posBadgeCls(kw.gsc_position != null ? Math.round(kw.gsc_position) : null)}`}>
+                          {kw.gsc_position != null ? kw.gsc_position.toFixed(1) : '—'}
+                        </span>
+                      </td>
+                    )}
+                    {hasGsc && (
+                      <td className="px-3 py-2.5 text-right text-teal-700 tabular-nums">
+                        {kw.gsc_impressions != null ? fmt(kw.gsc_impressions) : '—'}
+                      </td>
+                    )}
+                    {hasGsc && (
+                      <td className="px-3 py-2.5 text-right text-teal-700 tabular-nums">
+                        {kw.gsc_clicks != null ? fmt(kw.gsc_clicks) : '—'}
+                      </td>
+                    )}
                     <td className="px-3 py-2.5 text-right text-gray-600 tabular-nums">
                       {fmt(kw.search_volume)}
                     </td>
@@ -733,6 +914,8 @@ export default function SeoIntelligencePage() {
   const [rankingsLoading, setRankingsLoading] = useState(true)
   const [rankingsError,   setRankingsError]   = useState<string | null>(null)
   const [rankingsWarning, setRankingsWarning] = useState<string | null>(null)
+  const [gscStatus,       setGscStatus]       = useState<'connected' | 'no_data' | 'not_connected'>('not_connected')
+  const [gscPeriod,       setGscPeriod]       = useState<string | null>(null)
   const [positionChanges, setPositionChanges] = useState<PositionChangesResponse | null>(null)
   const [positionLoading, setPositionLoading] = useState(true)
   const [positionError,   setPositionError]   = useState<string | null>(null)
@@ -745,6 +928,12 @@ export default function SeoIntelligencePage() {
   const [generatingKeyword, setGeneratingKeyword] = useState<string | null>(null)
   const [actionMsg, setActionMsg] = useState('')
   const [actionOk, setActionOk] = useState<boolean | null>(null)
+
+  // Page health (Phase B2)
+  const [pageHealth,        setPageHealth]        = useState<PageHealthRow[]>([])
+  const [pageHealthLoading, setPageHealthLoading] = useState(true)
+  const [pageHealthGsc,     setPageHealthGsc]     = useState<'connected' | 'no_data' | 'not_connected'>('not_connected')
+  const [pageHealthGa4,     setPageHealthGa4]     = useState<'connected' | 'no_data' | 'not_connected'>('not_connected')
 
   useEffect(() => {
     void (async () => {
@@ -770,6 +959,8 @@ export default function SeoIntelligencePage() {
         setRankings(data.keywords ?? [])
         setRankingsDomain(data.domain ?? '')
         setRankingsWarning(data.warning ?? null)
+        setGscStatus(data.gsc_status ?? 'not_connected')
+        setGscPeriod(data.gsc_period ?? null)
       } catch (e) {
         setRankingsError(e instanceof Error ? e.message : 'Keyword Intelligence data failed to load')
       } finally {
@@ -805,6 +996,23 @@ export default function SeoIntelligencePage() {
         setCompError(e instanceof Error ? e.message : 'Competitor data failed to load')
       } finally {
         setCompLoading(false)
+      }
+    })()
+  }, [clientId])
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/seo-intelligence/page-health`)
+        const data = await res.json() as PageHealthResponse
+        if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
+        setPageHealth(data.pages ?? [])
+        setPageHealthGsc(data.gsc_status ?? 'not_connected')
+        setPageHealthGa4(data.ga4_status ?? 'not_connected')
+      } catch {
+        // Page health is best-effort; silent fail
+      } finally {
+        setPageHealthLoading(false)
       }
     })()
   }, [clientId])
@@ -889,17 +1097,27 @@ export default function SeoIntelligencePage() {
           </p>
           {loading ? (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              {Array.from({ length: 4 }).map((_, i) => (
+              {Array.from({ length: 8 }).map((_, i) => (
                 <div key={i} className="h-20 bg-white rounded-xl border border-gray-200 animate-pulse" />
               ))}
             </div>
           ) : (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <StatCard icon="🔑" label="收录关键词" value={fmt(metrics?.organic_keywords ?? null)} sub="自然搜索关键词总数" />
-              <StatCard icon="📈" label="月均流量"   value={fmt(metrics?.organic_traffic  ?? null)} sub="估算自然搜索月访量" />
-              <StatCard icon="⭐" label="权威分"     value={metrics?.authority_score != null ? String(Math.round(metrics.authority_score)) : '—'} sub="0–100，越高越强" />
-              <StatCard icon="📝" label="已发布博客" value={fmt(metrics?.published_posts  ?? null, 0)} sub="ME 内已发布文章数" />
-            </div>
+            <>
+              <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-2">市场视角 (DataForSEO)</p>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                <StatCard icon="🔑" label="收录关键词" value={fmt(metrics?.organic_keywords ?? null)} sub="自然搜索关键词总数" />
+                <StatCard icon="📈" label="估算流量"   value={fmt(metrics?.organic_traffic  ?? null)} sub="估算月自然访量" />
+                <StatCard icon="⭐" label="权威分"     value={metrics?.authority_score != null ? String(Math.round(metrics.authority_score)) : '—'} sub="0–100，越高越强" />
+                <StatCard icon="📝" label="已发布博客" value={fmt(metrics?.published_posts  ?? null, 0)} sub="ME 内已发布文章数" />
+              </div>
+              <p className="text-[10px] text-teal-600 uppercase tracking-wider mb-2">真实视角 (Search Console + Analytics)</p>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <StatCard icon="🎯" label="GSC 点击"   value={fmt(metrics?.gsc_clicks      ?? null)} sub="Google 真实点击数" />
+                <StatCard icon="👁" label="GSC 曝光"   value={fmt(metrics?.gsc_impressions ?? null)} sub="Google 搜索结果露出" />
+                <StatCard icon="👥" label="GA4 会话"   value={fmt(metrics?.ga4_sessions    ?? null)} sub="网站访问会话" />
+                <StatCard icon="🧑" label="GA4 用户"   value={fmt(metrics?.ga4_users       ?? null)} sub="独立访问用户" />
+              </div>
+            </>
           )}
           {!loading && !error && metrics?.last_updated == null && (
             <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
@@ -964,9 +1182,37 @@ export default function SeoIntelligencePage() {
                 <RankingsTable
                   keywords={rankings}
                   brandRoot={domainRoot(rankingsDomain)}
+                  gscStatus={gscStatus}
+                  gscPeriod={gscPeriod}
                 />
               </div>
             )}
+          </div>
+        </section>
+
+        {/* ── 页面健康 (Phase B2) ─────────────────────────────────────────────── */}
+        <section>
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">
+            页面健康
+          </p>
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold text-gray-900">Top Pages — GSC × GA4 合并视图</h2>
+              <div className="flex gap-2 text-xs">
+                <span className={`px-2 py-0.5 rounded-full ${pageHealthGsc === 'connected' ? 'bg-teal-100 text-teal-700' : 'bg-gray-100 text-gray-500'}`}>
+                  GSC {pageHealthGsc === 'connected' ? '✓' : '—'}
+                </span>
+                <span className={`px-2 py-0.5 rounded-full ${pageHealthGa4 === 'connected' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
+                  GA4 {pageHealthGa4 === 'connected' ? '✓' : '—'}
+                </span>
+              </div>
+            </div>
+            <PageHealthTable
+              pages={pageHealth}
+              loading={pageHealthLoading}
+              gscStatus={pageHealthGsc}
+              ga4Status={pageHealthGa4}
+            />
           </div>
         </section>
 
