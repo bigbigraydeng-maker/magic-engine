@@ -427,7 +427,7 @@ function QuestionRow({ question, snapshot }: { question: Question; snapshot?: Sn
           {snapshot && !snapshot.brands_mentioned?.length && !snapshot.error_message && (
             <p className="mt-1 text-xs font-semibold text-me-charcoal/45 italic">尚无识别到品牌</p>
           )}
-          {snapshot?.error_message && (
+          {snapshot?.error_message && snapshot.error_code !== 'no_ai_overview' && (
             <p className="mt-1 text-xs font-semibold text-status-rej">采集失败：{snapshot.error_message}</p>
           )}
           {!snapshot && (

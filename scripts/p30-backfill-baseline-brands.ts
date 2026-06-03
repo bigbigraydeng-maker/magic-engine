@@ -16,6 +16,7 @@
  *   npx tsx scripts/p30-backfill-baseline-brands.ts             # dry run, prints diffs
  *   npx tsx scripts/p30-backfill-baseline-brands.ts --apply     # actually write
  *   npx tsx scripts/p30-backfill-baseline-brands.ts --industry inbound_tour --apply
+ *   npx tsx scripts/p30-backfill-baseline-brands.ts --max-cost 5.00 --apply  # hard $ cap
  *
  * Environment: NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / ANTHROPIC_API_KEY
  */
@@ -58,6 +59,13 @@ async function main() {
   const apply = process.argv.includes('--apply')
   const industryFlagIdx = process.argv.indexOf('--industry')
   const industryFilter = industryFlagIdx >= 0 ? process.argv[industryFlagIdx + 1] : null
+  const maxCostFlagIdx = process.argv.indexOf('--max-cost')
+  const maxCostUsd = maxCostFlagIdx >= 0 ? parseFloat(process.argv[maxCostFlagIdx + 1] ?? '0') : 2.00
+  if (!Number.isFinite(maxCostUsd) || maxCostUsd <= 0) {
+    console.error('Invalid --max-cost value')
+    process.exit(1)
+  }
+  console.log(`Hard cost cap: $${maxCostUsd.toFixed(2)} (override with --max-cost N)`)
 
   const sb = createClient(url, key)
 
@@ -79,12 +87,19 @@ async function main() {
   console.log(`Loaded ${snapshots?.length ?? 0} snapshots, ${questions?.length ?? 0} questions`)
 
   let processed = 0, changed = 0, skipped = 0, errors = 0
+  let totalCostUsd = 0
 
   for (const snap of (snapshots ?? []) as SnapshotRow[]) {
     const industryCode = industryByQ.get(snap.question_id)
     if (!industryCode) { skipped++; continue }
     if (industryFilter && industryCode !== industryFilter) { skipped++; continue }
     if (!snap.raw_response) { skipped++; continue }
+
+    if (totalCostUsd >= maxCostUsd) {
+      console.warn(`\n⚠ Hit cost cap $${maxCostUsd.toFixed(2)} after processing ${processed}. Remaining ${(snapshots?.length ?? 0) - processed} snapshots skipped.`)
+      console.warn('  Re-run with --max-cost N to continue.')
+      break
+    }
 
     processed++
 
@@ -95,6 +110,7 @@ async function main() {
         const fromDomains = extractDomainBrandsFromOrganic(raw.organic_results ?? null)
         const merged = [...fromLocal, ...fromDomains]
         const std = await standardiseBrandList(merged, { supabase: sb, industryCode })
+        totalCostUsd += std.total_cost_usd
         const newBrands = std.brands
         const newTop3 = newBrands.slice(0, 3)
 
@@ -136,6 +152,7 @@ async function main() {
   }
 
   console.log(`\nProcessed ${processed}, would change ${changed}, skipped ${skipped}, errors ${errors}`)
+  console.log(`LLM cost incurred: $${totalCostUsd.toFixed(4)} (cap $${maxCostUsd.toFixed(2)})`)
   console.log(apply ? 'APPLIED.' : 'DRY RUN — pass --apply to write.')
 }
 

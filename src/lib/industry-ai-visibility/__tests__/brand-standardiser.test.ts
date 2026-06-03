@@ -134,6 +134,25 @@ describe('standardiseBrand — cache hit', () => {
     expect(result.canonical).toBe('CTS Eventim')
     expect(mockCreate).toHaveBeenCalledTimes(1)
   })
+
+  it('industry scope is enforced — back-to-back calls under different industries each hit LLM', async () => {
+    // Mutation guard: if cache key drops industry_code, the second call would
+    // return the cached 'Brand A' instead of calling the LLM for 'Brand B'.
+    const cache = new Map<string, CacheRow>()  // empty cache — both must miss
+    mockHaikuOk('Brand A In Tourism')
+    mockHaikuOk('Brand B In Finance')
+    const { client, lookups, upserts } = makeSupabase(cache)
+
+    const tourismResult = await standardiseBrand('acme', { supabase: client, industryCode: 'inbound_tour' })
+    const financeResult = await standardiseBrand('acme', { supabase: client, industryCode: 'finance' })
+
+    expect(tourismResult.canonical).toBe('Brand A In Tourism')
+    expect(financeResult.canonical).toBe('Brand B In Finance')
+    expect(mockCreate).toHaveBeenCalledTimes(2)  // ← drops to 1 if industry is removed from cache key
+    expect(lookups[0]).toEqual({ industry_code: 'inbound_tour', raw_lower: 'acme' })
+    expect(lookups[1]).toEqual({ industry_code: 'finance',      raw_lower: 'acme' })
+    expect(upserts.map(u => u.industry_code)).toEqual(['inbound_tour', 'finance'])
+  })
 })
 
 describe('standardiseBrand — retry + fallback', () => {
