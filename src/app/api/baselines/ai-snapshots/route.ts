@@ -3,10 +3,19 @@
  *
  * Query params:
  *   ?question_id=...     — limit to one question
- *   ?industry=...        — limit to one industry
+ *   ?industry=...        — limit to one industry_code
+ *   ?country=...         — 'nz' | 'au'
+ *   ?city=...            — 'auckland' | 'sydney' | etc.
+ *   ?language=...        — 'en' | 'zh'
  *   ?platform=...        — limit to one platform
- *   ?weeks=12            — last N weeks (default 12)
+ *   ?weeks=12            — last N weeks (default 12, max 52)
  *   ?latest_only=true    — return only latest snapshot per (question, platform)
+ *
+ * Filtering strategy:
+ *   - All question-side filters (industry/country/city/language) are pushed
+ *     down to the database via referenced-table syntax on the join, so they
+ *     also cap the query (server-side), not just trim after the fact.
+ *   - Snapshot-side filters (question_id/platform) are normal column filters.
  */
 
 import { NextResponse } from 'next/server'
@@ -20,6 +29,9 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const questionId  = searchParams.get('question_id')
   const industry    = searchParams.get('industry')
+  const country     = searchParams.get('country')
+  const city        = searchParams.get('city')
+  const language    = searchParams.get('language')
   const platform    = searchParams.get('platform')
   const weeksParam  = searchParams.get('weeks')
   const weeks       = weeksParam ? Math.max(1, Math.min(52, parseInt(weeksParam, 10) || 12)) : 12
@@ -30,6 +42,9 @@ export async function GET(req: Request) {
   cutoff.setUTCDate(cutoff.getUTCDate() - weeks * 7)
   const cutoffISO = cutoff.toISOString().slice(0, 10)
 
+  // Use !inner so question-side filters become JOIN constraints
+  // (i.e. snapshots without a matching question are excluded — and the
+  // referenced-table .eq() below actually filters at the DB level).
   let query = supabaseAdmin
     .from('industry_ai_visibility_snapshots')
     .select(`
@@ -39,27 +54,28 @@ export async function GET(req: Request) {
       serp_organic_top10, serp_local_pack, serp_paid_domains, serp_people_also_ask,
       model_version, tokens_used, cost_usd, parse_confidence,
       error_code, error_message,
-      industry_ai_visibility_questions:question_id ( industry_code, intent_layer, country, city, language, question_text )
+      industry_ai_visibility_questions:question_id!inner (
+        industry_code, intent_layer, country, city, language, question_text
+      )
     `)
     .gte('week_of', cutoffISO)
     .order('week_of', { ascending: false })
-    .limit(500)
+    .limit(1000)
 
+  // Snapshot-side filters
   if (questionId) query = query.eq('question_id', questionId)
   if (platform)   query = query.eq('platform', platform)
+
+  // Question-side filters via referenced-table syntax — pushes down to DB
+  if (industry) query = query.eq('industry_ai_visibility_questions.industry_code', industry)
+  if (country)  query = query.eq('industry_ai_visibility_questions.country',       country)
+  if (city)     query = query.eq('industry_ai_visibility_questions.city',          city)
+  if (language) query = query.eq('industry_ai_visibility_questions.language',      language)
 
   const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   let rows = data ?? []
-
-  // Industry filter is a join filter — apply in JS since join isn't filterable on supabase-js
-  if (industry) {
-    rows = rows.filter(r => {
-      const q = (r as { industry_ai_visibility_questions?: { industry_code?: string } | null }).industry_ai_visibility_questions
-      return q?.industry_code === industry
-    })
-  }
 
   // Latest-only: keep first occurrence per (question_id, platform) — rows are
   // already ordered by week_of DESC, so first = newest.

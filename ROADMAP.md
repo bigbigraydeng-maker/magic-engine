@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-04 00:35 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-04 01:27 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -29,6 +29,8 @@
 | **QA-清理-1** | `src/app/api/clients/[id]/blog/[postId]/route.ts:140` 同款内部 HTTP+Bearer 反模式根治（参考 PR #297 模式） | 1-2h |
 | **QA-清理-2** | `@/lib/apify/*` `@/lib/dataforseo/serp` `@/lib/gsc/client` 4 个模块文件缺失，advanced-agent.ts import 断裂排查 | 半天 |
 | **QA-清理-3** | tsc 整体红清理（scripts/p30-*、cms/publish-geo-snippet test mock、CompetitorSnapshotAdapter，历史遗留） | 1 天 |
+| **AIV-debt-1** | AI Visibility `latest_only` 当前在 JS 层去重（`api/baselines/ai-snapshots/route.ts`），题量 > 200 前必须改 DB 层 `DISTINCT ON (question_id, platform) ORDER BY week_of DESC`（PostgREST 需 RPC/view）。当前 10 题无害。子牙 2026-06-04 复审标记。 | 2-3h |
+| **AIV-debt-2** | city slug `gold-coast` / `gold_coast` 在 `src/lib/dataforseo/serp.ts:81-82` 双写，前端 CITY_LABELS 镜像。统一为 `gold-coast`（连字符）。子牙 2026-06-04 复审标记。 | 30min |
 | ~~**Phase 22.A.2**~~ | ~~GA4 每日采集~~ → ✅ PR #225 已 merged，2026-06-03 验证 cron 在跑（CTS 最新数据 03:00 UTC） | ✅ |
 | **Phase 24.B** | GBP 数据摂取（依赖 GBP.0 + migration） | 中 |
 | **B1 AU/NZ Marketing Index** | 战略级独立项目议题，Q4 2026 评估 → Q1 2027 启动 MVP | 6-8 周 |
