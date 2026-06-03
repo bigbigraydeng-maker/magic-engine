@@ -97,5 +97,7 @@ function inferAreaLabel(pathname: string | null, clientId: string): string {
   if (tail.startsWith('/memory'))         return '客户记忆库'
   if (tail.startsWith('/wallet'))         return '钱包'
   if (tail.startsWith('/settings'))       return '设置'
+  // geo-composer is a sibling route outside clients/[id], matched by full path
+  if (pathname?.includes('/geo-composer')) return 'GEO Composer'
   return '客户工作台'
 }

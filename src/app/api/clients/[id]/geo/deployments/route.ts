@@ -3,6 +3,52 @@ import { supabaseAdmin } from '@/lib/supabase'
 import type { GeoDirective } from '@/types/magic-engine'
 
 /**
+ * GET /api/clients/[id]/geo/deployments
+ *
+ * Returns all deployed pages for this client's active GEO directive.
+ * Each entry is shaped as { id, page_url, deployed_at, status }.
+ */
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const clientId = params.id
+
+    const { data: directives, error } = await supabaseAdmin
+      .from('geo_directives')
+      .select('id, deployed_pages, updated_at, status')
+      .eq('client_id', clientId)
+      .eq('status', 'active')
+      .limit(1)
+
+    if (error) {
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+    }
+
+    if (!directives || directives.length === 0) {
+      return NextResponse.json({ success: true, deployments: [] })
+    }
+
+    const directive = directives[0] as { id: string; deployed_pages: string[] | null; updated_at: string; status: string }
+    const pages: string[] = directive.deployed_pages ?? []
+
+    // Shape into Deployment objects the frontend expects
+    const deployments = pages.map((url, i) => ({
+      id: `${directive.id}-${i}`,
+      page_url: url,
+      deployed_at: directive.updated_at,
+      status: 'active' as const,
+    }))
+
+    return NextResponse.json({ success: true, deployments })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error'
+    return NextResponse.json({ success: false, error: message }, { status: 500 })
+  }
+}
+
+/**
  * POST /api/clients/[id]/geo/deployments
  *
  * Record a URL where the GEO snippet has been deployed.
