@@ -2,6 +2,7 @@ import { getMtcBalance } from '@/lib/mtc/balance'
 import { MTC_PACKAGES } from '@/lib/mtc/types'
 import { MePanel } from '@/components/ui/me-primitives'
 import WalletPurchase from './_components/WalletPurchase'
+import MtcLedgerTable from './_components/MtcLedgerTable'
 
 interface Props {
   params: { id: string }
@@ -168,6 +169,15 @@ export default async function WalletPage({ params, searchParams }: Props) {
             </div>
           ))}
         </div>
+      </MePanel>
+
+      {/* Transaction history */}
+      <MePanel>
+        <div className="mb-4 border-b border-black/10 pb-4">
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-me-charcoal/50">Transaction history</p>
+          <h2 className="mt-2 font-display text-xl font-bold tracking-tight text-me-charcoal">MTC Ledger</h2>
+        </div>
+        <MtcLedgerTable clientId={clientId} />
       </MePanel>
     </div>
   )
