@@ -227,4 +227,24 @@ describe('GET /api/mtc/ledger', () => {
     const res = await GET(makeRequest({ clientId: CLIENT_ID }))
     expect(res.status).toBe(500)
   })
+
+  // ── 6. Portal DB lookup failure → 500 (fail-closed) ──────────────────────
+
+  it('returns 500 when portal user DB lookup fails (fail-closed)', async () => {
+    mockPortalUsers.mockResolvedValue({ data: null, error: { message: 'connection timeout' } })
+
+    const res = await GET(makeRequest({ clientId: CLIENT_ID }))
+    expect(res.status).toBe(500)
+    const json = await res.json()
+    expect(json.error).toMatch(/Authorization check failed/)
+  })
+
+  // ── 7. Non-numeric page param → falls back to page 0 ─────────────────────
+
+  it('handles non-numeric page param gracefully (falls back to page 0)', async () => {
+    const res = await GET(makeRequest({ clientId: CLIENT_ID, page: 'abc' }))
+    expect(res.status).toBe(200)
+    const json = await res.json()
+    expect(json.page).toBe(0)
+  })
 })

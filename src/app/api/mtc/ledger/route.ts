@@ -40,7 +40,8 @@ export async function GET(request: NextRequest) {
   }
 
   const pageParam = request.nextUrl.searchParams.get('page')
-  const page = pageParam !== null ? parseInt(pageParam, 10) : 0
+  const raw = parseInt(pageParam ?? '0', 10)
+  const page = Number.isFinite(raw) && raw >= 0 ? raw : 0
 
   // ── Auth: session required for both paths ──────────────────────────────────
 
@@ -58,11 +59,14 @@ export async function GET(request: NextRequest) {
     .select('client_id')
     .eq('email', email)
     .eq('client_id', clientId)
+    .in('access_type', ['dashboard', 'both', 'self_serve'])
 
-  const isPortalUser =
-    !portalErr &&
-    Array.isArray(portalRows) &&
-    (portalRows as unknown[]).length > 0
+  if (portalErr) {
+    console.error('[mtc/ledger] portal user lookup failed:', portalErr)
+    return NextResponse.json({ error: 'Authorization check failed' }, { status: 500 })
+  }
+
+  const isPortalUser = Array.isArray(portalRows) && portalRows.length > 0
 
   // ── Fall back to admin check ───────────────────────────────────────────────
 
