@@ -91,7 +91,7 @@ interface Props {
 
 export default function MtcLedgerTable({ clientId }: Props) {
   const [data, setData] = useState<LedgerResponse | null>(null)
-  const [page, setPage] = useState(1)
+  const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -185,22 +185,22 @@ export default function MtcLedgerTable({ clientId }: Props) {
       {totalPages > 1 && (
         <div className="mt-4 flex items-center justify-between">
           <p className="text-xs text-me-charcoal/40">
-            Page {page} of {totalPages}
+            Page {page + 1} of {totalPages}
             {data && (
               <> &mdash; {data.total.toLocaleString()} transactions total</>
             )}
           </p>
           <div className="flex gap-2">
             <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page <= 1 || loading}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page <= 0 || loading}
               className="rounded-lg border border-black/10 px-3 py-1.5 text-xs font-bold text-me-charcoal/60 disabled:opacity-30 hover:border-me-ochre/40 transition"
             >
               ← Previous
             </button>
             <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page >= totalPages || loading}
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={page >= totalPages - 1 || loading}
               className="rounded-lg border border-black/10 px-3 py-1.5 text-xs font-bold text-me-charcoal/60 disabled:opacity-30 hover:border-me-ochre/40 transition"
             >
               Next →
