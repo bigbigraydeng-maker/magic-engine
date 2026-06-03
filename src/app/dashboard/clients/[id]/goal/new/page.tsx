@@ -19,6 +19,7 @@
 
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
+import Link from 'next/link'
 import {
   GOAL_SUBTYPES_BY_INTENT,
   getRecommendedMetrics,
@@ -251,7 +252,13 @@ export default function NewGoalPage() {
         {/* Header */}
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="flex items-center gap-2 font-display text-3xl font-bold tracking-tight text-me-charcoal">
+            <Link
+              href={`/dashboard/clients/${clientId}`}
+              className="text-xs font-black text-me-charcoal/45 hover:text-me-charcoal/75"
+            >
+              ← 返回客户主页
+            </Link>
+            <h1 className="mt-2 flex items-center gap-2 font-display text-3xl font-bold tracking-tight text-me-charcoal">
               New Goal
               <span className="inline-block rounded-full bg-me-ochre/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-me-ochre">
                 Beta

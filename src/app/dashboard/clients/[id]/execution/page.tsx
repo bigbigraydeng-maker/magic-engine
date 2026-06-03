@@ -2185,7 +2185,9 @@ export default function ExecutionPage() {
   const availableDimensions = Array.from(new Set(items.map(i => i.dimension).filter(Boolean))) as string[]
   const completedCount      = filteredItems.filter(i => i.status === 'completed').length
 
-  // New dimension-based grouping — excludes autonomous/flywheel items
+  // P33.10 fix: filteredItems already excludes unassigned items (null + placeholder)
+  // when Goal filter is active — they show in the dedicated "未归类 Actions" block below.
+  // (Supersedes #301's itemsForDimensionGroups intermediate, which only handled null.)
   const dimensionGroups = buildDimensionGroups(filteredItems)
 
   // Legacy prescription groups — kept for derive/supplement/revision flows only
@@ -2512,6 +2514,8 @@ export default function ExecutionPage() {
           // Phase 33 P33.9 fix: counts must follow dimension + goal filter so the
           // chip numbers reflect what's actually visible. Was previously based on
           // `items` (all rows), which misled FDE into thinking Goal filter wasn't working.
+          // (Supersedes #301's countsBase — filteredItemsWithoutStatus is the canonical
+          // intermediate that also feeds dimensionGroups, ensuring chips & groups agree.)
           const counts: Record<string, number> = {
             pending:     filteredItemsWithoutStatus.filter(i => i.status === 'pending').length,
             in_progress: filteredItemsWithoutStatus.filter(i => i.status === 'in_progress').length,
