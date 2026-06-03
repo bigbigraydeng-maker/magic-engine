@@ -308,3 +308,26 @@ services:
           type: web
           name: magic-engine
           property: host
+
+  # SEO Patrol — Phase 22.E.S2b
+  #   Daily SEO opportunity engine: reads keyword_snapshots + GSC snapshots,
+  #   runs the rule engine, persists fresh findings, and routes the top 3 onto
+  #   the SEO kanban column via 诸葛亮's persister (source='zhuge').
+  #   Runs after google-data-pullback-daily (3am) so data is fresh.
+  # Reference: ROADMAP.md § Phase 22.E · docs/seo-sop-implementation-design.md
+  - type: cron
+    name: seo-patrol-daily
+    env: node
+    schedule: "0 4 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -s -H "Authorization: Bearer $CRON_SECRET" \
+        https://$RENDER_EXTERNAL_URL/api/cron/seo-patrol-daily
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+      - key: RENDER_EXTERNAL_URL
+        fromService:
+          type: web
+          name: magic-engine
+          property: host

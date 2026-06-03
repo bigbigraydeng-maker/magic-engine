@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-04 09:47 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-04 11:10 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -3067,6 +3067,64 @@ AI Content Factory  ←──反馈──  Data Engine  ←──分析──  �
 - `22.D.2` POST /api/ai/zhugeliang/proactive endpoint (~1 天)
 - `22.D.3` /api/cron/anomaly-detector cron route (~0.5 天)
 - `22.D.4` 看板 UI：主动任务显示 ⚡ 系统检测 badge (~0.5 天)
+
+---
+
+### Phase 22.E — SEO 自动巡逻（每日 SEO SOP 引擎）📋 开发中（2026-06-04 启动）
+
+> **登记日期**：2026-06-04 · **前置**：Phase 22.A 采集在跑（google-data-pullback-daily + keyword-snapshots-weekly）
+> **设计文档**：`docs/seo-sop-implementation-design.md`（子牙 Opus 4.8 设计）
+> **来源**：学习 Iris《32K impressions in 30 days》文章的「每日 SEO 巡逻 SOP」，翻译成 ME 体系内实施
+
+**核心思路**：复刻 Phase 22.D（anomaly-detector）的两步流水线模式，但面向 **SEO 机会发现**（不是异动检测）：
+
+```
+[已有] google-data-pullback-daily (3am) → gsc/ga4 snapshots
+[已有] keyword-snapshots-weekly (周一)   → keyword_snapshots
+                  ↓
+[新建] seo-patrol-daily (4am)
+   Step 1 · SEO 诊断规则引擎（纯规则，无 AI）→ seo_patrol_findings (fresh)
+   Step 2 · 诸葛亮判断 → 复用 persistZhugeActions() → execution_items (pending)
+                  ↓
+[已有] 执行看板 SEO 列 ← FDE 早上打开点「生成」/「跳过」
+```
+
+**关键设计判断**：
+- action 上看板**复用现有 `persistZhugeActions()`**（source 自动为 `'zhuge'`），不新增 source 枚举值，不改 execution_items 约束
+- 诊断规则读 `keyword_snapshots`（per-keyword）+ `gsc_performance_snapshots`（per-page CTR），**不是 flywheel_metrics 聚合值**（这是与 22.D 的本质区别）
+- FDE 永远只看结论 + 点按钮，所有计算在后台
+
+**SEO 诊断规则（MVP，纯规则无 AI）：**
+
+| 规则 ID | 触发条件 | 产出 action_type |
+|---------|---------|-----------------|
+| R1 低 CTR 标题 | 排名 P2-P3 且 GSC CTR < 该排名基准 × 0.6 | `seo.refresh_blog`（标题）|
+| R2 缺内链 | 文章有 GSC 曝光但归因无内链导流 | `seo.refresh_blog`（内链）|
+| R3 内容老化 | 排名近 30 天下滑 > 3 位 | `seo.refresh_blog` |
+| R4 机会词 | DataForSEO 高量低 KD 词未覆盖 | `seo.publish_blog` |
+| R5 未收录 | GSC "discovered not indexed" > 7 天 | `seo.refresh_blog`（重提收录）|
+
+**工程任务清单（S1-S8）：**
+
+| 编号 | 待建项 | 优先级 | 状态 |
+|------|--------|--------|------|
+| `22.E.S2` | `seo_patrol_findings` 表 migration | P1 | 🔨 |
+| `22.E.S3` | SEO 诊断规则库（R1-R5）`src/lib/seo-patrol/` | P1 | 🔨 |
+| `22.E.S2b` | `seo-patrol-daily` cron（两步流水线）+ render.yaml | P1 | 🔨 |
+| `22.E.S1` | 李白评分接入 Blog Studio 发布流程（双路径 < 60 拦截）| P1 | 📋 |
+| `22.E.S4` | 看板 SEO 列头显示 Page-1 北极星数字 | P2 | 📋 |
+| `22.E.S5` | SEO action 卡片主按钮交互（生成/优化/收录）| P2 | 📋 |
+| `22.E.S6` | 客户 SEO 配置（CTS/Oztop 参数表）| P2 | 📋 |
+| `22.E.S7` | Schema 自动验证（Rich Results Test API）| P3 | 📋 |
+| `22.E.S8` | CTS 专项 SOP 文档落文件 | P2 | 📋 |
+
+**里程碑：**
+- **M1（地基）**：S2 表 + S3 规则库建好，`npm run build` 通过，Supabase 能看到 `seo_patrol_findings` 表
+- **M2（第一条 finding）**：S2b cron Step 1 对 CTS 真实数据产出 ≥ 1 条 finding
+- **M3（端到端）**：S2b Step 2 跑通 → CTS 看板 SEO 列出现系统推荐 action
+- **M4（质量关）**：S1 李白评分接入，发布前拦截低分草稿
+
+**客户落地差异**（CTS Tours NZ vs Oztop）：诊断规则通用，仅地区码（NZ 2554 / AU 2036）、发布路径（Next.js 直出 / WordPress+Yoast）、关键词重心、内链目标不同。详见设计文档 §7。
 
 ---
 
