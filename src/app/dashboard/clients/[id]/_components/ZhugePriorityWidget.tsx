@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import type { ZhugeActionRow } from '@/app/api/clients/[id]/zhuge/latest-actions/route';
+import type { ZhugeOutput, PriorityAction } from '@/lib/zhuge/types';
 import {
   FLYWHEEL_BADGE,
   IMPACT_CLS,
@@ -97,8 +98,6 @@ function ActionCard({ action, clientId }: { action: ZhugeActionRow; clientId: st
 // ── Main widget ───────────────────────────────────────────────────────────────
 
 type WidgetState = 'loading' | 'empty' | 'loaded';
-
-import type { ZhugeOutput, PriorityAction } from '@/lib/zhuge/types'
 
 export interface ZhugePriorityWidgetProps {
   clientId: string;

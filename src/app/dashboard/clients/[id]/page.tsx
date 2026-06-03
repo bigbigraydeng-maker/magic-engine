@@ -10,6 +10,7 @@ import { ZhugePriorityWidget } from './_components/ZhugePriorityWidget';
 import { ZhugeDrawer } from './_components/ZhugeDrawer';
 import { NextStepCard, type DiscoveryStatus, type PrescriptionStatus } from './_components/NextStepCard';
 import type { ClientDiscoveryRow } from '@/lib/zhangqian/types';
+import type { ZhugeOutput } from '@/lib/zhuge/types';
 import { ClientDataTab } from './_components/ClientDataTab';
 import { LocaleConfirmBanner } from './_components/LocaleConfirmBanner';
 import { IntelligenceSummarySection } from './_components/intelligence/IntelligenceSummarySection';
@@ -383,7 +384,7 @@ export default function ClientDetailPage() {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('brief');
   const [zhugeDrawerOpen, setZhugeDrawerOpen] = useState(false);
   const [zhugeRefreshKey, setZhugeRefreshKey] = useState(0);
-  const [zhugeFreshOutput, setZhugeFreshOutput] = useState<import('@/lib/zhuge/types').ZhugeOutput | null>(null);
+  const [zhugeFreshOutput, setZhugeFreshOutput] = useState<ZhugeOutput | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);

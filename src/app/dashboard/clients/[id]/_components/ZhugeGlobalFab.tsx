@@ -28,6 +28,7 @@ export function ZhugeGlobalFab({ clientId }: { clientId: string }) {
 
   // Fetch client metadata once so the panel can show a real label
   useEffect(() => {
+    if (!clientId) return
     void (async () => {
       try {
         const res = await fetch(`/api/clients/${clientId}`, { cache: 'no-store' })
@@ -39,6 +40,11 @@ export function ZhugeGlobalFab({ clientId }: { clientId: string }) {
       }
     })()
   }, [clientId])
+
+  // Defensive: if a parent layout forgets to pass clientId (e.g. wrong layout
+  // scope, undefined param), don't crash the entire tree — render nothing.
+  // Hooks above always run; this gate only blocks rendering.
+  if (!clientId) return null
 
   // Infer the current area from pathname so 诸葛亮 knows where the user is
   const currentAreaLabel = inferAreaLabel(pathname, clientId)
