@@ -57,6 +57,38 @@ function authHeader(): string {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+/** Country full-names for DataForSEO `location_name` city builds. */
+const COUNTRY_FULL_NAME: Record<'au' | 'nz', string> = {
+  au: 'Australia',
+  nz: 'New Zealand',
+}
+
+/** Map a city slug (as stored in `industry_ai_visibility_questions.city`) to
+ * its DataForSEO-recognized display name. Keys are lowercase slugs; values
+ * are the city display name DataForSEO accepts in `location_name`. */
+const CITY_DISPLAY_NAME: Record<string, string> = {
+  // New Zealand
+  auckland:    'Auckland',
+  wellington:  'Wellington',
+  christchurch:'Christchurch',
+  queenstown:  'Queenstown',
+  // Australia
+  sydney:      'Sydney',
+  melbourne:   'Melbourne',
+  brisbane:    'Brisbane',
+  perth:       'Perth',
+  adelaide:    'Adelaide',
+  'gold-coast':'Gold Coast',
+  gold_coast:  'Gold Coast',
+}
+
+export interface SerpOptions {
+  /** Optional city slug — when set, DataForSEO uses location_name = "{City},{Country}" instead of country-level location_code. */
+  city?: string | null
+  /** Override language. Default 'en'. Use 'zh-CN' for Chinese questions. */
+  language?: string
+}
+
 /**
  * Fetch a Google SERP page via DataForSEO: organic results, paid advertisers,
  * and the Google AI Overview answer.
@@ -65,12 +97,28 @@ function authHeader(): string {
  *
  * @param query       Search term, e.g. "vinyl flooring brisbane"
  * @param countryCode 'au' (default) or 'nz'
+ * @param options     Optional: city for city-level location, language override.
  */
 export async function getSerpPage(
   query: string,
   countryCode: 'au' | 'nz' = 'au',
+  options: SerpOptions = {},
 ): Promise<DfseSerpResult> {
-  const locationCode = LOCATION_CODE[countryCode]
+  const language = options.language ?? 'en'
+
+  // Build location: city-level if city provided AND mapped, else country-level
+  let locationField: { location_name: string } | { location_code: number }
+  if (options.city) {
+    const cityDisplay = CITY_DISPLAY_NAME[options.city.toLowerCase()]
+    if (cityDisplay) {
+      locationField = { location_name: `${cityDisplay},${COUNTRY_FULL_NAME[countryCode]}` }
+    } else {
+      // Unknown city slug — refuse rather than silently fall back to country
+      throw new Error(`getSerpPage: unknown city slug "${options.city}". Add to CITY_DISPLAY_NAME in serp.ts.`)
+    }
+  } else {
+    locationField = { location_code: LOCATION_CODE[countryCode] }
+  }
 
   const res = await fetch(
     `${DATAFORSEO_API_BASE}/serp/google/organic/live/advanced`,
@@ -80,8 +128,8 @@ export async function getSerpPage(
       body: JSON.stringify([
         {
           keyword:       query,
-          location_code: locationCode,
-          language_code: 'en',
+          ...locationField,
+          language_code: language,
           depth:         10,
           se_domain:     countryCode === 'nz' ? 'google.co.nz' : 'google.com.au',
         },

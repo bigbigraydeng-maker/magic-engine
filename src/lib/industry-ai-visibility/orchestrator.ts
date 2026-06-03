@@ -91,6 +91,7 @@ export async function runCollection(opts: RunCollectionOptions): Promise<RunSumm
   let attempted = 0
   let ok = 0
   let failed = 0
+  let partial = 0
   let snapshotsWritten = 0
   let totalCost = 0
 
@@ -99,6 +100,9 @@ export async function runCollection(opts: RunCollectionOptions): Promise<RunSumm
   const wantsGoogleSerp    = platforms.includes('google_serp')
   const wantsAnyDataForSeo = wantsGoogleAI || wantsGoogleSerp
 
+  // H2 fix: wrap the main loop + finalize in try/catch so an uncaught error
+  // mid-loop doesn't leave the run row stuck at status='running' forever.
+  try {
   for (const q of qs) {
     attempted++
 
@@ -149,11 +153,15 @@ export async function runCollection(opts: RunCollectionOptions): Promise<RunSumm
     }
 
     if (rowsToInsert.length > 0) {
-      const { error: insertErr } = await supabaseAdmin
+      // H1 fix: upsert on (question_id, platform, week_of) so re-running the
+      // same week refreshes existing rows instead of double-writing.
+      // The UNIQUE constraint is enforced at DB level by migration
+      // 20260622000002_ai_visibility_archive_fixes.sql.
+      const { error: upsertErr } = await supabaseAdmin
         .from('industry_ai_visibility_snapshots')
-        .insert(rowsToInsert)
-      if (insertErr) {
-        console.error(`Snapshot insert failed for question ${q.id}:`, insertErr)
+        .upsert(rowsToInsert, { onConflict: 'question_id,platform,week_of' })
+      if (upsertErr) {
+        console.error(`Snapshot upsert failed for question ${q.id}:`, upsertErr)
         questionHadAnyFail = true
       } else {
         snapshotsWritten += rowsToInsert.length
@@ -168,15 +176,34 @@ export async function runCollection(opts: RunCollectionOptions): Promise<RunSumm
         .eq('id', q.id)
     }
 
-    if (questionHadAnyOk) ok++
-    else if (questionHadAnyFail) failed++
+    // Track question outcome: all-ok, all-failed, or partial.
+    if (questionHadAnyOk && !questionHadAnyFail) ok++
+    else if (questionHadAnyFail && !questionHadAnyOk) failed++
+    else if (questionHadAnyOk && questionHadAnyFail) partial++
+  }
+
+  } catch (loopErr) {
+    // H2 fix: any unexpected error in the main loop → mark run as failed
+    // (preserves whatever questions we already processed in the counters)
+    const msg = loopErr instanceof Error ? loopErr.message : String(loopErr)
+    await markRunFailed(runId, `Main loop error: ${msg}`, startedAt)
+    throw loopErr
   }
 
   // 4. Finalize run row
   const durationSec = Math.round((Date.now() - startedAt) / 1000)
+  // Status semantics:
+  //   completed = every attempted question had ALL platforms succeed
+  //   partial   = at least one question fully ok, OR some partial mixed-success questions
+  //   failed    = no question had any successful platform
   const status: RunSummary['status'] =
-    failed === 0 && ok > 0 ? 'completed' :
-    ok > 0                 ? 'partial'    : 'failed'
+    (failed === 0 && partial === 0 && ok > 0) ? 'completed' :
+    (ok > 0 || partial > 0)                   ? 'partial'    : 'failed'
+
+  // For DB columns we collapse partial into questions_ok (any platform OK)
+  // to preserve the existing column semantics. The detailed completed/partial
+  // split is reflected in the `status` column.
+  const dbOk = ok + partial
 
   await supabaseAdmin
     .from('industry_ai_visibility_runs')
@@ -184,7 +211,7 @@ export async function runCollection(opts: RunCollectionOptions): Promise<RunSumm
       completed_at: new Date().toISOString(),
       status,
       questions_attempted: attempted,
-      questions_ok: ok,
+      questions_ok: dbOk,
       questions_failed: failed,
       snapshots_written: snapshotsWritten,
       total_cost_usd: totalCost,
@@ -196,7 +223,7 @@ export async function runCollection(opts: RunCollectionOptions): Promise<RunSumm
     run_id: runId,
     week_of: weekOf,
     questions_attempted: attempted,
-    questions_ok: ok,
+    questions_ok: dbOk,
     questions_failed: failed,
     snapshots_written: snapshotsWritten,
     total_cost_usd: totalCost,

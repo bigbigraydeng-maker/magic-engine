@@ -125,8 +125,17 @@ async function collectDataForSeoPair(question: Question): Promise<SerpPair> {
   const aiBase   = emptyResult('google_ai_overview', 'dataforseo-serp-advanced')
   const serpBase = emptyResult('google_serp',        'dataforseo-serp-advanced')
 
+  // C1+C2 fix: forward city + language to DataForSEO instead of silently
+  // dropping them. Without this, city questions get country-level SERP and
+  // zh questions get English-locale SERP — both errors would be permanently
+  // locked into the time series by locked_at on first successful collection.
+  const language = question.language === 'zh' ? 'zh-CN' : 'en'
+
   try {
-    const serp = await getSerpPage(question.question_text, country)
+    const serp = await getSerpPage(question.question_text, country, {
+      city: question.city,
+      language,
+    })
     const half = DATAFORSEO_COST_PER_CALL / 2  // amortize one API call across two snapshot rows
 
     // ─── google_ai_overview snapshot ───
