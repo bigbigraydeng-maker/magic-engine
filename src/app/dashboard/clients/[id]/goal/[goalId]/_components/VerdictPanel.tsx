@@ -17,6 +17,7 @@
 
 import { useState } from 'react'
 import type { GoalRow, GoalVerdict } from '@/types/strategy'
+import { PRIMARY_METRIC_CATALOG } from '@/types/strategy'
 
 const VERDICT_BADGE: Record<GoalVerdict, { label: string; color: string; emoji: string; textClass: string }> = {
   confirmed:    { label: 'Confirmed',    color: 'bg-status-track/10 text-status-track border-status-track/30', emoji: '✅', textClass: 'text-status-track' },
@@ -131,6 +132,48 @@ function VerdictModal({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
+  // P31.X.2 — resolve measurement type from catalog (no DB field needed)
+  const metricDef = PRIMARY_METRIC_CATALOG.find(m => m.key === goal.primary_metric_key)
+  const isAutoMeasurement = metricDef?.measurement === 'auto'
+
+  // P31.X.2 — auto-fetch state
+  const [fetching, setFetching] = useState(false)
+  const [fetchResult, setFetchResult] = useState<{
+    label: string; source: string; snapshot_date: string
+  } | null>(null)
+  const [fetchError, setFetchError] = useState('')
+
+  async function handleAutoFetch() {
+    setFetching(true)
+    setFetchError('')
+    setFetchResult(null)
+    try {
+      const res = await fetch(`/api/goals/${goal.id}/fetch-current-value`)
+      const j = await res.json() as {
+        ok: boolean
+        value?: number
+        source?: string
+        snapshot_date?: string
+        label?: string
+        reason?: string
+      }
+      if (j.ok && typeof j.value === 'number') {
+        setCurrentValue(String(j.value))
+        setFetchResult({
+          label: j.label ?? String(j.value),
+          source: j.source ?? '',
+          snapshot_date: j.snapshot_date ?? '',
+        })
+      } else {
+        setFetchError(j.reason ?? 'Auto-fetch returned no data')
+      }
+    } catch {
+      setFetchError('Network error during auto-fetch')
+    } finally {
+      setFetching(false)
+    }
+  }
+
   // Live preview of verdict (Phase 32: direction-aware)
   const numericCurrent = currentValue ? parseFloat(currentValue) : null
   const isDecrease = goal.target_direction === 'decrease'
@@ -185,20 +228,45 @@ function VerdictModal({
         </p>
 
         <div className="space-y-2">
-          <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">
-            Current value of {goal.primary_metric_label}
-          </label>
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">
+              Current value of {goal.primary_metric_label}
+            </label>
+            {/* P31.X.2 — auto-fetch button (only for auto-measurement metrics) */}
+            {isAutoMeasurement && (
+              <button
+                type="button"
+                onClick={handleAutoFetch}
+                disabled={fetching}
+                className="flex items-center gap-1 rounded-lg border border-me-ochre/30 bg-me-ochre/10 px-2.5 py-1 text-[11px] font-bold text-me-ochre transition-colors hover:bg-me-ochre/20 disabled:opacity-50"
+              >
+                {fetching ? '⏳ 获取中…' : '⚡ 自动获取'}
+              </button>
+            )}
+          </div>
           <div className="flex items-center gap-3">
             <input
               type="number"
               value={currentValue}
-              onChange={e => setCurrentValue(e.target.value)}
+              onChange={e => { setCurrentValue(e.target.value); setFetchResult(null) }}
               placeholder={`Was ${goal.baseline_value}, target ${goal.target_value}`}
               className="w-48 rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
               autoFocus
             />
             <span className="text-xs font-semibold text-me-charcoal/55">{goal.primary_metric_unit}</span>
           </div>
+          {/* Auto-fetch result label */}
+          {fetchResult && (
+            <div className="rounded-lg border border-me-ochre/20 bg-me-ochre/8 px-3 py-2">
+              <p className="text-[11px] font-semibold text-me-ochre">{fetchResult.label}</p>
+              <p className="mt-0.5 text-[10px] font-semibold text-me-charcoal/45">
+                来源：{fetchResult.source} · 截至 {new Date(fetchResult.snapshot_date).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}
+              </p>
+            </div>
+          )}
+          {fetchError && (
+            <p className="text-[11px] font-semibold text-status-rej">⚠️ {fetchError}</p>
+          )}
           <p className="text-[11px] font-semibold text-me-charcoal/55">
             Baseline {goal.baseline_value.toLocaleString()} {isDecrease ? '↓' : '→'} Target {goal.target_value.toLocaleString()}
             {isDecrease && (
