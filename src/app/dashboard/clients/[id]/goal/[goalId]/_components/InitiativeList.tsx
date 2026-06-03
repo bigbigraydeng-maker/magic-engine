@@ -62,14 +62,28 @@ export function InitiativeList({ goal, canEdit }: Props) {
   const [editing, setEditing] = useState<InitiativeRow | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
+  // P33.11/P33.12 — execution summary keyed by initiative_id
+  type ActionCounts = { total: number; completed: number; in_progress: number; pending: number }
+  const [execSummary, setExecSummary] = useState<{
+    byInitiative: Record<string, ActionCounts>
+    totals: ActionCounts
+  } | null>(null)
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch(`/api/goals/${goal.id}/initiatives`)
-      if (!res.ok) return
-      const j = await res.json()
-      // B7 fix: normalize NUMERIC strings to numbers (Supabase returns numeric as string)
-      setItems(normalizeInitiativeList(j.initiatives ?? []))
+      const [initRes, summaryRes] = await Promise.all([
+        fetch(`/api/goals/${goal.id}/initiatives`),
+        fetch(`/api/goals/${goal.id}/execution-summary`),
+      ])
+      if (initRes.ok) {
+        const j = await initRes.json()
+        setItems(normalizeInitiativeList(j.initiatives ?? []))
+      }
+      if (summaryRes.ok) {
+        const s = await summaryRes.json()
+        setExecSummary(s)
+      }
     } finally {
       setLoading(false)
     }
@@ -130,6 +144,10 @@ export function InitiativeList({ goal, canEdit }: Props) {
           const label = INITIATIVE_TYPE_LABEL[item.initiative_type]
           const tier = INITIATIVE_TYPE_TIER[item.initiative_type]
           const isExpanded = expandedId === item.id
+          const counts = execSummary?.byInitiative[item.id]
+          const completionPct = counts && counts.total > 0
+            ? Math.round((counts.completed / counts.total) * 100)
+            : null
           return (
             <div
               key={item.id}
@@ -167,6 +185,29 @@ export function InitiativeList({ goal, canEdit }: Props) {
                           ? item.hypothesis.slice(0, 220) + '…'
                           : item.hypothesis}
                       </p>
+                    )}
+                    {/* P33.11 — compact execution stats on collapsed card */}
+                    {!isExpanded && (
+                      <div className="mt-2 flex items-center gap-3">
+                        <span className="text-[10px] font-semibold text-me-charcoal/45">
+                          📋 {(item.campaign_ids ?? []).length} Campaign
+                        </span>
+                        {counts && counts.total > 0 ? (
+                          <>
+                            <span className="text-[10px] font-semibold text-me-charcoal/45">
+                              ✅ {counts.completed}/{counts.total} Actions ({completionPct}%)
+                            </span>
+                            <div className="w-16 h-1 rounded-full bg-me-charcoal/10 overflow-hidden">
+                              <div
+                                className="h-full rounded-full bg-status-track"
+                                style={{ width: `${completionPct}%` }}
+                              />
+                            </div>
+                          </>
+                        ) : counts ? (
+                          <span className="text-[10px] font-semibold text-me-charcoal/35">暂无 Actions</span>
+                        ) : null}
+                      </div>
                     )}
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-2">
@@ -212,6 +253,7 @@ export function InitiativeList({ goal, canEdit }: Props) {
                     initiative={item}
                     clientId={clientId}
                     onUpdated={load}
+                    actionCounts={counts}
                   />
                 </div>
               )}
@@ -219,6 +261,65 @@ export function InitiativeList({ goal, canEdit }: Props) {
           )
         })}
       </div>
+
+      {/* P33.12 — 执行进度摘要（仅在有数据时展示） */}
+      {execSummary && execSummary.totals.total > 0 && (
+        <div className="mt-5 rounded-lg border border-black/8 bg-me-ivory px-5 py-4">
+          <p className="mb-3 text-[10px] font-bold uppercase tracking-wide text-me-charcoal/45">
+            执行进度摘要
+          </p>
+          <div className="grid grid-cols-3 gap-3 mb-4 text-center">
+            <div>
+              <div className="text-xl font-black text-me-charcoal">{execSummary.totals.total}</div>
+              <div className="text-[10px] font-semibold text-me-charcoal/45 mt-0.5">总 Actions</div>
+            </div>
+            <div>
+              <div className="text-xl font-black text-status-track">{execSummary.totals.completed}</div>
+              <div className="text-[10px] font-semibold text-me-charcoal/45 mt-0.5">已完成</div>
+            </div>
+            <div>
+              <div className="text-xl font-black text-me-ochre">{execSummary.totals.in_progress}</div>
+              <div className="text-[10px] font-semibold text-me-charcoal/45 mt-0.5">进行中</div>
+            </div>
+          </div>
+          {/* Overall progress bar */}
+          <div className="mb-1 flex items-center justify-between text-[10px] font-semibold text-me-charcoal/55">
+            <span>整体完成率</span>
+            <span className="font-black text-me-charcoal">
+              {Math.round((execSummary.totals.completed / execSummary.totals.total) * 100)}%
+            </span>
+          </div>
+          <div className="h-2 w-full rounded-full bg-me-charcoal/10 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-status-track transition-all"
+              style={{ width: `${Math.round((execSummary.totals.completed / execSummary.totals.total) * 100)}%` }}
+            />
+          </div>
+          {/* Per-initiative breakdown */}
+          {realInitiatives.length > 1 && (
+            <div className="mt-4 space-y-2">
+              {realInitiatives.map(initiative => {
+                const c = execSummary.byInitiative[initiative.id]
+                if (!c || c.total === 0) return null
+                const pct = Math.round((c.completed / c.total) * 100)
+                return (
+                  <div key={initiative.id} className="flex items-center gap-3">
+                    <div className="min-w-0 flex-1 truncate text-[10px] font-semibold text-me-charcoal/65">
+                      {initiative.title}
+                    </div>
+                    <div className="w-20 h-1.5 rounded-full bg-me-charcoal/10 overflow-hidden shrink-0">
+                      <div className="h-full rounded-full bg-status-track" style={{ width: `${pct}%` }} />
+                    </div>
+                    <div className="text-[10px] font-black text-me-charcoal/55 shrink-0 w-10 text-right">
+                      {pct}%
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {drawerOpen && (
         <InitiativeFormDrawer

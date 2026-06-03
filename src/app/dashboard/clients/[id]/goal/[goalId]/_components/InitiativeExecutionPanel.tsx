@@ -25,9 +25,11 @@ interface Props {
   clientId: string
   /** Called after campaign_ids or marketing plan changes so parent can refresh */
   onUpdated?: () => void
+  /** Action counts for this initiative (from execution-summary API) */
+  actionCounts?: { total: number; completed: number; in_progress: number; pending: number }
 }
 
-export function InitiativeExecutionPanel({ initiative, clientId, onUpdated }: Props) {
+export function InitiativeExecutionPanel({ initiative, clientId, onUpdated, actionCounts }: Props) {
   const [campaigns, setCampaigns] = useState<CampaignLite[]>([])
   const [campaignsLoading, setCampaignsLoading] = useState(true)
   const [addingCampaign, setAddingCampaign] = useState(false)
@@ -111,8 +113,42 @@ export function InitiativeExecutionPanel({ initiative, clientId, onUpdated }: Pr
     onUpdated?.()
   }
 
+  // P33.11 — derived stats for header bar
+  const campaignCount = (initiative.campaign_ids ?? []).length
+  const completionPct = actionCounts && actionCounts.total > 0
+    ? Math.round((actionCounts.completed / actionCounts.total) * 100)
+    : null
+
   return (
     <div className="mt-3 rounded-lg border border-black/8 bg-me-ivory px-4 py-3">
+      {/* P33.11 — Campaign count + action completion rate */}
+      <div className="mb-3 flex items-center gap-4 text-[11px] font-semibold text-me-charcoal/55">
+        <span>
+          📋 <span className="font-black text-me-charcoal">{campaignCount}</span> 个 Campaign
+        </span>
+        {actionCounts && actionCounts.total > 0 ? (
+          <span>
+            ✅ Actions:{' '}
+            <span className="font-black text-me-charcoal">{actionCounts.completed}</span>
+            /{actionCounts.total}{' '}
+            <span className={`font-black ${completionPct! >= 80 ? 'text-status-track' : completionPct! >= 40 ? 'text-me-ochre' : 'text-me-charcoal/55'}`}>
+              ({completionPct}%)
+            </span>
+          </span>
+        ) : actionCounts ? (
+          <span className="text-me-charcoal/35">暂无关联 Actions</span>
+        ) : null}
+        {actionCounts && actionCounts.total > 0 && (
+          <div className="flex-1 max-w-[120px]">
+            <div className="h-1.5 w-full rounded-full bg-me-charcoal/10 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-status-track transition-all"
+                style={{ width: `${completionPct}%` }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
       <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-me-charcoal/45">
         关联执行
       </p>
