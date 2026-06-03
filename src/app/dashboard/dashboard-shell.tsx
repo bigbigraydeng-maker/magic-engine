@@ -32,8 +32,11 @@ const ADMIN_SECTIONS: NavSection[] = [
       { key: 'analytics',        label: 'Analytics',       mark: 'AN', soon: true },
       { key: 'reports',          label: 'Reports',         mark: 'RP', href: '/dashboard/reports' },
       { key: 'billing-monitor',  label: 'Billing Monitor', mark: 'BM', href: '/dashboard/admin/billing-monitor' },
+      { key: 'mtc-overview',     label: 'MTC Overview',    mark: 'MC', href: '/dashboard/admin/mtc-overview' },
       { key: 'ai-gateway',       label: 'AI Gateway',      mark: 'AG', href: '/dashboard/admin/ai-gateway' },
       { key: 'viral-references', label: 'Viral References',mark: 'VR', href: '/dashboard/admin/viral-references' },
+      { key: 'user-console',     label: 'User Console',    mark: 'UC', href: '/dashboard/admin/users' },
+      { key: 'industry-baselines', label: 'Industry Baselines', mark: 'IB', href: '/dashboard/industry-baselines' },
     ],
   },
 ]

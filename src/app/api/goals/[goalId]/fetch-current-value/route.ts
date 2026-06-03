@@ -1,10 +1,11 @@
 /**
  * GET /api/goals/[goalId]/fetch-current-value
  *
- * P31.X.2 — Auto-fetch the current value for a Goal's primary metric.
+ * P31.X.2 / A2.1+ — Auto-fetch the current value for a Goal's primary metric.
  *
- * Only works when the metric's measurement type is 'auto'.
- * Reads from already-cached ME data (no live API calls).
+ * Works for measurement='auto' AND 'hybrid' (the auto half — FDE tops up the
+ * non-automated portion via Submit Verdict).
+ * Reads from already-cached ME data + DataForSEO live for brand_search_volume.
  *
  * Response (success):
  *   { ok: true, value: number, source: string, snapshot_date: string, label: string }
