@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { AiVisibilityPanel } from './_components/AiVisibilityPanel'
+import { GoogleSerpPanel } from './_components/GoogleSerpPanel'
 
 interface BaselineDomain {
   id: string
@@ -517,7 +519,7 @@ export default function IndustryBaselinesPage() {
   const [domains, setDomains] = useState<BaselineDomain[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [activeTab, setActiveTab] = useState<'baselines' | 'runs'>('baselines')
+  const [activeTab, setActiveTab] = useState<'baselines' | 'ai_visibility' | 'google_serp' | 'runs'>('baselines')
   const [runsRefreshKey, setRunsRefreshKey] = useState(0)
   const [triggering, setTriggering] = useState(false)
   const [triggerMsg, setTriggerMsg] = useState('')
@@ -595,20 +597,25 @@ export default function IndustryBaselinesPage() {
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-black/10">
-          {(['baselines', 'runs'] as const).map(tab => (
+          {([
+            { key: 'baselines',     label: 'SEO Baselines' },
+            { key: 'ai_visibility', label: 'AI 可见度' },
+            { key: 'google_serp',   label: 'Google 排名' },
+            { key: 'runs',          label: 'Cron Runs' },
+          ] as const).map(({ key, label }) => (
             <button
-              key={tab}
+              key={key}
               onClick={() => {
-                setActiveTab(tab)
-                if (tab === 'runs') setRunsRefreshKey(k => k + 1)
+                setActiveTab(key)
+                if (key === 'runs') setRunsRefreshKey(k => k + 1)
               }}
               className={`-mb-px border-b-2 px-4 py-2 text-sm font-black transition-colors ${
-                activeTab === tab
+                activeTab === key
                   ? 'border-me-ochre text-me-ochre'
                   : 'border-transparent text-me-charcoal/45 hover:text-me-charcoal/75'
               }`}
             >
-              {tab === 'baselines' ? 'Baselines' : 'Cron Runs'}
+              {label}
             </button>
           ))}
         </div>
@@ -643,6 +650,10 @@ export default function IndustryBaselinesPage() {
             ))}
           </>
         )}
+
+        {activeTab === 'ai_visibility' && <AiVisibilityPanel />}
+
+        {activeTab === 'google_serp' && <GoogleSerpPanel />}
 
         {activeTab === 'runs' && (
           <CronRunsPanel refreshKey={runsRefreshKey} />
