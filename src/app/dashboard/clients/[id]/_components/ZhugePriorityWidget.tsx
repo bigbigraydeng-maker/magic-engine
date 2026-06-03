@@ -99,8 +99,6 @@ function ActionCard({ action, clientId }: { action: ZhugeActionRow; clientId: st
 
 type WidgetState = 'loading' | 'empty' | 'loaded';
 
-import type { ZhugeOutput, PriorityAction } from '@/lib/zhuge/types'
-
 export interface ZhugePriorityWidgetProps {
   clientId: string;
   /** Whether 张骞 discovery is confirmed (gate for "询问诸葛亮" CTA). */
