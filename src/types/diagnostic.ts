@@ -69,7 +69,8 @@ export type ReputationFindingType =
   | 'insufficient_review_count'
   | 'inconsistent_business_info'
   | 'no_review_platform'
-  | 'business_not_listed'  // P8.5.20: no Google Business Profile found
+  | 'business_not_listed'         // P8.5.20: no Google Business Profile found
+  | 'reviews_likely_off_platform' // A1: high rating but very few GBP reviews → industry platforms
 
 export type CompetitorFindingType =
   | 'competitor_keyword_gap'

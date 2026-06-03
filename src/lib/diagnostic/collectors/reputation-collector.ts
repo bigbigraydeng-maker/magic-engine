@@ -90,6 +90,15 @@ export function scoreReputation(signals: ReputationSignals): number | null {
 // ReputationCollector
 // ---------------------------------------------------------------------------
 
+export interface ReputationCollectorContext {
+  /** Business trading name, e.g. "CTS Tours NZ". Used to build a precise Places query. */
+  businessName?: string | null
+  /** Primary city, e.g. "Auckland". Combined with country for geo-precision. */
+  city?: string | null
+  /** ISO 2-letter country code, e.g. "NZ". */
+  country?: string | null
+}
+
 export class ReputationCollector {
   constructor(private readonly timeoutMs: number = MAX_COLLECTOR_TIMEOUT_MS) {}
 
@@ -97,6 +106,7 @@ export class ReputationCollector {
     clientId: string,
     domain: string,
     _keywords: string[],
+    ctx: ReputationCollectorContext = {},
   ): Promise<CollectorResult> {
     const fallback: CollectorResult = { score: null, findings: [] }
 
@@ -105,7 +115,7 @@ export class ReputationCollector {
     )
 
     try {
-      return await Promise.race([this.fetchAndScore(clientId, domain), timeout])
+      return await Promise.race([this.fetchAndScore(clientId, domain, ctx), timeout])
     } catch {
       return fallback
     }
@@ -115,8 +125,24 @@ export class ReputationCollector {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  private async fetchAndScore(clientId: string, domain: string): Promise<CollectorResult> {
-    const data = await getBusinessReviews(domain)
+  private buildQuery(domain: string, ctx: ReputationCollectorContext): string {
+    // Prefer a rich query: "<BusinessName> <City> <Country>" for precision.
+    // Fall back to the bare domain only when no name is available — a raw
+    // domain string is ambiguous and Google may return a wrong match.
+    if (ctx.businessName) {
+      const parts = [ctx.businessName, ctx.city, ctx.country].filter(Boolean)
+      return parts.join(' ')
+    }
+    return domain
+  }
+
+  private async fetchAndScore(
+    clientId: string,
+    domain: string,
+    ctx: ReputationCollectorContext,
+  ): Promise<CollectorResult> {
+    const query = this.buildQuery(domain, ctx)
+    const data = await getBusinessReviews(query)
 
     // P8.5.20: business not listed on Google → score is unknowable
     if (!data) {

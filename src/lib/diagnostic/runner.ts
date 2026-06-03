@@ -67,8 +67,8 @@ export async function executeDiagnosticRun(
     .eq('id', runId)
 
   try {
-    const [domain, keywords, gscQueries] = await fetchClientData(supabase, clientId)
-    const resultMap = await runCollectors(supabase, clientId, domain, keywords, gscQueries, module)
+    const [client, keywords, gscQueries] = await fetchClientData(supabase, clientId)
+    const resultMap = await runCollectors(supabase, clientId, client, keywords, gscQueries, module)
     await persistResult(supabase, runId, resultMap)
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
@@ -98,18 +98,30 @@ export async function runDiagnostic(
 // Private helpers
 // ---------------------------------------------------------------------------
 
+interface ClientData {
+  domain: string
+  name: string | null
+  city: string | null
+  country: string | null
+}
+
 async function fetchClientData(
   supabase: SupabaseClient,
   clientId: string,
-): Promise<[string, string[], string[]]> {
+): Promise<[ClientData, string[], string[]]> {
   const [clientRes, kwRes, discoveryRes] = await Promise.all([
-    supabase.from('clients').select('domain').eq('id', clientId).single(),
+    supabase.from('clients').select('domain, name, city, country').eq('id', clientId).single(),
     supabase.from('keywords').select('keyword').eq('client_id', clientId).eq('status', 'approved'),
     supabase.from('client_discovery').select('payload').eq('client_id', clientId).maybeSingle(),
   ])
 
-  const domain =
-    (clientRes.data as { domain: string | null } | null)?.domain ?? ''
+  const raw = clientRes.data as { domain: string | null; name: string | null; city: string | null; country: string | null } | null
+  const client: ClientData = {
+    domain: raw?.domain ?? '',
+    name: raw?.name ?? null,
+    city: raw?.city ?? null,
+    country: raw?.country ?? null,
+  }
   const keywords =
     (kwRes.data as { keyword: string }[] | null)?.map(k => k.keyword) ?? []
 
@@ -118,17 +130,18 @@ async function fetchClientData(
   const payload = (discoveryRes.data as { payload?: DiscoveryPayload } | null)?.payload
   const gscQueries = payload?.advanced?.gsc_data?.rows?.map(r => r.query) ?? []
 
-  return [domain, keywords, gscQueries]
+  return [client, keywords, gscQueries]
 }
 
 async function runCollectors(
   supabase: SupabaseClient,
   clientId: string,
-  domain: string,
+  client: ClientData,
   keywords: string[],
   gscQueries: string[],
   module: DiagnosticModule,
 ): Promise<Record<string, CollectorResult>> {
+  const { domain } = client
   const jobs: Array<{ dim: string; promise: Promise<CollectorResult> }> = []
 
   if (module === 'seo' || module === 'full') {
@@ -138,7 +151,14 @@ async function runCollectors(
     jobs.push({ dim: 'social', promise: new SocialCollector(supabase).collect(clientId, domain, keywords) })
   }
   if (module === 'reputation' || module === 'full') {
-    jobs.push({ dim: 'reputation', promise: new ReputationCollector().collect(clientId, domain, keywords) })
+    jobs.push({
+      dim: 'reputation',
+      promise: new ReputationCollector().collect(clientId, domain, keywords, {
+        businessName: client.name,
+        city: client.city,
+        country: client.country,
+      }),
+    })
   }
   if (module === 'competitor' || module === 'full') {
     jobs.push({ dim: 'competitor', promise: new CompetitorCollector().collect(clientId, domain, keywords) })

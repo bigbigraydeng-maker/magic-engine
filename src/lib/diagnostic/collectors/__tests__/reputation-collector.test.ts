@@ -241,6 +241,49 @@ describe('scoreReputation() — pure function', () => {
 })
 
 // ---------------------------------------------------------------------------
+// A1.5: rich query construction — businessName + city + country
+// ---------------------------------------------------------------------------
+
+describe('ReputationCollector — rich query construction (A1.5)', () => {
+  beforeEach(() => {
+    mockGetBusinessReviews.mockResolvedValue({
+      placeId: 'abc123',
+      name: 'CTS Tours NZ',
+      rating: 4.0,
+      totalReviews: 5,
+    })
+  })
+
+  it('passes rich query to getBusinessReviews when businessName provided', async () => {
+    await new ReputationCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS, {
+      businessName: 'CTS Tours NZ',
+      city: 'Auckland',
+      country: 'NZ',
+    })
+    expect(mockGetBusinessReviews).toHaveBeenCalledWith('CTS Tours NZ Auckland NZ')
+  })
+
+  it('omits null city/country parts from the query', async () => {
+    await new ReputationCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS, {
+      businessName: 'CTS Tours NZ',
+      city: null,
+      country: null,
+    })
+    expect(mockGetBusinessReviews).toHaveBeenCalledWith('CTS Tours NZ')
+  })
+
+  it('falls back to domain when businessName not provided', async () => {
+    await new ReputationCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS, {})
+    expect(mockGetBusinessReviews).toHaveBeenCalledWith(DOMAIN)
+  })
+
+  it('falls back to domain when ctx is omitted entirely', async () => {
+    await new ReputationCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS)
+    expect(mockGetBusinessReviews).toHaveBeenCalledWith(DOMAIN)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // A1: new finding — reviews_likely_off_platform
 // ---------------------------------------------------------------------------
 
