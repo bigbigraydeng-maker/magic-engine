@@ -117,22 +117,45 @@ export function AiVisibilityPanel() {
   useEffect(() => { loadAll() }, [loadAll])
 
   const handleCollect = async () => {
-    if (!confirm('立即触发一次采集？将对所有 active 问题调用 ChatGPT + DataForSEO，大约 1-3 分钟。')) return
+    if (!confirm('立即触发一次采集？将对所有 active 问题调用 ChatGPT + DataForSEO，约 1-5 分钟（后台执行，可关闭页面）。')) return
     setCollecting(true)
-    setCollectMsg('')
+    setCollectMsg('采集排队中…')
     try {
       const res = await fetch('/api/baselines/ai-collect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       })
-      const j = await res.json()
-      if (!res.ok) {
-        setCollectMsg(`✗ ${j.error ?? 'Failed'}`)
-      } else {
-        setCollectMsg(`✓ ${j.questions_ok}/${j.questions_attempted} ok · ${j.snapshots_written} snapshots · $${(j.total_cost_usd ?? 0).toFixed(4)} · ${j.duration_seconds}s`)
-        await loadAll()
+
+      // Defensive parse: 502 / 504 / Render restart pages return HTML, not JSON.
+      // Old code did `await res.json()` which threw "Unexpected token '<'".
+      const text = await res.text()
+      let json: { run_id?: string; status?: string; error?: string; message?: string } = {}
+      try {
+        json = text ? JSON.parse(text) : {}
+      } catch {
+        const preview = text.slice(0, 120).replace(/\s+/g, ' ').trim()
+        setCollectMsg(`✗ HTTP ${res.status} — 服务端返回非 JSON：${preview}…`)
+        return
       }
+
+      if (!res.ok) {
+        setCollectMsg(`✗ ${json.error ?? `HTTP ${res.status}`}`)
+        return
+      }
+
+      // 202 Accepted (async path) — work runs in background, poll runs table
+      if (res.status === 202 && json.run_id) {
+        setCollectMsg(`✓ 已排队 run ${json.run_id.slice(0, 8)}… — 后台执行中，约 1-3 分钟后刷新看结果`)
+        // Auto-refresh snapshots after 90s (typical batch duration)
+        setTimeout(() => { void loadAll() }, 90_000)
+        return
+      }
+
+      // 200 OK (legacy sync path) — old summary shape
+      const sync = json as unknown as { questions_ok: number; questions_attempted: number; snapshots_written: number; total_cost_usd?: number; duration_seconds: number }
+      setCollectMsg(`✓ ${sync.questions_ok}/${sync.questions_attempted} ok · ${sync.snapshots_written} snapshots · $${(sync.total_cost_usd ?? 0).toFixed(4)} · ${sync.duration_seconds}s`)
+      await loadAll()
     } catch (err) {
       setCollectMsg(`✗ ${(err as Error).message}`)
     } finally {
