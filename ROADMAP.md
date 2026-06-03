@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-03 11:21 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-03 12:05 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -180,6 +180,45 @@ GOAL (1 active per client) → INITIATIVES (按工作流目的切，非按维度
 **Phase 31 状态：✅ MVP 闭环完成 2026-06-02**
 
 整个 Goal 生命周期闭环：FDE 创建 Goal → 配 2-5 个 Initiative → 子牙润色 hypothesis → 老 actions 迁移 → 90 天后 cron 自动标 expired → FDE 填 current_value → 系统判 verdict + archive → 历史归档页学习。
+
+---
+
+### Phase 33 — Strategy-Execution Bridge（战略执行连线层）⭐⭐⭐ 2026-06-03
+
+> **目的**：把 Goal/Initiative 策略层和现有执行层（Campaign / Marketing Plan / Kanban）连线，让 Goal 功能在 ME 内实际可用。  
+> **依赖**：Phase 31 ✅ + Phase 32 ✅  
+> **PR**：[#299](https://github.com/bigbigraydeng-maker/magic-engine/pull/299)
+
+#### M1 — 数据地基（✅ 完成 2026-06-03）
+
+- [x] **P33.1** `initiatives` 表加 `campaign_ids uuid[]`（Initiative 关联哪些 Campaign）
+- [x] **P33.2** `marketing_plans` 表加 `initiative_id uuid` FK（Plan 归属哪个 Initiative）
+- [x] **P33.3** `execution_items.initiative_id` 确认已存在（Phase 31 migration，TypeScript 类型同步补齐）
+- [x] **P33.4** `InitiativeRow` 加 `campaign_ids`；`GeneratePlanRequest` 加 `initiative_id`；`ExecutionItem` 加 `initiative_id`
+
+#### M2 — Initiative 详情页连线入口（✅ 完成 2026-06-03）
+
+- [x] **P33.5** Initiative 卡片展开显示「关联执行」区域（已关联 Campaign 列表 + add/remove + 跳转链接）
+- [x] **P33.6** 点「+ 生成 Marketing Plan」从 Initiative 卡片打开弹窗，预填 `initiative_id` + 标题
+- [x] **P33.7** `PlanGenerator` 弹窗加「所属 Initiative」字段（从 Initiative 入口进来只读锁定；独立入口可选下拉）
+- [x] **P33.A** 新增 `GET /api/clients/[id]/initiatives`（PlanGenerator 下拉 + Kanban Goal filter 数据源）
+
+#### M3 — Kanban 显示 Goal/Initiative 归属（✅ 完成 2026-06-03）
+
+- [x] **P33.8** action 卡片加 `◈ Initiative名称` badge（有 initiative_id 时显示）
+- [x] **P33.9** Kanban 顶部加「按 Goal」filter（只在有 active Goal 时出现）
+- [x] **P33.10** Goal filter 激活时，`initiative_id=null` 的 action 单独显示「未归类 Actions」提示分组
+
+#### M4 — Goal 详情页执行摘要（📋 待开发）
+
+- [ ] **P33.11** Goal 详情页 Initiative 卡片展开显示：关联 Campaign 数量 + action 完成率
+- [ ] **P33.12** Goal 详情页底部「执行进度摘要」区块（各 Initiative 进度条 + 总数统计）
+
+---
+
+**Phase 33 状态（M1-M3）：✅ 完成 2026-06-03，M4 待下一 session**
+
+FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Marketing Plan；Kanban 按 Goal 筛选 action；action 卡片显示归属 Initiative。
 
 ---
 
@@ -3265,6 +3304,17 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-06-03（Phase 33 M1-M3 Strategy-Execution Bridge — PR #299）
+- **P33.1/P33.2** — DB migration：`initiatives.campaign_ids uuid[]` + `marketing_plans.initiative_id uuid FK`
+- **P33.3/P33.4** — TS 类型同步：`InitiativeRow.campaign_ids`、`GeneratePlanRequest.initiative_id`、`ExecutionItem.initiative_id`（Phase 31 DB 有列但 TS 未声明，一并补齐）
+- **P33.5/P33.6** — `InitiativeExecutionPanel` 组件：Initiative 卡片展开显示关联 Campaign + add/remove + 「+ 生成 Marketing Plan」按钮
+- **P33.7** — `PlanGenerator` 弹窗支持 `initiativeId`/`defaultTitle` props；独立入口新增「所属 Initiative」下拉
+- **P33.A** — 新增 `GET /api/clients/[id]/initiatives` 端点（返回 id/title/goal_id，供 Kanban filter + PlanGenerator 下拉使用）
+- **P33.8** — Kanban action 卡片加 `◈ Initiative名称` 橙色 badge
+- **P33.9** — Kanban 顶部加「按 Goal」filter 行（有 active Goal 才出现）
+- **P33.10** — Goal filter 激活时未归类 action 单独显示「未归类 Actions」提示分组
+- `InitiativeList` 重构：从直接点开编辑弹窗改为展开/收起模式，展开显示执行面板
 
 ### 2026-06-02（QA 测试加固轮 — 6 PR）
 背景：6-02 全天 Codex 大规模测试 ME 暴露的存量问题。性质是质量加固 + 反模式根治，非新功能推进。
