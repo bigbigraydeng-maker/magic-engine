@@ -310,3 +310,180 @@ export async function archiveInitiative(
   if (error) return { ok: false, error: error.message }
   return { ok: true }
 }
+
+// ─── Phase 33 M4 — Execution summary aggregation ─────────────────────────────
+//
+// Goal 详情页要看一眼就知道执行进度。聚合两条信息：
+//   1) 每个 Initiative 的 action 完成率 + 真实 Campaign 数（防御死 ID + paused）
+//   2) 整个 Goal 的汇总数（N Initiative / X Campaign / Y action 已完成 / Z 进行中）
+//
+// 为什么独立一个 server 聚合 helper 而不是前端 fetch:
+//   - 避免 N+1：每 Initiative 一个 fetch 在前端就是 N 个请求
+//   - 避免现存 bug 复用：InitiativeExecutionPanel 拉 campaign 用 ?status=active，
+//     paused 会从统计里消失。这里直接全状态查
+//   - 死 ID 防御：用 IN(...) 查 campaign_briefs 真实存在的 id，不靠 array_length
+//
+// completion rate 分母：total - skipped（skipped 不该算分母，
+// 否则 FDE 跳过的卡片会拖低完成率）。
+
+export interface InitiativeExecutionSummary {
+  initiativeId: string
+  title: string
+  initiativeType: string
+  /** Real campaign count (existing rows in campaign_briefs that match campaign_ids) */
+  campaignCount: number
+  /** Campaign status breakdown (active / paused / draft / archived / completed). */
+  campaignStatusCounts: Record<string, number>
+  totalActions: number
+  /** completed - skipped is NOT subtracted; completed is the literal count */
+  completedActions: number
+  inProgressActions: number
+  pendingActions: number
+  skippedActions: number
+  /** completed / (total - skipped), 0..100; null when denominator is 0 */
+  completionPct: number | null
+}
+
+export interface GoalExecutionSummary {
+  goalId: string
+  initiativeCount: number
+  /** Sum of real campaigns across all initiatives (deduplicated). */
+  totalCampaigns: number
+  totalActions: number
+  totalCompleted: number
+  totalInProgress: number
+  totalPending: number
+  totalSkipped: number
+  /** Aggregate completion (sum completed / sum (total - skipped)); null when denom=0 */
+  aggregateCompletionPct: number | null
+  perInitiative: InitiativeExecutionSummary[]
+}
+
+/**
+ * Compute execution summary for a Goal in one DB roundtrip per table.
+ *
+ * Architecture notes:
+ *   - 1 query to list active (non-archived) initiatives for the goal
+ *   - 1 query to fetch all execution_items where initiative_id IN (...)
+ *   - 1 query to fetch all campaign_briefs where id IN (flattened campaign_ids)
+ *   - In-memory grouping per initiative
+ *
+ * The pgrest .in() filter is bounded — for typical Goal scope (2-5 initiatives,
+ * each with 0-5 campaigns and 0-20 actions) this stays well under any query cap.
+ */
+export async function getExecutionSummaryForGoal(
+  supabase: SupabaseClient,
+  goalId: string,
+): Promise<GoalExecutionSummary | null> {
+  // 1) Initiatives for this goal (active = is_archived=false; unassigned bucket excluded)
+  const inits = await listInitiativesForGoal(supabase, goalId, { includeArchived: false })
+  const realInits = inits.filter(i => i.initiative_type !== 'unassigned')
+
+  if (realInits.length === 0) {
+    return {
+      goalId,
+      initiativeCount: 0,
+      totalCampaigns: 0,
+      totalActions: 0,
+      totalCompleted: 0,
+      totalInProgress: 0,
+      totalPending: 0,
+      totalSkipped: 0,
+      aggregateCompletionPct: null,
+      perInitiative: [],
+    }
+  }
+
+  const initIds = realInits.map(i => i.id)
+  const allCampaignIds = Array.from(
+    new Set(realInits.flatMap(i => i.campaign_ids ?? [])),
+  )
+
+  // 2) All actions across these initiatives
+  const { data: actions, error: actionsError } = await supabase
+    .from('execution_items')
+    .select('initiative_id, status')
+    .in('initiative_id', initIds)
+  if (actionsError) {
+    console.error('[strategy/initiatives] execution_items query error', actionsError)
+    return null
+  }
+
+  // 3) Real campaign rows (defend against deleted campaigns leaving dead ids)
+  let campaignRows: Array<{ id: string; status: string | null }> = []
+  if (allCampaignIds.length > 0) {
+    const { data, error } = await supabase
+      .from('campaign_briefs')
+      .select('id, status')
+      .in('id', allCampaignIds)
+    if (error) {
+      console.error('[strategy/initiatives] campaign_briefs query error', error)
+    } else {
+      campaignRows = (data ?? []) as Array<{ id: string; status: string | null }>
+    }
+  }
+  const realCampaignIds = new Set(campaignRows.map(c => c.id))
+  const campaignStatusById = new Map(
+    campaignRows.map(c => [c.id, c.status ?? 'unknown'] as const),
+  )
+
+  // 4) Per-Initiative aggregation
+  const perInitiative: InitiativeExecutionSummary[] = realInits.map(init => {
+    const initActions = (actions ?? []).filter(a => a.initiative_id === init.id)
+    const completed   = initActions.filter(a => a.status === 'completed').length
+    const inProgress  = initActions.filter(a => a.status === 'in_progress').length
+    const pending     = initActions.filter(a => a.status === 'pending').length
+    const skipped     = initActions.filter(a => a.status === 'skipped').length
+    const total       = initActions.length
+
+    const liveCampaignIds = (init.campaign_ids ?? []).filter(id => realCampaignIds.has(id))
+    const campaignStatusCounts: Record<string, number> = {}
+    for (const cid of liveCampaignIds) {
+      const s = campaignStatusById.get(cid) ?? 'unknown'
+      campaignStatusCounts[s] = (campaignStatusCounts[s] ?? 0) + 1
+    }
+
+    const denom = total - skipped
+    const completionPct = denom > 0 ? Math.round((completed / denom) * 100) : null
+
+    return {
+      initiativeId: init.id,
+      title: init.title,
+      initiativeType: init.initiative_type,
+      campaignCount: liveCampaignIds.length,
+      campaignStatusCounts,
+      totalActions: total,
+      completedActions: completed,
+      inProgressActions: inProgress,
+      pendingActions: pending,
+      skippedActions: skipped,
+      completionPct,
+    }
+  })
+
+  // 5) Goal-level totals
+  const totalActions     = perInitiative.reduce((s, p) => s + p.totalActions, 0)
+  const totalCompleted   = perInitiative.reduce((s, p) => s + p.completedActions, 0)
+  const totalInProgress  = perInitiative.reduce((s, p) => s + p.inProgressActions, 0)
+  const totalPending     = perInitiative.reduce((s, p) => s + p.pendingActions, 0)
+  const totalSkipped     = perInitiative.reduce((s, p) => s + p.skippedActions, 0)
+  const totalCampaigns   = realCampaignIds.size  // dedup across initiatives
+
+  const aggDenom = totalActions - totalSkipped
+  const aggregateCompletionPct = aggDenom > 0
+    ? Math.round((totalCompleted / aggDenom) * 100)
+    : null
+
+  return {
+    goalId,
+    initiativeCount: realInits.length,
+    totalCampaigns,
+    totalActions,
+    totalCompleted,
+    totalInProgress,
+    totalPending,
+    totalSkipped,
+    aggregateCompletionPct,
+    perInitiative,
+  }
+}

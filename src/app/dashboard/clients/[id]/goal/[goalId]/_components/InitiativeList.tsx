@@ -50,9 +50,13 @@ const POSTURE_COLOR: Record<string, string> = {
 interface Props {
   goal: GoalRow
   canEdit: boolean   // false when goal status is archived/expired
+  /** Phase 33 M4: per-Initiative summaries (computed once at the parent level). */
+  executionSummaries?: import('@/lib/strategy/initiatives').InitiativeExecutionSummary[]
+  /** Phase 33 M4: tell parent to re-fetch the goal-level execution summary. */
+  onExecutionChanged?: () => void
 }
 
-export function InitiativeList({ goal, canEdit }: Props) {
+export function InitiativeList({ goal, canEdit, executionSummaries, onExecutionChanged }: Props) {
   const params = useParams<{ id: string }>()
   const clientId = params.id
 
@@ -211,7 +215,8 @@ export function InitiativeList({ goal, canEdit }: Props) {
                   <InitiativeExecutionPanel
                     initiative={item}
                     clientId={clientId}
-                    onUpdated={load}
+                    summary={executionSummaries?.find(s => s.initiativeId === item.id)}
+                    onUpdated={() => { load(); onExecutionChanged?.() }}
                   />
                 </div>
               )}

@@ -16,6 +16,8 @@ import { normalizeGoalRow } from '@/lib/strategy/normalize'
 import { InitiativeList } from './_components/InitiativeList'
 import { BacklogMigrator } from './_components/BacklogMigrator'
 import { VerdictPanel } from './_components/VerdictPanel'
+import { ExecutionSummaryBar } from './_components/ExecutionSummaryBar'
+import type { GoalExecutionSummary } from '@/lib/strategy/initiatives'
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-NZ', {
@@ -42,6 +44,10 @@ export default function GoalDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  // Phase 33 M4: shared execution summary so the bar + per-Initiative cards
+  // render off the same fetch.
+  const [execSummary, setExecSummary] = useState<GoalExecutionSummary | null>(null)
+  const [execRefreshKey, setExecRefreshKey] = useState(0)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -286,8 +292,20 @@ export default function GoalDetailPage() {
         {/* Verdict panel (M4) — visible for active/expired/archived */}
         <VerdictPanel goal={goal} onJudged={load} />
 
+      {/* Phase 33 M4: Goal-level execution summary bar (P33.12) */}
+      <ExecutionSummaryBar
+        goalId={goalId}
+        refreshKey={execRefreshKey}
+        onLoaded={setExecSummary}
+      />
+
         {/* Initiatives (M3) */}
-        <InitiativeList goal={goal} canEdit={goal.status === 'draft' || goal.status === 'active'} />
+        <InitiativeList
+        goal={goal}
+        canEdit={goal.status === 'draft' || goal.status === 'active'}
+        executionSummaries={execSummary?.perInitiative}
+        onExecutionChanged={() => setExecRefreshKey(k => k + 1)}
+      />
 
         {/* Backlog migrator (M3.5) — only shows if client has unassigned actions */}
         {goal.title !== '[Migration] Unassigned Backlog' && (
