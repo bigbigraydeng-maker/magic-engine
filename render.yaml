@@ -52,6 +52,8 @@ services:
         value: https://gateway.ai.cloudflare.com/v1/bbd84393da8e5707ba617749dc17117c/magic-engine/openai
       - key: ANTHROPIC_BASE_URL
         value: https://gateway.ai.cloudflare.com/v1/bbd84393da8e5707ba617749dc17117c/magic-engine/anthropic
+      - key: YOUTUBE_API_KEY
+        sync: false
       - key: CLOUDFLARE_MGMT_TOKEN
         sync: false
       - key: ADMIN_EMAILS
@@ -174,6 +176,24 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # Daily Industry AI Visibility Archive — every day at 2:30am UTC (~2:30pm NZST)
+  # Runs all 10+ industry questions × 3 platforms (ChatGPT / Google AI Overview /
+  # Google SERP), upserts one snapshot per (question, platform, collected_date).
+  # PM decision 2026-06-04: daily (not weekly) — only daily granularity captures
+  # brand churn within the week. Cost ~$0.06/day for 10 seed questions.
+  # Migration 20260622000003 enabled daily UNIQUE constraint.
+  - type: cron
+    name: industry-ai-visibility-daily
+    env: node
+    schedule: "30 2 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -s -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/ai-visibility-weekly
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # Weekly SEO keyword snapshots — every Monday at 2am UTC (~2pm NZST)
   # Stores DataForSEO ranked keyword rows for SEO Intelligence trends.
   # Reference: ROADMAP.md P12.I.8
@@ -235,27 +255,21 @@ services:
       - key: CRON_SECRET
         sync: false
 
-  # Daily anomaly detector — every day at 5am UTC (~5pm NZST / 3pm AEST)
-  # Two-step pipeline:
-  #   Step 1: AnomalyDetectorJob — scans flywheel_metrics, writes anomaly_signals
-  #   Step 2: 诸葛亮 Proactive — reads fresh signals, creates proactive execution tasks
-  # Reference: ROADMAP.md § Phase 22.D.3
+  # Daily viral YouTube discovery — every day at 0am UTC (~12pm NZST)
+  # 8 industries × 6 keyword groups × limit 20 = up to ~960 videos/day.
+  # Auto-deduplicates, inserts new rows, kicks off Gemini analysis.
+  # Quota cost ~5,760 units/day (free tier = 10,000/day).
   - type: cron
-    name: anomaly-detector-daily
+    name: viral-discovery-weekly
     env: node
-    schedule: "0 5 * * *"
+    schedule: "0 0 * * *"
     buildCommand: ""
     startCommand: |
-      curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/anomaly-detector
+      curl -s -X POST -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/viral-discovery-weekly
     envVars:
       - key: CRON_SECRET
         sync: false
-      - key: RENDER_EXTERNAL_URL
-        fromService:
-          type: web
-          name: magic-engine
-          property: host
 
   # Daily anomaly detector — every day at 5am UTC (~5pm NZST / 3pm AEST)
   # Two-step pipeline:

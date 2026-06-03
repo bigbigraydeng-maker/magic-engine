@@ -1,13 +1,20 @@
 /**
  * GET /api/cron/ai-visibility-weekly
  *
- * Weekly Industry AI Visibility collection cron.
- * Triggered by Render scheduled task every Monday 06:00 UTC (≈18:00 NZST).
+ * Daily Industry AI Visibility collection cron.
+ * Triggered by Render scheduled task every day at 02:30 UTC (≈14:30 NZST).
+ *
+ * Note on route name: the path still says "weekly" for backward compatibility
+ * with PR #311. The actual cadence was changed to daily on 2026-06-04 (PM
+ * decision — only daily granularity captures within-week brand churn).
+ * Render cron entry: `industry-ai-visibility-daily` in render.yaml.
  *
  * Auth: Authorization: Bearer ${CRON_SECRET}
  *
  * Runs all active questions across all platforms (chatgpt + google_ai_overview + google_serp).
- * One row written per (question, platform, week_of) into industry_ai_visibility_snapshots.
+ * One row written per (question, platform, collected_date) into industry_ai_visibility_snapshots.
+ * UNIQUE constraint on (question_id, platform, collected_date) — re-runs within
+ * the same UTC day refresh the row; first run on a new day appends.
  */
 
 import { NextRequest, NextResponse } from 'next/server'

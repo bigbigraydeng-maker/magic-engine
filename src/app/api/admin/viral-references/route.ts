@@ -1,16 +1,33 @@
 /**
- * GET  /api/admin/viral-references          — list all references (newest first)
+ * GET  /api/admin/viral-references          — paginated list
  * POST /api/admin/viral-references          — batch import URLs for analysis
+ *
+ * GET query params:
+ *   page      number   page number, 1-based (default 1)
+ *   pageSize  number   rows per page (default 50, max 200)
+ *   status    string   filter by analysis_status, 'all' = no filter (default 'all')
+ *   sort      string   'newest' | 'views' | 'industry' (default 'newest')
+ *   summary   boolean  if '1', returns lightweight insight fields only (for InsightsPanel)
+ *
+ * GET response:
+ *   { success, references, total, page, pageSize }
  *
  * POST body:
  *   { videos: Array<{ url: string, industry: string, client_id?: string, notes?: string }> }
- *
- * Each video is inserted as 'pending', then analyzed asynchronously.
- * Analysis results are written back to the same row.
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { detectPlatform, analyzeViralReference } from '@/lib/reels/viral-analyzer'
+
+// Fields needed for InsightsPanel only (lightweight)
+const INSIGHT_FIELDS = [
+  'id', 'industry', 'content_goal', 'is_our_video', 'is_learnable',
+  'analysis_status', 'style_scores', 'style_tags', 'style_description',
+  'persona_fit', 'key_techniques', 'opening_hook', 'view_count', 'video_title',
+].join(',')
+
+// Full fields for the card grid
+const FULL_FIELDS = '*'
 
 interface VideoInput {
   url: string
@@ -21,14 +38,68 @@ interface VideoInput {
   notes?: string
 }
 
-export async function GET() {
-  const { data, error } = await supabaseAdmin
-    .from('viral_reference_library')
-    .select('*')
-    .order('created_at', { ascending: false })
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url)
 
+  const isSummary = searchParams.get('summary') === '1'
+  const page      = Math.max(1, Number(searchParams.get('page') ?? '1'))
+  const pageSize  = Math.min(200, Math.max(1, Number(searchParams.get('pageSize') ?? '50')))
+  const status    = searchParams.get('status') ?? 'all'
+  const sort      = searchParams.get('sort') ?? 'newest'
+
+  // ── Summary mode: return all done+learnable records with insight fields only ──
+  if (isSummary) {
+    let q = supabaseAdmin
+      .from('viral_reference_library')
+      .select(INSIGHT_FIELDS)
+      .eq('analysis_status', 'done')
+
+    const { data, error } = await q
+    if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+    return NextResponse.json({ success: true, references: data ?? [] })
+  }
+
+  // ── Paginated list mode ───────────────────────────────────────────────────────
+
+  // Count total (respecting status filter)
+  let countQ = supabaseAdmin
+    .from('viral_reference_library')
+    .select('id', { count: 'exact', head: true })
+
+  if (status !== 'all') countQ = countQ.eq('analysis_status', status)
+  const { count, error: countErr } = await countQ
+  if (countErr) return NextResponse.json({ success: false, error: countErr.message }, { status: 500 })
+
+  // Fetch page
+  let q = supabaseAdmin
+    .from('viral_reference_library')
+    .select(FULL_FIELDS)
+
+  if (status !== 'all') q = q.eq('analysis_status', status)
+
+  // Sorting
+  if (sort === 'views') {
+    q = q.order('view_count', { ascending: false, nullsFirst: false })
+  } else if (sort === 'industry') {
+    q = q.order('industry', { ascending: true }).order('created_at', { ascending: false })
+  } else {
+    q = q.order('created_at', { ascending: false })
+  }
+
+  const from = (page - 1) * pageSize
+  const to   = from + pageSize - 1
+  q = q.range(from, to)
+
+  const { data, error } = await q
   if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 })
-  return NextResponse.json({ success: true, references: data })
+
+  return NextResponse.json({
+    success:    true,
+    references: data ?? [],
+    total:      count ?? 0,
+    page,
+    pageSize,
+  })
 }
 
 export async function POST(req: NextRequest) {
@@ -47,7 +118,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'Maximum 30 videos per batch' }, { status: 400 })
   }
 
-  // Validate each entry
   for (const v of videos) {
     if (!v.url || !v.industry) {
       return NextResponse.json(
@@ -57,15 +127,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Insert all as 'pending'
   const rows = videos.map(v => ({
-    source_url: v.url,
-    industry: v.industry,
-    content_goal: v.content_goal ?? 'brand',
-    is_our_video: v.is_our_video ?? false,
-    client_id: v.client_id ?? null,
-    platform: detectPlatform(v.url),
-    notes: v.notes ?? null,
+    source_url:      v.url,
+    industry:        v.industry,
+    content_goal:    v.content_goal ?? 'brand',
+    is_our_video:    v.is_our_video ?? false,
+    client_id:       v.client_id ?? null,
+    platform:        detectPlatform(v.url),
+    notes:           v.notes ?? null,
     analysis_status: 'pending',
   }))
 
@@ -76,7 +145,6 @@ export async function POST(req: NextRequest) {
 
   if (insertErr) return NextResponse.json({ success: false, error: insertErr.message }, { status: 500 })
 
-  // Kick off analysis for each (non-blocking — runs in background)
   for (const ref of inserted ?? []) {
     analyzeViralReference(ref.id, ref.source_url).catch(err => {
       console.error(`[viral-references] analysis failed for ${ref.id}:`, err)
@@ -84,8 +152,8 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({
-    success: true,
-    queued: inserted?.length ?? 0,
+    success:    true,
+    queued:     inserted?.length ?? 0,
     references: inserted,
   })
 }

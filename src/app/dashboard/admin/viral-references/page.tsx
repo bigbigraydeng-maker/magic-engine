@@ -81,24 +81,24 @@ const SCORE_LABELS: Record<keyof StyleScores, string> = {
 const SCORE_COLORS: Record<keyof StyleScores, string> = {
   energy:       'bg-me-ochre',
   luxury:       'bg-me-ochre',
-  authenticity: 'bg-[#5C8A4A]',
-  emotional:    'bg-[#C2453A]',
+  authenticity: 'bg-status-track',
+  emotional:    'bg-status-rej',
   humor:        'bg-me-ochre',
-  urgency:      'bg-[#C2453A]',
+  urgency:      'bg-status-rej',
   offer_signal: 'bg-me-ochre',
 }
 
 function ScoreBar({ dimension, value }: { dimension: keyof StyleScores; value: number }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs text-me-charcoal/45 w-20 shrink-0">{SCORE_LABELS[dimension]}</span>
-      <div className="flex-1 bg-me-charcoal/60 rounded-full h-1.5">
+      <span className="text-xs text-me-ivory/50 w-20 shrink-0">{SCORE_LABELS[dimension]}</span>
+      <div className="flex-1 bg-me-charcoal/80 rounded-full h-1.5">
         <div
           className={`${SCORE_COLORS[dimension]} h-1.5 rounded-full transition-all`}
           style={{ width: `${(value / 10) * 100}%` }}
         />
       </div>
-      <span className="text-xs text-me-charcoal/35 w-6 text-right">{value}</span>
+      <span className="text-xs text-me-ivory/40 w-6 text-right">{value}</span>
     </div>
   )
 }
@@ -107,10 +107,10 @@ function ScoreBar({ dimension, value }: { dimension: keyof StyleScores; value: n
 
 function StatusBadge({ status }: { status: ViralReference['analysis_status'] }) {
   const config = {
-    pending:   { label: 'Pending',   cls: 'bg-me-charcoal/60 text-me-charcoal/35' },
+    pending:   { label: 'Pending',   cls: 'bg-me-charcoal/60 text-me-ivory/40' },
     analyzing: { label: 'Analyzing…', cls: 'bg-me-ochre/70 text-me-gold animate-pulse' },
-    done:      { label: 'Done',      cls: 'bg-[#5C8A4A]/70 text-[#5C8A4A]/70' },
-    error:     { label: 'Error',     cls: 'bg-[#C2453A]/70 text-[#C2453A]/70' },
+    done:      { label: 'Done',      cls: 'bg-status-track/30 text-status-track' },
+    error:     { label: 'Error',     cls: 'bg-status-rej/30 text-status-rej' },
   }
   const { label, cls } = config[status]
   return (
@@ -122,13 +122,13 @@ function StatusBadge({ status }: { status: ViralReference['analysis_status'] }) 
 
 function PlatformBadge({ platform }: { platform: ViralReference['platform'] }) {
   const config = {
-    youtube:   { label: 'YouTube',   cls: 'bg-[#C2453A]/50 text-[#C2453A]/70' },
-    facebook:  { label: 'Facebook',  cls: 'bg-me-ochre/60 text-me-ochre/80' },
-    tiktok:    { label: 'TikTok',    cls: 'bg-me-charcoal/60 text-me-charcoal/25' },
-    instagram: { label: 'Instagram', cls: 'bg-[#C2453A]/50 text-[#C2453A]/70' },
-    upload:    { label: 'Uploaded',  cls: 'bg-[#5C8A4A]/50 text-[#5C8A4A]/70' },
+    youtube:   { label: 'YouTube',   cls: 'bg-status-rej/30 text-status-rej' },
+    facebook:  { label: 'Facebook',  cls: 'bg-me-ochre/30 text-me-gold' },
+    tiktok:    { label: 'TikTok',    cls: 'bg-me-charcoal/60 text-me-ivory/60' },
+    instagram: { label: 'Instagram', cls: 'bg-status-rej/30 text-status-rej' },
+    upload:    { label: 'Uploaded',  cls: 'bg-status-track/30 text-status-track' },
   }
-  const { label, cls } = config[platform] ?? { label: platform, cls: 'bg-me-charcoal/60 text-me-charcoal/35' }
+  const { label, cls } = config[platform] ?? { label: platform, cls: 'bg-me-charcoal/60 text-me-ivory/50' }
   return (
     <span className={`text-xs px-2 py-0.5 rounded font-medium ${cls}`}>{label}</span>
   )
@@ -170,10 +170,10 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
   return (
     <div className={`rounded-xl p-4 border space-y-3 ${
       isOurs
-        ? 'bg-[#C2453A]/50 border-[#C2453A]/50'
+        ? 'bg-status-rej/20 border-status-rej/40'
         : !r.is_learnable && r.analysis_status === 'done'
-          ? 'bg-me-charcoal/60 border-me-charcoal/50 opacity-70'
-          : 'bg-me-charcoal/75 border-me-charcoal'
+          ? 'bg-me-charcoal/60 border-me-charcoal opacity-60'
+          : 'bg-me-charcoal/60 border-me-charcoal'
     }`}>
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
@@ -182,7 +182,7 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
             <PlatformBadge platform={r.platform} />
             <StatusBadge status={r.analysis_status} />
             {isOurs && (
-              <span className="text-xs px-2 py-0.5 rounded font-bold bg-[#C2453A] text-white">
+              <span className="text-xs px-2 py-0.5 rounded font-bold bg-status-rej text-white">
                 🎯 OUR VIDEO
               </span>
             )}
@@ -194,7 +194,7 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
                 <select
                   value={industryDraft}
                   onChange={e => setIndustryDraft(e.target.value)}
-                  className="bg-me-charcoal/90 border border-me-ochre rounded px-1.5 py-0.5 text-xs text-white focus:outline-none"
+                  className="bg-white/8 border border-me-ochre rounded px-1.5 py-0.5 text-xs text-white focus:outline-none"
                   autoFocus
                 >
                   {KNOWN_INDUSTRIES.map(ind => (
@@ -210,7 +210,7 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
                 </button>
                 <button
                   onClick={() => { setEditingIndustry(false); setIndustryDraft(r.industry) }}
-                  className="text-xs px-1.5 py-0.5 bg-me-charcoal/60 hover:bg-me-charcoal/45 text-me-charcoal/35 rounded"
+                  className="text-xs px-1.5 py-0.5 bg-me-charcoal/60 hover:bg-me-charcoal/50 text-me-ivory/50 rounded"
                 >
                   ✕
                 </button>
@@ -220,16 +220,16 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
                 onClick={() => { setIndustryDraft(r.industry); setEditingIndustry(true) }}
                 title="点击修改行业分类"
                 className={`text-xs capitalize hover:text-white transition-colors ${
-                  hasMismatch ? 'text-me-gold font-semibold' : 'text-me-charcoal/55'
+                  hasMismatch ? 'text-me-gold font-semibold' : 'text-me-ivory/35'
                 }`}
               >
                 {r.industry}
                 {hasMismatch && (
-                  <span className="ml-1 text-[10px] bg-me-ochre/50 text-me-gold px-1.5 py-0.5 rounded" title={`AI 识别为 "${r.detected_industry}"，与录入行业不符`}>
+                  <span className="ml-1 text-[10px] bg-status-exec/30 text-me-gold px-1.5 py-0.5 rounded" title={`AI 识别为 "${r.detected_industry}"，与录入行业不符`}>
                     ⚠ AI: {r.detected_industry}
                   </span>
                 )}
-                <span className="ml-1 text-[10px] text-me-charcoal/60">✏</span>
+                <span className="ml-1 text-[10px] text-me-ivory/35">✏</span>
               </button>
             )}
             {views && (
@@ -238,13 +238,13 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
               </span>
             )}
             {!isOurs && !r.is_learnable && r.analysis_status === 'done' && (
-              <span className="text-xs px-2 py-0.5 rounded bg-me-charcoal/60 text-me-charcoal/45" title={`view count below threshold (${r.view_threshold_min})`}>
+              <span className="text-xs px-2 py-0.5 rounded bg-me-charcoal/60 text-me-ivory/40" title={`view count below threshold (${r.view_threshold_min})`}>
                 ⊘ Not learnable
               </span>
             )}
           </div>
           {r.video_title && (
-            <p className="mt-1.5 text-xs text-me-charcoal/35 truncate" title={r.video_title}>
+            <p className="mt-1.5 text-xs text-me-ivory/50 truncate" title={r.video_title}>
               {r.video_title}
             </p>
           )}
@@ -262,13 +262,13 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
       {/* Error */}
       {r.analysis_status === 'error' && (
         <div className="flex items-start justify-between gap-2">
-          <p className="text-xs text-[#C2453A]/70 bg-[#C2453A]/50 rounded p-2 flex-1">
+          <p className="text-xs text-status-rej bg-status-rej/15 rounded p-2 flex-1">
             {r.analysis_error ?? 'Unknown error'}
           </p>
-          {r.platform === 'youtube' && (
+          {(r.platform === 'youtube' || r.platform === 'upload') && (
             <button
               onClick={() => onRetry(r.id)}
-              className="shrink-0 px-2.5 py-1.5 bg-me-charcoal/60 hover:bg-me-charcoal/45 text-xs text-white rounded-lg transition-colors"
+              className="shrink-0 px-2.5 py-1.5 bg-me-charcoal/60 hover:bg-me-charcoal/50 text-xs text-white rounded-lg transition-colors"
             >
               Retry
             </button>
@@ -281,24 +281,24 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
         <>
           {/* Style description */}
           {r.style_description && (
-            <p className="text-sm text-me-charcoal/25 leading-relaxed">{r.style_description}</p>
+            <p className="text-sm text-me-ivory/60 leading-relaxed">{r.style_description}</p>
           )}
 
           {/* Opening hook */}
           {r.opening_hook?.type && (
             <div className="flex items-start gap-2 bg-me-charcoal/50 rounded-lg px-3 py-2">
-              <span className="text-[10px] text-me-charcoal/55 mt-0.5 shrink-0">🎣 Hook</span>
+              <span className="text-[10px] text-me-ivory/40 mt-0.5 shrink-0">🎣 Hook</span>
               <div className="min-w-0">
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-me-ochre/60 text-me-ochre/80 font-medium">
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-exec/30 text-me-gold font-medium">
                   {r.opening_hook.type.replace(/_/g, ' ')}
                 </span>
                 {r.opening_hook.feel && (
-                  <span className="ml-1.5 text-[10px] text-me-charcoal/55">
+                  <span className="ml-1.5 text-[10px] text-me-ivory/40">
                     {r.opening_hook.feel === 'abrupt-cut' ? '⚡ abrupt' : '🌊 smooth'}
                   </span>
                 )}
                 {r.opening_hook.script && (
-                  <p className="text-xs text-me-charcoal/35 italic mt-1 line-clamp-1">
+                  <p className="text-xs text-me-ivory/50 italic mt-1 line-clamp-1">
                     "{r.opening_hook.script}"
                   </p>
                 )}
@@ -308,8 +308,8 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
 
           {/* Gap analysis (only for OUR videos) */}
           {showGap && (
-            <div className="rounded-lg border border-[#C2453A]/50 bg-[#C2453A]/50 p-3">
-              <p className="text-xs font-semibold text-[#C2453A]/70 mb-2">
+            <div className="rounded-lg border border-status-rej/30 bg-status-rej/10 p-3">
+              <p className="text-xs font-semibold text-status-rej mb-2">
                 Gap vs Top Viral References ({r.industry} {r.content_goal})
               </p>
               <div className="space-y-1">
@@ -318,11 +318,11 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
                   const avg = learnableAvgScores![dim]
                   const diff = ours - avg
                   const sign = diff > 0 ? '+' : ''
-                  const cls = Math.abs(diff) < 1 ? 'text-me-charcoal/45'
-                            : diff > 0 ? 'text-[#5C8A4A]/70' : 'text-me-gold'
+                  const cls = Math.abs(diff) < 1 ? 'text-me-ivory/40'
+                            : diff > 0 ? 'text-status-track' : 'text-me-gold'
                   return (
                     <div key={dim} className="flex justify-between text-xs">
-                      <span className="text-me-charcoal/45 capitalize">{SCORE_LABELS[dim]}</span>
+                      <span className="text-me-ivory/50 capitalize">{SCORE_LABELS[dim]}</span>
                       <span className={`font-mono ${cls}`}>
                         {ours.toFixed(1)} vs {avg.toFixed(1)} ({sign}{diff.toFixed(1)})
                       </span>
@@ -344,10 +344,10 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
           <div className="space-y-2">
             {r.key_techniques && r.key_techniques.length > 0 && (
               <div>
-                <p className="text-[10px] text-me-charcoal/55 uppercase tracking-widest mb-1">Key Techniques</p>
+                <p className="text-[10px] text-me-ivory/40 uppercase tracking-widest mb-1">Key Techniques</p>
                 <div className="flex flex-wrap gap-1.5">
                   {r.key_techniques.map(t => (
-                    <span key={t} className="text-xs bg-me-ochre/50 text-me-ochre/80 px-2 py-0.5 rounded">
+                    <span key={t} className="text-xs bg-status-exec/25 text-me-gold px-2 py-0.5 rounded">
                       {t}
                     </span>
                   ))}
@@ -356,10 +356,10 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
             )}
             {r.style_tags && r.style_tags.length > 0 && (
               <div>
-                <p className="text-[10px] text-me-charcoal/55 uppercase tracking-widest mb-1">Style Tags</p>
+                <p className="text-[10px] text-me-ivory/40 uppercase tracking-widest mb-1">Style Tags</p>
                 <div className="flex flex-wrap gap-1.5">
                   {r.style_tags.map(t => (
-                    <span key={t} className="text-xs bg-me-charcoal/60 text-me-charcoal/35 px-2 py-0.5 rounded">
+                    <span key={t} className="text-xs bg-me-charcoal/60 text-me-ivory/50 px-2 py-0.5 rounded">
                       {t}
                     </span>
                   ))}
@@ -368,10 +368,10 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
             )}
             {r.persona_fit && r.persona_fit.length > 0 && (
               <div>
-                <p className="text-[10px] text-me-charcoal/55 uppercase tracking-widest mb-1">Persona Fit</p>
+                <p className="text-[10px] text-me-ivory/40 uppercase tracking-widest mb-1">Persona Fit</p>
                 <div className="flex flex-wrap gap-1.5">
                   {r.persona_fit.map(p => (
-                    <span key={p} className="text-xs bg-[#5C8A4A]/50 text-[#5C8A4A]/70 px-2 py-0.5 rounded">
+                    <span key={p} className="text-xs bg-status-track/25 text-status-track px-2 py-0.5 rounded">
                       {p}
                     </span>
                   ))}
@@ -387,20 +387,28 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
+const PAGE_SIZE = 50
+
 export default function ViralReferencesPage() {
   const [refs, setRefs] = useState<ViralReference[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [triggering, setTriggering] = useState(false)
   const [triggerMsg, setTriggerMsg] = useState('')
   const [detectingIndustry, setDetectingIndustry] = useState(false)
   const [detectMsg, setDetectMsg] = useState('')
-  const [filter, setFilter] = useState<'all' | 'done' | 'pending' | 'error'>('all')
+  const [filter, setFilter] = useState<'all' | 'done' | 'pending' | 'analyzing' | 'error'>('all')
+  const [sortBy, setSortBy] = useState<'newest' | 'views' | 'industry'>('newest')
+
+  // InsightsPanel uses a separate lightweight fetch (all done records, minimal fields)
+  const [insightRefs, setInsightRefs] = useState<import('./InsightsPanel').ViralReferenceForInsights[]>([])
 
   // Add video form
   const [addUrls, setAddUrls] = useState('')
-  const [addIndustry, setAddIndustry] = useState<'travel' | 'flooring'>('travel')
-  const [addGoal, setAddGoal] = useState<ContentGoal>('brand')   // 'brand' = auto-detect default
+  const [addIndustry, setAddIndustry] = useState('travel')
+  const [addGoal, setAddGoal] = useState<ContentGoal | 'auto'>('auto')
   const [addIsOur, setAddIsOur] = useState(false)
   const [adding, setAdding] = useState(false)
   const [addMsg, setAddMsg] = useState('')
@@ -417,12 +425,21 @@ export default function ViralReferencesPage() {
   const [discovering, setDiscovering] = useState(false)
   const [discoverMsg, setDiscoverMsg] = useState('')
 
-  const fetchRefs = useCallback(async () => {
+  // Paginated card list
+  const fetchRefs = useCallback(async (p = page) => {
+    setLoading(true)
     try {
-      const res = await fetch('/api/admin/viral-references')
+      const params = new URLSearchParams({
+        page:     String(p),
+        pageSize: String(PAGE_SIZE),
+        status:   filter,
+        sort:     sortBy,
+      })
+      const res  = await fetch(`/api/admin/viral-references?${params}`)
       const data = await res.json()
       if (data.success) {
         setRefs(data.references ?? [])
+        setTotal(data.total ?? 0)
         setFetchError(null)
       } else {
         setFetchError(data.error ?? 'API returned success: false')
@@ -432,18 +449,30 @@ export default function ViralReferencesPage() {
     } finally {
       setLoading(false)
     }
+  }, [page, filter, sortBy])
+
+  // Lightweight fetch for InsightsPanel (all done records, minimal fields)
+  const fetchInsightRefs = useCallback(async () => {
+    try {
+      const res  = await fetch('/api/admin/viral-references?summary=1')
+      const data = await res.json()
+      if (data.success) setInsightRefs(data.references ?? [])
+    } catch { /* non-critical */ }
   }, [])
 
   // Initial load
-  useEffect(() => { fetchRefs() }, [fetchRefs])
+  useEffect(() => { fetchRefs(1); fetchInsightRefs() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-poll while any are analyzing
+  // Re-fetch cards when filter/sort/page changes
+  useEffect(() => { fetchRefs(page) }, [filter, sortBy, page])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-poll while any on current page are analyzing
   useEffect(() => {
     const hasAnalyzing = refs.some(r => r.analysis_status === 'analyzing')
     if (!hasAnalyzing) return
-    const t = setInterval(fetchRefs, 5000)
+    const t = setInterval(() => { fetchRefs(page); fetchInsightRefs() }, 5000)
     return () => clearInterval(t)
-  }, [refs, fetchRefs])
+  }, [refs, page, fetchRefs, fetchInsightRefs])
 
   const addVideos = async () => {
     const urls = addUrls
@@ -466,7 +495,7 @@ export default function ViralReferencesPage() {
           videos: urls.map(url => ({
             url,
             industry: addIndustry,
-            content_goal: addGoal,
+            ...(addGoal !== 'auto' && { content_goal: addGoal }),
             is_our_video: addIsOur,
           })),
         }),
@@ -497,7 +526,7 @@ export default function ViralReferencesPage() {
       const fd = new FormData()
       fd.append('file', uploadFile)
       fd.append('industry', addIndustry)
-      fd.append('content_goal', addGoal)
+      if (addGoal !== 'auto') fd.append('content_goal', addGoal)
       fd.append('is_our_video', String(addIsOur))
 
       const res = await fetch('/api/admin/viral-references/upload', {
@@ -535,7 +564,7 @@ export default function ViralReferencesPage() {
         body: JSON.stringify({
           keywords:     kw,
           industry:     addIndustry,
-          content_goal: addGoal,
+          ...(addGoal !== 'auto' && { content_goal: addGoal }),
           min_views:    discoverMinViews,
           limit:        discoverLimit,
           is_our_video: addIsOur,
@@ -613,15 +642,34 @@ export default function ViralReferencesPage() {
     }
   }
 
-  // Stats
-  const total     = refs.length
-  const done      = refs.filter(r => r.analysis_status === 'done').length
-  const pending   = refs.filter(r => r.analysis_status === 'pending').length
-  const analyzing = refs.filter(r => r.analysis_status === 'analyzing').length
-  const errors    = refs.filter(r => r.analysis_status === 'error').length
+  // Stats — fetched separately so they always show full counts regardless of current filter
+  const [stats, setStats] = useState({ total: 0, done: 0, pending: 0, analyzing: 0, errors: 0 })
+  useEffect(() => {
+    async function loadStats() {
+      try {
+        const [all, done, pending, analyzing, errors] = await Promise.all([
+          fetch('/api/admin/viral-references?pageSize=1').then(r => r.json()),
+          fetch('/api/admin/viral-references?pageSize=1&status=done').then(r => r.json()),
+          fetch('/api/admin/viral-references?pageSize=1&status=pending').then(r => r.json()),
+          fetch('/api/admin/viral-references?pageSize=1&status=analyzing').then(r => r.json()),
+          fetch('/api/admin/viral-references?pageSize=1&status=error').then(r => r.json()),
+        ])
+        setStats({
+          total:     all.total     ?? 0,
+          done:      done.total    ?? 0,
+          pending:   pending.total ?? 0,
+          analyzing: analyzing.total ?? 0,
+          errors:    errors.total  ?? 0,
+        })
+      } catch { /* non-critical */ }
+    }
+    loadStats()
+  }, [refs]) // re-run when refs change (after add/analyze)
 
-  const filtered = filter === 'all' ? refs
-    : refs.filter(r => r.analysis_status === filter)
+  // filtered is already the current page from API — sorting is done server-side
+  const filtered = refs
+
+  const totalPages = Math.ceil(total / PAGE_SIZE)
 
   // Compute avg scores per (industry, content_goal) from learnable references
   // Used for gap analysis on OUR videos
@@ -667,12 +715,13 @@ export default function ViralReferencesPage() {
     learnableAvgByKey.get(groupKey(r.industry, r.content_goal)) ?? null
 
   return (
+    <div className="min-h-screen bg-me-black">
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-bold tracking-tight text-white">Viral Reference Library</h1>
-          <p className="text-sm text-me-charcoal/45 mt-1">
+          <p className="text-sm text-me-ivory/50 mt-1">
             爆款视频风格参考库 — FDE 参考使用 · 分析结果自动注入 Reel 生成
           </p>
         </div>
@@ -687,16 +736,16 @@ export default function ViralReferencesPage() {
           </button>
           <button
             onClick={triggerAnalysis}
-            disabled={triggering || pending === 0}
+            disabled={triggering || stats.pending === 0}
             className="px-4 py-2 bg-me-ochre hover:bg-me-ochre disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
           >
-            {triggering ? 'Starting…' : `Analyze Pending (${pending})`}
+            {triggering ? 'Starting…' : `Analyze Pending (${stats.pending})`}
           </button>
         </div>
       </div>
 
       {/* Add Video Panel */}
-      <div className="bg-me-charcoal/75 border border-me-charcoal rounded-xl p-4 space-y-3">
+      <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium text-white">投喂新视频</p>
           <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
@@ -704,9 +753,9 @@ export default function ViralReferencesPage() {
               type="checkbox"
               checked={addIsOur}
               onChange={e => setAddIsOur(e.target.checked)}
-              className="w-4 h-4 rounded border-me-charcoal bg-me-charcoal/90 accent-[#C2453A]"
+              className="w-4 h-4 rounded border-me-charcoal/60 bg-me-charcoal/50 accent-status-rej"
             />
-            <span className={addIsOur ? 'text-[#C2453A]/70 font-medium' : 'text-me-charcoal/45'}>
+            <span className={addIsOur ? 'text-status-rej font-medium' : 'text-me-ivory/40'}>
               🎯 This is OUR video (gap analysis, not learning)
             </span>
           </label>
@@ -717,24 +766,28 @@ export default function ViralReferencesPage() {
             onChange={e => setAddUrls(e.target.value)}
             placeholder={"每行粘贴一条链接：\nhttps://youtube.com/shorts/...\nhttps://www.facebook.com/share/..."}
             rows={3}
-            className="flex-1 bg-me-charcoal/90 border border-me-charcoal rounded-lg px-3 py-2 text-sm text-white placeholder:text-me-charcoal/45 resize-none focus:outline-none focus:border-me-ochre"
+            className="flex-1 bg-me-charcoal/70 border border-me-charcoal rounded-lg px-3 py-2 text-sm text-white placeholder:text-me-ivory/30 resize-none focus:outline-none focus:border-me-ochre"
           />
           <div className="flex flex-col gap-2 shrink-0 w-44">
             <select
               value={addIndustry}
-              onChange={e => setAddIndustry(e.target.value as 'travel' | 'flooring')}
-              className="bg-me-charcoal/90 border border-me-charcoal rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-me-ochre"
+              onChange={e => setAddIndustry(e.target.value)}
+              className="bg-me-charcoal/70 border border-me-charcoal rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-me-ochre"
             >
-              <option value="travel">✈️ Travel</option>
-              <option value="flooring">🪵 Flooring</option>
+              {KNOWN_INDUSTRIES.map(ind => (
+                <option key={ind} value={ind}>
+                  {ind === 'travel' ? '✈️' : ind === 'flooring' ? '🪵' : ind === 'real_estate' ? '🏠' : ind === 'food' ? '🍽️' : ind === 'fashion' ? '👗' : ind === 'fitness' ? '💪' : ind === 'tech' ? '💻' : '💄'} {ind.charAt(0).toUpperCase() + ind.slice(1).replace(/_/g, ' ')}
+                </option>
+              ))}
             </select>
             <select
               value={addGoal}
-              onChange={e => setAddGoal(e.target.value as ContentGoal)}
-              className="bg-me-charcoal/90 border border-me-charcoal rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-me-ochre"
-              title="Default 'Auto-detect' lets Gemini classify the video. Pick a specific goal to override."
+              onChange={e => setAddGoal(e.target.value as ContentGoal | 'auto')}
+              className="bg-me-charcoal/70 border border-me-charcoal rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-me-ochre"
+              title="Auto-detect 让 AI 自动判断内容目标。选择 Force 可以强制指定。"
             >
-              <option value="brand">🤖 Auto-detect (recommended)</option>
+              <option value="auto">🤖 Auto-detect (推荐)</option>
+              <option value="brand">🎨 Force: Brand</option>
               <option value="sales">💰 Force: Sales</option>
               <option value="ugc">📱 Force: UGC</option>
               <option value="education">🎓 Force: Education</option>
@@ -749,17 +802,17 @@ export default function ViralReferencesPage() {
           </div>
         </div>
         {addMsg && (
-          <p className={`text-sm ${addMsg.startsWith('✅') ? 'text-[#5C8A4A]/70' : 'text-[#C2453A]/70'}`}>
+          <p className={`text-sm ${addMsg.startsWith('✅') ? 'text-status-track' : 'text-status-rej'}`}>
             {addMsg}
           </p>
         )}
       </div>
 
       {/* Upload File Panel */}
-      <div className="bg-me-charcoal/75 border border-me-charcoal rounded-xl p-4 space-y-3">
+      <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium text-white">📁 直接上传视频文件</p>
-          <p className="text-xs text-me-charcoal/55">
+          <p className="text-xs text-me-ivory/35">
             行业 / 类型用上方的选择 · 适合 Facebook 短链 / 私密视频 / 手机录屏
           </p>
         </div>
@@ -769,33 +822,33 @@ export default function ViralReferencesPage() {
             type="file"
             accept="video/mp4,video/quicktime,video/webm,video/x-matroska,video/mpeg"
             onChange={e => setUploadFile(e.target.files?.[0] ?? null)}
-            className="flex-1 text-sm text-me-charcoal/35 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-me-charcoal/60 file:text-white hover:file:bg-me-charcoal/45 file:cursor-pointer"
+            className="flex-1 text-sm text-me-ivory/50 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-me-charcoal/60 file:text-white hover:file:bg-me-charcoal/50 file:cursor-pointer"
           />
           <button
             onClick={uploadVideo}
             disabled={uploading || !uploadFile}
-            className="shrink-0 px-4 py-2 bg-[#5C8A4A] hover:bg-[#5C8A4A] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+            className="shrink-0 px-4 py-2 bg-status-track hover:bg-status-track/80 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
           >
             {uploading ? 'Uploading…' : 'Upload & Analyze'}
           </button>
         </div>
         {uploadFile && !uploadMsg && (
-          <p className="text-xs text-me-charcoal/45">
+          <p className="text-xs text-me-ivory/50">
             已选：{uploadFile.name} ({(uploadFile.size / 1024 / 1024).toFixed(1)} MB)
           </p>
         )}
         {uploadMsg && (
-          <p className={`text-sm ${uploadMsg.startsWith('✅') ? 'text-[#5C8A4A]/70' : 'text-[#C2453A]/70'}`}>
+          <p className={`text-sm ${uploadMsg.startsWith('✅') ? 'text-status-track' : 'text-status-rej'}`}>
             {uploadMsg}
           </p>
         )}
       </div>
 
       {/* Auto-Discover Panel */}
-      <div className="bg-me-charcoal/75 border border-me-charcoal rounded-xl p-4 space-y-3">
+      <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium text-white">🔍 YouTube 自动发现</p>
-          <p className="text-xs text-me-charcoal/55">
+          <p className="text-xs text-me-ivory/35">
             使用上方选择的行业 / 类型 · 约 120 配额/次 · 免费额度 10,000/天
           </p>
         </div>
@@ -807,13 +860,13 @@ export default function ViralReferencesPage() {
             onChange={e => setDiscoverKeywords(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && discoverVideos()}
             placeholder="搜索关键词，如：luxury travel New Zealand tour"
-            className="flex-1 min-w-64 bg-me-charcoal/90 border border-me-charcoal rounded-lg px-3 py-2 text-sm text-white placeholder:text-me-charcoal/45 focus:outline-none focus:border-me-ochre"
+            className="flex-1 min-w-64 bg-me-charcoal/70 border border-me-charcoal rounded-lg px-3 py-2 text-sm text-white placeholder:text-me-ivory/30 focus:outline-none focus:border-me-ochre"
           />
           {/* Min views */}
           <select
             value={discoverMinViews}
             onChange={e => setDiscoverMinViews(Number(e.target.value))}
-            className="bg-me-charcoal/90 border border-me-charcoal rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-me-ochre"
+            className="bg-me-charcoal/70 border border-me-charcoal rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-me-ochre"
             title="最低播放量过滤"
           >
             <option value={10000}>▶ 1万+</option>
@@ -826,7 +879,7 @@ export default function ViralReferencesPage() {
           <select
             value={discoverLimit}
             onChange={e => setDiscoverLimit(Number(e.target.value))}
-            className="bg-me-charcoal/90 border border-me-charcoal rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-me-ochre"
+            className="bg-me-charcoal/70 border border-me-charcoal rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-me-ochre"
             title="最多抓取数量"
           >
             <option value={10}>10 条</option>
@@ -842,7 +895,7 @@ export default function ViralReferencesPage() {
           </button>
         </div>
         {discoverMsg && (
-          <p className={`text-sm ${discoverMsg.startsWith('✅') ? 'text-[#5C8A4A]/70' : discoverMsg.startsWith('❌') ? 'text-[#C2453A]/70' : 'text-me-ochre/80'}`}>
+          <p className={`text-sm ${discoverMsg.startsWith('✅') ? 'text-status-track' : discoverMsg.startsWith('❌') ? 'text-status-rej' : 'text-me-gold'}`}>
             {discoverMsg}
           </p>
         )}
@@ -850,7 +903,7 @@ export default function ViralReferencesPage() {
 
       {/* Fetch error */}
       {fetchError && (
-        <p className="text-sm text-[#C2453A]/70 bg-[#C2453A]/50 rounded-lg px-4 py-2.5">
+        <p className="text-sm text-status-rej bg-status-rej/15 rounded-lg px-4 py-2.5">
           API Error: {fetchError}
         </p>
       )}
@@ -864,7 +917,7 @@ export default function ViralReferencesPage() {
 
       {/* Detect industry message */}
       {detectMsg && (
-        <p className={`text-sm rounded-lg px-4 py-2.5 ${detectMsg.startsWith('✅') ? 'text-[#5C8A4A]/70 bg-[#5C8A4A]/50' : 'text-[#C2453A]/70 bg-[#C2453A]/50'}`}>
+        <p className={`text-sm rounded-lg px-4 py-2.5 ${detectMsg.startsWith('✅') ? 'text-status-track bg-status-track/15' : 'text-status-rej bg-status-rej/15'}`}>
           {detectMsg}
         </p>
       )}
@@ -872,43 +925,60 @@ export default function ViralReferencesPage() {
       {/* Stats */}
       <div className="grid grid-cols-4 gap-3">
         {[
-          { label: 'Total',     value: total,     cls: 'text-white' },
-          { label: 'Analyzed',  value: done,      cls: 'text-[#5C8A4A]/70' },
-          { label: 'Analyzing', value: analyzing, cls: 'text-me-gold' },
-          { label: 'Errors',    value: errors,    cls: 'text-[#C2453A]/70' },
+          { label: 'Total',     value: stats.total,     cls: 'text-white' },
+          { label: 'Analyzed',  value: stats.done,      cls: 'text-status-track' },
+          { label: 'Analyzing', value: stats.analyzing, cls: 'text-me-gold' },
+          { label: 'Errors',    value: stats.errors,    cls: 'text-status-rej' },
         ].map(s => (
-          <div key={s.label} className="bg-me-charcoal/75 rounded-xl p-4 border border-me-charcoal text-center">
+          <div key={s.label} className="bg-me-charcoal/60 rounded-xl p-4 border border-me-charcoal text-center">
             <p className={`text-2xl font-bold ${s.cls}`}>{s.value}</p>
-            <p className="text-xs text-me-charcoal/55 mt-1">{s.label}</p>
+            <p className="text-xs text-me-ivory/40 mt-1">{s.label}</p>
           </div>
         ))}
       </div>
 
       {/* Insights Panel */}
-      <InsightsPanel refs={refs} />
+      <InsightsPanel refs={insightRefs} />
 
-      {/* Filter tabs */}
-      <div className="flex gap-2">
-        {(['all', 'done', 'pending', 'error'] as const).map(f => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize ${
-              filter === f
-                ? 'bg-me-charcoal/60 text-white'
-                : 'text-me-charcoal/55 hover:text-me-charcoal/35'
-            }`}
-          >
-            {f === 'all' ? `All (${total})` : f === 'done' ? `Done (${done})` : f === 'pending' ? `Pending (${pending})` : `Errors (${errors})`}
-          </button>
-        ))}
+      {/* Filter tabs + sort */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex gap-1.5 flex-wrap">
+          {([
+            { key: 'all',       label: `All (${stats.total})` },
+            { key: 'done',      label: `Done (${stats.done})` },
+            { key: 'analyzing', label: `Analyzing (${stats.analyzing})` },
+            { key: 'pending',   label: `Pending (${stats.pending})` },
+            { key: 'error',     label: `Errors (${stats.errors})` },
+          ] as const).map(f => (
+            <button
+              key={f.key}
+              onClick={() => { setFilter(f.key); setPage(1) }}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                filter === f.key
+                  ? 'bg-me-charcoal/80 text-white'
+                  : 'text-me-ivory/40 hover:text-me-ivory/70'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <select
+          value={sortBy}
+          onChange={e => { setSortBy(e.target.value as typeof sortBy); setPage(1) }}
+          className="bg-me-charcoal/70 border border-me-charcoal rounded-lg px-3 py-1.5 text-sm text-me-ivory/60 focus:outline-none focus:border-me-ochre"
+        >
+          <option value="newest">↓ 最新添加</option>
+          <option value="views">↓ 播放量</option>
+          <option value="industry">A→Z 行业</option>
+        </select>
       </div>
 
       {/* Grid */}
       {loading ? (
-        <div className="text-center py-12 text-me-charcoal/55">Loading…</div>
+        <div className="text-center py-12 text-me-ivory/35">Loading…</div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-12 text-me-charcoal/55">No references found.</div>
+        <div className="text-center py-12 text-me-ivory/35">No references found.</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filtered.map(r => (
@@ -922,6 +992,32 @@ export default function ViralReferencesPage() {
           ))}
         </div>
       )}
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between pt-2">
+          <p className="text-xs text-me-ivory/35">
+            第 {page} 页 / 共 {totalPages} 页 · 共 {total} 条
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="px-3 py-1.5 rounded-lg text-sm bg-me-charcoal/60 border border-me-charcoal text-me-ivory/60 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              ← 上一页
+            </button>
+            <button
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="px-3 py-1.5 rounded-lg text-sm bg-me-charcoal/60 border border-me-charcoal text-me-ivory/60 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              下一页 →
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
     </div>
   )
 }
