@@ -75,9 +75,21 @@ import { GET } from '../route'
 
 const STUB_USER = { id: 'user-1', email: 'admin@magiclab.test' }
 
+/** Valid (not-expired) purchases — used for balance / MTC metrics */
 const STUB_PURCHASES = [
   { id: 'p1', client_id: 'c1', amount_nzd: 500, mtc_amount: 1000, mtc_remaining: 800 },
   { id: 'p2', client_id: 'c2', amount_nzd: 300, mtc_amount: 600,  mtc_remaining: 200 },
+]
+
+/**
+ * All completed purchases (no expiry filter) — used for totalRevenue.
+ * Includes one additional expired purchase (amount_nzd: 200) that should
+ * be counted in revenue even though it no longer provides balance.
+ */
+const STUB_ALL_COMPLETED_PURCHASES = [
+  { amount_nzd: 500 },
+  { amount_nzd: 300 },
+  { amount_nzd: 200 }, // expired batch — must still be counted in totalRevenue
 ]
 
 const STUB_LEDGER = [
@@ -110,8 +122,12 @@ describe('GET /api/admin/mtc/overview', () => {
       error: null,
     })
 
-    // purchases, ledger, clients happy-path
-    mockPurchases.mockResolvedValue({ data: STUB_PURCHASES, error: null })
+    // purchases: two sequential calls per request
+    //   1st call → valid (not-expired) purchases for balance/MTC metrics
+    //   2nd call → all completed purchases for totalRevenue (no expiry filter)
+    mockPurchases
+      .mockResolvedValueOnce({ data: STUB_PURCHASES, error: null })
+      .mockResolvedValueOnce({ data: STUB_ALL_COMPLETED_PURCHASES, error: null })
     mockLedger.mockResolvedValue({ data: STUB_LEDGER, error: null })
     mockClients.mockResolvedValue({ data: STUB_CLIENTS, error: null })
   })
@@ -162,11 +178,11 @@ describe('GET /api/admin/mtc/overview', () => {
     expect(json.totalBalanceMtc).toBe(1000)
   })
 
-  it('totalRevenue equals sum of amount_nzd across valid purchases', async () => {
+  it('totalRevenue equals sum of amount_nzd across ALL completed purchases (including expired)', async () => {
     const res = await GET(makeRequest())
     const json = await res.json()
-    // 500 + 300 = 800
-    expect(json.totalRevenue).toBe(800)
+    // 500 + 300 + 200 (expired) = 1000
+    expect(json.totalRevenue).toBe(1000)
   })
 
   it('totalSoldMtc equals sum of mtc_amount across valid purchases', async () => {
@@ -224,6 +240,8 @@ describe('GET /api/admin/mtc/overview', () => {
   // ── Error handling ────────────────────────────────────────────────────────
 
   it('returns 500 when purchases DB query errors', async () => {
+    // Reset the once-queue from beforeEach so the error takes effect on the first call
+    mockPurchases.mockReset()
     mockPurchases.mockResolvedValue({ data: null, error: { message: 'DB failure' } })
     const res = await GET(makeRequest())
     expect(res.status).toBe(500)

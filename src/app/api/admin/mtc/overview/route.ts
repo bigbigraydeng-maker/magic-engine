@@ -87,6 +87,17 @@ export async function GET(_request: Request) {
 
   const purchases = (purchaseData ?? []) as PurchaseRow[]
 
+  // ── Fetch all completed purchases for revenue calculation (no expiry filter) ──
+
+  const { data: allCompletedPurchases, error: allPurchasesErr } = await supabaseAdmin
+    .from('mtc_purchases')
+    .select('amount_nzd')
+    .eq('status', 'completed')
+
+  if (allPurchasesErr) {
+    return NextResponse.json({ error: allPurchasesErr.message }, { status: 500 })
+  }
+
   // ── Fetch this-month ledger debits ────────────────────────────────────────
 
   const monthStart = new Date()
@@ -125,7 +136,9 @@ export async function GET(_request: Request) {
   // ── Aggregate global totals ───────────────────────────────────────────────
 
   const totalBalanceMtc = purchases.reduce((sum, p) => sum + p.mtc_remaining, 0)
-  const totalRevenue    = purchases.reduce((sum, p) => sum + p.amount_nzd, 0)
+  const totalRevenue    = (allCompletedPurchases ?? []).reduce(
+    (sum, p) => sum + Number(p.amount_nzd), 0,
+  )
   const totalSoldMtc    = purchases.reduce((sum, p) => sum + p.mtc_amount, 0)
   const totalConsumedMtc = totalSoldMtc - totalBalanceMtc
 
