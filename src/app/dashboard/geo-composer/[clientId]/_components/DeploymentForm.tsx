@@ -64,7 +64,10 @@ export function DeploymentForm({
     return generateDirectiveHtml(directive);
   }, [directive]);
 
-  // Detect which CMS providers are actively connected
+  // Detect one-click capable providers (wordpress / shopify create pages via REST).
+  // github is tracked separately: it's connected but uses a PR workflow, not REST,
+  // so the publish-geo-snippet API does NOT accept it (validated in route.ts).
+  // Showing a "Deploy to GitHub" button here would 400 — see B+ followup.
   const connectedProviders = useMemo<CmsProvider[]>(() => {
     if (!cmsProviders) return [];
     const list: CmsProvider[] = [];
@@ -74,6 +77,7 @@ export function DeploymentForm({
   }, [cmsProviders]);
 
   const hasConnectedCms = connectedProviders.length > 0;
+  const hasGithubOnly = !!(cmsProviders?.github?.connected) && !hasConnectedCms;
 
   const handleRecordDeployment = async () => {
     setIsRecording(true);
@@ -136,18 +140,35 @@ export function DeploymentForm({
   return (
     <div className="space-y-6">
 
-      {/* CMS Banner — shown when no CMS is connected */}
-      {cmsProviders !== undefined && !hasConnectedCms && (
+      {/* Banner — no CMS connected at all */}
+      {cmsProviders !== undefined && !hasConnectedCms && !hasGithubOnly && (
         <div className="p-4 bg-me-ochre/10 border border-me-ochre/30 rounded-lg flex items-start gap-3">
           <span className="text-me-ochre text-xl mt-0.5">🔗</span>
           <div>
             <p className="text-me-ochre font-medium text-sm">Connect your website for one-click deployment</p>
             <p className="text-me-ochre text-xs mt-1">
-              Link a WordPress or Shopify store in{' '}
-              <a href={`/dashboard/clients/${clientId}/settings`} className="underline hover:text-me-ochre">
+              Link a website in{' '}
+              <a href={`/dashboard/clients/${clientId}?settings=cms`} className="underline hover:text-me-ochre">
                 Settings → Website Connection
               </a>{' '}
               to deploy this snippet automatically.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Banner — only a version-control repository is connected (github).
+          The one-click REST publish flow doesn't apply, so we surface the
+          actual next step the FDE needs to take instead of a dead-end status. */}
+      {hasGithubOnly && (
+        <div className="p-4 bg-[#5C8A4A]/10 border border-[#5C8A4A]/30 rounded-lg flex items-start gap-3">
+          <span className="text-[#5C8A4A] text-xl mt-0.5">✓</span>
+          <div>
+            <p className="text-[#5C8A4A] font-medium text-sm">Repository connected</p>
+            <p className="text-[#5C8A4A]/90 text-xs mt-1">
+              Your site uses a code-based deployment. Open a pull request that adds the
+              snippet below to the page <code className="font-mono text-[11px] bg-white/60 px-1 py-0.5 rounded">&lt;head&gt;</code>,
+              then use <strong>Add Page</strong> below to record the URL once the PR is merged.
             </p>
           </div>
         </div>
