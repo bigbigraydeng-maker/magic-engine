@@ -2,17 +2,17 @@
 
 import { useState, useEffect, useCallback } from 'react'
 
-interface LedgerEntry {
+interface LedgerRow {
   id: string
   created_at: string
-  type: 'debit' | 'credit'
-  amount: number
+  direction: 'debit' | 'credit'
+  mtc_amount: number
   service_key: string | null
   notes: string | null
 }
 
 interface LedgerResponse {
-  entries: LedgerEntry[]
+  rows: LedgerRow[]
   total: number
   page: number
   pageSize: number
@@ -145,14 +145,14 @@ export default function MtcLedgerTable({ clientId }: Props) {
                   {error}
                 </td>
               </tr>
-            ) : !data || data.entries.length === 0 ? (
+            ) : !data || data.rows.length === 0 ? (
               <tr>
                 <td colSpan={3} className="px-4 py-8 text-center text-sm text-me-charcoal/40">
                   No transactions yet
                 </td>
               </tr>
             ) : (
-              data.entries.map((entry) => (
+              data.rows.map((entry) => (
                 <tr
                   key={entry.id}
                   className="border-b border-black/[.06] hover:bg-me-ivory/40 transition last:border-0"
@@ -164,13 +164,13 @@ export default function MtcLedgerTable({ clientId }: Props) {
                     <ServiceLabel serviceKey={entry.service_key} notes={entry.notes} />
                   </td>
                   <td className="px-4 py-3 text-right font-display font-bold tabular-nums whitespace-nowrap">
-                    {entry.type === 'debit' ? (
+                    {entry.direction === 'debit' ? (
                       <span className="text-me-charcoal">
-                        −{entry.amount.toLocaleString()} <span className="text-xs font-semibold text-me-charcoal/45">MTC</span>
+                        −{entry.mtc_amount.toLocaleString()} <span className="text-xs font-semibold text-me-charcoal/45">MTC</span>
                       </span>
                     ) : (
                       <span className="text-[#5C8A4A]">
-                        +{entry.amount.toLocaleString()} <span className="text-xs font-semibold text-[#5C8A4A]/60">MTC</span>
+                        +{entry.mtc_amount.toLocaleString()} <span className="text-xs font-semibold text-[#5C8A4A]/60">MTC</span>
                       </span>
                     )}
                   </td>
