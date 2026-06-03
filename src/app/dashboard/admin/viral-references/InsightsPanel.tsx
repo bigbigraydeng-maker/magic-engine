@@ -70,10 +70,10 @@ const SCORE_LABELS: Record<keyof StyleScores, string> = {
 const SCORE_COLORS: Record<keyof StyleScores, string> = {
   energy:       'bg-me-ochre',
   luxury:       'bg-me-ochre',
-  authenticity: 'bg-[#5C8A4A]',
-  emotional:    'bg-[#C2453A]',
+  authenticity: 'bg-status-track',
+  emotional:    'bg-status-rej',
   humor:        'bg-me-ochre',
-  urgency:      'bg-[#C2453A]',
+  urgency:      'bg-status-rej',
   offer_signal: 'bg-me-ochre',
 }
 
@@ -106,14 +106,14 @@ const HOOK_TYPE_ZH: Record<string, string> = {
 }
 
 const HOOK_TYPE_COLOR: Record<string, string> = {
-  visual_shock:          'bg-[#C2453A]/50 text-[#C2453A]/70',
-  ugc_selfie:            'bg-me-ochre/50 text-me-gold',
-  text_overlay_question: 'bg-me-ochre/50 text-me-gold',
-  product_reveal:        'bg-me-ochre/50 text-me-ochre/80',
-  testimonial_start:     'bg-[#5C8A4A]/50 text-[#5C8A4A]/70',
-  sound_cue:             'bg-me-ochre/50 text-me-ochre/70',
-  problem_statement:     'bg-me-ochre/50 text-me-gold',
-  scenic_beauty:         'bg-me-ochre/50 text-me-ochre/80',
+  visual_shock:          'bg-status-rej/25 text-status-rej',
+  ugc_selfie:            'bg-status-exec/25 text-me-gold',
+  text_overlay_question: 'bg-status-exec/25 text-me-gold',
+  product_reveal:        'bg-status-exec/25 text-me-gold',
+  testimonial_start:     'bg-status-track/25 text-status-track',
+  sound_cue:             'bg-status-exec/25 text-me-gold',
+  problem_statement:     'bg-status-exec/25 text-me-gold',
+  scenic_beauty:         'bg-status-exec/25 text-me-gold',
 }
 
 const INDUSTRY_EMOJI: Record<string, string> = {
@@ -143,21 +143,21 @@ function ScoreBar({ dim, value, compareValue }: {
 }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs text-me-charcoal/45 w-36 shrink-0">{SCORE_LABELS[dim]}</span>
-      <div className="flex-1 bg-me-charcoal/60 rounded-full h-1.5 relative">
+      <span className="text-xs text-me-ivory/50 w-36 shrink-0">{SCORE_LABELS[dim]}</span>
+      <div className="flex-1 bg-white/10 rounded-full h-1.5 relative">
         <div
           className={`${SCORE_COLORS[dim]} h-1.5 rounded-full transition-all`}
           style={{ width: `${(value / 10) * 100}%` }}
         />
         {compareValue !== undefined && (
           <div
-            className="absolute top-0 h-1.5 w-0.5 bg-white/40 rounded"
+            className="absolute top-0 h-1.5 w-0.5 bg-white/50 rounded"
             style={{ left: `${(compareValue / 10) * 100}%` }}
             title={`对比行业: ${compareValue.toFixed(1)}`}
           />
         )}
       </div>
-      <span className="text-xs text-me-charcoal/35 w-6 text-right font-mono">{value.toFixed(1)}</span>
+      <span className="text-xs text-me-ivory/40 w-6 text-right font-mono">{value.toFixed(1)}</span>
     </div>
   )
 }
@@ -187,41 +187,41 @@ function IndustryComparisonMatrix({ poolByIndustry }: {
   const dims = Object.keys(SCORE_LABELS) as (keyof StyleScores)[]
 
   return (
-    <div className="bg-me-charcoal/60 border border-me-charcoal/50 rounded-xl p-4">
-      <p className="text-[11px] font-semibold text-me-charcoal/45 uppercase tracking-widest mb-4">
+    <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+      <p className="text-[11px] font-semibold text-me-ivory/40 uppercase tracking-widest mb-4">
         ⚖️ 行业风格对比
       </p>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
             <tr>
-              <th className="text-left text-me-charcoal/55 font-normal pb-2 w-36">维度</th>
+              <th className="text-left text-me-ivory/40 font-normal pb-2 w-36">维度</th>
               {industries.map(ind => (
-                <th key={ind} className="text-center text-me-charcoal/35 font-semibold pb-2 px-2">
+                <th key={ind} className="text-center text-me-ivory/60 font-semibold pb-2 px-2">
                   {industryLabel(ind)}
-                  <span className="block text-[10px] text-me-charcoal/55 font-normal">
+                  <span className="block text-[10px] text-me-ivory/35 font-normal">
                     {poolByIndustry.get(ind)!.length} 条
                   </span>
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-me-charcoal">
+          <tbody className="divide-y divide-white/8">
             {dims.map(dim => {
               const scores = industries.map(ind => avgByIndustry.get(ind)![dim])
               const maxScore = Math.max(...scores)
               return (
                 <tr key={dim}>
-                  <td className="text-me-charcoal/45 py-1.5 pr-2">{SCORE_LABELS[dim]}</td>
+                  <td className="text-me-ivory/50 py-1.5 pr-2">{SCORE_LABELS[dim]}</td>
                   {industries.map((ind, i) => {
                     const val = scores[i]
                     const isMax = val === maxScore && scores.filter(s => s === maxScore).length === 1
                     return (
                       <td key={ind} className="text-center py-1.5 px-2">
-                        <span className={`font-mono ${isMax ? 'text-me-ochre/80 font-bold' : 'text-me-charcoal/45'}`}>
+                        <span className={`font-mono ${isMax ? 'text-me-gold font-bold' : 'text-me-ivory/40'}`}>
                           {val.toFixed(1)}
                         </span>
-                        <div className="mt-0.5 h-1 bg-me-charcoal/60 rounded-full mx-auto w-12">
+                        <div className="mt-0.5 h-1 bg-white/10 rounded-full mx-auto w-12">
                           <div
                             className={`h-1 rounded-full ${SCORE_COLORS[dim]}`}
                             style={{ width: `${(val / 10) * 100}%` }}
@@ -261,31 +261,31 @@ function HookAnalysis({ pool }: { pool: ViralReferenceForInsights[] }) {
 
   return (
     <div className="space-y-4">
-      <p className="text-[11px] font-semibold text-me-charcoal/45 uppercase tracking-widest">
+      <p className="text-[11px] font-semibold text-me-ivory/50 uppercase tracking-widest">
         🎣 开场 Hook 分析（前 1.5 秒）
       </p>
 
       {/* Hook type distribution */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <p className="text-[10px] text-me-charcoal/55 uppercase tracking-widest mb-2">Hook 类型分布</p>
+          <p className="text-[10px] text-me-ivory/35 uppercase tracking-widest mb-2">Hook 类型分布</p>
           <div className="space-y-1.5">
             {topTypes.map(([type, count]) => {
               const pct = Math.round((count / hooksPool.length) * 100)
               const label = HOOK_TYPE_ZH[type] ?? type
-              const colorCls = HOOK_TYPE_COLOR[type] ?? 'bg-me-charcoal/60 text-me-charcoal/35'
+              const colorCls = HOOK_TYPE_COLOR[type] ?? 'bg-white/10 text-me-ivory/50'
               return (
                 <div key={type} className="flex items-center gap-2">
                   <span className={`text-[10px] px-2 py-0.5 rounded font-medium shrink-0 ${colorCls}`}>
                     {label}
                   </span>
-                  <div className="flex-1 bg-me-charcoal/60 rounded-full h-1.5">
+                  <div className="flex-1 bg-white/10 rounded-full h-1.5">
                     <div
                       className="bg-me-ochre h-1.5 rounded-full"
                       style={{ width: `${pct}%` }}
                     />
                   </div>
-                  <span className="text-[10px] text-me-charcoal/55 w-8 text-right font-mono">{pct}%</span>
+                  <span className="text-[10px] text-me-ivory/35 w-8 text-right font-mono">{pct}%</span>
                 </div>
               )
             })}
@@ -293,24 +293,24 @@ function HookAnalysis({ pool }: { pool: ViralReferenceForInsights[] }) {
         </div>
 
         <div>
-          <p className="text-[10px] text-me-charcoal/55 uppercase tracking-widest mb-2">开场节奏</p>
+          <p className="text-[10px] text-me-ivory/35 uppercase tracking-widest mb-2">开场节奏</p>
           <div className="space-y-2">
             {sortedEntries(feelFreq).map(([feel, count]) => {
               const pct = Math.round((count / hooksPool.length) * 100)
               const label = feel === 'abrupt-cut' ? '⚡ 突切/跳接' : feel === 'smooth-reveal' ? '🌊 渐入/电影感' : feel
               return (
                 <div key={feel} className="flex items-center gap-2">
-                  <span className="text-xs text-me-charcoal/35 w-28 shrink-0">{label}</span>
-                  <div className="flex-1 bg-me-charcoal/60 rounded-full h-1.5">
+                  <span className="text-xs text-me-ivory/50 w-28 shrink-0">{label}</span>
+                  <div className="flex-1 bg-white/10 rounded-full h-1.5">
                     <div className="bg-me-ochre h-1.5 rounded-full" style={{ width: `${pct}%` }} />
                   </div>
-                  <span className="text-[10px] text-me-charcoal/55 w-8 text-right font-mono">{pct}%</span>
+                  <span className="text-[10px] text-me-ivory/35 w-8 text-right font-mono">{pct}%</span>
                 </div>
               )
             })}
           </div>
 
-          <p className="text-[10px] text-me-charcoal/55 mt-3">
+          <p className="text-[10px] text-me-ivory/35 mt-3">
             基于 {hooksPool.length} 条视频的 Hook 数据
           </p>
         </div>
@@ -319,14 +319,14 @@ function HookAnalysis({ pool }: { pool: ViralReferenceForInsights[] }) {
       {/* Example scripts */}
       {examplesByType.some(e => e.scripts.length > 0) && (
         <div>
-          <p className="text-[10px] text-me-charcoal/55 uppercase tracking-widest mb-2">高频 Hook 脚本示例</p>
+          <p className="text-[10px] text-me-ivory/35 uppercase tracking-widest mb-2">高频 Hook 脚本示例</p>
           <div className="space-y-3">
             {examplesByType.map(({ type, scripts }) => {
               if (scripts.length === 0) return null
-              const colorCls = HOOK_TYPE_COLOR[type] ?? 'bg-me-charcoal/60 text-me-charcoal/35'
+              const colorCls = HOOK_TYPE_COLOR[type] ?? 'bg-white/10 text-me-ivory/50'
               const label = HOOK_TYPE_ZH[type] ?? type
               return (
-                <div key={type} className="bg-me-charcoal/50 border border-me-charcoal/50 rounded-lg p-3">
+                <div key={type} className="bg-white/5 border border-white/10 rounded-lg p-3">
                   <span className={`text-[10px] px-2 py-0.5 rounded font-medium ${colorCls} mb-2 inline-block`}>
                     {label}
                   </span>
@@ -334,10 +334,10 @@ function HookAnalysis({ pool }: { pool: ViralReferenceForInsights[] }) {
                     {scripts.map((s, i) => (
                       <div key={i} className="text-xs">
                         {s.script ? (
-                          <p className="text-me-charcoal/25 italic">"{s.script}"</p>
+                          <p className="text-me-ivory/60 italic">"{s.script}"</p>
                         ) : null}
                         {s.title && (
-                          <p className="text-me-charcoal/55 text-[10px] mt-0.5 truncate">— {s.title}</p>
+                          <p className="text-me-ivory/35 text-[10px] mt-0.5 truncate">— {s.title}</p>
                         )}
                       </div>
                     ))}
@@ -475,7 +475,7 @@ export function InsightsPanel({ refs }: Props) {
   if (industries.length === 0) return null
 
   return (
-    <div className="bg-me-charcoal/75 border border-me-charcoal rounded-xl overflow-hidden">
+    <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between px-4 py-3 gap-3 flex-wrap">
@@ -486,12 +486,12 @@ export function InsightsPanel({ refs }: Props) {
           <span className="text-base">📊</span>
           <div className="min-w-0">
             <p className="text-sm font-semibold text-white">AI 洞察报告</p>
-            <p className="text-xs text-me-charcoal/45">
+            <p className="text-xs text-me-ivory/50">
               爆款规律分析 · 可向客户展示
               <span className="text-me-ochre/80"> · {industries.length} 个行业 · {learnable.length} 条视频</span>
             </p>
           </div>
-          <span className="text-me-charcoal/55 text-xs ml-2 shrink-0">{open ? '▲ 收起' : '▼ 展开'}</span>
+          <span className="text-me-ivory/35 text-xs ml-2 shrink-0">{open ? '▲ 收起' : '▼ 展开'}</span>
         </button>
 
         {/* Industry tabs */}
@@ -503,11 +503,11 @@ export function InsightsPanel({ refs }: Props) {
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                 industry === ind
                   ? 'bg-me-ochre text-white'
-                  : 'bg-me-charcoal/60 text-me-charcoal/45 hover:text-white'
+                  : 'bg-white/10 text-me-ivory/50 hover:text-white'
               }`}
             >
               {industryLabel(ind)}
-              <span className={`ml-1.5 text-[10px] ${industry === ind ? 'text-me-ochre/80' : 'text-me-charcoal/60'}`}>
+              <span className={`ml-1.5 text-[10px] ${industry === ind ? 'text-me-ochre/80' : 'text-me-ivory/35'}`}>
                 {poolByIndustry.get(ind)?.length ?? 0}
               </span>
             </button>
@@ -517,7 +517,7 @@ export function InsightsPanel({ refs }: Props) {
 
       {/* ── Body ───────────────────────────────────────────────────────────── */}
       {open && (
-        <div className="border-t border-me-charcoal p-5 space-y-6">
+        <div className="border-t border-white/10 p-5 space-y-6">
 
           {/* Industry comparison matrix (only when 2+ industries) */}
           {industries.length >= 2 && (
@@ -525,7 +525,7 @@ export function InsightsPanel({ refs }: Props) {
           )}
 
           {!insights ? (
-            <p className="text-sm text-me-charcoal/55 text-center py-4">
+            <p className="text-sm text-me-ivory/35 text-center py-4">
               需要至少 2 条已分析的可学习视频才能生成洞察报告
             </p>
           ) : (
@@ -541,11 +541,11 @@ export function InsightsPanel({ refs }: Props) {
               {/* DNA + Techniques */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <p className="text-[11px] font-semibold text-me-charcoal/45 uppercase tracking-widest mb-3">
+                  <p className="text-[11px] font-semibold text-me-ivory/40 uppercase tracking-widest mb-3">
                     🧬 爆款视频风格 DNA
                   </p>
                   {industries.length >= 2 && otherIndustriesAvg && (
-                    <p className="text-[10px] text-me-charcoal/60 mb-2">
+                    <p className="text-[10px] text-me-ivory/35 mb-2">
                       白色竖线 = 其他行业均值对比
                     </p>
                   )}
@@ -559,25 +559,25 @@ export function InsightsPanel({ refs }: Props) {
                       />
                     ))}
                   </div>
-                  <p className="text-[11px] text-me-charcoal/60 mt-3">{pool.length} 条视频平均分 · 最高 10 分</p>
+                  <p className="text-[11px] text-me-ivory/35 mt-3">{pool.length} 条视频平均分 · 最高 10 分</p>
                 </div>
 
                 <div className="space-y-5">
                   {insights.topTechs.length > 0 && (
                     <div>
-                      <p className="text-[11px] font-semibold text-me-charcoal/45 uppercase tracking-widest mb-2">
+                      <p className="text-[11px] font-semibold text-me-ivory/40 uppercase tracking-widest mb-2">
                         🎬 高频拍摄技法
                       </p>
                       <div className="space-y-1.5">
                         {insights.topTechs.map(([tech, count]) => (
                           <div key={tech} className="flex items-center gap-2">
-                            <span className="flex-1 text-xs text-me-charcoal/35">{tech}</span>
+                            <span className="flex-1 text-xs text-me-ivory/50">{tech}</span>
                             <div className="flex items-center gap-1.5 shrink-0">
                               <div
                                 className="h-1.5 bg-me-ochre rounded-full"
                                 style={{ width: `${Math.round((count / insights.topTechs[0][1]) * 52)}px` }}
                               />
-                              <span className="text-[10px] text-me-charcoal/55 w-3 text-right">{count}</span>
+                              <span className="text-[10px] text-me-ivory/35 w-3 text-right">{count}</span>
                             </div>
                           </div>
                         ))}
@@ -587,12 +587,12 @@ export function InsightsPanel({ refs }: Props) {
 
                   {insights.topTags.length > 0 && (
                     <div>
-                      <p className="text-[11px] font-semibold text-me-charcoal/45 uppercase tracking-widest mb-2">
+                      <p className="text-[11px] font-semibold text-me-ivory/40 uppercase tracking-widest mb-2">
                         🏷️ 风格标签
                       </p>
                       <div className="flex flex-wrap gap-1.5">
                         {insights.topTags.map(([tag]) => (
-                          <span key={tag} className="text-xs px-2 py-0.5 rounded bg-me-charcoal/60 text-me-charcoal/35">
+                          <span key={tag} className="text-xs px-2 py-0.5 rounded bg-white/10 text-me-ivory/50">
                             {tag}
                           </span>
                         ))}
@@ -603,14 +603,14 @@ export function InsightsPanel({ refs }: Props) {
               </div>
 
               {/* Hook Analysis */}
-              <div className="border-t border-me-charcoal/50 pt-5">
+              <div className="border-t border-white/10 pt-5">
                 <HookAnalysis pool={pool} />
               </div>
 
               {/* Goal distribution + Personas */}
               <div className="grid grid-cols-2 gap-6">
                 <div>
-                  <p className="text-[11px] font-semibold text-me-charcoal/45 uppercase tracking-widest mb-3">
+                  <p className="text-[11px] font-semibold text-me-ivory/40 uppercase tracking-widest mb-3">
                     🎯 内容类型分布
                   </p>
                   <div className="space-y-2">
@@ -619,13 +619,13 @@ export function InsightsPanel({ refs }: Props) {
                       const pct  = Math.round((count / pool.length) * 100)
                       return (
                         <div key={goal} className="flex items-center gap-2">
-                          <span className="text-xs text-me-charcoal/45 w-24 shrink-0">
+                          <span className="text-xs text-me-ivory/50 w-24 shrink-0">
                             {meta?.emoji} {meta?.label}
                           </span>
-                          <div className="flex-1 bg-me-charcoal/60 rounded-full h-1.5">
+                          <div className="flex-1 bg-white/10 rounded-full h-1.5">
                             <div className="bg-me-ochre h-1.5 rounded-full" style={{ width: `${pct}%` }} />
                           </div>
-                          <span className="text-xs text-me-charcoal/45 w-8 text-right font-mono">{pct}%</span>
+                          <span className="text-xs text-me-ivory/50 w-8 text-right font-mono">{pct}%</span>
                         </div>
                       )
                     })}
@@ -633,7 +633,7 @@ export function InsightsPanel({ refs }: Props) {
                 </div>
 
                 <div>
-                  <p className="text-[11px] font-semibold text-me-charcoal/45 uppercase tracking-widest mb-3">
+                  <p className="text-[11px] font-semibold text-me-ivory/40 uppercase tracking-widest mb-3">
                     👥 目标受众画像
                   </p>
                   <div className="space-y-2">
@@ -641,10 +641,10 @@ export function InsightsPanel({ refs }: Props) {
                       const pct = Math.round((count / pool.length) * 100)
                       return (
                         <div key={persona} className="flex items-center gap-2">
-                          <span className="text-xs text-me-charcoal/35 flex-1 truncate leading-snug" title={persona}>
+                          <span className="text-xs text-me-ivory/50 flex-1 truncate leading-snug" title={persona}>
                             {persona}
                           </span>
-                          <span className="text-xs text-[#5C8A4A]/70 font-mono shrink-0">{pct}%</span>
+                          <span className="text-xs text-status-track font-mono shrink-0">{pct}%</span>
                         </div>
                       )
                     })}
@@ -655,25 +655,25 @@ export function InsightsPanel({ refs }: Props) {
               {/* Top performers */}
               {insights.topPerformers.length > 0 && (
                 <div>
-                  <p className="text-[11px] font-semibold text-me-charcoal/45 uppercase tracking-widest mb-3">
+                  <p className="text-[11px] font-semibold text-me-ivory/40 uppercase tracking-widest mb-3">
                     🏆 播放量最高的参考视频
                   </p>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     {insights.topPerformers.map((r, i) => (
-                      <div key={r.id} className="bg-me-charcoal/60 border border-me-charcoal/50 rounded-lg p-3 space-y-2">
+                      <div key={r.id} className="bg-white/5 border border-white/10 rounded-lg p-3 space-y-2">
                         <div className="flex items-center gap-2">
                           <span className="text-base">{['🥇', '🥈', '🥉'][i]}</span>
                           <span className="text-me-gold text-xs font-bold">
                             {fmtViews(r.view_count!)} views
                           </span>
                           {r.opening_hook?.type && (
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${HOOK_TYPE_COLOR[r.opening_hook.type] ?? 'bg-me-charcoal/60 text-me-charcoal/45'}`}>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${HOOK_TYPE_COLOR[r.opening_hook.type] ?? 'bg-white/10 text-me-ivory/50'}`}>
                               {HOOK_TYPE_ZH[r.opening_hook.type] ?? r.opening_hook.type}
                             </span>
                           )}
                         </div>
                         {r.video_title && (
-                          <p className="text-xs text-me-charcoal/25 line-clamp-2 leading-relaxed">{r.video_title}</p>
+                          <p className="text-xs text-me-ivory/60 line-clamp-2 leading-relaxed">{r.video_title}</p>
                         )}
                         {r.opening_hook?.script && (
                           <p className="text-[10px] text-me-ochre/80 italic line-clamp-1">
