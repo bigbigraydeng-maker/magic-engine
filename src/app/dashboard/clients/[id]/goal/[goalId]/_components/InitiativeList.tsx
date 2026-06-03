@@ -22,6 +22,7 @@ import type {
   GoalRow,
 } from '@/types/strategy'
 import { INITIATIVE_TYPE_LABEL, INITIATIVE_TYPE_TIER } from '@/types/strategy'
+import { normalizeInitiativeList } from '@/lib/strategy/normalize'
 import { InitiativeFormDrawer } from './InitiativeFormDrawer'
 import { InitiativeExecutionPanel } from './InitiativeExecutionPanel'
 
@@ -67,7 +68,8 @@ export function InitiativeList({ goal, canEdit }: Props) {
       const res = await fetch(`/api/goals/${goal.id}/initiatives`)
       if (!res.ok) return
       const j = await res.json()
-      setItems(j.initiatives ?? [])
+      // B7 fix: normalize NUMERIC strings to numbers (Supabase returns numeric as string)
+      setItems(normalizeInitiativeList(j.initiatives ?? []))
     } finally {
       setLoading(false)
     }

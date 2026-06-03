@@ -12,6 +12,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import type { GoalRow } from '@/types/strategy'
+import { normalizeGoalRow } from '@/lib/strategy/normalize'
 import { InitiativeList } from './_components/InitiativeList'
 import { BacklogMigrator } from './_components/BacklogMigrator'
 import { VerdictPanel } from './_components/VerdictPanel'
@@ -53,7 +54,8 @@ export default function GoalDetailPage() {
         return
       }
       const j = await res.json()
-      setGoal(j.goal)
+      // B7 fix: normalize NUMERIC strings to numbers
+      setGoal(j.goal ? normalizeGoalRow(j.goal) : null)
     } finally {
       setLoading(false)
     }
@@ -220,11 +222,17 @@ export default function GoalDetailPage() {
                 {goal.target_direction === 'decrease' ? 'Reduction' : 'Growth'}
               </div>
               <div className="text-lg font-bold text-me-ochre">
-                {goal.baseline_value !== 0
-                  ? goal.target_direction === 'decrease'
-                    ? `${((1 - goal.target_value / goal.baseline_value) * 100).toFixed(0)}%`
-                    : `${(((goal.target_value / goal.baseline_value) - 1) * 100).toFixed(0)}%`
-                  : '—'}
+                {(() => {
+                  const b = goal.baseline_value
+                  const t = goal.target_value
+                  // B4 fix: baseline=0 → "From zero" (e.g. product launch signups 0→30)
+                  if (b === 0) return 'From zero'
+                  const pct = goal.target_direction === 'decrease'
+                    ? (1 - t / b) * 100
+                    : (t / b - 1) * 100
+                  if (!Number.isFinite(pct)) return '—'
+                  return `${pct.toFixed(0)}%`
+                })()}
               </div>
             </div>
           </div>
@@ -238,7 +246,23 @@ export default function GoalDetailPage() {
               {formatDate(goal.period_start)} → {formatDate(goal.period_end)}
             </div>
             <div className="mt-1 text-xs font-semibold text-me-charcoal/55">
-              {periodDays} days total · {goal.status === 'active' ? `${daysRemaining} remaining` : 'not started'}
+              {periodDays} days total · {(() => {
+                // B11 fix: status-aware period label
+                switch (goal.status) {
+                  case 'draft':
+                    return 'not started yet'
+                  case 'active':
+                    return `${daysRemaining} days remaining`
+                  case 'expired':
+                    return 'period ended · awaiting verdict'
+                  case 'archived':
+                    return goal.verdict_at
+                      ? `archived ${formatDate(goal.verdict_at.slice(0, 10))}`
+                      : 'archived'
+                  default:
+                    return goal.status
+                }
+              })()}
             </div>
           </div>
           <div className="rounded-xl border border-black/10 bg-white p-5 shadow-sm">

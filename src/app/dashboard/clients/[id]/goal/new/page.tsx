@@ -17,7 +17,7 @@
  * Saved as draft only — FDE 后续在 Goal 看板点 "Activate" 才正式启动。
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import {
   GOAL_SUBTYPES_BY_INTENT,
@@ -28,6 +28,51 @@ import {
   type MetricCandidate,
   type CreateGoalInput,
 } from '@/types/strategy'
+
+// ─── Per-metric placeholder examples ─────────────────────────────────────────
+// B3 fix: placeholder should follow the chosen metric, not stay on '80000'
+
+interface MetricPlaceholder {
+  baseline: string
+  target: string
+}
+
+const METRIC_PLACEHOLDERS: Record<string, MetricPlaceholder> = {
+  // Acquisition
+  leads_count:         { baseline: 'e.g. 20',    target: 'e.g. 50' },
+  form_submissions:    { baseline: 'e.g. 30',    target: 'e.g. 80' },
+  phone_calls:         { baseline: 'e.g. 15',    target: 'e.g. 40' },
+  // Sales: ongoing revenue
+  monthly_revenue:     { baseline: 'e.g. 80000', target: 'e.g. 120000' },
+  orders_count:        { baseline: 'e.g. 100',   target: 'e.g. 200' },
+  avg_order_value:     { baseline: 'e.g. 500',   target: 'e.g. 750' },
+  contract_value_signed: { baseline: 'e.g. 50000', target: 'e.g. 150000' },
+  // Sales: inventory clearance (decrease)
+  inventory_units_remaining: { baseline: 'e.g. 500', target: 'e.g. 0' },
+  inventory_value_remaining: { baseline: 'e.g. 50000', target: 'e.g. 0' },
+  // Sales: product launch
+  signups_count:       { baseline: 'e.g. 0',     target: 'e.g. 30' },
+  pre_orders_count:    { baseline: 'e.g. 0',     target: 'e.g. 50' },
+  // Sales: conversion lift
+  conversion_rate:     { baseline: 'e.g. 2',     target: 'e.g. 5' },
+  cart_abandonment_rate: { baseline: 'e.g. 70',  target: 'e.g. 50' },
+  // Awareness
+  brand_search_volume: { baseline: 'e.g. 500',   target: 'e.g. 2000' },
+  media_mentions:      { baseline: 'e.g. 5',     target: 'e.g. 30' },
+  ai_visibility_score: { baseline: 'e.g. 20',    target: 'e.g. 60' },
+  social_followers_growth: { baseline: 'e.g. 0', target: 'e.g. 1000' },
+  organic_traffic:     { baseline: 'e.g. 1000',  target: 'e.g. 5000' },
+}
+
+function placeholderFor(metric: MetricCandidate | null, direction: TargetDirection, kind: 'baseline' | 'target'): string {
+  if (metric) {
+    const preset = METRIC_PLACEHOLDERS[metric.key]
+    if (preset) return preset[kind]
+  }
+  // Fallback by direction
+  if (direction === 'decrease') return kind === 'baseline' ? 'e.g. 500' : 'e.g. 0'
+  return kind === 'baseline' ? 'e.g. 80000' : 'e.g. 120000'
+}
 
 // ─── Intent options ──────────────────────────────────────────────────────────
 
@@ -56,6 +101,10 @@ export default function NewGoalPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
+  // B14 fix: scroll to baseline/target section when metric is selected so PM
+  // can't miss it (especially for clearance subtype where metric list is short).
+  const baselineSectionRef = useRef<HTMLDivElement | null>(null)
+
   // ── State for all steps ────────────────────────────────────────────────────
   const [intent, setIntent] = useState<GoalIntent | null>(null)
   const [subType, setSubType] = useState<GoalSubType | null>(null)
@@ -74,7 +123,34 @@ export default function NewGoalPage() {
   })
   const [budgetAmount, setBudgetAmount] = useState('')
   const [budgetCurrency, setBudgetCurrency] = useState<'AUD' | 'NZD'>('NZD')
+  const [currencyTouched, setCurrencyTouched] = useState(false)
   const [fdeReasoning, setFdeReasoning] = useState('')
+
+  // B15 fix: detect client's country and default currency accordingly.
+  // CTS (NZ) → NZD default, Oztop (AU) → AUD default.
+  const [clientCountry, setClientCountry] = useState<'AU' | 'NZ' | null>(null)
+
+  useEffect(() => {
+    // Lightweight fetch — just get client country to pick default currency
+    fetch(`/api/clients/${clientId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(j => {
+        if (!j) return
+        const country = (j.client?.country ?? '').toUpperCase()
+        if (country === 'AU' || country === 'NZ') {
+          setClientCountry(country)
+        }
+      })
+      .catch(() => { /* silent — fallback to NZD default */ })
+  }, [clientId])
+
+  // Auto-set default currency once we know client country, but only if FDE
+  // hasn't explicitly chosen a currency yet
+  useEffect(() => {
+    if (clientCountry && !currencyTouched) {
+      setBudgetCurrency(clientCountry === 'AU' ? 'AUD' : 'NZD')
+    }
+  }, [clientCountry, currencyTouched])
 
   // ── Available sub-types for the chosen intent ─────────────────────────────
   const availableSubTypes = intent ? GOAL_SUBTYPES_BY_INTENT[intent] : []
@@ -94,6 +170,13 @@ export default function NewGoalPage() {
     const def = availableSubTypes.find(s => s.value === newSubType)
     if (def) {
       setTargetDirection(def.default_direction)
+      // B13 fix: pre-fill title with sub-type example, FDE can edit or accept as-is
+      // Only pre-fill if title is empty or matches a previous sub-type example
+      // (so FDE's manual edits aren't overwritten)
+      const previousExamples = availableSubTypes.map(s => s.example)
+      if (!title.trim() || previousExamples.includes(title.trim())) {
+        setTitle(def.example)
+      }
     }
     // Clear metric — will be re-chosen from filtered list
     setSelectedMetric(null)
@@ -106,6 +189,13 @@ export default function NewGoalPage() {
     setSubType(null)
     setTargetDirection('increase')
     setSelectedMetric(null)
+    // B13: also clear title if it's a previous sub-type example
+    if (intent) {
+      const previousExamples = GOAL_SUBTYPES_BY_INTENT[intent].map(s => s.example)
+      if (previousExamples.includes(title.trim())) {
+        setTitle('')
+      }
+    }
   }
 
   // ── Validation per step ────────────────────────────────────────────────────
@@ -310,6 +400,10 @@ export default function NewGoalPage() {
                     setSelectedMetric(m)
                     // Auto-apply metric's default direction if exists
                     if (m.default_direction) setTargetDirection(m.default_direction)
+                    // B14 fix: scroll to baseline/target section so PM can't miss it
+                    setTimeout(() => {
+                      baselineSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                    }, 100)
                   }}
                   className={`w-full rounded-lg border px-4 py-3 text-left transition-all ${
                     selectedMetric?.key === m.key
@@ -341,7 +435,11 @@ export default function NewGoalPage() {
             </div>
 
             {selectedMetric && (
-              <div className="space-y-4 border-t border-black/10 pt-4">
+              <div ref={baselineSectionRef} className="space-y-4 border-t border-black/10 pt-4 scroll-mt-4">
+                {/* B14: prominent banner so PM can't miss this section */}
+                <div className="rounded-lg border border-status-track/30 bg-status-track/[0.06] px-3 py-2 text-[12px] font-bold text-status-track">
+                  ↓ 请填写 baseline 和 target，才能进入 Step 3
+                </div>
                 {/* Direction toggle (auto-set by sub_type / metric, but user can override) */}
                 <div className="rounded-lg border border-black/10 bg-me-ivory p-3">
                   <div className="flex items-center justify-between gap-3">
@@ -374,7 +472,7 @@ export default function NewGoalPage() {
                       type="number"
                       value={baselineValue}
                       onChange={e => setBaselineValue(e.target.value)}
-                      placeholder={targetDirection === 'decrease' ? 'e.g. 500' : 'e.g. 80000'}
+                      placeholder={placeholderFor(selectedMetric, targetDirection, 'baseline')}
                       className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
                     />
                     <p className="text-[11px] font-semibold text-me-charcoal/45">单位: {selectedMetric.unit}</p>
@@ -387,14 +485,30 @@ export default function NewGoalPage() {
                       type="number"
                       value={targetValue}
                       onChange={e => setTargetValue(e.target.value)}
-                      placeholder={targetDirection === 'decrease' ? 'e.g. 0' : 'e.g. 120000'}
+                      placeholder={placeholderFor(selectedMetric, targetDirection, 'target')}
                       className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none"
                     />
-                    {baselineValue && targetValue && parseFloat(baselineValue) !== 0 && (
+                    {baselineValue && targetValue && (
                       <p className="text-[11px] font-bold text-status-track">
-                        {targetDirection === 'decrease'
-                          ? `${((1 - parseFloat(targetValue) / parseFloat(baselineValue)) * 100).toFixed(0)}% reduction`
-                          : `${((parseFloat(targetValue) / parseFloat(baselineValue) - 1) * 100).toFixed(0)}% growth`}
+                        {(() => {
+                          const b = parseFloat(baselineValue)
+                          const t = parseFloat(targetValue)
+                          if (!Number.isFinite(b) || !Number.isFinite(t)) return null
+                          // B4 fix: baseline=0 → "New from zero" instead of Infinity%
+                          if (b === 0) {
+                            return targetDirection === 'decrease'
+                              ? `Target: ${t.toLocaleString()} (from zero)`
+                              : `New metric · target ${t.toLocaleString()} (from zero)`
+                          }
+                          const pct = targetDirection === 'decrease'
+                            ? (1 - t / b) * 100
+                            : (t / b - 1) * 100
+                          // 守护：避免 NaN / Infinity 进 toFixed
+                          if (!Number.isFinite(pct)) return null
+                          return targetDirection === 'decrease'
+                            ? `${pct.toFixed(0)}% reduction`
+                            : `${pct.toFixed(0)}% growth`
+                        })()}
                       </p>
                     )}
                   </div>
@@ -445,14 +559,25 @@ export default function NewGoalPage() {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">货币</label>
+                <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">
+                  货币
+                  {clientCountry && !currencyTouched && (
+                    <span className="ml-1.5 text-[9px] font-bold text-me-ochre">
+                      auto · {clientCountry}
+                    </span>
+                  )}
+                </label>
                 <select
                   value={budgetCurrency}
-                  onChange={e => setBudgetCurrency(e.target.value as 'AUD' | 'NZD')}
+                  onChange={e => {
+                    // B15 fix: mark currency as touched so auto-default doesn't override
+                    setCurrencyTouched(true)
+                    setBudgetCurrency(e.target.value as 'AUD' | 'NZD')
+                  }}
                   className="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal focus:border-me-ochre focus:outline-none"
                 >
-                  <option value="NZD">NZD</option>
                   <option value="AUD">AUD</option>
+                  <option value="NZD">NZD</option>
                 </select>
               </div>
             </div>
@@ -511,23 +636,33 @@ export default function NewGoalPage() {
           </button>
 
           {step < 4 ? (
-            <button
-              type="button"
-              onClick={() => {
-                if (step === 1 && !canProceed1) return
-                if (step === 2 && !canProceed2) return
-                if (step === 3 && !canProceed3) return
-                setStep((step + 1) as 1 | 2 | 3 | 4)
-              }}
-              disabled={
-                (step === 1 && !canProceed1) ||
-                (step === 2 && !canProceed2) ||
-                (step === 3 && !canProceed3)
-              }
-              className="rounded-lg bg-me-ochre px-6 py-2 text-sm font-black text-white transition-colors hover:bg-me-ochre/90 disabled:cursor-not-allowed disabled:opacity-30"
-            >
-              Next →
-            </button>
+            <div className="flex flex-col items-end gap-1">
+              {/* Step 1 progress hint — tells PM what's still missing */}
+              {step === 1 && !canProceed1 && (
+                <p className="text-[11px] font-semibold text-me-charcoal/55">
+                  {!intent && '请先选 Intent · '}
+                  {intent && !subType && '请选 Sub-type · '}
+                  {intent && subType && !title.trim() && '请填 Goal 标题'}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  if (step === 1 && !canProceed1) return
+                  if (step === 2 && !canProceed2) return
+                  if (step === 3 && !canProceed3) return
+                  setStep((step + 1) as 1 | 2 | 3 | 4)
+                }}
+                disabled={
+                  (step === 1 && !canProceed1) ||
+                  (step === 2 && !canProceed2) ||
+                  (step === 3 && !canProceed3)
+                }
+                className="rounded-lg bg-me-ochre px-6 py-2 text-sm font-black text-white transition-colors hover:bg-me-ochre/90 disabled:cursor-not-allowed disabled:opacity-30"
+              >
+                Next →
+              </button>
+            </div>
           ) : (
             <button
               type="button"

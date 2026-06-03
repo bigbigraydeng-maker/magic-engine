@@ -276,15 +276,13 @@ export function InitiativeFormDrawer({
               <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">
                 Hypothesis · 为什么押这一条
               </label>
-              <button
-                type="button"
+              {/* B6 fix: polish button with hover tooltip explaining disable reason */}
+              <PolishButton
+                editing={editing}
+                polishing={polishing}
+                hypothesisEmpty={!hypothesis.trim()}
                 onClick={handlePolish}
-                disabled={!editing || polishing || !hypothesis.trim()}
-                className="rounded-md bg-me-ochre/90 px-3 py-1 text-xs font-black text-white transition-colors hover:bg-me-ochre disabled:cursor-not-allowed disabled:opacity-30"
-                title={!editing ? 'Save draft first, then polish' : ''}
-              >
-                {polishing ? '诸葛亮润色中…' : '🪄 让诸葛亮润色'}
-              </button>
+              />
             </div>
             <textarea
               value={hypothesis}
@@ -325,6 +323,51 @@ export function InitiativeFormDrawer({
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ─── B6 fix: polish button with hover tooltip ────────────────────────────────
+// When disabled, hover shows a clear reason instead of relying on the
+// browser's native title attribute (which has a 1-2s delay + bland styling).
+
+function PolishButton({
+  editing, polishing, hypothesisEmpty, onClick,
+}: {
+  editing: boolean
+  polishing: boolean
+  hypothesisEmpty: boolean
+  onClick: () => void
+}) {
+  const disabled = !editing || polishing || hypothesisEmpty
+
+  // Disable reason — first match wins
+  const disableReason =
+    polishing ? null  // no tooltip during polishing
+    : !editing ? '先点 Create Initiative 保存草稿，诸葛亮才能读 initiative 上下文做润色'
+    : hypothesisEmpty ? '先在下方写一段粗糙的 hypothesis，再让诸葛亮润色'
+    : null
+
+  return (
+    <div className="group relative">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        className="rounded-md bg-me-ochre/90 px-3 py-1 text-xs font-black text-white transition-colors hover:bg-me-ochre disabled:cursor-not-allowed disabled:opacity-30"
+      >
+        {polishing ? '诸葛亮润色中…' : '🪄 让诸葛亮润色'}
+      </button>
+
+      {/* Hover tooltip — shows instantly on hover/focus when button is disabled */}
+      {disableReason && (
+        <div className="pointer-events-none absolute right-0 top-full z-20 mt-1.5 w-64 rounded-lg border border-black/15 bg-me-charcoal px-3 py-2 text-[11px] font-semibold leading-relaxed text-white opacity-0 shadow-card transition-opacity duration-150 group-hover:opacity-100">
+          <div className="font-black uppercase tracking-wide text-me-ochre/90 text-[9px] mb-1">为什么按钮灰着？</div>
+          {disableReason}
+          {/* Arrow */}
+          <div className="absolute -top-1 right-4 h-2 w-2 rotate-45 border-l border-t border-black/15 bg-me-charcoal"></div>
+        </div>
+      )}
     </div>
   )
 }

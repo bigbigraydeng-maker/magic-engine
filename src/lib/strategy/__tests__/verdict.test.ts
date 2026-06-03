@@ -29,6 +29,38 @@ describe('computeGoalVerdict — direction-agnostic core math', () => {
   })
 })
 
+describe('computeGoalVerdict — baseline=0 edge cases (P32-B4 product launch)', () => {
+  it('CTS 团报名 0 → 30, current 25 = 83% confirmed', () => {
+    const result = computeGoalVerdict({
+      baseline_value: 0,
+      target_value: 30,
+      current_value: 25,
+    })
+    expect(result.verdict).toBe('confirmed')
+    expect(result.progress_pct).toBeCloseTo(83.3, 1)
+  })
+
+  it('CTS 团报名 0 → 30, current 15 = 50% partial', () => {
+    const result = computeGoalVerdict({
+      baseline_value: 0,
+      target_value: 30,
+      current_value: 15,
+    })
+    expect(result.verdict).toBe('partial')
+    expect(result.progress_pct).toBe(50)
+  })
+
+  it('CTS 团报名 0 → 30, current 0 = 0% reversed', () => {
+    const result = computeGoalVerdict({
+      baseline_value: 0,
+      target_value: 30,
+      current_value: 0,
+    })
+    expect(result.verdict).toBe('reversed')
+    expect(result.progress_pct).toBe(0)
+  })
+})
+
 describe('computeGoalVerdict — increase direction (default)', () => {
   it('confirms when progress ≥ 80%', () => {
     // CTS sales: 80k → 120k, current 116k = 90% progress

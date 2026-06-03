@@ -12,6 +12,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import type { GoalRow, GoalVerdict } from '@/types/strategy'
+import { normalizeGoalList } from '@/lib/strategy/normalize'
 
 const VERDICT_INFO: Record<GoalVerdict, { label: string; color: string; emoji: string }> = {
   confirmed:    { label: 'Confirmed',    color: 'text-status-track bg-status-track/10 border-status-track/30', emoji: '✅' },
@@ -43,7 +44,8 @@ export default function GoalHistoryPage() {
         return
       }
       const j = await res.json()
-      setGoals(j.goals ?? [])
+      // B7 fix: normalize NUMERIC strings to numbers
+      setGoals(normalizeGoalList(j.goals ?? []))
     } finally {
       setLoading(false)
     }
