@@ -20,6 +20,9 @@ interface InitiativeLite {
   id: string
   title: string
   goal_title?: string
+  /** Phase 33 P33.10 fix: endpoint now returns ALL initiatives incl. unassigned buckets.
+   * Caller must filter `initiative_type !== 'unassigned'` to exclude migration placeholders. */
+  initiative_type?: string
 }
 
 interface CampaignLite {
@@ -96,7 +99,10 @@ export function PlanGenerator({ clientId, onGenerated, onCancel, initiativeId, d
         const res = await fetch(`/api/clients/${clientId}/initiatives`)
         if (!res.ok) return
         const json = await res.json() as { initiatives?: InitiativeLite[] }
-        if (!cancelled) setInitiatives(json.initiatives ?? [])
+        // Phase 33 P33.10 fix: endpoint now returns all initiatives including unassigned
+        // migration buckets. Filter them out — FDE shouldn't assign a Plan to a placeholder.
+        const real = (json.initiatives ?? []).filter(i => i.initiative_type !== 'unassigned')
+        if (!cancelled) setInitiatives(real)
       } catch {
         /* non-fatal */
       }

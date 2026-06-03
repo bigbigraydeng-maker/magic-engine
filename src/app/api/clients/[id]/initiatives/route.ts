@@ -2,9 +2,17 @@
  * GET /api/clients/[id]/initiatives
  *
  * Phase 33 — List all non-archived initiatives for a client across all goals.
- * Used by PlanGenerator dropdown to let FDE associate a marketing plan with an initiative.
  *
- * Returns: { initiatives: Array<{id, title, goal_title, initiative_type}> }
+ * Used by:
+ *   - PlanGenerator dropdown (filters `initiative_type !== 'unassigned'` on the client side)
+ *   - Execution Kanban Goal filter + Initiative badge (needs ALL initiatives including
+ *     unassigned migration buckets, so the "未归类 Actions" group can identify them)
+ *
+ * P33.10 fix (2026-06-03): previously this endpoint filtered out unassigned buckets,
+ * which broke the Kanban's ability to detect "actions assigned to a migration placeholder"
+ * as unassigned. Now returns everything; callers filter as needed.
+ *
+ * Returns: { initiatives: Array<{id, title, goal_id, goal_title, initiative_type}> }
  */
 
 import { NextResponse } from 'next/server'
@@ -22,16 +30,15 @@ export async function GET(
 
   const rows = await listInitiativesForClient(supabaseAdmin, clientId)
 
-  // Return slim shape; filter out unassigned migration buckets
-  const initiatives = rows
-    .filter(r => r.initiative_type !== 'unassigned')
-    .map(r => ({
-      id:              r.id,
-      title:           r.title,
-      initiative_type: r.initiative_type,
-      goal_id:         r.goal_id,
-      goal_title:      r.goal_title,
-    }))
+  // Return slim shape — ALL initiatives including unassigned migration buckets.
+  // Callers filter by `initiative_type` as needed.
+  const initiatives = rows.map(r => ({
+    id:              r.id,
+    title:           r.title,
+    initiative_type: r.initiative_type,
+    goal_id:         r.goal_id,
+    goal_title:      r.goal_title,
+  }))
 
   return NextResponse.json({ initiatives })
 }

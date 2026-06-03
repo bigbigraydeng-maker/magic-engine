@@ -1684,6 +1684,10 @@ export default function ExecutionPage() {
   const [goalsForFilter, setGoalsForFilter] = useState<Array<{ id: string; title: string }>>([])
   // Phase 33: goalId → Set<initiativeId> for filtering items by goal
   const [goalInitiativeIds, setGoalInitiativeIds] = useState<Map<string, Set<string>>>(new Map())
+  // Phase 33 P33.10 fix: Set of placeholder Initiative IDs (initiative_type === 'unassigned').
+  // Phase 31 migration auto-binds legacy actions to these placeholders, so "unassigned" means
+  // initiative_id === null OR initiative_id ∈ this set.
+  const [unassignedInitiativeIds, setUnassignedInitiativeIds] = useState<Set<string>>(new Set())
   // 客户名（面包屑导航用）
   const [clientName, setClientName] = useState<string | null>(null)
   // Phase 20.D: FDE 手动录入
@@ -1783,11 +1787,18 @@ export default function ExecutionPage() {
         ])
         if (initRes.ok) {
           const j = await initRes.json() as {
-            initiatives?: Array<{ id: string; title: string; goal_id: string }>
+            initiatives?: Array<{ id: string; title: string; goal_id: string; initiative_type: string }>
           }
-          const titleMap = new Map<string, string>()
-          const goalMap  = new Map<string, Set<string>>()
+          const titleMap     = new Map<string, string>()
+          const goalMap      = new Map<string, Set<string>>()
+          const unassignedSet = new Set<string>()
           for (const i of j.initiatives ?? []) {
+            // Phase 33 P33.10 fix: track placeholder buckets separately so the
+            // "未归类 Actions" group can detect actions bound to them.
+            if (i.initiative_type === 'unassigned') {
+              unassignedSet.add(i.id)
+              continue  // skip badge/goal-filter membership for placeholders
+            }
             titleMap.set(i.id, i.title)
             if (i.goal_id) {
               if (!goalMap.has(i.goal_id)) goalMap.set(i.goal_id, new Set())
@@ -1796,6 +1807,7 @@ export default function ExecutionPage() {
           }
           setInitiativeMap(titleMap)
           setGoalInitiativeIds(goalMap)
+          setUnassignedInitiativeIds(unassignedSet)
         }
         if (goalRes.ok) {
           const j = await goalRes.json() as { goals?: Array<{ id: string; title: string }> }
@@ -2140,19 +2152,36 @@ export default function ExecutionPage() {
     setDetailEditable(editable)
   }, [])
 
-  const filteredItems = (() => {
+  // Phase 33 P33.10 fix: "unassigned" means initiative_id is null OR points to a
+  // migration placeholder bucket (Phase 31 auto-binds legacy actions to type='unassigned'
+  // initiatives, so plain null check is insufficient).
+  const isItemUnassigned = useCallback((item: ItemWithLogs): boolean => {
+    if (item.initiative_id === null) return true
+    return unassignedInitiativeIds.has(item.initiative_id)
+  }, [unassignedInitiativeIds])
+
+  // Phase 33 P33.9 fix: status chips need to count items AFTER dimension + goal filter
+  // but BEFORE status filter (otherwise selecting "已完成" would zero out the other counts).
+  // This intermediate result is also what dimension groups consume.
+  const filteredItemsWithoutStatus = (() => {
     let result = activeDimension === 'all' ? items : items.filter(i => i.dimension === activeDimension)
-    if (statusFilter !== 'all') result = result.filter(i => i.status === statusFilter)
     if (goalFilter !== 'all') {
       const initiativeIdsForGoal = goalInitiativeIds.get(goalFilter)
       if (initiativeIdsForGoal) {
+        // Goal filter: keep ONLY items truly belonging to this Goal's real initiatives.
+        // Unassigned actions (null or placeholder) are excluded here — they show in the
+        // dedicated "未归类" group below the dimension groups.
         result = result.filter(i =>
-          i.initiative_id === null || initiativeIdsForGoal.has(i.initiative_id),
+          i.initiative_id !== null && initiativeIdsForGoal.has(i.initiative_id),
         )
       }
     }
     return result
   })()
+
+  const filteredItems = statusFilter === 'all'
+    ? filteredItemsWithoutStatus
+    : filteredItemsWithoutStatus.filter(i => i.status === statusFilter)
   const availableDimensions = Array.from(new Set(items.map(i => i.dimension).filter(Boolean))) as string[]
   const completedCount      = filteredItems.filter(i => i.status === 'completed').length
 
@@ -2480,10 +2509,13 @@ export default function ExecutionPage() {
             { v: 'in_progress', label: '🔄 进行中' },
             { v: 'completed',   label: '✅ 已完成' },
           ]
+          // Phase 33 P33.9 fix: counts must follow dimension + goal filter so the
+          // chip numbers reflect what's actually visible. Was previously based on
+          // `items` (all rows), which misled FDE into thinking Goal filter wasn't working.
           const counts: Record<string, number> = {
-            pending:     items.filter(i => i.status === 'pending').length,
-            in_progress: items.filter(i => i.status === 'in_progress').length,
-            completed:   items.filter(i => i.status === 'completed').length,
+            pending:     filteredItemsWithoutStatus.filter(i => i.status === 'pending').length,
+            in_progress: filteredItemsWithoutStatus.filter(i => i.status === 'in_progress').length,
+            completed:   filteredItemsWithoutStatus.filter(i => i.status === 'completed').length,
           }
           return (
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -2532,9 +2564,14 @@ export default function ExecutionPage() {
           />
         ))}
 
-        {/* Phase 33 P33.10 — Unassigned Backlog: items with initiative_id=null (only shown when Goal filter active) */}
+        {/* Phase 33 P33.10 — Unassigned Backlog: items with no real initiative (null or
+            migration placeholder). Only shown when Goal filter is active so FDE can see
+            what's still pending classification. Note we compute from `items` (not
+            filteredItems) because filteredItems now excludes unassigned by design. */}
         {goalFilter !== 'all' && (() => {
-          const unassigned = filteredItems.filter(i => i.initiative_id === null && !isAutonomousItem(i))
+          let base = activeDimension === 'all' ? items : items.filter(i => i.dimension === activeDimension)
+          if (statusFilter !== 'all') base = base.filter(i => i.status === statusFilter)
+          const unassigned = base.filter(i => isItemUnassigned(i) && !isAutonomousItem(i))
           if (unassigned.length === 0) return null
           return (
             <div className="rounded-xl border border-dashed border-me-charcoal/20 bg-me-ivory/60 overflow-hidden">
