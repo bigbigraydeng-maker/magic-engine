@@ -17,6 +17,7 @@ import { InitiativeList } from './_components/InitiativeList'
 import { BacklogMigrator } from './_components/BacklogMigrator'
 import { VerdictPanel } from './_components/VerdictPanel'
 import { ExecutionSummaryBar } from './_components/ExecutionSummaryBar'
+import { CurrentValueCell } from './_components/CurrentValueCell'
 import type { GoalExecutionSummary } from '@/lib/strategy/initiatives'
 
 function formatDate(iso: string): string {
@@ -204,7 +205,7 @@ export default function GoalDetailPage() {
           <div className="mt-2 font-display text-2xl font-bold text-me-charcoal">
             {goal.primary_metric_label}
           </div>
-          <div className="mt-3 grid grid-cols-3 gap-4">
+          <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
             <div>
               <div className="text-[11px] font-black uppercase text-me-charcoal/45">
                 {goal.target_direction === 'decrease' ? '起始库存' : 'Baseline'}
@@ -214,6 +215,8 @@ export default function GoalDetailPage() {
               </div>
               <div className="text-[10px] font-semibold text-me-charcoal/45">{goal.primary_metric_unit}</div>
             </div>
+            {/* A2.1 — auto-fetched current value (or "—" for self_report metrics) */}
+            <CurrentValueCell goal={goal} />
             <div>
               <div className="text-[11px] font-black uppercase text-me-charcoal/45">
                 {goal.target_direction === 'decrease' ? '清空目标' : 'Target'}

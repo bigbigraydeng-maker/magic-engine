@@ -306,7 +306,7 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-06-03 18:39 NZST （**Phase 33 M4 上线 — Goal 详情页执行进度摘要（PR #304 merged）**）
+> 最后更新：2026-06-03 22:55 NZST （**Phase 33 M4 上线 — Goal 详情页执行进度摘要（PR #304 merged）**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
@@ -320,6 +320,7 @@ npm test           # 测试套件
 | **GBP.0** | Google Cloud：enable Business Profile API + Account Management API | ⚠️ PM 操作 |
 
 **已完成全景（最近几个 Phase）**：
+- ✅ **Phase 22.A.2 GA4 每日采集**（PR #225 merged，实际已上线）：每日 3am UTC cron 把 GA4 5 指标（sessions / users / pageviews / bounce_rate / avg_session_duration）写入 `flywheel_metrics`，前缀 `seo.ga4.*`。CTS Tours NZ 已验证最近一次 2026-06-03 03:00 UTC 跑过。**之前 ROADMAP 标"待开发"是文档滞后，2026-06-03 清理**
 - ✅ **Phase 33 M4 — Goal-level Execution Summary**（2026-06-03，PR #304 merged）：子牙 review 修正版（合并 P33.11+P33.12 为一套数据双视角）。新 `GET /api/goals/[goalId]/execution-summary` 一次聚合返回；ExecutionSummaryBar 顶部 4-stat row + 完成率进度条；InitiativeExecutionPanel 加完成率 chip + Campaign 状态点。修复 3 个子牙杀手锏 bug：skipped 排出分母 / 死 campaign ID 过滤 / paused campaign 不漏算。9 个新测试，97/97 strategy lib 全过
 - ✅ **Phase 33 P33.9/P33.10 修复**（2026-06-03，PR #301 + #302 merged）：状态 chips 数字跟 Goal filter 变化；「未归类 Actions」分组判断条件扩展为 `null || initiative_type='unassigned' placeholder`；endpoint 不再过滤 unassigned；PlanGenerator 前端补 filter 排除下拉。**测试待跑**（见焦点表第一行）
 - ✅ **A1 reputation 公式修复**（2026-06-03，PR #298 + #300 merged）：RATING 0.60→0.70 / REVIEW 0.40→0.30 / MAX_REVIEWS 100→30 + 抽出纯函数 `scoreReputation()` 预留 TripAdvisor/ProductReview 字段（A2 接驳零改动）+ GBP 查询从 domain → "name+city+country"。CTS Tours NZ reputation 44 → ~71（进入健康区间）
@@ -331,10 +332,11 @@ npm test           # 测试套件
 - ✅ **Phase 30 Industry Baseline Engine**（2026-06-02，PR #251）：5 细分 / 44 域名 / 月度 cron 自动重跑 / 华佗实时读基准（含 city 维度命中）
 
 **下一候选（按优先级）**：
-1. 📋 **A3 CTS/Oztop 案例沉淀** — 半天事，把跑通经验固化（A1 + M4 都完成，可基于真实评分和执行数据跑案例）
-2. 📋 **A2 Goal 主指标 auto-fetch** — GA4 / Brand search volume / Form submissions 自动读 current_value（1-2 天/源）
-3. 📋 **Phase 22.A.2** — GA4 每日采集（merge PR #187 后继续）
-4. 📋 **Phase 24.B** — GBP 数据摂取（依赖 GBP.0 + migration）
+1. 🔨 **A2.1 GA4 → Goal current_value** — Goal 详情页主指标卡片自动从 flywheel_metrics 读 GA4 sessions/users 当月汇总（1-2 天，会话中进行）
+2. 📋 **A2.2 Brand search source** — 从 GSC 读品牌搜索量当月聚合（1-2 天）
+3. 📋 **A2.3 Form/Order source** — 表单提交 / 订单数（需新接 connector，1-2 天 + connector）
+4. 📋 **A3 CTS/Oztop 案例沉淀** — 半天事，把跑通经验固化
+5. 📋 **Phase 24.B** — GBP 数据摂取（依赖 GBP.0 + migration）
 
 **ME 定位升级（2026-06-02 确立）**：
 旧 → 营销自动化平台
