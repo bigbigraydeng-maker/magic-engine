@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { countWords } from '@/lib/blog/generator'
+import { generateSocialSuggestions } from '@/lib/blog/generate-social-suggestions'
 import type { BlogPost, BlogStatus } from '@/types/magic-engine'
 
 /**
@@ -130,16 +131,14 @@ export async function PATCH(
       )
     }
 
-    // Fire-and-forget: generate social suggestions when a post is approved
+    // Fire-and-forget: generate social suggestions when a post is approved.
+    // QA-清理-1: replaced internal HTTP self-call (which 401'd silently
+    // whenever INTERNAL_API_KEY was missing) with direct in-process lib call.
+    // See PR #297 for the same pattern applied to zhangqian/connectors.
     if (body.status === 'approved') {
-      const baseUrl = process.env.NEXTAUTH_URL ?? process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3001'
-      fetch(`${baseUrl}/api/clients/${clientId}/blog/${postId}/social-suggestions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.INTERNAL_API_KEY ?? ''}`,
-        },
-      }).catch(() => {}) // silent failure — does not affect main flow
+      void generateSocialSuggestions(supabaseAdmin, clientId, postId).catch(err => {
+        console.error('[blog/:postId PATCH] social suggestions fire-and-forget failed:', err)
+      })
     }
 
     return NextResponse.json({ success: true, post: data })
