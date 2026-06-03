@@ -10,16 +10,24 @@ import { COMPETITOR_METRIC_KEY } from '../../vocabulary'
 // ── Mock supabaseAdmin ────────────────────────────────────────────────────────
 
 const mockInsertResult = vi.fn().mockResolvedValue({ error: null })
-const mockMetricsFrom = vi.fn(() => ({ insert: mockInsertResult }))
 
-const mockClientSingle = vi.fn()
-const mockClientEq = vi.fn(() => ({ single: mockClientSingle }))
-const mockClientSelect = vi.fn(() => ({ eq: mockClientEq }))
+const mockClientMaybeSingle = vi.fn()
+const mockClientEq           = vi.fn(() => ({ maybeSingle: mockClientMaybeSingle }))
+const mockClientSelect       = vi.fn(() => ({ eq: mockClientEq }))
+
+// Brief query chain: select → eq → or → order → limit → maybeSingle (always empty in these tests)
+const mockBriefMaybeSingle = vi.fn().mockResolvedValue({ data: null, error: null })
+const mockBriefLimit       = vi.fn(() => ({ maybeSingle: mockBriefMaybeSingle }))
+const mockBriefOrder       = vi.fn(() => ({ limit: mockBriefLimit }))
+const mockBriefOr          = vi.fn(() => ({ order: mockBriefOrder }))
+const mockBriefEq          = vi.fn(() => ({ or: mockBriefOr }))
+const mockBriefSelect      = vi.fn(() => ({ eq: mockBriefEq }))
 
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
     from: vi.fn((table: string) => {
-      if (table === 'clients') return { select: mockClientSelect }
+      if (table === 'clients')          return { select: mockClientSelect }
+      if (table === 'master_briefs')    return { select: mockBriefSelect }
       if (table === 'flywheel_metrics') return { insert: mockInsertResult }
       return {}
     }),
@@ -49,7 +57,7 @@ describe('CompetitorSnapshotAdapter.pullMetrics()', () => {
   })
 
   it('returns [] when client has no competitor_domains', async () => {
-    mockClientSingle.mockResolvedValue({ data: { competitor_domains: null }, error: null })
+    mockClientMaybeSingle.mockResolvedValue({ data: { competitor_domains: null }, error: null })
 
     const adapter = new CompetitorSnapshotAdapter()
     const result = await adapter.pullMetrics(CLIENT_ID)
@@ -59,7 +67,7 @@ describe('CompetitorSnapshotAdapter.pullMetrics()', () => {
   })
 
   it('returns [] when competitor_domains is an empty array', async () => {
-    mockClientSingle.mockResolvedValue({ data: { competitor_domains: [] }, error: null })
+    mockClientMaybeSingle.mockResolvedValue({ data: { competitor_domains: [] }, error: null })
 
     const adapter = new CompetitorSnapshotAdapter()
     const result = await adapter.pullMetrics(CLIENT_ID)
@@ -69,7 +77,7 @@ describe('CompetitorSnapshotAdapter.pullMetrics()', () => {
   })
 
   it('calls getBulkTrafficEstimation with competitor domains', async () => {
-    mockClientSingle.mockResolvedValue({
+    mockClientMaybeSingle.mockResolvedValue({
       data: { competitor_domains: ['rival.com.au', 'competitor.nz'] },
       error: null,
     })
@@ -85,7 +93,7 @@ describe('CompetitorSnapshotAdapter.pullMetrics()', () => {
   })
 
   it('writes one flywheel_metrics row per competitor domain', async () => {
-    mockClientSingle.mockResolvedValue({
+    mockClientMaybeSingle.mockResolvedValue({
       data: { competitor_domains: ['rival.com.au', 'competitor.nz'] },
       error: null,
     })
@@ -113,7 +121,7 @@ describe('CompetitorSnapshotAdapter.pullMetrics()', () => {
   })
 
   it('skips domains where monthly_traffic is null', async () => {
-    mockClientSingle.mockResolvedValue({
+    mockClientMaybeSingle.mockResolvedValue({
       data: { competitor_domains: ['no-data.com', 'has-data.com.au'] },
       error: null,
     })
@@ -130,7 +138,7 @@ describe('CompetitorSnapshotAdapter.pullMetrics()', () => {
   })
 
   it('returns [] and logs error when DataForSEO call throws', async () => {
-    mockClientSingle.mockResolvedValue({
+    mockClientMaybeSingle.mockResolvedValue({
       data: { competitor_domains: ['rival.com.au'] },
       error: null,
     })
@@ -151,7 +159,7 @@ describe('CompetitorSnapshotAdapter.pullMetrics()', () => {
   })
 
   it('logs insert error but still returns rows', async () => {
-    mockClientSingle.mockResolvedValue({
+    mockClientMaybeSingle.mockResolvedValue({
       data: { competitor_domains: ['rival.com.au'] },
       error: null,
     })

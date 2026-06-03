@@ -1222,7 +1222,15 @@ export default function SeoIntelligencePage() {
             了解对手
           </p>
           <div className="bg-white rounded-xl border border-gray-200 p-5">
-            <h2 className="text-sm font-semibold text-gray-900 mb-4">竞品对比 + 关键词缺口</h2>
+            <div className="mb-4 flex items-baseline justify-between gap-3">
+              <h2 className="text-sm font-semibold text-gray-900">竞品对比 + 关键词缺口</h2>
+              <Link
+                href={`/dashboard/clients/${clientId}/settings`}
+                className="text-xs text-cyan-700 hover:text-cyan-900 hover:underline"
+              >
+                竞品看错？去设置配置 →
+              </Link>
+            </div>
 
             {compLoading ? (
               <div className="space-y-2">
