@@ -15,7 +15,8 @@ interface Snapshot {
   question_id:         string
   platform:            string
   collected_at:        string
-  week_of:             string
+  collected_date:      string   // YYYY-MM-DD, UTC — primary time axis (since migration 20260622000003)
+  week_of:             string   // kept for backward-compat weekly rollups
   brands_mentioned:    string[] | null
   top3_brands:         string[] | null
   ai_answer_text:      string | null
@@ -50,8 +51,8 @@ export function GoogleSerpPanel() {
     setLoading(true)
     try {
       const [serpRes, aiRes] = await Promise.all([
-        fetch('/api/baselines/ai-snapshots?weeks=8&latest_only=true&platform=google_serp'),
-        fetch('/api/baselines/ai-snapshots?weeks=8&latest_only=true&platform=google_ai_overview'),
+        fetch('/api/baselines/ai-snapshots?days=30&latest_only=true&platform=google_serp'),
+        fetch('/api/baselines/ai-snapshots?days=30&latest_only=true&platform=google_ai_overview'),
       ])
       if (serpRes.ok) {
         const j = await serpRes.json() as { snapshots: Snapshot[] }

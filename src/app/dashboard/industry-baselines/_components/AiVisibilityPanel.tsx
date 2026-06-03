@@ -32,7 +32,8 @@ interface Snapshot {
   question_id:         string
   platform:            string
   collected_at:        string
-  week_of:             string
+  collected_date:      string   // YYYY-MM-DD, UTC — primary time axis
+  week_of:             string   // kept for legacy weekly rollups
   brands_mentioned:    string[] | null
   top3_brands:         string[] | null
   ai_answer_text:      string | null
@@ -98,7 +99,7 @@ export function AiVisibilityPanel() {
     try {
       const [qRes, sRes] = await Promise.all([
         fetch('/api/baselines/ai-questions'),
-        fetch('/api/baselines/ai-snapshots?weeks=12&latest_only=true&platform=chatgpt'),
+        fetch('/api/baselines/ai-snapshots?days=30&latest_only=true&platform=chatgpt'),
       ])
       if (qRes.ok) {
         const j = await qRes.json() as { questions: Question[] }
@@ -200,8 +201,8 @@ export function AiVisibilityPanel() {
     <div className="space-y-4">
       {/* Info banner */}
       <div className="space-y-1 rounded-xl border border-me-ochre/30 bg-me-ochre/10 px-4 py-3 text-xs font-semibold text-me-charcoal/80">
-        <p><strong className="font-black text-me-charcoal">行业 AI 可见度时序档案。</strong>每周追踪 ChatGPT + Google AI Overview + Google SERP 对每个行业问题的回答，记录哪些品牌被推荐、排名变化。数据进入飞轮归因分析。</p>
-        <p>问题一旦开始采集，<strong>question_text 永久锁定</strong>（保证时序连续性）。点击「展开」可查看该题历史快照按周倒序。</p>
+        <p><strong className="font-black text-me-charcoal">行业 AI 可见度时序档案 · 日级采集。</strong>每天追踪 ChatGPT + Google AI Overview + Google SERP 对每个行业问题的回答，记录哪些品牌被推荐、排名每日变化。数据进入飞轮归因分析。</p>
+        <p>问题一旦开始采集，<strong>question_text 永久锁定</strong>（保证时序连续性）。点击「展开历史」可查看该题最近 30 天每日快照按日倒序。</p>
       </div>
 
       {/* Toolbar: filters + collect */}
@@ -370,8 +371,8 @@ function QuestionRow({ question, snapshot }: { question: Question; snapshot?: Sn
     if (next && history === null) {
       setHistLoading(true)
       try {
-        // Pull ALL platforms for this question, last 12 weeks
-        const res = await fetch(`/api/baselines/ai-snapshots?question_id=${question.id}&weeks=12`)
+        // Pull ALL platforms for this question, last 30 days (daily granularity)
+        const res = await fetch(`/api/baselines/ai-snapshots?question_id=${question.id}&days=30`)
         if (res.ok) {
           const j = await res.json() as { snapshots: Snapshot[] }
           setHistory(j.snapshots ?? [])
@@ -384,15 +385,15 @@ function QuestionRow({ question, snapshot }: { question: Question; snapshot?: Sn
     }
   }
 
-  // Group history rows by week_of, then by platform — each "week card"
-  // shows all platforms collected that week side by side
-  const historyByWeek = useMemo(() => {
+  // Group history rows by collected_date, then by platform — each "day card"
+  // shows all platforms collected that day side by side
+  const historyByDay = useMemo(() => {
     if (!history) return []
     const map = new Map<string, Snapshot[]>()
     for (const s of history) {
-      const arr = map.get(s.week_of) ?? []
+      const arr = map.get(s.collected_date) ?? []
       arr.push(s)
-      map.set(s.week_of, arr)
+      map.set(s.collected_date, arr)
     }
     return Array.from(map.entries())
       .sort((a, b) => b[0].localeCompare(a[0]))  // newest first
@@ -420,7 +421,7 @@ function QuestionRow({ question, snapshot }: { question: Question; snapshot?: Sn
           {snapshot?.top3_brands && snapshot.top3_brands.length > 0 && (
             <p className="mt-1 text-xs font-semibold text-me-charcoal/55">
               <span className="text-me-ochre">ChatGPT Top 3:</span> {snapshot.top3_brands.join(' · ')}
-              <span className="ml-2 text-me-charcoal/45">· {snapshot.week_of}</span>
+              <span className="ml-2 text-me-charcoal/45">· {snapshot.collected_date}</span>
             </p>
           )}
           {snapshot && !snapshot.brands_mentioned?.length && !snapshot.error_message && (
@@ -446,8 +447,8 @@ function QuestionRow({ question, snapshot }: { question: Question; snapshot?: Sn
             <p className="text-xs font-semibold text-me-charcoal/45">尚无历史快照。</p>
           )}
 
-          {!histLoading && historyByWeek.map(([weekOf, weekSnaps]) => (
-            <WeekCard key={weekOf} weekOf={weekOf} snapshots={weekSnaps} />
+          {!histLoading && historyByDay.map(([day, daySnaps]) => (
+            <DayCard key={day} day={day} snapshots={daySnaps} />
           ))}
         </div>
       )}
@@ -455,7 +456,7 @@ function QuestionRow({ question, snapshot }: { question: Question; snapshot?: Sn
   )
 }
 
-// ─── Weekly history card (one per week, shows all platforms collected) ───────
+// ─── Daily history card (one per day, shows all platforms collected) ────────
 
 const PLATFORM_LABELS_SHORT: Record<string, string> = {
   chatgpt:            'ChatGPT',
@@ -464,7 +465,7 @@ const PLATFORM_LABELS_SHORT: Record<string, string> = {
   xiaohongshu:        '小红书',
 }
 
-function WeekCard({ weekOf, snapshots }: { weekOf: string; snapshots: Snapshot[] }) {
+function DayCard({ day, snapshots }: { day: string; snapshots: Snapshot[] }) {
   const [showRaw, setShowRaw] = useState(false)
 
   // Sort platforms in a fixed order for stable display
@@ -476,7 +477,7 @@ function WeekCard({ weekOf, snapshots }: { weekOf: string; snapshots: Snapshot[]
     <div className="rounded-lg border border-black/5 bg-me-ivory px-3 py-2">
       <div className="flex items-center justify-between">
         <p className="font-black uppercase tracking-wide text-[10px] text-me-charcoal/55">
-          Week of {weekOf}
+          {day}
         </p>
         <button
           onClick={() => setShowRaw(!showRaw)}

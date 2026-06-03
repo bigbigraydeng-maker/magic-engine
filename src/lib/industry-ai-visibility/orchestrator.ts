@@ -26,12 +26,17 @@ import type {
   RunSummary,
 } from './types'
 
-// ─── ISO week helper ─────────────────────────────────────────────────────────
+// ─── Time helpers ────────────────────────────────────────────────────────────
 function isoWeekStart(date = new Date()): string {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
   const dow = d.getUTCDay() || 7  // Sunday = 7
   if (dow !== 1) d.setUTCDate(d.getUTCDate() - (dow - 1))
   return d.toISOString().slice(0, 10)
+}
+
+/** UTC date string (YYYY-MM-DD). Used as the primary collected_date axis. */
+function utcDate(date = new Date()): string {
+  return date.toISOString().slice(0, 10)
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
@@ -48,7 +53,11 @@ export interface RunCollectionOptions {
 export async function runCollection(opts: RunCollectionOptions): Promise<RunSummary> {
   const startedAt = Date.now()
   const platforms: Platform[] = opts.platforms ?? ['chatgpt', 'google_ai_overview', 'google_serp']
-  const weekOf = isoWeekStart()
+  // weekOf: kept for backward-compat rollups (legacy column).
+  // collectedDate: the real primary key dimension since migration
+  //   20260622000003_ai_visibility_daily_collection.sql (PM decision 2026-06-04).
+  const weekOf        = isoWeekStart()
+  const collectedDate = utcDate()
 
   // 1. Create run row
   const { data: runRow, error: runErr } = await supabaseAdmin
@@ -146,20 +155,20 @@ export async function runCollection(opts: RunCollectionOptions): Promise<RunSumm
     let questionHadAnyFail = false
 
     for (const [platform, r] of Object.entries(results) as [Platform, CollectionResult][]) {
-      rowsToInsert.push(snapshotRow(q.id, platform, weekOf, runId, r))
+      rowsToInsert.push(snapshotRow(q.id, platform, weekOf, collectedDate, runId, r))
       if (r.ok) questionHadAnyOk = true
       else      questionHadAnyFail = true
       totalCost += r.cost_usd
     }
 
     if (rowsToInsert.length > 0) {
-      // H1 fix: upsert on (question_id, platform, week_of) so re-running the
-      // same week refreshes existing rows instead of double-writing.
-      // The UNIQUE constraint is enforced at DB level by migration
-      // 20260622000002_ai_visibility_archive_fixes.sql.
+      // Upsert on (question_id, platform, collected_date) — see migration
+      //   20260622000003_ai_visibility_daily_collection.sql
+      // Re-runs within the same UTC day refresh the row; first run on a new
+      // day appends a new row. This is what makes daily granularity work.
       const { error: upsertErr } = await supabaseAdmin
         .from('industry_ai_visibility_snapshots')
-        .upsert(rowsToInsert, { onConflict: 'question_id,platform,week_of' })
+        .upsert(rowsToInsert, { onConflict: 'question_id,platform,collected_date' })
       if (upsertErr) {
         console.error(`Snapshot upsert failed for question ${q.id}:`, upsertErr)
         questionHadAnyFail = true
@@ -238,6 +247,7 @@ function snapshotRow(
   questionId: string,
   platform: Platform,
   weekOf: string,
+  collectedDate: string,
   runId: string,
   r: CollectionResult,
 ): Record<string, unknown> {
@@ -245,6 +255,7 @@ function snapshotRow(
     question_id: questionId,
     platform,
     week_of: weekOf,
+    collected_date: collectedDate,
     collection_run_id: runId,
     raw_response: r.raw_response,
     brands_mentioned: r.brands_mentioned,

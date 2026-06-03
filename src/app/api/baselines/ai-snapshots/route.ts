@@ -8,14 +8,24 @@
  *   ?city=...            — 'auckland' | 'sydney' | etc.
  *   ?language=...        — 'en' | 'zh'
  *   ?platform=...        — limit to one platform
- *   ?weeks=12            — last N weeks (default 12, max 52)
- *   ?latest_only=true    — return only latest snapshot per (question, platform)
+ *   ?days=30             — last N days (default 30, max 365). Replaces the
+ *                          previous ?weeks param when used. If neither is
+ *                          provided, defaults to 30 days.
+ *   ?weeks=N             — legacy alias for days*7 (kept for backward compat)
+ *   ?latest_only=true    — return only the most recent snapshot per
+ *                          (question, platform). Time axis is now
+ *                          collected_date (daily), not week_of (weekly).
  *
  * Filtering strategy:
  *   - All question-side filters (industry/country/city/language) are pushed
  *     down to the database via referenced-table syntax on the join, so they
  *     also cap the query (server-side), not just trim after the fact.
  *   - Snapshot-side filters (question_id/platform) are normal column filters.
+ *
+ * Granularity note:
+ *   Migration 20260622000003 introduced `collected_date` as the primary
+ *   time axis (one snapshot per question×platform×day). `week_of` is kept
+ *   for backward-compatible weekly rollups but is no longer the unique key.
  */
 
 import { NextResponse } from 'next/server'
@@ -33,13 +43,24 @@ export async function GET(req: Request) {
   const city        = searchParams.get('city')
   const language    = searchParams.get('language')
   const platform    = searchParams.get('platform')
-  const weeksParam  = searchParams.get('weeks')
-  const weeks       = weeksParam ? Math.max(1, Math.min(52, parseInt(weeksParam, 10) || 12)) : 12
+
+  // Time window: prefer ?days, fall back to ?weeks*7, default 30 days.
+  const daysParam  = searchParams.get('days')
+  const weeksParam = searchParams.get('weeks')
+  let days: number
+  if (daysParam) {
+    days = Math.max(1, Math.min(365, parseInt(daysParam, 10) || 30))
+  } else if (weeksParam) {
+    days = Math.max(1, Math.min(365, (parseInt(weeksParam, 10) || 12) * 7))
+  } else {
+    days = 30
+  }
+
   const latestOnly  = searchParams.get('latest_only') === 'true'
 
-  // Compute cutoff date (weeks back from today)
+  // Compute cutoff date (days back from today, UTC)
   const cutoff = new Date()
-  cutoff.setUTCDate(cutoff.getUTCDate() - weeks * 7)
+  cutoff.setUTCDate(cutoff.getUTCDate() - days)
   const cutoffISO = cutoff.toISOString().slice(0, 10)
 
   // Use !inner so question-side filters become JOIN constraints
@@ -48,7 +69,7 @@ export async function GET(req: Request) {
   let query = supabaseAdmin
     .from('industry_ai_visibility_snapshots')
     .select(`
-      id, question_id, platform, collected_at, week_of,
+      id, question_id, platform, collected_at, collected_date, week_of,
       brands_mentioned, top3_brands,
       ai_answer_text, ai_citation_sources,
       serp_organic_top10, serp_local_pack, serp_paid_domains, serp_people_also_ask,
@@ -58,8 +79,8 @@ export async function GET(req: Request) {
         industry_code, intent_layer, country, city, language, question_text
       )
     `)
-    .gte('week_of', cutoffISO)
-    .order('week_of', { ascending: false })
+    .gte('collected_date', cutoffISO)
+    .order('collected_date', { ascending: false })
     .limit(1000)
 
   // Snapshot-side filters
@@ -77,8 +98,8 @@ export async function GET(req: Request) {
 
   let rows = data ?? []
 
-  // Latest-only: keep first occurrence per (question_id, platform) — rows are
-  // already ordered by week_of DESC, so first = newest.
+  // Latest-only: keep first occurrence per (question_id, platform). Rows are
+  // already ordered by collected_date DESC, so first = newest day.
   if (latestOnly) {
     const seen = new Set<string>()
     const filtered: typeof rows = []
