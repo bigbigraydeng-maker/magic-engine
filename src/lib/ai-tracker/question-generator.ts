@@ -18,6 +18,7 @@
 
 import { getOpenAIClient } from '@/lib/ai/openai-client'
 import { supabaseAdmin } from '../supabase'
+import { getClientCompetitorDomains } from '../competitors/resolver'
 import type {
   GenerateQuestionsRequest,
   GenerateQuestionsResult,
@@ -77,7 +78,6 @@ interface MasterBriefRow {
   core_proposition: string | null
   content_pillars: unknown
   target_audience: unknown
-  competitor_domains: string[] | null
   keyword_seeds: string[] | null
 }
 
@@ -108,15 +108,20 @@ export async function generateQuestionsForClient(
   const { data: brief } = await supabaseAdmin
     .from('master_briefs')
     .select(
-      'brand_name, core_proposition, content_pillars, target_audience, competitor_domains, keyword_seeds'
+      'brand_name, core_proposition, content_pillars, target_audience, keyword_seeds'
     )
     .eq('client_id', clientId)
     .eq('status', 'active')
     .maybeSingle<MasterBriefRow>()
 
+  // Competitor list resolved via unified resolver
+  // (clients.competitor_domains > master_briefs.competitor_domains > none).
+  const competitorDomains = await getClientCompetitorDomains(clientId, [], 10)
+
   const userMessage = buildUserMessage({
     client,
     brief,
+    competitorDomains,
     count,
     market,
     contextHint,
@@ -192,11 +197,12 @@ function normaliseRequest(req: GenerateQuestionsRequest): {
 function buildUserMessage(input: {
   client: ClientRow
   brief: MasterBriefRow | null
+  competitorDomains: string[]
   count: number
   market: MarketTag
   contextHint?: string
 }): string {
-  const { client, brief, count, market, contextHint } = input
+  const { client, brief, competitorDomains, count, market, contextHint } = input
 
   const lines: string[] = [
     `Generate ${count} industry questions for the following brand.`,
@@ -218,8 +224,8 @@ function buildUserMessage(input: {
     lines.push(`- Content pillars: ${JSON.stringify(brief.content_pillars)}`)
   }
 
-  if (brief?.competitor_domains?.length) {
-    lines.push(`- Known competitors: ${brief.competitor_domains.join(', ')}`)
+  if (competitorDomains.length > 0) {
+    lines.push(`- Known competitors: ${competitorDomains.join(', ')}`)
   }
 
   if (brief?.keyword_seeds?.length) {
