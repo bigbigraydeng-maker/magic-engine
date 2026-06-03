@@ -4,14 +4,14 @@
  * Admin/FDE overview of MTC (Magic Token Credits) across all clients.
  *
  * Returns aggregated balance, revenue, and per-client spending for the
- * current billing period.  Only users with role "admin" or "fde" in the
- * `users` table may access this endpoint.
+ * current billing period.  Access is restricted to users on the admin
+ * whitelist via guardAdmin().
  *
  * Reference: ROADMAP.md [P-MTC.1]
  */
 
 import { NextResponse } from 'next/server'
-import { requireSession } from '@/lib/auth/require-session'
+import { guardAdmin } from '@/lib/auth/require-admin'
 import { supabaseAdmin } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -47,29 +47,10 @@ type ClientSummary = {
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 export async function GET(_request: Request) {
-  // ── Session guard ────────────────────────────────────────────────────────────
+  // ── Admin guard (whitelist check) ─────────────────────────────────────────
 
-  const session = await requireSession()
-  if (!session.ok) {
-    return NextResponse.json({ error: session.error }, { status: session.status })
-  }
-
-  // ── Role check: admin or fde only ─────────────────────────────────────────
-
-  const { data: userRows, error: userErr } = await supabaseAdmin
-    .from('users')
-    .select('role')
-    .eq('email', session.user.email ?? '')
-    .limit(1)
-
-  if (userErr) {
-    return NextResponse.json({ error: userErr.message }, { status: 500 })
-  }
-
-  const role = (userRows as Array<{ role: string }>)?.[0]?.role
-  if (role !== 'admin' && role !== 'fde') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  const guard = await guardAdmin()
+  if (guard) return guard
 
   // ── Fetch valid purchases (completed + not expired) ───────────────────────
 

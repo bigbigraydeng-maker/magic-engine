@@ -2,21 +2,22 @@
  * GET /api/admin/mtc/overview — unit tests [P-MTC.1]
  *
  * Verifies:
- * 1. Unauthenticated or non-admin/fde users get 403
+ * 1. Unauthenticated or non-whitelisted users get 401/403 via guardAdmin()
  * 2. Success returns totalBalanceMtc, totalRevenue, totalSoldMtc, totalConsumedMtc, clients
  * 3. clients[0] contains currentBalance and thisMonthSpend
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { NextResponse } from 'next/server'
 
 // ─── Hoisted mocks ────────────────────────────────────────────────────────────
 
 const mocks = vi.hoisted(() => ({
-  requireSession: vi.fn(),
+  guardAdmin: vi.fn(),
 }))
 
-vi.mock('@/lib/auth/require-session', () => ({
-  requireSession: mocks.requireSession,
+vi.mock('@/lib/auth/require-admin', () => ({
+  guardAdmin: mocks.guardAdmin,
 }))
 
 // ─── supabaseAdmin mock ───────────────────────────────────────────────────────
@@ -31,7 +32,6 @@ vi.mock('@/lib/auth/require-session', () => ({
 const mockPurchases = vi.fn()
 const mockLedger    = vi.fn()
 const mockClients   = vi.fn()
-const mockUsers     = vi.fn()
 
 function makeChainable(resolveFn: () => Promise<unknown>): object {
   const handler: ProxyHandler<object> = {
@@ -63,7 +63,6 @@ vi.mock('@/lib/supabase', () => ({
       if (table === 'mtc_purchases') return makeChainable(mockPurchases)
       if (table === 'mtc_ledger')    return makeChainable(mockLedger)
       if (table === 'clients')       return makeChainable(mockClients)
-      if (table === 'users')         return makeChainable(mockUsers)
       return makeChainable(() => Promise.resolve({ data: [], error: null }))
     },
   },
@@ -72,8 +71,6 @@ vi.mock('@/lib/supabase', () => ({
 import { GET } from '../route'
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
-
-const STUB_USER = { id: 'user-1', email: 'admin@magiclab.test' }
 
 /** Valid (not-expired) purchases — used for balance / MTC metrics */
 const STUB_PURCHASES = [
@@ -113,14 +110,8 @@ describe('GET /api/admin/mtc/overview', () => {
   beforeEach(() => {
     vi.clearAllMocks()
 
-    // Default: valid admin session
-    mocks.requireSession.mockResolvedValue({ ok: true, user: STUB_USER })
-
-    // users table → admin role
-    mockUsers.mockResolvedValue({
-      data: [{ role: 'admin' }],
-      error: null,
-    })
+    // Default: guardAdmin passes (returns null)
+    mocks.guardAdmin.mockResolvedValue(null)
 
     // purchases: two sequential calls per request
     //   1st call → valid (not-expired) purchases for balance/MTC metrics
@@ -135,27 +126,19 @@ describe('GET /api/admin/mtc/overview', () => {
   // ── Auth ──────────────────────────────────────────────────────────────────
 
   it('returns 401 when session is missing', async () => {
-    mocks.requireSession.mockResolvedValue({ ok: false, status: 401, error: 'Unauthorized' })
+    mocks.guardAdmin.mockResolvedValue(
+      NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
+    )
     const res = await GET(makeRequest())
     expect(res.status).toBe(401)
   })
 
-  it('returns 403 when user role is not admin or fde', async () => {
-    mockUsers.mockResolvedValue({ data: [{ role: 'other' }], error: null })
+  it('returns 403 when user is not on the admin whitelist', async () => {
+    mocks.guardAdmin.mockResolvedValue(
+      NextResponse.json({ error: 'Forbidden' }, { status: 403 }),
+    )
     const res = await GET(makeRequest())
     expect(res.status).toBe(403)
-  })
-
-  it('returns 403 when user is not found in users table', async () => {
-    mockUsers.mockResolvedValue({ data: [], error: null })
-    const res = await GET(makeRequest())
-    expect(res.status).toBe(403)
-  })
-
-  it('allows access when user role is fde', async () => {
-    mockUsers.mockResolvedValue({ data: [{ role: 'fde' }], error: null })
-    const res = await GET(makeRequest())
-    expect(res.status).toBe(200)
   })
 
   // ── Happy path ────────────────────────────────────────────────────────────
