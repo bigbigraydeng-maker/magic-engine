@@ -2156,8 +2156,13 @@ export default function ExecutionPage() {
   const availableDimensions = Array.from(new Set(items.map(i => i.dimension).filter(Boolean))) as string[]
   const completedCount      = filteredItems.filter(i => i.status === 'completed').length
 
+  // P33.10 fix: when a goal filter is active, items with initiative_id=null go to the
+  // "未归类 Actions" block below — exclude them from dimension groups to avoid duplication
+  const itemsForDimensionGroups = goalFilter !== 'all'
+    ? filteredItems.filter(i => i.initiative_id !== null)
+    : filteredItems
   // New dimension-based grouping — excludes autonomous/flywheel items
-  const dimensionGroups = buildDimensionGroups(filteredItems)
+  const dimensionGroups = buildDimensionGroups(itemsForDimensionGroups)
 
   // Legacy prescription groups — kept for derive/supplement/revision flows only
   const prescriptionGroups  = buildExecutionGroups(filteredItems, prescriptions, marketingPlans)
@@ -2480,10 +2485,19 @@ export default function ExecutionPage() {
             { v: 'in_progress', label: '🔄 进行中' },
             { v: 'completed',   label: '✅ 已完成' },
           ]
+          // P33.9 fix: counts reflect active dimension+goal filters (exclude statusFilter itself)
+          const countsBase = (() => {
+            let r = activeDimension === 'all' ? items : items.filter(i => i.dimension === activeDimension)
+            if (goalFilter !== 'all') {
+              const ids = goalInitiativeIds.get(goalFilter)
+              if (ids) r = r.filter(i => i.initiative_id === null || ids.has(i.initiative_id))
+            }
+            return r
+          })()
           const counts: Record<string, number> = {
-            pending:     items.filter(i => i.status === 'pending').length,
-            in_progress: items.filter(i => i.status === 'in_progress').length,
-            completed:   items.filter(i => i.status === 'completed').length,
+            pending:     countsBase.filter(i => i.status === 'pending').length,
+            in_progress: countsBase.filter(i => i.status === 'in_progress').length,
+            completed:   countsBase.filter(i => i.status === 'completed').length,
           }
           return (
             <div className="flex items-center gap-1.5 flex-wrap">

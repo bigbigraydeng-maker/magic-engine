@@ -68,7 +68,7 @@ export default function GoalHistoryPage() {
             href={`/dashboard/clients/${clientId}`}
             className="text-xs font-black text-me-charcoal/45 hover:text-me-charcoal/75"
           >
-            ← Back to client
+            ← 返回客户主页
           </Link>
           <h1 className="mt-2 flex items-center gap-2 font-display text-3xl font-bold tracking-tight text-me-charcoal">
             Goal History
