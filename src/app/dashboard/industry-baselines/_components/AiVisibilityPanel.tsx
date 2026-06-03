@@ -488,22 +488,31 @@ function DayCard({ day, snapshots }: { day: string; snapshots: Snapshot[] }) {
       </div>
 
       <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-3">
-        {ordered.map(s => (
-          <div key={s.id} className="rounded border border-black/5 bg-white px-2 py-1.5">
-            <p className="text-[10px] font-black uppercase tracking-wide text-me-charcoal/45">
-              {PLATFORM_LABELS_SHORT[s.platform] ?? s.platform}
-            </p>
-            {s.error_message ? (
-              <p className="mt-1 text-[11px] font-semibold text-status-rej">✗ {s.error_message}</p>
-            ) : s.top3_brands && s.top3_brands.length > 0 ? (
-              <ol className="mt-1 list-decimal pl-4 text-[11px] font-semibold text-me-charcoal/85">
-                {s.top3_brands.map((b, i) => <li key={i} className="truncate">{b}</li>)}
-              </ol>
-            ) : (
-              <p className="mt-1 text-[11px] font-semibold text-me-charcoal/45 italic">无品牌</p>
-            )}
-          </div>
-        ))}
+        {ordered.map(s => {
+          // B-2 fix: distinguish "AI Overview block did not appear" from
+          // "AI Overview appeared but no brand extracted". Previously both
+          // showed as "无品牌", masking a real product signal.
+          const isAiAbsent = s.error_code === 'no_ai_overview'
+          const isRealError = s.error_message && !isAiAbsent
+          return (
+            <div key={s.id} className="rounded border border-black/5 bg-white px-2 py-1.5">
+              <p className="text-[10px] font-black uppercase tracking-wide text-me-charcoal/45">
+                {PLATFORM_LABELS_SHORT[s.platform] ?? s.platform}
+              </p>
+              {isRealError ? (
+                <p className="mt-1 text-[11px] font-semibold text-status-rej">✗ {s.error_message}</p>
+              ) : isAiAbsent ? (
+                <p className="mt-1 text-[11px] font-semibold text-me-charcoal/45 italic">本题未出现 AI Overview</p>
+              ) : s.top3_brands && s.top3_brands.length > 0 ? (
+                <ol className="mt-1 list-decimal pl-4 text-[11px] font-semibold text-me-charcoal/85">
+                  {s.top3_brands.map((b, i) => <li key={i} className="truncate">{b}</li>)}
+                </ol>
+              ) : (
+                <p className="mt-1 text-[11px] font-semibold text-me-charcoal/45 italic">无品牌</p>
+              )}
+            </div>
+          )
+        })}
       </div>
 
       {showRaw && (

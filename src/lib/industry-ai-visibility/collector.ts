@@ -16,6 +16,9 @@
 import { getOpenAIClient } from '@/lib/ai/openai-client'
 import { parseRanking } from '@/lib/ai-tracker/parser'
 import { getSerpPage } from '@/lib/dataforseo/serp'
+import { supabaseAdmin } from '@/lib/supabase'
+import { extractDomainBrandsFromOrganic } from './domain-normalise'
+import { standardiseBrandList } from './brand-standardiser'
 import type {
   CollectionResult,
   Platform,
@@ -139,55 +142,80 @@ async function collectDataForSeoPair(question: Question): Promise<SerpPair> {
     const half = DATAFORSEO_COST_PER_CALL / 2  // amortize one API call across two snapshot rows
 
     // ─── google_ai_overview snapshot ───
-    let aiBrands: string[] = []
-    let aiTop3: string[] = []
-    let aiParseConfidence: number | null = null
-    let aiTokens: number | null = null
-    let aiCost = half
-
-    if (serp.ai_overview_text) {
+    // B-2 fix: when Google did not return an AI Overview block (very common
+    // for commercial queries), record it as a structured non-error condition
+    // ('no_ai_overview'). The UI now distinguishes "AI Overview did not
+    // appear" from "AI Overview appeared but mentioned no brands", which
+    // were previously indistinguishable empty arrays.
+    let aiResult: CollectionResult
+    if (!serp.ai_overview_text) {
+      aiResult = {
+        ...aiBase,
+        ok: true,                            // still a successful collection
+        raw_response: { ai_overview_text: null, sources: serp.ai_overview_sources } as unknown as Record<string, unknown>,
+        brands_mentioned: [],
+        top3_brands: [],
+        ai_answer_text: null,
+        ai_citation_sources: serp.ai_overview_sources,
+        tokens_used: null,
+        cost_usd: half,
+        parse_confidence: null,
+        error_code: 'no_ai_overview',
+        error_message: 'Google did not surface an AI Overview for this query',
+      }
+    } else {
       const parsed = await parseRanking({
         rawResponse: serp.ai_overview_text,
         clientBrandName: '___NONE___',
       })
-      aiBrands = parsed.brands.map(b => b.brand)
-      aiTop3 = parsed.brands
+      const aiBrands = parsed.brands.map(b => b.brand)
+      const aiTop3 = parsed.brands
         .filter(b => b.rank > 0)
         .sort((a, b) => a.rank - b.rank)
         .slice(0, 3)
         .map(b => b.brand)
-      aiParseConfidence = aiBrands.length > 0 ? 1 : 0
-      aiCost = half + parsed.parse_cost_usd
-      aiTokens = null  // parser tracks its own; not surfaced here
-    }
 
-    const aiResult: CollectionResult = {
-      ...aiBase,
-      ok: true,
-      raw_response: { ai_overview_text: serp.ai_overview_text, sources: serp.ai_overview_sources } as unknown as Record<string, unknown>,
-      brands_mentioned: aiBrands,
-      top3_brands: aiTop3,
-      ai_answer_text: serp.ai_overview_text,
-      ai_citation_sources: serp.ai_overview_sources,
-      tokens_used: aiTokens,
-      cost_usd: aiCost,
-      parse_confidence: aiParseConfidence,
-      error_code: null,
-      error_message: null,
+      aiResult = {
+        ...aiBase,
+        ok: true,
+        raw_response: { ai_overview_text: serp.ai_overview_text, sources: serp.ai_overview_sources } as unknown as Record<string, unknown>,
+        brands_mentioned: aiBrands,
+        top3_brands: aiTop3,
+        ai_answer_text: serp.ai_overview_text,
+        ai_citation_sources: serp.ai_overview_sources,
+        tokens_used: null,
+        cost_usd: half + parsed.parse_cost_usd,
+        parse_confidence: aiBrands.length > 0 ? 1 : 0,
+        error_code: null,
+        error_message: null,
+      }
     }
 
     // ─── google_serp snapshot ───
-    // Brand extraction for organic SERP: pull domain titles from top 10 as proxies.
-    const serpBrandsFromTitles = serp.organic_results.map(o => o.title).filter(Boolean)
-    const serpBrandsFromLocalPack = (serp.local_pack ?? []).map(lp => lp.name)
-    const allSerpBrands = [...serpBrandsFromLocalPack, ...serpBrandsFromTitles]
+    // B-3 fix: previously `organic_results.title` was stored verbatim, which
+    // surfaced SEO article titles ("Best Small Group Tours | Intrepid Travel AU")
+    // as if they were brands. New pipeline:
+    //   1. local_pack.name  (Google Maps merchant names — already real brands)
+    //   2. domain-normalise organic URLs ("ctstours.co.nz" → "ctstours")
+    //   3. LLM-standardise the merged list ("ctstours" → "CTS Tours"),
+    //      cached per (industry_code, raw) to avoid repeated LLM calls.
+    const serpBrandsFromLocalPack = (serp.local_pack ?? [])
+      .map(lp => lp.name)
+      .filter(Boolean)
+    const serpBrandsFromDomains = extractDomainBrandsFromOrganic(serp.organic_results)
+    const rawSerpCandidates = [...serpBrandsFromLocalPack, ...serpBrandsFromDomains]
+
+    const standardised = await standardiseBrandList(rawSerpCandidates, {
+      supabase: supabaseAdmin,
+      industryCode: question.industry_code,
+    })
 
     const serpResult: CollectionResult = {
       ...serpBase,
       ok: true,
       raw_response: serp as unknown as Record<string, unknown>,
-      brands_mentioned: allSerpBrands,
-      top3_brands: allSerpBrands.slice(0, 3),
+      brands_mentioned: standardised.brands,
+      top3_brands: standardised.brands.slice(0, 3),
       ai_answer_text: null,
       ai_citation_sources: null,
       serp_organic_top10: serp.organic_results,
@@ -195,8 +223,8 @@ async function collectDataForSeoPair(question: Question): Promise<SerpPair> {
       serp_paid_domains: serp.paid_advertiser_domains,
       serp_people_also_ask: serp.people_also_ask ?? null,
       tokens_used: null,
-      cost_usd: half,
-      parse_confidence: null,  // not parsed by LLM, structured directly
+      cost_usd: half + standardised.total_cost_usd,
+      parse_confidence: standardised.brands.length > 0 ? 1 : 0,
       error_code: null,
       error_message: null,
     }
