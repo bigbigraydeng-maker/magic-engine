@@ -79,6 +79,42 @@ export function DeploymentForm({
   const hasConnectedCms = connectedProviders.length > 0;
   const hasGithubOnly = !!(cmsProviders?.github?.connected) && !hasConnectedCms;
 
+  const [githubPr, setGithubPr] = useState<{
+    loading: boolean;
+    prUrl: string | null;
+    prNumber: number | null;
+    error: string | null;
+  }>({ loading: false, prUrl: null, prNumber: null, error: null });
+
+  const handleOpenGithubPr = async () => {
+    setGithubPr({ loading: true, prUrl: null, prNumber: null, error: null });
+    try {
+      const res = await fetch(`/api/clients/${clientId}/cms/publish-geo-to-github`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json() as {
+        success: boolean;
+        pr_url?: string;
+        pr_number?: number;
+        error?: string;
+        code?: string;
+      };
+      if (!res.ok || !data.success) {
+        throw new Error(data.error ?? 'Failed to open GitHub PR');
+      }
+      setGithubPr({
+        loading: false,
+        prUrl: data.pr_url ?? null,
+        prNumber: data.pr_number ?? null,
+        error: null,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'GitHub PR failed';
+      setGithubPr({ loading: false, prUrl: null, prNumber: null, error: message });
+    }
+  };
+
   const handleRecordDeployment = async () => {
     setIsRecording(true);
     try {
@@ -157,20 +193,45 @@ export function DeploymentForm({
         </div>
       )}
 
-      {/* Banner — only a version-control repository is connected (github).
-          The one-click REST publish flow doesn't apply, so we surface the
-          actual next step the FDE needs to take instead of a dead-end status. */}
+      {/* GitHub PR Deploy — connected repo uses PR workflow, not REST */}
       {hasGithubOnly && (
-        <div className="p-4 bg-[#5C8A4A]/10 border border-[#5C8A4A]/30 rounded-lg flex items-start gap-3">
-          <span className="text-[#5C8A4A] text-xl mt-0.5">✓</span>
-          <div>
-            <p className="text-[#5C8A4A] font-medium text-sm">Repository connected</p>
-            <p className="text-[#5C8A4A]/90 text-xs mt-1">
-              Your site uses a code-based deployment. Open a pull request that adds the
-              snippet below to the page <code className="font-mono text-[11px] bg-white/60 px-1 py-0.5 rounded">&lt;head&gt;</code>,
-              then use <strong>Add Page</strong> below to record the URL once the PR is merged.
-            </p>
+        <div className="bg-white border border-[#5C8A4A]/30 rounded-lg p-6">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[#5C8A4A]">✓</span>
+            <h3 className="text-lg font-semibold">Deploy via GitHub PR</h3>
           </div>
+          <p className="text-sm text-me-charcoal/55 mb-4">
+            Opens a pull request in your connected repository with the GEO snippet file.
+            Merge the PR on GitHub, then record the page URL below.
+          </p>
+
+          {!githubPr.prUrl ? (
+            <button
+              onClick={handleOpenGithubPr}
+              disabled={githubPr.loading || loading}
+              className="px-4 py-2 bg-[#5C8A4A] text-white rounded-lg hover:bg-[#4a7340] disabled:bg-me-stone disabled:cursor-not-allowed transition font-medium text-sm"
+            >
+              {githubPr.loading ? 'Opening PR…' : 'Open Pull Request'}
+            </button>
+          ) : (
+            <div className="p-3 bg-[#5C8A4A]/10 border border-[#5C8A4A]/30 rounded text-[#5C8A4A] text-sm">
+              PR #{githubPr.prNumber} opened —{' '}
+              <a
+                href={githubPr.prUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-[#4a7340] font-medium"
+              >
+                Review &amp; merge on GitHub →
+              </a>
+            </div>
+          )}
+
+          {githubPr.error && (
+            <div className="mt-3 p-3 bg-[#C2453A]/10 border border-[#C2453A]/30 rounded text-[#C2453A] text-sm">
+              {githubPr.error}
+            </div>
+          )}
         </div>
       )}
 
