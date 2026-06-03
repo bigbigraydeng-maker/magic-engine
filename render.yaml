@@ -52,6 +52,8 @@ services:
         value: https://gateway.ai.cloudflare.com/v1/bbd84393da8e5707ba617749dc17117c/magic-engine/openai
       - key: ANTHROPIC_BASE_URL
         value: https://gateway.ai.cloudflare.com/v1/bbd84393da8e5707ba617749dc17117c/magic-engine/anthropic
+      - key: YOUTUBE_API_KEY
+        sync: false
       - key: CLOUDFLARE_MGMT_TOKEN
         sync: false
       - key: ADMIN_EMAILS
@@ -235,27 +237,20 @@ services:
       - key: CRON_SECRET
         sync: false
 
-  # Daily anomaly detector — every day at 5am UTC (~5pm NZST / 3pm AEST)
-  # Two-step pipeline:
-  #   Step 1: AnomalyDetectorJob — scans flywheel_metrics, writes anomaly_signals
-  #   Step 2: 诸葛亮 Proactive — reads fresh signals, creates proactive execution tasks
-  # Reference: ROADMAP.md § Phase 22.D.3
+  # Weekly viral YouTube discovery — every Monday at 0am UTC (~12pm NZST)
+  # Searches YouTube per industry, filters by min view count, inserts new rows,
+  # kicks off Gemini analysis. Quota cost ~2,880 units/week (free tier = 70k/week).
   - type: cron
-    name: anomaly-detector-daily
+    name: viral-discovery-weekly
     env: node
-    schedule: "0 5 * * *"
+    schedule: "0 0 * * 1"
     buildCommand: ""
     startCommand: |
-      curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/anomaly-detector
+      curl -s -X POST -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/viral-discovery-weekly
     envVars:
       - key: CRON_SECRET
         sync: false
-      - key: RENDER_EXTERNAL_URL
-        fromService:
-          type: web
-          name: magic-engine
-          property: host
 
   # Daily anomaly detector — every day at 5am UTC (~5pm NZST / 3pm AEST)
   # Two-step pipeline:

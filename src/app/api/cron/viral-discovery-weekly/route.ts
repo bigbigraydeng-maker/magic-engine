@@ -1,0 +1,320 @@
+/**
+ * POST /api/cron/viral-discovery-weekly
+ *
+ * Automatically discovers viral YouTube videos per industry each week.
+ * For each industry config entry: searches YouTube, filters by min view count,
+ * deduplicates against the DB, inserts new rows as 'pending', and kicks off
+ * Gemini analysis.
+ *
+ * Auth:     Authorization: Bearer ${CRON_SECRET}
+ * Schedule: Every Monday at 0am UTC (render.yaml)
+ *
+ * YouTube quota cost per industry:
+ *   ~100 units (search) + limit×1 (videos.list) ≈ 120 units/industry
+ *   8 industries × 3 keyword groups × 120 ≈ 2,880 units/week
+ *   Free daily quota: 10,000 → well within budget.
+ */
+
+import { NextRequest, NextResponse } from 'next/server'
+import { supabaseAdmin } from '@/lib/supabase'
+import { analyzeViralReference } from '@/lib/reels/viral-analyzer'
+
+export const dynamic    = 'force-dynamic'
+export const maxDuration = 300  // 5 min — 8 industries × ~30s each
+
+// ─── Industry keyword config ──────────────────────────────────────────────────
+
+interface IndustryConfig {
+  industry:   string
+  keywords:   string[]   // each entry = one YouTube search
+  min_views:  number
+  limit:      number     // max videos per keyword search
+}
+
+const INDUSTRY_CONFIGS: IndustryConfig[] = [
+  {
+    industry:  'travel',
+    keywords:  [
+      'luxury travel New Zealand tour',
+      'NZ travel experience vlog short',
+      'New Zealand holiday adventure reel',
+    ],
+    min_views: 50_000,
+    limit:     10,
+  },
+  {
+    industry:  'flooring',
+    keywords:  [
+      'hardwood floor installation timelapse',
+      'flooring renovation before after',
+      'timber floor NZ home renovation',
+    ],
+    min_views: 10_000,
+    limit:     10,
+  },
+  {
+    industry:  'real_estate',
+    keywords:  [
+      'luxury home tour New Zealand',
+      'real estate listing walkthrough NZ',
+      'property renovation reveal',
+    ],
+    min_views: 20_000,
+    limit:     10,
+  },
+  {
+    industry:  'food',
+    keywords:  [
+      'restaurant NZ food reel',
+      'New Zealand cafe aesthetic food',
+      'food photography plating short',
+    ],
+    min_views: 20_000,
+    limit:     10,
+  },
+  {
+    industry:  'fashion',
+    keywords:  [
+      'fashion haul outfit NZ style',
+      'clothing brand lookbook short',
+      'fashion styling reel aesthetic',
+    ],
+    min_views: 30_000,
+    limit:     10,
+  },
+  {
+    industry:  'fitness',
+    keywords:  [
+      'gym workout motivation reel',
+      'fitness transformation New Zealand',
+      'personal trainer workout short',
+    ],
+    min_views: 30_000,
+    limit:     10,
+  },
+  {
+    industry:  'tech',
+    keywords:  [
+      'tech product review short',
+      'software app demo reel',
+      'tech startup brand video',
+    ],
+    min_views: 20_000,
+    limit:     10,
+  },
+  {
+    industry:  'beauty',
+    keywords:  [
+      'skincare routine NZ beauty',
+      'makeup tutorial short reel',
+      'beauty product review aesthetic',
+    ],
+    min_views: 30_000,
+    limit:     10,
+  },
+]
+
+// ─── YouTube API helpers ──────────────────────────────────────────────────────
+
+interface YTSearchItem {
+  id:      { videoId: string }
+  snippet: { title: string; channelTitle: string; publishedAt: string }
+}
+
+interface YTVideoItem {
+  id:         string
+  snippet:    { title: string; channelTitle: string; publishedAt: string }
+  statistics: { viewCount?: string; likeCount?: string }
+}
+
+async function searchYouTube(
+  keywords: string,
+  apiKey:   string,
+  limit:    number,
+): Promise<YTSearchItem[]> {
+  const params = new URLSearchParams({
+    part:          'snippet',
+    q:             keywords,
+    type:          'video',
+    videoDuration: 'short',
+    order:         'viewCount',
+    maxResults:    String(Math.min(limit * 2, 50)),
+    key:           apiKey,
+  })
+  const res  = await fetch(`https://www.googleapis.com/youtube/v3/search?${params}`)
+  const data = await res.json() as { items?: YTSearchItem[]; error?: { message: string } }
+  if (data.error) throw new Error(`YouTube Search: ${data.error.message}`)
+  return data.items ?? []
+}
+
+async function getVideoDetails(videoIds: string[], apiKey: string): Promise<YTVideoItem[]> {
+  if (videoIds.length === 0) return []
+  const params = new URLSearchParams({
+    part: 'snippet,statistics',
+    id:   videoIds.join(','),
+    key:  apiKey,
+  })
+  const res  = await fetch(`https://www.googleapis.com/youtube/v3/videos?${params}`)
+  const data = await res.json() as { items?: YTVideoItem[]; error?: { message: string } }
+  if (data.error) throw new Error(`YouTube Videos: ${data.error.message}`)
+  return data.items ?? []
+}
+
+// ─── Per-keyword discover ─────────────────────────────────────────────────────
+
+interface DiscoverResult {
+  industry:        string
+  keywords:        string
+  found:           number
+  skipped:         number
+  below_threshold: number
+  queued:          number
+  error?:          string
+}
+
+async function discoverForKeywords(
+  cfg:    IndustryConfig,
+  kw:     string,
+  apiKey: string,
+): Promise<DiscoverResult> {
+  const base = { industry: cfg.industry, keywords: kw, found: 0, skipped: 0, below_threshold: 0, queued: 0 }
+
+  let searchItems: YTSearchItem[]
+  try {
+    searchItems = await searchYouTube(kw, apiKey, cfg.limit)
+  } catch (err) {
+    return { ...base, error: err instanceof Error ? err.message : 'search failed' }
+  }
+
+  if (searchItems.length === 0) return base
+
+  const videoIds = searchItems.map(i => i.id.videoId)
+
+  let details: YTVideoItem[]
+  try {
+    details = await getVideoDetails(videoIds, apiKey)
+  } catch (err) {
+    return { ...base, found: searchItems.length, error: err instanceof Error ? err.message : 'details fetch failed' }
+  }
+
+  const detailMap   = new Map(details.map(d => [d.id, d]))
+  const candidateUrls = videoIds.map(id => `https://www.youtube.com/watch?v=${id}`)
+
+  const { data: existing } = await supabaseAdmin
+    .from('viral_reference_library')
+    .select('source_url')
+    .in('source_url', candidateUrls)
+
+  const existingSet = new Set((existing ?? []).map(r => r.source_url))
+
+  type ToInsert = {
+    source_url: string; industry: string; content_goal: string
+    is_our_video: boolean; platform: string; analysis_status: string
+    view_count: number; like_count: number | null
+    published_at: string | null; video_title: string; channel_title: string
+  }
+  const toInsert: ToInsert[] = []
+  let skipped = 0
+  let belowThreshold = 0
+
+  for (const item of searchItems) {
+    if (toInsert.length >= cfg.limit) break
+    const vid    = item.id.videoId
+    const url    = `https://www.youtube.com/watch?v=${vid}`
+    const detail = detailMap.get(vid)
+    const views  = detail?.statistics?.viewCount ? Number(detail.statistics.viewCount) : 0
+
+    if (existingSet.has(url)) { skipped++;        continue }
+    if (views < cfg.min_views) { belowThreshold++; continue }
+
+    toInsert.push({
+      source_url:      url,
+      industry:        cfg.industry,
+      content_goal:    'brand',   // AI will override during analysis
+      is_our_video:    false,
+      platform:        'youtube',
+      analysis_status: 'pending',
+      view_count:      views,
+      like_count:      detail?.statistics?.likeCount ? Number(detail.statistics.likeCount) : null,
+      published_at:    detail?.snippet?.publishedAt ?? null,
+      video_title:     detail?.snippet?.title ?? item.snippet.title,
+      channel_title:   detail?.snippet?.channelTitle ?? item.snippet.channelTitle,
+    })
+  }
+
+  if (toInsert.length === 0) {
+    return { ...base, found: searchItems.length, skipped, below_threshold: belowThreshold }
+  }
+
+  const { data: inserted, error: insertErr } = await supabaseAdmin
+    .from('viral_reference_library')
+    .insert(toInsert)
+    .select('id, source_url')
+
+  if (insertErr) {
+    return { ...base, found: searchItems.length, skipped, below_threshold: belowThreshold, error: insertErr.message }
+  }
+
+  for (const ref of inserted ?? []) {
+    analyzeViralReference(ref.id, ref.source_url).catch(err => {
+      console.error(`[viral-discovery] analysis failed ${ref.id}:`, err)
+    })
+  }
+
+  return {
+    industry:        cfg.industry,
+    keywords:        kw,
+    found:           searchItems.length,
+    skipped,
+    below_threshold: belowThreshold,
+    queued:          inserted?.length ?? 0,
+  }
+}
+
+// ─── Route handler ────────────────────────────────────────────────────────────
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  const cronSecret = process.env.CRON_SECRET
+  if (!cronSecret) {
+    return NextResponse.json({ error: 'CRON_SECRET not set' }, { status: 500 })
+  }
+  if (req.headers.get('authorization') !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const apiKey = process.env.YOUTUBE_API_KEY
+  if (!apiKey) {
+    return NextResponse.json({ error: 'YOUTUBE_API_KEY not configured' }, { status: 500 })
+  }
+
+  const results: DiscoverResult[] = []
+  let totalQueued = 0
+
+  for (const cfg of INDUSTRY_CONFIGS) {
+    for (const kw of cfg.keywords) {
+      const result = await discoverForKeywords(cfg, kw, apiKey)
+      results.push(result)
+      totalQueued += result.queued
+
+      if (result.error) {
+        console.error(`[viral-discovery] ${cfg.industry} "${kw}": ${result.error}`)
+      } else {
+        console.log(
+          `[viral-discovery] ${cfg.industry} "${kw}": ` +
+          `found=${result.found} queued=${result.queued} ` +
+          `skipped=${result.skipped} below_threshold=${result.below_threshold}`,
+        )
+      }
+
+      // Small delay to be kind to YouTube quota rate limits
+      await new Promise(r => setTimeout(r, 300))
+    }
+  }
+
+  return NextResponse.json({
+    ok:          true,
+    timestamp:   new Date().toISOString(),
+    total_queued: totalQueued,
+    results,
+  })
+}
