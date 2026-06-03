@@ -70,10 +70,7 @@ export function ExecutionSummaryBar({ goalId, refreshKey = 0, onLoaded }: Props)
     <div className="rounded-xl border border-black/10 bg-white p-6 shadow-sm">
       <div className="flex items-center gap-2">
         <span className="text-xs font-black uppercase tracking-wide text-me-charcoal/45">
-          Execution Progress
-        </span>
-        <span className="rounded-full bg-me-ochre/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-me-ochre">
-          Phase 33 M4
+          执行进度 · Execution Progress
         </span>
       </div>
 

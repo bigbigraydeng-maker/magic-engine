@@ -186,7 +186,8 @@ export function InitiativeExecutionPanel({ initiative, clientId, summary, onUpda
                 type="button"
                 disabled={saving}
                 onClick={() => handleUnlinkCampaign(c.id)}
-                className="text-[10px] font-bold text-me-charcoal/35 hover:text-status-rej disabled:opacity-40"
+                title="解除关联（不会删除 Campaign）"
+                className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md border border-black/10 bg-white text-sm font-bold text-me-charcoal/55 transition-colors hover:border-status-rej/40 hover:bg-status-rej/10 hover:text-status-rej disabled:opacity-40"
               >
                 ×
               </button>

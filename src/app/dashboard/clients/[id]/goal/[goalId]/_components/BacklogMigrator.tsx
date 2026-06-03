@@ -9,7 +9,7 @@
  * 设计：默认收起 + 显示 backlog 总数，FDE 点开后才加载 actions 列表。
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { InitiativeRow, GoalRow } from '@/types/strategy'
 
 interface BacklogAction {
@@ -54,8 +54,18 @@ export function BacklogMigrator({ clientId, goal }: Props) {
     }
   }
 
+  // On mount: prime count + actions so FDE sees the backlog total
+  // (and can expand instantly). Without this, the section stays
+  // "collapsed with no number" and is easy to miss.
+  useEffect(() => {
+    loadOnce()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, goal.id])
+
   function toggleExpand() {
-    if (!expanded && count === null) loadOnce()
+    // First expand still triggers full action list load; count may already be set
+    // by the mount-time effect above.
+    if (!expanded && actions.length === 0) loadOnce()
     setExpanded(!expanded)
   }
 

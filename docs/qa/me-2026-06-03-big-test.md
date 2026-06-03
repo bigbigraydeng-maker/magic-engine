@@ -12,10 +12,10 @@
 
 | 指标 | 期望值 | 用于验证哪项 |
 |------|--------|--------------|
-| CTS 总 action 数 | **54** | Kanban 默认显示 |
-| pending | **38** | 状态 chip |
-| in_progress | **11** | 状态 chip |
-| completed | **1** | 状态 chip |
+| 整体执行进度分母 | **73** = 54 execution_items + 19 flywheel 自主行动 | Kanban 顶部 N/73 |
+| pending | **38** （来自 execution_items） | 状态 chip |
+| in_progress | **11** （来自 execution_items） | 状态 chip |
+| completed | **20** = 1 execution_items.completed + 19 flywheel 自主行动（全已执行） | 状态 chip |
 | skipped | **4** | 不显示在 chips 里（chips 只显示 pending/in_progress/completed） |
 | Filter 应用后 actions | **2** | P33.9 关键数字 |
 | 未归类 Actions（unassigned placeholder 绑定）| **52** | P33.10 关键数字 |
@@ -32,7 +32,7 @@
 
 ### ✅ 检查清单
 
-- [ ] **1.1** 不点任何 filter 时，看顶部状态 chips：`待处理 38` / `进行中 11` / `已完成 1`
+- [ ] **1.1** 不点任何 filter 时，看顶部状态 chips：`待处理 38` / `进行中 11` / `已完成 20`（已完成含 19 个飞轮自主行动）
   - 失败模式：数字对不上 → 数据飞了，截图给我反查
   - 失败模式：chips 不存在 → 部署没上线
 
@@ -183,3 +183,17 @@ Part 4 — A1 reputation:
 4. **整页 500**：截 URL + Render Events 截图，可能是部署回滚或环境变量错
 
 跑完汇总告诉我，我把对应的「🧪 测试待跑」从焦点表移到「✅ 已完成全景」。
+
+---
+
+## 🔧 测试中发现的 4 项修复（已写代码，待部署）
+
+| # | 问题 | 修复 |
+|---|------|------|
+| **1.1 clip 数字口径** | 测试清单期望 1，实际 20（19 个飞轮自主行动算 completed） | 已修正期望值 → **20**（不是 bug） |
+| **1.6 BacklogMigrator 看不到** | 默认 `count === null`，section 看起来空白 | useEffect mount 时自动 loadOnce()，进入页面就显示 backlog 数字 |
+| **2.1 "Phase 33 M4" 标签像内部代号** | ExecutionSummaryBar 顶部徽章是开发标识 | 删掉标签，标题改成「执行进度 · Execution Progress」 |
+| **2.7 unlink × 按钮难看到** | text-[10px] 灰色无 border 容易忽略 | 改成 6×6 白底圆角按钮 + 红色 hover + tooltip |
+| **4 A1 reputation 还是 44** | 上次诊断是 2026-05-29 (A1 修复前)，PM 没点「运行新诊断」 | 诊断页面顶部 ≥3 天未跑显示「⚠️ N 天未重跑」黄色提示 |
+
+跑这些修复需要 commit + push + 等 Render 部署（约 5 分钟）。
