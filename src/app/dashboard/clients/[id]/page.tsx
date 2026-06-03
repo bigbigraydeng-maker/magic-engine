@@ -383,6 +383,7 @@ export default function ClientDetailPage() {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('brief');
   const [zhugeDrawerOpen, setZhugeDrawerOpen] = useState(false);
   const [zhugeRefreshKey, setZhugeRefreshKey] = useState(0);
+  const [zhugeFreshOutput, setZhugeFreshOutput] = useState<import('@/lib/zhuge/types').ZhugeOutput | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -536,6 +537,7 @@ export default function ClientDetailPage() {
                 clientId={clientId}
                 discoveryConfirmed={discoveryConfirmed}
                 refreshKey={zhugeRefreshKey}
+                freshOutput={zhugeFreshOutput}
                 onAskZhuge={() => setZhugeDrawerOpen(true)}
               />
             </div>
@@ -544,6 +546,7 @@ export default function ClientDetailPage() {
               clientId={clientId}
               discoveryConfirmed={discoveryConfirmed}
               refreshKey={zhugeRefreshKey}
+              freshOutput={zhugeFreshOutput}
               onAskZhuge={() => setZhugeDrawerOpen(true)}
             />
           )}
@@ -650,7 +653,10 @@ export default function ClientDetailPage() {
         clientId={clientId}
         isOpen={zhugeDrawerOpen}
         onClose={() => setZhugeDrawerOpen(false)}
-        onComplete={() => setZhugeRefreshKey(k => k + 1)}
+        onComplete={(output) => {
+          setZhugeFreshOutput(output)
+          setZhugeRefreshKey(k => k + 1)
+        }}
       />
 
       {/* Settings drawer */}

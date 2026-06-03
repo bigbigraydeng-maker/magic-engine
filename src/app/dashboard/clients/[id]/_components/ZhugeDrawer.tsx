@@ -105,8 +105,9 @@ export interface ZhugeDrawerProps {
   clientId: string
   isOpen: boolean
   onClose: () => void
-  /** Called after a successful conduct run; parent should refresh cached widget. */
-  onComplete: () => void
+  /** Called after a successful conduct run with the fresh output so the parent
+   *  can push it directly into the ZhugePriorityWidget without a second fetch. */
+  onComplete: (output: ZhugeOutput) => void
 }
 
 export function ZhugeDrawer({ clientId, isOpen, onClose, onComplete }: ZhugeDrawerProps) {
@@ -152,10 +153,11 @@ export function ZhugeDrawer({ clientId, isOpen, onClose, onComplete }: ZhugeDraw
       if (!res.ok || !data.success) {
         throw new Error(data.error ?? `Error ${res.status}`)
       }
-      setOutput(data.output ?? null)
+      const fresh = data.output ?? null
+      setOutput(fresh)
       setSource('fresh')
       setPhase('done')
-      onCompleteRef.current()
+      if (fresh) onCompleteRef.current(fresh)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setPhase('error')

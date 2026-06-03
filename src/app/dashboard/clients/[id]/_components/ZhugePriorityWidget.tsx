@@ -98,26 +98,68 @@ function ActionCard({ action, clientId }: { action: ZhugeActionRow; clientId: st
 
 type WidgetState = 'loading' | 'empty' | 'loaded';
 
+import type { ZhugeOutput, PriorityAction } from '@/lib/zhuge/types'
+
 export interface ZhugePriorityWidgetProps {
   clientId: string;
   /** Whether 张骞 discovery is confirmed (gate for "询问诸葛亮" CTA). */
   discoveryConfirmed: boolean;
   /** Increment to trigger a cache refresh (e.g. after ZhugeDrawer completes). */
   refreshKey?: number;
+  /** Fresh output pushed directly from ZhugeDrawer after a conduct run — avoids
+   *  a second fetch and eliminates DB write-timing issues. */
+  freshOutput?: ZhugeOutput | null;
   /** Called when user clicks "询问诸葛亮" or "重新计算". */
   onAskZhuge: () => void;
+}
+
+function outputToRows(output: ZhugeOutput): ZhugeActionRow[] {
+  return output.top_actions
+    .sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99))
+    .map((action: PriorityAction): ZhugeActionRow => ({
+      id: `fresh-${action.rank}-${action.action_type}`,
+      flywheel: action.dimension,
+      action_type: action.action_type,
+      execution_mode: action.execution_mode,
+      expected_metric: null,
+      executed_at: output.generated_at,
+      payload: {
+        rank: action.rank,
+        why_now: action.why_now,
+        evidence_refs: action.evidence_refs,
+        expected_impact: action.expected_impact,
+        effort: action.effort,
+        executable_by: action.executable_by,
+        zhuge_session_key: '',
+        discovery_id: '',
+        diagnostic_run_id: null,
+      },
+    }))
 }
 
 export function ZhugePriorityWidget({
   clientId,
   discoveryConfirmed,
   refreshKey = 0,
+  freshOutput,
   onAskZhuge,
 }: ZhugePriorityWidgetProps) {
   const [state, setState] = useState<WidgetState>('loading');
   const [actions, setActions] = useState<ZhugeActionRow[]>([]);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+
+  // When fresh output arrives directly from ZhugeDrawer, render it immediately
+  // without waiting for a DB round-trip.
+  useEffect(() => {
+    if (!freshOutput) return;
+    const rows = outputToRows(freshOutput);
+    if (rows.length > 0) {
+      setActions(rows);
+      setGeneratedAt(freshOutput.generated_at);
+      setState('loaded');
+    }
+  }, [freshOutput]);
 
   const loadLatest = useCallback(async () => {
     setState('loading');
