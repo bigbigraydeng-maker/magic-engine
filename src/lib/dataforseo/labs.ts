@@ -825,17 +825,23 @@ export async function fetchDomainRankOverview(
 
   if (!res.ok) throw new Error(`DataForSEO domain_rank_overview error: ${res.status}`)
 
+  // Actual response shape (verified 2026-06-04 against bunnings.com.au):
+  //   tasks[0].result[0].items[0].metrics.organic.{count, etv}
+  // Previously we read tasks[0].result[0].metrics.organic which is undefined,
+  // causing all stub competitor enrichment to silently return 0/0.
   const json = await res.json() as {
     tasks?: Array<{
       result?: Array<{
-        metrics?: {
-          organic?: { count?: number | null; etv?: number | null }
-        }
+        items?: Array<{
+          metrics?: {
+            organic?: { count?: number | null; etv?: number | null }
+          }
+        }>
       }>
     }>
   }
 
-  const organic = json.tasks?.[0]?.result?.[0]?.metrics?.organic
+  const organic = json.tasks?.[0]?.result?.[0]?.items?.[0]?.metrics?.organic
   return {
     organic_keywords: Math.round(organic?.count ?? 0),
     organic_traffic:  Math.round(organic?.etv   ?? 0),
