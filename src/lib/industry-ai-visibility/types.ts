@@ -12,6 +12,7 @@ export type IndustryCode =
   | 'migration'
   | 'restaurant'
   | 'real_estate'
+  | 'flooring'
 
 export type IntentLayer =
   | 'discovery'
