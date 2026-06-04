@@ -175,7 +175,10 @@ describe('standardiseBrand — retry + fallback', () => {
     expect(result.canonical).toBe('Cts Tours')
     expect(result.source).toBe('fallback')
     expect(result.cost_usd).toBe(0)
-    expect(upserts[0].source).toBe('domain_fallback')
+    // 魏征 Hotfix-4: fallback must NOT be cached, otherwise a Haiku outage
+    // poisons the cache forever — next cycle would cache-hit the title-cased
+    // value and never retry the LLM, even after Haiku recovers.
+    expect(upserts).toHaveLength(0)
   })
 })
 

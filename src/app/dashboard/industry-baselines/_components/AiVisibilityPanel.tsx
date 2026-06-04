@@ -130,12 +130,18 @@ export function AiVisibilityPanel() {
       // Defensive parse: 502 / 504 / Render restart pages return HTML, not JSON.
       // Old code did `await res.json()` which threw "Unexpected token '<'".
       const text = await res.text()
-      let json: { run_id?: string; status?: string; error?: string; message?: string } = {}
+      let json: { run_id?: string; status?: string; error?: string; message?: string; existing_run_id?: string; hint?: string } = {}
       try {
         json = text ? JSON.parse(text) : {}
       } catch {
         const preview = text.slice(0, 120).replace(/\s+/g, ' ').trim()
         setCollectMsg(`✗ HTTP ${res.status} — 服务端返回非 JSON：${preview}…`)
+        return
+      }
+
+      // 魏征 P1: 409 = 另一次采集正在进行中
+      if (res.status === 409 && json.existing_run_id) {
+        setCollectMsg(`⏳ 已有采集运行中（run ${json.existing_run_id.slice(0, 8)}…），等其结束再点`)
         return
       }
 
@@ -226,6 +232,7 @@ export function AiVisibilityPanel() {
       <div className="space-y-1 rounded-xl border border-me-ochre/30 bg-me-ochre/10 px-4 py-3 text-xs font-semibold text-me-charcoal/80">
         <p><strong className="font-black text-me-charcoal">行业 AI 可见度时序档案 · 日级采集。</strong>每天追踪 ChatGPT + Google AI Overview + Google SERP 对每个行业问题的回答，记录哪些品牌被推荐、排名每日变化。数据进入飞轮归因分析。</p>
         <p>问题一旦开始采集，<strong>question_text 永久锁定</strong>（保证时序连续性）。点击「展开历史」可查看该题最近 30 天每日快照按日倒序。</p>
+        <p className="pt-1 border-t border-me-ochre/15 mt-1"><strong className="font-black text-me-charcoal">⚠ 注意区分两个按钮：</strong>本 tab 内的 <code className="px-1 py-0.5 bg-me-ochre/20 rounded text-me-charcoal">▶ Run AI visibility</code> 跑 AI 可见度采集（本 tab 数据）。页面顶部右上角的 <code className="px-1 py-0.5 bg-me-ochre/20 rounded text-me-charcoal">▶ Run SEO baselines</code> 跑 SEO Baselines tab 的 DataForSEO 域名打分。两套数据互不影响。</p>
       </div>
 
       {/* Toolbar: filters + collect */}
@@ -293,7 +300,7 @@ export function AiVisibilityPanel() {
             disabled={collecting}
             className="rounded-lg bg-me-ochre px-4 py-2 text-xs font-black text-white transition-colors hover:bg-me-ochre/90 disabled:opacity-50"
           >
-            {collecting ? '采集中…' : '▶ 立即采集'}
+            {collecting ? '采集中…' : '▶ Run AI visibility'}
           </button>
         </div>
       </div>

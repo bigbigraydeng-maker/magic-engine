@@ -26,23 +26,38 @@ interface SeoMetrics {
   last_updated:     string | null
 }
 
-interface PageHealthRow {
-  page:            string
-  gsc_clicks:      number | null
-  gsc_impressions: number | null
-  gsc_ctr:         number | null
-  gsc_position:    number | null
-  ga4_sessions:    number | null
-  ga4_pageviews:   number | null
+interface MetricDelta {
+  delta:    number | null
+  deltaPct: number | null
 }
 
+interface PageHealthRow {
+  page:              string
+  gsc_clicks:        number | null
+  gsc_impressions:   number | null
+  gsc_ctr:           number | null
+  gsc_position:      number | null
+  ga4_sessions:      number | null
+  ga4_pageviews:     number | null
+  gsc_clicks_d:      MetricDelta | null
+  gsc_impressions_d: MetricDelta | null
+  gsc_position_d:    MetricDelta | null
+  ga4_sessions_d:    MetricDelta | null
+}
+
+type DeltaStatus = 'ok' | 'insufficient' | 'no_data'
+
 interface PageHealthResponse {
-  pages?:      PageHealthRow[]
-  gsc_status?: 'connected' | 'no_data' | 'not_connected'
-  ga4_status?: 'connected' | 'no_data' | 'not_connected'
-  gsc_period?: string | null
-  ga4_period?: string | null
-  error?:      string
+  pages?:              PageHealthRow[]
+  dropped_off_paths?:  string[]
+  gsc_status?:         'connected' | 'no_data' | 'not_connected'
+  ga4_status?:         'connected' | 'no_data' | 'not_connected'
+  gsc_period?:         string | null
+  ga4_period?:         string | null
+  trend_status?:       DeltaStatus
+  trend_window_label?: string | null
+  trend_window_days?:  number | null
+  error?:              string
 }
 
 interface RankedKeyword {
@@ -578,18 +593,56 @@ function TrafficSplitRow({
   )
 }
 
-// ─── Page Health Table (Phase B2) ────────────────────────────────────────────
+// ─── Page Health Table (Phase B2 + B v2 trends) ─────────────────────────────
+
+/** Format a delta number with sign and abbreviated unit. */
+function fmtDelta(n: number | null | undefined): string {
+  if (n == null || n === 0) return '—'
+  const sign = n > 0 ? '+' : '−'
+  const abs = Math.abs(n)
+  if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(1)}M`
+  if (abs >= 1_000)     return `${sign}${(abs / 1_000).toFixed(1)}K`
+  return `${sign}${abs.toFixed(0)}`
+}
+
+function fmtPct(p: number | null | undefined): string {
+  if (p == null || p === 0) return ''
+  const sign = p > 0 ? '+' : ''
+  return `${sign}${p.toFixed(0)}%`
+}
+
+/** Green = improvement, red = regression. */
+function deltaCls(delta: number | null | undefined): string {
+  if (delta == null || delta === 0) return 'text-gray-400'
+  return delta > 0 ? 'text-emerald-600 font-medium' : 'text-rose-600 font-medium'
+}
+
+function DeltaCell({ d }: { d: MetricDelta | null }) {
+  if (!d || d.delta == null) return <span className="text-gray-300">—</span>
+  return (
+    <span className={`tabular-nums text-xs ${deltaCls(d.delta)}`}>
+      {fmtDelta(d.delta)}
+      {d.deltaPct != null && d.deltaPct !== 0 && (
+        <span className="ml-1 opacity-70">{fmtPct(d.deltaPct)}</span>
+      )}
+    </span>
+  )
+}
 
 function PageHealthTable({
   pages,
   loading,
   gscStatus,
   ga4Status,
+  trendStatus,
+  trendLabel,
 }: {
   pages: PageHealthRow[]
   loading: boolean
   gscStatus: 'connected' | 'no_data' | 'not_connected'
   ga4Status: 'connected' | 'no_data' | 'not_connected'
+  trendStatus: DeltaStatus
+  trendLabel: string | null
 }) {
   const [search, setSearch] = useState('')
   const [shown, setShown]   = useState(25)
@@ -599,6 +652,7 @@ function PageHealthTable({
     [pages, search],
   )
   const visible = filtered.slice(0, shown)
+  const showTrends = trendStatus === 'ok'
 
   if (loading) {
     return (
@@ -628,23 +682,36 @@ function PageHealthTable({
 
   return (
     <div className="space-y-3">
-      <input
-        type="text"
-        placeholder="搜索页面路径…"
-        value={search}
-        onChange={e => { setSearch(e.target.value); setShown(25) }}
-        className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-indigo-400"
-      />
+      <div className="flex items-center gap-3">
+        <input
+          type="text"
+          placeholder="搜索页面路径…"
+          value={search}
+          onChange={e => { setSearch(e.target.value); setShown(25) }}
+          className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-indigo-400"
+        />
+        {showTrends && trendLabel ? (
+          <span className="text-xs text-gray-500">
+            趋势对比窗口：<span className="font-semibold text-gray-700">{trendLabel}</span>
+          </span>
+        ) : trendStatus === 'insufficient' ? (
+          <span className="text-xs text-amber-600">需 ≥2 次采集才能算变化</span>
+        ) : null}
+      </div>
       <div className="overflow-x-auto rounded-xl border border-gray-200">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
               <th className="text-left  px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">页面</th>
               <th className="text-right px-3 py-2.5 text-xs font-semibold text-teal-600 uppercase tracking-wide w-20">GSC 点击</th>
+              {showTrends && <th className="text-right px-2 py-2.5 text-xs font-semibold text-teal-500 uppercase tracking-wide w-20">Δ</th>}
               <th className="text-right px-3 py-2.5 text-xs font-semibold text-teal-600 uppercase tracking-wide w-20">GSC 曝光</th>
+              {showTrends && <th className="text-right px-2 py-2.5 text-xs font-semibold text-teal-500 uppercase tracking-wide w-20">Δ</th>}
               <th className="text-right px-3 py-2.5 text-xs font-semibold text-teal-600 uppercase tracking-wide w-16">CTR</th>
               <th className="text-center px-3 py-2.5 text-xs font-semibold text-teal-600 uppercase tracking-wide w-20">均排名</th>
+              {showTrends && <th className="text-right px-2 py-2.5 text-xs font-semibold text-teal-500 uppercase tracking-wide w-20">Δ</th>}
               <th className="text-right px-3 py-2.5 text-xs font-semibold text-blue-600 uppercase tracking-wide w-20">GA4 会话</th>
+              {showTrends && <th className="text-right px-2 py-2.5 text-xs font-semibold text-blue-500 uppercase tracking-wide w-20">Δ</th>}
               <th className="text-right px-3 py-2.5 text-xs font-semibold text-blue-600 uppercase tracking-wide w-20">GA4 PV</th>
             </tr>
           </thead>
@@ -653,14 +720,18 @@ function PageHealthTable({
               <tr key={i} className="hover:bg-gray-50 transition-colors">
                 <td className="px-4 py-2.5 text-gray-900 font-medium max-w-md truncate" title={p.page}>{p.page}</td>
                 <td className="px-3 py-2.5 text-right text-teal-700 tabular-nums">{p.gsc_clicks != null ? fmt(p.gsc_clicks) : '—'}</td>
+                {showTrends && <td className="px-2 py-2.5 text-right"><DeltaCell d={p.gsc_clicks_d} /></td>}
                 <td className="px-3 py-2.5 text-right text-teal-700 tabular-nums">{p.gsc_impressions != null ? fmt(p.gsc_impressions) : '—'}</td>
+                {showTrends && <td className="px-2 py-2.5 text-right"><DeltaCell d={p.gsc_impressions_d} /></td>}
                 <td className="px-3 py-2.5 text-right text-teal-700 tabular-nums">{p.gsc_ctr != null ? `${(p.gsc_ctr * 100).toFixed(1)}%` : '—'}</td>
                 <td className="px-3 py-2.5 text-center">
                   <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold tabular-nums ${posBadgeCls(p.gsc_position != null ? Math.round(p.gsc_position) : null)}`}>
                     {p.gsc_position != null ? p.gsc_position.toFixed(1) : '—'}
                   </span>
                 </td>
+                {showTrends && <td className="px-2 py-2.5 text-right"><DeltaCell d={p.gsc_position_d} /></td>}
                 <td className="px-3 py-2.5 text-right text-blue-700 tabular-nums">{p.ga4_sessions != null ? fmt(p.ga4_sessions) : '—'}</td>
+                {showTrends && <td className="px-2 py-2.5 text-right"><DeltaCell d={p.ga4_sessions_d} /></td>}
                 <td className="px-3 py-2.5 text-right text-blue-700 tabular-nums">{p.ga4_pageviews != null ? fmt(p.ga4_pageviews) : '—'}</td>
               </tr>
             ))}
@@ -929,11 +1000,13 @@ export default function SeoIntelligencePage() {
   const [actionMsg, setActionMsg] = useState('')
   const [actionOk, setActionOk] = useState<boolean | null>(null)
 
-  // Page health (Phase B2)
+  // Page health (Phase B2 + B v2 trends)
   const [pageHealth,        setPageHealth]        = useState<PageHealthRow[]>([])
   const [pageHealthLoading, setPageHealthLoading] = useState(true)
   const [pageHealthGsc,     setPageHealthGsc]     = useState<'connected' | 'no_data' | 'not_connected'>('not_connected')
   const [pageHealthGa4,     setPageHealthGa4]     = useState<'connected' | 'no_data' | 'not_connected'>('not_connected')
+  const [trendStatus,       setTrendStatus]       = useState<DeltaStatus>('no_data')
+  const [trendLabel,        setTrendLabel]        = useState<string | null>(null)
 
   useEffect(() => {
     void (async () => {
@@ -1009,6 +1082,8 @@ export default function SeoIntelligencePage() {
         setPageHealth(data.pages ?? [])
         setPageHealthGsc(data.gsc_status ?? 'not_connected')
         setPageHealthGa4(data.ga4_status ?? 'not_connected')
+        setTrendStatus(data.trend_status ?? 'no_data')
+        setTrendLabel(data.trend_window_label ?? null)
       } catch {
         // Page health is best-effort; silent fail
       } finally {
@@ -1212,6 +1287,8 @@ export default function SeoIntelligencePage() {
               loading={pageHealthLoading}
               gscStatus={pageHealthGsc}
               ga4Status={pageHealthGa4}
+              trendStatus={trendStatus}
+              trendLabel={trendLabel}
             />
           </div>
         </section>

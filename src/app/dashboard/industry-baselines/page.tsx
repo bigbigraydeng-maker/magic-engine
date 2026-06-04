@@ -474,7 +474,7 @@ function CronRunsPanel({ refreshKey }: { refreshKey: number }) {
   if (loading) return <div className="py-8 text-center text-sm font-semibold text-me-charcoal/45">Loading runs…</div>
   if (runs.length === 0) return (
     <div className="py-8 text-center text-sm font-semibold text-me-charcoal/45">
-      No cron runs yet. Click &quot;Run all now&quot; to trigger one, or wait for the weekly schedule.
+      No cron runs yet. Click &quot;Run SEO baselines&quot; (top right) to trigger one, or wait for the weekly schedule.
     </div>
   )
 
@@ -590,7 +590,7 @@ export default function IndustryBaselinesPage() {
               disabled={triggering}
               className="rounded-lg bg-me-ochre px-4 py-2 text-xs font-black text-white transition-colors hover:bg-me-ochre/90 disabled:opacity-50"
             >
-              {triggering ? 'Starting…' : '▶ Run all now'}
+              {triggering ? 'Starting…' : '▶ Run SEO baselines'}
             </button>
           </div>
         </div>
@@ -624,7 +624,7 @@ export default function IndustryBaselinesPage() {
           <>
             {/* Info banner */}
             <div className="space-y-1 rounded-xl border border-me-ochre/30 bg-me-ochre/10 px-4 py-3 text-xs font-semibold text-me-charcoal/80">
-              <p><strong className="font-black text-me-charcoal">How it works:</strong> Per-domain &quot;Refresh&quot; runs one DataForSEO call; &quot;Run all now&quot; (top right) runs the whole watchlist + writes to industry_benchmarks.</p>
+              <p><strong className="font-black text-me-charcoal">How it works:</strong> Per-domain &quot;Refresh&quot; runs one DataForSEO call; &quot;Run SEO baselines&quot; (top right) runs the whole watchlist + writes to industry_benchmarks. This is the <em>SEO score</em> pipeline — distinct from the &quot;Run AI visibility&quot; button inside the AI 可见度 tab which tracks AI brand recommendations.</p>
               <p>Domains marked <span className="font-bold text-status-exec">⚠</span> haven&apos;t been collected in 30+ days. Sparkline shows weekly P50 trend.</p>
             </div>
 

@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireSession } from '@/lib/auth/require-session'
+import { normalisePath } from '@/lib/seo-intelligence/page-trends/path-utils'
+import {
+  pickComparison,
+  computeMetricDeltas,
+  buildWindowLabel,
+  type DeltaStatus,
+} from '@/lib/seo-intelligence/page-trends/delta'
+
+const TARGET_GAP_DAYS = 7
+const HISTORY_LIMIT   = 10  // enough to find a 7-day-old snapshot
 
 interface GscPageRow {
   page?: string
@@ -16,14 +26,26 @@ interface Ga4PageRow {
   sessions: number
 }
 
+interface MetricDeltaWire {
+  delta:    number | null
+  deltaPct: number | null
+}
+
 interface PageHealthRow {
-  page:            string
-  gsc_clicks:      number | null
-  gsc_impressions: number | null
-  gsc_ctr:         number | null
-  gsc_position:    number | null
-  ga4_sessions:    number | null
-  ga4_pageviews:   number | null
+  page:              string
+  gsc_clicks:        number | null
+  gsc_impressions:   number | null
+  gsc_ctr:           number | null
+  gsc_position:      number | null
+  ga4_sessions:      number | null
+  ga4_pageviews:     number | null
+
+  // Trend deltas vs the snapshot ~7 days old (see TARGET_GAP_DAYS).
+  gsc_clicks_d:      MetricDeltaWire | null
+  gsc_impressions_d: MetricDeltaWire | null
+  // For position: positive delta = rank improvement (we invert raw delta).
+  gsc_position_d:    MetricDeltaWire | null
+  ga4_sessions_d:    MetricDeltaWire | null
 }
 
 /**
@@ -31,17 +53,22 @@ interface PageHealthRow {
  *
  * Returns per-page health metrics, merging the latest GSC top_pages
  * (clicks/impressions/ctr/position) with the latest GA4 top_pages
- * (sessions/pageviews). Pages appearing in either source are returned.
+ * (sessions/pageviews). Each metric also carries a delta vs the snapshot
+ * closest to (latest.synced_at - 7 days). See lib/seo-intelligence/page-trends.
  *
  * Sort order: GSC clicks desc, then GA4 sessions desc.
  *
  * Response shape:
  * {
- *   pages:      PageHealthRow[]
- *   gsc_status: 'connected' | 'no_data' | 'not_connected'
- *   ga4_status: 'connected' | 'no_data' | 'not_connected'
- *   gsc_period: string | null
- *   ga4_period: string | null
+ *   pages:              PageHealthRow[]
+ *   dropped_off_paths:  string[]      // pages in previous snapshot, not in latest
+ *   gsc_status:         'connected' | 'no_data' | 'not_connected'
+ *   ga4_status:         'connected' | 'no_data' | 'not_connected'
+ *   gsc_period:         string | null
+ *   ga4_period:         string | null
+ *   trend_status:       DeltaStatus   // 'ok' | 'insufficient' | 'no_data'
+ *   trend_window_label: string | null // e.g. "7d" or "since 2026-05-26"
+ *   trend_window_days:  number | null
  * }
  */
 export async function GET(
@@ -55,47 +82,132 @@ export async function GET(
 
   const { id: clientId } = await params
 
-  const [gscInfo, ga4Info] = await Promise.all([
-    fetchLatestGscPages(clientId),
-    fetchLatestGa4Pages(clientId),
+  const [gscHistory, ga4History] = await Promise.all([
+    fetchGscHistory(clientId),
+    fetchGa4History(clientId),
   ])
 
-  // Merge by page path. GSC paths are full URLs; GA4 is path-only.
-  // Normalise both to path-only for matching.
+  const gscLatest = gscHistory.snapshots[0] ?? null
+  const ga4Latest = ga4History.snapshots[0] ?? null
+
+  // ── Build merged page map from latest snapshots ──
   const pageMap = new Map<string, PageHealthRow>()
 
-  for (const p of gscInfo.pages) {
-    const path = normalisePath(p.page ?? '')
-    if (!path) continue
-    pageMap.set(path, {
-      page:            path,
-      gsc_clicks:      p.clicks,
-      gsc_impressions: p.impressions,
-      gsc_ctr:         p.ctr,
-      gsc_position:    p.position,
-      ga4_sessions:    null,
-      ga4_pageviews:   null,
-    })
-  }
-
-  for (const p of ga4Info.pages) {
-    const path = normalisePath(p.page)
-    if (!path) continue
-    const existing = pageMap.get(path)
-    if (existing) {
-      existing.ga4_sessions  = p.sessions
-      existing.ga4_pageviews = p.pageviews
-    } else {
+  if (gscLatest) {
+    for (const p of gscLatest.pages) {
+      const path = normalisePath(p.page ?? '')
+      if (!path) continue
       pageMap.set(path, {
-        page:            path,
-        gsc_clicks:      null,
-        gsc_impressions: null,
-        gsc_ctr:         null,
-        gsc_position:    null,
-        ga4_sessions:    p.sessions,
-        ga4_pageviews:   p.pageviews,
+        page:              path,
+        gsc_clicks:        p.clicks,
+        gsc_impressions:   p.impressions,
+        gsc_ctr:           p.ctr,
+        gsc_position:      p.position,
+        ga4_sessions:      null,
+        ga4_pageviews:     null,
+        gsc_clicks_d:      null,
+        gsc_impressions_d: null,
+        gsc_position_d:    null,
+        ga4_sessions_d:    null,
       })
     }
+  }
+
+  if (ga4Latest) {
+    for (const p of ga4Latest.pages) {
+      const path = normalisePath(p.page)
+      if (!path) continue
+      const existing = pageMap.get(path)
+      if (existing) {
+        existing.ga4_sessions  = p.sessions
+        existing.ga4_pageviews = p.pageviews
+      } else {
+        pageMap.set(path, {
+          page:              path,
+          gsc_clicks:        null,
+          gsc_impressions:   null,
+          gsc_ctr:           null,
+          gsc_position:      null,
+          ga4_sessions:      p.sessions,
+          ga4_pageviews:     p.pageviews,
+          gsc_clicks_d:      null,
+          gsc_impressions_d: null,
+          gsc_position_d:    null,
+          ga4_sessions_d:    null,
+        })
+      }
+    }
+  }
+
+  // ── Compute deltas: GSC clicks/impressions/position, GA4 sessions ──
+  const gscCompare = pickComparison(gscHistory.snapshots, TARGET_GAP_DAYS)
+  const ga4Compare = pickComparison(ga4History.snapshots, TARGET_GAP_DAYS)
+
+  const droppedOff = new Set<string>()
+
+  if (gscCompare.latest && gscCompare.previous) {
+    const clicksDelta = computeMetricDeltas(
+      gscCompare.latest.pages, gscCompare.previous.pages,
+      p => p.page ?? '', p => p.clicks, normalisePath,
+    )
+    const impDelta = computeMetricDeltas(
+      gscCompare.latest.pages, gscCompare.previous.pages,
+      p => p.page ?? '', p => p.impressions, normalisePath,
+    )
+    const posDelta = computeMetricDeltas(
+      gscCompare.latest.pages, gscCompare.previous.pages,
+      p => p.page ?? '', p => p.position, normalisePath,
+    )
+
+    for (const [path, row] of Array.from(pageMap.entries())) {
+      const c = clicksDelta.byPath.get(path)
+      if (c) row.gsc_clicks_d      = { delta: c.delta, deltaPct: c.deltaPct }
+      const i = impDelta.byPath.get(path)
+      if (i) row.gsc_impressions_d = { delta: i.delta, deltaPct: i.deltaPct }
+      const p = posDelta.byPath.get(path)
+      if (p && p.delta !== null) {
+        // Invert: lower position = better. Surface positive delta as improvement.
+        row.gsc_position_d = {
+          delta:    -p.delta,
+          deltaPct: p.deltaPct !== null ? -p.deltaPct : null,
+        }
+      }
+    }
+    for (const p of Array.from(clicksDelta.droppedOffPaths)) droppedOff.add(p)
+  }
+
+  if (ga4Compare.latest && ga4Compare.previous) {
+    const sessDelta = computeMetricDeltas(
+      ga4Compare.latest.pages, ga4Compare.previous.pages,
+      p => p.page, p => p.sessions, normalisePath,
+    )
+    for (const [path, row] of Array.from(pageMap.entries())) {
+      const s = sessDelta.byPath.get(path)
+      if (s) row.ga4_sessions_d = { delta: s.delta, deltaPct: s.deltaPct }
+    }
+    for (const p of Array.from(sessDelta.droppedOffPaths)) droppedOff.add(p)
+  }
+
+  // ── Determine trend status + window label ──
+  // Prefer GSC for the label (richer dataset); fall back to GA4.
+  const referenceCompare = gscCompare.previous ? gscCompare : ga4Compare
+  let trendStatus: DeltaStatus
+  let trendLabel: string | null = null
+  let trendDays:  number | null = null
+
+  if (!referenceCompare.latest) {
+    trendStatus = 'no_data'
+  } else if (!referenceCompare.previous) {
+    trendStatus = 'insufficient'
+  } else {
+    trendStatus = 'ok'
+    const w = buildWindowLabel(
+      referenceCompare.latest.synced_at,
+      referenceCompare.previous.synced_at,
+      TARGET_GAP_DAYS,
+    )
+    trendLabel = w.label
+    trendDays  = w.days
   }
 
   const pages = Array.from(pageMap.values()).sort((a, b) => {
@@ -108,10 +220,14 @@ export async function GET(
   return NextResponse.json(
     {
       pages,
-      gsc_status: gscInfo.status,
-      ga4_status: ga4Info.status,
-      gsc_period: gscInfo.period,
-      ga4_period: ga4Info.period,
+      dropped_off_paths:  Array.from(droppedOff),
+      gsc_status:         gscHistory.status,
+      ga4_status:         ga4History.status,
+      gsc_period:         gscHistory.period,
+      ga4_period:         ga4History.period,
+      trend_status:       trendStatus,
+      trend_window_label: trendLabel,
+      trend_window_days:  trendDays,
     },
     {
       headers: {
@@ -123,77 +239,62 @@ export async function GET(
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-interface SourceInfo<T> {
-  pages: T[]
+interface HistoryInfo<T> {
+  snapshots: Array<{ synced_at: string; pages: T[] }>
   status: 'connected' | 'no_data' | 'not_connected'
   period: string | null
 }
 
-async function fetchLatestGscPages(clientId: string): Promise<SourceInfo<GscPageRow>> {
-  const empty: SourceInfo<GscPageRow> = { pages: [], status: 'not_connected', period: null }
+async function fetchGscHistory(clientId: string): Promise<HistoryInfo<GscPageRow>> {
+  const empty: HistoryInfo<GscPageRow> = { snapshots: [], status: 'not_connected', period: null }
   try {
     const { data, error } = await supabaseAdmin
       .from('gsc_performance_snapshots')
-      .select('top_pages, period_start, period_end')
+      .select('synced_at, top_pages, period_start, period_end')
       .eq('client_id', clientId)
-      .order('period_end', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    if (error || !data) return empty
-    const pages = (data.top_pages ?? []) as GscPageRow[]
+      .order('synced_at', { ascending: false })
+      .limit(HISTORY_LIMIT)
+    if (error || !data || data.length === 0) return empty
+
+    const snapshots = data.map(row => ({
+      synced_at: row.synced_at as string,
+      pages: (row.top_pages ?? []) as GscPageRow[],
+    }))
+    const latest = data[0]
+
     return {
-      pages,
-      status: pages.length === 0 ? 'no_data' : 'connected',
-      period: `${data.period_start} – ${data.period_end}`,
+      snapshots,
+      status: snapshots[0].pages.length === 0 ? 'no_data' : 'connected',
+      period: `${latest.period_start} – ${latest.period_end}`,
     }
   } catch {
     return empty
   }
 }
 
-async function fetchLatestGa4Pages(clientId: string): Promise<SourceInfo<Ga4PageRow>> {
-  const empty: SourceInfo<Ga4PageRow> = { pages: [], status: 'not_connected', period: null }
+async function fetchGa4History(clientId: string): Promise<HistoryInfo<Ga4PageRow>> {
+  const empty: HistoryInfo<Ga4PageRow> = { snapshots: [], status: 'not_connected', period: null }
   try {
     const { data, error } = await supabaseAdmin
       .from('ga4_traffic_snapshots')
-      .select('top_pages, period_start, period_end')
+      .select('synced_at, top_pages, period_start, period_end')
       .eq('client_id', clientId)
-      .order('period_end', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    if (error || !data) return empty
-    const pages = (data.top_pages ?? []) as Ga4PageRow[]
+      .order('synced_at', { ascending: false })
+      .limit(HISTORY_LIMIT)
+    if (error || !data || data.length === 0) return empty
+
+    const snapshots = data.map(row => ({
+      synced_at: row.synced_at as string,
+      pages: (row.top_pages ?? []) as Ga4PageRow[],
+    }))
+    const latest = data[0]
+
     return {
-      pages,
-      status: pages.length === 0 ? 'no_data' : 'connected',
-      period: `${data.period_start} – ${data.period_end}`,
+      snapshots,
+      status: snapshots[0].pages.length === 0 ? 'no_data' : 'connected',
+      period: `${latest.period_start} – ${latest.period_end}`,
     }
   } catch {
     return empty
   }
-}
-
-/**
- * Normalise a page URL or path to a path-only string for matching.
- * GSC returns full URLs; GA4 returns paths.
- *   "https://example.com/blog/foo"  → "/blog/foo"
- *   "/blog/foo?utm=x"                → "/blog/foo"
- *   "/blog/foo/"                     → "/blog/foo"
- */
-function normalisePath(input: string): string {
-  if (!input) return ''
-  let path = input
-  try {
-    if (path.startsWith('http')) {
-      path = new URL(path).pathname
-    }
-  } catch {
-    // not a valid URL, keep as-is
-  }
-  // strip query string
-  const qIdx = path.indexOf('?')
-  if (qIdx >= 0) path = path.substring(0, qIdx)
-  // strip trailing slash (except for root)
-  if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1)
-  return path
 }

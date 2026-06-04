@@ -48,18 +48,28 @@ export interface RunCollectionOptions {
   limit?: number
   triggeredBy: 'cron' | 'admin_manual'
   triggeredByUser?: string
+  /**
+   * Hotfix (魏征 P0): when provided, runCollection() uses this existing run_id
+   * instead of inserting a new run row. The API route uses this to create the
+   * row up-front, return the run_id to the client, then fire-and-forget the
+   * collection — guaranteeing only one row per logical run.
+   */
+  existingRunId?: string
 }
 
-export async function runCollection(opts: RunCollectionOptions): Promise<RunSummary> {
-  const startedAt = Date.now()
+/**
+ * Hotfix helper — create a fresh run row and return its id. Use this from
+ * API routes that want to return 202 + run_id immediately, then call
+ * runCollection({ ..., existingRunId }) in the background.
+ */
+export async function createRunRow(opts: {
+  industries?: string[]
+  platforms?: Platform[]
+  triggeredBy: 'cron' | 'admin_manual'
+  triggeredByUser?: string
+}): Promise<string> {
   const platforms: Platform[] = opts.platforms ?? ['chatgpt', 'google_ai_overview', 'google_serp']
-  // weekOf: kept for backward-compat rollups (legacy column).
-  // collectedDate: the real primary key dimension since migration
-  //   20260622000003_ai_visibility_daily_collection.sql (PM decision 2026-06-04).
-  const weekOf        = isoWeekStart()
-  const collectedDate = utcDate()
-
-  // 1. Create run row
+  const weekOf = isoWeekStart()
   const { data: runRow, error: runErr } = await supabaseAdmin
     .from('industry_ai_visibility_runs')
     .insert({
@@ -72,11 +82,43 @@ export async function runCollection(opts: RunCollectionOptions): Promise<RunSumm
     })
     .select('id')
     .single()
-
   if (runErr || !runRow) {
     throw new Error(`Failed to create run row: ${runErr?.message}`)
   }
-  const runId = runRow.id as string
+  return runRow.id as string
+}
+
+export async function runCollection(opts: RunCollectionOptions): Promise<RunSummary> {
+  const startedAt = Date.now()
+  const platforms: Platform[] = opts.platforms ?? ['chatgpt', 'google_ai_overview', 'google_serp']
+  // weekOf: kept for backward-compat rollups (legacy column).
+  // collectedDate: the real primary key dimension since migration
+  //   20260622000003_ai_visibility_daily_collection.sql (PM decision 2026-06-04).
+  const weekOf        = isoWeekStart()
+  const collectedDate = utcDate()
+
+  // 1. Use existing run_id if caller pre-created one (魏征 P0 fix), else create
+  let runId: string
+  if (opts.existingRunId) {
+    runId = opts.existingRunId
+  } else {
+    const { data: runRow, error: runErr } = await supabaseAdmin
+      .from('industry_ai_visibility_runs')
+      .insert({
+        week_of: weekOf,
+        status: 'running',
+        industries_scope: opts.industries ?? null,
+        platforms_scope:  platforms,
+        triggered_by:     opts.triggeredBy,
+        triggered_by_user: opts.triggeredByUser ?? null,
+      })
+      .select('id')
+      .single()
+    if (runErr || !runRow) {
+      throw new Error(`Failed to create run row: ${runErr?.message}`)
+    }
+    runId = runRow.id as string
+  }
 
   // 2. Load questions
   let qQuery = supabaseAdmin

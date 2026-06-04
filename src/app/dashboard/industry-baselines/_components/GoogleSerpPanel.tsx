@@ -9,6 +9,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { SerpRowErrorBoundary } from './SerpRowErrorBoundary'
 
 interface Snapshot {
   id:                  string
@@ -105,11 +106,16 @@ export function GoogleSerpPanel() {
           </div>
           <div className="divide-y divide-black/5">
             {snaps.map(s => (
-              <SerpRow
+              <SerpRowErrorBoundary
                 key={s.id}
-                snapshot={s}
-                aiOverview={aiOverviewByQuestionId.get(s.question_id)}
-              />
+                snapshotId={s.id}
+                questionPreview={s.industry_ai_visibility_questions?.question_text?.slice(0, 60) ?? '(unknown)'}
+              >
+                <SerpRow
+                  snapshot={s}
+                  aiOverview={aiOverviewByQuestionId.get(s.question_id)}
+                />
+              </SerpRowErrorBoundary>
             ))}
           </div>
         </div>
@@ -126,8 +132,16 @@ function SerpRow({ snapshot, aiOverview }: { snapshot: Snapshot; aiOverview?: Sn
   const langLabel = q?.language === 'zh' ? '中文' : 'EN'
   const intent = q?.intent_layer ?? '—'
 
-  const organicTop3 = (snapshot.serp_organic_top10 ?? []).slice(0, 3)
-  const aiTop3 = aiOverview?.top3_brands ?? []
+  // 魏征 Hotfix-5: defensive Array.isArray guards everywhere. Even though
+  // the schema types claim these are typed arrays, real Supabase responses
+  // can deliver null / undefined / scalar shapes (e.g. when DataForSEO
+  // returns no organic block at all). Calling .map on a non-array is the
+  // classic "Application error" crash trigger.
+  const organicAll = Array.isArray(snapshot.serp_organic_top10) ? snapshot.serp_organic_top10 : []
+  const localPack = Array.isArray(snapshot.serp_local_pack) ? snapshot.serp_local_pack : []
+  const peopleAlsoAsk = Array.isArray(snapshot.serp_people_also_ask) ? snapshot.serp_people_also_ask : []
+  const organicTop3 = organicAll.slice(0, 3)
+  const aiTop3 = Array.isArray(aiOverview?.top3_brands) ? aiOverview.top3_brands : []
 
   return (
     <div className="px-4 py-3">
@@ -148,8 +162,8 @@ function SerpRow({ snapshot, aiOverview }: { snapshot: Snapshot; aiOverview?: Sn
               <p className="text-[10px] font-black uppercase tracking-wide text-me-charcoal/45">Google 自然 Top 3</p>
               {organicTop3.length > 0 ? (
                 <ol className="mt-1 list-decimal pl-4 text-xs font-semibold text-me-charcoal/85">
-                  {organicTop3.map(o => (
-                    <li key={o.position} className="truncate">{o.title}</li>
+                  {organicTop3.map((o, i) => (
+                    <li key={`top3-${i}`} className="truncate">{o?.title ?? '(no title)'}</li>
                   ))}
                 </ol>
               ) : (
@@ -161,7 +175,7 @@ function SerpRow({ snapshot, aiOverview }: { snapshot: Snapshot; aiOverview?: Sn
               {aiTop3.length > 0 ? (
                 <ol className="mt-1 list-decimal pl-4 text-xs font-semibold text-me-charcoal/85">
                   {aiTop3.map((b, i) => (
-                    <li key={i}>{b}</li>
+                    <li key={`aitop3-${i}`}>{b ?? ''}</li>
                   ))}
                 </ol>
               ) : (
@@ -181,38 +195,41 @@ function SerpRow({ snapshot, aiOverview }: { snapshot: Snapshot; aiOverview?: Sn
               <pre className="mt-1 whitespace-pre-wrap font-sans text-me-charcoal/85">{aiOverview.ai_answer_text}</pre>
             </div>
           )}
-          {snapshot.serp_organic_top10 && snapshot.serp_organic_top10.length > 0 && (
+          {organicAll.length > 0 && (
             <div>
               <p className="font-black uppercase tracking-wide text-me-charcoal/45">Google 自然 Top 10</p>
               <ol className="mt-1 list-decimal pl-4 text-me-charcoal/85">
-                {snapshot.serp_organic_top10.map(o => (
-                  <li key={o.position}>
-                    <span className="font-semibold">{o.title}</span>{' '}
-                    <span className="text-me-charcoal/45">— {o.url}</span>
+                {organicAll.map((o, i) => (
+                  <li key={`organic-${i}`}>
+                    <span className="font-semibold">{o?.title ?? '(no title)'}</span>{' '}
+                    <span className="text-me-charcoal/45">— {o?.url ?? ''}</span>
                   </li>
                 ))}
               </ol>
             </div>
           )}
-          {snapshot.serp_local_pack && snapshot.serp_local_pack.length > 0 && (
+          {localPack.length > 0 && (
             <div>
               <p className="font-black uppercase tracking-wide text-me-charcoal/45">Local Pack</p>
               <ul className="mt-1 list-disc pl-4 text-me-charcoal/85">
-                {snapshot.serp_local_pack.map((lp, i) => (
-                  <li key={i}>
-                    <span className="font-semibold">{lp.name}</span>
-                    {lp.rating && <span className="ml-2 text-me-ochre">{lp.rating}★</span>}
-                    {lp.review_count && <span className="ml-1 text-me-charcoal/45">({lp.review_count})</span>}
+                {localPack.map((lp, i) => (
+                  <li key={`lp-${i}`}>
+                    <span className="font-semibold">{lp?.name ?? '(unnamed)'}</span>
+                    {/* 魏征 Hotfix-5: previously `{lp.rating && ...}` would render
+                        literal "0" when rating === 0 because JSX falsy-renders 0.
+                        Use explicit non-null check. */}
+                    {lp?.rating != null && <span className="ml-2 text-me-ochre">{lp.rating}★</span>}
+                    {lp?.review_count != null && <span className="ml-1 text-me-charcoal/45">({lp.review_count})</span>}
                   </li>
                 ))}
               </ul>
             </div>
           )}
-          {snapshot.serp_people_also_ask && snapshot.serp_people_also_ask.length > 0 && (
+          {peopleAlsoAsk.length > 0 && (
             <div>
               <p className="font-black uppercase tracking-wide text-me-charcoal/45">People Also Ask</p>
               <ul className="mt-1 list-disc pl-4 text-me-charcoal/85">
-                {snapshot.serp_people_also_ask.map((p, i) => <li key={i}>{p}</li>)}
+                {peopleAlsoAsk.map((p, i) => <li key={`paa-${i}`}>{p ?? ''}</li>)}
               </ul>
             </div>
           )}
