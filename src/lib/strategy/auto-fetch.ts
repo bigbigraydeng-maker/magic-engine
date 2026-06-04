@@ -3,12 +3,13 @@
  *
  * Resolves a current_value for Goals whose primary_metric_key has
  * measurement='auto' (or 'hybrid'), by reading from already-cached ME data
- * sources or — for brand_search_volume — calling DataForSEO live.
+ * sources or — for brand_search_volume — calling DataForSEO live as a fallback.
  *
  * Supported metric keys (MVP):
  *   - organic_traffic    → ga4_traffic_snapshots.total_sessions (latest)
- *   - brand_search_volume→ DataForSEO bulkKeywordVolume live (replaces SEMrush;
- *                          SEMrush has been removed from ME stack 2026-06-03)
+ *   - brand_search_volume→ GSC rolling-28-day clicks for brand-tagged queries
+ *                          (PRIMARY, A2.2). DataForSEO bulkKeywordVolume is
+ *                          the FALLBACK when GSC is not connected or empty.
  *   - form_submissions   → SUM(ga4_traffic_snapshots.top_sources[].conversions)
  *                          Conversions = key events. Requires client to mark
  *                          form_submit or generate_lead as key event in GA4.
@@ -29,6 +30,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { bulkKeywordVolume } from '@/lib/dataforseo/labs'
 import { locationCodeForDb } from '@/lib/seo-intelligence/keyword-snapshots'
+import { isBrandedKeyword } from '@/lib/seo-intelligence/intent-strategy'
 
 export type AutoFetchResult =
   | { ok: true;  value: number; source: string; snapshot_date: string; label: string }
@@ -97,18 +99,49 @@ async function fetchOrganicTraffic(
 }
 
 // ── brand_search_volume ────────────────────────────────────────────────────
+//
+// A2.2 — Two-tier resolution:
+//
+//   1. PRIMARY: GSC rolling-28-day clicks for brand-tagged queries.
+//      Reads gsc_performance_snapshots (latest row, written by daily cron),
+//      filters top_queries[] with isBrandedKeyword(), sums the clicks.
+//      "Brand search volume" is rendered as ACTUAL CLICKS on brand-related
+//      searches — real behaviour, not impressions / not third-party estimate.
+//
+//   2. FALLBACK: DataForSEO bulkKeywordVolume live (the pre-A2.2 behaviour).
+//      Used when GSC connector is not yet hooked up or the snapshot table
+//      has no row for this client yet. Returns monthly search-volume
+//      ESTIMATE for the brand name — coarser but always available.
+//
+// Brand-token source: clients.domain (e.g. "ctstours.co.nz" → "ctstours"),
+// matching the SEO Intelligence convention (src/lib/seo-agent/assembler.ts).
+
+interface GscQuerySnapshotRow {
+  query?: string
+  clicks?: number
+  impressions?: number
+  ctr?: number
+  position?: number
+}
+
+function extractBrandRootFromDomain(domain: string | null): string | null {
+  if (!domain) return null
+  const cleaned = domain.replace(/^www\./, '').split('.')[0]?.toLowerCase()
+  return cleaned && cleaned.length > 0 ? cleaned : null
+}
 
 async function fetchBrandSearchVolume(
   supabase: SupabaseClient,
   clientId: string,
 ): Promise<AutoFetchResult> {
   // Schema reality (2026-06-03 audit): clients table has `name` + `semrush_db`
-  // (au/nz) but no `primary_keyword` column. Use `name` as the brand keyword.
+  // (au/nz) but no `primary_keyword` column. `domain` is the GSC brand-root
+  // source; `name` is the DataForSEO fallback keyword.
   const { data: client, error: clientErr } = await supabase
     .from('clients')
-    .select('name, semrush_db')
+    .select('name, semrush_db, domain')
     .eq('id', clientId)
-    .maybeSingle<{ name: string | null; semrush_db: string | null }>()
+    .maybeSingle<{ name: string | null; semrush_db: string | null; domain: string | null }>()
 
   if (clientErr) {
     return { ok: false, reason: `Client query failed: ${clientErr.message}` }
@@ -117,15 +150,26 @@ async function fetchBrandSearchVolume(
     return { ok: false, reason: 'Client not found' }
   }
 
-  const brandKeyword = client.name
-  if (!brandKeyword) {
-    return { ok: false, reason: 'Client has no name — cannot look up brand search volume' }
+  // ── Tier 1: GSC rolling-28-day brand-tagged clicks ─────────────────────
+  const brandRoot = extractBrandRootFromDomain(client.domain)
+  if (brandRoot) {
+    const gscResult = await fetchBrandClicksFromGsc(supabase, clientId, brandRoot)
+    if (gscResult.ok) return gscResult
+    // gscResult.ok === false → fall through to DataForSEO with the reason
+    // preserved for diagnostics (logged below if fallback also fails).
   }
 
-  // SEMrush has been removed from the ME stack (2026-06-03). Call DataForSEO
-  // bulkKeywordVolume live so we don't depend on the empty keyword_snapshots
-  // table — the SEMrush ingestion cron never ran, and DataForSEO is the
-  // canonical replacement.
+  // ── Tier 2: DataForSEO live keyword-volume estimate ────────────────────
+  const brandKeyword = client.name
+  if (!brandKeyword) {
+    return {
+      ok: false,
+      reason: brandRoot
+        ? 'No GSC data for this client yet, and client.name is missing — cannot fall back to DataForSEO'
+        : 'Client has no domain or name — cannot look up brand search volume',
+    }
+  }
+
   const locationCode = locationCodeForDb(client.semrush_db)
   let labsResults
   try {
@@ -149,9 +193,65 @@ async function fetchBrandSearchVolume(
   return {
     ok: true,
     value: hit.search_volume,
-    source: 'DataForSEO bulk keyword volume',
+    source: 'DataForSEO bulk keyword volume (estimate · GSC not yet connected)',
     snapshot_date: new Date().toISOString(),
-    label: `${hit.search_volume.toLocaleString()} searches/mo for "${hit.keyword}"`,
+    label: `~${hit.search_volume.toLocaleString()} searches/mo for "${hit.keyword}"`,
+  }
+}
+
+async function fetchBrandClicksFromGsc(
+  supabase: SupabaseClient,
+  clientId: string,
+  brandRoot: string,
+): Promise<AutoFetchResult> {
+  const { data, error } = await supabase
+    .from('gsc_performance_snapshots')
+    .select('top_queries, period_start, period_end')
+    .eq('client_id', clientId)
+    .order('period_start', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ top_queries: GscQuerySnapshotRow[] | null; period_start: string; period_end: string }>()
+
+  if (error) {
+    return { ok: false, reason: `GSC snapshot query failed: ${error.message}` }
+  }
+  if (!data) {
+    return { ok: false, reason: 'No GSC snapshot found — client may not have connected Google Search Console yet' }
+  }
+
+  const queries = Array.isArray(data.top_queries) ? data.top_queries : []
+  if (queries.length === 0) {
+    return { ok: false, reason: 'GSC snapshot has no top_queries — possibly an empty site or sync issue' }
+  }
+
+  let brandedClicks = 0
+  let brandedQueryCount = 0
+  for (const row of queries) {
+    if (!row.query) continue
+    if (typeof row.clicks !== 'number') continue
+    if (isBrandedKeyword(row.query, brandRoot)) {
+      brandedClicks += row.clicks
+      brandedQueryCount += 1
+    }
+  }
+
+  if (brandedQueryCount === 0) {
+    // GSC snapshot exists but no brand-tagged queries surface in the top_queries
+    // window. This is real signal: tiny brand awareness OR brand-root mismatch
+    // (e.g. domain is "ctstours" but real brand search is "CTS tours NZ").
+    // Fall back to DataForSEO so FDE still sees a number; log the miss.
+    return {
+      ok: false,
+      reason: `No branded queries found in GSC top_queries for brand "${brandRoot}". Falling back to DataForSEO estimate.`,
+    }
+  }
+
+  return {
+    ok: true,
+    value: brandedClicks,
+    source: 'GSC clicks (28-day brand searches)',
+    snapshot_date: data.period_end,
+    label: `${brandedClicks.toLocaleString()} brand-search clicks (${brandedQueryCount} ${brandedQueryCount === 1 ? 'query' : 'queries'} · ${formatDate(data.period_start)} → ${formatDate(data.period_end)})`,
   }
 }
 
