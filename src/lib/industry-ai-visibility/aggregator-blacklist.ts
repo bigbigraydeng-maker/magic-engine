@@ -87,6 +87,33 @@ export const AGGREGATOR_BLACKLIST: readonly string[] = [
   'menulog.co.nz',
   'menulog.com.au',
   'zomato.com',
+
+  // ─── AU/NZ news / media (魏征 Hotfix-3) ─────────────────────────────
+  // SERP often returns "10 Best X" listicles from these — they would
+  // otherwise surface as fake brands "News" / "Stuff" / "Nzherald" / "Smh".
+  'news.com.au',
+  'theaustralian.com.au',
+  '9news.com.au',
+  '7news.com.au',
+  'abc.net.au',
+  'smh.com.au',
+  'theage.com.au',
+  'stuff.co.nz',
+  'nzherald.co.nz',
+  'rnz.co.nz',
+  'newshub.co.nz',
+  '1news.co.nz',
+
+  // ─── AU/NZ classifieds / marketplaces (NOT brand operators) ─────────
+  'carsales.com.au',
+  'carsguide.com.au',
+  'drive.com.au',
+  'seek.com.au',
+  'seek.co.nz',
+  'indeed.com',
+  'gumtree.com.au',
+  'gumtree.co.nz',
+  'allhomes.com.au',
 ]
 
 /**

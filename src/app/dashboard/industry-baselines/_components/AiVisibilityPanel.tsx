@@ -130,12 +130,18 @@ export function AiVisibilityPanel() {
       // Defensive parse: 502 / 504 / Render restart pages return HTML, not JSON.
       // Old code did `await res.json()` which threw "Unexpected token '<'".
       const text = await res.text()
-      let json: { run_id?: string; status?: string; error?: string; message?: string } = {}
+      let json: { run_id?: string; status?: string; error?: string; message?: string; existing_run_id?: string; hint?: string } = {}
       try {
         json = text ? JSON.parse(text) : {}
       } catch {
         const preview = text.slice(0, 120).replace(/\s+/g, ' ').trim()
         setCollectMsg(`✗ HTTP ${res.status} — 服务端返回非 JSON：${preview}…`)
+        return
+      }
+
+      // 魏征 P1: 409 = 另一次采集正在进行中
+      if (res.status === 409 && json.existing_run_id) {
+        setCollectMsg(`⏳ 已有采集运行中（run ${json.existing_run_id.slice(0, 8)}…），等其结束再点`)
         return
       }
 

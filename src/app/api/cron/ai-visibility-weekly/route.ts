@@ -19,6 +19,30 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { runCollection } from '@/lib/industry-ai-visibility/orchestrator'
+import { supabaseAdmin } from '@/lib/supabase'
+
+const STALE_RUN_THRESHOLD_MS = 10 * 60 * 1000
+
+/**
+ * 魏征 Hotfix-2: clear stale 'running' rows (>10 min) before kicking off a
+ * fresh cron. Without this the partial unique index `iav_runs_single_in_flight`
+ * would refuse the new run forever after one serverless worker death.
+ */
+async function sweepStaleRuns(): Promise<void> {
+  const cutoffIso = new Date(Date.now() - STALE_RUN_THRESHOLD_MS).toISOString()
+  const { data, error } = await supabaseAdmin
+    .from('industry_ai_visibility_runs')
+    .update({
+      status: 'failed',
+      completed_at: new Date().toISOString(),
+      error_message: 'Stuck in running > 10 min — auto-cleared by cron sweeper',
+    })
+    .eq('status', 'running')
+    .lt('started_at', cutoffIso)
+    .select('id')
+  if (error) console.error('[cron/ai-visibility/sweeper] failed:', error)
+  else if ((data ?? []).length > 0) console.log(`[cron/ai-visibility/sweeper] cleared ${data!.length} stale run(s)`)
+}
 
 // 500 questions × ~3-4s each = ~30min worst case. Render allows long jobs.
 // Vercel maxDuration caps at 300s on Pro plan — but ME runs on Render
@@ -35,6 +59,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
+    await sweepStaleRuns()
     const summary = await runCollection({ triggeredBy: 'cron' })
     return NextResponse.json(summary)
   } catch (err) {
@@ -54,6 +79,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
+    await sweepStaleRuns()
     const summary = await runCollection({ triggeredBy: 'admin_manual' })
     return NextResponse.json(summary)
   } catch (err) {

@@ -121,15 +121,14 @@ export async function standardiseBrand(
     }
   }
 
-  // 3) Fallback — title-case the cleaned raw, never crash
-  console.error('[brand-standardiser] LLM failed twice, using fallback', { raw: cleaned, error: lastError })
+  // 3) Fallback — title-case the cleaned raw, never crash.
+  // 魏征 Hotfix-4: do NOT persist the fallback to cache. If we did, every
+  // subsequent collection during a Haiku outage would cache-hit the bad
+  // title-cased value and never retry the LLM, even after Haiku recovers.
+  // Cost of re-trying LLM on the same raw next cycle is ~$0.0002 — acceptable
+  // insurance against permanent cache poisoning.
+  console.error('[brand-standardiser] LLM failed twice, using fallback (not cached)', { raw: cleaned, error: lastError })
   const fallback = titleCase(cleaned)
-  await persistCanonical(deps, {
-    rawLower,
-    canonical: fallback,
-    source: 'domain_fallback',
-    llmCost: 0,
-  })
   return { canonical: fallback, source: 'fallback', cost_usd: 0 }
 }
 
