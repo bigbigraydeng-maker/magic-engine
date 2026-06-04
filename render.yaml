@@ -194,6 +194,22 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # Phase 31 A2.1-γ — Goal current_value refresh
+  # Daily 03:00 UTC (~15:00 NZST), runs AFTER industry-ai-visibility-daily (02:30 UTC)
+  # so ai_visibility_score Goals read today's snapshots (not yesterday's).
+  # Spec: docs/superpowers/specs/2026-06-04-a21-stepc-design-v3.md (v3.1)
+  - type: cron
+    name: goal-current-value-refresh
+    env: node
+    schedule: "0 3 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -s -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/goal-current-value-refresh
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # Weekly SEO keyword snapshots — every Monday at 2am UTC (~2pm NZST)
   # Stores DataForSEO ranked keyword rows for SEO Intelligence trends.
   # Reference: ROADMAP.md P12.I.8
