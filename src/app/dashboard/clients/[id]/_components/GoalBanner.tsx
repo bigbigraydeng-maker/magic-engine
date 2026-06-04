@@ -75,9 +75,35 @@ export function GoalBanner({ clientId }: Props) {
     )
   }
 
-  // Single active goal — original full-width banner
+  // Single active goal — full-width banner + toolbar (History / + New Goal).
+  // Phase 32: even with one active Goal the FDE must be able to add a second
+  // (multi-Goal parallel support). The toolbar here is what unblocks that —
+  // without it, single-active clients had no "+ New Goal" entry point.
   if (goals.length === 1) {
-    return <SingleGoalRow clientId={clientId} goal={goals[0]} showHistory />
+    return (
+      <div className="mb-4 space-y-2">
+        <div className="flex items-center justify-between px-1">
+          <div className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">
+            1 Active Goal
+          </div>
+          <div className="flex items-center gap-3">
+            <Link
+              href={`/dashboard/clients/${clientId}/goals/history`}
+              className="text-xs font-black text-me-charcoal/55 hover:text-me-charcoal"
+            >
+              History
+            </Link>
+            <Link
+              href={`/dashboard/clients/${clientId}/goal/new`}
+              className="rounded-lg bg-me-ochre px-3 py-1.5 text-xs font-black text-white transition-colors hover:bg-me-ochre/90"
+            >
+              + New Goal
+            </Link>
+          </div>
+        </div>
+        <SingleGoalRow clientId={clientId} goal={goals[0]} />
+      </div>
+    )
   }
 
   // Multiple active goals — stacked compact view + + New Goal button
@@ -112,12 +138,11 @@ export function GoalBanner({ clientId }: Props) {
 // ─── One Goal row ────────────────────────────────────────────────────────────
 
 function SingleGoalRow({
-  clientId, goal, compact, showHistory,
+  clientId, goal, compact,
 }: {
   clientId: string
   goal: GoalRow
   compact?: boolean
-  showHistory?: boolean
 }) {
   const remaining = daysRemaining(goal.period_end)
   const isDecrease = goal.target_direction === 'decrease'
@@ -155,11 +180,6 @@ function SingleGoalRow({
             <span className="font-bold text-me-ochre">{remaining} days remaining</span>
           </p>
         </div>
-        {showHistory && (
-          <span className="shrink-0 text-xs font-black text-me-charcoal/55">
-            History →
-          </span>
-        )}
       </div>
     </Link>
   )
