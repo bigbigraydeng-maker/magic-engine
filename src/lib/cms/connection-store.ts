@@ -11,8 +11,13 @@
 
 import { supabaseAdmin } from '../supabase'
 import { encryptToken, decryptToken, tokenLastFour } from './crypto'
-import { CMS_STATUS, CMS_PROVIDER } from './vocabulary'
-import type { CmsConnectionStatus, WordpressConnectionStatus, ShopifyConnectionStatus } from './vocabulary'
+import { CMS_STATUS, CMS_PROVIDER, isCmsContentTarget } from './vocabulary'
+import type {
+  CmsConnectionStatus,
+  WordpressConnectionStatus,
+  ShopifyConnectionStatus,
+  CmsContentTarget,
+} from './vocabulary'
 import { validateWordpressSiteUrl } from './url-guard'
 import { validateShopifyShopUrl } from './shopify-guard'
 
@@ -26,6 +31,8 @@ interface CmsConnectionRow {
   repo_name:              string | null
   default_branch:         string | null
   content_paths:          string[]
+  /** B1: GEO-B+ Stage 1 — typed injection targets. */
+  content_targets:        unknown
   site_url:               string | null
   username:               string | null
   encrypted_token:        string
@@ -49,8 +56,53 @@ export interface UpsertCmsConnectionParams {
   repoName:       string
   defaultBranch?: string
   contentPaths?:  string[]
+  /** B1: list of GEO snippet injection targets. Accepts unknown so route
+   *  handlers can pass raw JSON straight through; normaliseContentTargets
+   *  enforces the whitelist (syntax ∈ {html, php}, role = global_head)
+   *  before the value reaches Postgres. */
+  contentTargets?: unknown
   /** Plain-text GitHub PAT — will be encrypted before storage. */
   plainToken:     string
+}
+
+// ─── Content target validation (mirror of DB CHECK constraint) ───────────────
+
+/**
+ * Normalises the caller-supplied list, throwing if any element fails the
+ * whitelist. We validate in JS first so the API can return a 400 with a clean
+ * message instead of bubbling a Postgres CHECK violation up to the FDE.
+ */
+export function normaliseContentTargets(
+  input: unknown,
+): CmsContentTarget[] {
+  if (input === undefined || input === null) return []
+  if (!Array.isArray(input)) {
+    throw new Error('contentTargets must be an array')
+  }
+  const out: CmsContentTarget[] = []
+  for (const raw of input) {
+    if (!isCmsContentTarget(raw)) {
+      throw new Error(
+        'Invalid content target — expected {path, syntax (html|php), role (global_head), label?}',
+      )
+    }
+    // Trim BEFORE re-checking empty, so a whitespace-only path (which DB CHECK
+    // would reject as empty) is caught here as a 400 instead of bubbling up as
+    // a 500 from the Postgres constraint violation.
+    const trimmedPath = raw.path.trim()
+    if (trimmedPath === '') {
+      throw new Error(
+        'Invalid content target — path cannot be blank',
+      )
+    }
+    out.push({
+      path:   trimmedPath,
+      syntax: raw.syntax,
+      role:   raw.role,
+      ...(raw.label !== undefined ? { label: raw.label } : {}),
+    })
+  }
+  return out
 }
 
 // ─── upsertConnection ────────────────────────────────────────────────────────
@@ -66,13 +118,15 @@ export async function upsertConnection(
     clientId,
     repoOwner,
     repoName,
-    defaultBranch = 'main',
-    contentPaths  = [],
+    defaultBranch  = 'main',
+    contentPaths   = [],
+    contentTargets = [],
     plainToken,
   } = params
 
-  const encrypted = encryptToken(plainToken)
-  const hint      = tokenLastFour(plainToken)
+  const encrypted   = encryptToken(plainToken)
+  const hint        = tokenLastFour(plainToken)
+  const safeTargets = normaliseContentTargets(contentTargets)
 
   const { data, error } = await supabaseAdmin
     .from('cms_connections')
@@ -84,6 +138,7 @@ export async function upsertConnection(
         repo_name:       repoName,
         default_branch:  defaultBranch,
         content_paths:   contentPaths,
+        content_targets: safeTargets,
         encrypted_token: encrypted,
         token_last_four: hint,
         status:          CMS_STATUS.DISCONNECTED,
@@ -96,6 +151,29 @@ export async function upsertConnection(
     .single()
 
   if (error) throw new Error(`cms_connections upsert failed: ${error.message}`)
+
+  return rowToStatus(data as CmsConnectionRow)
+}
+
+/**
+ * Update only the content_targets list. Useful for the Settings UI which
+ * needs to add/remove targets without re-typing the PAT.
+ */
+export async function updateContentTargets(
+  clientId: string,
+  targets:  unknown,
+): Promise<CmsConnectionStatus | null> {
+  const safeTargets = normaliseContentTargets(targets)
+  const { data, error } = await supabaseAdmin
+    .from('cms_connections')
+    .update({ content_targets: safeTargets })
+    .eq('client_id', clientId)
+    .eq('provider', CMS_PROVIDER.GITHUB)
+    .select()
+    .maybeSingle()
+
+  if (error) throw new Error(`cms_connections content_targets update failed: ${error.message}`)
+  if (!data)  return null
 
   return rowToStatus(data as CmsConnectionRow)
 }
@@ -197,16 +275,27 @@ export async function deleteConnection(clientId: string): Promise<void> {
 
 function rowToStatus(row: CmsConnectionRow): CmsConnectionStatus {
   return {
-    connected:    row.status === CMS_STATUS.CONNECTED,
-    provider:     row.provider as CmsConnectionStatus['provider'],
-    repoOwner:    row.repo_owner    ?? '',
-    repoName:     row.repo_name     ?? '',
-    branch:       row.default_branch ?? '',
-    tokenHint:    row.token_last_four,
-    status:       row.status as CmsConnectionStatus['status'],
-    lastError:    row.last_error,
-    lastTestedAt: row.last_tested_at,
+    connected:      row.status === CMS_STATUS.CONNECTED,
+    provider:       row.provider as CmsConnectionStatus['provider'],
+    repoOwner:      row.repo_owner    ?? '',
+    repoName:       row.repo_name     ?? '',
+    branch:         row.default_branch ?? '',
+    tokenHint:      row.token_last_four,
+    status:         row.status as CmsConnectionStatus['status'],
+    lastError:      row.last_error,
+    lastTestedAt:   row.last_tested_at,
+    contentTargets: parseContentTargets(row.content_targets),
   }
+}
+
+/**
+ * Defensive parse: DB CHECK guarantees shape on writes that go through us,
+ * but a row may have been written outside the app (manual SQL). Drop any
+ * malformed elements so the UI never crashes on a bad row.
+ */
+function parseContentTargets(raw: unknown): CmsContentTarget[] {
+  if (!Array.isArray(raw)) return []
+  return raw.filter(isCmsContentTarget)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

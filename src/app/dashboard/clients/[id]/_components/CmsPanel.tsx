@@ -18,6 +18,11 @@ import { useState, useEffect, useCallback } from 'react'
 import type {
   CmsConnectionStatus,
   WordpressConnectionStatus,
+  CmsContentTarget,
+  CmsContentTargetSyntax,
+} from '@/lib/cms/vocabulary'
+import {
+  CMS_CONTENT_TARGET_SYNTAX,
 } from '@/lib/cms/vocabulary'
 
 interface Props {
@@ -325,6 +330,12 @@ function GithubConnectedView({ clientId, status, onRefresh, onDisconnect }: Gith
       {status.lastError && <LastErrorRow message={status.lastError} />}
       {testResult       && <TestResultRow message={testResult} />}
 
+      <GeoContentTargetsCard
+        clientId={clientId}
+        initialTargets={status.contentTargets}
+        onSaved={onRefresh}
+      />
+
       <ConnectionActions
         testing={testing}
         confirmDelete={confirmDelete}
@@ -333,6 +344,192 @@ function GithubConnectedView({ clientId, status, onRefresh, onDisconnect }: Gith
         onConfirmDeleteRequest={() => setConfirmDelete(true)}
         onConfirmDelete={handleDisconnect}
       />
+    </div>
+  )
+}
+
+// ─── B1: GEO content targets editor ──────────────────────────────────────────
+
+interface GeoContentTargetsCardProps {
+  clientId:       string
+  initialTargets: CmsContentTarget[]
+  onSaved:        () => void
+}
+
+function GeoContentTargetsCard({ clientId, initialTargets, onSaved }: GeoContentTargetsCardProps) {
+  const [rows, setRows]       = useState<CmsContentTarget[]>(initialTargets)
+  const [dirty, setDirty]     = useState(false)
+  const [saving, setSaving]   = useState(false)
+  const [error, setError]     = useState<string | null>(null)
+  const [savedAt, setSavedAt] = useState<number | null>(null)
+
+  // M1 (魏征 B1 review): sync upstream changes when the FDE hasn't started
+  // editing yet. Without this, a successful save → onSaved() → fetchStatus()
+  // re-renders the parent with fresh contentTargets but rows stays on the
+  // stale local copy. We only re-seed when !dirty so we never silently
+  // overwrite unsaved edits.
+  useEffect(() => {
+    if (!dirty) setRows(initialTargets)
+  }, [initialTargets, dirty])
+
+  const updateRow = (idx: number, patch: Partial<CmsContentTarget>) => {
+    setRows(prev => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)))
+    setDirty(true)
+  }
+  const removeRow = (idx: number) => {
+    setRows(prev => prev.filter((_, i) => i !== idx))
+    setDirty(true)
+  }
+  const addRow = () => {
+    setRows(prev => [...prev, { path: '', syntax: 'html', role: 'global_head' }])
+    setDirty(true)
+  }
+
+  // M2 (魏征 B1 review): never silently drop user input. If any row has a
+  // blank path, abort the save and tell the FDE exactly which row, so the
+  // "I added a target and it didn't save" footgun never fires.
+  const handleSave = async () => {
+    setError(null)
+    const blankIdx = rows.findIndex(r => r.path.trim() === '')
+    if (blankIdx !== -1) {
+      setError(`第 ${blankIdx + 1} 行缺少路径，请填写或删除该行`)
+      return
+    }
+
+    setSaving(true)
+    try {
+      const res  = await fetch(`/api/clients/${clientId}/cms/connect`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content_targets: rows }),
+      })
+      const json = await res.json() as {
+        success: boolean
+        error?:  string
+        data?:   { contentTargets?: CmsContentTarget[] }
+      }
+      if (!json.success) throw new Error(json.error ?? 'Save failed')
+
+      // M1: prefer server-canonical value so rows is always what's in the DB
+      // (server normalisation could trim, dedupe, etc).
+      if (json.data?.contentTargets) {
+        setRows(json.data.contentTargets)
+      }
+      setDirty(false)
+      setSavedAt(Date.now())
+      onSaved()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-black/10 bg-white p-5 space-y-3">
+      <div>
+        <p className="text-sm font-semibold text-me-charcoal">GEO 注入目标 (Content Targets)</p>
+        <p className="text-xs text-me-charcoal/60 mt-1 leading-relaxed">
+          配置 GEO 指令要注入到仓库哪些模板文件的 <code className="font-mono">&lt;head&gt;</code>。
+          支持纯 HTML / PHP 模板；Next.js / Vue / Astro 等组件框架暂不支持。
+        </p>
+        {/* M3 (魏征 B1 review): make it explicit that the publish path doesn't
+            consume this yet, so PMs verifying B1 don't think the config is broken. */}
+        <p className="text-xs text-me-charcoal/45 mt-2 italic">
+          ⓘ 配置已保存到数据库，但当前 GEO 部署仍走旧的「独立 snippet 文件 + PR」模式。
+          下一个 PR（Stage 1 升级）才会开始读取此列表，自动把 snippet 注入到指定模板里。
+        </p>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="rounded-lg bg-me-ivory border border-dashed border-black/10 px-4 py-6 text-center">
+          <p className="text-xs text-me-charcoal/55">尚未配置注入目标。GEO 部署会读取此列表决定 PR 改哪些文件。</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {rows.map((row, idx) => (
+            <ContentTargetRow
+              key={idx}
+              row={row}
+              onChange={patch => updateRow(idx, patch)}
+              onRemove={() => removeRow(idx)}
+            />
+          ))}
+        </div>
+      )}
+
+      <div className="flex items-center justify-between pt-1">
+        <button
+          type="button"
+          onClick={addRow}
+          className="text-xs text-me-ochre hover:underline font-medium"
+        >
+          + 添加目标
+        </button>
+        <div className="flex items-center gap-3">
+          {savedAt && !dirty && (
+            <span className="text-xs text-[#5C8A4A]">✓ 已保存</span>
+          )}
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={!dirty || saving}
+            className="px-3 py-1.5 text-xs font-semibold bg-me-ochre text-white rounded-lg disabled:opacity-40 hover:bg-me-ochre/90 transition-colors"
+          >
+            {saving ? '保存中…' : '保存目标'}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="text-xs text-[#C2453A] bg-[#C2453A]/10 border border-[#C2453A]/30 rounded-lg px-3 py-2">
+          {error}
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface ContentTargetRowProps {
+  row:      CmsContentTarget
+  onChange: (patch: Partial<CmsContentTarget>) => void
+  onRemove: () => void
+}
+
+function ContentTargetRow({ row, onChange, onRemove }: ContentTargetRowProps) {
+  return (
+    <div className="grid grid-cols-12 gap-2 items-center">
+      <input
+        type="text"
+        value={row.path}
+        onChange={e => onChange({ path: e.target.value })}
+        placeholder="e.g. header.php"
+        className={INPUT_CLASS + ' col-span-5 font-mono text-xs'}
+      />
+      <select
+        value={row.syntax}
+        onChange={e => onChange({ syntax: e.target.value as CmsContentTargetSyntax })}
+        className={INPUT_CLASS + ' col-span-2 text-xs'}
+      >
+        {CMS_CONTENT_TARGET_SYNTAX.map(s => (
+          <option key={s} value={s}>{s.toUpperCase()}</option>
+        ))}
+      </select>
+      <input
+        type="text"
+        value={row.label ?? ''}
+        onChange={e => onChange({ label: e.target.value || undefined })}
+        placeholder="标签 (可选)"
+        className={INPUT_CLASS + ' col-span-4 text-xs'}
+      />
+      <button
+        type="button"
+        onClick={onRemove}
+        className="col-span-1 text-me-charcoal/45 hover:text-[#C2453A] text-lg leading-none"
+        aria-label="Remove target"
+      >
+        ×
+      </button>
     </div>
   )
 }
