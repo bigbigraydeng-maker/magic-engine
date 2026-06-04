@@ -307,7 +307,7 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-06-04 17:14 NZST （**A2.2 GSC 品牌搜索量上线 (PR #336) + Kanban Content Workbench UX 4 连击 (PR #327) + Phase 33 全部测试通过 ✅**）
+> 最后更新：2026-06-04 20:54 NZST （**GEO-B+ Stage 1 收官 (B3 PR #345 + B2-5/B2-8) + A2.2 GSC 品牌搜索量 (PR #336) + Kanban Content Workbench UX (PR #327) ✅**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
@@ -319,6 +319,7 @@ npm test           # 测试套件
 | **GBP.0** | Google Cloud：enable Business Profile API + Account Management API | ⚠️ PM 操作 |
 
 **已完成全景（最近几个 Phase）**：
+- ✅ **GEO-B+ Stage 1 收官**（2026-06-04）：GitHub PR 式 GEO 指令部署三段全部上线 — B1（content_targets schema + Settings UI, PR #333）→ B2（模板注入 + 漂移检测 + 魏征 9 must-fix, PR #342）→ B3（webhook PR merge 回写 geo_deployments, PR #345）。本次收尾两个 carryover：**B2-5** updateContentTargets 单测 7 个（含变异验证）+ **B2-8** `cms_content_targets_github_only_check` DB 约束（非 github 行 content_targets 必空，防误写保险丝，Migration `20260624000005` 经 MCP RED→GREEN 真实验证）。**B2-3**（content_targets 审计日志）摸底发现项目无 audit_logs 地基，PM 决策拆为独立待排期项（见 ROADMAP §9「📋 待排期：审计基础设施」）。24/24 测试通过
 - ✅ **A2.2 brand_search_volume GSC 接入**（2026-06-04，PR #336 merged）：Goal 主指标 `brand_search_volume` 改读 GSC rolling 28 天品牌词 clicks（替代 DataForSEO 估算）。两层解析（GSC 优先 / DataForSEO fallback）。**P0 修复**：发现 token equality 漏 80% 多词品牌（CTS "cts tours" 不能匹配域名根 "ctstours"），新增 `clients.brand_aliases` 字段 + substring 匹配（不污染原 isBrandedKeyword）。+ SOP 文档。17 测试通过，CTS 真实数据回归验证 166 brand clicks（之前 ~5）
 - ✅ **Kanban Content Workbench UX 4 连击**（2026-06-04，PR #327 merged）：FDE 最高频用的内容生成工作台 — 修 4 个痛点（反复点击 / 看不到进度 / prompt 太小 / 失败回退）+ 顺手修 1 个生产 CRITICAL bug（不存在的 GET endpoint 把 completed item 拉回 in_progress）。子牙+魏征双审，三阶段状态机 + useRef 同步去重 + 卡片三态（制作中/失败重试/超时）。8 commits，45/45 测试通过
 - ✅ **Phase 33 P33.9/P33.10 + M4 测试回归通过**（2026-06-04）：Goal filter 状态 chips、未归类分组、Goal 详情页 Execution Progress 卡片、Initiative 完成率 chip、Campaign 状态点 — 数据层 + UI 层全部跑通。Phase 33 整体收官
