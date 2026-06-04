@@ -8,12 +8,15 @@ import { runTracker } from '@/lib/ai-tracker/orchestrator'
  * Weekly cron — runs the AI Visibility Tracker for every client that has
  * at least one enabled query. Triggered by Render Cron every Monday.
  *
+ * Returns 202 immediately and runs the tracker in the background to avoid
+ * Cloudflare's 100s gateway timeout (tracker takes 10–15 min for all clients).
+ *
  * Auth: Bearer ${CRON_SECRET}
  *
  * Reference: ROADMAP.md P7.1.11, ARCHITECTURE.md §12.3
  */
 
-// Render long-running cron tier; allow up to 15 min to cover several clients.
+// Allow up to 15 min for the background work to complete on Render.
 export const maxDuration = 900
 
 export async function GET(req: NextRequest) {
@@ -30,6 +33,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  // Fire background work without awaiting — respond 202 immediately so
+  // Cloudflare doesn't time out the curl trigger (524 after ~100s).
+  void runInBackground()
+
+  return NextResponse.json(
+    { success: true, message: 'AI tracker started in background' },
+    { status: 202 }
+  )
+}
+
+async function runInBackground() {
   // Find clients that have at least one enabled query
   const { data: clientsWithQueries, error: queryErr } = await supabaseAdmin
     .from('ai_visibility_queries')
@@ -37,10 +51,8 @@ export async function GET(req: NextRequest) {
     .eq('enabled', true)
 
   if (queryErr) {
-    return NextResponse.json(
-      { error: `Failed to load clients: ${queryErr.message}` },
-      { status: 500 }
-    )
+    console.error('[ai-tracker-weekly] Failed to load clients:', queryErr.message)
+    return
   }
 
   const clientIds = Array.from(
@@ -48,50 +60,26 @@ export async function GET(req: NextRequest) {
   )
 
   if (clientIds.length === 0) {
-    return NextResponse.json({
-      success: true,
-      message: 'No clients have enabled queries — nothing to run',
-      clients_processed: 0,
-    })
+    console.log('[ai-tracker-weekly] No clients have enabled queries — nothing to run')
+    return
   }
 
-  const results: Array<{
-    client_id: string
-    runs_succeeded: number
-    runs_failed: number
-    cost_usd: number
-    error?: string
-  }> = []
+  let totalCost = 0
 
   // Process clients sequentially — multiple clients in parallel would
   // multiply provider RPM pressure.
   for (const clientId of clientIds) {
     try {
       const result = await runTracker({ client_id: clientId })
-      results.push({
-        client_id: clientId,
-        runs_succeeded: result.runs_succeeded,
-        runs_failed: result.runs_failed,
-        cost_usd: result.total_cost_usd,
-      })
+      totalCost += result.total_cost_usd
+      console.log(
+        `[ai-tracker-weekly] client=${clientId} succeeded=${result.runs_succeeded} failed=${result.runs_failed} cost=$${result.total_cost_usd.toFixed(4)}`
+      )
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error'
-      results.push({
-        client_id: clientId,
-        runs_succeeded: 0,
-        runs_failed: 0,
-        cost_usd: 0,
-        error: message,
-      })
+      console.error(`[ai-tracker-weekly] client=${clientId} error:`, message)
     }
   }
 
-  const totalCost = results.reduce((s, r) => s + r.cost_usd, 0)
-
-  return NextResponse.json({
-    success: true,
-    clients_processed: results.length,
-    total_cost_usd: totalCost,
-    results,
-  })
+  console.log(`[ai-tracker-weekly] Done. clients=${clientIds.length} total_cost=$${totalCost.toFixed(4)}`)
 }
