@@ -100,12 +100,17 @@ function mockDirective(rows: unknown[] | null, error?: string) {
 }
 
 const GOOD_CONN = {
-  plainToken: 'ghp_testtoken',
-  repoOwner:  'acme',
-  repoName:   'website',
-  branch:     'main',
-  status:     'connected',
-  connected:  true,
+  plainToken:     'ghp_testtoken',
+  repoOwner:      'acme',
+  repoName:       'website',
+  branch:         'main',
+  status:         'connected' as const,
+  connected:      true,
+  provider:       'github' as const,
+  tokenHint:      'oken',
+  lastError:      null,
+  lastTestedAt:   null,
+  contentTargets: [],
 }
 
 const DIRECTIVE_ROW = {

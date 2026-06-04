@@ -43,6 +43,42 @@ export const ME_BRANCH_PREFIX = 'feat/me-seo-'
 
 export const GITHUB_API_BASE = 'https://api.github.com'
 
+// ─── Content target (B1: GEO-B+ Stage 1) ──────────────────────────────────────
+
+/**
+ * Template-injection targets configured per GitHub connection. The
+ * publish-geo-to-github route reads these to decide which file(s) to inject
+ * the GEO snippet block into.
+ *
+ * MVP whitelist:
+ *   - syntax: 'html' | 'php' (jsx/vue/astro intentionally NOT supported — see
+ *     魏征 2026-06-04 review; component frameworks must wait for Phase 2 CDN)
+ *   - role:   'global_head' (page-level / body-end roles deferred)
+ */
+export const CMS_CONTENT_TARGET_SYNTAX = ['html', 'php'] as const
+export type CmsContentTargetSyntax = (typeof CMS_CONTENT_TARGET_SYNTAX)[number]
+
+export const CMS_CONTENT_TARGET_ROLE = ['global_head'] as const
+export type CmsContentTargetRole = (typeof CMS_CONTENT_TARGET_ROLE)[number]
+
+export interface CmsContentTarget {
+  path:    string
+  syntax:  CmsContentTargetSyntax
+  role:    CmsContentTargetRole
+  label?:  string
+}
+
+/** Runtime guard mirroring the DB CHECK constraint. */
+export function isCmsContentTarget(value: unknown): value is CmsContentTarget {
+  if (!value || typeof value !== 'object') return false
+  const v = value as Record<string, unknown>
+  if (typeof v.path !== 'string' || v.path === '') return false
+  if (typeof v.syntax !== 'string' || !CMS_CONTENT_TARGET_SYNTAX.includes(v.syntax as CmsContentTargetSyntax)) return false
+  if (typeof v.role !== 'string' || !CMS_CONTENT_TARGET_ROLE.includes(v.role as CmsContentTargetRole)) return false
+  if (v.label !== undefined && typeof v.label !== 'string') return false
+  return true
+}
+
 // ─── Type shapes (shared between server + UI) ─────────────────────────────────
 
 export interface CmsConnectionStatus {
@@ -56,6 +92,8 @@ export interface CmsConnectionStatus {
   status:    CmsStatus
   lastError: string | null
   lastTestedAt: string | null
+  /** B1: template injection targets for the GEO deploy path. */
+  contentTargets: CmsContentTarget[]
 }
 
 /**
