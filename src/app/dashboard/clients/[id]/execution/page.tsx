@@ -2062,10 +2062,12 @@ export default function ExecutionPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ kind: 'ai_assist', author: 'luban', content: '社媒内容已在后台生成完成，可打开工作台查看' }),
           }).catch(() => {})
-          // 读取 DB 最新状态（不依赖可能已过期的 items 快照），确保状态持久写入后再刷新
-          const statusRes = await fetch(`/api/clients/${clientId}/execution/${itemId}`).catch(() => null)
-          const statusJson = statusRes?.ok ? await statusRes.json() as { item?: { status: string } } : null
-          if (!statusJson?.item || statusJson.item.status === 'pending') {
+          // 仅当当前 item 处于 pending 时才提升为 in_progress
+          // 之前用 GET 端点读 DB 最新状态，但该路由不存在（只有 PATCH/DELETE），
+          // 走 fallback 时会无条件 PATCH in_progress，把已 completed 的 item 拉回去
+          // 改用本地 items snapshot 判断 — 已 completed/in_progress/skipped 一律不触发
+          const currentItem = items.find(i => i.id === itemId)
+          if (!currentItem || currentItem.status === 'pending') {
             await fetch(`/api/clients/${clientId}/execution/${itemId}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
