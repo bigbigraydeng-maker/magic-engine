@@ -60,28 +60,25 @@ A2.2 上线后，`brand_search_volume` 这个 Goal 主指标的取数逻辑是�
 
 ---
 
-## 2 · 写入 Supabase（2 分钟）
+## 2 · 在 ME 后台填别名（2 分钟）
 
-> 目前没有 UI（Phase 后续会加 Settings 页字段），先用 Supabase Studio 直填。
+> ⚠️ **不要进 Supabase / 不要跑 SQL**。FDE 的所有配置都通过 ME 后台 UI 完成。
 
-1. 打开 [Supabase Studio](https://supabase.com/dashboard) → 选 `magic-engine` (CrazyContent) 项目
-2. 左侧 **Table Editor → clients**
-3. 找到客户行（按 `name` 列搜）
-4. 双击 `brand_aliases` 单元格
-5. 填入 JSON 数组（必须是 PostgreSQL `text[]` 字面量格式，注意是花括号 `{}` 不是方括号 `[]`）：
+1. 打开 ME → **客户 dashboard → Settings**（齿轮图标）
+2. 滚到 **§2 SEO 基础信息 → 🏷️ 品牌词别名** 区
+3. 在 textarea 里**每行一个别名**贴入，例如 CTS：
 
-```
-{"cts tours","cts travel","china travel service","ctsnz"}
-```
+   ```
+   cts tours
+   cts travel
+   china travel service
+   ctsnz
+   ```
 
-保存（按 Enter 或 Save）。
+4. 点 **保存**。看到 `✓ 已保存（HH:MM:SS）` 即完成
 
-> 如果你用的是 Supabase MCP（Claude Code 帮你做）：
-> ```sql
-> UPDATE public.clients
->    SET brand_aliases = ARRAY['cts tours','cts travel','china travel service','ctsnz']
->  WHERE name = 'CTS Tours NZ';
-> ```
+> 保存时自动统一小写、合并多余空白、去重、过滤过短的别名（< 2 字符）。
+> 别名留空 = 降级到域名根 + DataForSEO 估算。
 
 ---
 
@@ -92,13 +89,15 @@ A2.2 上线后，`brand_search_volume` 这个 Goal 主指标的取数逻辑是�
    - 一个非零数字（CTS ~170 / Oztop ~46）
    - 数据源标签 = `GSC clicks (28-day brand searches)`
    - 副标签 = `N brand-search clicks (M queries · 时间区间)`
-3. 如果显示 fallback 文案 `DataForSEO bulk keyword volume (estimate · GSC not yet connected)` → 你的 alias 没匹配上，回 §1 检查（多半是别名写得太严格，比如 `"CTS Tours NZ"` 整串而 GSC query 是 `"cts tours"`）
+3. 如果显示 fallback 文案 `DataForSEO bulk keyword volume (estimate · GSC not yet connected)` → 你的别名没匹配上，回 §1 检查：
+   - 别名是不是写得太严格了（写 `"CTS Tours NZ"` 整串，但 GSC query 是 `"cts tours"`）
+   - 别名要写**最短的稳定形式**，让 substring 匹配自动覆盖各种长尾变体
 
 ---
 
 ## 4 · 没有 Goal 用 brand_search_volume 怎么办
 
-如果客户当前 Goal 都不用 `brand_search_volume` 主指标，A2.2 代码不会被触发（这是当前 CTS / Oztop 的情况，2026-06-04 audit）。要先建一个：
+如果客户当前 Goal 都不用 `brand_search_volume` 主指标，A2.2 代码不会被任何 Goal 触发。要先建一个：
 
 1. 客户 dashboard → **新建 Goal**
 2. 选 Goal 类型：**品牌曝光 (awareness)**
@@ -110,6 +109,6 @@ A2.2 上线后，`brand_search_volume` 这个 Goal 主指标的取数逻辑是�
 
 ## 5 · 后续 backlog
 
-- [ ] Settings 页加 `brand_aliases` 可视化编辑字段（避免每次 FDE 操作都要进 Supabase Studio）
-- [ ] cron 自动建议 — 跑 GSC top queries 给出"未识别但点击数很高"的 query 候选，提醒 FDE 是否补 alias
-- [ ] 多语言 / 多市场处理（CTS 在中国市场可能搜索"长城旅游服务"，目前 alias 没覆盖中文）
+- [ ] cron 自动建议 — 跑 GSC top queries 给出"未识别但点击数很高"的 query 候选，提醒 FDE 是否补别名
+- [ ] 多语言 / 多市场处理（CTS 在中国市场可能搜索"长城旅游服务"，目前别名没覆盖中文）
+- [ ] 别名命中预览 — Settings 面板保存后即时显示"本次别名能命中最近一次 GSC snapshot 里 N 个 query / 共 M clicks"，FDE 当场看到效果
