@@ -163,6 +163,7 @@ UI / 报告 / 客户交付物中**禁止出现真实供应商名**，只用封�
 - **写前先读**：修改任何文件前，先读该文件的 exports、直接调用方、共享工具函数；不确定某段代码为何如此设计时，先问再改
 - **FDE/PM 配置类数据必须有 UI（强约束）⭐**：任何需要 FDE/PM 在客户级别填的字段（brand_aliases / competitor_domains / primary_keywords / GA4 property_id / GBP account_id / 任何 connector 配置），**必须连同 Settings 页 UI 一起做完才算 ready**。**绝不能写"让 PM 进 Supabase Studio 直填" / "FDE 跑 SQL UPDATE" 这种 SOP**——运营人员不应该碰数据库。判断标准：如果某个字段被 FDE 工作流读，它的写入路径必须是 ME 后台的可视化 UI。新功能 PR 如果只加了字段没加 UI 就上线，按"产品缺陷"对待，下一 PR 必须补。复用 pattern：`CompetitorDomainsPanel` / `PrimaryKeywordsPanel`（chip + add input 模板）+ `/api/clients/[id]/{field}` 对称 GET/PATCH 路由。
 - **绝不凭空注入客户业务数据（强约束）⭐⭐**：任何给客户写战略 Goal / Initiative / Action / 关键词列表 / 业务方向之前，**必须先做两件事**：①查 `master_briefs.{brand_name, core_proposition, target_audience, content_pillars, keyword_seeds}` 拿真实业务方向；②查 `clients.primary_keywords` 拿 PM 配的真实主关键词。**绝不能从外部对话/记忆/直觉假设业务方向**，绝不能编 search_volume / KD / 月点击 等数字——数字必须来自 DataForSEO（用 ME 的 keyword-snapshots-weekly cron 或调 `bulkKeywordVolume()`）或 GSC snapshots。**两次重大事故教训**：(1) CTS 子牙凭空假设"queenstown inbound 旅游" — 实际 CTS 是 outbound Kiwi→中国旅游；(2) Oztop 子牙编了"vinyl/herringbone/plantation shutters/sheer curtains" 5 个品类页 + 编 18100/22200 搜索量 — 实际 Oztop 不卖 shutters/curtains/herringbone，且数字全是编的。判断标准：**任何 SEO/营销内容/数据相关 SQL 写入或 Initiative hypothesis，必须能在 master_brief 或 clients 表里指明真实来源**；否则停手问 PM。
+- **PR 动 ROADMAP.md 必须魏征扫 diff（强约束）⭐⭐**：多并行 session 时，PR 改 ROADMAP.md 极易在 rebase / merge 时**意外删掉别 Phase 的登记**。子牙开 PR 前**必须**：①跑 `git diff main -- ROADMAP.md`；②确认 diff 里所有 `-` 删除行都是**有意的本 PR 应该删的**（如本 Phase 自己的旧状态）；③看到任何**与本 PR 主题无关的 `-` 删除行**（如别的 Phase 的登记被删）→ 立刻停手，从 `git show <base-commit>:ROADMAP.md` 恢复，不要让事故 PR 进 main。**真实事故**：2026-06-04 PR #353（fix goals 入口）merge 时意外删除了 PR #348/#350 登记的 Phase 22.E S9-S13 + 决战日 schedule（105 行），靠子牙下个 session 开工 S13 时 grep "S13" 0 行才发现，PR #359 才恢复。判断标准：ROADMAP.md 的 diff `-` 行必须**100% 与 PR title 相关**，否则就是误删。
 
 ---
 
@@ -308,7 +309,7 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-06-04 22:56 NZST （**A2.2 GSC 品牌搜索量上线 (PR #336) + Kanban Content Workbench UX 4 连击 (PR #327) + Phase 33 全部测试通过 ✅**）
+> 最后更新：2026-06-05 00:02 NZST （**A2.2 GSC 品牌搜索量上线 (PR #336) + Kanban Content Workbench UX 4 连击 (PR #327) + Phase 33 全部测试通过 ✅**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|

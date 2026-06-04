@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-04 20:59 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-05 00:02 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -3117,14 +3117,111 @@ AI Content Factory  ←──反馈──  Data Engine  ←──分析──  �
 | `22.E.S6` | 客户 SEO 配置（CTS/Oztop 参数表）| P2 | 📋 |
 | `22.E.S7` | Schema 自动验证（Rich Results Test API）| P3 | 📋 |
 | `22.E.S8` | CTS 专项 SOP 文档落文件 | P2 | 📋 |
+| `22.E.S9` | **Action 卡片"预期影响"字段** — 90 天 traffic uplift 估算，规则可算无 AI | **P1** | ✅ PR #355 |
+| `22.E.S4ext` | **SEO 列头客户事实快照** — 月点击 / 总曝光 / Page-1 词数（S4 扩展）| **P1** | ✅ PR #349 |
+| `22.E.S10` | **客户 SEO 成熟度阶段感知** — foundation / optimization / scale 三档，规则优先级动态调 | P3 | 📋 |
+| `22.E.S11` | **MAX_ACTIONS_PER_CLIENT 客户可配** — 适配 FDE 产能（默认 3，可调 1-5）| P3 | 📋 |
+| `22.E.S12` | **PM 决策层 vs FDE 执行层分流** — 战略级 action（高量高 KD）走 PM 审 | P3 | 📋 |
+| `22.E.S13` | **SEO 子类型精细分流** — drawer 按 action_type 走不同生成器（落地页 + 现有页面 SEO 元素优化）| **P2** | 🔨 决战日核心 |
+
+**S9-S13 来源**：2026-06-04 PM 反馈 + Oztop SEO 方案借鉴。详见"S9-S13 设计要点"段。
+
+> **2026-06-04 ROADMAP 恢复说明**：PR #353（fix goals 入口）merge 时意外删除 PR #348/#350 的 S9-S13 + 决战日登记。本 PR 从 git 历史（commit e0d8d04）重新恢复，并把 A2/A3/A2-S9 的实际完成状态同步更新。同时加入 CLAUDE.md 黑线（任何 PR 动 ROADMAP.md，魏征必扫 diff 是否意外删别 Phase 的登记），防止再发生。
 
 **里程碑：**
-- **M1（地基）**：S2 表 + S3 规则库建好，`npm run build` 通过，Supabase 能看到 `seo_patrol_findings` 表
-- **M2（第一条 finding）**：S2b cron Step 1 对 CTS 真实数据产出 ≥ 1 条 finding
-- **M3（端到端）**：S2b Step 2 跑通 → CTS 看板 SEO 列出现系统推荐 action
-- **M4（质量关）**：S1 李白评分接入，发布前拦截低分草稿
+- **M1（地基）**：S2 表 + S3 规则库建好，`npm run build` 通过，Supabase 能看到 `seo_patrol_findings` 表 ✅
+- **M2（第一条 finding）**：S2b cron Step 1 对 CTS 真实数据产出 ≥ 1 条 finding ✅
+- **M3（端到端）**：S2b Step 2 跑通 → CTS 看板 SEO 列出现系统推荐 action ✅
+- **M4（质量关）**：S1 李白评分接入，发布前拦截低分草稿 📋
+- **M5（FDE 价值闭环）**：S9（预期影响）+ S4ext（客户快照）上线，FDE 看 action 卡片立刻知道"做这个能拿到什么" ✅ 2026-06-04 上线
 
 **客户落地差异**（CTS Tours NZ vs Oztop）：诊断规则通用，仅地区码（NZ 2554 / AU 2036）、发布路径（Next.js 直出 / WordPress+Yoast）、关键词重心、内链目标不同。详见设计文档 §7。
+
+### S9-S13 设计要点（2026-06-04 PM 反馈驱动）
+
+**起源**：PM 反馈"FDE 不知道这条带来的价值和希望达到的目标是什么"+ 借鉴 Oztop SEO 6 个月路线图方案（ROI 表 / Phase 分层 / 客户事实快照 / 节奏 Option / PM-FDE 分流）。
+
+**S9 — Action 卡片"预期影响"字段（P1 优先）** ✅ 已上线 PR #355
+
+每张 SEO action 卡片增加"做这个 90 天预期"字段，让 FDE 立刻知道价值。
+
+| Action 类型 | 预期影响计算公式（纯规则无 AI）|
+|------------|------------------------------|
+| `seo.refresh_blog`（低 CTR 改标题）| baseline_clicks × (CTR_benchmark / CTR_actual - 1) × 0.7（衰减）|
+| `seo.refresh_blog`（内容老化 + 排名掉位）| 估算回升至 prior_position 的 traffic 增量 = search_volume × ctrForPosition(prior) - search_volume × ctrForPosition(current) |
+| `seo.publish_blog`（机会词）| search_volume × ctrForPosition(30) × 0.5（保守估计 3-6 个月进入 P30 ）|
+| `seo.publish_landing_page`（S13 引入）| search_volume × ctrForPosition(50) × 0.5 |
+
+**实施**（已完成）：
+- 纯函数 `src/lib/seo-patrol/expected-impact.ts`（28 单测，魏征复审通过）
+- 在 `StudioArticleTab.tsx` 顶部嵌入预期影响卡片（仅对有 keyword metadata 的 action 显示）
+- 38 条策略性 action 静默不显示（不是降级，是正确——它们本就不是 keyword 工作）
+
+**S4ext — SEO 列头客户事实快照（P1 优先）** ✅ 已上线 PR #349
+
+看板 SEO 列头加 1 行 sticky 显示客户 SEO 基础事实：
+```
+📊 客户 SEO 基础：月点击 155 / 总曝光 7,006 / Page-1 词数 0 / 平均排名 18.7
+```
+
+数据来源：`gsc_performance_snapshots` 最新一行 + `keyword_snapshots` 算 Page-1 词数。已有数据，纯前端读 + 渲染。
+实施（已完成）：复用 metrics endpoint 补 `gsc_avg_position` + 新建 `page-1-count` 轻量 API + `SeoColumnSnapshot.tsx` 组件。
+
+**S10 — 客户 SEO 成熟度阶段感知（P3）**
+
+clients 表加 `seo_maturity_stage` 字段：
+- `foundation`（0-1 阶段，月点击 <500）→ 优先 R4（机会词）+ 新落地页
+- `optimization`（成长阶段，月点击 500-5000）→ 优先 R1（CTR）+ R3（救页面）
+- `scale`（成熟阶段，月点击 >5000）→ 优先 R5（收录）+ 长尾扩展
+
+规则引擎根据 stage 动态调权重。
+
+**S11 — MAX_ACTIONS 客户可配（P3）**
+
+`MAX_ACTIONS_PER_CLIENT` 从硬编码 3 变 `clients.seo_daily_action_cap`（默认 3，FDE 在 settings 可配 1-5）。适配不同客户的 FDE 产能。
+
+**S12 — PM 决策层 vs FDE 执行层分流（P3）**
+
+定义"战略级 action"判定规则（高搜量 ≥10000 + 低 KD ≤20）→ action 卡片显示 `🎯 战略机会` 标签 + 路由到 PM Inbox（不直接进 FDE 看板）。PM 审过才放给 FDE。
+
+**S13 — SEO 子类型精细分流（P2）** 🔨 决战日核心
+
+扩展 `SEO_ACTION_TYPE` 词表：
+- `seo.publish_landing_page` — 生成 SEO 落地页（不同于博客的 Schema、结构）
+- `seo.optimize_page_seo` — 读现有页面 → 改 title/meta/H1/schema → 推送 WP / Next.js
+
+新建两个 drawer tab：
+- `StudioLandingPageTab.tsx` — 落地页生成器
+- `StudioPageSeoOptimizerTab.tsx` — 页面 SEO 元素优化
+
+`tabsForItem()` 按 `item.action_type` 路由到不同 tab。后端 API（落地页生成 / 页面优化）登记为 S14/S15。
+
+**当前临时**：Stage 1（PR #347）已让 SEO drawer 只显示 SEO 文章 tab，去除噪音，但所有 SEO action 都走文章生成器。S13 上线后才有真正的页面工作流。
+
+### 决战日 Schedule — 2026-06-08 周日 EOD ⏰
+
+> **PM 拍板**：2026-06-04 PM 反馈"重要的组件必须完成，其余进 backlog"。设决战日推动收尾节奏。
+
+**6/8 前必上线（M5 价值闭环）：**
+
+| 编号 | 内容 | 状态 |
+|------|------|------|
+| **A3 (S4ext)** | SEO 列头客户事实快照 | ✅ PR #349 merged |
+| **A2 (S9)** | Action 卡片"预期影响"字段 | ✅ PR #355 merged |
+| **S9-prereq** | 给 marketing_plan/diagnostic 也塞 action metadata | ⏭ 路线 A 跳过（38 条策略性 action 本就不该有影响估算） |
+| **S13** | SEO 子类型精细分流（落地页 + 页面 SEO 优化）| 🔨 6/5-6/7 集中做 |
+
+**6/8 后进 backlog（不阻挡推广）：**
+
+| 编号 | 内容 | 优先级 |
+|------|------|--------|
+| S10 | 客户 SEO 成熟度阶段感知 | P3 |
+| S11 | MAX_ACTIONS 客户可配 | P3 |
+| S12 | PM/FDE 决策分流 | P3 |
+| S14/S15 | S13 的后端 API（落地页生成 / 页面优化）| P2 |
+| 安全债 | seo-intelligence 目录 IDOR 防护补齐（魏征 LOW）| P3 |
+
+**节奏说明**：4 天纯开发 + 6/8 当天测试缓冲。6/9 起进入推广阶段。
 
 ---
 
