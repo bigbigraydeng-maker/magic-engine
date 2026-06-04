@@ -216,6 +216,13 @@ export interface ExecutionItem {
   generation_started_at: string | null
   /** Kanban Content Workbench: populated when the latest generation failed. NULL = no failure / cleared on retry. */
   generation_error: string | null
+  /**
+   * Phase 22.E.S13: machine-readable action slug from SEO_ACTION_TYPE /
+   * other flywheel vocabularies. Drives Content Studio tab routing — landing
+   * page / page SEO optimiser tabs branch on this. NULL for legacy items
+   * written before P24.A added the DB column.
+   */
+  action_type: string | null
 }
 
 /** 内容飞轮闭环 — 执行看板 row 上展示的关联内容预览（execution GET 时 embed） */

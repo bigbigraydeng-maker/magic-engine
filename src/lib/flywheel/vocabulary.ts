@@ -85,6 +85,21 @@ export const SEO_ACTION_TYPE = {
   /** Re-optimise an existing blog post after keyword data refreshes (in_house) */
   REFRESH_BLOG: 'seo.refresh_blog',
 
+  /**
+   * Phase 22.E.S13: Generate a SEO-optimised category / product landing page
+   * (distinct from a blog post — landing pages use Product / Service Schema
+   * and have a conversion-oriented structure). UI is a stub in S13; backend
+   * generator API tracked as S14.
+   */
+  PUBLISH_LANDING_PAGE: 'seo.publish_landing_page',
+
+  /**
+   * Phase 22.E.S13: Optimise SEO elements (title / meta description / H1 /
+   * Schema.org markup) on an existing live page. UI is a stub in S13; backend
+   * read-and-rewrite pipeline tracked as S15.
+   */
+  OPTIMIZE_PAGE_SEO: 'seo.optimize_page_seo',
+
   /** Pull a fresh SEMrush domain snapshot into flywheel_metrics (in_house) */
   SEMRUSH_SNAPSHOT: 'seo.semrush_snapshot',
 

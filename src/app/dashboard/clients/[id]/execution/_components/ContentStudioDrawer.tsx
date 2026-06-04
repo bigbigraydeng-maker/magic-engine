@@ -11,10 +11,13 @@ import { useState, useEffect, useCallback } from 'react'
 import type { ExecutionItem } from '@/types/diagnostic'
 import { ReelsStudio } from '../../_components/ReelsStudio'
 import { StudioArticleTab } from './StudioArticleTab'
+import { StudioLandingPageTab } from './StudioLandingPageTab'
+import { StudioPageSeoOptimizerTab } from './StudioPageSeoOptimizerTab'
 import { SocialPlanSection } from './SocialPlanSection'
 import type { GalleryAsset } from './SocialPlanSection'
 
-type StudioTab = 'article' | 'social' | 'video'
+// Phase 22.E.S13: 'landing' + 'optimize' added for SEO sub-type routing.
+type StudioTab = 'article' | 'social' | 'video' | 'landing' | 'optimize'
 type TabDef = readonly [StudioTab, string]
 
 interface ActiveCampaign {
@@ -81,6 +84,16 @@ function tabsForItem(item: ExecutionItem): { tabs: TabDef[]; defaultTab: StudioT
     }
   }
   if (item.dimension === 'seo') {
+    // Phase 22.E.S13: branch by action_type so landing-page and page-SEO-
+    // optimisation actions get their own (stub) workbench instead of all
+    // SEO tasks funneling into the article generator.
+    if (item.action_type === 'seo.publish_landing_page') {
+      return { tabs: [['landing', 'SEO 落地页']], defaultTab: 'landing' }
+    }
+    if (item.action_type === 'seo.optimize_page_seo') {
+      return { tabs: [['optimize', '页面 SEO 优化']], defaultTab: 'optimize' }
+    }
+    // publish_blog / refresh_blog / null / unknown → article tab (fallback)
     return { tabs: [['article', 'SEO 文章']], defaultTab: 'article' }
   }
   // ai_visibility, ads, reputation, competitor, or unknown → show all 3
@@ -247,6 +260,12 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
               hasActiveCampaign={!!campaign}
               onGenerated={linkContentToItem}
             />
+          ) : tab === 'landing' ? (
+            // Phase 22.E.S13 stub — backend (S14) tracked in ROADMAP.
+            <StudioLandingPageTab clientId={clientId} item={item} />
+          ) : tab === 'optimize' ? (
+            // Phase 22.E.S13 stub — backend (S15) tracked in ROADMAP.
+            <StudioPageSeoOptimizerTab clientId={clientId} item={item} />
           ) : tab === 'social' ? (
             // 图文帖子：Posts + Stories（含文字与图片生成）
             // TODO: 平台 tab（Facebook / Instagram / TikTok）→ 对应不同内容格式
