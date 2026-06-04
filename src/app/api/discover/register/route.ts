@@ -17,23 +17,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { runZhangqian } from '@/lib/zhangqian/agent'
 import { getDomainMetrics, getKeywordsForSite } from '@/lib/dataforseo/labs'
+import {
+  checkScanRateLimits,
+  recordScanAttempt,
+  getDomainCache,
+  setDomainCache,
+  updateDomainCacheStatus,
+} from '@/lib/zhangqian/rate-limiter'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
-
-// ─── Rate limit ───────────────────────────────────────────────────────────────
-
-const ipBucket = new Map<string, { count: number; resetAt: number }>()
-
-function checkRate(ip: string): boolean {
-  const now = Date.now()
-  const entry = ipBucket.get(ip)
-  if (!entry || entry.resetAt < now) {
-    ipBucket.set(ip, { count: 1, resetAt: now + 86_400_000 })
-    return false
-  }
-  if (entry.count >= 3) return true
-  entry.count++
-  return false
-}
 
 // ─── URL normaliser ───────────────────────────────────────────────────────────
 
@@ -190,6 +181,7 @@ async function runScan(jobId: string, domain: string): Promise<void> {
         .from('public_scan_jobs')
         .update({ status: 'failed', error: `Validation: ${validation_error}`, completed_at: new Date().toISOString() })
         .eq('id', jobId)
+      await updateDomainCacheStatus(domain, 'failed').catch(() => {})
       return
     }
 
@@ -230,6 +222,7 @@ async function runScan(jobId: string, domain: string): Promise<void> {
         completed_at: new Date().toISOString(),
       })
       .eq('id', jobId)
+    await updateDomainCacheStatus(domain, 'completed').catch(() => {})
   }
 
   try {
@@ -239,6 +232,7 @@ async function runScan(jobId: string, domain: string): Promise<void> {
         .from('public_scan_jobs')
         .update({ status: 'failed', error: 'Scan exceeded 9-minute limit — please try again.', completed_at: new Date().toISOString() })
         .eq('id', jobId)
+      await updateDomainCacheStatus(domain, 'failed').catch(() => {})
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -247,6 +241,7 @@ async function runScan(jobId: string, domain: string): Promise<void> {
         .from('public_scan_jobs')
         .update({ status: 'failed', error: msg, completed_at: new Date().toISOString() })
         .eq('id', jobId)
+      await updateDomainCacheStatus(domain, 'failed').catch(() => {})
     } catch {
       // Ignore failure while recording the failure state.
     }
@@ -260,12 +255,6 @@ async function runScan(jobId: string, domain: string): Promise<void> {
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
-  if (checkRate(ip)) {
-    return NextResponse.json(
-      { error: 'Daily limit reached (3 scans per day). Try again tomorrow.' },
-      { status: 429 },
-    )
-  }
 
   let url: string, domain: string, email = '', name = ''
   try {
@@ -283,6 +272,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     name  = typeof body.name === 'string' ? body.name.trim() : ''
   } catch {
     return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 })
+  }
+
+  // Phase X.S3 H3 — persistent rate-limit by IP, email, domain.
+  const rate = await checkScanRateLimits({ ip, email, domain })
+  if (!rate.allowed) {
+    return NextResponse.json(
+      {
+        error: 'Daily limit reached (3 scans per day). Try again tomorrow.',
+        blocked_by: rate.blockedBy,
+      },
+      { status: 429 },
+    )
+  }
+
+  // 24h domain cache hit — hand back the existing job.
+  const cached = await getDomainCache(domain)
+  if (cached) {
+    return NextResponse.json({ success: true, job_id: cached.job_id, cached: true })
   }
 
   // Save lead
@@ -303,9 +310,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Failed to create scan job.' }, { status: 500 })
   }
 
+  await Promise.allSettled([
+    recordScanAttempt({ ip, email, domain }),
+    setDomainCache(domain, job.id, 'queued'),
+  ])
+
   // Fire background scan
   void runScan(job.id, domain).catch((err: unknown) => {
     console.error('[discover/register] background scan failure', err)
+    void updateDomainCacheStatus(domain, 'failed').catch(() => {})
   })
 
   // Determine origin for magic link redirect
