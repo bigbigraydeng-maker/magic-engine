@@ -1,18 +1,28 @@
 /**
+ * GET /api/clients/[id]/execution/[itemId]
+ *   Read a single execution item (used by kanban for "is this still
+ *   the current DB state?" checks before optimistic updates).
+ *
  * PATCH /api/clients/[id]/execution/[itemId]
+ *   Update an execution item — supports status / title / description /
+ *   content_post_id / sort_order / generation lifecycle fields.
+ *   All meaningful changes are mirrored to execution_logs.
  *
- * 更新执行项 —— 支持状态变更 + 标题/说明编辑（处方"活化" P8.10.S5.2）。
- * 所有变更自动写入 execution_logs 时间线。
+ *   Body (at least one field required): {
+ *     status?:                'pending' | 'in_progress' | 'completed' | 'skipped'
+ *     title?:                 string
+ *     description?:           string
+ *     note?:                  string                    — optional FDE note
+ *     content_post_id?:       string | null
+ *     sort_order?:            number
+ *     generation_started_at?: string | null             — ISO timestamp; null clears
+ *     generation_error?:      string | null             — error message; null clears
+ *   }
  *
- * Body（status / title / description 至少一项）: {
- *   status?:      'pending' | 'in_progress' | 'completed' | 'skipped'
- *   title?:       string   — 编辑标题
- *   description?: string   — 编辑说明
- *   note?:        string   — 可选，附带一条 FDE 备注
- * }
+ * DELETE /api/clients/[id]/execution/[itemId]
+ *   Soft-revocable removal — pending items only.
  *
- * Security: Bearer token (INTERNAL_API_KEY)
- * Reference: ROADMAP.md P8.10.S4.1 / S5.2
+ * Security: dashboard session via requireDashboardClientAccess.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -29,6 +39,27 @@ const STATUS_LABEL: Record<ExecutionItemStatus, string> = {
   in_progress: '进行中',
   completed:   '已完成',
   skipped:     '已跳过',
+}
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: { id: string; itemId: string } },
+): Promise<NextResponse> {
+  const { id: clientId, itemId } = params
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
+  }
+  const { data, error } = await supabaseAdmin
+    .from('execution_items')
+    .select('*')
+    .eq('id', itemId)
+    .eq('client_id', clientId)
+    .single<ExecutionItem>()
+  if (error || !data) {
+    return NextResponse.json({ success: false, error: 'Execution item not found' }, { status: 404 })
+  }
+  return NextResponse.json({ success: true, item: data })
 }
 
 export async function PATCH(
@@ -50,6 +81,9 @@ export async function PATCH(
       note?: string
       content_post_id?: string | null // 内容飞轮闭环：关联/解除关联 content_post
       sort_order?: number             // Phase 20.D：拖拽排序
+      // Generation lifecycle (kanban "制作中 / 失败" tracking)
+      generation_started_at?: string | null
+      generation_error?:      string | null
     }
 
     const newTitle = typeof body.title === 'string' ? body.title.trim() : undefined
@@ -58,10 +92,12 @@ export async function PATCH(
     const hasEdit = newTitle !== undefined || newDesc !== undefined
     const hasContentLink = body.content_post_id !== undefined // null 表示解除关联
     const hasSort = typeof body.sort_order === 'number'
+    const hasGenStart = body.generation_started_at !== undefined // null = clear
+    const hasGenError = body.generation_error !== undefined       // null = clear
 
-    if (!hasStatus && !hasEdit && !hasContentLink && !hasSort) {
+    if (!hasStatus && !hasEdit && !hasContentLink && !hasSort && !hasGenStart && !hasGenError) {
       return NextResponse.json(
-        { success: false, error: 'status / title / description / content_post_id / sort_order 至少要有一项' },
+        { success: false, error: 'status / title / description / content_post_id / sort_order / generation_* 至少要有一项' },
         { status: 400 },
       )
     }
@@ -119,6 +155,10 @@ export async function PATCH(
     }
     // Phase 20.D: sort_order update (drag-reorder, no log entry)
     if (hasSort) patch.sort_order = body.sort_order
+
+    // Generation lifecycle — kanban "制作中 / 失败 [重试]" UI driver
+    if (hasGenStart) patch.generation_started_at = body.generation_started_at
+    if (hasGenError) patch.generation_error      = body.generation_error
 
     const { data, error } = await supabaseAdmin
       .from('execution_items')
