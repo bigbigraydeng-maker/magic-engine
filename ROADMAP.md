@@ -1,42 +1,9 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-04 21:05 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-04 20:59 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
-
----
-
-## ⚔️ 决战日 · 1 周咨询式交付收尾（D-Day = 2026-06-11）
-
-> PM 决策（2026-06-04 子牙对齐）：推广话术 = **「咨询式交付（FDE 重度参与）」**。
-> 不卖全自动飞轮，卖「诊断 + 战略 + 内容落地」。决战日 = 让 FDE 能 4 小时内零卡点跑通完整咨询链。
-> **通过标准**：新 FDE 拿到 ME 账号 → 新建客户 → 张骞 → 华佗 → 诸葛亮 → Goal → Initiative → Marketing Plan → Kanban → 内容 → 发布 → 月报 HTML → Portal 链接 — 整条链不卡、不报错、不需要 Claude 救场。
-
-### 倒排（D1-D5）
-
-| 天 | 范围 | 必须完成 |
-|----|------|---------|
-| **D1** 周五 06-05 | A2.2/A2.3 收尾 + 修 UI 缺口 | ① Oztop brand_search_volume Goal 走通（验证 GSC = 48 clicks）<br/>② A2.3 Oztop GA4 generate_lead 配置（15 min PM 操作）<br/>③ PR #353 GoalBanner 修复 merged |
-| **D2** 周一 06-08 | 新客户冷启动走查 | 新建一个全新假客户（如「Magic Lab 粉丝丰」），从 0 跑：建客户 → 张骞 → 华佗 → 诸葛亮 → Goal → 内容 → Portal。**每一步记 1 行卡点**（不立刻修）|
-| **D3** 周二 06-09 | 修 D2 跑出的硬卡点 | 子牙 + Codex 分工：硬卡点（让 FDE 走不下去）必修；软问题登记 ROADMAP 二期 |
-| **D4** 周三 06-10 | CTS / Oztop 双客户完整回归 | 两个客户都走一遍，用最近 30 天真实数据。生成的产物（博客/Reels/月报）人工评估质量 |
-| **D5** 周四 06-11 决战日 | 最终检查 + 推广素材准备 | ① 所有硬卡点 merged<br/>② `npm test` 100% 通过<br/>③ 「FDE 操作手册」初稿（子牙生成 → PM 复核 → `docs/sops/fde-end-to-end-playbook.md`）<br/>④ CTS demo 录屏走完整链路 |
-
-### 砍掉清单（明确不做，登记到二期）
-
-- Attribution job 优化（已实装可用，FDE 暂不深究）
-- Google Ads / TikTok Ads 真接通（咨询式不需要自动执行）
-- 月报 PDF 自动生成 + 邮件发送（HTML + Ctrl+P 够用）
-- Outcome chip 数据可视化打磨（已优雅降级）
-- 任何新功能开发
-
-### PM 推广前置（D3-D5 并行准备）
-
-- 价目表 / 服务套餐定义
-- 客户准入条件（最小数据要求：GSC + GA4 + 网站 + 社媒账号）
-- 首批目标客户名单（5-10 个，FDE 容量上限）
-- 着陆页文案核对（Discovery vs FDE 分层定价仍生效）
 
 ---
 

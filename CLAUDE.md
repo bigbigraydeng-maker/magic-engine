@@ -307,34 +307,18 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-06-04 21:05 NZST （**A2.2 GSC 品牌搜索量上线 (PR #336) + Kanban Content Workbench UX 4 连击 (PR #327) + Phase 33 全部测试通过 ✅**）
-
-### ⚔️ 决战日（D-Day = 2026-06-11 周四）— 1 周咨询式交付收尾
-
-> PM 已确认：推广卖「咨询式交付（FDE 重度参与）」，不卖全自动飞轮。详见 [ROADMAP.md § 决战日](./ROADMAP.md#%EF%B8%8F-%E5%86%B3%E6%88%98%E6%97%A5--1-%E5%91%A8%E5%92%A8%E8%AF%A2%E5%BC%8F%E4%BA%A4%E4%BB%98%E6%94%B6%E5%B0%BE)。
-
-| 日期 | 必须完成 | 状态 |
-|------|---------|------|
-| **D1 周五 06-05** | ① Oztop brand_search_volume Goal 走通（预期 GSC=48）<br/>② A2.3 Oztop GA4 generate_lead 配置（15 min PM）<br/>③ PR #353 GoalBanner merged | 🔄 进行中 |
-| **D2 周一 06-08** | 新建假客户「Magic Lab 粉丝丰」（或类似）从 0 跑：建客户→张骞→华佗→诸葛亮→Goal→内容→Portal。每步记 1 行卡点（不立刻修） | 📋 |
-| **D3 周二 06-09** | 修 D2 跑出的硬卡点（子牙 + Codex 分工）；软问题登记二期 | 📋 |
-| **D4 周三 06-10** | CTS / Oztop 双客户完整回归 + 内容质量人工评估 | 📋 |
-| **D5 周四 06-11 决战日** | ① 所有硬卡点 merged ② `npm test` 100% ③ FDE 操作手册（子牙生成+PM 复核）④ CTS demo 录屏 | 📋 |
-
-**砍掉清单（明确不做）**：Attribution job 优化 / Google·TikTok Ads 接通 / 月报 PDF 自动生成 / Outcome chip 打磨 / 任何新功能开发
-
-### 其他活跃议题（决战日期间次优先）
+> 最后更新：2026-06-04 20:59 NZST （**A2.2 GSC 品牌搜索量上线 (PR #336) + Kanban Content Workbench UX 4 连击 (PR #327) + Phase 33 全部测试通过 ✅**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **PM 操作（Meta Ads）🔴** | Render 设 `META_SYSTEM_USER_TOKEN`（长效 System User Token），否则执行看板「直接执行 (Meta API)」返回 424 | ⚠️ 待操作（决战日后） |
-| **GBP.0** | Google Cloud：enable Business Profile API + Account Management API | ⚠️ PM 操作（决战日后） |
+| **🧪 A2.2 端到端验证** | PR #336 已 merged。等 Render 部署完后：①CTS 客户建 Goal 主指标=`brand_search_volume` ②Supabase clients 表 CTS 行的 `brand_aliases` 填 `{"cts tours","cts travel","china travel service","ctsnz"}` ③Goal 详情页主指标卡应显示 ~166 + 数据源 "GSC clicks (28-day brand searches)" ④Oztop 同样跑一遍（aliases `{"oztop building supplies","oz top"}`）。SOP: `docs/sops/brand-aliases-setup-for-gsc.md` | ⚠️ 今日晚上跑 |
+| **A2.3 Oztop GA4 generate_lead 配置** | PM 已熟练 SOP，15 分钟跑完同样配置。GTM trigger + GA4 Event Tag + Mark as key event | 📋 PM 操作 / 15 分钟 |
+| **A3 案例沉淀** | A2.1/A2.2/A2.3 全部跑通后，把 CTS/Oztop 经验固化到 Clients/ 笔记 | 📋 半天（A2 全部上线后做）|
 | **B1 AU/NZ Marketing Index** | 独立项目战略议题，Q4 2026 评估 → Q1 2027 启动 MVP | 📋 战略级 / 6-8 周 |
+| **PM 操作（Meta Ads）🔴** | Render 设 `META_SYSTEM_USER_TOKEN`（长效 System User Token），否则执行看板「直接执行 (Meta API)」返回 424 | ⚠️ 待操作 |
+| **GBP.0** | Google Cloud：enable Business Profile API + Account Management API | ⚠️ PM 操作 |
 
 **已完成全景（最近几个 Phase）**：
-- ✅ **A2.2 CTS Tours brand_search_volume 端到端验证通过**（2026-06-04 子牙陪 PM 走 UI）：CTS aliases 写入 `{cts tours, cts travel, china travel service, ctsnz, ctstours}`，Goal 详情页 CURRENT=184，数据源标注 `GSC clicks (28-day brand searches)` ✅。同时为 oztop 预填 aliases `{oztop, oztop building supplies, oz top}`，预期 Goal CURRENT=48 待 PM 在 UI 建 Goal 验证。Build 通过（GoalBanner 改动 tsc clean）
-- ✅ **GoalBanner 单 active 缺 + New Goal 入口 修复**（2026-06-04，PR #353）：Phase 32 多 active 设计下，0/2+ Goal 都有 +New Goal 按钮，单 active 反而没有。补上工具栏 + 删死 `showHistory` prop。PM 验证 Oztop 加第二个 Goal 时撞上的缺口
-- ✅ **FDE 鉴权扩 fde access_type**（2026-06-04，PR #346 merged）：`getDashboardClientIds` 漏 `'fde'` 导致 FDE 用户无法访问自己负责的客户（前端显示 "Client not found"），加 `'fde'` 进白名单 + 即时 DB hotfix
 - ✅ **A2.2 brand_search_volume GSC 接入**（2026-06-04，PR #336 merged）：Goal 主指标 `brand_search_volume` 改读 GSC rolling 28 天品牌词 clicks（替代 DataForSEO 估算）。两层解析（GSC 优先 / DataForSEO fallback）。**P0 修复**：发现 token equality 漏 80% 多词品牌（CTS "cts tours" 不能匹配域名根 "ctstours"），新增 `clients.brand_aliases` 字段 + substring 匹配（不污染原 isBrandedKeyword）。+ SOP 文档。17 测试通过，CTS 真实数据回归验证 166 brand clicks（之前 ~5）
 - ✅ **Kanban Content Workbench UX 4 连击**（2026-06-04，PR #327 merged）：FDE 最高频用的内容生成工作台 — 修 4 个痛点（反复点击 / 看不到进度 / prompt 太小 / 失败回退）+ 顺手修 1 个生产 CRITICAL bug（不存在的 GET endpoint 把 completed item 拉回 in_progress）。子牙+魏征双审，三阶段状态机 + useRef 同步去重 + 卡片三态（制作中/失败重试/超时）。8 commits，45/45 测试通过
 - ✅ **Phase 33 P33.9/P33.10 + M4 测试回归通过**（2026-06-04）：Goal filter 状态 chips、未归类分组、Goal 详情页 Execution Progress 卡片、Initiative 完成率 chip、Campaign 状态点 — 数据层 + UI 层全部跑通。Phase 33 整体收官
