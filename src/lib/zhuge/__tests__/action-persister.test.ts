@@ -43,12 +43,13 @@ function makeZhugeOutput(actions: PriorityAction[]): ZhugeOutput {
 //   1. zhuge_sessions.upsert().select('id').single()
 //   2. flywheel_actions.select().eq().eq().limit()   (idempotency check)
 //   3. flywheel_actions.insert().select()             (insert — only if not idempotent)
-//   4. execution_items.select().eq().eq().in()        (dedup check — async, non-blocking)
+//   4. execution_items.select().eq().eq().in()        (dedup check)
 //   5. execution_items.update().in()                  (supersede — optional)
 //   6. execution_items.insert()                       (new items — optional)
 //
-// Because execution_items writes are fire-and-forget (void), their mock never
-// needs to satisfy the outer test assertions.
+// execution_items writes are now awaited (not fire-and-forget), so their mock
+// must respond correctly — otherwise a write failure bubbles up and changes the
+// outer result. Routed by method name so the dynamic call sequence stays valid.
 
 interface TableMockConfig {
   sessionId?: string
@@ -56,6 +57,11 @@ interface TableMockConfig {
   flywheelInserted?: { id: string }[]
   flywheelInsertError?: string
   flywheelCheckError?: string
+  /** Existing pending execution_items rows the dedup query returns. */
+  executionExisting?: { id: string; action_type: string; source: string; zhuge_session_id: string | null }[]
+  executionSelectError?: string
+  executionUpdateError?: string
+  executionInsertError?: string
 }
 
 function makeTableAwareMock(cfg: TableMockConfig = {}) {
@@ -90,22 +96,32 @@ function makeTableAwareMock(cfg: TableMockConfig = {}) {
     }),
   }
 
-  // execution_items: any access — non-blocking, use a permissive chain
-  const executionSelectChain = {
+  // execution_items: writeExecutionItems issues a dynamic call sequence —
+  //   always   select().eq().eq().in()        (dedup query)
+  //   if any   update().in()                   (supersede — only when needed)
+  //   if any   insert(rows)                     (new rows — only when needed)
+  // Route by method name (not call count) so the mock stays correct whether or
+  // not the supersede branch runs. select() resolves the dedup result; in() on
+  // the select chain returns the configured existing rows.
+  const executionExistingRows = cfg.executionExisting ?? []
+  const executionChain = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
-    in: vi.fn().mockResolvedValue({ data: [], error: null }),
-  }
-  const executionUpdateChain = {
-    update: vi.fn().mockReturnThis(),
-    in: vi.fn().mockResolvedValue({ error: null }),
-  }
-  const executionInsertChain = {
-    insert: vi.fn().mockResolvedValue({ error: null }),
+    in: vi.fn().mockResolvedValue({
+      data: executionExistingRows,
+      error: cfg.executionSelectError ? { message: cfg.executionSelectError } : null,
+    }),
+    update: vi.fn().mockReturnValue({
+      in: vi.fn().mockResolvedValue({
+        error: cfg.executionUpdateError ? { message: cfg.executionUpdateError } : null,
+      }),
+    }),
+    insert: vi.fn().mockResolvedValue({
+      error: cfg.executionInsertError ? { message: cfg.executionInsertError } : null,
+    }),
   }
 
   let flywheelCallCount = 0
-  let executionCallCount = 0
 
   const supabase = {
     from: vi.fn((table: string) => {
@@ -114,16 +130,12 @@ function makeTableAwareMock(cfg: TableMockConfig = {}) {
         flywheelCallCount++
         return flywheelCallCount === 1 ? flywheelSelectChain : flywheelInsertChain
       }
-      if (table === 'execution_items') {
-        executionCallCount++
-        if (executionCallCount === 1) return executionSelectChain
-        if (executionCallCount === 2) return executionUpdateChain
-        return executionInsertChain
-      }
+      if (table === 'execution_items') return executionChain
       return { insert: vi.fn().mockResolvedValue({ error: null }) }
     }),
     _flywheelInsertChain: flywheelInsertChain,
     _flywheelSelectChain: flywheelSelectChain,
+    _executionChain: executionChain,
   }
   return supabase
 }
@@ -367,5 +379,50 @@ describe('persistZhugeActions()', () => {
 
     const expected = buildSessionKey('client-abc', 'disc-xyz', 'run-999')
     expect(result.session_key).toBe(expected)
+  })
+
+  // ── execution_items kanban write (awaited, not fire-and-forget) ──────────────
+  // Regression guard for the serverless bug where un-awaited execution_items
+  // writes were killed when the cron handler returned. These assert the kanban
+  // insert actually happens before persistZhugeActions resolves.
+
+  it('awaits the execution_items insert on the normal path (kanban write lands)', async () => {
+    const supabase = makeTableAwareMock({
+      flywheelExisting: [],
+      flywheelInserted: [{ id: 'a1' }],
+      executionExisting: [], // no existing pending rows → all actions are inserted
+    })
+
+    await persistZhugeActions(supabase as never, {
+      clientId: 'client-1',
+      discoveryId: 'discovery-1',
+      diagnosticRunId: 'run-1',
+      output: makeZhugeOutput([makeAction('seo', 'seo.publish_blog')]),
+    })
+
+    // The kanban insert must have been called (would be skipped/lost if fire-and-forget).
+    expect(supabase._executionChain.insert).toHaveBeenCalledTimes(1)
+    const rows = supabase._executionChain.insert.mock.calls[0][0] as Array<{ source: string; dimension: string }>
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ source: 'zhuge', dimension: 'seo' })
+  })
+
+  it('awaits the execution_items insert on the idempotent path too', async () => {
+    // flywheel_actions already exist (idempotent), but a fresh session still
+    // needs the kanban rows written — and that write must be awaited.
+    const supabase = makeTableAwareMock({
+      flywheelExisting: [{ id: 'existing-1' }],
+      executionExisting: [],
+    })
+
+    const result = await persistZhugeActions(supabase as never, {
+      clientId: 'client-1',
+      discoveryId: 'discovery-1',
+      diagnosticRunId: 'run-1',
+      output: makeZhugeOutput([makeAction('seo', 'seo.refresh_blog')]),
+    })
+
+    expect(result.idempotent).toBe(true)
+    expect(supabase._executionChain.insert).toHaveBeenCalledTimes(1)
   })
 })

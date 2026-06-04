@@ -167,9 +167,15 @@ export async function persistZhugeActions(
 
   if (existing && existing.length > 0) {
     // ── 3a. Execution items (idempotent path — still need to write items if new session) ──
-    void writeExecutionItems(supabase, input.clientId, zhugeSessionId, input.output.top_actions).catch(
-      (err: unknown) => console.warn('[action-persister] execution_items write failed (idempotent path):', err instanceof Error ? err.message : String(err)),
-    )
+    // Awaited (not fire-and-forget): on Render serverless the handler returns
+    // immediately after this function resolves, killing any un-awaited promise
+    // before the kanban rows are written. try/catch preserves the original
+    // "execution_items failure must not break the main flow" intent.
+    try {
+      await writeExecutionItems(supabase, input.clientId, zhugeSessionId, input.output.top_actions)
+    } catch (err: unknown) {
+      console.warn('[action-persister] execution_items write failed (idempotent path):', err instanceof Error ? err.message : String(err))
+    }
     return {
       inserted: 0,
       idempotent: true,
@@ -200,10 +206,17 @@ export async function persistZhugeActions(
     ids = (inserted as { id: string }[]).map((r) => r.id)
   }
 
-  // ── 3b. Write to execution_items (all 6 dimensions, non-blocking) ───────────
-  void writeExecutionItems(supabase, input.clientId, zhugeSessionId, input.output.top_actions).catch(
-    (err: unknown) => console.warn('[action-persister] execution_items write failed:', err instanceof Error ? err.message : String(err)),
-  )
+  // ── 3b. Write to execution_items (all 6 dimensions) ─────────────────────────
+  // Awaited (not fire-and-forget): on Render serverless an un-awaited promise is
+  // killed when the cron handler returns, so the kanban rows would never land
+  // (flywheel_actions, written synchronously above, survived — execution_items
+  // did not). try/catch keeps an execution_items failure from breaking the main
+  // flow now that flywheel_actions has already committed.
+  try {
+    await writeExecutionItems(supabase, input.clientId, zhugeSessionId, input.output.top_actions)
+  } catch (err: unknown) {
+    console.warn('[action-persister] execution_items write failed:', err instanceof Error ? err.message : String(err))
+  }
 
   return {
     inserted: ids.length,
