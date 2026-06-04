@@ -218,13 +218,25 @@ export function findingsToActions(findings: SeoPatrolFinding[]): PriorityAction[
       // action): the keyword the rule identified, plus rule context. The
       // article studio reads steps_json.keyword to prefill the keyword field,
       // so the FDE doesn't have to extract it from the description by eye.
+      //
+      // Phase 22.E.S9: also carry the full signal set so the "expected impact"
+      // card can compute 90-day uplift without a second DB read. position_delta
+      // and ctr/ctr_benchmark/impressions are what `computeExpectedImpact`
+      // reads for stale_content and low_ctr_title branches respectively.
       metadata: {
         keyword: f.keyword,
         url: f.url,
         rule_id: f.ruleId,
         position: f.position,
+        prior_position:
+          f.position !== null && f.positionDelta !== null
+            ? f.position - f.positionDelta
+            : null,
+        position_delta: f.positionDelta,
         search_volume: f.searchVolume,
         keyword_difficulty: f.keywordDifficulty,
+        ctr: f.ctr,
+        ctr_benchmark: f.ctrBenchmark,
       },
       evidence_refs: [`seo_patrol:${f.ruleId}:${subject}`],
       expected_impact: RULE_IMPACT[f.ruleId],

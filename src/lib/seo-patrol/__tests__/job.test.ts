@@ -176,4 +176,51 @@ describe('findingsToActions', () => {
     expect(meta?.position).toBe(10)
     expect(meta?.rule_id).toBe('stale_content')
   })
+
+  it('derives prior_position from position - position_delta for stale_content (S9 regression guard)', () => {
+    // Phase 22.E.S9 — expected-impact stale_content branch needs prior_position
+    // to compute recovered clicks. job.ts derives it from (position - positionDelta).
+    const actions = findingsToActions([
+      finding({
+        ruleId: 'stale_content',
+        keyword: 'great wall tours',
+        position: 10,
+        positionDelta: 6,
+      }),
+    ])
+    const meta = actions[0].metadata as Record<string, unknown> | undefined
+    expect(meta?.prior_position).toBe(4)  // 10 - 6 = 4
+    expect(meta?.position_delta).toBe(6)
+  })
+
+  it('keeps prior_position null when finding has no positionDelta', () => {
+    // Defensive: keyword_opportunity findings have no positionDelta, so
+    // prior_position must stay null instead of being miscalculated.
+    const actions = findingsToActions([
+      finding({
+        ruleId: 'keyword_opportunity',
+        keyword: 'milford sound',
+        position: null,
+        positionDelta: null,
+      }),
+    ])
+    const meta = actions[0].metadata as Record<string, unknown> | undefined
+    expect(meta?.prior_position).toBeNull()
+    expect(meta?.position_delta).toBeNull()
+  })
+
+  it('carries ctr / ctr_benchmark for low_ctr_title findings (S9 regression guard)', () => {
+    const actions = findingsToActions([
+      finding({
+        ruleId: 'low_ctr_title',
+        keyword: 'cts tours',
+        position: 3,
+        ctr: 0.02,
+        ctrBenchmark: 0.11,
+      }),
+    ])
+    const meta = actions[0].metadata as Record<string, unknown> | undefined
+    expect(meta?.ctr).toBeCloseTo(0.02, 4)
+    expect(meta?.ctr_benchmark).toBeCloseTo(0.11, 4)
+  })
 })

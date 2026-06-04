@@ -19,6 +19,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import type { ExecutionItem } from '@/types/diagnostic'
 import { StudioArticleWorkbench, toArticlePost, type ArticlePost } from './StudioArticleWorkbench'
+import { computeExpectedImpact } from '@/lib/seo-patrol/expected-impact'
 
 const WORD_COUNT_OPTIONS = [800, 1000, 1200, 1500, 2000] as const
 
@@ -155,9 +156,30 @@ export function StudioArticleTab({ clientId, item, hasActiveCampaign, onGenerate
     )
   }
 
+  // Phase 22.E.S9 — expected impact card (90-day uplift estimate).
+  // Hidden when the action has no measurable keyword dimension (strategic /
+  // workflow tasks) — never shown as "estimate unavailable" because that
+  // would confuse the FDE about whether the system failed.
+  const impact = computeExpectedImpact(item.steps_json)
+
   // ── Pre-generation form ─────────────────────────────────────────────────────
   return (
     <div className="space-y-5 max-w-2xl">
+      {/* Expected impact (only when computable) */}
+      {impact && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+          <div className="text-[11px] font-bold text-emerald-700 tracking-wide">
+            📊 90 天预期影响
+          </div>
+          <div className="mt-1 text-lg font-black text-emerald-900">
+            每月增加 ~{Math.round(impact.clicks_per_month)} 点击
+          </div>
+          <div className="mt-1 text-[11px] text-emerald-800/70">
+            {impact.basis}
+          </div>
+        </div>
+      )}
+
       {/* Keyword / topic */}
       <div>
         <label className="block text-xs font-semibold text-gray-600 mb-1">
