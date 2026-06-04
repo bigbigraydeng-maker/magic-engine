@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-05 01:56 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-05 04:47 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -3497,6 +3497,50 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-06-05（CTS/Oztop Goal-Initiative-Campaign 业务架构对齐 + FDE SOP 落地）
+
+**触发**：PM 在 ME 后台尝试给 CTS 建第一个真实跑通的 Goal（M1：organic_traffic auto-fetch 验证），过程中暴露三层问题：
+
+1. **指标错配**：CTS/Oztop 各 3 个 active Goal，主指标全是 ME 读不到的（orders_count / monthly_revenue / inventory_units / placeholder）→ current_value 永远空
+2. **Initiative 孤儿**：3 个真活儿 initiative（带预算 / 带 hypothesis）全挂在已 archived 的旧 Goal 上 → 战略动作无家可归
+3. **Campaign 野生**：Oztop 「Elegant Walnut Clearance」campaign（38 social post + 3 plan + 2 package 在跑）无 initiative 引用 → 5 层执行链路（153 execution_items / 83 social_plans）跟新 Goal 体系**完全断开**
+
+**最初的盲点**：先尝试简单"调整 Goal 指标"，PM 两个犀利质问揭出真相 —— Q1「3 个 Goal 对应的 Initiative 呢？」+ Q2「所有 Goal 都流量/可见度，真正推广在哪里？」。摸完发现 marketing_plan / campaign 5 层骨架完整还在跑，只是"换头"（旧 Goal archive 了、新 Goal 还没接进去）。
+
+**11 处 DB 调整**（完整业务架构对齐）：
+
+1. archive 3 个错配 Goal（CTS新西兰曝光重复 / CTS ME营销Wave1 orders 空 / OZTop电商获客5w revenue 空）
+2. 改 active 1 个（Oztop Brisbane品牌曝光，从 draft → active）
+3. 新建 4 个指标对的 Goal（CTS AI 可见度 / Oztop 自然流量 / CTS 2026 团报名 leads_count / Oztop Walnut 清仓 monthly_revenue 手填）
+4. 新建 2 个 initiative（Oztop Walnut 清仓社媒推广 / CTS 2027 Silk Road 提前蓄水）
+5. 改 3 个旧 initiative 的 goal_id（CTS Ads / CTS SEO-Visa / Oztop SEO Phase 1 重新归属到指标对的新 Goal）
+6. 改 2 个 initiative 的 campaign_ids（修正 2026 Ads 误挂 Silk Road campaign 的错误 + SEO-Visa 通用流量不绑团）
+7. 改 1 个 Goal title（CTS 团报名询盘 → CTS 2026 Best of China 团报名，明确战线）
+
+**最终架构 — CTS 4 active Goal + 2 条独立战线**：
+
+- 🟦 **2026 Best of China 战线**：Goal「2026 团报名 leads_count」→ Initiative「Facebook + Google Ads — Oct 2026 Tours (fast/70%)」→ Campaign「Oct 2026 Spotlight — Three Tours」（36 social / 2 plan / 2 package）
+- 🟨 **2027 Silk Road 战线**：Goal「CTS 品牌搜索量提升 brand_search_volume 166」→ Initiative「2027 Silk Road 提前蓄水 (slow)」→ Campaign「Silk Road Discovery」（8 social / 2 plan / 2 package）
+- 🟩 **通用流量蓄水**：Goal「CTS 自然流增长 organic_traffic 525」→ Initiative「SEO + Content — China Visa-Free Travel NZ (slow/20%)」（不挂 campaign，因通用入口）
+- ⚪ **AI 可见度战场**：Goal「CTS AI 可见度提升 ai_visibility_score」→ 待挂 initiative
+
+**Oztop 4 active Goal**：
+- Oztop 自然流增长 organic_traffic 402 → SEO Phase 1 Brisbane Flooring
+- Brisbane品牌曝光 brand_search_volume 48 → 待挂
+- Oztop AI 可见度提升 → 待挂
+- Oztop Walnut 地板清仓 monthly_revenue 手填 → Walnut 清仓社媒推广 initiative → Elegant Walnut Clearance campaign（38 social）
+
+**SOP 落地**：[`docs/sops/goal-initiative-campaign-setup-for-fde.md`](./docs/sops/goal-initiative-campaign-setup-for-fde.md) —— 从今晚真实业务调整中淬出的 FDE 标准操作指南，含三层模型 / 指标白名单 / 战线拆分原则 / 错误自查清单 / CTS 真实案例参考。**未来 FDE onboarding 新客户或对齐老客户 Goal 体系时必读。**
+
+**发现的产品 bug（已记录待修，未在本次动）**：
+- Goal 向导 Step 2「精确匹配吃掉通用候选」过滤逻辑 bug —— 当 sub-type 被某个 metric 精确匹配时，会屏蔽 organic_traffic 等通用指标。临时绕过：sub-type 选「地理扩张」走 fallback。修法（未做）：把过滤改成「精确 + 通用 的并集」。
+
+**验证**：
+- M1 端到端：CTS organic_traffic Goal active 后，current_value=525 自动填，标签「GA4 (28-day sessions)」
+- DB 全景验证：8 active Goal，4 个挂上真活儿 initiative，3 条挂上 campaign（含 44 个 CTS social + 38 个 Oztop social 正确归属到 Goal 体系）
+
+---
 
 ### 2026-06-05（🚨 Schema 漂移事故修复 — PR #365 ✅ 13 处缺失对象补齐）
 
