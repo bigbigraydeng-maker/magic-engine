@@ -68,6 +68,21 @@ export interface UpsertCmsConnectionParams {
 // ─── Content target validation (mirror of DB CHECK constraint) ───────────────
 
 /**
+ * Thrown by normaliseContentTargets when caller input fails the MVP whitelist.
+ *
+ * B2 carryover from 魏征 B1 review: previously route handlers used
+ * `message.startsWith('Invalid content target')` to distinguish 400 vs 500.
+ * That was fragile — any wording change would silently degrade to 500. Routes
+ * now check `err instanceof CmsContentTargetValidationError`.
+ */
+export class CmsContentTargetValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'CmsContentTargetValidationError'
+  }
+}
+
+/**
  * Normalises the caller-supplied list, throwing if any element fails the
  * whitelist. We validate in JS first so the API can return a 400 with a clean
  * message instead of bubbling a Postgres CHECK violation up to the FDE.
@@ -77,12 +92,12 @@ export function normaliseContentTargets(
 ): CmsContentTarget[] {
   if (input === undefined || input === null) return []
   if (!Array.isArray(input)) {
-    throw new Error('contentTargets must be an array')
+    throw new CmsContentTargetValidationError('contentTargets must be an array')
   }
   const out: CmsContentTarget[] = []
   for (const raw of input) {
     if (!isCmsContentTarget(raw)) {
-      throw new Error(
+      throw new CmsContentTargetValidationError(
         'Invalid content target — expected {path, syntax (html|php), role (global_head), label?}',
       )
     }
@@ -91,7 +106,7 @@ export function normaliseContentTargets(
     // a 500 from the Postgres constraint violation.
     const trimmedPath = raw.path.trim()
     if (trimmedPath === '') {
-      throw new Error(
+      throw new CmsContentTargetValidationError(
         'Invalid content target — path cannot be blank',
       )
     }

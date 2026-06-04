@@ -24,10 +24,36 @@ import {
   upsertConnection,
   deleteConnection,
   updateContentTargets,
+  CmsContentTargetValidationError,
 } from '@/lib/cms/connection-store'
 
 interface RouteContext {
   params: { id: string }
+}
+
+/**
+ * B2 carryover (魏征 B1 review #B2-2): collapse the POST + PATCH catch blocks
+ * into one helper, and use `instanceof CmsContentTargetValidationError`
+ * instead of fragile `message.startsWith()` to distinguish 400 from 500.
+ */
+function respondCmsConnectError(
+  err:     unknown,
+  clientId: string,
+  routeTag: string,
+  fallback: { message: string; code: string },
+): NextResponse {
+  if (err instanceof CmsContentTargetValidationError) {
+    return NextResponse.json(
+      { success: false, error: err.message, code: 'INVALID_CONTENT_TARGETS' },
+      { status: 400 },
+    )
+  }
+  const message = err instanceof Error ? err.message : 'Unknown error'
+  console.error(routeTag, clientId, message)
+  return NextResponse.json(
+    { success: false, error: fallback.message, code: fallback.code },
+    { status: 500 },
+  )
 }
 
 // ─── POST ─────────────────────────────────────────────────────────────────────
@@ -107,19 +133,10 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
     return NextResponse.json({ success: true, data: status })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    // Validation errors from normaliseContentTargets are caller-facing — pass through.
-    if (message.startsWith('Invalid content target') || message.startsWith('contentTargets')) {
-      return NextResponse.json(
-        { success: false, error: message, code: 'INVALID_CONTENT_TARGETS' },
-        { status: 400 },
-      )
-    }
-    console.error('[cms/connect POST]', clientId, message)
-    return NextResponse.json(
-      { success: false, error: 'Failed to save connection', code: 'DB_ERROR' },
-      { status: 500 },
-    )
+    return respondCmsConnectError(err, clientId, '[cms/connect POST]', {
+      message: 'Failed to save connection',
+      code:    'DB_ERROR',
+    })
   }
 }
 
@@ -160,18 +177,10 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
     }
     return NextResponse.json({ success: true, data: status })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    if (message.startsWith('Invalid content target') || message.startsWith('contentTargets')) {
-      return NextResponse.json(
-        { success: false, error: message, code: 'INVALID_CONTENT_TARGETS' },
-        { status: 400 },
-      )
-    }
-    console.error('[cms/connect PATCH]', clientId, message)
-    return NextResponse.json(
-      { success: false, error: 'Failed to update content targets', code: 'DB_ERROR' },
-      { status: 500 },
-    )
+    return respondCmsConnectError(err, clientId, '[cms/connect PATCH]', {
+      message: 'Failed to update content targets',
+      code:    'DB_ERROR',
+    })
   }
 }
 
