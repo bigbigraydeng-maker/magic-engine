@@ -357,11 +357,20 @@ interface GeoContentTargetsCardProps {
 }
 
 function GeoContentTargetsCard({ clientId, initialTargets, onSaved }: GeoContentTargetsCardProps) {
-  const [rows, setRows]     = useState<CmsContentTarget[]>(initialTargets)
-  const [dirty, setDirty]   = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [error, setError]   = useState<string | null>(null)
+  const [rows, setRows]       = useState<CmsContentTarget[]>(initialTargets)
+  const [dirty, setDirty]     = useState(false)
+  const [saving, setSaving]   = useState(false)
+  const [error, setError]     = useState<string | null>(null)
   const [savedAt, setSavedAt] = useState<number | null>(null)
+
+  // M1 (魏征 B1 review): sync upstream changes when the FDE hasn't started
+  // editing yet. Without this, a successful save → onSaved() → fetchStatus()
+  // re-renders the parent with fresh contentTargets but rows stays on the
+  // stale local copy. We only re-seed when !dirty so we never silently
+  // overwrite unsaved edits.
+  useEffect(() => {
+    if (!dirty) setRows(initialTargets)
+  }, [initialTargets, dirty])
 
   const updateRow = (idx: number, patch: Partial<CmsContentTarget>) => {
     setRows(prev => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)))
@@ -376,19 +385,36 @@ function GeoContentTargetsCard({ clientId, initialTargets, onSaved }: GeoContent
     setDirty(true)
   }
 
+  // M2 (魏征 B1 review): never silently drop user input. If any row has a
+  // blank path, abort the save and tell the FDE exactly which row, so the
+  // "I added a target and it didn't save" footgun never fires.
   const handleSave = async () => {
     setError(null)
+    const blankIdx = rows.findIndex(r => r.path.trim() === '')
+    if (blankIdx !== -1) {
+      setError(`第 ${blankIdx + 1} 行缺少路径，请填写或删除该行`)
+      return
+    }
+
     setSaving(true)
     try {
-      // Strip empty rows so the FDE doesn't have to manually remove placeholders
-      const payload = rows.filter(r => r.path.trim() !== '')
       const res  = await fetch(`/api/clients/${clientId}/cms/connect`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content_targets: payload }),
+        body: JSON.stringify({ content_targets: rows }),
       })
-      const json = await res.json() as { success: boolean; error?: string }
+      const json = await res.json() as {
+        success: boolean
+        error?:  string
+        data?:   { contentTargets?: CmsContentTarget[] }
+      }
       if (!json.success) throw new Error(json.error ?? 'Save failed')
+
+      // M1: prefer server-canonical value so rows is always what's in the DB
+      // (server normalisation could trim, dedupe, etc).
+      if (json.data?.contentTargets) {
+        setRows(json.data.contentTargets)
+      }
       setDirty(false)
       setSavedAt(Date.now())
       onSaved()
@@ -406,6 +432,12 @@ function GeoContentTargetsCard({ clientId, initialTargets, onSaved }: GeoContent
         <p className="text-xs text-me-charcoal/60 mt-1 leading-relaxed">
           配置 GEO 指令要注入到仓库哪些模板文件的 <code className="font-mono">&lt;head&gt;</code>。
           支持纯 HTML / PHP 模板；Next.js / Vue / Astro 等组件框架暂不支持。
+        </p>
+        {/* M3 (魏征 B1 review): make it explicit that the publish path doesn't
+            consume this yet, so PMs verifying B1 don't think the config is broken. */}
+        <p className="text-xs text-me-charcoal/45 mt-2 italic">
+          ⓘ 配置已保存到数据库，但当前 GEO 部署仍走旧的「独立 snippet 文件 + PR」模式。
+          下一个 PR（Stage 1 升级）才会开始读取此列表，自动把 snippet 注入到指定模板里。
         </p>
       </div>
 

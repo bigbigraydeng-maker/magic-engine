@@ -86,8 +86,17 @@ export function normaliseContentTargets(
         'Invalid content target — expected {path, syntax (html|php), role (global_head), label?}',
       )
     }
+    // Trim BEFORE re-checking empty, so a whitespace-only path (which DB CHECK
+    // would reject as empty) is caught here as a 400 instead of bubbling up as
+    // a 500 from the Postgres constraint violation.
+    const trimmedPath = raw.path.trim()
+    if (trimmedPath === '') {
+      throw new Error(
+        'Invalid content target — path cannot be blank',
+      )
+    }
     out.push({
-      path:   raw.path.trim(),
+      path:   trimmedPath,
       syntax: raw.syntax,
       role:   raw.role,
       ...(raw.label !== undefined ? { label: raw.label } : {}),

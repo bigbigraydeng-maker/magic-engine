@@ -59,6 +59,18 @@ describe('normaliseContentTargets', () => {
     ).toThrow(/Invalid content target/)
   })
 
+  it('rejects whitespace-only path (M4 — was passing JS but failing DB CHECK as 500)', () => {
+    expect(() =>
+      normaliseContentTargets([{ path: '   ', syntax: 'html', role: 'global_head' }]),
+    ).toThrow(/path cannot be blank/)
+  })
+
+  it('rejects tab/newline-only path', () => {
+    expect(() =>
+      normaliseContentTargets([{ path: '\t\n', syntax: 'php', role: 'global_head' }]),
+    ).toThrow(/path cannot be blank/)
+  })
+
   it('rejects missing path', () => {
     expect(() =>
       normaliseContentTargets([{ syntax: 'html', role: 'global_head' }]),
