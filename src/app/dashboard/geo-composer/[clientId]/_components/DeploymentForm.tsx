@@ -79,40 +79,98 @@ export function DeploymentForm({
   const hasConnectedCms = connectedProviders.length > 0;
   const hasGithubOnly = !!(cmsProviders?.github?.connected) && !hasConnectedCms;
 
+  interface DriftedTarget {
+    path: string;
+    expected_hash: string;
+    live_hash: string;
+  }
+
   const [githubPr, setGithubPr] = useState<{
     loading: boolean;
     prUrl: string | null;
     prNumber: number | null;
+    targetPaths: string[];
     error: string | null;
-  }>({ loading: false, prUrl: null, prNumber: null, error: null });
+    errorCode: string | null;
+    drifted: DriftedTarget[];
+  }>({
+    loading: false,
+    prUrl: null,
+    prNumber: null,
+    targetPaths: [],
+    error: null,
+    errorCode: null,
+    drifted: [],
+  });
 
-  const handleOpenGithubPr = async () => {
-    setGithubPr({ loading: true, prUrl: null, prNumber: null, error: null });
+  const [showDriftDialog, setShowDriftDialog] = useState(false);
+
+  const runGithubPublish = async (forceOverwrite: boolean) => {
+    setGithubPr(prev => ({ ...prev, loading: true, error: null, errorCode: null, drifted: [] }));
     try {
       const res = await fetch(`/api/clients/${clientId}/cms/publish-geo-to-github`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force_overwrite: forceOverwrite }),
       });
       const data = await res.json() as {
         success: boolean;
         pr_url?: string;
         pr_number?: number;
+        target_paths?: string[];
         error?: string;
         code?: string;
+        drifted_targets?: DriftedTarget[];
+        hint?: string;
       };
       if (!res.ok || !data.success) {
-        throw new Error(data.error ?? 'Failed to open GitHub PR');
+        // Drift requires explicit FDE confirmation — surface a dialog,
+        // don't dump a raw error blob.
+        if (data.code === 'EXTERNAL_DRIFT' && (data.drifted_targets?.length ?? 0) > 0) {
+          setGithubPr(prev => ({
+            ...prev,
+            loading: false,
+            error: null,
+            errorCode: 'EXTERNAL_DRIFT',
+            drifted: data.drifted_targets ?? [],
+          }));
+          setShowDriftDialog(true);
+          return;
+        }
+        setGithubPr(prev => ({
+          ...prev,
+          loading: false,
+          error: data.error ?? 'Failed to open GitHub PR',
+          errorCode: data.code ?? null,
+          drifted: [],
+        }));
+        return;
       }
       setGithubPr({
         loading: false,
         prUrl: data.pr_url ?? null,
         prNumber: data.pr_number ?? null,
+        targetPaths: data.target_paths ?? [],
         error: null,
+        errorCode: null,
+        drifted: [],
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'GitHub PR failed';
-      setGithubPr({ loading: false, prUrl: null, prNumber: null, error: message });
+      setGithubPr(prev => ({
+        ...prev,
+        loading: false,
+        error: message,
+        errorCode: null,
+        drifted: [],
+      }));
     }
+  };
+
+  const handleOpenGithubPr = () => { void runGithubPublish(false); };
+  const handleConfirmForceOverwrite = () => {
+    setShowDriftDialog(false);
+    void runGithubPublish(true);
   };
 
   const handleRecordDeployment = async () => {
@@ -201,8 +259,9 @@ export function DeploymentForm({
             <h3 className="text-lg font-semibold">Deploy via GitHub PR</h3>
           </div>
           <p className="text-sm text-me-charcoal/55 mb-4">
-            Opens a pull request in your connected repository with the GEO snippet file.
-            Merge the PR on GitHub, then record the page URL below.
+            Magic Engine reads your configured template paths, injects the GEO
+            snippet inside each <code className="font-mono text-[11px]">&lt;head&gt;</code>,
+            and opens a pull request you can review &amp; merge.
           </p>
 
           {!githubPr.prUrl ? (
@@ -214,26 +273,60 @@ export function DeploymentForm({
               {githubPr.loading ? 'Opening PR…' : 'Open Pull Request'}
             </button>
           ) : (
-            <div className="p-3 bg-[#5C8A4A]/10 border border-[#5C8A4A]/30 rounded text-[#5C8A4A] text-sm">
-              PR #{githubPr.prNumber} opened —{' '}
+            <div className="p-3 bg-[#5C8A4A]/10 border border-[#5C8A4A]/30 rounded text-[#5C8A4A] text-sm space-y-2">
+              <div>
+                PR #{githubPr.prNumber} opened —{' '}
+                <a
+                  href={githubPr.prUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:text-[#4a7340] font-medium"
+                >
+                  Review &amp; merge on GitHub →
+                </a>
+              </div>
+              {githubPr.targetPaths.length > 0 && (
+                <ul className="text-xs text-[#4a7340] list-disc pl-5">
+                  {githubPr.targetPaths.map(p => (
+                    <li key={p}><code className="font-mono">{p}</code></li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {githubPr.error && githubPr.errorCode === 'NO_TARGETS_CONFIGURED' && (
+            <div className="mt-3 p-3 bg-me-ochre/10 border border-me-ochre/30 rounded text-me-ochre text-sm">
+              <p className="mb-1">{githubPr.error}</p>
               <a
-                href={githubPr.prUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline hover:text-[#4a7340] font-medium"
+                href={`/dashboard/clients/${clientId}?settings=cms`}
+                className="underline font-medium hover:text-me-ochre"
               >
-                Review &amp; merge on GitHub →
+                Open Settings → Website Connection →
               </a>
             </div>
           )}
 
-          {githubPr.error && (
+          {githubPr.error && githubPr.errorCode !== 'NO_TARGETS_CONFIGURED' && (
             <div className="mt-3 p-3 bg-[#C2453A]/10 border border-[#C2453A]/30 rounded text-[#C2453A] text-sm">
               {githubPr.error}
             </div>
           )}
         </div>
       )}
+
+      {/* Drift confirmation dialog */}
+      <ConfirmDialog
+        isOpen={showDriftDialog}
+        title="External edits detected"
+        message={`Magic Engine found ${githubPr.drifted.length} template file(s) whose ME-GEO block was changed outside this tool. Re-publish will replace those edits.\n\nAffected files:\n${githubPr.drifted.map(d => `  • ${d.path}`).join('\n')}`}
+        confirmLabel="Replace external edits"
+        cancelLabel="Cancel"
+        onConfirm={handleConfirmForceOverwrite}
+        onCancel={() => setShowDriftDialog(false)}
+        loading={githubPr.loading}
+      />
+
 
       {/* One-Click CMS Deploy — shown when a CMS is connected */}
       {hasConnectedCms && (

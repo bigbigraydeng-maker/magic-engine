@@ -164,10 +164,35 @@ export class GithubClient {
     )
   }
 
+  /**
+   * Close a pull request without merging.
+   * Used by GEO-B+ Stage 1 B2: when re-publishing the same directive, the
+   * previous still-open PR is closed and a fresh one opened, so review
+   * history on the old PR is preserved rather than force-pushed away.
+   */
+  async closePullRequest(owner: string, repo: string, prNumber: number): Promise<void> {
+    await this.request(
+      'PATCH',
+      `/repos/${owner}/${repo}/pulls/${prNumber}`,
+      { state: 'closed' },
+    )
+  }
+
+  /**
+   * Delete a branch reference. After closing a stale PR we tidy up the branch.
+   * Safe to call when the branch is already gone (caller should swallow 404).
+   */
+  async deleteBranch(owner: string, repo: string, branch: string): Promise<void> {
+    await this.request(
+      'DELETE',
+      `/repos/${owner}/${repo}/git/refs/heads/${branch}`,
+    )
+  }
+
   // ── Private request helper ──────────────────────────────────────────────────
 
   private async request<T>(
-    method: 'GET' | 'POST' | 'PUT',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path:   string,
     body?:  unknown,
   ): Promise<T> {

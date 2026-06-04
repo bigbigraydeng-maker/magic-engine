@@ -1,18 +1,26 @@
 /**
- * Tests for POST /api/clients/[id]/cms/publish-geo-to-github
+ * Tests for POST /api/clients/[id]/cms/publish-geo-to-github (B2 template-injection rev)
  *
- * Covers:
+ * Coverage:
  *   1. Auth guard → 403
- *   2. No GitHub connection → 422
- *   3. Connection not verified → 422
- *   4. No active GEO directive → 404
- *   5. Happy path → 200 + pr_url + pr_number
- *   6. Branch already exists (GitHub 422) → 409
- *   7. Generic GitHub API error → 502
+ *   2. No GitHub connection → 422 NO_CONNECTION
+ *   3. Connection not verified → 422 CONNECTION_NOT_VERIFIED
+ *   4. No content_targets configured → 422 NO_TARGETS_CONFIGURED
+ *   5. No active directive → 404 NO_DIRECTIVE
+ *   6. Template file missing in repo → 422 TEMPLATE_NOT_FOUND
+ *   7. Template has no </head> → 422 HEAD_TAG_NOT_FOUND
+ *   8. Drift detected (no force_overwrite) → 422 EXTERNAL_DRIFT + drifted_targets
+ *   9. Drift with force_overwrite=true → 200 (proceeds)
+ *  10. Happy path single target → 200 + commitFile called + recordDeployment
+ *  11. Happy path multi target → 200 + commitFile called per target
+ *  12. Stale blobSha (GitHub 409) → 409 STALE_BLOB_SHA
+ *  13. Closes stale PR before opening new one
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
+
+// ── Mocks ─────────────────────────────────────────────────────────────────────
 
 vi.mock('@/lib/auth/client-access', () => ({
   requireDashboardClientAccess: vi.fn(),
@@ -26,16 +34,27 @@ vi.mock('@/lib/cms/connection-store', () => ({
   getConnection: vi.fn(),
 }))
 
+vi.mock('@/lib/cms/geo-deployments-store', () => ({
+  findLatestLiveDeployment: vi.fn(),
+  findOpenDeployment:       vi.fn(),
+  markSuperseded:           vi.fn(),
+  recordDeployment:         vi.fn(),
+}))
+
 vi.mock('@/lib/geo/html-generator', () => ({
-  generateDirectiveHtml: vi.fn(() => '<div>GEO snippet</div>'),
+  generateDirectiveHtml: vi.fn(() => '<script>GEO</script>'),
 }))
 
 vi.mock('@/lib/cms/github-client', () => {
   const mockClient = {
+    getRepo:           vi.fn(),
+    getFileContent:    vi.fn(),
     getBranchSha:      vi.fn(),
     createBranch:      vi.fn(),
     commitFile:        vi.fn(),
     createPullRequest: vi.fn(),
+    closePullRequest:  vi.fn(),
+    deleteBranch:      vi.fn(),
   }
   return {
     GithubClient:   vi.fn(() => mockClient),
@@ -55,24 +74,41 @@ import { POST } from '../route'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getConnection } from '@/lib/cms/connection-store'
+import {
+  findLatestLiveDeployment,
+  findOpenDeployment,
+  markSuperseded,
+  recordDeployment,
+} from '@/lib/cms/geo-deployments-store'
 import * as githubClientModule from '@/lib/cms/github-client'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockGh = (githubClientModule as any).__mockClient as {
+  getFileContent:    ReturnType<typeof vi.fn>
   getBranchSha:      ReturnType<typeof vi.fn>
   createBranch:      ReturnType<typeof vi.fn>
   commitFile:        ReturnType<typeof vi.fn>
   createPullRequest: ReturnType<typeof vi.fn>
+  closePullRequest:  ReturnType<typeof vi.fn>
+  deleteBranch:      ReturnType<typeof vi.fn>
 }
 
 const CLIENT_ID = 'client-abc'
 const DIRECTIVE_ID = '12345678-abcd-0000-0000-000000000000'
 
-function makeRequest() {
+const HTML_TEMPLATE = `<!DOCTYPE html>
+<html>
+<head>
+  <title>Acme</title>
+</head>
+<body>Hello</body>
+</html>`
+
+function makeRequest(body: object = {}) {
   return new NextRequest(`http://localhost/api/clients/${CLIENT_ID}/cms/publish-geo-to-github`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({}),
+    body: JSON.stringify(body),
   })
 }
 
@@ -89,8 +125,8 @@ function mockAuth(ok: boolean) {
 
 function mockDirective(rows: unknown[] | null, error?: string) {
   const chain = {
-    select:     vi.fn().mockReturnThis(),
-    eq:         vi.fn().mockReturnThis(),
+    select:      vi.fn().mockReturnThis(),
+    eq:          vi.fn().mockReturnThis(),
     maybeSingle: vi.fn().mockResolvedValue({
       data:  rows ? rows[0] ?? null : null,
       error: error ? { message: error } : null,
@@ -99,8 +135,8 @@ function mockDirective(rows: unknown[] | null, error?: string) {
   vi.mocked(supabaseAdmin.from).mockReturnValue(chain as unknown as ReturnType<typeof supabaseAdmin.from>)
 }
 
-const GOOD_CONN = {
-  plainToken:     'ghp_testtoken',
+const CONN_WITH_TARGETS = {
+  plainToken:     'ghp_test',
   repoOwner:      'acme',
   repoName:       'website',
   branch:         'main',
@@ -110,7 +146,22 @@ const GOOD_CONN = {
   tokenHint:      'oken',
   lastError:      null,
   lastTestedAt:   null,
+  contentTargets: [
+    { path: 'layouts/main.html', syntax: 'html' as const, role: 'global_head' as const },
+  ],
+}
+
+const CONN_NO_TARGETS = {
+  ...CONN_WITH_TARGETS,
   contentTargets: [],
+}
+
+const CONN_MULTI_TARGETS = {
+  ...CONN_WITH_TARGETS,
+  contentTargets: [
+    { path: 'layouts/main.html', syntax: 'html' as const, role: 'global_head' as const },
+    { path: 'header.php',         syntax: 'php' as const,  role: 'global_head' as const },
+  ],
 }
 
 const DIRECTIVE_ROW = {
@@ -121,92 +172,241 @@ const DIRECTIVE_ROW = {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mockGh.getBranchSha.mockResolvedValue('abc123sha')
+  mockGh.getFileContent.mockResolvedValue({
+    sha:            'blobsha123',
+    content:        Buffer.from(HTML_TEMPLATE, 'utf8').toString('base64'),
+    size:           HTML_TEMPLATE.length,
+    decodedContent: HTML_TEMPLATE,
+  })
+  mockGh.getBranchSha.mockResolvedValue('basesha1234')
   mockGh.createBranch.mockResolvedValue(undefined)
   mockGh.commitFile.mockResolvedValue(undefined)
-  mockGh.createPullRequest.mockResolvedValue({ number: 42, html_url: 'https://github.com/acme/website/pull/42', title: 'GEO Directive' })
+  mockGh.createPullRequest.mockResolvedValue({
+    number:   42,
+    html_url: 'https://github.com/acme/website/pull/42',
+    title:    'GEO Directive',
+  })
+  vi.mocked(findLatestLiveDeployment).mockResolvedValue(null)
+  vi.mocked(findOpenDeployment).mockResolvedValue(null)
+  vi.mocked(recordDeployment).mockResolvedValue({
+    id:            'dep1',
+    client_id:     CLIENT_ID,
+    directive_id:  DIRECTIVE_ID,
+    target_path:   'layouts/main.html',
+    branch:        'geo-directive/12345678-x',
+    pr_number:     42,
+    pr_url:        'https://github.com/acme/website/pull/42',
+    injected_hash: 'h',
+    status:        'pending_pr',
+    created_at:    '',
+    updated_at:    '',
+  })
 })
 
-describe('POST /api/clients/[id]/cms/publish-geo-to-github', () => {
+describe('publish-geo-to-github route (B2)', () => {
   it('returns 403 when auth fails', async () => {
     mockAuth(false)
     const res = await POST(makeRequest(), makeContext())
     expect(res.status).toBe(403)
   })
 
-  it('returns 422 when no GitHub connection exists', async () => {
+  it('returns 422 NO_CONNECTION when no GitHub conn', async () => {
     mockAuth(true)
     vi.mocked(getConnection).mockResolvedValue(null)
     const res = await POST(makeRequest(), makeContext())
     expect(res.status).toBe(422)
-    const body = await res.json() as { code: string }
-    expect(body.code).toBe('NO_CONNECTION')
+    expect((await res.json() as { code: string }).code).toBe('NO_CONNECTION')
   })
 
-  it('returns 422 when connection is not verified', async () => {
+  it('returns 422 CONNECTION_NOT_VERIFIED', async () => {
     mockAuth(true)
-    vi.mocked(getConnection).mockResolvedValue({ ...GOOD_CONN, status: 'error', connected: false })
+    vi.mocked(getConnection).mockResolvedValue({ ...CONN_WITH_TARGETS, status: 'error', connected: false })
     const res = await POST(makeRequest(), makeContext())
     expect(res.status).toBe(422)
-    const body = await res.json() as { code: string }
-    expect(body.code).toBe('CONNECTION_NOT_VERIFIED')
+    expect((await res.json() as { code: string }).code).toBe('CONNECTION_NOT_VERIFIED')
   })
 
-  it('returns 404 when no active directive exists', async () => {
+  it('returns 422 NO_TARGETS_CONFIGURED when content_targets is empty', async () => {
     mockAuth(true)
-    vi.mocked(getConnection).mockResolvedValue(GOOD_CONN)
+    vi.mocked(getConnection).mockResolvedValue(CONN_NO_TARGETS)
+    const res = await POST(makeRequest(), makeContext())
+    expect(res.status).toBe(422)
+    expect((await res.json() as { code: string }).code).toBe('NO_TARGETS_CONFIGURED')
+  })
+
+  it('returns 404 NO_DIRECTIVE', async () => {
+    mockAuth(true)
+    vi.mocked(getConnection).mockResolvedValue(CONN_WITH_TARGETS)
     mockDirective([])
     const res = await POST(makeRequest(), makeContext())
     expect(res.status).toBe(404)
-    const body = await res.json() as { code: string }
-    expect(body.code).toBe('NO_DIRECTIVE')
+    expect((await res.json() as { code: string }).code).toBe('NO_DIRECTIVE')
   })
 
-  it('returns 200 with pr_url on happy path', async () => {
+  it('returns 422 TEMPLATE_NOT_FOUND when target file missing', async () => {
     mockAuth(true)
-    vi.mocked(getConnection).mockResolvedValue(GOOD_CONN)
+    vi.mocked(getConnection).mockResolvedValue(CONN_WITH_TARGETS)
+    mockDirective([DIRECTIVE_ROW])
+    const { GitHubApiError } = await import('@/lib/cms/github-client')
+    mockGh.getFileContent.mockRejectedValue(new GitHubApiError(404, 'Not Found'))
+
+    const res = await POST(makeRequest(), makeContext())
+    expect(res.status).toBe(422)
+    expect((await res.json() as { code: string }).code).toBe('TEMPLATE_NOT_FOUND')
+  })
+
+  it('returns 422 HEAD_TAG_NOT_FOUND when template lacks </head>', async () => {
+    mockAuth(true)
+    vi.mocked(getConnection).mockResolvedValue(CONN_WITH_TARGETS)
+    mockDirective([DIRECTIVE_ROW])
+    const BAD = '<html><body>No head</body></html>'
+    mockGh.getFileContent.mockResolvedValue({
+      sha:            'blobsha',
+      content:        Buffer.from(BAD, 'utf8').toString('base64'),
+      size:           BAD.length,
+      decodedContent: BAD,
+    })
+
+    const res = await POST(makeRequest(), makeContext())
+    expect(res.status).toBe(422)
+    expect((await res.json() as { code: string }).code).toBe('HEAD_TAG_NOT_FOUND')
+  })
+
+  it('returns 422 EXTERNAL_DRIFT when live hash ≠ recorded hash and no force', async () => {
+    mockAuth(true)
+    vi.mocked(getConnection).mockResolvedValue(CONN_WITH_TARGETS)
+    mockDirective([DIRECTIVE_ROW])
+    // Pre-existing block in template with content X; recorded hash = different
+    const TEMPLATE_WITH_BLOCK = `<html><head>
+<!-- ME-GEO-START (do not edit between these markers — managed by Magic Engine) -->
+<script>OLD</script>
+<!-- ME-GEO-END -->
+</head><body></body></html>`
+    mockGh.getFileContent.mockResolvedValue({
+      sha: 'b',
+      content: Buffer.from(TEMPLATE_WITH_BLOCK, 'utf8').toString('base64'),
+      size: TEMPLATE_WITH_BLOCK.length,
+      decodedContent: TEMPLATE_WITH_BLOCK,
+    })
+    vi.mocked(findLatestLiveDeployment).mockResolvedValue({
+      id:            'dep0',
+      client_id:     CLIENT_ID,
+      directive_id:  DIRECTIVE_ID,
+      target_path:   'layouts/main.html',
+      branch:        'old-branch',
+      pr_number:     1,
+      pr_url:        'u',
+      injected_hash: 'recorded_hash_does_not_match_live',
+      status:        'merged',
+      created_at:    '',
+      updated_at:    '',
+    })
+
+    const res = await POST(makeRequest({}), makeContext())
+    expect(res.status).toBe(422)
+    const body = await res.json() as { code: string; drifted_targets: Array<{ path: string }> }
+    expect(body.code).toBe('EXTERNAL_DRIFT')
+    expect(body.drifted_targets).toHaveLength(1)
+    expect(body.drifted_targets[0]?.path).toBe('layouts/main.html')
+    // GitHub should NOT have been touched
+    expect(mockGh.createBranch).not.toHaveBeenCalled()
+  })
+
+  it('proceeds when force_overwrite=true despite drift', async () => {
+    mockAuth(true)
+    vi.mocked(getConnection).mockResolvedValue(CONN_WITH_TARGETS)
+    mockDirective([DIRECTIVE_ROW])
+    const TEMPLATE_WITH_BLOCK = `<html><head>
+<!-- ME-GEO-START (do not edit between these markers — managed by Magic Engine) -->
+<script>EVIL</script>
+<!-- ME-GEO-END -->
+</head><body></body></html>`
+    mockGh.getFileContent.mockResolvedValue({
+      sha: 'b',
+      content: Buffer.from(TEMPLATE_WITH_BLOCK, 'utf8').toString('base64'),
+      size: TEMPLATE_WITH_BLOCK.length,
+      decodedContent: TEMPLATE_WITH_BLOCK,
+    })
+    vi.mocked(findLatestLiveDeployment).mockResolvedValue({
+      id:            'dep0',
+      client_id:     CLIENT_ID,
+      directive_id:  DIRECTIVE_ID,
+      target_path:   'layouts/main.html',
+      branch:        'old',
+      pr_number:     1,
+      pr_url:        'u',
+      injected_hash: 'no_match',
+      status:        'merged',
+      created_at:    '',
+      updated_at:    '',
+    })
+
+    const res = await POST(makeRequest({ force_overwrite: true }), makeContext())
+    expect(res.status).toBe(200)
+    expect(mockGh.createBranch).toHaveBeenCalled()
+  })
+
+  it('happy path: single target — opens PR + commits + records', async () => {
+    mockAuth(true)
+    vi.mocked(getConnection).mockResolvedValue(CONN_WITH_TARGETS)
     mockDirective([DIRECTIVE_ROW])
 
     const res = await POST(makeRequest(), makeContext())
     expect(res.status).toBe(200)
-    const body = await res.json() as { success: boolean; pr_url: string; pr_number: number; branch: string }
+    const body = await res.json() as { success: boolean; pr_url: string; target_paths: string[] }
     expect(body.success).toBe(true)
-    expect(body.pr_url).toBe('https://github.com/acme/website/pull/42')
-    expect(body.pr_number).toBe(42)
-    expect(body.branch).toMatch(/^geo-directive\//)
-
-    // Verify GitHub API calls
-    expect(mockGh.getBranchSha).toHaveBeenCalledWith('acme', 'website', 'main')
-    expect(mockGh.createBranch).toHaveBeenCalled()
-    expect(mockGh.commitFile).toHaveBeenCalled()
-    expect(mockGh.createPullRequest).toHaveBeenCalled()
+    expect(body.target_paths).toEqual(['layouts/main.html'])
+    expect(mockGh.commitFile).toHaveBeenCalledTimes(1)
+    // commitFile gets blobSha threaded for the GitHub If-Match guard
+    expect(mockGh.commitFile.mock.calls[0]).toEqual(expect.arrayContaining(['blobsha123']))
+    expect(vi.mocked(recordDeployment)).toHaveBeenCalledTimes(1)
   })
 
-  it('returns 409 when branch already exists (GitHub 422)', async () => {
+  it('happy path: multi target — commits per target', async () => {
     mockAuth(true)
-    vi.mocked(getConnection).mockResolvedValue(GOOD_CONN)
+    vi.mocked(getConnection).mockResolvedValue(CONN_MULTI_TARGETS)
     mockDirective([DIRECTIVE_ROW])
 
+    const res = await POST(makeRequest(), makeContext())
+    expect(res.status).toBe(200)
+    expect(mockGh.commitFile).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(recordDeployment)).toHaveBeenCalledTimes(2)
+  })
+
+  it('returns 409 STALE_BLOB_SHA when GitHub rejects commit due to sha mismatch', async () => {
+    mockAuth(true)
+    vi.mocked(getConnection).mockResolvedValue(CONN_WITH_TARGETS)
+    mockDirective([DIRECTIVE_ROW])
     const { GitHubApiError } = await import('@/lib/cms/github-client')
-    mockGh.createBranch.mockRejectedValue(new GitHubApiError(422, 'Reference already exists'))
+    mockGh.commitFile.mockRejectedValue(new GitHubApiError(409, 'sha does not match'))
 
     const res = await POST(makeRequest(), makeContext())
     expect(res.status).toBe(409)
-    const body = await res.json() as { code: string }
-    expect(body.code).toBe('BRANCH_EXISTS')
+    expect((await res.json() as { code: string }).code).toBe('STALE_BLOB_SHA')
   })
 
-  it('returns 502 on generic GitHub API error', async () => {
+  it('closes stale PR + supersedes row before opening new PR', async () => {
     mockAuth(true)
-    vi.mocked(getConnection).mockResolvedValue(GOOD_CONN)
+    vi.mocked(getConnection).mockResolvedValue(CONN_WITH_TARGETS)
     mockDirective([DIRECTIVE_ROW])
-
-    const { GitHubApiError } = await import('@/lib/cms/github-client')
-    mockGh.getBranchSha.mockRejectedValue(new GitHubApiError(401, 'Bad credentials'))
+    vi.mocked(findOpenDeployment).mockResolvedValue({
+      id:            'stale1',
+      client_id:     CLIENT_ID,
+      directive_id:  DIRECTIVE_ID,
+      target_path:   'layouts/main.html',
+      branch:        'geo-directive/old',
+      pr_number:     10,
+      pr_url:        'u',
+      injected_hash: 'h',
+      status:        'pending_pr',
+      created_at:    '',
+      updated_at:    '',
+    })
 
     const res = await POST(makeRequest(), makeContext())
-    expect(res.status).toBe(502)
-    const body = await res.json() as { code: string }
-    expect(body.code).toBe('GITHUB_API_ERROR')
+    expect(res.status).toBe(200)
+    expect(mockGh.closePullRequest).toHaveBeenCalledWith('acme', 'website', 10)
+    expect(mockGh.deleteBranch).toHaveBeenCalledWith('acme', 'website', 'geo-directive/old')
+    expect(vi.mocked(markSuperseded)).toHaveBeenCalledWith('stale1')
   })
 })
