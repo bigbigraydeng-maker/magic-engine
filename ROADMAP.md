@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-04 22:33 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-04 23:14 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -30,7 +30,7 @@
 | # | 任务 | 来源 | 工时 | 状态 | 谁做 |
 |---|------|------|------|------|------|
 | P0.1 | ✅ merge PR #354 A2.1-γ Goal current_value cron | open PR #354 | 30 min | ✅ 已 merged 2026-06-04 22:23 NZST | 子牙 |
-| P0.2 | 配 META_SYSTEM_USER_TOKEN（Render，否则执行看板「直接执行 Meta API」424） | 焦点表 | 5 min | ⚠️ 待 PM | PM Render |
+| P0.2 | 配 META_SYSTEM_USER_TOKEN（Render，否则执行看板「直接执行 Meta API」424） | 焦点表 | 30-60 min（含建 Meta App）| ⏸️ **半成品 — 2026-06-04 晚 PM 操作进度记录**：① ✅ CTStours Business Manager → 系统用户「Magic-Engine」(编号 61590547833867, Admin) 已建 ② ✅ 资产「CTS 广告账户」已分配 + 权限「管理营销活动（广告）」已开（含查看表现，最小权限） ③ 🚫 卡在「生成口令」：CTStours 业务资产组**无任何 Meta App**，必须先建 App 才能 generate token。PM 决定 6/4 晚到此为止 → 延后至决战日后 P1 sprint，**不影响 A2.1-γ cron**（不依赖 Meta token） | PM Render + Meta dev |
 | P0.3 | A2.1-γ 端到端验证（6/5 03:00 UTC cron 首跑后）：Goal 详情页看 current_value + auto.cron 标签；Oztop ai_visibility_score 不再 "industry not mapped"；SQL 手算与 cron 写值一致 | PR #354 验收 | 1 h | ⏳ 6/5 | PM UI + 子牙 SQL |
 | P0.4 | A2.2 端到端验证（PR #336 已 merged）：CTS Goal 主指标=brand_search_volume 显示 ~166 + 数据源 "GSC clicks (28-day brand)"；Oztop 同样跑 | 焦点表 + PR #336 | 30 min | ⏳ 6/5 | PM UI |
 | P0.5 | rebase + merge PR #353 New Goal 入口 | open PR #353 (CONFLICTING) | 30 min | ⏳ 6/5 | 子牙 |
@@ -46,17 +46,18 @@
 
 | 日期 | 计划 |
 |------|------|
-| **周三 6/4 晚** | ✅ P0.1 merge #354 ✓ · ⚠️ P0.2 PM 配 Meta token（5 min） |
+| **周三 6/4 晚** | ✅ P0.1 merge #354 · ⏸️ P0.2 半成品（System User + 资产已配，卡建 App 延后到 P1）· ✅ 收工 |
 | **周四 6/5** | 03:00 UTC A2.1-γ 首跑 → P0.3 + P0.4 + P0.8 同上午 PM 验收（~2h）· P0.5 子牙 rebase #353（30 min）· P0.10 S9 编码（6h） |
 | **周五 6/6 EOD freeze** | P0.10 S13 编码（4h）· P0.6 T-MP-Generate 排查（2-3h） |
 | **周六 6/7** | P0.7 PR #346 验收（30 min）· P0.9 A3 案例沉淀（4h）· buffer for 周末 hotfix |
 | **周日 6/8 决战日** | 演示彩排 · 只 hotfix · 零新 Task |
 
-### ⚠️ 3 个最大风险
+### ⚠️ 3 个最大风险（2026-06-04 晚更新）
 
-1. **CRON_SECRET 不配 = 所有 cron 静默失败**（A2.1-γ / Phase 30 月度 / Phase 31 daily 全废）。**PM 必须 6/4 今晚配**，否则 6/5 03:00 UTC cron 验收必失败
+1. ~~**CRON_SECRET 不配 = 所有 cron 静默失败**~~ → **已澄清**：CRON_SECRET 早已配置（GSC daily cron 已每天 03:00 UTC 跑过），A2.1-γ cron 明早会照跑无虞。此风险下架。
 2. **T-MP-Generate** 可能不止 2-3h（怀疑 Claude API 超时 / Render 冷启动 / 鉴权 308），需要加超时 + 重试 + 错误降级 UI
 3. **Phase 22.E S9** 工时低估风险：M5 「FDE 价值闭环」涉及 DB + prompt + UI 三层，6h MVP 不行就先出「DB+API」(6/5)，UI 顺延 (6/6)
+4. ⭐ **新增**：**META_SYSTEM_USER_TOKEN 已降级 P1**（卡在「ME 无 Meta App」需 30-60 min 建 + Meta App Review）。决战日演示**不演示「Meta API 一键执行」按钮**即可绕过。如客户演示坚持要看这按钮，需周末专门腾 1h 走完 Meta App 创建流程。
 
 ### 🟡 P1 — 推广后第一个 sprint（决战日后立即开工）
 

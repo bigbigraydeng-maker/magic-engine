@@ -307,7 +307,19 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-06-04 22:33 NZST （**🎯 决战日 2026-06-08 周日 EOD 已定 + PR #354 A2.1-γ Goal cron 已 merged + 9 项 P0 已登记 ROADMAP**）
+> 最后更新：2026-06-04 23:14 NZST （**🌙 6/4 收工 · PR #354 已 merged · PR #356 决战日规划已开 · META token 卡建 App 已降级 P1 · 明早咒语：`继续决战日 — 周四 6/5 任务`**）
+
+### 🌙 今晚 6/4 收工状态
+
+- ✅ **PR #354 (A2.1-γ Goal current_value cron)** merged 22:23 NZST
+- ✅ **PR #356 决战日 + 10 项 P0 + 4 天节奏表** 已开（docs/d-day-2026-06-08 分支）
+- ⏸️ **META_SYSTEM_USER_TOKEN PM 操作半成品**：
+  - ✅ CTStours Business Manager → 系统用户 "Magic-Engine" (编号 61590547833867, Admin) 已建
+  - ✅ 广告账户 "CTS" 已分配 + 权限「管理营销活动（广告）」已开
+  - 🚫 卡在「生成口令」：CTStours 业务资产组**无任何 Meta App**，必须先建 ME 自己的 Meta App
+  - **决定**：降级 P1，决战日后第一个 sprint 再做（30-60 min 含建 App + Meta App Review）
+  - **不影响 A2.1-γ cron**（cron 不依赖 Meta token）
+- 🌅 **明早第一句话咒语**：`继续决战日 — 周四 6/5 任务`
 
 ### 🎯 决战日 2026-06-08 周日（4 天倒计时）
 
@@ -316,19 +328,42 @@ npm test           # 测试套件
 - **A2.3 Form/Order connector** → 降级 P1
 - **Phase 22.E S9** → MVP 版（6h）保 S13
 - **PR #346 FDE access** → 加入 P0 端到端验收
+- ⭐ **META_SYSTEM_USER_TOKEN** → 降级 P1（2026-06-04 晚 PM 操作半成品，卡建 App）
 
-| 任务 ID | 内容 | 优先级 |
-|---------|------|--------|
-| **🔴 P0.2 PM Render 配 META_SYSTEM_USER_TOKEN** | 5 min PM 操作。否则执行看板「直接执行 Meta API」424 | ⚠️ 今晚 |
-| **🔴 P0.3+P0.4 A2.1-γ + A2.2 端到端**（6/5 03:00 UTC cron 首跑后） | Goal 详情页 current_value + auto.cron 标签；CTS brand_search_volume 显示 ~166；Oztop ai_visibility_score 不再 "industry not mapped" | ⏳ 6/5 上午 |
-| **🔴 P0.5 rebase + merge PR #353** New Goal 入口 (CONFLICTING) | 30 min 子牙 | ⏳ 6/5 |
-| **🔴 P0.6 T-MP-Generate** Marketing Plan HTML response bug | 2-3h 子牙排查（怀疑 Claude API 超时） | ⏳ 6/6 |
-| **🔴 P0.7 PR #346 FDE access** 端到端验收（客户员工开账号前必验 + IDOR 余孽 P19.F） | 30 min PM | ⏳ 6/7 |
-| **🔴 P0.8 A2.3 Oztop GA4 generate_lead** GTM 配置 | 15 min PM SOP | ⏳ 6/5 |
-| **🔴 P0.9 A3 案例沉淀** CTS/Oztop Phase 31/33/A2 实战 markdown | 4h 子牙 | ⏳ 6/7 |
-| **🔴 P0.10 Phase 22.E S9 + S13** Action 预期影响 MVP + SEO 子类分流 | 10h 子牙 | ⏳ 6/5-6/6 |
-| **B1 AU/NZ Marketing Index** | 战略级，Q4 评估 | 📋 P2 / 决战日后 |
-| **GBP.0** | Google Cloud：enable Business Profile API + Account Management API | ⚠️ PM 操作（非决战日 P0）|
+### 明早 6/5 优先级（按时序）
+
+| 时段 | 任务 | 负责 |
+|------|------|------|
+| **03:00 UTC（NZST 15:00）** | A2.1-γ cron 首跑（自动）| 系统 |
+| 上午 | **P0.3+P0.4 A2.1-γ + A2.2 端到端验收**（Goal 详情页 current_value + auto.cron 标签；CTS brand_search_volume ~166；Oztop ai_visibility_score 不再 "industry not mapped"）| PM UI + 子牙 SQL 1.5h |
+| 上午 | **P0.5 rebase + merge PR #353** New Goal 入口 | 子牙 30 min |
+| 上午 | **P0.8 A2.3 GA4 generate_lead** GTM 配置 | PM SOP 15 min |
+| 下午 | **P0.10 Phase 22.E S9** Action 预期影响 MVP 编码 | 子牙 6h |
+
+### 决战日 P0 总览（10 项中 1 已完成）
+
+| # | 任务 | 工时 | 状态 |
+|---|------|------|------|
+| P0.1 | merge PR #354 | — | ✅ 已完成 |
+| **P0.2** | META token | 30-60 min | ⏸️ **半成品 → P1** |
+| P0.3+P0.4 | A2.1-γ + A2.2 端到端验收 | 1.5h | ⏳ 6/5 上午 |
+| P0.5 | rebase + merge PR #353 | 30 min | ⏳ 6/5 上午 |
+| P0.6 | T-MP-Generate HTML bug | 2-3h | ⏳ 6/6 |
+| P0.7 | PR #346 FDE access 端到端 | 30 min | ⏳ 6/7 |
+| P0.8 | A2.3 GA4 generate_lead 配置 | 15 min | ⏳ 6/5 上午 |
+| P0.9 | A3 案例沉淀 | 4h | ⏳ 6/7 |
+| P0.10 | Phase 22.E S9 + S13 | 10h | ⏳ 6/5 下午-6/6 |
+
+**剩余总工时 ~17h ≈ 4 个工作日**（详细节奏表见 ROADMAP § 决战日）
+
+### 战略储备（决战日后）
+
+| 任务 | 优先级 |
+|------|--------|
+| META token 完成（建 Meta App + 生成口令） | P1 / sprint-1 |
+| A2.3 Form/Order connector | P1 |
+| B1 AU/NZ Marketing Index | P2 / Q4 评估 |
+| GBP.0 Google Cloud Business Profile API | PM 操作 / 非决战日 |
 
 **已完成全景（最近几个 Phase）**：
 - ✅ **A2.2 brand_search_volume GSC 接入**（2026-06-04，PR #336 merged）：Goal 主指标 `brand_search_volume` 改读 GSC rolling 28 天品牌词 clicks（替代 DataForSEO 估算）。两层解析（GSC 优先 / DataForSEO fallback）。**P0 修复**：发现 token equality 漏 80% 多词品牌（CTS "cts tours" 不能匹配域名根 "ctstours"），新增 `clients.brand_aliases` 字段 + substring 匹配（不污染原 isBrandedKeyword）。+ SOP 文档。17 测试通过，CTS 真实数据回归验证 166 brand clicks（之前 ~5）
