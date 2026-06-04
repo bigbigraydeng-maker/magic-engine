@@ -306,20 +306,21 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-06-04 15:08 NZST （**Phase 33 M4 上线 — Goal 详情页执行进度摘要（PR #304 merged）**）
+> 最后更新：2026-06-04 15:50 NZST （**Kanban Content Workbench UX 4 连击上线 — PR #327 merged + Phase 33 P33.9/P33.10/M4 测试全部通过 ✅**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **🧪 Phase 33 P33.9/P33.10 测试待跑** | PR #302 已 merged。回 CTS 执行看板验证：①点 Goal filter 后状态 chips 数字真变小（之前 38/11/20 不变）②「📥 未归类 Actions」分组出现（应含 ~52 条 placeholder 绑定 action）③Bulk-migrate 一条 action 后从未归类消失 | ⚠️ 今日晚上跑 |
-| **🧪 Phase 33 M4 测试待跑** | PR #304 已 merged。回 CTS Goal 详情页验证：①顶部 Execution Progress 卡片出现（数字 vs Supabase 对得上）②Initiative 卡片展开后右上角 X/Y actions done 完成率 chip ③Campaign 已关联列表里有状态点（active/paused）| ⚠️ 今日晚上跑 |
-| **A3 案例沉淀** | 把 CTS/Oztop Phase 31/33 跑通经验固化到 Clients/ 笔记 | 📋 半天 |
-| **A2 Goal 主指标 auto-fetch** | GA4 / Brand search volume / Form submissions 自动读 current_value | 📋 中 / 1-2 天/源 |
+| **🔨 A2.2 Brand search → Goal current_value** | 从 GSC `gsc_performance_snapshots` 读品牌词搜索量当月聚合，自动填 Goal 主指标 = `brand_search_volume`。复用 A2.1 GA4 实现模板（auto-fetch.ts） | ⚠️ 进行中 / 1-2 天 |
+| **A2.3 Oztop 复刻 GA4 generate_lead 配置** | PM 已熟练 SOP，15 分钟跑完。同样的 GTM Trigger + GA4 Event Tag + Mark as key event | 📋 PM 操作 / 15 分钟 |
+| **A3 案例沉淀** | 把 CTS/Oztop Phase 31/33 + A2.1/A2.2/A2.3 跑通经验固化到 Clients/ 笔记 | 📋 半天（A2 系列全部上线后再做）|
 | **B1 AU/NZ Marketing Index** | 独立项目战略议题，Q4 2026 评估 → Q1 2027 启动 MVP | 📋 战略级 / 6-8 周 |
 | **PM 操作（Meta Ads）🔴** | Render 设 `META_SYSTEM_USER_TOKEN`（长效 System User Token），否则执行看板「直接执行 (Meta API)」返回 424 | ⚠️ 待操作 |
 | **PM 操作 🔴** | GitHub repo Secrets 添加 `CRON_SECRET`（Phase 30/31 共用，月度/每日 cron 才能跑） | ⚠️ 待操作 |
 | **GBP.0** | Google Cloud：enable Business Profile API + Account Management API | ⚠️ PM 操作 |
 
 **已完成全景（最近几个 Phase）**：
+- ✅ **Kanban Content Workbench UX 4 连击**（2026-06-04，PR #327 merged）：FDE 最高频用的内容生成工作台 — 修 4 个痛点（反复点击 / 看不到进度 / prompt 太小 / 失败回退）+ 顺手修 1 个生产中 CRITICAL bug（不存在的 GET endpoint 把 completed item 拉回 in_progress）。子牙 + 魏征双审，新增 execution_items 两列（generation_started_at + generation_error）+ 三阶段状态机 + useRef 同步去重 + 卡片三态 UI（制作中/失败重试/超时）。8 commits，45/45 测试通过
+- ✅ **Phase 33 P33.9/P33.10 + M4 测试回归通过**（2026-06-04）：Goal filter 状态 chips、未归类分组、Goal 详情页 Execution Progress 卡片、Initiative 完成率 chip、Campaign 状态点 — 数据层 + UI 层全部跑通。Phase 33 整体收官
 - ✅ **Phase 22.A.2 GA4 每日采集**（PR #225 merged，实际已上线）：每日 3am UTC cron 把 GA4 5 指标（sessions / users / pageviews / bounce_rate / avg_session_duration）写入 `flywheel_metrics`，前缀 `seo.ga4.*`。CTS Tours NZ 已验证最近一次 2026-06-03 03:00 UTC 跑过。**之前 ROADMAP 标"待开发"是文档滞后，2026-06-03 清理**
 - ✅ **Phase 33 M4 — Goal-level Execution Summary**（2026-06-03，PR #304 merged）：子牙 review 修正版（合并 P33.11+P33.12 为一套数据双视角）。新 `GET /api/goals/[goalId]/execution-summary` 一次聚合返回；ExecutionSummaryBar 顶部 4-stat row + 完成率进度条；InitiativeExecutionPanel 加完成率 chip + Campaign 状态点。修复 3 个子牙杀手锏 bug：skipped 排出分母 / 死 campaign ID 过滤 / paused campaign 不漏算。9 个新测试，97/97 strategy lib 全过
 - ✅ **Phase 33 P33.9/P33.10 修复**（2026-06-03，PR #301 + #302 merged）：状态 chips 数字跟 Goal filter 变化；「未归类 Actions」分组判断条件扩展为 `null || initiative_type='unassigned' placeholder`；endpoint 不再过滤 unassigned；PlanGenerator 前端补 filter 排除下拉。**测试待跑**（见焦点表第一行）
@@ -332,17 +333,16 @@ npm test           # 测试套件
 - ✅ **Phase 30 Industry Baseline Engine**（2026-06-02，PR #251）：5 细分 / 44 域名 / 月度 cron 自动重跑 / 华佗实时读基准（含 city 维度命中）
 
 **下一候选（按优先级）**：
-1. 🔨 **A2.1 GA4 → Goal current_value** — Goal 详情页主指标卡片自动从 flywheel_metrics 读 GA4 sessions/users 当月汇总（1-2 天，会话中进行）
-2. 📋 **A2.2 Brand search source** — 从 GSC 读品牌搜索量当月聚合（1-2 天）
-3. 📋 **A2.3 Form/Order source** — 表单提交 / 订单数（需新接 connector，1-2 天 + connector）
-4. 📋 **A3 CTS/Oztop 案例沉淀** — 半天事，把跑通经验固化
-5. 📋 **Phase 24.B** — GBP 数据摂取（依赖 GBP.0 + migration）
+1. 🔨 **A2.2 Brand search → Goal current_value** — 从 GSC `gsc_performance_snapshots` 读品牌词搜索量当月聚合，复用 A2.1 GA4 实现模板（1-2 天，下一 session 开工）
+2. 📋 **A2.3 Form/Order source** — 表单提交 / 订单数（需新接 connector，1-2 天 + connector）
+3. 📋 **A3 CTS/Oztop 案例沉淀** — 半天事，把 A2 系列全部跑通后做
+4. 📋 **Phase 24.B** — GBP 数据摂取（依赖 GBP.0 + migration）
 
 **ME 定位升级（2026-06-02 确立）**：
 旧 → 营销自动化平台
 **新 → 以 Goal 为中心的生意指挥平台**（Kanban 汇总所有能帮客户达成 Goal 的因素，营销只是其中一条战线）
 
-下一 session：`继续 ME 工作 — 跑 Phase 33 P33.9/P33.10 + M4 测试` 或 `继续 ME 工作 — A3 案例沉淀`
+下一 session：`继续 ME 工作 — A2.2 GSC 品牌搜索量接入`
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox

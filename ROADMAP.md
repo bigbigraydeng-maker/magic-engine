@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-04 15:08 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-04 15:50 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -3342,6 +3342,49 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-06-04（Kanban Content Workbench UX 4 连击 — PR #327 ✅）
+**痛点（PM 报告）**：FDE 每天最高频用的内容生成工作台体验差 ——
+1. 点击任务卡后需要点 3 次以上才能生成
+2. 生成时看板看不到进度，不知道哪条在生成
+3. content workbench 内编辑 prompt 的地方太小
+4. 点击生成 post，等几分钟后卡片恢复原始状态（白等）
+
+**根因（子牙 + 魏征双审）**：
+- 痛点 1：drawer 打开整页 spinner 2-3 秒等 campaign fetch（marketing-plan → campaign 串行查询），FDE 以为 drawer 卡死了关掉重开 → 反复触发同一 fetch
+- 痛点 2：`bgGeneratingIds` 仅是 React 内存 Set，刷新页面/切 tab 即丢
+- 痛点 3：`<input type=text>` 单行 + 仅 batch 模式可见，任务模式完全无 prompt 编辑入口
+- 痛点 4：生成失败 `catch { /* non-fatal */ }` 完全吞错，状态从未真正持久化
+- 🔥 **CRITICAL bonus**：发现生产中已存在 bug — `page.tsx:2066` 调用不存在的 GET endpoint，每次成功生成会把已 completed 的 item 拉回 in_progress
+
+**修复（8 commits）**：
+- Migration: `execution_items` + `generation_started_at` + `generation_error`
+- `handleBackgroundGenerate` 重写为三阶段状态机（start → succeed/fail → cleanup）+ useRef 同步去重防双发
+- 失败退回 pending + 写 blocker log + 卡片显示"⚠ 生成失败 [重试]"按钮（魏征方向 B）
+- 卡片三态：制作中（cyan）/ 失败（red+重试）/ 超时（amber，>10min 无完成 log）
+- 砍 ContentStudioDrawer 整页 spinner，drawer 立即渲染，campaign 后台静默加载
+- 任务模式暴露可编辑 textarea，预填 `item.description`，**纯内存 state 不回写 DB**（魏征 MEDIUM-1 — 保留原始诊断语义）
+- GET handler 补齐 + ExecutionItem type 扩展 + 测试 fixtures 补全
+
+**关键设计取舍**：
+- 失败状态退回 pending 而非停在 in_progress：Phase 33 M4 Goal 完成率统计把 in_progress 算"进行中"，stuck-failed 会污染 Goal 完成率
+- 重试按钮 = 打开 drawer 让 FDE 手动重新点生成，而非偷偷复用旧 params：原始 params（platform/counts/angle）已丢失，强制 FDE 走一遍工作台更透明
+- 不建 `content_generation_jobs` 单独表（子牙判定为过度投资）：用落库 log + DB 字段拿到 80% 价值
+
+**验证**：tsc 0 错（我的改动）/ vitest 45/45 / next build 编译通过 / Supabase migration 已 apply
+
+---
+
+### 2026-06-04（Phase 33 P33.9/P33.10 + M4 测试回归通过 ✅）
+
+**测试范围**：
+- **P33.9**（PR #301/#302）— Goal filter 选定后状态 chips 数字跟随变化（之前 38/11/20 不变 → 现在随 filter 变小）
+- **P33.10**（PR #301/#302）— 「📥 未归类 Actions」分组正确显示（条件扩展为 `initiative_id IS NULL OR initiative_type='unassigned'` placeholder）；bulk-migrate 一条 action 后从未归类分组移除
+- **M4**（PR #304）— Goal 详情页顶部 Execution Progress 卡片数字 vs Supabase 对得上；Initiative 卡片展开后右上角 X/Y actions done 完成率 chip；Campaign 已关联列表里状态点（active/paused）
+
+**结论**：三项功能数据层 + UI 层全部回归通过，子牙 review 时修复的 3 个杀手锏 bug（skipped 排出分母 / 死 campaign ID 过滤 / paused campaign 不漏算）实测无问题。Phase 33 整体收官。
+
+---
 
 ### 2026-06-04（A2.3 端到端验证 — GA4 generate_lead 闭环打通 ⭐ CTS 真实数据）
 
