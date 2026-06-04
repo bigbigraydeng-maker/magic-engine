@@ -75,14 +75,17 @@ const baseItem: ExecutionGroupItem = {
   created_at: '2026-05-22T00:00:00Z',
   updated_at: '2026-05-22T00:00:00Z',
   content_post_id: null,
+  production_package_id: null,
   source: 'diagnostic',
   marketing_plan_id: null,
   initiative_id: null,
   generation_started_at: null,
   generation_error: null,
+  action_type: null,
   logs: [],
   outcome: null,
   linked_post: null,
+  content_state: null,
 }
 
 const approvedPrescription = [

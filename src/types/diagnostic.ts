@@ -206,6 +206,8 @@ export interface ExecutionItem {
   updated_at: string
   /** 关联的内容帖子 ID。社媒/SEO 内容类执行项的产出物。published 后自动 mark completed。 */
   content_post_id: string | null
+  /** 关联的量产包 ID — 一键量产生成的 production_package。multi-post 任务的归属。 */
+  production_package_id: string | null
   /** 来源类型 — 决定看板分组和徽章显示 */
   source: ExecutionItemSource
   /** marketing_plan 来源时有值，作为分组键 */
@@ -234,6 +236,43 @@ export interface LinkedContentPost {
   caption: string | null
   scheduled_at: string | null
   visual_asset_url: string | null // 取 final 版本或 latest version 的 storage_url
+}
+
+/**
+ * Kanban 卡片内容状态条 — 四档信号（文/图/视/发），FDE 不开抽屉就能看到进度。
+ *
+ * 每档值：
+ *   - 'ready'      ✓  绿色 — 已就绪
+ *   - 'generating' ⏳ 蓝色 — 生成中
+ *   - 'failed'     ✗  红色 — 失败（可重试）
+ *   - 'pending'    ·  灰色 — 未开始
+ *   - 'na'         —  灰色 — 不适用（如纯文章任务无视频档）
+ *
+ * priority_signal 是边框色推导依据：
+ *   - 'failed'      → 红边（最高优先级，FDE 立刻处理）
+ *   - 'stale'       → 黄边（超时）
+ *   - 'generating'  → 蓝边（不打扰）
+ *   - 'published'   → 绿边
+ *   - 'normal'      → 白边
+ */
+export type ContentStateSignal = 'ready' | 'generating' | 'failed' | 'pending' | 'na'
+export type CardPrioritySignal = 'failed' | 'stale' | 'generating' | 'published' | 'normal'
+
+export interface CardContentState {
+  text:       ContentStateSignal      // caption / script 有无
+  image:      ContentStateSignal      // visual_assets 状态
+  video:      ContentStateSignal      // reels_drafts 状态
+  publish:    ContentStateSignal      // publer_post_id / scheduled_at
+  priority:   CardPrioritySignal
+  /** 最近一次相关状态变更时间（ISO 字符串）— 用于卡片右下角"3 分钟前" */
+  last_changed_at: string | null
+  /** 多帖任务进度（量产包）— 仅 production_package_id 非空时填 */
+  package_progress?: {
+    total:      number
+    ready:      number
+    generating: number
+    failed:     number
+  }
 }
 
 // ── ExecutionLog (鲁班执行代理 — P8.10.S4) ────────────────────────────────────

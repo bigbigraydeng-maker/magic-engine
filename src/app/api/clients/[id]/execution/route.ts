@@ -19,6 +19,7 @@ import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import type {
   ExecutionItem, ExecutionLog, PrescriptionStatus,
   DiagnosticDimension, FixType, LinkedContentPost,
+  CardContentState, ContentStateSignal, CardPrioritySignal,
 } from '@/types/diagnostic'
 import type { ExecutionMode, FlywheelName, OutcomeVerdict } from '@/lib/flywheel/adapters/types'
 
@@ -45,6 +46,8 @@ export interface ExecutionItemWithLogs extends ExecutionItem {
   logs: ExecutionLog[]
   outcome: ItemOutcomeSummary | null
   linked_post: LinkedContentPost | null
+  /** Kanban 卡片内容状态条聚合 — 文/图/视/发四档（CardContentState） */
+  content_state: CardContentState | null
   source_kind?: 'execution_item' | 'flywheel_action'
   flywheel_action_id?: string
 }
@@ -203,12 +206,17 @@ export async function GET(
       }
     }
 
+    // Kanban content_state 聚合 — 文/图/视/发四档信号（CardContentState）
+    // FDE 不开抽屉就能看到每个任务的内容生产进度
+    const contentStateByItem = await buildContentStatesByItem(baseItems, linkedPostByItem)
+
     const items: ExecutionItemWithLogs[] = baseItems.map(it => ({
       ...it,
       source_kind: 'execution_item',
       logs: logsByItem[it.id] ?? [],
       outcome: outcomeByItem[it.id] ?? null,
       linked_post: linkedPostByItem[it.id] ?? null,
+      content_state: contentStateByItem[it.id] ?? null,
     }))
     const autonomousItems = prescriptionId ? [] : await fetchAutonomousActionItems(clientId)
     const allItems = [...autonomousItems, ...items]
@@ -236,6 +244,211 @@ export async function GET(
     console.error('[execution GET] Unexpected error:', err)
     return NextResponse.json({ success: false, error: 'An unexpected error occurred' }, { status: 500 })
   }
+}
+
+// ─── Kanban 卡片内容状态条聚合 ─────────────────────────────────────────────────
+//
+// 对每个 execution_item，聚合：
+//   - text   : caption / script 有无 → ready / pending
+//   - image  : visual_assets 状态 → ready / generating / failed / pending
+//   - video  : reels_drafts 状态 → ready / generating / failed / pending / na
+//   - publish: publer_post_id / scheduled_at → ready (published) / generating (scheduled) / pending
+//   - priority: 推导边框色（failed > stale > generating > published > normal）
+//   - package_progress: 量产包多帖任务的 X/Y 进度
+//
+// 一次聚合所有 itemIds 涉及的 visual_assets / reels_drafts / production_items，避免 N+1。
+
+interface BaseItemForState {
+  id: string
+  content_post_id: string | null
+  production_package_id: string | null
+  dimension: DiagnosticDimension
+  generation_started_at: string | null
+  generation_error: string | null
+  updated_at: string
+}
+
+async function buildContentStatesByItem(
+  baseItems: BaseItemForState[],
+  linkedPostByItem: Record<string, LinkedContentPost>,
+): Promise<Record<string, CardContentState>> {
+  if (baseItems.length === 0) return {}
+
+  const itemIds  = baseItems.map(i => i.id)
+  const postIds  = baseItems.map(i => i.content_post_id).filter((x): x is string => !!x)
+  const pkgIds   = baseItems.map(i => i.production_package_id).filter((x): x is string => !!x)
+
+  // 1. visual_assets：按 post_id 聚合状态计数
+  const assetsByPostId: Record<string, { ready: number; generating: number; failed: number }> = {}
+  if (postIds.length > 0) {
+    const { data: assetRows } = await supabaseAdmin
+      .from('visual_assets')
+      .select('post_id, generation_status')
+      .in('post_id', postIds)
+
+    for (const row of (assetRows ?? []) as { post_id: string; generation_status: string }[]) {
+      const bucket = (assetsByPostId[row.post_id] ??= { ready: 0, generating: 0, failed: 0 })
+      if (row.generation_status === 'ready') bucket.ready++
+      else if (row.generation_status === 'failed') bucket.failed++
+      else if (row.generation_status === 'generating' || row.generation_status === 'queued_for_retry') bucket.generating++
+    }
+  }
+
+  // 2. reels_drafts：按 execution_item_id 聚合（一个 item 通常对应 0-1 个 reel draft）
+  const reelByItemId: Record<string, { status: string; updated_at: string | null }> = {}
+  if (itemIds.length > 0) {
+    const { data: reelRows } = await supabaseAdmin
+      .from('reels_drafts')
+      .select('execution_item_id, status, updated_at')
+      .in('execution_item_id', itemIds)
+      .order('updated_at', { ascending: false })
+
+    for (const row of (reelRows ?? []) as { execution_item_id: string | null; status: string; updated_at: string | null }[]) {
+      if (!row.execution_item_id) continue
+      if (reelByItemId[row.execution_item_id]) continue   // 保留最新一条
+      reelByItemId[row.execution_item_id] = { status: row.status, updated_at: row.updated_at }
+    }
+  }
+
+  // 3. production_items：量产包进度（post 维度聚合状态）
+  const pkgProgressByPkgId: Record<string, { total: number; ready: number; generating: number; failed: number }> = {}
+  if (pkgIds.length > 0) {
+    const { data: pkgItemRows } = await supabaseAdmin
+      .from('production_items')
+      .select('package_id, status, content_post_id')
+      .in('package_id', pkgIds)
+
+    for (const row of (pkgItemRows ?? []) as { package_id: string; status: string; content_post_id: string | null }[]) {
+      const bucket = (pkgProgressByPkgId[row.package_id] ??= { total: 0, ready: 0, generating: 0, failed: 0 })
+      bucket.total++
+      if (row.status === 'ready') bucket.ready++
+      else if (row.status === 'failed') bucket.failed++
+      else bucket.generating++
+    }
+  }
+
+  // 4. publer_post_id + scheduled_at：从 content_posts 拿
+  const publishStatusByPostId: Record<string, { has_publer: boolean; scheduled_at: string | null; status: string }> = {}
+  if (postIds.length > 0) {
+    const { data: postRows } = await supabaseAdmin
+      .from('content_posts')
+      .select('id, publer_post_id, scheduled_at, status')
+      .in('id', postIds)
+
+    for (const row of (postRows ?? []) as { id: string; publer_post_id: string | null; scheduled_at: string | null; status: string }[]) {
+      publishStatusByPostId[row.id] = {
+        has_publer:   !!row.publer_post_id,
+        scheduled_at: row.scheduled_at,
+        status:       row.status,
+      }
+    }
+  }
+
+  // 装配每个 item 的 CardContentState
+  const result: Record<string, CardContentState> = {}
+  for (const item of baseItems) {
+    const text:    ContentStateSignal = computeTextSignal(item, linkedPostByItem[item.id] ?? null)
+    const image:   ContentStateSignal = computeImageSignal(item, assetsByPostId)
+    const video:   ContentStateSignal = computeVideoSignal(item, reelByItemId[item.id] ?? null)
+    const publish: ContentStateSignal = computePublishSignal(item, publishStatusByPostId)
+
+    const priority: CardPrioritySignal = computePriority({ text, image, video, publish, item })
+
+    const pkgProgress = item.production_package_id
+      ? pkgProgressByPkgId[item.production_package_id]
+      : undefined
+
+    result[item.id] = {
+      text, image, video, publish,
+      priority,
+      last_changed_at: item.updated_at,
+      ...(pkgProgress ? { package_progress: pkgProgress } : {}),
+    }
+  }
+
+  return result
+}
+
+function computeTextSignal(item: BaseItemForState, linked: LinkedContentPost | null): ContentStateSignal {
+  // SEO 文章 / 社媒帖子才看文案；纯 reels 任务文案在 caption 字段
+  if (linked?.caption && linked.caption.trim().length > 0) return 'ready'
+  if (item.generation_started_at && !item.generation_error) return 'generating'
+  if (item.generation_error) return 'failed'
+  return 'pending'
+}
+
+function computeImageSignal(
+  item: BaseItemForState,
+  assetsByPostId: Record<string, { ready: number; generating: number; failed: number }>,
+): ContentStateSignal {
+  // 纯文章任务（dimension=seo 且无关联 post）→ na
+  if (!item.content_post_id) {
+    if (item.dimension === 'seo') return 'na'
+    return 'pending'
+  }
+  const bucket = assetsByPostId[item.content_post_id]
+  if (!bucket) return 'pending'
+  const total = bucket.ready + bucket.generating + bucket.failed
+  if (total === 0) return 'pending'
+  if (bucket.failed > 0 && bucket.generating === 0) return 'failed'
+  if (bucket.generating > 0) return 'generating'
+  if (bucket.ready > 0) return 'ready'
+  return 'pending'
+}
+
+function computeVideoSignal(
+  item: BaseItemForState,
+  reel: { status: string; updated_at: string | null } | null,
+): ContentStateSignal {
+  if (!reel) {
+    // Reel-only 任务但还没建 draft → pending；其他类型 → na
+    const stepsJson = (item as unknown as { steps_json: Record<string, unknown> | null }).steps_json
+    const kind = stepsJson?.kind as string | undefined
+    if (kind === 'social_reel') return 'pending'
+    return 'na'
+  }
+  switch (reel.status) {
+    case 'video_ready':      return 'ready'
+    case 'video_generating': return 'generating'
+    case 'images_ready':     return 'generating'  // 视频还在等
+    case 'failed':           return 'failed'
+    default:                 return 'pending'
+  }
+}
+
+function computePublishSignal(
+  item: BaseItemForState,
+  publishByPostId: Record<string, { has_publer: boolean; scheduled_at: string | null; status: string }>,
+): ContentStateSignal {
+  if (!item.content_post_id) return 'pending'
+  const info = publishByPostId[item.content_post_id]
+  if (!info) return 'pending'
+  if (info.status === 'published') return 'ready'
+  if (info.status === 'scheduled' || info.has_publer) return 'generating'  // 已推 Publer 等待发布
+  return 'pending'
+}
+
+function computePriority(args: {
+  text: ContentStateSignal
+  image: ContentStateSignal
+  video: ContentStateSignal
+  publish: ContentStateSignal
+  item: BaseItemForState
+}): CardPrioritySignal {
+  const { text, image, video, publish, item } = args
+  if (text === 'failed' || image === 'failed' || video === 'failed') return 'failed'
+  // stale：generation_started_at 超过 10 分钟还没成功
+  if (item.generation_started_at && !item.generation_error) {
+    const startedMs = Date.parse(item.generation_started_at)
+    if (!Number.isNaN(startedMs) && Date.now() - startedMs > 10 * 60_000) {
+      // 但如果已经 ready 了就不算 stale
+      const anyReady = text === 'ready' || image === 'ready' || video === 'ready'
+      if (!anyReady) return 'stale'
+    }
+  }
+  if (publish === 'ready') return 'published'
+  if (text === 'generating' || image === 'generating' || video === 'generating') return 'generating'
+  return 'normal'
 }
 
 async function fetchLatestOutcomesByAction(actionIds: string[]): Promise<Record<string, ItemOutcomeSummary>> {
@@ -327,14 +540,17 @@ function buildAutonomousItem(
     created_at: action.created_at,
     updated_at: action.created_at,
     content_post_id: null,
+    production_package_id: null,
     source: 'diagnostic',           // 自主行动用 sentinel prescription_id，归类为 diagnostic 来源
     marketing_plan_id: null,
     initiative_id: null,
     generation_started_at: null,    // autonomous actions don't go through the workbench generate flow
     generation_error: null,
+    action_type: action.action_type,
     logs: [],
     outcome,
     linked_post: null,
+    content_state: null,            // 飞轮自主行动不进 Kanban 卡片状态条
     source_kind: 'flywheel_action',
     flywheel_action_id: action.id,
   }

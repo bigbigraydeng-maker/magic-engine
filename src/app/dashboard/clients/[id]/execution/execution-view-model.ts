@@ -3,6 +3,7 @@ import type {
   ExecutionLog,
   LinkedContentPost,
   PrescriptionStatus,
+  CardContentState,
 } from '@/types/diagnostic'
 
 export const AUTONOMOUS_GROUP_ID = '__autonomous__'
@@ -42,6 +43,8 @@ export type ItemWithLogs = ExecutionItem & {
   logs: ExecutionLog[]
   outcome?: OutcomeSummary | null
   linked_post?: LinkedContentPost | null
+  /** Kanban 卡片内容状态条聚合（文/图/视/发） */
+  content_state?: CardContentState | null
   source_kind?: 'execution_item' | 'flywheel_action'
   flywheel_action_id?: string
 }

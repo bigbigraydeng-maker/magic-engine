@@ -4,7 +4,11 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import type { ExecutionItemStatus, ExecutionLog, ExecutionTarget, LinkedContentPost } from '@/types/diagnostic'
+import type {
+  ExecutionItemStatus, ExecutionLog, ExecutionTarget, LinkedContentPost,
+  CardContentState, ContentStateSignal, CardPrioritySignal,
+} from '@/types/diagnostic'
+import { ContentStateStrip, getPriorityBorderClass } from './_components/ContentStateStrip'
 import { FlywheelDrawer } from './_components/FlywheelDrawer'
 import { LubanChatDrawer } from './_components/LubanChatDrawer'
 import { SeoColumnSnapshot } from './_components/SeoColumnSnapshot'
@@ -16,7 +20,6 @@ import { AdsFixDrawer } from './_components/AdsFixDrawer'
 import { AdsAuditSection } from './_components/AdsAuditSection'
 import {
   buildExecutionGroups,
-  buildDimensionGroups,
   formatOutcomeLabel,
   isAutonomousItem,
   MARKETING_PLAN_GROUP_PREFIX,
@@ -641,11 +644,13 @@ function ExecutionItemCard({
   const statusMeta  = STATUS_META[item.status]
   const dimMeta     = DIMENSION_CARD_META[item.dimension ?? '']
   const dueDate     = item.due_date
-  const hasAiAssist = item.logs?.some(l => l.kind === 'ai_assist') ?? false
-  const logCount    = item.logs?.length ?? 0
   const genState    = resolveGenerationState(item, isBackgroundGenerating)
-  const isGenerating = genState === 'generating'
-  const isFailed     = genState === 'failed'
+  const isFailed    = genState === 'failed'
+
+  // Kanban 卡片新版：紧凑双列 + 内容状态条 + 边框优先级
+  // 边框由 content_state.priority 推导（failed/stale/generating/published/normal）
+  const contentState = item.content_state ?? null
+  const borderClass = getPriorityBorderClass(contentState?.priority, isActive)
 
   return (
     <div
@@ -653,76 +658,65 @@ function ExecutionItemCard({
       tabIndex={0}
       onClick={() => onOpenDetail(item)}
       onKeyDown={e => e.key === 'Enter' && onOpenDetail(item)}
-      className={`cursor-pointer select-none rounded-lg border p-2.5 transition-all ${
-        isActive
-          ? 'border-cyan-300 bg-cyan-50 shadow-sm'
-          : isFailed
-            ? 'border-red-200 bg-red-50/40 shadow-sm'
-            : isGenerating
-              ? 'border-cyan-200 bg-cyan-50/50 shadow-sm'
-              : 'border-slate-200 bg-white hover:border-cyan-200 hover:shadow-sm'
-      }`}
+      className={`cursor-pointer select-none rounded-lg border p-2 transition-all ${borderClass}`}
     >
+      {/* 紧凑双列：左侧标题/描述/元数据，右侧状态徽章/到期 */}
       <div className="flex items-start gap-2">
-        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-slate-950 text-[9px] font-black text-white">
-          {fixMeta.label.slice(0, 2).toUpperCase()}
-        </span>
+        {/* 左列 — 主信息 */}
         <div className="flex-1 min-w-0">
-          <p className="line-clamp-2 text-xs font-black leading-tight text-slate-900">{item.title}</p>
-          {item.description && (
-            <p className="mt-0.5 line-clamp-1 text-[11px] font-semibold text-slate-400">{item.description}</p>
-          )}
-        </div>
-        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold ${statusMeta.color}`}>
-          {statusMeta.label}
-        </span>
-      </div>
-      <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-        {dimMeta && (
-          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${dimMeta.cls}`}>{dimMeta.label}</span>
-        )}
-        {dueDate && <span className="text-[10px] text-gray-400">{dueDate}</span>}
-        {isGenerating && (
-          <span className="flex items-center gap-1 text-[10px] font-bold text-cyan-700">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-500" />
-            制作中
-          </span>
-        )}
-        {isFailed && (
-          <>
-            <span
-              className="text-[10px] font-bold text-red-700 bg-red-50 px-1.5 py-0.5 rounded truncate max-w-[160px]"
-              title={item.generation_error ?? '生成失败'}
-            >
-              ⚠ 生成失败
+          <div className="flex items-center gap-1.5 mb-1">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-slate-950 text-[9px] font-black text-white">
+              {fixMeta.label.slice(0, 2).toUpperCase()}
             </span>
-            {onRetryGenerate && (
-              <button
-                type="button"
-                onClick={e => { e.stopPropagation(); onRetryGenerate(item) }}
-                className="text-[10px] font-bold text-red-700 underline hover:text-red-900"
-              >
-                重试
-              </button>
+            {dimMeta && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${dimMeta.cls}`}>{dimMeta.label}</span>
             )}
-          </>
-        )}
-        {genState === 'stale' && (
-          <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded" title="生成已超过 10 分钟未完成，可能已超时；点开任务查看日志">
-            ⚠ 生成超时
+            {initiativeLabel && (
+              <span className="text-[10px] font-bold text-me-ochre bg-me-ochre/10 px-1 py-0.5 rounded truncate max-w-[100px]" title={initiativeLabel}>
+                ◈ {initiativeLabel}
+              </span>
+            )}
+          </div>
+          <p className="line-clamp-2 text-xs font-black leading-tight text-slate-900">{item.title}</p>
+        </div>
+
+        {/* 右列 — 状态 + 到期 */}
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${statusMeta.color}`}>
+            {statusMeta.label}
           </span>
-        )}
-        {item.source === 'proactive_signal' && (
-          <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">⚡ 系统检测</span>
-        )}
-        {!isGenerating && !isFailed && hasAiAssist && <span className="text-[10px] font-bold text-cyan-700">AI 草稿</span>}
-        {logCount > 0 && <span className="text-[10px] text-gray-400">{logCount} 条日志</span>}
-        {initiativeLabel && (
-          <span className="text-[10px] font-bold text-me-ochre bg-me-ochre/10 px-1.5 py-0.5 rounded truncate max-w-[120px]" title={initiativeLabel}>
-            ◈ {initiativeLabel}
-          </span>
-        )}
+          {dueDate && <span className="text-[10px] text-gray-400 whitespace-nowrap">{dueDate}</span>}
+        </div>
       </div>
+
+      {/* 内容状态条 — 文/图/视/发 + 量产进度 + 时间戳 */}
+      <ContentStateStrip state={contentState ?? null} />
+
+      {/* 失败时显示重试按钮（在状态条下方） */}
+      {isFailed && onRetryGenerate && (
+        <div className="mt-1 flex items-center gap-1.5">
+          <span
+            className="text-[10px] font-bold text-red-700 bg-red-50 px-1.5 py-0.5 rounded truncate max-w-[200px]"
+            title={item.generation_error ?? '生成失败'}
+          >
+            ⚠ {item.generation_error ? '生成失败' : '失败'}
+          </span>
+          <button
+            type="button"
+            onClick={e => { e.stopPropagation(); onRetryGenerate(item) }}
+            className="text-[10px] font-bold text-red-700 underline hover:text-red-900"
+          >
+            重试
+          </button>
+        </div>
+      )}
+
+      {/* 系统检测 / 备注 — 仅必要时显示，缩到最小 */}
+      {item.source === 'proactive_signal' && (
+        <div className="mt-1">
+          <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">⚡ 系统检测</span>
+        </div>
+      )}
     </div>
   )
 }
@@ -1656,6 +1650,128 @@ function PrescriptionGroup({
 
 const PREVIEW_COUNT = 5
 
+/**
+ * PlanGroupSection — 按 Marketing Plan / 处方 / FDE 手动分组的卡片组渲染
+ *
+ * 接受 GroupData（execution-view-model 已聚合的 group），渲染：
+ *   - 组标题（📋 Marketing Plan 名 / 🩺 处方 / 📝 FDE 录入）
+ *   - 进度统计 chip（X 待处理 / Y 进行中 / Z 已完成）
+ *   - 紧凑双列卡片网格
+ *
+ * 替代 DimensionGroupSection（保留 DimensionGroupSection 兼容尚未替换的入口）
+ */
+function PlanGroupSection({
+  group,
+  activeDetailId,
+  onOpenDetail,
+  bgGeneratingIds,
+  initiativeMap,
+  onRetryGenerate,
+}: {
+  group: GroupData
+  activeDetailId: string | null
+  onOpenDetail: (item: ItemWithLogs) => void
+  bgGeneratingIds?: Set<string>
+  initiativeMap?: Map<string, string>
+  onRetryGenerate?: (item: ItemWithLogs) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+
+  const pending     = group.items.filter(i => i.status === 'pending').length
+  const inProgress  = group.items.filter(i => i.status === 'in_progress').length
+  const completed   = group.items.filter(i => i.status === 'completed').length
+  const total       = group.items.length
+  const failed      = group.items.filter(i => i.content_state?.priority === 'failed').length
+
+  const visibleItems = expanded ? group.items : group.items.slice(0, PREVIEW_COUNT)
+  const hiddenCount  = total - PREVIEW_COUNT
+
+  // Marketing Plan 显示日期区间；处方显示生成时间
+  const dateLabel = (() => {
+    if (group.kind === 'marketing_plan' && group.marketingPlanMeta) {
+      const { start_date, end_date } = group.marketingPlanMeta
+      if (start_date && end_date) return `${start_date} → ${end_date}`
+      if (start_date) return `自 ${start_date}`
+      return null
+    }
+    if (group.kind === 'prescription' && group.meta?.generated_at) {
+      return new Date(group.meta.generated_at).toLocaleDateString('zh-CN')
+    }
+    return null
+  })()
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center gap-3 px-4 py-3 bg-gray-50 border-b border-gray-100 hover:bg-gray-100 transition-colors text-left"
+      >
+        <span className="text-sm font-black text-gray-900 truncate">{group.label}</span>
+        {dateLabel && (
+          <span className="text-[10px] font-semibold text-slate-500 whitespace-nowrap">{dateLabel}</span>
+        )}
+        <div className="flex items-center gap-1.5 ml-2 flex-wrap">
+          {failed > 0 && (
+            <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">
+              ⚠ {failed} 失败
+            </span>
+          )}
+          {inProgress > 0 && (
+            <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+              {inProgress} 进行中
+            </span>
+          )}
+          {pending > 0 && (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+              {pending} 待处理
+            </span>
+          )}
+          {completed > 0 && (
+            <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-700">
+              {completed} 已完成
+            </span>
+          )}
+        </div>
+        <span className="ml-auto text-xs text-gray-400 shrink-0">
+          {expanded ? '▲ 收起' : `▼ 共 ${total} 条`}
+        </span>
+      </button>
+
+      {/* 卡片网格 — 紧凑双列（lg 屏幕两栏并排，小屏一栏） */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 px-3 py-2">
+        {visibleItems.map(item => (
+          <ExecutionItemCard
+            key={item.id}
+            item={item}
+            isActive={item.id === activeDetailId}
+            onOpenDetail={onOpenDetail}
+            isBackgroundGenerating={bgGeneratingIds?.has(item.id) ?? false}
+            initiativeLabel={item.initiative_id ? initiativeMap?.get(item.initiative_id) : undefined}
+            onRetryGenerate={onRetryGenerate}
+          />
+        ))}
+      </div>
+
+      {!expanded && hiddenCount > 0 && (
+        <button
+          onClick={() => setExpanded(true)}
+          className="w-full py-2.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 transition-colors border-t border-gray-100"
+        >
+          还有 {hiddenCount} 条 · 点击展开
+        </button>
+      )}
+      {expanded && total > PREVIEW_COUNT && (
+        <button
+          onClick={() => setExpanded(false)}
+          className="w-full py-2.5 text-xs font-semibold text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors border-t border-gray-100"
+        >
+          收起
+        </button>
+      )}
+    </div>
+  )
+}
+
 function DimensionGroupSection({
   clientId,
   group,
@@ -2389,12 +2505,8 @@ export default function ExecutionPage() {
   const availableDimensions = Array.from(new Set(items.map(i => i.dimension).filter(Boolean))) as string[]
   const completedCount      = filteredItems.filter(i => i.status === 'completed').length
 
-  // P33.10 fix: filteredItems already excludes unassigned items (null + placeholder)
-  // when Goal filter is active — they show in the dedicated "未归类 Actions" block below.
-  // (Supersedes #301's itemsForDimensionGroups intermediate, which only handled null.)
-  const dimensionGroups = buildDimensionGroups(filteredItems)
-
-  // Legacy prescription groups — kept for derive/supplement/revision flows only
+  // 方案 1: 主分组按 Marketing Plan / 处方 / FDE 手动；维度只做 filter chip。
+  // dimension 视图已 retired（P33.10 之前用于按 6 大维度分组）。
   const prescriptionGroups  = buildExecutionGroups(filteredItems, prescriptions, marketingPlans)
     .filter(g => g.items.length > 0)
 
@@ -2757,22 +2869,20 @@ export default function ExecutionPage() {
         {/* P18.A.3 — Meta Ads 操作历史与撤销 */}
         <AdsAuditSection clientId={clientId} />
 
-        {/* 按工作类型分组 — 社媒 / SEO / GEO / 广告 / 口碑 / 竞品（飞轮自主任务已过滤）*/}
-        {dimensionGroups.map(group => (
-          <DimensionGroupSection
-            key={group.dimension}
-            clientId={clientId}
-            group={group}
-            activeDetailId={detailItem?.id ?? null}
-            onOpenDetail={item => {
-              const legacy = prescriptionGroups.find(g => g.items.some(i => i.id === item.id))
-              openDetailAndRemember(item, legacy?.editable ?? true)
-            }}
-            bgGeneratingIds={allBgGeneratingIds}
-            initiativeMap={initiativeMap}
-            onRetryGenerate={handleRetryGenerate}
-          />
-        ))}
+        {/* 按 Marketing Plan / 处方分组 — Plan 优先（最贴近 FDE 真实工作节奏） */}
+        {prescriptionGroups
+          .filter(g => g.kind === 'marketing_plan' || g.kind === 'prescription')
+          .map(group => (
+            <PlanGroupSection
+              key={group.pid}
+              group={group}
+              activeDetailId={detailItem?.id ?? null}
+              onOpenDetail={item => openDetailAndRemember(item, group.editable)}
+              bgGeneratingIds={allBgGeneratingIds}
+              initiativeMap={initiativeMap}
+              onRetryGenerate={handleRetryGenerate}
+            />
+          ))}
 
         {/* Phase 33 P33.10 — Unassigned Backlog: items with no real initiative (null or
             migration placeholder). Only shown when Goal filter is active so FDE can see
