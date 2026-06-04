@@ -216,8 +216,8 @@ export default function GeoComposerPage() {
     <div className="p-6 space-y-4">
       {/* Header */}
       <div className="flex items-center gap-3 flex-wrap">
-        <Link href="/dashboard/geo-composer" className="text-me-charcoal/45 hover:text-me-charcoal/60 text-sm flex-shrink-0">
-          ← GEO Composer
+        <Link href={`/dashboard/clients/${clientId}`} className="text-me-charcoal/45 hover:text-me-charcoal/60 text-sm flex-shrink-0">
+          ← 返回客户
         </Link>
         <span className="text-me-charcoal/35">/</span>
         <h1 className="font-display text-2xl font-bold tracking-tight text-me-charcoal/90">{client?.name ?? clientId}</h1>

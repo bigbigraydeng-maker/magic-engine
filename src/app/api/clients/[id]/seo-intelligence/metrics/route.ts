@@ -65,6 +65,7 @@ export async function GET(
     published_posts:  get(SEO_METRIC_KEY.PUBLISHED_POSTS),
     gsc_clicks:       get(SEO_METRIC_KEY.GSC_CLICKS),
     gsc_impressions:  get(SEO_METRIC_KEY.GSC_IMPRESSIONS),
+    gsc_avg_position: get(SEO_METRIC_KEY.GSC_AVG_POSITION),
     ga4_sessions:     get(SEO_METRIC_KEY.GA4_SESSIONS),
     ga4_users:        get(SEO_METRIC_KEY.GA4_USERS),
     last_updated:     lastUpdated,

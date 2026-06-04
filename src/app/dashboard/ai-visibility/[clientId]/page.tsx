@@ -203,8 +203,8 @@ export default function AiVisibilityPage() {
     return (
       <div className="font-sans px-8 py-7 space-y-3">
         <p className="text-[13.5px] text-black/55">Client not found.</p>
-        <Link href="/dashboard/ai-visibility" className="text-[13px] font-semibold text-me-ochre hover:underline">
-          ← Back to AI Visibility
+        <Link href={`/dashboard/clients/${clientId}`} className="text-[13px] font-semibold text-me-ochre hover:underline">
+          ← 返回客户
         </Link>
       </div>
     );
@@ -224,7 +224,7 @@ export default function AiVisibilityPage() {
       <header className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b border-black/10 bg-[#FBF8F3]/80 px-8 py-5 backdrop-blur-md">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-[12.5px] font-semibold text-black/45">
-            <Link href="/dashboard/ai-visibility" className="hover:text-me-ochre">
+            <Link href={`/dashboard/clients/${clientId}`} className="hover:text-me-ochre">
               AI Visibility
             </Link>
             <span className="text-black/25">/</span>

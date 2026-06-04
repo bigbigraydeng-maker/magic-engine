@@ -32,6 +32,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { getValidAccessToken } from '@/lib/google-oauth/client'
 import { requestIndexing } from '@/lib/gsc/indexing-client'
 import { pingSitemap, buildSitemapUrlFromDomain, type SitemapPingSummary } from '@/lib/gsc/sitemap-ping'
+import { markMergedByPr } from '@/lib/cms/geo-deployments-store'
 
 interface GithubPullRequestEvent {
   action: string
@@ -110,12 +111,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ignored: 'not a merge' })
   }
 
+  const prNumber  = body.pull_request.number
+  const prUrl     = body.pull_request.html_url
+  const publishedAt = body.pull_request.merged_at ?? new Date().toISOString()
+
+  // ── B3: GEO deployment tracking ──────────────────────────────────────────
+  // A GEO PR can cover multiple template files (multi-target injection).
+  // markMergedByPr flips all matching pending_pr rows to merged in one call.
+  // We run this before the blog lookup so a GEO-only PR still gets a clean 200.
+  let geoMergedCount = 0
+  try {
+    geoMergedCount = await markMergedByPr(prNumber, prUrl)
+  } catch (err) {
+    // Best-effort — don't let a DB blip cause GitHub to disable the webhook.
+    console.error('[github-webhook] geo_deployments merge update failed', err)
+  }
+
   // ── Lookup the blog_post ─────────────────────────────────────────────────
   // pr_number is not globally unique, so we also match the full pr_url.
   const { data: posts, error: lookupErr } = await supabaseAdmin
     .from('blog_posts')
     .select('id, client_id, slug, pr_url, pr_number, status')
-    .eq('pr_number', body.pull_request.number)
+    .eq('pr_number', prNumber)
 
   if (lookupErr) {
     console.error('[github-webhook] blog_posts lookup failed', lookupErr)
@@ -123,16 +140,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const match = (posts ?? []).find(
-    p => (p as BlogPostRow).pr_url === body.pull_request.html_url,
+    p => (p as BlogPostRow).pr_url === prUrl,
   ) as BlogPostRow | undefined
 
   if (!match) {
-    // PR merged but no ME-tracked blog_post — could be a non-ME PR. Acknowledge silently.
-    return NextResponse.json({ ignored: 'no matching blog_post' })
+    // PR merged but no ME-tracked blog_post — could be a GEO PR or non-ME PR.
+    return NextResponse.json({ ignored: 'no matching blog_post', geo_deployments_merged: geoMergedCount })
   }
 
   // ── Update blog_post → published ─────────────────────────────────────────
-  const publishedAt = body.pull_request.merged_at ?? new Date().toISOString()
   const { error: updateErr } = await supabaseAdmin
     .from('blog_posts')
     .update({ status: 'published', published_at: publishedAt })
@@ -159,12 +175,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   ])
 
   return NextResponse.json({
-    success:        true,
-    blog_post_id:   match.id,
-    pr_number:      body.pull_request.number,
-    published_at:   publishedAt,
-    sitemap_ping:   sitemapResult,
-    gsc_indexing:   gscResult,
+    success:                  true,
+    blog_post_id:             match.id,
+    pr_number:                prNumber,
+    published_at:             publishedAt,
+    geo_deployments_merged:   geoMergedCount,
+    sitemap_ping:             sitemapResult,
+    gsc_indexing:             gscResult,
   })
 }
 

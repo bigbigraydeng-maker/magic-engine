@@ -7,6 +7,7 @@ import Link from 'next/link'
 import type { ExecutionItemStatus, ExecutionLog, ExecutionTarget, LinkedContentPost } from '@/types/diagnostic'
 import { FlywheelDrawer } from './_components/FlywheelDrawer'
 import { LubanChatDrawer } from './_components/LubanChatDrawer'
+import { SeoColumnSnapshot } from './_components/SeoColumnSnapshot'
 import { InlinePrescriptionDrawer } from './_components/InlinePrescriptionDrawer'
 import { ProjectLubanDrawer } from './_components/ProjectLubanDrawer'
 import { ProjectReviewDrawer } from './_components/ProjectReviewDrawer'
@@ -1607,6 +1608,7 @@ function PrescriptionGroup({
 const PREVIEW_COUNT = 5
 
 function DimensionGroupSection({
+  clientId,
   group,
   activeDetailId,
   onOpenDetail,
@@ -1614,6 +1616,8 @@ function DimensionGroupSection({
   initiativeMap,
   onRetryGenerate,
 }: {
+  /** Phase 22.E.S4ext: needed so the SEO column can render its client baseline snapshot. */
+  clientId: string
   group: DimensionGroup
   activeDetailId: string | null
   onOpenDetail: (item: ItemWithLogs) => void
@@ -1662,6 +1666,11 @@ function DimensionGroupSection({
           {expanded ? '▲ 收起' : `▼ 展开 · 共 ${total} 条`}
         </span>
       </button>
+
+      {/* Phase 22.E.S4ext — SEO column gets a client baseline snapshot row
+          (monthly clicks / impressions / page-1 keywords / avg position) so
+          the FDE sees what each action is lifting on top of. */}
+      {group.dimension === 'seo' && <SeoColumnSnapshot clientId={clientId} />}
 
       {/* Items */}
       <div className="divide-y divide-gray-100 px-4 py-2 space-y-2">
@@ -2703,6 +2712,7 @@ export default function ExecutionPage() {
         {dimensionGroups.map(group => (
           <DimensionGroupSection
             key={group.dimension}
+            clientId={clientId}
             group={group}
             activeDetailId={detailItem?.id ?? null}
             onOpenDetail={item => {
