@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-04 16:46 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-04 17:00 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -3400,6 +3400,49 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-06-04（A2.2 brand_search_volume GSC 接入 — PR #336 ✅ ⭐ 含 P0 fix）
+
+**核心**：Goal 主指标 `brand_search_volume` 从 DataForSEO 估算升级为 GSC 真实 28-day 品牌词 clicks。这是 A2 系列（Goal current_value auto-fetch）第 2 条数据源接通。
+
+**两层解析**：
+- **Tier 1（PRIMARY）**：GSC `gsc_performance_snapshots` 最新一行 top_queries → `isBrandQueryMatch(query, brandRoot, brand_aliases)` 过滤 → sum clicks
+- **Tier 2（FALLBACK）**：DataForSEO `bulkKeywordVolume` live（GSC 无数据时兜底）
+
+**P0 修复（live-data audit 触发，已合并）**：
+- 第一版用 `isBrandedKeyword`（token equality），audit CTS Tours NZ 真实 GSC 数据发现致命缺陷：
+  - CTS top queries 全是 "cts tours" (127 clicks) / "china travel service nz" (21) / "cts travel" (13) — 多词形式
+  - token equality 把 "cts tours" 拆 ["cts","tours"]，没有 token 等于 "ctstours" → CTS 会显示 ~5 而非 ~166
+- 修复：加 `clients.brand_aliases TEXT[]` 字段 + 新写 `isBrandQueryMatch` (substring + case-insensitive)
+- `isBrandedKeyword` 保留不动（SEO Intelligence 用法 token equality 是对的）
+
+**调研发现的福利**（原估 ~10h，实际 ~3h）：GSC OAuth / FDE 连 GSC UI / Daily cron / 数据表全部已存在。A2.2 实质 = 最后一公里 + P0 修复。
+
+**验证**：17/17 单元测试通过（含 CTS 真实数据回归）/ strategy lib 全套 114/114 / SQL 推演：CTS 166 brand clicks / Oztop 48 brand clicks
+
+**关联文档**：SOP `docs/sops/brand-aliases-setup-for-gsc.md`（FDE 操作手册）+ Migration `20260624010000_client_brand_aliases.sql`
+
+**待 PM 端到端验证**：CTS 新建 Goal 主指标=brand_search_volume + 填 brand_aliases → 看 Goal 详情页主指标卡显示 ~166
+
+---
+
+### 2026-06-04（Kanban Content Workbench UX 4 连击 — PR #327 ✅）
+
+**痛点**：FDE 最高频用的内容生成工作台 — ①点击 3 次以上才能生成 ②看板看不到进度 ③prompt 编辑区太小 ④白等几分钟卡片回退
+
+**根因（子牙 + 魏征双审）**：drawer 整页 spinner / 内存 Set 不持久 / `<input>` 单行且仅 batch 模式 / catch 完全吞错 + 🔥 **CRITICAL bonus**：生产中 `page.tsx:2066` 调用不存在 GET endpoint 把 completed item 拉回 in_progress
+
+**修复（8 commits）**：Migration `generation_started_at/error` + handleBackgroundGenerate 三阶段状态机 + useRef 同步去重 + 卡片三态（制作中/失败/超时）+ 砍整页 spinner + 任务模式 textarea + GET handler 补齐
+
+**验证**：tsc 0 错 / vitest 45/45 / Supabase migration 已 apply
+
+---
+
+### 2026-06-04（Phase 33 P33.9/P33.10 + M4 测试回归通过 ✅）
+
+P33.9（PR #301/#302 — Goal filter 状态 chips 数字跟随）/ P33.10（未归类 Actions 分组）/ M4（PR #304 — Goal 详情页 Execution Progress 卡片 + Initiative 完成率 chip + Campaign 状态点）三项数据层 + UI 层全部回归通过。子牙 review 时修复的 3 个杀手锏 bug 实测无问题。**Phase 33 整体收官**。
+
+---
 
 ### 2026-06-04（A2.3 端到端验证 — GA4 generate_lead 闭环打通 ⭐ CTS 真实数据）
 
