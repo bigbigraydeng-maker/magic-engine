@@ -772,6 +772,15 @@ function TaskDetailDrawer({
   const [factoryLoading, setFactoryLoading] = useState(false)
   const [factoryResult, setFactoryResult]   = useState<{ successCount: number; packageId: string | null } | null>(null)
   const [factoryError, setFactoryError]     = useState<string | null>(null)
+
+  // P21.8 fix — 平台多选状态（初始化后在 useEffect 里设）
+  const ALL_FACTORY_PLATFORMS = ['facebook', 'instagram', 'tiktok', 'linkedin', 'google'] as const
+  type FactoryPlatform = typeof ALL_FACTORY_PLATFORMS[number]
+  const PLATFORM_LABELS: Record<FactoryPlatform, string> = {
+    facebook: 'FB', instagram: 'IG', tiktok: 'TT', linkedin: 'LI', google: 'GG',
+  }
+  const [factoryPlatforms, setFactoryPlatforms] = useState<FactoryPlatform[]>(['facebook', 'instagram', 'tiktok'])
+
   useEffect(() => { setMounted(true) }, [])
 
   useEffect(() => {
@@ -779,30 +788,51 @@ function TaskDetailDrawer({
     setEditingTitle(false)
     setEditingDesc(false)
     setConfirmDelete(false)
+    setFactoryResult(null)
+    setFactoryError(null)
   }, [item?.id])
 
   if (!mounted || !item) return null
   const activeItem = item
 
-  // P21.8 — AI Factory 一键量产处理器
+  // P21.8 fix — 从 steps_json 读平台：优先读 platforms 数组，兼容旧 platform 单字符串
   const stepsJson = activeItem.steps_json as Record<string, unknown> | null
-  const factoryTopic    = typeof stepsJson?.topic === 'string' ? stepsJson.topic : null
-  const factoryPlatform = typeof stepsJson?.platform === 'string' ? stepsJson.platform : null
-  const isFactoryTask   = stepsJson?.source === 'marketing_plan' && !!factoryTopic
+  const factoryTopic = typeof stepsJson?.topic === 'string' ? stepsJson.topic : null
+  const isFactoryTask = stepsJson?.source === 'marketing_plan' && !!factoryTopic
+
+  // 初始化平台选择（基于 steps_json 中的平台配置）
+  useEffect(() => {
+    if (!stepsJson) return
+    const rawPlatforms = Array.isArray(stepsJson.platforms)
+      ? (stepsJson.platforms as string[])
+      : typeof stepsJson.platform === 'string' && stepsJson.platform
+        ? [stepsJson.platform as string]
+        : []
+    const valid = rawPlatforms.filter((p): p is FactoryPlatform =>
+      ALL_FACTORY_PLATFORMS.includes(p as FactoryPlatform)
+    )
+    if (valid.length > 0) setFactoryPlatforms(valid)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeItem.id])
+
+  function toggleFactoryPlatform(p: FactoryPlatform) {
+    setFactoryPlatforms(prev =>
+      prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]
+    )
+  }
 
   async function handleFactoryFanOut() {
-    if (!factoryTopic) return
+    if (!factoryTopic || factoryPlatforms.length === 0) return
     setFactoryLoading(true)
     setFactoryResult(null)
     setFactoryError(null)
     try {
-      const platforms = factoryPlatform ? [factoryPlatform] : undefined
       const res = await fetch(`/api/clients/${clientId}/ai-factory/fan-out`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          topic:          factoryTopic,
-          platforms,
+          topic:           factoryTopic,
+          platforms:       factoryPlatforms,
           executionItemId: activeItem.id,
         }),
       })
@@ -1051,19 +1081,38 @@ function TaskDetailDrawer({
           {/* Item 4: 自主飞轮操作全部关闭；Item 6: in_house 在 execButton 内已 return null */}
           {!isAutonomousItem(item) && execButton}
 
-          {/* P21.8 — AI Factory 一键量产（仅 marketing_plan 来源且有 topic 的任务） */}
+          {/* P21.8 fix — AI Factory 一键量产：平台多选 + 量产按钮 */}
           {isFactoryTask && !isDone && (
-            <button
-              onClick={() => void handleFactoryFanOut()}
-              disabled={factoryLoading}
-              className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 text-xs font-black text-violet-800 transition hover:bg-violet-100 disabled:opacity-60"
-            >
-              {factoryLoading ? (
-                <><span className="h-2 w-2 animate-spin rounded-full border border-violet-500 border-t-transparent" />量产中…</>
-              ) : (
-                <>⚡ 一键量产</>
-              )}
-            </button>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {/* 平台 toggle chips */}
+              {ALL_FACTORY_PLATFORMS.map(p => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => toggleFactoryPlatform(p)}
+                  disabled={factoryLoading}
+                  className={`inline-flex h-7 items-center rounded px-2 text-[11px] font-bold transition border ${
+                    factoryPlatforms.includes(p)
+                      ? 'border-violet-300 bg-violet-100 text-violet-800'
+                      : 'border-slate-200 bg-white text-slate-400'
+                  } disabled:opacity-50`}
+                >
+                  {PLATFORM_LABELS[p]}
+                </button>
+              ))}
+              {/* 量产触发按钮 */}
+              <button
+                onClick={() => void handleFactoryFanOut()}
+                disabled={factoryLoading || factoryPlatforms.length === 0}
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 text-xs font-black text-violet-800 transition hover:bg-violet-100 disabled:opacity-60"
+              >
+                {factoryLoading ? (
+                  <><span className="h-2 w-2 animate-spin rounded-full border border-violet-500 border-t-transparent" />量产中…</>
+                ) : (
+                  <>⚡ 量产 {factoryPlatforms.length} 条</>
+                )}
+              </button>
+            </div>
           )}
         </div>
 

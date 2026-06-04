@@ -63,10 +63,19 @@ function dueDateToPhase(dueDate: string): number {
 
 function buildStepsJson(task: PlanTask): Record<string, unknown> {
   const requires = task.requires ?? kindToRequires(task.kind)
+
+  // P21.8 fix — 同时写 platforms 数组（供量产扇出用）和兼容旧 platform 单字符串
+  // platform 单值保留供旧代码读，platforms 数组是新的多平台扇出来源
+  const platformSingle = task.platform ?? null
+  const platformsArray: string[] = platformSingle
+    ? [platformSingle]
+    : ['facebook', 'instagram', 'tiktok']   // 社媒任务无指定平台时默认 3 个
+
   return {
     source: 'marketing_plan',
     kind: task.kind,
-    platform: task.platform ?? null,
+    platform: platformSingle,         // 兼容旧字段
+    platforms: platformsArray,        // 新：量产扇出用
     topic: task.topic ?? null,
     source_blog_topic_index: task.source_blog_topic_index ?? null,
     source_strategy_item_id: task.source_strategy_item_id ?? null,
