@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-04 23:14 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-04 23:24 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -32,8 +32,8 @@
 | P0.1 | ✅ merge PR #354 A2.1-γ Goal current_value cron | open PR #354 | 30 min | ✅ 已 merged 2026-06-04 22:23 NZST | 子牙 |
 | P0.2 | 配 META_SYSTEM_USER_TOKEN（Render，否则执行看板「直接执行 Meta API」424） | 焦点表 | 30-60 min（含建 Meta App）| ⏸️ **半成品 — 2026-06-04 晚 PM 操作进度记录**：① ✅ CTStours Business Manager → 系统用户「Magic-Engine」(编号 61590547833867, Admin) 已建 ② ✅ 资产「CTS 广告账户」已分配 + 权限「管理营销活动（广告）」已开（含查看表现，最小权限） ③ 🚫 卡在「生成口令」：CTStours 业务资产组**无任何 Meta App**，必须先建 App 才能 generate token。PM 决定 6/4 晚到此为止 → 延后至决战日后 P1 sprint，**不影响 A2.1-γ cron**（不依赖 Meta token） | PM Render + Meta dev |
 | P0.3 | A2.1-γ 端到端验证（6/5 03:00 UTC cron 首跑后）：Goal 详情页看 current_value + auto.cron 标签；Oztop ai_visibility_score 不再 "industry not mapped"；SQL 手算与 cron 写值一致 | PR #354 验收 | 1 h | ⏳ 6/5 | PM UI + 子牙 SQL |
-| P0.4 | A2.2 端到端验证（PR #336 已 merged）：CTS Goal 主指标=brand_search_volume 显示 ~166 + 数据源 "GSC clicks (28-day brand)"；Oztop 同样跑 | 焦点表 + PR #336 | 30 min | ⏳ 6/5 | PM UI |
-| P0.5 | rebase + merge PR #353 New Goal 入口 | open PR #353 (CONFLICTING) | 30 min | ⏳ 6/5 | 子牙 |
+| P0.4 | A2.2 端到端验证（PR #336 已 merged）：CTS Goal 主指标=brand_search_volume 显示 ~166 + 数据源 "GSC clicks (28-day brand)"；Oztop 同样跑 | 焦点表 + PR #336 | 30 min | ✅ 完成 2026-06-04 22:35 NZST — CTS=184 + Oztop=48 全部走通，BrandAliasesPanel UI（PR #343）顺带验收 | PM UI |
+| P0.5 | rebase + merge PR #353 New Goal 入口 | open PR #353 | 30 min | ✅ 完成 2026-06-04（上 session 已 merged）| 子牙 |
 | P0.6 | T-MP-Generate Marketing Plan 「Unexpected token '<'」HTML bug 排查 | docs/bugs/2026-06-03 | 2-3 h | ⏳ 6/6 | 子牙 |
 | P0.7 | PR #346 FDE users access 端到端验收（客户员工开账号前必验，IDOR 余孽 P19.F 也一并看） | PR #346 | 30 min | ⏳ 6/7 | PM UI |
 | P0.8 | A2.3 Oztop GA4 generate_lead 配置（SOP 15 min PM 操作，确保 form_submissions Goal 可用） | 焦点表 | 15 min | ⏳ 6/5 | PM GTM op |
@@ -67,6 +67,7 @@
 - QA-清理-1/2/3 内部 HTTP+Bearer / apify 模块 / tsc 整体红
 - P19.F IDOR 余孽（`execution/manual` + `FdeManualEntryModal`）— 客户员工开账号前必修
 - Phase 22.E S10/S11/S12
+- ⭐ **Goal Sub-type 语义错位 — Awareness 4 子类不够**（2026-06-04 A2.2 Oztop 验证发现）：Awareness 当前 4 个 Sub-type（新品牌进入 / 活动推广 / 地理扩张 / 口碑修复）都暗含「特定场景」语义，缺一个「**纯品牌提升（同市场内）**」的兜底选项。Oztop 在 Brisbane 做 AU 全国 flooring 电商，本来就在那里，不需要"扩张"，但向导逼着它选「地理扩张」，自动生成"Brisbane 品牌曝光"标题——字面正确，**给客户老板汇报会被吐槽**（"我们不就在 Brisbane 吗"）。**修法选项**：(A) 加 Awareness Sub-type "品牌资产建设 / Brand Equity"（无地理语义）；(B) Sub-type 不再驱动 Goal 标题，让 FDE 自由命名；(C) Sub-type 模板加 "如非地理扩张请自由命名" 提示。建议 (B)：解耦 Sub-type（场景标签）与 Goal 标题（FDE 自定）。工作量 2-4h（向导 Step 1.3 改 + 4 个 Sub-type 文案 review）
 
 ### 🟢 P2 — 战略储备
 
