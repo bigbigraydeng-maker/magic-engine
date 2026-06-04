@@ -30,7 +30,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { bulkKeywordVolume } from '@/lib/dataforseo/labs'
 import { locationCodeForDb } from '@/lib/seo-intelligence/keyword-snapshots'
-import { isBrandedKeyword } from '@/lib/seo-intelligence/intent-strategy'
 
 export type AutoFetchResult =
   | { ok: true;  value: number; source: string; snapshot_date: string; label: string }
@@ -104,7 +103,7 @@ async function fetchOrganicTraffic(
 //
 //   1. PRIMARY: GSC rolling-28-day clicks for brand-tagged queries.
 //      Reads gsc_performance_snapshots (latest row, written by daily cron),
-//      filters top_queries[] with isBrandedKeyword(), sums the clicks.
+//      filters top_queries[] with isBrandQueryMatch(), sums the clicks.
 //      "Brand search volume" is rendered as ACTUAL CLICKS on brand-related
 //      searches — real behaviour, not impressions / not third-party estimate.
 //
@@ -113,8 +112,21 @@ async function fetchOrganicTraffic(
 //      has no row for this client yet. Returns monthly search-volume
 //      ESTIMATE for the brand name — coarser but always available.
 //
-// Brand-token source: clients.domain (e.g. "ctstours.co.nz" → "ctstours"),
-// matching the SEO Intelligence convention (src/lib/seo-agent/assembler.ts).
+// Brand recognition (A2.2 P0 fix, after CTS live-data audit):
+//   The naive identifier is the domain root ("ctstours" from "ctstours.co.nz")
+//   matched as a substring (NOT token equality — see below). For multi-word
+//   brands ("CTS Tours" → real GSC queries "cts tours", "china travel
+//   service nz", "cts travel") the domain root alone misses ~80% of brand
+//   searches. clients.brand_aliases TEXT[] lets FDE supply additional
+//   substrings to widen recognition.
+//
+//   Why substring (not token equality):
+//     - Token equality: "cts tours" → tokens ["cts","tours"], neither equals
+//       "ctstours" → MISS (CTS would surface ~0 brand clicks).
+//     - Substring:      "cts tours" contains alias "cts tours" → HIT.
+//     - Domain-root substring is also safer for compound brands where the
+//       GSC query happens to spell brand together: "ctstours" inside
+//       "ctstoursnz" → HIT (token equality would also miss this).
 
 interface GscQuerySnapshotRow {
   query?: string
@@ -130,18 +142,73 @@ function extractBrandRootFromDomain(domain: string | null): string | null {
   return cleaned && cleaned.length > 0 ? cleaned : null
 }
 
+/**
+ * Normalise a string for brand matching: lowercase + collapse whitespace.
+ * Keeps inner spaces (we want "cts tours" to stay 2 words for substring
+ * matching against query "cts tours auckland").
+ */
+function normaliseBrandTerm(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Test whether a GSC query counts as a brand search.
+ *
+ * Matcher candidates (any hit = brand):
+ *   1. Any entry in brand_aliases appears as a substring of the query.
+ *      Use case: multi-word brands ("CTS Tours" aliases: ["cts tours",
+ *      "cts travel", "china travel service"]).
+ *   2. brandRoot (from domain) appears as a substring of the query.
+ *      Use case: legacy / no-alias clients where the brand is one word
+ *      that happens to appear inline in queries ("oztop" inside
+ *      "oztop building supplies").
+ *
+ * Both checks are case-insensitive with whitespace collapsed.
+ *
+ * @param query        GSC top_queries[i].query
+ * @param brandRoot    domain root or null
+ * @param brandAliases optional alias array from clients.brand_aliases
+ */
+export function isBrandQueryMatch(
+  query: string,
+  brandRoot: string | null,
+  brandAliases: string[] | null,
+): boolean {
+  const q = normaliseBrandTerm(query)
+  if (!q) return false
+
+  if (Array.isArray(brandAliases)) {
+    for (const alias of brandAliases) {
+      if (typeof alias !== 'string') continue
+      const a = normaliseBrandTerm(alias)
+      if (a.length >= 2 && q.includes(a)) return true
+    }
+  }
+
+  if (brandRoot) {
+    const r = normaliseBrandTerm(brandRoot)
+    if (r.length >= 2 && q.includes(r)) return true
+  }
+
+  return false
+}
+
 async function fetchBrandSearchVolume(
   supabase: SupabaseClient,
   clientId: string,
 ): Promise<AutoFetchResult> {
-  // Schema reality (2026-06-03 audit): clients table has `name` + `semrush_db`
-  // (au/nz) but no `primary_keyword` column. `domain` is the GSC brand-root
-  // source; `name` is the DataForSEO fallback keyword.
+  // Schema reality (2026-06-03 audit + 2026-06-04 P0 fix): clients table has
+  // `name`, `semrush_db` (au/nz), `domain`, and (new) `brand_aliases` text[].
   const { data: client, error: clientErr } = await supabase
     .from('clients')
-    .select('name, semrush_db, domain')
+    .select('name, semrush_db, domain, brand_aliases')
     .eq('id', clientId)
-    .maybeSingle<{ name: string | null; semrush_db: string | null; domain: string | null }>()
+    .maybeSingle<{
+      name: string | null
+      semrush_db: string | null
+      domain: string | null
+      brand_aliases: string[] | null
+    }>()
 
   if (clientErr) {
     return { ok: false, reason: `Client query failed: ${clientErr.message}` }
@@ -151,9 +218,13 @@ async function fetchBrandSearchVolume(
   }
 
   // ── Tier 1: GSC rolling-28-day brand-tagged clicks ─────────────────────
-  const brandRoot = extractBrandRootFromDomain(client.domain)
-  if (brandRoot) {
-    const gscResult = await fetchBrandClicksFromGsc(supabase, clientId, brandRoot)
+  const brandRoot     = extractBrandRootFromDomain(client.domain)
+  const brandAliases  = Array.isArray(client.brand_aliases) && client.brand_aliases.length > 0
+    ? client.brand_aliases
+    : null
+  const canMatchBrand = brandRoot !== null || brandAliases !== null
+  if (canMatchBrand) {
+    const gscResult = await fetchBrandClicksFromGsc(supabase, clientId, brandRoot, brandAliases)
     if (gscResult.ok) return gscResult
     // gscResult.ok === false → fall through to DataForSEO with the reason
     // preserved for diagnostics (logged below if fallback also fails).
@@ -202,7 +273,8 @@ async function fetchBrandSearchVolume(
 async function fetchBrandClicksFromGsc(
   supabase: SupabaseClient,
   clientId: string,
-  brandRoot: string,
+  brandRoot: string | null,
+  brandAliases: string[] | null,
 ): Promise<AutoFetchResult> {
   const { data, error } = await supabase
     .from('gsc_performance_snapshots')
@@ -229,7 +301,7 @@ async function fetchBrandClicksFromGsc(
   for (const row of queries) {
     if (!row.query) continue
     if (typeof row.clicks !== 'number') continue
-    if (isBrandedKeyword(row.query, brandRoot)) {
+    if (isBrandQueryMatch(row.query, brandRoot, brandAliases)) {
       brandedClicks += row.clicks
       brandedQueryCount += 1
     }
@@ -237,12 +309,18 @@ async function fetchBrandClicksFromGsc(
 
   if (brandedQueryCount === 0) {
     // GSC snapshot exists but no brand-tagged queries surface in the top_queries
-    // window. This is real signal: tiny brand awareness OR brand-root mismatch
-    // (e.g. domain is "ctstours" but real brand search is "CTS tours NZ").
-    // Fall back to DataForSEO so FDE still sees a number; log the miss.
+    // window. Likely causes:
+    //   1. Tiny brand awareness (real signal — long-tail informational only)
+    //   2. Multi-word brand without brand_aliases configured (e.g. CTS Tours
+    //      with only domain-root "ctstours" set; queries are "cts tours",
+    //      "china travel service" → all miss)
+    // Fall back to DataForSEO; log the alias-config hint in the reason.
+    const aliasHint = brandAliases
+      ? ''
+      : ' (no brand_aliases configured — add aliases on clients.brand_aliases for multi-word brands)'
     return {
       ok: false,
-      reason: `No branded queries found in GSC top_queries for brand "${brandRoot}". Falling back to DataForSEO estimate.`,
+      reason: `No branded queries found in GSC top_queries for brand "${brandRoot ?? '(no domain)'}"${aliasHint}. Falling back to DataForSEO estimate.`,
     }
   }
 
