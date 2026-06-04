@@ -13,7 +13,14 @@ import { clampLimit } from '@/lib/validation-utils'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { SeoContentAdapter } from '@/lib/flywheel/adapters/SeoContentAdapter'
 import { SEO_ACTION_TYPE, SEO_METRIC_KEY } from '@/lib/flywheel/vocabulary'
+import { precheckCharge, commitCharge, refundOnFail } from '@/lib/mtc/charge'
+import type { ServiceKey } from '@/lib/mtc/types'
 import type { BlogPost, BlogMode, GenerateBlogRequest } from '@/types/magic-engine'
+
+/** unified mode = dual-signal (60 MTC), everything else = SEO-only (40 MTC). */
+function blogServiceKey(mode: BlogMode): ServiceKey {
+  return mode === 'unified' ? 'blog_dual_signal' : 'blog_seo'
+}
 
 /**
  * GET /api/clients/[id]/blog
@@ -140,6 +147,15 @@ export async function POST(
       }
     }
 
+    // ── MTC precheck ─────────────────────────────────────────────────────────
+    // Reject early if balance/budget can't cover this post. commit happens on
+    // background completion, refund on background failure.
+    const serviceKey = blogServiceKey(mode)
+    const precheck = await precheckCharge(clientId, serviceKey)
+    if (!precheck.ok) {
+      return NextResponse.json(precheck.body, { status: precheck.status })
+    }
+
     // ── Insert placeholder with status='generating', return immediately ────────
     const { data: placeholder, error: insertErr } = await supabaseAdmin
       .from('blog_posts')
@@ -154,6 +170,9 @@ export async function POST(
         keyword_kd:        body.keyword_kd        ?? null,
         keyword_intent:    body.keyword_intent    ?? null,
         status:            'generating',
+        mtc_service_key:   serviceKey,
+        mtc_projected:     precheck.projectedMtc,
+        mtc_committed:     false,
       })
       .select('id')
       .single()
@@ -185,6 +204,7 @@ async function runGenerationBackground(
   mode: BlogMode,
   postId: string,
 ) {
+  const serviceKey = blogServiceKey(mode)
   try {
     // Load client domain for internal link checker (P14.B.4).
     const { data: clientRow } = await supabaseAdmin
@@ -229,6 +249,9 @@ async function runGenerationBackground(
       console.error('[blog background] flywheel action failed (non-blocking):', err)
     }
 
+    // MTC commit — read projected amount from the row (precheck wrote it on POST)
+    await commitBlogMtc(clientId, postId, serviceKey)
+
   } catch (err) {
     console.error('[blog background] Generation failed for post', postId, ':', err)
     await Promise.resolve(
@@ -237,7 +260,55 @@ async function runGenerationBackground(
         .update({ status: 'failed' })
         .eq('id', postId),
     ).catch((e: unknown) => console.error('[blog background] status→failed update error:', e))
+
+    // MTC refund — generation failed, no charge taken (precheck-only at POST).
+    // Mark mtc_committed=true so retries don't double-process.
+    await Promise.resolve(
+      supabaseAdmin
+        .from('blog_posts')
+        .update({ mtc_committed: true })
+        .eq('id', postId),
+    ).catch(() => {})
+
+    // Write a ledger row noting the failure for audit trail.
+    const { data: row } = await supabaseAdmin
+      .from('blog_posts')
+      .select('mtc_projected')
+      .eq('id', postId)
+      .maybeSingle<{ mtc_projected: number | null }>()
+    if (row?.mtc_projected) {
+      await refundOnFail(clientId, serviceKey, row.mtc_projected, {
+        referenceId: postId,
+        reason: err instanceof Error ? err.message : 'blog generation failed',
+      })
+    }
   }
+}
+
+/**
+ * Commit MTC for a successfully-generated blog post.
+ * Guarded by mtc_committed to prevent double-charge on retries.
+ */
+async function commitBlogMtc(clientId: string, postId: string, serviceKey: ServiceKey): Promise<void> {
+  const { data: row } = await supabaseAdmin
+    .from('blog_posts')
+    .select('mtc_projected, mtc_committed')
+    .eq('id', postId)
+    .maybeSingle<{ mtc_projected: number | null; mtc_committed: boolean | null }>()
+
+  if (!row || row.mtc_committed || !row.mtc_projected || row.mtc_projected <= 0) return
+
+  const commit = await commitCharge(clientId, serviceKey, row.mtc_projected, {
+    referenceId: postId,
+    notes: `blog ${serviceKey}`,
+  })
+  if (commit.ok) {
+    await supabaseAdmin
+      .from('blog_posts')
+      .update({ mtc_committed: true })
+      .eq('id', postId)
+  }
+  // Leave committed=false on failure; ops can re-run a sweep later.
 }
 
 async function updateGeneratedPost(

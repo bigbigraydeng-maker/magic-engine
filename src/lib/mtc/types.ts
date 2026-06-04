@@ -17,6 +17,7 @@ export type ServiceKey =
   | 'social_post'
   | 'social_series'
   | 'social_calendar'
+  | 'social_story'
   | 'marketing_plan'
   | 'keyword_report'
   | 'geo_directives'
@@ -41,6 +42,7 @@ export const MTC_RATES: Record<ServiceKey, number> = {
   social_post: 5,
   social_series: 20,
   social_calendar: 30,
+  social_story: 3,
   marketing_plan: 30,
   keyword_report: 30,
   geo_directives: 20,
