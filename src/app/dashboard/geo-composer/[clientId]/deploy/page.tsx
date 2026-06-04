@@ -21,7 +21,7 @@ import { DeployedPagesList } from '../_components/DeployedPagesList';
 import { useDeploymentApi } from '@/lib/hooks/use-deployment-api';
 import { DEPLOYMENT_CONFIG } from '@/lib/deployment-constants';
 import type { GeoDirective } from '@/types/magic-engine';
-import type { WordpressConnectionStatus, ShopifyConnectionStatus } from '@/lib/cms/vocabulary';
+import type { CmsConnectionStatus, WordpressConnectionStatus, ShopifyConnectionStatus } from '@/lib/cms/vocabulary';
 
 interface ClientData {
   id: string;
@@ -30,6 +30,9 @@ interface ClientData {
 }
 
 export interface CmsProviders {
+  // github is the version-control style integration (commit + PR).
+  // wordpress / shopify create pages directly via REST APIs.
+  github: CmsConnectionStatus | null;
   wordpress: WordpressConnectionStatus | null;
   shopify: ShopifyConnectionStatus | null;
 }
@@ -40,7 +43,7 @@ export default function DeploymentPage() {
 
   const [client, setClient] = useState<ClientData | null>(null);
   const [directive, setDirective] = useState<GeoDirective | null>(null);
-  const [cmsProviders, setCmsProviders] = useState<CmsProviders>({ wordpress: null, shopify: null });
+  const [cmsProviders, setCmsProviders] = useState<CmsProviders>({ github: null, wordpress: null, shopify: null });
   const [pageLoading, setPageLoading] = useState(true);
   const [pageError, setPageError] = useState('');
 
@@ -80,6 +83,7 @@ export default function DeploymentPage() {
         const cmsData = await cmsRes.json();
         if (cmsData.success) {
           setCmsProviders({
+            github:    cmsData.providers?.github    ?? null,
             wordpress: cmsData.providers?.wordpress ?? null,
             shopify:   cmsData.providers?.shopify   ?? null,
           });

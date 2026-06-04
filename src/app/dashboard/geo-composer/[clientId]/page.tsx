@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { DirectiveEditor } from './_components/DirectiveEditor';
 import { SnippetPreview } from './_components/SnippetPreview';
+import { ConfirmDialog } from './_components/ConfirmDialog';
 import type { GeoDirective, GeoScenario, GeoAudienceSignals } from '@/types/magic-engine';
 
 interface Client {
@@ -47,6 +48,7 @@ export default function GeoComposerPage() {
   const [activating, setActivating] = useState(false);
   const [actionMsg, setActionMsg] = useState('');
   const [actionOk, setActionOk] = useState<boolean | null>(null);
+  const [showActivateConfirm, setShowActivateConfirm] = useState(false);
 
   const flashMsg = (msg: string, ok: boolean) => {
     setActionMsg(msg);
@@ -157,17 +159,27 @@ export default function GeoComposerPage() {
     }
   };
 
-  // Activate directive
+  // Activate directive — wrapped in confirm dialog because activation now
+  // archives the previous active AND all other drafts in one atomic step.
   const handleActivate = async () => {
     if (!selected) return;
+    setShowActivateConfirm(false);
     setActivating(true);
     try {
       const res = await fetch(`/api/clients/${clientId}/geo/${selected.id}/activate`, {
         method: 'POST',
       });
-      const j = await res.json();
+      const j = await res.json() as {
+        success: boolean
+        error?: string
+        drafts_archived?: number
+      };
       if (!res.ok || !j.success) throw new Error(j.error ?? 'Activation failed');
-      flashMsg('✓ Directive activated — it is now the live version', true);
+      const archivedCount = j.drafts_archived ?? 0;
+      const suffix = archivedCount > 0
+        ? `（已自动归档 ${archivedCount} 个草稿）`
+        : '';
+      flashMsg(`✓ Directive activated — it is now the live version${suffix}`, true);
       await fetchAll();
     } catch (err: unknown) {
       flashMsg(err instanceof Error ? err.message : 'Activation failed', false);
@@ -175,6 +187,12 @@ export default function GeoComposerPage() {
       setActivating(false);
     }
   };
+
+  // Other drafts that will be archived when the selected one is activated.
+  // Excludes the selected one itself, the current active, and already-archived rows.
+  const otherDraftsCount = selected
+    ? directives.filter(d => d.id !== selected.id && d.status === 'draft').length
+    : 0;
 
   // ── Loading ───────────────────────────────────────────────────────────────
   if (loading) {
@@ -347,7 +365,7 @@ export default function GeoComposerPage() {
                 </button>
                 {selected.status !== 'active' && (
                   <button
-                    onClick={handleActivate}
+                    onClick={() => setShowActivateConfirm(true)}
                     disabled={activating || isDirty}
                     title={isDirty ? 'Save your changes first' : 'Activate this directive'}
                     className="px-4 py-2 text-sm font-medium bg-[#5C8A4A] hover:bg-[#5C8A4A] disabled:bg-[#5C8A4A]/70 text-white rounded-lg transition-colors"
@@ -360,6 +378,27 @@ export default function GeoComposerPage() {
           )}
         </>
       )}
+
+      {/* Activation confirm — tells the FDE that activating this version will
+          also archive any other drafts for the same client (the previous
+          active is always archived; this dialog surfaces the draft side-effect
+          which is new behaviour and would otherwise be silent). */}
+      <ConfirmDialog
+        isOpen={showActivateConfirm}
+        title="Activate this directive?"
+        message={
+          selected
+            ? (otherDraftsCount > 0
+                ? `Activating v${selected.version} will: (1) make it the live GEO directive for this client, (2) archive the current active version (if any), and (3) archive ${otherDraftsCount} other draft${otherDraftsCount === 1 ? '' : 's'}. Archived directives stay viewable in the version history but cannot be edited.`
+                : `Activating v${selected.version} will make it the live GEO directive for this client. Any previously-active version will be moved to the archive (still viewable from the version history).`)
+            : ''
+        }
+        confirmLabel="Activate"
+        cancelLabel="Cancel"
+        onConfirm={handleActivate}
+        onCancel={() => setShowActivateConfirm(false)}
+        loading={activating}
+      />
     </div>
   );
 }

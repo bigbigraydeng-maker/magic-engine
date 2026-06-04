@@ -212,6 +212,10 @@ export interface ExecutionItem {
   marketing_plan_id: string | null
   /** Phase 31/33: Initiative this action belongs to (nullable for legacy items) */
   initiative_id: string | null
+  /** Kanban Content Workbench: wall-clock when the latest content generation started. NULL = never tried. */
+  generation_started_at: string | null
+  /** Kanban Content Workbench: populated when the latest generation failed. NULL = no failure / cleared on retry. */
+  generation_error: string | null
 }
 
 /** 内容飞轮闭环 — 执行看板 row 上展示的关联内容预览（execution GET 时 embed） */

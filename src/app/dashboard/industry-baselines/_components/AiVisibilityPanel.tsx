@@ -117,22 +117,51 @@ export function AiVisibilityPanel() {
   useEffect(() => { loadAll() }, [loadAll])
 
   const handleCollect = async () => {
-    if (!confirm('立即触发一次采集？将对所有 active 问题调用 ChatGPT + DataForSEO，大约 1-3 分钟。')) return
+    if (!confirm('立即触发一次采集？将对所有 active 问题调用 ChatGPT + DataForSEO，约 1-5 分钟（后台执行，可关闭页面）。')) return
     setCollecting(true)
-    setCollectMsg('')
+    setCollectMsg('采集排队中…')
     try {
       const res = await fetch('/api/baselines/ai-collect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       })
-      const j = await res.json()
-      if (!res.ok) {
-        setCollectMsg(`✗ ${j.error ?? 'Failed'}`)
-      } else {
-        setCollectMsg(`✓ ${j.questions_ok}/${j.questions_attempted} ok · ${j.snapshots_written} snapshots · $${(j.total_cost_usd ?? 0).toFixed(4)} · ${j.duration_seconds}s`)
-        await loadAll()
+
+      // Defensive parse: 502 / 504 / Render restart pages return HTML, not JSON.
+      // Old code did `await res.json()` which threw "Unexpected token '<'".
+      const text = await res.text()
+      let json: { run_id?: string; status?: string; error?: string; message?: string; existing_run_id?: string; hint?: string } = {}
+      try {
+        json = text ? JSON.parse(text) : {}
+      } catch {
+        const preview = text.slice(0, 120).replace(/\s+/g, ' ').trim()
+        setCollectMsg(`✗ HTTP ${res.status} — 服务端返回非 JSON：${preview}…`)
+        return
       }
+
+      // 魏征 P1: 409 = 另一次采集正在进行中
+      if (res.status === 409 && json.existing_run_id) {
+        setCollectMsg(`⏳ 已有采集运行中（run ${json.existing_run_id.slice(0, 8)}…），等其结束再点`)
+        return
+      }
+
+      if (!res.ok) {
+        setCollectMsg(`✗ ${json.error ?? `HTTP ${res.status}`}`)
+        return
+      }
+
+      // 202 Accepted (async path) — work runs in background, poll runs table
+      if (res.status === 202 && json.run_id) {
+        setCollectMsg(`✓ 已排队 run ${json.run_id.slice(0, 8)}… — 后台执行中，约 1-3 分钟后刷新看结果`)
+        // Auto-refresh snapshots after 90s (typical batch duration)
+        setTimeout(() => { void loadAll() }, 90_000)
+        return
+      }
+
+      // 200 OK (legacy sync path) — old summary shape
+      const sync = json as unknown as { questions_ok: number; questions_attempted: number; snapshots_written: number; total_cost_usd?: number; duration_seconds: number }
+      setCollectMsg(`✓ ${sync.questions_ok}/${sync.questions_attempted} ok · ${sync.snapshots_written} snapshots · $${(sync.total_cost_usd ?? 0).toFixed(4)} · ${sync.duration_seconds}s`)
+      await loadAll()
     } catch (err) {
       setCollectMsg(`✗ ${(err as Error).message}`)
     } finally {
@@ -203,6 +232,7 @@ export function AiVisibilityPanel() {
       <div className="space-y-1 rounded-xl border border-me-ochre/30 bg-me-ochre/10 px-4 py-3 text-xs font-semibold text-me-charcoal/80">
         <p><strong className="font-black text-me-charcoal">行业 AI 可见度时序档案 · 日级采集。</strong>每天追踪 ChatGPT + Google AI Overview + Google SERP 对每个行业问题的回答，记录哪些品牌被推荐、排名每日变化。数据进入飞轮归因分析。</p>
         <p>问题一旦开始采集，<strong>question_text 永久锁定</strong>（保证时序连续性）。点击「展开历史」可查看该题最近 30 天每日快照按日倒序。</p>
+        <p className="pt-1 border-t border-me-ochre/15 mt-1"><strong className="font-black text-me-charcoal">⚠ 注意区分两个按钮：</strong>本 tab 内的 <code className="px-1 py-0.5 bg-me-ochre/20 rounded text-me-charcoal">▶ Run AI visibility</code> 跑 AI 可见度采集（本 tab 数据）。页面顶部右上角的 <code className="px-1 py-0.5 bg-me-ochre/20 rounded text-me-charcoal">▶ Run SEO baselines</code> 跑 SEO Baselines tab 的 DataForSEO 域名打分。两套数据互不影响。</p>
       </div>
 
       {/* Toolbar: filters + collect */}
@@ -270,7 +300,7 @@ export function AiVisibilityPanel() {
             disabled={collecting}
             className="rounded-lg bg-me-ochre px-4 py-2 text-xs font-black text-white transition-colors hover:bg-me-ochre/90 disabled:opacity-50"
           >
-            {collecting ? '采集中…' : '▶ 立即采集'}
+            {collecting ? '采集中…' : '▶ Run AI visibility'}
           </button>
         </div>
       </div>
@@ -427,7 +457,7 @@ function QuestionRow({ question, snapshot }: { question: Question; snapshot?: Sn
           {snapshot && !snapshot.brands_mentioned?.length && !snapshot.error_message && (
             <p className="mt-1 text-xs font-semibold text-me-charcoal/45 italic">尚无识别到品牌</p>
           )}
-          {snapshot?.error_message && (
+          {snapshot?.error_message && snapshot.error_code !== 'no_ai_overview' && (
             <p className="mt-1 text-xs font-semibold text-status-rej">采集失败：{snapshot.error_message}</p>
           )}
           {!snapshot && (
@@ -488,22 +518,31 @@ function DayCard({ day, snapshots }: { day: string; snapshots: Snapshot[] }) {
       </div>
 
       <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-3">
-        {ordered.map(s => (
-          <div key={s.id} className="rounded border border-black/5 bg-white px-2 py-1.5">
-            <p className="text-[10px] font-black uppercase tracking-wide text-me-charcoal/45">
-              {PLATFORM_LABELS_SHORT[s.platform] ?? s.platform}
-            </p>
-            {s.error_message ? (
-              <p className="mt-1 text-[11px] font-semibold text-status-rej">✗ {s.error_message}</p>
-            ) : s.top3_brands && s.top3_brands.length > 0 ? (
-              <ol className="mt-1 list-decimal pl-4 text-[11px] font-semibold text-me-charcoal/85">
-                {s.top3_brands.map((b, i) => <li key={i} className="truncate">{b}</li>)}
-              </ol>
-            ) : (
-              <p className="mt-1 text-[11px] font-semibold text-me-charcoal/45 italic">无品牌</p>
-            )}
-          </div>
-        ))}
+        {ordered.map(s => {
+          // B-2 fix: distinguish "AI Overview block did not appear" from
+          // "AI Overview appeared but no brand extracted". Previously both
+          // showed as "无品牌", masking a real product signal.
+          const isAiAbsent = s.error_code === 'no_ai_overview'
+          const isRealError = s.error_message && !isAiAbsent
+          return (
+            <div key={s.id} className="rounded border border-black/5 bg-white px-2 py-1.5">
+              <p className="text-[10px] font-black uppercase tracking-wide text-me-charcoal/45">
+                {PLATFORM_LABELS_SHORT[s.platform] ?? s.platform}
+              </p>
+              {isRealError ? (
+                <p className="mt-1 text-[11px] font-semibold text-status-rej">✗ {s.error_message}</p>
+              ) : isAiAbsent ? (
+                <p className="mt-1 text-[11px] font-semibold text-me-charcoal/45 italic">本题未出现 AI Overview</p>
+              ) : s.top3_brands && s.top3_brands.length > 0 ? (
+                <ol className="mt-1 list-decimal pl-4 text-[11px] font-semibold text-me-charcoal/85">
+                  {s.top3_brands.map((b, i) => <li key={i} className="truncate">{b}</li>)}
+                </ol>
+              ) : (
+                <p className="mt-1 text-[11px] font-semibold text-me-charcoal/45 italic">无品牌</p>
+              )}
+            </div>
+          )
+        })}
       </div>
 
       {showRaw && (

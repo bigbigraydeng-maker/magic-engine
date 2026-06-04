@@ -17,6 +17,7 @@
 
 import { supabaseAdmin } from '../../supabase'
 import { getBulkTrafficEstimation } from '../../dataforseo/labs'
+import { getClientCompetitorDomains } from '../../competitors/resolver'
 import { COMPETITOR_METRIC_KEY } from '../vocabulary'
 import type { FlywheelMetricRow } from './types'
 
@@ -75,15 +76,12 @@ export class CompetitorSnapshotAdapter {
     }))
   }
 
+  /**
+   * Resolved via unified resolver: clients.competitor_domains (FDE) >
+   * master_briefs.competitor_domains > DataForSEO auto (not used here — only
+   * known competitors get a flywheel_metrics row).
+   */
   private async fetchCompetitorDomains(clientId: string): Promise<string[]> {
-    const { data } = await supabaseAdmin
-      .from('clients')
-      .select('competitor_domains')
-      .eq('id', clientId)
-      .single()
-
-    const raw = data?.competitor_domains
-    if (!Array.isArray(raw)) return []
-    return raw.filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
+    return getClientCompetitorDomains(clientId, [], 50)
   }
 }

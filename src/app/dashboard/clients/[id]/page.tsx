@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { ContentHub } from './_components/ContentHub';
 import { GenerationDrawer } from './_components/GenerationDrawer';
@@ -358,9 +358,15 @@ function WorkflowProgress({
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+// Valid SettingsTab keys (must match SettingsDrawer's exported union).
+// Used to validate ?settings=<tab> URL parameters.
+const VALID_SETTINGS_TABS: ReadonlyArray<SettingsTab> = ['brief', 'client-info', 'cms', 'users', 'platform']
+
 export default function ClientDetailPage() {
   const params = useParams();
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const clientId = params.id as string;
 
   const [client, setClient] = useState<Client | null>(null);
@@ -379,9 +385,22 @@ export default function ClientDetailPage() {
 
   const execItemId = searchParams.get('exec');
   const [generationOpen, setGenerationOpen] = useState(Boolean(execItemId));
-  // ?brief=1 (from 张骞 confirm) auto-opens the brief settings drawer
-  const [settingsOpen, setSettingsOpen] = useState(searchParams.get('brief') === '1');
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>('brief');
+  // Open the settings drawer via URL:
+  //   ?brief=1               → opens with the "brief" tab (张骞 confirm flow)
+  //   ?settings=<tab-id>     → opens with the given tab (e.g. ?settings=cms
+  //                             from the GEO deploy page's "connect website" link)
+  // We compute initial state in the useState initializer (runs once on mount).
+  const initialSettingsTab = ((): SettingsTab => {
+    const raw = searchParams.get('settings')
+    if (raw && (VALID_SETTINGS_TABS as readonly string[]).includes(raw)) {
+      return raw as SettingsTab
+    }
+    return 'brief'
+  })()
+  const [settingsOpen, setSettingsOpen] = useState(
+    searchParams.get('brief') === '1' || searchParams.get('settings') !== null,
+  );
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>(initialSettingsTab);
   const [zhugeDrawerOpen, setZhugeDrawerOpen] = useState(false);
   const [zhugeRefreshKey, setZhugeRefreshKey] = useState(0);
   const [zhugeFreshOutput, setZhugeFreshOutput] = useState<ZhugeOutput | null>(null);
@@ -660,10 +679,23 @@ export default function ClientDetailPage() {
         }}
       />
 
-      {/* Settings drawer */}
+      {/* Settings drawer.
+          On close we also strip the auto-open URL params (?brief, ?settings)
+          so a page refresh doesn't re-open the drawer the FDE just closed.
+          Other params (e.g. ?exec) are preserved. */}
       <SettingsDrawer
         open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => {
+          setSettingsOpen(false)
+          const params = new URLSearchParams(searchParams?.toString() ?? '')
+          let dirty = false
+          if (params.has('brief'))    { params.delete('brief');    dirty = true }
+          if (params.has('settings')) { params.delete('settings'); dirty = true }
+          if (dirty && pathname) {
+            const query = params.toString()
+            router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+          }
+        }}
         clientId={clientId}
         client={client}
         activeTab={settingsTab}

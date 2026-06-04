@@ -595,12 +595,37 @@ const DIMENSION_CARD_META: Record<string, { label: string; cls: string }> = {
   competitor:    { label: '竞品', cls: 'bg-yellow-50 text-yellow-600' },
 }
 
+// 生成中阈值 — 超过这个时间还没结果，按"超时"处理（DB started_at 不再可信）
+const GENERATION_STALE_MS = 10 * 60 * 1000
+
+type GenerationState = 'idle' | 'generating' | 'failed' | 'stale'
+
+function resolveGenerationState(
+  item: ItemWithLogs,
+  isMemoryGenerating: boolean,
+): GenerationState {
+  // 内存 Set 命中 → 一定在生成（覆盖刚启动还没写 DB 的窗口）
+  if (isMemoryGenerating) return 'generating'
+  // 失败优先 — error 字段显式标记
+  if (item.generation_error) return 'failed'
+  // DB 有 started_at：10 分钟内算"制作中"，超时算 stale
+  if (item.generation_started_at) {
+    const startedMs = Date.parse(item.generation_started_at)
+    if (Number.isFinite(startedMs) && Date.now() - startedMs < GENERATION_STALE_MS) {
+      return 'generating'
+    }
+    return 'stale'
+  }
+  return 'idle'
+}
+
 function ExecutionItemCard({
   item,
   isActive,
   onOpenDetail,
   isBackgroundGenerating = false,
   initiativeLabel,
+  onRetryGenerate,
 }: {
   item:         ItemWithLogs
   isActive:     boolean
@@ -608,6 +633,8 @@ function ExecutionItemCard({
   isBackgroundGenerating?: boolean
   /** Phase 33: Initiative title for badge — shown when item.initiative_id is set */
   initiativeLabel?: string
+  /** Retry handler — opens the content workbench so FDE can re-trigger generation */
+  onRetryGenerate?: (item: ItemWithLogs) => void
 }) {
   const fixMeta     = FIX_TYPE_META[item.fix_type ?? ''] ?? FIX_TYPE_META.fde_manual
   const statusMeta  = STATUS_META[item.status]
@@ -615,6 +642,9 @@ function ExecutionItemCard({
   const dueDate     = item.due_date
   const hasAiAssist = item.logs?.some(l => l.kind === 'ai_assist') ?? false
   const logCount    = item.logs?.length ?? 0
+  const genState    = resolveGenerationState(item, isBackgroundGenerating)
+  const isGenerating = genState === 'generating'
+  const isFailed     = genState === 'failed'
 
   return (
     <div
@@ -625,9 +655,11 @@ function ExecutionItemCard({
       className={`cursor-pointer select-none rounded-lg border p-2.5 transition-all ${
         isActive
           ? 'border-cyan-300 bg-cyan-50 shadow-sm'
-          : isBackgroundGenerating
-            ? 'border-cyan-200 bg-cyan-50/50 shadow-sm'
-            : 'border-slate-200 bg-white hover:border-cyan-200 hover:shadow-sm'
+          : isFailed
+            ? 'border-red-200 bg-red-50/40 shadow-sm'
+            : isGenerating
+              ? 'border-cyan-200 bg-cyan-50/50 shadow-sm'
+              : 'border-slate-200 bg-white hover:border-cyan-200 hover:shadow-sm'
       }`}
     >
       <div className="flex items-start gap-2">
@@ -649,16 +681,40 @@ function ExecutionItemCard({
           <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${dimMeta.cls}`}>{dimMeta.label}</span>
         )}
         {dueDate && <span className="text-[10px] text-gray-400">{dueDate}</span>}
-        {isBackgroundGenerating && (
+        {isGenerating && (
           <span className="flex items-center gap-1 text-[10px] font-bold text-cyan-700">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-500" />
             制作中
           </span>
         )}
+        {isFailed && (
+          <>
+            <span
+              className="text-[10px] font-bold text-red-700 bg-red-50 px-1.5 py-0.5 rounded truncate max-w-[160px]"
+              title={item.generation_error ?? '生成失败'}
+            >
+              ⚠ 生成失败
+            </span>
+            {onRetryGenerate && (
+              <button
+                type="button"
+                onClick={e => { e.stopPropagation(); onRetryGenerate(item) }}
+                className="text-[10px] font-bold text-red-700 underline hover:text-red-900"
+              >
+                重试
+              </button>
+            )}
+          </>
+        )}
+        {genState === 'stale' && (
+          <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded" title="生成已超过 10 分钟未完成，可能已超时；点开任务查看日志">
+            ⚠ 生成超时
+          </span>
+        )}
         {item.source === 'proactive_signal' && (
           <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">⚡ 系统检测</span>
         )}
-        {!isBackgroundGenerating && hasAiAssist && <span className="text-[10px] font-bold text-cyan-700">AI 草稿</span>}
+        {!isGenerating && !isFailed && hasAiAssist && <span className="text-[10px] font-bold text-cyan-700">AI 草稿</span>}
         {logCount > 0 && <span className="text-[10px] text-gray-400">{logCount} 条日志</span>}
         {initiativeLabel && (
           <span className="text-[10px] font-bold text-me-ochre bg-me-ochre/10 px-1.5 py-0.5 rounded truncate max-w-[120px]" title={initiativeLabel}>
@@ -1129,6 +1185,7 @@ function PhaseColumn({
   onAddItem,
   bgGeneratingIds,
   onReorder,
+  onRetryGenerate,
 }: {
   phase: number
   items: ItemWithLogs[]
@@ -1141,6 +1198,7 @@ function PhaseColumn({
   onAddItem: (prescriptionId: string, phase: number, fields: AddItemFields) => Promise<boolean>
   bgGeneratingIds?: Set<string>
   onReorder?: (draggedId: string, targetId: string, columnItems: ItemWithLogs[]) => void
+  onRetryGenerate?: (item: ItemWithLogs) => void
 }) {
   const [open, setOpen] = useState(defaultOpen)
   const [adding, setAdding] = useState(false)
@@ -1225,6 +1283,7 @@ function PhaseColumn({
                 isActive={activeDetailId === item.id}
                 onOpenDetail={onOpenDetail}
                 isBackgroundGenerating={bgGeneratingIds?.has(item.id) ?? false}
+                onRetryGenerate={onRetryGenerate}
               />
             </div>
           ))}
@@ -1432,6 +1491,7 @@ function PrescriptionGroup({
   onAddItem,
   bgGeneratingIds,
   onReorder,
+  onRetryGenerate,
 }: {
   group: GroupData
   defaultOpen: boolean
@@ -1441,6 +1501,7 @@ function PrescriptionGroup({
   onAddItem: (prescriptionId: string, phase: number, fields: AddItemFields) => Promise<boolean>
   bgGeneratingIds?: Set<string>
   onReorder?: (draggedId: string, targetId: string, columnItems: ItemWithLogs[]) => void
+  onRetryGenerate?: (item: ItemWithLogs) => void
 }) {
   const { items, label, archived, derivable, pid, meta, marketingPlanMeta, editable, kind } = group
 
@@ -1530,6 +1591,7 @@ function PrescriptionGroup({
               onAddItem={onAddItem}
               bgGeneratingIds={bgGeneratingIds}
               onReorder={onReorder}
+              onRetryGenerate={onRetryGenerate}
             />
           ))}
         </div>
@@ -1550,6 +1612,7 @@ function DimensionGroupSection({
   onOpenDetail,
   bgGeneratingIds,
   initiativeMap,
+  onRetryGenerate,
 }: {
   group: DimensionGroup
   activeDetailId: string | null
@@ -1557,6 +1620,7 @@ function DimensionGroupSection({
   bgGeneratingIds?: Set<string>
   /** Phase 33: initiative_id → title for badge display */
   initiativeMap?: Map<string, string>
+  onRetryGenerate?: (item: ItemWithLogs) => void
 }) {
   const [expanded, setExpanded] = useState(false)
 
@@ -1609,6 +1673,7 @@ function DimensionGroupSection({
             onOpenDetail={onOpenDetail}
             isBackgroundGenerating={bgGeneratingIds?.has(item.id) ?? false}
             initiativeLabel={item.initiative_id ? initiativeMap?.get(item.initiative_id) : undefined}
+            onRetryGenerate={onRetryGenerate}
           />
         ))}
       </div>
@@ -2020,7 +2085,18 @@ export default function ExecutionPage() {
     }
   }, [clientId])
 
-  // 后台社媒内容生成（关闭 ContentStudioDrawer 后继续跑，完成后刷新看板）
+  // Synchronous in-flight guard — React state updates are async, so a fast
+  // double-click can pass the bgGeneratingIds check twice before either
+  // setBgGeneratingIds commits. The ref is updated synchronously and
+  // de-dupes the second call before any work starts.
+  const bgGeneratingRef = useRef<Set<string>>(new Set())
+
+  // 后台社媒内容生成 — 完整状态机：
+  //   start  → PATCH generation_started_at=now, error=null, status=in_progress
+  //            写一条 ai_assist log "社媒内容生成中…"（持久化进度信号，刷新页面仍可见）
+  //   succeed → save-to-board + 写完成 log + PATCH started_at=null, error=null
+  //   fail   → PATCH started_at=null, error=msg, status 退回 pending
+  //            写一条 blocker log（FDE 看得到失败原因，卡片显示"失败 [重试]"）
   const handleBackgroundGenerate = useCallback((
     itemId: string,
     params: {
@@ -2032,13 +2108,43 @@ export default function ExecutionPage() {
       angle_focus?: string
     },
   ) => {
+    // De-dupe: same item already generating → no-op
+    if (bgGeneratingRef.current.has(itemId)) return
+    bgGeneratingRef.current.add(itemId)
     setBgGeneratingIds(prev => { const s = new Set(prev); s.add(itemId); return s })
+
     void (async () => {
+      // ── Phase 1: mark "started" before the slow AI call ────────────────
+      // Use the items snapshot at call time — same logic as before, never
+      // demote completed/skipped/already in_progress.
+      const currentItem = items.find(i => i.id === itemId)
+      const shouldPromoteStatus = !currentItem || currentItem.status === 'pending'
+      const startPatchBody: Record<string, unknown> = {
+        generation_started_at: new Date().toISOString(),
+        generation_error:      null,
+      }
+      if (shouldPromoteStatus) startPatchBody.status = 'in_progress'
+      await fetch(`/api/clients/${clientId}/execution/${itemId}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(startPatchBody),
+      }).catch(() => { /* generation continues; UI just won't show 制作中 chip */ })
+      await fetch(`/api/clients/${clientId}/execution/${itemId}/log`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ kind: 'ai_assist', author: 'luban', content: '社媒内容生成中…' }),
+      }).catch(() => {})
+      // Optimistic kanban refresh so the "制作中" chip appears immediately.
+      void fetchItems(true)
+
+      // ── Phase 2: the slow AI call ──────────────────────────────────────
+      let succeeded = false
+      let errorMessage = ''
       try {
         const res = await fetch(`/api/clients/${clientId}/social-plan`, {
-          method: 'POST',
+          method:  'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          body:    JSON.stringify({
             campaign_brief_id:  params.campaignId,
             platform:           params.platform,
             posts_count:        params.posts_count,
@@ -2049,34 +2155,66 @@ export default function ExecutionPage() {
           }),
         })
         const json = await res.json() as { success: boolean; plan_id?: string; error?: string }
-        if (json.success) {
-          // Save generated plan to content_posts so it appears in Launch Hub
+        if (!res.ok || !json.success) {
+          errorMessage = json.error || `生成失败 (HTTP ${res.status})`
+        } else {
+          succeeded = true
           if (json.plan_id) {
-            await fetch(`/api/clients/${clientId}/social-plan/${json.plan_id}/save-to-board`, {
-              method: 'POST',
+            const saveRes = await fetch(`/api/clients/${clientId}/social-plan/${json.plan_id}/save-to-board`, {
+              method:  'POST',
               headers: { 'Content-Type': 'application/json' },
-            }).catch(() => {})
-          }
-          await fetch(`/api/clients/${clientId}/execution/${itemId}/log`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ kind: 'ai_assist', author: 'luban', content: '社媒内容已在后台生成完成，可打开工作台查看' }),
-          }).catch(() => {})
-          // 读取 DB 最新状态（不依赖可能已过期的 items 快照），确保状态持久写入后再刷新
-          const statusRes = await fetch(`/api/clients/${clientId}/execution/${itemId}`).catch(() => null)
-          const statusJson = statusRes?.ok ? await statusRes.json() as { item?: { status: string } } : null
-          if (!statusJson?.item || statusJson.item.status === 'pending') {
-            await fetch(`/api/clients/${clientId}/execution/${itemId}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ status: 'in_progress' }),
-            })
+            }).catch(() => null)
+            if (!saveRes || !saveRes.ok) {
+              // Plan generated but couldn't be saved to Launch Hub —
+              // mark as failure so FDE knows to retry rather than silently
+              // losing the content.
+              succeeded = false
+              errorMessage = '内容已生成但未能保存到内容板，请重试'
+            }
           }
         }
-      } catch { /* non-fatal */ } finally {
-        setBgGeneratingIds(prev => { const s = new Set(prev); s.delete(itemId); return s })
-        void fetchItems(true)
+      } catch (e) {
+        errorMessage = e instanceof Error ? e.message : '生成失败，请重试'
       }
+
+      // ── Phase 3: write outcome to DB ───────────────────────────────────
+      if (succeeded) {
+        await fetch(`/api/clients/${clientId}/execution/${itemId}/log`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ kind: 'ai_assist', author: 'luban', content: '社媒内容已在后台生成完成，可打开工作台查看' }),
+        }).catch(() => {})
+        await fetch(`/api/clients/${clientId}/execution/${itemId}`, {
+          method:  'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ generation_started_at: null, generation_error: null }),
+        }).catch(() => {})
+      } else {
+        // Roll status back to pending so the failed item doesn't pollute
+        // Phase 33 M4 Goal-completion-rate math (in_progress is counted as
+        // "actively working on it"). Surface the error via blocker log.
+        await fetch(`/api/clients/${clientId}/execution/${itemId}/log`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ kind: 'blocker', author: 'system', content: `生成失败：${errorMessage}` }),
+        }).catch(() => {})
+        const rollbackBody: Record<string, unknown> = {
+          generation_started_at: null,
+          generation_error:      errorMessage,
+        }
+        // Only roll back to pending if we were the ones who promoted it.
+        if (shouldPromoteStatus) rollbackBody.status = 'pending'
+        await fetch(`/api/clients/${clientId}/execution/${itemId}`, {
+          method:  'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify(rollbackBody),
+        }).catch(() => {})
+      }
+
+      // ── Phase 4: release locks + refresh kanban ───────────────────────
+      bgGeneratingRef.current.delete(itemId)
+      setBgGeneratingIds(prev => { const s = new Set(prev); s.delete(itemId); return s })
+      void fetchItems(true)
     })()
   }, [clientId, items, fetchItems])
 
@@ -2151,6 +2289,14 @@ export default function ExecutionPage() {
     setDetailItem(item)
     setDetailEditable(editable)
   }, [])
+
+  // 失败重试 — 打开 detail drawer，FDE 进入内容工作台手动再点"生成"。
+  // 不直接复用 handleBackgroundGenerate 是因为：retry 时原始 params（platform/
+  // counts/angle）已丢失，强制 FDE 走一遍工作台可以让他们检查/修改 prompt
+  // 再生成，比偷偷用旧参数更透明。
+  const handleRetryGenerate = useCallback((item: ItemWithLogs) => {
+    openDetailAndRemember(item, true)
+  }, [openDetailAndRemember])
 
   // Phase 33 P33.10 fix: "unassigned" means initiative_id is null OR points to a
   // migration placeholder bucket (Phase 31 auto-binds legacy actions to type='unassigned'
@@ -2565,6 +2711,7 @@ export default function ExecutionPage() {
             }}
             bgGeneratingIds={allBgGeneratingIds}
             initiativeMap={initiativeMap}
+            onRetryGenerate={handleRetryGenerate}
           />
         ))}
 
@@ -2597,6 +2744,7 @@ export default function ExecutionPage() {
                     isActive={item.id === detailItem?.id}
                     onOpenDetail={i => openDetailAndRemember(i, true)}
                     isBackgroundGenerating={allBgGeneratingIds.has(item.id)}
+                    onRetryGenerate={handleRetryGenerate}
                   />
                 ))}
               </div>

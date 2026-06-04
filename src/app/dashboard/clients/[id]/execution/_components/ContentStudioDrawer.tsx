@@ -183,11 +183,11 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
               )}
               <p className="mt-2 text-xs font-semibold text-slate-500">
                 Master Brief is injected automatically
-                {campaignLoaded && (
-                  campaign
+                {!campaignLoaded
+                  ? <> · <span className="text-slate-400">Campaign 加载中…</span></>
+                  : campaign
                     ? <> · Campaign: <strong className="text-slate-700">{campaign.name}</strong></>
-                    : <> · <span className="text-amber-700">No active campaign; using brand DNA only</span></>
-                )}
+                    : <> · <span className="text-amber-700">未配置 Active Campaign — 内容生成将不可用</span></>}
               </p>
             </div>
             <button
@@ -221,13 +221,15 @@ export function ContentStudioDrawer({ clientId, item, onClose, onContentGenerate
           </div>
         )}
 
-        {/* Body */}
+        {/* Body — render immediately; campaign loads silently in the background.
+            Previously this was gated on `campaignLoaded` and showed a full-page
+            spinner for 2-3s while waiting for the marketing-plan → campaign
+            lookup, which FDEs mistook for a frozen drawer and closed/reopened
+            (re-firing the same fetch — the "needs 3+ clicks" symptom).
+            Generation controls inside SocialPlanSection are already gated on
+            !campaignId with a clear amber prompt, so no spinner is needed. */}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
-          {!campaignLoaded ? (
-            <div className="flex justify-center py-20">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-slate-950" />
-            </div>
-          ) : tab === 'article' ? (
+          {tab === 'article' ? (
             <StudioArticleTab
               clientId={clientId}
               item={item}

@@ -12,6 +12,7 @@
 
 import { getOpenAIClient } from '@/lib/ai/openai-client'
 import { supabaseAdmin } from '../supabase'
+import { getClientCompetitorDomains } from '../competitors/resolver'
 import type {
   GeoScenario,
   GeoAudienceSignals,
@@ -84,7 +85,6 @@ interface BriefRow {
   core_proposition: string | null
   target_audience: unknown
   content_pillars: unknown
-  competitor_domains: string[] | null
   keyword_seeds: string[] | null
 }
 
@@ -121,10 +121,14 @@ export async function generateGeoDirective(
   // 2. Load active master_brief
   const { data: brief } = await supabaseAdmin
     .from('master_briefs')
-    .select('id, brand_name, core_proposition, target_audience, content_pillars, competitor_domains, keyword_seeds')
+    .select('id, brand_name, core_proposition, target_audience, content_pillars, keyword_seeds')
     .eq('client_id', req.client_id)
     .eq('status', 'active')
     .maybeSingle<BriefRow>()
+
+  // Competitor list resolved via unified resolver
+  // (clients.competitor_domains > master_briefs.competitor_domains > none).
+  const competitorDomains = await getClientCompetitorDomains(req.client_id, [], 10)
 
   // 3. Optionally load Tracker weak spots
   let snapshot: SnapshotRow | null = null
@@ -149,6 +153,7 @@ export async function generateGeoDirective(
   const userMessage = buildUserMessage({
     client,
     brief: brief ?? null,
+    competitorDomains,
     weakSpots,
     contextHint: req.context_hint,
   })
@@ -272,10 +277,11 @@ function extractWeakSpots(
 function buildUserMessage(input: {
   client: ClientRow
   brief: BriefRow | null
+  competitorDomains: string[]
   weakSpots: RunWeakSpot[]
   contextHint?: string
 }): string {
-  const { client, brief, weakSpots, contextHint } = input
+  const { client, brief, competitorDomains, weakSpots, contextHint } = input
 
   // Extract city from target_audience.location to enforce correct geography in scenarios
   const audienceLocation = (brief?.target_audience as { location?: string } | null)?.location ?? null
@@ -302,8 +308,8 @@ function buildUserMessage(input: {
   if (brief?.keyword_seeds?.length) {
     lines.push(`Keyword seeds: ${brief.keyword_seeds.join(', ')}`)
   }
-  if (brief?.competitor_domains?.length) {
-    lines.push(`Competitor domains: ${brief.competitor_domains.join(', ')}`)
+  if (competitorDomains.length > 0) {
+    lines.push(`Competitor domains: ${competitorDomains.join(', ')}`)
   }
 
   if (weakSpots.length > 0) {

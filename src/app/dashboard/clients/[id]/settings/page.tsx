@@ -16,6 +16,7 @@
 import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
 import { GbpPanel } from './_components/GbpPanel'
+import { CompetitorDomainsPanel } from './_components/CompetitorDomainsPanel'
 
 const ERROR_MESSAGES: Record<string, string> = {
   token_exchange_failed: '无法从 Google 获取访问令牌，请重试。',
@@ -49,9 +50,9 @@ export default function ClientSettingsPage() {
           </Link>
         </div>
 
-        <h1 className="text-2xl font-black text-slate-950">平台连接设置</h1>
+        <h1 className="text-2xl font-black text-slate-950">客户配置中心</h1>
         <p className="mt-1 text-sm text-slate-500">
-          管理客户的第三方平台授权（Google Business Profile、Google Search Console 等）
+          管理客户的平台连接（OAuth 授权）和基础信息（竞品、品牌词等元数据）
         </p>
 
         {/* OAuth callback banners */}
@@ -77,8 +78,16 @@ export default function ClientSettingsPage() {
           </div>
         )}
 
+        {/* ── §1 平台连接（OAuth 类） ────────────────────────────────────── */}
+        <div className="mt-8 mb-2 flex items-baseline gap-2">
+          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+            § 1 · 平台连接
+          </p>
+          <span className="text-xs text-slate-400">OAuth 授权</span>
+        </div>
+
         {/* GBP Connection Section */}
-        <section className="mt-8">
+        <section>
           <div className="mb-3 flex items-center gap-2">
             <span className="text-base">📍</span>
             <h2 className="font-black text-slate-800">Google Business Profile</h2>
@@ -87,7 +96,7 @@ export default function ClientSettingsPage() {
         </section>
 
         {/* Other connectors — managed on the legacy connectors page */}
-        <section className="mt-8">
+        <section className="mt-6">
           <div className="mb-3 flex items-center gap-2">
             <span className="text-base">🔗</span>
             <h2 className="font-black text-slate-800">其他平台连接</h2>
@@ -116,6 +125,22 @@ export default function ClientSettingsPage() {
               </Link>
             ))}
           </div>
+        </section>
+
+        {/* ── §2 SEO 基础信息（客户元数据） ───────────────────────────────── */}
+        <div className="mt-10 mb-2 flex items-baseline gap-2">
+          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+            § 2 · SEO 基础信息
+          </p>
+          <span className="text-xs text-slate-400">客户元数据 · 多支柱共用</span>
+        </div>
+
+        <section>
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-base">🥊</span>
+            <h2 className="font-black text-slate-800">竞品域名清单</h2>
+          </div>
+          <CompetitorDomainsPanel clientId={clientId} />
         </section>
 
       </div>

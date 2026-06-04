@@ -38,6 +38,8 @@ function makeItem(overrides?: Partial<ExecutionItem>): ExecutionItem {
     source: 'diagnostic',
     marketing_plan_id: null,
     initiative_id: null,
+    generation_started_at: null,
+    generation_error: null,
     ...overrides,
   }
 }
