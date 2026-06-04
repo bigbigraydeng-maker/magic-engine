@@ -17,6 +17,7 @@ import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
 import { GbpPanel } from './_components/GbpPanel'
 import { CompetitorDomainsPanel } from './_components/CompetitorDomainsPanel'
+import { PrimaryKeywordsPanel } from './_components/PrimaryKeywordsPanel'
 
 const ERROR_MESSAGES: Record<string, string> = {
   token_exchange_failed: '无法从 Google 获取访问令牌，请重试。',
@@ -136,6 +137,14 @@ export default function ClientSettingsPage() {
         </div>
 
         <section>
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-base">🎯</span>
+            <h2 className="font-black text-slate-800">主关键词清单</h2>
+          </div>
+          <PrimaryKeywordsPanel clientId={clientId} />
+        </section>
+
+        <section className="mt-6">
           <div className="mb-3 flex items-center gap-2">
             <span className="text-base">🥊</span>
             <h2 className="font-black text-slate-800">竞品域名清单</h2>
