@@ -595,12 +595,37 @@ const DIMENSION_CARD_META: Record<string, { label: string; cls: string }> = {
   competitor:    { label: '竞品', cls: 'bg-yellow-50 text-yellow-600' },
 }
 
+// 生成中阈值 — 超过这个时间还没结果，按"超时"处理（DB started_at 不再可信）
+const GENERATION_STALE_MS = 10 * 60 * 1000
+
+type GenerationState = 'idle' | 'generating' | 'failed' | 'stale'
+
+function resolveGenerationState(
+  item: ItemWithLogs,
+  isMemoryGenerating: boolean,
+): GenerationState {
+  // 内存 Set 命中 → 一定在生成（覆盖刚启动还没写 DB 的窗口）
+  if (isMemoryGenerating) return 'generating'
+  // 失败优先 — error 字段显式标记
+  if (item.generation_error) return 'failed'
+  // DB 有 started_at：10 分钟内算"制作中"，超时算 stale
+  if (item.generation_started_at) {
+    const startedMs = Date.parse(item.generation_started_at)
+    if (Number.isFinite(startedMs) && Date.now() - startedMs < GENERATION_STALE_MS) {
+      return 'generating'
+    }
+    return 'stale'
+  }
+  return 'idle'
+}
+
 function ExecutionItemCard({
   item,
   isActive,
   onOpenDetail,
   isBackgroundGenerating = false,
   initiativeLabel,
+  onRetryGenerate,
 }: {
   item:         ItemWithLogs
   isActive:     boolean
@@ -608,6 +633,8 @@ function ExecutionItemCard({
   isBackgroundGenerating?: boolean
   /** Phase 33: Initiative title for badge — shown when item.initiative_id is set */
   initiativeLabel?: string
+  /** Retry handler — opens the content workbench so FDE can re-trigger generation */
+  onRetryGenerate?: (item: ItemWithLogs) => void
 }) {
   const fixMeta     = FIX_TYPE_META[item.fix_type ?? ''] ?? FIX_TYPE_META.fde_manual
   const statusMeta  = STATUS_META[item.status]
@@ -615,6 +642,9 @@ function ExecutionItemCard({
   const dueDate     = item.due_date
   const hasAiAssist = item.logs?.some(l => l.kind === 'ai_assist') ?? false
   const logCount    = item.logs?.length ?? 0
+  const genState    = resolveGenerationState(item, isBackgroundGenerating)
+  const isGenerating = genState === 'generating'
+  const isFailed     = genState === 'failed'
 
   return (
     <div
@@ -625,9 +655,11 @@ function ExecutionItemCard({
       className={`cursor-pointer select-none rounded-lg border p-2.5 transition-all ${
         isActive
           ? 'border-cyan-300 bg-cyan-50 shadow-sm'
-          : isBackgroundGenerating
-            ? 'border-cyan-200 bg-cyan-50/50 shadow-sm'
-            : 'border-slate-200 bg-white hover:border-cyan-200 hover:shadow-sm'
+          : isFailed
+            ? 'border-red-200 bg-red-50/40 shadow-sm'
+            : isGenerating
+              ? 'border-cyan-200 bg-cyan-50/50 shadow-sm'
+              : 'border-slate-200 bg-white hover:border-cyan-200 hover:shadow-sm'
       }`}
     >
       <div className="flex items-start gap-2">
@@ -649,16 +681,40 @@ function ExecutionItemCard({
           <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${dimMeta.cls}`}>{dimMeta.label}</span>
         )}
         {dueDate && <span className="text-[10px] text-gray-400">{dueDate}</span>}
-        {isBackgroundGenerating && (
+        {isGenerating && (
           <span className="flex items-center gap-1 text-[10px] font-bold text-cyan-700">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-500" />
             制作中
           </span>
         )}
+        {isFailed && (
+          <>
+            <span
+              className="text-[10px] font-bold text-red-700 bg-red-50 px-1.5 py-0.5 rounded truncate max-w-[160px]"
+              title={item.generation_error ?? '生成失败'}
+            >
+              ⚠ 生成失败
+            </span>
+            {onRetryGenerate && (
+              <button
+                type="button"
+                onClick={e => { e.stopPropagation(); onRetryGenerate(item) }}
+                className="text-[10px] font-bold text-red-700 underline hover:text-red-900"
+              >
+                重试
+              </button>
+            )}
+          </>
+        )}
+        {genState === 'stale' && (
+          <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded" title="生成已超过 10 分钟未完成，可能已超时；点开任务查看日志">
+            ⚠ 生成超时
+          </span>
+        )}
         {item.source === 'proactive_signal' && (
           <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">⚡ 系统检测</span>
         )}
-        {!isBackgroundGenerating && hasAiAssist && <span className="text-[10px] font-bold text-cyan-700">AI 草稿</span>}
+        {!isGenerating && !isFailed && hasAiAssist && <span className="text-[10px] font-bold text-cyan-700">AI 草稿</span>}
         {logCount > 0 && <span className="text-[10px] text-gray-400">{logCount} 条日志</span>}
         {initiativeLabel && (
           <span className="text-[10px] font-bold text-me-ochre bg-me-ochre/10 px-1.5 py-0.5 rounded truncate max-w-[120px]" title={initiativeLabel}>
@@ -1129,6 +1185,7 @@ function PhaseColumn({
   onAddItem,
   bgGeneratingIds,
   onReorder,
+  onRetryGenerate,
 }: {
   phase: number
   items: ItemWithLogs[]
@@ -1141,6 +1198,7 @@ function PhaseColumn({
   onAddItem: (prescriptionId: string, phase: number, fields: AddItemFields) => Promise<boolean>
   bgGeneratingIds?: Set<string>
   onReorder?: (draggedId: string, targetId: string, columnItems: ItemWithLogs[]) => void
+  onRetryGenerate?: (item: ItemWithLogs) => void
 }) {
   const [open, setOpen] = useState(defaultOpen)
   const [adding, setAdding] = useState(false)
@@ -1225,6 +1283,7 @@ function PhaseColumn({
                 isActive={activeDetailId === item.id}
                 onOpenDetail={onOpenDetail}
                 isBackgroundGenerating={bgGeneratingIds?.has(item.id) ?? false}
+                onRetryGenerate={onRetryGenerate}
               />
             </div>
           ))}
@@ -1432,6 +1491,7 @@ function PrescriptionGroup({
   onAddItem,
   bgGeneratingIds,
   onReorder,
+  onRetryGenerate,
 }: {
   group: GroupData
   defaultOpen: boolean
@@ -1441,6 +1501,7 @@ function PrescriptionGroup({
   onAddItem: (prescriptionId: string, phase: number, fields: AddItemFields) => Promise<boolean>
   bgGeneratingIds?: Set<string>
   onReorder?: (draggedId: string, targetId: string, columnItems: ItemWithLogs[]) => void
+  onRetryGenerate?: (item: ItemWithLogs) => void
 }) {
   const { items, label, archived, derivable, pid, meta, marketingPlanMeta, editable, kind } = group
 
@@ -1530,6 +1591,7 @@ function PrescriptionGroup({
               onAddItem={onAddItem}
               bgGeneratingIds={bgGeneratingIds}
               onReorder={onReorder}
+              onRetryGenerate={onRetryGenerate}
             />
           ))}
         </div>
@@ -1550,6 +1612,7 @@ function DimensionGroupSection({
   onOpenDetail,
   bgGeneratingIds,
   initiativeMap,
+  onRetryGenerate,
 }: {
   group: DimensionGroup
   activeDetailId: string | null
@@ -1557,6 +1620,7 @@ function DimensionGroupSection({
   bgGeneratingIds?: Set<string>
   /** Phase 33: initiative_id → title for badge display */
   initiativeMap?: Map<string, string>
+  onRetryGenerate?: (item: ItemWithLogs) => void
 }) {
   const [expanded, setExpanded] = useState(false)
 
@@ -1609,6 +1673,7 @@ function DimensionGroupSection({
             onOpenDetail={onOpenDetail}
             isBackgroundGenerating={bgGeneratingIds?.has(item.id) ?? false}
             initiativeLabel={item.initiative_id ? initiativeMap?.get(item.initiative_id) : undefined}
+            onRetryGenerate={onRetryGenerate}
           />
         ))}
       </div>
@@ -2225,6 +2290,14 @@ export default function ExecutionPage() {
     setDetailEditable(editable)
   }, [])
 
+  // 失败重试 — 打开 detail drawer，FDE 进入内容工作台手动再点"生成"。
+  // 不直接复用 handleBackgroundGenerate 是因为：retry 时原始 params（platform/
+  // counts/angle）已丢失，强制 FDE 走一遍工作台可以让他们检查/修改 prompt
+  // 再生成，比偷偷用旧参数更透明。
+  const handleRetryGenerate = useCallback((item: ItemWithLogs) => {
+    openDetailAndRemember(item, true)
+  }, [openDetailAndRemember])
+
   // Phase 33 P33.10 fix: "unassigned" means initiative_id is null OR points to a
   // migration placeholder bucket (Phase 31 auto-binds legacy actions to type='unassigned'
   // initiatives, so plain null check is insufficient).
@@ -2638,6 +2711,7 @@ export default function ExecutionPage() {
             }}
             bgGeneratingIds={allBgGeneratingIds}
             initiativeMap={initiativeMap}
+            onRetryGenerate={handleRetryGenerate}
           />
         ))}
 
@@ -2670,6 +2744,7 @@ export default function ExecutionPage() {
                     isActive={item.id === detailItem?.id}
                     onOpenDetail={i => openDetailAndRemember(i, true)}
                     isBackgroundGenerating={allBgGeneratingIds.has(item.id)}
+                    onRetryGenerate={handleRetryGenerate}
                   />
                 ))}
               </div>
