@@ -214,6 +214,18 @@ export function findingsToActions(findings: SeoPatrolFinding[]): PriorityAction[
       dimension: 'seo',
       action_type: f.suggestedActionType,
       why_now: f.description,
+      // Pre-fill payload for the Content Workbench (and any UI that opens this
+      // action): the keyword the rule identified, plus rule context. The
+      // article studio reads steps_json.keyword to prefill the keyword field,
+      // so the FDE doesn't have to extract it from the description by eye.
+      metadata: {
+        keyword: f.keyword,
+        url: f.url,
+        rule_id: f.ruleId,
+        position: f.position,
+        search_volume: f.searchVolume,
+        keyword_difficulty: f.keywordDifficulty,
+      },
       evidence_refs: [`seo_patrol:${f.ruleId}:${subject}`],
       expected_impact: RULE_IMPACT[f.ruleId],
       effort: RULE_EFFORT[f.ruleId],

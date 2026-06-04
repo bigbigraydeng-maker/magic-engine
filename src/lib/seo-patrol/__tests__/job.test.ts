@@ -142,4 +142,38 @@ describe('findingsToActions', () => {
   it('returns an empty array for no findings', () => {
     expect(findingsToActions([])).toEqual([])
   })
+
+  it('attaches metadata carrying the real keyword so the Content Workbench can prefill it', () => {
+    // Regression guard for the FDE-feedback bug where the studio prefilled
+    // the action-type label ("Publish Blog") instead of the rule's keyword.
+    const actions = findingsToActions([
+      finding({
+        ruleId: 'keyword_opportunity',
+        keyword: 'chengdu panda tours',
+        searchVolume: 280,
+        keywordDifficulty: 19,
+      }),
+    ])
+    expect(actions).toHaveLength(1)
+    const meta = actions[0].metadata as Record<string, unknown> | undefined
+    expect(meta).toBeDefined()
+    expect(meta?.keyword).toBe('chengdu panda tours')
+    expect(meta?.rule_id).toBe('keyword_opportunity')
+    expect(meta?.search_volume).toBe(280)
+  })
+
+  it('attaches metadata for stale-content findings (keyword + position context)', () => {
+    const actions = findingsToActions([
+      finding({
+        ruleId: 'stale_content',
+        keyword: 'great wall tours',
+        position: 10,
+        positionDelta: 6,
+      }),
+    ])
+    const meta = actions[0].metadata as Record<string, unknown> | undefined
+    expect(meta?.keyword).toBe('great wall tours')
+    expect(meta?.position).toBe(10)
+    expect(meta?.rule_id).toBe('stale_content')
+  })
 })

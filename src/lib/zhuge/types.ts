@@ -81,6 +81,18 @@ export interface PriorityAction {
   execution_mode: ExecutionMode
   /** Luban tool name if auto-executable; null if FDE or external handling required. */
   executable_by: string | null
+  /**
+   * Optional action-type-specific payload. When set, action-persister writes it
+   * to execution_items.steps_json so the Content Workbench (and any other
+   * downstream UI) can pre-fill domain-aware fields instead of re-deriving them
+   * from action_type/title.
+   *
+   * SEO patrol uses this to carry the real target keyword
+   * (e.g. { keyword: 'chengdu panda tours', rule_id: 'keyword_opportunity', ... }),
+   * so the article studio prefills the keyword field with the keyword the rule
+   * actually identified, not the generic "Publish Blog" title.
+   */
+  metadata?: Record<string, unknown>
 }
 
 // ── Conductor input / output ──────────────────────────────────────────────────

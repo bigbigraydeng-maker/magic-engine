@@ -361,6 +361,10 @@ export async function writeExecutionItems(
       source:           'zhuge',
       zhuge_session_id: zhugeSessionId,
       sort_order:       action.rank,
+      // Carry action-type-specific metadata (e.g. SEO patrol's real keyword)
+      // so the Content Workbench can pre-fill domain fields without re-parsing
+      // the description. null when the producer didn't supply metadata.
+      steps_json:       action.metadata ?? null,
     }))
 
     const { error: insertErr } = await supabase

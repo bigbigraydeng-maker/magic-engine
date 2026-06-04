@@ -36,8 +36,24 @@ interface Props {
   onGenerated: (summary: string, blogPostId?: string) => void
 }
 
+/**
+ * Read the real target keyword from steps_json (set by seo-patrol via
+ * PriorityAction.metadata) and fall back to the item title for legacy actions
+ * that pre-date the metadata channel. The kanban title for SEO patrol actions
+ * is the action-type label ("Publish Blog" / "Refresh Blog"), so without this
+ * the FDE would see the verb instead of the actual keyword the rule found.
+ */
+function initialKeywordFromItem(item: ExecutionItem): string {
+  const meta = item.steps_json
+  if (meta && typeof meta === 'object' && 'keyword' in meta) {
+    const k = (meta as { keyword?: unknown }).keyword
+    if (typeof k === 'string' && k.trim().length > 0) return k
+  }
+  return item.title
+}
+
 export function StudioArticleTab({ clientId, item, hasActiveCampaign, onGenerated }: Props) {
-  const [keyword, setKeyword]       = useState(item.title)
+  const [keyword, setKeyword]       = useState(() => initialKeywordFromItem(item))
   const [fdeContext, setFdeContext] = useState('')
   const [mode, setMode]             = useState<'unified' | 'geo_only'>(
     item.dimension === 'ai_visibility' ? 'geo_only' : 'unified',
