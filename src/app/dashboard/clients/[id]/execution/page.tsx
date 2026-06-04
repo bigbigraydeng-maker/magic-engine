@@ -2020,7 +2020,18 @@ export default function ExecutionPage() {
     }
   }, [clientId])
 
-  // 后台社媒内容生成（关闭 ContentStudioDrawer 后继续跑，完成后刷新看板）
+  // Synchronous in-flight guard — React state updates are async, so a fast
+  // double-click can pass the bgGeneratingIds check twice before either
+  // setBgGeneratingIds commits. The ref is updated synchronously and
+  // de-dupes the second call before any work starts.
+  const bgGeneratingRef = useRef<Set<string>>(new Set())
+
+  // 后台社媒内容生成 — 完整状态机：
+  //   start  → PATCH generation_started_at=now, error=null, status=in_progress
+  //            写一条 ai_assist log "社媒内容生成中…"（持久化进度信号，刷新页面仍可见）
+  //   succeed → save-to-board + 写完成 log + PATCH started_at=null, error=null
+  //   fail   → PATCH started_at=null, error=msg, status 退回 pending
+  //            写一条 blocker log（FDE 看得到失败原因，卡片显示"失败 [重试]"）
   const handleBackgroundGenerate = useCallback((
     itemId: string,
     params: {
@@ -2032,13 +2043,43 @@ export default function ExecutionPage() {
       angle_focus?: string
     },
   ) => {
+    // De-dupe: same item already generating → no-op
+    if (bgGeneratingRef.current.has(itemId)) return
+    bgGeneratingRef.current.add(itemId)
     setBgGeneratingIds(prev => { const s = new Set(prev); s.add(itemId); return s })
+
     void (async () => {
+      // ── Phase 1: mark "started" before the slow AI call ────────────────
+      // Use the items snapshot at call time — same logic as before, never
+      // demote completed/skipped/already in_progress.
+      const currentItem = items.find(i => i.id === itemId)
+      const shouldPromoteStatus = !currentItem || currentItem.status === 'pending'
+      const startPatchBody: Record<string, unknown> = {
+        generation_started_at: new Date().toISOString(),
+        generation_error:      null,
+      }
+      if (shouldPromoteStatus) startPatchBody.status = 'in_progress'
+      await fetch(`/api/clients/${clientId}/execution/${itemId}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(startPatchBody),
+      }).catch(() => { /* generation continues; UI just won't show 制作中 chip */ })
+      await fetch(`/api/clients/${clientId}/execution/${itemId}/log`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ kind: 'ai_assist', author: 'luban', content: '社媒内容生成中…' }),
+      }).catch(() => {})
+      // Optimistic kanban refresh so the "制作中" chip appears immediately.
+      void fetchItems(true)
+
+      // ── Phase 2: the slow AI call ──────────────────────────────────────
+      let succeeded = false
+      let errorMessage = ''
       try {
         const res = await fetch(`/api/clients/${clientId}/social-plan`, {
-          method: 'POST',
+          method:  'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          body:    JSON.stringify({
             campaign_brief_id:  params.campaignId,
             platform:           params.platform,
             posts_count:        params.posts_count,
@@ -2049,36 +2090,66 @@ export default function ExecutionPage() {
           }),
         })
         const json = await res.json() as { success: boolean; plan_id?: string; error?: string }
-        if (json.success) {
-          // Save generated plan to content_posts so it appears in Launch Hub
+        if (!res.ok || !json.success) {
+          errorMessage = json.error || `生成失败 (HTTP ${res.status})`
+        } else {
+          succeeded = true
           if (json.plan_id) {
-            await fetch(`/api/clients/${clientId}/social-plan/${json.plan_id}/save-to-board`, {
-              method: 'POST',
+            const saveRes = await fetch(`/api/clients/${clientId}/social-plan/${json.plan_id}/save-to-board`, {
+              method:  'POST',
               headers: { 'Content-Type': 'application/json' },
-            }).catch(() => {})
-          }
-          await fetch(`/api/clients/${clientId}/execution/${itemId}/log`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ kind: 'ai_assist', author: 'luban', content: '社媒内容已在后台生成完成，可打开工作台查看' }),
-          }).catch(() => {})
-          // 仅当当前 item 处于 pending 时才提升为 in_progress
-          // 之前用 GET 端点读 DB 最新状态，但该路由不存在（只有 PATCH/DELETE），
-          // 走 fallback 时会无条件 PATCH in_progress，把已 completed 的 item 拉回去
-          // 改用本地 items snapshot 判断 — 已 completed/in_progress/skipped 一律不触发
-          const currentItem = items.find(i => i.id === itemId)
-          if (!currentItem || currentItem.status === 'pending') {
-            await fetch(`/api/clients/${clientId}/execution/${itemId}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ status: 'in_progress' }),
-            })
+            }).catch(() => null)
+            if (!saveRes || !saveRes.ok) {
+              // Plan generated but couldn't be saved to Launch Hub —
+              // mark as failure so FDE knows to retry rather than silently
+              // losing the content.
+              succeeded = false
+              errorMessage = '内容已生成但未能保存到内容板，请重试'
+            }
           }
         }
-      } catch { /* non-fatal */ } finally {
-        setBgGeneratingIds(prev => { const s = new Set(prev); s.delete(itemId); return s })
-        void fetchItems(true)
+      } catch (e) {
+        errorMessage = e instanceof Error ? e.message : '生成失败，请重试'
       }
+
+      // ── Phase 3: write outcome to DB ───────────────────────────────────
+      if (succeeded) {
+        await fetch(`/api/clients/${clientId}/execution/${itemId}/log`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ kind: 'ai_assist', author: 'luban', content: '社媒内容已在后台生成完成，可打开工作台查看' }),
+        }).catch(() => {})
+        await fetch(`/api/clients/${clientId}/execution/${itemId}`, {
+          method:  'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ generation_started_at: null, generation_error: null }),
+        }).catch(() => {})
+      } else {
+        // Roll status back to pending so the failed item doesn't pollute
+        // Phase 33 M4 Goal-completion-rate math (in_progress is counted as
+        // "actively working on it"). Surface the error via blocker log.
+        await fetch(`/api/clients/${clientId}/execution/${itemId}/log`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ kind: 'blocker', author: 'system', content: `生成失败：${errorMessage}` }),
+        }).catch(() => {})
+        const rollbackBody: Record<string, unknown> = {
+          generation_started_at: null,
+          generation_error:      errorMessage,
+        }
+        // Only roll back to pending if we were the ones who promoted it.
+        if (shouldPromoteStatus) rollbackBody.status = 'pending'
+        await fetch(`/api/clients/${clientId}/execution/${itemId}`, {
+          method:  'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify(rollbackBody),
+        }).catch(() => {})
+      }
+
+      // ── Phase 4: release locks + refresh kanban ───────────────────────
+      bgGeneratingRef.current.delete(itemId)
+      setBgGeneratingIds(prev => { const s = new Set(prev); s.delete(itemId); return s })
+      void fetchItems(true)
     })()
   }, [clientId, items, fetchItems])
 
