@@ -213,6 +213,13 @@ export interface GoalRow {
   fde_reasoning: string | null
   is_beta: boolean
 
+  /** A2.1 — auto-fetched current value (cron or manual trigger) */
+  current_value: number | null
+  /** ISO timestamp of last auto-fetch */
+  current_value_fetched_at: string | null
+  /** Source: cron job, UI button, or FDE manual entry */
+  current_value_source: 'auto.cron' | 'auto.manual' | 'self_report' | null
+
   created_at: string
   updated_at: string
   created_by: string | null

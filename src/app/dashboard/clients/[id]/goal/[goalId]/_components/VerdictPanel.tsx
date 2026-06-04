@@ -89,6 +89,15 @@ export function VerdictPanel({ goal, onJudged }: Props) {
   )
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function formatRelativeTime(iso: string): string {
+  const diffMin = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
+  if (diffMin < 60) return `${diffMin}m ago`
+  if (diffMin < 1440) return `${Math.floor(diffMin / 60)}h ago`
+  return `${Math.floor(diffMin / 1440)}d ago`
+}
+
 // ─── Read-only verdict display (archived state) ─────────────────────────────
 
 function VerdictResult({ goal }: { goal: GoalRow }) {
@@ -115,6 +124,32 @@ function VerdictResult({ goal }: { goal: GoalRow }) {
             <p className="mt-3 text-[11px] font-semibold opacity-60">
               Judged on {new Date(goal.verdict_at).toLocaleString('en-NZ')}
             </p>
+          )}
+          {/* A2.1-γ — current value source label + fetch timestamp */}
+          {(goal.current_value != null || goal.current_value_source) && (
+            <div className="mt-3 flex items-center gap-2">
+              {goal.current_value != null && (
+                <span className="text-[11px] font-semibold opacity-70">
+                  Current value: {goal.current_value.toLocaleString()}
+                </span>
+              )}
+              {goal.current_value_source && (
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                  goal.current_value_source === 'auto.cron'
+                    ? 'bg-status-track/15 text-status-track'
+                    : goal.current_value_source === 'auto.manual'
+                      ? 'bg-me-ochre/15 text-me-ochre'
+                      : 'bg-me-charcoal/10 text-me-charcoal/65'
+                }`}>
+                  {goal.current_value_source}
+                </span>
+              )}
+              {goal.current_value_fetched_at && (
+                <span className="text-[10px] text-me-charcoal/45">
+                  {formatRelativeTime(goal.current_value_fetched_at)}
+                </span>
+              )}
+            </div>
           )}
         </div>
       </div>

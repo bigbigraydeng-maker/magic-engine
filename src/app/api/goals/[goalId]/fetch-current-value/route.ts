@@ -49,5 +49,18 @@ export async function GET(
   }
 
   const result = await autoFetchMetricValue(supabaseAdmin, clientId, goal.primary_metric_key)
+
+  // A2.1-γ: persist fetched value back to goals table so VerdictPanel can show source + time
+  if (result.ok && typeof result.value === 'number') {
+    await supabaseAdmin
+      .from('goals')
+      .update({
+        current_value: result.value,
+        current_value_fetched_at: new Date().toISOString(),
+        current_value_source: 'auto.manual',
+      })
+      .eq('id', params.goalId)
+  }
+
   return NextResponse.json(result)
 }
