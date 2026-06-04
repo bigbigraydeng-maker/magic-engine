@@ -330,6 +330,8 @@ function buildAutonomousItem(
     source: 'diagnostic',           // 自主行动用 sentinel prescription_id，归类为 diagnostic 来源
     marketing_plan_id: null,
     initiative_id: null,
+    generation_started_at: null,    // autonomous actions don't go through the workbench generate flow
+    generation_error: null,
     logs: [],
     outcome,
     linked_post: null,
