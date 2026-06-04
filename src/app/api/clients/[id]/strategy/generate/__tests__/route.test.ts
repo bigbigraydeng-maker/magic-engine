@@ -45,6 +45,27 @@ import {
 import type { GenerateResponse } from '../route'
 import type { RawOpportunity } from '@/lib/strategy/types'
 
+// Phase X.S2: paid-tier auth bypass — these route tests target the business
+// logic, not the auth path. Real wiring is covered in
+// src/lib/auth/__tests__/client-access.test.ts.
+vi.mock('@/lib/auth/client-access', () => ({
+  requireDashboardClientAccess: vi.fn().mockResolvedValue({
+    ok: true,
+    user: { id: 'test-user', email: 'test@magiclab.com' },
+    role: 'admin',
+    tier: 'admin',
+    allowedClientId: null,
+  }),
+  requirePaidClientAccess: vi.fn().mockResolvedValue({
+    ok: true,
+    user: { id: 'test-user', email: 'test@magiclab.com' },
+    role: 'admin',
+    tier: 'admin',
+    allowedClientId: null,
+  }),
+}))
+
+
 // ---------------------------------------------------------------------------
 // Typed mock references
 // ---------------------------------------------------------------------------

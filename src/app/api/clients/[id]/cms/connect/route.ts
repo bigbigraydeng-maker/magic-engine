@@ -14,12 +14,12 @@
  *
  * PATCH body: { content_targets: CmsContentTarget[] }
  *
- * Security: requireDashboardClientAccess (session-cookie auth).
+ * Security: requirePaidClientAccess (session-cookie auth).
  * The plain-text PAT is NEVER logged or echoed back.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import {
   upsertConnection,
   deleteConnection,
@@ -60,7 +60,7 @@ function respondCmsConnectError(
 
 export async function POST(req: NextRequest, { params }: RouteContext) {
   const clientId = params.id
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status })
   }
@@ -144,7 +144,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
 export async function PATCH(req: NextRequest, { params }: RouteContext) {
   const clientId = params.id
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status })
   }
@@ -188,7 +188,7 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
 
 export async function DELETE(req: NextRequest, { params }: RouteContext) {
   const clientId = params.id
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status })
   }

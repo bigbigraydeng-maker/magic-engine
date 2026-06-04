@@ -8,12 +8,12 @@
  * Body: { config?: { page_url?: string } }
  * Returns: { success, advanced_job_id? }
  *
- * Security: session-cookie via requireDashboardClientAccess
+ * Security: session-cookie via requirePaidClientAccess
  * Reference: ROADMAP.md P8.10.S0.22
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getLatestDiscovery } from '@/lib/zhangqian/persistor'
 import { startAdvancedDiscovery } from '@/lib/zhangqian/start-advanced-discovery'
@@ -26,7 +26,7 @@ export async function POST(
   { params }: { params: { id: string; anchor: string } },
 ): Promise<NextResponse> {
   const { id: clientId, anchor } = params
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status })
   }

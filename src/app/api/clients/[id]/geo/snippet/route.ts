@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { generateDirectiveHtml } from '@/lib/geo/html-generator'
 import { buildSnippets } from '@/lib/geo/snippet-builder'
 import type { GeoDirective } from '@/types/magic-engine'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 /**
  * GET /api/clients/[id]/geo/snippet?directive_id=...
@@ -16,6 +17,11 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const access = await requirePaidClientAccess(params.id)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
+  }
+
   try {
     const clientId = params.id
     const directiveId = new URL(req.url).searchParams.get('directive_id')

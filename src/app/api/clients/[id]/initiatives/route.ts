@@ -17,7 +17,7 @@
 
 import { NextResponse } from 'next/server'
 import { listInitiativesForClient } from '@/lib/strategy/initiatives'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 
 export async function GET(
@@ -25,7 +25,7 @@ export async function GET(
   { params }: { params: { id: string } },
 ) {
   const clientId = params.id
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
   const rows = await listInitiativesForClient(supabaseAdmin, clientId)

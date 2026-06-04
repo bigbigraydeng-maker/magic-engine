@@ -194,11 +194,16 @@ describe('dashboard auth middleware', () => {
       buildRequest('/dashboard/clients/client-self-uuid/brief'),
     )
 
+    // Whitelist sourced from ACCESS_TYPES_DASHBOARD constant. Order is
+    // significant only because the array passed to `.in()` is the literal
+    // ACCESS_TYPES_DASHBOARD readonly tuple — keep this in sync if the
+    // constant's element order changes.
     expect(mockSupabaseIn).toHaveBeenCalledWith('access_type', [
       'dashboard',
       'fde',
       'both',
       'self_serve',
+      'client',
     ])
     expect(res.status).toBe(200)
     expect(res.headers.get('x-middleware-request-x-user-role')).toBe(

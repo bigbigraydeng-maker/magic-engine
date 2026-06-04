@@ -13,13 +13,13 @@
  *   due_date?:    YYYY-MM-DD
  * }
  *
- * Security: session-cookie via requireDashboardClientAccess (Phase 19 pattern)
+ * Security: session-cookie via requirePaidClientAccess (Phase 19 pattern)
  * Reference: ROADMAP.md Phase 20.D
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import type { DiagnosticDimension, ExecutionItem, ExecutionItemStatus, FixType } from '@/types/diagnostic'
 
 export const dynamic = 'force-dynamic'
@@ -35,7 +35,7 @@ export async function POST(
   { params }: { params: { id: string } },
 ): Promise<NextResponse> {
   const { id: clientId } = params
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status })
   }

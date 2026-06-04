@@ -17,7 +17,7 @@
 
 import { NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { generatePrescription } from '@/lib/diagnostic/prescription-generator'
 import { runHuatuo } from '@/lib/huatuo/agent'
 import type {
@@ -48,7 +48,7 @@ export async function POST(
   { params }: { params: { id: string } },
 ): Promise<Response> {
   const { id: clientId } = params
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return new Response(JSON.stringify({ error: access.error }), {
       status: access.status,

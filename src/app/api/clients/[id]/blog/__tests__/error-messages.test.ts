@@ -59,6 +59,7 @@ vi.mock('@/lib/blog/topic-selector', () => ({
 
 vi.mock('@/lib/auth/client-access', () => ({
   requireDashboardClientAccess: vi.fn(),
+  requirePaidClientAccess: vi.fn(),
 }))
 
 // MTC charge helper — bypass balance/budget checks in this test file so it
@@ -80,9 +81,13 @@ import { GET as blogListGET, POST as blogListPOST } from '../route'
 import { GET as opportunitiesGET } from '../opportunities/route'
 import { GET as postDetailGET, PATCH as postDetailPATCH, DELETE as postDetailDELETE } from '../[postId]/route'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requireDashboardClientAccess, requirePaidClientAccess } from '@/lib/auth/client-access'
 
+// Blog routes use requireDashboardClientAccess (consumption tier), but the
+// charge helper is mocked separately. requirePaidClientAccess is imported only
+// to satisfy other routes that may import it via barrel files.
 const mockDashboardAccess = vi.mocked(requireDashboardClientAccess)
+void requirePaidClientAccess
 import { generateBlogPost } from '@/lib/blog/generator'
 import { fetchRelatedPages, buildPagesContextBlock } from '@/lib/blog/pages-context'
 import { auditBlogPost } from '@/lib/blog/quality-audit'

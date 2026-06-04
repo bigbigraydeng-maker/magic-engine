@@ -20,6 +20,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { crawlPages } from '@/lib/site-audit/crawler'
 import { classifyPage } from '@/lib/site-audit/classifier'
 import { detectGEOBlock } from '@/lib/site-audit/geo-detector'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 export const maxDuration = 120
 
@@ -39,6 +40,11 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { id: string; pageId: string } }
 ): Promise<NextResponse> {
+  const access = await requirePaidClientAccess(params.id)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
+  }
+
   const clientId = params.id
   const pageId = params.pageId
 

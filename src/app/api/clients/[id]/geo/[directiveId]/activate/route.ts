@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import type { GeoDirective } from '@/types/magic-engine'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 /**
  * POST /api/clients/[id]/geo/[directiveId]/activate
@@ -25,6 +26,11 @@ export async function POST(
   _req: NextRequest,
   { params }: { params: { id: string; directiveId: string } }
 ) {
+  const access = await requirePaidClientAccess(params.id)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
+  }
+
   try {
     const { id: clientId, directiveId } = params
 

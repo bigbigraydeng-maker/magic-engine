@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { JobRunner } from '@/lib/site-audit/job-runner'
 import { executeJob } from '@/lib/site-audit/job-executor'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 // Allow up to 60 seconds on Render — the actual crawl runs in background
 export const maxDuration = 60
@@ -116,6 +117,11 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ): Promise<NextResponse<CrawlResponse | ApiErrorResponse>> {
+  const access = await requirePaidClientAccess(params.id)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
+  }
+
   const clientId = params.id
 
   try {

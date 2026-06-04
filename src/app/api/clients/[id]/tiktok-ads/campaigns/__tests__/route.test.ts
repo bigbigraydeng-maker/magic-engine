@@ -9,12 +9,14 @@ import { NextRequest } from 'next/server'
 
 const mocks = vi.hoisted(() => ({
   requireDashboardClientAccess: vi.fn(),
+  requirePaidClientAccess: vi.fn(),
   listCampaigns:                vi.fn(),
   loadTikTokAdsCreds:           vi.fn(),
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
   requireDashboardClientAccess: mocks.requireDashboardClientAccess,
+  requirePaidClientAccess: mocks.requireDashboardClientAccess,
 }))
 
 vi.mock('@/lib/tiktok-ads/client', () => ({

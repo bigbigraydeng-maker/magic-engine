@@ -22,6 +22,9 @@ import {
 } from '@/lib/zhangqian/persistor'
 import { getDomainMetrics, getKeywordsForSite, bulkKeywordVolume } from '@/lib/dataforseo/labs'
 import { loadMemoryForClient } from '@/lib/memory'
+import { precheckCharge, commitCharge, refundOnFail } from '@/lib/mtc/charge'
+
+const ZHANGQIAN_SERVICE_KEY = 'zhangqian_discover' as const
 
 // Render — agent itself runs in fire-and-forget; this handler returns in <1s
 export const maxDuration = 60
@@ -55,11 +58,26 @@ export async function POST(
       )
     }
 
+    // MTC precheck — admin bypasses the deduction (internal QA runs shouldn't
+    // burn the client's balance). Real users (paid_client / self_serve) get
+    // charged 60 MTC; the signup bonus covers the first run for free signups.
+    const isAdminCall = access.tier === 'admin'
+    let projectedMtc = 0
+    if (!isAdminCall) {
+      const precheck = await precheckCharge(clientId, ZHANGQIAN_SERVICE_KEY)
+      if (!precheck.ok) {
+        return NextResponse.json(precheck.body, { status: precheck.status })
+      }
+      projectedMtc = precheck.projectedMtc
+    }
+
     // Create job synchronously so we can return its id immediately
     const jobId = await createDiscoveryJob(supabaseAdmin, clientId, client.domain)
 
-    // Fire-and-forget background execution
-    void executeDiscoveryJob(jobId, clientId, client.domain).catch((err: unknown) => {
+    // Fire-and-forget background execution. The worker handles MTC commit on
+    // success and refund-on-fail; we pass projectedMtc=0 for admin runs so the
+    // worker becomes a no-op for billing.
+    void executeDiscoveryJob(jobId, clientId, client.domain, projectedMtc).catch((err: unknown) => {
       console.error('[zhangqian/discover] background failure', err)
     })
 
@@ -82,6 +100,7 @@ async function executeDiscoveryJob(
   jobId: string,
   clientId: string,
   domain: string,
+  projectedMtc: number,
 ): Promise<void> {
   await updateJobProgress(supabaseAdmin, jobId, {
     status: 'running',
@@ -153,6 +172,12 @@ async function executeDiscoveryJob(
         `Validation failed: ${validation_error}. Partial cost: $${report.meta.cost_usd}.`,
         raw_output,
       )
+      if (projectedMtc > 0) {
+        await refundOnFail(clientId, ZHANGQIAN_SERVICE_KEY, projectedMtc, {
+          referenceId: jobId,
+          reason: `zhangqian validation failed: ${validation_error}`,
+        })
+      }
       return
     }
 
@@ -179,8 +204,22 @@ async function executeDiscoveryJob(
     }
 
     await completeJob(supabaseAdmin, jobId, clientId, report)
+
+    // MTC commit (skipped for admin runs where projectedMtc was set to 0)
+    if (projectedMtc > 0) {
+      await commitCharge(clientId, ZHANGQIAN_SERVICE_KEY, projectedMtc, {
+        referenceId: jobId,
+        notes: 'zhangqian discovery report',
+      })
+    }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
     await failJob(supabaseAdmin, jobId, `Agent error: ${message}`)
+    if (projectedMtc > 0) {
+      await refundOnFail(clientId, ZHANGQIAN_SERVICE_KEY, projectedMtc, {
+        referenceId: jobId,
+        reason: `zhangqian agent error: ${message}`,
+      })
+    }
   }
 }

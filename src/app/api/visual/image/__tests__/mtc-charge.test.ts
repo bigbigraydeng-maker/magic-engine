@@ -29,6 +29,7 @@ vi.mock('@/lib/visual/storage', () => ({
 
 vi.mock('@/lib/auth/client-access', () => ({
   requireDashboardClientAccess: vi.fn(),
+  requirePaidClientAccess: vi.fn(),
 }))
 
 vi.mock('@/lib/mtc/charge', () => ({

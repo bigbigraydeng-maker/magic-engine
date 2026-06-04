@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import type { MarketingPlan, MarketingPlanStatus } from '@/lib/marketing-plan/types'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 const VALID_STATUSES: MarketingPlanStatus[] = ['draft', 'approved', 'completed', 'archived']
 
@@ -16,6 +17,11 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const access = await requirePaidClientAccess(params.id)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
+  }
+
   const clientId = params.id
   const { searchParams } = new URL(req.url)
   const statusParam = searchParams.get('status')

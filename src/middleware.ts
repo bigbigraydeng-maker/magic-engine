@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createMiddlewareSupabaseClient } from '@/lib/supabase-server'
 import { getUserPermissions } from '@/lib/auth/whitelist'
 import { supabaseAdmin } from '@/lib/supabase'
+import { ACCESS_TYPES_DASHBOARD, ACCESS_TYPES_PORTAL } from '@/lib/auth/access-types'
 
 export async function middleware(request: NextRequest) {
   const requestHeaders = new Headers(request.headers)
@@ -40,7 +41,7 @@ export async function middleware(request: NextRequest) {
       .from('client_portal_users')
       .select('client_id')
       .eq('email', (user.email ?? '').toLowerCase())
-      .in('access_type', ['portal', 'both'])
+      .in('access_type', ACCESS_TYPES_PORTAL as readonly string[] as string[])
 
     if (!portalUsers || portalUsers.length === 0) {
       return NextResponse.redirect(new URL('/unauthorized', request.url))
@@ -84,7 +85,7 @@ export async function middleware(request: NextRequest) {
     .from('client_portal_users')
     .select('client_id')
     .eq('email', email)
-    .in('access_type', ['dashboard', 'fde', 'both', 'self_serve'])
+    .in('access_type', ACCESS_TYPES_DASHBOARD as readonly string[] as string[])
 
   // Fallback: CLIENT_VIEWERS env var (backward compat — keeps existing Render configs working)
   const envPerms = getUserPermissions(email)

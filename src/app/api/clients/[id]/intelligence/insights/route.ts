@@ -11,14 +11,14 @@
  *   days       Look-back window for trend computation (default: 28, max: 90)
  *   timezone   IANA timezone string (default: 'Pacific/Auckland')
  *
- * Auth: session cookie via requireDashboardClientAccess
+ * Auth: session cookie via requirePaidClientAccess
  *
  * Reference: ROADMAP.md P22.B.5
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { bucketByGranularity } from '@/lib/flywheel/intelligence/timeseries'
 import { generateInsights, type AnomalySignalRow } from '@/lib/flywheel/intelligence/insights'
 import { getMetricMeta, SPOTLIGHT_METRIC_KEYS } from '@/lib/flywheel/intelligence/metric-catalog'
@@ -38,7 +38,7 @@ export async function GET(
 ) {
   const clientId = params.id
 
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }

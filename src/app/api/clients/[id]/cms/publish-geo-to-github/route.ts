@@ -33,11 +33,11 @@
  *   hint: 'Re-publish with force_overwrite=true to replace external edits.',
  * }
  *
- * Security: requireDashboardClientAccess (session-cookie auth)
+ * Security: requirePaidClientAccess (session-cookie auth)
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getConnection } from '@/lib/cms/connection-store'
 import { GithubClient, GitHubApiError } from '@/lib/cms/github-client'
@@ -79,7 +79,7 @@ const SUPPORTED_INJECTOR_SYNTAX: ReadonlySet<CmsContentTargetSyntax> = new Set<C
 
 export async function POST(req: NextRequest, { params }: RouteContext) {
   const { id: clientId } = params
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import type { GeoDirective, GeoScenario, GeoAudienceSignals } from '@/types/magic-engine'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 /**
  * PATCH /api/clients/[id]/geo/[directiveId]
@@ -22,6 +23,11 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string; directiveId: string } }
 ) {
+  const access = await requirePaidClientAccess(params.id)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
+  }
+
   try {
     const { directiveId } = params
     const body = (await req.json()) as {

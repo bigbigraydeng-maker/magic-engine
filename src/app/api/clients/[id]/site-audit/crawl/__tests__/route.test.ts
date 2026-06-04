@@ -40,6 +40,27 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { JobRunner } from '@/lib/site-audit/job-runner'
 import { executeJob } from '@/lib/site-audit/job-executor'
 
+// Phase X.S2: paid-tier auth bypass — these route tests target the business
+// logic, not the auth path. Real wiring is covered in
+// src/lib/auth/__tests__/client-access.test.ts.
+vi.mock('@/lib/auth/client-access', () => ({
+  requireDashboardClientAccess: vi.fn().mockResolvedValue({
+    ok: true,
+    user: { id: 'test-user', email: 'test@magiclab.com' },
+    role: 'admin',
+    tier: 'admin',
+    allowedClientId: null,
+  }),
+  requirePaidClientAccess: vi.fn().mockResolvedValue({
+    ok: true,
+    user: { id: 'test-user', email: 'test@magiclab.com' },
+    role: 'admin',
+    tier: 'admin',
+    allowedClientId: null,
+  }),
+}))
+
+
 // ---------------------------------------------------------------------------
 // Typed references to mock internals
 // ---------------------------------------------------------------------------

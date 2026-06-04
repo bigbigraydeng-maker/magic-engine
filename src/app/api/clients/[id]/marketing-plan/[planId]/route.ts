@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { revokePlanTasks } from '@/lib/marketing-plan/task-dispatcher'
 import type { MarketingPlanData, MarketingPlanStatus } from '@/lib/marketing-plan/types'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 interface PatchBody {
   title?: string
@@ -25,6 +26,11 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string; planId: string } }
 ) {
+  const access = await requirePaidClientAccess(params.id)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
+  }
+
   try {
     const { data, error } = await supabaseAdmin
       .from('marketing_plans')
@@ -59,6 +65,11 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string; planId: string } }
 ) {
+  const access = await requirePaidClientAccess(params.id)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
+  }
+
   try {
     const body = await req.json().catch(() => ({})) as PatchBody
 
@@ -101,6 +112,11 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: { id: string; planId: string } }
 ) {
+  const access = await requirePaidClientAccess(params.id)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
+  }
+
   try {
     // 先清除该 Plan 下所有 pending 的执行项（已开工/已完成的保留）
     const { revoked } = await revokePlanTasks(params.planId)
