@@ -54,9 +54,17 @@ interface Props {
  *   social_post / social_story → only 图文帖子
  *   social_reel               → only 短视频
  *   social dimension (generic)→ 图文帖子 + 短视频
- *   everything else           → all 3 tabs
+ *   seo dimension              → only SEO 文章 (no social/video noise)
+ *   ai_visibility / ads / reputation / competitor / unknown → all 3 tabs
  *
  * Single-tab tasks hide the tab bar entirely — no distracting chrome.
+ *
+ * SEO note (Phase 22.E follow-up): currently all SEO actions route to the
+ * article workbench. Future S13 will branch by action_type to a landing-page
+ * generator (seo.publish_landing_page) and a page SEO optimizer
+ * (seo.optimize_page_seo); for now those actions still land here, which is
+ * acceptable because the article generator is the only SEO content tool
+ * implemented end-to-end.
  */
 function tabsForItem(item: ExecutionItem): { tabs: TabDef[]; defaultTab: StudioTab } {
   const kind = item.steps_json?.kind as string | undefined
@@ -72,7 +80,10 @@ function tabsForItem(item: ExecutionItem): { tabs: TabDef[]; defaultTab: StudioT
       defaultTab: 'social',
     }
   }
-  // SEO, ai_visibility, ads, reputation, competitor, or unknown → show all 3
+  if (item.dimension === 'seo') {
+    return { tabs: [['article', 'SEO 文章']], defaultTab: 'article' }
+  }
+  // ai_visibility, ads, reputation, competitor, or unknown → show all 3
   return {
     tabs: [['article', 'SEO 文章'], ['social', '图文帖子'], ['video', '短视频']],
     defaultTab: 'article',
