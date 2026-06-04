@@ -17,9 +17,11 @@
  *   - leads_count        → same source as form_submissions (hybrid metric — auto
  *                          half from GA4 conversions, FDE tops up phone/wechat
  *                          leads manually via Submit Verdict)
+ *   - ai_visibility_score→ industry_ai_visibility_snapshots: client's top-3 AI
+ *                          mention share × 100 (A2.1-γ). Has a same-day freshness
+ *                          gate — returns ok:false if the snapshot isn't today's.
  *
  * Not yet supported (data source missing or complex):
- *   - ai_visibility_score→ ai_visibility_snapshots (no 0-100 column yet)
  *   - conversion_rate    → derived GA4 (events/sessions)
  *   - social_followers_growth → no data source
  *   - cart_abandonment_rate → no data source
