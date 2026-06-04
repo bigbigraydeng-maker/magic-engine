@@ -307,16 +307,28 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-06-04 20:59 NZST （**A2.2 GSC 品牌搜索量上线 (PR #336) + Kanban Content Workbench UX 4 连击 (PR #327) + Phase 33 全部测试通过 ✅**）
+> 最后更新：2026-06-04 22:33 NZST （**🎯 决战日 2026-06-08 周日 EOD 已定 + PR #354 A2.1-γ Goal cron 已 merged + 9 项 P0 已登记 ROADMAP**）
+
+### 🎯 决战日 2026-06-08 周日（4 天倒计时）
+
+详见 ROADMAP § 决战日章节。决策已落锤：
+- **冻结日**：6/6 周五 EOD，之后只 hotfix + 验收
+- **A2.3 Form/Order connector** → 降级 P1
+- **Phase 22.E S9** → MVP 版（6h）保 S13
+- **PR #346 FDE access** → 加入 P0 端到端验收
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
-| **🧪 A2.2 端到端验证** | PR #336 已 merged。等 Render 部署完后：①CTS 客户建 Goal 主指标=`brand_search_volume` ②Supabase clients 表 CTS 行的 `brand_aliases` 填 `{"cts tours","cts travel","china travel service","ctsnz"}` ③Goal 详情页主指标卡应显示 ~166 + 数据源 "GSC clicks (28-day brand searches)" ④Oztop 同样跑一遍（aliases `{"oztop building supplies","oz top"}`）。SOP: `docs/sops/brand-aliases-setup-for-gsc.md` | ⚠️ 今日晚上跑 |
-| **A2.3 Oztop GA4 generate_lead 配置** | PM 已熟练 SOP，15 分钟跑完同样配置。GTM trigger + GA4 Event Tag + Mark as key event | 📋 PM 操作 / 15 分钟 |
-| **A3 案例沉淀** | A2.1/A2.2/A2.3 全部跑通后，把 CTS/Oztop 经验固化到 Clients/ 笔记 | 📋 半天（A2 全部上线后做）|
-| **B1 AU/NZ Marketing Index** | 独立项目战略议题，Q4 2026 评估 → Q1 2027 启动 MVP | 📋 战略级 / 6-8 周 |
-| **PM 操作（Meta Ads）🔴** | Render 设 `META_SYSTEM_USER_TOKEN`（长效 System User Token），否则执行看板「直接执行 (Meta API)」返回 424 | ⚠️ 待操作 |
-| **GBP.0** | Google Cloud：enable Business Profile API + Account Management API | ⚠️ PM 操作 |
+| **🔴 P0.2 PM Render 配 META_SYSTEM_USER_TOKEN** | 5 min PM 操作。否则执行看板「直接执行 Meta API」424 | ⚠️ 今晚 |
+| **🔴 P0.3+P0.4 A2.1-γ + A2.2 端到端**（6/5 03:00 UTC cron 首跑后） | Goal 详情页 current_value + auto.cron 标签；CTS brand_search_volume 显示 ~166；Oztop ai_visibility_score 不再 "industry not mapped" | ⏳ 6/5 上午 |
+| **🔴 P0.5 rebase + merge PR #353** New Goal 入口 (CONFLICTING) | 30 min 子牙 | ⏳ 6/5 |
+| **🔴 P0.6 T-MP-Generate** Marketing Plan HTML response bug | 2-3h 子牙排查（怀疑 Claude API 超时） | ⏳ 6/6 |
+| **🔴 P0.7 PR #346 FDE access** 端到端验收（客户员工开账号前必验 + IDOR 余孽 P19.F） | 30 min PM | ⏳ 6/7 |
+| **🔴 P0.8 A2.3 Oztop GA4 generate_lead** GTM 配置 | 15 min PM SOP | ⏳ 6/5 |
+| **🔴 P0.9 A3 案例沉淀** CTS/Oztop Phase 31/33/A2 实战 markdown | 4h 子牙 | ⏳ 6/7 |
+| **🔴 P0.10 Phase 22.E S9 + S13** Action 预期影响 MVP + SEO 子类分流 | 10h 子牙 | ⏳ 6/5-6/6 |
+| **B1 AU/NZ Marketing Index** | 战略级，Q4 评估 | 📋 P2 / 决战日后 |
+| **GBP.0** | Google Cloud：enable Business Profile API + Account Management API | ⚠️ PM 操作（非决战日 P0）|
 
 **已完成全景（最近几个 Phase）**：
 - ✅ **A2.2 brand_search_volume GSC 接入**（2026-06-04，PR #336 merged）：Goal 主指标 `brand_search_volume` 改读 GSC rolling 28 天品牌词 clicks（替代 DataForSEO 估算）。两层解析（GSC 优先 / DataForSEO fallback）。**P0 修复**：发现 token equality 漏 80% 多词品牌（CTS "cts tours" 不能匹配域名根 "ctstours"），新增 `clients.brand_aliases` 字段 + substring 匹配（不污染原 isBrandedKeyword）。+ SOP 文档。17 测试通过，CTS 真实数据回归验证 166 brand clicks（之前 ~5）

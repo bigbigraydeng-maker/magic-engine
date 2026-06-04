@@ -1,9 +1,75 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-04 20:59 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-04 22:33 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
+
+---
+
+## 🎯 决战日：2026-06-08 周日 EOD（NZST）⭐⭐⭐
+
+> **目标**：推广前所有 P0 必交付。决战日定后**冻结日 6/6 周五 EOD**，之后只允许 hotfix + 验收，零新 Task。
+>
+> **节奏**：今晚 6/4 → 6/8 共 4 个工作日，子代理 + PM 双线并行。
+>
+> 决策（2026-06-04 子代理盘点 + PM 拍板）：
+> - **A2.3 Form/Order connector** → 降级 P1（演示用 GA4 + brand search 两源足够）
+> - **Phase 22.E S9** → 出 MVP 版（6h）保 S13
+> - **PR #346 FDE access** → 加入 P0 端到端验收（顺手）
+
+### 🔴 P0 — 必交付清单（按节奏顺序）
+
+> ⚠️ **子代理初版盘点时引用了过时焦点表，已根据 CLAUDE.md 最新状态修正：**
+> - CRON_SECRET 已配（GSC cron 已每天跑）→ 不在 P0
+> - A1 reputation 公式 44→71 已修复（PR #298+#300） → 不在 P0
+> - Phase 33 P33.9/P33.10 + M4 测试已回归通过 → 不在 P0
+> - PR #336（A2.2 GSC brand_search_volume）已 merged → 验收降级 P0.4
+> - PR #354（A2.1-γ）已 merged ✅
+
+| # | 任务 | 来源 | 工时 | 状态 | 谁做 |
+|---|------|------|------|------|------|
+| P0.1 | ✅ merge PR #354 A2.1-γ Goal current_value cron | open PR #354 | 30 min | ✅ 已 merged 2026-06-04 22:23 NZST | 子牙 |
+| P0.2 | 配 META_SYSTEM_USER_TOKEN（Render，否则执行看板「直接执行 Meta API」424） | 焦点表 | 5 min | ⚠️ 待 PM | PM Render |
+| P0.3 | A2.1-γ 端到端验证（6/5 03:00 UTC cron 首跑后）：Goal 详情页看 current_value + auto.cron 标签；Oztop ai_visibility_score 不再 "industry not mapped"；SQL 手算与 cron 写值一致 | PR #354 验收 | 1 h | ⏳ 6/5 | PM UI + 子牙 SQL |
+| P0.4 | A2.2 端到端验证（PR #336 已 merged）：CTS Goal 主指标=brand_search_volume 显示 ~166 + 数据源 "GSC clicks (28-day brand)"；Oztop 同样跑 | 焦点表 + PR #336 | 30 min | ⏳ 6/5 | PM UI |
+| P0.5 | rebase + merge PR #353 New Goal 入口 | open PR #353 (CONFLICTING) | 30 min | ⏳ 6/5 | 子牙 |
+| P0.6 | T-MP-Generate Marketing Plan 「Unexpected token '<'」HTML bug 排查 | docs/bugs/2026-06-03 | 2-3 h | ⏳ 6/6 | 子牙 |
+| P0.7 | PR #346 FDE users access 端到端验收（客户员工开账号前必验，IDOR 余孽 P19.F 也一并看） | PR #346 | 30 min | ⏳ 6/7 | PM UI |
+| P0.8 | A2.3 Oztop GA4 generate_lead 配置（SOP 15 min PM 操作，确保 form_submissions Goal 可用） | 焦点表 | 15 min | ⏳ 6/5 | PM GTM op |
+| P0.9 | A3 案例沉淀（CTS / Oztop Phase 31/33/A2 实战 markdown） | 焦点表 + Clients/ | 4 h | ⏳ 6/7 | 子牙 |
+| P0.10 | Phase 22.E S9 (Action 预期影响 MVP 版 6h) + S13 (SEO 子类分流 4h) | PR #350 PM 圈定 | 10 h | ⏳ 6/5-6/6 | 子牙 |
+
+**P0 总工时**（修正后）：~20 h（含 30% buffer）≈ 4 个工作日
+
+### 📅 4 天节奏表（修正版）
+
+| 日期 | 计划 |
+|------|------|
+| **周三 6/4 晚** | ✅ P0.1 merge #354 ✓ · ⚠️ P0.2 PM 配 Meta token（5 min） |
+| **周四 6/5** | 03:00 UTC A2.1-γ 首跑 → P0.3 + P0.4 + P0.8 同上午 PM 验收（~2h）· P0.5 子牙 rebase #353（30 min）· P0.10 S9 编码（6h） |
+| **周五 6/6 EOD freeze** | P0.10 S13 编码（4h）· P0.6 T-MP-Generate 排查（2-3h） |
+| **周六 6/7** | P0.7 PR #346 验收（30 min）· P0.9 A3 案例沉淀（4h）· buffer for 周末 hotfix |
+| **周日 6/8 决战日** | 演示彩排 · 只 hotfix · 零新 Task |
+
+### ⚠️ 3 个最大风险
+
+1. **CRON_SECRET 不配 = 所有 cron 静默失败**（A2.1-γ / Phase 30 月度 / Phase 31 daily 全废）。**PM 必须 6/4 今晚配**，否则 6/5 03:00 UTC cron 验收必失败
+2. **T-MP-Generate** 可能不止 2-3h（怀疑 Claude API 超时 / Render 冷启动 / 鉴权 308），需要加超时 + 重试 + 错误降级 UI
+3. **Phase 22.E S9** 工时低估风险：M5 「FDE 价值闭环」涉及 DB + prompt + UI 三层，6h MVP 不行就先出「DB+API」(6/5)，UI 顺延 (6/6)
+
+### 🟡 P1 — 推广后第一个 sprint（决战日后立即开工）
+
+- A2.3 Form/Order connector（第三个数据源）
+- Phase 22.E S4ext 验收（PR #349 merged 未跑）
+- AIV-debt-1 `latest_only` 改 DB 层
+- QA-清理-1/2/3 内部 HTTP+Bearer / apify 模块 / tsc 整体红
+- P19.F IDOR 余孽（`execution/manual` + `FdeManualEntryModal`）— 客户员工开账号前必修
+- Phase 22.E S10/S11/S12
+
+### 🟢 P2 — 战略储备
+
+- B1 AU/NZ Marketing Index（Q4 评估）· Phase 24.B GBP 数据 · Phase 27 Visual Reference · Phase 28 FDE Inbox · Phase 29 Unified UX · Phase 8.P Paid Social · Phase 31.X 战略层余项 · Phase 14.G Site Knowledge Graph
 
 ---
 
