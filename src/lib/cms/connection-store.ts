@@ -110,6 +110,14 @@ export function normaliseContentTargets(
         'Invalid content target — path cannot be blank',
       )
     }
+    // Repo-relative paths only. A leading '/' would produce '/repos/o/r/contents//path'
+    // on the GitHub API call and 400 with an opaque "Invalid path" — catch it here
+    // so the FDE sees an actionable error.
+    if (trimmedPath.startsWith('/')) {
+      throw new CmsContentTargetValidationError(
+        'Invalid content target — path must be repo-relative (no leading "/")',
+      )
+    }
     out.push({
       path:   trimmedPath,
       syntax: raw.syntax,

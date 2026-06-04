@@ -18,6 +18,7 @@ import {
   injectGeoSnippet,
   readExistingInjectedHash,
   HeadTagNotFoundError,
+  SnippetContainsMarkerError,
   ME_GEO_START_MARKER,
   ME_GEO_END_MARKER,
 } from './snippet-injector'
@@ -130,6 +131,20 @@ describe('injectGeoSnippet — failure modes', () => {
     const tpl = '<html><HEAD></HEAD><body></body></html>'
     const { newContent } = injectGeoSnippet(tpl, SNIPPET, 'html', 'x.html')
     expect(newContent).toContain(ME_GEO_START_MARKER)
+  })
+
+  it('MF1: rejects snippet containing the START marker literally (injection attempt)', () => {
+    const tpl = '<html><head></head><body></body></html>'
+    const evil = `<script>console.log("smuggle")</script>${ME_GEO_START_MARKER}`
+    expect(() => injectGeoSnippet(tpl, evil, 'html', 'x.html'))
+      .toThrow(SnippetContainsMarkerError)
+  })
+
+  it('MF1: rejects snippet containing the END marker literally (injection attempt)', () => {
+    const tpl = '<html><head></head><body></body></html>'
+    const evil = `${ME_GEO_END_MARKER}<script>console.log("after")</script>`
+    expect(() => injectGeoSnippet(tpl, evil, 'html', 'x.html'))
+      .toThrow(SnippetContainsMarkerError)
   })
 })
 

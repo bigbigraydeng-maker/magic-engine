@@ -71,6 +71,12 @@ describe('normaliseContentTargets', () => {
     ).toThrow(/path cannot be blank/)
   })
 
+  it('MF1: rejects path with leading slash (would produce // in GitHub contents URL)', () => {
+    expect(() =>
+      normaliseContentTargets([{ path: '/header.php', syntax: 'php', role: 'global_head' }]),
+    ).toThrow(/no leading/)
+  })
+
   it('rejects missing path', () => {
     expect(() =>
       normaliseContentTargets([{ syntax: 'html', role: 'global_head' }]),

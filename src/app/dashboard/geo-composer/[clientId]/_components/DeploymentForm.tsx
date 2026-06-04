@@ -307,7 +307,33 @@ export function DeploymentForm({
             </div>
           )}
 
-          {githubPr.error && githubPr.errorCode !== 'NO_TARGETS_CONFIGURED' && (
+          {/* MF8 (魏征 B2 review): when the FDE dismisses the drift dialog
+              without choosing, leave a visible breadcrumb explaining what's
+              pending so they don't think the click vanished. The dialog state
+              and the lingering drift state are decoupled, so closing the
+              dialog leaves errorCode='EXTERNAL_DRIFT' here to drive this UI. */}
+          {githubPr.errorCode === 'EXTERNAL_DRIFT' &&
+            !showDriftDialog &&
+            !githubPr.prUrl &&
+            githubPr.drifted.length > 0 && (
+            <div className="mt-3 p-3 bg-me-ochre/10 border border-me-ochre/30 rounded text-me-ochre text-sm">
+              <p className="mb-2">
+                Drift detected on {githubPr.drifted.length} file
+                {githubPr.drifted.length === 1 ? '' : 's'}. Re-publishing will
+                replace the external edits.
+              </p>
+              <button
+                onClick={() => setShowDriftDialog(true)}
+                className="underline font-medium hover:text-me-ochre/80 text-sm"
+              >
+                Review drift &amp; choose →
+              </button>
+            </div>
+          )}
+
+          {githubPr.error &&
+            githubPr.errorCode !== 'NO_TARGETS_CONFIGURED' &&
+            githubPr.errorCode !== 'EXTERNAL_DRIFT' && (
             <div className="mt-3 p-3 bg-[#C2453A]/10 border border-[#C2453A]/30 rounded text-[#C2453A] text-sm">
               {githubPr.error}
             </div>

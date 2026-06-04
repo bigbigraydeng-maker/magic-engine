@@ -44,6 +44,23 @@ export class HeadTagNotFoundError extends Error {
   }
 }
 
+/**
+ * Thrown when the snippet payload itself contains one of our marker strings.
+ * Letting that through would lead to the second-injection lookup latching on
+ * to the spurious marker inside user-supplied content, splitting the file at
+ * the wrong byte offset, and corrupting the live template. We refuse the
+ * publish at the injector boundary so the route can surface a clean 422.
+ */
+export class SnippetContainsMarkerError extends Error {
+  constructor(targetPath: string) {
+    super(
+      `GEO snippet for ${targetPath} contains a reserved ME-GEO marker string — ` +
+      `rewrite the directive so its rendered HTML does not include the literal markers.`,
+    )
+    this.name = 'SnippetContainsMarkerError'
+  }
+}
+
 // ─── Result ──────────────────────────────────────────────────────────────────
 
 export interface InjectionResult {
@@ -88,6 +105,18 @@ export function injectGeoSnippet(
   void syntax
 
   const trimmedSnippet = snippet.trim()
+
+  // Reject snippets that would smuggle marker literals through the injector.
+  // The boundary check must happen before any byte offset math — once the
+  // marker string lives inside the wrapped block, our indexOf-based parser
+  // would split the file at the user-controlled offset on the next publish.
+  if (
+    trimmedSnippet.includes(ME_GEO_START_MARKER) ||
+    trimmedSnippet.includes(ME_GEO_END_MARKER)
+  ) {
+    throw new SnippetContainsMarkerError(targetPath)
+  }
+
   const injectedHash   = sha256Hex(trimmedSnippet)
 
   // ── Case 1: existing block — replace inner snippet in place ──────────────

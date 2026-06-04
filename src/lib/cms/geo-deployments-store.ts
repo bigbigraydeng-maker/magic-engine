@@ -13,6 +13,18 @@
 
 import { supabaseAdmin } from '../supabase'
 
+/**
+ * Thrown by recordDeployment when MF6's partial unique index trips, meaning
+ * another publish has an in-flight pending_pr row for the same (client,
+ * directive, target_path). Route turns this into 422 CONCURRENT_PUBLISH_IN_PROGRESS.
+ */
+export class ConcurrentDeploymentError extends Error {
+  constructor() {
+    super('Another publish is already in flight for this (client, directive, target_path)')
+    this.name = 'ConcurrentDeploymentError'
+  }
+}
+
 export type GeoDeploymentStatus =
   | 'pending_pr'
   | 'merged'
@@ -65,7 +77,14 @@ export async function recordDeployment(
     .select()
     .single()
 
-  if (error) throw new Error(`geo_deployments insert failed: ${error.message}`)
+  if (error) {
+    // MF6: Postgres unique_violation on the partial pending_pr index. PostgREST
+    // surfaces this as { code: '23505' } in the error payload.
+    if ((error as { code?: string }).code === '23505') {
+      throw new ConcurrentDeploymentError()
+    }
+    throw new Error(`geo_deployments insert failed: ${error.message}`)
+  }
   return data as GeoDeploymentRow
 }
 

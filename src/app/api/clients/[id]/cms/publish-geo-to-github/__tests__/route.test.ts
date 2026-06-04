@@ -34,12 +34,18 @@ vi.mock('@/lib/cms/connection-store', () => ({
   getConnection: vi.fn(),
 }))
 
-vi.mock('@/lib/cms/geo-deployments-store', () => ({
-  findLatestLiveDeployment: vi.fn(),
-  findOpenDeployment:       vi.fn(),
-  markSuperseded:           vi.fn(),
-  recordDeployment:         vi.fn(),
-}))
+vi.mock('@/lib/cms/geo-deployments-store', async () => {
+  // Re-export the real ConcurrentDeploymentError class — route uses
+  // `instanceof` for branching, so a vi.fn() stub would break that.
+  const actual = await vi.importActual<typeof import('@/lib/cms/geo-deployments-store')>('@/lib/cms/geo-deployments-store')
+  return {
+    ConcurrentDeploymentError: actual.ConcurrentDeploymentError,
+    findLatestLiveDeployment:  vi.fn(),
+    findOpenDeployment:        vi.fn(),
+    markSuperseded:            vi.fn(),
+    recordDeployment:          vi.fn(),
+  }
+})
 
 vi.mock('@/lib/geo/html-generator', () => ({
   generateDirectiveHtml: vi.fn(() => '<script>GEO</script>'),
@@ -383,6 +389,171 @@ describe('publish-geo-to-github route (B2)', () => {
     const res = await POST(makeRequest(), makeContext())
     expect(res.status).toBe(409)
     expect((await res.json() as { code: string }).code).toBe('STALE_BLOB_SHA')
+  })
+
+  // ── MF must-fix companion tests ───────────────────────────────────────────
+
+  it('MF1: returns 422 SNIPPET_CONTAINS_MARKER when directive HTML smuggles a marker', async () => {
+    mockAuth(true)
+    vi.mocked(getConnection).mockResolvedValue(CONN_WITH_TARGETS)
+    mockDirective([DIRECTIVE_ROW])
+
+    // Make generateDirectiveHtml return a payload that includes our START marker
+    const { generateDirectiveHtml } = await import('@/lib/geo/html-generator')
+    vi.mocked(generateDirectiveHtml).mockReturnValueOnce(
+      '<script>x</script><!-- ME-GEO-START (do not edit between these markers — managed by Magic Engine) -->',
+    )
+
+    const res = await POST(makeRequest(), makeContext())
+    expect(res.status).toBe(422)
+    expect((await res.json() as { code: string }).code).toBe('SNIPPET_CONTAINS_MARKER')
+    expect(mockGh.createBranch).not.toHaveBeenCalled()
+  })
+
+  it('MF2: half-built branch is deleted when commitFile fails mid-loop', async () => {
+    mockAuth(true)
+    vi.mocked(getConnection).mockResolvedValue(CONN_MULTI_TARGETS)
+    mockDirective([DIRECTIVE_ROW])
+    const { GitHubApiError } = await import('@/lib/cms/github-client')
+    // First commit succeeds, second fails with a non-sha error
+    mockGh.commitFile
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new GitHubApiError(502, 'Bad Gateway'))
+
+    const res = await POST(makeRequest(), makeContext())
+    expect(res.status).toBe(502)
+    // The route must clean up the orphan branch
+    expect(mockGh.deleteBranch).toHaveBeenCalledWith('acme', 'website', expect.stringMatching(/^geo-directive\//))
+  })
+
+  it('MF3: markSuperseded throw is swallowed (still returns 200)', async () => {
+    mockAuth(true)
+    vi.mocked(getConnection).mockResolvedValue(CONN_WITH_TARGETS)
+    mockDirective([DIRECTIVE_ROW])
+    vi.mocked(findOpenDeployment).mockResolvedValue({
+      id:            'stale1',
+      client_id:     CLIENT_ID,
+      directive_id:  DIRECTIVE_ID,
+      target_path:   'layouts/main.html',
+      branch:        'geo-directive/old',
+      pr_number:     10,
+      pr_url:        'u',
+      injected_hash: 'h',
+      status:        'pending_pr',
+      created_at:    '',
+      updated_at:    '',
+    })
+    vi.mocked(markSuperseded).mockRejectedValue(new Error('DB blip'))
+
+    const res = await POST(makeRequest(), makeContext())
+    expect(res.status).toBe(200)
+    // close+delete still executed
+    expect(mockGh.closePullRequest).toHaveBeenCalled()
+    expect(mockGh.deleteBranch).toHaveBeenCalledWith('acme', 'website', 'geo-directive/old')
+  })
+
+  it('MF4: orphan ME-GEO block (lastDeployment=null) routes to drift', async () => {
+    mockAuth(true)
+    vi.mocked(getConnection).mockResolvedValue(CONN_WITH_TARGETS)
+    mockDirective([DIRECTIVE_ROW])
+    const ORPHAN_TEMPLATE = `<html><head>
+<!-- ME-GEO-START (do not edit between these markers — managed by Magic Engine) -->
+<script>ORPHAN</script>
+<!-- ME-GEO-END -->
+</head><body></body></html>`
+    mockGh.getFileContent.mockResolvedValue({
+      sha:            'b',
+      content:        Buffer.from(ORPHAN_TEMPLATE, 'utf8').toString('base64'),
+      size:           ORPHAN_TEMPLATE.length,
+      decodedContent: ORPHAN_TEMPLATE,
+    })
+    // No DB record for this target — that's the orphan case
+    vi.mocked(findLatestLiveDeployment).mockResolvedValue(null)
+
+    const res = await POST(makeRequest({}), makeContext())
+    expect(res.status).toBe(422)
+    const body = await res.json() as { code: string; drifted_targets: Array<{ path: string; expected_hash: string }> }
+    expect(body.code).toBe('EXTERNAL_DRIFT')
+    expect(body.drifted_targets[0]?.expected_hash).toBe('orphan_no_record')
+    // No GitHub mutation on drift
+    expect(mockGh.createBranch).not.toHaveBeenCalled()
+  })
+
+  it('MF4: orphan block proceeds when force_overwrite=true', async () => {
+    mockAuth(true)
+    vi.mocked(getConnection).mockResolvedValue(CONN_WITH_TARGETS)
+    mockDirective([DIRECTIVE_ROW])
+    const ORPHAN_TEMPLATE = `<html><head>
+<!-- ME-GEO-START (do not edit between these markers — managed by Magic Engine) -->
+<script>ORPHAN</script>
+<!-- ME-GEO-END -->
+</head><body></body></html>`
+    mockGh.getFileContent.mockResolvedValue({
+      sha:            'b',
+      content:        Buffer.from(ORPHAN_TEMPLATE, 'utf8').toString('base64'),
+      size:           ORPHAN_TEMPLATE.length,
+      decodedContent: ORPHAN_TEMPLATE,
+    })
+    vi.mocked(findLatestLiveDeployment).mockResolvedValue(null)
+
+    const res = await POST(makeRequest({ force_overwrite: true }), makeContext())
+    expect(res.status).toBe(200)
+    expect(mockGh.commitFile).toHaveBeenCalled()
+  })
+
+  it('MF5: when closePullRequest fails (non-404), deleteBranch is skipped', async () => {
+    mockAuth(true)
+    vi.mocked(getConnection).mockResolvedValue(CONN_WITH_TARGETS)
+    mockDirective([DIRECTIVE_ROW])
+    vi.mocked(findOpenDeployment).mockResolvedValue({
+      id:            'stale1',
+      client_id:     CLIENT_ID,
+      directive_id:  DIRECTIVE_ID,
+      target_path:   'layouts/main.html',
+      branch:        'geo-directive/old',
+      pr_number:     10,
+      pr_url:        'u',
+      injected_hash: 'h',
+      status:        'pending_pr',
+      created_at:    '',
+      updated_at:    '',
+    })
+    const { GitHubApiError } = await import('@/lib/cms/github-client')
+    mockGh.closePullRequest.mockRejectedValueOnce(new GitHubApiError(500, 'rate limit'))
+
+    const res = await POST(makeRequest(), makeContext())
+    // Main publish still succeeds (close stale is best-effort)
+    expect(res.status).toBe(200)
+    // Critical: branch must NOT have been deleted when close failed
+    expect(mockGh.deleteBranch).not.toHaveBeenCalledWith('acme', 'website', 'geo-directive/old')
+  })
+
+  it('MF6: ConcurrentDeploymentError from recordDeployment → 422 CONCURRENT_PUBLISH_IN_PROGRESS', async () => {
+    mockAuth(true)
+    vi.mocked(getConnection).mockResolvedValue(CONN_WITH_TARGETS)
+    mockDirective([DIRECTIVE_ROW])
+    const { ConcurrentDeploymentError } = await import('@/lib/cms/geo-deployments-store')
+    vi.mocked(recordDeployment).mockRejectedValueOnce(new ConcurrentDeploymentError())
+
+    const res = await POST(makeRequest(), makeContext())
+    expect(res.status).toBe(422)
+    expect((await res.json() as { code: string }).code).toBe('CONCURRENT_PUBLISH_IN_PROGRESS')
+    // The rollback path must close the PR + delete the branch we just opened
+    expect(mockGh.closePullRequest).toHaveBeenCalled()
+    expect(mockGh.deleteBranch).toHaveBeenCalled()
+  })
+
+  it('MF7: PR body does NOT contain the raw clientId UUID', async () => {
+    mockAuth(true)
+    vi.mocked(getConnection).mockResolvedValue(CONN_WITH_TARGETS)
+    mockDirective([DIRECTIVE_ROW])
+
+    await POST(makeRequest(), makeContext())
+    const prCall = mockGh.createPullRequest.mock.calls[0] as [unknown, unknown, { body: string }]
+    const prBody = prCall[2].body
+    expect(prBody).not.toContain(CLIENT_ID)
+    // shortId is OK to include
+    expect(prBody).toContain(DIRECTIVE_ID.slice(0, 8))
   })
 
   it('closes stale PR + supersedes row before opening new PR', async () => {

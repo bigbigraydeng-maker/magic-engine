@@ -45,12 +45,14 @@ import {
   injectGeoSnippet,
   readExistingInjectedHash,
   HeadTagNotFoundError,
+  SnippetContainsMarkerError,
 } from '@/lib/cms/snippet-injector'
 import {
   findLatestLiveDeployment,
   findOpenDeployment,
   markSuperseded,
   recordDeployment,
+  ConcurrentDeploymentError,
 } from '@/lib/cms/geo-deployments-store'
 import { generateDirectiveHtml } from '@/lib/geo/html-generator'
 import type {
@@ -192,6 +194,25 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         continue
       }
 
+      // MF4 (魏征 B2 review): orphan block — the file has a ME-GEO block but
+      // we have no DB record of writing it. Could be (a) DB cleanup after a
+      // directive archive cascaded, (b) cross-environment migration, or (c)
+      // someone hand-injected a fake marker block. In every case the safe
+      // default is to refuse to overwrite silently; force_overwrite lets the
+      // FDE proceed once they've decided.
+      if (
+        liveHash !== null &&
+        lastDeployment === null &&
+        !forceOverwrite
+      ) {
+        drift.push({
+          path:          target.path,
+          expected_hash: 'orphan_no_record',
+          live_hash:     liveHash,
+        })
+        continue
+      }
+
       let injection
       try {
         injection = injectGeoSnippet(
@@ -207,6 +228,17 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
               success: false,
               error:   err.message,
               code:    'HEAD_TAG_NOT_FOUND',
+              target:  target.path,
+            },
+            { status: 422 },
+          )
+        }
+        if (err instanceof SnippetContainsMarkerError) {
+          return NextResponse.json(
+            {
+              success: false,
+              error:   err.message,
+              code:    'SNIPPET_CONTAINS_MARKER',
               target:  target.path,
             },
             { status: 422 },
@@ -258,34 +290,65 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   }
 
   // ── Close any prior still-open PR for any of these targets ────────────────
+  //
+  // MF5: only attempt to delete the stale branch if the PR close succeeded —
+  //      otherwise we end up with the PR still open AND its branch gone, which
+  //      GitHub then auto-closes with a confusing "branch deleted" status that
+  //      ME's webhook (B3) has no way to reconcile.
+  // MF3: markSuperseded is wrapped in try/catch and falls through on failure —
+  //      a stale DB row is a self-healing condition (next publish's
+  //      ConcurrentDeploymentError will re-detect and another supersede pass
+  //      will tidy it), whereas a thrown exception here would surface as 500
+  //      AFTER we've already mutated GitHub state.
   for (const { target } of prepared) {
     const open = await findOpenDeployment(clientId, directive.id, target.path)
     if (!open) continue
+
+    let closeOk = false
     try {
       await gh.closePullRequest(owner, repo, open.pr_number)
+      closeOk = true
     } catch (err) {
-      // PR may already be closed externally; not fatal.
-      if (!(err instanceof GitHubApiError && err.status === 404)) {
+      // 404 = PR was already closed externally — that's fine, proceed to delete.
+      if (err instanceof GitHubApiError && err.status === 404) {
+        closeOk = true
+      } else {
         console.warn('[publish-geo-to-github] failed to close stale PR', open.pr_number, err)
       }
     }
-    try {
-      await gh.deleteBranch(owner, repo, open.branch)
-    } catch (err) {
-      if (!(err instanceof GitHubApiError && err.status === 404)) {
-        console.warn('[publish-geo-to-github] failed to delete stale branch', open.branch, err)
+
+    if (closeOk) {
+      try {
+        await gh.deleteBranch(owner, repo, open.branch)
+      } catch (err) {
+        if (!(err instanceof GitHubApiError && err.status === 404)) {
+          console.warn('[publish-geo-to-github] failed to delete stale branch', open.branch, err)
+        }
       }
     }
-    await markSuperseded(open.id)
+
+    try {
+      await markSuperseded(open.id)
+    } catch (err) {
+      console.warn('[publish-geo-to-github] markSuperseded failed for row', open.id, err)
+    }
   }
 
   // ── Open a fresh branch + commit + PR ─────────────────────────────────────
   const shortId    = directive.id.slice(0, 8)
   const branchName = `geo-directive/${shortId}-${Date.now()}`
 
+  // MF2 (魏征 B2 review): track whether the branch was created so we can
+  // best-effort delete it if the commit-or-PR phase blows up partway through.
+  // Without this a failed commitFile #N leaves a half-populated branch
+  // forever — no PR, no DB record, just orphan branches piling up in the
+  // client repo.
+  let branchCreated = false
+
   try {
     const baseSha = await gh.getBranchSha(owner, repo, base)
     await gh.createBranch(owner, repo, branchName, baseSha)
+    branchCreated = true
 
     for (const item of prepared) {
       // blobSha threading — if main moved between our earlier getFileContent
@@ -303,7 +366,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     }
 
     const prTitle = `GEO Directive ${shortId} — inject into ${prepared.length} file${prepared.length === 1 ? '' : 's'}`
-    const prBody  = renderPrBody(directive, prepared.map(p => p.target.path), clientId)
+    const prBody  = renderPrBody(shortId, prepared.map(p => p.target.path))
     const pr = await gh.createPullRequest(owner, repo, {
       title: prTitle,
       body:  prBody,
@@ -311,17 +374,45 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       base,
     })
 
-    // Record one deployment row per target
-    for (const item of prepared) {
-      await recordDeployment({
-        clientId,
-        directiveId:  directive.id,
-        targetPath:   item.target.path,
-        branch:       branchName,
-        prNumber:     pr.number,
-        prUrl:        pr.html_url,
-        injectedHash: item.injectedHash,
-      })
+    // Record one deployment row per target.
+    //
+    // MF6: the partial unique index on (client_id, directive_id, target_path)
+    //      WHERE status='pending_pr' guarantees at most one in-flight row per
+    //      target. A concurrent publish racing past findOpenDeployment lands
+    //      here and hits 23505 → ConcurrentDeploymentError → 422.
+    try {
+      for (const item of prepared) {
+        await recordDeployment({
+          clientId,
+          directiveId:  directive.id,
+          targetPath:   item.target.path,
+          branch:       branchName,
+          prNumber:     pr.number,
+          prUrl:        pr.html_url,
+          injectedHash: item.injectedHash,
+        })
+      }
+    } catch (err) {
+      if (err instanceof ConcurrentDeploymentError) {
+        // Roll back the GitHub side: close the PR + delete the branch so the
+        // FDE doesn't see a phantom open PR with no DB tracking. This is best-
+        // effort — failures are logged but don't change the response.
+        try { await gh.closePullRequest(owner, repo, pr.number) } catch (e) {
+          console.warn('[publish-geo-to-github] rollback closePullRequest failed', e)
+        }
+        try { await gh.deleteBranch(owner, repo, branchName) } catch (e) {
+          console.warn('[publish-geo-to-github] rollback deleteBranch failed', e)
+        }
+        return NextResponse.json(
+          {
+            success: false,
+            error:   'Another publish is already in flight for this directive. Wait for it to finish and retry.',
+            code:    'CONCURRENT_PUBLISH_IN_PROGRESS',
+          },
+          { status: 422 },
+        )
+      }
+      throw err
     }
 
     return NextResponse.json({
@@ -332,6 +423,17 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       target_paths: prepared.map(p => p.target.path),
     })
   } catch (err) {
+    // MF2: clean up the half-built branch so the client repo doesn't accumulate
+    // orphan refs. We swallow the cleanup failure — the original error is what
+    // the FDE cares about.
+    if (branchCreated) {
+      try {
+        await gh.deleteBranch(owner, repo, branchName)
+      } catch (cleanupErr) {
+        console.warn('[publish-geo-to-github] failed to clean up half-built branch', branchName, cleanupErr)
+      }
+    }
+
     if (err instanceof GitHubApiError) {
       if (err.status === 409 || (err.status === 422 && /sha/i.test(err.message))) {
         return NextResponse.json(
@@ -357,10 +459,16 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   }
 }
 
-function renderPrBody(directive: GeoDirective, paths: string[], clientId: string): string {
+/**
+ * MF7 (魏征 B2 review): keep the internal clientId UUID out of the PR body.
+ * That description ships to the customer's GitHub repo where any collaborator
+ * — or anyone they screenshot a PR to — can read it. Use the directive's
+ * shortId only; it's stable, identifying, and not a route handle.
+ */
+function renderPrBody(directiveShortId: string, paths: string[]): string {
   return `## GEO Directive Injection
 
-Client \`${clientId}\` · directive \`${directive.id}\`
+Directive \`${directiveShortId}\`
 
 ### Files updated
 ${paths.map(p => `- \`${p}\``).join('\n')}
