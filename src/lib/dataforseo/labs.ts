@@ -794,9 +794,19 @@ export async function getDomainMetrics(
   }
 }
 
-async function fetchDomainRankOverview(
+/**
+ * Single-domain organic rank snapshot: count of ranking keywords +
+ * estimated monthly organic traffic. Exposed for callers that need
+ * stats for a specific competitor domain (e.g. FDE-configured
+ * competitors that don't appear in SERP-discovered list and therefore
+ * lack metrics from getSerpCompetitors).
+ *
+ * DataForSEO has no bulk version of this endpoint; call once per domain
+ * in parallel if you need multiple.
+ */
+export async function fetchDomainRankOverview(
   domain: string,
-  locationCode: number,
+  locationCode: number = DEFAULT_LOCATION_CODE,
 ): Promise<{ organic_keywords: number; organic_traffic: number }> {
   const res = await fetch(
     `${DATAFORSEO_API_BASE}/dataforseo_labs/google/domain_rank_overview/live`,
