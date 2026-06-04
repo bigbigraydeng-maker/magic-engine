@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-05 00:02 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-05 01:56 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -3497,6 +3497,34 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-06-05（🚨 Schema 漂移事故修复 — PR #365 ✅ 13 处缺失对象补齐）
+
+**触发**：PM 排查「Oztop 关键词排名为何 0 条」，实测线上 `keyword-snapshots-weekly` cron，发现**全部 19 个客户**报 `local_pack_rank column not found`。
+
+**深挖根因**（审计 134 个 migration 文件 vs 生产 DB 实际表结构）：
+- 表面：`keyword_snapshots` 缺 `local_pack_rank` 列
+- 真相：**13 处 schema 漂移**（9 表未建 + 4 列缺失），不是单点 bug
+- **机制**：一批早期 migration 的 `CREATE POLICY` 引用了**从未实现的多租户模型**——`clients.workspace_id`（不存在）和 `client_team` 表（不存在）。Postgres apply 时炸在 policy 步骤、**整个事务回滚**，所以表/列从未建成（尽管 .sql 文件在代码仓里）
+
+**影响的真实功能**：
+- 关键词排名追踪（**全 19 客户瘫痪**，含 CTS + Oztop）
+- 月报聚合（`datasource_monthly_reports` ×3 表不存在）
+- 案例库 + 处方 KPI 回流（`prescription_cases` / `prescription_outcomes`）
+- 华佗诊断叙事层（`diagnostic_narratives`）
+- 落地页线索埋点（`website_lead_events`）
+- 本地 SERP 历史（`local_ranking_history`）
+
+**修复**（PR #365 → main，migration `20260626000001_backfill_drifted_schema.sql` 已 apply 生产）：
+- 6 列：`keyword_snapshots.local_pack_rank` / `clients.contact_name+email+phone` / `blog_posts.geo_directive_version_id` / `client_site_pages.search_vector`
+- 9 表：`website_lead_events` / `prescription_cases` / `prescription_outcomes` / `local_data_cache` / `datasource_monthly_reports` ×3 / `diagnostic_narratives` / `local_ranking_history`
+- RLS 全部替换为 `service_role_full USING(true)`（ME 真实访问模型）
+
+**验证**：13 处 `exists_now=true`；DB 模拟 keyword cron 写入 `local_pack_rank=2` 成功；**PM 重 curl cron 实测**：error 字段全消失，Oztop **95 keywords_seen + 95 snapshots_written**、CTS 32/32、全 19 客户排名追踪复活
+
+**防复发规则已写入 CLAUDE.md § 开发约定**（强约束⭐⭐）：新 migration RLS 一律用 service-role 模板，禁止引用 `workspace_id`/`client_team`/`auth.uid()`/`auth.jwt()`；写完必须 grep 检查
+
+---
 
 ### 2026-06-04（A2.2 brand_search_volume GSC 接入 — PR #336 ✅ ⭐ 含 P0 fix）
 
