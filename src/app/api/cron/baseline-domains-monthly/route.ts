@@ -25,9 +25,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { SeoCollector } from '@/lib/diagnostic/collectors/seo-collector'
 
-// 600s = 10 min. baseline_domains has 44 rows at writing; with serial+2s delay
-// each domain takes ~5-7s → ~310s total, dangerously close to 300s.
-// Bumped to 600 + reduced delay + parallel batches below to keep headroom.
+// Fire-and-forget: GET returns 202 immediately, background work runs async.
+// Cloudflare times out at ~100s; 44 domains × ~5-7s = ~310s total.
+// maxDuration covers the actual background processing on Render.
 export const maxDuration = 600
 
 interface DomainRow {
@@ -270,7 +270,7 @@ async function finalizeRun(runId: string, fields: {
     .eq('id', runId)
 }
 
-// GET — cron trigger (Bearer auth, preserves existing Render cron contract)
+// GET — cron trigger (Bearer auth, fire-and-forget to avoid Cloudflare 524)
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const cronSecret = process.env.CRON_SECRET
   if (!cronSecret) {
@@ -279,7 +279,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (req.headers.get('authorization') !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  return runCollection('cron')
+  // Respond immediately so Cloudflare doesn't 524; collection runs in background
+  void runCollection('cron')
+  return NextResponse.json(
+    { success: true, message: 'Baseline collection started in background' },
+    { status: 202 },
+  )
 }
 
 // POST — admin manual trigger (x-cron-secret header)
