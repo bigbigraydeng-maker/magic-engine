@@ -5,14 +5,16 @@
  *         NOT merged with brief — that's the resolver's job).
  * PATCH → replaces the FDE list. All inputs normalised before persistence.
  *
- * On PATCH success, downstream cache layers are invalidated so SEO Intelligence,
- * AI Tracker, GEO Composer, etc. see the new list on next read.
+ * On PATCH success we only revalidate the surfaces that currently read this
+ * field (settings page + seo-intelligence dashboard). Consumer migration
+ * (ai-tracker / geo composer / seo-agent / keyword-relevance) is a followup;
+ * add their routes + a fetch tag when those land.
  *
  * Mirrors src/app/api/clients/[id]/competitor-domains/route.ts.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { revalidatePath, revalidateTag } from 'next/cache'
+import { revalidatePath } from 'next/cache'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { normaliseKeyword } from '@/lib/keywords/resolver'
@@ -100,15 +102,22 @@ export async function PATCH(
     )
   }
 
-  // Invalidate downstream caches that depend on primary_keywords.
-  // (Consumers will be migrated to the resolver in a followup; for now we
-  // pre-emptively invalidate the same surfaces as competitor_domains so the
-  // UX is consistent when the migrations land.)
+  // Invalidate the user-facing surfaces that read primary_keywords today:
+  //   - settings page so the FDE sees the just-saved value on refresh
+  //   - seo-intelligence dashboard so any consumer panel rendered there
+  //     (once consumers migrate to the resolver) reflects the new list
+  //
+  // Followups (登记于 ROADMAP — keyword resolver consumer migration):
+  //   - migrate ai-tracker question-generator to resolver, then add its
+  //     route here
+  //   - migrate geo/composer + seo-agent/conductor + seo-intelligence
+  //     keyword-relevance to resolver, then add their routes here
+  //   - intentionally NO revalidateTag yet — no consumer attaches a tag,
+  //     so it would be a no-op. Add tag + tag-based fetch wiring together
+  //     in the consumer migration PR.
   try {
-    revalidatePath(`/api/clients/${clientId}/seo-intelligence/competitors-gap`)
     revalidatePath(`/dashboard/clients/${clientId}/seo-intelligence`)
     revalidatePath(`/dashboard/clients/${clientId}/settings`)
-    revalidateTag(`client-keywords-${clientId}`)
   } catch {
     // revalidate is best-effort during dev / non-Next runtime; ignore
   }
