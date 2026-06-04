@@ -158,7 +158,11 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
   // FDE generation config (customisable before generating)
   const [config, setConfig]                 = useState<GenerationConfig>(DEFAULT_CONFIG)
   const [settingsOpen, setSettingsOpen]     = useState(false)
-  const [angleFocusInput, setAngleFocusInput] = useState('')
+  // Task mode: prefill with the task's own brief so FDE can tweak before generating.
+  // Batch mode: empty (FDE types a fresh angle).
+  const [angleFocusInput, setAngleFocusInput] = useState(() =>
+    item ? (item.description || item.title || '') : '',
+  )
 
   // Image-generation in-flight counter — drives kanban "制作中" badge
   const [imageGenCount, setImageGenCount]   = useState(0)
@@ -315,9 +319,11 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
 
   async function generateFocused() {
     if (!campaignId || !taskKind || !item) return
+    // Prefer the FDE-edited textarea; fall back to the task brief if they cleared it.
+    const angleText = angleFocusInput.trim() || item.description || item.title
     const overrides: GenerateOverrides = {
       ...KIND_PLAN_CONFIG[taskKind],
-      angle_focus: item.description || item.title,
+      angle_focus: angleText,
       ...(taskPlatform ? { platform: taskPlatform } : {}),
     }
 
@@ -372,9 +378,25 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
             )}
           </div>
           <h4 className="mt-2 text-sm font-black leading-snug text-slate-950">{item.title}</h4>
-          {item.description && item.description !== item.title && (
-            <p className="mt-1 line-clamp-3 text-xs leading-5 text-slate-600">{item.description}</p>
-          )}
+
+          {/* Editable angle/prompt — prefilled with the task brief, FDE can tweak
+              before generating. This is the prompt the AI uses as the creative
+              angle ("夏季促销专注海滩假期" etc.). Kept as ephemeral state — never
+              written back to execution_items.description to preserve the
+              original diagnostic context. */}
+          <div className="mt-3">
+            <label className="mb-1 block text-[10px] font-black uppercase tracking-[0.12em] text-cyan-700">
+              生成 prompt（可编辑）
+            </label>
+            <textarea
+              value={angleFocusInput}
+              onChange={e => setAngleFocusInput(e.target.value)}
+              placeholder="描述这条内容想达到的角度、卖点或风格；留空则使用任务描述"
+              rows={4}
+              className="w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs leading-5 text-slate-700 placeholder-slate-400 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+            />
+          </div>
+
           {item.status === 'in_progress' ? (
             <div className="mt-3 flex items-center gap-3">
               <span className="text-[11px] font-semibold text-green-700">✓ 内容已生成，可在下方查看和调整</span>
