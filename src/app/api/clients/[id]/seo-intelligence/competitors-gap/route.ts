@@ -123,7 +123,10 @@ export async function GET(
       { domain: client.domain, competitors, gapKeywords },
       {
         headers: {
-          'Cache-Control': 'public, s-maxage=86400, stale-while-revalidate=3600',
+          // Short cache so FDE-edited competitor_domains take effect within ~1 minute.
+          // Trade-off: DataForSEO calls are gated by this cache, so don't drop to 0;
+          // 60s strikes a balance between freshness and API spend (was 86400 / 24h).
+          'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=60',
         },
       },
     )
