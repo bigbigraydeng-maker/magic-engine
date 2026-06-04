@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-04 23:24 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-04 23:36 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -36,20 +36,25 @@
 | P0.5 | rebase + merge PR #353 New Goal 入口 | open PR #353 | 30 min | ✅ 完成 2026-06-04（上 session 已 merged）| 子牙 |
 | P0.6 | T-MP-Generate Marketing Plan 「Unexpected token '<'」HTML bug 排查 | docs/bugs/2026-06-03 | 2-3 h | ⏳ 6/6 | 子牙 |
 | P0.7 | PR #346 FDE users access 端到端验收（客户员工开账号前必验，IDOR 余孽 P19.F 也一并看） | PR #346 | 30 min | ⏳ 6/7 | PM UI |
-| P0.8 | A2.3 Oztop GA4 generate_lead 配置（SOP 15 min PM 操作，确保 form_submissions Goal 可用） | 焦点表 | 15 min | ⏳ 6/5 | PM GTM op |
-| P0.9 | A3 案例沉淀（CTS / Oztop Phase 31/33/A2 实战 markdown） | 焦点表 + Clients/ | 4 h | ⏳ 6/7 | 子牙 |
+| ~~P0.8~~ | ~~A2.3 Oztop GA4 generate_lead 配置~~ | 焦点表 | 15 min | ❌ **砍掉 2026-06-04（PM 决策）**：CTS 主指标=orders_count / Oztop=monthly_revenue，无人用 form_submissions Goal，配了没人用。可需要时再 15 min 跑 | — |
+| ~~P0.9~~ | ~~A3 案例沉淀（CTS / Oztop Phase 31/33/A2 实战 markdown）~~ | 焦点表 + Clients/ | 4 h | ⏬ **降级 P1**（决战日后写）：CTS/Oztop 本身不需要这文档，给销售/新 FDE 用。推广前写即可 | 子牙 |
 | P0.10 | Phase 22.E S9 (Action 预期影响 MVP 版 6h) + S13 (SEO 子类分流 4h) | PR #350 PM 圈定 | 10 h | ⏳ 6/5-6/6 | 子牙 |
 
-**P0 总工时**（修正后）：~20 h（含 30% buffer）≈ 4 个工作日
+**P0 总工时**（2026-06-04 晚 PM 价值审计后）：~16 h（含 30% buffer）≈ 3.5 个工作日
+
+**砍获记录**（2026-06-04 晚 PM 决策）：
+- ❌ P0.8 GA4 generate_lead 完全砍掉（CTS=orders / Oztop=revenue，无人用 form_submissions）
+- ⏬ P0.9 案例沉淀降级 P1（推广前写即可，决战日不需要）
+- ✅ P0.10 SEO S9+S13 保留（PM 范围拍板不动）
 
 ### 📅 4 天节奏表（修正版）
 
 | 日期 | 计划 |
 |------|------|
-| **周三 6/4 晚** | ✅ P0.1 merge #354 · ⏸️ P0.2 半成品（System User + 资产已配，卡建 App 延后到 P1）· ✅ 收工 |
-| **周四 6/5** | 03:00 UTC A2.1-γ 首跑 → P0.3 + P0.4 + P0.8 同上午 PM 验收（~2h）· P0.5 子牙 rebase #353（30 min）· P0.10 S9 编码（6h） |
+| **周三 6/4 晚** | ✅ P0.1 merge #354 · ✅ P0.4 A2.2 CTS+Oztop 双客户验收（CTS=184 / Oztop=48）· ✅ P0.5 PR #353 ·  ⏸️ P0.2 半成品（卡建 Meta App，延后 P1）· ✅ 收工 |
+| **周四 6/5** | 03:00 UTC A2.1-γ 首跑 → P0.3 PM 验收（~1h）· P0.10 S9 编码（6h，子牙）· ~~P0.8 GA4 generate_lead~~（已砍） |
 | **周五 6/6 EOD freeze** | P0.10 S13 编码（4h）· P0.6 T-MP-Generate 排查（2-3h） |
-| **周六 6/7** | P0.7 PR #346 验收（30 min）· P0.9 A3 案例沉淀（4h）· buffer for 周末 hotfix |
+| **周六 6/7** | P0.7 PR #346 验收（30 min）· buffer for 周末 hotfix · ~~P0.9 案例沉淀~~（已降级 P1） |
 | **周日 6/8 决战日** | 演示彩排 · 只 hotfix · 零新 Task |
 
 ### ⚠️ 3 个最大风险（2026-06-04 晚更新）
@@ -61,7 +66,8 @@
 
 ### 🟡 P1 — 推广后第一个 sprint（决战日后立即开工）
 
-- A2.3 Form/Order connector（第三个数据源）
+- ⭐ **A3 案例沉淀**（2026-06-04 从 P0.9 降级）：CTS / Oztop Phase 31/33/A2 实战写成 markdown，给销售/新 FDE 用，推广前必须有
+- A2.3 Form/Order connector（第三个数据源 — 真有客户用 form_submissions Goal 再做）
 - Phase 22.E S4ext 验收（PR #349 merged 未跑）
 - AIV-debt-1 `latest_only` 改 DB 层
 - QA-清理-1/2/3 内部 HTTP+Bearer / apify 模块 / tsc 整体红
