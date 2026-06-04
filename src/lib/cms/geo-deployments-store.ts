@@ -155,3 +155,27 @@ export async function markSuperseded(rowId: string): Promise<void> {
 
   if (error) throw new Error(`geo_deployments supersede failed: ${error.message}`)
 }
+
+/**
+ * Mark all pending_pr rows for a given PR as merged.
+ *
+ * Called by the GitHub webhook (B3) when a GEO PR is merged. A single PR
+ * can cover multiple targets (multi-file injection), so we update every
+ * row that shares the pr_number + pr_url pair.
+ *
+ * Returns the number of rows updated. A return value of 0 means the PR
+ * was not ME-tracked (e.g. the caller merged a non-GEO PR) — the route
+ * silently ignores this.
+ */
+export async function markMergedByPr(prNumber: number, prUrl: string): Promise<number> {
+  const { data, error } = await supabaseAdmin
+    .from('geo_deployments')
+    .update({ status: 'merged' })
+    .eq('pr_number', prNumber)
+    .eq('pr_url',    prUrl)
+    .eq('status',    'pending_pr')
+    .select('id')
+
+  if (error) throw new Error(`geo_deployments merge update failed: ${error.message}`)
+  return (data ?? []).length
+}
