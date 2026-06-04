@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-04 19:18 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-04 20:51 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -3194,6 +3194,31 @@ clients 表加 `seo_maturity_stage` 字段：
 `tabsForItem()` 按 `item.action_type` 路由到不同 tab。后端 API（落地页生成 / 页面优化）登记为 S14/S15。
 
 **当前临时**：Stage 1（PR #347）已让 SEO drawer 只显示 SEO 文章 tab，去除噪音，但所有 SEO action 都走文章生成器。S13 上线后才有真正的页面工作流。
+
+### 决战日 Schedule — 2026-06-08 周日 EOD ⏰
+
+> **PM 拍板**：2026-06-04 PM 反馈"重要的组件必须完成，其余进 backlog"。设决战日推动收尾节奏。
+
+**6/8 前必上线（M5 价值闭环）：**
+
+| 编号 | 内容 | 状态 |
+|------|------|------|
+| **A3 (S4ext)** | SEO 列头客户事实快照 | ✅ PR #349 merged |
+| **S9-prereq** | 给 marketing_plan/diagnostic 也塞 action metadata（让 A2 能用） | 📋 待做 |
+| **A2 (S9)** | Action 卡片"预期影响"字段 | 📋 待做（依赖 S9-prereq）|
+| **S13** | SEO 子类型精细分流（落地页 + 页面 SEO 优化）| 📋 待做（最复杂，需后端 API 设计）|
+
+**6/8 后进 backlog（不阻挡推广）：**
+
+| 编号 | 内容 | 优先级 |
+|------|------|--------|
+| S10 | 客户 SEO 成熟度阶段感知 | P3 |
+| S11 | MAX_ACTIONS 客户可配 | P3 |
+| S12 | PM/FDE 决策分流 | P3 |
+| S14/S15 | S13 的后端 API（落地页生成 / 页面优化）| P2 |
+| 安全债 | seo-intelligence 目录 IDOR 防护补齐（魏征 LOW）| P3 |
+
+**节奏说明**：4 天纯开发 + 6/8 当天测试缓冲。6/9 起进入推广阶段。
 
 ---
 
