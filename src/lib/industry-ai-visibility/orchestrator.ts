@@ -61,16 +61,44 @@ export interface RunCollectionOptions {
  * Hotfix helper — create a fresh run row and return its id. Use this from
  * API routes that want to return 202 + run_id immediately, then call
  * runCollection({ ..., existingRunId }) in the background.
+ *
+ * 魏征 Hotfix-7: when the partial unique index `iav_runs_single_in_flight`
+ * rejects the INSERT (because a stale 'running' row still occupies it),
+ * we sweep stale rows in-place and retry once. This makes the API resilient
+ * to serverless workers being killed mid-collection without forcing the
+ * caller to wait for the 5-min sweeper threshold.
  */
-export async function createRunRow(opts: {
+const STALE_RUN_THRESHOLD_MS = 5 * 60 * 1000 // 5 min — 魏征 Hotfix-7 (was 10 min)
+const UNIQUE_VIOLATION_CODE = '23505'
+
+async function sweepStaleRunningRows(): Promise<number> {
+  const cutoffIso = new Date(Date.now() - STALE_RUN_THRESHOLD_MS).toISOString()
+  const { data, error } = await supabaseAdmin
+    .from('industry_ai_visibility_runs')
+    .update({
+      status: 'failed',
+      completed_at: new Date().toISOString(),
+      error_message: `Stuck in running > 5 min — auto-cleared by createRunRow retry path`,
+    })
+    .eq('status', 'running')
+    .lt('started_at', cutoffIso)
+    .select('id')
+  if (error) {
+    console.error('[orchestrator/createRunRow.sweep] failed:', error)
+    return 0
+  }
+  return (data ?? []).length
+}
+
+async function insertRunRow(opts: {
   industries?: string[]
   platforms?: Platform[]
   triggeredBy: 'cron' | 'admin_manual'
   triggeredByUser?: string
-}): Promise<string> {
+}): Promise<{ data: { id: string } | null; error: { code?: string; message: string } | null }> {
   const platforms: Platform[] = opts.platforms ?? ['chatgpt', 'google_ai_overview', 'google_serp']
   const weekOf = isoWeekStart()
-  const { data: runRow, error: runErr } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('industry_ai_visibility_runs')
     .insert({
       week_of: weekOf,
@@ -82,10 +110,35 @@ export async function createRunRow(opts: {
     })
     .select('id')
     .single()
-  if (runErr || !runRow) {
-    throw new Error(`Failed to create run row: ${runErr?.message}`)
+  return { data: data as { id: string } | null, error: error as { code?: string; message: string } | null }
+}
+
+export async function createRunRow(opts: {
+  industries?: string[]
+  platforms?: Platform[]
+  triggeredBy: 'cron' | 'admin_manual'
+  triggeredByUser?: string
+}): Promise<string> {
+  // 1st attempt
+  const first = await insertRunRow(opts)
+  if (first.data) return first.data.id
+
+  // 魏征 Hotfix-7: if the partial unique index rejected us (code 23505),
+  // sweep stale rows and retry exactly once. This handles the race where
+  // a serverless worker died mid-collection but the 5-min sweeper window
+  // hasn't elapsed yet.
+  if (first.error?.code === UNIQUE_VIOLATION_CODE) {
+    const swept = await sweepStaleRunningRows()
+    console.warn(`[orchestrator/createRunRow] unique violation, swept ${swept} stale row(s), retrying`)
+    const retry = await insertRunRow(opts)
+    if (retry.data) return retry.data.id
+    throw new Error(
+      `Failed to create run row after stale-row sweep: ${retry.error?.message ?? 'unknown'}. ` +
+      `Another collection is still genuinely in-flight; wait a few seconds and try again.`,
+    )
   }
-  return runRow.id as string
+
+  throw new Error(`Failed to create run row: ${first.error?.message ?? 'unknown'}`)
 }
 
 export async function runCollection(opts: RunCollectionOptions): Promise<RunSummary> {

@@ -120,6 +120,13 @@ export function AiVisibilityPanel() {
     if (!confirm('立即触发一次采集？将对所有 active 问题调用 ChatGPT + DataForSEO，约 1-5 分钟（后台执行，可关闭页面）。')) return
     setCollecting(true)
     setCollectMsg('采集排队中…')
+    // 魏征 Hotfix-7: keep the button disabled for the whole collection window
+    // (5 min) — not just until the 202 returns. This prevents PM double-click
+    // from racing the unique index `iav_runs_single_in_flight` (each click
+    // would create a 'running' row; second click would 409 anyway, but a
+    // burst of 3+ clicks during the 5-min window was the original Issue 1).
+    const reEnable = () => setCollecting(false)
+    let scheduledReEnable: ReturnType<typeof setTimeout> | null = null
     try {
       const res = await fetch('/api/baselines/ai-collect', {
         method: 'POST',
@@ -136,25 +143,33 @@ export function AiVisibilityPanel() {
       } catch {
         const preview = text.slice(0, 120).replace(/\s+/g, ' ').trim()
         setCollectMsg(`✗ HTTP ${res.status} — 服务端返回非 JSON：${preview}…`)
+        reEnable()
         return
       }
 
       // 魏征 P1: 409 = 另一次采集正在进行中
       if (res.status === 409 && json.existing_run_id) {
         setCollectMsg(`⏳ 已有采集运行中（run ${json.existing_run_id.slice(0, 8)}…），等其结束再点`)
+        // Re-enable button after 30s — by then the other run is likely done or 409 will fire again
+        scheduledReEnable = setTimeout(reEnable, 30_000)
         return
       }
 
       if (!res.ok) {
         setCollectMsg(`✗ ${json.error ?? `HTTP ${res.status}`}`)
+        reEnable()
         return
       }
 
       // 202 Accepted (async path) — work runs in background, poll runs table
       if (res.status === 202 && json.run_id) {
         setCollectMsg(`✓ 已排队 run ${json.run_id.slice(0, 8)}… — 后台执行中，约 1-3 分钟后刷新看结果`)
-        // Auto-refresh snapshots after 90s (typical batch duration)
+        // Auto-refresh snapshots after 90s
         setTimeout(() => { void loadAll() }, 90_000)
+        // 魏征 Hotfix-7: keep button locked for 5 min (matches server-side
+        // STALE_RUN_THRESHOLD_MS + CONCURRENCY_WINDOW_MS). PM cannot accidentally
+        // burn another $0.40 by re-clicking thinking nothing happened.
+        scheduledReEnable = setTimeout(reEnable, 5 * 60_000)
         return
       }
 
@@ -162,11 +177,14 @@ export function AiVisibilityPanel() {
       const sync = json as unknown as { questions_ok: number; questions_attempted: number; snapshots_written: number; total_cost_usd?: number; duration_seconds: number }
       setCollectMsg(`✓ ${sync.questions_ok}/${sync.questions_attempted} ok · ${sync.snapshots_written} snapshots · $${(sync.total_cost_usd ?? 0).toFixed(4)} · ${sync.duration_seconds}s`)
       await loadAll()
+      reEnable()
     } catch (err) {
       setCollectMsg(`✗ ${(err as Error).message}`)
-    } finally {
-      setCollecting(false)
+      reEnable()
     }
+    // Note: deliberately do NOT have a `finally { reEnable }` because we want
+    // the cooldown semantics above. scheduledReEnable is fire-and-forget.
+    void scheduledReEnable
   }
 
   // ── Filter option lists (derived from questions, not hardcoded) ─────────

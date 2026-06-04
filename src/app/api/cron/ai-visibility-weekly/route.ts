@@ -21,11 +21,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { runCollection } from '@/lib/industry-ai-visibility/orchestrator'
 import { supabaseAdmin } from '@/lib/supabase'
 
-const STALE_RUN_THRESHOLD_MS = 10 * 60 * 1000
+const STALE_RUN_THRESHOLD_MS = 5 * 60 * 1000 // 魏征 Hotfix-7 (was 10 min — too lenient)
 
 /**
- * 魏征 Hotfix-2: clear stale 'running' rows (>10 min) before kicking off a
- * fresh cron. Without this the partial unique index `iav_runs_single_in_flight`
+ * 魏征 Hotfix-2 + Hotfix-7: clear stale 'running' rows (>5 min) before kicking
+ * off a fresh cron. Without this the partial unique index `iav_runs_single_in_flight`
  * would refuse the new run forever after one serverless worker death.
  */
 async function sweepStaleRuns(): Promise<void> {

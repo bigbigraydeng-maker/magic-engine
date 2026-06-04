@@ -36,12 +36,12 @@ interface RequestBody {
 }
 
 const CONCURRENCY_WINDOW_MS = 5 * 60 * 1000  // 5 minutes
-const STALE_RUN_THRESHOLD_MS = 10 * 60 * 1000 // 10 minutes — 魏征 Hotfix-2 sweeper
+const STALE_RUN_THRESHOLD_MS = 5 * 60 * 1000 // 魏征 Hotfix-7 (was 10 min — too lenient, PM double-click within 10 min would hit unique index)
 
 /**
- * 魏征 Hotfix-2: clear runs stuck in 'running' for > 10 minutes. These come
- * from serverless workers being killed mid-collection. Without this, the
- * partial unique index would block all future runs forever.
+ * 魏征 Hotfix-2 + Hotfix-7: clear runs stuck in 'running' for > 5 minutes.
+ * These come from serverless workers being killed mid-collection. Without
+ * this, the partial unique index would block all future runs.
  *
  * Runs synchronously on each ai-collect entry (cheap — one indexed UPDATE)
  * so we don't need to register a separate sweeper cron.
