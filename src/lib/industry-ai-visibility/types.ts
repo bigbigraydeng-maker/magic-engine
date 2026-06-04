@@ -73,9 +73,15 @@ export interface CollectionResult {
     url:      string
     description: string
   }> | null
+  /**
+   * 魏征 Hotfix-6: DataForSEO returns rating as an OBJECT, not a number:
+   *   { value: 4.9, rating_max: 5, rating_type: 'Max5', votes_count: 598 }
+   * Earlier `rating: number | null` typing was wrong and caused React #31
+   * crashes in GoogleSerpPanel. The UI normalises via normaliseLocalPackRating().
+   */
   serp_local_pack: Array<{
     name: string
-    rating: number | null
+    rating: number | { value?: number; rating_max?: number; rating_type?: string; votes_count?: number } | null
     review_count: number | null
     address: string | null
   }> | null

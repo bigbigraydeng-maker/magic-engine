@@ -23,7 +23,18 @@ interface Snapshot {
   ai_answer_text:      string | null
   ai_citation_sources: string[] | null
   serp_organic_top10:  Array<{ position: number; title: string; url: string; description: string }> | null
-  serp_local_pack:     Array<{ name: string; rating: number | null; review_count: number | null; address: string | null }> | null
+  /**
+   * DataForSEO returns `rating` as an OBJECT `{value, rating_max, rating_type, votes_count}`,
+   * NOT a number. Earlier types assumed `number` and caused Minified React error #31 when
+   * the UI tried to render the object directly. Always normalise via `localPackRating()`.
+   * 魏征 Hotfix-6 (snapshot 15210287... was the smoking gun).
+   */
+  serp_local_pack:     Array<{
+    name: string
+    rating: number | { value?: number; rating_max?: number; votes_count?: number } | null
+    review_count: number | null
+    address: string | null
+  }> | null
   serp_people_also_ask: string[] | null
   error_message:       string | null
   industry_ai_visibility_questions?: {
@@ -33,6 +44,31 @@ interface Snapshot {
     language: string
     question_text: string
   } | null
+}
+
+/**
+ * 魏征 Hotfix-6: normalise DataForSEO Local Pack rating field.
+ *
+ * Real shapes observed in production:
+ *   1. number             — legacy / synthetic snapshots
+ *   2. {value:4.9, rating_max:5, rating_type:"Max5", votes_count:598}  — DataForSEO live
+ *   3. null               — no rating present
+ *
+ * Always returns { value: number | null, votes: number | null } so the UI
+ * never has to render an object directly (which throws React #31).
+ */
+function normaliseLocalPackRating(
+  raw: number | { value?: number; rating_max?: number; votes_count?: number } | null | undefined,
+): { value: number | null; votes: number | null } {
+  if (raw == null) return { value: null, votes: null }
+  if (typeof raw === 'number') return { value: raw, votes: null }
+  if (typeof raw === 'object') {
+    return {
+      value: typeof raw.value === 'number' ? raw.value : null,
+      votes: typeof raw.votes_count === 'number' ? raw.votes_count : null,
+    }
+  }
+  return { value: null, votes: null }
 }
 
 const INDUSTRY_LABELS: Record<string, string> = {
@@ -212,16 +248,20 @@ function SerpRow({ snapshot, aiOverview }: { snapshot: Snapshot; aiOverview?: Sn
             <div>
               <p className="font-black uppercase tracking-wide text-me-charcoal/45">Local Pack</p>
               <ul className="mt-1 list-disc pl-4 text-me-charcoal/85">
-                {localPack.map((lp, i) => (
-                  <li key={`lp-${i}`}>
-                    <span className="font-semibold">{lp?.name ?? '(unnamed)'}</span>
-                    {/* 魏征 Hotfix-5: previously `{lp.rating && ...}` would render
-                        literal "0" when rating === 0 because JSX falsy-renders 0.
-                        Use explicit non-null check. */}
-                    {lp?.rating != null && <span className="ml-2 text-me-ochre">{lp.rating}★</span>}
-                    {lp?.review_count != null && <span className="ml-1 text-me-charcoal/45">({lp.review_count})</span>}
-                  </li>
-                ))}
+                {localPack.map((lp, i) => {
+                  // 魏征 Hotfix-6: DataForSEO returns rating as {value, rating_max,
+                  // votes_count, ...} object — not a number. Normalise to scalars
+                  // before render or React throws Minified error #31.
+                  const r = normaliseLocalPackRating(lp?.rating)
+                  const votes = lp?.review_count ?? r.votes
+                  return (
+                    <li key={`lp-${i}`}>
+                      <span className="font-semibold">{lp?.name ?? '(unnamed)'}</span>
+                      {r.value != null && <span className="ml-2 text-me-ochre">{r.value}★</span>}
+                      {votes != null && <span className="ml-1 text-me-charcoal/45">({votes})</span>}
+                    </li>
+                  )
+                })}
               </ul>
             </div>
           )}
