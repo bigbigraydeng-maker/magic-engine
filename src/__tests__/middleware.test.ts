@@ -121,15 +121,26 @@ describe('dashboard auth middleware', () => {
     expect(url.searchParams.get('next')).toBe('/prospect')
   })
 
-  it('redirects unauthenticated portal pages to the portal login page', async () => {
+  it('redirects unauthenticated portal pages to the unified /login (Phase X.S4 portal phase-out)', async () => {
     getUserMock.mockResolvedValue({ data: { user: null } })
 
     const res = await middleware(buildRequest('/portal/client-x-uuid/report'))
 
     expect(res.status).toBe(307)
     const url = new URL(res.headers.get('location')!)
-    expect(url.pathname).toBe('/portal/login')
-    expect(url.searchParams.get('next')).toBe('/portal/client-x-uuid/report')
+    expect(url.pathname).toBe('/login')
+    // The `next` param is rewritten to the dashboard equivalent so the user
+    // lands on /dashboard/clients/<clientId>/report after signing in.
+    expect(url.searchParams.get('next')).toBe('/dashboard/clients/client-x-uuid/report')
+  })
+
+  it('redirects authenticated /portal/<clientId>/<rest> with 308 to /dashboard equivalent', async () => {
+    getUserMock.mockResolvedValue({ data: { user: { email: 'paid@example.com' } } })
+
+    const res = await middleware(buildRequest('/portal/client-x-uuid/report'))
+    expect(res.status).toBe(308)
+    const url = new URL(res.headers.get('location')!)
+    expect(url.pathname).toBe('/dashboard/clients/client-x-uuid/report')
   })
 
   it('redirects to /unauthorized when user is not on the whitelist', async () => {

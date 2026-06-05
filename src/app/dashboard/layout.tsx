@@ -11,6 +11,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const headersList = await headers()
   const userRole = headersList.get('x-user-role') ?? 'admin'
+  const userTier = (headersList.get('x-user-tier') ?? 'admin') as
+    'admin' | 'paid_client' | 'self_serve' | 'portal_only'
   const allowedClientId = headersList.get('x-allowed-client-id') ?? null
   const roleLabel = userRole === 'client-viewer' ? 'Client view' : 'Admin cockpit'
 
@@ -18,6 +20,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <DashboardShell
       userEmail={user.email ?? ''}
       userRole={userRole}
+      userTier={userTier}
       allowedClientId={allowedClientId}
       roleLabel={roleLabel}
     >
