@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireSession } from '@/lib/auth/require-session'
 import { normalisePath } from '@/lib/seo-intelligence/page-trends/path-utils'
-import {
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import {
   pickComparison,
   computeMetricDeltas,
   buildWindowLabel,
@@ -76,7 +76,9 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const access = await requirePaidClientAccess(params.id)
+  const { id: clientId } = await params
+
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
   }
@@ -85,8 +87,6 @@ export async function GET(
   if (!session.ok) {
     return NextResponse.json({ error: session.error }, { status: session.status })
   }
-
-  const { id: clientId } = await params
 
   const [gscHistory, ga4History] = await Promise.all([
     fetchGscHistory(clientId),
