@@ -177,6 +177,6 @@ export async function POST(request: NextRequest) {
     email: email.toLowerCase().trim(),
     next: safeNext,
     needsVerification: true,
-    message: 'Account created. Enter the 6-digit code we just emailed you to verify.',
+    message: 'Account created. Enter the verification code we just emailed you to verify.',
   })
 }

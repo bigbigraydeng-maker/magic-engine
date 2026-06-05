@@ -157,7 +157,7 @@ export default function RegisterForm({ next, fromProspect }: RegisterFormProps) 
           Enter your verification code
         </h3>
         <p className="mt-2 text-sm leading-6 text-me-charcoal/60">
-          We emailed a 6-digit code to{' '}
+          We emailed a verification code to{' '}
           <span className="font-semibold text-me-charcoal">{pending.email}</span>.
           {' '}Enter it below to activate your account and receive your{' '}
           <strong>500 MTC</strong> welcome bonus.
@@ -169,13 +169,13 @@ export default function RegisterForm({ next, fromProspect }: RegisterFormProps) 
           type="text"
           inputMode="numeric"
           autoComplete="one-time-code"
-          pattern="\d{6}"
-          maxLength={6}
+          pattern="\d{6,10}"
+          maxLength={10}
           value={code}
           onChange={handleCodeChange}
           disabled={verifying}
           placeholder="123456"
-          aria-label="6-digit verification code"
+          aria-label="Verification code"
           className="mt-5 h-14 w-full rounded-xl border-[1.5px] border-me-charcoal/14 bg-white px-3 text-center font-display text-2xl font-bold tracking-[0.5em] text-me-charcoal outline-none transition focus:border-me-ochre focus:shadow-[0_0_0_3px_rgba(196,145,46,.12)] disabled:opacity-60"
         />
 

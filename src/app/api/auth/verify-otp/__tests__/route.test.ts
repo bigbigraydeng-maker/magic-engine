@@ -49,12 +49,23 @@ describe('POST /api/auth/verify-otp', () => {
     expect(mocks.verifyOtp).not.toHaveBeenCalled()
   })
 
-  it('rejects a non-6-digit code', async () => {
+  it('rejects a non-numeric code', async () => {
     const res = await POST(request({ email: 'user@example.com', token: '12ab' }))
     expect(res.status).toBe(400)
     const body = await res.json()
-    expect(body.error).toMatch(/6-digit/i)
+    expect(body.error).toMatch(/code from your email/i)
     expect(mocks.verifyOtp).not.toHaveBeenCalled()
+  })
+
+  it('accepts 8-digit OTP (Supabase project setting)', async () => {
+    mocks.verifyOtp.mockResolvedValue({ data: {}, error: null })
+    mocks.resolveRedirectForSession.mockResolvedValue('/dashboard/clients/abc')
+    const res = await POST(request({ email: 'user@example.com', token: '40338177' }))
+    expect(res.status).toBe(200)
+    expect(mocks.verifyOtp).toHaveBeenCalledWith(expect.objectContaining({
+      email: 'user@example.com',
+      token: '40338177',
+    }))
   })
 
   it('verifies the OTP with type=signup and resolves the redirect (which grants the bonus)', async () => {
