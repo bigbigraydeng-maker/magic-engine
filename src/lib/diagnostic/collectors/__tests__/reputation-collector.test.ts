@@ -155,11 +155,16 @@ describe('ReputationCollector.collect() — no review platform', () => {
 // ---------------------------------------------------------------------------
 
 describe('ReputationCollector.collect() — failure', () => {
-  it('returns degraded { score: null, findings: [] } when API throws', async () => {
+  it('returns score=null + business_not_listed finding when Places API throws', async () => {
+    // 2026-06-05: previously all-sources-null returned empty findings. Now we
+    // surface a business_not_listed finding so FDE sees something actionable
+    // instead of a silent missing dimension. Other sources (Apify) are
+    // industry-gated so default industry=null → only GBP runs → null sources.
     mockGetBusinessReviews.mockRejectedValue(new Error('Places timeout'))
     const result = await new ReputationCollector(10).collect(CLIENT_ID, DOMAIN, KEYWORDS)
     expect(result.score).toBeNull()
-    expect(result.findings).toHaveLength(0)
+    expect(result.findings).toHaveLength(1)
+    expect(result.findings[0]!.finding_type).toBe('business_not_listed')
   })
 
   it('returns degraded result on timeout', async () => {
@@ -201,24 +206,38 @@ describe('scoreReputation() — pure function', () => {
     expect(score).toBeGreaterThanOrEqual(80)
   })
 
-  it('multi-source signals average their per-source scores', () => {
-    // When A2 lights up TripAdvisor data, both sources contribute equally.
-    // Sanity check: two identical sources should equal a single source.
-    const single = scoreReputation({ gbp: { rating: 4.5, reviewCount: 50 } })
+  it('multi-source signals average their per-source scores (tourism industry)', () => {
+    // Two identical sources should equal a single source when industry weights
+    // both — score is a weighted mean, identical inputs ⇒ identical output.
+    const single = scoreReputation({ gbp: { rating: 4.5, reviewCount: 50 } }, 'tourism')
     const double = scoreReputation({
       gbp: { rating: 4.5, reviewCount: 50 },
       tripadvisor: { rating: 4.5, reviewCount: 50 },
-    })
+    }, 'tourism')
     expect(double).toBe(single)
   })
 
-  it('multi-source signals lift the score when one source is stronger', () => {
-    const gbpOnly = scoreReputation({ gbp: { rating: 4.0, reviewCount: 5 } })
+  it('multi-source signals lift the score when one source is stronger (tourism industry)', () => {
+    // Pass industry='tourism' so TripAdvisor weight is non-zero. Without the
+    // industry tag, default weights treat TripAdvisor as weight=0 → no lift.
+    const gbpOnly = scoreReputation({ gbp: { rating: 4.0, reviewCount: 5 } }, 'tourism')
     const both = scoreReputation({
       gbp: { rating: 4.0, reviewCount: 5 },
       tripadvisor: { rating: 4.8, reviewCount: 200 },
-    })
+    }, 'tourism')
     expect(both).toBeGreaterThan(gbpOnly ?? 0)
+  })
+
+  it('default weights (no industry) include only gbp — TripAdvisor data ignored', () => {
+    // Verify the safe default: any business with unknown industry collapses to
+    // Google-only scoring even if TripAdvisor data is fetched. Prevents silent
+    // mis-scoring of industries we haven't classified yet.
+    const gbpOnly = scoreReputation({ gbp: { rating: 4.0, reviewCount: 5 } })
+    const withTripadvisor = scoreReputation({
+      gbp: { rating: 4.0, reviewCount: 5 },
+      tripadvisor: { rating: 4.8, reviewCount: 200 },
+    })
+    expect(withTripadvisor).toBe(gbpOnly)
   })
 
   it('review-count ceiling at exactly 30 reviews hits 100% review component', () => {
