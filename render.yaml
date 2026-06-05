@@ -69,6 +69,7 @@ services:
   # Vision Asset Intelligence analyzer — every 2 minutes
   # Picks up pending client_assets, runs GPT-4o-mini Vision, writes scores.
   # Reference: ROADMAP.md P21.B.3
+  # healthchecks.io: vision-analyzer (1b1cd19b-583a-41ac-baaa-c9415241d5e8)
   - type: cron
     name: vision-analyzer
     env: node
@@ -76,12 +77,14 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -X POST -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/vision-analyzer
+        https://app.magicengine.com.au/api/cron/vision-analyzer \
+        && curl -fsS "https://hc-ping.com/1b1cd19b-583a-41ac-baaa-c9415241d5e8" || true
     envVars:
       - key: CRON_SECRET
         sync: false
 
   # Poll visual generation jobs every 2 minutes
+  # healthchecks.io: poll-visual-jobs (0dd2b641-499f-4f2f-8b73-73085050a5f0)
   - type: cron
     name: poll-visual-jobs
     env: node
@@ -89,7 +92,8 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/poll-visual-jobs
+        https://app.magicengine.com.au/api/cron/poll-visual-jobs \
+        && curl -fsS "https://hc-ping.com/0dd2b641-499f-4f2f-8b73-73085050a5f0" || true
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -101,6 +105,7 @@ services:
   #   - Watchdog: Detect and log failed jobs (status='failed' with error_message)
   #   - Recovery: Resume pending jobs stuck > 1 hour
   # Reference: ROADMAP.md P8.0.5.6
+  # healthchecks.io: site-audit-cron (8451084d-23c0-44b0-af00-8e29ff80fcdc)
   - type: cron
     name: site-audit-cron
     env: node
@@ -108,7 +113,8 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -X POST -H "x-cron-secret: $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/site-audit-jobs
+        https://app.magicengine.com.au/api/cron/site-audit-jobs \
+        && curl -fsS "https://hc-ping.com/8451084d-23c0-44b0-af00-8e29ff80fcdc" || true
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -116,6 +122,7 @@ services:
   # Flywheel attribution job — every 6 hours
   # Computes baseline/after/verdict for every flywheel_action with an expected_metric.
   # Reference: ROADMAP.md P12.A.9
+  # healthchecks.io: attribution-cron (87926446-35cf-4e5b-a868-bb784c27ee5f)
   - type: cron
     name: attribution-cron
     env: node
@@ -123,7 +130,8 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -X POST -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/attribution
+        https://app.magicengine.com.au/api/cron/attribution \
+        && curl -fsS "https://hc-ping.com/87926446-35cf-4e5b-a868-bb784c27ee5f" || true
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -132,6 +140,7 @@ services:
   # Marks stuck pending/running discovery jobs (>10 min) as failed.
   # The status route's stale check is reactive (UI-poll driven), so jobs
   # whose UI was closed mid-run would otherwise sit running forever.
+  # healthchecks.io: zhangqian-sweeper (071910fe-b9b7-435d-8b72-f141818eb03d)
   - type: cron
     name: zhangqian-sweeper
     env: node
@@ -139,7 +148,8 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/zhangqian-sweeper
+        https://app.magicengine.com.au/api/cron/zhangqian-sweeper \
+        && curl -fsS "https://hc-ping.com/071910fe-b9b7-435d-8b72-f141818eb03d" || true
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -149,6 +159,7 @@ services:
   # Background generation in /api/clients/[id]/blog is fire-and-forget;
   # if Render restarts mid-run, rows would otherwise sit generating forever.
   # Reference: ROADMAP.md P14.C.1
+  # healthchecks.io: blog-stuck-generating-sweeper (180d3e65-1910-4f8d-a778-409571d5fb46)
   - type: cron
     name: blog-stuck-generating-sweeper
     env: node
@@ -156,7 +167,8 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/blog-stuck-generating
+        https://app.magicengine.com.au/api/cron/blog-stuck-generating \
+        && curl -fsS "https://hc-ping.com/180d3e65-1910-4f8d-a778-409571d5fb46" || true
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -166,6 +178,7 @@ services:
   # --max-time 30: route returns 202 immediately (fire-and-forget), so 30s is
   # plenty. Avoids Cloudflare 524 timeout that killed previous sync runs.
   # Reference: ROADMAP.md P7.4.13
+  # healthchecks.io: ai-tracker-weekly (c4f101fe-c2cf-47f9-807f-08ea09d43934)
   - type: cron
     name: ai-tracker-weekly
     env: node
@@ -173,7 +186,8 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s --max-time 30 -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/ai-tracker-weekly
+        https://app.magicengine.com.au/api/cron/ai-tracker-weekly \
+        && curl -fsS "https://hc-ping.com/c4f101fe-c2cf-47f9-807f-08ea09d43934" || true
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -184,6 +198,7 @@ services:
   # PM decision 2026-06-04: daily (not weekly) — only daily granularity captures
   # brand churn within the week. Cost ~$0.06/day for 10 seed questions.
   # Migration 20260622000003 enabled daily UNIQUE constraint.
+  # healthchecks.io: industry-ai-visibility-daily (1400fe83-cc62-4634-9f7e-a2345553beee)
   - type: cron
     name: industry-ai-visibility-daily
     env: node
@@ -191,7 +206,8 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/ai-visibility-weekly
+        https://app.magicengine.com.au/api/cron/ai-visibility-weekly \
+        && curl -fsS "https://hc-ping.com/1400fe83-cc62-4634-9f7e-a2345553beee" || true
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -200,6 +216,7 @@ services:
   # Daily 03:00 UTC (~15:00 NZST), runs AFTER industry-ai-visibility-daily (02:30 UTC)
   # so ai_visibility_score Goals read today's snapshots (not yesterday's).
   # Spec: docs/superpowers/specs/2026-06-04-a21-stepc-design-v3.md (v3.1)
+  # healthchecks.io: goal-current-value-refresh (300bb7f9-8a16-4a72-b9eb-a924dc76efa8)
   - type: cron
     name: goal-current-value-refresh
     env: node
@@ -207,7 +224,8 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/goal-current-value-refresh
+        https://app.magicengine.com.au/api/cron/goal-current-value-refresh \
+        && curl -fsS "https://hc-ping.com/300bb7f9-8a16-4a72-b9eb-a924dc76efa8" || true
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -215,6 +233,7 @@ services:
   # Weekly SEO keyword snapshots — every Monday at 2am UTC (~2pm NZST)
   # Stores DataForSEO ranked keyword rows for SEO Intelligence trends.
   # Reference: ROADMAP.md P12.I.8
+  # healthchecks.io: keyword-snapshots-weekly (db156874-3c69-4b5a-b534-a6bbea63a467)
   - type: cron
     name: keyword-snapshots-weekly
     env: node
@@ -222,7 +241,8 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/keyword-snapshots-weekly
+        https://app.magicengine.com.au/api/cron/keyword-snapshots-weekly \
+        && curl -fsS "https://hc-ping.com/db156874-3c69-4b5a-b534-a6bbea63a467" || true
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -230,6 +250,7 @@ services:
   # Daily social engagement pullback — every day at 4am UTC
   # Pulls Publer post likes/comments/shares into flywheel_metrics.
   # Reference: ROADMAP.md P12.C.3
+  # healthchecks.io: social-engagement-pullback (01c469cc-4e77-4e88-bba4-7f17cbec91bc)
   - type: cron
     name: social-engagement-pullback
     env: node
@@ -237,7 +258,8 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/social-engagement-pullback
+        https://app.magicengine.com.au/api/cron/social-engagement-pullback \
+        && curl -fsS "https://hc-ping.com/01c469cc-4e77-4e88-bba4-7f17cbec91bc" || true
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -245,6 +267,7 @@ services:
   # Daily Google data pullback — every day at 3am UTC (~3pm NZST)
   # Syncs GSC + GA4 snapshots for all clients with connected Google connectors.
   # Reference: ROADMAP.md P17.A.4
+  # healthchecks.io: google-data-pullback-daily (12f3c5c4-4524-48b8-92c5-72fd2b775d01)
   - type: cron
     name: google-data-pullback-daily
     env: node
@@ -252,7 +275,8 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/google-data-pullback-daily
+        https://app.magicengine.com.au/api/cron/google-data-pullback-daily \
+        && curl -fsS "https://hc-ping.com/12f3c5c4-4524-48b8-92c5-72fd2b775d01" || true
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -261,6 +285,7 @@ services:
   # Re-runs priority analysis for all clients with confirmed discovery,
   # writes fresh recommendations to execution_items kanban.
   # Reference: ROADMAP.md P24.B
+  # healthchecks.io: zhuge-weekly-recalculate (a2c4d128-e09c-41eb-843e-98c9a0afecba)
   - type: cron
     name: zhuge-weekly-recalculate
     env: node
@@ -268,7 +293,8 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/zhuge-recalculate
+        https://app.magicengine.com.au/api/cron/zhuge-recalculate \
+        && curl -fsS "https://hc-ping.com/a2c4d128-e09c-41eb-843e-98c9a0afecba" || true
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -277,6 +303,7 @@ services:
   # Throttled queue drainer: picks up to 8 pending videos, runs Gemini analysis
   # sequentially with 5s delay between calls. Without this, viral-discovery would
   # burst 150+ concurrent Gemini calls and hit paid-tier TPM cap (1M tok/min).
+  # healthchecks.io: viral-analyzer-worker (55891cbc-cfd5-4c58-b28b-f06206fade5a)
   - type: cron
     name: viral-analyzer-worker
     env: node
@@ -284,7 +311,8 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -X POST -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/viral-analyzer-worker
+        https://app.magicengine.com.au/api/cron/viral-analyzer-worker \
+        && curl -fsS "https://hc-ping.com/55891cbc-cfd5-4c58-b28b-f06206fade5a" || true
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -293,6 +321,7 @@ services:
   # 8 industries × 6 keyword groups × limit 20 = up to ~960 videos/day.
   # Auto-deduplicates, inserts new rows, kicks off Gemini analysis.
   # Quota cost ~5,760 units/day (free tier = 10,000/day).
+  # healthchecks.io: viral-discovery-weekly (e5c6cbe8-e6cc-457f-bb3f-538971dafd46)
   - type: cron
     name: viral-discovery-weekly
     env: node
@@ -300,7 +329,8 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -X POST -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/viral-discovery-weekly
+        https://app.magicengine.com.au/api/cron/viral-discovery-weekly \
+        && curl -fsS "https://hc-ping.com/e5c6cbe8-e6cc-457f-bb3f-538971dafd46" || true
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -310,6 +340,7 @@ services:
   #   Step 1: AnomalyDetectorJob — scans flywheel_metrics, writes anomaly_signals
   #   Step 2: 诸葛亮 Proactive — reads fresh signals, creates proactive execution tasks
   # Reference: ROADMAP.md § Phase 22.D.3
+  # healthchecks.io: anomaly-detector-daily (ff78126a-25e2-4a50-abcb-edbcb1dfaec9)
   - type: cron
     name: anomaly-detector-daily
     env: node
@@ -317,7 +348,8 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://$RENDER_EXTERNAL_URL/api/cron/anomaly-detector
+        https://$RENDER_EXTERNAL_URL/api/cron/anomaly-detector \
+        && curl -fsS "https://hc-ping.com/ff78126a-25e2-4a50-abcb-edbcb1dfaec9" || true
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -329,6 +361,7 @@ services:
 
   # Daily cron health digest — every day at 6am UTC (~6pm NZST)
   # Queries cron_run_logs for the past 24h; sends Resend email only if failures found.
+  # healthchecks.io: daily-cron-digest (10c101e8-05a0-4026-9531-39edddd7c74d)
   - type: cron
     name: daily-cron-digest
     env: node
@@ -336,7 +369,8 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/daily-cron-digest
+        https://app.magicengine.com.au/api/cron/daily-cron-digest \
+        && curl -fsS "https://hc-ping.com/10c101e8-05a0-4026-9531-39edddd7c74d" || true
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -347,6 +381,7 @@ services:
   #   the SEO kanban column via 诸葛亮's persister (source='zhuge').
   #   Runs after google-data-pullback-daily (3am) so data is fresh.
   # Reference: ROADMAP.md § Phase 22.E · docs/seo-sop-implementation-design.md
+  # healthchecks.io: seo-patrol-daily (db58fff5-fd32-45e0-a7fd-b067bede6689)
   - type: cron
     name: seo-patrol-daily
     env: node
@@ -354,7 +389,8 @@ services:
     buildCommand: ""
     startCommand: |
       curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://$RENDER_EXTERNAL_URL/api/cron/seo-patrol-daily
+        https://$RENDER_EXTERNAL_URL/api/cron/seo-patrol-daily \
+        && curl -fsS "https://hc-ping.com/db58fff5-fd32-45e0-a7fd-b067bede6689" || true
     envVars:
       - key: CRON_SECRET
         sync: false
