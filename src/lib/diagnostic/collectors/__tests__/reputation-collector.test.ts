@@ -4,12 +4,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // Mocks — vi.hoisted ensures variables are available at factory time
 // ---------------------------------------------------------------------------
 
-const { mockGetBusinessReviews } = vi.hoisted(() => ({
+const { mockGetBusinessReviews, mockScrapeProductReview, mockScrapeTripadvisor } = vi.hoisted(() => ({
   mockGetBusinessReviews: vi.fn(),
+  mockScrapeProductReview: vi.fn(),
+  mockScrapeTripadvisor: vi.fn(),
 }))
 
 vi.mock('@/lib/places/client', () => ({
   getBusinessReviews: mockGetBusinessReviews,
+}))
+
+vi.mock('@/lib/apify/productreview-scraper', () => ({
+  scrapeProductReviewBusiness: mockScrapeProductReview,
+}))
+
+vi.mock('@/lib/apify/tripadvisor-scraper', () => ({
+  scrapeTripadvisorBusiness: mockScrapeTripadvisor,
 }))
 
 // ---------------------------------------------------------------------------
@@ -501,4 +511,87 @@ describe('ReputationCollector.collect() — off-platform reviews hint', () => {
     const { findings } = await new ReputationCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS)
     expect(findings.find(x => x.finding_type === 'reviews_likely_off_platform')).toBeUndefined()
   })
+})
+
+// ---------------------------------------------------------------------------
+// 2026-06-06 hotfix — per-source timeouts (Oztop regression repro)
+//
+// Past incident: PR #390 wired ProductReview into the building bucket and
+// when the Apify actor hung, the outer 30 s collector timeout killed every-
+// thing including a healthy GBP, leaving Oztop with score=null and 0
+// findings (DB confirmed: run 79991401-... 2026-06-05 15:29 UTC).
+//
+// With per-source timeouts a hung industry source now resolves to null
+// while GBP still lands and produces a score. These tests pin that
+// invariant.
+// ---------------------------------------------------------------------------
+
+describe('ReputationCollector — per-source timeouts (2026-06-06)', () => {
+  it('Oztop regression: GBP healthy + ProductReview hangs → score uses GBP only', async () => {
+    // industry='flooring' resolves to 'building' bucket
+    // (gbp 0.50 + productReview 0.50).
+    mockGetBusinessReviews.mockResolvedValue({
+      placeId: 'oztop-gbp',
+      name: 'Oztop',
+      rating: 4.0,
+      totalReviews: 30,
+    })
+    // ProductReview hangs forever — would have nuked the whole dimension
+    // under PR #390. The withTimeout wrapper should cap it at 20 s and
+    // leave GBP standing.
+    mockScrapeProductReview.mockReturnValue(new Promise(() => {}))
+
+    // Use a short hard cap on the collector itself so the test runs fast;
+    // the per-source timeouts inside fetchAllSources are independent of
+    // this outer cap.
+    const result = await new ReputationCollector(25_000).collect(CLIENT_ID, DOMAIN, KEYWORDS, {
+      businessName: 'Oztop',
+      city: 'Brisbane',
+      country: 'AU',
+      industry: 'flooring',
+    })
+
+    // The withTimeout helper resolves the hung scraper to null at 20 s.
+    // After that, scoreReputation re-normalises {gbp only} → ~78
+    // (rating 4.0 + 30 reviews capped). Just assert "not null and in band".
+    expect(result.score).not.toBeNull()
+    expect(result.score!).toBeGreaterThanOrEqual(70)
+    expect(result.score!).toBeLessThanOrEqual(85)
+  }, 30_000) // vitest test-level timeout slightly above the 20 s source cap
+
+  it('Hung tripadvisor in tourism bucket does not block GBP', async () => {
+    mockGetBusinessReviews.mockResolvedValue({
+      placeId: 'cts-gbp',
+      name: 'CTS Tours NZ',
+      rating: 4.0,
+      totalReviews: 5,
+    })
+    mockScrapeTripadvisor.mockReturnValue(new Promise(() => {}))
+
+    const result = await new ReputationCollector(25_000).collect(CLIENT_ID, DOMAIN, KEYWORDS, {
+      businessName: 'CTS Tours NZ',
+      city: 'Auckland',
+      country: 'NZ',
+      industry: 'travel',
+    })
+
+    expect(result.score).not.toBeNull()
+    // GBP at 4.0 / 5 reviews scores in the 50–65 band (matches A1 regression test).
+    expect(result.score!).toBeGreaterThanOrEqual(50)
+    expect(result.score!).toBeLessThanOrEqual(65)
+  }, 30_000)
+
+  it('Hung GBP eventually resolves to null without blocking the collector forever', async () => {
+    // GBP itself can hang. The withTimeout wrapper caps it at 10 s and
+    // the rest of the collector still runs — in this case no industry
+    // sources are configured so we end up with all-null + business_not_listed.
+    mockGetBusinessReviews.mockReturnValue(new Promise(() => {}))
+
+    const result = await new ReputationCollector(15_000).collect(CLIENT_ID, DOMAIN, KEYWORDS)
+    expect(result.score).toBeNull()
+    // With no industry, only GBP attempted → business_not_listed (not
+    // review_lookup_failed). This regression-locks the dispatch logic.
+    expect(result.findings).toHaveLength(1)
+    expect(result.findings[0]!.finding_type).toBe('business_not_listed')
+  }, 20_000)
 })

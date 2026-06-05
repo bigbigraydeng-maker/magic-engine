@@ -8,6 +8,36 @@ import { makeEvidence, evidenceSource } from '../types'
 import { MAX_COLLECTOR_TIMEOUT_MS } from '../constants'
 
 // ---------------------------------------------------------------------------
+// Per-source timeout helper (2026-06-06 hotfix)
+//
+// Wraps a per-source fetch promise in a race against a setTimeout. If the
+// fetch resolves first the timer is cleared and the value is returned. If
+// the timer fires first the wrapped promise resolves to null and logs a
+// warning so production debug doesn't lose the signal that we cut someone
+// off. This is intentional: silent timeouts would re-create the very
+// "where did the data go" problem PR #390 was trying to fix.
+// ---------------------------------------------------------------------------
+
+async function withTimeout<T>(
+  promise: Promise<T | null>,
+  timeoutMs: number,
+  label: string,
+): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeoutPromise = new Promise<null>(resolve => {
+    timer = setTimeout(() => {
+      console.warn(`[reputation-collector] ${label} fetch timed out after ${timeoutMs}ms`)
+      resolve(null)
+    }, timeoutMs)
+  })
+  try {
+    return await Promise.race([promise, timeoutPromise])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Scoring constants (A1 reputation formula — 2026-06-02)
 //
 // Why these values:
@@ -364,16 +394,22 @@ export class ReputationCollector {
 
   /**
    * Parallel-fetch all relevant reputation sources for the given industry.
-   * Each fetcher catches its own errors and returns null on failure so a
-   * single platform outage doesn't tank the whole dimension.
    *
-   * Sources with weight 0 in the industry table are skipped entirely
-   * (no Apify call made) — saves credits and reduces latency.
+   * Each fetcher gets its OWN timeout (Promise.race against a sleep) so a
+   * slow Apify scraper never drags the whole dimension to null. Critical
+   * invariant: GBP must NEVER be blocked by Apify — losing GBP loses the
+   * core score, which is far worse than losing one industry source.
    *
-   * NB to apify-actor agents:
-   *   - Add a new private async fetch<Source>() method below.
-   *   - Wire it into the Promise.all here, gated by industry weight.
-   *   - Stage-3 integration (Claude) will run after all 5 fetchers exist.
+   * Past incident (2026-06-05, Oztop): when ProductReview hung past 30 s,
+   * the collector's outer 30 s race killed everything including a healthy
+   * GBP result, returning {score: null, findings: []}. With per-source
+   * timeouts, GBP at ~3 s lands well inside its 10 s budget while
+   * ProductReview is killed at 20 s — and the score still computes.
+   *
+   * Why allSettled instead of all: a rejection from any branch would
+   * abort the whole batch. allSettled treats each branch as independent
+   * outcome which is what we want here. Per-fetcher try/catch is still
+   * the primary defence; allSettled is the belt to the suspenders.
    */
   private async fetchAllSources(
     query: string,
@@ -384,17 +420,45 @@ export class ReputationCollector {
       ? INDUSTRY_REPUTATION_WEIGHTS[industry]
       : DEFAULT_INDUSTRY_WEIGHTS
 
-    // Always fetch GBP — it's the dimension's discoverability check too.
-    // Other sources only fetched if industry weights them above zero.
-    const [gbp, tripadvisor, productReview, booking, hipages] = await Promise.all([
-      this.fetchGbp(query),
-      (weights.tripadvisor ?? 0) > 0 ? this.fetchTripadvisor(query) : Promise.resolve(null),
-      (weights.productReview ?? 0) > 0 ? this.fetchProductReview(query) : Promise.resolve(null),
-      (weights.booking ?? 0) > 0 ? this.fetchBooking(query) : Promise.resolve(null),
-      (weights.hipages ?? 0) > 0 ? this.fetchHipages(query) : Promise.resolve(null),
+    // Per-source timeouts (ms). GBP gets the tightest budget — it's
+    // canonically a 1–3 s Google Places call, 10 s is generous. Apify
+    // scrapers get 20 s each; the underlying actors are configured with
+    // a 60 s actor-level timeout but if they exceed 20 s on the client
+    // side we'd rather lose that one source than the whole dimension.
+    const GBP_TIMEOUT_MS = 10_000
+    const APIFY_TIMEOUT_MS = 20_000
+
+    // Each branch is wrapped in withTimeout(...) so a hung fetcher races
+    // against its own deadline, not the collector's outer timeout.
+    const settled = await Promise.allSettled([
+      withTimeout(this.fetchGbp(query), GBP_TIMEOUT_MS, 'gbp'),
+      (weights.tripadvisor ?? 0) > 0
+        ? withTimeout(this.fetchTripadvisor(query), APIFY_TIMEOUT_MS, 'tripadvisor')
+        : Promise.resolve(null),
+      (weights.productReview ?? 0) > 0
+        ? withTimeout(this.fetchProductReview(query), APIFY_TIMEOUT_MS, 'productReview')
+        : Promise.resolve(null),
+      (weights.booking ?? 0) > 0
+        ? withTimeout(this.fetchBooking(query), APIFY_TIMEOUT_MS, 'booking')
+        : Promise.resolve(null),
+      (weights.hipages ?? 0) > 0
+        ? withTimeout(this.fetchHipages(query), APIFY_TIMEOUT_MS, 'hipages')
+        : Promise.resolve(null),
     ])
 
-    return { gbp, tripadvisor, productReview, booking, hipages }
+    // Unpack allSettled — any rejection becomes null (already logged inside
+    // withTimeout or the per-fetcher try/catch).
+    const unpack = (i: number): ReputationSourceSignal | null => {
+      const r = settled[i]
+      return r && r.status === 'fulfilled' ? r.value : null
+    }
+    return {
+      gbp: unpack(0),
+      tripadvisor: unpack(1),
+      productReview: unpack(2),
+      booking: unpack(3),
+      hipages: unpack(4),
+    }
   }
 
   /** GBP via existing Google Places API path. Unchanged from pre-2026-06-05. */
