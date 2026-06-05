@@ -293,6 +293,8 @@ flooring · spc · vinyl floor · pet floor · spc floor
 
 唯一 P1 排名是品牌词 `oztop building supplies`。其他全部 0→1。
 
+**`Page-1 词数 0` 的解释**：这个数字来自 `keyword_snapshots` 表（DataForSEO 追踪的非品牌 SEO 机会词），不含品牌词。品牌词 `oztop building supplies` 虽然 GSC 显示 P1，但未纳入 DataForSEO 追踪集（追踪它没意义，本来就是品牌词），所以这里不计入。看板列头的"Page-1 词数 = 0" = "Oztop 没有任何非品牌 SEO 机会词进入 Google P1"。
+
 ## 10. 每日 SOP（AEST 上午开工 30 分钟）
 
 🔗 https://app.magicengine.com.au/dashboard/clients/d5c98811-1c1d-4ded-bdf0-4cefec6afb84/execution
@@ -310,12 +312,12 @@ flooring · spc · vinyl floor · pet floor · spc floor
 `seo-patrol-daily` 每天 4am UTC（AEST 2pm）跑，对 Oztop keyword_snapshots 自动诊断 5 规则：
 
 - **R1 低 CTR 标题**：排名 P2-P3 但 CTR < 基准 60% → 推 `seo.refresh_blog`
-- **R2 缺内链**：页面有曝光但无内链导流 → 推 `seo.refresh_blog`
+- **R2 缺内链**：页面有曝光但无内链导流 → 推 `seo.refresh_blog`（🚧 当前版本不触发 — 数据采集 site-crawl 链接图待建）
 - **R3 内容老化**：排名近 30 天下滑 > 3 位 → 推 `seo.refresh_blog`
 - **R4 机会词**：高量低 KD 未覆盖词 → 推 `seo.publish_blog`
-- **R5 未收录**：GSC "discovered not indexed" > 7 天 → 推 `seo.refresh_blog`
+- **R5 未收录**：GSC "discovered not indexed" > 7 天 → 推 `seo.refresh_blog`（🚧 当前版本不触发 — GSC Index Coverage API 接入待建）
 
-每客户每天最多 3 条 actions。
+每客户每天最多 3 条 actions。**当前实际生效的是 R1 / R3 / R4 三条**，R2/R5 在数据采集到位前不触发。
 
 ### 10.3 点开 SEO action 卡片看 S9 预期影响
 
@@ -346,22 +348,23 @@ N < 5 clicks/月 → 可考虑跳过。
 
 ## 11. 每周 SOP（每周一上午 1 小时）
 
-等 `keyword-snapshots-weekly` cron 跑完（周一 2am UTC = AEST 12pm 周一），看 ME 后台 SEO Intelligence：
+等 `keyword-snapshots-weekly` cron 跑完（周一 2am UTC = AEST 12pm 周一），看 ME 后台 SEO Intelligence（**单页滚动布局，向下依次看 4 个 section**）：
 
 - **Rankings**：当前 keyword 排名 + 周变化
 - **Page Health**：各页面 GSC 表现 7 天 delta
 - **Position Changes**：哪些词周环比进了 P30 / P50
-- **Keyword Gap**：竞品（Carpet Court / FloorWorld / theflooringguys）有 Oztop 没的真实机会词
+- **竞品对比 + 关键词缺口**：竞品（Carpet Court / FloorWorld / theflooringguys）有 Oztop 没的真实机会词
 
 ### 11.1 周决策
 
-- 看 Page Health → 选 1 个 7d 点击下跌 > 20% 的 WP page 做"救援"
-- 看 Keyword Gap → 从 13 个真实 keyword_seeds 维度选 1 个写新 WP post（**必须**走 DataForSEO 真实 search_volume + KD，**禁止凭空**）
+- 看 Page Health → 选 1 个 7d 点击下跌 > 20% 的 WP page 做"救援"（在执行看板右上角点击 **`+ 手动录入`** → 填 title / description / dimension=`seo` / fix_type=`fde_manual`）
+- 看"竞品对比 + 关键词缺口" → 从 13 个真实 keyword_seeds 维度选 1 个写新 WP post（同上方式手动录入 + steps_json 里必须走 DataForSEO 真实 search_volume + KD，**禁止凭空**）
 
 ## 12. 每月 SOP
 
 - AI 可见度审查（看 `ai_visibility_snapshots` 表）
 - Industry Baseline 复查（AU flooring / building supplies 行业）
+  - **当前需 PM 手动触发**：`baseline-domains-monthly` endpoint 尚未在 render.yaml 注册自动调度
 - 月度 review 文档 `clients/oztop/monthly-review-YYYY-MM.md`
 
 ## 13. 应急 SOP

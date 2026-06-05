@@ -80,12 +80,12 @@ CTS Tours NZ 是 **outbound** 业务：把**新西兰 Kiwi 游客送到中国旅
 
 `seo-patrol-daily` 每天 4am UTC（NZST 4pm）跑，对 CTS keyword_snapshots 自动诊断 5 条规则：
 - **R1 低 CTR 标题**：排名 P2-P3 但 CTR < 基准 60% → 推 `seo.refresh_blog` action
-- **R2 缺内链**：页面有曝光但无内链导流 → 推 `seo.refresh_blog`
+- **R2 缺内链**：页面有曝光但无内链导流 → 推 `seo.refresh_blog`（🚧 当前版本不触发 — 数据采集 site-crawl 链接图待建，见 `src/lib/seo-patrol/job.ts` 第 15-18 行）
 - **R3 内容老化**：排名近 30 天下滑 > 3 位 → 推 `seo.refresh_blog`
 - **R4 机会词**：高量低 KD 未覆盖词 → 推 `seo.publish_blog`
-- **R5 未收录**：GSC "discovered not indexed" > 7 天 → 推 `seo.refresh_blog`
+- **R5 未收录**：GSC "discovered not indexed" > 7 天 → 推 `seo.refresh_blog`（🚧 当前版本不触发 — GSC Index Coverage API 接入待建）
 
-最多 3 条 actions / 客户 / 天。
+最多 3 条 actions / 客户 / 天。**当前实际生效的是 R1 / R3 / R4 三条**，R2/R5 在数据采集到位前永远不触发，FDE 不要等它推 actions。
 
 ### 1.3 点开 SEO action 卡片看 S9 预期影响（Phase 22.E.S9）
 
@@ -134,19 +134,19 @@ FDE 看到这个数字立刻知道"做这条值不值"。如果 N < 5 clicks/月
 
 🔗 https://app.magicengine.com.au/dashboard/clients/c0000000-0000-0000-0000-000000000000/seo-intelligence
 
-四个关键视图：
+页面是单页滚动布局（**不是 tab 切换**）。FDE 向下滚动依次看到 4 个 section：
 
-| 视图 | 看什么 |
+| section（按页面顺序）| 看什么 |
 |------|-------|
 | **Rankings** | 当前 keyword 排名 + 周变化（新 / 进步 / 退步 / 掉出）|
 | **Page Health** | 各页面 GSC 表现 7 天 delta（点击/曝光涨跌）|
 | **Position Changes** | 哪些词周环比进了 P30 / P50 |
-| **Keyword Gap** | 竞品有 CTS 没的真实机会词（按 13 个真实 keyword_seeds 维度查 DataForSEO）|
+| **竞品对比 + 关键词缺口** | 竞品有 CTS 没的真实机会词（按 15 个真实 keyword_seeds 维度查 DataForSEO）|
 
 ### 2.3 周决策
 
-- 看 Page Health → 选 1 个 7d 点击下跌 > 20% 的页面做"救援"（FDE 手动 fde_manual action 进看板）
-- 看 Keyword Gap → 从竞品有 CTS 没的词里选 1 个高搜索量低 KD 的开新博客（FDE 手动 action 进看板 + 在 metadata 里填真实 keyword + search_volume + KD）
+- 看 Page Health → 选 1 个 7d 点击下跌 > 20% 的页面做"救援"（在执行看板右上角点击 **`+ 手动录入`** → 填 title / description / dimension=`seo` / fix_type=`fde_manual`）
+- 看"竞品对比 + 关键词缺口" → 从竞品有 CTS 没的词里选 1 个高搜索量低 KD 的开新博客（同上方式手动录入 + steps_json 里填真实 keyword + search_volume + KD）
 
 ---
 
@@ -162,10 +162,12 @@ FDE 看到这个数字立刻知道"做这条值不值"。如果 N < 5 clicks/月
 
 ### 3.2 Industry Baseline 复查（Phase 30）
 
-`baseline-domains-monthly` cron 每月 1 号跑，刷新 NZ outbound travel 行业基准：
+`baseline-domains-monthly` endpoint 刷新 NZ outbound travel 行业基准（**当前需 PM 手动触发，render.yaml 尚未注册自动调度**）：
 
 - CTS 当前在行业基准里的位置（百分位 P50/P75/P90）
 - vs 竞品 Trip A Deal / APT / Wendy Wu 的差距
+
+PM 月初联系子牙在 Render 手动触发一次，或等 render.yaml 注册后自动跑。
 
 ### 3.3 月度 review 文档
 
@@ -180,14 +182,13 @@ FDE 在 `clients/cts/monthly-review-YYYY-MM.md` 记录：
 
 ### 4.1 cron 失败（Render 触发）
 
-如果 `seo-patrol-daily` 跑失败：
+如果 `seo-patrol-daily` 跑失败（看板今日没出现新 SEO action）：
 
-```bash
-curl -H "Authorization: Bearer $CRON_SECRET" \
-  https://app.magicengine.com.au/api/cron/seo-patrol-daily
-```
+1. **联系 PM 或子牙** → PM 在 Render Dashboard → Cron Jobs → `seo-patrol-daily` 手动 Trigger Run
+2. 如果不急迫 → 等下个调度（24 小时内）自动重试
+3. PM 查 Supabase logs 看具体错误。常见：DataForSEO API 429 → 自动 5 分钟后重试。
 
-查 Supabase logs 看具体错误。常见：DataForSEO API 429 → 等 5 分钟重试。
+**⚠️ 安全注意**：`CRON_SECRET` 是服务器机密，FDE 不应持有也不应在文档/聊天里出现。所有 cron 触发由 PM 在 Render 后台完成。
 
 ### 4.2 GSC 收录卡住
 
