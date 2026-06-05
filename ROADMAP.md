@@ -277,8 +277,10 @@ FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Mar
 - [x] **P34.5** `vendor-filter.ts` 封装名过滤 + `mcp_access_log` 限流/审计 + 客户接入 SOP ✅ **2026-06-05**：`vendor-filter.ts`（递归 scrub OpenAI→Content Engine / SEMrush→Keyword Intelligence 等，runScoped 返回前兜底）+ `rate-limit.ts`（mcp_access_log 滑动窗 60/min，跨实例安全，错误 fail-open）+ `docs/sops/mcp-client-access-setup.md`（FDE 签发 + 客户 Claude Desktop mcp-remote 接入 + 故障排查 + CF e2e SOP）。19 新测试（vendor 14 + rate-limit 5），MCP 全套 91 测试通过 + build ✓
 
 > 二期 backlog：GA4/AI 可见度/content 三个 tool、网页版 OAuth 薄层、计费接入（`mcp_access_log` 已预留聚合源）、独立 service 拆分（触发线见设计文档 §2.2）、可执行 MCP（V2 路线，设计文档 §12）。
+>
+> **⭐ 二期主推方向（2026-06-05 PM 确立）——「连接你的 AI 商业助手」推广**：把已做好的 MCP 包装成卖点对外推。目标用户 = **FDE 客户 + MTC 客户**，通过 **Claude Code / Codex / Claude Desktop** 接入（均原生支持 remote MCP + API Key，**无需 OAuth** —— 目标人群是技术型/进阶用户，钥匙接入零门槛）。兑现「在 AU/NZ 最懂你的 AI 商业助手」定位：客户 AI 接上 ME 真实数据 → 从通用 AI 变成懂你生意的助手。接入 SOP 已写 `docs/sops/mcp-ai-assistant-connect.md`（Claude Code `claude mcp add --transport http` / Codex `codex mcp add --url --bearer-token-env-var` / Desktop mcp-remote）。**二期任务**：① Dashboard/营销页加「连接你的 AI 助手」入口 + 客户自助拿钥匙引导；② MTC 计费分层（FDE 赠送 / MTC 客户按调用消耗，复用 `mcp_access_log`）；③ OAuth 一键接入**仅当**出现大量非技术普通客户走 claude.ai 网页版时再做，且走「接第三方 OAuth 服务」路径（不自建），开工前先 spike。
 
-**Phase 34 状态：✅ P34.0–P34.5 全部完成 2026-06-05（客户的 Claude 能凭 Key 只读查询自己数据，强隔离 + 限流 + 封装名过滤 + 接入 SOP）。代码层 91 单测 + build 全过。⏳ 真实数据 HTTP e2e 待 CF 预览跑（本 dev 容器受 Supabase network allowlist 限制连不上数据 API）+ 魏征/子牙最终审 → 等 PM `go merge`。**
+**Phase 34 状态：✅ 全部完成并已 merge 到 main 2026-06-05（PR #369 squash）。真实生产 e2e 通过 —— CTS 在 Claude Desktop 实测 `me_get_overview`/`me_list_goals`/`me_get_seo_performance` 三工具全部成功落库（mcp_access_log），数据三方吻合（体检分 38 / 博客 2 / 社媒 3 = 狄仁杰数据层查值）；跨客户隔离亲验（CTS 钥匙查 Oztop 返回空 = 隔离生效）。代码层 92 单测 + build 全过，魏征×2 + 子牙 + 狄仁杰 + Codex 审过。→ 下一步见上方「⭐ 二期主推方向」。**
 
 ---
 
