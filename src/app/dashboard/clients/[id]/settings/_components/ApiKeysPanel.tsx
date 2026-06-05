@@ -9,7 +9,7 @@
  * the client must be re-issued a new key.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 interface Props {
   clientId: string
@@ -49,6 +49,12 @@ export function ApiKeysPanel({ clientId }: Props) {
   const [copied,      setCopied]      = useState(false)
   const [revokingId,  setRevokingId]  = useState<string | null>(null)
   const [revokeErr,   setRevokeErr]   = useState<string | null>(null)
+  // useRef sync dedupe (魏征 R1): useState `issuing` doesn't update until the
+  // next render — React 18 concurrent mode + back-to-back clicks (or touch +
+  // click during hydration) can fire two POSTs before disabled kicks in.
+  // The ref is checked/set synchronously on the FIRST line of handleIssue.
+  const issuingRef                    = useRef(false)
+  const revokingIdRef                 = useRef<string | null>(null)
 
   const load = useCallback(async () => {
     setState({ phase: 'loading' })
@@ -68,8 +74,11 @@ export function ApiKeysPanel({ clientId }: Props) {
   useEffect(() => { load() }, [load])
 
   const handleIssue = async () => {
+    // Synchronous gate — must be first, before any await or setState.
+    if (issuingRef.current) return
     const name = nameDraft.trim()
     if (!name) return
+    issuingRef.current = true
     setIssuing(true)
     setIssueErr(null)
     try {
@@ -89,11 +98,14 @@ export function ApiKeysPanel({ clientId }: Props) {
     } catch (err) {
       setIssueErr(err instanceof Error ? err.message : String(err))
     } finally {
+      issuingRef.current = false
       setIssuing(false)
     }
   }
 
   const handleRevoke = async (row: ApiKeyRow) => {
+    if (revokingIdRef.current === row.id) return
+    revokingIdRef.current = row.id
     if (!confirm(
       `吊销 "${row.name}" (${row.key_prefix}…) 后，客户的 Claude 将立即断连，不可恢复。\n\n确定吊销？`,
     )) return
@@ -111,6 +123,7 @@ export function ApiKeysPanel({ clientId }: Props) {
     } catch (err) {
       setRevokeErr(err instanceof Error ? err.message : String(err))
     } finally {
+      revokingIdRef.current = null
       setRevokingId(null)
     }
   }
@@ -126,8 +139,9 @@ export function ApiKeysPanel({ clientId }: Props) {
       await navigator.clipboard.writeText(reveal.plaintext)
       setCopied(true)
     } catch {
-      // clipboard API may fail in non-secure contexts; the textarea below
-      // still lets FDE select-copy manually.
+      // Non-secure context or browser denied clipboard access. Don't pretend
+      // it worked — tell the FDE to copy from the textarea manually.
+      setIssueErr('剪贴板访问被浏览器拒绝，请手动选中文本框复制 Key')
     }
   }
 
@@ -140,6 +154,16 @@ export function ApiKeysPanel({ clientId }: Props) {
   }
 
   if (state.phase === 'error') {
+    // 403 = client-viewer trying to read admin-only resource. Graceful
+    // degrade with explanation rather than scary red box.
+    if (state.message.includes('403') || state.message.toLowerCase().includes('forbidden')) {
+      return (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-sm font-bold text-slate-600">仅 Admin/FDE 可管理 MCP Key</p>
+          <p className="mt-1 text-xs text-slate-500">如需为该客户签发 API Key，请联系项目 Admin。</p>
+        </div>
+      )
+    }
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-4">
         <p className="text-sm font-bold text-red-700">加载失败</p>
@@ -281,7 +305,7 @@ export function ApiKeysPanel({ clientId }: Props) {
       )}
 
       <p className="mt-4 border-t border-slate-100 pt-3 text-xs text-slate-400">
-        客户用此 Key 在自己的 Claude 里只读查询本客户数据（排名/目标/执行进度/内容交付）。Key 只签发给本客户，不能查看其他客户的数据。
+        客户用此 Key 在 MCP 兼容客户端（如 Claude Desktop）里只读查询本客户数据（排名/目标/执行进度/内容交付）。Key 只签发给本客户，不能查看其他客户的数据。
       </p>
     </div>
   )
