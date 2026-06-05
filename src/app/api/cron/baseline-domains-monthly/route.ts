@@ -106,7 +106,10 @@ async function runCollection(triggeredBy: 'cron' | 'admin_manual', existingRunId
       return NextResponse.json({ error: loadError.message }, { status: 500 })
     }
 
-    const domains = (rows ?? []) as DomainRow[]
+    const NON_COMMERCIAL_RE = /\.(govt|gov|org|edu|ac)\.|\.govt$|\.gov$|\.org$|\.edu$|\.ac$/i
+    const domains = ((rows ?? []) as DomainRow[]).filter(
+      r => !NON_COMMERCIAL_RE.test(r.domain)
+    )
     if (domains.length === 0) {
       await finalizeRun(runId!, {
         status: 'completed',
