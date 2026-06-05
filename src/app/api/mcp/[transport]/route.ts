@@ -12,8 +12,9 @@
  *
  * Client endpoint: POST /api/mcp/mcp  (basePath /api/mcp + streamable /mcp).
  *
- * Real client-data tools land in P34.4 with scoped-queries enforcing
- * client_id at the innermost layer (design doc §6.1, 子牙 B5).
+ * Tools: me_ping (health check) + 5 read-only client-data tools registered
+ * via registerReadOnlyTools, which enforce client_id at the innermost
+ * scoped-queries layer (design doc §6.1, 子牙 B5).
  */
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js'
 import { createMcpHandler, withMcpAuth } from 'mcp-handler'
@@ -24,20 +25,16 @@ import {
   requireMeClientId,
   verifyApiKey,
 } from '@/lib/auth/api-key-access'
+import { registerReadOnlyTools } from '@/lib/mcp/tools'
 
 const baseHandler = createMcpHandler(
   (server) => {
+    // Health check — also exercises the requireMeClientId chokepoint.
     server.tool(
       'me_ping',
-      'Health check for the Magic Engine MCP server. Returns pong + server ' +
-        'time. (P34.0/1 stub — real client-data tools land in P34.4.)',
+      'Health check for the Magic Engine MCP server. Returns pong + server time.',
       { echo: z.string().optional() },
       async ({ echo }, { authInfo }) => {
-        // requireMeClientId throws if the locked client context is missing —
-        // the correct pattern for real data tools (P34.4). me_ping reaching
-        // this point already means withMcpAuth admitted the request, so the
-        // context is always present; we still go through the single chokepoint
-        // rather than reading authInfo.extra ad hoc.
         const { meClientId, keyId } = requireMeClientId(authInfo)
         logMcpAccess({ keyId, clientId: meClientId, tool: 'me_ping', ok: true })
         return {
@@ -50,6 +47,9 @@ const baseHandler = createMcpHandler(
         }
       },
     )
+
+    // 5 read-only client-data tools (P34.4).
+    registerReadOnlyTools(server)
   },
   { serverInfo: { name: 'magic-engine', version: '0.0.1' } },
   { basePath: '/api/mcp', disableSse: true, verboseLogs: false },

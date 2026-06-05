@@ -48,6 +48,26 @@
 
 本地 dev 实测要做的话：把 Render 的 `NEXT_PUBLIC_SUPABASE_URL` / `*_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` 复制进 `.env.local`（已在 `.gitignore`），然后 `npm run dev` → 走上面同样的脚本。
 
+### ⚠️ 2026-06-05 P34.4 实测发现：本 dev 容器无法连 Supabase 数据 API（网络白名单）
+
+P34.4 端到端尝试时确认了一个**环境硬限制**：这个 cloud dev 容器起 dev server 后，MCP 路由能编译、鉴权层能正常返回 401（不崩），但 supabaseAdmin 查询返回 `{ message: 'Host not in allowlist' }` —— **Supabase 项目配了 network restrictions，dev 容器的出站 IP 不在白名单**。这解释了为什么 dev 容器从来没配 Supabase env（配了也连不上 PostgREST 数据 API）。
+
+注意：Supabase MCP 工具（execute_sql / apply_migration）能连，是因为它走 **management API**（不同出口），不是 PostgREST 数据 API。
+
+**因此真实数据 HTTP 端到端只能在 Cloudflare Pages 预览部署上做**（预览环境的出站 IP 在 Supabase 白名单内 + 有真 service-role key）。代码层正确性已由单测（api-key-access 35 + api-keys 路由 26 + scoped-queries 11）+ `npm run build` + 路由编译 + 鉴权返 401（非崩溃）充分覆盖。
+
+CF 预览 e2e SOP（P34.4 之后任意预览 URL）：
+```
+1) Supabase MCP 给某 QA 客户 INSERT 一把 key（generateApiKey 生成 hash/prefix）
+2) Claude Desktop claude_desktop_config.json 配 mcp-remote 指向
+   https://<preview>.magic-engine.pages.dev/api/mcp/mcp，header Authorization: Bearer <plaintext>
+3) 验证：me_ping 通 / me_get_overview 返回该客户诊断分 / me_list_goals 返回目标 /
+   me_get_seo_performance 返回 GSC 快照或 pending_sync
+4) 跨租户验证：A 客户的 key 调任何 tool 只能拿到 A 的数据（scoped-queries 强制）
+5) 扫返回无供应商真名（openai/anthropic/semrush/...）
+6) 测试结束 revoke 全部测试 key
+```
+
 ## 本次留下的清理痕迹
 
 - ✅ 测试 key（id `9880986a-0bd7-4b4b-894a-4336da0bd3f6`，QA CTS `aaaaaaaa-…`，name 'P34.1 spike test key'）已 `revoked_at = now()` —— 行还在，作为 P34.1 的「曾被发出的第一把 key」审计证据
