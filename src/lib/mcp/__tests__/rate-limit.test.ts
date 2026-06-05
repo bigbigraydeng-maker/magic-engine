@@ -1,11 +1,10 @@
 /**
- * P34.5 — rate-limit tests. Counts mcp_access_log rows per key in the window.
+ * P34.5 + P34-P3.5 — rate limit. Counts mcp_access_log by the kind-specific
+ * FK column (client_key_id / admin_key_id), supports custom limit, fails open.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-vi.mock('@/lib/supabase', () => ({
-  supabaseAdmin: { from: vi.fn() },
-}))
+vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 
 import { checkRateLimit, RATE_LIMIT } from '../rate-limit'
 import { supabaseAdmin } from '@/lib/supabase'
@@ -21,43 +20,41 @@ function mockCount(result: { count: number | null; error: unknown }) {
   return { select, eq, gte }
 }
 
-beforeEach(() => {
-  vi.resetAllMocks()
-})
+beforeEach(() => vi.resetAllMocks())
 
 describe('checkRateLimit', () => {
-  it('allows when under the limit', async () => {
+  it('allows under the limit', async () => {
     mockCount({ count: 5, error: null })
     const res = await checkRateLimit(KEY_ID)
-    expect(res.ok).toBe(true)
-    expect(res.used).toBe(5)
-    expect(res.limit).toBe(RATE_LIMIT)
+    expect(res).toEqual({ ok: true, used: 5, limit: RATE_LIMIT })
   })
 
-  it('blocks at the limit', async () => {
+  it('blocks at / over the limit', async () => {
     mockCount({ count: RATE_LIMIT, error: null })
-    const res = await checkRateLimit(KEY_ID)
-    expect(res.ok).toBe(false)
-  })
-
-  it('blocks over the limit', async () => {
+    expect((await checkRateLimit(KEY_ID)).ok).toBe(false)
     mockCount({ count: RATE_LIMIT + 10, error: null })
-    const res = await checkRateLimit(KEY_ID)
-    expect(res.ok).toBe(false)
+    expect((await checkRateLimit(KEY_ID)).ok).toBe(false)
   })
 
-  it('scopes the count to this key and a time window', async () => {
+  it('default kind=client counts client_key_id column', async () => {
     const { eq, gte } = mockCount({ count: 0, error: null })
     await checkRateLimit(KEY_ID)
-    expect(eq).toHaveBeenCalledWith('key_id', KEY_ID)
-    // gte called with an ISO timestamp (the window start).
-    const sinceArg = gte.mock.calls[0][1] as string
-    expect(sinceArg).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    expect(eq).toHaveBeenCalledWith('client_key_id', KEY_ID)
+    expect(gte.mock.calls[0][1]).toMatch(/^\d{4}-\d{2}-\d{2}T/)
   })
 
-  it('fails OPEN on a counting error (read-only surface must not go dark)', async () => {
+  it('kind=admin counts admin_key_id column + honours custom limit', async () => {
+    const { eq } = mockCount({ count: 29, error: null })
+    const res = await checkRateLimit(KEY_ID, { limit: 30, kind: 'admin' })
+    expect(eq).toHaveBeenCalledWith('admin_key_id', KEY_ID)
+    expect(res).toEqual({ ok: true, used: 29, limit: 30 })
+    // 30 used vs limit 30 → blocked
+    mockCount({ count: 30, error: null })
+    expect((await checkRateLimit(KEY_ID, { limit: 30, kind: 'admin' })).ok).toBe(false)
+  })
+
+  it('fails OPEN on a counting error', async () => {
     mockCount({ count: null, error: { message: 'boom' } })
-    const res = await checkRateLimit(KEY_ID)
-    expect(res.ok).toBe(true)
+    expect((await checkRateLimit(KEY_ID)).ok).toBe(true)
   })
 })

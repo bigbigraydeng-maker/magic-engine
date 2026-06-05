@@ -1,20 +1,20 @@
 /**
- * MCP rate limiting (Phase 34 / P34.5).
+ * MCP rate limiting (Phase 34 / P34.5, extended for admin in P34-P3.5).
  *
- * Counts rows in mcp_access_log for this key in the last RATE_WINDOW_SEC and
- * rejects once over RATE_LIMIT. Using the access log as the counter (子牙 B3)
- * keeps it correct across multiple Render instances — no single-instance
- * in-memory LRU that breaks on scale-out.
+ * Counts mcp_access_log rows for a key in the last RATE_WINDOW_SEC. Using the
+ * access log as the counter (子牙 B3) keeps it correct across multiple Render
+ * instances — no single-instance in-memory LRU.
  *
- * Note: mcp_access_log is written fire-and-forget by logMcpAccess AFTER a tool
- * runs, so the window is approximate (a burst within the same tick can slip a
- * few through before rows land). That's an acceptable tradeoff for a read-only
- * surface — the goal is abuse/scan throttling, not exact accounting.
+ * Counts the per-kind FK column (client_key_id / admin_key_id), NOT the legacy
+ * key_id — P34-P3 logMcpAccess writes the kind-specific column.
+ *
+ * Fire-and-forget log writes mean the window is approximate; acceptable for a
+ * read-only abuse/scan throttle. Fails OPEN on a counting error.
  */
 import { supabaseAdmin } from '@/lib/supabase'
 
-export const RATE_LIMIT = 60        // requests
-export const RATE_WINDOW_SEC = 60   // per 60s sliding window
+export const RATE_LIMIT = 60 // client default, per 60s
+export const RATE_WINDOW_SEC = 60
 
 export interface RateCheck {
   ok: boolean
@@ -22,24 +22,27 @@ export interface RateCheck {
   limit: number
 }
 
-/**
- * Returns ok:false if this key has made >= RATE_LIMIT calls in the window.
- * Fails OPEN (ok:true) on a counting error — a read-only surface shouldn't go
- * dark because the log table hiccuped; the error is logged for visibility.
- */
-export async function checkRateLimit(keyId: string): Promise<RateCheck> {
+export interface RateOpts {
+  limit?: number
+  kind?: 'client' | 'admin'
+}
+
+export async function checkRateLimit(keyId: string, opts: RateOpts = {}): Promise<RateCheck> {
+  const limit = opts.limit ?? RATE_LIMIT
+  const column = opts.kind === 'admin' ? 'admin_key_id' : 'client_key_id'
   const since = new Date(Date.now() - RATE_WINDOW_SEC * 1000).toISOString()
+
   const { count, error } = await supabaseAdmin
     .from('mcp_access_log')
     .select('id', { count: 'exact', head: true })
-    .eq('key_id', keyId)
+    .eq(column, keyId)
     .gte('created_at', since)
 
   if (error) {
     console.error('[mcp rate-limit] count failed, failing open:', error)
-    return { ok: true, used: 0, limit: RATE_LIMIT }
+    return { ok: true, used: 0, limit }
   }
 
   const used = count ?? 0
-  return { ok: used < RATE_LIMIT, used, limit: RATE_LIMIT }
+  return { ok: used < limit, used, limit }
 }
