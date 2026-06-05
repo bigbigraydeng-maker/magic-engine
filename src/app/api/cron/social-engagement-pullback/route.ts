@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { pullbackAllEngagement } from '@/lib/publer/engagement-pullback'
 import { TikTokAdapter } from '@/lib/flywheel/adapters/TikTokAdapter'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 // Pulling engagement for many posts + TikTok profiles may take a while; allow up to 5 min.
 export const maxDuration = 300
@@ -28,6 +29,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const cronRun = await startCronRun('social-engagement-pullback')
+
   try {
     // ── 1. Publer post engagement ─────────────────────────────────────────────
     const result = await pullbackAllEngagement(supabaseAdmin)
@@ -35,6 +38,13 @@ export async function GET(request: NextRequest) {
     // ── 2. TikTok profile metrics — P22.A.4 ──────────────────────────────────
     const tiktokResult = await syncTikTokProfiles()
 
+    const r = result as unknown as Record<string, unknown>
+    await cronRun.finish({
+      processed: typeof r.total_posts === 'number' ? r.total_posts : undefined,
+      completed: typeof r.updated === 'number' ? r.updated : undefined,
+      failed: tiktokResult.failed,
+      summary: { ...r, tiktok: tiktokResult },
+    })
     return NextResponse.json({
       timestamp: new Date().toISOString(),
       ...result,
@@ -43,6 +53,7 @@ export async function GET(request: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[cron/social-engagement-pullback]', message)
+    await cronRun.finish({ failed: 1, error: message })
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }

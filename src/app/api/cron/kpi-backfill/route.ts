@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { backfillSemrushKpisForPrescription, type BackfillResult } from '@/lib/case-library/outcome-recorder'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 // Allow up to 5 min for a full cron run across all clients
 export const maxDuration = 300
@@ -45,6 +46,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const cronRun = await startCronRun('kpi-backfill')
+
   // ── Fetch approved prescriptions that have a case record ──────────────────
   // JOIN: prescriptions → prescription_cases → clients
   const { data: rows, error: queryErr } = await supabaseAdmin
@@ -60,6 +63,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     .not('prescriptions.approved_at', 'is', null)
 
   if (queryErr) {
+    await cronRun.finish({ failed: 1, error: queryErr.message })
     return NextResponse.json(
       { error: `Failed to load prescriptions: ${queryErr.message}` },
       { status: 500 },
@@ -67,6 +71,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   if (!rows || rows.length === 0) {
+    await cronRun.finish({ processed: 0, completed: 0, failed: 0 })
     return NextResponse.json({
       success: true,
       message: 'No approved prescriptions with cases found',
@@ -112,6 +117,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     error: r.error,
   }))
 
+  await cronRun.finish({
+    processed: prescriptions.length,
+    completed: prescriptions.length - errors.length,
+    failed: errors.length,
+    summary: { outcomes_written: totalWritten, outcomes_skipped: totalSkipped },
+  })
   return NextResponse.json({
     success: true,
     prescriptions_processed: prescriptions.length,

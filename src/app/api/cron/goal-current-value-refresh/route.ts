@@ -18,6 +18,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { autoFetchMetricValue } from '@/lib/strategy/auto-fetch'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 export const maxDuration = 300 // 5 min — generous; cron typically completes <60s
 
@@ -47,6 +48,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const cronRun = await startCronRun('goal-current-value-refresh')
+
   // ── Load active goals ───────────────────────────────────────────────────
   const goalsRes = await supabaseAdmin
     .from('goals')
@@ -63,6 +66,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       duration_ms: Date.now() - startedAt,
     }
     console.log('[goal-current-value-refresh]', result)
+    await cronRun.finish({ processed: 0, completed: 0, failed: 0 })
     return NextResponse.json(result)
   }
 
@@ -120,5 +124,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     duration_ms: Date.now() - startedAt,
   }
   console.log('[goal-current-value-refresh]', JSON.stringify(result))
+  await cronRun.finish({ processed: goals.length, completed: succeeded, failed })
   return NextResponse.json(result)
 }

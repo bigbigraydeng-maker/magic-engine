@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { analyzeViralReference } from '@/lib/reels/viral-analyzer'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 export const dynamic     = 'force-dynamic'
 export const maxDuration = 120  // 2 min
@@ -35,6 +36,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const cronRun = await startCronRun('viral-analyzer-worker')
+
   // Claim up to BATCH_SIZE pending rows. Mark as 'analyzing' atomically
   // so a concurrent run won't double-process.
   const { data: pending, error: selectErr } = await supabaseAdmin
@@ -45,10 +48,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .limit(BATCH_SIZE)
 
   if (selectErr) {
+    await cronRun.finish({ failed: 1, error: selectErr.message })
     return NextResponse.json({ error: selectErr.message }, { status: 500 })
   }
   const batch = pending ?? []
   if (batch.length === 0) {
+    await cronRun.finish({ processed: 0, completed: 0, failed: 0 })
     return NextResponse.json({ ok: true, processed: 0, message: 'No pending references' })
   }
 
@@ -59,6 +64,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .in('id', batch.map(r => r.id))
 
   if (claimErr) {
+    await cronRun.finish({ failed: 1, error: claimErr.message })
     return NextResponse.json({ error: claimErr.message }, { status: 500 })
   }
 
@@ -87,6 +93,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
+  await cronRun.finish({ processed: batch.length, completed: succeeded, failed })
   return NextResponse.json({
     ok:        true,
     timestamp: new Date().toISOString(),

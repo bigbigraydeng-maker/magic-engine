@@ -24,6 +24,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { SeoCollector } from '@/lib/diagnostic/collectors/seo-collector'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 // Fire-and-forget: GET returns 202 immediately, background work runs async.
 // Cloudflare times out at ~100s; 44 domains × ~5-7s = ~310s total.
@@ -66,6 +67,8 @@ async function runCollection(triggeredBy: 'cron' | 'admin_manual', existingRunId
     )
   }
 
+  const cronRun = await startCronRun('baseline-domains-monthly')
+
   // 1. Create or use existing run record
   let runId: string | undefined = existingRunId
   if (!runId) {
@@ -75,6 +78,7 @@ async function runCollection(triggeredBy: 'cron' | 'admin_manual', existingRunId
       .select('id')
       .single()
     if (insertError || !runRow) {
+      await cronRun.finish({ failed: 1, error: `Failed to create cron run record: ${insertError?.message ?? 'unknown'}` })
       return NextResponse.json(
         { error: `Failed to create cron run record: ${insertError?.message ?? 'unknown'}` },
         { status: 500 },
@@ -98,6 +102,7 @@ async function runCollection(triggeredBy: 'cron' | 'admin_manual', existingRunId
         error_message: `Failed to load domains: ${loadError.message}`,
         duration_seconds: Math.round((Date.now() - startTime) / 1000),
       })
+      await cronRun.finish({ failed: 1, error: loadError.message })
       return NextResponse.json({ error: loadError.message }, { status: 500 })
     }
 
@@ -107,6 +112,7 @@ async function runCollection(triggeredBy: 'cron' | 'admin_manual', existingRunId
         status: 'completed',
         duration_seconds: Math.round((Date.now() - startTime) / 1000),
       })
+      await cronRun.finish({ processed: 0, completed: 0, failed: 0 })
       return NextResponse.json({ success: true, message: 'No baseline domains configured', run_id: runId })
     }
 
@@ -233,6 +239,12 @@ async function runCollection(triggeredBy: 'cron' | 'admin_manual', existingRunId
       failure_details:    failureDetails.length > 0 ? failureDetails : null,
     })
 
+    await cronRun.finish({
+      processed: domains.length,
+      completed: succeeded,
+      failed,
+      summary: { benchmarks_written: benchmarksWritten },
+    })
     return NextResponse.json({
       success:  true,
       run_id:   runId,
@@ -250,6 +262,7 @@ async function runCollection(triggeredBy: 'cron' | 'admin_manual', existingRunId
       error_message: msg,
       duration_seconds: Math.round((Date.now() - startTime) / 1000),
     })
+    await cronRun.finish({ failed: 1, error: msg })
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

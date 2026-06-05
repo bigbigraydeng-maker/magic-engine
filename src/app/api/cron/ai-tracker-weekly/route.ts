@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { runTracker } from '@/lib/ai-tracker/orchestrator'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 /**
  * GET /api/cron/ai-tracker-weekly
@@ -44,6 +45,8 @@ export async function GET(req: NextRequest) {
 }
 
 async function runInBackground() {
+  const cronRun = await startCronRun('ai-tracker-weekly')
+
   // Find clients that have at least one enabled query
   const { data: clientsWithQueries, error: queryErr } = await supabaseAdmin
     .from('ai_visibility_queries')
@@ -52,6 +55,7 @@ async function runInBackground() {
 
   if (queryErr) {
     console.error('[ai-tracker-weekly] Failed to load clients:', queryErr.message)
+    await cronRun.finish({ failed: 1, error: queryErr.message })
     return
   }
 
@@ -61,10 +65,13 @@ async function runInBackground() {
 
   if (clientIds.length === 0) {
     console.log('[ai-tracker-weekly] No clients have enabled queries — nothing to run')
+    await cronRun.finish({ processed: 0, completed: 0, failed: 0 })
     return
   }
 
   let totalCost = 0
+  let succeeded = 0
+  let failed = 0
 
   // Process clients sequentially — multiple clients in parallel would
   // multiply provider RPM pressure.
@@ -72,14 +79,22 @@ async function runInBackground() {
     try {
       const result = await runTracker({ client_id: clientId })
       totalCost += result.total_cost_usd
+      succeeded++
       console.log(
         `[ai-tracker-weekly] client=${clientId} succeeded=${result.runs_succeeded} failed=${result.runs_failed} cost=$${result.total_cost_usd.toFixed(4)}`
       )
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error'
       console.error(`[ai-tracker-weekly] client=${clientId} error:`, message)
+      failed++
     }
   }
 
   console.log(`[ai-tracker-weekly] Done. clients=${clientIds.length} total_cost=$${totalCost.toFixed(4)}`)
+  await cronRun.finish({
+    processed: clientIds.length,
+    completed: succeeded,
+    failed,
+    summary: { total_cost_usd: totalCost },
+  })
 }

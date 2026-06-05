@@ -6,10 +6,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(request: NextRequest) {
-  const secret = request.nextUrl.searchParams.get('secret')
+  const authHeader = request.headers.get('authorization')
   const expectedSecret = process.env.CRON_SECRET
 
-  if (!expectedSecret || secret !== expectedSecret) {
+  if (!expectedSecret || authHeader !== `Bearer ${expectedSecret}`) {
     return NextResponse.json(
       { error: 'Unauthorized' },
       { status: 401 }

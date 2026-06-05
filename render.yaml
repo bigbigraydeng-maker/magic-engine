@@ -327,6 +327,20 @@ services:
           name: magic-engine
           property: host
 
+  # Daily cron health digest — every day at 6am UTC (~6pm NZST)
+  # Queries cron_run_logs for the past 24h; sends Resend email only if failures found.
+  - type: cron
+    name: daily-cron-digest
+    env: node
+    schedule: "0 6 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -s -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/daily-cron-digest
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # SEO Patrol — Phase 22.E.S2b
   #   Daily SEO opportunity engine: reads keyword_snapshots + GSC snapshots,
   #   runs the rule engine, persists fresh findings, and routes the top 3 onto

@@ -20,6 +20,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 // A healthy generation takes ~30–90s. 10 minutes is a generous ceiling that
 // catches actual stuck rows without false-positiving slow Anthropic calls.
@@ -30,6 +31,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+
+  const cronRun = await startCronRun('blog-stuck-generating-sweeper')
 
   const cutoffIso = new Date(Date.now() - STALE_GENERATION_TIMEOUT_MS).toISOString()
 
@@ -42,6 +45,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   if (selectErr) {
     console.error('[blog-stuck-generating] select failed', selectErr)
+    await cronRun.finish({ failed: 1, error: selectErr.message })
     return NextResponse.json(
       { swept: 0, error: selectErr.message },
       { status: 500 },
@@ -49,6 +53,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   if (!stuck || stuck.length === 0) {
+    await cronRun.finish({ processed: 0, completed: 0, failed: 0 })
     return NextResponse.json({ swept: 0, ids: [] })
   }
 
@@ -61,6 +66,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   if (updateErr) {
     console.error('[blog-stuck-generating] update failed', updateErr)
+    await cronRun.finish({ failed: 1, error: updateErr.message })
     return NextResponse.json(
       { swept: 0, error: updateErr.message },
       { status: 500 },
@@ -68,6 +74,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   console.log(`[blog-stuck-generating] marked ${ids.length} stuck row(s) failed`, ids)
+  // sweeper: swept 条目是已修复的卡死 job，不算 failed（failed=0 表示 sweeper 本身运行正常）
+  await cronRun.finish({ processed: ids.length, completed: ids.length, failed: 0, summary: { swept: ids.length } })
   return NextResponse.json({
     swept: ids.length,
     ids,

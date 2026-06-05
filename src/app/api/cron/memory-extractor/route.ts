@@ -21,6 +21,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { runExtractorForClient, runExtractorForAllClients } from '@/lib/memory'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -39,6 +40,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const cronRun = await startCronRun('memory-extractor')
+
   const { searchParams } = new URL(req.url)
   const clientId = searchParams.get('client_id') ?? undefined
 
@@ -51,6 +54,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         `preferences+${result.preferences_added} decisions+${result.decisions_updated} ` +
         `errors=${result.errors.length}`,
       )
+      await cronRun.finish({
+        processed: result.outcomes_processed,
+        completed: result.outcomes_processed - result.errors.length,
+        failed: result.errors.length,
+      })
       return NextResponse.json({
         ok: true,
         timestamp: new Date().toISOString(),
@@ -61,6 +69,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
       console.error('[memory-extractor/cron] single client error:', message)
+      await cronRun.finish({ failed: 1, error: message })
       return NextResponse.json({ error: message }, { status: 500 })
     }
   }
@@ -73,6 +82,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       `preferences+${batch.aggregate.preferences_added} decisions+${batch.aggregate.decisions_updated} ` +
       `client_errors=${batch.per_client_errors.length}`,
     )
+    await cronRun.finish({
+      processed: batch.clients_processed,
+      completed: batch.clients_processed - batch.per_client_errors.length,
+      failed: batch.per_client_errors.length,
+    })
     return NextResponse.json({
       ok: true,
       timestamp: new Date().toISOString(),
@@ -82,6 +96,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[memory-extractor/cron] batch error:', message)
+    await cronRun.finish({ failed: 1, error: message })
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }

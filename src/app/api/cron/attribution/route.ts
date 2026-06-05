@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { runAttributionJob } from '@/lib/flywheel/attribution/job'
 import { runGscAttributionForClient } from '@/lib/flywheel/attribution/gsc-bridge'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 /**
  * POST /api/cron/attribution
@@ -72,6 +73,8 @@ export async function POST(
   const windowDays =
     windowDaysParam !== null ? parseInt(windowDaysParam, 10) : undefined
 
+  const cronRun = await startCronRun('attribution-cron')
+
   // ── Pass 1: flywheel_metrics-based attribution (existing) ──────────────────
   let pass1Result = { processed: 0, written: 0, skipped: 0 }
   try {
@@ -82,6 +85,7 @@ export async function POST(
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal server error'
     console.error('[attribution/cron] Pass 1 error:', message)
+    await cronRun.finish({ failed: 1, error: message })
     return NextResponse.json<ApiErrorResponse>({ error: message }, { status: 500 })
   }
 
@@ -113,6 +117,12 @@ export async function POST(
     gscResult.errors.push(message)
   }
 
+  await cronRun.finish({
+    processed: pass1Result.processed,
+    completed: pass1Result.written,
+    failed: gscResult.errors.length,
+    summary: { pass1: pass1Result, gsc: gscResult },
+  })
   return NextResponse.json<AttributionCronResponse>(
     {
       timestamp: new Date().toISOString(),

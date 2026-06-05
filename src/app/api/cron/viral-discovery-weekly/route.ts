@@ -19,6 +19,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 300  // 5 min — 8 industries × ~30s each
@@ -312,6 +313,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'YOUTUBE_API_KEY not configured' }, { status: 500 })
   }
 
+  const cronRun = await startCronRun('viral-discovery-weekly')
+
   const results: DiscoverResult[] = []
   let totalQueued = 0
 
@@ -336,6 +339,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
+  const errorCount = results.filter(r => r.error !== undefined).length
+  await cronRun.finish({
+    processed: results.length,
+    completed: results.length - errorCount,
+    failed: errorCount,
+    summary: { total_queued: totalQueued },
+  })
   return NextResponse.json({
     ok:          true,
     timestamp:   new Date().toISOString(),

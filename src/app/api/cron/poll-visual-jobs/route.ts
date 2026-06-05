@@ -5,6 +5,7 @@ import { checkVideoStatus } from '@/lib/visual/seedance'
 import { checkAvatarStatus } from '@/lib/visual/heygen'
 import { uploadFromUrl } from '@/lib/visual/storage'
 import { GENERATION_CONFIG } from '@/lib/visual/generation-config'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 type ProviderResult = {
   status: string
@@ -34,6 +35,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const cronRun = await startCronRun('poll-visual-jobs')
+
   // Process 1: Check generating Reels videos (from reels_drafts table)
   const { data: generatingReels } = await supabaseAdmin
     .from('reels_drafts')
@@ -57,6 +60,7 @@ export async function GET(req: NextRequest) {
   const allAssets = [...(generatingAssets || []), ...(queuedForRetry || [])]
 
   if (!allAssets.length && !generatingReels?.length) {
+    await cronRun.finish({ processed: 0, completed: 0, failed: 0 })
     return NextResponse.json({
       processed: 0,
       completed: 0,
@@ -100,28 +104,27 @@ export async function GET(req: NextRequest) {
 
         reelsCompleted++
       } else if (result.status === 'failed') {
-        await supabaseAdmin
+        const { error: dbErr } = await supabaseAdmin
           .from('reels_drafts')
           .update({
             status: 'images_ready',
             video_error: result.error,
           })
           .eq('id', reel.id)
-
+        if (dbErr) console.error(`[poll-visual-jobs] Failed to update reel ${reel.id}:`, dbErr)
         reelsFailed++
       }
       // Still processing — leave status as-is, will check again next cycle
     } catch (err) {
       console.error(`[poll-visual-jobs] Error polling reel ${reel.id}:`, err)
-      // On error, mark as failed
-      await supabaseAdmin
+      const { error: dbErr } = await supabaseAdmin
         .from('reels_drafts')
         .update({
           status: 'images_ready',
           video_error: err instanceof Error ? err.message : String(err),
         })
         .eq('id', reel.id)
-
+      if (dbErr) console.error(`[poll-visual-jobs] Failed to mark reel ${reel.id} failed:`, dbErr)
       reelsFailed++
     }
   }
@@ -269,6 +272,22 @@ export async function GET(req: NextRequest) {
       }
     }
   }
+
+  const totalFailed = failed + reelsFailed
+  await cronRun.finish({
+    processed: allAssets.length + (generatingReels || []).length,
+    completed: completed + reelsCompleted,
+    failed: totalFailed,
+    summary: {
+      assets_processed: allAssets.length,
+      assets_completed: completed,
+      assets_failed: failed,
+      queued_for_retry: queuedForRetryCount,
+      reels_processed: (generatingReels || []).length,
+      reels_completed: reelsCompleted,
+      reels_failed: reelsFailed,
+    },
+  })
 
   return NextResponse.json({
     processed: allAssets.length,
