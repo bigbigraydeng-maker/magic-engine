@@ -282,6 +282,22 @@ FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Mar
 
 **Phase 34 状态：✅ 全部完成并已 merge 到 main 2026-06-05（PR #369 squash）。真实生产 e2e 通过 —— CTS 在 Claude Desktop 实测 `me_get_overview`/`me_list_goals`/`me_get_seo_performance` 三工具全部成功落库（mcp_access_log），数据三方吻合（体检分 38 / 博客 2 / 社媒 3 = 狄仁杰数据层查值）；跨客户隔离亲验（CTS 钥匙查 Oztop 返回空 = 隔离生效）。代码层 92 单测 + build 全过，魏征×2 + 子牙 + 狄仁杰 + Codex 审过。→ 下一步见上方「⭐ 二期主推方向」。**
 
+### Phase 34 二期 P3 — FDE 跨客户 Admin Key ✅ 实施完成 2026-06-05
+
+> 全程走完新「Agent 审查协议」：子牙出方案 → 魏征 2 轮挑刺 → 子牙修订（加 Z1/Z2）→ 魏征复审 Open the gate → 实施 → 狄仁杰断案「隔离命门守住，准予 merge」。设计稿 `docs/specs/2026-06-05-mcp-phase2-product-design.md` §6 + 内部 SOP `docs/sops/admin-mcp-key-internal.md`。
+
+- [x] **P34-P3.1** migration：`admin_api_keys` + `api_key_settings`(kill-switch 单行表)+ `admin_key_issue_confirms`(Z2 字段先建)+ `mcp_access_log` 双 FK/key_kind/source_ip + 三分支 XOR CHECK + 前缀 CHECK + 90/180 天 expires CHECK。生产 apply 验证 8 项全绿
+- [x] **P34-P3.2** `verifyApiKey` 前缀 XOR 分叉 + `lookupByKind`(单表，防串库 R1）+ env/DB 双 kill-switch + IP 白名单 + Z1 wrong_endpoint + `requireAdminContext`
+- [x] **P34-P3.5** `admin-scoped-queries.ts`（**绝不 import scoped-queries**，狄仁杰加固：requireClientId 下沉最里层）+ `admin-tools.ts`（5 个 `me_admin_*`，跳过 vendor scrub Y5）+ `/api/mcp-admin/[transport]` endpoint + rate-limit 按 kind 计数
+- [x] **P34-P3.6** wrong_endpoint 双向防御（client/admin 各传 expectedKind）+ import-isolation 静态锁（CI 强制 Y3）
+- [x] **P34-P3.7** `/dashboard/admin/mcp-keys` UI（颁发/列表/吊销/🚨kill-switch 红条）+ `/api/admin/mcp-keys` GET/POST/[keyId] DELETE/revoke-all（requireAdmin + CSRF）
+- [x] **P34-P3.8** `/api/cron/admin-key-expiry` 每日检测 7 天内到期 + 空 IP 白名单债（邮件提醒待 P2）
+- [x] **P34-P3.10** 内部 SOP `admin-mcp-key-internal.md`（颁发流程 + 事故响应 5 分钟失效 + 取证/审计 SQL + 安全边界）
+- [ ] **P34-P3.9**（降级 backlog）`createMcpAuthAdapter(kind)` 抽取防 verifyToken 漂移（两 endpoint 已工作+测试覆盖，纯重构）
+- [ ] **二期补强**（狄仁杰/魏征 backlog）：真 colleague-confirm code 流程 · IP 白名单升 DB 强约束 · 过期邮件（依赖 P2 SendGrid）· 老 mcp_access_log.key_id 列下线
+
+**P3 验证**：109 MCP/auth 单测全过（含 import 隔离锁 + 变异测试坐实）+ `npm run build` ✓ + 狄仁杰生产 DB 实测攻击（XOR CHECK 拦脏数据 / kill-switch / 前缀 / 过期全部拦截成功）。**PM 决策**：首批只发 1 把给 PM 自己，验证 1 周再扩。
+
 ---
 
 ### Website Self-Serve Auth - 2026-06-02
