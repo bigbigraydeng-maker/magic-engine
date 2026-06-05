@@ -16,7 +16,6 @@ export default function RegisterForm({ next, fromProspect }: RegisterFormProps) 
   const [form, setForm] = useState({
     businessName: '',
     email: '',
-    password: '',
     websiteUrl: '',
   })
   const [loading, setLoading] = useState(false)
@@ -53,7 +52,6 @@ export default function RegisterForm({ next, fromProspect }: RegisterFormProps) 
   function registerPayload() {
     return {
       email: form.email.trim().toLowerCase(),
-      password: form.password,
       businessName: form.businessName.trim(),
       websiteUrl: form.websiteUrl.trim() || undefined,
       next,
@@ -247,21 +245,6 @@ export default function RegisterForm({ next, fromProspect }: RegisterFormProps) 
           value={form.email}
           onChange={handleChange}
           placeholder="you@company.com"
-          className={INPUT_CLS}
-        />
-      </div>
-
-      <div>
-        <label htmlFor="password" className={LABEL_CLS}>Password</label>
-        <input
-          id="password"
-          name="password"
-          type="password"
-          required
-          minLength={8}
-          value={form.password}
-          onChange={handleChange}
-          placeholder="At least 8 characters"
           className={INPUT_CLS}
         />
       </div>
