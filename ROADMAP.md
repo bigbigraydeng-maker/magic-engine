@@ -274,11 +274,11 @@ FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Mar
 - [x] **P34.2** Key 管理 API + 客户设置「§3 程序化访问 / 🔌 MCP API 访问」UI ✅ **2026-06-05**：`/api/clients/[id]/api-keys` (GET 列表显式列白名单防 key_hash 泄漏 / POST 发 key 返回明文仅一次) + `/[keyId]` (DELETE 软删除,双 .eq 防跨租户 IDOR);`ApiKeysPanel` 组件 (一次性高亮明文+复制按钮+关闭即销毁,active/revoked 状态徽章,吊销 confirm) 挂到 settings page §3 section (子牙纠偏:不是 Tab 抽屉是堆叠 section);14 路由测试通过 (含 GET '不含 key_hash' 变异锚点 + DELETE 双 .eq IDOR 锚点);`npm run build` ✓ Compiled successfully。**MCP 钥匙现在能在 Dashboard 前台收发了**,不再需要进 Supabase 直填。
 - [x] **P34.3** `/api/mcp` 接 transport + 鉴权挂载 ✅ **2026-06-05**（P34.1 已做主体；route 用 extractBearer 自解析 + withMcpAuth required:true）
 - [x] **P34.4** `src/lib/mcp/scoped-queries.ts` 隔离层 + 5 个只读 tool + 空数据态 + 最里层变异测试 ✅ **2026-06-05**：scoped-queries 工厂（client_id 闭包绑定，每方法强制 `.eq('client_id')`，唯一持 client_id 层）+ `tools.ts`（5 tool overview/list_goals/goal_detail/seo_performance/list_execution_items，统一 runScoped 含 requireMeClientId 守门 + logMcpAccess + 错误契约）。11 隔离测试（6 个 `.eq('client_id')` 变异锚点 + getGoalDetail 双 .eq + seo pending_sync 空态 + execution .neq skipped）。**真实 HTTP e2e 受 Supabase network allowlist 阻挡本容器跑不了，留 CF 预览**（SOP 见 me-mcp-p34-1-auth-notes.md）。单测 11+26+35 全过 + build ✓
-- [ ] **P34.5** `vendor-filter.ts` 封装名过滤 + `mcp_access_log` 限流/审计 + 跨 client 隔离测试 + 客户接入 SOP（`docs/sops/`）
+- [x] **P34.5** `vendor-filter.ts` 封装名过滤 + `mcp_access_log` 限流/审计 + 客户接入 SOP ✅ **2026-06-05**：`vendor-filter.ts`（递归 scrub OpenAI→Content Engine / SEMrush→Keyword Intelligence 等，runScoped 返回前兜底）+ `rate-limit.ts`（mcp_access_log 滑动窗 60/min，跨实例安全，错误 fail-open）+ `docs/sops/mcp-client-access-setup.md`（FDE 签发 + 客户 Claude Desktop mcp-remote 接入 + 故障排查 + CF e2e SOP）。19 新测试（vendor 14 + rate-limit 5），MCP 全套 91 测试通过 + build ✓
 
 > 二期 backlog：GA4/AI 可见度/content 三个 tool、网页版 OAuth 薄层、计费接入（`mcp_access_log` 已预留聚合源）、独立 service 拆分（触发线见设计文档 §2.2）、可执行 MCP（V2 路线，设计文档 §12）。
 
-**Phase 34 状态：🔄 P34.0–P34.4 ✅ 2026-06-05（客户的 Claude 现在能凭 Key 查到自己的真实数据：overview/goals/SEO/execution）→ 仅剩 P34.5 封装名过滤 + 限流 + 接入 SOP。真实数据 e2e 待 CF 预览跑（本容器 Supabase network allowlist 限制）。**
+**Phase 34 状态：✅ P34.0–P34.5 全部完成 2026-06-05（客户的 Claude 能凭 Key 只读查询自己数据，强隔离 + 限流 + 封装名过滤 + 接入 SOP）。代码层 91 单测 + build 全过。⏳ 真实数据 HTTP e2e 待 CF 预览跑（本 dev 容器受 Supabase network allowlist 限制连不上数据 API）+ 魏征/子牙最终审 → 等 PM `go merge`。**
 
 ---
 
@@ -3520,6 +3520,18 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-06-05（Phase 34 — Client MCP Server 设计→实现 P34.0–P34.5 ✅ PR #369）
+
+**一句话**：客户能在自己的 Claude 里凭 API Key 只读查询「自己的」ME 数据（体检分 / 目标进度 / 搜索表现 / 执行进度 / 内容交付），强隔离、限流、不暴露供应商真名。
+
+**链路**：设计稿 v3（魏征+子牙双审）→ Phase 34 登记 → P34.0 transport spike（mcp-handler + Streamable HTTP 套进 Next.js App Router，stateless JSON）→ P34.1 鉴权地基（client_api_keys + mcp_access_log 两表 + verifyApiKey + withMcpAuth）→ P34.2 Key 管理 API + 设置页 §3 UI（FDE 签发/吊销，魏征安全加固）→ P34.3+P34.4 scoped-queries 最里层隔离 + 5 只读 tool → P34.5 封装名过滤 + 限流 + 接入 SOP。
+
+**安全护城河**：client_id 双层锁定（外层 API Key 反查 / 内层 scoped-queries 闭包绑定强制 `.eq('client_id')`），满足「校验放最里层」；admin-only 签发 + CSRF + 软删除吊销 + 60/min 限流 + 封装名过滤。
+
+**验证**：91 单测全过（鉴权 35 + 管理路由 26 + 隔离 11 + 封装名 14 + 限流 5）+ `npm run build` ✓。⏳ 真实数据 HTTP e2e 待 CF 预览（本 dev 容器 Supabase network allowlist 连不上数据 API）。
+
+**关联文档**：设计稿 `docs/specs/me-mcp-server-design.md` · 鉴权笔记 `me-mcp-p34-1-auth-notes.md` · 客户接入 SOP `docs/sops/mcp-client-access-setup.md` · Migration `20260627000001_p34_mcp_api_keys.sql`
 
 ### 2026-06-05（🚨 Schema 漂移事故修复 — PR #365 ✅ 13 处缺失对象补齐）
 

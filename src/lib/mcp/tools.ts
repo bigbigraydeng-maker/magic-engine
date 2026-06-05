@@ -17,6 +17,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { logMcpAccess, requireMeClientId } from '@/lib/auth/api-key-access'
 import { createScopedQueries, type ScopedQueries } from '@/lib/mcp/scoped-queries'
+import { checkRateLimit } from '@/lib/mcp/rate-limit'
+import { scrubVendorNames } from '@/lib/mcp/vendor-filter'
 
 interface ToolResult {
   content: Array<{ type: 'text'; text: string }>
@@ -43,10 +45,29 @@ async function runScoped(
     )
   }
 
+  // Rate limit per key (sliding window over mcp_access_log). Logged as a
+  // throttled call so repeated abuse keeps counting against the window.
+  const rate = await checkRateLimit(ctx.keyId)
+  if (!rate.ok) {
+    logMcpAccess({
+      keyId: ctx.keyId,
+      clientId: ctx.meClientId,
+      tool,
+      ok: false,
+      errorCode: 'rate_limited',
+    })
+    return errorResult(
+      `Rate limit reached (${rate.limit} requests/min). Please wait a moment and try again.`,
+    )
+  }
+
   try {
     const data = await fn(createScopedQueries(ctx.meClientId))
     logMcpAccess({ keyId: ctx.keyId, clientId: ctx.meClientId, tool, ok: true })
-    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+    // Final vendor-name scrub before the payload leaves the server (CLAUDE.md
+    // 封装名 — no real third-party vendor names in client-facing output).
+    const safe = scrubVendorNames(data)
+    return { content: [{ type: 'text', text: JSON.stringify(safe, null, 2) }] }
   } catch (err) {
     logMcpAccess({
       keyId: ctx.keyId,
