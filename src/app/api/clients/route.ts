@@ -1,12 +1,55 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { getUserPermissions } from '@/lib/auth/whitelist'
 
+/**
+ * P0-J fix (魏征 CRITICAL #1): this endpoint previously returned ALL clients
+ * to any anonymous caller. It is consumed by /dashboard/content and
+ * /dashboard/visuals which are reachable by self_serve users — that's how
+ * raydeng@workvisas.work saw 41 strangers' content on first login.
+ *
+ * Now requires a session, and self_serve / portal_only callers only see their
+ * own client rows (via client_portal_users.email lookup). Admin keeps the
+ * full list.
+ */
 export async function GET() {
   try {
-    const { data, error } = await supabaseAdmin
+    // ── 1. Session gate ───────────────────────────────────────────────────
+    const supabase = createServerSupabaseClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user?.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    const email = user.email.toLowerCase()
+
+    // ── 2. Admin shortcut — return everything ─────────────────────────────
+    const adminPerms = getUserPermissions(email)
+    const isAdmin = adminPerms?.role === 'admin'
+
+    // ── 3. Non-admin: filter to client_portal_users.email matches only ────
+    let allowedIds: string[] | null = null
+    if (!isAdmin) {
+      const { data: accessRows } = await supabaseAdmin
+        .from('client_portal_users')
+        .select('client_id')
+        .eq('email', email)
+      allowedIds = (accessRows ?? []).map(r => r.client_id as string)
+      if (allowedIds.length === 0) {
+        return NextResponse.json({ clients: [] })
+      }
+    }
+
+    let query = supabaseAdmin
       .from('clients')
       .select('id, name, domain, created_at, semrush_db, plan_tier')
       .order('created_at', { ascending: false })
+
+    if (!isAdmin && allowedIds) {
+      query = query.in('id', allowedIds)
+    }
+
+    const { data, error } = await query
 
     if (error) throw error
     const clients = data ?? []

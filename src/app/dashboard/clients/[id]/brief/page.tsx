@@ -93,12 +93,26 @@ export default function BriefPage() {
 
   return (
     <div className="mx-auto max-w-xl px-4 py-10">
-      <div className="mb-8">
-        <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Brand Brief</p>
-        <h1 className="mt-2 text-2xl font-black text-slate-950">Tell us about your business</h1>
-        <p className="mt-2 text-sm leading-6 text-slate-600">
-          These 5 fields unlock content generation, the execution kanban, and Launch Hub. Takes 2 minutes.
-        </p>
+      <div className="mb-8 flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Brand Brief</p>
+          <h1 className="mt-2 text-2xl font-black text-slate-950">Tell us about your business</h1>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            These 5 fields unlock content generation, the execution kanban, and Launch Hub. Takes 2 minutes.
+          </p>
+        </div>
+        {/* P0-J: brief was a forced gate with no escape. Users who want to
+            explore their workspace first now have an out. The brief stays
+            required to unlock paid features (FeatureLockGate enforces that
+            elsewhere), but landing the moment after signup should never feel
+            like a dead-end. */}
+        <button
+          type="button"
+          onClick={() => router.push(`/dashboard/clients/${id}`)}
+          className="shrink-0 text-xs font-semibold text-slate-500 underline-offset-4 hover:text-slate-700 hover:underline"
+        >
+          Skip for now →
+        </button>
       </div>
 
       {(hasWelcome || cameFromProspect) && (

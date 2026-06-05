@@ -10,8 +10,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (!user) redirect('/login')
 
   const headersList = await headers()
-  const userRole = headersList.get('x-user-role') ?? 'admin'
-  const userTier = (headersList.get('x-user-tier') ?? 'admin') as
+  // P0-J fix (魏征 漏洞 A): tier fallback was 'admin' — any missing header
+  // would silently escalate to admin privileges. Fail-safe to the lowest
+  // tier ('portal_only' = read-only single client) so a misconfigured
+  // middleware can never accidentally grant admin.
+  const userRole = headersList.get('x-user-role') ?? 'client-viewer'
+  const userTier = (headersList.get('x-user-tier') ?? 'portal_only') as
     'admin' | 'paid_client' | 'self_serve' | 'portal_only'
   const allowedClientId = headersList.get('x-allowed-client-id') ?? null
   const roleLabel = userRole === 'client-viewer' ? 'Client view' : 'Admin cockpit'

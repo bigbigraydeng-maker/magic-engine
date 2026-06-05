@@ -117,8 +117,13 @@ export async function middleware(request: NextRequest) {
   }
   const tier = pickTier()
 
-  // Paths client-viewers are allowed beyond their own client page
-  const CLIENT_VIEWER_ALLOWED = ['/dashboard/content', '/dashboard/visuals']
+  // Paths client-viewers are allowed beyond their own client page.
+  // P0-J: only paid_client tier gets the multi-client aggregate views.
+  // self_serve users on these paths previously saw OTHER clients' content
+  // (data leak — raydeng@workvisas.work saw 41 strangers' posts).
+  const CLIENT_VIEWER_ALLOWED = tier === 'paid_client'
+    ? ['/dashboard/content', '/dashboard/visuals']
+    : []
 
   if (path.startsWith('/dashboard/clients/')) {
     // Restrict to their own client only
