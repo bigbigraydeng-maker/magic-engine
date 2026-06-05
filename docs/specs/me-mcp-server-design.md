@@ -1,7 +1,8 @@
 # Magic Engine MCP Server 设计文档（客户自助数据访问）
 
-> 状态：**设计稿 v3（已过魏征 + 子牙双审）** · 创建 2026-06-04 · 分支 `claude/magic-engine-mcp-design-GJNWq`
+> 状态：**设计稿 v3（已过魏征 + 子牙双审）· PM 已拍板 → 已登记 Phase 34** · 创建 2026-06-04 · 分支 `claude/magic-engine-mcp-design-GJNWq`
 > 鉴权方向：**Per-client API Key**（PM 已拍板，OAuth 留作后期升级）
+> 战略定性：**只读 MVP / 可执行是明确 V2 路线**（PM 拍板「留门框」，见 §12）
 > 范围：**只读 MVP** — 客户在 Claude 里调用 MCP，查看「自己的」业务/营销数据
 
 > **v2 修订（采纳魏征审查）**：①新增 **T0 transport spike 前置关卡**（Node↔Web 签名不兼容）；②MVP tool 由 8 砍到 **5**；③补 zod/SDK 依赖、空数据态、rate limit 改 Supabase 计数表；④工期 5 → **6–7 天**。坐标核验：表/字段/函数**全部真实、无编造**，CLAUDE.md 强约束**全部合规**。
@@ -312,12 +313,9 @@ PM 选了 API Key 而非 OAuth，这里有个**真实的接入面权衡**，必�
 
 ## 10. Phase 归属与开放问题（待 PM 决策）
 
-### 10.1 Phase 归属（不擅自新建，等 PM 拍）
+### 10.1 Phase 归属（PM 已拍板：新建 Phase 34）
 
-按 CLAUDE.md「不要轻易新建 Phase」原则，候选：
-
-- **选项 A（推荐）**：归入 **Phase 9（报告化 + 客户 Portal）** 作为子任务 `P9.3 Portal 程序化访问层（MCP）`。理由：MCP 本质是「客户 Portal」的程序化/对话式访问层，同模块延伸，已有 `P9.2 客户 Portal` 登记。
-- **选项 B**：新建 Phase。理由：引入了**全新对外访问模态**（客户用 Claude 而非浏览器）+ 全新 API Key 基础设施 + 工作量达 8 任务，接近开新 Phase 门槛。但 CLAUDE.md 要求「PM 明确指示才开新 Phase」。
+**已定**：PM 明确指示新建 **Phase 34 — Client MCP Server（客户自助数据访问）**，已登记进 ROADMAP（紧跟 Phase 33 之后的近期 Phase 区 + 顶部总览）。理由：引入了全新对外访问模态（客户用 Claude 而非浏览器）+ 全新 API Key 基础设施 + 工作量达 8 任务，达到开新 Phase 门槛，且 PM 明确指示。
 
 > 另注：ROADMAP `TD.3` 记着「Supabase MCP 未连接 ME 项目」——那是**给开发用的 Supabase 官方 MCP**，与本设计「给客户用的 ME 自研 MCP」是两回事，勿混淆。
 
@@ -331,18 +329,20 @@ PM 选了 API Key 而非 OAuth，这里有个**真实的接入面权衡**，必�
 
 ---
 
-## 11. 落地后 ROADMAP 登记草案（Phase 归属定了再写入）
+## 11. ROADMAP 登记（✅ 已写入 Phase 34）
+
+已登记进 ROADMAP（`### Phase 34` 章节 + 顶部总览）：
 
 ```
-- [ ] **P9.3.0** transport spike（前置关卡）：SDK+zod 依赖 + stateless StreamableHTTP 套进 App Router route handler + Inspector 握手
-- [ ] **P9.3.1** client_api_keys + mcp_access_log 表 + Bearer 鉴权层（requireApiKeyClientAccess）
-- [ ] **P9.3.2** Key 管理 API + 客户设置「🔌 API 访问」UI（强约束：配置类必须有 UI）
-- [ ] **P9.3.3** /api/mcp 接 transport + 鉴权挂载
-- [ ] **P9.3.4** scoped-queries 隔离层（client_id 闭包绑定）+ 5 个只读 tool + 空数据态 + 最里层变异测试
-- [ ] **P9.3.5** 封装名过滤层 + mcp_access_log 限流/审计 + 隔离测试 + 客户接入 SOP
+- [ ] **P34.0** transport spike（前置关卡）：SDK+zod 依赖 + stateless StreamableHTTP 套进 App Router route handler + Inspector 握手
+- [ ] **P34.1** client_api_keys + mcp_access_log 表 + requireApiKeyClientAccess 鉴权层
+- [ ] **P34.2** Key 管理 API + 客户设置「🔌 API 访问」UI（强约束：配置类必须有 UI）
+- [ ] **P34.3** /api/mcp 接 transport + 鉴权挂载
+- [ ] **P34.4** scoped-queries 隔离层（client_id 闭包绑定）+ 5 个只读 tool + 空数据态 + 最里层变异测试
+- [ ] **P34.5** 封装名过滤层 + mcp_access_log 限流/审计 + 隔离测试 + 客户接入 SOP
 ```
 
-> ⚠️ 真正写入 ROADMAP.md 前，按 CLAUDE.md 强约束跑 `git diff main -- ROADMAP.md`，确认所有 `-` 删除行 100% 与本主题相关，防误删别 Phase 登记。
+> 登记时已按 CLAUDE.md 强约束跑 `git diff main -- ROADMAP.md` 自查，确认 diff 为纯新增、无误删别 Phase 登记。
 
 ---
 

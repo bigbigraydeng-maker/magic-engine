@@ -260,6 +260,28 @@ FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Mar
 
 ---
 
+### Phase 34 — Client MCP Server（客户自助数据访问）⭐⭐ 2026-06-04 📋 设计完成，待开工
+
+> **目的**：让客户在自己的 Claude（Desktop / 网页 Custom Connector）里接入 ME，用自然语言查看**该客户专属**的真实数据（排名 / 执行进度 / 目标 / 内容交付）。**只读、强隔离、不暴露第三方供应商真名。**
+> **鉴权**：Per-client API Key（PM 拍板，OAuth 留二期）。
+> **战略定性（PM 拍板「留门框」）**：只读 MVP / **可执行是明确 V2 路线** —— tool 命名空间（`me_execute_*`）+ scope（`write:*`）按「将来可加 write」设计，将来客户可经 Claude 直接触发 Fix，成为执行飞轮新触发源（OTTO 未做的差异化窗口）。
+> **设计文档**：`docs/specs/me-mcp-server-design.md`（v3，已过魏征 + 子牙双审）
+> **PR**：[#369](https://github.com/bigbigraydeng-maker/magic-engine/pull/369)（设计稿）
+> **工期估**：≈ 6–7 天（含 P34.0 transport spike 未知数）
+
+- [ ] **P34.0** transport spike（前置关卡，不过不许往下）：新增 `@modelcontextprotocol/sdk` + `zod` 锁版本；stateless JSON 模式把 `StreamableHTTPServerTransport` 套进 App Router `/api/mcp` route handler；MCP Inspector 实测握手（验掉「能否套进 Next.js」这个唯一翻船风险）
+- [ ] **P34.1** migration：`client_api_keys`（hash-only + `metadata jsonb` + `created_by_email`）+ `mcp_access_log`（审计/限流/计费三合一，service_role 模板）+ `requireApiKeyClientAccess` 鉴权层
+- [ ] **P34.2** Key 管理 API（`/api/clients/[id]/api-keys` GET/POST/DELETE）+ 客户设置抽屉「🔌 API 访问」UI（强约束：配置类必须有 UI；MVP FDE 代发）
+- [ ] **P34.3** `/api/mcp` 接 transport + `requireApiKeyClientAccess` 鉴权挂载
+- [ ] **P34.4** `src/lib/mcp/scoped-queries.ts` 隔离层（client_id 闭包绑定 + 强制 `.eq` 拦截器，满足「校验放最里层」）+ 5 个只读 tool（overview / goals / goal-detail / seo / execution）+ 空数据态 + **最里层变异测试**
+- [ ] **P34.5** `vendor-filter.ts` 封装名过滤 + `mcp_access_log` 限流/审计 + 跨 client 隔离测试 + 客户接入 SOP（`docs/sops/`）
+
+> 二期 backlog：GA4/AI 可见度/content 三个 tool、网页版 OAuth 薄层、计费接入（`mcp_access_log` 已预留聚合源）、独立 service 拆分（触发线见设计文档 §2.2）、可执行 MCP（V2 路线，设计文档 §12）。
+
+**Phase 34 状态：📋 设计完成（v3 双审通过），待 PM 发「开工」指令 → 从 P34.0 transport spike 起。**
+
+---
+
 ### Website Self-Serve Auth - 2026-06-02
 
 - [x] **P29.AUTH.1** Google self-serve registration - add Google entry points to portal register/login, route self-serve OAuth callbacks into a new Magic Engine workspace when no existing access row exists, and keep the existing 500 MTC welcome bonus path intact.
@@ -339,6 +361,7 @@ FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Mar
 📋 Phase 26     Client Locale Intelligence / 客户地域智能层（国家→州→城市三层 + 业务范围 + AU/NZ 节日日历注入）✅ 已完成
 📋 Phase 27     Visual Reference Library / 视觉参考库（图像版 viral analyzer — FDE 上传 + 客户提供 + 竞品爬取，构建行业视觉知识库）📋 待开发
 📋 Phase 28     FDE Inbox / 待处理收件箱（⚠️ 待并入 Phase 20.D — 统一看板扩展）
+📋 Phase 34     Client MCP Server / 客户自助数据访问（只读 MVP + 可执行 V2 路线，设计完成待开工 — PR #369）
 ```
 
 **Phase 7 核心战略**：双信号博客（Dual-Signal Blog）— 每篇文章同时携带 SEO 信号（Google 排名）和 GEO 信号（AI 推荐），选题由 AI Tracker 弱项 × SEMrush 低KD机会交叉驱动，形成数据自强化飞轮。
