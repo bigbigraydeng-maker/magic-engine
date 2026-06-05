@@ -271,14 +271,14 @@ FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Mar
 
 - [x] **P34.0** transport spike（前置关卡，不过不许往下）：新增 `@modelcontextprotocol/sdk` + `zod` 锁版本；stateless JSON 模式把 `StreamableHTTPServerTransport` 套进 App Router `/api/mcp` route handler；MCP Inspector 实测握手（验掉「能否套进 Next.js」这个唯一翻船风险）✅ **PASS 2026-06-05**（mcp-handler 适配 Web 标准签名 + CF 生产 build 过 + MCP 官方 client `initialize`/`tools/list`/`tools/call` 全通；详见 `docs/specs/me-mcp-p34-0-spike-result.md`）
 - [x] **P34.1** migration：`client_api_keys`（hash-only + `metadata jsonb` + `created_by_email`）+ `mcp_access_log`（审计/限流/计费三合一，service_role 模板）+ `requireApiKeyClientAccess` 鉴权层 ✅ **2026-06-05**：两张表 apply 进 CrazyContent 已验证（RLS on + service_role policy + 4/3 索引）；`src/lib/auth/api-key-access.ts`（generateApiKey/sha256Hex/extractBearer/verifyApiKey/logMcpAccess，**25/25 单测通过**含变异/边界）；MCP 路由用 `withMcpAuth` 包装、`ME client_id` 走 `extra.meClientId` 避免与 OAuth `clientId` 混淆；生产 `npm run build` ✓ Compiled successfully。本地真实 HTTP 端到端实测被 dev 容器缺 SUPABASE_SERVICE_ROLE_KEY 阻塞——验证留 CF 预览部署 + P34.4 端到端联测
-- [ ] **P34.2** Key 管理 API（`/api/clients/[id]/api-keys` GET/POST/DELETE）+ 客户设置抽屉「🔌 API 访问」UI（强约束：配置类必须有 UI；MVP FDE 代发）
+- [x] **P34.2** Key 管理 API + 客户设置「§3 程序化访问 / 🔌 MCP API 访问」UI ✅ **2026-06-05**：`/api/clients/[id]/api-keys` (GET 列表显式列白名单防 key_hash 泄漏 / POST 发 key 返回明文仅一次) + `/[keyId]` (DELETE 软删除,双 .eq 防跨租户 IDOR);`ApiKeysPanel` 组件 (一次性高亮明文+复制按钮+关闭即销毁,active/revoked 状态徽章,吊销 confirm) 挂到 settings page §3 section (子牙纠偏:不是 Tab 抽屉是堆叠 section);14 路由测试通过 (含 GET '不含 key_hash' 变异锚点 + DELETE 双 .eq IDOR 锚点);`npm run build` ✓ Compiled successfully。**MCP 钥匙现在能在 Dashboard 前台收发了**,不再需要进 Supabase 直填。
 - [ ] **P34.3** `/api/mcp` 接 transport + `requireApiKeyClientAccess` 鉴权挂载
 - [ ] **P34.4** `src/lib/mcp/scoped-queries.ts` 隔离层（client_id 闭包绑定 + 强制 `.eq` 拦截器，满足「校验放最里层」）+ 5 个只读 tool（overview / goals / goal-detail / seo / execution）+ 空数据态 + **最里层变异测试**
 - [ ] **P34.5** `vendor-filter.ts` 封装名过滤 + `mcp_access_log` 限流/审计 + 跨 client 隔离测试 + 客户接入 SOP（`docs/sops/`）
 
 > 二期 backlog：GA4/AI 可见度/content 三个 tool、网页版 OAuth 薄层、计费接入（`mcp_access_log` 已预留聚合源）、独立 service 拆分（触发线见设计文档 §2.2）、可执行 MCP（V2 路线，设计文档 §12）。
 
-**Phase 34 状态：🔄 P34.0 ✅ + P34.1 ✅ 2026-06-05（数据库地基 + Bearer 鉴权层就位）→ 下一步 P34.2 Key 管理 API + UI。**
+**Phase 34 状态：🔄 P34.0 ✅ + P34.1 ✅ + P34.2 ✅ 2026-06-05（地基 + 鉴权 + 管理 UI 全就位）→ 下一步 P34.3 把 MCP 路由的 stub 真正接上发好的 Key。**
 
 ---
 
