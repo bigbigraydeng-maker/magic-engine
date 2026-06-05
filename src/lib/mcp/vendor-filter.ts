@@ -28,11 +28,24 @@ const VENDOR_MAP: Array<{ pattern: RegExp; replacement: string }> = [
   { pattern: /\bpubler\b/gi, replacement: 'Publishing Hub' },
 ]
 
+/** Packaged names — used to collapse accidental duplicates after scrubbing. */
+const PACKAGED_NAMES = [
+  'Content Engine', 'Strategy Engine', 'Keyword Intelligence', 'Site Analyzer',
+  'Visual Studio', 'Video Studio', 'Avatar Studio', 'Content Workspace', 'Publishing Hub',
+]
+
 /** Scrub vendor names from a single string. */
 export function scrubString(input: string): string {
   let out = input
   for (const { pattern, replacement } of VENDOR_MAP) {
     out = out.replace(pattern, replacement)
+  }
+  // Collapse consecutive duplicate packaged names that arise when two vendor
+  // tokens in a phrase map to the same 封装名 (e.g. "OpenAI GPT-4o-mini" first
+  // becomes "Content Engine Content Engine"). 狄仁杰 review — cosmetic only,
+  // the security contract (no real vendor name) already held without this.
+  for (const name of PACKAGED_NAMES) {
+    out = out.replace(new RegExp(`${name}(?:\\s+${name})+`, 'g'), name)
   }
   return out
 }

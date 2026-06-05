@@ -27,6 +27,12 @@ describe('scrubString', () => {
   it('leaves unrelated text untouched', () => {
     expect(scrubString('your search ranking improved')).toBe('your search ranking improved')
   })
+
+  it('collapses duplicate packaged names from multi-token vendor phrases (狄仁杰)', () => {
+    // "OpenAI GPT-4o-mini": both tokens map to Content Engine — must not double.
+    expect(scrubString('OpenAI GPT-4o-mini')).toBe('Content Engine')
+    expect(scrubString('built on OpenAI GPT-4o-mini today')).toBe('built on Content Engine today')
+  })
 })
 
 describe('scrubVendorNames (recursive)', () => {
