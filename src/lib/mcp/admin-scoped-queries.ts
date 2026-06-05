@@ -88,13 +88,14 @@ export interface AdminQueries {
  * because admin is cross-client by design.
  */
 export function createAdminQueries(): AdminQueries {
+  // Each query self-guards client_id at the innermost layer (狄仁杰: don't rely
+  // only on the factory / tool-layer zod). requireClientId throws on empty.
   return {
     listAllClients,
-    getOverview: async (clientId: string) => getOverview(requireClientId(clientId)),
-    listGoals: async (clientId: string, status?: string) => listGoals(requireClientId(clientId), status),
-    getSeoPerformance: async (clientId: string, limit?: number) =>
-      getSeoPerformance(requireClientId(clientId), limit),
-    listExecutionItems: async (clientId: string) => listExecutionItems(requireClientId(clientId)),
+    getOverview,
+    listGoals,
+    getSeoPerformance,
+    listExecutionItems,
   }
 }
 
@@ -122,6 +123,7 @@ async function listAllClients(): Promise<ClientSummary[]> {
 
 // SYNC WITH scoped-queries.ts getOverview
 async function getOverview(clientId: string): Promise<OverviewResult> {
+  requireClientId(clientId)
   const [diag, blog, social] = await Promise.all([
     supabaseAdmin
       .from('diagnostic_runs')
@@ -150,6 +152,7 @@ async function getOverview(clientId: string): Promise<OverviewResult> {
 
 // SYNC WITH scoped-queries.ts listGoals
 async function listGoals(clientId: string, status?: string): Promise<GoalSummary[]> {
+  requireClientId(clientId)
   let query = supabaseAdmin
     .from('goals')
     .select(
@@ -165,6 +168,7 @@ async function listGoals(clientId: string, status?: string): Promise<GoalSummary
 
 // SYNC WITH scoped-queries.ts getSeoPerformance
 async function getSeoPerformance(clientId: string, limit?: number): Promise<SeoResult> {
+  requireClientId(clientId)
   const capped = Math.min(Math.max(1, limit ?? SEO_DEFAULT_LIMIT), SEO_MAX_LIMIT)
   const { data } = await supabaseAdmin
     .from('gsc_performance_snapshots')
@@ -188,6 +192,7 @@ async function getSeoPerformance(clientId: string, limit?: number): Promise<SeoR
 
 // SYNC WITH scoped-queries.ts listExecutionItems
 async function listExecutionItems(clientId: string): Promise<ExecutionByDimension> {
+  requireClientId(clientId)
   const { data } = await supabaseAdmin
     .from('execution_items')
     .select('id, title, status, dimension, due_date')
