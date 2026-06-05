@@ -61,16 +61,19 @@ const handler = withMcpAuth(
     // Take over bearer parsing ourselves: extractBearer tolerates multi-space
     // / casing, rather than relying on mcp-handler's internal split(" ").
     const token = extractBearer(req.headers.get('authorization'))
-    const result = await verifyApiKey(token)
-    if (!result.ok) return undefined
+    const sourceIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+    // expectedKind 'client' (Z1): an admin key here → wrong_endpoint → rejected.
+    const result = await verifyApiKey(token, { expectedKind: 'client', sourceIp })
+    if (!result.ok || result.auth.kind !== 'client') return undefined
     // OAuth-shaped AuthInfo: `clientId` is OAuth's "issuing app" concept and
-    // NOT our ME client_id. We stash both keyId and the locked ME client_id
-    // in `extra.meClientId` so tool callbacks (P34.4) can read them safely.
+    // NOT our ME client_id. We stash kind + ME client_id in extra so tool
+    // callbacks read them via requireMeClientId (which throws if missing).
     return {
       token: token ?? '',
       clientId: result.auth.keyId, // OAuth-level identifier, not ME client_id
       scopes: result.auth.scopes,
       extra: {
+        kind: 'client',
         meClientId: result.auth.clientId,
         keyId: result.auth.keyId,
       },

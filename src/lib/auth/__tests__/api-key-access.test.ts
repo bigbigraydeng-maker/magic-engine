@@ -226,12 +226,15 @@ describe('logMcpAccess', () => {
     })
 
     expect(mockFrom).toHaveBeenCalledWith('mcp_access_log')
+    // Default kind = 'client' → writes client_key_id (R2 双 FK), NOT old key_id.
     expect(insertChain.insert).toHaveBeenCalledWith({
-      key_id: KEY_ID,
+      key_kind: 'client',
+      client_key_id: KEY_ID,
       client_id: CLIENT_ID,
       tool: 'me_ping',
       ok: true,
       error_code: null,
+      source_ip: null,
     })
   })
 
@@ -248,7 +251,27 @@ describe('logMcpAccess', () => {
     })
 
     expect(insertChain.insert).toHaveBeenCalledWith(
-      expect.objectContaining({ ok: false, error_code: 'rate_limited' }),
+      expect.objectContaining({ ok: false, error_code: 'rate_limited', key_kind: 'client' }),
     )
+  })
+
+  it('admin kind writes admin_key_id, never client_key_id (R2)', () => {
+    const insertChain = mockInsertOk()
+    mockFrom.mockReturnValue(insertChain)
+
+    logMcpAccess({
+      kind: 'admin',
+      keyId: KEY_ID,
+      clientId: CLIENT_ID,
+      tool: 'me_admin_get_overview',
+      ok: true,
+      sourceIp: '203.0.113.5',
+    })
+
+    const row = insertChain.insert.mock.calls[0][0]
+    expect(row.key_kind).toBe('admin')
+    expect(row.admin_key_id).toBe(KEY_ID)
+    expect(row).not.toHaveProperty('client_key_id')
+    expect(row.source_ip).toBe('203.0.113.5')
   })
 })
