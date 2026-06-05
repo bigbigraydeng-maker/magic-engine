@@ -19,7 +19,9 @@ import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js'
 import { createMcpHandler, withMcpAuth } from 'mcp-handler'
 import { z } from 'zod'
 import {
+  extractBearer,
   logMcpAccess,
+  requireMeClientId,
   verifyApiKey,
 } from '@/lib/auth/api-key-access'
 
@@ -31,21 +33,13 @@ const baseHandler = createMcpHandler(
         'time. (P34.0/1 stub — real client-data tools land in P34.4.)',
       { echo: z.string().optional() },
       async ({ echo }, { authInfo }) => {
-        // authInfo is populated by withMcpAuth below; we always log access so
-        // the access log doubles as audit + rate-limit source + future
-        // billing aggregation (design doc §6.5).
-        if (authInfo?.extra) {
-          const meClientId = authInfo.extra.meClientId as string | undefined
-          const keyId = authInfo.extra.keyId as string | undefined
-          if (meClientId && keyId) {
-            logMcpAccess({
-              keyId,
-              clientId: meClientId,
-              tool: 'me_ping',
-              ok: true,
-            })
-          }
-        }
+        // requireMeClientId throws if the locked client context is missing —
+        // the correct pattern for real data tools (P34.4). me_ping reaching
+        // this point already means withMcpAuth admitted the request, so the
+        // context is always present; we still go through the single chokepoint
+        // rather than reading authInfo.extra ad hoc.
+        const { meClientId, keyId } = requireMeClientId(authInfo)
+        logMcpAccess({ keyId, clientId: meClientId, tool: 'me_ping', ok: true })
         return {
           content: [
             {
@@ -63,14 +57,17 @@ const baseHandler = createMcpHandler(
 
 const handler = withMcpAuth(
   baseHandler,
-  async (_req, bearerToken): Promise<AuthInfo | undefined> => {
-    const result = await verifyApiKey(bearerToken)
+  async (req): Promise<AuthInfo | undefined> => {
+    // Take over bearer parsing ourselves: extractBearer tolerates multi-space
+    // / casing, rather than relying on mcp-handler's internal split(" ").
+    const token = extractBearer(req.headers.get('authorization'))
+    const result = await verifyApiKey(token)
     if (!result.ok) return undefined
     // OAuth-shaped AuthInfo: `clientId` is OAuth's "issuing app" concept and
     // NOT our ME client_id. We stash both keyId and the locked ME client_id
     // in `extra.meClientId` so tool callbacks (P34.4) can read them safely.
     return {
-      token: bearerToken ?? '',
+      token: token ?? '',
       clientId: result.auth.keyId, // OAuth-level identifier, not ME client_id
       scopes: result.auth.scopes,
       extra: {

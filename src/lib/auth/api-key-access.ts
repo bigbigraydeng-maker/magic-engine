@@ -85,6 +85,11 @@ export function extractBearer(header: string | null | undefined): string | null 
  *   - On success, fire-and-forget update of `last_used_at` (non-blocking).
  *   - Does NOT write to `mcp_access_log` — that's the caller's job (we don't
  *     know the tool name here; callers wrap with logMcpAccess after dispatch).
+ *
+ * Timing: lookup is a hash-equality index query. There is NO usable timing
+ * side-channel — sha256 is one-way, so DB B-tree timing cannot be reverted to
+ * plaintext (one char change avalanches the whole hash). Hence we deliberately
+ * do NOT use crypto.timingSafeEqual; it would add complexity for no gain.
  */
 export async function verifyApiKey(rawKey: string | null | undefined): Promise<VerifyResult> {
   if (!rawKey) return { ok: false, reason: 'missing' }
@@ -104,7 +109,11 @@ export async function verifyApiKey(rawKey: string | null | undefined): Promise<V
   }
   if (!data) return { ok: false, reason: 'not_found_or_revoked' }
 
-  void touchLastUsed(data.id)
+  // Fire-and-forget; .catch covers the case where the supabase builder
+  // rejects (network / fetch abort) rather than resolving with { error }.
+  void touchLastUsed(data.id).catch((e) =>
+    console.error('[api-key-access] touchLastUsed rejected:', e),
+  )
   return {
     ok: true,
     auth: {
@@ -146,4 +155,42 @@ export function logMcpAccess(params: {
     .then(({ error }) => {
       if (error) console.error('[api-key-access] logMcpAccess failed:', error)
     })
+    // Second arg / .catch covers a rejected builder (network / fetch abort);
+    // without it this fire-and-forget would be an unhandled rejection.
+    .catch((e) => console.error('[api-key-access] logMcpAccess rejected:', e))
+}
+
+/**
+ * The locked MCP context for a request: the ME client_id (NOT OAuth clientId)
+ * and the issuing key id, both stashed in AuthInfo.extra by the route's
+ * withMcpAuth verifyToken callback.
+ */
+export interface McpContext {
+  meClientId: string
+  keyId: string
+}
+
+/**
+ * Extract the locked MCP context from an MCP tool callback's authInfo.
+ *
+ * SECURITY (魏征 review): tools MUST call this instead of reading
+ * `authInfo.extra.meClientId` ad hoc. If the context is missing it THROWS —
+ * never silently continues — so a real client-data tool (P34.4) can never
+ * run a query without a client_id and leak across tenants. The `me_ping`
+ * stub's "skip logging if extra missing" pattern must NOT be copied into
+ * data tools; this guard is the single chokepoint that enforces it.
+ *
+ * @param authInfo - the `authInfo` passed to an MCP tool callback by mcp-handler
+ */
+export function requireMeClientId(authInfo: unknown): McpContext {
+  const extra = (authInfo as { extra?: Record<string, unknown> } | undefined)?.extra
+  const meClientId = extra?.meClientId
+  const keyId = extra?.keyId
+  if (typeof meClientId !== 'string' || meClientId.length === 0) {
+    throw new Error('MCP auth context missing meClientId — refusing to run tool')
+  }
+  if (typeof keyId !== 'string' || keyId.length === 0) {
+    throw new Error('MCP auth context missing keyId — refusing to run tool')
+  }
+  return { meClientId, keyId }
 }

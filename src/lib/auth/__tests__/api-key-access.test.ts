@@ -12,6 +12,7 @@ import {
   extractBearer,
   verifyApiKey,
   logMcpAccess,
+  requireMeClientId,
   KEY_PREFIX,
 } from '../api-key-access'
 import { supabaseAdmin } from '@/lib/supabase'
@@ -172,6 +173,43 @@ describe('verifyApiKey', () => {
     // None of the chain calls should ever include the plaintext.
     const allCalls = [...chain.eq.mock.calls, ...chain.is.mock.calls].flat()
     expect(allCalls).not.toContain(plaintext)
+  })
+
+  // Semantic revoked test (魏征 review): the previous .is()-was-called check
+  // only verifies the query is *constructed* with the filter. This one
+  // documents the real contract — a revoked row never reaches the success
+  // path. The DB enforces it via `.is('revoked_at', null)`, so when a key is
+  // revoked the query returns no row and verifyApiKey must report
+  // not_found_or_revoked, NOT ok:true.
+  it('a revoked key (filtered out by SQL) yields not_found_or_revoked', async () => {
+    // Simulate the SQL filter: revoked rows are excluded → maybeSingle empty.
+    mockLookup({ data: null, error: null })
+    const res = await verifyApiKey(`${KEY_PREFIX}revokedkey`)
+    expect(res).toEqual({ ok: false, reason: 'not_found_or_revoked' })
+  })
+})
+
+describe('requireMeClientId', () => {
+  it('returns meClientId + keyId from a well-formed authInfo', () => {
+    const ctx = requireMeClientId({
+      extra: { meClientId: CLIENT_ID, keyId: KEY_ID },
+    })
+    expect(ctx).toEqual({ meClientId: CLIENT_ID, keyId: KEY_ID })
+  })
+
+  it.each([
+    ['undefined authInfo', undefined],
+    ['null authInfo', null],
+    ['no extra', {}],
+    ['empty extra', { extra: {} }],
+    ['missing meClientId', { extra: { keyId: KEY_ID } }],
+    ['missing keyId', { extra: { meClientId: CLIENT_ID } }],
+    ['empty meClientId', { extra: { meClientId: '', keyId: KEY_ID } }],
+    ['non-string meClientId', { extra: { meClientId: 123, keyId: KEY_ID } }],
+  ])('throws (refuses to run) when %s', (_label, authInfo) => {
+    // This is the security chokepoint: a data tool must NEVER run without a
+    // locked client_id. Missing context => throw, never silent continue.
+    expect(() => requireMeClientId(authInfo)).toThrow()
   })
 })
 
