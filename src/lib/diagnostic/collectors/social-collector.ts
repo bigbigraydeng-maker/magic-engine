@@ -79,13 +79,39 @@ export class SocialCollector {
         return { score: null, findings: [this.makeMissingPresenceFinding(clientId)], post_samples: [] }
       }
 
-      const timeout = new Promise<SocialCollectorResult>(resolve =>
-        setTimeout(() => resolve({ score: null, findings: [], post_samples: [] }), this.timeoutMs),
+      // Wrap the collector race so a stall surfaces as an explicit timeout finding
+      // rather than a silent score=null + empty findings. (魏征: 2026-06-05 fix —
+      // previously a stuck Apify call left FDE with "未配置" with no debugging
+      // signal anywhere; the timeout path produced zero log lines, zero finding.)
+      const TIMEOUT_SENTINEL = Symbol('social-collector timeout')
+      const timeoutSec = Math.round(this.timeoutMs / 1000)
+      const timeout = new Promise<typeof TIMEOUT_SENTINEL>(resolve =>
+        setTimeout(() => resolve(TIMEOUT_SENTINEL), this.timeoutMs),
       )
 
-      return await Promise.race([this.collectAndScore(clientId, handles), timeout])
-    } catch {
-      return { score: null, findings: [], post_samples: [] }
+      const raced = await Promise.race([this.collectAndScore(clientId, handles), timeout])
+
+      if (raced === TIMEOUT_SENTINEL) {
+        console.error(`[social-collector] timeout after ${timeoutSec}s — clientId=${clientId}`)
+        return {
+          score: null,
+          findings: [this.makeCollectorErrorFinding(clientId, handles, `Collector timed out after ${timeoutSec} seconds`)],
+          post_samples: [],
+        }
+      }
+
+      return raced
+    } catch (err) {
+      // Last-resort safety net for fetchSocialHandles / hasFreshCache failures.
+      // collectAndScore has its own per-platform error handling that returns
+      // findings; reaching this catch means something earlier blew up.
+      const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+      console.error(`[social-collector] unexpected error — clientId=${clientId} err=${message}`)
+      return {
+        score: null,
+        findings: [this.makeCollectorErrorFinding(clientId, null, message)],
+        post_samples: [],
+      }
     }
   }
 
@@ -119,7 +145,10 @@ export class SocialCollector {
     const findings: NewFinding[] = []
     const post_samples: SocialPostSample[] = []
 
-    // Run configured platforms concurrently; each is fault-tolerant
+    // Run configured platforms concurrently; each is fault-tolerant.
+    // Order is fixed: [Instagram, Facebook, TikTok] — relied on below for
+    // mapping rejected promises back to the platform that failed.
+    const PLATFORM_ORDER = ['Instagram', 'Facebook', 'TikTok'] as const
     const jobs = await Promise.allSettled([
       handles.instagramHandle
         ? scrapeInstagramProfile(handles.instagramHandle).then(p => ({
@@ -147,9 +176,24 @@ export class SocialCollector {
         : Promise.resolve(null),
     ])
 
-    for (const result of jobs) {
-      if (result.status !== 'fulfilled' || !result.value) continue
-      const { platform, posts, engagementRate, topPosts } = result.value
+    for (let i = 0; i < jobs.length; i++) {
+      const result = jobs[i]
+      if (!result) continue
+      const platform = PLATFORM_ORDER[i]!
+
+      // Surface per-platform scraper failures — previously these were silently
+      // skipped via `continue`, leaving score=null + zero findings + zero log
+      // lines. Now: console.error + a typed finding so FDE sees the real reason
+      // (Apify 401 / actor not found / timeout / Facebook blocked).
+      if (result.status === 'rejected') {
+        const err = result.reason
+        const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+        console.error(`[social-collector] ${platform} scrape failed — clientId=${clientId} err=${message}`)
+        findings.push(this.makeScrapeFailedFinding(clientId, platform, handles, message))
+        continue
+      }
+      if (!result.value) continue
+      const { posts, engagementRate, topPosts } = result.value
 
       post_samples.push(...topPosts)
 
@@ -249,6 +293,78 @@ export class SocialCollector {
       }),
       recommendation:
         'Open Client Settings → Social and add the Instagram handle, Facebook Page URL, and/or TikTok handle. Prioritise Instagram + Facebook for AU/NZ markets.',
+      fix_type: 'fde_manual',
+      priority_score: 75,
+    }
+  }
+
+  /**
+   * Emitted when a single platform's scraper throws (Apify 401 / 404 / 500,
+   * timeout, network error, Facebook blocked, etc). Carries the real error
+   * message in `evidence.parsed.error` so FDE can see what went wrong.
+   *
+   * Prior to 2026-06-05 these failures were silently swallowed by `continue`
+   * in the result loop, leaving a null score + zero findings + zero Render
+   * Logs. PM had no way to distinguish "未配置 handle" from "Apify key expired".
+   */
+  private makeScrapeFailedFinding(
+    clientId: string,
+    platform: 'Instagram' | 'Facebook' | 'TikTok',
+    handles: SocialHandles,
+    errorMessage: string,
+  ): NewFinding {
+    return {
+      client_id: clientId,
+      dimension: 'social',
+      finding_type: 'social_scrape_failed',
+      severity: 'high',
+      title: `${platform} data could not be fetched`,
+      description:
+        `The Apify ${platform} scraper failed for this client, so ${platform} performance was excluded from the social score. ` +
+        `Error: ${errorMessage}`,
+      evidence: makeEvidence({
+        parsed: { platform, error: errorMessage },
+        sources: sourcesForPlatform(platform, handles),
+      }),
+      recommendation:
+        `Check Render logs for "[social-scraper] Apify ${platform} error" to see the response body. ` +
+        'Most common causes: APIFY_API_KEY expired/wrong, Apify account out of credits, the actor was renamed/disabled, or the public profile is private/region-blocked.',
+      fix_type: 'fde_manual',
+      priority_score: 70,
+    }
+  }
+
+  /**
+   * Emitted when the whole collector throws or times out before any per-platform
+   * loop runs (e.g. fetchSocialHandles DB error, hasFreshCache crash, collector
+   * stalls past timeoutMs). Distinct finding_type from scrape_failed so the UI
+   * can render different remediation copy.
+   */
+  private makeCollectorErrorFinding(
+    clientId: string,
+    handles: SocialHandles | null,
+    errorMessage: string,
+  ): NewFinding {
+    return {
+      client_id: clientId,
+      dimension: 'social',
+      finding_type: 'social_collector_error',
+      severity: 'high',
+      title: 'Social collector failed before scoring',
+      description:
+        'The diagnostic engine could not complete the social check. The collector either stalled or hit an unexpected error before any platform-level data was fetched. ' +
+        `Error: ${errorMessage}`,
+      evidence: makeEvidence({
+        parsed: {
+          error: errorMessage,
+          instagram_handle:  handles?.instagramHandle ?? null,
+          facebook_page_url: handles?.facebookPageUrl ?? null,
+          tiktok_handle:     handles?.tiktokHandle ?? null,
+        },
+      }),
+      recommendation:
+        'Check Render logs for "[social-collector]" lines around the diagnostic run time. ' +
+        'If the error message mentions Apify, follow the social_scrape_failed remediation steps.',
       fix_type: 'fde_manual',
       priority_score: 75,
     }

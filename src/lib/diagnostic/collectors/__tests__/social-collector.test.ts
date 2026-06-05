@@ -219,12 +219,28 @@ describe('SocialCollector.collect() — missing Instagram handle', () => {
 // ---------------------------------------------------------------------------
 
 describe('SocialCollector.collect() — Apify failure', () => {
-  it('returns degraded { score: null, findings: [] } when Apify throws', async () => {
+  // 2026-06-05: failures used to be silently swallowed (findings: []), making
+  // it impossible to distinguish "Apify down" from "user did not configure".
+  // Now each per-platform rejection becomes a typed social_scrape_failed
+  // finding with the underlying error message in evidence.parsed.error.
+  it('returns degraded score=null + a social_scrape_failed finding when Apify throws', async () => {
     mockScrapeInstagramProfile.mockRejectedValue(new Error('Apify down'))
     const supabase = makeSupabase({})
     const result = await new SocialCollector(supabase, 30_000).collect(CLIENT_ID, DOMAIN, KEYWORDS)
     expect(result.score).toBeNull()
-    expect(result.findings).toHaveLength(0)
+    expect(result.findings).toHaveLength(1)
+
+    const finding = result.findings[0]!
+    expect(finding.dimension).toBe('social')
+    expect(finding.finding_type).toBe('social_scrape_failed')
+    expect(finding.severity).toBe('high')
+    expect(finding.title).toContain('Instagram')
+
+    // The real underlying error must be carried in evidence so FDE can see it.
+    expect(finding.evidence).not.toBeNull()
+    const parsed = finding.evidence!.parsed as { platform: string; error: string }
+    expect(parsed.platform).toBe('Instagram')
+    expect(parsed.error).toContain('Apify down')
   })
 })
 

@@ -18,9 +18,31 @@ import type { IndustryCode } from '@/lib/industry-ai-visibility/types'
 
 const MAPPING: Record<string, IndustryCode> = {
   // Tourism
-  'travel':             'inbound_tour',
-  'tourism':            'inbound_tour',
-  'tour operator':      'inbound_tour',
+  //
+  // AU/NZ travel agents serve two directions:
+  //   - outbound_tour: AU/NZ residents going overseas (CTS Tours NZ → China,
+  //                    most retail travel agents). This is the dominant case
+  //                    for ME's AU/NZ market.
+  //   - inbound_tour:  overseas visitors coming TO AU/NZ (DMCs, inbound
+  //                    operators, Chinese-language inbound DMCs). Smaller
+  //                    market but distinct AI-question set.
+  //
+  // Default the generic keywords ("travel", "tourism", "tour operator") to
+  // OUTBOUND because that's what most AU/NZ retail clients are. Inbound
+  // operators must use an explicit keyword ("inbound tour" / "入境旅游" /
+  // "中文旅行社") that ALL include the disambiguating signal.
+  //
+  // Pre-2026-06-05 these generic keywords mapped to inbound_tour and
+  // silently misclassified CTS Tours NZ (outbound NZ→China) → "no AI
+  // visibility snapshots for industry inbound_tour" because the inbound_tour
+  // snapshot didn't match CTS's outbound question set.
+  'travel':             'outbound_tour',
+  'tourism':            'outbound_tour',
+  'tour operator':      'outbound_tour',
+  '出境旅游':           'outbound_tour',
+  // Inbound operators must opt in explicitly:
+  'inbound tour':       'inbound_tour',
+  'inbound tourism':    'inbound_tour',
   '入境旅游':           'inbound_tour',
   '中文旅行社':         'inbound_tour',
 
