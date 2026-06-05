@@ -60,9 +60,11 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  // Use signUp (not admin.createUser) so we can set emailRedirectTo.
-  // This ensures the verification link goes to /auth/callback?next=/portal
-  // rather than the bare SITE_URL.
+  // Use signUp (not admin.createUser) so Supabase sends the signup confirmation
+  // email. The Supabase email template uses {{ .Token }} (a 6-digit OTP), NOT
+  // {{ .ConfirmationURL }} — P0-B. The user enters that code on the next screen,
+  // which POSTs to /api/auth/verify-otp. emailRedirectTo is kept as a harmless
+  // fallback for any environment still on the link template.
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.magicengine.com.au'
   const supabaseAnon = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -89,10 +91,20 @@ export async function POST(request: NextRequest) {
   }
 
   // Create clients row
+  //
+  // P0-C fix: contact_email is the canonical channel for FDE/admin outreach
+  // (support tickets, MTC top-up reminders, account recovery). It was previously
+  // left NULL because grant-signup-bonus reads the email from
+  // client_portal_users.email instead — so the bonus path still works without
+  // it — but downstream tooling (admin UI, billing reminders, A2.2 GSC brand
+  // search heuristics) all expect contact_email to be populated. Writing it
+  // here is non-breaking: clients.contact_email was already nullable, and
+  // existing rows just keep their NULL until they're touched.
   const { data: client, error: clientError } = await supabaseAdmin
     .from('clients')
     .insert({
       name: businessName.trim(),
+      contact_email: email.toLowerCase().trim(),
       domain: (websiteUrl?.trim() || '').replace(/^https?:\/\//i, '').replace(/\/.*$/, '').toLowerCase() || null,
       source: 'self_serve',
     })
@@ -153,6 +165,9 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     ok: true,
     clientId: client.id,
-    message: 'Account created. Please check your email to verify your address.',
+    email: email.toLowerCase().trim(),
+    next: safeNext,
+    needsVerification: true,
+    message: 'Account created. Enter the 6-digit code we just emailed you to verify.',
   })
 }

@@ -218,12 +218,25 @@
           </form>
         </div>
 
-        <!-- Success state (hidden) -->
-        <div class="email-sent" role="status" aria-live="polite">
+        <!-- Success state (hidden). app.js sets data-state to "delivered" when the
+             report email actually sent, or "pending" when the scan hasn't finished
+             (no honest report to send yet). CSS below shows the matching copy. -->
+        <div class="email-sent" data-state="pending" role="status" aria-live="polite">
           <div style="font-size:1.5rem;margin-bottom:8px;">✅</div>
-          <strong data-en="Report on its way!" data-zh="报告已发出！">Report on its way!</strong>
-          <p style="margin-top:6px;font-size:.88rem;color:#1F7A55;" data-en="Check your inbox within 24 hours. Check spam if you don't see it." data-zh="请在 24 小时内查看收件箱，如未收到请检查垃圾邮件。">Check your inbox within 24 hours. Check spam if you don't see it.</p>
+          <span class="es-delivered">
+            <strong data-en="Report on its way!" data-zh="报告已发出！">Report on its way!</strong>
+            <p style="margin-top:6px;font-size:.88rem;color:#1F7A55;" data-en="Check your inbox within 24 hours. Check spam if you don't see it." data-zh="请在 24 小时内查看收件箱，如未收到请检查垃圾邮件。">Check your inbox within 24 hours. Check spam if you don't see it.</p>
+          </span>
+          <span class="es-pending">
+            <strong data-en="You're on the list!" data-zh="已为您登记！">You're on the list!</strong>
+            <p style="margin-top:6px;font-size:.88rem;color:#1F7A55;" data-en="Your scan is still finishing. We'll email your full report the moment it's ready — usually within 24 hours." data-zh="您的扫描仍在进行中，报告准备就绪后我们会立即发送到您的邮箱，通常在 24 小时内。">Your scan is still finishing. We'll email your full report the moment it's ready — usually within 24 hours.</p>
+          </span>
         </div>
+        <style>
+          .email-sent .es-delivered, .email-sent .es-pending { display: none; }
+          .email-sent[data-state="delivered"] .es-delivered { display: block; }
+          .email-sent[data-state="pending"] .es-pending { display: block; }
+        </style>
       </div>
 
       <!-- Run another -->
