@@ -26,7 +26,8 @@ vi.mock('@/lib/supabase', () => ({
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
-  requireDashboardClientAccess: vi.fn(),
+  requireDashboardClientAccess: vi.fn().mockResolvedValue({ ok: true, user: { id: 'test-user', email: 'test@magiclab.com' }, role: 'admin', tier: 'admin', allowedClientId: null }),
+  requirePaidClientAccess: vi.fn().mockResolvedValue({ ok: true, user: { id: 'test-user', email: 'test@magiclab.com' }, role: 'admin', tier: 'admin', allowedClientId: null }),
 }))
 
 // ---------------------------------------------------------------------------
@@ -37,9 +38,9 @@ import { POST } from '../run/route'
 import { GET as getLatest } from '../latest/route'
 import { GET as getRuns } from '../runs/route'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requireDashboardClientAccess, requirePaidClientAccess } from '@/lib/auth/client-access'
 
-const mockAccess = vi.mocked(requireDashboardClientAccess)
+const mockAccess = vi.mocked(requirePaidClientAccess)
 
 // ---------------------------------------------------------------------------
 // Helpers

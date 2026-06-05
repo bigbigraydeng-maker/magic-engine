@@ -16,6 +16,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireBearerToken } from '@/lib/validation-utils'
 import { runGscAttributionForClient } from '@/lib/flywheel/attribution/gsc-bridge'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,6 +27,11 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } },
 ): Promise<NextResponse> {
+  const access = await requirePaidClientAccess(params.id)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
+  }
+
   const auth = requireBearerToken(req.headers.get('authorization') ?? undefined)
   if (!auth.ok) {
     return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })

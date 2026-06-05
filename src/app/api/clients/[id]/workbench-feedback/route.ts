@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 
 type FeedbackState = 'done' | 'dismissed' | 'irrelevant'
@@ -28,7 +28,7 @@ export async function POST(
   { params }: { params: { id: string } },
 ) {
   const { id: clientId } = params
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }

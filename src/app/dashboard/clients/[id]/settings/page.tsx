@@ -19,6 +19,8 @@ import { GbpPanel } from './_components/GbpPanel'
 import { CompetitorDomainsPanel } from './_components/CompetitorDomainsPanel'
 import { PrimaryKeywordsPanel } from './_components/PrimaryKeywordsPanel'
 import { BrandAliasesPanel } from './_components/BrandAliasesPanel'
+import { SocialHandlesPanel } from './_components/SocialHandlesPanel'
+import { ApiKeysPanel } from './_components/ApiKeysPanel'
 
 const ERROR_MESSAGES: Record<string, string> = {
   token_exchange_failed: '无法从 Google 获取访问令牌，请重试。',
@@ -159,6 +161,38 @@ export default function ClientSettingsPage() {
             <h2 className="font-black text-slate-800">竞品域名清单</h2>
           </div>
           <CompetitorDomainsPanel clientId={clientId} />
+        </section>
+
+        {/* ── §3 社媒账号（诊断 social 维度数据源） ──────────────────────── */}
+        <div className="mt-10 mb-2 flex items-baseline gap-2">
+          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+            § 3 · 社媒账号
+          </p>
+          <span className="text-xs text-slate-400">驱动诊断引擎社媒维度</span>
+        </div>
+
+        <section>
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-base">📱</span>
+            <h2 className="font-black text-slate-800">Instagram · Facebook · TikTok</h2>
+          </div>
+          <SocialHandlesPanel clientId={clientId} />
+        </section>
+
+        {/* ── §4 程序化访问（Phase 34） ───────────────────────────────────── */}
+        <div className="mt-10 mb-2 flex items-baseline gap-2">
+          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+            § 4 · 程序化访问
+          </p>
+          <span className="text-xs text-slate-400">客户用自己的 MCP 客户端查看本客户数据</span>
+        </div>
+
+        <section>
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-base">🔌</span>
+            <h2 className="font-black text-slate-800">MCP API 访问</h2>
+          </div>
+          <ApiKeysPanel clientId={clientId} />
         </section>
 
       </div>

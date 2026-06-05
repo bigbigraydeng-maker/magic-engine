@@ -13,7 +13,7 @@
  *   { success: false, code: ..., error: string }    — other errors
  *
  * Security:
- *   - requireDashboardClientAccess (tenant isolation)
+ *   - requirePaidClientAccess (tenant isolation)
  *   - URL validated to be http(s) and same domain as client's GSC property
  *
  * Quota: 200 requests/day per Google Cloud project.
@@ -21,7 +21,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { getValidAccessToken } from '@/lib/google-oauth/client'
 import { requestIndexing } from '@/lib/gsc/indexing-client'
 import { buildAuthUrl, buildState } from '@/lib/google-oauth/client'
@@ -33,7 +33,7 @@ interface RouteContext {
 
 export async function POST(req: NextRequest, { params }: RouteContext) {
   const { id: clientId } = params
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }

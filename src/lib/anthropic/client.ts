@@ -33,6 +33,25 @@ export function getAnthropicClient(): Anthropic {
   return new Anthropic({ apiKey, baseURL: CF_GATEWAY_BASE, defaultHeaders })
 }
 
+/**
+ * Direct Anthropic client that bypasses CF AI Gateway.
+ *
+ * Use for long-running Claude calls (>60s) that would otherwise be killed by
+ * Cloudflare's gateway timeout (524). Marketing Plan generation is the primary
+ * use case — it calls Claude with maxOutputTokens=8000 and can take 60-120s.
+ *
+ * Trade-off: no CF Gateway caching/logging for these calls, but the call
+ * actually completes rather than returning HTML 524.
+ */
+export function getAnthropicClientDirect(): Anthropic {
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) {
+    throw new Error('ANTHROPIC_API_KEY environment variable is not set')
+  }
+  // No baseURL override — uses Anthropic SDK default (api.anthropic.com)
+  return new Anthropic({ apiKey })
+}
+
 export interface ClaudeDocInput {
   type: 'pdf' | 'text'
   /** Base64 for PDF, plain string for text */
@@ -50,16 +69,21 @@ export interface ClaudeCallResult {
 /**
  * Call Claude with optional documents (PDFs or text blobs) and a user message.
  * Uses the beta messages API when PDFs are present (required for PDF support in SDK v0.32.x).
+ *
+ * @param bypassGateway - When true, calls Anthropic API directly (no CF Gateway).
+ *   Use for long-running calls (>60s) to avoid Cloudflare 524 timeout.
+ *   See: fix/marketing-plan-cf-timeout
  */
 export async function callClaudeWithDocs(params: {
   systemPrompt: string
   userMessage: string
   docs?: ClaudeDocInput[]
   maxOutputTokens?: number
+  bypassGateway?: boolean
 }): Promise<ClaudeCallResult> {
-  const { systemPrompt, userMessage, docs = [], maxOutputTokens = 8096 } = params
+  const { systemPrompt, userMessage, docs = [], maxOutputTokens = 8096, bypassGateway = false } = params
 
-  const client = getAnthropicClient()
+  const client = bypassGateway ? getAnthropicClientDirect() : getAnthropicClient()
   const hasPdfs = docs.some(d => d.type === 'pdf')
 
   // Build content array — docs first, then user message

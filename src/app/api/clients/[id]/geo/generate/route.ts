@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { generateGeoDirective } from '@/lib/geo/composer'
 import { supabaseAdmin } from '@/lib/supabase'
 import type { GeoDirective } from '@/types/magic-engine'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 /**
  * POST /api/clients/[id]/geo/generate
@@ -21,6 +22,11 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const access = await requirePaidClientAccess(params.id)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
+  }
+
   try {
     const clientId = params.id
     const body = (await req.json().catch(() => ({}))) as {

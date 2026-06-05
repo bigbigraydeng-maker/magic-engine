@@ -17,6 +17,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { generateImage } from '@/lib/visual/openai-images'
 import { uploadFromBase64 } from '@/lib/visual/storage'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { chargeForGeneration, refundOnFail } from '@/lib/mtc/charge'
 
 type RouteContext = { params: { id: string; draftId: string } }
 
@@ -51,19 +52,38 @@ export async function POST(
       )
     }
 
-    // 2. Generate storyboard image via gpt-image-1 (synchronous, ~10–20s)
-    const { b64 } = await generateImage({
-      prompt: draft.opening_frame_prompt,
-      aspect_ratio: '9:16', // 1024×1536 portrait — storyboard is a tall document
+    // MTC: storyboard = reels_storyboard (5 MTC). Deduct upfront, refund on throw.
+    const charge = await chargeForGeneration(clientId, 'reels_storyboard', {
+      referenceId: draftId,
+      notes: 'reels storyboard generation',
     })
+    if (!charge.ok) {
+      return NextResponse.json(charge.body, { status: charge.status })
+    }
 
-    // 3. Upload to Supabase Storage for a permanent URL
-    const { storage_url: imageUrl } = await uploadFromBase64({
-      base64: b64,
-      clientId,
-      folder: `reels/${draftId}`,
-      assetType: 'image',
-    })
+    let b64: string
+    let imageUrl: string
+    try {
+      // 2. Generate storyboard image via gpt-image-1 (synchronous, ~10–20s)
+      ;({ b64 } = await generateImage({
+        prompt: draft.opening_frame_prompt,
+        aspect_ratio: '9:16', // 1024×1536 portrait — storyboard is a tall document
+      }))
+
+      // 3. Upload to Supabase Storage for a permanent URL
+      ;({ storage_url: imageUrl } = await uploadFromBase64({
+        base64: b64,
+        clientId,
+        folder: `reels/${draftId}`,
+        assetType: 'image',
+      }))
+    } catch (genErr) {
+      await refundOnFail(clientId, 'reels_storyboard', charge.mtcAmount, {
+        referenceId: draftId,
+        reason: genErr instanceof Error ? genErr.message : 'storyboard generation failed',
+      })
+      throw genErr
+    }
 
     // 4. Update draft — same image used for both opening and closing frames
     const { data: updated, error: updateErr } = await supabaseAdmin

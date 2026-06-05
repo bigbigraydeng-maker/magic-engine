@@ -6,14 +6,14 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { createGoal, listGoalsForClient } from '@/lib/strategy/goals'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import type { CreateGoalInput, GoalStatus } from '@/types/strategy'
 
 export async function GET(
   req: Request,
   { params }: { params: { id: string } },
 ) {
-  const access = await requireDashboardClientAccess(params.id)
+  const access = await requirePaidClientAccess(params.id)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
   const { searchParams } = new URL(req.url)
@@ -30,7 +30,7 @@ export async function POST(
   req: Request,
   { params }: { params: { id: string } },
 ) {
-  const access = await requireDashboardClientAccess(params.id)
+  const access = await requirePaidClientAccess(params.id)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
   let body: CreateGoalInput

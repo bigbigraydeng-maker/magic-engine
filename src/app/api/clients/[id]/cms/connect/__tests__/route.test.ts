@@ -15,6 +15,7 @@ import { NextRequest } from 'next/server'
 
 vi.mock('@/lib/auth/client-access', () => ({
   requireDashboardClientAccess: vi.fn(),
+  requirePaidClientAccess: vi.fn(),
 }))
 
 vi.mock('@/lib/cms/connection-store', async () => {
@@ -30,7 +31,7 @@ vi.mock('@/lib/cms/connection-store', async () => {
 })
 
 import { POST, PATCH } from '../route'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requireDashboardClientAccess, requirePaidClientAccess } from '@/lib/auth/client-access'
 import {
   upsertConnection,
   updateContentTargets,
@@ -52,10 +53,11 @@ function makeCtx() {
 }
 
 function mockAuth(ok: boolean) {
-  vi.mocked(requireDashboardClientAccess).mockResolvedValue(
-    ok ? ({ ok: true, clientId: CLIENT_ID } as unknown as Awaited<ReturnType<typeof requireDashboardClientAccess>>)
-       : ({ ok: false, error: 'Unauthorized', status: 403 } as unknown as Awaited<ReturnType<typeof requireDashboardClientAccess>>),
-  )
+  const result = ok
+    ? ({ ok: true, clientId: CLIENT_ID } as unknown as Awaited<ReturnType<typeof requireDashboardClientAccess>>)
+    : ({ ok: false, error: 'Unauthorized', status: 403 } as unknown as Awaited<ReturnType<typeof requireDashboardClientAccess>>)
+  vi.mocked(requireDashboardClientAccess).mockResolvedValue(result)
+  vi.mocked(requirePaidClientAccess).mockResolvedValue(result)
 }
 
 const GOOD_STATUS = {

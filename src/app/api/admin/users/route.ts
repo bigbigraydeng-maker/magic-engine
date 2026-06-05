@@ -9,9 +9,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { guardAdmin } from '@/lib/auth/require-admin'
 import { getUserPermissions } from '@/lib/auth/whitelist'
+import { ACCESS_TYPE_VALUES, type AccessType } from '@/lib/auth/access-types'
 
-const ALLOWED_TYPES = ['portal', 'dashboard', 'fde', 'both', 'self_serve', 'all'] as const
-type AccessType = 'portal' | 'dashboard' | 'fde' | 'both' | 'self_serve'
+// Reuse the canonical list of access_type values + 'all' filter sentinel
+// used by the FDE user-management UI.
+const ALLOWED_TYPES = [...ACCESS_TYPE_VALUES, 'all'] as const
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const guard = await guardAdmin()
@@ -58,8 +60,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (!body.client_id || typeof body.client_id !== 'string') {
       return NextResponse.json({ error: 'client_id is required.' }, { status: 400 })
     }
-    if (!body.access_type || !['portal', 'dashboard', 'fde', 'both', 'self_serve'].includes(body.access_type as string)) {
-      return NextResponse.json({ error: 'access_type must be portal | dashboard | fde | both | self_serve.' }, { status: 400 })
+    if (!body.access_type || !ACCESS_TYPE_VALUES.includes(body.access_type as AccessType)) {
+      return NextResponse.json({ error: `access_type must be one of: ${ACCESS_TYPE_VALUES.join(' | ')}.` }, { status: 400 })
     }
 
     email        = body.email.trim().toLowerCase()

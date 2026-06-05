@@ -260,6 +260,46 @@ FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Mar
 
 ---
 
+### Phase 34 — Client MCP Server（客户自助数据访问）⭐⭐ 2026-06-04 📋 设计完成，待开工
+
+> **目的**：让客户在自己的 Claude（Desktop / 网页 Custom Connector）里接入 ME，用自然语言查看**该客户专属**的真实数据（排名 / 执行进度 / 目标 / 内容交付）。**只读、强隔离、不暴露第三方供应商真名。**
+> **鉴权**：Per-client API Key（PM 拍板，OAuth 留二期）。
+> **战略定性（PM 拍板「留门框」）**：只读 MVP / **可执行是明确 V2 路线** —— tool 命名空间（`me_execute_*`）+ scope（`write:*`）按「将来可加 write」设计，将来客户可经 Claude 直接触发 Fix，成为执行飞轮新触发源（OTTO 未做的差异化窗口）。
+> **设计文档**：`docs/specs/me-mcp-server-design.md`（v3，已过魏征 + 子牙双审）
+> **PR**：[#369](https://github.com/bigbigraydeng-maker/magic-engine/pull/369)（设计稿）
+> **工期估**：≈ 6–7 天（含 P34.0 transport spike 未知数）
+
+- [x] **P34.0** transport spike（前置关卡，不过不许往下）：新增 `@modelcontextprotocol/sdk` + `zod` 锁版本；stateless JSON 模式把 `StreamableHTTPServerTransport` 套进 App Router `/api/mcp` route handler；MCP Inspector 实测握手（验掉「能否套进 Next.js」这个唯一翻船风险）✅ **PASS 2026-06-05**（mcp-handler 适配 Web 标准签名 + CF 生产 build 过 + MCP 官方 client `initialize`/`tools/list`/`tools/call` 全通；详见 `docs/specs/me-mcp-p34-0-spike-result.md`）
+- [x] **P34.1** migration：`client_api_keys`（hash-only + `metadata jsonb` + `created_by_email`）+ `mcp_access_log`（审计/限流/计费三合一，service_role 模板）+ `requireApiKeyClientAccess` 鉴权层 ✅ **2026-06-05**：两张表 apply 进 CrazyContent 已验证（RLS on + service_role policy + 4/3 索引）；`src/lib/auth/api-key-access.ts`（generateApiKey/sha256Hex/extractBearer/verifyApiKey/logMcpAccess，**25/25 单测通过**含变异/边界）；MCP 路由用 `withMcpAuth` 包装、`ME client_id` 走 `extra.meClientId` 避免与 OAuth `clientId` 混淆；生产 `npm run build` ✓ Compiled successfully。本地真实 HTTP 端到端实测被 dev 容器缺 SUPABASE_SERVICE_ROLE_KEY 阻塞——验证留 CF 预览部署 + P34.4 端到端联测
+- [x] **P34.2** Key 管理 API + 客户设置「§3 程序化访问 / 🔌 MCP API 访问」UI ✅ **2026-06-05**：`/api/clients/[id]/api-keys` (GET 列表显式列白名单防 key_hash 泄漏 / POST 发 key 返回明文仅一次) + `/[keyId]` (DELETE 软删除,双 .eq 防跨租户 IDOR);`ApiKeysPanel` 组件 (一次性高亮明文+复制按钮+关闭即销毁,active/revoked 状态徽章,吊销 confirm) 挂到 settings page §3 section (子牙纠偏:不是 Tab 抽屉是堆叠 section);14 路由测试通过 (含 GET '不含 key_hash' 变异锚点 + DELETE 双 .eq IDOR 锚点);`npm run build` ✓ Compiled successfully。**MCP 钥匙现在能在 Dashboard 前台收发了**,不再需要进 Supabase 直填。
+- [x] **P34.3** `/api/mcp` 接 transport + 鉴权挂载 ✅ **2026-06-05**（P34.1 已做主体；route 用 extractBearer 自解析 + withMcpAuth required:true）
+- [x] **P34.4** `src/lib/mcp/scoped-queries.ts` 隔离层 + 5 个只读 tool + 空数据态 + 最里层变异测试 ✅ **2026-06-05**：scoped-queries 工厂（client_id 闭包绑定，每方法强制 `.eq('client_id')`，唯一持 client_id 层）+ `tools.ts`（5 tool overview/list_goals/goal_detail/seo_performance/list_execution_items，统一 runScoped 含 requireMeClientId 守门 + logMcpAccess + 错误契约）。11 隔离测试（6 个 `.eq('client_id')` 变异锚点 + getGoalDetail 双 .eq + seo pending_sync 空态 + execution .neq skipped）。**真实 HTTP e2e 受 Supabase network allowlist 阻挡本容器跑不了，留 CF 预览**（SOP 见 me-mcp-p34-1-auth-notes.md）。单测 11+26+35 全过 + build ✓
+- [x] **P34.5** `vendor-filter.ts` 封装名过滤 + `mcp_access_log` 限流/审计 + 客户接入 SOP ✅ **2026-06-05**：`vendor-filter.ts`（递归 scrub OpenAI→Content Engine / SEMrush→Keyword Intelligence 等，runScoped 返回前兜底）+ `rate-limit.ts`（mcp_access_log 滑动窗 60/min，跨实例安全，错误 fail-open）+ `docs/sops/mcp-client-access-setup.md`（FDE 签发 + 客户 Claude Desktop mcp-remote 接入 + 故障排查 + CF e2e SOP）。19 新测试（vendor 14 + rate-limit 5），MCP 全套 91 测试通过 + build ✓
+
+> 二期 backlog：GA4/AI 可见度/content 三个 tool、网页版 OAuth 薄层、计费接入（`mcp_access_log` 已预留聚合源）、独立 service 拆分（触发线见设计文档 §2.2）、可执行 MCP（V2 路线，设计文档 §12）。
+>
+> **⭐ 二期主推方向（2026-06-05 PM 确立）——「连接你的 AI 商业助手」推广**：把已做好的 MCP 包装成卖点对外推。目标用户 = **FDE 客户 + MTC 客户**，通过 **Claude Code / Codex / Claude Desktop** 接入（均原生支持 remote MCP + API Key，**无需 OAuth** —— 目标人群是技术型/进阶用户，钥匙接入零门槛）。兑现「在 AU/NZ 最懂你的 AI 商业助手」定位：客户 AI 接上 ME 真实数据 → 从通用 AI 变成懂你生意的助手。接入 SOP 已写 `docs/sops/mcp-ai-assistant-connect.md`（Claude Code `claude mcp add --transport http` / Codex `codex mcp add --url --bearer-token-env-var` / Desktop mcp-remote）。**二期任务**：① Dashboard/营销页加「连接你的 AI 助手」入口 + 客户自助拿钥匙引导；② MTC 计费分层（FDE 赠送 / MTC 客户按调用消耗，复用 `mcp_access_log`）；③ OAuth 一键接入**仅当**出现大量非技术普通客户走 claude.ai 网页版时再做，且走「接第三方 OAuth 服务」路径（不自建），开工前先 spike。
+
+**Phase 34 状态：✅ 全部完成并已 merge 到 main 2026-06-05（PR #369 squash）。真实生产 e2e 通过 —— CTS 在 Claude Desktop 实测 `me_get_overview`/`me_list_goals`/`me_get_seo_performance` 三工具全部成功落库（mcp_access_log），数据三方吻合（体检分 38 / 博客 2 / 社媒 3 = 狄仁杰数据层查值）；跨客户隔离亲验（CTS 钥匙查 Oztop 返回空 = 隔离生效）。代码层 92 单测 + build 全过，魏征×2 + 子牙 + 狄仁杰 + Codex 审过。→ 下一步见上方「⭐ 二期主推方向」。**
+
+### Phase 34 二期 P3 — FDE 跨客户 Admin Key ✅ 实施完成 2026-06-05
+
+> 全程走完新「Agent 审查协议」：子牙出方案 → 魏征 2 轮挑刺 → 子牙修订（加 Z1/Z2）→ 魏征复审 Open the gate → 实施 → 狄仁杰断案「隔离命门守住，准予 merge」。设计稿 `docs/specs/2026-06-05-mcp-phase2-product-design.md` §6 + 内部 SOP `docs/sops/admin-mcp-key-internal.md`。
+
+- [x] **P34-P3.1** migration：`admin_api_keys` + `api_key_settings`(kill-switch 单行表)+ `admin_key_issue_confirms`(Z2 字段先建)+ `mcp_access_log` 双 FK/key_kind/source_ip + 三分支 XOR CHECK + 前缀 CHECK + 90/180 天 expires CHECK。生产 apply 验证 8 项全绿
+- [x] **P34-P3.2** `verifyApiKey` 前缀 XOR 分叉 + `lookupByKind`(单表，防串库 R1）+ env/DB 双 kill-switch + IP 白名单 + Z1 wrong_endpoint + `requireAdminContext`
+- [x] **P34-P3.5** `admin-scoped-queries.ts`（**绝不 import scoped-queries**，狄仁杰加固：requireClientId 下沉最里层）+ `admin-tools.ts`（5 个 `me_admin_*`，跳过 vendor scrub Y5）+ `/api/mcp-admin/[transport]` endpoint + rate-limit 按 kind 计数
+- [x] **P34-P3.6** wrong_endpoint 双向防御（client/admin 各传 expectedKind）+ import-isolation 静态锁（CI 强制 Y3）
+- [x] **P34-P3.7** `/dashboard/admin/mcp-keys` UI（颁发/列表/吊销/🚨kill-switch 红条）+ `/api/admin/mcp-keys` GET/POST/[keyId] DELETE/revoke-all（requireAdmin + CSRF）
+- [x] **P34-P3.8** `/api/cron/admin-key-expiry` 每日检测 7 天内到期 + 空 IP 白名单债（邮件提醒待 P2）
+- [x] **P34-P3.10** 内部 SOP `admin-mcp-key-internal.md`（颁发流程 + 事故响应 5 分钟失效 + 取证/审计 SQL + 安全边界）
+- [ ] **P34-P3.9**（降级 backlog）`createMcpAuthAdapter(kind)` 抽取防 verifyToken 漂移（两 endpoint 已工作+测试覆盖，纯重构）
+- [ ] **二期补强**（狄仁杰/魏征 backlog）：真 colleague-confirm code 流程 · IP 白名单升 DB 强约束 · 过期邮件（依赖 P2 SendGrid）· 老 mcp_access_log.key_id 列下线
+
+**P3 验证**：109 MCP/auth 单测全过（含 import 隔离锁 + 变异测试坐实）+ `npm run build` ✓ + 狄仁杰生产 DB 实测攻击（XOR CHECK 拦脏数据 / kill-switch / 前缀 / 过期全部拦截成功）。**PM 决策**：首批只发 1 把给 PM 自己，验证 1 周再扩。
+
+---
+
 ### Website Self-Serve Auth - 2026-06-02
 
 - [x] **P29.AUTH.1** Google self-serve registration - add Google entry points to portal register/login, route self-serve OAuth callbacks into a new Magic Engine workspace when no existing access row exists, and keep the existing 500 MTC welcome bonus path intact.
@@ -339,6 +379,7 @@ FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Mar
 📋 Phase 26     Client Locale Intelligence / 客户地域智能层（国家→州→城市三层 + 业务范围 + AU/NZ 节日日历注入）✅ 已完成
 📋 Phase 27     Visual Reference Library / 视觉参考库（图像版 viral analyzer — FDE 上传 + 客户提供 + 竞品爬取，构建行业视觉知识库）📋 待开发
 📋 Phase 28     FDE Inbox / 待处理收件箱（⚠️ 待并入 Phase 20.D — 统一看板扩展）
+📋 Phase 34     Client MCP Server / 客户自助数据访问（只读 MVP + 可执行 V2 路线，设计完成待开工 — PR #369）
 ```
 
 **Phase 7 核心战略**：双信号博客（Dual-Signal Blog）— 每篇文章同时携带 SEO 信号（Google 排名）和 GEO 信号（AI 推荐），选题由 AI Tracker 弱项 × SEMrush 低KD机会交叉驱动，形成数据自强化飞轮。
@@ -3497,6 +3538,20 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-06-05（Phase 34 — Client MCP Server 设计→实现 P34.0–P34.5 ✅ PR #369）
+
+**一句话**：客户能在自己的 Claude 里凭 API Key 只读查询「自己的」ME 数据（体检分 / 目标进度 / 搜索表现 / 执行进度 / 内容交付），强隔离、限流、不暴露供应商真名。
+
+**链路**：设计稿 v3（魏征+子牙双审）→ Phase 34 登记 → P34.0 transport spike（mcp-handler + Streamable HTTP 套进 Next.js App Router，stateless JSON）→ P34.1 鉴权地基（client_api_keys + mcp_access_log 两表 + verifyApiKey + withMcpAuth）→ P34.2 Key 管理 API + 设置页 §3 UI（FDE 签发/吊销，魏征安全加固）→ P34.3+P34.4 scoped-queries 最里层隔离 + 5 只读 tool → P34.5 封装名过滤 + 限流 + 接入 SOP。
+
+**安全护城河**：client_id 双层锁定（外层 API Key 反查 / 内层 scoped-queries 闭包绑定强制 `.eq('client_id')`），满足「校验放最里层」；admin-only 签发 + CSRF + 软删除吊销 + 60/min 限流 + 封装名过滤。
+
+**验证**：91 单测全过（鉴权 35 + 管理路由 26 + 隔离 11 + 封装名 14 + 限流 5）+ `npm run build` ✓。⏳ 真实数据 HTTP e2e 待 CF 预览（本 dev 容器 Supabase network allowlist 连不上数据 API）。
+
+**关联文档**：设计稿 `docs/specs/me-mcp-server-design.md` · 鉴权笔记 `me-mcp-p34-1-auth-notes.md` · 客户接入 SOP `docs/sops/mcp-client-access-setup.md` · Migration `20260627000001_p34_mcp_api_keys.sql`
+
+---
 
 ### 2026-06-05（CTS/Oztop Goal-Initiative-Campaign 业务架构对齐 + FDE SOP 落地）
 

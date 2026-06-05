@@ -2,8 +2,31 @@ import { describe, expect, it } from 'vitest'
 import { resolveIndustryCode, matchAliases } from '../industry-mapping'
 
 describe('resolveIndustryCode', () => {
-  it('maps "travel" → "inbound_tour"', () => {
-    expect(resolveIndustryCode('travel')).toBe('inbound_tour')
+  // 2026-06-05: generic tourism keywords default to outbound_tour because
+  // most AU/NZ retail travel agents (CTS Tours NZ et al) serve outbound
+  // demand. Inbound operators must use an explicit "inbound" keyword.
+  it('maps generic "travel" → "outbound_tour" (default AU/NZ retail direction)', () => {
+    expect(resolveIndustryCode('travel')).toBe('outbound_tour')
+  })
+
+  it('maps "tourism" → "outbound_tour"', () => {
+    expect(resolveIndustryCode('tourism')).toBe('outbound_tour')
+  })
+
+  it('maps "tour operator" → "outbound_tour"', () => {
+    expect(resolveIndustryCode('tour operator')).toBe('outbound_tour')
+  })
+
+  it('maps explicit "inbound tour" → "inbound_tour"', () => {
+    expect(resolveIndustryCode('inbound tour')).toBe('inbound_tour')
+  })
+
+  it('maps Chinese "入境旅游" → "inbound_tour"', () => {
+    expect(resolveIndustryCode('入境旅游')).toBe('inbound_tour')
+  })
+
+  it('maps Chinese "出境旅游" → "outbound_tour"', () => {
+    expect(resolveIndustryCode('出境旅游')).toBe('outbound_tour')
   })
 
   it('maps "flooring" → "flooring"', () => {

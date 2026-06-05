@@ -12,10 +12,12 @@ const mockAnomalyCount  = vi.fn()
 
 const mocks = vi.hoisted(() => ({
   requireDashboardClientAccess: vi.fn(),
+  requirePaidClientAccess: vi.fn(),
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
   requireDashboardClientAccess: mocks.requireDashboardClientAccess,
+  requirePaidClientAccess: mocks.requireDashboardClientAccess,
 }))
 
 // Build a flexible chainable mock for supabaseAdmin

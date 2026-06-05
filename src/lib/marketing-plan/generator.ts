@@ -166,11 +166,15 @@ export async function generatePlanData(params: {
 }): Promise<GenerateResult> {
   const userPrompt = buildUserPrompt(params)
 
+  // bypassGateway: true — Marketing Plan generation can take 60-120s (8000 output
+  // tokens). CF AI Gateway kills requests after ~60s (524). Calling Anthropic
+  // directly avoids the timeout. See: fix/marketing-plan-cf-timeout
   const result = await callClaudeWithDocs({
     systemPrompt: SYSTEM_PROMPT,
     userMessage: userPrompt,
     docs: params.campaignDocs,
     maxOutputTokens: 8000,
+    bypassGateway: true,
   })
 
   const planData = parseJsonResponse<MarketingPlanData>(result.text)

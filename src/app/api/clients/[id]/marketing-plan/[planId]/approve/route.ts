@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { dispatchPlanTasks } from '@/lib/marketing-plan/task-dispatcher'
 import type { MarketingPlan } from '@/lib/marketing-plan/types'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 export const maxDuration = 60
 
@@ -20,6 +21,11 @@ export async function POST(
   _req: NextRequest,
   { params }: { params: { id: string; planId: string } }
 ) {
+  const access = await requirePaidClientAccess(params.id)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
+  }
+
   try {
     // 1. 读 Plan
     const { data: plan, error: fetchErr } = await supabaseAdmin

@@ -12,6 +12,7 @@ import { NextRequest } from 'next/server'
 const mockRequireAccess = vi.fn()
 vi.mock('@/lib/auth/client-access', () => ({
   requireDashboardClientAccess: (...args: unknown[]) => mockRequireAccess(...args),
+  requirePaidClientAccess: (...args: unknown[]) => mockRequireAccess(...args),
 }))
 
 // ── Google Ads client mocks ───────────────────────────────────────────────────

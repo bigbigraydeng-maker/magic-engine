@@ -22,12 +22,12 @@
  * DELETE /api/clients/[id]/execution/[itemId]
  *   Soft-revocable removal — pending items only.
  *
- * Security: dashboard session via requireDashboardClientAccess.
+ * Security: dashboard session via requirePaidClientAccess.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import type { ExecutionItem, ExecutionItemStatus } from '@/types/diagnostic'
 
 export const dynamic = 'force-dynamic'
@@ -46,7 +46,7 @@ export async function GET(
   { params }: { params: { id: string; itemId: string } },
 ): Promise<NextResponse> {
   const { id: clientId, itemId } = params
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
@@ -67,7 +67,7 @@ export async function PATCH(
   { params }: { params: { id: string; itemId: string } },
 ): Promise<NextResponse> {
   const { id: clientId } = params
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
@@ -249,7 +249,7 @@ export async function DELETE(
   { params }: { params: { id: string; itemId: string } },
 ): Promise<NextResponse> {
   const { id: clientId } = params
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }

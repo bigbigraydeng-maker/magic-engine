@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const access = await requirePaidClientAccess(params.id)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
+  }
+
   try {
     const clientId = params.id
     const { searchParams } = new URL(request.url)

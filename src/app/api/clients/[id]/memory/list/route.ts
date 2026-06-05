@@ -10,7 +10,7 @@
  *
  * Responses:
  *   200  { preferences, proven_patterns, failed_experiments, decisions, counts }
- *   404  client not found（由 requireDashboardClientAccess 处理）
+ *   404  client not found（由 requirePaidClientAccess 处理）
  *   500  DB error
  *
  * Reference: ROADMAP.md Phase 23.E
@@ -18,7 +18,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -29,7 +29,7 @@ export async function GET(
 ): Promise<NextResponse> {
   const { id: clientId } = params
 
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }

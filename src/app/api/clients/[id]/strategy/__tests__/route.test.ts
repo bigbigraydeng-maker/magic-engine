@@ -31,6 +31,27 @@ import { supabaseAdmin } from '@/lib/supabase'
 import type { ListStrategyResponse } from '../route'
 import type { StrategyItem, StrategyStatus } from '@/lib/strategy/types'
 
+// Phase X.S2: paid-tier auth bypass — these route tests target the business
+// logic, not the auth path. Real wiring is covered in
+// src/lib/auth/__tests__/client-access.test.ts.
+vi.mock('@/lib/auth/client-access', () => ({
+  requireDashboardClientAccess: vi.fn().mockResolvedValue({
+    ok: true,
+    user: { id: 'test-user', email: 'test@magiclab.com' },
+    role: 'admin',
+    tier: 'admin',
+    allowedClientId: null,
+  }),
+  requirePaidClientAccess: vi.fn().mockResolvedValue({
+    ok: true,
+    user: { id: 'test-user', email: 'test@magiclab.com' },
+    role: 'admin',
+    tier: 'admin',
+    allowedClientId: null,
+  }),
+}))
+
+
 // ---------------------------------------------------------------------------
 // Test data factories
 // ---------------------------------------------------------------------------

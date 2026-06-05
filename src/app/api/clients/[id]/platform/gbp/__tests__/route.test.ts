@@ -5,6 +5,7 @@ import { NextRequest } from 'next/server'
 
 const mocks = vi.hoisted(() => ({
   requireDashboardClientAccess: vi.fn(),
+  requirePaidClientAccess: vi.fn(),
   listConnections:    vi.fn(),
   getConnectionById:  vi.fn(),
   revokeConnection:   vi.fn(),
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/auth/client-access', () => ({
   requireDashboardClientAccess: mocks.requireDashboardClientAccess,
+  requirePaidClientAccess: mocks.requireDashboardClientAccess,
 }))
 
 vi.mock('@/lib/platform-oauth/connection-store', () => ({

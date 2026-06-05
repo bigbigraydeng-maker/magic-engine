@@ -9,14 +9,14 @@
  *   days         Number of calendar days to look back (default: 28, max: 90)
  *   timezone     IANA timezone string (default: 'Pacific/Auckland')
  *
- * Auth: session cookie via requireDashboardClientAccess
+ * Auth: session cookie via requirePaidClientAccess
  *
  * Reference: ROADMAP.md P22.B.3
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { bucketByGranularity } from '@/lib/flywheel/intelligence/timeseries'
 import { getMetricMeta } from '@/lib/flywheel/intelligence/metric-catalog'
 import type { TimeGranularity, TrendSeries } from '@/lib/flywheel/intelligence/types'
@@ -38,7 +38,7 @@ export async function GET(
 ) {
   const clientId = params.id
 
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }

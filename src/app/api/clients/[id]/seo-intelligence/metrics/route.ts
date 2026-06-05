@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireSession } from '@/lib/auth/require-session'
 import { SEO_METRIC_KEY } from '@/lib/flywheel/vocabulary'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 /**
  * GET /api/clients/[id]/seo-intelligence/metrics
@@ -22,6 +23,11 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const access = await requirePaidClientAccess(params.id)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
+  }
+
   const session = await requireSession()
   if (!session.ok) {
     return NextResponse.json({ error: session.error }, { status: session.status })

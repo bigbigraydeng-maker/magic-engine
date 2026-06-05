@@ -17,11 +17,17 @@ import { formatBriefForPrompt } from '@/lib/content/brief-injector'
 import { formatCampaignForPrompt, getCampaignById } from '@/lib/content/campaign-injector'
 import Anthropic from '@anthropic-ai/sdk'
 import type { MasterBrief } from '@/types/magic-engine'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const access = await requirePaidClientAccess(params.id)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
+  }
+
   const clientId = params.id
 
   let campaignId: string | undefined

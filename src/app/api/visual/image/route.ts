@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { generateImage } from '@/lib/visual/openai-images'
 import { uploadFromBase64 } from '@/lib/visual/storage'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { chargeForGeneration, refundOnFail } from '@/lib/mtc/charge'
 
 export async function POST(req: NextRequest) {
   try {
@@ -37,37 +38,59 @@ export async function POST(req: NextRequest) {
       ? `${post.visual_brief}. Additional requirements: ${post.revision_notes}`
       : post?.visual_brief) || ''
 
-    // Generate image synchronously via OpenAI gpt-image-1 (~10-30s)
-    const { b64 } = await generateImage({ prompt: basePrompt, aspect_ratio })
-
-    // Upload base64 PNG directly to Supabase storage
-    const { storage_url, file_size_kb } = await uploadFromBase64({
-      base64: b64,
-      clientId: client_id,
-      postId: post_id,
-      assetType: 'image',
-      variant,
+    // MTC: deduct upfront; refund if anything from this point onward fails
+    const charge = await chargeForGeneration(client_id, 'image_single', {
+      referenceId: post_id,
+      notes: 'visual/image generation',
     })
+    if (!charge.ok) {
+      return NextResponse.json(charge.body, { status: charge.status })
+    }
 
-    // Insert as ready immediately — no polling needed
-    const { data: asset, error } = await supabaseAdmin
-      .from('visual_assets')
-      .insert({
-        post_id,
-        client_id,
-        asset_type: 'image',
-        provider: 'openai',
-        prompt_used: basePrompt,
+    let b64: string
+    let storage_url: string
+    let file_size_kb: number
+    let asset: { id: string } | null = null
+    try {
+      // Generate image synchronously via OpenAI gpt-image-1 (~10-30s)
+      ;({ b64 } = await generateImage({ prompt: basePrompt, aspect_ratio }))
+
+      // Upload base64 PNG directly to Supabase storage
+      ;({ storage_url, file_size_kb } = await uploadFromBase64({
+        base64: b64,
+        clientId: client_id,
+        postId: post_id,
+        assetType: 'image',
         variant,
-        generation_status: 'ready',
-        storage_url,
-        file_size_kb,
-        cost_usd: 0.04,
-      })
-      .select()
-      .single()
+      }))
 
-    if (error) throw error
+      // Insert as ready immediately — no polling needed
+      const { data: insertedAsset, error } = await supabaseAdmin
+        .from('visual_assets')
+        .insert({
+          post_id,
+          client_id,
+          asset_type: 'image',
+          provider: 'openai',
+          prompt_used: basePrompt,
+          variant,
+          generation_status: 'ready',
+          storage_url,
+          file_size_kb,
+          cost_usd: 0.04,
+        })
+        .select()
+        .single()
+
+      if (error) throw error
+      asset = insertedAsset
+    } catch (genErr) {
+      await refundOnFail(client_id, 'image_single', charge.mtcAmount, {
+        referenceId: post_id,
+        reason: genErr instanceof Error ? genErr.message : 'image generation failed',
+      })
+      throw genErr
+    }
 
     if (post?.revision_notes) {
       await supabaseAdmin

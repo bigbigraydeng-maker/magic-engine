@@ -63,6 +63,10 @@ function buildBasicAuth(username: string, appPassword: string): string {
 }
 
 
+// Identifies Magic Engine to host-side firewalls (e.g. SiteGround WAF).
+// A missing or generic User-Agent (bare Node.js fetch) can trigger IP bans.
+const ME_USER_AGENT = 'MagicEngine/1.0 (WordPress Publisher; +https://magicengine.com.au)'
+
 async function wpFetch(
   config:  WordpressClientConfig,
   path:    string,
@@ -76,6 +80,7 @@ async function wpFetch(
     headers: {
       'Content-Type':  'application/json',
       'Authorization': buildBasicAuth(config.username, config.appPassword),
+      'User-Agent':    ME_USER_AGENT,
       ...(options.headers ?? {}),
     },
   })

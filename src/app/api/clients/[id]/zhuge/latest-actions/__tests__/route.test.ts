@@ -13,14 +13,15 @@ vi.mock('@/lib/supabase', () => ({
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
-  requireDashboardClientAccess: vi.fn(),
+  requireDashboardClientAccess: vi.fn().mockResolvedValue({ ok: true, user: { id: 'test-user', email: 'test@magiclab.com' }, role: 'admin', tier: 'admin', allowedClientId: null }),
+  requirePaidClientAccess: vi.fn().mockResolvedValue({ ok: true, user: { id: 'test-user', email: 'test@magiclab.com' }, role: 'admin', tier: 'admin', allowedClientId: null }),
 }))
 
 // ── Imports ───────────────────────────────────────────────────────────────────
 
 import { GET } from '../route'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requireDashboardClientAccess, requirePaidClientAccess } from '@/lib/auth/client-access'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -57,11 +58,11 @@ function makeActionRow(overrides: Record<string, unknown> = {}) {
 }
 
 function allowAuth() {
-  vi.mocked(requireDashboardClientAccess).mockResolvedValue({ ok: true, user: { email: 'test@test.com' } as never, role: 'admin', allowedClientId: null })
+  vi.mocked(requirePaidClientAccess).mockResolvedValue({ ok: true, user: { email: 'test@test.com' } as never, role: 'admin', allowedClientId: null })
 }
 
 function denyAuth() {
-  vi.mocked(requireDashboardClientAccess).mockResolvedValue({
+  vi.mocked(requirePaidClientAccess).mockResolvedValue({
     ok: false,
     error: 'Unauthorized',
     status: 401,

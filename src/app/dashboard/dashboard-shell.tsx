@@ -4,18 +4,30 @@ import { usePathname } from 'next/navigation'
 import { MeMarkDefs, MeMark } from '@/components/ui/me-mark'
 import { cx } from '@/components/ui/me-theme'
 import Link from 'next/link'
+import { useState } from 'react'
+import { FeatureLockModal } from '@/components/auth/FeatureLockGate'
 
 interface Props {
   children: React.ReactNode
   userEmail: string
   userRole: string
+  /** Phase X.S4 — semantic tier; drives sidebar lock styling + upsell modal. */
+  userTier: 'admin' | 'paid_client' | 'self_serve' | 'portal_only'
   allowedClientId: string | null
   roleLabel: string
 }
 
 // ── Nav definition ────────────────────────────────────────────────────────────
 
-type NavItem = { key: string; label: string; href?: string; mark: string; soon?: boolean }
+type NavItem = {
+  key: string
+  label: string
+  href?: string
+  mark: string
+  soon?: boolean
+  /** Feature label shown in the upsell modal when self_serve clicks this. */
+  paidOnlyFeature?: string
+}
 type NavSection = { title?: string; items: NavItem[] }
 
 const ADMIN_SECTIONS: NavSection[] = [
@@ -43,14 +55,27 @@ const ADMIN_SECTIONS: NavSection[] = [
 
 // ── Sidebar nav item ──────────────────────────────────────────────────────────
 
-function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+function NavLink({
+  item,
+  active,
+  locked,
+  onLockedClick,
+}: {
+  item: NavItem
+  active: boolean
+  /** When true, the click opens the upsell modal instead of navigating. */
+  locked?: boolean
+  onLockedClick?: (feature: string) => void
+}) {
   const cls = cx(
-    'flex items-center gap-3 rounded-[10px] px-3 py-[10px] text-[13.5px] font-medium transition',
+    'group flex items-center gap-3 rounded-[10px] px-3 py-[10px] text-[13.5px] font-medium transition',
     active
       ? 'bg-[#C4912E]/16 text-[#EBCB8B]'
       : item.soon
         ? 'cursor-default text-white/25'
-        : 'text-white/55 hover:bg-white/[.06] hover:text-[#FBF8F3]',
+        : locked
+          ? 'cursor-pointer text-white/40 hover:bg-white/[.04] hover:text-white/60'
+          : 'text-white/55 hover:bg-white/[.06] hover:text-[#FBF8F3]',
   )
   const mark = (
     <span className={cx(
@@ -64,6 +89,9 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
     <>
       {mark}
       <span className="flex-1">{item.label}</span>
+      {locked && (
+        <span aria-hidden className="text-[11px] text-amber-400/80" title="Paid feature">🔒</span>
+      )}
       {item.soon && (
         <span className="rounded bg-white/[.06] px-1.5 py-0.5 text-[9px] font-black uppercase tracking-widest text-white/25">
           Soon
@@ -73,19 +101,71 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
   )
 
   if (item.soon || !item.href) return <div className={cls}>{inner}</div>
+  if (locked && onLockedClick) {
+    const feature = item.paidOnlyFeature ?? item.label
+    return (
+      <button
+        type="button"
+        onClick={() => onLockedClick(feature)}
+        className={cls}
+      >
+        {inner}
+      </button>
+    )
+  }
   return <Link href={item.href} className={cls}>{inner}</Link>
 }
 
 // ── DashboardShell ────────────────────────────────────────────────────────────
 
-export default function DashboardShell({ children, userEmail, userRole, allowedClientId }: Props) {
-  const pathname = usePathname()
+// ── Self-serve nav: consumption-only links, paid features show as locked ─────
+// We render these in the client area sub-tree so the user sees the lock
+// affordance for the gated features they *would* see as a paid customer.
+function buildSelfServeSections(clientId: string): NavSection[] {
+  return [
+    {
+      items: [
+        { key: 'client-home', label: 'My workspace', mark: 'CL', href: `/dashboard/clients/${clientId}` },
+      ],
+    },
+    {
+      title: 'Create',
+      items: [
+        { key: 'visuals', label: 'Visual Studio', mark: 'VS', href: '/dashboard/visuals' },
+        { key: 'content', label: 'Content',       mark: 'CT', href: '/dashboard/content' },
+      ],
+    },
+    {
+      title: 'Paid features',
+      items: [
+        { key: 'goals',       label: 'Goals',       mark: 'GO', href: `/dashboard/clients/${clientId}/goals`,       paidOnlyFeature: 'Goals' },
+        { key: 'strategy',    label: 'Strategy',    mark: 'ST', href: `/dashboard/clients/${clientId}/strategy`,    paidOnlyFeature: 'Strategy' },
+        { key: 'diagnostic',  label: 'Diagnostic',  mark: 'DG', href: `/dashboard/clients/${clientId}/diagnostic`,  paidOnlyFeature: 'Diagnostic' },
+        { key: 'execution',   label: 'Execution',   mark: 'EX', href: `/dashboard/clients/${clientId}/execution`,   paidOnlyFeature: 'Execution' },
+        { key: 'connectors',  label: 'Connectors',  mark: 'CN', href: `/dashboard/clients/${clientId}/connectors`,  paidOnlyFeature: 'Connectors' },
+      ],
+    },
+  ]
+}
 
+export default function DashboardShell({ children, userEmail, userRole, userTier, allowedClientId }: Props) {
+  const pathname = usePathname()
+  const [lockModalFeature, setLockModalFeature] = useState<string | null>(null)
+
+  const isClientViewer = userRole === 'client-viewer' && allowedClientId
+  const isSelfServe = isClientViewer && userTier === 'self_serve'
+
+  const sections: NavSection[] | null = isSelfServe && allowedClientId
+    ? buildSelfServeSections(allowedClientId)
+    : null
+
+  // Compute the active nav key off whichever section list is in play.
   const activeKey = (() => {
-    for (const section of ADMIN_SECTIONS) {
+    const list = sections ?? ADMIN_SECTIONS
+    for (const section of list) {
       for (const item of section.items) {
         if (!item.href) continue
-        const exact = item.key === 'overview'
+        const exact = item.key === 'overview' || item.key === 'client-home'
         if (exact ? pathname === item.href : (pathname === item.href || pathname.startsWith(item.href + '/'))) {
           return item.key
         }
@@ -93,9 +173,6 @@ export default function DashboardShell({ children, userEmail, userRole, allowedC
     }
     return ''
   })()
-
-  // Client-viewer: simplified single-link sidebar
-  const isClientViewer = userRole === 'client-viewer' && allowedClientId
 
   return (
     <div className="grid min-h-screen bg-[#FBF8F3] font-sans [grid-template-columns:248px_1fr] max-[720px]:grid-cols-1">
@@ -118,7 +195,28 @@ export default function DashboardShell({ children, userEmail, userRole, allowedC
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto px-3 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {isClientViewer ? (
+          {sections ? (
+            sections.map((section, i) => (
+              <div key={i} className="mb-4">
+                {section.title && (
+                  <p className="mb-1.5 px-3 text-[9.5px] font-black uppercase tracking-[.16em] text-white/22">
+                    {section.title}
+                  </p>
+                )}
+                <div className="space-y-[2px]">
+                  {section.items.map(item => (
+                    <NavLink
+                      key={item.key}
+                      item={item}
+                      active={item.key === activeKey}
+                      locked={Boolean(item.paidOnlyFeature)}
+                      onLockedClick={setLockModalFeature}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))
+          ) : isClientViewer ? (
             <NavLink
               item={{ key: 'clients', label: 'My client', mark: 'CL', href: `/dashboard/clients/${allowedClientId}` }}
               active={pathname.startsWith(`/dashboard/clients/${allowedClientId}`)}
@@ -172,6 +270,16 @@ export default function DashboardShell({ children, userEmail, userRole, allowedC
       <main className="min-w-0 flex-col">
         {children}
       </main>
+
+      {/* Phase X.S4 — upsell modal triggered by sidebar lock clicks. */}
+      {lockModalFeature && (
+        <FeatureLockModal
+          feature={lockModalFeature}
+          open={true}
+          onClose={() => setLockModalFeature(null)}
+          dismissible
+        />
+      )}
     </div>
   )
 }
