@@ -110,12 +110,13 @@ export default function RegisterForm({ next, fromProspect }: RegisterFormProps) 
   }
 
   function handleCodeChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const digits = e.target.value.replace(/\D/g, '').slice(0, 6)
+    // Supabase Email OTP length varies by project setting (6-10). Accept up to 10.
+    const digits = e.target.value.replace(/\D/g, '').slice(0, 10)
     setCode(digits)
     setVerifyError('')
-    if (digits.length === 6 && !verifying) {
-      void submitCode(digits)
-    }
+    // P0-G/P0-I: previously we auto-submitted at length===6, which truncated
+    // 8-digit OTPs from older Supabase project settings. Do not auto-submit
+    // any more — user clicks Verify when ready. Length is validated server-side.
   }
 
   async function handleResend() {
@@ -189,7 +190,17 @@ export default function RegisterForm({ next, fromProspect }: RegisterFormProps) 
           <p className="mt-3 text-sm font-medium text-[#1F7A55]">{resendNotice}</p>
         )}
 
-        <div className="mt-5 flex items-center justify-between text-sm">
+        <button
+          type="button"
+          onClick={() => { if (code.length >= 6 && !verifying) void submitCode(code) }}
+          disabled={code.length < 6 || verifying}
+          className="mt-5 flex h-12 w-full items-center justify-center rounded-xl text-sm font-bold text-[#2A2008] shadow-[0_18px_50px_rgba(196,145,46,.22)] transition active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
+          style={{ background: 'linear-gradient(135deg,#EBCB8B,#C4912E 55%,#A6781F)' }}
+        >
+          {verifying ? 'Verifying…' : 'Verify & continue →'}
+        </button>
+
+        <div className="mt-4 flex items-center justify-between text-sm">
           <button
             type="button"
             onClick={handleResend}
@@ -202,7 +213,6 @@ export default function RegisterForm({ next, fromProspect }: RegisterFormProps) 
                 ? 'Sending…'
                 : 'Resend code'}
           </button>
-          {verifying && <span className="text-me-charcoal/45">Verifying…</span>}
         </div>
       </div>
     )
