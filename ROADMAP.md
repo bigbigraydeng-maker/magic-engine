@@ -270,7 +270,7 @@ FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Mar
 > **工期估**：≈ 6–7 天（含 P34.0 transport spike 未知数）
 
 - [x] **P34.0** transport spike（前置关卡，不过不许往下）：新增 `@modelcontextprotocol/sdk` + `zod` 锁版本；stateless JSON 模式把 `StreamableHTTPServerTransport` 套进 App Router `/api/mcp` route handler；MCP Inspector 实测握手（验掉「能否套进 Next.js」这个唯一翻船风险）✅ **PASS 2026-06-05**（mcp-handler 适配 Web 标准签名 + CF 生产 build 过 + MCP 官方 client `initialize`/`tools/list`/`tools/call` 全通；详见 `docs/specs/me-mcp-p34-0-spike-result.md`）
-- [ ] **P34.1** migration：`client_api_keys`（hash-only + `metadata jsonb` + `created_by_email`）+ `mcp_access_log`（审计/限流/计费三合一，service_role 模板）+ `requireApiKeyClientAccess` 鉴权层
+- [x] **P34.1** migration：`client_api_keys`（hash-only + `metadata jsonb` + `created_by_email`）+ `mcp_access_log`（审计/限流/计费三合一，service_role 模板）+ `requireApiKeyClientAccess` 鉴权层 ✅ **2026-06-05**：两张表 apply 进 CrazyContent 已验证（RLS on + service_role policy + 4/3 索引）；`src/lib/auth/api-key-access.ts`（generateApiKey/sha256Hex/extractBearer/verifyApiKey/logMcpAccess，**25/25 单测通过**含变异/边界）；MCP 路由用 `withMcpAuth` 包装、`ME client_id` 走 `extra.meClientId` 避免与 OAuth `clientId` 混淆；生产 `npm run build` ✓ Compiled successfully。本地真实 HTTP 端到端实测被 dev 容器缺 SUPABASE_SERVICE_ROLE_KEY 阻塞——验证留 CF 预览部署 + P34.4 端到端联测
 - [ ] **P34.2** Key 管理 API（`/api/clients/[id]/api-keys` GET/POST/DELETE）+ 客户设置抽屉「🔌 API 访问」UI（强约束：配置类必须有 UI；MVP FDE 代发）
 - [ ] **P34.3** `/api/mcp` 接 transport + `requireApiKeyClientAccess` 鉴权挂载
 - [ ] **P34.4** `src/lib/mcp/scoped-queries.ts` 隔离层（client_id 闭包绑定 + 强制 `.eq` 拦截器，满足「校验放最里层」）+ 5 个只读 tool（overview / goals / goal-detail / seo / execution）+ 空数据态 + **最里层变异测试**
@@ -278,7 +278,7 @@ FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Mar
 
 > 二期 backlog：GA4/AI 可见度/content 三个 tool、网页版 OAuth 薄层、计费接入（`mcp_access_log` 已预留聚合源）、独立 service 拆分（触发线见设计文档 §2.2）、可执行 MCP（V2 路线，设计文档 §12）。
 
-**Phase 34 状态：🔄 P34.0 transport spike ✅ PASS 2026-06-05（翻船风险解除）→ 下一步 P34.1 鉴权地基。**
+**Phase 34 状态：🔄 P34.0 ✅ + P34.1 ✅ 2026-06-05（数据库地基 + Bearer 鉴权层就位）→ 下一步 P34.2 Key 管理 API + UI。**
 
 ---
 
