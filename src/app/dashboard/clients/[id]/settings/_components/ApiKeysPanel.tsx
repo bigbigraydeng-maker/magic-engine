@@ -105,10 +105,15 @@ export function ApiKeysPanel({ clientId }: Props) {
 
   const handleRevoke = async (row: ApiKeyRow) => {
     if (revokingIdRef.current === row.id) return
-    revokingIdRef.current = row.id
+    // Confirm BEFORE claiming the guard ref (Codex review): if confirm is
+    // cancelled after setting the ref, the early return would never clear it
+    // and all future revokes of this key would be silently ignored. The sync
+    // confirm dialog blocks the thread, so a double-click still can't slip
+    // past the line-107 guard while the dialog is open.
     if (!confirm(
       `吊销 "${row.name}" (${row.key_prefix}…) 后，客户的 Claude 将立即断连，不可恢复。\n\n确定吊销？`,
     )) return
+    revokingIdRef.current = row.id
     setRevokingId(row.id)
     setRevokeErr(null)
     try {

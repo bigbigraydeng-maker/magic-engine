@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireSession } from '@/lib/auth/require-session'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { normalisePath } from '@/lib/seo-intelligence/page-trends/path-utils'
 import {
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
   pickComparison,
   computeMetricDeltas,
   buildWindowLabel,
