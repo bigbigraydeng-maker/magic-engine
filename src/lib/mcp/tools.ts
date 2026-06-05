@@ -127,6 +127,17 @@ export function registerReadOnlyTools(server: McpServer): void {
   )
 
   server.tool(
+    'me_get_traffic',
+    'Get your recent website traffic snapshots (Google Analytics 4): sessions, ' +
+      'users, new users, pageviews, average session duration, bounce rate, plus ' +
+      'top pages and top sources. Optionally pass a limit (default 6, max 24 most ' +
+      'recent periods).',
+    { limit: z.number().int().positive().max(24).optional() },
+    async ({ limit }, { authInfo }) =>
+      runScoped(authInfo, 'me_get_traffic', (q) => q.getTraffic(limit)),
+  )
+
+  server.tool(
     'me_list_execution_items',
     'List the work currently being done for you, grouped by dimension (SEO, ' +
       'AI visibility, ads, social, reputation, competitor). Each item shows its ' +

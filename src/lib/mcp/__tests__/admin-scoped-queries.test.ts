@@ -47,6 +47,23 @@ describe('createAdminQueries — explicit client_id scoping', () => {
     expect(eqCalls).toContainEqual(['status', 'active'])
   })
 
+  it('getTraffic scopes by the passed client_id + throws on empty arg', async () => {
+    await expect(createAdminQueries().getTraffic('')).rejects.toThrow()
+    const { chain, eqCalls } = makeChain({ data: [{ total_sessions: 5 }], error: null })
+    mockFrom.mockReturnValue(chain as never)
+    const res = await createAdminQueries().getTraffic(CLIENT_ID)
+    expect(eqCalls).toContainEqual(['client_id', CLIENT_ID])
+    // ok-branch contract (魏征 Y2): symmetrical to client version.
+    expect(res.status).toBe('ok')
+  })
+
+  it('getTraffic returns pending_sync on empty data (魏征 Y2)', async () => {
+    const { chain } = makeChain({ data: [], error: null })
+    mockFrom.mockReturnValue(chain as never)
+    const res = await createAdminQueries().getTraffic(CLIENT_ID)
+    expect(res.status).toBe('pending_sync')
+  })
+
   it('getSeoPerformance scopes by client_id + pending_sync on empty', async () => {
     const { chain, eqCalls } = makeChain({ data: [], error: null })
     mockFrom.mockReturnValue(chain as never)

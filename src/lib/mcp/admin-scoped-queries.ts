@@ -17,6 +17,8 @@ import { supabaseAdmin } from '@/lib/supabase'
 
 const SEO_DEFAULT_LIMIT = 6
 const SEO_MAX_LIMIT = 24
+const TRAFFIC_DEFAULT_LIMIT = 6
+const TRAFFIC_MAX_LIMIT = 24
 
 // ── types (DUPLICATED from scoped-queries on purpose — SYNC WITH it) ────────
 export interface ClientSummary {
@@ -69,6 +71,24 @@ export type SeoResult =
   | { status: 'pending_sync'; message: string }
   | { status: 'ok'; snapshots: SeoSnapshot[] }
 
+export interface TrafficSnapshot {
+  property_id: string | null
+  period_start: string
+  period_end: string
+  total_sessions: number
+  total_users: number
+  total_new_users: number
+  total_pageviews: number
+  avg_session_duration: number
+  bounce_rate: number
+  top_pages: unknown
+  top_sources: unknown
+}
+
+export type TrafficResult =
+  | { status: 'pending_sync'; message: string }
+  | { status: 'ok'; snapshots: TrafficSnapshot[] }
+
 export type ExecutionByDimension = Record<
   string,
   Array<{ id: string; title: string; status: string; due_date: string | null }>
@@ -79,6 +99,7 @@ export interface AdminQueries {
   getOverview(clientId: string): Promise<OverviewResult>
   listGoals(clientId: string, status?: string): Promise<GoalSummary[]>
   getSeoPerformance(clientId: string, limit?: number): Promise<SeoResult>
+  getTraffic(clientId: string, limit?: number): Promise<TrafficResult>
   listExecutionItems(clientId: string): Promise<ExecutionByDimension>
 }
 
@@ -95,6 +116,7 @@ export function createAdminQueries(): AdminQueries {
     getOverview,
     listGoals,
     getSeoPerformance,
+    getTraffic,
     listExecutionItems,
   }
 }
@@ -188,6 +210,31 @@ async function getSeoPerformance(clientId: string, limit?: number): Promise<SeoR
     }
   }
   return { status: 'ok', snapshots: data as SeoSnapshot[] }
+}
+
+// SYNC WITH scoped-queries.ts getTraffic
+async function getTraffic(clientId: string, limit?: number): Promise<TrafficResult> {
+  requireClientId(clientId)
+  const capped = Math.min(Math.max(1, limit ?? TRAFFIC_DEFAULT_LIMIT), TRAFFIC_MAX_LIMIT)
+  const { data } = await supabaseAdmin
+    .from('ga4_traffic_snapshots')
+    .select(
+      'property_id, period_start, period_end, total_sessions, total_users, ' +
+        'total_new_users, total_pageviews, avg_session_duration, bounce_rate, ' +
+        'top_pages, top_sources',
+    )
+    .eq('client_id', clientId)
+    .order('period_end', { ascending: false })
+    .limit(capped)
+  if (!data || data.length === 0) {
+    return {
+      status: 'pending_sync',
+      message:
+        'Website traffic data is not available yet. Google Analytics 4 data ' +
+        'syncs daily; the first snapshot appears after the next sync.',
+    }
+  }
+  return { status: 'ok', snapshots: data as TrafficSnapshot[] }
 }
 
 // SYNC WITH scoped-queries.ts listExecutionItems

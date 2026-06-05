@@ -97,6 +97,23 @@ describe('every method scopes by client_id', () => {
     expect(eqCalls).toContainEqual(['id', GOAL_ID])
   })
 
+  it('getTraffic filters by client_id and returns ok with snapshots', async () => {
+    const { chain, eqCalls } = makeChain({ data: [{ total_sessions: 100 }], error: null })
+    mockFrom.mockReturnValue(chain as never)
+    const res = await createScopedQueries(CLIENT_ID).getTraffic()
+    expect(eqCalls).toContainEqual(['client_id', CLIENT_ID])
+    // ok-branch contract (魏征 Y1): mutating the final return to pending_sync must fail here.
+    expect(res.status).toBe('ok')
+    if (res.status === 'ok') expect(res.snapshots).toHaveLength(1)
+  })
+
+  it('getTraffic returns pending_sync when empty', async () => {
+    const { chain } = makeChain({ data: [], error: null })
+    mockFrom.mockReturnValue(chain as never)
+    const res = await createScopedQueries(CLIENT_ID).getTraffic()
+    expect(res.status).toBe('pending_sync')
+  })
+
   it('getSeoPerformance filters by client_id', async () => {
     const { chain, eqCalls } = makeChain({ data: [{ site_url: 'x' }], error: null })
     mockFrom.mockReturnValue(chain as never)

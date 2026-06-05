@@ -100,6 +100,16 @@ export function registerAdminTools(server: McpServer): void {
   )
 
   server.tool(
+    'me_admin_get_traffic',
+    'Get a client’s recent website traffic snapshots (Google Analytics 4) for a ' +
+      'given client_id (sessions/users/pageviews/duration/bounce + top pages & ' +
+      'sources). Optional limit (default 6, max 24).' + ADMIN_NOTE,
+    { client_id: z.string().uuid(), limit: z.number().int().positive().max(24).optional() },
+    async ({ client_id, limit }, { authInfo }) =>
+      runAdmin(authInfo, 'me_admin_get_traffic', (q) => q.getTraffic(client_id, limit)),
+  )
+
+  server.tool(
     'me_admin_list_execution_items',
     'List the execution work for a given client_id, grouped by dimension ' +
       '(skipped excluded).' + ADMIN_NOTE,
