@@ -23,8 +23,8 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { canonicalEmail } from '@/lib/auth/email'
 
-const WINDOW_MS = 24 * 60 * 60 * 1000   // 24h
 const DEFAULT_DAILY_CAP = 3
+/** 24h — both the rate-limit window length and the domain cache TTL. */
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
 
 export type BucketType = 'ip' | 'email' | 'domain'
@@ -108,36 +108,94 @@ export async function checkScanRateLimits(
 /**
  * Increment ALL applicable dimensions for this scan attempt. Should be called
  * after `checkScanRateLimits` returns `allowed: true` and the job row has
- * been created. Idempotent in spirit (the call is a single upsert per row).
+ * been created.
+ *
+ * Phase X.S6 M-4: each dimension is now consumed via the atomic
+ * zhangqian_rate_limit_consume RPC; concurrent callers serialise on the
+ * unique (bucket_type, bucket_key, window_start) constraint so the per-day
+ * cap can no longer be exceeded by parallel hits sharing the same fingerprint.
+ *
+ * For routes that want the strongest guarantee, prefer `consumeScanRateLimits`
+ * below — it merges check + record into one round-trip per dimension and is
+ * race-free by construction.
  */
 export async function recordScanAttempt(input: ScanRateLimitInput): Promise<void> {
-  const ws = windowStart()
+  await consumeScanRateLimits(input)
+}
+
+/**
+ * Atomically increment + check every applicable dimension for this scan.
+ * Returns a verdict per dimension; the caller can short-circuit further work
+ * (e.g. skip creating the job + running the agent) when any dimension is over
+ * cap.
+ *
+ * Race property: each (bucket_type, bucket_key, window_start) tuple has a
+ * unique constraint, so two concurrent INSERT ... ON CONFLICT calls
+ * targeting the same tuple serialise; whichever runs second sees the
+ * post-increment value and may exceed the cap by 1 on its return — but that
+ * second call's `allowed` will still be `false`, so the caller does not
+ * proceed.
+ */
+export async function consumeScanRateLimits(
+  input: ScanRateLimitInput,
+): Promise<ScanRateLimitResult> {
+  const cap = input.cap ?? DEFAULT_DAILY_CAP
+  const ws  = windowStart()
+
   const keys: Array<[BucketType, string]> = [['ip', normalizeIp(input.ip)]]
   const emailCanon = canonicalEmail(input.email ?? '')
-  if (emailCanon)   keys.push(['email',  emailCanon])
-  if (input.domain) keys.push(['domain', normalizeDomain(input.domain)])
+  if (emailCanon)         keys.push(['email',  emailCanon])
+  if (input.domain)       keys.push(['domain', normalizeDomain(input.domain)])
 
-  // UPSERT pattern: read-modify-write via a single SQL call would be cleaner
-  // (e.g. an INSERT ... ON CONFLICT ... DO UPDATE SET count = count+1) but
-  // Supabase JS client doesn't expose that for arbitrary tables without a
-  // SQL function. So we read then write, accepting a small race window —
-  // the worst case is a fingerprint that runs in parallel exceeding the
-  // cap by one. The persistence still wins over the in-memory map.
+  const counts: Partial<Record<BucketType, { count: number; cap: number; key: string }>> = {}
+  let blockedBy: BucketType | undefined
+
   for (const [type, key] of keys) {
-    const { data } = await supabaseAdmin
-      .from('zhangqian_scan_rate_limits')
-      .select('count')
-      .eq('bucket_type', type)
-      .eq('bucket_key', key)
-      .eq('window_start', ws)
-      .maybeSingle<{ count: number }>()
-    const newCount = (data?.count ?? 0) + 1
-    await supabaseAdmin
-      .from('zhangqian_scan_rate_limits')
-      .upsert(
-        { bucket_type: type, bucket_key: key, window_start: ws, count: newCount, updated_at: new Date().toISOString() },
-        { onConflict: 'bucket_type,bucket_key,window_start' },
-      )
+    const { data, error } = await supabaseAdmin.rpc('zhangqian_rate_limit_consume', {
+      p_bucket_type:  type,
+      p_bucket_key:   key,
+      p_window_start: ws,
+      p_cap:          cap,
+    })
+    if (error) {
+      // Defensive: fall back to legacy non-atomic upsert + treat as allowed
+      // (loud warning so we notice if the RPC starts failing in prod).
+      console.warn('[rate-limiter] atomic RPC failed, falling back', { type, key, error: error.message })
+      const { data: row } = await supabaseAdmin
+        .from('zhangqian_scan_rate_limits')
+        .select('count')
+        .eq('bucket_type', type)
+        .eq('bucket_key', key)
+        .eq('window_start', ws)
+        .maybeSingle<{ count: number }>()
+      const newCount = (row?.count ?? 0) + 1
+      await supabaseAdmin
+        .from('zhangqian_scan_rate_limits')
+        .upsert(
+          { bucket_type: type, bucket_key: key, window_start: ws, count: newCount, updated_at: new Date().toISOString() },
+          { onConflict: 'bucket_type,bucket_key,window_start' },
+        )
+      counts[type] = { count: newCount, cap, key }
+      if (newCount > cap && !blockedBy) blockedBy = type
+      continue
+    }
+
+    const row = (Array.isArray(data) ? data[0] : data) as
+      | { allowed: boolean; post_count: number }
+      | null
+    const postCount = row?.post_count ?? 0
+    counts[type] = { count: postCount, cap, key }
+    if (!row?.allowed && !blockedBy) blockedBy = type
+  }
+
+  if (!counts.ip)     counts.ip     = { count: 0, cap, key: normalizeIp(input.ip) }
+  if (!counts.email)  counts.email  = { count: 0, cap, key: emailCanon }
+  if (!counts.domain) counts.domain = { count: 0, cap, key: normalizeDomain(input.domain) }
+
+  return {
+    allowed: !blockedBy,
+    blockedBy,
+    limits: counts as Record<BucketType, { count: number; cap: number; key: string }>,
   }
 }
 
@@ -185,6 +243,3 @@ export async function updateDomainCacheStatus(domain: string, jobStatus: string)
     .eq('domain', normalizeDomain(domain))
 }
 
-// Silence unused-import warning if WINDOW_MS becomes unreferenced; the
-// constant documents the window length even when not directly used.
-void WINDOW_MS

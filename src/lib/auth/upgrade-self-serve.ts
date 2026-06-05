@@ -46,6 +46,16 @@ export interface UpgradeOk {
   alreadyUpgraded: boolean
   /** True when the existing self_serve row was deleted in favour of a fresh client row. */
   merged: boolean
+  /**
+   * Phase X.S6 M-3 — only set when `merged: true` AND the post-upsert delete
+   * of the old self_serve row failed. The paid row IS in place (the user has
+   * the access they paid for), but ops needs to manually remove the orphan
+   * self_serve row, or a follow-up sweep should re-attempt the delete.
+   * When undefined / false, no cleanup is pending.
+   */
+  cleanupPending?: boolean
+  /** Present when cleanupPending=true — the orphan self_serve row's id. */
+  cleanupRowId?: string
 }
 export interface UpgradeFail { ok: false; reason: UpgradeReason; message: string }
 export type UpgradeResult = UpgradeOk | UpgradeFail
@@ -180,8 +190,18 @@ export async function upgradeSelfServeToPaid(opts: UpgradeOptions): Promise<Upgr
 
   if (delErr) {
     // Both rows now exist; the user has paid access. We log the inconsistency
-    // and let the caller decide whether to retry the cleanup.
+    // and surface it on the result so callers (admin UI + ops sweeps) know
+    // there is a leftover self_serve row to retire manually.
     console.error('[upgrade-self-serve] paid row created but self_serve delete failed:', delErr)
+    return {
+      ok:              true,
+      email:           rawEmail,
+      clientId:        opts.mergeIntoClientId,
+      alreadyUpgraded: false,
+      merged:          true,
+      cleanupPending:  true,
+      cleanupRowId:    selfServe.id as string,
+    }
   }
 
   return {

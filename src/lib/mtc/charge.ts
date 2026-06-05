@@ -158,8 +158,14 @@ export async function chargeForGeneration(
 /**
  * Credit the MTC back to the client when the post-charge work fails.
  * Records a `refund` ledger row referencing the failed work for audit.
- * Best-effort: errors are logged but never thrown — refund failure must not
- * mask the original generation failure.
+ *
+ * Phase X.S6 M-2: when the refund itself fails (DB error, mid-table state),
+ * we now persist a row to `mtc_refund_failures` so an ops sweep can replay it
+ * — previously the failure was just console.error'd and the over-charged
+ * customer had no audit trail to discover the situation.
+ *
+ * Best-effort: errors writing to mtc_refund_failures are also logged but
+ * never thrown — refund failure must not mask the original generation failure.
  */
 export async function refundOnFail(
   clientId: string,
@@ -167,19 +173,38 @@ export async function refundOnFail(
   mtcAmount: number,
   opts: { referenceId?: string; reason?: string } = {},
 ): Promise<void> {
+  const notes = opts.reason
+    ? `Auto-refund: ${serviceKey} failed — ${opts.reason}`
+    : `Auto-refund: ${serviceKey} failed`
+
+  let lastError: string | null = null
   try {
-    const notes = opts.reason
-      ? `Auto-refund: ${serviceKey} failed — ${opts.reason}`
-      : `Auto-refund: ${serviceKey} failed`
     const result = await refundMtc(clientId, serviceKey, mtcAmount, {
       referenceId: opts.referenceId,
       notes,
     })
-    if (!result.ok) {
-      console.error('[mtc/refundOnFail] refund failed', { clientId, serviceKey, mtcAmount })
-    }
+    if (result.ok) return
+    lastError = 'refundMtc returned ok=false (likely ledger insert failure)'
+    console.error('[mtc/refundOnFail] refund failed', { clientId, serviceKey, mtcAmount })
   } catch (err) {
+    lastError = err instanceof Error ? err.message : String(err)
     console.error('[mtc/refundOnFail] refund threw', err)
+  }
+
+  // Refund did not complete — persist for ops replay.
+  try {
+    await supabaseAdmin.from('mtc_refund_failures').insert({
+      client_id:      clientId,
+      service_key:    serviceKey,
+      mtc_amount:     mtcAmount,
+      reference_id:   opts.referenceId ?? null,
+      failure_reason: opts.reason ?? null,
+      last_error:     lastError,
+    })
+  } catch (writeErr) {
+    // Last-resort log only — at this point both the refund AND the failure
+    // record write failed, and there's nothing else we can do server-side.
+    console.error('[mtc/refundOnFail] mtc_refund_failures insert threw', writeErr)
   }
 }
 
@@ -247,6 +272,3 @@ export async function commitCharge(
   }
 }
 
-// Silence unused-import warning if supabaseAdmin ends up unreferenced after
-// future refactors — the import stays for any inline ledger writes added later.
-void supabaseAdmin

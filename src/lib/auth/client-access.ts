@@ -4,7 +4,6 @@ import { requireSession } from '@/lib/auth/require-session'
 import { getUserPermissions, type UserRole } from '@/lib/auth/whitelist'
 import {
   ACCESS_TYPES_DASHBOARD,
-  ACCESS_TYPES_PAID,
   tierForAccessType,
   type AccessTier,
   type AccessType,
@@ -139,6 +138,3 @@ async function getDashboardAccessForEmail(email: string): Promise<
   }
 }
 
-// Silence unused-import warning if ACCESS_TYPES_PAID becomes unreferenced after
-// future refactors — kept to keep the import surface stable across PRs.
-void ACCESS_TYPES_PAID

@@ -261,26 +261,33 @@ async function runGenerationBackground(
         .eq('id', postId),
     ).catch((e: unknown) => console.error('[blog background] status→failed update error:', e))
 
-    // MTC refund — generation failed, no charge taken (precheck-only at POST).
-    // Mark mtc_committed=true so retries don't double-process.
-    await Promise.resolve(
-      supabaseAdmin
-        .from('blog_posts')
-        .update({ mtc_committed: true })
-        .eq('id', postId),
-    ).catch(() => {})
-
-    // Write a ledger row noting the failure for audit trail.
+    // Phase X.S6 M-2 fix: in precheck-only async mode, generation failure
+    // means NO charge was ever taken (commitBlogMtc only runs in the happy
+    // path above). Only refund if the commit had already succeeded. We read
+    // mtc_committed back from the row to make that decision; refund only
+    // when commit had happened but a later step (e.g. SeoContentAdapter)
+    // threw before we got out of the try block.
     const { data: row } = await supabaseAdmin
       .from('blog_posts')
-      .select('mtc_projected')
+      .select('mtc_projected, mtc_committed')
       .eq('id', postId)
-      .maybeSingle<{ mtc_projected: number | null }>()
-    if (row?.mtc_projected) {
+      .maybeSingle<{ mtc_projected: number | null; mtc_committed: boolean | null }>()
+
+    if (row?.mtc_committed && row.mtc_projected && row.mtc_projected > 0) {
+      // Real charge was taken — refund it.
       await refundOnFail(clientId, serviceKey, row.mtc_projected, {
         referenceId: postId,
         reason: err instanceof Error ? err.message : 'blog generation failed',
       })
+    } else {
+      // Precheck-only failure — no charge taken; just lock the row so a
+      // re-trigger of the same post_id doesn't double-process.
+      await Promise.resolve(
+        supabaseAdmin
+          .from('blog_posts')
+          .update({ mtc_committed: true })
+          .eq('id', postId),
+      ).catch(() => {})
     }
   }
 }

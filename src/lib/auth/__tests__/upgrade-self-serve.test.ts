@@ -11,6 +11,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 type Row = Record<string, unknown>
 const tables: Record<string, Row[]> = {}
+/** Test seam: set deleteShouldFail[<table>] = { message } to make DELETE return that error. */
+const deleteShouldFail: Record<string, { message: string } | null> = {}
 
 function builderFor(name: string) {
   const filters: Array<[string, unknown]> = []
@@ -42,6 +44,12 @@ function builderFor(name: string) {
   builder.delete = vi.fn(() => ({
     eq: (col: string, val: unknown) => {
       filters.push([col, val])
+      // Test seam: tests can set deleteShouldFail[table] = errObj to simulate
+      // a DB failure on the delete-side of merge.
+      const failErr = deleteShouldFail[name]
+      if (failErr) {
+        return Promise.resolve({ data: null, error: failErr })
+      }
       tables[name] = (tables[name] ?? []).filter(r => !matches(r))
       return Promise.resolve({ data: null, error: null })
     },
@@ -58,6 +66,7 @@ import { upgradeSelfServeToPaid } from '../upgrade-self-serve'
 
 beforeEach(() => {
   for (const k of Object.keys(tables)) delete tables[k]
+  for (const k of Object.keys(deleteShouldFail)) delete deleteShouldFail[k]
 })
 
 describe('upgradeSelfServeToPaid — in-place', () => {
@@ -148,5 +157,44 @@ describe('upgradeSelfServeToPaid — merge into another client', () => {
     if (!r.ok) expect(r.reason).toBe('target_client_missing')
     // self_serve row must still exist on failure.
     expect(tables.client_portal_users?.[0]?.access_type).toBe('self_serve')
+  })
+
+  // Phase X.S6 M-3 — cleanup pending when delete of orphan self_serve fails.
+  it('returns cleanupPending=true when self_serve delete fails after merge', async () => {
+    tables.client_portal_users = [
+      { id: 'row-old', email: 'alice@example.com', client_id: 'c-old', access_type: 'self_serve' },
+    ]
+    tables.clients = [{ id: 'c-new' }]
+    deleteShouldFail.client_portal_users = { message: 'connection lost during delete' }
+
+    const r = await upgradeSelfServeToPaid({
+      email: 'alice@example.com',
+      mergeIntoClientId: 'c-new',
+    })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.merged).toBe(true)
+    expect(r.cleanupPending).toBe(true)
+    expect(r.cleanupRowId).toBe('row-old')
+    // Both rows still present — the paid one was upserted, the orphan
+    // self_serve survived the failed delete and is what cleanupRowId points to.
+    const rows = tables.client_portal_users ?? []
+    expect(rows).toHaveLength(2)
+  })
+
+  it('cleanupPending is undefined on a normal merge', async () => {
+    tables.client_portal_users = [
+      { id: 'row-old', email: 'alice@example.com', client_id: 'c-old', access_type: 'self_serve' },
+    ]
+    tables.clients = [{ id: 'c-new' }]
+
+    const r = await upgradeSelfServeToPaid({
+      email: 'alice@example.com',
+      mergeIntoClientId: 'c-new',
+    })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.cleanupPending).toBeUndefined()
+    expect(r.cleanupRowId).toBeUndefined()
   })
 })

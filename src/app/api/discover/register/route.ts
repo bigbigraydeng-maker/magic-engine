@@ -18,8 +18,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { runZhangqian } from '@/lib/zhangqian/agent'
 import { getDomainMetrics, getKeywordsForSite } from '@/lib/dataforseo/labs'
 import {
-  checkScanRateLimits,
-  recordScanAttempt,
+  consumeScanRateLimits,
   getDomainCache,
   setDomainCache,
   updateDomainCacheStatus,
@@ -274,8 +273,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 })
   }
 
-  // Phase X.S3 H3 — persistent rate-limit by IP, email, domain.
-  const rate = await checkScanRateLimits({ ip, email, domain })
+  // 24h domain cache hit — hand back the existing job. Done before
+  // rate-limit consume so cached hits don't burn a quota slot.
+  const cached = await getDomainCache(domain)
+  if (cached) {
+    return NextResponse.json({ success: true, job_id: cached.job_id, cached: true })
+  }
+
+  // Phase X.S6 M-4 — atomic per-dimension consume (replaces check + record).
+  const rate = await consumeScanRateLimits({ ip, email, domain })
   if (!rate.allowed) {
     return NextResponse.json(
       {
@@ -284,12 +290,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       },
       { status: 429 },
     )
-  }
-
-  // 24h domain cache hit — hand back the existing job.
-  const cached = await getDomainCache(domain)
-  if (cached) {
-    return NextResponse.json({ success: true, job_id: cached.job_id, cached: true })
   }
 
   // Save lead
@@ -310,10 +310,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Failed to create scan job.' }, { status: 500 })
   }
 
-  await Promise.allSettled([
-    recordScanAttempt({ ip, email, domain }),
-    setDomainCache(domain, job.id, 'queued'),
-  ])
+  await setDomainCache(domain, job.id, 'queued').catch(() => {})
 
   // Fire background scan
   void runScan(job.id, domain).catch((err: unknown) => {

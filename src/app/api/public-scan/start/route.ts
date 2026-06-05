@@ -17,8 +17,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { runZhangqian } from '@/lib/zhangqian/agent'
 import { getDomainMetrics, getKeywordsForSite } from '@/lib/dataforseo/labs'
 import {
-  checkScanRateLimits,
-  recordScanAttempt,
+  consumeScanRateLimits,
   getDomainCache,
   setDomainCache,
   updateDomainCacheStatus,
@@ -293,8 +292,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 })
   }
 
-  // Phase X.S3 H3 — persistent rate-limit by IP, email and domain.
-  const rate = await checkScanRateLimits({ ip, email, domain })
+  // 24h domain cache — if the same site was scanned recently, hand back the
+  // existing job rather than spending another $0.57 on a duplicate. Done
+  // BEFORE rate-limit consume so a cached hit doesn't burn a quota slot.
+  const cached = await getDomainCache(domain)
+  if (cached) {
+    return NextResponse.json({ job_id: cached.job_id, cached: true })
+  }
+
+  // Phase X.S6 M-4 — atomic check-and-increment per dimension (ip/email/domain).
+  // Replaces the older check + record two-step which had a race window.
+  const rate = await consumeScanRateLimits({ ip, email, domain })
   if (!rate.allowed) {
     return NextResponse.json(
       {
@@ -303,13 +311,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       },
       { status: 429 },
     )
-  }
-
-  // 24h domain cache — if the same site was scanned recently, hand back the
-  // existing job rather than spending another $0.57 on a duplicate.
-  const cached = await getDomainCache(domain)
-  if (cached) {
-    return NextResponse.json({ job_id: cached.job_id, cached: true })
   }
 
   // Save lead (email capture)
@@ -332,13 +333,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Failed to create scan job.' }, { status: 500 })
   }
 
-  // Best-effort: record the attempt against IP/email/domain counters and
-  // stash the new job in the domain cache. We do these AFTER the job row
-  // exists so a rate-record without a corresponding scan can't happen.
-  await Promise.allSettled([
-    recordScanAttempt({ ip, email, domain }),
-    setDomainCache(domain, job.id, 'queued'),
-  ])
+  // Stash the new job in the domain cache. Rate-limit counters already
+  // moved in consumeScanRateLimits above; the job is created right after.
+  await setDomainCache(domain, job.id, 'queued').catch(() => {})
 
   // Fire-and-forget; the background worker also updates the domain cache
   // status so a cached pointer that later fails can be silently regenerated.

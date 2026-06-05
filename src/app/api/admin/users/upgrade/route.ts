@@ -91,5 +91,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     client_id:        result.clientId,
     already_upgraded: result.alreadyUpgraded,
     merged:           result.merged,
+    /** Phase X.S6 M-3 — only present when merge succeeded but the old
+     *  self_serve row could not be deleted; admin UI should surface this. */
+    cleanup_pending:  result.cleanupPending ?? false,
+    cleanup_row_id:   result.cleanupRowId,
   })
 }

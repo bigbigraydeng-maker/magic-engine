@@ -10,8 +10,23 @@ const deductMock = vi.fn()
 const refundMock = vi.fn()
 const budgetMock = vi.fn()
 
+// Capture inserts into mtc_refund_failures so tests can assert ops-replay
+// records are written when refund itself fails.
+const refundFailureInserts: unknown[] = []
 vi.mock('@/lib/supabase', () => ({
-  supabaseAdmin: { from: vi.fn() },
+  supabaseAdmin: {
+    from: vi.fn((table: string) => {
+      if (table === 'mtc_refund_failures') {
+        return {
+          insert: vi.fn((row: unknown) => {
+            refundFailureInserts.push(row)
+            return Promise.resolve({ data: null, error: null })
+          }),
+        }
+      }
+      return { insert: vi.fn(() => Promise.resolve({ data: null, error: null })) }
+    }),
+  },
 }))
 vi.mock('./balance', () => ({ getMtcBalance: (...a: unknown[]) => balanceMock(...a) }))
 vi.mock('./deduct', () => ({ deductMtc: (...a: unknown[]) => deductMock(...a) }))
@@ -32,6 +47,7 @@ const BLOCK_BUDGET = { allowed: false, spent: 4990, cap: 5000, remaining: 10, ca
 
 beforeEach(() => {
   vi.clearAllMocks()
+  refundFailureInserts.length = 0
   budgetMock.mockResolvedValue(ALLOW_BUDGET)
   balanceMock.mockResolvedValue({ balance: 1000, batches: [] })
   deductMock.mockResolvedValue({ ok: true, ledgerEntryId: 'led-1' })
@@ -116,6 +132,8 @@ describe('refundOnFail', () => {
         notes: expect.stringContaining('LLM timeout'),
       }),
     )
+    // Happy path — no failure record needed.
+    expect(refundFailureInserts).toHaveLength(0)
   })
 
   it('does not throw when refund fails — caller already handling main failure', async () => {
@@ -128,6 +146,46 @@ describe('refundOnFail', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     await refundOnFail('c1', 'blog_seo', 40)
     expect(spy).toHaveBeenCalled()
+    spy.mockRestore()
+  })
+
+  // Phase X.S6 M-2 — refund failure now persists for ops replay.
+
+  it('persists a mtc_refund_failures row when refund returns ok=false', async () => {
+    refundMock.mockResolvedValueOnce({ ok: false })
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await refundOnFail('c1', 'blog_seo', 40, { referenceId: 'post-1', reason: 'timeout' })
+    expect(refundFailureInserts).toHaveLength(1)
+    const row = refundFailureInserts[0] as Record<string, unknown>
+    expect(row.client_id).toBe('c1')
+    expect(row.service_key).toBe('blog_seo')
+    expect(row.mtc_amount).toBe(40)
+    expect(row.reference_id).toBe('post-1')
+    expect(row.failure_reason).toBe('timeout')
+    expect(row.last_error).toContain('refundMtc')
+    spy.mockRestore()
+  })
+
+  it('persists a mtc_refund_failures row when refund throws', async () => {
+    refundMock.mockRejectedValueOnce(new Error('db down'))
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await refundOnFail('c1', 'image_single', 10, { referenceId: 'p1' })
+    expect(refundFailureInserts).toHaveLength(1)
+    const row = refundFailureInserts[0] as Record<string, unknown>
+    expect(row.last_error).toBe('db down')
+    spy.mockRestore()
+  })
+
+  it('does not throw when the failure-record insert itself fails', async () => {
+    // Force the insert to throw on top of refund throwing.
+    refundMock.mockRejectedValueOnce(new Error('db down'))
+    const { supabaseAdmin } = await import('@/lib/supabase')
+    const fromSpy = vi.spyOn(supabaseAdmin, 'from').mockImplementationOnce(() => ({
+      insert: () => { throw new Error('table missing') },
+    } as never))
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await expect(refundOnFail('c1', 'blog_seo', 40)).resolves.toBeUndefined()
+    fromSpy.mockRestore()
     spy.mockRestore()
   })
 })
