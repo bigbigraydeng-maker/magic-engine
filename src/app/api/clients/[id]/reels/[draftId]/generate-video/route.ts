@@ -11,6 +11,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { submitI2VGeneration } from '@/lib/visual/seedance'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { precheckCharge } from '@/lib/mtc/charge'
+import type { ServiceKey } from '@/lib/mtc/types'
+
+/** Map (resolution, duration) → MTC ServiceKey. 1080p is FDE-only (no key). */
+function resolveServiceKey(resolution: '480p' | '720p' | '1080p', duration: number): ServiceKey | null {
+  if (resolution === '480p' && duration === 6) return 'reels_480p_6s'
+  if (resolution === '720p' && duration === 6) return 'reels_720p_6s'
+  if (resolution === '720p' && duration === 10) return 'reels_720p_10s'
+  if (resolution === '720p' && duration === 15) return 'reels_720p_15s'
+  return null  // 1080p or unsupported combo — not in MTC table
+}
 
 type RouteContext = { params: { id: string; draftId: string } }
 
@@ -71,7 +82,20 @@ export async function POST(
       )
     }
 
-    // 2. Submit I2V job to Atlas
+    // 2. MTC precheck — validate balance/budget upfront; commit happens in
+    //    video-status when the Atlas job completes. 1080p has no MTC key and
+    //    skips this guard (FDE-only mode).
+    const serviceKey = resolveServiceKey(resolution, duration)
+    let projectedMtc: number | null = null
+    if (serviceKey) {
+      const charge = await precheckCharge(clientId, serviceKey, { referenceId: draftId })
+      if (!charge.ok) {
+        return NextResponse.json(charge.body, { status: charge.status })
+      }
+      projectedMtc = charge.projectedMtc
+    }
+
+    // 3. Submit I2V job to Atlas
     const { job_id } = await submitI2VGeneration({
       prompt: draft.i2v_video_prompt,
       opening_frame_url: draft.opening_frame_url,
@@ -82,12 +106,15 @@ export async function POST(
       generate_audio,
     })
 
-    // 3. Update draft status
+    // 4. Update draft status + record projected MTC for the worker to commit
     const { error: updateErr } = await supabaseAdmin
       .from('reels_drafts')
       .update({
         status: 'video_generating',
         provider_job_id: job_id,
+        mtc_service_key: serviceKey,
+        mtc_projected:   projectedMtc,
+        mtc_committed:   false,
       })
       .eq('id', draftId)
 

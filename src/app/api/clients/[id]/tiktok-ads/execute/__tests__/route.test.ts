@@ -11,6 +11,7 @@ const mockFlywheelInsert = vi.fn()
 
 const mocks = vi.hoisted(() => ({
   requireDashboardClientAccess: vi.fn(),
+  requirePaidClientAccess: vi.fn(),
   getCampaign:                  vi.fn(),
   setCampaignStatus:            vi.fn(),
   setCampaignBudget:            vi.fn(),
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/auth/client-access', () => ({
   requireDashboardClientAccess: mocks.requireDashboardClientAccess,
+  requirePaidClientAccess: mocks.requireDashboardClientAccess,
 }))
 
 vi.mock('@/lib/tiktok-ads/client', () => ({

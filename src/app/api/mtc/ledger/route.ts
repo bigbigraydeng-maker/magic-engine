@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth/require-session'
 import { guardAdmin } from '@/lib/auth/require-admin'
+import { ACCESS_TYPES_DASHBOARD } from '@/lib/auth/access-types'
 import { supabaseAdmin } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -59,7 +60,7 @@ export async function GET(request: NextRequest) {
     .select('client_id')
     .eq('email', email)
     .eq('client_id', clientId)
-    .in('access_type', ['dashboard', 'both', 'self_serve'])
+    .in('access_type', ACCESS_TYPES_DASHBOARD as readonly string[] as string[])
 
   if (portalErr) {
     console.error('[mtc/ledger] portal user lookup failed:', portalErr)

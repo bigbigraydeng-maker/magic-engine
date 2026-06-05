@@ -9,13 +9,13 @@
 
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 export async function GET(
   _req: Request,
   { params }: { params: { id: string } },
 ) {
-  const access = await requireDashboardClientAccess(params.id)
+  const access = await requirePaidClientAccess(params.id)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
   // 找该客户的 unassigned initiative

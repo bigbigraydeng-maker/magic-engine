@@ -25,6 +25,7 @@ import {
 import type { ClaudeDocInput } from '@/lib/anthropic/client'
 import type { GeneratePlanRequest } from '@/lib/marketing-plan/types'
 import type { MasterBrief } from '@/types/magic-engine'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 const CAMPAIGN_BUCKET = 'campaign-uploads'
 
@@ -34,6 +35,11 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const access = await requirePaidClientAccess(params.id)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
+  }
+
   const clientId = params.id
 
   try {

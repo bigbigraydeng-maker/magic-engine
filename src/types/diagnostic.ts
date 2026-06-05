@@ -61,6 +61,8 @@ export type SocialFindingType =
   | 'inconsistent_brand_voice'
   | 'no_content_calendar'
   | 'social_accounts_not_linked'  // P8.5.23: IG/FB handles not configured
+  | 'social_scrape_failed'        // 2026-06-05: Apify scraper threw for a configured platform
+  | 'social_collector_error'      // 2026-06-05: collector stalled / crashed before per-platform loop
 
 export type ReputationFindingType =
   | 'negative_reviews'

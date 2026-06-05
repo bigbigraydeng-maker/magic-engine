@@ -20,7 +20,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import {
   getConnectionStatus,
   getWordpressConnectionStatus,
@@ -33,7 +33,7 @@ interface RouteContext {
 
 export async function GET(req: NextRequest, { params }: RouteContext) {
   const { id: clientId } = params
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }

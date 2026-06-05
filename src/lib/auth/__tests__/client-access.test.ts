@@ -10,9 +10,10 @@ vi.mock('@/lib/supabase', () => ({
   },
 }))
 
-import { requireDashboardClientAccess } from '../client-access'
+import { requireDashboardClientAccess, requirePaidClientAccess } from '../client-access'
 import { requireSession } from '../require-session'
 import { supabaseAdmin } from '@/lib/supabase'
+import type { AccessType } from '../access-types'
 
 const CLIENT_ID = '11111111-1111-4111-8111-111111111111'
 const OTHER_CLIENT_ID = '22222222-2222-4222-8222-222222222222'
@@ -28,11 +29,22 @@ function mockUser(email: string) {
   } as Awaited<ReturnType<typeof requireSession>>)
 }
 
-function mockPortalRows(rows: Array<{ client_id: string }>, error: unknown = null) {
+/**
+ * Mock rows from client_portal_users. Default access_type is 'dashboard'
+ * to keep legacy tests (that pre-date tier support) passing unchanged.
+ */
+function mockPortalRows(
+  rows: Array<{ client_id: string; access_type?: AccessType }>,
+  error: unknown = null,
+) {
+  const enriched = rows.map(r => ({
+    client_id: r.client_id,
+    access_type: r.access_type ?? 'dashboard',
+  }))
   const chain = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
-    in: vi.fn().mockResolvedValue({ data: rows, error }),
+    in: vi.fn().mockResolvedValue({ data: enriched, error }),
   }
   mockFrom.mockReturnValue(chain as unknown as ReturnType<typeof supabaseAdmin.from>)
   return chain
@@ -78,6 +90,7 @@ describe('requireDashboardClientAccess', () => {
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.role).toBe('admin')
+      expect(result.tier).toBe('admin')
       expect(result.allowedClientId).toBeNull()
     }
     expect(mockFrom).not.toHaveBeenCalled()
@@ -92,6 +105,7 @@ describe('requireDashboardClientAccess', () => {
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.role).toBe('client-viewer')
+      expect(result.tier).toBe('paid_client')
       expect(result.allowedClientId).toBe(CLIENT_ID)
     }
   })
@@ -104,6 +118,7 @@ describe('requireDashboardClientAccess', () => {
     const result = await requireDashboardClientAccess(CLIENT_ID)
 
     expect(result.ok).toBe(true)
+    if (result.ok) expect(result.tier).toBe('paid_client')
   })
 
   it('returns 403 when a viewer asks for another client', async () => {
@@ -112,7 +127,11 @@ describe('requireDashboardClientAccess', () => {
 
     const result = await requireDashboardClientAccess(CLIENT_ID)
 
-    expect(result).toEqual({ ok: false, status: 403, error: 'Forbidden' })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(403)
+      expect(result.reason).toBe('forbidden')
+    }
   })
 
   it('fails closed when the permission lookup fails', async () => {
@@ -121,10 +140,130 @@ describe('requireDashboardClientAccess', () => {
 
     const result = await requireDashboardClientAccess(CLIENT_ID)
 
-    expect(result).toEqual({
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(500)
+      expect(result.reason).toBe('lookup_failed')
+    }
+  })
+
+  // ── Tier mapping (Phase X.S2) ────────────────────────────────────────────────
+
+  it('maps access_type=client to tier=paid_client', async () => {
+    mockUser('paid@example.com')
+    mockPortalRows([{ client_id: CLIENT_ID, access_type: 'client' }])
+
+    const result = await requireDashboardClientAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.tier).toBe('paid_client')
+  })
+
+  it('maps access_type=fde to tier=paid_client', async () => {
+    mockUser('fde@magiclab.com')
+    mockPortalRows([{ client_id: CLIENT_ID, access_type: 'fde' }])
+
+    const result = await requireDashboardClientAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.tier).toBe('paid_client')
+  })
+
+  it('maps access_type=both to tier=paid_client', async () => {
+    mockUser('legacy@example.com')
+    mockPortalRows([{ client_id: CLIENT_ID, access_type: 'both' }])
+
+    const result = await requireDashboardClientAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.tier).toBe('paid_client')
+  })
+
+  it('maps access_type=self_serve to tier=self_serve', async () => {
+    mockUser('free@example.com')
+    mockPortalRows([{ client_id: CLIENT_ID, access_type: 'self_serve' }])
+
+    const result = await requireDashboardClientAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.tier).toBe('self_serve')
+  })
+})
+
+describe('requirePaidClientAccess', () => {
+  const saved: Record<string, string | undefined> = {}
+
+  beforeEach(() => {
+    vi.resetAllMocks()
+    for (const key of KEYS) {
+      saved[key] = process.env[key]
+      delete process.env[key]
+    }
+  })
+
+  afterEach(() => {
+    for (const key of KEYS) {
+      if (saved[key] === undefined) delete process.env[key]
+      else process.env[key] = saved[key]
+    }
+  })
+
+  it('passes paid_client through with tier preserved', async () => {
+    mockUser('paid@example.com')
+    mockPortalRows([{ client_id: CLIENT_ID, access_type: 'client' }])
+
+    const result = await requirePaidClientAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.tier).toBe('paid_client')
+  })
+
+  it('passes admin through with tier=admin', async () => {
+    process.env.ADMIN_EMAILS = 'pm@magiclab.com'
+    mockUser('pm@magiclab.com')
+
+    const result = await requirePaidClientAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.tier).toBe('admin')
+  })
+
+  it('rejects self_serve with 403 reason=paid_only', async () => {
+    mockUser('free@example.com')
+    mockPortalRows([{ client_id: CLIENT_ID, access_type: 'self_serve' }])
+
+    const result = await requirePaidClientAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(403)
+      expect(result.reason).toBe('paid_only')
+    }
+  })
+
+  it('propagates 401 from session check (no double-checking)', async () => {
+    mockRequireSession.mockResolvedValue({
       ok: false,
-      status: 500,
-      error: 'Authorization check failed',
+      status: 401,
+      error: 'Unauthorized',
     })
+
+    const result = await requirePaidClientAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(401)
+  })
+
+  it('propagates 403 forbidden when client_id does not match user', async () => {
+    mockUser('paid@example.com')
+    mockPortalRows([{ client_id: OTHER_CLIENT_ID, access_type: 'client' }])
+
+    const result = await requirePaidClientAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(403)
+      expect(result.reason).toBe('forbidden')
+    }
   })
 })

@@ -16,7 +16,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { listCampaigns, loadTikTokAdsCreds } from '@/lib/tiktok-ads/client'
 
 interface RouteParams {
@@ -27,7 +27,7 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Ne
   const clientId = params.id
 
   // ── Auth ─────────────────────────────────────────────────────────────────
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }

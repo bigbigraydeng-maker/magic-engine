@@ -25,6 +25,7 @@ import {
   getModeBoost,
 } from '@/lib/case-library/outcome-confidence'
 import type { StrategyItem, RawOpportunity } from '@/lib/strategy/types'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 export const maxDuration = 60
 
@@ -48,6 +49,11 @@ export async function POST(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ): Promise<NextResponse> {
+  const access = await requirePaidClientAccess(params.id)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
+  }
+
   const clientId = params.id
 
   try {

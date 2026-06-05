@@ -20,6 +20,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getAdAccountInsights, getAdCampaignInsights } from '@/lib/meta/client'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 interface RouteParams {
   params: { id: string }
@@ -31,6 +32,11 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   // ── 1. Resolve date range ─────────────────────────────────────────────────
   let body: { since?: string; until?: string; production_package_id?: string } = {}
   try {
+  const access = await requirePaidClientAccess(params.id)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
+  }
+
     body = await req.json()
   } catch {
     // body is optional — default to last 30 days
