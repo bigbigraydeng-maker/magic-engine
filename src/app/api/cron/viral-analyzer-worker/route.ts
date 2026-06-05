@@ -38,12 +38,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const cronRun = await startCronRun('viral-analyzer-worker')
 
-  // Claim up to BATCH_SIZE pending rows. Mark as 'analyzing' atomically
-  // so a concurrent run won't double-process.
+  // Claim up to BATCH_SIZE rows. Pending rows are processed first; error rows
+  // (e.g. prior 429 quota exhaustion) are retried once the queue is empty.
+  // Ordering: pending before error, then oldest-first within each group.
   const { data: pending, error: selectErr } = await supabaseAdmin
     .from('viral_reference_library')
-    .select('id, source_url')
-    .eq('analysis_status', 'pending')
+    .select('id, source_url, analysis_status')
+    .in('analysis_status', ['pending', 'error'])
+    .order('analysis_status', { ascending: false })  // 'pending' > 'error' alphabetically desc → pending first
     .order('created_at', { ascending: true })
     .limit(BATCH_SIZE)
 
