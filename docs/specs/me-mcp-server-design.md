@@ -1,10 +1,12 @@
 # Magic Engine MCP Server 设计文档（客户自助数据访问）
 
-> 状态：**设计稿 v2（已过魏征审查）** · 创建 2026-06-04 · 分支 `claude/magic-engine-mcp-design-GJNWq`
+> 状态：**设计稿 v3（已过魏征 + 子牙双审）** · 创建 2026-06-04 · 分支 `claude/magic-engine-mcp-design-GJNWq`
 > 鉴权方向：**Per-client API Key**（PM 已拍板，OAuth 留作后期升级）
 > 范围：**只读 MVP** — 客户在 Claude 里调用 MCP，查看「自己的」业务/营销数据
 
-> **v2 修订（2026-06-04，采纳魏征审查）**：①新增 **T0 transport spike 前置关卡**——Streamable HTTP 套进 App Router route handler 存在 Node↔Web 签名不兼容风险，必须先验证（详见 §2.1 + §9）；②MVP tool 由 8 砍到 **5**（其余 3 个降为二期）；③补 zod/SDK 依赖盘点、空数据态语义、rate limit 改 Supabase 计数表；④工期 5 → **6–7 天**。坐标核验：魏征逐条读代码确认文档引用的表/字段/函数**全部真实存在、无编造**，CLAUDE.md 强约束**全部合规**。
+> **v2 修订（采纳魏征审查）**：①新增 **T0 transport spike 前置关卡**（Node↔Web 签名不兼容）；②MVP tool 由 8 砍到 **5**；③补 zod/SDK 依赖、空数据态、rate limit 改 Supabase 计数表；④工期 5 → **6–7 天**。坐标核验：表/字段/函数**全部真实、无编造**，CLAUDE.md 强约束**全部合规**。
+>
+> **v3 修订（采纳子牙架构复审）**：①🔴 **隔离下沉到最里层**——新增 `src/lib/mcp/scoped-queries.ts`，client_id 用闭包绑定而非每次传参，变异测试改测最里层（满足 CLAUDE.md「校验放最里层」，堵住「复用 src/lib 把隔离上移到调用约定层」的旁路，见 §2 + §6.1 + §8）；②**战略定性纠偏**——MCP = 「只读 MVP / 可执行是明确 V2 路线」，tool 命名空间与 scope 按「将来可加 write」设计（见 §4 + §12）；③`client_api_keys` 加 `metadata jsonb` 兜底 + `mcp_access_log`（审计/计费/限流三合一）升 MVP 必做（见 §3.1 + §6）；④补**故障隔离拆分触发线**（见 §2.2）；⑤澄清 stateless ≠ 做不了「主动提醒客户」（见 §2.1）。
 
 ---
 
@@ -57,8 +59,10 @@
 │    ├─ 2. MCP Server (@modelcontextprotocol)  │
 │    │      tools/list, tools/call             │
 │    │                                         │
-│    ├─ 3. tool handler → src/lib/* 查询        │  ← 复用现有 lib 查询
-│    │      （永远用步骤1锁定的 clientId）       │     客户无法传别人的 id
+│    ├─ 3. tool handler                        │
+│    │      → scopedQueries(clientId).getX()   │  ← 隔离在最里层（子牙 B5）
+│    │        （clientId 闭包绑定，不再每次传参）│     唯一持有 client_id 的层
+│    │      → 内部才调 src/lib/* SELECT          │
 │    │                                         │
 │    └─ 4. vendorNameFilter(result)            │  ← 封装名过滤
 │           OpenAI→Content Engine 等            │
@@ -67,7 +71,9 @@
 └─────────────────────────────────────────────┘
 ```
 
-**核心安全不变量**：`client_id` **永远由 API Key 反查得到，绝不接受工具入参传入**。这样即使 Claude（或恶意 prompt 注入）尝试传 `client_id`，也会被忽略，从根上杜绝越权。
+**核心安全不变量（两层，缺一不可）**：
+1. **最外层**：`client_id` **永远由 API Key 反查得到，绝不接受工具入参传入** —— 客户/prompt 注入传不进 client_id。
+2. **最里层（子牙 B5 🔴）**：tool handler **不直接调通用 `src/lib` 查询**（那些函数签名为旧路由设计、本就接受 `clientId` 参数，靠人肉每次传对 = 约定隔离非架构隔离）。改为统一走 `src/lib/mcp/scoped-queries.ts`：这是**唯一持有 client_id 的层**，client_id 经构造时**闭包绑定**，把「传 client_id」从 N 次调用收敛成 1 次绑定，并在该层对所有查询统一强制 `.eq('client_id', boundClientId)`。这才满足 CLAUDE.md「校验放最里层、无 API 绕过」。
 
 ### 2.1 ⚠️ 最大技术风险：transport 适配（魏征 🔴，必须 spike）
 
@@ -80,6 +86,22 @@
 - 若走 stateful/session 模式还需 **`GET /api/mcp` 维持 SSE 长连接** + session 生命周期管理（架构图当前只画了 POST）。Render `plan: standard` 是长驻单实例 Node（`next start`），**能撑长连接**——这点对方案有利，但仍需 spike 实证。
 
 **结论**：MVP 默认走「stateless JSON」，T0 用 MCP Inspector 实测 route handler 能握手 + `tools/list` + 一次 `tools/call`，过了再排后面的 tool。
+
+> **澄清（子牙 B2）**：stateless 放弃的是「单次工具调用生命周期内的 SSE 流式推送」，只读查询根本不需要，**零损失**。它**不等于**「做不了排名掉了主动提醒客户」——MCP 是「客户的 Claude 主动拉」，协议本身没有「server 反向唤醒一个空闲 client」的能力（那需要 client 常驻 + 注册回调，Claude Desktop/Web 都不提供）。**主动提醒走 ME 已有渠道（邮件 / portal 通知 / 月报）或客户端轮询，与 transport 选 stateless 无关。** 别被「牺牲推送」误导成虚假两难。
+
+### 2.2 故障隔离：MVP 挂主 app 是「用风险换速度」的明牌取舍（子牙 B4）
+
+「挂 `/api/mcp`、零额外部署」的代价：陌生客户流量（含 prompt 注入触发的异常调用、扫描、滥用）直接打进**跑着 FDE 看板 + 19 客户关键词 cron + GA4/GSC 每日采集的主 app**，且 Render `standard` 单实例 = 共享命运（MCP 被打爆，cron/看板陪葬）。
+
+**MVP 仍可接受**，因为四道收窄阀：①只读、②FDE 代发 key（无公开注册，接入面极窄）、③Supabase 计数表 rate limit、④试点仅 CTS/Oztop 两客户。
+
+**但必须写死拆分触发线**（满足任一即拆出独立 Render service —— 同一份 `src/lib` 查询换个 service 跑 `/api/mcp`，成本低）：
+- key 开放给客户自助生成（接入面失控）
+- MCP 客户数 > ~10 或调用量压到 cron 时段
+- 出现第一次 MCP 流量影响主 app 可用性的事故
+- 进入计费（§12）后 MCP 成为有 SLA 承诺的对外产品
+
+「先挂后拆」是对的演进，不是债 —— 前提是这条线写进文档、照表拆，别温水煮青蛙拖到事故。
 
 ---
 
@@ -100,16 +122,33 @@ CREATE TABLE IF NOT EXISTS client_api_keys (
   created_by_email text,                     -- 创建者 email（审计，对齐 client_portal_users 既有列名）
   last_used_at timestamptz,
   revoked_at   timestamptz,                  -- 软删除：吊销不删行，保留审计
+  metadata     jsonb NOT NULL DEFAULT '{}',  -- 子牙 B3：兜底，未来挂 plan/计费关联零迁移成本
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_client_api_keys_client ON client_api_keys(client_id);
 CREATE INDEX IF NOT EXISTS idx_client_api_keys_hash   ON client_api_keys(key_hash);
 
+-- mcp_access_log：审计 + 限流计数 + 将来计费聚合，三合一（子牙 B3：升 MVP 必做，少建一张表）
+CREATE TABLE IF NOT EXISTS mcp_access_log (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  key_id     uuid NOT NULL REFERENCES client_api_keys(id) ON DELETE CASCADE,
+  client_id  uuid NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  tool       text NOT NULL,
+  ok         boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+-- 限流即 append 后 count(*) WHERE key_id=$1 AND created_at > now()-interval '60s'
+CREATE INDEX IF NOT EXISTS idx_mcp_access_log_key_ts ON mcp_access_log(key_id, created_at DESC);
+
 -- RLS：service_role 模板（CLAUDE.md 强约束，不引用 workspace_id / client_team / auth.uid）
 ALTER TABLE client_api_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mcp_access_log  ENABLE ROW LEVEL SECURITY;
 DO $$ BEGIN
   CREATE POLICY "service_role_full" ON client_api_keys FOR ALL USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE POLICY "service_role_full" ON mcp_access_log FOR ALL USING (true);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 ```
 
@@ -183,7 +222,7 @@ CLAUDE.md 强约束「配置类数据必须有 UI，不能让 PM/FDE 进 Supabas
 
 **空数据态语义（魏征 🟡，真实坑）**：GSC / GA4 / flywheel 表都是 cron 周期写入，**新接入客户这些表是空的**。每个 tool 必须显式区分「无权限/查不到」与「有权限但数据待同步」，后者返回结构化提示（如 `{ status: 'pending_sync', message: '数据每日同步，最新一批稍后可见' }`）而非空数组。空态进测试矩阵。
 
-**显式不做（MVP）**：任何写操作 / Fix 执行 / 改预算改出价 —— 那是 FDE 权限边界（CLAUDE.md「Fix vs Talk to Us」），且 MCP 给客户的是**透明度**不是**控制权**。`reputation` / `competitor` 两维度按现有设计只读诊断，纳入 `me_get_overview` 评分但不单列工具。
+**显式不做（MVP），但架构留口（子牙 B1 战略定性）**：MVP **不做**任何写操作 / Fix 执行 / 改预算改出价（FDE 权限边界，CLAUDE.md「Fix vs Talk to Us」红线）。但定性是 **「只读 MVP / 可执行是明确 V2 路线」，不是「MCP=透明度终点」**——客户在自己的 Claude 里直接下达意图（「把那个亏损关键词停了」）让自然语言成为飞轮**新触发源**，才是 ME「执行自动化护城河」的真正战略机会（OTTO/Search Atlas 都还没做）。因此 MVP 写 tool 时**必须按「将来可加 write」设计形状**：`me_*` 命名空间预留 `me_execute_*`、`scopes` 维度预留 `write:*`、`scoped-queries` 层将来可加 mutation。详见 §12。`reputation` / `competitor` 两维度按现有设计只读诊断，纳入 `me_get_overview` 评分但不单列工具。
 
 ---
 
@@ -208,11 +247,11 @@ MCP 返回给客户的内容 = **客户交付物**，受 CLAUDE.md「UI/报告/�
 
 ## 6. 安全设计
 
-1. **越权防护（最重要）**：client_id 只从 API Key 反查，工具入参一律不接受 client_id。变异测试：故意让 tool 尝试读别的 client → 必须 0 行。
+1. **越权防护（最重要，子牙 B5 🔴）**：双层 —— 最外层 client_id 只从 API Key 反查、工具入参不接受 client_id；**最里层** tool 不直接调通用 lib，统一走 `scoped-queries.ts`（client_id 闭包绑定 + 该层强制 `.eq('client_id', …)`）。变异测试**必须测最里层**：在某个 scoped-query 里故意漏掉/改错 client_id 过滤，断言隔离测试立刻 fail（只测最外层「key 反查」挡不住「复用 lib 传错参」的旁路）。
 2. **只读**：MCP 路由只暴露 SELECT 类查询，不挂任何写 lib。
 3. **Key 安全**：只存 hash；明文仅创建时返回一次；吊销软删保留审计。
-4. **Rate limiting**：ME 应用层当前**完全没有** rate limit（探查确认，仅 site-audit 爬虫有节流）。MCP 对外，必须补 —— 按 `keyId` 滑动窗口（如 60 req/min）。**用 Supabase 计数表，不赌单实例内存 LRU**（魏征 🟡：Render 现在虽是单实例，但随时可能扩容，内存方案一扩就漏；对外暴露的 key，rate limit 不是「二期可选」项）。
-5. **审计**：`last_used_at` + 可选 `mcp_access_log`（keyId / tool / ts），二期再加。
+4. **Rate limiting**：ME 应用层当前**完全没有** rate limit（探查确认，仅 site-audit 爬虫有节流）。MCP 对外，必须补 —— 按 `keyId` 滑动窗口（如 60 req/min），**直接复用 `mcp_access_log` 表做计数**（`count(*) WHERE key_id AND created_at > now()-60s`），跨实例安全，不赌单实例内存 LRU（魏征 🟡 + 子牙 B3：和审计/计费共用一张 append-only 表，少建一张）。
+5. **审计（子牙 B3：升 MVP 必做）**：`client_api_keys.last_used_at` + `mcp_access_log`（key_id / client_id / tool / ok / ts）每次调用 append 一行。它同时是审计轨迹、限流计数源、将来计费聚合源 —— 三合一，不再「二期再加」。
 6. **最小返回**：每个 tool 只 select 客户该看的列，不 `select *`（避免泄露内部成本 `cost_usd`、internal flags 等）。
 7. **统一错误契约 + 协议版本（魏征 🟢）**：T0 spike 拍定面向的 MCP protocol revision 并写入文档；所有 tool 抛错（DB 超时 / 客户未接 GSC / goal_id 不存在）返回统一结构（`isError: true` + 人话 message，封装名过滤后），不把原始堆栈/SQL 错误透给客户。
 
@@ -238,8 +277,11 @@ PM 选了 API Key 而非 OAuth，这里有个**真实的接入面权衡**，必�
 ## 8. 数据隔离验证
 
 - 单测：两个 client 各发一个 key，A 的 key 调任何 tool 只能拿到 A 的数据。
-- 变异测试：手动改坏「client_id 来自 key」这行，断言隔离测试立刻 fail（防空架子测试）。
-- 边界：吊销的 key → 401；过期/不存在 key → 401；跨 client goal_id → 查不到（因为查询带 client_id 过滤）。
+- 变异测试（**两处都要**，子牙 B5）：
+  1. 最外层 —— 改坏「client_id 来自 key」这行 → 隔离测试 fail；
+  2. **最里层 —— 在某个 `scoped-queries` 里故意漏掉/改错 `.eq('client_id', …)` → 隔离测试也必须 fail**（这才防得住「复用 lib 传错参」的真实旁路；只测最外层是空架子）。
+- 边界：吊销的 key → 401；过期/不存在 key → 401；跨 client goal_id → 查不到（scoped-queries 层强制 client_id 过滤）。
+- DB 层兜底（最强，**MVP 可选 / 标二期**）：MCP 用带 `client_id` 行级约束的独立 Postgres role，让「忘了加过滤」在数据层就拿不到数据。
 
 ---
 
@@ -248,14 +290,15 @@ PM 选了 API Key 而非 OAuth，这里有个**真实的接入面权衡**，必�
 | 任务 | 内容 | 验证 |
 |------|------|------|
 | **T0** ⭐ | **transport spike（前置关卡，不过不许往下）**：新增 `@modelcontextprotocol/sdk` + `zod` 并锁版本；用 stateless JSON 模式把 `StreamableHTTPServerTransport` 套进 `/api/mcp` route handler；MCP Inspector 实测握手 | `npm run build` 仍过 + Inspector 能 `tools/list` + 一次 `tools/call`（哪怕返回 stub） |
-| **T1** | `client_api_keys` migration（service_role 模板，`created_by_email`）+ apply | Supabase 后台见新表 |
+| **T1** | migration：`client_api_keys`（含 `metadata jsonb`/`created_by_email`）+ `mcp_access_log`（service_role 模板）+ apply | Supabase 后台见两张新表 |
 | **T2** | `src/lib/auth/api-key-access.ts` + key 生成/哈希工具 + 单测 | 单测：合法/吊销/无效 key |
 | **T3** | Key 管理 API（`/api/clients/[id]/api-keys` GET/POST/DELETE） | 生成→列表→吊销闭环 |
 | **T4** | Key 管理 UI（客户设置抽屉「🔌 API 访问」Tab） | FDE 能发 key（强约束：必须有 UI） |
 | **T5** | `/api/mcp` 接 T0 transport + `requireApiKeyClientAccess` 鉴权挂载 | Inspector 带真实 key 能握手 |
-| **T6** | 5 个只读 tool（复用 src/lib 查询）+ 空数据态 | 每 tool 真实 client 数据 + 空态回归 |
+| **T6a** | `src/lib/mcp/scoped-queries.ts`（client_id 闭包绑定 + 强制 `.eq` 拦截器）+ **最里层变异测试** | 漏过滤的变异 → 隔离测试 fail |
+| **T6b** | 5 个只读 tool（只调 scoped-queries，不碰通用 lib）+ 空数据态 | 每 tool 真实 client 数据 + 空态回归 |
 | **T7** | `vendor-filter.ts` + 「返回无真名」回归测试 | grep 真名 0 命中 |
-| **T8** | Rate limit（Supabase 计数表，按 keyId）+ 隔离/变异测试 + 接入 SOP 文档 | 越权测试 0 行 |
+| **T8** | Rate limit（复用 `mcp_access_log` 计数）+ 审计 append + 隔离测试 + 接入 SOP 文档 | 越权测试 0 行 |
 
 **MVP 总估：≈ 6–7 个工作日**（魏征 🟡 上调，含 T0 spike 未知数 + T4 真实前端工作量）：T0 spike ~1d、T1–T4 鉴权地基+UI ~2.5d、T5–T6 MCP+5 工具 ~2d、T7–T8 安全+测试 ~1.5d。**T0 若发现需自写 Web-stream 适配层（非 stateless 能解决），立即回炉重估，不在此估算内。**
 
@@ -284,7 +327,7 @@ PM 选了 API Key 而非 OAuth，这里有个**真实的接入面权衡**，必�
 2. **网页版接入**：是否需要二期 OAuth 薄层让 claude.ai 网页版一键 Connect？还是只支持 Desktop + mcp-remote 就够？
 3. **工具粒度**：8 个够吗？是否要加 `me_get_monthly_report`（直接给月报摘要）？
 4. ~~Rate limit 存储~~：**已拍定** —— Supabase 计数表（跨实例安全），不赌单实例内存（见 §6.4）。
-5. **是否纳入计费**：API 调用是否消耗 MTC token / 计入 plan quota？（与 Phase 20 变现层关系）
+5. ~~是否纳入计费~~：**子牙 B3 已收口** —— 现在**不**和 Phase 20 变现层联合设计（过度工程，Phase 20 模型未定型）。已做零成本预留：`client_api_keys.metadata jsonb` 兜底 + `mcp_access_log` 作为将来计费的唯一聚合源。将来接计费只动 log 聚合、不改 key 表结构。无需 PM 现在拍。
 
 ---
 
@@ -292,11 +335,22 @@ PM 选了 API Key 而非 OAuth，这里有个**真实的接入面权衡**，必�
 
 ```
 - [ ] **P9.3.0** transport spike（前置关卡）：SDK+zod 依赖 + stateless StreamableHTTP 套进 App Router route handler + Inspector 握手
-- [ ] **P9.3.1** client_api_keys 表 + Bearer 鉴权层（requireApiKeyClientAccess）
+- [ ] **P9.3.1** client_api_keys + mcp_access_log 表 + Bearer 鉴权层（requireApiKeyClientAccess）
 - [ ] **P9.3.2** Key 管理 API + 客户设置「🔌 API 访问」UI（强约束：配置类必须有 UI）
 - [ ] **P9.3.3** /api/mcp 接 transport + 鉴权挂载
-- [ ] **P9.3.4** 5 个只读 MCP tool（复用 src/lib 查询，client_id 由 key 锁定，含空数据态）
-- [ ] **P9.3.5** 封装名过滤层 + Supabase 计数表 rate limit + 隔离/变异测试 + 客户接入 SOP
+- [ ] **P9.3.4** scoped-queries 隔离层（client_id 闭包绑定）+ 5 个只读 tool + 空数据态 + 最里层变异测试
+- [ ] **P9.3.5** 封装名过滤层 + mcp_access_log 限流/审计 + 隔离测试 + 客户接入 SOP
 ```
 
 > ⚠️ 真正写入 ROADMAP.md 前，按 CLAUDE.md 强约束跑 `git diff main -- ROADMAP.md`，确认所有 `-` 删除行 100% 与本主题相关，防误删别 Phase 登记。
+
+---
+
+## 12. V2 路线图：从「只读透明度」到「可执行飞轮触发源」（子牙 B1，不在 MVP 范围）
+
+记录战略方向，确保 MVP 不写死成「只读形状」。**不在 MVP 工期内**，仅为 T6 设计形状提供约束：
+
+- **战略价值**：客户在自己的 Claude 里直接下意图（停亏损词 / 预算倾斜 GEO）→ 自然语言成为执行飞轮的**新触发源** → 动作落 `flywheel_actions`（护城河表）→ 回流归因。这是 ME 区别于 OTTO（只 Google SEO）的 GEO+执行自动化窗口。
+- **MVP 必须留好的接口（零额外成本）**：①`me_*` 命名空间将来加 `me_execute_*`；②`scopes` 维度将来加 `write:*`；③`scoped-queries` 层将来加 mutation 方法。
+- **V2 才需要新建、MVP 不碰的**：客户经 MCP 触发 Fix 的**授权边界 + 审批链**（谁批准这个 client 能触发哪类 Fix）、把 MCP 触发的动作写进 `flywheel_actions` 的归因链、严守 CLAUDE.md「Fix vs Talk to Us」红线（只放可自动执行类，重构/预算策略仍 Talk to Us）。
+- **PM 现在只需拍认知**（不拍工程）：认可「只读 MVP / 可执行 V2」的定性，让 T6 按可扩展形状写。
