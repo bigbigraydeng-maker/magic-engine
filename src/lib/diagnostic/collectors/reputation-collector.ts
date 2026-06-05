@@ -1,5 +1,8 @@
 import { getBusinessReviews } from '@/lib/places/client'
-import type { BusinessReviewData } from '@/lib/places/client'
+import { scrapeTripadvisorBusiness } from '@/lib/apify/tripadvisor-scraper'
+import { scrapeProductReviewBusiness } from '@/lib/apify/productreview-scraper'
+import { scrapeBookingBusiness } from '@/lib/apify/booking-scraper'
+import { scrapeHipagesBusiness } from '@/lib/apify/hipages-scraper'
 import type { CollectorResult, NewFinding } from '../types'
 import { makeEvidence, evidenceSource } from '../types'
 import { MAX_COLLECTOR_TIMEOUT_MS } from '../constants'
@@ -49,41 +52,162 @@ export interface ReputationSourceSignal {
   reviewCount: number // absolute count
 }
 
-export interface ReputationSignals {
-  gbp: ReputationSourceSignal | null
-  /** Reserved for A2 (TripAdvisor partner API integration). Always null today. */
-  tripadvisor?: ReputationSourceSignal | null
-  /** Reserved for future industry platform expansion. Always null today. */
-  productReview?: ReputationSourceSignal | null
+/**
+ * All reputation sources currently supported.  Add new keys here when a new
+ * Apify scraper / API integration lands — the scoring function picks up the
+ * new key automatically as long as INDUSTRY_REPUTATION_WEIGHTS is updated.
+ */
+export type ReputationSource =
+  | 'gbp'             // Google Business Profile via Google Places API (all industries)
+  | 'tripadvisor'     // Apify maxcopell/tripadvisor-scraper (tourism + restaurant primary)
+  | 'productReview'   // Apify abotapi/product-reviews-australia-scraper (building/services/retail/education)
+  | 'booking'         // Apify zhorex/booking-reviews-scraper (tourism — accommodation focus)
+  | 'hipages'         // Apify abotapi/hipages-business-scraper (trades / building services)
+
+export type ReputationSignals = Partial<Record<ReputationSource, ReputationSourceSignal | null>>
+
+/**
+ * Industries we apply differentiated source weights for.  Anything not listed
+ * here falls back to DEFAULT_INDUSTRY_WEIGHTS (Google Reviews only).
+ *
+ * These string keys mirror clients.industry free-text values normalised by the
+ * caller — the collector matches case-insensitively against this map.
+ */
+export type ReputationIndustry =
+  | 'tourism'         // travel agents, tour operators, hotels — TripAdvisor primary
+  | 'restaurant'      // restaurants, cafes — TripAdvisor primary
+  | 'building'        // building supplies, flooring, materials — ProductReview primary
+  | 'professional'   // legal / accounting / consulting — ProductReview primary
+  | 'retail'          // general retail — ProductReview primary
+  | 'education'       // tutoring, training providers — ProductReview primary
+  | 'trades'          // electricians, plumbers, builders — Hipages primary
+
+/**
+ * Per-industry source weights.  Each row MUST sum to 1.0.  Sources not listed
+ * (or set to 0) are ignored even if data was fetched — this lets us "fetch
+ * everything in case it's there" while still scoring only what matters for the
+ * industry.
+ *
+ * Weights reflect where AU/NZ customers actually leave reviews per industry:
+ *   - tourism:  TripAdvisor is the dominant review platform; Booking adds
+ *               accommodation depth.  Google still matters but is secondary.
+ *   - building: ProductReview.com.au is the AU-specific platform for tradespeople
+ *               and building materials.  Google is co-primary for foot traffic.
+ *   - trades:   Hipages owns trades reviews in AU.  Google still matters.
+ *   - default:  any unknown industry collapses to Google-only — preserves
+ *               existing behaviour, no regression for industries we haven't
+ *               classified yet.
+ */
+export const INDUSTRY_REPUTATION_WEIGHTS: Record<ReputationIndustry, Partial<Record<ReputationSource, number>>> = {
+  tourism:      { gbp: 0.30, tripadvisor: 0.50, booking: 0.20 },
+  restaurant:   { gbp: 0.40, tripadvisor: 0.60 },
+  building:     { gbp: 0.50, productReview: 0.50 },
+  professional: { gbp: 0.50, productReview: 0.50 },
+  retail:       { gbp: 0.50, productReview: 0.50 },
+  education:    { gbp: 0.50, productReview: 0.50 },
+  trades:       { gbp: 0.40, hipages: 0.60 },
+}
+
+export const DEFAULT_INDUSTRY_WEIGHTS: Partial<Record<ReputationSource, number>> = { gbp: 1.0 }
+
+/**
+ * Map free-text clients.industry value → ReputationIndustry bucket.  Returns
+ * null when no mapping exists (caller uses DEFAULT_INDUSTRY_WEIGHTS).
+ *
+ * Mirrors src/lib/strategy/industry-mapping.ts pattern but uses ME's own
+ * reputation taxonomy (which is broader — tourism covers both inbound and
+ * outbound since reputation reviews don't care about direction).
+ */
+export function resolveReputationIndustry(industry: string | null | undefined): ReputationIndustry | null {
+  if (!industry) return null
+  const k = industry.trim().toLowerCase().replace(/\s+/g, ' ')
+  switch (k) {
+    case 'travel':
+    case 'tourism':
+    case 'tour operator':
+    case 'inbound tour':
+    case 'inbound tourism':
+    case '入境旅游':
+    case '出境旅游':
+    case '中文旅行社':
+      return 'tourism'
+    case 'restaurant':
+    case 'food':
+    case 'cafe':
+    case '餐饮':
+    case '中餐':
+      return 'restaurant'
+    case 'flooring':
+    case 'tiles':
+    case 'flooring & tiles':
+    case 'flooring and tiles':
+    case 'building':
+    case 'building materials':
+    case '地板':
+    case '瓷砖':
+    case '建材':
+      return 'building'
+    case 'legal':
+    case 'law':
+    case 'accounting':
+    case 'consulting':
+    case 'professional services':
+      return 'professional'
+    case 'retail':
+    case 'shop':
+    case '零售':
+      return 'retail'
+    case 'education':
+    case 'tutoring':
+    case 'training':
+    case '教育':
+    case '留学':
+      return 'education'
+    case 'electrician':
+    case 'plumber':
+    case 'builder':
+    case 'trades':
+    case 'tradesperson':
+      return 'trades'
+    default:
+      return null
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Pure scoring function — exported for testing and future reuse by other
-// dimensions / aggregators.  All non-null signals are weighted equally and
-// the rating/count weights are applied within each source, then averaged
-// across sources.  Empty signal set → null (let the caller decide what
-// "unknown reputation" should look like for the overall score).
+// dimensions / aggregators.  Each source's individual score is computed using
+// the rating/count weights, then sources are combined using the per-industry
+// weight table.  Sources without data (null) are dropped and remaining
+// weights are re-normalised so partial coverage still produces a sensible
+// 0–100 result.
 // ---------------------------------------------------------------------------
 
-export function scoreReputation(signals: ReputationSignals): number | null {
-  const sources: ReputationSourceSignal[] = []
-  if (signals.gbp) sources.push(signals.gbp)
-  if (signals.tripadvisor) sources.push(signals.tripadvisor)
-  if (signals.productReview) sources.push(signals.productReview)
+export function scoreReputation(
+  signals: ReputationSignals,
+  industry?: ReputationIndustry | null,
+): number | null {
+  const weights = industry
+    ? INDUSTRY_REPUTATION_WEIGHTS[industry]
+    : DEFAULT_INDUSTRY_WEIGHTS
 
-  if (sources.length === 0) return null
+  // Compute (sourceScore, weight) pairs only for sources that have data
+  // AND have a non-zero weight in the industry table.
+  let weightedSum = 0
+  let totalWeight = 0
+  for (const [source, signal] of Object.entries(signals)) {
+    if (!signal) continue
+    const w = weights[source as ReputationSource] ?? 0
+    if (w <= 0) continue
+    const ratingScore = Math.max(0, Math.min(100, ((signal.rating - 1) / 4) * 100))
+    const reviewScore = Math.min(1, signal.reviewCount / MAX_REVIEWS_FOR_FULL_SCORE) * 100
+    const sourceScore = ratingScore * RATING_WEIGHT + reviewScore * REVIEW_WEIGHT
+    weightedSum += sourceScore * w
+    totalWeight += w
+  }
 
-  const scores = sources.map(s => {
-    const ratingScore = Math.max(0, Math.min(100, ((s.rating - 1) / 4) * 100))
-    const reviewScore = Math.min(1, s.reviewCount / MAX_REVIEWS_FOR_FULL_SCORE) * 100
-    return ratingScore * RATING_WEIGHT + reviewScore * REVIEW_WEIGHT
-  })
-
-  // Equal weighting across non-null sources — simpler than per-source weights
-  // and consistent with the "trust every source you have" stance.  When
-  // industry adaptation arrives (A3), swap this for a weighted mean.
-  const raw = scores.reduce((a, b) => a + b, 0) / scores.length
-  return Math.min(100, Math.max(0, Math.round(raw)))
+  if (totalWeight === 0) return null
+  return Math.min(100, Math.max(0, Math.round(weightedSum / totalWeight)))
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +221,12 @@ export interface ReputationCollectorContext {
   city?: string | null
   /** ISO 2-letter country code, e.g. "NZ". */
   country?: string | null
+  /**
+   * Free-text clients.industry value (e.g. 'travel', 'flooring', 'restaurant').
+   * Resolved to a ReputationIndustry bucket via resolveReputationIndustry to
+   * select per-source weights.  null/unmapped industries fall back to Google-only.
+   */
+  industry?: string | null
 }
 
 export class ReputationCollector {
@@ -142,32 +272,115 @@ export class ReputationCollector {
     ctx: ReputationCollectorContext,
   ): Promise<CollectorResult> {
     const query = this.buildQuery(domain, ctx)
-    const data = await getBusinessReviews(query)
+    const industry = resolveReputationIndustry(ctx.industry)
 
-    // P8.5.20: business not listed on Google → score is unknowable
-    if (!data) {
+    // Fetch every source in parallel — each fetcher is fault-tolerant and
+    // returns null on failure.  Industry-irrelevant sources (weight=0 in the
+    // industry table) are short-circuited to null to avoid wasted Apify calls.
+    const sources = await this.fetchAllSources(query, industry, ctx)
+
+    // Google Business Profile is still the canonical "is this business
+    // discoverable" signal.  Surface the "business not listed" finding when
+    // GBP returned no match, regardless of other sources.
+    if (!sources.gbp && !sources.tripadvisor && !sources.productReview && !sources.booking && !sources.hipages) {
       return {
         score: null,
         findings: [this.makeNoReviewPlatformFinding(clientId)],
       }
     }
 
-    return this.buildResult(clientId, data)
+    return this.buildResult(clientId, sources, industry)
   }
 
-  private buildResult(clientId: string, data: BusinessReviewData): CollectorResult {
-    const findings: NewFinding[] = []
+  /**
+   * Parallel-fetch all relevant reputation sources for the given industry.
+   * Each fetcher catches its own errors and returns null on failure so a
+   * single platform outage doesn't tank the whole dimension.
+   *
+   * Sources with weight 0 in the industry table are skipped entirely
+   * (no Apify call made) — saves credits and reduces latency.
+   *
+   * NB to apify-actor agents:
+   *   - Add a new private async fetch<Source>() method below.
+   *   - Wire it into the Promise.all here, gated by industry weight.
+   *   - Stage-3 integration (Claude) will run after all 5 fetchers exist.
+   */
+  private async fetchAllSources(
+    query: string,
+    industry: ReputationIndustry | null,
+    _ctx: ReputationCollectorContext,
+  ): Promise<ReputationSignals> {
+    const weights = industry
+      ? INDUSTRY_REPUTATION_WEIGHTS[industry]
+      : DEFAULT_INDUSTRY_WEIGHTS
 
-    if (data.rating < LOW_RATING_THRESHOLD) {
+    // Always fetch GBP — it's the dimension's discoverability check too.
+    // Other sources only fetched if industry weights them above zero.
+    const [gbp, tripadvisor, productReview, booking, hipages] = await Promise.all([
+      this.fetchGbp(query),
+      (weights.tripadvisor ?? 0) > 0 ? this.fetchTripadvisor(query) : Promise.resolve(null),
+      (weights.productReview ?? 0) > 0 ? this.fetchProductReview(query) : Promise.resolve(null),
+      (weights.booking ?? 0) > 0 ? this.fetchBooking(query) : Promise.resolve(null),
+      (weights.hipages ?? 0) > 0 ? this.fetchHipages(query) : Promise.resolve(null),
+    ])
+
+    return { gbp, tripadvisor, productReview, booking, hipages }
+  }
+
+  /** GBP via existing Google Places API path. Unchanged from pre-2026-06-05. */
+  private async fetchGbp(query: string): Promise<ReputationSourceSignal | null> {
+    try {
+      const data = await getBusinessReviews(query)
+      if (!data) return null
+      return { rating: data.rating, reviewCount: data.totalReviews }
+    } catch (err) {
+      console.error(`[reputation-collector] GBP fetch failed query="${query}" err=${err instanceof Error ? err.message : String(err)}`)
+      return null
+    }
+  }
+
+  /** Apify maxcopell/tripadvisor — tourism + restaurant primary platform. */
+  private async fetchTripadvisor(query: string): Promise<ReputationSourceSignal | null> {
+    const data = await scrapeTripadvisorBusiness(query)
+    return data ? { rating: data.rating, reviewCount: data.totalReviews } : null
+  }
+
+  /** Apify abotapi/product-reviews-australia-scraper — building/professional/retail/education. */
+  private async fetchProductReview(query: string): Promise<ReputationSourceSignal | null> {
+    const data = await scrapeProductReviewBusiness(query)
+    return data ? { rating: data.rating, reviewCount: data.totalReviews } : null
+  }
+
+  /** Apify zhorex/booking-reviews-scraper — tourism (accommodation focus). */
+  private async fetchBooking(query: string): Promise<ReputationSourceSignal | null> {
+    const data = await scrapeBookingBusiness(query)
+    return data ? { rating: data.rating, reviewCount: data.totalReviews } : null
+  }
+
+  /** Apify abotapi/hipages-business-scraper — trades (electricians, plumbers, builders). */
+  private async fetchHipages(query: string): Promise<ReputationSourceSignal | null> {
+    const data = await scrapeHipagesBusiness(query)
+    return data ? { rating: data.rating, reviewCount: data.totalReviews } : null
+  }
+
+  private buildResult(
+    clientId: string,
+    signals: ReputationSignals,
+    industry: ReputationIndustry | null,
+  ): CollectorResult {
+    const findings: NewFinding[] = []
+    const gbp = signals.gbp
+
+    if (gbp && gbp.rating < LOW_RATING_THRESHOLD) {
       findings.push({
         client_id: clientId,
         dimension: 'reputation',
         finding_type: 'low_review_rating',
         severity: 'high',
         title: 'Low Google review rating',
-        description: `Average rating is ${data.rating.toFixed(1)}/5 — below the recommended threshold of ${LOW_RATING_THRESHOLD}.`,
+        description: `Average rating is ${gbp.rating.toFixed(1)}/5 — below the recommended threshold of ${LOW_RATING_THRESHOLD}.`,
         evidence: makeEvidence({
-          parsed: { rating: data.rating, total_reviews: data.totalReviews },
+          parsed: { rating: gbp.rating, total_reviews: gbp.reviewCount },
           sources: [evidenceSource('https://business.google.com/')],
         }),
         recommendation: 'Respond to negative reviews professionally and implement a customer feedback process to improve satisfaction.',
@@ -176,16 +389,16 @@ export class ReputationCollector {
       })
     }
 
-    if (data.totalReviews <= FEW_REVIEWS_THRESHOLD) {
+    if (gbp && gbp.reviewCount <= FEW_REVIEWS_THRESHOLD) {
       findings.push({
         client_id: clientId,
         dimension: 'reputation',
         finding_type: 'insufficient_review_count',
         severity: 'medium',
         title: 'Too few Google reviews',
-        description: `Only ${data.totalReviews} review${data.totalReviews === 1 ? '' : 's'} found. More reviews build trust and improve local SEO.`,
+        description: `Only ${gbp.reviewCount} review${gbp.reviewCount === 1 ? '' : 's'} found. More reviews build trust and improve local SEO.`,
         evidence: makeEvidence({
-          parsed: { total_reviews: data.totalReviews },
+          parsed: { total_reviews: gbp.reviewCount },
           sources: [evidenceSource('https://business.google.com/')],
         }),
         recommendation: 'Ask satisfied customers to leave a Google review. Include a QR code or direct link in receipts or follow-up emails.',
@@ -196,9 +409,15 @@ export class ReputationCollector {
 
     // A1: honest disclosure that the score may underestimate real reputation
     // when the customer's industry typically reviews on other platforms.
+    // Suppress this finding when an industry-specific source already
+    // contributed data — at that point the score IS multi-source and the
+    // hint would be misleading.
+    const hasIndustrySource = !!(signals.tripadvisor || signals.productReview || signals.booking || signals.hipages)
     if (
-      data.rating >= HIGH_RATING_FOR_OFF_PLATFORM_HINT &&
-      data.totalReviews <= LOW_COUNT_FOR_OFF_PLATFORM_HINT
+      gbp &&
+      !hasIndustrySource &&
+      gbp.rating >= HIGH_RATING_FOR_OFF_PLATFORM_HINT &&
+      gbp.reviewCount <= LOW_COUNT_FOR_OFF_PLATFORM_HINT
     ) {
       findings.push({
         client_id: clientId,
@@ -206,9 +425,9 @@ export class ReputationCollector {
         finding_type: 'reviews_likely_off_platform',
         severity: 'low',
         title: 'Reviews may live on industry platforms (not Google)',
-        description: `Strong Google rating (${data.rating.toFixed(1)}/5) but only ${data.totalReviews} Google review${data.totalReviews === 1 ? '' : 's'}. Customers in this industry may be reviewing on TripAdvisor, ProductReview, Yelp, or sector-specific platforms — the Google-only score may underestimate real reputation.`,
+        description: `Strong Google rating (${gbp.rating.toFixed(1)}/5) but only ${gbp.reviewCount} Google review${gbp.reviewCount === 1 ? '' : 's'}. Customers in this industry may be reviewing on TripAdvisor, ProductReview, Yelp, or sector-specific platforms — the Google-only score may underestimate real reputation.`,
         evidence: makeEvidence({
-          parsed: { rating: data.rating, total_reviews: data.totalReviews },
+          parsed: { rating: gbp.rating, total_reviews: gbp.reviewCount },
           sources: [evidenceSource('https://business.google.com/')],
         }),
         recommendation: 'Identify the platform your customers actually use to leave reviews (TripAdvisor for tourism, ProductReview for retail/services, etc) and audit reputation there. Add it to the diagnostic data sources to get a complete picture.',
@@ -217,9 +436,7 @@ export class ReputationCollector {
       })
     }
 
-    const score = scoreReputation({
-      gbp: { rating: data.rating, reviewCount: data.totalReviews },
-    })
+    const score = scoreReputation(signals, industry)
     // Pass `null` through unchanged — runner.ts treats null as "dimension
     // skipped" and re-normalises the overall weight, which is exactly what
     // we want when no source contributed data.  Coercing to 0 would silently
