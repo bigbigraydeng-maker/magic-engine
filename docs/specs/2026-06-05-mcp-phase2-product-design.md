@@ -145,7 +145,12 @@ CREATE TABLE notification_log (
 
 ---
 
-## 6. P3 — FDE Admin Key(月内,**高敏感**)
+## 6. P3 — FDE Admin Key ✅ 已实施完成(PR #391 merged 2026-06-05)
+
+> 📌 **本节已落地** —— 完整设计 + 实施记录见 ROADMAP 「Phase 34 二期 P3」段 + 内部 SOP `docs/sops/admin-mcp-key-internal.md`。
+> 走完整 Agent 审查协议:子牙出方案 → 魏征 2 审挑刺 → 子牙修订(加 Z1/Z2) → 魏征复审 Open the gate → 8 commit 实施 → 狄仁杰断案「隔离命门守住,准予 merge」。
+>
+> 本节以下原始设计要点仅作历史记录保留,真实实施细节以 main 上代码 + SOP 为准。
 
 > ⚠️ **本节是整个二期最危险的一环**。Phase 34 的安全护城河就是「client_id 双层锁定 + 一把 key 只能看一家」。Admin key 要打破这个不变量,必须**特别小心、单独设计、双审**。
 
