@@ -269,7 +269,7 @@ FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Mar
 > **PR**：[#369](https://github.com/bigbigraydeng-maker/magic-engine/pull/369)（设计稿）
 > **工期估**：≈ 6–7 天（含 P34.0 transport spike 未知数）
 
-- [ ] **P34.0** transport spike（前置关卡，不过不许往下）：新增 `@modelcontextprotocol/sdk` + `zod` 锁版本；stateless JSON 模式把 `StreamableHTTPServerTransport` 套进 App Router `/api/mcp` route handler；MCP Inspector 实测握手（验掉「能否套进 Next.js」这个唯一翻船风险）
+- [x] **P34.0** transport spike（前置关卡，不过不许往下）：新增 `@modelcontextprotocol/sdk` + `zod` 锁版本；stateless JSON 模式把 `StreamableHTTPServerTransport` 套进 App Router `/api/mcp` route handler；MCP Inspector 实测握手（验掉「能否套进 Next.js」这个唯一翻船风险）✅ **PASS 2026-06-05**（mcp-handler 适配 Web 标准签名 + CF 生产 build 过 + MCP 官方 client `initialize`/`tools/list`/`tools/call` 全通；详见 `docs/specs/me-mcp-p34-0-spike-result.md`）
 - [ ] **P34.1** migration：`client_api_keys`（hash-only + `metadata jsonb` + `created_by_email`）+ `mcp_access_log`（审计/限流/计费三合一，service_role 模板）+ `requireApiKeyClientAccess` 鉴权层
 - [ ] **P34.2** Key 管理 API（`/api/clients/[id]/api-keys` GET/POST/DELETE）+ 客户设置抽屉「🔌 API 访问」UI（强约束：配置类必须有 UI；MVP FDE 代发）
 - [ ] **P34.3** `/api/mcp` 接 transport + `requireApiKeyClientAccess` 鉴权挂载
@@ -278,7 +278,7 @@ FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Mar
 
 > 二期 backlog：GA4/AI 可见度/content 三个 tool、网页版 OAuth 薄层、计费接入（`mcp_access_log` 已预留聚合源）、独立 service 拆分（触发线见设计文档 §2.2）、可执行 MCP（V2 路线，设计文档 §12）。
 
-**Phase 34 状态：📋 设计完成（v3 双审通过），待 PM 发「开工」指令 → 从 P34.0 transport spike 起。**
+**Phase 34 状态：🔄 P34.0 transport spike ✅ PASS 2026-06-05（翻船风险解除）→ 下一步 P34.1 鉴权地基。**
 
 ---
 
