@@ -10,7 +10,7 @@
  * all per-source fetches via `Promise.all`, where a single throw would abort
  * the other sources (GBP / ProductReview / Booking).  Every failure mode below
  * (missing key, non-2xx, network timeout, malformed payload, no match) is
- * logged with `[reputation-scraper]` prefix and returns `null` instead.
+ * logged with `[reputation-scraper:tripadvisor]` prefix and returns `null` instead.
  */
 
 const APIFY_BASE = 'https://api.apify.com/v2'
@@ -73,13 +73,13 @@ export async function scrapeTripadvisorBusiness(
 ): Promise<TripAdvisorBusinessReviews | null> {
   const token = process.env.APIFY_API_KEY
   if (!token) {
-    console.error('[reputation-scraper] APIFY_API_KEY not configured — TripAdvisor scrape aborted')
+    console.error('[reputation-scraper:tripadvisor] APIFY_API_KEY not configured — scrape aborted')
     return null
   }
 
   const trimmed = query.trim()
   if (!trimmed) {
-    console.error('[reputation-scraper] TripAdvisor scrape called with empty query — aborted')
+    console.error('[reputation-scraper:tripadvisor] scrape called with empty query — aborted')
     return null
   }
 
@@ -105,7 +105,7 @@ export async function scrapeTripadvisorBusiness(
     if (!res.ok) {
       const body = await readApifyErrorBody(res)
       console.error(
-        `[reputation-scraper] Apify TripAdvisor error: status=${res.status} query=${trimmed} body=${body}`,
+        `[reputation-scraper:tripadvisor] Apify error: status=${res.status} query=${trimmed} body=${body}`,
       )
       return null
     }
@@ -113,7 +113,7 @@ export async function scrapeTripadvisorBusiness(
     const items = (await res.json()) as Record<string, unknown>[]
     if (!Array.isArray(items) || items.length === 0) {
       console.error(
-        `[reputation-scraper] Apify TripAdvisor returned no items for query=${trimmed}`,
+        `[reputation-scraper:tripadvisor] Apify returned no items for query=${trimmed}`,
       )
       return null
     }
@@ -124,7 +124,7 @@ export async function scrapeTripadvisorBusiness(
 
     if (rating === null || totalReviews === null) {
       console.error(
-        `[reputation-scraper] Apify TripAdvisor payload missing rating/numberOfReviews for query=${trimmed}`,
+        `[reputation-scraper:tripadvisor] Apify payload missing rating/numberOfReviews for query=${trimmed}`,
       )
       return null
     }
@@ -135,7 +135,7 @@ export async function scrapeTripadvisorBusiness(
     // reputation formula.
     if (rating < 1 || rating > 5 || totalReviews < 0) {
       console.error(
-        `[reputation-scraper] Apify TripAdvisor out-of-range values for query=${trimmed} rating=${rating} totalReviews=${totalReviews}`,
+        `[reputation-scraper:tripadvisor] Apify out-of-range values for query=${trimmed} rating=${rating} totalReviews=${totalReviews}`,
       )
       return null
     }
@@ -147,7 +147,7 @@ export async function scrapeTripadvisorBusiness(
     // some platforms throw non-Error objects.
     const msg = err instanceof Error ? err.message : String(err)
     console.error(
-      `[reputation-scraper] Apify TripAdvisor network/parse failure: query=${trimmed} error=${msg}`,
+      `[reputation-scraper:tripadvisor] Apify network/parse failure: query=${trimmed} error=${msg}`,
     )
     return null
   }

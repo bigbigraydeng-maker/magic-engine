@@ -73,6 +73,7 @@ export type ReputationFindingType =
   | 'no_review_platform'
   | 'business_not_listed'         // P8.5.20: no Google Business Profile found
   | 'reviews_likely_off_platform' // A1: high rating but very few GBP reviews → industry platforms
+  | 'review_lookup_failed'        // 2026-06-06: multiple review platforms attempted, all returned null (transient outage / query mismatch)
 
 export type CompetitorFindingType =
   | 'competitor_keyword_gap'

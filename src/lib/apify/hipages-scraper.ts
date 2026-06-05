@@ -53,13 +53,13 @@ function pickNumber(record: Record<string, unknown>, keys: readonly string[]): n
 export async function scrapeHipagesBusiness(query: string): Promise<HipagesBusinessReviews | null> {
   const token = process.env.APIFY_API_KEY
   if (!token) {
-    console.error('[reputation-scraper] APIFY_API_KEY not configured — Hipages scrape aborted')
+    console.error('[reputation-scraper:hipages] APIFY_API_KEY not configured — scrape aborted')
     return null
   }
 
   const trimmed = query.trim()
   if (!trimmed) {
-    console.error('[reputation-scraper] Hipages query is empty — skipping')
+    console.error('[reputation-scraper:hipages] query is empty — skipping')
     return null
   }
 
@@ -79,13 +79,13 @@ export async function scrapeHipagesBusiness(query: string): Promise<HipagesBusin
 
     if (!res.ok) {
       const body = await readApifyErrorBody(res)
-      console.error(`[reputation-scraper] Apify Hipages error: status=${res.status} query="${trimmed}" body=${body}`)
+      console.error(`[reputation-scraper:hipages] Apify error: status=${res.status} query="${trimmed}" body=${body}`)
       return null
     }
 
     const items = (await res.json()) as Record<string, unknown>[]
     if (!Array.isArray(items) || items.length === 0) {
-      console.error(`[reputation-scraper] Hipages returned no matches for query="${trimmed}"`)
+      console.error(`[reputation-scraper:hipages] returned no matches for query="${trimmed}"`)
       return null
     }
 
@@ -94,12 +94,12 @@ export async function scrapeHipagesBusiness(query: string): Promise<HipagesBusin
     const totalReviews = pickNumber(first, ['totalReviews', 'reviewCount', 'reviewsCount', 'numberOfReviews'])
 
     if (rating === null || totalReviews === null) {
-      console.error(`[reputation-scraper] Hipages payload missing rating/review fields for query="${trimmed}" keys=${Object.keys(first).join(',')}`)
+      console.error(`[reputation-scraper:hipages] payload missing rating/review fields for query="${trimmed}" keys=${Object.keys(first).join(',')}`)
       return null
     }
 
     if (rating < 1 || rating > 5 || totalReviews < 0) {
-      console.error(`[reputation-scraper] Hipages rating/review out of range for query="${trimmed}" rating=${rating} totalReviews=${totalReviews}`)
+      console.error(`[reputation-scraper:hipages] rating/review out of range for query="${trimmed}" rating=${rating} totalReviews=${totalReviews}`)
       return null
     }
 
@@ -109,7 +109,7 @@ export async function scrapeHipagesBusiness(query: string): Promise<HipagesBusin
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error(`[reputation-scraper] Hipages scrape threw for query="${trimmed}" error=${message}`)
+    console.error(`[reputation-scraper:hipages] scrape threw for query="${trimmed}" error=${message}`)
     return null
   }
 }

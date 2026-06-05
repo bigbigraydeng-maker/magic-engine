@@ -87,13 +87,13 @@ export async function scrapeProductReviewBusiness(
 ): Promise<ProductReviewBusinessReviews | null> {
   const token = process.env.APIFY_API_KEY
   if (!token) {
-    console.error('[reputation-scraper] APIFY_API_KEY not configured — ProductReview scrape aborted')
+    console.error('[reputation-scraper:productreview] APIFY_API_KEY not configured — scrape aborted')
     return null
   }
 
   const trimmed = query.trim()
   if (!trimmed) {
-    console.error('[reputation-scraper] ProductReview scrape called with empty query')
+    console.error('[reputation-scraper:productreview] scrape called with empty query')
     return null
   }
 
@@ -114,14 +114,14 @@ export async function scrapeProductReviewBusiness(
     if (!res.ok) {
       const body = await readApifyErrorBody(res)
       console.error(
-        `[reputation-scraper] Apify ProductReview error: status=${res.status} query="${trimmed}" body=${body}`,
+        `[reputation-scraper:productreview] Apify error: status=${res.status} query="${trimmed}" body=${body}`,
       )
       return null
     }
 
     const items = (await res.json()) as Record<string, unknown>[]
     if (!Array.isArray(items) || items.length === 0) {
-      console.error(`[reputation-scraper] ProductReview returned no items for query="${trimmed}"`)
+      console.error(`[reputation-scraper:productreview] returned no items for query="${trimmed}"`)
       return null
     }
 
@@ -131,12 +131,12 @@ export async function scrapeProductReviewBusiness(
     }
 
     console.error(
-      `[reputation-scraper] ProductReview returned ${items.length} item(s) but none had rating + reviewCount for query="${trimmed}"`,
+      `[reputation-scraper:productreview] returned ${items.length} item(s) but none had rating + reviewCount for query="${trimmed}"`,
     )
     return null
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    console.error(`[reputation-scraper] ProductReview scrape threw for query="${trimmed}": ${msg}`)
+    console.error(`[reputation-scraper:productreview] scrape threw for query="${trimmed}": ${msg}`)
     return null
   }
 }

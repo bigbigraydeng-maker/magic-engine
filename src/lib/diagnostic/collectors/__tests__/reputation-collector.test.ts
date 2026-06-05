@@ -16,7 +16,7 @@ vi.mock('@/lib/places/client', () => ({
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import { ReputationCollector, scoreReputation } from '../reputation-collector'
+import { ReputationCollector, scoreReputation, resolveReputationIndustry } from '../reputation-collector'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -273,13 +273,47 @@ describe('ReputationCollector — rich query construction (A1.5)', () => {
     })
   })
 
-  it('passes rich query to getBusinessReviews when businessName provided', async () => {
+  it('de-duplicates country tokens already in businessName (CTS Tours NZ + Auckland + NZ)', async () => {
+    // E2 fix (2026-06-06): businessName "CTS Tours NZ" already contains the
+    // country code, so appending it again produces "CTS Tours NZ Auckland NZ"
+    // which lowers TripAdvisor / Booking match rates.  We expect the NZ
+    // suffix to be detected and dropped from the appended tokens.
     await new ReputationCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS, {
       businessName: 'CTS Tours NZ',
       city: 'Auckland',
       country: 'NZ',
     })
-    expect(mockGetBusinessReviews).toHaveBeenCalledWith('CTS Tours NZ Auckland NZ')
+    expect(mockGetBusinessReviews).toHaveBeenCalledWith('CTS Tours NZ Auckland')
+  })
+
+  it('keeps city when businessName does NOT already contain it (Hilton + Auckland + NZ)', async () => {
+    await new ReputationCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS, {
+      businessName: 'Hilton',
+      city: 'Auckland',
+      country: 'NZ',
+    })
+    expect(mockGetBusinessReviews).toHaveBeenCalledWith('Hilton Auckland NZ')
+  })
+
+  it('drops both city and country when both already in name (Auckland Lodge NZ + Auckland + NZ)', async () => {
+    await new ReputationCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS, {
+      businessName: 'Auckland Lodge NZ',
+      city: 'Auckland',
+      country: 'NZ',
+    })
+    expect(mockGetBusinessReviews).toHaveBeenCalledWith('Auckland Lodge NZ')
+  })
+
+  it('matches token only at word boundary (Brand vs Branded)', async () => {
+    // Word-boundary regex: "Branded NZ" + "Brand" should NOT skip "Brand".
+    // But we ARE testing the city/country side, so test: name="Auckville Lodge"
+    // + city="Auck" should NOT skip Auck (no word boundary inside "Auckville").
+    await new ReputationCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS, {
+      businessName: 'Auckville Lodge',
+      city: 'Auck',
+      country: 'NZ',
+    })
+    expect(mockGetBusinessReviews).toHaveBeenCalledWith('Auckville Lodge Auck NZ')
   })
 
   it('omits null city/country parts from the query', async () => {
@@ -299,6 +333,128 @@ describe('ReputationCollector — rich query construction (A1.5)', () => {
   it('falls back to domain when ctx is omitted entirely', async () => {
     await new ReputationCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS)
     expect(mockGetBusinessReviews).toHaveBeenCalledWith(DOMAIN)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 2026-06-06 follow-up: industry bucket split + new finding type
+// ---------------------------------------------------------------------------
+
+describe('resolveReputationIndustry() — industry mapping (2026-06-06)', () => {
+  it('maps hotel/motel/lodge/hostel to accommodation bucket (S3)', () => {
+    expect(resolveReputationIndustry('hotel')).toBe('accommodation')
+    expect(resolveReputationIndustry('hotels')).toBe('accommodation')
+    expect(resolveReputationIndustry('motel')).toBe('accommodation')
+    expect(resolveReputationIndustry('lodge')).toBe('accommodation')
+    expect(resolveReputationIndustry('hostel')).toBe('accommodation')
+    expect(resolveReputationIndustry('hostels')).toBe('accommodation')
+    expect(resolveReputationIndustry('accommodation')).toBe('accommodation')
+    expect(resolveReputationIndustry('B&B')).toBe('accommodation')
+    expect(resolveReputationIndustry('bed and breakfast')).toBe('accommodation')
+    expect(resolveReputationIndustry('guesthouse')).toBe('accommodation')
+    expect(resolveReputationIndustry('酒店')).toBe('accommodation')
+    expect(resolveReputationIndustry('民宿')).toBe('accommodation')
+    expect(resolveReputationIndustry('旅馆')).toBe('accommodation')
+  })
+
+  it('keeps travel agents / tour operators in tourism bucket (NOT accommodation)', () => {
+    expect(resolveReputationIndustry('travel')).toBe('tourism')
+    expect(resolveReputationIndustry('travel agent')).toBe('tourism')
+    expect(resolveReputationIndustry('travel agency')).toBe('tourism')
+    expect(resolveReputationIndustry('tour operator')).toBe('tourism')
+    expect(resolveReputationIndustry('inbound tour')).toBe('tourism')
+    expect(resolveReputationIndustry('outbound tour')).toBe('tourism')
+    expect(resolveReputationIndustry('旅行社')).toBe('tourism')
+    expect(resolveReputationIndustry('入境旅游')).toBe('tourism')
+    expect(resolveReputationIndustry('出境旅游')).toBe('tourism')
+  })
+
+  it('returns null for unmapped industries (Google-only fallback)', () => {
+    expect(resolveReputationIndustry('manufacturing')).toBeNull()
+    expect(resolveReputationIndustry(null)).toBeNull()
+    expect(resolveReputationIndustry('')).toBeNull()
+  })
+})
+
+describe('scoreReputation() — accommodation bucket (2026-06-06)', () => {
+  it('accommodation weights GBP + TripAdvisor + Booking (not just GBP)', () => {
+    // Hilton-like profile: strong on all 3 platforms.
+    const score = scoreReputation({
+      gbp: { rating: 4.5, reviewCount: 200 },
+      tripadvisor: { rating: 4.6, reviewCount: 500 },
+      booking: { rating: 4.4, reviewCount: 1000 },
+    }, 'accommodation')
+    expect(score).toBeGreaterThanOrEqual(85)
+  })
+
+  it('accommodation re-normalises when Booking is null (covers e.g. small B&B not on Booking)', () => {
+    const withBooking = scoreReputation({
+      gbp: { rating: 4.5, reviewCount: 50 },
+      tripadvisor: { rating: 4.5, reviewCount: 50 },
+      booking: { rating: 4.5, reviewCount: 50 },
+    }, 'accommodation')
+    const withoutBooking = scoreReputation({
+      gbp: { rating: 4.5, reviewCount: 50 },
+      tripadvisor: { rating: 4.5, reviewCount: 50 },
+      booking: null,
+    }, 'accommodation')
+    // All identical inputs => identical score (re-normalisation works).
+    expect(withoutBooking).toBe(withBooking)
+  })
+})
+
+describe('scoreReputation() — tourism bucket excludes booking (2026-06-06)', () => {
+  it('tourism (travel agent) ignores Booking data even if fetched', () => {
+    // PR #385 e2e revealed: CTS Tours is a travel agent, not accommodation.
+    // Even if Booking returned data (which it can\'t for travel agents),
+    // the tourism bucket should ignore it.
+    const withoutBooking = scoreReputation({
+      gbp: { rating: 4.0, reviewCount: 5 },
+      tripadvisor: { rating: 4.5, reviewCount: 50 },
+    }, 'tourism')
+    const withBooking = scoreReputation({
+      gbp: { rating: 4.0, reviewCount: 5 },
+      tripadvisor: { rating: 4.5, reviewCount: 50 },
+      booking: { rating: 4.8, reviewCount: 200 },  // would inflate if counted
+    }, 'tourism')
+    expect(withBooking).toBe(withoutBooking)
+  })
+
+  it('tourism multi-source lift now uses only GBP + TripAdvisor (no Booking)', async () => {
+    const gbpOnly = scoreReputation({ gbp: { rating: 4.0, reviewCount: 5 } }, 'tourism')
+    const both = scoreReputation({
+      gbp: { rating: 4.0, reviewCount: 5 },
+      tripadvisor: { rating: 4.8, reviewCount: 200 },
+    }, 'tourism')
+    expect(both).toBeGreaterThan(gbpOnly ?? 0)
+  })
+})
+
+describe('ReputationCollector.collect() — review_lookup_failed finding (S1)', () => {
+  it('emits review_lookup_failed (not business_not_listed) when industry sources were attempted and all returned null', async () => {
+    // Tourism industry → fetchAllSources calls TripAdvisor.  Because we don\'t
+    // mock the Apify scraper, it returns null (no APIFY_API_KEY in test env).
+    // GBP returns null too.  Should surface review_lookup_failed because
+    // multiple sources were tried, not business_not_listed.
+    mockGetBusinessReviews.mockResolvedValue(null)
+    const result = await new ReputationCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS, {
+      industry: 'travel',
+    })
+    expect(result.score).toBeNull()
+    expect(result.findings).toHaveLength(1)
+    expect(result.findings[0]!.finding_type).toBe('review_lookup_failed')
+    expect(result.findings[0]!.severity).toBe('high')
+  })
+
+  it('still emits business_not_listed (critical) when only GBP was attempted (no industry)', async () => {
+    // Default industry=null → only GBP runs.  When GBP returns null, the
+    // original critical finding is correct: the business genuinely has no
+    // Google listing.
+    mockGetBusinessReviews.mockResolvedValue(null)
+    const result = await new ReputationCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS)
+    expect(result.findings).toHaveLength(1)
+    expect(result.findings[0]!.finding_type).toBe('business_not_listed')
+    expect(result.findings[0]!.severity).toBe('critical')
   })
 })
 

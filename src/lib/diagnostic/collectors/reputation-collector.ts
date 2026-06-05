@@ -61,7 +61,7 @@ export type ReputationSource =
   | 'gbp'             // Google Business Profile via Google Places API (all industries)
   | 'tripadvisor'     // Apify maxcopell/tripadvisor-scraper (tourism + restaurant primary)
   | 'productReview'   // Apify abotapi/product-reviews-australia-scraper (building/services/retail/education)
-  | 'booking'         // Apify zhorex/booking-reviews-scraper (tourism — accommodation focus)
+  | 'booking'         // Apify voyager/booking-scraper (accommodation only — hotels/motels/hostels)
   | 'hipages'         // Apify abotapi/hipages-business-scraper (trades / building services)
 
 export type ReputationSignals = Partial<Record<ReputationSource, ReputationSourceSignal | null>>
@@ -74,7 +74,8 @@ export type ReputationSignals = Partial<Record<ReputationSource, ReputationSourc
  * caller — the collector matches case-insensitively against this map.
  */
 export type ReputationIndustry =
-  | 'tourism'         // travel agents, tour operators, hotels — TripAdvisor primary
+  | 'tourism'         // travel agents, tour operators (NOT hotels) — TripAdvisor primary
+  | 'accommodation'   // hotels, motels, lodges, hostels — TripAdvisor + Booking
   | 'restaurant'      // restaurants, cafes — TripAdvisor primary
   | 'building'        // building supplies, flooring, materials — ProductReview primary
   | 'professional'   // legal / accounting / consulting — ProductReview primary
@@ -99,13 +100,21 @@ export type ReputationIndustry =
  *               classified yet.
  */
 export const INDUSTRY_REPUTATION_WEIGHTS: Record<ReputationIndustry, Partial<Record<ReputationSource, number>>> = {
-  tourism:      { gbp: 0.30, tripadvisor: 0.50, booking: 0.20 },
-  restaurant:   { gbp: 0.40, tripadvisor: 0.60 },
-  building:     { gbp: 0.50, productReview: 0.50 },
-  professional: { gbp: 0.50, productReview: 0.50 },
-  retail:       { gbp: 0.50, productReview: 0.50 },
-  education:    { gbp: 0.50, productReview: 0.50 },
-  trades:       { gbp: 0.40, hipages: 0.60 },
+  // Travel agents / tour operators don't have Booking listings — Booking is
+  // for accommodation only.  Tourism = gbp + tripadvisor only.  E2E with
+  // CTS Tours (PR #385) confirmed that fetching Booking for a travel agency
+  // is wasted credits AND was generating noisy "no items" log lines.
+  tourism:        { gbp: 0.40, tripadvisor: 0.60 },
+  // Accommodation IS where Booking.com data lives — keep all three sources
+  // weighted.  Booking is most authoritative for hotels but TripAdvisor
+  // covers wider sentiment.
+  accommodation:  { gbp: 0.25, tripadvisor: 0.40, booking: 0.35 },
+  restaurant:     { gbp: 0.40, tripadvisor: 0.60 },
+  building:       { gbp: 0.50, productReview: 0.50 },
+  professional:   { gbp: 0.50, productReview: 0.50 },
+  retail:         { gbp: 0.50, productReview: 0.50 },
+  education:      { gbp: 0.50, productReview: 0.50 },
+  trades:         { gbp: 0.40, hipages: 0.60 },
 }
 
 export const DEFAULT_INDUSTRY_WEIGHTS: Partial<Record<ReputationSource, number>> = { gbp: 1.0 }
@@ -122,14 +131,36 @@ export function resolveReputationIndustry(industry: string | null | undefined): 
   if (!industry) return null
   const k = industry.trim().toLowerCase().replace(/\s+/g, ' ')
   switch (k) {
+    case 'hotel':
+    case 'hotels':
+    case 'motel':
+    case 'motels':
+    case 'lodge':
+    case 'hostel':
+    case 'hostels':
+    case 'accommodation':
+    case 'b&b':
+    case 'bed and breakfast':
+    case 'guest house':
+    case 'guesthouse':
+    case '酒店':
+    case '民宿':
+    case '旅馆':
+      return 'accommodation'
     case 'travel':
     case 'tourism':
     case 'tour operator':
+    case 'tour operators':
+    case 'travel agent':
+    case 'travel agency':
     case 'inbound tour':
     case 'inbound tourism':
+    case 'outbound tour':
+    case 'outbound tourism':
     case '入境旅游':
     case '出境旅游':
     case '中文旅行社':
+    case '旅行社':
       return 'tourism'
     case 'restaurant':
     case 'food':
@@ -260,7 +291,22 @@ export class ReputationCollector {
     // Fall back to the bare domain only when no name is available — a raw
     // domain string is ambiguous and Google may return a wrong match.
     if (ctx.businessName) {
-      const parts = [ctx.businessName, ctx.city, ctx.country].filter(Boolean)
+      // De-dup tokens that already appear in the business name to avoid
+      // queries like "CTS Tours NZ Auckland NZ" (where the trading name
+      // already contains the country suffix).  Word-boundary case-insensitive
+      // matching — only skips when the city/country is a STANDALONE token in
+      // the name, so a name like "Hilton Auckland" still gets "Auckland" added
+      // to disambiguate from other Hiltons globally if city differs.
+      const nameLower = ctx.businessName.toLowerCase()
+      const containsToken = (token: string | null | undefined): boolean => {
+        if (!token) return false
+        const t = token.toLowerCase().trim()
+        if (!t) return false
+        return new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(nameLower)
+      }
+      const parts: string[] = [ctx.businessName]
+      if (ctx.city && !containsToken(ctx.city)) parts.push(ctx.city)
+      if (ctx.country && !containsToken(ctx.country)) parts.push(ctx.country)
       return parts.join(' ')
     }
     return domain
@@ -279,17 +325,41 @@ export class ReputationCollector {
     // industry table) are short-circuited to null to avoid wasted Apify calls.
     const sources = await this.fetchAllSources(query, industry, ctx)
 
-    // Google Business Profile is still the canonical "is this business
-    // discoverable" signal.  Surface the "business not listed" finding when
-    // GBP returned no match, regardless of other sources.
+    // Distinguish two failure modes:
+    //   1. "Business genuinely has no online listing" — GBP null AND no other
+    //      sources were even attempted (industry didn't weight them).  This
+    //      is a real critical finding: the business needs to claim its GBP.
+    //   2. "Multiple platforms attempted but all failed" — GBP null AND at
+    //      least one industry source was attempted but returned null (could
+    //      be transient outage, query mismatch, or actor schema drift).
+    //      Surface a different, lower-severity finding so FDE doesn't ask
+    //      the customer to re-claim a GBP that may already exist.
     if (!sources.gbp && !sources.tripadvisor && !sources.productReview && !sources.booking && !sources.hipages) {
+      const otherSourcesAttempted = this.industryHasNonGbpSources(industry)
       return {
         score: null,
-        findings: [this.makeNoReviewPlatformFinding(clientId)],
+        findings: [otherSourcesAttempted
+          ? this.makeReviewLookupFailedFinding(clientId)
+          : this.makeNoReviewPlatformFinding(clientId),
+        ],
       }
     }
 
     return this.buildResult(clientId, sources, industry)
+  }
+
+  /**
+   * Returns true if the industry weights any non-GBP source > 0 — i.e. we
+   * would have called at least one Apify scraper.  Used by fetchAndScore to
+   * pick the right finding message when everything returns null.
+   */
+  private industryHasNonGbpSources(industry: ReputationIndustry | null): boolean {
+    const weights = industry ? INDUSTRY_REPUTATION_WEIGHTS[industry] : DEFAULT_INDUSTRY_WEIGHTS
+    for (const [source, weight] of Object.entries(weights)) {
+      if (source === 'gbp') continue
+      if ((weight ?? 0) > 0) return true
+    }
+    return false
   }
 
   /**
@@ -351,7 +421,7 @@ export class ReputationCollector {
     return data ? { rating: data.rating, reviewCount: data.totalReviews } : null
   }
 
-  /** Apify zhorex/booking-reviews-scraper — tourism (accommodation focus). */
+  /** Apify voyager/booking-scraper — accommodation industry only. */
   private async fetchBooking(query: string): Promise<ReputationSourceSignal | null> {
     const data = await scrapeBookingBusiness(query)
     return data ? { rating: data.rating, reviewCount: data.totalReviews } : null
@@ -456,6 +526,30 @@ export class ReputationCollector {
       recommendation: 'Create and verify a Google Business Profile at https://business.google.com — this is a 30-minute setup that unlocks reviews, Google Maps presence, and local pack rankings.',
       fix_type: 'fde_manual',
       priority_score: 75,
+    }
+  }
+
+  /**
+   * Issued when GBP returned null AND at least one industry-specific source
+   * (TripAdvisor / ProductReview / Booking / Hipages) was attempted but also
+   * returned null.  Could be: transient API outage, search query didn't match
+   * any listing, or actor schema drift.  Lower severity than business_not_listed
+   * because the business may well be listed — we just couldn't fetch its data
+   * this run.  FDE should check logs and re-run rather than asking the
+   * customer to re-claim a GBP that may already exist.
+   */
+  private makeReviewLookupFailedFinding(clientId: string): NewFinding {
+    return {
+      client_id: clientId,
+      dimension: 'reputation',
+      finding_type: 'review_lookup_failed',
+      severity: 'high',
+      title: 'Unable to fetch review data from any platform',
+      description: 'Multiple review platforms were queried (Google + industry-specific) and none returned data this run. This may be a transient API issue or a search query mismatch — re-run the diagnostic. If the issue persists, verify the business name and city in client settings.',
+      evidence: null,
+      recommendation: 'Re-run the diagnostic. If still failing, FDE should check Render logs for "[reputation-scraper:*]" or "[reputation-collector]" entries to diagnose the root cause (timeout, query mismatch, or actor failure).',
+      fix_type: 'fde_manual',
+      priority_score: 60,
     }
   }
 }
