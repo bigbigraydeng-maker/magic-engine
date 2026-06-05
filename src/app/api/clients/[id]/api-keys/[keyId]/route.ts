@@ -21,12 +21,26 @@ import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 function isCrossOrigin(req: NextRequest): boolean {
   const origin = req.headers.get('origin')
   if (!origin) return false
+  let originHost: string
   try {
-    // Use req.url not req.nextUrl so unit tests with plain Request also work.
-    return new URL(origin).host !== new URL(req.url).host
+    originHost = new URL(origin).host
   } catch {
     return true
   }
+  // Behind Render's reverse proxy, req.url is an internal address — trust
+  // X-Forwarded-Host (the real public host the browser hit), fall back to
+  // req.url host only when absent (unit tests). Without this, every real
+  // same-origin browser request false-positives as cross-origin.
+  const forwardedHost = req.headers.get('x-forwarded-host')
+  let selfHost = forwardedHost ?? ''
+  if (!selfHost) {
+    try {
+      selfHost = new URL(req.url).host
+    } catch {
+      return true
+    }
+  }
+  return originHost !== selfHost
 }
 
 export async function DELETE(

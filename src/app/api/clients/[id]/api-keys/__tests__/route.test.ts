@@ -195,6 +195,34 @@ describe('POST /api/clients/[id]/api-keys', () => {
     expect(mockFrom).not.toHaveBeenCalled()
   })
 
+  // Production regression (Render reverse proxy): req.url is an internal
+  // address but Origin is the public host. The check must trust
+  // X-Forwarded-Host, otherwise every real browser POST false-positives as
+  // cross-origin (the "Cross-origin requests are not allowed" prod bug).
+  it('allows same-origin behind a reverse proxy (X-Forwarded-Host)', async () => {
+    grantAdmin('fde@magicengine.test')
+    const single = vi.fn().mockResolvedValue({
+      data: { id: KEY_ID, name: 'x', key_prefix: 'me_live_PLA', scopes: ['read:all'], created_at: 't' },
+      error: null,
+    })
+    const select = vi.fn().mockReturnValue({ single })
+    const insert = vi.fn().mockReturnValue({ select })
+    mockFrom.mockReturnValue({ insert } as unknown as ReturnType<typeof supabaseAdmin.from>)
+
+    // Internal req.url (localhost) but public Origin + matching X-Forwarded-Host.
+    const req = new Request('http://localhost:3000/x', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin: 'https://app.magicengine.com.au',
+        'x-forwarded-host': 'app.magicengine.com.au',
+      },
+      body: JSON.stringify({ name: 'x' }),
+    })
+    const res = await POST(req as never, { params: Promise.resolve({ id: CLIENT_ID }) })
+    expect(res.status).toBe(200) // NOT 403 — same-origin via forwarded host
+  })
+
   it.each([
     ['empty', { name: '' }],
     ['whitespace', { name: '   ' }],

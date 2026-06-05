@@ -41,13 +41,27 @@ interface PostBody {
 function isCrossOrigin(req: NextRequest): boolean {
   const origin = req.headers.get('origin')
   if (!origin) return false  // server-side / same-origin GETs commonly omit Origin
+  let originHost: string
   try {
-    // Use req.url (Request property) not req.nextUrl so this works in unit
-    // tests that pass a plain Request as well as in production NextRequest.
-    return new URL(origin).host !== new URL(req.url).host
+    originHost = new URL(origin).host
   } catch {
     return true
   }
+  // Behind Render's reverse proxy, req.url is an INTERNAL address (not the
+  // public host the browser hit), so comparing Origin against it would
+  // false-positive on EVERY real same-origin browser request. Trust
+  // X-Forwarded-Host (the real public host); only fall back to req.url host
+  // when the header is absent (e.g. unit tests with a plain Request).
+  const forwardedHost = req.headers.get('x-forwarded-host')
+  let selfHost = forwardedHost ?? ''
+  if (!selfHost) {
+    try {
+      selfHost = new URL(req.url).host
+    } catch {
+      return true
+    }
+  }
+  return originHost !== selfHost
 }
 
 /**
