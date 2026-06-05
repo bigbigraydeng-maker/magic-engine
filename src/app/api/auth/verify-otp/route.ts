@@ -38,10 +38,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'A valid email is required' }, { status: 400 })
   }
 
-  // Supabase email OTPs are 6 numeric digits.
+  // Supabase email OTP length varies by project setting (default 6, can be set
+  // 6-10 in Dashboard → Authentication → Email Provider). Accept 6-10 digits
+  // so the code keeps working if the setting changes — verifyOtp itself does
+  // the cryptographic check, length is only a guard against typos.
   const code = typeof token === 'string' ? token.trim() : ''
-  if (!/^\d{6}$/.test(code)) {
-    return NextResponse.json({ error: 'Enter the 6-digit code from your email' }, { status: 400 })
+  if (!/^\d{6,10}$/.test(code)) {
+    return NextResponse.json({ error: 'Enter the code from your email' }, { status: 400 })
   }
 
   const cookieStore = cookies()
