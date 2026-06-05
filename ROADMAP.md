@@ -282,6 +282,19 @@ FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Mar
 
 **Phase 34 状态：✅ 全部完成并已 merge 到 main 2026-06-05（PR #369 squash）。真实生产 e2e 通过 —— CTS 在 Claude Desktop 实测 `me_get_overview`/`me_list_goals`/`me_get_seo_performance` 三工具全部成功落库（mcp_access_log），数据三方吻合（体检分 38 / 博客 2 / 社媒 3 = 狄仁杰数据层查值）；跨客户隔离亲验（CTS 钥匙查 Oztop 返回空 = 隔离生效）。代码层 92 单测 + build 全过，魏征×2 + 子牙 + 狄仁杰 + Codex 审过。→ 下一步见上方「⭐ 二期主推方向」。**
 
+### Phase 34 二期 P3 — FDE 跨客户 Admin Key（启动 2026-06-05）
+
+> **核心风险**：admin key 跨所有客户，要在已上线的「客户只能看自己」安全墙旁开授权通道。子牙设计稿 `docs/specs/2026-06-05-mcp-phase2-product-design.md` §6 + 详细架构（前缀 `me_admin_*` / 独立 `admin_api_keys` 表 / 独立 `/api/mcp/admin/[transport]` endpoint / 独立 `admin-scoped-queries` + `admin-tools` 模块 / 与 `scoped-queries.ts` 物理隔离 0 行改动）。**最大风险 = 复用诱惑**（admin 模块绝不 import scoped-queries 任何函数）。**PM 拍板（A）**：首批只发 1 把给 PM 自己，验证 1 周再扩。技术默认：90 天过期 / 30 req/min 限流 / 最小字段集 / 不发邮件提醒 / 不做 IP 白名单。
+
+- [ ] **P34-P3.1** migration：`admin_api_keys` 表（hash-only + owner_email + 强制 expires_at + revoked_at 软删除）+ `mcp_access_log` 扩 `key_kind/is_admin` 列、drop key_id FK。RLS service_role 模板，强 grep 自检
+- [ ] **P34-P3.2** `verifyApiKey` 按前缀分叉（`me_live_*` → client / `me_admin_*` → admin），校验过期。单测覆盖 client/admin/malformed/expired/revoked
+- [ ] **P34-P3.3** `src/lib/mcp/admin-scoped-queries.ts`（**绝不 import scoped-queries.ts**，显式 client_id 入参）+ 单测
+- [ ] **P34-P3.4** `src/lib/mcp/admin-tools.ts`（5 个 `me_admin_*` 工具：list_clients + overview/goals/seo/execution 跨客户版）+ `runAdmin` 包装 + `requireAdminContext` 守门 + 单测（client kind → throw / admin kind → throw 反之）
+- [ ] **P34-P3.5** `/api/mcp/admin/[transport]/route.ts` 新 endpoint（只接 `me_admin_*` + 独立 admin 限流 30/min）+ 现有 `/api/mcp/[transport]` 加 `kind==='client'` 防御
+- [ ] **P34-P3.6** `/dashboard/admin/mcp-keys` 颁发/列表/吊销页（guardAdmin 把关，红条横幅警告，过期倒计时，最近 7d 调用客户数）+ `/api/admin/mcp-keys/` 路由
+- [ ] **P34-P3.7** `docs/sops/admin-mcp-key-internal.md`（**INTERNAL ONLY** 头，客户 SOP 绝口不提 admin endpoint 存在）+ 审计 SQL 模板
+- [ ] **P34-P3.8** 狄仁杰跨租户串扰回归测试（4 种组合 + 物理隔离 grep 检查 + 变异测试）+ 魏征双审 + 子牙复审「`git grep "from.*scoped-queries" src/lib/mcp/admin-*` 必须 0 命中」
+
 ---
 
 ### Website Self-Serve Auth - 2026-06-02
