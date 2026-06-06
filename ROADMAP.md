@@ -2476,6 +2476,26 @@ AI 可见度层（ME 独有 ✅）
 - 广告投放效果数据回流
 - 暂停 / 调整出价操作
 
+### Phase 18.D — Meta 付费创意测试飞轮（Creative Testing Flywheel）📋 立项中，未开工（2026-06-06 登记）
+
+> **立项依据**：[`docs/strategy/meta-flywheel-risk-and-sequencing.md`](./docs/strategy/meta-flywheel-risk-and-sequencing.md)（子牙/魏征/板桥/狄仁杰 四路审查）
+> **战略**：批量生成 10–20 创意变体 → Meta 付费测试 → per-creative CPA/CTR/完播 判生死 → 砍输家/放大赢家 → 赢家特征回喂生成。对外封装名「创意测试引擎」。
+> **结论**：飞轮战略成立，但地基有 live 裂缝，**先收口再施工**。
+
+**D0 实测（2026-06-06）**：仅 CTS 绑混账户 `act_2775766642787274`（含他客户花费 → CTS 数据被污染）；Oztop 未绑；`META_SYSTEM_USER_TOKEN` 未配（R5 写越权当前哑）。**铁律：账户治理完成前禁止再绑任何客户到 `act_2775…`。**
+
+| 阶段 | 任务 | 依赖 |
+|------|------|------|
+| **P18.D.0 救火** | ① execute 写前 `assertCampaignOwnedByClient` 守卫（最里层防旁路，对应 R5）② 读聚合按 client 过滤不整账户归一（R1）③ 禁绑混账户 | 与飞轮解耦，优先 |
+| **P18.D.1 地基** | 账户治理（拆账户：CTS/Oztop 迁回自有账户）+ 企业验证（已提交）+ Partner Access + 配 `ads_management` token + API 版本单点升 v23（修 v18/v19 已停用） | 企业验证 |
+| **P18.D.2 链路** | creative_id↔content_posts 断链：正路=ME 自己建投（需 Advanced Access）；过渡=UTM/命名反解；禁=FDE 手维护映射 | P18.D.1 |
+| **P18.D.3 判决** | `scoreCreative` 纯函数 + creative 级 snapshot 表 + `client_ad_entities` 白名单（配 Settings UI）+ Workbench 红绿灯榜 | P18.D.1 |
+| **P18.D.4 自动** | 自己建投/砍/放大全自动 | Advanced Access（以周计） |
+
+**PM 决策**：D1 账户治理（推荐拆账户）/ D2 最低接单预算线（$30–50/天）/ D3 定价归属（Goal 加速包，收服务费）/ D4 承诺话术（卖确定性非隔夜爆款）。
+
+**新表强约束**：三表带 `client_id NOT NULL`，RLS 用 service_role 幂等模板，写完 grep `workspace_id|client_team|auth.uid`；`client_ad_entities` 白名单必须配 UI（禁 FDE 进 Studio 直填）。
+
 ### 安全边界
 
 - 所有操作必须校验 `client_id` + 广告账户 ownership（防租户穿越）✅ `requireDashboardClientAccess`
