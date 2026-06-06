@@ -76,9 +76,9 @@ services:
     schedule: "*/2 * * * *"
     buildCommand: ""
     startCommand: |
-      curl -s -X POST -H "Authorization: Bearer $CRON_SECRET" \
+      curl -fsS --max-time 120 -X POST -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/vision-analyzer \
-        && curl -fsS "https://hc-ping.com/1b1cd19b-583a-41ac-baaa-c9415241d5e8" || true
+        && curl -fsS "https://hc-ping.com/1b1cd19b-583a-41ac-baaa-c9415241d5e8"
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -91,9 +91,9 @@ services:
     schedule: "*/2 * * * *"
     buildCommand: ""
     startCommand: |
-      curl -s -H "Authorization: Bearer $CRON_SECRET" \
+      curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/poll-visual-jobs \
-        && curl -fsS "https://hc-ping.com/0dd2b641-499f-4f2f-8b73-73085050a5f0" || true
+        && curl -fsS "https://hc-ping.com/0dd2b641-499f-4f2f-8b73-73085050a5f0"
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -112,9 +112,9 @@ services:
     schedule: "0 2 * * *"
     buildCommand: ""
     startCommand: |
-      curl -s -X POST -H "x-cron-secret: $CRON_SECRET" \
+      curl -fsS --max-time 120 -X POST -H "x-cron-secret: $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/site-audit-jobs \
-        && curl -fsS "https://hc-ping.com/8451084d-23c0-44b0-af00-8e29ff80fcdc" || true
+        && curl -fsS "https://hc-ping.com/8451084d-23c0-44b0-af00-8e29ff80fcdc"
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -129,9 +129,9 @@ services:
     schedule: "0 */6 * * *"
     buildCommand: ""
     startCommand: |
-      curl -s -X POST -H "Authorization: Bearer $CRON_SECRET" \
+      curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/attribution \
-        && curl -fsS "https://hc-ping.com/87926446-35cf-4e5b-a868-bb784c27ee5f" || true
+        && curl -fsS "https://hc-ping.com/87926446-35cf-4e5b-a868-bb784c27ee5f"
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -147,9 +147,9 @@ services:
     schedule: "*/5 * * * *"
     buildCommand: ""
     startCommand: |
-      curl -s -H "Authorization: Bearer $CRON_SECRET" \
+      curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/zhangqian-sweeper \
-        && curl -fsS "https://hc-ping.com/071910fe-b9b7-435d-8b72-f141818eb03d" || true
+        && curl -fsS "https://hc-ping.com/071910fe-b9b7-435d-8b72-f141818eb03d"
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -166,9 +166,9 @@ services:
     schedule: "*/5 * * * *"
     buildCommand: ""
     startCommand: |
-      curl -s -H "Authorization: Bearer $CRON_SECRET" \
+      curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/blog-stuck-generating \
-        && curl -fsS "https://hc-ping.com/180d3e65-1910-4f8d-a778-409571d5fb46" || true
+        && curl -fsS "https://hc-ping.com/180d3e65-1910-4f8d-a778-409571d5fb46"
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -185,9 +185,9 @@ services:
     schedule: "0 1 * * 1"
     buildCommand: ""
     startCommand: |
-      curl -s --max-time 30 -H "Authorization: Bearer $CRON_SECRET" \
+      curl -fsS --max-time 30 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/ai-tracker-weekly \
-        && curl -fsS "https://hc-ping.com/c4f101fe-c2cf-47f9-807f-08ea09d43934" || true
+        && curl -fsS "https://hc-ping.com/c4f101fe-c2cf-47f9-807f-08ea09d43934"
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -205,9 +205,9 @@ services:
     schedule: "30 2 * * *"
     buildCommand: ""
     startCommand: |
-      curl -s -H "Authorization: Bearer $CRON_SECRET" \
+      curl -fsS --max-time 600 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/ai-visibility-weekly \
-        && curl -fsS "https://hc-ping.com/1400fe83-cc62-4634-9f7e-a2345553beee" || true
+        && curl -fsS "https://hc-ping.com/1400fe83-cc62-4634-9f7e-a2345553beee"
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -223,9 +223,9 @@ services:
     schedule: "0 3 * * *"
     buildCommand: ""
     startCommand: |
-      curl -s -H "Authorization: Bearer $CRON_SECRET" \
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/goal-current-value-refresh \
-        && curl -fsS "https://hc-ping.com/300bb7f9-8a16-4a72-b9eb-a924dc76efa8" || true
+        && curl -fsS "https://hc-ping.com/300bb7f9-8a16-4a72-b9eb-a924dc76efa8"
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -240,9 +240,9 @@ services:
     schedule: "0 2 * * 1"
     buildCommand: ""
     startCommand: |
-      curl -s -H "Authorization: Bearer $CRON_SECRET" \
+      curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/keyword-snapshots-weekly \
-        && curl -fsS "https://hc-ping.com/db156874-3c69-4b5a-b534-a6bbea63a467" || true
+        && curl -fsS "https://hc-ping.com/db156874-3c69-4b5a-b534-a6bbea63a467"
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -257,9 +257,9 @@ services:
     schedule: "0 4 * * *"
     buildCommand: ""
     startCommand: |
-      curl -s -H "Authorization: Bearer $CRON_SECRET" \
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/social-engagement-pullback \
-        && curl -fsS "https://hc-ping.com/01c469cc-4e77-4e88-bba4-7f17cbec91bc" || true
+        && curl -fsS "https://hc-ping.com/01c469cc-4e77-4e88-bba4-7f17cbec91bc"
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -274,9 +274,9 @@ services:
     schedule: "0 3 * * *"
     buildCommand: ""
     startCommand: |
-      curl -s -H "Authorization: Bearer $CRON_SECRET" \
+      curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/google-data-pullback-daily \
-        && curl -fsS "https://hc-ping.com/12f3c5c4-4524-48b8-92c5-72fd2b775d01" || true
+        && curl -fsS "https://hc-ping.com/12f3c5c4-4524-48b8-92c5-72fd2b775d01"
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -292,9 +292,9 @@ services:
     schedule: "0 3 * * 1"
     buildCommand: ""
     startCommand: |
-      curl -s -H "Authorization: Bearer $CRON_SECRET" \
+      curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/zhuge-recalculate \
-        && curl -fsS "https://hc-ping.com/a2c4d128-e09c-41eb-843e-98c9a0afecba" || true
+        && curl -fsS "https://hc-ping.com/a2c4d128-e09c-41eb-843e-98c9a0afecba"
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -310,9 +310,9 @@ services:
     schedule: "*/2 * * * *"
     buildCommand: ""
     startCommand: |
-      curl -s -X POST -H "Authorization: Bearer $CRON_SECRET" \
+      curl -fsS --max-time 120 -X POST -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/viral-analyzer-worker \
-        && curl -fsS "https://hc-ping.com/55891cbc-cfd5-4c58-b28b-f06206fade5a" || true
+        && curl -fsS "https://hc-ping.com/55891cbc-cfd5-4c58-b28b-f06206fade5a"
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -328,9 +328,9 @@ services:
     schedule: "0 0 * * *"
     buildCommand: ""
     startCommand: |
-      curl -s -X POST -H "Authorization: Bearer $CRON_SECRET" \
+      curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/viral-discovery-weekly \
-        && curl -fsS "https://hc-ping.com/e5c6cbe8-e6cc-457f-bb3f-538971dafd46" || true
+        && curl -fsS "https://hc-ping.com/e5c6cbe8-e6cc-457f-bb3f-538971dafd46"
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -347,17 +347,12 @@ services:
     schedule: "0 5 * * *"
     buildCommand: ""
     startCommand: |
-      curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://$RENDER_EXTERNAL_URL/api/cron/anomaly-detector \
-        && curl -fsS "https://hc-ping.com/ff78126a-25e2-4a50-abcb-edbcb1dfaec9" || true
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/anomaly-detector \
+        && curl -fsS "https://hc-ping.com/ff78126a-25e2-4a50-abcb-edbcb1dfaec9"
     envVars:
       - key: CRON_SECRET
         sync: false
-      - key: RENDER_EXTERNAL_URL
-        fromService:
-          type: web
-          name: magic-engine
-          property: host
 
   # Daily cron health digest — every day at 6am UTC (~6pm NZST)
   # Queries cron_run_logs for the past 24h; sends Resend email only if failures found.
@@ -368,9 +363,9 @@ services:
     schedule: "0 6 * * *"
     buildCommand: ""
     startCommand: |
-      curl -s -H "Authorization: Bearer $CRON_SECRET" \
+      curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/daily-cron-digest \
-        && curl -fsS "https://hc-ping.com/10c101e8-05a0-4026-9531-39edddd7c74d" || true
+        && curl -fsS "https://hc-ping.com/10c101e8-05a0-4026-9531-39edddd7c74d"
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -388,14 +383,9 @@ services:
     schedule: "0 4 * * *"
     buildCommand: ""
     startCommand: |
-      curl -s -H "Authorization: Bearer $CRON_SECRET" \
-        https://$RENDER_EXTERNAL_URL/api/cron/seo-patrol-daily \
-        && curl -fsS "https://hc-ping.com/db58fff5-fd32-45e0-a7fd-b067bede6689" || true
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/seo-patrol-daily \
+        && curl -fsS "https://hc-ping.com/db58fff5-fd32-45e0-a7fd-b067bede6689"
     envVars:
       - key: CRON_SECRET
         sync: false
-      - key: RENDER_EXTERNAL_URL
-        fromService:
-          type: web
-          name: magic-engine
-          property: host
