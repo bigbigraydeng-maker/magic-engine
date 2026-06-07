@@ -216,6 +216,84 @@
 
 ---
 
+### 窗口 p0-fixes (dreamy-shannon-e3b391) — Self-serve 注册漏斗 + 多租户隔离 + 付费 MTC 闭环
+
+**主题**：把 self-serve 用户从「输入网址 → 收码 → 进 dashboard → 充值 MTC → 生成内容」整条漏斗端到端打通。**直接影响 F1 (Onboarding) + F3-F5 (内容生成扣费) + 全局多租户隔离**。
+
+**本窗口在 main 上 merge 的 PR**：
+| PR | 主题 | 影响 FDE 视角 |
+|---|---|---|
+| #384 | P0-A/B/C 邮件不发空报告 + 6 位 OTP + clients.contact_email 写入 | F1 Onboarding 收码邮件 |
+| #388 | P0-F `signUp` → `signInWithOtp`（passwordless） | F1 注册流程 |
+| #389 | P0-G OTP 接受 6-10 位 | F1 收码页 |
+| #392 | P0-I onChange `.slice(0,6)` 残留 + 加 Verify 按钮 | F1 收码页 |
+| #396 | **P0-J PR-1 多租户数据泄露止血**（4 surgical fixes） | **F1-F7 全局**：raydeng (self-serve) 之前看到 41 条陌生客户内容；现在 self-serve 只看到自己 |
+| #407 | P0-J PR-2a normalizeSelfServeTarget 路径穿透堵 | F1 callback 重定向 |
+
+**FDE 在 ME 后台哪个 URL 能点到**：
+
+| 入口 | URL | FDE 几步 |
+|---|---|---|
+| F1.1 注册收码 | `/portal/register` (不在 dashboard 内) | 4 步：填 Business name + Email → Create → 收 OTP → 输入 OTP |
+| F1.2 Brand Brief | `/dashboard/clients/[id]/brief?welcome=1` | 5 字段表单（Company / Industry / Audience / Differentiator / Voice）。**右上角已加 "Skip for now →"**（PR #396） |
+| F3 看 MTC 余额 | `/dashboard/clients/[id]/wallet` | 进入 → 看余额 + 批次 + 历史 |
+| F3 充值 MTC | `/dashboard/clients/[id]/wallet` → "Top up" | 选包 → Stripe checkout → 付款 → 回 wallet |
+| F3-F5 扣费触发 | 任意生成入口（blog / social / reels / image / ai-factory / zhangqian） | 点生成按钮 → 余额预检 → 生成 → 成功扣费 / 失败退款 |
+
+**MTC 扣费接通的 8 个 API**（FDE 视角=点生成按钮即触发）：
+- `/api/clients/[id]/blog`（博客 SEO 40 / 双信号 60 MTC）
+- `/api/clients/[id]/social-plan`（5-30 MTC）
+- `/api/clients/[id]/reels/[draftId]/generate-storyboard`（5 MTC）
+- `/api/clients/[id]/reels/[draftId]/generate-video`（20-80 MTC 按分辨率×时长）
+- `/api/clients/[id]/reels/[draftId]/video-status`（commit / refund 决策点）
+- `/api/clients/[id]/ai-factory/fan-out`（5 MTC/帖）
+- `/api/clients/[id]/zhangqian/discover`（60 MTC）
+- `/api/visual/image`（10 MTC）
+
+**CTS / Oztop 测试时填什么真实业务数据**（已查 master_brief + clients.primary_keywords，不要编）：
+
+| 字段 | CTS Tours (NZ outbound) | Oztop Building Supplies (AU 建材) |
+|---|---|---|
+| Industry | Tourism & Hospitality | Construction & Trades |
+| Target Audience | NZ 35-70 文化游退休层（Auckland / Wellington / Christchurch） | AU 建造商 / 装修业主 / 建筑商 |
+| Core Differentiator | China travel specialists since 1928, NZ outbound, direct on-ground operations | （查 master_brief，不要编"shutters/curtains"） |
+| Brand Voice | Professional | Professional |
+| Website URL | https://www.ctstours.co.nz | （查 master_brief） |
+| **绝不要填** | Queenstown inbound 旅游 / 入境游 / 高山滑雪 | shutters / curtains / herringbone / vinyl flooring |
+
+**当前是否有「UI 点不到必须开 Supabase 直填」的字段**：
+
+| 字段 | 状态 | 评级 |
+|---|---|---|
+| `clients.contact_email` | ✅ self-register 已自动写入（PR #384 P0-C） | OK |
+| `clients.domain` | ⚠️ 表单 Website URL 是 **optional**；不填则 domain = NULL；FDE 进入 dashboard 后看不到客户域名。**Settings 页能补**（已有 UI） | **登 Bug 池 P2**（见 BUG-P0F-001） |
+| MTC 充值后 access_type 升级 | ❌ **缺口**：Stripe webhook 不自动把 `client_portal_users.access_type` 从 `self_serve` 升级到 `paid_client`。FDE/客户付款后仍看到 self-serve sidebar，**进不去 paid_client 专属页**。当前只能走手动 PUT `/api/clients/[id]/upgrade` 或 PM 跑 SQL | **登 Bug 池 P1**（见 BUG-P0F-002） |
+| dashboard 任何 layout 缺 `x-user-tier` header | ⚠️ P0-J PR-1 改了 fallback 从 `'admin'` → `'portal_only'`（fail-safe），但**正面影响**：admin/FDE 如果 middleware 没注入 header（如直接访问 `/dashboard` 根），会被降级到 portal_only，看不到 paid sidebar | **登 Bug 池 P2**（见 BUG-P0F-003） |
+
+**预计上线日期 / 当前是否已在 main 可点**：
+- ✅ PR #384/#388/#389/#392/#396/#407 全部已 merged 进 main，Render 自动部署
+- ✅ F1 Onboarding (注册 + Brief) FDE 可点
+- ✅ F3-F5 MTC 扣费 FDE 可点
+- ❌ Stripe 付款 → access_type 升级**未做**（BUG-P0F-002）
+
+**可贡献到 FEIMAOTUI.md 第二节的哪几格**：
+- F1 × CTS：Onboarding（注册 + Brief）已支持 ✅
+- F1 × Oztop：同上 ✅
+- F3 × CTS / Oztop：扣费基础设施已通 ✅（但需要 Stripe 升级修复后才能完整测付费用户体验）
+- F4 × CTS / Oztop：多租户隔离影响 Initiative 编排页（FDE 进 Goal 详情前先经过 P0-J 路由 / tier 闸）
+- F5 × CTS / Oztop：生成 Action 触发扣费的代码路径已通
+- F7 月报：**不贡献**（本窗口未碰月报生成）
+
+**本窗口自报红线踩踏**（飞毛腿测试纪律 v0.2 确立前）：
+- 🚨 在飞毛腿测试纪律确立**之前**，本窗口为诊断 P0 注册漏斗根因，**多次用 MCP `execute_sql` 删/改 DB**：
+  - 6/5 ~14 次 `DELETE FROM auth.users / clients / client_portal_users / signup_bonus_grants / auth.identities WHERE email='raydeng@workvisas.work'` — 重置测试账号
+  - 6/5 1 次 `UPDATE clients SET contact_email='raydeng@workvisas.work' WHERE id='0469394d-...'` — backfill 因 self-register bug 漏写的字段
+- ⚠️ **辩解**：这些是 P0 诊断+止血期间的研发工具操作，**不是 FDE 工作流**——FDE 永远不会"重置测试账号"。但按飞毛腿红线 5「禁止开 Supabase Studio / 写 SQL / 用 MCP 直接操作数据库」，这些操作在飞毛腿期间也算红线。
+- ✅ **后续承诺**：从 v0.2 红线写入起，本窗口任何 ME 数据库写入一律走 UI；研发诊断如需 SQL，必须在 PR 描述里登记，FEIMAOTUI 第六节 Bug 池追加一行供汇总人审。
+- ✅ **已止血**：本窗口最近 2 个 PR (#407 P0-J PR-2a + 本 handoff) 零 SQL，全代码层修。
+
+---
+
 ## 四、子牙汇总进度（实时更新）
 
 | Phase | 子任务 | 客户 | 负责窗口 | 状态 | 备注 |
@@ -270,6 +348,9 @@
 | BUG-FMT-003 | F4 / PlanGenerator UX | P2 | 当 Initiative 没挂 Campaign 时，FDE 点 "Generate Marketing Plan" 没有任何 UI 提示"你这个 Plan 只能做 DNA-only（不挂 Campaign）"。FDE 会困惑为什么 Campaign 下拉是空的或为什么要"硬选"。修复方案 PR #402 的改动 3 包含 "This Initiative has no campaigns yet — Plan will be DNA-only" 提示 | funny-goodall-1a84b8 | 🟡 修复方案已起草，等 Codex 重派落地 |
 | BC-001 | F4 Initiative 编辑 | **P0 候选** | FDE 能否在 ME UI 上编辑已存在 Initiative 的 budget_amount？2026-06-07 nostalgic-rubin 窗口子牙用 MCP SQL 直接改 CTS Initiative budget 2100→3000，未走 UI 验证。飞毛腿测试时需实测：在 `/dashboard/clients/c0000000.../goal/7e6d6ff0.../` 的 Initiative 卡片上能否点编辑 → 改 budget → 保存。UI 点不到 → 升级 P0 实 bug | nostalgic-rubin-1b8032 | ⏳ 待 strange-brown UI 验证 |
 | BC-002 | F4 Marketing Plan archive | **P0 候选** | FDE 能否在 ME UI 上 archive marketing_plan 草稿？2026-06-07 nostalgic-rubin 窗口子牙用 MCP SQL 直接 archive 2 条历史重复 draft (`ed234551` + `1c8beca2`)，未走 UI 验证。飞毛腿测试时需实测：在 `/dashboard/clients/c0000000.../marketing-plan` 草稿列表上能否点 archive 按钮。UI 点不到 → 升级 P0 实 bug | nostalgic-rubin-1b8032 | ⏳ 待 strange-brown UI 验证 |
+| BUG-P0F-001 | F1 Onboarding / Brand Brief | P2 | `/portal/register` 表单的 Website URL 字段是 **optional**。FDE 注册自助账号不填 → `clients.domain` 留 NULL → FDE 进 dashboard 后看不到客户域名（左侧客户卡片缺关键标识）。Settings 页能补但 FDE 容易忘。建议：注册时把 URL 改 required，或 Brief 第一字段强制要求。当前 `/dashboard/clients/[id]/settings` 已有 UI 可补 domain，所以不是阻断 P1 | p0-fixes (dreamy-shannon-e3b391) | ⏳ 待飞毛腿 F1 实测 |
+| BUG-P0F-002 | F3 付费用户升级闭环 | **P1** | Stripe checkout 付款成功 + webhook 收到 `checkout.session.completed` → 当前只写 `mtc_purchases` 表，**不升级 `client_portal_users.access_type`**。FDE/客户付款后 access_type 仍是 `self_serve`，看不到 paid_client 专属页（如 Marketing Plan / Strategy / Diagnostic 等付费功能）。子牙 grep `src/app/api/stripe/webhook/route.ts` + `src/lib/auth/upgrade-self-serve.ts` 确认：手动 PUT `/api/clients/[id]/upgrade` 存在，但 webhook 没自动调它。**FDE 视角**：付完钱仍卡在 self-serve 视图，找不到付费功能入口。**修法**：在 webhook `checkout.session.completed` handler 里调 `upgradeSelfServeToPaid()`。已知工作量半天 | p0-fixes (dreamy-shannon-e3b391) | 🟡 修法已明，待回本职 Phase 修 |
+| BUG-P0F-003 | F1-F7 全局 / dashboard layout | P2 | P0-J PR-1 把 `dashboard/layout.tsx` 的 `userTier` fallback 从 `'admin'` 改成 `'portal_only'`（防止 header 缺失时静默升级 admin）。**副作用**：admin/FDE 如果通过非 middleware 路径（如 cookie 失效后旧 SSR 缓存）访问 `/dashboard`，会被降级看到 portal_only sidebar，找不到 paid sidebar 项。当前没有 hard data 说真发生过，但 P0-J PR-2/PR-3（拆 `/workspace` 路由）后会更彻底解决。**短期缓解**：FDE 遇到 sidebar 缺项时 hard refresh 一次。当前不阻断飞毛腿 | p0-fixes (dreamy-shannon-e3b391) | 🟡 短期可接受，待 P0-J PR-2/PR-3 彻底解决 |
 
 ---
 
@@ -293,3 +374,4 @@
 - **v0.2** — 2026-06-07 PM 强调「FDE 视角手动后台跑」，加测试纪律 6 条红线 + 通过判定改"FDE 在 UI 上看到/点到"
 - **v0.3** — 2026-06-07 funny-liskov + funny-goodall 两窗口写入分工 + 3 个 P1/P2 Bug
 - **v0.4** — 2026-06-07 nostalgic-rubin 窗口分工合入（CTS Best of China Google Ads 资产）+ 2 个 P0 候选 Bug + F3-CTS/F4-CTS/F5-CTS-Ads 行登记负责窗口 + 准备 PR 到 main
+- **v0.5** — 2026-06-07 p0-fixes (dreamy-shannon-e3b391) 窗口分工合入：6 个 P0 PR 已 merged（self-serve 注册漏斗 + 多租户隔离 P0-J PR-1/2a）+ 3 个 Bug (BUG-P0F-001/002/003：domain optional + Stripe 升级缺口 + tier fallback 副作用) + 自报 SQL 红线踩踏（v0.2 红线前的 P0 诊断+止血 DB 操作）+ 承诺零 SQL 后续
