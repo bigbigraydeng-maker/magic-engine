@@ -15,6 +15,8 @@ import type { SeasonalCalendarData } from './seasonal-calendar'
 import type { GTrendsInterestSummary } from '@/lib/gtrends/client'
 import type { SimilarCaseResult } from '@/lib/case-library/retriever'
 import type { OutcomeConfidenceMap } from '@/lib/case-library/outcome-confidence'
+// re-export for callers (defined in ./memory to keep types lean)
+export type { HuatuoPromptMode } from './memory'
 
 // ─── Industry Benchmark ────────────────────────────────────────────────────────
 

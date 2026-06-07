@@ -25,6 +25,7 @@ import type {
   SelfGrade,
   SelfGradeWeakness,
 } from './types'
+import type { HuatuoMemoryBundle, HuatuoPromptMode } from './memory'
 import { fetchBenchmarks, extractBenchmarkIds } from './benchmarks'
 import { mapIndustryToCategory } from './industry-mapper'
 import { getDomainTrafficHistory } from '@/lib/dataforseo/labs'
@@ -106,6 +107,22 @@ export interface RunHuatuoOptions {
    * 华佗用它来：避开已知失败实验、引用已验证获胜模式、参考过往诊断决策。
    */
   memoryContext?: MemoryContext
+  /**
+   * Phase DAPE W1 — 三层 memory bundle（client_learned_preferences +
+   * zhuge_feedback_events + prescription_outcomes）。
+   *
+   * 优先于 memoryContext：传 memoryBundle 时使用 W1 路径；
+   * 仅传 memoryContext 时仍走 Phase 23.D.2 旧路径（向后兼容）。
+   * 两个都没传 → 不注入 memory。
+   */
+  memoryBundle?: HuatuoMemoryBundle
+  /**
+   * Phase DAPE W1 — prompt 模式（短/长双轨）。
+   *   - 'short'：自助客户 (~500 tokens)，仅关键 memory + 高优 KPI
+   *   - 'long'：FDE 客户 (~3000 tokens)，全量 memory + 详细 outcome
+   * 默认 'long'（保持旧行为）。
+   */
+  promptMode?: HuatuoPromptMode
 }
 
 /**
@@ -179,11 +196,22 @@ export async function runHuatuo(
   // ── Step 2: Generate（pass 1）────────────────────────────────────────────
   await onProgress('华佗正在开方…')
   const client = getHuatuoAnthropicClient()
+  const promptMode = options.promptMode ?? 'long'
+  // Phase DAPE W1: 加日志让魏征可验 — agent 真使用 memory bundle / mode
+  console.info('[huatuo:agent] runHuatuo prompt config', {
+    prompt_mode: promptMode,
+    has_memory_bundle: Boolean(options.memoryBundle),
+    has_memory_context_legacy: Boolean(options.memoryContext),
+    memory_bundle_has_content: options.memoryBundle?.has_content ?? null,
+  })
   let pass1
   try {
     pass1 = await withHardTimeout(
       '处方生成',
-      generatePrescription(client, discovery, intake, lookup, options.priorContext, options.memoryContext),
+      generatePrescription(
+        client, discovery, intake, lookup,
+        options.priorContext, options.memoryContext, options.memoryBundle, promptMode,
+      ),
       CLAUDE_TIMEOUT_GENERATION_MS,
     )
   } catch (err) {
@@ -234,6 +262,8 @@ export async function runHuatuo(
               weaknesses: selfGrade.weaknesses,
               priorContext: options.priorContext,
               memoryContext: options.memoryContext,
+              memoryBundle: options.memoryBundle,
+              promptMode,
             },
           ),
           CLAUDE_TIMEOUT_GENERATION_MS,
@@ -299,6 +329,10 @@ export interface RefineHuatuoOptions {
   previousSelfGrade?: SelfGrade | null
   /** Phase 23.D.2 — L3 记忆层注入（与生成阶段共享） */
   memoryContext?: MemoryContext
+  /** Phase DAPE W1 — 三层 memory bundle（优先于 memoryContext） */
+  memoryBundle?: HuatuoMemoryBundle
+  /** Phase DAPE W1 — prompt 模式（默认 'long' 保持旧行为） */
+  promptMode?: HuatuoPromptMode
 }
 
 /**
@@ -360,6 +394,8 @@ export async function refineHuatuoPrescription(
         weaknesses: previousWeaknesses,
         humanComments: options.humanComments,
         memoryContext: options.memoryContext,
+        memoryBundle: options.memoryBundle,
+        promptMode: options.promptMode,
       },
     ),
     CLAUDE_TIMEOUT_GENERATION_MS,
@@ -426,8 +462,12 @@ async function generatePrescription(
   lookup: HuatuoLookupContext,
   priorContext?: PriorPrescriptionContext,
   memoryContext?: MemoryContext,
+  memoryBundle?: HuatuoMemoryBundle,
+  promptMode: HuatuoPromptMode = 'long',
 ): Promise<ClaudeCallResult<PrescriptionContent>> {
-  const userPrompt = buildHuatuoGenerationPrompt(discovery, intake, lookup, priorContext, memoryContext)
+  const userPrompt = buildHuatuoGenerationPrompt(
+    discovery, intake, lookup, priorContext, memoryContext, memoryBundle, promptMode,
+  )
   const message = await client.messages.create({
     model: MODEL_SONNET,
     max_tokens: MAX_OUTPUT_TOKENS_GENERATION,
@@ -504,11 +544,17 @@ async function generatePrescriptionWithFeedback(
     humanComments?: string
     priorContext?: PriorPrescriptionContext
     memoryContext?: MemoryContext
+    memoryBundle?: HuatuoMemoryBundle
+    promptMode?: HuatuoPromptMode
   },
 ): Promise<ClaudeCallResult<PrescriptionContent>> {
   // 精修 prompt 强调"针对性修复 + 保持紧凑"
   // 防止 Claude 看到 8 条 weaknesses 后过度扩写超出 8192 max_tokens
-  const basePrompt = buildHuatuoGenerationPrompt(discovery, intake, lookup, feedback.priorContext, feedback.memoryContext)
+  const basePrompt = buildHuatuoGenerationPrompt(
+    discovery, intake, lookup,
+    feedback.priorContext, feedback.memoryContext,
+    feedback.memoryBundle, feedback.promptMode ?? 'long',
+  )
 
   // 人工意见（如有）— 比 AI 自评 weaknesses 优先级更高
   const humanCommentsBlock = feedback.humanComments && feedback.humanComments.trim()

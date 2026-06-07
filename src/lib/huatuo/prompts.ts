@@ -20,6 +20,11 @@ import { formatCasesForPrompt } from '@/lib/case-library/retriever'
 import { formatConfidenceForPrompt } from '@/lib/case-library/outcome-confidence'
 import { formatMemoryForPrompt } from '@/lib/memory/format'
 import type { MemoryContext } from '@/lib/memory/types'
+import {
+  formatHuatuoMemoryForPrompt,
+  type HuatuoMemoryBundle,
+  type HuatuoPromptMode,
+} from './memory'
 
 // ─── Generation prompt（生成阶段）──────────────────────────────────────────────
 
@@ -269,6 +274,11 @@ ${prior.executionSummary}
  * 构建生成阶段的 user message。
  * priorContext 非空时进入"补充/修订"模式。
  * memoryContext 非空时附加 L3 记忆段（Phase 23.D.2）。
+ *
+ * Phase DAPE W1: 新加 memoryBundle + promptMode。memoryBundle 优先于 memoryContext
+ *   - 传 memoryBundle → 走 W1 三层 memory（preferences + zhuge_feedback + outcomes）+ 双模式
+ *   - 仅传 memoryContext → 走旧路径（向后兼容 Phase 23.D.2）
+ *   - 两个都没传 → 不注入 memory（与旧版完全一致）
  */
 export function buildHuatuoGenerationPrompt(
   discovery: DiscoveryReport,
@@ -276,6 +286,8 @@ export function buildHuatuoGenerationPrompt(
   lookup: HuatuoLookupContext,
   priorContext?: PriorPrescriptionContext,
   memoryContext?: MemoryContext,
+  memoryBundle?: HuatuoMemoryBundle,
+  promptMode: HuatuoPromptMode = 'long',
 ): string {
   const d = discovery.diagnosis
   const scores = d?.scores
@@ -336,9 +348,11 @@ export function buildHuatuoGenerationPrompt(
       ? '# 任务：生成处方的修订版（v2）'
       : '# 任务：为以下客户开具 90 天三阶段数字营销处方'
 
-  // Phase 23.D.2: 注入 L3 记忆（华佗主要参考 proven_patterns / failed_experiments / recent_decisions；
-  // preferences 与处方策略相关性较弱，但保留以提供完整上下文）
-  const memorySection = formatMemoryForPrompt(memoryContext)
+  // Phase DAPE W1: 注入三层 memory（preferences + zhuge_feedback + prescription_outcomes）+ 双模式
+  // 优先用 memoryBundle（W1 路径），fallback 旧 memoryContext（Phase 23.D.2 兼容）
+  const memorySection = memoryBundle
+    ? formatHuatuoMemoryForPrompt(memoryBundle, promptMode)
+    : formatMemoryForPrompt(memoryContext)
 
   return `${taskTitle}
 
