@@ -96,13 +96,16 @@ export function DimensionScoreCard({
         </div>
       )}
 
-      {/* S11: config CTA for unconfigured dimensions */}
+      {/* S11: config CTA for unconfigured dimensions.
+          Copy + tooltip both tell FDE where they're going so the link is
+          self-explanatory before they click. */}
       {isUnknown && configHref && (
         <Link
           href={configHref}
+          title="将打开 Settings → 关键词与竞品"
           className="text-xs text-indigo-500 hover:text-indigo-700 hover:underline"
         >
-          立即配置 →
+          去 Settings 配置 →
         </Link>
       )}
 

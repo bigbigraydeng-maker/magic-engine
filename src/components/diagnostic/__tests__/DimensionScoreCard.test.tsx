@@ -55,7 +55,7 @@ describe('DimensionScoreCard — null score path (S14 root cause)', () => {
     expect(screen.getByTestId('explain-toggle-competitor')).toHaveTextContent('为什么"未配置"?')
   })
 
-  it('renders the 立即配置 link when configHref is given and score is null', () => {
+  it('renders the 去 Settings 配置 link with tooltip when configHref is given and score is null (S11)', () => {
     render(
       <DimensionScoreCard
         dimension="seo"
@@ -64,8 +64,9 @@ describe('DimensionScoreCard — null score path (S14 root cause)', () => {
         configHref="/dashboard/clients/abc/settings"
       />,
     )
-    const link = screen.getByRole('link', { name: /立即配置/ })
+    const link = screen.getByRole('link', { name: /去 Settings 配置/ })
     expect(link).toHaveAttribute('href', '/dashboard/clients/abc/settings')
+    expect(link).toHaveAttribute('title')
   })
 })
 
