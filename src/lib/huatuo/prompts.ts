@@ -83,6 +83,7 @@ export const HUATUO_GENERATION_SYSTEM_PROMPT = `你是华佗（Huà Tuó），Ma
 输出 schema：
 {
   "summary": "string（中文，2–3 句话）",
+  "narrative": "string（中文，200–400 字大白话叙事——给客户老板看，不给 FDE 看。回答三件事：1）当前最大问题一句话；2）处方分几阶段如何解决；3）阶段一最该先动的 1–2 件事，具体到 action title。不要重复 summary，要更口语化。）",
   "phases": [
     {
       "phase_number": 1,

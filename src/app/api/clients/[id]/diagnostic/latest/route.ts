@@ -52,14 +52,29 @@ export async function GET(
 
     const runId = (run as Record<string, unknown>).id as string
 
-    // Findings ordered by priority (highest first)
-    const { data: findings } = await supabaseAdmin
-      .from('diagnostic_findings')
-      .select('*')
-      .eq('run_id', runId)
-      .order('priority_score', { ascending: false })
+    // Findings ordered by priority (highest first) — parallel with narratives.
+    // DAPE W3: also load synthesis narratives so the speed-overview page
+    // can show the human-readable summary cards alongside the score grid.
+    const [findingsRes, narrativesRes] = await Promise.all([
+      supabaseAdmin
+        .from('diagnostic_findings')
+        .select('*')
+        .eq('run_id', runId)
+        .order('priority_score', { ascending: false }),
+      supabaseAdmin
+        .from('diagnostic_narratives')
+        .select('id, kind, dimension, narrative_md, generated_at')
+        .eq('run_id', runId)
+        .order('kind', { ascending: true })
+        .order('dimension', { ascending: true, nullsFirst: true }),
+    ])
 
-    return NextResponse.json({ success: true, run, findings: findings ?? [] })
+    return NextResponse.json({
+      success: true,
+      run,
+      findings: findingsRes.data ?? [],
+      narratives: narrativesRes.data ?? [],
+    })
   } catch (err: unknown) {
     console.error('[diagnostic/latest] Unexpected error:', err)
     return NextResponse.json(

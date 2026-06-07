@@ -372,6 +372,26 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # Agent Learning Rollup — DAPE W3 (spec §3.3)
+  # Weekly aggregator: takes the previous ISO week (Mon 00:00 UTC → Mon 00:00 UTC)
+  # of flywheel_outcomes + zhuge_feedback_events and writes ONE summary
+  # preference per active client into client_learned_preferences. Next agent run
+  # reads it via loadMemoryForClient so "what worked / what got dismissed last
+  # week" is in the prompt without re-deriving from raw outcomes each time.
+  # Runs Mon 07:00 UTC (after the Sunday/early Monday data pulls have settled).
+  # Reference: docs/superpowers/specs/2026-06-08-me-dape-redefine-v0.2.md §3.3
+  - type: cron
+    name: agent-learning-rollup
+    env: node
+    schedule: "0 7 * * 1"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/agent-learning-rollup
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # SEO Patrol — Phase 22.E.S2b
   #   Daily SEO opportunity engine: reads keyword_snapshots + GSC snapshots,
   #   runs the rule engine, persists fresh findings, and routes the top 3 onto

@@ -520,6 +520,8 @@ function attachExecutionTarget(action: PrescriptionAction): PrescriptionAction {
 function normalizePrescriptionContent(p: Partial<PrescriptionContent>): PrescriptionContent {
   return {
     summary: typeof p.summary === 'string' ? p.summary : '',
+    // DAPE W3 — narrative 是新加的可选字段，旧 prompt 无此输出 → 空串兜底
+    narrative: typeof p.narrative === 'string' ? p.narrative : '',
     phases: Array.isArray(p.phases)
       ? p.phases.map(ph => ({
           phase_number:   typeof ph.phase_number === 'number' ? ph.phase_number : 0,

@@ -1,0 +1,375 @@
+/**
+ * DAPE W3 — Weekly Agent Learning Rollup
+ *
+ * Aggregates the **past week** of flywheel outcomes + zhuge workbench feedback
+ * into the learned-preferences memory layer so the next agent run can read
+ * "what worked last week" without re-deriving everything from scratch.
+ *
+ * Why a separate weekly job (vs. memory-extractor which runs daily):
+ *   - memory-extractor inspects every confirmed/reversed outcome individually
+ *     and writes per-action patterns / experiments. It is correct but coarse:
+ *     a single bad week never bubbles up as "this client doesn't like X".
+ *   - learning-rollup runs once per ISO week and emits **summary preferences**
+ *     ("FDE dismissed 8/10 SEO suggestions last week → de-prioritize this
+ *     suggestion family") that capture *negative* signal which memory-extractor
+ *     misses (extractor only learns from positive confirmed outcomes).
+ *   - It also closes the loop on `zhuge_feedback_events` which spec §1.3
+ *     flagged as "spent but never read".
+ *
+ * Design contract:
+ *   - **Read-only on existing tables** — only writes to client_learned_preferences.
+ *     Never touches zhuge_feedback_events, flywheel_* (狄仁杰: agent learning
+ *     must not mutate execution truth).
+ *   - **Idempotent** — re-running the same week is a no-op (we check for an
+ *     existing rollup preference keyed by ISO-week + client_id).
+ *   - **Single-source dedup** — `source='auto_extracted'` + `extracted_from_table
+ *     ='learning_rollup_weekly'` + `extracted_from_id=<iso-week-key>::<client_id>`
+ *     means a second run for the same week never double-writes.
+ *   - **Per-client error isolation** — one client throwing doesn't kill the
+ *     rest of the batch. Errors are accumulated and surfaced in the result.
+ *   - **No CTS/Oztop data deletion** — we only INSERT into preferences; we
+ *     never DELETE or UPDATE existing rows.
+ *
+ * Output: each client gets at most ONE new preference row per rollup, of the
+ * form "本周 outcome 摘要: confirmed=X reversed=Y; FDE 反馈摘要: done=A
+ * dismissed=B irrelevant=C; 建议 …". Lightweight, deterministic, no LLM calls.
+ */
+
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { savePreference } from './service'
+
+// ── Public types ─────────────────────────────────────────────────────────────
+
+export interface RollupResult {
+  /** Client UUID being summarised. */
+  client_id: string
+  /** ISO-week key, e.g. '2026-W23'. Idempotency key root. */
+  iso_week: string
+  /** Confirmed outcomes in the window. */
+  outcomes_confirmed: number
+  /** Reversed outcomes in the window. */
+  outcomes_reversed: number
+  /** Inconclusive outcomes in the window. */
+  outcomes_inconclusive: number
+  /** Zhuge workbench feedback counts in the window. */
+  feedback_done: number
+  feedback_dismissed: number
+  feedback_irrelevant: number
+  /** True if a new preference row was inserted (vs. already existed). */
+  preference_inserted: boolean
+  /** Empty unless something went wrong while processing this client. */
+  error: string | null
+}
+
+export interface RollupBatchResult {
+  iso_week: string
+  window_start: string
+  window_end: string
+  clients_processed: number
+  preferences_inserted: number
+  errors: number
+  results: RollupResult[]
+}
+
+// ── Public API ───────────────────────────────────────────────────────────────
+
+/**
+ * Run the weekly rollup for every client that had **either** a flywheel
+ * outcome or a zhuge feedback event in the window. Clients with no signal
+ * are skipped — empty rollups are noise.
+ */
+export async function runWeeklyLearningRollup(
+  supabase: SupabaseClient,
+  options: { now?: Date } = {},
+): Promise<RollupBatchResult> {
+  const now = options.now ?? new Date()
+  const { weekStart, weekEnd, isoWeek } = computeWeekWindow(now)
+
+  // 1. Discover the set of clients with signal in the window. Two source
+  //    tables; union the IDs so we cover both positive (outcomes) and
+  //    negative (feedback dismissals) signal.
+  const [outcomeClientsRes, feedbackClientsRes] = await Promise.all([
+    supabase
+      .from('flywheel_outcomes')
+      .select('client_id')
+      .gte('computed_at', weekStart.toISOString())
+      .lt('computed_at', weekEnd.toISOString()),
+    supabase
+      .from('zhuge_feedback_events')
+      .select('client_id')
+      .gte('created_at', weekStart.toISOString())
+      .lt('created_at', weekEnd.toISOString()),
+  ])
+
+  const clientIds = new Set<string>()
+  for (const row of outcomeClientsRes.data ?? []) {
+    if (typeof row.client_id === 'string') clientIds.add(row.client_id)
+  }
+  for (const row of feedbackClientsRes.data ?? []) {
+    if (typeof row.client_id === 'string') clientIds.add(row.client_id)
+  }
+
+  const results: RollupResult[] = []
+  let preferencesInserted = 0
+  let errors = 0
+
+  for (const clientId of Array.from(clientIds)) {
+    try {
+      const r = await rollupOneClient(supabase, clientId, weekStart, weekEnd, isoWeek)
+      results.push(r)
+      if (r.preference_inserted) preferencesInserted++
+      if (r.error) errors++
+    } catch (err) {
+      errors++
+      results.push({
+        client_id: clientId,
+        iso_week: isoWeek,
+        outcomes_confirmed: 0,
+        outcomes_reversed: 0,
+        outcomes_inconclusive: 0,
+        feedback_done: 0,
+        feedback_dismissed: 0,
+        feedback_irrelevant: 0,
+        preference_inserted: false,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
+  return {
+    iso_week: isoWeek,
+    window_start: weekStart.toISOString(),
+    window_end: weekEnd.toISOString(),
+    clients_processed: results.length,
+    preferences_inserted: preferencesInserted,
+    errors,
+    results,
+  }
+}
+
+// ── Per-client rollup ────────────────────────────────────────────────────────
+
+async function rollupOneClient(
+  supabase: SupabaseClient,
+  clientId: string,
+  windowStart: Date,
+  windowEnd: Date,
+  isoWeek: string,
+): Promise<RollupResult> {
+  const startIso = windowStart.toISOString()
+  const endIso = windowEnd.toISOString()
+  const dedupKey = `${isoWeek}::${clientId}`
+
+  // ── 1. Idempotency check — if we already wrote a rollup for this week,
+  //      bail out with a no-op (still report the counts so callers see the
+  //      window covered something).
+  const { data: existing } = await supabase
+    .from('client_learned_preferences')
+    .select('id')
+    .eq('client_id', clientId)
+    .eq('source', 'auto_extracted')
+    .eq('extracted_from_table', 'learning_rollup_weekly')
+    .eq('extracted_from_id', dedupKey)
+    .limit(1)
+
+  const alreadyDone = (existing?.length ?? 0) > 0
+
+  // ── 2. Aggregate outcomes in window.
+  const [outcomesRes, feedbackRes] = await Promise.all([
+    supabase
+      .from('flywheel_outcomes')
+      .select('verdict')
+      .eq('client_id', clientId)
+      .gte('computed_at', startIso)
+      .lt('computed_at', endIso),
+    supabase
+      .from('zhuge_feedback_events')
+      .select('feedback_state')
+      .eq('client_id', clientId)
+      .gte('created_at', startIso)
+      .lt('created_at', endIso),
+  ])
+
+  let confirmed = 0
+  let reversed = 0
+  let inconclusive = 0
+  for (const o of outcomesRes.data ?? []) {
+    if (o.verdict === 'confirmed') confirmed++
+    else if (o.verdict === 'reversed') reversed++
+    else if (o.verdict === 'inconclusive') inconclusive++
+  }
+
+  let done = 0
+  let dismissed = 0
+  let irrelevant = 0
+  for (const f of feedbackRes.data ?? []) {
+    if (f.feedback_state === 'done') done++
+    else if (f.feedback_state === 'dismissed') dismissed++
+    else if (f.feedback_state === 'irrelevant') irrelevant++
+  }
+
+  const totalOutcomes = confirmed + reversed + inconclusive
+  const totalFeedback = done + dismissed + irrelevant
+
+  // ── 3. No-signal short-circuit. Don't emit a "0/0/0" preference: that
+  //      poisons the prompt with noise.
+  if (totalOutcomes === 0 && totalFeedback === 0) {
+    return {
+      client_id: clientId,
+      iso_week: isoWeek,
+      outcomes_confirmed: confirmed,
+      outcomes_reversed: reversed,
+      outcomes_inconclusive: inconclusive,
+      feedback_done: done,
+      feedback_dismissed: dismissed,
+      feedback_irrelevant: irrelevant,
+      preference_inserted: false,
+      error: null,
+    }
+  }
+
+  if (alreadyDone) {
+    return {
+      client_id: clientId,
+      iso_week: isoWeek,
+      outcomes_confirmed: confirmed,
+      outcomes_reversed: reversed,
+      outcomes_inconclusive: inconclusive,
+      feedback_done: done,
+      feedback_dismissed: dismissed,
+      feedback_irrelevant: irrelevant,
+      preference_inserted: false,
+      error: null,
+    }
+  }
+
+  // ── 4. Compose a short Chinese summary that will land in
+  //      client_learned_preferences.content. The next agent run reads this via
+  //      loadMemoryForClient → formatMemoryForPrompt and treats it as context.
+  const content = composeSummaryLine({
+    isoWeek,
+    confirmed,
+    reversed,
+    inconclusive,
+    done,
+    dismissed,
+    irrelevant,
+  })
+
+  // Confidence: higher when we saw more signal, capped at 0.85 so a single
+  // noisy week never trumps long-running fde_annotation preferences (which
+  // default to confidence_score=1.0).
+  const signal = totalOutcomes + totalFeedback
+  const confidence = Math.min(0.85, 0.5 + Math.log10(1 + signal) * 0.15)
+
+  const saved = await savePreference(supabase, {
+    client_id: clientId,
+    preference_type: 'other',
+    content,
+    source: 'auto_extracted',
+    confidence_score: Number(confidence.toFixed(2)),
+    extracted_from_table: 'learning_rollup_weekly',
+    extracted_from_id: dedupKey,
+  })
+
+  return {
+    client_id: clientId,
+    iso_week: isoWeek,
+    outcomes_confirmed: confirmed,
+    outcomes_reversed: reversed,
+    outcomes_inconclusive: inconclusive,
+    feedback_done: done,
+    feedback_dismissed: dismissed,
+    feedback_irrelevant: irrelevant,
+    preference_inserted: saved != null,
+    error: saved == null ? 'savePreference returned null' : null,
+  }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Compose the one-line summary stored in client_learned_preferences.content.
+ *
+ * Format example:
+ *   "[2026-W23] outcome 摘要: confirmed=3 reversed=1 inconclusive=2;
+ *    工作台反馈: done=5 dismissed=2 irrelevant=1;
+ *    建议: 优先保留已验证模式 (3 个 confirmed), FDE 标记 2 条无效建议待回访。"
+ */
+function composeSummaryLine(input: {
+  isoWeek: string
+  confirmed: number
+  reversed: number
+  inconclusive: number
+  done: number
+  dismissed: number
+  irrelevant: number
+}): string {
+  const outcomePart = `outcome 摘要: confirmed=${input.confirmed} reversed=${input.reversed} inconclusive=${input.inconclusive}`
+  const feedbackPart = `工作台反馈: done=${input.done} dismissed=${input.dismissed} irrelevant=${input.irrelevant}`
+
+  const hints: string[] = []
+  if (input.confirmed > 0) {
+    hints.push(`优先保留已验证模式 (${input.confirmed} 个 confirmed)`)
+  }
+  if (input.reversed >= 2) {
+    hints.push(`回查 ${input.reversed} 个反向 outcome 是否方向错误`)
+  }
+  if (input.dismissed + input.irrelevant >= 3) {
+    hints.push(`FDE 标记 ${input.dismissed + input.irrelevant} 条无效建议, 下次降权`)
+  }
+  if (input.done >= 3) {
+    hints.push(`FDE 完成 ${input.done} 条建议, 可加权同类推荐`)
+  }
+  const hintPart = hints.length > 0 ? `建议: ${hints.join(', ')}` : '建议: 信号不足, 继续观察'
+
+  return `[${input.isoWeek}] ${outcomePart}; ${feedbackPart}; ${hintPart}`
+}
+
+/**
+ * Compute the ISO-week window for `now`. Window covers the previous Monday
+ * 00:00 UTC through this Monday 00:00 UTC (exclusive). This matches the
+ * `agent-learning-rollup` cron schedule (`0 7 * * 1` = Monday 07:00 UTC), so
+ * the cron always summarises the **just-completed** ISO week.
+ *
+ * isoWeek is the year-week string the previous Monday belongs to, e.g.
+ * '2026-W23'.
+ *
+ * Exported for unit tests so they can pin a deterministic week.
+ */
+export function computeWeekWindow(now: Date): {
+  weekStart: Date
+  weekEnd: Date
+  isoWeek: string
+} {
+  // Find the most recent Monday 00:00 UTC at-or-before `now`.
+  const dayUtc = now.getUTCDay() // 0=Sun .. 6=Sat
+  // Convert so Monday=0, Sun=6:
+  const offsetToMonday = (dayUtc + 6) % 7
+  const thisMonday = new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() - offsetToMonday,
+    0, 0, 0, 0,
+  ))
+  // The window covers the PREVIOUS week (Mon-prev → Mon-this).
+  const weekStart = new Date(thisMonday.getTime() - 7 * 24 * 60 * 60 * 1000)
+  const weekEnd = thisMonday
+
+  const isoWeek = formatIsoWeek(weekStart)
+  return { weekStart, weekEnd, isoWeek }
+}
+
+/**
+ * Format a UTC date as ISO-week string `YYYY-Www`.
+ * Follows ISO 8601: week 1 is the week containing the first Thursday.
+ */
+export function formatIsoWeek(d: Date): string {
+  // Algorithm per https://en.wikipedia.org/wiki/ISO_week_date
+  const target = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
+  const dayNum = target.getUTCDay() || 7 // Mon=1..Sun=7
+  target.setUTCDate(target.getUTCDate() + 4 - dayNum) // shift to Thursday of week
+  const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1))
+  const weekNum = Math.ceil(((target.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7)
+  return `${target.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`
+}

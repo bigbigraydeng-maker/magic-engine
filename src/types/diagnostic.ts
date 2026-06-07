@@ -377,4 +377,13 @@ export interface PrescriptionContent {
   phases: PrescriptionPhase[]
   kpi_targets: KPITarget[]
   budget_allocation: BudgetAllocationItem[]
+  /**
+   * DAPE W3 — 处方大白话叙事（spec §2.2/§2.3）。
+   * 华佗在跑完处方生成后给客户一段 200–400 字的中文总结，回答三个问题：
+   *   1. 当前最大的问题是什么（一句话）
+   *   2. 处方分几个阶段怎么解决（按 phase 列举）
+   *   3. 阶段一最该先动的 1–2 件事（具体到 action title）
+   * 可选 — 旧数据不带此字段，UI/序列化要兜底为空字符串。
+   */
+  narrative?: string
 }

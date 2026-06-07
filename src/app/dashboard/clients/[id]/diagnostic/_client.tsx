@@ -12,10 +12,20 @@ import type { DiagnosticRun, DiagnosticFinding, DiagnosticDimension } from '@/ty
 // Types
 // ---------------------------------------------------------------------------
 
+interface NarrativeRow {
+  id: string
+  kind: 'competitor_market_structure' | 'competitor_benchmarking_path' | 'dimension_narrative' | 'score_explanation' | 'market_context'
+  dimension: string | null
+  narrative_md: string
+  generated_at: string
+}
+
 interface LatestResponse {
   success: boolean
   run: DiagnosticRun
   findings: DiagnosticFinding[]
+  /** DAPE W3 — synthesis narratives loaded alongside findings */
+  narratives?: NarrativeRow[]
   error?: string
 }
 
@@ -78,6 +88,146 @@ function EmptyState({ onRun, isRunning }: { onRun: () => void; isRunning: boolea
   )
 }
 
+/**
+ * DAPE W3 — AI 大白话叙事卡（Synthesis narratives）。
+ *
+ * 渲染优先级（最相关 → 最次要）：
+ *   1. score_explanation (target='overall') — 总分一句话
+ *   2. dimension_narrative — 每个维度的中文大白话
+ *   3. market_context — 行业上下文（无 dimension，运行时可选）
+ *   4. competitor_market_structure / competitor_benchmarking_path — 竞品段
+ *
+ * 默认折叠维度卡（避免一屏全部展开），点 chevron 展开。Overall + market_context
+ * 默认展开，因为是高优先信息。
+ *
+ * 客户/PM 视角：先看到一句"全局体检结论"，然后按需点开维度。
+ * 老板看 PDF 等价于读完整报告（report-generator 已渲染相同 narratives）。
+ */
+function NarrativeSection({
+  narratives,
+  clientId,
+  runId,
+}: {
+  narratives: NarrativeRow[]
+  clientId: string
+  runId: string
+}) {
+  const overall = narratives.find(
+    n => n.kind === 'score_explanation' && n.dimension === 'overall',
+  )
+  const dimensionNarratives = narratives
+    .filter(n => n.kind === 'dimension_narrative')
+    .sort((a, b) => (a.dimension ?? '').localeCompare(b.dimension ?? ''))
+  const market = narratives.find(n => n.kind === 'market_context')
+  const competitorStructure = narratives.find(n => n.kind === 'competitor_market_structure')
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
+          AI 解读（大白话）
+        </h2>
+        <Link
+          href={`/dashboard/clients/${clientId}/diagnostic/report?run_id=${runId}`}
+          className="text-xs text-indigo-500 hover:text-indigo-700 hover:underline"
+        >
+          查看完整报告 →
+        </Link>
+      </div>
+
+      <div className="space-y-3">
+        {overall && (
+          <NarrativeCard
+            title="综合结论"
+            body={overall.narrative_md}
+            defaultOpen
+            accent="indigo"
+          />
+        )}
+
+        {dimensionNarratives.map(n => (
+          <NarrativeCard
+            key={n.id}
+            title={(n.dimension && DIMENSION_LABELS[n.dimension as DiagnosticDimension]) ?? n.dimension ?? '其他'}
+            body={n.narrative_md}
+          />
+        ))}
+
+        {market && (
+          <NarrativeCard
+            title="行业背景"
+            body={market.narrative_md}
+            defaultOpen={dimensionNarratives.length === 0}
+            accent="amber"
+          />
+        )}
+
+        {competitorStructure && (
+          <NarrativeCard
+            title="竞品格局"
+            body={competitorStructure.narrative_md}
+          />
+        )}
+      </div>
+    </section>
+  )
+}
+
+/**
+ * Strip leading H2 / ## heading from a synthesis narrative — the dimension
+ * narrator emits "## SEO\n\n…" but our card already shows a Chinese label
+ * in the header, so showing both is duplicate noise.
+ */
+function stripLeadingHeading(md: string): string {
+  return md.replace(/^\s*#{1,3}\s+[^\n]+\n+/, '').trim()
+}
+
+function NarrativeCard({
+  title,
+  body,
+  defaultOpen = false,
+  accent = 'gray',
+}: {
+  title: string
+  body: string
+  defaultOpen?: boolean
+  accent?: 'indigo' | 'amber' | 'gray'
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  const accentClass =
+    accent === 'indigo'
+      ? 'border-indigo-200 bg-indigo-50/50'
+      : accent === 'amber'
+        ? 'border-amber-200 bg-amber-50/40'
+        : 'border-gray-200 bg-white'
+  const cleaned = stripLeadingHeading(body)
+
+  return (
+    <div className={`rounded-xl border ${accentClass}`}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-3 text-left"
+        aria-expanded={open}
+      >
+        <span className="text-sm font-semibold text-gray-800">{title}</span>
+        <svg
+          className={`w-4 h-4 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <div className="px-4 pb-4 -mt-1 text-sm text-gray-700 leading-relaxed whitespace-pre-line">
+          {cleaned}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function DimensionFilterTabs({
   active,
   onChange,
@@ -119,6 +269,7 @@ export function DiagnosticClient() {
 
   const [run, setRun] = useState<DiagnosticRun | null>(null)
   const [findings, setFindings] = useState<DiagnosticFinding[]>([])
+  const [narratives, setNarratives] = useState<NarrativeRow[]>([])
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set())
   const [pageLoading, setPageLoading] = useState(true)
   const [pageError, setPageError] = useState<string | null>(null)
@@ -164,6 +315,7 @@ export function DiagnosticClient() {
       if (data.success) {
         setRun(data.run)
         setFindings(data.findings ?? [])
+        setNarratives(data.narratives ?? [])
       }
     } catch (e) {
       setPageError(e instanceof Error ? e.message : '加载失败')
@@ -390,6 +542,11 @@ export function DiagnosticClient() {
               </div>
             )}
           </section>
+        )}
+
+        {/* DAPE W3 — AI 大白话叙事 (synthesis narratives) */}
+        {run && narratives.length > 0 && (
+          <NarrativeSection narratives={narratives} clientId={clientId} runId={run.id} />
         )}
 
         {/* Findings */}
