@@ -1,6 +1,7 @@
 'use client'
 
 import React from 'react'
+import Link from 'next/link'
 import type { DiagnosticFinding, DiagnosticSeverity, FixType } from '@/types/diagnostic'
 
 // ---------------------------------------------------------------------------
@@ -100,14 +101,14 @@ export function DiagnosticFindingCard({
         {/* Right-aligned action cluster: configHref CTA (S09) + dismiss */}
         <div className="flex items-center gap-2 shrink-0">
           {configHref && (
-            <a
+            <Link
               data-testid="config-cta"
               href={configHref}
               title="跳转到 Settings 完成该维度配置"
               className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700 hover:bg-indigo-100 transition-colors"
             >
               立即配置 →
-            </a>
+            </Link>
           )}
           {onDismiss && (
             <button
