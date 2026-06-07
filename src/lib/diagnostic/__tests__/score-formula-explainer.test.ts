@@ -2,8 +2,10 @@
  * Tests for score-formula-explainer — single source of truth for the
  * "为什么是 X 分?" content surfaced under each diagnostic dimension card.
  *
- * These are characterisation tests: the formula strings are public-facing
- * copy that flows through to the FDE UI, so changes must be deliberate.
+ * These are characterisation tests with full-string `toBe` assertions: the
+ * formula copy ships to FDE/customer eyeballs, so any change is intentional
+ * and must update this test in lockstep. Loose regex matches (the original
+ * /50/ style) let weight drifts (50→40) pass undetected — fixed in魏征 H1.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -28,22 +30,52 @@ describe('getDimensionFormula', () => {
     expect(card.weightInOverall).toBe(DIMENSION_WEIGHTS[dim])
   })
 
-  it('seo formula mentions the three weighted ingredients matching seo-collector', () => {
-    const seo = getDimensionFormula('seo').formula
-    expect(seo).toMatch(/50/)
-    expect(seo).toMatch(/25/)
-    expect(seo).toMatch(/关键词|coverage/i)
-    expect(seo).toMatch(/权威|authority/i)
-    expect(seo).toMatch(/技术|technical/i)
+  // Full-string assertions — every byte ships to UI, treat as protected copy.
+  // Mirror seo-collector.ts: KW 50 + Authority 25 + Technical 25.
+  it('seo formula matches seo-collector verbatim', () => {
+    expect(getDimensionFormula('seo').formula).toBe(
+      'SEO = 50 × 关键词覆盖率 + 25 × 域名权威(0–100) + 25 × 技术健康(0–100)',
+    )
   })
 
-  it('reputation formula matches A1 weights (0.70 / 0.30 / cap 30)', () => {
-    const rep = getDimensionFormula('reputation').formula
-    expect(rep).toMatch(/70/)
-    expect(rep).toMatch(/30/)
+  // Mirror reputation-collector.ts A1 weights (0.70 rating + 0.30 reviews cap 30).
+  it('reputation formula matches A1 weights verbatim', () => {
+    expect(getDimensionFormula('reputation').formula).toBe(
+      '口碑 = 70 × (评分 / 5) + 30 × min(评论数, 30) / 30',
+    )
   })
 
-  it('competitor formula explicitly says null when < 3 competitors', () => {
+  // Mirror ads-collector.ts (platform 0.40 + volume 0.35 + creative 0.25).
+  it('ads formula matches ads-collector verbatim', () => {
+    expect(getDimensionFormula('ads').formula).toBe(
+      '广告 = 40 × 平台多样性 + 35 × 广告体量 + 25 × 创意多样性',
+    )
+  })
+
+  // Mirror social-collector.ts: per-platform avg(0.40×freq + 0.40×engage) +
+  // min(20, (n-1)*10) diversity bonus. Previously mis-stated as
+  // "(发文频率分 + 互动率分) / 2" — 子牙 social explainer 修正.
+  it('social formula matches social-collector verbatim', () => {
+    expect(getDimensionFormula('social').formula).toBe(
+      '社媒 = 平均(每平台 0.40×发文频率分 + 0.40×互动率分) + min(20, (平台数-1)×10) 多平台奖励',
+    )
+  })
+
+  // Mirror ai-visibility-collector.ts: citation rate.
+  it('ai_visibility formula matches collector verbatim', () => {
+    expect(getDimensionFormula('ai_visibility').formula).toBe(
+      'AI 可见度 = 100 × 被 AI 引用问句数 / 总追踪问句数',
+    )
+  })
+
+  // Mirror competitor-collector.ts: client/comp avg traffic ratio.
+  it('competitor formula matches competitor-collector verbatim', () => {
+    expect(getDimensionFormula('competitor').formula).toBe(
+      '竞品 = 100 × 客户自然流量 / 竞品自然流量均值（封顶 100）',
+    )
+  })
+
+  it('competitor tierHint explicitly says null when < 3 competitors', () => {
     const comp = getDimensionFormula('competitor')
     expect(comp.tierHint).toMatch(/无数据|未跑|未配置/)
   })
@@ -80,5 +112,43 @@ describe('OVERALL_WEIGHTING_NOTE', () => {
   it('includes the tier band thresholds so the UI can quote them verbatim', () => {
     expect(OVERALL_WEIGHTING_NOTE).toContain(String(SCORE_THRESHOLDS.green))
     expect(OVERALL_WEIGHTING_NOTE).toContain(String(SCORE_THRESHOLDS.amber))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 魏征 H3: DIMENSION_WEIGHTS invariants — constants.ts comment says weights
+// "必须和 = 1.0" but until now nothing enforced it. If someone bumps reputation
+// from 0.10 → 0.20 without rebalancing, computeOverallScore renormalises but
+// the OVERALL_WEIGHTING_NOTE silently lies. Guard both invariants here.
+// ---------------------------------------------------------------------------
+
+describe('DIMENSION_WEIGHTS invariants', () => {
+  it('all weights sum to 1.0 (within float epsilon)', () => {
+    const sum = Object.values(DIMENSION_WEIGHTS).reduce((a, b) => a + b, 0)
+    expect(Math.abs(sum - 1.0)).toBeLessThan(0.0001)
+  })
+
+  it('every dimension has a weight in [0, 1]', () => {
+    for (const dim of ALL_DIMS) {
+      const w = DIMENSION_WEIGHTS[dim]
+      expect(w).toBeGreaterThanOrEqual(0)
+      expect(w).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it.each(ALL_DIMS)('getDimensionFormula("%s").weightInOverall mirrors constants', dim => {
+    expect(getDimensionFormula(dim).weightInOverall).toBe(DIMENSION_WEIGHTS[dim])
+  })
+
+  it('OVERALL_WEIGHTING_NOTE percentages sum to ~100%', () => {
+    // Parse "seo 35% · reputation 10% ..." from the note and add up.
+    const matches = OVERALL_WEIGHTING_NOTE.match(/\d+%/g) ?? []
+    // Only the 6 dimension weights, not the SCORE_THRESHOLDS bands.
+    const dimensionPcts = matches
+      .map(m => parseInt(m, 10))
+      .filter(n => n <= 50)  // tier-band thresholds (70/40) are >50 → excluded
+    const sum = dimensionPcts.reduce((a, b) => a + b, 0)
+    expect(sum).toBeGreaterThanOrEqual(98)  // rounding slack
+    expect(sum).toBeLessThanOrEqual(102)
   })
 })

@@ -51,9 +51,9 @@ const FORMULAS: Record<DiagnosticDimension, Omit<DimensionFormulaCard, 'weightIn
     tierHint: `多平台同时投 + 体量充足 + 多种创意格式 → 高分；单平台 / 少量广告 → 低分`,
   },
   social: {
-    formula: '社媒 = ( 发文频率分(0–100) + 互动率分(0–100) ) / 2',
+    formula: '社媒 = 平均(每平台 0.40×发文频率分 + 0.40×互动率分) + min(20, (平台数-1)×10) 多平台奖励',
     dataSource: 'Apify 社媒 scraper（IG/FB/TikTok 公共贴文）+ Settings 已绑定的 handle',
-    tierHint: `每周 ≥6 帖 + 互动率 ≥3% → 健康；账号未绑 / 长期断更 → 无数据`,
+    tierHint: `每平台每月 ≥6 帖 + 互动率 ≥3% → 健康；账号未绑 / 长期断更 → 无数据`,
   },
   reputation: {
     formula: '口碑 = 70 × (评分 / 5) + 30 × min(评论数, 30) / 30',
