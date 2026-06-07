@@ -2175,10 +2175,10 @@ website_publish_jobs
 
 | 任务 | 内容 | 优先级 |
 |------|------|--------|
-| ⬜ **P14.D.1** | `/dashboard/keywords` 手动查词页面切到 DataForSEO（`/api/semrush/*` 路由全部重写或 redirect 到 `/api/dataforseo/*`） | 🔴 |
+| ✅ **P14.D.1** | `/dashboard/keywords` 切到 `/api/keyword-intelligence/*`（厂商中立封装名，非 dataforseo；底层早已是 DataForSEO） | 🔴 |
 | ⬜ **P14.D.2** | 验证或删除 `keywords` 表（如果真死表 → drop；如果有用 → 加 DataForSEO 写入路径） | 🟡 |
 | ⬜ **P14.D.3** | 变量重命名：`includeSemrush` → `includeKeywordData`；注释清理 | 🟢 |
-| ⬜ **P14.D.4** | `src/app/api/semrush/*` 路由删除（确认无外部调用后） | 🟢 |
+| ✅ **P14.D.4** | `src/app/api/semrush/*` 已 git mv 到 `keyword-intelligence/*`（确认仅 keywords 页 3 处调用） | 🟢 |
 | ⬜ **P14.D.5** | 环境变量保留 `SEMRUSH_*`（按 CLAUDE.md 规则，env var 用真实命名）但代码不再读取 | 🟢 |
 
 ---

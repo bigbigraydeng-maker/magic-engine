@@ -305,9 +305,9 @@ Body（JSON）:
 ## 八、数据流向图（完整）
 
 ```
-SEMrush API
+DataForSEO API
     ↓
-/api/semrush/related-keywords
+/api/keyword-intelligence/related-keywords
     ↓
 Supabase: keywords 表
     ↓ 手动点击 "↑ Airtable"
@@ -340,7 +340,7 @@ Airtable: Content Calendar（Status: Published）
 
 **后端 API（全部已开发）：**
 - `/api/clients` — 客户管理 CRUD
-- `/api/semrush/related-keywords` — SEMrush 关键词抓取
+- `/api/keyword-intelligence/related-keywords` — DataForSEO 关键词抓取
 - `/api/content/route-a` — 关键词 → 内容生成
 - `/api/content/route-b` — 病毒视频 → 内容改写（框架完成）
 - `/api/content/route-c` — Master Brief + Topic → 内容生成
