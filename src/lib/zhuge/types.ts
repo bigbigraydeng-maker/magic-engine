@@ -18,6 +18,71 @@ import type { MemoryContext } from '@/lib/memory/types'
 
 export type { Client, DiagnosticDimension, DiagnosticFinding, ExecutionMode, MemoryContext }
 
+// ── DAPE W2 prompt mode (dual-track business) ─────────────────────────────────
+
+/**
+ * DAPE W2 (spec §1.5.6 + §2.x.6) — Dual prompt mode for dual-track business.
+ *
+ * - 'short' = Self-Serve client path. Cheap, fast, small token budget.
+ *   Only client-level memory injected (Layer 1).
+ * - 'long'  = FDE client path. Deep, expensive, full memory.
+ *   Client-level + industry-level + global baseline injected (Layers 1+2+3).
+ *
+ * When undefined, defaults to 'long' (FDE behaviour) to preserve backward
+ * compatibility with callers that haven't been updated yet.
+ */
+export type ZhugePromptMode = 'short' | 'long'
+
+/**
+ * DAPE W2 — Industry-level memory snapshot (Layer 2).
+ *
+ * Lightweight summary derived from industry_benchmarks rows for the client's
+ * sub-industry. Used by zhuge conductor + luban-router to anchor recommendations
+ * against real peer performance instead of fabricated targets.
+ */
+export interface IndustryBenchmarkSummary {
+  sub_industry: string | null
+  /** Per-dimension snapshot (only dimensions present in industry_benchmarks). */
+  dimensions: Array<{
+    dimension: 'seo' | 'social' | 'reputation' | 'ai_visibility'
+    score_p50: number | null
+    score_p75: number | null
+    score_p90: number | null
+    typical_monthly_budget_aud: number | null
+    confidence: number
+    source: string | null
+  }>
+  /** True when at least one dimension row was found. */
+  has_content: boolean
+}
+
+/**
+ * DAPE W2 — Self-feedback snapshot (zhuge's own feedback closed loop).
+ *
+ * Recent zhuge_feedback_events rows for the client. Lets the proactive
+ * lens (and the conductor) avoid resurrecting suggestions the client
+ * already dismissed or marked irrelevant.
+ */
+export interface ZhugeFeedbackSummary {
+  /** True when at least one event row was loaded. */
+  has_content: boolean
+  /** Total events sampled (capped). */
+  total: number
+  /** Counts per feedback_state in the sample. */
+  state_counts: { done: number; dismissed: number; irrelevant: number }
+  /** Suggestion keys the client repeatedly dismissed (≥2 dismissals). */
+  dismissed_keys: string[]
+  /** Suggestion keys the client repeatedly marked irrelevant (≥2 irrelevant). */
+  irrelevant_keys: string[]
+  /** Most recent N events (raw rows for prompt injection). */
+  recent_events: Array<{
+    suggestion_key: string
+    suggestion_title: string
+    feedback_state: 'done' | 'dismissed' | 'irrelevant'
+    created_at: string
+  }>
+}
+
 // ── Diagnostic scores snapshot ────────────────────────────────────────────────
 
 /** Flattened 0–100 score per dimension; null = data unavailable / dimension skipped. */
@@ -111,6 +176,21 @@ export interface ZhugeInput {
   businessContext: BusinessContext
   /** Phase 23 L3 记忆层注入（可选 — 无记忆时行为与旧版完全一致）。 */
   memoryContext?: MemoryContext
+  /**
+   * DAPE W2 — Layer 2 行业级 memory（industry_benchmarks 汇总）。
+   * Only used in long mode; passed-through harmlessly in short mode.
+   */
+  industryBenchmarkSummary?: IndustryBenchmarkSummary
+  /**
+   * DAPE W2 — zhuge 自身的反馈学习闭环（zhuge_feedback_events）。
+   * Used by conductor to skip recommendations the client already dismissed.
+   */
+  feedbackSummary?: ZhugeFeedbackSummary
+  /**
+   * DAPE W2 — Prompt mode. Defaults to 'long' when omitted (FDE behaviour,
+   * backward-compatible). Self-Serve callers should pass 'short' to save tokens.
+   */
+  promptMode?: ZhugePromptMode
 }
 
 /** Structured work order produced by the conductor. */

@@ -22,11 +22,17 @@ import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getAnthropicClient, MODEL_HAIKU } from '@/lib/anthropic/client'
 import { jsonrepair } from 'jsonrepair'
+import { loadZhugeFeedbackSummary, formatZhugeFeedbackPrompt } from './memory-loader'
 import type { AnomalySeverity } from '@/lib/flywheel/anomaly/types'
+import type { ZhugePromptMode, ZhugeFeedbackSummary } from './types'
 
 // Haiku pricing (per million tokens)
 const HAIKU_PRICE_IN  = 0.80
 const HAIKU_PRICE_OUT = 4.00
+
+// DAPE W2 — Output token budget per prompt mode.
+const PROACTIVE_MAX_OUTPUT_TOKENS_LONG = 1024
+const PROACTIVE_MAX_OUTPUT_TOKENS_SHORT = 512
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -76,9 +82,9 @@ export interface BatchProactiveResult {
   results: ProactiveResult[]
 }
 
-// ── System prompt ─────────────────────────────────────────────────────────────
+// ── System prompts (DAPE W2 dual-mode) ────────────────────────────────────────
 
-const SYSTEM_PROMPT = `You are 诸葛亮's Proactive Lens — a lightweight decision filter inside Magic Engine.
+const SYSTEM_PROMPT_LONG = `You are 诸葛亮's Proactive Lens — a lightweight decision filter inside Magic Engine.
 
 Your job: given a list of automatically detected metric anomalies for a client, decide which ones warrant creating a proactive task, and what that task should be.
 
@@ -86,6 +92,7 @@ Your job: given a list of automatically detected metric anomalies for a client, 
 - "high" severity anomalies → almost always act (should_act: true), unless the data is clearly noisy (e.g. delta_pct only slightly over threshold, reference_value is zero or near-zero)
 - "medium" severity → act only if the anomaly is sustained and actionable
 - dismiss if: the metric_key is unfamiliar, the values seem nonsensical, or we already have an obvious structural reason (new client, no data history)
+- Self-Feedback Loop (when provided): if a similar suggestion_key was repeatedly DISMISSED by this client, dismiss the new signal with dismiss_reason="recurrent_dismissal_pattern"
 - Never create duplicate or vague tasks — action_type must be a concrete snake_case slug
 
 ## Output format
@@ -100,18 +107,45 @@ Each element:
   "expected_impact": "low" | "medium" | "high"
 }`
 
+const SYSTEM_PROMPT_SHORT = `You are 诸葛亮's Proactive Lens (self-serve mode). Keep decisions tight.
+
+For each metric anomaly, decide should_act (true/false). Default to false for medium severity. Output JSON array only.
+
+Schema:
+{
+  "signal_id": "<string>",
+  "should_act": true | false,
+  "dismiss_reason": "<string or omit>",
+  "action_type": "<snake_case slug — required when should_act=true>",
+  "action_description": "<1 short Chinese sentence — required when should_act=true>",
+  "expected_impact": "low" | "medium" | "high"
+}`
+
+function pickSystemPrompt(mode: ZhugePromptMode | undefined): string {
+  return mode === 'short' ? SYSTEM_PROMPT_SHORT : SYSTEM_PROMPT_LONG
+}
+
 // ── Prompt builder ─────────────────────────────────────────────────────────────
 
-function buildUserPrompt(clientName: string, signals: FreshSignal[]): string {
+function buildUserPrompt(
+  clientName: string,
+  signals: FreshSignal[],
+  feedbackSummary?: ZhugeFeedbackSummary,
+  mode: ZhugePromptMode = 'long',
+): string {
   const lines = signals.map((s) =>
     `- id=${s.id} flywheel=${s.flywheel} rule=${s.rule_id} severity=${s.severity} ` +
     `delta_pct=${s.delta_pct.toFixed(1)}% current=${s.current_value} reference=${s.reference_value} ` +
     `description="${s.description}"`
   )
+
+  // DAPE W2 — long mode injects zhuge_feedback_events. Short mode skips it to save tokens.
+  const feedbackSection = mode === 'long' ? formatZhugeFeedbackPrompt(feedbackSummary) : ''
+
   return `Client: ${clientName}
 Anomaly signals (${signals.length} fresh):
 ${lines.join('\n')}
-
+${feedbackSection}
 Evaluate each signal and return your decisions as a JSON array.`
 }
 
@@ -147,8 +181,11 @@ function parseDecisions(raw: string, signalIds: Set<string>): ProactiveDecision[
 async function processClient(
   clientId: string,
   signals: FreshSignal[],
-  errors: string[]
+  errors: string[],
+  options: { mode?: ZhugePromptMode } = {},
 ): Promise<{ acted: number; dismissed: number; cost_usd: number }> {
+  const mode: ZhugePromptMode = options.mode ?? 'long'
+
   // Fetch client name for the prompt
   const { data: clientRow } = await supabaseAdmin
     .from('clients')
@@ -158,9 +195,29 @@ async function processClient(
 
   const clientName = (clientRow as { name?: string } | null)?.name ?? clientId
 
+  // DAPE W2 — Load zhuge's own feedback loop (memory of past suggestions).
+  // Long mode injects it into the prompt; short mode still loads it for the
+  // pre-LLM filter below so we cheaply skip recurring-dismissed signals even in short mode.
+  const feedbackSummary = await loadZhugeFeedbackSummary(supabaseAdmin, clientId)
+
+  // DAPE W2 — observable memory hit logging.
+  console.info('[zhuge/proactive] memory hits', JSON.stringify({
+    client_id: clientId,
+    mode,
+    feedback_loop: feedbackSummary.has_content,
+    feedback_total: feedbackSummary.total,
+    feedback_state_counts: feedbackSummary.state_counts,
+    dismissed_keys_count: feedbackSummary.dismissed_keys.length,
+    irrelevant_keys_count: feedbackSummary.irrelevant_keys.length,
+    fresh_signals: signals.length,
+  }))
+
   // Call Claude (Haiku — cheap, this runs daily)
   const signalIds = new Set(signals.map((s) => s.id))
-  const userPrompt = buildUserPrompt(clientName, signals)
+  const userPrompt = buildUserPrompt(clientName, signals, feedbackSummary, mode)
+  const systemPrompt = pickSystemPrompt(mode)
+  const maxTokens =
+    mode === 'short' ? PROACTIVE_MAX_OUTPUT_TOKENS_SHORT : PROACTIVE_MAX_OUTPUT_TOKENS_LONG
 
   let decisions: ProactiveDecision[] = []
   let cost_usd = 0
@@ -169,8 +226,8 @@ async function processClient(
     const anthropic = getAnthropicClient()
     const message = await anthropic.messages.create({
       model: MODEL_HAIKU,
-      max_tokens: 1024,
-      system: SYSTEM_PROMPT,
+      max_tokens: maxTokens,
+      system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
     })
     const text = message.content
@@ -191,6 +248,26 @@ async function processClient(
       dismiss_reason: 'claude_call_failed',
       expected_impact: 'low' as const,
     }))
+  }
+
+  // DAPE W2 — Deterministic safety net: override any should_act=true decision
+  // whose action_type was repeatedly DISMISSED by this client. The LLM should
+  // already respect the feedback loop section in the prompt, but this gives us
+  // a second line of defence in case it ignores the hint.
+  const dismissedActionTypes = new Set(feedbackSummary.dismissed_keys)
+  if (dismissedActionTypes.size > 0) {
+    decisions = decisions.map((d) => {
+      if (d.should_act && d.action_type && dismissedActionTypes.has(d.action_type)) {
+        return {
+          ...d,
+          should_act: false,
+          dismiss_reason: 'recurrent_dismissal_pattern',
+          action_type: undefined,
+          action_description: undefined,
+        }
+      }
+      return d
+    })
   }
 
   // Any signal not in Claude's response: default to dismiss
@@ -314,8 +391,13 @@ async function processClient(
  * Process all fresh anomaly_signals across all clients.
  * Called by POST /api/ai/zhugeliang/proactive (P22.D.2)
  * and the daily cron at /api/cron/anomaly-detector (P22.D.3).
+ *
+ * DAPE W2 — `options.mode` selects short (self-serve) vs long (FDE) prompt
+ * behaviour. Defaults to 'long' to preserve backward-compatibility.
  */
-export async function runProactivePass(): Promise<BatchProactiveResult> {
+export async function runProactivePass(
+  options: { mode?: ZhugePromptMode } = {},
+): Promise<BatchProactiveResult> {
   const errors: string[] = []
 
   // Fetch all fresh signals (up to 200 — avoids runaway queries)
@@ -366,7 +448,7 @@ export async function runProactivePass(): Promise<BatchProactiveResult> {
   for (const [clientId, clientSignals] of Array.from(byClient)) {
     const clientErrors: string[] = []
     try {
-      const { acted, dismissed, cost_usd } = await processClient(clientId, clientSignals, clientErrors)
+      const { acted, dismissed, cost_usd } = await processClient(clientId, clientSignals, clientErrors, { mode: options.mode })
       totalActed += acted
       totalDismissed += dismissed
       totalCost += cost_usd

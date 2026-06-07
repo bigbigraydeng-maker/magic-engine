@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest'
-import { getLubanRoute } from '../luban-router'
+import { describe, it, expect, vi } from 'vitest'
+import { getLubanRoute, recommendActionsForDimension } from '../luban-router'
+import type { IndustryBenchmarkSummary } from '../types'
 
 const CLIENT_ID = 'client-abc-123'
 
@@ -77,5 +78,111 @@ describe('getLubanRoute()', () => {
         expect(r.href).toContain(CLIENT_ID)
       }
     }
+  })
+})
+
+// ── DAPE W2 — recommendActionsForDimension ───────────────────────────────────
+
+const stubSupabase = {} as Parameters<typeof recommendActionsForDimension>[0]
+
+function makeIndustrySummary(overrides: Partial<IndustryBenchmarkSummary> = {}): IndustryBenchmarkSummary {
+  return {
+    sub_industry: 'inbound_tour_operator',
+    has_content: true,
+    dimensions: [
+      { dimension: 'seo',           score_p50: 30, score_p75: 50, score_p90: 70, typical_monthly_budget_aud: 1200, confidence: 0.8, source: 'live' },
+      { dimension: 'social',        score_p50: 20, score_p75: 35, score_p90: 60, typical_monthly_budget_aud: 800,  confidence: 0.7, source: 'cache' },
+      { dimension: 'reputation',    score_p50: 50, score_p75: 70, score_p90: 85, typical_monthly_budget_aud: null, confidence: 0.6, source: 'cache' },
+      { dimension: 'ai_visibility', score_p50: 10, score_p75: 25, score_p90: 50, typical_monthly_budget_aud: null, confidence: 0.5, source: 'cache' },
+    ],
+    ...overrides,
+  }
+}
+
+describe('recommendActionsForDimension()', () => {
+  it('returns empty list when no industry memory available', async () => {
+    const summary = makeIndustrySummary({ has_content: false, dimensions: [] })
+    const recs = await recommendActionsForDimension(stubSupabase, CLIENT_ID, {
+      industryBenchmarkSummary: summary,
+    })
+    expect(recs).toEqual([])
+  })
+
+  it('long mode targets P90 for each dimension', async () => {
+    const recs = await recommendActionsForDimension(stubSupabase, CLIENT_ID, {
+      mode: 'long',
+      industryBenchmarkSummary: makeIndustrySummary(),
+    })
+    expect(recs.length).toBeGreaterThan(0)
+    for (const r of recs) {
+      expect(r.target_percentile).toBe('p90')
+    }
+    const seo = recs.find((r) => r.dimension === 'seo')
+    expect(seo?.target_value).toBe(70)
+  })
+
+  it('short mode targets P75 and skips reputation + caps at 2', async () => {
+    const recs = await recommendActionsForDimension(stubSupabase, CLIENT_ID, {
+      mode: 'short',
+      industryBenchmarkSummary: makeIndustrySummary(),
+    })
+    expect(recs.length).toBeLessThanOrEqual(2)
+    for (const r of recs) {
+      expect(r.target_percentile).toBe('p75')
+      expect(r.dimension).not.toBe('reputation')
+    }
+  })
+
+  it('uses default tool per dimension', async () => {
+    const recs = await recommendActionsForDimension(stubSupabase, CLIENT_ID, {
+      mode: 'long',
+      industryBenchmarkSummary: makeIndustrySummary(),
+    })
+    expect(recs.find((r) => r.dimension === 'seo')?.tool).toBe('luban.generate_blog_post')
+    expect(recs.find((r) => r.dimension === 'ai_visibility')?.tool).toBe('luban.generate_geo_directive')
+    expect(recs.find((r) => r.dimension === 'social')?.tool).toBe('luban.generate_social_post')
+    expect(recs.find((r) => r.dimension === 'reputation')?.tool).toBeNull()
+  })
+
+  it('falls back to P75 when P90 is missing in long mode', async () => {
+    const summary = makeIndustrySummary({
+      dimensions: [
+        { dimension: 'seo', score_p50: 30, score_p75: 50, score_p90: null, typical_monthly_budget_aud: 1200, confidence: 0.8, source: 'live' },
+      ],
+    })
+    const recs = await recommendActionsForDimension(stubSupabase, CLIENT_ID, {
+      mode: 'long',
+      industryBenchmarkSummary: summary,
+    })
+    expect(recs[0].target_value).toBe(50)
+  })
+
+  it('skips dimensions where all percentiles are null', async () => {
+    const summary = makeIndustrySummary({
+      dimensions: [
+        { dimension: 'seo', score_p50: null, score_p75: null, score_p90: null, typical_monthly_budget_aud: null, confidence: 0, source: null },
+      ],
+    })
+    const recs = await recommendActionsForDimension(stubSupabase, CLIENT_ID, {
+      mode: 'long',
+      industryBenchmarkSummary: summary,
+    })
+    expect(recs).toHaveLength(0)
+  })
+
+  it('logs memory hit metrics', async () => {
+    const logSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
+    await recommendActionsForDimension(stubSupabase, CLIENT_ID, {
+      mode: 'long',
+      industryBenchmarkSummary: makeIndustrySummary(),
+    })
+    const logged = logSpy.mock.calls.find(call =>
+      typeof call[0] === 'string' && call[0].includes('[zhuge/luban-router] memory hits')
+    )
+    expect(logged).toBeDefined()
+    const payload = JSON.parse(logged![1] as string)
+    expect(payload.industry_memory).toBe(true)
+    expect(payload.sub_industry).toBe('inbound_tour_operator')
+    logSpy.mockRestore()
   })
 })

@@ -25,7 +25,11 @@ import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { assembleZhugeInput } from '@/lib/zhuge/assembler'
 import { conductPriorityActions } from '@/lib/zhuge/conductor'
 import { persistZhugeActions, type PersistZhugeActionsResult } from '@/lib/zhuge/action-persister'
-import type { BusinessContext } from '@/lib/zhuge/types'
+import {
+  loadIndustryBenchmarkSummary,
+  loadZhugeFeedbackSummary,
+} from '@/lib/zhuge/memory-loader'
+import type { BusinessContext, ZhugePromptMode } from '@/lib/zhuge/types'
 import { loadMemoryForClient } from '@/lib/memory'
 
 export const dynamic = 'force-dynamic'
@@ -41,12 +45,20 @@ export async function POST(
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
-  let body: { businessContext?: Partial<BusinessContext> } = {}
+  let body: {
+    businessContext?: Partial<BusinessContext>
+    promptMode?: ZhugePromptMode
+  } = {}
   try {
     body = (await req.json()) as typeof body
   } catch {
     // Empty body is valid — all fields optional
   }
+
+  // DAPE W2 — Self-Serve callers can pass promptMode='short' to save tokens.
+  // FDE callers omit it (defaults to 'long', backward-compat).
+  const promptMode: ZhugePromptMode | undefined =
+    body.promptMode === 'short' || body.promptMode === 'long' ? body.promptMode : undefined
 
   // Assemble ZhugeInput from real DB data
   let assembled: Awaited<ReturnType<typeof assembleZhugeInput>>
@@ -80,10 +92,24 @@ export async function POST(
   // Phase 23.D: Load L3 memory context (non-blocking — failure returns empty context)
   const memoryContext = await loadMemoryForClient(supabaseAdmin, clientId, { maxRecentDecisions: 5 })
 
+  // DAPE W2 — Load Layer 2 (industry benchmarks) + zhuge self-feedback loop.
+  // Both are non-blocking; failure yields empty summaries that the conductor
+  // formatter renders as zero-length strings (backward-compat).
+  const [industryBenchmarkSummary, feedbackSummary] = await Promise.all([
+    loadIndustryBenchmarkSummary(supabaseAdmin, clientId),
+    loadZhugeFeedbackSummary(supabaseAdmin, clientId),
+  ])
+
   // Call the 诸葛亮 conductor (with memory injected)
   let output: Awaited<ReturnType<typeof conductPriorityActions>>
   try {
-    output = await conductPriorityActions({ ...assembled.input, memoryContext })
+    output = await conductPriorityActions({
+      ...assembled.input,
+      memoryContext,
+      industryBenchmarkSummary,
+      feedbackSummary,
+      promptMode,
+    })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[zhuge/conduct] conductor error:', msg)
@@ -111,12 +137,26 @@ export async function POST(
       discovery_id: assembled.discovery_id,
       diagnostic_run_id: assembled.diagnostic_run_id,
       findings_count: assembled.findings_count,
+      prompt_mode: promptMode ?? 'long',
       memory_loaded: memoryContext.has_content,
       memory_stats: {
         preferences: memoryContext.preferences.length,
         proven_patterns: memoryContext.proven_patterns.length,
         failed_experiments: memoryContext.failed_experiments.length,
         recent_decisions: memoryContext.recent_decisions.length,
+      },
+      // DAPE W2 — Layer 2 (industry) + self-feedback diagnostics
+      industry_memory_loaded: industryBenchmarkSummary.has_content,
+      industry_memory_stats: {
+        sub_industry: industryBenchmarkSummary.sub_industry,
+        dimensions: industryBenchmarkSummary.dimensions.length,
+      },
+      feedback_loop_loaded: feedbackSummary.has_content,
+      feedback_loop_stats: {
+        total: feedbackSummary.total,
+        state_counts: feedbackSummary.state_counts,
+        dismissed_keys: feedbackSummary.dismissed_keys.length,
+        irrelevant_keys: feedbackSummary.irrelevant_keys.length,
       },
     },
     persisted,

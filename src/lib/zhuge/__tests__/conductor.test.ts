@@ -10,9 +10,18 @@ import {
   buildUserPrompt,
   parseOutput,
   validateAction,
+  pickSystemPrompt,
   MAX_ACTIONS,
+  MAX_ACTIONS_SHORT,
+  SYSTEM_PROMPT_LONG,
+  SYSTEM_PROMPT_SHORT,
 } from '../conductor'
-import type { ZhugeInput, PriorityAction } from '../types'
+import type {
+  ZhugeInput,
+  PriorityAction,
+  IndustryBenchmarkSummary,
+  ZhugeFeedbackSummary,
+} from '../types'
 import type { DiagnosticFinding } from '@/types/diagnostic'
 
 const mockCallClaude = vi.mocked(callClaudeChat)
@@ -339,5 +348,192 @@ describe('conductPriorityActions()', () => {
       makeInput({ diagnosticScores: { seo: null, ai_visibility: null, ads: null, social: null } })
     )
     expect(output.top_actions).toHaveLength(1)
+  })
+})
+
+// ── DAPE W2: dual prompt mode + memory injection ─────────────────────────────
+
+describe('DAPE W2 — pickSystemPrompt()', () => {
+  it('returns long system prompt by default', () => {
+    expect(pickSystemPrompt(undefined)).toBe(SYSTEM_PROMPT_LONG)
+    expect(pickSystemPrompt('long')).toBe(SYSTEM_PROMPT_LONG)
+  })
+
+  it('returns short system prompt when mode=short', () => {
+    expect(pickSystemPrompt('short')).toBe(SYSTEM_PROMPT_SHORT)
+  })
+
+  it('long prompt mentions Layer 2 industry memory + self-feedback loop', () => {
+    expect(SYSTEM_PROMPT_LONG).toContain('Industry Memory')
+    expect(SYSTEM_PROMPT_LONG).toContain('Self-Feedback Loop')
+  })
+
+  it('short prompt is materially shorter than long prompt', () => {
+    expect(SYSTEM_PROMPT_SHORT.length).toBeLessThan(SYSTEM_PROMPT_LONG.length)
+  })
+})
+
+describe('DAPE W2 — buildUserPrompt() prompt-mode awareness', () => {
+  it('includes PromptMode header in both modes', () => {
+    const long = buildUserPrompt(makeInput({ promptMode: 'long' }))
+    const short = buildUserPrompt(makeInput({ promptMode: 'short' }))
+    expect(long).toContain('PromptMode: long')
+    expect(short).toContain('PromptMode: short')
+  })
+
+  it('omits industry/feedback sections in short mode even when provided', () => {
+    const industrySummary: IndustryBenchmarkSummary = {
+      sub_industry: 'inbound_tour_operator',
+      has_content: true,
+      dimensions: [
+        { dimension: 'seo', score_p50: 30, score_p75: 50, score_p90: 70, typical_monthly_budget_aud: 1200, confidence: 0.8, source: 'live' },
+      ],
+    }
+    const feedbackSummary: ZhugeFeedbackSummary = {
+      has_content: true,
+      total: 1,
+      state_counts: { done: 1, dismissed: 0, irrelevant: 0 },
+      dismissed_keys: [],
+      irrelevant_keys: [],
+      recent_events: [{ suggestion_key: 'k', suggestion_title: 't', feedback_state: 'done', created_at: '2026-06-01' }],
+    }
+    const prompt = buildUserPrompt(makeInput({
+      promptMode: 'short',
+      industryBenchmarkSummary: industrySummary,
+      feedbackSummary,
+    }))
+    expect(prompt).not.toContain('Industry Memory (L2')
+    expect(prompt).not.toContain('Self-Feedback Loop')
+  })
+
+  it('includes industry/feedback sections in long mode when memory has content', () => {
+    const industrySummary: IndustryBenchmarkSummary = {
+      sub_industry: 'inbound_tour_operator',
+      has_content: true,
+      dimensions: [
+        { dimension: 'seo', score_p50: 30, score_p75: 50, score_p90: 70, typical_monthly_budget_aud: 1200, confidence: 0.8, source: 'live' },
+      ],
+    }
+    const feedbackSummary: ZhugeFeedbackSummary = {
+      has_content: true,
+      total: 2,
+      state_counts: { done: 0, dismissed: 2, irrelevant: 0 },
+      dismissed_keys: ['publish_blog'],
+      irrelevant_keys: [],
+      recent_events: [
+        { suggestion_key: 'publish_blog', suggestion_title: 'Publish', feedback_state: 'dismissed', created_at: '2026-06-01' },
+      ],
+    }
+    const prompt = buildUserPrompt(makeInput({
+      promptMode: 'long',
+      industryBenchmarkSummary: industrySummary,
+      feedbackSummary,
+    }))
+    expect(prompt).toContain('Industry Memory (L2 — sub_industry=inbound_tour_operator)')
+    expect(prompt).toContain('Self-Feedback Loop')
+    expect(prompt).toContain('DO NOT re-suggest: publish_blog')
+  })
+
+  it('short mode trims findings list to at most 8', () => {
+    const lotsOfFindings: DiagnosticFinding[] = Array.from({ length: 20 }, (_, i) => ({
+      id: `f${i}`, run_id: 'r', client_id: 'c',
+      dimension: 'seo' as const,
+      finding_type: 'missing_meta_title' as const,
+      severity: 'high' as const,
+      title: `Finding ${i}`,
+      description: '', evidence: null, recommendation: 'Fix',
+      fix_type: 'me_auto' as const, priority_score: 50,
+      created_at: '2026-01-01',
+    }))
+    const prompt = buildUserPrompt(makeInput({ promptMode: 'short', findings: lotsOfFindings }))
+    // 8 lines max for short mode
+    const matches = prompt.match(/Finding \d+/g) ?? []
+    expect(matches.length).toBeLessThanOrEqual(8)
+  })
+
+  it('long mode allows up to 20 findings', () => {
+    const lotsOfFindings: DiagnosticFinding[] = Array.from({ length: 20 }, (_, i) => ({
+      id: `f${i}`, run_id: 'r', client_id: 'c',
+      dimension: 'seo' as const,
+      finding_type: 'missing_meta_title' as const,
+      severity: 'high' as const,
+      title: `Finding ${i}`,
+      description: '', evidence: null, recommendation: 'Fix',
+      fix_type: 'me_auto' as const, priority_score: 50,
+      created_at: '2026-01-01',
+    }))
+    const prompt = buildUserPrompt(makeInput({ promptMode: 'long', findings: lotsOfFindings }))
+    const matches = prompt.match(/Finding \d+/g) ?? []
+    expect(matches.length).toBeGreaterThan(8)
+  })
+})
+
+describe('DAPE W2 — conductPriorityActions() mode behaviour', () => {
+  it('short mode caps actions at MAX_ACTIONS_SHORT', async () => {
+    const manyActions = Array.from({ length: 10 }, (_, i) => ({
+      ...SAMPLE_ACTION,
+      rank: i + 1,
+      action_type: `action_${i}`,
+    }))
+    mockCallClaude.mockResolvedValueOnce(makeClaudeResponse(manyActions))
+    const output = await conductPriorityActions(makeInput({ promptMode: 'short' }))
+    expect(output.top_actions.length).toBeLessThanOrEqual(MAX_ACTIONS_SHORT)
+  })
+
+  it('long mode keeps up to MAX_ACTIONS actions', async () => {
+    const manyActions = Array.from({ length: 10 }, (_, i) => ({
+      ...SAMPLE_ACTION,
+      rank: i + 1,
+      action_type: `action_${i}`,
+    }))
+    mockCallClaude.mockResolvedValueOnce(makeClaudeResponse(manyActions))
+    const output = await conductPriorityActions(makeInput({ promptMode: 'long' }))
+    expect(output.top_actions.length).toBeLessThanOrEqual(MAX_ACTIONS)
+    expect(output.top_actions.length).toBeGreaterThan(MAX_ACTIONS_SHORT)
+  })
+
+  it('short mode passes SYSTEM_PROMPT_SHORT and smaller maxOutputTokens to Claude', async () => {
+    mockCallClaude.mockResolvedValueOnce(makeClaudeResponse())
+    await conductPriorityActions(makeInput({ promptMode: 'short' }))
+    const call = mockCallClaude.mock.calls[0][0]
+    expect(call.systemPrompt).toBe(SYSTEM_PROMPT_SHORT)
+    expect(call.maxOutputTokens).toBeLessThanOrEqual(1024)
+  })
+
+  it('default mode (no promptMode) uses long prompt (backward compat)', async () => {
+    mockCallClaude.mockResolvedValueOnce(makeClaudeResponse())
+    await conductPriorityActions(makeInput())
+    const call = mockCallClaude.mock.calls[0][0]
+    expect(call.systemPrompt).toBe(SYSTEM_PROMPT_LONG)
+    expect(call.maxOutputTokens).toBe(2048)
+  })
+
+  it('logs memory hit metrics so they are observable', async () => {
+    const logSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
+    mockCallClaude.mockResolvedValueOnce(makeClaudeResponse())
+
+    const industrySummary: IndustryBenchmarkSummary = {
+      sub_industry: 'inbound_tour_operator',
+      has_content: true,
+      dimensions: [
+        { dimension: 'seo', score_p50: 30, score_p75: 50, score_p90: 70, typical_monthly_budget_aud: 1200, confidence: 0.8, source: 'live' },
+      ],
+    }
+
+    await conductPriorityActions(makeInput({
+      promptMode: 'long',
+      industryBenchmarkSummary: industrySummary,
+    }))
+
+    const logged = logSpy.mock.calls.find(call =>
+      typeof call[0] === 'string' && call[0].includes('[zhuge/conductor] memory hits')
+    )
+    expect(logged).toBeDefined()
+    const payload = JSON.parse(logged![1] as string)
+    expect(payload.memory_l2).toBe(true)
+    expect(payload.memory_l2_dimensions).toBe(1)
+    expect(payload.mode).toBe('long')
+
+    logSpy.mockRestore()
   })
 })
