@@ -393,6 +393,42 @@
 
 ---
 
+### 窗口 gipmt-audit — GIPMT 链路 FDE UI 走查 + BC-001/BC-002 代码层验证
+
+> **诚实定位**：本窗口**没有"建"** GIPMT 任何 UI；本窗口的 GIPMT 计划是给「**ME 自己当客户**」（推广 ME 获客），**不是** CTS/Oztop。但这一 session 把 Goal→Initiative→Campaign→Plan→Task 整条链的真实数据模型 + 每层 UI 写入路径读穿了，正好能**代码层验证**两个悬而未决的 P0 候选（nostalgic-rubin 留的 **BC-001 / BC-002**）。
+> **验证方式 = grep + 读组件源码**（funny-goodall 同款 confirm-by-code），**非 live click-test**；最终仍需 strange-brown 在线上点一次终判。
+
+- **当前 Phase / 工作主题**：P14.D SEMrush→DataForSEO 路由改名（已 merged，FDE 不可见）+ GIPMT 链路讲解（ME 自有获客规划，非 CTS/Oztop）
+
+- **代码层验证结论（帮 strange-brown 缩小 live 测试范围 + 建议 Bug 池降级，交子牙裁定）**：
+
+  **BC-001（Initiative budget 能否 UI 编辑）→ 建议降级，UI 写入路径存在**
+  - 组件 `…/goal/[goalId]/_components/InitiativeFormDrawer.tsx`：`editing = !!initiative`（line 44），编辑态走 `PATCH`（line 74-76）
+  - budget 由 **budget_percent 输入框**编辑（line 49/67），旁边实时显示派生金额 `≈ {goal.budget_currency} {goal.budget_amount × pct/100}`（line 265-267）
+  - 结论：nostalgic-rubin 那次 SQL 改 2100→3000 **本可在 UI 上点**（填 budget_percent，如 goal 预算下约 70%≈3000）
+  - ⚠️ 唯一真缺口：**没有"直接填美元金额"的输入框**，只能填百分比；若 Goal 未设 `budget_amount`，派生金额不显示。这是 **UX 限制，不是"必须开 Supabase"**。
+  - 👉 **建议：BC-001 P0候选 → 降为 P3 UX**（待 live 确认"填 % → 保存生效"）
+
+  **BC-002（marketing_plan 草稿能否 UI archive）→ 建议降级/关闭，UI 写入路径存在**
+  - 组件 `…/marketing-plan/_components/PlanEditor.tsx`：「🗑 归档并清除任务」按钮（line 224-229）+ 二次确认弹窗，调 `DELETE /api/clients/[id]/marketing-plan/[planId]`（line 140）
+  - 后端 `…/marketing-plan/[planId]/route.ts` 文档明写 `DELETE — 归档（软删除）`，并 `revokePlanTasks` 清 pending 任务；列表页有 `已归档` tab
+  - 结论：nostalgic-rubin 用 SQL archive 的两条草稿 **FDE 本可在 UI 上点**
+  - 👉 **建议：BC-002 P0候选 → 关闭（非 bug）**（待 live 确认"点🗑 → 进已归档 tab"）
+
+- **顺带：撤回我上一轮口头误报 brand_aliases**：`brand_aliases` **有完整 UI**——`settings/_components/BrandAliasesPanel.tsx`（chip+add，与 Competitor/PrimaryKeywords 两 Panel 并列）+ `/api/clients/[id]/brand-aliases` 对称 GET/PATCH。CLAUDE.md 焦点表"去 Supabase 填 brand_aliases"是**过时 SOP，不是 bug**。
+
+- **CTS/Oztop 真实业务数据**：本窗口**不产** CTS/Oztop 资产（我的 GIPMT 计划是 ME 自己当客户）。CTS 真实数据以 nostalgic-rubin 段为准（master_brief：outbound Kiwi→中国旅游，非 Queenstown）
+
+- **当前是否有「UI 点不到必须 Supabase」字段**：本窗口验证范围内（Initiative budget / plan archive / brand_aliases）**均有 UI**，无新增缺陷
+
+- **预计上线 / main 可点**：上述 UI（InitiativeFormDrawer / PlanEditor / BrandAliasesPanel）**均已在 main 可点**
+
+- **可贡献到第二节哪几格**：F4（Initiative 编辑 UI 代码层验证，CTS+Oztop 通用）。不产 F1/F2/F3/F5/F6/F7 新资产
+
+- **本窗口红线踩踏自报**：**无**。全程未开 Supabase / 未写 SQL / 未调 curl / 未拿 cron 当结果（GIPMT 仅讲解 + 提议 seed DB 但**未执行**）
+
+---
+
 ## 四、子牙汇总进度（实时更新）
 
 | Phase | 子任务 | 客户 | 负责窗口 | 状态 | 备注 |
