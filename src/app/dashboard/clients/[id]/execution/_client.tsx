@@ -2475,6 +2475,9 @@ export function ExecutionClient() {
   // 87 张卡密集时 FDE 关掉抽屉常找不回原位, 用 data-execution-item-id 定位 DOM。
   useEffect(() => {
     if (!lastClosedItemId) return
+    // 快速连点关多张卡时, 先清掉所有残留高亮 (旧 timer 被 cleanup 取消, class 不会自动 remove)
+    document.querySelectorAll<HTMLElement>('[data-execution-item-id].ring-orange-400')
+      .forEach(n => n.classList.remove('ring-2', 'ring-orange-400', 'ring-offset-1', 'bg-orange-50/60'))
     const node = document.querySelector<HTMLElement>(
       `[data-execution-item-id="${lastClosedItemId}"]`,
     )
