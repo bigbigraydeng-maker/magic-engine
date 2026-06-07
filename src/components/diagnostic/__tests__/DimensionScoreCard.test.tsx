@@ -135,4 +135,27 @@ describe('DimensionScoreCard — mini progress bar (S10)', () => {
     render(<DimensionScoreCard dimension="ads" dimensionLabel="广告" score={31} />)
     expect(screen.getByTestId('score-bar-ads')).toHaveAttribute('title')
   })
+
+  // 魏征 H2: clampPct edge cases — mutation showed removing Math.max kept tests
+  // green. score=-5 would push width:-5% (invalid CSS, but React would still
+  // set it). score=110 would overflow. Lock both ends here.
+  it('clamps negative scores to 0% bar width', () => {
+    render(<DimensionScoreCard dimension="seo" dimensionLabel="SEO" score={-5} />)
+    const bar = screen.getByTestId('score-bar-seo').lastElementChild as HTMLElement
+    expect(bar.style.width).toBe('0%')
+  })
+
+  it('clamps scores above 100 to 100% bar width', () => {
+    render(<DimensionScoreCard dimension="seo" dimensionLabel="SEO" score={110} />)
+    const bar = screen.getByTestId('score-bar-seo').lastElementChild as HTMLElement
+    expect(bar.style.width).toBe('100%')
+  })
+
+  it('score=0 still renders the bar (not the null path) with 0% width', () => {
+    render(<DimensionScoreCard dimension="ads" dimensionLabel="广告" score={0} />)
+    const wrap = screen.getByTestId('score-bar-ads')
+    expect(wrap).toBeInTheDocument()
+    const bar = wrap.lastElementChild as HTMLElement
+    expect(bar.style.width).toBe('0%')
+  })
 })
