@@ -786,6 +786,24 @@ function TaskDetailDrawer({
     setFactoryError(null)
   }, [item?.id])
 
+  // 初始化平台选择（基于 steps_json 中的平台配置）
+  // MUST stay before any early return so hook count is stable across renders
+  // (React: hooks called in identical order every render — early return below).
+  useEffect(() => {
+    const sj = item?.steps_json as Record<string, unknown> | null | undefined
+    if (!sj) return
+    const rawPlatforms = Array.isArray(sj.platforms)
+      ? (sj.platforms as string[])
+      : typeof sj.platform === 'string' && sj.platform
+        ? [sj.platform as string]
+        : []
+    const valid = rawPlatforms.filter((p): p is FactoryPlatform =>
+      ALL_FACTORY_PLATFORMS.includes(p as FactoryPlatform)
+    )
+    if (valid.length > 0) setFactoryPlatforms(valid)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item?.id])
+
   if (!mounted || !item) return null
   const activeItem = item
 
@@ -793,21 +811,6 @@ function TaskDetailDrawer({
   const stepsJson = activeItem.steps_json as Record<string, unknown> | null
   const factoryTopic = typeof stepsJson?.topic === 'string' ? stepsJson.topic : null
   const isFactoryTask = stepsJson?.source === 'marketing_plan' && !!factoryTopic
-
-  // 初始化平台选择（基于 steps_json 中的平台配置）
-  useEffect(() => {
-    if (!stepsJson) return
-    const rawPlatforms = Array.isArray(stepsJson.platforms)
-      ? (stepsJson.platforms as string[])
-      : typeof stepsJson.platform === 'string' && stepsJson.platform
-        ? [stepsJson.platform as string]
-        : []
-    const valid = rawPlatforms.filter((p): p is FactoryPlatform =>
-      ALL_FACTORY_PLATFORMS.includes(p as FactoryPlatform)
-    )
-    if (valid.length > 0) setFactoryPlatforms(valid)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeItem.id])
 
   function toggleFactoryPlatform(p: FactoryPlatform) {
     setFactoryPlatforms(prev =>
