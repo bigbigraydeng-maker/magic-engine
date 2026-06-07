@@ -60,6 +60,8 @@ services:
         sync: false
       - key: CLIENT_VIEWERS
         sync: false
+      - key: RESEND_API_KEY
+        sync: false
       - key: RENDER_EXTERNAL_URL
         fromService:
           type: web

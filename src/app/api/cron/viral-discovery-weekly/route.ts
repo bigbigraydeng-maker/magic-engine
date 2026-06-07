@@ -308,12 +308,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const cronRun = await startCronRun('viral-discovery-weekly')
+
   const apiKey = process.env.YOUTUBE_API_KEY
   if (!apiKey) {
+    await cronRun.finish({ failed: 1, error: 'YOUTUBE_API_KEY not configured' })
     return NextResponse.json({ error: 'YOUTUBE_API_KEY not configured' }, { status: 500 })
   }
-
-  const cronRun = await startCronRun('viral-discovery-weekly')
 
   const results: DiscoverResult[] = []
   let totalQueued = 0
