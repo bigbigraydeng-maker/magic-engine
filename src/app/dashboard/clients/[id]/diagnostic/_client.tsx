@@ -65,6 +65,13 @@ const DEFAULT_CHIP_DIMENSIONS: DiagnosticDimension[] = [
   'seo', 'ai_visibility', 'ads', 'social', 'reputation', 'competitor',
 ]
 
+// 魏征 H5: module-level baseline cache (per clientId, 5-min TTL).
+// Without this, every dashboard re-render / client-switch round-trip would
+// re-fetch /api/clients/[id]/diagnostic/baseline → supabase + fetchBenchmarks.
+// FDE flipping between CTS and Oztop in the kanban would stack DB queries.
+const BASELINE_CACHE_TTL_MS = 5 * 60 * 1000
+const baselineCache = new Map<string, { at: number; data: Partial<Record<DiagnosticDimension, BaselineInfo>> }>()
+
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -362,9 +369,16 @@ export function DiagnosticClient() {
   useEffect(() => { void fetchLatest() }, [fetchLatest])
 
   // Industry baselines for the "为什么是 X 分?" baseline-comparison row.
-  // Fire once per client — no dependency on the run itself.
+  // 魏征 H5: consult module-level cache first; only hit the API on cold/stale.
   useEffect(() => {
     let cancelled = false
+
+    const cached = baselineCache.get(clientId)
+    if (cached && Date.now() - cached.at < BASELINE_CACHE_TTL_MS) {
+      setBaselines(cached.data)
+      return
+    }
+
     ;(async () => {
       try {
         const res = await fetch(`/api/clients/${clientId}/diagnostic/baseline`)
@@ -373,7 +387,10 @@ export function DiagnosticClient() {
           success: boolean
           baselines: Partial<Record<DiagnosticDimension, BaselineInfo>>
         }
-        if (!cancelled && data.success) setBaselines(data.baselines)
+        if (!cancelled && data.success) {
+          setBaselines(data.baselines)
+          baselineCache.set(clientId, { at: Date.now(), data: data.baselines })
+        }
       } catch {
         // non-fatal: baseline absence renders as "暂无" in the card
       }
