@@ -58,8 +58,10 @@ const ALL_DIMENSIONS: DiagnosticDimension[] = [
   'seo', 'ai_visibility', 'social', 'reputation', 'competitor', 'ads',
 ]
 
-const VALID_DIMENSIONS: DiagnosticDimension[] = [
-  'seo', 'ai_visibility', 'social', 'reputation', 'competitor',
+// Default chip ordering when run.dimensions_requested is missing. Real chips
+// come from the run itself so adding a new dimension doesn't require a UI edit.
+const DEFAULT_CHIP_DIMENSIONS: DiagnosticDimension[] = [
+  'seo', 'ai_visibility', 'ads', 'social', 'reputation', 'competitor',
 ]
 
 // ---------------------------------------------------------------------------
@@ -230,33 +232,62 @@ function NarrativeCard({
   )
 }
 
+// S15: dimensions come from the run itself (dimensions_requested), with a count
+// badge per chip. Empty-count chips are kept but greyed/disabled so FDE can see
+// "0 findings on AI 可见度" is a real signal rather than a missing tab.
 function DimensionFilterTabs({
   active,
   onChange,
+  dimensions,
+  counts,
+  totalCount,
 }: {
   active: DiagnosticDimension | 'all'
   onChange: (dim: DiagnosticDimension | 'all') => void
+  dimensions: DiagnosticDimension[]
+  counts: Partial<Record<DiagnosticDimension, number>>
+  totalCount: number
 }) {
-  const tabs: Array<{ key: DiagnosticDimension | 'all'; label: string }> = [
-    { key: 'all', label: '全部' },
-    ...VALID_DIMENSIONS.map(d => ({ key: d, label: DIMENSION_LABELS[d] })),
+  const tabs: Array<{ key: DiagnosticDimension | 'all'; label: string; count: number }> = [
+    { key: 'all', label: '全部', count: totalCount },
+    ...dimensions.map(d => ({ key: d, label: DIMENSION_LABELS[d], count: counts[d] ?? 0 })),
   ]
 
   return (
     <div className="flex flex-wrap gap-2">
-      {tabs.map(tab => (
-        <button
-          key={tab.key}
-          onClick={() => onChange(tab.key)}
-          className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-            active === tab.key
-              ? 'bg-indigo-600 text-white'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-          }`}
-        >
-          {tab.label}
-        </button>
-      ))}
+      {tabs.map(tab => {
+        const isActive = active === tab.key
+        const isEmpty = tab.key !== 'all' && tab.count === 0
+        return (
+          <button
+            key={tab.key}
+            onClick={() => onChange(tab.key)}
+            disabled={isEmpty && !isActive}
+            data-testid={`filter-chip-${tab.key}`}
+            data-count={tab.count}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+              isActive
+                ? 'bg-indigo-600 text-white'
+                : isEmpty
+                  ? 'bg-gray-50 text-gray-300 cursor-not-allowed'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            <span>{tab.label}</span>
+            <span
+              className={`tabular-nums text-[10px] font-semibold rounded-full px-1.5 py-0.5 ${
+                isActive
+                  ? 'bg-white/20 text-white'
+                  : isEmpty
+                    ? 'bg-gray-100 text-gray-300'
+                    : 'bg-white text-gray-500'
+              }`}
+            >
+              {tab.count}
+            </span>
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -394,13 +425,27 @@ export function DiagnosticClient() {
 
   const isRunning = Boolean(activeRunId) || pollStatus === 'running'
 
-  const visibleFindings = findings.filter(f => {
-    if (dismissedIds.has(f.id)) return false
+  const livingFindings = findings.filter(f => !dismissedIds.has(f.id))
+
+  const visibleFindings = livingFindings.filter(f => {
     if (dimFilter === 'all') return true
     return f.dimension === dimFilter
   })
 
   const dimensionScores = (run?.dimension_scores ?? {}) as Partial<Record<DiagnosticDimension, number | null>>
+
+  // S15: chip dimensions come from the run itself so adding/removing a dimension
+  // never requires a UI edit. Fall back to the default ordering if the run
+  // pre-dates the dimensions_requested column.
+  const requestedDimensions: DiagnosticDimension[] = (
+    (run?.dimensions_requested as DiagnosticDimension[] | null | undefined) ?? DEFAULT_CHIP_DIMENSIONS
+  ).filter((d): d is DiagnosticDimension => ALL_DIMENSIONS.includes(d))
+
+  const findingCountByDim = livingFindings.reduce<Partial<Record<DiagnosticDimension, number>>>((acc, f) => {
+    const dim = f.dimension as DiagnosticDimension
+    acc[dim] = (acc[dim] ?? 0) + 1
+    return acc
+  }, {})
 
   // ---------------------------------------------------------------------------
   // Render states
@@ -589,7 +634,13 @@ export function DiagnosticClient() {
 
             {/* Dimension filter tabs */}
             <div className="bg-white rounded-xl border border-gray-200 p-3 mb-4">
-              <DimensionFilterTabs active={dimFilter} onChange={setDimFilter} />
+              <DimensionFilterTabs
+                active={dimFilter}
+                onChange={setDimFilter}
+                dimensions={requestedDimensions}
+                counts={findingCountByDim}
+                totalCount={livingFindings.length}
+              />
             </div>
 
             {/* Findings list */}
