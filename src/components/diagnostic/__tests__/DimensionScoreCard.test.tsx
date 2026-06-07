@@ -113,3 +113,25 @@ describe('DimensionScoreCard — industry baseline comparison (S14)', () => {
     expect(screen.getByTestId('explain-panel-seo')).toHaveTextContent('行业 Top 25%')
   })
 })
+
+// ---------------------------------------------------------------------------
+// S10: mini progress bar — visual gradient so 36 vs 31 vs 48 are
+// distinguishable at a glance even though all three render as "red".
+// ---------------------------------------------------------------------------
+
+describe('DimensionScoreCard — mini progress bar (S10)', () => {
+  it('renders the bar for a non-null score', () => {
+    render(<DimensionScoreCard dimension="seo" dimensionLabel="SEO" score={36} />)
+    expect(screen.getByTestId('score-bar-seo')).toBeInTheDocument()
+  })
+
+  it('does NOT render the bar when score is null', () => {
+    render(<DimensionScoreCard dimension="competitor" dimensionLabel="竞品" score={null} />)
+    expect(screen.queryByTestId('score-bar-competitor')).not.toBeInTheDocument()
+  })
+
+  it('exposes the tier-band tooltip on the bar', () => {
+    render(<DimensionScoreCard dimension="ads" dimensionLabel="广告" score={31} />)
+    expect(screen.getByTestId('score-bar-ads')).toHaveAttribute('title')
+  })
+})

@@ -33,6 +33,10 @@ export interface DimensionScoreCardProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
+function clampPct(score: number): number {
+  return Math.max(0, Math.min(100, score))
+}
+
 function baselineLabel(score: number, baseline: BaselineInfo): string {
   if (baseline.p90 != null && score >= baseline.p90) return '行业 Top 10%'
   if (baseline.p75 != null && score >= baseline.p75) return '行业 Top 25%'
@@ -67,6 +71,30 @@ export function DimensionScoreCard({
         dimension={dimensionLabel}
         loading={loading}
       />
+
+      {/* S10: mini progress bar — visualises 0–100 scale with tier band markers
+          so FDE can see "36 vs 31" at a glance even though both fall in red. */}
+      {!loading && !isUnknown && (
+        <div
+          data-testid={`score-bar-${dimension}`}
+          className="relative h-1.5 w-full rounded-full bg-gray-200 overflow-hidden"
+          title="<40 危险 · 40–69 待改善 · ≥70 健康"
+        >
+          {/* tier band markers at amber (40) and green (70) thresholds */}
+          <div className="absolute top-0 bottom-0 left-[40%] w-px bg-gray-400/40" aria-hidden />
+          <div className="absolute top-0 bottom-0 left-[70%] w-px bg-gray-400/40" aria-hidden />
+          <div
+            className={
+              tier === 'green'
+                ? 'h-full bg-green-500'
+                : tier === 'amber'
+                  ? 'h-full bg-orange-500'
+                  : 'h-full bg-red-500'
+            }
+            style={{ width: `${clampPct(score as number)}%` }}
+          />
+        </div>
+      )}
 
       {/* S11: config CTA for unconfigured dimensions */}
       {isUnknown && configHref && (
