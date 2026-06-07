@@ -21,7 +21,9 @@ import { refineHuatuoPrescription, coerceWeaknesses } from '@/lib/huatuo/agent'
 import type { PrescriptionIntake, PrescriptionContent } from '@/types/diagnostic'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import type { SelfGrade, SelfGradeWeakness } from '@/lib/huatuo/types'
+import type { GoalRow } from '@/types/strategy'
 import { loadMemoryForClient } from '@/lib/memory'
+import { getGoalById } from '@/lib/strategy/goals'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -39,6 +41,8 @@ interface PrescriptionRow {
   content: PrescriptionContent | null
   self_grade: SelfGrade | null
   generation_meta: { passes?: number } | null
+  /** DAPE W4: 一对一关联 Goal (refine 时复用) */
+  goal_id: string | null
 }
 
 interface DiscoveryRow {
@@ -73,7 +77,7 @@ export async function POST(
   // 加载 + 校验（同步部分）
   const { data: presc, error: pErr } = await supabaseAdmin
     .from('prescriptions')
-    .select('id, client_id, discovery_id, status, agent_name, intake, content, self_grade, generation_meta')
+    .select('id, client_id, discovery_id, status, agent_name, intake, content, self_grade, generation_meta, goal_id')
     .eq('id', pId)
     .eq('client_id', clientId)
     .single<PrescriptionRow>()
@@ -111,10 +115,13 @@ export async function POST(
 
   const previousPasses = presc.generation_meta?.passes ?? 1
 
+  // DAPE W4: 加载关联 Goal (refine 时复用 prompt 注入)
+  const goal = presc.goal_id ? await getGoalById(supabaseAdmin, presc.goal_id) : null
+
   return new Response(
     makeRefineStream(
       pId, clientId, disc.payload, presc.intake, presc.content,
-      previousWeaknesses, humanComments, previousPasses, presc.self_grade,
+      previousWeaknesses, humanComments, previousPasses, presc.self_grade, goal,
     ),
     { headers: streamHeaders() },
   )
@@ -148,6 +155,7 @@ function makeRefineStream(
   humanComments: string | undefined,
   previousPasses: number,
   previousSelfGrade: SelfGrade | null,
+  goal: GoalRow | null,
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()
 
@@ -177,6 +185,7 @@ function makeRefineStream(
             previousPasses,
             previousSelfGrade,
             memoryContext,
+            goal,    // DAPE W4: 一对一 Goal 注入 prompt
             onProgress: async (note) => {
               sendEvent({ type: 'progress', note })
               await supabaseAdmin

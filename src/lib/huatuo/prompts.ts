@@ -10,6 +10,7 @@
 
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import type { PrescriptionIntake, PrescriptionContent, PriorPrescriptionContext } from '@/types/diagnostic'
+import type { GoalRow } from '@/types/strategy'
 import type { HuatuoLookupContext, TrendSummaryLite, SelfGradeWeakness } from './types'
 import { formatBenchmarksForPrompt } from './benchmarks'
 import { categoryToChineseName } from './industry-mapper'
@@ -37,8 +38,16 @@ export const HUATUO_GENERATION_SYSTEM_PROMPT = `你是华佗（Huà Tuó），Ma
 1. **基准锚定**：每个 KPI 的 target_value 必须落在行业基准 P50–P90 区间内。如超出，realism_confidence 必须 ≤ 0.5 并在 notes 说明理由。
 2. **FDE 可执行**：每个 action 必须包含 estimated_hours / required_skills / measurement_method / module，缺一不可。
 3. **预算硬上限**：budget_allocation 各项之和 ≤ monthly_budget_aud（绝不可超），且要参考该行业 typical_monthly_budget_aud 判断分配是否合理。
-4. **三阶段结构**：阶段 1（2–4 周快速见效）、阶段 2（4–8 周结构性建设）、阶段 3（8–12 周长期护城河）。
+4. **DAPE 动态 N 阶段结构（修 BUG-FMT-F19/F20/F21）**：
+   - **阶段数不写死 3**: 跟 Goal period 总周数 + Initiative 战线数对齐, 通常 2–5 个阶段
+   - **阶段总周数 = Goal period 总周数** (不再固定 12 周). Goal 90 天 → 总 12 周; Goal 60 天 → 总 8 周, 各 phase duration_weeks 之和 = 总周数
+   - **阶段命名跟 Initiative title 一致** (例如「Brisbane 询盘获客」「Walnut 地板清仓」). **禁用「止血 / 建设 / 护城河」抽象隐喻** — 板桥铁律: 客户看不懂的隐喻不要用
+   - **每个 phase = 1 个 Initiative** (派生关系): 每个 phase 必须填 initiative_seed 字段, 处方批准时系统自动用它在 initiatives 表 batch insert
 5. **依赖关系**：如 action B 需要等 action A 完成才能开始，必须在 B 的 dependencies 数组里写 A 的 id。
+6. **Initiative type 选择** (Phase 31 6 类型 + unassigned):
+   - **terminal** (直接驱动 Goal verdict): demand_generation 需求生成 / conversion_optimization 转化优化 / trust_building 信任建设 / competitive_defense 竞争防御 / market_education 市场教育
+   - **supporting** (服务 terminal): content_asset_production 内容资产生产 — 弹药库, 自己 KPI 是"产了多少弹药"
+   - 一个 Goal 至少 1 个 terminal Initiative. 不要全填 supporting.
 
 ## 输出语言规则
 
@@ -87,8 +96,15 @@ export const HUATUO_GENERATION_SYSTEM_PROMPT = `你是华佗（Huà Tuó），Ma
   "phases": [
     {
       "phase_number": 1,
-      "name": "string（中文，如「第一阶段：止血与快速见效」）",
+      "name": "string（中文，跟 initiative_seed.title 一致，如「Brisbane 询盘获客」。**禁用「止血/建设/护城河」**）",
       "duration_weeks": number,
+      "initiative_seed": {
+        "initiative_type": "demand_generation|conversion_optimization|trust_building|competitive_defense|market_education|content_asset_production",
+        "title": "中文 Initiative 标题（跟 phase.name 一致或更精炼）",
+        "posture": "offensive|defensive|fast|slow",
+        "budget_percent": number,
+        "hypothesis": "中文 1–2 句战略假设（为什么押这一条，90 天后验证）"
+      },
       "actions": [
         {
           "id": "kebab-case-唯一-id",
@@ -272,6 +288,53 @@ ${prior.executionSummary}
 }
 
 /**
+ * DAPE Week 2 W4 — 把 Goal 上下文格式化进 prompt.
+ * 处方跟 Goal 一对一, 华佗需要知道:
+ *   - period 总周数 (决定 phases duration_weeks 之和)
+ *   - intent + sub_type (决定 Initiative 类型选择倾向)
+ *   - budget_amount (跟 monthly_budget_aud 校验)
+ *   - primary_metric (决定 KPI 重点)
+ * Spec §2.3.2.
+ */
+function buildGoalSection(goal?: GoalRow | null): string {
+  if (!goal) {
+    return '## ⚠️ 未关联 Goal (legacy 模式)\n\n本处方未关联 Goal — 沿用传统 3 阶段结构 (2-4 / 4-8 / 8-12 周). 新方案请要求 FDE 关联 Goal.'
+  }
+
+  const periodStart = new Date(goal.period_start)
+  const periodEnd = new Date(goal.period_end)
+  const totalWeeks = Math.max(
+    1,
+    Math.round((periodEnd.getTime() - periodStart.getTime()) / (7 * 24 * 60 * 60 * 1000)),
+  )
+
+  return `## 处方关联的 Goal (DAPE 一对一)
+
+- **Goal 标题**: ${goal.title}
+- **意图 (intent)**: ${goal.intent}${goal.sub_type ? ` / ${goal.sub_type}` : ''}
+- **周期**: ${goal.period_start} → ${goal.period_end} (共 **${totalWeeks} 周**)
+- **主指标**: ${goal.primary_metric_label} (${goal.primary_metric_key}, ${goal.primary_metric_unit ?? ''})
+- **基线 → 目标**: ${goal.baseline_value} → ${goal.target_value} (方向: ${goal.target_direction})
+- **预算**: ${goal.budget_amount != null ? `${goal.budget_amount} ${goal.budget_currency ?? 'AUD'}` : '未设'}
+
+### 阶段时长约束 (修 BUG-FMT-F19)
+
+**phases[].duration_weeks 之和必须 = ${totalWeeks} 周** (不再写死 12 周).
+建议拆分:
+- 短期 (\<= 8 周): 2 phases × ${Math.floor(totalWeeks / 2)} 周
+- 中期 (9-16 周): 3 phases × ${Math.floor(totalWeeks / 3)} 周
+- 长期 (\>= 17 周): 4-5 phases × ${Math.floor(totalWeeks / 4)} 周
+
+### Initiative 类型倾向 (Phase 31 6 类型, 参考)
+
+- **${goal.intent === 'acquisition' ? '🎯 acquisition' : goal.intent === 'sales' ? '💰 sales' : '📢 awareness'}** Goal 通常 1 个 \`demand_generation\` (terminal) + 0-1 个 \`content_asset_production\` (supporting 喂弹药)
+- \`competitive_defense\` 适合有强竞品的客户 (用 Phase 30 行业基准)
+- \`trust_building\` 适合 reputation 弱 / 新客户的客户
+- 永远至少 1 个 terminal Initiative
+`
+}
+
+/**
  * 构建生成阶段的 user message。
  * priorContext 非空时进入"补充/修订"模式。
  * memoryContext 非空时附加 L3 记忆段（Phase 23.D.2）。
@@ -280,6 +343,8 @@ ${prior.executionSummary}
  *   - 传 memoryBundle → 走 W1 三层 memory（preferences + zhuge_feedback + outcomes）+ 双模式
  *   - 仅传 memoryContext → 走旧路径（向后兼容 Phase 23.D.2）
  *   - 两个都没传 → 不注入 memory（与旧版完全一致）
+ *
+ * DAPE W4: 新加 goal 参数, 非空时强制按 Goal period 派生 phases 时长 + intent 影响 Initiative 类型倾向.
  */
 export function buildHuatuoGenerationPrompt(
   discovery: DiscoveryReport,
@@ -289,6 +354,7 @@ export function buildHuatuoGenerationPrompt(
   memoryContext?: MemoryContext,
   memoryBundle?: HuatuoMemoryBundle,
   promptMode: HuatuoPromptMode = 'long',
+  goal?: GoalRow | null,
 ): string {
   const d = discovery.diagnosis
   const scores = d?.scores
@@ -355,6 +421,9 @@ export function buildHuatuoGenerationPrompt(
     ? formatHuatuoMemoryForPrompt(memoryBundle, promptMode)
     : formatMemoryForPrompt(memoryContext)
 
+  // DAPE Week 2 W4: Goal 上下文 (period 决定 phases duration_weeks 之和)
+  const goalSection = buildGoalSection(goal)
+
   return `${taskTitle}
 
 ## 客户画像
@@ -380,6 +449,7 @@ ${interestSection}
 ${casesSection ? `\n${casesSection}\n` : ''}
 ${confidenceSection ? `\n${confidenceSection}\n` : ''}
 ${memorySection}
+${goalSection}
 ${prior.block}
 ## 客户意向
 - **业务目标**：${intake.business_goal}

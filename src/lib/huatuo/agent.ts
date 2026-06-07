@@ -17,6 +17,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { parseJsonResponse, MODEL_SONNET } from '@/lib/anthropic/client'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import type { PrescriptionContent, PrescriptionIntake, PrescriptionAction, PriorPrescriptionContext } from '@/types/diagnostic'
+import type { GoalRow } from '@/types/strategy'
 import { deriveExecutionTarget } from '@/lib/flywheel/execution-target'
 import type { MemoryContext } from '@/lib/memory/types'
 import type {
@@ -123,6 +124,12 @@ export interface RunHuatuoOptions {
    * 默认 'long'（保持旧行为）。
    */
   promptMode?: HuatuoPromptMode
+  /**
+   * DAPE Week 2 W4 — 处方关联的 Goal (一对一).
+   * 非空时华佗按 Goal period 派生 phases.duration_weeks 之和; intent 影响 Initiative 类型倾向.
+   * Spec §2.3.
+   */
+  goal?: GoalRow | null
 }
 
 /**
@@ -210,7 +217,7 @@ export async function runHuatuo(
       '处方生成',
       generatePrescription(
         client, discovery, intake, lookup,
-        options.priorContext, options.memoryContext, options.memoryBundle, promptMode,
+        options.priorContext, options.memoryContext, options.memoryBundle, promptMode, options.goal,
       ),
       CLAUDE_TIMEOUT_GENERATION_MS,
     )
@@ -264,6 +271,7 @@ export async function runHuatuo(
               memoryContext: options.memoryContext,
               memoryBundle: options.memoryBundle,
               promptMode,
+              goal: options.goal,
             },
           ),
           CLAUDE_TIMEOUT_GENERATION_MS,
@@ -333,6 +341,8 @@ export interface RefineHuatuoOptions {
   memoryBundle?: HuatuoMemoryBundle
   /** Phase DAPE W1 — prompt 模式（默认 'long' 保持旧行为） */
   promptMode?: HuatuoPromptMode
+  /** DAPE Week 2 W4 — 处方关联的 Goal (一对一). refine 时跟生成阶段一致注入. */
+  goal?: GoalRow | null
 }
 
 /**
@@ -396,6 +406,7 @@ export async function refineHuatuoPrescription(
         memoryContext: options.memoryContext,
         memoryBundle: options.memoryBundle,
         promptMode: options.promptMode,
+        goal: options.goal,    // DAPE W4
       },
     ),
     CLAUDE_TIMEOUT_GENERATION_MS,
@@ -464,9 +475,10 @@ async function generatePrescription(
   memoryContext?: MemoryContext,
   memoryBundle?: HuatuoMemoryBundle,
   promptMode: HuatuoPromptMode = 'long',
+  goal?: GoalRow | null,
 ): Promise<ClaudeCallResult<PrescriptionContent>> {
   const userPrompt = buildHuatuoGenerationPrompt(
-    discovery, intake, lookup, priorContext, memoryContext, memoryBundle, promptMode,
+    discovery, intake, lookup, priorContext, memoryContext, memoryBundle, promptMode, goal,
   )
   const message = await client.messages.create({
     model: MODEL_SONNET,
@@ -517,6 +529,43 @@ function attachExecutionTarget(action: PrescriptionAction): PrescriptionAction {
   }
 }
 
+/**
+ * DAPE Week 2 W4 — 把华佗输出的 initiative_seed 防御性 normalize.
+ * Claude 可能漏字段或填错枚举, 兜底用 unassigned + content_asset_production fallback 后由 FDE 重分类.
+ */
+const VALID_INIT_TYPES = new Set([
+  'demand_generation', 'conversion_optimization', 'trust_building',
+  'competitive_defense', 'market_education', 'content_asset_production', 'unassigned',
+])
+const VALID_POSTURES = new Set(['offensive', 'defensive', 'fast', 'slow'])
+
+function normalizeInitiativeSeed(seed: unknown): import('@/types/diagnostic').PhaseInitiativeSeed | undefined {
+  if (!seed || typeof seed !== 'object') return undefined
+  const s = seed as Record<string, unknown>
+
+  const rawType = typeof s.initiative_type === 'string' ? s.initiative_type : null
+  const initiative_type = (rawType && VALID_INIT_TYPES.has(rawType)
+    ? rawType
+    : 'unassigned') as import('@/types/diagnostic').PhaseInitiativeSeed['initiative_type']
+
+  const rawPosture = typeof s.posture === 'string' ? s.posture : null
+  const posture = rawPosture && VALID_POSTURES.has(rawPosture)
+    ? rawPosture as 'offensive' | 'defensive' | 'fast' | 'slow'
+    : null
+
+  const budget_percent = typeof s.budget_percent === 'number' && Number.isFinite(s.budget_percent)
+    ? Math.max(0, Math.min(100, s.budget_percent))
+    : null
+
+  return {
+    initiative_type,
+    title: typeof s.title === 'string' ? s.title : '',
+    posture,
+    budget_percent,
+    hypothesis: typeof s.hypothesis === 'string' ? s.hypothesis : null,
+  }
+}
+
 function normalizePrescriptionContent(p: Partial<PrescriptionContent>): PrescriptionContent {
   return {
     summary: typeof p.summary === 'string' ? p.summary : '',
@@ -524,10 +573,11 @@ function normalizePrescriptionContent(p: Partial<PrescriptionContent>): Prescrip
     narrative: typeof p.narrative === 'string' ? p.narrative : '',
     phases: Array.isArray(p.phases)
       ? p.phases.map(ph => ({
-          phase_number:   typeof ph.phase_number === 'number' ? ph.phase_number : 0,
-          name:           typeof ph.name === 'string' ? ph.name : '',
-          duration_weeks: typeof ph.duration_weeks === 'number' ? ph.duration_weeks : 0,
-          actions:        Array.isArray(ph.actions) ? ph.actions.map(attachExecutionTarget) : [],
+          phase_number:    typeof ph.phase_number === 'number' ? ph.phase_number : 0,
+          name:            typeof ph.name === 'string' ? ph.name : '',
+          duration_weeks:  typeof ph.duration_weeks === 'number' ? ph.duration_weeks : 0,
+          actions:         Array.isArray(ph.actions) ? ph.actions.map(attachExecutionTarget) : [],
+          initiative_seed: normalizeInitiativeSeed((ph as { initiative_seed?: unknown }).initiative_seed),
         }))
       : [],
     kpi_targets: Array.isArray(p.kpi_targets) ? p.kpi_targets : [],
@@ -548,6 +598,7 @@ async function generatePrescriptionWithFeedback(
     memoryContext?: MemoryContext
     memoryBundle?: HuatuoMemoryBundle
     promptMode?: HuatuoPromptMode
+    goal?: GoalRow | null
   },
 ): Promise<ClaudeCallResult<PrescriptionContent>> {
   // 精修 prompt 强调"针对性修复 + 保持紧凑"
@@ -555,7 +606,7 @@ async function generatePrescriptionWithFeedback(
   const basePrompt = buildHuatuoGenerationPrompt(
     discovery, intake, lookup,
     feedback.priorContext, feedback.memoryContext,
-    feedback.memoryBundle, feedback.promptMode ?? 'long',
+    feedback.memoryBundle, feedback.promptMode ?? 'long', feedback.goal,
   )
 
   // 人工意见（如有）— 比 AI 自评 weaknesses 优先级更高

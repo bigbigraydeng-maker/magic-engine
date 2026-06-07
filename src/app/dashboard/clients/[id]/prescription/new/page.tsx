@@ -8,6 +8,24 @@ import type { ClientDiscoveryRow } from '@/lib/zhangqian/types'
 import type { SelfGrade, HuatuoGenerationMeta, TrendSummaryLite, SelfGradeWeakness, SelfGradeDimension } from '@/lib/huatuo/types'
 import { coerceWeaknesses } from '@/lib/huatuo/weakness-utils'
 
+// DAPE Week 2 W4 — Goal 一对一 + 版本化所需的轻量 row 类型
+interface MinimalGoal {
+  id: string
+  title: string
+  intent: string
+  sub_type: string | null
+  period_start: string
+  period_end: string
+}
+
+interface PrescriptionVersionItem {
+  id: string
+  version: number
+  status: PrescriptionStatus
+  created_at: string
+  approved_at: string | null
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -95,10 +113,21 @@ export default function NewPrescriptionPage() {
     supplementOf ? 'supplement' : reviseOf ? 'revision' : null
   const priorId = supplementOf ?? reviseOf
 
+  // DAPE W4: URL 可带 ?goal_id=<id> 预选 Goal (从 Goal 详情页"新开处方"按钮跳过来)
+  const initialGoalId = searchParams.get('goal_id')
+
   // Discovery source (Zhangqian)
   const [discovery, setDiscovery]             = useState<ClientDiscoveryRow | null>(null)
   const [discoveryLoading, setDiscoveryLoading] = useState(true)
   const [discoveryId, setDiscoveryId]         = useState<string | null>(null)
+
+  // DAPE W4: 处方跟 Goal 一对一
+  const [activeGoals, setActiveGoals]   = useState<MinimalGoal[]>([])
+  const [selectedGoalId, setSelectedGoalId] = useState<string | null>(initialGoalId)
+  const [goalsLoading, setGoalsLoading] = useState(true)
+  // 该 Goal 下所有处方版本 (供版本切换 UI)
+  const [versionList, setVersionList]   = useState<PrescriptionVersionItem[]>([])
+  const [activeVersionId, setActiveVersionId] = useState<string | null>(null)
 
   const [step, setStep] = useState<Step>(1)
 
@@ -199,15 +228,65 @@ export default function NewPrescriptionPage() {
     })()
   }, [clientId])
 
+  // ── DAPE W4: Load active Goals 列表 (供 Step 1 Goal selector) ──────────────
+  useEffect(() => {
+    void (async () => {
+      setGoalsLoading(true)
+      try {
+        // 复用 P32 多 Goal API (/active-list 返回所有 active goals)
+        const res = await fetch(`/api/clients/${clientId}/goals/active-list`, { cache: 'no-store' })
+        if (!res.ok) return
+        const data = await res.json() as { goals?: MinimalGoal[] }
+        const list = data.goals ?? []
+        setActiveGoals(list)
+        // 如果 URL 没指定 goal_id 且客户唯一 active goal → 自动选
+        if (!initialGoalId && list.length === 1) {
+          setSelectedGoalId(list[0].id)
+        }
+      } catch (err) {
+        console.warn('[prescription/new] load active goals failed', err)
+      } finally {
+        setGoalsLoading(false)
+      }
+    })()
+    // 只在 mount 时加载, initialGoalId 不会变
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId])
+
+  // ── DAPE W4: 选 Goal 后加载该 Goal 下所有处方版本 ──────────────────────────
+  useEffect(() => {
+    if (!selectedGoalId) {
+      setVersionList([])
+      setActiveVersionId(null)
+      return
+    }
+    void (async () => {
+      try {
+        const res = await fetch(`/api/goals/${selectedGoalId}/prescriptions`, { cache: 'no-store' })
+        if (!res.ok) return
+        const data = await res.json() as {
+          prescriptions?: PrescriptionVersionItem[]
+          active_prescription_id?: string | null
+        }
+        setVersionList(data.prescriptions ?? [])
+        setActiveVersionId(data.active_prescription_id ?? null)
+      } catch (err) {
+        console.warn('[prescription/new] load versions failed', err)
+      }
+    })()
+  }, [selectedGoalId])
+
   // ── 加载最近一份草稿处方（防止用户刚生成完刷新页面就丢失结果）─────────────
   // 补充/修订模式不自动恢复草稿 —— 用户是来新建增量/修订版的
+  // DAPE W4: 带 selectedGoalId filter, 仅恢复该 Goal 下的最新版
   useEffect(() => {
     if (priorMode) return
     void (async () => {
       try {
-        const res = await fetch(`/api/clients/${clientId}/prescriptions/latest-draft`, {
-          cache: 'no-store',
-        })
+        const url = selectedGoalId
+          ? `/api/clients/${clientId}/prescriptions/latest-draft?goal_id=${selectedGoalId}`
+          : `/api/clients/${clientId}/prescriptions/latest-draft`
+        const res = await fetch(url, { cache: 'no-store' })
         if (!res.ok) return
         const data = await res.json() as { prescription?: Prescription }
         const p = data.prescription
@@ -227,9 +306,9 @@ export default function NewPrescriptionPage() {
         setStep(3)
       } catch {/* 找不到草稿就保持表单 */}
     })()
-    // 只跑一次（mount 时）
+    // 跟 selectedGoalId 联动 — 切 Goal 后会自动加载该 Goal 下最新版
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId])
+  }, [clientId, selectedGoalId])
 
   // ── Generate prescription (SSE 流式) ──────────────────────────────────────
   const handleGenerate = useCallback(async () => {
@@ -252,11 +331,12 @@ export default function NewPrescriptionPage() {
         notes:               notes || null,
       }
       // 补充/修订模式优先 —— 从原处方 derive discovery，body 只带关系字段
+      // DAPE W4: 普通生成必传 goal_id (一对一); 补充/修订模式从原处方继承不必传
       const body: Record<string, unknown> =
         priorMode === 'supplement' ? { supplement_of: priorId, intake } :
         priorMode === 'revision'   ? { revise: priorId, intake } :
-        discoveryId                ? { discovery_id: discoveryId, intake } :
-                                     { intake }
+        discoveryId                ? { discovery_id: discoveryId, intake, goal_id: selectedGoalId } :
+                                     { intake, goal_id: selectedGoalId }
 
       const res = await fetch(`/api/clients/${clientId}/prescription/generate`, {
         method:  'POST',
@@ -310,7 +390,7 @@ export default function NewPrescriptionPage() {
       setProgressNote(null)
       if (elapsedRef.current) { clearInterval(elapsedRef.current); elapsedRef.current = null }
     }
-  }, [businessGoal, urgency, budget, priorityDims, notes, discoveryId, clientId, priorMode, priorId])
+  }, [businessGoal, urgency, budget, priorityDims, notes, discoveryId, clientId, priorMode, priorId, selectedGoalId])
 
   // ── Approve prescription ──────────────────────────────────────────────────
   const handleApprove = async () => {
@@ -530,6 +610,60 @@ export default function NewPrescriptionPage() {
           <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
             <h2 className="font-semibold text-gray-900">填写业务意向</h2>
 
+            {/* DAPE W4: Goal 选择器 — 处方跟 Goal 一对一 */}
+            {!priorMode && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  关联 Goal <span className="text-red-500">*</span>
+                  <span className="ml-2 text-xs font-normal text-gray-400">
+                    (DAPE 处方跟 Goal 一对一)
+                  </span>
+                </label>
+                {goalsLoading ? (
+                  <div className="text-sm text-gray-400 py-2">加载客户 Goal 列表…</div>
+                ) : activeGoals.length === 0 ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    ⚠️ 该客户暂无 active Goal —{' '}
+                    <Link href={`/dashboard/clients/${clientId}/goal/new`} className="underline">
+                      先创建一个 Goal
+                    </Link>
+                    {' '}再生成处方。
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {activeGoals.map(g => {
+                      const periodWeeks = Math.round(
+                        (new Date(g.period_end).getTime() - new Date(g.period_start).getTime())
+                          / (7 * 24 * 60 * 60 * 1000),
+                      )
+                      return (
+                        <button
+                          key={g.id}
+                          type="button"
+                          onClick={() => setSelectedGoalId(g.id)}
+                          className={`w-full text-left rounded-lg border px-3 py-2.5 transition-colors ${
+                            selectedGoalId === g.id
+                              ? 'border-indigo-400 bg-indigo-50'
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          <div className="text-sm font-medium text-gray-900">{g.title}</div>
+                          <div className="text-xs text-gray-500 mt-0.5">
+                            {g.intent}{g.sub_type ? ` / ${g.sub_type}` : ''} · {periodWeeks} 周 ({g.period_start.slice(5)} → {g.period_end.slice(5)})
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+                {selectedGoalId && versionList.length > 0 && (
+                  <div className="mt-2 text-xs text-gray-500">
+                    该 Goal 已有 {versionList.length} 版处方 (最新 v{versionList[0]?.version}, status={versionList[0]?.status})
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Business goal */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -634,8 +768,9 @@ export default function NewPrescriptionPage() {
             <div className="flex justify-end pt-2">
               <button
                 onClick={() => { setStep(2); void handleGenerate() }}
-                disabled={!businessGoal.trim() || budget <= 0}
+                disabled={!businessGoal.trim() || budget <= 0 || (!priorMode && !selectedGoalId && activeGoals.length > 0)}
                 className="rounded-lg bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                title={!priorMode && !selectedGoalId && activeGoals.length > 0 ? '请先关联一个 Goal' : ''}
               >
                 生成处方 →
               </button>
@@ -669,6 +804,16 @@ export default function NewPrescriptionPage() {
           <div className="lg:grid lg:grid-cols-3 lg:gap-6">
             {/* ─── 左栏：处方内容（移动端全宽；已批准时占满 3 列） ─── */}
             <div className={`space-y-4 ${isApproved ? 'lg:col-span-3' : 'lg:col-span-2'}`}>
+            {/* DAPE W4: 版本切换 chips — 该 Goal 下所有处方版本 */}
+            {selectedGoalId && versionList.length >= 1 && (
+              <VersionSwitcher
+                versions={versionList}
+                currentId={prescriptionId}
+                activeApprovedId={activeVersionId}
+                clientId={clientId}
+              />
+            )}
+
             {/* 已批准横幅 — 只读态，引导去执行看板 */}
             {isApproved && (
               <div className="rounded-xl border border-green-200 bg-green-50 p-4 flex items-center gap-3">
@@ -751,16 +896,44 @@ export default function NewPrescriptionPage() {
               </div>
             )}
 
-            {/* Phases */}
+            {/* Phases — DAPE W4: 动态 N 阶段, 每阶段对应 1 个派生 Initiative */}
             {content.phases.map(phase => (
               <div key={phase.phase_number} className="bg-white rounded-xl border border-gray-200 p-5">
-                <div className="flex items-center gap-3 mb-3">
-                  <span className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold flex items-center justify-center">
+                <div className="flex items-start gap-3 mb-3">
+                  <span className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold flex items-center justify-center shrink-0">
                     {phase.phase_number}
                   </span>
-                  <div>
+                  <div className="flex-1 min-w-0">
                     <h3 className="font-semibold text-gray-900">{phase.name}</h3>
-                    <p className="text-xs text-gray-400">{phase.duration_weeks} 周</p>
+                    <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-gray-400">
+                      <span>{phase.duration_weeks} 周</span>
+                      {phase.initiative_seed && (
+                        <>
+                          <span>·</span>
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium ${
+                              phase.initiative_seed.initiative_type === 'unassigned'
+                                ? 'bg-gray-100 text-gray-600'
+                                : 'bg-purple-100 text-purple-700'
+                            }`}
+                            title="批准处方时自动派生为 Initiative (Phase 31 三层骨架)"
+                          >
+                            🎯 {phase.initiative_seed.initiative_type.replace(/_/g, ' ')}
+                          </span>
+                          {phase.initiative_seed.posture && (
+                            <span className="text-gray-500">{phase.initiative_seed.posture}</span>
+                          )}
+                          {phase.initiative_seed.budget_percent != null && (
+                            <span className="text-gray-500">{phase.initiative_seed.budget_percent}% 预算</span>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    {phase.initiative_seed?.hypothesis && (
+                      <p className="mt-1.5 text-xs text-gray-600 leading-relaxed italic">
+                        💡 {phase.initiative_seed.hypothesis}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div className="space-y-3 pl-10">
@@ -1549,6 +1722,80 @@ function ActionRow({ action }: { action: PrescriptionAction }) {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// DAPE W4 — VersionSwitcher: Goal 下所有处方版本 chips (v1/v2/v3 滚动)
+// ---------------------------------------------------------------------------
+
+function VersionSwitcher({
+  versions,
+  currentId,
+  activeApprovedId,
+  clientId,
+}: {
+  versions: PrescriptionVersionItem[]
+  currentId: string | null
+  activeApprovedId: string | null
+  clientId: string
+}) {
+  if (versions.length === 0) return null
+
+  // 按 version DESC 排
+  const sorted = [...versions].sort((a, b) => b.version - a.version)
+
+  return (
+    <div className="rounded-xl border border-indigo-100 bg-indigo-50/30 p-3.5">
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <div>
+          <p className="text-xs font-semibold text-indigo-900 uppercase tracking-wide">
+            处方版本历史
+          </p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            DAPE: 同一 Goal 下处方可以滚动迭代 v1 → v2 → v3
+          </p>
+        </div>
+        {activeApprovedId && (
+          <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+            当前生效: v{sorted.find(v => v.id === activeApprovedId)?.version ?? '?'}
+          </span>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {sorted.map(v => {
+          const isCurrent = v.id === currentId
+          const isActive = v.id === activeApprovedId
+          const statusCls =
+            v.status === 'approved' && isActive ? 'bg-green-600 text-white' :
+            v.status === 'approved'             ? 'bg-green-100 text-green-700' :
+            v.status === 'draft'                ? 'bg-amber-100 text-amber-800' :
+            v.status === 'superseded'           ? 'bg-gray-200 text-gray-500' :
+            v.status === 'rejected'             ? 'bg-red-100 text-red-700' :
+                                                   'bg-gray-100 text-gray-600'
+          const ringCls = isCurrent ? 'ring-2 ring-indigo-500 ring-offset-1' : ''
+          const statusLabel =
+            v.status === 'approved' && isActive ? '✓ 当前' :
+            v.status === 'approved'             ? '✓ 已批' :
+            v.status === 'draft'                ? '草稿' :
+            v.status === 'superseded'           ? '已归档' :
+            v.status === 'rejected'             ? '已拒' :
+                                                   v.status
+          return (
+            <Link
+              key={v.id}
+              href={`/dashboard/clients/${clientId}/prescription/new?prescription_id=${v.id}`}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-all ${statusCls} ${ringCls} hover:opacity-90`}
+              title={`v${v.version} · ${v.status} · ${new Date(v.created_at).toLocaleDateString()}`}
+            >
+              <span className="font-bold tabular-nums">v{v.version}</span>
+              <span className="opacity-75">·</span>
+              <span>{statusLabel}</span>
+            </Link>
+          )
+        })}
+      </div>
     </div>
   )
 }

@@ -24,10 +24,12 @@ import type {
   PrescriptionIntake, PrescriptionContent, PriorPrescriptionContext,
   ExecutionItem,
 } from '@/types/diagnostic'
+import type { GoalRow } from '@/types/strategy'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import { savePrescriptionCase, deriveCrisisType } from '@/lib/case-library/saver'
 import { mapIndustryToCategory } from '@/lib/huatuo/industry-mapper'
 import { loadMemoryForClient } from '@/lib/memory'
+import { getGoalById, listActiveGoals } from '@/lib/strategy/goals'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -62,6 +64,11 @@ export async function POST(
     supplement_of?: string
     revise?: string
     intake?: PrescriptionIntake
+    /**
+     * DAPE Week 2 W4 — 处方跟 Goal 一对一 (修 BUG-FMT-F21).
+     * 缺省时尝试用客户最新 active goal 兜底; 客户无 active goal 则报 422.
+     */
+    goal_id?: string
   }
   try {
     body = await req.json()
@@ -73,6 +80,11 @@ export async function POST(
   if (!intake.business_goal || typeof intake.monthly_budget_aud !== 'number') {
     return errorResponse(400, 'intake must include business_goal and monthly_budget_aud')
   }
+
+  // ── DAPE W4: 解析 Goal (一对一) ─────────────────────────────────────
+  const goalResult = await resolveGoal(clientId, body.goal_id, body.supplement_of ?? body.revise)
+  if ('error' in goalResult) return errorResponse(goalResult.status, goalResult.error)
+  const goal = goalResult.goal
 
   // ── Path: 补充 / 修订 — 从原处方 derive 上下文 ─────────────────────────────
   const priorId = body.supplement_of ?? body.revise
@@ -87,7 +99,7 @@ export async function POST(
       priorPrescriptionId: priorId,
     }
     return new Response(
-      makeHuatuoStream(clientId, prep.discoveryId, prep.discovery, intake, priorMeta),
+      makeHuatuoStream(clientId, prep.discoveryId, prep.discovery, intake, goal, priorMeta),
       { headers: streamHeaders() },
     )
   }
@@ -106,7 +118,7 @@ export async function POST(
       return errorResponse(422, 'Discovery must be confirmed before generating a prescription')
     }
 
-    return new Response(makeHuatuoStream(clientId, row.id, row.payload, intake), {
+    return new Response(makeHuatuoStream(clientId, row.id, row.payload, intake, goal), {
       headers: streamHeaders(),
     })
   }
@@ -134,6 +146,77 @@ export async function POST(
   }
 
   return errorResponse(400, 'discovery_id / supplement_of / revise / run_id 至少要有一个')
+}
+
+// ─── DAPE Week 2 W4: Goal 解析 ───────────────────────────────────────────────
+//
+// 处方跟 Goal 一对一 (修 BUG-FMT-F21). 优先级:
+//   1. body.goal_id 显式传 → 校验属于该 client
+//   2. 补充/修订模式 → 从原处方 inherit goal_id (不传也能跑)
+//   3. 客户唯一 active goal → 自动 fallback (UI 在迁移期不必每次传)
+//   4. 客户多 active goals 但没传 → 422 (强制 UI 选)
+//   5. 客户 0 active goals → 允许 NULL (legacy 模式, 兼容 pre-DAPE 流)
+//
+// 不破坏: 历史 6 处方 (CTS/Oztop 等) goal_id 全 NULL, 新调用可不传 (兜底逻辑)
+//
+type ResolveGoalResult =
+  | { goal: GoalRow | null }
+  | { error: string; status: number }
+
+async function resolveGoal(
+  clientId: string,
+  explicitGoalId: string | undefined,
+  priorPrescriptionId: string | undefined,
+): Promise<ResolveGoalResult> {
+  // Case 1: 显式 goal_id
+  if (explicitGoalId) {
+    const g = await getGoalById(supabaseAdmin, explicitGoalId)
+    if (!g) return { error: 'Goal not found', status: 404 }
+    if (g.client_id !== clientId) return { error: 'Goal does not belong to this client', status: 403 }
+    return { goal: g }
+  }
+
+  // Case 2: 补充/修订 — 继承原处方的 goal_id
+  if (priorPrescriptionId) {
+    const { data: prior } = await supabaseAdmin
+      .from('prescriptions')
+      .select('goal_id')
+      .eq('id', priorPrescriptionId)
+      .eq('client_id', clientId)
+      .maybeSingle<{ goal_id: string | null }>()
+    if (prior?.goal_id) {
+      const g = await getGoalById(supabaseAdmin, prior.goal_id)
+      if (g) return { goal: g }
+    }
+    // 原处方无 goal_id (legacy) → 继续 fallback case 3
+  }
+
+  // Case 3-5: 客户 active goals 兜底
+  const activeGoals = await listActiveGoals(supabaseAdmin, clientId)
+  if (activeGoals.length === 1) {
+    return { goal: activeGoals[0] }   // 唯一 active goal 自动用
+  }
+  if (activeGoals.length > 1) {
+    return {
+      error: `Client has ${activeGoals.length} active goals — body.goal_id is required to disambiguate`,
+      status: 422,
+    }
+  }
+  // 0 active goals = legacy 模式 (允许 NULL, 跟旧处方一致)
+  return { goal: null }
+}
+
+/** DAPE W4: 算同 Goal 下一版本号. legacy (goal=null) 永远 v1. */
+async function computeNextVersion(goalId: string | null): Promise<number> {
+  if (!goalId) return 1
+  const { data } = await supabaseAdmin
+    .from('prescriptions')
+    .select('version')
+    .eq('goal_id', goalId)
+    .order('version', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ version: number }>()
+  return (data?.version ?? 0) + 1
 }
 
 // ─── 补充/修订：从原处方加载上下文 ────────────────────────────────────────────
@@ -252,6 +335,7 @@ function makeHuatuoStream(
   discoveryId: string,
   discovery: DiscoveryReport,
   intake: PrescriptionIntake,
+  goal: GoalRow | null,
   priorMeta?: PriorMeta,
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()
@@ -268,9 +352,12 @@ function makeHuatuoStream(
         } catch {/* connection closed */}
       }
 
-      // 1. 插入 generating 行（补充/修订时带上关系字段）
+      // 1. 插入 generating 行（补充/修订时带上关系字段, DAPE W4 填 goal_id + version）
       let prescriptionId: string | null = null
       try {
+        // DAPE W4: 算同 Goal 下下一版本号
+        const nextVersion = await computeNextVersion(goal?.id ?? null)
+
         const insertRow: Record<string, unknown> = {
           client_id:     clientId,
           discovery_id:  discoveryId,
@@ -281,6 +368,8 @@ function makeHuatuoStream(
           agent_name:    'huatuo',
           progress_note: '排队中…',
           generated_at:  new Date().toISOString(),
+          goal_id:       goal?.id ?? null,     // DAPE W4: 一对一
+          version:       nextVersion,           // DAPE W4: 版本化 (v1/v2/v3)
         }
         if (priorMeta) {
           insertRow[priorMeta.relationField] = priorMeta.priorPrescriptionId
@@ -312,11 +401,12 @@ function makeHuatuoStream(
         maxRecentDecisions: 5,
       })
 
-      // 2. 执行华佗（补充/修订模式带 priorContext，附 L3 记忆上下文）
+      // 2. 执行华佗（补充/修订模式带 priorContext，附 L3 记忆上下文，DAPE W4 附 Goal）
       try {
         const result = await runHuatuo(supabaseAdmin, discovery, intake, {
           priorContext: priorMeta?.priorContext,
           memoryContext,
+          goal,    // DAPE W4: 一对一 Goal 注入 prompt
           onProgress: async (note) => {
             sendEvent({ type: 'progress', note })
             if (prescriptionId) {

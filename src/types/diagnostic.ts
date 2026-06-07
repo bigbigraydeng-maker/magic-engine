@@ -163,6 +163,17 @@ export interface Prescription {
   supplements_id: string | null
   /** 本处方修订/替代了哪份处方（批准后原处方置 superseded）。NULL = 非修订 */
   supersedes_id: string | null
+  /**
+   * DAPE Week 2 W4 — Phase 31 三层骨架对齐: 处方跟 Goal 一对一.
+   * NULL = pre-DAPE legacy 处方 (CTS/Oztop 现有 6 条). DAPE-era API enforces non-null.
+   * Spec: docs/superpowers/specs/2026-06-08-me-dape-redefine-v0.2.md §2.3
+   */
+  goal_id: string | null
+  /**
+   * 同一 Goal 下处方版本号 (v1/v2/v3...). API 插入时自动 = max(version)+1.
+   * supersedes_id 链路指向上一版的真实 row id; version 是给 UI 渲染滚动 chips 用.
+   */
+  version: number
   created_at: string
   updated_at: string
 }
@@ -350,6 +361,40 @@ export interface PrescriptionPhase {
   name: string
   duration_weeks: number
   actions: PrescriptionAction[]
+  /**
+   * DAPE Week 2 W4 — phase 由 Goal period 派生时长, 每个 phase 派生 1 个 Initiative.
+   * NULL = legacy 处方 (3 阶段固定"止血/建设/护城河"). 新处方华佗必须填.
+   *
+   * Initiative 在处方批准时自动 batch insert (见 PATCH /prescription/[pId]).
+   * Spec §2.3.3.
+   */
+  initiative_seed?: PhaseInitiativeSeed
+}
+
+/**
+ * DAPE Week 2 W4 — 处方每个 phase 派生 1 个 Initiative 的种子.
+ * 字段对齐 Phase 31 `CreateInitiativeInput`. tier 由 initiative_type 自动推导.
+ */
+export interface PhaseInitiativeSeed {
+  /** Phase 31 6 类型 + unassigned. terminal 类型直接 drive Goal verdict, supporting 服务其他 Initiative. */
+  initiative_type:
+    | 'demand_generation'
+    | 'conversion_optimization'
+    | 'trust_building'
+    | 'competitive_defense'
+    | 'market_education'
+    | 'content_asset_production'
+    | 'unassigned'
+  /** Initiative 标题 (跟 phase.name 一致, 或更精炼). 中文. */
+  title: string
+  /** 进攻 / 防守 / 快攻 / 慢推. NULL = 待 FDE 填. */
+  posture?: 'offensive' | 'defensive' | 'fast' | 'slow' | null
+  /** 占 Goal 总预算的百分比. 同 Goal 下所有 Initiative budget_percent 之和 ≤ 100. */
+  budget_percent?: number | null
+  /** 为什么押这一条 (战略假设, 90 天后验证). FDE/AI 一起填. */
+  hypothesis?: string | null
+  /** Supporting 类型必须指向 1 个 terminal Initiative. 由派生逻辑后填 (不在 huatuo 输出). */
+  supports_phase_number?: number | null
 }
 
 export interface KPITarget {

@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { generateExecutionItems } from '@/lib/diagnostic/execution-generator'
+import { deriveInitiativesFromPrescription } from '@/lib/diagnostic/initiative-derive'
 import type { Prescription, PrescriptionStatus } from '@/types/diagnostic'
 
 // 关键：禁用 Next.js 路由缓存，否则华佗异步 polling 拿不到刚写入的 content。
@@ -93,13 +94,13 @@ export async function PATCH(
       )
     }
 
-    // Fetch current prescription（含 supersedes_id — 修订处方批准时要归档原处方）
+    // Fetch current prescription（含 supersedes_id 修订归档 + DAPE W4 goal_id/version/content for Initiative 派生）
     const { data: current, error: fetchError } = await supabaseAdmin
       .from('prescriptions')
-      .select('id, status, client_id, supersedes_id')
+      .select('id, status, client_id, supersedes_id, goal_id, version, content')
       .eq('id', pId)
       .eq('client_id', clientId)
-      .single<Pick<Prescription, 'id' | 'status' | 'client_id' | 'supersedes_id'>>()
+      .single<Pick<Prescription, 'id' | 'status' | 'client_id' | 'supersedes_id' | 'goal_id' | 'version' | 'content'>>()
 
     if (fetchError || !current) {
       return NextResponse.json({ success: false, error: 'Prescription not found' }, { status: 404 })
@@ -113,11 +114,30 @@ export async function PATCH(
       )
     }
 
-    // ── 批准：先生成 execution_items，成功后才标记 approved ──────────────
+    // ── 批准：先派生 Initiative + 生成 execution_items，成功后才标记 approved ──
     // （顺序很重要：若生成失败，status 保持 draft，不会卡在"已批准但无执行项"）
+    let initiativeMap: Record<number, string> = {}
     if (body.status === 'approved') {
+      // DAPE W4: Initiative 自动派生 (BUG-FMT-F21 修法)
+      // 失败不阻塞 — Initiative 派生不影响处方批准, 只记日志, 防止误删 CTS 4 active goals
       try {
-        await generateExecutionItems(supabaseAdmin, pId, clientId)
+        const r = await deriveInitiativesFromPrescription(supabaseAdmin, current)
+        initiativeMap = r.initiativeIdsByPhase
+        console.info('[prescription PATCH] Initiative derivation:', {
+          prescriptionId: pId,
+          goalId: current.goal_id,
+          inserted: r.inserted,
+          skipped: r.skipped,
+        })
+        for (const note of r.notes) console.info('  ', note)
+      } catch (initErr: unknown) {
+        // 故意不阻塞 — Initiative 派生失败不能挡处方批准
+        const msg = initErr instanceof Error ? initErr.message : String(initErr)
+        console.warn('[prescription PATCH] Initiative derivation failed (non-blocking):', msg)
+      }
+
+      try {
+        await generateExecutionItems(supabaseAdmin, pId, clientId, { initiativeIdsByPhase: initiativeMap })
       } catch (genErr: unknown) {
         const msg = genErr instanceof Error ? genErr.message : String(genErr)
         console.error('[prescription PATCH] generateExecutionItems failed:', msg, genErr)

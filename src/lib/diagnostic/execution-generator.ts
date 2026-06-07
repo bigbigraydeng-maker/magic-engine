@@ -36,10 +36,19 @@ import { deriveExecutionTarget } from '@/lib/flywheel/execution-target'
 // Public API
 // ---------------------------------------------------------------------------
 
+/**
+ * DAPE Week 2 W4 — opts.initiativeIdsByPhase 把 phase_number → 派生的 initiative_id
+ * 透传, 让 execution_items.initiative_id 跟 Initiative 关联 (Phase 31 三层骨架闭环).
+ */
+export interface GenerateExecutionItemsOptions {
+  initiativeIdsByPhase?: Record<number, string>
+}
+
 export async function generateExecutionItems(
   supabase: SupabaseClient,
   prescriptionId: string,
   clientId: string,
+  opts: GenerateExecutionItemsOptions = {},
 ): Promise<ExecutionItem[]> {
   // ── Fetch prescription first (needed for expected count) ─────────────────
   const { data: prescription, error } = await supabase
@@ -72,7 +81,7 @@ export async function generateExecutionItems(
   }
 
   // ── Map actions → execution items ────────────────────────────────────────
-  const rows = buildExecutionRows(content, prescriptionId, clientId)
+  const rows = buildExecutionRows(content, prescriptionId, clientId, opts.initiativeIdsByPhase ?? {})
 
   // ── Bulk insert ──────────────────────────────────────────────────────────
   const { data: inserted, error: insertError } = await supabase
@@ -104,6 +113,8 @@ interface ExecutionRow {
   steps_json:      Record<string, unknown>
   execution_target: ExecutionTarget
   sort_order:      number
+  /** DAPE W4: 关联到 phase 派生出的 Initiative (Phase 31 三层闭环) */
+  initiative_id?:  string | null
 }
 
 // execution_items.finding_id 是 UUID 列。但华佗处方的 finding_ids 是
@@ -119,12 +130,14 @@ function buildExecutionRows(
   content: PrescriptionContent,
   prescriptionId: string,
   clientId: string,
+  initiativeIdsByPhase: Record<number, string>,
 ): ExecutionRow[] {
   const rows: ExecutionRow[] = []
 
   for (const phase of content.phases) {
     phase.actions.forEach((action, idx) => {
       const findingIds = Array.isArray(action.finding_ids) ? action.finding_ids : []
+      const initiativeIdForPhase = initiativeIdsByPhase[phase.phase_number] ?? null
       rows.push({
         prescription_id: prescriptionId,
         client_id:       clientId,
@@ -138,6 +151,7 @@ function buildExecutionRows(
         execution_target: action.execution_target
           ?? deriveExecutionTarget(action.dimension, action.fix_type),
         sort_order:      (phase.phase_number - 1) * 100 + idx,
+        initiative_id:   initiativeIdForPhase,
         // 原始 finding_ids 字符串 + 华佗 FDE 字段存进 steps_json 留溯源
         steps_json: {
           ...buildStepsJson(action),
