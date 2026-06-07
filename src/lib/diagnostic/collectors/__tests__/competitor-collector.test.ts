@@ -251,31 +251,16 @@ describe('CompetitorCollector.collect() — traffic unknowable (BUG-FMT-S14)', (
     expect(result.findings.some(f => f.finding_type === 'competitor_traffic_unknowable')).toBe(true)
   })
 
-  it('returns score=null when client itself has organic_traffic=null', async () => {
-    // Client has no SEMrush row at all — `clientMetrics` is null. Old code
-    // coerced to 0 and gave a fake 100. New code must say null.
-    mockGetCompetitorDomains.mockResolvedValue([
-      { domain: 'a.co.nz', overlap_score: 0.5, organic_traffic: 1000, authority_score: 20 },
-      { domain: 'b.co.nz', overlap_score: 0.4, organic_traffic: 900,  authority_score: 18 },
-      { domain: 'c.co.nz', overlap_score: 0.3, organic_traffic: 800,  authority_score: 15 },
-    ])
-    // First call (for the client) rejects; later calls (for competitors)
-    // succeed via the default mock. allSettled isolates each per-domain call.
-    mockGetDomainMetrics.mockImplementation((d: string) => {
-      if (d === DOMAIN) return Promise.reject(new Error('client has no SEMrush row'))
-      return Promise.resolve({ organic_traffic: 900, authority_score: 18 })
-    })
-    const result = await new CompetitorCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS)
-    // clientTraffic falls back to the DataForSEO entry, which doesn't exist
-    // for the client itself — so clientMetrics resolves to null and the
-    // collector enters the unknowable branch.
-    expect(result.score === null || typeof result.score === 'number').toBe(true)
-    // We can't deterministically force null for the client path through the
-    // public collect() because organic_traffic falls back to the
-    // DataForSEO competitor entry's value, not the client's. This test
-    // documents the desired behaviour without being flaky — the precise
-    // null branch is exercised by the test above.
-  })
+  // Note (魏征 review HIGH#2): we originally drafted a second test here trying
+  // to force the "clientTraffic === null" branch by rejecting only the client's
+  // SEMrush call. The test ended up as a tautology — the public collect()
+  // signature doesn't let us deterministically force `clientMetrics === null`
+  // through these mocks because the SEMrush fallback paths interact with the
+  // already-fetched DataForSEO competitor entries in ways the mock surface
+  // can't cleanly isolate. Rather than ship a fake green test, we document
+  // the coverage gap honestly: the all-zero competitors path above is the
+  // representative case (same code branch), and the client-null path is
+  // exercised end-to-end by the runner integration tests / live diagnostics.
 })
 
 // ---------------------------------------------------------------------------

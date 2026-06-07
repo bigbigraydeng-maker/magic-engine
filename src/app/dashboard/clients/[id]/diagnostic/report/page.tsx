@@ -261,24 +261,47 @@ export default function DiagnosticReportPage() {
         `/api/clients/${clientId}/diagnostic/runs/${reportData.run_id}/synthesize`,
         { method: 'POST' },
       )
+      // BUG-FMT-S13 HIGH#1 review fix — per-module state matters: rerun-from-DB
+      // path loses competitorList in memory so competitor_analysis is always
+      // skipped on manual rerun. FDE must see WHICH modules ran vs skipped,
+      // not just an overall "ran/cost" line, otherwise an empty competitor
+      // section after a successful regenerate looks like a fresh bug.
+      type ModuleStatus =
+        | { state: 'ok'; rows_written: number; cost_usd: number }
+        | { state: 'skipped'; reason: string }
+        | { state: 'failed'; error: string }
       const body = await res.json() as {
         success: boolean
         ran?: boolean
         skipped_reason?: string | null
         total_cost_usd?: number
+        modules?: Record<string, ModuleStatus>
         error?: string
       }
       if (!res.ok || !body.success) {
         throw new Error(body.error ?? `HTTP ${res.status}`)
       }
+      const moduleLabels: Record<string, string> = {
+        score_explanations:   '得分解释',
+        dimension_narratives: '维度叙事',
+        competitor_analysis:  '竞品分析',
+        market_context:       '市场上下文',
+      }
       if (body.ran) {
-        setSynthNotice(
-          `叙事已重新生成（成本 $${(body.total_cost_usd ?? 0).toFixed(3)}）。点"打印 / PDF"刷新报告。`,
-        )
+        const modules = body.modules ?? {}
+        const okList     = Object.entries(modules).filter(([, m]) => m.state === 'ok'     ).map(([k]) => moduleLabels[k] ?? k)
+        const skipList   = Object.entries(modules).filter(([, m]) => m.state === 'skipped').map(([k]) => moduleLabels[k] ?? k)
+        const failList   = Object.entries(modules).filter(([, m]) => m.state === 'failed' ).map(([k]) => moduleLabels[k] ?? k)
+        const cost   = (body.total_cost_usd ?? 0).toFixed(3)
+        const okStr   = okList.length   ? `✓ 已生成：${okList.join('、')}` : ''
+        const skipStr = skipList.length ? `· 跳过：${skipList.join('、')}` : ''
+        const failStr = failList.length ? `· 失败：${failList.join('、')}` : ''
+        setSynthNotice(`叙事重生 完成（$${cost}）${okStr} ${skipStr} ${failStr}`.trim())
       } else {
         setSynthNotice(`未生成新叙事：${body.skipped_reason ?? 'unknown'}`)
       }
-      // Reload report so the new narratives show up.
+      // Reload report so the new narratives show up. cache-bust prevents
+      // browser HTTP cache from returning stale HTML.
       await fetchReport()
     } catch (e) {
       setSynthNotice(`生成失败：${e instanceof Error ? e.message : String(e)}`)

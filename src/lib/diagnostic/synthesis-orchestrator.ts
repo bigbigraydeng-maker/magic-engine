@@ -78,6 +78,7 @@ export interface OrchestratorResult {
     | 'disabled_by_env'
     | 'rate_limited_24h'
     | 'no_findings_at_all'
+    | 'client_not_found'
   /** Per-module status. Lets the manual endpoint show FDE what worked. */
   modules: {
     score_explanations: ModuleStatus
@@ -148,9 +149,10 @@ export async function runSynthesis(
   // Load client context (brand name, domain, industry, country) for prompts.
   const client = await loadClientContext(supabase, input.clientId)
   if (!client) {
-    // Can't prompt without client name/domain — return as if rate-limited so
-    // the runner doesn't crash. This shouldn't happen in practice.
-    return { ...emptyResult, skipped_reason: 'no_findings_at_all' }
+    // Can't prompt without client name/domain — shouldn't happen in practice
+    // but degrade gracefully so the runner doesn't crash. Distinct reason
+    // string so log triage knows it wasn't a findings-empty diagnostic.
+    return { ...emptyResult, skipped_reason: 'client_not_found' }
   }
 
   const ctx = { runId: input.runId, clientId: input.clientId }
