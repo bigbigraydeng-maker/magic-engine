@@ -294,14 +294,60 @@
 
 ---
 
+### 窗口 feat/phase23-memory-fixes-and-cron — Reputation 多源 collector（F2 口碑维度）
+
+**主题**：F2 6 维诊断的 **reputation 维度**——多源 Apify scrapers（TripAdvisor / Booking / ProductReview / Hipages）+ 行业感知权重 + 每源独立 timeout race-condition 修复。已上线 main 三个 PR（#385 #390 #397）。
+
+**覆盖飞毛腿格子**：F2 × CTS（reputation 维度）+ F2 × Oztop（reputation 维度）
+
+- **你这块功能 FDE 在 ME 后台哪个 URL/菜单能点到？**
+  - 主入口：`/dashboard/clients/[id]/diagnostic` → 点 "运行新诊断" / "重跑诊断"
+  - 等 5-10 分钟后 → 同一页面看 "诊断报告" → **口碑卡片**（分数 0-100 或 "未配置"）+ findings 列表
+  - findings 类型 FDE 能看到的：`business_not_listed`（critical, 真的没 Google listing）/ `low_review_rating`（high, < 3.5 星）/ `insufficient_review_count`（medium, < 20 reviews）/ `review_lookup_failed`（high, 多源查询都失败可能是 transient）/ `reviews_likely_off_platform`（low, 高分但少评论暗示客户在 TripAdvisor 上）
+
+- **FDE 手动点完一次需要几步？**
+  - 4 步：进诊断页 → 点"运行新诊断"按钮 → 等 5-10 分钟（多源并发抓取）→ 看口碑卡片 + 展开 findings
+  - **没有任何额外 UI 操作**——industry / brand_aliases 字段是别窗口的 Settings UI 管的，reputation 维度只是消费
+
+- **CTS 和 Oztop 测试时，应该填什么真实业务数据？**
+  - **CTS Tours**（industry=`travel`）→ tourism 桶 → 自动调 GBP + TripAdvisor（**不调 Booking**，因旅行社不是住宿）。期望分：**~54**（GBP 4.0 ⭐ × 5 reviews 兜底，TripAdvisor 实测查不到 CTS listing 返 null）。已 PM 实测验证 ✅
+  - **Oztop Building Supplies**（industry=`flooring`）→ building 桶 → GBP + ProductReview.com.au。期望分：**~83**（GBP 4.0 ⭐ × 30 reviews，PR #397 之前 race condition 致 null，hotfix 后应回归）
+  - **绝不编 reputation 数据**——所有数字必须来自 Render 上 Apify scrapers 真实抓的结果（Apify 账户已上线 $29/月）
+
+- **当前是否有「UI 上点不到，必须开 Supabase 直填」的字段？**
+  - ✅ **本窗口 reputation 多源逻辑自身无新字段**——industry / brand_aliases / city / country 都是 clients 表已有字段，别窗口的 Settings UI 已经维护（或 PM 在追之）
+  - ⚠️ **但有一个相关产品缺陷**：FDE 在诊断结果页**看不到 reputation 维度是哪些源贡献了分数**——例如 CTS 54 分到底是 "GBP only" 还是 "GBP + TripAdvisor 都查不到所以重归一化为 GBP" FDE 区分不出来。这是 **F2 × reputation 的 UI 缺口**，登记为 BUG-FMT-REP-001（P2，影响 FDE 排查能力）。详见第六节
+  - ⚠️ **另一个相关缺陷**：当 reputation 维度返 null + 出 `review_lookup_failed` finding 时，**FDE 没法在 UI 上看到具体哪个 source 超时了**（Render 日志有 `[reputation-scraper:tripadvisor] timed out after 20000ms` 但 FDE 没 Render 访问）。登记 BUG-FMT-REP-002（P2）
+
+- **预计上线日期 / 当前是否已在 main 可点**
+  - ✅ **已在 main**（PR #385 多源接入 / PR #390 voyager Booking + tourism/accommodation 拆桶 / PR #397 per-source timeout hotfix）
+  - ✅ Render 已自动部署 PR #397（2026-06-06 16:34 UTC merged）
+  - ✅ PM 已实测 CTS 诊断走通（口碑 54 = GBP-only 安全降级正确）
+  - ⏳ **Oztop hotfix 后的口碑分数（应 ~83）等飞毛腿测试时 FDE 走 UI 验证**
+
+- **可贡献到 FEIMAOTUI.md 第二节的哪几格**
+  - **F2 × CTS（reputation 维度）**：FDE 点"重跑诊断" → 看口碑 54 分 + 展开 findings（应该有 `low_review_rating` 或 `reviews_likely_off_platform` 之类）→ 验证无 `business_not_listed`（CTS 有 Google listing）
+  - **F2 × Oztop（reputation 维度）**：FDE 点"重跑诊断" → 看口碑分（hotfix 后应 ~83 而非 null）→ 展开 findings → 验证无 `review_lookup_failed`（hotfix 后应有 GBP 出分）
+  - 本窗口**不贡献 F1/F3/F4/F5/F6/F7**（reputation 是诊断维度，不接入飞轮——CLAUDE.md 明文：reputation + competitor 只诊断不接入飞轮，FDE 外部完成）
+
+**本窗口产出的资产**（已 merged 进 main）：
+- PR #385 `feat(diagnostic): 多源 reputation + 行业感知权重 + 4 个 Apify scraper` (commit `1806413`)
+- PR #390 `fix(reputation): Booking actor swap + tourism/accommodation bucket split + 5 follow-ups` (commit `26f89e3`)
+- PR #397 `fix(reputation): per-source timeouts so a hung Apify scraper does not nuke GBP` (commit `8b3c50e` 估算 / hotfix)
+
+**遗留 follow-up（不影响飞毛腿）**：
+- 5 项 LOW/HIGH 技术债登记 Task #36（魏征 PR #397 review 给的）：fake timers 重构测试（CI 50s→<1s）+ withTimeout 注释补 reject 路径说明 + Booking/Hipages hung 测试对称 + Timeouts 注入参数化 + S1-3 from #390 review
+
+---
+
 ## 四、子牙汇总进度（实时更新）
 
 | Phase | 子任务 | 客户 | 负责窗口 | 状态 | 备注 |
 |---|---|---|---|---|---|
 | F1 | Onboarding 体检 | CTS | TBD | ⬜ 未开始 | |
 | F1 | Onboarding 体检 | Oztop | TBD | ⬜ 未开始 | |
-| F2 | 6 维诊断 | CTS | TBD | ⬜ 未开始 | |
-| F2 | 6 维诊断 | Oztop | TBD | ⬜ 未开始 | |
+| F2 | 6 维诊断 | CTS | feat/phase23-memory-fixes-and-cron（reputation 维度后端）+ funny-liskov（AI Visibility 数据质量）+ strange-brown（UI 实测）| 🟡 reputation 已 PR #385/390/397 上线 main，PM 实测过 54 分；其他 5 维待 FDE UI 全维度跑 | reputation 实测 = 54（GBP-only 兜底，TripAdvisor 0 items）|
+| F2 | 6 维诊断 | Oztop | feat/phase23-memory-fixes-and-cron（reputation 维度后端）+ funny-liskov（AI Visibility）+ strange-brown（UI 实测）| 🟡 reputation hotfix #397 上线后应 ~83，**待 FDE UI 验证** | hotfix 前曾退化到 null（race condition），#397 修复后应回归 |
 | F3 | Goal 设定 | CTS | nostalgic-rubin（资产）+ strange-brown（UI 实测）| 🟡 资产就绪待 UI 验证 | Goal `7e6d6ff0` 已 SQL 建好，需 FDE UI 重做 |
 | F3 | Goal 设定 | Oztop | TBD | ⬜ 未开始 | |
 | F4 | Initiative 编排 | CTS | nostalgic-rubin（资产）+ strange-brown（UI 实测）+ funny-goodall（约束修复）| 🟡 资产就绪待 UI 验证 | Initiative `61c5ac23` 已 SQL 建好，BC-001 待 UI 验证 |
@@ -351,6 +397,8 @@
 | BUG-P0F-001 | F1 Onboarding / Brand Brief | P2 | `/portal/register` 表单的 Website URL 字段是 **optional**。FDE 注册自助账号不填 → `clients.domain` 留 NULL → FDE 进 dashboard 后看不到客户域名（左侧客户卡片缺关键标识）。Settings 页能补但 FDE 容易忘。建议：注册时把 URL 改 required，或 Brief 第一字段强制要求。当前 `/dashboard/clients/[id]/settings` 已有 UI 可补 domain，所以不是阻断 P1 | p0-fixes (dreamy-shannon-e3b391) | ⏳ 待飞毛腿 F1 实测 |
 | BUG-P0F-002 | F3 付费用户升级闭环 | **P1** | Stripe checkout 付款成功 + webhook 收到 `checkout.session.completed` → 当前只写 `mtc_purchases` 表，**不升级 `client_portal_users.access_type`**。FDE/客户付款后 access_type 仍是 `self_serve`，看不到 paid_client 专属页（如 Marketing Plan / Strategy / Diagnostic 等付费功能）。子牙 grep `src/app/api/stripe/webhook/route.ts` + `src/lib/auth/upgrade-self-serve.ts` 确认：手动 PUT `/api/clients/[id]/upgrade` 存在，但 webhook 没自动调它。**FDE 视角**：付完钱仍卡在 self-serve 视图，找不到付费功能入口。**修法**：在 webhook `checkout.session.completed` handler 里调 `upgradeSelfServeToPaid()`。已知工作量半天 | p0-fixes (dreamy-shannon-e3b391) | 🟡 修法已明，待回本职 Phase 修 |
 | BUG-P0F-003 | F1-F7 全局 / dashboard layout | P2 | P0-J PR-1 把 `dashboard/layout.tsx` 的 `userTier` fallback 从 `'admin'` 改成 `'portal_only'`（防止 header 缺失时静默升级 admin）。**副作用**：admin/FDE 如果通过非 middleware 路径（如 cookie 失效后旧 SSR 缓存）访问 `/dashboard`，会被降级看到 portal_only sidebar，找不到 paid sidebar 项。当前没有 hard data 说真发生过，但 P0-J PR-2/PR-3（拆 `/workspace` 路由）后会更彻底解决。**短期缓解**：FDE 遇到 sidebar 缺项时 hard refresh 一次。当前不阻断飞毛腿 | p0-fixes (dreamy-shannon-e3b391) | 🟡 短期可接受，待 P0-J PR-2/PR-3 彻底解决 |
+| BUG-FMT-REP-001 | F2 reputation 维度结果展示 | P2 | FDE 在诊断页看到口碑分数（如 CTS 54 / Oztop 83），**但看不到分数是由哪些源贡献的**——例如 54 分到底是 "tourism 桶 GBP-only 兜底" 还是 "GBP + TripAdvisor 都查到" FDE 无法区分。线索仅在 Render 日志 `[reputation-scraper:tripadvisor] Apify returned no items ...`，FDE 没有 Render 访问。诊断报告页应该在口碑卡片下方加一行展示 "评分来源：GBP（4.0★/5 reviews）" 或 "评分来源：3 平台（GBP / TripAdvisor / Booking）" 让 FDE 可解释 | feat/phase23-memory-fixes-and-cron | ⏳ 待登记后续 PR 修复 |
+| BUG-FMT-REP-002 | F2 reputation 超时可见性 | P2 | 当 reputation 维度返 null + 出 `review_lookup_failed` finding 时，FDE **看不到具体哪个 source 超时了**（GBP / TripAdvisor / ProductReview / Booking / Hipages 哪个）。线索仅在 Render 日志 `[reputation-collector] productReview fetch timed out after 20000ms`。诊断报告页应该把 timed-out source 列表附在 finding description 里，便于 FDE 排查（"建议运营核对此客户的 industry 字段或检查 Apify 账户余额"）。本窗口 task #36 follow-up 范围内 | feat/phase23-memory-fixes-and-cron | ⏳ 待登记后续 PR 修复 |
 
 ---
 
@@ -375,3 +423,4 @@
 - **v0.3** — 2026-06-07 funny-liskov + funny-goodall 两窗口写入分工 + 3 个 P1/P2 Bug
 - **v0.4** — 2026-06-07 nostalgic-rubin 窗口分工合入（CTS Best of China Google Ads 资产）+ 2 个 P0 候选 Bug + F3-CTS/F4-CTS/F5-CTS-Ads 行登记负责窗口 + 准备 PR 到 main
 - **v0.5** — 2026-06-07 p0-fixes (dreamy-shannon-e3b391) 窗口分工合入：6 个 P0 PR 已 merged（self-serve 注册漏斗 + 多租户隔离 P0-J PR-1/2a）+ 3 个 Bug (BUG-P0F-001/002/003：domain optional + Stripe 升级缺口 + tier fallback 副作用) + 自报 SQL 红线踩踏（v0.2 红线前的 P0 诊断+止血 DB 操作）+ 承诺零 SQL 后续
+- **v0.6** — 2026-06-07 feat/phase23-memory-fixes-and-cron 窗口分工合入（reputation 多源 collector，F2 × CTS/Oztop 口碑维度）+ 2 个 P2 Bug（reputation 评分来源不可见 + 超时 source 不可见）+ rebase 恢复（原 PR #410 因子牙误操作 cleanup 致 CLOSED，commit `d2949fc` 由 `refs/pull/410/head` 救回，新 PR 重开）
