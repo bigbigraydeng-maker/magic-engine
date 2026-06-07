@@ -8,6 +8,7 @@ import { DimensionScoreCard, type BaselineInfo } from '@/components/diagnostic/D
 import { DiagnosticFindingCard } from '@/components/diagnostic/DiagnosticFindingCard'
 import { useDiagnosticStatus } from './_hooks/use-diagnostic-status'
 import { OVERALL_WEIGHTING_NOTE } from '@/lib/diagnostic/score-formula-explainer'
+import { sanitiseLegacyScores } from '@/lib/diagnostic/legacy-score-sanitiser'
 import type { DiagnosticRun, DiagnosticFinding, DiagnosticDimension } from '@/types/diagnostic'
 
 // ---------------------------------------------------------------------------
@@ -432,7 +433,7 @@ export function DiagnosticClient() {
     return f.dimension === dimFilter
   })
 
-  const dimensionScores = (run?.dimension_scores ?? {}) as Partial<Record<DiagnosticDimension, number | null>>
+  const rawDimensionScores = (run?.dimension_scores ?? {}) as Partial<Record<DiagnosticDimension, number | null>>
 
   // S15: chip dimensions come from the run itself so adding/removing a dimension
   // never requires a UI edit. Fall back to the default ordering if the run
@@ -453,8 +454,23 @@ export function DiagnosticClient() {
   // FDE to the same Settings page rather than contradicting each other.
   const dimensionsSkipped: DiagnosticDimension[] = (run?.dimensions_skipped ?? []) as DiagnosticDimension[]
   const skippedSet = new Set<DiagnosticDimension>(dimensionsSkipped)
+
+  // 魏征 H4 + 板桥 P0: legacy competitor=100 sanitiser.
+  // Pre-PR-251 CompetitorCollector defaulted to score=100 when < 3 competitors
+  // were found, instead of returning null. PM caught those legacy runs on the
+  // live page ("竞品 100 健康是什么鬼"). Code fix already shipped, but the
+  // historical runs still render green-100 until the FDE reruns.
+  // Pure read-time guard, narrow to the exact bug fingerprint — see
+  // lib/diagnostic/legacy-score-sanitiser.ts tests for boundary behaviour.
+  const sanitised = sanitiseLegacyScores({
+    rawScores: rawDimensionScores,
+    dimensionsSkipped: skippedSet,
+    findingCountByDim,
+  })
+  const dimensionScores = sanitised.scores
+  const effectiveSkippedSet = sanitised.effectiveSkippedSet
   const fixDeeplinkFor = (dim: DiagnosticDimension): string | undefined => {
-    if (!skippedSet.has(dim)) return undefined
+    if (!effectiveSkippedSet.has(dim)) return undefined
     return `/dashboard/clients/${clientId}/${DIMENSION_CONFIG_ANCHOR[dim]}`
   }
 
