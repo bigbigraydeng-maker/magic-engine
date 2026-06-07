@@ -93,7 +93,7 @@ ME 自有获客面向**两类人，诉求不同**，落地页 / 内容 / CTA **�
 | **P3 替你出活：提示词 + 市场计划** | 接付费客户需求 | **付费客户** | ai marketing for SMEs, ai training for business (50), ai automation for small business | MOFU/BOFU |
 | **P4 真实案例（Oztop / CTS 具名）** | 转化临门一脚 | 两者 | 案例/结果型长尾 | BOFU |
 
-> 写每篇前，用 **ME 自己的 Keyword Intelligence（DataForSEO `bulkKeywordVolume`）拉真实量级**再定标题——既保证不编数字，也是 dogfooding。SEMrush MCP 当前账号无 MCP 权限，统一走 ME 内部 DataForSEO 链路。
+> 写每篇前，用 **ME 自己的 Keyword Intelligence（= DataForSEO，`bulkKeywordVolume`）拉真实量级**再定标题——既保证不编数字，也是 dogfooding。**SEMrush 已全停用，关键词/SEO 数据一律走 DataForSEO**（封装名 Keyword Intelligence 背后现在就是 DataForSEO）。
 
 ---
 
