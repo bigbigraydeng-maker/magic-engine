@@ -292,11 +292,24 @@ export default function DiagnosticReportPage() {
         const okList     = Object.entries(modules).filter(([, m]) => m.state === 'ok'     ).map(([k]) => moduleLabels[k] ?? k)
         const skipList   = Object.entries(modules).filter(([, m]) => m.state === 'skipped').map(([k]) => moduleLabels[k] ?? k)
         const failList   = Object.entries(modules).filter(([, m]) => m.state === 'failed' ).map(([k]) => moduleLabels[k] ?? k)
-        const cost   = (body.total_cost_usd ?? 0).toFixed(3)
         const okStr   = okList.length   ? `✓ 已生成：${okList.join('、')}` : ''
         const skipStr = skipList.length ? `· 跳过：${skipList.join('、')}` : ''
         const failStr = failList.length ? `· 失败：${failList.join('、')}` : ''
-        setSynthNotice(`叙事重生 完成（$${cost}）${okStr} ${skipStr} ${failStr}`.trim())
+        // 板桥 review — 兼职 FDE 看到金额会紧张；成本只暴露给 admin。
+        // (admin tier 当前在前端无直接信号；保守做法：只显示金额若 >$0，
+        // 让 FDE 知道有花费但不强调具体数字。)
+        const cost   = body.total_cost_usd ?? 0
+        const costStr = cost > 0 ? ` · 本次约 $${cost.toFixed(2)}` : ''
+        const mainLine = `叙事重生 完成${costStr} ${[okStr, skipStr, failStr].filter(Boolean).join(' ')}`.trim()
+        // 板桥/狄仁杰 HIGH — 特化"竞品分析跳过(manual rerun 内存丢失)"提示，
+        // 让 FDE 知道这是设计而非 bug + 给出下一步动作。
+        const competitorReason = modules.competitor_analysis?.state === 'skipped'
+          ? modules.competitor_analysis.reason
+          : null
+        const hint = competitorReason && /manual rerun/i.test(competitorReason)
+          ? '\n提示：竞品分析仅在跑新诊断时生成；如需更新竞品段，请回"速览"页点"运行新诊断"。'
+          : ''
+        setSynthNotice(mainLine + hint)
       } else {
         setSynthNotice(`未生成新叙事：${body.skipped_reason ?? 'unknown'}`)
       }
@@ -452,7 +465,7 @@ export default function DiagnosticReportPage() {
       {/* Inline notice for synthesis result */}
       {synthNotice && (
         <div className="flex-shrink-0 bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-start justify-between gap-3">
-          <p className="text-xs text-amber-800 leading-relaxed">{synthNotice}</p>
+          <p className="text-xs text-amber-800 leading-relaxed whitespace-pre-line">{synthNotice}</p>
           <button
             onClick={() => setSynthNotice(null)}
             className="text-amber-600 hover:text-amber-900 flex-shrink-0"

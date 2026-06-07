@@ -503,6 +503,8 @@ describe('generateReport — P8.10.S4.1', () => {
       run: { ...MOCK_RUN, dimension_scores: { seo: 55 } },
     })
     const { markdown } = await generateReport(supabase as never, RUN_ID, CLIENT_ID)
-    expect(markdown).toContain('无数据')
+    // 板桥 review — placeholder changed from '无数据' to a customer-facing phrase
+    // explaining the dimension is "暂未覆盖" rather than implying laziness.
+    expect(markdown).toContain('本期暂未覆盖')
   })
 })

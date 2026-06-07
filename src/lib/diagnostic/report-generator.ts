@@ -325,10 +325,15 @@ function renderSummaryMd(
   ].join('\n')
 }
 
+// 板桥 review — "无数据" 客户看到等于"你们偷懒"。改成显式的"本期暂未覆盖"
+// 让客户理解这是"在路上"不是"没做"。null = 数据源未连接 / 数据不足，
+// 不是诊断质量问题。
+const NO_SCORE_DISPLAY = '本期暂未覆盖'
+
 function renderBaselineMd(run: DiagnosticRun): string {
   const rows = DIMENSION_ORDER.map(dim => {
     const score = run.dimension_scores?.[dim]
-    const display = score == null ? '无数据' : `${score}/100`
+    const display = score == null ? NO_SCORE_DISPLAY : `${score}/100`
     return `| ${DIMENSION_LABELS[dim]} | ${display} |`
   }).join('\n')
 
@@ -350,7 +355,7 @@ function renderDimensionsMd(
 
   for (const dim of DIMENSION_ORDER) {
     const score = run.dimension_scores?.[dim]
-    const scoreDisplay = score == null ? '无数据' : `${score}/100`
+    const scoreDisplay = score == null ? NO_SCORE_DISPLAY : `${score}/100`
     sections.push(`### ${DIMENSION_LABELS[dim]} — ${scoreDisplay}`)
 
     const explanation = buckets.score_explanation.find(n => n.dimension === dim)
@@ -706,7 +711,9 @@ function formatDate(iso: string | null): string {
 }
 
 function scoreVerdict(score: number | null): string {
-  if (score == null) return '未评分'
+  // 板桥 review — "未评分" 客户看会困惑（"我交了钱怎么没评分"）。
+  // null verdict = 某些维度数据源未连接，本期综合分无法计算。
+  if (score == null) return '本期暂未覆盖（数据源待连接）'
   if (score >= 80) return '健康'
   if (score >= 60) return '一般'
   if (score >= 40) return '偏弱'

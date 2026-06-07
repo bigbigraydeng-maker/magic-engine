@@ -69,6 +69,12 @@ export interface OrchestratorInput {
    * sets this to true so FDE can refresh narratives on demand.
    */
   force?: boolean
+  /**
+   * Set by rerunSynthesisForRun. When true, competitorList won't be
+   * available (it lives only in collector memory) so competitor_analysis
+   * will skip with a clearer reason than "need ≥2 competitors".
+   */
+  isManualRerun?: boolean
 }
 
 export interface OrchestratorResult {
@@ -178,7 +184,7 @@ export async function runSynthesis(
       : { state: 'failed', error: persist.error ?? 'persist failed' }
     totalCost += result.cost_usd
   } catch (err) {
-    modules.score_explanations = { state: 'failed', error: messageOf(err) }
+    modules.score_explanations = { state: 'failed', error: safeErrorForFde(err, 'score_explanations') }
   }
 
   // ─── 2. Dimension narratives (one call per dimension with findings) ──────
@@ -204,7 +210,7 @@ export async function runSynthesis(
       totalCost += dimCost
     }
   } catch (err) {
-    modules.dimension_narratives = { state: 'failed', error: messageOf(err) }
+    modules.dimension_narratives = { state: 'failed', error: safeErrorForFde(err, 'dimension_narratives') }
   }
 
   // ─── 3. Competitor analysis (one call, ≥2 competitors required) ──────────
@@ -212,9 +218,14 @@ export async function runSynthesis(
     try {
       const competitorList = input.resultMap['competitor']?.competitorList ?? []
       if (competitorList.length < 2) {
+        // Distinct reason for manual rerun: competitorList only lives in
+        // collector memory and is lost on rerun-from-DB. FDE needs to know
+        // this is design, not bug — and how to get the missing analysis.
         modules.competitor_analysis = {
           state: 'skipped',
-          reason: `need ≥2 competitors, got ${competitorList.length}`,
+          reason: input.isManualRerun
+            ? 'competitor list not available on manual rerun (re-run the full diagnostic for fresh competitor analysis)'
+            : `need ≥2 competitors, got ${competitorList.length}`,
         }
       } else {
         const result = await analyzeCompetitorLandscape({
@@ -229,7 +240,7 @@ export async function runSynthesis(
         totalCost += result.cost_usd
       }
     } catch (err) {
-      modules.competitor_analysis = { state: 'failed', error: messageOf(err) }
+      modules.competitor_analysis = { state: 'failed', error: safeErrorForFde(err, 'competitor_analysis') }
     }
   } else {
     modules.competitor_analysis = { state: 'skipped', reason: 'disabled by env' }
@@ -260,7 +271,7 @@ export async function runSynthesis(
         totalCost += result.cost_usd
       }
     } catch (err) {
-      modules.market_context = { state: 'failed', error: messageOf(err) }
+      modules.market_context = { state: 'failed', error: safeErrorForFde(err, 'market_context') }
     }
   } else {
     modules.market_context = { state: 'skipped', reason: 'disabled by env' }
@@ -290,11 +301,17 @@ async function isAutoRunAllowed(
     .limit(1)
 
   if (error) {
-    // On error, allow — better to spend a bit than to block silently. The
-    // upsert will dedupe on (run_id, kind, dimension) so repeated runs of
-    // the same run_id won't double-charge.
-    console.warn('[synthesis-orchestrator] rate-limit check failed, allowing:', error.message)
-    return true
+    // 狄仁杰 review HIGH — fail-CLOSED. Old code returned true here ("better
+    // to spend a bit than block silently"), which means a transient Supabase
+    // hiccup → uncapped LLM spend across every cron-triggered run. The
+    // safer default is to skip this auto-run; FDE can force-rerun via the
+    // manual endpoint if they genuinely need narratives now.
+    console.warn(
+      `[synthesis-orchestrator] rate-limit check failed for client ${clientId}, ` +
+      `fail-closed (no auto-synthesis this run):`,
+      error.message,
+    )
+    return false
   }
   return !data || data.length === 0
 }
@@ -380,8 +397,29 @@ function resolveMarketCode(country: string | null): MarketCode | null {
   return null
 }
 
-function messageOf(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
+/**
+ * 狄仁杰 review HIGH — return a SAFE error string to the FDE-facing banner.
+ *
+ * Anthropic SDK errors can include the model name, request ID, partial API
+ * key, or even rate-limit headers in `.message` — none of which the UI
+ * should display. Server-side logs keep the full detail; the response
+ * surfaces only a category + opaque code.
+ */
+function safeErrorForFde(err: unknown, moduleName: string): string {
+  // Always log the full detail server-side so ops can debug.
+  const full = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+  console.error(`[synthesis-orchestrator] ${moduleName} failed:`, full)
+
+  // Coarse category for the UI — never the raw SDK message.
+  const code =
+    err instanceof Error && /rate.?limit|429/i.test(err.message) ? 'rate_limited'
+    : err instanceof Error && /timeout|timed.?out/i.test(err.message) ? 'timeout'
+    : err instanceof Error && /api.?key|unauthorized|401/i.test(err.message) ? 'auth_error'
+    : err instanceof Error && /quota|insufficient/i.test(err.message) ? 'quota_exhausted'
+    : err instanceof Error && /5\d{2}/.test(err.message) ? 'upstream_error'
+    : 'llm_call_failed'
+
+  return `LLM call failed (${code}). See server logs for details.`
 }
 
 // ---------------------------------------------------------------------------
@@ -435,5 +473,6 @@ export async function rerunSynthesisForRun(
     resultMap,
     overallScore: run.overall_score ?? 0,
     force: true,
+    isManualRerun: true,
   })
 }
