@@ -153,6 +153,18 @@ interface YTVideoItem {
   statistics: { viewCount?: string; likeCount?: string }
 }
 
+const YOUTUBE_FETCH_TIMEOUT_MS = 10_000
+
+async function fetchWithTimeout(url: string): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), YOUTUBE_FETCH_TIMEOUT_MS)
+  try {
+    return await fetch(url, { signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function searchYouTube(
   keywords: string,
   apiKey:   string,
@@ -167,7 +179,7 @@ async function searchYouTube(
     maxResults:    String(Math.min(limit * 2, 50)),
     key:           apiKey,
   })
-  const res  = await fetch(`https://www.googleapis.com/youtube/v3/search?${params}`)
+  const res  = await fetchWithTimeout(`https://www.googleapis.com/youtube/v3/search?${params}`)
   const data = await res.json() as { items?: YTSearchItem[]; error?: { message: string } }
   if (data.error) throw new Error(`YouTube Search: ${data.error.message}`)
   return data.items ?? []
@@ -180,7 +192,7 @@ async function getVideoDetails(videoIds: string[], apiKey: string): Promise<YTVi
     id:   videoIds.join(','),
     key:  apiKey,
   })
-  const res  = await fetch(`https://www.googleapis.com/youtube/v3/videos?${params}`)
+  const res  = await fetchWithTimeout(`https://www.googleapis.com/youtube/v3/videos?${params}`)
   const data = await res.json() as { items?: YTVideoItem[]; error?: { message: string } }
   if (data.error) throw new Error(`YouTube Videos: ${data.error.message}`)
   return data.items ?? []
