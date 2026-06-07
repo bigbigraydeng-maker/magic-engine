@@ -656,6 +656,7 @@ function ExecutionItemCard({
     <div
       role="button"
       tabIndex={0}
+      data-execution-item-id={item.id}
       onClick={() => onOpenDetail(item)}
       onKeyDown={e => e.key === 'Enter' && onOpenDetail(item)}
       className={`cursor-pointer select-none rounded-lg border p-2 transition-all ${borderClass}`}
@@ -1480,6 +1481,7 @@ function FdeManualGroup({
               }}
               role="button"
               tabIndex={0}
+              data-execution-item-id={item.id}
               onClick={() => onOpenDetail(item)}
               onKeyDown={ev => ev.key === 'Enter' && onOpenDetail(item)}
               className={`rounded-lg border p-2.5 cursor-pointer transition-all select-none ${
@@ -1914,6 +1916,8 @@ export function ExecutionClient() {
   // 右侧详情抽屉
   const [detailItem, setDetailItem]       = useState<ItemWithLogs | null>(null)
   const [detailEditable, setDetailEditable] = useState(false)
+  // F25-L1: 抽屉关闭后, 回到刚才点击的卡片 + 高亮 3 秒, 避免 87 张卡片中"找不回原位"
+  const [lastClosedItemId, setLastClosedItemId] = useState<string | null>(null)
   // 维度过滤
   const [activeDimension, setActiveDimension] = useState<string>('all')
   // 状态过滤（全部/待处理/进行中/已完成）
@@ -2467,6 +2471,23 @@ export function ExecutionClient() {
     setDetailEditable(editable)
   }, [])
 
+  // F25-L1: 抽屉关闭后, 自动滚回刚才点击的卡片 + 高亮 3 秒。
+  // 87 张卡密集时 FDE 关掉抽屉常找不回原位, 用 data-execution-item-id 定位 DOM。
+  useEffect(() => {
+    if (!lastClosedItemId) return
+    const node = document.querySelector<HTMLElement>(
+      `[data-execution-item-id="${lastClosedItemId}"]`,
+    )
+    if (!node) { setLastClosedItemId(null); return }
+    node.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    node.classList.add('ring-2', 'ring-orange-400', 'ring-offset-1', 'bg-orange-50/60')
+    const t = setTimeout(() => {
+      node.classList.remove('ring-2', 'ring-orange-400', 'ring-offset-1', 'bg-orange-50/60')
+      setLastClosedItemId(null)
+    }, 3000)
+    return () => clearTimeout(t)
+  }, [lastClosedItemId])
+
   // 失败重试 — 打开 detail drawer，FDE 进入内容工作台手动再点"生成"。
   // 不直接复用 handleBackgroundGenerate 是因为：retry 时原始 params（platform/
   // counts/angle）已丢失，强制 FDE 走一遍工作台可以让他们检查/修改 prompt
@@ -2942,6 +2963,7 @@ export function ExecutionClient() {
         clientId={clientId}
         editable={detailEditable}
         onClose={() => {
+          setLastClosedItemId(detailItem?.id ?? null)
           setDetailItem(null)
           setStudioItem(null)
           setChatItem(null)
