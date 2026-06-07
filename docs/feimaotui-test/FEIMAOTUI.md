@@ -456,6 +456,35 @@
 | BC-004 | F5 Ads / Connector 设置 | **P0 候选** | FDE 能否在 ME Settings UI 上设置/绑定客户的 **Meta 广告账户 (`clients.meta_ad_account_id`)**？实测 CTS=`act_2775766642787274`、Oztop=`null`。若 Settings 无此字段的 UI → FDE 无法把客户接到 Meta 广告账户 = 必须 Supabase 直填 = P0。飞毛腿测试时需实测 `/dashboard/clients/[id]/settings` 有没有 Meta 广告账户输入框 | loving-cannon-6b69d | ⏳ 待 strange-brown UI 验证 |
 | BC-005 | F5-Social / Campaign Brief 编辑 | **P1 候选** | FDE 能否在 ME UI 上编辑 Campaign Brief 的 **`angle` / `channel_goal`**？实测 Oztop「Elegant Walnut Clearance」(`c0a63a8e`) 这两字段为空 → batch-generate 缺方向。若 Campaign 编辑器 UI 不能填这俩字段 = 必须 Supabase 直填。另：Reels Studio 当前**只能单条逐步生成，不能一次出多条变体**（创意测试要 N 个变体），FDE 要重复点 N 次 | loving-cannon-6b69d | ⏳ 待 strange-brown UI 验证 |
 | BC-006 | F5 Ads-Meta 数据正确性 | **P1** | CTS 绑的 Meta 账户 `act_2775766642787274` 是**多客户混账户**（含 Oztop 的 flooring 广告花费），ME 按"账户级"拉数原样归给 CTS → **CTS 在 ME 看到的 Ads 花费/ROAS 被污染（虚高）**，混入了不属于 CTS 的钱。FDE 在 CTS 看 Ads 数据会看到别客户的花费。根因与修复见 `docs/strategy/meta-flywheel-risk-and-sequencing.md`（狄仁杰 R1）。**铁律：账户治理前禁止再把任何客户绑到该混账户** | loving-cannon-6b69d | 🟡 待账户治理（拆账户 + 企业验证已提交） |
+| BUG-FMT-S01 | F1 Settings UX | P2 | Settings 弹窗滚动时鼠标滚轮事件穿透到背后 dashboard 页面 — FDE 分心晕看不清是哪个面板在动 | strange-brown 飞毛腿 F1 | ✅ 已修 PR #416 |
+| BUG-FMT-S02 | F1 Settings UX | P2 | 点设置按钮 → Settings 弹窗默认滚动到中间 (Brand Voice/Target Audience) 不是顶部 Brand Basics — 容易漏看 | strange-brown 飞毛腿 F1 | ✅ 已修 PR #416 |
+| BUG-FMT-S03 | F1 Settings 平台连接 | **P1** | Settings → 平台连接 Tab **空壳跳出去**到独立 `/dashboard/clients/[id]/connectors` 页面 — 跨 Tab 上下文丢失 | strange-brown 飞毛腿 F1 | ✅ 已修 PR #416 |
+| BUG-FMT-S04 | F1 Settings 关键词配置 | **P0** | Settings 5 Tab 都没有 `primary_keywords / brand_aliases / competitor_domains / meta_ad_account_id` 编辑 UI — 必须开 Supabase 直填 — 违背 CLAUDE.md "FDE/PM 配置类数据必须有 UI" 强约束 | strange-brown 飞毛腿 F1 | ✅ 已修 PR #416 |
+| BUG-FMT-S07 | F1 Settings 客户信息 | P2 | 客户信息 Tab "业务地域设置" 标题下面**完全空白** — FDE 不知道这是啥要点哪 | strange-brown 飞毛腿 F1 | ✅ 已修 PR #416 |
+| BUG-FMT-S09 | F2 诊断报告 | P1 | SEO 卡片显示"未配置"但下方 findings 第一条又是 SEO 高级 finding "Target keywords not configured" — 两边逻辑撞车 FDE 困惑 | strange-brown 飞毛腿 F2 | 🟡 簇 B PR 修中 |
+| BUG-FMT-S10 | F2 诊断报告 UX | P2 | 卡片颜色梯度信息密度不足 — 36/31/48 三个都是红/橙色，FDE 看不出 36 比 31 高 5 分但都是"危险" | strange-brown 飞毛腿 F2 | 🟡 簇 B PR 修中 |
+| BUG-FMT-S11 | F2 诊断报告 UX | P2 | "立即配置 →" 链接 FDE 不知道点了去哪 — hover 没说明 | strange-brown 飞毛腿 F2 | 🟡 簇 B PR 修中 |
+| BUG-FMT-S13 | F2 诊断叙事化 | P3 | `diagnostic_narratives = 0` UI 没入口 | strange-brown 飞毛腿 F2 | 🟡 DAPE W3 worker 跑中 |
+| BUG-FMT-S14 | F2 诊断评分 | **P0** | **PM 现场抓: 客户看打分莫名其妙打分没根据 / 竞品 100 是因为根本没跑竞品维度 (无数据 = 默认满分谎言) / 整个页面非常水** — 评分系统无解释链路 + 默认满分谎言 | strange-brown 飞毛腿 F2 | 🟡 簇 B PR 修中 |
+| BUG-FMT-S15 | F2 诊断 filter | P1 | **PM 抓: 点击全部可以看到 5 条诊断但只能在 SEO 和口碑上看到 2 条** — filter chip 缺"广告" + 无数字徽章 + 空 chip 不 disable | strange-brown 飞毛腿 F2 | 🟡 簇 B PR 修中 |
+| BUG-FMT-S16 | F2 完整报告 PDF | **P0** | **PM 抓: 做这个页面的程序员可以被开除了** — 诊断完整报告页是空架子: 摘要复读机 / 基线快照跟速览一模一样 / 维度详情把 findings 横过来重摆 / 竞品 100/100 下面什么都没有 / PDF 导出意味着这页可以打印给客户 | strange-brown 飞毛腿 F2 | 🟡 DAPE Week 1 修中 |
+| BUG-FMT-F6 | F3 Goal 退步 | **P1** | current 156 < baseline 166 但 UI 不警告"在退步" + GROWTH 81% 计算逻辑不透明 — 客户看了以为"还在路上"实际反向恶化 | strange-brown 飞毛腿 F3 | 🟡 DAPE Week 1 修中 |
+| BUG-FMT-F7 | F3 Goal GROWTH | P2 | GROWTH 81% 算法不透明 (156/300=52% 166/300=55% 倒推不出 81%) — 鼠标 hover 没显示算法 | strange-brown 飞毛腿 F3 | 🟡 DAPE Week 1 修中 |
+| BUG-FMT-F8 | F3 Goal 执行进度 | P1 | "No actions yet under any Initiative" 跟下面 "Unassigned Backlog 46" 自相矛盾 — UI 文案没考虑 unassigned | strange-brown 飞毛腿 F3 | 🟡 DAPE Week 3 修中 |
+| BUG-FMT-F9 | F3 Goal BUDGET | P1 | **PM 框出**: Goal BUDGET "— not set" + Initiative 抽屉问 "% of Goal · 剩余 100%" 的设计矛盾 — Goal 没设总预算时 Initiative 的 % 是什么意思 | strange-brown 飞毛腿 F3 | 🟡 DAPE Week 2 修中 |
+| BUG-FMT-F11 | F3 Initiative hypothesis | P1 | HYPOTHESIS 文本框存的是 `\n` 字面转义字符串 + 无 markdown 渲染 — FDE 看了一片乱码不敢编辑 | strange-brown 飞毛腿 F3 | 🟡 DAPE Week 2 修中 |
+| BUG-FMT-F15 | F3 Initiative POSTURE | **P0** | POSTURE 2×2 矩阵 (Offensive/Defensive × Fast/Slow) vs 后端单字段 4 选 1 的 UX/schema 矛盾 — FDE 直觉以为要选 2 个，实际只能 4 选 1 | strange-brown 飞毛腿 F3 | 🟡 DAPE Week 2 修中 |
+| BUG-FMT-F16 | F4 处方页入口 | P1 | 诸葛亮处方页**无 dashboard/Goal/Initiative 入口** — 只能从工具菜单进 / 客户主页 GIPMT 第 3 段太小 / Goal 详情页没关联处方入口 — 信息架构问题 | strange-brown 飞毛腿 F4 | 🟡 DAPE Week 2 修中 |
+| BUG-FMT-F19 | F4 处方 3 阶段时长 | P1 | 处方"3 阶段时长"写死 12 周 vs Goal period 错位 — 如果 Goal 是 6 个月/1 年/3 个月，处方还是 12 周 | strange-brown 飞毛腿 F4 | 🟡 DAPE Week 2 修中 |
+| BUG-FMT-F20 | F4 处方阶段命名 | P1 | "止血/建设/护城河" 命名来源迷 — 混合 3 种行业隐喻 (医疗+咨询+投资) + 来源没在 UI 标注 | strange-brown 飞毛腿 F4 | 🟡 DAPE Week 2 修中 |
+| BUG-FMT-F21 | F4 处方早期设计 | **P0 候选** | 早期设计未升级 — 处方"3 阶段"模板自成第 4 层跟 Phase 31 三层 (Goal→Initiative→Action) 脱节 = 信息冗余 + 心智模型混乱 | strange-brown 飞毛腿 F4 | 🟡 DAPE Week 2 修中 |
+| BUG-FMT-F22 | F4 处方→执行归因 | **P0 候选** | execution_items 表无 prescription_id 字段 — 处方 → 执行 traceability 链断 — FDE 看 kanban 卡片不知道这条 action 是哪个处方的哪个阶段哪个动作 | strange-brown 飞毛腿 F4 | 🟡 DAPE Week 3 修中 |
+| BUG-FMT-F23 | F4 链路过长 | **P0** | **PM 抓**: ME 当前链路 11 层 (诊断→处方→Goal→Initiative→Campaign→Marketing Plan→Execution Items→Kanban→Outcome→Verdict→月报) 但客户心智 ≤4 层 FDE ≤5 层 — 不是"长"是"散" 11 层里 7 层是断的 | strange-brown 飞毛腿 F4 | 🟡 DAPE 整体重构 (本 spec) |
+| BUG-FMT-F24 | F4-F5 Campaign/Plan 价值 | P1 | Campaign / Marketing Plan **独特价值在 UI 上没体现** — FDE 看不出"为什么我要点 Campaign 而不是 Kanban" | strange-brown 飞毛腿 F4 | 🟡 DAPE Week 3 修中 |
+| BUG-FMT-F25-L1 | F5 Kanban UX | **P0 阻断** | **PM 抓: 任务太多, 点开抽屉后, 再关闭不知道哪个任务应该关注** — 抽屉关闭后滚动位置丢失 + 没有"我刚才看的是哪个"视觉锁定 | strange-brown 飞毛腿 F5 | 🟡 Kanban PR 跑中 |
+| BUG-FMT-F25-L2 | F5 Kanban AI 推荐 | P0 | Kanban 顶部缺 "AI 推荐今天做 3 件" — 当前 87 张卡片平铺 FDE 不知道从哪开始 — 违背 ME"AI 当参谋"定位 | strange-brown 飞毛腿 F5 | 🟡 DAPE Week 3 修中 |
+| BUG-FMT-F29 | F5 Launch Hub 工作流 | P2 | **PM 抓**: Launch Hub 弹"关联处方执行项"下拉 26 个候选 FDE 手动选 → 内容生成时没绑定 prescription_action_id → 数据流反了 | strange-brown 飞毛腿 F5 | 🟡 等社媒发布工具重做 (PM 决定) |
+| BUG-FMT-CORE-1 | 核心引擎重定义 | **P0 战略级** | **PM 终极一击**: 20 年 CMO 不会用 GIMPT 11 层 / 缺 Discovery+Analysis / AI 是装饰品不是引擎 / 6 大支柱是末端标签不是核心轴 — ME 核心引擎不应该是 GIMPT 应该是 DAPE (Discovery / Analysis / Prescription / Execution) | strange-brown 飞毛腿 + 5-agent 复审 | 🟡 DAPE spec v0.2 已签字, 5 worker 并行实施 |
 
 ---
 
