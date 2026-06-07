@@ -100,11 +100,39 @@ export class CompetitorCollector {
     })
 
     // 4. Compute score
-    const clientTraffic = clientMetrics?.organic_traffic ?? 0
+    //
+    // BUG-FMT-S14 — "competitor 100/100 with nothing under it" root cause.
+    // The old code used `ratio = avgCompetitorTraffic > 0 ? clientTraffic / avg : 1`
+    // which silently returned `1` (i.e. score 100 = "you tie with everyone")
+    // when EITHER the client OR every competitor had no traffic data — both
+    // of which mean we genuinely don't know who is winning, not that they're
+    // tied. Same convention as `competitors.length < 3` above: when data is
+    // missing the score MUST be null, never a fake confidence-100.
+    const clientTraffic = clientMetrics?.organic_traffic ?? null
+    const compTrafficValues = competitorList
+      .map(c => c.organic_traffic)
+      .filter((t): t is number => typeof t === 'number' && t > 0)
     const avgCompetitorTraffic =
-      competitorList.reduce((sum, c) => sum + c.organic_traffic, 0) / competitorList.length
+      compTrafficValues.length > 0
+        ? compTrafficValues.reduce((s, t) => s + t, 0) / compTrafficValues.length
+        : null
 
-    const ratio = avgCompetitorTraffic > 0 ? clientTraffic / avgCompetitorTraffic : 1
+    if (clientTraffic === null || avgCompetitorTraffic === null) {
+      return {
+        score: null,
+        findings: [
+          this.makeCompetitorTrafficUnknowableFinding(
+            clientId,
+            clientTraffic,
+            avgCompetitorTraffic,
+            competitorList,
+          ),
+        ],
+        competitorList,
+      }
+    }
+
+    const ratio = clientTraffic / avgCompetitorTraffic
     const score = Math.min(100, Math.round(ratio * 100))
 
     // 5. Generate findings
@@ -188,6 +216,51 @@ export class CompetitorCollector {
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * BUG-FMT-S14 — emitted when we have ≥3 competitor domains but cannot
+   * compute the traffic ratio because EITHER the client OR every competitor
+   * is missing organic_traffic data (DataForSEO returned 0 or null).
+   *
+   * Distinct from `competitor_data_insufficient` which fires when we couldn't
+   * even find competitor domains. Both result in `score: null` so the
+   * dimension is excluded from overall_score weighting.
+   */
+  private makeCompetitorTrafficUnknowableFinding(
+    clientId: string,
+    clientTraffic: number | null,
+    avgCompetitorTraffic: number | null,
+    competitorList: CompetitorEntry[],
+  ): NewFinding {
+    const missing = clientTraffic === null
+      ? avgCompetitorTraffic === null ? 'both' : 'client'
+      : 'competitors'
+    return {
+      client_id: clientId,
+      dimension: 'competitor',
+      finding_type: 'competitor_traffic_unknowable',
+      severity: 'high',
+      title: 'Competitor traffic gap is not yet measurable',
+      description:
+        missing === 'client'
+          ? 'Your domain has no organic traffic data on file yet, so the gap vs competitors cannot be quantified. Score reported as "not configured" to avoid a misleading 100/100.'
+          : missing === 'competitors'
+            ? 'All discovered competitor domains lack organic_traffic data from DataForSEO. Score reported as "not configured" until at least one competitor has measurable traffic.'
+            : 'Neither this domain nor any competitor has organic_traffic data on file. Score reported as "not configured" to avoid a misleading 100/100.',
+      evidence: makeEvidence({
+        parsed: {
+          client_traffic: clientTraffic,
+          avg_competitor_traffic: avgCompetitorTraffic,
+          competitors_found: competitorList.length,
+          competitors_with_traffic: competitorList.filter(c => c.organic_traffic > 0).length,
+        },
+      }),
+      recommendation:
+        'Wait until the site has earned organic keyword rankings (see SEO dimension) and re-run the diagnostic; DataForSEO refreshes monthly. If competitors are truly all unknown to DataForSEO, supplement via Client Settings → Competitors.',
+      fix_type: 'fde_manual',
+      priority_score: 60,
+    }
+  }
 
   private makeCompetitorDataInsufficientFinding(
     clientId: string,

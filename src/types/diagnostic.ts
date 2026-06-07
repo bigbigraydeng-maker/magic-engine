@@ -84,6 +84,7 @@ export type CompetitorFindingType =
   | 'traffic_gap_large'
   | 'no_competitor_data'
   | 'competitor_data_insufficient'  // P8.5.21: < 3 competitors detected
+  | 'competitor_traffic_unknowable' // BUG-FMT-S14: ≥3 competitors but traffic data missing — score=null instead of fake 100/100
 
 export type FindingType =
   | SeoFindingType
