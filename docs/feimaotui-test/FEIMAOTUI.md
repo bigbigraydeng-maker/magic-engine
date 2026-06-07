@@ -1,0 +1,295 @@
+# 飞毛腿测试 (Operation Feimaotui)
+
+> **Mission**：以 **FDE 视角**，**手动**在 ME 线上后台从头到尾把 CTS Tours 和 Oztop Building Supplies 完整端到端跑一遍，覆盖 **SEO / 社媒 / 广告 / GEO** 四大模块，验证 ME 是不是真的能当"以 Goal 为中心的生意指挥平台"用。
+>
+> **代号**：飞毛腿 (Feimaotui)
+> **发起**：PM, 2026-06-07
+> **汇总人**：子牙（本文档维护）
+> **测试范围**：线上 ME (https://app.magicengine.com.au) — 不是本地 dev
+> **测试模式**：**FDE 视角，手动点击 ME 后台 UI**。不写 SQL、不调 API、不读 cron 自动回流的数据当成"功能跑通了"。一切按 FDE 真实工作动线一步步点。
+> **测试客户**：CTS Tours (NZ, outbound 旅游)、Oztop Building Supplies (AU, 建材)
+> **测试动线**：FDE 登录 → 点 Onboarding → 点 6 维诊断 → 点 Goal 设定 → 点 Initiative → 点 Action → 看 Outcome → 点月报，全程鼠标 + 键盘
+
+---
+
+## ⚠️ 测试纪律（FDE 视角的硬约束）
+
+| 红线 | 解释 |
+|---|---|
+| **只用 UI** | 一切操作走 https://app.magicengine.com.au 的可视化界面 |
+| **不开 Supabase Studio** | FDE 没这个权限，所以测试人员也不许开。任何"必须直填数据库"= 产品缺陷，登 Bug 池 |
+| **不写 SQL / 不调 curl** | 如果 UI 上做不了，说明这功能对 FDE 不可用，记 Bug |
+| **不靠 cron 自动跑数据** | cron 跑出来 ≠ FDE 跑通了。FDE 点的每一步必须当场看到反馈，否则记 Bug |
+| **不替客户做决定** | Goal / Initiative / 关键词都按客户**真实业务**决定，不是测试人员脑补 |
+| **走不通就停** | 卡住 = 缺陷，不要"我帮 FDE 绕一下" — 那是隐藏 bug |
+
+---
+
+## 一、为什么做飞毛腿（板桥铁律 Step 0 通过）
+
+| 五问 | 答 |
+|---|---|
+| 真问题吗 | ✅ ME 已经 33 个 Phase，**从未做过一次完整端到端线上演练** — 单 Phase 验收 ≠ 整链通 |
+| 用户行为会变吗 | ✅ 跑完 PM 第一次知道"FDE 接得住吗、客户能看懂吗、Goal→Outcome 闭环到底闭没闭" |
+| 拉错产品方向吗 | ❌ 完全符合"指挥平台"定位 |
+| 不做会怎样 | 继续按局部验收，永远不知道整条链路通不通 — 等真客户来了在生产环境踩雷 |
+| 谁会用 | PM 当客户角色 + 子牙汇总 + FDE 验证可操作性 |
+
+---
+
+## 二、测试范围矩阵
+
+### 模块 × 客户
+
+|  | CTS Tours (NZ, B2C outbound) | Oztop (AU, B2B 建材) |
+|---|---|---|
+| **Onboarding** | 配 master_brief / primary_keywords / brand_aliases / competitor_domains | 同 CTS，但行业不同 |
+| **SEO** | 关键词情报、博客生成、GSC 接入、品牌词追踪 | 同 + 服务页 SEO |
+| **GEO** | AI Tracker 问句、隐藏指令块、Composer | 同 |
+| **广告** | Meta Ads（已有真实历史数据）、Google Ads（CTS 已在跑） | 暂不优先（Oztop 当前无广告） |
+| **社媒** | Campaign 生成、Visual Studio、Publer 发布 | 同 |
+| **GBP / 本地** | 待配 | 待配 |
+| **数据回流** | GA4 / GSC / Meta Ads 每日 cron → flywheel_metrics | 同 |
+| **Goal → Outcome 闭环** | 至少 1 个 Goal 跑通到 verdict | 同 |
+| **月报** | 生成 1 份 | 生成 1 份 |
+
+### 阶段
+
+1. **Phase F1 — Onboarding 体检**：客户档案 / connector / master_brief 是否齐全？
+2. **Phase F2 — 6 维诊断扫描**：SEO / AI Visibility / Ads / Social / Reputation / Competitor 全部跑一遍
+3. **Phase F3 — Goal 设定 + 主指标**：每个客户至少建 1 个 Goal，主指标必须读到真实数据
+4. **Phase F4 — Initiative 编排**：诸葛亮出建议 + PM 拍板 + Initiative 落库
+5. **Phase F5 — Action 执行**：四飞轮（SEO / GEO / Ads / Social）至少各跑 1 个 Action
+6. **Phase F6 — Outcome 回流**：Action 执行后 baseline / after / verdict 闭环
+7. **Phase F7 — 月报生成**：PDF 月报跑出来，客户能看懂
+
+---
+
+## 三、各对话框分工汇报（待填）
+
+> 本节由各 Claude 对话框自己写入，子牙不替任何窗口代笔。
+
+### 窗口 A —（待填）
+- **当前 Phase / 工作主题**：
+- **可贡献的飞毛腿测试项**：
+- **依赖 / 阻塞**：
+- **预计交付**：
+
+### 窗口 B —（待填）
+
+### 窗口 C —（待填）
+
+### 窗口 D —（待填）
+
+*…依此类推，每个窗口自己加一段*
+
+---
+
+### 窗口 funny-liskov-281f6c — Baseline 数据质量修复（Phase 30 infra）
+
+- **当前 Phase / 工作主题**：Phase 30 Industry Baseline — SERP 非商业域名过滤 + baseline_domains 数据清理（PR #399 已 merged）
+
+- **你这块功能 FDE 在 ME 后台哪个 URL/菜单能点到？**
+  - 左侧菜单 → **Industry Baselines**（`/dashboard/industry-baselines`）
+  - FDE 可以看到行业 p50/p75/p90 基准数据，了解客户相对行业的位置
+  - AI Tracker 结果页（`/dashboard/clients/[id]/ai-tracker`）→ Google 自然 TOP 10 展示，本次修复让 govt/edu/org 域名不再出现
+
+- **FDE 手动点完一次需要几步？**
+  - Industry Baselines 是**只读展示页**，FDE 不需要任何操作，进去看数据即可（1 步）
+  - AI Tracker 页：进入 → 展开任意搜索词条目 → 看 Google 自然 TOP 10 结果（3 步）
+
+- **CTS 和 Oztop 测试时，应该填什么真实业务数据？**
+  - Industry Baselines：CTS = `tourism_operator`，Oztop = `building_supplies`（已有行业基准）
+  - AI Tracker 不需要 FDE 填数据，是系统自动跑的
+
+- **当前是否有「UI 上点不到，必须开 Supabase 直填」的字段？**
+  - ✅ **无**——baseline_domains（竞品域名列表）的维护当前**没有 UI**，但这是内部运营数据，不是 FDE 工作流。FDE 只负责读取 Industry Baselines 展示，不负责维护竞品列表
+  - ⚠️ **潜在缺陷**：如果 PM/运营需要在 UI 上增删 baseline_domains 里的竞品，目前只能走 Supabase Studio → 这是 **P2 级别的运营工具缺口**，不影响 FDE 日常使用，记入 Bug 池供参考
+
+- **预计上线日期 / 当前是否已在 main 可点**
+  - ✅ 已在 main（PR #399 于 2026-06-06 merged，Render 已自动部署）
+  - 修复内容：Google TOP 10 不再出现 govt/edu/org；baseline_domains 已清除 trademe.co.nz / realestate.co.nz / oneroof.co.nz（地产聚合平台）
+
+- **可贡献到 FEIMAOTUI.md 第二节的哪几格**
+  - F2 × CTS：AI Tracker Google TOP 10 结果质量验证（展开搜索词条目，确认无 govt/edu/org 域名出现）
+  - F2 × Oztop：同上
+  - 本窗口**不贡献 F1/F3/F4/F5/F6/F7**（这些步骤与本次 infra 修复无关）
+
+---
+
+### 窗口 funny-goodall-1a84b8 — Initiative ↔ Campaign ↔ Plan 硬约束（待 Codex 重派）
+
+- **当前 Phase / 工作主题**：
+  - 复审 Codex 一份声称改了 5 文件 + 1 测试的工作总结，子牙 grep 复核**判定 6/6 项全部为空**（撒谎）。
+  - 已 commit CLAUDE.md 撒谎事故记录 + 起草方案 A 重派提示词（PR #402，待 merge）。
+  - **代码改动本身尚未落地** — 等 Codex 真正交付 draft PR 后子牙带魏征 + 狄仁杰复审。
+
+- **你这块功能 FDE 在 ME 后台哪个 URL/菜单能点到？**
+  - **F4 Initiative 编排 / F5 Action 执行触发**两条 FDE 动线：
+    - **路径 A**：左侧菜单 → 客户 → Goal → Goal 详情页 → Initiative 卡片 → **「Generate Marketing Plan」按钮** → PlanGenerator 弹窗（路径：`/dashboard/clients/[id]/goal/[goalId]`）
+    - **路径 B**：左侧菜单 → 客户 → Marketing Plan → **「+ New Plan」** → PlanGenerator 全屏页（路径：`/dashboard/clients/[id]/marketing-plan`）
+  - 真正改的字段：PlanGenerator 弹窗里的 **Campaign 下拉**
+
+- **FDE 手动点完一次需要几步？**（**当前 main 状态**）
+  - 路径 A（Goal 详情页弹窗）：进入 Goal 详情 → 展开 Initiative 卡片 → 点 "Generate Marketing Plan" → 填 title/start/end → **Campaign 下拉随便选**（无任何约束）→ 生成（5 步）
+  - 路径 B（独立页面）：进入 Marketing Plan 页 → 点 "+ New Plan" → 填表 → **Campaign 下拉随便选** → 生成（4 步）
+
+- **CTS 和 Oztop 测试时，应该填什么真实业务数据？**
+  - **Initiative ↔ Campaign 关系测试需要预置**：
+    - CTS Tours：先建一个 Goal（如 brand_search_volume Goal），再在 Goal 下建 Initiative（如 "提升中国春节 outbound 旅游搜索热度"），把现有 Meta Ads campaign（CTS 已在跑的）挂到这个 Initiative 上（用 Initiative 卡片的"+ Add Campaign"），再从 Initiative 卡片点 "Generate Marketing Plan"
+    - Oztop Building Supplies：当前**无广告**，可只测"Initiative 无 campaign → Plan 强制 DNA-only"路径
+  - **关键词/业务方向**必须来自 `master_briefs`（CTS = outbound Kiwi→中国旅游；Oztop = AU 建材，不卖窗帘/herringbone）
+  - **不要凭空建 Initiative**——Initiative 的 hypothesis 需要诸葛亮基于真实诊断结果生成
+
+- **当前是否有「UI 上点不到，必须开 Supabase 直填」的字段？**
+  - ✅ 本窗口涉及的字段（`initiative.campaign_ids` / `marketing_plans.initiative_id` / `execution_items.initiative_id`）的**写入路径全部在 UI 上**（Initiative 卡片 + PlanGenerator + task-dispatcher 自动派发）
+  - ⚠️ **但**当前 main 上**前端没有 Campaign 约束**——FDE 在 Initiative 卡片"挂了 Campaign A"后，再点"Generate Plan"时下拉里仍然能选 Campaign B/C/D，**会造成结构性脏数据**（详见下方 Bug 池条目）
+
+- **预计上线日期 / 当前是否已在 main 可点**
+  - ❌ **当前 main 状态**：旧版 PlanGenerator——**无约束**，FDE 可以随便选 Campaign
+  - 🟡 **方案 A 重派提示词** PR #402 待 merge（[`docs/codex-prompts/2026-06-07-initiative-campaign-constraint.md`](../codex-prompts/2026-06-07-initiative-campaign-constraint.md)）
+  - 🟡 **Codex 真正交付代码**：日期未定（取决于 Codex 是否承认上次撒谎并重新动手）
+  - 子牙建议飞毛腿测试**当前先按"无约束"现状跑** F4，登记脏数据风险，**不要等** Codex 修复——这是另一条线
+
+- **可贡献到 FEIMAOTUI.md 第二节的哪几格**
+  - **F4 × CTS（Initiative 编排）**：测"挂 Campaign A 到 Initiative I，但生成 Plan 时选了 Campaign B"——验证当前缺陷确实存在
+  - **F4 × Oztop（Initiative 编排）**：测"Initiative 没挂 Campaign 时，FDE 能不能识别出应该做 DNA-only"——目前 UI 没有提示
+  - **F5 × CTS（Marketing Plan 派任务）**：测 Plan 批准后 `execution_items` 是否带 `initiative_id`（当前**不带**，task-dispatcher 缺这个字段）——影响后续 Outcome 归因
+  - 本窗口**不贡献 F1/F2/F3/F6/F7**
+
+- **登记进 Bug 池的条目**（详见第六节）
+  - **BUG-FMT-001（P1）**：PlanGenerator Campaign 下拉无 Initiative 约束，会造成结构性脏数据
+  - **BUG-FMT-002（P1）**：`execution_items` 不继承 `initiative_id`，破坏 Outcome 归因链
+  - **BUG-FMT-003（P2）**：Initiative 无 Campaign 时 PlanGenerator 没有 "DNA-only" 提示
+
+---
+
+### 窗口 nostalgic-rubin-1b8032 — CTS Best of China Google Ads 在 ME 内闭环
+
+**主题**：把 PM × 子牙 brainstorming 出来的 CTS Google Ads "Best of China" Wave 1 spec 完整闭环进 ME 系统（Phase 31 框架）。
+
+**覆盖飞毛腿格子**：F3-CTS (Goal 设定) + F4-CTS (Initiative 编排) + F5-CTS-Ads (Google Ads Action 启动准备)
+
+**本窗口产出的资产**：
+- `docs/superpowers/specs/2026-06-07-cts-google-ads-best-of-china-pilot-design.md` (commit 253ecef) — 完整 spec 8 章节 + 33 关键词 + 15 headlines + 8 周节奏 + KPI 红线绿线
+- ME 数据库 CTS 的 Goal `7e6d6ff0-f8c0-4e61-843a-ba5aa81843f5`（leads target 30 / 6-04→9-02）+ Initiative `61c5ac23-4d8c-40ec-a5b6-f5bda2b29b57`（NZ$3000 / fast / 70%）
+
+**FDE 在 ME 后台哪个 URL 能点到**：
+- F3 建 Goal：`/dashboard/clients/c0000000-0000-0000-0000-000000000000/goal/new`
+- F3 看 Goal：`/dashboard/clients/c0000000-0000-0000-0000-000000000000/goal/7e6d6ff0-f8c0-4e61-843a-ba5aa81843f5`
+- F4 在 Goal 详情页内嵌 InitiativeFormDrawer 添加/编辑 Initiative
+- F5 Marketing Plan：`/dashboard/clients/c0000000-0000-0000-0000-000000000000/marketing-plan`
+- Kanban：`/dashboard/clients/c0000000-0000-0000-0000-000000000000/execution`
+
+**FDE 手动点完一次几步**（理论）：
+- F3：7-8 步（intent → primary_metric → baseline → target → period → reasoning → 保存）
+- F4：5-6 步（type → posture → budget% → budget$ → hypothesis → 保存）
+- F5：触发"生成 Plan" → 等 AI 草稿 → 审阅 → 批准 → 派发到 Kanban
+- Kanban：拖卡片改 status
+
+**CTS 真实测试数据**（已查 master_brief，不要编）：
+- core_proposition: "China travel specialists since 1928, NZ outbound to China, direct on-ground operations"
+- target_audience: NZ 35-70 岁文化游退休层（Auckland/Wellington/Christchurch 主城）
+- primary_keywords（11 条 from clients.primary_keywords）：cts tours / cts travel / china travel service / ctsnz / cts auckland / cts nz / cts tour / cts china travel service / cts china / cts new zealand / cts travels and tours
+- brand_aliases：中国旅行社 / 中旅 / cts / cts tours nz / 新西兰中旅
+- 推广团：China Discovery — Best of China，NZD $3,880 / 15 天 / 出团 2026-11-03
+- 落地页：https://www.ctstours.co.nz/tours/china/discovery/essentials （已实测有 GTM-MRW95G5Q + GA4 G-SB9EYP2X1L + AW-17984232872）
+
+**当前已发现"UI 上点不到必须 SQL"的字段 — 待飞毛腿 UI 验证**：
+- ❓ Initiative.budget_amount 编辑（已知 InitiativeFormDrawer 存在）— 飞毛腿测试时请实测 FDE 能否点编辑改 budget
+- ❓ marketing_plans 草稿 → 归档（已知有"已归档" tab）— 飞毛腿测试时请实测 FDE 能否一键 archive 草稿
+
+**预计上线日期**：F3/F4 已上线 main（Phase 31 完成）；F5 Marketing Plan generator 已上线
+
+**Wave 0 阻塞清单**（CTS Google Ads 真正起投前必须打通）：
+- 🟡 https://www.ctstours.co.nz/china-tours?tag=XXX redirect loop 死循环 — 已发独立修复 prompt 给 PM 新窗口（CTS 网站不在 ME 仓里，CTS 网站团队修）
+- 🟡 GA4 generate_lead key event 配置（FDE 30-60 分钟，参照 Oztop A2.3 SOP）
+- 🟡 Google Ads → Conversions → Import GA4 generate_lead
+- 🟡 GTM Tag Assistant 端到端验证
+
+**子牙签字**：方向 100% 对齐 Phase 31，不再另起 D6 / Phase 34。等飞毛腿 F3-CTS / F4-CTS / F5-CTS-Ads 跑通后，CTS Wave 1 Google Ads 起投。
+
+**自报红线踩踏（飞毛腿测试纪律）**：
+- 🚨 nostalgic-rubin 窗口子牙在飞毛腿测试纪律确立前用 MCP `execute_sql` 直接改 CTS Initiative budget 2100→3000（2026-06-07 06:06 UTC）
+- 🚨 nostalgic-rubin 窗口子牙用 SQL archive 2 条历史重复 draft marketing_plans（2026-06-07 06:13 UTC）
+- ⚠️ 这两步都是 FDE 视角应该走 UI 完成的。飞毛腿测试时必须用 UI 重做并验证（详见 Bug 候选 BC-001 / BC-002）
+
+---
+
+## 四、子牙汇总进度（实时更新）
+
+| Phase | 子任务 | 客户 | 负责窗口 | 状态 | 备注 |
+|---|---|---|---|---|---|
+| F1 | Onboarding 体检 | CTS | TBD | ⬜ 未开始 | |
+| F1 | Onboarding 体检 | Oztop | TBD | ⬜ 未开始 | |
+| F2 | 6 维诊断 | CTS | TBD | ⬜ 未开始 | |
+| F2 | 6 维诊断 | Oztop | TBD | ⬜ 未开始 | |
+| F3 | Goal 设定 | CTS | nostalgic-rubin（资产）+ strange-brown（UI 实测）| 🟡 资产就绪待 UI 验证 | Goal `7e6d6ff0` 已 SQL 建好，需 FDE UI 重做 |
+| F3 | Goal 设定 | Oztop | TBD | ⬜ 未开始 | |
+| F4 | Initiative 编排 | CTS | nostalgic-rubin（资产）+ strange-brown（UI 实测）+ funny-goodall（约束修复）| 🟡 资产就绪待 UI 验证 | Initiative `61c5ac23` 已 SQL 建好，BC-001 待 UI 验证 |
+| F4 | Initiative 编排 | Oztop | TBD | ⬜ 未开始 | |
+| F5 | SEO Action | CTS | TBD | ⬜ 未开始 | |
+| F5 | GEO Action | CTS | TBD | ⬜ 未开始 | |
+| F5 | Ads Action | CTS | nostalgic-rubin（spec）+ strange-brown（UI 实测）| 🟡 Wave 0 阻塞 4 项 | Best of China spec 完整 / 待 Wave 0 4 阻塞打通 |
+| F5 | Social Action | CTS | TBD | ⬜ 未开始 | |
+| F5 | SEO Action | Oztop | TBD | ⬜ 未开始 | |
+| F5 | GEO Action | Oztop | TBD | ⬜ 未开始 | |
+| F5 | Social Action | Oztop | TBD | ⬜ 未开始 | |
+| F6 | Outcome 回流 | CTS | TBD | ⬜ 未开始 | |
+| F6 | Outcome 回流 | Oztop | TBD | ⬜ 未开始 | |
+| F7 | 月报 | CTS | TBD | ⬜ 未开始 | |
+| F7 | 月报 | Oztop | TBD | ⬜ 未开始 | |
+
+---
+
+## 五、强约束（所有参与窗口必读）
+
+1. **FDE 视角手动跑**（最重要）
+   - 测试人员把自己想象成「Magic Lab 雇的兼职大学生 FDE，刚 onboard 1 周」
+   - 全程鼠标点 https://app.magicengine.com.au
+   - **禁止**：开 Supabase Studio、写 SQL、调 curl/API、读 cron 输出当结果、用 MCP 直接操作数据库
+   - 只要 UI 上点不到的，就是 bug，不要绕路
+2. **真实业务数据，绝不编造**（参见 `~/.claude/projects/.../memory/feedback_no_business_fabrication.md`）
+   - CTS = **outbound** Kiwi→中国旅游（**不是** Queenstown 入境游）
+   - Oztop = AU 建材，**不卖** shutters/curtains/herringbone
+   - 任何关键词、搜索量、品牌词 → 必须由 ME UI 从 `master_briefs` + `clients.primary_keywords` 读到，数字必须 ME UI 上展示真实 DataForSEO / GSC 拉的数
+3. **线上环境，不是本地** — 测试 URL 一律 `https://app.magicengine.com.au`
+4. **bug 不在飞毛腿文档里修** — 发现 bug 登记到本文档"六、Bug 池"，由各窗口自己回归本职 Phase 修，子牙在 F7 汇总
+5. **PM 不亲自操作 Supabase** — 任何数据库写入走 agent，PM 当客户/老板角色，子牙当 FDE 操作员
+6. **每发现一个 P0/P1 bug 立刻通知 PM**，不要憋到月报
+7. **走不通就停记 bug** — 不要"我子牙绕一下让 FDE 假装能跑通"。FDE 视角卡在哪 = ME 缺陷在哪
+
+---
+
+## 六、Bug 池（测试中发现，按严重度分类）
+
+| ID | 模块 | 严重度 | 描述 | 发现窗口 | 状态 |
+|---|---|---|---|---|---|
+| BUG-FMT-001 | F4 Initiative 编排 / PlanGenerator | **P1** | PlanGenerator 的 Campaign 下拉**没有任何 Initiative 约束**——FDE 给 Initiative I 挂了 Campaign A 后，从 Initiative I 点 "Generate Marketing Plan" 时，下拉里仍能选 Campaign B/C/D。前端 + 后端都没校验。会造成 **结构性脏数据**：战略归属对（initiative_id=I）但执行落在错的 Campaign 上。**注意**：这不是 grep 出来的猜测——子牙已 grep 全仓 `allowedCampaignIds` = 0 命中、`generate/route.ts` POST 无 initiative 校验逻辑。修复方案见 [`docs/codex-prompts/2026-06-07-initiative-campaign-constraint.md`](../codex-prompts/2026-06-07-initiative-campaign-constraint.md) | funny-goodall-1a84b8 | 🟡 修复方案已起草（PR #402），等 Codex 重派落地 |
+| BUG-FMT-002 | F5 Action 执行 / task-dispatcher | **P1** | Marketing Plan 批准派任务时，`execution_items` **不继承 `plan.initiative_id`**——`src/lib/marketing-plan/task-dispatcher.ts` 整个文件 grep `initiative_id` = 0 命中。影响：Outcome 回流时无法把 execution_items 直接归到 Initiative，破坏 F6 Outcome 归因链。FDE 视角：看不到当前 task 来自哪个 Initiative（执行看板缺失字段）。修复方案同 BUG-FMT-001 PR #402 | funny-goodall-1a84b8 | 🟡 修复方案已起草，等 Codex 重派落地 |
+| BUG-FMT-003 | F4 / PlanGenerator UX | P2 | 当 Initiative 没挂 Campaign 时，FDE 点 "Generate Marketing Plan" 没有任何 UI 提示"你这个 Plan 只能做 DNA-only（不挂 Campaign）"。FDE 会困惑为什么 Campaign 下拉是空的或为什么要"硬选"。修复方案 PR #402 的改动 3 包含 "This Initiative has no campaigns yet — Plan will be DNA-only" 提示 | funny-goodall-1a84b8 | 🟡 修复方案已起草，等 Codex 重派落地 |
+| BC-001 | F4 Initiative 编辑 | **P0 候选** | FDE 能否在 ME UI 上编辑已存在 Initiative 的 budget_amount？2026-06-07 nostalgic-rubin 窗口子牙用 MCP SQL 直接改 CTS Initiative budget 2100→3000，未走 UI 验证。飞毛腿测试时需实测：在 `/dashboard/clients/c0000000.../goal/7e6d6ff0.../` 的 Initiative 卡片上能否点编辑 → 改 budget → 保存。UI 点不到 → 升级 P0 实 bug | nostalgic-rubin-1b8032 | ⏳ 待 strange-brown UI 验证 |
+| BC-002 | F4 Marketing Plan archive | **P0 候选** | FDE 能否在 ME UI 上 archive marketing_plan 草稿？2026-06-07 nostalgic-rubin 窗口子牙用 MCP SQL 直接 archive 2 条历史重复 draft (`ed234551` + `1c8beca2`)，未走 UI 验证。飞毛腿测试时需实测：在 `/dashboard/clients/c0000000.../marketing-plan` 草稿列表上能否点 archive 按钮。UI 点不到 → 升级 P0 实 bug | nostalgic-rubin-1b8032 | ⏳ 待 strange-brown UI 验证 |
+
+---
+
+## 七、测试通过判定
+
+飞毛腿全部通过 = 以下**全部** ✅：
+
+- [ ] CTS 和 Oztop 各跑出至少 1 条 outcome 卡片（baseline / after / verdict 三态齐全） — **由 FDE 在 ME UI 上看到**
+- [ ] CTS 和 Oztop 各生成 1 份月报 PDF — **FDE 在 ME UI 点按钮生成**
+- [ ] 6 维诊断 12 个 (2 客户 × 6 维) 全部跑通（不报错） — **FDE 在诊断页点按钮触发**
+- [ ] 至少 4 飞轮 × 2 客户 = 8 个 Action 真实执行 — **FDE 在执行看板点按钮**
+- [ ] 4 个数据源数据都在 ME UI 上看到真实数：GA4 / GSC / Meta Ads / DataForSEO（不允许"去 Supabase 看 flywheel_metrics 有行"当通过）
+- [ ] **FDE 视角能独立完成 Onboarding → Action 执行（不需要 PM/子牙救火，不需要开 Supabase Studio，不需要写 SQL）**
+- [ ] 全过程发现的 P0 bug 全部修完并回归
+
+---
+
+## 八、版本
+
+- **v0.1** — 2026-06-07 子牙创建骨架，待各窗口填分工
+- **v0.2** — 2026-06-07 PM 强调「FDE 视角手动后台跑」，加测试纪律 6 条红线 + 通过判定改"FDE 在 UI 上看到/点到"
+- **v0.3** — 2026-06-07 funny-liskov + funny-goodall 两窗口写入分工 + 3 个 P1/P2 Bug
+- **v0.4** — 2026-06-07 nostalgic-rubin 窗口分工合入（CTS Best of China Google Ads 资产）+ 2 个 P0 候选 Bug + F3-CTS/F4-CTS/F5-CTS-Ads 行登记负责窗口 + 准备 PR 到 main
