@@ -162,7 +162,11 @@ export function LocaleSettingsPanel({ clientId }: Props) {
           state_code: stateCode || null,
           city:       trimmedCity || null,
           business_scope: scope,
-          confirm:    locale.locale_confirmed_at ? undefined : true,
+          // Always renew locale_confirmed_at on save so the timestamp tracks
+          // "last reviewed" instead of "first ever confirmed". Route uses a
+          // single-direction gate (`if (body.confirm === true)`) so this never
+          // un-confirms a previously confirmed locale.
+          confirm:    true,
         }),
       })
       if (!res.ok) {
@@ -302,9 +306,6 @@ export function LocaleSettingsPanel({ clientId }: Props) {
         )}
         {!dirty && savedAt && (
           <span className="text-xs text-emerald-600">✓ 已保存（{savedAt}）</span>
-        )}
-        {!dirty && !savedAt && !locale.locale_confirmed_at && (
-          <span className="text-xs text-amber-600">⚠ 尚未确认</span>
         )}
       </div>
 
