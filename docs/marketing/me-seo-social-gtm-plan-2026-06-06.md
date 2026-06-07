@@ -61,28 +61,52 @@ Owner: FDE / Growth
 
 ---
 
+## 2.5 两类目标客户 —— 两套叙事（强区分）⭐
+
+ME 自有获客面向**两类人，诉求不同**，落地页 / 内容 / CTA **必须分两套**，不要用一套话术糊弄两边。
+
+### A. FDE 客户（伙伴 / 代运营）
+- **他们是谁**：用 ME 去服务自己下游一批客户的人（机构 / 顾问 / 代运营伙伴）。
+- **他们要什么**：**整体托管效率** —— 一个人 / 小团队能同时管多少客户、省多少人力，多客户看板、批量执行、结果自动回流归因。
+- **核心信息**："**一个平台托管你所有客户的 SEO×GEO 战场，诊断→执行→归因全自动，一个人干一个团队的活。**"
+- **钩子内容**：多客户看板、批量内容生成、飞轮自动归因、FDE 工作流 SOP。
+- **CTA**：申请成为 FDE 伙伴 / 预约托管演示。
+
+### B. 普通付费客户（自己用的中小企业主）
+- **他们是谁**：自己的生意、自己用 ME 的 AU/NZ 中小企业主。
+- **他们要什么**：**少费脑、出活** —— ME 怎么帮他们**写好提示词 / 自动出市场计划 / 出内容**，不懂营销也能做。
+- **核心信息**："**不懂营销也没关系 —— ME 帮你写好提示词、自动出市场计划和内容，你只管点确认。**"
+- **钩子内容**：AI 帮你写提示词、一键出月度市场计划、双信号博客自动生成、免费诊断。
+- **CTA**：免费诊断 / 试生成一份市场计划。
+
+> 共同底座（两边都讲）：SEO×GEO 双战场、本地 AU/NZ、真实具名案例（Oztop / CTS）。
+> 差异在 **效率（FDE） vs 替你动手出活（付费客户）**。
+
+---
+
 ## 3. 内容支柱（4 根）
 
-| 支柱 | 角色 | 目标词（真实来源见 §1 三份文档） | 漏斗 |
-|---|---|---|---|
-| **P1 SEO×GEO 双战场**（差异化） | 抢叙事/社媒弹药 | generative engine optimization, ai search visibility, geo ai visibility | TOFU/思想领导 |
-| **P2 AI 自动化省人力**（捕获） | 接现成需求 | ai workflow automation (140), ai automation for business (40), ai process automation | MOFU/BOFU |
-| **P3 SME 落地/培训**（捕获） | 接现成需求 | ai training for business (50), ai marketing for SMEs, ai automation for small business | MOFU/BOFU |
-| **P4 真实案例**（证明） | 转化临门一脚 | 案例/结果型长尾 | BOFU |
+| 支柱 | 角色 | 主受众 | 目标词（真实来源见 §1 三份文档） | 漏斗 |
+|---|---|---|---|---|
+| **P1 SEO×GEO 双战场**（差异化） | 抢叙事/社媒弹药 | 两者 | generative engine optimization, ai search visibility, geo ai visibility | TOFU/思想领导 |
+| **P2 多客户托管 / 自动化效率** | 接 FDE 需求 | **FDE** | ai workflow automation (140), ai automation for business (40), ai process automation | MOFU/BOFU |
+| **P3 替你出活：提示词 + 市场计划** | 接付费客户需求 | **付费客户** | ai marketing for SMEs, ai training for business (50), ai automation for small business | MOFU/BOFU |
+| **P4 真实案例（Oztop / CTS 具名）** | 转化临门一脚 | 两者 | 案例/结果型长尾 | BOFU |
 
 > 写每篇前，用 **ME 自己的 Keyword Intelligence（DataForSEO `bulkKeywordVolume`）拉真实量级**再定标题——既保证不编数字，也是 dogfooding。SEMrush MCP 当前账号无 MCP 权限，统一走 ME 内部 DataForSEO 链路。
 
 ---
 
-## 4. 真实弹药（案例素材 — 注意授权）
+## 4. 真实弹药（案例素材 — PM 已授权具名 ✅）
 
-⚠️ **公开使用客户名需先拿授权**。未授权前用脱敏写法（"a Brisbane building-supplies retailer" / "an NZ outbound travel operator"）。
+PM 已授权 **Oztop / CTS 公开具名**做 case study（2026-06-06）。两案各打一类受众：
 
-可讲的真实结果（来自本周 ME 库内真实数据）：
-- **Oztop（Brisbane 建材/地板）**：技术 SEO 地基 17 项落地；**95 个关键词进 Google 榜、品牌词第 1**；GA4 网站访问 **28 天 +66%**；首批 2 篇双信号博客上线。
-- **CTS（NZ 出境游 Kiwi→中国）**：声誉评分修正后 44→~71；品牌搜索量接入 GSC 真实 28 天 clicks。
+- **Oztop（Brisbane 建材/地板）** — 偏**付费客户**视角（"一个中小企业用 ME 拿到了结果"）：
+  技术 SEO 地基 17 项落地；**95 个关键词进 Google 榜、品牌词第 1**；GA4 网站访问 **28 天 +66%**；首批 2 篇双信号博客上线。
+- **CTS（NZ 出境游 Kiwi→中国）** — 偏 **AI 搜索/GEO + FDE 托管**视角（"重建 AI 可见度 + 全自动归因"）：
+  声誉评分修正后 44→~71；品牌搜索量接入 GSC 真实 28 天 clicks。
 
-这些是真材实料的 before/after，做成案例页 + 社媒卡片转化力最强。
+这些是真材实料的 before/after，做成具名案例页 + 社媒卡片转化力最强。
 
 ---
 
@@ -90,21 +114,22 @@ Owner: FDE / Growth
 
 > 节奏建议：**每周 1 篇博客 + 3 条 LinkedIn**。博客用 ME 双信号引擎生成（dogfooding），人工终审。
 
-**第 1 周 — 立旗（差异化）**
+**第 1 周 — 立旗（差异化 · 两类都看）**
 - 博客（P1）：*"Google 排名只是一半 —— 2026 你还得在 AI 搜索里被找到（AU/NZ 指南）"*
-- LinkedIn ×3：①双战场观点贴 ②"什么是 GEO，为什么本地生意现在就要管" ③Oztop 95 词上榜小成果（脱敏/或授权后具名）
+- LinkedIn ×3：①双战场观点贴 ②"什么是 GEO，为什么本地生意现在就要管" ③Oztop 95 词上榜成果（**具名**）
 
-**第 2 周 — 接需求（捕获 P2/P3）**
-- 博客（P2）：*"AI 工作流自动化：澳洲中小企业能先自动化的 5 件营销杂活"*（打 `ai workflow automation`）
-- LinkedIn ×3：①自动化省时间的具体例子 ②AI training for business 钩子 ③免费诊断 CTA
+**第 2 周 — 打 FDE（托管效率）**
+- 博客（P2）：*"一个人托管 20 个客户的 SEO×GEO：Magic Engine 的多客户自动化工作流"*（打 `ai workflow automation`）
+- LinkedIn ×3：①"FDE 一人顶一队"效率贴 ②多客户看板截图 ③申请 FDE 伙伴 CTA
 
-**第 3 周 — 证明（P4 案例）**
-- 博客（P4）：*"案例：一家 Brisbane 建材商如何用 AI 把网站流量 28 天提升 66%"*（Oztop，授权或脱敏）
-- LinkedIn ×3：①案例数据卡片 ②before/after 截图 ③"你也想要这样的诊断"CTA
+**第 3 周 — 证明（P4 具名案例 · 两类都看）**
+- 博客（P4-a）：*"案例：Brisbane 建材商 Oztop 如何用 ME 把网站流量 28 天提升 66%"*（**具名**）
+- 博客（P4-b）：*"案例：NZ 出境游 CTS 如何用 ME 重建 AI 搜索可见度"*（**具名**）
+- LinkedIn ×3：①Oztop 数据卡片 ②CTS before/after ③"你也想要这样的诊断"CTA
 
-**第 4 周 — 收口（捕获 + GEO 复盘）**
-- 博客（P3）：*"AI marketing for SMEs：小团队不请大代理也能做的增长打法"*
-- LinkedIn ×3：①SME 打法清单 ②GEO 月度观察（蹭 AI 搜索热点）③月度成果汇总 + 预约入口
+**第 4 周 — 打付费客户（替你出活）**
+- 博客（P3）：*"不懂营销也能做：让 AI 帮你写好提示词、自动出一份月度市场计划"*
+- LinkedIn ×3：①"一键出市场计划"演示 ②AI 帮你写提示词的前后对比 ③免费试生成 CTA
 
 ---
 
@@ -141,7 +166,8 @@ Owner: FDE / Growth
 
 ## 9. 下一步（可立即执行）
 
-1. PM 拍板 §1 双轨打法 + §4 案例授权（CTS/Oztop 能否具名）。
+1. ✅ 已定：双轨打法 + 两类受众分叙事（§2.5）+ Oztop/CTS **具名授权**（§4）。
 2. 用 ME Keyword Intelligence 拉第 1 周博客目标词真实量级 → 定终稿标题。
 3. ME 当客户建站 + 建 Goal（启动 dogfooding 闭环）。
 4. 出第 1 篇博客（P1 双战场）+ 第 1 周 3 条 LinkedIn。
+5. 分别做两套落地页文案：**FDE（托管效率）/ 付费客户（替你出活）**。
