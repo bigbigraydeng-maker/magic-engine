@@ -425,4 +425,90 @@ describe('persistZhugeActions()', () => {
     expect(result.idempotent).toBe(true)
     expect(supabase._executionChain.insert).toHaveBeenCalledTimes(1)
   })
+
+  // ── DAPE W5 (spec §2.4.3) — prescription_id propagation ─────────────────────
+  // The persister must thread `prescriptionId` from the caller all the way down
+  // into the execution_items insert row. NULL is also a valid value.
+
+  it('DAPE W5 — fills execution_items.prescription_id from input.prescriptionId', async () => {
+    const supabase = makeTableAwareMock({
+      flywheelExisting: [],
+      flywheelInserted: [{ id: 'a1' }],
+      executionExisting: [],
+    })
+
+    await persistZhugeActions(supabase as never, {
+      clientId: 'client-1',
+      discoveryId: 'discovery-1',
+      diagnosticRunId: 'run-1',
+      prescriptionId: 'prescription-uuid-7',
+      output: makeZhugeOutput([makeAction('seo', 'seo.fix_titles')]),
+    })
+
+    const rows = supabase._executionChain.insert.mock.calls[0][0] as Array<{ prescription_id: string | null; source: string }>
+    expect(rows).toHaveLength(1)
+    expect(rows[0].prescription_id).toBe('prescription-uuid-7')
+    expect(rows[0].source).toBe('zhuge')
+  })
+
+  it('DAPE W5 — leaves prescription_id NULL when caller omits it (backwards compat)', async () => {
+    const supabase = makeTableAwareMock({
+      flywheelExisting: [],
+      flywheelInserted: [{ id: 'a1' }],
+      executionExisting: [],
+    })
+
+    await persistZhugeActions(supabase as never, {
+      clientId: 'client-1',
+      discoveryId: 'discovery-1',
+      diagnosticRunId: 'run-1',
+      // prescriptionId not provided — backwards-compatible default = null
+      output: makeZhugeOutput([makeAction('seo', 'seo.fix_titles')]),
+    })
+
+    const rows = supabase._executionChain.insert.mock.calls[0][0] as Array<{ prescription_id: string | null }>
+    expect(rows).toHaveLength(1)
+    expect(rows[0].prescription_id).toBeNull()
+  })
+
+  it('DAPE W5 — leaves prescription_id NULL when caller explicitly passes null', async () => {
+    const supabase = makeTableAwareMock({
+      flywheelExisting: [],
+      flywheelInserted: [{ id: 'a1' }],
+      executionExisting: [],
+    })
+
+    await persistZhugeActions(supabase as never, {
+      clientId: 'client-1',
+      discoveryId: 'discovery-1',
+      diagnosticRunId: 'run-1',
+      prescriptionId: null,
+      output: makeZhugeOutput([makeAction('ai_visibility', 'geo.deploy')]),
+    })
+
+    const rows = supabase._executionChain.insert.mock.calls[0][0] as Array<{ prescription_id: string | null }>
+    expect(rows).toHaveLength(1)
+    expect(rows[0].prescription_id).toBeNull()
+  })
+
+  it('DAPE W5 — propagates prescription_id on the idempotent path too', async () => {
+    // Even when flywheel_actions is already populated (idempotent hit), the
+    // kanban insert still runs — and must still carry prescription_id.
+    const supabase = makeTableAwareMock({
+      flywheelExisting: [{ id: 'existing-1' }],
+      executionExisting: [],
+    })
+
+    await persistZhugeActions(supabase as never, {
+      clientId: 'client-1',
+      discoveryId: 'discovery-1',
+      diagnosticRunId: 'run-1',
+      prescriptionId: 'pres-idempotent-3',
+      output: makeZhugeOutput([makeAction('seo', 'seo.refresh_blog')]),
+    })
+
+    const rows = supabase._executionChain.insert.mock.calls[0][0] as Array<{ prescription_id: string | null }>
+    expect(rows).toHaveLength(1)
+    expect(rows[0].prescription_id).toBe('pres-idempotent-3')
+  })
 })

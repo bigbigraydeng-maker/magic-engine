@@ -52,6 +52,13 @@ export interface PersistZhugeActionsInput {
   clientId: string
   discoveryId: string
   diagnosticRunId: string | null
+  /**
+   * DAPE W5 (spec §2.4.3): when known, link new execution_items rows to the
+   * prescription that birthed this conduct call so Kanban prescription filter
+   * + outcome 回流 can survive. NULL = no active prescription yet (the column
+   * stays NULL, still legal per the relaxed source_consistency constraint).
+   */
+  prescriptionId?: string | null
   output: ZhugeOutput
 }
 
@@ -172,7 +179,13 @@ export async function persistZhugeActions(
     // before the kanban rows are written. try/catch preserves the original
     // "execution_items failure must not break the main flow" intent.
     try {
-      await writeExecutionItems(supabase, input.clientId, zhugeSessionId, input.output.top_actions)
+      await writeExecutionItems(
+        supabase,
+        input.clientId,
+        zhugeSessionId,
+        input.output.top_actions,
+        input.prescriptionId ?? null,
+      )
     } catch (err: unknown) {
       console.warn('[action-persister] execution_items write failed (idempotent path):', err instanceof Error ? err.message : String(err))
     }
@@ -213,7 +226,13 @@ export async function persistZhugeActions(
   // did not). try/catch keeps an execution_items failure from breaking the main
   // flow now that flywheel_actions has already committed.
   try {
-    await writeExecutionItems(supabase, input.clientId, zhugeSessionId, input.output.top_actions)
+    await writeExecutionItems(
+      supabase,
+      input.clientId,
+      zhugeSessionId,
+      input.output.top_actions,
+      input.prescriptionId ?? null,
+    )
   } catch (err: unknown) {
     console.warn('[action-persister] execution_items write failed:', err instanceof Error ? err.message : String(err))
   }
@@ -292,12 +311,18 @@ export function actionTypeToTitle(actionType: string): string {
  *   - Existing pending `source='fde'` or `source='luban'` row → skip (don't overwrite human work)
  *   - Existing pending `source='zhuge'` row (old session) → mark superseded, insert new
  *   - No existing pending row → insert new
+ *
+ * DAPE W5 (spec §2.4.3): `prescriptionId` (when non-null) lands in the new
+ * execution_items.prescription_id column, restoring the P→E attribution link
+ * for zhuge-sourced kanban cards. Passing null is still valid — the relaxed
+ * source_consistency constraint allows it for source='zhuge'.
  */
 export async function writeExecutionItems(
   supabase: SupabaseClient,
   clientId: string,
   zhugeSessionId: string | null,
   actions: PriorityAction[],
+  prescriptionId: string | null = null,
 ): Promise<WriteExecutionItemsResult> {
   if (actions.length === 0) return { inserted: 0, superseded: 0 }
 
@@ -349,7 +374,10 @@ export async function writeExecutionItems(
 
   if (toInsert.length > 0) {
     const rows = toInsert.map((action) => ({
-      prescription_id:  null,
+      // DAPE W5 (spec §2.4.3): link zhuge-sourced items back to the prescription
+      // that birthed this conduct call. NULL when no active prescription yet —
+      // valid post-migration 20260628000001.
+      prescription_id:  prescriptionId,
       client_id:        clientId,
       finding_id:       null,
       dimension:        action.dimension,

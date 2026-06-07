@@ -27,6 +27,13 @@ export interface AssembledContext {
   discovery_id: string
   /** ID of the diagnostic run used — null if no completed run exists. */
   diagnostic_run_id: string | null
+  /**
+   * DAPE W5 (spec §2.4.3): ID of the latest active prescription for this client.
+   * Used by action-persister to fill execution_items.prescription_id so the
+   * P→E attribution link survives (Kanban prescription filter + outcome回流).
+   * NULL when no approved/draft prescription exists yet.
+   */
+  prescription_id: string | null
   findings_count: number
 }
 
@@ -80,17 +87,21 @@ export async function assembleZhugeInput(
   const diagnosticScores: DiagnosticScores = latestRun?.dimension_scores ?? {}
 
   // 6. Fetch latest prescription intake for business context (best-effort)
+  // DAPE W5: also return the prescription id so action-persister can link
+  // execution_items back to the prescription that birthed this conduct call.
   const { data: prescriptions } = await supabase
     .from('prescriptions')
-    .select('intake')
+    .select('id, intake')
     .eq('client_id', clientId)
     .in('status', ['approved', 'draft'])
     .order('created_at', { ascending: false })
     .limit(1)
 
-  const intake = (
-    prescriptions?.[0] as { intake: PrescriptionIntake | null } | undefined
-  )?.intake ?? null
+  const latestPrescription = prescriptions?.[0] as
+    | { id: string; intake: PrescriptionIntake | null }
+    | undefined
+  const intake = latestPrescription?.intake ?? null
+  const prescriptionId = latestPrescription?.id ?? null
 
   // 7. Derive market from semrush_db
   const market = deriveMarket(client.semrush_db)
@@ -116,6 +127,7 @@ export async function assembleZhugeInput(
     },
     discovery_id: discoveryRow.id,
     diagnostic_run_id: latestRun?.id ?? null,
+    prescription_id: prescriptionId,
     findings_count: findings.length,
   }
 }

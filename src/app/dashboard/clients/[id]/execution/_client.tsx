@@ -1942,6 +1942,16 @@ export function ExecutionClient() {
   const [bgImageGenCount, setBgImageGenCount] = useState(0)
   // 指南针浮动面板
   const [compassOpen, setCompassOpen] = useState(false)
+  // DAPE W5 — Prescription filter (chip 区域)
+  // 'all' = 不过滤；UUID = 仅显示挂在此 prescription 下的卡片
+  const [prescriptionFilter, setPrescriptionFilter] = useState<string>('all')
+  // DAPE W5 — "AI 推荐今天做 3 件" 推荐卡片
+  const [dailyRecs, setDailyRecs] = useState<Array<{
+    id: string; title: string; description: string; dimension: string | null;
+    status: string; score: number; reason: string; prescription_id: string | null;
+  }>>([])
+  const [dailyRecsLoading, setDailyRecsLoading] = useState(false)
+  const [dailyRecsCollapsed, setDailyRecsCollapsed] = useState(false)
   const handleDownloadDocx = async () => {
     setIsDocxLoading(true)
     try {
@@ -2066,6 +2076,39 @@ export function ExecutionClient() {
     if (fresh && fresh !== detailItem) setDetailItem(fresh)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items])
+
+  // DAPE W5 — 加载"AI 推荐今天做 3 件"
+  // 短模式（无 LLM），跟 items 同步刷新；items 变化（FDE 完成卡片等）后重算
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        setDailyRecsLoading(true)
+        const res = await fetch(`/api/clients/${clientId}/zhuge/daily-recommendation`, { cache: 'no-store' })
+        if (!res.ok) {
+          if (!cancelled) setDailyRecs([])
+          return
+        }
+        const json = await res.json() as {
+          success: boolean
+          recommendations?: Array<{
+            id: string; title: string; description: string; dimension: string | null;
+            status: string; score: number; reason: string; prescription_id: string | null;
+          }>
+        }
+        if (!cancelled && json.success && json.recommendations) {
+          setDailyRecs(json.recommendations)
+        }
+      } catch {
+        if (!cancelled) setDailyRecs([])
+      } finally {
+        if (!cancelled) setDailyRecsLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  // 用 items.length 作为 trigger — items 数量变化（如完成一张）时重算
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, items.length])
 
   // 状态变更 — 乐观更新（点击立即变）+ 失败回滚并报错
   const handleStatusChange = useCallback(async (itemId: string, status: ExecutionItemStatus) => {
@@ -2486,6 +2529,7 @@ export function ExecutionClient() {
   // Phase 33 P33.9 fix: status chips need to count items AFTER dimension + goal filter
   // but BEFORE status filter (otherwise selecting "已完成" would zero out the other counts).
   // This intermediate result is also what dimension groups consume.
+  // DAPE W5: prescription filter is layered onto the same path so chips stay consistent.
   const filteredItemsWithoutStatus = (() => {
     let result = activeDimension === 'all' ? items : items.filter(i => i.dimension === activeDimension)
     if (goalFilter !== 'all') {
@@ -2498,6 +2542,13 @@ export function ExecutionClient() {
           i.initiative_id !== null && initiativeIdsForGoal.has(i.initiative_id),
         )
       }
+    }
+    if (prescriptionFilter !== 'all') {
+      // DAPE W5 (spec §2.4.5): keep only items linked to the selected prescription.
+      // Pre-DAPE rows with prescription_id = NULL drop out — they show under
+      // "all" but disappear when a specific prescription is selected (expected
+      // behaviour: backfill SOP fills these in over time).
+      result = result.filter(i => i.prescription_id === prescriptionFilter)
     }
     return result
   })()
@@ -2822,6 +2873,65 @@ export function ExecutionClient() {
           </div>
         )}
 
+        {/* DAPE W5 (spec §2.4.5) — Prescription filter chips
+            只在确实有 ≥1 个 prescription_id 已被 backfill 到 items 上时显示，
+            避免在 backfill 前出现空 filter 占位。每个 chip 显示对应处方 generated_at 简化。 */}
+        {(() => {
+          const presIdsInItems = new Set<string>()
+          for (const it of items) {
+            if (it.prescription_id) presIdsInItems.add(it.prescription_id)
+          }
+          const visiblePrescriptions = prescriptions.filter(p => presIdsInItems.has(p.id))
+          if (visiblePrescriptions.length === 0) return null
+          // count per prescription (用 items.length 反映真实数量)
+          const countByPres = new Map<string, number>()
+          for (const it of items) {
+            if (it.prescription_id) {
+              countByPres.set(it.prescription_id, (countByPres.get(it.prescription_id) ?? 0) + 1)
+            }
+          }
+          return (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[10px] font-bold uppercase tracking-wide text-me-charcoal/45 mr-1">按处方</span>
+              <button
+                onClick={() => setPrescriptionFilter('all')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                  prescriptionFilter === 'all'
+                    ? 'bg-violet-600 text-white'
+                    : 'bg-white border border-gray-200 text-gray-600 hover:border-violet-300 hover:text-violet-700'
+                }`}
+              >
+                全部
+              </button>
+              {visiblePrescriptions.map(p => {
+                const label = p.supersedes_id
+                  ? `修订 · ${p.generated_at?.slice(0,10) ?? '?'}`
+                  : p.supplements_id
+                    ? `补充 · ${p.generated_at?.slice(0,10) ?? '?'}`
+                    : `处方 · ${p.generated_at?.slice(0,10) ?? '?'}`
+                const n = countByPres.get(p.id) ?? 0
+                const isArchived = p.status === 'superseded'
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => setPrescriptionFilter(p.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      prescriptionFilter === p.id
+                        ? 'bg-violet-600 text-white'
+                        : isArchived
+                          ? 'bg-white border border-gray-200 text-gray-400 hover:text-violet-700'
+                          : 'bg-white border border-gray-200 text-gray-600 hover:border-violet-300 hover:text-violet-700'
+                    }`}
+                    title={isArchived ? '已归档 · 被修订取代' : undefined}
+                  >
+                    {label} {n}
+                  </button>
+                )
+              })}
+            </div>
+          )
+        })()}
+
         {/* 状态过滤 chips */}
         {(() => {
           const STATUS_TABS = [
@@ -2860,6 +2970,59 @@ export function ExecutionClient() {
         })()}
 
         <ProgressBar completed={completedCount} total={filteredItems.length} />
+
+        {/* DAPE W5 (spec §2.4.5) — AI 推荐今天做 3 件
+            短模式（无 LLM 调用，纯规则排序）。点击卡片 → 滚动到看板对应卡片并打开详情。
+            Collapse 状态 + items 为空时不显示。 */}
+        {dailyRecs.length > 0 && (
+          <div className="rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🧠</span>
+                <h3 className="text-sm font-bold text-violet-900">AI 推荐今天做 {dailyRecs.length} 件</h3>
+                {dailyRecsLoading && (
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-violet-300 border-t-violet-700" />
+                )}
+              </div>
+              <button
+                onClick={() => setDailyRecsCollapsed(v => !v)}
+                className="text-xs text-violet-600 hover:text-violet-800 font-medium"
+                aria-label={dailyRecsCollapsed ? '展开 AI 推荐' : '折叠 AI 推荐'}
+              >
+                {dailyRecsCollapsed ? '展开 ▾' : '折叠 ▴'}
+              </button>
+            </div>
+            {!dailyRecsCollapsed && (
+              <div className="grid gap-2 sm:grid-cols-3">
+                {dailyRecs.map((rec) => {
+                  const fullItem = items.find(i => i.id === rec.id)
+                  return (
+                    <button
+                      key={rec.id}
+                      onClick={() => {
+                        if (fullItem) setDetailItem(fullItem)
+                      }}
+                      className="text-left rounded-lg border border-violet-100 bg-white p-3 hover:border-violet-400 hover:shadow transition-all"
+                    >
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <span className="text-[10px] font-semibold text-violet-600 uppercase tracking-wide">
+                          {rec.reason}
+                        </span>
+                        <span className="text-[10px] font-mono text-violet-400 shrink-0">
+                          {Math.round(rec.score)}
+                        </span>
+                      </div>
+                      <p className="text-sm font-semibold text-gray-900 line-clamp-2">{rec.title}</p>
+                      {rec.description && (
+                        <p className="mt-1 text-xs text-gray-500 line-clamp-2">{rec.description}</p>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Phase 22.D — AnomalyDetector 信号面板 */}
         <AnomalySignalPanel clientId={clientId} />

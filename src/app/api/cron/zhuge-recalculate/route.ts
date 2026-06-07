@@ -82,10 +82,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const output = await conductPriorityActions(assembled.input)
 
       // Persist to flywheel_actions + execution_items
+      // DAPE W5 (spec §2.4.3): pass prescription_id so cron-generated kanban
+      // cards inherit the same P→E attribution as user-triggered conduct calls.
       await persistZhugeActions(supabaseAdmin, {
         clientId,
         discoveryId: assembled.discovery_id,
         diagnosticRunId: assembled.diagnostic_run_id,
+        prescriptionId: assembled.prescription_id,
         output,
       })
 

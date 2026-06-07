@@ -242,4 +242,31 @@ describe('assembleZhugeInput()', () => {
     expect(ctx.input.businessContext.monthly_budget_aud).toBeNull()
     expect(ctx.input.businessContext.primary_goal).toBeNull()
   })
+
+  // ── DAPE W5 (spec §2.4.3) — prescription_id passthrough ────────────────────
+
+  it('DAPE W5 — returns prescription_id from the latest active prescription', async () => {
+    mockGetLatestDiscovery.mockResolvedValueOnce(makeDiscoveryRow())
+    const supabase = makeSupabase({
+      clients: [CLIENT_ROW],
+      diagnostic_runs: [makeDiagnosticRun()],
+      diagnostic_findings: [makeFinding()],
+      prescriptions: [{ id: 'pres-uuid-1', intake: { business_goal: 'g', monthly_budget_aud: 1000 } }],
+    })
+
+    const ctx = await assembleZhugeInput(supabase as never, 'client-1')
+    expect(ctx.prescription_id).toBe('pres-uuid-1')
+  })
+
+  it('DAPE W5 — returns prescription_id = null when no prescription exists', async () => {
+    mockGetLatestDiscovery.mockResolvedValueOnce(makeDiscoveryRow())
+    const supabase = makeSupabase({
+      clients: [CLIENT_ROW],
+      diagnostic_runs: [],
+      prescriptions: [],
+    })
+
+    const ctx = await assembleZhugeInput(supabase as never, 'client-1')
+    expect(ctx.prescription_id).toBeNull()
+  })
 })

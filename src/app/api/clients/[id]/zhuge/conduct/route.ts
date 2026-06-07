@@ -97,6 +97,9 @@ export async function POST(
       clientId,
       discoveryId: assembled.discovery_id,
       diagnosticRunId: assembled.diagnostic_run_id,
+      // DAPE W5 (spec §2.4.3): hand the latest prescription_id to the persister
+      // so kanban cards carry their P→E attribution. NULL is valid.
+      prescriptionId: assembled.prescription_id,
       output,
     })
   } catch (err: unknown) {
