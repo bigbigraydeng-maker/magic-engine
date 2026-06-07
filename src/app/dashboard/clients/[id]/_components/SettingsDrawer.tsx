@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { BriefPanel } from './BriefPanel'
 import { CmsPanel } from './CmsPanel'
 import { UsersPanel } from './UsersPanel'
-import { LocaleConfirmBanner } from './LocaleConfirmBanner'
+import { LocaleSettingsPanel } from './LocaleSettingsPanel'
 import { MtcBudgetPanel } from './MtcBudgetPanel'
 import { MetaAdAccountPanel } from './MetaAdAccountPanel'
 import { PrimaryKeywordsPanel } from '../settings/_components/PrimaryKeywordsPanel'
@@ -205,8 +205,11 @@ export function SettingsDrawer({ open, onClose, clientId, client, activeTab, onT
               {/* §2 Locale */}
               <div>
                 <p className="text-[11px] font-black uppercase tracking-[0.14em] text-me-ochre">§ 2 · 业务地域</p>
-                <div className="mt-2 rounded-xl border border-black/10 bg-white p-5 shadow-sm">
-                  <LocaleConfirmBanner clientId={clientId} />
+                <p className="mt-1 text-xs text-me-charcoal/55">
+                  国家 / 州 / 城市 / 服务范围 — 多模块共用（reputation/competitor 诊断、AI Tracker market-context、DataForSEO 路由）。
+                </p>
+                <div className="mt-2">
+                  <LocaleSettingsPanel clientId={clientId} />
                 </div>
               </div>
 
