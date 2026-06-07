@@ -340,6 +340,59 @@
 
 ---
 
+### 窗口 loving-cannon-6b69d — 内容工程校验（Campaign 批量 / Reels / Workbench）+ Meta 创意测试飞轮（Phase 18.D）
+
+- **当前 Phase / 工作主题**：
+  - Phase 18.D「Meta 付费创意测试飞轮」立项（PR #401 已 merged：`docs/strategy/meta-flywheel-risk-and-sequencing.md`，子牙/魏征/板桥/狄仁杰四路审查）
+  - 校验 ME 三项**内容工程**能不能被 FDE 用来产出广告测试创意：**Campaign 批量生成（内容包）/ Reels Studio（视频学习）/ Workbench（诸葛亮 FAB）**
+  - 覆盖飞毛腿格子：**F5-Social（CTS + Oztop）** + **F5-Ads-Meta（CTS）**（区别于 nostalgic-rubin 的 Google Ads）
+
+- **你这块功能 FDE 在 ME 后台哪个 URL/菜单能点到？**
+  > ⚠️ 以下路径来自代码调查，**本窗口在数据/策略层工作，没有实际点过线上 UI**，具体菜单位置请 strange-brown 实测核对。
+  - **Campaign 批量生成（F5-Social）**：客户 → Campaign Brief → batch-generate（`/api/clients/[id]/campaign/[campaignId]/batch-generate`，对应 UI 的「批量生成内容」按钮）。CTS 现成 Campaign「Oct 2026 Spotlight — Three Tours」(`1b0df407`)；Oztop「Elegant Walnut Clearance」(`c0a63a8e`)
+  - **Reels Studio（F5-Social 视频）**：客户 → Reels 生成工作室，可关联 Campaign Brief（`/api/clients/[id]/reels/generate`）
+  - **Workbench（诸葛亮 FAB）**：客户页右下角全局工作台 FAB
+  - **Meta Ads 执行（F5-Ads）**：执行看板 → AdsFixDrawer →「直接执行 (Meta API)」
+
+- **FDE 手动点完一次需要几步？**
+  - Campaign 批量生成：进 Campaign → 点「批量生成」→ 设数量(1-30) → 等待 AI 生成 + 自动质量审计(最多 3 次重试) → 看 content_posts 草稿（约 4-5 步 + 等待）
+  - Reels Studio：进 Reels → 关联 Campaign → 生成 prompts（开/闭帧 + i2v + caption）→ 生成图 → 生成视频（多步、单条逐步走，**不能批量出多条变体** — 见 BC-005）
+  - Workbench：点 FAB → 看待处理摘要 + 「下一步建议」（1-2 步，**纯查看器**，无生成入口）
+
+- **CTS 和 Oztop 测试时，应该填什么真实业务数据？**（已查 `master_briefs` + `clients`，read-only，不是编的）
+
+  | | CTS Tours NZ (`c0000000…0000`) | Oztop (`d5c98811…`) |
+  |---|---|---|
+  | 真实定位 | NZ→中国 **outbound** 文化小团游，1928 至今，直营地接 | Brisbane 硬地板/SPC/乙烯基/**宠物地板**/地毯/瓷砖/卫浴 |
+  | 受众 | NZ 35–70 文化游退休层（Auckland/Wellington/Christchurch） | Brisbane 30–55 家装/翻新 |
+  | semrush_db | nz | au |
+  | 主关键词 | cts tours / cts travel / china travel service …（品牌词为主） | flooring / spc / vinyl floor / pet floor / spc floor |
+  | F5-Social 钩子方向 | POV/好奇/目的地（POV 穿越北京胡同、长城私人太极、NZ 免签、14 席稀缺、1928 传承） | 问题/反差/清仓（养宠物地板错误、狗狂奔一年后、地毯换 Walnut 前后对比、库存清完即止、Hybrid vs Engineered Timber） |
+  | ⚠️数据卫生 | 有一条**错的 inactive brief「CTS to US」**（写成美国留学），勿用，认准 active「CTS Tours」 | 勿编 shutters/curtains/herringbone（历史翻车点） |
+
+- **当前是否有「UI 上点不到，必须开 Supabase 直填」的字段？**（候选，待 strange-brown UI 验证）
+  - ❓ **`clients.meta_ad_account_id`** —— 实测 CTS=`act_2775766642787274`、Oztop=`null`。Settings 里**是否有这个字段的 UI 让 FDE 填**？若无 = FDE 无法把客户接到 Meta 广告账户 = **P0**（见 BC-004）
+  - ❓ **Campaign Brief 的 `angle` / `channel_goal`** —— 实测 Oztop「Elegant Walnut Clearance」这两字段为空。Campaign 编辑器 UI 能否让 FDE 填？不能填 → batch-generate 缺方向（见 BC-005）
+  - 🔴 **「把生成的创意推到 Meta 当广告」完全没有 UI** —— FDE 在 ME 里生成完创意后，无法在 ME 内一键建广告/投放，必须手动开 Meta Ads Manager（见 BC-003，Phase 18.D 未建）
+
+- **预计上线日期 / 当前是否已在 main 可点**
+  - ✅ 内容工程三件套（Campaign 批量生成 / Reels Studio / Workbench）已在 main，是现有功能，可点
+  - ❌ Meta 创意测试飞轮（自动建投/砍/放大）**未建**，Phase 18.D 立项中（救火→地基→链路→判决→自动）
+  - ⚠️ Meta「直接执行 (Meta API)」点了报 **424**（`META_SYSTEM_USER_TOKEN` 生产未配，= ROADMAP `PM-ENV-1`）
+
+- **可贡献到 FEIMAOTUI.md 第二节的哪几格**
+  - **F5-Social × CTS**：Campaign 批量生成 + Reels Studio 产出广告测试创意（POV 钩子）
+  - **F5-Social × Oztop**：同上（清仓/宠物地板钩子，先补 Campaign angle）
+  - **F5-Ads × CTS（Meta）**：创意测试飞轮——目前只能"生成 + 人工 boost + 读回"半自动（区别于 nostalgic-rubin 的 Google Ads）
+  - 本窗口**不贡献 F1/F2/F3/F6/F7**
+
+- **本窗口自报的红线踩踏**（飞毛腿测试纪律）
+  - ⚠️ 本窗口在策略调查阶段用 MCP `execute_sql` 跑过**只读 SELECT**（查 clients / master_briefs / goals / initiatives / campaign_briefs 做业务地基核实）。**未修改任何数据、未把 cron/SQL 数据当成"FDE 跑通了"**，但按红线"不写 SQL / 不用 MCP 操作数据库"标准，read-only 查询也属灰区，**如实自报**。飞毛腿正式测试一律改走 UI。
+
+- **登记进 Bug 池的条目**（详见第六节）：BC-003（P1）/ BC-004（P0 候选）/ BC-005（P1 候选）/ BC-006（P1 数据正确性）
+
+---
+
 ## 四、子牙汇总进度（实时更新）
 
 | Phase | 子任务 | 客户 | 负责窗口 | 状态 | 备注 |
@@ -354,11 +407,11 @@
 | F4 | Initiative 编排 | Oztop | TBD | ⬜ 未开始 | |
 | F5 | SEO Action | CTS | TBD | ⬜ 未开始 | |
 | F5 | GEO Action | CTS | TBD | ⬜ 未开始 | |
-| F5 | Ads Action | CTS | nostalgic-rubin（spec）+ strange-brown（UI 实测）| 🟡 Wave 0 阻塞 4 项 | Best of China spec 完整 / 待 Wave 0 4 阻塞打通 |
-| F5 | Social Action | CTS | TBD | ⬜ 未开始 | |
+| F5 | Ads Action | CTS | nostalgic-rubin（Google Ads spec）+ loving-cannon（Meta 创意测试飞轮 P18.D）+ strange-brown（UI 实测）| 🟡 Google: Wave 0 阻塞 4 项；Meta: 半自动(BC-003/006) | Best of China spec 完整 / Meta 走"生成+人工boost+读回" |
+| F5 | Social Action | CTS | loving-cannon-6b69d | 🟡 待 UI 实测 | Campaign 批量生成 + Reels Studio 产出广告测试创意 |
 | F5 | SEO Action | Oztop | TBD | ⬜ 未开始 | |
 | F5 | GEO Action | Oztop | TBD | ⬜ 未开始 | |
-| F5 | Social Action | Oztop | TBD | ⬜ 未开始 | |
+| F5 | Social Action | Oztop | loving-cannon-6b69d | 🟡 待 UI 实测 | 同 CTS，先补 Campaign angle（BC-005）|
 | F6 | Outcome 回流 | CTS | TBD | ⬜ 未开始 | |
 | F6 | Outcome 回流 | Oztop | TBD | ⬜ 未开始 | |
 | F7 | 月报 | CTS | TBD | ⬜ 未开始 | |
@@ -399,6 +452,10 @@
 | BUG-P0F-003 | F1-F7 全局 / dashboard layout | P2 | P0-J PR-1 把 `dashboard/layout.tsx` 的 `userTier` fallback 从 `'admin'` 改成 `'portal_only'`（防止 header 缺失时静默升级 admin）。**副作用**：admin/FDE 如果通过非 middleware 路径（如 cookie 失效后旧 SSR 缓存）访问 `/dashboard`，会被降级看到 portal_only sidebar，找不到 paid sidebar 项。当前没有 hard data 说真发生过，但 P0-J PR-2/PR-3（拆 `/workspace` 路由）后会更彻底解决。**短期缓解**：FDE 遇到 sidebar 缺项时 hard refresh 一次。当前不阻断飞毛腿 | p0-fixes (dreamy-shannon-e3b391) | 🟡 短期可接受，待 P0-J PR-2/PR-3 彻底解决 |
 | BUG-FMT-REP-001 | F2 reputation 维度结果展示 | P2 | FDE 在诊断页看到口碑分数（如 CTS 54 / Oztop 83），**但看不到分数是由哪些源贡献的**——例如 54 分到底是 "tourism 桶 GBP-only 兜底" 还是 "GBP + TripAdvisor 都查到" FDE 无法区分。线索仅在 Render 日志 `[reputation-scraper:tripadvisor] Apify returned no items ...`，FDE 没有 Render 访问。诊断报告页应该在口碑卡片下方加一行展示 "评分来源：GBP（4.0★/5 reviews）" 或 "评分来源：3 平台（GBP / TripAdvisor / Booking）" 让 FDE 可解释 | feat/phase23-memory-fixes-and-cron | ⏳ 待登记后续 PR 修复 |
 | BUG-FMT-REP-002 | F2 reputation 超时可见性 | P2 | 当 reputation 维度返 null + 出 `review_lookup_failed` finding 时，FDE **看不到具体哪个 source 超时了**（GBP / TripAdvisor / ProductReview / Booking / Hipages 哪个）。线索仅在 Render 日志 `[reputation-collector] productReview fetch timed out after 20000ms`。诊断报告页应该把 timed-out source 列表附在 finding description 里，便于 FDE 排查（"建议运营核对此客户的 industry 字段或检查 Apify 账户余额"）。本窗口 task #36 follow-up 范围内 | feat/phase23-memory-fixes-and-cron | ⏳ 待登记后续 PR 修复 |
+| BC-003 | F5 Ads-Meta 创意投放 | **P1** | ME 内**没有「把生成的创意推到 Meta 当广告」的 UI** —— FDE 在 Campaign 批量生成/Reels 出完创意后，无法在 ME 内一键建广告/投放，必须手动开 Meta Ads Manager。创意测试飞轮（生成→投→筛赢家）的"投"这一段 FDE 在 ME 走不通。根因：`src/lib/meta/client.ts` 只有读 insights + 改预算/启停，**无 create-creative/建投能力**（Phase 18.D 未建，立项见 `docs/strategy/meta-flywheel-risk-and-sequencing.md`）| loving-cannon-6b69d | 🟡 Phase 18.D 立项中，当前走"生成+人工 boost+读回"半自动 |
+| BC-004 | F5 Ads / Connector 设置 | **P0 候选** | FDE 能否在 ME Settings UI 上设置/绑定客户的 **Meta 广告账户 (`clients.meta_ad_account_id`)**？实测 CTS=`act_2775766642787274`、Oztop=`null`。若 Settings 无此字段的 UI → FDE 无法把客户接到 Meta 广告账户 = 必须 Supabase 直填 = P0。飞毛腿测试时需实测 `/dashboard/clients/[id]/settings` 有没有 Meta 广告账户输入框 | loving-cannon-6b69d | ⏳ 待 strange-brown UI 验证 |
+| BC-005 | F5-Social / Campaign Brief 编辑 | **P1 候选** | FDE 能否在 ME UI 上编辑 Campaign Brief 的 **`angle` / `channel_goal`**？实测 Oztop「Elegant Walnut Clearance」(`c0a63a8e`) 这两字段为空 → batch-generate 缺方向。若 Campaign 编辑器 UI 不能填这俩字段 = 必须 Supabase 直填。另：Reels Studio 当前**只能单条逐步生成，不能一次出多条变体**（创意测试要 N 个变体），FDE 要重复点 N 次 | loving-cannon-6b69d | ⏳ 待 strange-brown UI 验证 |
+| BC-006 | F5 Ads-Meta 数据正确性 | **P1** | CTS 绑的 Meta 账户 `act_2775766642787274` 是**多客户混账户**（含 Oztop 的 flooring 广告花费），ME 按"账户级"拉数原样归给 CTS → **CTS 在 ME 看到的 Ads 花费/ROAS 被污染（虚高）**，混入了不属于 CTS 的钱。FDE 在 CTS 看 Ads 数据会看到别客户的花费。根因与修复见 `docs/strategy/meta-flywheel-risk-and-sequencing.md`（狄仁杰 R1）。**铁律：账户治理前禁止再把任何客户绑到该混账户** | loving-cannon-6b69d | 🟡 待账户治理（拆账户 + 企业验证已提交） |
 
 ---
 
@@ -424,3 +481,4 @@
 - **v0.4** — 2026-06-07 nostalgic-rubin 窗口分工合入（CTS Best of China Google Ads 资产）+ 2 个 P0 候选 Bug + F3-CTS/F4-CTS/F5-CTS-Ads 行登记负责窗口 + 准备 PR 到 main
 - **v0.5** — 2026-06-07 p0-fixes (dreamy-shannon-e3b391) 窗口分工合入：6 个 P0 PR 已 merged（self-serve 注册漏斗 + 多租户隔离 P0-J PR-1/2a）+ 3 个 Bug (BUG-P0F-001/002/003：domain optional + Stripe 升级缺口 + tier fallback 副作用) + 自报 SQL 红线踩踏（v0.2 红线前的 P0 诊断+止血 DB 操作）+ 承诺零 SQL 后续
 - **v0.6** — 2026-06-07 feat/phase23-memory-fixes-and-cron 窗口分工合入（reputation 多源 collector，F2 × CTS/Oztop 口碑维度）+ 2 个 P2 Bug（reputation 评分来源不可见 + 超时 source 不可见）+ rebase 恢复（原 PR #410 因子牙误操作 cleanup 致 CLOSED，commit `d2949fc` 由 `refs/pull/410/head` 救回，新 PR 重开）
+- **v0.7** — 2026-06-07 loving-cannon-6b69d 窗口分工合入（内容工程校验 Campaign批量/Reels/Workbench + Meta 创意测试飞轮 Phase 18.D）+ 4 个 Bug（BC-003 Meta 无投放 UI / BC-004 meta_ad_account_id 无 UI / BC-005 Campaign angle 编辑 + Reels 不能批量 / BC-006 混账户污染 CTS Ads 数据）+ F5-Social/F5-Ads-Meta 分工
