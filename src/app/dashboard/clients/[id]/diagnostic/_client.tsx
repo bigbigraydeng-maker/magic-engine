@@ -447,6 +447,17 @@ export function DiagnosticClient() {
     return acc
   }, {})
 
+  // S09: dimensions explicitly returned null (data unavailable) — used to wire
+  // the "立即配置 →" deeplink onto findings whose dimension was skipped, so the
+  // SEO "未配置" card + the SEO finding "Target keywords not configured" point
+  // FDE to the same Settings page rather than contradicting each other.
+  const dimensionsSkipped: DiagnosticDimension[] = (run?.dimensions_skipped ?? []) as DiagnosticDimension[]
+  const skippedSet = new Set<DiagnosticDimension>(dimensionsSkipped)
+  const fixDeeplinkFor = (dim: DiagnosticDimension): string | undefined => {
+    if (!skippedSet.has(dim)) return undefined
+    return `/dashboard/clients/${clientId}/${DIMENSION_CONFIG_ANCHOR[dim]}`
+  }
+
   // ---------------------------------------------------------------------------
   // Render states
   // ---------------------------------------------------------------------------
@@ -655,6 +666,7 @@ export function DiagnosticClient() {
                     key={finding.id}
                     finding={finding}
                     onDismiss={handleDismiss}
+                    configHref={fixDeeplinkFor(finding.dimension as DiagnosticDimension)}
                   />
                 ))
               )}

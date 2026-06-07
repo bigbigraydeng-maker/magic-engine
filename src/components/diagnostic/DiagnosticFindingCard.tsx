@@ -10,7 +10,14 @@ import type { DiagnosticFinding, DiagnosticSeverity, FixType } from '@/types/dia
 export interface DiagnosticFindingCardProps {
   finding: DiagnosticFinding
   onDismiss?: (id: string) => void
+  /** Deeplink for the inline "立即修复 →" CTA on me_auto findings. */
   fixDeeplink?: string
+  /**
+   * S09: shortcut to Settings → relevant tab when the finding's dimension was
+   * skipped (e.g. SEO finding "Target keywords not configured" gets a top-right
+   * "立即配置 →" button so FDE never has to guess where to go).
+   */
+  configHref?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -61,6 +68,7 @@ export function DiagnosticFindingCard({
   finding,
   onDismiss,
   fixDeeplink,
+  configHref,
 }: DiagnosticFindingCardProps): React.ReactElement {
   const { id, severity, fix_type, title, description, recommendation } = finding
 
@@ -89,17 +97,29 @@ export function DiagnosticFindingCard({
           </span>
         </div>
 
-        {/* Dismiss button */}
-        {onDismiss && (
-          <button
-            data-testid="dismiss-btn"
-            onClick={() => onDismiss(id)}
-            className="text-gray-300 hover:text-gray-500 transition-colors shrink-0"
-            aria-label="忽略"
-          >
-            ✕
-          </button>
-        )}
+        {/* Right-aligned action cluster: configHref CTA (S09) + dismiss */}
+        <div className="flex items-center gap-2 shrink-0">
+          {configHref && (
+            <a
+              data-testid="config-cta"
+              href={configHref}
+              title="跳转到 Settings 完成该维度配置"
+              className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700 hover:bg-indigo-100 transition-colors"
+            >
+              立即配置 →
+            </a>
+          )}
+          {onDismiss && (
+            <button
+              data-testid="dismiss-btn"
+              onClick={() => onDismiss(id)}
+              className="text-gray-300 hover:text-gray-500 transition-colors"
+              aria-label="忽略"
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Title */}

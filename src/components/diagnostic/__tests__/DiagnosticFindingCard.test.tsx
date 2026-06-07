@@ -206,3 +206,41 @@ describe('DiagnosticFindingCard — content', () => {
     expect(screen.getByText(/Build quality backlinks/)).toBeInTheDocument()
   })
 })
+
+// ---------------------------------------------------------------------------
+// S09: configHref CTA — surfaces a "立即配置 →" shortcut when the finding's
+// dimension was skipped, so the "未配置" card and the "Target keywords not
+// configured" finding agree on the same Settings link instead of contradicting
+// each other.
+// ---------------------------------------------------------------------------
+
+describe('DiagnosticFindingCard — configHref CTA (S09)', () => {
+  it('renders the 立即配置 link when configHref is provided', () => {
+    render(
+      <DiagnosticFindingCard
+        finding={makeFinding()}
+        configHref="/dashboard/clients/abc/settings"
+      />,
+    )
+    const cta = screen.getByTestId('config-cta')
+    expect(cta).toHaveAttribute('href', '/dashboard/clients/abc/settings')
+    expect(cta).toHaveAttribute('title')
+  })
+
+  it('does NOT render the CTA when configHref is omitted', () => {
+    render(<DiagnosticFindingCard finding={makeFinding()} />)
+    expect(screen.queryByTestId('config-cta')).not.toBeInTheDocument()
+  })
+
+  it('renders configHref alongside the dismiss button without overlap', () => {
+    render(
+      <DiagnosticFindingCard
+        finding={makeFinding()}
+        configHref="/x"
+        onDismiss={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId('config-cta')).toBeInTheDocument()
+    expect(screen.getByTestId('dismiss-btn')).toBeInTheDocument()
+  })
+})
