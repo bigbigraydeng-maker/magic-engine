@@ -4,8 +4,10 @@ import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { ScoreGauge } from '@/components/diagnostic/ScoreGauge'
+import { DimensionScoreCard, type BaselineInfo } from '@/components/diagnostic/DimensionScoreCard'
 import { DiagnosticFindingCard } from '@/components/diagnostic/DiagnosticFindingCard'
 import { useDiagnosticStatus } from './_hooks/use-diagnostic-status'
+import { OVERALL_WEIGHTING_NOTE } from '@/lib/diagnostic/score-formula-explainer'
 import type { DiagnosticRun, DiagnosticFinding, DiagnosticDimension } from '@/types/diagnostic'
 
 // ---------------------------------------------------------------------------
@@ -277,6 +279,7 @@ export function DiagnosticClient() {
   const [isLaunching, setIsLaunching] = useState(false)
   const [dimFilter, setDimFilter] = useState<DiagnosticDimension | 'all'>('all')
   const [isDocxLoading, setIsDocxLoading] = useState(false)
+  const [baselines, setBaselines] = useState<Partial<Record<DiagnosticDimension, BaselineInfo>>>({})
 
   // Poll active run status while running
   const { status: pollStatus, run: polledRun } = useDiagnosticStatus(clientId, activeRunId)
@@ -325,6 +328,26 @@ export function DiagnosticClient() {
   }, [clientId])
 
   useEffect(() => { void fetchLatest() }, [fetchLatest])
+
+  // Industry baselines for the "为什么是 X 分?" baseline-comparison row.
+  // Fire once per client — no dependency on the run itself.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/diagnostic/baseline`)
+        if (!res.ok) return
+        const data = (await res.json()) as {
+          success: boolean
+          baselines: Partial<Record<DiagnosticDimension, BaselineInfo>>
+        }
+        if (!cancelled && data.success) setBaselines(data.baselines)
+      } catch {
+        // non-fatal: baseline absence renders as "暂无" in the card
+      }
+    })()
+    return () => { cancelled = true }
+  }, [clientId])
 
   const handleRunDiagnostic = async () => {
     setIsLaunching(true)
@@ -506,7 +529,7 @@ export function DiagnosticClient() {
           </div>
         )}
 
-        {/* Score grid — 2×3 */}
+        {/* Score grid — 2×3 with formula breakdowns (S14) */}
         {(run || isRunning) && (
           <section>
             <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
@@ -517,28 +540,34 @@ export function DiagnosticClient() {
                 // null = data not available; undefined = still loading
                 const raw = dimensionScores[dim]
                 return (
-                  <div key={dim} className="flex flex-col items-center gap-1">
-                    <ScoreGauge
-                      score={raw === undefined ? null : raw}
-                      dimension={DIMENSION_LABELS[dim]}
-                      loading={isRunning && raw === undefined}
-                    />
-                    {raw === null && (
-                      <Link
-                        href={`/dashboard/clients/${clientId}/${DIMENSION_CONFIG_ANCHOR[dim]}`}
-                        className="text-xs text-indigo-500 hover:text-indigo-700 hover:underline"
-                      >
-                        立即配置 →
-                      </Link>
-                    )}
-                  </div>
+                  <DimensionScoreCard
+                    key={dim}
+                    dimension={dim}
+                    dimensionLabel={DIMENSION_LABELS[dim]}
+                    score={raw === undefined ? null : raw}
+                    loading={isRunning && raw === undefined}
+                    baseline={baselines[dim] ?? null}
+                    configHref={
+                      raw === null
+                        ? `/dashboard/clients/${clientId}/${DIMENSION_CONFIG_ANCHOR[dim]}`
+                        : undefined
+                    }
+                  />
                 )
               })}
             </div>
             {run?.overall_score != null && (
-              <div className="mt-4 rounded-xl border border-gray-200 bg-white p-4 flex items-center justify-between">
-                <span className="text-sm font-medium text-gray-700">综合得分</span>
-                <ScoreGauge score={run.overall_score} />
+              <div className="mt-4 rounded-xl border border-gray-200 bg-white p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-700">综合得分</span>
+                  <ScoreGauge score={run.overall_score} />
+                </div>
+                <p
+                  data-testid="overall-weighting-note"
+                  className="text-[11px] leading-relaxed text-gray-500"
+                >
+                  {OVERALL_WEIGHTING_NOTE}
+                </p>
               </div>
             )}
           </section>
