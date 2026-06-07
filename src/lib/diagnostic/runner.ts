@@ -4,11 +4,15 @@ import type { CollectorResult, NewFinding } from './types'
 import { SeoCollector } from './collectors/seo-collector'
 import { SocialCollector } from './collectors/social-collector'
 import { ReputationCollector } from './collectors/reputation-collector'
-import { CompetitorCollector } from './collectors/competitor-collector'
+import { CompetitorCollector, type CompetitorEntry } from './collectors/competitor-collector'
 import { AiVisibilityCollector } from './collectors/ai-visibility-collector'
 import { createDefaultLiveProbe } from './ai-visibility-live-probe'
 import { AdsCollector } from './collectors/ads-collector'
 import { computeOverallScore, isDiagnosticDimension } from './guards'
+import { runSynthesis } from './synthesis-orchestrator'
+
+/** Per-dimension collector return — `competitor` may carry competitorList. */
+type RunnerCollectorResult = CollectorResult & { competitorList?: CompetitorEntry[] }
 
 // ---------------------------------------------------------------------------
 // Module registry
@@ -69,7 +73,29 @@ export async function executeDiagnosticRun(
   try {
     const [client, keywords, gscQueries] = await fetchClientData(supabase, clientId)
     const resultMap = await runCollectors(supabase, clientId, client, keywords, gscQueries, module)
-    await persistResult(supabase, runId, resultMap)
+    const overallScore = await persistResult(supabase, runId, resultMap)
+
+    // BUG-FMT-S13/S16 — fan out to LLM synthesis after the deterministic run is
+    // safely persisted. Failures here MUST NOT mark the run failed; they are
+    // logged and the report-generator silently drops the empty sections.
+    if (module === 'full' && overallScore !== null) {
+      try {
+        const result = await runSynthesis(supabase, {
+          runId,
+          clientId,
+          resultMap,
+          overallScore,
+        })
+        if (!result.ran && result.skipped_reason) {
+          console.log(`[runner] synthesis skipped for run ${runId}: ${result.skipped_reason}`)
+        } else if (result.ran) {
+          console.log(`[runner] synthesis ok for run ${runId}: $${result.total_cost_usd.toFixed(3)}`)
+        }
+      } catch (synthErr) {
+        const message = synthErr instanceof Error ? synthErr.message : String(synthErr)
+        console.warn(`[runner] synthesis threw for run ${runId}, ignoring:`, message)
+      }
+    }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
     await supabase
@@ -143,9 +169,12 @@ async function runCollectors(
   keywords: string[],
   gscQueries: string[],
   module: DiagnosticModule,
-): Promise<Record<string, CollectorResult>> {
+): Promise<Record<string, RunnerCollectorResult>> {
   const { domain } = client
-  const jobs: Array<{ dim: string; promise: Promise<CollectorResult> }> = []
+  // CompetitorCollectorResult extends CollectorResult with competitorList — the
+  // wider promise type lets us preserve that field through Promise.allSettled
+  // without losing the per-job dimension labelling.
+  const jobs: Array<{ dim: string; promise: Promise<RunnerCollectorResult> }> = []
 
   if (module === 'seo' || module === 'full') {
     jobs.push({ dim: 'seo', promise: new SeoCollector().collect(clientId, domain, keywords, gscQueries) })
@@ -178,11 +207,16 @@ async function runCollectors(
   }
 
   const settled = await Promise.allSettled(jobs.map(j => j.promise))
-  const resultMap: Record<string, CollectorResult> = {}
+  const resultMap: Record<string, RunnerCollectorResult> = {}
 
   jobs.forEach((job, i) => {
     const s = settled[i]
-    resultMap[job.dim] = s.status === 'fulfilled' ? s.value : { score: 0, findings: [] }
+    // BUG-FMT-S14 — a rejected collector means the dimension is UNKNOWABLE,
+    // not "average". Returning score: 0 was lying with confidence. Use null
+    // so computeOverallScore re-normalises weights and the UI shows "not
+    // configured" instead of a fake zero (matches the same convention used
+    // by collectors themselves when prerequisite data is missing).
+    resultMap[job.dim] = s.status === 'fulfilled' ? s.value : { score: null, findings: [] }
   })
 
   return resultMap
@@ -191,8 +225,8 @@ async function runCollectors(
 async function persistResult(
   supabase: SupabaseClient,
   runId: string,
-  resultMap: Record<string, CollectorResult>,
-): Promise<void> {
+  resultMap: Record<string, RunnerCollectorResult>,
+): Promise<number | null> {
   // P8.5.24: dimensionScores stores number | null — null means "data unavailable"
   // and is excluded from computeOverallScore (weights re-normalised).
   const dimensionScores: Partial<Record<DiagnosticDimension, number | null>> = {}
@@ -226,4 +260,6 @@ async function persistResult(
       completed_at: new Date().toISOString(),
     })
     .eq('id', runId)
+
+  return overallScore
 }
