@@ -166,8 +166,16 @@ export async function getSerpPage(
 
   const items = json.tasks?.[0]?.result?.[0]?.items ?? []
 
+  // Filter out non-commercial domains (govt, edu, org, ac) — these inflate
+  // the "competitive landscape" with entities that are not business rivals.
+  const NON_COMMERCIAL_RE = /\.(govt|gov|org|edu|ac)\.|\.govt$|\.gov$|\.org$|\.edu$|\.ac$/i
+
   const organicResults = items
     .filter(it => it.type === 'organic')
+    .filter(it => {
+      const url = it.url ?? ''
+      return !NON_COMMERCIAL_RE.test(url)
+    })
     .slice(0, 10)
     .map(it => ({
       position:    it.rank_absolute ?? 0,

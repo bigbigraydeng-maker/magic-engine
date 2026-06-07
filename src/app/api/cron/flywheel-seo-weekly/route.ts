@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { SeoContentAdapter } from '@/lib/flywheel/adapters/SeoContentAdapter'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 /**
  * GET /api/cron/flywheel-seo-weekly
@@ -31,6 +32,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const cronRun = await startCronRun('flywheel-seo-weekly')
+
   // Fetch all clients that have a domain configured
   const { data: clients, error: clientErr } = await supabaseAdmin
     .from('clients')
@@ -38,6 +41,7 @@ export async function GET(req: NextRequest) {
     .not('domain', 'is', null)
 
   if (clientErr) {
+    await cronRun.finish({ failed: 1, error: clientErr.message })
     return NextResponse.json(
       { error: `Failed to load clients: ${clientErr.message}` },
       { status: 500 }
@@ -50,6 +54,7 @@ export async function GET(req: NextRequest) {
   )
 
   if (eligibleClients.length === 0) {
+    await cronRun.finish({ processed: 0, completed: 0, failed: 0 })
     return NextResponse.json({
       success: true,
       message: 'No clients with a domain — nothing to snapshot',
@@ -79,6 +84,12 @@ export async function GET(req: NextRequest) {
   const totalMetrics = results.reduce((s, r) => s + r.metrics_written, 0)
   const failedCount = results.filter(r => r.error !== undefined).length
 
+  await cronRun.finish({
+    processed: results.length,
+    completed: results.length - failedCount,
+    failed: failedCount,
+    summary: { metrics_written: totalMetrics },
+  })
   return NextResponse.json({
     success: true,
     clients_processed: results.length,

@@ -23,6 +23,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { assembleZhugeInput } from '@/lib/zhuge/assembler'
 import { conductPriorityActions } from '@/lib/zhuge/conductor'
 import { persistZhugeActions } from '@/lib/zhuge/action-persister'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 export const dynamic = 'force-dynamic'
 // Allow up to 15 minutes — Claude calls are ~10-20s each; 40 clients = ~800s worst case
@@ -41,6 +42,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const cronRun = await startCronRun('zhuge-weekly-recalculate')
+
   // Fetch all clients that have a confirmed discovery
   const { data: discoveries, error: discErr } = await supabaseAdmin
     .from('client_discovery')
@@ -48,6 +51,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     .not('confirmed_at', 'is', null)
 
   if (discErr) {
+    await cronRun.finish({ failed: 1, error: discErr.message })
     return NextResponse.json(
       { error: `Failed to load eligible clients: ${discErr.message}` },
       { status: 500 },
@@ -57,6 +61,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const clientIds = (discoveries ?? []).map((d) => (d as { client_id: string }).client_id)
 
   if (clientIds.length === 0) {
+    await cronRun.finish({ processed: 0, completed: 0, failed: 0 })
     return NextResponse.json({
       success: true,
       message: 'No clients with confirmed discovery — nothing to recalculate',
@@ -107,6 +112,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const skippedCount = results.filter((r) => r.status === 'skipped').length
   const errorCount   = results.filter((r) => r.status === 'error').length
 
+  await cronRun.finish({
+    processed: clientIds.length,
+    completed: okCount,
+    failed: errorCount,
+    summary: { skipped: skippedCount },
+  })
   return NextResponse.json({
     success: true,
     clients_processed: clientIds.length,

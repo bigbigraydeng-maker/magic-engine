@@ -103,6 +103,8 @@ interface ClientData {
   name: string | null
   city: string | null
   country: string | null
+  /** Free-text industry (e.g. 'travel', 'flooring'). Drives reputation-collector source weights. */
+  industry: string | null
 }
 
 async function fetchClientData(
@@ -110,17 +112,18 @@ async function fetchClientData(
   clientId: string,
 ): Promise<[ClientData, string[], string[]]> {
   const [clientRes, kwRes, discoveryRes] = await Promise.all([
-    supabase.from('clients').select('domain, name, city, country').eq('id', clientId).single(),
+    supabase.from('clients').select('domain, name, city, country, industry').eq('id', clientId).single(),
     supabase.from('keywords').select('keyword').eq('client_id', clientId).eq('status', 'approved'),
     supabase.from('client_discovery').select('payload').eq('client_id', clientId).maybeSingle(),
   ])
 
-  const raw = clientRes.data as { domain: string | null; name: string | null; city: string | null; country: string | null } | null
+  const raw = clientRes.data as { domain: string | null; name: string | null; city: string | null; country: string | null; industry: string | null } | null
   const client: ClientData = {
     domain: raw?.domain ?? '',
     name: raw?.name ?? null,
     city: raw?.city ?? null,
     country: raw?.country ?? null,
+    industry: raw?.industry ?? null,
   }
   const keywords =
     (kwRes.data as { keyword: string }[] | null)?.map(k => k.keyword) ?? []
@@ -157,6 +160,7 @@ async function runCollectors(
         businessName: client.name,
         city: client.city,
         country: client.country,
+        industry: client.industry,
       }),
     })
   }

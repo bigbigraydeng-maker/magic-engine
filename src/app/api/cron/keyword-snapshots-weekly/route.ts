@@ -4,6 +4,7 @@ import {
   snapshotRankedKeywordsForClient,
   type KeywordSnapshotClient,
 } from '@/lib/seo-intelligence/keyword-snapshots'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 /**
  * GET /api/cron/keyword-snapshots-weekly
@@ -37,12 +38,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const cronRun = await startCronRun('keyword-snapshots-weekly')
+
   const { data: clients, error: clientErr } = await supabaseAdmin
     .from('clients')
     .select('id, domain, semrush_db')
     .not('domain', 'is', null)
 
   if (clientErr) {
+    await cronRun.finish({ failed: 1, error: clientErr.message })
     return NextResponse.json(
       { error: `Failed to load clients: ${clientErr.message}` },
       { status: 500 },
@@ -57,6 +61,7 @@ export async function GET(req: NextRequest) {
     )
 
   if (eligibleClients.length === 0) {
+    await cronRun.finish({ processed: 0, completed: 0, failed: 0 })
     return NextResponse.json({
       success: true,
       message: 'No clients with a domain — nothing to snapshot',
@@ -95,6 +100,12 @@ export async function GET(req: NextRequest) {
   const totalWritten = results.reduce((sum, r) => sum + r.snapshots_written, 0)
   const failedCount = results.filter(r => r.error !== undefined).length
 
+  await cronRun.finish({
+    processed: results.length,
+    completed: results.length - failedCount,
+    failed: failedCount,
+    summary: { snapshots_written: totalWritten },
+  })
   return NextResponse.json({
     success: true,
     clients_processed: results.length,

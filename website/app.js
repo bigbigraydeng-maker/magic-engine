@@ -482,21 +482,32 @@ async function handleEmailSubmit(e) {
 
   if (btn) { btn.textContent = 'Sending…'; btn.disabled = true; }
 
+  // delivered = the report email was actually sent (real lead behind it).
+  // pending   = scan hasn't persisted a lead yet (demo/fallback/unknown id or
+  //             /api/report returned report_not_ready). We must NOT claim the
+  //             report is on its way in that case. P0-A fix.
+  let delivered = false;
   try {
     if (leadId) {
-      await fetch('/api/report', {
+      const res = await fetch('/api/report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ leadId, email, consent }),
       });
+      delivered = res.ok;
     }
   } catch (err) {
     console.warn('Report API error (non-fatal):', err.message);
   }
 
-  // Always show success (graceful degradation)
   document.querySelector('.email-form-wrap')?.classList.add('hidden');
-  document.querySelector('.email-sent')?.classList.add('show');
+
+  // Toggle the success copy honestly: only show "on its way" when delivered.
+  const sentEl = document.querySelector('.email-sent');
+  if (sentEl) {
+    sentEl.setAttribute('data-state', delivered ? 'delivered' : 'pending');
+    sentEl.classList.add('show');
+  }
 
   if (btn) { btn.textContent = 'Send my full report →'; btn.disabled = false; }
 }

@@ -149,10 +149,10 @@ export default function KeywordsPage() {
 
     try {
       const endpoint = mode === 'related'
-        ? '/api/semrush/related-keywords'
+        ? '/api/keyword-intelligence/related-keywords'
         : mode === 'gap'
-          ? '/api/semrush/keyword-gap'
-          : '/api/semrush/keyword-overview';
+          ? '/api/keyword-intelligence/keyword-gap'
+          : '/api/keyword-intelligence/keyword-overview';
 
       const body = mode === 'related'
         ? { seed_keyword: seedKeywords.split('\n')[0].trim(), client_id: fetchClient }

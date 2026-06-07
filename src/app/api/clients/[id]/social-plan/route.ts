@@ -32,6 +32,9 @@ import type { CampaignBrief } from '@/types/magic-engine'
 import { evaluate } from '@/lib/content/quality-rubric'
 import type { RubricContext } from '@/lib/content/quality-rubric'
 import type { MasterBrief } from '@/types/magic-engine'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { precheckCharge, commitCharge } from '@/lib/mtc/charge'
+import { MTC_RATES } from '@/lib/mtc/types'
 
 // ─── Viral reference row shape (partial select) ────────────────────────────────
 
@@ -148,6 +151,13 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   const clientId = params.id
+
+  // Authz — was missing entirely before. Anyone with a session could generate
+  // a social plan on any client's behalf.
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error }, { status: access.status })
+  }
 
   try {
     const body = await req.json().catch(() => ({})) as {
@@ -270,6 +280,21 @@ export async function POST(
     const brandDNA = extractBrandVisualDNA(brief as unknown as MasterBrief)
     const campaignDirection = extractCampaignVisualDirection(campaign as CampaignBrief)
 
+    // 3d. MTC precheck — upper bound assumes config will be honoured by the LLM.
+    //     We commit per actual produced unit after generation, so an
+    //     under-delivering LLM is auto-cheaper rather than over-charged.
+    const upperBoundMtc =
+      (genConfig.reels_count   + genConfig.posts_count) * MTC_RATES.social_post +
+      genConfig.stories_count                            * MTC_RATES.social_story
+    if (upperBoundMtc > 0) {
+      const precheck = await precheckCharge(clientId, 'social_post', { units: upperBoundMtc / MTC_RATES.social_post })
+      // We use social_post as the precheck pricing unit just to validate balance;
+      // the actual commit below uses the correct per-unit service keys.
+      if (!precheck.ok) {
+        return NextResponse.json(precheck.body, { status: precheck.status })
+      }
+    }
+
     // 4. Strategy first, then parallel content generation
     const strategy = await generateChannelStrategy(briefText, campaignText, genConfig)
     const [reels, posts, stories] = await Promise.all([
@@ -322,6 +347,38 @@ export async function POST(
       .single()
 
     if (insertErr) throw insertErr
+
+    // MTC commit — one ledger row per produced unit, referencing the saved plan.
+    // Reels and posts are both 5 MTC (social_post); stories are 3 MTC (social_story).
+    // We commit per actual produced item so LLM under-delivery → user pays less.
+    const reelUnits  = reels?.length  ?? 0
+    const postUnits  = posts?.length  ?? 0
+    const storyUnits = stories?.length ?? 0
+
+    if (reelUnits > 0) {
+      await commitCharge(
+        clientId,
+        'social_post',
+        reelUnits * MTC_RATES.social_post,
+        { referenceId: savedPlan.id, notes: `social plan reels × ${reelUnits}` },
+      )
+    }
+    if (postUnits > 0) {
+      await commitCharge(
+        clientId,
+        'social_post',
+        postUnits * MTC_RATES.social_post,
+        { referenceId: savedPlan.id, notes: `social plan posts × ${postUnits}` },
+      )
+    }
+    if (storyUnits > 0) {
+      await commitCharge(
+        clientId,
+        'social_story',
+        storyUnits * MTC_RATES.social_story,
+        { referenceId: savedPlan.id, notes: `social plan stories × ${storyUnits}` },
+      )
+    }
 
     return NextResponse.json({ success: true, plan, plan_id: savedPlan.id })
 

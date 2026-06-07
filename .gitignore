@@ -53,3 +53,4 @@ service-account*.json
 # P30 baseline domain discovery script outputs (intermediate JSON, data already in DB)
 scripts/p30-s1-*-output.json
 scripts/p30-s4-*-output.json
+.mcp-*.mjs

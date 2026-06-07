@@ -23,7 +23,8 @@ import { NextRequest } from 'next/server'
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
 vi.mock('@/lib/auth/client-access', () => ({
-  requireDashboardClientAccess: vi.fn(),
+  requireDashboardClientAccess: vi.fn().mockResolvedValue({ ok: true, user: { id: 'test-user', email: 'test@magiclab.com' }, role: 'admin', tier: 'admin', allowedClientId: null }),
+  requirePaidClientAccess: vi.fn().mockResolvedValue({ ok: true, user: { id: 'test-user', email: 'test@magiclab.com' }, role: 'admin', tier: 'admin', allowedClientId: null }),
 }))
 
 vi.mock('@/lib/supabase', () => ({
@@ -77,7 +78,7 @@ vi.mock('@/lib/cms/github-client', () => {
 })
 
 import { POST } from '../route'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requireDashboardClientAccess, requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getConnection } from '@/lib/cms/connection-store'
 import {
@@ -123,7 +124,7 @@ function makeContext() {
 }
 
 function mockAuth(ok: boolean) {
-  vi.mocked(requireDashboardClientAccess).mockResolvedValue(
+  vi.mocked(requirePaidClientAccess).mockResolvedValue(
     ok ? ({ ok: true, clientId: CLIENT_ID } as unknown as Awaited<ReturnType<typeof requireDashboardClientAccess>>)
        : ({ ok: false, error: 'Unauthorized', status: 403 } as unknown as Awaited<ReturnType<typeof requireDashboardClientAccess>>),
   )

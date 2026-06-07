@@ -20,6 +20,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { analyseImage, computeScores } from '@/lib/assets/vision-analyzer'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
@@ -35,6 +36,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const cronRun = await startCronRun('vision-analyzer')
+
   // 1. Claim a batch: PostgREST UPDATE does not support .order().limit(),
   //    so we SELECT the IDs first, then UPDATE by ID.
   const { data: pending, error: selectErr } = await supabaseAdmin
@@ -47,11 +50,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   if (selectErr) {
     console.error('[vision-analyzer] select error:', selectErr.message)
+    await cronRun.finish({ failed: 1, error: selectErr.message })
     return NextResponse.json({ error: selectErr.message }, { status: 500 })
   }
 
   const batch = pending ?? []
   if (batch.length === 0) {
+    await cronRun.finish({ processed: 0, completed: 0, failed: 0 })
     return NextResponse.json({ ok: true, processed: 0, message: 'No pending assets' })
   }
 
@@ -63,6 +68,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   if (claimErr) {
     console.error('[vision-analyzer] claim error:', claimErr.message)
+    await cronRun.finish({ failed: 1, error: claimErr.message })
     return NextResponse.json({ error: claimErr.message }, { status: 500 })
   }
 
@@ -114,6 +120,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
+  await cronRun.finish({ processed: batch.length, completed: succeeded, failed })
   return NextResponse.json({
     ok:        true,
     timestamp: new Date().toISOString(),

@@ -12,6 +12,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 // Match the status route's stale threshold so the UI-driven and cron-driven
 // timeouts agree. If you change one, change the other.
@@ -22,6 +23,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+
+  const cronRun = await startCronRun('zhangqian-sweeper')
 
   const cutoffIso = new Date(Date.now() - STALE_JOB_TIMEOUT_MS).toISOString()
 
@@ -36,6 +39,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   if (selectErr) {
     console.error('[zhangqian-sweeper] select failed', selectErr)
+    await cronRun.finish({ failed: 1, error: selectErr.message })
     return NextResponse.json(
       { swept: 0, error: selectErr.message },
       { status: 500 },
@@ -43,6 +47,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   if (!stuck || stuck.length === 0) {
+    await cronRun.finish({ processed: 0, completed: 0, failed: 0 })
     return NextResponse.json({ swept: 0, ids: [] })
   }
 
@@ -60,6 +65,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   if (updateErr) {
     console.error('[zhangqian-sweeper] update failed', updateErr)
+    await cronRun.finish({ failed: 1, error: updateErr.message })
     return NextResponse.json(
       { swept: 0, error: updateErr.message },
       { status: 500 },
@@ -67,6 +73,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   console.log(`[zhangqian-sweeper] marked ${ids.length} stuck job(s) failed`, ids)
+  // sweeper: swept 条目是已修复的卡死 job，failed=0 表示 sweeper 本身运行正常
+  await cronRun.finish({ processed: ids.length, completed: ids.length, failed: 0, summary: { swept: ids.length } })
   return NextResponse.json({
     swept: ids.length,
     ids,

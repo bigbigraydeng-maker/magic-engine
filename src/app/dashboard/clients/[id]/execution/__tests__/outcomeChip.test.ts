@@ -10,8 +10,11 @@ import { AUTONOMOUS_GROUP_ID, buildDimensionGroups, buildExecutionGroups, format
 type OutcomeSummary = Parameters<typeof formatOutcomeLabel>[0]
 type ExecutionGroupItem = Parameters<typeof buildExecutionGroups>[0][number]
 
+// Phase X.S5: the page component was extracted to _client.tsx behind a
+// ServerFeatureLock wrapper. The OutcomeChip definition still lives in
+// the (now-renamed) client file; we read from there.
 const executionPageSource = readFileSync(
-  join(process.cwd(), 'src', 'app', 'dashboard', 'clients', '[id]', 'execution', 'page.tsx'),
+  join(process.cwd(), 'src', 'app', 'dashboard', 'clients', '[id]', 'execution', '_client.tsx'),
   'utf8',
 ).replace(/\r\n/g, '\n')
 

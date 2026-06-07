@@ -18,7 +18,7 @@
  *
  * Configuration (per GitHub repo, one-time):
  *   - Settings → Webhooks → Add webhook
- *   - Payload URL: https://${RENDER_EXTERNAL_URL}/api/cms/github/webhook
+ *   - Payload URL: https://app.magicengine.com.au/api/cms/github/webhook
  *   - Content type: application/json
  *   - Secret: same value as GITHUB_WEBHOOK_SECRET env var
  *   - Events: "Pull requests" only

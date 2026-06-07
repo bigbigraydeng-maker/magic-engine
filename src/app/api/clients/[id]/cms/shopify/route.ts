@@ -17,7 +17,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import {
   upsertShopifyConnection,
   getShopifyConnectionStatus,
@@ -42,7 +42,7 @@ function badInput(msg: string) {
 
 export async function GET(req: NextRequest, { params }: RouteContext) {
   const { id: clientId } = params
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
@@ -69,7 +69,7 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
  */
 export async function POST(req: NextRequest, { params }: RouteContext) {
   const { id: clientId } = params
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
@@ -150,7 +150,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
 export async function DELETE(req: NextRequest, { params }: RouteContext) {
   const { id: clientId } = params
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }

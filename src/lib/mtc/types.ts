@@ -17,6 +17,7 @@ export type ServiceKey =
   | 'social_post'
   | 'social_series'
   | 'social_calendar'
+  | 'social_story'
   | 'marketing_plan'
   | 'keyword_report'
   | 'geo_directives'
@@ -25,6 +26,7 @@ export type ServiceKey =
   | 'master_brief_update'
   | 'bonus_registration'
   | 'ai_factory_post'
+  | 'zhangqian_discover'
 
 export const MTC_RATES: Record<ServiceKey, number> = {
   blog_seo: 40,
@@ -41,6 +43,7 @@ export const MTC_RATES: Record<ServiceKey, number> = {
   social_post: 5,
   social_series: 20,
   social_calendar: 30,
+  social_story: 3,
   marketing_plan: 30,
   keyword_report: 30,
   geo_directives: 20,
@@ -49,6 +52,7 @@ export const MTC_RATES: Record<ServiceKey, number> = {
   master_brief_update: 20,
   bonus_registration: 100,
   ai_factory_post: 5,   // P21.8 — AI Factory 量产帖子，与 social_post 同价
+  zhangqian_discover: 60, // Phase X.S2 — 张骞 discovery report regeneration; ~$0.57 real cost
 }
 
 export interface MtcPackage {

@@ -73,9 +73,28 @@ export interface FacebookPage {
 // Apify actor-level timeout in seconds; separate from the Node fetch abort below.
 const APIFY_ACTOR_TIMEOUT_SEC = 60
 
+/**
+ * Read an Apify error response without consuming the body for the success path.
+ * Returns a short summary suitable for inclusion in thrown error messages.
+ * Best-effort: if reading the body fails, returns a fixed sentinel.
+ */
+async function readApifyErrorBody(res: Response): Promise<string> {
+  try {
+    const text = await res.text()
+    // Apify error bodies are JSON like {"error":{"type":"...","message":"..."}}.
+    // Keep the raw text but truncate so logs aren't massive.
+    return text.length > 300 ? `${text.slice(0, 300)}…` : text
+  } catch {
+    return '(body unreadable)'
+  }
+}
+
 export async function scrapeInstagramProfile(handle: string): Promise<InstagramProfile> {
   const token = process.env.APIFY_API_KEY
-  if (!token) throw new Error('APIFY_API_KEY not configured')
+  if (!token) {
+    console.error('[social-scraper] APIFY_API_KEY not configured — Instagram scrape aborted')
+    throw new Error('APIFY_API_KEY not configured')
+  }
 
   const res = await fetch(
     `${APIFY_BASE}/acts/apify~instagram-scraper/run-sync-get-dataset-items?token=${token}&timeout=${APIFY_ACTOR_TIMEOUT_SEC}`,
@@ -90,7 +109,11 @@ export async function scrapeInstagramProfile(handle: string): Promise<InstagramP
     },
   )
 
-  if (!res.ok) throw new Error(`Apify Instagram error: ${res.status}`)
+  if (!res.ok) {
+    const body = await readApifyErrorBody(res)
+    console.error(`[social-scraper] Apify Instagram error: status=${res.status} handle=${handle} body=${body}`)
+    throw new Error(`Apify Instagram error: ${res.status} — ${body}`)
+  }
 
   const items = (await res.json()) as Record<string, unknown>[]
   const p = items[0] ?? {}
@@ -147,7 +170,10 @@ function pickTopPosts(
 
 export async function scrapeFacebookPage(pageUrl: string): Promise<FacebookPage> {
   const token = process.env.APIFY_API_KEY
-  if (!token) throw new Error('APIFY_API_KEY not configured')
+  if (!token) {
+    console.error('[social-scraper] APIFY_API_KEY not configured — Facebook scrape aborted')
+    throw new Error('APIFY_API_KEY not configured')
+  }
 
   const res = await fetch(
     `${APIFY_BASE}/acts/apify~facebook-pages-scraper/run-sync-get-dataset-items?token=${token}&timeout=${APIFY_ACTOR_TIMEOUT_SEC}`,
@@ -159,7 +185,11 @@ export async function scrapeFacebookPage(pageUrl: string): Promise<FacebookPage>
     },
   )
 
-  if (!res.ok) throw new Error(`Apify Facebook error: ${res.status}`)
+  if (!res.ok) {
+    const body = await readApifyErrorBody(res)
+    console.error(`[social-scraper] Apify Facebook error: status=${res.status} pageUrl=${pageUrl} body=${body}`)
+    throw new Error(`Apify Facebook error: ${res.status} — ${body}`)
+  }
 
   const items = (await res.json()) as Record<string, unknown>[]
   const p = items[0] ?? {}
@@ -193,7 +223,10 @@ export interface TiktokProfile {
 
 export async function scrapeTiktokProfile(handle: string): Promise<TiktokProfile> {
   const token = process.env.APIFY_API_KEY
-  if (!token) throw new Error('APIFY_API_KEY not configured')
+  if (!token) {
+    console.error('[social-scraper] APIFY_API_KEY not configured — TikTok scrape aborted')
+    throw new Error('APIFY_API_KEY not configured')
+  }
 
   const cleanHandle = handle.replace(/^@/, '')
   const profileUrl = `https://www.tiktok.com/@${cleanHandle}`
@@ -210,7 +243,11 @@ export async function scrapeTiktokProfile(handle: string): Promise<TiktokProfile
     },
   )
 
-  if (!res.ok) throw new Error(`Apify TikTok error: ${res.status}`)
+  if (!res.ok) {
+    const body = await readApifyErrorBody(res)
+    console.error(`[social-scraper] Apify TikTok error: status=${res.status} handle=${cleanHandle} body=${body}`)
+    throw new Error(`Apify TikTok error: ${res.status} — ${body}`)
+  }
 
   const items = (await res.json()) as Record<string, unknown>[]
   if (items.length === 0) {

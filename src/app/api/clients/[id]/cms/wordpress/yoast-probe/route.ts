@@ -15,13 +15,13 @@
  *      (no-op write). 200 → keys registered; 403 → keys not registered.
  *
  * Security:
- *  - requireDashboardClientAccess (tenant isolation)
+ *  - requirePaidClientAccess (tenant isolation)
  *  - Uses existing encrypted credentials — no password re-entry
  *  - DNS SSRF guard runs inside wordpress-client
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { getWordpressConnection } from '@/lib/cms/connection-store'
 import { setYoastPluginInstalled } from '@/lib/cms/connection-store'
 import { probeYoastMetaWritable } from '@/lib/cms/wordpress-client'
@@ -32,7 +32,7 @@ interface RouteContext {
 
 export async function POST(req: NextRequest, { params }: RouteContext) {
   const { id: clientId } = params
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }

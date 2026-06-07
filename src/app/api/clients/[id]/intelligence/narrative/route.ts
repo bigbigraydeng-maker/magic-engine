@@ -15,14 +15,14 @@
  *   - max_tokens 限制在 400（约 200 AU English 词）
  *   - 无 DB 写入，无缓存表
  *
- * Auth: session cookie via requireDashboardClientAccess
+ * Auth: session cookie via requirePaidClientAccess
  *
  * Reference: ROADMAP.md P22.C.1
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { getAnthropicClient, MODEL_SONNET } from '@/lib/anthropic/client'
 import { bucketByGranularity } from '@/lib/flywheel/intelligence/timeseries'
 import { generateInsights } from '@/lib/flywheel/intelligence/insights'
@@ -41,7 +41,7 @@ type RouteContext = { params: { id: string } }
 export async function GET(req: NextRequest, { params }: RouteContext) {
   const { id: clientId } = params
 
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status })
   }

@@ -20,12 +20,25 @@ vi.mock('@/lib/supabase', () => ({
     from: vi.fn(() => ({
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
+      gt: vi.fn().mockReturnThis(),
+      gte: vi.fn().mockResolvedValue({ data: [], error: null }),
       order: vi.fn().mockReturnThis(),
       limit: vi.fn().mockResolvedValue({ data: [], error: null }),
       single: vi.fn().mockResolvedValue({ data: null, error: null }),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
       insert: vi.fn().mockReturnThis(),
+      update: vi.fn().mockReturnThis(),
+      delete: vi.fn().mockReturnThis(),
     })),
   },
+}))
+
+// Bypass MTC precheck so blog tests focus on auth/business logic.
+vi.mock('@/lib/mtc/charge', () => ({
+  precheckCharge: vi.fn().mockResolvedValue({ ok: true, projectedMtc: 40 }),
+  commitCharge:   vi.fn().mockResolvedValue({ ok: true }),
+  refundOnFail:   vi.fn().mockResolvedValue(undefined),
+  chargeForGeneration: vi.fn().mockResolvedValue({ ok: true, ledgerEntryId: 'led-1', mtcAmount: 10 }),
 }))
 
 vi.mock('@/lib/blog/generator', () => ({
@@ -41,7 +54,8 @@ vi.mock('@/lib/blog/topic-selector', () => ({
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
-  requireDashboardClientAccess: vi.fn(),
+  requireDashboardClientAccess: vi.fn().mockResolvedValue({ ok: true, user: { id: 'test-user', email: 'test@magiclab.com' }, role: 'admin', tier: 'admin', allowedClientId: null }),
+  requirePaidClientAccess: vi.fn().mockResolvedValue({ ok: true, user: { id: 'test-user', email: 'test@magiclab.com' }, role: 'admin', tier: 'admin', allowedClientId: null }),
 }))
 
 // ---------------------------------------------------------------------------
@@ -51,9 +65,12 @@ vi.mock('@/lib/auth/client-access', () => ({
 import { GET as blogListGET, POST as blogListPOST } from '../route'
 import { GET as opportunitiesGET } from '../opportunities/route'
 import { GET as postDetailGET, PATCH as postDetailPATCH, DELETE as postDetailDELETE } from '../[postId]/route'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requireDashboardClientAccess, requirePaidClientAccess } from '@/lib/auth/client-access'
 
+// Blog routes use the consumption-tier helper (see CLAUDE.md / Phase X.S2 plan).
+// requirePaidClientAccess is mocked alongside to satisfy any cross-imports.
 const mockAccess = vi.mocked(requireDashboardClientAccess)
+void requirePaidClientAccess
 
 // ---------------------------------------------------------------------------
 // Helpers

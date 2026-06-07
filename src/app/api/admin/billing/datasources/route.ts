@@ -9,20 +9,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getBillingByMonth, getCostsByService, getAvailableMonths } from '@/lib/billing/usage-tracker'
+import { guardAdmin } from '@/lib/auth/require-admin'
 
 export async function GET(req: NextRequest) {
   try {
-    // Optional CRON_SECRET authentication (for cron jobs)
-    // UI calls are allowed from admin dashboard
+    // Accept either: admin session (UI) or Bearer CRON_SECRET (cron jobs)
     const authHeader = req.headers.get('authorization')
-    if (authHeader) {
-      const expectedToken = `Bearer ${process.env.CRON_SECRET}`
-      if (authHeader !== expectedToken) {
-        return NextResponse.json(
-          { error: 'Unauthorized' },
-          { status: 401 }
-        )
-      }
+    const cronToken = `Bearer ${process.env.CRON_SECRET}`
+    const isCronCall = authHeader === cronToken
+
+    if (!isCronCall) {
+      const guard = await guardAdmin()
+      if (guard) return guard
     }
 
     // Initialize Supabase with service role key

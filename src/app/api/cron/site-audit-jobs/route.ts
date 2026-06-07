@@ -22,6 +22,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { JobRunner } from '@/lib/site-audit/job-runner'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 // Allow up to 120 seconds for all operations
 export const maxDuration = 120
@@ -48,18 +49,20 @@ export interface ApiErrorResponse {
 export async function POST(
   request: NextRequest
 ): Promise<NextResponse<CronJobResponse | ApiErrorResponse>> {
+  // 1. Validate CRON_SECRET (outside try so cronRun is accessible in catch)
+  const cronSecret = request.headers.get('x-cron-secret')
+  const expectedSecret = process.env.CRON_SECRET
+
+  if (!cronSecret || cronSecret !== expectedSecret) {
+    return NextResponse.json<ApiErrorResponse>(
+      { error: 'Unauthorized' },
+      { status: 401 }
+    )
+  }
+
+  const cronRun = await startCronRun('site-audit-cron')
+
   try {
-    // 1. Validate CRON_SECRET
-    const cronSecret = request.headers.get('x-cron-secret')
-    const expectedSecret = process.env.CRON_SECRET
-
-    if (!cronSecret || cronSecret !== expectedSecret) {
-      return NextResponse.json<ApiErrorResponse>(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      )
-    }
-
     const timestamp = new Date().toISOString()
     const jobRunner = new JobRunner(supabaseAdmin)
 
@@ -137,6 +140,12 @@ export async function POST(
     }
 
     // 5. Return complete status report
+    await cronRun.finish({
+      processed: cleanedJobs + resumedJobs,
+      completed: cleanedJobs + resumedJobs,
+      failed: failedJobsFound,
+      summary: { cleaned_jobs: cleanedJobs, failed_jobs_found: failedJobsFound, resumed_jobs: resumedJobs },
+    })
     return NextResponse.json<CronJobResponse>(
       {
         timestamp,
@@ -149,6 +158,7 @@ export async function POST(
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal server error'
     console.error('[site-audit/cron] Unexpected error:', message)
+    await cronRun.finish({ failed: 1, error: message })
     return NextResponse.json<ApiErrorResponse>(
       { error: message },
       { status: 500 }

@@ -24,6 +24,7 @@ import { fetchGa4Snapshot } from '@/lib/ga4/client'
 import { getAdAccountInsights, getAdCampaignInsights } from '@/lib/meta/client'
 import { SEO_METRIC_KEY, GA4_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import { MetaAdsAdapter } from '@/lib/flywheel/adapters/MetaAdsAdapter'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 900
@@ -65,6 +66,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const cronRun = await startCronRun('google-data-pullback-daily')
+
   // ── 1. Load connected Google connectors + Meta Ads accounts in parallel ───
   const [connResult, metaResult] = await Promise.all([
     supabaseAdmin
@@ -79,6 +82,7 @@ export async function GET(req: NextRequest) {
   ])
 
   if (connResult.error) {
+    await cronRun.finish({ failed: 1, error: connResult.error.message })
     return NextResponse.json(
       { error: `Failed to load connectors: ${connResult.error.message}` },
       { status: 500 },
@@ -121,6 +125,7 @@ export async function GET(req: NextRequest) {
   )
 
   if (work.length === 0) {
+    await cronRun.finish({ processed: 0, completed: 0, failed: 0 })
     return NextResponse.json({
       success:           true,
       message:           'No clients with connected data sources — nothing to sync',
@@ -164,6 +169,12 @@ export async function GET(req: NextRequest) {
     r => r.gsc?.success === false || r.ga4?.success === false || r.meta?.success === false,
   ).length
 
+  await cronRun.finish({
+    processed: results.length,
+    completed: results.length - failed,
+    failed,
+    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced },
+  })
   return NextResponse.json({
     success:           true,
     clients_processed: results.length,

@@ -20,6 +20,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { runCollection } from '@/lib/industry-ai-visibility/orchestrator'
 import { supabaseAdmin } from '@/lib/supabase'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 const STALE_RUN_THRESHOLD_MS = 5 * 60 * 1000 // 魏征 Hotfix-7 (was 10 min — too lenient)
 
@@ -58,12 +59,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const cronRun = await startCronRun('industry-ai-visibility-daily')
   try {
     await sweepStaleRuns()
     const summary = await runCollection({ triggeredBy: 'cron' })
+    const s = summary as unknown as Record<string, unknown>
+    await cronRun.finish({
+      processed: typeof s.total === 'number' ? s.total : undefined,
+      completed: typeof s.succeeded === 'number' ? s.succeeded : undefined,
+      failed:    typeof s.failed === 'number' ? s.failed : 0,
+      summary:   s,
+    })
     return NextResponse.json(summary)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
+    await cronRun.finish({ failed: 1, error: msg })
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
@@ -78,12 +88,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const cronRun = await startCronRun('industry-ai-visibility-daily')
   try {
     await sweepStaleRuns()
     const summary = await runCollection({ triggeredBy: 'admin_manual' })
+    const s = summary as unknown as Record<string, unknown>
+    await cronRun.finish({
+      processed: typeof s.total === 'number' ? s.total : undefined,
+      completed: typeof s.succeeded === 'number' ? s.succeeded : undefined,
+      failed:    typeof s.failed === 'number' ? s.failed : 0,
+      summary:   s,
+    })
     return NextResponse.json(summary)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
+    await cronRun.finish({ failed: 1, error: msg })
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

@@ -11,10 +11,12 @@ const mockSelect = vi.fn()
 
 const mocks = vi.hoisted(() => ({
   requireDashboardClientAccess: vi.fn(),
+  requirePaidClientAccess: vi.fn(),
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
   requireDashboardClientAccess: mocks.requireDashboardClientAccess,
+  requirePaidClientAccess: mocks.requireDashboardClientAccess,
 }))
 
 vi.mock('@/lib/supabase', () => ({

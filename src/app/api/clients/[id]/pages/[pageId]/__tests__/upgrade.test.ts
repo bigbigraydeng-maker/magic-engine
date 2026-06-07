@@ -20,16 +20,20 @@ vi.mock('@/lib/blog/upgrade-generator', () => ({
 
 vi.mock('@/lib/auth/client-access', () => ({
   requireDashboardClientAccess: vi.fn().mockResolvedValue({ ok: true, user: { email: 'test@test.com' }, role: 'admin', allowedClientId: null }),
+  requirePaidClientAccess: vi.fn().mockResolvedValue({ ok: true, user: { email: 'test@test.com' }, role: 'admin', allowedClientId: null }),
 }))
 
 import { POST } from '../upgrade/route'
 import { supabaseAdmin } from '@/lib/supabase'
 import { generatePageUpgrade } from '@/lib/blog/upgrade-generator'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requireDashboardClientAccess, requirePaidClientAccess } from '@/lib/auth/client-access'
 
 const mockFrom = vi.mocked(supabaseAdmin.from)
 const mockGenerate = vi.mocked(generatePageUpgrade)
-const mockAccess = vi.mocked(requireDashboardClientAccess)
+// Route uses requirePaidClientAccess; legacy tests mock requireDashboardClientAccess.
+// We alias mockAccess to the Paid mock to keep the existing test bodies working.
+const mockAccess = vi.mocked(requirePaidClientAccess)
+void requireDashboardClientAccess  // keep import for back-compat; no-op
 
 function makeRequest(body: unknown = {}, clientId = 'client-abc', pageId = 'page-xyz') {
   return new NextRequest(`http://localhost/api/clients/${clientId}/pages/${pageId}/upgrade`, {

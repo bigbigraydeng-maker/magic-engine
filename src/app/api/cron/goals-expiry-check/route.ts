@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { flagExpiredGoals } from '@/lib/strategy/verdict'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 export const maxDuration = 60
 
@@ -30,12 +31,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const cronRun = await startCronRun('goals-expiry-check')
+
   const result = await flagExpiredGoals(supabaseAdmin)
 
   if (result.error) {
+    await cronRun.finish({ failed: 1, error: result.error })
     return NextResponse.json({ error: result.error }, { status: 500 })
   }
 
+  await cronRun.finish({ processed: result.flagged_count, completed: result.flagged_count, failed: 0 })
   return NextResponse.json({
     success: true,
     flagged_count: result.flagged_count,

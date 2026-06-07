@@ -179,20 +179,52 @@ export async function onRequestPost(context) {
       return new Response(JSON.stringify({ error: 'Consent required' }), { status: 400, headers: corsHeaders });
     }
 
+    // Synthetic lead IDs (demo-/fallback-/unknown-) are emitted by scout.js when
+    // DataForSEO or Supabase is unavailable — there is NO persisted lead row
+    // behind them, so getLead() returns null and the email would render the
+    // "No findings available." placeholder. Sending that is worse than not
+    // sending at all (it tells the user their report is ready when it never
+    // ran). Refuse here so the frontend can show an honest "still processing"
+    // message instead. P0-A fix.
+    const isSyntheticLead =
+      !leadId ||
+      leadId.startsWith('demo-') ||
+      leadId.startsWith('fallback-') ||
+      leadId.startsWith('unknown-');
+
+    if (isSyntheticLead) {
+      return new Response(
+        JSON.stringify({
+          error: 'report_not_ready',
+          message:
+            'Your scan is still processing. We will email your full report once it completes — typically within 24 hours.',
+        }),
+        { status: 400, headers: corsHeaders },
+      );
+    }
+
     // Fetch lead
-    let lead = null;
-    if (leadId && !leadId.startsWith('demo-') && !leadId.startsWith('fallback-')) {
-      lead = await getLead(env, leadId);
+    const lead = await getLead(env, leadId);
+
+    // No persisted lead behind a real-looking ID (deleted / wrong id / RLS).
+    // Same rule: never email an empty-findings report.
+    if (!lead) {
+      return new Response(
+        JSON.stringify({
+          error: 'report_not_ready',
+          message:
+            'Your scan is still processing. We will email your full report once it completes — typically within 24 hours.',
+        }),
+        { status: 400, headers: corsHeaders },
+      );
     }
 
     // Build and send email
-    const { subject, body: htmlBody } = buildEmail({ lead: lead || {}, email });
+    const { subject, body: htmlBody } = buildEmail({ lead, email });
     await sendEmail(env, { to: email, subject, htmlBody });
 
     // Update lead record
-    if (lead?.id) {
-      await updateLead(env, lead.id, email);
-    }
+    await updateLead(env, lead.id, email);
 
     return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
 

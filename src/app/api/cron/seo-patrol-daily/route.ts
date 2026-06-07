@@ -33,6 +33,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { runSeoPatrol, type SeoPatrolBatchResult } from '@/lib/seo-patrol/job'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 export const dynamic = 'force-dynamic'
 // Sequential per-client DB reads + persister writes. Allow 5 min.
@@ -63,6 +64,7 @@ export async function GET(
     return NextResponse.json<ErrorResponse>({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const cronRun = await startCronRun('seo-patrol-daily')
   const timestamp = new Date().toISOString()
 
   try {
@@ -72,10 +74,17 @@ export async function GET(
         `findings=${result.total_findings} actions=${result.total_actions} ` +
         `failed=${result.failed}`,
     )
+    await cronRun.finish({
+      processed: result.clients_processed,
+      completed: result.clients_processed - result.failed,
+      failed: result.failed,
+      summary: { total_findings: result.total_findings, total_actions: result.total_actions },
+    })
     return NextResponse.json<CronResponse>({ success: true, timestamp, ...result })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[seo-patrol/cron] unhandled error:', message)
+    await cronRun.finish({ failed: 1, error: message })
     return NextResponse.json<ErrorResponse>({ error: message }, { status: 500 })
   }
 }

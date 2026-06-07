@@ -13,27 +13,31 @@ function sanitizeNext(next: unknown): string {
 }
 
 // POST /api/auth/self-register
-// Body: { email, password, businessName, websiteUrl? }
-// Creates a self_serve client + Supabase auth user + portal access.
-// Does NOT grant MTC yet — that happens on first login via auth/callback.
+// Body: { email, businessName, websiteUrl? }
+// Creates a self_serve client + Supabase auth user (passwordless) + portal access.
+// Sends a 6-digit OTP via signInWithOtp — NOT signUp(password).
+// Does NOT grant MTC yet — that happens after OTP verify in /api/auth/verify-otp
+// which calls resolveRedirectForSession() → grantSignupBonus().
+//
+// P0-F (2026-06-05): switched from signUp(password) to signInWithOtp because
+// signUp generates a 56-byte hex confirmation_token (not a 6-digit OTP) regardless
+// of "Email OTP Length" setting. signInWithOtp is the only API that actually
+// emits the 6-digit OTP that {{ .Token }} renders in the email template.
+// Passwordless aligns with the P0-B decision (drop single-use confirmation links).
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null)
-  const { email, password, businessName, websiteUrl, next } = body ?? {}
+  const { email, businessName, websiteUrl, next } = body ?? {}
   const safeNext = sanitizeNext(next)
 
-  if (!email || !password || !businessName) {
+  if (!email || !businessName) {
     return NextResponse.json(
-      { error: 'email, password, and businessName are required' },
+      { error: 'email and businessName are required' },
       { status: 400 },
     )
   }
 
   if (typeof email !== 'string' || !email.includes('@')) {
     return NextResponse.json({ error: 'Invalid email' }, { status: 400 })
-  }
-
-  if (typeof password !== 'string' || password.length < 8) {
-    return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 })
   }
 
   // Check for existing registration (prevent duplicate clients)
@@ -60,39 +64,54 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  // Use signUp (not admin.createUser) so we can set emailRedirectTo.
-  // This ensures the verification link goes to /auth/callback?next=/portal
-  // rather than the bare SITE_URL.
+  // signInWithOtp creates the auth.users row (shouldCreateUser: true) AND emits
+  // a 6-digit OTP via the Magic Link / Email OTP template ({{ .Token }}).
+  // No password. emailRedirectTo is harmless on OTP-only flow — Supabase only
+  // uses it when {{ .ConfirmationURL }} is in the template.
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.magicengine.com.au'
   const supabaseAnon = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
   )
 
-  const { data: authData, error: authError } = await supabaseAnon.auth.signUp({
+  const { error: otpError } = await supabaseAnon.auth.signInWithOtp({
     email: email.toLowerCase().trim(),
-    password,
     options: {
+      shouldCreateUser: true,
       emailRedirectTo: `${appUrl}/auth/callback?next=${encodeURIComponent(safeNext)}`,
     },
   })
 
-  if (authError || !authData.user) {
-    if (authError?.message?.includes('already registered')) {
-      return NextResponse.json(
-        { error: 'An account with this email already exists. Please log in.' },
-        { status: 409 },
-      )
-    }
-    console.error('[self-register] auth create failed:', authError)
+  if (otpError) {
+    // signInWithOtp does not throw "already registered" because it works for
+    // existing users too (passwordless re-login). The duplicate check above
+    // catches the portal_users / clients row collision.
+    console.error('[self-register] signInWithOtp failed:', otpError)
     return NextResponse.json({ error: 'Registration failed' }, { status: 500 })
   }
 
+  // Fetch the auth user that signInWithOtp just created so we can roll it back
+  // on downstream failure. We use the admin client to look up by email.
+  const { data: userList } = await supabaseAdmin.auth.admin.listUsers()
+  const authUser = userList?.users.find(
+    (u) => u.email?.toLowerCase() === email.toLowerCase().trim(),
+  )
+
   // Create clients row
+  //
+  // P0-C fix: contact_email is the canonical channel for FDE/admin outreach
+  // (support tickets, MTC top-up reminders, account recovery). It was previously
+  // left NULL because grant-signup-bonus reads the email from
+  // client_portal_users.email instead — so the bonus path still works without
+  // it — but downstream tooling (admin UI, billing reminders, A2.2 GSC brand
+  // search heuristics) all expect contact_email to be populated. Writing it
+  // here is non-breaking: clients.contact_email was already nullable, and
+  // existing rows just keep their NULL until they're touched.
   const { data: client, error: clientError } = await supabaseAdmin
     .from('clients')
     .insert({
       name: businessName.trim(),
+      contact_email: email.toLowerCase().trim(),
       domain: (websiteUrl?.trim() || '').replace(/^https?:\/\//i, '').replace(/\/.*$/, '').toLowerCase() || null,
       source: 'self_serve',
     })
@@ -101,7 +120,9 @@ export async function POST(request: NextRequest) {
 
   if (clientError || !client) {
     // Roll back auth user on failure
-    await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
+    if (authUser?.id) {
+      await supabaseAdmin.auth.admin.deleteUser(authUser.id)
+    }
     console.error('[self-register] client insert failed:', clientError)
     return NextResponse.json({ error: 'Registration failed' }, { status: 500 })
   }
@@ -153,6 +174,9 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     ok: true,
     clientId: client.id,
-    message: 'Account created. Please check your email to verify your address.',
+    email: email.toLowerCase().trim(),
+    next: safeNext,
+    needsVerification: true,
+    message: 'Account created. Enter the verification code we just emailed you to verify.',
   })
 }

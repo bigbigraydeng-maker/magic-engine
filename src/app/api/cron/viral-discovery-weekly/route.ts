@@ -19,6 +19,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 300  // 5 min — 8 industries × ~30s each
@@ -152,6 +153,18 @@ interface YTVideoItem {
   statistics: { viewCount?: string; likeCount?: string }
 }
 
+const YOUTUBE_FETCH_TIMEOUT_MS = 10_000
+
+async function fetchWithTimeout(url: string): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), YOUTUBE_FETCH_TIMEOUT_MS)
+  try {
+    return await fetch(url, { signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function searchYouTube(
   keywords: string,
   apiKey:   string,
@@ -166,7 +179,7 @@ async function searchYouTube(
     maxResults:    String(Math.min(limit * 2, 50)),
     key:           apiKey,
   })
-  const res  = await fetch(`https://www.googleapis.com/youtube/v3/search?${params}`)
+  const res  = await fetchWithTimeout(`https://www.googleapis.com/youtube/v3/search?${params}`)
   const data = await res.json() as { items?: YTSearchItem[]; error?: { message: string } }
   if (data.error) throw new Error(`YouTube Search: ${data.error.message}`)
   return data.items ?? []
@@ -179,7 +192,7 @@ async function getVideoDetails(videoIds: string[], apiKey: string): Promise<YTVi
     id:   videoIds.join(','),
     key:  apiKey,
   })
-  const res  = await fetch(`https://www.googleapis.com/youtube/v3/videos?${params}`)
+  const res  = await fetchWithTimeout(`https://www.googleapis.com/youtube/v3/videos?${params}`)
   const data = await res.json() as { items?: YTVideoItem[]; error?: { message: string } }
   if (data.error) throw new Error(`YouTube Videos: ${data.error.message}`)
   return data.items ?? []
@@ -307,8 +320,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const cronRun = await startCronRun('viral-discovery-weekly')
+
   const apiKey = process.env.YOUTUBE_API_KEY
   if (!apiKey) {
+    await cronRun.finish({ failed: 1, error: 'YOUTUBE_API_KEY not configured' })
     return NextResponse.json({ error: 'YOUTUBE_API_KEY not configured' }, { status: 500 })
   }
 
@@ -336,6 +352,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
+  const errorCount = results.filter(r => r.error !== undefined).length
+  await cronRun.finish({
+    processed: results.length,
+    completed: results.length - errorCount,
+    failed: errorCount,
+    summary: { total_queued: totalQueued },
+  })
   return NextResponse.json({
     ok:          true,
     timestamp:   new Date().toISOString(),

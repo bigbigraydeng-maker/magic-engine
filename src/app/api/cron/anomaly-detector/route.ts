@@ -37,6 +37,7 @@ import { runAnomalyDetector } from '@/lib/flywheel/anomaly'
 import { runProactivePass } from '@/lib/zhuge/proactive'
 import type { AnomalyDetectorResult } from '@/lib/flywheel/anomaly/AnomalyDetectorJob'
 import type { BatchProactiveResult } from '@/lib/zhuge/proactive'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 export const dynamic = 'force-dynamic'
 // Step 1 is fast; Step 2 calls Claude per client. Allow 5 min total.
@@ -71,6 +72,7 @@ export async function GET(
   }
 
   const timestamp = new Date().toISOString()
+  const cronRun = await startCronRun('anomaly-detector-daily')
 
   // ── Step 1: AnomalyDetectorJob ────────────────────────────────────────────
   let step1: AnomalyDetectorResult
@@ -84,12 +86,19 @@ export async function GET(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[anomaly-detector/cron] step1 unhandled error:', message)
+    await cronRun.finish({ failed: 1, error: `Step 1 failed: ${message}` })
     return NextResponse.json<ErrorResponse>({ error: `Step 1 failed: ${message}` }, { status: 500 })
   }
 
   // ── Step 2: 诸葛亮 Proactive ──────────────────────────────────────────────
   // Skip if no new signals were persisted (nothing fresh to act on).
   if (step1.signalsPersisted === 0) {
+    await cronRun.finish({
+      processed: step1.scannedClients,
+      completed: step1.scannedClients,
+      failed: step1.errors.length,
+      summary: { step1, step2_skipped: true },
+    })
     return NextResponse.json<CronResponse>({
       success: true,
       timestamp,
@@ -110,21 +119,34 @@ export async function GET(
     const message = err instanceof Error ? err.message : String(err)
     console.error('[anomaly-detector/cron] step2 unhandled error:', message)
     // Step 1 succeeded — still return 200 with partial result
+    const partialStep2: BatchProactiveResult = {
+      clients_processed: 0,
+      total_acted: 0,
+      total_dismissed: 0,
+      total_cost_usd: 0,
+      errors: [`Step 2 failed: ${message}`],
+      results: [],
+    }
+    await cronRun.finish({
+      processed: step1.scannedClients,
+      completed: step1.scannedClients - step1.errors.length,
+      failed: step1.errors.length,
+      summary: { step1, step2: partialStep2 },
+    })
     return NextResponse.json<CronResponse>({
       success: true,
       timestamp,
       step1,
-      step2: {
-        clients_processed: 0,
-        total_acted: 0,
-        total_dismissed: 0,
-        total_cost_usd: 0,
-        errors: [`Step 2 failed: ${message}`],
-        results: [],
-      },
+      step2: partialStep2,
     })
   }
 
+  await cronRun.finish({
+    processed: step1.scannedClients,
+    completed: step1.scannedClients - step1.errors.length,
+    failed: step1.errors.length + step2.errors.length,
+    summary: { step1, step2 },
+  })
   return NextResponse.json<CronResponse>({
     success: true,
     timestamp,

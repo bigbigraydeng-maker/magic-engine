@@ -19,7 +19,8 @@ import { NextRequest } from 'next/server'
 // ── Mocks (must be before imports of the module under test) ──────────────────
 
 vi.mock('@/lib/auth/client-access', () => ({
-  requireDashboardClientAccess: vi.fn(),
+  requireDashboardClientAccess: vi.fn().mockResolvedValue({ ok: true, user: { id: 'test-user', email: 'test@magiclab.com' }, role: 'admin', tier: 'admin', allowedClientId: null }),
+  requirePaidClientAccess: vi.fn().mockResolvedValue({ ok: true, user: { id: 'test-user', email: 'test@magiclab.com' }, role: 'admin', tier: 'admin', allowedClientId: null }),
 }))
 
 vi.mock('@/lib/supabase', () => ({
@@ -50,7 +51,7 @@ vi.mock('@/lib/geo/html-generator', () => ({
 }))
 
 import { POST } from '../route'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requireDashboardClientAccess, requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getWordpressConnection, getShopifyConnection } from '@/lib/cms/connection-store'
 import {
@@ -64,7 +65,7 @@ import {
 
 // ── Typed mocks ───────────────────────────────────────────────────────────────
 
-const mockAuth        = vi.mocked(requireDashboardClientAccess)
+const mockAuth        = vi.mocked(requirePaidClientAccess)
 const mockFrom        = vi.mocked(supabaseAdmin.from)
 const mockGetWp       = vi.mocked(getWordpressConnection)
 const mockGetShopify  = vi.mocked(getShopifyConnection)

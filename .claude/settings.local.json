@@ -6,7 +6,10 @@
       "Bash(npm test *)",
       "Bash(npm run *)",
       "Bash(git add *)",
-      "Bash(git fetch *)"
+      "Bash(git fetch *)",
+      "mcp__Meta__ads_get_ad_accounts",
+      "mcp__Meta__ads_get_ad_entities",
+      "mcp__Meta__ads_get_ad_videos"
     ]
   }
 }

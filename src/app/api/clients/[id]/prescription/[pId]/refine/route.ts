@@ -16,7 +16,7 @@
 
 import { NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { refineHuatuoPrescription, coerceWeaknesses } from '@/lib/huatuo/agent'
 import type { PrescriptionIntake, PrescriptionContent } from '@/types/diagnostic'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
@@ -52,7 +52,7 @@ export async function POST(
   { params }: { params: { id: string; pId: string } },
 ): Promise<Response> {
   const { id: clientId } = params
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return errorResponse(access.status, access.error)
   }
