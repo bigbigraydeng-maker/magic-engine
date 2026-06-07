@@ -349,3 +349,21 @@ services:
           type: web
           name: magic-engine
           property: host
+
+  # Phase 23.C — Memory Extractor (L3 学习闭环)
+  #   从 flywheel_outcomes + flywheel_actions 抽取 proven_patterns /
+  #   failed_experiments / learned_preferences，并回填 decision_history.outcome_verdict。
+  #   时序：attribution-cron (*/6h) 产出 outcomes → memory-extractor (06:00 UTC)
+  #   在最新一批 outcomes 写入后运行，保证当天 outcomes 当天学习。
+  #   Reference: ROADMAP.md Phase 23.C
+  - type: cron
+    name: memory-extractor-daily
+    env: node
+    schedule: "0 6 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -s -X POST -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/memory-extractor
+    envVars:
+      - key: CRON_SECRET
+        sync: false
