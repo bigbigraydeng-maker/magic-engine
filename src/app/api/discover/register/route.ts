@@ -24,6 +24,7 @@ import {
   updateDomainCacheStatus,
 } from '@/lib/zhangqian/rate-limiter'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
+import { normaliseAttribution } from '@/lib/marketing/attribution'
 
 // ─── URL normaliser ───────────────────────────────────────────────────────────
 
@@ -254,10 +255,12 @@ async function runScan(jobId: string, domain: string): Promise<void> {
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
+  const requestReferrer = req.headers.get('referer')
 
   let url: string, domain: string, email = '', name = ''
+  let attribution: ReturnType<typeof normaliseAttribution> = null
   try {
-    const body = (await req.json()) as { url?: unknown; email?: unknown; name?: unknown }
+    const body = (await req.json()) as { url?: unknown; email?: unknown; name?: unknown } & Record<string, unknown>
     if (!body.url || typeof body.url !== 'string') {
       return NextResponse.json({ error: 'url is required.' }, { status: 400 })
     }
@@ -269,6 +272,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     domain = norm.domain
     email = body.email.trim().toLowerCase()
     name  = typeof body.name === 'string' ? body.name.trim() : ''
+    attribution = normaliseAttribution({
+      ...body,
+      referrer: typeof body.referrer === 'string' ? body.referrer : requestReferrer,
+    })
   } catch {
     return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 })
   }
@@ -296,13 +303,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   await Promise.resolve(
     supabaseAdmin
       .from('discovery_leads')
-      .insert({ url, name: name || null, email, created_at: new Date().toISOString() }),
+      .insert({
+        url,
+        name: name || null,
+        email,
+        created_at: new Date().toISOString(),
+        ...attribution,
+        attribution,
+      }),
   ).catch(() => {})
 
   // Create scan job
   const { data: job, error: jobErr } = await supabaseAdmin
     .from('public_scan_jobs')
-    .insert({ url, domain, email, name: name || null })
+    .insert({
+      url,
+      domain,
+      email,
+      name: name || null,
+      ...attribution,
+      attribution,
+    })
     .select('id')
     .single<{ id: string }>()
 

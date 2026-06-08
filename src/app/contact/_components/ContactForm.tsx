@@ -1,10 +1,19 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { attributionFromSearchParams } from '@/lib/marketing/attribution'
+import { MARKETING_EVENT, trackMarketingEvent } from '@/lib/marketing/events'
 
 type Status = 'idle' | 'submitting' | 'success' | 'error'
 
 export default function ContactForm() {
+  const searchParams = useSearchParams()
+  const attribution = useMemo(
+    () => attributionFromSearchParams(searchParams),
+    [searchParams],
+  )
+
   const [status, setStatus] = useState<Status>('idle')
   const [errorMsg, setErrorMsg] = useState('')
 
@@ -19,6 +28,7 @@ export default function ContactForm() {
       email: (form.elements.namedItem('email') as HTMLInputElement).value,
       company: (form.elements.namedItem('company') as HTMLInputElement).value,
       message: (form.elements.namedItem('message') as HTMLTextAreaElement).value,
+      ...attribution,
     }
 
     try {
@@ -32,6 +42,10 @@ export default function ContactForm() {
         setErrorMsg(json.error ?? 'Something went wrong. Please try again.')
         setStatus('error')
       } else {
+        trackMarketingEvent(MARKETING_EVENT.CONTACT_SUBMIT, {
+          page_path: '/contact',
+          ...attribution,
+        })
         setStatus('success')
       }
     } catch {
@@ -112,7 +126,7 @@ export default function ContactForm() {
           name="message"
           required
           rows={6}
-          placeholder="Tell us about your business and what you're looking for…"
+          placeholder="Tell us about your business and what you're looking for..."
           className="w-full resize-none rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
         />
       </div>
@@ -134,7 +148,7 @@ export default function ContactForm() {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z" />
             </svg>
-            Sending…
+            Sending...
           </>
         ) : (
           'Send message'

@@ -42,6 +42,270 @@ function localizePath(pathname, lang) {
 
 let currentLang = isChinesePath(window.location.pathname) ? 'zh' : 'en';
 
+const MARKETING_EVENT = {
+  ADS_LANDING_VIEW: 'ads_landing_view',
+  ADS_PRIMARY_CTA_CLICK: 'ads_primary_cta_click',
+  DISCOVER_START: 'discover_start',
+  DISCOVER_SUBMIT: 'discover_submit',
+  CONTACT_SUBMIT: 'contact_submit',
+  QUALIFIED_LEAD: 'qualified_lead',
+};
+
+const URL_ATTRIBUTION_KEYS = [
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_term',
+  'utm_content',
+  'entry_offer',
+  'entry_page',
+];
+
+const ATTRIBUTION_KEYS = [...URL_ATTRIBUTION_KEYS, 'referrer'];
+const ATTRIBUTION_STORAGE_KEY = 'me_marketing_attribution_v1';
+
+function trimAttributionValue(value) {
+  if (typeof value !== 'string') return '';
+  return value.trim().slice(0, 300);
+}
+
+function mergeAttribution(...sources) {
+  const out = {};
+
+  sources.forEach(source => {
+    if (!source || typeof source !== 'object') return;
+    ATTRIBUTION_KEYS.forEach(key => {
+      const value = trimAttributionValue(source[key]);
+      if (value) out[key] = value;
+    });
+  });
+
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+function attributionFromSearch(search = window.location.search) {
+  const params = new URLSearchParams(search);
+  const raw = {};
+
+  ATTRIBUTION_KEYS.forEach(key => {
+    const value = params.get(key);
+    if (value) raw[key] = value;
+  });
+
+  return mergeAttribution(raw);
+}
+
+function readStoredAttribution() {
+  try {
+    const raw = window.sessionStorage.getItem(ATTRIBUTION_STORAGE_KEY);
+    if (!raw) return null;
+    return mergeAttribution(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function persistAttribution(attribution) {
+  try {
+    if (!attribution) {
+      window.sessionStorage.removeItem(ATTRIBUTION_STORAGE_KEY);
+      return;
+    }
+
+    window.sessionStorage.setItem(ATTRIBUTION_STORAGE_KEY, JSON.stringify(attribution));
+  } catch {
+    // Ignore storage failures in private browsing or locked-down environments.
+  }
+}
+
+function getDefaultAttribution(pathname = window.location.pathname) {
+  const pageKey = normalizePath(pathname);
+
+  if (pageKey === '/ads' || pageKey === '/cn/ads') {
+    return {
+      entry_offer: 'free_diagnosis',
+      entry_page: isChinesePath(pathname) ? 'cn_ads' : 'ads',
+    };
+  }
+
+  if (pageKey === '/discover' || pageKey === '/cn/discover') {
+    return {
+      entry_page: isChinesePath(pathname) ? 'cn_discover' : 'discover',
+    };
+  }
+
+  return null;
+}
+
+function getCurrentAttribution() {
+  const pageKey = stripCnPrefix(window.location.pathname);
+  const defaults = getDefaultAttribution(window.location.pathname);
+  const stored = readStoredAttribution();
+  const search = attributionFromSearch(window.location.search);
+
+  const merged = pageKey === '/ads'
+    ? mergeAttribution(stored, defaults, search, { referrer: document.referrer || '' })
+    : mergeAttribution(defaults, stored, search, { referrer: document.referrer || '' });
+
+  persistAttribution(merged);
+  return merged;
+}
+
+let marketingAttribution = getCurrentAttribution();
+
+function withAttribution(href, attribution) {
+  if (!href) return href;
+
+  const merged = mergeAttribution(attribution);
+  if (!merged) return href;
+
+  const isAbsolute = /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(href);
+  const url = new URL(href, isAbsolute ? undefined : window.location.origin);
+
+  URL_ATTRIBUTION_KEYS.forEach(key => {
+    const value = merged[key];
+    if (value) url.searchParams.set(key, value);
+  });
+
+  return isAbsolute
+    ? url.toString()
+    : `${url.pathname}${url.search}${url.hash}`;
+}
+
+function getLinkAttribution(link) {
+  if (!link) return marketingAttribution;
+
+  return mergeAttribution(marketingAttribution, {
+    entry_offer: link.getAttribute('data-entry-offer') || '',
+    entry_page: link.getAttribute('data-entry-page') || '',
+  });
+}
+
+function decorateAttributionLinks(root = document) {
+  root.querySelectorAll('[data-pass-attribution="true"]').forEach(link => {
+    const baseHref = link.getAttribute('data-base-href') || link.getAttribute('href');
+    if (!baseHref) return;
+
+    if (!link.getAttribute('data-base-href')) {
+      link.setAttribute('data-base-href', baseHref);
+    }
+
+    const nextHref = withAttribution(baseHref, getLinkAttribution(link));
+    if (nextHref) link.setAttribute('href', nextHref);
+  });
+}
+
+function trackMarketingEvent(name, params = {}) {
+  const payload = { ...params };
+
+  if (typeof window.gtag === 'function') {
+    window.gtag('event', name, payload);
+  }
+
+  window.dataLayer = window.dataLayer || [];
+  window.dataLayer.push({ event: name, ...payload });
+}
+
+function inferLeadDestination(href) {
+  const target = String(href || '');
+  if (target.includes('/discover')) return 'discover';
+  if (target.includes('/contact')) return 'contact';
+  if (target.includes('/portal/')) return 'portal';
+  return 'page';
+}
+
+function postLeadEvent(payload) {
+  const body = JSON.stringify(payload);
+
+  try {
+    if (navigator.sendBeacon) {
+      const blob = new Blob([body], { type: 'application/json' });
+      const accepted = navigator.sendBeacon('/api/lead-event', blob);
+      if (accepted) return;
+    }
+  } catch {
+    // Fall through to fetch keepalive.
+  }
+
+  fetch('/api/lead-event', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+    keepalive: true,
+  }).catch(() => {});
+}
+
+function logMarketingLeadEvent(eventName, options = {}) {
+  const attribution = mergeAttribution(marketingAttribution, options.attribution);
+  const pagePath = normalizePath(window.location.pathname);
+
+  postLeadEvent({
+    ctaKey: eventName,
+    destination: options.destination || 'page',
+    href: options.href || `${window.location.pathname}${window.location.search}`,
+    pagePath,
+    source: attribution?.entry_page || attribution?.utm_source || pagePath.replace(/^\//, '') || 'website',
+    referrer: attribution?.referrer || document.referrer || null,
+    metadata: {
+      event_name: eventName,
+      ...options.metadata,
+      attribution,
+    },
+  });
+}
+
+function initAdsTracking() {
+  if (stripCnPrefix(window.location.pathname) !== '/ads') return;
+
+  const pagePath = normalizePath(window.location.pathname);
+
+  trackMarketingEvent(MARKETING_EVENT.ADS_LANDING_VIEW, {
+    page_path: pagePath,
+    ...marketingAttribution,
+  });
+  logMarketingLeadEvent(MARKETING_EVENT.ADS_LANDING_VIEW, {
+    destination: 'page',
+    href: `${window.location.pathname}${window.location.search}`,
+  });
+
+  document.querySelectorAll('[data-ads-primary-cta]').forEach(link => {
+    link.addEventListener('click', () => {
+      const href = link.getAttribute('href') || '';
+      const ctaLocation = link.getAttribute('data-ads-primary-cta') || 'unknown';
+      const attribution = getLinkAttribution(link);
+
+      trackMarketingEvent(MARKETING_EVENT.ADS_PRIMARY_CTA_CLICK, {
+        page_path: pagePath,
+        cta_location: ctaLocation,
+        ...attribution,
+      });
+
+      logMarketingLeadEvent(MARKETING_EVENT.ADS_PRIMARY_CTA_CLICK, {
+        destination: inferLeadDestination(href),
+        href,
+        attribution,
+        metadata: { cta_location: ctaLocation },
+      });
+    });
+  });
+}
+
+function initDiscoverTracking() {
+  if (stripCnPrefix(window.location.pathname) !== '/discover') return;
+
+  const pagePath = normalizePath(window.location.pathname);
+
+  trackMarketingEvent(MARKETING_EVENT.DISCOVER_START, {
+    page_path: pagePath,
+    ...marketingAttribution,
+  });
+
+  logMarketingLeadEvent(MARKETING_EVENT.DISCOVER_START, {
+    destination: 'page',
+    href: `${window.location.pathname}${window.location.search}`,
+  });
+}
+
 function shouldRewriteLink(href) {
   if (!href) return false;
   return !href.startsWith('http')
@@ -135,6 +399,8 @@ function rewritePageLinks(lang) {
     const nextHref = localizeHref(href, lang);
     if (nextHref !== href) link.setAttribute('href', nextHref);
   });
+
+  decorateAttributionLinks();
 }
 
 function applyLanguage(lang) {
@@ -432,6 +698,11 @@ async function handleDiscoverSubmit(e) {
     return;
   }
 
+  const attribution = mergeAttribution(
+    getDefaultAttribution(window.location.pathname),
+    marketingAttribution,
+  );
+
   market = detectMarket(url);
   if (btn) { btn.textContent = 'Starting…'; btn.disabled = true; }
   startProgress();
@@ -440,7 +711,7 @@ async function handleDiscoverSubmit(e) {
     const res = await fetch('/api/scout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, noWebsite }),
+      body: JSON.stringify({ url, noWebsite, attribution }),
       signal: AbortSignal.timeout(90000),
     });
 
@@ -450,6 +721,23 @@ async function handleDiscoverSubmit(e) {
     stopProgress();
     leadId = data.leadId;
     market = data.market || market;
+
+    trackMarketingEvent(MARKETING_EVENT.DISCOVER_SUBMIT, {
+      page_path: normalizePath(window.location.pathname),
+      lead_id: data.leadId || '',
+      market,
+      ...attribution,
+    });
+    logMarketingLeadEvent(MARKETING_EVENT.DISCOVER_SUBMIT, {
+      destination: 'discover',
+      href: '/api/scout',
+      attribution,
+      metadata: {
+        lead_id: data.leadId || null,
+        market,
+        no_website: Boolean(noWebsite),
+      },
+    });
 
     setTimeout(() => renderResult(data), 500);
 
@@ -529,11 +817,16 @@ function handleHeroSubmit(e) {
   e.preventDefault();
   const url = document.getElementById('hero-url-input')?.value?.trim() || '';
   const discoverPath = localizePath('/discover', currentLang);
-  if (url) {
-    window.location.href = `${discoverPath}?url=${encodeURIComponent(url)}`;
-  } else {
-    window.location.href = discoverPath;
-  }
+  const target = new URL(discoverPath, window.location.origin);
+
+  if (url) target.searchParams.set('url', url);
+
+  const nextHref = withAttribution(
+    `${target.pathname}${target.search}${target.hash}`,
+    marketingAttribution,
+  );
+
+  window.location.href = nextHref || `${target.pathname}${target.search}${target.hash}`;
 }
 
 /* ── Mobile nav ── */
@@ -559,6 +852,7 @@ function closeMobileMenu() {
 
 /* ── Init ── */
 document.addEventListener('DOMContentLoaded', () => {
+  marketingAttribution = getCurrentAttribution();
 
   // Inject hamburger + mobile nav drawer into every page
   const navInner = document.querySelector('.nav-inner');
@@ -592,6 +886,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   applyLanguage(currentLang);
+  decorateAttributionLinks();
+  initAdsTracking();
+  initDiscoverTracking();
 
   // Hero form
   document.getElementById('hero-url-form')?.addEventListener('submit', handleHeroSubmit);
@@ -606,7 +903,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelector('.nw-toggle')?.addEventListener('click', toggleNoWebsite);
 
   // Auto-fill & submit if URL param present on /discover
-  if (window.location.pathname.startsWith('/discover')) {
+  if (stripCnPrefix(window.location.pathname) === '/discover') {
     const params = new URLSearchParams(window.location.search);
     const urlParam = params.get('url');
     if (urlParam) {

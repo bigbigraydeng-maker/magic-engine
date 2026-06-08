@@ -16,6 +16,29 @@ const LOCALES = {
   },
 };
 
+const ATTRIBUTION_KEYS = [
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_term',
+  'utm_content',
+  'entry_offer',
+  'entry_page',
+  'referrer',
+];
+
+function normaliseAttribution(input) {
+  if (!input || typeof input !== 'object') return null;
+
+  const out = {};
+  ATTRIBUTION_KEYS.forEach(key => {
+    const value = typeof input[key] === 'string' ? input[key].trim().slice(0, 300) : '';
+    if (value) out[key] = value;
+  });
+
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 function detectMarket(hostname) {
   const h = (hostname || '').toLowerCase();
   if (h.endsWith('.nz') || h.includes('.co.nz')) return 'NZ';
@@ -103,18 +126,22 @@ function getDemoFindings(market) {
   };
 }
 
-async function storeLead(env, { url, market, findings, noWebsite }) {
+async function storeLead(env, { url, market, findings, noWebsite, attribution }) {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) {
     // Return a stub ID when Supabase isn't configured
     return { id: `demo-${Date.now()}` };
   }
 
+  const cleanAttribution = normaliseAttribution(attribution);
   const body = JSON.stringify({
     url: url || '',
     market,
     findings,
     no_website_answers: noWebsite || null,
     status: 'scouted',
+    ...(cleanAttribution || {}),
+    attribution: cleanAttribution,
+    referrer: cleanAttribution?.referrer || null,
   });
 
   const res = await fetch(`${env.SUPABASE_URL}/rest/v1/discovery_leads`, {
@@ -149,6 +176,7 @@ export async function onRequestPost(context) {
   try {
     const body = await request.json();
     const { url, noWebsite } = body;
+    const attribution = normaliseAttribution(body.attribution);
 
     if (!url && !noWebsite) {
       return new Response(JSON.stringify({ error: 'url or noWebsite required' }), {
@@ -243,7 +271,7 @@ export async function onRequestPost(context) {
     }
 
     // Store lead
-    const lead = await storeLead(env, { url, market, findings, noWebsite });
+    const lead = await storeLead(env, { url, market, findings, noWebsite, attribution });
 
     const teaser = (findings.findings || []).slice(0, 3);
 

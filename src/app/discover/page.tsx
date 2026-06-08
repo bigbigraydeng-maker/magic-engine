@@ -1,9 +1,11 @@
 'use client'
 
-import { Suspense, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
+import { attributionFromSearchParams } from '@/lib/marketing/attribution'
+import { MARKETING_EVENT, trackMarketingEvent } from '@/lib/marketing/events'
 
 const signals = [
   'Search demand and ranking gaps',
@@ -108,6 +110,11 @@ function SuccessView({ email }: { email: string }) {
 function DiscoverForm() {
   const searchParams = useSearchParams()
   const prefillUrl = searchParams.get('url') ?? ''
+  const attribution = useMemo(
+    () => attributionFromSearchParams(searchParams),
+    [searchParams],
+  )
+  const didTrackStart = useRef(false)
 
   const [url, setUrl] = useState(prefillUrl)
   const [name, setName] = useState('')
@@ -115,6 +122,16 @@ function DiscoverForm() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [sent, setSent] = useState(false)
+
+  useEffect(() => {
+    if (didTrackStart.current) return
+    didTrackStart.current = true
+
+    trackMarketingEvent(MARKETING_EVENT.DISCOVER_START, {
+      page_path: '/discover',
+      ...attribution,
+    })
+  }, [attribution])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -130,7 +147,12 @@ function DiscoverForm() {
       const res = await fetch('/api/discover/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim(), name: name.trim(), email: email.trim() }),
+        body: JSON.stringify({
+          url: url.trim(),
+          name: name.trim(),
+          email: email.trim(),
+          ...attribution,
+        }),
       })
 
       const data = await res.json() as { success?: boolean; error?: string }
@@ -141,6 +163,10 @@ function DiscoverForm() {
         return
       }
 
+      trackMarketingEvent(MARKETING_EVENT.DISCOVER_SUBMIT, {
+        page_path: '/discover',
+        ...attribution,
+      })
       setSent(true)
     } catch {
       setError('Network error. Please check your connection and try again.')

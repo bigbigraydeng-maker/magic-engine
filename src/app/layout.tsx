@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { Inter, Space_Grotesk } from 'next/font/google'
+import GaScripts from '@/components/marketing/GaScripts'
 import './globals.css'
 
 const inter = Inter({
@@ -53,6 +54,7 @@ export default function RootLayout({
     <html lang="en" className={`${inter.variable} ${spaceGrotesk.variable}`}>
       <body className="font-sans">
         {children}
+        <GaScripts />
       </body>
     </html>
   )
