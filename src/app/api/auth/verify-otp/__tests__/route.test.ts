@@ -109,4 +109,57 @@ describe('POST /api/auth/verify-otp', () => {
 
     expect(mocks.resolveRedirectForSession.mock.calls[0][1]).toBe('/dashboard')
   })
+
+  // Login flow uses type='email' (existing user passwordless sign-in); the
+  // register flow keeps the default type='signup'. Mixing them up makes
+  // Supabase return "Token has expired or is invalid" even with a valid code.
+  it('forwards type=email when login form submits an OTP', async () => {
+    mocks.verifyOtp.mockResolvedValue({ data: {}, error: null })
+    mocks.resolveRedirectForSession.mockResolvedValue('/dashboard')
+
+    const res = await POST(request({ email: 'user@example.com', token: '123456', type: 'email' }))
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.ok).toBe(true)
+    expect(body.redirect).toBe('/dashboard')
+    expect(mocks.verifyOtp).toHaveBeenCalledWith({
+      email: 'user@example.com',
+      token: '123456',
+      type: 'email',
+    })
+    // Login path must reuse the single source-of-truth redirect logic so admin
+    // vs self_serve vs portal_only routing stays consistent with the signup
+    // flow. (子牙 architecture review)
+    expect(mocks.resolveRedirectForSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('defaults to type=signup when no type is provided (register backward compat)', async () => {
+    mocks.verifyOtp.mockResolvedValue({ data: {}, error: null })
+    mocks.resolveRedirectForSession.mockResolvedValue('/dashboard')
+
+    await POST(request({ email: 'user@example.com', token: '123456' }))
+
+    expect(mocks.verifyOtp).toHaveBeenCalledWith({
+      email: 'user@example.com',
+      token: '123456',
+      type: 'signup',
+    })
+  })
+
+  it('falls back to type=signup when an unknown type is submitted (anti-forgery guard)', async () => {
+    mocks.verifyOtp.mockResolvedValue({ data: {}, error: null })
+    mocks.resolveRedirectForSession.mockResolvedValue('/dashboard')
+
+    // 'recovery' / 'invite' etc. are valid Supabase OTP types but we never
+    // issue them from our own routes, so any incoming value other than
+    // 'signup' / 'email' is treated as forged and silently coerced to signup.
+    await POST(request({ email: 'user@example.com', token: '123456', type: 'recovery' }))
+
+    expect(mocks.verifyOtp).toHaveBeenCalledWith({
+      email: 'user@example.com',
+      token: '123456',
+      type: 'signup',
+    })
+  })
 })

@@ -1,9 +1,16 @@
 /**
  * POST /api/auth/verify-otp
- * Body: { email, token, next? }
+ * Body: { email, token, next?, type? }
  *
- * Completes self-serve signup using a 6-digit email OTP instead of a magic
- * confirmation link (P0-B).
+ * Completes email-based authentication using a 6-digit OTP instead of a magic
+ * confirmation link.
+ *
+ * Two flows share this route:
+ *   - type='signup' (default): new self-serve signup confirming a fresh account.
+ *     This is the original P0-B flow.
+ *   - type='email': existing user logging in via /login or /portal/login.
+ *     Supabase tags signInWithOtp emails for already-confirmed users with
+ *     type=email; using 'signup' here returns "Token has expired or is invalid".
  *
  * Why OTP instead of a link: the previous flow sent a one-time PKCE
  * confirmation URL. Gmail's link pre-scanner fetches that URL before the human
@@ -17,6 +24,7 @@
  *      cookies on the response (so middleware sees the user on the next nav).
  *   2. Reuse resolveRedirectForSession() to pick the landing page AND grant the
  *      500 MTC welcome bonus — the exact same path session-route uses.
+ *      (grantSignupBonus is idempotent so login replays are safe.)
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -29,10 +37,26 @@ function sanitizeNext(next: unknown): string {
   return next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard'
 }
 
+// Whitelist of OTP types we accept from the client. Supabase supports a wider
+// set (recovery, invite, sms, phone_change, …) but we only ever issue 'signup'
+// (new account confirmation) and 'email' (existing user passwordless sign-in)
+// from our own routes, so anything else would be a forged request.
+const ACCEPTED_OTP_TYPES = ['signup', 'email'] as const
+type AcceptedOtpType = typeof ACCEPTED_OTP_TYPES[number]
+
+function sanitizeOtpType(value: unknown): AcceptedOtpType {
+  if (typeof value === 'string' && (ACCEPTED_OTP_TYPES as readonly string[]).includes(value)) {
+    return value as AcceptedOtpType
+  }
+  // Default keeps the original /portal/register behaviour working unchanged.
+  return 'signup'
+}
+
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null)
-  const { email, token, next } = body ?? {}
+  const { email, token, next, type } = body ?? {}
   const safePath = sanitizeNext(next)
+  const otpType = sanitizeOtpType(type)
 
   if (typeof email !== 'string' || !email.includes('@')) {
     return NextResponse.json({ error: 'A valid email is required' }, { status: 400 })
@@ -70,7 +94,7 @@ export async function POST(request: NextRequest) {
   const { error } = await supabase.auth.verifyOtp({
     email: email.toLowerCase().trim(),
     token: code,
-    type: 'signup',
+    type: otpType,
   })
 
   if (error) {
