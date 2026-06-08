@@ -158,7 +158,9 @@ export default async function PortalOverviewPage({ params }: Props) {
       .from('execution_items')
       .select('id, title, status, dimension, due_date, source')
       .eq('client_id', clientId)
-      .neq('status', 'skipped')
+      // Hide skipped (FDE declined) and superseded (DAPE W5 archived) from the
+      // client-facing portal — only show live actionable work.
+      .not('status', 'in', '(skipped,superseded)')
       .order('sort_order', { ascending: true })
       .limit(100),
   ])

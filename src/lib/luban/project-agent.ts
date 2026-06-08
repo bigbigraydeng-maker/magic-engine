@@ -116,13 +116,18 @@ async function loadProjectContext(
     .order('phase', { ascending: true })
     .order('sort_order', { ascending: true })
 
-  const items: ProjectItemLite[] = ((itemRows ?? []) as ExecutionItem[]).map(it => ({
-    title:             it.title,
-    phase:             it.phase,
-    dimension:         it.dimension,
-    status:            it.status,
-    prescriptionLabel: (it.prescription_id ? prescLabelMap.get(it.prescription_id) : null) ?? '处方',
-  }))
+  // Filter out system-archived (`superseded`) items so Luban's prompt only sees
+  // live FDE-actionable work. DAPE W5 marks old zhuge rows superseded when
+  // recommendations are regenerated; they shouldn't influence Luban's plan.
+  const items: ProjectItemLite[] = ((itemRows ?? []) as ExecutionItem[])
+    .filter(it => it.status !== 'superseded')
+    .map(it => ({
+      title:             it.title,
+      phase:             it.phase,
+      dimension:         it.dimension,
+      status:            it.status as ProjectItemLite['status'],
+      prescriptionLabel: (it.prescription_id ? prescLabelMap.get(it.prescription_id) : null) ?? '处方',
+    }))
 
   // 5. 最近的工作日志（跨所有执行项）
   const itemTitleMap = new Map(

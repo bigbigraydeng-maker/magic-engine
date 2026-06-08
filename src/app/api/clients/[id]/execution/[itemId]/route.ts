@@ -32,6 +32,9 @@ import type { ExecutionItem, ExecutionItemStatus } from '@/types/diagnostic'
 
 export const dynamic = 'force-dynamic'
 
+// FDE-facing PATCH transitions only. `superseded` is **system-only** (written by
+// `src/lib/zhuge/action-persister.ts` when DAPE regenerates recommendations) and
+// must not be reachable through this manual API.
 const VALID_STATUSES: ExecutionItemStatus[] = ['pending', 'in_progress', 'completed', 'skipped']
 
 const STATUS_LABEL: Record<ExecutionItemStatus, string> = {
@@ -39,6 +42,7 @@ const STATUS_LABEL: Record<ExecutionItemStatus, string> = {
   in_progress: '进行中',
   completed:   '已完成',
   skipped:     '已跳过',
+  superseded:  '已取代',
 }
 
 export async function GET(

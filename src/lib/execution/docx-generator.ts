@@ -74,6 +74,7 @@ const STATUS_LABELS: Record<ExecutionItemStatus, string> = {
   in_progress: '进行中',
   completed:   '已完成',
   skipped:     '已跳过',
+  superseded:  '已取代',
 }
 
 const DIM_LABELS: Record<string, string> = {

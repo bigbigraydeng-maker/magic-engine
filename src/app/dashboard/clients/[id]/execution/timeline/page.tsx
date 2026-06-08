@@ -57,6 +57,17 @@ const STATUS_LABEL: Record<ExecutionItemStatus, { label: string; cls: string }> 
   in_progress: { label: '进行中', cls: 'bg-blue-100 text-blue-700' },
   completed:   { label: '已完成', cls: 'bg-green-100 text-green-700' },
   skipped:     { label: '已跳过', cls: 'bg-gray-100 text-gray-600' },
+  superseded:  { label: '已取代', cls: 'bg-gray-200 text-gray-500' },
+}
+
+// Defensive lookup — guard render against unknown future status values.
+function statusLabelOf(status: string): { label: string; cls: string } {
+  return (
+    (STATUS_LABEL as Record<string, { label: string; cls: string }>)[status] ?? {
+      label: status,
+      cls: 'bg-gray-100 text-gray-600',
+    }
+  )
 }
 
 function formatDateLabel(iso: string): string {
@@ -182,7 +193,7 @@ export default function TimelinePage() {
 }
 
 function TimelineRow({ item, clientId }: { item: ItemRow; clientId: string }) {
-  const status = STATUS_LABEL[item.status]
+  const status = statusLabelOf(item.status)
   const cs = item.content_state
 
   // 边框左色块（视觉优先级）

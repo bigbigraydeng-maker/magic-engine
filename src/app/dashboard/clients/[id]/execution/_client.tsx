@@ -159,8 +159,24 @@ const STATUS_META: Record<ExecutionItemStatus, { label: string; color: string }>
   in_progress: { label: '进行中', color: 'bg-blue-100 text-blue-700' },
   completed:   { label: '已完成', color: 'bg-green-100 text-green-700' },
   skipped:     { label: '已跳过', color: 'bg-yellow-100 text-yellow-700' },
+  // System-only terminal state (DAPE W5 写入). 不在 STATUS_FLOW 里 — FDE 不能手动切到这里.
+  superseded:  { label: '已取代', color: 'bg-gray-200 text-gray-500' },
 }
 
+// Defensive lookup — returns a safe fallback when `status` is an unknown/future value
+// (e.g. new lifecycle states added by backend before the frontend types catch up).
+// Used by render paths so a stray status never blows up `.color` access.
+function statusMetaOf(status: string): { label: string; color: string } {
+  return (
+    (STATUS_META as Record<string, { label: string; color: string }>)[status] ?? {
+      label: status,
+      color: 'bg-gray-100 text-gray-600',
+    }
+  )
+}
+
+// FDE-facing status transitions. `superseded` is omitted deliberately — only
+// the system (zhuge action-persister) can write that state.
 const STATUS_FLOW: ExecutionItemStatus[] = ['pending', 'in_progress', 'completed', 'skipped']
 
 // 下拉菜单内每个状态项前的色点 — STATUS_META.color 太浅，单独取饱和色
@@ -169,6 +185,7 @@ const STATUS_DOT: Record<ExecutionItemStatus, string> = {
   in_progress: 'bg-blue-500',
   completed:   'bg-green-500',
   skipped:     'bg-yellow-500',
+  superseded:  'bg-gray-400',
 }
 
 // 可在内容工作台（ContentStudioDrawer）生成内容的诊断维度
@@ -540,7 +557,7 @@ function StatusDropdown({
 }) {
   const [open, setOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  const current = STATUS_META[status]
+  const current = statusMetaOf(status)
 
   useEffect(() => {
     if (!open) return
@@ -641,7 +658,7 @@ function ExecutionItemCard({
   onRetryGenerate?: (item: ItemWithLogs) => void
 }) {
   const fixMeta     = FIX_TYPE_META[item.fix_type ?? ''] ?? FIX_TYPE_META.fde_manual
-  const statusMeta  = STATUS_META[item.status]
+  const statusMeta  = statusMetaOf(item.status)
   const dimMeta     = DIMENSION_CARD_META[item.dimension ?? '']
   const dueDate     = item.due_date
   const genState    = resolveGenerationState(item, isBackgroundGenerating)
@@ -968,7 +985,10 @@ function TaskDetailDrawer({
         {/* 状态控制 */}
         {!isReadonly
           ? <StatusDropdown status={item.status} onChange={status => onStatusChange(item.id, status)} />
-          : <span className={`inline-block text-xs px-2 py-1 rounded-full font-medium ${STATUS_META[item.status].color}`}>{STATUS_META[item.status].label}</span>
+          : (() => {
+              const m = statusMetaOf(item.status)
+              return <span className={`inline-block text-xs px-2 py-1 rounded-full font-medium ${m.color}`}>{m.label}</span>
+            })()
         }
 
         {/* 说明 */}
@@ -1461,7 +1481,7 @@ function FdeManualGroup({
         )}
         {group.items.map(item => {
           const dimMeta     = DIMENSION_CARD_META[item.dimension ?? '']
-          const statusMeta  = STATUS_META[item.status]
+          const statusMeta  = statusMetaOf(item.status)
           const fixMeta     = FIX_TYPE_META[item.fix_type ?? ''] ?? FIX_TYPE_META.fde_manual
           const requiresKey = (item.steps_json as Record<string, unknown> | null)?.requires as string | undefined
           const reqMeta     = requiresKey ? REQUIRES_META[requiresKey] : null

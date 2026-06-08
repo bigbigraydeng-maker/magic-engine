@@ -156,6 +156,8 @@ const DIMENSION_CN: Record<string, string> = {
 }
 const STATUS_CN: Record<string, string> = {
   pending: '待处理', in_progress: '进行中', completed: '已完成', skipped: '已跳过',
+  // 系统态 — DAPE W5 写入；鲁班不会写入此值，但列表渲染可能命中
+  superseded: '已取代',
 }
 
 // ─── buildProjectLubanTools ───────────────────────────────────────────────────

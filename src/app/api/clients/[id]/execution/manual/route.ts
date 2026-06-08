@@ -28,6 +28,8 @@ const VALID_DIMENSIONS: DiagnosticDimension[] = [
   'seo', 'ai_visibility', 'ads', 'social', 'reputation', 'competitor',
 ]
 const VALID_FIX_TYPES: FixType[] = ['fde_manual', 'me_auto', 'third_party']
+// FDE-creatable initial statuses only. `superseded` is **system-only** (written
+// by `src/lib/zhuge/action-persister.ts` when DAPE regenerates recommendations).
 const VALID_STATUSES: ExecutionItemStatus[] = ['pending', 'in_progress', 'completed', 'skipped']
 
 export async function POST(

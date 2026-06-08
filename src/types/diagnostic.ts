@@ -193,7 +193,16 @@ export interface PriorPrescriptionContext {
 
 // ── ExecutionItem (§2.4) ──────────────────────────────────────────────────────
 
-export type ExecutionItemStatus = 'pending' | 'in_progress' | 'completed' | 'skipped'
+/**
+ * Execution item lifecycle status.
+ *
+ * - `pending` / `in_progress` / `completed` / `skipped` — FDE-facing transitions.
+ * - `superseded` — **system-only** terminal state, written when DAPE/Zhuge regenerates
+ *   recommendations and supersedes an older pending row (see
+ *   `src/lib/zhuge/action-persister.ts::writeExecutionItems`). FDE cannot transition
+ *   a card into this state; it appears only in read paths (kanban / timeline / docx).
+ */
+export type ExecutionItemStatus = 'pending' | 'in_progress' | 'completed' | 'skipped' | 'superseded'
 
 /** 执行项来源 — diagnostic（处方派发）/ marketing_plan（营销计划派发）/ fde_manual（FDE 手动录入）/ proactive_signal（诸葛亮主动检测）*/
 export type ExecutionItemSource = 'diagnostic' | 'marketing_plan' | 'fde_manual' | 'proactive_signal' | 'zhuge' | 'luban' | 'fde'
