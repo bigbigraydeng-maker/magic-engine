@@ -2,6 +2,44 @@
 
 > 每次打开新会话：先看底部 **§ 当前焦点** → 按需读 [ROADMAP.md](./ROADMAP.md)。
 
+## ⭐ ME 核心引擎 = DAPE（2026-06-08 PM 拍板上线）
+
+> **不是** GIMPT (Goal/Initiative/Marketing-plan/Prescription/Task 11 层) — 那是早期工程师视角堆叠。
+> **是** **DAPE** = **Discovery → Analysis → Prescription → Execution**，4 段循环 + AI 贯穿全程 + 6 大支柱矩阵。
+>
+> | 段 | 一句话 | ME 后台 agent |
+> |---|---|---|
+> | **D** Discovery 发现 | ME 主动找客户没意识到的痛点 / 机会 / 异常 / 竞品动作 | 司马徽 (新建, Week 4+) |
+> | **A** Analysis 分析 | ME 拿数据 + AI 给客户 6 支柱打分 + 说清楚为什么 | 华佗 (huatuo) ✅ memory 接通 |
+> | **P** Prescription 处方 | AI 出战略地图: 该做什么 / 不做什么 / 为什么 / 资源怎么分 | 华佗 + 诸葛亮 (zhuge) ✅ Goal 一对一 + 版本化 |
+> | **E** Execution 执行 | FDE / 客户把处方翻译成可做的动作, 跑掉, 回流 | 诸葛亮 + 鲁班 (luban) ✅ AI 推荐今天做 3 件 (短模式 0 MTC) |
+>
+> **6 大支柱（横向切片）**：SEO / 社媒 / 广告 / 口碑 / AI 可见度 / 竞品。每段 × 6 支柱 = 24 格矩阵，**不死板** — 按客户行业 plugin 不同权重。
+>
+> **AI 学习闭环**：3 层 memory（客户级 + 行业级 + 全局），huatuo + zhuge 都接通已有 14 张 memory 表 (Phase 23/30 沉淀)，每周 `agent-learning-rollup` cron (Mon 07:00 UTC) 把 outcome 回灌 client_learned_preferences。
+>
+> **双轨业务（PM 强约束 不能打翻）**：
+> - **self-serve 自助客户**：`/portal/register` 域名注册 → 自助 wizard → 全程消耗 MTC
+> - **FDE 月付客户**：跟 ME 团队对话签约 → PM/FDE 后台代配 Goal/Initiative/Campaign/Plan → 月付套餐 MTC 充足
+> - 两轨**共用** DAPE 4 段引擎 + 四视角分层 UI：自助客户 / FDE 客户老板 / FDE 内部 / 数据层
+> - AI prompt 双模式：**短** (~500 tokens, 自助省 token) / **长** (~3000 tokens, FDE 深度)
+>
+> **完整 spec**：[`docs/superpowers/specs/2026-06-08-me-dape-redefine-v0.2.md`](./docs/superpowers/specs/2026-06-08-me-dape-redefine-v0.2.md) (949 行, 5-agent 签字: 子牙 / 板桥 / 魏征 / 狄仁杰 / 诸葛亮)
+>
+> **对外文案**：用大白话「发现-分析-处方-执行」，**对外不出现 DAPE 字眼**。DAPE 仅 ME 内部技术文档用 (板桥强约束)。
+>
+> **任何 agent 提案前必先问**：跟 DAPE 哪一段对齐？跟 6 支柱哪一柱关联？是 self-serve 还是 FDE 轨？跟 AI memory 哪一层挂钩？
+
+### DAPE 改造硬约束（v0.3 spec 教训沉淀，所有 worker 必读）
+
+1. **migration 必 PM 拍板**：worker 严禁自行 `apply_migration` (W4/W5 worker 都踩过，导致 1 个 P0 Kanban 崩 + 1 个 BLOCKER P→E 链断)
+2. **加 enum / status 新值必同步前端 type + UI fallback**：每次改 `type X = 'a' | 'b' | 'c'` 必 grep 全仓 Record / switch / STATUS_META key 同步 (superseded 事故教训)
+3. **删 PR 分支前必 verify `gh pr view <N> --json state` = MERGED**：不能 force push 完立刻 delete branch (PR #410/#415 误删事故教训)
+4. **worker 报"已 apply migration"必 SQL 验证 `supabase_migrations.schema_migrations`**：不能信 worker 口报 (W4/W5 都误报)
+5. **大改动前 5-agent live 复审**：子牙独裁起草必被 PM 拉回 (今天 PM 拉回 4 次)
+
+---
+
 **⚠️ 必读规则（每次会话开始前强制执行）：**
 - [`~/.claude/rules/coding-style.md`](~/.claude/rules/coding-style.md) — 含「删除代码前的强制流程」，**PM 反问 ≠ 删除指令**
 - [`~/.claude/rules/development-workflow.md`](~/.claude/rules/development-workflow.md) — 含「删除决策：先读意图，再动手」步骤 0.5
@@ -358,7 +396,7 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-06-08 06:09 NZST （**A2.2 GSC 品牌搜索量上线 (PR #336) + Kanban Content Workbench UX 4 连击 (PR #327) + Phase 33 全部测试通过 ✅**）
+> 最后更新：2026-06-08 14:43 NZST （**A2.2 GSC 品牌搜索量上线 (PR #336) + Kanban Content Workbench UX 4 连击 (PR #327) + Phase 33 全部测试通过 ✅**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|

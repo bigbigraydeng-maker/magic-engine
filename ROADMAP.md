@@ -1,7 +1,9 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-08 06:09 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
-> 
+> 最后更新：2026-06-08 14:43 NZST · 当前阶段：**⭐ DAPE 核心引擎 v0.2 ✅ 上线 production (Week 1+2+3 全部 merged, 17 PR / 6126+ 行代码 / 2 P0 hotfix)；Phase 24.A Platform OAuth Connector ✅；Phase 14.C ✅；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+>
+> **⭐ 核心引擎重定义（2026-06-08 PM 拍板）**：ME 核心引擎从 GIMPT (11 层堆叠) 改为 **DAPE** = **Discovery / Analysis / Prescription / Execution** 4 段循环 + AI 贯穿 + 6 大支柱矩阵。详见 [CLAUDE.md § ME 核心引擎 = DAPE](./CLAUDE.md) 顶部段落 + [DAPE spec v0.2](./docs/superpowers/specs/2026-06-08-me-dape-redefine-v0.2.md)（949 行, 5-agent 签字）+ 本文 § 9 DAPE 上线记录。
+>
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
 
@@ -3558,6 +3560,64 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-06-08（⭐ DAPE 核心引擎 v0.2 上线 — Week 1+2+3 全部 merged production）
+
+**一句话**：ME 核心引擎从 GIMPT (11 层堆叠) 改为 **DAPE = Discovery / Analysis / Prescription / Execution** 4 段循环 + AI 贯穿 + 6 大支柱矩阵。AI 学习闭环真正接通，FDE/客户首次能在 production 看到「AI 当参谋」效果。
+
+**触发**：PM 飞毛腿测试 F4 (Prescription) 时灵魂三问 "20 年 CMO 会这么用吗？AI 在哪？6 支柱在哪？" → 5-agent (子牙/板桥/魏征/狄仁杰/诸葛亮) live 复审 + brainstorm 5 议题 → 出 [DAPE spec v0.2](./docs/superpowers/specs/2026-06-08-me-dape-redefine-v0.2.md)（949 行）→ 5 并行 worker 通宵实施 → 2 P0 hotfix → 上线。
+
+**实施成果**（17 PR / 6126+ 行代码）：
+
+| PR | 主题 | 关键 |
+|---|---|---|
+| #428 | DAPE v0.2 spec | 949 行, 5-agent 签字 |
+| #430 | W1 huatuo memory 接通 | client_learned_preferences + zhuge_feedback + prescription_outcomes + 短/长双模 prompt, 19 测试 |
+| #432 | W2 zhuge memory 接通 | industry_benchmarks + zhuge_feedback + 双模 + deterministic 安全网, 119 测试 |
+| #433 | W3 narrative + cron | huatuo 输出 narrative + agent-learning-rollup 每周 Mon 07:00 UTC, 68 测试 |
+| #434 | W5 E 段 prescription_id + AI 推荐 | execution_items.prescription_id 字段, Kanban 顶部「AI 推荐今天做 3 件」短模 0 MTC, 111 zhuge 测试 + 52 新 |
+| #435 | W4 P 段 Goal 一对一 | prescriptions.goal_id + version + Initiative 派生, 处方页 Step 1 Goal selector, 阶段动态 N (不再写死 12 周), 20 新测试 |
+| #439 | P0 hotfix Kanban superseded | STATUS_META + statusMetaOf fallback (W5 schema 加 status='superseded' 但前端 type 没跟，5 新测试) |
+| #440 | P0 hotfix prescription/new step1 | latest-draft API 不再自动恢复 approved 处方进 Step 3 (前端 guard 12 新测试) |
+
+**Schema 改动（最小路径）**：
+- `execution_items.prescription_id` 字段 (放松 source_consistency CHECK，让 zhuge/luban/proactive_signal/fde 可选填 prescription_id，partial index for Kanban filter)
+- `prescriptions.goal_id` + `prescriptions.version` (Goal 一对一 + 版本化)
+- W5 migration `20260628000001_dape_w5_execution_prescription_link` apply 后 backfill CTS 7 zhuge orphan 行 → prescription_id
+
+**业务保护验证（PM 强约束 0 影响）**：
+- ✅ self-serve 注册漏斗 + MTC 8 API 不动
+- ✅ CTS 96 卡片 / Oztop 92 卡片 0 影响
+- ✅ CTS 4 active goals current_value 不动 (NULL / 468 / 156)
+- ✅ RLS service_role 模板严守 (CLAUDE.md 强约束)
+- ✅ Render 自动 deploy 完成, production 实测 4 个 UI 改动全生效 (诊断 narrative / Kanban AI 推荐 3 件 / prescription chip / Goal selector)
+
+**双轨业务 (PM 6 底线锁定)**：
+- self-serve 自助客户：`/portal/register` → 自助 wizard → 全程 MTC
+- FDE 月付客户：签约 → 后台代配 → 月付套餐
+- 共用 DAPE 4 段 + 四视角分层 + 双模 prompt
+
+**飞毛腿测试关闭** (F1-F5 跑完, F6+F7 PM 跳过):
+- 飞毛腿主文档 `docs/feimaotui-test/FEIMAOTUI.md`
+- 30+ Bug 池, 战略级 BUG-FMT-CORE-1 触发本 DAPE 改造
+- 子牙今天 9 次失误 (4 次独裁 / 1 次误删 PR 分支 / 2 次审 PR 漏 type drift / 1 次相信 worker 误报 / 1 次话多) — 全部透明记录在 [FEIMAOTUI-FINAL-OVERNIGHT-2026-06-08.md](./docs/feimaotui-test/FEIMAOTUI-FINAL-OVERNIGHT-2026-06-08.md)
+
+**沉淀进 CLAUDE.md 顶部强约束** (5 条 DAPE 改造硬约束):
+1. migration 必 PM 拍板, worker 严禁自行 apply
+2. 加 enum 新值必同步前端 type + UI fallback (superseded 教训)
+3. 删 PR 分支前必 verify state=MERGED (PR #410/#415 教训)
+4. worker 报"已 apply"必 SQL 验证 schema_migrations
+5. 大改动必 5-agent live 复审
+
+**Phase 编号说明**: DAPE 不是新 Phase，是**核心引擎重定义**。后续 Phase 35+ 都基于 DAPE 4 段框架展开，不再用 GIMPT 11 层。Week 4+ 计划：双轨业务串通测试 + 客户视角 mockup 验证 + 司马徽 (Discovery agent) 新建。
+
+**关联文档**：
+- [DAPE spec v0.2](./docs/superpowers/specs/2026-06-08-me-dape-redefine-v0.2.md) (PM × 5-agent 签字)
+- [飞毛腿 Bug 池](./docs/feimaotui-test/FEIMAOTUI.md) (30+ Bug 含 BUG-FMT-CORE-1 战略级)
+- [W4 backfill SQL](./docs/migrations-sql/dape-w4-backfill-prescription-goal-id.sql) + [W5 backfill SOP](./docs/sops/dape-w5-execution-prescription-id-backfill.md)
+- [overnight final report](./docs/feimaotui-test/FEIMAOTUI-FINAL-OVERNIGHT-2026-06-08.md)
+
+---
 
 ### 2026-06-05（Phase 34 — Client MCP Server 设计→实现 P34.0–P34.5 ✅ PR #369）
 
