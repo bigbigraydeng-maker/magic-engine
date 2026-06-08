@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { Suspense } from 'react'
 import Link from 'next/link'
 import ContactForm from './_components/ContactForm'
 
@@ -41,7 +42,9 @@ export default function ContactPage() {
         </p>
 
         <div className="mt-10 rounded-xl border border-slate-200 bg-white p-6 sm:p-8">
-          <ContactForm />
+          <Suspense fallback={<p className="py-8 text-center text-sm text-slate-500">Loading form...</p>}>
+            <ContactForm />
+          </Suspense>
         </div>
 
         <div className="mt-8 flex items-start gap-4 rounded-xl border border-slate-200 bg-white p-6">
