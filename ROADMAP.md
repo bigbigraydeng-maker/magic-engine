@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-08 06:09 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-08 13:56 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -252,11 +252,82 @@ GOAL (1 active per client) → INITIATIVES (按工作流目的切，非按维度
 - [ ] **P33.11** Goal 详情页 Initiative 卡片展开显示：关联 Campaign 数量 + action 完成率
 - [ ] **P33.12** Goal 详情页底部「执行进度摘要」区块（各 Initiative 进度条 + 总数统计）
 
+#### M5 — Marketing Plan 4 层骨架可视化 + 站内跳转（📋 已登记，2026-06-08 触发，待开工）
+
+> **触发事件**：2026-06-08 CTS DAPE 重启时，PM 在 `/dashboard/clients/[id]/marketing-plan` 页面看不到 Plan 归属的 Initiative / Campaign / Goal，只能看到 Plan 自身内容。**FDE / PM 无法回答"这个 Plan 在打哪场仗"，DAPE 闭环里 P 阶段产物溯源 D/A 阶段的链路断了。**
+>
+> **PM 强约束**："左侧 initiative，右侧详情等都需要有站内跳转的链接，但是开新窗口"。
+>
+> **数据已经在**：`marketing_plans.initiative_id` + `marketing_plans.campaign_id` 早就有了（Phase 33 M1 P33.2 / 历史 schema），只是 PlanEditor / `_client.tsx` 没 JOIN 显示。
+
+- [ ] **P33.13** 左侧 Plan 列表按 Initiative 分组（在 `_client.tsx` plans 列表上加 group by initiative_id）
+  - 分组 header：「Initiative 名 · X plans · → 跳 Initiative 详情页（新窗口）」
+  - 无 Initiative 的 Plan 单独归为「Unassigned」分组
+  - Initiative 分组按 Goal 排序（同一 Goal 下的 Initiative 聚在一起）
+
+- [ ] **P33.14** 右侧 PlanEditor 顶部加 4 层溯源卡片（在 executive_summary 上方）
+  - 显示链路：`Goal "G1 团报名" → Initiative "I3 FB+IG 矩阵" → Campaign Brief "教育内容 A"（+ N 个副 brief） → Plan 当前`
+  - 每个节点是可点击的 chip，**点击 `target="_blank" rel="noopener"` 开新窗口**
+  - Goal chip → `/dashboard/clients/[id]/goals/[goalId]`
+  - Initiative chip → `/dashboard/clients/[id]/goals/[goalId]?initiative=[initId]`（或 Initiative 独立详情页）
+  - Campaign Brief chip → `/dashboard/clients/[id]/campaign-briefs/[briefId]`（如不存在该路由，本任务一起补）
+  - 缺任一节点显示「未关联 - 点击关联」打开关联弹窗
+
+- [ ] **P33.15** PlanEditor 任务清单每张卡加 → 跳 Kanban 单卡链接（target=_blank）
+  - 当前任务清单只展示 plan_data.tasks 内容，FDE 看到任务后想编辑只能去 Kanban 找
+  - 加「→ 在 Kanban 中打开」按钮，定位到对应 execution_items 卡
+
+- [ ] **P33.16** 顶部面包屑改为 4 层路径
+  - 现状：`客户主页 / Marketing Plan`
+  - 目标：`客户主页 / G1 团报名 / I3 FB+IG 矩阵 / Marketing Plan`
+  - 每层可点（target=_blank 新窗口）
+
+- [ ] **P33.17** 跳转规范统一为「新窗口」（PM 强约束）
+  - 本任务覆盖整个 Strategy/Plan/Kanban 跳转链路
+  - 所有跨实体跳转（Goal ↔ Initiative ↔ Plan ↔ Action）一律 `<Link target="_blank" rel="noopener noreferrer">`
+  - 同实体内 tab/section 切换不开新窗口（保留 SPA 体验）
+  - 在 `src/lib/navigation/cross-entity-link.tsx` 抽统一组件 `<CrossEntityLink>` 强制 target=_blank，避免散在各处遗漏
+
+- [ ] **P33.18** Plan 创建路径补 Campaign Brief 选择
+  - 当前 PlanGenerator 只能选 Initiative，不能选 Campaign Brief
+  - 多 Brief / Initiative 1:N 关系（板桥 2026-06-08 拍板）需要 PM 显式选 1 主 Brief + N 副 Brief
+  - plan_data.related_campaign_briefs（uuid[]）已建，UI 补支持
+
+- [ ] **P33.19** （板桥软上限提醒，2026-06-08 拍板）
+  - Initiative 下 Campaign Brief > 5 时，UI warn「该 Initiative 已关联 5+ Campaign Brief，建议先评估是否 Initiative 没拆够细」
+  - Campaign Brief 下 Marketing Plan > 3 时，UI warn 同理
+  - 不阻断写入，只 warn
+
+- [ ] **P33.20** Plan 列表卡片可视化 Plan 数据完整度
+  - 当前 list card 只显示 title/date/任务数/博客数
+  - 加缺失字段提醒：如 social/blog/kpis/tasks 任一为空 → 显示 ⚠️「plan_data 不完整」chip
+  - 配合 P33.21 后端 zod 校验 → 防止脏数据进库
+
+- [ ] **P33.21** 后端 API zod schema 校验（防 2026-06-08 事故重演）
+  - 2026-06-08 子牙直接 INSERT marketing_plans 漏 social/blog/tasks 字段 → PlanEditor crash
+  - PATCH/POST `/api/clients/[id]/marketing-plan/*` 加 zod schema validation
+  - 拒绝 plan_data 缺 social/blog/kpis/tasks 任一字段的请求
+  - 同时给 PlanEditor 加 defensive default（`draft.blog ?? defaultBlogPlan()`）作为 fallback
+
+#### M6 — Kanban 分层折叠（📋 已登记，与 M5 同期触发，待开工）
+
+> **触发事件**：2026-06-08 板桥拍板 ME 数据 1:N 关系成立（一个 Goal 多 Initiative / 一个 Initiative 多 Campaign Brief / 一个 Brief 多 Plan）→ 同时也意味着 1 Goal 下可能有 4 Initiative × 3 Campaign × 2 Plan × 10 Action = 240 张卡，FDE 打开 Kanban 直接懵。
+
+- [ ] **P33.22** Kanban 默认视图折叠到 Initiative 层
+  - 点开 Initiative 才看到 Campaign 列表
+  - 点开 Campaign 才看到 Marketing Plan
+  - 点开 Plan 才看到 Action 列表
+  - 单卡 Action 仍按 status 列（pending / in_progress / completed）布局
+
+- [ ] **P33.23** 折叠状态本地持久化（localStorage）
+  - PM 折叠/展开的偏好下次打开看板时复现
+  - 不污染数据库
+
 ---
 
-**Phase 33 状态（M1-M3）：✅ 完成 2026-06-03，M4 待下一 session**
+**Phase 33 状态（M1-M3）：✅ 完成 2026-06-03，M4 待下一 session，M5 + M6 已登记 2026-06-08，待开工**
 
-FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Marketing Plan；Kanban 按 Goal 筛选 action；action 卡片显示归属 Initiative。
+FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Marketing Plan；Kanban 按 Goal 筛选 action；action 卡片显示归属 Initiative。**M5 + M6 完成后**：FDE 在 Marketing Plan 页面能直接看到 Goal/Initiative/Campaign 完整路径 + 一键开新窗口跳上下游 + Kanban 按 4 层骨架折叠不再 240 张卡铺一脸。
 
 ---
 
@@ -3558,6 +3629,37 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-06-08（DAPE 模式定义 + CTS 4 层骨架重启 + Phase 33 M5/M6 登记）
+
+**一句话**：定义 DAPE 工作流（Diagnosis/Analysis/Prescription/Execution）写入 memory；CTS 客户清场（归档 5 历史 plans + 9 张孤儿 Action + 2 旧 campaign_briefs + Unassigned Backlog 容器）；从零重走 Discovery，建出 2 个新 Campaign Brief + 2 个新 Marketing Plan + 5 + 30 = 35 张可执行 Kanban Action，4 层骨架（Goal→Initiative→Campaign Brief→Marketing Plan→Action）完整连线；中途事故修复（plan_data 缺 social/blog/tasks 导致 PlanEditor crash）；登记 Phase 33 M5/M6 + 2026-06-08 PM 强约束「跨实体跳转必须 target=_blank 新窗口」。
+
+**CTS 落地内容（数据库实测）**：
+- 归档：5 marketing_plans（archived）+ 2 campaign_briefs（archived）+ Unassigned Backlog Initiative + [Migration] Unassigned Backlog Goal + 9 张 active Action superseded
+- I2 着陆页+表单 Initiative：新建 1 个 Campaign Brief「Landing Page CRO Sprint Q3 2026」+ 1 个 Marketing Plan「CRO Sprint · 6/8-6/15」+ 5 张 CRO Action（表单字段精简 / 24h 回电承诺 / Hero 紧迫感 / 感谢页 WhatsApp 直连 / 移动端 sticky CTA）
+- I3 FB+IG 内容矩阵 Initiative：新建 2 个 Campaign Brief（教育内容 A + 信任建立 B，1:N 关系板桥拍板）+ 1 个 Marketing Plan「30 天内容矩阵 · 6/15-7/15 · 4 周排期」+ explode 30 张 content Action（W1-D1 ~ W4-D7，按周分主题）
+- 4 层完整 FK 连线，UI `/marketing-plan` 显示 7 条 Plan（含历史 archived），SQL 校验通过
+
+**重要事故**：UI client-side exception。子牙直接 SQL INSERT marketing_plans 时 plan_data jsonb 缺 `social` / `blog` / `tasks` 3 个 schema 必填字段，PlanEditor 第 275/307/310/313 行做 `draft.blog.topics.length` 两层链式访问，undefined crash → 已修复（反向同步 execution_items 到 plan_data.tasks + 补全 social/blog 空字段）。**根因**：后端 API 无 schema validation，前端无 defensive default。**登记 P33.21**（zod + defensive default）。
+
+**Phase 33 M5/M6 登记（PM 强约束）**：
+- M5 Marketing Plan 4 层骨架可视化：P33.13（左侧 Plan 列表按 Initiative 分组）+ P33.14（右侧详情 4 层溯源 chip）+ P33.15（任务清单 → Kanban 跳转）+ P33.16（4 层面包屑）+ P33.17（统一 CrossEntityLink 组件，**target="_blank" 强制**）+ P33.18（PlanGenerator 支持选 Campaign Brief）+ P33.19（板桥软上限提醒）+ P33.20（plan 数据完整度可视化）+ P33.21（zod schema 防脏数据）
+- M6 Kanban 分层折叠：P33.22 默认折叠到 Initiative 层 + P33.23 折叠状态 localStorage 持久化
+- 触发动机：PM 在 `/marketing-plan` 看不到 Plan 属于哪个 Initiative / Campaign / Goal，DAPE 闭环 P 阶段产物溯源 D/A 链路断了
+
+**沉淀产物**：
+- `memory/project_dape_workflow.md` — DAPE 永久定义
+- `docs/clients/cts-tours/dape-restart-plan-2026-06-08.md` — CTS DAPE 重启对账底稿
+- 本日志 entry
+
+**待办（下次 session 候选）**：
+- 补 G3 SEO Initiative 4 层骨架（本次 6 张老 Action 归档误杀，G3 SEO 当前 0 Plan / 0 Action）
+- 板桥要求的 P33.17 + P33.19 + P33.22 三件 UI 改造（M5/M6 全套）
+- I1 Meta Ads PoC 等 PM 配 META_SYSTEM_USER_TOKEN 后建 4 层 + 3 Campaign Brief
+- I4 EDM Welcome 等 PM 选 EDM 工具后建 4 层
+- 早上焦点表里 A2.2 端到端验证（CTS brand_aliases SOP）
+
+---
 
 ### 2026-06-05（Phase 34 — Client MCP Server 设计→实现 P34.0–P34.5 ✅ PR #369）
 

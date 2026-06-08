@@ -358,10 +358,11 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-06-08 06:09 NZST （**A2.2 GSC 品牌搜索量上线 (PR #336) + Kanban Content Workbench UX 4 连击 (PR #327) + Phase 33 全部测试通过 ✅**）
+> 最后更新：2026-06-08 13:56 NZST （**DAPE 工作流定义 + CTS 4 层骨架重启完整连线 ✅ + Phase 33 M5/M6 已登记** — 数据库 ✅ / UI 改造待开工）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
+| **🎯 Phase 33 M5 + M6** | Marketing Plan 4 层骨架 UI 可视化（P33.13-21）+ Kanban 分层折叠（P33.22-23）。PM 强约束：跨实体跳转一律 `target="_blank"` 新窗口，抽 `<CrossEntityLink>` 统一组件。**触发**：CTS 跑通 4 层后发现 `/marketing-plan` 看不到 Plan 属于哪 Initiative/Campaign/Goal，DAPE P 阶段溯源链断 | ⚠️ 下次 session 主任务 |
 | **🧪 A2.2 端到端验证** | PR #336 已 merged。等 Render 部署完后：①CTS 客户建 Goal 主指标=`brand_search_volume` ②Supabase clients 表 CTS 行的 `brand_aliases` 填 `{"cts tours","cts travel","china travel service","ctsnz"}` ③Goal 详情页主指标卡应显示 ~166 + 数据源 "GSC clicks (28-day brand searches)" ④Oztop 同样跑一遍（aliases `{"oztop building supplies","oz top"}`）。SOP: `docs/sops/brand-aliases-setup-for-gsc.md` | ⚠️ 今日晚上跑 |
 | **A2.3 Oztop GA4 generate_lead 配置** | PM 已熟练 SOP，15 分钟跑完同样配置。GTM trigger + GA4 Event Tag + Mark as key event | 📋 PM 操作 / 15 分钟 |
 | **A3 案例沉淀** | A2.1/A2.2/A2.3 全部跑通后，把 CTS/Oztop 经验固化到 Clients/ 笔记 | 📋 半天（A2 全部上线后做）|
@@ -370,6 +371,7 @@ npm test           # 测试套件
 | **GBP.0** | Google Cloud：enable Business Profile API + Account Management API | ⚠️ PM 操作 |
 
 **已完成全景（最近几个 Phase）**：
+- ✅ **DAPE 工作流定义 + CTS 4 层骨架重启**（2026-06-08，仅数据库，无 PR）：定义 DAPE（Diagnosis/Analysis/Prescription/Execution）写入 memory；CTS 清场（5 plans + 9 actions + 2 briefs + Unassigned 容器全归档）；从零重走 Discovery，建出 2 Campaign Brief + 2 Marketing Plan + 35 张可执行 Kanban Action，4 层完整连线（Goal→Initiative→Campaign Brief→Marketing Plan→Action）。中途修复 PlanEditor crash（plan_data 缺 social/blog/tasks 三个 schema 字段）。**沉淀**：`memory/project_dape_workflow.md` + `memory/project_marketing_plan_ui_lag.md` + `memory/feedback_jsonb_schema_validation.md` + `docs/clients/cts-tours/dape-restart-plan-2026-06-08.md`。**登记**：Phase 33 M5（Marketing Plan UI 4 层可视化 + target=_blank 强约束）+ M6（Kanban 分层折叠）
 - ✅ **A2.2 brand_search_volume GSC 接入**（2026-06-04，PR #336 merged）：Goal 主指标 `brand_search_volume` 改读 GSC rolling 28 天品牌词 clicks（替代 DataForSEO 估算）。两层解析（GSC 优先 / DataForSEO fallback）。**P0 修复**：发现 token equality 漏 80% 多词品牌（CTS "cts tours" 不能匹配域名根 "ctstours"），新增 `clients.brand_aliases` 字段 + substring 匹配（不污染原 isBrandedKeyword）。+ SOP 文档。17 测试通过，CTS 真实数据回归验证 166 brand clicks（之前 ~5）
 - ✅ **Kanban Content Workbench UX 4 连击**（2026-06-04，PR #327 merged）：FDE 最高频用的内容生成工作台 — 修 4 个痛点（反复点击 / 看不到进度 / prompt 太小 / 失败回退）+ 顺手修 1 个生产 CRITICAL bug（不存在的 GET endpoint 把 completed item 拉回 in_progress）。子牙+魏征双审，三阶段状态机 + useRef 同步去重 + 卡片三态（制作中/失败重试/超时）。8 commits，45/45 测试通过
 - ✅ **Phase 33 P33.9/P33.10 + M4 测试回归通过**（2026-06-04）：Goal filter 状态 chips、未归类分组、Goal 详情页 Execution Progress 卡片、Initiative 完成率 chip、Campaign 状态点 — 数据层 + UI 层全部跑通。Phase 33 整体收官
@@ -386,16 +388,18 @@ npm test           # 测试套件
 - ✅ **Phase 30 Industry Baseline Engine**（2026-06-02，PR #251）：5 细分 / 44 域名 / 月度 cron 自动重跑 / 华佗实时读基准（含 city 维度命中）
 
 **下一候选（按优先级）**：
-1. 🧪 **A2.2 端到端验证** — CTS/Oztop 跑 SOP 配 brand_aliases + 建 Goal + 看 Goal 主指标卡（30 分钟）
-2. 📋 **A2.3 Oztop GA4 generate_lead** — PM 操作，15 分钟
-3. 📋 **A3 CTS/Oztop 案例沉淀** — 半天事，A2 系列全部上线后做
-4. 📋 **Phase 24.B** — GBP 数据摂取（依赖 GBP.0 + migration）
+1. 🎯 **Phase 33 M5/M6** — Marketing Plan UI 4 层骨架可视化 + 站内跳转 target=_blank + Kanban 分层折叠（1-2 天，分 PR）
+2. 🧪 **A2.2 端到端验证** — CTS/Oztop 跑 SOP 配 brand_aliases + 建 Goal + 看 Goal 主指标卡（30 分钟）
+3. 📋 **A2.3 Oztop GA4 generate_lead** — PM 操作，15 分钟
+4. 📋 **G3 SEO Initiative 补 4 层** — 本次清场误杀 6 张老 Action，G3 SEO 目前 0 Plan / 0 Action 需补
+5. 📋 **A3 CTS/Oztop 案例沉淀** — 半天事，A2 系列全部上线后做
+6. 📋 **Phase 24.B** — GBP 数据摂取（依赖 GBP.0 + migration）
 
 **ME 定位升级（2026-06-02 确立）**：
 旧 → 营销自动化平台
 **新 → 以 Goal 为中心的生意指挥平台**（Kanban 汇总所有能帮客户达成 Goal 的因素，营销只是其中一条战线）
 
-下一 session：`继续 ME 工作 — A2.2 端到端验证`
+下一 session：`继续 ME 工作 — Phase 33 M5 Marketing Plan UI 4 层骨架可视化`
 
 **更新规则**（每次上线新功能）：
 1. ROADMAP.md 勾选对应任务 checkbox
