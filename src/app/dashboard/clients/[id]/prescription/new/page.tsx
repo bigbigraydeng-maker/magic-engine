@@ -7,6 +7,7 @@ import type { PrescriptionContent, PrescriptionIntake, DiagnosticDimension, Pres
 import type { ClientDiscoveryRow } from '@/lib/zhangqian/types'
 import type { SelfGrade, HuatuoGenerationMeta, TrendSummaryLite, SelfGradeWeakness, SelfGradeDimension } from '@/lib/huatuo/types'
 import { coerceWeaknesses } from '@/lib/huatuo/weakness-utils'
+import { shouldAutoRestoreLatestDraft } from './restore-guards'
 
 // DAPE Week 2 W4 — Goal 一对一 + 版本化所需的轻量 row 类型
 interface MinimalGoal {
@@ -279,6 +280,13 @@ export default function NewPrescriptionPage() {
   // ── 加载最近一份草稿处方（防止用户刚生成完刷新页面就丢失结果）─────────────
   // 补充/修订模式不自动恢复草稿 —— 用户是来新建增量/修订版的
   // DAPE W4: 带 selectedGoalId filter, 仅恢复该 Goal 下的最新版
+  //
+  // 🚨 P0 FIX (BUG-FMT-W4-1): approved 处方不该自动跳 Step 3
+  // 原因: latest-draft API 返回包括 approved 在内的所有非废弃处方 (DB 状态判断需要)
+  // 但 /prescription/new 路由的语义是"新建处方"——若客户已有 approved 处方就自动跳 Step 3
+  // 审阅页, 会卡住 W4 新加的 Goal selector, 用户根本进不来新建流程。
+  // 修法: 客户端 guard — approved 不自动跳, 让用户在 Step 1 选 Goal 重新生成 (或新版本)
+  // 同时保留对 draft/generating/failed 的自动恢复 (用户工作中断后回来继续)
   useEffect(() => {
     if (priorMode) return
     void (async () => {
@@ -290,9 +298,12 @@ export default function NewPrescriptionPage() {
         if (!res.ok) return
         const data = await res.json() as { prescription?: Prescription }
         const p = data.prescription
-        if (!p || !p.content) return
-        // 仅当用户还在第1步且没生成中时才自动恢复
-        if (step !== 1 || isGenerating) return
+        // 🚨 P0 GUARD: approved 处方不自动跳 Step 3 (BUG-FMT-W4-1)
+        // approved 是已锁定的处方, 用户来 /prescription/new 是想新建另一版, 不是看已批准的
+        // 想看 approved 应去 /dashboard/clients/[id]/execution
+        // shouldAutoRestoreLatestDraft 集中处理: content/step/isGenerating/approved 四道闸 (见 restore-guards.ts)
+        if (!shouldAutoRestoreLatestDraft({ step, isGenerating, prescription: p })) return
+        if (!p) return  // TS narrowing — guard 内部已检
         setPrescriptionId(p.id)
         setPrescriptionStatus(p.status)
         setContent(p.content)
