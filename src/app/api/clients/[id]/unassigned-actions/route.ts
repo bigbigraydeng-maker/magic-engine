@@ -30,11 +30,14 @@ export async function GET(
     return NextResponse.json({ actions: [], count: 0 })
   }
 
-  // 列出该 initiative 下的所有 execution_items
+  // 列出该 initiative 下**仍 active** 的 execution_items
+  // 2026-06-08 fix: 之前未过滤 status，导致 superseded/skipped/completed 的老 action
+  // 仍在 Goal 详情页 "Unassigned Backlog" 数字里被算入（FDE 看到 46 但其实 0 active）。
   const { data, error } = await supabaseAdmin
     .from('execution_items')
     .select('id, title, dimension, status, created_at')
     .eq('initiative_id', unassignedInit.id)
+    .not('status', 'in', '(skipped,superseded,completed)')
     .order('created_at', { ascending: false })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
