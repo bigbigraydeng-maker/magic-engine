@@ -16,7 +16,7 @@
  *   - 归档
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
 import type {
   MarketingPlan,
@@ -26,6 +26,18 @@ import type {
   PlatformContentMix,
   BlogTopicPlan,
 } from '@/lib/marketing-plan/types'
+
+// Phase 33 M5 P33.14 — 4 层骨架溯源 chip 用的轻量类型
+interface InitiativeRef {
+  id: string
+  title: string
+  goal_id: string | null
+  goal_title: string | null
+}
+interface CampaignBriefRef {
+  id: string
+  title: string
+}
 
 interface Props {
   clientId: string
@@ -66,6 +78,52 @@ export function PlanEditor({ clientId, plan, onUpdated, onArchived }: Props) {
     setMsg('')
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan.id])
+
+  // Phase 33 M5 P33.14 — 加载 Initiative + Campaign Brief 名字用于溯源 chip
+  // 当前 Plan 上只有 initiative_id + campaign_id，需 fetch 才能拿到名字 + Goal 归属
+  const [initiative, setInitiative] = useState<InitiativeRef | null>(null)
+  const [campaignBrief, setCampaignBrief] = useState<CampaignBriefRef | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadTraceability() {
+      // 一次拉所有 Initiative（已包含 goal_id + goal_title）
+      if (plan.initiative_id) {
+        try {
+          const res = await fetch(`/api/clients/${clientId}/initiatives`)
+          const json = await res.json() as { initiatives?: InitiativeRef[] }
+          if (!cancelled) {
+            const match = (json.initiatives ?? []).find(i => i.id === plan.initiative_id) ?? null
+            setInitiative(match)
+          }
+        } catch {
+          if (!cancelled) setInitiative(null)
+        }
+      } else {
+        setInitiative(null)
+      }
+
+      // Campaign Brief 单独 fetch（campaign endpoint 返回 status filter，取 all）
+      if (plan.campaign_id) {
+        try {
+          const res = await fetch(`/api/clients/${clientId}/campaign?status=all`)
+          const json = await res.json() as { campaigns?: CampaignBriefRef[] }
+          if (!cancelled) {
+            const match = (json.campaigns ?? []).find(c => c.id === plan.campaign_id) ?? null
+            setCampaignBrief(match)
+          }
+        } catch {
+          if (!cancelled) setCampaignBrief(null)
+        }
+      } else {
+        setCampaignBrief(null)
+      }
+    }
+
+    void loadTraceability()
+    return () => { cancelled = true }
+  }, [clientId, plan.id, plan.initiative_id, plan.campaign_id])
 
   const editable = plan.status === 'draft'
   const taskCount = (draft.tasks ?? []).length
@@ -245,6 +303,66 @@ export function PlanEditor({ clientId, plan, onUpdated, onArchived }: Props) {
           {msg}
         </div>
       )}
+
+      {/* Phase 33 M5 P33.14 — 4 层骨架溯源 chip 行（Goal → Initiative → Campaign Brief） */}
+      {/* PM 2026-06-08 强约束：所有跨实体跳转一律 target="_blank" rel="noopener noreferrer" */}
+      <div className="px-5 py-2.5 bg-gray-50 border-b border-gray-200 flex flex-wrap items-center gap-2">
+        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mr-1">溯源</span>
+
+        {/* Goal chip */}
+        {initiative?.goal_id && initiative.goal_title ? (
+          <a
+            href={`/dashboard/clients/${clientId}/goal/${initiative.goal_id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[11px] inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-full px-2.5 py-0.5 transition-colors"
+            title={`打开 Goal 详情页（新窗口）`}
+          >
+            🎯 Goal: <span className="font-medium">{initiative.goal_title}</span>
+            <span className="text-blue-400">↗</span>
+          </a>
+        ) : (
+          <span className="text-[11px] inline-flex items-center gap-1 bg-gray-100 text-gray-400 border border-gray-200 rounded-full px-2.5 py-0.5" title="此 Plan 未关联 Goal">
+            🎯 Goal: 未关联
+          </span>
+        )}
+
+        <span className="text-gray-300 text-xs">→</span>
+
+        {/* Initiative chip */}
+        {initiative ? (
+          <a
+            href={`/dashboard/clients/${clientId}/goal/${initiative.goal_id}#initiative-${initiative.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[11px] inline-flex items-center gap-1 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-full px-2.5 py-0.5 transition-colors"
+            title={`打开 Initiative 所在 Goal 详情页（新窗口）`}
+          >
+            ◈ Initiative: <span className="font-medium">{initiative.title}</span>
+            <span className="text-purple-400">↗</span>
+          </a>
+        ) : (
+          <span className="text-[11px] inline-flex items-center gap-1 bg-gray-100 text-gray-400 border border-gray-200 rounded-full px-2.5 py-0.5" title="此 Plan 未关联 Initiative">
+            ◈ Initiative: 未关联
+          </span>
+        )}
+
+        <span className="text-gray-300 text-xs">→</span>
+
+        {/* Campaign Brief chip（暂无详情页，灰色不可点） */}
+        {campaignBrief ? (
+          <span
+            className="text-[11px] inline-flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-2.5 py-0.5"
+            title="Campaign Brief 详情页待建（M5 后续任务）"
+          >
+            📋 Brief: <span className="font-medium">{campaignBrief.title}</span>
+          </span>
+        ) : (
+          <span className="text-[11px] inline-flex items-center gap-1 bg-gray-100 text-gray-400 border border-gray-200 rounded-full px-2.5 py-0.5" title="此 Plan 未关联 Campaign Brief">
+            📋 Brief: 未关联
+          </span>
+        )}
+      </div>
 
       {/* Executive summary */}
       {draft.executive_summary && (

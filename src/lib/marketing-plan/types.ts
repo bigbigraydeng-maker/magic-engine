@@ -117,6 +117,8 @@ export interface MarketingPlan {
   id: string
   client_id: string
   campaign_id: string | null
+  /** Phase 33 P33.2: Plan 归属的 Initiative（战略层）— DB 早就有，TS interface 此次补齐 */
+  initiative_id: string | null
   master_brief_id: string | null
   title: string
   status: MarketingPlanStatus
