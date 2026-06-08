@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-08 14:43 NZST · 当前阶段：**⭐ DAPE 核心引擎 v0.2 ✅ 上线 production (Week 1+2+3 全部 merged, 17 PR / 6126+ 行代码 / 2 P0 hotfix)；Phase 24.A Platform OAuth Connector ✅；Phase 14.C ✅；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-09 01:23 NZST · 当前阶段：**⭐ DAPE 核心引擎 v0.2 ✅ 上线 production (Week 1+2+3 全部 merged, 17 PR / 6126+ 行代码 / 2 P0 hotfix)；Phase 24.A Platform OAuth Connector ✅；Phase 14.C ✅；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 >
 > **⭐ 核心引擎重定义（2026-06-08 PM 拍板）**：ME 核心引擎从 GIMPT (11 层堆叠) 改为 **DAPE** = **Discovery / Analysis / Prescription / Execution** 4 段循环 + AI 贯穿 + 6 大支柱矩阵。详见 [CLAUDE.md § ME 核心引擎 = DAPE](./CLAUDE.md) 顶部段落 + [DAPE spec v0.2](./docs/superpowers/specs/2026-06-08-me-dape-redefine-v0.2.md)（949 行, 5-agent 签字）+ 本文 § 9 DAPE 上线记录。
 >
@@ -36,6 +36,7 @@
 | ~~**Phase 22.A.2**~~ | ~~GA4 每日采集~~ → ✅ PR #225 已 merged，2026-06-03 验证 cron 在跑（CTS 最新数据 03:00 UTC） | ✅ |
 | **Phase 24.B** | GBP 数据摂取（依赖 GBP.0 + migration） | 中 |
 | **B1 AU/NZ Marketing Index** | 战略级独立项目议题，Q4 2026 评估 → Q1 2027 启动 MVP | 6-8 周 |
+| **CTS-SEO-LP-HolidayPackages** | CTS `/china-holiday-packages-from-nz` 新建 SEO 落地页 — FB Sprint 2026-06-09 发现：`china holiday packages` 390/月 + `holidays to china` 390/月 CTS 都排 #49 (弱势但市场大)，专属落地页冲首页机会。**暂缓到 Phase 14 后**（G1 9/2 verdict 仅 12 周不够新页 0→P50 通常 12-16 周，板桥铁律 R2 防焦点稀释）。Phase 14 后启动，挂 C5 SEO 战线第二批 | 2-3 天 + 等 8-12 周 SEO 上排 |
 
 ### C. PM 一次性操作（无代码工作量）
 
