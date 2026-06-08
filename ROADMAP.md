@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-05 04:47 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-08 15:02 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -3266,9 +3266,12 @@ clients 表加 `seo_maturity_stage` 字段：
 
 ---
 
-## Phase 23 — Cross-Agent Memory Layer（旗舰能力 · 升级自 Phase 8.M）📋 战略确认，待排期
+## Phase 23 — Cross-Agent Memory Layer（旗舰能力 · 升级自 Phase 8.M）✅ 全部完成
 
-> **登记日期**：2026-05-26 · **状态**：战略方向已确认，由旧 Phase 8.M 升级整合，PM 拍板
+> **登记日期**：2026-05-26 · **状态**：✅ 23.A-E 全部完成（PR 已合并） · **2026-06-08 修复**：补 UNIQUE 约束 + 注册 memory-extractor cron（PR #445）
+> **背景**：状态标签之前错误地留在"待排期"，实际上代码已于 2026-06-10 之前全部开发完成。2026-06-08 子牙 audit 核实，Supabase 四表 + service.ts + extractor.ts + format.ts 均存在。
+
+> **登记日期**：2026-05-26 · **原始状态**：战略方向已确认，由旧 Phase 8.M 升级整合，PM 拍板
 >
 > **战略定位**：ME 三大旗舰能力之一（生产 Phase 21 + 学习 Phase 22 + 记忆 Phase 23）。让 ME 从"每次重新生成的工具"升级为"每客户持续学习的共生体"，定义 FDE 服务的真正壁垒。
 >
@@ -3538,6 +3541,24 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-06-08（超级 Agent 架构奠基 — Phase 23 修复 + Phase B/C/D ✅ PR #445）
+
+**一句话**：完成「最懂澳新 AI 增长引擎」超级 Agent 的底层管道：统一 ClientContext + 柔性能力注册表 + ZiyaRouter ExecutionPlan + 单一入口 `/api/super-agent`。
+
+**链路**：
+1. **Phase 23 DB 修复**：补 `client_proven_patterns` / `client_failed_experiments` UNIQUE 约束（删重复行）；`render.yaml` 注册 `memory-extractor-daily` cron（06:00 UTC），修复「学习循环从未运行」问题
+2. **Phase B — 统一 ClientContext 层**：`src/lib/context/` 4 文件（loader / registry / orchestrator / types）；`loadClientContext()` 并行一次性加载；`GROWTH_CAPABILITY_REGISTRY` 柔性注册表（adapter 模式，agent 合并/拆分只改这里）；`runOrchestration()` 依赖序编排
+3. **Phase C — ZiyaRouter ExecutionPlan**：`planExecution()` 把 TaskType 映射到完整 `ExecutionPlan`（capabilities/parallel/sequential/context_needs），9 个 TaskType 全部声明；保留原 `matchRoute()` 不破坏现有调用
+4. **Phase D — `/api/super-agent`**：单一 POST 入口，pipeline = auth → planExecution → loadClientContext → runOrchestration → sanitiseOutputs；devops 任务类型返回 `{ devops_only: true }` 不跑 growth orchestrator；207 Multi-Status
+
+**柔性设计保证**：agent 合并/拆分/新增 → 只改 `GROWTH_CAPABILITY_REGISTRY` + `TASK_EXECUTION_MAP`，入口路由不变。
+
+**TypeScript 验证**：`npx tsc --noEmit` 0 错误。
+
+**未完成（留 Phase E）**：SSE streaming（`?stream=1`）/ 前台聊天界面 / write_seo+write_geo capability 接入。
+
+---
 
 ### 2026-06-05（Phase 34 — Client MCP Server 设计→实现 P34.0–P34.5 ✅ PR #369）
 
