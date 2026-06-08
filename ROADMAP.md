@@ -1,9 +1,19 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-05 04:47 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-09 01:47 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
+
+---
+
+## 🔴 待 PM 决策
+
+### [DECISION-001] Staging 环境 vs 账单告警 优先级（2026-06-09）
+
+**问题**：招 freelancer 前需建 Staging 环境（S1-S5，隔离测试用）+ 设账单告警（A1-A4，防 cron bug 烧钱）。两者都未完成。
+**不做会怎样**：不建 Staging → QA 只能在生产跑，有污染客户数据风险；不设告警 → cron 失控账单暴涨才发现。
+**子牙推荐**：先做 A3（Render 崩溃告警，5 分钟）→ 再做 S1-S5（Staging，子牙帮你跑 schema）→ A1/A2 最后做。
 
 ---
 
