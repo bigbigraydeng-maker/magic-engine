@@ -217,8 +217,17 @@ export interface GoalRow {
   current_value: number | null
   /** ISO timestamp of last auto-fetch */
   current_value_fetched_at: string | null
-  /** Source: cron job, UI button, or FDE manual entry */
-  current_value_source: 'auto.cron' | 'auto.manual' | 'self_report' | null
+  /**
+   * Source label. UI checks .startsWith('auto.') to know it came from a machine.
+   *   - 'auto.cron': written by scheduled refresh cron
+   *   - 'auto.<source>': written by UI fetch button — source matches the real
+   *     underlying data source (ga4_organic_sessions / ga4_conversions /
+   *     gsc_brand_clicks / dataforseo_keyword_volume / ai_visibility_top3)
+   *   - 'auto.manual': legacy fallback for unknown shapes
+   *   - 'self_report': FDE / PM manually typed in a value
+   *   - null: never fetched yet
+   */
+  current_value_source: string | null
 
   created_at: string
   updated_at: string

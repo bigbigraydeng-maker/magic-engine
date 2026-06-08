@@ -137,7 +137,7 @@ function VerdictResult({ goal }: { goal: GoalRow }) {
                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
                   goal.current_value_source === 'auto.cron'
                     ? 'bg-status-track/15 text-status-track'
-                    : goal.current_value_source === 'auto.manual'
+                    : goal.current_value_source.startsWith('auto.')
                       ? 'bg-me-ochre/15 text-me-ochre'
                       : 'bg-me-charcoal/10 text-me-charcoal/65'
                 }`}>

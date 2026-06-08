@@ -51,13 +51,20 @@ export async function GET(
   const result = await autoFetchMetricValue(supabaseAdmin, clientId, goal.primary_metric_key)
 
   // A2.1-γ: persist fetched value back to goals table so VerdictPanel can show source + time
+  // A3 fix (2026-06-08): write the real fetch source (auto.ga4_conversions /
+  // auto.ga4_organic_sessions / auto.gsc_brand_clicks / etc.) instead of the
+  // useless 'auto.manual' tag. Falls back to 'auto.manual' for unknown shapes
+  // so the UI VerdictPanel mapping still works.
   if (result.ok && typeof result.value === 'number') {
+    const detailedSource = (result.source && result.source.startsWith('auto.'))
+      ? result.source
+      : 'auto.manual'
     await supabaseAdmin
       .from('goals')
       .update({
         current_value: result.value,
         current_value_fetched_at: new Date().toISOString(),
-        current_value_source: 'auto.manual',
+        current_value_source: detailedSource,
       })
       .eq('id', params.goalId)
   }

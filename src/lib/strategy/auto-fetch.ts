@@ -70,6 +70,12 @@ export async function autoFetchMetricValue(
 }
 
 // ── organic_traffic ────────────────────────────────────────────────────────
+//
+// A1 fix (2026-06-08): organic_traffic = ONLY medium='organic' sessions.
+// Previously summed total_sessions (direct + organic + paid + referral all
+// mixed). That made a paid_social spike look like organic growth and pollutes
+// SEO-only Goal verdicts. Now we sum top_sources[] where medium='organic',
+// matching the Goal label semantics ("自然流增长" = SEO-driven traffic only).
 
 async function fetchOrganicTraffic(
   supabase: SupabaseClient,
@@ -77,11 +83,16 @@ async function fetchOrganicTraffic(
 ): Promise<AutoFetchResult> {
   const { data, error } = await supabase
     .from('ga4_traffic_snapshots')
-    .select('total_sessions, period_start, period_end')
+    .select('top_sources, total_sessions, period_start, period_end')
     .eq('client_id', clientId)
     .order('period_start', { ascending: false })
     .limit(1)
-    .maybeSingle()
+    .maybeSingle<{
+      top_sources: Ga4SourceRow[] | null
+      total_sessions: number | null
+      period_start: string
+      period_end: string
+    }>()
 
   if (error) {
     return { ok: false, reason: `GA4 query failed: ${error.message}` }
@@ -89,16 +100,23 @@ async function fetchOrganicTraffic(
   if (!data) {
     return { ok: false, reason: 'No GA4 snapshot found — run GA4 Sync first' }
   }
-  if (typeof data.total_sessions !== 'number') {
-    return { ok: false, reason: 'GA4 snapshot missing total_sessions value' }
+
+  const sources = Array.isArray(data.top_sources) ? data.top_sources : []
+  if (sources.length === 0) {
+    return { ok: false, reason: 'GA4 snapshot missing top_sources breakdown — cannot isolate organic traffic' }
   }
+
+  const organicSessions = sources.reduce(
+    (sum, src) => sum + (src.medium === 'organic' && typeof src.sessions === 'number' ? src.sessions : 0),
+    0,
+  )
 
   return {
     ok: true,
-    value: data.total_sessions,
-    source: 'GA4 (28-day sessions)',
-    snapshot_date: data.period_end as string,
-    label: `${data.total_sessions.toLocaleString()} sessions (${formatDate(data.period_start as string)} → ${formatDate(data.period_end as string)})`,
+    value: organicSessions,
+    source: 'auto.ga4_organic_sessions',
+    snapshot_date: data.period_end,
+    label: `${organicSessions.toLocaleString()} organic sessions (${formatDate(data.period_start)} → ${formatDate(data.period_end)})`,
   }
 }
 
@@ -269,7 +287,7 @@ async function fetchBrandSearchVolume(
   return {
     ok: true,
     value: hit.search_volume,
-    source: 'DataForSEO bulk keyword volume (estimate · GSC not yet connected)',
+    source: 'auto.dataforseo_keyword_volume',
     snapshot_date: new Date().toISOString(),
     label: `~${hit.search_volume.toLocaleString()} searches/mo for "${hit.keyword}"`,
   }
@@ -332,7 +350,7 @@ async function fetchBrandClicksFromGsc(
   return {
     ok: true,
     value: brandedClicks,
-    source: 'GSC clicks (28-day brand searches)',
+    source: 'auto.gsc_brand_clicks',
     snapshot_date: data.period_end,
     label: `${brandedClicks.toLocaleString()} brand-search clicks (${brandedQueryCount} ${brandedQueryCount === 1 ? 'query' : 'queries'} · ${formatDate(data.period_start)} → ${formatDate(data.period_end)})`,
   }
@@ -396,7 +414,7 @@ async function fetchFormSubmissions(
   return {
     ok: true,
     value: totalConversions,
-    source: 'GA4 conversions (key events)',
+    source: 'auto.ga4_conversions',
     snapshot_date: data.period_end,
     label: `${totalConversions.toLocaleString()} conversions (${formatDate(data.period_start)} → ${formatDate(data.period_end)})`,
   }
@@ -512,7 +530,7 @@ async function fetchAiVisibilityScore(
   return {
     ok: true,
     value: score,
-    source: 'industry_ai_visibility_snapshots (top3 occurrence)',
+    source: 'auto.ai_visibility_top3',
     snapshot_date: latestDate,
     label: `${score}/100 — top3 in ${hitQuestions.size}/${uniqueQuestions.size} ${industryCode} questions`,
   }
