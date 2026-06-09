@@ -1,16 +1,26 @@
 # Oztop Reel 1 — 实拍素材拍摄清单（给客户）
 
-> **状态**：草稿 v0.9 — 等 PM 拍板素材存储位置后出终稿 v1.0
-> **占位符**：`{{UPLOAD_LOCATION}}` 待 PM 确认后替换
-> **拟推荐**：Google Drive 客户专属文件夹 `Oztop_Magic_Engine_Assets/2026-06-09-Reel1-Walnut/`
+> **状态**：终稿 v1.0 — PM 2026-06-09 已拍板 Google Drive 存储位置
 > **生成日期**：2026-06-09
 > **用途**：PM 把本文档 PDF 化或直接微信文字发给 Oztop 老板，让他按清单拍
 
 ---
 
-## 给客户的一句话说明
+## 上传位置（PM 已建好）
 
-> Hey, 我们这次 Reel 用 "真实拍摄 + 数字字卡" 混剪，需要你拍 5 个镜头. 每个 5-10 秒就够, 总共半小时能拍完. 拍完上传到 **{{UPLOAD_LOCATION}}**, 我们今天剪出来明天上线.
+📁 **Google Drive 文件夹**：
+https://drive.google.com/drive/folders/15Zyvfl89IF4kCAKbIja3XT2uspJokBCV?usp=drive_link
+
+PM 提前给 Oztop 老板开通编辑权限 (Anyone with the link can upload)，老板拍完直接拖进去。
+
+---
+
+## 给客户的一句话说明（PM 发微信用）
+
+> Hey, 我们这次 Reel 用 "真实拍摄 + 数字字卡" 混剪，需要你拍 5 个镜头. 每个 5-10 秒就够, 总共半小时能拍完. 拍完上传到这个 Drive 文件夹：
+> https://drive.google.com/drive/folders/15Zyvfl89IF4kCAKbIja3XT2uspJokBCV
+>
+> 明天 8 点前传完，下午 5 点 Reel 上线 FB+IG. 如果你拍不到合格的，我们用 AI 兜底，不影响发布.
 
 ---
 
