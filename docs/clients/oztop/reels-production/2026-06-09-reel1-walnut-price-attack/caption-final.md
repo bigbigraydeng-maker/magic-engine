@@ -12,7 +12,7 @@
 ```
 $35.50/m² for 15mm Elegant Walnut engineer timber.
 
-Retail chains charge $55–70/m² for the same quality. The difference? We warehouse our own stock under the Big Panda Flooring brand. No retail chain markup. No middleman. No guessing games on price.
+Retail chains charge $55–70/m² for the same quality. The difference? Oztop warehouses our own stock — direct from manufacturer to your floor. No retail chain markup. No middleman. No guessing games on price.
 
 Licensed. Insured. Same-day quote. 2-week installation from deposit.
 
@@ -22,7 +22,7 @@ Licensed. Insured. Same-day quote. 2-week installation from deposit.
 💬 DM us your floor size — we'll send you a number today.
 🌐 oztopbuildingsupplies.com.au?utm_source=facebook&utm_medium=organic&utm_campaign=oztop_walnut_clearance_2026&utm_content=reel1_price_attack
 
-#flooringbrisbane #engineeredtimber #brisbanebuilder #flooringgoldcoast #spcflooring #bigpandaflooring #oztopbuildingsupplies #homeimprovement #renovationbrisbane #timberfloor #brisbanerenovation #floorinstall #timberfloorbrisbane #brisbanehome #flooringdeals
+#flooringbrisbane #engineeredtimber #brisbanebuilder #flooringgoldcoast #spcflooring #oztopbuildingsupplies #oztopflooring #homeimprovement #renovationbrisbane #timberfloor #brisbanerenovation #floorinstall #timberfloorbrisbane #brisbanehome #flooringdeals
 ```
 
 ---
@@ -32,7 +32,7 @@ Licensed. Insured. Same-day quote. 2-week installation from deposit.
 ```
 $35.50/m² for 15mm Elegant Walnut engineer timber.
 
-Retail chains charge $55–70/m² for the same quality. The difference? We warehouse our own stock under the Big Panda Flooring brand. No retail chain markup. No middleman. No guessing games on price.
+Retail chains charge $55–70/m² for the same quality. The difference? Oztop warehouses our own stock — direct from manufacturer to your floor. No retail chain markup. No middleman. No guessing games on price.
 
 Licensed. Insured. Same-day quote. 2-week installation from deposit.
 
@@ -46,7 +46,7 @@ Licensed. Insured. Same-day quote. 2-week installation from deposit.
 .
 .
 
-#flooringbrisbane #engineeredtimber #brisbanebuilder #flooringgoldcoast #spcflooring #bigpandaflooring #oztopbuildingsupplies #homeimprovement #renovationbrisbane #timberfloor #brisbanerenovation #floorinstall #timberfloorbrisbane #brisbanehome #flooringdeals
+#flooringbrisbane #engineeredtimber #brisbanebuilder #flooringgoldcoast #spcflooring #oztopbuildingsupplies #oztopflooring #homeimprovement #renovationbrisbane #timberfloor #brisbanerenovation #floorinstall #timberfloorbrisbane #brisbanehome #flooringdeals
 ```
 
 > **IG 不能放 clickable link**，把 UTM 放 `link in bio`（Linktree 或主页跳转），caption 写 `🌐 Link in bio`。
