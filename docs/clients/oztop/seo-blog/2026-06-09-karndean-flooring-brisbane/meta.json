@@ -1,0 +1,208 @@
+{
+  "post_metadata": {
+    "publish_date": "2026-06-09",
+    "client": "Oztop Building Supplies",
+    "domain": "oztopbuildingsupplies.com.au",
+    "post_type": "blog",
+    "intent": "transactional / commercial-local",
+    "target_audience": "Brisbane + Gold Coast homeowners, investors, and pet families searching for Karndean LVT",
+    "language": "AU English",
+    "market": "AU (QLD)",
+    "word_count": 1620,
+    "primary_keyword_density_pct": 0.62,
+    "primary_keyword_occurrences": 10
+  },
+  "yoast_seo": {
+    "focus_keyphrase": "Karndean flooring Brisbane",
+    "seo_title": "Where to Buy Karndean Flooring in Brisbane | Oztop Authorised",
+    "seo_title_chars": 60,
+    "meta_description": "Authorised Karndean retailer in Brisbane. Visit our Slacks Creek showroom or call 07 3416 6458 for same-day quote. Servicing 100km radius.",
+    "meta_description_chars": 137,
+    "slug": "where-to-buy-karndean-flooring-brisbane",
+    "canonical_url": "https://oztopbuildingsupplies.com.au/blog/where-to-buy-karndean-flooring-brisbane/",
+    "robots": "index, follow",
+    "synonyms": [
+      "Karndean Brisbane",
+      "Karndean LooseLay Brisbane",
+      "Karndean authorised retailer Brisbane",
+      "Karndean LVT Brisbane",
+      "buy Karndean Brisbane",
+      "Karndean vinyl plank Brisbane"
+    ],
+    "secondary_keywords": [
+      "Karndean LooseLay Longboard",
+      "vinyl flooring Brisbane",
+      "luxury vinyl plank Brisbane",
+      "Brisbane flooring showroom",
+      "Slacks Creek flooring"
+    ]
+  },
+  "open_graph": {
+    "og:type": "article",
+    "og:title": "Where to Buy Karndean Flooring in Brisbane | Oztop",
+    "og:description": "Authorised Karndean retailer in Slacks Creek. See real LooseLay Longboard planks in person. Same-day quote. Call 07 3416 6458.",
+    "og:url": "https://oztopbuildingsupplies.com.au/blog/where-to-buy-karndean-flooring-brisbane/",
+    "og:image_recommendation": "Hero image — wide-format real install photo of LooseLay Longboard in a Brisbane home, natural light, warm timber tone. 1200x630. Filename: karndean-looselay-brisbane-install.jpg",
+    "og:locale": "en_AU",
+    "og:site_name": "Oztop Building Supplies"
+  },
+  "twitter_card": {
+    "twitter:card": "summary_large_image",
+    "twitter:title": "Where to Buy Karndean Flooring in Brisbane | Oztop",
+    "twitter:description": "Authorised Karndean retailer. Slacks Creek showroom. Same-day quote. 07 3416 6458."
+  },
+  "internal_links_used": [
+    {
+      "anchor_text": "Karndean range",
+      "target_url": "/brand/karndean/",
+      "context": "Para 2 of 'Oztop's Karndean range in stock' section"
+    },
+    {
+      "anchor_text": "vinyl flooring category",
+      "target_url": "/product-category/flooring/vinyl-flooring/",
+      "context": "End of 'Oztop's Karndean range in stock' section"
+    },
+    {
+      "anchor_text": "SPC and hybrid range",
+      "target_url": "/product-category/flooring/spc-wpc-hybrid-flooring/",
+      "context": "FAQ Q5 (Karndean vs other options)"
+    },
+    {
+      "anchor_text": "engineered timber options",
+      "target_url": "/product-category/flooring/engineered-timber-flooring/",
+      "context": "FAQ Q5 (Karndean vs other options)"
+    }
+  ],
+  "schema_jsonld": {
+    "article_schema": {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      "headline": "Where to Buy Karndean Flooring in Brisbane: Your Authorised Retailer Guide",
+      "description": "Authorised Karndean retailer guide for Brisbane homeowners. Visit our Slacks Creek showroom, see the LooseLay Longboard range in person, and get a same-day quote with two-week installation.",
+      "image": "https://oztopbuildingsupplies.com.au/wp-content/uploads/2026/06/karndean-looselay-brisbane-install.jpg",
+      "datePublished": "2026-06-09",
+      "dateModified": "2026-06-09",
+      "author": {
+        "@type": "Organization",
+        "name": "Oztop Building Supplies",
+        "url": "https://oztopbuildingsupplies.com.au"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "Oztop Building Supplies",
+        "logo": {
+          "@type": "ImageObject",
+          "url": "https://oztopbuildingsupplies.com.au/wp-content/uploads/oztop-logo.png"
+        }
+      },
+      "mainEntityOfPage": {
+        "@type": "WebPage",
+        "@id": "https://oztopbuildingsupplies.com.au/blog/where-to-buy-karndean-flooring-brisbane/"
+      },
+      "about": {
+        "@type": "Thing",
+        "name": "Karndean LooseLay Longboard luxury vinyl plank flooring"
+      },
+      "areaServed": {
+        "@type": "Place",
+        "name": "Brisbane and Gold Coast, 100km radius from Slacks Creek QLD"
+      }
+    },
+    "faq_schema": {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What does \"authorised Karndean retailer\" actually mean?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Karndean only supplies its flooring through retailers that meet its training, display, and after-sales standards. Authorised retailers like Oztop receive genuine product through Karndean's Australian distribution, get product training direct from the brand, and can register your installation for full warranty cover. Buying from a non-authorised seller — including most online and overseas channels — usually voids the manufacturer warranty."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I come into the showroom to see Karndean before buying?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. Our Slacks Creek showroom has full-plank LooseLay Longboard displays for all twenty in-stock colours. No appointment needed during normal trading hours (Mon–Fri 9am–5pm, Sat 9am–4pm). If you'd like a dedicated consultation with a product specialist, call 07 3416 6458 to book a 30-minute slot."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How long does it take to get a Karndean quote?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "For 90% of enquiries we send a written quote the same business day. Send us your room measurements (a rough sketch is fine) and your preferred LooseLay Longboard colour, and we'll come back with a complete number covering supply, underlay, trim, removal of existing flooring, and installation by our licensed crew."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Why shouldn't I just buy Karndean from a big-box hardware store?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Most large hardware retailers don't carry Karndean's premium ranges and aren't part of Karndean's authorised retailer network. Specialist flooring retailers like Oztop carry the actual range, hold real stock you can see installed, and have crews trained on Karndean's specific subfloor and trim requirements. The installation difference is what protects the warranty."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How do I choose between Karndean and other vinyl or hybrid options?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "It comes down to budget, traffic, and what you want the floor to look like. Karndean LooseLay Longboard sits at the premium end of the vinyl plank category — best visuals, longest board length, easiest to lift and replace a damaged plank. For higher-traffic or budget-driven jobs, Oztop's SPC and hybrid range and engineered timber options might suit better. Bring your scenario to the showroom and we'll walk you through real samples of each."
+          }
+        }
+      ]
+    }
+  },
+  "dataforseo_inputs": {
+    "primary_keyword": "Karndean flooring Brisbane",
+    "search_volume_monthly": 2400,
+    "cpc_aud": 1.77,
+    "snapshot_date": "2026-06-04",
+    "database": "au",
+    "target_position_8_weeks": "Top 20",
+    "competing_brands_in_serp": "Karndean.com.au, Choices Flooring, Carpet Court, Andersens — most are franchise/aggregator pages, not local retailer-specific. Opportunity gap exists for a hyper-local Slacks Creek/Brisbane retailer page."
+  },
+  "ai_visibility_signals": {
+    "entities_anchored": [
+      "Oztop Building Supplies",
+      "Karndean LooseLay Longboard",
+      "Slacks Creek QLD 4127",
+      "Brisbane",
+      "Gold Coast",
+      "07 3416 6458"
+    ],
+    "facts_for_ai_citation": [
+      "Oztop is an authorised Karndean retailer in Brisbane",
+      "Showroom address: 5 Judds Ct, Slacks Creek QLD 4127",
+      "Phone: 07 3416 6458",
+      "Trading hours: Mon-Fri 9am-5pm, Sat 9am-4pm",
+      "Same-day quote on 90% of enquiries",
+      "Two-week installation from deposit",
+      "Licensed and insured under Queensland building regulations",
+      "Service area: Brisbane and Gold Coast within 100km of Slacks Creek",
+      "Currently stocks 20 colour variants of Karndean LooseLay Longboard"
+    ]
+  },
+  "compliance_checklist": {
+    "no_bigpanda_mention": true,
+    "no_competitive_pricing_phrase": true,
+    "no_best_quality_phrase": true,
+    "no_affordable_phrase": true,
+    "no_fabricated_data_or_brands": true,
+    "all_karndean_ranges_verified_on_oztop_site": true,
+    "supply_chain_advantage_mentioned": true,
+    "licensed_and_insured_mentioned_count": 4,
+    "same_day_quote_mentioned_count": 5,
+    "two_week_install_mentioned_count": 3,
+    "100km_service_radius_mentioned_count": 3,
+    "phone_07_3416_6458_in_cta": true,
+    "phone_in_meta_description": true,
+    "primary_keyword_in_first_100_words": true,
+    "primary_keyword_in_h1": true,
+    "primary_keyword_in_meta_title": true,
+    "primary_keyword_in_meta_description": false,
+    "_note_on_meta_desc": "Meta description uses 'Karndean retailer in Brisbane' (semantic match) rather than exact 'Karndean flooring Brisbane' phrase to keep the description natural and within 137 chars. Yoast will still flag green for focus keyphrase presence (Karndean + Brisbane both present)."
+  }
+}
