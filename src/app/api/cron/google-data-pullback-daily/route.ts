@@ -169,11 +169,21 @@ export async function GET(req: NextRequest) {
     r => r.gsc?.success === false || r.ga4?.success === false || r.meta?.success === false,
   ).length
 
+  // Collect per-client errors so postmortem is possible without Render logs.
+  // Diagnostic only — no behavior change.
+  const errors = results.flatMap(r => {
+    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'; error: string }> = []
+    if (r.gsc?.success === false && r.gsc.error)   out.push({ client_id: r.client_id, source: 'gsc',  error: r.gsc.error })
+    if (r.ga4?.success === false && r.ga4.error)   out.push({ client_id: r.client_id, source: 'ga4',  error: r.ga4.error })
+    if (r.meta?.success === false && r.meta.error) out.push({ client_id: r.client_id, source: 'meta', error: r.meta.error })
+    return out
+  })
+
   await cronRun.finish({
     processed: results.length,
     completed: results.length - failed,
     failed,
-    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced },
+    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, errors },
   })
   return NextResponse.json({
     success:           true,
