@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-09 01:23 NZST · 当前阶段：**⭐ DAPE 核心引擎 v0.2 ✅ 上线 production (Week 1+2+3 全部 merged, 17 PR / 6126+ 行代码 / 2 P0 hotfix)；Phase 24.A Platform OAuth Connector ✅；Phase 14.C ✅；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-11 04:02 NZST · 当前阶段：**⭐ DAPE 核心引擎 v0.2 ✅ 上线 production (Week 1+2+3 全部 merged, 17 PR / 6126+ 行代码 / 2 P0 hotfix)；Phase 24.A Platform OAuth Connector ✅；Phase 14.C ✅；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 >
 > **⭐ 核心引擎重定义（2026-06-08 PM 拍板）**：ME 核心引擎从 GIMPT (11 层堆叠) 改为 **DAPE** = **Discovery / Analysis / Prescription / Execution** 4 段循环 + AI 贯穿 + 6 大支柱矩阵。详见 [CLAUDE.md § ME 核心引擎 = DAPE](./CLAUDE.md) 顶部段落 + [DAPE spec v0.2](./docs/superpowers/specs/2026-06-08-me-dape-redefine-v0.2.md)（949 行, 5-agent 签字）+ 本文 § 9 DAPE 上线记录。
 >
@@ -3561,6 +3561,32 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-06-11（Organic Rankings branded% bug fix — clients.brand_aliases 接入 SEO Intelligence）
+
+**一句话**：ME 后台 Organic Rankings 卡片的 Branded vs Non-Branded Traffic 修复——CTS Tours NZ 实测 0% Branded（真实 ≈24%）。根因是 P12.I.10 实现的 `isBrandedKeyword` 用 token equality 匹配域名根（`"ctstours"`），CTS 真实词 `"cts tours auckland"` 的 tokens 没一个等于 `"ctstours"` → MISS。复用 PR #336 (A2.2) 已沉淀的 `brand_aliases` substring pattern。
+
+**改动 5 文件 / +283 / -19**：
+- `src/lib/seo-intelligence/intent-strategy.ts` — 新增 `isBrandedKeywordWithAliases(keyword, brandRoot, brandAliases)` substring matcher；`buildBrandTrafficSplit` / `prioritizeContentKeywords` / `sortByIntentPriority` 加可选 `brandAliases` 参数（向后兼容）；**不污染**原 `isBrandedKeyword`（assembler.ts 仍依赖 token equality）
+- `src/app/api/clients/[id]/seo-intelligence/rankings/route.ts` — clients select 加 `brand_aliases`，响应 body 新字段 `brand_aliases: string[] | null`
+- `src/app/dashboard/clients/[id]/seo-intelligence/page.tsx` — RankingsTable 接收 aliases，line-788 硬编码 substring 用 helper 替代
+- `src/lib/seo-agent/assembler.ts` — 加 7 行注释解释为什么继续用 token-equality（防未来回归）
+- `src/lib/seo-intelligence/__tests__/intent-strategy.test.ts` — 12 新测试覆盖 CTS 真实样本 + 边界 + brandRoot length-5 防御
+
+**魏征 review 沉淀的防御**：
+1. brandRoot 自动派生路径加 `length >= 5` 防御（防 `tours.co.nz` / `care.co.nz` 这种通用词域名误命中）
+2. brand_aliases 路径保持 `length >= 2`（FDE-curated 信任）
+3. assembler.ts 加注释说明语义分裂的合理性
+
+**测试**：影响范围内 48/48 通过；build 绿。
+
+**前置依赖**（PM 端到端验证才能在生产看到 ~24%）：
+- DB 里 `clients.brand_aliases` 必须配齐：CTS 推荐 `['cts tours', 'cts travel', 'china travel service', 'ctsnz']`（如缺 "china travel service" 则漏 CTS 第二高 GSC query ≈ 21 clicks）
+- SOP：`docs/sops/brand-aliases-setup-for-gsc.md`（已为 A2.2 写过）
+
+**关联 ticket**：P12.I.10（Branded vs Non-Branded 流量分拆 — 原始实现），A2.2（brand_aliases 字段 + SOP）
+
+---
 
 ### 2026-06-08（⭐ DAPE 核心引擎 v0.2 上线 — Week 1+2+3 全部 merged production）
 

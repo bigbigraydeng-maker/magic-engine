@@ -26,10 +26,14 @@ interface GscQueryRow {
  *
  * Response shape:
  * {
- *   domain:     string
- *   keywords:   Array<LabsKeyword & { gsc_position, gsc_impressions, gsc_clicks, gsc_ctr }>
- *   gsc_status: 'connected' | 'no_data' | 'not_connected'
- *   gsc_period: string | null   // e.g. "2026-05-07 – 2026-06-03"
+ *   domain:        string
+ *   brand_aliases: string[] | null   // FDE-configured aliases (2026-06-11 P0 fix);
+ *                                    // used client-side by intent-strategy helpers
+ *                                    // to count branded keywords correctly for
+ *                                    // multi-word brands (CTS Tours, etc.)
+ *   keywords:      Array<LabsKeyword & { gsc_position, gsc_impressions, gsc_clicks, gsc_ctr }>
+ *   gsc_status:    'connected' | 'no_data' | 'not_connected'
+ *   gsc_period:    string | null   // e.g. "2026-05-07 – 2026-06-03"
  * }
  *
  * Cache: 24 h (DataForSEO live call, expensive).
@@ -52,7 +56,7 @@ export async function GET(
 
   const { data: client, error: clientError } = await supabaseAdmin
     .from('clients')
-    .select('id, domain, semrush_db')
+    .select('id, domain, semrush_db, brand_aliases')
     .eq('id', clientId)
     .single()
 
@@ -72,6 +76,11 @@ export async function GET(
   // Fetch latest GSC snapshot (best-effort, does not block rankings)
   const gscData = await fetchLatestGscQueries(clientId)
 
+  // brand_aliases lets the UI distinguish branded vs non-branded organic traffic
+  // for multi-word brands (CTS Tours → ['cts tours', 'cts travel', …]).
+  // See lib/seo-intelligence/intent-strategy.ts → isBrandedKeywordWithAliases.
+  const brandAliases = Array.isArray(client.brand_aliases) ? client.brand_aliases : null
+
   try {
     const keywords = await getRankedKeywords(client.domain, locationCode, 200)
     const enriched = mergeGscData(keywords, gscData.queryMap)
@@ -79,6 +88,7 @@ export async function GET(
     return NextResponse.json(
       {
         domain: client.domain,
+        brand_aliases: brandAliases,
         keywords: enriched,
         gsc_status: gscData.status,
         gsc_period: gscData.period,
@@ -100,6 +110,7 @@ export async function GET(
       return NextResponse.json(
         {
           domain: client.domain,
+          brand_aliases: brandAliases,
           keywords: enriched,
           source: 'snapshot',
           snapshot_date: snapshot.snapshot_date,

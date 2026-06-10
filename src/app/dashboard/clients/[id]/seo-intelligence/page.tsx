@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { buildGapKeywordBlogRequest } from '@/lib/blog/request-builders'
 import {
   buildBrandTrafficSplit,
+  isBrandedKeywordWithAliases,
   prioritizeContentKeywords,
   sortByIntentPriority,
   type BrandTrafficSplit,
@@ -93,6 +94,7 @@ interface GapKeyword {
 
 interface RankingsResponse {
   domain?: string
+  brand_aliases?: string[] | null
   keywords?: RankedKeyword[]
   source?: 'live' | 'snapshot'
   snapshot_date?: string | null
@@ -757,11 +759,13 @@ function PageHealthTable({
 function RankingsTable({
   keywords,
   brandRoot,
+  brandAliases,
   gscStatus,
   gscPeriod,
 }: {
   keywords: RankedKeyword[]
   brandRoot: string
+  brandAliases: string[] | null
   gscStatus: 'connected' | 'no_data' | 'not_connected'
   gscPeriod: string | null
 }) {
@@ -785,7 +789,7 @@ function RankingsTable({
       }
 
       if (brandFilter !== 'all') {
-        const isBranded = kw.keyword.toLowerCase().includes(brandRoot)
+        const isBranded = isBrandedKeywordWithAliases(kw.keyword, brandRoot, brandAliases)
         if (brandFilter === 'branded'     &&  !isBranded) return false
         if (brandFilter === 'non-branded' &&   isBranded) return false
       }
@@ -794,19 +798,19 @@ function RankingsTable({
 
       return true
     })
-  }, [keywords, intentFilter, posFilter, brandFilter, search, brandRoot])
+  }, [keywords, intentFilter, posFilter, brandFilter, search, brandRoot, brandAliases])
 
   const trafficSplit = useMemo(
-    () => buildBrandTrafficSplit(keywords, brandRoot),
-    [keywords, brandRoot],
+    () => buildBrandTrafficSplit(keywords, brandRoot, brandAliases),
+    [keywords, brandRoot, brandAliases],
   )
   const contentPriorities = useMemo(
-    () => prioritizeContentKeywords(keywords, brandRoot, 5),
-    [keywords, brandRoot],
+    () => prioritizeContentKeywords(keywords, brandRoot, 5, brandAliases),
+    [keywords, brandRoot, brandAliases],
   )
   const prioritized = useMemo(
-    () => sortByIntentPriority(filtered, brandRoot),
-    [filtered, brandRoot],
+    () => sortByIntentPriority(filtered, brandRoot, brandAliases),
+    [filtered, brandRoot, brandAliases],
   )
   const page = prioritized.slice(0, shown)
 
@@ -982,6 +986,7 @@ export default function SeoIntelligencePage() {
   // Rankings (Panel A)
   const [rankings,        setRankings]        = useState<RankedKeyword[]>([])
   const [rankingsDomain,  setRankingsDomain]  = useState('')
+  const [rankingsAliases, setRankingsAliases] = useState<string[] | null>(null)
   const [rankingsLoading, setRankingsLoading] = useState(true)
   const [rankingsError,   setRankingsError]   = useState<string | null>(null)
   const [rankingsWarning, setRankingsWarning] = useState<string | null>(null)
@@ -1031,6 +1036,7 @@ export default function SeoIntelligencePage() {
         if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
         setRankings(data.keywords ?? [])
         setRankingsDomain(data.domain ?? '')
+        setRankingsAliases(Array.isArray(data.brand_aliases) ? data.brand_aliases : null)
         setRankingsWarning(data.warning ?? null)
         setGscStatus(data.gsc_status ?? 'not_connected')
         setGscPeriod(data.gsc_period ?? null)
@@ -1257,6 +1263,7 @@ export default function SeoIntelligencePage() {
                 <RankingsTable
                   keywords={rankings}
                   brandRoot={domainRoot(rankingsDomain)}
+                  brandAliases={rankingsAliases}
                   gscStatus={gscStatus}
                   gscPeriod={gscPeriod}
                 />

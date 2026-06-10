@@ -189,6 +189,14 @@ function buildRankingCandidates(
   businessTerms: string[],
   location: SeoAgentLocationContext,
 ): RawSeoCandidate[] {
+  // NOTE: intentionally uses token-equality `isBrandedKeyword` (not the
+  // alias-aware `isBrandedKeywordWithAliases` from intent-strategy.ts). The
+  // assembler is selecting CONTENT-BRIEF candidates: widening the matcher to
+  // substring + aliases here would suppress legitimate non-brand keyword
+  // opportunities (e.g. "cts" alias would knock out generic-term candidates
+  // that happen to contain those letters). If a future PR needs alias-aware
+  // filtering in the assembler, switch to isBrandedKeywordWithAliases and
+  // pass clients.brand_aliases through. See intent-strategy.ts for context.
   return keywords
     .filter((item) => !isBrandedKeyword(item.keyword, brandRoot))
     .filter((item) => item.intent !== 'navigational')
