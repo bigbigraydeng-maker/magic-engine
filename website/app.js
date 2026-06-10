@@ -9,6 +9,89 @@
 const CN_PREFIX = '/cn';
 
 /* ── Language routing ── */
+function getFilePreviewRoot() {
+  if (window.location.protocol !== 'file:') return null;
+
+  const path = window.location.pathname.replace(/\\/g, '/');
+  const marker = '/website/';
+  const index = path.toLowerCase().lastIndexOf(marker);
+  if (index === -1) return null;
+
+  return `file://${path.slice(0, index + marker.length)}`;
+}
+
+function stripFilePreviewPrefix(pathname) {
+  if (window.location.protocol !== 'file:' || !pathname) return pathname;
+
+  const normalized = pathname.replace(/\\/g, '/');
+  const marker = '/website/';
+  const index = normalized.toLowerCase().lastIndexOf(marker);
+  if (index === -1) return pathname;
+
+  return normalized.slice(index + marker.length - 1) || '/';
+}
+
+function resolveSiteUrl(href) {
+  if (!href) return null;
+
+  const isAbsolute = /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(href);
+  if (isAbsolute) return new URL(href);
+
+  if (window.location.protocol === 'file:') {
+    const root = getFilePreviewRoot();
+    const relative = href.startsWith('/') ? href.slice(1) : href;
+    return new URL(relative, root || window.location.href);
+  }
+
+  return new URL(href, window.location.origin);
+}
+
+function shouldUseStaticHtmlRoutes() {
+  if (window.location.protocol === 'file:') return true;
+
+  const pathname = window.location.pathname.replace(/\\/g, '/');
+  return pathname.endsWith('.html');
+}
+
+function formatLocalHref(url) {
+  const next = new URL(url.toString());
+
+  if (shouldUseStaticHtmlRoutes()) {
+    const pathname = next.pathname.replace(/\\/g, '/');
+    const marker = '/website/';
+    const index = pathname.toLowerCase().lastIndexOf(marker);
+    const hasExtension = /\/[^/]+\.[a-zA-Z\d]+$/.test(pathname);
+    const isAssetPath = pathname.startsWith('/assets/')
+      || pathname.startsWith('/api/')
+      || pathname === '/app.js'
+      || pathname === '/google-tag.js'
+      || pathname === '/styles.css'
+      || pathname === '/robots.txt'
+      || pathname === '/sitemap.xml';
+
+    if (!hasExtension && !isAssetPath) {
+      if (index !== -1) {
+        const rootPath = pathname.slice(0, index + marker.length - 1);
+        const routePath = pathname.slice(index + marker.length - 1) || '/';
+        const filePath = routePath.endsWith('/')
+          ? `${routePath}index.html`
+          : `${routePath}.html`;
+        next.pathname = `${rootPath}${filePath}`;
+      } else {
+        next.pathname = pathname.endsWith('/')
+          ? `${pathname}index.html`
+          : `${pathname}.html`;
+      }
+    }
+
+    if (window.location.protocol === 'file:') {
+      return next.toString();
+    }
+  }
+
+  return `${next.pathname}${next.search}${next.hash}`;
+}
+
 function isChinesePath(pathname = window.location.pathname) {
   const normalized = normalizePath(pathname);
   return normalized === CN_PREFIX || normalized.startsWith(`${CN_PREFIX}/`);
@@ -16,7 +99,7 @@ function isChinesePath(pathname = window.location.pathname) {
 
 function normalizePath(pathname) {
   if (!pathname) return '/';
-  let next = pathname;
+  let next = stripFilePreviewPrefix(pathname);
   if (next.endsWith('/index.html')) {
     next = next.slice(0, -('/index.html'.length)) || '/';
   } else if (next.endsWith('.html')) {
@@ -38,6 +121,19 @@ function localizePath(pathname, lang) {
     return clean === '/' ? '/cn/' : `${CN_PREFIX}${clean}`;
   }
   return clean;
+}
+
+function getAlternateLanguagePath(lang) {
+  const attr = lang === 'zh' ? 'data-alt-zh-path' : 'data-alt-en-path';
+  const explicit = document.documentElement.getAttribute(attr);
+  if (!explicit) return null;
+
+  if (shouldRewriteLink(explicit)) {
+    const url = resolveSiteUrl(explicit);
+    return normalizePath(url.pathname);
+  }
+
+  return explicit.startsWith('/') ? normalizePath(explicit) : null;
 }
 
 let currentLang = isChinesePath(window.location.pathname) ? 'zh' : 'en';
@@ -160,7 +256,7 @@ function withAttribution(href, attribution) {
   if (!merged) return href;
 
   const isAbsolute = /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(href);
-  const url = new URL(href, isAbsolute ? undefined : window.location.origin);
+  const url = resolveSiteUrl(href);
 
   URL_ATTRIBUTION_KEYS.forEach(key => {
     const value = merged[key];
@@ -169,7 +265,7 @@ function withAttribution(href, attribution) {
 
   return isAbsolute
     ? url.toString()
-    : `${url.pathname}${url.search}${url.hash}`;
+    : formatLocalHref(url);
 }
 
 function getLinkAttribution(link) {
@@ -318,7 +414,7 @@ function shouldRewriteLink(href) {
 function localizeHref(href, lang) {
   if (!shouldRewriteLink(href)) return href;
 
-  const url = new URL(href, window.location.origin);
+  const url = resolveSiteUrl(href);
   const pathname = normalizePath(url.pathname);
 
   if (
@@ -333,7 +429,7 @@ function localizeHref(href, lang) {
   }
 
   url.pathname = localizePath(pathname, lang);
-  return `${url.pathname}${url.search}${url.hash}`;
+  return formatLocalHref(url);
 }
 
 const PAGE_TITLES = {
@@ -373,6 +469,18 @@ const PAGE_TITLES = {
   '/ads': {
     zh: '广告投放启动 — Magic Engine',
   },
+  '/solutions': {
+    zh: '英文市场解决方案 — Magic Engine',
+  },
+  '/solutions/home-services': {
+    zh: '英文市场方案：到家服务 — Magic Engine',
+  },
+  '/solutions/professional-services': {
+    zh: '英文市场方案：专业服务 — Magic Engine',
+  },
+  '/solutions/travel-programs': {
+    zh: '英文市场方案：旅游、教育与项目 — Magic Engine',
+  },
   '/features': {
     zh: '功能 — Magic Engine',
   },
@@ -384,10 +492,32 @@ const PAGE_TITLES = {
   },
 };
 
+Object.assign(PAGE_TITLES, {
+  '/solutions': {
+    zh: '行业场景与增长方向 | Magic Engine',
+  },
+  '/solutions/home-services': {
+    zh: '地产中介英文市场内容方案 | Magic Engine',
+  },
+  '/solutions/education-migration-schools': {
+    zh: '留学、移民与学校英文市场内容方案 | Magic Engine',
+  },
+  '/solutions/professional-services': {
+    zh: '专业服务英文市场内容方案 | Magic Engine',
+  },
+  '/solutions/travel-programs': {
+    zh: '旅游英文市场内容方案 | Magic Engine',
+  },
+});
+
 function updatePageMeta(lang) {
   if (lang !== 'zh') return;
 
   const pageKey = stripCnPrefix(window.location.pathname);
+  if (pageKey === '/discover' && isUnifiedDiscoverPage()) {
+    document.title = '免费业务探查 | Magic Engine';
+    return;
+  }
   const meta = PAGE_TITLES[pageKey];
   if (meta?.zh) document.title = meta.zh;
 }
@@ -426,8 +556,18 @@ function applyLanguage(lang) {
 
 function toggleLang() {
   const nextLang = currentLang === 'en' ? 'zh' : 'en';
+  const nextPath = getAlternateLanguagePath(nextLang) || localizePath(window.location.pathname, nextLang);
+
+  if (window.location.protocol === 'file:') {
+    const target = resolveSiteUrl(nextPath);
+    target.search = window.location.search;
+    target.hash = window.location.hash;
+    window.location.href = target.toString();
+    return;
+  }
+
   const target = new URL(window.location.href);
-  target.pathname = localizePath(window.location.pathname, nextLang);
+  target.pathname = nextPath;
   target.search = window.location.search;
   target.hash = window.location.hash;
   window.location.href = target.toString();
@@ -517,6 +657,16 @@ function showState(name) {
     el.classList.add('active');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
+}
+
+function isUnifiedDiscoverPage() {
+  return stripCnPrefix(window.location.pathname) === '/discover'
+    && Boolean(document.getElementById('discover-email-input'));
+}
+
+function setDiscoverSuccessEmail(email) {
+  const target = document.getElementById('discover-success-email');
+  if (target) target.textContent = email || '';
 }
 
 function advanceStep(idx) {
@@ -684,6 +834,85 @@ async function handleDiscoverSubmit(e) {
   const btn = document.getElementById('discover-btn');
   const url = urlInput?.value?.trim() || '';
 
+  if (isUnifiedDiscoverPage()) {
+    const nameInput = document.getElementById('discover-name-input');
+    const emailInput = document.getElementById('discover-email-input');
+    const name = nameInput?.value?.trim() || '';
+    const email = emailInput?.value?.trim() || '';
+
+    if (!url || !email) {
+      const targetInput = !url ? urlInput : emailInput;
+      targetInput?.focus();
+      targetInput?.classList.add('shake');
+      setTimeout(() => targetInput?.classList.remove('shake'), 500);
+      return;
+    }
+
+    const attribution = mergeAttribution(
+      getDefaultAttribution(window.location.pathname),
+      marketingAttribution,
+    );
+
+    if (btn) {
+      btn.textContent = currentLang === 'zh' ? '正在启动…' : 'Starting…';
+      btn.disabled = true;
+    }
+
+    startProgress();
+
+    try {
+      const res = await fetch('/api/discover/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url,
+          name,
+          email,
+          ...attribution,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+
+      stopProgress();
+      leadId = data.job_id || null;
+      setDiscoverSuccessEmail(email);
+
+      trackMarketingEvent(MARKETING_EVENT.DISCOVER_SUBMIT, {
+        page_path: normalizePath(window.location.pathname),
+        lead_id: data.job_id || '',
+        ...attribution,
+      });
+      logMarketingLeadEvent(MARKETING_EVENT.DISCOVER_SUBMIT, {
+        destination: 'discover',
+        href: '/api/discover/register',
+        attribution,
+        metadata: {
+          lead_id: data.job_id || null,
+          flow: 'unified_register',
+        },
+      });
+
+      showState('result');
+    } catch (err) {
+      console.warn('Unified discover start failed:', err?.message || err);
+      stopProgress();
+      showState('form');
+      window.alert(
+        currentLang === 'zh'
+          ? `启动失败：${err?.message || '请稍后重试。'}`
+          : `Could not start discovery: ${err?.message || 'Please try again later.'}`
+      );
+    }
+
+    if (btn) {
+      btn.textContent = currentLang === 'zh' ? '开始业务探查 →' : 'Start business discovery →';
+      btn.disabled = false;
+    }
+    return;
+  }
+
   const nwPanel = document.querySelector('.nw-panel.open');
   const noWebsite = nwPanel ? {
     what:  document.getElementById('nw-what')?.value || '',
@@ -817,16 +1046,16 @@ function handleHeroSubmit(e) {
   e.preventDefault();
   const url = document.getElementById('hero-url-input')?.value?.trim() || '';
   const discoverPath = localizePath('/discover', currentLang);
-  const target = new URL(discoverPath, window.location.origin);
+  const target = resolveSiteUrl(discoverPath);
 
   if (url) target.searchParams.set('url', url);
 
   const nextHref = withAttribution(
-    `${target.pathname}${target.search}${target.hash}`,
+    formatLocalHref(target),
     marketingAttribution,
   );
 
-  window.location.href = nextHref || `${target.pathname}${target.search}${target.hash}`;
+  window.location.href = nextHref || formatLocalHref(target);
 }
 
 /* ── Mobile nav ── */
@@ -872,6 +1101,7 @@ document.addEventListener('DOMContentLoaded', () => {
     mobileNav.setAttribute('aria-label', 'Mobile navigation');
     mobileNav.innerHTML = `
       <a href="/discover"  data-en="Free Discovery" data-zh="免费探查">Free Discovery</a>
+      <a href="/solutions" data-en="Solutions"      data-zh="解决方案">Solutions</a>
       <a href="/geo"       data-en="GEO"             data-zh="GEO">GEO</a>
       <a href="/training"  data-en="Training"        data-zh="培训">Training</a>
       <a href="/ads"       data-en="Ads"             data-zh="广告">Ads</a>
@@ -910,10 +1140,12 @@ document.addEventListener('DOMContentLoaded', () => {
       const urlInput = document.getElementById('url-input');
       if (urlInput) {
         urlInput.value = decodeURIComponent(urlParam);
-        setTimeout(() => {
-          document.getElementById('discover-form')
-            ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-        }, 600);
+        if (!isUnifiedDiscoverPage()) {
+          setTimeout(() => {
+            document.getElementById('discover-form')
+              ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+          }, 600);
+        }
       }
     }
   }

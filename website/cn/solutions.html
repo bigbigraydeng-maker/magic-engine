@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh" data-alt-en-path="/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>行业场景与增长方向 | Magic Engine</title>
+  <meta name="description" content="Magic Engine 中文站当前围绕 4 条高意向行业主线展开：地产中介、留学移民学校、旅游、专业服务。每条线都按真实客户决策逻辑来组织。">
+  <meta property="og:title" content="行业场景与增长方向 | Magic Engine">
+  <meta property="og:description" content="先把行业主线定对，再持续长出 FAQ、案例、样例和更具体的问题页面。">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Magic Engine">
+  <meta property="og:url" content="https://magicengine.com.au/cn/solutions">
+  <meta property="og:image" content="https://magicengine.com.au/assets/og-card.svg">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="行业场景与增长方向 | Magic Engine">
+  <meta name="twitter:description" content="中文版官网按行业购买逻辑组织，不再只是服务列表。">
+  <link rel="canonical" href="https://magicengine.com.au/cn/solutions">
+  <link rel="alternate" hreflang="zh-Hans" href="https://magicengine.com.au/cn/solutions">
+  <link rel="alternate" hreflang="en" href="https://magicengine.com.au/">
+  <script>
+    (function () {
+      var marker = '/website/';
+      var path = window.location.pathname.replace(/\\/g, '/');
+      var index = path.toLowerCase().lastIndexOf(marker);
+      var root = window.location.protocol === 'file:' && index !== -1
+        ? 'file://' + path.slice(0, index + marker.length)
+        : '';
+
+      window.__ME_RESOLVE_STATIC__ = function (href) {
+        if (!root || !href || !href.startsWith('/')) return href;
+        return new URL(href.slice(1), root).toString();
+      };
+
+      var stylesheet = document.createElement('link');
+      stylesheet.rel = 'stylesheet';
+      stylesheet.href = window.__ME_RESOLVE_STATIC__('/styles.css');
+      document.head.appendChild(stylesheet);
+
+      var icon = document.createElement('link');
+      icon.rel = 'icon';
+      icon.type = 'image/svg+xml';
+      icon.href = window.__ME_RESOLVE_STATIC__('/assets/favicon.svg?v=20260602');
+      document.head.appendChild(icon);
+    })();
+  </script>
+</head>
+<body>
+<nav class="nav">
+  <div class="container">
+    <div class="nav-inner">
+      <a href="/cn/" class="nav-logo">Magic Engine</a>
+      <ul class="nav-links">
+        <li><a href="/cn/solutions" style="color:var(--gold-dark);">行业场景</a></li>
+        <li><a href="/cn/discover">免费探查</a></li>
+        <li><a href="/cn/ads">广告测试</a></li>
+        <li><a href="/cn/about">关于</a></li>
+      </ul>
+      <div class="nav-actions">
+        <button class="btn-lang" id="lang-toggle" onclick="toggleLang()" aria-label="Switch language">EN</button>
+        <a href="/cn/discover" class="btn-register">开始探查</a>
+        <a href="https://app.magicengine.com.au/portal/login" class="btn-portal">客户入口</a>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<section class="hero" style="padding-bottom:56px;">
+  <div class="container">
+    <div class="hero-badge">4 条高意向行业主线 · 中文站入口</div>
+    <h1 class="serif">先把行业主线定对，再把每一页都变成能拿客户的解释页面。</h1>
+    <p class="hero-sub">
+      中文站不再按内部服务菜单拆分，而是按客户怎么搜索、怎么理解、怎么决定来组织。
+      当前优先做 4 条行业主线：地产中介、留学 / 移民 / 学校、旅游、专业服务。
+    </p>
+    <div class="hero-ctas" style="margin-top:24px;margin-bottom:0;">
+      <a href="/cn/discover" class="btn-primary">先做免费探查 →</a>
+      <a href="#pillars" class="btn-secondary">看 4 条行业主线</a>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="pillars">
+  <div class="container">
+    <div class="center">
+      <div class="section-label">四条行业主线</div>
+      <h2 class="serif section-heading">每条线都对应一种不同的客户决策逻辑。</h2>
+      <p class="section-sub">
+        这不是“行业名字堆在一起”，而是 4 套不同的信任建立方式、购买逻辑和内容方向。
+      </p>
+    </div>
+    <div class="features-grid">
+      <article class="feature-card">
+        <span class="feature-kicker">01 · 地产中介</span>
+        <h3>先讲清区域、房源、流程和可信度。</h3>
+        <p>适合住宅买卖、租赁、物业管理和英文市场获客型地产团队。</p>
+        <div class="me-feat" style="margin-top:14px;">
+          <span>suburb 页面</span><span>房源图文</span><span>买卖 FAQ</span><span>区域内容</span>
+        </div>
+        <a href="/cn/solutions/home-services" class="btn-secondary" style="margin-top:16px;">查看行业方案 →</a>
+      </article>
+      <article class="feature-card">
+        <span class="feature-kicker">02 · 留学 / 移民 / 学校</span>
+        <h3>先把适合谁、流程怎么走、结果是什么讲明白。</h3>
+        <p>适合高信任、长决策、强解释型业务，核心不是“宣传”，而是“解释”。</p>
+        <div class="me-feat" style="margin-top:14px;">
+          <span>家长 FAQ</span><span>签证解释</span><span>流程页</span><span>课程对比</span>
+        </div>
+        <a href="/cn/solutions/education-migration-schools" class="btn-secondary" style="margin-top:16px;">查看行业方案 →</a>
+      </article>
+      <article class="feature-card">
+        <span class="feature-kicker">03 · 旅游</span>
+        <h3>先让客户看懂旅程，再让他们愿意出发。</h3>
+        <p>适合旅行社、地接、定制团和本地体验项目，重点是路线、体验和预期管理。</p>
+        <div class="me-feat" style="margin-top:14px;">
+          <span>路线页</span><span>短视频脚本</span><span>出行 FAQ</span><span>季节内容</span>
+        </div>
+        <a href="/cn/solutions/travel-programs" class="btn-secondary" style="margin-top:16px;">查看行业方案 →</a>
+      </article>
+      <article class="feature-card">
+        <span class="feature-kicker">04 · 专业服务</span>
+        <h3>先建立方法论和信任，再谈预约与成交。</h3>
+        <p>适合会计、律师、贷款、保险、顾问与 agency，重点是专业判断和可信证据。</p>
+        <div class="me-feat" style="margin-top:14px;">
+          <span>方法页</span><span>案例页</span><span>FAQ</span><span>低摩擦 CTA</span>
+        </div>
+        <a href="/cn/solutions/professional-services" class="btn-secondary" style="margin-top:16px;">查看行业方案 →</a>
+      </article>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section style="background:var(--paper-dim);">
+  <div class="container">
+    <div class="center">
+      <div class="section-label">行业页怎么写</div>
+      <h2 class="serif section-heading">行业主页面不是公司介绍页，而是这一类客户的“主解释页”。</h2>
+      <p class="section-sub">
+        它应该直接回答这个行业里客户最在意的问题，先解释清楚，再引导更低摩擦的下一步动作。
+      </p>
+    </div>
+    <div class="three-grid">
+      <div class="card">
+        <h3>先讲清 4 件事</h3>
+        <p>客户是谁、为什么通用 AI 不够、Magic Engine 会记住什么、后续可以持续生成哪些英文市场内容。</p>
+      </div>
+      <div class="card">
+        <h3>下面再长内容页</h3>
+        <p>优先长 FAQ、案例、样例、对比、流程解释和细分场景页，让客户的问题越来越具体，也更容易形成页面网络。</p>
+      </div>
+      <div class="card">
+        <h3>最后再给 CTA</h3>
+        <p>最好是“开始免费探查”“看行业样例”“先看某个具体问题”，而不是一上来就要求重承诺动作。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section>
+  <div class="container">
+    <div class="local-grid">
+      <div>
+      <div class="section-label">延伸内容</div>
+      <h2 class="serif section-heading">每条行业线下面，都应该继续长出 FAQ、案例和具体问题页。</h2>
+      <p class="section-sub" style="margin-bottom:0;">
+          真正带来高意向搜索和广告承接的，通常不是首页口号，而是行业页下面那批更具体的 FAQ 页、案例页、样例页和细分场景页。
+      </p>
+      </div>
+      <div>
+        <ul class="local-checks">
+          <li class="local-check">
+            <div class="chk-icon" aria-hidden="true">1</div>
+            <div class="chk-text">
+              <strong>行业主页</strong>
+              <span>定义为什么这个行业需要“先理解业务，再生成内容”。</span>
+            </div>
+          </li>
+          <li class="local-check">
+            <div class="chk-icon" aria-hidden="true">2</div>
+            <div class="chk-text">
+              <strong>FAQ 页</strong>
+              <span>吃掉最常见、最接近真实搜索的问题。</span>
+            </div>
+          </li>
+          <li class="local-check">
+            <div class="chk-icon" aria-hidden="true">3</div>
+            <div class="chk-text">
+              <strong>案例 / 模板页</strong>
+              <span>让客户看到素材最后会长成什么样。</span>
+            </div>
+          </li>
+          <li class="local-check">
+            <div class="chk-icon" aria-hidden="true">4</div>
+            <div class="chk-text">
+              <strong>细分场景页</strong>
+              <span>不同受众、不同服务线、不同决策阶段，都可以继续拆成独立子页。</span>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="cta-photo">
+  <div class="container">
+    <div class="cta-block">
+      <h2 class="serif">如果你还不确定先做哪条线，先从探查看。</h2>
+      <p>先把业务、受众和当前网站看清楚，再决定中文版网站先推哪类客户场景，效率会更高。</p>
+      <div class="hero-ctas" style="margin-top:26px;">
+        <a href="/cn/discover" class="btn-primary" style="font-size:1rem;padding:15px 28px;">开始免费探查 →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="site-footer">
+  <div class="container">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <a href="/cn/" class="nav-logo" style="color:rgba(255,255,255,.8);text-decoration:none;">Magic Engine</a>
+        <p>面向澳洲和新西兰市场的 AI 商业内容引擎。</p>
+      </div>
+      <div class="footer-col">
+        <h4>行业主线</h4>
+        <ul>
+          <li><a href="/cn/solutions/home-services">地产中介</a></li>
+          <li><a href="/cn/solutions/education-migration-schools">留学 / 移民 / 学校</a></li>
+          <li><a href="/cn/solutions/travel-programs">旅游</a></li>
+          <li><a href="/cn/solutions/professional-services">专业服务</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>开始</h4>
+        <ul>
+          <li><a href="/cn/discover">免费探查</a></li>
+          <li><a href="/cn/ads">广告测试</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>公司</h4>
+        <ul>
+          <li><a href="/cn/about">关于</a></li>
+          <li><a href="/cn/privacy">隐私政策</a></li>
+          <li><a href="mailto:raydeng@magicengine.com.au">联系</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <div class="footer-entity">
+        ABC Plus Home Pty Limited · ABN 45 674 442 445 · 98 Beatrice Ave, Ascot, Brisbane QLD 4007, Australia · raydeng@magicengine.com.au
+      </div>
+      <div class="footer-copy">© 2026 Magic Engine</div>
+    </div>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var resolve = window.__ME_RESOLVE_STATIC__ || function (href) { return href; };
+    ['/google-tag.js', '/app.js'].forEach(function (src) {
+      var script = document.createElement('script');
+      script.src = resolve(src);
+      document.body.appendChild(script);
+    });
+  })();
+</script>
+</body>
+</html>
