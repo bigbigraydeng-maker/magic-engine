@@ -132,13 +132,15 @@ export default function RegisterForm({ next, fromProspect }: RegisterFormProps) 
       })
       const data = await res.json().catch(() => ({}))
       if (res.ok) {
+        // Unverified repeat POST now genuinely re-sends a fresh code (resent: true).
         setResendNotice('A new code is on its way.')
         setResendCooldown(RESEND_COOLDOWN_SEC)
-      } else if (res.status === 409) {
-        // Account already exists from the first send — code is still valid.
+      } else if (res.status === 429) {
+        // Supabase email cooldown — the previous code is still the live one.
         setResendNotice('Your previous code is still valid — check your inbox.')
         setResendCooldown(RESEND_COOLDOWN_SEC)
       } else {
+        // 409 now only means "already verified — log in instead" (or a name clash).
         setVerifyError(data.error ?? 'Could not resend the code. Please try again.')
       }
     } catch {

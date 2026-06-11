@@ -67,10 +67,15 @@ export async function POST(request: NextRequest) {
     },
   )
 
+  // type 'email' matches both token kinds GoTrue can have emitted: the signup
+  // confirmation code (new, unconfirmed user) AND the magiclink code sent when
+  // signInWithOtp hits an already-confirmed user — e.g. someone who verified
+  // but whose bonus grant failed mid-flight and re-requested a code. The
+  // narrower type 'signup' rejected the latter.
   const { error } = await supabase.auth.verifyOtp({
     email: email.toLowerCase().trim(),
     token: code,
-    type: 'signup',
+    type: 'email',
   })
 
   if (error) {

@@ -68,7 +68,7 @@ describe('POST /api/auth/verify-otp', () => {
     }))
   })
 
-  it('verifies the OTP with type=signup and resolves the redirect (which grants the bonus)', async () => {
+  it('verifies the OTP with type=email and resolves the redirect (which grants the bonus)', async () => {
     mocks.verifyOtp.mockResolvedValue({ data: {}, error: null })
     mocks.resolveRedirectForSession.mockResolvedValue('/dashboard/clients/abc/brief?welcome=1')
 
@@ -79,11 +79,13 @@ describe('POST /api/auth/verify-otp', () => {
     expect(body.ok).toBe(true)
     expect(body.redirect).toBe('/dashboard/clients/abc/brief?welcome=1')
 
-    // Email is normalised, code is trimmed, type is signup.
+    // Email is normalised, code is trimmed, type is 'email' — it must accept
+    // both the signup confirmation code and the magiclink code a resend can
+    // produce for an already-confirmed user.
     expect(mocks.verifyOtp).toHaveBeenCalledWith({
       email: 'user@example.com',
       token: '123456',
-      type: 'signup',
+      type: 'email',
     })
     // resolveRedirectForSession is the single place that calls grantSignupBonus.
     expect(mocks.resolveRedirectForSession).toHaveBeenCalledTimes(1)
