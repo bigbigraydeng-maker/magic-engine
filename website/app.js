@@ -500,7 +500,10 @@ Object.assign(PAGE_TITLES, {
     zh: '地产中介英文市场内容方案 | Magic Engine',
   },
   '/solutions/education-migration-schools': {
-    zh: '留学、移民与学校英文市场内容方案 | Magic Engine',
+    zh: '留学与移民英文市场内容方案 | Magic Engine',
+  },
+  '/solutions/schools': {
+    zh: '学校与教育项目英文市场内容方案 | Magic Engine',
   },
   '/solutions/professional-services': {
     zh: '专业服务英文市场内容方案 | Magic Engine',
@@ -1345,4 +1348,87 @@ document.head.appendChild(shakeStyle);
     const open = home.querySelector(".me-faq-item.open .me-faq-a");
     if (open) open.style.maxHeight = open.scrollHeight + "px";
   });
+})();
+
+
+/* ════════════════════════════════════════════════════════════════════
+   CN pages scroll interactions (2026-06-12)
+   Generic reveal + count-up for the /cn/ pages, mirroring the #me-home
+   system but driven by the unscoped `.rv` / `[data-count-cn]` hooks so
+   it works on every page without touching the homepage IIFE above.
+   ════════════════════════════════════════════════════════════════════ */
+(function () {
+  "use strict";
+  var revealEls = document.querySelectorAll(".rv");
+  var countEls = document.querySelectorAll("[data-count-cn]");
+  if (revealEls.length === 0 && countEls.length === 0) return;
+
+  var motionOff = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  var watchers = [];
+  function registerWatcher(el, ratio, cb) {
+    if (!el) return;
+    watchers.push({ el: el, ratio: ratio == null ? 0.12 : ratio, cb: cb, done: false });
+  }
+  function inView(el, ratio) {
+    var r = el.getBoundingClientRect();
+    var vh = window.innerHeight || document.documentElement.clientHeight;
+    if (r.height === 0 && r.width === 0) return false;
+    var visibleTop = Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
+    var need = Math.min(r.height * ratio, vh * 0.4);
+    return r.top < vh && r.bottom > 0 && visibleTop >= Math.max(1, need);
+  }
+  var ticking = false;
+  function runWatchers() {
+    ticking = false;
+    for (var i = watchers.length - 1; i >= 0; i--) {
+      var w = watchers[i];
+      if (w.done) { watchers.splice(i, 1); continue; }
+      if (inView(w.el, w.ratio)) { w.done = true; w.cb(w.el); }
+    }
+  }
+  function requestRun() {
+    if (ticking) return;
+    ticking = true;
+    setTimeout(runWatchers, 16);
+  }
+  window.addEventListener("scroll", requestRun, { passive: true });
+  window.addEventListener("resize", requestRun);
+  var polls = 0;
+  var pollTimer = setInterval(function () {
+    runWatchers();
+    if (++polls > 40 || watchers.length === 0) clearInterval(pollTimer);
+  }, 200);
+
+  revealEls.forEach(function (el) {
+    if (motionOff) { el.classList.add("in"); return; }
+    registerWatcher(el, 0.1, function (t) { t.classList.add("in"); });
+  });
+
+  function animateCount(el) {
+    var target = parseFloat(el.dataset.countCn);
+    var dec = parseInt(el.dataset.dec || "0", 10);
+    var prefix = el.dataset.prefix || "";
+    var suffix = el.dataset.suffix || "";
+    if (motionOff || isNaN(target)) {
+      el.textContent = prefix + (isNaN(target) ? el.textContent : target.toFixed(dec)) + suffix;
+      return;
+    }
+    var dur = 1300;
+    var start = Date.now();
+    var timer = setInterval(function () {
+      var t = Math.min((Date.now() - start) / dur, 1);
+      var eased = 1 - Math.pow(1 - t, 3);
+      el.textContent = prefix + (target * eased).toFixed(dec) + suffix;
+      if (t >= 1) { el.textContent = prefix + target.toFixed(dec) + suffix; clearInterval(timer); }
+    }, 32);
+  }
+  countEls.forEach(function (el) {
+    registerWatcher(el, 0.5, animateCount);
+  });
+
+  requestRun();
+  window.addEventListener("load", requestRun);
+  setTimeout(requestRun, 250);
+  setTimeout(requestRun, 800);
 })();

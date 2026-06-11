@@ -1057,3 +1057,211 @@ h3.serif { font-size: clamp(1.2rem, 2vw, 1.6rem); }
 #me-home .me-dark .me-shead p { color: rgba(251,248,243,.62); }
 #me-home .me-dark .me-eyebrow { color: var(--me-soft-gold); }
 #me-home .me-dark .me-kicker-row .me-line { background: var(--me-soft-gold); }
+
+/* ════════════════════════════════════════════════════════════════════
+   CN site enhancements (2026-06-12)
+   Shared, non-scoped components for the /cn/ pages: feature cards
+   (previously unstyled), scroll reveal, stats band, hero visual,
+   per-industry data strips, and unified footer logo. Class names are
+   prefixed `cn-` (or are the long-missing `feature-*` classes) so they
+   cannot collide with the scoped #me-home system above.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ---------- Feature cards (used across /cn/ since P29, never styled) ---------- */
+.feature-card {
+  position: relative;
+  background: var(--white);
+  border: 1px solid rgba(22,24,29,.08);
+  border-radius: var(--r-lg);
+  padding: 30px 28px 28px;
+  overflow: hidden;
+  transition: transform .35s cubic-bezier(.22,.61,.36,1), box-shadow .35s, border-color .35s;
+}
+.feature-card::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, #EBCB8B, #C4912E 55%, #A6781F);
+  opacity: 0; transform: scaleX(.4); transform-origin: left;
+  transition: opacity .35s, transform .45s cubic-bezier(.22,.61,.36,1);
+}
+.feature-card:hover {
+  transform: translateY(-5px);
+  box-shadow: var(--sh-lg);
+  border-color: rgba(196,145,46,.35);
+}
+.feature-card:hover::before { opacity: 1; transform: scaleX(1); }
+.feature-card h3 { font-size: 1.05rem; font-weight: 650; line-height: 1.4; margin: 6px 0 10px; }
+.feature-card p  { font-size: .88rem; color: var(--ink-light); line-height: 1.66; }
+.feature-kicker {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: .72rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--gold-dark);
+}
+.feature-kicker::before {
+  content: ''; width: 18px; height: 2px; border-radius: 2px;
+  background: linear-gradient(90deg, #EBCB8B, #C4912E);
+}
+.me-feat { display: flex; flex-wrap: wrap; gap: 7px; }
+.me-feat span {
+  font-size: .72rem; font-weight: 600; color: var(--ink-light);
+  background: var(--gold-bg); border: 1px solid rgba(196,145,46,.18);
+  padding: 4px 10px; border-radius: var(--r-full);
+}
+
+/* ---------- Scroll reveal (generic — driven by app.js cn IIFE) ---------- */
+.rv { opacity: 0; transform: translateY(22px); transition: opacity .7s cubic-bezier(.22,.61,.36,1), transform .7s cubic-bezier(.22,.61,.36,1); }
+.rv.in { opacity: 1; transform: none; }
+.rv.d1 { transition-delay: .08s; }
+.rv.d2 { transition-delay: .16s; }
+.rv.d3 { transition-delay: .24s; }
+.rv.d4 { transition-delay: .32s; }
+@media (prefers-reduced-motion: reduce) { .rv { opacity: 1; transform: none; transition: none; } }
+
+/* ---------- Stats band (dark, gold count-up numbers) ---------- */
+.cn-stats-band {
+  background: #141312;
+  border-block: 1px solid rgba(196,145,46,.22);
+  padding: 44px 0;
+  position: relative;
+  overflow: hidden;
+}
+.cn-stats-band::before {
+  content: '';
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(196,145,46,.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(196,145,46,.05) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 80% 100% at 50% 50%, black 30%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 100% at 50% 50%, black 30%, transparent 100%);
+  pointer-events: none;
+}
+.cn-stats-grid {
+  position: relative; z-index: 1;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 28px;
+}
+.cn-stat { text-align: center; }
+.cn-stat .num {
+  font-family: var(--ff-serif); font-weight: 700;
+  font-size: clamp(2rem, 4vw, 2.9rem); line-height: 1;
+  background: linear-gradient(135deg, #EBCB8B 0%, #C4912E 60%, #D9A93F 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.cn-stat .lbl { font-size: .82rem; color: rgba(251,248,243,.6); margin-top: 9px; line-height: 1.5; }
+@media (max-width: 760px) {
+  .cn-stats-grid { grid-template-columns: repeat(2, 1fr); gap: 32px 18px; }
+}
+
+/* ---------- Hero visual (two-column hero with animated SVG) ---------- */
+.cn-hero-grid {
+  display: grid; grid-template-columns: 1.08fr .92fr;
+  gap: 52px; align-items: center;
+}
+.cn-hero-visual {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 360px;
+}
+.cn-hero-visual svg { width: min(100%, 480px); height: auto; position: relative; z-index: 2; }
+.cn-hero-glow {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  width: 320px; height: 320px;
+  background: radial-gradient(circle, rgba(196,145,46,.20) 0%, rgba(196,145,46,.06) 45%, transparent 70%);
+  pointer-events: none;
+  animation: cn-breathe 6s ease-in-out infinite;
+}
+@keyframes cn-breathe {
+  0%,100% { opacity: .75; transform: translate(-50%,-50%) scale(1); }
+  50%     { opacity: 1;   transform: translate(-50%,-50%) scale(1.09); }
+}
+@media (max-width: 880px) {
+  .cn-hero-grid { grid-template-columns: 1fr; gap: 26px; }
+  .cn-hero-visual { min-height: 240px; order: -1; }
+  .cn-hero-visual svg { width: min(100%, 340px); }
+}
+
+/* ---------- Animated SVG flow lines (gold, logo-language) ---------- */
+.cn-flow-line {
+  stroke-dasharray: 8 10;
+  animation: cn-flow 2.6s linear infinite;
+}
+.cn-flow-line.f2 { animation-duration: 3.1s; animation-delay: .4s; }
+.cn-flow-line.f3 { animation-duration: 2.9s; animation-delay: .9s; }
+@keyframes cn-flow { to { stroke-dashoffset: -54; } }
+.cn-pulse-node { animation: cn-pulse 3s ease-in-out infinite; transform-origin: center; transform-box: fill-box; }
+.cn-pulse-node.p2 { animation-delay: 1s; }
+.cn-pulse-node.p3 { animation-delay: 2s; }
+@keyframes cn-pulse {
+  0%,100% { opacity: .75; transform: scale(1); }
+  50%     { opacity: 1;   transform: scale(1.18); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cn-flow-line, .cn-pulse-node, .cn-hero-glow { animation: none; }
+}
+
+/* ---------- Industry data strip (light band of 3 structural numbers) ---------- */
+.cn-data-strip {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  background: var(--white);
+  border: 1px solid rgba(22,24,29,.09);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-sm);
+  overflow: hidden;
+  margin-top: 34px;
+}
+.cn-ds-item {
+  padding: 22px 24px;
+  display: flex; align-items: baseline; gap: 12px;
+}
+.cn-ds-item + .cn-ds-item { border-left: 1px solid rgba(22,24,29,.08); }
+.cn-ds-item .num {
+  font-family: var(--ff-serif); font-weight: 700; font-size: 1.9rem; line-height: 1;
+  color: var(--gold-dark);
+}
+.cn-ds-item .lbl { font-size: .82rem; color: var(--ink-light); line-height: 1.45; }
+@media (max-width: 720px) {
+  .cn-data-strip { grid-template-columns: 1fr; }
+  .cn-ds-item + .cn-ds-item { border-left: none; border-top: 1px solid rgba(22,24,29,.08); }
+}
+
+/* ---------- Industry hero illustration panel ---------- */
+.cn-ind-visual {
+  position: relative;
+  background: #141312;
+  border-radius: var(--r-xl);
+  padding: 34px 30px;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  box-shadow: var(--sh-lg);
+}
+.cn-ind-visual::before {
+  content: '';
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(196,145,46,.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(196,145,46,.06) 1px, transparent 1px);
+  background-size: 36px 36px;
+  pointer-events: none;
+}
+.cn-ind-visual svg { width: 100%; max-width: 380px; height: auto; position: relative; z-index: 1; }
+
+/* ---------- Breadcrumb ---------- */
+.cn-breadcrumb {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  font-size: .8rem; color: var(--ink-muted);
+  margin-bottom: 18px;
+}
+.cn-breadcrumb a { color: var(--ink-light); text-decoration: none; transition: color var(--t); }
+.cn-breadcrumb a:hover { color: var(--gold-dark); }
+.cn-breadcrumb .sep { opacity: .5; }
+
+/* ---------- Section number accents ---------- */
+.chk-icon { transition: transform .3s, box-shadow .3s; }
+.local-check:hover .chk-icon { transform: scale(1.08); box-shadow: 0 6px 18px rgba(196,145,46,.28); }
+
+/* ---------- Unified footer polish ---------- */
+.site-footer .footer-logo { display: inline-flex; align-items: center; gap: 9px; text-decoration: none; font-weight: 700; }
+.site-footer .footer-logo svg { width: 24px; height: 22px; flex: none; }
+.site-footer .footer-logo span { color: rgba(255,255,255,.82); font-size: 1rem; }

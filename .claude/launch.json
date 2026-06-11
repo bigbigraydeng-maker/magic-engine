@@ -4,9 +4,24 @@
     {
       "name": "magic-engine",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 3001,
       "autoPort": false
+    },
+    {
+      "name": "website-static",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8765",
+        "--directory",
+        "website"
+      ],
+      "port": 8765
     }
   ]
 }
