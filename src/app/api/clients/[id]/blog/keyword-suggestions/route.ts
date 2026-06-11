@@ -6,6 +6,7 @@ import { getActiveBrief } from '@/lib/content/brief-injector'
 import {
   buildBusinessKeywordTerms,
   extractBriefSeedTerms,
+  extractExcludedTopics,
   isBusinessRelevantKeyword,
 } from '@/lib/seo-intelligence/keyword-relevance'
 
@@ -43,10 +44,12 @@ export async function GET(
         .maybeSingle(),
       getActiveBrief(clientId).catch(() => null),
     ])
+    const briefRecord = activeBrief as Record<string, unknown> | null
+    const excludedTopics = extractExcludedTopics(briefRecord)
     const businessTerms = buildBusinessKeywordTerms({
       domain: (client?.domain as string | null) ?? null,
       industry: (client?.industry as string | null) ?? null,
-      seedTerms: extractBriefSeedTerms(activeBrief as Record<string, unknown> | null),
+      seedTerms: extractBriefSeedTerms(briefRecord),
     })
 
     const { data, error } = await supabaseAdmin
@@ -84,7 +87,7 @@ export async function GET(
       }))
 
     const suggestions: KeywordSuggestion[] = [...tierB, ...tierA]
-      .filter((suggestion) => isBusinessRelevantKeyword(suggestion.keyword, businessTerms))
+      .filter((suggestion) => isBusinessRelevantKeyword(suggestion.keyword, businessTerms, excludedTopics))
       .slice(0, 15)
 
     return NextResponse.json({ success: true, suggestions })

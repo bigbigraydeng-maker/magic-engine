@@ -20,6 +20,12 @@ import { analyzeSeoGap } from '@/lib/seo-gap/analyzer'
 import { generateSeoGapDocx } from '@/lib/seo-gap/docx-generator'
 import type { ParsedKeyword } from '@/lib/seo-gap/csv-parser'
 import { getActiveBrief } from '@/lib/content/brief-injector'
+import {
+  buildBusinessKeywordTerms,
+  extractBriefSeedTerms,
+  extractExcludedTopics,
+  isBusinessRelevantKeyword,
+} from '@/lib/seo-intelligence/keyword-relevance'
 
 const LOCATION_CODE_BY_DB: Record<string, number> = { au: 2036, nz: 2554 }
 
@@ -143,6 +149,13 @@ export async function POST(
 
     // ── 4. Determine competitors (priority: active brief → filtered DataForSEO)
     const activeBrief = await getActiveBrief(clientId)
+    const briefRecord = activeBrief as Record<string, unknown> | null
+    const excludedTopics = extractExcludedTopics(briefRecord)
+    const businessTerms = buildBusinessKeywordTerms({
+      domain: client.domain,
+      industry: null,
+      seedTerms: extractBriefSeedTerms(briefRecord),
+    })
     const knownDomains: string[] = ((activeBrief?.competitor_domains as string[] | null) ?? [])
       .map(d => d.replace(/^https?:\/\//, '').replace(/\/$/, '').toLowerCase())
 
@@ -170,7 +183,9 @@ export async function POST(
       return NextResponse.json({ success: false, error: 'No gap keywords found' }, { status: 422 })
     }
 
-    const parsedKeywords = gapKeywords.map(kw => labsKeywordToParsed(kw, competitorDomains))
+    const parsedKeywords = gapKeywords
+      .filter(kw => isBusinessRelevantKeyword(kw.keyword, businessTerms, excludedTopics))
+      .map(kw => labsKeywordToParsed(kw, competitorDomains))
 
     // ── 5. AI analysis ────────────────────────────────────────────────────────
     const analysis = await analyzeSeoGap({

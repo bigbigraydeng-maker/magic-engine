@@ -96,7 +96,7 @@ export async function PATCH(
   for (const raw of body.topics) {
     if (typeof raw !== 'string') continue
     const norm = normaliseTopic(raw)
-    if (norm.length < 2) continue
+    if (norm.length < 4) continue
     if (seen.has(norm)) continue
     if (cleaned.length >= MAX_TOPICS) break
     seen.add(norm)

@@ -5,6 +5,7 @@ import { isBrandedKeyword } from '@/lib/seo-intelligence/intent-strategy'
 import {
   buildBusinessKeywordTerms,
   extractBriefSeedTerms,
+  extractExcludedTopics,
   isBusinessRelevantKeyword,
 } from '@/lib/seo-intelligence/keyword-relevance'
 import { getPositionChangesForClient } from '@/lib/seo-intelligence/position-changes'
@@ -39,7 +40,8 @@ export async function assembleSeoAgentInput(
     industry: client.industry,
     seedTerms: extractBriefSeedTerms(brief as Record<string, unknown> | null),
   })
-  const gapKeywords = await fetchGapKeywords(client.domain, client.semrush_db, brief?.competitor_domains ?? [], businessTerms)
+  const excludedTopics = extractExcludedTopics(brief as Record<string, unknown> | null)
+  const gapKeywords = await fetchGapKeywords(client.domain, client.semrush_db, brief?.competitor_domains ?? [], businessTerms, excludedTopics)
   const candidates = buildCandidates({
     domain: client.domain,
     goal,
@@ -97,6 +99,7 @@ async function fetchGapKeywords(
   semrushDb: string | null,
   knownCompetitors: string[],
   businessTerms: string[],
+  excludedTopics: string[] = [],
 ): Promise<LabsKeyword[]> {
   const locationCode = locationCodeForDb(semrushDb)
   const competitorDomains = knownCompetitors.length > 0
@@ -106,7 +109,7 @@ async function fetchGapKeywords(
   if (competitorDomains.length === 0) return []
 
   const keywords = await getKeywordsGap(domain, competitorDomains.slice(0, 3), locationCode, 120)
-  return keywords.filter((item) => isBusinessRelevantKeyword(item.keyword, businessTerms)).slice(0, 40)
+  return keywords.filter((item) => isBusinessRelevantKeyword(item.keyword, businessTerms, excludedTopics)).slice(0, 40)
 }
 
 async function discoverCompetitors(domain: string, locationCode: number): Promise<string[]> {
