@@ -67,10 +67,37 @@ export function extractBriefSeedTerms(brief: Record<string, unknown> | null | un
   return values
 }
 
-export function isBusinessRelevantKeyword(keyword: string, businessTerms: string[]): boolean {
+export function extractExcludedTopics(brief: Record<string, unknown> | null | undefined): string[] {
+  if (!brief) return []
+  const raw = brief['excluded_topics']
+  if (!raw) return []
+  const result: string[] = []
+  collectStrings(raw, result)
+  return result.map(s => s.trim().toLowerCase()).filter(Boolean)
+}
+
+/**
+ * Returns true when the keyword matches at least one business term AND
+ * does not contain any client-configured excluded topic.
+ *
+ * excludedTopics: singular root words (e.g. 'shutter', 'blind') set per client
+ * in master_briefs.excluded_topics. Substring matched so 'shutter' blocks
+ * 'shutters', 'plantation shutters', etc.
+ */
+export function isBusinessRelevantKeyword(
+  keyword: string,
+  businessTerms: string[],
+  excludedTopics: string[] = [],
+): boolean {
   const normalized = keyword.trim().toLowerCase()
   if (!normalized) return false
   if (HARD_BLOCKED_PATTERNS.some((pattern) => pattern.test(normalized))) return false
+
+  // Exclude topics must be checked before the business-relevance pass so a
+  // term that is both in businessTerms and excludedTopics gets blocked.
+  if (excludedTopics.length > 0) {
+    if (excludedTopics.some((topic) => normalized.includes(topic))) return false
+  }
 
   const words = normalized.split(/[^a-z0-9]+/).filter(Boolean)
   const meaningfulWords = words.filter((word) => !COMMON_TERMS.has(word))
