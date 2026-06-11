@@ -1,6 +1,6 @@
 # Magic Engine — Roadmap
 
-> 最后更新：2026-06-08 15:02 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
+> 最后更新：2026-06-12 00:02 NZST · 当前阶段：**Phase 24.A Platform OAuth Connector ✅ 全部 8 任务完成 PR #125；Phase 14.C P14.C.1–6 ✅ PR 待合并；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 > 
 > **策略更新（2026-05-05）**：GEO Directive 部署机制确认采用 **Phase 1 静态模型**（MVP），**Phase 2 动态脚本延缓至 Q3+ 2026**（需 PoC 验证）。详见 [§3.3.1 部署机制决策](#geoDirectiveDecision)。
 > 配套：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [ARCHITECTURE.md](./ARCHITECTURE.md)（技术架构）
@@ -1893,6 +1893,7 @@ SEO 诊断 → Fix 按钮 → 推 GitHub PR → 客户 merge → 元数据修复
 | **P12.I.8** | `keyword_snapshots` 表 migration + weekly Cron（每周存关键词排名快照，为趋势图积累数据） | — | ✅ |
 | **P12.I.9** | Position Changes 计算（New / Lost / Improved / Declined），Panel A 展示 | P12.I.8 | ✅ |
 | **P12.I.10** | Intent 优先内容策略（Transactional 置顶）+ Branded vs Non-Branded 流量分拆 | P12.I.2 | ✅ |
+| **P12.I.BF1** | ✅ **keyword gap 误命中修复** — `isBusinessRelevantKeyword` 加 `excludedTopics` 可选参数；`extractExcludedTopics` 读 `master_briefs.excluded_topics`；`competitors-gap` route 传入 excluded list；Settings 页新增「排除品类词」面板 + `/api/clients/[id]/excluded-topics` GET/PATCH；migration 文件已提交**等 PM apply**。根因：Oztop gap 词 100% shutters/blinds，BUILDING_SUPPLIES_TERMS 通用词表含 shutter/blind/curtain，flooring hint 自动激活整张词表。PR: fix/keyword-relevance-excluded-topics | P12.I.3, P12.I.4 | ✅ |
 
 ### 里程碑关卡
 
@@ -4330,3 +4331,7 @@ P33.9（PR #301/#302 — Goal filter 状态 chips 数字跟随）/ P33.10（未�
 - `website/ai-training.html`、`website/ai-automation.html`、`website/ai-marketing-smes.html` 以及 `/cn/` 对应页已上线，SME-first public surface 补齐
 - `website/index.html`、`website/cn/index.html`、`website/robots.txt`、`website/sitemap.xml` 已同步新页面入口与抓取路径
 
+
+### 2026-06-11（keyword gap 误命中修复 P12.I.BF1 ✅）
+
+- **P12.I.BF1** — Oztop gap 词 100% shutters/blinds 根因修复：`isBusinessRelevantKeyword` 加 `excludedTopics[]` 参数（backward-compat 默认空数组）；`extractExcludedTopics` 读 `master_briefs.excluded_topics`；`competitors-gap` route 传入；Settings 页「排除品类词」UI + GET/PATCH API；migration 已提交等 PM apply；13 单测全过
