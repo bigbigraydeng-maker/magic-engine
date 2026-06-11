@@ -38,6 +38,12 @@ const ADMIN_SECTIONS: NavSection[] = [
     ],
   },
   {
+    title: 'Create',
+    items: [
+      { key: 'poster-studio', label: '内容工作室', mark: 'CS', href: '/dashboard/poster-studio' },
+    ],
+  },
+  {
     title: 'Operate',
     items: [
       { key: 'launch-hub',       label: 'Launch Hub',      mark: 'LH', href: '/dashboard/visuals' },
