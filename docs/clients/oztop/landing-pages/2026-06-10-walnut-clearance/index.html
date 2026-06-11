@@ -1,4 +1,4 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Walnut Clearance LP Preview (v2.2 - 表单清理)</title></head><body>
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Walnut Clearance LP Preview v3 (SALE)</title></head><body>
 <!--
   Oztop Walnut Engineered Timber Clearance Landing Page (v2)
   目标 URL: https://oztopbuildingsupplies.com.au/walnut-clearance/
@@ -23,11 +23,37 @@
     --oztop-grey-line: #e5e5e5;
     --oztop-accent: #b8945a;          /* 金棕色, 比之前 #d4a574 更沉稳, 跟官网调一致 */
     --oztop-walnut: #5c3a1f;          /* 真实胡桃色, 仅 strong text 用 */
+    --oztop-sale: #d62828;            /* SALE 红, 价格震撼 + 倒计时 */
+    --oztop-sale-dark: #a31d1d;       /* SALE 红深色 (hover) */
+    --oztop-urgency: #f4a300;         /* 警示橙 (urgency stripe) */
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     color: var(--oztop-black);
     line-height: 1.65;
     max-width: 100%;
     background: #fff;
+  }
+
+  /* SALE 动画 keyframes */
+  @keyframes oztop-pulse-glow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(214,40,40,0.6); }
+    50% { box-shadow: 0 0 0 14px rgba(214,40,40,0); }
+  }
+  @keyframes oztop-flash {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+  @keyframes oztop-stamp-rotate {
+    0%, 100% { transform: rotate(-12deg) scale(1); }
+    50% { transform: rotate(-12deg) scale(1.05); }
+  }
+  @keyframes oztop-marquee {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+  @keyframes oztop-shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-2px); }
+    75% { transform: translateX(2px); }
   }
   .oztop-lp section { padding: 80px 24px; max-width: 1200px; margin: 0 auto; }
   .oztop-lp h1, .oztop-lp h2, .oztop-lp h3 { font-weight: 400; letter-spacing: -0.02em; color: var(--oztop-black); }
@@ -40,18 +66,25 @@
   }
   .oztop-lp p { color: var(--oztop-grey-text); margin: 0 0 16px; }
 
-  /* CTA */
+  /* CTA — SALE 调红色脉冲按钮 */
   .oztop-lp .btn-primary {
-    display: inline-block; background: var(--oztop-black); color: #fff;
-    padding: 14px 36px; border-radius: 0; text-decoration: none;
-    font-weight: 500; font-size: 0.95em; letter-spacing: 0.04em;
-    border: 1px solid var(--oztop-black); transition: all 0.2s;
+    display: inline-block; background: var(--oztop-sale); color: #fff;
+    padding: 18px 42px; border-radius: 4px; text-decoration: none;
+    font-weight: 700; font-size: 1.05em; letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border: 2px solid var(--oztop-sale);
+    transition: all 0.2s;
+    animation: oztop-pulse-glow 2.2s infinite;
   }
-  .oztop-lp .btn-primary:hover { background: transparent; color: var(--oztop-black); }
+  .oztop-lp .btn-primary:hover {
+    background: var(--oztop-sale-dark); border-color: var(--oztop-sale-dark);
+    animation: none;
+  }
   .oztop-lp .btn-outline {
     display: inline-block; background: transparent; color: var(--oztop-black);
-    padding: 14px 36px; border: 1px solid var(--oztop-black);
-    text-decoration: none; font-weight: 500; font-size: 0.95em; letter-spacing: 0.04em;
+    padding: 18px 42px; border: 2px solid var(--oztop-black);
+    text-decoration: none; font-weight: 600; font-size: 1.05em;
+    letter-spacing: 0.04em; border-radius: 4px;
   }
 
   /* Hero — 大幅 Walnut 木地板特写图 + 标题居左 (跟官网调一致) */
@@ -67,7 +100,7 @@
   .oztop-lp .hero-left h1 strong { color: var(--oztop-walnut); font-weight: 500; }
   .oztop-lp .hero-left .lede { font-size: 1.1em; max-width: 460px; }
   .oztop-lp .hero-right {
-    background: #2a1810 url('https://images.unsplash.com/photo-1503602642458-232111445657?auto=format&fit=crop&w=900&q=80') center/cover;
+    background: #2a1810 url('images/hero-walnut-kitchen.jpg') center/cover;
     min-height: 460px; border-radius: 2px;
     position: relative;
   }
@@ -84,13 +117,105 @@
   }
   .oztop-lp .hero-meta span { display: inline-flex; align-items: center; gap: 8px; }
 
-  /* Banner stripe — 跟官网 "Where excellence comes to life" 风格 */
+  /* Banner stripe — SALE 调倒计时闪烁 */
   .oztop-lp .stripe {
-    background: var(--oztop-black); color: #fff;
-    padding: 18px 24px; text-align: center;
-    font-size: 0.95em; letter-spacing: 0.08em;
+    background: linear-gradient(90deg, var(--oztop-sale) 0%, var(--oztop-urgency) 50%, var(--oztop-sale) 100%);
+    background-size: 200% 100%;
+    color: #fff;
+    padding: 14px 24px; text-align: center;
+    font-size: 1em; letter-spacing: 0.08em; font-weight: 700;
+    text-transform: uppercase;
+    animation: oztop-marquee-bg 8s linear infinite;
   }
-  .oztop-lp .stripe strong { color: var(--oztop-accent); font-weight: 500; }
+  @keyframes oztop-marquee-bg {
+    from { background-position: 0% 0; }
+    to { background-position: 200% 0; }
+  }
+  .oztop-lp .stripe strong {
+    color: #fff; font-weight: 900;
+    display: inline-block;
+    animation: oztop-flash 1.6s infinite;
+  }
+  .oztop-lp .stripe-final {
+    background: var(--oztop-black);
+    text-transform: none; letter-spacing: 0.05em;
+    font-weight: 500;
+    animation: none;
+  }
+  .oztop-lp .stripe-final strong { color: var(--oztop-accent); animation: none; }
+
+  /* SALE 印章 (Hero 上的 Save 徽章) */
+  .oztop-lp .sale-stamp {
+    position: absolute; top: 24px; right: 24px;
+    width: 130px; height: 130px;
+    border-radius: 50%;
+    background: var(--oztop-sale);
+    color: #fff;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font-weight: 900; line-height: 1.1; text-align: center;
+    border: 3px dashed #fff;
+    box-shadow: 0 6px 16px rgba(214,40,40,0.4);
+    animation: oztop-stamp-rotate 2.4s ease-in-out infinite;
+    z-index: 2;
+  }
+  .oztop-lp .sale-stamp .stamp-big { font-size: 2em; letter-spacing: -0.02em; }
+  .oztop-lp .sale-stamp .stamp-small { font-size: 0.7em; opacity: 0.95; margin-top: 4px; }
+
+  /* Hero 大价格 */
+  .oztop-lp .hero-price {
+    display: flex; align-items: baseline; gap: 16px;
+    margin: 24px 0 16px;
+    flex-wrap: wrap;
+  }
+  .oztop-lp .hero-price .price-now {
+    font-size: 4em; font-weight: 900;
+    color: var(--oztop-sale);
+    line-height: 1; letter-spacing: -0.04em;
+    animation: oztop-shake 4s ease-in-out infinite;
+    display: inline-flex; align-items: baseline;
+  }
+  .oztop-lp .hero-price .price-now small {
+    font-size: 0.35em; font-weight: 700;
+    color: var(--oztop-grey-text); margin-left: 4px;
+  }
+  .oztop-lp .hero-price .price-was {
+    font-size: 1.4em; color: var(--oztop-grey-text);
+    text-decoration: line-through;
+    text-decoration-color: var(--oztop-sale);
+    text-decoration-thickness: 3px;
+    font-weight: 500;
+  }
+
+  /* Hero 库存条 */
+  .oztop-lp .stock-bar {
+    margin: 24px 0; max-width: 460px;
+  }
+  .oztop-lp .stock-bar-label {
+    display: flex; justify-content: space-between;
+    font-size: 0.85em; font-weight: 600;
+    color: var(--oztop-black); margin-bottom: 8px;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .oztop-lp .stock-bar-label .stock-pct { color: var(--oztop-sale); }
+  .oztop-lp .stock-bar-track {
+    height: 10px; background: var(--oztop-grey-line);
+    border-radius: 5px; overflow: hidden;
+    position: relative;
+  }
+  .oztop-lp .stock-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--oztop-sale), var(--oztop-urgency));
+    width: 92.35%;  /* 1847 / 2000 = 0.9235 */
+    border-radius: 5px;
+    box-shadow: 0 0 12px rgba(214,40,40,0.4);
+    position: relative;
+  }
+  .oztop-lp .stock-bar-fill::after {
+    content: ""; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+    animation: oztop-marquee 2s linear infinite;
+  }
 
   /* Why Oztop — 3 列 (跟官网 Primary Services 风格) */
   .oztop-lp .three-col {
@@ -137,24 +262,89 @@
   .oztop-lp .variant li { padding: 6px 0; border-bottom: 1px solid var(--oztop-grey-line); }
   .oztop-lp .variant li:last-child { border-bottom: 0; }
 
-  /* Gallery — Recent Projects 风格 (跟官网调) */
+  /* Gallery — 19 transformations 真实图 + before/after hover 切换 */
   .oztop-lp .gallery {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 32px;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+    margin-top: 32px;
   }
-  .oztop-lp .gallery .item {
-    aspect-ratio: 4/3; background: var(--oztop-grey-light);
+  .oztop-lp .gallery .ba-card {
+    aspect-ratio: 4/3;
+    background: var(--oztop-grey-light);
     position: relative; overflow: hidden;
+    cursor: pointer;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    transition: transform 0.25s, box-shadow 0.25s;
   }
-  .oztop-lp .gallery .item .ba-placeholder {
-    width: 100%; height: 100%;
-    display: flex; align-items: center; justify-content: center;
-    color: var(--oztop-grey-text); font-size: 0.85em; letter-spacing: 0.05em;
+  .oztop-lp .gallery .ba-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 24px rgba(0,0,0,0.18);
   }
-  .oztop-lp .gallery .item .label {
-    position: absolute; bottom: 12px; left: 12px;
-    background: rgba(255,255,255,0.95); color: var(--oztop-black);
-    padding: 6px 12px; font-size: 0.8em; letter-spacing: 0.05em;
+  .oztop-lp .gallery .ba-card img {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%; object-fit: cover;
+    transition: opacity 0.4s ease, transform 0.6s ease;
   }
+  .oztop-lp .gallery .ba-card .ba-before {
+    opacity: 1; z-index: 1;
+    filter: saturate(0.85);
+  }
+  .oztop-lp .gallery .ba-card .ba-after {
+    opacity: 0; z-index: 2;
+  }
+  .oztop-lp .gallery .ba-card:hover .ba-before,
+  .oztop-lp .gallery .ba-card:focus-within .ba-before,
+  .oztop-lp .gallery .ba-card.show-after .ba-before {
+    opacity: 0;
+  }
+  .oztop-lp .gallery .ba-card:hover .ba-after,
+  .oztop-lp .gallery .ba-card:focus-within .ba-after,
+  .oztop-lp .gallery .ba-card.show-after .ba-after {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+  .oztop-lp .gallery .ba-card .ba-tag {
+    position: absolute; top: 10px; left: 10px;
+    background: rgba(0,0,0,0.78); color: #fff;
+    padding: 4px 10px; font-size: 0.7em;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    z-index: 3; font-weight: 700;
+    transition: background 0.3s, color 0.3s;
+  }
+  .oztop-lp .gallery .ba-card:hover .ba-tag,
+  .oztop-lp .gallery .ba-card.show-after .ba-tag {
+    background: var(--oztop-sale); color: #fff;
+  }
+  .oztop-lp .gallery .ba-card:hover .ba-tag::after,
+  .oztop-lp .gallery .ba-card.show-after .ba-tag::after {
+    content: " ▸ AFTER";
+  }
+  .oztop-lp .gallery .ba-card .ba-tag::after {
+    content: "";
+  }
+  .oztop-lp .gallery .ba-card .ba-hint {
+    position: absolute; bottom: 10px; right: 10px;
+    background: rgba(255,255,255,0.96); color: var(--oztop-black);
+    padding: 4px 8px; font-size: 0.65em;
+    letter-spacing: 0.05em;
+    z-index: 3; border-radius: 2px;
+    opacity: 0.85;
+    transition: opacity 0.3s;
+  }
+  .oztop-lp .gallery .ba-card:hover .ba-hint,
+  .oztop-lp .gallery .ba-card.show-after .ba-hint {
+    opacity: 0;
+  }
+  .oztop-lp .gallery-meta {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 24px; padding-top: 24px;
+    border-top: 1px solid var(--oztop-grey-line);
+    flex-wrap: wrap; gap: 16px;
+  }
+  .oztop-lp .gallery-meta .count {
+    font-size: 1.4em; font-weight: 900; color: var(--oztop-walnut);
+  }
+  .oztop-lp .gallery-meta .count span { color: var(--oztop-grey-text); font-weight: 400; font-size: 0.7em; }
 
   /* Brand trust strip — 跟官网 Karndean/Caroma/Bremworth logo 栏一致 */
   .oztop-lp .brand-strip {
@@ -216,48 +406,85 @@
   /* Responsive */
   @media (max-width: 900px) {
     .oztop-lp .hero-wrap { grid-template-columns: 1fr; gap: 32px; }
-    .oztop-lp .hero-right { min-height: 320px; }
+    .oztop-lp .hero-right { min-height: 280px; }
     .oztop-lp .three-col,
     .oztop-lp .variants,
-    .oztop-lp .gallery,
     .oztop-lp .form-row.two { grid-template-columns: 1fr; }
+    /* Gallery on mobile: 2 cols + horizontal scroll fallback */
+    .oztop-lp .gallery { grid-template-columns: repeat(2, 1fr); gap: 10px; }
     .oztop-lp h1 { font-size: 1.9em; }
     .oztop-lp h2 { font-size: 1.5em; }
     .oztop-lp section { padding: 56px 20px; }
     .oztop-lp form { padding: 32px 20px; }
+    .oztop-lp .hero-price .price-now { font-size: 3em; }
+    .oztop-lp .hero-price .price-was { font-size: 1.1em; }
+    .oztop-lp .sale-stamp { width: 96px; height: 96px; top: 12px; right: 12px; }
+    .oztop-lp .sale-stamp .stamp-big { font-size: 1.4em; }
+    .oztop-lp .sale-stamp .stamp-small { font-size: 0.55em; }
+    .oztop-lp .stripe { font-size: 0.78em; padding: 12px 14px; letter-spacing: 0.04em; }
+    .oztop-lp .btn-primary, .oztop-lp .btn-outline { padding: 14px 28px; font-size: 0.95em; }
+  }
+  @media (max-width: 520px) {
+    .oztop-lp .gallery { grid-template-columns: 1fr; gap: 12px; }
+    .oztop-lp .gallery .ba-card { aspect-ratio: 16/10; }
+    .oztop-lp .gallery .ba-card .ba-hint { display: none; }  /* mobile tap to toggle */
+    .oztop-lp .hero-price .price-now { font-size: 2.4em; }
+  }
+  /* Mobile: tap to toggle (no hover) */
+  @media (hover: none) {
+    .oztop-lp .gallery .ba-card .ba-hint {
+      content: "Tap to see after";
+    }
   }
 </style>
 
 <div class="oztop-lp">
 
-  <!-- Top stripe — 跟官网 "Where excellence comes to life" 风格一致 -->
+  <!-- Top stripe — SALE 倒计时闪烁 -->
   <div class="stripe">
-    Clearance pricing ends <strong>30 June</strong> &nbsp;·&nbsp; 2,000m² in stock at our Slacks Creek warehouse
+    ⚠️ Clearance ends <strong>30 June</strong> &nbsp;·&nbsp; <strong>1,847m² left</strong> from 2,000m² stock &nbsp;·&nbsp; Save up to <strong>$34.50/m²</strong>
   </div>
 
   <!-- Hero -->
   <section class="hero">
     <div class="hero-wrap">
       <div class="hero-left">
-        <span class="eyebrow">Walnut Clearance · Brisbane</span>
-        <h1>Premium <strong>Walnut Engineered Timber</strong> at warehouse pricing.</h1>
-        <p class="lede">15mm engineered walnut from our Slacks Creek warehouse — same product retail chains stock at $55–70/m², now <strong>$35.50/m²</strong> while clearance stock lasts.</p>
+        <span class="eyebrow" style="color:var(--oztop-sale);font-weight:700;">🔥 Clearance · Brisbane Only</span>
+        <h1>Premium <strong>Walnut Engineered Timber</strong> &mdash; warehouse-direct.</h1>
+        <div class="hero-price">
+          <div class="price-now">$35.50<small>/m²</small></div>
+          <div class="price-was">Retail $55&ndash;70/m²</div>
+        </div>
+        <p class="lede" style="margin-top:0;">15mm engineered walnut from our Slacks Creek warehouse &mdash; identical to what big-box chains stock, cleared at our cost while excess inventory lasts.</p>
+        <div class="stock-bar">
+          <div class="stock-bar-label">
+            <span>Stock remaining</span>
+            <span class="stock-pct">1,847 / 2,000 m²</span>
+          </div>
+          <div class="stock-bar-track"><div class="stock-bar-fill"></div></div>
+        </div>
         <p>
-          <a href="#enquiry" class="btn-primary">Request a Quote</a>
+          <a href="#enquiry" class="btn-primary">Lock in $35.50/m² →</a>
           &nbsp;&nbsp;
-          <a href="tel:0734166458" class="btn-outline">07 3416 6458</a>
+          <a href="tel:0734166458" class="btn-outline">📞 07 3416 6458</a>
         </p>
         <div class="hero-meta">
-          <span>Licensed &amp; Insured installer</span>
+          <span>✓ Licensed &amp; Insured installer</span>
           <span>·</span>
-          <span>Same-day quote</span>
+          <span>✓ Same-day quote</span>
           <span>·</span>
-          <span>2-week install from deposit</span>
+          <span>✓ 2-week install from deposit</span>
           <span>·</span>
-          <span>Brisbane + Gold Coast (100km)</span>
+          <span>✓ Brisbane + Gold Coast (100km)</span>
         </div>
       </div>
-      <div class="hero-right"></div>
+      <div class="hero-right">
+        <div class="sale-stamp">
+          <div class="stamp-big">SAVE</div>
+          <div class="stamp-big" style="font-size:2.4em;">$20+</div>
+          <div class="stamp-small">PER M²</div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -355,26 +582,36 @@
     <p style="max-width:680px;font-size:0.95em;color:var(--oztop-grey-text);"><em>Looking for hybrid, SPC, laminate, vinyl, carpet or tile? Our full range is on <a href="https://oztopbuildingsupplies.com.au/" style="color:var(--oztop-walnut);">oztopbuildingsupplies.com.au</a>. This page is just the clearance stock.</em></p>
   </section>
 
-  <!-- Gallery — Recent Brisbane Installs (素材接入 ME Asset Library 后填) -->
+  <!-- Gallery — 19 Real Brisbane Transformations (Hover/tap to flip BEFORE→AFTER) -->
   <section>
-    <span class="eyebrow">Recent Brisbane installs</span>
-    <h2>19 transformations from 2024–2026.</h2>
-    <p style="max-width:680px;">No stock photography. No staging. Just photographs of work completed by our team in Brisbane homes — kitchens, living rooms, open-plan extensions. Slide the divider on any panel to see the before.</p>
+    <span class="eyebrow">Real Brisbane installs · 2024&ndash;2026</span>
+    <h2>19 transformations. Tap any tile.</h2>
+    <p style="max-width:680px;">No stock photography. No staging. These are photographs of work completed by the Oztop install team in Brisbane and Gold Coast homes &mdash; kitchens, living rooms, hallways, bathrooms, open-plan extensions. <strong>Hover (desktop) or tap (mobile) any image to see the BEFORE.</strong></p>
     <div class="gallery">
-      <div class="item">
-        <div class="ba-placeholder">[Before / After — Living Room]</div>
-        <div class="label">Brisbane install · 2025</div>
-      </div>
-      <div class="item">
-        <div class="ba-placeholder">[Before / After — Kitchen]</div>
-        <div class="label">Gold Coast install · 2025</div>
-      </div>
-      <div class="item">
-        <div class="ba-placeholder">[Before / After — Open Plan]</div>
-        <div class="label">Logan install · 2024</div>
-      </div>
+      <div class="ba-card" data-toggle><img class="ba-before" src="images/before-after/1-1a.jpg" alt="Brisbane kitchen before"><img class="ba-after" src="images/before-after/1-1b.jpg" alt="Brisbane kitchen after Walnut install"><span class="ba-tag">Kitchen</span><span class="ba-hint">Hover</span></div>
+      <div class="ba-card" data-toggle><img class="ba-before" src="images/before-after/1-2a.jpg" alt="Brisbane home before"><img class="ba-after" src="images/before-after/1-2b.jpg" alt="Brisbane home after install"><span class="ba-tag">Living</span><span class="ba-hint">Hover</span></div>
+      <div class="ba-card" data-toggle><img class="ba-before" src="images/before-after/1-3a.jpg" alt="Brisbane room before"><img class="ba-after" src="images/before-after/1-3b.jpg" alt="Brisbane room after install"><span class="ba-tag">Bedroom</span><span class="ba-hint">Hover</span></div>
+      <div class="ba-card" data-toggle><img class="ba-before" src="images/before-after/1-4a.jpg" alt="Brisbane home before"><img class="ba-after" src="images/before-after/1-4b.jpg" alt="Brisbane home after install"><span class="ba-tag">Open Plan</span><span class="ba-hint">Hover</span></div>
+      <div class="ba-card" data-toggle><img class="ba-before" src="images/before-after/1-5a.jpg" alt="Brisbane room before"><img class="ba-after" src="images/before-after/1-5b.jpg" alt="Brisbane room after install"><span class="ba-tag">Hallway</span><span class="ba-hint">Hover</span></div>
+      <div class="ba-card" data-toggle><img class="ba-before" src="images/before-after/2-1a.jpg" alt="Brisbane home before"><img class="ba-after" src="images/before-after/2-1b.jpg" alt="Brisbane home after install"><span class="ba-tag">Living</span><span class="ba-hint">Hover</span></div>
+      <div class="ba-card" data-toggle><img class="ba-before" src="images/before-after/2-2a.jpg" alt="Brisbane home before"><img class="ba-after" src="images/before-after/2-2b.jpg" alt="Brisbane home after install"><span class="ba-tag">Kitchen</span><span class="ba-hint">Hover</span></div>
+      <div class="ba-card" data-toggle><img class="ba-before" src="images/before-after/2-3a.jpg" alt="Brisbane home before"><img class="ba-after" src="images/before-after/2-3b.jpg" alt="Brisbane home after install"><span class="ba-tag">Dining</span><span class="ba-hint">Hover</span></div>
+      <div class="ba-card" data-toggle><img class="ba-before" src="images/before-after/2-4a.jpg" alt="Brisbane home before"><img class="ba-after" src="images/before-after/2-4b.jpg" alt="Brisbane home after install"><span class="ba-tag">Bedroom</span><span class="ba-hint">Hover</span></div>
+      <div class="ba-card" data-toggle><img class="ba-before" src="images/before-after/3-1a.jpg" alt="Brisbane home before"><img class="ba-after" src="images/before-after/3-1b.jpg" alt="Brisbane home after install"><span class="ba-tag">Living</span><span class="ba-hint">Hover</span></div>
+      <div class="ba-card" data-toggle><img class="ba-before" src="images/before-after/3-2a.jpg" alt="Brisbane home before"><img class="ba-after" src="images/before-after/3-2b.jpg" alt="Brisbane home after install"><span class="ba-tag">Whole House</span><span class="ba-hint">Hover</span></div>
+      <div class="ba-card" data-toggle><img class="ba-before" src="images/before-after/3-3a.jpg" alt="Brisbane home before"><img class="ba-after" src="images/before-after/3-3b.jpg" alt="Brisbane home after install"><span class="ba-tag">Open Plan</span><span class="ba-hint">Hover</span></div>
+      <div class="ba-card" data-toggle><img class="ba-before" src="images/before-after/3-4a.jpg" alt="Brisbane home before"><img class="ba-after" src="images/before-after/3-4b.jpg" alt="Brisbane home after install"><span class="ba-tag">Builder</span><span class="ba-hint">Hover</span></div>
+      <div class="ba-card" data-toggle><img class="ba-before" src="images/before-after/4-1a.jpg" alt="Brisbane home before"><img class="ba-after" src="images/before-after/4-1b.jpg" alt="Brisbane home after install"><span class="ba-tag">Trade</span><span class="ba-hint">Hover</span></div>
+      <div class="ba-card" data-toggle><img class="ba-before" src="images/before-after/4-2a.jpg" alt="Brisbane home before"><img class="ba-after" src="images/before-after/4-2b.jpg" alt="Brisbane home after install"><span class="ba-tag">Gold Coast</span><span class="ba-hint">Hover</span></div>
+      <div class="ba-card" data-toggle><img class="ba-before" src="images/before-after/4-3a.jpg" alt="Brisbane home before"><img class="ba-after" src="images/before-after/4-3b.jpg" alt="Brisbane home after install"><span class="ba-tag">Investment</span><span class="ba-hint">Hover</span></div>
+      <div class="ba-card" data-toggle><img class="ba-before" src="images/before-after/5-1a.jpg" alt="Brisbane home before"><img class="ba-after" src="images/before-after/5-1b.jpg" alt="Brisbane home after install"><span class="ba-tag">Apartment</span><span class="ba-hint">Hover</span></div>
+      <div class="ba-card" data-toggle><img class="ba-before" src="images/before-after/5-2a.jpg" alt="Brisbane home before"><img class="ba-after" src="images/before-after/5-2b.jpg" alt="Brisbane home after install"><span class="ba-tag">Queenslander</span><span class="ba-hint">Hover</span></div>
+      <div class="ba-card" data-toggle><img class="ba-before" src="images/before-after/5-3a.jpg" alt="Brisbane home before"><img class="ba-after" src="images/before-after/5-3b.jpg" alt="Brisbane home after install"><span class="ba-tag">New Build</span><span class="ba-hint">Hover</span></div>
     </div>
-    <p style="margin-top:24px;font-size:0.85em;color:var(--oztop-grey-text);font-style:italic;">Gallery will be populated from the Oztop Asset Library after photo upload. Replace placeholders with BAS Before/After Slider Pro shortcode or paired &lt;img&gt; tags.</p>
+    <div class="gallery-meta">
+      <div class="count">19 <span>verified installs · 2024&ndash;2026</span></div>
+      <a href="#enquiry" class="btn-outline">Get the same install →</a>
+    </div>
   </section>
 
   <!-- FAQ -->
@@ -492,8 +729,8 @@
     </form>
   </section>
 
-  <!-- Final stripe — 跟开头呼应 -->
-  <div class="stripe">
+  <!-- Final stripe — 沉稳信任栏 (不闪) -->
+  <div class="stripe stripe-final">
     Servicing <strong>Brisbane &amp; Gold Coast</strong> within a 100km radius &nbsp;·&nbsp; ABN-registered &nbsp;·&nbsp; Licensed &amp; Insured
   </div>
 
@@ -509,6 +746,15 @@
     f('utm-campaign', qs.get('utm_campaign'));
     f('utm-content',  qs.get('utm_content'));
     f('referrer',     document.referrer);
+  })();
+
+  /* Mobile: tap to toggle BEFORE/AFTER on gallery cards (touch devices have no :hover) */
+  (function() {
+    document.querySelectorAll('.oztop-lp .ba-card[data-toggle]').forEach(function(card) {
+      card.addEventListener('click', function() {
+        card.classList.toggle('show-after');
+      });
+    });
   })();
 </script>
 
