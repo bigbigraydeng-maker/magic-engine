@@ -7,6 +7,12 @@
       "runtimeArgs": ["run", "dev"],
       "port": 3001,
       "autoPort": false
+    },
+    {
+      "name": "walnut-lp",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8765", "--directory", "docs/clients/oztop/landing-pages/2026-06-10-walnut-clearance"],
+      "port": 8765
     }
   ]
 }

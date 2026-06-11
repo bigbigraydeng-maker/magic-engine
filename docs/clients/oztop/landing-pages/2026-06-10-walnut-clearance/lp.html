@@ -1,314 +1,563 @@
 <!--
-  Oztop Walnut Engineered Timber 清仓 Landing Page
+  Oztop Walnut Engineered Timber Clearance Landing Page (v2)
   目标 URL: https://oztopbuildingsupplies.com.au/walnut-clearance/
-  创建日期: 2026-06-10
-  PM 拍板: 建在客户域名 (CLAUDE.md 红线 - ME 域名禁止承载客户对外页)
-  发布路径: blog_posts.id → POST /api/clients/[id]/cms/publish-wordpress target_type=page
-
-  设计原则:
+  创建日期: 2026-06-11
+  设计参考: Oztop 官网 oztopbuildingsupplies.com.au (白底 / 简约 / 商务 Builder/Trade 调)
+  PM 拍板:
+  - 跟官网完全同调 (white-led, 大量留白, 黑字 + 少量金色 accent)
   - 不出现 Big Panda 字样 (PM 强约束 - 独立 Oztop 品牌)
   - $35.50/m² vs 零售 $55-70/m² 价格主张
   - Brisbane + Gold Coast 100km 服务区
   - Same-day quote / 2-week install / Licensed & Insured
-  - 表单 → Webhook → ME /api/clients/[id]/leads → client_lead_submissions 表
-  - Hero 区域留 before/after slider 占位 (素材接入后填)
+  - 表单 action 等 PM 与客户确认收件方式 (Formspree / CF7 / Zapier 三选一)
+  - Hero 区域留 before/after slider 占位 (素材接入 ME Asset Library 后填)
 -->
 
 <style>
-  .walnut-lp { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; color: #1a1a1a; line-height: 1.6; max-width: 100%; }
-  .walnut-lp .hero { background: linear-gradient(135deg, #2a1810 0%, #4a2c1c 100%); color: #fff; padding: 60px 24px; text-align: center; }
-  .walnut-lp .hero h1 { font-size: 2.4em; margin: 0 0 12px; font-weight: 800; letter-spacing: -0.02em; }
-  .walnut-lp .hero .sub { font-size: 1.2em; opacity: 0.9; margin-bottom: 24px; }
-  .walnut-lp .hero .price { font-size: 3em; font-weight: 800; color: #d4a574; margin: 16px 0; }
-  .walnut-lp .hero .price small { font-size: 0.4em; color: #fff; opacity: 0.8; }
-  .walnut-lp .cta-btn { display: inline-block; background: #d4a574; color: #1a1a1a; padding: 16px 40px; border-radius: 6px; text-decoration: none; font-weight: 700; font-size: 1.1em; margin-top: 16px; }
-  .walnut-lp .cta-btn:hover { background: #c49560; }
-  .walnut-lp .trust-row { display: flex; justify-content: center; flex-wrap: wrap; gap: 24px; margin-top: 32px; font-size: 0.95em; }
-  .walnut-lp .trust-row span { display: flex; align-items: center; gap: 6px; }
-  .walnut-lp .section { padding: 56px 24px; max-width: 960px; margin: 0 auto; }
-  .walnut-lp .section h2 { font-size: 2em; margin: 0 0 24px; font-weight: 700; }
-  .walnut-lp .compare-table { width: 100%; border-collapse: collapse; margin: 24px 0; }
-  .walnut-lp .compare-table th, .walnut-lp .compare-table td { border: 1px solid #e0e0e0; padding: 14px; text-align: left; }
-  .walnut-lp .compare-table th { background: #f5f5f5; font-weight: 700; }
-  .walnut-lp .compare-table .winner { background: #faf4ea; font-weight: 600; }
-  .walnut-lp .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 24px; }
-  .walnut-lp .gallery .pair { background: #faf4ea; padding: 16px; border-radius: 8px; }
-  .walnut-lp .gallery .pair-label { font-weight: 600; margin-bottom: 8px; color: #4a2c1c; }
-  .walnut-lp .gallery .ba-placeholder { background: #d4a574; height: 200px; display: flex; align-items: center; justify-content: center; color: #fff; border-radius: 4px; }
-  .walnut-lp .faq { margin: 24px 0; }
-  .walnut-lp .faq-item { background: #faf4ea; border-radius: 8px; padding: 20px; margin-bottom: 12px; }
-  .walnut-lp .faq-q { font-weight: 700; margin-bottom: 8px; }
-  .walnut-lp .form-section { background: #2a1810; color: #fff; padding: 56px 24px; }
-  .walnut-lp .form-section h2 { color: #fff; }
-  .walnut-lp form { max-width: 600px; margin: 0 auto; }
-  .walnut-lp .form-row { margin-bottom: 16px; }
-  .walnut-lp .form-row label { display: block; margin-bottom: 6px; font-weight: 600; }
-  .walnut-lp .form-row input, .walnut-lp .form-row select, .walnut-lp .form-row textarea { width: 100%; padding: 12px; border-radius: 4px; border: 1px solid #ddd; font-size: 1em; }
-  .walnut-lp .form-row textarea { resize: vertical; min-height: 80px; }
-  .walnut-lp .form-submit { background: #d4a574; color: #1a1a1a; padding: 16px 32px; border: none; border-radius: 6px; font-size: 1.1em; font-weight: 700; cursor: pointer; width: 100%; margin-top: 12px; }
-  .walnut-lp .form-submit:hover { background: #c49560; }
-  .walnut-lp .form-foot { text-align: center; margin-top: 12px; font-size: 0.85em; opacity: 0.75; }
-  .walnut-lp .urgency-bar { background: #d4a574; color: #1a1a1a; text-align: center; padding: 12px; font-weight: 700; }
-  @media (max-width: 600px) {
-    .walnut-lp .hero h1 { font-size: 1.7em; }
-    .walnut-lp .hero .price { font-size: 2.2em; }
-    .walnut-lp .section h2 { font-size: 1.5em; }
+  /* Oztop 官网风格变量 */
+  .oztop-lp {
+    --oztop-black: #1a1a1a;
+    --oztop-grey-text: #555;
+    --oztop-grey-light: #f5f5f5;
+    --oztop-grey-line: #e5e5e5;
+    --oztop-accent: #b8945a;          /* 金棕色, 比之前 #d4a574 更沉稳, 跟官网调一致 */
+    --oztop-walnut: #5c3a1f;          /* 真实胡桃色, 仅 strong text 用 */
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    color: var(--oztop-black);
+    line-height: 1.65;
+    max-width: 100%;
+    background: #fff;
+  }
+  .oztop-lp section { padding: 80px 24px; max-width: 1200px; margin: 0 auto; }
+  .oztop-lp h1, .oztop-lp h2, .oztop-lp h3 { font-weight: 400; letter-spacing: -0.02em; color: var(--oztop-black); }
+  .oztop-lp h1 { font-size: 2.6em; line-height: 1.15; margin: 0 0 24px; }
+  .oztop-lp h2 { font-size: 2em; line-height: 1.2; margin: 0 0 32px; }
+  .oztop-lp h3 { font-size: 1.3em; margin: 0 0 12px; }
+  .oztop-lp .eyebrow {
+    text-transform: uppercase; letter-spacing: 0.2em; font-size: 0.78em;
+    color: var(--oztop-accent); font-weight: 500; margin-bottom: 16px; display: inline-block;
+  }
+  .oztop-lp p { color: var(--oztop-grey-text); margin: 0 0 16px; }
+
+  /* CTA */
+  .oztop-lp .btn-primary {
+    display: inline-block; background: var(--oztop-black); color: #fff;
+    padding: 14px 36px; border-radius: 0; text-decoration: none;
+    font-weight: 500; font-size: 0.95em; letter-spacing: 0.04em;
+    border: 1px solid var(--oztop-black); transition: all 0.2s;
+  }
+  .oztop-lp .btn-primary:hover { background: transparent; color: var(--oztop-black); }
+  .oztop-lp .btn-outline {
+    display: inline-block; background: transparent; color: var(--oztop-black);
+    padding: 14px 36px; border: 1px solid var(--oztop-black);
+    text-decoration: none; font-weight: 500; font-size: 0.95em; letter-spacing: 0.04em;
+  }
+
+  /* Hero — 大幅 Walnut 木地板特写图 + 标题居左 (跟官网调一致) */
+  .oztop-lp .hero {
+    background: #fafaf8;
+    border-bottom: 1px solid var(--oztop-grey-line);
+    padding: 80px 24px;
+  }
+  .oztop-lp .hero-wrap {
+    max-width: 1200px; margin: 0 auto;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center;
+  }
+  .oztop-lp .hero-left h1 strong { color: var(--oztop-walnut); font-weight: 500; }
+  .oztop-lp .hero-left .lede { font-size: 1.1em; max-width: 460px; }
+  .oztop-lp .hero-right {
+    background: #2a1810 url('https://images.unsplash.com/photo-1503602642458-232111445657?auto=format&fit=crop&w=900&q=80') center/cover;
+    min-height: 460px; border-radius: 2px;
+    position: relative;
+  }
+  .oztop-lp .hero-right::after {
+    content: "Walnut Engineered Timber · 15mm";
+    position: absolute; bottom: 24px; left: 24px;
+    background: rgba(255,255,255,0.95); color: var(--oztop-black);
+    padding: 10px 18px; font-size: 0.85em; letter-spacing: 0.05em;
+  }
+  .oztop-lp .hero-meta {
+    margin-top: 32px; display: flex; flex-wrap: wrap; gap: 24px;
+    padding-top: 24px; border-top: 1px solid var(--oztop-grey-line);
+    font-size: 0.9em; color: var(--oztop-grey-text);
+  }
+  .oztop-lp .hero-meta span { display: inline-flex; align-items: center; gap: 8px; }
+
+  /* Banner stripe — 跟官网 "Where excellence comes to life" 风格 */
+  .oztop-lp .stripe {
+    background: var(--oztop-black); color: #fff;
+    padding: 18px 24px; text-align: center;
+    font-size: 0.95em; letter-spacing: 0.08em;
+  }
+  .oztop-lp .stripe strong { color: var(--oztop-accent); font-weight: 500; }
+
+  /* Why Oztop — 3 列 (跟官网 Primary Services 风格) */
+  .oztop-lp .three-col {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 48px;
+  }
+  .oztop-lp .three-col .col {
+    padding: 32px 0; border-top: 2px solid var(--oztop-black);
+  }
+  .oztop-lp .three-col .col .num {
+    font-size: 0.85em; color: var(--oztop-accent); font-weight: 500;
+    margin-bottom: 16px; letter-spacing: 0.1em;
+  }
+
+  /* Comparison Table — 极简表格 (跟官网 Hybrid/Laminate/Engineered/Vinyl 对比表风格) */
+  .oztop-lp .compare {
+    width: 100%; border-collapse: collapse; margin: 32px 0;
+  }
+  .oztop-lp .compare th, .oztop-lp .compare td {
+    padding: 18px 16px; text-align: left;
+    border-bottom: 1px solid var(--oztop-grey-line);
+    font-size: 0.95em;
+  }
+  .oztop-lp .compare th {
+    background: var(--oztop-grey-light); font-weight: 500;
+    color: var(--oztop-black); letter-spacing: 0.02em;
+  }
+  .oztop-lp .compare .oztop-col { background: #fafaf8; font-weight: 500; }
+  .oztop-lp .compare .price-big { font-size: 1.3em; color: var(--oztop-walnut); }
+
+  /* Variants grid */
+  .oztop-lp .variants {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 32px;
+  }
+  .oztop-lp .variant {
+    border: 1px solid var(--oztop-grey-line); padding: 32px 24px;
+    transition: border-color 0.2s;
+  }
+  .oztop-lp .variant:hover { border-color: var(--oztop-black); }
+  .oztop-lp .variant .v-price {
+    font-size: 1.8em; color: var(--oztop-walnut); margin: 16px 0 4px;
+  }
+  .oztop-lp .variant .v-sub { font-size: 0.85em; color: var(--oztop-grey-text); margin-bottom: 16px; }
+  .oztop-lp .variant ul { padding: 0; list-style: none; font-size: 0.9em; color: var(--oztop-grey-text); }
+  .oztop-lp .variant li { padding: 6px 0; border-bottom: 1px solid var(--oztop-grey-line); }
+  .oztop-lp .variant li:last-child { border-bottom: 0; }
+
+  /* Gallery — Recent Projects 风格 (跟官网调) */
+  .oztop-lp .gallery {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 32px;
+  }
+  .oztop-lp .gallery .item {
+    aspect-ratio: 4/3; background: var(--oztop-grey-light);
+    position: relative; overflow: hidden;
+  }
+  .oztop-lp .gallery .item .ba-placeholder {
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--oztop-grey-text); font-size: 0.85em; letter-spacing: 0.05em;
+  }
+  .oztop-lp .gallery .item .label {
+    position: absolute; bottom: 12px; left: 12px;
+    background: rgba(255,255,255,0.95); color: var(--oztop-black);
+    padding: 6px 12px; font-size: 0.8em; letter-spacing: 0.05em;
+  }
+
+  /* Brand trust strip — 跟官网 Karndean/Caroma/Bremworth logo 栏一致 */
+  .oztop-lp .brand-strip {
+    background: var(--oztop-grey-light);
+    padding: 48px 24px; text-align: center;
+  }
+  .oztop-lp .brand-strip .eyebrow { margin-bottom: 24px; }
+  .oztop-lp .brand-logos {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 48px;
+    color: var(--oztop-grey-text); font-size: 1.1em; letter-spacing: 0.05em;
+  }
+
+  /* FAQ */
+  .oztop-lp .faq-item {
+    border-bottom: 1px solid var(--oztop-grey-line);
+    padding: 24px 0;
+  }
+  .oztop-lp .faq-q {
+    font-weight: 500; color: var(--oztop-black); margin-bottom: 8px;
+    font-size: 1.05em;
+  }
+  .oztop-lp .faq-a { color: var(--oztop-grey-text); font-size: 0.95em; }
+
+  /* Contact Form — 跟官网 Contact Form 7 风格一致 */
+  .oztop-lp .form-section { background: var(--oztop-grey-light); padding: 80px 24px; }
+  .oztop-lp form { max-width: 720px; margin: 0 auto; background: #fff; padding: 48px; }
+  .oztop-lp .form-row { margin-bottom: 20px; }
+  .oztop-lp .form-row.two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .oztop-lp .form-row label {
+    display: block; margin-bottom: 8px; font-size: 0.85em;
+    color: var(--oztop-grey-text); letter-spacing: 0.04em; font-weight: 500;
+  }
+  .oztop-lp .form-row label .req { color: var(--oztop-walnut); }
+  .oztop-lp .form-row input,
+  .oztop-lp .form-row select,
+  .oztop-lp .form-row textarea {
+    width: 100%; padding: 12px 14px; border: 1px solid var(--oztop-grey-line);
+    font-size: 0.95em; font-family: inherit; background: #fff;
+    transition: border-color 0.2s;
+  }
+  .oztop-lp .form-row input:focus,
+  .oztop-lp .form-row select:focus,
+  .oztop-lp .form-row textarea:focus {
+    outline: none; border-color: var(--oztop-black);
+  }
+  .oztop-lp .form-row textarea { resize: vertical; min-height: 100px; }
+  .oztop-lp .form-submit {
+    background: var(--oztop-black); color: #fff;
+    padding: 16px 48px; border: none; font-size: 0.95em;
+    font-weight: 500; letter-spacing: 0.08em; cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  .oztop-lp .form-submit:hover { opacity: 0.85; }
+  .oztop-lp .form-foot {
+    text-align: center; margin-top: 20px; font-size: 0.82em;
+    color: var(--oztop-grey-text);
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .oztop-lp .hero-wrap { grid-template-columns: 1fr; gap: 32px; }
+    .oztop-lp .hero-right { min-height: 320px; }
+    .oztop-lp .three-col,
+    .oztop-lp .variants,
+    .oztop-lp .gallery,
+    .oztop-lp .form-row.two { grid-template-columns: 1fr; }
+    .oztop-lp h1 { font-size: 1.9em; }
+    .oztop-lp h2 { font-size: 1.5em; }
+    .oztop-lp section { padding: 56px 20px; }
+    .oztop-lp form { padding: 32px 20px; }
   }
 </style>
 
-<div class="walnut-lp">
+<div class="oztop-lp">
 
-  <!-- Urgency Bar -->
-  <div class="urgency-bar">⏰ Clearance ends 30 June · 2,000m² remaining · Brisbane & Gold Coast only</div>
+  <!-- Top stripe — 跟官网 "Where excellence comes to life" 风格一致 -->
+  <div class="stripe">
+    Clearance pricing ends <strong>30 June</strong> &nbsp;·&nbsp; 2,000m² in stock at our Slacks Creek warehouse
+  </div>
 
   <!-- Hero -->
   <section class="hero">
-    <h1>Elegant Walnut Engineered Timber Clearance</h1>
-    <p class="sub">15mm premium walnut · Same retail-chain quality, direct from our warehouse</p>
-    <div class="price">$35.50<small>/m²</small></div>
-    <p class="sub">Retail chains charge <strong>$55–70/m²</strong> for the same product</p>
-    <a href="#enquiry" class="cta-btn">Get Same-Day Quote →</a>
-    <div class="trust-row">
-      <span>✅ Licensed &amp; Insured</span>
-      <span>📍 Brisbane &amp; Gold Coast (100km)</span>
-      <span>🚚 2-Week Install</span>
-      <span>📞 07 3416 6458</span>
+    <div class="hero-wrap">
+      <div class="hero-left">
+        <span class="eyebrow">Walnut Clearance · Brisbane</span>
+        <h1>Premium <strong>Walnut Engineered Timber</strong> at warehouse pricing.</h1>
+        <p class="lede">15mm engineered walnut from our Slacks Creek warehouse — same product retail chains stock at $55–70/m², now <strong>$35.50/m²</strong> while clearance stock lasts.</p>
+        <p>
+          <a href="#enquiry" class="btn-primary">Request a Quote</a>
+          &nbsp;&nbsp;
+          <a href="tel:0734166458" class="btn-outline">07 3416 6458</a>
+        </p>
+        <div class="hero-meta">
+          <span>Licensed &amp; Insured installer</span>
+          <span>·</span>
+          <span>Same-day quote</span>
+          <span>·</span>
+          <span>2-week install from deposit</span>
+          <span>·</span>
+          <span>Brisbane + Gold Coast (100km)</span>
+        </div>
+      </div>
+      <div class="hero-right"></div>
     </div>
   </section>
 
-  <!-- Before/After Gallery (素材接入后填充) -->
-  <section class="section">
-    <h2>Real Brisbane Installations — Before &amp; After</h2>
-    <p>Below are 19 actual transformations from our 2024–2026 Brisbane projects. No stock photos. No staging. Just real Queensland homes.</p>
-    <div class="gallery">
-      <div class="pair">
-        <div class="pair-label">Project 1 — Pair 1 (Living Room)</div>
-        <div class="ba-placeholder">[BEFORE/AFTER slider — pair_id placeholder]</div>
+  <!-- Why Oztop — 3 列 (Builder/Trade 商务调) -->
+  <section>
+    <span class="eyebrow">Why buy from us</span>
+    <h2>Mid-1990s flooring specialist. Direct supply, direct install.</h2>
+    <div class="three-col">
+      <div class="col">
+        <div class="num">01</div>
+        <h3>Warehouse-direct pricing</h3>
+        <p>We over-ordered 2,000m² of 15mm Walnut Engineered for a builder project that scaled back. Rather than hold it another year, we're clearing at our cost. Same product. Same warranty. Just our excess inventory.</p>
       </div>
-      <div class="pair">
-        <div class="pair-label">Project 1 — Pair 2 (Kitchen)</div>
-        <div class="ba-placeholder">[BEFORE/AFTER slider — pair_id placeholder]</div>
+      <div class="col">
+        <div class="num">02</div>
+        <h3>Licensed install team</h3>
+        <p>Most clearance customers choose supply + install. Our team is Oztop-employed, fully insured, and works alongside the Recent Projects portfolio we've delivered for Buildercap, Greyburn, McCarthy Homes and others.</p>
       </div>
-      <div class="pair">
-        <div class="pair-label">Project 2 — Pair 1 (Open Plan)</div>
-        <div class="ba-placeholder">[BEFORE/AFTER slider — pair_id placeholder]</div>
+      <div class="col">
+        <div class="num">03</div>
+        <h3>Walk-in showroom · Slacks Creek</h3>
+        <p>25 minutes from Brisbane CBD. Hold a real plank in your hands today. No appointment needed. Take a sample home, see it under your own light, decide on your own time.</p>
       </div>
     </div>
-    <p style="text-align:center;margin-top:24px;"><em>素材接入后此处自动渲染 19 对 before/after, ME client_assets API 提供 → BAS Slider Pro 渲染</em></p>
   </section>
 
-  <!-- Price Comparison -->
-  <section class="section">
-    <h2>Why $35.50 instead of $55–70?</h2>
-    <p>Same 15mm thickness. Same European engineering. Same 25-year structural warranty. The only difference is where you buy it.</p>
-    <table class="compare-table">
+  <!-- Brand trust strip — 复用官网已有的 brand logo trust -->
+  <section class="brand-strip">
+    <span class="eyebrow">Trusted suppliers we stock</span>
+    <div class="brand-logos">
+      <span>Karndean</span>
+      <span>Godfrey Hirst</span>
+      <span>Bremworth</span>
+      <span>Caroma</span>
+      <span>Fienza</span>
+      <span>Stoneworld</span>
+      <span>DIY Tiles</span>
+      <span>Preference Floors</span>
+    </div>
+  </section>
+
+  <!-- Comparison Table — 跟官网 Hybrid/Laminate/Engineered/Vinyl 对比表同结构 -->
+  <section>
+    <span class="eyebrow">Clearance vs Retail</span>
+    <h2>What you're actually buying.</h2>
+    <p style="max-width:680px;">The product spec is identical to what big-box retailers stock. The difference is supply chain — we hold our own warehouse, we don't pay retail markup, and we don't pad the install lead-time.</p>
+    <table class="compare">
       <thead>
         <tr>
-          <th>What you get</th>
-          <th>Retail chain (Bunnings / Beaumont)</th>
-          <th class="winner">Oztop (this clearance)</th>
+          <th style="width:36%;"></th>
+          <th>Retail chains</th>
+          <th class="oztop-col">Oztop Clearance</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td>Per-m² price (15mm Walnut Engineered)</td>
-          <td>$55 – $70 /m²</td>
-          <td class="winner">$35.50 /m²</td>
+          <td>15mm Walnut Engineered, per m²</td>
+          <td>$55 &ndash; $70</td>
+          <td class="oztop-col"><span class="price-big">$35.50</span></td>
         </tr>
         <tr>
           <td>Stock holding</td>
           <td>Order in, 4–6 weeks</td>
-          <td class="winner">2,000m² in Slacks Creek warehouse</td>
+          <td class="oztop-col">2,000m² in Slacks Creek</td>
         </tr>
         <tr>
           <td>Quote turnaround</td>
           <td>3–5 business days</td>
-          <td class="winner">Same day (call before 4pm)</td>
+          <td class="oztop-col">Same day (before 4pm)</td>
         </tr>
         <tr>
           <td>Install lead-time</td>
           <td>4–8 weeks after deposit</td>
-          <td class="winner">2 weeks after deposit</td>
+          <td class="oztop-col">2 weeks after deposit</td>
         </tr>
         <tr>
-          <td>Licensed &amp; Insured installation</td>
-          <td>Subcontracted to third party</td>
-          <td class="winner">Oztop-employed team, full insurance cover</td>
+          <td>Install team</td>
+          <td>Subcontracted</td>
+          <td class="oztop-col">Oztop-employed, insured</td>
         </tr>
         <tr>
-          <td>Sample available</td>
-          <td>Email request, 2–3 days</td>
-          <td class="winner">Walk into Slacks Creek showroom today</td>
+          <td>Sample access</td>
+          <td>Mail-out, 2–3 days</td>
+          <td class="oztop-col">Walk-in showroom today</td>
         </tr>
       </tbody>
     </table>
-    <p><strong>How we do it:</strong> Oztop warehouses our own stock — direct from manufacturer to your floor. No retail chain markup. No middleman. No guessing games on price.</p>
   </section>
 
   <!-- 3 Variants -->
-  <section class="section">
-    <h2>Three Walnut Variants on Clearance</h2>
-    <table class="compare-table">
-      <thead>
-        <tr>
-          <th>Variant</th>
-          <th>Thickness</th>
-          <th>Best for</th>
-          <th>Clearance Price</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><strong>Walnut Engineered (Premium)</strong></td>
-          <td>15mm</td>
-          <td>Living + bedrooms, owner-occupier homes</td>
-          <td>$35.50 /m²</td>
-        </tr>
-        <tr>
-          <td><strong>Walnut Hybrid SPC</strong></td>
-          <td>6.5mm</td>
-          <td>Rental properties, high-traffic, kitchens</td>
-          <td>$28.50 /m²</td>
-        </tr>
-        <tr>
-          <td><strong>Walnut Laminate</strong></td>
-          <td>12mm</td>
-          <td>Budget renovations, investment properties</td>
-          <td>$22.50 /m²</td>
-        </tr>
-      </tbody>
-    </table>
-  </section>
-
-  <!-- FAQ -->
-  <section class="section">
-    <h2>Common Questions</h2>
-    <div class="faq">
-      <div class="faq-item">
-        <div class="faq-q">Q: Is the quote valid after the clearance ends?</div>
-        <div>Yes — your quote is locked for 30 days from issue. As long as you book your install during that window, the $35.50/m² rate holds even if our public clearance ends 30 June.</div>
+  <section>
+    <span class="eyebrow">Three options on clearance</span>
+    <h2>Match the walnut to the room.</h2>
+    <div class="variants">
+      <div class="variant">
+        <span class="eyebrow">Premium · 15mm</span>
+        <h3>Walnut Engineered</h3>
+        <div class="v-price">$35.50<span style="font-size:0.5em;color:var(--oztop-grey-text);">/m²</span></div>
+        <div class="v-sub">Best for owner-occupier living &amp; bedrooms</div>
+        <ul>
+          <li>Multi-layer plywood core</li>
+          <li>Natural timber veneer wear layer</li>
+          <li>Floating or glue-down install</li>
+          <li>25-year structural warranty</li>
+        </ul>
       </div>
-      <div class="faq-item">
-        <div class="faq-q">Q: Do you install or just supply?</div>
-        <div>Both. We're Licensed &amp; Insured installers. Most clearance customers choose supply + install (one team, one accountability). Supply-only is also fine if you have your own trades.</div>
+      <div class="variant">
+        <span class="eyebrow">High-traffic · 6.5mm</span>
+        <h3>Walnut Hybrid SPC</h3>
+        <div class="v-price">$28.50<span style="font-size:0.5em;color:var(--oztop-grey-text);">/m²</span></div>
+        <div class="v-sub">Best for rentals, kitchens, wet areas</div>
+        <ul>
+          <li>Stone-plastic composite core</li>
+          <li>100% waterproof rated</li>
+          <li>Floating click-lock install</li>
+          <li>20-year structural warranty</li>
+        </ul>
       </div>
-      <div class="faq-item">
-        <div class="faq-q">Q: What's the catch with the price?</div>
-        <div>No catch. We over-ordered 2,000m² for a builder project that scaled back. Rather than warehouse it for another year, we're clearing it at our cost. Same product, same warranty, same installation team — just our excess inventory.</div>
-      </div>
-      <div class="faq-item">
-        <div class="faq-q">Q: Can I see a sample before I commit?</div>
-        <div>Yes. Walk into our Slacks Creek showroom (25 min from Brisbane CBD) and we'll hand you a real plank. No appointment needed. Or we can post a sample if you can't make it in.</div>
-      </div>
-      <div class="faq-item">
-        <div class="faq-q">Q: How much area is realistic for the $35.50 rate?</div>
-        <div>Minimum 30m². Above that, we hold the rate up to 200m². Larger projects, talk to us — we'll quote at cost on volume above 200m².</div>
+      <div class="variant">
+        <span class="eyebrow">Budget · 12mm</span>
+        <h3>Walnut Laminate</h3>
+        <div class="v-price">$22.50<span style="font-size:0.5em;color:var(--oztop-grey-text);">/m²</span></div>
+        <div class="v-sub">Best for investment properties, budget renos</div>
+        <ul>
+          <li>Compressed wood fibre core</li>
+          <li>Artificial protective wear layer</li>
+          <li>Floating click-lock install</li>
+          <li>15-year structural warranty</li>
+        </ul>
       </div>
     </div>
   </section>
 
-  <!-- Lead Form -->
+  <!-- Gallery — Recent Brisbane Installs (素材接入 ME Asset Library 后填) -->
+  <section>
+    <span class="eyebrow">Recent Brisbane installs</span>
+    <h2>19 transformations from 2024–2026.</h2>
+    <p style="max-width:680px;">No stock photography. No staging. Just photographs of work completed by our team in Brisbane homes — kitchens, living rooms, open-plan extensions. Slide the divider on any panel to see the before.</p>
+    <div class="gallery">
+      <div class="item">
+        <div class="ba-placeholder">[Before / After — Living Room]</div>
+        <div class="label">Brisbane install · 2025</div>
+      </div>
+      <div class="item">
+        <div class="ba-placeholder">[Before / After — Kitchen]</div>
+        <div class="label">Gold Coast install · 2025</div>
+      </div>
+      <div class="item">
+        <div class="ba-placeholder">[Before / After — Open Plan]</div>
+        <div class="label">Logan install · 2024</div>
+      </div>
+    </div>
+    <p style="margin-top:24px;font-size:0.85em;color:var(--oztop-grey-text);font-style:italic;">Gallery will be populated from the Oztop Asset Library after photo upload. Replace placeholders with BAS Before/After Slider Pro shortcode or paired &lt;img&gt; tags.</p>
+  </section>
+
+  <!-- FAQ -->
+  <section>
+    <span class="eyebrow">Common questions</span>
+    <h2>What buyers usually ask.</h2>
+    <div style="max-width:860px;">
+      <div class="faq-item">
+        <div class="faq-q">Is the quote valid after the 30 June clearance ends?</div>
+        <div class="faq-a">Yes — your quote is locked for 30 days from the day we issue it. If we quote you on 28 June, the $35.50/m² rate holds until 28 July, regardless of when our public clearance ends.</div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">Do you install, or supply only?</div>
+        <div class="faq-a">Both. Our installation team is Oztop-employed and fully insured. Supply-only is available if you have your own trades.</div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">Why is the price below retail?</div>
+        <div class="faq-a">We over-ordered 2,000m² of 15mm Walnut Engineered for a builder project that scaled back. The product, warranty and installation team are identical to anything else we sell — this is our excess inventory cleared at warehouse cost.</div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">Can I see a sample before committing?</div>
+        <div class="faq-a">Yes. Walk into our Slacks Creek showroom (25 minutes from Brisbane CBD), or we'll post a sample to you if that's easier.</div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">What's the minimum area for the $35.50 rate?</div>
+        <div class="faq-a">Minimum 30m². We hold the clearance rate up to 200m². For projects above 200m², contact us and we'll quote at cost on the volume above that threshold.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Lead Form — 跟官网 Contact Form 7 字段对齐 -->
   <section class="form-section" id="enquiry">
-    <h2 style="text-align:center;">Get Your Same-Day Quote</h2>
-    <p style="text-align:center;max-width:600px;margin:0 auto 32px;">Drop your floor size and we'll send you a fixed number today. 30-day quote validity. No phone pressure.</p>
-    <form id="walnut-lead-form" action="https://magicengine.com.au/api/clients/d5c98811-1c1d-4ded-bdf0-4cefec6afb84/leads" method="POST">
+    <div style="max-width:720px;margin:0 auto;text-align:center;">
+      <span class="eyebrow">Request a Quote</span>
+      <h2>Send us your floor size. We'll send back a number today.</h2>
+      <p style="margin-bottom:32px;">Quote held for 30 days. No phone pressure. Prefer to call? <strong>07 3416 6458</strong>, Monday to Saturday 9am–5pm Brisbane.</p>
+    </div>
+    <!--
+      [PM TODO] 表单 action 等明天与客户确认收件方式后填:
+        - 方案 A (推荐): Formspree → action="https://formspree.io/f/<your-id>"
+        - 方案 B: WordPress Contact Form 7 → 删除整个 <form>, 用 [contact-form-7 id="XX"] shortcode 替换
+        - 方案 C: Zapier webhook → action="https://hooks.zapier.com/hooks/catch/XXX/YYY/"
+      字段命名参考了官网 Contact Form 7 (Full Name First/Last, Phone, Email, Suburb, Post Code, Budget Range, Message)
+    -->
+    <form id="walnut-lead-form" action="REPLACE_WITH_FORMSPREE_OR_CF7" method="POST">
       <input type="hidden" name="source_page" value="walnut-clearance" />
-      <input type="hidden" name="utm_source" value="" id="utm-source" />
-      <input type="hidden" name="utm_medium" value="" id="utm-medium" />
-      <input type="hidden" name="utm_campaign" value="" id="utm-campaign" />
-      <input type="hidden" name="utm_content" value="" id="utm-content" />
-      <input type="hidden" name="referrer" value="" id="referrer" />
-      <div class="form-row">
-        <label>Your name *</label>
-        <input name="name" required placeholder="e.g. Sarah Tan" />
+      <input type="hidden" name="utm_source" id="utm-source" />
+      <input type="hidden" name="utm_medium" id="utm-medium" />
+      <input type="hidden" name="utm_campaign" id="utm-campaign" />
+      <input type="hidden" name="utm_content" id="utm-content" />
+      <input type="hidden" name="referrer" id="referrer" />
+
+      <div class="form-row two">
+        <div>
+          <label>First Name <span class="req">*</span></label>
+          <input name="first_name" required placeholder="" />
+        </div>
+        <div>
+          <label>Last Name <span class="req">*</span></label>
+          <input name="last_name" required placeholder="" />
+        </div>
+      </div>
+      <div class="form-row two">
+        <div>
+          <label>Phone <span class="req">*</span></label>
+          <input name="phone" required type="tel" placeholder="04xx xxx xxx" />
+        </div>
+        <div>
+          <label>Email</label>
+          <input name="email" type="email" placeholder="" />
+        </div>
+      </div>
+      <div class="form-row two">
+        <div>
+          <label>Suburb</label>
+          <input name="suburb" placeholder="e.g. Logan, Sunnybank" />
+        </div>
+        <div>
+          <label>Post Code</label>
+          <input name="post_code" placeholder="" />
+        </div>
       </div>
       <div class="form-row">
-        <label>Phone *</label>
-        <input name="phone" required type="tel" placeholder="04xx xxx xxx" />
-      </div>
-      <div class="form-row">
-        <label>Email (optional but recommended for written quote)</label>
-        <input name="email" type="email" placeholder="sarah@example.com" />
-      </div>
-      <div class="form-row">
-        <label>Which Walnut variant are you considering? *</label>
+        <label>Which Walnut variant interests you <span class="req">*</span></label>
         <select name="product_interest" required>
-          <option value="">-- Select one --</option>
-          <option value="walnut_engineered">Walnut Engineered ($35.50/m², 15mm Premium)</option>
-          <option value="walnut_spc">Walnut Hybrid SPC ($28.50/m², 6.5mm, rentals)</option>
-          <option value="walnut_laminate">Walnut Laminate ($22.50/m², 12mm, budget)</option>
-          <option value="all">Show me all three side by side</option>
+          <option value="">— Select one —</option>
+          <option value="walnut_engineered">Walnut Engineered ($35.50/m² · 15mm Premium)</option>
+          <option value="walnut_spc">Walnut Hybrid SPC ($28.50/m² · 6.5mm · rentals &amp; wet areas)</option>
+          <option value="walnut_laminate">Walnut Laminate ($22.50/m² · 12mm · budget)</option>
+          <option value="all">Show me all three side-by-side</option>
         </select>
       </div>
-      <div class="form-row">
-        <label>Approximate floor area (m²)</label>
-        <input name="area_sqm" type="number" min="0" step="5" placeholder="e.g. 80" />
+      <div class="form-row two">
+        <div>
+          <label>Approximate floor area (m²)</label>
+          <input name="area_sqm" type="number" min="0" step="5" placeholder="e.g. 80" />
+        </div>
+        <div>
+          <label>When are you looking to install</label>
+          <select name="timeline">
+            <option value="">— Select one —</option>
+            <option value="1_month">Within 1 month</option>
+            <option value="1_3_months">1–3 months</option>
+            <option value="3_plus_months">3+ months</option>
+            <option value="inquiry_only">Just getting prices</option>
+          </select>
+        </div>
       </div>
       <div class="form-row">
-        <label>When are you looking to install?</label>
-        <select name="timeline">
-          <option value="">-- Select one --</option>
-          <option value="1_month">Within 1 month</option>
-          <option value="1_3_months">1–3 months</option>
-          <option value="3_plus_months">3+ months</option>
-          <option value="inquiry_only">Just getting prices</option>
-        </select>
-      </div>
-      <div class="form-row">
-        <label>Anything else we should know?</label>
+        <label>Anything else we should know</label>
         <textarea name="message" placeholder="e.g. existing tile floor to remove, pet-friendly preference, kitchen open-plan"></textarea>
       </div>
-      <button type="submit" class="form-submit">Send My Floor Size — Get Quote Today</button>
-      <p class="form-foot">Your info goes to Oztop only. No spam. 30-day quote validity. 📞 07 3416 6458 if you prefer to call.</p>
+      <div class="form-row" style="text-align:center;margin-top:32px;">
+        <button type="submit" class="form-submit">Submit Enquiry</button>
+        <p class="form-foot">Your info goes to Oztop only. No spam. Quote valid 30 days from issue.</p>
+      </div>
     </form>
   </section>
+
+  <!-- Final stripe — 跟开头呼应 -->
+  <div class="stripe">
+    Servicing <strong>Brisbane &amp; Gold Coast</strong> within a 100km radius &nbsp;·&nbsp; ABN-registered &nbsp;·&nbsp; Licensed &amp; Insured
+  </div>
 
 </div>
 
 <script>
-  // Capture UTM + referrer on page load (works even without WP plugin)
+  /* Capture UTM + referrer on page load */
   (function() {
     var qs = new URLSearchParams(window.location.search);
-    document.getElementById('utm-source').value = qs.get('utm_source') || '';
-    document.getElementById('utm-medium').value = qs.get('utm_medium') || '';
-    document.getElementById('utm-campaign').value = qs.get('utm_campaign') || '';
-    document.getElementById('utm-content').value = qs.get('utm_content') || '';
-    document.getElementById('referrer').value = document.referrer || '';
+    var f = function(id, val) { var el = document.getElementById(id); if (el) el.value = val || ''; };
+    f('utm-source',   qs.get('utm_source'));
+    f('utm-medium',   qs.get('utm_medium'));
+    f('utm-campaign', qs.get('utm_campaign'));
+    f('utm-content',  qs.get('utm_content'));
+    f('referrer',     document.referrer);
   })();
-
-  // Form submit handler — show success message inline, fall back to redirect
-  document.getElementById('walnut-lead-form').addEventListener('submit', async function(e) {
-    e.preventDefault();
-    var form = e.target;
-    var btn = form.querySelector('.form-submit');
-    btn.disabled = true; btn.textContent = 'Sending…';
-    var data = Object.fromEntries(new FormData(form));
-    try {
-      var res = await fetch(form.action, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      if (res.ok) {
-        form.innerHTML = '<div style="text-align:center;padding:40px;"><h3 style="color:#d4a574;">✅ Got it. We\'ll call you within 4 business hours.</h3><p>If you\'re in a hurry, ring us now: <strong>07 3416 6458</strong> (Mon–Sat 9am–5pm Brisbane).</p></div>';
-      } else {
-        btn.textContent = 'Try again — or call 07 3416 6458'; btn.disabled = false;
-      }
-    } catch (err) {
-      btn.textContent = 'Network issue — call 07 3416 6458'; btn.disabled = false;
-    }
-  });
 </script>
 
-<!-- Schema.org Product + Offer + FAQPage JSON-LD -->
+<!-- Schema.org Product + Offer + FAQPage JSON-LD — AI 可见度信号 -->
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@graph": [
     {
       "@type": "Product",
-      "name": "Elegant Walnut 15mm Engineered Timber Flooring",
-      "description": "Premium 15mm walnut engineered timber on clearance from Oztop Building Supplies, Slacks Creek QLD. Direct-from-warehouse pricing $35.50/m² vs retail chain $55-70/m².",
+      "name": "Walnut Engineered Timber Flooring",
+      "description": "15mm premium walnut engineered timber flooring on clearance from Oztop Building Supplies, Slacks Creek QLD. Warehouse-direct pricing $35.50/m² versus retail chain $55–70/m².",
       "brand": { "@type": "Brand", "name": "Oztop Building Supplies" },
       "offers": {
         "@type": "Offer",
@@ -324,11 +573,11 @@
     {
       "@type": "FAQPage",
       "mainEntity": [
-        { "@type": "Question", "name": "Is the quote valid after the clearance ends?", "acceptedAnswer": { "@type": "Answer", "text": "Yes — your quote is locked for 30 days from issue. The $35.50/m² rate holds even if our public clearance ends 30 June, as long as you book your install during that window." } },
-        { "@type": "Question", "name": "Do you install or just supply?", "acceptedAnswer": { "@type": "Answer", "text": "Both. Oztop is Licensed & Insured. Most clearance customers choose supply + install, but supply-only is fine if you have your own trades." } },
-        { "@type": "Question", "name": "Why is the price so much lower than retail chains?", "acceptedAnswer": { "@type": "Answer", "text": "We over-ordered 2,000m² for a builder project that scaled back. Rather than warehouse it another year, we're clearing at cost. Same product, warranty, and installation — just our excess inventory." } },
-        { "@type": "Question", "name": "Can I see a sample before committing?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Walk into our Slacks Creek showroom (25 min from Brisbane CBD), no appointment needed. Or we'll post a sample." } },
-        { "@type": "Question", "name": "What's the minimum area for the $35.50 rate?", "acceptedAnswer": { "@type": "Answer", "text": "Minimum 30m². Above that, we hold the rate up to 200m². Larger projects quoted at cost on volume above 200m²." } }
+        { "@type": "Question", "name": "Is the quote valid after the 30 June clearance ends?", "acceptedAnswer": { "@type": "Answer", "text": "Yes — your quote is locked for 30 days from the day we issue it. The $35.50/m² rate holds as long as you book the install within that window." } },
+        { "@type": "Question", "name": "Do you install, or supply only?", "acceptedAnswer": { "@type": "Answer", "text": "Both. Our installation team is Oztop-employed and fully insured. Supply-only is available if you have your own trades." } },
+        { "@type": "Question", "name": "Why is the price below retail?", "acceptedAnswer": { "@type": "Answer", "text": "We over-ordered 2,000m² of 15mm Walnut Engineered for a builder project that scaled back. The product, warranty and installation team are identical to anything else we sell." } },
+        { "@type": "Question", "name": "Can I see a sample before committing?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Walk into our Slacks Creek showroom (25 minutes from Brisbane CBD), or we will post a sample to you." } },
+        { "@type": "Question", "name": "What is the minimum area for the $35.50 rate?", "acceptedAnswer": { "@type": "Answer", "text": "Minimum 30m². We hold the clearance rate up to 200m². For projects above 200m² we quote at cost on the volume above that threshold." } }
       ]
     }
   ]
