@@ -13,6 +13,7 @@ import { getClientCompetitors } from '@/lib/competitors/resolver'
 import {
   buildBusinessKeywordTerms,
   extractBriefSeedTerms,
+  extractExcludedTopics,
   isBusinessRelevantKeyword,
 } from '@/lib/seo-intelligence/keyword-relevance'
 
@@ -87,11 +88,13 @@ export async function GET(
 
   // Read brief for business terms (NOT for competitor list — that's resolver's job)
   const activeBrief = await getActiveBrief(clientId)
+  const briefRecord = activeBrief as Record<string, unknown> | null
   const businessTerms = buildBusinessKeywordTerms({
     domain: client.domain,
     industry: (client.industry as string | null) ?? null,
-    seedTerms: extractBriefSeedTerms(activeBrief as Record<string, unknown> | null),
+    seedTerms: extractBriefSeedTerms(briefRecord),
   })
+  const excludedTopics = extractExcludedTopics(briefRecord)
 
   try {
     // ── Step 1: Discover competitors via DataForSEO (fallback source for resolver)
@@ -141,7 +144,7 @@ export async function GET(
       ? await getKeywordsGap(client.domain, top3, locationCode, 200)
       : []
     const gapKeywords = rawGapKeywords
-      .filter(keyword => isBusinessRelevantKeyword(keyword.keyword, businessTerms))
+      .filter(keyword => isBusinessRelevantKeyword(keyword.keyword, businessTerms, excludedTopics))
       .slice(0, 100)
 
     return NextResponse.json(
