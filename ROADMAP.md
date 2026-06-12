@@ -1922,6 +1922,31 @@ SEO 诊断 → Fix 按钮 → 推 GitHub PR → 客户 merge → 元数据修复
 
 ---
 
+## Phase 12.R — WordPress Page Rewriter + 7 项 ME 平台修复 📋 已登记，2026-06-13 启动
+
+> **背景**:ME Blog Factory 能新建博客但**无 UI 改写已有页面**;wpFetch 缺超时/WAF 检测必现 502;GEO 隐藏块用 inline positioning style 被 WP Gutenberg 剥掉,粘出可见 `[INSTRUCTIONS FOR AI AGENTS]` (P0 客户站事故 2026-06-13 04:53)。
+>
+> **Spec**:[`docs/superpowers/specs/2026-06-13-phase-12J-wordpress-page-rewriter.md`](./docs/superpowers/specs/2026-06-13-phase-12J-wordpress-page-rewriter.md) (附录 B 为正式实施版,A 为 RFC 起草历史)
+>
+> **命名修正**:起草误用 `12.J` (已被博客头图配图占用),正式登记用 `12.R`。spec 文件名 + git 分支名 (`phase-12j-page-rewriter`) 保留作历史标识。
+>
+> **登记日期**:2026-06-13
+
+| 任务 ID | 内容 | 优先级 | 状态 |
+|---------|------|--------|------|
+| **P12.R.B6** | wpFetch 加 10s 超时 + 显式 AbortController + SiteGround/Wordfence/Sucuri/Cloudflare WAF 三件套 + 5xx 重试 1 次 + 分类错误码 | P0 BLOCKER | 🔄 派 Codex |
+| **P12.R.B7** | GEO 隐藏机制架构修复(`hidden` attr + `<style>` 块组合)+ html-builder sanitize 兜底 + DB backfill 20+ 篇 + page-rewriter 完工后自动重发 published 老博客 | P0 BLOCKER | 🔄 进行中 |
+| **P12.R.M1-M5** | `updateExistingWordpressPost()` + API + UI 三屏 + Kanban 集成 + Oztop tile-sizes 真站点 sanity test | P1 | 📋 |
+| **P12.R.A1** | Blog Detail Action Bar(Delete / Regenerate / Edit Content) | P1 | 📋 |
+| **P12.R.A8** | 客户主题 text-transform:uppercase 预检 + 预发布警告 | P1 | 📋 |
+| **P12.R.A2** | Blog Generate 表单加 Mode 选择器(默认 unified) | P2 | 📋 |
+| **P12.R.A4** | Blog Detail Focus Keyphrase inline editor | P2 | 📋 |
+| **P12.R.B10** | Blog Detail Internal Links Panel(显示 anchor + target_slug + resolved 状态) | P2 | 📋 |
+
+总工时:~26.5h ≈ 3-3.5 day(含 Codex 三件套自证 + 魏征/板桥复审)。
+
+---
+
 ## Phase 12.K — Campaign 视觉方向（两层视觉继承体系） ✅ 已完成
 
 > **背景**：Campaign Brief 缺少活动专属视觉方向——当前只有 MB 级别 `vi_*` 品牌宪法，但每次活动的色调、氛围、创意约束无处记录，导致博客头图 / Reels / 社媒配图风格飘移。Phase 12.K 在 `campaign_briefs` 表加 5 个 nullable 视觉字段，并接入 AI 一键生成活动视觉方向。
