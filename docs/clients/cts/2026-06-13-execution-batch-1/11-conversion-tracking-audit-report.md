@@ -31,10 +31,19 @@
 - **魏征对抗式静态复审 PASS（可 merge，无 BLOCKER/MAJOR）**。
 - **关键收益**：复用已上线转化 action → **PM 无需进 Google Ads UI 建新 action**，原 §2 Step A 阻塞**消除**。原 §2 Step B 的「新建 ConversionTracker.tsx」方案**作废**（会与已有 ThankYouClient 重复），以本节实际改动为准。
 
-**⛔ 本环境限制（诚实声明）**：本机**未装 node**（跑不了 `next build`/`jest`）+ **无 gh / 无 push 凭证**。所以：
-- 代码**未跑 build/测试验证**（仅静态类型核对 + 魏征静态复审）。
-- commit **在本地分支，未 push、未开 PR**。需 PM 在有凭证的环境 push + 开 PR + **merge 到 chinatravel main（Render 自动部署）**。
-- **闸 0 仍未绿**：未部署 → 无真实 fire 可验。
+**✅ 进度更新（2026-06-13 当日已推进到部署）**：
+- chinatravel **PR #54 已 merge 到 main**，**CI「Build (Next.js)」PASS**（type/build 验证由 GitHub Actions 真实通过，本机无 node 跑不了但 CI 覆盖了）。
+- **Render 已部署到生产**（~3.5 min 后 thank-you chunk hash `b50b52→e6ef1c`）。
+- **生产 bundle 实证（grep，非编造）**：
+  - `/thank-you` chunk：Ads label `y-kaCLSI9YAcEKi7xv9C` ✓ + dedup 守卫 `cts_lead_fired` ✓ + Meta `Lead` ✓
+  - `/contact` chunk：Ads label ✓ + Meta `Lead` ✓（原先缺，现补上）
+
+**⛔ 仍未做（诚实声明，决定闸 0 不能算绿）**：
+- **jest 测试未执行**（本机无 node，CI 无 test job）——仅过魏征静态审。
+- **浏览器真实 fire 绿勾未走查**：Google Tag Assistant「Conversion fired」+ Meta Pixel Helper「Lead fired」需 PM 在浏览器走真实表单流程（红线 #4：不用 console 假 fire）。**这是我无法替代的一步。**
+- **24h 真实转化数未见**（6/14 NZST 复查）。
+
+**所以闸 0 = 代码已上线生产且 bundle 实证，但「真实 fire 绿勾 + 24h 数据」未验 → 按红线 #2 仍 RED**，不能对诸葛亮宣布已绿。
 
 下方原 §1–§2 保留作审计留痕，但**结论以本 §0.5 为准**。
 
@@ -228,10 +237,10 @@ import ConversionTracker from './ConversionTracker';
 
 严格按红线 #2，必须等 **chinatravel PR merge → Render 部署 → §3 两条路径真实打绿 → 24h 见 Google Ads 真实转化数**，才能对诸葛亮说「闸 0 已绿」。在那之前 Campaign 2/3/M1 不应仅凭本报告上线。
 
-**PM 放闸路线图（待办）**：
-1. push `claude/cts-conversion-thankyou-lead`（chinatravel 仓）→ 开 PR → review → **merge 到 main**（Render 自动部署）。
-2. 部署完按 §3 走查两条路径，打绿。
-3. 绿 + 24h 见真实转化数 → 回诸葛亮窗口说「闸 0 已绿」。
+**PM 放闸路线图**：
+1. ~~push → PR → merge chinatravel main → Render 部署~~ ✅ **已完成**（PR #54 merged + 生产 bundle 实证两条路径都含转化代码）。
+2. ⬜ **PM 走查打绿（唯一剩余技术步骤）**：装 Google Tag Assistant + Meta Pixel Helper，走①tour 询盘→/thank-you ②/contact 内联，各见「Conversion fired」+「Lead fired」绿勾（红线 #4：真实表单，不用 console 假 fire）。
+3. ⬜ 24h（6/14 NZST）Google Ads「预约服务」列见真实转化数 → **绿 + 有数 → 才回诸葛亮窗口（sharp-lamarr-5359d3）说「闸 0 已绿」**。
 
 ---
 
