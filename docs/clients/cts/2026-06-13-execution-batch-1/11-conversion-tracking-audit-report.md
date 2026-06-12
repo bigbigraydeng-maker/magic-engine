@@ -34,12 +34,19 @@
 **✅ 进度更新（2026-06-13 当日已推进到部署）**：
 - chinatravel **PR #54 已 merge 到 main**，**CI「Build (Next.js)」PASS**（type/build 验证由 GitHub Actions 真实通过，本机无 node 跑不了但 CI 覆盖了）。
 - **Render 已部署到生产**（~3.5 min 后 thank-you chunk hash `b50b52→e6ef1c`）。
-- **生产 bundle 实证（grep，非编造）**：
-  - `/thank-you` chunk：Ads label `y-kaCLSI9YAcEKi7xv9C` ✓ + dedup 守卫 `cts_lead_fired` ✓ + Meta `Lead` ✓
-  - `/contact` chunk：Ads label ✓ + Meta `Lead` ✓（原先缺，现补上）
+- **生产 bundle 精确实证（反编译片段，非松匹配、非编造）**：两条路径的实际 fire 代码逐字确认：
+  ```js
+  // /contact page-08c9cbf4 + /thank-you page-e6ef1ccf 都含：
+  (t=window.gtag)||t("event","conversion",{send_to:"AW-17984232872/y-kaCLSI9YAcEKi7xv9C",value:1,currency:"NZD",transaction_id:r}),
+  (n=window.fbq)||n("track","Lead",{value:1,currency:"NZD"},{eventID:r})
+  ```
+  gtag 转化 + **真实 fbq Lead**，共享 `r`（eventID=transaction_id）。/thank-you 另含 `cts_lead_fired` dedup。
+  > 🔎 误报澄清：交接时另一窗口 grep `page-08c9cbf4` 报「fbq Lead:0」，是 grep pattern 没匹配上 minified 形态（`fbq`→`n=window.fbq`→`n("track","Lead")`，`fbq` 与 `Lead` 不相邻）。实际 Meta Lead **在该 chunk 内**，非 CDN stale。
+- **value = NZD 1.0**（与已上线 /contact 转化一致），**不是 $50**（原 spec 的 $50 未采用，保持单转化口径一致供 Smart Bidding）。
+
+- **jest 真实 PASS**：已给 chinatravel CI 加 `Test (jest)` job（PR #55），云端真跑——`PASS src/lib/analytics/__tests__/lead-conversion.test.ts`，Test Suites 23/23 passed（47s）。不再只是静态审。
 
 **⛔ 仍未做（诚实声明，决定闸 0 不能算绿）**：
-- **jest 测试未执行**（本机无 node，CI 无 test job）——仅过魏征静态审。
 - **浏览器真实 fire 绿勾未走查**：Google Tag Assistant「Conversion fired」+ Meta Pixel Helper「Lead fired」需 PM 在浏览器走真实表单流程（红线 #4：不用 console 假 fire）。**这是我无法替代的一步。**
 - **24h 真实转化数未见**（6/14 NZST 复查）。
 
@@ -244,4 +251,37 @@ import ConversionTracker from './ConversionTracker';
 
 ---
 
-*报告人：子牙 · 分支 `claude/cts-conversion-fix` · worktree `../magic-engine-cts-conv`*
+## 6 · PM 浏览器走查 Runbook（5 分钟 · 闸 0 转绿的唯一剩余技术步）
+
+> 工具：浏览器装 **Google Tag Assistant**（Chrome 扩展）+ **Meta Pixel Helper**（Chrome 扩展）。
+
+**⚠️ 最易误判的坑（先读）**：thank-you 路径加了 `sessionStorage` 去重防刷新双计 → **同一 session 对同一 tour 测第二次不会再 fire**（设计，非坏）。所以**每测一次开一个新无痕窗口**（Cmd+Shift+N）或换不同 tour。CTS 的 gtag/Pixel 无条件加载（不等 cookie consent），扩展应直接抓到，**不用点 Accept**。
+
+**期望 value = NZD 1.0**（不是 $50）。
+
+### 路径 A — Tour 询盘（主路径，最重要）
+1. 新无痕窗口 → 任一 tour 页 → 填询盘表单 → **Send Enquiry**
+2. 跳到 `/thank-you` 后：
+   - ✅ Tag Assistant：`AW-17984232872` 下 **Conversion fired**，value 1.0 NZD
+   - ✅ Pixel Helper：`1441880990459874` 下 **Lead fired**，value 1.0 NZD
+
+### 路径 B — /contact（内联，不跳转）
+1. 新无痕窗口 → `/contact` → 填表 → **Send Message** → 页面原地显示 "Thank you!"
+2. 此刻：✅ Tag Assistant Conversion fired + ✅ Pixel Helper Lead fired
+
+### 不绿排查（按概率）
+| 现象 | 多半原因 | 处理 |
+|---|---|---|
+| 第二次测没 fire | dedup（同 tour 同 session） | 换无痕窗口 / 换 tour |
+| Pixel Lead 不出 | ad-blocker 拦 fbq | 关 ad-blocker 重测 |
+| 没 Conversion | 表单没真提交成功 / 没到 /thank-you | 确认提交成功、URL 到 /thank-you |
+| 都没 base 标签 | 扩展没连上标签页 | 刷新 + 重连扩展 |
+
+### 24h 复查（6/14 NZST）
+Google Ads（105-817-1329）→ Tools → Conversions →「预约服务/Booking Service」列出现真实数（≠「—」、≠0）。
+
+**两条路径绿勾 + 24h 见真实数 → 才回诸葛亮窗口（sharp-lamarr-5359d3）说「闸 0 已绿」。** 之前一律按 RED。
+
+---
+
+*报告人：子牙 · CTS conversion 单一 owner · chinatravel PR #54(merged)+#55(CI jest) · magic-engine PR #465(merged)+#466*
