@@ -8,7 +8,39 @@
 
 ---
 
-## 0 · 一句话结论
+## ⚠️ 0.5 · 复测修正（2026-06-13 第二轮 · 推翻原 §0/§1/§2 部分结论 · 以本节为准）
+
+> 第一轮审计用 `curl|grep` 服务端 HTML + 反编译部分 JS chunk，**漏 grep 了 contact 页 chunk**，导致 over-claim「全站 send_to=0」。第二轮直接拿到 CTS Next.js 仓库源码（`chinatravel` repo，ME 有部署权，PM 6/13 拍板）逐文件读 + 生产 bundle 实证，修正如下：
+
+**真实拓扑（实证）**：CTS 有**两条 lead 路径**，不是一条。
+
+| Lead 路径 | 触发 | Google Ads 转化 | Meta Pixel Lead |
+|---|---|---|---|
+| **通用 `/contact` 表单** | 提交成功→内联显示（**不跳转 /thank-you**） | ✅ **已上线**（`y-kaCLSI9YAcEKi7xv9C`，PR #43，6/10）。生产 contact chunk 实测含此 label | ❌ 缺 |
+| **Tour 询盘**（`TourEnquiry.tsx`，主路径） | 提交成功→`router.push('/thank-you')` | ❌ **缺**（只有一个无 GTM 容器消费的 dataLayer push） | ❌ 缺 |
+
+**修正后的「9 click 0 转化」根因**：品牌防御 campaign 把流量引到首页/tour 页，询盘主要走 **tour 询盘 → /thank-you**——而这条路**完全没有转化事件**。`/contact` 那条虽有 Ads 转化但量小。Meta Pixel `Lead` 则**两条路都没有**。
+
+**因此修复 = 改 CTS Next.js 仓库代码（不是建 GTM、不是 PM 进 Google Ads 建新 action）**：
+
+- 子牙已在 `chinatravel` 仓 worktree（分支 `claude/cts-conversion-thankyou-lead`）完成 **3 文件外科手术改动 + 1 测试文件**，已本地 commit（`6f4a4a2`）：
+  1. 新建 `src/lib/analytics/lead-conversion.ts`：集中式 `fireLeadConversion(source)`，一处 fire Google Ads 转化（**复用已上线的真实 label** `AW-17984232872/y-kaCLSI9YAcEKi7xv9C`）+ Meta Pixel `Lead`，共享 `eventID` 供未来 CAPI 去重。
+  2. `ThankYouClient.tsx`：在 /thank-you 落地 fire（按 tour 参数 sessionStorage 去重，防刷新双计、StrictMode 安全）。
+  3. `ContactFormClient.tsx`：用 helper 替换原内联 Ads 块，**顺带补上原先缺失的 Meta Lead**（Ads 行为等价）。
+  4. jest 测试：双 channel + 共享 id 去重 + gtag/fbq 缺失守卫。
+- **魏征对抗式静态复审 PASS（可 merge，无 BLOCKER/MAJOR）**。
+- **关键收益**：复用已上线转化 action → **PM 无需进 Google Ads UI 建新 action**，原 §2 Step A 阻塞**消除**。原 §2 Step B 的「新建 ConversionTracker.tsx」方案**作废**（会与已有 ThankYouClient 重复），以本节实际改动为准。
+
+**⛔ 本环境限制（诚实声明）**：本机**未装 node**（跑不了 `next build`/`jest`）+ **无 gh / 无 push 凭证**。所以：
+- 代码**未跑 build/测试验证**（仅静态类型核对 + 魏征静态复审）。
+- commit **在本地分支，未 push、未开 PR**。需 PM 在有凭证的环境 push + 开 PR + **merge 到 chinatravel main（Render 自动部署）**。
+- **闸 0 仍未绿**：未部署 → 无真实 fire 可验。
+
+下方原 §1–§2 保留作审计留痕，但**结论以本 §0.5 为准**。
+
+---
+
+## 0 · 一句话结论（⚠️ 已被 §0.5 修正，保留留痕）
 
 **CTS 不缺像素，缺的是「转化事件」。** Google Ads 基础标签在跑（只记 page_view）、Meta Pixel 基础标签在跑（只记 PageView），但**全站没有任何 conversion / Lead 事件** → Google Ads 永远 0 转化、Meta 永远抓不到询盘。修复 = 在 `/thank-you` 页加一段「转化事件」代码 + 在 Google Ads UI 建对应的 Conversion Action。
 
@@ -149,21 +181,27 @@ import ConversionTracker from './ConversionTracker';
 
 > **诚实声明**：以下绿勾**当前一个都没打**。代码尚未部署、Conversion Action 尚未建。子牙无法替 PM 在浏览器里验证真实 fire。**禁止把以下任何一条当「已完成」**。
 
-部署 Step A + Step B 后，PM 装 **Google Tag Assistant** + **Meta Pixel Helper**，走**真实表单流程**（不要用 console 假 fire）：
+> ⚠️ 以 §0.5 修正为准：value 是 **NZD 1.0**（与已上线 contact 转化一致），不是 $50；**两条路径都要走**（contact 内联 / tour 询盘跳 /thank-you）。
 
+**chinatravel PR merge + Render 部署完成后**，PM 装 **Google Tag Assistant** + **Meta Pixel Helper**，走**真实表单流程**（不要 console 假 fire）：
+
+**路径 A — Tour 询盘（主路径）**：
+1. 访问任一 tour 页（如 `https://www.ctstours.co.nz/tours/...`）
+2. 填询盘 form → Send Enquiry → 跳到 `/thank-you?tour=...`
+3. 在 `/thank-you` 落地页应看到下表绿勾。
+
+**路径 B — 通用 /contact**：
 1. 访问 `https://www.ctstours.co.nz/contact`
-2. 填测试 form（Name/Email/Phone/Travel Interest/Message）→ 提交 → 跳到 `/thank-you`
-3. 在 `/thank-you` 页应看到：
+2. 填 form → Send Message → **内联**显示 "Thank you!"（**不跳转**），转化在当前页 fire。
 
 | 检查项 | 工具 | 期望 | 状态 |
 |---|---|---|---|
-| Google Ads `Contact Form Submit` 转化 fire | Google Tag Assistant | "Conversion fired" 绿勾 + value 50 NZD | ☐ PENDING |
-| Meta `Lead` event fire | Meta Pixel Helper | "Lead" fired 绿勾 + value 50 NZD | ☐ PENDING |
+| Google Ads `预约服务/Booking Service` 转化 fire（两条路） | Google Tag Assistant | "Conversion fired" 绿勾 + value 1.0 NZD | ☐ PENDING |
+| Meta `Lead` event fire（两条路） | Meta Pixel Helper | "Lead" fired 绿勾 + value 1.0 NZD | ☐ PENDING |
 | Meta Events Manager Test Events | Meta EM → Test Events | 看到 `Lead`（browser 源） | ☐ PENDING |
-| （可选）GA4 `page_view` /thank-you | GA4 DebugView | 命中 | ☐ N/A（除非做 Step E） |
 
-4. 任一不绿 → 回 Step A/B 排查（最常见：Label 没填对 / Accept cookie 没点 / 组件没渲染）。
-5. **24h 复查点**：**2026-06-14（NZST）**，PM 回 Google Ads → Conversions，`Contact Form Submit` 列出现真实数字（≠「—」、≠ 0）。
+3. 任一不绿 → 排查（最常见：PR 未 merge/未部署 / gtag·fbq 被 ad-blocker 拦 / 组件未渲染）。
+4. **24h 复查点**：**2026-06-14（NZST）**，PM 回 Google Ads → Conversions，`预约服务` 列出现真实数字（≠「—」、≠ 0）。
 
 ---
 
@@ -186,7 +224,14 @@ import ConversionTracker from './ConversionTracker';
 
 ## 5 · 给诸葛亮窗口的放闸信号
 
-**闸 0（conversion tracking）当前是「规格就绪、待部署验证」状态，不是「已绿」。** 严格按红线 #2，必须等 Step A+B 部署完 + §3 验证清单真实打绿 + 24h 见到 Google Ads 真实转化数，才能对诸葛亮说「闸 0 已绿」。在那之前 Campaign 2/3/M1 不应仅凭本报告上线。
+**闸 0（conversion tracking）当前是「代码就绪 + 已复审，待 push/merge/部署 + 真实 fire 验证」，不是「已绿」。** 代码已写完并经 子牙+魏征 双审，但：①本环境无 node，未跑 build/测试；②commit 未 push、PR 未开（无凭证）；③未部署 → 无真实 fire 可验。
+
+严格按红线 #2，必须等 **chinatravel PR merge → Render 部署 → §3 两条路径真实打绿 → 24h 见 Google Ads 真实转化数**，才能对诸葛亮说「闸 0 已绿」。在那之前 Campaign 2/3/M1 不应仅凭本报告上线。
+
+**PM 放闸路线图（待办）**：
+1. push `claude/cts-conversion-thankyou-lead`（chinatravel 仓）→ 开 PR → review → **merge 到 main**（Render 自动部署）。
+2. 部署完按 §3 走查两条路径，打绿。
+3. 绿 + 24h 见真实转化数 → 回诸葛亮窗口说「闸 0 已绿」。
 
 ---
 
