@@ -28,8 +28,9 @@ export type CmsStatus = (typeof CMS_STATUS)[keyof typeof CMS_STATUS]
 // ─── Fix action types ─────────────────────────────────────────────────────────
 
 export const CMS_ACTION_TYPE = {
-  META_UPDATE:    'cms_meta_update',     // patch metaTitle / metaDescription
-  CONTENT_INSERT: 'cms_content_insert',  // create / overwrite a content file
+  META_UPDATE:     'cms_meta_update',      // patch metaTitle / metaDescription (GitHub-PR static-site flow)
+  CONTENT_INSERT:  'cms_content_insert',   // create / overwrite a content file or publish a new post
+  UPDATE_EXISTING: 'cms_update_existing',  // P12.R.M1 — PATCH an already-published WP post/page (title / yoast meta / FAQ schema)
 } as const
 
 export type CmsActionType = (typeof CMS_ACTION_TYPE)[keyof typeof CMS_ACTION_TYPE]

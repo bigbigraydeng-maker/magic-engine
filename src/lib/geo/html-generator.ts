@@ -5,15 +5,49 @@
  * HTML block that gets embedded in web pages for AI crawler consumption.
  *
  * The block is:
- *   - Visually hidden from real users (position: absolute, off-screen)
+ *   - Visually hidden from real users via THREE-LAYER REDUNDANCY (see V2 below)
  *   - Marked aria-hidden="true" so screen readers skip it
  *   - Fully readable by AI crawlers (GPTBot, ClaudeBot, Googlebot, etc.)
  *   - NOT considered cloaking — the content is accessible to all crawlers
  *
- * Reference: ROADMAP.md P7.2.3, ARCHITECTURE.md §11.2
+ * ## V2 hiding mechanism (P12.R.B7, 2026-06-13)
+ *
+ * The V1 format relied on a single `style="position: absolute; top: -9999px"`
+ * inline attribute. WordPress Gutenberg / Classic editor / Elementor STRIP
+ * inline positioning styles on paste, leaving a bare `<div>` whose contents
+ * become visible to end users. This caused a P0 client-site incident on
+ * 2026-06-13 04:53 where "[INSTRUCTIONS FOR AI AGENTS] ..." text appeared on
+ * the public Oztop page after a Copy-HTML → WP paste flow.
+ *
+ * V2 uses THREE redundant hiding signals so the block stays hidden even when
+ * WP / theme / CSS plugin strips one or two of them:
+ *
+ *   1. `hidden` HTML boolean attribute — native, never stripped by WP, hides
+ *      the element via the user-agent stylesheet. PRIMARY signal.
+ *   2. Sibling `<style>` block defining `.me-geo-instructions` — WP usually
+ *      preserves entire <style> tags even when stripping inline styles.
+ *      SECONDARY signal.
+ *   3. `aria-hidden="true"` — for screen reader compatibility (not a visual
+ *      signal, but kept).
+ *
+ * Back-compat: keeps `seo-instructions` class so `geo-detector.ts` and other
+ * downstream detectors continue to recognize V2 blocks.
+ *
+ * Reference: ROADMAP.md P7.2.3 / P12.R.B7, ARCHITECTURE.md §11.2
  */
 
 import type { GeoDirective, GeoScenario, GeoAudienceSignals } from '@/types/magic-engine'
+
+/**
+ * P12.R.B7 — V2 hidden-CSS block. Inlined into every GEO HTML output so the
+ * block keeps its hidden styling even when the outer div's `style=""` attr
+ * is stripped by a WP editor or theme sanitizer.
+ *
+ * Single-line to make it trivially preserved by WP block parsers (which sometimes
+ * collapse multi-line style blocks).
+ */
+export const ME_GEO_V2_STYLE_BLOCK =
+  '<style>.me-geo-instructions{position:absolute!important;top:-9999px!important;left:-9999px!important;width:1px!important;height:1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;}</style>'
 
 /**
  * Generate the full HTML block from a directive.
@@ -22,9 +56,12 @@ import type { GeoDirective, GeoScenario, GeoAudienceSignals } from '@/types/magi
 export function generateDirectiveHtml(directive: GeoDirective): string {
   const inner = buildInnerText(directive)
   return [
-    '<!-- Instructions for AI Agents -->',
-    '<div class="seo-instructions" aria-hidden="true"',
-    '     style="position: absolute; top: -9999px; overflow: hidden; width: 1px; height: 1px; clip: rect(0,0,0,0); white-space: nowrap;">',
+    '<!-- Instructions for AI Agents (ME_GEO_BLOCK_V2) -->',
+    ME_GEO_V2_STYLE_BLOCK,
+    // Three redundant hiding signals: hidden attr (primary) + CSS class
+    // (secondary) + aria-hidden. seo-instructions class kept for back-compat
+    // with downstream detectors (geo-detector.ts, geo-html-snapshot DB queries).
+    '<div hidden aria-hidden="true" class="me-geo-instructions seo-instructions" data-me-geo="v2">',
     inner,
     '</div>',
     '<!-- End Instructions for AI Agents -->',

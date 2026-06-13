@@ -13,6 +13,7 @@
 
 import { useState, useEffect } from 'react'
 import type { CmsConnectionStatus, WordpressConnectionStatus, ShopifyConnectionStatus } from '@/lib/cms/vocabulary'
+import { ThemeUppercaseWarning } from './ThemeUppercaseWarning'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -378,6 +379,8 @@ export function PublishToWebsitePanel({ clientId, postId, primaryKeyword, disabl
     const platform = connectedPlatforms[0]
     return (
       <div className="flex flex-col gap-1.5">
+        {/* P12.R.A8 — theme uppercase precheck warning */}
+        <ThemeUppercaseWarning clientId={clientId} enabled={platform === 'wordpress'} />
         {missingKeyword && platform === 'wordpress' && (
           <span className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium bg-orange-50 border border-orange-300 text-orange-700 rounded-md">
             ⚠️ 缺少焦点关键词 — Yoast SEO 字段将为空
@@ -394,6 +397,8 @@ export function PublishToWebsitePanel({ clientId, postId, primaryKeyword, disabl
   // Multiple platforms connected: show a dropdown-style set of buttons.
   return (
     <div className="flex flex-col gap-1.5">
+      {/* P12.R.A8 — theme uppercase precheck warning */}
+      <ThemeUppercaseWarning clientId={clientId} enabled={connectedPlatforms.includes('wordpress')} />
       {missingKeyword && (
         <span className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium bg-orange-50 border border-orange-300 text-orange-700 rounded-md">
           ⚠️ 缺少焦点关键词 — WordPress Yoast SEO 字段将为空
