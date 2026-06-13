@@ -46,10 +46,54 @@ export function buildBlogBodyHtml(post: BlogBodyPost): string {
   const parts = [
     buildHeroFigure(post),
     post.html_body,
-    post.geo_html_snapshot ?? '',
+    sanitizeGeoSnapshot(post.geo_html_snapshot ?? ''),
   ]
 
   return parts.filter(Boolean).join('\n\n')
+}
+
+/**
+ * P12.R.B7 — Wrap legacy V1 GEO snapshots in a V2 hidden-div fallback before
+ * they leave Magic Engine.
+ *
+ * Background: V1 snapshots stored in `blog_posts.geo_html_snapshot` rely on a
+ * single inline `style="position: absolute; top: -9999px"` attribute to hide
+ * the AI-instruction block. WordPress Gutenberg / Classic editor / Elementor
+ * strip inline positioning styles on paste, leaving the block visible to end
+ * users — a P0 client-site incident occurred on 2026-06-13 04:53 (Oztop).
+ *
+ * Fix strategy:
+ *   - NEW posts: GEO Composer now emits V2 format (see html-generator.ts:
+ *     `hidden` attr + sibling `<style>` block).
+ *   - LEGACY posts: this function wraps them in a V2 outer div on the way out,
+ *     so Copy-HTML output and CMS publish paths are protected even before the
+ *     DB backfill runs.
+ *
+ * Idempotent: if the snapshot already uses V2 (has the `hidden` attribute on
+ * the outer div) we pass it through untouched. Empty input returns empty.
+ */
+export function sanitizeGeoSnapshot(snapshot: string): string {
+  if (!snapshot) return ''
+
+  // Already V2 — has a `hidden` boolean attribute on a div. Skip wrapping.
+  // The regex matches: <div ... hidden> | <div ... hidden ...> | <div hidden ...>
+  if (/<div[^>]*\shidden(\s|>|=)/i.test(snapshot)) return snapshot
+
+  // Legacy V1 detector: outer <div class="seo-instructions" ... style="position:absolute...">
+  // Only wrap if BOTH signals present — avoids false positives on tiny test
+  // fixtures or hand-crafted snapshots that don't carry the inline style.
+  const isLegacyV1 = /<div[^>]*class="[^"]*seo-instructions[^"]*"[^>]*style="[^"]*position\s*:\s*absolute/i
+    .test(snapshot)
+  if (!isLegacyV1) return snapshot
+
+  return [
+    '<!-- ME GEO V2 wrapper (legacy V1 auto-sanitize) -->',
+    // Inlined style block — kept in sync with html-generator.ts ME_GEO_V2_STYLE_BLOCK.
+    '<style>.me-geo-instructions{position:absolute!important;top:-9999px!important;left:-9999px!important;width:1px!important;height:1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;}</style>',
+    '<div hidden aria-hidden="true" class="me-geo-instructions" data-me-geo="v2-wrap">',
+    snapshot,
+    '</div>',
+  ].join('\n')
 }
 
 function buildHeroFigure(post: BlogBodyPost): string {

@@ -41,7 +41,7 @@ import {
   getOrCreateDefaultBlog,
 } from '@/lib/cms/shopify-client'
 import { prepareCmsContent } from '@/lib/cms/html-sanitizer'
-import { buildArticleSchemaScript } from '@/lib/blog/html-builder'
+import { buildArticleSchemaScript, sanitizeGeoSnapshot } from '@/lib/blog/html-builder'
 import type { ArticleSchemaPost } from '@/lib/blog/html-builder'
 import { CMS_ACTION_TYPE } from '@/lib/cms/vocabulary'
 
@@ -178,7 +178,13 @@ async function handleDraft(clientId: string, body: DraftRequestBody): Promise<Ne
 
   const title       = typeof post.title             === 'string' ? post.title             : 'Untitled'
   const rawHtml     = typeof post.html_body         === 'string' ? post.html_body         : ''
-  const geoSnapshot = typeof post.geo_html_snapshot === 'string' ? post.geo_html_snapshot : ''
+  // P12.R.B7: route through sanitizeGeoSnapshot — same legacy V1 vulnerability
+  // as publish-wordpress. Shopify rich-text editor strips inline positioning
+  // styles on paste too, so legacy snapshots must be wrapped in a V2 hidden
+  // div before publishing.
+  const geoSnapshot = sanitizeGeoSnapshot(
+    typeof post.geo_html_snapshot === 'string' ? post.geo_html_snapshot : '',
+  )
   const summary     = typeof post.meta_description  === 'string' ? post.meta_description  : undefined
 
   // P14.C.4: JSON-LD BlogPosting schema + GEO directive injected AFTER sanitization
