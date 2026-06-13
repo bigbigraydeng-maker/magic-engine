@@ -52,6 +52,33 @@
 
 **所以闸 0 = 代码已上线生产且 bundle 实证，但「真实 fire 绿勾 + 24h 数据」未验 → 按红线 #2 仍 RED**，不能对诸葛亮宣布已绿。
 
+---
+
+## ✅ 0.6 · 浏览器真实 fire 实证全绿 + 竞态修复（2026-06-13 晚 · 以本节为最新状态）
+
+> 子牙用 Claude-in-Chrome 驱动**真实表单提交**（红线 #4 合规，非 console 假 fire）+ PM 自己浏览器 Pixel Helper 双重验证。
+
+**① Google Ads 转化 — 实证 fire ✅**：真实填表提交 2 个团（Japan Discovery / China Silk Road）2/2 抓到真实请求：
+```
+googleads.g.doubleclick.net/pagead/.../17984232872/?...&en=conversion&label=y-kaCLSI9YAcEKi7xv9C&value=1&currency_code=NZD&url=...thank-you...
+```
+`en=conversion` + 正确 label + value 1 NZD，3 条冗余请求。这正是修复前为 0 的主路径转化。
+
+**② Meta Lead — 实证亮绿 ✅**：PM 自己浏览器 **Meta Pixel Helper** 显示 `Lead ● 使用中`（换没测过的团 + 新标签页绕开 sessionStorage 去重后即现）。注：Lead 走 `sendBeacon`，浏览器 Resource Timing / 自动化网络监控都抓不到，必须用 Pixel Helper / Events Manager 这类读 fbq 内部的工具看。
+
+**③ 竞态修复（顺手发现并修）✅**：`<TrackingScripts>` 用 `afterInteractive` 加载 gtag/fbq。
+- 正常表单流程（SPA 跳转 /thank-you）：gtag/fbq 早就绪 → 正常 fire。
+- **直接/刷新/收藏夹打开 /thank-you**：`ThankYouClient` effect 早于 gtag/fbq 就绪 → 被 `?.` 守卫静默跳过 → **漏转化 + 漏 Lead**。
+- 修复：`fireLeadConversion` 加就绪重试（每 channel 等就绪再 fire，最多 ~3s / 20×150ms，各最多一次，超时干净放弃）。
+- **chinatravel PR #60 MERGED + 已部署**；CI Test(jest) 406 测试全绿（含重试新测试）。
+- **A/B 生产实证**：同浏览器、同「直接打开 /thank-you」，修复前 `gads_label_count=0`、修复后 `=3`。
+
+**闸 0 当前状态**：两条转化（Ads + Meta Lead）均**浏览器实证 fire**，竞态已修上线 → **技术面全绿**。**唯一剩余**：24h（2026-06-14 NZST）Google Ads「预约服务」列见真实转化数做最后闭环。见到真实数 → 才正式回诸葛亮窗口（sharp-lamarr-5359d3）说「闸 0 已绿」推 Campaign 2/3/M1；Campaign 准备工作可即刻启动。
+
+下方 §0.5 / §1–§5 保留作审计留痕，**最新状态以本 §0.6 为准**。
+
+---
+
 下方原 §1–§2 保留作审计留痕，但**结论以本 §0.5 为准**。
 
 ---
@@ -212,9 +239,9 @@ import ConversionTracker from './ConversionTracker';
 
 | 检查项 | 工具 | 期望 | 状态 |
 |---|---|---|---|
-| Google Ads `预约服务/Booking Service` 转化 fire（两条路） | Google Tag Assistant | "Conversion fired" 绿勾 + value 1.0 NZD | ☐ PENDING |
-| Meta `Lead` event fire（两条路） | Meta Pixel Helper | "Lead" fired 绿勾 + value 1.0 NZD | ☐ PENDING |
-| Meta Events Manager Test Events | Meta EM → Test Events | 看到 `Lead`（browser 源） | ☐ PENDING |
+| Google Ads `预约服务/Booking Service` 转化 fire | Chrome 真实提交抓网络请求 | `en=conversion`+label+value 1 NZD | ✅ 已实证（见 §0.6，2/2） |
+| Meta `Lead` event fire | Meta Pixel Helper | "Lead ● 使用中" 亮绿 | ✅ 已实证（见 §0.6） |
+| 直接/刷新打开 /thank-you 也 fire | A/B 抓 label_count | 修复前 0 → 修复后 3 | ✅ 已实证（PR #60 上线后） |
 
 3. 任一不绿 → 排查（最常见：PR 未 merge/未部署 / gtag·fbq 被 ad-blocker 拦 / 组件未渲染）。
 4. **24h 复查点**：**2026-06-14（NZST）**，PM 回 Google Ads → Conversions，`预约服务` 列出现真实数字（≠「—」、≠ 0）。
