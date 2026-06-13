@@ -639,3 +639,189 @@ export async function deleteWordpressPage(
     throw new Error(`WordPress deletePage failed (${res.status}): ${text.slice(0, 200)}`)
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// P12.R.M1 — Page Rewriter: get/update an EXISTING WP post or page
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Distinct from the create/publish flow above:
+//   - createWordpressPostDraft + publishWordpressPost  → produce a NEW post.
+//   - getExistingWordpressPost + updateExistingWordpressPost → mutate an
+//     already-published post/page so the FDE can rewrite Yoast title / meta /
+//     FAQ schema without opening WP admin.
+//
+// The two functions are intentionally minimal — audit / idempotency / before-
+// snapshot recording live in the API route layer (M2), not here.
+
+export type WordpressPostType = 'post' | 'page'
+
+const YOAST_TITLE_KEY     = '_yoast_wpseo_title'
+const YOAST_METADESC_KEY  = '_yoast_wpseo_metadesc'
+const YOAST_FOCUSKW_KEY   = '_yoast_wpseo_focuskw'
+
+export interface ExistingWordpressPost {
+  /** WP post ID. */
+  postId:          number
+  postType:        WordpressPostType
+  title:           string
+  slug:            string
+  excerpt:         string
+  /** Raw HTML body as stored in WP `content.raw`. May be Elementor JSON markers. */
+  content:         string
+  /** WP post status: `publish`, `draft`, `pending`, `private`, `future`. */
+  status:          string
+  /** Live URL. */
+  link:            string
+  /** Last-modified ISO timestamp from WP. */
+  modified:        string
+  /** Yoast SEO title from `meta._yoast_wpseo_title`. Undefined when the key is not exposed. */
+  seoTitle?:       string
+  seoDescription?: string
+  focusKeyphrase?: string
+}
+
+/**
+ * Fetch a single post or page so the FDE can see current Yoast meta / title /
+ * excerpt before authoring a rewrite. `context=edit` is required so Yoast
+ * meta fields come back populated (`view` context strips meta on most installs).
+ */
+export async function getExistingWordpressPost(
+  config:    WordpressClientConfig,
+  postId:    number,
+  postType:  WordpressPostType = 'post',
+): Promise<ExistingWordpressPost> {
+  if (!Number.isInteger(postId) || postId <= 0) {
+    throw new WordpressFetchError(
+      `getExistingWordpressPost: invalid postId ${postId} — must be a positive integer.`,
+      'HTTP_ERROR',
+    )
+  }
+  const path = `/${postType}s/${postId}?context=edit`
+  const res  = await wpFetch(config, path)
+  const data = await expectJson(res, `getExisting${postType === 'page' ? 'Page' : 'Post'}`)
+
+  const meta = (data.meta ?? {}) as Record<string, unknown>
+  return {
+    postId,
+    postType,
+    title:    extractRenderedOrRaw(data.title),
+    slug:     typeof data.slug === 'string' ? data.slug : '',
+    excerpt:  extractRenderedOrRaw(data.excerpt),
+    content:  extractRenderedOrRaw(data.content),
+    status:   typeof data.status   === 'string' ? data.status   : 'publish',
+    link:     typeof data.link     === 'string' ? data.link     : '',
+    modified: typeof data.modified === 'string' ? data.modified : '',
+    seoTitle:       optionalString(meta[YOAST_TITLE_KEY]),
+    seoDescription: optionalString(meta[YOAST_METADESC_KEY]),
+    focusKeyphrase: optionalString(meta[YOAST_FOCUSKW_KEY]),
+  }
+}
+
+/**
+ * WP REST returns `{ rendered, raw }` shapes for title/content/excerpt under
+ * `context=edit`. Prefer `raw` (untransformed) so a round-trip rewrite doesn't
+ * lose shortcodes or Elementor wrappers; fall back to `rendered` / string.
+ */
+function extractRenderedOrRaw(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>
+    if (typeof obj.raw      === 'string') return obj.raw
+    if (typeof obj.rendered === 'string') return obj.rendered
+  }
+  return ''
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined
+}
+
+export interface UpdateExistingWordpressPostInput {
+  postId:        number
+  postType?:     WordpressPostType   // default 'post'
+
+  // ── At least ONE of these must be supplied ───────────────────────────────────
+  title?:           string
+  excerpt?:         string
+  content?:         string   // HTML body — caller must sanitize via prepareCmsContent first
+  slug?:            string
+  /** Yoast SEO title (`<title>` tag). */
+  seoTitle?:        string
+  /** Yoast meta description. */
+  seoDescription?:  string
+  /** Yoast focus keyphrase. */
+  focusKeyphrase?:  string
+}
+
+export interface UpdateExistingWordpressPostResult {
+  postId:        number
+  postType:      WordpressPostType
+  link:          string
+  modified:      string
+  /** Echo of which input keys were actually sent on the wire — useful for audit. */
+  updatedFields: string[]
+}
+
+/**
+ * PATCH an existing WP post / page.
+ *
+ * WP REST treats POST `/posts/{id}` as a partial update: only the fields you
+ * send are mutated. We forward only the keys the caller specified, so an
+ * absent `content` field will NOT clear the body.
+ *
+ * Yoast meta keys are sent under the `meta` object. They must be registered
+ * as `show_in_rest` — verify with probeYoastMetaWritable() before relying on
+ * the seoTitle / seoDescription / focusKeyphrase inputs.
+ *
+ * Does NOT change the post status (publish/draft/private stays as-is). Callers
+ * that need a status change must use the existing publish/delete helpers.
+ */
+export async function updateExistingWordpressPost(
+  config: WordpressClientConfig,
+  input:  UpdateExistingWordpressPostInput,
+): Promise<UpdateExistingWordpressPostResult> {
+  if (!Number.isInteger(input.postId) || input.postId <= 0) {
+    throw new WordpressFetchError(
+      `updateExistingWordpressPost: invalid postId ${input.postId} — must be a positive integer.`,
+      'HTTP_ERROR',
+    )
+  }
+  const postType: WordpressPostType = input.postType ?? 'post'
+
+  const body: Record<string, unknown> = {}
+  const updatedFields: string[]       = []
+
+  if (input.title    !== undefined) { body.title   = input.title;   updatedFields.push('title') }
+  if (input.excerpt  !== undefined) { body.excerpt = input.excerpt; updatedFields.push('excerpt') }
+  if (input.content  !== undefined) { body.content = input.content; updatedFields.push('content') }
+  if (input.slug     !== undefined) { body.slug    = input.slug;    updatedFields.push('slug') }
+
+  const meta: Record<string, string> = {}
+  if (input.seoTitle       !== undefined) { meta[YOAST_TITLE_KEY]    = input.seoTitle;       updatedFields.push('seoTitle') }
+  if (input.seoDescription !== undefined) { meta[YOAST_METADESC_KEY] = input.seoDescription; updatedFields.push('seoDescription') }
+  if (input.focusKeyphrase !== undefined) { meta[YOAST_FOCUSKW_KEY]  = input.focusKeyphrase; updatedFields.push('focusKeyphrase') }
+  if (Object.keys(meta).length > 0) body.meta = meta
+
+  if (updatedFields.length === 0) {
+    throw new WordpressFetchError(
+      'updateExistingWordpressPost: no updatable fields supplied — at least one of ' +
+      '{title, excerpt, content, slug, seoTitle, seoDescription, focusKeyphrase} is required.',
+      'HTTP_ERROR',
+    )
+  }
+
+  const path = `/${postType}s/${input.postId}`
+  const res  = await wpFetch(config, path, {
+    method: 'POST',
+    body:   JSON.stringify(body),
+  })
+  const data = await expectJson(res, `update${postType === 'page' ? 'Page' : 'Post'}`)
+
+  return {
+    postId:        input.postId,
+    postType,
+    link:          typeof data.link     === 'string' ? data.link     : '',
+    modified:      typeof data.modified === 'string' ? data.modified : '',
+    updatedFields,
+  }
+}

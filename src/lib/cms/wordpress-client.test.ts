@@ -339,3 +339,323 @@ describe('wpFetch retry behaviour (via testWordpressConnection)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// P12.R.M1 — getExistingWordpressPost / updateExistingWordpressPost
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const CONFIG = {
+  siteUrl:     'https://oztop.com.au',
+  username:    'me',
+  appPassword: 'xxxx xxxx xxxx',
+}
+
+describe('getExistingWordpressPost', () => {
+  const realFetch = globalThis.fetch
+  let fetchMock: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    fetchMock = vi.fn()
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+  })
+  afterEach(() => {
+    globalThis.fetch = realFetch
+    vi.restoreAllMocks()
+  })
+
+  it('hits /posts/{id}?context=edit by default and decodes the response', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
+      id:       123,
+      title:    { rendered: 'Tile Sizes Explained',                 raw: 'Tile Sizes Explained — Oztop' },
+      slug:     'tile-sizes-explained',
+      excerpt:  { rendered: 'A complete guide to tile sizes.',      raw: 'Raw excerpt text' },
+      content:  { rendered: '<p>Rendered HTML</p>',                  raw: '<p>Raw HTML</p>' },
+      status:   'publish',
+      link:     'https://oztop.com.au/tile-sizes-explained/',
+      modified: '2026-06-13T03:30:00',
+      meta: {
+        _yoast_wpseo_title:    'Tile Sizes Explained | Oztop',
+        _yoast_wpseo_metadesc: 'Pick the right tile size for your project.',
+        _yoast_wpseo_focuskw:  'tile sizes',
+      },
+    }), { status: 200 }))
+
+    const { getExistingWordpressPost } = await import('./wordpress-client')
+    const post = await getExistingWordpressPost(CONFIG, 123)
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const calledUrl = fetchMock.mock.calls[0][0] as string
+    expect(calledUrl).toBe('https://oztop.com.au/wp-json/wp/v2/posts/123?context=edit')
+
+    expect(post).toEqual({
+      postId:         123,
+      postType:       'post',
+      // raw is preferred over rendered to preserve shortcodes / Elementor markers
+      title:          'Tile Sizes Explained — Oztop',
+      slug:           'tile-sizes-explained',
+      excerpt:        'Raw excerpt text',
+      content:        '<p>Raw HTML</p>',
+      status:         'publish',
+      link:           'https://oztop.com.au/tile-sizes-explained/',
+      modified:       '2026-06-13T03:30:00',
+      seoTitle:       'Tile Sizes Explained | Oztop',
+      seoDescription: 'Pick the right tile size for your project.',
+      focusKeyphrase: 'tile sizes',
+    })
+  })
+
+  it('hits /pages/{id} when postType="page"', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
+      id: 7, title: { raw: 'About' }, status: 'publish',
+    }), { status: 200 }))
+
+    const { getExistingWordpressPost } = await import('./wordpress-client')
+    await getExistingWordpressPost(CONFIG, 7, 'page')
+
+    const calledUrl = fetchMock.mock.calls[0][0] as string
+    expect(calledUrl).toContain('/wp-json/wp/v2/pages/7')
+  })
+
+  it('falls back to rendered HTML when raw is absent', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
+      id: 9,
+      title:   { rendered: 'Fallback Title' },   // no `raw`
+      content: { rendered: '<p>Fallback</p>' },
+      status:  'publish',
+      meta:    {},
+    }), { status: 200 }))
+
+    const { getExistingWordpressPost } = await import('./wordpress-client')
+    const post = await getExistingWordpressPost(CONFIG, 9)
+
+    expect(post.title).toBe('Fallback Title')
+    expect(post.content).toBe('<p>Fallback</p>')
+  })
+
+  it('returns undefined Yoast fields when meta is absent / non-string', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
+      id: 11, title: { raw: 'T' }, status: 'publish',
+      meta: { _yoast_wpseo_title: null },   // present but null
+    }), { status: 200 }))
+
+    const { getExistingWordpressPost } = await import('./wordpress-client')
+    const post = await getExistingWordpressPost(CONFIG, 11)
+
+    expect(post.seoTitle).toBeUndefined()
+    expect(post.seoDescription).toBeUndefined()
+    expect(post.focusKeyphrase).toBeUndefined()
+  })
+
+  it.each<[number | string]>([[0], [-1], [1.5], ['abc' as unknown as number]])(
+    'rejects invalid postId %p with HTTP_ERROR before any fetch',
+    async invalid => {
+      const { getExistingWordpressPost } = await import('./wordpress-client')
+      await expect(
+        getExistingWordpressPost(CONFIG, invalid as number),
+      ).rejects.toMatchObject({ name: 'WordpressFetchError', code: 'HTTP_ERROR' })
+      expect(fetchMock).toHaveBeenCalledTimes(0)
+    },
+  )
+
+  it('propagates WAF errors from expectJson (SiteGround captcha)', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse('<html>captcha</html>', {
+      status: 200,
+      url:    'https://oztop.com.au/sgcaptcha/?x',
+    }))
+    const { getExistingWordpressPost } = await import('./wordpress-client')
+    await expect(getExistingWordpressPost(CONFIG, 123))
+      .rejects.toMatchObject({ name: 'WordpressFetchError', code: 'SITEGROUND_ANTIBOT' })
+  })
+})
+
+describe('updateExistingWordpressPost', () => {
+  const realFetch = globalThis.fetch
+  let fetchMock: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    fetchMock = vi.fn()
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+  })
+  afterEach(() => {
+    globalThis.fetch = realFetch
+    vi.restoreAllMocks()
+  })
+
+  it('sends ONLY the fields the caller specified — partial update', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
+      id: 123,
+      link: 'https://oztop.com.au/tile-sizes-explained/',
+      modified: '2026-06-13T04:00:00',
+    }), { status: 200 }))
+
+    const { updateExistingWordpressPost } = await import('./wordpress-client')
+    const result = await updateExistingWordpressPost(CONFIG, {
+      postId:  123,
+      seoTitle: 'New Yoast Title',
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    expect(init.method).toBe('POST')
+    const sentBody = JSON.parse(init.body as string) as Record<string, unknown>
+
+    // Critical: ONLY meta._yoast_wpseo_title is sent, nothing else.
+    expect(sentBody).toEqual({
+      meta: { _yoast_wpseo_title: 'New Yoast Title' },
+    })
+    // Critical regression guard — sending `content: ''` would clear the body
+    // on WP. We MUST not include `content` here.
+    expect(sentBody).not.toHaveProperty('content')
+    expect(sentBody).not.toHaveProperty('title')
+
+    expect(result).toEqual({
+      postId:        123,
+      postType:      'post',
+      link:          'https://oztop.com.au/tile-sizes-explained/',
+      modified:      '2026-06-13T04:00:00',
+      updatedFields: ['seoTitle'],
+    })
+  })
+
+  it('maps Yoast meta keys correctly: seoTitle/seoDescription/focusKeyphrase', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
+      id: 123, link: 'x', modified: 'y',
+    }), { status: 200 }))
+
+    const { updateExistingWordpressPost } = await import('./wordpress-client')
+    await updateExistingWordpressPost(CONFIG, {
+      postId:         123,
+      seoTitle:       'T',
+      seoDescription: 'D',
+      focusKeyphrase: 'K',
+    })
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    const body = JSON.parse(init.body as string) as Record<string, unknown>
+
+    expect(body).toEqual({
+      meta: {
+        _yoast_wpseo_title:    'T',
+        _yoast_wpseo_metadesc: 'D',
+        _yoast_wpseo_focuskw:  'K',
+      },
+    })
+  })
+
+  it('uses /pages/{id} for postType="page"', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
+      id: 7, link: 'x', modified: 'y',
+    }), { status: 200 }))
+
+    const { updateExistingWordpressPost } = await import('./wordpress-client')
+    await updateExistingWordpressPost(CONFIG, {
+      postId:   7,
+      postType: 'page',
+      title:    'New Page Title',
+    })
+
+    const calledUrl = fetchMock.mock.calls[0][0] as string
+    expect(calledUrl).toBe('https://oztop.com.au/wp-json/wp/v2/pages/7')
+  })
+
+  it('forwards empty string values (clearing a Yoast field is a valid intent)', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
+      id: 123, link: 'x', modified: 'y',
+    }), { status: 200 }))
+
+    const { updateExistingWordpressPost } = await import('./wordpress-client')
+    await updateExistingWordpressPost(CONFIG, {
+      postId:         123,
+      focusKeyphrase: '',
+    })
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    const body = JSON.parse(init.body as string) as Record<string, unknown>
+    expect(body.meta).toEqual({ _yoast_wpseo_focuskw: '' })
+  })
+
+  it('rejects when NO updatable field is supplied', async () => {
+    const { updateExistingWordpressPost } = await import('./wordpress-client')
+    await expect(updateExistingWordpressPost(CONFIG, { postId: 123 }))
+      .rejects.toMatchObject({
+        name: 'WordpressFetchError',
+        code: 'HTTP_ERROR',
+      })
+    expect(fetchMock).toHaveBeenCalledTimes(0)
+  })
+
+  it.each<[number]>([[0], [-1], [1.5]])(
+    'rejects invalid postId %p before any fetch',
+    async invalid => {
+      const { updateExistingWordpressPost } = await import('./wordpress-client')
+      await expect(updateExistingWordpressPost(CONFIG, {
+        postId: invalid as number,
+        title:  'whatever',
+      })).rejects.toMatchObject({ name: 'WordpressFetchError', code: 'HTTP_ERROR' })
+      expect(fetchMock).toHaveBeenCalledTimes(0)
+    },
+  )
+
+  it('reports `updatedFields` in input order so the audit layer can log them', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
+      id: 123, link: 'x', modified: 'y',
+    }), { status: 200 }))
+
+    const { updateExistingWordpressPost } = await import('./wordpress-client')
+    const result = await updateExistingWordpressPost(CONFIG, {
+      postId:         123,
+      title:          'Tile Sizes Explained — Updated',
+      seoTitle:       'New Yoast',
+      focusKeyphrase: 'tile sizing',
+    })
+
+    expect(result.updatedFields).toEqual(['title', 'seoTitle', 'focusKeyphrase'])
+  })
+
+  it('propagates WAF errors (Wordfence block on PATCH)', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse('Generated by Wordfence', { status: 403 }))
+
+    const { updateExistingWordpressPost } = await import('./wordpress-client')
+    await expect(updateExistingWordpressPost(CONFIG, {
+      postId:   123,
+      seoTitle: 'x',
+    })).rejects.toMatchObject({
+      name: 'WordpressFetchError',
+      code: 'WORDFENCE_BLOCK',
+    })
+  })
+
+  it('returns updatedFields = [content] without sending other keys when only content is set', async () => {
+    // Regression guard against the most dangerous mistake: accidentally sending
+    // `title: undefined` would NOT clear the title, but sending `title: ''`
+    // WOULD. Make sure absent inputs never sneak into the request body.
+    fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
+      id: 123, link: 'x', modified: 'y',
+    }), { status: 200 }))
+
+    const { updateExistingWordpressPost } = await import('./wordpress-client')
+    await updateExistingWordpressPost(CONFIG, {
+      postId:  123,
+      content: '<p>Brand new body.</p>',
+    })
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    const body = JSON.parse(init.body as string) as Record<string, unknown>
+    expect(body).toEqual({ content: '<p>Brand new body.</p>' })
+    expect(body).not.toHaveProperty('title')
+    expect(body).not.toHaveProperty('meta')
+  })
+})
+
+describe('CMS_ACTION_TYPE.UPDATE_EXISTING', () => {
+  it('is exported with the agreed-upon string value (audit layer depends on this)', async () => {
+    const { CMS_ACTION_TYPE } = await import('./vocabulary')
+    expect(CMS_ACTION_TYPE.UPDATE_EXISTING).toBe('cms_update_existing')
+  })
+
+  it('does NOT clash with existing action types', async () => {
+    const { CMS_ACTION_TYPE } = await import('./vocabulary')
+    const values = Object.values(CMS_ACTION_TYPE) as string[]
+    expect(new Set(values).size).toBe(values.length)
+  })
+})
