@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { GeoChecklist } from './_components/GeoChecklist';
 import { PublishToWebsitePanel } from './_components/PublishToWebsitePanel';
 import { buildBlogHtml, computeGeoChecklist } from '@/lib/blog/html-builder';
+import { buildBlogRegeneratePayload } from '@/lib/blog/regenerate-payload';
 import type { BlogPost } from '@/types/magic-engine';
 
 
@@ -25,6 +26,7 @@ const STATUS_COLORS: Record<string, string> = {
  */
 export default function BlogPostPage() {
   const params = useParams();
+  const router = useRouter();
   const clientId = params.id as string;
   const postId   = params.postId as string;
 
@@ -38,6 +40,18 @@ export default function BlogPostPage() {
   const [saving, setSaving]       = useState(false);
   const [actionMsg, setActionMsg] = useState('');
   const [actionOk, setActionOk]   = useState<boolean | null>(null);
+
+  // P12.R.A1 — Action Bar:
+  //   editingContent: when true, show an inline textarea + Save/Cancel under
+  //                   the action bar so FDE can hand-fix html_body without
+  //                   leaving the page.
+  //   draftContent:   working copy of html_body while editingContent=true.
+  //   regenerating:   prevents double-firing Regenerate which is a credit-cost op.
+  //   deleting:       guards the Delete confirm flow.
+  const [editingContent, setEditingContent] = useState(false);
+  const [draftContent,   setDraftContent]   = useState('');
+  const [regenerating,   setRegenerating]   = useState(false);
+  const [deleting,       setDeleting]       = useState(false);
 
   const flash = (msg: string, ok: boolean) => {
     setActionMsg(msg); setActionOk(ok);
@@ -78,6 +92,100 @@ export default function BlogPostPage() {
     }, 5000)
     return () => clearInterval(timer)
   }, [post?.status, clientId, postId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── P12.R.A1 — Delete / Regenerate / Edit Content handlers ──────────────────
+
+  const handleDelete = async () => {
+    if (!post) return;
+    const ok = window.confirm(
+      `Delete this blog post permanently?\n\nTitle: "${post.title || post.topic}"\n\n` +
+      `This cannot be undone. If it's already been published to a CMS, the live page is not removed.`,
+    );
+    if (!ok) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/blog/${postId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(j.error ?? `Delete failed (HTTP ${res.status})`);
+      }
+      // Hard-navigate back to the blog list so any cached state of this post
+      // is left behind.
+      router.push(`/dashboard/clients/${clientId}/blog`);
+    } catch (err: unknown) {
+      flash(err instanceof Error ? err.message : 'Delete failed', false);
+      setDeleting(false);
+    }
+  };
+
+  const handleRegenerate = async () => {
+    if (!post) return;
+    if (!post.topic) {
+      flash('No topic recorded on this post — cannot regenerate', false);
+      return;
+    }
+    const ok = window.confirm(
+      `Regenerate creates a NEW draft with the same topic + mode and leaves THIS post alone.\n\n` +
+      `Topic: "${post.topic}"\nMode: ${post.mode}\n\n` +
+      `It will consume MTC. Continue?`,
+    );
+    if (!ok) return;
+    setRegenerating(true);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/blog`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(buildBlogRegeneratePayload(post)),
+      });
+      const j = await res.json() as { success?: boolean; post_id?: string; action?: string; error?: string };
+      if (!res.ok || !j.success) {
+        throw new Error(j.error ?? `Regenerate failed (HTTP ${res.status})`);
+      }
+      if (j.action === 'queued' && j.post_id) {
+        router.push(`/dashboard/clients/${clientId}/blog/${j.post_id}`);
+      } else {
+        flash(`Regenerate response: ${j.action ?? 'unknown'}`, false);
+      }
+    } catch (err: unknown) {
+      flash(err instanceof Error ? err.message : 'Regenerate failed', false);
+    } finally {
+      setRegenerating(false);
+    }
+  };
+
+  const openEditContent = () => {
+    if (!post) return;
+    setDraftContent(post.html_body ?? '');
+    setEditingContent(true);
+  };
+
+  const cancelEditContent = () => {
+    setEditingContent(false);
+    setDraftContent('');
+  };
+
+  const saveEditContent = async () => {
+    if (!post) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/blog/${postId}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ html_body: draftContent }),
+      });
+      const j = await res.json() as { success?: boolean; post?: BlogPost; error?: string };
+      if (!res.ok || !j.success || !j.post) {
+        throw new Error(j.error ?? `Save failed (HTTP ${res.status})`);
+      }
+      setPost(j.post);
+      setEditingContent(false);
+      flash('✓ Content updated', true);
+    } catch (err: unknown) {
+      flash(err instanceof Error ? err.message : 'Save failed', false);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleStatusChange = async (newStatus: string) => {
     if (!post) return;
@@ -308,6 +416,32 @@ ${showGeoBlock && post.geo_html_snapshot
               🔍 GSC Inspect
             </button>
           )}
+
+          {/* P12.R.A1 — Edit content / Regenerate / Delete recovery actions.
+              Surfaced for non-terminal posts only (published posts hide these
+              to avoid accidental edits to live content; rejected posts hide
+              them because they're being abandoned anyway). */}
+          {post.status !== 'published' && post.status !== 'rejected' && (
+            <>
+              <span className="mx-1 h-5 w-px bg-gray-200" aria-hidden="true" />
+              <button onClick={openEditContent}
+                disabled={editingContent}
+                className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 text-gray-700 hover:border-indigo-400 hover:text-indigo-700 disabled:opacity-40 transition-colors">
+                📝 Edit content
+              </button>
+              <button onClick={handleRegenerate}
+                disabled={regenerating || !post.topic}
+                title={!post.topic ? 'No topic on this post — cannot regenerate' : undefined}
+                className="px-3 py-1.5 text-xs font-medium rounded-lg border border-purple-300 text-purple-700 hover:bg-purple-50 disabled:opacity-40 transition-colors">
+                {regenerating ? '… Regenerating' : '🔄 Regenerate'}
+              </button>
+              <button onClick={handleDelete}
+                disabled={deleting}
+                className="px-3 py-1.5 text-xs font-medium rounded-lg border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-40 transition-colors">
+                {deleting ? '… Deleting' : '🗑 Delete'}
+              </button>
+            </>
+          )}
         </div>
 
         <div className="ml-auto flex items-center gap-2">
@@ -338,6 +472,41 @@ ${showGeoBlock && post.geo_html_snapshot
           )}
         </div>
       </div>
+
+      {/* P12.R.A1 — inline content editor. Mirrors the simple textarea pattern
+          used elsewhere in this dashboard — no markdown renderer / no diff,
+          just a faithful raw HTML edit surface. */}
+      {editingContent && (
+        <div className="bg-white rounded-xl border border-indigo-200 p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-900">📝 Edit content (HTML)</h3>
+            <span className="text-[11px] text-gray-500">
+              {draftContent.length.toLocaleString()} chars
+            </span>
+          </div>
+          <textarea
+            value={draftContent}
+            onChange={(e) => setDraftContent(e.target.value)}
+            rows={18}
+            className="w-full font-mono text-xs border border-gray-300 rounded-md p-3 focus:border-indigo-400 focus:outline-none"
+            placeholder="<p>Your HTML body here…</p>"
+          />
+          <p className="text-[11px] text-gray-500">
+            Tip: keep paragraph & heading tags intact — the GEO block, schema script and hero image
+            are appended automatically when this post is published or copied.
+          </p>
+          <div className="flex justify-end gap-2">
+            <button onClick={cancelEditContent} disabled={saving}
+              className="px-4 py-2 text-xs font-medium border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50">
+              Cancel
+            </button>
+            <button onClick={saveEditContent} disabled={saving || draftContent === (post.html_body ?? '')}
+              className="px-4 py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white rounded-lg">
+              {saving ? '… Saving' : 'Save content'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Two-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
