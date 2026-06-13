@@ -69,6 +69,15 @@ export default function ClientBlogPage() {
   const [freeWordCount, setFreeWordCount] = useState(1200);
   const [freeGenerating, setFreeGenerating] = useState(false);
 
+  // P12.R.A2 — explicit Mode selector for the AI Weak Spot Topics section.
+  // Default 'unified' (dual-signal SEO + GEO, strongest output). Replaces the
+  // legacy auto-pick `opp.primary_keyword ? 'unified' : 'geo_only'` which left
+  // FDE without a way to override — and on some opps fell through to a weaker
+  // mode silently. seo_only intentionally omitted: 2 of the 5 oldest drafts
+  // were seo_only and failed the quality threshold; we no longer want to
+  // surface that option as a one-click default.
+  const [weakSpotMode, setWeakSpotMode] = useState<'unified' | 'geo_only'>('unified');
+
   const flash = (msg: string, ok: boolean) => {
     setActionMsg(msg);
     setActionOk(ok);
@@ -171,7 +180,8 @@ export default function ClientBlogPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          mode: opp.primary_keyword ? 'unified' : 'geo_only',
+          // P12.R.A2 — explicit FDE-selected mode overrides the legacy auto-pick.
+          mode: weakSpotMode,
           topic: opp.query_text,
           source_query_id: opp.query_id,
           source_query_text: opp.query_text,
@@ -448,7 +458,7 @@ export default function ClientBlogPage() {
 
       {/* ── AI Weak Spot Topics ────────────────────────────────────── */}
       <section>
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
           <div>
             <h2 className="text-base font-semibold text-gray-900">
               🎯 AI Weak Spot Topics
@@ -457,7 +467,33 @@ export default function ClientBlogPage() {
               Queries where AI systems are not recommending {clientName}. Each is a blog opportunity.
             </p>
           </div>
-          <span className="text-xs text-gray-400">{opportunities.length} topics</span>
+
+          {/* P12.R.A2 — section-level Mode selector. Applied to every
+              Generate-Blog-Post click below. Default 'unified'. */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-semibold text-gray-600 uppercase tracking-wide">Mode</span>
+              <div className="flex gap-1 rounded-lg bg-gray-100 p-0.5">
+                {([['unified', '🔀 SEO + GEO'], ['geo_only', '🤖 GEO only']] as const).map(([val, label]) => (
+                  <button
+                    key={val}
+                    onClick={() => setWeakSpotMode(val)}
+                    title={val === 'unified'
+                      ? 'SEO keywords + AI entity signals (recommended default)'
+                      : 'AI visibility signals only — use when the topic has no SEO keyword data'}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                      weakSpotMode === val
+                        ? 'bg-white text-indigo-700 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-800'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <span className="text-xs text-gray-400">{opportunities.length} topics</span>
+          </div>
         </div>
 
         {opportunities.length === 0 ? (

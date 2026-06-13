@@ -5,9 +5,10 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { GeoChecklist } from './_components/GeoChecklist';
 import { PublishToWebsitePanel } from './_components/PublishToWebsitePanel';
+import { InternalLinksPanel } from './_components/InternalLinksPanel';
 import { buildBlogHtml, computeGeoChecklist } from '@/lib/blog/html-builder';
 import { buildBlogRegeneratePayload } from '@/lib/blog/regenerate-payload';
-import type { BlogPost } from '@/types/magic-engine';
+import type { BlogPost, BlogInternalLink } from '@/types/magic-engine';
 
 
 const STATUS_COLORS: Record<string, string> = {
@@ -40,6 +41,10 @@ export default function BlogPostPage() {
   const [saving, setSaving]       = useState(false);
   const [actionMsg, setActionMsg] = useState('');
   const [actionOk, setActionOk]   = useState<boolean | null>(null);
+  // P12.R.A4 — Focus Keyphrase inline editor state.
+  const [editingFocus, setEditingFocus] = useState(false);
+  const [focusDraft,   setFocusDraft]   = useState('');
+  const [savingFocus,  setSavingFocus]  = useState(false);
 
   // P12.R.A1 — Action Bar:
   //   editingContent: when true, show an inline textarea + Save/Cancel under
@@ -186,6 +191,50 @@ export default function BlogPostPage() {
       setSaving(false);
     }
   };
+
+  // ── P12.R.A4 — open / save / cancel focus-keyphrase inline editor. ──────────
+  const openFocusEditor = () => {
+    if (!post) return;
+    setFocusDraft(post.primary_keyword ?? '');
+    setEditingFocus(true);
+  };
+
+  const cancelFocusEditor = () => {
+    setEditingFocus(false);
+    setFocusDraft('');
+  };
+
+  const saveFocusKeyphrase = async () => {
+    if (!post) return;
+    const trimmed = focusDraft.trim();
+    setSavingFocus(true);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/blog/${postId}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        // Empty string clears the field — see PATCH handler.
+        body:    JSON.stringify({ primary_keyword: trimmed.length === 0 ? null : trimmed }),
+      });
+      const j = await res.json() as { success?: boolean; post?: BlogPost; error?: string };
+      if (!res.ok || !j.success || !j.post) {
+        throw new Error(j.error ?? `Save failed (HTTP ${res.status})`);
+      }
+      setPost(j.post);
+      setEditingFocus(false);
+      flash(trimmed ? '✓ Focus keyphrase updated' : '✓ Focus keyphrase cleared', true);
+    } catch (err: unknown) {
+      flash(err instanceof Error ? err.message : 'Save failed', false);
+    } finally {
+      setSavingFocus(false);
+    }
+  };
+
+  // P12.R.B10 — propagate panel-level edits back into the page-level cache so
+  // downstream consumers (e.g. the next GET poll) don't overwrite a fresh edit.
+  const handleInternalLinksChange = (next: BlogInternalLink[]) => {
+    setPost(p => p ? { ...p, internal_links: next } : p);
+  };
+
 
   const handleStatusChange = async (newStatus: string) => {
     if (!post) return;
@@ -542,6 +591,70 @@ ${showGeoBlock && post.geo_html_snapshot
           {/* SEO meta info */}
           <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
             <h3 className="text-sm font-semibold text-gray-900">SEO Metadata</h3>
+
+            {/* P12.R.A4 — Focus Keyphrase inline editor.
+                Wired so FDE can backfill the field when the generator left it
+                blank, instead of dropping back to Supabase Studio. */}
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-0.5">
+                <p className="text-xs font-medium text-gray-500">Focus Keyphrase</p>
+                {!editingFocus && (
+                  <button
+                    onClick={openFocusEditor}
+                    className="text-[11px] font-medium text-indigo-600 hover:underline"
+                  >
+                    {post.primary_keyword ? 'Edit' : '+ Add'}
+                  </button>
+                )}
+              </div>
+              {editingFocus ? (
+                <div className="space-y-1.5">
+                  <input
+                    type="text"
+                    autoFocus
+                    value={focusDraft}
+                    onChange={e => setFocusDraft(e.target.value)}
+                    placeholder="e.g. engineered timber Brisbane"
+                    maxLength={120}
+                    className="w-full px-2 py-1 text-xs border border-indigo-300 rounded focus:outline-none focus:border-indigo-500"
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') void saveFocusKeyphrase();
+                      if (e.key === 'Escape') cancelFocusEditor();
+                    }}
+                  />
+                  <div className="flex items-center justify-end gap-1.5">
+                    <button
+                      onClick={cancelFocusEditor}
+                      disabled={savingFocus}
+                      className="text-[11px] text-gray-500 hover:text-gray-700 disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => void saveFocusKeyphrase()}
+                      disabled={savingFocus}
+                      className="text-[11px] font-semibold px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded disabled:opacity-50"
+                    >
+                      {savingFocus ? '…' : 'Save'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p className="text-xs text-gray-800">
+                    {post.primary_keyword || (
+                      <span className="text-amber-700 italic">
+                        — Missing; Yoast SEO focus keyphrase will be empty on publish.
+                      </span>
+                    )}
+                  </p>
+                  {post.primary_keyword && (
+                    <p className="text-xs text-gray-400">{post.primary_keyword.length} chars</p>
+                  )}
+                </>
+              )}
+            </div>
+
             <div>
               <p className="text-xs font-medium text-gray-500 mb-0.5">Meta Title</p>
               <p className="text-xs text-gray-800">{post.meta_title || '—'}</p>
@@ -565,6 +678,17 @@ ${showGeoBlock && post.geo_html_snapshot
               </div>
             )}
           </div>
+
+          {/* P12.R.B10 — Internal Links Panel.
+              Reads blog_posts.internal_links and lets FDE toggle Resolved per
+              row. Empty array → component renders an empty-state card so the
+              FDE knows the panel works even when no links were proposed. */}
+          <InternalLinksPanel
+            clientId={clientId}
+            postId={postId}
+            initialLinks={post.internal_links ?? []}
+            onChange={handleInternalLinksChange}
+          />
         </div>
       </div>
     </div>
