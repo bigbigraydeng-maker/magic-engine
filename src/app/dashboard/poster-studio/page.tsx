@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { cx } from '@/components/ui/me-theme'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -8,7 +8,7 @@ import { cx } from '@/components/ui/me-theme'
 type Mode = 'magic_lab_class' | 'ray_perspective'
 type Platform = 'xiaohongshu' | 'instagram' | 'linkedin' | 'wechat'
 type InputType = 'url' | 'text' | 'image_url'
-type ImageStatus = 'none' | 'pending' | 'processing' | 'completed' | 'failed'
+type ImageStatus = 'none' | 'completed' | 'failed'
 
 interface CopyOutput {
   headline: string
@@ -81,8 +81,6 @@ export default function PosterStudioPage() {
   const [recentJobs, setRecentJobs] = useState<RecentJob[]>([])
   const [copiedField, setCopiedField] = useState<string | null>(null)
 
-  const pollRef = useRef<NodeJS.Timeout | null>(null)
-
   // ── Load recent jobs ───────────────────────────────────────────────────────
   const loadRecentJobs = useCallback(async () => {
     try {
@@ -96,49 +94,12 @@ export default function PosterStudioPage() {
 
   useEffect(() => { loadRecentJobs() }, [loadRecentJobs])
 
-  // ── Poll for image completion ──────────────────────────────────────────────
-  const startPolling = useCallback((jobId: string) => {
-    let attempts = 0
-    const MAX_ATTEMPTS = 40 // ~2 min
-
-    pollRef.current = setInterval(async () => {
-      attempts++
-      if (attempts > MAX_ATTEMPTS) {
-        clearInterval(pollRef.current!)
-        setResult(prev => prev ? { ...prev, image_status: 'failed' } : prev)
-        return
-      }
-
-      try {
-        const res = await fetch(`/api/poster-studio/jobs/${jobId}`)
-        if (!res.ok) return
-        const job = await res.json()
-
-        if (job.image_status === 'completed' && job.image_url) {
-          clearInterval(pollRef.current!)
-          setResult(prev => prev
-            ? { ...prev, image_url: job.image_url, image_status: 'completed' }
-            : prev
-          )
-          loadRecentJobs()
-        } else if (job.image_status === 'failed') {
-          clearInterval(pollRef.current!)
-          setResult(prev => prev ? { ...prev, image_status: 'failed' } : prev)
-        }
-      } catch { /* silent */ }
-    }, 3000)
-  }, [loadRecentJobs])
-
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
-
   // ── Generate ───────────────────────────────────────────────────────────────
   async function handleGenerate() {
     if (!inputValue.trim()) {
       setError('请填写输入内容')
       return
     }
-    if (pollRef.current) clearInterval(pollRef.current)
-
     setIsGenerating(true)
     setError(null)
     setResult(null)
@@ -162,10 +123,6 @@ export default function PosterStudioPage() {
 
       setResult(data)
       loadRecentJobs()
-
-      if (data.image_status === 'pending') {
-        startPolling(data.job_id)
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -413,12 +370,11 @@ export default function PosterStudioPage() {
 
           {/* Generating skeleton */}
           {isGenerating && (
-            <div className="flex flex-1 flex-col gap-3 rounded-2xl border border-white/[.06] bg-white/[.02] p-5">
-              <div className="h-5 w-2/3 animate-pulse rounded-full bg-white/[.06]" />
-              <div className="space-y-2 mt-2">
-                {[80, 65, 75, 60, 50].map((w, i) => (
-                  <div key={i} className="animate-pulse rounded-full bg-white/[.04]" style={{ height: 12, width: `${w}%` }} />
-                ))}
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-2xl border border-white/[.06] bg-white/[.02] p-5">
+              <div className="h-9 w-9 animate-spin rounded-full border-2 border-white/10 border-t-[#C4912E]" />
+              <div className="space-y-1.5 text-center">
+                <p className="text-[13px] text-white/50">AI 生成中…</p>
+                <p className="text-[11px] text-white/25">文案 + 配图同步生成，约 30-60s</p>
               </div>
             </div>
           )}
@@ -529,14 +485,6 @@ export default function PosterStudioPage() {
                       >
                         ↓ 下载图片
                       </a>
-                    </div>
-                  ) : result.image_status === 'pending' || result.image_status === 'processing' ? (
-                    <div className="flex flex-col items-center gap-3 py-10">
-                      <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/10 border-t-[#C4912E]" />
-                      <p className="text-[12px] text-white/30">Visual Studio 生成中…（约 30-60s）</p>
-                      <p className="text-[11px] text-white/20 text-center max-w-xs">
-                        {result.image_prompt}
-                      </p>
                     </div>
                   ) : result.image_status === 'failed' ? (
                     <p className="py-8 text-center text-[12px] text-red-400/70">
