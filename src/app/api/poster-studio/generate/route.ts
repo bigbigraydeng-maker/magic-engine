@@ -4,6 +4,7 @@ import { getAnthropicClientDirect, MODEL_SONNET, parseJsonResponse } from '@/lib
 import { fetchUrlAsMarkdown } from '@/lib/brief/jina'
 import { generateImage } from '@/lib/visual/openai-images'
 import { uploadFromBase64 } from '@/lib/visual/storage'
+import { guardAdmin } from '@/lib/auth/require-admin'
 
 export const maxDuration = 180
 
@@ -91,6 +92,9 @@ const PLATFORM_GUIDANCE: Record<Platform, string> = {
 }
 
 export async function POST(req: NextRequest) {
+  const guard = await guardAdmin()
+  if (guard) return guard
+
   try {
     const reqBody: GenerateBody = await req.json()
     const {
