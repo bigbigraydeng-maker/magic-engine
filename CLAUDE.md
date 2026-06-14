@@ -205,6 +205,52 @@
 
 ---
 
+## 多窗口 / 咒语接力工作流（强约束 · 2026-06-12 沉淀）⭐⭐
+
+> **事故背景**：2026-06-12 审 4 个 open PR（#460 / #455 / #452 / #448）发现**全部 `dirty`（跟 main 冲突）无法 merge**。最老的放了 4 天。根因 = **长命分支 × 高频共享文件（ROADMAP.md/CLAUDE.md）× 多 session 不同步** 三者叠加。两个 docs-only PR（2 文件 / 1 文件）也照样冲突，全因抢改 ROADMAP/CLAUDE.md；#460 描述说改 8 文件、GitHub 显示 78 文件 +4718 行 = 典型「分支基于旧 main、从没 sync」的 diff 虚胖症状。
+
+### 根因三条（记住这三个就够）
+
+1. **PR 开太久没合** → main 漂远 → 冲突必然。能合的几小时内合，别过夜拖天。
+2. **抢改 ROADMAP.md / CLAUDE.md** → 这俩是头号「冲突磁铁」，几乎每个 PR 都动它们。
+3. **多 session 各开各的、开工前不 sync main** → 全基于旧 main，最后全撞一起。
+
+### 咒语接力：新窗口拿到咒语后，**写代码前必做**（顺序不能乱）
+
+```bash
+git fetch origin                      # ① 永远先 fetch（只读，绝对安全）
+git checkout <咒语里的确切分支名>
+git pull --ff-only origin <分支>       # ② 拉该分支远程最新（别的窗口可能推过）
+git merge origin/main                 # ③ 把最新 main 合进来 —— 关键防漂移步骤
+# 解冲突（此刻冲突最小）→ 跑 npm run build + 测试 → 才开始写新代码
+```
+
+- **同步 main 必须用 `git merge origin/main`，禁止 rebase**：本仓强约束「绝对禁止 force push / rebase」，而 rebase 已 push 的分支必须 force push → 违规。merge 产生 merge commit、push 是 fast-forward、零违规（这是验证过的安全姿势）。
+- **merge 完务必重跑 build + 测试**：文本不冲突 ≠ 语义不冲突，main 的新改动可能悄悄破坏分支假设。
+
+### 咒语本身必须带的信息（光给任务名不够）
+
+1. **确切分支名**（不是让新窗口猜 / 新建重复分支）
+2. **PR 号**（若已开）
+3. 明示一句 **「开工前先 `git merge origin/main`」**
+4. **已完成 / 下一步**（让新窗口不重推导、不重做）
+5. **base 以最新 main 为准**
+
+### 其他铁律
+
+- **一个分支同一时间只允许一个窗口开**：开新窗口前先确认旧窗口已关；接力同一大任务用**同一分支**，全新并行任务基于**最新 main** 开新分支 + 旧窗口不关就用 `git worktree` 物理隔离。
+- **别在大任务/功能分支里顺手改 ROADMAP.md / CLAUDE.md**：登记类改动拆**独立小 PR 立即合**（纯文档、风险极低），把冲突源从功能 PR 里剥离。
+- **「文件数 vs 描述对不上」当漂移警报**：描述说 8 文件、GitHub 显示 78 → 分支太旧没 sync，早发现早 merge main。
+- **PR 切小、切短命**：别一个 PR 塞「核心修复 + 新 API + UI + migration + ROADMAP」（#460 的反面教材），拆小块快进快出。
+- **区分「不能合」vs「不该合」**：纯机械冲突 = 不能合（merge main 即可）；等 migration apply / 等真决策 = 不该合（合了也是半成品）。看 PR 先问卡在哪一类。
+- **带 migration 的 PR 天生两步合**：migration 必 PM 拍板、worker 不许自行 apply（见 § 开发约定），merge 要配合 PM 手动 apply 那一步，提前按两步规划。
+
+### 一句话
+
+> **长命分支是万恶之源。治本三招：①能合就快合 ②ROADMAP/CLAUDE.md 登记拆独立小 PR 立即合 ③新窗口开工先 `git fetch` + `git merge origin/main`（永远 merge，永不 rebase）。**
+
+---
+
 ## 产品战略方向（2026-05-18 确立）⭐
 
 > **DataForSEO 提供数据地基 → Magic Engine 在上面跑自动化执行引擎 → 同时覆盖 Google SEO + AI 搜索两个战场**

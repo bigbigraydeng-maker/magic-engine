@@ -22,9 +22,9 @@ import { analyzeViralReference } from '@/lib/reels/viral-analyzer'
 import { startCronRun } from '@/lib/cron/run-logger'
 
 export const dynamic     = 'force-dynamic'
-export const maxDuration = 120  // 2 min
+export const maxDuration = 300  // 5 min
 
-const BATCH_SIZE   = 8
+const BATCH_SIZE   = 4
 const DELAY_MS     = 5_000
 
 export async function POST(req: NextRequest): Promise<NextResponse> {

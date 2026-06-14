@@ -312,7 +312,7 @@ services:
     schedule: "*/2 * * * *"
     buildCommand: ""
     startCommand: |
-      curl -fsS --max-time 120 -X POST -H "Authorization: Bearer $CRON_SECRET" \
+      curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/viral-analyzer-worker \
         && curl -fsS "https://hc-ping.com/55891cbc-cfd5-4c58-b28b-f06206fade5a"
     envVars:

@@ -108,19 +108,29 @@ export function detectPlatform(url: string): 'youtube' | 'facebook' | 'tiktok' |
 
 // ─── YouTube: direct URL (no download) ───────────────────────────────────────
 
+const GEMINI_TIMEOUT_MS = 60_000
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms),
+    ),
+  ])
+}
+
 async function analyzeYouTubeVideo(url: string, apiKey: string): Promise<ViralAnalysisResult> {
   const genAI = new GoogleGenerativeAI(apiKey)
   const model = genAI.getGenerativeModel({ model: ANALYSIS_MODEL })
 
-  const result = await model.generateContent([
-    {
-      fileData: {
-        fileUri: url,
-        mimeType: 'video/*',
-      },
-    },
-    { text: ANALYSIS_PROMPT },
-  ])
+  const result = await withTimeout(
+    model.generateContent([
+      { fileData: { fileUri: url, mimeType: 'video/*' } },
+      { text: ANALYSIS_PROMPT },
+    ]),
+    GEMINI_TIMEOUT_MS,
+    'analyzeYouTubeVideo',
+  )
 
   return parseAnalysisResponse(result.response.text())
 }
@@ -153,15 +163,14 @@ export async function analyzeLocalVideoFile(
   const genAI = new GoogleGenerativeAI(apiKey)
   const model = genAI.getGenerativeModel({ model: ANALYSIS_MODEL })
 
-  const result = await model.generateContent([
-    {
-      fileData: {
-        fileUri: fileInfo.uri,
-        mimeType,
-      },
-    },
-    { text: ANALYSIS_PROMPT },
-  ])
+  const result = await withTimeout(
+    model.generateContent([
+      { fileData: { fileUri: fileInfo.uri, mimeType } },
+      { text: ANALYSIS_PROMPT },
+    ]),
+    GEMINI_TIMEOUT_MS,
+    'analyzeLocalVideoFile',
+  )
 
   // Clean up uploaded file (non-blocking, best-effort)
   fileManager.deleteFile(fileInfo.name).catch(() => {})
