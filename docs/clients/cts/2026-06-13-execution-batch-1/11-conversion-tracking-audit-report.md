@@ -239,15 +239,9 @@ import ConversionTracker from './ConversionTracker';
 
 | 检查项 | 工具 | 期望 | 状态 |
 |---|---|---|---|
-<<<<<<< HEAD
 | Google Ads `预约服务/Booking Service` 转化 fire | Chrome 真实提交抓网络请求 | `en=conversion`+label+value 1 NZD | ✅ 已实证（见 §0.6，2/2） |
 | Meta `Lead` event fire | Meta Pixel Helper | "Lead ● 使用中" 亮绿 | ✅ 已实证（见 §0.6） |
 | 直接/刷新打开 /thank-you 也 fire | A/B 抓 label_count | 修复前 0 → 修复后 3 | ✅ 已实证（PR #60 上线后） |
-=======
-| Google Ads `预约服务/Booking Service` 转化 fire（两条路） | Google Tag Assistant | "Conversion fired" 绿勾 + value 1.0 NZD | ☐ PENDING |
-| Meta `Lead` event fire（两条路） | Meta Pixel Helper | "Lead" fired 绿勾 + value 1.0 NZD | ☐ PENDING |
-| Meta Events Manager Test Events | Meta EM → Test Events | 看到 `Lead`（browser 源） | ☐ PENDING |
->>>>>>> origin/main
 
 3. 任一不绿 → 排查（最常见：PR 未 merge/未部署 / gtag·fbq 被 ad-blocker 拦 / 组件未渲染）。
 4. **24h 复查点**：**2026-06-14（NZST）**，PM 回 Google Ads → Conversions，`预约服务` 列出现真实数字（≠「—」、≠ 0）。
@@ -277,7 +271,6 @@ import ConversionTracker from './ConversionTracker';
 
 严格按红线 #2，必须等 **chinatravel PR merge → Render 部署 → §3 两条路径真实打绿 → 24h 见 Google Ads 真实转化数**，才能对诸葛亮说「闸 0 已绿」。在那之前 Campaign 2/3/M1 不应仅凭本报告上线。
 
-<<<<<<< HEAD
 **PM 放闸路线图**：
 1. ~~push → PR → merge chinatravel main → Render 部署~~ ✅ **已完成**（PR #54 merged + 生产 bundle 实证两条路径都含转化代码）。
 2. ⬜ **PM 走查打绿（唯一剩余技术步骤）**：装 Google Tag Assistant + Meta Pixel Helper，走①tour 询盘→/thank-you ②/contact 内联，各见「Conversion fired」+「Lead fired」绿勾（红线 #4：真实表单，不用 console 假 fire）。
@@ -319,13 +312,3 @@ Google Ads（105-817-1329）→ Tools → Conversions →「预约服务/Booking
 ---
 
 *报告人：子牙 · CTS conversion 单一 owner · chinatravel PR #54(merged)+#55(CI jest) · magic-engine PR #465(merged)+#466*
-=======
-**PM 放闸路线图（待办）**：
-1. push `claude/cts-conversion-thankyou-lead`（chinatravel 仓）→ 开 PR → review → **merge 到 main**（Render 自动部署）。
-2. 部署完按 §3 走查两条路径，打绿。
-3. 绿 + 24h 见真实转化数 → 回诸葛亮窗口说「闸 0 已绿」。
-
----
-
-*报告人：子牙 · 分支 `claude/cts-conversion-fix` · worktree `../magic-engine-cts-conv`*
->>>>>>> origin/main
