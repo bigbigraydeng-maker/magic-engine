@@ -39,6 +39,7 @@ interface ConnectorRow {
 
 interface ClientWork {
   client_id:          string
+  client_name?:       string
   site_url?:          string
   property_id?:       string
   meta_ad_account_id?: string
@@ -77,7 +78,7 @@ export async function GET(req: NextRequest) {
       .eq('status', 'connected'),
     supabaseAdmin
       .from('clients')
-      .select('id, meta_ad_account_id')
+      .select('id, name, meta_ad_account_id')
       .not('meta_ad_account_id', 'is', null),
   ])
 
@@ -90,7 +91,7 @@ export async function GET(req: NextRequest) {
   }
 
   const connectors = connResult.data
-  const metaClients = (metaResult.data ?? []) as Array<{ id: string; meta_ad_account_id: string }>
+  const metaClients = (metaResult.data ?? []) as Array<{ id: string; name: string; meta_ad_account_id: string }>
 
   // ── 2. Build per-client work map ───────────────────────────────────────────
   const workMap = new Map<string, ClientWork>()
@@ -116,6 +117,7 @@ export async function GET(req: NextRequest) {
   // Merge Meta Ads clients into work map
   for (const c of metaClients) {
     const entry = workMap.get(c.id) ?? { client_id: c.id }
+    entry.client_name = c.name
     entry.meta_ad_account_id = c.meta_ad_account_id
     workMap.set(c.id, entry)
   }
@@ -138,8 +140,6 @@ export async function GET(req: NextRequest) {
     })
   }
 
-  const metaToken = process.env.META_SYSTEM_USER_TOKEN
-
   // ── 3. Process each client ─────────────────────────────────────────────────
   const results: ClientResult[] = []
 
@@ -154,8 +154,14 @@ export async function GET(req: NextRequest) {
       result.ga4 = await syncGa4(client.client_id, client.property_id)
     }
 
-    if (client.meta_ad_account_id && metaToken) {
-      result.meta = await syncMeta(client.client_id, client.meta_ad_account_id, metaToken)
+    if (client.meta_ad_account_id) {
+      // Per-client token: {SLUG}_META_SYSTEM_USER_TOKEN, fallback to global META_SYSTEM_USER_TOKEN
+      const slug = (client.client_name ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '_')
+      const metaToken = (slug && process.env[`${slug}_META_SYSTEM_USER_TOKEN`])
+        || process.env.META_SYSTEM_USER_TOKEN
+      if (metaToken) {
+        result.meta = await syncMeta(client.client_id, client.meta_ad_account_id, metaToken)
+      }
     }
 
     results.push(result)
