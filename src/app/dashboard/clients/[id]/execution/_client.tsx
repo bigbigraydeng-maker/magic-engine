@@ -36,6 +36,7 @@ import { DataPullbackSection } from './_components/DataPullbackSection'
 import { AnomalySignalPanel } from './_components/AnomalySignalPanel'
 import { IntelligenceSummarySection } from '../_components/intelligence/IntelligenceSummarySection'
 import { BriefGateBanner } from '../_components/BriefGateBanner'
+import { pageRewriterUrlForExecutionItem } from '@/lib/page-rewriter/url'
 // MemoryAnnotationPanel removed — Phase 20.D item 6: system handles flywheel recording automatically
 
 // ---------------------------------------------------------------------------
@@ -1098,6 +1099,22 @@ function TaskDetailDrawer({
           )}
           {/* Item 4: 自主飞轮操作全部关闭；Item 6: in_house 在 execButton 内已 return null */}
           {!isAutonomousItem(item) && execButton}
+
+          {/* P12.R.M4: Page Rewriter shortcut for SEO action cards.
+              Surfaces ME's built-in page-rewriter so FDE can rewrite Yoast
+              title / meta / focus keyphrase / content on an existing WP page
+              without leaving the dashboard. Audit row will link back via
+              kanban_item_id. We render unconditionally for SEO cards that
+              aren't yet done — execution_target doesn't carry a URL today, so
+              the rewriter UI handles URL entry on its lookup screen. */}
+          {item.dimension === 'seo' && !isDone && (
+            <a
+              href={pageRewriterUrlForExecutionItem(item.client_id, item.id)}
+              className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-3 text-xs font-black text-violet-800 transition-colors hover:bg-violet-100"
+            >
+              在 ME 中改写此页 →
+            </a>
+          )}
 
           {/* P21.8 fix — AI Factory 一键量产：平台多选 + 量产按钮 */}
           {isFactoryTask && !isDone && (

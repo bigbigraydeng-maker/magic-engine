@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { countWords } from '@/lib/blog/generator'
 import { generateSocialSuggestions } from '@/lib/blog/generate-social-suggestions'
+import { sanitizeInternalLinks } from '@/lib/blog/internal-links-sanitize'
 import type { BlogPost, BlogStatus } from '@/types/magic-engine'
 
 /**
@@ -80,6 +81,10 @@ export async function PATCH(
       meta_title?: string
       meta_description?: string
       html_body?: string
+      // P12.R.A4 — manual primary_keyword edit (FDE backfill missing focus keyphrase).
+      primary_keyword?: string | null
+      // P12.R.B10 — Internal Links Panel toggle resolved flag.
+      internal_links?: Array<{ anchor: unknown; target_slug: unknown; resolved?: unknown }>
     }
 
     const VALID_STATUSES: BlogStatus[] = ['draft', 'approved', 'published', 'rejected']
@@ -108,6 +113,28 @@ export async function PATCH(
       }
       patch.html_body  = body.html_body
       patch.word_count = countWords(body.html_body)
+    }
+
+    // P12.R.A4 — primary_keyword edit. Empty string + explicit null both treated
+    // as "clear the field". Caps at 120 chars to match Yoast focus keyphrase
+    // length expectations.
+    if (body.primary_keyword !== undefined) {
+      patch.primary_keyword = body.primary_keyword === null || body.primary_keyword === ''
+        ? null
+        : String(body.primary_keyword).slice(0, 120)
+    }
+
+    // P12.R.B10 — internal_links full-array replace. The UI sends the entire
+    // BlogInternalLink[] back with `resolved` toggled. sanitizeInternalLinks
+    // returns the safe canonical shape so the column never holds tampered data.
+    if (body.internal_links !== undefined) {
+      if (!Array.isArray(body.internal_links)) {
+        return NextResponse.json(
+          { success: false, error: 'internal_links must be an array' },
+          { status: 400 },
+        )
+      }
+      patch.internal_links = sanitizeInternalLinks(body.internal_links)
     }
 
     if (Object.keys(patch).length === 0) {

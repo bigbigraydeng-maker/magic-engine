@@ -43,7 +43,7 @@ import {
   deleteWordpressPage,
 } from '@/lib/cms/wordpress-client'
 import { prepareCmsContent } from '@/lib/cms/html-sanitizer'
-import { buildArticleSchemaScript } from '@/lib/blog/html-builder'
+import { buildArticleSchemaScript, sanitizeGeoSnapshot } from '@/lib/blog/html-builder'
 import type { ArticleSchemaPost } from '@/lib/blog/html-builder'
 import { CMS_ACTION_TYPE } from '@/lib/cms/vocabulary'
 
@@ -220,15 +220,21 @@ async function handleDraft(clientId: string, body: DraftRequestBody): Promise<Ne
 
   const title          = typeof post.title             === 'string' ? post.title             : 'Untitled'
   const rawHtml        = typeof post.html_body         === 'string' ? post.html_body         : ''
-  const geoSnapshot    = typeof post.geo_html_snapshot === 'string' ? post.geo_html_snapshot : ''
+  // P12.R.B7: route through sanitizeGeoSnapshot so legacy V1 snapshots (with
+  // their fragile inline `position:absolute` style) are wrapped in a V2 hidden
+  // div before publishing. Without this, WP Gutenberg / Classic editor strip
+  // the inline style on paste and leak "[INSTRUCTIONS FOR AI AGENTS]" text to
+  // the public page (P0 incident 2026-06-13 04:53).
+  const geoSnapshot    = sanitizeGeoSnapshot(
+    typeof post.geo_html_snapshot === 'string' ? post.geo_html_snapshot : '',
+  )
   const excerpt        = typeof post.meta_description  === 'string' ? post.meta_description  : undefined
   // P14.C.4: JSON-LD BlogPosting schema for Google rich results.
   // Built from post metadata + WP siteUrl so the published page declares its
   // canonical URL. The sanitizer preserves <script type="application/ld+json"> blocks.
   const schemaScript   = buildArticleSchemaScript(post as ArticleSchemaPost, conn.siteUrl)
   // Sanitize user content only; append GEO block + schema AFTER sanitization so
-  // GEO's style="position:absolute;top:-9999px" / aria-hidden and the JSON-LD
-  // script tag survive intact.
+  // GEO's hidden attribute + <style> block and the JSON-LD script tag survive intact.
   const content        = [
     prepareCmsContent(rawHtml),
     geoSnapshot,

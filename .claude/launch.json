@@ -7,6 +7,12 @@
       "runtimeArgs": ["run", "dev"],
       "port": 3001,
       "autoPort": false
+    },
+    {
+      "name": "membership-deck",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["public/decks/magic-lab-class-membership/serve.py"],
+      "port": 8799
     }
   ]
 }
