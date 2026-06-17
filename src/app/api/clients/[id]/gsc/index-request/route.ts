@@ -23,6 +23,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { getValidAccessToken } from '@/lib/google-oauth/client'
+import { getValidToken, PlatformConnectionNotFoundError } from '@/lib/platform-oauth/token-manager'
 import { requestIndexing } from '@/lib/gsc/indexing-client'
 import { buildAuthUrl, buildState } from '@/lib/google-oauth/client'
 import { COMBINED_GOOGLE_SCOPES } from '@/lib/google-oauth/client'
@@ -57,9 +58,18 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   }
 
   // Fetch a valid OAuth access token for this client.
+  // Try new encrypted path first, fall back to legacy google_oauth_tokens.
   let accessToken: string
   try {
-    const token = await getValidAccessToken(clientId)
+    let token: string | null = null
+    try {
+      token = await getValidToken(clientId, 'google_gsc')
+    } catch (err) {
+      if (!(err instanceof PlatformConnectionNotFoundError)) {
+        console.warn('[gsc/index-request] getValidToken error:', err instanceof Error ? err.message : err)
+      }
+    }
+    if (!token) token = await getValidAccessToken(clientId)
     if (!token) throw new Error('No valid access token')
     accessToken = token
   } catch {
