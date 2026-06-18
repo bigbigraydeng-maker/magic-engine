@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { checkImageStatus } from '@/lib/visual/atlas'
+import { guardAdmin } from '@/lib/auth/require-admin'
 
-// GET /api/poster-studio/jobs/[id] — poll job status (image completion)
+// GET /api/poster-studio/jobs/[id] — poll job status (admin only)
 export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const guard = await guardAdmin()
+  if (guard) return guard
+
   const { id } = params
 
   const { data: job, error } = await supabaseAdmin

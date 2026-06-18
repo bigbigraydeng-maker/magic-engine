@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { getAnthropicClientDirect, MODEL_SONNET } from '@/lib/anthropic/client'
+import { getAnthropicClientDirect, MODEL_SONNET, parseJsonResponse } from '@/lib/anthropic/client'
 import { fetchUrlAsMarkdown } from '@/lib/brief/jina'
-import { submitImageGeneration } from '@/lib/visual/atlas'
-import { parseJsonResponse } from '@/lib/anthropic/client'
+import { generateImage } from '@/lib/visual/openai-images'
+import { uploadFromBase64 } from '@/lib/visual/storage'
+import { guardAdmin } from '@/lib/auth/require-admin'
 
-export const maxDuration = 120
+export const maxDuration = 180
 
 type Mode = 'magic_lab_class' | 'ray_perspective'
 type Platform = 'xiaohongshu' | 'instagram' | 'linkedin' | 'wechat'
@@ -30,12 +31,12 @@ interface CopyOutput {
   image_prompt: string
 }
 
-// ── Platform dimensions for Atlas ─────────────────────────────────────────────
-const PLATFORM_DIMS: Record<Platform, { width: number; height: number }> = {
-  xiaohongshu: { width: 768,  height: 1024 },
-  instagram:   { width: 1024, height: 1024 },
-  linkedin:    { width: 1024, height: 576  },
-  wechat:      { width: 1024, height: 1024 },
+// ── Platform → OpenAI aspect ratio ────────────────────────────────────────────
+const PLATFORM_ASPECT: Record<Platform, string> = {
+  xiaohongshu: '9:16',
+  instagram:   '1:1',
+  linkedin:    '16:9',
+  wechat:      '1:1',
 }
 
 // ── Brand voice prompts ────────────────────────────────────────────────────────
@@ -56,7 +57,7 @@ const SYSTEM_PROMPTS: Record<Mode, string> = {
 {
   "headline": "标题（15字内）",
   "body": "正文（根据平台长度要求）",
-  "hashtags": ["tag1", "tag2", ...最多8个"],
+  "hashtags": ["tag1", "tag2", ...最多8个],
   "platform_note": "针对此平台的一句话发布建议",
   "image_prompt": "English prompt for image generation (50-80 words, professional/educational aesthetic, no text in image)"
 }`,
@@ -77,7 +78,7 @@ const SYSTEM_PROMPTS: Record<Mode, string> = {
 {
   "headline": "标题（15字内，要有点冲）",
   "body": "正文",
-  "hashtags": ["tag1", "tag2", ...最多6个"],
+  "hashtags": ["tag1", "tag2", ...最多6个],
   "platform_note": "针对此平台的一句话发布建议",
   "image_prompt": "English prompt for image generation (50-80 words, bold personal brand aesthetic, authentic feel, no text in image)"
 }`,
@@ -91,8 +92,11 @@ const PLATFORM_GUIDANCE: Record<Platform, string> = {
 }
 
 export async function POST(req: NextRequest) {
+  const guard = await guardAdmin()
+  if (guard) return guard
+
   try {
-    const body: GenerateBody = await req.json()
+    const reqBody: GenerateBody = await req.json()
     const {
       mode,
       platform,
@@ -102,7 +106,7 @@ export async function POST(req: NextRequest) {
       input_image_url,
       source_label,
       generate_image = true,
-    } = body
+    } = reqBody
 
     if (!mode || !platform || !input_type) {
       return NextResponse.json({ error: 'mode, platform, input_type are required' }, { status: 400 })
@@ -148,21 +152,16 @@ export async function POST(req: NextRequest) {
 
     const jobId = job.id
 
-    // ── Step 3: call Claude to generate copy ──────────────────────────────────
-    const systemPrompt = SYSTEM_PROMPTS[mode]
-    const userMessage = `平台：${platform}（${PLATFORM_GUIDANCE[platform]}）
-
-原始素材：
-${rawContent.slice(0, 8000)}
-
-请改写为「${mode === 'magic_lab_class' ? 'Magic Lab Class' : '大瑞视角'}」风格的${platform}帖子。`
-
+    // ── Step 3: Claude generates copy + image prompt ──────────────────────────
     const anthropic = getAnthropicClientDirect()
     const claudeRes = await anthropic.messages.create({
       model: MODEL_SONNET,
       max_tokens: 1500,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userMessage }],
+      system: SYSTEM_PROMPTS[mode],
+      messages: [{
+        role: 'user',
+        content: `平台：${platform}（${PLATFORM_GUIDANCE[platform]}）\n\n原始素材：\n${rawContent.slice(0, 8000)}\n\n请改写为「${mode === 'magic_lab_class' ? 'Magic Lab Class' : '大瑞视角'}」风格的${platform}帖子。`,
+      }],
     })
 
     const rawJson = (claudeRes.content[0] as { type: string; text: string }).text
@@ -172,29 +171,36 @@ ${rawContent.slice(0, 8000)}
       throw new Error('Claude returned incomplete copy')
     }
 
-    // ── Step 4: kick off Atlas image generation (async) ───────────────────────
-    let atlasJobId: string | null = null
-    let imageStatus: 'none' | 'pending' = 'none'
+    const { headline, body: copyBody, hashtags, platform_note, image_prompt } = copy
 
-    if (generate_image && copy.image_prompt) {
-      const dims = PLATFORM_DIMS[platform]
-      const { job_id } = await submitImageGeneration({
-        prompt: copy.image_prompt,
-        width: dims.width,
-        height: dims.height,
-      })
-      atlasJobId = job_id
-      imageStatus = 'pending'
+    // ── Step 4: OpenAI image generation (synchronous) ─────────────────────────
+    let imageUrl: string | null = null
+    let imageStatus: 'none' | 'completed' | 'failed' = 'none'
+
+    if (generate_image && image_prompt) {
+      try {
+        const aspect_ratio = PLATFORM_ASPECT[platform]
+        const { b64 } = await generateImage({ prompt: image_prompt, aspect_ratio })
+        const { storage_url } = await uploadFromBase64({
+          base64: b64,
+          clientId: 'magic-lab-internal',
+          folder: `poster-studio/${jobId}`,
+          assetType: 'image',
+        })
+        imageUrl = storage_url
+        imageStatus = 'completed'
+      } catch {
+        imageStatus = 'failed'
+      }
     }
 
-    // ── Step 5: update DB row ─────────────────────────────────────────────────
-    const { headline, body: copyBody, hashtags, platform_note, image_prompt } = copy
+    // ── Step 5: persist result ────────────────────────────────────────────────
     await supabaseAdmin
       .from('poster_studio_jobs')
       .update({
         generated_copy: { headline, body: copyBody, hashtags, platform_note },
         image_prompt,
-        atlas_job_id: atlasJobId,
+        image_url: imageUrl,
         image_status: imageStatus,
         status: 'completed',
         updated_at: new Date().toISOString(),
@@ -206,7 +212,7 @@ ${rawContent.slice(0, 8000)}
       job_id: jobId,
       copy: { headline, body: copyBody, hashtags, platform_note },
       image_prompt,
-      image_url: null,
+      image_url: imageUrl,
       image_status: imageStatus,
     })
   } catch (err) {
