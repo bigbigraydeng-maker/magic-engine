@@ -21,7 +21,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchGscSnapshot } from '@/lib/gsc/client'
 import { fetchGa4Snapshot } from '@/lib/ga4/client'
-import { getAdAccountInsights, getAdCampaignInsights } from '@/lib/meta/client'
+import { getAdAccountInsights, getAdCampaignInsights, MetaAdsInsights } from '@/lib/meta/client'
 import { SEO_METRIC_KEY, GA4_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import { MetaAdsAdapter } from '@/lib/flywheel/adapters/MetaAdsAdapter'
 import { startCronRun } from '@/lib/cron/run-logger'
@@ -160,7 +160,7 @@ export async function GET(req: NextRequest) {
       const metaToken = (slug && process.env[`${slug}_META_SYSTEM_USER_TOKEN`])
         || process.env.META_SYSTEM_USER_TOKEN
       if (metaToken) {
-        result.meta = await syncMeta(client.client_id, client.meta_ad_account_id, metaToken)
+        result.meta = await syncMeta(client.client_id, client.meta_ad_account_id, metaToken, slug)
       }
     }
 
@@ -368,6 +368,7 @@ async function syncMeta(
   clientId: string,
   adAccountId: string,
   accessToken: string,
+  clientSlug: string,
 ): Promise<{ success: boolean; snapshot_id?: string; error?: string }> {
   try {
     const today        = new Date()
@@ -411,8 +412,48 @@ async function syncMeta(
     // pullMetrics() reads the latest meta_ads_snapshots row (just inserted above).
     await new MetaAdsAdapter().pullMetrics(clientId).catch(() => { /* non-fatal */ })
 
+    // Append daily row to Airtable Meta Ads Daily table (non-fatal).
+    await appendAirtableMetaDaily(clientSlug, adAccountId, insights, until).catch(() => {})
+
     return { success: true, snapshot_id: (data as { id: string }).id }
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' }
   }
+}
+
+// ─── Airtable Meta Ads Daily append ──────────────────────────────────────────
+// Appends one row per client per day to the client's Airtable "Meta Ads Daily"
+// table. Requires env vars: AIRTABLE_API_KEY, {SLUG}_AIRTABLE_META_BASE_ID,
+// {SLUG}_AIRTABLE_META_TABLE_ID. Silently skips if any are missing.
+async function appendAirtableMetaDaily(
+  clientSlug: string,
+  adAccountId: string,
+  insights: MetaAdsInsights,
+  dateStr: string,
+): Promise<void> {
+  const apiKey  = process.env.AIRTABLE_API_KEY
+  const baseId  = process.env[`${clientSlug}_AIRTABLE_META_BASE_ID`]
+  const tableId = process.env[`${clientSlug}_AIRTABLE_META_TABLE_ID`]
+  if (!apiKey || !baseId || !tableId) return
+
+  const ctrPct = insights.ctr != null ? Math.round(insights.ctr * 10000) / 100 : null
+
+  const fields: Record<string, unknown> = {
+    'Date':        dateStr,
+    'Ad Name':     'Daily Account Total (auto)',
+    'Campaign ID': adAccountId,
+    'Impressions': insights.impressions,
+    'Clicks':      insights.clicks,
+    'Spend NZD':   insights.spend,
+    'Status':      'ACTIVE',
+    'Note':        `Auto-synced ${dateStr}. NZ$${insights.spend.toFixed(2)} spend / ${insights.impressions.toLocaleString()} imp / ${insights.clicks} clicks${ctrPct != null ? ` / CTR ${ctrPct}%` : ''}`,
+  }
+  if (ctrPct != null)       fields['CTR %']   = ctrPct
+  if (insights.cpc != null) fields['CPC NZD'] = insights.cpc
+
+  await fetch(`https://api.airtable.com/v0/${baseId}/${tableId}`, {
+    method:  'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ fields }),
+  })
 }
