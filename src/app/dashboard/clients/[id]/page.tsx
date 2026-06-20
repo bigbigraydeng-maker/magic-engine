@@ -57,7 +57,11 @@ function RadarChart({ scores }: { scores: Record<string, number> }) {
   const rings = [25, 50, 75, 100];
 
   const scorePoly = HEALTH_DIMS
-    .map((d, i) => pt(i, ((scores[d.key] ?? 0) / 100) * maxR))
+    .map((d, i) => {
+      const s = scores[d.key];
+      return s != null ? pt(i, (s / 100) * maxR) : null;
+    })
+    .filter((p): p is [number, number] => p !== null)
     .map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`)
     .join(' ');
 
@@ -80,7 +84,9 @@ function RadarChart({ scores }: { scores: Record<string, number> }) {
       })}
       <polygon points={scorePoly} fill="rgba(196,145,46,0.18)" stroke="#C4912E" strokeWidth="2" strokeLinejoin="round" />
       {HEALTH_DIMS.map((d, i) => {
-        const [x, y] = pt(i, ((scores[d.key] ?? 0) / 100) * maxR);
+        const s = scores[d.key];
+        if (s == null) return null;
+        const [x, y] = pt(i, (s / 100) * maxR);
         return <circle key={i} cx={x.toFixed(1)} cy={y.toFixed(1)} r="3.5" fill="#C4912E" stroke="white" strokeWidth="1.5" />;
       })}
       {HEALTH_DIMS.map((d, i) => {
