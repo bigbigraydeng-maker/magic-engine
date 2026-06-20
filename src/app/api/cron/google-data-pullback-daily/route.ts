@@ -23,7 +23,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchGscSnapshot } from '@/lib/gsc/client'
-import { fetchGa4Snapshot } from '@/lib/ga4/client'
+import { fetchGa4Snapshot, fetchGa4PaidSearchMetrics } from '@/lib/ga4/client'
 import { getAdAccountInsights, getAdCampaignInsights, MetaAdsInsights } from '@/lib/meta/client'
 import { fetchAccountInsights, loadGoogleAdsCreds } from '@/lib/google-ads/client'
 import { SEO_METRIC_KEY, GA4_METRIC_KEY, ADS_METRIC_KEY } from '@/lib/flywheel/vocabulary'
@@ -407,6 +407,45 @@ async function syncGa4(
       .from('flywheel_metrics')
       .insert(ga4MetricsRows)
       .then(() => {}, () => { /* non-fatal — snapshot already saved */ })
+
+    // Pull paid search metrics from GA4 and write to the ads flywheel.
+    // Non-fatal: if the account has no paid search traffic the rows will be 0.
+    const paidMetrics = await fetchGa4PaidSearchMetrics(propertyId, clientId).catch(() => null)
+    if (paidMetrics) {
+      const paidKeys = [
+        ADS_METRIC_KEY.GA4_PAID_SESSIONS,
+        ADS_METRIC_KEY.GA4_PAID_USERS,
+        ADS_METRIC_KEY.GA4_PAID_CONVERSIONS,
+      ]
+      await supabaseAdmin
+        .from('flywheel_metrics')
+        .delete()
+        .eq('client_id', clientId)
+        .eq('source', 'ga4_paid_search_pullback')
+        .in('metric_key', paidKeys)
+        .gte('measured_at', todayStart)
+        .lte('measured_at', todayEnd)
+        .then(() => {}, () => {})
+
+      const paidRows = [
+        { metric_key: ADS_METRIC_KEY.GA4_PAID_SESSIONS,    metric_value: paidMetrics.paid_sessions },
+        { metric_key: ADS_METRIC_KEY.GA4_PAID_USERS,       metric_value: paidMetrics.paid_users },
+        { metric_key: ADS_METRIC_KEY.GA4_PAID_CONVERSIONS, metric_value: paidMetrics.paid_conversions },
+      ].map(m => ({
+        client_id:    clientId,
+        flywheel:     'ads' as const,
+        metric_key:   m.metric_key,
+        metric_value: m.metric_value,
+        source:       'ga4_paid_search_pullback',
+        source_ref:   { period_start: paidMetrics.period_start, period_end: paidMetrics.period_end },
+        measured_at:  new Date().toISOString(),
+      }))
+
+      await supabaseAdmin
+        .from('flywheel_metrics')
+        .insert(paidRows)
+        .then(() => {}, () => { /* non-fatal */ })
+    }
 
     return { success: true, snapshot_id: (data as { id: string }).id }
   } catch (err) {
