@@ -28,6 +28,17 @@ export interface CrawlResult {
   statusCode: number
   error?: string
   crawledAt: Date
+  /**
+   * Set when Jina returned an anti-bot challenge page (SiteGround / Cloudflare
+   * / Wordfence / Sucuri / generic). The crawler still records the URL but
+   * downstream code MUST skip writing markdown/title back to `client_site_pages`
+   * (otherwise the "Robot Challenge Screen" stubs overwrite real page data).
+   *
+   * 2026-06-20 Oztop incident: 30+ product-category pages stored as
+   * `title="Robot Challenge Screen"` because we trusted Jina's output without
+   * fingerprinting. See antibot-detector.ts for the detection rules.
+   */
+  antibot?: { kind: string; evidence: string }
 }
 
 // ---------------------------------------------------------------------------
@@ -331,13 +342,22 @@ export async function crawlPages(
 
     try {
       const { fetchUrlAsMarkdown } = await import('../brief/jina')
+      const { detectAntibotChallenge } = await import('./antibot-detector')
       const jinaResult = await withTimeout(fetchUrlAsMarkdown(url), timeout)
+      const title = jinaResult.title || extractTitle(jinaResult.markdown, url)
+
+      // 2026-06-20 Oztop incident — Jina passes anti-bot challenge pages
+      // through verbatim, polluting client_site_pages with stub rows. Flag
+      // them here so the job-executor can route them to crawl_status
+      // 'antibot_challenged' instead of overwriting real page data.
+      const antibot = detectAntibotChallenge(jinaResult.markdown, title)
       results.push({
         url,
-        markdown: jinaResult.markdown,
-        title: jinaResult.title || extractTitle(jinaResult.markdown, url),
+        markdown: antibot ? '' : jinaResult.markdown,
+        title:    antibot ? '' : title,
         statusCode: 200,
         crawledAt,
+        ...(antibot ? { antibot, error: `antibot_${antibot.kind}: ${antibot.evidence}` } : {}),
       })
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err)
