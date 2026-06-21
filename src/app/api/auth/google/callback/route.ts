@@ -20,6 +20,7 @@ import {
   type OAuthFlow,
 } from '@/lib/google-oauth/client'
 import { supabaseAdmin } from '@/lib/supabase'
+import { encryptToken } from '@/lib/platform-oauth/vocabulary'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -92,6 +93,33 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   } catch (err) {
     console.error('[google/callback] failed to store tokens:', err)
     return NextResponse.redirect(destination(flow, clientId, 'error'))
+  }
+
+  // Dual-write to platform_oauth_connections (encrypted path) so getValidToken()
+  // works for GSC. Keep writing to google_oauth_tokens above for backward compat.
+  if (tokens.refresh_token) {
+    const expiresAt = new Date(Date.now() + tokens.expires_in * 1000)
+    const { error: connErr } = await supabaseAdmin
+      .from('platform_oauth_connections')
+      .upsert(
+        {
+          client_id:         clientId,
+          provider:          'google_gsc',
+          access_token_enc:  encryptToken(tokens.access_token),
+          refresh_token_enc: encryptToken(tokens.refresh_token),
+          token_expiry:      expiresAt.toISOString(),
+          account_id:        googleEmail ?? clientId,
+          display_name:      googleEmail ?? 'Google Search Console',
+          scopes:            tokens.scope.split(' '),
+          status:            'active',
+          updated_at:        new Date().toISOString(),
+        },
+        { onConflict: 'client_id,provider,account_id' },
+      )
+    if (connErr) {
+      console.warn('[google/callback] dual-write to platform_oauth_connections failed:', connErr.message)
+      // Non-fatal — legacy path still works
+    }
   }
 
   // Update GSC connector — preserve site_url and existing 'connected' status.

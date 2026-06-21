@@ -16,6 +16,7 @@
 
 import { createSign } from 'crypto'
 import { getValidAccessToken } from '@/lib/google-oauth/client'
+import { getValidToken, PlatformConnectionNotFoundError } from '@/lib/platform-oauth/token-manager'
 import type { GscSearchData, GscQueryRow } from '@/lib/zhangqian/types'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -338,13 +339,26 @@ async function querySearchAnalytics(
 // ─── Token resolution ─────────────────────────────────────────────────────────
 
 async function resolveAccessToken(clientId?: string): Promise<string | null> {
-  // 1. OAuth token (per-client, preferred)
+  // 1. New encrypted path (platform_oauth_connections, provider='google_gsc')
+  if (clientId) {
+    try {
+      const token = await getValidToken(clientId, 'google_gsc')
+      if (token) return token
+    } catch (err) {
+      if (!(err instanceof PlatformConnectionNotFoundError)) {
+        console.warn('[gsc/client] getValidToken error:', err instanceof Error ? err.message : err)
+      }
+      // Fall through to legacy path
+    }
+  }
+
+  // 2. Legacy OAuth token (google_oauth_tokens table) — backward compat
   if (clientId) {
     const oauthToken = await getValidAccessToken(clientId)
     if (oauthToken) return oauthToken
   }
 
-  // 2. Service-account JWT (legacy / internal)
+  // 3. Service-account JWT (legacy / internal)
   const creds = loadServiceAccount()
   if (!creds) return null
   return getServiceAccountToken(creds).catch(() => null)

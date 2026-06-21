@@ -98,6 +98,48 @@ export async function crawlAndClassifyPages(
   for (let i = 0; i < crawlResults.length; i++) {
     const crawl = crawlResults[i]
 
+    // Antibot challenge — record a stub row with crawl_status='antibot_challenged'
+    // and DO NOT overwrite any previously-captured real data. This is the fix
+    // for the 2026-06-20 Oztop incident where 30+ product-category pages got
+    // stored as `title="Robot Challenge Screen"` because we trusted Jina's
+    // output even when it relayed the WAF interstitial verbatim.
+    if (crawl.antibot) {
+      failed.push({ url: crawl.url, error: crawl.error ?? `antibot_${crawl.antibot.kind}` })
+      crawledCount++
+      let pagePath = '/'
+      try { pagePath = new URL(crawl.url).pathname } catch { /* keep default */ }
+      // Mark the row so subsequent diagnostic / page-rewriter passes can skip
+      // these URLs until the underlying allowlist / IP issue is fixed.
+      // NOTE: we explicitly DON'T pass title / markdown_content / word_count
+      // — Supabase upsert with onConflict only overwrites the columns we
+      // include, so previously-captured real data on this URL stays put.
+      try {
+        await supabase
+          .from('client_site_pages')
+          .upsert(
+            {
+              client_id:    clientId,
+              url:          crawl.url,
+              path:         pagePath,
+              status_code:  crawl.statusCode,
+              crawled_at:   crawl.crawledAt.toISOString(),
+              crawl_status: 'antibot_challenged',
+              crawl_error:  crawl.error ?? `antibot_${crawl.antibot.kind}: ${crawl.antibot.evidence}`,
+            },
+            { onConflict: 'client_id,url' },
+          )
+      } catch {
+        // Don't block the batch on a single upsert failure
+      }
+      if ((i + 1) % PROGRESS_UPDATE_INTERVAL === 0) {
+        await runner.updateProgress(jobId, {
+          totalUrlsCrawled: crawledCount,
+          totalPagesClassified: classifiedCount,
+        })
+      }
+      continue
+    }
+
     if (crawl.error) {
       failed.push({ url: crawl.url, error: crawl.error })
       crawledCount++

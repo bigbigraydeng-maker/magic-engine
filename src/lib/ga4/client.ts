@@ -161,13 +161,60 @@ export async function fetchGa4Snapshot(
   }
 }
 
+// ─── Public API (paid search) ─────────────────────────────────────────────────
+
+export interface Ga4PaidSearchMetrics {
+  paid_sessions:    number
+  paid_users:       number
+  paid_conversions: number
+  period_start:     string
+  period_end:       string
+}
+
+/**
+ * Pull Paid Search totals from GA4 by filtering on sessionDefaultChannelGroup.
+ * Uses the same OAuth token as fetchGa4Snapshot — no extra scope required.
+ */
+export async function fetchGa4PaidSearchMetrics(
+  propertyId: string,
+  clientId: string,
+  periodDays: number = DEFAULT_PERIOD_DAYS,
+): Promise<Ga4PaidSearchMetrics | null> {
+  const token = await getValidAccessToken(clientId)
+  if (!token) return null
+
+  const normalized  = normalizePropertyId(propertyId)
+  const periodEnd   = toIsoDate(new Date())
+  const periodStart = toIsoDate(daysAgo(periodDays))
+
+  const result = await runReport(token, normalized, periodStart, periodEnd, {
+    metrics:         ['sessions', 'totalUsers', 'keyEvents'],
+    dimensionFilter: {
+      filter: {
+        fieldName:     'sessionDefaultChannelGroup',
+        stringFilter:  { value: 'Paid Search', matchType: 'EXACT' },
+      },
+    },
+  })
+
+  const mv = result.rows?.[0]?.metricValues ?? []
+  return {
+    paid_sessions:    parseInt(mv[0]?.value ?? '0', 10),
+    paid_users:       parseInt(mv[1]?.value ?? '0', 10),
+    paid_conversions: parseInt(mv[2]?.value ?? '0', 10),
+    period_start:     periodStart,
+    period_end:       periodEnd,
+  }
+}
+
 // ─── Internals ────────────────────────────────────────────────────────────────
 
 interface ReportOptions {
-  dimensions?: string[]
-  metrics:     string[]
-  orderBy?:    string
-  limit?:      number
+  dimensions?:      string[]
+  metrics:          string[]
+  orderBy?:         string
+  limit?:           number
+  dimensionFilter?: unknown
 }
 
 async function runReport(
@@ -190,6 +237,9 @@ async function runReport(
   }
   if (opts.limit) {
     body.limit = opts.limit
+  }
+  if (opts.dimensionFilter !== undefined) {
+    body.dimensionFilter = opts.dimensionFilter
   }
 
   const controller = new AbortController()

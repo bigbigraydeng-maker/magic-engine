@@ -371,6 +371,121 @@ export async function addCampaignNegativeKeyword(
   return json.results?.[0]?.resourceName ?? null
 }
 
+// ── Account-level insights (for daily cron pullback) ─────────────────────────
+
+export interface GoogleAdsAccountInsights {
+  /** Window covered, ISO date (YYYY-MM-DD). */
+  period_start: string
+  /** Window covered, ISO date (YYYY-MM-DD). */
+  period_end: string
+  /** Total spend in account currency (post-micro conversion). */
+  spend: number
+  /** Total impressions. */
+  impressions: number
+  /** Total clicks. */
+  clicks: number
+  /** Click-through rate (clicks / impressions). 0 when impressions = 0. */
+  ctr: number
+  /** Average cost per click in account currency. 0 when clicks = 0. */
+  cpc: number
+  /** Total conversions across all conversion actions on the account. */
+  conversions: number
+  /** Cost per conversion in account currency. 0 when conversions = 0. */
+  cpa: number
+}
+
+/**
+ * Fetch aggregate account-level metrics for the trailing `lookbackDays`-day
+ * window from Google Ads. Returns null on API failure so the cron can skip
+ * the client without blowing up the whole run.
+ *
+ * Aggregation is done client-side because Google Ads GAQL only emits one row
+ * per `segments.date`; we sum the daily rows into a single window total.
+ */
+export async function fetchAccountInsights(
+  creds: GoogleAdsCreds,
+  lookbackDays = 30,
+): Promise<GoogleAdsAccountInsights | null> {
+  const today = new Date()
+  const since = new Date(today)
+  since.setUTCDate(today.getUTCDate() - lookbackDays)
+  const period_start = since.toISOString().slice(0, 10)
+  const period_end = today.toISOString().slice(0, 10)
+
+  const accessToken = await getAccessToken(creds)
+  const url = `${GOOGLE_ADS_API_BASE}/customers/${creds.customerId}/googleAds:search`
+
+  const query = `
+    SELECT
+      metrics.cost_micros,
+      metrics.impressions,
+      metrics.clicks,
+      metrics.conversions,
+      segments.date
+    FROM customer
+    WHERE segments.date BETWEEN '${period_start}' AND '${period_end}'
+  `.trim()
+
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: buildHeaders(creds, accessToken),
+      body: JSON.stringify({ query }),
+    })
+  } catch (err) {
+    console.error('[google-ads/client] fetchAccountInsights fetch error:', err)
+    return null
+  }
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    console.error(`[google-ads/client] fetchAccountInsights HTTP ${res.status}:`, body.slice(0, 300))
+    return null
+  }
+
+  const json = (await res.json()) as {
+    results?: Array<{
+      metrics?: {
+        costMicros?: string
+        impressions?: string
+        clicks?: string
+        conversions?: number
+      }
+    }>
+  }
+
+  // Sum daily rows. Google Ads API returns numerics as strings for big ints
+  // (cost_micros, impressions, clicks) and as JSON numbers for conversions.
+  let spendMicros = 0
+  let impressions = 0
+  let clicks = 0
+  let conversions = 0
+  for (const row of json.results ?? []) {
+    spendMicros += Number(row.metrics?.costMicros ?? 0)
+    impressions += Number(row.metrics?.impressions ?? 0)
+    clicks += Number(row.metrics?.clicks ?? 0)
+    conversions += Number(row.metrics?.conversions ?? 0)
+  }
+
+  const spend = spendMicros / 1_000_000
+  const ctr = impressions > 0 ? clicks / impressions : 0
+  const cpc = clicks > 0 ? spend / clicks : 0
+  const cpa = conversions > 0 ? spend / conversions : 0
+
+  return {
+    period_start,
+    period_end,
+    spend,
+    impressions,
+    clicks,
+    ctr,
+    cpc,
+    conversions,
+    cpa,
+  }
+}
+
 // ── Env-var credential loader ─────────────────────────────────────────────────
 
 /**

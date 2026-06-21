@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { getValidAccessToken } from '@/lib/google-oauth/client'
+import { getValidToken, PlatformConnectionNotFoundError } from '@/lib/platform-oauth/token-manager'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,7 +36,18 @@ export async function GET(
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
-  const token = await getValidAccessToken(clientId)
+  // Try new encrypted path first, fall back to legacy
+  let token: string | null = null
+  try {
+    token = await getValidToken(clientId, 'google_gsc')
+  } catch (err) {
+    if (!(err instanceof PlatformConnectionNotFoundError)) {
+      console.warn('[gsc/sites] getValidToken error:', err instanceof Error ? err.message : err)
+    }
+  }
+  if (!token) {
+    token = await getValidAccessToken(clientId)
+  }
   if (!token) {
     return NextResponse.json(
       { success: false, error: 'No valid Google OAuth token — complete OAuth first.' },
