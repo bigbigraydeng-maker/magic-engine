@@ -73,6 +73,13 @@ const CONNECTOR_CATALOGUE = [
     description: 'Instagram Business / Facebook Page / TikTok Business 等',
     setupHint: '客户社媒账号通过 Publer 授权后，Magic Engine 即可读取真实指标和调度发布。',
   },
+  {
+    anchor: 'magento',
+    name: 'Magento 电商店铺',
+    emoji: '🛒',
+    description: '店铺订单量、营收、平均客单价、热销商品（通过 Magento REST API 接入）',
+    setupHint: '在 Magento 后台创建 Integration（System → Integrations），复制 Access Token 和店铺 URL 后填入下方。接入后 Magic Engine 可通过 MCP 实时查询电商数据。',
+  },
 ]
 
 interface ConnectorRow {

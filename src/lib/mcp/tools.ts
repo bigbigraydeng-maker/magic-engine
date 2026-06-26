@@ -146,4 +146,34 @@ export function registerReadOnlyTools(server: McpServer): void {
     async (_args, { authInfo }) =>
       runScoped(authInfo, 'me_list_execution_items', (q) => q.listExecutionItems()),
   )
+
+  server.tool(
+    'me_get_ecommerce_summary',
+    'Get ecommerce store performance snapshots from the connected Magento store: ' +
+      'total orders, revenue, average order value, and top-selling products. ' +
+      'Requires a connected Magento store (set up in connector settings). ' +
+      'Optionally pass a limit (default 6, max 24 most recent periods).',
+    { limit: z.number().int().positive().max(24).optional() },
+    async ({ limit }, { authInfo }) =>
+      runScoped(authInfo, 'me_get_ecommerce_summary', (q) => q.getMagentoSummary(limit)),
+  )
+
+  server.tool(
+    'me_list_top_products',
+    'Get the top-selling products from the connected Magento store for the most ' +
+      'recent synced period: product name, quantity ordered, and estimated revenue. ' +
+      'Returns the latest snapshot only. Requires a connected Magento store.',
+    {},
+    async (_args, { authInfo }) =>
+      runScoped(authInfo, 'me_list_top_products', async (q) => {
+        const result = await q.getMagentoSummary(1)
+        if (result.status === 'pending_sync') return result
+        const latest = result.snapshots[0]
+        return {
+          period_start: latest.period_start,
+          period_end: latest.period_end,
+          top_products: latest.top_products ?? [],
+        }
+      }),
+  )
 }

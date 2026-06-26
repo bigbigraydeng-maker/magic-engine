@@ -91,6 +91,20 @@ export type ExecutionByDimension = Record<
   Array<{ id: string; title: string; status: string; due_date: string | null }>
 >
 
+export interface MagentoSnapshot {
+  store_url: string
+  period_start: string
+  period_end: string
+  total_orders: number
+  total_revenue: number
+  aov: number
+  top_products: unknown
+}
+
+export type MagentoResult =
+  | { status: 'pending_sync'; message: string }
+  | { status: 'ok'; snapshots: MagentoSnapshot[] }
+
 export interface ScopedQueries {
   getOverview(): Promise<OverviewResult>
   listGoals(status?: string): Promise<GoalSummary[]>
@@ -98,6 +112,7 @@ export interface ScopedQueries {
   getSeoPerformance(limit?: number): Promise<SeoResult>
   getTraffic(limit?: number): Promise<TrafficResult>
   listExecutionItems(): Promise<ExecutionByDimension>
+  getMagentoSummary(limit?: number): Promise<MagentoResult>
 }
 
 export function createScopedQueries(clientId: string): ScopedQueries {
@@ -114,6 +129,7 @@ export function createScopedQueries(clientId: string): ScopedQueries {
     getSeoPerformance: (limit?: number) => getSeoPerformance(clientId, limit),
     getTraffic: (limit?: number) => getTraffic(clientId, limit),
     listExecutionItems: () => listExecutionItems(clientId),
+    getMagentoSummary: (limit?: number) => getMagentoSummary(clientId, limit),
   }
 }
 
@@ -251,4 +267,27 @@ async function listExecutionItems(clientId: string): Promise<ExecutionByDimensio
     })
   }
   return grouped
+}
+
+const MAGENTO_DEFAULT_LIMIT = 6
+const MAGENTO_MAX_LIMIT = 24
+
+async function getMagentoSummary(clientId: string, limit?: number): Promise<MagentoResult> {
+  const capped = Math.min(Math.max(1, limit ?? MAGENTO_DEFAULT_LIMIT), MAGENTO_MAX_LIMIT)
+  const { data } = await supabaseAdmin
+    .from('magento_snapshots')
+    .select('store_url, period_start, period_end, total_orders, total_revenue, aov, top_products')
+    .eq('client_id', clientId)
+    .order('period_end', { ascending: false })
+    .limit(capped)
+
+  if (!data || data.length === 0) {
+    return {
+      status: 'pending_sync',
+      message:
+        'Ecommerce store data is not available yet. ' +
+        'Connect your store in the connector settings and trigger a sync.',
+    }
+  }
+  return { status: 'ok', snapshots: data as MagentoSnapshot[] }
 }
