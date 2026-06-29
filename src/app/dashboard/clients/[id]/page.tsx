@@ -16,6 +16,7 @@ import { LocaleConfirmBanner } from './_components/LocaleConfirmBanner';
 import { IntelligenceSummarySection } from './_components/intelligence/IntelligenceSummarySection';
 import { BriefGateBanner } from './_components/BriefGateBanner';
 import { GoalBanner } from './_components/GoalBanner';
+import { WorkLogPanel } from './_components/WorkLogPanel';
 
 
 interface Client {
@@ -381,7 +382,7 @@ export default function ClientDetailPage() {
 
   // ?exec=<itemId> 来自执行看板的「在社媒矩阵中执行」跳转：
   // 自动打开 GenerationDrawer 并把生成的内容关联回该执行项（内容飞轮闭环）
-  const [activeTab, setActiveTab] = useState<'overview' | 'data' | 'tools'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'data' | 'tools' | 'logs'>('overview');
 
   const execItemId = searchParams.get('exec');
   const [generationOpen, setGenerationOpen] = useState(Boolean(execItemId));
@@ -515,7 +516,7 @@ export default function ClientDetailPage() {
 
       {/* ── Tab bar ──────────────────────────────────────────────────────────── */}
       <div className="flex gap-1 rounded-xl border border-black/10 bg-white p-1">
-        {([ ['overview', '概览'], ['data', '数据'], ['tools', '工具'] ] as const).map(([id, label]) => (
+        {([ ['overview', '概览'], ['data', '数据'], ['tools', '工具'], ['logs', '日志'] ] as const).map(([id, label]) => (
           <button
             key={id}
             onClick={() => setActiveTab(id)}
@@ -658,6 +659,13 @@ export default function ClientDetailPage() {
             </div>
           </section>
         </>
+      )}
+
+      {/* ── 日志 tab ──────────────────────────────────────────────────────────── */}
+      {activeTab === 'logs' && (
+        <div className="max-w-2xl">
+          <WorkLogPanel clientId={clientId} />
+        </div>
       )}
 
       {/* Generation drawer */}
