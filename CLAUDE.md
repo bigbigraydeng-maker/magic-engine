@@ -378,6 +378,54 @@ UI / 报告 / 客户交付物中**禁止出现真实供应商名**，只用封�
 
 ---
 
+## 会话工作日志（自动写入 fde_work_logs）⭐⭐
+
+> **强制规则**：每次会话结束前（PM 说「结束」/「关闭」/「下一个会话」/「好了今天到这里」，或 Claude 发出「下一会话启动咒语」时），**必须自动写入工作日志**。
+>
+> 不需要 PM 提醒，Claude 主动执行。不写日志 = 会话结束协议不完整。
+
+### 客户 ID 对照表
+
+| 客户 | client_id |
+|------|-----------|
+| **CTS Tours NZ** | `c0000000-0000-0000-0000-000000000000` |
+| **Oztop Building Supplies** | `d5c98811-1c1d-4ded-bdf0-4cefec6afb84` |
+
+### 写入规则
+
+1. **判断本次会话操作了哪些客户**（从上下文推断：改了哪个客户的 GBP / Meta / SEO / GEO / AI 等）
+2. **每个客户写一条日志**（不同客户分开 INSERT）
+3. **摘要格式**（不超过 300 字，中文，结构化）：
+   ```
+   【SEO】xxx（如有）
+   【GEO】xxx（如有）
+   【Meta 广告】xxx（如有）
+   【GBP】xxx（如有）
+   【AI 可见度】xxx（如有）
+   【其他】xxx（如有）
+   下一步：xxx
+   ```
+4. **通过 Supabase MCP 直接 INSERT**（不走 API，不需要 session）：
+
+```sql
+INSERT INTO fde_work_logs (client_id, log_date, summary, author_email)
+VALUES (
+  '<client_id>',
+  CURRENT_DATE,
+  '<摘要内容>',
+  'bigbigraydeng@gmail.com'
+);
+```
+
+5. **INSERT 完成后告知 PM**：「✅ 工作日志已写入：[客户名] · [日期]」
+
+### 本次会话未触碰客户不写日志
+
+- 只有本次会话**实际做了操作**的客户才写（不要每次都写两个客户）
+- 纯对话、纯查询、未落地的讨论不算「实际操作」
+
+---
+
 ## Phase 12 工作协议（飞轮数据闭环）⭐⭐⭐
 
 > 启动日期：2026-05-17。为**非技术 PM** 设计的「踩扎实」协议，不追快。详见 [ROADMAP.md § Phase 12](./ROADMAP.md)。
