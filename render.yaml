@@ -397,6 +397,26 @@ services:
   #   runs the rule engine, persists fresh findings, and routes the top 3 onto
   #   the SEO kanban column via 诸葛亮's persister (source='zhuge').
   #   Runs after google-data-pullback-daily (3am) so data is fresh.
+  # Oztop SEO automation loop — weekly meta optimisation
+  # Reads GSC opportunity keywords (pos 4-20) → AI meta → WP PATCH → work log
+  # Requires: OZTOP_WP_USERNAME, OZTOP_WP_APP_PASSWORD (set in Render dashboard)
+  - type: cron
+    name: oztop-seo-optimizer
+    env: node
+    schedule: "0 5 * * 1"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -X POST \
+        -H "Authorization: Bearer $CRON_SECRET" \
+        "https://app.magicengine.com.au/api/cron/oztop-seo-optimizer?max=8"
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+      - key: OZTOP_WP_USERNAME
+        sync: false
+      - key: OZTOP_WP_APP_PASSWORD
+        sync: false
+
   # Reference: ROADMAP.md § Phase 22.E · docs/seo-sop-implementation-design.md
   # healthchecks.io: seo-patrol-daily (db58fff5-fd32-45e0-a7fd-b067bede6689)
   - type: cron
