@@ -47,12 +47,12 @@ const POST_MIN_AGE_DAYS = 30
 const POST_MAX_CTR      = 0.02
 
 interface GscQueryRow {
-  query: string
+  query?: string
+  page?:  string
   clicks: number
   impressions: number
   ctr: number
   position: number
-  page?: string
 }
 
 interface WpContent {
@@ -250,6 +250,7 @@ async function processOpportunities(
   maxItems: number,
   dryRun: boolean,
   mode: 'pages' | 'posts',
+  bestKeyword: (slug: string) => string,
 ): Promise<{ results: OptimisedResult[]; skipped: string[] }> {
   const results: OptimisedResult[] = []
   const skipped: string[] = []
@@ -258,16 +259,16 @@ async function processOpportunities(
 
   for (const opp of opportunities) {
     if (processed >= maxItems) break
-    if (!opp.page) { skipped.push(`"${opp.query}" — no GSC page URL`); continue }
+    if (!opp.page) { skipped.push(`(no page URL) — skip`); continue }
 
     // Posts mode extra guards
     if (mode === 'posts') {
-      if (opp.impressions < 20) { skipped.push(`"${opp.query}" — impressions < 20`); continue }
-      if (opp.ctr >= POST_MAX_CTR) { skipped.push(`"${opp.query}" — CTR ${(opp.ctr * 100).toFixed(1)}% ≥ 2%`); continue }
+      if (opp.impressions < 20) { skipped.push(`${opp.page} — impressions < 20`); continue }
+      if (opp.ctr >= POST_MAX_CTR) { skipped.push(`${opp.page} — CTR ${(opp.ctr * 100).toFixed(1)}% ≥ 2%`); continue }
     }
 
     const slug = slugFromUrl(opp.page)
-    if (!slug) { skipped.push(`"${opp.query}" — cannot parse slug from ${opp.page}`); continue }
+    if (!slug) { skipped.push(`${opp.page} — cannot parse slug`); continue }
 
     if (cooldownSlugs.has(slug)) { skipped.push(`/${slug} — in cooldown`); continue }
 
@@ -275,7 +276,7 @@ async function processOpportunities(
     const wp = await fetchWpBySlug(slug, auth)
     if (!wp) { skipped.push(`/${slug} — not found in WP (or WP blocked)`); continue }
 
-    // Pages mode: skip if WP found it as a post (wrong type bucket)
+    // Skip if wrong type bucket
     if (mode === 'pages' && wp.type !== 'pages') { skipped.push(`/${slug} — is a post, skip in pages mode`); continue }
     if (mode === 'posts' && wp.type !== 'posts') { skipped.push(`/${slug} — is a page, skip in posts mode`); continue }
 
@@ -288,12 +289,13 @@ async function processOpportunities(
       }
     }
 
+    const keyword = bestKeyword(slug)
     const { title: newTitle, desc: newDesc } = await generateMeta(
-      opp.query, wp.yoast_title, wp.yoast_desc, wp.link, mode,
+      keyword, wp.yoast_title, wp.yoast_desc, wp.link, mode,
     )
 
     if (newTitle === wp.yoast_title && newDesc === wp.yoast_desc) {
-      skipped.push(`"${opp.query}" — no change generated`)
+      skipped.push(`/${slug} — no change generated`)
       continue
     }
 
@@ -302,7 +304,7 @@ async function processOpportunities(
 
     const result: OptimisedResult = {
       content_type: mode,
-      keyword:      opp.query,
+      keyword,
       position:     Math.round(opp.position * 10) / 10,
       ctr:          opp.ctr,
       page_id:      wp.id,
@@ -342,7 +344,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // GSC data
     const { data: snapshot, error: gscErr } = await supabaseAdmin
       .from('gsc_performance_snapshots')
-      .select('top_queries, period_start, period_end')
+      .select('top_queries, top_pages, period_start, period_end')
       .eq('client_id', OZTOP_CLIENT_ID)
       .order('period_start', { ascending: false })
       .limit(1)
@@ -352,18 +354,36 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'No GSC data for Oztop', detail: gscErr?.message }, { status: 404 })
     }
 
-    const queries = (snapshot.top_queries ?? []) as GscQueryRow[]
-    const opportunities = queries
-      .filter(q => q.position >= 4 && q.position <= 20 && q.impressions >= 10 && !!q.page)
+    // top_pages has the page URL + position/impressions/ctr
+    // top_queries has keyword + position/impressions (no page URL)
+    // We use top_pages as opportunity candidates, then pick best keyword from top_queries by slug tokens
+    const topPages   = (snapshot.top_pages   ?? []) as GscQueryRow[]
+    const topQueries = (snapshot.top_queries ?? []) as GscQueryRow[]
+
+    const opportunities = topPages
+      .filter(p => !!p.page && p.position >= 4 && p.position <= 20 && p.impressions >= 10)
       .sort((a, b) => (b.impressions / b.position) - (a.impressions / a.position))
+
+    // Build keyword lookup: slug tokens → best matching query keyword
+    function bestKeyword(slug: string): string {
+      const tokens = slug.split('-').filter(t => t.length > 2)
+      let best = ''
+      let bestScore = 0
+      for (const row of topQueries) {
+        if (!row.query) continue
+        const score = tokens.filter(t => row.query!.toLowerCase().includes(t)).length
+        if (score > bestScore) { bestScore = score; best = row.query }
+      }
+      return best || slug.replace(/-/g, ' ')
+    }
 
     const auth = wpAuth()
     const pageCooldown = forceAll ? new Set<string>() : await getRecentlyOptimised(PAGE_COOLDOWN)
     const postCooldown = forceAll ? new Set<string>() : await getRecentlyOptimised(POST_COOLDOWN)
 
-    // Sequential (not parallel) — targeted WP requests per slug, rate-limit friendly
-    const pagesResult = await processOpportunities(opportunities, auth, pageCooldown, maxPages, dryRun, 'pages')
-    const postsResult = await processOpportunities(opportunities, auth, postCooldown, maxPosts, dryRun, 'posts')
+    // Sequential — targeted WP requests per slug, rate-limit friendly
+    const pagesResult = await processOpportunities(opportunities, auth, pageCooldown, maxPages, dryRun, 'pages', bestKeyword)
+    const postsResult = await processOpportunities(opportunities, auth, postCooldown, maxPosts, dryRun, 'posts', bestKeyword)
 
     const allResults = [...pagesResult.results, ...postsResult.results]
 
