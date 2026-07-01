@@ -13,19 +13,18 @@
  *     Trigger: position 4-20, impressions ≥ 20, CTR < 2%, post age > 30 days
  *     Cooldown: 60 days per slug (more conservative — blog meta is intentional)
  *
- * Pipeline per item:
- *   1. GSC snapshot → opportunity keywords (pages + posts separately)
- *   2. Filter cooldown slugs from seo_meta_log
- *   3. Match keyword → WP content via GSC URL or slug tokens
- *   4. AI (Claude Haiku) → new title ≤60 chars, desc ≤155 chars
- *   5. PATCH WP REST API (requires OZTOP_WP_APP_PASSWORD)
- *   6. INSERT seo_meta_log with content_type field
- *   7. fde_work_logs summary
+ * Architecture: slug-targeted WP lookups (no bulk listing)
+ *   GSC top_queries always includes the `page` field (full URL).
+ *   We extract the slug from that URL and call
+ *   /wp-json/wp/v2/pages?slug=<slug> or /posts?slug=<slug> directly.
+ *   This avoids the SiteGround/Cloudflare block that hits bulk per_page=50
+ *   listings from Render's IP range — targeted auth'd requests pass through.
  *
  * Auth: Authorization: Bearer $CRON_SECRET
  * Options:
  *   ?dry_run=true   — preview without writing
- *   ?max=N          — max items per mode (default 8 pages + 4 posts)
+ *   ?max=N          — max pages to optimise (default 8)
+ *   ?max_posts=N    — max posts to optimise (default 4)
  *   ?force=true     — ignore cooldown
  *
  * Env vars: CRON_SECRET, SUPABASE_*, ANTHROPIC_API_KEY,
@@ -43,9 +42,9 @@ const OZTOP_CLIENT_ID   = 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84'
 const OZTOP_WP_BASE     = 'https://oztopbuildingsupplies.com.au/wp-json/wp/v2'
 const FDE_EMAIL         = 'bigbigraydeng@gmail.com'
 const PAGE_COOLDOWN     = 30   // days
-const POST_COOLDOWN     = 60   // days — more conservative for blog content
-const POST_MIN_AGE_DAYS = 30   // don't touch posts younger than this
-const POST_MAX_CTR      = 0.02 // 2% — only fix posts with bad CTR
+const POST_COOLDOWN     = 60   // days
+const POST_MIN_AGE_DAYS = 30
+const POST_MAX_CTR      = 0.02
 
 interface GscQueryRow {
   query: string
@@ -64,7 +63,7 @@ interface WpContent {
   title: string
   yoast_title: string
   yoast_desc: string
-  date?: string  // post publish date (ISO)
+  date?: string
 }
 
 interface OptimisedResult {
@@ -91,50 +90,69 @@ function wpAuth(): string | null {
   return `Basic ${Buffer.from(`${u}:${p}`).toString('base64')}`
 }
 
-async function fetchWpContent(type: 'pages' | 'posts'): Promise<WpContent[]> {
-  const auth = wpAuth()
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(auth ? { Authorization: auth } : {}),
+function slugFromUrl(pageUrl: string): string | null {
+  try {
+    return new URL(pageUrl).pathname.replace(/^\/|\/$/g, '').split('/').pop() ?? null
+  } catch {
+    return null
   }
-  const fields = type === 'posts'
-    ? 'id,slug,link,title,yoast_head_json,date'
-    : 'id,slug,link,title,yoast_head_json'
-  const results: WpContent[] = []
-  let page = 1
-  while (true) {
-    const res = await fetch(
-      `${OZTOP_WP_BASE}/${type}?per_page=50&page=${page}&_fields=${fields}`,
-      { headers },
-    )
-    if (!res.ok) break
-    const ct = res.headers.get('content-type') ?? ''
-    if (!ct.includes('application/json')) {
-      console.error(`[oztop-seo] WP ${type} page ${page} returned non-JSON (${ct}): possible Cloudflare/SiteGround block`)
-      break
+}
+
+type WpApiItem = {
+  id: number; slug: string; link: string
+  title: { rendered: string }
+  yoast_head_json?: { title?: string; description?: string }
+  date?: string
+}
+
+async function wpGet(path: string, auth: string | null): Promise<WpApiItem[] | null> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (auth) headers['Authorization'] = auth
+  const res = await fetch(`${OZTOP_WP_BASE}${path}`, { headers })
+  if (!res.ok) return null
+  const ct = res.headers.get('content-type') ?? ''
+  if (!ct.includes('application/json')) return null
+  return res.json() as Promise<WpApiItem[]>
+}
+
+// Fetch a single WP page or post by slug (targeted — no bulk listing)
+// Tries pages first, then posts. Returns null if not found or WP blocked.
+async function fetchWpBySlug(slug: string, auth: string | null): Promise<WpContent | null> {
+  const fields = 'id,slug,link,title,yoast_head_json,date'
+
+  // Try pages first
+  const pages = await wpGet(`/pages?slug=${encodeURIComponent(slug)}&_fields=${fields}`, auth)
+  if (pages && pages.length > 0) {
+    const item = pages[0]
+    return {
+      id:          item.id,
+      type:        'pages',
+      slug:        item.slug,
+      link:        item.link,
+      title:       item.title.rendered,
+      yoast_title: item.yoast_head_json?.title ?? item.title.rendered ?? '',
+      yoast_desc:  item.yoast_head_json?.description ?? '',
+      date:        item.date,
     }
-    const batch = await res.json() as Array<{
-      id: number; slug: string; link: string
-      title: { rendered: string }
-      yoast_head_json?: { title?: string; description?: string }
-      date?: string
-    }>
-    for (const item of batch) {
-      results.push({
-        id:          item.id,
-        type,
-        slug:        item.slug,
-        link:        item.link,
-        title:       item.title.rendered,
-        yoast_title: item.yoast_head_json?.title ?? item.title.rendered ?? '',
-        yoast_desc:  item.yoast_head_json?.description ?? '',
-        date:        item.date,
-      })
-    }
-    if (batch.length < 50) break
-    page++
   }
-  return results
+
+  // Try posts
+  const posts = await wpGet(`/posts?slug=${encodeURIComponent(slug)}&_fields=${fields}`, auth)
+  if (posts && posts.length > 0) {
+    const item = posts[0]
+    return {
+      id:          item.id,
+      type:        'posts',
+      slug:        item.slug,
+      link:        item.link,
+      title:       item.title.rendered,
+      yoast_title: item.yoast_head_json?.title ?? item.title.rendered ?? '',
+      yoast_desc:  item.yoast_head_json?.description ?? '',
+      date:        item.date,
+    }
+  }
+
+  return null
 }
 
 async function patchWpMeta(content: WpContent, title: string, desc: string): Promise<boolean> {
@@ -146,26 +164,6 @@ async function patchWpMeta(content: WpContent, title: string, desc: string): Pro
     body:    JSON.stringify({ meta: { _yoast_wpseo_title: title, _yoast_wpseo_metadesc: desc } }),
   })
   return res.ok
-}
-
-// ─── Keyword → content matching ───────────────────────────────────────────────
-
-function matchKeyword(keyword: string, allContent: WpContent[], gscPage?: string): WpContent | null {
-  if (gscPage) {
-    try {
-      const slug = new URL(gscPage).pathname.replace(/^\/|\/$/g, '').split('/').pop() ?? ''
-      const exact = allContent.find(c => c.slug === slug)
-      if (exact) return exact
-    } catch { /* fall through */ }
-  }
-  const tokens = keyword.toLowerCase().split(/\s+/).filter(t => t.length > 2)
-  let best: WpContent | null = null
-  let bestScore = 0
-  for (const item of allContent) {
-    const score = tokens.filter(t => item.slug.includes(t)).length
-    if (score > bestScore) { bestScore = score; best = item }
-  }
-  return bestScore >= 2 ? best : null
 }
 
 // ─── AI meta generation ───────────────────────────────────────────────────────
@@ -243,15 +241,15 @@ async function logOptimisation(result: OptimisedResult): Promise<void> {
   })
 }
 
-// ─── Process one batch (pages or posts) ──────────────────────────────────────
+// ─── Main processing loop (slug-targeted) ────────────────────────────────────
 
-async function processBatch(
+async function processOpportunities(
   opportunities: GscQueryRow[],
-  wpContent: WpContent[],
+  auth: string | null,
   cooldownSlugs: Set<string>,
   maxItems: number,
   dryRun: boolean,
-  contentType: 'pages' | 'posts',
+  mode: 'pages' | 'posts',
 ): Promise<{ results: OptimisedResult[]; skipped: string[] }> {
   const results: OptimisedResult[] = []
   const skipped: string[] = []
@@ -260,61 +258,64 @@ async function processBatch(
 
   for (const opp of opportunities) {
     if (processed >= maxItems) break
+    if (!opp.page) { skipped.push(`"${opp.query}" — no GSC page URL`); continue }
 
-    // Posts extra guards
-    if (contentType === 'posts') {
+    // Posts mode extra guards
+    if (mode === 'posts') {
       if (opp.impressions < 20) { skipped.push(`"${opp.query}" — impressions < 20`); continue }
-      if (opp.ctr >= POST_MAX_CTR) { skipped.push(`"${opp.query}" — CTR ${(opp.ctr * 100).toFixed(1)}% ≥ 2%, skip`); continue }
+      if (opp.ctr >= POST_MAX_CTR) { skipped.push(`"${opp.query}" — CTR ${(opp.ctr * 100).toFixed(1)}% ≥ 2%`); continue }
     }
 
-    const matched = matchKeyword(opp.query, wpContent, opp.page)
-    if (!matched) {
-      skipped.push(`"${opp.query}" — no matching WP ${contentType === 'posts' ? 'post' : 'page'}`)
-      continue
-    }
+    const slug = slugFromUrl(opp.page)
+    if (!slug) { skipped.push(`"${opp.query}" — cannot parse slug from ${opp.page}`); continue }
+
+    if (cooldownSlugs.has(slug)) { skipped.push(`/${slug} — in cooldown`); continue }
+
+    // Targeted WP lookup — no bulk listing, avoids SiteGround/Cloudflare block
+    const wp = await fetchWpBySlug(slug, auth)
+    if (!wp) { skipped.push(`/${slug} — not found in WP (or WP blocked)`); continue }
+
+    // Pages mode: skip if WP found it as a post (wrong type bucket)
+    if (mode === 'pages' && wp.type !== 'pages') { skipped.push(`/${slug} — is a post, skip in pages mode`); continue }
+    if (mode === 'posts' && wp.type !== 'posts') { skipped.push(`/${slug} — is a page, skip in posts mode`); continue }
 
     // Post age guard
-    if (contentType === 'posts' && matched.date) {
-      const ageMs = nowMs - new Date(matched.date).getTime()
+    if (mode === 'posts' && wp.date) {
+      const ageMs = nowMs - new Date(wp.date).getTime()
       if (ageMs < POST_MIN_AGE_DAYS * 86_400_000) {
-        skipped.push(`/${matched.slug} — published < ${POST_MIN_AGE_DAYS} days ago`)
+        skipped.push(`/${slug} — published < ${POST_MIN_AGE_DAYS} days ago`)
         continue
       }
     }
 
-    if (cooldownSlugs.has(matched.slug)) {
-      skipped.push(`/${matched.slug} — in cooldown`)
-      continue
-    }
-
     const { title: newTitle, desc: newDesc } = await generateMeta(
-      opp.query, matched.yoast_title, matched.yoast_desc, matched.link, contentType,
+      opp.query, wp.yoast_title, wp.yoast_desc, wp.link, mode,
     )
 
-    if (newTitle === matched.yoast_title && newDesc === matched.yoast_desc) {
+    if (newTitle === wp.yoast_title && newDesc === wp.yoast_desc) {
       skipped.push(`"${opp.query}" — no change generated`)
       continue
     }
 
     let wpUpdated = false
-    if (!dryRun) wpUpdated = await patchWpMeta(matched, newTitle, newDesc)
+    if (!dryRun) wpUpdated = await patchWpMeta(wp, newTitle, newDesc)
 
     const result: OptimisedResult = {
-      content_type: contentType,
+      content_type: mode,
       keyword:      opp.query,
       position:     Math.round(opp.position * 10) / 10,
       ctr:          opp.ctr,
-      page_id:      matched.id,
-      page_slug:    matched.slug,
-      page_url:     matched.link,
-      old_title:    matched.yoast_title,
-      old_desc:     matched.yoast_desc,
+      page_id:      wp.id,
+      page_slug:    wp.slug,
+      page_url:     wp.link,
+      old_title:    wp.yoast_title,
+      old_desc:     wp.yoast_desc,
       new_title:    newTitle,
       new_desc:     newDesc,
       wp_updated:   wpUpdated,
     }
     results.push(result)
-    cooldownSlugs.add(matched.slug)
+    cooldownSlugs.add(slug)
     if (!dryRun) await logOptimisation(result)
     processed++
   }
@@ -332,79 +333,69 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-  const params   = req.nextUrl.searchParams
-  const dryRun   = params.get('dry_run') === 'true'
-  const forceAll = params.get('force') === 'true'
-  const maxPages = Math.min(parseInt(params.get('max') ?? '8'), 20)
-  const maxPosts = Math.min(parseInt(params.get('max_posts') ?? '4'), 10)
+    const params   = req.nextUrl.searchParams
+    const dryRun   = params.get('dry_run') === 'true'
+    const forceAll = params.get('force') === 'true'
+    const maxPages = Math.min(parseInt(params.get('max') ?? '8'), 20)
+    const maxPosts = Math.min(parseInt(params.get('max_posts') ?? '4'), 10)
 
-  // GSC data
-  const { data: snapshot, error: gscErr } = await supabaseAdmin
-    .from('gsc_performance_snapshots')
-    .select('top_queries, period_start, period_end')
-    .eq('client_id', OZTOP_CLIENT_ID)
-    .order('period_start', { ascending: false })
-    .limit(1)
-    .single()
+    // GSC data
+    const { data: snapshot, error: gscErr } = await supabaseAdmin
+      .from('gsc_performance_snapshots')
+      .select('top_queries, period_start, period_end')
+      .eq('client_id', OZTOP_CLIENT_ID)
+      .order('period_start', { ascending: false })
+      .limit(1)
+      .single()
 
-  if (gscErr || !snapshot) {
-    return NextResponse.json({ error: 'No GSC data for Oztop', detail: gscErr?.message }, { status: 404 })
-  }
+    if (gscErr || !snapshot) {
+      return NextResponse.json({ error: 'No GSC data for Oztop', detail: gscErr?.message }, { status: 404 })
+    }
 
-  const queries = (snapshot.top_queries ?? []) as GscQueryRow[]
-  const baseOpportunities = queries
-    .filter(q => q.position >= 4 && q.position <= 20 && q.impressions >= 10)
-    .sort((a, b) => (b.impressions / b.position) - (a.impressions / a.position))
+    const queries = (snapshot.top_queries ?? []) as GscQueryRow[]
+    const opportunities = queries
+      .filter(q => q.position >= 4 && q.position <= 20 && q.impressions >= 10 && !!q.page)
+      .sort((a, b) => (b.impressions / b.position) - (a.impressions / a.position))
 
-  // Cooldown sets (shared across pages + posts to avoid slug collisions)
-  const pageCooldown = forceAll ? new Set<string>() : await getRecentlyOptimised(PAGE_COOLDOWN)
-  const postCooldown = forceAll ? new Set<string>() : await getRecentlyOptimised(POST_COOLDOWN)
+    const auth = wpAuth()
+    const pageCooldown = forceAll ? new Set<string>() : await getRecentlyOptimised(PAGE_COOLDOWN)
+    const postCooldown = forceAll ? new Set<string>() : await getRecentlyOptimised(POST_COOLDOWN)
 
-  // WP content (fetch in parallel)
-  const [wpPages, wpPosts] = await Promise.all([
-    fetchWpContent('pages'),
-    fetchWpContent('posts'),
-  ])
-  const wpDiagnostic = { pages_fetched: wpPages.length, posts_fetched: wpPosts.length }
+    // Sequential (not parallel) — targeted WP requests per slug, rate-limit friendly
+    const pagesResult = await processOpportunities(opportunities, auth, pageCooldown, maxPages, dryRun, 'pages')
+    const postsResult = await processOpportunities(opportunities, auth, postCooldown, maxPosts, dryRun, 'posts')
 
-  // Run both modes
-  const [pagesResult, postsResult] = await Promise.all([
-    processBatch(baseOpportunities, wpPages, pageCooldown, maxPages, dryRun, 'pages'),
-    processBatch(baseOpportunities, wpPosts,  postCooldown, maxPosts, dryRun, 'posts'),
-  ])
+    const allResults = [...pagesResult.results, ...postsResult.results]
 
-  const allResults = [...pagesResult.results, ...postsResult.results]
+    // Work log
+    if (!dryRun && allResults.length > 0) {
+      const pageLines = pagesResult.results.map(r =>
+        `  · [页面] pos${r.position} "${r.keyword}" → /${r.page_slug} ${r.wp_updated ? '✓' : '⚠'}`)
+      const postLines = postsResult.results.map(r =>
+        `  · [博客] pos${r.position} CTR${(r.ctr * 100).toFixed(1)}% "${r.keyword}" → /${r.page_slug} ${r.wp_updated ? '✓' : '⚠'}`)
+      const summary = [
+        `【SEO】自动循环优化：${pagesResult.results.length} 个服务页 + ${postsResult.results.length} 篇博客 meta`,
+        ...pageLines,
+        ...postLines,
+        `下一次运行：下周一 05:00 UTC`,
+      ].filter(Boolean).join('\n')
 
-  // Work log
-  if (!dryRun && allResults.length > 0) {
-    const pageLines = pagesResult.results.map(r =>
-      `  · [页面] pos${r.position} "${r.keyword}" → /${r.page_slug} ${r.wp_updated ? '✓' : '⚠'}`)
-    const postLines = postsResult.results.map(r =>
-      `  · [博客] pos${r.position} CTR${(r.ctr * 100).toFixed(1)}% "${r.keyword}" → /${r.page_slug} ${r.wp_updated ? '✓' : '⚠'}`)
-    const summary = [
-      `【SEO】自动循环优化：${pagesResult.results.length} 个服务页 + ${postsResult.results.length} 篇博客 meta`,
-      ...pageLines,
-      ...postLines,
-      `下一次运行：下周一 05:00 UTC`,
-    ].filter(Boolean).join('\n')
+      await supabaseAdmin.from('fde_work_logs').insert({
+        client_id:    OZTOP_CLIENT_ID,
+        log_date:     new Date().toISOString().slice(0, 10),
+        summary,
+        author_email: FDE_EMAIL,
+      })
+    }
 
-    await supabaseAdmin.from('fde_work_logs').insert({
-      client_id:    OZTOP_CLIENT_ID,
-      log_date:     new Date().toISOString().slice(0, 10),
-      summary,
-      author_email: FDE_EMAIL,
-    })
-  }
-
-  return NextResponse.json({
-      success:    true,
-      dry_run:    dryRun,
-      wp_auth:    !!wpAuth(),
-      wp:         wpDiagnostic,
-      period:     `${snapshot.period_start} → ${snapshot.period_end}`,
-      pages:      { optimised: pagesResult.results, skipped: pagesResult.skipped.slice(0, 8) },
-      posts:      { optimised: postsResult.results, skipped: postsResult.skipped.slice(0, 8) },
-      schedule:   'Every Monday 05:00 UTC (render.yaml cron)',
+    return NextResponse.json({
+      success:  true,
+      dry_run:  dryRun,
+      wp_auth:  !!auth,
+      period:   `${snapshot.period_start} → ${snapshot.period_end}`,
+      pages:    { optimised: pagesResult.results, skipped: pagesResult.skipped.slice(0, 10) },
+      posts:    { optimised: postsResult.results, skipped: postsResult.skipped.slice(0, 10) },
+      schedule: 'Every Monday 05:00 UTC (render.yaml cron)',
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
