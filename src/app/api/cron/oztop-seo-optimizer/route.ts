@@ -3,32 +3,23 @@
  *
  * Oztop SEO Automation Loop — runs every Monday 05:00 UTC via render.yaml
  *
- * Two-mode loop:
- *
- *   PAGES mode  — service/location pages
- *     Trigger: position 4-20, impressions ≥ 10
- *     Cooldown: 30 days per slug
- *
- *   POSTS mode  — blog articles (written by ME blog system)
- *     Trigger: position 4-20, impressions ≥ 20, CTR < 2%, post age > 30 days
- *     Cooldown: 60 days per slug (more conservative — blog meta is intentional)
- *
- * Architecture: slug-targeted WP lookups (no bulk listing)
- *   GSC top_queries always includes the `page` field (full URL).
- *   We extract the slug from that URL and call
- *   /wp-json/wp/v2/pages?slug=<slug> or /posts?slug=<slug> directly.
- *   This avoids the SiteGround/Cloudflare block that hits bulk per_page=50
- *   listings from Render's IP range — targeted auth'd requests pass through.
+ * Architecture (v2 — WP plugin approach):
+ *   Render cron does NOT touch WP REST API (SiteGround blocks Render IPs).
+ *   Instead:
+ *     1. Read GSC top_pages → filter position 4-20, impressions ≥ 10
+ *     2. Match best keyword from top_queries via slug tokens
+ *     3. AI (Claude Haiku) generates new title + desc
+ *     4. INSERT into seo_meta_log with wp_updated=false (pending queue)
+ *     5. WP plugin (installed on Oztop WP) polls Supabase hourly,
+ *        applies via update_post_meta(), marks wp_updated=true
  *
  * Auth: Authorization: Bearer $CRON_SECRET
  * Options:
- *   ?dry_run=true   — preview without writing
- *   ?max=N          — max pages to optimise (default 8)
- *   ?max_posts=N    — max posts to optimise (default 4)
+ *   ?dry_run=true   — preview without writing to Supabase
+ *   ?max=N          — max items to queue (default 8)
  *   ?force=true     — ignore cooldown
  *
- * Env vars: CRON_SECRET, SUPABASE_*, ANTHROPIC_API_KEY,
- *           OZTOP_WP_USERNAME, OZTOP_WP_APP_PASSWORD
+ * Env vars: CRON_SECRET, SUPABASE_*, ANTHROPIC_API_KEY
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -39,14 +30,10 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 const OZTOP_CLIENT_ID   = 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84'
-const OZTOP_WP_BASE     = 'https://oztopbuildingsupplies.com.au/wp-json/wp/v2'
 const FDE_EMAIL         = 'bigbigraydeng@gmail.com'
-const PAGE_COOLDOWN     = 30   // days
-const POST_COOLDOWN     = 60   // days
-const POST_MIN_AGE_DAYS = 30
-const POST_MAX_CTR      = 0.02
+const PAGE_COOLDOWN     = 30   // days before re-optimising same slug
 
-interface GscQueryRow {
+interface GscRow {
   query?: string
   page?:  string
   clicks: number
@@ -55,146 +42,33 @@ interface GscQueryRow {
   position: number
 }
 
-interface WpContent {
-  id: number
-  type: 'pages' | 'posts'
-  slug: string
-  link: string
-  title: string
-  yoast_title: string
-  yoast_desc: string
-  date?: string
-}
-
-interface OptimisedResult {
-  content_type: 'pages' | 'posts'
-  keyword: string
-  position: number
-  ctr: number
-  page_id: number
-  page_slug: string
-  page_url: string
-  old_title: string
-  old_desc: string
-  new_title: string
-  new_desc: string
-  wp_updated: boolean
-}
-
-// ─── WP REST API ──────────────────────────────────────────────────────────────
-
-function wpAuth(): string | null {
-  const u = process.env.OZTOP_WP_USERNAME
-  const p = process.env.OZTOP_WP_APP_PASSWORD
-  if (!u || !p) return null
-  return `Basic ${Buffer.from(`${u}:${p}`).toString('base64')}`
-}
-
-function slugFromUrl(pageUrl: string): string | null {
-  try {
-    return new URL(pageUrl).pathname.replace(/^\/|\/$/g, '').split('/').pop() ?? null
-  } catch {
-    return null
-  }
-}
-
-type WpApiItem = {
-  id: number; slug: string; link: string
-  title: { rendered: string }
-  yoast_head_json?: { title?: string; description?: string }
-  date?: string
-}
-
-async function wpGet(path: string, auth: string | null): Promise<WpApiItem[] | null> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (auth) headers['Authorization'] = auth
-  const res = await fetch(`${OZTOP_WP_BASE}${path}`, { headers })
-  if (!res.ok) return null
-  const ct = res.headers.get('content-type') ?? ''
-  if (!ct.includes('application/json')) return null
-  return res.json() as Promise<WpApiItem[]>
-}
-
-// Fetch a single WP page or post by slug (targeted — no bulk listing)
-// Tries pages first, then posts. Returns null if not found or WP blocked.
-async function fetchWpBySlug(slug: string, auth: string | null): Promise<WpContent | null> {
-  const fields = 'id,slug,link,title,yoast_head_json,date'
-
-  // Try pages first
-  const pages = await wpGet(`/pages?slug=${encodeURIComponent(slug)}&_fields=${fields}`, auth)
-  if (pages && pages.length > 0) {
-    const item = pages[0]
-    return {
-      id:          item.id,
-      type:        'pages',
-      slug:        item.slug,
-      link:        item.link,
-      title:       item.title.rendered,
-      yoast_title: item.yoast_head_json?.title ?? item.title.rendered ?? '',
-      yoast_desc:  item.yoast_head_json?.description ?? '',
-      date:        item.date,
-    }
-  }
-
-  // Try posts
-  const posts = await wpGet(`/posts?slug=${encodeURIComponent(slug)}&_fields=${fields}`, auth)
-  if (posts && posts.length > 0) {
-    const item = posts[0]
-    return {
-      id:          item.id,
-      type:        'posts',
-      slug:        item.slug,
-      link:        item.link,
-      title:       item.title.rendered,
-      yoast_title: item.yoast_head_json?.title ?? item.title.rendered ?? '',
-      yoast_desc:  item.yoast_head_json?.description ?? '',
-      date:        item.date,
-    }
-  }
-
-  return null
-}
-
-async function patchWpMeta(content: WpContent, title: string, desc: string): Promise<boolean> {
-  const auth = wpAuth()
-  if (!auth) return false
-  const res = await fetch(`${OZTOP_WP_BASE}/${content.type}/${content.id}`, {
-    method:  'POST',
-    headers: { Authorization: auth, 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ meta: { _yoast_wpseo_title: title, _yoast_wpseo_metadesc: desc } }),
-  })
-  return res.ok
+interface QueuedItem {
+  page_slug:  string
+  page_url:   string
+  keyword:    string
+  new_title:  string
+  new_desc:   string
 }
 
 // ─── AI meta generation ───────────────────────────────────────────────────────
 
 async function generateMeta(
   keyword: string,
-  currentTitle: string,
-  currentDesc: string,
   pageUrl: string,
-  contentType: 'pages' | 'posts',
 ): Promise<{ title: string; desc: string }> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-  const context = contentType === 'posts'
-    ? 'This is a blog article about flooring. The current meta is not generating enough clicks (low CTR). Rewrite to be more compelling and click-worthy while keeping it accurate.'
-    : 'This is a service/location page for a flooring store.'
   const msg = await client.messages.create({
     model:      'claude-haiku-4-5-20251001',
     max_tokens: 200,
     messages:   [{
       role:    'user',
-      content: `You are an SEO specialist for an Australian flooring store in South Brisbane.
-
-${context}
+      content: `You are an SEO specialist for an Australian flooring and building supplies store in South Brisbane.
 
 Target keyword: "${keyword}"
-Page: ${pageUrl}
-Current title: "${currentTitle}"
-Current description: "${currentDesc}"
+Page URL: ${pageUrl}
 
 Rules:
-- Title: max 60 chars, keyword near start, include "Brisbane", end "| Oztop" if space allows
+- Title: max 60 chars, include keyword near start, include "Brisbane", end "| Oztop" if space allows
 - Description: max 155 chars, include keyword + Brisbane/South Brisbane + clear call to action
 - Australian English, professional tone, no quotes inside the text
 
@@ -203,13 +77,13 @@ Respond ONLY with valid JSON: {"title":"...","desc":"..."}`,
   })
   const text = msg.content[0].type === 'text' ? msg.content[0].text.trim() : '{}'
   try {
-    const p = JSON.parse(text) as { title: string; desc: string }
+    const p = JSON.parse(text) as { title?: string; desc?: string }
     return {
-      title: (p.title ?? currentTitle).slice(0, 60),
-      desc:  (p.desc ?? currentDesc).slice(0, 155),
+      title: (p.title ?? keyword).slice(0, 60),
+      desc:  (p.desc  ?? '').slice(0, 155),
     }
   } catch {
-    return { title: currentTitle, desc: currentDesc }
+    return { title: keyword.slice(0, 60), desc: '' }
   }
 }
 
@@ -225,106 +99,6 @@ async function getRecentlyOptimised(daysBack: number): Promise<Set<string>> {
   return new Set((data ?? []).map((r: { page_slug: string }) => r.page_slug))
 }
 
-async function logOptimisation(result: OptimisedResult): Promise<void> {
-  await supabaseAdmin.from('seo_meta_log').insert({
-    client_id:    OZTOP_CLIENT_ID,
-    content_type: result.content_type,
-    page_slug:    result.page_slug,
-    page_url:     result.page_url,
-    keyword:      result.keyword,
-    old_title:    result.old_title,
-    old_desc:     result.old_desc,
-    new_title:    result.new_title,
-    new_desc:     result.new_desc,
-    wp_updated:   result.wp_updated,
-    optimised_at: new Date().toISOString(),
-  })
-}
-
-// ─── Main processing loop (slug-targeted) ────────────────────────────────────
-
-async function processOpportunities(
-  opportunities: GscQueryRow[],
-  auth: string | null,
-  cooldownSlugs: Set<string>,
-  maxItems: number,
-  dryRun: boolean,
-  mode: 'pages' | 'posts',
-  bestKeyword: (slug: string) => string,
-): Promise<{ results: OptimisedResult[]; skipped: string[] }> {
-  const results: OptimisedResult[] = []
-  const skipped: string[] = []
-  let processed = 0
-  const nowMs = Date.now()
-
-  for (const opp of opportunities) {
-    if (processed >= maxItems) break
-    if (!opp.page) { skipped.push(`(no page URL) — skip`); continue }
-
-    // Posts mode extra guards
-    if (mode === 'posts') {
-      if (opp.impressions < 20) { skipped.push(`${opp.page} — impressions < 20`); continue }
-      if (opp.ctr >= POST_MAX_CTR) { skipped.push(`${opp.page} — CTR ${(opp.ctr * 100).toFixed(1)}% ≥ 2%`); continue }
-    }
-
-    const slug = slugFromUrl(opp.page)
-    if (!slug) { skipped.push(`${opp.page} — cannot parse slug`); continue }
-
-    if (cooldownSlugs.has(slug)) { skipped.push(`/${slug} — in cooldown`); continue }
-
-    // Targeted WP lookup — no bulk listing, avoids SiteGround/Cloudflare block
-    const wp = await fetchWpBySlug(slug, auth)
-    if (!wp) { skipped.push(`/${slug} — not found in WP (or WP blocked)`); continue }
-
-    // Skip if wrong type bucket
-    if (mode === 'pages' && wp.type !== 'pages') { skipped.push(`/${slug} — is a post, skip in pages mode`); continue }
-    if (mode === 'posts' && wp.type !== 'posts') { skipped.push(`/${slug} — is a page, skip in posts mode`); continue }
-
-    // Post age guard
-    if (mode === 'posts' && wp.date) {
-      const ageMs = nowMs - new Date(wp.date).getTime()
-      if (ageMs < POST_MIN_AGE_DAYS * 86_400_000) {
-        skipped.push(`/${slug} — published < ${POST_MIN_AGE_DAYS} days ago`)
-        continue
-      }
-    }
-
-    const keyword = bestKeyword(slug)
-    const { title: newTitle, desc: newDesc } = await generateMeta(
-      keyword, wp.yoast_title, wp.yoast_desc, wp.link, mode,
-    )
-
-    if (newTitle === wp.yoast_title && newDesc === wp.yoast_desc) {
-      skipped.push(`/${slug} — no change generated`)
-      continue
-    }
-
-    let wpUpdated = false
-    if (!dryRun) wpUpdated = await patchWpMeta(wp, newTitle, newDesc)
-
-    const result: OptimisedResult = {
-      content_type: mode,
-      keyword,
-      position:     Math.round(opp.position * 10) / 10,
-      ctr:          opp.ctr,
-      page_id:      wp.id,
-      page_slug:    wp.slug,
-      page_url:     wp.link,
-      old_title:    wp.yoast_title,
-      old_desc:     wp.yoast_desc,
-      new_title:    newTitle,
-      new_desc:     newDesc,
-      wp_updated:   wpUpdated,
-    }
-    results.push(result)
-    cooldownSlugs.add(slug)
-    if (!dryRun) await logOptimisation(result)
-    processed++
-  }
-
-  return { results, skipped }
-}
-
 // ─── Main handler ─────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -338,8 +112,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const params   = req.nextUrl.searchParams
     const dryRun   = params.get('dry_run') === 'true'
     const forceAll = params.get('force') === 'true'
-    const maxPages = Math.min(parseInt(params.get('max') ?? '8'), 20)
-    const maxPosts = Math.min(parseInt(params.get('max_posts') ?? '4'), 10)
+    const maxItems = Math.min(parseInt(params.get('max') ?? '8'), 20)
 
     // GSC data
     const { data: snapshot, error: gscErr } = await supabaseAdmin
@@ -354,17 +127,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'No GSC data for Oztop', detail: gscErr?.message }, { status: 404 })
     }
 
-    // top_pages has the page URL + position/impressions/ctr
-    // top_queries has keyword + position/impressions (no page URL)
-    // We use top_pages as opportunity candidates, then pick best keyword from top_queries by slug tokens
-    const topPages   = (snapshot.top_pages   ?? []) as GscQueryRow[]
-    const topQueries = (snapshot.top_queries ?? []) as GscQueryRow[]
+    const topPages   = (snapshot.top_pages   ?? []) as GscRow[]
+    const topQueries = (snapshot.top_queries ?? []) as GscRow[]
 
+    // Opportunities: pages in position 4-20 with enough impressions
     const opportunities = topPages
       .filter(p => !!p.page && p.position >= 4 && p.position <= 20 && p.impressions >= 10)
       .sort((a, b) => (b.impressions / b.position) - (a.impressions / a.position))
 
-    // Build keyword lookup: slug tokens → best matching query keyword
+    // Best keyword per slug: match slug tokens against top_queries
     function bestKeyword(slug: string): string {
       const tokens = slug.split('-').filter(t => t.length > 2)
       let best = ''
@@ -377,94 +148,75 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return best || slug.replace(/-/g, ' ')
     }
 
-    const auth = wpAuth()
-    const pageCooldown = forceAll ? new Set<string>() : await getRecentlyOptimised(PAGE_COOLDOWN)
-    const postCooldown = forceAll ? new Set<string>() : await getRecentlyOptimised(POST_COOLDOWN)
+    function slugFromUrl(url: string): string | null {
+      try {
+        return new URL(url).pathname.replace(/^\/|\/$/g, '').split('/').pop() ?? null
+      } catch { return null }
+    }
 
-    // Sequential — targeted WP requests per slug, rate-limit friendly
-    const pagesResult = await processOpportunities(opportunities, auth, pageCooldown, maxPages, dryRun, 'pages', bestKeyword)
-    const postsResult = await processOpportunities(opportunities, auth, postCooldown, maxPosts, dryRun, 'posts', bestKeyword)
+    const cooldownSlugs = forceAll ? new Set<string>() : await getRecentlyOptimised(PAGE_COOLDOWN)
 
-    const allResults = [...pagesResult.results, ...postsResult.results]
+    const queued: QueuedItem[] = []
+    const skipped: string[]    = []
 
-    // Work log
-    if (!dryRun && allResults.length > 0) {
-      const pageLines = pagesResult.results.map(r =>
-        `  · [页面] pos${r.position} "${r.keyword}" → /${r.page_slug} ${r.wp_updated ? '✓' : '⚠'}`)
-      const postLines = postsResult.results.map(r =>
-        `  · [博客] pos${r.position} CTR${(r.ctr * 100).toFixed(1)}% "${r.keyword}" → /${r.page_slug} ${r.wp_updated ? '✓' : '⚠'}`)
-      const summary = [
-        `【SEO】自动循环优化：${pagesResult.results.length} 个服务页 + ${postsResult.results.length} 篇博客 meta`,
-        ...pageLines,
-        ...postLines,
-        `下一次运行：下周一 05:00 UTC`,
-      ].filter(Boolean).join('\n')
+    for (const opp of opportunities) {
+      if (queued.length >= maxItems) break
 
-      await supabaseAdmin.from('fde_work_logs').insert({
+      const slug = slugFromUrl(opp.page!)
+      if (!slug) { skipped.push(`${opp.page} — cannot parse slug`); continue }
+      if (cooldownSlugs.has(slug)) { skipped.push(`/${slug} — in cooldown`); continue }
+
+      const keyword = bestKeyword(slug)
+      const { title, desc } = await generateMeta(keyword, opp.page!)
+
+      if (!title) { skipped.push(`/${slug} — AI returned empty title`); continue }
+
+      queued.push({ page_slug: slug, page_url: opp.page!, keyword, new_title: title, new_desc: desc })
+      cooldownSlugs.add(slug)
+    }
+
+    // Write pending queue to Supabase (WP plugin will apply these)
+    if (!dryRun && queued.length > 0) {
+      const rows = queued.map(item => ({
         client_id:    OZTOP_CLIENT_ID,
-        log_date:     new Date().toISOString().slice(0, 10),
-        summary,
-        author_email: FDE_EMAIL,
+        content_type: 'pages',
+        page_slug:    item.page_slug,
+        page_url:     item.page_url,
+        keyword:      item.keyword,
+        old_title:    '',
+        old_desc:     '',
+        new_title:    item.new_title,
+        new_desc:     item.new_desc,
+        wp_updated:   false,
+        optimised_at: new Date().toISOString(),
+      }))
+      await supabaseAdmin.from('seo_meta_log').insert(rows)
+
+      // Work log
+      const lines = queued.map(r => `  · pos? "${r.keyword}" → /${r.page_slug} (pending WP plugin)`)
+      const summary = [
+        `【SEO】自动循环：${queued.length} 条 AI meta 写入待处理队列，等待 WP 插件每小时拉取并应用`,
+        ...lines,
+        `下一次 Render 运行：下周一 05:00 UTC`,
+      ].join('\n')
+      await supabaseAdmin.from('fde_work_logs').insert({
+        client_id: OZTOP_CLIENT_ID, log_date: new Date().toISOString().slice(0, 10),
+        summary, author_email: FDE_EMAIL,
       })
     }
 
     return NextResponse.json({
-      success:  true,
-      dry_run:  dryRun,
-      wp_auth:  !!auth,
-      period:   `${snapshot.period_start} → ${snapshot.period_end}`,
-      gsc_debug: {
-        top_pages_count:   topPages.length,
-        top_queries_count: topQueries.length,
-        opportunities_after_filter: opportunities.length,
-        sample_pages: topPages.slice(0, 3).map(p => ({ page: p.page, pos: p.position, impr: p.impressions })),
-      },
-      pages:    { optimised: pagesResult.results, skipped: pagesResult.skipped.slice(0, 10) },
-      posts:    { optimised: postsResult.results, skipped: postsResult.skipped.slice(0, 10) },
-      schedule: 'Every Monday 05:00 UTC (render.yaml cron)',
+      success:        true,
+      dry_run:        dryRun,
+      period:         `${snapshot.period_start} → ${snapshot.period_end}`,
+      opportunities:  opportunities.length,
+      queued:         queued.map(r => ({ slug: r.page_slug, keyword: r.keyword, title: r.new_title, desc: r.new_desc })),
+      skipped:        skipped.slice(0, 10),
+      wp_note:        'WP plugin (oztop-seo-sync) will apply these hourly via update_post_meta()',
+      schedule:       'Render cron: Every Monday 05:00 UTC',
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ error: 'Internal error', detail: msg }, { status: 500 })
   }
-}
-
-// Diagnostic: test if WP PATCH (write) works from Render's IP
-// GET /api/cron/oztop-seo-optimizer?test_patch=1
-// Uses known contact page ID=591, writes a safe test value, then reads back to confirm
-export async function GET(req: NextRequest): Promise<NextResponse> {
-  const secret = process.env.CRON_SECRET
-  if (!secret || req.headers.get('Authorization') !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-  if (req.nextUrl.searchParams.get('test_patch') !== '1') {
-    return NextResponse.json({ error: 'Add ?test_patch=1' }, { status: 400 })
-  }
-
-  const auth = wpAuth()
-  if (!auth) return NextResponse.json({ error: 'No WP credentials' }, { status: 500 })
-
-  // PATCH page id=591 (contact) with a safe test value
-  const patchRes = await fetch(`${OZTOP_WP_BASE}/pages/591`, {
-    method:  'POST',
-    headers: { Authorization: auth, 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ meta: { _yoast_wpseo_title: '%%title%% | Oztop Building Supplies' } }),
-  })
-  const patchStatus  = patchRes.status
-  const patchCt      = patchRes.headers.get('content-type') ?? ''
-  const patchBodyRaw = await patchRes.text()
-  const patchBody    = patchBodyRaw.slice(0, 300)
-
-  // Also test a targeted GET to confirm read status
-  const getRes    = await fetch(`${OZTOP_WP_BASE}/pages?slug=contact&_fields=id,slug`, {
-    headers: { Authorization: auth },
-  })
-  const getStatus = getRes.status
-  const getCt     = getRes.headers.get('content-type') ?? ''
-  const getBody   = (await getRes.text()).slice(0, 200)
-
-  return NextResponse.json({
-    patch: { status: patchStatus, content_type: patchCt, body: patchBody },
-    get:   { status: getStatus,  content_type: getCt,   body: getBody },
-  })
 }
