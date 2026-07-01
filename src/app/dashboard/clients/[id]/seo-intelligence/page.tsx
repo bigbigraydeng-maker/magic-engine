@@ -1013,6 +1013,23 @@ export default function SeoIntelligencePage() {
   const [trendStatus,       setTrendStatus]       = useState<DeltaStatus>('no_data')
   const [trendLabel,        setTrendLabel]        = useState<string | null>(null)
 
+  // SEO meta optimisation log (oztop-seo-optimizer loop results)
+  interface MetaLogEntry {
+    id: string
+    page_slug: string
+    page_url: string
+    keyword: string
+    old_title: string
+    old_desc: string
+    new_title: string
+    new_desc: string
+    wp_updated: boolean
+    optimised_at: string
+  }
+  const [metaLog,        setMetaLog]        = useState<MetaLogEntry[]>([])
+  const [metaLogLoading, setMetaLogLoading] = useState(true)
+  const [metaLogExpanded, setMetaLogExpanded] = useState<string | null>(null)
+
   useEffect(() => {
     void (async () => {
       try {
@@ -1094,6 +1111,20 @@ export default function SeoIntelligencePage() {
         // Page health is best-effort; silent fail
       } finally {
         setPageHealthLoading(false)
+      }
+    })()
+  }, [clientId])
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/seo-meta-log?limit=30`)
+        const data = await res.json() as { logs?: MetaLogEntry[] }
+        setMetaLog(data.logs ?? [])
+      } catch {
+        // best-effort
+      } finally {
+        setMetaLogLoading(false)
       }
     })()
   }, [clientId])
@@ -1387,6 +1418,111 @@ export default function SeoIntelligencePage() {
             </div>
             <span className="text-gray-300 group-hover:text-indigo-400 transition-colors">→</span>
           </Link>
+        </section>
+
+        {/* ── Meta 优化历史（SEO Loop 结果）──────────────────────────────────── */}
+        <section>
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">
+            自动化执行记录
+          </p>
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-900">Meta 优化历史</h2>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  每周一自动运行 · AI 优化 title/description · 写入 WordPress
+                </p>
+              </div>
+              {metaLog.length > 0 && (
+                <span className="text-xs bg-indigo-50 text-indigo-700 font-semibold px-2.5 py-1 rounded-full">
+                  共 {metaLog.length} 条记录
+                </span>
+              )}
+            </div>
+
+            {metaLogLoading ? (
+              <div className="space-y-2">
+                {[1, 2, 3].map(i => (
+                  <div key={i} className="h-12 bg-gray-100 rounded animate-pulse" />
+                ))}
+              </div>
+            ) : metaLog.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-center">
+                <span className="text-3xl mb-3">🤖</span>
+                <p className="text-sm font-medium text-gray-600">暂无优化记录</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  Loop 每周一 05:00 UTC 自动执行。
+                  需配置 Render env: <code className="bg-gray-100 px-1 rounded">OZTOP_WP_APP_PASSWORD</code>
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {metaLog.map(entry => {
+                  const isOpen = metaLogExpanded === entry.id
+                  const date = new Date(entry.optimised_at)
+                  const dateStr = date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+                  const timeStr = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+                  return (
+                    <div key={entry.id} className="py-3">
+                      <button
+                        className="w-full text-left flex items-start gap-3 group"
+                        onClick={() => setMetaLogExpanded(isOpen ? null : entry.id)}
+                      >
+                        {/* Status dot */}
+                        <span className={`mt-0.5 flex-shrink-0 w-2 h-2 rounded-full mt-1.5 ${entry.wp_updated ? 'bg-green-400' : 'bg-amber-400'}`} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-medium text-gray-900 truncate">
+                              {entry.new_title || entry.page_slug}
+                            </span>
+                            <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-mono shrink-0">
+                              /{entry.page_slug}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3 mt-0.5">
+                            <span className="text-xs text-indigo-600 font-medium">
+                              &ldquo;{entry.keyword}&rdquo;
+                            </span>
+                            <span className="text-xs text-gray-400">{dateStr} {timeStr}</span>
+                            {entry.wp_updated
+                              ? <span className="text-xs text-green-600 font-medium">✓ 已写入 WP</span>
+                              : <span className="text-xs text-amber-600">⚠ 未写入</span>
+                            }
+                          </div>
+                        </div>
+                        <span className={`text-gray-300 text-xs mt-1 transition-transform ${isOpen ? 'rotate-180' : ''}`}>▼</span>
+                      </button>
+
+                      {isOpen && (
+                        <div className="mt-3 ml-5 space-y-3 text-xs">
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="bg-red-50 rounded-lg p-3">
+                              <p className="font-semibold text-red-700 mb-1.5">优化前</p>
+                              <p className="text-gray-700 font-medium mb-1">{entry.old_title || <span className="text-gray-400 italic">无</span>}</p>
+                              <p className="text-gray-500 leading-relaxed">{entry.old_desc || <span className="italic">无</span>}</p>
+                            </div>
+                            <div className="bg-green-50 rounded-lg p-3">
+                              <p className="font-semibold text-green-700 mb-1.5">优化后</p>
+                              <p className="text-gray-700 font-medium mb-1">{entry.new_title}</p>
+                              <p className="text-gray-500 leading-relaxed">{entry.new_desc}</p>
+                            </div>
+                          </div>
+                          <a
+                            href={entry.page_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-indigo-600 hover:underline"
+                          >
+                            查看页面 →
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
         </section>
       </div>
     </div>
