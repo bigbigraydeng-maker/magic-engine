@@ -108,6 +108,11 @@ async function fetchWpContent(type: 'pages' | 'posts'): Promise<WpContent[]> {
       { headers },
     )
     if (!res.ok) break
+    const ct = res.headers.get('content-type') ?? ''
+    if (!ct.includes('application/json')) {
+      console.error(`[oztop-seo] WP ${type} page ${page} returned non-JSON (${ct}): possible Cloudflare/SiteGround block`)
+      break
+    }
     const batch = await res.json() as Array<{
       id: number; slug: string; link: string
       title: { rendered: string }
@@ -360,6 +365,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     fetchWpContent('pages'),
     fetchWpContent('posts'),
   ])
+  const wpDiagnostic = { pages_fetched: wpPages.length, posts_fetched: wpPosts.length }
 
   // Run both modes
   const [pagesResult, postsResult] = await Promise.all([
@@ -394,6 +400,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       success:    true,
       dry_run:    dryRun,
       wp_auth:    !!wpAuth(),
+      wp:         wpDiagnostic,
       period:     `${snapshot.period_start} → ${snapshot.period_end}`,
       pages:      { optimised: pagesResult.results, skipped: pagesResult.skipped.slice(0, 8) },
       posts:      { optimised: postsResult.results, skipped: postsResult.skipped.slice(0, 8) },
