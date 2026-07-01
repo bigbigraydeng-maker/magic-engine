@@ -320,11 +320,12 @@ async function processBatch(
 // ─── Main handler ─────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const cronSecret = process.env.CRON_SECRET
-  if (!cronSecret) return NextResponse.json({ error: 'CRON_SECRET not set' }, { status: 500 })
-  if (req.headers.get('Authorization') !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  try {
+    const cronSecret = process.env.CRON_SECRET
+    if (!cronSecret) return NextResponse.json({ error: 'CRON_SECRET not set' }, { status: 500 })
+    if (req.headers.get('Authorization') !== `Bearer ${cronSecret}`) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
 
   const params   = req.nextUrl.searchParams
   const dryRun   = params.get('dry_run') === 'true'
@@ -390,12 +391,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   return NextResponse.json({
-    success:    true,
-    dry_run:    dryRun,
-    wp_auth:    !!wpAuth(),
-    period:     `${snapshot.period_start} → ${snapshot.period_end}`,
-    pages:      { optimised: pagesResult.results, skipped: pagesResult.skipped.slice(0, 8) },
-    posts:      { optimised: postsResult.results, skipped: postsResult.skipped.slice(0, 8) },
-    schedule:   'Every Monday 05:00 UTC (render.yaml cron)',
-  })
+      success:    true,
+      dry_run:    dryRun,
+      wp_auth:    !!wpAuth(),
+      period:     `${snapshot.period_start} → ${snapshot.period_end}`,
+      pages:      { optimised: pagesResult.results, skipped: pagesResult.skipped.slice(0, 8) },
+      posts:      { optimised: postsResult.results, skipped: postsResult.skipped.slice(0, 8) },
+      schedule:   'Every Monday 05:00 UTC (render.yaml cron)',
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ error: 'Internal error', detail: msg }, { status: 500 })
+  }
 }
