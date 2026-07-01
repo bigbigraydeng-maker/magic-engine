@@ -92,7 +92,7 @@ async function fetchAllContent(): Promise<WpContent[]> {
     ...(auth ? { Authorization: auth } : {}),
   }
   const results: WpContent[] = []
-  for (const type of ['pages', 'posts'] as const) {
+  for (const type of ['pages'] as const) {
     let page = 1
     while (true) {
       const res = await fetch(
