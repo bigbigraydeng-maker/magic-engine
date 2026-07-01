@@ -413,6 +413,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       dry_run:  dryRun,
       wp_auth:  !!auth,
       period:   `${snapshot.period_start} → ${snapshot.period_end}`,
+      gsc_debug: {
+        top_pages_count:   topPages.length,
+        top_queries_count: topQueries.length,
+        opportunities_after_filter: opportunities.length,
+        sample_pages: topPages.slice(0, 3).map(p => ({ page: p.page, pos: p.position, impr: p.impressions })),
+      },
       pages:    { optimised: pagesResult.results, skipped: pagesResult.skipped.slice(0, 10) },
       posts:    { optimised: postsResult.results, skipped: postsResult.skipped.slice(0, 10) },
       schedule: 'Every Monday 05:00 UTC (render.yaml cron)',
