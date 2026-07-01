@@ -3112,6 +3112,307 @@ AU / NZ（当前）          新市场（未来）
 
 ---
 
+### Phase 21.F — Content-to-Ad Bridge（内容工厂闭环最后一段 · Reels Health Scoring + Boost Recommender）📋 已登记 · 晚些启动（2026-06-26 PM 拍板）
+
+> **登记日期**：2026-06-26 · **状态**：📋 已登记 · 晚些启动开发（PM "什么都不要做，先写到 roadmap 中，晚一些再启动"）
+> **来源**：2026-06-26 CTS Meta Ads Operator 实战一天沉淀 —— Reborn 7 天 unicorn（CPL $5.50→$10.18 稳定 baseline，Frequency 1.22 未饱和）+ 13 个 CTS 历史 campaign PAUSE 清账 + Publer 昨/今日 2 条 Reel（Imperial History 649 views / Best of China 565 views）实时评估 → **PM 拍板"内容工厂初见端倪，如何整合到 FDE 业务内"**
+> **战略定位**：AI Content Factory (P21) 生产 → Reels 发布 → **【Content-to-Ad Bridge】评分 + 排序 + 升级投流** → Meta Ads API 直连 boost。这是 P21 产能引擎的**闭环最后一段**，把 FDE 手动"看数据 → 挑 winner → boost"SOP 系统化，让 Content Factory 从"多产内容"升级为"多产 winner 广告"。
+> **6 支柱归属**：**社媒（P21 产出）× 广告（Meta 投流）** 交叉桥；**DAPE 分段**：Analysis（Reel 评分）+ Prescription（boost 推荐）+ Execution（Meta API 直连）
+> **依赖**：Phase 21 已完成的生产引擎 · Phase 22 采集层（Meta Graph API organic insights）· FDE / PM 手动 Meta Ads 操作经验（本会话是首个实战沉淀）
+
+#### 三层能力（本会话思考精华，待子牙 + 诸葛亮深度整合）
+
+1. **Reel Health Score 公式引擎**（可量化评分）
+   - 6 权重维度：Views vs baseline (0.20) + Hook rate (0.15) + Hold rate (0.20) + Non-followers % (0.15) + Engagement rate (0.10) + Shares/Saves 加权 (0.20)
+   - Strategic bonus：+10 命中主推团品 / +5 Meta 算法认可 / -20 撞 winner 题材 / -50 违反客户品牌红线（如 CTS "1928" 全球品牌 vs NZ branch 25 年）
+2. **4 档决策矩阵**（系统硬阈值）
+   - ⭐⭐⭐ 强 Boost（Score ≥ 75 + Hold ≥ 20% + 非撞 winner）→ 自动 boost $10/天 × 3 天
+   - ⭐⭐ 可选 Boost（Score 55-75 + Non-followers ≥ 50%）→ FDE 一键确认队列
+   - ⭐ 观望（Score 35-55）→ 24-48h 二次评分池
+   - ❌ 不建议（Score < 35 或 Hold < 10%）→ 归档 + 内容主题失败学习
+3. **防撞 Winner 逻辑**（避免 organic boost 跟付费 winner 抢受众）
+   - `active_ad_winners` 表 + 题材 tag 交集/embedding similarity 计算
+   - Frequency > 2.5 时自动解锁被 penalty 压住的相似题材（winner 饱和 → 相似 Reel 可 boost 续命）
+
+#### 4 张新表（待子牙 spec 细化）
+
+| 表 | 用途 |
+|---|---|
+| `reels_organic_snapshots` | 每 6h 拉一次 Meta Graph API 每条 Reel insights（reach/views/hook/hold/engagement/non_followers_pct）|
+| `reels_health_scores` | 每次评分 + 决策档 + 主题 tags + winner_penalty |
+| `content_to_ad_recommendations` | 系统推荐 boost 队列 + FDE 确认状态 + 转化到 campaign_id（可复用 flywheel_actions）|
+| `active_ad_winners` | 当前跑的 winner 题材 + 生命周期 + current_frequency |
+
+#### 子任务规划（待启动前细化 · 6-8 周 MVP）
+
+| 编号 | 内容 | 归属子系统 |
+|---|---|---|
+| **P21.F.0** | CTS Airtable SOP 手动跑 2-3 周积累 20+ 条 Reel 样本 → 验证公式权重 | 客户实施层（本会话 CTS Operator 执行） |
+| **P21.F.1** | 4 张数据表 migration + `active_ad_winners` 初始化脚本 | 21.C 数据层 |
+| **P21.F.2** | Meta Graph API organic Reels 采集器 + `reels-organic-metrics-hourly` cron | 22.A 采集层 |
+| **P21.F.3** | Reel Health Score 公式引擎 + `reel-score-daily` cron | 22.B 分析层 |
+| **P21.F.4** | 防撞 Winner 逻辑（题材 tag V1 简单版 + V2 embedding） | 22.B 分析层 |
+| **P21.F.5** | 4 档决策矩阵 + boost 推荐 API + `content_to_ad_recommendations` 写入 | 22.C 反馈层 |
+| **P21.F.6** | FDE Dashboard UI：`/dashboard/clients/[id]/social/reel-workbench` 三列（排行榜 / boost 候选 / 撞 winner 名单） | 20.D 统一看板扩展 |
+| **P21.F.7** | Meta Ads API 直连 boost（接 P21.C 已建 `meta-ads/boost-post` API）+ FDE 一键 confirm 到 Ads Manager | 21.C 多平台发布管道 |
+| **P21.F.8** | CTS Tours + Oztop 端到端 MVP 验收（M3 关卡）| — |
+
+#### FDE 业务集成（待诸葛亮深度思考补充）
+
+- **月度 SOP 嵌入**：Content Factory 发帖后 24-48h 自动排队 → Reel Workbench 显示 boost 候选 → FDE 每天早 08:00 打开 dashboard 一键确认 → Meta API 直连 boost → 3 天后自动回流 CPL 数据评估
+- **MTC 计费触点**：`reel-score-daily` cron 不计费（服务基础设施），boost API 调用按当前 Meta Ads MTC 规则扣费
+- **FDE 月付客户 vs 自助客户分层**：FDE 客户默认走完整 Bridge（评分 + 推荐 + 一键 boost）；自助客户只看排行榜 + 手动 boost 按钮（省 token）
+- **AI 三层记忆闭环**：boost 后 3 天 CPL 数据回流 → 更新 `client_learned_preferences.winning_reel_patterns`（客户级）+ `industry_baselines.reel_boost_benchmarks`（行业级）
+
+#### Phase 21.F 不做清单（MVP 边界）
+
+- ❌ MVP 不做 IG Reels 评分（IG media MCP 在 CTS ad account 灰度未 rollout，先只覆盖 FB Page）
+- ❌ MVP 不做 TikTok / YouTube Shorts 评分（等 P21.C 多平台发布上线后 Phase 21.G 扩展）
+- ❌ MVP 不做自动 boost（PM 强约束：boost = 花钱，必须 FDE 一键 confirm）
+- ❌ MVP 不做非 FDE 客户 UI（先 FDE 内部触发，参考 P21.8 模式）
+- ❌ 不脱离 Phase 22 采集层单独跑（评分公式的输入依赖 Meta Graph API insights）
+
+#### 待办清单（启动前）
+
+- 🔲 **子牙深度思考**：架构 spec（表设计 / API 契约 / cron 编排 / UI 交互流），归入哪个 sub-phase 拆分节奏（本会话已召集）
+- 🔲 **诸葛亮深度思考**：FDE 业务模式集成（Goal → Initiative → Action 映射 / MTC 计费触点 / 客户体验流 / 3 层 AI 记忆闭环）（本会话已召集）
+- 🔲 **魏征代码挑刺**：spec 出稿后跟安全 / 边界 / 性能视角挑战
+- 🔲 **板桥 C 端 UX 审**：Reel Workbench UI 对 FDE 是否直观 + 主推团品优先级如何暴露
+- 🔲 **狄仁杰攻击验证**：防撞 winner 逻辑边界（Frequency 阈值 / 题材 tag 冲突判定 / 反常用例）
+
+---
+
+### Phase 21.G — WhatsApp Business + AI 客服（单渠道试点 · CTS 首个）📋 已登记 · 晚些启动（2026-06-26 PM 拍板）
+
+> **登记日期**：2026-06-26 · **状态**：📋 已登记 · 晚些启动（PM "什么都不要做，晚些启动"）
+> **来源**：2026-06-26 CTS Meta Ads Operator 会话 —— PM 提出"内容工厂初见端倪 + 客户从 FB Ads 到 WhatsApp Business 到 Mailchimp 完整获客链路"战略问题。P21.G 是 P21.H 多渠道架构的**第 1 个渠道试点**。
+> **战略定位**：P21.F(内容 → boost)的**转化端** + P21.H(Universal Lead Ingestion)的**第一个 adapter**。CTS 手动跑 SOP → 反推 AI 客服 flow → 抽象成 ME 平台通用引擎（Wati/Interakt 短期辅助，Meta Cloud API + Claude 长期自建）。
+> **6 支柱归属**：**社媒 × 广告 × 客户支持** 三段交叉 · **DAPE 分段**：Execution
+> **依赖**：CTS 已有手机 App 版 WhatsApp Business（PM 个人号 + 名称改成 "CTS Tours"，客户已可发消息）· Meta Business Manager（PM 已 login）· `META_SYSTEM_USER_TOKEN` 已配（Reborn campaign 已在用）
+
+#### 关键 CTS 现状（2026-06-26 PM 确认）
+
+- 手机 App 版 WhatsApp Business ✅ 已通，客户能发消息进来
+- 用 PM 个人手机号（⚠️ 长期硬伤：未来升级 WABA API 时必须废弃 + 客户对话数据无法迁移）
+- Business Profile 名称 = "CTS Tours" ✅
+- Meta Business Manager 下 WABA 尚未 Claim（Magic Engine BM 是 Agency BM · CTStours BM 空壳 0 Page · Ad Account 2775766642787274 可能是 Personal Ad Account 不挂 BM）
+- ⚠️ **架构澄清待做**：CTS Page/Ad Account 究竟归属 personal 还是 CTStours BM，决定 WABA 挂哪里
+
+#### 子任务规划（待启动前细化）
+
+| 编号 | 内容 | 归属子系统 |
+|---|---|---|
+| **P21.G.0** | CTS 短期手动 SOP：App 版 + 个人号跑 Click-to-WhatsApp Test Campaign（fork Reborn winner），积累 20-50 conv 数据反推 AI 客服 flow 权重 | 客户实施层（我 CTS Operator 执行）|
+| **P21.G.1** | CTS 采购专用号（NZ 本地 +64）+ WABA Cloud API 升级（免费路径，不走 BSP）| 客户资产准备 |
+| **P21.G.2** | Meta Cloud API 集成层：`src/lib/whatsapp/cloud-api.ts`（发消息 / 收 webhook / Template 提交）| 21.C 多平台发布管道 |
+| **P21.G.3** | AI 客服 6 步 flow 引擎（通用架构 + 客户级 override）：欢迎 → 意图分类 → 数据收集 → 高意图识别 → 转人工 → 沉默追 | 21.A 产能引擎 |
+| **P21.G.4** | Message Template 4 张（Welcome / Follow-up 24h / Booking Confirm / Post-service）中英双语版，Travel 行业标准模板 | 21.B 素材库 · 行业模板 |
+| **P21.G.5** | 高意图识别 + 转人工触发（Claude Sonnet 读客户 `client_learned_preferences` memory + 关键词识别）| 21.A · AI 层 |
+| **P21.G.6** | 对话数据回流 `flywheel_actions`（source='whatsapp_conversation'） · outcome 归因 → CPL / 成团率 | Phase 22 采集层 |
+| **P21.G.7** | CTS + Oztop 端到端 MVP 验收（M3 关卡） | — |
+| **P21.G.8** | CTWA Test Campaign（fork Reborn Winner Reel，$40/天 × 3 天，验证 CPL vs Lead Form baseline） | 21.C |
+
+#### FDE 业务集成
+
+- **月度 SOP**：客户 WhatsApp 每天早 08:00 NZST 汇总 dashboard，FDE 15 分钟内 review + 高意图 conv 转销售
+- **MTC 计费**：AI Sonnet 回复按 token 扣（约 3000 tokens/conv），FDE 客户月费内含 500-1000 conv/月 · 自助按次
+- **AI 三层记忆**：客户级学 hook/FAQ、行业级学 travel/retail/F&B baseline、全局学"高意图触发词库"
+- **组织成本**：工作时间人工兜底（15 分钟响应），非工作时间 AI + Template auto-reply
+
+#### Fable 5 复审修正（2026-07-02 PM 拍板写入）⭐
+
+1. **CTWA 72h 免费窗口 + 广告归因 ID 必存**：Click-to-WhatsApp 广告进来的对话有 **72h 免费消息窗口**（普通对话仅 24h）；webhook referral 携带 **`ctwa_clid` + 来源 `ad_id`** — P21.G.0 测试第一天就必须落库这两个字段，否则永远算不出"哪条 Reel 的 WhatsApp lead 成团率高"，P21.F Bridge 归因链断在这里
+2. **AI bot 披露义务（WhatsApp Business Messaging Policy，违反封 WABA）**：自动化对话必须明示是 bot（欢迎语保留 "I'm CTS AI assistant"）+ 提供人工升级路径；用户主动说 "human / 真人 / 人工" **必须立刻转人工**，不能只靠高意图触发
+
+#### Phase 21.G 不做清单
+
+- ❌ MVP 不做 Message Template AI 自动生成（V1 手动 4 张模板 + 行业库）
+- ❌ MVP 不做多语言（仅英文 + 中文，覆盖 CTS + Oztop）
+- ❌ 不接 ManyChat / Chatfuel（CTS 过去 Messenger STOPPED 事故 + 免费 25 上限教训）
+- ❌ MVP 不做非 FDE 自助 UI（先 FDE 内部触发）
+- ❌ 不做 WhatsApp Business App 版功能（仅 API 版，App 版是 CTS 试点期间过渡）
+
+#### 待办清单（启动前）
+
+- 🔲 **CTS 架构澄清**：Ad Account + Page 归属 personal / CTStours BM / Magic Engine BM，决定 WABA 挂哪
+- 🔲 **子牙深度 spec**：cloud-api.ts 契约 · flow engine 状态机 · memory 加载策略 · Template 版本控制
+- 🔲 **诸葛亮商业模式**：FDE vs 自助分层 · MTC 定价 · 高意图分流规则
+- 🔲 **板桥 UX 审**：FDE dashboard 15 分钟工时的 UI 是否够直观
+
+---
+
+### Phase 21.H — Universal Lead Ingestion Engine（跨渠道 Lead 中枢层 · ME 核心 IP）📋 已登记 · 晚些启动（2026-06-26 PM 拍板）
+
+> **登记日期**：2026-06-26 · **状态**：📋 已登记 · 晚些启动
+> **来源**：2026-06-26 PM 描述"客户从 FB / TikTok / YouTube / Google → WhatsApp / Newsletter / SMS → Mailchimp"完整获客链路。P21.H 是**统一数据中枢**。
+> **战略定位**：ME 相对 SEMrush（只 Data）/ Hootsuite（只发布）/ Publer（只发布+基础 analytics）/ HubSpot（只 CRM 弱获客）的**独家护城河** —— 唯一走通"获客 × AI 处理 × CRM 沉淀"全链路的平台。**Universal Lead Object 是数据护城河**：客户即使换 Mailchimp/HubSpot，跨渠道 attribution 数据只在 ME。
+> **6 支柱归属**：**横向 infrastructure**（不属单一支柱，全支柱通用） · **DAPE 分段**：Discovery（跨渠道数据接入）+ Analysis（AI enrichment + intent scoring）
+> **依赖**：P21.G（WhatsApp adapter 是第一案例）· Phase 22 采集层 · `flywheel_actions` 现有表结构
+
+#### 4 层架构 Vision（详细见 CTS Meta Ads 会话 2026-06-26）
+
+```
+获客渠道层 → 接入点层 → ME 中枢层（P21.H）→ CRM 层（P21.I）
+  FB Ads      Meta Lead Form    Universal Lead Object    Mailchimp
+  TikTok      WhatsApp          Channel Adapters         Twilio SMS
+  YouTube     Messenger / DM    AI Enrichment            Sales UI
+  Google      Website Form      Deduplication            AI Nurture
+  Organic     SMS / Phone       Auto-Routing
+  Newsletter  Subscribe         Consent & Privacy Log
+```
+
+#### Universal Lead Object 数据结构（核心 IP · 2026-07-02 Fable 5 复审修正版 ⭐）
+
+> **复审改动**：①对话历史拆独立表（jsonb[] 存 lead 行 = 反模式：行膨胀 / 并发覆盖 / 无法索引）②email/phone 提升为列（jsonb 内嵌无法索引，10 万 leads 后 dedup 全表扫）③consent 按渠道拆子表（email 同意 ≠ SMS 同意，NZ 管营销消息的主法是 **Unsolicited Electronic Messages Act 2007** 不是 Privacy Act）④status 拆两维（生命周期 stage ≠ 温度，hot/cold 本来就是 intent_score 的展示层）⑤merge 是破坏性操作必须留 log
+
+**`leads` 主表**：
+- `lead_id` (uuid) · `client_id` · `source_channel` · `source_campaign` · `source_ad_id`（CTWA ctwa_clid / Meta ad_id，归因链）
+- `name` · **`email`（独立列 + 部分唯一索引）** · **`phone_e164`（独立列 + 索引，所有 adapter 写入前强制 E.164 归一化："+64 21 123 4567" = "0211234567" = 同一人）** · `whatsapp` · `wechat`
+- `business_intent` jsonb: {product_interest, time_frame, budget, party_size, special_needs}
+- `intent_score` (0-100) · `engagement_score` · `last_activity_at`（汇总字段，明细在子表）
+- **`stage`**: enum(new / qualified / converted / lost) — 生命周期单维；温度用 intent_score 表达，**不设 hot/cold 枚举**
+- `assigned_sales_rep_id`
+- `sync_state` jsonb: {mailchimp_id, mailchimp_last_sync}
+
+**`lead_interactions` 子表**（一条消息/事件一行）：
+- `id` · `lead_id` (FK) · `channel` · `direction` (inbound/outbound) · `content` · `ai_or_human` · `occurred_at`
+- 索引：`(lead_id, occurred_at DESC)`；PII 对话内容需定 retention policy
+
+**`lead_consents` 子表**（一渠道一行，Twilio 发送前强制查行）：
+- `id` · `lead_id` (FK) · `channel` (email/sms/whatsapp) · `granted_at` · `source` · `revoked_at`
+- 合规基准：**NZ Unsolicited Electronic Messages Act 2007**（email + SMS opt-in/退订）+ Privacy Act 2020（数据处理）
+
+**`lead_merge_log` 子表**（dedup 合并可回滚）：
+- `id` · `surviving_lead_id` · `merged_lead_id` · `field_survivorship` jsonb · `merged_at` · `merged_by`
+
+#### 子任务规划（待启动前细化）
+
+| 编号 | 内容 | 归属子系统 |
+|---|---|---|
+| **P21.H.0** | Universal Lead Object schema 设计 + `leads` 表 migration + service_role RLS | 数据层 |
+| **P21.H.1** | Channel Adapter 抽象基类 `src/lib/leads/adapters/base.ts`（interface + 通用 dedup / consent / write helper） | 中枢层 |
+| **P21.H.2** | **Meta Lead Form Adapter**：接 Reborn 类广告 webhook，parse to Universal Lead Object。⚠️ **前置门槛（Fable 5 复审）**：`leads_retrieval` 权限需 Meta App Review + Business Verification（1-3 周），**启动 P21.H 第一天就提交申请**，否则 Week 5-8 干等（Week 1 Zapier 快赢恰好绕过此门槛 — 用 Zapier 已审核 App） | 首个 adapter |
+| **P21.H.3** | **WhatsApp Adapter**：P21.G 输出接入（对话式 → AI enrichment 提取 business_intent） | 首个 adapter |
+| **P21.H.4** | **Website Form Adapter**：客户官网 POST 到 ME endpoint（ctstours.co.nz / oztopbuildingsupplies.com.au） | 首个 adapter |
+| **P21.H.5** | AI Enrichment Layer：Claude Sonnet 读 interaction_history + 客户 memory → 提取 business_intent + 打 intent_score | AI 层 |
+| **P21.H.6** | Deduplication Engine：phone/email match → 跨渠道合并同一人 lead，保留 full interaction_history | 中枢层 |
+| **P21.H.7** | Auto-Routing：高意图（score >= 70）→ WhatsApp/Slack 通知销售 · 中意图 → 入 P21.I Mailchimp nurture · 低意图 → 归档 | 中枢层 |
+| **P21.H.8** | 销售团队 Lead Dashboard UI：`/dashboard/clients/[id]/leads`（列表 + 卡片详情 + 全渠道 interaction history） | 20.D 统一看板 |
+
+#### Multi-tenant 设计（FDE 15 分钟接新客户）
+
+`client_lead_config` 表：
+```
+{
+  client_id,
+  enabled_channels: [fb_ads, whatsapp, website, ...],
+  credentials: encrypted { fb_page_id, meta_ad_account, whatsapp_waba_id, ... },
+  ai_client_prompt: "You are [Client] AI assistant...",
+  business_domain: "travel_outbound_china" | "retail_building_materials" | ...,
+  sales_team: [user_ids],
+  intent_scoring_rules: { high_intent_keywords: [], threshold: 70 }
+}
+```
+
+FDE 未来 Wizard：客户信息 → 选启用渠道 → 客户提供 credentials → AI prompt（行业模板自动生成）→ Test lead → Go live。**15 分钟 vs 从 0 搭 2 周**。
+
+#### Phase 21.H 不做清单
+
+- ❌ MVP 只做 3 个 adapter（Meta Lead Form + WhatsApp + Website Form），TikTok/YouTube/Google/SMS/Phone 后续 P21.J 补
+- ❌ 不做实时 cross-channel attribution（V1 按渠道归因，V2 embedding + last-touch-multi-touch model 后续）
+- ❌ 不做 lead scoring 机器学习（V1 关键词 + 规则，V2 pattern learning 后续）
+- ❌ 不做客户自助 credentials UI（先 FDE 后台 Supabase 直改）
+
+#### 待办清单（启动前）
+
+- 🔲 **子牙 spec**：Adapter 抽象契约 · AI Enrichment prompt 结构 · Dedup 冲突处理策略 · 数据库分区（10 万+ leads 后）
+- 🔲 **诸葛亮 商业**：跨渠道 attribution 如何给客户老板讲清楚 · FDE vs 自助分层
+- 🔲 **魏征代码挑刺**：多 tenant 数据隔离 · Consent log 合规（GDPR / NZ Privacy Act）
+- 🔲 **狄仁杰攻击**：SQL injection / 恶意 webhook / lead 数据泄漏边界
+
+---
+
+### Phase 21.I — Mailchimp CRM Sync + Twilio SMS（下游 CRM 沉淀层）📋 已登记 · 晚些启动（2026-06-26 PM 拍板）
+
+> **登记日期**：2026-06-26 · **状态**：📋 已登记 · 晚些启动
+> **来源**：2026-06-26 PM 确认"Mailchimp 选它做 CRM 系统" + "CTS 已和 Mailchimp 接通"
+> **战略定位**：ME 不重造 CRM，用 Mailchimp（Email + 联系人库）+ Twilio（NZ SMS 补线）作为**下游沉淀层**。P21.H 输出 Lead → P21.I sync 到 Mailchimp → Mailchimp email flow 触发 nurture。
+> **6 支柱归属**：**横向 infrastructure** · **DAPE 分段**：Prescription（自动 nurture 决策）+ Execution（email/SMS 触发）
+> **依赖**：P21.H（Universal Lead Object）· 客户 Mailchimp 账户 + API key（已经和 CTS 接通 ✅）
+
+#### 关键 CTS 现状（2026-06-26 PM 确认）
+
+- ✅ CTS Mailchimp 账户已存在
+- ✅ Mailchimp API 已和 CTS 接通（ME 可调用）
+- ⚠️ 短期 Reborn Lead Form leads 可以**手动 CSV export → Mailchimp import**（P21.I.0 SOP）
+- ⚠️ 长期需要自动 sync（P21.I.2 cron）
+
+#### 关键 CRM 分工
+
+| 数据类型 | 归属 | 补线 |
+|---|---|---|
+| Email marketing + Contact 库 | ✅ Mailchimp | — |
+| Sales Pipeline 简单 | ✅ Mailchimp（客户 < 100 lead/月）| 超量升 HubSpot / Pipedrive |
+| SMS Marketing | ⚠️ Mailchimp SMS beta 不支持 NZ | ✅ Twilio / MessageMedia（NZ 支持） |
+| WhatsApp | ❌ Mailchimp 不做 | ✅ ME 直接接 P21.G Cloud API |
+| Landing Page + Form | ✅ Mailchimp（客户自建）| — |
+
+#### 子任务规划（待启动前细化）
+
+| 编号 | 内容 | 归属子系统 |
+|---|---|---|
+| **P21.I.0** | **⭐ Week 1 快赢（Fable 5 复审改）**：Zapier "Facebook Lead Ads → Mailchimp subscriber" 现成模板（PM Zapier 已 OAuth 连好），2 小时配完，Reborn 每个新 lead **实时**进 Mailchimp + 打 tag。~~原方案 CSV 周导出~~ 被否 — lead 响应速度是转化率第一变量（5 分钟 vs 隔天差数倍），每周导一次 = unicorn CPL 买来的 lead 平均躺 3-4 天贬值。P21.H 中枢上线后再把 Zapier 切换成 ME adapter | 客户实施层（我 CTS Operator）|
+| **P21.I.1** | Mailchimp API 集成层：`src/lib/mailchimp/client.ts`（subscriber 增删改查 · tag / segment / list 管理） | 21.C 多平台发布管道 |
+| **P21.I.2** | Lead → Subscriber sync engine：`mailchimp-sync-daily` cron 每 5 分钟 sync 新 lead + status 变化 | 22.C 反馈层 |
+| **P21.I.3** | Status → Tag mapping 引擎：`lead.status = 'hot'` → Mailchimp tag "hot_lead"；`business_intent.product_interest = 'Best of China 15 Days'` → tag "boc_15d_interest" | 中间层 |
+| **P21.I.4** | Mailchimp webhook 回调：email open / click / unsubscribe 事件 → 回流 ME `lead.interaction_history` | 反馈层 |
+| **P21.I.5** | Twilio / MessageMedia SMS 集成层：`src/lib/sms/twilio-client.ts`（NZ 号码发送 + 收 SMS webhook） | 21.C |
+| **P21.I.6** | SMS opt-in flow + consent log（NZ Privacy Act 合规）· double opt-in（客户回 "Y" 确认订阅） | 合规 |
+| **P21.I.7** | CTS + Oztop 端到端验收：新 lead 从 P21.G/H → P21.I → Mailchimp 出现 + email flow 触发 + 3 天后 open/click 回流 | — |
+| **P21.I.8** | 客户老板 Portal Lead Dashboard：全渠道 lead 数 + attribution + Mailchimp email metrics（open/click/unsubscribe rate） | 20.D 客户 Portal |
+
+#### FDE 业务集成
+
+- **月度 SOP**：客户 Mailchimp email flow 每月效果回顾（open rate / click rate / unsubscribe rate → 反哺 P21 内容生产）
+- **MTC 计费**：Mailchimp / Twilio 费用**走客户自己账户**（ME 不代付，同 Meta 广告费）· ME 收 "CRM 集成 setup" 一次性 MTC + 月度维护小额
+- **多 CRM 未来扩展**：短期 Mailchimp only，客户超 100+ 活跃 leads/月自动提示升 HubSpot / Pipedrive 集成（P21.I.V2）
+
+#### 单向 Sync 铁律（Fable 5 复审拍板 · 2026-07-02，不留给子牙讨论）⭐
+
+> **ME 是唯一 source of truth。同步永远单向**：ME → Mailchimp 推字段/tag；Mailchimp → ME **只回流事件**（open / click / unsubscribe），**字段永不回流**。双向字段 sync 是 CRM 集成最著名的死亡陷阱（冲突解决 / 循环触发 / 静默覆盖）。
+> **配套 FDE SOP 纪律**：销售在 ME dashboard 工作，**不在 Mailchimp 里改联系人数据**。Mailchimp unsubscribe 事件回流后，ME 端 `lead_consents.revoked_at` 立即写入 + Twilio 发送前强制查 suppression。
+> **成本纪律**：Mailchimp 按 contact 计费（unsubscribed 也算，archived 不算）→ `stage=lost` 90 天后自动 archive。
+
+#### Phase 21.I 不做清单
+
+- ❌ 不做 Mailchimp → HubSpot / Salesforce 迁移工具（简单客户 Mailchimp 够）
+- ❌ 不做 Twilio Voice（SMS only）
+- ❌ 不做 SMS 短代码申请（用长号即可）
+- ❌ 不做 Mailchimp 内容自动生成（Mailchimp 内 email 内容仍由客户/FDE 手写，ME 只 sync 联系人 + tag）
+- ❌ 不代付客户 Mailchimp / Twilio 费用
+
+#### 待办清单（启动前）
+
+- 🔲 **子牙 spec**：Mailchimp client 契约 · sync 冲突处理（Mailchimp 端手工改了 tag 怎么办）· Twilio NZ 号码采购路径
+- 🔲 **诸葛亮 商业**：Mailchimp 定价触点 · Twilio SMS 定价（NZ 约 $0.05/条）· 客户老板月报如何展示 CRM metrics
+- 🔲 **魏征代码挑刺**：Mailchimp webhook 验签 · Twilio TCPA / NZ Privacy Act 合规
+- 🔲 **板桥 UX 审**：客户老板 Portal Lead Dashboard 是否 5 秒内看懂 attribution
+
+---
+
+### P21.F + G + H + I 综合 MVP 12 周节奏（PM 拍板顺序：G → H → I · 2026-07-02 Fable 5 复审加 Week 1 快赢）
+
+| 阶段 | 时间 | 主体 | 交付 |
+|---|---|---|---|
+| **⭐ Week 1（快赢，2 小时）** | **P21.I.0 Zapier 直连**（不写代码，先于一切） | Zapier "FB Lead Ads → Mailchimp" 模板配置，Reborn 每日 9-12 leads 实时进 Mailchimp + tag | Speed-to-lead 从 3-4 天 → 5 分钟；绕过 Meta App Review 门槛 |
+| **Week 1-4** | P21.G MVP（WhatsApp 单渠道试点） | CTS 手动跑 + 采购专用号 + Cloud API 升级 + AI 客服 flow（bot 披露 + ctwa_clid 归因落库） | CTS 每天 15-25 WhatsApp conv/CPL $3-8 |
+| **Week 5-8** | P21.H MVP（Universal Lead Object + 3 adapters） | Meta Lead Form（App Review 第 1 天提交）+ WhatsApp + Website 三 adapter 上线；4 表修正版 schema | CTS + Oztop 跨渠道 lead 统一入口 |
+| **Week 9-12** | P21.I MVP（Mailchimp + Twilio） | Zapier 线切换成 ME adapter · 单向 sync 铁律 · Twilio SMS 补线 | 全链路：获客 → 中枢 → CRM 闭环 |
+
+**PM 里程碑关卡（继承 Phase 12 强约束）**：每阶段 M1/M2/M3 不通过绝不下一阶段。
+
+---
+
 ## Phase 22 — Data Intelligence Engine（旗舰能力 · 与 AI Factory 同级别双引擎）📋 战略确认，待排期
 
 > **登记日期**：2026-05-26 · **状态**：战略方向已确认，PM 明确为"与 AI Factory 同等量级独立旗舰"
