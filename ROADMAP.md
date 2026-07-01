@@ -3377,6 +3377,32 @@ FDE 未来 Wizard：客户信息 → 选启用渠道 → 客户提供 credential
 - **MTC 计费**：Mailchimp / Twilio 费用**走客户自己账户**（ME 不代付，同 Meta 广告费）· ME 收 "CRM 集成 setup" 一次性 MTC + 月度维护小额
 - **多 CRM 未来扩展**：短期 Mailchimp only，客户超 100+ 活跃 leads/月自动提示升 HubSpot / Pipedrive 集成（P21.I.V2）
 
+#### CTS Email + SMS Nurture 链路设计（2026-07-02 PM 三输入确认版）⭐
+
+> **PM 三输入**：①Lead Form 无 SMS opt-in 勾选（但有手机号）②无早鸟/限时优惠 ③Day 1 首触电话由 CTS 客户销售团队打（SLA 不在 ME 手里）
+
+**设计原则**：渠道分工（Email=内容深度 / SMS=时效触发 / 人工=主转化）· 频次红线（SMS 30 天 ≤3 条且仅 10:00-19:00 NZST；Email 30 天 7 封后降月 1-2）· 温度分轨（hot lead 直接人工轨，自动流是兜底）
+
+**30 天主链路**：
+| 时点 | 渠道 | 内容 |
+|---|---|---|
+| Day 0 · 5 分钟内 | SMS #1（事务性+内嵌 opt-in）+ Email #1 | SMS："itinerary is in your inbox... Want tour updates by text? Reply YES. Reply STOP to opt out." — **仅回 YES 者进 SMS 营销轨**（UEM Act 2007 合规）；Email：欢迎+行程 PDF+CTA china-tours |
+| Day 1 | 人工 📞 | CTS 销售团队首触（ME 侧配实时通知 Zap） |
+| Day 2 | Email #2 | 团品 day-by-day 行程 + 免费咨询 CTA |
+| Day 4 | SMS #2（仅 opt-in）| 咨询邀请，回 YES 转人工 |
+| Day 7 | Email #3 | 客户故事 + 评价（social proof）|
+| Day 10 | Email #4 | 价格 + 出发日期表（**无编造优惠**）|
+| Day 14 | Email #5 | FAQ 顾虑处理（签证/语言/体力；措辞 "global brand since 1928"，禁 "Auckland since 1928"）|
+| Day 21 | Email #6 | 换角度再营销（美食/摄影/带爸妈返乡）|
+| Day 28 | Email #7 + SMS #3（仅 opt-in）| 收尾纯咨询 CTA + 真实信息（如 "2027 dates open"），**禁编造名额紧张** |
+| Day 30+ | 长期池 | Email 月 1-2 newsletter；SMS 季度 ≤1-2 仅重大真实节点；Day 90 re-engagement 一次无互动 → Mailchimp archive（省 contact 费）|
+
+**分支规则**：email 互动 ≥2 → 通知销售；SMS 回复任何内容 → 转人工+暂停自动流；booking → 切 pre-departure flow；7 天 0 打开 → 跳过下条 SMS；30 天 0 互动 → 转长期池；STOP/unsubscribe → 该渠道立即 suppress（按渠道管，email 退订不影响 SMS）
+
+**销售协作环节（自动流最易断处）**：①新 lead 实时通知 Zap → CTS 销售团队 email ②每周 FDE-销售 15 分钟 sync 更新 lead 状态 tag（contacted/consult_booked/converted/lost）③下一版 Lead Form 补 SMS 同意勾选框（治本）
+
+**技术落地两阶段**：现在 = Mailchimp Customer Journey（email 全链路）+ Zapier 定时 + Twilio/MessageMedia（SMS，Mailchimp 不支持 NZ）；P21.I 后 = ME 统一编排（intent_score 分轨/人工接管自动暂停/跨渠道 suppression 联动）
+
 #### 单向 Sync 铁律（Fable 5 复审拍板 · 2026-07-02，不留给子牙讨论）⭐
 
 > **ME 是唯一 source of truth。同步永远单向**：ME → Mailchimp 推字段/tag；Mailchimp → ME **只回流事件**（open / click / unsubscribe），**字段永不回流**。双向字段 sync 是 CRM 集成最著名的死亡陷阱（冲突解决 / 循环触发 / 静默覆盖）。
