@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Get a Quote — Oztop Building Supplies</title>
+<meta name="description" content="Free measure and quote from Brisbane's flooring, tiles, carpet and bathware specialists. Response within 1 business day." />
+<!--
+  ────────────────────────────────────────────────────────────────────────────
+  OZTOP QUOTE LANDING PAGE — MOCKUP (2026-06)
+  ────────────────────────────────────────────────────────────────────────────
+
+  DEPLOYMENT TARGET
+    https://oztopbuildingsupplies.com.au/quote/
+    (NEVER deploy under magicengine.com.au — ME red-line constraint.)
+
+  HOW TO INSTALL IN ELEMENTOR
+    1. WP admin → Pages → Add New → name it "Quote" (slug: /quote/).
+    2. Edit with Elementor → drop an "HTML" widget into a full-width section.
+    3. Copy this entire file's contents into that HTML widget.
+    4. Save & publish. The page is self-contained — no theme dependency.
+    5. Replace every {{PLACEHOLDER}} below with the real value before going live.
+
+  PLACEHOLDERS the FDE must fill before publish:
+    {{OZTOP_PHONE}}            e.g. "07 3xxx xxxx"
+    {{OZTOP_ABN}}              e.g. "XX XXX XXX XXX"
+    {{OZTOP_ADDRESS}}          e.g. "Unit X, Slacks Creek QLD 4127"
+    {{OZTOP_MAP_EMBED_URL}}    Google Maps embed URL — Maps → Share → Embed a map
+    {{GOOGLE_RATING}}          e.g. "4.8"   (pull from current Google Business Profile)
+    {{GOOGLE_REVIEW_COUNT}}    e.g. "126"
+    {{FORM_ENDPOINT_URL}}      Stage 1 → Formspree (https://formspree.io/f/xxxxxx)
+                               Stage 2 → ME endpoint when /leads ships:
+                                 https://app.magicengine.com.au/api/clients/d5c98811-1c1d-4ded-bdf0-4cefec6afb84/leads
+
+  ────────────────────────────────────────────────────────────────────────────
+-->
+<style>
+  :root {
+    --brand:       #1f3a55;
+    --brand-dk:    #142736;
+    --accent:      #d97706;       /* warm CTA contrast against the deep blue */
+    --accent-dk:   #b45309;
+    --ink:         #1f2937;
+    --ink-soft:    #4b5563;
+    --muted:       #6b7280;
+    --line:        #e5e7eb;
+    --bg-soft:     #f9fafb;
+    --bg-warm:     #fffbeb;
+    --radius:      14px;
+    --shadow:      0 6px 24px -8px rgba(20, 39, 54, .15);
+    --font:        -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: var(--font); color: var(--ink); line-height: 1.55; background: #fff; }
+  img { max-width: 100%; display: block; }
+
+  /* ── Reusable shell ──────────────────────────────────────────────────── */
+  .shell { width: 100%; max-width: 1180px; margin: 0 auto; padding: 0 20px; }
+  h1, h2, h3 { color: var(--brand-dk); line-height: 1.2; margin: 0 0 12px; font-weight: 700; }
+  h1 { font-size: clamp(28px, 5vw, 44px); letter-spacing: -0.01em; }
+  h2 { font-size: clamp(22px, 3.5vw, 30px); }
+  h3 { font-size: 18px; }
+  p  { margin: 0 0 12px; }
+  a  { color: var(--brand); }
+
+  .btn {
+    display: inline-block; text-decoration: none; font-weight: 700;
+    background: var(--accent); color: #fff; padding: 14px 26px;
+    border-radius: 10px; border: 0; cursor: pointer; font-size: 16px;
+    transition: background .15s ease, transform .15s ease;
+    box-shadow: 0 4px 12px -4px rgba(217, 119, 6, .45);
+  }
+  .btn:hover, .btn:focus-visible { background: var(--accent-dk); transform: translateY(-1px); outline: none; }
+  .btn--block { display: block; width: 100%; text-align: center; }
+
+  .eyebrow {
+    display: inline-block; font-size: 12px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--brand);
+    background: rgba(31, 58, 85, .08); padding: 5px 10px; border-radius: 999px;
+    font-weight: 600;
+  }
+
+  /* ── Header (sticky, minimal) ───────────────────────────────────────── */
+  .topbar {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255, 255, 255, .92); backdrop-filter: saturate(140%) blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .topbar__row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 0; gap: 14px;
+  }
+  .brand { font-weight: 800; color: var(--brand-dk); font-size: 18px; }
+  .brand small { display: block; font-size: 11px; color: var(--muted); font-weight: 500; letter-spacing: .04em; }
+  .topbar__cta a { font-size: 14px; font-weight: 600; color: var(--brand); text-decoration: none; }
+  .topbar__cta a + a { margin-left: 12px; padding: 8px 14px; background: var(--brand); color: #fff; border-radius: 8px; }
+
+  /* ── Hero ────────────────────────────────────────────────────────────── */
+  .hero {
+    background:
+      radial-gradient(1200px 600px at 80% 0%, rgba(217, 119, 6, .12), transparent 60%),
+      linear-gradient(180deg, #f6f8fb 0%, #fff 100%);
+    padding: 56px 0 32px;
+  }
+  .hero__grid {
+    display: grid; grid-template-columns: 1.15fr 1fr;
+    gap: 48px; align-items: center;
+  }
+  .hero__copy ul {
+    margin: 18px 0 0; padding: 0; list-style: none; display: grid; gap: 8px;
+  }
+  .hero__copy li { display: flex; align-items: start; gap: 10px; color: var(--ink-soft); font-size: 15px; }
+  .hero__copy li::before { content: "✓"; color: var(--accent); font-weight: 800; margin-top: 1px; }
+  .hero__actions { margin-top: 22px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .hero__phone { color: var(--ink-soft); font-size: 14px; }
+  .hero__phone strong { color: var(--brand-dk); }
+
+  /* ── Form card ──────────────────────────────────────────────────────── */
+  .quote-card {
+    background: #fff; border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 28px; position: relative;
+  }
+  .quote-card::before {
+    content: ""; position: absolute; inset: -1px; border-radius: var(--radius);
+    background: linear-gradient(135deg, rgba(31, 58, 85, .25), rgba(217, 119, 6, .25));
+    z-index: -1; filter: blur(12px); opacity: .35;
+  }
+  .quote-card h2 { font-size: 22px; margin-bottom: 4px; }
+  .quote-card__lede { color: var(--muted); font-size: 14px; margin-bottom: 16px; }
+  .form-row { display: grid; gap: 6px; margin-bottom: 12px; }
+  .form-row label { font-size: 13px; font-weight: 600; color: var(--ink-soft); }
+  .form-row input, .form-row select, .form-row textarea {
+    font: inherit; padding: 12px 14px; border: 1px solid var(--line);
+    border-radius: 10px; background: #fff; color: var(--ink); width: 100%;
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  .form-row input:focus, .form-row select:focus, .form-row textarea:focus {
+    border-color: var(--brand); box-shadow: 0 0 0 3px rgba(31, 58, 85, .15); outline: none;
+  }
+  .form-row textarea { resize: vertical; min-height: 88px; }
+  .form-fineprint { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .form-success {
+    display: none; padding: 16px; border-radius: 10px;
+    background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46;
+  }
+  .form-error {
+    display: none; padding: 12px 14px; border-radius: 10px; margin-top: 8px;
+    background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; font-size: 14px;
+  }
+  .form-row.row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .form-row.row-2 > div { display: grid; gap: 6px; }
+
+  /* ── 3-up trust strip ───────────────────────────────────────────────── */
+  .why {
+    padding: 56px 0 32px; background: #fff;
+  }
+  .why__grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px;
+  }
+  .why__card {
+    border: 1px solid var(--line); border-radius: var(--radius); padding: 22px;
+    background: var(--bg-soft);
+  }
+  .why__card .ic {
+    width: 40px; height: 40px; border-radius: 10px; background: rgba(31, 58, 85, .1);
+    display: grid; place-items: center; margin-bottom: 12px;
+    color: var(--brand); font-size: 20px; font-weight: 800;
+  }
+  .why__card h3 { margin: 0 0 6px; font-size: 17px; }
+  .why__card p  { font-size: 14px; color: var(--ink-soft); margin: 0; }
+
+  /* ── Social proof ───────────────────────────────────────────────────── */
+  .proof { padding: 32px 0 56px; background: var(--bg-warm); }
+  .proof__grid {
+    display: grid; grid-template-columns: 1fr 2fr; gap: 36px; align-items: center;
+  }
+  .rating {
+    background: #fff; border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 22px; text-align: center; box-shadow: var(--shadow);
+  }
+  .rating__stars { font-size: 22px; letter-spacing: .12em; color: #f59e0b; line-height: 1; }
+  .rating__num { font-size: 36px; font-weight: 800; color: var(--brand-dk); margin: 6px 0 0; line-height: 1; }
+  .rating__sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .rating__cta { display: inline-block; margin-top: 12px; font-size: 13px; color: var(--brand); font-weight: 600; text-decoration: none; }
+
+  .cases {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+  }
+  .case {
+    aspect-ratio: 4 / 5; border-radius: 12px; overflow: hidden; position: relative;
+    background: #d1d5db center / cover no-repeat;
+    border: 1px solid var(--line);
+  }
+  .case--placeholder {
+    display: grid; place-items: center; color: #6b7280; font-size: 12px;
+    background:
+      repeating-linear-gradient(45deg, #f3f4f6 0 12px, #e5e7eb 12px 24px);
+  }
+  .case::after {
+    content: attr(data-caption);
+    position: absolute; left: 0; right: 0; bottom: 0;
+    padding: 10px 12px; color: #fff; font-size: 12px; font-weight: 600;
+    background: linear-gradient(0deg, rgba(0,0,0,.55), transparent);
+  }
+
+  /* ── Footer ──────────────────────────────────────────────────────────── */
+  .ftr { background: var(--brand-dk); color: #cfd8e3; padding: 40px 0 24px; }
+  .ftr__grid {
+    display: grid; grid-template-columns: 1.4fr 1fr 1.2fr; gap: 32px; align-items: start;
+  }
+  .ftr h4 { color: #fff; margin: 0 0 8px; font-size: 14px; letter-spacing: .04em; text-transform: uppercase; }
+  .ftr p, .ftr a { color: #cfd8e3; font-size: 14px; text-decoration: none; }
+  .ftr a:hover { color: #fff; }
+  .ftr__map iframe { width: 100%; height: 200px; border: 0; border-radius: 12px; }
+  .ftr__legal {
+    margin-top: 24px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,.1);
+    font-size: 12px; color: #94a3b8; display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+  }
+
+  /* ── Mobile ─────────────────────────────────────────────────────────── */
+  @media (max-width: 900px) {
+    .hero { padding: 36px 0 16px; }
+    .hero__grid { grid-template-columns: 1fr; gap: 28px; }
+    .quote-card { padding: 22px; }
+    .why { padding: 36px 0 16px; }
+    .why__grid { grid-template-columns: 1fr; }
+    .proof { padding: 24px 0 36px; }
+    .proof__grid { grid-template-columns: 1fr; gap: 22px; }
+    .cases { grid-template-columns: repeat(3, 1fr); }
+    .ftr__grid { grid-template-columns: 1fr; gap: 24px; }
+    .topbar__cta a:not(:last-child) { display: none; }
+    .form-row.row-2 { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ─── HEADER ──────────────────────────────────────────────────────────── -->
+<header class="topbar">
+  <div class="shell topbar__row">
+    <div class="brand">
+      Oztop Building Supplies
+      <small>Flooring · Carpet · Tiles · Bathware</small>
+    </div>
+    <nav class="topbar__cta" aria-label="Quick actions">
+      <a href="tel:{{OZTOP_PHONE}}">📞 {{OZTOP_PHONE}}</a>
+      <a href="#quote-form">Get a Quote</a>
+    </nav>
+  </div>
+</header>
+
+<!-- ─── HERO ────────────────────────────────────────────────────────────── -->
+<section class="hero">
+  <div class="shell hero__grid">
+    <div class="hero__copy">
+      <span class="eyebrow">Brisbane &amp; SE Queensland</span>
+      <h1>Flooring, tiles &amp; bathware done right — quote back to you in 1 business day.</h1>
+      <p style="font-size: 17px; color: var(--ink-soft); margin-top: 10px;">
+        From SPC and hybrid floors to bathroom renovations, our Brisbane team helps
+        homeowners and builders pick the right product, get a transparent quote, and
+        get the job moving — no pressure, no guesswork.
+      </p>
+      <ul>
+        <li>Free measure &amp; quote — including same-day site visit options across Brisbane</li>
+        <li>In-stock SPC, hybrid, vinyl, carpet and tiles for quick turnaround</li>
+        <li>Built for Queensland — moisture, heat and high-traffic conditions tested</li>
+        <li>One supplier across flooring, tiles and bathware — fewer headaches for your renovation</li>
+      </ul>
+      <div class="hero__actions">
+        <a class="btn" href="#quote-form">Get my free quote →</a>
+        <span class="hero__phone">Or call <strong>{{OZTOP_PHONE}}</strong> — Mon–Fri 8:00–17:00</span>
+      </div>
+    </div>
+
+    <!-- ─── QUOTE FORM ─────────────────────────────────────────────── -->
+    <aside class="quote-card" id="quote-form">
+      <h2>Tell us about your project</h2>
+      <p class="quote-card__lede">We'll come back within 1 business day with availability and a transparent estimate.</p>
+
+      <form id="oztop-quote-form" novalidate>
+        <div class="form-row">
+          <label for="qf-name">Your name <span aria-hidden="true" style="color:#b91c1c">*</span></label>
+          <input id="qf-name" name="name" type="text" required autocomplete="name" placeholder="First &amp; last name" />
+        </div>
+
+        <div class="form-row row-2">
+          <div>
+            <label for="qf-phone">Phone <span aria-hidden="true" style="color:#b91c1c">*</span></label>
+            <input id="qf-phone" name="phone" type="tel" required autocomplete="tel" placeholder="04xx xxx xxx" pattern="^[+0-9\s()-]{8,16}$" />
+          </div>
+          <div>
+            <label for="qf-email">Email</label>
+            <input id="qf-email" name="email" type="email" autocomplete="email" placeholder="you@example.com" />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label for="qf-type">What's the project? <span aria-hidden="true" style="color:#b91c1c">*</span></label>
+          <select id="qf-type" name="project_type" required>
+            <option value="" disabled selected>Choose one…</option>
+            <option value="flooring">Flooring (SPC / hybrid / vinyl / timber)</option>
+            <option value="carpet">Carpet</option>
+            <option value="tiles">Tiles (bathroom / kitchen / outdoor)</option>
+            <option value="bathware">Bathware (vanity / shower / fixtures)</option>
+            <option value="multi">Multiple categories — renovation</option>
+            <option value="other">Something else</option>
+          </select>
+        </div>
+
+        <div class="form-row row-2">
+          <div>
+            <label for="qf-suburb">Suburb</label>
+            <input id="qf-suburb" name="suburb" type="text" placeholder="e.g. Slacks Creek 4127" autocomplete="address-level2" />
+          </div>
+          <div>
+            <label for="qf-timing">When?</label>
+            <select id="qf-timing" name="timeline">
+              <option value="" disabled selected>Choose…</option>
+              <option value="this_week">This week</option>
+              <option value="this_month">In the next 4 weeks</option>
+              <option value="this_quarter">In the next 3 months</option>
+              <option value="researching">Just researching</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label for="qf-msg">Anything we should know? (optional)</label>
+          <textarea id="qf-msg" name="message" rows="3" placeholder="Room size, current floor type, materials you're considering, photos welcome later."></textarea>
+        </div>
+
+        <!-- Honeypot — bots will fill it; humans never see it -->
+        <div style="position:absolute; left:-9999px;" aria-hidden="true">
+          <label>Leave this empty: <input type="text" name="company_hp" tabindex="-1" autocomplete="off" /></label>
+        </div>
+
+        <button class="btn btn--block" type="submit" id="qf-submit">Send quote request</button>
+        <p class="form-fineprint">
+          By submitting, you agree we can call or email about your enquiry. We don't share your details.
+        </p>
+        <div class="form-error" id="qf-error" role="alert"></div>
+        <div class="form-success" id="qf-success" role="status">
+          <strong>Thanks — your request is in.</strong><br />
+          We'll get back to you within 1 business day. Prefer to talk now? Call <a href="tel:{{OZTOP_PHONE}}">{{OZTOP_PHONE}}</a>.
+        </div>
+      </form>
+    </aside>
+  </div>
+</section>
+
+<!-- ─── 3-UP WHY OZTOP ─────────────────────────────────────────────────── -->
+<section class="why">
+  <div class="shell">
+    <div class="why__grid">
+      <div class="why__card">
+        <div class="ic">$</div>
+        <h3>Transparent pricing</h3>
+        <p>Free measure included. Itemised quote with no surprise add-ons — pick what fits the brief.</p>
+      </div>
+      <div class="why__card">
+        <div class="ic">⚡</div>
+        <h3>In stock, ready to ship</h3>
+        <p>SPC, hybrid, vinyl, carpet and bathroom tiles held in the Brisbane warehouse — fast turnaround.</p>
+      </div>
+      <div class="why__card">
+        <div class="ic">⚒</div>
+        <h3>Expert installation</h3>
+        <p>Project-managed end-to-end. Our installers know Queensland sub-floors, moisture and timelines.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── SOCIAL PROOF ───────────────────────────────────────────────────── -->
+<section class="proof">
+  <div class="shell">
+    <div class="proof__grid">
+      <div class="rating">
+        <div class="rating__stars" aria-hidden="true">★★★★★</div>
+        <div class="rating__num">{{GOOGLE_RATING}}</div>
+        <div class="rating__sub">based on {{GOOGLE_REVIEW_COUNT}} Google reviews</div>
+        <a class="rating__cta" href="#" rel="noopener" target="_blank">Read reviews →</a>
+      </div>
+
+      <div>
+        <h2 style="margin-bottom: 6px;">Recent Brisbane projects</h2>
+        <p style="color: var(--ink-soft); margin: 0 0 14px;">
+          Real installs from our local team — replace these with your own photos before launch.
+        </p>
+        <div class="cases">
+          <div class="case case--placeholder" data-caption="SPC plank — Wynnum reno">Case photo 1</div>
+          <div class="case case--placeholder" data-caption="Bathroom tiles — Carindale">Case photo 2</div>
+          <div class="case case--placeholder" data-caption="Hybrid floor — Slacks Creek">Case photo 3</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── FOOTER ─────────────────────────────────────────────────────────── -->
+<footer class="ftr">
+  <div class="shell ftr__grid">
+    <div>
+      <h4>Visit our Brisbane showroom</h4>
+      <p>{{OZTOP_ADDRESS}}</p>
+      <p>Mon–Fri 8:00–17:00 · Sat 9:00–13:00</p>
+      <p><a href="tel:{{OZTOP_PHONE}}">📞 {{OZTOP_PHONE}}</a></p>
+    </div>
+    <div>
+      <h4>Find us</h4>
+      <p>Free customer parking on site. We're a short drive from the Pacific Motorway.</p>
+      <p><a href="#quote-form">Or send your project brief →</a></p>
+    </div>
+    <div class="ftr__map">
+      <h4>On the map</h4>
+      <iframe
+        src="{{OZTOP_MAP_EMBED_URL}}"
+        loading="lazy"
+        referrerpolicy="no-referrer-when-downgrade"
+        title="Oztop Building Supplies on Google Maps"
+        allowfullscreen></iframe>
+    </div>
+  </div>
+  <div class="shell ftr__legal">
+    <span>© <span id="ftr-year"></span> Oztop Building Supplies · ABN {{OZTOP_ABN}}</span>
+    <span>Brisbane &amp; SE Queensland · Flooring · Carpet · Tiles · Bathware</span>
+  </div>
+</footer>
+
+<script>
+  // ── Footer year ──────────────────────────────────────────────────────
+  document.getElementById('ftr-year').textContent = new Date().getFullYear();
+
+  // ── Form submit ──────────────────────────────────────────────────────
+  // Stage 1 (immediate): point FORM_ENDPOINT to a Formspree (or Tally / WPForms)
+  //   endpoint so FDE can launch this page TODAY without ME backend changes.
+  // Stage 2 (post-ME-leads-PR): swap FORM_ENDPOINT to
+  //   https://app.magicengine.com.au/api/clients/d5c98811-1c1d-4ded-bdf0-4cefec6afb84/leads
+  //   to flow lead rows into ME for attribution + Kanban surfacing.
+  // The on-the-wire shape below works for BOTH (Formspree accepts arbitrary
+  // JSON; ME endpoint will mirror the same field names — see ME PR spec).
+  var FORM_ENDPOINT = '{{FORM_ENDPOINT_URL}}';
+
+  var form    = document.getElementById('oztop-quote-form');
+  var btn     = document.getElementById('qf-submit');
+  var errorEl = document.getElementById('qf-error');
+  var okEl    = document.getElementById('qf-success');
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    errorEl.style.display = 'none';
+    errorEl.textContent = '';
+
+    // Honeypot — bail silently
+    if (form.elements['company_hp'].value) {
+      okEl.style.display = 'block';
+      form.style.display = 'none';
+      return;
+    }
+
+    var name  = form.elements['name'].value.trim();
+    var phone = form.elements['phone'].value.trim();
+    var type  = form.elements['project_type'].value;
+    if (!name || !phone || !type) {
+      errorEl.textContent = 'Please fill in your name, phone and project type.';
+      errorEl.style.display = 'block';
+      return;
+    }
+
+    var payload = {
+      name:          name,
+      phone:         phone,
+      email:         form.elements['email'].value.trim(),
+      project_type:  type,
+      suburb:        form.elements['suburb'].value.trim(),
+      timeline:      form.elements['timeline'].value,
+      message:       form.elements['message'].value.trim(),
+      // Attribution hints for the ME Kanban — kept simple and provider-agnostic.
+      source_url:    window.location.href,
+      referrer:      document.referrer || null,
+      submitted_at:  new Date().toISOString(),
+    };
+
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+
+    fetch(FORM_ENDPOINT, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body:    JSON.stringify(payload),
+    })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        form.style.display = 'none';
+        okEl.style.display = 'block';
+        // Optional: GA4 / fb pixel events go here.
+        if (typeof gtag === 'function') {
+          gtag('event', 'generate_lead', { project_type: type });
+        }
+      })
+      .catch(function (err) {
+        errorEl.textContent =
+          'Sorry — we could not send that. Please call ' +
+          ('{{OZTOP_PHONE}}'.replace(/[{}]/g, '') ? '{{OZTOP_PHONE}}' : 'us') +
+          ' or try again. (' + err.message + ')';
+        errorEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Send quote request';
+      });
+  });
+</script>
+
+</body>
+</html>

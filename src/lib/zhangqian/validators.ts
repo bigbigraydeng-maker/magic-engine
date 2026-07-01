@@ -383,6 +383,10 @@ function isDiagnosis(v: unknown): v is DiagnosisBlock {
     for (const key of ['seo', 'social', 'reputation', 'ai_visibility', 'overall'] as const) {
       if (!isNumber(scores[key])) scores[key] = 0
     }
+    // Optional fields: non-number non-null → null (not 0, because null = "not measured")
+    for (const key of ['ads', 'competitor'] as const) {
+      if (key in scores && scores[key] !== null && !isNumber(scores[key])) scores[key] = null
+    }
   }
   if (!isRecord(v.actions)) {
     v.actions = { quick_fix: [], important: [], talk_to_us: [] }

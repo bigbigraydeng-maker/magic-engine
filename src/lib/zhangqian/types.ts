@@ -200,6 +200,8 @@ export interface DiagnosisBlock {
     social: number
     reputation: number
     ai_visibility: number
+    ads?: number | null     // null = not yet measured by zhangqian
+    competitor?: number | null
     overall: number
   }
   money_flow: string        // Chinese "钱去了哪里" narrative

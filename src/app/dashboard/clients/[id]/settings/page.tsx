@@ -16,6 +16,7 @@
 import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
 import { GbpPanel } from './_components/GbpPanel'
+import { GoogleAdsPanel } from './_components/GoogleAdsPanel'
 import { CompetitorDomainsPanel } from './_components/CompetitorDomainsPanel'
 import { PrimaryKeywordsPanel } from './_components/PrimaryKeywordsPanel'
 import { BrandAliasesPanel } from './_components/BrandAliasesPanel'
@@ -100,7 +101,18 @@ export default function ClientSettingsPage() {
           <GbpPanel clientId={clientId} />
         </section>
 
-        {/* Other connectors — managed on the legacy connectors page */}
+        {/* Google Ads Connection Section */}
+        <section className="mt-6">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-base">📢</span>
+            <h2 className="font-black text-slate-800">Google Ads</h2>
+          </div>
+          <GoogleAdsPanel clientId={clientId} />
+        </section>
+
+        {/* Other connectors — managed on the legacy connectors page.
+            google-ads is intentionally removed from this list (Phase 18.B.3
+            moved it to a dedicated GoogleAdsPanel above). */}
         <section className="mt-6">
           <div className="mb-3 flex items-center gap-2">
             <span className="text-base">🔗</span>
@@ -113,7 +125,6 @@ export default function ClientSettingsPage() {
             {[
               { anchor: 'gsc',         label: 'Google Search Console', icon: '🔍', hint: 'GSC 搜索表现 + Indexing API' },
               { anchor: 'ga4',         label: 'Google Analytics 4',    icon: '📈', hint: '网站真实流量数据' },
-              { anchor: 'google-ads',  label: 'Google 广告（公开扫描）', icon: '📢', hint: '透明度中心抓取' },
               { anchor: 'meta-ads',    label: 'Facebook 主页',          icon: '📊', hint: 'Meta 广告库 + 公开粉丝数' },
             ].map(p => (
               <Link

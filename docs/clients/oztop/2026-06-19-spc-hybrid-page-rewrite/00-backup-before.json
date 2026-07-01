@@ -1,0 +1,27 @@
+{
+  "captured_at": "2026-06-19T16:30:00Z",
+  "captured_by": "ziya (auto-pilot session)",
+  "wp_term_id": 53,
+  "taxonomy": "product_cat",
+  "name": "Hybrid Flooring",
+  "slug": "spc-wpc-hybrid-flooring",
+  "parent_term_id": 42,
+  "url": "https://oztopbuildingsupplies.com.au/product-category/flooring/spc-wpc-hybrid-flooring/",
+  "description_before": "The perfect combination of style and performance, SPC (Stone Plastic Composite) and WPC (Wood Plastic Composite) hybrid flooring offer waterproof durability, scratch resistance, and easy maintenance. Ideal for modern homes and busy spaces.",
+  "description_length": 239,
+  "yoast_before": {
+    "wpseo_title": "",
+    "wpseo_desc": "",
+    "wpseo_focuskw": "",
+    "wpseo_linkdex": "-1020",
+    "wpseo_content_score": "90",
+    "wpseo_noindex": "default",
+    "wpseo_canonical": "",
+    "wpseo_bctitle": "",
+    "wpseo_opengraph-title": "",
+    "wpseo_opengraph-description": "",
+    "wpseo_twitter-title": "",
+    "wpseo_twitter-description": ""
+  },
+  "rollback_instructions": "Open https://oztopbuildingsupplies.com.au/wp-admin/term.php?taxonomy=product_cat&tag_ID=53&post_type=product → clear Description → paste 'description_before' value → clear all Yoast fields → Update."
+}

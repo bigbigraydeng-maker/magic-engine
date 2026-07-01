@@ -262,6 +262,15 @@ export const ADS_METRIC_KEY = {
 
   /** Cost per acquisition / conversion (spend / conversions) */
   CPA: 'ads.account.cpa',
+
+  /** Paid Search sessions from GA4 (sessionDefaultChannelGroup == "Paid Search") */
+  GA4_PAID_SESSIONS: 'ads.ga4.paid_sessions',
+
+  /** Paid Search users from GA4 */
+  GA4_PAID_USERS: 'ads.ga4.paid_users',
+
+  /** Paid Search key events (conversions) from GA4 */
+  GA4_PAID_CONVERSIONS: 'ads.ga4.paid_conversions',
 } as const
 
 export type AdsMetricKey = (typeof ADS_METRIC_KEY)[keyof typeof ADS_METRIC_KEY]
