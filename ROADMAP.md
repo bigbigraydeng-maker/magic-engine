@@ -3291,7 +3291,7 @@ AU / NZ（当前）          新市场（未来）
 |---|---|---|
 | **P21.H.0** | Universal Lead Object schema 设计 + `leads` 表 migration + service_role RLS | 数据层 |
 | **P21.H.1** | Channel Adapter 抽象基类 `src/lib/leads/adapters/base.ts`（interface + 通用 dedup / consent / write helper） | 中枢层 |
-| **P21.H.2** | **Meta Lead Form Adapter**：接 Reborn 类广告 webhook，parse to Universal Lead Object。⚠️ **前置门槛（Fable 5 复审）**：`leads_retrieval` 权限需 Meta App Review + Business Verification（1-3 周），**启动 P21.H 第一天就提交申请**，否则 Week 5-8 干等（Week 1 Zapier 快赢恰好绕过此门槛 — 用 Zapier 已审核 App） | 首个 adapter |
+| **P21.H.2** | **Meta Lead Form Adapter**：接 Reborn 类广告 webhook，parse to Universal Lead Object。⚠️ **前置门槛（Fable 5 复审）**：`leads_retrieval` 权限需 Meta App Review + Business Verification（1-3 周），**启动 P21.H 第一天就提交申请**，否则 Week 5-8 干等（Week 1 Make 快赢恰好绕过此门槛 — 用 Make 已审核 App） | 首个 adapter |
 | **P21.H.3** | **WhatsApp Adapter**：P21.G 输出接入（对话式 → AI enrichment 提取 business_intent） | 首个 adapter |
 | **P21.H.4** | **Website Form Adapter**：客户官网 POST 到 ME endpoint（ctstours.co.nz / oztopbuildingsupplies.com.au） | 首个 adapter |
 | **P21.H.5** | AI Enrichment Layer：Claude Sonnet 读 interaction_history + 客户 memory → 提取 business_intent + 打 intent_score | AI 层 |
@@ -3361,7 +3361,7 @@ FDE 未来 Wizard：客户信息 → 选启用渠道 → 客户提供 credential
 
 | 编号 | 内容 | 归属子系统 |
 |---|---|---|
-| **P21.I.0** | **⭐ Week 1 快赢（Fable 5 复审改）**：Zapier "Facebook Lead Ads → Mailchimp subscriber" 现成模板（PM Zapier 已 OAuth 连好），2 小时配完，Reborn 每个新 lead **实时**进 Mailchimp + 打 tag。~~原方案 CSV 周导出~~ 被否 — lead 响应速度是转化率第一变量（5 分钟 vs 隔天差数倍），每周导一次 = unicorn CPL 买来的 lead 平均躺 3-4 天贬值。P21.H 中枢上线后再把 Zapier 切换成 ME adapter | 客户实施层（我 CTS Operator）|
+| **P21.I.0** | **⭐ Week 1 快赢（Fable 5 复审改 · 2026-07-02 PM 拍板用 Make 不用 Zapier — 团队产品统一 Make + Make MCP 已直连可代建 scenario）**：Make "Facebook Lead Ads (Watch Leads instant trigger) → Mailchimp Add/Update Subscriber + tag" scenario，2 小时配完，Reborn 每个新 lead **实时**进 Mailchimp。~~原方案 CSV 周导出~~ 被否 — lead 响应速度是转化率第一变量（5 分钟 vs 隔天差数倍）。P21.H 中枢上线后再把 Make 线切换成 ME adapter | 客户实施层（我 CTS Operator）|
 | **P21.I.1** | Mailchimp API 集成层：`src/lib/mailchimp/client.ts`（subscriber 增删改查 · tag / segment / list 管理） | 21.C 多平台发布管道 |
 | **P21.I.2** | Lead → Subscriber sync engine：`mailchimp-sync-daily` cron 每 5 分钟 sync 新 lead + status 变化 | 22.C 反馈层 |
 | **P21.I.3** | Status → Tag mapping 引擎：`lead.status = 'hot'` → Mailchimp tag "hot_lead"；`business_intent.product_interest = 'Best of China 15 Days'` → tag "boc_15d_interest" | 中间层 |
@@ -3401,7 +3401,7 @@ FDE 未来 Wizard：客户信息 → 选启用渠道 → 客户提供 credential
 
 **销售协作环节（自动流最易断处）**：①新 lead 实时通知 Zap → CTS 销售团队 email ②每周 FDE-销售 15 分钟 sync 更新 lead 状态 tag（contacted/consult_booked/converted/lost）③下一版 Lead Form 补 SMS 同意勾选框（治本）
 
-**技术落地两阶段**：现在 = Mailchimp Customer Journey（email 全链路）+ Zapier 定时 + Twilio/MessageMedia（SMS，Mailchimp 不支持 NZ）；P21.I 后 = ME 统一编排（intent_score 分轨/人工接管自动暂停/跨渠道 suppression 联动）
+**技术落地两阶段**：现在 = Mailchimp Customer Journey（email 全链路）+ Make scheduled scenario + Twilio/MessageMedia（SMS，Mailchimp 不支持 NZ）；P21.I 后 = ME 统一编排（intent_score 分轨/人工接管自动暂停/跨渠道 suppression 联动）
 
 #### 单向 Sync 铁律（Fable 5 复审拍板 · 2026-07-02，不留给子牙讨论）⭐
 
@@ -3430,10 +3430,10 @@ FDE 未来 Wizard：客户信息 → 选启用渠道 → 客户提供 credential
 
 | 阶段 | 时间 | 主体 | 交付 |
 |---|---|---|---|
-| **⭐ Week 1（快赢，2 小时）** | **P21.I.0 Zapier 直连**（不写代码，先于一切） | Zapier "FB Lead Ads → Mailchimp" 模板配置，Reborn 每日 9-12 leads 实时进 Mailchimp + tag | Speed-to-lead 从 3-4 天 → 5 分钟；绕过 Meta App Review 门槛 |
+| **⭐ Week 1（快赢，2 小时）** | **P21.I.0 Make 直连**（不写代码，先于一切；Make MCP 可代建） | Make "FB Lead Ads → Mailchimp" scenario，Reborn 每日 9-12 leads 实时进 Mailchimp + tag + 销售实时通知 | Speed-to-lead 从 3-4 天 → 5 分钟；绕过 Meta App Review 门槛 |
 | **Week 1-4** | P21.G MVP（WhatsApp 单渠道试点） | CTS 手动跑 + 采购专用号 + Cloud API 升级 + AI 客服 flow（bot 披露 + ctwa_clid 归因落库） | CTS 每天 15-25 WhatsApp conv/CPL $3-8 |
 | **Week 5-8** | P21.H MVP（Universal Lead Object + 3 adapters） | Meta Lead Form（App Review 第 1 天提交）+ WhatsApp + Website 三 adapter 上线；4 表修正版 schema | CTS + Oztop 跨渠道 lead 统一入口 |
-| **Week 9-12** | P21.I MVP（Mailchimp + Twilio） | Zapier 线切换成 ME adapter · 单向 sync 铁律 · Twilio SMS 补线 | 全链路：获客 → 中枢 → CRM 闭环 |
+| **Week 9-12** | P21.I MVP（Mailchimp + Twilio） | Make 线切换成 ME adapter · 单向 sync 铁律 · Twilio SMS 补线 | 全链路：获客 → 中枢 → CRM 闭环 |
 
 **PM 里程碑关卡（继承 Phase 12 强约束）**：每阶段 M1/M2/M3 不通过绝不下一阶段。
 
