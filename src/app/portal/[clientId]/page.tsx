@@ -143,7 +143,9 @@ export default async function PortalOverviewPage({ params }: Props) {
 
   const discoveryReport = discovery?.payload as unknown as DiscoveryReport | undefined
 
-  const [{ count: blogCount }, { count: socialCount }, { data: execItems }] = await Promise.all([
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10)
+
+  const [{ count: blogCount }, { count: socialCount }, { data: execItems }, { data: workLogs }] = await Promise.all([
     supabaseAdmin
       .from('blog_posts')
       .select('id', { count: 'exact', head: true })
@@ -163,7 +165,22 @@ export default async function PortalOverviewPage({ params }: Props) {
       .not('status', 'in', '(skipped,superseded)')
       .order('sort_order', { ascending: true })
       .limit(100),
+    supabaseAdmin
+      .from('fde_work_logs')
+      .select('id, log_date, summary, author_email, created_at')
+      .eq('client_id', clientId)
+      .gte('log_date', thirtyDaysAgo)
+      .order('log_date', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(30),
   ])
+
+  // Group work logs by date
+  const logsByDate: Record<string, Array<{ id: string; summary: string; author_email: string; created_at: string }>> = {}
+  for (const log of (workLogs ?? [])) {
+    ;(logsByDate[log.log_date] ??= []).push(log)
+  }
+  const logDates = Object.keys(logsByDate).sort((a, b) => b.localeCompare(a))
 
   // Group execution items by dimension (only non-skipped, visible items)
   const execByDimension: Partial<Record<DiagnosticDimension, Array<{
@@ -404,6 +421,44 @@ export default async function PortalOverviewPage({ params }: Props) {
                 )
               },
             )}
+          </div>
+        </section>
+      )}
+
+      {/* Work updates feed — last 30 days */}
+      {logDates.length > 0 && (
+        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="mb-5 border-b border-slate-200 pb-5">
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+              Work updates
+            </p>
+            <h2 className="mt-2 text-2xl font-black text-slate-950">
+              What we&apos;ve been doing for you
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Daily progress notes from your team — last 30 days.
+            </p>
+          </div>
+
+          <div className="space-y-6">
+            {logDates.map(date => (
+              <div key={date}>
+                <p className="mb-3 text-xs font-black uppercase tracking-[0.12em] text-slate-400">
+                  {new Date(date + 'T00:00:00').toLocaleDateString('en-NZ', {
+                    weekday: 'short', day: 'numeric', month: 'long', year: 'numeric',
+                  })}
+                </p>
+                <div className="space-y-3">
+                  {logsByDate[date].map(log => (
+                    <div key={log.id} className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+                        {log.summary}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         </section>
       )}
