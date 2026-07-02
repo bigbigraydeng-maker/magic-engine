@@ -190,7 +190,20 @@ export async function storeTokens(
 
 // ─── Token retrieval + auto-refresh ──────────────────────────────────────────
 
-export async function getValidAccessToken(clientId: string): Promise<string | null> {
+/**
+ * Return a valid access_token for the client, refreshing if the cached one
+ * is near expiry.
+ *
+ * `opts.forceRefresh` skips the cached-token check and hits the Google
+ * refresh endpoint unconditionally. Used by GSC / GA4 clients when they
+ * catch a 401 with a cached access_token — Google can invalidate tokens
+ * before their nominal expiry, and we saw intermittent 06-27/06-28/06-30
+ * cron failures with exactly that shape.
+ */
+export async function getValidAccessToken(
+  clientId: string,
+  opts?: { forceRefresh?: boolean },
+): Promise<string | null> {
   const { data } = await supabaseAdmin
     .from('google_oauth_tokens')
     .select('access_token, refresh_token, token_expiry')
@@ -200,7 +213,7 @@ export async function getValidAccessToken(clientId: string): Promise<string | nu
   if (!data) return null
 
   const expiresAt = new Date(data.token_expiry).getTime()
-  if (Date.now() < expiresAt - TOKEN_BUFFER_MS) {
+  if (!opts?.forceRefresh && Date.now() < expiresAt - TOKEN_BUFFER_MS) {
     return data.access_token
   }
 

@@ -197,12 +197,16 @@ async function markConnectionError(connectionId: string, message: string): Promi
 export async function getValidToken(
   clientId: string,
   provider: PlatformProvider,
+  opts?: { forceRefresh?: boolean },
 ): Promise<string> {
   const row         = await fetchConnectionRow(clientId, provider)
   const accessToken = decryptToken(row.access_token_enc)
 
-  // Fast path — token still valid
-  if (!isTokenExpired(row.token_expiry)) {
+  // Fast path — token still valid AND caller hasn't asked us to refresh
+  // anyway. Callers pass forceRefresh=true after they catch a 401 on the
+  // cached token; Google can invalidate access tokens before token_expiry
+  // and the cron logs on 06-27/06-28/06-30 showed exactly that pattern.
+  if (!opts?.forceRefresh && !isTokenExpired(row.token_expiry)) {
     return accessToken
   }
 

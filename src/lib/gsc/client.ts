@@ -196,11 +196,29 @@ export async function fetchGscSnapshot(
   // Fire all three requests in parallel: site-level totals + top queries + top pages.
   // Site-level uses no dimensions → returns true aggregate (fixes P17.A bug where
   // totals were summed from top-50 rows only, under-counting long-tail queries).
-  const [siteTotals, queries, pages] = await Promise.all([
-    querySiteTotals(token, siteUrl, periodStart, periodEnd),
-    querySearchAnalytics(token, siteUrl, periodStart, periodEnd, 'query'),
-    querySearchAnalytics(token, siteUrl, periodStart, periodEnd, 'page'),
+  const runQueries = (t: string) => Promise.all([
+    querySiteTotals(t, siteUrl, periodStart, periodEnd),
+    querySearchAnalytics(t, siteUrl, periodStart, periodEnd, 'query'),
+    querySearchAnalytics(t, siteUrl, periodStart, periodEnd, 'page'),
   ])
+
+  let siteTotals, queries, pages
+  try {
+    ;[siteTotals, queries, pages] = await runQueries(token)
+  } catch (err) {
+    // Google can invalidate access tokens before their nominal expiry
+    // (revocation, rotation, transient anti-abuse). We saw that shape on
+    // 06-27 / 06-28 / 06-30 cron runs — cached token, no local expiry, 401.
+    // Force a refresh and retry once. Second 401 propagates.
+    if (err instanceof GscApiError && err.httpStatus === 401 && clientId) {
+      console.warn(`[gsc/client] 401 on cached token for ${clientId} — force-refreshing and retrying once`)
+      const fresh = await resolveAccessToken(clientId, { forceRefresh: true })
+      if (!fresh) return null
+      ;[siteTotals, queries, pages] = await runQueries(fresh)
+    } else {
+      throw err
+    }
+  }
 
   return {
     site_url:          siteUrl,
@@ -338,11 +356,14 @@ async function querySearchAnalytics(
 
 // ─── Token resolution ─────────────────────────────────────────────────────────
 
-async function resolveAccessToken(clientId?: string): Promise<string | null> {
+async function resolveAccessToken(
+  clientId?: string,
+  opts?: { forceRefresh?: boolean },
+): Promise<string | null> {
   // 1. New encrypted path (platform_oauth_connections, provider='google_gsc')
   if (clientId) {
     try {
-      const token = await getValidToken(clientId, 'google_gsc')
+      const token = await getValidToken(clientId, 'google_gsc', opts)
       if (token) return token
     } catch (err) {
       if (!(err instanceof PlatformConnectionNotFoundError)) {
@@ -354,7 +375,7 @@ async function resolveAccessToken(clientId?: string): Promise<string | null> {
 
   // 2. Legacy OAuth token (google_oauth_tokens table) — backward compat
   if (clientId) {
-    const oauthToken = await getValidAccessToken(clientId)
+    const oauthToken = await getValidAccessToken(clientId, opts)
     if (oauthToken) return oauthToken
   }
 

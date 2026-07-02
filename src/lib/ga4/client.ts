@@ -115,24 +115,41 @@ export async function fetchGa4Snapshot(
   const periodEnd   = toIsoDate(new Date())
   const periodStart = toIsoDate(daysAgo(periodDays))
 
-  const [totals, topPages, topSources] = await Promise.all([
-    runReport(token, normalized, periodStart, periodEnd, {
+  const runReports = (t: string) => Promise.all([
+    runReport(t, normalized, periodStart, periodEnd, {
       metrics: ['sessions', 'totalUsers', 'newUsers', 'screenPageViews',
                 'averageSessionDuration', 'bounceRate'],
     }),
-    runReport(token, normalized, periodStart, periodEnd, {
+    runReport(t, normalized, periodStart, periodEnd, {
       dimensions: ['pagePath'],
       metrics:    ['screenPageViews', 'sessions'],
       orderBy:    'screenPageViews',
       limit:      SNAPSHOT_ROWS,
     }),
-    runReport(token, normalized, periodStart, periodEnd, {
+    runReport(t, normalized, periodStart, periodEnd, {
       dimensions: ['sessionSource', 'sessionMedium'],
       metrics:    ['sessions', 'keyEvents'],
       orderBy:    'sessions',
       limit:      SNAPSHOT_ROWS,
     }),
   ])
+
+  let totals, topPages, topSources
+  try {
+    ;[totals, topPages, topSources] = await runReports(token)
+  } catch (err) {
+    // See gsc/client.ts fetchGscSnapshot for the same defensive retry —
+    // Google can invalidate access tokens before their nominal expiry
+    // (06-27/06-28/06-30 cron runs). Force-refresh and try once more.
+    if (err instanceof Ga4ApiError && err.httpStatus === 401) {
+      console.warn(`[ga4/client] 401 on cached token for ${clientId} — force-refreshing and retrying once`)
+      const fresh = await getValidAccessToken(clientId, { forceRefresh: true })
+      if (!fresh) return null
+      ;[totals, topPages, topSources] = await runReports(fresh)
+    } else {
+      throw err
+    }
+  }
 
   const mv = totals.rows?.[0]?.metricValues ?? []
 
