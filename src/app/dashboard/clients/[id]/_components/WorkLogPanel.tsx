@@ -26,7 +26,11 @@ export function WorkLogPanel({ clientId }: { clientId: string }) {
     setLoading(false)
   }
 
-  useEffect(() => { fetchLogs() }, [clientId])
+  useEffect(() => {
+    fetchLogs()
+    const timer = setInterval(fetchLogs, 60_000)
+    return () => clearInterval(timer)
+  }, [clientId])
 
   async function handleSave() {
     const summary = text.trim()
