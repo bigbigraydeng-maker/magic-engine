@@ -303,6 +303,31 @@ FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Mar
 
 ---
 
+### Phase 35 — 司马徽 Outbound Prospecting（AI 数字地基 + 智能获客）⭐⭐⭐ 2026-07-06 启动
+
+> **来源**：PM「Magic Engine Project Brief v0.1 — AI Digital Foundation & Smart Prospecting System」。对齐 DAPE **D 段**（司马徽，spec 预留 Week 4+ 位置）。ME 自己的获客轨（第三轨），出口灌进现有 self-serve / FDE 双轨。**内部销售工具，客户永远看不到此流程。**
+>
+> **PM 已拍板的业务决策（2026-07-06）**：
+> - 定价阶梯：免费体检报告（销售武器）→ **Digital Foundation 一次性 AUD $1,490**（前 10 个创始客户 $990 + case study 授权）→ Keep-Alive **$199/月**（全自动订阅）→ FDE $990–2,490/月
+> - **退款保证写进官网**（7 天交付，不满意全额退）
+> - Mockup 策略：**不进冷邮件、不进套餐承诺**；只在 prospect 回复后生成（AI 生成 + 人审 10 分钟），套餐清单措辞用「新首页概念设计图」，避免与退款保证冲突
+> - 整站重建不做（人工黑洞）；ME 出图纸不施工，客户站必须在客户域名（红线）
+>
+> **管线五步**：①批量发现（DataForSEO Business Listings，18 行业 × AU/NZ 12 城种子）→ ②零 AI 规则审计（首页抓取 + OnPage instant，~$0.005/家）→ ③规则机会分（强生意 × 弱数字地基，≥55 进入下一步）→ ④张骞 prospect 短模式 AI 分析（只跑 qualified，目标 ~$0.10–0.15/家）→ ⑤销售资产（outreach email + Top 3 改进点）+ 人审队列。回复者走现有 `/discover` → `/prospect` → onboard 漏斗（零新代码）。
+
+- [x] **P35.1** Migration `20260706000001_outbound_prospects.sql`：管线主表（9 状态流转 + place_id 去重 + service_role RLS 模板）**⚠️ 待 PM 拍板 apply**
+- [x] **P35.2** `lib/dataforseo/business-listings.ts`：Business Listings 批量搜索封装 + `INDUSTRY_CATEGORIES`（18 行业）+ `CITY_COORDS`（AU 8 城 / NZ 4 城）
+- [x] **P35.3** `lib/prospecting/`：`tracking-detector`（GA4/GTM/Pixel/Clarity/UA/表单/邮箱 正则检测，零成本）+ `score`（40 分生意强度 + 60 分数字弱点，纯函数）+ `audit`（编排：首页抓取 + OnPage instant）
+- [x] **P35.4** API `/api/admin/prospecting`（GET 列表）+ `/discover`（POST 批量发现，place_id/domain 双去重）+ `/audit`（POST 批量审计 + 打分 + 状态流转），全部 guardAdmin
+- [ ] **P35.5** 张骞 prospect 短模式（砍社媒 scraper、工具调用 ~6 次，目标成本 <$0.15）+ `/api/admin/prospecting/analyze`
+- [ ] **P35.6** outreach email 生成（一次 Claude 短调用，AU Spam Act / NZ UEM 合规：退订 + 真实身份）+ 人审队列 UI（admin ProspectsTab 旁新 tab）
+- [ ] **P35.7** 转化闭环接线：replied → 发 `/discover` magic link；converted → `converted_client_id` 关联 clients
+- [ ] **P35.8** 定价页 / 官网 Digital Foundation 套餐文案（板桥必审：C 端文案）
+
+**成本模型**：1000 家/月 ≈ 发现 $10 + 规则审计 $25 + AI 只跑 qualified（~15%）$20 ≈ **$55/月**，合格线索 AI 成本 ~$0.13（Brief 目标 <$0.10 贴线）。
+
+---
+
 ### Website Self-Serve Auth - 2026-06-02
 
 - [x] **P29.AUTH.1** Google self-serve registration - add Google entry points to portal register/login, route self-serve OAuth callbacks into a new Magic Engine workspace when no existing access row exists, and keep the existing 500 MTC welcome bonus path intact.
@@ -3930,6 +3955,10 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-07-06（Phase 35 司马徽 Outbound Prospecting M1+M2 落地 [P35.1-P35.4]）
+
+ME 自己的获客管线前三步上线（内部销售工具）：DataForSEO Business Listings 批量发现（18 行业 × AU/NZ 12 城）→ 零 AI 规则审计（tracking 检测 + OnPage instant，~$0.005/家）→ 规则机会分（强生意 × 弱数字地基）。新表 `outbound_prospects`（migration 待 PM apply）+ 3 个 admin API。17 新单测全过。定价阶梯与退款保证 PM 已拍板（见 Phase 35 章节）。
 
 ### 2026-06-12（keyword gap 排除品类词 — Oztop shutters/blinds 误命中修复 [P12.I.BF1]）
 
