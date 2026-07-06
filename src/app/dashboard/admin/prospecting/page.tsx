@@ -8,7 +8,7 @@
  * the PM-facing way to exercise the pipeline end-to-end without curl.
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { INDUSTRY_CATEGORIES, CITY_COORDS } from '@/lib/dataforseo/business-listings'
 
 interface ProspectRow {
@@ -72,6 +72,9 @@ export default function ProspectingPage() {
   const [error, setError] = useState('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<AiReport | null>(null)
+  // Latest requested detail id — guards against out-of-order responses
+  // showing prospect A's scorecard under prospect B's row.
+  const detailRequestRef = useRef<string | null>(null)
 
   const fetchList = useCallback(async () => {
     const qs = new URLSearchParams({ limit: '50' })
@@ -104,17 +107,27 @@ export default function ProspectingPage() {
     }
   }
 
+  // Sequential single-prospect requests: one analysis can take ~2 minutes,
+  // so a 3-prospect batch in one HTTP call would outlive the proxy timeout.
   async function runAnalyze() {
     setBusy('analyze'); setError(''); setMessage('')
     try {
-      const res = await fetch('/api/admin/prospecting/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ limit: 3 }),
-      })
-      const data = await res.json() as { analyzed?: number; failed?: number; remaining?: number; error?: string }
-      if (!res.ok) throw new Error(data.error ?? 'AI 分析失败')
-      setMessage(`本批 AI 分析 ${data.analyzed} 家（失败 ${data.failed}），剩余合格待析 ${data.remaining}`)
+      let done = 0, remaining: number | null = null
+      for (let i = 0; i < 3; i++) {
+        setMessage(`AI 分析第 ${i + 1}/3 家…`)
+        const res = await fetch('/api/admin/prospecting/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ limit: 1 }),
+        })
+        const data = await res.json() as { analyzed?: number; retrying?: number; remaining?: number; error?: string }
+        if (!res.ok) throw new Error(data.error ?? 'AI 分析失败')
+        done += data.analyzed ?? 0
+        remaining = data.remaining ?? null
+        if ((data.analyzed ?? 0) === 0 && (data.retrying ?? 0) === 0) break  // queue empty
+        await fetchList()
+      }
+      setMessage(`本轮 AI 分析完成 ${done} 家，剩余合格待析 ${remaining ?? '—'}`)
       await fetchList()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'AI 分析失败')
@@ -124,12 +137,21 @@ export default function ProspectingPage() {
   }
 
   async function toggleDetail(id: string, status: string) {
-    if (expandedId === id) { setExpandedId(null); setDetail(null); return }
+    if (expandedId === id) {
+      setExpandedId(null); setDetail(null); detailRequestRef.current = null
+      return
+    }
     if (!['analyzed', 'outreach_ready', 'contacted', 'replied', 'converted'].includes(status)) return
     setExpandedId(id); setDetail(null)
-    const res = await fetch(`/api/admin/prospecting/${id}`)
-    const data = await res.json() as { prospect?: { ai_report?: AiReport | null }; error?: string }
-    if (res.ok) setDetail(data.prospect?.ai_report ?? null)
+    detailRequestRef.current = id
+    try {
+      const res = await fetch(`/api/admin/prospecting/${id}`)
+      const data = await res.json() as { prospect?: { ai_report?: AiReport | null }; error?: string }
+      if (detailRequestRef.current !== id) return
+      setDetail(res.ok ? (data.prospect?.ai_report ?? null) : { error: '加载失败' })
+    } catch {
+      if (detailRequestRef.current === id) setDetail({ error: '加载失败' })
+    }
   }
 
   async function runAudit() {

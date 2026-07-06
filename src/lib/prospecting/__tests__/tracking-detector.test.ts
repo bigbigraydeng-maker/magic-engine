@@ -78,4 +78,12 @@ describe('detectTrackingSignals', () => {
     expect(s.facebook_url).toBe('https://www.facebook.com/ozflooringco')
     expect(s.instagram_url).toBe('https://www.instagram.com/ozflooringco/')
   })
+
+  it('skips facebook paths whose identity lives past the first segment', () => {
+    const html = `
+      <a href="https://www.facebook.com/profile.php?id=61551234">profile</a>
+      <a href="https://www.facebook.com/pages/Foo-Bar/123456">page</a>
+      <a href="https://www.facebook.com/groups/tradies">group</a>`
+    expect(detectTrackingSignals(html).facebook_url).toBeNull()
+  })
 })

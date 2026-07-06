@@ -42,7 +42,10 @@ const EMAIL_REGEX = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi
 // Asset filenames and tracking-domain noise that match the email regex shape.
 const EMAIL_JUNK = /\.(png|jpe?g|gif|svg|webp|css|js)$|@(sentry|example)\./i
 
-const FACEBOOK_REGEX  = /https?:\/\/(?:www\.)?facebook\.com\/(?!sharer|share|plugins|dialog|tr\b|login|policies)[A-Za-z0-9_.\-]+\/?/i
+// Excludes non-profile paths AND path-only prefixes (profile.php / pages/…)
+// whose identity lives past the first segment — a truncated capture there
+// would send Apify to the wrong page.
+const FACEBOOK_REGEX  = /https?:\/\/(?:www\.)?facebook\.com\/(?!sharer|share|plugins|dialog|tr\b|login|policies|profile\.php|pages\b|groups\b|events\b|watch\b|privacy|help\b|hashtag)[A-Za-z0-9_.\-]+\/?/i
 const INSTAGRAM_REGEX = /https?:\/\/(?:www\.)?instagram\.com\/(?!p\/|reel\/|explore|accounts)[A-Za-z0-9_.\-]+\/?/i
 
 export function detectTrackingSignals(html: string): TrackingSignals {

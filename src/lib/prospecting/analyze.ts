@@ -102,6 +102,20 @@ const INDUSTRY_LABELS: Record<string, string> = {
 const HOMEPAGE_CHAR_CAP = 6_000
 const GEO_ANSWER_CHAR_CAP = 2_500
 
+// Per-stage ceilings so one hung upstream cannot stretch a batch past the
+// HTTP proxy timeout (each analysis stays bounded at ~2 minutes worst case).
+const HOMEPAGE_TIMEOUT_MS = 35_000
+const GEO_TIMEOUT_MS = 45_000
+const SOCIAL_TIMEOUT_MS = 80_000
+
+/** Resolve null when the promise does not settle within `ms`. */
+function withTimeout<T>(promise: Promise<T | null>, ms: number): Promise<T | null> {
+  return Promise.race([
+    promise,
+    new Promise<null>(resolve => setTimeout(() => resolve(null), ms)),
+  ])
+}
+
 // ─── Collectors (each optional, never throws) ────────────────────────────────
 
 async function collectHomepage(url: string | null): Promise<string | null> {
@@ -114,22 +128,40 @@ async function collectHomepage(url: string | null): Promise<string | null> {
   }
 }
 
-/** Exported for tests. Checks whether the brand shows up in an AI answer. */
-export function brandMentioned(answer: string, businessName: string): boolean {
+const LEGAL_SUFFIXES = new Set(['pty', 'ltd', 'limited', 'co', 'the', 'and'])
+
+/**
+ * Exported for tests. Checks whether the brand shows up in an AI answer.
+ *
+ * `genericWords` are tokens that carry no brand identity in this probe's
+ * context (the city and industry words of the question itself). A fallback
+ * partial match must include at least one distinctive token — otherwise a
+ * name like "Brisbane Flooring" would "match" any answer that mentions
+ * flooring in Brisbane, and the false positive would flow straight into
+ * the outreach email ("you already appear in AI search").
+ */
+export function brandMentioned(answer: string, businessName: string, genericWords: string[] = []): boolean {
   const normalise = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
   const name = normalise(businessName)
   if (!name) return false
-  const haystack = normalise(answer)
-  if (haystack.includes(name)) return true
-  // Tolerate suffix trimming: "Oz Flooring Co Pty Ltd" → "oz flooring"
-  const words = name.split(' ').filter(w => !['pty', 'ltd', 'limited', 'co', 'the'].includes(w))
-  return words.length >= 2 && haystack.includes(words.slice(0, 2).join(' '))
+  const haystack = ` ${normalise(answer)} `
+  if (haystack.includes(` ${name} `)) return true
+
+  const generic = new Set(genericWords.flatMap(w => normalise(w).split(' ')))
+  const words = name.split(' ').filter(w => !LEGAL_SUFFIXES.has(w))
+  if (words.length < 2) return false
+  const bigram = words.slice(0, 2)
+  // Suffix-trimmed fallback ("Oz Flooring Co Pty Ltd" → "oz flooring") only
+  // counts when the bigram carries at least one distinctive word.
+  if (!bigram.some(w => !generic.has(w))) return false
+  return haystack.includes(` ${bigram.join(' ')} `)
 }
 
 async function collectGeoProbe(input: ProspectAnalysisInput): Promise<{ raw: string; probe: GeoProbeResult } | null> {
   if (!process.env.OPENAI_API_KEY) return null
   const label = INDUSTRY_LABELS[input.industry] ?? input.industry.replace(/_/g, ' ')
-  const question = `What is the best ${label} in ${input.city.replace(/_/g, ' ')}?`
+  const city = input.city.replace(/_/g, ' ')
+  const question = `What is the best ${label} in ${city}?`
   const market = input.country === 'NZ' ? 'nz' : 'au'
   const out = await runOpenAI({ question, market })
   if (out.error_message || !out.raw_response) return null
@@ -137,7 +169,9 @@ async function collectGeoProbe(input: ProspectAnalysisInput): Promise<{ raw: str
     raw: out.raw_response.slice(0, GEO_ANSWER_CHAR_CAP),
     probe: {
       question,
-      mentioned: brandMentioned(out.raw_response, input.business_name),
+      // City + industry words are generic in this context — a business named
+      // after them must match on its distinctive words only.
+      mentioned: brandMentioned(out.raw_response, input.business_name, [city, label, input.country]),
       competitors_mentioned: [],   // filled by the synthesis call
     },
   }
@@ -182,6 +216,44 @@ interface SynthesisJson {
   pillars: ProspectAnalysis['pillars']
 }
 
+const PILLAR_KEYS = ['seo', 'geo', 'social', 'gbp'] as const
+
+/**
+ * Exported for tests. Runtime shape validation for the synthesis JSON —
+ * parseJsonResponse only guarantees "some JSON object", and a malformed
+ * ai_report (e.g. top_problems as a string) crashes the console UI at
+ * render time. Invalid shapes throw so the caller takes the error fallback.
+ */
+export function validateSynthesis(raw: unknown): SynthesisJson {
+  const obj = raw as Partial<SynthesisJson> | null
+  if (!obj || typeof obj !== 'object') throw new Error('synthesis: not an object')
+
+  const pillars = obj.pillars as Record<string, { score?: unknown; summary?: unknown }> | undefined
+  if (!pillars) throw new Error('synthesis: pillars missing')
+  for (const key of PILLAR_KEYS) {
+    const p = pillars[key]
+    if (!p || typeof p.score !== 'number' || typeof p.summary !== 'string') {
+      throw new Error(`synthesis: pillar ${key} malformed`)
+    }
+    p.score = Math.max(0, Math.min(100, Math.round(p.score)))
+  }
+
+  if (!Array.isArray(obj.top_problems) || !obj.top_problems.every(p => typeof p === 'string')) {
+    throw new Error('synthesis: top_problems malformed')
+  }
+  if (typeof obj.email_hook !== 'string') throw new Error('synthesis: email_hook malformed')
+
+  return {
+    owner_name: typeof obj.owner_name === 'string' && obj.owner_name.trim() ? obj.owner_name : null,
+    top_problems: obj.top_problems,
+    email_hook: obj.email_hook,
+    competitors_mentioned: Array.isArray(obj.competitors_mentioned)
+      ? obj.competitors_mentioned.filter((c): c is string => typeof c === 'string')
+      : [],
+    pillars: obj.pillars as ProspectAnalysis['pillars'],
+  }
+}
+
 function buildSynthesisPrompt(
   input: ProspectAnalysisInput,
   homepage: string | null,
@@ -211,10 +283,14 @@ export async function analyzeProspect(input: ProspectAnalysisInput): Promise<Pro
   const analyzed_at = new Date().toISOString()
   const skips: string[] = []
 
+  // Bare domains from the listing need a scheme before they reach the
+  // Site Analyzer, otherwise the fallback never succeeds.
+  const homepageUrl = input.website_url ?? (input.domain ? `https://${input.domain}` : null)
+
   const [homepage, geo, social] = await Promise.all([
-    collectHomepage(input.website_url ?? input.domain),
-    collectGeoProbe(input).catch(() => null),
-    collectSocialActivity(input),
+    withTimeout(collectHomepage(homepageUrl), HOMEPAGE_TIMEOUT_MS),
+    withTimeout(collectGeoProbe(input).catch(() => null), GEO_TIMEOUT_MS),
+    withTimeout(collectSocialActivity(input), SOCIAL_TIMEOUT_MS),
   ])
   if (!homepage) skips.push('homepage_unavailable')
   if (!geo) skips.push('geo_probe_skipped')
@@ -232,13 +308,13 @@ export async function analyzeProspect(input: ProspectAnalysisInput): Promise<Pro
       messages: [{ role: 'user', content: buildSynthesisPrompt(input, homepage, geo?.raw ?? null, social) }],
       maxOutputTokens: 1500,
     })
-    const parsed = parseJsonResponse<SynthesisJson>(result.text)
+    const parsed = validateSynthesis(parseJsonResponse<unknown>(result.text))
 
     return {
       analyzed_at,
       segment,
-      owner_name:   parsed.owner_name ?? null,
-      top_problems: (parsed.top_problems ?? []).slice(0, 3),
+      owner_name:   parsed.owner_name,
+      top_problems: parsed.top_problems.slice(0, 3),
       email_hook:   parsed.email_hook ?? '',
       pillars:      parsed.pillars,
       geo_probe: geo
@@ -263,7 +339,18 @@ export async function analyzeProspect(input: ProspectAnalysisInput): Promise<Pro
       geo_probe: geo?.probe ?? null,
       social_activity: social,
       skips,
-      error: err instanceof Error ? err.message : 'synthesis failed',
+      // Neutral wording only — raw messages can leak vendor names into the
+      // admin UI (UI 层禁真名). The original goes to server logs.
+      error: neutraliseError(err),
     }
   }
+}
+
+function neutraliseError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err)
+  console.error('[prospecting/analyze] synthesis failed:', raw)
+  if (/api[ _-]?key|environment variable/i.test(raw)) return 'AI 引擎未配置'
+  if (/429|rate.?limit|overloaded/i.test(raw)) return 'AI 引擎限流，稍后重试'
+  if (/No JSON object|synthesis:/.test(raw)) return 'AI 返回格式异常'
+  return 'AI 分析失败'
 }
