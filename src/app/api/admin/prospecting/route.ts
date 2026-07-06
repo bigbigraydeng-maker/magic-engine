@@ -12,12 +12,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { guardAdmin } from '@/lib/auth/require-admin'
-import { complianceFooter } from '@/lib/prospecting/outreach'
+import { complianceFooter, senderIdentity } from '@/lib/prospecting/outreach'
 
 const PAGE_SIZE = 30
 const VALID_STATUSES = [
   'discovered', 'audited', 'qualified', 'analyzed',
-  'outreach_ready', 'contacted', 'replied', 'converted', 'archived',
+  'outreach_ready', 'contacted', 'replied', 'converted', 'archived', 'opted_out',
 ]
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -59,6 +59,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     total: count ?? 0,
     page,
     limit,
-    ...(full ? { compliance_footer: complianceFooter() } : {}),
+    // Footer is a template — `{{business_name}}` substituted per card so the
+    // preview shows exactly what each owner receives.
+    ...(full ? { compliance_footer: complianceFooter(), sender_configured: senderIdentity().configured } : {}),
   })
 }

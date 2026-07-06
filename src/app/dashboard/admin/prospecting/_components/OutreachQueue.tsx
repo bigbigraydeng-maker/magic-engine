@@ -67,7 +67,8 @@ function PillarBar({ label, pillar }: { label: string; pillar: PillarScore }) {
 
 export default function OutreachQueue() {
   const [cards, setCards] = useState<QueueCard[]>([])
-  const [footer, setFooter] = useState('')
+  const [footer, setFooter] = useState('')       // template with {{business_name}}
+  const [senderConfigured, setSenderConfigured] = useState(true)
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')          // card id or 'draft'
@@ -82,11 +83,12 @@ export default function OutreachQueue() {
     setLoading(true)
     try {
       const res = await fetch('/api/admin/prospecting?status=outreach_ready&full=1&limit=20')
-      const data = await res.json() as { prospects?: QueueCard[]; total?: number; compliance_footer?: string; error?: string }
+      const data = await res.json() as { prospects?: QueueCard[]; total?: number; compliance_footer?: string; sender_configured?: boolean; error?: string }
       if (!res.ok) throw new Error(data.error ?? '加载失败')
       setCards(data.prospects ?? [])
       setTotal(data.total ?? 0)
       setFooter(data.compliance_footer ?? '')
+      setSenderConfigured(data.sender_configured ?? true)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
     } finally {
@@ -115,7 +117,8 @@ export default function OutreachQueue() {
     }
   }
 
-  async function patch(id: string, payload: Record<string, unknown>, okMessage: string) {
+  /** Returns true on success — callers must not assume the write landed. */
+  async function patch(id: string, payload: Record<string, unknown>, okMessage: string): Promise<boolean> {
     setBusy(id); setError('')
     try {
       const res = await fetch(`/api/admin/prospecting/${id}`, {
@@ -127,24 +130,39 @@ export default function OutreachQueue() {
       if (!res.ok) throw new Error(data.error ?? '操作失败')
       setMessage(okMessage)
       await fetchQueue()
+      return true
     } catch (e) {
       setError(e instanceof Error ? e.message : '操作失败')
+      return false
     } finally {
       setBusy('')
     }
   }
 
+  function footerFor(card: QueueCard): string {
+    return footer.replace('{{business_name}}', card.business_name)
+  }
+
   async function copyAndMarkContacted(card: QueueCard) {
     if (!card.outreach_email) return
-    const fullText = `Subject: ${card.outreach_email.subject}\n\n${card.outreach_email.body}\n\n${footer}`
+    // The compliance footer must be part of every copied email — refuse
+    // rather than silently produce a footer-less (non-compliant) message.
+    if (!footer) { setError('合规落款未加载，请刷新页面后再复制'); return }
+    const fullText = `Subject: ${card.outreach_email.subject}\n\n${card.outreach_email.body}\n\n${footerFor(card)}`
     try {
       await navigator.clipboard.writeText(fullText)
     } catch {
       setError('复制失败——请手动选中邮件文本')
       return
     }
-    setContactedToday(n => n + 1)
-    await patch(card.id, { action: 'mark_contacted' }, '已复制全文 ✂️ 粘贴进邮箱发出即可（已标记为已联系）')
+    const ok = await patch(card.id, { action: 'mark_contacted' }, '已复制全文 ✂️ 粘贴进邮箱发出即可（已标记为已联系）')
+    if (ok) {
+      setContactedToday(n => n + 1)
+    } else {
+      // The text IS on the clipboard — a second reviewer re-copying this card
+      // would double-email the same business.
+      setError('全文已复制，但标记失败——请勿重复发送，刷新确认这条的状态后再操作')
+    }
   }
 
   function startEdit(card: QueueCard) {
@@ -155,8 +173,9 @@ export default function OutreachQueue() {
   }
 
   async function saveEdit(id: string) {
-    await patch(id, { action: 'edit_email', subject: editSubject, body: editBody }, '草稿已保存')
-    setEditingId(null)
+    const ok = await patch(id, { action: 'edit_email', subject: editSubject, body: editBody }, '草稿已保存')
+    // Keep the editor (and the reviewer's wording) open on failure.
+    if (ok) setEditingId(null)
   }
 
   return (
@@ -164,18 +183,25 @@ export default function OutreachQueue() {
       {/* Queue header */}
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-me-charcoal/10 bg-white p-4">
         <div className="mr-auto">
-          <div className="text-sm font-medium text-me-charcoal">待审草稿 {total} 封{contactedToday > 0 && ` · 本次已发出 ${contactedToday} 封 🎯`}</div>
+          <div className="text-sm font-medium text-me-charcoal">待审草稿 {total} 封{contactedToday > 0 && ` · 本次已复制 ${contactedToday} 封 ✂️`}</div>
           <div className="text-xs text-me-charcoal/50 mt-0.5">
             每封邮件的每个说法，左侧都放着依据 — 核对一眼，改一改，复制即发。发出的每一封都由你亲手把关。
           </div>
         </div>
         <button onClick={() => void draftBatch()} disabled={busy !== ''}
           className="rounded-lg bg-me-charcoal px-4 py-2 text-sm text-white disabled:opacity-40">
-          {busy === 'draft' ? '撰写中…' : '✍️ 生成外呼草稿 (5)'}
+          {busy === 'draft' ? '撰写中…' : '✍️ 生成邮件草稿 (5)'}
         </button>
         {message && <span className="w-full text-sm text-[#5C8A4A]">{message}</span>}
         {error && <span className="w-full text-sm text-[#C2453A]">{error}</span>}
       </div>
+
+      {!senderConfigured && (
+        <div className="rounded-xl border border-me-ochre/30 bg-me-ochre/8 px-4 py-3 text-xs text-me-charcoal/70">
+          ⚠️ 尚未配置真人署名（环境变量 <code>OUTREACH_SENDER_NAME</code>）——当前落款是「The Magic Engine Team」。
+          团队署名是冷邮件回复率杀手，建议配置后再发。
+        </div>
+      )}
 
       {loading && <div className="py-10 text-center text-sm text-me-charcoal/40">加载中…</div>}
 
@@ -184,7 +210,7 @@ export default function OutreachQueue() {
           <div className="text-3xl">📮</div>
           <div className="mt-2 text-sm text-me-charcoal/60">队列空空如也</div>
           <div className="mt-1 text-xs text-me-charcoal/40">
-            在「管线」页跑完 ③ AI 分析后，回来点「✍️ 生成外呼草稿」
+            在「管线」页跑完 ③ AI 分析后，回来点「✍️ 生成邮件草稿」
           </div>
         </div>
       )}
@@ -260,7 +286,7 @@ export default function OutreachQueue() {
                 <div className="flex-1">
                   <div className="text-[15px] font-semibold text-me-charcoal">{email?.subject}</div>
                   <div className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-me-charcoal/85">{email?.body}</div>
-                  <div className="mt-4 whitespace-pre-wrap border-t border-me-charcoal/8 pt-3 text-xs leading-relaxed text-me-charcoal/45">{footer}</div>
+                  <div className="mt-4 whitespace-pre-wrap border-t border-me-charcoal/8 pt-3 text-xs leading-relaxed text-me-charcoal/45">{footerFor(card)}</div>
                 </div>
               )}
 
@@ -280,8 +306,10 @@ export default function OutreachQueue() {
                     </button>
                     <button onClick={() => startEdit(card)} disabled={busy !== ''}
                       className="rounded-lg border border-me-charcoal/15 px-3 py-1.5 text-xs text-me-charcoal/70 disabled:opacity-40">✏️ 编辑</button>
+                    <button onClick={() => void patch(card.id, { action: 'opt_out' }, '已标记拒收，永不再联系')} disabled={busy !== ''}
+                      className="ml-auto rounded-lg border border-[#C2453A]/20 px-3 py-1.5 text-xs text-[#C2453A]/70 disabled:opacity-40">🚫 对方拒收</button>
                     <button onClick={() => void patch(card.id, { action: 'archive' }, '已归档')} disabled={busy !== ''}
-                      className="ml-auto rounded-lg border border-me-charcoal/10 px-3 py-1.5 text-xs text-me-charcoal/40 disabled:opacity-40">归档</button>
+                      className="rounded-lg border border-me-charcoal/10 px-3 py-1.5 text-xs text-me-charcoal/40 disabled:opacity-40">归档</button>
                   </>
                 )}
               </div>

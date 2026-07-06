@@ -33,10 +33,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const body  = await req.json().catch(() => null) as { limit?: number } | null
   const limit = Math.min(MAX_BATCH, Math.max(1, body?.limit ?? DEFAULT_BATCH))
 
+  // Error-parked analyses are excluded — otherwise a handful of high-score
+  // error rows would occupy every batch forever while healthy prospects
+  // below them never get drafted.
   const { data: batch, error } = await supabaseAdmin
     .from('outbound_prospects')
     .select('id, business_name, industry, city, country, domain, rating, review_count, ai_report, updated_at')
     .eq('status', 'analyzed')
+    .is('ai_report->error', null)
     .order('prospect_score', { ascending: false, nullsFirst: false })
     .limit(limit)
 
@@ -92,6 +96,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .from('outbound_prospects')
     .select('id', { count: 'exact', head: true })
     .eq('status', 'analyzed')
+    .is('ai_report->error', null)
 
   return NextResponse.json({ drafted, skipped, failed, remaining: count ?? 0 })
 }

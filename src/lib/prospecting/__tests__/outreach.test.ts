@@ -1,6 +1,20 @@
-import { describe, it, expect } from 'vitest'
-import { validateOutreachJson, buildOutreachPrompt, complianceFooter, type OutreachInput } from '../outreach'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+vi.mock('@/lib/anthropic/client', () => ({
+  callClaudeChat: vi.fn(),
+  parseJsonResponse: (text: string) => JSON.parse(text),
+}))
+
+import { callClaudeChat } from '@/lib/anthropic/client'
+import {
+  validateOutreachJson, buildOutreachPrompt, complianceFooter,
+  sanitiseOwnerName, generateOutreachEmail, type OutreachInput,
+} from '../outreach'
 import type { ProspectAnalysis } from '../analyze'
+
+const mockClaude = vi.mocked(callClaudeChat)
+
+beforeEach(() => { vi.clearAllMocks() })
 
 function report(overrides: Partial<ProspectAnalysis> = {}): ProspectAnalysis {
   return {
@@ -48,31 +62,87 @@ describe('buildOutreachPrompt', () => {
   it('grounds the prompt in real evidence: problems, GEO absence, dead social', () => {
     const p = buildOutreachPrompt(input())
     expect(p).toContain('No Google Analytics installed')
-    expect(p).toContain('does not come up')
+    expect(p).toContain("didn't get a mention")
     expect(p).toContain('FloorFlow')
     expect(p).toContain('no posts in the last 30 days')
     expect(p).toContain('OWNER FIRST NAME: Mark')
+  })
+
+  it('phrases the GEO evidence as time-boxed ("when we asked ChatGPT"), never absolute', () => {
+    const p = buildOutreachPrompt(input())
+    expect(p).toContain('when we asked ChatGPT')
+    expect(p).not.toContain('does not come up')
   })
 
   it('omits GEO evidence when the brand IS mentioned (never claim absence falsely)', () => {
     const p = buildOutreachPrompt(input({
       ai_report: report({ geo_probe: { question: 'q', mentioned: true, competitors_mentioned: [] } }),
     }))
-    expect(p).not.toContain('does not come up')
+    expect(p).not.toContain("didn't get a mention")
   })
 
   it('degrades to the generic angle when there are no problems', () => {
     const p = buildOutreachPrompt(input({ ai_report: report({ top_problems: [], email_hook: '' }) }))
     expect(p).toContain('keep the email generic')
-    expect(p).toContain('4.7★ from 120 customers')
+    expect(p).toContain('120 reviews at 4.7★')
+  })
+
+  it('drops a doubtful owner name instead of risking the wrong greeting', () => {
+    const p = buildOutreachPrompt(input({
+      business_name: 'Dave Smith Flooring',
+      ai_report: report({ owner_name: 'Dave' }),   // "Dave" is the brand, not verified person
+    }))
+    expect(p).toContain('OWNER FIRST NAME: unknown')
+  })
+})
+
+describe('sanitiseOwnerName', () => {
+  it('keeps a plausible first name, stripping titles and surnames', () => {
+    expect(sanitiseOwnerName('Dr Sarah Nguyen (Director)', 'Brisbane Dental Studio')).toBe('Sarah')
+  })
+
+  it('rejects a name that overlaps the business name (brand, not person)', () => {
+    expect(sanitiseOwnerName('Smith', 'Smith & Jones Plumbing')).toBeNull()
+  })
+
+  it('rejects null / empty / absurd inputs', () => {
+    expect(sanitiseOwnerName(null, 'X')).toBeNull()
+    expect(sanitiseOwnerName('  ', 'X')).toBeNull()
+    expect(sanitiseOwnerName('A', 'X')).toBeNull()
   })
 })
 
 describe('complianceFooter', () => {
-  it('carries identity, reason, and an opt-out (AU Spam Act / NZ UEM)', () => {
-    const f = complianceFooter()
+  it('carries identity, website, reason, and an opt-out (AU Spam Act / NZ UEM)', () => {
+    const f = complianceFooter('Oz Flooring Co')
     expect(f).toMatch(/Magic Engine/)
-    expect(f).toMatch(/publicly listed/)
-    expect(f).toMatch(/unsubscribe/i)
+    expect(f).toMatch(/magicengine/)
+    expect(f).toContain('Oz Flooring Co')
+    expect(f).toContain('public Google Business listing')
+    expect(f).toMatch(/reply "no thanks"/)
+    expect(f).toContain("won't hear from us again")
+  })
+
+  it('emits a substitutable template when no business name is given', () => {
+    expect(complianceFooter()).toContain('{{business_name}}')
+  })
+})
+
+describe('generateOutreachEmail', () => {
+  it('returns a draft with the segment as angle', async () => {
+    mockClaude.mockResolvedValue({ text: JSON.stringify({ subject: 'About your flooring store', body: 'x'.repeat(80) }), tokens_in: 1, tokens_out: 1, cost_usd: 0 })
+    const email = await generateOutreachEmail(input())
+    expect(email.subject).toBe('About your flooring store')
+    expect(email.angle).toBe('core_target')
+  })
+
+  it('throws (caller retries) when the model returns a malformed draft', async () => {
+    mockClaude.mockResolvedValue({ text: '{"subject": "hi"}', tokens_in: 1, tokens_out: 1, cost_usd: 0 })
+    await expect(generateOutreachEmail(input())).rejects.toThrow(/body/)
+  })
+
+  it('propagates model failure instead of fabricating a draft', async () => {
+    mockClaude.mockRejectedValue(new Error('overloaded'))
+    await expect(generateOutreachEmail(input())).rejects.toThrow('overloaded')
   })
 })
