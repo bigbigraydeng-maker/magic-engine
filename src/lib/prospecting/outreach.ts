@@ -17,6 +17,7 @@
 import { callClaudeChat, parseJsonResponse } from '@/lib/anthropic/client'
 import type { ProspectAnalysis } from './analyze'
 import type { ProspectSegment } from './segment'
+import type { LeakReport } from './report'
 
 export interface OutreachEmail {
   subject:      string
@@ -38,6 +39,13 @@ export interface OutreachInput {
   rating:        number | null
   review_count:  number | null
   ai_report:     ProspectAnalysis
+  /**
+   * Lead-leakage report (report.ts). When present, its customer-phrased
+   * summary_points become the email's evidence — the same "where enquiries
+   * leak" findings the recipient sees on the full report page, so the cold
+   * email and the report tell one consistent story.
+   */
+  leak_report?:  LeakReport
 }
 
 // ─── Compliance footer (fixed, never AI-generated) ────────────────────────────
@@ -94,7 +102,7 @@ const ANGLE_BRIEFS: Record<ProspectSegment, string> = {
 const SYSTEM_PROMPT = `You write short cold-outreach emails for Magic Engine, a digital upgrade service for Australian and New Zealand local businesses. Rules:
 - Australian/New Zealand English — match the recipient's country in spelling and idiom. Warm, plain, tradie-friendly. No marketing buzzwords (avoid "digital presence", "leverage", "solutions"), no exclamation marks, no emoji.
 - 90-130 words body. Short paragraphs. At most one bulleted list of 2-3 findings.
-- Every factual claim must come from the EVIDENCE section verbatim in spirit — never invent numbers, tools, or findings.
+- Every factual claim must come from the EVIDENCE section — never invent numbers, tools, or findings. You may lightly reword an evidence line for flow, but keep every business name, competitor name, and number exactly as written.
 - Open with the provided hook sentence (you may lightly smooth it). Address the owner by first name if provided, otherwise no name.
 - Close with a soft, no-pressure offer of the free full report and one question they can answer with a single word.
 - Never promise or imply any outcome — rankings, leads, enquiries, calls, customers, growth, or revenue. State findings only; let the reader draw their own conclusions.
@@ -137,11 +145,31 @@ export function buildOutreachPrompt(input: OutreachInput): string {
   const r = input.ai_report
   const city = input.city.replace(/_/g, ' ')
   const trade = input.industry.replace(/_/g, ' ')
+  const hook = r.email_hook ||
+    `You've clearly built a solid reputation in ${city} — ${input.review_count ?? 'that many'} reviews at ${input.rating ?? '—'}★ doesn't happen by accident.`
+
+  // Preferred path: the lead-leakage report's customer-phrased findings, so
+  // the cold email and the full report page tell one consistent story. Its
+  // summary_points already fold in AI-search, social, contact and tracking
+  // evidence — no need to re-list them piecemeal.
+  const leaks = input.leak_report?.summary_points ?? []
+  if (leaks.length) {
+    return [
+      'ANGLE: Lead with where enquiries are quietly slipping away — this business gets found but loses ready customers before they get in touch. Warm and concrete, not alarmist. Frame it as things worth a quick look, not failures.',
+      `BUSINESS: ${input.business_name} — ${trade} in ${city}, ${input.country}`,
+      `OWNER FIRST NAME: ${sanitiseOwnerName(r.owner_name, input.business_name) ?? 'unknown'}`,
+      `HOOK SENTENCE: ${hook}`,
+      'EVIDENCE — where enquiries may be leaking (use 2-3, keep names and numbers exact):',
+      ...leaks.map(p => `- ${p}`),
+    ].join('\n')
+  }
+
+  // Fallback (no leak report): the original evidence assembly.
   return [
     `ANGLE: ${ANGLE_BRIEFS[r.segment] ?? ANGLE_BRIEFS.general}`,
     `BUSINESS: ${input.business_name} — ${trade} in ${city}, ${input.country}`,
     `OWNER FIRST NAME: ${sanitiseOwnerName(r.owner_name, input.business_name) ?? 'unknown'}`,
-    `HOOK SENTENCE: ${r.email_hook || `You've clearly built a solid reputation in ${city} — ${input.review_count ?? 'that many'} reviews at ${input.rating ?? '—'}★ doesn't happen by accident.`}`,
+    `HOOK SENTENCE: ${hook}`,
     `EVIDENCE — problems we can name:`,
     ...(r.top_problems.length ? r.top_problems.map(p => `- ${p}`) : ['- (none — keep the email generic and lead with the free report)']),
     // Time-boxed, defensible phrasing: "when we asked … didn't get a mention"

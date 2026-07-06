@@ -11,8 +11,20 @@ import {
   sanitiseOwnerName, generateOutreachEmail, type OutreachInput,
 } from '../outreach'
 import type { ProspectAnalysis } from '../analyze'
+import type { LeakReport } from '../report'
 
 const mockClaude = vi.mocked(callClaudeChat)
+
+function leakReport(summary_points: string[]): LeakReport {
+  return {
+    generated_at: '2026-07-06T00:00:00Z',
+    business_name: 'Oz Flooring Co',
+    headline: `${summary_points.length} places where enquiries are leaking`,
+    leak_count: summary_points.length,
+    stages: [],
+    summary_points,
+  }
+}
 
 beforeEach(() => { vi.clearAllMocks() })
 
@@ -93,6 +105,26 @@ describe('buildOutreachPrompt', () => {
       ai_report: report({ owner_name: 'Dave' }),   // "Dave" is the brand, not verified person
     }))
     expect(p).toContain('OWNER FIRST NAME: unknown')
+  })
+
+  it('leads with the lead-leakage angle and uses the report summary points when present', () => {
+    const leak = leakReport([
+      "There's no enquiry form or visible email on your homepage.",
+      'Your Facebook page hasn\'t posted in over a month.',
+    ])
+    const p = buildOutreachPrompt(input({ leak_report: leak }))
+    expect(p).toContain('where enquiries are quietly slipping away')
+    expect(p).toContain('no enquiry form or visible email')
+    expect(p).toContain("hasn't posted in over a month")
+    // The leak path supersedes the piecemeal fallback evidence assembly.
+    expect(p).not.toContain('EVIDENCE — problems we can name')
+    expect(p).toContain('OWNER FIRST NAME: Mark')
+  })
+
+  it('falls back to the original evidence path when the leak report has no findings', () => {
+    const p = buildOutreachPrompt(input({ leak_report: leakReport([]) }))
+    expect(p).toContain('EVIDENCE — problems we can name')
+    expect(p).not.toContain('quietly slipping away')
   })
 })
 

@@ -17,7 +17,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { guardAdmin } from '@/lib/auth/require-admin'
 import { generateOutreachEmail } from '@/lib/prospecting/outreach'
+import { buildLeakReport } from '@/lib/prospecting/report'
 import type { ProspectAnalysis } from '@/lib/prospecting/analyze'
+import type { ProspectAudit } from '@/lib/prospecting/audit'
+import type { ScoreSignal } from '@/lib/prospecting/score'
 
 const DEFAULT_BATCH = 5
 const MAX_BATCH = 10
@@ -38,7 +41,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // below them never get drafted.
   const { data: batch, error } = await supabaseAdmin
     .from('outbound_prospects')
-    .select('id, business_name, industry, city, country, domain, rating, review_count, ai_report, updated_at')
+    .select('id, business_name, industry, city, country, domain, rating, review_count, ai_report, audit, score_breakdown, updated_at')
     .eq('status', 'analyzed')
     .is('ai_report->error', null)
     .order('prospect_score', { ascending: false, nullsFirst: false })
@@ -66,6 +69,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (claimError) return NextResponse.json({ error: claimError.message }, { status: 500 })
     if (!claimed || claimed.length === 0) { skipped++; continue }
 
+    // Reorganise the already-collected audit + analysis evidence into the
+    // customer-facing lead-leakage funnel; its summary_points frame the email
+    // so the cold note and the full report page tell one story.
+    const audit = prospect.audit as ProspectAudit | null
+    const leak_report = buildLeakReport({
+      business_name: prospect.business_name,
+      industry:      prospect.industry,
+      city:          prospect.city,
+      country:       prospect.country,
+      rating:        prospect.rating,
+      review_count:  prospect.review_count,
+      https_ok:      audit?.https_ok ?? null,
+      tracking:      audit?.tracking ?? null,
+      breakdown:     (prospect.score_breakdown as ScoreSignal[] | null) ?? null,
+      analysis:      report,
+    })
+
     try {
       const email = await generateOutreachEmail({
         business_name: prospect.business_name,
@@ -76,6 +96,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         rating:        prospect.rating,
         review_count:  prospect.review_count,
         ai_report:     report,
+        leak_report,
       })
 
       const { error: updateError } = await supabaseAdmin
