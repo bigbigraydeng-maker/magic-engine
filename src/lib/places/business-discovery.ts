@@ -177,10 +177,11 @@ export async function discoverBusinessesViaPlaces(params: {
       next_page_token?: string
     }
     if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
-      // A later-page failure (next_page_token not yet active, or quota) just
-      // ends pagination — keep the pages already collected instead of
-      // discarding a good first page. Only a first-page failure is fatal.
-      if (pageToken) break
+      // A not-yet-active next_page_token on page 2+ returns INVALID_REQUEST —
+      // that just means "stop paginating", so keep the pages already
+      // collected. Quota / auth / unknown errors are real failures and must
+      // still surface (thrown below), even on a later page.
+      if (pageToken && data.status === 'INVALID_REQUEST') break
       // Include the actual request URL (key redacted) so cron_run_logs shows
       // exactly what production sent.
       const safeUrl = url.replace(/([?&]key=)[^&]*/, '$1***')
