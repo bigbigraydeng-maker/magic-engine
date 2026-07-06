@@ -99,8 +99,16 @@ export default function ProspectingPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ industry, city }),
       })
-      const data = await res.json() as { discovered?: number; inserted?: number; skipped?: number; error?: string }
-      if (!res.ok) throw new Error(data.error ?? '拉取失败')
+      // Read text first so a platform HTML error page (timeout / crash) shows
+      // its real status code instead of an opaque "Unexpected token '<'".
+      const raw = await res.text()
+      let data: { discovered?: number; inserted?: number; skipped?: number; error?: string }
+      try {
+        data = raw ? JSON.parse(raw) : {}
+      } catch {
+        throw new Error(`服务器返回非 JSON（HTTP ${res.status}${res.status >= 502 ? '，疑似请求超时' : ''}）：${raw.replace(/\s+/g, ' ').trim().slice(0, 140)}`)
+      }
+      if (!res.ok) throw new Error(data.error ?? `拉取失败（HTTP ${res.status}）`)
       setMessage(`发现 ${data.discovered} 家，新入库 ${data.inserted}，去重跳过 ${data.skipped}`)
       await fetchList()
     } catch (e) {

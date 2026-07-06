@@ -63,24 +63,44 @@ describe('searchBusinessListings', () => {
   it('surfaces a task-level error instead of returning an empty list', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({
+      text: () => Promise.resolve(JSON.stringify({
         tasks: [{ status_code: 40501, status_message: 'Invalid Field: categories' }],
-      }),
+      })),
     } as Response)
     await expect(
       searchBusinessListings({ categories: ['bogus'], coord: '0,0' }),
     ).rejects.toThrow(/40501.*Invalid Field/)
   })
 
+  it('throws a diagnostic error when DataForSEO returns non-JSON (HTML)', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve('<!DOCTYPE html><html><body>Unauthorized</body></html>'),
+    } as Response)
+    await expect(
+      searchBusinessListings({ categories: ['plumber'], coord: '0,0' }),
+    ).rejects.toThrow(/non-JSON.*DOCTYPE/)
+  })
+
+  it('surfaces a non-2xx HTTP status with a body snippet', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false, status: 401,
+      text: () => Promise.resolve('authentication failed'),
+    } as Response)
+    await expect(
+      searchBusinessListings({ categories: ['plumber'], coord: '0,0' }),
+    ).rejects.toThrow(/HTTP 401.*authentication failed/)
+  })
+
   it('parses a successful response', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({
+      text: () => Promise.resolve(JSON.stringify({
         tasks: [{
           status_code: 20000,
           result: [{ items: [{ title: 'A Plumbing', url: 'https://aplumbing.co.nz' }, { title: '' }] }],
         }],
-      }),
+      })),
     } as Response)
     const listings = await searchBusinessListings({ categories: ['plumber'], coord: '0,0' })
     expect(listings).toHaveLength(1)

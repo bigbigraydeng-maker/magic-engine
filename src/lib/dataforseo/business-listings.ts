@@ -173,14 +173,25 @@ export async function searchBusinessListings(params: {
     },
   )
 
-  if (!res.ok) throw new Error(`DataForSEO business listings error: ${res.status}`)
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`DataForSEO business listings HTTP ${res.status}: ${body.slice(0, 200)}`)
+  }
 
-  const json = await res.json() as {
+  // Read as text first: an auth/gateway failure can return an HTML page with
+  // a 200, and a bare res.json() would throw an opaque "Unexpected token '<'".
+  const rawText = await res.text()
+  let json: {
     tasks?: Array<{
       status_code?: number
       status_message?: string
       result?: Array<{ items?: RawListingItem[] | null }>
     }>
+  }
+  try {
+    json = JSON.parse(rawText)
+  } catch {
+    throw new Error(`DataForSEO returned non-JSON (HTTP ${res.status}): ${rawText.slice(0, 200)}`)
   }
 
   // DataForSEO returns HTTP 200 with a task-level error (bad category id,
