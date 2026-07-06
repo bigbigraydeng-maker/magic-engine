@@ -16,7 +16,7 @@ import type { BusinessListing } from '@/lib/dataforseo/business-listings'
 const PLACES_BASE = 'https://maps.googleapis.com/maps/api/place'
 const MAX_PAGES = 3
 const MAX_LIMIT = 60
-const PAGE_TOKEN_DELAY_MS = 2000   // Google requires a short wait before a page token activates
+const PAGE_TOKEN_DELAY_MS = 3000   // Google requires a short wait before a page token activates
 
 /**
  * Industry seed key → plain-language Places search term. Keys MUST stay in
@@ -177,9 +177,12 @@ export async function discoverBusinessesViaPlaces(params: {
       next_page_token?: string
     }
     if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
+      // A later-page failure (next_page_token not yet active, or quota) just
+      // ends pagination — keep the pages already collected instead of
+      // discarding a good first page. Only a first-page failure is fatal.
+      if (pageToken) break
       // Include the actual request URL (key redacted) so cron_run_logs shows
-      // exactly what production sent — settles which code version ran and
-      // whether the params are what we expect.
+      // exactly what production sent.
       const safeUrl = url.replace(/([?&]key=)[^&]*/, '$1***')
       throw new Error(`Places text search: ${data.status}${data.error_message ? ` — ${data.error_message}` : ''} [req: ${safeUrl}]`)
     }
