@@ -91,25 +91,43 @@ export default function ProspectingPage() {
 
   useEffect(() => { void fetchList() }, [fetchList])
 
+  // Discovery runs in the background (202), so poll the total row count until
+  // new prospects land instead of waiting on one long synchronous request.
+  async function totalCount(): Promise<number> {
+    const res = await fetch('/api/admin/prospecting?limit=1')
+    const raw = await res.text()
+    try { return (JSON.parse(raw) as { total?: number }).total ?? 0 } catch { return 0 }
+  }
+
   async function runDiscover() {
     setBusy('discover'); setError(''); setMessage('')
     try {
+      const before = await totalCount()
       const res = await fetch('/api/admin/prospecting/discover', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ industry, city }),
       })
-      // Read text first so a platform HTML error page (timeout / crash) shows
-      // its real status code instead of an opaque "Unexpected token '<'".
       const raw = await res.text()
-      let data: { discovered?: number; inserted?: number; skipped?: number; error?: string }
+      let data: { started?: boolean; error?: string }
       try {
         data = raw ? JSON.parse(raw) : {}
       } catch {
         throw new Error(`服务器返回非 JSON（HTTP ${res.status}${res.status >= 502 ? '，疑似请求超时' : ''}）：${raw.replace(/\s+/g, ' ').trim().slice(0, 140)}`)
       }
       if (!res.ok) throw new Error(data.error ?? `拉取失败（HTTP ${res.status}）`)
-      setMessage(`发现 ${data.discovered} 家，新入库 ${data.inserted}，去重跳过 ${data.skipped}`)
+
+      setMessage('后台拉取中…（DataForSEO 实时查询，约 10–60 秒）')
+      for (let i = 0; i < 40; i++) {
+        await new Promise(r => setTimeout(r, 3000))
+        const now = await totalCount()
+        if (now > before) {
+          setMessage(`✅ 新入库 ${now - before} 家商家`)
+          await fetchList()
+          return
+        }
+      }
+      setMessage('拉取已提交，但 2 分钟内未见新商家 — 可能该类目在此城市无结果，或上游超时。可稍后刷新或重试。')
       await fetchList()
     } catch (e) {
       setError(e instanceof Error ? e.message : '拉取失败')
