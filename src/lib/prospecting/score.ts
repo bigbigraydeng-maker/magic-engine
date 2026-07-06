@@ -68,7 +68,10 @@ export function calculateProspectScore(input: ProspectScoreInput): ProspectScore
   if (input.has_website) {
     const t = input.tracking
     weakness('no_https',        8, input.https_ok === false)
-    weakness('no_ga4',         10, t !== null && !t.ga4)
+    // GA4 deployed inside a GTM container leaves no G- id in the HTML, so
+    // only claim "no GA4" when there is no GTM either — a false claim here
+    // ends up verbatim in the outreach email.
+    weakness('no_ga4',         10, t !== null && !t.ga4 && !t.gtm)
     weakness('no_gtm',          4, t !== null && !t.gtm)
     weakness('no_meta_pixel',   8, t !== null && !t.meta_pixel)
     weakness('legacy_ua',       4, t?.legacy_ua === true)

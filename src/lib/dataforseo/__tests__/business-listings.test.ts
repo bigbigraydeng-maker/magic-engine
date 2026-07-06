@@ -1,5 +1,21 @@
-import { describe, it, expect } from 'vitest'
-import { parseListingItem, INDUSTRY_CATEGORIES, CITY_COORDS } from '../business-listings'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import {
+  parseListingItem,
+  searchBusinessListings,
+  INDUSTRY_CATEGORIES,
+  CITY_COORDS,
+} from '../business-listings'
+
+vi.mock('@/lib/validation-utils', () => ({
+  validateEnvVar: () => 'test',
+}))
+
+const mockFetch = vi.fn()
+vi.stubGlobal('fetch', mockFetch)
+
+beforeEach(() => {
+  mockFetch.mockReset()
+})
 
 describe('parseListingItem', () => {
   it('normalises a complete listing', () => {
@@ -40,6 +56,35 @@ describe('parseListingItem', () => {
   it('extracts domain from url when domain field is absent', () => {
     const l = parseListingItem({ title: 'X', url: 'http://example.co.nz/about' })
     expect(l?.domain).toBe('example.co.nz')
+  })
+})
+
+describe('searchBusinessListings', () => {
+  it('surfaces a task-level error instead of returning an empty list', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        tasks: [{ status_code: 40501, status_message: 'Invalid Field: categories' }],
+      }),
+    } as Response)
+    await expect(
+      searchBusinessListings({ categories: ['bogus'], coord: '0,0' }),
+    ).rejects.toThrow(/40501.*Invalid Field/)
+  })
+
+  it('parses a successful response', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        tasks: [{
+          status_code: 20000,
+          result: [{ items: [{ title: 'A Plumbing', url: 'https://aplumbing.co.nz' }, { title: '' }] }],
+        }],
+      }),
+    } as Response)
+    const listings = await searchBusinessListings({ categories: ['plumber'], coord: '0,0' })
+    expect(listings).toHaveLength(1)
+    expect(listings[0].domain).toBe('aplumbing.co.nz')
   })
 })
 

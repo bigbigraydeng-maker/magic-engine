@@ -44,9 +44,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let qualifiedCount = 0
 
   for (const prospect of batch) {
-    const hasWebsite = Boolean(prospect.website_url || prospect.domain)
+    const websiteRef = (prospect.website_url ?? prospect.domain ?? '').trim()
+    const hasWebsite = websiteRef.length > 0
+    // runProspectAudit is designed never to throw, but a single poison row
+    // must not wedge the batch (unaudited rows re-enter every batch), so
+    // guard anyway and let the row transition to `audited` regardless.
     const audit = hasWebsite
-      ? await runProspectAudit(prospect.website_url ?? prospect.domain!)
+      ? await runProspectAudit(websiteRef).catch(() => null)
       : null
 
     const isClaimed = (prospect.raw_listing as { is_claimed?: boolean } | null)?.is_claimed === true
@@ -65,6 +69,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Publicly listed email found on the site: persist for outreach.
     const email = audit?.tracking?.emails[0] ?? null
 
+    // `.eq('status', 'discovered')`: if a concurrent audit call already
+    // processed this row, leave its result alone instead of double-writing.
     const { error: updateError } = await supabaseAdmin
       .from('outbound_prospects')
       .update({
@@ -77,6 +83,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         updated_at: new Date().toISOString(),
       })
       .eq('id', prospect.id)
+      .eq('status', 'discovered')
 
     if (updateError) {
       return NextResponse.json(

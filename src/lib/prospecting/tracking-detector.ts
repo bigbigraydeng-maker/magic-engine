@@ -23,12 +23,16 @@ export interface TrackingSignals {
 
 const PATTERNS: Array<{ key: keyof Omit<TrackingSignals, 'emails'>; regex: RegExp }> = [
   { key: 'ga4',        regex: /gtag\/js\?id=G-|gtag\(\s*['"]config['"]\s*,\s*['"]G-/i },
-  { key: 'gtm',        regex: /googletagmanager\.com\/gtm\.js|['"]GTM-[A-Z0-9]{4,}['"]/i },
+  // Case-sensitive: container ids are always upper-case "GTM-…"; /i would
+  // false-positive on class names like class="gtm-track".
+  { key: 'gtm',        regex: /googletagmanager\.com\/gtm\.js|['"]GTM-[A-Z0-9]{4,}['"]/ },
   { key: 'meta_pixel', regex: /connect\.facebook\.net\/[^'"]*fbevents\.js|fbq\(\s*['"]init['"]/i },
   { key: 'clarity',    regex: /clarity\.ms\/tag|['"]clarity['"]\s*,\s*window/i },
   { key: 'legacy_ua',  regex: /['"]UA-\d{4,}-\d+['"]/ },
-  // A form containing an email/tel input, or contact/enquiry/quote in its attributes.
-  { key: 'contact_form', regex: /<form[^>]*(?:contact|enquir|inquir|quote)[^>]*>|<form[\s\S]{0,2000}?type=["'](?:email|tel)["']/i },
+  // A form containing an email/tel input (without crossing a </form>
+  // boundary — a search form followed by a footer newsletter input must not
+  // match), or contact/enquiry/quote in the form tag's attributes.
+  { key: 'contact_form', regex: /<form[^>]*(?:contact|enquir|inquir|quote)[^>]*>|<form(?:(?!<\/form)[\s\S]){0,2000}?type=["'](?:email|tel)["']/i },
 ]
 
 const EMAIL_REGEX = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi

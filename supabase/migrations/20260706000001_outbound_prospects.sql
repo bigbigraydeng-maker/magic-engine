@@ -40,9 +40,11 @@ create table if not exists outbound_prospects (
   ai_report           jsonb,                           -- Zhangqian prospect-mode output
   outreach_email      jsonb,                           -- { subject, body, generated_at }
 
-  status              text        not null default 'discovered',
+  status              text        not null default 'discovered'
+    check (status in ('discovered', 'audited', 'qualified', 'analyzed',
+                      'outreach_ready', 'contacted', 'replied', 'converted', 'archived')),
   notes               text,                            -- sales team notes
-  converted_client_id uuid references clients(id),
+  converted_client_id uuid references clients(id) on delete set null,
 
   created_at          timestamptz not null default now(),
   audited_at          timestamptz,

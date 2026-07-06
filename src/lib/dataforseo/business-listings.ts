@@ -178,11 +178,22 @@ export async function searchBusinessListings(params: {
   const json = await res.json() as {
     tasks?: Array<{
       status_code?: number
+      status_message?: string
       result?: Array<{ items?: RawListingItem[] | null }>
     }>
   }
 
-  const items = json.tasks?.[0]?.result?.[0]?.items ?? []
+  // DataForSEO returns HTTP 200 with a task-level error (bad category id,
+  // exhausted balance, …). Surface it — an empty [] here is indistinguishable
+  // from "no businesses in this city" and silently kills a whole seed.
+  const task = json.tasks?.[0]
+  if (task?.status_code !== undefined && task.status_code !== 20000) {
+    throw new Error(
+      `DataForSEO business listings task error ${task.status_code}: ${task.status_message ?? 'unknown'}`,
+    )
+  }
+
+  const items = task?.result?.[0]?.items ?? []
   return items
     .map(parseListingItem)
     .filter((l): l is BusinessListing => l !== null)

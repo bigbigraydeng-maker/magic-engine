@@ -53,6 +53,16 @@ describe('detectTrackingSignals', () => {
     expect(s.contact_form).toBe(true)
   })
 
+  it('does not cross a </form> boundary to a footer newsletter input', () => {
+    const html = '<form action="/search"><input type="text" name="q"></form>' +
+      '<footer><input type="email" name="newsletter"></footer>'
+    expect(detectTrackingSignals(html).contact_form).toBe(false)
+  })
+
+  it('does not mistake a gtm-* class name for a GTM container id', () => {
+    expect(detectTrackingSignals('<div class="gtm-track-click">x</div>').gtm).toBe(false)
+  })
+
   it('returns all-false on empty html', () => {
     const s = detectTrackingSignals('')
     expect(Object.values(s).every(v => v === false || (Array.isArray(v) && v.length === 0))).toBe(true)

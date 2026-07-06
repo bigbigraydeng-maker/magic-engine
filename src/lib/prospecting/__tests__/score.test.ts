@@ -79,6 +79,14 @@ describe('calculateProspectScore', () => {
     expect(r.qualified).toBe(false)
   })
 
+  it('does not claim "no GA4" when GTM is present (GA4 may live in the container)', () => {
+    const r = calculateProspectScore(input({
+      tracking: { ...NO_TRACKING, gtm: true },
+    }))
+    expect(r.breakdown.find(s => s.signal === 'no_ga4')).toBeUndefined()
+    expect(r.breakdown.find(s => s.signal === 'no_gtm')).toBeUndefined()
+  })
+
   it('counts unreachable https as a weakness', () => {
     const withSsl    = calculateProspectScore(input())
     const withoutSsl = calculateProspectScore(input({ https_ok: false }))
