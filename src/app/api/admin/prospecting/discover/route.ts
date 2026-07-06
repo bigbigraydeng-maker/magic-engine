@@ -25,11 +25,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { guardAdmin } from '@/lib/auth/require-admin'
 import {
-  searchBusinessListings,
   INDUSTRY_CATEGORIES,
   CITY_COORDS,
   type BusinessListing,
 } from '@/lib/dataforseo/business-listings'
+// Discovery source: Google Places (no DataForSEO dependency, so it keeps
+// working when the DataForSEO balance is exhausted). The DataForSEO
+// business_listings wrapper stays available for a future switch-back.
+import { discoverBusinessesViaPlaces } from '@/lib/places/business-discovery'
 
 /**
  * In-batch dedup: the same business can appear under several categories
@@ -55,17 +58,15 @@ function dedupeBatch(listings: BusinessListing[]): { unique: BusinessListing[]; 
 }
 
 async function pullAndInsert(params: {
-  categories: string[]
   coord: string
   country: 'AU' | 'NZ'
   industry: string
   city: string
   limit: number
-  offset: number
 }): Promise<{ discovered: number; inserted: number }> {
-  const { categories, coord, country, industry, city, limit, offset } = params
+  const { coord, country, industry, city, limit } = params
 
-  const listings = await searchBusinessListings({ categories, coord, limit, offset })
+  const listings = await discoverBusinessesViaPlaces({ industry, city, coord, country, limit })
   const { unique } = dedupeBatch(listings)
   if (unique.length === 0) return { discovered: listings.length, inserted: 0 }
 
@@ -121,7 +122,7 @@ async function pullAndInsert(params: {
  */
 async function runDiscovery(params: Parameters<typeof pullAndInsert>[0]): Promise<void> {
   const startedAt = Date.now()
-  const { industry, city, limit, offset } = params
+  const { industry, city, limit } = params
 
   const { data: logRow } = await supabaseAdmin
     .from('cron_run_logs')
@@ -129,7 +130,7 @@ async function runDiscovery(params: Parameters<typeof pullAndInsert>[0]): Promis
       job_name:   'prospecting_discover',
       status:     'running',
       started_at: new Date().toISOString(),
-      summary:    { industry, city, limit, offset },
+      summary:    { industry, city, limit },
     })
     .select('id')
     .single<{ id: string }>()
@@ -178,16 +179,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     )
   }
 
-  // Fire-and-forget so a slow business_listings query cannot exceed the
-  // gateway timeout. The console polls the list for the new rows.
+  // Fire-and-forget so a slow discovery query cannot exceed the gateway
+  // timeout. The console polls the list for the new rows.
   void runDiscovery({
-    categories,
     coord:    location.coord,
     country:  location.country,
     industry,
     city,
-    limit:    Math.max(1, body?.limit ?? 100),
-    offset:   Math.max(0, body?.offset ?? 0),
+    limit:    Math.max(1, body?.limit ?? 40),
   }).catch(err => console.error('[prospecting/discover] background failure', err))
 
   return NextResponse.json({ started: true }, { status: 202 })

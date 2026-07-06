@@ -119,7 +119,7 @@ export default function ProspectingPage() {
       }
       if (!res.ok) throw new Error(data.error ?? `拉取失败（HTTP ${res.status}）`)
 
-      setMessage('后台拉取中…（DataForSEO 实时查询，约 10–60 秒）')
+      setMessage('后台拉取中…（约 10–60 秒）')
       for (let i = 0; i < 40; i++) {
         await new Promise(r => setTimeout(r, 3000))
         const now = await totalCount()
