@@ -47,6 +47,7 @@ interface ProspectRow {
   industry:      string
   city:          string
   country:       string
+  domain:        string | null
   rating:        number | null
   review_count:  number | null
   audit:         ProspectAudit | null
@@ -76,17 +77,19 @@ export default async function ReportPage({ params }: { params: { id: string } })
 
   const { data: p } = await supabaseAdmin
     .from('outbound_prospects')
-    .select('business_name, industry, city, country, rating, review_count, audit, score_breakdown, ai_report')
+    .select('business_name, industry, city, country, domain, rating, review_count, audit, score_breakdown, ai_report')
     .eq('id', params.id)
     .maybeSingle<ProspectRow>()
 
   if (!p) return <InvalidLink />
 
+  const hasWebsite = Boolean(p.domain)
   const report = buildLeakReport({
     business_name: p.business_name,
     industry:      p.industry,
     city:          p.city,
     country:       p.country,
+    has_website:   hasWebsite,
     rating:        p.rating,
     review_count:  p.review_count,
     https_ok:      p.audit?.https_ok ?? null,
@@ -114,8 +117,11 @@ export default async function ReportPage({ params }: { params: { id: string } })
 
   // The $99 site-rebuild offer only shows when the current site is genuinely
   // weak (insecure / slow / thin) — never dangled at a business whose site is fine.
+  // The $99 one-page-site add-on shows when there is no website at all, or
+  // when the current site is genuinely weak (insecure / slow / thin).
   const WEAK_SITE_SIGNALS = ['no_https', 'slow_lcp', 'thin_content', 'missing_title', 'missing_description', 'missing_h1']
-  const siteWeak = p.audit?.https_ok === false ||
+  const siteWeak = !hasWebsite ||
+    p.audit?.https_ok === false ||
     (p.score_breakdown ?? []).some(s => WEAK_SITE_SIGNALS.includes(s.signal))
 
   // Industries where the practitioner IS the brand — a presenter-video add-on
@@ -289,9 +295,11 @@ export default async function ReportPage({ params }: { params: { id: string } })
         {/* $99 site rebuild — only when the current site is genuinely weak */}
         {siteWeak && (
           <section className="mt-6 rounded-[24px] p-6" style={{ background: '#fff', border: `1px solid ${GOLD}` }}>
-            <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: OCHRE }}>Optional add-on · single-page info site</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: OCHRE }}>
+              {hasWebsite ? 'Optional add-on · single-page info site' : 'Start here · single-page info site'}
+            </p>
             <h2 className="mt-2 text-lg font-semibold" style={{ fontFamily: DISPLAY }}>
-              Website looking tired? A one-page site from <span style={{ color: OCHRE }}>$99&nbsp;NZD</span>
+              {hasWebsite ? 'Website looking tired?' : 'No website yet?'} A one-page site from <span style={{ color: OCHRE }}>$99&nbsp;NZD</span>
             </h2>
             <p className="mt-2 text-sm leading-relaxed" style={{ color: 'rgba(26,26,26,0.7)' }}>
               A fast, secure single-page information site — your services, reviews and contact done right, built

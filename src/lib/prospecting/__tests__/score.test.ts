@@ -49,8 +49,9 @@ describe('calculateProspectScore', () => {
         },
       }),
     }))
-    // Full 40 strength + 10(ga4)+4(gtm)+8(pixel)+4(ua)+6(form)+3+3+2+8(lcp)+4(thin) = 92
-    expect(r.score).toBe(92)
+    // 40 strength + weakness 14(form)+8(no enquiry path)+10(pixel)+4(ga4)+2(gtm)
+    // +3(ua)+4(title)+3(desc)+2(h1)+8(lcp)+5(thin) = 63 → clamped at 100
+    expect(r.score).toBe(100)
     expect(r.qualified).toBe(true)
   })
 
@@ -61,13 +62,26 @@ describe('calculateProspectScore', () => {
     expect(r.qualified).toBe(false)
   })
 
-  it('never qualifies a prospect without a website', () => {
+  it('qualifies an established no-website business (the $99 one-page-site deal)', () => {
     const r = calculateProspectScore(input({
-      has_website: false, https_ok: null, tracking: null, onpage: null,
+      has_website: false, https_ok: null, tracking: null, onpage: null,   // 120 reviews (default)
+    }))
+    expect(r.qualified).toBe(true)
+    // No site to audit → no weakness signals fire
+    expect(r.breakdown.every(s => s.kind === 'strength')).toBe(true)
+  })
+
+  it('does NOT qualify a no-website business with too few reviews (not established)', () => {
+    const r = calculateProspectScore(input({
+      has_website: false, review_count: 3, https_ok: null, tracking: null, onpage: null,
     }))
     expect(r.qualified).toBe(false)
-    // Weakness signals must not fire without a site to audit
-    expect(r.breakdown.every(s => s.kind === 'strength')).toBe(true)
+  })
+
+  it('weights the enquiry leak (no contact form) as the sharpest lead-leak signal', () => {
+    const r = calculateProspectScore(input({ tracking: NO_TRACKING, onpage: null }))
+    expect(r.breakdown.find(s => s.signal === 'no_contact_form')?.points).toBe(14)
+    expect(r.breakdown.find(s => s.signal === 'no_enquiry_path')?.points).toBe(8)
   })
 
   it('scores a weak business below threshold even with a weak site', () => {
@@ -76,7 +90,7 @@ describe('calculateProspectScore', () => {
       tracking: NO_TRACKING,
       onpage: null,
     }))
-    // strength: only has_website 6; weakness: 10+4+8+4+6 = 32 → 38
+    // strength: only has_website 6; weakness 14+8+10+4+2+3 = 41 → 47 (< 55)
     expect(r.score).toBeLessThan(QUALIFICATION_THRESHOLD)
     expect(r.qualified).toBe(false)
   })
@@ -92,7 +106,7 @@ describe('calculateProspectScore', () => {
   it('counts unreachable https as a weakness', () => {
     const withSsl    = calculateProspectScore(input())
     const withoutSsl = calculateProspectScore(input({ https_ok: false }))
-    expect(withoutSsl.score - withSsl.score).toBe(8)
+    expect(withoutSsl.score - withSsl.score).toBe(10)
   })
 
   it('caps the score at 100 and sums breakdown to score', () => {
@@ -107,7 +121,8 @@ describe('calculateProspectScore', () => {
         },
       }),
     }))
+    const sum = r.breakdown.reduce((s, x) => s + x.points, 0)
     expect(r.score).toBeLessThanOrEqual(100)
-    expect(r.breakdown.reduce((s, x) => s + x.points, 0)).toBe(r.score)
+    expect(r.score).toBe(Math.min(100, sum))
   })
 })

@@ -38,6 +38,7 @@ function baseInput(over: Partial<LeakReportInput> = {}): LeakReportInput {
     industry: 'dentists',
     city: 'auckland',
     country: 'NZ',
+    has_website: true,
     rating: 4.8,
     review_count: 120,
     https_ok: true,
@@ -142,6 +143,21 @@ describe('summary_points — the email body', () => {
     const r = buildLeakReport(baseInput({ analysis: null, tracking: null, breakdown: null, https_ok: null }))
     expect(r.leak_count).toBe(0)
     expect(r.stages).toHaveLength(5)
+  })
+})
+
+describe('no-website funnel ($99 one-page-site opportunity)', () => {
+  it('marks found / trust / contact as leaks when there is no website', () => {
+    const r = buildLeakReport(baseInput({ has_website: false, tracking: null }))
+    expect(r.stages.slice(0, 3).map(s => s.status)).toEqual(['leak', 'leak', 'leak'])
+    expect(r.stages[0].finding).toMatch(/don't have a website/i)
+    expect(r.stages[0].fix).toMatch(/\$99/)
+  })
+
+  it('surfaces the no-website leaks in the email summary', () => {
+    const r = buildLeakReport(baseInput({ has_website: false, tracking: null }))
+    expect(r.summary_points.length).toBeGreaterThanOrEqual(3)
+    expect(r.leak_count).toBeGreaterThanOrEqual(3)
   })
 })
 

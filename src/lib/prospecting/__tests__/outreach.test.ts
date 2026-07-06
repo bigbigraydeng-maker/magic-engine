@@ -21,6 +21,8 @@ function leakReport(summary_points: string[]): LeakReport {
     business_name: 'Oz Flooring Co',
     headline: `${summary_points.length} places where enquiries are leaking`,
     leak_count: summary_points.length,
+    health_score: 40,
+    verdict: 'Leaking enquiries',
     stages: [],
     summary_points,
   }

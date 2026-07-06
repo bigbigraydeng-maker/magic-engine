@@ -64,6 +64,8 @@ export interface LeakReportInput {
   industry:      string
   city:          string
   country:       string
+  /** false → the business has no website at all (drives the no-website funnel). */
+  has_website:   boolean
   rating:        number | null
   review_count:  number | null
   https_ok:      boolean | null
@@ -180,6 +182,22 @@ function stageEngine(input: LeakReportInput): LeakStage {
   return { ...base, status: 'ok', finding: '' }
 }
 
+// ─── No-website funnel (the $99 one-page-site opportunity) ────────────────────
+
+const SITE_FIX = 'A clean one-page site (from $99) so Google, AI and customers can actually find and reach you.'
+
+function noWebsiteStages(input: LeakReportInput): [LeakStage, LeakStage, LeakStage] {
+  const tradeLabel = trade(input.industry)
+  return [
+    { key: 'found', label: 'Getting found', status: 'leak', fix: SITE_FIX,
+      finding: `You don't have a website yet — so when someone Googles you, or asks AI for ${article(tradeLabel)} ${tradeLabel} in ${place(input.city)}, there's nothing of yours to show.` },
+    { key: 'trust', label: 'First impression', status: 'leak', fix: SITE_FIX,
+      finding: `With no website, a new customer has nowhere to check you out and decide you're the one to call.` },
+    { key: 'contact', label: 'Getting in touch', status: 'leak', fix: SITE_FIX,
+      finding: `Someone who hears about you and looks online finds no site to enquire through — you're relying on them to already have your number.` },
+  ]
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /** Build the customer-facing lead-leakage report. Pure — never throws, never invents. */
@@ -187,13 +205,18 @@ export function buildLeakReport(input: LeakReportInput): LeakReport {
   const breakdown = input.breakdown ?? []
   const hasSignal = (s: string) => breakdown.some(b => b.signal === s && b.kind === 'weakness')
 
-  const stages: LeakStage[] = [
-    stageFound(input, hasSignal),
-    stageTrust(input, hasSignal),
-    stageContact(input),
-    stageAlive(input),
-    stageEngine(input),
-  ]
+  // No website at all → the first three funnel stages are leaks by definition
+  // (nothing to find, no first impression, nowhere to enquire); social and
+  // engine still read from real signals.
+  const stages: LeakStage[] = input.has_website === false
+    ? [...noWebsiteStages(input), stageAlive(input), stageEngine(input)]
+    : [
+        stageFound(input, hasSignal),
+        stageTrust(input, hasSignal),
+        stageContact(input),
+        stageAlive(input),
+        stageEngine(input),
+      ]
 
   const leak_count = stages.filter(s => s.status === 'leak').length
   const weak_count = stages.filter(s => s.status === 'weak').length

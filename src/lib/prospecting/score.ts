@@ -42,6 +42,11 @@ export interface ProspectScoreResult {
 
 export const QUALIFICATION_THRESHOLD = 55
 
+// A no-website business can't be site-audited, but an established one (real
+// reviews) is a prime target for the one-time $99 one-page-site deal — so it
+// qualifies on business strength alone instead of being discarded.
+export const NO_WEBSITE_MIN_REVIEWS = 20
+
 const SLOW_LCP_MS = 4000
 const THIN_CONTENT_WORDS = 200
 
@@ -63,33 +68,43 @@ export function calculateProspectScore(input: ProspectScoreInput): ProspectScore
   strength('gbp_claimed',      4, input.is_claimed)
   strength('has_website',      6, input.has_website)
 
-  // ── Digital weakness (upgrade opportunity) — max 60 ───────────────────────
-  // Only meaningful when the site was actually audited.
+  // ── Digital weakness (lead-leak opportunity) — weighted toward the leaks
+  //    that cost enquiries, not just missing analytics. Only meaningful when
+  //    the site was actually audited.
   if (input.has_website) {
     const t = input.tracking
-    weakness('no_https',        8, input.https_ok === false)
-    // GA4 deployed inside a GTM container leaves no G- id in the HTML, so
-    // only claim "no GA4" when there is no GTM either — a false claim here
-    // ends up verbatim in the outreach email.
-    weakness('no_ga4',         10, t !== null && !t.ga4 && !t.gtm)
-    weakness('no_gtm',          4, t !== null && !t.gtm)
-    weakness('no_meta_pixel',   8, t !== null && !t.meta_pixel)
-    weakness('legacy_ua',       4, t?.legacy_ua === true)
-    weakness('no_contact_form', 6, t !== null && !t.contact_form)
-
+    // ③ Getting in touch — the sharpest lead leak: no way to enquire.
+    weakness('no_contact_form', 14, t !== null && !t.contact_form)
+    weakness('no_enquiry_path',  8, t !== null && !t.contact_form && t.emails.length === 0)
+    // ② First impression — insecure site scares visitors off before they act.
+    weakness('no_https',        10, input.https_ok === false)
+    // ⑤ Bringing leads in — no ad pixel = can't run/measure the lead ads.
+    weakness('no_meta_pixel',   10, t !== null && !t.meta_pixel)
+    // Measurement gaps still count, but less than an actual leak.
+    // GA4 inside a GTM container leaves no G- id, so only claim "no GA4"
+    // when there is no GTM either — a false claim ends up in the email.
+    weakness('no_ga4',           4, t !== null && !t.ga4 && !t.gtm)
+    weakness('no_gtm',           2, t !== null && !t.gtm)
+    weakness('legacy_ua',        3, t?.legacy_ua === true)
+    // ① Getting found — SEO basics + speed.
     const o = input.onpage
-    weakness('missing_title',       3, o?.checks.no_title === true)
+    weakness('missing_title',       4, o?.checks.no_title === true)
     weakness('missing_description', 3, o?.checks.no_description === true)
     weakness('missing_h1',          2, o?.checks.no_h1 === true)
     weakness('slow_lcp',            8, (o?.core_web_vitals?.lcp ?? 0) > SLOW_LCP_MS)
-    weakness('thin_content',        4, o?.word_count !== null && o?.word_count !== undefined && o.word_count < THIN_CONTENT_WORDS)
+    weakness('thin_content',        5, o?.word_count !== null && o?.word_count !== undefined && o.word_count < THIN_CONTENT_WORDS)
   }
 
   const score = Math.min(100, breakdown.reduce((sum, s) => sum + s.points, 0))
 
-  // No website = nothing to upgrade with the low-labour Foundation package;
-  // route those to archive regardless of business strength.
-  const qualified = input.has_website && score >= QUALIFICATION_THRESHOLD
+  // Two qualification paths:
+  //  - has a website → score must clear the threshold (established business ×
+  //    leaking site).
+  //  - no website → can't be site-audited, but an established business (real
+  //    reviews) is the ideal target for the one-time $99 one-page-site deal.
+  const qualified = input.has_website
+    ? score >= QUALIFICATION_THRESHOLD
+    : (input.review_count ?? 0) >= NO_WEBSITE_MIN_REVIEWS
 
   return { score, qualified, breakdown }
 }

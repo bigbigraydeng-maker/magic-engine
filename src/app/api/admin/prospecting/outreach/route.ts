@@ -78,6 +78,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       industry:      prospect.industry,
       city:          prospect.city,
       country:       prospect.country,
+      has_website:   Boolean(prospect.domain),
       rating:        prospect.rating,
       review_count:  prospect.review_count,
       https_ok:      audit?.https_ok ?? null,
