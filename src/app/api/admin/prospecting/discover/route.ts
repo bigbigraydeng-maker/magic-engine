@@ -54,8 +54,7 @@ function dedupeBatch(listings: BusinessListing[]): { unique: BusinessListing[]; 
   return { unique, unidentifiable }
 }
 
-/** Background worker: pull listings, dedup against the table, insert new rows. */
-async function runDiscovery(params: {
+async function pullAndInsert(params: {
   categories: string[]
   coord: string
   country: 'AU' | 'NZ'
@@ -63,12 +62,12 @@ async function runDiscovery(params: {
   city: string
   limit: number
   offset: number
-}): Promise<void> {
+}): Promise<{ discovered: number; inserted: number }> {
   const { categories, coord, country, industry, city, limit, offset } = params
 
   const listings = await searchBusinessListings({ categories, coord, limit, offset })
   const { unique } = dedupeBatch(listings)
-  if (unique.length === 0) return
+  if (unique.length === 0) return { discovered: listings.length, inserted: 0 }
 
   const placeIds = unique.map(l => l.place_id).filter((v): v is string => v !== null)
   const domains  = unique.map(l => l.domain).filter((v): v is string => v !== null)
@@ -91,7 +90,7 @@ async function runDiscovery(params: {
     !(l.place_id && knownPlaceIds.has(l.place_id)) &&
     !(l.domain && knownDomains.has(l.domain)),
   )
-  if (fresh.length === 0) return
+  if (fresh.length === 0) return { discovered: listings.length, inserted: 0 }
 
   const rows = fresh.map(l => ({
     business_name: l.name,
@@ -110,6 +109,50 @@ async function runDiscovery(params: {
 
   const { error } = await supabaseAdmin.from('outbound_prospects').insert(rows)
   if (error) throw new Error(error.message)
+  return { discovered: listings.length, inserted: rows.length }
+}
+
+/**
+ * Background worker with a diagnostic breadcrumb. A fire-and-forget worker's
+ * errors otherwise only reach the platform console (invisible from here). The
+ * cron_run_logs row distinguishes: no row = never ran (platform killed the
+ * background task) / status=failed+error_message = ran but upstream failed /
+ * stuck at running = killed mid-flight.
+ */
+async function runDiscovery(params: Parameters<typeof pullAndInsert>[0]): Promise<void> {
+  const startedAt = Date.now()
+  const { industry, city, limit, offset } = params
+
+  const { data: logRow } = await supabaseAdmin
+    .from('cron_run_logs')
+    .insert({
+      job_name:   'prospecting_discover',
+      status:     'running',
+      started_at: new Date().toISOString(),
+      summary:    { industry, city, limit, offset },
+    })
+    .select('id')
+    .single<{ id: string }>()
+  const logId = logRow?.id ?? null
+
+  const finish = (status: string, extra: Record<string, unknown>): Promise<void> =>
+    logId
+      ? supabaseAdmin.from('cron_run_logs')
+          .update({ status, finished_at: new Date().toISOString(), duration_ms: Date.now() - startedAt, ...extra })
+          .eq('id', logId)
+          .then(() => undefined, () => undefined)
+      : Promise.resolve()
+
+  try {
+    const { discovered, inserted } = await pullAndInsert(params)
+    await finish('completed', {
+      processed: discovered, completed_count: inserted,
+      summary: { industry, city, discovered, inserted },
+    })
+  } catch (err) {
+    await finish('failed', { error_message: err instanceof Error ? err.message : String(err) })
+    throw err
+  }
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
