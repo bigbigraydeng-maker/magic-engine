@@ -6,11 +6,13 @@ import type { OnPageResult } from '@/lib/dataforseo/onpage'
 const NO_TRACKING: TrackingSignals = {
   ga4: false, gtm: false, meta_pixel: false, clarity: false,
   legacy_ua: true, contact_form: false, emails: [],
+  facebook_url: null, instagram_url: null,
 }
 
 const FULL_TRACKING: TrackingSignals = {
   ga4: true, gtm: true, meta_pixel: true, clarity: true,
   legacy_ua: false, contact_form: true, emails: ['hi@biz.com.au'],
+  facebook_url: 'https://facebook.com/biz', instagram_url: 'https://instagram.com/biz',
 }
 
 function onpage(overrides: Partial<OnPageResult> = {}): OnPageResult {

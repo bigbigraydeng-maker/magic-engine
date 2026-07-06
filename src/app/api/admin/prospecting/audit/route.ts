@@ -66,8 +66,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     })
     if (qualified) qualifiedCount++
 
-    // Publicly listed email found on the site: persist for outreach.
-    const email = audit?.tracking?.emails[0] ?? null
+    // Publicly listed contact points found on the site: persist for outreach.
+    const email     = audit?.tracking?.emails[0] ?? null
+    const facebook  = audit?.tracking?.facebook_url ?? null
+    const instagram = audit?.tracking?.instagram_url ?? null
 
     // `.eq('status', 'discovered')`: if a concurrent audit call already
     // processed this row, leave its result alone instead of double-writing.
@@ -78,6 +80,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         prospect_score:  score,
         score_breakdown: breakdown,
         ...(email ? { email } : {}),
+        ...(facebook ? { facebook_url: facebook } : {}),
+        ...(instagram ? { instagram_url: instagram } : {}),
         status:     qualified ? 'qualified' : 'audited',
         audited_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),

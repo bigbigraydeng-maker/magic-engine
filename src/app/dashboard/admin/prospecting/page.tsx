@@ -43,7 +43,23 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
   archived:       { label: '已归档',   cls: 'bg-me-charcoal/5 text-me-charcoal/40' },
 }
 
-const FILTERS = ['all', 'discovered', 'qualified', 'audited'] as const
+const FILTERS = ['all', 'discovered', 'qualified', 'analyzed', 'audited'] as const
+
+const SEGMENT_LABELS: Record<string, string> = {
+  core_target: '核心靶', blind_flyer: '盲飞型', social_gap: '社媒空窗', general: '通用',
+}
+
+interface PillarScore { score: number; summary: string }
+interface AiReport {
+  segment?: string
+  owner_name?: string | null
+  top_problems?: string[]
+  email_hook?: string
+  pillars?: { seo: PillarScore; geo: PillarScore; social: PillarScore; gbp: PillarScore }
+  geo_probe?: { question: string; mentioned: boolean; competitors_mentioned: string[] } | null
+  social_activity?: { platform: string; followers: number; posts_last_30d: number } | null
+  error?: string
+}
 
 export default function ProspectingPage() {
   const [industry, setIndustry] = useState('flooring')
@@ -51,9 +67,11 @@ export default function ProspectingPage() {
   const [rows, setRows] = useState<ProspectRow[]>([])
   const [total, setTotal] = useState(0)
   const [filter, setFilter] = useState<string>('all')
-  const [busy, setBusy] = useState<'' | 'discover' | 'audit'>('')
+  const [busy, setBusy] = useState<'' | 'discover' | 'audit' | 'analyze'>('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [detail, setDetail] = useState<AiReport | null>(null)
 
   const fetchList = useCallback(async () => {
     const qs = new URLSearchParams({ limit: '50' })
@@ -84,6 +102,34 @@ export default function ProspectingPage() {
     } finally {
       setBusy('')
     }
+  }
+
+  async function runAnalyze() {
+    setBusy('analyze'); setError(''); setMessage('')
+    try {
+      const res = await fetch('/api/admin/prospecting/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: 3 }),
+      })
+      const data = await res.json() as { analyzed?: number; failed?: number; remaining?: number; error?: string }
+      if (!res.ok) throw new Error(data.error ?? 'AI 分析失败')
+      setMessage(`本批 AI 分析 ${data.analyzed} 家（失败 ${data.failed}），剩余合格待析 ${data.remaining}`)
+      await fetchList()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'AI 分析失败')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function toggleDetail(id: string, status: string) {
+    if (expandedId === id) { setExpandedId(null); setDetail(null); return }
+    if (!['analyzed', 'outreach_ready', 'contacted', 'replied', 'converted'].includes(status)) return
+    setExpandedId(id); setDetail(null)
+    const res = await fetch(`/api/admin/prospecting/${id}`)
+    const data = await res.json() as { prospect?: { ai_report?: AiReport | null }; error?: string }
+    if (res.ok) setDetail(data.prospect?.ai_report ?? null)
   }
 
   async function runAudit() {
@@ -138,6 +184,10 @@ export default function ProspectingPage() {
           className="rounded-lg bg-me-ochre px-4 py-2 text-sm text-white disabled:opacity-40">
           {busy === 'audit' ? '审计中（约 1 分钟）…' : '② 审计下一批 (5)'}
         </button>
+        <button onClick={() => void runAnalyze()} disabled={busy !== ''}
+          className="rounded-lg bg-[#5C8A4A] px-4 py-2 text-sm text-white disabled:opacity-40">
+          {busy === 'analyze' ? 'AI 分析中（1-3 分钟）…' : '③ AI 分析合格者 (3)'}
+        </button>
         {message && <span className="text-sm text-[#5C8A4A]">{message}</span>}
         {error && <span className="text-sm text-[#C2453A]">{error}</span>}
       </div>
@@ -176,13 +226,16 @@ export default function ProspectingPage() {
             )}
             {rows.map(r => {
               const meta = STATUS_META[r.status] ?? { label: r.status, cls: 'bg-me-ivory text-me-charcoal/60' }
-              return (
-                <tr key={r.id} className="border-b border-me-charcoal/5">
+              const expandable = ['analyzed', 'outreach_ready', 'contacted', 'replied', 'converted'].includes(r.status)
+              return [
+                <tr key={r.id} onClick={() => void toggleDetail(r.id, r.status)}
+                  className={`border-b border-me-charcoal/5 ${expandable ? 'cursor-pointer hover:bg-me-ivory/40' : ''}`}>
                   <td className="px-4 py-3 font-medium text-me-charcoal">{r.business_name}</td>
                   <td className="px-4 py-3 text-me-charcoal/60">{r.industry} · {r.city}</td>
                   <td className="px-4 py-3 text-me-charcoal/60">
                     {r.domain
-                      ? <a href={`https://${r.domain}`} target="_blank" rel="noreferrer" className="underline">{r.domain}</a>
+                      ? <a href={`https://${r.domain}`} target="_blank" rel="noreferrer" className="underline"
+                          onClick={e => e.stopPropagation()}>{r.domain}</a>
                       : <span className="text-me-charcoal/30">无网站</span>}
                   </td>
                   <td className="px-4 py-3 text-me-charcoal/60">
@@ -195,8 +248,49 @@ export default function ProspectingPage() {
                     <span className={`rounded-full px-2 py-0.5 text-xs ${meta.cls}`}>{meta.label}</span>
                   </td>
                   <td className="px-4 py-3 text-me-charcoal/60">{r.email ?? r.phone ?? '—'}</td>
-                </tr>
-              )
+                </tr>,
+                expandedId === r.id && (
+                  <tr key={`${r.id}-detail`} className="border-b border-me-charcoal/5 bg-me-ivory/30">
+                    <td colSpan={7} className="px-6 py-4">
+                      {!detail && <span className="text-sm text-me-charcoal/40">加载中…</span>}
+                      {detail?.error && <span className="text-sm text-[#C2453A]">分析失败：{detail.error}</span>}
+                      {detail && !detail.error && (
+                        <div className="space-y-3 text-sm">
+                          <div className="flex flex-wrap gap-4">
+                            {detail.pillars && Object.entries(detail.pillars).map(([k, p]) => (
+                              <div key={k} className="rounded-lg border border-me-charcoal/10 bg-white px-3 py-2 min-w-[180px] max-w-[260px]">
+                                <div className="text-xs uppercase text-me-charcoal/40">{k}</div>
+                                <div className="text-lg font-semibold text-me-charcoal">{p.score}</div>
+                                <div className="text-xs text-me-charcoal/60">{p.summary}</div>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="text-me-charcoal/70">
+                            <span className="font-medium">Segment：</span>{SEGMENT_LABELS[detail.segment ?? ''] ?? detail.segment ?? '—'}
+                            {detail.owner_name && <span className="ml-4"><span className="font-medium">老板：</span>{detail.owner_name}</span>}
+                            {detail.geo_probe && (
+                              <span className="ml-4"><span className="font-medium">AI 搜索：</span>
+                                {detail.geo_probe.mentioned ? '✅ 出现' : '❌ 不出现'}
+                                {detail.geo_probe.competitors_mentioned.length > 0 && `（竞品在场：${detail.geo_probe.competitors_mentioned.join('、')}）`}
+                              </span>
+                            )}
+                          </div>
+                          {(detail.top_problems?.length ?? 0) > 0 && (
+                            <ul className="list-disc pl-5 text-me-charcoal/70">
+                              {detail.top_problems!.map((p, i) => <li key={i}>{p}</li>)}
+                            </ul>
+                          )}
+                          {detail.email_hook && (
+                            <div className="rounded-lg bg-white border border-me-charcoal/10 px-3 py-2 text-me-charcoal/80">
+                              ✉️ {detail.email_hook}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ),
+              ]
             })}
           </tbody>
         </table>

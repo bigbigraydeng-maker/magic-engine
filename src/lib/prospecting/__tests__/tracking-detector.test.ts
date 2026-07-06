@@ -65,6 +65,17 @@ describe('detectTrackingSignals', () => {
 
   it('returns all-false on empty html', () => {
     const s = detectTrackingSignals('')
-    expect(Object.values(s).every(v => v === false || (Array.isArray(v) && v.length === 0))).toBe(true)
+    expect(Object.values(s).every(v => v === false || v === null || (Array.isArray(v) && v.length === 0))).toBe(true)
+  })
+
+  it('extracts the first Facebook page and Instagram profile links', () => {
+    const html = `
+      <a href="https://www.facebook.com/sharer/sharer.php?u=x">share</a>
+      <a href="https://www.facebook.com/ozflooringco">FB</a>
+      <a href="https://www.instagram.com/p/Cxyz/">a post</a>
+      <a href="https://www.instagram.com/ozflooringco/">IG</a>`
+    const s = detectTrackingSignals(html)
+    expect(s.facebook_url).toBe('https://www.facebook.com/ozflooringco')
+    expect(s.instagram_url).toBe('https://www.instagram.com/ozflooringco/')
   })
 })

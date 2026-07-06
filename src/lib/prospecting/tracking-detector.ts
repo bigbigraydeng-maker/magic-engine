@@ -19,9 +19,12 @@ export interface TrackingSignals {
   contact_form: boolean
   /** Publicly listed emails found on the page (mailto + plain text). */
   emails:       string[]
+  /** First Facebook page / Instagram profile linked from the page. */
+  facebook_url:  string | null
+  instagram_url: string | null
 }
 
-const PATTERNS: Array<{ key: keyof Omit<TrackingSignals, 'emails'>; regex: RegExp }> = [
+const PATTERNS: Array<{ key: keyof Pick<TrackingSignals, 'ga4' | 'gtm' | 'meta_pixel' | 'clarity' | 'legacy_ua' | 'contact_form'>; regex: RegExp }> = [
   { key: 'ga4',        regex: /gtag\/js\?id=G-|gtag\(\s*['"]config['"]\s*,\s*['"]G-/i },
   // Case-sensitive: container ids are always upper-case "GTM-…"; /i would
   // false-positive on class names like class="gtm-track".
@@ -39,10 +42,13 @@ const EMAIL_REGEX = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi
 // Asset filenames and tracking-domain noise that match the email regex shape.
 const EMAIL_JUNK = /\.(png|jpe?g|gif|svg|webp|css|js)$|@(sentry|example)\./i
 
+const FACEBOOK_REGEX  = /https?:\/\/(?:www\.)?facebook\.com\/(?!sharer|share|plugins|dialog|tr\b|login|policies)[A-Za-z0-9_.\-]+\/?/i
+const INSTAGRAM_REGEX = /https?:\/\/(?:www\.)?instagram\.com\/(?!p\/|reel\/|explore|accounts)[A-Za-z0-9_.\-]+\/?/i
+
 export function detectTrackingSignals(html: string): TrackingSignals {
   const signals = Object.fromEntries(
     PATTERNS.map(({ key, regex }) => [key, regex.test(html)]),
-  ) as Omit<TrackingSignals, 'emails'>
+  ) as Pick<TrackingSignals, 'ga4' | 'gtm' | 'meta_pixel' | 'clarity' | 'legacy_ua' | 'contact_form'>
 
   const emails = Array.from(new Set(
     (html.match(EMAIL_REGEX) ?? [])
@@ -50,5 +56,10 @@ export function detectTrackingSignals(html: string): TrackingSignals {
       .filter(e => !EMAIL_JUNK.test(e)),
   )).slice(0, 5)
 
-  return { ...signals, emails }
+  return {
+    ...signals,
+    emails,
+    facebook_url:  html.match(FACEBOOK_REGEX)?.[0] ?? null,
+    instagram_url: html.match(INSTAGRAM_REGEX)?.[0] ?? null,
+  }
 }
