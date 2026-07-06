@@ -319,10 +319,13 @@ FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Mar
 - [x] **P35.2** `lib/dataforseo/business-listings.ts`：Business Listings 批量搜索封装 + `INDUSTRY_CATEGORIES`（18 行业）+ `CITY_COORDS`（AU 8 城 / NZ 4 城）
 - [x] **P35.3** `lib/prospecting/`：`tracking-detector`（GA4/GTM/Pixel/Clarity/UA/表单/邮箱 正则检测，零成本）+ `score`（40 分生意强度 + 60 分数字弱点，纯函数）+ `audit`（编排：首页抓取 + OnPage instant）
 - [x] **P35.4** API `/api/admin/prospecting`（GET 列表）+ `/discover`（POST 批量发现，place_id/domain 双去重）+ `/audit`（POST 批量审计 + 打分 + 状态流转），全部 guardAdmin
-- [ ] **P35.5** 张骞 prospect 短模式（砍社媒 scraper、工具调用 ~6 次，目标成本 <$0.15）+ `/api/admin/prospecting/analyze`
+- [x] **P35.6a** 最小测试 UI `/dashboard/admin/prospecting`：行业×城市种子选择 + ①拉取商家 ②审计下一批 按钮 + 结果表格（机会分/状态/联系方式）。PM 可视化跑真实全链路测试（沙盒容器出网被网络策略挡，e2e 必须在 Render 生产跑）
+- [ ] **P35.5** 张骞 prospect 短模式（砍社媒 scraper、工具调用 ~6 次，目标成本 <$0.15）+ `/api/admin/prospecting/analyze`；顺带抽 About/FB 页老板名字做冷邮件个性化 + segment 标签（核心靶/盲飞型/社媒空窗）+ 首页社媒链接正则抽取
 - [ ] **P35.6** outreach email 生成（一次 Claude 短调用，AU Spam Act / NZ UEM 合规：退订 + 真实身份）+ 人审队列 UI（admin ProspectsTab 旁新 tab）
 - [ ] **P35.7** 转化闭环接线：replied → 发 `/discover` magic link；converted → `converted_client_id` 关联 clients
 - [ ] **P35.8** 定价页 / 官网 Digital Foundation 套餐文案（板桥必审：C 端文案）
+- [ ] **P35.9** AI 语音外呼（PM 指定方向 2026-07-06）：ElevenLabs Conversational AI / Bland.ai / Vapi 选型 PoC。用途分级：**warm 跟进优先**（邮件已回复/未接来电回拨），cold call 需先查 AU Do Not Call Register 合规（企业号码也可注册 DNC）。AU/NZ 口音语音 + 通话结果回写 outbound_prospects
+- [ ] **P35.10** 外呼专用域名（PM 已拍板不用主域）：候选近似域名查询 → PM 选定注册 → SPF/DKIM/DMARC 配置 → 2-3 周预热计划。主域只收回复，保 magic link 通道信誉
 
 **成本模型**：1000 家/月 ≈ 发现 $10 + 规则审计 $25 + AI 只跑 qualified（~15%）$20 ≈ **$55/月**，合格线索 AI 成本 ~$0.13（Brief 目标 <$0.10 贴线）。
 
