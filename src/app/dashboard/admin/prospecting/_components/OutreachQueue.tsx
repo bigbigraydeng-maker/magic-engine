@@ -143,12 +143,25 @@ export default function OutreachQueue() {
     return footer.replace('{{business_name}}', card.business_name)
   }
 
+  // Public report link for this prospect. Base is the report host — falls back
+  // to the main site; set NEXT_PUBLIC_REPORT_BASE_URL to point cold-outreach
+  // report links at a separate outreach domain.
+  function reportUrlFor(card: QueueCard): string {
+    const base = process.env.NEXT_PUBLIC_REPORT_BASE_URL
+      || process.env.NEXT_PUBLIC_SITE_URL
+      || 'https://magicengine.com.au'
+    return `${base.replace(/\/$/, '')}/report/${card.id}`
+  }
+
   async function copyAndMarkContacted(card: QueueCard) {
     if (!card.outreach_email) return
     // The compliance footer must be part of every copied email — refuse
     // rather than silently produce a footer-less (non-compliant) message.
     if (!footer) { setError('合规落款未加载，请刷新页面后再复制'); return }
-    const fullText = `Subject: ${card.outreach_email.subject}\n\n${card.outreach_email.body}\n\n${footerFor(card)}`
+    // Body → full report link → compliance footer. The link lets the reader
+    // see every finding in the branded report without the email carrying an
+    // attachment (which cold recipients won't open).
+    const fullText = `Subject: ${card.outreach_email.subject}\n\n${card.outreach_email.body}\n\nSee the full breakdown here: ${reportUrlFor(card)}\n\n${footerFor(card)}`
     try {
       await navigator.clipboard.writeText(fullText)
     } catch {

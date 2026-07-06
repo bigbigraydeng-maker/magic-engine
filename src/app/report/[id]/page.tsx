@@ -118,6 +118,11 @@ export default async function ReportPage({ params }: { params: { id: string } })
   const siteWeak = p.audit?.https_ok === false ||
     (p.score_breakdown ?? []).some(s => WEAK_SITE_SIGNALS.includes(s.signal))
 
+  // Industries where the practitioner IS the brand — a presenter-video add-on
+  // (AI avatar, plain-language, no vendor name) lands; trades don't need it.
+  const PERSONAL_BRAND = new Set(['lawyers', 'cosmetic_clinics', 'dentists', 'accountants', 'mortgage_brokers', 'education_consultants'])
+  const personalBrand = PERSONAL_BRAND.has(p.industry)
+
   const PLAN = [
     'Get you found in Google and AI search — the exact queries and fixes',
     'Plug every enquiry leak on your site — form, click-to-call, WhatsApp',
@@ -292,6 +297,21 @@ export default async function ReportPage({ params }: { params: { id: string } })
               A fast, secure single-page information site — your services, reviews and contact done right, built
               to be found by Google <em>and</em> AI search. On your own domain, yours to keep. (For local service
               businesses, not online shops.)
+            </p>
+          </section>
+        )}
+
+        {/* Presenter-video add-on — only for personal-brand industries */}
+        {personalBrand && (
+          <section className="mt-6 rounded-[24px] p-6" style={{ background: '#fff', border: `1px solid ${GOLD}` }}>
+            <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: OCHRE }}>Optional add-on · for personal-brand businesses</p>
+            <h2 className="mt-2 text-lg font-semibold" style={{ fontFamily: DISPLAY }}>
+              Be the face customers trust — <span style={{ color: OCHRE }}>AI presenter videos of you</span>
+            </h2>
+            <p className="mt-2 text-sm leading-relaxed" style={{ color: 'rgba(26,26,26,0.7)' }}>
+              In your line of work people choose the person, not just the business. We turn you into a series of
+              short, professional presenter videos — introducing your services, answering the questions clients
+              always ask, building trust before they even call — with no film crew, no studio day, no camera nerves.
             </p>
           </section>
         )}
