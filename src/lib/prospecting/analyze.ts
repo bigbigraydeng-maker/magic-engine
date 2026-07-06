@@ -78,7 +78,7 @@ export interface ProspectAnalysisInput {
 // ─── Seed labels for the GEO probe question ───────────────────────────────────
 
 /** Human phrasing per industry seed key, for "best X in <city>" questions. */
-const INDUSTRY_LABELS: Record<string, string> = {
+export const INDUSTRY_LABELS: Record<string, string> = {
   flooring:            'flooring store',
   builders:            'home builder',
   roofing:             'roofing company',
