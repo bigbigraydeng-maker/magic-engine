@@ -49,33 +49,39 @@ describe('calculateProspectScore', () => {
         },
       }),
     }))
-    // 40 strength + weakness 14(form)+8(no enquiry path)+10(pixel)+4(ga4)+2(gtm)
-    // +3(ua)+4(title)+3(desc)+2(h1)+8(lcp)+5(thin) = 63 → clamped at 100
-    expect(r.score).toBe(100)
+    // 32 strength + weakness 14(form)+8(no enquiry path)+10(pixel)+4(ga4)+2(gtm)
+    // +3(ua)+4(title)+3(desc)+2(h1)+8(lcp)+5(thin) = 63 → 95
+    expect(r.score).toBe(95)
     expect(r.qualified).toBe(true)
   })
 
   it('does not qualify an already-modern site even with a strong business', () => {
     const r = calculateProspectScore(input({ tracking: FULL_TRACKING }))
-    // 40 strength, no weaknesses
-    expect(r.score).toBe(40)
+    // 32 strength (no size bonus), no weaknesses
+    expect(r.score).toBe(32)
     expect(r.qualified).toBe(false)
   })
 
-  it('qualifies an established no-website business (the $99 one-page-site deal)', () => {
+  it('qualifies a SMALL no-website business (few reviews) — our real target, not the giants', () => {
     const r = calculateProspectScore(input({
-      has_website: false, https_ok: null, tracking: null, onpage: null,   // 120 reviews (default)
+      has_website: false, review_count: 8, https_ok: null, tracking: null, onpage: null,
     }))
     expect(r.qualified).toBe(true)
     // No site to audit → no weakness signals fire
     expect(r.breakdown.every(s => s.kind === 'strength')).toBe(true)
   })
 
-  it('does NOT qualify a no-website business with too few reviews (not established)', () => {
+  it('does NOT qualify a no-website listing with almost no reviews (likely dead / not trading)', () => {
     const r = calculateProspectScore(input({
-      has_website: false, review_count: 3, https_ok: null, tracking: null, onpage: null,
+      has_website: false, review_count: 2, https_ok: null, tracking: null, onpage: null,
     }))
     expect(r.qualified).toBe(false)
+  })
+
+  it('does NOT reward the industry leader for sheer size — 500 reviews scores the same as 8', () => {
+    const small = calculateProspectScore(input({ review_count: 8 }))
+    const giant = calculateProspectScore(input({ review_count: 500 }))
+    expect(giant.score).toBe(small.score)   // no reviews_30 / reviews_100 size bonus
   })
 
   it('weights the enquiry leak (no contact form) as the sharpest lead-leak signal', () => {

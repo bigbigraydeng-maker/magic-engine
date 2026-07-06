@@ -33,7 +33,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .from('outbound_prospects')
     .select('id, business_name, website_url, domain, phone, rating, review_count, raw_listing')
     .eq('status', 'discovered')
-    .order('review_count', { ascending: false, nullsFirst: false })
+    // Process in discovery order (FIFO), NOT review count desc — front-loading
+    // by reviews surfaced the industry leaders first, exactly the businesses we
+    // don't target. Small local shops must get audited too.
+    .order('created_at', { ascending: true })
     .limit(limit)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
