@@ -67,6 +67,14 @@ describe('discoverBusinessesViaPlaces', () => {
     expect(mockFetch).toHaveBeenCalledTimes(3)
   })
 
+  it('sends the location coord with a literal comma (not %2C, which Places rejects)', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ status: 'ZERO_RESULTS', results: [] }) } as Response)
+    await discoverBusinessesViaPlaces({ industry: 'flooring', city: 'brisbane', coord: '-27.47,153.02', country: 'AU' })
+    const url = mockFetch.mock.calls[0][0] as string
+    expect(url).toContain('location=-27.47,153.02')
+    expect(url).not.toContain('location=-27.47%2C153.02')
+  })
+
   it('returns [] on ZERO_RESULTS without throwing', async () => {
     mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ status: 'ZERO_RESULTS', results: [] }) } as Response)
     const listings = await discoverBusinessesViaPlaces({

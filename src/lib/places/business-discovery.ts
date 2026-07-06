@@ -162,7 +162,10 @@ export async function discoverBusinessesViaPlaces(params: {
   for (let page = 0; page < MAX_PAGES && results.length < limit; page++) {
     const url = pageToken
       ? `${PLACES_BASE}/textsearch/json?pagetoken=${encodeURIComponent(pageToken)}&key=${key}`
-      : `${PLACES_BASE}/textsearch/json?query=${encodeURIComponent(query)}&location=${encodeURIComponent(params.coord)}&radius=${SEARCH_RADIUS_M}&key=${key}`
+      // `location` must keep its literal "lat,lng" comma — URL-encoding it to
+      // %2C makes Places reject the request as INVALID_REQUEST. coord is our
+      // own controlled value (no user input), so it is safe unencoded.
+      : `${PLACES_BASE}/textsearch/json?query=${encodeURIComponent(query)}&location=${params.coord}&radius=${SEARCH_RADIUS_M}&key=${key}`
 
     const res = await fetch(url)
     if (!res.ok) throw new Error(`Places text search HTTP ${res.status}`)
