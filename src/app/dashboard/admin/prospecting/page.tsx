@@ -108,6 +108,8 @@ export default function ProspectingPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ industry, city }),
       })
+      // Read text first so a platform HTML error page (timeout / crash) shows
+      // its real status code instead of an opaque "Unexpected token '<'".
       const raw = await res.text()
       let data: { started?: boolean; error?: string }
       try {
