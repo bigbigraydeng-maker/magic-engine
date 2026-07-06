@@ -151,3 +151,36 @@ describe('headline', () => {
     expect(r.headline).toBe('1 place where enquiries are leaking')
   })
 })
+
+describe('health_score + verdict', () => {
+  it('is 100 / fairly tight for an all-healthy prospect', () => {
+    const r = buildLeakReport(baseInput())
+    expect(r.health_score).toBe(100)
+    expect(r.verdict).toBe('Fairly tight')
+  })
+
+  it('drops into high-leak-risk territory when everything leaks', () => {
+    const r = buildLeakReport(baseInput({
+      https_ok: false, tracking: TRACKING_ALL_MISSING,
+      analysis: analysis({
+        geo_probe: { question: 'q', mentioned: false, competitors_mentioned: ['Rival'] },
+        social_activity: { platform: 'facebook', followers: 1, posts_last_30d: 0 },
+      }),
+    }))
+    expect(r.leak_count).toBe(5)
+    expect(r.health_score).toBe(10)       // 100 - 5*18
+    expect(r.verdict).toBe('High leak risk')
+  })
+
+  it('never goes below zero', () => {
+    const r = buildLeakReport(baseInput({
+      https_ok: false, tracking: TRACKING_ALL_MISSING,
+      breakdown: [{ signal: 'missing_title', points: 3, kind: 'weakness' }],
+      analysis: analysis({
+        geo_probe: { question: 'q', mentioned: false, competitors_mentioned: ['Rival'] },
+        social_activity: { platform: 'facebook', followers: 1, posts_last_30d: 0 },
+      }),
+    }))
+    expect(r.health_score).toBeGreaterThanOrEqual(0)
+  })
+})

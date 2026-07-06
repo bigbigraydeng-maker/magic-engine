@@ -50,6 +50,10 @@ export interface LeakReport {
   headline:       string
   /** Count of stages currently leaking (status === 'leak'). */
   leak_count:     number
+  /** 0–100 lead-health score derived from the stages (100 = nothing leaking). */
+  health_score:   number
+  /** Short verdict label keyed off the score, for the hero badge. */
+  verdict:        string
   stages:         LeakStage[]
   /** Sharpest findings (leaks first, then soft spots) for the cold-email body. */
   summary_points: string[]
@@ -192,6 +196,15 @@ export function buildLeakReport(input: LeakReportInput): LeakReport {
   ]
 
   const leak_count = stages.filter(s => s.status === 'leak').length
+  const weak_count = stages.filter(s => s.status === 'weak').length
+
+  // Lead-health score: a hero number the owner reacts to. Each leaking stage
+  // costs most, each soft spot a little. Deterministic — no invented weighting
+  // beyond the funnel itself.
+  const health_score = Math.max(0, 100 - leak_count * 18 - weak_count * 8)
+  const verdict = health_score < 40 ? 'High leak risk'
+    : health_score < 70 ? 'Leaking enquiries'
+    : 'Fairly tight'
 
   // Email body: leaks first, then soft spots — sharpest evidence up top, capped
   // at 4 so the note stays scannable. Empty findings (unassessed stages) drop.
@@ -211,6 +224,8 @@ export function buildLeakReport(input: LeakReportInput): LeakReport {
     business_name: input.business_name,
     headline,
     leak_count,
+    health_score,
+    verdict,
     stages,
     summary_points,
   }
