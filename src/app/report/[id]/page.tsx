@@ -112,6 +112,12 @@ export default async function ReportPage({ params }: { params: { id: string } })
   if (social) stats.push({ v: social.followers.toLocaleString(), label: `${cap(social.platform)} followers` })
   if (social) stats.push({ v: String(social.posts_last_30d), label: 'Posts last 30 days' })
 
+  // The $99 site-rebuild offer only shows when the current site is genuinely
+  // weak (insecure / slow / thin) — never dangled at a business whose site is fine.
+  const WEAK_SITE_SIGNALS = ['no_https', 'slow_lcp', 'thin_content', 'missing_title', 'missing_description', 'missing_h1']
+  const siteWeak = p.audit?.https_ok === false ||
+    (p.score_breakdown ?? []).some(s => WEAK_SITE_SIGNALS.includes(s.signal))
+
   const PLAN = [
     'Get you found in Google and AI search — the exact queries and fixes',
     'Plug every enquiry leak on your site — form, click-to-call, WhatsApp',
@@ -181,6 +187,15 @@ export default async function ReportPage({ params }: { params: { id: string } })
             ))}
           </div>
         )}
+
+        {/* Local-team trust strip */}
+        <div className="mt-4 flex items-center gap-2.5 rounded-2xl px-4 py-3" style={{ background: '#fff', border: `1px solid ${STONE}` }}>
+          <span className="text-base">📍</span>
+          <p className="text-xs leading-relaxed" style={{ color: 'rgba(26,26,26,0.65)' }}>
+            We&apos;re a local <span className="font-semibold" style={{ color: CHARCOAL }}>Auckland team</span> — real people, no offshore
+            call centre. Happy to jump on a call or <span className="font-semibold" style={{ color: CHARCOAL }}>pop in and see you in person</span>.
+          </p>
+        </div>
 
         {/* AI-search competitor comparison — the killer element */}
         {rivals.length > 0 && (
@@ -266,17 +281,61 @@ export default async function ReportPage({ params }: { params: { id: string } })
           </div>
         </div>
 
-        {/* Offer */}
+        {/* $99 site rebuild — only when the current site is genuinely weak */}
+        {siteWeak && (
+          <section className="mt-6 rounded-[24px] p-6" style={{ background: '#fff', border: `1px solid ${GOLD}` }}>
+            <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: OCHRE }}>Optional add-on</p>
+            <h2 className="mt-2 text-lg font-semibold" style={{ fontFamily: DISPLAY }}>
+              Website looking tired? We&apos;ll rebuild it for <span style={{ color: OCHRE }}>$99&nbsp;NZD</span>
+            </h2>
+            <p className="mt-2 text-sm leading-relaxed" style={{ color: 'rgba(26,26,26,0.7)' }}>
+              A fast, secure site built to be found by Google <em>and</em> AI search — for the price of a nice
+              dinner. Built on your own domain, yours to keep. (For local service businesses, not online shops.)
+            </p>
+          </section>
+        )}
+
+        {/* Offer — founding deal, NZ market */}
         <section className="mt-6 rounded-[24px] p-6 text-white" style={{ background: CHARCOAL }}>
-          <h2 className="text-lg font-semibold" style={{ fontFamily: DISPLAY }}>We fix all of this in 90 days</h2>
+          <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider"
+                style={{ background: 'rgba(235,203,139,0.16)', color: GOLD }}>
+            ★ Founding offer · first 100 NZ businesses only
+          </span>
+          <h2 className="mt-3 text-lg font-semibold" style={{ fontFamily: DISPLAY }}>We fix all of this in 90 days</h2>
           <p className="mt-2 text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.72)' }}>
-            One flat price of AUD&nbsp;$990 for the first three months. We get you found, plug the leaks,
-            and switch on a steady flow of enquiries — all done for you. If you&apos;re not happy with what we
-            deliver, you get a full refund.
+            Get found, plug the leaks, and switch on a steady flow of enquiries — content, social, ads and
+            follow-up, all done for you by AI and our Auckland team.
           </p>
-          <a href={mailto} className="mt-4 inline-flex rounded-xl px-5 py-2.5 text-sm font-semibold" style={{ background: GOLD_GRAD, color: CHARCOAL }}>
-            Book a 15-minute chat →
-          </a>
+
+          {/* Price anchor */}
+          <div className="mt-4 rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.06)' }}>
+            <p className="text-xs leading-relaxed" style={{ color: 'rgba(255,255,255,0.6)' }}>
+              Agencies charge <span className="line-through">$1,500–$3,000 a month</span> for just one piece of this.
+            </p>
+            <p className="mt-1 text-sm">
+              <span className="text-2xl font-bold" style={{ fontFamily: DISPLAY, color: GOLD }}>$990 NZD</span>
+              <span style={{ color: 'rgba(255,255,255,0.6)' }}> — the full 90 days, everything included.</span>
+            </p>
+          </div>
+
+          {/* Guarantee */}
+          <div className="mt-3 flex items-start gap-2.5 rounded-2xl p-4" style={{ background: 'rgba(92,138,74,0.15)' }}>
+            <span className="text-lg">🛡️</span>
+            <p className="text-sm leading-relaxed">
+              <span className="font-bold" style={{ color: '#A7D18F' }}>100% money-back guarantee.</span>
+              <span style={{ color: 'rgba(255,255,255,0.75)' }}> If you&apos;re not happy with what we deliver, you get
+              every dollar back — no questions asked.</span>
+            </p>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-3">
+            <a href={mailto} className="inline-flex rounded-xl px-5 py-2.5 text-sm font-semibold" style={{ background: GOLD_GRAD, color: CHARCOAL }}>
+              Book a 15-minute chat →
+            </a>
+            <a href={mailto} className="inline-flex rounded-xl border px-5 py-2.5 text-sm font-semibold" style={{ borderColor: 'rgba(255,255,255,0.25)', color: '#fff' }}>
+              Or have us visit you
+            </a>
+          </div>
         </section>
 
         <footer className="mt-8 text-xs leading-relaxed" style={{ color: 'rgba(26,26,26,0.4)' }}>
