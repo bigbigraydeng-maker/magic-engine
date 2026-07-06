@@ -156,6 +156,23 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # Prospecting auto-sweep — every 10 minutes (Phase 35)
+  # Advances the outbound conveyor one bounded step per fire:
+  #   audit -> analyze -> draft -> discover next industry x NZ-city seed.
+  # No-ops unless PROSPECTING_SWEEP_ENABLED=true (ships dark; PM turns spend on).
+  # Sending stays human — drafts land in the review queue only.
+  - type: cron
+    name: prospecting-sweep
+    env: node
+    schedule: "*/10 * * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/prospecting-sweep
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # Blog generation sweeper — every 5 minutes
   # Marks blog_posts stuck at status='generating' (>10 min) as failed.
   # Background generation in /api/clients/[id]/blog is fire-and-forget;
