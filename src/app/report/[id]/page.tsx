@@ -284,13 +284,14 @@ export default async function ReportPage({ params }: { params: { id: string } })
         {/* $99 site rebuild — only when the current site is genuinely weak */}
         {siteWeak && (
           <section className="mt-6 rounded-[24px] p-6" style={{ background: '#fff', border: `1px solid ${GOLD}` }}>
-            <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: OCHRE }}>Optional add-on</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: OCHRE }}>Optional add-on · single-page info site</p>
             <h2 className="mt-2 text-lg font-semibold" style={{ fontFamily: DISPLAY }}>
-              Website looking tired? We&apos;ll rebuild it for <span style={{ color: OCHRE }}>$99&nbsp;NZD</span>
+              Website looking tired? A one-page site from <span style={{ color: OCHRE }}>$99&nbsp;NZD</span>
             </h2>
             <p className="mt-2 text-sm leading-relaxed" style={{ color: 'rgba(26,26,26,0.7)' }}>
-              A fast, secure site built to be found by Google <em>and</em> AI search — for the price of a nice
-              dinner. Built on your own domain, yours to keep. (For local service businesses, not online shops.)
+              A fast, secure single-page information site — your services, reviews and contact done right, built
+              to be found by Google <em>and</em> AI search. On your own domain, yours to keep. (For local service
+              businesses, not online shops.)
             </p>
           </section>
         )}
