@@ -24,8 +24,10 @@ describe('toListing', () => {
     expect(l).toMatchObject({
       place_id: 'p1', name: 'Oz Flooring', city: 'Brisbane', country_code: 'AU',
       domain: 'ozflooring.com.au', website_url: 'https://www.ozflooring.com.au/',
-      phone: '07 1234 5678', rating: 4.6, review_count: 88, is_claimed: true,
+      phone: '07 1234 5678', rating: 4.6, review_count: 88,
     })
+    // business_status must NOT be faked into a GBP claim signal
+    expect(l?.is_claimed).toBe(false)
   })
 
   it('handles a result with no detail (no website / phone)', () => {
@@ -86,6 +88,47 @@ describe('discoverBusinessesViaPlaces', () => {
     await expect(discoverBusinessesViaPlaces({
       industry: 'bogus', city: 'brisbane', coord: '0,0', country: 'AU',
     })).rejects.toThrow(/No Places search label/)
+  })
+
+  it('aborts the whole run (not silent null) when Details hits a quota limit', async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({
+        status: 'OK', results: [{ place_id: 'p1', name: 'A Flooring', rating: 4.8 }],
+      }) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({
+        status: 'OVER_QUERY_LIMIT', error_message: 'You have exceeded your daily request quota.',
+      }) } as Response)
+    await expect(discoverBusinessesViaPlaces({
+      industry: 'flooring', city: 'brisbane', coord: '0,0', country: 'AU',
+    })).rejects.toThrow(/OVER_QUERY_LIMIT/)
+  })
+
+  it('keeps going (website null) when Details returns NOT_FOUND for one business', async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({
+        status: 'OK', results: [{ place_id: 'p1', name: 'A Flooring', rating: 4.8 }],
+      }) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ status: 'NOT_FOUND' }) } as Response)
+    const listings = await discoverBusinessesViaPlaces({
+      industry: 'flooring', city: 'brisbane', coord: '0,0', country: 'AU',
+    })
+    expect(listings).toHaveLength(1)
+    expect(listings[0].website_url).toBeNull()
+  })
+
+  it('drops national chains from the results', async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({
+        status: 'OK', results: [
+          { place_id: 'p1', name: 'Bunnings Warehouse Brisbane', rating: 4.1 },
+          { place_id: 'p2', name: 'Local Timber Floors', rating: 4.9 },
+        ],
+      }) } as Response)
+      .mockResolvedValue({ ok: true, json: () => Promise.resolve({ status: 'OK', result: {} }) } as Response)
+    const listings = await discoverBusinessesViaPlaces({
+      industry: 'flooring', city: 'brisbane', coord: '0,0', country: 'AU',
+    })
+    expect(listings.map(l => l.name)).toEqual(['Local Timber Floors'])
   })
 })
 

@@ -46,6 +46,17 @@ export const INDUSTRY_SEARCH_LABEL: Record<string, string> = {
 
 const COUNTRY_NAME: Record<'AU' | 'NZ', string> = { AU: 'Australia', NZ: 'New Zealand' }
 
+// Text Search only soft-biases by location, so national chains / big-box
+// retailers leak in. Drop the obvious ones — they are never Digital
+// Foundation prospects. (Coarse first-pass filter; finer category filtering
+// is a follow-up.)
+const CHAIN_BLOCKLIST =
+  /\b(bunnings|ikea|beacon lighting|harvey norman|the good guys|officeworks|kmart|target|big ?w|freedom|amart|nick scali|carpet ?court|choices flooring|andersens)\b/i
+
+// Google Places Details statuses that mean "stop, the whole run will fail"
+// (quota / auth) rather than "this one business has no detail".
+const FATAL_DETAIL_STATUSES = new Set(['OVER_QUERY_LIMIT', 'REQUEST_DENIED'])
+
 /** "gold_coast" → "Gold Coast" */
 function cityDisplay(key: string): string {
   return key.split('_').map(w => (w ? w[0].toUpperCase() + w.slice(1) : w)).join(' ')
@@ -93,19 +104,31 @@ export function toListing(
     domain:       toDomain(detail?.website),
     rating:       place.rating ?? null,
     review_count: place.user_ratings_total ?? null,
-    is_claimed:   detail?.business_status === 'OPERATIONAL',
+    // The Places free tier does not expose real GBP claim status —
+    // business_status means "operating", not "claimed". Don't fake it.
+    is_claimed:   false,
     raw:          { ...place, ...(detail ?? {}) },
   }
 }
 
+/**
+ * Fetch website + phone for one place.
+ * - null       → this business genuinely has no detail (NOT_FOUND etc.)
+ * - throws      → quota/auth failure: the whole run should fail loudly, not
+ *                 silently mark every remaining business as "no website"
+ */
 async function fetchDetails(placeId: string, key: string): Promise<PlaceDetail | null> {
   const fields = 'website,formatted_phone_number,business_status'
   const res = await fetch(
     `${PLACES_BASE}/details/json?place_id=${encodeURIComponent(placeId)}&fields=${fields}&key=${key}`,
   )
-  if (!res.ok) return null
-  const data = await res.json() as { result?: PlaceDetail; status: string }
-  return data.status === 'OK' ? (data.result ?? null) : null
+  if (!res.ok) return null   // transient network blip — skip this one, keep going
+  const data = await res.json() as { result?: PlaceDetail; status: string; error_message?: string }
+  if (data.status === 'OK') return data.result ?? null
+  if (FATAL_DETAIL_STATUSES.has(data.status)) {
+    throw new Error(`Places details ${data.status}${data.error_message ? ` — ${data.error_message}` : ''}`)
+  }
+  return null
 }
 
 /**
@@ -161,8 +184,12 @@ export async function discoverBusinessesViaPlaces(params: {
   const sliced = results.slice(0, limit)
   const listings: BusinessListing[] = []
   for (const place of sliced) {
-    if (!place.place_id) continue
-    const detail = await fetchDetails(place.place_id, key).catch(() => null)
+    if (!place.place_id || !place.name) continue
+    if (CHAIN_BLOCKLIST.test(place.name)) continue   // drop national chains / big-box
+    // No .catch here: a quota/auth failure from fetchDetails must abort the
+    // run (→ cron_run_logs failed) instead of silently producing website-less
+    // rows that all fail qualification.
+    const detail = await fetchDetails(place.place_id, key)
     const listing = toListing(place, detail, cityLabel, params.country, label)
     if (listing) listings.push(listing)
   }
