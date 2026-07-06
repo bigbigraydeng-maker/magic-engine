@@ -1,14 +1,18 @@
 /**
- * GET /api/admin/prospecting?status=&industry=&min_score=&page=&limit=
+ * GET /api/admin/prospecting?status=&industry=&min_score=&page=&limit=&full=1
  *
  * Admin-only. Paginated list of outbound_prospects (Phase 35 pipeline).
- * Excludes heavy jsonb fields (raw_listing / audit / ai_report); fetch a
- * single prospect for detail once a detail route exists.
+ * Excludes heavy jsonb fields (raw_listing / audit / ai_report) unless
+ * `full=1` is passed together with a status filter — the review queue needs
+ * complete cards (ai_report + outreach_email) in one request. Full mode is
+ * capped at 20 rows and also returns the compliance footer + sender
+ * identity so the client can render exactly what will be sent.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { guardAdmin } from '@/lib/auth/require-admin'
+import { complianceFooter } from '@/lib/prospecting/outreach'
 
 const PAGE_SIZE = 30
 const VALID_STATUSES = [
@@ -24,14 +28,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const status   = params.get('status') ?? ''
   const industry = params.get('industry') ?? ''
   const minScore = parseInt(params.get('min_score') ?? '', 10)
+  const full     = params.get('full') === '1' && status !== ''
   const page     = Math.max(1, parseInt(params.get('page') ?? '1', 10))
-  const limit    = Math.min(100, Math.max(1, parseInt(params.get('limit') ?? String(PAGE_SIZE), 10)))
+  const maxLimit = full ? 20 : 100
+  const limit    = Math.min(maxLimit, Math.max(1, parseInt(params.get('limit') ?? String(PAGE_SIZE), 10)))
   const offset   = (page - 1) * limit
+
+  const baseColumns =
+    'id, business_name, industry, city, country, domain, phone, email, rating, review_count, prospect_score, status, created_at, audited_at'
 
   let query = supabaseAdmin
     .from('outbound_prospects')
     .select(
-      'id, business_name, industry, city, country, domain, phone, email, rating, review_count, prospect_score, status, created_at, audited_at',
+      full ? `${baseColumns}, ai_report, outreach_email` : baseColumns,
       { count: 'exact' },
     )
     .order('prospect_score', { ascending: false, nullsFirst: false })
@@ -45,5 +54,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const { data, error, count } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  return NextResponse.json({ prospects: data ?? [], total: count ?? 0, page, limit })
+  return NextResponse.json({
+    prospects: data ?? [],
+    total: count ?? 0,
+    page,
+    limit,
+    ...(full ? { compliance_footer: complianceFooter() } : {}),
+  })
 }

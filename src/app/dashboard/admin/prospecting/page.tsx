@@ -10,6 +10,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { INDUSTRY_CATEGORIES, CITY_COORDS } from '@/lib/dataforseo/business-listings'
+import OutreachQueue from './_components/OutreachQueue'
 
 interface ProspectRow {
   id: string
@@ -62,6 +63,7 @@ interface AiReport {
 }
 
 export default function ProspectingPage() {
+  const [tab, setTab] = useState<'pipeline' | 'outreach'>('pipeline')
   const [industry, setIndustry] = useState('flooring')
   const [city, setCity] = useState('brisbane')
   const [rows, setRows] = useState<ProspectRow[]>([])
@@ -175,13 +177,28 @@ export default function ProspectingPage() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold text-me-charcoal">Prospecting 获客管线</h1>
-        <p className="text-sm text-me-charcoal/50 mt-1">
-          内部销售工具 · 批量发现 → 规则审计 → 机会分 ≥55 合格（共 {total} 条）
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-me-charcoal">Prospecting 获客管线</h1>
+          <p className="text-sm text-me-charcoal/50 mt-1">
+            内部销售工具 · 批量发现 → 规则审计 → AI 分析 → 人审外呼（共 {total} 条）
+          </p>
+        </div>
+        <div className="flex rounded-lg border border-me-charcoal/15 p-0.5 text-sm">
+          <button onClick={() => setTab('pipeline')}
+            className={`rounded-md px-4 py-1.5 ${tab === 'pipeline' ? 'bg-me-charcoal text-white' : 'text-me-charcoal/60'}`}>
+            管线
+          </button>
+          <button onClick={() => setTab('outreach')}
+            className={`rounded-md px-4 py-1.5 ${tab === 'outreach' ? 'bg-me-charcoal text-white' : 'text-me-charcoal/60'}`}>
+            📮 外呼审核
+          </button>
+        </div>
       </div>
 
+      {tab === 'outreach' && <OutreachQueue />}
+
+      {tab === 'pipeline' && <>
       {/* Seed controls */}
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-me-charcoal/10 bg-white p-4">
         <label className="text-sm text-me-charcoal/70">
@@ -317,6 +334,7 @@ export default function ProspectingPage() {
           </tbody>
         </table>
       </div>
+      </>}
     </div>
   )
 }
