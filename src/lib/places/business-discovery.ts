@@ -177,7 +177,11 @@ export async function discoverBusinessesViaPlaces(params: {
       next_page_token?: string
     }
     if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
-      throw new Error(`Places text search: ${data.status}${data.error_message ? ` — ${data.error_message}` : ''}`)
+      // Include the actual request URL (key redacted) so cron_run_logs shows
+      // exactly what production sent — settles which code version ran and
+      // whether the params are what we expect.
+      const safeUrl = url.replace(/([?&]key=)[^&]*/, '$1***')
+      throw new Error(`Places text search: ${data.status}${data.error_message ? ` — ${data.error_message}` : ''} [req: ${safeUrl}]`)
     }
     results.push(...(data.results ?? []))
     if (!data.next_page_token) break
