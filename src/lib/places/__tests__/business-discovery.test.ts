@@ -67,12 +67,13 @@ describe('discoverBusinessesViaPlaces', () => {
     expect(mockFetch).toHaveBeenCalledTimes(3)
   })
 
-  it('sends the location coord with a literal comma (not %2C, which Places rejects)', async () => {
+  it('searches by query text only, with no location/radius params (avoids INVALID_REQUEST)', async () => {
     mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ status: 'ZERO_RESULTS', results: [] }) } as Response)
     await discoverBusinessesViaPlaces({ industry: 'flooring', city: 'brisbane', coord: '-27.47,153.02', country: 'AU' })
     const url = mockFetch.mock.calls[0][0] as string
-    expect(url).toContain('location=-27.47,153.02')
-    expect(url).not.toContain('location=-27.47%2C153.02')
+    expect(url).toContain('query=flooring%20store%20in%20Brisbane%2C%20Australia')
+    expect(url).not.toContain('location=')
+    expect(url).not.toContain('radius=')
   })
 
   it('returns [] on ZERO_RESULTS without throwing', async () => {

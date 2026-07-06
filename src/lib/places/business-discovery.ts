@@ -17,7 +17,6 @@ const PLACES_BASE = 'https://maps.googleapis.com/maps/api/place'
 const MAX_PAGES = 3
 const MAX_LIMIT = 60
 const PAGE_TOKEN_DELAY_MS = 2000   // Google requires a short wait before a page token activates
-const SEARCH_RADIUS_M = 25_000
 
 /**
  * Industry seed key → plain-language Places search term. Keys MUST stay in
@@ -162,10 +161,12 @@ export async function discoverBusinessesViaPlaces(params: {
   for (let page = 0; page < MAX_PAGES && results.length < limit; page++) {
     const url = pageToken
       ? `${PLACES_BASE}/textsearch/json?pagetoken=${encodeURIComponent(pageToken)}&key=${key}`
-      // `location` must keep its literal "lat,lng" comma — URL-encoding it to
-      // %2C makes Places reject the request as INVALID_REQUEST. coord is our
-      // own controlled value (no user input), so it is safe unencoded.
-      : `${PLACES_BASE}/textsearch/json?query=${encodeURIComponent(query)}&location=${params.coord}&radius=${SEARCH_RADIUS_M}&key=${key}`
+      // Location comes from the geo terms already in the query
+      // ("... in Auckland, New Zealand"). A location+radius combo on this
+      // legacy Text Search endpoint gets rejected as INVALID_REQUEST, so we
+      // rely on the query text alone. coord stays in the signature for a
+      // possible future switch back to a location-biased endpoint.
+      : `${PLACES_BASE}/textsearch/json?query=${encodeURIComponent(query)}&key=${key}`
 
     const res = await fetch(url)
     if (!res.ok) throw new Error(`Places text search HTTP ${res.status}`)
