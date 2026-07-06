@@ -78,6 +78,20 @@ describe('calculateProspectScore', () => {
     expect(r.qualified).toBe(false)
   })
 
+  it('qualifies exactly at the no-website review floor (boundary: review_count === 3)', () => {
+    const r = calculateProspectScore(input({
+      has_website: false, review_count: 3, has_phone: true, https_ok: null, tracking: null, onpage: null,
+    }))
+    expect(r.qualified).toBe(true)
+  })
+
+  it('does NOT qualify a no-website business with no phone — no way to reach them at all', () => {
+    const r = calculateProspectScore(input({
+      has_website: false, has_phone: false, review_count: 40, https_ok: null, tracking: null, onpage: null,
+    }))
+    expect(r.qualified).toBe(false)
+  })
+
   it('does NOT reward the industry leader for sheer size — 500 reviews scores the same as 8', () => {
     const small = calculateProspectScore(input({ review_count: 8 }))
     const giant = calculateProspectScore(input({ review_count: 500 }))

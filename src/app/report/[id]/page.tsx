@@ -48,6 +48,7 @@ interface ProspectRow {
   city:          string
   country:       string
   domain:        string | null
+  website_url:   string | null
   rating:        number | null
   review_count:  number | null
   audit:         ProspectAudit | null
@@ -77,13 +78,13 @@ export default async function ReportPage({ params }: { params: { id: string } })
 
   const { data: p } = await supabaseAdmin
     .from('outbound_prospects')
-    .select('business_name, industry, city, country, domain, rating, review_count, audit, score_breakdown, ai_report')
+    .select('business_name, industry, city, country, domain, website_url, rating, review_count, audit, score_breakdown, ai_report')
     .eq('id', params.id)
     .maybeSingle<ProspectRow>()
 
   if (!p) return <InvalidLink />
 
-  const hasWebsite = Boolean(p.domain)
+  const hasWebsite = Boolean(p.website_url || p.domain)
   const report = buildLeakReport({
     business_name: p.business_name,
     industry:      p.industry,
@@ -164,8 +165,8 @@ export default async function ReportPage({ params }: { params: { id: string } })
         <div className="mt-4 flex items-start justify-between gap-5 rounded-[24px] p-6" style={{ background: '#fff', boxShadow: '0 1px 2px rgba(26,26,26,.04), 0 8px 28px rgba(26,26,26,.06)' }}>
           <div className="flex-1">
             <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider"
-                  style={{ background: 'rgba(194,69,58,0.1)', color: RED }}>
-              🔴 {report.verdict}
+                  style={{ background: `${scoreColor(report.health_score)}1a`, color: scoreColor(report.health_score) }}>
+              {report.health_score < 40 ? '🔴' : report.health_score < 70 ? '🟠' : '🟢'} {report.verdict}
             </span>
             <h1 className="mt-3 text-[22px] font-semibold leading-tight sm:text-[26px]" style={{ fontFamily: DISPLAY, letterSpacing: '-0.02em' }}>
               {p.business_name}

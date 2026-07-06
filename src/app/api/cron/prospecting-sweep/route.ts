@@ -20,6 +20,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { supabaseAdmin } from '@/lib/supabase'
 import { startCronRun } from '@/lib/cron/run-logger'
 import {
   queueCounts, coverageByCombo,
@@ -34,6 +35,24 @@ const AUDIT_BATCH = 5
 const ANALYZE_BATCH = 2
 const DRAFT_BATCH = 5
 const DISCOVER_LIMIT = 25
+// Hard daily ceiling on paid AI analyses (~$0.15 each → ≤ ~$6/day). Once hit,
+// the sweep skips the analyze step (still audits / drafts / discovers) until
+// the rolling 24h window clears.
+const DAILY_ANALYZE_CAP = 40
+
+/** AI analyses run by this cron in the last 24h, summed from cron_run_logs. */
+async function analyzedLast24h(): Promise<number> {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const { data } = await supabaseAdmin
+    .from('cron_run_logs')
+    .select('summary')
+    .eq('job_name', 'prospecting-sweep')
+    .gte('finished_at', since)
+  return (data ?? []).reduce(
+    (n, r) => n + (Number((r.summary as { analyzed?: number } | null)?.analyzed) || 0),
+    0,
+  )
+}
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   if (req.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -46,7 +65,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const cronRun = await startCronRun('prospecting-sweep')
   try {
     const counts = await queueCounts()
-    const stage = pickStage(counts)
+    const analyzeAllowed = (await analyzedLast24h()) < DAILY_ANALYZE_CAP
+    const stage = pickStage(counts, analyzeAllowed)
     let result: Record<string, unknown>
 
     if (stage === 'audit') {

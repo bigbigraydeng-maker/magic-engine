@@ -41,7 +41,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // below them never get drafted.
   const { data: batch, error } = await supabaseAdmin
     .from('outbound_prospects')
-    .select('id, business_name, industry, city, country, domain, rating, review_count, ai_report, audit, score_breakdown, updated_at')
+    .select('id, business_name, industry, city, country, domain, website_url, rating, review_count, ai_report, audit, score_breakdown, updated_at')
     .eq('status', 'analyzed')
     .is('ai_report->error', null)
     .order('prospect_score', { ascending: false, nullsFirst: false })
@@ -78,7 +78,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       industry:      prospect.industry,
       city:          prospect.city,
       country:       prospect.country,
-      has_website:   Boolean(prospect.domain),
+      has_website:   Boolean(prospect.website_url || prospect.domain),
       rating:        prospect.rating,
       review_count:  prospect.review_count,
       https_ok:      audit?.https_ok ?? null,

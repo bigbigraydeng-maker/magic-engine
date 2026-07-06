@@ -26,18 +26,30 @@ const MAX_ATTEMPTS = 2
 
 // ─── Queue introspection (drives the cron's stage choice) ─────────────────────
 
-async function countByStatus(status: string, noError = false): Promise<number> {
-  let q = supabaseAdmin.from('outbound_prospects').select('id', { count: 'exact', head: true }).eq('status', status)
-  if (noError) q = q.is('ai_report->error', null)
-  const { count } = await q
+async function countDiscoveredOrQualified(status: 'discovered' | 'qualified'): Promise<number> {
+  const { count } = await supabaseAdmin
+    .from('outbound_prospects').select('id', { count: 'exact', head: true }).eq('status', status)
+  return count ?? 0
+}
+
+/**
+ * Draftable = analyzed, analysis succeeded (no `error`), AND not already
+ * parked as un-draftable (no `draft_error`). Excluding draft_error is what
+ * keeps a poison-pill row from making pickStage return 'draft' forever and
+ * starving discovery.
+ */
+async function countDraftable(): Promise<number> {
+  const { count } = await supabaseAdmin
+    .from('outbound_prospects').select('id', { count: 'exact', head: true })
+    .eq('status', 'analyzed').is('ai_report->error', null).is('ai_report->draft_error', null)
   return count ?? 0
 }
 
 export async function queueCounts(): Promise<{ discovered: number; qualified: number; draftable: number }> {
   const [discovered, qualified, draftable] = await Promise.all([
-    countByStatus('discovered'),
-    countByStatus('qualified'),
-    countByStatus('analyzed', true),
+    countDiscoveredOrQualified('discovered'),
+    countDiscoveredOrQualified('qualified'),
+    countDraftable(),
   ])
   return { discovered, qualified, draftable }
 }
@@ -114,9 +126,12 @@ export async function analyzeBatch(limit: number): Promise<{ analyzed: number; r
     const attempts = ((p.ai_report as StoredReport)?.attempts ?? 0) + 1
     const nextStatus = analysis.error && attempts < MAX_ATTEMPTS ? 'qualified' : 'analyzed'
     nextStatus === 'qualified' ? retrying++ : analyzed++
-    await supabaseAdmin.from('outbound_prospects')
+    const { error: upErr } = await supabaseAdmin.from('outbound_prospects')
       .update({ ai_report: { ...analysis, attempts }, status: nextStatus, updated_at: new Date().toISOString() })
       .eq('id', p.id).eq('status', 'qualified')
+    // The analysis is already paid for; a lost write would let the next fire
+    // re-analyze (re-spend). Surface it so the cron logs a failure instead.
+    if (upErr) throw new Error(`analyze update failed for ${p.id}: ${upErr.message}`)
   }
   return { analyzed, retrying }
 }
@@ -126,25 +141,29 @@ export async function analyzeBatch(limit: number): Promise<{ analyzed: number; r
 export async function draftBatch(limit: number): Promise<{ drafted: number; failed: number }> {
   const { data: batch } = await supabaseAdmin
     .from('outbound_prospects')
-    .select('id, business_name, industry, city, country, domain, rating, review_count, ai_report, audit, score_breakdown, updated_at')
-    .eq('status', 'analyzed').is('ai_report->error', null)
+    .select('id, business_name, industry, city, country, domain, website_url, rating, review_count, ai_report, audit, score_breakdown, updated_at')
+    .eq('status', 'analyzed').is('ai_report->error', null).is('ai_report->draft_error', null)
     .order('prospect_score', { ascending: false, nullsFirst: false })
     .limit(limit)
   if (!batch || batch.length === 0) return { drafted: 0, failed: 0 }
 
   let drafted = 0, failed = 0
   for (const p of batch) {
-    const report = p.ai_report as ProspectAnalysis | null
+    const report = p.ai_report as (ProspectAnalysis & { draft_attempts?: number }) | null
     if (!report || report.error) continue
     const { data: claimed } = await supabaseAdmin
       .from('outbound_prospects').update({ updated_at: new Date().toISOString() })
       .eq('id', p.id).eq('status', 'analyzed').eq('updated_at', p.updated_at).select('id')
     if (!claimed || claimed.length === 0) continue
 
+    // has_website must agree with the audit-side definition (website_url ?? domain):
+    // domain can be null for an unparseable URL that still has a website, and
+    // claiming "you have no website" on the report would be a false statement.
+    const hasWebsite = Boolean(p.website_url || p.domain)
     const audit = p.audit as ProspectAudit | null
     const leak_report = buildLeakReport({
       business_name: p.business_name, industry: p.industry, city: p.city, country: p.country,
-      has_website: Boolean(p.domain), rating: p.rating, review_count: p.review_count,
+      has_website: hasWebsite, rating: p.rating, review_count: p.review_count,
       https_ok: audit?.https_ok ?? null, tracking: audit?.tracking ?? null,
       breakdown: (p.score_breakdown as ScoreSignal[] | null) ?? null, analysis: report,
     })
@@ -157,8 +176,19 @@ export async function draftBatch(limit: number): Promise<{ drafted: number; fail
         .update({ outreach_email: email, status: 'outreach_ready', updated_at: new Date().toISOString() })
         .eq('id', p.id).eq('status', 'analyzed')
       drafted++
-    } catch {
-      failed++   // stays analyzed; next sweep retries
+    } catch (err) {
+      // Retry cap: a persistently un-draftable row must not re-spend every fire
+      // nor block discovery forever. After MAX_ATTEMPTS, park it with a
+      // draft_error so countDraftable() and draftBatch's filter skip it.
+      const draftAttempts = (report.draft_attempts ?? 0) + 1
+      const parked = draftAttempts >= MAX_ATTEMPTS
+      const patch: Record<string, unknown> = parked
+        ? { ...report, draft_attempts: draftAttempts, draft_error: err instanceof Error ? err.message : String(err) }
+        : { ...report, draft_attempts: draftAttempts }
+      await supabaseAdmin.from('outbound_prospects')
+        .update({ ai_report: patch, updated_at: new Date().toISOString() })
+        .eq('id', p.id).eq('status', 'analyzed')
+      failed++
     }
   }
   return { drafted, failed }
