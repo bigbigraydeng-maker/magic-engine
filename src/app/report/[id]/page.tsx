@@ -130,12 +130,14 @@ export default async function ReportPage({ params }: { params: { id: string } })
   const PERSONAL_BRAND = new Set(['lawyers', 'cosmetic_clinics', 'dentists', 'accountants', 'mortgage_brokers', 'education_consultants'])
   const personalBrand = PERSONAL_BRAND.has(p.industry)
 
+  // The real package phases (weeks 1–3 foundation → 3–8 lead engine → 9–12
+  // proof), shown blurred: enough structure to feel concrete, details on the call.
   const PLAN = [
-    'Get you found in Google and AI search — the exact queries and fixes',
-    'Plug every enquiry leak on your site — form, click-to-call, WhatsApp',
-    'Reactivate your social with a month of AI-made posts and video',
-    'Switch on the video-ad lead engine — who to target and how',
-    'Auto email and SMS follow-up so no enquiry ever goes cold',
+    'Weeks 1–3 · Foundation: site refresh, enquiry form straight to your phone, visitor tracking you can check anywhere',
+    'Weeks 1–3 · Get found: Google profile set up and polished, SEO fixes, AI-search code on your site',
+    'Weeks 3–8 · Lead engine: real reviews from your past customers + a smooth search-to-call path',
+    'Weeks 3–8 · For visual trades: 10 short video ads and 1,000+ locals who’ve seen your work',
+    'Weeks 9–12 · Proof: a before/after report on every leak we found today',
   ]
 
   return (
@@ -325,11 +327,11 @@ export default async function ReportPage({ params }: { params: { id: string } })
           </section>
         )}
 
-        {/* Offer — founding deal, NZ market */}
+        {/* Offer — founding deal, Auckland only (in-person promise) */}
         <section className="mt-6 rounded-[24px] p-6 text-white" style={{ background: CHARCOAL }}>
           <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider"
                 style={{ background: 'rgba(235,203,139,0.16)', color: GOLD }}>
-            ★ Founding offer · first 100 NZ businesses only
+            ★ Founding offer · first 100 Auckland businesses only
           </span>
           <h2 className="mt-3 text-lg font-semibold" style={{ fontFamily: DISPLAY }}>We fix all of this in 90 days</h2>
           <p className="mt-2 text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.72)' }}>
@@ -355,6 +357,16 @@ export default async function ReportPage({ params }: { params: { id: string } })
               <span className="font-bold" style={{ color: '#A7D18F' }}>100% money-back guarantee.</span>
               <span style={{ color: 'rgba(255,255,255,0.75)' }}> If you&apos;re not happy with what we deliver, you get
               every dollar back — no questions asked.</span>
+            </p>
+          </div>
+
+          {/* Why this price — founding partners become case studies */}
+          <div className="mt-3 flex items-start gap-2.5 rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.06)' }}>
+            <span className="text-lg">🤝</span>
+            <p className="text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.75)' }}>
+              <span className="font-bold text-white">Why this price?</span> You&apos;d be one of our first 100
+              Auckland partners. We come to you in person, do the work — and with your OK, your
+              before-and-after becomes one of our success stories. That&apos;s the trade.
             </p>
           </div>
 

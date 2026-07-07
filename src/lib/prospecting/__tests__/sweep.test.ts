@@ -1,5 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { pickStage, leastCoveredCombo, buildCombos, sweepIndustries, FOCUS_INDUSTRIES, type Combo } from '../sweep'
+import {
+  pickStage, leastCoveredCombo, buildCombos,
+  sweepIndustries, sweepCities, FOCUS_INDUSTRIES, FOCUS_CITIES, type Combo,
+} from '../sweep'
 
 describe('pickStage — drain the pipeline before pulling more in', () => {
   it('audits first when raw discoveries are waiting', () => {
@@ -25,12 +28,10 @@ describe('pickStage — drain the pipeline before pulling more in', () => {
 })
 
 describe('buildCombos', () => {
-  it('covers only NZ cities (NZ market first) × the focus industries', () => {
-    const combos = buildCombos([...FOCUS_INDUSTRIES])
-    const cities = new Set(combos.map(c => c.city))
-    expect(cities).toEqual(new Set(['auckland', 'wellington', 'christchurch', 'hamilton']))
-    // 8 focus industries × 4 NZ cities
-    expect(combos.length).toBe(FOCUS_INDUSTRIES.length * 4)
+  it('covers only Auckland (in-person founding offer) × the focus industries', () => {
+    const combos = buildCombos([...FOCUS_INDUSTRIES], [...FOCUS_CITIES])
+    expect(new Set(combos.map(c => c.city))).toEqual(new Set(['auckland']))
+    expect(combos.length).toBe(FOCUS_INDUSTRIES.length * FOCUS_CITIES.length)
   })
 
   it('excludes foreign-market-skewed industries from the first wave', () => {
@@ -42,6 +43,34 @@ describe('buildCombos', () => {
   it('drops unknown industry keys instead of seeding a labelless search', () => {
     const combos = buildCombos(['plumbers', 'not_a_real_industry'])
     expect(new Set(combos.map(c => c.industry))).toEqual(new Set(['plumbers']))
+  })
+
+  it('drops unknown city keys instead of seeding a coordinate-less city', () => {
+    const combos = buildCombos(['plumbers'], ['auckland', 'not_a_city'])
+    expect(new Set(combos.map(c => c.city))).toEqual(new Set(['auckland']))
+  })
+})
+
+describe('sweepCities — env override', () => {
+  const original = process.env.SWEEP_CITIES
+  afterEach(() => {
+    if (original === undefined) delete process.env.SWEEP_CITIES
+    else process.env.SWEEP_CITIES = original
+  })
+
+  it('defaults to Auckland only when the env is unset', () => {
+    delete process.env.SWEEP_CITIES
+    expect(sweepCities()).toEqual(['auckland'])
+  })
+
+  it('honours a valid override for a later expansion, dropping unknown keys', () => {
+    process.env.SWEEP_CITIES = 'auckland, wellington, atlantis'
+    expect(sweepCities()).toEqual(['auckland', 'wellington'])
+  })
+
+  it('falls back to Auckland when the override has no valid keys', () => {
+    process.env.SWEEP_CITIES = 'atlantis'
+    expect(sweepCities()).toEqual(['auckland'])
   })
 })
 

@@ -62,33 +62,54 @@ export const FOCUS_INDUSTRIES = [
 ] as const
 
 /**
- * Active discover allow-list: the SWEEP_INDUSTRIES env (comma-separated
- * industry keys) overrides the focus list, so a second wave opens up with an
- * env change and no deploy. Unknown keys are dropped; an empty/all-invalid
- * override falls back to FOCUS_INDUSTRIES rather than sweeping nothing.
+ * First-wave city list. The $990 founding offer is Auckland-only — the pitch
+ * promises in-person visits, so prospecting outside Auckland would put a
+ * promise in the email we can't keep. Widen via SWEEP_CITIES when the offer
+ * expands (e.g. 'auckland,wellington').
  */
-export function sweepIndustries(): string[] {
-  const raw = process.env.SWEEP_INDUSTRIES
+export const FOCUS_CITIES = ['auckland'] as const
+
+function envList(name: string, valid: (key: string) => boolean, fallback: readonly string[]): string[] {
+  const raw = process.env[name]
   if (raw) {
-    const picked = raw.split(',').map(s => s.trim()).filter(Boolean)
-      .filter(k => k in INDUSTRY_SEARCH_LABEL)
+    const picked = raw.split(',').map(s => s.trim()).filter(Boolean).filter(valid)
     if (picked.length > 0) return picked
   }
-  return [...FOCUS_INDUSTRIES]
+  return [...fallback]
 }
 
 /**
- * Every active industry × NZ-city seed pair (NZ market first). `industries`
- * defaults to the env-resolved allow-list; tests pass an explicit list to stay
- * deterministic. Unknown industry keys are skipped so a stale env value can't
- * inject a seed with no Places search label.
+ * Active discover allow-lists: the SWEEP_INDUSTRIES / SWEEP_CITIES envs
+ * (comma-separated keys) override the focus lists, so a second wave opens up
+ * with an env change and no deploy. Unknown keys are dropped; an
+ * empty/all-invalid override falls back to the focus list rather than
+ * sweeping nothing.
  */
-export function buildCombos(industries: string[] = sweepIndustries()): Combo[] {
-  const cities = Object.keys(CITY_COORDS).filter(c => CITY_COORDS[c].country === 'NZ')
+export function sweepIndustries(): string[] {
+  return envList('SWEEP_INDUSTRIES', k => k in INDUSTRY_SEARCH_LABEL, FOCUS_INDUSTRIES)
+}
+
+export function sweepCities(): string[] {
+  return envList('SWEEP_CITIES', k => k in CITY_COORDS, FOCUS_CITIES)
+}
+
+/**
+ * Every active industry × active city seed pair. Both default to the
+ * env-resolved allow-lists; tests pass explicit lists to stay deterministic.
+ * Unknown keys are skipped so a stale env value can't inject a seed with no
+ * Places search label / no city coordinates.
+ */
+export function buildCombos(
+  industries: string[] = sweepIndustries(),
+  cities: string[] = sweepCities(),
+): Combo[] {
   const combos: Combo[] = []
   for (const industry of industries) {
     if (!(industry in INDUSTRY_SEARCH_LABEL)) continue
-    for (const city of cities) combos.push({ industry, city })
+    for (const city of cities) {
+      if (!(city in CITY_COORDS)) continue
+      combos.push({ industry, city })
+    }
   }
   return combos
 }
