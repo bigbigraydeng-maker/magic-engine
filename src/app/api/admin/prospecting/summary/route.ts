@@ -29,12 +29,17 @@ export async function GET(): Promise<NextResponse> {
   const entries = await Promise.all(STATUSES.map(async s => [s, await countStatus(s)] as const))
   const counts = Object.fromEntries(entries) as Record<(typeof STATUSES)[number], number>
 
-  // Parked = analyzed but stuck (analysis error or draft retries exhausted).
-  const { count: parked } = await supabaseAdmin
-    .from('outbound_prospects')
-    .select('id', { count: 'exact', head: true })
-    .eq('status', 'analyzed')
-    .or('ai_report->error.not.is.null,ai_report->draft_error.not.is.null')
+  // Parked = analyzed but stuck: either analysis errored, or draft retries were
+  // exhausted (draft_error). The two are mutually exclusive on a row — an
+  // analysis error keeps it out of drafting — so summing two plain IS NOT NULL
+  // counts is exact and avoids a fragile PostgREST json `.or` filter.
+  const [errCount, draftErrCount] = await Promise.all([
+    supabaseAdmin.from('outbound_prospects').select('id', { count: 'exact', head: true })
+      .eq('status', 'analyzed').not('ai_report->>error', 'is', null),
+    supabaseAdmin.from('outbound_prospects').select('id', { count: 'exact', head: true })
+      .eq('status', 'analyzed').not('ai_report->>draft_error', 'is', null),
+  ])
+  const parked = (errCount.count ?? 0) + (draftErrCount.count ?? 0)
 
-  return NextResponse.json({ counts, parked: parked ?? 0 })
+  return NextResponse.json({ counts, parked })
 }
