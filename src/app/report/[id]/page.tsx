@@ -21,6 +21,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { MeMark, MeMarkDefs } from '@/components/ui/me-mark'
 import { buildLeakReport, type LeakStage } from '@/lib/prospecting/report'
 import { INDUSTRY_LABELS, type ProspectAnalysis } from '@/lib/prospecting/analyze'
+import ReportLeadForm from './_components/ReportLeadForm'
 import type { ProspectAudit } from '@/lib/prospecting/audit'
 import type { ScoreSignal } from '@/lib/prospecting/score'
 
@@ -151,7 +152,7 @@ export default async function ReportPage({ params }: { params: { id: string } })
             <MeMark className="h-7 w-auto" />
             <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 16, letterSpacing: '-0.02em' }}>Magic Engine</span>
           </div>
-          <a href={mailto} className="rounded-lg px-3.5 py-1.5 text-xs font-semibold text-white" style={{ background: GOLD_GRAD }}>
+          <a href="#start" className="rounded-lg px-3.5 py-1.5 text-xs font-semibold text-white" style={{ background: GOLD_GRAD }}>
             Talk to us →
           </a>
         </div>
@@ -288,7 +289,7 @@ export default async function ReportPage({ params }: { params: { id: string } })
               <p className="mb-3 px-6 text-center text-sm" style={{ color: 'rgba(26,26,26,0.6)' }}>
                 Your step-by-step 90-day plan is ready — we&apos;ll walk you through it on a free call.
               </p>
-              <a href={mailto} className="rounded-xl px-6 py-3 text-sm font-semibold text-white" style={{ background: GOLD_GRAD }}>
+              <a href="#start" className="rounded-xl px-6 py-3 text-sm font-semibold text-white" style={{ background: GOLD_GRAD }}>
                 Book a 15-minute chat →
               </a>
             </div>
@@ -328,7 +329,7 @@ export default async function ReportPage({ params }: { params: { id: string } })
         )}
 
         {/* Offer — founding deal, Auckland only (in-person promise) */}
-        <section className="mt-6 rounded-[24px] p-6 text-white" style={{ background: CHARCOAL }}>
+        <section id="start" className="mt-6 scroll-mt-6 rounded-[24px] p-6 text-white" style={{ background: CHARCOAL }}>
           <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider"
                 style={{ background: 'rgba(235,203,139,0.16)', color: GOLD }}>
             ★ Founding offer · first 100 Auckland businesses only
@@ -370,13 +371,14 @@ export default async function ReportPage({ params }: { params: { id: string } })
             </p>
           </div>
 
-          <div className="mt-4 flex flex-wrap gap-3">
-            <a href={mailto} className="inline-flex rounded-xl px-5 py-2.5 text-sm font-semibold" style={{ background: GOLD_GRAD, color: CHARCOAL }}>
-              Book a 15-minute chat →
-            </a>
-            <a href={mailto} className="inline-flex rounded-xl border px-5 py-2.5 text-sm font-semibold" style={{ borderColor: 'rgba(255,255,255,0.25)', color: '#fff' }}>
-              Or have us visit you
-            </a>
+          <div className="mt-5">
+            <ReportLeadForm prospectId={params.id} />
+            <p className="mt-3 text-center text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>
+              Prefer email? Reach us any time at{' '}
+              <a href={mailto} className="underline" style={{ color: 'rgba(255,255,255,0.7)' }}>
+                {process.env.OUTREACH_REPLY_EMAIL ?? 'hello@magicengine.cloud'}
+              </a>
+            </p>
           </div>
         </section>
 
