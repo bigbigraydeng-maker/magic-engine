@@ -144,7 +144,7 @@ export default async function ReportPage({ params }: { params: { id: string } })
     'Weeks 1–3 · Foundation: site refresh, enquiry form straight to your phone, visitor tracking you can check anywhere',
     'Weeks 1–3 · Get found: Google profile set up and polished, SEO fixes, AI-search code on your site',
     'Weeks 3–8 · Lead engine: real reviews from your past customers + a smooth search-to-call path',
-    'Weeks 3–8 · For visual trades: 10 short video ads and 1,000+ locals who’ve seen your work',
+    'Weeks 3–8 · For visual trades: short video ads that build a local audience who’ve seen your work',
     'Weeks 9–12 · Proof: a before/after report on every leak we found today',
   ]
 
@@ -343,8 +343,8 @@ export default async function ReportPage({ params }: { params: { id: string } })
           </span>
           <h2 className="mt-3 text-lg font-semibold" style={{ fontFamily: DISPLAY }}>We fix all of this in 90 days</h2>
           <p className="mt-2 text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.72)' }}>
-            Get found, plug the leaks, and switch on a steady flow of enquiries — content, social, ads and
-            follow-up, all done for you by AI and our Auckland team.
+            Get found, plug the leaks, and make it effortless for customers to reach you — search, social, ads
+            and follow-up, all done for you by AI and our Auckland team.
           </p>
 
           {/* Price anchor */}
@@ -354,7 +354,7 @@ export default async function ReportPage({ params }: { params: { id: string } })
             </p>
             <p className="mt-1 text-sm">
               <span className="text-2xl font-bold" style={{ fontFamily: DISPLAY, color: GOLD }}>$990 NZD</span>
-              <span style={{ color: 'rgba(255,255,255,0.6)' }}> — the full 90 days, everything included.</span>
+              <span style={{ color: 'rgba(255,255,255,0.6)' }}> — the full 90-day build, done for you.</span>
             </p>
           </div>
 
