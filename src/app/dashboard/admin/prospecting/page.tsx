@@ -11,6 +11,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { INDUSTRY_CATEGORIES, CITY_COORDS } from '@/lib/dataforseo/business-listings'
 import OutreachQueue from './_components/OutreachQueue'
+import PipelineCRM from './_components/PipelineCRM'
 
 interface ProspectRow {
   id: string
@@ -64,7 +65,7 @@ interface AiReport {
 }
 
 export default function ProspectingPage() {
-  const [tab, setTab] = useState<'pipeline' | 'outreach'>('pipeline')
+  const [tab, setTab] = useState<'crm' | 'pipeline' | 'outreach'>('crm')
   const [industry, setIndustry] = useState('flooring')
   const [city, setCity] = useState('brisbane')
   const [rows, setRows] = useState<ProspectRow[]>([])
@@ -232,9 +233,13 @@ export default function ProspectingPage() {
           </p>
         </div>
         <div className="flex rounded-lg border border-me-charcoal/15 p-0.5 text-sm">
+          <button onClick={() => setTab('crm')}
+            className={`rounded-md px-4 py-1.5 ${tab === 'crm' ? 'bg-me-charcoal text-white' : 'text-me-charcoal/60'}`}>
+            ▦ CRM 看板
+          </button>
           <button onClick={() => setTab('pipeline')}
             className={`rounded-md px-4 py-1.5 ${tab === 'pipeline' ? 'bg-me-charcoal text-white' : 'text-me-charcoal/60'}`}>
-            管线
+            ▤ 管线表格
           </button>
           <button onClick={() => setTab('outreach')}
             className={`rounded-md px-4 py-1.5 ${tab === 'outreach' ? 'bg-me-charcoal text-white' : 'text-me-charcoal/60'}`}>
@@ -243,6 +248,7 @@ export default function ProspectingPage() {
         </div>
       </div>
 
+      {tab === 'crm' && <PipelineCRM />}
       {tab === 'outreach' && <OutreachQueue />}
 
       {tab === 'pipeline' && <>
