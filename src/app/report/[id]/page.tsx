@@ -21,6 +21,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { MeMark, MeMarkDefs } from '@/components/ui/me-mark'
 import { buildLeakReport, type LeakStage } from '@/lib/prospecting/report'
 import { INDUSTRY_LABELS, type ProspectAnalysis } from '@/lib/prospecting/analyze'
+import { sanitiseOwnerName } from '@/lib/prospecting/outreach'
 import ReportLeadForm from './_components/ReportLeadForm'
 import type { ProspectAudit } from '@/lib/prospecting/audit'
 import type { ScoreSignal } from '@/lib/prospecting/score'
@@ -50,6 +51,7 @@ interface ProspectRow {
   country:       string
   domain:        string | null
   website_url:   string | null
+  email:         string | null
   rating:        number | null
   review_count:  number | null
   audit:         ProspectAudit | null
@@ -79,7 +81,7 @@ export default async function ReportPage({ params }: { params: { id: string } })
 
   const { data: p } = await supabaseAdmin
     .from('outbound_prospects')
-    .select('business_name, industry, city, country, domain, website_url, rating, review_count, audit, score_breakdown, ai_report')
+    .select('business_name, industry, city, country, domain, website_url, email, rating, review_count, audit, score_breakdown, ai_report')
     .eq('id', params.id)
     .maybeSingle<ProspectRow>()
 
@@ -108,6 +110,11 @@ export default async function ReportPage({ params }: { params: { id: string } })
   const social = p.ai_report?.social_activity
 
   const keyFinding = report.summary_points[0] ?? ''
+  // Pre-fill the lead form with what we already know (we emailed this owner):
+  // the business email we reached out on, and a plausible owner first name.
+  // Both stay editable so the reader can correct anything wrong.
+  const prefillName  = sanitiseOwnerName(p.ai_report?.owner_name, p.business_name) ?? ''
+  const prefillEmail = p.email ?? ''
   const mailto = `mailto:${process.env.OUTREACH_REPLY_EMAIL ?? 'hello@magicengine.cloud'}` +
     `?subject=${encodeURIComponent(`Health check chat — ${p.business_name}`)}`
 
@@ -372,7 +379,7 @@ export default async function ReportPage({ params }: { params: { id: string } })
           </div>
 
           <div className="mt-5">
-            <ReportLeadForm prospectId={params.id} />
+            <ReportLeadForm prospectId={params.id} prefillName={prefillName} prefillEmail={prefillEmail} />
             <p className="mt-3 text-center text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>
               Prefer email? Reach us any time at{' '}
               <a href={mailto} className="underline" style={{ color: 'rgba(255,255,255,0.7)' }}>

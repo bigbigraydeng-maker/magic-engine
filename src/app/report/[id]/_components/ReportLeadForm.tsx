@@ -18,9 +18,20 @@ const inputClass =
   'w-full rounded-xl border-0 px-4 py-2.5 text-sm text-[#1A1A1A] placeholder:text-[rgba(26,26,26,0.4)] focus:outline-none focus:ring-2 focus:ring-[#EBCB8B]'
 const inputStyle = { background: 'rgba(255,255,255,0.94)' }
 
-export default function ReportLeadForm({ prospectId }: { prospectId: string }) {
+export default function ReportLeadForm({
+  prospectId,
+  prefillName = '',
+  prefillEmail = '',
+}: {
+  prospectId: string
+  prefillName?: string
+  prefillEmail?: string
+}) {
   const [status, setStatus] = useState<Status>('idle')
   const [errorMsg, setErrorMsg] = useState('')
+  // We pre-fill name + email from what we already know (we emailed this owner),
+  // so the reader only adds phone + message. Both stay editable to correct.
+  const prefilled = Boolean(prefillEmail)
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -64,12 +75,17 @@ export default function ReportLeadForm({ prospectId }: { prospectId: string }) {
 
   return (
     <form onSubmit={handleSubmit} className="grid gap-3">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <input name="name" type="text" required autoComplete="name" placeholder="Your name *" aria-label="Your name" className={inputClass} style={inputStyle} />
-        <input name="email" type="email" required autoComplete="email" placeholder="Email *" aria-label="Email" className={inputClass} style={inputStyle} />
-      </div>
-      <input name="phone" type="tel" autoComplete="tel" placeholder="Phone (optional — we can call you)" aria-label="Phone" className={inputClass} style={inputStyle} />
+      {prefilled && (
+        <p className="text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>
+          Just add your phone or a note and hit send — we’ll take it from there.
+        </p>
+      )}
+      <input name="phone" type="tel" autoComplete="tel" placeholder="Best phone to reach you (optional)" aria-label="Phone" className={inputClass} style={inputStyle} />
       <textarea name="message" rows={3} placeholder="Anything you’d like us to know? (optional)" aria-label="Message" className={`${inputClass} resize-none`} style={inputStyle} />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <input name="name" type="text" required autoComplete="name" defaultValue={prefillName} placeholder="Your name *" aria-label="Your name" className={inputClass} style={inputStyle} />
+        <input name="email" type="email" required autoComplete="email" defaultValue={prefillEmail} placeholder="Email *" aria-label="Email" className={inputClass} style={inputStyle} />
+      </div>
       {status === 'error' && (
         <p className="rounded-lg px-3 py-2 text-sm" style={{ background: 'rgba(194,69,58,0.2)', color: '#F0B8B2' }}>
           {errorMsg}
