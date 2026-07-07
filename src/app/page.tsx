@@ -2,13 +2,14 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
+import WaitlistForm from './_components/WaitlistForm'
 
 export const dynamic = 'force-dynamic'
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://magicengine.com.au'
-const pageTitle = 'AI Upgrade & Training for AU/NZ Businesses'
+const pageTitle = 'AI Growth Engine for Auckland Local Businesses — $990 for 90 Days'
 const pageDescription =
-  'Bilingual English and Chinese AI upgrade support for businesses in Australia and New Zealand, with SEO, AI visibility, and training-led execution.'
+  'We take 100 Auckland businesses and install a full AI growth engine — website, Google profile, enquiry tracking and lead generation — done for you, in person, in 90 days. Money-back guarantee.'
 
 export const metadata: Metadata = {
   title: pageTitle,
@@ -29,82 +30,52 @@ export const metadata: Metadata = {
   },
 }
 
-const modules = [
+// The three phases of the $990 / 90-day founding package. Single source of
+// truth: docs/superpowers/specs/2026-07-07-990-growth-engine-package-v1.md —
+// change the spec first, then mirror here.
+const phases = [
   {
-    n: '01 · SEO',
-    status: 'Live',
-    title: 'SEO Content Engine',
-    body: 'Dual-track visibility across Google and the new AI search. Keyword intelligence, dual-signal blogs, and weekly brand tracking across the engines that answer your customers.',
-    features: ['Keyword Intelligence', 'AI Visibility Tracker', 'GEO Composer', 'Blog Studio'],
+    n: 'Weeks 1–3',
+    title: 'Foundation',
+    body: 'Your website refreshed, an enquiry form that rings your phone, visitor tracking you can check from anywhere, your Google Business Profile set up properly, and AI-search code on your site so ChatGPT can find you.',
   },
   {
-    n: '02 · Social',
-    status: 'Live',
-    title: 'Social Content Matrix',
-    body: 'A multi-platform, multi-client production line. Brand briefs, batch campaign generation, AI visuals and video, then scheduled straight to your client accounts.',
-    features: ['Brand Brief Studio', 'Campaign Studio', 'Visual & Video', 'Publishing Hub'],
+    n: 'Weeks 3–8',
+    title: 'Lead engine',
+    body: 'Real reviews from your past customers feeding your Google ranking, a smooth search-to-call path — and for visual trades, short video ads that build an audience of locals who’ve seen your work.',
   },
   {
-    n: '03 · Ads',
-    status: 'Building',
-    title: 'Ads Intelligence',
-    body: 'Connect ad accounts, run a 9-dimension AI diagnosis with a 0–100 health score, and apply reversible one-click fixes — or hand complex calls to the team.',
-    features: ['Account connect', 'AI diagnosis', 'One-click fix'],
+    n: 'Weeks 9–12',
+    title: 'Proof',
+    body: 'A before-and-after report on every leak we found on day one. Your data, your accounts, your assets — everything we build stays yours.',
   },
-  {
-    n: '04 · Data',
-    status: 'Coming',
-    title: 'Insight Reports',
-    body: 'Every battlefront, aggregated. Monthly intelligence reports delivered to the same portal your clients use for approvals and decisions.',
-    features: ['Monthly PDF', 'Client Portal', 'Cross-module KPIs'],
-  },
-]
-
-const flywheel = [
-  {
-    n: '01',
-    title: 'Diagnose',
-    body: 'Score search, AI visibility, social, ads, reputation and competitors without ever exposing the supplier names behind the data.',
-  },
-  {
-    n: '02',
-    title: 'Execute',
-    body: 'Turn priority findings into content, website fixes, social assets and ad decisions your customers can review and approve.',
-  },
-  {
-    n: '03',
-    title: 'Prove',
-    body: 'Bring outcomes back into the same portal customers use for approvals, reports and next-step decisions.',
-  },
-]
-
-const metrics = [
-  { value: '+23%', label: 'AI visibility lift for our first GEO pilot, CTS Tours NZ' },
-  { value: '15', label: 'Visibility actions shipped in the current execution loop' },
-  { value: '48h', label: 'From signing up to a prioritised diagnosis in hand' },
-  { value: '100%', label: 'Of execution visible to the client, in real time' },
 ]
 
 const faqs = [
   {
-    question: 'Do you work with Chinese-speaking and English-speaking teams?',
+    question: 'Who is this for?',
     answer:
-      'Yes. The site is being shaped for bilingual AU/NZ businesses, so both audiences can understand the offer without needing separate product tracks right away.',
+      'Auckland local businesses — builders, renovators, trades, flooring, landscaping and other local services. If your customers search "near me" or want to see your work before they call, this is built for you.',
   },
   {
-    question: 'Can you help with AI training as well as SEO?',
+    question: 'How does the money-back guarantee work?',
     answer:
-      'Yes. Training is part of the roadmap, and the homepage now gives that service a clear path without overbuilding a separate training system too early.',
+      'The guarantee is tied to delivery: everything we commit to on your 90-day plan gets done. If we don’t deliver it, you get every dollar back. We don’t promise rankings or a number of leads — no honest company can — we promise the work, done properly.',
   },
   {
-    question: 'Are you focused on Australia and New Zealand?',
+    question: 'Why is it only $990?',
     answer:
-      'Yes. The public site, search language, and examples are all written for Australia and New Zealand first.',
+      'Because you’re one of our first 100 Auckland partners. We come to you in person, do the work, and (with your OK) your before-and-after becomes one of our success stories. Agencies charge $1,500–$3,000 a month for a fraction of this.',
   },
   {
-    question: 'What does the execution loop include?',
+    question: 'What do you need from me?',
     answer:
-      'Diagnosis, prioritised work items, customer approvals, shipped actions, and monthly proof — all in one portal. We run it as your external AI content operations team.',
+      'About an hour at kickoff — access to your website and Google Business Profile, some photos of your work, and your list of past customers if you want the review engine. We handle the rest.',
+  },
+  {
+    question: 'I’m not in Auckland — can I still join?',
+    answer:
+      'The founding 100 is Auckland-only because we onboard every business face to face. Join the waitlist below and we’ll email you the moment we open your city.',
   },
 ]
 
@@ -116,7 +87,7 @@ const homepageStructuredData = {
       name: 'Magic Engine',
       url: siteUrl,
       description: pageDescription,
-      areaServed: ['Australia', 'New Zealand'],
+      areaServed: ['Auckland', 'New Zealand', 'Australia'],
     },
     {
       '@type': 'WebSite',
@@ -125,13 +96,13 @@ const homepageStructuredData = {
     },
     {
       '@type': 'Service',
-      name: 'AI upgrade and training',
-      serviceType: 'AI upgrade and training for AU/NZ businesses',
+      name: 'AI growth engine for local businesses',
+      serviceType: '90-day done-for-you digital marketing foundation and lead generation',
       provider: {
         '@type': 'Organization',
         name: 'Magic Engine',
       },
-      areaServed: ['Australia', 'New Zealand'],
+      areaServed: ['Auckland, New Zealand'],
     },
     {
       '@type': 'FAQPage',
@@ -240,11 +211,8 @@ function MeMarkHero() {
   )
 }
 
-const statusColor: Record<string, string> = {
-  Live: 'text-[#5C8A4A] bg-[rgba(92,138,74,0.12)]',
-  Building: 'text-[#C4912E] bg-[rgba(196,145,46,0.14)]',
-  Coming: 'text-[#8A8276] bg-[rgba(183,177,165,0.20)]',
-}
+const GOLD_GRAD = 'linear-gradient(135deg, #EBCB8B 0%, #C4912E 55%, #A6781F 100%)'
+const DISPLAY = 'var(--font-display, "Space Grotesk"), sans-serif'
 
 export default async function HomePage() {
   if (process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
@@ -273,21 +241,17 @@ export default async function HomePage() {
             borderColor: 'rgba(26,26,26,0.10)',
           }}
         >
-          <div className="mx-auto flex h-[72px] max-w-[1200px] items-center justify-between gap-5 px-6 lg:px-8">
+          <div className="mx-auto flex h-[72px] max-w-[1080px] items-center justify-between gap-5 px-6 lg:px-8">
             <Link href="/" className="flex items-center gap-2.5">
               <MeLogo size={36} />
-              <span className="font-display" style={{ fontFamily: 'var(--font-display, "Space Grotesk"), sans-serif', fontWeight: 700, fontSize: 17, letterSpacing: '-0.02em' }}>
+              <span style={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: 17, letterSpacing: '-0.02em' }}>
                 Magic Engine
               </span>
             </Link>
             <nav className="hidden items-center gap-6 text-sm font-medium lg:flex" style={{ color: 'rgba(26,26,26,0.65)' }}>
-              <a href="#flywheel" className="hover:text-[#1A1A1A] transition-colors">How it works</a>
-              <a href="#modules" className="hover:text-[#1A1A1A] transition-colors">Product</a>
-              <a href="#proof" className="hover:text-[#1A1A1A] transition-colors">Pilots</a>
+              <a href="#plan" className="hover:text-[#1A1A1A] transition-colors">The 90-day plan</a>
               <a href="#faq" className="hover:text-[#1A1A1A] transition-colors">FAQ</a>
-              <Link href="/geo" className="hover:text-[#1A1A1A] transition-colors">GEO</Link>
-              <Link href="/training" className="hover:text-[#1A1A1A] transition-colors">Training</Link>
-              <Link href="/about" className="hover:text-[#1A1A1A] transition-colors">About</Link>
+              <a href="#waitlist" className="hover:text-[#1A1A1A] transition-colors">Outside Auckland?</a>
             </nav>
             <div className="flex items-center gap-3">
               <Link
@@ -295,18 +259,14 @@ export default async function HomePage() {
                 className="hidden rounded-xl border px-4 py-2 text-sm font-semibold transition-colors hover:bg-white sm:block"
                 style={{ borderColor: 'rgba(26,26,26,0.14)', color: '#1A1A1A' }}
               >
-                View portal
+                Client portal
               </Link>
               <Link
                 href="/contact"
                 className="rounded-xl px-4 py-2 text-sm font-semibold transition-all hover:-translate-y-px"
-                style={{
-                  background: 'linear-gradient(135deg, #EBCB8B 0%, #C4912E 55%, #A6781F 100%)',
-                  color: '#2A2008',
-                  boxShadow: '0 18px 50px rgba(196,145,46,.22)',
-                }}
+                style={{ background: GOLD_GRAD, color: '#2A2008', boxShadow: '0 18px 50px rgba(196,145,46,.22)' }}
               >
-                Get free diagnosis
+                Claim a spot
               </Link>
             </div>
           </div>
@@ -314,56 +274,51 @@ export default async function HomePage() {
 
         {/* ── HERO ── */}
         <section className="relative overflow-hidden py-16 sm:py-24">
-          <div className="mx-auto max-w-[1200px] px-6 lg:px-8">
+          <div className="mx-auto max-w-[1080px] px-6 lg:px-8">
             <div className="grid items-center gap-12 lg:grid-cols-2 lg:gap-14">
               <div>
-                <p
-                  className="mb-4 text-xs font-semibold uppercase tracking-[0.16em]"
-                  style={{ color: '#C4912E' }}
+                <span
+                  className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider"
+                  style={{ background: 'rgba(196,145,46,0.12)', color: '#A6781F' }}
                 >
-                  AI Execution Engine — for AU/NZ growth teams
-                </p>
+                  ★ Founding offer · first 100 Auckland businesses only
+                </span>
                 <h1
-                  className="text-5xl font-semibold leading-[1.04] tracking-tight sm:text-6xl lg:text-[clamp(40px,5.4vw,68px)]"
-                  style={{ fontFamily: 'var(--font-display, "Space Grotesk"), sans-serif', letterSpacing: '-0.02em' }}
+                  className="mt-5 text-5xl font-semibold leading-[1.04] tracking-tight sm:text-6xl lg:text-[clamp(40px,5.2vw,64px)]"
+                  style={{ fontFamily: DISPLAY, letterSpacing: '-0.02em' }}
                 >
-                  Turns diagnosis into{' '}
-                  <span style={{ background: 'linear-gradient(135deg, #EBCB8B 0%, #C4912E 55%, #A6781F 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
-                    visible execution.
+                  Your AI growth engine.{' '}
+                  <span style={{ background: GOLD_GRAD, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
+                    Done for you, in person.
                   </span>
                 </h1>
                 <p className="mt-6 text-lg leading-relaxed" style={{ color: 'rgba(26,26,26,0.65)', maxWidth: '30em' }}>
-                  Discover opportunities, execute the work, and show customers what changed — across search, AI visibility, social, ads, reputation and competitor signals. One managed loop, run by Magic Lab as your external AI content team.
-                </p>
-                <p className="mt-3 text-sm leading-relaxed" style={{ color: 'rgba(26,26,26,0.48)' }}>
-                  面向澳洲和新西兰企业的 AI 升级与培训。先把信息说清楚，再把执行做起来。
+                  We take 100 Auckland local businesses and install everything customers need to find you,
+                  trust you and reach you — website, Google profile, reviews, tracking and lead generation.
+                  90 days, <span className="font-semibold" style={{ color: '#1A1A1A' }}>$990 NZD</span>, money-back guarantee.
                 </p>
                 <div className="mt-8 flex flex-wrap gap-3">
                   <Link
                     href="/contact"
                     className="inline-flex h-12 items-center gap-2 rounded-xl px-5 text-sm font-semibold transition-all hover:-translate-y-0.5"
-                    style={{
-                      background: 'linear-gradient(135deg, #EBCB8B 0%, #C4912E 55%, #A6781F 100%)',
-                      color: '#2A2008',
-                      boxShadow: '0 18px 50px rgba(196,145,46,.22)',
-                    }}
+                    style={{ background: GOLD_GRAD, color: '#2A2008', boxShadow: '0 18px 50px rgba(196,145,46,.22)' }}
                   >
-                    Get free diagnosis
+                    Claim one of the 100 spots
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M5 12h14M13 6l6 6-6 6" />
                     </svg>
                   </Link>
-                  <Link
-                    href="/portal/login"
+                  <a
+                    href="#waitlist"
                     className="inline-flex h-12 items-center rounded-xl border px-5 text-sm font-semibold transition-all hover:bg-white"
                     style={{ borderColor: 'rgba(26,26,26,0.18)', color: '#1A1A1A' }}
                   >
-                    See the client portal
-                  </Link>
+                    Outside Auckland? Join the waitlist
+                  </a>
                 </div>
                 <p className="mt-4 flex items-center gap-2 text-xs font-medium" style={{ color: 'rgba(26,26,26,0.48)' }}>
                   <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#5C8A4A' }} />
-                  No commitment · Diagnosis delivered in 48 hours
+                  Auckland-based team · We come to you · 100% money-back if we don&apos;t deliver
                 </p>
               </div>
               <div className="flex items-center justify-center">
@@ -379,265 +334,105 @@ export default async function HomePage() {
           </div>
         </section>
 
-        {/* ── TRUST STRIP ── */}
-        <section
-          className="border-y"
-          style={{ borderColor: 'rgba(26,26,26,0.10)', background: 'rgba(234,230,223,0.40)' }}
-        >
-          <div className="mx-auto flex max-w-[1200px] flex-wrap items-center justify-between gap-8 px-6 py-7 lg:px-8">
-            <div className="flex items-center gap-3.5">
-              <svg viewBox="0 0 80 70" fill="none" className="h-11 w-auto flex-none" aria-hidden="true">
-                <path d="M14 30 C20 18 34 12 46 16 C56 19 60 28 68 30 C72 31 74 36 70 40 C64 46 58 40 54 44 C50 48 52 56 46 58 C40 60 38 52 32 52 C26 52 22 60 17 56 C12 52 18 46 16 40 C14 35 10 36 14 30 Z" fill="#C4912E" opacity="0.9" />
-                <circle cx="62" cy="50" r="4" fill="#C4912E" />
-              </svg>
-              <span
-                className="text-xs font-semibold uppercase leading-5 tracking-[0.12em]"
-                style={{ color: '#C4912E' }}
+        {/* ── 90-DAY PLAN ── */}
+        <section id="plan" className="border-t py-20 sm:py-24" style={{ borderColor: 'rgba(26,26,26,0.10)' }}>
+          <div className="mx-auto max-w-[1080px] px-6 lg:px-8">
+            <div className="mb-4 flex items-center gap-3">
+              <span className="h-px w-8 opacity-50" style={{ background: '#C4912E' }} />
+              <span className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: '#C4912E' }}>What you get</span>
+            </div>
+            <h2 className="text-4xl font-semibold tracking-tight" style={{ fontFamily: DISPLAY, letterSpacing: '-0.02em' }}>
+              90 days. Three phases. All done for you.
+            </h2>
+            <div className="mt-10 grid gap-5 md:grid-cols-3">
+              {phases.map(phase => (
+                <div key={phase.title} className="rounded-2xl border p-6" style={{ background: '#fff', borderColor: 'rgba(26,26,26,0.10)' }}>
+                  <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#C4912E' }}>{phase.n}</p>
+                  <h3 className="mt-2 text-xl font-semibold" style={{ fontFamily: DISPLAY }}>{phase.title}</h3>
+                  <p className="mt-3 text-sm leading-relaxed" style={{ color: 'rgba(26,26,26,0.65)' }}>{phase.body}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ── PRICE + GUARANTEE ── */}
+        <section className="py-20" style={{ background: '#0D0D0D' }}>
+          <div className="mx-auto max-w-[720px] px-6 text-center lg:px-8">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: '#EBCB8B' }}>
+              Why this price
+            </p>
+            <h2 className="mt-4 text-4xl font-semibold text-white" style={{ fontFamily: DISPLAY, letterSpacing: '-0.02em' }}>
+              Agencies charge <span className="line-through opacity-60">$1,500–$3,000 a month</span> for one piece of this.
+            </h2>
+            <p className="mt-5 text-lg" style={{ color: 'rgba(251,248,243,0.72)' }}>
+              You pay <span className="font-bold" style={{ color: '#EBCB8B' }}>$990 NZD once</span> for the full 90 days —
+              because you&apos;d be one of our first 100 Auckland partners. We come to you in person, do the work,
+              and with your OK, your before-and-after becomes one of our success stories. That&apos;s the trade.
+            </p>
+            <div className="mx-auto mt-8 flex max-w-md items-start gap-3 rounded-2xl p-5 text-left" style={{ background: 'rgba(92,138,74,0.15)' }}>
+              <span className="text-xl">🛡️</span>
+              <p className="text-sm leading-relaxed text-white">
+                <span className="font-bold" style={{ color: '#A7D18F' }}>100% money-back guarantee.</span>{' '}
+                <span style={{ color: 'rgba(255,255,255,0.75)' }}>
+                  Everything on your 90-day plan gets delivered, or you get every dollar back.
+                </span>
+              </p>
+            </div>
+            <div className="mt-8">
+              <Link
+                href="/contact"
+                className="inline-flex h-12 items-center gap-2 rounded-xl px-6 text-sm font-semibold transition-all hover:-translate-y-0.5"
+                style={{ background: GOLD_GRAD, color: '#2A2008', boxShadow: '0 18px 50px rgba(196,145,46,.22)' }}
               >
-                Built for<br />Australia &amp; New Zealand
-              </span>
-            </div>
-            <div className="flex gap-12">
-              {[
-                { n: '4', label: 'Marketing battlefronts covered' },
-                { n: '+23%', label: 'AI visibility lift (GEO pilot)' },
-                { n: '48h', label: 'From signup to diagnosis' },
-              ].map(stat => (
-                <div key={stat.label}>
-                  <p className="font-display text-2xl font-semibold" style={{ fontFamily: 'var(--font-display, "Space Grotesk"), sans-serif', color: '#1A1A1A' }}>
-                    {stat.n}
-                  </p>
-                  <p className="mt-0.5 text-xs" style={{ color: 'rgba(26,26,26,0.62)' }}>{stat.label}</p>
-                </div>
-              ))}
+                Claim one of the 100 spots
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 12h14M13 6l6 6-6 6" />
+                </svg>
+              </Link>
             </div>
           </div>
         </section>
 
-        {/* ── FLYWHEEL ── */}
-        <section id="flywheel" className="py-20 sm:py-28">
-          <div className="mx-auto max-w-[1200px] px-6 lg:px-8">
-            <div className="flex items-center gap-3 mb-4">
+        {/* ── WAITLIST (outside Auckland) ── */}
+        <section id="waitlist" className="py-20 sm:py-24">
+          <div className="mx-auto max-w-[640px] px-6 lg:px-8">
+            <div className="mb-4 flex items-center gap-3">
               <span className="h-px w-8 opacity-50" style={{ background: '#C4912E' }} />
-              <span className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: '#C4912E' }}>The execution flywheel</span>
+              <span className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: '#C4912E' }}>Outside Auckland?</span>
             </div>
-            <h2
-              className="text-4xl font-semibold tracking-tight lg:text-5xl"
-              style={{ fontFamily: 'var(--font-display, "Space Grotesk"), sans-serif', letterSpacing: '-0.02em' }}
-            >
-              One loop, turning continuously.
+            <h2 className="text-4xl font-semibold tracking-tight" style={{ fontFamily: DISPLAY, letterSpacing: '-0.02em' }}>
+              Join the waitlist for your city.
             </h2>
-            <p className="mt-4 text-lg max-w-2xl" style={{ color: 'rgba(26,26,26,0.65)' }}>
-              Most tools stop at the report. Magic Engine connects insight to impact — so the work that matters actually ships, and the results stay visible.
+            <p className="mt-4 text-base leading-relaxed" style={{ color: 'rgba(26,26,26,0.65)' }}>
+              The founding 100 is Auckland-only because we onboard every business face to face.
+              Leave your details and we&apos;ll email you the moment we open your city — waitlist
+              members get first pick of the next founding round.
             </p>
-            <div className="mt-12 grid gap-5 sm:grid-cols-3">
-              {flywheel.map(item => (
-                <article
-                  key={item.title}
-                  className="rounded-2xl p-7"
-                  style={{ background: '#fff', border: '1px solid rgba(26,26,26,0.10)', boxShadow: '0 1px 2px rgba(26,26,26,.04), 0 8px 28px rgba(26,26,26,.06)' }}
-                >
-                  <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl" style={{ background: '#FBF8F3', border: '1px solid rgba(26,26,26,0.10)' }}>
-                    <svg viewBox="0 0 200 180" fill="none" className="h-7 w-7">
-                      <defs>
-                        <linearGradient id={`fw${item.n}`} x1="20" y1="20" x2="180" y2="160" gradientUnits="userSpaceOnUse">
-                          <stop stopColor="#EBCB8B" /><stop offset="0.55" stopColor="#C4912E" /><stop offset="1" stopColor="#A6781F" />
-                        </linearGradient>
-                        <radialGradient id={`fn${item.n}`} cx="0.5" cy="0.5" r="0.5">
-                          <stop offset="0" stopColor="#FFFFFF" /><stop offset="0.45" stopColor="#FBEFD2" /><stop offset="1" stopColor="#EBCB8B" />
-                        </radialGradient>
-                      </defs>
-                      <g stroke={`url(#fw${item.n})`} fill="none" strokeLinecap="round" strokeWidth="8">
-                        <path d="M22,38 C70,50 110,78 148,92" /><path d="M22,62 C72,68 112,84 148,92" />
-                        <path d="M22,86 C76,90 112,90 148,92" /><path d="M22,110 C76,102 112,98 148,92" />
-                        <path d="M22,134 C70,122 112,104 148,92" />
-                      </g>
-                      <g fill={`url(#fw${item.n})`}>
-                        <circle cx="22" cy="38" r="6.5" /><circle cx="22" cy="62" r="6.5" />
-                        <circle cx="22" cy="86" r="6.5" /><circle cx="22" cy="110" r="6.5" />
-                        <circle cx="22" cy="134" r="6.5" />
-                      </g>
-                      <rect x="148" y="74" width="36" height="36" rx="10" fill={`url(#fn${item.n})`} />
-                    </svg>
-                  </div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em]" style={{ color: '#C4912E' }}>{item.n}</p>
-                  <h3 className="mt-1.5 text-xl font-semibold" style={{ fontFamily: 'var(--font-display, "Space Grotesk"), sans-serif' }}>
-                    {item.title}
-                  </h3>
-                  <p className="mt-3 text-sm leading-relaxed" style={{ color: 'rgba(26,26,26,0.65)' }}>{item.body}</p>
-                </article>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* ── MODULES ── */}
-        <section
-          id="modules"
-          className="py-20 sm:py-28"
-          style={{ background: '#FBF8F3', borderTop: '1px solid rgba(26,26,26,0.10)', borderBottom: '1px solid rgba(26,26,26,0.10)' }}
-        >
-          <div className="mx-auto max-w-[1200px] px-6 lg:px-8">
-            <div className="flex items-center gap-3 mb-4">
-              <span className="h-px w-8 opacity-50" style={{ background: '#C4912E' }} />
-              <span className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: '#C4912E' }}>Four battlefronts, one engine</span>
-            </div>
-            <h2
-              className="text-4xl font-semibold tracking-tight lg:text-5xl"
-              style={{ fontFamily: 'var(--font-display, "Space Grotesk"), sans-serif', letterSpacing: '-0.02em' }}
-            >
-              Be seen everywhere your customers look.
-            </h2>
-            <p className="mt-4 text-lg max-w-2xl" style={{ color: 'rgba(26,26,26,0.65)' }}>
-              Magic Engine covers the full marketing surface — traditional search, AI answers, social and paid — as one connected operating system.
-            </p>
-            <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {modules.map(mod => (
-                <article
-                  key={mod.title}
-                  className="flex flex-col rounded-2xl p-6"
-                  style={{ background: '#fff', border: '1px solid rgba(26,26,26,0.10)', boxShadow: '0 1px 2px rgba(26,26,26,.04), 0 8px 28px rgba(26,26,26,.06)' }}
-                >
-                  <div className="mb-5 flex items-center justify-between">
-                    <span className="text-xs font-semibold uppercase tracking-[0.14em]" style={{ color: '#C4912E' }}>{mod.n}</span>
-                    <span className={`rounded-full px-3 py-1 text-[11px] font-semibold leading-none ${statusColor[mod.status]}`}>
-                      {mod.status}
-                    </span>
-                  </div>
-                  <h3 className="text-[18px] font-semibold leading-snug" style={{ fontFamily: 'var(--font-display, "Space Grotesk"), sans-serif' }}>
-                    {mod.title}
-                  </h3>
-                  <p className="mt-3 text-sm leading-relaxed" style={{ color: 'rgba(26,26,26,0.65)' }}>{mod.body}</p>
-                  <div className="mt-4 flex flex-wrap gap-1.5">
-                    {mod.features.map(f => (
-                      <span
-                        key={f}
-                        className="rounded-md px-2 py-0.5 text-[11px] font-medium"
-                        style={{ background: 'rgba(196,145,46,0.10)', color: '#A6781F' }}
-                      >
-                        {f}
-                      </span>
-                    ))}
-                  </div>
-                </article>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* ── METRICS ── */}
-        <section id="outcomes" className="py-20 sm:py-28">
-          <div className="mx-auto max-w-[1200px] px-6 lg:px-8">
-            <div className="flex items-center gap-3 mb-4">
-              <span className="h-px w-8 opacity-50" style={{ background: '#C4912E' }} />
-              <span className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: '#C4912E' }}>The product promise</span>
-            </div>
-            <h2
-              className="text-4xl font-semibold tracking-tight lg:text-5xl"
-              style={{ fontFamily: 'var(--font-display, "Space Grotesk"), sans-serif', letterSpacing: '-0.02em' }}
-            >
-              Not another dashboard.<br />A managed execution system.
-            </h2>
-            <p className="mt-4 text-lg max-w-2xl" style={{ color: 'rgba(26,26,26,0.65)' }}>
-              Magic Engine starts with diagnosis — but the product is the execution loop after it: prioritised work, customer approvals, shipped actions and monthly proof.
-            </p>
-            <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-              {metrics.map(m => (
-                <div
-                  key={m.label}
-                  className="rounded-2xl p-6"
-                  style={{ background: '#fff', border: '1px solid rgba(26,26,26,0.10)' }}
-                >
-                  <p
-                    className="font-display text-4xl font-semibold"
-                    style={{ fontFamily: 'var(--font-display, "Space Grotesk"), sans-serif', color: '#C4912E' }}
-                  >
-                    {m.value}
-                  </p>
-                  <p className="mt-2 text-sm leading-relaxed" style={{ color: 'rgba(26,26,26,0.65)' }}>{m.label}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* ── PILOTS ── */}
-        <section
-          id="proof"
-          className="py-20 sm:py-28"
-          style={{ background: '#FBF8F3', borderTop: '1px solid rgba(26,26,26,0.10)', borderBottom: '1px solid rgba(26,26,26,0.10)' }}
-        >
-          <div className="mx-auto max-w-[1200px] px-6 lg:px-8">
-            <div className="flex items-center gap-3 mb-4">
-              <span className="h-px w-8 opacity-50" style={{ background: '#C4912E' }} />
-              <span className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: '#C4912E' }}>Live with pilot clients</span>
-            </div>
-            <h2
-              className="text-4xl font-semibold tracking-tight lg:text-5xl"
-              style={{ fontFamily: 'var(--font-display, "Space Grotesk"), sans-serif', letterSpacing: '-0.02em' }}
-            >
-              Running today across AU &amp; NZ.
-            </h2>
-            <div className="mt-10 grid gap-5 lg:grid-cols-[1.5fr_1fr_1fr]">
-              <div
-                className="rounded-2xl p-8"
-                style={{ background: '#fff', border: '1px solid rgba(26,26,26,0.10)', boxShadow: '0 1px 2px rgba(26,26,26,.04), 0 8px 28px rgba(26,26,26,.06)' }}
-              >
-                <p className="text-base leading-relaxed" style={{ color: 'rgba(26,26,26,0.72)', fontStyle: 'italic' }}>
-                  "Magic Engine isn't a tool you buy and operate alone — Magic Lab runs it as your external AI content team, against an annual visibility build, not a monthly subscription."
-                </p>
-                <div className="mt-6 flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold" style={{ background: 'linear-gradient(135deg, #EBCB8B 0%, #C4912E 100%)', color: '#2A2008' }}>ML</div>
-                  <div>
-                    <p className="text-sm font-semibold">Magic Lab</p>
-                    <p className="text-xs" style={{ color: 'rgba(26,26,26,0.55)' }}>Your external AI content operations team</p>
-                  </div>
-                </div>
-              </div>
-              {[
-                { initials: 'CT', name: 'CTS Tours NZ', role: 'Travel & tourism · New Zealand · pilot', body: 'GEO + SEO + Ads. Full execution loop live, with Meta ad data connected and AI visibility tracked weekly.' },
-                { initials: 'OZ', name: 'Oztop', role: 'Local business · Australia · pilot', body: 'SEO + GEO. Dual-signal blogs and AI-recommendation instructions building search and AI-answer visibility.' },
-              ].map(p => (
-                <div
-                  key={p.name}
-                  className="rounded-2xl p-7"
-                  style={{ background: '#fff', border: '1px solid rgba(26,26,26,0.10)' }}
-                >
-                  <p className="text-sm leading-relaxed" style={{ color: 'rgba(26,26,26,0.72)', fontStyle: 'italic' }}>&ldquo;{p.body}&rdquo;</p>
-                  <div className="mt-5 flex items-center gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold" style={{ background: 'rgba(196,145,46,0.15)', color: '#A6781F' }}>{p.initials}</div>
-                    <div>
-                      <p className="text-sm font-semibold">{p.name}</p>
-                      <p className="text-xs" style={{ color: 'rgba(26,26,26,0.55)' }}>{p.role}</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
+            <div className="mt-8">
+              <WaitlistForm />
             </div>
           </div>
         </section>
 
         {/* ── FAQ ── */}
-        <section id="faq" className="py-20 sm:py-28">
-          <div className="mx-auto max-w-[1200px] px-6 lg:px-8">
-            <div className="flex items-center gap-3 mb-4">
+        <section id="faq" className="border-t py-20 sm:py-24" style={{ borderColor: 'rgba(26,26,26,0.10)' }}>
+          <div className="mx-auto max-w-[1080px] px-6 lg:px-8">
+            <div className="mb-4 flex items-center gap-3">
               <span className="h-px w-8 opacity-50" style={{ background: '#C4912E' }} />
               <span className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: '#C4912E' }}>FAQ</span>
             </div>
-            <h2
-              className="text-4xl font-semibold tracking-tight"
-              style={{ fontFamily: 'var(--font-display, "Space Grotesk"), sans-serif', letterSpacing: '-0.02em' }}
-            >
+            <h2 className="text-4xl font-semibold tracking-tight" style={{ fontFamily: DISPLAY, letterSpacing: '-0.02em' }}>
               Questions people ask before they reach out.
             </h2>
-            <div className="mt-8 grid gap-3 max-w-3xl">
+            <div className="mt-8 grid max-w-3xl gap-3">
               {faqs.map(faq => (
                 <details
                   key={faq.question}
                   className="group rounded-xl border p-5"
                   style={{ background: '#fff', borderColor: 'rgba(26,26,26,0.10)' }}
                 >
-                  <summary className="cursor-pointer list-none text-base font-semibold" style={{ fontFamily: 'var(--font-display, "Space Grotesk"), sans-serif' }}>
+                  <summary className="cursor-pointer list-none text-base font-semibold" style={{ fontFamily: DISPLAY }}>
                     {faq.question}
                   </summary>
                   <p className="mt-3 text-sm leading-relaxed" style={{ color: 'rgba(26,26,26,0.65)' }}>{faq.answer}</p>
@@ -647,61 +442,18 @@ export default async function HomePage() {
           </div>
         </section>
 
-        {/* ── CTA STRIP ── */}
-        <section className="py-20" style={{ background: '#0D0D0D' }}>
-          <div className="mx-auto max-w-[1200px] px-6 text-center lg:px-8">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: '#EBCB8B' }}>
-              Get started
-            </p>
-            <h2
-              className="mt-4 text-4xl font-semibold text-white lg:text-5xl"
-              style={{ fontFamily: 'var(--font-display, "Space Grotesk"), sans-serif', letterSpacing: '-0.02em' }}
-            >
-              Ready to see what's possible?
-            </h2>
-            <p className="mt-4 text-lg max-w-xl mx-auto" style={{ color: 'rgba(251,248,243,0.62)' }}>
-              Free diagnosis, no commitment. We map your visibility gaps and show you the first 3 actions that move the needle.
-            </p>
-            <div className="mt-8 flex flex-wrap justify-center gap-3">
-              <Link
-                href="/contact"
-                className="inline-flex h-12 items-center gap-2 rounded-xl px-6 text-sm font-semibold transition-all hover:-translate-y-0.5"
-                style={{
-                  background: 'linear-gradient(135deg, #EBCB8B 0%, #C4912E 55%, #A6781F 100%)',
-                  color: '#2A2008',
-                  boxShadow: '0 18px 50px rgba(196,145,46,.22)',
-                }}
-              >
-                Get free diagnosis
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M5 12h14M13 6l6 6-6 6" />
-                </svg>
-              </Link>
-              <Link
-                href="/portal/login"
-                className="inline-flex h-12 items-center rounded-xl border px-6 text-sm font-semibold transition-colors hover:bg-white/10"
-                style={{ borderColor: 'rgba(251,248,243,0.18)', color: 'rgba(251,248,243,0.85)' }}
-              >
-                View client portal
-              </Link>
-            </div>
-          </div>
-        </section>
-
         {/* ── FOOTER ── */}
         <footer style={{ borderTop: '1px solid rgba(26,26,26,0.10)', background: '#fff' }}>
-          <div className="mx-auto flex max-w-[1200px] flex-col items-center justify-between gap-5 px-6 py-8 text-sm sm:flex-row lg:px-8" style={{ color: 'rgba(26,26,26,0.55)' }}>
+          <div className="mx-auto flex max-w-[1080px] flex-col items-center justify-between gap-5 px-6 py-8 text-sm sm:flex-row lg:px-8" style={{ color: 'rgba(26,26,26,0.55)' }}>
             <div className="flex items-center gap-2.5">
               <MeLogo size={28} />
-              <span style={{ fontFamily: 'var(--font-display, "Space Grotesk"), sans-serif', fontWeight: 600, fontSize: 14 }}>
+              <span style={{ fontFamily: DISPLAY, fontWeight: 600, fontSize: 14 }}>
                 Magic Engine
               </span>
               <span className="ml-2">© {new Date().getFullYear()} Magic Lab. All rights reserved.</span>
             </div>
             <nav className="flex flex-wrap justify-center gap-5 text-sm">
               <Link href="/about" className="hover:text-[#1A1A1A] transition-colors">About</Link>
-              <Link href="/geo" className="hover:text-[#1A1A1A] transition-colors">GEO</Link>
-              <Link href="/training" className="hover:text-[#1A1A1A] transition-colors">Training</Link>
               <Link href="/privacy" className="hover:text-[#1A1A1A] transition-colors">Privacy Policy</Link>
               <Link href="/terms" className="hover:text-[#1A1A1A] transition-colors">Terms of Service</Link>
               <Link href="/contact" className="hover:text-[#1A1A1A] transition-colors">Contact</Link>
