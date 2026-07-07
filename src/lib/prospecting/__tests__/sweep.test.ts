@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { pickStage, leastCoveredCombo, buildCombos, type Combo } from '../sweep'
+import { describe, it, expect, afterEach } from 'vitest'
+import { pickStage, leastCoveredCombo, buildCombos, sweepIndustries, FOCUS_INDUSTRIES, type Combo } from '../sweep'
 
 describe('pickStage — drain the pipeline before pulling more in', () => {
   it('audits first when raw discoveries are waiting', () => {
@@ -25,12 +25,46 @@ describe('pickStage — drain the pipeline before pulling more in', () => {
 })
 
 describe('buildCombos', () => {
-  it('covers only NZ cities (NZ market first) × every industry', () => {
-    const combos = buildCombos()
+  it('covers only NZ cities (NZ market first) × the focus industries', () => {
+    const combos = buildCombos([...FOCUS_INDUSTRIES])
     const cities = new Set(combos.map(c => c.city))
     expect(cities).toEqual(new Set(['auckland', 'wellington', 'christchurch', 'hamilton']))
-    // 18 industries × 4 NZ cities
-    expect(combos.length).toBe(18 * 4)
+    // 8 focus industries × 4 NZ cities
+    expect(combos.length).toBe(FOCUS_INDUSTRIES.length * 4)
+  })
+
+  it('excludes foreign-market-skewed industries from the first wave', () => {
+    const industries = new Set(buildCombos([...FOCUS_INDUSTRIES]).map(c => c.industry))
+    expect(industries.has('education_consultants')).toBe(false)
+    expect(industries.has('travel_agencies')).toBe(false)
+  })
+
+  it('drops unknown industry keys instead of seeding a labelless search', () => {
+    const combos = buildCombos(['plumbers', 'not_a_real_industry'])
+    expect(new Set(combos.map(c => c.industry))).toEqual(new Set(['plumbers']))
+  })
+})
+
+describe('sweepIndustries — env override', () => {
+  const original = process.env.SWEEP_INDUSTRIES
+  afterEach(() => {
+    if (original === undefined) delete process.env.SWEEP_INDUSTRIES
+    else process.env.SWEEP_INDUSTRIES = original
+  })
+
+  it('defaults to the focus list when the env is unset', () => {
+    delete process.env.SWEEP_INDUSTRIES
+    expect(sweepIndustries()).toEqual([...FOCUS_INDUSTRIES])
+  })
+
+  it('honours a valid comma-separated override, dropping unknown keys', () => {
+    process.env.SWEEP_INDUSTRIES = 'dentists, lawyers , not_real'
+    expect(sweepIndustries()).toEqual(['dentists', 'lawyers'])
+  })
+
+  it('falls back to the focus list when the override has no valid keys', () => {
+    process.env.SWEEP_INDUSTRIES = 'not_real, also_fake'
+    expect(sweepIndustries()).toEqual([...FOCUS_INDUSTRIES])
   })
 })
 

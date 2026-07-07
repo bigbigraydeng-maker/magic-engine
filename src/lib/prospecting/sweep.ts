@@ -42,11 +42,52 @@ export function pickStage(counts: QueueCounts, analyzeAllowed = true): SweepStag
 
 export interface Combo { industry: string; city: string }
 
-/** Every industry × NZ-city seed pair (NZ market first). */
-export function buildCombos(): Combo[] {
+/**
+ * First-wave focus list. The full catalogue in INDUSTRY_SEARCH_LABEL stays
+ * intact; the sweep only *discovers* from these until we widen it. This is the
+ * visual / renovation / local-trade cluster where our fastest SOP levers
+ * (leak-fix + review engine + GBP + Meta video) all land, so the first
+ * outreach wave has the strongest, fastest-to-results story.
+ *
+ * Deliberately excluded here (present in the catalogue but not swept):
+ *   - education_consultants / travel_agencies — skew to foreign / non-English
+ *     markets, failing the "must serve NZ local English customers" rule.
+ *   - dentists / cosmetic_clinics / lawyers / mortgage_brokers / accountants /
+ *     hvac / solar — fine businesses, held for a second wave with tailored
+ *     angles; widen via SWEEP_INDUSTRIES when ready.
+ */
+export const FOCUS_INDUSTRIES = [
+  'kitchen_renovation', 'bathroom_renovation', 'builders', 'landscaping',
+  'roofing', 'flooring', 'electricians', 'plumbers',
+] as const
+
+/**
+ * Active discover allow-list: the SWEEP_INDUSTRIES env (comma-separated
+ * industry keys) overrides the focus list, so a second wave opens up with an
+ * env change and no deploy. Unknown keys are dropped; an empty/all-invalid
+ * override falls back to FOCUS_INDUSTRIES rather than sweeping nothing.
+ */
+export function sweepIndustries(): string[] {
+  const raw = process.env.SWEEP_INDUSTRIES
+  if (raw) {
+    const picked = raw.split(',').map(s => s.trim()).filter(Boolean)
+      .filter(k => k in INDUSTRY_SEARCH_LABEL)
+    if (picked.length > 0) return picked
+  }
+  return [...FOCUS_INDUSTRIES]
+}
+
+/**
+ * Every active industry × NZ-city seed pair (NZ market first). `industries`
+ * defaults to the env-resolved allow-list; tests pass an explicit list to stay
+ * deterministic. Unknown industry keys are skipped so a stale env value can't
+ * inject a seed with no Places search label.
+ */
+export function buildCombos(industries: string[] = sweepIndustries()): Combo[] {
   const cities = Object.keys(CITY_COORDS).filter(c => CITY_COORDS[c].country === 'NZ')
   const combos: Combo[] = []
-  for (const industry of Object.keys(INDUSTRY_SEARCH_LABEL)) {
+  for (const industry of industries) {
+    if (!(industry in INDUSTRY_SEARCH_LABEL)) continue
     for (const city of cities) combos.push({ industry, city })
   }
   return combos
