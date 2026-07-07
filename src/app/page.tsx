@@ -87,7 +87,7 @@ const homepageStructuredData = {
       name: 'Magic Engine',
       url: siteUrl,
       description: pageDescription,
-      areaServed: ['Auckland', 'New Zealand', 'Australia'],
+      areaServed: ['Auckland', 'New Zealand'],
     },
     {
       '@type': 'WebSite',

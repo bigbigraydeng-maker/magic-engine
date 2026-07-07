@@ -144,12 +144,13 @@ export default function OutreachQueue() {
   }
 
   // Public report link for this prospect. Base is the report host — falls back
-  // to the main site; set NEXT_PUBLIC_REPORT_BASE_URL to point cold-outreach
-  // report links at a separate outreach domain.
+  // to the outreach domain (.cloud — a .com.au link reads wrong to NZ
+  // recipients); set NEXT_PUBLIC_REPORT_BASE_URL once the custom domain is
+  // attached in Render.
   function reportUrlFor(card: QueueCard): string {
     const base = process.env.NEXT_PUBLIC_REPORT_BASE_URL
       || process.env.NEXT_PUBLIC_SITE_URL
-      || 'https://magicengine.com.au'
+      || 'https://magicengine.cloud'
     return `${base.replace(/\/$/, '')}/report/${card.id}`
   }
 
@@ -160,8 +161,10 @@ export default function OutreachQueue() {
     if (!footer) { setError('合规落款未加载，请刷新页面后再复制'); return }
     // Body → full report link → compliance footer. The link lets the reader
     // see every finding in the branded report without the email carrying an
-    // attachment (which cold recipients won't open).
-    const fullText = `Subject: ${card.outreach_email.subject}\n\n${card.outreach_email.body}\n\nSee the full breakdown here: ${reportUrlFor(card)}\n\n${footerFor(card)}`
+    // attachment (which cold recipients won't open). The link line says what
+    // it is and that it's safe — a bare URL in a cold email reads as
+    // suspicious (PM feedback 2026-07-07).
+    const fullText = `Subject: ${card.outreach_email.subject}\n\n${card.outreach_email.body}\n\nEverything we found is on one page here — no login, nothing to download, just a web page:\n${reportUrlFor(card)}\n\n${footerFor(card)}`
     try {
       await navigator.clipboard.writeText(fullText)
     } catch {

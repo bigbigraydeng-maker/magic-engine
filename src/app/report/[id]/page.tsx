@@ -107,7 +107,7 @@ export default async function ReportPage({ params }: { params: { id: string } })
   const social = p.ai_report?.social_activity
 
   const keyFinding = report.summary_points[0] ?? ''
-  const mailto = `mailto:${process.env.OUTREACH_REPLY_EMAIL ?? 'hello@magicengine.com.au'}` +
+  const mailto = `mailto:${process.env.OUTREACH_REPLY_EMAIL ?? 'hello@magicengine.cloud'}` +
     `?subject=${encodeURIComponent(`Health check chat — ${p.business_name}`)}`
 
   const stats: Array<{ v: string; label: string }> = []
@@ -381,7 +381,7 @@ export default async function ReportPage({ params }: { params: { id: string } })
         </section>
 
         <footer className="mt-8 text-xs leading-relaxed" style={{ color: 'rgba(26,26,26,0.4)' }}>
-          <p>Magic Engine · Digital marketing for AU/NZ local businesses</p>
+          <p>Magic Engine · Auckland, New Zealand</p>
           <p className="mt-1">
             We put this together after coming across {p.business_name} in your public Google Business
             listing. Not happy to hear from us? Just reply &ldquo;no thanks&rdquo; and we won&apos;t be in touch again.

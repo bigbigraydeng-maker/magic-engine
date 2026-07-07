@@ -54,8 +54,8 @@ export interface OutreachInput {
 export function senderIdentity(): { name: string; company: string; website: string; configured: boolean } {
   return {
     name:    process.env.OUTREACH_SENDER_NAME ?? 'The Magic Engine Team',
-    company: process.env.OUTREACH_SENDER_COMPANY ?? 'Magic Engine · Digital marketing for AU/NZ local businesses',
-    website: process.env.OUTREACH_WEBSITE ?? 'magicengine.com.au',
+    company: process.env.OUTREACH_SENDER_COMPANY ?? 'Magic Engine · Auckland, New Zealand',
+    website: process.env.OUTREACH_WEBSITE ?? 'magicengine.cloud',
     // "The X Team" signatures read as bulk mail — the console warns until a
     // real person's name is configured.
     configured: Boolean(process.env.OUTREACH_SENDER_NAME),
@@ -68,14 +68,17 @@ export function senderIdentity(): { name: string; company: string; website: stri
  * `{{business_name}}` is substituted per prospect at render/copy time.
  * The opt-out promise is backed by the `opted_out` terminal status: those
  * rows never re-enter the queue and discover-dedup blocks re-import.
+ * Opens with "Cheers," so the body flows into a natural sign-off instead of
+ * a name appearing out of nowhere (PM feedback 2026-07-07).
  */
 export function complianceFooter(businessName = '{{business_name}}'): string {
   const { name, company, website } = senderIdentity()
   return [
-    '—',
+    'Cheers,',
     name,
     company,
     website,
+    '',
     `We came across ${businessName} through your public Google Business listing — this is a one-off note, ` +
     `not a mailing list. If it's not for you, just reply "no thanks" and you won't hear from us again.`,
   ].join('\n')
@@ -99,16 +102,19 @@ const ANGLE_BRIEFS: Record<ProspectSegment, string> = {
 
 // ─── Generation ───────────────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `You write short cold-outreach emails for Magic Engine, a digital upgrade service for Australian and New Zealand local businesses. Rules:
-- Australian/New Zealand English — match the recipient's country in spelling and idiom. Warm, plain, tradie-friendly. No marketing buzzwords (avoid "digital presence", "leverage", "solutions"), no exclamation marks, no emoji.
-- 90-130 words body. Short paragraphs. At most one bulleted list of 2-3 findings.
+const SYSTEM_PROMPT = `You write short cold-outreach emails for Magic Engine, an Auckland-based digital upgrade service for New Zealand local businesses. Rules:
+- New Zealand English. Warm, plain, tradie-friendly. No marketing buzzwords (avoid "digital presence", "leverage", "solutions"), no exclamation marks, no emoji.
+- 110-160 words body. Short paragraphs. At most one bulleted list of 2-3 findings.
+- Structure, strictly in this order:
+  1. Greeting on its own line: "Hi {owner first name}," if provided, otherwise "Hi there,".
+  2. Introduce yourself and why you're writing BEFORE any findings, in one or two lines: the sender (first name, from Magic Engine, an Auckland-based team) is taking on the first 100 Auckland local businesses this year at founding pricing, and while shortlisting businesses in their trade ran a free digital health check on theirs. The reader must know who is talking and why before hearing anything about their business — otherwise it feels like surveillance.
+  3. One warm line acknowledging their strong reputation (use the HOOK, lightly smoothed).
+  4. 2-3 findings from EVIDENCE.
+  5. Soft close: a no-pressure line and one question they can answer with a single word. Do NOT write a sign-off or name — it is appended separately.
 - Every factual claim must come from the EVIDENCE section — never invent numbers, tools, or findings. You may lightly reword an evidence line for flow, but keep every business name, competitor name, and number exactly as written.
-- Open with the provided hook sentence (you may lightly smooth it). Address the owner by first name if provided, otherwise no name.
-- Close with a soft, no-pressure offer of the free full report and one question they can answer with a single word.
 - Never promise or imply any outcome — rankings, leads, enquiries, calls, customers, growth, or revenue. State findings only; let the reader draw their own conclusions.
 - Never reveal that WE used AI or automated tools to research them — say "we had a look at". You MAY mention that customers use tools like ChatGPT to find businesses; that is a fact about the market, not about us, and you may add one plain-language line like "more and more people ask ChatGPT instead of Googling these days".
 - Subject line: under 60 characters, specific and honest, mentions their business or trade, no clickbait, sentence case.
-- Do NOT add a signature or footer — it is appended separately.
 Respond with a single JSON object, no markdown: {"subject": string, "body": string}`
 
 const TITLE_WORDS = new Set(['mr', 'mrs', 'ms', 'dr', 'dr.', 'director', 'owner', 'founder', 'manager'])
@@ -145,6 +151,8 @@ export function buildOutreachPrompt(input: OutreachInput): string {
   const r = input.ai_report
   const city = input.city.replace(/_/g, ' ')
   const trade = input.industry.replace(/_/g, ' ')
+  const identity = senderIdentity()
+  const senderFirst = identity.configured ? identity.name.split(/\s+/)[0] : 'the team'
   const hook = r.email_hook ||
     `You've clearly built a solid reputation in ${city} — ${input.review_count ?? 'that many'} reviews at ${input.rating ?? '—'}★ doesn't happen by accident.`
 
@@ -158,6 +166,7 @@ export function buildOutreachPrompt(input: OutreachInput): string {
       'ANGLE: Lead with where enquiries are quietly slipping away — this business gets found but loses ready customers before they get in touch. Warm and concrete, not alarmist. Frame it as things worth a quick look, not failures.',
       `BUSINESS: ${input.business_name} — ${trade} in ${city}, ${input.country}`,
       `OWNER FIRST NAME: ${sanitiseOwnerName(r.owner_name, input.business_name) ?? 'unknown'}`,
+      `SENDER FIRST NAME: ${senderFirst}`,
       `HOOK SENTENCE: ${hook}`,
       'EVIDENCE — where enquiries may be leaking (use 2-3, keep names and numbers exact):',
       ...leaks.map(p => `- ${p}`),
@@ -169,6 +178,7 @@ export function buildOutreachPrompt(input: OutreachInput): string {
     `ANGLE: ${ANGLE_BRIEFS[r.segment] ?? ANGLE_BRIEFS.general}`,
     `BUSINESS: ${input.business_name} — ${trade} in ${city}, ${input.country}`,
     `OWNER FIRST NAME: ${sanitiseOwnerName(r.owner_name, input.business_name) ?? 'unknown'}`,
+    `SENDER FIRST NAME: ${senderFirst}`,
     `HOOK SENTENCE: ${hook}`,
     `EVIDENCE — problems we can name:`,
     ...(r.top_problems.length ? r.top_problems.map(p => `- ${p}`) : ['- (none — keep the email generic and lead with the free report)']),
