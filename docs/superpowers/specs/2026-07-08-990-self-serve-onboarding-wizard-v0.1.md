@@ -1,5 +1,9 @@
 # $990 自助 Onboarding 向导 · spec v0.1（草案 · 待 3 审）
 
+> **v1 已实现（2026-07-08 夜，commit 53b99ffa）**：向导页 `/dashboard/clients/[id]/onboarding` + `GET onboarding/status`（推进度）+ `POST onboarding/complete`（Step5 服务端触发诊断，修那个堵点）。5 步全接现有路由，26 测试过、tsc 干净、Cloudflare build 绿。
+> **⚠️ 激活开关未翻**（故意）：新注册仍落 `/brief`。要让向导成落地页，改 `src/lib/auth/self-serve-routing.ts` 的 `buildBriefPath` → `/onboarding`（一行）。留待 PM 在预览 URL 亲验向导后再翻——翻了每个真实新注册都走此向导，不宜未 live 测就默认启用。
+> **仍待办**：per-step 跳过/求助的独立持久化（需 migration，PM 拍）· 服务城市字段写入路径 · $99 前移销售话术（非代码）· 放量前的成本 DoS DB 原子锁（见 §7.1）。
+
 > 起草：2026-07-08（子牙）。**状态：草案，未拍板、未动手。** 需子牙(架构) + 魏征(挑刺) + 板桥(C 端客户视角) 三审 + PM 拍板后才进实现。
 >
 > 派生自：[$990 增长引擎启动包 spec](./2026-07-07-990-growth-engine-package-v1.md)（服务边界事实源）。本文只定义**自助 onboarding 采集环节**的产品形态，不改服务边界。
