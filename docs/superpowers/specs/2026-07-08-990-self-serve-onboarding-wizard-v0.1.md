@@ -16,14 +16,19 @@
 
 > **实测结论（2026-07-08 亲测）**：`/portal/*` 是死代码（layout 无条件重定向 + middleware 308），自助客户实际生活在 `/dashboard/clients/[id]/*`，按 tier 门控。所以向导是 **dashboard 路由**，不是 portal 页。
 
-## 1. 🔴 前置 BLOCKER（不解决向导无意义 · 必须 PM 先拍）
+## 1. ✅ D1 前置 BLOCKER — 已修复（2026-07-08，四审通过）
 
-**自助客户当前被守卫挡在连接器门外。** 连接器 `POST /api/clients/[id]/connectors/[anchor]/connect` 与 `GET .../status` 用 `requirePaidClientAccess` → `self_serve` tier 直接 **403 `paid_only`**。而素材上传 `/api/clients/[id]/assets` 用 `requireDashboardClientAccess`（self_serve 可过）。**门控不一致，且"绑定账户"这一 onboarding 核心动作对 $990 客户今天是死的。**
+原问题：`self_serve` 被 `requirePaidClientAccess` 挡在连接器 + 绑定路由外，"绑定账户"这一 onboarding 核心动作对 $990 客户是死的。
 
-- **决策点 D1**：是否放开 `self_serve` 走连接器 connect/status？
-  - 该守卫是 paid-only **有历史原因**（注释引用过一次真实数据泄露：self_serve 曾能看 `/dashboard/content`、`/dashboard/visuals` 聚合数据）。**不能简单翻标志位。**
-  - 推荐路径：**新增 `requireOnboardingClientAccess(clientId)`**——允许 `self_serve` **仅**访问 onboarding 必需的连接/上传/档案写入路由（connect/status/assets/{field} 对称路由），但**不**放开聚合数据页。即"能配自己的，看不到别人的、也看不到 paid-only 聚合视图"。
-  - 这一步触碰**鉴权/隔离核心** → 按 CLAUDE.md 必须 **狄仁杰实施后攻击验证**。
+**已落地修复**（commit a6a4f150 + f8caaa3a）：
+- 新增 `requireOnboardingClientAccess(clientId)`——放行 admin/paid_client/**self_serve**，隔离与 `requireDashboardClientAccess` 完全一致（只能碰自己 client），**不**触碰 paid-only 聚合页。
+- 守卫替换清单（**6 个路由**，四审子牙纠正了初版"半修"——只改 2 个漏了真正绑数据的 4 个）：
+  `connectors/[anchor]/connect` · `connectors/status` · **`gsc/sites`** · **`gsc/sync`** · **`ga4/sync`** · **`platform/gbp`**
+- Step 2 域名写入：**新增窄路由 `PATCH /api/clients/[id]/domain`**（onboarding 守卫，只允许写 `domain`）。主表 PATCH 仍 admin-only（它能改 `plan_tier`/`monthly_mtc_cap` 计费字段，绝不放给自助客户）。
+- **成本 DoS 防护**（狄仁杰/魏征 H1）：`startAdvancedDiscovery` 加 in-flight 去重（已有 pending/running 的 advanced job 就复用），self_serve 无法靠狂点 connect 刷爆外部 API 预算。
+- anchor 路径参数白名单校验（防脏数据入 `client_connectors`）。
+- 顺手补 `brief/route.ts` GET/PUT 的裸奔越权洞（独立 commit）。
+- 狄仁杰攻击验证：SAFE（无 IDOR、无提权、无回归）；测试变异验证过（魏征）。22/22 auth+dedup 测试通过。
 
 ## 2. 向导步骤（5 步 · 全部复用已有路由，零新表优先）
 
@@ -32,19 +37,35 @@
 | 步 | 标题 | 客户做什么 | 复用的后端 | 写入 |
 |---|---|---|---|---|
 | 1 | 生意档案 | 确认/补全 名称·行业·服务城市·主关键词 | light-brief + primary-keywords 路由 | `clients.brief_fields` / `brief_completed_at` / `primary_keywords` |
-| 2 | 网站 | 填域名；无网站 → 触发 $99 单页站分支（转 FDE 队列） | `PATCH /api/clients/[id]`（domain） | `clients.domain` |
-| 3 | 连接账户 | GBP（真 OAuth）· GA4/GSC（真 OAuth）· Meta（标记+手填 ad account） | google/gbp OAuth + connectors/connect | `platform_oauth_connections` / `client_connectors` / `meta_ad_account_id` |
+| 2 | 网站 | 填域名；无网站 → **$99 单页站分支（必须签约时已谈妥，见 §3.1）** | **新窄路由 `PATCH /api/clients/[id]/domain`** | `clients.domain` |
+| 3 | 连接账户 | GBP（真 OAuth）· GA4/GSC（**有则连、没有则"我们帮你建"**）· Meta（标记+手填 ad account，仅种草轨） | google/gbp OAuth + connectors/connect + gsc/ga4/platform 路由（均已 onboarding 守卫） | `platform_oauth_connections` / `client_connectors` / `meta_ad_account_id` |
 | 4 | 上传素材 | logo · 作品照 · 老客户名单（评价引擎用） | `POST /api/clients/[id]/assets`（已允许 self_serve） | `client_assets`（bucket `visual-assets`） |
-| 5 | 完成 | 确认提交 → 触发首次诊断 + 通知 FDE「已自助 onboard，可上门/远程复核」 | 诊断 runner + 通知 | `onboarding_completed_at` |
+| 5 | 完成 | 确认提交 → 触发首次诊断 + 通知 FDE「已自助 onboard，看哪几步没走完 → 上门重点补」 | 诊断 runner + 通知 | `onboarding_completed_at` |
 
-**Step 3 诚实边界（板桥红线）**：只有 GBP/GA4/GSC 是真「一键授权」；Meta/Google-Ads 是「填账户 ID + 标记连接」，UI 文案不能写成"一键授权 Meta"，要写"填入你的 Meta 广告账户 ID / 授权我们的商务权限"。
+**Step 3 硬规则（板桥红线，四审确立）**：
 
-## 3. 上门 kickoff 的定位（B2 不破）
+1. **GA4/GSC 必须按"有/没有"分叉**（spec 内部矛盾修复）：$990 客户多半**没有** GA4/GSC（是我们帮建的交付项，见 SOP 权限分级）。所以默认**不显示"连接"按钮**，显示：「网站访问数据工具你多半还没有——这是我们帮你免费装好的其中一项，现在跳过就行。」**只有**已检测到客户已有账户时才显示"连接"。**绝不能**让没有 GA4 的老板去点"连接一个你没有的东西"。
+2. **Meta/Google-Ads 严禁写"一键授权"**：写「有 Facebook 广告账户?填一下账户编号（一串数字）+ 授权投放权限。还没有?正常，上门帮你开。」
+3. **每个平台都要有「👉 我搞不定 / 不知道账号 → 上门那天帮我连」按钮**：点了**不算失败、不 block、直接把这项写进 FDE 上门清单**（skip = 主动登记求助，不是静默跳过）。这需要一个轻量 skip 标记（见 §4 per-step 状态）。
 
-自助向导是**主路**，不是取代上门。水电/屋顶老板很多搞不定 OAuth → **「自助优先 + 上门兜底」**：
-- 能自己走完的：省 FDE 工时。
-- 卡在 Step 3 授权的：FDE 上门那一次（B2 承诺）当场帮连。
-- 向导 Step 5 完成通知 FDE，FDE 看哪些步骤客户没走完 → 上门重点补哪几步。
+### 3.1 $99 单页站岔口（板桥高危骂街点）
+
+**$99 绝不能是老板在无人屏幕上第一次看到。** 老板签的是 $990，向导里突然弹"再付 $99" = 100% 觉得被 bait → 退款/差评。
+
+- **筛选前移到签约**：冷邮件/销售话术/签约对话必须先问"你有没有网站?"，无网站的当面讲清"$99 单页站是门票"。
+- **向导只做"已知确认"，不做"首次告知"**：Step 2 若签约已知无网站，文案是「我们说好的 $99 单页站，建在**你自己域名**下，这是你的资产 →」。
+
+## 3. 定位（板桥纠正：上门为主，自助压缩上门时长）
+
+⚠️ **初版把帽子戴反了。** 对奥克兰小 trades 老板，现实是**上门帮连才是主路**（反正 B2 承诺每客户至少上门一次，顺手连账户本就在计划内），自助向导真正能省的是 Step 1/2/4（档案/域名/素材）——**Step 3 授权老实说主要靠上门**（板桥估真自助率 <10%）。
+
+正确定位：**「上门为主路，自助压缩上门时长」**。老板上门前把能填的先填好，上门那趟只干"连不了的账户"这一件硬活。
+
+**🔴 工时红线警告（B5）**：**必须**按"上门为主"重估 onboarding 工时，别按"自助率高"估——否则系统性低估。一个卡在 Step 3 的老板，上门现场帮连 GBP（还得先找回登录权）+ 找 Meta ID + 装 GA4 + 装表单，轻松吃 **3–5 小时** + 奥克兰堵车。100 家全这样，**光 onboarding 就吃掉 15h 红线的 1/3~1/2**。产品/运营的工时模型全部按此算，15h 才守得住。
+
+## 3.2 轨道升级衔接（板桥补：self_serve → paid_client）
+
+$990 客户 90 天后续约月付时，`access_type` 从 `self_serve` 翻 `paid_client`，权限要求从"轻"升到 FDE 轨硬门槛（GA4 Editor 必给）。**谁在何时翻、怎么跟客户解释"$990 时没要、现在要"**——两份 SOP 都要补一段"轨道升级 checklist"。**高工时预警客户**（无网站 + 种草轨 + 搞不定自助 三重叠加）签约时就识别出来，调预期或调定价。
 
 ## 4. 复用 vs 新建（省人工排序）
 
@@ -69,8 +90,18 @@
 - 不改 $990 服务边界（那是 v1 spec 的事）。
 - 不替代上门 kickoff。
 
-## 7. 待 PM / 审查决策
+## 7. 决策状态（四审后更新）
 
-- **D1**（头号）：放开 self_serve 走 onboarding 连接器的方式 = 新守卫 `requireOnboardingClientAccess`？还是别的隔离方案？（狄仁杰必审）
-- **D2**：per-step 完成勾选存哪（跟 PR #533 决策合并）？
-- **D3**：向导是否 hard-gate（没走完不给用其他功能）还是 resumable 软引导？（板桥倾向软引导）
+- **D1** ✅ 已定 + 已修：新守卫 `requireOnboardingClientAccess`，6 路由放开 + 域名窄路由 + 成本 DoS 去重，狄仁杰验过 SAFE。
+- **D2** per-step 勾选 → 子牙定：**向导 v1 用纯推理发货（字段有值即完成，零新表），不被 PR #533 拖住**。唯一推不出的是"主动跳过 vs 还没做"——skip 标记作 fast-follow（若 #533 是同一持久化原语可合并，否则单开 `onboarding_steps_skipped jsonb`，PM 拍 migration）。§2 Step 3 的"搞不定→上门"按钮依赖这个 skip 标记。
+- **D3** → 子牙+板桥共识：**resumable 软引导**（可跳过、可回来续，不 hard-gate）。
+- **待确认（子牙）**：Step 1 的"服务城市"落哪个字段？`light-brief` 只写 company_name/industry/target_audience/... **不含服务城市**；主关键词走独立 `primary-keywords` 路由。实现前钉死写入路径，别留没有后端的输入框。
+
+## 8. 四审结论（2026-07-08）
+
+| 审 | 结论 | 已纳入 |
+|---|---|---|
+| 子牙(架构) | APPROVE-WITH-CHANGES | D1 半修→补 6 路由+域名路由；docstring 诚实化；纯推理发货；服务城市待确认 |
+| 魏征(挑刺) | APPROVE-WITH-CHANGES | 成本 DoS 去重；anchor 白名单；500 边界测试 |
+| 板桥(C 端) | 方向对·改 5 处 | Step3 GA4/GSC 分叉；搞不定按钮；上门为主重估工时；$99 前移签约；轨道升级 checklist |
+| 狄仁杰(攻击) | SAFE-WITH-CAVEATS→已补 | 成本 DoS + anchor 已修；隔离无洞 |
