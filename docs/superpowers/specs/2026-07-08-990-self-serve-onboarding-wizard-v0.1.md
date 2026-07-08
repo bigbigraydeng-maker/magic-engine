@@ -40,7 +40,9 @@
 | 2 | 网站 | 填域名；无网站 → **$99 单页站分支（必须签约时已谈妥，见 §3.1）** | **新窄路由 `PATCH /api/clients/[id]/domain`** | `clients.domain` |
 | 3 | 连接账户 | GBP（真 OAuth）· GA4/GSC（**有则连、没有则"我们帮你建"**）· Meta（标记+手填 ad account，仅种草轨） | google/gbp OAuth + connectors/connect + gsc/ga4/platform 路由（均已 onboarding 守卫） | `platform_oauth_connections` / `client_connectors` / `meta_ad_account_id` |
 | 4 | 上传素材 | logo · 作品照 · 老客户名单（评价引擎用） | `POST /api/clients/[id]/assets`（已允许 self_serve） | `client_assets`（bucket `visual-assets`） |
-| 5 | 完成 | 确认提交 → 触发首次诊断 + 通知 FDE「已自助 onboard，看哪几步没走完 → 上门重点补」 | 诊断 runner + 通知 | `onboarding_completed_at` |
+| 5 | 完成 | 确认提交 → 触发首次诊断 + 通知 FDE「已自助 onboard，看哪几步没走完 → 上门重点补」 | **见下方 🔴 Step5 堵点** | `onboarding_completed_at` |
+
+**🔴 Step 5 堵点（2026-07-08 完整链路走查发现，第三个半修）**：`diagnostic/run` 与 `diagnostic/runs` 是 `requirePaidClientAccess` → self_serve **403 撞墙**，自助客户走完 Step 1-4 却触发不了自己的 before 基线诊断。**修法不是翻守卫**——诊断跑 6 个外部采集器（与 advanced discovery 同属高成本），直接对 self_serve 放开 = 又开一个成本 DoS 面。**正确做法**：Step 5「提交完成」是一个**服务端动作**（专用 onboarding-complete 端点，onboarding 守卫）——内部用 service role 触发这一次诊断 + 复用去重/节流 + 通知 FDE；客户**不直接调** `diagnostic/run`，诊断对普通面板照旧付费门控。链路走查确认 Step 1-4 + OAuth 全通，仅此一处堵。
 
 **Step 3 硬规则（板桥红线，四审确立）**：
 
