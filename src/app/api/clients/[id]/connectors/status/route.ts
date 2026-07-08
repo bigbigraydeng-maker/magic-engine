@@ -4,13 +4,15 @@
  * Returns the list of connectors with live status from the client_connectors
  * table. Falls back to all-not_connected defaults if the client has no rows.
  *
- * Security: Bearer token (INTERNAL_API_KEY)
- * Reference: ROADMAP.md P8.10.S0.22
+ * Security: session-cookie via requireOnboardingClientAccess — self-serve
+ * clients need to see their own connector status during onboarding.
+ * Isolation is unchanged (caller can only read their own client's rows).
+ * Reference: ROADMAP.md P8.10.S0.22 · Phase B $990 self-serve onboarding
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requireOnboardingClientAccess } from '@/lib/auth/client-access'
 
 export const dynamic = 'force-dynamic'
 
@@ -87,7 +89,7 @@ export async function GET(
   { params }: { params: { id: string } },
 ): Promise<NextResponse> {
   const { id: clientId } = params
-  const access = await requirePaidClientAccess(clientId)
+  const access = await requireOnboardingClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status })
   }

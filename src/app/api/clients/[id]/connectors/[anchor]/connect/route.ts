@@ -8,12 +8,14 @@
  * Body: { config?: { page_url?: string } }
  * Returns: { success, advanced_job_id? }
  *
- * Security: session-cookie via requirePaidClientAccess
- * Reference: ROADMAP.md P8.10.S0.22
+ * Security: session-cookie via requireOnboardingClientAccess — self-serve
+ * clients must be able to connect their OWN accounts during onboarding.
+ * Isolation is unchanged (caller can only touch their own client).
+ * Reference: ROADMAP.md P8.10.S0.22 · Phase B $990 self-serve onboarding
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requireOnboardingClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getLatestDiscovery } from '@/lib/zhangqian/persistor'
 import { startAdvancedDiscovery } from '@/lib/zhangqian/start-advanced-discovery'
@@ -26,7 +28,7 @@ export async function POST(
   { params }: { params: { id: string; anchor: string } },
 ): Promise<NextResponse> {
   const { id: clientId, anchor } = params
-  const access = await requirePaidClientAccess(clientId)
+  const access = await requireOnboardingClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status })
   }
