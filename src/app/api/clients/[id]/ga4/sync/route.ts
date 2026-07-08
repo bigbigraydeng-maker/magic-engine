@@ -14,7 +14,7 @@
  * Returns: { success, snapshot_id, property_id, period_start, period_end,
  *             total_sessions, total_users, total_pageviews }
  *
- * Security: Bearer token (INTERNAL_API_KEY)
+ * Security: session cookie via requireOnboardingClientAccess (own client only)
  * Reference: ROADMAP.md P17.A.2
  */
 

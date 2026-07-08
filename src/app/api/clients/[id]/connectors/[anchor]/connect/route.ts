@@ -52,6 +52,21 @@ export async function POST(
     // No body or non-JSON; config stays null.
   }
 
+  // Was this connector ALREADY connected before this request? Advanced
+  // discovery is expensive (external API + LLM); it must fire only on the
+  // first connect of an anchor, never on every re-POST. Without this gate a
+  // self_serve client could loop "connect → wait for completion → connect
+  // again" to keep re-triggering full-price discovery runs (魏征/狄仁杰 D1
+  // re-review). The in-flight dedup in startAdvancedDiscovery only covers
+  // concurrent clicks; this covers the complete-then-retrigger loop.
+  const { data: prior } = await supabaseAdmin
+    .from('client_connectors')
+    .select('status')
+    .eq('client_id', clientId)
+    .eq('anchor', anchor)
+    .maybeSingle<{ status: string }>()
+  const wasConnected = prior?.status === 'connected'
+
   // Upsert connector status
   const now = new Date().toISOString()
   const { error: upsertError } = await supabaseAdmin
@@ -72,8 +87,8 @@ export async function POST(
     return NextResponse.json({ success: false, error: upsertError.message }, { status: 500 })
   }
 
-  // Trigger advanced discovery for supported connectors
-  if (!ADVANCED_DISCOVERY_TRIGGERS.has(anchor)) {
+  // Trigger advanced discovery for supported connectors — first connect only.
+  if (!ADVANCED_DISCOVERY_TRIGGERS.has(anchor) || wasConnected) {
     return NextResponse.json({ success: true })
   }
 

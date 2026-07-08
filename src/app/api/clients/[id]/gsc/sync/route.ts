@@ -14,7 +14,7 @@
  * Returns: { success, snapshot_id, site_url, period_start, period_end,
  *             total_clicks, total_impressions }
  *
- * Security: Bearer token (INTERNAL_API_KEY)
+ * Security: session cookie via requireOnboardingClientAccess (own client only)
  * Reference: ROADMAP.md P17.A.1
  */
 

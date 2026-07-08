@@ -7,7 +7,7 @@
  *
  * Returns: { success, sites: Array<{ siteUrl, permissionLevel }> }
  *
- * Security: Bearer token (INTERNAL_API_KEY)
+ * Security: session cookie via requireOnboardingClientAccess (own client only)
  * Reference: ROADMAP.md P17.A.followup
  */
 
