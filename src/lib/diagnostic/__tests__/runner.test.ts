@@ -101,18 +101,18 @@ function makeSupabase(opts: MockOptions = {}): SupabaseClient {
           select: vi.fn().mockReturnValue({
             eq: vi.fn().mockReturnValue({
               single: vi.fn().mockResolvedValue({
-                data: { domain: clientDomain, instagram_handle: null },
+                data: { domain: clientDomain, instagram_handle: null, primary_keywords: [] },
                 error: null,
               }),
             }),
           }),
         }
       }
-      if (table === 'keywords') {
+      if (table === 'client_discovery') {
         return {
           select: vi.fn().mockReturnValue({
             eq: vi.fn().mockReturnValue({
-              eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+              maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
             }),
           }),
         }

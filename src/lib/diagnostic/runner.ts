@@ -137,13 +137,12 @@ async function fetchClientData(
   supabase: SupabaseClient,
   clientId: string,
 ): Promise<[ClientData, string[], string[]]> {
-  const [clientRes, kwRes, discoveryRes] = await Promise.all([
-    supabase.from('clients').select('domain, name, city, country, industry').eq('id', clientId).single(),
-    supabase.from('keywords').select('keyword').eq('client_id', clientId).eq('status', 'approved'),
+  const [clientRes, discoveryRes] = await Promise.all([
+    supabase.from('clients').select('domain, name, city, country, industry, primary_keywords').eq('id', clientId).single(),
     supabase.from('client_discovery').select('payload').eq('client_id', clientId).maybeSingle(),
   ])
 
-  const raw = clientRes.data as { domain: string | null; name: string | null; city: string | null; country: string | null; industry: string | null } | null
+  const raw = clientRes.data as { domain: string | null; name: string | null; city: string | null; country: string | null; industry: string | null; primary_keywords: string[] | null } | null
   const client: ClientData = {
     domain: raw?.domain ?? '',
     name: raw?.name ?? null,
@@ -151,8 +150,11 @@ async function fetchClientData(
     country: raw?.country ?? null,
     industry: raw?.industry ?? null,
   }
-  const keywords =
-    (kwRes.data as { keyword: string }[] | null)?.map(k => k.keyword) ?? []
+  // Target keywords come from clients.primary_keywords (the canonical store set
+  // via the client settings UI). The legacy `keywords` table was archived
+  // 2026-05-30, so reading it silently returned empty and every SEO diagnostic
+  // fell back to "keywords not configured".
+  const keywords = raw?.primary_keywords ?? []
 
   // Extract real search queries from GSC advanced discovery payload
   type DiscoveryPayload = { advanced?: { gsc_data?: { rows?: Array<{ query: string }> } } }
