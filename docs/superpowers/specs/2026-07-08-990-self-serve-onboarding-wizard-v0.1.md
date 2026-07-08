@@ -97,6 +97,14 @@ $990 客户 90 天后续约月付时，`access_type` 从 `self_serve` 翻 `paid_
 - **D3** → 子牙+板桥共识：**resumable 软引导**（可跳过、可回来续，不 hard-gate）。
 - **待确认（子牙）**：Step 1 的"服务城市"落哪个字段？`light-brief` 只写 company_name/industry/target_audience/... **不含服务城市**；主关键词走独立 `primary-keywords` 路由。实现前钉死写入路径，别留没有后端的输入框。
 
+## 7.1 已接受风险（PM 拍板 2026-07-08）· ⚠️ 放量前必办
+
+**成本 DoS 残留** — advanced discovery 的去重是 app 层非原子（SELECT→INSERT），且 basic discovery 有先于本次的 MTC precheck 竞态。app 层已挡「串行狂点」+「连过再点」（first-connect gate + in-flight dedup），残留仅「同一瞬间并发 burst」能钻 TOCTOU 窗口多花外部 vendor 预算。影响面：攻击者只能触发**自己 client** 的诊断，烧的是共享外部 API 费。
+
+- **PM 决策**：**beta 期接受**（客户少、均为真人熟人，无脚本攻击动机）。
+- **🔴 放量前必办（gate 到"陌生人自助注册开放"那一刻）**：加 DB 部分唯一索引
+  `CREATE UNIQUE INDEX ... ON client_discovery_jobs(client_id, job_type) WHERE status IN ('pending','running')`（service_role 模板，PM 拍 migration）让入队原子化；并考虑 advanced 接 MTC 计价 / 完成后冷却窗。**没做这条之前不得对公开注册放量。**
+
 ## 8. 四审结论（2026-07-08）
 
 | 审 | 结论 | 已纳入 |
