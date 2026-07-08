@@ -26,7 +26,7 @@
 | 4 上传素材 | logo · 作品照 · 老客户名单 | `client_assets` 有上传 |
 | 5 提交完成 | 触发首次诊断，通知 FDE 复核 | `onboarding_completed_at` 有值 |
 
-**⚠️ 已知阻塞（向导上线前）**：self_serve 用户当前被 `requirePaidClientAccess` 挡在连接器 connect/status 外（403）。在 spec D1 决策落地前，**Step 3 的账户连接仍需 FDE 在后台代做**（或上门帮客户连）。
+**✅ 守卫已放开（2026-07-08）**：self_serve 现在能走连接器 connect/status + gsc/ga4/platform 绑定路由 + 域名写入（`requireOnboardingClientAccess`，四审通过）。向导 UI 未上线前，这些字段仍可由 FDE 在客户 dashboard 代填/上门代连——但**目标状态是客户自己走完**。
 
 ---
 
