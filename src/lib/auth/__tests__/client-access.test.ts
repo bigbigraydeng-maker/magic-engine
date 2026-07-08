@@ -257,6 +257,19 @@ describe('requireOnboardingClientAccess', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.status).toBe(401)
   })
+
+  it('fails closed (500 lookup_failed) when the permission lookup errors', async () => {
+    mockUser('free@example.com')
+    mockPortalRows([], { message: 'database unavailable' })
+
+    const result = await requireOnboardingClientAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(500)
+      expect(result.reason).toBe('lookup_failed')
+    }
+  })
 })
 
 describe('requirePaidClientAccess', () => {

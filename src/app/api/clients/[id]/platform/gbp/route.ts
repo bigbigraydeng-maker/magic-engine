@@ -6,7 +6,7 @@
  *   GET    → list active GBP connections for this client
  *   DELETE → revoke a specific connection (?connectionId=)
  *
- * Auth: requirePaidClientAccess — session cookie.
+ * Auth: requireOnboardingClientAccess — session cookie.
  * Tenant isolation on DELETE: verifies the connection's client_id matches
  * the route's [id] param before revoking.
  *
@@ -14,7 +14,7 @@
  */
 
 import { type NextRequest, NextResponse } from 'next/server'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requireOnboardingClientAccess } from '@/lib/auth/client-access'
 import {
   listConnections,
   getConnectionById,
@@ -30,7 +30,7 @@ interface RouteContext {
 export async function GET(req: NextRequest, { params }: RouteContext) {
   const clientId = params.id
 
-  const access = await requirePaidClientAccess(clientId)
+  const access = await requireOnboardingClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
@@ -52,7 +52,7 @@ export async function DELETE(req: NextRequest, { params }: RouteContext) {
     )
   }
 
-  const access = await requirePaidClientAccess(clientId)
+  const access = await requireOnboardingClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
