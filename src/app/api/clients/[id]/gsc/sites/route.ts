@@ -12,7 +12,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requireOnboardingClientAccess } from '@/lib/auth/client-access'
 import { getValidAccessToken } from '@/lib/google-oauth/client'
 import { getValidToken, PlatformConnectionNotFoundError } from '@/lib/platform-oauth/token-manager'
 
@@ -31,7 +31,7 @@ export async function GET(
   { params }: { params: { id: string } },
 ): Promise<NextResponse> {
   const { id: clientId } = params
-  const access = await requirePaidClientAccess(clientId)
+  const access = await requireOnboardingClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }

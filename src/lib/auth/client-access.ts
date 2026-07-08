@@ -83,21 +83,22 @@ export async function requireDashboardClientAccess(
 /**
  * Onboarding-scoped access (Phase B · $990 self-serve).
  *
- * Allows admin, paid_client, AND self_serve to reach the specific routes a
- * client needs to onboard THEMSELVES — connect their own accounts, upload
- * their own assets, write their own profile fields. Isolation is identical to
- * requireDashboardClientAccess: the caller can only ever touch the client(s)
- * their verified email is a member of (email → client_portal_users), enforced
- * on every request via supabaseAdmin.
+ * Isolation is IDENTICAL to requireDashboardClientAccess — allows admin,
+ * paid_client, AND self_serve, and the caller can only ever touch the
+ * client(s) their verified email is a member of (email → client_portal_users).
+ * This function adds NO extra narrowing of its own.
  *
- * This deliberately does NOT open any paid-only aggregate surface
- * (/dashboard/content, /dashboard/visuals, or any requirePaidClientAccess
- * route) — those stay paid-gated. Use this ONLY on routes that are genuinely
- * part of self-serve onboarding; anything that is a paid deliverable must
- * remain on requirePaidClientAccess.
+ * The "onboarding-only" scope is a CONVENTION enforced by WHICH routes adopt
+ * this guard, not by the function: it exists purely so every route
+ * deliberately opened to self_serve for onboarding (connect their own
+ * accounts, upload their own assets, write their own profile fields) is
+ * greppable for a security audit, instead of being lost among the many
+ * routes that use requireDashboardClientAccess for other reasons.
  *
- * Named (not a bare requireDashboardClientAccess call) so every self_serve-open
- * onboarding route is greppable for security audit.
+ * Adopt it ONLY on genuine self-serve onboarding routes. Anything that is a
+ * paid deliverable must stay on requirePaidClientAccess — that is what keeps
+ * self_serve out of paid-only aggregate surfaces (/dashboard/content,
+ * /dashboard/visuals, etc.); this guard does not touch those either way.
  */
 export async function requireOnboardingClientAccess(
   clientId: string,

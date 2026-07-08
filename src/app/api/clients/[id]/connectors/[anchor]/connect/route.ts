@@ -20,6 +20,12 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { getLatestDiscovery } from '@/lib/zhangqian/persistor'
 import { startAdvancedDiscovery } from '@/lib/zhangqian/start-advanced-discovery'
 
+// Valid connector anchors. MUST stay in sync with CONNECTOR_CATALOGUE in
+// ../../status/route.ts. `anchor` is a path param written straight into
+// client_connectors, so it is whitelisted here to keep junk rows out of the
+// table (the DB column has no CHECK constraint).
+const VALID_ANCHORS = new Set(['gsc', 'google-ads', 'gbp', 'meta-ads', 'reviews', 'ga4', 'publer', 'social'])
+
 // Anchors that unlock advanced discovery when connected.
 const ADVANCED_DISCOVERY_TRIGGERS = new Set(['meta-ads', 'gbp', 'gsc', 'google-ads'])
 
@@ -31,6 +37,10 @@ export async function POST(
   const access = await requireOnboardingClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status })
+  }
+
+  if (!VALID_ANCHORS.has(anchor)) {
+    return NextResponse.json({ success: false, error: `Unknown connector: ${anchor}` }, { status: 400 })
   }
 
   // Parse optional config from request body
