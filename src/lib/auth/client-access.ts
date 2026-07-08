@@ -81,6 +81,31 @@ export async function requireDashboardClientAccess(
 }
 
 /**
+ * Onboarding-scoped access (Phase B · $990 self-serve).
+ *
+ * Allows admin, paid_client, AND self_serve to reach the specific routes a
+ * client needs to onboard THEMSELVES — connect their own accounts, upload
+ * their own assets, write their own profile fields. Isolation is identical to
+ * requireDashboardClientAccess: the caller can only ever touch the client(s)
+ * their verified email is a member of (email → client_portal_users), enforced
+ * on every request via supabaseAdmin.
+ *
+ * This deliberately does NOT open any paid-only aggregate surface
+ * (/dashboard/content, /dashboard/visuals, or any requirePaidClientAccess
+ * route) — those stay paid-gated. Use this ONLY on routes that are genuinely
+ * part of self-serve onboarding; anything that is a paid deliverable must
+ * remain on requirePaidClientAccess.
+ *
+ * Named (not a bare requireDashboardClientAccess call) so every self_serve-open
+ * onboarding route is greppable for security audit.
+ */
+export async function requireOnboardingClientAccess(
+  clientId: string,
+): Promise<ClientAccessResult> {
+  return requireDashboardClientAccess(clientId)
+}
+
+/**
  * Phase X.S2 — Paid-only gate. Wraps requireDashboardClientAccess and
  * additionally rejects self_serve users with a structured 403 so the
  * frontend can render the "Talk to Us / Class" upsell modal instead of
