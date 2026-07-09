@@ -39,8 +39,24 @@ const PATTERNS: Array<{ key: keyof Pick<TrackingSignals, 'ga4' | 'gtm' | 'meta_p
 ]
 
 const EMAIL_REGEX = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi
-// Asset filenames and tracking-domain noise that match the email regex shape.
-const EMAIL_JUNK = /\.(png|jpe?g|gif|svg|webp|css|js)$|@(sentry|example)\./i
+// Filters out strings that match the email shape but are never a real contact:
+//   1. asset filenames (logo@2x.png, sprite.svg …)
+//   2. telemetry / site-builder vendor domains, INCLUDING subdomains —
+//      e.g. Wix's `…@sentry-next.wixpress.com`, `…@o1.ingest.sentry.io`,
+//      and template-vendor `hello@pixelarity.com` (all seen in live sweeps)
+//   3. template placeholder pairs — `user@domain.com`, `you@example.com`,
+//      `name@yourdomain.com`, etc.
+// Real business emails on a real domain (info@whiteroofing.co.nz,
+// reception@clinic42.co.nz) are unaffected.
+const EMAIL_JUNK = new RegExp(
+  [
+    '\\.(png|jpe?g|gif|svg|webp|css|js)$',
+    '@(?:[a-z0-9-]+\\.)*(?:sentry|wixpress|pixelarity|ingest)\\.',
+    '@(?:example|domain|yourdomain|yoursite|yourcompany|company|email)\\.',
+    '^(?:user|you|your-?email|your-?name|name|firstname|lastname|info|admin|email|test)@(?:example|domain|yourdomain|yoursite|yourcompany|company)\\.',
+  ].join('|'),
+  'i',
+)
 
 // Excludes non-profile paths AND path-only prefixes (profile.php / pages/…)
 // whose identity lives past the first segment — a truncated capture there
