@@ -49,16 +49,20 @@ export interface Combo { industry: string; city: string }
  * (leak-fix + review engine + GBP + Meta video) all land, so the first
  * outreach wave has the strongest, fastest-to-results story.
  *
+ * cosmetic_clinics added to the wave 2026-07-09 (PM go): high-value,
+ * personal-brand Auckland businesses that fit the $990 offer well (the report
+ * page even carries a presenter-video add-on for them).
+ *
  * Deliberately excluded here (present in the catalogue but not swept):
  *   - education_consultants / travel_agencies — skew to foreign / non-English
  *     markets, failing the "must serve NZ local English customers" rule.
- *   - dentists / cosmetic_clinics / lawyers / mortgage_brokers / accountants /
- *     hvac / solar — fine businesses, held for a second wave with tailored
- *     angles; widen via SWEEP_INDUSTRIES when ready.
+ *   - dentists / lawyers / mortgage_brokers / accountants / hvac / solar —
+ *     fine businesses, held for a later wave with tailored angles; widen via
+ *     SWEEP_INDUSTRIES when ready.
  */
 export const FOCUS_INDUSTRIES = [
   'kitchen_renovation', 'bathroom_renovation', 'builders', 'landscaping',
-  'roofing', 'flooring', 'electricians', 'plumbers',
+  'roofing', 'flooring', 'electricians', 'plumbers', 'cosmetic_clinics',
 ] as const
 
 /**
