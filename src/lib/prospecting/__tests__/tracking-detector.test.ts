@@ -48,6 +48,24 @@ describe('detectTrackingSignals', () => {
     expect(s.emails).toEqual([])
   })
 
+  it('filters telemetry + template-placeholder emails, keeps the real one', () => {
+    // All three junk forms seen in live sweeps, plus one real business email.
+    const html = `
+      <a href="mailto:605a7baede844d278b89dc95ae0a9123@sentry-next.wixpress.com">x</a>
+      <span>user@domain.com</span>
+      <a href="mailto:hello@pixelarity.com">theme</a>
+      <a href="mailto:you@example.com">placeholder</a>
+      <a href="mailto:reception@clinic42.co.nz">Email us</a>`
+    const s = detectTrackingSignals(html)
+    expect(s.emails).toEqual(['reception@clinic42.co.nz'])
+  })
+
+  it('keeps real role-address emails on real domains (info@, admin@)', () => {
+    const html = `<a href="mailto:info@whiteroofing.co.nz">a</a><a href="mailto:admin@naturescapes.co.nz">b</a>`
+    const s = detectTrackingSignals(html)
+    expect(s.emails).toEqual(['info@whiteroofing.co.nz', 'admin@naturescapes.co.nz'])
+  })
+
   it('detects a contact form named by attribute without email input', () => {
     const s = detectTrackingSignals('<form class="enquiry-form"><input type="text"></form>')
     expect(s.contact_form).toBe(true)
