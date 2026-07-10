@@ -28,6 +28,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const status   = params.get('status') ?? ''
   const industry = params.get('industry') ?? ''
   const minScore = parseInt(params.get('min_score') ?? '', 10)
+  // has_email=1 restricts to prospects that carry a scraped email — the only
+  // ones the review queue can actually SEND to. Without it, phone-only prospects
+  // (higher-scored, so first by the sort below) fill the page and bury the
+  // sendable cards past the limit where they're unreachable.
+  const hasEmail = params.get('has_email') === '1'
   const full     = params.get('full') === '1' && status !== ''
   const page     = Math.max(1, parseInt(params.get('page') ?? '1', 10))
   const maxLimit = full ? 20 : 100
@@ -50,6 +55,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (status && VALID_STATUSES.includes(status)) query = query.eq('status', status)
   if (industry) query = query.eq('industry', industry)
   if (!Number.isNaN(minScore)) query = query.gte('prospect_score', minScore)
+  if (hasEmail) query = query.not('email', 'is', null)
 
   const { data, error, count } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

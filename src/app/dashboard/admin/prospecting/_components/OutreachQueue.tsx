@@ -78,11 +78,16 @@ export default function OutreachQueue() {
   const [editSubject, setEditSubject] = useState('')
   const [editBody, setEditBody] = useState('')
   const [contactedToday, setContactedToday] = useState(0)
+  // Default ON: phone-only prospects outrank email ones by score and would
+  // otherwise bury every sendable card past the page limit (unreachable).
+  const [onlyEmail, setOnlyEmail] = useState(true)
 
   const fetchQueue = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch('/api/admin/prospecting?status=outreach_ready&full=1&limit=20')
+      const res = await fetch(
+        `/api/admin/prospecting?status=outreach_ready&full=1&limit=20${onlyEmail ? '&has_email=1' : ''}`,
+      )
       const data = await res.json() as { prospects?: QueueCard[]; total?: number; compliance_footer?: string; sender_configured?: boolean; error?: string }
       if (!res.ok) throw new Error(data.error ?? '加载失败')
       setCards(data.prospects ?? [])
@@ -94,7 +99,7 @@ export default function OutreachQueue() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [onlyEmail])
 
   useEffect(() => { void fetchQueue() }, [fetchQueue])
 
@@ -226,6 +231,10 @@ export default function OutreachQueue() {
             每封邮件的每个说法，左侧都放着依据 — 核对一眼，改一改，复制即发。发出的每一封都由你亲手把关。
           </div>
         </div>
+        <label className="flex items-center gap-1.5 text-xs text-me-charcoal/70 select-none">
+          <input type="checkbox" checked={onlyEmail} onChange={e => setOnlyEmail(e.target.checked)} disabled={busy !== ''} />
+          只看有邮箱（可发送）
+        </label>
         <button onClick={() => void draftBatch()} disabled={busy !== ''}
           className="rounded-lg bg-me-charcoal px-4 py-2 text-sm text-white disabled:opacity-40">
           {busy === 'draft' ? '撰写中…' : '✍️ 生成邮件草稿 (5)'}
