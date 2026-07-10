@@ -151,7 +151,9 @@ export default function OutreachQueue() {
   // never automated). A confirm guards against a mis-click firing a real email.
   async function sendEmail(card: QueueCard) {
     if (!card.email) return
-    if (!window.confirm(`确认发送给 ${card.business_name}（${card.email}）？`)) return
+    if (!window.confirm(
+      `立即向 ${card.business_name}（${card.email}）真实发出这封邮件？发出后无法撤回。`,
+    )) return
     await patch(card.id, { action: 'send' }, `已发送给 ${card.business_name}`)
   }
 
@@ -184,7 +186,7 @@ export default function OutreachQueue() {
     // attachment (which cold recipients won't open). The link line says what
     // it is and that it's safe — a bare URL in a cold email reads as
     // suspicious (PM feedback 2026-07-07).
-    const fullText = `Subject: ${card.outreach_email.subject}\n\n${card.outreach_email.body}\n\nEverything we found is on one page here — no login, nothing to download, just a web page:\n${reportUrlFor(card)}\n\n${footerFor(card)}`
+    const fullText = `Subject: ${card.outreach_email.subject}\n\n${card.outreach_email.body}\n\nHere's the full rundown on one page — no login, nothing to download, just a web page:\n${reportUrlFor(card)}\n\n${footerFor(card)}`
     try {
       await navigator.clipboard.writeText(fullText)
     } catch {

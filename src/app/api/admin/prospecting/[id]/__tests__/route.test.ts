@@ -9,6 +9,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 let selectRow: Record<string, unknown> | null
 let claimRows: Array<{ id: string }> | null
 const updates: Array<Record<string, unknown>> = []
+// Per-update list of the [col, val] pairs passed to .eq() — lets us assert the
+// claim actually carries the status guard, so mutating it fails the test (魏征 C2).
+const updateEqArgs: Array<Array<[string, unknown]>> = []
 const sendMock = vi.fn()
 
 vi.mock('@/lib/auth/require-admin', () => ({ guardAdmin: vi.fn().mockResolvedValue(null) }))
@@ -23,11 +26,14 @@ vi.mock('@/lib/supabase', () => ({
       select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: selectRow, error: null }) }) }),
       update: (payload: Record<string, unknown>) => {
         updates.push(payload)
-        const terminal = {
+        const eqPairs: Array<[string, unknown]> = []
+        updateEqArgs.push(eqPairs)
+        const node = {
+          eq: (col: string, val: unknown) => { eqPairs.push([col, val]); return node },
           select: () => Promise.resolve({ data: claimRows, error: null }),
           then: (resolve: (v: { error: null }) => unknown) => resolve({ error: null }),
         }
-        return { eq: () => ({ eq: () => terminal }) }
+        return node
       },
     }),
   },
@@ -41,6 +47,7 @@ const send = () =>
 
 beforeEach(() => {
   updates.length = 0
+  updateEqArgs.length = 0
   sendMock.mockReset().mockResolvedValue({ error: null })
   process.env.RESEND_API_KEY = 'test-key'
   process.env.OUTREACH_FROM_EMAIL = 'hello@magicengine.cloud'
@@ -64,6 +71,12 @@ describe("PATCH { action: 'send' }", () => {
     expect(arg.text).toContain('/unsubscribe/')          // compliance footer present
     expect(arg.text).toContain('/report/')               // report link present
     expect(updates[0].status).toBe('contacted')          // claimed before send
+    // The claim MUST be guarded on the current outreach_ready status — this is
+    // the anti-double-send lock; mutating the guard must fail this test.
+    expect(updateEqArgs[0]).toContainEqual(['status', 'outreach_ready'])
+    expect(updateEqArgs[0]).toContainEqual(['id', ID])
+    // Stable idempotency key so an ambiguous-failure retry can't double-send.
+    expect(sendMock.mock.calls[0][1]).toEqual({ idempotencyKey: `outreach/${ID}` })
   })
 
   it('503s when RESEND_API_KEY is missing — never claims', async () => {

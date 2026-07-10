@@ -144,9 +144,14 @@ async function handleSend(id: string): Promise<NextResponse> {
   const from = `${senderIdentity().name} <${fromEmail}>`
   try {
     const resend = new Resend(apiKey)
-    const { error: sendErr } = await resend.emails.send({
-      from, to, replyTo: fromEmail, subject, text: fullBody,
-    })
+    // Idempotency key (stable per prospect): if a send actually goes out but the
+    // response is lost and we revert + retry, Resend dedupes on this key and
+    // returns the original result instead of sending a SECOND real email —
+    // closing the "ambiguous failure → double-send" hole (魏征 C1).
+    const { error: sendErr } = await resend.emails.send(
+      { from, to, replyTo: fromEmail, subject, text: fullBody },
+      { idempotencyKey: `outreach/${id}` },
+    )
     if (sendErr) throw new Error(typeof sendErr === 'string' ? sendErr : JSON.stringify(sendErr))
   } catch (err) {
     // Send failed — release the claim so the card returns to the queue.

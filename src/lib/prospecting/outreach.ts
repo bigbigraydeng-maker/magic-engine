@@ -107,10 +107,13 @@ export function renderFullOutreachBody(params: {
   reportUrl: string
   unsubscribeUrl: string
 }): string {
-  const footer = complianceFooter(params.businessName).replace('{{unsubscribe_url}}', params.unsubscribeUrl)
+  // Function replacer: substitute literally so a `$` in the URL is never read
+  // as a replace pattern, matching the queue UI's footerFor (魏征).
+  const footer = complianceFooter(params.businessName)
+    .replace(/\{\{unsubscribe_url\}\}/g, () => params.unsubscribeUrl)
   return (
     `${params.draftBody.trim()}\n\n` +
-    `Everything we found is on one page here — no login, nothing to download, just a web page:\n${params.reportUrl}\n\n` +
+    `Here's the full rundown on one page — no login, nothing to download, just a web page:\n${params.reportUrl}\n\n` +
     footer
   )
 }
