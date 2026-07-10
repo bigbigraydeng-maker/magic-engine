@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('@/lib/anthropic/client', () => ({
   callClaudeChat: vi.fn(),
@@ -8,7 +8,7 @@ vi.mock('@/lib/anthropic/client', () => ({
 import { callClaudeChat } from '@/lib/anthropic/client'
 import {
   validateOutreachJson, buildOutreachPrompt, complianceFooter,
-  sanitiseOwnerName, generateOutreachEmail, type OutreachInput,
+  sanitiseOwnerName, generateOutreachEmail, senderIdentity, type OutreachInput,
 } from '../outreach'
 import type { ProspectAnalysis } from '../analyze'
 import type { LeakReport } from '../report'
@@ -143,6 +143,40 @@ describe('sanitiseOwnerName', () => {
     expect(sanitiseOwnerName(null, 'X')).toBeNull()
     expect(sanitiseOwnerName('  ', 'X')).toBeNull()
     expect(sanitiseOwnerName('A', 'X')).toBeNull()
+  })
+})
+
+describe('senderIdentity', () => {
+  const saved = {
+    name: process.env.OUTREACH_SENDER_NAME,
+    first: process.env.OUTREACH_SENDER_FIRST_NAME,
+  }
+  afterEach(() => {
+    for (const [k, v] of [['OUTREACH_SENDER_NAME', saved.name], ['OUTREACH_SENDER_FIRST_NAME', saved.first]] as const) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v
+    }
+  })
+
+  it('defaults to a real person (Big Ray Deng / Ray) and counts as configured', () => {
+    delete process.env.OUTREACH_SENDER_NAME
+    delete process.env.OUTREACH_SENDER_FIRST_NAME
+    const id = senderIdentity()
+    expect(id.name).toBe('Big Ray Deng')
+    expect(id.firstName).toBe('Ray')          // not "Big" from a naive split
+    expect(id.configured).toBe(true)
+  })
+
+  it('lets env override the name, deriving the first token when no first-name override', () => {
+    process.env.OUTREACH_SENDER_NAME = 'Jane Smith'
+    delete process.env.OUTREACH_SENDER_FIRST_NAME
+    const id = senderIdentity()
+    expect(id.name).toBe('Jane Smith')
+    expect(id.firstName).toBe('Jane')
+  })
+
+  it('still flags the generic team signature as unconfigured', () => {
+    process.env.OUTREACH_SENDER_NAME = 'The Magic Engine Team'
+    expect(senderIdentity().configured).toBe(false)
   })
 })
 

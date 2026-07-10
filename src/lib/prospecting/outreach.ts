@@ -51,14 +51,21 @@ export interface OutreachInput {
 // ─── Compliance footer (fixed, never AI-generated) ────────────────────────────
 
 /** Sender identity for the outreach signature; configured per deployment. */
-export function senderIdentity(): { name: string; company: string; website: string; configured: boolean } {
+export function senderIdentity(): { name: string; firstName: string; company: string; website: string; configured: boolean } {
+  const name = process.env.OUTREACH_SENDER_NAME ?? 'Big Ray Deng'
+  // First name for the in-body intro ("I'm Ray from Magic Engine"). Overridable
+  // because a naive first-token split mis-picks it for names like "Big Ray Deng"
+  // (→ "Big"); the built-in default pairs the default full name with "Ray".
+  const firstName = process.env.OUTREACH_SENDER_FIRST_NAME
+    ?? (process.env.OUTREACH_SENDER_NAME ? name.split(/\s+/)[0] : 'Ray')
   return {
-    name:    process.env.OUTREACH_SENDER_NAME ?? 'The Magic Engine Team',
+    name,
+    firstName,
     company: process.env.OUTREACH_SENDER_COMPANY ?? 'Magic Engine · Auckland, New Zealand',
     website: process.env.OUTREACH_WEBSITE ?? 'magicengine.cloud',
-    // "The X Team" signatures read as bulk mail — the console warns until a
-    // real person's name is configured.
-    configured: Boolean(process.env.OUTREACH_SENDER_NAME),
+    // A "The X Team" signature reads as bulk mail — the console warns until a
+    // real person's name signs the outreach.
+    configured: name !== 'The Magic Engine Team',
   }
 }
 
@@ -155,7 +162,7 @@ export function buildOutreachPrompt(input: OutreachInput): string {
   const city = input.city.replace(/_/g, ' ')
   const trade = input.industry.replace(/_/g, ' ')
   const identity = senderIdentity()
-  const senderFirst = identity.configured ? identity.name.split(/\s+/)[0] : 'the team'
+  const senderFirst = identity.configured ? identity.firstName : 'the team'
   const hook = r.email_hook ||
     `You've clearly built a solid reputation in ${city} — ${input.review_count ?? 'that many'} reviews at ${input.rating ?? '—'}★ doesn't happen by accident.`
 
