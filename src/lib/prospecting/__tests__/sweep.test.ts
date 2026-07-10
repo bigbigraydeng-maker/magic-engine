@@ -76,9 +76,11 @@ describe('pickStage — drain the pipeline before pulling more in', () => {
 })
 
 describe('buildCombos', () => {
-  it('covers only Auckland (in-person founding offer) × the focus industries', () => {
+  it('covers the Auckland sub-areas (in-person founding offer) × the focus industries', () => {
     const combos = buildCombos([...FOCUS_INDUSTRIES], [...FOCUS_CITIES])
-    expect(new Set(combos.map(c => c.city))).toEqual(new Set(['auckland']))
+    expect(new Set(combos.map(c => c.city))).toEqual(
+      new Set(['north_shore', 'west_auckland', 'south_auckland', 'east_auckland', 'central_auckland']),
+    )
     expect(combos.length).toBe(FOCUS_INDUSTRIES.length * FOCUS_CITIES.length)
   })
 
@@ -106,9 +108,9 @@ describe('sweepCities — env override', () => {
     else process.env.SWEEP_CITIES = original
   })
 
-  it('defaults to Auckland only when the env is unset', () => {
+  it('defaults to the Auckland sub-areas when the env is unset', () => {
     delete process.env.SWEEP_CITIES
-    expect(sweepCities()).toEqual(['auckland'])
+    expect(sweepCities()).toEqual(['north_shore', 'west_auckland', 'south_auckland', 'east_auckland', 'central_auckland'])
   })
 
   it('honours a valid override for a later expansion, dropping unknown keys', () => {
@@ -116,9 +118,9 @@ describe('sweepCities — env override', () => {
     expect(sweepCities()).toEqual(['auckland', 'wellington'])
   })
 
-  it('falls back to Auckland when the override has no valid keys', () => {
+  it('falls back to the Auckland sub-areas when the override has no valid keys', () => {
     process.env.SWEEP_CITIES = 'atlantis'
-    expect(sweepCities()).toEqual(['auckland'])
+    expect(sweepCities()).toEqual(['north_shore', 'west_auckland', 'south_auckland', 'east_auckland', 'central_auckland'])
   })
 })
 

@@ -49,29 +49,35 @@ export interface Combo { industry: string; city: string }
  * (leak-fix + review engine + GBP + Meta video) all land, so the first
  * outreach wave has the strongest, fastest-to-results story.
  *
- * cosmetic_clinics added to the wave 2026-07-09 (PM go): high-value,
- * personal-brand Auckland businesses that fit the $990 offer well (the report
- * page even carries a presenter-video add-on for them).
+ * cosmetic_clinics added 2026-07-09; hvac / dentists / commercial_cleaning
+ * added 2026-07-10 (PM go): all high-value Auckland local businesses that fit
+ * the $990 fast-results playbook (trade search + GBP, or personal-brand nurture).
  *
  * Deliberately excluded here (present in the catalogue but not swept):
  *   - education_consultants / travel_agencies — skew to foreign / non-English
  *     markets, failing the "must serve NZ local English customers" rule.
- *   - dentists / lawyers / mortgage_brokers / accountants / hvac / solar —
- *     fine businesses, held for a later wave with tailored angles; widen via
- *     SWEEP_INDUSTRIES when ready.
+ *   - lawyers / mortgage_brokers / accountants / solar — longer-consideration
+ *     professional services; held for a later wave with a tailored authority
+ *     angle. Widen via SWEEP_INDUSTRIES when ready.
  */
 export const FOCUS_INDUSTRIES = [
   'kitchen_renovation', 'bathroom_renovation', 'builders', 'landscaping',
   'roofing', 'flooring', 'electricians', 'plumbers', 'cosmetic_clinics',
+  'hvac', 'dentists', 'commercial_cleaning',
 ] as const
 
 /**
- * First-wave city list. The $990 founding offer is Auckland-only — the pitch
- * promises in-person visits, so prospecting outside Auckland would put a
- * promise in the email we can't keep. Widen via SWEEP_CITIES when the offer
- * expands (e.g. 'auckland,wellington').
+ * First-wave city list. The $990 founding offer is Auckland-only (in-person
+ * visits), so we stay inside Auckland — but search by AREA rather than one
+ * Auckland-wide query. This (a) surfaces far more distinct local businesses
+ * (each area returns its own top results) and (b) tags every prospect with the
+ * area it was found in, so the outreach can name it ("...plumbers in West
+ * Auckland..."), which lands better with a local operator. Still all Auckland,
+ * so the visit promise holds. Widen via SWEEP_CITIES if the offer ever expands.
  */
-export const FOCUS_CITIES = ['auckland'] as const
+export const FOCUS_CITIES = [
+  'north_shore', 'west_auckland', 'south_auckland', 'east_auckland', 'central_auckland',
+] as const
 
 function envList(name: string, valid: (key: string) => boolean, fallback: readonly string[]): string[] {
   const raw = process.env[name]

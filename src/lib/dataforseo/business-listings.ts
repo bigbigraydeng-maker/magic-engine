@@ -86,6 +86,16 @@ export const CITY_COORDS: Record<string, { coord: string; country: 'AU' | 'NZ' }
   canberra:     { coord: '-35.2809,149.1300', country: 'AU' },
   newcastle:    { coord: '-32.9283,151.7817', country: 'AU' },
   auckland:     { coord: '-36.8485,174.7633', country: 'NZ' },
+  // Auckland sub-areas — the $990 sweep searches by area so each prospect
+  // carries the local area it was found in (e.g. "West Auckland"), which the
+  // outreach then names back to the owner. Local businesses respond better to
+  // a message that knows their patch. Coords display-only (Text Search uses
+  // the query text).
+  north_shore:      { coord: '-36.7830,174.7500', country: 'NZ' },
+  west_auckland:    { coord: '-36.9000,174.6300', country: 'NZ' },
+  south_auckland:   { coord: '-37.0000,174.8800', country: 'NZ' },
+  east_auckland:    { coord: '-36.9100,174.9000', country: 'NZ' },
+  central_auckland: { coord: '-36.8600,174.7600', country: 'NZ' },
   wellington:   { coord: '-41.2866,174.7756', country: 'NZ' },
   christchurch: { coord: '-43.5321,172.6362', country: 'NZ' },
   hamilton:     { coord: '-37.7870,175.2793', country: 'NZ' },

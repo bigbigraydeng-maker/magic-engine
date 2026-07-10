@@ -35,10 +35,11 @@ const AUDIT_BATCH = 5
 const ANALYZE_BATCH = 2
 const DRAFT_BATCH = 5
 const DISCOVER_LIMIT = 25
-// Hard daily ceiling on paid AI analyses (~$0.15 each → ≤ ~$6/day). Once hit,
+// Hard daily ceiling on paid AI analyses (~$0.15 each → ≤ ~$15/day). Once hit,
 // the sweep skips the analyze step (still audits / drafts / discovers) until
-// the rolling 24h window clears.
-const DAILY_ANALYZE_CAP = 40
+// the rolling 24h window clears. Raised 40→100 on 2026-07-10 (PM go) to lift
+// how many prospects reach "ready to send" per day.
+const DAILY_ANALYZE_CAP = 100
 // Re-discover each industry×city seed at most once per this window. Rotates the
 // sweep across all seeds and idles once the universe is covered, instead of
 // re-hammering one saturated seed every fire (2026-07-10 stuck-loop cost fix).
