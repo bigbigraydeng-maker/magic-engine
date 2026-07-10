@@ -96,6 +96,47 @@
 
 ---
 
+## 遇卡点必自动化(强约束 · 2026-07-11 拍板 · 永久)⭐⭐⭐
+
+> **业务增长模型必须自动化。任何工作出现卡点,子牙必自己解决,把「让 PM/FDE/客户老板去手动点」当作不存在的方案。**
+
+### 触发场景(必自动化)
+
+- 第三方 UI 卡住 / 找不到入口
+- API 未文档化或需要 reverse engineer
+- 需要跨客户 / 跨账户 / 跨月度重复的操作
+- 未来客户规模化下会指数放大的手动工作
+
+### 绝对禁止(2026-07-11 PM 拍桌)
+
+- ❌ 「请 PM 手机 Business Suite 手动 boost N 个视频到广告组」类甩手方案
+- ❌ 「让 FDE / 客户老板去 XX 平台点击 XX 按钮」类人工 SOP
+- ❌ 「这个 UI 找不到入口,你能不能自己操作」类工人思路
+- ❌ 因为 3rd party UI 麻烦就 handoff 给 PM 或客户
+
+### 必须做(自动化路径清单)
+
+1. **深挖第三方 UI**:hover 状态 / 二级 dropdown / URL 参数 / 隐藏 flow / 键盘快捷键 / 右键菜单
+2. **官方 Graph API 直调**:Meta Graph API / GA4 Data API / GBP API / Mailchimp API / GSC API / Google Ads API — 主流平台都有官方 API
+3. **javascript_tool inject Ajax**:在页面 context 里复现前端 GraphQL/REST mutation(F12 → Network 抓真实 request,复现到 fetch)
+4. **Chrome DevTools 深度自动化**:puppeteer-like 长交互链、多 tab 协调、隐藏 iframe 操作
+5. **ME 后台 scenario 沉淀**:同一操作跨客户复用,写进 ME 变成可复用产品能力(如「winner Reel → paid Ad Set 自动同步」应该是 ME 的 media-planner 模块)
+
+### 唯一例外(还是那 2 条)
+
+- **不可逆操作 go-or-stop**(PM 显式 `go publish` / `go merge` / `go apply`)
+- **客户真实业务场景 fact**(PM 是唯一 source of truth,如「客户老板决策」「事故现场发生了什么」)
+
+### 一句话
+
+> **业务规模 = 自动化 × 无人工兜底。UI 卡了自己深挖,API 未知自己 reverse,别把手工丢回 PM。**
+
+### 真实事故(2026-07-11)
+
+子牙给 CTS ThruPlay Pool Builder 加 4 winner Reel,Meta Ads Manager「使用现有帖子」radio 没暴露 post 切换器 — 子牙 handoff「请 PM 手机 Business Suite boost 4 个 Reel」。PM 拍桌:「我不接受人工来做,考虑到未来的业务增长模型,还是需要自动化来做,子牙你要写到 CLAUDE 里,任何工作出现卡点都需要先自己解决,把人工替代当作不存在的方案」。
+
+---
+
 ## Codex 协作分工（PM 强约束）⭐
 
 > ME 项目里 PM 同时开多个 Claude Code 窗口并行做事，**Claude Code 是主导，Codex 是辅助**。Codex token 便宜，适合大量精准修复 + 测试覆盖。**PM 不亲自给 Codex 派活，由 Claude Code 统筹分配。**
