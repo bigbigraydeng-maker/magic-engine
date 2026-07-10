@@ -54,6 +54,36 @@ export async function queueCounts(): Promise<{ discovered: number; qualified: nu
   return { discovered, qualified, draftable }
 }
 
+/**
+ * Latest discover-attempt time (epoch ms) per "industry|city", from the sweep's
+ * own cron breadcrumbs. Lets the cron rotate discovery by least-recently-
+ * attempted and idle once every seed was swept recently — instead of
+ * re-hammering the numerically-fewest-rows seed forever, which burns Places
+ * calls on a saturated combo and never rotates (2026-07-10 stuck-loop fix:
+ * the sweep was stuck rediscovering bathroom_renovation/auckland — 20 found,
+ * 0 inserted — every 10 minutes).
+ */
+export async function lastDiscoverAttemptByCombo(
+  sinceMs = 7 * 24 * 60 * 60 * 1000,
+): Promise<Record<string, number>> {
+  const since = new Date(Date.now() - sinceMs).toISOString()
+  const { data } = await supabaseAdmin
+    .from('cron_run_logs')
+    .select('summary, finished_at')
+    .eq('job_name', 'prospecting-sweep')
+    .gte('finished_at', since)
+  const out: Record<string, number> = {}
+  type Row = { summary: { stage?: string; combo?: { industry?: string; city?: string } } | null; finished_at: string | null }
+  for (const r of (data ?? []) as Row[]) {
+    const s = r.summary
+    if (s?.stage !== 'discover' || !s.combo?.industry || !s.combo?.city || !r.finished_at) continue
+    const key = `${s.combo.industry}|${s.combo.city}`
+    const t = new Date(r.finished_at).getTime()
+    if (!out[key] || t > out[key]) out[key] = t
+  }
+  return out
+}
+
 /** Row count per "industry|city" so the cron can discover the least-covered seed. */
 export async function coverageByCombo(): Promise<Record<string, number>> {
   const { data } = await supabaseAdmin.from('outbound_prospects').select('industry, city')
