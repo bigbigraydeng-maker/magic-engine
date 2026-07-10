@@ -53,9 +53,9 @@ Step 7 · Write log to winner_reel_sync_log + Slack notify
 
 `META_SYSTEM_USER_TOKEN_<CLIENT_KEY>` 优先,fallback `META_SYSTEM_USER_TOKEN`。
 
-CLIENT_KEY = `clients.slug` 大写,非 `[A-Z0-9]` 全转 `_`。
-- `cts-tours-nz` → `META_SYSTEM_USER_TOKEN_CTS_TOURS_NZ`
-- `oztop` → `META_SYSTEM_USER_TOKEN_OZTOP`
+CLIENT_KEY = `clients.domain` 大写,非 `[A-Z0-9]` 全转 `_`(`clients` 无 `slug` 列;domain 是稳定唯一 field)。
+- `ctstours.co.nz` → `META_SYSTEM_USER_TOKEN_CTSTOURS_CO_NZ`
+- `oztopbuildingsupplies.com.au` → `META_SYSTEM_USER_TOKEN_OZTOPBUILDINGSUPPLIES_COM_AU`
 
 **Token 权限要求**:
 - `ads_management`
@@ -65,10 +65,15 @@ CLIENT_KEY = `clients.slug` 大写,非 `[A-Z0-9]` 全转 `_`。
 - `pages_manage_ads`
 
 **Token 类型选择**:
-- **有 Business Manager 的客户**:System User Token(无过期)
-- **个人广告账户客户(如 CTS)**:User Access Token(60 天过期,需 refresh)
+- **有 Business Manager 的客户**:System User Token(无过期,BM → 商务管理器 → 系统用户 生成)
+- **个人广告账户客户(如 CTS)**:User Access Token
+  (60 天过期 · Graph API Explorer 生成 · 需 60 天前 refresh · 无 BM 时的唯一路径)
 
-Meta App 状态:必须 **Live**(Development 模式下 API 拒绝 fresh creative,但引用现有 post 建 Ad 仍可以走通)
+**60 天 refresh 触发规则(手工版,Level-1 pilot 时期)**:
+- Token 生成后写到 Render env,同时记 expiry 到 `Clients/<client>/notes/meta-token-expiry.md`
+- Google Calendar 提前 7 天 alert PM 去 Graph API Explorer 换新 token 贴到 Render env
+
+**Meta App 状态**:必须 **Live**(Development 模式下 API 拒绝 fresh creative — 但引用现有 Page post 建 Ad(`object_story_id`)仍可走通,这正是本 module 使用的模式)
 
 ---
 
