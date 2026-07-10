@@ -65,11 +65,13 @@ export function senderIdentity(): { name: string; company: string; website: stri
 /**
  * AU Spam Act / NZ UEM required elements: who we are, why you got this,
  * and how to opt out — phrased like a person, not a disclaimer (板桥 P1-1).
- * `{{business_name}}` is substituted per prospect at render/copy time.
- * The opt-out promise is backed by the `opted_out` terminal status: those
- * rows never re-enter the queue and discover-dedup blocks re-import.
- * Opens with "Cheers," so the body flows into a natural sign-off instead of
- * a name appearing out of nowhere (PM feedback 2026-07-07).
+ * `{{business_name}}` and `{{unsubscribe_url}}` are substituted per prospect at
+ * render/copy time. The opt-out is backed by the `opted_out` terminal status:
+ * those rows never re-enter the queue and discover-dedup blocks re-import.
+ * Offers both a one-click unsubscribe link (honoured instantly by the
+ * /unsubscribe page) and a plain reply, so the recipient always has a
+ * frictionless way out. Opens with "Cheers," so the body flows into a natural
+ * sign-off instead of a name appearing out of nowhere (PM feedback 2026-07-07).
  */
 export function complianceFooter(businessName = '{{business_name}}'): string {
   const { name, company, website } = senderIdentity()
@@ -80,7 +82,8 @@ export function complianceFooter(businessName = '{{business_name}}'): string {
     website,
     '',
     `We came across ${businessName} through your public Google Business listing — this is a one-off note, ` +
-    `not a mailing list. If it's not for you, just reply "no thanks" and you won't hear from us again.`,
+    `not a mailing list. If it's not for you, unsubscribe here: {{unsubscribe_url}} — or just reply "no thanks". ` +
+    `Either way, you won't hear from us again.`,
   ].join('\n')
 }
 

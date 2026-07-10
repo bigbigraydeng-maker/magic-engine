@@ -157,8 +157,14 @@ describe('complianceFooter', () => {
     expect(f).toContain("won't hear from us again")
   })
 
+  it('offers a one-click unsubscribe link placeholder alongside the reply option', () => {
+    expect(complianceFooter('Oz Flooring Co')).toContain('{{unsubscribe_url}}')
+  })
+
   it('emits a substitutable template when no business name is given', () => {
-    expect(complianceFooter()).toContain('{{business_name}}')
+    const t = complianceFooter()
+    expect(t).toContain('{{business_name}}')
+    expect(t).toContain('{{unsubscribe_url}}')
   })
 })
 

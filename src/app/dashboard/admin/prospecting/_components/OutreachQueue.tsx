@@ -140,18 +140,28 @@ export default function OutreachQueue() {
   }
 
   function footerFor(card: QueueCard): string {
-    return footer.replace('{{business_name}}', card.business_name)
+    return footer
+      .replace('{{business_name}}', card.business_name)
+      .replace('{{unsubscribe_url}}', unsubscribeUrlFor(card))
   }
 
-  // Public report link for this prospect. Base is the report host — falls back
-  // to the outreach domain (.cloud — a .com.au link reads wrong to NZ
-  // recipients); set NEXT_PUBLIC_REPORT_BASE_URL once the custom domain is
-  // attached in Render.
-  function reportUrlFor(card: QueueCard): string {
-    const base = process.env.NEXT_PUBLIC_REPORT_BASE_URL
+  // Public link host — falls back to the outreach domain (.cloud — a .com.au
+  // link reads wrong to NZ recipients); set NEXT_PUBLIC_REPORT_BASE_URL once
+  // the custom domain is attached in Render.
+  function publicBase(): string {
+    return (process.env.NEXT_PUBLIC_REPORT_BASE_URL
       || process.env.NEXT_PUBLIC_SITE_URL
-      || 'https://magicengine.cloud'
-    return `${base.replace(/\/$/, '')}/report/${card.id}`
+      || 'https://magicengine.cloud').replace(/\/$/, '')
+  }
+
+  // Public report link for this prospect.
+  function reportUrlFor(card: QueueCard): string {
+    return `${publicBase()}/report/${card.id}`
+  }
+
+  // One-click opt-out link carried in the compliance footer.
+  function unsubscribeUrlFor(card: QueueCard): string {
+    return `${publicBase()}/unsubscribe/${card.id}`
   }
 
   async function copyAndMarkContacted(card: QueueCard) {
