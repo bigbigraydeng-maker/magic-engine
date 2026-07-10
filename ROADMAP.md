@@ -3470,6 +3470,24 @@ FDE 未来 Wizard：客户信息 → 选启用渠道 → 客户提供 credential
 
 ---
 
+### Phase 21.J — Meta Ads 创意自动闭环(内容工厂 v1 · CTS 试点)📋 spec 已过双审 · PM 已批开工(2026-07-11)
+
+> **登记日期**:2026-07-11 · **状态**:📋 spec v0.1 定稿(子牙起草 → 魏征 15 条 + 板桥 10 条全处置)· **PM 已批开工**;migration apply / 首发投放逐次显式 go
+> **Spec**:`docs/superpowers/specs/2026-07-11-content-factory-ads-loop-v0.1.md`(含附录 A PM 拍板记录)
+> **一句话**:信号(广告疲劳/放大赢家/新 campaign/素材缺口)→ 系统自动决策该做什么 → 内容工单 → 本地 worker 生产(Video Studio I2V + Edit Engine 混剪)→ **人工只审最终成片**(=确认质量+确认花钱,$50/工单绝对硬顶)→ 发 Meta Ads → 表现回流 → 赢家自动拆片入 Winner 库 → 反哺下一轮
+> **PM 三决策**:①信号自动发起 ②该不该做/做什么全自动、人只审成片 ③先广告后社媒。**PM 显式接受风险(附录 A)**:B 轨生成地标 clip 允许进 CTS 付费广告(投放勾 Meta AI-generated 标注;客户级开关,他客默认收紧)
+> **素材库三层(PM 定义)**:①`video_clips`(A轨真实像素/B轨生成式)②`winner_structures`(赢家广告自动拆 hook/middle/CTA 段+表现数据)③战略地基硬闸(`master_briefs`+active `goals` 只读,角度必须溯源到 brief 条目否则拒单)
+> **与 Phase 34.A 关系**:PR #542 winner-reel-sync 的疲劳暂停(CTR<中位数×0.5)= P21.J `creative_fatigue` 信号源;34.A 腾位、21.J 补位,互补不重叠。信号契约对齐(spec §3)= M1 开工前置
+> **可视流水线(PM 强要求)**:CTS Airtable base `app8Hlx28jAfGabdH` 3 张镜像表(Signals `tblN6FsXhvqm7nBiL` / Work Orders `tblhnHiDXsM9PKsBp` 7 档状态 Kanban / Winner `tbl6XCuNRnlwaCvch`),字段名=未来 ME 表列名契约;**花钱审核闸独立 base `ME Factory Ops`**(M2 建,白名单协作者,魏征 F5)
+> **DAPE**:E 段主体 · 广告支柱(v1)→社媒(v2)· FDE 轨(CTS)· memory Layer 1(`winning_reel_patterns` + 新增 `rejected_creative_patterns` 负样本回灌)
+
+- [ ] **P21.J.M1 地基**(≈1 周):migration 7 表 + `clients.brand_redline_phrases` + claim RPC + `content-factory` bucket(**一次 PM 拍板 apply,worker 严禁自行 apply**);`POST /api/factory/signals`;策略 agent 全闸(brief/goal 溯源 + 去重 + fail-closed)+ 工单生成。验收:模拟疲劳信号→带溯源+人话理由的工单;撞红线→人话拒绝;同 ad 重复信号→`duplicate_open_order`
+- [ ] **P21.J.M2 生产线**(≈1.5-2 周):本地 worker(claim/heartbeat/complete/fail)+ Video Studio + Edit Engine 接入;独立审核 base `ME Factory Ops`(Factory Review + Winner Intake)+ 双向 sweeper + 审核人白名单;`BrandRedlinesPanel`;muapi 计费模式+视频上传权限双 spike(开工第一天)。验收:PM 在 Airtable 卡片内直接播片,过审/打回(分类+意见)全链路跑通
+- [ ] **P21.J.M3 闭环**(≈1-2 周):发布($50 绝对硬顶 + publish_intent 幂等 + publish_failed 收敛)+ UTM 沿用 + 表现回流单链路 + winner 判定拆片入库 + 工厂内部自发疲劳信号。验收:真实成片上 CTS Meta 账户(**PM 显式 go 后才首发**,$10/天×3 天)+ 回流数据落 `flywheel_metrics` + 工作日志人话叙事无"工厂"字眼
+- [ ] **开放项**:信号契约与 34.A 对齐冻结(M1 前置)· asset_gap 信号归属 · MTC 计费触点(v1 占位不扣)· Airtable 观测层↔ME 真值同步(M2 起)
+
+---
+
 ## Phase 22 — Data Intelligence Engine（旗舰能力 · 与 AI Factory 同级别双引擎）📋 战略确认，待排期
 
 > **登记日期**：2026-05-26 · **状态**：战略方向已确认，PM 明确为"与 AI Factory 同等量级独立旗舰"
