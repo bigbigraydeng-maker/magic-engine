@@ -85,8 +85,12 @@ export default function OutreachQueue() {
   const fetchQueue = useCallback(async () => {
     setLoading(true)
     try {
+      // no-store: after a send flips a card to `contacted`, the refetch must be
+      // fresh — a browser-cached list would still show the just-sent card and
+      // look like nothing happened.
       const res = await fetch(
         `/api/admin/prospecting?status=outreach_ready&full=1&limit=20${onlyEmail ? '&has_email=1' : ''}`,
+        { cache: 'no-store' },
       )
       const data = await res.json() as { prospects?: QueueCard[]; total?: number; compliance_footer?: string; sender_configured?: boolean; error?: string }
       if (!res.ok) throw new Error(data.error ?? '加载失败')
@@ -159,7 +163,13 @@ export default function OutreachQueue() {
     if (!window.confirm(
       `立即向 ${card.business_name}（${card.email}）真实发出这封邮件？发出后无法撤回。`,
     )) return
-    await patch(card.id, { action: 'send' }, `已发送给 ${card.business_name}`)
+    // Optimistic: drop the card the moment the send succeeds so the change is
+    // instant (patch's refetch then confirms it's gone).
+    const ok = await patch(card.id, { action: 'send' }, `✅ 已发送给 ${card.business_name}`)
+    if (ok) {
+      setCards(prev => prev.filter(c => c.id !== card.id))
+      setContactedToday(n => n + 1)
+    }
   }
 
   // Public link host — falls back to the outreach domain (.cloud — a .com.au
@@ -171,41 +181,9 @@ export default function OutreachQueue() {
       || 'https://magicengine.cloud').replace(/\/$/, '')
   }
 
-  // Public report link for this prospect.
-  function reportUrlFor(card: QueueCard): string {
-    return `${publicBase()}/report/${card.id}`
-  }
-
-  // One-click opt-out link carried in the compliance footer.
+  // One-click opt-out link carried in the compliance footer preview.
   function unsubscribeUrlFor(card: QueueCard): string {
     return `${publicBase()}/unsubscribe/${card.id}`
-  }
-
-  async function copyAndMarkContacted(card: QueueCard) {
-    if (!card.outreach_email) return
-    // The compliance footer must be part of every copied email — refuse
-    // rather than silently produce a footer-less (non-compliant) message.
-    if (!footer) { setError('合规落款未加载，请刷新页面后再复制'); return }
-    // Body → full report link → compliance footer. The link lets the reader
-    // see every finding in the branded report without the email carrying an
-    // attachment (which cold recipients won't open). The link line says what
-    // it is and that it's safe — a bare URL in a cold email reads as
-    // suspicious (PM feedback 2026-07-07).
-    const fullText = `Subject: ${card.outreach_email.subject}\n\n${card.outreach_email.body}\n\nHere's the full rundown on one page — no login, nothing to download, just a web page:\n${reportUrlFor(card)}\n\n${footerFor(card)}`
-    try {
-      await navigator.clipboard.writeText(fullText)
-    } catch {
-      setError('复制失败——请手动选中邮件文本')
-      return
-    }
-    const ok = await patch(card.id, { action: 'mark_contacted' }, '已复制全文 ✂️ 粘贴进邮箱发出即可（已标记为已联系）')
-    if (ok) {
-      setContactedToday(n => n + 1)
-    } else {
-      // The text IS on the clipboard — a second reviewer re-copying this card
-      // would double-email the same business.
-      setError('全文已复制，但标记失败——请勿重复发送，刷新确认这条的状态后再操作')
-    }
   }
 
   function startEdit(card: QueueCard) {
@@ -226,9 +204,9 @@ export default function OutreachQueue() {
       {/* Queue header */}
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-me-charcoal/10 bg-white p-4">
         <div className="mr-auto">
-          <div className="text-sm font-medium text-me-charcoal">待审草稿 {total} 封{contactedToday > 0 && ` · 本次已复制 ${contactedToday} 封 ✂️`}</div>
+          <div className="text-sm font-medium text-me-charcoal">待发 {total} 封{contactedToday > 0 && ` · 本次已发送 ${contactedToday} 封 ✉️`}</div>
           <div className="text-xs text-me-charcoal/50 mt-0.5">
-            每封邮件的每个说法，左侧都放着依据 — 核对一眼，改一改，复制即发。发出的每一封都由你亲手把关。
+            每封邮件的每个说法，左侧都放着依据 — 核对一眼，改一改，点「发送邮件」即真实发出。发出的每一封都由你亲手把关。
           </div>
         </div>
         <label className="flex items-center gap-1.5 text-xs text-me-charcoal/70 select-none">
@@ -350,13 +328,9 @@ export default function OutreachQueue() {
                     {card.email && (
                       <button onClick={() => void sendEmail(card)} disabled={busy !== ''}
                         className="rounded-lg bg-[#C4912E] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
-                        ✉️ 发送邮件
+                        {busy === card.id ? '发送中…' : '✉️ 发送邮件'}
                       </button>
                     )}
-                    <button onClick={() => void copyAndMarkContacted(card)} disabled={busy !== ''}
-                      className="rounded-lg bg-[#5C8A4A] px-3 py-1.5 text-xs text-white disabled:opacity-40">
-                      📋 复制全文 + 标记已联系
-                    </button>
                     <button onClick={() => startEdit(card)} disabled={busy !== ''}
                       className="rounded-lg border border-me-charcoal/15 px-3 py-1.5 text-xs text-me-charcoal/70 disabled:opacity-40">✏️ 编辑</button>
                     <button onClick={() => void patch(card.id, { action: 'opt_out' }, '已标记拒收，永不再联系')} disabled={busy !== ''}
