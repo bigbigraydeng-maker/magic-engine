@@ -134,3 +134,33 @@ export function leastCoveredCombo(combos: Combo[], coverage: Record<string, numb
   }
   return best
 }
+
+/**
+ * Pick the seed to discover next by LEAST-RECENTLY-ATTEMPTED (round-robin over
+ * `lastAttempt`, epoch-ms per "industry|city"), not fewest-rows. This is the
+ * 2026-07-10 stuck-loop fix: coverage-by-row-count fixates on a saturated seed
+ * (Places returns the same ~20 already-inserted businesses) and never rotates,
+ * burning a Places call every fire. Never-attempted combos (time 0) sort first.
+ *
+ * Returns null when even the least-recently-attempted combo was discovered
+ * within `cooldownMs` — the whole universe was swept recently, so the cron
+ * idles instead of re-hammering a saturated seed. It re-sweeps each combo once
+ * the cooldown elapses, catching genuinely-new businesses without daily burn.
+ */
+export function pickDiscoverCombo(
+  combos: Combo[],
+  lastAttempt: Record<string, number>,
+  nowMs: number,
+  cooldownMs: number,
+): Combo | null {
+  if (combos.length === 0) return null
+  let best = combos[0]
+  let bestT = lastAttempt[`${best.industry}|${best.city}`] ?? 0
+  for (const c of combos) {
+    const t = lastAttempt[`${c.industry}|${c.city}`] ?? 0
+    if (t < bestT) { best = c; bestT = t }
+  }
+  // Every combo attempted within the cooldown → idle (no Places spend).
+  if (bestT > 0 && nowMs - bestT < cooldownMs) return null
+  return best
+}

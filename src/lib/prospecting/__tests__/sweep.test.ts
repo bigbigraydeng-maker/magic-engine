@@ -1,8 +1,56 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import {
-  pickStage, leastCoveredCombo, buildCombos,
+  pickStage, leastCoveredCombo, pickDiscoverCombo, buildCombos,
   sweepIndustries, sweepCities, FOCUS_INDUSTRIES, FOCUS_CITIES, type Combo,
 } from '../sweep'
+
+describe('pickDiscoverCombo — rotate by least-recently-attempted, idle when all fresh', () => {
+  const combos: Combo[] = [
+    { industry: 'plumbers', city: 'auckland' },
+    { industry: 'roofing', city: 'auckland' },
+    { industry: 'flooring', city: 'auckland' },
+  ]
+  const HOUR = 60 * 60 * 1000
+  const COOLDOWN = 24 * HOUR
+  const now = 1_000_000_000_000
+
+  it('picks a never-attempted combo first (time 0 sorts before any timestamp)', () => {
+    // roofing + flooring attempted recently; plumbers never → plumbers wins.
+    const last = { 'roofing|auckland': now - HOUR, 'flooring|auckland': now - 2 * HOUR }
+    expect(pickDiscoverCombo(combos, last, now, COOLDOWN)).toEqual({ industry: 'plumbers', city: 'auckland' })
+  })
+
+  it('picks the least-recently-attempted when all have been attempted', () => {
+    const last = {
+      'plumbers|auckland': now - 30 * HOUR,   // oldest, past cooldown
+      'roofing|auckland':  now - 10 * HOUR,
+      'flooring|auckland': now - 5 * HOUR,
+    }
+    expect(pickDiscoverCombo(combos, last, now, COOLDOWN)).toEqual({ industry: 'plumbers', city: 'auckland' })
+  })
+
+  it('returns null (idle — no Places spend) when every combo was attempted within the cooldown', () => {
+    const last = {
+      'plumbers|auckland': now - 1 * HOUR,
+      'roofing|auckland':  now - 2 * HOUR,
+      'flooring|auckland': now - 3 * HOUR,
+    }
+    expect(pickDiscoverCombo(combos, last, now, COOLDOWN)).toBeNull()
+  })
+
+  it('re-sweeps a combo once its cooldown elapses', () => {
+    const last = {
+      'plumbers|auckland': now - 25 * HOUR,   // just past 24h cooldown
+      'roofing|auckland':  now - 2 * HOUR,
+      'flooring|auckland': now - 3 * HOUR,
+    }
+    expect(pickDiscoverCombo(combos, last, now, COOLDOWN)).toEqual({ industry: 'plumbers', city: 'auckland' })
+  })
+
+  it('returns null for an empty combo list', () => {
+    expect(pickDiscoverCombo([], {}, now, COOLDOWN)).toBeNull()
+  })
+})
 
 describe('pickStage — drain the pipeline before pulling more in', () => {
   it('audits first when raw discoveries are waiting', () => {

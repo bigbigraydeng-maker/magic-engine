@@ -23,10 +23,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { startCronRun } from '@/lib/cron/run-logger'
 import {
-  queueCounts, coverageByCombo,
+  queueCounts, lastDiscoverAttemptByCombo,
   auditBatch, analyzeBatch, draftBatch, discoverAndInsert,
 } from '@/lib/prospecting/pipeline'
-import { pickStage, buildCombos, leastCoveredCombo } from '@/lib/prospecting/sweep'
+import { pickStage, buildCombos, pickDiscoverCombo } from '@/lib/prospecting/sweep'
 
 // Analyze is the slow step (~2 min each); 2 per fire keeps us under the limit.
 export const maxDuration = 300
@@ -39,6 +39,10 @@ const DISCOVER_LIMIT = 25
 // the sweep skips the analyze step (still audits / drafts / discovers) until
 // the rolling 24h window clears.
 const DAILY_ANALYZE_CAP = 40
+// Re-discover each industry×city seed at most once per this window. Rotates the
+// sweep across all seeds and idles once the universe is covered, instead of
+// re-hammering one saturated seed every fire (2026-07-10 stuck-loop cost fix).
+const DISCOVER_COOLDOWN_MS = 24 * 60 * 60 * 1000
 
 /** AI analyses run by this cron in the last 24h, summed from cron_run_logs. */
 async function analyzedLast24h(): Promise<number> {
@@ -76,10 +80,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     } else if (stage === 'draft') {
       result = await draftBatch(DRAFT_BATCH)
     } else {
-      const combo = leastCoveredCombo(buildCombos(), await coverageByCombo())
+      const combo = pickDiscoverCombo(
+        buildCombos(), await lastDiscoverAttemptByCombo(), Date.now(), DISCOVER_COOLDOWN_MS,
+      )
       result = combo
         ? { combo, ...(await discoverAndInsert({ ...combo, limit: DISCOVER_LIMIT })) }
-        : { discovered: 0, inserted: 0 }
+        : { discovered: 0, inserted: 0, skipped: 'all seeds discovered within cooldown' }
     }
 
     await cronRun.finish({ processed: 1, completed: 1, failed: 0, summary: { stage, ...result } })
