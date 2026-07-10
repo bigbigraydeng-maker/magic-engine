@@ -137,6 +137,32 @@ async function fetchHomepage(startUrl: string): Promise<FetchOutcome> {
   }
 }
 
+// ─── Contact-page email fallback ────────────────────────────────────────────────
+
+// Small businesses that don't put an email on the homepage almost always list
+// one on a contact page. Tried only when the homepage yielded no email — a few
+// free, SSRF-guarded fetches that lift the "has a real email" rate materially
+// (2026-07-10: only ~35% of prospects had a scraped email; the rest had a site
+// but we only read the homepage).
+const CONTACT_PATHS = ['/contact', '/contact-us', '/about']
+
+/**
+ * When the homepage exposed no email, look on a few common contact pages and
+ * return the first non-empty email list found (junk already filtered by the
+ * tracking detector). Free fetches, SSRF-guarded, bounded to CONTACT_PATHS.
+ */
+async function scrapeContactEmails(finalUrl: string): Promise<string[]> {
+  let origin: string
+  try { origin = new URL(finalUrl).origin } catch { return [] }
+  for (const path of CONTACT_PATHS) {
+    const page = await fetchHomepage(`${origin}${path}`)
+    if (!page.ok) continue
+    const emails = detectTrackingSignals(page.html).emails
+    if (emails.length > 0) return emails
+  }
+  return []
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -157,6 +183,13 @@ export async function runProspectAudit(websiteUrl: string): Promise<ProspectAudi
     return { ...empty, https_ok: page.https_ok, fetch_error: page.error }
   }
 
+  const tracking = detectTrackingSignals(page.html)
+  // Homepage had no email? Small-business emails usually live on /contact.
+  if (tracking.emails.length === 0) {
+    const contactEmails = await scrapeContactEmails(page.finalUrl)
+    if (contactEmails.length > 0) tracking.emails = contactEmails
+  }
+
   const onpage = await getOnPageInstant(url).catch(() => null)
 
   return {
@@ -164,7 +197,7 @@ export async function runProspectAudit(websiteUrl: string): Promise<ProspectAudi
     final_url:   page.finalUrl,
     https_ok:    true,
     fetch_error: null,
-    tracking:    detectTrackingSignals(page.html),
+    tracking,
     onpage,
   }
 }

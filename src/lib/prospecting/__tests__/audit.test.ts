@@ -111,4 +111,24 @@ describe('runProspectAudit', () => {
     expect(audit.https_ok).toBeNull()
     expect(audit.fetch_error).toBe('too_many_redirects')
   })
+
+  const okPage = (url: string, html: string) => ({
+    ok: true, status: 200, url, headers: new Headers(), text: () => Promise.resolve(html),
+  } as unknown as Response)
+
+  it('scrapes an email off the contact page when the homepage has none', async () => {
+    mockFetch
+      .mockResolvedValueOnce(okPage('https://8.8.8.8/', '<html>call us on 09 123 4567</html>'))       // homepage: no email
+      .mockResolvedValueOnce(okPage('https://8.8.8.8/contact', '<a href="mailto:hello@realbiz.co.nz">Email</a>'))
+    const audit = await runProspectAudit('https://8.8.8.8/')
+    expect(audit.tracking?.emails).toEqual(['hello@realbiz.co.nz'])
+    expect(mockFetch).toHaveBeenCalledTimes(2) // homepage + /contact (stopped at first hit)
+  })
+
+  it('does NOT fetch contact pages when the homepage already has an email', async () => {
+    mockFetch.mockResolvedValueOnce(okPage('https://8.8.8.8/', '<a href="mailto:info@onhome.co.nz">a</a>'))
+    const audit = await runProspectAudit('https://8.8.8.8/')
+    expect(audit.tracking?.emails).toEqual(['info@onhome.co.nz'])
+    expect(mockFetch).toHaveBeenCalledTimes(1) // homepage only — no contact-page fetches
+  })
 })
