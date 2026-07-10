@@ -147,6 +147,14 @@ export default function OutreachQueue() {
       .replace(/\{\{unsubscribe_url\}\}/g, () => unsubscribeUrlFor(card))
   }
 
+  // Server-side send via Resend (one deliberate click per prospect — sending is
+  // never automated). A confirm guards against a mis-click firing a real email.
+  async function sendEmail(card: QueueCard) {
+    if (!card.email) return
+    if (!window.confirm(`确认发送给 ${card.business_name}（${card.email}）？`)) return
+    await patch(card.id, { action: 'send' }, `已发送给 ${card.business_name}`)
+  }
+
   // Public link host — falls back to the outreach domain (.cloud — a .com.au
   // link reads wrong to NZ recipients); set NEXT_PUBLIC_REPORT_BASE_URL once
   // the custom domain is attached in Render.
@@ -328,6 +336,12 @@ export default function OutreachQueue() {
                   </>
                 ) : (
                   <>
+                    {card.email && (
+                      <button onClick={() => void sendEmail(card)} disabled={busy !== ''}
+                        className="rounded-lg bg-[#C4912E] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
+                        ✉️ 发送邮件
+                      </button>
+                    )}
                     <button onClick={() => void copyAndMarkContacted(card)} disabled={busy !== ''}
                       className="rounded-lg bg-[#5C8A4A] px-3 py-1.5 text-xs text-white disabled:opacity-40">
                       📋 复制全文 + 标记已联系

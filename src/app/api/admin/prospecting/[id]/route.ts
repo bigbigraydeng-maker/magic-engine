@@ -3,6 +3,8 @@
  *        including the heavy jsonb fields the list endpoint excludes.
  * PATCH /api/admin/prospecting/[id] — review-queue actions:
  *        { action: 'edit_email', subject, body }  outreach_ready only
+ *        { action: 'send' }                       outreach_ready → contacted
+ *                                                 (sends the email via Resend)
  *        { action: 'mark_contacted' }             outreach_ready → contacted
  *        { action: 'archive' }                    any active status → archived
  *        { action: 'opt_out' }                    permanent do-not-contact
@@ -10,11 +12,20 @@
  */
 
 import { NextResponse } from 'next/server'
+import { Resend } from 'resend'
 import { supabaseAdmin } from '@/lib/supabase'
 import { guardAdmin } from '@/lib/auth/require-admin'
-import type { OutreachEmail } from '@/lib/prospecting/outreach'
+import { renderFullOutreachBody, senderIdentity, type OutreachEmail } from '@/lib/prospecting/outreach'
+import type { ProspectAudit } from '@/lib/prospecting/audit'
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Public link host for report + unsubscribe URLs (same fallback as the queue UI). */
+function publicBase(): string {
+  return (process.env.NEXT_PUBLIC_REPORT_BASE_URL
+    || process.env.NEXT_PUBLIC_SITE_URL
+    || 'https://magicengine.cloud').replace(/\/$/, '')
+}
 
 export async function GET(
   _req: Request,
@@ -41,6 +52,7 @@ export async function GET(
 
 type PatchBody =
   | { action: 'edit_email'; subject: string; body: string }
+  | { action: 'send' }
   | { action: 'mark_contacted' }
   | { action: 'archive' }
   | { action: 'opt_out' }
@@ -80,6 +92,76 @@ async function handleEditEmail(id: string, body: { subject?: unknown; body?: unk
   return NextResponse.json({ ok: true, outreach_email: updated })
 }
 
+/**
+ * Send the approved outreach email via Resend, then move the prospect to
+ * `contacted`. Human-approved: a person clicks send in the review queue for
+ * each prospect (sending is never automated).
+ *
+ * Order guards against a double-send far more than a lost send: we CLAIM the
+ * row (outreach_ready → contacted) before calling Resend, so a second click
+ * matches zero rows and 409s. If Resend then fails we revert the claim so the
+ * card returns to the queue for a retry.
+ */
+async function handleSend(id: string): Promise<NextResponse> {
+  const apiKey = process.env.RESEND_API_KEY
+  if (!apiKey) return NextResponse.json({ error: '发信未配置（RESEND_API_KEY 缺失）' }, { status: 503 })
+
+  const { data: row, error: readError } = await supabaseAdmin
+    .from('outbound_prospects')
+    .select('business_name, status, audit, outreach_email')
+    .eq('id', id)
+    .maybeSingle<{ business_name: string; status: string; audit: ProspectAudit | null; outreach_email: OutreachEmail | null }>()
+  if (readError) return NextResponse.json({ error: readError.message }, { status: 500 })
+  if (!row) return NextResponse.json({ error: 'not found' }, { status: 404 })
+  if (row.status !== 'outreach_ready') return NextResponse.json({ error: '不在待审状态（可能已发送）' }, { status: 409 })
+
+  const to = row.audit?.tracking?.emails?.[0]?.trim()
+  if (!to) return NextResponse.json({ error: '该商家没有邮箱，只能电话跟进' }, { status: 400 })
+  const subject = row.outreach_email?.subject?.trim()
+  const draftBody = row.outreach_email?.body?.trim()
+  if (!subject || !draftBody) return NextResponse.json({ error: '邮件草稿缺失' }, { status: 409 })
+
+  const fullBody = renderFullOutreachBody({
+    draftBody,
+    businessName: row.business_name,
+    reportUrl: `${publicBase()}/report/${id}`,
+    unsubscribeUrl: `${publicBase()}/unsubscribe/${id}`,
+  })
+
+  // Claim before sending so a double-click can't double-send.
+  const { data: claimed, error: claimErr } = await supabaseAdmin
+    .from('outbound_prospects')
+    .update({ status: 'contacted', contacted_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('status', 'outreach_ready')
+    .select('id')
+  if (claimErr) return NextResponse.json({ error: claimErr.message }, { status: 500 })
+  if (!claimed || claimed.length === 0) {
+    return NextResponse.json({ error: '不在待审状态（可能刚被其他操作处理）' }, { status: 409 })
+  }
+
+  const fromEmail = process.env.OUTREACH_FROM_EMAIL ?? 'hello@magicengine.cloud'
+  const from = `${senderIdentity().name} <${fromEmail}>`
+  try {
+    const resend = new Resend(apiKey)
+    const { error: sendErr } = await resend.emails.send({
+      from, to, replyTo: fromEmail, subject, text: fullBody,
+    })
+    if (sendErr) throw new Error(typeof sendErr === 'string' ? sendErr : JSON.stringify(sendErr))
+  } catch (err) {
+    // Send failed — release the claim so the card returns to the queue.
+    await supabaseAdmin
+      .from('outbound_prospects')
+      .update({ status: 'outreach_ready', contacted_at: null })
+      .eq('id', id)
+      .eq('status', 'contacted')
+    const message = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ error: `发送失败：${message}` }, { status: 502 })
+  }
+
+  return NextResponse.json({ ok: true })
+}
+
 async function transition(
   id: string,
   fromStatuses: string[],
@@ -116,6 +198,8 @@ export async function PATCH(
   switch (body.action) {
     case 'edit_email':
       return handleEditEmail(params.id, body)
+    case 'send':
+      return handleSend(params.id)
     case 'mark_contacted':
       return transition(params.id, ['outreach_ready'],
         { status: 'contacted', contacted_at: new Date().toISOString() }, '不在待审状态')

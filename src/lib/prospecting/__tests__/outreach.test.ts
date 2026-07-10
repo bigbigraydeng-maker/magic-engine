@@ -8,7 +8,8 @@ vi.mock('@/lib/anthropic/client', () => ({
 import { callClaudeChat } from '@/lib/anthropic/client'
 import {
   validateOutreachJson, buildOutreachPrompt, complianceFooter,
-  sanitiseOwnerName, generateOutreachEmail, senderIdentity, type OutreachInput,
+  sanitiseOwnerName, generateOutreachEmail, senderIdentity, renderFullOutreachBody,
+  type OutreachInput,
 } from '../outreach'
 import type { ProspectAnalysis } from '../analyze'
 import type { LeakReport } from '../report'
@@ -143,6 +144,27 @@ describe('sanitiseOwnerName', () => {
     expect(sanitiseOwnerName(null, 'X')).toBeNull()
     expect(sanitiseOwnerName('  ', 'X')).toBeNull()
     expect(sanitiseOwnerName('A', 'X')).toBeNull()
+  })
+})
+
+describe('renderFullOutreachBody', () => {
+  const rendered = renderFullOutreachBody({
+    draftBody: 'Hi there,\n\nquick note.',
+    businessName: 'Oz Flooring Co',
+    reportUrl: 'https://magicengine.cloud/report/abc',
+    unsubscribeUrl: 'https://magicengine.cloud/unsubscribe/abc',
+  })
+
+  it('stitches draft, report link and footer with the business name substituted', () => {
+    expect(rendered).toContain('quick note.')
+    expect(rendered).toContain('https://magicengine.cloud/report/abc')
+    expect(rendered).toContain('Oz Flooring Co')
+  })
+
+  it('substitutes the one-click unsubscribe URL — no raw placeholder ships', () => {
+    expect(rendered).toContain('https://magicengine.cloud/unsubscribe/abc')
+    expect(rendered).not.toContain('{{unsubscribe_url}}')
+    expect(rendered).not.toContain('{{business_name}}')
   })
 })
 

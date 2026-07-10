@@ -95,6 +95,26 @@ export function complianceFooter(businessName = '{{business_name}}'): string {
   ].join('\n')
 }
 
+/**
+ * Assemble the full outreach email body actually sent: the approved draft, the
+ * one-line report link, then the compliance footer with the business name and
+ * one-click unsubscribe URL substituted. Single source of truth so the admin
+ * send path and the manual copy path produce byte-identical emails.
+ */
+export function renderFullOutreachBody(params: {
+  draftBody: string
+  businessName: string
+  reportUrl: string
+  unsubscribeUrl: string
+}): string {
+  const footer = complianceFooter(params.businessName).replace('{{unsubscribe_url}}', params.unsubscribeUrl)
+  return (
+    `${params.draftBody.trim()}\n\n` +
+    `Everything we found is on one page here — no login, nothing to download, just a web page:\n${params.reportUrl}\n\n` +
+    footer
+  )
+}
+
 // ─── Angle briefs per segment ─────────────────────────────────────────────────
 
 const ANGLE_BRIEFS: Record<ProspectSegment, string> = {
