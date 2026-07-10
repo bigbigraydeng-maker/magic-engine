@@ -53,11 +53,12 @@ export interface OutreachInput {
 /** Sender identity for the outreach signature; configured per deployment. */
 export function senderIdentity(): { name: string; firstName: string; company: string; website: string; configured: boolean } {
   const name = process.env.OUTREACH_SENDER_NAME ?? 'Big Ray Deng'
-  // First name for the in-body intro ("I'm Ray from Magic Engine"). Overridable
-  // because a naive first-token split mis-picks it for names like "Big Ray Deng"
-  // (→ "Big"); the built-in default pairs the default full name with "Ray".
+  // First name for the in-body intro ("I'm Big Ray from Magic Engine").
+  // Overridable because a naive first-token split mis-picks it for names like
+  // "Big Ray Deng" (→ "Big"); the built-in default pairs the full name with
+  // "Big Ray".
   const firstName = process.env.OUTREACH_SENDER_FIRST_NAME
-    ?? (process.env.OUTREACH_SENDER_NAME ? name.split(/\s+/)[0] : 'Ray')
+    ?? (process.env.OUTREACH_SENDER_NAME ? name.split(/\s+/)[0] : 'Big Ray')
   return {
     name,
     firstName,

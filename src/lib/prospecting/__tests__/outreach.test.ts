@@ -157,12 +157,12 @@ describe('senderIdentity', () => {
     }
   })
 
-  it('defaults to a real person (Big Ray Deng / Ray) and counts as configured', () => {
+  it('defaults to a real person (Big Ray Deng / Big Ray) and counts as configured', () => {
     delete process.env.OUTREACH_SENDER_NAME
     delete process.env.OUTREACH_SENDER_FIRST_NAME
     const id = senderIdentity()
     expect(id.name).toBe('Big Ray Deng')
-    expect(id.firstName).toBe('Ray')          // not "Big" from a naive split
+    expect(id.firstName).toBe('Big Ray')      // not "Big" from a naive split
     expect(id.configured).toBe(true)
   })
 
