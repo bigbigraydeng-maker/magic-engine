@@ -140,9 +140,11 @@ export default function OutreachQueue() {
   }
 
   function footerFor(card: QueueCard): string {
+    // Function replacers: substitute every occurrence and treat the value
+    // literally (a `$` in a business name is never read as a replace pattern).
     return footer
-      .replace('{{business_name}}', card.business_name)
-      .replace('{{unsubscribe_url}}', unsubscribeUrlFor(card))
+      .replace(/\{\{business_name\}\}/g, () => card.business_name)
+      .replace(/\{\{unsubscribe_url\}\}/g, () => unsubscribeUrlFor(card))
   }
 
   // Public link host — falls back to the outreach domain (.cloud — a .com.au

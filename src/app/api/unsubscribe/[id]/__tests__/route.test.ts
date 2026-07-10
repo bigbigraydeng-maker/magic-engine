@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 let updatePayload: Record<string, unknown> | null = null
 let prospectRow: { business_name: string; status: string; ai_report: unknown } | null
 let readError: { message: string } | null = null
+let writeError: { message: string } | null = null
 
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
@@ -19,7 +20,7 @@ vi.mock('@/lib/supabase', () => ({
       }),
       update: (payload: Record<string, unknown>) => {
         updatePayload = payload
-        return { eq: () => Promise.resolve({ error: null }) }
+        return { eq: () => Promise.resolve({ error: writeError }) }
       },
     }),
   },
@@ -35,6 +36,7 @@ beforeEach(() => {
   updatePayload = null
   prospectRow = { business_name: 'Oz Flooring Co', status: 'contacted', ai_report: { foo: 1 } }
   readError = null
+  writeError = null
 })
 
 describe('POST /api/unsubscribe/[id]', () => {
@@ -64,6 +66,27 @@ describe('POST /api/unsubscribe/[id]', () => {
     expect(report.foo).toBe(1)                     // existing analysis preserved
     expect(report.opt_out?.via).toBe('unsubscribe_link')
     expect(typeof report.opt_out?.at).toBe('string')
+  })
+
+  it('preserves a converted (paying-client) status but still records the opt-out request', async () => {
+    prospectRow = { business_name: 'Oz Flooring Co', status: 'converted', ai_report: { foo: 1 } }
+    const res = await call(VALID_ID)
+    expect(res.status).toBe(200)
+    expect(updatePayload?.status).toBe('converted')          // business marker NOT destroyed
+    const report = updatePayload?.ai_report as { opt_out?: { via?: string } }
+    expect(report.opt_out?.via).toBe('unsubscribe_link')     // request still honoured/recorded
+  })
+
+  it('preserves an archived status rather than flipping it to opted_out', async () => {
+    prospectRow = { business_name: 'Oz Flooring Co', status: 'archived', ai_report: null }
+    await call(VALID_ID)
+    expect(updatePayload?.status).toBe('archived')
+  })
+
+  it('surfaces a DB write error as 500', async () => {
+    writeError = { message: 'write boom' }
+    const res = await call(VALID_ID)
+    expect(res.status).toBe(500)
   })
 
   it('is idempotent — an already-opted-out prospect returns ok without re-writing', async () => {
