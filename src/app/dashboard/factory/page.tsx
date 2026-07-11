@@ -47,11 +47,26 @@ const ORDER = [
   'measuring', 'failed', 'closed', 'archived', 'superseded',
 ]
 
+function WorkerHealth({ lastHeartbeat, activeCount }: { lastHeartbeat: string | null; activeCount: number }) {
+  if (activeCount === 0) return null
+  const ageMin = lastHeartbeat ? Math.round((Date.now() - new Date(lastHeartbeat).getTime()) / 60000) : null
+  const stale = ageMin === null || ageMin > 10 // sweeper 10 分钟收僵死工单,同阈值
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className={`w-2 h-2 rounded-full ${stale ? 'bg-red-500' : 'bg-emerald-500'}`} />
+      {stale
+        ? <span className="text-red-600">worker 疑似离线(生产中 {activeCount} 条,{ageMin === null ? '无心跳' : `${ageMin} 分钟没心跳`})</span>
+        : <span>worker {ageMin} 分钟前还活着</span>}
+    </span>
+  )
+}
+
 export default function FactoryOpsPage() {
   const [orders, setOrders] = useState<WorkOrder[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [reviving, setReviving] = useState<string | null>(null)
+  const [worker, setWorker] = useState<{ last_heartbeat_at: string | null; active_count: number }>({ last_heartbeat_at: null, active_count: 0 })
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -60,6 +75,7 @@ export default function FactoryOpsPage() {
       if (!res.ok) throw new Error(`加载失败 (${res.status})`)
       const json = await res.json()
       setOrders(json.orders ?? [])
+      setWorker(json.worker ?? { last_heartbeat_at: null, active_count: 0 })
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
@@ -99,8 +115,9 @@ export default function FactoryOpsPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">内容工厂 · 工单看板</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            共 {orders.length} 条工单{deadCount > 0 ? ` · ⚠️ ${deadCount} 条在死信队列待复活` : ''}
+          <p className="text-sm text-slate-500 mt-1 flex items-center gap-3 flex-wrap">
+            <span>共 {orders.length} 条工单{deadCount > 0 ? ` · ⚠️ ${deadCount} 条在死信队列待复活` : ''}</span>
+            <WorkerHealth lastHeartbeat={worker.last_heartbeat_at} activeCount={worker.active_count} />
           </p>
         </div>
         <button
