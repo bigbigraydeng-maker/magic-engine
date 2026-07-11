@@ -256,9 +256,13 @@ async function resolveClips(wo, tmp, onCost) {
 function assemble(wo, localPaths, copy, tmp) {
   const brief = wo.brief
   const out = join(tmp, 'final.mp4')
+  // BGM:默认 brandkit 自带 music_bright.wav,可 env 覆盖(FACTORY_BGM_PATH)。
+  // make_promo 只在 cfg.music 存在时才铺床(ducked -14dB),无此字段 = 无背景乐。
+  const bgm = ENV.FACTORY_BGM_PATH || join(BRAND_KIT, 'assets/music_bright.wav')
   const cfg = {
     output: out,
     brand_kit: BRAND_KIT,
+    ...(existsSync(bgm) ? { music: bgm } : {}),
     segments: brief.segments.map((seg, i) => ({
       src: localPaths[i],
       ss: 0,
