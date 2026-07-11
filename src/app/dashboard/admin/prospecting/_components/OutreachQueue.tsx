@@ -186,6 +186,12 @@ export default function OutreachQueue() {
     return `${publicBase()}/unsubscribe/${card.id}`
   }
 
+  // The report link the server appends between body and footer at send time —
+  // shown in the preview so the reviewer sees the exact email the owner gets.
+  function reportLineFor(card: QueueCard): string {
+    return `Here's the full rundown on one page — no login, nothing to download, just a web page:\n${publicBase()}/report/${card.id}`
+  }
+
   function startEdit(card: QueueCard) {
     if (!card.outreach_email) return
     setEditingId(card.id)
@@ -311,6 +317,7 @@ export default function OutreachQueue() {
                 <div className="flex-1">
                   <div className="text-[15px] font-semibold text-me-charcoal">{email?.subject}</div>
                   <div className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-me-charcoal/85">{email?.body}</div>
+                  <div className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-me-charcoal/70">{reportLineFor(card)}</div>
                   <div className="mt-4 whitespace-pre-wrap border-t border-me-charcoal/8 pt-3 text-xs leading-relaxed text-me-charcoal/45">{footerFor(card)}</div>
                 </div>
               )}
