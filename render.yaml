@@ -283,6 +283,27 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # Daily Winner Reel Auto-Sync — every day at 15:00 UTC (= 03:00 NZST, NZST=UTC+12)
+  # Phase 34.A: scans a client's FB Page organic Reels, promotes winners into the
+  # ThruPlay pool (new Ads default PAUSED, FDE approves). Migrated off GitHub Actions:
+  # GHA scheduled workflows are best-effort and the 2026-07-11 15:00 UTC run never fired.
+  # Render Cron Scheduler is a dedicated scheduler and fires reliably.
+  # Reference: docs/sops/winner-reel-auto-sync.md · PR #542/#545
+  # TODO(healthchecks): create a healthchecks.io monitor + append its hc-ping URL as a
+  #   dead-man switch (emails if a run is missed). Left off until a UUID is provisioned;
+  #   the cts-meta-daily-selfcheck scheduled task already flags a missed run in the interim.
+  - type: cron
+    name: winner-reel-sync-daily
+    env: node
+    schedule: "0 15 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/winner-reel-sync-daily
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # Daily Google data pullback — every day at 3am UTC (~3pm NZST)
   # Syncs GSC + GA4 snapshots for all clients with connected Google connectors.
   # Reference: ROADMAP.md P17.A.4

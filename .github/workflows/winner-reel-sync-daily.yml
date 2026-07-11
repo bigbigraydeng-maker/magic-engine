@@ -10,9 +10,11 @@ name: Phase 34.A — Winner Reel Auto-Sync (Daily)
 #
 # Reference: docs/sops/winner-reel-auto-sync.md · PR #542
 
+# NOTE: scheduled trigger removed 2026-07-12 — moved to Render Cron Scheduler
+# (render.yaml → winner-reel-sync-daily) because GitHub Actions scheduled runs are
+# best-effort and the 15:00 UTC run was silently skipped. This workflow is kept for
+# manual on-demand runs (workflow_dispatch) only.
 on:
-  schedule:
-    - cron: '0 15 * * *'
   workflow_dispatch:
 
 jobs:
