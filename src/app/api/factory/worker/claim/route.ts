@@ -113,6 +113,34 @@ export async function POST(req: NextRequest) {
     uploads[key] = { path, signed_url: u.signedUrl, token: u.token }
   }
 
+  // B 轨生成 clip 的签名上传 URL(路径即 complete 时 validateClipPath 前缀契约)。
+  // 按 clip_generation_plan 逐条,key=idempotency_key(worker 生成后凭此上传+回填)。
+  const genPlan = Array.isArray(brief['clip_generation_plan'])
+    ? (brief['clip_generation_plan'] as Array<Record<string, unknown>>)
+    : []
+  const clipUploads: Array<{ idempotency_key: string; path: string; signed_url: string; token: string }> = []
+  for (const item of genPlan) {
+    const role = String(item['segment_role'] ?? 'clip')
+    const pos = Number(item['position'] ?? 0)
+    // 生成式统一进 b-generated;实拍补拍走 a-real(v1 生成为主)
+    const path = `clips/b-generated/${clientId}/${workOrderId}_${role}_${pos}.mp4`
+    const { data: u, error: uErr } = await supabaseAdmin.storage
+      .from(FACTORY_BUCKET)
+      .createSignedUploadUrl(path, { upsert: true })
+    if (uErr || !u) {
+      return NextResponse.json(
+        { error: `signed clip upload url failed (${role}:${pos}): ${uErr?.message ?? 'unknown'}` },
+        { status: 500 },
+      )
+    }
+    clipUploads.push({
+      idempotency_key: String(item['idempotency_key'] ?? `${workOrderId}:${role}:${pos}`),
+      path,
+      signed_url: u.signedUrl,
+      token: u.token,
+    })
+  }
+
   return NextResponse.json({
     claimed: true,
     work_order_id: workOrderId,
@@ -121,5 +149,6 @@ export async function POST(req: NextRequest) {
     brief,
     clips,
     uploads,
+    clip_uploads: clipUploads,
   })
 }
