@@ -23,6 +23,7 @@ import { BrandAliasesPanel } from './_components/BrandAliasesPanel'
 import { SocialHandlesPanel } from './_components/SocialHandlesPanel'
 import { ApiKeysPanel } from './_components/ApiKeysPanel'
 import { ExcludedTopicsPanel } from './_components/ExcludedTopicsPanel'
+import { BrandRedlinesPanel } from './_components/BrandRedlinesPanel'
 
 const ERROR_MESSAGES: Record<string, string> = {
   token_exchange_failed: '无法从 Google 获取访问令牌，请重试。',
@@ -181,6 +182,14 @@ export default function ClientSettingsPage() {
             <h2 className="font-black text-slate-800">排除品类词（关键词 gap 过滤）</h2>
           </div>
           <ExcludedTopicsPanel clientId={clientId} />
+        </section>
+
+        <section className="mt-6">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-base">⛔</span>
+            <h2 className="font-black text-slate-800">品牌红线短语（内容工厂拒单闸）</h2>
+          </div>
+          <BrandRedlinesPanel clientId={clientId} />
         </section>
 
         {/* ── §3 社媒账号（诊断 social 维度数据源） ──────────────────────── */}
