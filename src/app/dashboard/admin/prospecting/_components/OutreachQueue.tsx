@@ -179,8 +179,12 @@ export default function OutreachQueue() {
   // a failure just skips that card; the human still approves the batch via one
   // deliberate, counted confirm.
   const BATCH_CAP = 20
+  // A card open in the editor has unsaved edits in local state, not in the DB —
+  // sending would fire the OLD stored draft (unsaved changes lost, unrecallable).
+  // Exclude it so the reviewer must save or cancel first (Codex P1).
+  const batchTargets = () => cards.filter(c => c.email && c.id !== editingId)
   async function sendBatch() {
-    const targets = cards.filter(c => c.email).slice(0, BATCH_CAP)
+    const targets = batchTargets().slice(0, BATCH_CAP)
     if (targets.length === 0) { setError('没有可发送的邮件（当前无带邮箱的卡片）'); return }
     if (!window.confirm(
       `立即批量发送 ${targets.length} 封邮件？每封都会真实发出，无法撤回。`,
@@ -261,7 +265,7 @@ export default function OutreachQueue() {
           只看有邮箱（可发送）
         </label>
         {(() => {
-          const sendable = Math.min(cards.filter(c => c.email).length, BATCH_CAP)
+          const sendable = Math.min(batchTargets().length, BATCH_CAP)
           return sendable > 0 ? (
             <button onClick={() => void sendBatch()} disabled={busy !== ''}
               className="rounded-lg bg-[#C4912E] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">
