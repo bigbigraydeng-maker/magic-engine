@@ -1,0 +1,46 @@
+name: P21.J — Factory Sweepers (worker + review)
+
+# 每 5 分钟触发内容工厂两个 sweeper:
+#   worker-sweeper:收回心跳超时(>10min)的 claimed/producing 工单(不消耗 attempt)
+#   review-sweeper:rendered → Airtable 审核卡 / 审核动作回流 / Winner Intake 入库
+# 两者均幂等,GH Actions schedule 抖动/重复触发无害。
+#
+# 配置:GitHub repo Secrets: CRON_SECRET(与 Render env 同值)
+# Reference: docs/superpowers/specs/2026-07-11-content-factory-ads-loop-v0.1.md §6.1/§7.2
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger factory sweepers
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          BASE_URL: https://app.magicengine.com.au
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET secret not set"
+            exit 1
+          fi
+
+          fail=0
+          for path in factory-worker-sweeper factory-review-sweeper; do
+            url="$BASE_URL/api/cron/$path"
+            echo "Triggering: $url"
+            status=$(curl -sSL -o /tmp/body.json -w "%{http_code}" \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              --max-time 300 "$url" || echo "000")
+            echo "Status: $status"
+            cat /tmp/body.json || true
+            echo ""
+            if [ "$status" != "200" ]; then
+              echo "::error::Non-200 from $path"
+              fail=1
+            fi
+          done
+          exit $fail

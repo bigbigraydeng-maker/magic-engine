@@ -8,11 +8,13 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { FACTORY_B_TRACK_SCENE_TAGS } from '@/lib/factory/constants'
 import {
   isWorkerAuthorized,
   scanRedlineHits,
   validateClipPath,
   validateRenderPath,
+  workerIdFromBody,
 } from '@/lib/factory/worker-guard'
 
 export const dynamic = 'force-dynamic'
@@ -78,10 +80,15 @@ export async function POST(
   if (newClips === null) {
     return NextResponse.json({ error: 'new_clips malformed' }, { status: 400 })
   }
+  // 归属校验(魏征 M2-P1-1)
+  const workerId = workerIdFromBody(body)
+  if (!workerId) {
+    return NextResponse.json({ error: 'worker_id required' }, { status: 400 })
+  }
 
   const { data: wo, error: loadErr } = await supabaseAdmin
     .from('content_work_orders')
-    .select('id, client_id, master_brief_id, status, brief, actual_cost_usd, output')
+    .select('id, client_id, master_brief_id, status, brief, budget_cap_usd, actual_cost_usd, output, claimed_by')
     .eq('id', id)
     .maybeSingle()
   if (loadErr) {
@@ -91,6 +98,30 @@ export async function POST(
     return NextResponse.json(
       { error: `work order not active (status=${wo?.status ?? 'missing'})` },
       { status: 409 },
+    )
+  }
+  if (wo.claimed_by !== workerId) {
+    return NextResponse.json(
+      { error: `work order claimed by another worker (${wo.claimed_by ?? 'none'})` },
+      { status: 409 },
+    )
+  }
+
+  // ⓪ 服务端预扣硬顶(魏征 M2-P1-3):complete 是唯一可信边界,worker 本地 check 只是第一道
+  const briefObj = (wo.brief ?? {}) as Record<string, unknown>
+  const maxNewClips = typeof briefObj['max_new_clips'] === 'number' ? briefObj['max_new_clips'] : 0
+  if (newClips.length > maxNewClips) {
+    return NextResponse.json(
+      { error: `new_clips (${newClips.length}) exceeds max_new_clips (${maxNewClips})` },
+      { status: 422 },
+    )
+  }
+  // 自报成本超预算 1.5 倍容差 → 拒收,防台账事实源被单次污染打穿停机线(护栏 10)
+  if (actualCost > Number(wo.budget_cap_usd) * 1.5) {
+    console.error(`[factory worker] work order ${id} cost overrun rejected: $${actualCost} > cap $${wo.budget_cap_usd} ×1.5`)
+    return NextResponse.json(
+      { error: `actual_cost_usd ($${actualCost}) exceeds budget_cap_usd ($${wo.budget_cap_usd}) tolerance` },
+      { status: 422 },
     )
   }
 
@@ -119,11 +150,27 @@ export async function POST(
   // ② 成片级红线复扫(fail-closed:红线/brief 查询失败即拒,查不到 ≠ 没有)
   const { data: client, error: cErr } = await supabaseAdmin
     .from('clients')
-    .select('brand_redline_phrases')
+    .select('brand_redline_phrases, factory_config')
     .eq('id', wo.client_id)
     .maybeSingle()
   if (cErr || !client) {
     return NextResponse.json({ error: 'redline lookup failed' }, { status: 500 })
+  }
+
+  // ①b B 轨 scene_tag 白名单(魏征 M2-P1-2,护栏 6/板桥 #8):生成式具体地标不入库,
+  // 例外仅 clients.factory_config.allow_b_track_landmark_ads(附录 A: CTS PM 显式接受)
+  const allowLandmark =
+    ((client.factory_config ?? {}) as Record<string, unknown>)['allow_b_track_landmark_ads'] === true
+  if (!allowLandmark) {
+    const badTag = newClips.find(
+      (c) => c.track === 'b_generated' && !(FACTORY_B_TRACK_SCENE_TAGS as readonly string[]).includes(c.scene_tag),
+    )
+    if (badTag) {
+      return NextResponse.json(
+        { error: `b_generated scene_tag '${badTag.scene_tag}' not in abstract whitelist (护栏 6)` },
+        { status: 422 },
+      )
+    }
   }
   const { data: brief, error: bErr } = await supabaseAdmin
     .from('master_briefs')
@@ -160,14 +207,15 @@ export async function POST(
     )
     const rows = newClips
       .filter((c) => !existingKeys.has(c.idempotency_key))
-      .map((c, i) => ({
+      .map((c) => ({
         client_id: wo.client_id,
         title: c.title ?? null,
         scene_tag: c.scene_tag,
         motion_type: c.motion_type ?? null,
         duration_seconds: c.duration_seconds,
         track: c.track,
-        storage_url: validateClipPath(c.storage_url, wo.client_id, c.track) ?? clipPaths[i],
+        // 前面已全量校验过,此处必非 null(死代码 fallback 已删,魏征 M2-P2-2)
+        storage_url: validateClipPath(c.storage_url, wo.client_id, c.track) as string,
         generation_cost_usd: c.generation_cost_usd ?? 0,
         source_meta: {
           ...(c.source_meta ?? {}),
@@ -219,7 +267,8 @@ export async function POST(
     new_clip_ids: insertedClipIds,
   }
 
-  const { error: upErr } = await supabaseAdmin
+  // .select() 判行数:load 后被 sweeper 收回时 0 行匹配不能伪装成功(魏征 M2-P1-1)
+  const { data: updated, error: upErr } = await supabaseAdmin
     .from('content_work_orders')
     .update({
       status: 'rendered',
@@ -229,9 +278,15 @@ export async function POST(
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
+    .eq('claimed_by', workerId)
     .in('status', ACTIVE_STATUSES)
+    .select('id')
   if (upErr) {
     return NextResponse.json({ error: upErr.message }, { status: 500 })
+  }
+  if (!updated || updated.length === 0) {
+    console.error(`[factory worker] complete race: work order ${id} reclaimed mid-flight (clips/ledger already written)`)
+    return NextResponse.json({ error: 'work order reclaimed mid-flight' }, { status: 409 })
   }
 
   return NextResponse.json({

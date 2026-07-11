@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
   const reclaimed: string[] = []
   for (const wo of stale ?? []) {
     const nextReclaim = Number(wo.reclaim_count) + 1
-    const { error: upErr } = await supabaseAdmin
+    const { data: upd, error: upErr } = await supabaseAdmin
       .from('content_work_orders')
       .update({
         status: 'queued',
@@ -48,10 +48,12 @@ export async function GET(req: NextRequest) {
       .eq('id', wo.id)
       .in('status', ['claimed', 'producing'])
       .lt('heartbeat_at', staleBefore) // 二次条件防与活 worker 心跳竞态
+      .select('id')
     if (upErr) {
       console.error(`[factory-worker-sweeper] reclaim ${wo.id} failed: ${upErr.message}`)
       continue
     }
+    if (!upd || upd.length === 0) continue // 竞态输给活心跳,0 行不虚报(魏征 M2-P2-4)
     reclaimed.push(wo.id as string)
     if (nextReclaim >= RECLAIM_ALERT_THRESHOLD) {
       console.warn(

@@ -21,6 +21,9 @@ export const FACTORY_DAILY_COST_CAP_USD = 5
 /** 角度去重回看窗口(护栏 7) */
 export const FACTORY_ANGLE_DEDUPE_DAYS = 14
 
+/** 单工单投放预算绝对硬顶(PM 决策 ②:$50/工单,审核「通过」单次确认风险上界) */
+export const FACTORY_PUBLISH_BUDGET_HARD_CAP_USD = 50
+
 /** winner 疲劳解锁阈值:frequency > 2.5 才允许撞题材续命(护栏 7) */
 export const FACTORY_WINNER_FREQUENCY_UNLOCK = 2.5
 

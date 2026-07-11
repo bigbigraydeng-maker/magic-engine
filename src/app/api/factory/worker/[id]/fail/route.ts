@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { isWorkerAuthorized } from '@/lib/factory/worker-guard'
+import { isWorkerAuthorized, workerIdFromBody } from '@/lib/factory/worker-guard'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,10 +29,15 @@ export async function POST(
     ? body.error.trim().slice(0, 2000)
     : 'worker reported failure'
   const retryable = body.retryable === true
+  // 归属校验(魏征 M2-P1-1)
+  const workerId = workerIdFromBody(body)
+  if (!workerId) {
+    return NextResponse.json({ error: 'worker_id required' }, { status: 400 })
+  }
 
   const { data: wo, error: loadErr } = await supabaseAdmin
     .from('content_work_orders')
-    .select('id, status, attempt_count, max_attempts')
+    .select('id, status, attempt_count, max_attempts, claimed_by')
     .eq('id', id)
     .maybeSingle()
   if (loadErr) {
@@ -44,11 +49,17 @@ export async function POST(
       { status: 409 },
     )
   }
+  if (wo.claimed_by !== workerId) {
+    return NextResponse.json(
+      { error: `work order claimed by another worker (${wo.claimed_by ?? 'none'})` },
+      { status: 409 },
+    )
+  }
 
   const nextAttempt = Number(wo.attempt_count) + 1
   const toDeadLetter = !retryable || nextAttempt >= Number(wo.max_attempts)
 
-  const { error: upErr } = await supabaseAdmin
+  const { data: updated, error: upErr } = await supabaseAdmin
     .from('content_work_orders')
     .update(
       toDeadLetter
@@ -72,9 +83,14 @@ export async function POST(
           },
     )
     .eq('id', id)
+    .eq('claimed_by', workerId)
     .in('status', ACTIVE_STATUSES)
+    .select('id')
   if (upErr) {
     return NextResponse.json({ error: upErr.message }, { status: 500 })
+  }
+  if (!updated || updated.length === 0) {
+    return NextResponse.json({ error: 'work order reclaimed mid-flight' }, { status: 409 })
   }
 
   if (toDeadLetter) {

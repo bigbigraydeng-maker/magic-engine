@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { isWorkerAuthorized } from '@/lib/factory/worker-guard'
+import { isWorkerAuthorized, workerIdFromBody } from '@/lib/factory/worker-guard'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,10 +28,15 @@ export async function POST(
   const costSoFar = typeof body.cost_so_far_usd === 'number' && Number.isFinite(body.cost_so_far_usd)
     ? body.cost_so_far_usd
     : null
+  // 归属校验(魏征 M2-P1-1):合盖超时被 sweeper 收回再被别人 claim 的工单,旧 worker 不得再碰
+  const workerId = workerIdFromBody(body)
+  if (!workerId) {
+    return NextResponse.json({ error: 'worker_id required' }, { status: 400 })
+  }
 
   const { data: wo, error: loadErr } = await supabaseAdmin
     .from('content_work_orders')
-    .select('id, status, budget_cap_usd, actual_cost_usd')
+    .select('id, status, budget_cap_usd, actual_cost_usd, claimed_by')
     .eq('id', id)
     .maybeSingle()
   if (loadErr) {
@@ -43,13 +48,20 @@ export async function POST(
       { status: 409 },
     )
   }
+  if (wo.claimed_by !== workerId) {
+    return NextResponse.json(
+      { error: `work order claimed by another worker (${wo.claimed_by ?? 'none'})` },
+      { status: 409 },
+    )
+  }
 
   // 成本只增不减(防乱序心跳回退计数)
   const nextCost = costSoFar !== null
     ? Math.max(Number(wo.actual_cost_usd), costSoFar)
     : Number(wo.actual_cost_usd)
 
-  const { error: upErr } = await supabaseAdmin
+  // .select() 判行数:load 后被 sweeper 收回时 0 行匹配不能静默成功(魏征 M2-P1-1)
+  const { data: updated, error: upErr } = await supabaseAdmin
     .from('content_work_orders')
     .update({
       heartbeat_at: new Date().toISOString(),
@@ -58,9 +70,14 @@ export async function POST(
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
+    .eq('claimed_by', workerId)
     .in('status', ACTIVE_STATUSES)
+    .select('id')
   if (upErr) {
     return NextResponse.json({ error: upErr.message }, { status: 500 })
+  }
+  if (!updated || updated.length === 0) {
+    return NextResponse.json({ error: 'work order reclaimed mid-flight' }, { status: 409 })
   }
 
   const abort = nextCost >= Number(wo.budget_cap_usd)

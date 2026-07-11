@@ -8,6 +8,7 @@ import {
   validateClipPath,
   validateRenderPath,
   workerClientWhitelist,
+  workerIdFromBody,
 } from './worker-guard'
 
 const CLIENT = 'c0000000-0000-0000-0000-000000000000'
@@ -28,6 +29,17 @@ describe('isWorkerAuthorized', () => {
   it('env 未配置 → fail-closed 一律拒', () => {
     delete process.env.FACTORY_WORKER_TOKEN
     expect(isWorkerAuthorized('Bearer secret-token')).toBe(false)
+  })
+})
+
+describe('workerIdFromBody(魏征 M2-P1-1 归属校验入参)', () => {
+  it('合法字符串 → trim 后返回', () => {
+    expect(workerIdFromBody({ worker_id: ' local-mac ' })).toBe('local-mac')
+  })
+  it('缺失 / 空串 / 非字符串 → null(调用方 400)', () => {
+    expect(workerIdFromBody({})).toBeNull()
+    expect(workerIdFromBody({ worker_id: '  ' })).toBeNull()
+    expect(workerIdFromBody({ worker_id: 42 })).toBeNull()
   })
 })
 

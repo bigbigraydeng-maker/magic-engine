@@ -2,6 +2,8 @@
 // 纯函数,零 DB 依赖:①专用 token 鉴权 ②client 白名单 ③上传路径前缀强校验 + 红线复扫。
 // 这是审核流/素材库注入面的正门 —— 任意外部 URL 一律拒,fail-closed。
 
+import { timingSafeEqual } from 'crypto'
+
 import { normalizeAngle } from './strategist'
 
 export const FACTORY_BUCKET = 'content-factory'
@@ -10,8 +12,20 @@ export const FACTORY_BUCKET = 'content-factory'
 export function isWorkerAuthorized(authHeader: string | null): boolean {
   const token = process.env.FACTORY_WORKER_TOKEN
   // fail-closed:env 未配置一律拒
-  if (!token) return false
-  return authHeader === `Bearer ${token}`
+  if (!token || !authHeader) return false
+  const expected = Buffer.from(`Bearer ${token}`)
+  const got = Buffer.from(authHeader)
+  return expected.length === got.length && timingSafeEqual(expected, got)
+}
+
+/**
+ * worker_id 归属校验(魏征 M2-P1-1):body.worker_id 必须与工单 claimed_by 一致。
+ * 场景:Mac 合盖超时 → sweeper 收回 → 另一 worker 重新 claim → 旧 worker 醒来
+ * 调 complete/fail/heartbeat 不得碰新一轮生产中的工单。
+ */
+export function workerIdFromBody(body: Record<string, unknown>): string | null {
+  const v = body['worker_id']
+  return typeof v === 'string' && v.trim().length > 0 ? v.trim() : null
 }
 
 /**
