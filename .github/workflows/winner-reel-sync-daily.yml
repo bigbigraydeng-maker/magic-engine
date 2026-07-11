@@ -1,0 +1,61 @@
+name: Phase 34.A — Winner Reel Auto-Sync (Daily)
+
+# 每天 15:00 UTC(= 03:00 NZST 冬令时)触发 winner-reel-sync cron endpoint。
+# Engine 扫描每个 enabled 客户的 FB Page organic Reels,winner 自动加进
+# paid Pool Builder Ad Set(Level-1 试点:新 Ad 全 PAUSED 等 FDE approve)。
+#
+# 配置:
+#   - GitHub repo Secrets: CRON_SECRET(与 Render env 同值)
+#   - 可选 WINNER_REEL_SYNC_URL(默认 https://app.magicengine.com.au/api/cron/winner-reel-sync-daily)
+#
+# Reference: docs/sops/winner-reel-auto-sync.md · PR #542
+
+on:
+  schedule:
+    - cron: '0 15 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger winner-reel-sync endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          WINNER_REEL_SYNC_URL: ${{ secrets.WINNER_REEL_SYNC_URL || 'https://app.magicengine.com.au/api/cron/winner-reel-sync-daily' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET secret not set"
+            exit 1
+          fi
+
+          echo "Triggering: $WINNER_REEL_SYNC_URL"
+          response=$(curl -fsSL -w "\nHTTP_STATUS:%{http_code}" \
+            -X GET \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            --max-time 300 \
+            "$WINNER_REEL_SYNC_URL")
+
+          status=$(echo "$response" | tail -n1 | sed 's/HTTP_STATUS://')
+          body=$(echo "$response" | sed '$d')
+
+          echo "Status: $status"
+          echo "Body: $body"
+
+          if [ "$status" != "200" ]; then
+            echo "::error::Non-200 response from winner-reel-sync endpoint"
+            exit 1
+          fi
+
+          # Surface per-client errors in the Actions log (run itself stays green
+          # so guard-hits don't page anyone; errors are visible in log + Slack)
+          echo "$body" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          for r in d.get('results', []):
+              line = f\"client={r['clientId'][:8]} status={r['status']} added={r['added']} paused={r['paused']} guards={r['guards']}\"
+              print(line)
+              if r['status'] == 'error':
+                  print(f\"::warning::sync error for {r['clientId']}: {r.get('error')}\")
+          "
