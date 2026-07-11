@@ -1,0 +1,160 @@
+// P21.J Content Factory — shared types
+// Spec: docs/superpowers/specs/2026-07-11-content-factory-ads-loop-v0.1.md
+
+export type SignalType =
+  | 'creative_fatigue'
+  | 'scale_winner'
+  | 'new_campaign'
+  | 'asset_gap'
+
+export type SignalStatus = 'received' | 'evaluating' | 'accepted' | 'rejected' | 'expired'
+
+export type OrderType = 'variant_from_winner' | 'fresh_angle' | 'clip_generation'
+
+export interface DemandSignal {
+  id: string
+  client_id: string
+  signal_type: SignalType
+  source: string
+  dedupe_key: string | null
+  confidence: number | null
+  evidence: Record<string, unknown>
+  request: Record<string, unknown>
+  status: SignalStatus
+  expires_at: string | null
+  created_at: string
+}
+
+/** §5.1 闸 1 战略地基切片(只读) */
+export interface MasterBriefSlice {
+  id: string
+  core_proposition: string | null
+  content_pillars: string[] | null
+  keyword_seeds: string[] | null
+  excluded_topics: string[] | null
+}
+
+export interface GoalSlice {
+  id: string
+  title: string | null
+}
+
+export interface WinnerSlice {
+  id: string
+  hook_segment: Record<string, unknown>
+  middle_segment: Record<string, unknown>
+  cta_segment: Record<string, unknown>
+  win_reason_tags: string[]
+  cost_per_thruplay: number | null
+  current_frequency: number | null
+  status: string
+}
+
+export interface BlocklistEntry {
+  angle: string
+  permanent: boolean
+  expires_at: string | null
+}
+
+export interface ClipSlice {
+  id: string
+  scene_tag: string
+  motion_type: string | null
+  track: 'a_real' | 'b_generated'
+  usage_count: number
+  last_used_at: string | null
+}
+
+/**
+ * decideSignal 的全部输入。loader(evaluate.ts)负责从 DB 装配;
+ * 纯函数核心不碰 DB —— 可测试性 = 护栏可验证性。
+ * 任何切片为 null = 对应查询失败/缺失 → 闸 1 fail-closed(护栏 4)。
+ */
+export interface GateContext {
+  now: Date
+  signal: DemandSignal
+  /** 该 client 所有开放工单对应的 evidence.ad_id(护栏 11 语义去重) */
+  openOrderAdIds: string[]
+  brief: MasterBriefSlice | null
+  goal: GoalSlice | null
+  /** null = clients.brand_redline_phrases 查询失败(fail-closed) */
+  brandRedlines: string[] | null
+  /** 近 14 天全部工单 angle(含打回/归档,魏征 F4) */
+  recentAngles: string[]
+  blocklist: BlocklistEntry[]
+  activeWinners: WinnerSlice[]
+  /** factory_balance_ledger 结余;null = 查询失败 */
+  balanceUsd: number | null
+  /** 该 client 当日已建工单数 / 当日生成成本 */
+  dailyOrderCount: number
+  dailyCostUsd: number
+  clipStock: ClipSlice[]
+  /** 附录 A: CTS=true,他客默认 false */
+  allowBTrackLandmarkAds: boolean
+}
+
+export interface AngleSource {
+  type: 'content_pillar' | 'keyword_seed' | 'core_proposition' | 'winner_structure'
+  ref_id: string
+  ref_text: string
+}
+
+export interface ClipGenerationPlanItem {
+  segment_role: 'hook' | 'middle' | 'cta'
+  position: number
+  scene_tag: string
+  motion_type: string
+  prompt_hint: string
+  /** `{work_order_id占位}:{segment_role}:{position}` — worker 侧防重烧(魏征 F10③) */
+  idempotency_key: string
+  source_image_url: null
+  requires_source_resolution: true
+}
+
+export interface WorkOrderBrief {
+  segments: Array<{
+    role: 'hook' | 'middle' | 'cta'
+    duration_hint_s: number
+    description: string
+    clip_ids: string[]
+  }>
+  /** 闸 2 预扣制硬数(护栏 8):worker 提交 muapi 前本地强制 check */
+  max_new_clips: number
+  clip_generation_plan: ClipGenerationPlanItem[]
+  aspect_ratio: '9:16'
+  notes: string
+}
+
+export interface WorkOrderDraft {
+  client_id: string
+  signal_id: string
+  goal_id: string
+  master_brief_id: string
+  winner_structure_id: string | null
+  order_type: OrderType
+  angle: string
+  angle_source: AngleSource
+  rationale_one_liner: string
+  brief: WorkOrderBrief
+  budget_cap_usd: number
+  clip_links: Array<{ clip_id: string; segment_role: 'hook' | 'middle' | 'cta'; position: number }>
+}
+
+export type Decision =
+  | { outcome: 'expired' }
+  | { outcome: 'rejected'; reason: RejectReason; detail?: string }
+  | { outcome: 'accepted'; workOrder: WorkOrderDraft }
+
+export type RejectReason =
+  | 'duplicate_open_order'
+  | 'gate_data_unavailable'
+  | 'no_active_brief_or_goal'
+  | 'angle_not_traceable'
+  | 'brand_redline_hit'
+  | 'excluded_topic_hit'
+  | 'no_angle_available'
+  | 'balance_low'
+  | 'daily_order_cap'
+  | 'daily_cost_cap'
+  | 'rationale_template_failed'
+  | 'unsupported_signal'
