@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { FactoryChat } from './FactoryChat'
 
 // P21.J ME 原生化 P1 — 审核 Inbox(spec me-native-design v0.2 §2.1)
 // 试验田:看片 + 拍板。in_review 工单 → 大号播放器 + 人话理由 +
@@ -20,14 +21,6 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
 const publicUrl = (path?: string) =>
   path ? `${SUPABASE_URL}/storage/v1/object/public/content-factory/${path}` : ''
 
-// 打回理由:画面/品牌走 reject_quality(重开工单);预算走 reject_budget(只改预算)
-const REJECT_CHIPS = [
-  { label: '画面质量', action: 'reject_quality' as const },
-  { label: '不像品牌', action: 'reject_quality' as const },
-  { label: '不喜欢', action: 'reject_quality' as const },
-  { label: '预算节奏', action: 'reject_budget' as const },
-]
-
 // clientId:只看该客户的待审(客户页概览用);hideWhenEmpty:没待审就不渲染(不占地方)
 export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hideWhenEmpty?: boolean } = {}) {
   const [orders, setOrders] = useState<WorkOrder[]>([])
@@ -35,7 +28,6 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<WorkOrder | null>(null)
-  const [rejectingId, setRejectingId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -72,25 +64,12 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
       }
       setOrders((prev) => prev.filter((o) => o.id !== id)) // 审完自动翻下一条
       setConfirming(null)
-      setRejectingId(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : '操作失败')
     } finally {
       setBusy(null)
     }
   }, [])
-
-  const reject = useCallback((id: string, chip: (typeof REJECT_CHIPS)[number]) => {
-    if (chip.action === 'reject_budget') {
-      const input = window.prompt('新的投放预算(美元,上限 $50):', '20')
-      if (input == null) return
-      const n = Number(input)
-      if (!Number.isFinite(n) || n <= 0 || n > 50) { setError('预算需在 $0–$50 之间'); return }
-      void act(id, { action: 'reject_budget', new_budget_usd: n })
-    } else {
-      void act(id, { action: 'reject_quality', feedback: chip.label })
-    }
-  }, [act])
 
   // 嵌客户页概览:没待审(或加载中)就不占地方,只在有片要审时冒出来
   if (hideWhenEmpty && (loading || orders.length === 0)) return null
@@ -104,6 +83,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
 
       {error && <div className="mb-3 px-4 py-2 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>}
 
+      <div className={clientId ? 'grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4 items-start' : ''}>
       <div className="space-y-4">
         {orders.map((o) => (
           <div key={o.id} className="border border-slate-200 rounded-xl bg-white p-4 flex flex-col sm:flex-row gap-4">
@@ -129,28 +109,16 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
               <button
                 onClick={() => setConfirming(o)}
                 disabled={busy === o.id}
-                className="w-full sm:w-auto sm:self-start px-5 h-11 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 mb-3"
+                className="w-full sm:w-auto sm:self-start px-5 h-11 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 mb-2"
               >{busy === o.id ? '处理中…' : '✓ 通过并投放(上限 $50)'}</button>
 
-              {rejectingId === o.id ? (
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs text-slate-400 mr-1">点一下即打回:</span>
-                  {REJECT_CHIPS.map((c) => (
-                    <button
-                      key={c.label}
-                      onClick={() => reject(o.id, c)}
-                      disabled={busy === o.id}
-                      className="text-sm text-slate-600 border border-slate-300 rounded-full px-3 py-1.5 hover:bg-slate-50 disabled:opacity-50"
-                    >{c.label}</button>
-                  ))}
-                  <button onClick={() => setRejectingId(null)} className="text-xs text-slate-400 px-2">取消</button>
-                </div>
-              ) : (
-                <button onClick={() => setRejectingId(o.id)} className="text-sm text-slate-500 self-start hover:text-slate-700">打回</button>
-              )}
+              <p className="text-xs text-slate-400">要改画面或调预算?在右边跟 Claude 说人话即可。</p>
             </div>
           </div>
         ))}
+      </div>
+
+        {clientId && <FactoryChat clientId={clientId} onActed={load} />}
       </div>
 
       {confirming && (
