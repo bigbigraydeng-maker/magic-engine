@@ -172,6 +172,47 @@ export default function OutreachQueue() {
     }
   }
 
+  // Batch send: fire the visible email-carrying cards through the SAME per-card
+  // send endpoint, sequentially (not parallel — gentler on Resend and the
+  // .cloud domain's sending reputation), capped per click so one press can't
+  // blast the whole pool. Each card keeps its own claim + idempotency guard, so
+  // a failure just skips that card; the human still approves the batch via one
+  // deliberate, counted confirm.
+  const BATCH_CAP = 20
+  async function sendBatch() {
+    const targets = cards.filter(c => c.email).slice(0, BATCH_CAP)
+    if (targets.length === 0) { setError('没有可发送的邮件（当前无带邮箱的卡片）'); return }
+    if (!window.confirm(
+      `立即批量发送 ${targets.length} 封邮件？每封都会真实发出，无法撤回。`,
+    )) return
+
+    setBusy('batch'); setError(''); setMessage('')
+    let sent = 0, failed = 0
+    for (let i = 0; i < targets.length; i++) {
+      const card = targets[i]
+      setMessage(`批量发送中… ${i + 1}/${targets.length}（成功 ${sent}，失败 ${failed}）`)
+      try {
+        const res = await fetch(`/api/admin/prospecting/${card.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'send' }),
+        })
+        if (res.ok) {
+          sent++
+          setContactedToday(n => n + 1)
+          setCards(prev => prev.filter(c => c.id !== card.id))
+        } else {
+          failed++
+        }
+      } catch {
+        failed++
+      }
+    }
+    setBusy('')
+    setMessage(`批量发送完成：成功 ${sent}，失败 ${failed}${failed ? '（失败的仍在队列，可单独重试）' : ''}`)
+    await fetchQueue()
+  }
+
   // Public link host — falls back to the outreach domain (.cloud — a .com.au
   // link reads wrong to NZ recipients); set NEXT_PUBLIC_REPORT_BASE_URL once
   // the custom domain is attached in Render.
@@ -219,6 +260,15 @@ export default function OutreachQueue() {
           <input type="checkbox" checked={onlyEmail} onChange={e => setOnlyEmail(e.target.checked)} disabled={busy !== ''} />
           只看有邮箱（可发送）
         </label>
+        {(() => {
+          const sendable = Math.min(cards.filter(c => c.email).length, BATCH_CAP)
+          return sendable > 0 ? (
+            <button onClick={() => void sendBatch()} disabled={busy !== ''}
+              className="rounded-lg bg-[#C4912E] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">
+              {busy === 'batch' ? '批量发送中…' : `✉️ 批量发送 (${sendable})`}
+            </button>
+          ) : null
+        })()}
         <button onClick={() => void draftBatch()} disabled={busy !== ''}
           className="rounded-lg bg-me-charcoal px-4 py-2 text-sm text-white disabled:opacity-40">
           {busy === 'draft' ? '撰写中…' : '✍️ 生成邮件草稿 (5)'}
