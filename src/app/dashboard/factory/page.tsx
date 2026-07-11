@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { ReviewInbox } from './_components/ReviewInbox'
 
 // P21.J M2 — Content Factory Ops 后台(spec §6.1)
 // 工单管线可视 + dead_letter 一键复活。单运营者视图,不做复杂筛选。
@@ -85,7 +86,9 @@ export default function FactoryOpsPage() {
     }
   }, [load])
 
+  // in_review 由顶部审核 Inbox 全权接管,下方看板不重复展示
   const grouped = ORDER
+    .filter((status) => status !== 'in_review')
     .map((status) => ({ status, items: orders.filter((o) => o.status === status) }))
     .filter((g) => g.items.length > 0)
 
@@ -105,6 +108,8 @@ export default function FactoryOpsPage() {
           className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 hover:bg-slate-50"
         >刷新</button>
       </div>
+
+      <ReviewInbox />
 
       {error && (
         <div className="mb-4 px-4 py-3 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>
