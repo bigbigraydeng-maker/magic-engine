@@ -1,0 +1,158 @@
+{
+  "competitor_name": "Aaron Foss",
+  "scanned_at": "2026-07-10T09:30:00+12:00",
+  "source": "plugin_manual",
+  "positioning_oneliner": "Barfoot & Thompson Mission Bay 分行东区扛把子 · 全公司 2024/2025 No.1 个人销售冠军 · 东区 8 年区域第一 · 走欧美 Kiwi 主流高端住宅路线",
+  "company": "Barfoot & Thompson (Mission Bay 分行, 99D Tamaki Drive)",
+  "regions": [
+    "Mission Bay",
+    "Kohimarama",
+    "St Heliers",
+    "Glendowie",
+    "Orakei",
+    "Remuera",
+    "Glen Innes"
+  ],
+  "audience": {
+    "language_mix": "en_only",
+    "price_tier": "high",
+    "notes": "均价 $2.65M · 完全没有中文/华人 buyer network 信号 · 主打英语 Kiwi 主流市场"
+  },
+  "recent_activity": {
+    "period_months": 12,
+    "deals_count": 28,
+    "avg_deal_size": 2650000,
+    "gmv": null,
+    "currency": "NZD"
+  },
+  "personal_domain": {
+    "exists": false,
+    "url": null,
+    "dns_verified": true,
+    "candidate_domains_checked": [
+      "aaronfoss.co.nz",
+      "aaronfossrealestate.co.nz",
+      "aaronfoss.nz",
+      "aaronfossrealestate.com"
+    ]
+  },
+  "social_media": [
+    {
+      "platform": "facebook",
+      "handle": "aaronfossrealestate",
+      "url": "https://www.facebook.com/aaronfossrealestate/",
+      "exists": true,
+      "followers": 2120,
+      "posts_count": null,
+      "activity_note": "~95% listing 视频搬砖模板 · 几乎无 educational content"
+    },
+    {
+      "platform": "instagram",
+      "handle": "aaronfoss_realestate",
+      "url": "https://www.instagram.com/aaronfoss_realestate/",
+      "exists": true,
+      "followers": 4910,
+      "posts_count": 1240,
+      "activity_note": "高产量低粉丝黏度 posts:followers ≈ 1:4 · Reels 与 FB 同源复用"
+    },
+    {
+      "platform": "threads",
+      "handle": "aaronfoss_realestate",
+      "url": "https://www.threads.com/@aaronfoss_realestate",
+      "exists": true,
+      "followers": 352,
+      "posts_count": null,
+      "activity_note": "listing 视频镜像 FB/IG"
+    },
+    {
+      "platform": "linkedin",
+      "handle": "aaronfossrealestate",
+      "url": "https://www.linkedin.com/in/aaronfossrealestate/",
+      "exists": true,
+      "followers": null,
+      "posts_count": null,
+      "activity_note": "HTTP 999 反爬 · 未拿细节"
+    },
+    {
+      "platform": "youtube",
+      "handle": null,
+      "url": null,
+      "exists": false,
+      "followers": null,
+      "posts_count": null,
+      "activity_note": "无独立频道 · 零散 SOLD 视频挂在 B&T 官方频道下"
+    },
+    {
+      "platform": "tiktok",
+      "handle": null,
+      "url": null,
+      "exists": false,
+      "followers": null,
+      "posts_count": null,
+      "activity_note": "未见公开账号"
+    },
+    {
+      "platform": "xiaohongshu",
+      "handle": null,
+      "url": null,
+      "exists": false,
+      "followers": null,
+      "posts_count": null,
+      "activity_note": "未见公开账号"
+    },
+    {
+      "platform": "wechat_public",
+      "handle": null,
+      "url": null,
+      "exists": false,
+      "followers": null,
+      "posts_count": null,
+      "activity_note": "未见公开账号"
+    }
+  ],
+  "paid_ads": {
+    "meta_ads": "unknown",
+    "google_ads": "unknown",
+    "verification_notes": "Meta Ad Library SPA 反爬 · WebFetch 抓不到详情 · Google site: 查询 0 结果 · 弱负信号但未定案 · 建议 PM 手动 15 秒核 https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=NZ&q=Aaron%20Foss"
+  },
+  "reputation": {
+    "google_business_profile": null,
+    "rate_my_agent_score": null,
+    "rate_my_agent_reviews": null,
+    "oneroof_testimonials": 123,
+    "other_notes": "RateMyAgent 页面存在但 403 反爬未拿到评分 · Homes.co.nz 显示 24 月 121 sold + all-time 428 sold + $765M+ GMV · 2024/2025 全公司 No.1 Individual Salesperson · 东区连续 8 年 Region No.1"
+  },
+  "differentiators": [
+    "Barfoot 品牌背书 + 8 年区域第一 + 全公司 No.1 · 社会证明碾压",
+    "全价位段覆盖（'smallest apartment to largest multi-million-dollar development site'）",
+    "与华人 agent Livia Li 联合出镜的团队模式 · 部分华人段隐性覆盖",
+    "个人人设 genuine / respectful / strong work ethic",
+    "listing 视频产量高 · Meta 算法自然分发"
+  ],
+  "weaknesses": [
+    "无个人独立域名 · 4 个候选域名 DNS 亲验全空 · 所有 SEO 权重给 barfoot.co.nz",
+    "零 TikTok / 小红书 / WeChat · 华人 buyer 渠道完全缺席",
+    "无独立 YouTube 频道 · 视频资产不属于自己",
+    "未见付费 Meta 广告 · 纯 organic + 老客户口碑",
+    "无中文/Mandarin 声明 · 华人 buyer 市场对他不透明",
+    "内容 ~95% listing 搬砖 · 缺 educational / market update / suburb guide / buyer 教育内容",
+    "WhatsApp Business 明确 Not available（OneRoof/Homes.co.nz 均标注）"
+  ],
+  "source_links": [
+    "https://www.barfoot.co.nz/our-people/a.foss",
+    "https://www.realestate.co.nz/agent/440644/aaron-foss",
+    "https://www.oneroof.co.nz/agent/aaron-foss-18521",
+    "https://homes.co.nz/profile/barfoot-and-thompson/mission-bay/aaron-foss",
+    "https://www.ratemyagent.co.nz/real-estate-agent/aaron-foss-ab393/sales/overview",
+    "https://www.facebook.com/aaronfossrealestate/",
+    "https://www.instagram.com/aaronfoss_realestate/",
+    "https://www.linkedin.com/in/aaronfossrealestate/"
+  ],
+  "data_gaps": [
+    "Meta 付费广告是否活跃 · Ad Library SPA 反爬未拿到详情 · 需 PM 手动 15 秒核 https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=NZ&q=Aaron%20Foss",
+    "RateMyAgent 具体评分数字 · HTTP 403 反爬",
+    "LinkedIn 详细履历与网络规模 · HTTP 999 反爬",
+    "Facebook Page / Instagram 具体粉丝互动量（likes / comments / shares）· 平台需登录",
+    "GBP review 数量与评分 · 未在扫盘窗口验证"
+  ]
+}

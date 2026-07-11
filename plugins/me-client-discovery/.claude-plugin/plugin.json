@@ -1,0 +1,21 @@
+{
+  "name": "me-client-discovery",
+  "version": "0.1.0",
+  "description": "Magic Engine · DAPE-Discovery 段的手工前身。新客户接入第一周用并行分身（5+3 agent）扫竞对/市场/本地媒体，出中文 HTML deck，可部署 Cloudflare Pages。数据 schema 与未来司马徽 agent 完全对齐，Phase 1 上线后自动同步进 ME 后台 competitor_snapshots / market_context_snapshots / local_media_channels 三张表。Skills: /discovery-scan /synthesize-deck /deploy-deck /sync-to-me /sanity-check。",
+  "author": {
+    "name": "Magic Engine · Ray Deng",
+    "email": "bigbigraydeng@gmail.com"
+  },
+  "homepage": "https://github.com/bigbigraydeng-maker/magic-engine",
+  "keywords": [
+    "discovery",
+    "competitor-analysis",
+    "market-scan",
+    "local-media",
+    "dape",
+    "simatai",
+    "me-plugin",
+    "anz",
+    "chinese-bilingual"
+  ]
+}

@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://magicengine.com.au/schemas/market-context.schema.json",
+  "title": "Market Context Snapshot",
+  "description": "Geographic + demographic + market-heat snapshot for a client's target region. Written by plugin (Phase 0) or 司马徽 (Phase 3). Consumed by ME client detail page + 华佗 (Analysis) for baseline benchmarking.",
+  "type": "object",
+  "required": ["geography", "scanned_at", "source"],
+  "properties": {
+    "geography": {
+      "type": "object",
+      "required": ["country", "region_name"],
+      "properties": {
+        "country": { "type": "string", "enum": ["NZ", "AU", "other"] },
+        "region_name": { "type": "string", "description": "e.g. 'Auckland Bayside + Central Gold'" },
+        "suburbs": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "scanned_at": { "type": "string", "format": "date-time" },
+    "source": {
+      "type": "string",
+      "enum": ["plugin_manual", "simatai_auto", "manual_import"]
+    },
+    "median_prices": {
+      "type": "array",
+      "description": "One entry per suburb where median found. Skip suburbs without data.",
+      "items": {
+        "type": "object",
+        "required": ["suburb"],
+        "properties": {
+          "suburb": { "type": "string" },
+          "median_price": { "type": ["number", "null"] },
+          "currency": { "type": "string", "default": "NZD" },
+          "as_of": { "type": "string", "format": "date" },
+          "source_url": { "type": "string" }
+        }
+      }
+    },
+    "school_zones": {
+      "type": "array",
+      "description": "Relevant school zones + premium impact. NZ = Auckland Grammar / Selwyn / Baradene etc.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "zone_name": { "type": "string" },
+          "covered_suburbs": { "type": "array", "items": { "type": "string" } },
+          "premium_note": { "type": "string", "description": "e.g. 'Double Grammar Zone 溢价 $200k / 25 条街'" }
+        }
+      }
+    },
+    "demographics": {
+      "type": "object",
+      "properties": {
+        "chinese_ethnicity_pct": { "type": ["number", "null"], "description": "0-100 · null if not found" },
+        "asian_ethnicity_pct": { "type": ["number", "null"] },
+        "census_year": { "type": ["integer", "null"] },
+        "census_source_url": { "type": "string" }
+      }
+    },
+    "market_heat": {
+      "type": "object",
+      "properties": {
+        "median_yoy_pct": { "type": ["number", "null"], "description": "e.g. -1.92 for -1.92% YoY" },
+        "sales_volume_yoy_pct": { "type": ["number", "null"] },
+        "days_on_market": { "type": ["integer", "null"] },
+        "buyer_or_seller_market": { "type": "string", "enum": ["buyer", "seller", "balanced", "unknown"] },
+        "source_urls": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "buyer_profiles": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "e.g. ['Family upgrader (Kohimarama 学区家庭)', 'Retiree downsizer', '华人 investor']"
+    },
+    "platform_penetration": {
+      "type": "object",
+      "properties": {
+        "facebook_pct_pop": { "type": ["number", "null"] },
+        "instagram_pct_pop": { "type": ["number", "null"] },
+        "wechat_note": { "type": "string" },
+        "xiaohongshu_note": { "type": "string" }
+      }
+    },
+    "key_insights": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "3-5 strategic insights derived from data"
+    },
+    "source_links": {
+      "type": "array",
+      "items": { "type": "string", "format": "uri" }
+    },
+    "data_gaps": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": false
+}

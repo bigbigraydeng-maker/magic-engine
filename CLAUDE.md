@@ -96,47 +96,6 @@
 
 ---
 
-## 遇卡点必自动化(强约束 · 2026-07-11 拍板 · 永久)⭐⭐⭐
-
-> **业务增长模型必须自动化。任何工作出现卡点,子牙必自己解决,把「让 PM/FDE/客户老板去手动点」当作不存在的方案。**
-
-### 触发场景(必自动化)
-
-- 第三方 UI 卡住 / 找不到入口
-- API 未文档化或需要 reverse engineer
-- 需要跨客户 / 跨账户 / 跨月度重复的操作
-- 未来客户规模化下会指数放大的手动工作
-
-### 绝对禁止(2026-07-11 PM 拍桌)
-
-- ❌ 「请 PM 手机 Business Suite 手动 boost N 个视频到广告组」类甩手方案
-- ❌ 「让 FDE / 客户老板去 XX 平台点击 XX 按钮」类人工 SOP
-- ❌ 「这个 UI 找不到入口,你能不能自己操作」类工人思路
-- ❌ 因为 3rd party UI 麻烦就 handoff 给 PM 或客户
-
-### 必须做(自动化路径清单)
-
-1. **深挖第三方 UI**:hover 状态 / 二级 dropdown / URL 参数 / 隐藏 flow / 键盘快捷键 / 右键菜单
-2. **官方 Graph API 直调**:Meta Graph API / GA4 Data API / GBP API / Mailchimp API / GSC API / Google Ads API — 主流平台都有官方 API
-3. **javascript_tool inject Ajax**:在页面 context 里复现前端 GraphQL/REST mutation(F12 → Network 抓真实 request,复现到 fetch)
-4. **Chrome DevTools 深度自动化**:puppeteer-like 长交互链、多 tab 协调、隐藏 iframe 操作
-5. **ME 后台 scenario 沉淀**:同一操作跨客户复用,写进 ME 变成可复用产品能力(如「winner Reel → paid Ad Set 自动同步」应该是 ME 的 media-planner 模块)
-
-### 唯一例外(还是那 2 条)
-
-- **不可逆操作 go-or-stop**(PM 显式 `go publish` / `go merge` / `go apply`)
-- **客户真实业务场景 fact**(PM 是唯一 source of truth,如「客户老板决策」「事故现场发生了什么」)
-
-### 一句话
-
-> **业务规模 = 自动化 × 无人工兜底。UI 卡了自己深挖,API 未知自己 reverse,别把手工丢回 PM。**
-
-### 真实事故(2026-07-11)
-
-子牙给 CTS ThruPlay Pool Builder 加 4 winner Reel,Meta Ads Manager「使用现有帖子」radio 没暴露 post 切换器 — 子牙 handoff「请 PM 手机 Business Suite boost 4 个 Reel」。PM 拍桌:「我不接受人工来做,考虑到未来的业务增长模型,还是需要自动化来做,子牙你要写到 CLAUDE 里,任何工作出现卡点都需要先自己解决,把人工替代当作不存在的方案」。
-
----
-
 ## Codex 协作分工（PM 强约束）⭐
 
 > ME 项目里 PM 同时开多个 Claude Code 窗口并行做事，**Claude Code 是主导，Codex 是辅助**。Codex token 便宜，适合大量精准修复 + 测试覆盖。**PM 不亲自给 Codex 派活，由 Claude Code 统筹分配。**
@@ -386,6 +345,13 @@ UI / 报告 / 客户交付物中**禁止出现真实供应商名**，只用封�
   EXCEPTION WHEN duplicate_object THEN NULL; END $$;
   ```
   **禁止引用**：`clients.workspace_id`（不存在）、`client_team` 表（不存在）、任何未实现的多租户模型对象。**禁止用 `auth.uid()` / `auth.jwt()`**——ME 没用 Supabase Auth 做 end-user 鉴权。**真实事故**：2026-06-05 审计发现 13 处 schema 漂移（9 表未建 + 4 列缺失），根因正是早期 migration 的 `CREATE POLICY` 引用了 `workspace_id`/`client_team`，apply 时炸在 policy 步骤、整个事务回滚——文件在仓里但 DB 里啥都没建。影响 19 客户关键词排名 cron 全瘫 + 5 模块功能（月报/案例库/诊断叙事/线索埋点/本地 SERP）。PR #365 用 service_role 模板补齐。判断标准：写完 migration **必须** grep `workspace_id\|client_team\|auth\.uid\|auth\.jwt`，命中→重写 policy。
+- **任何外部执行工作必须三落库到 fde_work_logs + execution_items + flywheel_actions（强约束）⭐⭐**：任何在客户 WordPress / 客户第三方平台 / GSC / OpenAI 等外部环境完成的执行动作（写博客、修 Yoast、生成图、上传 media、GSC Request Indexing、修 noindex、跑 cron 之外的任何手动操作），**动作完成后必须同时落三张表**，否则 ME 后台完全看不见 = PM 视角等于没做：
+  0. **`fde_work_logs`（客户详情页 FDE Work Log tab · PR #500）** — PM 主看板。字段：`client_id` · `log_date`（date）· `summary`（text，自由 markdown，一段汇总当日所有动作 + 数据 + 交付物 URL）· `author_email`（例：`bigbigraydeng@gmail.com`）。**每天每客户一条**（无 unique 约束，多条也允许但一天一条更清晰），格式约定 `【<类型>】<一句话主题>\n\n【1. 事故修复｜xxx】xxx\n【2. 内容｜xxx】xxx\n【3. 架构｜xxx】xxx\n【交付物 URL】xxx\n【今日成本】$X\n【ME 后台归因】xxx`
+  1. **`execution_items`（Kanban 可视层）** — 标题格式 `【<标签> YYYY-MM-DD】xxx`（例：`【SEO 事故修复 2026-07-02】30 brand noindex 根治`）· `dimension='seo'/'ai_visibility'/'ads'/'social'/'reputation'/'competitor'` · `status='completed'` · `fix_type='me_auto'` · `source='fde_manual'` · `completed_at`+`created_at`+`updated_at` 填 UTC 时间戳
+  2. **`flywheel_actions`（Flywheel 归因层）** — `flywheel='seo'/'geo'/'ads'/'social'` · `action_type=<snake_case_动作类型>`（如 `noindex_fix` / `depth_blog_launch` / `depth_blog_expand_with_images` / `visual_media_pipeline_launch` / `gsc_request_indexing_batch`）· `execution_mode='in_house'/'third_party'/'external_manual'` · `vendor` 填具体供应商代号（如 `oztop_wordpress` / `openai_wp_rest` / `google_search_console`）· `payload` 塞完整 JSON 数据（title / url / wp_post_id / word_count / focus_keyphrase / target_keywords / internal_links / red_line_compliance / 30/90/180 天 projected metrics）· `expected_metric` + `expected_delta` 填对应飞轮北极星指标预测（如 clicks/impressions/indexed_pages/dwell_time_sec）
+  3. **UPDATE `flywheel_actions.execution_item_id = execution_items.id`** — 建立 Kanban ↔ Flywheel 归因链，后续 flywheel_metrics + flywheel_outcomes 自动关联 impact 归因图
+  
+  **真实事故**：2026-07-02 子牙一整天做 Oztop 5 大动作（noindex 修复 / kitchen blog v1+v2 / 31 张 AI 图部署 / GSC 提交），全部在外部环境完成，**0 条落库到 ME 后台**。PM 打开 Oztop 客户页 FDE Work Log tab 看不到今天日志，反问"ME 后台内的日志还是看不到？" 才补 1 fde_work_log + 5 execution_items + 5 flywheel_actions + 全部 link 归因。**教训**：外部执行工作 !== 完成，只有落三张表了才算完成。**检查清单**（session 结束前必跑）：`SELECT count(*) FROM fde_work_logs WHERE client_id=<X> AND log_date=CURRENT_DATE;` 应 ≥ 1；`SELECT count(*) FROM execution_items WHERE client_id=<X> AND completed_at::date=CURRENT_DATE;` 应 = 今日实际动作数量；同样查 flywheel_actions；再查 `flywheel_actions.execution_item_id IS NOT NULL` 归因率必须 100%。**判断标准**：如果 PM 打开 ME 后台 FDE Work Log tab 看不到某今日动作，就是没落库，等于没做。
 
 ---
 
@@ -416,54 +382,6 @@ UI / 报告 / 客户交付物中**禁止出现真实供应商名**，只用封�
 - 会话结束前，未完成任务必须回写 ROADMAP.md（禁止只留在 TodoWrite）
 - Commit message 格式：`feat(module): description [P8.3.2]`
 - 完成后在 ROADMAP.md § 9 功能完成日志 追加记录
-
----
-
-## 会话工作日志（自动写入 fde_work_logs）⭐⭐
-
-> **强制规则**：每次会话结束前（PM 说「结束」/「关闭」/「下一个会话」/「好了今天到这里」，或 Claude 发出「下一会话启动咒语」时），**必须自动写入工作日志**。
->
-> 不需要 PM 提醒，Claude 主动执行。不写日志 = 会话结束协议不完整。
-
-### 客户 ID 对照表
-
-| 客户 | client_id |
-|------|-----------|
-| **CTS Tours NZ** | `c0000000-0000-0000-0000-000000000000` |
-| **Oztop Building Supplies** | `d5c98811-1c1d-4ded-bdf0-4cefec6afb84` |
-
-### 写入规则
-
-1. **判断本次会话操作了哪些客户**（从上下文推断：改了哪个客户的 GBP / Meta / SEO / GEO / AI 等）
-2. **每个客户写一条日志**（不同客户分开 INSERT）
-3. **摘要格式**（不超过 300 字，中文，结构化）：
-   ```
-   【SEO】xxx（如有）
-   【GEO】xxx（如有）
-   【Meta 广告】xxx（如有）
-   【GBP】xxx（如有）
-   【AI 可见度】xxx（如有）
-   【其他】xxx（如有）
-   下一步：xxx
-   ```
-4. **通过 Supabase MCP 直接 INSERT**（不走 API，不需要 session）：
-
-```sql
-INSERT INTO fde_work_logs (client_id, log_date, summary, author_email)
-VALUES (
-  '<client_id>',
-  CURRENT_DATE,
-  '<摘要内容>',
-  'bigbigraydeng@gmail.com'
-);
-```
-
-5. **INSERT 完成后告知 PM**：「✅ 工作日志已写入：[客户名] · [日期]」
-
-### 本次会话未触碰客户不写日志
-
-- 只有本次会话**实际做了操作**的客户才写（不要每次都写两个客户）
-- 纯对话、纯查询、未落地的讨论不算「实际操作」
 
 ---
 
@@ -579,10 +497,14 @@ npm test           # 测试套件
 
 ## 当前焦点 ⬅️ 每次打开先看这里
 
-> 最后更新：2026-06-11 16:53 NZST （**A2.2 GSC 品牌搜索量上线 (PR #336) + Kanban Content Workbench UX 4 连击 (PR #327) + Phase 33 全部测试通过 ✅**）
+> 最后更新：2026-07-12 NZST （**Roman Hu · Phase 1 后端 PR #543 待 review + Bayside Monthly / Vendor Pitch 已 deploy · SEO 战略 pivot**）
 
 | 任务 ID | 内容 | 优先级 |
 |---------|------|--------|
+| **🔴 Phase 1 discovery 后端 PR #543** | `feat/discovery-phase-1-endpoint` · 3 张表 migration + POST `/api/discovery/scan-results` + Zod schemas + 28 单元测试 · **待 PM ① review ② `go merge` ③ 手动 apply migration ④ Render env 设 `DISCOVERY_API_TOKEN` ⑤ 微信 token 发澳洲同事**（她 export env var 即用 · plugin 无需重装）| ⚠️ 今日操作 |
+| **⚡ Roman 3 个 Cloudflare Pages live** | 主战略 deck https://roman-hu-plan.pages.dev · 月刊首期 https://bayside-monthly.pages.dev · Vendor Pitch https://roman-vendor-pitch.pages.dev · 全 noindex · Roman 每月改 template 发月刊 · 每谈 1 家开发商用 dev tools console `replaceAll` 改 vendor pitch 打印 PDF | ✅ 完成 |
+| **📋 Roman 战略 pivot · SEO/blog 主战场** | 客户改主意 · 不做 Meta/Google 广告 · 主战场 SEO 长尾词 + blog + PR 引用 · Bayside Monthly 每月第 1 周五发是长期武器 · Roman romanhu.com DR 0.1 · 12 月目标 15-25 · 3-5 年才追平竞对 DR 70 | 📋 战略执行中 |
+| **📋 me-client-discovery plugin v0.1 已交付** | `plugins/me-client-discovery/` · 5 skill + 3 JSON schema + Roman canonical 8 JSON + FUTURE-ME-COMPAT.md · 已 zip 发澳洲同事 · Phase 1 后端 = 上面 PR #543 | ✅ 完成 |
 | **🔄 P18.B.0 等 Google Ads token 审核** | PM 已在 Google Ads MCC 提交 developer token 申请（2026-06-11）。等 1-7 个工作日。审核通过后填 Render env `GOOGLE_ADS_DEVELOPER_TOKEN`。期间可用 test account 开发 P18.B.1 骨架 | 🔄 PM 等审核 |
 | **P18.B.1 骨架** | 不阻塞 token：Google Cloud Console 建 OAuth 2.0 client + Service Account；`lib/connectors/google-ads/client.ts`（封装 `google-ads-api` npm package）；env 占位写好 | 📋 子牙可先做（test account）|
 | **🧪 A2.2 端到端验证** | PR #336 已 merged。等 Render 部署完后：①CTS 客户建 Goal 主指标=`brand_search_volume` ②Supabase clients 表 CTS 行的 `brand_aliases` 填 `{"cts tours","cts travel","china travel service","ctsnz"}` ③Goal 详情页主指标卡应显示 ~166 + 数据源 "GSC clicks (28-day brand searches)" ④Oztop 同样跑一遍（aliases `{"oztop building supplies","oz top"}`）。SOP: `docs/sops/brand-aliases-setup-for-gsc.md` | ⚠️ 今日晚上跑 |

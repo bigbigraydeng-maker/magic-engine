@@ -1,0 +1,674 @@
+<title>Chinese Buyer Program · Ray White Mission Bay · Roman Hu</title>
+
+<style>
+  :root {
+    --ground: #F8F6F0;
+    --ink: #0F1216;
+    --muted: #6B6E76;
+    --deep: #002542;
+    --deep-2: #003a66;
+    --gold: #A88342;
+    --gold-soft: #C9AA6D;
+    --red-lantern: #9E2F1F;
+    --hairline: #E5E1D5;
+    --hairline-strong: #C8C4B4;
+    --font-display: Charter, 'Iowan Old Style', 'Songti SC', 'Noto Serif SC', 'Times New Roman', serif;
+    --font-body: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Inter, sans-serif;
+    --font-mono: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  }
+  html { color-scheme: light; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 15.5px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  .wrap {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: clamp(48px, 8vw, 88px) clamp(20px, 4vw, 52px) 96px;
+  }
+
+  /* ————— Cover ————— */
+  .cover {
+    padding-bottom: 56px;
+    border-bottom: 1px solid var(--hairline-strong);
+    margin-bottom: 64px;
+  }
+  .cover-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 24px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding-bottom: 36px;
+    border-bottom: 1px solid var(--hairline);
+    margin-bottom: 40px;
+    flex-wrap: wrap;
+  }
+  .cover-meta .brand {
+    color: var(--deep);
+    font-weight: 600;
+  }
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: clamp(38px, 6.4vw, 60px);
+    line-height: 1.08;
+    letter-spacing: -0.015em;
+    margin: 0 0 18px;
+    color: var(--ink);
+    text-wrap: balance;
+  }
+  h1 em {
+    font-style: italic;
+    color: var(--deep);
+    font-weight: 500;
+  }
+  .prepared-for {
+    display: inline-block;
+    padding: 6px 14px;
+    background: rgba(0,37,66,0.06);
+    color: var(--deep);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 26px;
+    border-left: 3px solid var(--gold);
+  }
+  .cover .sub {
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.55;
+    color: var(--muted);
+    max-width: 600px;
+    margin: 0 0 32px;
+  }
+  .thesis {
+    border-left: 3px solid var(--gold);
+    padding: 4px 0 4px 22px;
+    max-width: 70ch;
+    font-family: var(--font-display);
+    font-size: 19px;
+    line-height: 1.55;
+    color: var(--ink);
+    font-style: italic;
+  }
+  .thesis .accent { color: var(--deep); font-weight: 600; font-style: normal; }
+  .thesis .gold { color: var(--gold); font-weight: 600; font-style: normal; }
+
+  /* ————— Fill placeholder ————— */
+  .fill {
+    background: #FFF7E0;
+    padding: 1px 8px;
+    border-radius: 3px;
+    border: 1px dashed #E5C979;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: #8b6b00;
+    white-space: nowrap;
+  }
+
+  /* ————— Section ————— */
+  section {
+    padding: 48px 0 8px;
+    max-width: 70ch;
+  }
+  section + section { border-top: 1px solid var(--hairline); }
+
+  .marker-row {
+    display: flex;
+    align-items: baseline;
+    gap: 18px;
+    margin-bottom: 12px;
+  }
+  .marker {
+    font-family: var(--font-display);
+    font-size: 26px;
+    line-height: 1;
+    color: var(--gold);
+    font-weight: 400;
+  }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  h2 {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: 30px;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    margin: 0 0 20px;
+    text-wrap: balance;
+  }
+  h3 {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: 20px;
+    line-height: 1.25;
+    color: var(--deep);
+    margin: 28px 0 10px;
+  }
+  h4 {
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin: 22px 0 8px;
+  }
+  p { margin: 0 0 12px; }
+  ul, ol { padding-left: 22px; margin: 6px 0 16px; }
+  li { margin-bottom: 5px; }
+  li::marker { color: var(--gold); font-family: var(--font-mono); font-size: 11.5px; }
+  strong { color: var(--ink); font-weight: 600; }
+  em { font-style: italic; }
+  a { color: var(--deep-2); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: rgba(0,37,66,0.35); }
+
+  /* ————— Numbers block ————— */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--hairline);
+    border: 1px solid var(--hairline);
+    margin: 24px 0 28px;
+  }
+  @media (max-width: 640px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+  .kpi-cell {
+    background: var(--ground);
+    padding: 18px 16px;
+  }
+  .kpi-cell .num {
+    font-family: var(--font-display);
+    font-size: 26px;
+    line-height: 1;
+    color: var(--deep);
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    margin-bottom: 6px;
+  }
+  .kpi-cell .num .unit { font-size: 12.5px; color: var(--muted); font-weight: 400; margin-left: 2px; }
+  .kpi-cell .label {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  /* ————— 4-col matrix / assets ————— */
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px 36px;
+    margin: 16px 0 24px;
+  }
+  @media (max-width: 640px) { .grid-2 { grid-template-columns: 1fr; gap: 20px; } }
+
+  /* ————— Services table ————— */
+  .table-scroll { overflow-x: auto; margin: 18px -4px 26px; padding: 0 4px; }
+  table.services {
+    width: 100%;
+    min-width: 620px;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  table.services th, table.services td {
+    text-align: left;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--hairline);
+    vertical-align: top;
+  }
+  table.services thead th {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    border-bottom: 1.5px solid var(--ink);
+  }
+  table.services td.stage {
+    font-weight: 600;
+    color: var(--deep);
+    white-space: nowrap;
+  }
+
+  /* ————— Callouts ————— */
+  .callout {
+    padding: 14px 20px;
+    margin: 22px 0;
+    border-left: 3px solid var(--gold);
+    background: rgba(168,131,66,0.05);
+    font-size: 14.5px;
+    line-height: 1.6;
+  }
+  .callout.deep { border-left-color: var(--deep); background: rgba(0,37,66,0.04); }
+  .callout .label {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+  .callout.deep .label { color: var(--deep); }
+
+  /* ————— Timeline ————— */
+  .timeline {
+    margin: 20px 0 30px;
+    border-top: 1px solid var(--hairline);
+  }
+  .stage {
+    display: grid;
+    grid-template-columns: 110px 1fr;
+    gap: 24px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--hairline);
+  }
+  @media (max-width: 640px) { .stage { grid-template-columns: 1fr; gap: 6px; } }
+  .stage .when {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.06em;
+    color: var(--gold);
+    text-transform: uppercase;
+    padding-top: 3px;
+  }
+  .stage .when .name {
+    display: block;
+    font-family: var(--font-display);
+    font-size: 14.5px;
+    color: var(--deep);
+    text-transform: none;
+    margin-top: 2px;
+    font-weight: 500;
+  }
+  .stage ul { margin: 0; padding-left: 18px; }
+  .stage li { font-size: 14px; margin-bottom: 3px; }
+
+  /* ————— Signoff ————— */
+  .signoff {
+    margin-top: 56px;
+    padding: 28px;
+    background: var(--deep);
+    color: #ECEEF2;
+    border-left: 4px solid var(--gold);
+  }
+  .signoff h3 {
+    color: #fff;
+    margin: 0 0 8px;
+    font-size: 22px;
+  }
+  .signoff .role {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--gold-soft);
+    margin-bottom: 10px;
+  }
+  .signoff ul { padding-left: 0; list-style: none; margin: 8px 0 16px; }
+  .signoff li { padding: 3px 0; font-size: 14px; color: #C4CAD3; }
+  .signoff li::before { content: "· "; color: var(--gold); }
+  .signoff a { color: #fff; text-decoration-color: rgba(255,255,255,0.4); }
+  .signoff .cta {
+    display: inline-block;
+    background: var(--gold);
+    color: var(--deep);
+    padding: 10px 20px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    text-decoration: none;
+    font-weight: 600;
+    margin-top: 12px;
+  }
+
+  /* ————— Colophon ————— */
+  .colophon {
+    margin-top: 32px;
+    padding-top: 20px;
+    border-top: 1px solid var(--hairline);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  @media print {
+    body { background: #fff; font-size: 11pt; }
+    section { page-break-inside: avoid; padding: 30px 0; }
+    .signoff { background: #f0f0f0; color: #000; }
+    .signoff a { color: #000; }
+    .fill { background: transparent; border: 1px solid #999; }
+  }
+</style>
+
+<div class="wrap">
+
+<!-- ═════════════════ Cover ═════════════════ -->
+<header class="cover">
+  <div class="cover-meta">
+    <span class="brand">Ray White Mission Bay · Chinese Buyer Program</span>
+    <span>2026·07 · v1</span>
+  </div>
+
+  <div class="prepared-for">Prepared for <span class="fill">[开发商名称]</span> · <span class="fill">[项目名 or "Auckland pipeline overview"]</span></div>
+
+  <h1>Auckland <em>华人 buyer 通道</em><br>为您的下一个 pre-launch</h1>
+
+  <p class="sub">
+    Ray White Mission Bay · Roman Hu 主导 · 覆盖 4 语（英/普/沪/粤）· 集成 Ray White NZ China Desk 与链家 Lianjia co-listing 网络 · 独家专供 Bayside + Central Gold + Eastern 高净值华人买家池。
+  </p>
+
+  <div class="thesis">
+    Auckland 房产开发商每 3 单里有 1 单来自华人买家<span class="fill">[开发商可核数据]</span> ·
+    但 <span class="accent">80% 的开发商没有一个专门的 Chinese buyer pipeline</span>。<br><br>
+    Roman Hu 作为 Ray White Mission Bay <span class="gold">Head of Projects</span> · 是唯一同时具备 ①分行 project marketing 头衔 ②Ray White NZ China Desk 集成通道 ③链家 6,000+ 门店 2.6 亿买家池 ④四语能力 + 前 TV 主持人视频制作背景 —— 这 4 项**同时**具备的东区 agent。
+  </div>
+</header>
+
+<!-- ═════════════════ 壹 · The gap ═════════════════ -->
+<section>
+  <div class="marker-row"><span class="marker">壹</span><span class="eyebrow">The gap developers face</span></div>
+  <h2>为什么华人 buyer 是您 pre-launch 阶段最难触达的一段</h2>
+
+  <p>Auckland 开发商在标准挂盘阶段（realestate.co.nz / OneRoof / homes.co.nz）就能接触所有本地买家。但**华人高净值 buyer 的决策链路完全不在这些平台上**：</p>
+
+  <ul>
+    <li><strong>他们从微信朋友圈 + 小红书 + 天维网</strong>看新盘 · 而不是 realestate.co.nz</li>
+    <li><strong>他们通过熟人 referral + 一个信任的中文中介</strong>决策 · 而不是 auction 现场竞标</li>
+    <li><strong>他们要求中文签约资料 + 中文法务翻译</strong> · 大部分开发商 sales team 没有此配置</li>
+    <li><strong>大陆买家一部分通过链家 Lianjia 在国内先看盘</strong> · 落地后再确认 · 大部分开发商无链家通道</li>
+  </ul>
+
+  <p>结果：开发商在 pre-launch 阶段**华人 buyer 触达率通常在 15-25%** · 而实际市场里华人 buyer 占 Auckland 高端 residential 高达 <span class="fill">[Roman: 30-40% based on your intake data]</span>。</p>
+
+  <div class="callout deep">
+    <span class="label">The gap</span>
+    <strong>预留的 pre-launch 优势 buyer 池里，最有购买力的一段（华人）被系统性错过。</strong>不是需求不在 · 是通道不对。
+  </div>
+</section>
+
+<!-- ═════════════════ 贰 · The solution ═════════════════ -->
+<section>
+  <div class="marker-row"><span class="marker">贰</span><span class="eyebrow">Roman's solution</span></div>
+  <h2>华人 buyer 通道 · 由一个人完整承接</h2>
+
+  <p>Roman 不是给你的 marketing team 加一条 vendor · 是给你直接提供一个**"华人 buyer end-to-end pipeline"** —— pre-launch database → 中文 marketing 内容 → 签约翻译 → 拍卖竞标 → 交割后跟进 · 五个环节由 Roman 一人主导。</p>
+
+  <div class="kpi-grid">
+    <div class="kpi-cell">
+      <div class="num"><span class="fill">[500+]</span></div>
+      <div class="label">Chinese buyer database（Roman 自建 · 12 月目标 1000）</div>
+    </div>
+    <div class="kpi-cell">
+      <div class="num">2.6<span class="unit">亿</span></div>
+      <div class="label">链家 buyer 池 · 通过 Ray White co-listing 接入</div>
+    </div>
+    <div class="kpi-cell">
+      <div class="num">4</div>
+      <div class="label">语言 EN / 普 / 沪 / 粤 全覆盖</div>
+    </div>
+    <div class="kpi-cell">
+      <div class="num">$151<span class="unit">M</span></div>
+      <div class="label">Roman 2024 OneRoof Top 18 sales · NZD</div>
+    </div>
+  </div>
+
+  <p><em>Chinese buyer database 是 Roman 亲自过滤过的、经过 pre-qualification 的华人买家名单 · 不是 cold list。数据点包括：预算区间 · 首置或投资 · 学区偏好 · 时间窗口 · 语言偏好。</em></p>
+</section>
+
+<!-- ═════════════════ 叁 · 4 assets ═════════════════ -->
+<section>
+  <div class="marker-row"><span class="marker">叁</span><span class="eyebrow">The 4 assets Roman brings</span></div>
+  <h2>4 项资产 · 4 家竞对 agent 都不具备的组合</h2>
+
+  <div class="grid-2">
+    <div>
+      <h4>Asset 1 · Head of Projects 头衔</h4>
+      <p>Ray White Mission Bay 分行内**唯一**冠 Head of Projects 头衔的 agent · 天然具备 vendor 端心智 · 不是二手房 agent 兼职做 pre-launch。</p>
+    </div>
+    <div>
+      <h4>Asset 2 · Ray White NZ China Desk</h4>
+      <p>Sen Wang 领导的集团级 Chinese buyer 通道 · Roman 直连 · 加链家 Lianjia 6,000+ 中国门店 co-listing 协议。</p>
+    </div>
+    <div>
+      <h4>Asset 3 · 四语 + 前 TV 主持人</h4>
+      <p>英语 / 普通话 / 上海话 / 粤语 · 可为项目录制中文 walkthrough / 楼花介绍 / 买家答疑视频 · 无第三方翻译成本。</p>
+    </div>
+    <div>
+      <h4>Asset 4 · MBA + AREINZ + 硬社会证明</h4>
+      <p>2024 OneRoof NZ Top Agents Top 18 · $151M sales · MBA 金融背景 · Silver Fern Business Award · vendor 谈判 + 华人客户信任双具备。</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <span class="label">Why this combo matters</span>
+    Auckland 东区**没有其他 agent 同时具备这 4 项**。竞对 Aaron Foss（Barfoot）· Paul Neshausen（Barfoot St Heliers）· Sarah Liu（Bayleys Remuera）· Lawrence Yuan（Barfoot Mission Bay）— 全部只覆盖 2-3 项 · 无一具备 Head of Projects + China Desk + 四语 + Top 18 全套。
+  </div>
+</section>
+
+<!-- ═════════════════ 肆 · Services matrix ═════════════════ -->
+<section>
+  <div class="marker-row"><span class="marker">肆</span><span class="eyebrow">Services at each stage</span></div>
+  <h2>项目 5 个阶段 · Roman 交付什么</h2>
+
+  <div class="table-scroll">
+    <table class="services">
+      <thead>
+        <tr>
+          <th>Stage</th>
+          <th>Roman 交付</th>
+          <th>时间</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="stage">1 · Pre-launch<br>database build</td>
+          <td>把 Roman 现有 <span class="fill">[500+]</span> Chinese buyer DB 中匹配本项目 profile 的 buyer 筛出 · 一对一 WhatsApp/微信邀约 · 建立 exclusive interest list</td>
+          <td>Day 1-30</td>
+        </tr>
+        <tr>
+          <td class="stage">2 · Chinese<br>marketing content</td>
+          <td>中文项目介绍视频（Roman 出镜）· 双语 brochure · 微信朋友圈 + 小红书内容矩阵 · 天维网 estate.skykiwi.com 挂盘</td>
+          <td>Day 15-45</td>
+        </tr>
+        <tr>
+          <td class="stage">3 · Lianjia<br>co-listing 上架</td>
+          <td>通过 Ray White NZ China Desk 提交链家 co-listing 申请 · 覆盖大陆 buyer · 全程中文咨询响应由 Roman 处理</td>
+          <td>Day 30-60</td>
+        </tr>
+        <tr>
+          <td class="stage">4 · 签约<br>+ 拍卖</td>
+          <td>中文签约资料准备 · 中文法务翻译对接 · Auction 现场为华人 buyer 竞标（Ray White Wayne Maguire 拍卖师体系）</td>
+          <td>项目 auction 日</td>
+        </tr>
+        <tr>
+          <td class="stage">5 · 交割<br>+ 跟进</td>
+          <td>settlement 阶段中文对接 · 交房后 12 月内买家 referral 回流 · 建立开发商长期口碑</td>
+          <td>成交后 12 月</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═════════════════ 伍 · Track record ═════════════════ -->
+<section>
+  <div class="marker-row"><span class="marker">伍</span><span class="eyebrow">Track record</span></div>
+  <h2>Roman 的硬数字 · 可 fact-check</h2>
+
+  <ul>
+    <li><strong>OneRoof NZ Top Agents 2024 · Top 18 out of ~15,000 agents nationally</strong> · $151M in individual sales · <a href="https://www.oneroof.co.nz">oneroof.co.nz</a></li>
+    <li><strong>MBA (Massey University)</strong> · 金融背景 · 谈判 + 项目经济性分析</li>
+    <li><strong>AREINZ · Silver Fern Business Award</strong> · REINZ 全国排名 top 中介资格认证</li>
+    <li><strong>前中文电视台主持人 + 制片人</strong> · 视频/中文内容制作能力内建 · 无第三方成本</li>
+    <li><strong>9 年 Auckland residential 经验</strong> · 5 年 team leader · 华人 + Kiwi 双段实操</li>
+    <li><strong>2026-07 起 Ray White Mission Bay · Head of Projects</strong> · 分行 project portfolio 独立负责人</li>
+  </ul>
+
+  <p>Auckland residential agent LinkedIn: <a href="https://www.linkedin.com/in/roman-hu-943843137/">linkedin.com/in/roman-hu-943843137</a></p>
+</section>
+
+<!-- ═════════════════ 陆 · Case fit ═════════════════ -->
+<section>
+  <div class="marker-row"><span class="marker">陆</span><span class="eyebrow">Case fit</span></div>
+  <h2>为什么 <span class="fill">[开发商名称]</span> <span class="fill">[项目名]</span> 特别适合此通道</h2>
+
+  <p><em>这一章需要 Roman 针对每家开发商定制 · 每次 pitch 前花 15 分钟做 tailoring。</em></p>
+
+  <h3>项目基本判断（Roman 填）</h3>
+  <ul>
+    <li><strong>Location fit</strong>：<span class="fill">[项目位置 vs Roman 目标地理 · Mission Bay/Kohimarama/St Heliers/Glendowie/Remuera/Meadowbank/Ellerslie]</span></li>
+    <li><strong>Price band fit</strong>：<span class="fill">[项目价格带 vs Roman 华人 buyer DB 主流预算 $1.5M-$3M 或 $3M-$6M]</span></li>
+    <li><strong>Product fit</strong>：<span class="fill">[freehold townhouse / 公寓 / duplex · 华人买家熟悉度]</span></li>
+    <li><strong>School zone fit</strong>：<span class="fill">[项目是否落在 Selwyn / Grammar / Baradene 学区 · 华人妈妈决策强触发]</span></li>
+  </ul>
+
+  <h3>Roman 已有 buyer 池匹配（Roman 填）</h3>
+  <ul>
+    <li>当前 DB 中匹配本项目 profile 的 buyer 约 <span class="fill">[X]</span> 位 · 已 pre-qualified</li>
+    <li>其中 <span class="fill">[X]</span> 位已表达"新盘 pre-launch 兴趣"</li>
+    <li>预估 pre-launch 期华人 buyer 转化 <span class="fill">[X-Y]</span> 单</li>
+  </ul>
+</section>
+
+<!-- ═════════════════ 柒 · Commercial ═════════════════ -->
+<section>
+  <div class="marker-row"><span class="marker">柒</span><span class="eyebrow">Commercial structure</span></div>
+  <h2>建议合作结构 · 3 种可选</h2>
+
+  <h3>Option A · Chinese Buyer Exclusive Channel（推荐）</h3>
+  <p>本项目所有华人 buyer sales 由 Roman 主导 · 开发商内部 sales team 保留其他 buyer · 佣金结构 <span class="fill">[开发商标准 sales commission · 按华人 buyer 成交单计]</span>。</p>
+  <p><strong>好处（开发商视角）</strong>：华人段独立通道不影响主 sales team · 增量成交纯净贡献 · 无培训成本。</p>
+
+  <h3>Option B · Pre-launch Chinese Marketing Package</h3>
+  <p>Roman 只做 pre-launch 阶段华人 buyer 蓄水池 + 中文 marketing content · 项目正式 launch 后交回开发商 sales team · 前期服务按 <span class="fill">[flat fee 或 lead 数收费]</span>。</p>
+
+  <h3>Option C · Full-project Sales Partner</h3>
+  <p>Roman 作为项目 exclusive sales partner · 覆盖全 buyer segment · 佣金 <span class="fill">[全项目 %]</span>。</p>
+
+  <div class="callout">
+    <span class="label">建议</span>
+    <strong>Option A 对双方风险最小</strong>：开发商保留主 sales team · Roman 提供 additive 华人段 · 试单验证后可升 Option C。首次合作建议 A 起步。
+  </div>
+</section>
+
+<!-- ═════════════════ 捌 · Timeline ═════════════════ -->
+<section>
+  <div class="marker-row"><span class="marker">捌</span><span class="eyebrow">First 90 days</span></div>
+  <h2>如果我们今天说 yes · 90 天路线</h2>
+
+  <div class="timeline">
+    <div class="stage">
+      <div class="when">Day 1-14<span class="name">Kickoff</span></div>
+      <ul>
+        <li>MOU 或 heads of agreement 签 · 明确 Option A/B/C 与佣金</li>
+        <li>Roman 获取项目 material（floorplan · CGI · price sheet · timeline）</li>
+        <li>华人 buyer DB pre-filter（预计匹配 <span class="fill">[X]</span> 位）</li>
+      </ul>
+    </div>
+    <div class="stage">
+      <div class="when">Day 15-45<span class="name">Content build</span></div>
+      <ul>
+        <li>Roman 出镜中文项目介绍视频 3 支（60s / 3min / 5min）</li>
+        <li>双语 brochure + 微信朋友圈内容矩阵制作</li>
+        <li>小红书 3 篇长文（学区 · 楼盘对比 · 华人 buyer 决策）</li>
+        <li>天维网 estate.skykiwi.com 挂盘 + 华页专栏 pitch</li>
+      </ul>
+    </div>
+    <div class="stage">
+      <div class="when">Day 30-60<span class="name">Lianjia 通道</span></div>
+      <ul>
+        <li>通过 Ray White NZ China Desk 提交链家 co-listing</li>
+        <li>大陆 buyer 咨询响应（Roman 一对一 · 中文微信/WhatsApp）</li>
+        <li>Interest list 从预 <span class="fill">[X]</span> 位扩至 <span class="fill">[Y]</span> 位</li>
+      </ul>
+    </div>
+    <div class="stage">
+      <div class="when">Day 60-90<span class="name">Convert</span></div>
+      <ul>
+        <li>Pre-launch open home 华人段专场（Roman 主持）</li>
+        <li>华人 buyer 竞标 / 签约 / 中文法务对接</li>
+        <li>目标：pre-launch 完 <span class="fill">[X]</span> 单</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════ 玖 · What Roman needs ═════════════════ -->
+<section>
+  <div class="marker-row"><span class="marker">玖</span><span class="eyebrow">What Roman needs from you</span></div>
+  <h2>开发商需要给的 3 件事</h2>
+
+  <ol>
+    <li><strong>项目正式 material access</strong>：floorplan / CGI / price sheet / settlement timeline · 早 30-45 天拿到，Roman 就能早 30-45 天蓄水</li>
+    <li><strong>Exclusivity 条款</strong>（Option A/C）：华人 buyer 单进本项目必须通过 Roman · 避免华人 buyer 被 duplicated 触达导致信任崩</li>
+    <li><strong>Marketing budget 分配（Option A/C）</strong>：Roman 承担中文视频 + 内容矩阵制作 · 开发商保留传统渠道 spend · 明确不重叠</li>
+  </ol>
+</section>
+
+<!-- ═════════════════ 拾 · Next steps ═════════════════ -->
+<section>
+  <div class="marker-row"><span class="marker">拾</span><span class="eyebrow">Next steps</span></div>
+  <h2>接下来 3 件事 · 你说 yes 就跑</h2>
+
+  <ol>
+    <li><strong>15 分钟电话</strong>：Roman + 开发商 project lead · 项目 fit 深聊 · Roman 亲自 pitch DB 匹配数字</li>
+    <li><strong>正式 pitch meeting</strong>：Roman 带 Ray White Mission Bay CEO Wayne Maguire 一起来 · 面对面谈条款</li>
+    <li><strong>Trial run</strong>：先跑 Option B（低承诺）· 30 天看华人 buyer interest list 规模 · 达标转 Option A</li>
+  </ol>
+</section>
+
+<!-- ═════════════════ Signoff ═════════════════ -->
+<div class="signoff">
+  <div class="role">Prepared by</div>
+  <h3>Roman Hu · Ray White Mission Bay</h3>
+  <div class="role" style="color:var(--gold);margin-top:6px;">Head of Projects · Licensee Salesperson (REAA 2008)</div>
+  <ul>
+    <li>OneRoof NZ Top Agents 2024 · Top 18 · $151M in sales</li>
+    <li>MBA · AREINZ · Silver Fern Business Award</li>
+    <li>Fluent in English / Mandarin / Shanghainese / Cantonese</li>
+    <li>Former Chinese-language TV host & producer</li>
+    <li>Ray White NZ China Desk direct access + Lianjia co-listing</li>
+  </ul>
+  <p style="font-size:14px;margin:12px 0 4px;">
+    Direct: <span class="fill">[Roman: 021 XXX XXX]</span> ·
+    Email: <a href="mailto:roman.hu@raywhite.co.nz">roman.hu@raywhite.co.nz</a>
+  </p>
+  <p style="font-size:14px;margin:0 0 12px;">
+    Ray White Mission Bay · 33-35 Tamaki Drive · Auckland 1071
+  </p>
+  <a href="mailto:roman.hu@raywhite.co.nz?subject=Chinese%20Buyer%20Program%20—%20pitch%20meeting" class="cta">Book 15-min pitch call →</a>
+</div>
+
+<!-- ═════════════════ Colophon ═════════════════ -->
+<div class="colophon">
+  <p><strong>Chinese Buyer Program · Ray White Mission Bay · v1 · July 2026</strong></p>
+  <p>Prepared for <span class="fill">[开发商名称]</span>. Confidential business proposal — for recipient review only, not for redistribution.</p>
+  <p>Roman Hu · Licensee Salesperson under Real Estate Agents Act 2008 (REAA). Ray White Mission Bay is trading as Five AM Bayside Realty Limited.</p>
+  <p>Data attribution: OneRoof NZ Top Agents (公开榜单) · Ray White NZ China Desk (集团内部通道) · Lianjia co-listing (Ray White NZ 官方伙伴).</p>
+</div>
+
+</div>

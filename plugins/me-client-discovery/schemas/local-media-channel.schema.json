@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://magicengine.com.au/schemas/local-media-channel.schema.json",
+  "title": "Local Media Channel",
+  "description": "One local media / community / newsletter / sponsorship channel discovered in a client's region. Written by plugin (Phase 0) or 司马徽 (Phase 3). Consumed by 诸葛亮 agent (Prescription) when choosing where to invest local budget.",
+  "type": "object",
+  "required": ["media_name", "category", "scanned_at", "source"],
+  "properties": {
+    "media_name": {
+      "type": "string",
+      "description": "e.g. 'East & Bays Courier' / 'Verve Magazine' / 'Chinese Herald 华页'"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "print_newspaper",
+        "print_magazine",
+        "community_fb_group",
+        "neighbourly",
+        "newsletter_edm",
+        "podcast",
+        "youtube_channel",
+        "radio",
+        "tv",
+        "sponsorship_event",
+        "chinese_media",
+        "school_publication",
+        "business_association",
+        "other"
+      ]
+    },
+    "scanned_at": { "type": "string", "format": "date-time" },
+    "source": {
+      "type": "string",
+      "enum": ["plugin_manual", "simatai_auto", "manual_import"]
+    },
+    "coverage": {
+      "type": "object",
+      "properties": {
+        "geography_covered": { "type": "array", "items": { "type": "string" }, "description": "Which suburbs the channel reaches" },
+        "reach_number": { "type": ["integer", "null"], "description": "Circulation / audience / members" },
+        "reach_metric": {
+          "type": "string",
+          "enum": ["print_circulation", "readers_nielsen", "fb_members", "email_subs", "podcast_downloads", "tv_viewers", "unknown"]
+        },
+        "audience_profile": { "type": "string", "description": "e.g. 'high-net-worth lifestyle 30-55'" }
+      }
+    },
+    "pricing": {
+      "type": "object",
+      "properties": {
+        "rate_card_notes": { "type": "string", "description": "Free-form; e.g. 'Full page $2,752 / Quarter $688 / Front page solus 2x8 $900'" },
+        "cheapest_entry_option": { "type": "string" },
+        "discount_note": { "type": "string" },
+        "currency": { "type": "string", "default": "NZD" }
+      }
+    },
+    "contact": {
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "person": { "type": "string" },
+        "advertise_url": { "type": "string" },
+        "notes": { "type": "string" }
+      }
+    },
+    "chinese_relevant": {
+      "type": "boolean",
+      "description": "True if channel is specifically Chinese-language or has strong Chinese audience"
+    },
+    "recommended_play": {
+      "type": "string",
+      "description": "One-line recommended action. e.g. '每月 1/4 版付费 + 每季 sponsored op-ed' / '内容置换换免费专栏'"
+    },
+    "roi_rank": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5,
+      "description": "1 = must-do first, 5 = optional"
+    },
+    "traps_to_avoid": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "e.g. 'Ellerslie Racecourse 主赞助被 Barfoot 占了 10+ 年'"
+    },
+    "source_links": {
+      "type": "array",
+      "items": { "type": "string", "format": "uri" }
+    }
+  },
+  "additionalProperties": false
+}

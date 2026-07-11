@@ -1,0 +1,167 @@
+{
+  "competitor_name": "Sarah Liu 刘思华",
+  "scanned_at": "2026-07-10T09:45:00+12:00",
+  "source": "plugin_manual",
+  "positioning_oneliner": "Bayleys Remuera 中英/粤三语豪宅路线 · Top 5% + $500M 俱乐部 · 服务大陆/香港高净值华人 · 20 年中资银行金融背景 · 但零中文自媒体布局",
+  "company": "Bayleys Real Estate (Remuera 分行)",
+  "regions": [
+    "Remuera",
+    "Orakei",
+    "Greenlane",
+    "Mission Bay",
+    "St Heliers",
+    "Parnell",
+    "Epsom",
+    "Glendowie"
+  ],
+  "audience": {
+    "language_mix": "en_zh_multi",
+    "price_tier": "luxury",
+    "notes": "明确'Asian migrant community established connections' · 服务 high net worth 华人（大陆+香港+ABC）· 三语 EN/普通话/粤语 · 但门面（LinkedIn/Bayleys bio/oneroof/homes.co.nz）全部英文优先 · 华人身份靠中文姓名 + 语言标注被动承接 · 不是主动 SEO 关键词"
+  },
+  "recent_activity": {
+    "period_months": 12,
+    "deals_count": 12,
+    "avg_deal_size": 4410000,
+    "gmv": null,
+    "currency": "NZD"
+  },
+  "personal_domain": {
+    "exists": false,
+    "url": null,
+    "dns_verified": true,
+    "candidate_domains_checked": [
+      "sarahliu.co.nz",
+      "sarahliurealestate.co.nz",
+      "sarahliuproperty.co.nz"
+    ]
+  },
+  "social_media": [
+    {
+      "platform": "facebook",
+      "handle": "sarahliubayleysremuera",
+      "url": "https://www.facebook.com/sarahliubayleysremuera/",
+      "exists": true,
+      "followers": null,
+      "posts_count": null,
+      "activity_note": "活跃发 listing · 内容英文 listing post 模板化 · 中文买家 engage 弱"
+    },
+    {
+      "platform": "instagram",
+      "handle": "sarahliu_bayleys",
+      "url": "https://www.instagram.com/sarahliu_bayleys/",
+      "exists": true,
+      "followers": null,
+      "posts_count": null,
+      "activity_note": "粉丝数被平台限制未拿到"
+    },
+    {
+      "platform": "linkedin",
+      "handle": "sarah-liu-remuera",
+      "url": "https://www.linkedin.com/in/sarah-liu-remuera/",
+      "exists": true,
+      "followers": null,
+      "posts_count": null,
+      "activity_note": "显名'刘思华 Sarah Liu'· HTTP 999 反爬未打开"
+    },
+    {
+      "platform": "youtube",
+      "handle": null,
+      "url": null,
+      "exists": false,
+      "followers": null,
+      "posts_count": null,
+      "activity_note": "无独立频道 · 无中文项目介绍视频"
+    },
+    {
+      "platform": "tiktok",
+      "handle": null,
+      "url": null,
+      "exists": false,
+      "followers": null,
+      "posts_count": null,
+      "activity_note": "未见"
+    },
+    {
+      "platform": "xiaohongshu",
+      "handle": null,
+      "url": null,
+      "exists": false,
+      "followers": null,
+      "posts_count": null,
+      "activity_note": "未见个人号 · 三语能力未转化中文平台布局"
+    },
+    {
+      "platform": "wechat_public",
+      "handle": null,
+      "url": null,
+      "exists": false,
+      "followers": null,
+      "posts_count": null,
+      "activity_note": "未见"
+    },
+    {
+      "platform": "wechat_video",
+      "handle": null,
+      "url": null,
+      "exists": false,
+      "followers": null,
+      "posts_count": null,
+      "activity_note": "未见"
+    },
+    {
+      "platform": "douyin",
+      "handle": null,
+      "url": null,
+      "exists": false,
+      "followers": null,
+      "posts_count": null,
+      "activity_note": "未见"
+    }
+  ],
+  "paid_ads": {
+    "meta_ads": "unknown",
+    "google_ads": "unknown",
+    "verification_notes": "Meta Ad Library socket 挂断未直接确认 · 从无独立域名 + 完全依赖 Bayleys brand + 内容以 listing post 为主的模式看 · 大概率只跑单条 listing boost（Bayleys 品牌层级），无自建 lead-gen 广告漏斗"
+  },
+  "reputation": {
+    "google_business_profile": null,
+    "rate_my_agent_score": null,
+    "rate_my_agent_reviews": null,
+    "oneroof_testimonials": null,
+    "other_notes": "生涯累计 64-68 单 / $313M · 2025/2026 财年 Bayleys Auckland Residential 1 月 #1 销售 · 2025 年 3&4 月 #1 · 24 月合计 $128.6M · 中文口碑靠 Chinese Herald 2 篇 PR 稿承接（专访 Bayleys 顶尖豪宅销售顾问 + Rawene Avenue 3 周 $5600 万）"
+  },
+  "differentiators": [
+    "20 年中资银行金融背景 · Investment/tax 视角讲盘",
+    "豪宅 tier · $4-6M+ 均价",
+    "三语覆盖大陆+港+ABC",
+    "Bayleys 高端品牌背书",
+    "Chinese Herald PR 稿承接中文口碑"
+  ],
+  "weaknesses": [
+    "零中文自媒体 · 小红书/视频号/微信公号/抖音全空 · 中文流量全靠先驱网 PR 稿被动承接",
+    "无独立域名 · 所有 SEO 权重给 bayleys.co.nz · 个人品牌资产不可携带",
+    "英文优先 bio · 三语能力没转化成中文关键词 SEO",
+    "只做豪宅 tier · $1-3M 中端家庭刚需盘（Meadowbank/Ellerslie/Mount Wellington）不是主战场",
+    "社媒英文为主 · FB/IG 帖子英文 listing post 模板化 · 中文买家 engage 弱",
+    "无 YouTube 视频看房 / 无 TikTok 短视频 · 年轻华人买家触达通道缺失"
+  ],
+  "source_links": [
+    "https://www.bayleys.co.nz/sarah-liu",
+    "https://auckland.bayleys.co.nz/agents/sarah-liu-3848",
+    "https://www.oneroof.co.nz/agent/sarah-liu-13348",
+    "https://homes.co.nz/profile/bayleys/remuera/sarah-liu",
+    "https://www.realestate.co.nz/agent/294205/sarah-liu",
+    "https://www.facebook.com/sarahliubayleysremuera/",
+    "https://www.linkedin.com/in/sarah-liu-remuera/",
+    "https://www.chineseherald.co.nz/news/property/sarah-liu/",
+    "https://www.chineseherald.co.nz/news/property/rawene-avenue/"
+  ],
+  "data_gaps": [
+    "Meta Ad Library 直接广告数据 · socket 挂断未取",
+    "Instagram / Facebook 精确粉丝数 · 平台反爬需登录",
+    "LinkedIn 详细履历 · HTTP 999 反爬",
+    "GBP review 数据 · 未验证",
+    "微信私域华人 buyer 数据库规模 · 非公开"
+  ]
+}

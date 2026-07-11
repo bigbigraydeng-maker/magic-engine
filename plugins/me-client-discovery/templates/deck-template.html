@@ -1,0 +1,1214 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Bayside 90 天占位战 · Roman Hu · Ray White Mission Bay Head of Projects · 竞争白地图 + 三线漏斗处方 + Head of Projects vendor 端独家杠杆">
+<meta name="author" content="Magic Engine · Ray Deng">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Bayside 90 天占位战 · Roman Hu 处方">
+<meta property="og:description" content="4 家对手全撞白墙 · 三线漏斗（Meta ThruPlay + GEO + 本地媒体） + Head of Projects vendor 端独家杠杆">
+<meta property="og:locale" content="zh_CN">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Bayside 90 天占位战 · Roman Hu 处方">
+<meta name="twitter:description" content="4 家对手全撞白墙 · 三线漏斗 + vendor 端独家杠杆">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8F%98%3C/text%3E%3C/svg%3E">
+<title>Bayside 90 天占位战 · Roman Hu 处方</title>
+
+<style>
+  :root {
+    --ground: #F8F6F1;
+    --ground-2: #F1EEE6;
+    --ink: #14161A;
+    --muted: #6B6E76;
+    --deep: #002542;
+    --deep-soft: #12395A;
+    --signal: #C63A21;
+    --gold: #A88342;
+    --gold-soft: #C9AA6D;
+    --kiwi: #2E6B4A;
+    --hairline: #E5E3DB;
+    --hairline-strong: #C9C5B7;
+
+    --font-display: Charter, 'Iowan Old Style', 'Songti SC', 'Noto Serif SC', 'Times New Roman', serif;
+    --font-body: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Inter, sans-serif;
+    --font-mono: 'SF Mono', 'JetBrains Mono', Menlo, ui-monospace, monospace;
+
+    --measure: 68ch;
+    --gutter: clamp(20px, 4vw, 56px);
+  }
+
+  html { color-scheme: light; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 15.5px;
+    line-height: 1.68;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  .wrap {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: clamp(48px, 8vw, 96px) var(--gutter) 96px;
+  }
+
+  /* ————— Cover ————— */
+  .cover {
+    padding-bottom: 64px;
+    border-bottom: 1px solid var(--hairline-strong);
+    margin-bottom: 72px;
+  }
+  .cover-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 24px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding-bottom: 40px;
+    border-bottom: 1px solid var(--hairline);
+    margin-bottom: 40px;
+    flex-wrap: wrap;
+  }
+  .cover h1 {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: clamp(38px, 6.2vw, 62px);
+    line-height: 1.06;
+    letter-spacing: -0.015em;
+    margin: 0 0 20px;
+    text-wrap: balance;
+    color: var(--ink);
+  }
+  .cover h1 em {
+    font-style: italic;
+    color: var(--deep);
+    font-weight: 500;
+  }
+  .cover .sub {
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.55;
+    color: var(--muted);
+    max-width: 620px;
+    margin: 0 0 44px;
+  }
+  .cover .sub b {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  .thesis {
+    background: transparent;
+    border-left: 3px solid var(--gold);
+    padding: 2px 0 2px 24px;
+    max-width: var(--measure);
+    font-family: var(--font-display);
+    font-size: 19.5px;
+    line-height: 1.55;
+    color: var(--ink);
+    letter-spacing: -0.005em;
+  }
+  .thesis .accent { color: var(--deep); font-weight: 600; font-style: normal; }
+  .thesis .red { color: var(--signal); font-weight: 600; }
+
+  /* ————— Section ————— */
+  section {
+    padding: 56px 0 8px;
+    max-width: var(--measure);
+    scroll-margin-top: 24px;
+  }
+  section + section { border-top: 1px solid var(--hairline); }
+
+  .marker-row {
+    display: flex;
+    align-items: baseline;
+    gap: 18px;
+    margin-bottom: 14px;
+  }
+  .marker {
+    font-family: var(--font-display);
+    font-size: 30px;
+    line-height: 1;
+    color: var(--gold);
+    font-weight: 400;
+    letter-spacing: 0.02em;
+  }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  h2 {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: 34px;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    margin: 0 0 22px;
+    text-wrap: balance;
+  }
+  h3 {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: 22px;
+    line-height: 1.28;
+    color: var(--deep);
+    margin: 36px 0 12px;
+    letter-spacing: -0.005em;
+  }
+  h4 {
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 13.5px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin: 28px 0 10px;
+  }
+  p { margin: 0 0 14px; }
+  p + p { margin-top: 0; }
+
+  a { color: var(--deep-soft); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: rgba(0,37,66,0.35); }
+  a:hover { text-decoration-color: currentColor; }
+
+  strong { font-weight: 600; color: var(--ink); }
+  em { font-style: italic; }
+
+  ul, ol { padding-left: 20px; margin: 4px 0 18px; }
+  li { margin-bottom: 6px; padding-left: 4px; }
+  li::marker { color: var(--gold); font-family: var(--font-mono); font-size: 12px; }
+
+  /* ————— Callouts ————— */
+  .callout {
+    padding: 14px 18px 14px 18px;
+    margin: 20px 0 22px;
+    border-left: 3px solid var(--muted);
+    background: transparent;
+    font-size: 14.5px;
+    line-height: 1.6;
+  }
+  .callout.red { border-left-color: var(--signal); }
+  .callout.red strong { color: var(--signal); }
+  .callout.gold { border-left-color: var(--gold); background: rgba(168,131,66,0.045); }
+  .callout.kiwi { border-left-color: var(--kiwi); }
+  .callout .label {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--signal);
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+  .callout.gold .label { color: var(--gold); }
+  .callout.kiwi .label { color: var(--kiwi); }
+
+  /* ————— Grids ————— */
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px 40px;
+    margin: 12px 0 24px;
+  }
+  @media (max-width: 640px) {
+    .grid-2 { grid-template-columns: 1fr; gap: 20px; }
+  }
+  .grid-2 h4 { margin-top: 0; }
+
+  /* ————— Matrix table ————— */
+  .table-scroll {
+    overflow-x: auto;
+    margin: 24px -8px 32px;
+    padding: 0 8px;
+    max-width: none;
+  }
+  .matrix {
+    width: 100%;
+    min-width: 640px;
+    border-collapse: collapse;
+    font-size: 13.5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .matrix th, .matrix td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--hairline);
+    vertical-align: top;
+  }
+  .matrix thead th {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    border-bottom: 1.5px solid var(--ink);
+    padding-bottom: 12px;
+  }
+  .matrix thead th:first-child { color: var(--ink); }
+  .matrix .row-label {
+    font-weight: 500;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+  .matrix td.pos { color: var(--kiwi); font-weight: 600; text-align: center; }
+  .matrix td.neg { color: var(--signal); font-weight: 600; text-align: center; }
+  .matrix td.mid { color: var(--gold); font-weight: 600; text-align: center; }
+  .matrix td.text { text-align: center; font-size: 12.5px; color: var(--muted); }
+  .matrix .roman-col { background: rgba(168,131,66,0.055); }
+  .matrix thead th.roman-col { background: rgba(168,131,66,0.09); color: var(--gold); }
+
+  .matrix .footnote {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+  }
+
+  /* ————— KPI grid ————— */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--hairline);
+    border: 1px solid var(--hairline);
+    margin: 24px 0 28px;
+  }
+  @media (max-width: 640px) {
+    .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  .kpi-cell {
+    background: var(--ground);
+    padding: 18px 16px;
+  }
+  .kpi-cell .num {
+    font-family: var(--font-display);
+    font-size: 26px;
+    line-height: 1;
+    color: var(--deep);
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    margin-bottom: 6px;
+  }
+  .kpi-cell .num .unit { font-size: 13px; color: var(--muted); font-weight: 400; margin-left: 2px; }
+  .kpi-cell .label {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  /* ————— Timeline ————— */
+  .timeline {
+    margin: 20px 0 30px;
+    border-top: 1px solid var(--hairline);
+  }
+  .stage {
+    display: grid;
+    grid-template-columns: 130px 1fr;
+    gap: 24px;
+    padding: 18px 0;
+    border-bottom: 1px solid var(--hairline);
+  }
+  @media (max-width: 640px) {
+    .stage { grid-template-columns: 1fr; gap: 8px; }
+  }
+  .stage .when {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.06em;
+    color: var(--gold);
+    text-transform: uppercase;
+    padding-top: 4px;
+  }
+  .stage .when .name {
+    display: block;
+    font-family: var(--font-display);
+    font-size: 15px;
+    color: var(--deep);
+    letter-spacing: -0.005em;
+    text-transform: none;
+    margin-top: 2px;
+    font-weight: 500;
+  }
+  .stage ul { margin: 0; padding-left: 18px; }
+  .stage li { font-size: 14px; margin-bottom: 4px; }
+
+  /* ————— Budget table ————— */
+  .budget {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+    margin: 18px 0 24px;
+  }
+  .budget th, .budget td { padding: 10px 12px; border-bottom: 1px solid var(--hairline); text-align: left; }
+  .budget th {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    border-bottom: 1.5px solid var(--ink);
+  }
+  .budget td.num { text-align: right; font-family: var(--font-mono); }
+  .budget tr.total td {
+    border-top: 1.5px solid var(--ink);
+    border-bottom: none;
+    font-weight: 600;
+    padding-top: 14px;
+    color: var(--deep);
+  }
+  .budget tr.total td.num { font-size: 16px; }
+
+  /* ————— TOC & footer ————— */
+  .toc {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 32px;
+    margin: 24px 0 8px;
+    font-size: 14px;
+  }
+  @media (max-width: 640px) { .toc { grid-template-columns: 1fr; } }
+  .toc a {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px dotted var(--hairline);
+    text-decoration: none;
+    color: var(--ink);
+    gap: 16px;
+  }
+  .toc a:hover { color: var(--signal); }
+  .toc a .n {
+    font-family: var(--font-display);
+    color: var(--gold);
+    font-size: 15px;
+  }
+
+  .appendix {
+    margin-top: 72px;
+    padding-top: 32px;
+    border-top: 1px solid var(--hairline-strong);
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .appendix h3 {
+    font-size: 14px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-family: var(--font-mono);
+    font-weight: 500;
+    margin: 0 0 16px;
+  }
+  .appendix ul { columns: 2; column-gap: 32px; padding-left: 16px; }
+  @media (max-width: 640px) { .appendix ul { columns: 1; } }
+  .appendix li { break-inside: avoid; margin-bottom: 4px; font-size: 12.5px; }
+  .appendix a { color: var(--muted); }
+  .appendix a:hover { color: var(--deep); }
+
+  .signoff {
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--hairline);
+    display: flex;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  /* Video theme list */
+  .video-list {
+    list-style: none;
+    padding: 0;
+    margin: 12px 0 20px;
+    border-top: 1px solid var(--hairline);
+  }
+  .video-list li {
+    display: grid;
+    grid-template-columns: 44px 90px 1fr;
+    gap: 16px;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--hairline);
+    align-items: baseline;
+    font-size: 14px;
+    margin: 0;
+  }
+  @media (max-width: 640px) {
+    .video-list li { grid-template-columns: 32px 1fr; }
+    .video-list li .hook { grid-column: 2; font-size: 11px; margin-bottom: 2px; }
+    .video-list li .title { grid-column: 2; }
+  }
+  .video-list .no {
+    font-family: var(--font-display);
+    color: var(--gold);
+    font-size: 18px;
+    font-variant-numeric: tabular-nums;
+  }
+  .video-list .hook {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .video-list .title { color: var(--ink); line-height: 1.4; }
+
+  .lane {
+    padding: 32px 0 8px;
+    border-top: 1px solid var(--hairline);
+    margin-top: 40px;
+  }
+  .lane:first-of-type { border-top: none; padding-top: 12px; margin-top: 8px; }
+  .lane-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 10px;
+  }
+  .lane-num {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    color: var(--gold);
+    font-weight: 500;
+  }
+  .lane-title {
+    font-family: var(--font-display);
+    font-size: 22px;
+    color: var(--deep);
+    letter-spacing: -0.005em;
+    font-weight: 500;
+    margin: 0;
+  }
+  .lane-title small {
+    font-family: var(--font-body);
+    font-size: 12.5px;
+    color: var(--muted);
+    font-weight: 400;
+    margin-left: 8px;
+    letter-spacing: 0;
+  }
+
+  /* print */
+  @media print {
+    body { font-size: 11pt; }
+    .cover h1 { font-size: 32pt; }
+    section { page-break-inside: avoid; padding: 30px 0; }
+    .lane { page-break-inside: avoid; }
+    .kpi-cell .num { color: var(--ink); }
+    a { color: var(--ink); text-decoration: none; }
+  }
+</style>
+
+</head>
+<body>
+<div class="wrap">
+
+<!-- ═════════════════ COVER ═════════════════ -->
+<header class="cover">
+  <div class="cover-meta">
+    <span>Magic Engine · Strategy Memo</span>
+    <span>2026·07·10 · v1</span>
+  </div>
+  <h1>Bayside 九十天<br><em>占位战</em></h1>
+  <p class="sub">
+    面向 <b>Roman Hu</b> 的一份诚实处方 ——<br>
+    Ray White Mission Bay · Head of Projects · Bayside + Central Gold
+  </p>
+
+  <div class="thesis">
+    四家对手 <span class="accent">Aaron Foss · Paul Neshausen · Lawrence Yuan · Sarah Liu</span>
+    全在同一堵墙上：<span class="red">无独立域名 · 无付费 Meta · 无中文自媒体 · 无教育内容 · 无 WhatsApp 承接</span>。<br><br>
+    Roman 用 <span class="accent">romanhu.com</span> + 四语 + 前中文 TV 主持天赋 + <span class="accent">Ray White 集团级 China Desk</span>，
+    九十天里跑三线漏斗（Meta ThruPlay → WhatsApp · GEO/AI 引用 · 本地媒体信任沉淀）+ 一条独家 <span class="accent">Head of Projects vendor 端</span>。
+    一年出首单打平投入，两年成为 Bayside <em>The Digital Bilingual Agent</em>。
+  </div>
+</header>
+
+<!-- ═════════════════ TOC ═════════════════ -->
+<nav class="toc">
+  <a href="#s1"><span><span class="n">壹</span>&nbsp;&nbsp;战场 · 新东家新头衔新地理</span><span>·</span></a>
+  <a href="#s2"><span><span class="n">贰</span>&nbsp;&nbsp;竞争白地图</span><span>·</span></a>
+  <a href="#s3"><span><span class="n">叁</span>&nbsp;&nbsp;Roman 武器 vs 短板</span><span>·</span></a>
+  <a href="#s4"><span><span class="n">肆</span>&nbsp;&nbsp;处方 · 三线漏斗 + 一线 vendor</span><span>·</span></a>
+  <a href="#s5"><span><span class="n">伍</span>&nbsp;&nbsp;Meta 预算数字模型</span><span>·</span></a>
+  <a href="#s6"><span><span class="n">陆</span>&nbsp;&nbsp;90 天路线</span><span>·</span></a>
+  <a href="#s7"><span><span class="n">柒</span>&nbsp;&nbsp;KPI + 月度预算</span><span>·</span></a>
+  <a href="#s8"><span><span class="n">捌</span>&nbsp;&nbsp;红线 · 30 天必做三件事</span><span>·</span></a>
+</nav>
+
+<!-- ═════════════════ 壹 · 战场 ═════════════════ -->
+<section id="s1">
+  <div class="marker-row">
+    <span class="marker">壹</span>
+    <span class="eyebrow">The Battlefield</span>
+  </div>
+  <h2>战场 · 新东家 · 新头衔 · 新地理</h2>
+
+  <p>Roman 已从 Barfoot &amp; Thompson Royal Heights 跳到 <strong>Ray White Mission Bay</strong>。这不是普通换所，是三件事同时发生：跨品牌、跨头衔、跨地理。</p>
+
+  <div class="grid-2">
+    <div>
+      <h4>新东家</h4>
+      <p>Ray White Mission Bay（法律实体 Five AM Bayside Realty Ltd）· 属 <strong>Ray White Maguires One Team</strong> 大伞 · 33-35 Tamaki Drive · CEO Wayne Maguire 是 Ray White NZ Auctioneer of the Year（10,000+ 场拍卖）。</p>
+      <p>分行刚合并 <strong>Anton Huang</strong>（华裔中英双语）的 Eastern Group，覆盖延伸到 Howick / Botany / Flat Bush / Pakuranga。</p>
+    </div>
+    <div>
+      <h4>新头衔</h4>
+      <p>Licensee Salesperson &amp; <strong>Head of Projects</strong> —— 不是普通 agent，是分行新盘 / 开发项目营销负责人。</p>
+      <p>意味着服务两端：<strong>vendor 端</strong>（开发商拉盘）+ <strong>华人 buyer 端</strong>（pre-launch 池）。这是 Aaron Foss / Sarah Liu 都拿不到的杠杆。</p>
+    </div>
+    <div>
+      <h4>新地理</h4>
+      <p>从 West Auckland Royal Heights（华人自住区 · 中价位）→ <strong>Bayside + Central Gold</strong>（老钱区 · $2M–$10M+）。</p>
+      <p>Mission Bay median <strong>$2.1M</strong>、Remuera 均值 <strong>$2.34M</strong> · 完全不同的 buyer 画像 · 完全不同的关键词组。</p>
+    </div>
+    <div>
+      <h4>新集团资产（B&amp;T 时期没有的）</h4>
+      <p><strong>Ray White NZ China Desk</strong>（Sen Wang 领导）+ <strong>链家 Lianjia co-listing</strong>（6,000+ 中国门店 / 2.6 亿买家池）+ Canva 中文/双语模板库 + Wayne Maguire 拍卖师体系。</p>
+    </div>
+  </div>
+
+  <h3>直接对手 · 同一条 Tamaki Drive 上肉搏</h3>
+  <p>Barfoot Mission Bay 和 Ray White Mission Bay 在 <strong>同一条街</strong>。你的日常对手是：</p>
+  <ul>
+    <li><strong>Aaron Foss</strong>（Barfoot Mission Bay）· 全公司 2024/2025 No.1 Individual · 东区 8 年冠军 · 均价 $2.65M · 生涯 430+ 单</li>
+    <li><strong>Lawrence Yuan</strong>（Barfoot Mission Bay）· 16 年老资历 · Paritai Drive 豪宅垄断 · 华人 buyer network</li>
+    <li><strong>Paul Neshausen</strong>（Barfoot St Heliers）· NESHAUSEN.team 六连冠 · $2M–$20M 豪宅 · MBA 背书</li>
+    <li><strong>Sarah Liu 刘思华</strong>（Bayleys Remuera）· 三语 $4.41M 均价 · 生涯累计 $313M</li>
+  </ul>
+</section>
+
+<!-- ═════════════════ 贰 · 竞争白地图 ═════════════════ -->
+<section id="s2">
+  <div class="marker-row">
+    <span class="marker">贰</span>
+    <span class="eyebrow">The White Space</span>
+  </div>
+  <h2>四家对手撞成同一堵墙</h2>
+
+  <p>把四家对手放一张表上比对九个维度，一件事直接跳出来：<strong>他们全部都在同一个 blind spot 里</strong>。这就是 Roman 的机会窗。</p>
+
+  <div class="table-scroll">
+    <table class="matrix">
+      <thead>
+        <tr>
+          <th></th>
+          <th>Aaron Foss<br><span class="footnote">B&amp;T Mission Bay</span></th>
+          <th>Paul Neshausen<br><span class="footnote">B&amp;T St Heliers</span></th>
+          <th>Lawrence Yuan<br><span class="footnote">B&amp;T Mission Bay</span></th>
+          <th>Sarah Liu<br><span class="footnote">Bayleys Remuera</span></th>
+          <th class="roman-col">Roman Hu<br><span class="footnote">Ray White Mission Bay</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="row-label">独立个人域名</td>
+          <td class="neg">✗ DNS 4 域全空</td>
+          <td class="neg">✗ neshausen.team 未注册</td>
+          <td class="neg">✗</td>
+          <td class="neg">✗</td>
+          <td class="roman-col pos">✓ romanhu.com</td>
+        </tr>
+        <tr>
+          <td class="row-label">中英双/多语</td>
+          <td class="neg">仅英</td>
+          <td class="neg">仅英</td>
+          <td class="mid">双语</td>
+          <td class="mid">三语（门面全英）</td>
+          <td class="roman-col pos">✓ 四语 英/普/沪/粤</td>
+        </tr>
+        <tr>
+          <td class="row-label">小红书</td>
+          <td class="neg">✗</td>
+          <td class="neg">✗</td>
+          <td class="neg">✗</td>
+          <td class="neg">✗</td>
+          <td class="roman-col pos">空白等打</td>
+        </tr>
+        <tr>
+          <td class="row-label">微信公众号 / 视频号</td>
+          <td class="neg">✗</td>
+          <td class="neg">✗</td>
+          <td class="neg">✗</td>
+          <td class="neg">✗</td>
+          <td class="roman-col pos">✓ Roman78 底座已有</td>
+        </tr>
+        <tr>
+          <td class="row-label">抖音 / TikTok</td>
+          <td class="neg">✗ / ✗</td>
+          <td class="text">TikTok 走 mentor 不接盘</td>
+          <td class="neg">✗ / ✗</td>
+          <td class="neg">✗ / ✗</td>
+          <td class="roman-col pos">✓ / ✓ 已有</td>
+        </tr>
+        <tr>
+          <td class="row-label">付费 Meta 广告</td>
+          <td class="text">未见活跃投放</td>
+          <td class="text">未见活跃投放</td>
+          <td class="neg">✗</td>
+          <td class="text">仅偶尔 listing boost</td>
+          <td class="roman-col pos">空白等打</td>
+        </tr>
+        <tr>
+          <td class="row-label">教育型内容</td>
+          <td class="neg">~95% listing 搬砖</td>
+          <td class="neg">100% listing</td>
+          <td class="neg">✗</td>
+          <td class="neg">✗</td>
+          <td class="roman-col pos">空白等打</td>
+        </tr>
+        <tr>
+          <td class="row-label">WhatsApp Business 承接</td>
+          <td class="neg">✗ 明确 unavailable</td>
+          <td class="neg">✗</td>
+          <td class="neg">✗</td>
+          <td class="neg">✗</td>
+          <td class="roman-col pos">空白等打</td>
+        </tr>
+        <tr>
+          <td class="row-label">Google Business Profile 运营</td>
+          <td class="text">被动</td>
+          <td class="text">被动</td>
+          <td class="text">被动</td>
+          <td class="text">被动</td>
+          <td class="roman-col pos">空白等打</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout gold">
+    <span class="label">核心洞察</span>
+    <strong>4 家对手全都靠公司品牌 + 传统 organic + 老客户 referral 打天下</strong>。「数字 IP + 双语教育内容 + 付费漏斗 + WhatsApp 承接」这个组合，整个东区/中区<strong>没有人在做</strong>。这不是红海是蓝海 —— 现在跳进去就是自己一个人。
+  </div>
+
+  <h3>对手最难打的一件事：Aaron Foss 的社会证明</h3>
+  <p>四家对手的数字资产都不强，但有一样是 Roman 短期<strong>追不上</strong>的 —— Aaron Foss 的 OneRoof <strong>123 条 review</strong> + 全公司 2024/2025 冠军 + 8 年区域第一。别去跟他比"卖了多少套"—— 他会赢。绕开他的 lane，去做他 0 分的教育内容 / 华人漏斗 / vendor 端。</p>
+</section>
+
+<!-- ═════════════════ 叁 · 武器 vs 短板 ═════════════════ -->
+<section id="s3">
+  <div class="marker-row">
+    <span class="marker">叁</span>
+    <span class="eyebrow">Roman's Arsenal &amp; Weak Spots</span>
+  </div>
+  <h2>诚实盘点 · 武器与警报</h2>
+
+  <div class="grid-2">
+    <div>
+      <h4 style="color:var(--kiwi);">武器</h4>
+      <ul>
+        <li><strong>romanhu.com 域名已在手</strong> —— 4 家对手都没有</li>
+        <li><strong>四语</strong>（英/普/沪/粤）+ <strong>前中文电视台主持人</strong> = 天生视频出镜天赋，是别人花钱也买不到的差异化</li>
+        <li><strong>MBA + AREINZ + 银蕨奖 + 2024 OneRoof NZ Top Agents Top 18 $151M</strong> —— 硬社会证明（Sarah Liu 24 月累计 $128M 都被打穿）</li>
+        <li>WeChat / 抖音 / TikTok 账号<strong>已有底座</strong>，省 30 天搭建</li>
+        <li>Ray White 集团级 <strong>China Desk + 链家 co-listing + Canva 中文模板库</strong> —— B&amp;T 时代没有的杠杆</li>
+        <li><strong>Head of Projects 头衔</strong> = vendor 端资源 · 独家杠杆（详见肆·5）</li>
+      </ul>
+    </div>
+    <div>
+      <h4 style="color:var(--signal);">短板与警报</h4>
+      <ul>
+        <li><strong>romanhu.com 还挂 Barfoot 邮箱 (r.hu@barfoot.co.nz) + Team Hu 品牌</strong> —— 客户搜 Roman Hu 落到 B&amp;T 页面 = 送客给旧东家</li>
+        <li>LinkedIn / homes.co.nz 未同步 · realestate.co.nz 显示 "Missing agent"</li>
+        <li><strong>Team Hu 没跟过来</strong>（Hunter Qu + Jaye Yuan 未迁移）· 独狼状态，前 90 天承接压力大</li>
+        <li>West → East 案例<strong>不能直接搬</strong>：Bayside 均价 $2.1M vs Royal Heights 差 3 倍 · 用错案例老板会看穿</li>
+        <li>Bayside 主流 74% 欧美 Kiwi · 华人身份是<strong>加分不是主战线</strong> · 打法必须双漏斗独立</li>
+        <li>Head of Projects 是新职责 · 需要 vendor pitch deck / pre-launch database 这些<strong>全新能力</strong></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout red">
+    <span class="label">红线警报</span>
+    romanhu.com 未 rebrand + LinkedIn 未更新 + realestate.co.nz "Missing agent" 三件事叠加，<strong>每晚一天，就送 1 个 B&amp;T 时代老客户回去给 Team Hu 留守成员或 Aaron / Lawrence 挖走</strong>。这是 30 天必做的第一件事（详见捌）。
+  </div>
+</section>
+
+<!-- ═════════════════ 肆 · 处方 ═════════════════ -->
+<section id="s4">
+  <div class="marker-row">
+    <span class="marker">肆</span>
+    <span class="eyebrow">The Prescription</span>
+  </div>
+  <h2>处方 · 三线漏斗 + 一线独家 vendor</h2>
+
+  <p>四条漏斗独立跑，creative 不共用。你原来的 Meta 视频 ThruPlay → WhatsApp 方案<strong>方向对了</strong>，我把它工程化，并加另外三条你没考虑到的（GEO / 本地媒体 / vendor 端）。</p>
+
+  <!-- Lane 1 -->
+  <div class="lane">
+    <div class="lane-head">
+      <span class="lane-num">Lane 01</span>
+      <h3 class="lane-title">Meta 视频 ThruPlay → WhatsApp <small>你的原方案 · 工程化</small></h3>
+    </div>
+
+    <div class="callout">
+      <span class="label" style="color:var(--muted);">第一坑先说</span>
+      房产广告在 Meta 属 <strong>Special Ads Category (Housing)</strong> → 不能按 postcode / 邮编精定向。<strong>解法：靠 creative 前 3 秒自筛。</strong>画面锁 Bayside 地标（Mission Bay 海滩 · Selwyn College 门口 · St Heliers Bay Road · Baradene 大门）→ 非本地 1 秒滑走 → Meta 算法降低他们曝光 → 剩下能看 15s 完播的都是高地缘意图。<em>不靠定向精准，靠 creative 精准。</em>
+    </div>
+
+    <h4>广告结构 · 三 Campaign 组合</h4>
+    <div class="grid-2">
+      <div>
+        <strong>Campaign 1 · Bayside Awareness（EN）</strong>
+        <p style="font-size:13.5px;color:var(--muted);">目标：ThruPlay · 兴趣代理 Auckland + Real Estate + Investment · 5 条英文视频 · 对标 Aaron Foss 的欧美 Kiwi 客群</p>
+      </div>
+      <div>
+        <strong>Campaign 2 · Central Gold 华人段（中文）</strong>
+        <p style="font-size:13.5px;color:var(--muted);">目标：ThruPlay · 兴趣代理 Mandarin + Auckland Grammar / Baradene + Investment Property · 5 条中文视频 · 对标 Sarah / Lawrence 客群</p>
+      </div>
+      <div>
+        <strong>Campaign 3 · Retarget（双语）</strong>
+        <p style="font-size:13.5px;color:var(--muted);">Custom Audience：Campaign 1 + 2 的 15s+ 完播人群 + romanhu.com 30 天访客 → WhatsApp Click-to-Message + Free Consult Lead Form</p>
+      </div>
+      <div>
+        <strong>KPI 目标</strong>
+        <p style="font-size:13.5px;color:var(--muted);">CPM 8–15 NZD · CPMTP 6–12 NZD · WhatsApp 对话 CPL 15–40 NZD · Free consult 见面 CPL 60–150 NZD</p>
+      </div>
+    </div>
+
+    <h4>Bayside 冷流量视频 · 英文 · 5 条起步</h4>
+    <ul class="video-list">
+      <li><span class="no">1</span><span class="hook">数据钩子</span><span class="title">Why Mission Bay houses sell 40% faster than Kohimarama in 2026</span></li>
+      <li><span class="no">2</span><span class="hook">专业钩子</span><span class="title">3 things every Bayside buyer misses in cross-lease titles</span></li>
+      <li><span class="no">3</span><span class="hook">卖家钩子</span><span class="title">How to auction-proof your $3M+ Bayside home</span></li>
+      <li><span class="no">4</span><span class="hook">学区钩子</span><span class="title">Selwyn vs Glendowie College zone — which street is worth $200k more</span></li>
+      <li><span class="no">5</span><span class="hook">人物钩子</span><span class="title">From Shanghai to Mission Bay — why I moved my business East</span></li>
+    </ul>
+
+    <h4>Central Gold 冷流量视频 · 中文 · 5 条起步（小红书 / 视频号 / 抖音同步）</h4>
+    <ul class="video-list">
+      <li><span class="no">1</span><span class="hook">学区钩子</span><span class="title">Remuera 西 vs 东 25 条街 · Grammar Zone 溢价 $200k 全解析</span></li>
+      <li><span class="no">2</span><span class="hook">门槛钩子</span><span class="title">Meadowbank $150 万起步 · 华人买家进入门槛完全指南</span></li>
+      <li><span class="no">3</span><span class="hook">痛点钩子</span><span class="title">为什么大陆买家在东区看 10 套房还走不下手 · 三个决策盲区</span></li>
+      <li><span class="no">4</span><span class="hook">选择钩子</span><span class="title">Baradene vs Double Grammar · 华人妈妈的学区决策树</span></li>
+      <li><span class="no">5</span><span class="hook">流程钩子</span><span class="title">拍卖前一晚 · 你的中介应该帮你做的 7 件事</span></li>
+    </ul>
+
+    <h4>WhatsApp 承接三段式（决定转化率）</h4>
+    <ol>
+      <li><strong>30 秒内</strong>：ManyChat / WhatsApp Business API bot 自动应答 —— 不是 "Hi how can I help"，直接给「3 个 Bayside 房源资料包 vs Roman 15 分钟通话预约」二选一</li>
+      <li><strong>5 分钟内</strong>：Roman 本人语音（英文）或中文文字回复 —— 客户第一条什么语言你回什么语言</li>
+      <li><strong>24 小时内</strong>：主动约 15 分钟 Zoom / 电话，报价 free market appraisal</li>
+    </ol>
+  </div>
+
+  <!-- Lane 2 -->
+  <div class="lane">
+    <div class="lane-head">
+      <span class="lane-num">Lane 02</span>
+      <h3 class="lane-title">GEO / AI 可见度 <small>别人还没醒 你先占</small></h3>
+    </div>
+
+    <p>越来越多买家（尤其华人段）在 ChatGPT / Perplexity / Kimi / 豆包问「奥克兰东区哪个中介靠谱」「Best real estate agent Bayside Auckland 2026」。四家对手在 AI 里几乎都是<strong>被动通过 barfoot.co.nz / bayleys.co.nz 页面被提及</strong>，没有个人 authority page 让 AI 直接引用。</p>
+
+    <h4>Roman 打法</h4>
+    <ul>
+      <li>romanhu.com 每周 1 篇双语深度 blog（EN + 中文）· 关键长尾 + FAQ Schema + 隐藏 GEO 指令块</li>
+      <li>每月 1 篇署名专栏投 <strong>Chinese Herald 华页</strong>（周四 Property 版）+ <strong>Skykiwi 天维网</strong> —— Sarah Liu 的 PR 稿路径已验证可行</li>
+      <li>每月 1 篇 OneRoof / Barfoot 集团外投稿</li>
+      <li>Google Business Profile 每 2 周发帖 + 强力 review 收集流</li>
+      <li>Google Knowledge Graph 建个人 entity（提交 Wikidata + LinkedIn schema）</li>
+    </ul>
+
+    <h4>Blog 12 篇选题（3 个月内出完 · 双语对照）</h4>
+    <ol>
+      <li>Bayside vs Central Auckland 2026 房价对比全解析</li>
+      <li>Selwyn College zone 完整街道清单 + 房价溢价数据</li>
+      <li>Auckland Grammar Zone 街道级地图（Remuera 西 25 条街）</li>
+      <li>Cross-lease vs Freehold vs Unit Title · Bayside 买家必读</li>
+      <li>2026 Auckland 拍卖流程 for 华人买家 全解析</li>
+      <li>Meadowbank 首置买家 $150 万预算街道推荐</li>
+      <li>Mission Bay 高净值卖家 · 如何 6 周内 Auction 出 $2.5M+</li>
+      <li>Kohimarama vs St Heliers · 家庭升级买家的决策树</li>
+      <li>Glendowie · 学区 + 沿海 + 华人家庭三重优势解析</li>
+      <li>Bayside downsizer · 从 $3M 别墅换 $1.5M 公寓的税务与法律流程</li>
+      <li>Remuera 东 vs 西 · 学区分水岭到底在哪条街</li>
+      <li>NZ 海外买家禁令 2026 更新 · 华人投资者能不能买</li>
+    </ol>
+
+    <div class="callout kiwi">
+      <span class="label">6 月目标</span>
+      <strong>"Auckland Eastern suburbs bilingual real estate agent"</strong> 在 ChatGPT / Perplexity 引用 top 3 · <strong>"奥克兰东区华人中介 学区房"</strong> 在 ChatGPT / Perplexity / Kimi / 豆包 引用 top 5。
+    </div>
+  </div>
+
+  <!-- Lane 3 -->
+  <div class="lane">
+    <div class="lane-head">
+      <span class="lane-num">Lane 03</span>
+      <h3 class="lane-title">romanhu.com · 从名片到 lead 机器 <small>Head of Projects 页新增</small></h3>
+    </div>
+
+    <div class="callout red">
+      <span class="label">30 天红线</span>
+      <strong>邮箱换 roman.hu@raywhite.co.nz · Team Hu 品牌下线 · Barfoot 视觉全清 · 加 Ray White 蓝黄</strong> · 新增 "Head of Projects" 页专门服务 vendor 端。每晚 1 天 SEO 权重就被割裂送给 B&amp;T。
+    </div>
+
+    <h4>站点结构</h4>
+    <ul>
+      <li><strong>/</strong> 首页 · Bayside + Central Gold 双区块地图 + 双语 CTA · <strong>OneRoof Top 18 $151M + 银蕨奖 + MBA + 四语</strong> 硬社会证明</li>
+      <li><strong>/suburbs/</strong> 9 个 suburb 深度 landing page（Mission Bay / Kohimarama / St Heliers / Glendowie / Remuera / Meadowbank / Ellerslie / Mount Wellington / Panmure）· 每页 median 每月自动更新 + 学区图 + 近 12 月成交案例</li>
+      <li><strong>/projects/</strong> Head of Projects 专区 · vendor pitch deck 展示 · 已合作开发商 case</li>
+      <li><strong>/projects/pre-launch/</strong> 华人 pre-launch 蓄水池 · Chinese buyer database 报名入口</li>
+      <li><strong>/blog/</strong> Lane 02 每周产出内容</li>
+      <li><strong>/videos/</strong> Meta 广告视频过审后回流沉淀</li>
+      <li><strong>/case-studies/</strong> 前 6 月至少 3 个真实成交 · <strong>禁止用 Royal Heights 案例充 Bayside</strong></li>
+      <li><strong>/zh/</strong> 整站中文（简繁双开）· hreflang 打对</li>
+    </ul>
+
+    <h4>必备 tech</h4>
+    <ul>
+      <li>Meta Pixel + Google Tag Manager（Retarget 池的关键）</li>
+      <li>WhatsApp float button 全站 + Free consult book form 每页</li>
+      <li>FAQ Schema + Product Schema + LocalBusiness Schema 每页</li>
+      <li>Cloudflare CDN + 国内可访问保底（华人客户探亲期间访问）</li>
+    </ul>
+  </div>
+
+  <!-- Lane 4 -->
+  <div class="lane">
+    <div class="lane-head">
+      <span class="lane-num">Lane 04</span>
+      <h3 class="lane-title">本地媒体矩阵 <small>四对手全没打的免费/低成本渠道</small></h3>
+    </div>
+
+    <p>调研发现整个东区 + 中区有一整套本地媒体，四家对手<strong>几乎都没系统运营</strong>。按 ROI 排序，前四个必谈：</p>
+
+    <h4>1 · Verve Magazine — 分发点逐字命中 Roman 目标区</h4>
+    <p style="font-size:14px;">Auckland 高端 lifestyle 免费月刊 · <strong>18,000 份/月 · Nielsen 约 90,000 读者</strong> · 咖啡馆 300+ 家分发 · 分发点覆盖 <strong>Mission Bay / Kohimarama / Parnell / Newmarket / Remuera / Epsom / Orakei / Herne Bay / Mt Eden / Stonefields</strong> —— 与 Roman 目标区重叠度接近 100%，读者画像跟"东区中区房产老板"高度对齐。<br>
+    <strong>打法：</strong>先发邮件 <code>jamie@vervemagazine.co.nz</code> 或 <code>arna@vervemagazine.co.nz</code> 拿 media kit · 谈 1/2 版或对开双页 · 每季 1 次品牌形象露出 · 配合成交案例转化。</p>
+
+    <h4>2 · East &amp; Bays Courier — 派送区跟目标区 1:1 对齐</h4>
+    <p style="font-size:14px;">Stuff 系每周刊 · 派送 <strong>Broadway Park / Ellerslie / Glendowie / Kohimarama / Meadowbank / Mission Bay / Newmarket / Orakei / Parnell / Remuera / St Heliers / St Johns / Stonefields</strong>（一次全中）。<br>
+    <strong>真实 rate card（含 GST 前）：</strong>Full page 8x8 <strong>$2,752</strong> · Half $1,376 · Quarter <strong>$688</strong> · <strong>Front page solus 2x8 只 $900</strong>（性价比之王，视觉冲击是 quarter page 3 倍）· 6+ 期长约可打 40% 折扣。<br>
+    <strong>打法：</strong>Front page solus 每月 1 次 + 每季 1 篇 sponsored op-ed（Roman 前 TV 主持人写"东区房产 Q&amp;A 专栏"完全够专业）· 联系 David Gadd <code>david.gadd@stuff.co.nz</code>。</p>
+
+    <h4>3 · Chinese Herald 华页 + Skykiwi 天维网</h4>
+    <p style="font-size:14px;">Chinese Herald <strong>90,000 print readers 每周 · 120+ pick-up locations · 200k+ total 跨 print + WeChat + RED</strong> · Sarah Liu 的 PR 稿路径已验证。Skykiwi 房产频道是奥克兰华人房产头部。<br>
+    <strong>打法：</strong>每月各 1 篇署名 —— Roman 前 TV 主持人身份内容置换（不付费换免费专栏位）· 双通道覆盖大陆背景华人段 + 港/ABC 段 · Chinese Herald 免费拿 media pack: <code>enquiry@chineseherald.co.nz</code>。</p>
+
+    <h4>4 · Neighbourly Premium — 全 NZ 最便宜本地信任度渠道</h4>
+    <p style="font-size:14px;">Neighbourly.co.nz 覆盖 Roman 每一个目标 suburb 各自独立页 · Premium Business 年费 <strong>$199 + GST</strong>（原价 $399，季度价 $79）· 一年可跨所有目标区常年挂 profile + 发帖 · 付费 Sponsored Post 起价 $300/regional/2 周。<br>
+    <strong>打法：</strong>D1 就买年费上线 · 常年低成本背景植入 · 配合 GBP + review 建立本地信任堆栈。</p>
+
+    <h4>选修 · Ponsonby News + Baradene Heart + 社区 FB Group</h4>
+    <p style="font-size:14px;"><strong>Ponsonby News</strong> 18k 户派送 / Nielsen 69k 读者 · Inside front / Page 3 / OBC 全页各 $2,500 · 品牌形象位（非引流）· 截稿每月 20 号 · 适合首度 rebrand 亮相。<br>
+    <strong>Baradene Heart Magazine</strong> 半年刊接广告 · 华人妈妈第二热学区精准打击。<br>
+    <strong>社区 FB Group</strong>：Mission Bay - Kohi - St Heliers Community / Ellerslie Residents Association 等 6-8 个 group · Roman 用本人号 organic 参与（禁止硬发盘）· 长期口碑沉淀。</p>
+
+    <div class="callout gold">
+      <span class="label">避坑与厘清</span>
+      ① <strong>Ellerslie Racecourse 主赞助被 Barfoot 占了 10+ 年</strong>（Auckland Cup Day + Twilight Summer Night 冠名）· 别去撞这个赛道 · 谈 Kohimarama Yacht Club 青少年帆船子赞助更划算（Kiwi 高净值家庭渗透）。<br>
+      ② <strong>"Mission Bay Music Festival / Bayfest" 是美国 San Diego 同名节</strong>，Auckland 无对应大型 music festival · 别踩坑。<br>
+      ③ <strong>OurAuckland 印刷版 2022 起已停</strong> · 只剩 e-news · 不再作为印刷渠道候选。
+    </div>
+  </div>
+
+  <!-- Lane 5 -->
+  <div class="lane">
+    <div class="lane-head">
+      <span class="lane-num">Lane 05</span>
+      <h3 class="lane-title">Head of Projects vendor 端 <small>Roman 独家杠杆 · 对手拿不到</small></h3>
+    </div>
+
+    <p>因为你是 Head of Projects，你有一条<strong>独家的第四漏斗</strong> —— 开发商 vendor 端。Aaron / Sarah / Lawrence / Paul 都是普通 agent，只做 buyer 侧。你可以同时做<strong>拉盘（vendor pitch）+ 华人 buyer pre-launch 蓄水池</strong>的端到端撮合。</p>
+
+    <h4>Vendor 端能力必备</h4>
+    <ul>
+      <li><strong>Pre-launch Chinese Buyer Database 蓄水池</strong> —— 用 Meta + 小红书 + 微信各渠道收，累积到 <strong>500-1000 华人 lead</strong> 就有 vendor pitch 价值</li>
+      <li><strong>Vendor Pitch Deck 模板</strong>（EN + 中文双版）· 展示华人 reach + 链家 co-listing 能力 + 前 TV 主持人可拍项目介绍视频</li>
+      <li><strong>楼花 CGI + 3D tour + 中文项目介绍视频</strong>（用 Ray White Canva 中文模板库产出）</li>
+      <li><strong>Ray White China Desk (Sen Wang) 直连</strong> + 链家 co-listing 申请</li>
+    </ul>
+
+    <h4>Vendor 端漏斗</h4>
+    <ol>
+      <li>主动出击奥克兰东区在建 / 规划开发商 3-5 家（如 Ockham Residential / Winton Land / TPI Group 等）</li>
+      <li>Pitch deck 说服 vendor 把 <strong>Chinese buyer 端 exclusive</strong> 交 Roman</li>
+      <li>拉 1 个 vendor pre-launch mandate = <strong>单个项目 5-30 单佣金</strong></li>
+      <li>1 个 vendor mandate 打平<strong>全年 Meta + 内容 + 本地媒体总投入</strong></li>
+    </ol>
+
+    <div class="callout gold">
+      <span class="label">独家</span>
+      这是 Head of Projects 头衔的<strong>唯一杠杆点</strong>。前面三条漏斗竞对理论上都能抄，唯独这条 —— Aaron 没有项目权限 · Sarah 只做二手豪宅 · Lawrence 传统 grinding 派 · Paul 走英语高端 vendor 拿不到中国 buyer 池。<strong>Roman 是这个 lane 的独家玩家</strong>。
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════ 伍 · 预算数字 ═════════════════ -->
+<section id="s5">
+  <div class="marker-row">
+    <span class="marker">伍</span>
+    <span class="eyebrow">The Money Math</span>
+  </div>
+  <h2>Meta 预算不会失控 · 数字模型</h2>
+
+  <p>你问"Housing 广告不能精定向，预算是不是会很大" —— 数字算给你看：<strong>不会</strong>。原因是 Housing 类别的 CPMTP（每千次 15s+ 完播成本）实际很低，靠 creative 前 3 秒自筛 = 非本地人根本触发不到扣费。</p>
+
+  <h3>三档预算 · 实际能拿到的结果</h3>
+
+  <div class="table-scroll">
+    <table class="budget">
+      <thead>
+        <tr>
+          <th>月预算 NZ$</th>
+          <th class="num">曝光次数</th>
+          <th class="num">15s+ 完播人群</th>
+          <th class="num">WhatsApp 对话</th>
+          <th class="num">Free consult 见面</th>
+          <th class="num">首单概率</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>1,500</td><td class="num">100–150k</td><td class="num">8–12k</td><td class="num">30–50</td><td class="num">5–10</td><td class="num">0–1 / 月</td></tr>
+        <tr><td>2,500</td><td class="num">180–250k</td><td class="num">15–20k</td><td class="num">60–100</td><td class="num">10–18</td><td class="num">1–2 / 月</td></tr>
+        <tr><td>4,000</td><td class="num">300–400k</td><td class="num">25–35k</td><td class="num">100–150</td><td class="num">18–30</td><td class="num">2–3 / 月</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>对比传统获客</h3>
+  <div class="kpi-grid">
+    <div class="kpi-cell">
+      <div class="num">$50<span class="unit">–150</span></div>
+      <div class="label">传统 Open Home CPL</div>
+    </div>
+    <div class="kpi-cell">
+      <div class="num">$15<span class="unit">–40</span></div>
+      <div class="label">Meta WhatsApp 对话 CPL</div>
+    </div>
+    <div class="kpi-cell">
+      <div class="num">$60<span class="unit">–150</span></div>
+      <div class="label">Meta 见面 CPL</div>
+    </div>
+    <div class="kpi-cell">
+      <div class="num">$30–60<span class="unit">k</span></div>
+      <div class="label">Bayside 单笔佣金</div>
+    </div>
+  </div>
+
+  <div class="callout kiwi">
+    <span class="label">打平模型</span>
+    月投 NZ$2,500 × 12 个月 = NZ$30k · <strong>只需 12 个月内出 1 单 Bayside 二手 就打平</strong> · 90 天目标 1-2 单 · 理论上 90 天回本。<br>
+    真正贵的<strong>不是 Meta</strong>，是 ① 视频拍摄剪辑（Roman TV 主持背景自出镜省一半）② WhatsApp 承接人力（前 90 天你自己接 · 培养判断力）· ③ vendor pitch deck 产出。
+  </div>
+</section>
+
+<!-- ═════════════════ 陆 · 90 天路线 ═════════════════ -->
+<section id="s6">
+  <div class="marker-row">
+    <span class="marker">陆</span>
+    <span class="eyebrow">90-Day Roadmap</span>
+  </div>
+  <h2>90 天路线 · 不能快 · 快 = 半吊子</h2>
+
+  <div class="timeline">
+    <div class="stage">
+      <div class="when">D1 – D7<span class="name">红线抢救</span></div>
+      <ul>
+        <li><strong>romanhu.com 立即 Ray White rebrand</strong> · 邮箱 / 品牌 / 视觉全清</li>
+        <li>LinkedIn / homes.co.nz / OneRoof / realestate.co.nz / Google Business Profile 全平台身份同步</li>
+        <li>跳槽宣告发 5 平台（LinkedIn EN 长文 + IG 竖版视频 + 微信朋友圈 + 小红书 + FB）</li>
+        <li>Ray White China Desk (Sen Wang) 建立直连</li>
+        <li>申请链家 Lianjia co-listing 接入</li>
+      </ul>
+    </div>
+
+    <div class="stage">
+      <div class="when">W2 – W4<span class="name">地基期</span></div>
+      <ul>
+        <li>romanhu.com 9 个 suburb landing page 文案 + 上线</li>
+        <li>Head of Projects / Pre-launch 蓄水池 页上线</li>
+        <li>Meta Business Manager + WhatsApp Business API + Publer + Pixel 就位</li>
+        <li>Bayside 5 条英文视频拍摄（Roman 自出镜）</li>
+        <li>Central Gold 5 条中文视频拍摄</li>
+        <li>第 1 篇双语 blog 上线</li>
+        <li>East &amp; Bays Courier + Skykiwi + Chinese Herald 谈判开启</li>
+        <li>GBP 建 + 前 5 条 review 收拢</li>
+      </ul>
+    </div>
+
+    <div class="stage">
+      <div class="when">D31 – D60<span class="name">起势期</span></div>
+      <ul>
+        <li>Meta Campaign 1+2 冷流量启投 · CPMTP &lt;10 NZD 前不上 Campaign 3</li>
+        <li>Custom Audience 15s+ 池目标 <strong>10k+</strong></li>
+        <li>W7 上 Campaign 3 retarget WhatsApp + Free consult</li>
+        <li>双语 blog 每周 1 篇 · 小红书日更 · WeChat 视频号周 3</li>
+        <li>East &amp; Bays Courier 第 1 次刊登 · Chinese Herald 第 1 篇署名专栏</li>
+        <li>华人 pre-launch database 目标 <strong>200 lead</strong></li>
+        <li>Vendor pitch deck 完成 · 主动接触 3-5 家开发商</li>
+      </ul>
+    </div>
+
+    <div class="stage">
+      <div class="when">D61 – D90<span class="name">转化期</span></div>
+      <ul>
+        <li>WhatsApp 累计 <strong>60-100 条对话</strong></li>
+        <li>Free consult 见面 <strong>15-25 个</strong></li>
+        <li>首笔 Bayside / Central Gold 二手成交 <strong>1-2 单</strong></li>
+        <li>Vendor pitch 至少 <strong>1 家开发商</strong> pre-launch mandate</li>
+        <li>首波成交案例回灌所有渠道（Meta 新 creative + Blog 案例页 + 小红书笔记 + LinkedIn EN 长文）</li>
+        <li>GEO 引用测试 · 手动在 ChatGPT/Perplexity/Kimi 亲问 "Best bilingual real estate agent Auckland Eastern suburbs"</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════ 柒 · KPI 预算 ═════════════════ -->
+<section id="s7">
+  <div class="marker-row">
+    <span class="marker">柒</span>
+    <span class="eyebrow">KPI &amp; Monthly Budget</span>
+  </div>
+  <h2>KPI 目标 + 月度预算</h2>
+
+  <h3>90 天末 KPI</h3>
+  <div class="kpi-grid">
+    <div class="kpi-cell"><div class="num">15–25<span class="unit">k</span></div><div class="label">Meta ThruPlay 观看</div></div>
+    <div class="kpi-cell"><div class="num">10–15<span class="unit">k</span></div><div class="label">Custom Audience 池</div></div>
+    <div class="kpi-cell"><div class="num">60–100</div><div class="label">WhatsApp 对话</div></div>
+    <div class="kpi-cell"><div class="num">15–25</div><div class="label">Free consult 见面</div></div>
+    <div class="kpi-cell"><div class="num">1–2</div><div class="label">首单成交</div></div>
+    <div class="kpi-cell"><div class="num">≥ 1</div><div class="label">Vendor pre-launch mandate</div></div>
+    <div class="kpi-cell"><div class="num">500+</div><div class="label">华人 pre-launch DB</div></div>
+    <div class="kpi-cell"><div class="num">500–1000</div><div class="label">romanhu.com organic / 月</div></div>
+    <div class="kpi-cell"><div class="num">800+</div><div class="label">小红书粉丝</div></div>
+    <div class="kpi-cell"><div class="num">500+</div><div class="label">WeChat 视频号粉丝</div></div>
+    <div class="kpi-cell"><div class="num">15+</div><div class="label">GBP review</div></div>
+    <div class="kpi-cell"><div class="num">Top 5</div><div class="label">AI 引用 · 华人段</div></div>
+  </div>
+
+  <h3>月度预算 · NZ$</h3>
+  <div class="table-scroll">
+    <table class="budget">
+      <thead>
+        <tr>
+          <th>项</th>
+          <th class="num">月预算</th>
+          <th>说明</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Meta 广告 · 三 Campaign</td><td class="num">2,000 – 2,500</td><td>Bayside EN + Central Gold 中文 + Retarget</td></tr>
+        <tr><td>视频拍摄剪辑</td><td class="num">2,000 – 3,000</td><td>Roman 自出镜省一半 · 前 3 个月密集期偏高</td></tr>
+        <tr><td>WhatsApp API + ManyChat / Publer</td><td class="num">200 – 300</td><td>自动应答 + 私域承接</td></tr>
+        <tr><td>GBP + Reputation 运营</td><td class="num">200</td><td>双周发帖 + review 集齐</td></tr>
+        <tr><td>romanhu.com 内容制作</td><td class="num">1,000 – 1,500</td><td>双语 blog + suburb page 每周产出</td></tr>
+        <tr><td>本地媒体矩阵 · Verve + Courier + Chinese Herald + Neighbourly</td><td class="num">1,800 – 2,500</td><td>Courier front-page solus $900 + Verve 1/2 版 + Neighbourly $17</td></tr>
+        <tr><td>SEO / GEO 工具 · 关键词监测</td><td class="num">200 – 300</td><td>Semrush 基础 + AI 引用监测</td></tr>
+        <tr class="total"><td>总计</td><td class="num">7,100 – 9,800</td><td>90 天投入 ~NZ$21–29k · 1 单 Bayside 打平</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═════════════════ 捌 · 红线 ═════════════════ -->
+<section id="s8">
+  <div class="marker-row">
+    <span class="marker">捌</span>
+    <span class="eyebrow">Red Lines &amp; Day-One Moves</span>
+  </div>
+  <h2>红线 · 30 天必做三件事</h2>
+
+  <p>其他所有事情都可以慢，这三件不能。每晚 1 天你都在流血 —— 客户回头找不到你，直接进 Aaron 或 Team Hu 留守成员碗里。</p>
+
+  <div class="callout red">
+    <span class="label">红线 · 一</span>
+    <strong>romanhu.com 立即 Ray White rebrand</strong> · 邮箱换 roman.hu@raywhite.co.nz · Team Hu 品牌下线 · Barfoot 所有视觉 / 外链清除 · 加 Ray White 蓝黄配色 · 加 "Head of Projects" 独立页专门服务 vendor 端。
+    <br><br>
+    <em>后果：</em>客户搜 "Roman Hu Auckland" 落到 barfoot.co.nz/our-people/r.hu 页面 = SEO 权重全送给旧东家 · 老客户"我在哪里找你"的问句被 B&amp;T 系统截胡。
+  </div>
+
+  <div class="callout red">
+    <span class="label">红线 · 二</span>
+    <strong>全平台身份同步</strong> —— LinkedIn / homes.co.nz / OneRoof / realestate.co.nz / Google Business Profile / Facebook / IG / 小红书 / 微信 · 全部改到 Ray White Mission Bay · Head of Projects · 四语 · Bayside + Central Gold 覆盖 · Ray White 视觉。
+    <br><br>
+    <em>特别注意：</em>realestate.co.nz agent 553640 目前显示 "Missing agent" 状态 · 需要主动联系 Ray White 分行 admin 推 REA 认证同步。
+  </div>
+
+  <div class="callout red">
+    <span class="label">红线 · 三</span>
+    <strong>跳槽宣告 5 平台同一天发一轮</strong> —— LinkedIn EN 长文 + IG 竖版视频（Roman 自出镜 30 秒宣告）+ 微信朋友圈 + 小红书 + FB。收拢 B&amp;T 时代客户"我在哪里找你"的问句，避免流失。
+    <br><br>
+    <em>文案骨架：</em>「加入 Ray White Mission Bay 出任 Head of Projects — 从 Royal Heights 到 Bayside，从二手房到高端 + 新盘。感谢 B&amp;T 五年，我把 Bayside + Central Gold 的四语买家和 vendor 端资源作为下一站的承诺。你的下一套房 / 下一个开发项目，仍然可以来找我。」
+  </div>
+
+  <h3>关键待人工核实（PM 15 秒事项）</h3>
+  <ul>
+    <li>手动开 Meta Ad Library 确认 Aaron Foss 有没有跑付费广告 ·
+      <a href="https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=NZ&q=Aaron%20Foss" target="_blank" rel="noopener">→ 直达链接</a>
+    </li>
+    <li>Roman 到 Ray White 正式起薪日 · 影响 90 天路线第一周</li>
+    <li>Team Hu 成员是否会 3-6 月内追随（如追随，独狼期缩短）</li>
+    <li>Ray White franchise 是否允许 romanhu.com 保留独立域名 + 独立 Meta 广告账户</li>
+  </ul>
+</section>
+
+<!-- ═════════════════ 附录 ═════════════════ -->
+<section class="appendix" style="max-width:none;">
+  <h3>Appendix · 数据源与调研链接</h3>
+  <ul>
+    <li><a href="https://rwstheliers.co.nz/agents/roman-hu/187650">Roman Hu · Ray White profile</a></li>
+    <li><a href="https://www.romanhu.com/">romanhu.com · 待 rebrand</a></li>
+    <li><a href="https://www.barfoot.co.nz/our-people/a.foss">Aaron Foss · Barfoot</a></li>
+    <li><a href="https://www.barfoot.co.nz/our-people/p.neshausen">Paul Neshausen · Barfoot</a></li>
+    <li><a href="https://www.barfoot.co.nz/our-people/l.yuan">Lawrence Yuan · Barfoot</a></li>
+    <li><a href="https://www.bayleys.co.nz/sarah-liu">Sarah Liu 刘思华 · Bayleys</a></li>
+    <li><a href="https://rwmissionbay.co.nz/">Ray White Maguires One Team</a></li>
+    <li><a href="https://www.raywhite.co.nz/ray-white-release-chinese-marketing-toolkit/">Ray White Chinese Marketing Toolkit</a></li>
+    <li><a href="https://www.raywhite.co.nz/news-media/new-partnership-set-to-drive-growth-at-ray-white-bays-offices">Ray White Bays 新分行合并</a></li>
+    <li><a href="https://www.vervemagazine.co.nz/">Verve Magazine · 18k 月刊</a></li>
+    <li><a href="https://advertise.stuff.co.nz/brands/east-bays-courier">East &amp; Bays Courier 广告 rate card</a></li>
+    <li><a href="https://ponsonbynews.co.nz/advertising/">Ponsonby News advertising</a></li>
+    <li><a href="https://www.neighbourly.co.nz/businessboost">Neighbourly Premium $199/年</a></li>
+    <li><a href="https://www.chineseherald.co.nz/contact/ads-service/">Chinese Herald 华页广告</a></li>
+    <li><a href="https://money.skykiwi.com/realestate/">Skykiwi 天维网房产</a></li>
+    <li><a href="https://www.baradene.school.nz/our-community/growing-heart/baradene-heart-magazine">Baradene Heart Magazine</a></li>
+    <li><a href="https://www.remuera.org.nz/">Remuera Business Association</a></li>
+    <li><a href="https://www.stheliers.com/">St Heliers Village Association</a></li>
+    <li><a href="https://wtv.co.nz">World TV / BNE · 华人电视电台</a></li>
+    <li><a href="https://www.oneroof.co.nz/agent/aaron-foss-18521">Aaron Foss · OneRoof 123 review</a></li>
+    <li><a href="https://homes.co.nz/profile/barfoot-and-thompson/mission-bay/aaron-foss">Aaron Foss · homes.co.nz</a></li>
+    <li><a href="https://grammarzone.co.nz/suburbs/">Auckland Double Grammar Zone 街道</a></li>
+    <li><a href="https://datareportal.com/reports/digital-2026-new-zealand">Digital 2026 NZ · Meta / IG 数据</a></li>
+    <li><a href="https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=NZ&q=Aaron%20Foss">Meta Ad Library · Aaron Foss 手动核</a></li>
+    <li><a href="https://www.reinz.co.nz/">REINZ 房价数据</a></li>
+  </ul>
+</section>
+
+<div class="signoff">
+  <span>Prepared by Magic Engine · Ray Deng</span>
+  <span>2026·07·10 · Version 1</span>
+</div>
+
+</div>
+</body>
+</html>

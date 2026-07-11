@@ -1,0 +1,385 @@
+[
+  {
+    "media_name": "Verve Magazine",
+    "category": "print_magazine",
+    "scanned_at": "2026-07-10T10:15:00+12:00",
+    "source": "plugin_manual",
+    "coverage": {
+      "geography_covered": [
+        "Mission Bay",
+        "Kohimarama",
+        "Parnell",
+        "Newmarket",
+        "Remuera",
+        "Epsom",
+        "Orakei",
+        "Herne Bay",
+        "Mt Eden",
+        "Stonefields"
+      ],
+      "reach_number": 18000,
+      "reach_metric": "print_circulation",
+      "audience_profile": "Auckland 高端 lifestyle 免费月刊 · Nielsen 约 90,000 读者 · 300+ 家咖啡馆分发 · 高净值 lifestyle 30-55"
+    },
+    "pricing": {
+      "rate_card_notes": "广告价未公开 · 需邮件询价",
+      "cheapest_entry_option": "未询价",
+      "discount_note": "未公开",
+      "currency": "NZD"
+    },
+    "contact": {
+      "email": "jamie@vervemagazine.co.nz 或 arna@vervemagazine.co.nz",
+      "phone": null,
+      "person": "Jamie Christian Desplaces / Arna Kennedy",
+      "advertise_url": "https://www.vervemagazine.co.nz/contact-us/",
+      "notes": "先发邮件拿 media kit + 报价"
+    },
+    "chinese_relevant": false,
+    "recommended_play": "先拿 media kit · 谈 1/2 版或对开双页 · 每季 1 次品牌形象露出 · 配合成交案例转化",
+    "roi_rank": 1,
+    "traps_to_avoid": [],
+    "source_links": [
+      "https://www.vervemagazine.co.nz/",
+      "https://www.vervemagazine.co.nz/contact-us/"
+    ]
+  },
+  {
+    "media_name": "East & Bays Courier",
+    "category": "print_newspaper",
+    "scanned_at": "2026-07-10T10:20:00+12:00",
+    "source": "plugin_manual",
+    "coverage": {
+      "geography_covered": [
+        "Broadway Park",
+        "Ellerslie",
+        "Glendowie",
+        "Kohimarama",
+        "Meadowbank",
+        "Mission Bay",
+        "Newmarket",
+        "Orakei",
+        "Parnell",
+        "Remuera",
+        "St Heliers",
+        "St Johns",
+        "Stonefields"
+      ],
+      "reach_number": null,
+      "reach_metric": "print_circulation",
+      "audience_profile": "Stuff 系每周刊 · 派送区跟 Roman 目标区 1:1 对齐 · 家庭级本地读者"
+    },
+    "pricing": {
+      "rate_card_notes": "Full page 8x8 $2,752 · Half $1,376 · Quarter $688 · Front page solus 2x8 $900（性价比之王 · 视觉冲击是 quarter page 3 倍）· 不含 GST",
+      "cheapest_entry_option": "Front page solus 2x8 $900",
+      "discount_note": "6+ 期长约可打 40% 折扣",
+      "currency": "NZD"
+    },
+    "contact": {
+      "email": "david.gadd@stuff.co.nz",
+      "phone": "04 474 0000",
+      "person": "David Gadd",
+      "advertise_url": "https://advertise.stuff.co.nz/brands/east-bays-courier",
+      "notes": "Stuff 通用 rate card"
+    },
+    "chinese_relevant": false,
+    "recommended_play": "Front page solus 每月 1 次 + 每季 1 篇 sponsored op-ed（Roman 前 TV 主持人写'东区房产 Q&A 专栏'）· 建立本地印刷权威 · GEO 加分",
+    "roi_rank": 1,
+    "traps_to_avoid": [],
+    "source_links": [
+      "https://advertise.stuff.co.nz/brands/east-bays-courier",
+      "https://advertise.stuff.co.nz/brand/print/eastern-courier/"
+    ]
+  },
+  {
+    "media_name": "Chinese Herald 华页",
+    "category": "chinese_media",
+    "scanned_at": "2026-07-10T10:25:00+12:00",
+    "source": "plugin_manual",
+    "coverage": {
+      "geography_covered": [
+        "NZ 全国"
+      ],
+      "reach_number": 90000,
+      "reach_metric": "readers_nielsen",
+      "audience_profile": "1994 起 NZ 中文头部刊 · 每周 90,000 print readers · 120+ pick-up locations · 200k+ total audience 跨 print + WeChat + RED · 周四 Property 专版"
+    },
+    "pricing": {
+      "rate_card_notes": "价格未公开 · 免费拿 media pack",
+      "cheapest_entry_option": "署名专栏（内容置换换免费专栏位）",
+      "discount_note": "未公开",
+      "currency": "NZD"
+    },
+    "contact": {
+      "email": "enquiry@chineseherald.co.nz",
+      "phone": "+64 9 366 1388",
+      "person": null,
+      "advertise_url": "https://www.chineseherald.co.nz/contact/ads-service/",
+      "notes": "联系后 1-2 工作日回复"
+    },
+    "chinese_relevant": true,
+    "recommended_play": "每月 1 篇署名专栏 · Roman 前 TV 主持人身份内容置换 · Sarah Liu PR 稿路径已验证",
+    "roi_rank": 2,
+    "traps_to_avoid": [],
+    "source_links": [
+      "https://www.chineseherald.co.nz/chinese-herald",
+      "https://www.chineseherald.co.nz/contact/ads-service/",
+      "https://www.chineseherald.co.nz/news/property/sarah-liu/"
+    ]
+  },
+  {
+    "media_name": "Skykiwi 天维网",
+    "category": "chinese_media",
+    "scanned_at": "2026-07-10T10:30:00+12:00",
+    "source": "plugin_manual",
+    "coverage": {
+      "geography_covered": [
+        "NZ 全国 · 奥克兰中区版块活跃"
+      ],
+      "reach_number": null,
+      "reach_metric": "unknown",
+      "audience_profile": "2001 起最大 NZ 华人媒体 · 房产频道 estate.skykiwi.com + BBS + 微信矩阵"
+    },
+    "pricing": {
+      "rate_card_notes": "价格未公开",
+      "cheapest_entry_option": "内容置换换 BBS 帖 or 房产频道文章",
+      "discount_note": null,
+      "currency": "NZD"
+    },
+    "contact": {
+      "email": "ads@skykiwi.com",
+      "phone": "+64 9 309 2288",
+      "person": null,
+      "advertise_url": "https://em.skykiwi.com/",
+      "notes": null
+    },
+    "chinese_relevant": true,
+    "recommended_play": "每月 1 篇署名 · 覆盖大陆背景华人段 · 与 Chinese Herald 双通道",
+    "roi_rank": 2,
+    "traps_to_avoid": [],
+    "source_links": [
+      "https://estate.skykiwi.com/",
+      "https://money.skykiwi.com/realestate/",
+      "https://em.skykiwi.com/"
+    ]
+  },
+  {
+    "media_name": "Neighbourly Premium",
+    "category": "neighbourly",
+    "scanned_at": "2026-07-10T10:35:00+12:00",
+    "source": "plugin_manual",
+    "coverage": {
+      "geography_covered": [
+        "Mission Bay",
+        "Kohimarama",
+        "St Heliers",
+        "Glendowie",
+        "Remuera",
+        "Meadowbank",
+        "Ellerslie"
+      ],
+      "reach_number": null,
+      "reach_metric": "email_subs",
+      "audience_profile": "覆盖 Roman 每一个目标 suburb 各自独立页 · 本地邻里平台"
+    },
+    "pricing": {
+      "rate_card_notes": "Premium Business 年费 $199 + GST（原价 $399，季度价 $79）· Sponsored Post 起价 $300/regional/2 周",
+      "cheapest_entry_option": "年费 $199 + GST · 全 NZ 最便宜的本地信任度渠道",
+      "discount_note": "季度 $79 起",
+      "currency": "NZD"
+    },
+    "contact": {
+      "email": null,
+      "phone": null,
+      "person": null,
+      "advertise_url": "https://www.neighbourly.co.nz/businessboost",
+      "notes": "D1 即可注册上线"
+    },
+    "chinese_relevant": false,
+    "recommended_play": "D1 就买年费上线 · 常年低成本背景植入 · 配合 GBP + review 建立本地信任堆栈",
+    "roi_rank": 1,
+    "traps_to_avoid": [],
+    "source_links": [
+      "https://www.neighbourly.co.nz/businessboost",
+      "https://advertise.stuff.co.nz/rates-and-specs/digital/Neighbourly%20Sponsored%20Post%20Featured%20Post%20and%20Alerts"
+    ]
+  },
+  {
+    "media_name": "Ponsonby News",
+    "category": "print_magazine",
+    "scanned_at": "2026-07-10T10:40:00+12:00",
+    "source": "plugin_manual",
+    "coverage": {
+      "geography_covered": [
+        "Ponsonby",
+        "Herne Bay",
+        "Grey Lynn",
+        "Freemans Bay",
+        "Remuera",
+        "Parnell"
+      ],
+      "reach_number": 18000,
+      "reach_metric": "print_circulation",
+      "audience_profile": "18k 户派送 · Nielsen 69,000 读者 · 东区 lifestyle 月刊"
+    },
+    "pricing": {
+      "rate_card_notes": "Inside front cover / Page 3 / Outside back cover full page 各 $2,500 · Double-page spread $4,500 · 6+ 期打折",
+      "cheapest_entry_option": "季度品牌形象位 $2,500",
+      "discount_note": "6+ 期打折",
+      "currency": "NZD"
+    },
+    "contact": {
+      "email": null,
+      "phone": null,
+      "person": null,
+      "advertise_url": "https://ponsonbynews.co.nz/advertising/",
+      "notes": "截稿每月 20 号"
+    },
+    "chinese_relevant": false,
+    "recommended_play": "选修 · 品牌形象位（非引流）· 适合首度 rebrand 亮相",
+    "roi_rank": 3,
+    "traps_to_avoid": [],
+    "source_links": [
+      "https://ponsonbynews.co.nz/advertising/"
+    ]
+  },
+  {
+    "media_name": "Baradene Heart Magazine",
+    "category": "school_publication",
+    "scanned_at": "2026-07-10T10:45:00+12:00",
+    "source": "plugin_manual",
+    "coverage": {
+      "geography_covered": [
+        "Meadowbank",
+        "Remuera",
+        "Central Auckland 华人妈妈段"
+      ],
+      "reach_number": null,
+      "reach_metric": "unknown",
+      "audience_profile": "Baradene College 半年刊 · 华人妈妈第二热学区"
+    },
+    "pricing": {
+      "rate_card_notes": "半年刊接广告 · 'affordable rates' · 广告位有限",
+      "cheapest_entry_option": "半年 1 版",
+      "discount_note": null,
+      "currency": "NZD"
+    },
+    "contact": {
+      "email": null,
+      "phone": null,
+      "person": null,
+      "advertise_url": "https://www.baradene.school.nz/our-community/growing-heart/baradene-heart-magazine",
+      "notes": "直接联系 school office / PTA"
+    },
+    "chinese_relevant": true,
+    "recommended_play": "选修 · 半年 1 次广告 + 1 次专访置换 · 单价便宜 · 精准家庭级触达",
+    "roi_rank": 3,
+    "traps_to_avoid": [],
+    "source_links": [
+      "https://www.baradene.school.nz/our-community/growing-heart/baradene-heart-magazine"
+    ]
+  },
+  {
+    "media_name": "Remuera Business Association Newsletter",
+    "category": "business_association",
+    "scanned_at": "2026-07-10T10:50:00+12:00",
+    "source": "plugin_manual",
+    "coverage": {
+      "geography_covered": [
+        "Remuera 商业圈"
+      ],
+      "reach_number": null,
+      "reach_metric": "email_subs",
+      "audience_profile": "Associate member 收 e-newsletter + collective advertising · 本地商业圈信任背书"
+    },
+    "pricing": {
+      "rate_card_notes": "价格未公开 · associate member 可发 collective ads",
+      "cheapest_entry_option": "Associate member 会员费",
+      "discount_note": null,
+      "currency": "NZD"
+    },
+    "contact": {
+      "email": null,
+      "phone": "027 413 3819",
+      "person": null,
+      "advertise_url": "https://www.remuera.org.nz/about-us/doing-business-in-remuera/rba/about-the-rba-and-bid-programme",
+      "notes": null
+    },
+    "chinese_relevant": false,
+    "recommended_play": "选修 · associate member 长期挂位 + collective ads · 本地商业圈信任背书",
+    "roi_rank": 3,
+    "traps_to_avoid": [],
+    "source_links": [
+      "https://www.remuera.org.nz/"
+    ]
+  },
+  {
+    "media_name": "The OneRoof Radio Show",
+    "category": "radio",
+    "scanned_at": "2026-07-10T10:55:00+12:00",
+    "source": "plugin_manual",
+    "coverage": {
+      "geography_covered": [
+        "NZ 全国"
+      ],
+      "reach_number": null,
+      "reach_metric": "unknown",
+      "audience_profile": "Newstalk ZB 每周节目 · Tim Beveridge 主持 · 常请 buyer's agent / interior designer 上节目"
+    },
+    "pricing": {
+      "rate_card_notes": "客座嘉宾无广告费 · 内容置换",
+      "cheapest_entry_option": "客座嘉宾",
+      "discount_note": null,
+      "currency": "NZD"
+    },
+    "contact": {
+      "email": null,
+      "phone": null,
+      "person": null,
+      "advertise_url": "https://www.newstalkzb.co.nz/on-air/the-weekend-collective/the-oneroof-radio-show/",
+      "notes": "pitch via newstalkzb.co.nz"
+    },
+    "chinese_relevant": false,
+    "recommended_play": "选修 · 客座嘉宾一次 · Roman 前 TV 主持人身份 pitch 一次'东区华人 buyer 视角'",
+    "roi_rank": 4,
+    "traps_to_avoid": [],
+    "source_links": [
+      "https://www.newstalkzb.co.nz/on-air/the-weekend-collective/the-oneroof-radio-show/"
+    ]
+  },
+  {
+    "media_name": "Ellerslie Racecourse Sponsorship",
+    "category": "sponsorship_event",
+    "scanned_at": "2026-07-10T11:00:00+12:00",
+    "source": "plugin_manual",
+    "coverage": {
+      "geography_covered": [
+        "Auckland 中区 + 东区"
+      ],
+      "reach_number": null,
+      "reach_metric": "tv_viewers",
+      "audience_profile": "Auckland Cup Day + Twilight Summer Night 冠名活动"
+    },
+    "pricing": {
+      "rate_card_notes": "价格未公开 · 需询价",
+      "cheapest_entry_option": "raceday sponsor / fashion / sampling",
+      "discount_note": null,
+      "currency": "NZD"
+    },
+    "contact": {
+      "email": null,
+      "phone": null,
+      "person": null,
+      "advertise_url": "https://www.aucklandracing.co.nz/media/",
+      "notes": null
+    },
+    "chinese_relevant": false,
+    "recommended_play": "禁 · 主赞助被 Barfoot 占了 10+ 年 · 别去撞",
+    "roi_rank": 5,
+    "traps_to_avoid": [
+      "主赞助 Auckland Cup Day + Twilight Summer Night 冠名被 Barfoot 占了 10+ 年 · Roman 撞不上"
+    ],
+    "source_links": [
+      "https://www.aucklandracing.co.nz/media/"
+    ]
+  }
+]

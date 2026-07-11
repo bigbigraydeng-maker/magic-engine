@@ -1,0 +1,84 @@
+{
+  "client": {
+    "name": "Roman Hu",
+    "slug": "roman-hu",
+    "id": null,
+    "one_liner": "华人四语（英/普/沪/粤）房产中介 · Ray White Mission Bay · Head of Projects · 前中文电视台主持人 · MBA + AREINZ + 银蕨奖 + 2024 OneRoof NZ Top Agents Top 18 $151M",
+    "company": "Ray White Mission Bay (Five AM Bayside Realty Ltd · 属 Ray White Maguires One Team)",
+    "role": "Licensee Salesperson & Head of Projects",
+    "previous_employer": "Barfoot & Thompson Royal Heights (West Auckland Team Leader · 已跳槽)"
+  },
+  "scanned_at": "2026-07-11T00:00:00+12:00",
+  "scanner": {
+    "plugin": "me-client-discovery",
+    "version": "0.1.0",
+    "mode": "retroactive_backfill",
+    "note": "Roman 案例首次 discovery 在 2026-07-10 由手工版跑通 · 本文件是把结果按 plugin schema 回填 · 作为 canonical 参考数据"
+  },
+  "geography": {
+    "country": "NZ",
+    "region_name": "Auckland Bayside + Central Gold",
+    "primary_suburbs": [
+      "Mission Bay",
+      "Kohimarama",
+      "St Heliers",
+      "Glendowie"
+    ],
+    "secondary_suburbs": [
+      "Remuera",
+      "Meadowbank",
+      "Ellerslie",
+      "Mount Wellington",
+      "Panmure"
+    ]
+  },
+  "outputs": {
+    "competitors_count": 4,
+    "competitor_files": [
+      "competitors/aaron-foss.json",
+      "competitors/paul-neshausen.json",
+      "competitors/lawrence-yuan.json",
+      "competitors/sarah-liu.json"
+    ],
+    "market_context_file": "market-context.json",
+    "local_media_channels_file": "local-media-channels.json",
+    "local_media_count": 10
+  },
+  "cross_competitor_insights": [
+    "4/4 无独立个人域名（DNS 亲验或候选未注册）",
+    "4/4 无付费 Meta 广告（Aaron/Paul 待手动核 · Lawrence/Sarah 已定案）",
+    "4/4 无小红书 · 4/4 无微信公众号 · 4/4 无微信视频号",
+    "4/4 无 WhatsApp Business 承接（Aaron 明确标 unavailable · 其他未见）",
+    "4/4 内容策略以 listing 搬砖为主 · 无 educational content",
+    "4/4 GBP 运营被动 · 无系统 review 收集流",
+    "3/4 无 YouTube 独立频道（Aaron/Paul/Lawrence · Sarah 也无）",
+    "Aaron 唯一硬社会证明：OneRoof 123 review + 全公司 No.1 · 短期追不上",
+    "Sarah/Lawrence 有中文能力但都没做中文自媒体 · Roman 抢占等于抢无人区"
+  ],
+  "all_data_gaps": [
+    "Meta Ad Library 是 SPA 反爬 · 4 家竞对的付费 Meta 详情均未直接确认 · 需 PM 手动 15 秒核 4 个直达链接",
+    "LinkedIn HTTP 999 · 4 家竞对详细履历均只有 Google 快照",
+    "RateMyAgent HTTP 403 · Aaron/Lawrence 具体评分未拿",
+    "IG / FB 精确粉丝互动量 · 平台需登录",
+    "Stats NZ Chinese 单一族群 % suburb 级 · 用总亚裔 % 代替",
+    "St Heliers / Mount Wellington / Panmure 独立房价 median 未拿",
+    "Ahrefs / Similarweb / Apollo MCP 未授权 · backlink / 域名流量 / 决策链未拿"
+  ],
+  "roman_key_flags": {
+    "red_lines": [
+      "romanhu.com 还挂 Barfoot 邮箱 (r.hu@barfoot.co.nz) + Team Hu 品牌 · 30 天不 rebrand 送客给旧东家",
+      "LinkedIn / homes.co.nz 未同步 · realestate.co.nz 显示 'Missing agent'",
+      "Team Hu (Hunter Qu + Jaye Yuan) 未跟过来 · 独狼状态"
+    ],
+    "cross_geography_hazard": "从 West Auckland Royal Heights 均价 vs Bayside 差 3 倍 · 案例不能直接搬 · deck 里禁用旧地理成交假装东区案例",
+    "unique_leverage": "Head of Projects 头衔 = vendor 端资源 · 4 家竞对都拿不到 · 独家杠杆 lane 05",
+    "leverage_prerequisite": "vendor 端需要新工具尚未搭建：pitch deck 模板 · pre-launch Chinese buyer database · 楼花 CGI + 中文项目介绍视频能力 · lane 05 落地 delay 风险",
+    "strategic_warning": "Bayside 主流 74% 欧美 Kiwi · 华人身份是加分不是主战线 · 双漏斗 EN(Bayside)/中文(Central Gold) creative 独立跑不能共用"
+  },
+  "next_steps": [
+    "PM 手动 15 秒核 4 个 Meta Ad Library 链接（Aaron/Paul/Lawrence/Sarah）",
+    "跑 /sanity-check roman-hu 验证 4 类硬伤",
+    "跑 /synthesize-deck roman-hu 出 v2 deck（若需要迭代）",
+    "跑 /sync-to-me roman-hu 需要等 Phase 1 endpoint 上线"
+  ]
+}

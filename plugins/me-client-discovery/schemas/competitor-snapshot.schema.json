@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://magicengine.com.au/schemas/competitor-snapshot.schema.json",
+  "title": "Competitor Snapshot",
+  "description": "One competitor's public-data snapshot at a point in time. Written by me-client-discovery plugin (Phase 0) or 司马徽 agent (Phase 3). Consumed by ME client detail Discovery tab + 华佗 agent (Analysis).",
+  "type": "object",
+  "required": [
+    "competitor_name",
+    "scanned_at",
+    "source",
+    "positioning_oneliner",
+    "data_gaps"
+  ],
+  "properties": {
+    "competitor_name": {
+      "type": "string",
+      "description": "Public name of competitor (EN or 中文). e.g. 'Aaron Foss' / '刘思华 Sarah Liu'"
+    },
+    "scanned_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601. When this snapshot was taken."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["plugin_manual", "simatai_auto", "manual_import"],
+      "description": "Who wrote this snapshot. plugin_manual = me-client-discovery. simatai_auto = future 司马徽 agent."
+    },
+    "positioning_oneliner": {
+      "type": "string",
+      "description": "One-sentence positioning. e.g. 'B&T Mission Bay 全公司 2024/2025 No.1 · 均价 $2.65M · 纯英语 Kiwi 客群'"
+    },
+    "company": {
+      "type": "string",
+      "description": "Agency/employer they hang under. e.g. 'Barfoot & Thompson' / '独立品牌'"
+    },
+    "regions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Primary + secondary geographic coverage. e.g. ['Mission Bay', 'Kohimarama', 'St Heliers']"
+    },
+    "audience": {
+      "type": "object",
+      "properties": {
+        "language_mix": {
+          "type": "string",
+          "enum": ["en_only", "en_zh", "zh_only", "en_zh_multi", "unknown"],
+          "description": "en_zh_multi = 三语或以上"
+        },
+        "price_tier": {
+          "type": "string",
+          "enum": ["entry", "mid", "high", "luxury", "mixed", "unknown"],
+          "description": "客单价段位"
+        },
+        "notes": { "type": "string" }
+      }
+    },
+    "recent_activity": {
+      "type": "object",
+      "description": "Last 12 months trading activity. All fields nullable — write null if unverified.",
+      "properties": {
+        "period_months": { "type": "integer", "default": 12 },
+        "deals_count": { "type": ["integer", "null"] },
+        "avg_deal_size": { "type": ["number", "null"] },
+        "gmv": { "type": ["number", "null"] },
+        "currency": { "type": "string", "default": "NZD" }
+      }
+    },
+    "personal_domain": {
+      "type": "object",
+      "properties": {
+        "exists": { "type": "boolean" },
+        "url": { "type": ["string", "null"] },
+        "dns_verified": {
+          "type": "boolean",
+          "description": "True only if verified via dig / DNS lookup, not just Google snapshot"
+        },
+        "candidate_domains_checked": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "e.g. ['aaronfoss.co.nz', 'aaronfossrealestate.com'] — all attempted names"
+        }
+      }
+    },
+    "social_media": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["platform", "handle", "exists"],
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": ["facebook", "instagram", "linkedin", "youtube", "tiktok", "threads", "wechat_public", "wechat_video", "xiaohongshu", "douyin", "twitter", "other"]
+          },
+          "handle": { "type": "string" },
+          "url": { "type": "string" },
+          "exists": { "type": "boolean" },
+          "followers": { "type": ["integer", "null"] },
+          "posts_count": { "type": ["integer", "null"] },
+          "activity_note": { "type": "string", "description": "e.g. '~95% listing 搬砖 · 无 educational content'" }
+        }
+      }
+    },
+    "paid_ads": {
+      "type": "object",
+      "properties": {
+        "meta_ads": { "type": "string", "enum": ["yes", "no", "unknown"] },
+        "google_ads": { "type": "string", "enum": ["yes", "no", "unknown"] },
+        "verification_notes": { "type": "string" }
+      }
+    },
+    "reputation": {
+      "type": "object",
+      "properties": {
+        "google_business_profile": { "type": "boolean" },
+        "rate_my_agent_score": { "type": ["number", "null"] },
+        "rate_my_agent_reviews": { "type": ["integer", "null"] },
+        "oneroof_testimonials": { "type": ["integer", "null"] },
+        "other_notes": { "type": "string" }
+      }
+    },
+    "differentiators": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "3-5 unique strengths. e.g. ['8年区域No.1', 'MBA背书']"
+    },
+    "weaknesses": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "3-5 exploitable gaps (client's attack surface). e.g. ['无个人域名', '无华人渠道']"
+    },
+    "source_links": {
+      "type": "array",
+      "items": { "type": "string", "format": "uri" },
+      "description": "All URLs used to build this snapshot"
+    },
+    "data_gaps": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Explicitly unverified items. e.g. ['Meta Ad Library — SPA 反爬未拿到', 'IG 精确粉丝数需登录']. Empty array means all verified."
+    }
+  },
+  "additionalProperties": false
+}

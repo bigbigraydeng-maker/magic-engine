@@ -1,0 +1,143 @@
+{
+  "geography": {
+    "country": "NZ",
+    "region_name": "Auckland Bayside + Central Gold",
+    "suburbs": [
+      "Mission Bay",
+      "Kohimarama",
+      "St Heliers",
+      "Glendowie",
+      "Remuera",
+      "Meadowbank",
+      "Ellerslie",
+      "Mount Wellington",
+      "Panmure"
+    ]
+  },
+  "scanned_at": "2026-07-10T10:00:00+12:00",
+  "source": "plugin_manual",
+  "median_prices": [
+    {
+      "suburb": "Mission Bay",
+      "median_price": 2100000,
+      "currency": "NZD",
+      "as_of": "2026-07-01",
+      "source_url": "https://homes.co.nz"
+    },
+    {
+      "suburb": "Glendowie",
+      "median_price": 1500000,
+      "currency": "NZD",
+      "as_of": "2026-07-01",
+      "source_url": "https://homes.co.nz"
+    },
+    {
+      "suburb": "Kohimarama",
+      "median_price": 1450000,
+      "currency": "NZD",
+      "as_of": "2026-07-01",
+      "source_url": "https://homes.co.nz"
+    },
+    {
+      "suburb": "Remuera",
+      "median_price": 2344100,
+      "currency": "NZD",
+      "as_of": "2026-03-01",
+      "source_url": "https://www.opespartners.co.nz/property-markets/auckland"
+    },
+    {
+      "suburb": "Meadowbank",
+      "median_price": 1587300,
+      "currency": "NZD",
+      "as_of": "2026-06-01",
+      "source_url": "https://www.opespartners.co.nz/property-markets/auckland/meadowbank"
+    },
+    {
+      "suburb": "Ellerslie",
+      "median_price": 1136950,
+      "currency": "NZD",
+      "as_of": "2026-06-01",
+      "source_url": "https://www.opespartners.co.nz/property-markets/auckland/ellerslie"
+    }
+  ],
+  "school_zones": [
+    {
+      "zone_name": "Double Grammar Zone (Auckland Grammar + Epsom Girls Grammar)",
+      "covered_suburbs": [
+        "Remuera (西部约 25% 街道 · 近 Newmarket)"
+      ],
+      "premium_note": "中区最大溢价点 · 落在 Double Grammar Zone 的 25 条街较邻街可高 $200k · 华人自住段刚需"
+    },
+    {
+      "zone_name": "Selwyn College + Glendowie College 双轨",
+      "covered_suburbs": [
+        "Mission Bay",
+        "Kohimarama",
+        "St Heliers",
+        "Glendowie",
+        "Meadowbank"
+      ],
+      "premium_note": "Bayside 全部走 Selwyn College（Kohimarama Rd）· 不在 Double Grammar · 但 Selwyn+Glendowie 双轨口碑不弱"
+    },
+    {
+      "zone_name": "Baradene College (天主教女校)",
+      "covered_suburbs": [
+        "Meadowbank"
+      ],
+      "premium_note": "Bayside 华人家庭第二热点 · 学区口碑 + 天主教背景 · 华人妈妈择校决策树重要节点"
+    }
+  ],
+  "demographics": {
+    "chinese_ethnicity_pct": null,
+    "asian_ethnicity_pct": 34.5,
+    "census_year": 2023,
+    "census_source_url": "https://en.wikipedia.org/wiki/Remuera"
+  },
+  "market_heat": {
+    "median_yoy_pct": -1.92,
+    "sales_volume_yoy_pct": -12.6,
+    "days_on_market": 34,
+    "buyer_or_seller_market": "buyer",
+    "source_urls": [
+      "https://www.reinz.co.nz/",
+      "https://www.opespartners.co.nz/property-markets/auckland"
+    ]
+  },
+  "buyer_profiles": [
+    "Bayside · Family upgrader（Kohimarama/St Heliers 学区家庭）",
+    "Bayside · Retiree downsizer（Mission Bay 公寓/apartment）",
+    "Central Gold · 华人自住改善（Remuera 西 Grammar Zone）",
+    "Central Gold · 华人首置/投资（Meadowbank/Ellerslie 学区跳板）",
+    "Central Gold · Kiwi 中产改善（Mount Wellington/Panmure）"
+  ],
+  "platform_penetration": {
+    "facebook_pct_pop": 65.6,
+    "instagram_pct_pop": 50.4,
+    "wechat_note": "奥克兰华人段必打 WeChat + 小红书 · Roman 已有 WeChat (Roman78) · 参考同行头部华人中介 WeChat 15k / 小红书 4k 粉丝级别 · 红线：WeChat/RED 禁直接投放广告 · 只能内容 + 私域 + 信任积累",
+    "xiaohongshu_note": "华人妈妈段活跃 · 学区房攻略 / 成交案例 / IG 短视频三大主题 · 免费但要人力"
+  },
+  "key_insights": [
+    "双市场双话术 · Bayside 打 Kiwi/European 卖家（英文 + Meta + OneRoof 曝光）· Central Gold 打华人买家（WeChat/RED 私域 + 学区叙事）",
+    "学区是 Central Gold 唯一护城河 · Remuera 西必须绑 Grammar Zone · Meadowbank 必须绑 Selwyn + Baradene",
+    "市场下行反而是 Roman 机会窗 · 库存周期长 + 成交周期 34 天 · 卖家更需要'懂多语种买家池'的中介",
+    "Roman 现有 Royal Heights 品牌资产不能直接搬运 · 西区平均房价与 Bayside 差 3 倍 · 需重新做 Bayside 精品定位 + 至少 6 个月成交案例沉淀",
+    "Meta 广告适合做 Bayside 卖家教育漏斗 · 中文平台适合做华人买家信任沉淀 · 两个漏斗独立跑不共用 creative"
+  ],
+  "source_links": [
+    "https://www.reinz.co.nz/",
+    "https://www.opespartners.co.nz/property-markets/auckland",
+    "https://www.opespartners.co.nz/property-markets/auckland/ellerslie",
+    "https://www.opespartners.co.nz/property-markets/auckland/meadowbank",
+    "https://en.wikipedia.org/wiki/Meadowbank,_New_Zealand",
+    "https://en.wikipedia.org/wiki/Remuera",
+    "https://datareportal.com/reports/digital-2026-new-zealand",
+    "https://grammarzone.co.nz/suburbs/",
+    "https://www.ags.school.nz/enrolment/school-zone/"
+  ],
+  "data_gaps": [
+    "St Heliers / Mount Wellington / Panmure 独立 median 未拿到 · homes.co.nz 需手动查",
+    "Chinese 单一族群 % suburb 级 · 需 Stats NZ Aotearoa Data Explorer 交互查 · WebFetch 拉不到 loading 后数据 · 用总亚裔 % 代替",
+    "华人段小红书/微信 Bayside vs Central Gold 分布差异 · 无公开数据 · 需 Roman 自己测",
+    "Google Ads / SEMrush 关键词搜索量 · MCP 未授权未拿到"
+  ]
+}
