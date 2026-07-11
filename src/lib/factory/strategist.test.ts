@@ -269,3 +269,113 @@ describe('normalizeAngle', () => {
     expect(normalizeAngle('  Best  of CHINA  ')).toBe('best of china')
   })
 })
+
+describe('魏征 M1 评审修复回归', () => {
+  it('F11:asset_gap 只出 clip 生成工单——不挂既有 clip、scene 取自 evidence、溯源 inventory_gap', () => {
+    const d = decideSignal(
+      makeCtx({
+        signal: makeSignal({
+          signal_type: 'asset_gap',
+          evidence: { scene_tag: 'great_wall' },
+          request: { desired_variant_count: 2 },
+        }),
+        clipStock: [
+          { id: 'clip-a', scene_tag: 'great_wall', motion_type: null, track: 'a_real', usage_count: 0, last_used_at: null },
+        ],
+      }),
+    )
+    expect(d.outcome).toBe('accepted')
+    const wo = (d as { workOrder: Record<string, unknown> }).workOrder as {
+      order_type: string
+      angle: string
+      angle_source: { type: string; ref_text: string }
+      clip_links: unknown[]
+      brief: { segments: unknown[]; clip_generation_plan: Array<{ scene_tag: string }> }
+    }
+    expect(wo.order_type).toBe('clip_generation')
+    expect(wo.angle).toBe('asset_gap:great_wall')
+    expect(wo.angle_source.type).toBe('inventory_gap')
+    expect(wo.clip_links).toHaveLength(0)
+    expect(wo.brief.segments).toHaveLength(0)
+    expect(wo.brief.clip_generation_plan).toHaveLength(2)
+    expect(wo.brief.clip_generation_plan[0].scene_tag).toBe('great_wall')
+  })
+
+  it('F11:asset_gap 缺 evidence.scene_tag → reject(不出无的放矢的工单)', () => {
+    const d = decideSignal(makeCtx({ signal: makeSignal({ signal_type: 'asset_gap', evidence: {} }) }))
+    expect((d as { reason: string }).reason).toBe('rationale_template_failed')
+  })
+
+  it('F8:brief 条目自身踩红线 → 跳过该候选落到下一个(角度会内插进客户可见叙事)', () => {
+    const d = decideSignal(
+      makeCtx({
+        brief: {
+          id: 'b',
+          core_proposition: null,
+          content_pillars: ['Heritage — Auckland since 1928', 'Silk Road adventure'],
+          keyword_seeds: [],
+          excluded_topics: [],
+        },
+      }),
+    )
+    expect(d.outcome).toBe('accepted')
+    expect((d as { workOrder: { angle: string } }).workOrder.angle).toBe('Silk Road adventure')
+  })
+
+  it('F12:scene_tag 匹配角度的素材优先于更冷的无关素材(防货不对题)', () => {
+    const d = decideSignal(
+      makeCtx({
+        recentAngles: ['Best of China group tours'], // 逼角度落到 Silk Road adventure
+        clipStock: [
+          { id: 'clip-cold-unrelated', scene_tag: 'shop_interior', motion_type: null, track: 'a_real', usage_count: 0, last_used_at: null },
+          { id: 'clip-silk', scene_tag: 'silk_road_desert', motion_type: null, track: 'a_real', usage_count: 9, last_used_at: null },
+        ],
+      }),
+    )
+    const wo = (d as { workOrder: { clip_links: Array<{ clip_id: string; segment_role: string }> } }).workOrder
+    expect(wo.clip_links[0]).toMatchObject({ clip_id: 'clip-silk', segment_role: 'hook' })
+  })
+
+  it('F2:accepted 工单携带 source_ad_id(护栏 11 直查本表的地基)', () => {
+    const d = decideSignal(makeCtx())
+    expect((d as { workOrder: { source_ad_id: string } }).workOrder.source_ad_id).toBe('ad_1')
+  })
+})
+
+describe('实库形状兼容', () => {
+  it('content_pillars 为 jsonb 对象数组({id,name,description})时用 name 溯源(2026-07-11 实库验证)', () => {
+    const d = decideSignal(
+      makeCtx({
+        brief: {
+          id: 'brief-1',
+          core_proposition: null,
+          content_pillars: [
+            { id: 'destination_inspiration', name: 'Destination Inspiration', description: 'Visually-led content', post_ratio: 0.35 },
+          ],
+          keyword_seeds: [],
+          excluded_topics: [],
+        },
+      }),
+    )
+    expect(d.outcome).toBe('accepted')
+    const wo = (d as { workOrder: { angle: string; angle_source: { ref_id: string; ref_text: string } } }).workOrder
+    expect(wo.angle).toBe('Destination Inspiration')
+    expect(wo.angle_source.ref_id).toBe('content_pillars.destination_inspiration')
+    expect(wo.angle_source.ref_text).toBe('Destination Inspiration')
+  })
+
+  it('对象缺 name → 跳过该条目,无候选则 angle_not_traceable', () => {
+    const d = decideSignal(
+      makeCtx({
+        brief: {
+          id: 'b',
+          core_proposition: null,
+          content_pillars: [{ id: 'x', description: 'no name' }],
+          keyword_seeds: [],
+          excluded_topics: [],
+        },
+      }),
+    )
+    expect((d as { reason: string }).reason).toBe('angle_not_traceable')
+  })
+})

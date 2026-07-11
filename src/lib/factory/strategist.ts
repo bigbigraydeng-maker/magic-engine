@@ -141,6 +141,21 @@ function isBlocked(ctx: GateContext, angle: string): boolean {
 }
 
 /**
+ * 候选角度文本自身过红线/排除话题扫描(魏征 M1-F8):
+ * winner hookDesc 未来源于 Airtable 人工录入,brief 条目也可能踩线,
+ * 而 angle 会内插进 rationale 流向客户可见叙事 —— 候选级拦截。
+ */
+function angleTextClean(ctx: GateContext, text: string): boolean {
+  for (const phrase of ctx.brandRedlines ?? []) {
+    if (phrase && containsPhrase(text, phrase)) return false
+  }
+  for (const topic of ctx.brief?.excluded_topics ?? []) {
+    if (topic && containsPhrase(text, topic)) return false
+  }
+  return true
+}
+
+/**
  * 正向溯源(板桥 #1 主闸):角度必须指向 brief 具体条目或 winner 来源。
  * 黑名单永远列不全没发生过的编造,只有正向溯源防得住(两次历史事故教训)。
  */
@@ -153,19 +168,23 @@ export function pickAngle(ctx: GateContext, winner: WinnerSlice | null): AnglePi
     const tagText = winner.win_reason_tags.join(', ') || 'proven structure'
     const hookDesc = asString((winner.hook_segment ?? {})['description']) ?? tagText
     const angle = `winner-variant: ${hookDesc}`
-    if (!isBlocked(ctx, angle)) {
+    if (!isBlocked(ctx, angle) && angleTextClean(ctx, angle)) {
       return {
         angle,
         source: { type: 'winner_structure', ref_id: winner.id, ref_text: hookDesc },
       }
     }
-    // 骨架角度撞车 → 落回 brief 溯源的 fresh 角度
+    // 骨架角度撞车/踩线 → 落回 brief 溯源的 fresh 角度
   }
 
   // fresh_angle / new_campaign / asset_gap:强制溯源 brief 具体条目(护栏 2)
+  // content_pillars 实库为 jsonb 对象数组 {id,name,description}(2026-07-11 实库验证),兼容纯字符串
   const candidates: AnglePick[] = []
   ;(brief.content_pillars ?? []).forEach((p, i) => {
-    if (p) candidates.push({ angle: p, source: { type: 'content_pillar', ref_id: `content_pillars[${i}]`, ref_text: p } })
+    const name = typeof p === 'string' ? p : (p?.name ?? '')
+    if (!name) return
+    const refId = typeof p === 'object' && p?.id ? `content_pillars.${p.id}` : `content_pillars[${i}]`
+    candidates.push({ angle: name, source: { type: 'content_pillar', ref_id: refId, ref_text: name } })
   })
   ;(brief.keyword_seeds ?? []).forEach((k, i) => {
     if (k) candidates.push({ angle: k, source: { type: 'keyword_seed', ref_id: `keyword_seeds[${i}]`, ref_text: k } })
@@ -180,7 +199,7 @@ export function pickAngle(ctx: GateContext, winner: WinnerSlice | null): AnglePi
   if (candidates.length === 0) {
     return { outcome: 'rejected', reason: 'angle_not_traceable', detail: 'brief has no traceable entries' }
   }
-  const pick = candidates.find((c) => !isBlocked(ctx, c.angle))
+  const pick = candidates.find((c) => !isBlocked(ctx, c.angle) && angleTextClean(ctx, c.angle))
   if (!pick) {
     return { outcome: 'rejected', reason: 'no_angle_available', detail: 'all traceable angles deduped/blocked' }
   }
@@ -216,11 +235,20 @@ interface ClipSelection {
   generationPlan: ClipGenerationPlanItem[]
 }
 
+/** scene_tag 与角度的 token 重叠度(魏征 M1-F12:素材必须优先匹配角度,防货不对题) */
+function sceneAngleOverlap(sceneTag: string, angle: string): number {
+  const angleTokens = new Set(normalizeAngle(angle).split(/[^a-z0-9一-鿿]+/).filter(Boolean))
+  const sceneTokens = sceneTag.toLowerCase().split(/[^a-z0-9一-鿿]+/).filter(Boolean)
+  return sceneTokens.filter((t) => angleTokens.has(t)).length
+}
+
 export function selectClips(ctx: GateContext, angle: string): ClipSelection {
-  // 冷素材优先(usage_count asc, last_used_at asc nulls first)防审美疲劳
+  // 匹配角度优先(token 重叠 desc),同分冷素材优先(usage asc, last_used asc)防审美疲劳
   const pool = ctx.clipStock
     .filter((c) => clipAllowed(ctx, c))
     .sort((a, b) => {
+      const ov = sceneAngleOverlap(b.scene_tag, angle) - sceneAngleOverlap(a.scene_tag, angle)
+      if (ov !== 0) return ov
       if (a.usage_count !== b.usage_count) return a.usage_count - b.usage_count
       const at = a.last_used_at ? new Date(a.last_used_at).getTime() : 0
       const bt = b.last_used_at ? new Date(b.last_used_at).getTime() : 0
@@ -300,6 +328,60 @@ export function buildRationale(ctx: GateContext, angle: string): string | null {
 
 // ── 主决策流(§5.1)────────────────────────────────────────────────────────────
 
+/**
+ * asset_gap 独立分支(魏征 M1-F11):spec §3.2「只出 clip 生成工单,不出成片」——
+ * 不挂既有 clip、不烧 brief 角度进去重窗、scene_tag 取自 evidence。
+ */
+function decideAssetGap(ctx: GateContext): Decision {
+  const brief = ctx.brief!
+  const goal = ctx.goal!
+  const scene = asString(ctx.signal.evidence['scene_tag'])
+  if (!scene) {
+    return { outcome: 'rejected', reason: 'rationale_template_failed', detail: 'asset_gap missing evidence.scene_tag' }
+  }
+  const rationale = buildRationale(ctx, scene)
+  if (!rationale) return { outcome: 'rejected', reason: 'rationale_template_failed' }
+
+  const budgetCap = FACTORY_ORDER_BUDGET_CAP_USD
+  const desired = asNumber(ctx.signal.request['desired_variant_count']) ?? 1
+  const count = Math.min(Math.max(desired, 1), maxNewClipsFor(budgetCap))
+  const motion = asString(ctx.signal.request['motion_type']) ?? 'push_in'
+
+  return {
+    outcome: 'accepted',
+    workOrder: {
+      client_id: ctx.signal.client_id,
+      signal_id: ctx.signal.id,
+      goal_id: goal.id,
+      master_brief_id: brief.id,
+      winner_structure_id: null,
+      order_type: 'clip_generation',
+      angle: `asset_gap:${scene}`,
+      angle_source: { type: 'inventory_gap', ref_id: 'evidence.scene_tag', ref_text: scene },
+      rationale_one_liner: rationale,
+      brief: {
+        segments: [],
+        max_new_clips: maxNewClipsFor(budgetCap),
+        clip_generation_plan: Array.from({ length: count }, (_, i) => ({
+          segment_role: 'middle' as const,
+          position: i,
+          scene_tag: scene,
+          motion_type: motion,
+          prompt_hint: `${scene} — b-roll clip, real motion, 9:16 vertical`,
+          idempotency_key: `{work_order_id}:middle:${i}`,
+          source_image_url: null,
+          requires_source_resolution: true as const,
+        })),
+        aspect_ratio: '9:16',
+        notes: asString(ctx.signal.request['notes']) ?? '',
+      },
+      budget_cap_usd: budgetCap,
+      source_ad_id: asString(ctx.signal.evidence['ad_id']),
+      clip_links: [],
+    },
+  }
+}
+
 export function decideSignal(ctx: GateContext): Decision {
   const g0 = gate0(ctx)
   if (g0) return g0
@@ -311,6 +393,8 @@ export function decideSignal(ctx: GateContext): Decision {
   // gate1 通过后 brief/goal 必非空(TS 收窄)
   const brief = ctx.brief!
   const goal = ctx.goal!
+
+  if (ctx.signal.signal_type === 'asset_gap') return decideAssetGap(ctx)
 
   const winner = pickWinner(ctx)
   const anglePick = pickAngle(ctx, winner)
@@ -325,11 +409,7 @@ export function decideSignal(ctx: GateContext): Decision {
   const { segments, clipLinks, generationPlan } = selectClips(ctx, anglePick.angle)
 
   const orderType =
-    ctx.signal.signal_type === 'asset_gap'
-      ? 'clip_generation'
-      : winner && anglePick.source.type === 'winner_structure'
-        ? 'variant_from_winner'
-        : 'fresh_angle'
+    winner && anglePick.source.type === 'winner_structure' ? 'variant_from_winner' : 'fresh_angle'
 
   const briefPayload: WorkOrderBrief = {
     segments,
@@ -353,6 +433,7 @@ export function decideSignal(ctx: GateContext): Decision {
       rationale_one_liner: rationale,
       brief: briefPayload,
       budget_cap_usd: budgetCap,
+      source_ad_id: asString(ctx.signal.evidence['ad_id']),
       clip_links: clipLinks,
     },
   }

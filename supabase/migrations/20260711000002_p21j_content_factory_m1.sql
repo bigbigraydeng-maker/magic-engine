@@ -136,11 +136,14 @@ CREATE TABLE IF NOT EXISTS public.content_work_orders (
                           ('brand_redline','quality','wrong_angle','budget','other')),
   reject_reason         text,
   published_ad_id       text,
+  source_ad_id          text,  -- 触发信号的 evidence.ad_id 冗余(护栏 11 语义去重直查本表,魏征 M1-F2)
   created_at            timestamptz NOT NULL DEFAULT now(),
   updated_at            timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_cwo_queue  ON public.content_work_orders(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_cwo_client ON public.content_work_orders(client_id, status);
+CREATE INDEX IF NOT EXISTS idx_cwo_source_ad ON public.content_work_orders(client_id, source_ad_id)
+  WHERE source_ad_id IS NOT NULL;
 
 ALTER TABLE public.content_work_orders ENABLE ROW LEVEL SECURITY;
 DO $$ BEGIN
@@ -237,7 +240,11 @@ WHERE id = 'c0000000-0000-0000-0000-000000000000';
 --        FOR UPDATE SKIP LOCKED,杜绝「先 SELECT 再 UPDATE」竞态。
 --        Pattern: 20260626000006_mtc_atomic_deduct_rpc.sql
 -- ────────────────────────────────────────────────────────────────────────────
-CREATE OR REPLACE FUNCTION public.factory_claim_work_order(p_worker_id text)
+-- p_client_ids: worker 客户白名单(spec §6.1 F9 收权;NULL = 不限,魏征 M1-F7 一次拍板避免二轮 migration)
+CREATE OR REPLACE FUNCTION public.factory_claim_work_order(
+  p_worker_id  text,
+  p_client_ids uuid[] DEFAULT NULL
+)
 RETURNS TABLE (
   ok            boolean,
   work_order_id uuid,
@@ -256,6 +263,7 @@ BEGIN
     INTO v_order
     FROM public.content_work_orders cwo
    WHERE cwo.status = 'queued'
+     AND (p_client_ids IS NULL OR cwo.client_id = ANY(p_client_ids))
    ORDER BY cwo.created_at ASC
    FOR UPDATE SKIP LOCKED
    LIMIT 1;
@@ -276,6 +284,27 @@ BEGIN
   RETURN QUERY SELECT true, v_order.id, v_order.client_id, v_order.brief, v_order.budget_cap_usd;
 END;
 $$;
+
+-- 🔴 权限收口(魏征 M1-F1 P0):SECURITY DEFINER 函数默认 EXECUTE 授予 anon/authenticated,
+-- anon key 在浏览器 bundle 里 —— 不收口 = 任何人可经 PostgREST 认领工单并读走 brief。
+REVOKE EXECUTE ON FUNCTION public.factory_claim_work_order(text, uuid[]) FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.factory_claim_work_order(text, uuid[]) TO service_role;
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- §4.6e factory_balance_usd — 余额聚合 RPC(护栏 10;魏征 M1-F9:
+--        JS 全表 select 有 1000 行静默截断,聚合必须发生在 SQL 层)
+-- ────────────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.factory_balance_usd()
+RETURNS numeric
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT COALESCE(SUM(amount_usd), 0) FROM public.factory_balance_ledger;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.factory_balance_usd() FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.factory_balance_usd() TO service_role;
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- §4.7 Storage bucket: content-factory(公开读;路径前缀做 A/B 轨物理分离)

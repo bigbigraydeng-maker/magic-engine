@@ -25,11 +25,19 @@ export interface DemandSignal {
   created_at: string
 }
 
-/** §5.1 闸 1 战略地基切片(只读) */
+/** master_briefs.content_pillars 实库形状 = jsonb 对象数组(2026-07-11 实库验证) */
+export interface ContentPillar {
+  id?: string
+  name?: string
+  description?: string
+  post_ratio?: number
+}
+
+/** §5.1 闸 1 战略地基切片(只读)。content_pillars 兼容对象数组与字符串数组。 */
 export interface MasterBriefSlice {
   id: string
   core_proposition: string | null
-  content_pillars: string[] | null
+  content_pillars: Array<ContentPillar | string> | null
   keyword_seeds: string[] | null
   excluded_topics: string[] | null
 }
@@ -94,7 +102,8 @@ export interface GateContext {
 }
 
 export interface AngleSource {
-  type: 'content_pillar' | 'keyword_seed' | 'core_proposition' | 'winner_structure'
+  /** 'inventory_gap' 仅 asset_gap 类工单用:补库存不是创意角度,溯源指向 evidence.scene_tag(魏征 M1-F11) */
+  type: 'content_pillar' | 'keyword_seed' | 'core_proposition' | 'winner_structure' | 'inventory_gap'
   ref_id: string
   ref_text: string
 }
@@ -137,6 +146,8 @@ export interface WorkOrderDraft {
   rationale_one_liner: string
   brief: WorkOrderBrief
   budget_cap_usd: number
+  /** 触发信号的 evidence.ad_id 冗余进工单本表(护栏 11 语义去重直查,不经 signal join;魏征 M1-F2) */
+  source_ad_id: string | null
   clip_links: Array<{ clip_id: string; segment_role: 'hook' | 'middle' | 'cta'; position: number }>
 }
 

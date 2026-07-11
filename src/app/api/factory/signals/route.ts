@@ -13,6 +13,11 @@ export const maxDuration = 60
 const SIGNAL_TYPES: SignalType[] = ['creative_fatigue', 'scale_winner', 'new_campaign', 'asset_gap']
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+/** evidence/request 必须是 plain object,数组/字符串入 jsonb 会让护栏 11 静默失效(魏征 M1-F10) */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
 export async function POST(req: NextRequest) {
   const key = process.env.INTERNAL_API_KEY
   const auth = req.headers.get('authorization')
@@ -38,6 +43,12 @@ export async function POST(req: NextRequest) {
       { error: `signal_type must be one of ${SIGNAL_TYPES.join('|')}` },
       { status: 400 },
     )
+  }
+  if (body.evidence !== undefined && !isPlainObject(body.evidence)) {
+    return NextResponse.json({ error: 'evidence must be an object' }, { status: 400 })
+  }
+  if (body.request !== undefined && !isPlainObject(body.request)) {
+    return NextResponse.json({ error: 'request must be an object' }, { status: 400 })
   }
 
   const row = {
