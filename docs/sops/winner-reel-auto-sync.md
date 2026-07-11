@@ -97,11 +97,12 @@ CLIENT_KEY = `clients.domain` 大写,非 `[A-Z0-9]` 全转 `_`(`clients` 无 `sl
 
 Auth: `Authorization: Bearer $CRON_SECRET`
 
-Render Cron Scheduler:
+实际实现走 GitHub Actions(`.github/workflows/winner-reel-sync-daily.yml`,PR #545):
 ```yaml
-schedule: "0 14 * * *"    # UTC · 03:00 NZST = 14:00 UTC (winter)
-                          # 夏令时期 15:00 UTC,可跟其他 cron 一起调
+schedule: "0 15 * * *"    # UTC · 03:00 NZST = 15:00 UTC (NZST = UTC+12, winter)
+                          # 夏令时期(NZDT = UTC+13)对应 14:00 UTC,若需精确对齐可届时调整
 ```
+> ⚠️ 修正:早期草稿误写 "03:00 NZST = 14:00 UTC"。NZST = UTC+12,03:00 NZST = **15:00 UTC**(14:00 UTC 实为 02:00 NZST)。
 
 **手动触发**(测试):
 ```bash
