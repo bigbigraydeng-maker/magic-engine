@@ -17,6 +17,7 @@ import { IntelligenceSummarySection } from './_components/intelligence/Intellige
 import { BriefGateBanner } from './_components/BriefGateBanner';
 import { GoalBanner } from './_components/GoalBanner';
 import { WorkLogPanel } from './_components/WorkLogPanel';
+import { ReviewInbox } from '../../factory/_components/ReviewInbox';
 
 
 interface Client {
@@ -540,6 +541,9 @@ export default function ClientDetailPage() {
       {/* ── 概览 tab ──────────────────────────────────────────────────────────── */}
       {activeTab === 'overview' && (
         <>
+          {/* 内容工厂待审 — 有成片等你拍板时冒出来(spec me-native-design v0.2) */}
+          <ReviewInbox clientId={clientId} hideWhenEmpty />
+
           {/* Workflow progress bar — 3-step overview */}
           <WorkflowProgress
             discoveryConfirmed={discoveryConfirmed}

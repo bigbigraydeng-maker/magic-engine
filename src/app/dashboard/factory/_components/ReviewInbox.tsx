@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 interface WorkOrder {
   id: string
+  client_id: string
   client_name: string
   status: string
   angle: string
@@ -27,7 +28,8 @@ const REJECT_CHIPS = [
   { label: '预算节奏', action: 'reject_budget' as const },
 ]
 
-export function ReviewInbox() {
+// clientId:只看该客户的待审(客户页概览用);hideWhenEmpty:没待审就不渲染(不占地方)
+export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hideWhenEmpty?: boolean } = {}) {
   const [orders, setOrders] = useState<WorkOrder[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
@@ -41,14 +43,18 @@ export function ReviewInbox() {
       const res = await fetch('/api/factory/work-orders')
       if (!res.ok) throw new Error(`加载失败 (${res.status})`)
       const json = await res.json()
-      setOrders((json.orders ?? []).filter((o: WorkOrder) => o.status === 'in_review'))
+      const pending = (json.orders ?? []).filter(
+        (o: WorkOrder & { client_id?: string }) =>
+          o.status === 'in_review' && (!clientId || o.client_id === clientId),
+      )
+      setOrders(pending)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [clientId])
 
   useEffect(() => { void load() }, [load])
 
@@ -86,6 +92,8 @@ export function ReviewInbox() {
     }
   }, [act])
 
+  // 嵌客户页概览:没待审(或加载中)就不占地方,只在有片要审时冒出来
+  if (hideWhenEmpty && (loading || orders.length === 0)) return null
   if (loading) return <p className="text-sm text-slate-400 mb-6">加载待审…</p>
 
   return (
