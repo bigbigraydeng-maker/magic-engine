@@ -183,6 +183,7 @@ async function persistDecision(
           angle: draft.angle,
           rationale: draft.rationale_one_liner,
           segmentRoles: draft.brief.segments.map((s) => s.role),
+          expectedMetric: goal?.primary_metric_key, // B3:CTA 导向圈定 Goal 北极星(诸葛亮硬验收)
         })
       }
     } catch (e) {

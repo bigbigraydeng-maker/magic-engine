@@ -9,7 +9,7 @@ vi.mock('@/lib/anthropic/client', () => ({
 }))
 // formatBriefForPrompt 用真实实现(读 fixture brief 字段即可,无需 mock)
 
-import { generateAdCopy } from './copy-generator'
+import { ctaIntentFor, generateAdCopy } from './copy-generator'
 import type { MasterBrief } from '@/types/magic-engine'
 
 const BRIEF = {
@@ -67,5 +67,22 @@ describe('generateAdCopy', () => {
     const copy = await generateAdCopy({ brief: noBrand, angle: 'a', rationale: 'w', segmentRoles: ROLES })
     expect(JSON.stringify(copy)).not.toContain('这个品牌')
     expect(copy.endcard.cta).toContain('our brand')
+  })
+})
+
+describe('ctaIntentFor — B3 文案 CTA 导向 Goal 北极星(诸葛亮硬验收)', () => {
+  it('brand_search_volume → 拉品牌搜索(去搜品牌)', () => {
+    expect(ctaIntentFor('brand_search_volume')).toContain('品牌搜索')
+  })
+  it('monthly_revenue → 转化/清仓抢购', () => {
+    expect(ctaIntentFor('monthly_revenue')).toContain('转化')
+  })
+  it('leads_count → 拿线索', () => {
+    expect(ctaIntentFor('leads_count')).toContain('线索')
+  })
+  it('未知/null 指标 → 品牌认知兜底(不炸)', () => {
+    expect(ctaIntentFor(null)).toContain('品牌认知')
+    expect(ctaIntentFor(undefined)).toContain('品牌认知')
+    expect(ctaIntentFor('weird_metric')).toContain('品牌认知')
   })
 })

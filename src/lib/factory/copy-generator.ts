@@ -10,6 +10,27 @@ import type { AdCopy } from './types'
 
 type Role = 'hook' | 'middle' | 'cta'
 
+/**
+ * B3(诸葛亮硬验收):文案 CTA 意图必须导向工单圈定的 Goal 北极星,别自嗨。
+ * expected_metric(来自 brief.attribution)→ 一句 CTA 战略意图喂进生成 prompt。
+ */
+export function ctaIntentFor(metric: string | null | undefined): string {
+  switch (metric) {
+    case 'brand_search_volume':
+      return 'CTA 目标=拉品牌搜索:引导观众"记住品牌名并去搜索它"(Search "<brand>"),不是直接卖货。'
+    case 'monthly_revenue':
+      return 'CTA 目标=直接转化/营收:限时优惠、清仓抢购式紧迫感,引导立刻购买/到店。'
+    case 'leads_count':
+      return 'CTA 目标=拿线索:引导留资/咨询/报名(Enquire / Sign up / Talk to us)。'
+    case 'organic_traffic':
+      return 'CTA 目标=引流上站:引导访问官网了解更多(Visit our site)。'
+    case 'ai_visibility_score':
+      return 'CTA 目标=品牌权威露出:强化专业身份与品类权威,引导认知不强推销。'
+    default:
+      return 'CTA 目标=品牌认知:清晰品牌行动号召,不编价格。'
+  }
+}
+
 /** copy 生成同步塞在信号入口链路(persistDecision),Sonnet 卡住会拖满入口(魏征 A2-§4)。
  *  硬超时 → 走模板 fallback,不拖垮 signals POST(maxDuration 60s)。 */
 const COPY_GEN_TIMEOUT_MS = 8000
@@ -33,8 +54,10 @@ export async function generateAdCopy(params: {
   angle: string
   rationale: string
   segmentRoles: Role[]
+  /** B3:工单归因桩的北极星指标,塑造 CTA 战略意图(诸葛亮硬验收) */
+  expectedMetric?: string | null
 }): Promise<AdCopy> {
-  const { brief, angle, rationale, segmentRoles } = params
+  const { brief, angle, rationale, segmentRoles, expectedMetric } = params
   const brand = brief.brand_name || 'our brand' // 英文中性词,不让中文串进 AU/NZ 英文广告(魏征 A2-§6)
   const url = brief.website || ''
 
@@ -44,11 +67,12 @@ export async function generateAdCopy(params: {
       `AU/NZ 英语拼写,不编造价格/数字。只返回 JSON,不要解释。\n\n${formatBriefForPrompt(brief)}`
     const user =
       `角度(必须溯源品牌主线): ${angle}\n为什么做这条: ${rationale}\n` +
+      `${ctaIntentFor(expectedMetric)}\n` +
       `段落顺序(${segmentRoles.length} 段): ${segmentRoles.join(', ')}\n\n` +
       `返回 JSON:{"segments":[{"role":"hook|middle|cta","title_main"?,"title_sub"?,"caption"?,"vo"?}],` +
       `"endcard":{"cta","offer":["..."],"url":"${url}","vo"?}}\n` +
       `规则:每个文本字段 ≤ 6 词;英语;无把握的价格用「Talk to us」式 CTA;` +
-      `endcard.url 固定填 "${url}";segments 数量 = ${segmentRoles.length}。`
+      `endcard.url 固定填 "${url}";segments 数量 = ${segmentRoles.length};CTA 须体现上面的 CTA 目标。`
 
     const { text } = await withTimeout(
       callClaudeChat({

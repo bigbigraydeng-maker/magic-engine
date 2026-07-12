@@ -35,8 +35,18 @@ const WORKER_TOKEN = ENV.FACTORY_WORKER_TOKEN || ''
 const WORKER_ID = ENV.FACTORY_WORKER_ID || `mac-${hostname()}`
 const MUAPI_KEY = ENV.MUAPI_API_KEY || ''
 // OPENAI_KEY 已移除:A2 起文案由 ME 后端按 master_brief 生成(brief.copy),worker 不再写文案
-const MAKE_PROMO = ENV.MAKE_PROMO_PATH || join(process.env.HOME, 'Documents/CTS_BrandKit/make_promo.py')
-const BRAND_KIT = ENV.BRAND_KIT_PATH || join(process.env.HOME, 'Documents/CTS_BrandKit')
+// B3:引擎指向 MagicLab_Studio 权威版(治没音乐/素材糙),brandkit 按客户走(治装配层 CTS 尾巴)。
+const STUDIO_ROOT = ENV.STUDIO_ROOT || join(process.env.HOME, 'Dropbox/MagicLab_Studio')
+const MAKE_PROMO = ENV.MAKE_PROMO_PATH || join(STUDIO_ROOT, 'engine/make_promo.py')
+const DEFAULT_BRAND_KIT = ENV.BRAND_KIT_PATH || join(process.env.HOME, 'Documents/CTS_BrandKit')
+// client_id → studio 文件夹名(brandkit=$STUDIO_ROOT/<folder>/brandkit)。JSON env 覆盖。
+const CLIENT_STUDIO = (() => { try { return JSON.parse(ENV.FACTORY_CLIENT_STUDIO || '{}') } catch { return {} } })()
+function brandkitFor(clientId) {
+  const folder = CLIENT_STUDIO[clientId]
+  const kit = folder ? join(STUDIO_ROOT, folder, 'brandkit') : DEFAULT_BRAND_KIT
+  if (!existsSync(kit)) log(`⚠️ brandkit 不存在: ${kit}(client=${clientId}),退回默认`)
+  return existsSync(kit) ? kit : DEFAULT_BRAND_KIT
+}
 const MUAPI_SLUG = ENV.MUAPI_KLING_SLUG || 'kling-v2.1-standard-i2v'
 const CLIP_UNIT_COST = Number(ENV.FACTORY_CLIP_UNIT_COST_USD || '0.225')
 
@@ -228,12 +238,13 @@ async function resolveClips(wo, tmp, onCost) {
 function assemble(wo, localPaths, copy, tmp) {
   const brief = wo.brief
   const out = join(tmp, 'final.mp4')
-  // BGM:默认 brandkit 自带 music_bright.wav,可 env 覆盖(FACTORY_BGM_PATH)。
+  const brandKit = brandkitFor(wo.client_id) // B3:brandkit 按客户,不再硬编 CTS
+  // BGM:默认该客户 brandkit 自带 music_bright.wav,可 env 覆盖(FACTORY_BGM_PATH)。
   // make_promo 只在 cfg.music 存在时才铺床(ducked -14dB),无此字段 = 无背景乐。
-  const bgm = ENV.FACTORY_BGM_PATH || join(BRAND_KIT, 'assets/music_bright.wav')
+  const bgm = ENV.FACTORY_BGM_PATH || join(brandKit, 'assets/music_bright.wav')
   const cfg = {
     output: out,
-    brand_kit: BRAND_KIT,
+    brand_kit: brandKit,
     ...(existsSync(bgm) ? { music: bgm } : {}),
     segments: brief.segments.map((seg, i) => ({
       src: localPaths[i],
