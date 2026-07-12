@@ -9,7 +9,7 @@ vi.mock('@/lib/anthropic/client', () => ({
 }))
 // formatBriefForPrompt 用真实实现(读 fixture brief 字段即可,无需 mock)
 
-import { ctaIntentFor, generateAdCopy } from './copy-generator'
+import { ctaIntentFor, generateAdCopy, hookIntentFor } from './copy-generator'
 import type { MasterBrief } from '@/types/magic-engine'
 
 const BRIEF = {
@@ -44,6 +44,16 @@ describe('generateAdCopy', () => {
     expect(copy.endcard.url).toBe('oztopbuildingsupplies.com.au')
     expect(JSON.stringify(copy)).not.toContain('CTS')
     expect(JSON.stringify(copy)).not.toContain('ctstours')
+  })
+
+  it('模板 fallback 按 Goal 微调 CTA:营收/线索 → 行动号召,且不编价格数字', async () => {
+    callClaudeChat.mockResolvedValue(BAD_JSON)
+    const rev = await generateAdCopy({ brief: BRIEF, angle: 'walnut clearance', rationale: 'why', segmentRoles: ROLES, expectedMetric: 'monthly_revenue' })
+    expect(rev.endcard.cta).toBe('Free measure & quote')
+    // 红线:模板绝不编造价格/折扣数字
+    expect(JSON.stringify(rev)).not.toMatch(/\$\d|\d+\s*%/)
+    const brandGoal = await generateAdCopy({ brief: BRIEF, angle: 'flooring', rationale: 'why', segmentRoles: ROLES, expectedMetric: 'brand_search_volume' })
+    expect(brandGoal.endcard.cta).toContain('Discover')
   })
 
   it('LLM 返回段数不够 → 走 fallback(不放行残缺文案)', async () => {
@@ -84,5 +94,19 @@ describe('ctaIntentFor — B3 文案 CTA 导向 Goal 北极星(诸葛亮硬验�
     expect(ctaIntentFor(null)).toContain('品牌认知')
     expect(ctaIntentFor(undefined)).toContain('品牌认知')
     expect(ctaIntentFor('weird_metric')).toContain('品牌认知')
+  })
+})
+
+describe('hookIntentFor — B4 钩子导向 Goal 北极星(板桥:hook 是生死线)', () => {
+  it('monthly_revenue → 清仓/紧迫感', () => {
+    expect(hookIntentFor('monthly_revenue')).toMatch(/清仓|紧迫|限时/)
+  })
+  it('brand_search_volume → 品牌记忆/去搜', () => {
+    expect(hookIntentFor('brand_search_volume')).toContain('品牌记忆')
+  })
+  it('未知/null 指标 → 停手指兜底(不炸)', () => {
+    expect(hookIntentFor(null)).toContain('停手指')
+    expect(hookIntentFor(undefined)).toContain('停手指')
+    expect(hookIntentFor('weird_metric')).toContain('停手指')
   })
 })
