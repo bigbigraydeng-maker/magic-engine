@@ -240,17 +240,52 @@ async function resolveClips(wo, tmp, onCost) {
 
 // ── 装配(make_promo.py)────────────────────────────────────────────────────────
 
+// B3 皮按客户走:brandkit 根可放 factory_profile.json 定义创意配置,worker 下发引擎。
+// { music?: 曲名(相对 _shared/music)或绝对路径, music_mood?, look?, caption_mode?, xfade? }。
+// 缺文件 = 全部保持引擎默认(不给无 profile 的客户偷偷改风格/换曲)。
+const SHARED_MUSIC = join(STUDIO_ROOT, '_shared/music')
+
+function creativeProfile(brandKit) {
+  const p = join(brandKit, 'factory_profile.json')
+  if (!existsSync(p)) return {}
+  try {
+    return JSON.parse(readFileSync(p, 'utf8'))
+  } catch {
+    log(`⚠️ factory_profile.json 解析失败: ${p},用引擎默认`)
+    return {}
+  }
+}
+
+// BGM 解析:profile.music(绝对路径或 _shared/music 下曲名)优先,回退 env / brandkit 自带曲。
+// make_promo 只在 cfg.music 存在时才铺床(ducked -14dB),无 music 且无 music_mood = 无背景乐。
+function resolveBgm(profile, brandKit) {
+  if (profile.music) {
+    const abs = profile.music.startsWith('/') ? profile.music : join(SHARED_MUSIC, profile.music)
+    if (existsSync(abs)) return abs
+    // 魏征 P1:打错曲名且声明了 music_mood 时,别静默砸 brandkit 默认曲(可能串 CTS),
+    // 返回 null 让 assemble 落到 music_mood(客户声明的次优意图)。仅无 mood 才兜底默认曲。
+    log(`⚠️ factory_profile.music 找不到: ${abs}${profile.music_mood ? ',回退 music_mood' : ',回退默认曲'}`)
+    if (profile.music_mood) return null
+  }
+  const fallback = ENV.FACTORY_BGM_PATH || join(brandKit, 'assets/music_bright.wav')
+  return existsSync(fallback) ? fallback : null
+}
+
 function assemble(wo, localPaths, copy, tmp) {
   const brief = wo.brief
   const out = join(tmp, 'final.mp4')
   const brandKit = brandkitFor(wo.client_id) // B3:brandkit 按客户,不再硬编 CTS
-  // BGM:默认该客户 brandkit 自带 music_bright.wav,可 env 覆盖(FACTORY_BGM_PATH)。
-  // make_promo 只在 cfg.music 存在时才铺床(ducked -14dB),无此字段 = 无背景乐。
-  const bgm = ENV.FACTORY_BGM_PATH || join(brandKit, 'assets/music_bright.wav')
+  const profile = creativeProfile(brandKit)
+  const bgm = resolveBgm(profile, brandKit)
   const cfg = {
     output: out,
     brand_kit: brandKit,
-    ...(existsSync(bgm) ? { music: bgm } : {}),
+    // 音乐:显式曲优先;无显式曲但 profile 给了 mood → 交引擎按库自动选。
+    ...(bgm ? { music: bgm } : profile.music_mood ? { music_mood: profile.music_mood } : {}),
+    // 质量参数(reel 感):仅 profile 显式声明才下发,不给无 profile 客户偷改。
+    ...(profile.look ? { look: profile.look } : {}),
+    ...(profile.caption_mode != null ? { caption_mode: profile.caption_mode } : {}),
+    ...(profile.xfade != null ? { xfade: profile.xfade } : {}),
     segments: brief.segments.map((seg, i) => ({
       src: localPaths[i],
       ss: 0,
