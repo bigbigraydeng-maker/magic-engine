@@ -1,6 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import type { WorkOrderStatus } from '@/lib/factory/types'
+import { STATUS_META, STATUS_ORDER } from './_components/statusMeta'
 
 // P21.J M2 — Content Factory Ops 后台(spec §6.1)
 // 工单管线可视 + dead_letter 一键复活。单运营者视图,不做复杂筛选。
@@ -8,7 +10,7 @@ import { useCallback, useEffect, useState } from 'react'
 interface WorkOrder {
   id: string
   client_name: string
-  status: string
+  status: WorkOrderStatus
   order_type: string
   angle: string
   rationale_one_liner: string
@@ -20,31 +22,6 @@ interface WorkOrder {
   source_ad_id: string | null
   created_at: string
 }
-
-const STATUS_META: Record<string, { label: string; color: string }> = {
-  queued: { label: '排队中', color: 'bg-slate-100 text-slate-700' },
-  claimed: { label: '已领取', color: 'bg-blue-100 text-blue-700' },
-  producing: { label: '生产中', color: 'bg-blue-100 text-blue-700' },
-  rendered: { label: '已出片', color: 'bg-indigo-100 text-indigo-700' },
-  in_review: { label: '待审核', color: 'bg-amber-100 text-amber-800' },
-  review_rejected: { label: '已打回', color: 'bg-orange-100 text-orange-700' },
-  approved: { label: '已通过', color: 'bg-emerald-100 text-emerald-700' },
-  publishing: { label: '发布中', color: 'bg-teal-100 text-teal-700' },
-  publish_failed: { label: '发布失败', color: 'bg-red-100 text-red-700' },
-  published: { label: '已发布', color: 'bg-green-100 text-green-700' },
-  measuring: { label: '归因中', color: 'bg-cyan-100 text-cyan-700' },
-  closed: { label: '已归档', color: 'bg-slate-100 text-slate-500' },
-  failed: { label: '失败', color: 'bg-red-100 text-red-700' },
-  dead_letter: { label: '死信队列', color: 'bg-red-200 text-red-900' },
-  archived: { label: '已归档', color: 'bg-slate-100 text-slate-500' },
-  superseded: { label: '已取代', color: 'bg-slate-100 text-slate-500' },
-}
-
-const ORDER = [
-  'dead_letter', 'publish_failed', 'in_review', 'rendered', 'review_rejected',
-  'producing', 'claimed', 'queued', 'approved', 'publishing', 'published',
-  'measuring', 'failed', 'closed', 'archived', 'superseded',
-]
 
 function WorkerHealth({ lastHeartbeat, activeCount }: { lastHeartbeat: string | null; activeCount: number }) {
   if (activeCount === 0) return null
@@ -102,7 +79,7 @@ export default function FactoryOpsPage() {
   }, [load])
 
   // 全局工单看板 = 纯跨客户状态总览。交互审核(卡+通过+对话框)在客户页概览,不在这
-  const grouped = ORDER
+  const grouped = STATUS_ORDER
     .map((status) => ({ status, items: orders.filter((o) => o.status === status) }))
     .filter((g) => g.items.length > 0)
 
@@ -136,7 +113,7 @@ export default function FactoryOpsPage() {
 
       <div className="space-y-6">
         {grouped.map((g) => {
-          const meta = STATUS_META[g.status] ?? { label: g.status, color: 'bg-slate-100 text-slate-700' }
+          const meta = STATUS_META[g.status] // Record<WorkOrderStatus> 穷举,必有值
           return (
             <section key={g.status}>
               <h2 className="text-sm font-medium text-slate-600 mb-2 flex items-center gap-2">

@@ -11,6 +11,25 @@ export type SignalStatus = 'received' | 'evaluating' | 'accepted' | 'rejected' |
 
 export type OrderType = 'variant_from_winner' | 'fresh_angle' | 'clip_generation'
 
+/**
+ * 工单状态机单一类型来源(A1 架构整理)。权威定义 = migration content_work_orders.status
+ * CHECK 约束(20260711000002)。改此 union 必同步:①DB CHECK ②STATUS_META(statusMeta.ts,
+ * Record<WorkOrderStatus> 会编译报错兜底)③canTransition。这是 CLAUDE.md「改 enum 必全仓
+ * grep 同步」的着力点——以前是裸 string,没地方 grep。
+ * 分段:M1 生产 → M2 审核 → M3 发布/归因 → 终态。
+ */
+export type WorkOrderStatus =
+  | 'queued' | 'claimed' | 'producing' | 'rendered'          // M1/M2 生产
+  | 'in_review' | 'review_rejected' | 'approved'             // 审核
+  | 'publishing' | 'publish_failed' | 'published' | 'measuring' | 'closed' // M3 发布/归因
+  | 'failed' | 'dead_letter' | 'archived' | 'superseded'     // 终态
+
+/** 打回分类(migration content_work_orders.reject_category CHECK) */
+export type ReviewRejectCategory = 'brand_redline' | 'quality' | 'wrong_angle' | 'budget' | 'other'
+
+/** winner 入库来源(migration winner_structures.entry_channel CHECK;peer_study 待 B 段加 migration 后并入) */
+export type WinnerEntryChannel = 'auto' | 'manual_intake'
+
 export interface DemandSignal {
   id: string
   client_id: string

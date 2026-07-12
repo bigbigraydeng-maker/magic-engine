@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import type { WorkOrderStatus } from '@/lib/factory/types'
 import { FactoryChat } from './FactoryChat'
 
 // P21.J ME 原生化 P1 — 审核 Inbox(spec me-native-design v0.2 §2.1)
@@ -11,7 +12,7 @@ interface WorkOrder {
   id: string
   client_id: string
   client_name: string
-  status: string
+  status: WorkOrderStatus
   angle: string
   rationale_one_liner: string
   output: { video_path?: string } | null

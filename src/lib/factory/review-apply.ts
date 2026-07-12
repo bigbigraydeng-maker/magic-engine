@@ -4,6 +4,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { approveBudgetWithinCap } from './review-actions'
+import type { ReviewRejectCategory } from './types'
 
 export interface ReviewApplyResult {
   ok: boolean
@@ -79,7 +80,7 @@ export async function applyQualityReject(
     .from('content_work_orders')
     .update({
       status: 'review_rejected',
-      reject_category: 'quality',
+      reject_category: 'quality' satisfies ReviewRejectCategory,
       reject_reason: feedback.slice(0, 2000),
       updated_at: new Date().toISOString(),
     })
