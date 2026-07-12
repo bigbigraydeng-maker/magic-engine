@@ -25,6 +25,7 @@ const publicUrl = (path?: string) =>
 export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hideWhenEmpty?: boolean } = {}) {
   const [orders, setOrders] = useState<WorkOrder[]>([])
   const [loading, setLoading] = useState(true)
+  const [hasShown, setHasShown] = useState(false) // 显示过一次就常驻,刷新不卸载(防对话框丢历史)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<WorkOrder | null>(null)
@@ -40,6 +41,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
           o.status === 'in_review' && (!clientId || o.client_id === clientId),
       )
       setOrders(pending)
+      if (pending.length > 0) setHasShown(true)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
@@ -71,9 +73,10 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
     }
   }, [])
 
-  // 嵌客户页概览:没待审(或加载中)就不占地方,只在有片要审时冒出来
-  if (hideWhenEmpty && (loading || orders.length === 0)) return null
-  if (loading) return <p className="text-sm text-slate-400 mb-6">加载待审…</p>
+  // 只在「从没显示过 + 当前也没待审」时隐藏。一旦显示过就常驻——刷新时绝不整体卸载,
+  // 否则右侧对话框(ReviewInbox 的子组件)会被连带卸载,历史 + 正在输入的指令全丢(PM 报的 bug)。
+  if (hideWhenEmpty && !hasShown && orders.length === 0) return null
+  if (!hasShown && loading) return <p className="text-sm text-slate-400 mb-6">加载待审…</p>
 
   return (
     <section className="mb-8">
