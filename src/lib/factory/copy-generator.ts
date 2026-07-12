@@ -52,6 +52,21 @@ export function hookIntentFor(metric: string | null | undefined): string {
   }
 }
 
+/**
+ * 红线硬拦(魏征 B4-P1):prompt 口头禁数字不够,LLM 可能无视吐出「$29/m²」「40% off」。
+ * 这类编造的价格/折扣一旦上客户可见成片 = 踩「绝不凭空注入客户业务数据」红线(Oztop 编过假数字事故)。
+ * output 侧扫描,命中即判定整条 LLM 结果不可信 → 落模板 fallback(零数字,已测试守护)。
+ * 红线由数据事实守护,不靠 prompt 措辞。(未来 verified_offer 录入的真数字将走白名单豁免——板桥,下一 PR)
+ */
+const INVENTED_NUMBER_RE = /\$\s*\d|\d+\s*%|\d+\s*(?:off|dollars?)\b/i
+
+function hasInventedNumber(copy: AdCopy): boolean {
+  const texts: Array<string | undefined> = []
+  for (const s of copy.segments ?? []) texts.push(s.title_main, s.title_sub, s.caption, s.vo)
+  texts.push(copy.endcard?.cta, copy.endcard?.vo, ...(copy.endcard?.offer ?? []))
+  return texts.some((t) => typeof t === 'string' && INVENTED_NUMBER_RE.test(t))
+}
+
 /** copy 生成同步塞在信号入口链路(persistDecision),Sonnet 卡住会拖满入口(魏征 A2-§4)。
  *  硬超时 → 走模板 fallback,不拖垮 signals POST(maxDuration 60s)。 */
 const COPY_GEN_TIMEOUT_MS = 8000
@@ -117,14 +132,16 @@ export async function generateAdCopy(params: {
     ) {
       parsed.endcard.url = url // 硬锁品牌网址,不信 LLM 填的
       if (!Array.isArray(parsed.endcard.offer)) parsed.endcard.offer = []
-      return parsed
+      // 红线硬拦:LLM 无视禁数字约束吐了编造价格/折扣 → 整条不可信,落模板(不 return)
+      if (!hasInventedNumber(parsed)) return parsed
     }
   } catch {
     // 落模板 fallback
   }
 
   // 品牌接地模板 fallback(LLM 挂时用,不硬编任何客户名/网址)。CTA 按 Goal 微调但绝对安全:
-  // 营收/转化类用行动号召「Free measure & quote」(真实服务,不编价格/折扣),其余走品牌认知。
+  // 营收/转化类用行业中立行动号召「Enquire now」——魏征 B4-P1:不能硬编「Free measure & quote」
+  // 这类行业专属服务承诺(对 CTS 旅游等客户 = 替客户编不存在的服务)。其余走品牌认知。
   const isConversion = expectedMetric === 'monthly_revenue' || expectedMetric === 'leads_count'
   return {
     segments: segmentRoles.map((role, i) =>
@@ -133,7 +150,7 @@ export async function generateAdCopy(params: {
         : { role, caption: angle },
     ),
     endcard: isConversion
-      ? { cta: 'Free measure & quote', offer: ['Talk to us today'], url }
+      ? { cta: 'Enquire now', offer: ['Talk to us today'], url }
       : { cta: `Discover ${brand}`, offer: ['Talk to us today'], url },
   }
 }

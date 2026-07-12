@@ -46,14 +46,30 @@ describe('generateAdCopy', () => {
     expect(JSON.stringify(copy)).not.toContain('ctstours')
   })
 
-  it('模板 fallback 按 Goal 微调 CTA:营收/线索 → 行动号召,且不编价格数字', async () => {
+  it('模板 fallback 按 Goal 微调 CTA:营收/线索 → 行业中立行动号召(不编行业专属服务承诺)', async () => {
     callClaudeChat.mockResolvedValue(BAD_JSON)
     const rev = await generateAdCopy({ brief: BRIEF, angle: 'walnut clearance', rationale: 'why', segmentRoles: ROLES, expectedMetric: 'monthly_revenue' })
-    expect(rev.endcard.cta).toBe('Free measure & quote')
-    // 红线:模板绝不编造价格/折扣数字
+    expect(rev.endcard.cta).toBe('Enquire now') // 魏征 B4-P1:不硬编 'Free measure & quote' 地板专属承诺
     expect(JSON.stringify(rev)).not.toMatch(/\$\d|\d+\s*%/)
     const brandGoal = await generateAdCopy({ brief: BRIEF, angle: 'flooring', rationale: 'why', segmentRoles: ROLES, expectedMetric: 'brand_search_volume' })
     expect(brandGoal.endcard.cta).toContain('Discover')
+  })
+
+  it('🔴 LLM 无视禁数字吐编造价格($29/40% off) → 整条落模板(红线代码硬拦,非空架子)', async () => {
+    // 关键:这是合法 JSON、段数够、endcard 全——旧代码(无 output 拦截)会原样放行 → 数字上客户成片。
+    callClaudeChat.mockResolvedValue({
+      text: JSON.stringify({
+        segments: [
+          { role: 'hook', title_main: '$29/m² WALNUT', title_sub: 'was $59' },
+          { role: 'middle', caption: '40% off this week' },
+          { role: 'cta', caption: 'ends soon' },
+        ],
+        endcard: { cta: 'Save 40%', offer: ['$29/m²'], url: 'oztopbuildingsupplies.com.au' },
+      }),
+    })
+    const copy = await generateAdCopy({ brief: BRIEF, angle: 'walnut clearance', rationale: 'why', segmentRoles: ROLES, expectedMetric: 'monthly_revenue' })
+    expect(JSON.stringify(copy)).not.toMatch(/\$\s*\d|\d+\s*%/) // 被拦回模板 = 零编造数字
+    expect(copy.endcard.cta).toBe('Enquire now') // 拿到的是模板中立 CTA,不是 LLM 的 'Save 40%'
   })
 
   it('LLM 返回段数不够 → 走 fallback(不放行残缺文案)', async () => {
