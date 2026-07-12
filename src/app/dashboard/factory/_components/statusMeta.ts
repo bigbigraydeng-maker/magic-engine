@@ -15,12 +15,12 @@ export const STATUS_META: Record<WorkOrderStatus, { label: string; color: string
   publishing: { label: '发布中', color: 'bg-teal-100 text-teal-700' },
   publish_failed: { label: '发布失败', color: 'bg-red-100 text-red-700' },
   published: { label: '已发布', color: 'bg-green-100 text-green-700' },
-  measuring: { label: '归因中', color: 'bg-cyan-100 text-cyan-700' },
-  closed: { label: '已归档', color: 'bg-slate-100 text-slate-500' },
+  measuring: { label: '统计效果中', color: 'bg-cyan-100 text-cyan-700' },
+  closed: { label: '已完成', color: 'bg-slate-100 text-slate-500' },
   failed: { label: '失败', color: 'bg-red-100 text-red-700' },
-  dead_letter: { label: '死信队列', color: 'bg-red-200 text-red-900' },
+  dead_letter: { label: '卡住待处理', color: 'bg-red-200 text-red-900' },
   archived: { label: '已归档', color: 'bg-slate-100 text-slate-500' },
-  superseded: { label: '已取代', color: 'bg-slate-100 text-slate-500' },
+  superseded: { label: '已被新版替换', color: 'bg-slate-100 text-slate-500' },
 }
 
 /** 看板分组展示顺序(要拍板的状态在前:死信/发布失败/待审) */

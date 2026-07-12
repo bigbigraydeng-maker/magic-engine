@@ -91,7 +91,7 @@ export default function FactoryOpsPage() {
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">内容工厂 · 工单看板</h1>
           <p className="text-sm text-slate-500 mt-1 flex items-center gap-3 flex-wrap">
-            <span>共 {orders.length} 条工单{deadCount > 0 ? ` · ⚠️ ${deadCount} 条在死信队列待复活` : ''}</span>
+            <span>共 {orders.length} 条工单{deadCount > 0 ? ` · ⚠️ ${deadCount} 条卡住了,需你手动重试` : ''}</span>
             <WorkerHealth lastHeartbeat={worker.last_heartbeat_at} activeCount={worker.active_count} />
           </p>
         </div>
@@ -147,7 +147,7 @@ export default function FactoryOpsPage() {
                           onClick={() => void revive(o.id)}
                           disabled={reviving === o.id}
                           className="shrink-0 px-3 py-1.5 text-sm rounded-lg bg-slate-900 text-white hover:bg-slate-700 disabled:opacity-50"
-                        >{reviving === o.id ? '复活中…' : '↻ 复活回队列'}</button>
+                        >{reviving === o.id ? '重试中…' : '↻ 重新排队重试'}</button>
                       )}
                     </div>
                   </div>
