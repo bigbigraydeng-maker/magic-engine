@@ -142,9 +142,9 @@ L3 转化层(CTWA / Lead Form)· 素材守门轮换(learning-phase 安全)
 
 | 34.A(现) | 激进版 |
 |---|---|
-| 每天 1 次(GHA cron `0 15 * * *` = 03:00 NZST) | **每 6h**(`0 3,9,15,21 * * *` UTC) |
+| 每天 1 次(Render Cron `0 15 * * *` = 03:00 NZST) | **每 6h**(`0 3,9,15,21 * * *` UTC) |
 
-- **cron 沿用 GHA**(34.A winner-sync-daily.yml 已验证可用,PR #545 merged),非 Render —— 本仓 cron 混合两栈(render.yaml 有 Render cron,.github/workflows 有 GHA cron),34.B 沿用 34.A 同栈
+- **cron 用 Render Cron**(34.A winner-sync-daily 已迁到 Render Cron,`render.yaml` L286-302 有定义,PR #542/#545 merged),34.B 沿用 34.A 同栈 —— 与 winner-sync + google-data-pullback 均在 `render.yaml`。**迁移原因**:GHA scheduled workflows 是 best-effort,2026-07-11 15:00 UTC 那次 run 从未触发;Render Cron 是专用调度器,触发可靠
 - **时区已核对**:03:00 NZST = **15:00 UTC**(NZST=UTC+12 冬令时)。34.A SOP 里「03:00 NZST = 14:00 UTC」是笔误,本 spec 附带修正
 - 6h 仅 G1 需要小时级精度;G3 每日 1 次
 - **rate limit**:Marketing API 用 BUC(Business Use Case)按 ad account 滚动积分制,非简单 200/小时。当前 ~10 调用/次 × 4 次/天充足;10 客户规模化用 per-client token 分摊 + `insights level=ad` 一次拉整个 ad set(合并调用)
