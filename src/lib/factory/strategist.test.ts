@@ -248,6 +248,26 @@ describe('骨架 + 工单组装', () => {
     expect(wo.brief.clip_generation_plan).toHaveLength(1) // 只缺 cta 段
   })
 
+  it('素材单一根治:同 scene_tag 多行只出镜一次,重复场景落生成计划(去重按内容不止 id)', () => {
+    // 真实 bug 现场:Oztop bath1_factory 有 2 行(同源不同 id),旧代码只按 id 去重 → hook+middle 都选 bath = 成片单一。
+    const d = decideSignal(
+      makeCtx({
+        clipStock: [
+          { id: 'bath-a', scene_tag: 'bath1_factory', motion_type: null, track: 'a_real', usage_count: 0, last_used_at: null },
+          { id: 'bath-b', scene_tag: 'bath1_factory', motion_type: null, track: 'a_real', usage_count: 0, last_used_at: null },
+          { id: 'water', scene_tag: 'broll_water_tile', motion_type: null, track: 'a_real', usage_count: 0, last_used_at: null },
+        ],
+      }),
+    )
+    const wo = (d as { workOrder: { clip_links: Array<{ clip_id: string }>; brief: { clip_generation_plan: unknown[] } } }).workOrder
+    // 只有 2 个 distinct 场景 → 只挂 2 条,第 3 段落生成计划(不重复同一 bath 场景)
+    expect(wo.clip_links).toHaveLength(2)
+    expect(wo.brief.clip_generation_plan).toHaveLength(1)
+    const sceneOf: Record<string, string> = { 'bath-a': 'bath1_factory', 'bath-b': 'bath1_factory', water: 'broll_water_tile' }
+    const usedScenes = new Set(wo.clip_links.map((l) => sceneOf[l.clip_id]))
+    expect(usedScenes.size).toBe(2) // 两条挂载 clip 必须来自不同场景
+  })
+
   it('A/B 轨治理:B 轨地标 clip 默认排除;客户显式接受风险(CTS)才放行(护栏 6/附录 A)', () => {
     const bClip = { id: 'clip-b', scene_tag: 'great_wall', motion_type: null, track: 'b_generated' as const, usage_count: 0, last_used_at: null }
     const denied = decideSignal(makeCtx({ clipStock: [bClip], allowBTrackLandmarkAds: false }))

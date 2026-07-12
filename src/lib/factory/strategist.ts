@@ -274,11 +274,15 @@ export function selectClips(ctx: GateContext, angle: string): ClipSelection {
   const clipLinks: WorkOrderDraft['clip_links'] = []
   const generationPlan: ClipGenerationPlanItem[] = []
   const used = new Set<string>()
+  // 按 scene_tag(内容身份)去重,不止 clip.id:同一场景多行(如 bath1_factory×2 同源不同 id)
+  // 不能跨段重复出镜,否则成片「素材单一」。distinct 场景不够 → 该段落 generationPlan 补生成。
+  const usedScenes = new Set<string>()
 
   roles.forEach((role, i) => {
-    const clip = pool.find((c) => !used.has(c.id))
+    const clip = pool.find((c) => !used.has(c.id) && !(c.scene_tag && usedScenes.has(c.scene_tag)))
     if (clip) {
       used.add(clip.id)
+      if (clip.scene_tag) usedScenes.add(clip.scene_tag)
       segments.push({
         role,
         duration_hint_s: FACTORY_SEGMENT_TEMPLATE[role],

@@ -286,6 +286,8 @@ function assemble(wo, localPaths, copy, tmp) {
     ...(profile.look ? { look: profile.look } : {}),
     ...(profile.caption_mode != null ? { caption_mode: profile.caption_mode } : {}),
     ...(profile.xfade != null ? { xfade: profile.xfade } : {}),
+    // endcard_panel:false = logo 直接放深色渐变(白字 logo 用,如 Oztop),不套白卡片(否则白字消失)。
+    ...(profile.endcard_panel != null ? { endcard_panel: profile.endcard_panel } : {}),
     segments: brief.segments.map((seg, i) => ({
       src: localPaths[i],
       ss: 0,
