@@ -8,10 +8,9 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { FACTORY_B_TRACK_SCENE_TAGS } from '@/lib/factory/constants'
+import { completeWorkOrder } from '@/lib/factory/complete-work-order'
 import {
   isWorkerAuthorized,
-  scanRedlineHits,
   validateClipPath,
   validateRenderPath,
   workerIdFromBody,
@@ -135,164 +134,31 @@ export async function POST(
       { status: 422 },
     )
   }
-  const clipPaths: string[] = []
-  for (const clip of newClips) {
-    const p = validateClipPath(clip.storage_url, wo.client_id, clip.track)
-    if (!p) {
+  for (let i = 0; i < newClips.length; i++) {
+    if (!validateClipPath(newClips[i].storage_url, wo.client_id, newClips[i].track)) {
       return NextResponse.json(
-        { error: `new_clips[${clipPaths.length}] path/track invalid: ${clip.storage_url}` },
-        { status: 422 },
-      )
-    }
-    clipPaths.push(p)
-  }
-
-  // ② 成片级红线复扫(fail-closed:红线/brief 查询失败即拒,查不到 ≠ 没有)
-  const { data: client, error: cErr } = await supabaseAdmin
-    .from('clients')
-    .select('brand_redline_phrases, factory_config')
-    .eq('id', wo.client_id)
-    .maybeSingle()
-  if (cErr || !client) {
-    return NextResponse.json({ error: 'redline lookup failed' }, { status: 500 })
-  }
-
-  // ①b B 轨 scene_tag 白名单(魏征 M2-P1-2,护栏 6/板桥 #8):生成式具体地标不入库,
-  // 例外仅 clients.factory_config.allow_b_track_landmark_ads(附录 A: CTS PM 显式接受)
-  const allowLandmark =
-    ((client.factory_config ?? {}) as Record<string, unknown>)['allow_b_track_landmark_ads'] === true
-  if (!allowLandmark) {
-    const badTag = newClips.find(
-      (c) => c.track === 'b_generated' && !(FACTORY_B_TRACK_SCENE_TAGS as readonly string[]).includes(c.scene_tag),
-    )
-    if (badTag) {
-      return NextResponse.json(
-        { error: `b_generated scene_tag '${badTag.scene_tag}' not in abstract whitelist (护栏 6)` },
+        { error: `new_clips[${i}] path/track invalid: ${newClips[i].storage_url}` },
         { status: 422 },
       )
     }
   }
-  const { data: brief, error: bErr } = await supabaseAdmin
-    .from('master_briefs')
-    .select('excluded_topics')
-    .eq('id', wo.master_brief_id)
-    .maybeSingle()
-  if (bErr) {
-    return NextResponse.json({ error: 'brief lookup failed' }, { status: 500 })
-  }
-  const overlays = (Array.isArray((wo.brief as Record<string, unknown>)?.['segments'])
-    ? ((wo.brief as Record<string, unknown>)['segments'] as Array<Record<string, unknown>>)
-    : []
-  ).map((s) => (typeof s['text_overlay'] === 'string' ? (s['text_overlay'] as string) : null))
-  const redlineHits = scanRedlineHits(
-    [caption, ...overlays],
-    (client.brand_redline_phrases as string[] | null) ?? [],
-    (brief?.excluded_topics as string[] | null) ?? [],
-  )
 
-  // ③ new_clips 幂等入库:idempotency_key 命中已有行 → 复用不重插(魏征 F10③)
-  const insertedClipIds: string[] = []
-  if (newClips.length > 0) {
-    const keys = newClips.map((c) => c.idempotency_key)
-    const { data: existing, error: exErr } = await supabaseAdmin
-      .from('video_clips')
-      .select('id, source_meta')
-      .eq('client_id', wo.client_id)
-      .in('source_meta->>idempotency_key', keys)
-    if (exErr) {
-      return NextResponse.json({ error: `clip idempotency check failed: ${exErr.message}` }, { status: 500 })
-    }
-    const existingKeys = new Set(
-      (existing ?? []).map((r) => String((r.source_meta as Record<string, unknown>)?.['idempotency_key'])),
-    )
-    const rows = newClips
-      .filter((c) => !existingKeys.has(c.idempotency_key))
-      .map((c) => ({
-        client_id: wo.client_id,
-        title: c.title ?? null,
-        scene_tag: c.scene_tag,
-        motion_type: c.motion_type ?? null,
-        duration_seconds: c.duration_seconds,
-        track: c.track,
-        // 前面已全量校验过,此处必非 null(死代码 fallback 已删,魏征 M2-P2-2)
-        storage_url: validateClipPath(c.storage_url, wo.client_id, c.track) as string,
-        generation_cost_usd: c.generation_cost_usd ?? 0,
-        source_meta: {
-          ...(c.source_meta ?? {}),
-          idempotency_key: c.idempotency_key,
-          work_order_id: wo.id,
-        },
-      }))
-    if (rows.length > 0) {
-      const { data: ins, error: insErr } = await supabaseAdmin
-        .from('video_clips')
-        .insert(rows)
-        .select('id')
-      if (insErr) {
-        return NextResponse.json({ error: `clip insert failed: ${insErr.message}` }, { status: 500 })
-      }
-      insertedClipIds.push(...(ins ?? []).map((r) => r.id as string))
-    }
-  }
-
-  // ④ 台账 spend(护栏 10 事实源)。幂等:同工单已有 spend 行则跳过(complete 重试不重记)
-  if (actualCost > 0) {
-    const { data: existingSpend } = await supabaseAdmin
-      .from('factory_balance_ledger')
-      .select('id')
-      .eq('work_order_id', wo.id)
-      .eq('entry_type', 'spend')
-      .limit(1)
-      .maybeSingle()
-    if (!existingSpend) {
-      const { error: ledgerErr } = await supabaseAdmin.from('factory_balance_ledger').insert({
-        entry_type: 'spend',
-        amount_usd: -actualCost,
-        work_order_id: wo.id,
-        note: `muapi generation spend (worker complete)`,
-      })
-      if (ledgerErr) {
-        return NextResponse.json({ error: `ledger write failed: ${ledgerErr.message}` }, { status: 500 })
-      }
-    }
-  }
-
-  const output = {
-    ...((wo.output as Record<string, unknown>) ?? {}),
-    video_path: videoPath,
-    segments_json_path: segmentsPath,
-    srt_path: srtPath,
+  // ②–④ 多表写编排(红线复扫 + B轨白名单 + clip 幂等入库 + 台账 + 工单转 rendered)抽到 lib(A3)
+  const result = await completeWorkOrder(supabaseAdmin, {
+    wo,
+    workerId,
+    videoPath,
+    segmentsPath,
+    srtPath,
     caption,
-    redline_hits: redlineHits,
-    new_clip_ids: insertedClipIds,
-  }
-
-  // .select() 判行数:load 后被 sweeper 收回时 0 行匹配不能伪装成功(魏征 M2-P1-1)
-  const { data: updated, error: upErr } = await supabaseAdmin
-    .from('content_work_orders')
-    .update({
-      status: 'rendered',
-      actual_cost_usd: Math.max(Number(wo.actual_cost_usd), actualCost),
-      output,
-      heartbeat_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id)
-    .eq('claimed_by', workerId)
-    .in('status', ACTIVE_STATUSES)
-    .select('id')
-  if (upErr) {
-    return NextResponse.json({ error: upErr.message }, { status: 500 })
-  }
-  if (!updated || updated.length === 0) {
-    console.error(`[factory worker] complete race: work order ${id} reclaimed mid-flight (clips/ledger already written)`)
-    return NextResponse.json({ error: 'work order reclaimed mid-flight' }, { status: 409 })
-  }
-
+    actualCost,
+    newClips,
+  })
+  if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status })
   return NextResponse.json({
     ok: true,
-    status: 'rendered',
-    redline_hits: redlineHits,
-    new_clip_ids: insertedClipIds,
+    status: result.status,
+    redline_hits: result.redlineHits,
+    new_clip_ids: result.newClipIds,
   })
 }

@@ -15,10 +15,13 @@ type Role = 'hook' | 'middle' | 'cta'
 const COPY_GEN_TIMEOUT_MS = 8000
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    p,
-    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('copy gen timeout')), ms)),
-  ])
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('copy gen timeout')), ms)
+    p.then(
+      (v) => { clearTimeout(t); resolve(v) },
+      (e) => { clearTimeout(t); reject(e) }, // 显式接住 p 的 rejection,不泄漏 unhandled + 清定时器
+    )
+  })
 }
 
 /**

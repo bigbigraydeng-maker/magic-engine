@@ -4,11 +4,11 @@
 // F5 日配额含终态工单 + NZ 日界 / F6 brief 双轨兼容 / F9 余额 SQL 聚合 / F10 全体收进 try。
 
 import { supabaseAdmin } from '@/lib/supabase'
-import { getActiveBrief } from '@/lib/content/brief-injector'
 import { FACTORY_ANGLE_DEDUPE_DAYS } from './constants'
 import { generateAdCopy } from './copy-generator'
 import { decideSignal } from './strategist'
 import type { AdCopy, DemandSignal, Decision, GateContext } from './types'
+import type { MasterBrief } from '@/types/magic-engine'
 
 const TERMINAL_STATUSES = ['closed', 'archived', 'dead_letter', 'superseded']
 
@@ -17,7 +17,9 @@ function nzDay(d: Date): string {
   return d.toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' })
 }
 
-async function loadContext(signal: DemandSignal): Promise<GateContext> {
+async function loadContext(
+  signal: DemandSignal,
+): Promise<{ ctx: GateContext; fullBrief: MasterBrief | null }> {
   const now = new Date()
   const since = new Date(now.getTime() - FACTORY_ANGLE_DEDUPE_DAYS * 86_400_000).toISOString()
 
@@ -45,16 +47,27 @@ async function loadContext(signal: DemandSignal): Promise<GateContext> {
   if (roErr) throw new Error(`work_orders query failed: ${roErr.message}`)
 
   // ③ 战略地基(只读):active master_brief(双轨兼容:status='active' 或旧行 is_active=true,
-  // 取最高 version;魏征 M1-F6,pattern 同 src/lib/content/brief-injector.ts)
-  const { data: brief, error: bErr } = await supabaseAdmin
+  // 取最高 version;魏征 M1-F6)。A3:一次查全字段,strategist 用窄切片、copy 生成用 full brief,
+  // 消掉 persistDecision 里的第二次查(魏征 A2-§5)。
+  const { data: fullBrief, error: bErr } = await supabaseAdmin
     .from('master_briefs')
-    .select('id, core_proposition, content_pillars, keyword_seeds, excluded_topics')
+    .select('*')
     .eq('client_id', signal.client_id)
     .or('status.eq.active,is_active.eq.true')
     .order('version', { ascending: false })
     .limit(1)
     .maybeSingle()
   if (bErr) throw new Error(`master_briefs query failed: ${bErr.message}`)
+  // strategist 只需这 4 个战略字段(GateContext.brief 契约不变)
+  const brief = fullBrief
+    ? {
+        id: fullBrief.id,
+        core_proposition: fullBrief.core_proposition,
+        content_pillars: fullBrief.content_pillars,
+        keyword_seeds: fullBrief.keyword_seeds,
+        excluded_topics: fullBrief.excluded_topics,
+      }
+    : null
 
   const { data: goal, error: gErr } = await supabaseAdmin
     .from('goals')
@@ -105,7 +118,7 @@ async function loadContext(signal: DemandSignal): Promise<GateContext> {
 
   const factoryConfig = (client?.factory_config ?? {}) as Record<string, unknown>
 
-  return {
+  const ctx: GateContext = {
     now,
     signal,
     openOrderAdIds,
@@ -121,9 +134,14 @@ async function loadContext(signal: DemandSignal): Promise<GateContext> {
     clipStock: clips ?? [],
     allowBTrackLandmarkAds: factoryConfig['allow_b_track_landmark_ads'] === true,
   }
+  return { ctx, fullBrief: fullBrief ?? null }
 }
 
-async function persistDecision(signal: DemandSignal, decision: Decision): Promise<string | null> {
+async function persistDecision(
+  signal: DemandSignal,
+  decision: Decision,
+  fullBrief: MasterBrief | null,
+): Promise<string | null> {
   if (decision.outcome === 'expired') {
     await supabaseAdmin.from('content_demand_signals').update({ status: 'expired' }).eq('id', signal.id)
     return null
@@ -154,7 +172,6 @@ async function persistDecision(signal: DemandSignal, decision: Decision): Promis
     // best-effort:失败(LLM/查 brief)不阻塞建单,copy 缺省时 worker 有品牌无关兜底。
     let copy: AdCopy | undefined
     try {
-      const fullBrief = await getActiveBrief(signal.client_id)
       if (fullBrief) {
         copy = await generateAdCopy({
           brief: fullBrief,
@@ -233,9 +250,9 @@ export async function evaluateSignal(signalId: string): Promise<EvaluateResult> 
 
     await supabaseAdmin.from('content_demand_signals').update({ status: 'evaluating' }).eq('id', signalId)
 
-    const ctx = await loadContext(signal as DemandSignal)
+    const { ctx, fullBrief } = await loadContext(signal as DemandSignal)
     const decision = decideSignal(ctx)
-    const orderId = await persistDecision(signal as DemandSignal, decision)
+    const orderId = await persistDecision(signal as DemandSignal, decision, fullBrief)
 
     if (decision.outcome === 'accepted') {
       return { outcome: 'accepted', work_order_id: orderId ?? undefined }
