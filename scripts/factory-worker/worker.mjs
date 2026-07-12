@@ -41,11 +41,16 @@ const MAKE_PROMO = ENV.MAKE_PROMO_PATH || join(STUDIO_ROOT, 'engine/make_promo.p
 const DEFAULT_BRAND_KIT = ENV.BRAND_KIT_PATH || join(process.env.HOME, 'Documents/CTS_BrandKit')
 // client_id → studio 文件夹名(brandkit=$STUDIO_ROOT/<folder>/brandkit)。JSON env 覆盖。
 const CLIENT_STUDIO = (() => { try { return JSON.parse(ENV.FACTORY_CLIENT_STUDIO || '{}') } catch { return {} } })()
+// make_promo 引擎对这几个资产是无守卫 open(brand_red.txt)/引 logo/watermark —— 缺任一即炸装配。
+// 健康检查到「资产在」而非只「文件夹在」(魏征 B3:半成品目录 existsSync 放行=第三客户定时炸弹)。
+const BRANDKIT_REQUIRED = ['brand_red.txt', 'assets/logo_color.png', 'assets/watermark.png']
+const brandkitHealthy = (kit) => BRANDKIT_REQUIRED.every((r) => existsSync(join(kit, r)))
 function brandkitFor(clientId) {
   const folder = CLIENT_STUDIO[clientId]
   const kit = folder ? join(STUDIO_ROOT, folder, 'brandkit') : DEFAULT_BRAND_KIT
-  if (!existsSync(kit)) log(`⚠️ brandkit 不存在: ${kit}(client=${clientId}),退回默认`)
-  return existsSync(kit) ? kit : DEFAULT_BRAND_KIT
+  if (brandkitHealthy(kit)) return kit
+  log(`⚠️ brandkit 资产不全: ${kit}(client=${clientId}),退回默认 ${DEFAULT_BRAND_KIT}`)
+  return DEFAULT_BRAND_KIT
 }
 const MUAPI_SLUG = ENV.MUAPI_KLING_SLUG || 'kling-v2.1-standard-i2v'
 const CLIP_UNIT_COST = Number(ENV.FACTORY_CLIP_UNIT_COST_USD || '0.225')
