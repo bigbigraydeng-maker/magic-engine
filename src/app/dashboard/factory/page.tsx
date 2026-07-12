@@ -1,7 +1,6 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { ReviewInbox } from './_components/ReviewInbox'
 
 // P21.J M2 — Content Factory Ops 后台(spec §6.1)
 // 工单管线可视 + dead_letter 一键复活。单运营者视图,不做复杂筛选。
@@ -102,9 +101,8 @@ export default function FactoryOpsPage() {
     }
   }, [load])
 
-  // in_review 由顶部审核 Inbox 全权接管,下方看板不重复展示
+  // 全局工单看板 = 纯跨客户状态总览。交互审核(卡+通过+对话框)在客户页概览,不在这
   const grouped = ORDER
-    .filter((status) => status !== 'in_review')
     .map((status) => ({ status, items: orders.filter((o) => o.status === status) }))
     .filter((g) => g.items.length > 0)
 
@@ -126,7 +124,7 @@ export default function FactoryOpsPage() {
         >刷新</button>
       </div>
 
-      <ReviewInbox />
+      <p className="text-xs text-slate-400 mb-5">要审片 / 改画面 / 调预算,进对应客户页的「概览」tab —— 那里有成片 + Claude 对话框。这页只看全局状态。</p>
 
       {error && (
         <div className="mb-4 px-4 py-3 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>
