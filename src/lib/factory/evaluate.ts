@@ -4,9 +4,11 @@
 // F5 日配额含终态工单 + NZ 日界 / F6 brief 双轨兼容 / F9 余额 SQL 聚合 / F10 全体收进 try。
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { getActiveBrief } from '@/lib/content/brief-injector'
 import { FACTORY_ANGLE_DEDUPE_DAYS } from './constants'
+import { generateAdCopy } from './copy-generator'
 import { decideSignal } from './strategist'
-import type { DemandSignal, Decision, GateContext } from './types'
+import type { AdCopy, DemandSignal, Decision, GateContext } from './types'
 
 const TERMINAL_STATUSES = ['closed', 'archived', 'dead_letter', 'superseded']
 
@@ -148,20 +150,43 @@ async function persistDecision(signal: DemandSignal, decision: Decision): Promis
 
   // insert 之后任何一步失败 → 工单收敛为 failed,不留孤儿 queued 单被 worker 烧钱(魏征 M1-F4)
   try {
+    // A2 脑子收回后端:按 master_brief 品牌接地生成广告文案存进 brief.copy,worker 不再自己写。
+    // best-effort:失败(LLM/查 brief)不阻塞建单,copy 缺省时 worker 有品牌无关兜底。
+    let copy: AdCopy | undefined
+    try {
+      const fullBrief = await getActiveBrief(signal.client_id)
+      if (fullBrief) {
+        copy = await generateAdCopy({
+          brief: fullBrief,
+          angle: draft.angle,
+          rationale: draft.rationale_one_liner,
+          segmentRoles: draft.brief.segments.map((s) => s.role),
+        })
+      }
+    } catch (e) {
+      console.error(`[factory] copy gen failed (signal ${signal.id}): ${e instanceof Error ? e.message : e}`)
+    }
+
     // idempotency_key 占位符 → 真实工单 id(魏征 M1-F3:跨工单 key 碰撞会让 worker 张冠李戴复用 clip)
-    if (draft.brief.clip_generation_plan.length > 0) {
+    const needsIdemResolve = draft.brief.clip_generation_plan.length > 0
+    if (needsIdemResolve || copy) {
       const resolvedBrief = {
         ...draft.brief,
-        clip_generation_plan: draft.brief.clip_generation_plan.map((p) => ({
-          ...p,
-          idempotency_key: p.idempotency_key.replace('{work_order_id}', order.id),
-        })),
+        ...(needsIdemResolve
+          ? {
+              clip_generation_plan: draft.brief.clip_generation_plan.map((p) => ({
+                ...p,
+                idempotency_key: p.idempotency_key.replace('{work_order_id}', order.id),
+              })),
+            }
+          : {}),
+        ...(copy ? { copy } : {}),
       }
       const { error: upErr } = await supabaseAdmin
         .from('content_work_orders')
         .update({ brief: resolvedBrief })
         .eq('id', order.id)
-      if (upErr) throw new Error(`brief idempotency resolve failed: ${upErr.message}`)
+      if (upErr) throw new Error(`brief resolve/copy update failed: ${upErr.message}`)
     }
 
     if (clip_links.length > 0) {

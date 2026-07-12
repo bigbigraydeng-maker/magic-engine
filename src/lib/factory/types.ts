@@ -139,6 +139,22 @@ export interface ClipGenerationPlanItem {
   requires_source_resolution: true
 }
 
+/** 段级广告文案(A2:后端生成,品牌接地) */
+export interface AdCopySegment {
+  role: 'hook' | 'middle' | 'cta'
+  title_main?: string
+  title_sub?: string
+  caption?: string
+  vo?: string
+}
+
+/** 一条成片的完整广告文案。A2 起由 ME 后端按 master_brief VI 生成,存进 brief.copy;
+ *  worker 只读不生成(不再硬编客户/网址)。 */
+export interface AdCopy {
+  segments: AdCopySegment[]
+  endcard: { cta: string; offer: string[]; url: string; vo?: string }
+}
+
 export interface WorkOrderBrief {
   segments: Array<{
     role: 'hook' | 'middle' | 'cta'
@@ -151,6 +167,8 @@ export interface WorkOrderBrief {
   clip_generation_plan: ClipGenerationPlanItem[]
   aspect_ratio: '9:16'
   notes: string
+  /** A2:后端生成的广告文案(品牌接地)。worker 读它装配,不再自己写硬编 CTS 的文案。 */
+  copy?: AdCopy
 }
 
 export interface WorkOrderDraft {

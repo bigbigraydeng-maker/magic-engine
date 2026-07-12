@@ -34,7 +34,7 @@ const API_BASE = ENV.FACTORY_API_BASE || 'https://app.magicengine.com.au'
 const WORKER_TOKEN = ENV.FACTORY_WORKER_TOKEN || ''
 const WORKER_ID = ENV.FACTORY_WORKER_ID || `mac-${hostname()}`
 const MUAPI_KEY = ENV.MUAPI_API_KEY || ''
-const OPENAI_KEY = ENV.OPENAI_API_KEY || ''
+// OPENAI_KEY 已移除:A2 起文案由 ME 后端按 master_brief 生成(brief.copy),worker 不再写文案
 const MAKE_PROMO = ENV.MAKE_PROMO_PATH || join(process.env.HOME, 'Documents/CTS_BrandKit/make_promo.py')
 const BRAND_KIT = ENV.BRAND_KIT_PATH || join(process.env.HOME, 'Documents/CTS_BrandKit')
 const MUAPI_SLUG = ENV.MUAPI_KLING_SLUG || 'kling-v2.1-standard-i2v'
@@ -129,47 +129,19 @@ async function muapiGenerate(planItem, sourceImageUrl) {
   throw new Error('muapi 轮询超时(10min)')
 }
 
-// ── 广告文案生成(OpenAI 优先,无 key 走模板 fallback)────────────────────────
-// 文案必须溯源工单 angle + rationale(战略地基),不自由发挥。
+// ── 广告文案(A2:后端已按 master_brief 品牌接地生成,存 brief.copy;worker 只读不生成)──
+// worker 不再写文案(以前硬编 CTS,只能服务一个客户)。brief.copy 缺失才走品牌无关兜底
+// (仅用 angle,不硬编任何客户名/网址)——正常路径永远有 brief.copy。
 
-async function generateCopy(wo) {
-  const brief = wo.brief
-  const roleCount = brief.segments.length
-  if (OPENAI_KEY) {
-    try {
-      const sys = 'You write short punchy 9:16 vertical video ad copy for a New Zealand travel brand (CTS Tours). ' +
-        'AU/NZ English. Return strict JSON only.'
-      const user =
-        `Angle: ${wo.angle}\nWhy (rationale): ${wo.rationale_one_liner}\n` +
-        `Segments (${roleCount}): ${brief.segments.map((s) => s.role).join(', ')}\n` +
-        `Return JSON: {"segments":[{"role","title_main"?,"title_sub"?,"caption"?,"vo"}],"endcard":{"cta","offer":[..],"url":"www.ctstours.co.nz","vo"}}. ` +
-        'Keep each field <= 6 words. No fabricated prices — use "Talk to us" style CTA if unsure.'
-      const r = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
-          response_format: { type: 'json_object' },
-          temperature: 0.7,
-        }),
-      })
-      const j = await r.json()
-      const parsed = JSON.parse(j.choices[0].message.content)
-      if (Array.isArray(parsed.segments) && parsed.segments.length >= roleCount) return parsed
-    } catch (e) {
-      log('copy: OpenAI 失败,走模板 fallback:', e.message)
-    }
-  }
-  // 模板 fallback(溯源 angle,不编数字)
-  const titles = ['Discover the Real China', wo.angle, 'Travel With CTS Tours']
+function resolveCopy(wo) {
+  if (wo.brief?.copy?.segments?.length) return wo.brief.copy
+  log('⚠️ brief.copy 缺失(后端文案生成可能失败),走 angle 兜底')
   return {
-    segments: brief.segments.map((s, i) => ({
+    segments: wo.brief.segments.map((s, i) => ({
       role: s.role,
-      ...(i === 0 ? { title_main: 'DISCOVER', title_sub: titles[0] } : { caption: titles[i % titles.length] }),
-      vo: '',
+      ...(i === 0 ? { title_sub: wo.angle } : { caption: wo.angle }),
     })),
-    endcard: { cta: 'Best of China', offer: ['Talk to us today'], url: 'www.ctstours.co.nz', vo: '' },
+    endcard: { cta: wo.angle, offer: [], url: '' },
   }
 }
 
@@ -286,7 +258,7 @@ async function processOrder(wo) {
   const tmp = mkdtempSync(join(tmpdir(), 'factory_'))
   try {
     await heartbeat(woId, 0)
-    const copy = await generateCopy(wo)
+    const copy = resolveCopy(wo)
     const { localPaths, newClips, cost } = await resolveClips(wo, tmp, (c) => heartbeat(woId, c))
     log(`  素材就绪(${newClips.length} 条生成,成本 $${cost.toFixed(3)}),装配中…`)
     await heartbeat(woId, cost)
