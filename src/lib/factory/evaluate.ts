@@ -69,22 +69,42 @@ async function loadContext(
       }
     : null
 
-  const { data: goal, error: gErr } = await supabaseAdmin
-    .from('goals')
-    .select('id, title')
-    .eq('client_id', signal.client_id)
-    .eq('status', 'active')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (gErr) throw new Error(`goals query failed: ${gErr.message}`)
-
+  // client 先查(拿 factory_config,含 B0 圈定的 factory_goal_id)
   const { data: client, error: cErr } = await supabaseAdmin
     .from('clients')
     .select('brand_redline_phrases, factory_config')
     .eq('id', signal.client_id)
     .maybeSingle()
   if (cErr) throw new Error(`clients query failed: ${cErr.message}`)
+
+  // B0 Goal 圈定:优先用 factory_config.factory_goal_id(PM 圈定"这批片服务哪个 Goal"),
+  // 该 Goal 不 active/不存在则退回最新 active(fail-safe,不因配置指向已归档 Goal 就拒单)。
+  // 诸葛亮红线:禁"选最新 Goal"式盲量产,产出必须挂对客户真正想推的 Goal。
+  const GOAL_COLS = 'id, title, primary_metric_key'
+  const configGoalId = ((client?.factory_config ?? {}) as Record<string, unknown>)['factory_goal_id']
+  let goal: { id: string; title: string | null; primary_metric_key: string | null } | null = null
+  if (typeof configGoalId === 'string') {
+    const { data } = await supabaseAdmin
+      .from('goals')
+      .select(GOAL_COLS)
+      .eq('id', configGoalId)
+      .eq('client_id', signal.client_id)
+      .eq('status', 'active')
+      .maybeSingle()
+    goal = data
+  }
+  if (!goal) {
+    const { data, error: gErr } = await supabaseAdmin
+      .from('goals')
+      .select(GOAL_COLS)
+      .eq('client_id', signal.client_id)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (gErr) throw new Error(`goals query failed: ${gErr.message}`)
+    goal = data
+  }
 
   const { data: blocklist, error: blErr } = await supabaseAdmin
     .from('factory_angle_blocklist')
@@ -141,6 +161,7 @@ async function persistDecision(
   signal: DemandSignal,
   decision: Decision,
   fullBrief: MasterBrief | null,
+  goal: GateContext['goal'],
 ): Promise<string | null> {
   if (decision.outcome === 'expired') {
     await supabaseAdmin.from('content_demand_signals').update({ status: 'expired' }).eq('id', signal.id)
@@ -184,27 +205,30 @@ async function persistDecision(
       console.error(`[factory] copy gen failed (signal ${signal.id}): ${e instanceof Error ? e.message : e}`)
     }
 
+    // B0 归因桩:每条产出天生挂对 Goal + 北极星指标(goal 在 accepted 分支必非 null,gate1 已过)。
+    const attribution = goal
+      ? { goal_id: draft.goal_id, expected_metric: goal.primary_metric_key }
+      : undefined
     // idempotency_key 占位符 → 真实工单 id(魏征 M1-F3:跨工单 key 碰撞会让 worker 张冠李戴复用 clip)
     const needsIdemResolve = draft.brief.clip_generation_plan.length > 0
-    if (needsIdemResolve || copy) {
-      const resolvedBrief = {
-        ...draft.brief,
-        ...(needsIdemResolve
-          ? {
-              clip_generation_plan: draft.brief.clip_generation_plan.map((p) => ({
-                ...p,
-                idempotency_key: p.idempotency_key.replace('{work_order_id}', order.id),
-              })),
-            }
-          : {}),
-        ...(copy ? { copy } : {}),
-      }
-      const { error: upErr } = await supabaseAdmin
-        .from('content_work_orders')
-        .update({ brief: resolvedBrief })
-        .eq('id', order.id)
-      if (upErr) throw new Error(`brief resolve/copy update failed: ${upErr.message}`)
+    const resolvedBrief = {
+      ...draft.brief,
+      ...(needsIdemResolve
+        ? {
+            clip_generation_plan: draft.brief.clip_generation_plan.map((p) => ({
+              ...p,
+              idempotency_key: p.idempotency_key.replace('{work_order_id}', order.id),
+            })),
+          }
+        : {}),
+      ...(copy ? { copy } : {}),
+      ...(attribution ? { attribution } : {}),
     }
+    const { error: upErr } = await supabaseAdmin
+      .from('content_work_orders')
+      .update({ brief: resolvedBrief })
+      .eq('id', order.id)
+    if (upErr) throw new Error(`brief resolve/copy/attribution update failed: ${upErr.message}`)
 
     if (clip_links.length > 0) {
       const { error: linkErr } = await supabaseAdmin
@@ -252,7 +276,7 @@ export async function evaluateSignal(signalId: string): Promise<EvaluateResult> 
 
     const { ctx, fullBrief } = await loadContext(signal as DemandSignal)
     const decision = decideSignal(ctx)
-    const orderId = await persistDecision(signal as DemandSignal, decision, fullBrief)
+    const orderId = await persistDecision(signal as DemandSignal, decision, fullBrief, ctx.goal)
 
     if (decision.outcome === 'accepted') {
       return { outcome: 'accepted', work_order_id: orderId ?? undefined }
