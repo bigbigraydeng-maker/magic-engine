@@ -24,8 +24,13 @@ export const STATUS_META: Record<WorkOrderStatus, { label: string; color: string
 }
 
 /** 看板分组展示顺序(要拍板的状态在前:死信/发布失败/待审) */
-export const STATUS_ORDER: WorkOrderStatus[] = [
+export const STATUS_ORDER = [
   'dead_letter', 'publish_failed', 'in_review', 'rendered', 'review_rejected',
   'producing', 'claimed', 'queued', 'approved', 'publishing', 'published',
   'measuring', 'failed', 'closed', 'archived', 'superseded',
-]
+] as const satisfies readonly WorkOrderStatus[]
+
+// 编译期穷举:STATUS_ORDER 漏了某状态即报错——否则该状态工单会在全局看板静默消失(魏征 A1 复审)
+type _MissingFromOrder = Exclude<WorkOrderStatus, (typeof STATUS_ORDER)[number]>
+const _statusOrderComplete: _MissingFromOrder extends never ? true : ['STATUS_ORDER 缺状态', _MissingFromOrder] = true
+void _statusOrderComplete

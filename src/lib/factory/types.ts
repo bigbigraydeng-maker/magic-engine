@@ -13,8 +13,8 @@ export type OrderType = 'variant_from_winner' | 'fresh_angle' | 'clip_generation
 
 /**
  * 工单状态机单一类型来源(A1 架构整理)。权威定义 = migration content_work_orders.status
- * CHECK 约束(20260711000002)。改此 union 必同步:①DB CHECK ②STATUS_META(statusMeta.ts,
- * Record<WorkOrderStatus> 会编译报错兜底)③canTransition。这是 CLAUDE.md「改 enum 必全仓
+ * CHECK 约束(20260711000002)。改此 union 必同步:①DB CHECK ②STATUS_META + STATUS_ORDER
+ * (statusMeta.ts,两者都有编译期穷举断言会报错兜底)。这是 CLAUDE.md「改 enum 必全仓
  * grep 同步」的着力点——以前是裸 string,没地方 grep。
  * 分段:M1 生产 → M2 审核 → M3 发布/归因 → 终态。
  */
