@@ -10,6 +10,17 @@ import type { AdCopy } from './types'
 
 type Role = 'hook' | 'middle' | 'cta'
 
+/** copy 生成同步塞在信号入口链路(persistDecision),Sonnet 卡住会拖满入口(魏征 A2-§4)。
+ *  硬超时 → 走模板 fallback,不拖垮 signals POST(maxDuration 60s)。 */
+const COPY_GEN_TIMEOUT_MS = 8000
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('copy gen timeout')), ms)),
+  ])
+}
+
 /**
  * 按 master_brief 生成一条成片的广告文案。endcard.url 强制锁 master_brief.website
  * (防 LLM 乱填别的域名 —— 客户业务页只能挂客户自己域名,CLAUDE.md 红线精神)。
@@ -21,7 +32,7 @@ export async function generateAdCopy(params: {
   segmentRoles: Role[]
 }): Promise<AdCopy> {
   const { brief, angle, rationale, segmentRoles } = params
-  const brand = brief.brand_name || '这个品牌'
+  const brand = brief.brand_name || 'our brand' // 英文中性词,不让中文串进 AU/NZ 英文广告(魏征 A2-§6)
   const url = brief.website || ''
 
   try {
@@ -36,11 +47,14 @@ export async function generateAdCopy(params: {
       `规则:每个文本字段 ≤ 6 词;英语;无把握的价格用「Talk to us」式 CTA;` +
       `endcard.url 固定填 "${url}";segments 数量 = ${segmentRoles.length}。`
 
-    const { text } = await callClaudeChat({
-      systemPrompt,
-      messages: [{ role: 'user', content: user }],
-      maxOutputTokens: 1024,
-    })
+    const { text } = await withTimeout(
+      callClaudeChat({
+        systemPrompt,
+        messages: [{ role: 'user', content: user }],
+        maxOutputTokens: 1024,
+      }),
+      COPY_GEN_TIMEOUT_MS,
+    )
     const parsed = parseJsonResponse<AdCopy>(text)
     if (
       parsed &&
