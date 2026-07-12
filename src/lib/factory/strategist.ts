@@ -20,6 +20,7 @@ import type {
   ClipSlice,
   Decision,
   GateContext,
+  GoalSlice,
   WinnerSlice,
   WorkOrderBrief,
   WorkOrderDraft,
@@ -29,6 +30,19 @@ import type {
 
 export function normalizeAngle(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+/**
+ * B0 Goal 圈定(纯函数,零 DB):优先 factory_config.factory_goal_id 指向的 active goal,
+ * 指向的 goal 不在 active 列表(归档/删/换客户)则退回最新 active(activeGoals 由调用方按
+ * created_at desc 排序,[0]=最新)。诸葛亮红线:禁"盲选最新 Goal"式量产。
+ */
+export function pickFactoryGoal(configGoalId: unknown, activeGoals: GoalSlice[]): GoalSlice | null {
+  if (typeof configGoalId === 'string') {
+    const configured = activeGoals.find((g) => g.id === configGoalId)
+    if (configured) return configured
+  }
+  return activeGoals[0] ?? null
 }
 
 function containsPhrase(haystack: string, phrase: string): boolean {

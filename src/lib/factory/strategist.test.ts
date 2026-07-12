@@ -1,7 +1,7 @@
 // P21.J M1 — 策略决策核护栏测试(对照 spec §5.2 护栏总表)
 import { describe, expect, it } from 'vitest'
-import { decideSignal, maxNewClipsFor, normalizeAngle } from './strategist'
-import type { DemandSignal, GateContext } from './types'
+import { decideSignal, maxNewClipsFor, normalizeAngle, pickFactoryGoal } from './strategist'
+import type { DemandSignal, GateContext, GoalSlice } from './types'
 
 function makeSignal(over: Partial<DemandSignal> = {}): DemandSignal {
   return {
@@ -32,7 +32,7 @@ function makeCtx(over: Partial<GateContext> = {}): GateContext {
       keyword_seeds: ['china tour from auckland'],
       excluded_topics: ['inbound tourism'],
     },
-    goal: { id: 'goal-1', title: 'Leads growth' },
+    goal: { id: 'goal-1', title: 'Leads growth', primary_metric_key: 'leads_count' },
     brandRedlines: ['Auckland since 1928'],
     recentAngles: [],
     blocklist: [],
@@ -261,6 +261,28 @@ describe('骨架 + 工单组装', () => {
     const moodClip = { id: 'clip-m', scene_tag: 'sunset_mood', motion_type: null, track: 'b_generated' as const, usage_count: 0, last_used_at: null }
     const d = decideSignal(makeCtx({ clipStock: [moodClip], allowBTrackLandmarkAds: false }))
     expect((d as { workOrder: { clip_links: unknown[] } }).workOrder.clip_links).toHaveLength(1)
+  })
+})
+
+describe('pickFactoryGoal — B0 Goal 圈定(诸葛亮红线:禁盲选最新)', () => {
+  const goals: GoalSlice[] = [
+    { id: 'g-newest', title: 'Leads', primary_metric_key: 'leads_count' },       // [0] 最新
+    { id: 'g-brand', title: '品牌搜索', primary_metric_key: 'brand_search_volume' },
+  ]
+  it('config 命中 active goal → 用圈定的(不是最新)', () => {
+    expect(pickFactoryGoal('g-brand', goals)?.id).toBe('g-brand')
+  })
+  it('config 指向的 goal 不在 active 列表(归档/换客户) → 退回最新', () => {
+    expect(pickFactoryGoal('g-archived', goals)?.id).toBe('g-newest')
+  })
+  it('configGoalId 非 string(null/数字/对象) → 退回最新', () => {
+    expect(pickFactoryGoal(null, goals)?.id).toBe('g-newest')
+    expect(pickFactoryGoal(123, goals)?.id).toBe('g-newest')
+    expect(pickFactoryGoal({}, goals)?.id).toBe('g-newest')
+  })
+  it('无任何 active goal → null(gate1 会因此拒单)', () => {
+    expect(pickFactoryGoal('g-brand', [])).toBeNull()
+    expect(pickFactoryGoal(null, [])).toBeNull()
   })
 })
 

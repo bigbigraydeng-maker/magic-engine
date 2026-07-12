@@ -6,8 +6,8 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { FACTORY_ANGLE_DEDUPE_DAYS } from './constants'
 import { generateAdCopy } from './copy-generator'
-import { decideSignal } from './strategist'
-import type { AdCopy, DemandSignal, Decision, GateContext } from './types'
+import { decideSignal, pickFactoryGoal } from './strategist'
+import type { AdCopy, DemandSignal, Decision, GateContext, GoalSlice } from './types'
 import type { MasterBrief } from '@/types/magic-engine'
 
 const TERMINAL_STATUSES = ['closed', 'archived', 'dead_letter', 'superseded']
@@ -77,34 +77,18 @@ async function loadContext(
     .maybeSingle()
   if (cErr) throw new Error(`clients query failed: ${cErr.message}`)
 
-  // B0 Goal 圈定:优先用 factory_config.factory_goal_id(PM 圈定"这批片服务哪个 Goal"),
-  // 该 Goal 不 active/不存在则退回最新 active(fail-safe,不因配置指向已归档 Goal 就拒单)。
-  // 诸葛亮红线:禁"选最新 Goal"式盲量产,产出必须挂对客户真正想推的 Goal。
-  const GOAL_COLS = 'id, title, primary_metric_key'
+  // B0 Goal 圈定(诸葛亮红线:禁"选最新 Goal"盲量产,产出必须挂对客户真正想推的 Goal)。
+  // 一次查全部 active goal(desc),纯函数 pickFactoryGoal 挑:优先 factory_config.factory_goal_id,
+  // 指向的 goal 不在 active 列表(归档/删/换客户)则退回最新 active(fail-safe)。
+  const { data: activeGoals, error: gErr } = await supabaseAdmin
+    .from('goals')
+    .select('id, title, primary_metric_key')
+    .eq('client_id', signal.client_id)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+  if (gErr) throw new Error(`goals query failed: ${gErr.message}`)
   const configGoalId = ((client?.factory_config ?? {}) as Record<string, unknown>)['factory_goal_id']
-  let goal: { id: string; title: string | null; primary_metric_key: string | null } | null = null
-  if (typeof configGoalId === 'string') {
-    const { data } = await supabaseAdmin
-      .from('goals')
-      .select(GOAL_COLS)
-      .eq('id', configGoalId)
-      .eq('client_id', signal.client_id)
-      .eq('status', 'active')
-      .maybeSingle()
-    goal = data
-  }
-  if (!goal) {
-    const { data, error: gErr } = await supabaseAdmin
-      .from('goals')
-      .select(GOAL_COLS)
-      .eq('client_id', signal.client_id)
-      .eq('status', 'active')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    if (gErr) throw new Error(`goals query failed: ${gErr.message}`)
-    goal = data
-  }
+  const goal = pickFactoryGoal(configGoalId, (activeGoals ?? []) as GoalSlice[])
 
   const { data: blocklist, error: blErr } = await supabaseAdmin
     .from('factory_angle_blocklist')
