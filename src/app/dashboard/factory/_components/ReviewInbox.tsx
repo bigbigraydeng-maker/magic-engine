@@ -114,7 +114,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
                 onClick={() => setConfirming(o)}
                 disabled={busy === o.id}
                 className="w-full sm:w-auto sm:self-start px-5 h-11 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 mb-2"
-              >{busy === o.id ? '处理中…' : '✓ 通过并投放(上限 $50)'}</button>
+              >{busy === o.id ? '处理中…' : '✓ 通过·待发布'}</button>
 
               <p className="text-xs text-slate-400">要改画面或调预算?在右边跟 Claude 说人话即可。</p>
             </div>
@@ -128,14 +128,14 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
       {confirming && (
         <div className="fixed inset-0 z-40 bg-black/45 grid place-items-center p-4" onClick={() => setConfirming(null)}>
           <div className="bg-white rounded-xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
-            <p className="font-medium text-slate-900 mb-1">这条会开始花钱投放</p>
-            <p className="text-sm text-slate-600 mb-5">投放上限 <span className="font-medium text-slate-900">$50</span>,超了系统自动停。确定投?</p>
+            <p className="font-medium text-slate-900 mb-1">通过并排入发布队列</p>
+            <p className="text-sm text-slate-600 mb-5">通过 = 标记这条合格、排队等发布。<span className="font-medium text-slate-900">真实发布与投放($50 上限)链路正在建设(P0)</span>,现在通过不会自动发出去或花钱。确定通过?</p>
             <div className="flex gap-3">
               <button
                 onClick={() => void act(confirming.id, { action: 'approve' })}
                 disabled={busy === confirming.id}
                 className="flex-1 h-10 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50"
-              >{busy === confirming.id ? '投放中…' : '确定投放'}</button>
+              >{busy === confirming.id ? '处理中…' : '确定通过'}</button>
               <button onClick={() => setConfirming(null)} className="px-5 h-10 rounded-lg border border-slate-200 text-sm">再想想</button>
             </div>
           </div>
