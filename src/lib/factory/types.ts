@@ -120,6 +120,8 @@ export interface GateContext {
   clipStock: ClipSlice[]
   /** 附录 A: CTS=true,他客默认 false */
   allowBTrackLandmarkAds: boolean
+  /** B4:客户级持久真促销(factory_config.verified_offer),该客户所有活动默认带上;单条活动可用 signal 覆盖 */
+  verifiedOffer: VerifiedOffer | null
 }
 
 export interface AngleSource {

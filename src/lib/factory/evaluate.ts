@@ -137,6 +137,7 @@ async function loadContext(
     dailyCostUsd,
     clipStock: clips ?? [],
     allowBTrackLandmarkAds: factoryConfig['allow_b_track_landmark_ads'] === true,
+    verifiedOffer: parseVerifiedOffer(factoryConfig['verified_offer']), // B4:客户级持久真促销
   }
   return { ctx, fullBrief: fullBrief ?? null }
 }
@@ -165,6 +166,7 @@ async function persistDecision(
   decision: Decision,
   fullBrief: MasterBrief | null,
   goal: GateContext['goal'],
+  clientOffer: VerifiedOffer | null, // B4:客户级持久 offer,signal 无 override 时用它
 ): Promise<string | null> {
   if (decision.outcome === 'expired') {
     await supabaseAdmin.from('content_demand_signals').update({ status: 'expired' }).eq('id', signal.id)
@@ -203,7 +205,8 @@ async function persistDecision(
           rationale: draft.rationale_one_liner,
           segmentRoles: draft.brief.segments.map((s) => s.role),
           expectedMetric: goal?.primary_metric_key, // B3:CTA 导向圈定 Goal 北极星(诸葛亮硬验收)
-          verifiedOffer: parseVerifiedOffer(signal.evidence?.['verified_offer']), // B4:真促销真数字进钩子
+          // B4:单条活动 signal.evidence 可覆盖;否则用客户级持久 offer
+          verifiedOffer: parseVerifiedOffer(signal.evidence?.['verified_offer']) ?? clientOffer,
         })
       }
     } catch (e) {
@@ -281,7 +284,7 @@ export async function evaluateSignal(signalId: string): Promise<EvaluateResult> 
 
     const { ctx, fullBrief } = await loadContext(signal as DemandSignal)
     const decision = decideSignal(ctx)
-    const orderId = await persistDecision(signal as DemandSignal, decision, fullBrief, ctx.goal)
+    const orderId = await persistDecision(signal as DemandSignal, decision, fullBrief, ctx.goal, ctx.verifiedOffer)
 
     if (decision.outcome === 'accepted') {
       return { outcome: 'accepted', work_order_id: orderId ?? undefined }

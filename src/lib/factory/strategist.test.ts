@@ -42,6 +42,7 @@ function makeCtx(over: Partial<GateContext> = {}): GateContext {
     dailyCostUsd: 0,
     clipStock: [],
     allowBTrackLandmarkAds: true,
+    verifiedOffer: null,
     ...over,
   }
 }
