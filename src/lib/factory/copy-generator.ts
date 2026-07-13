@@ -6,7 +6,7 @@
 import { callClaudeChat, parseJsonResponse } from '@/lib/anthropic/client'
 import { formatBriefForPrompt } from '@/lib/content/brief-injector'
 import type { MasterBrief } from '@/types/magic-engine'
-import type { AdCopy } from './types'
+import type { AdCopy, VerifiedOffer } from './types'
 
 type Role = 'hook' | 'middle' | 'cta'
 
@@ -58,13 +58,44 @@ export function hookIntentFor(metric: string | null | undefined): string {
  * output 侧扫描,命中即判定整条 LLM 结果不可信 → 落模板 fallback(零数字,已测试守护)。
  * 红线由数据事实守护,不靠 prompt 措辞。(未来 verified_offer 录入的真数字将走白名单豁免——板桥,下一 PR)
  */
-const INVENTED_NUMBER_RE = /\$\s*\d|\d+\s*%|\d+\s*(?:off|dollars?)\b/i
+// 价格/折扣片段(全局匹配,逐个校验数字是否在白名单)。只盯价格/折扣,不误伤 "2 years"/"24/7" 等普通数字。
+const PRICE_DISCOUNT_RE = /\$\s*\d[\d.,]*|\d+(?:\.\d+)?\s*%|\d+(?:\.\d+)?\s*(?:off|dollars?)\b/gi
 
-function hasInventedNumber(copy: AdCopy): boolean {
+/** 归一化数字串:去千分位逗号 + 去尾零("35.50"→"35.5"),让 $35.5/$35.50 等价比对。 */
+function normNum(n: string): string {
+  const f = parseFloat(n.replace(/,/g, ''))
+  return Number.isFinite(f) ? String(f) : n
+}
+
+function collectTexts(copy: AdCopy): string[] {
   const texts: Array<string | undefined> = []
   for (const s of copy.segments ?? []) texts.push(s.title_main, s.title_sub, s.caption, s.vo)
   texts.push(copy.endcard?.cta, copy.endcard?.vo, ...(copy.endcard?.offer ?? []))
-  return texts.some((t) => typeof t === 'string' && INVENTED_NUMBER_RE.test(t))
+  return texts.filter((t): t is string => typeof t === 'string')
+}
+
+/** verified_offer 里出现的所有数字 = 红线白名单(客户确认的真数字可用,其余一律视为 AI 编造)。 */
+export function allowedNumbersFrom(offer: VerifiedOffer | null | undefined): Set<string> {
+  const allowed = new Set<string>()
+  if (!offer) return allowed
+  for (const v of [offer.price_from, offer.was_price, offer.discount, offer.offer_expiry]) {
+    if (typeof v === 'string') for (const n of v.match(/\d+(?:\.\d+)?/g) ?? []) allowed.add(normNum(n))
+  }
+  return allowed
+}
+
+/**
+ * 红线硬拦(魏征 B4-P1 + 板桥 verified_offer):扫 output 价格/折扣片段,任一片段的数字不在白名单
+ * (verified_offer 的真数字)→ 判定 AI 编造 → 整条落模板。无 verified_offer = 白名单空 = 禁一切价格/折扣数字。
+ */
+function hasInventedNumber(copy: AdCopy, allowed: Set<string>): boolean {
+  for (const t of collectTexts(copy)) {
+    for (const frag of t.match(PRICE_DISCOUNT_RE) ?? []) {
+      const nums = frag.match(/\d+(?:\.\d+)?/g) ?? []
+      if (nums.some((n) => !allowed.has(normNum(n)))) return true
+    }
+  }
+  return false
 }
 
 /** copy 生成同步塞在信号入口链路(persistDecision),Sonnet 卡住会拖满入口(魏征 A2-§4)。
@@ -92,20 +123,37 @@ export async function generateAdCopy(params: {
   segmentRoles: Role[]
   /** B3:工单归因桩的北极星指标,塑造 CTA 战略意图(诸葛亮硬验收) */
   expectedMetric?: string | null
+  /** B4:PM 录入的客户真实促销事实,真数字可合法进钩子(红线白名单,其余数字仍拦) */
+  verifiedOffer?: VerifiedOffer | null
 }): Promise<AdCopy> {
-  const { brief, angle, rationale, segmentRoles, expectedMetric } = params
+  const { brief, angle, rationale, segmentRoles, expectedMetric, verifiedOffer } = params
   const brand = brief.brand_name || 'our brand' // 英文中性词,不让中文串进 AU/NZ 英文广告(魏征 A2-§6)
   const url = brief.website || ''
+  const allowed = allowedNumbersFrom(verifiedOffer) // 红线白名单:仅这些真数字放行
 
   try {
+    const offerFacts = verifiedOffer
+      ? ([
+          ['现价', verifiedOffer.price_from],
+          ['原价', verifiedOffer.was_price],
+          ['折扣', verifiedOffer.discount],
+          ['截止', verifiedOffer.offer_expiry],
+        ] as Array<[string, string | undefined]>)
+          .filter(([, v]) => v)
+          .map(([k, v]) => `${k}=${v}`)
+          .join('、')
+      : ''
     const systemPrompt =
       `你为「${brand}」写 9:16 竖屏**信息流短视频广告**(Facebook/Instagram Reels)文案。` +
       `这是刷到就要在前 3 秒留住观众的广告,不是品牌宣传片——第一段(hook)是全片生死线。` +
-      `严格遵守下面的品牌约束,AU 英语拼写。**不编造任何价格/折扣/数字**` +
-      `(没依据的 $X、X% off 一律不写;促销紧迫感用 clearance / while stocks last / limited stock / free measure & quote 这类真实表达)。` +
+      `严格遵守下面的品牌约束,AU 英语拼写。**除下方"客户已确认真实促销事实"明确给出的数字外,不编造任何价格/折扣/数字**` +
+      `(没依据的 $X、X% off 一律不写;无促销数字时紧迫感用 clearance / while stocks last / limited stock 这类真实表达)。` +
       `只返回 JSON,不要解释。\n\n${formatBriefForPrompt(brief)}`
     const user =
       `角度(必须溯源品牌主线): ${angle}\n为什么做这条: ${rationale}\n` +
+      (offerFacts
+        ? `客户已确认真实促销事实(这些真数字可以且应该用进钩子做紧迫感,例:把现价当 hook 主视觉): ${offerFacts}。除这些外禁止编造任何其他价格/折扣数字。\n`
+        : '') +
       `${hookIntentFor(expectedMetric)}\n${ctaIntentFor(expectedMetric)}\n` +
       `段落顺序(${segmentRoles.length} 段): ${segmentRoles.join(', ')}\n\n` +
       `要求:\n` +
@@ -132,16 +180,31 @@ export async function generateAdCopy(params: {
     ) {
       parsed.endcard.url = url // 硬锁品牌网址,不信 LLM 填的
       if (!Array.isArray(parsed.endcard.offer)) parsed.endcard.offer = []
-      // 红线硬拦:LLM 无视禁数字约束吐了编造价格/折扣 → 整条不可信,落模板(不 return)
-      if (!hasInventedNumber(parsed)) return parsed
+      // 红线硬拦:LLM 吐的价格/折扣数字不在 verified_offer 白名单 → 编造 → 整条不可信,落模板(不 return)
+      if (!hasInventedNumber(parsed, allowed)) return parsed
     }
   } catch {
     // 落模板 fallback
   }
 
-  // 品牌接地模板 fallback(LLM 挂时用,不硬编任何客户名/网址)。CTA 按 Goal 微调但绝对安全:
-  // 营收/转化类用行业中立行动号召「Enquire now」——魏征 B4-P1:不能硬编「Free measure & quote」
-  // 这类行业专属服务承诺(对 CTS 旅游等客户 = 替客户编不存在的服务)。其余走品牌认知。
+  // 品牌接地模板 fallback(LLM 挂时用,不硬编任何客户名/网址)。
+  // B4:有 verified_offer 真价 → 把真价当钩子 + 截止紧迫感(真数字来自 PM 录入,红线安全,本地无 LLM 也能出真数字片)。
+  const price = verifiedOffer?.price_from
+  if (price) {
+    const urgency = verifiedOffer?.offer_expiry ? `Ends ${verifiedOffer.offer_expiry}` : 'While stocks last'
+    const wasLine = verifiedOffer?.was_price ? `Was ${verifiedOffer.was_price}` : angle
+    return {
+      segments: segmentRoles.map((role, i) =>
+        i === 0
+          ? { role, title_main: price, title_sub: angle } // 真价当 hook 主视觉
+          : i === segmentRoles.length - 1
+            ? { role, caption: urgency }
+            : { role, caption: wasLine },
+      ),
+      endcard: { cta: 'Shop now', offer: [urgency], url },
+    }
+  }
+  // 无 verified_offer:绝不编数字。CTA 按 Goal 微调但绝对安全(魏征 B4-P1:不硬编行业专属服务承诺)。
   const isConversion = expectedMetric === 'monthly_revenue' || expectedMetric === 'leads_count'
   return {
     segments: segmentRoles.map((role, i) =>

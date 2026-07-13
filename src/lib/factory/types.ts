@@ -157,6 +157,22 @@ export interface AdCopy {
   endcard: { cta: string; offer: string[]; url: string; vo?: string }
 }
 
+/**
+ * B4 verified_offer(板桥+魏征):PM/FDE 录入的**客户白纸黑字确认的真实促销事实**。
+ * 红线放行通道——文案里的价格/折扣数字只有出现在这里才允许用,否则一律视为 AI 编造被拦。
+ * 全部可选字符串,PM 按活动实际填(留空 = 无促销 = 禁一切数字)。走 signal.evidence.verified_offer 传入。
+ */
+export interface VerifiedOffer {
+  /** 现价,如 "$35.50/m²" */
+  price_from?: string
+  /** 原价,如 "$59/m²"(可选,有则可做 was/now 对比) */
+  was_price?: string
+  /** 折扣,如 "40% off"(可选) */
+  discount?: string
+  /** 截止,如 "31 July" / "end of July"(可选) */
+  offer_expiry?: string
+}
+
 export interface WorkOrderBrief {
   segments: Array<{
     role: 'hook' | 'middle' | 'cta'
