@@ -269,22 +269,21 @@ describe('骨架 + 工单组装', () => {
     expect(usedScenes.size).toBe(2) // 两条挂载 clip 必须来自不同场景
   })
 
-  it('选片:真实产品片优先,通用 stock 被挤出前排(治 CTA 配狗,仅 isRealFootage 生效)', () => {
-    // 魏征 B6-P5:用中性 tag(无 brief 词 → briefRelevance 全 0、无角度重叠),唯一区分 = isRealFootage
-    // (stock 尾 _px####)。这样测试**单独**守护"真实优先",不被 briefRelevance 顺带假绿。
-    // 变异验证:把 isRealFootage 恒 true → stock 与真实片全同分 → 稳定排序保留原序 → stock 进 5 镜 → 本测试 fail。
+  it('选片:真实产品片(track=a_real)优先,AI/stock(b_generated)被挤出前排(来源即真相)', () => {
+    // 判据=track(不是文件名):a_real=客户真拍优先,b_generated=AI i2v/stock 沉底。中性 tag 排除 brief/角度干扰,
+    // 唯一区分=track。变异验证:isRealClip 恒 true → 全同分 → 稳定排序保原序 → AI 片进 5 镜 → 本测试 fail。
     const real = (tag: string) => ({ id: tag, scene_tag: tag, motion_type: null, track: 'a_real' as const, usage_count: 0, last_used_at: null })
     const d = decideSignal(
       makeCtx({
         clipStock: [
-          { id: 'stockclip', scene_tag: 'zzz_px4453066', motion_type: null, track: 'a_real', usage_count: 0, last_used_at: null }, // 通用 stock,中性 tag
-          real('alpha'), real('bravo'), real('charlie'), real('delta'), real('echo'), // 真实片,中性 tag
+          { id: 'aiclip', scene_tag: 'oz_kitchen_113', motion_type: null, track: 'b_generated', usage_count: 0, last_used_at: null }, // AI i2v(非地标,进池)
+          real('alpha'), real('bravo'), real('charlie'), real('delta'), real('echo'), // 真拍
         ],
       }),
     )
     const wo = (d as { workOrder: { clip_links: Array<{ clip_id: string }> } }).workOrder
     expect(wo.clip_links).toHaveLength(5)
-    expect(wo.clip_links.map((l) => l.clip_id)).not.toContain('stockclip') // 5 镜被 5 真实片占,stock 排不上
+    expect(wo.clip_links.map((l) => l.clip_id)).not.toContain('aiclip') // 5 镜被 5 真拍占,AI 排不上
   })
 
   it('A/B 轨治理:B 轨地标 clip 默认排除;客户显式接受风险(CTS)才放行(护栏 6/附录 A)', () => {

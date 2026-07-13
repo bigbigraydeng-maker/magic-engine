@@ -256,13 +256,11 @@ function sceneAngleOverlap(sceneTag: string, angle: string): number {
   return sceneTokens.filter((t) => angleTokens.has(t)).length
 }
 
-// 通用 stock 素材:scene_tag 尾 _px####/_pb#### 等(Pexels/Pixabay 库存 ID)。客户真实产品片(oz_/factory
-// 等)不带此后缀。产品广告用真实产品片 > 通用 stock —— 让「狗」这类跟业务无关的 stock 沉底(PM 反馈 CTA 配狗)。
-// 约定:后缀由上游 ingest 命名规范保证;这是**排序启发式非硬闸**——误判只让排序次优,不排除任何 clip
-// (第①层 sceneAngleOverlap 仍先保货对题)。深层版=AI 视觉给 clip 打语义标签(后续独立议题)。
-const STOCK_TAG_RE = /_(px|pb|pexels|pixabay|shutterstock)\d+$/i
-function isRealFootage(sceneTag: string): boolean {
-  return !STOCK_TAG_RE.test(sceneTag)
+// 「真实产品片」判据 = **track(来源即真相**,两窗口契约 [[feedback-real-vs-generated-clip-provenance]])。
+// a_real=客户店里真拍,b_generated=AI(i2v)/stock。绝不用文件名启发式——AI i2v 的 oz_* 无 _px 后缀会被误判真实,
+// 把 AI 当「Oztop 真实产品」发 = 红线。产品广告优先真拍;AI/stock 沉底(只做氛围,发布闸再拦真产品冒充)。
+function isRealClip(clip: { track?: string | null }): boolean {
+  return clip.track === 'a_real'
 }
 
 /** 从 master_brief 抽相关度 token(客户真实业务词,不凭空):keyword_seeds + content_pillars + core_proposition。 */
@@ -297,7 +295,7 @@ export function selectClips(ctx: GateContext, angle: string): ClipSelection {
     .sort((a, b) => {
       const ov = sceneAngleOverlap(b.scene_tag, angle) - sceneAngleOverlap(a.scene_tag, angle)
       if (ov !== 0) return ov
-      const real = (isRealFootage(b.scene_tag) ? 1 : 0) - (isRealFootage(a.scene_tag) ? 1 : 0)
+      const real = (isRealClip(b) ? 1 : 0) - (isRealClip(a) ? 1 : 0)
       if (real !== 0) return real
       const rel = clipBriefRelevance(b.scene_tag, briefTokens) - clipBriefRelevance(a.scene_tag, briefTokens)
       if (rel !== 0) return rel
