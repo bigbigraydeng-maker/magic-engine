@@ -16,6 +16,7 @@ import { Resend } from 'resend'
 import { supabaseAdmin } from '@/lib/supabase'
 import { guardAdmin } from '@/lib/auth/require-admin'
 import { renderFullOutreachBody, senderIdentity, type OutreachEmail } from '@/lib/prospecting/outreach'
+import { isJunkContactEmail } from '@/lib/prospecting/tracking-detector'
 import type { ProspectAudit } from '@/lib/prospecting/audit'
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -117,6 +118,11 @@ async function handleSend(id: string): Promise<NextResponse> {
 
   const to = row.audit?.tracking?.emails?.[0]?.trim()
   if (!to) return NextResponse.json({ error: '该商家没有邮箱，只能电话跟进' }, { status: 400 })
+  // Refuse placeholder / marketing-service addresses scraped before the junk
+  // filter widened — sending there wastes a send and dents domain reputation.
+  if (isJunkContactEmail(to)) {
+    return NextResponse.json({ error: '占位/服务邮箱，跳过（需人工核实真实邮箱）' }, { status: 422 })
+  }
   const subject = row.outreach_email?.subject?.trim()
   const draftBody = row.outreach_email?.body?.trim()
   if (!subject || !draftBody) return NextResponse.json({ error: '邮件草稿缺失' }, { status: 409 })

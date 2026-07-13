@@ -41,22 +41,34 @@ const PATTERNS: Array<{ key: keyof Pick<TrackingSignals, 'ga4' | 'gtm' | 'meta_p
 const EMAIL_REGEX = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi
 // Filters out strings that match the email shape but are never a real contact:
 //   1. asset filenames (logo@2x.png, sprite.svg …)
-//   2. telemetry / site-builder vendor domains, INCLUDING subdomains —
-//      e.g. Wix's `…@sentry-next.wixpress.com`, `…@o1.ingest.sentry.io`,
-//      and template-vendor `hello@pixelarity.com` (all seen in live sweeps)
+//   2. telemetry / site-builder / marketing-service vendor domains, INCLUDING
+//      subdomains — e.g. Wix's `…@sentry-next.wixpress.com`,
+//      `…@o1.ingest.sentry.io`, template-vendor `hello@pixelarity.com`, and
+//      notification services like `back-in-stock@notifyboost.net` (all seen live)
 //   3. template placeholder pairs — `user@domain.com`, `you@example.com`,
-//      `name@yourdomain.com`, etc.
+//      `name@yourdomain.com` — and Wix's default `…@mysite.com` (site never
+//      set a real address; e.g. `info@mysite.com`).
 // Real business emails on a real domain (info@whiteroofing.co.nz,
 // reception@clinic42.co.nz) are unaffected.
 const EMAIL_JUNK = new RegExp(
   [
     '\\.(png|jpe?g|gif|svg|webp|css|js)$',
-    '@(?:[a-z0-9-]+\\.)*(?:sentry|wixpress|pixelarity|ingest)\\.',
-    '@(?:example|domain|yourdomain|yoursite|yourcompany|company|email)\\.',
+    '@(?:[a-z0-9-]+\\.)*(?:sentry|wixpress|pixelarity|ingest|notifyboost|klaviyomail|mailchimpapp|sendgrid|mailgun|sparkpostmail)\\.',
+    '@(?:example|domain|yourdomain|yoursite|yourcompany|company|email|mysite|wixsite)\\.',
     '^(?:user|you|your-?email|your-?name|name|firstname|lastname|info|admin|email|test)@(?:example|domain|yourdomain|yoursite|yourcompany|company)\\.',
   ].join('|'),
   'i',
 )
+
+/**
+ * True when an address matches the email shape but is never a real business
+ * inbox (asset filename, telemetry/marketing-service vendor, or a template
+ * placeholder). Shared so the send path can refuse a junk address that was
+ * scraped before this filter widened — a belt to the scrape-time braces.
+ */
+export function isJunkContactEmail(email: string): boolean {
+  return EMAIL_JUNK.test(email.trim().toLowerCase())
+}
 
 // Excludes non-profile paths AND path-only prefixes (profile.php / pages/…)
 // whose identity lives past the first segment — a truncated capture there

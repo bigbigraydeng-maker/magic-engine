@@ -95,6 +95,14 @@ describe("PATCH { action: 'send' }", () => {
     expect(updates).toHaveLength(0)
   })
 
+  it('422s a placeholder/service email (mysite.com) — never sends or claims', async () => {
+    selectRow!.audit = { tracking: { emails: ['info@mysite.com'] } }
+    const res = await send()
+    expect(res.status).toBe(422)
+    expect(sendMock).not.toHaveBeenCalled()
+    expect(updates).toHaveLength(0)
+  })
+
   it('409s when the prospect is not outreach_ready', async () => {
     selectRow!.status = 'contacted'
     const res = await send()
