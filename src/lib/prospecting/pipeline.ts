@@ -33,6 +33,25 @@ async function countDiscoveredOrQualified(status: 'discovered' | 'qualified'): P
 }
 
 /**
+ * Sendable-email gate for the AI stages. The prospect score rewards a weak
+ * digital foundation, and a business with no scrapeable email scores HIGHEST —
+ * so without this filter the score-ordered analyze/draft stages spend Strategy
+ * Engine on prospects that can never be cold-emailed, and fill the review queue
+ * with un-sendable cards (the has_email filter then hides them → an empty batch
+ * button). `email` is written from audit.tracking.emails[0] at audit time and
+ * is junk-filtered at scrape (isJunkContactEmail / #572), so "email IS NOT NULL"
+ * is the reliable "we can actually email this owner" signal. Email-less
+ * qualified prospects simply wait in `qualified` (zero AI cost) for a future
+ * phone-outreach track.
+ */
+async function countSendableQualified(): Promise<number> {
+  const { count } = await supabaseAdmin
+    .from('outbound_prospects').select('id', { count: 'exact', head: true })
+    .eq('status', 'qualified').not('email', 'is', null)
+  return count ?? 0
+}
+
+/**
  * Draftable = analyzed, analysis succeeded (no `error`), AND not already
  * parked as un-draftable (no `draft_error`). Excluding draft_error is what
  * keeps a poison-pill row from making pickStage return 'draft' forever and
@@ -42,13 +61,14 @@ async function countDraftable(): Promise<number> {
   const { count } = await supabaseAdmin
     .from('outbound_prospects').select('id', { count: 'exact', head: true })
     .eq('status', 'analyzed').is('ai_report->error', null).is('ai_report->draft_error', null)
+    .not('email', 'is', null)  // sendable-email gate (see countSendableQualified)
   return count ?? 0
 }
 
 export async function queueCounts(): Promise<{ discovered: number; qualified: number; draftable: number }> {
   const [discovered, qualified, draftable] = await Promise.all([
     countDiscoveredOrQualified('discovered'),
-    countDiscoveredOrQualified('qualified'),
+    countSendableQualified(),
     countDraftable(),
   ])
   return { discovered, qualified, draftable }
@@ -137,6 +157,7 @@ export async function analyzeBatch(limit: number): Promise<{ analyzed: number; r
     .from('outbound_prospects')
     .select('id, business_name, industry, city, country, website_url, domain, facebook_url, instagram_url, rating, review_count, score_breakdown, ai_report, updated_at')
     .eq('status', 'qualified')
+    .not('email', 'is', null)  // sendable-email gate (see countSendableQualified)
     .order('prospect_score', { ascending: false, nullsFirst: false })
     .limit(limit)
   if (!batch || batch.length === 0) return { analyzed: 0, retrying: 0 }
@@ -173,6 +194,7 @@ export async function draftBatch(limit: number): Promise<{ drafted: number; fail
     .from('outbound_prospects')
     .select('id, business_name, industry, city, country, domain, website_url, rating, review_count, ai_report, audit, score_breakdown, updated_at')
     .eq('status', 'analyzed').is('ai_report->error', null).is('ai_report->draft_error', null)
+    .not('email', 'is', null)  // sendable-email gate (see countSendableQualified)
     .order('prospect_score', { ascending: false, nullsFirst: false })
     .limit(limit)
   if (!batch || batch.length === 0) return { drafted: 0, failed: 0 }

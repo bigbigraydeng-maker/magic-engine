@@ -44,6 +44,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .select('id, business_name, industry, city, country, domain, website_url, rating, review_count, ai_report, audit, score_breakdown, updated_at')
     .eq('status', 'analyzed')
     .is('ai_report->error', null)
+    // Sendable-email gate: only draft for prospects we can actually cold-email.
+    // The score rewards a weak digital foundation, and email-less businesses
+    // score highest — so without this the queue fills with un-sendable cards
+    // and the batch-send button shows nothing (email written from
+    // audit.tracking.emails[0] at audit, junk-filtered at scrape).
+    .not('email', 'is', null)
     .order('prospect_score', { ascending: false, nullsFirst: false })
     .limit(limit)
 

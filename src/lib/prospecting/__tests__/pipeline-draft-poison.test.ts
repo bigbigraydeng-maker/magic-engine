@@ -15,6 +15,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // Captured across the chainable mock so tests can assert on what was written.
 const selectFilters: Array<[string, unknown]> = []
+// `.not(col, op, val)` filters — the sendable-email gate lives here.
+const notFilters: Array<[string, unknown, unknown]> = []
 const updatePayloads: Array<Record<string, unknown>> = []
 let resultQueue: unknown[] = []
 
@@ -22,9 +24,10 @@ let resultQueue: unknown[] = []
 // builder; awaiting it resolves to the next queued result (in call order).
 function builder() {
   const b: Record<string, unknown> = {}
-  for (const m of ['select', 'eq', 'is', 'order', 'limit', 'update'] as const) {
+  for (const m of ['select', 'eq', 'is', 'not', 'order', 'limit', 'update'] as const) {
     b[m] = vi.fn((...args: unknown[]) => {
       if (m === 'is') selectFilters.push([args[0] as string, args[1]])
+      if (m === 'not') notFilters.push([args[0] as string, args[1], args[2]])
       if (m === 'update') updatePayloads.push(args[0] as Record<string, unknown>)
       return b
     })
@@ -58,6 +61,7 @@ const analysis = { analyzed_at: 't', segment: 'core_target' }
 beforeEach(() => {
   vi.clearAllMocks()
   selectFilters.length = 0
+  notFilters.length = 0
   updatePayloads.length = 0
   resultQueue = []
 })
@@ -70,6 +74,15 @@ describe('draftBatch — poison-pill retry cap', () => {
     // draftable and pickStage returns 'draft' forever.
     expect(selectFilters).toContainEqual(['ai_report->draft_error', null])
     expect(selectFilters).toContainEqual(['ai_report->error', null])
+  })
+
+  it('SELECT gates on a scrapeable email so email-less prospects are never drafted', async () => {
+    resultQueue = [{ data: [] }]
+    await draftBatch(5)
+    // Sendable-email gate: the score rewards a weak digital foundation and
+    // email-less businesses score highest, so without this filter the queue
+    // fills with un-sendable cards and the batch button shows nothing.
+    expect(notFilters).toContainEqual(['email', 'is', null])
   })
 
   it('1st failure: increments draft_attempts to 1 but does NOT park (still retryable)', async () => {
