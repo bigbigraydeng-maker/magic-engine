@@ -17,9 +17,17 @@ export function getOpenAIClient(): OpenAI {
   if (!apiKey) {
     throw new Error('OPENAI_API_KEY environment variable is not set')
   }
-  // CF AI Gateway Authenticated mode requires a cf-aig-authorization header.
-  // When CF_AIG_TOKEN is unset, omit the header (gateway must then be unauthenticated).
+  // CF AI Gateway Authenticated mode requires a cf-aig-authorization header —
+  // without it the gateway 401s outright (confirmed 2026-07-14). So a missing
+  // token means "skip the gateway", not "gateway must be unauthenticated".
   const aigToken = process.env.CF_AIG_TOKEN
-  const defaultHeaders = aigToken ? { 'cf-aig-authorization': `Bearer ${aigToken}` } : undefined
-  return new OpenAI({ apiKey, baseURL: CF_GATEWAY_BASE, defaultHeaders })
+  if (!aigToken) {
+    console.warn('[openai-client] CF_AIG_TOKEN not set — bypassing CF AI Gateway, calls go direct to OpenAI (no gateway logging/caching)')
+    return new OpenAI({ apiKey })
+  }
+  return new OpenAI({
+    apiKey,
+    baseURL: CF_GATEWAY_BASE,
+    defaultHeaders: { 'cf-aig-authorization': `Bearer ${aigToken}` },
+  })
 }

@@ -26,11 +26,20 @@ export function getAnthropicClient(): Anthropic {
   if (!apiKey) {
     throw new Error('ANTHROPIC_API_KEY environment variable is not set')
   }
-  // CF AI Gateway Authenticated mode requires a cf-aig-authorization header.
-  // When CF_AIG_TOKEN is unset, omit the header (gateway must then be unauthenticated).
+  // CF AI Gateway Authenticated mode requires a cf-aig-authorization header —
+  // without it the gateway 401s outright (confirmed 2026-07-14, same bug as
+  // openai-client.ts). A missing token means "skip the gateway", not
+  // "gateway must be unauthenticated".
   const aigToken = process.env.CF_AIG_TOKEN
-  const defaultHeaders = aigToken ? { 'cf-aig-authorization': `Bearer ${aigToken}` } : undefined
-  return new Anthropic({ apiKey, baseURL: CF_GATEWAY_BASE, defaultHeaders })
+  if (!aigToken) {
+    console.warn('[anthropic-client] CF_AIG_TOKEN not set — bypassing CF AI Gateway, calls go direct to Anthropic (no gateway logging/caching)')
+    return new Anthropic({ apiKey })
+  }
+  return new Anthropic({
+    apiKey,
+    baseURL: CF_GATEWAY_BASE,
+    defaultHeaders: { 'cf-aig-authorization': `Bearer ${aigToken}` },
+  })
 }
 
 /**
