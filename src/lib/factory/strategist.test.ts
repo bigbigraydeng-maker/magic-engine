@@ -269,6 +269,23 @@ describe('骨架 + 工单组装', () => {
     expect(usedScenes.size).toBe(2) // 两条挂载 clip 必须来自不同场景
   })
 
+  it('选片:真实产品片优先,通用 stock(狗)被挤出前排(治 PM 反馈 CTA 配狗)', () => {
+    const real = (tag: string) => ({ id: tag, scene_tag: tag, motion_type: null, track: 'a_real' as const, usage_count: 0, last_used_at: null })
+    const d = decideSignal(
+      makeCtx({
+        clipStock: [
+          // stock 狗(scene_tag 尾 _px####)+ 5 个真实产品场景
+          { id: 'dog', scene_tag: 'dog_px4453066', motion_type: null, track: 'a_real', usage_count: 0, last_used_at: null },
+          real('oz_kitchen_1'), real('oz_install_2'), real('bath1_factory'), real('broll_water_tile'), real('oz_kitchen_5'),
+        ],
+      }),
+    )
+    const wo = (d as { workOrder: { clip_links: Array<{ clip_id: string }> } }).workOrder
+    // 5 镜 + 5 真实场景 + 1 stock 狗 → 5 镜全被真实产品片占,狗(通用 stock)排不上
+    expect(wo.clip_links).toHaveLength(5)
+    expect(wo.clip_links.map((l) => l.clip_id)).not.toContain('dog')
+  })
+
   it('A/B 轨治理:B 轨地标 clip 默认排除;客户显式接受风险(CTS)才放行(护栏 6/附录 A)', () => {
     const bClip = { id: 'clip-b', scene_tag: 'great_wall', motion_type: null, track: 'b_generated' as const, usage_count: 0, last_used_at: null }
     const denied = decideSignal(makeCtx({ clipStock: [bClip], allowBTrackLandmarkAds: false }))

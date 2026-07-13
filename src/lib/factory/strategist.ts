@@ -256,13 +256,45 @@ function sceneAngleOverlap(sceneTag: string, angle: string): number {
   return sceneTokens.filter((t) => angleTokens.has(t)).length
 }
 
+// 通用 stock 素材:scene_tag 尾 _px####/_pb#### 等(Pexels/Pixabay 库存 ID)。客户真实产品片(oz_/factory
+// 等)不带此后缀。产品广告用真实产品片 > 通用 stock —— 让「狗」这类跟业务无关的 stock 沉底(PM 反馈 CTA 配狗)。
+const STOCK_TAG_RE = /_(px|pb|pexels|pixabay|shutterstock)\d+$/i
+function isRealFootage(sceneTag: string): boolean {
+  return !STOCK_TAG_RE.test(sceneTag)
+}
+
+/** 从 master_brief 抽相关度 token(客户真实业务词,不凭空):keyword_seeds + content_pillars + core_proposition。 */
+function briefRelevanceTokens(brief: GateContext['brief']): Set<string> {
+  const set = new Set<string>()
+  if (!brief) return set
+  const add = (s?: string | null) => {
+    if (!s) return
+    for (const t of s.toLowerCase().split(/[^a-z0-9]+/)) if (t.length > 3) set.add(t)
+  }
+  ;(brief.keyword_seeds ?? []).forEach(add)
+  ;(brief.content_pillars ?? []).forEach((p) => add(typeof p === 'string' ? p : JSON.stringify(p)))
+  add(brief.core_proposition)
+  return set
+}
+
+/** clip scene_tag 与客户业务词的重叠度(次级排序:同为真实/同为 stock 时,更贴业务的优先)。 */
+function clipBriefRelevance(sceneTag: string, tokens: Set<string>): number {
+  return sceneTag.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 3 && tokens.has(t)).length
+}
+
 export function selectClips(ctx: GateContext, angle: string): ClipSelection {
-  // 匹配角度优先(token 重叠 desc),同分冷素材优先(usage asc, last_used asc)防审美疲劳
+  // 排序:①角度 token 重叠(货对题,魏征 F12)②真实产品片优先(stock 沉底,治 CTA 配狗)
+  // ③贴业务(master_brief 相关度)④冷素材优先(usage/last_used)防审美疲劳
+  const briefTokens = briefRelevanceTokens(ctx.brief)
   const pool = ctx.clipStock
     .filter((c) => clipAllowed(ctx, c))
     .sort((a, b) => {
       const ov = sceneAngleOverlap(b.scene_tag, angle) - sceneAngleOverlap(a.scene_tag, angle)
       if (ov !== 0) return ov
+      const real = (isRealFootage(b.scene_tag) ? 1 : 0) - (isRealFootage(a.scene_tag) ? 1 : 0)
+      if (real !== 0) return real
+      const rel = clipBriefRelevance(b.scene_tag, briefTokens) - clipBriefRelevance(a.scene_tag, briefTokens)
+      if (rel !== 0) return rel
       if (a.usage_count !== b.usage_count) return a.usage_count - b.usage_count
       const at = a.last_used_at ? new Date(a.last_used_at).getTime() : 0
       const bt = b.last_used_at ? new Date(b.last_used_at).getTime() : 0
