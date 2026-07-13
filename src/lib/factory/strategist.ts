@@ -258,6 +258,8 @@ function sceneAngleOverlap(sceneTag: string, angle: string): number {
 
 // 通用 stock 素材:scene_tag 尾 _px####/_pb#### 等(Pexels/Pixabay 库存 ID)。客户真实产品片(oz_/factory
 // 等)不带此后缀。产品广告用真实产品片 > 通用 stock —— 让「狗」这类跟业务无关的 stock 沉底(PM 反馈 CTA 配狗)。
+// 约定:后缀由上游 ingest 命名规范保证;这是**排序启发式非硬闸**——误判只让排序次优,不排除任何 clip
+// (第①层 sceneAngleOverlap 仍先保货对题)。深层版=AI 视觉给 clip 打语义标签(后续独立议题)。
 const STOCK_TAG_RE = /_(px|pb|pexels|pixabay|shutterstock)\d+$/i
 function isRealFootage(sceneTag: string): boolean {
   return !STOCK_TAG_RE.test(sceneTag)
@@ -272,7 +274,11 @@ function briefRelevanceTokens(brief: GateContext['brief']): Set<string> {
     for (const t of s.toLowerCase().split(/[^a-z0-9]+/)) if (t.length > 3) set.add(t)
   }
   ;(brief.keyword_seeds ?? []).forEach(add)
-  ;(brief.content_pillars ?? []).forEach((p) => add(typeof p === 'string' ? p : JSON.stringify(p)))
+  // 只取 name + description 的语义文本(魏征 B6-P3:JSON.stringify 会混入 key 名/id/数字噪音,
+  // 且跟 pickAngle 只取 name 的抽取方式不一致)
+  ;(brief.content_pillars ?? []).forEach((p) =>
+    add(typeof p === 'string' ? p : `${p?.name ?? ''} ${p?.description ?? ''}`),
+  )
   add(brief.core_proposition)
   return set
 }
