@@ -58,10 +58,14 @@ export function hookIntentFor(metric: string | null | undefined): string {
  * output 侧扫描,命中即判定整条 LLM 结果不可信 → 落模板 fallback(零数字,已测试守护)。
  * 红线由数据事实守护,不靠 prompt 措辞。(未来 verified_offer 录入的真数字将走白名单豁免——板桥,下一 PR)
  */
-// 价格/折扣片段(全局匹配,逐个校验数字是否在白名单)。只盯价格/折扣,不误伤 "2 years"/"24/7" 等普通数字。
-const PRICE_DISCOUNT_RE = /\$\s*\d[\d.,]*|\d+(?:\.\d+)?\s*%|\d+(?:\.\d+)?\s*(?:off|dollars?)\b/gi
+// 数字提取(支持千分位逗号;normNum 再去逗号归一,魏征 B4-P1:"$1,299" 不被断成 1/299)。
+const NUM_RE = /\d[\d,]*(?:\.\d+)?/g
+// 价格/折扣片段(best-effort 尽量宽以拦编造价格;$50 人工审片是最后兜底)。覆盖:货币前缀($/A$/NZ$/AUD/￥)、
+// 百分比/off/dollars/bucks 后缀、per-unit 裸价(/m²、/sqm、per m)、"X for Y"(魏征 B4-P1:裸价系统性漏网)。
+const PRICE_DISCOUNT_RE =
+  /(?:\$|a\$|nz\$|\baud\b|￥)\s*\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?\s*(?:%|\boff\b|\bdollars?\b|\bbucks\b|\/\s*m²|\/\s*m2|\/\s*sqm|\bper\s*m²?)|\d[\d,]*\s*\bfor\b\s*\d/gi
 
-/** 归一化数字串:去千分位逗号 + 去尾零("35.50"→"35.5"),让 $35.5/$35.50 等价比对。 */
+/** 归一化数字串:去千分位逗号 + 去尾零("35.50"→"35.5","1,299"→"1299")。 */
 function normNum(n: string): string {
   const f = parseFloat(n.replace(/,/g, ''))
   return Number.isFinite(f) ? String(f) : n
@@ -74,12 +78,17 @@ function collectTexts(copy: AdCopy): string[] {
   return texts.filter((t): t is string => typeof t === 'string')
 }
 
-/** verified_offer 里出现的所有数字 = 红线白名单(客户确认的真数字可用,其余一律视为 AI 编造)。 */
+/**
+ * verified_offer 里的价格数字 = 红线白名单(客户确认的真数字可用,其余一律视为 AI 编造)。
+ * 魏征 B4-P0:**只从 price/was/discount 提数字,排除 offer_expiry**——日期天然含小整数(31 号/月份/年份),
+ * 一旦进白名单就给 AI 一批"合法价格弹药"(offer_expiry:"31 July" → AI 可写 "$31/m²")。截止日以 "Ends 31 July"
+ * 出现,不匹配 PRICE_DISCOUNT_RE(无 $/%/裸价单位),本就不会被拦,无需进白名单。
+ */
 export function allowedNumbersFrom(offer: VerifiedOffer | null | undefined): Set<string> {
   const allowed = new Set<string>()
   if (!offer) return allowed
-  for (const v of [offer.price_from, offer.was_price, offer.discount, offer.offer_expiry]) {
-    if (typeof v === 'string') for (const n of v.match(/\d+(?:\.\d+)?/g) ?? []) allowed.add(normNum(n))
+  for (const v of [offer.price_from, offer.was_price, offer.discount]) {
+    if (typeof v === 'string') for (const n of v.match(NUM_RE) ?? []) allowed.add(normNum(n))
   }
   return allowed
 }
@@ -91,7 +100,7 @@ export function allowedNumbersFrom(offer: VerifiedOffer | null | undefined): Set
 function hasInventedNumber(copy: AdCopy, allowed: Set<string>): boolean {
   for (const t of collectTexts(copy)) {
     for (const frag of t.match(PRICE_DISCOUNT_RE) ?? []) {
-      const nums = frag.match(/\d+(?:\.\d+)?/g) ?? []
+      const nums = frag.match(NUM_RE) ?? []
       if (nums.some((n) => !allowed.has(normNum(n)))) return true
     }
   }

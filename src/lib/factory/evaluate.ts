@@ -145,8 +145,12 @@ async function loadContext(
 function parseVerifiedOffer(raw: unknown): VerifiedOffer | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const o = raw as Record<string, unknown>
-  const pick = (k: string): string | undefined =>
-    typeof o[k] === 'string' && (o[k] as string).trim() ? (o[k] as string).trim() : undefined
+  // 防 prompt 注入(魏征 B4-P2):evidence 是外部 POST 可控,剥换行 + 限长(价格/折扣/日期本就是短串)。
+  const pick = (k: string): string | undefined => {
+    if (typeof o[k] !== 'string') return undefined
+    const cleaned = (o[k] as string).replace(/[\r\n]+/g, ' ').trim().slice(0, 40)
+    return cleaned || undefined
+  }
   const offer: VerifiedOffer = {
     price_from: pick('price_from'),
     was_price: pick('was_price'),
