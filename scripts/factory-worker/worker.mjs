@@ -271,6 +271,21 @@ function resolveBgm(profile, brandKit) {
   return existsSync(fallback) ? fallback : null
 }
 
+// 定格兜底:取 clip 真实时长,装配时 dur 不超过它(短 clip 撑长时段会定格,PM 反馈 6-10s 定格)。
+// ffprobe 取不到 → 返回 null,退回 duration_hint_s(保持旧行为,不炸)。
+function probeClipDuration(p) {
+  try {
+    const out = execFileSync(
+      '/usr/local/bin/ffprobe',
+      ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', p],
+    ).toString().trim()
+    const d = parseFloat(out)
+    return Number.isFinite(d) && d > 0 ? d : null
+  } catch {
+    return null
+  }
+}
+
 function assemble(wo, localPaths, copy, tmp) {
   const brief = wo.brief
   const out = join(tmp, 'final.mp4')
@@ -288,12 +303,12 @@ function assemble(wo, localPaths, copy, tmp) {
     ...(profile.xfade != null ? { xfade: profile.xfade } : {}),
     // endcard_panel:false = logo 直接放深色渐变(白字 logo 用,如 Oztop),不套白卡片(否则白字消失)。
     ...(profile.endcard_panel != null ? { endcard_panel: profile.endcard_panel } : {}),
-    segments: brief.segments.map((seg, i) => ({
-      src: localPaths[i],
-      ss: 0,
-      dur: seg.duration_hint_s,
-      ...(copy.segments[i] || {}),
-    })),
+    segments: brief.segments.map((seg, i) => {
+      const clipDur = probeClipDuration(localPaths[i])
+      // 定格根治:dur 不超过 clip 实长(留 0.1s 余量避免边界撑帧);探测失败退回 hint
+      const dur = clipDur ? Math.min(seg.duration_hint_s, clipDur - 0.1) : seg.duration_hint_s
+      return { src: localPaths[i], ss: 0, dur: Math.max(dur, 0.5), ...(copy.segments[i] || {}) }
+    }),
     endcard: copy.endcard,
   }
   const cfgPath = join(tmp, 'promo.json')

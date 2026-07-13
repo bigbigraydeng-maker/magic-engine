@@ -11,7 +11,7 @@ import {
   FACTORY_DAILY_ORDER_CAP,
   FACTORY_MIN_BALANCE_USD,
   FACTORY_ORDER_BUDGET_CAP_USD,
-  FACTORY_SEGMENT_TEMPLATE,
+  FACTORY_SHOT_PLAN,
   FACTORY_WINNER_FREQUENCY_UNLOCK,
 } from './constants'
 import type {
@@ -269,23 +269,24 @@ export function selectClips(ctx: GateContext, angle: string): ClipSelection {
       return at - bt
     })
 
-  const roles: Array<'hook' | 'middle' | 'cta'> = ['hook', 'middle', 'cta']
   const segments: WorkOrderBrief['segments'] = []
   const clipLinks: WorkOrderDraft['clip_links'] = []
   const generationPlan: ClipGenerationPlanItem[] = []
   const used = new Set<string>()
   // 按 scene_tag(内容身份)去重,不止 clip.id:同一场景多行(如 bath1_factory×2 同源不同 id)
-  // 不能跨段重复出镜,否则成片「素材单一」。distinct 场景不够 → 该段落 generationPlan 补生成。
+  // 不能跨镜重复出镜,否则成片「素材单一」。distinct 场景不够 → 该镜 generationPlan 补生成。
   const usedScenes = new Set<string>()
 
-  roles.forEach((role, i) => {
+  // 5 镜方案(中段拆 3 短镜):每镜拉一条不同场景 clip = 治定格 + 素材单一 + 太平(护栏 2/7)
+  FACTORY_SHOT_PLAN.forEach((shot, i) => {
+    const role = shot.role
     const clip = pool.find((c) => !used.has(c.id) && !(c.scene_tag && usedScenes.has(c.scene_tag)))
     if (clip) {
       used.add(clip.id)
       if (clip.scene_tag) usedScenes.add(clip.scene_tag)
       segments.push({
         role,
-        duration_hint_s: FACTORY_SEGMENT_TEMPLATE[role],
+        duration_hint_s: shot.duration_hint_s,
         description: `${role} — ${clip.scene_tag}`,
         clip_ids: [clip.id],
       })
@@ -294,7 +295,7 @@ export function selectClips(ctx: GateContext, angle: string): ClipSelection {
       // 库存不足 → 同工单附 clip_generation_plan(idempotency_key 防重烧,魏征 F10③)
       segments.push({
         role,
-        duration_hint_s: FACTORY_SEGMENT_TEMPLATE[role],
+        duration_hint_s: shot.duration_hint_s,
         description: `${role} — to generate for angle: ${angle}`,
         clip_ids: [],
       })

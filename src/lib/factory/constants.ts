@@ -42,8 +42,16 @@ export const FACTORY_B_TRACK_SCENE_TAGS = [
 ] as const
 
 /** 三段式默认时长模板(§5.1 步骤 4) */
-export const FACTORY_SEGMENT_TEMPLATE = {
-  hook: 3,
-  middle: 8,
-  cta: 3,
-} as const
+/**
+ * 分镜方案(治定格+素材单一,PM 反馈"中间 6-10s 定格、素材太单一")。
+ * 旧:hook3/middle8/cta3 三段,中段 8s 撑一条 ~5s clip → 6-10s 定格。
+ * 新:5 镜,中段拆 3 短镜,每镜 ≤ 最短库存 clip(3.0s)不撑帧;拉 5 条不同场景 = 快节奏 + 不单一。
+ * worker 装配再按 clip 实长 min-cap 兜底(双保险,任何短 clip 都不定格)。
+ */
+export const FACTORY_SHOT_PLAN = [
+  { role: 'hook', duration_hint_s: 2.8 },
+  { role: 'middle', duration_hint_s: 2.6 },
+  { role: 'middle', duration_hint_s: 2.6 },
+  { role: 'middle', duration_hint_s: 2.6 },
+  { role: 'cta', duration_hint_s: 2.8 },
+] as const

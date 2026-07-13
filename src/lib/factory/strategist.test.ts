@@ -226,9 +226,9 @@ describe('骨架 + 工单组装', () => {
     expect(wo.rationale_one_liner).toContain('2.8')
     expect(wo.angle_source.type).toBe('content_pillar')
     expect(wo.brief.max_new_clips).toBe(8)
-    // 零库存 → 三段全部进 clip_generation_plan(§5.1 步骤 5)
-    expect(wo.brief.clip_generation_plan).toHaveLength(3)
-    expect(wo.brief.segments).toHaveLength(3)
+    // 零库存 → 5 镜全部进 clip_generation_plan(§5.1 步骤 5;分镜方案 hook+3middle+cta)
+    expect(wo.brief.clip_generation_plan).toHaveLength(5)
+    expect(wo.brief.segments).toHaveLength(5)
     expect(wo.goal_id).toBe('goal-1')
     expect(wo.master_brief_id).toBe('brief-1')
   })
@@ -244,8 +244,8 @@ describe('骨架 + 工单组装', () => {
     )
     const wo = (d as { workOrder: { clip_links: Array<{ clip_id: string; segment_role: string }>; brief: { clip_generation_plan: unknown[] } } }).workOrder
     expect(wo.clip_links[0]).toMatchObject({ clip_id: 'clip-cold', segment_role: 'hook' })
-    expect(wo.clip_links).toHaveLength(2)
-    expect(wo.brief.clip_generation_plan).toHaveLength(1) // 只缺 cta 段
+    expect(wo.clip_links).toHaveLength(2) // 2 个不同场景 → 挂 2 镜
+    expect(wo.brief.clip_generation_plan).toHaveLength(3) // 剩 3 镜(2 middle + cta)补生成
   })
 
   it('素材单一根治:同 scene_tag 多行只出镜一次,重复场景落生成计划(去重按内容不止 id)', () => {
@@ -260,9 +260,9 @@ describe('骨架 + 工单组装', () => {
       }),
     )
     const wo = (d as { workOrder: { clip_links: Array<{ clip_id: string }>; brief: { clip_generation_plan: unknown[] } } }).workOrder
-    // 只有 2 个 distinct 场景 → 只挂 2 条,第 3 段落生成计划(不重复同一 bath 场景)
+    // 只有 2 个 distinct 场景 → 只挂 2 镜,其余 3 镜落生成计划(不重复同一 bath 场景)
     expect(wo.clip_links).toHaveLength(2)
-    expect(wo.brief.clip_generation_plan).toHaveLength(1)
+    expect(wo.brief.clip_generation_plan).toHaveLength(3)
     const sceneOf: Record<string, string> = { 'bath-a': 'bath1_factory', 'bath-b': 'bath1_factory', water: 'broll_water_tile' }
     const usedScenes = new Set(wo.clip_links.map((l) => sceneOf[l.clip_id]))
     expect(usedScenes.size).toBe(2) // 两条挂载 clip 必须来自不同场景
