@@ -10,6 +10,63 @@ import type { AdCopy } from './types'
 
 type Role = 'hook' | 'middle' | 'cta'
 
+/**
+ * B3(诸葛亮硬验收):文案 CTA 意图必须导向工单圈定的 Goal 北极星,别自嗨。
+ * expected_metric(来自 brief.attribution)→ 一句 CTA 战略意图喂进生成 prompt。
+ */
+export function ctaIntentFor(metric: string | null | undefined): string {
+  switch (metric) {
+    case 'brand_search_volume':
+      return 'CTA 目标=拉品牌搜索:引导观众"记住品牌名并去搜索它"(Search "<brand>"),不是直接卖货。'
+    case 'monthly_revenue':
+      return 'CTA 目标=直接转化/营收:限时优惠、清仓抢购式紧迫感,引导立刻购买/到店。'
+    case 'leads_count':
+      return 'CTA 目标=拿线索:引导留资/咨询/报名(Enquire / Sign up / Talk to us)。'
+    case 'organic_traffic':
+      return 'CTA 目标=引流上站:引导访问官网了解更多(Visit our site)。'
+    case 'ai_visibility_score':
+      return 'CTA 目标=品牌权威露出:强化专业身份与品类权威,引导认知不强推销。'
+    default:
+      return 'CTA 目标=品牌认知:清晰品牌行动号召,不编价格。'
+  }
+}
+
+/**
+ * B4 钩子craft:hook 段是信息流广告的生死线,按 Goal 北极星给「前 3 秒该怎么抓人」的战略意图。
+ * 板桥硬约束:hook 不是品牌介绍,是让刷手指的人停下的狠话。
+ */
+export function hookIntentFor(metric: string | null | undefined): string {
+  switch (metric) {
+    case 'monthly_revenue':
+      return 'Hook 目标=清仓/促销紧迫感:前 3 秒用稀缺/限时戳动作(while stocks last / final clearance / limited stock),制造"现在不看就没了"。不编具体价格/折扣数字。'
+    case 'brand_search_volume':
+      return 'Hook 目标=品牌记忆:前 3 秒抛一个反常识或痛点问题,让观众记住并想去搜品牌名。'
+    case 'leads_count':
+      return 'Hook 目标=勾留资动机:前 3 秒点破一个"不解决会后悔"的痛点,引出免费咨询/报价。'
+    case 'organic_traffic':
+      return 'Hook 目标=勾好奇:前 3 秒抛一个"看完才知道答案"的信息缺口,引导上站。'
+    case 'ai_visibility_score':
+      return 'Hook 目标=权威开场:前 3 秒用专业断言/品类洞察立住权威身份。'
+    default:
+      return 'Hook 目标=停手指:前 3 秒一句戳中痛点或反常识的狠话,别用"品牌名+定位"式平淡开场。'
+  }
+}
+
+/**
+ * 红线硬拦(魏征 B4-P1):prompt 口头禁数字不够,LLM 可能无视吐出「$29/m²」「40% off」。
+ * 这类编造的价格/折扣一旦上客户可见成片 = 踩「绝不凭空注入客户业务数据」红线(Oztop 编过假数字事故)。
+ * output 侧扫描,命中即判定整条 LLM 结果不可信 → 落模板 fallback(零数字,已测试守护)。
+ * 红线由数据事实守护,不靠 prompt 措辞。(未来 verified_offer 录入的真数字将走白名单豁免——板桥,下一 PR)
+ */
+const INVENTED_NUMBER_RE = /\$\s*\d|\d+\s*%|\d+\s*(?:off|dollars?)\b/i
+
+function hasInventedNumber(copy: AdCopy): boolean {
+  const texts: Array<string | undefined> = []
+  for (const s of copy.segments ?? []) texts.push(s.title_main, s.title_sub, s.caption, s.vo)
+  texts.push(copy.endcard?.cta, copy.endcard?.vo, ...(copy.endcard?.offer ?? []))
+  return texts.some((t) => typeof t === 'string' && INVENTED_NUMBER_RE.test(t))
+}
+
 /** copy 生成同步塞在信号入口链路(persistDecision),Sonnet 卡住会拖满入口(魏征 A2-§4)。
  *  硬超时 → 走模板 fallback,不拖垮 signals POST(maxDuration 60s)。 */
 const COPY_GEN_TIMEOUT_MS = 8000
@@ -33,22 +90,30 @@ export async function generateAdCopy(params: {
   angle: string
   rationale: string
   segmentRoles: Role[]
+  /** B3:工单归因桩的北极星指标,塑造 CTA 战略意图(诸葛亮硬验收) */
+  expectedMetric?: string | null
 }): Promise<AdCopy> {
-  const { brief, angle, rationale, segmentRoles } = params
+  const { brief, angle, rationale, segmentRoles, expectedMetric } = params
   const brand = brief.brand_name || 'our brand' // 英文中性词,不让中文串进 AU/NZ 英文广告(魏征 A2-§6)
   const url = brief.website || ''
 
   try {
     const systemPrompt =
-      `你为「${brand}」写 9:16 竖屏视频广告文案。严格遵守下面的品牌约束,` +
-      `AU/NZ 英语拼写,不编造价格/数字。只返回 JSON,不要解释。\n\n${formatBriefForPrompt(brief)}`
+      `你为「${brand}」写 9:16 竖屏**信息流短视频广告**(Facebook/Instagram Reels)文案。` +
+      `这是刷到就要在前 3 秒留住观众的广告,不是品牌宣传片——第一段(hook)是全片生死线。` +
+      `严格遵守下面的品牌约束,AU 英语拼写。**不编造任何价格/折扣/数字**` +
+      `(没依据的 $X、X% off 一律不写;促销紧迫感用 clearance / while stocks last / limited stock / free measure & quote 这类真实表达)。` +
+      `只返回 JSON,不要解释。\n\n${formatBriefForPrompt(brief)}`
     const user =
       `角度(必须溯源品牌主线): ${angle}\n为什么做这条: ${rationale}\n` +
+      `${hookIntentFor(expectedMetric)}\n${ctaIntentFor(expectedMetric)}\n` +
       `段落顺序(${segmentRoles.length} 段): ${segmentRoles.join(', ')}\n\n` +
+      `要求:\n` +
+      `- hook 段(第一段)必须是能让刷手指的人停下的狠话:戳痛点/反常识/紧迫,禁止"品牌名+定位"式平淡开场。\n` +
+      `- 每个文本字段 ≤ 6 词;AU 英语;无把握的价格/折扣改用「Free measure & quote」「Talk to us」式表达,绝不编数字。\n` +
+      `- endcard.url 固定填 "${url}";segments 数量 = ${segmentRoles.length};CTA 体现上面的 CTA 目标。\n\n` +
       `返回 JSON:{"segments":[{"role":"hook|middle|cta","title_main"?,"title_sub"?,"caption"?,"vo"?}],` +
-      `"endcard":{"cta","offer":["..."],"url":"${url}","vo"?}}\n` +
-      `规则:每个文本字段 ≤ 6 词;英语;无把握的价格用「Talk to us」式 CTA;` +
-      `endcard.url 固定填 "${url}";segments 数量 = ${segmentRoles.length}。`
+      `"endcard":{"cta","offer":["..."],"url":"${url}","vo"?}}`
 
     const { text } = await withTimeout(
       callClaudeChat({
@@ -67,19 +132,25 @@ export async function generateAdCopy(params: {
     ) {
       parsed.endcard.url = url // 硬锁品牌网址,不信 LLM 填的
       if (!Array.isArray(parsed.endcard.offer)) parsed.endcard.offer = []
-      return parsed
+      // 红线硬拦:LLM 无视禁数字约束吐了编造价格/折扣 → 整条不可信,落模板(不 return)
+      if (!hasInventedNumber(parsed)) return parsed
     }
   } catch {
     // 落模板 fallback
   }
 
-  // 品牌接地模板 fallback(不硬编任何客户名/网址)
+  // 品牌接地模板 fallback(LLM 挂时用,不硬编任何客户名/网址)。CTA 按 Goal 微调但绝对安全:
+  // 营收/转化类用行业中立行动号召「Enquire now」——魏征 B4-P1:不能硬编「Free measure & quote」
+  // 这类行业专属服务承诺(对 CTS 旅游等客户 = 替客户编不存在的服务)。其余走品牌认知。
+  const isConversion = expectedMetric === 'monthly_revenue' || expectedMetric === 'leads_count'
   return {
     segments: segmentRoles.map((role, i) =>
       i === 0
         ? { role, title_main: brand.toUpperCase().slice(0, 24), title_sub: angle }
         : { role, caption: angle },
     ),
-    endcard: { cta: `Discover ${brand}`, offer: ['Talk to us today'], url },
+    endcard: isConversion
+      ? { cta: 'Enquire now', offer: ['Talk to us today'], url }
+      : { cta: `Discover ${brand}`, offer: ['Talk to us today'], url },
   }
 }

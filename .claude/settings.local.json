@@ -9,7 +9,9 @@
       "Bash(git fetch *)",
       "mcp__Meta__ads_get_ad_accounts",
       "mcp__Meta__ads_get_ad_entities",
-      "mcp__Meta__ads_get_ad_videos"
+      "mcp__Meta__ads_get_ad_videos",
+      "mcp__ca736b0e-a212-43ef-bc9d-ab81f5088d26__list_projects",
+      "mcp__ca736b0e-a212-43ef-bc9d-ab81f5088d26__execute_sql"
     ]
   }
 }

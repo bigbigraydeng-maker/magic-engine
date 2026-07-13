@@ -35,8 +35,23 @@ const WORKER_TOKEN = ENV.FACTORY_WORKER_TOKEN || ''
 const WORKER_ID = ENV.FACTORY_WORKER_ID || `mac-${hostname()}`
 const MUAPI_KEY = ENV.MUAPI_API_KEY || ''
 // OPENAI_KEY 已移除:A2 起文案由 ME 后端按 master_brief 生成(brief.copy),worker 不再写文案
-const MAKE_PROMO = ENV.MAKE_PROMO_PATH || join(process.env.HOME, 'Documents/CTS_BrandKit/make_promo.py')
-const BRAND_KIT = ENV.BRAND_KIT_PATH || join(process.env.HOME, 'Documents/CTS_BrandKit')
+// B3:引擎指向 MagicLab_Studio 权威版(治没音乐/素材糙),brandkit 按客户走(治装配层 CTS 尾巴)。
+const STUDIO_ROOT = ENV.STUDIO_ROOT || join(process.env.HOME, 'Dropbox/MagicLab_Studio')
+const MAKE_PROMO = ENV.MAKE_PROMO_PATH || join(STUDIO_ROOT, 'engine/make_promo.py')
+const DEFAULT_BRAND_KIT = ENV.BRAND_KIT_PATH || join(process.env.HOME, 'Documents/CTS_BrandKit')
+// client_id → studio 文件夹名(brandkit=$STUDIO_ROOT/<folder>/brandkit)。JSON env 覆盖。
+const CLIENT_STUDIO = (() => { try { return JSON.parse(ENV.FACTORY_CLIENT_STUDIO || '{}') } catch { return {} } })()
+// make_promo 引擎对这几个资产是无守卫 open(brand_red.txt)/引 logo/watermark —— 缺任一即炸装配。
+// 健康检查到「资产在」而非只「文件夹在」(魏征 B3:半成品目录 existsSync 放行=第三客户定时炸弹)。
+const BRANDKIT_REQUIRED = ['brand_red.txt', 'assets/logo_color.png', 'assets/watermark.png']
+const brandkitHealthy = (kit) => BRANDKIT_REQUIRED.every((r) => existsSync(join(kit, r)))
+function brandkitFor(clientId) {
+  const folder = CLIENT_STUDIO[clientId]
+  const kit = folder ? join(STUDIO_ROOT, folder, 'brandkit') : DEFAULT_BRAND_KIT
+  if (brandkitHealthy(kit)) return kit
+  log(`⚠️ brandkit 资产不全: ${kit}(client=${clientId}),退回默认 ${DEFAULT_BRAND_KIT}`)
+  return DEFAULT_BRAND_KIT
+}
 const MUAPI_SLUG = ENV.MUAPI_KLING_SLUG || 'kling-v2.1-standard-i2v'
 const CLIP_UNIT_COST = Number(ENV.FACTORY_CLIP_UNIT_COST_USD || '0.225')
 
@@ -225,16 +240,54 @@ async function resolveClips(wo, tmp, onCost) {
 
 // ── 装配(make_promo.py)────────────────────────────────────────────────────────
 
+// B3 皮按客户走:brandkit 根可放 factory_profile.json 定义创意配置,worker 下发引擎。
+// { music?: 曲名(相对 _shared/music)或绝对路径, music_mood?, look?, caption_mode?, xfade? }。
+// 缺文件 = 全部保持引擎默认(不给无 profile 的客户偷偷改风格/换曲)。
+const SHARED_MUSIC = join(STUDIO_ROOT, '_shared/music')
+
+function creativeProfile(brandKit) {
+  const p = join(brandKit, 'factory_profile.json')
+  if (!existsSync(p)) return {}
+  try {
+    return JSON.parse(readFileSync(p, 'utf8'))
+  } catch {
+    log(`⚠️ factory_profile.json 解析失败: ${p},用引擎默认`)
+    return {}
+  }
+}
+
+// BGM 解析:profile.music(绝对路径或 _shared/music 下曲名)优先,回退 env / brandkit 自带曲。
+// make_promo 只在 cfg.music 存在时才铺床(ducked -14dB),无 music 且无 music_mood = 无背景乐。
+function resolveBgm(profile, brandKit) {
+  if (profile.music) {
+    const abs = profile.music.startsWith('/') ? profile.music : join(SHARED_MUSIC, profile.music)
+    if (existsSync(abs)) return abs
+    // 魏征 P1:打错曲名且声明了 music_mood 时,别静默砸 brandkit 默认曲(可能串 CTS),
+    // 返回 null 让 assemble 落到 music_mood(客户声明的次优意图)。仅无 mood 才兜底默认曲。
+    log(`⚠️ factory_profile.music 找不到: ${abs}${profile.music_mood ? ',回退 music_mood' : ',回退默认曲'}`)
+    if (profile.music_mood) return null
+  }
+  const fallback = ENV.FACTORY_BGM_PATH || join(brandKit, 'assets/music_bright.wav')
+  return existsSync(fallback) ? fallback : null
+}
+
 function assemble(wo, localPaths, copy, tmp) {
   const brief = wo.brief
   const out = join(tmp, 'final.mp4')
-  // BGM:默认 brandkit 自带 music_bright.wav,可 env 覆盖(FACTORY_BGM_PATH)。
-  // make_promo 只在 cfg.music 存在时才铺床(ducked -14dB),无此字段 = 无背景乐。
-  const bgm = ENV.FACTORY_BGM_PATH || join(BRAND_KIT, 'assets/music_bright.wav')
+  const brandKit = brandkitFor(wo.client_id) // B3:brandkit 按客户,不再硬编 CTS
+  const profile = creativeProfile(brandKit)
+  const bgm = resolveBgm(profile, brandKit)
   const cfg = {
     output: out,
-    brand_kit: BRAND_KIT,
-    ...(existsSync(bgm) ? { music: bgm } : {}),
+    brand_kit: brandKit,
+    // 音乐:显式曲优先;无显式曲但 profile 给了 mood → 交引擎按库自动选。
+    ...(bgm ? { music: bgm } : profile.music_mood ? { music_mood: profile.music_mood } : {}),
+    // 质量参数(reel 感):仅 profile 显式声明才下发,不给无 profile 客户偷改。
+    ...(profile.look ? { look: profile.look } : {}),
+    ...(profile.caption_mode != null ? { caption_mode: profile.caption_mode } : {}),
+    ...(profile.xfade != null ? { xfade: profile.xfade } : {}),
+    // endcard_panel:false = logo 直接放深色渐变(白字 logo 用,如 Oztop),不套白卡片(否则白字消失)。
+    ...(profile.endcard_panel != null ? { endcard_panel: profile.endcard_panel } : {}),
     segments: brief.segments.map((seg, i) => ({
       src: localPaths[i],
       ss: 0,

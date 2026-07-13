@@ -64,6 +64,8 @@ export interface MasterBriefSlice {
 export interface GoalSlice {
   id: string
   title: string | null
+  /** 归因桩(B0):工单产出预期服务的北极星指标,进 D 段 flywheel 归因用 */
+  primary_metric_key: string | null
 }
 
 export interface WinnerSlice {
@@ -169,6 +171,12 @@ export interface WorkOrderBrief {
   notes: string
   /** A2:后端生成的广告文案(品牌接地)。worker 读它装配,不再自己写硬编 CTS 的文案。 */
   copy?: AdCopy
+  /** B0 归因桩:这条产出预期服务的 Goal + 北极星指标。诸葛亮红线——每条片天生挂对 Goal
+   *  不成孤岛,进 D 段 flywheel_actions 带 goal_id/expected_metric 直接归因。
+   *  ⚠️ 权威源约定(诸葛亮 B0 复审):goal_id 的权威源是 content_work_orders 顶层列(一直有),
+   *  这里的 goal_id 只是同址镜像;expected_metric 才是本桩的真正新增价值(锁死当时预期指标,
+   *  Goal 的 metric 以后可能变)。D 段读 goal 一律读顶层列,brief.attribution 只当 metric 快照。 */
+  attribution?: { goal_id: string; expected_metric: string | null }
 }
 
 export interface WorkOrderDraft {

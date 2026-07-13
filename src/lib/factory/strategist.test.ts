@@ -1,7 +1,7 @@
 // P21.J M1 — 策略决策核护栏测试(对照 spec §5.2 护栏总表)
 import { describe, expect, it } from 'vitest'
-import { decideSignal, maxNewClipsFor, normalizeAngle } from './strategist'
-import type { DemandSignal, GateContext } from './types'
+import { decideSignal, maxNewClipsFor, normalizeAngle, pickFactoryGoal } from './strategist'
+import type { DemandSignal, GateContext, GoalSlice } from './types'
 
 function makeSignal(over: Partial<DemandSignal> = {}): DemandSignal {
   return {
@@ -32,7 +32,7 @@ function makeCtx(over: Partial<GateContext> = {}): GateContext {
       keyword_seeds: ['china tour from auckland'],
       excluded_topics: ['inbound tourism'],
     },
-    goal: { id: 'goal-1', title: 'Leads growth' },
+    goal: { id: 'goal-1', title: 'Leads growth', primary_metric_key: 'leads_count' },
     brandRedlines: ['Auckland since 1928'],
     recentAngles: [],
     blocklist: [],
@@ -248,6 +248,26 @@ describe('骨架 + 工单组装', () => {
     expect(wo.brief.clip_generation_plan).toHaveLength(1) // 只缺 cta 段
   })
 
+  it('素材单一根治:同 scene_tag 多行只出镜一次,重复场景落生成计划(去重按内容不止 id)', () => {
+    // 真实 bug 现场:Oztop bath1_factory 有 2 行(同源不同 id),旧代码只按 id 去重 → hook+middle 都选 bath = 成片单一。
+    const d = decideSignal(
+      makeCtx({
+        clipStock: [
+          { id: 'bath-a', scene_tag: 'bath1_factory', motion_type: null, track: 'a_real', usage_count: 0, last_used_at: null },
+          { id: 'bath-b', scene_tag: 'bath1_factory', motion_type: null, track: 'a_real', usage_count: 0, last_used_at: null },
+          { id: 'water', scene_tag: 'broll_water_tile', motion_type: null, track: 'a_real', usage_count: 0, last_used_at: null },
+        ],
+      }),
+    )
+    const wo = (d as { workOrder: { clip_links: Array<{ clip_id: string }>; brief: { clip_generation_plan: unknown[] } } }).workOrder
+    // 只有 2 个 distinct 场景 → 只挂 2 条,第 3 段落生成计划(不重复同一 bath 场景)
+    expect(wo.clip_links).toHaveLength(2)
+    expect(wo.brief.clip_generation_plan).toHaveLength(1)
+    const sceneOf: Record<string, string> = { 'bath-a': 'bath1_factory', 'bath-b': 'bath1_factory', water: 'broll_water_tile' }
+    const usedScenes = new Set(wo.clip_links.map((l) => sceneOf[l.clip_id]))
+    expect(usedScenes.size).toBe(2) // 两条挂载 clip 必须来自不同场景
+  })
+
   it('A/B 轨治理:B 轨地标 clip 默认排除;客户显式接受风险(CTS)才放行(护栏 6/附录 A)', () => {
     const bClip = { id: 'clip-b', scene_tag: 'great_wall', motion_type: null, track: 'b_generated' as const, usage_count: 0, last_used_at: null }
     const denied = decideSignal(makeCtx({ clipStock: [bClip], allowBTrackLandmarkAds: false }))
@@ -261,6 +281,28 @@ describe('骨架 + 工单组装', () => {
     const moodClip = { id: 'clip-m', scene_tag: 'sunset_mood', motion_type: null, track: 'b_generated' as const, usage_count: 0, last_used_at: null }
     const d = decideSignal(makeCtx({ clipStock: [moodClip], allowBTrackLandmarkAds: false }))
     expect((d as { workOrder: { clip_links: unknown[] } }).workOrder.clip_links).toHaveLength(1)
+  })
+})
+
+describe('pickFactoryGoal — B0 Goal 圈定(诸葛亮红线:禁盲选最新)', () => {
+  const goals: GoalSlice[] = [
+    { id: 'g-newest', title: 'Leads', primary_metric_key: 'leads_count' },       // [0] 最新
+    { id: 'g-brand', title: '品牌搜索', primary_metric_key: 'brand_search_volume' },
+  ]
+  it('config 命中 active goal → 用圈定的(不是最新)', () => {
+    expect(pickFactoryGoal('g-brand', goals)?.id).toBe('g-brand')
+  })
+  it('config 指向的 goal 不在 active 列表(归档/换客户) → 退回最新', () => {
+    expect(pickFactoryGoal('g-archived', goals)?.id).toBe('g-newest')
+  })
+  it('configGoalId 非 string(null/数字/对象) → 退回最新', () => {
+    expect(pickFactoryGoal(null, goals)?.id).toBe('g-newest')
+    expect(pickFactoryGoal(123, goals)?.id).toBe('g-newest')
+    expect(pickFactoryGoal({}, goals)?.id).toBe('g-newest')
+  })
+  it('无任何 active goal → null(gate1 会因此拒单)', () => {
+    expect(pickFactoryGoal('g-brand', [])).toBeNull()
+    expect(pickFactoryGoal(null, [])).toBeNull()
   })
 })
 
