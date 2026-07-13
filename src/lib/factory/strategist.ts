@@ -365,6 +365,9 @@ export function buildRationale(ctx: GateContext, angle: string): string | null {
  * asset_gap 独立分支(魏征 M1-F11):spec §3.2「只出 clip 生成工单,不出成片」——
  * 不挂既有 clip、不烧 brief 角度进去重窗、scene_tag 取自 evidence。
  */
+// 红线前提锁(魏征 B9):asset_gap 豁免「价格广告真料」红线,**依赖它只出 clip_generation 补库存、
+// 绝不直出成片**(spec §3.2)。产出的 AI 片进 clipStock=b_generated,未来价格单的 selectClips 会过滤掉,
+// 真价永不盖到它们头上。**若日后 asset_gap 被改成能直出成片,requireRealFootage 红线必须同步下沉到这里。**
 function decideAssetGap(ctx: GateContext): Decision {
   const brief = ctx.brief!
   const goal = ctx.goal!
