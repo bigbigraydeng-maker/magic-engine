@@ -126,7 +126,7 @@ export interface GateContext {
 
 export interface AngleSource {
   /** 'inventory_gap' 仅 asset_gap 类工单用:补库存不是创意角度,溯源指向 evidence.scene_tag(魏征 M1-F11) */
-  type: 'content_pillar' | 'keyword_seed' | 'core_proposition' | 'winner_structure' | 'inventory_gap'
+  type: 'content_pillar' | 'core_proposition' | 'winner_structure' | 'inventory_gap'
   ref_id: string
   ref_text: string
 }
