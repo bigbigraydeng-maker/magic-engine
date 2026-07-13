@@ -329,6 +329,12 @@ FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Mar
 - [ ] **P35.8** 定价页 / 官网 Digital Foundation 套餐文案（板桥必审：C 端文案）。**退款保证措辞红线（PM 拍板 2026-07-06）**：保证挂「交付」不挂「效果」——「7 天内四项升级全部交付并附验证截图，做不到全额退款」；绝不承诺排名/客流/生意变好（SEO 见效 8-12 周，写效果 = 给退款开后门）；交付验证截图（前后对比）同时是 case study 素材；「提升」的证据由 $199 Keep-Alive 月报在第 2-3 个月兑现（续费 + 升 FDE 钩子）
 - [ ] **P35.9** AI 语音外呼（PM 指定方向 2026-07-06）：ElevenLabs Conversational AI / Bland.ai / Vapi 选型 PoC。用途分级：**warm 跟进优先**（邮件已回复/未接来电回拨），cold call 需先查 AU Do Not Call Register 合规（企业号码也可注册 DNC）。AU/NZ 口音语音 + 通话结果回写 outbound_prospects
 - [ ] **P35.10** 外呼专用域名（PM 已拍板不用主域）：候选近似域名查询 → PM 选定注册 → SPF/DKIM/DMARC 配置 → 2-3 周预热计划。主域只收回复，保 magic link 通道信誉
+- [x] **P35.11a** 发送端假邮箱闸 + AI 阶段邮箱闸（2026-07-13，PR #572 + #578）：**治标** —— `tracking-detector.EMAIL_JUNK` 扩容（Wix 默认 mysite/wixsite + 营销服务发件域 notifyboost/klaviyo/mailchimp/sendgrid/mailgun/sparkpost）+ `isJunkContactEmail()` 发送端 422 拦截；`analyzeBatch`/`draftBatch`/`countDraftable`/新 `countSendableQualified` 全部加 `email IS NOT NULL` 闸，AI 不再烧在发不出的商家上、审核队列只留可发卡片。存量 9 个假邮箱 email 列已清。
+- [ ] **P35.11 邮箱深挖（治本，PM 拍板 2026-07-13）⭐**：**「假邮箱」≠「没邮箱」** —— 诊断 9 个被判无邮箱的商家（Maddren Homes / Clinic 1 / ETF Electrical / Roofing Excellence / Space Air / The Cosmetic Store / Factory Carpets / Voltsy / Moore Quality），**全部有真实官网 + 电话，4 家还有在线询盘表单**。根因 = 抓取器只读首页 HTML、抓到主题占位符（`user@domain.com`/Wix `mysite.com`）就当邮箱、漏了真邮箱。三条深挖路径（PM 全部同意）：
+  - **① 爬 /contact + /about 页**：不只首页，多页 mailto/正文邮箱抽取（最省事，能捞回一大批）。
+  - **② GBP + Facebook 主页拉邮箱**：官方 API（GBP + Meta），覆盖官网没明写邮箱的。
+  - **③ 有表单没邮箱的自动填表投递询盘（PM 批准最激进一条）**：F12 抓表单真实 POST/GraphQL → `javascript_tool`/Chrome DevTools 复现提交，把询盘打进对方 CRM。符合「卡点必自动化、无人工兜底」，且应沉淀为 ME 可复用的 media/lead 模块能力（跨客户复用）。
+  - 顺带小 bug：`facebook_url` 检测把命名空间声明 `xmlns:fb="http://www.facebook.com/2008/fbml"` 误抓成 `facebook.com/2008/`（多家命中），深挖时一并修。
 
 **成本模型**：1000 家/月 ≈ 发现 $10 + 规则审计 $25 + AI 只跑 qualified（~15%）$20 ≈ **$55/月**，合格线索 AI 成本 ~$0.13（Brief 目标 <$0.10 贴线）。
 
