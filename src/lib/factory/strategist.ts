@@ -200,9 +200,10 @@ export function pickAngle(ctx: GateContext, winner: WinnerSlice | null): AnglePi
     const refId = typeof p === 'object' && p?.id ? `content_pillars.${p.id}` : `content_pillars[${i}]`
     candidates.push({ angle: name, source: { type: 'content_pillar', ref_id: refId, ref_text: name } })
   })
-  ;(brief.keyword_seeds ?? []).forEach((k, i) => {
-    if (k) candidates.push({ angle: k, source: { type: 'keyword_seed', ref_id: `keyword_seeds[${i}]`, ref_text: k } })
-  })
+  // 不用 keyword_seeds 当广告角度(修复作品根因):keyword_seeds 是 SEO 目标词,常含**竞品品牌名**
+  // (Oztop 的 "mapei brisbane"/"karndean brisbane")。拿竞品名当自家广告角度 = 事故(rationale 写
+  // 「按你品牌主线 mapei brisbane」)+ 潜在商标问题。广告角度只来自 content_pillars(策划的创意主题)
+  // + core_proposition。keyword_seeds 留给 SEO 内容,不进广告创意角度。
   if (brief.core_proposition) {
     candidates.push({
       angle: brief.core_proposition,
@@ -257,12 +258,16 @@ function sceneAngleOverlap(sceneTag: string, angle: string): number {
 }
 
 export function selectClips(ctx: GateContext, angle: string): ClipSelection {
-  // 匹配角度优先(token 重叠 desc),同分冷素材优先(usage asc, last_used asc)防审美疲劳
+  // 排序:①角度 token 重叠(货对题)②真实产品片优先 ③冷素材优先(防审美疲劳)
   const pool = ctx.clipStock
     .filter((c) => clipAllowed(ctx, c))
     .sort((a, b) => {
       const ov = sceneAngleOverlap(b.scene_tag, angle) - sceneAngleOverlap(a.scene_tag, angle)
       if (ov !== 0) return ov
+      // 真实产品片(track='a_real',客户真拍)优先于 AI/stock(b_generated):治「AI 冒充真产品打真价+漏水印」
+      // 「CTA 配狗」。**按来源(track)判真假,不靠文件名**(隔壁契约 + [[real-vs-generated-clip-provenance]])。
+      const real = (a.track === 'a_real' ? 0 : 1) - (b.track === 'a_real' ? 0 : 1)
+      if (real !== 0) return real
       if (a.usage_count !== b.usage_count) return a.usage_count - b.usage_count
       const at = a.last_used_at ? new Date(a.last_used_at).getTime() : 0
       const bt = b.last_used_at ? new Date(b.last_used_at).getTime() : 0

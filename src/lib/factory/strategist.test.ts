@@ -422,3 +422,29 @@ describe('实库形状兼容', () => {
     expect((d as { reason: string }).reason).toBe('angle_not_traceable')
   })
 })
+
+describe('修复作品根因 · 选片按来源 + 角度不用竞品词', () => {
+  it('选片:真实产品片(track=a_real)优先于 AI(b_generated),按来源判非文件名', () => {
+    // AI 片 scene_tag 看着更"产品"(oz_kitchen),真拍片中性名——只按 track 判。变异:去掉 track 排序 → 原序 'ai' 先 → fail
+    const d = decideSignal(
+      makeCtx({
+        clipStock: [
+          { id: 'ai', scene_tag: 'oz_kitchen_1', motion_type: null, track: 'b_generated', usage_count: 0, last_used_at: null },
+          { id: 'real', scene_tag: 'clip_zzz', motion_type: null, track: 'a_real', usage_count: 0, last_used_at: null },
+        ],
+      }),
+    )
+    const wo = (d as { workOrder: { clip_links: Array<{ clip_id: string }> } }).workOrder
+    expect(wo.clip_links[0].clip_id).toBe('real') // a_real 先挂,AI 沉后
+  })
+
+  it('pickAngle 不拿 keyword_seeds 当广告角度(竞品名不当自家角度)', () => {
+    // brief 只有 keyword_seeds(含竞品名 mapei/karndean)→ 无可溯源广告角度。变异:仍用 keyword_seeds → accepted → fail
+    const d = decideSignal(
+      makeCtx({
+        brief: { id: 'b', core_proposition: null, content_pillars: [], keyword_seeds: ['mapei brisbane', 'karndean brisbane'], excluded_topics: [] },
+      }),
+    )
+    expect((d as { reason: string }).reason).toBe('angle_not_traceable')
+  })
+})
