@@ -257,10 +257,16 @@ function sceneAngleOverlap(sceneTag: string, angle: string): number {
   return sceneTokens.filter((t) => angleTokens.has(t)).length
 }
 
-export function selectClips(ctx: GateContext, angle: string): ClipSelection {
+/**
+ * @param requireRealFootage 价格广告红线(verifiedOffer 客户):真价会盖在底料上,底料只能真拍(a_real)。
+ *   为 true 时:①池子只留 a_real(排除 b_generated)②真料不够的镜**跳过、不生成 AI 补位**(AI 绝不背书真价)。
+ *   全真料不足 5 镜 → 少几镜也全真(endcard 仍给 CTA);一条真料都没有 → segments 空,调用方拒单。
+ */
+export function selectClips(ctx: GateContext, angle: string, requireRealFootage: boolean): ClipSelection {
   // 排序:①角度 token 重叠(货对题)②真实产品片优先 ③冷素材优先(防审美疲劳)
   const pool = ctx.clipStock
     .filter((c) => clipAllowed(ctx, c))
+    .filter((c) => !requireRealFootage || c.track === 'a_real') // 价格广告红线:AI/生成绝不背书真价
     .sort((a, b) => {
       const ov = sceneAngleOverlap(b.scene_tag, angle) - sceneAngleOverlap(a.scene_tag, angle)
       if (ov !== 0) return ov
@@ -296,6 +302,9 @@ export function selectClips(ctx: GateContext, angle: string): ClipSelection {
         clip_ids: [clip.id],
       })
       clipLinks.push({ clip_id: clip.id, segment_role: role, position: i })
+    } else if (requireRealFootage) {
+      // 价格广告:真料不够不生成 AI 补位(红线)。这一镜跳过——少几镜也全真,不掺 AI。
+      return
     } else {
       // 库存不足 → 同工单附 clip_generation_plan(idempotency_key 防重烧,魏征 F10③)
       segments.push({
@@ -430,7 +439,12 @@ export function decideSignal(ctx: GateContext): Decision {
   }
 
   const budgetCap = FACTORY_ORDER_BUDGET_CAP_USD
-  const { segments, clipLinks, generationPlan } = selectClips(ctx, anglePick.angle)
+  // 价格广告红线:有 verifiedOffer(真价)→ 底料强制真拍(a_real),AI 绝不背书真价(魏征 B8)
+  const requireRealFootage = ctx.verifiedOffer != null
+  const { segments, clipLinks, generationPlan } = selectClips(ctx, anglePick.angle, requireRealFootage)
+  if (requireRealFootage && segments.length === 0) {
+    return { outcome: 'rejected', reason: 'price_ad_needs_real_footage', detail: 'verified_offer set but no a_real footage available' }
+  }
 
   const orderType =
     winner && anglePick.source.type === 'winner_structure' ? 'variant_from_winner' : 'fresh_angle'

@@ -232,3 +232,5 @@ export type RejectReason =
   | 'daily_cost_cap'
   | 'rationale_template_failed'
   | 'unsupported_signal'
+  /** 价格广告红线:verifiedOffer(真价)客户无真拍(a_real)素材,不许用 AI 底料背书真价 */
+  | 'price_ad_needs_real_footage'
