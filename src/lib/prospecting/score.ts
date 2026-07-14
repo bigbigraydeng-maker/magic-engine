@@ -40,7 +40,15 @@ export interface ProspectScoreResult {
   breakdown: ScoreSignal[]
 }
 
-export const QUALIFICATION_THRESHOLD = 55
+// Lowered 55 → 45 (P35.12 supply-unblock, PM 2026-07-14): at 55 a business
+// needed near-total digital dysfunction to qualify, but "has a real email /
+// contact form / HTTPS" (i.e. reachable enough to email) systematically costs
+// the three biggest weakness signals (no_contact_form 14 + no_enquiry_path 8 +
+// no_https 10 = 32), capping healthy-but-under-marketed businesses at ~40–54.
+// That anti-selected exactly the contactable prospects the $19.90/$990 offer is
+// for. 45 admits the "good business, just not marketing itself" band; the email
+// gate on analyze/draft still keeps AI spend to reachable prospects.
+export const QUALIFICATION_THRESHOLD = 45
 
 // A no-website business can't be site-audited, but a real, contactable local
 // business is a prime target for the one-time $99 one-page-site deal. The bar
