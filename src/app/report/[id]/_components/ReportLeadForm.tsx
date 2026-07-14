@@ -67,7 +67,8 @@ export default function ReportLeadForm({
       <div className="rounded-2xl p-5 text-center" style={{ background: 'rgba(92,138,74,0.22)' }}>
         <p className="text-base font-semibold" style={{ color: '#A7D18F' }}>Thanks — we’ve got it ✓</p>
         <p className="mt-1.5 text-sm" style={{ color: 'rgba(255,255,255,0.78)' }}>
-          One of our New Zealand team will be in touch within one business day. Talk soon.
+          We’ll email your secure $19.90 link within one business day, and we’ll be here if you have any
+          questions. Talk soon.
         </p>
       </div>
     )
@@ -97,10 +98,10 @@ export default function ReportLeadForm({
         className="h-12 rounded-xl text-sm font-semibold transition-all hover:-translate-y-px disabled:opacity-60"
         style={{ background: GOLD_GRAD, color: CHARCOAL }}
       >
-        {status === 'submitting' ? 'Sending…' : 'Yes — show me the 90-day plan'}
+        {status === 'submitting' ? 'Sending…' : 'Yes — let’s start for $19.90'}
       </button>
       <p className="text-center text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>
-        No pressure, no obligation. We’ll walk you through everything on a quick call or in person.
+        No pressure, no obligation — a one-off $19.90 with no lock-in.
       </p>
     </form>
   )

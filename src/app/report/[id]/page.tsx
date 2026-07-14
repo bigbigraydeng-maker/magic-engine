@@ -332,10 +332,10 @@ export default async function ReportPage({ params }: { params: { id: string } })
             <div className="absolute inset-0 flex flex-col items-center justify-end pb-6"
                  style={{ background: `linear-gradient(to bottom, ${IVORY}00 0%, ${IVORY} 62%)` }}>
               <p className="mb-3 px-6 text-center text-sm" style={{ color: 'rgba(26,26,26,0.6)' }}>
-                Your step-by-step 90-day plan is ready — we&apos;ll walk you through it on a free call.
+                Your step-by-step 90-day plan is ready — start with a $19.90 onboarding and see how we work.
               </p>
               <a href="#start" className="rounded-xl px-6 py-3 text-sm font-semibold text-white" style={{ background: GOLD_GRAD }}>
-                Book a 15-minute chat →
+                Start for $19.90 →
               </a>
             </div>
           </div>
@@ -373,30 +373,66 @@ export default async function ReportPage({ params }: { params: { id: string } })
           </section>
         )}
 
-        {/* Offer — NZ-wide founding deal (Auckland in-person, rest of NZ remote) */}
+        {/* Offer — two-step: $19.90 onboarding first, $990 full build second */}
         <section id="start" className="mt-6 scroll-mt-6 rounded-[24px] p-6 text-white" style={{ background: CHARCOAL }}>
           <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider"
                 style={{ background: 'rgba(235,203,139,0.16)', color: GOLD }}>
-            ★ Founding offer · first 100 New Zealand businesses only
+            ★ Start here · first 100 New Zealand businesses only
           </span>
-          <h2 className="mt-3 text-lg font-semibold" style={{ fontFamily: DISPLAY }}>We fix all of this in 90 days</h2>
+          <h2 className="mt-3 text-lg font-semibold" style={{ fontFamily: DISPLAY }}>
+            Let&apos;s fix the first wins for <span style={{ color: GOLD }}>$19.90</span>
+          </h2>
           <p className="mt-2 text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.72)' }}>
-            Get found, plug the leaks, and make it effortless for customers to reach you — search, social, ads
-            and follow-up, all done for you by AI and our New Zealand team.
+            No big commitment. For less than the price of lunch, we&apos;ll actually do the first round of fixes
+            from this report — so you can see exactly how we work before anything bigger.
           </p>
 
-          {/* Price anchor */}
-          <div className="mt-4 rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.06)' }}>
-            <p className="text-xs leading-relaxed" style={{ color: 'rgba(255,255,255,0.6)' }}>
-              Agencies charge <span className="line-through">$1,500–$3,000 a month</span> for just one piece of this.
-            </p>
-            <p className="mt-1 text-sm">
-              <span className="text-2xl font-bold" style={{ fontFamily: DISPLAY, color: GOLD }}>$990 NZD</span>
-              <span style={{ color: 'rgba(255,255,255,0.6)' }}> — the full 90-day build, done for you.</span>
+          {/* Step 1 — $19.90 onboarding: what you get */}
+          <div className="mt-4 rounded-2xl p-5" style={{ background: 'rgba(255,255,255,0.06)', border: `1px solid ${GOLD}` }}>
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: GOLD }}>Step 1 · Onboarding</p>
+              <p className="shrink-0">
+                <span className="text-2xl font-bold" style={{ fontFamily: DISPLAY, color: GOLD }}>$19.90</span>
+                <span className="text-xs" style={{ color: 'rgba(255,255,255,0.55)' }}> one-off · no lock-in</span>
+              </p>
+            </div>
+            <ul className="mt-3 space-y-2 text-sm" style={{ color: 'rgba(255,255,255,0.82)' }}>
+              {[
+                'Your Google profile cleaned up, with your first posts drafted and ready to publish',
+                'A first-pass SEO tune-up for your website — page titles, speed and security fixes',
+                'Tracking set up properly — Google Analytics + your online enquiry form wired up, so every lead is counted',
+                'A keyword report — what your customers actually search for',
+                'A check on whether you turn up when people ask ChatGPT or AI for a business like yours',
+                'A done-for-you review-request message + link, ready to send to your past customers',
+              ].map(t => (
+                <li key={t} className="flex items-start gap-2">
+                  <span style={{ color: '#A7D18F' }}>✓</span><span>{t}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 border-t pt-3 text-xs leading-relaxed" style={{ borderColor: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.6)' }}>
+              We&apos;ll connect your Google and Facebook so everything works together — you stay in control and
+              can disconnect any time.
             </p>
           </div>
 
-          {/* Guarantee */}
+          {/* Step 2 — $990 full build (the upsell, described softly) */}
+          <div className="mt-3 rounded-2xl p-5" style={{ background: 'rgba(255,255,255,0.04)' }}>
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.6)' }}>Step 2 · When you&apos;re ready</p>
+              <p className="shrink-0">
+                <span className="text-lg font-bold" style={{ fontFamily: DISPLAY, color: 'rgba(255,255,255,0.85)' }}>$990</span>
+                <span className="text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}> full 90-day build</span>
+              </p>
+            </div>
+            <p className="mt-2 text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.6)' }}>
+              Like what you see? The full 90-day build does the whole job for you — search, social, ads and
+              follow-up, all done by our New Zealand team. Agencies charge <span className="line-through">$1,500–$3,000 a month</span> for
+              one slice of it. No pressure — only if step 1 wins you over.
+            </p>
+          </div>
+
+          {/* Guarantee — covers both steps */}
           <div className="mt-3 flex items-start gap-2.5 rounded-2xl p-4" style={{ background: 'rgba(92,138,74,0.15)' }}>
             <span className="text-lg">🛡️</span>
             <p className="text-sm leading-relaxed">
@@ -406,20 +442,11 @@ export default async function ReportPage({ params }: { params: { id: string } })
             </p>
           </div>
 
-          {/* Why this price — founding partners become case studies */}
-          <div className="mt-3 flex items-start gap-2.5 rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.06)' }}>
-            <span className="text-lg">🤝</span>
-            <p className="text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.75)' }}>
-              <span className="font-bold text-white">Why this price?</span> You&apos;d be one of our first 100
-              New Zealand partners. We do the work — mostly online, wherever you are in NZ, and in person if
-              you&apos;re in Auckland. With your OK your before-and-after becomes one of our success stories. That&apos;s the trade.
-            </p>
-          </div>
-
           <div className="mt-5">
             <ReportLeadForm prospectId={params.id} prefillName={prefillName} prefillEmail={prefillEmail} />
-            <p className="mt-3 text-center text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>
-              Prefer email? Reach us any time at{' '}
+            <p className="mt-3 text-center text-xs leading-relaxed" style={{ color: 'rgba(255,255,255,0.45)' }}>
+              Because we set each onboarding up by hand for your business, we&apos;ll email your secure $19.90
+              link within one business day — not a generic checkout. Prefer email? Reach us any time at{' '}
               <a href={mailto} className="underline" style={{ color: 'rgba(255,255,255,0.7)' }}>
                 {process.env.OUTREACH_REPLY_EMAIL ?? 'hello@magicengine.cloud'}
               </a>
