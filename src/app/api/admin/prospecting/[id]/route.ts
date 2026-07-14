@@ -188,11 +188,14 @@ async function handleSend(id: string): Promise<NextResponse> {
 async function handleGenerateKeywordReport(id: string): Promise<NextResponse> {
   const { data: row, error: readError } = await supabaseAdmin
     .from('outbound_prospects')
-    .select('domain, country, ai_report')
+    .select('status, domain, country, ai_report, updated_at')
     .eq('id', id)
-    .maybeSingle<{ domain: string | null; country: string; ai_report: ProspectAnalysis | null }>()
+    .maybeSingle<{ status: string; domain: string | null; country: string; ai_report: ProspectAnalysis | null; updated_at: string }>()
   if (readError) return NextResponse.json({ error: readError.message }, { status: 500 })
   if (!row) return NextResponse.json({ error: 'not found' }, { status: 404 })
+  // Delivery artifact — gate on the paid onboarding stage so a stray script can't
+  // burn DataForSEO on cold prospects (defence beyond the onboarding-only button).
+  if (row.status !== 'onboarding') return NextResponse.json({ error: '只有 onboarding（付费交付）阶段才生成关键词报告' }, { status: 409 })
   if (!row.ai_report) return NextResponse.json({ error: '该商家还没有 AI 分析报告，先跑分析' }, { status: 409 })
 
   const keyword_report = await buildKeywordReport(row.domain, row.country)
@@ -200,12 +203,19 @@ async function handleGenerateKeywordReport(id: string): Promise<NextResponse> {
     return NextResponse.json({ ok: true, count: 0, note: '没拿到关键词数据（网站太新/无排名，或数据源暂不可用）' })
   }
 
+  // Optimistic lock on updated_at (same as edit_email): the DataForSEO round-trip
+  // is seconds long, so guard against clobbering an ai_report rewritten meanwhile.
   const merged: ProspectAnalysis = { ...row.ai_report, keyword_report }
-  const { error } = await supabaseAdmin
+  const { data: written, error } = await supabaseAdmin
     .from('outbound_prospects')
     .update({ ai_report: merged, updated_at: new Date().toISOString() })
     .eq('id', id)
+    .eq('updated_at', row.updated_at)
+    .select('id')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (!written || written.length === 0) {
+    return NextResponse.json({ error: '保存冲突：该商家资料刚被其他操作修改，请刷新后重试' }, { status: 409 })
+  }
   return NextResponse.json({ ok: true, count: keyword_report.length })
 }
 
