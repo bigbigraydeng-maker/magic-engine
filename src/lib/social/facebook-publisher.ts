@@ -25,8 +25,9 @@ export interface FacebookPublishResponse {
 
 /**
  * Get Facebook page access token from database
+ * (exported for factory publish-worker FacebookReelAdapter reuse)
  */
-async function getFacebookPageToken(sourceId: string): Promise<{
+export async function getFacebookPageToken(sourceId: string): Promise<{
   accessToken: string;
   pageId: string;
 } | null> {

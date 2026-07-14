@@ -175,6 +175,48 @@ export interface VerifiedOffer {
   offer_expiry?: string
 }
 
+// ── P0.1 发布(publish-worker)────────────────────────────────────────────────
+
+/** 发布目标(clients.factory_config.publish_target 存,FDE 配)。缺 → 不发标失败,绝不猜/误发别客户页。 */
+export interface PublishTarget {
+  platform: 'facebook' | 'publer'
+  /** facebook:页 id(如 Oztop 748077498...) */
+  page_id?: string
+  /** facebook:页 token 来源记录 id(facebook-publisher getFacebookPageToken 用) */
+  fb_source_id?: string
+  /** publer:CTS 账号 id */
+  publer_account_id?: string
+  publer_provider?: string
+}
+
+/** 发布回执(存 published_ref):幂等对账锚(防"发出去没记上"重发)+ P1 measure 数据源。一次存全。 */
+export interface PublishedRef {
+  platform: 'facebook' | 'publer'
+  page_id?: string
+  post_id: string
+  video_id?: string
+  published_at: string
+  permalink?: string
+}
+
+/**
+ * 发布适配器契约(子牙 B8):publish-worker 主体只认 adapter + 状态机 + 三落库,平台差异全塞进 adapter。
+ * 加 CTS = 多写个 PublerAdapter,worker 一行不改。
+ */
+export interface PublishAdapter {
+  readonly platform: 'facebook' | 'publer'
+  /** 发布一条成片,返回回执。draft=true 只发草稿/不公开(首测验格式)。 */
+  publish(args: {
+    videoUrl: string
+    caption: string
+    target: PublishTarget
+    idempotencyTag: string
+    draft: boolean
+  }): Promise<PublishedRef>
+  /** 幂等对账(魏征 B9 防双发):查平台侧该 wo(靠 idempotencyTag)是否已发。已发→回执,未发→null。 */
+  findExisting(args: { target: PublishTarget; idempotencyTag: string }): Promise<PublishedRef | null>
+}
+
 export interface WorkOrderBrief {
   segments: Array<{
     role: 'hook' | 'middle' | 'cta'
