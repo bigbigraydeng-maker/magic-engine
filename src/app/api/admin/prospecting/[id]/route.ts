@@ -56,6 +56,7 @@ type PatchBody =
   | { action: 'send' }
   | { action: 'mark_contacted' }
   | { action: 'start_onboarding' }
+  | { action: 'mark_converted' }
   | { action: 'archive' }
   | { action: 'opt_out' }
 
@@ -223,8 +224,15 @@ export async function PATCH(
       // which we don't auto-track).
       return transition(params.id, ['replied', 'contacted'],
         { status: 'onboarding' }, '只有已联系/已回复的商家才能进入 onboarding')
+    case 'mark_converted':
+      // Forward exit from onboarding: the $19.90 client bought the $990 build.
+      // Without this the funnel has no endpoint and onboarding rows pile up.
+      return transition(params.id, ['onboarding'],
+        { status: 'converted' }, '只有 onboarding 阶段才能标记成交')
     case 'archive':
-      return transition(params.id, ACTIVE_STATUSES, { status: 'archived' }, '当前状态不可归档')
+      // onboarding included so a fell-through / mis-clicked / refunded $19.90
+      // row has an exit — otherwise it's a dead end needing manual SQL.
+      return transition(params.id, [...ACTIVE_STATUSES, 'onboarding'], { status: 'archived' }, '当前状态不可归档')
     case 'opt_out':
       // Footer promise: "you won't hear from us again". Terminal from any
       // pre-conversion state — including contacted/replied, where the

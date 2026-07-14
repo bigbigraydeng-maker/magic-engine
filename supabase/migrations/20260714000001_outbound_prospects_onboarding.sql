@@ -7,7 +7,7 @@
 -- client. In the pilot, an FDE moves the row here by hand after confirming the
 -- manually-sent payment link was paid (sending is never automated).
 --
--- Pipeline order: … replied → onboarding → converted (won $990, converted_client_id set).
+-- Pipeline order: … replied → onboarding → converted (won the $990 build).
 --
 -- ⚠️ PM applies this migration (workers never self-apply). Ships in the same PR
 -- as the code that writes the status, but merge is two-step: apply first, then

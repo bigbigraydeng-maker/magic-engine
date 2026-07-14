@@ -47,6 +47,10 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
   opted_out:      { label: '🚫 拒收',  cls: 'bg-[#C2453A]/10 text-[#C2453A]/70' },
 }
 
+// Statuses whose row expands to a detail drawer (has an ai_report worth showing).
+// Single source so the click handler and the row's hover affordance never diverge.
+const EXPANDABLE_STATUSES = ['analyzed', 'outreach_ready', 'contacted', 'replied', 'onboarding', 'converted']
+
 const FILTERS = ['all', 'discovered', 'qualified', 'analyzed', 'audited'] as const
 
 const SEGMENT_LABELS: Record<string, string> = {
@@ -174,7 +178,7 @@ export default function ProspectingPage() {
       setExpandedId(null); setDetail(null); detailRequestRef.current = null
       return
     }
-    if (!['analyzed', 'outreach_ready', 'contacted', 'replied', 'onboarding', 'converted'].includes(status)) return
+    if (!EXPANDABLE_STATUSES.includes(status)) return
     setExpandedId(id); setDetail(null)
     detailRequestRef.current = id
     try {
@@ -319,7 +323,7 @@ export default function ProspectingPage() {
             )}
             {rows.map(r => {
               const meta = STATUS_META[r.status] ?? { label: r.status, cls: 'bg-me-ivory text-me-charcoal/60' }
-              const expandable = ['analyzed', 'outreach_ready', 'contacted', 'replied', 'converted'].includes(r.status)
+              const expandable = EXPANDABLE_STATUSES.includes(r.status)
               return [
                 <tr key={r.id} onClick={() => void toggleDetail(r.id, r.status)}
                   className={`border-b border-me-charcoal/5 ${expandable ? 'cursor-pointer hover:bg-me-ivory/40' : ''}`}>

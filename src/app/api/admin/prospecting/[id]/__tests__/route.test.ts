@@ -152,3 +152,23 @@ describe("PATCH { action: 'start_onboarding' }", () => {
     expect(res.status).toBe(409)
   })
 })
+
+const markConverted = () =>
+  PATCH({ json: () => Promise.resolve({ action: 'mark_converted' }) } as never, { params: { id: ID } })
+
+describe("PATCH { action: 'mark_converted' }", () => {
+  it('moves onboarding → converted, guarded on onboarding only', async () => {
+    claimRows = [{ id: ID }]
+    const res = await markConverted()
+    expect(res.status).toBe(200)
+    expect(updates[0].status).toBe('converted')
+    // Forward exit is reachable ONLY from onboarding — the funnel endpoint.
+    expect(updateEqArgs[0]).toContainEqual(['status', ['onboarding']])
+  })
+
+  it('409s when the row is not in onboarding', async () => {
+    claimRows = []
+    const res = await markConverted()
+    expect(res.status).toBe(409)
+  })
+})
