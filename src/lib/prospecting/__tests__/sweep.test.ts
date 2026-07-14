@@ -83,9 +83,11 @@ describe('buildCombos', () => {
     for (const area of ['north_shore', 'west_auckland', 'south_auckland', 'east_auckland', 'central_auckland']) {
       expect(cities.has(area)).toBe(true)
     }
-    // …and the remote-served metros are in too.
-    expect(cities.has('wellington')).toBe(true)
-    expect(cities.has('christchurch')).toBe(true)
+    // …and every remote-served metro is in too (explicit so a dropped/merge-
+    // eaten city line fails here — the length check alone can't catch that).
+    for (const metro of ['wellington', 'christchurch', 'hamilton', 'tauranga', 'napier', 'hastings', 'palmerston_north', 'nelson', 'dunedin', 'rotorua']) {
+      expect(cities.has(metro)).toBe(true)
+    }
     expect(combos.length).toBe(FOCUS_INDUSTRIES.length * FOCUS_CITIES.length)
   })
 

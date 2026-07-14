@@ -76,7 +76,7 @@ export const FOCUS_INDUSTRIES = [
  */
 export const FOCUS_CITIES = [
   'north_shore', 'west_auckland', 'south_auckland', 'east_auckland', 'central_auckland',
-  'wellington', 'christchurch', 'hamilton', 'tauranga', 'napier_hastings',
+  'wellington', 'christchurch', 'hamilton', 'tauranga', 'napier', 'hastings',
   'palmerston_north', 'nelson', 'dunedin', 'rotorua',
 ] as const
 

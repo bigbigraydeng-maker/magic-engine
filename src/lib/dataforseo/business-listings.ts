@@ -103,7 +103,10 @@ export const CITY_COORDS: Record<string, { coord: string; country: 'AU' | 'NZ' }
   // for the remote-delivery offer. Auckland stays split by area (finer-grained);
   // these smaller metros are one query each.
   tauranga:        { coord: '-37.6878,176.1651', country: 'NZ' },
-  napier_hastings: { coord: '-39.4928,176.9120', country: 'NZ' },
+  // Napier & Hastings are twin cities ~18km apart — separate search seeds, not
+  // a "Napier Hastings" combined string (which is not a real place name).
+  napier:          { coord: '-39.4928,176.9120', country: 'NZ' },
+  hastings:        { coord: '-39.6395,176.8380', country: 'NZ' },
   palmerston_north:{ coord: '-40.3523,175.6082', country: 'NZ' },
   nelson:          { coord: '-41.2706,173.2840', country: 'NZ' },
   dunedin:         { coord: '-45.8788,170.5028', country: 'NZ' },

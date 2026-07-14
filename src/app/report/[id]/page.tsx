@@ -218,8 +218,8 @@ export default async function ReportPage({ params }: { params: { id: string } })
           <span className="text-base">📍</span>
           <p className="text-xs leading-relaxed" style={{ color: 'rgba(26,26,26,0.65)' }}>
             We&apos;re a <span className="font-semibold" style={{ color: CHARCOAL }}>New Zealand team</span> — real people, no offshore
-            call centre. In Auckland? <span className="font-semibold" style={{ color: CHARCOAL }}>We&apos;ll pop in and see you</span>. Anywhere
-            else in NZ? We do it all remotely.
+            call centre. We work with businesses <span className="font-semibold" style={{ color: CHARCOAL }}>right across NZ</span>, mostly online —
+            and if you&apos;re in Auckland, we&apos;ll happily pop in too.
           </p>
         </div>
 
@@ -411,8 +411,8 @@ export default async function ReportPage({ params }: { params: { id: string } })
             <span className="text-lg">🤝</span>
             <p className="text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.75)' }}>
               <span className="font-bold text-white">Why this price?</span> You&apos;d be one of our first 100
-              New Zealand partners — in person if you&apos;re in Auckland, remotely anywhere else in NZ. We do the
-              work, and with your OK your before-and-after becomes one of our success stories. That&apos;s the trade.
+              New Zealand partners. We do the work — mostly online, wherever you are in NZ, and in person if
+              you&apos;re in Auckland. With your OK your before-and-after becomes one of our success stories. That&apos;s the trade.
             </p>
           </div>
 
