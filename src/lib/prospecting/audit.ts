@@ -144,7 +144,7 @@ async function fetchHomepage(startUrl: string): Promise<FetchOutcome> {
 // free, SSRF-guarded fetches that lift the "has a real email" rate materially
 // (2026-07-10: only ~35% of prospects had a scraped email; the rest had a site
 // but we only read the homepage).
-const CONTACT_PATHS = ['/contact', '/contact-us', '/about']
+const CONTACT_PATHS = ['/contact', '/contact-us', '/contact-us.html', '/about', '/about-us', '/get-a-quote', '/enquiry', '/quote']
 
 /**
  * When the homepage exposed no email, look on a few common contact pages and
@@ -161,6 +161,22 @@ async function scrapeContactEmails(finalUrl: string): Promise<string[]> {
     if (emails.length > 0) return emails
   }
   return []
+}
+
+/**
+ * Standalone email discovery for a business site (homepage → contact pages),
+ * junk already filtered by the tracking detector. Reused by the re-scan batch
+ * (P35.11) to backfill prospects that were audited before the contact-page
+ * fallback existed, or before CONTACT_PATHS widened. Never throws → [].
+ */
+export async function discoverContactEmail(websiteUrl: string): Promise<string[]> {
+  const url = normaliseUrl(websiteUrl)
+  if (!url) return []
+  const page = await fetchHomepage(url)
+  if (!page.ok) return []
+  const homepage = detectTrackingSignals(page.html).emails
+  if (homepage.length > 0) return homepage
+  return scrapeContactEmails(page.finalUrl)
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
