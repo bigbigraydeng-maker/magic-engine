@@ -23,6 +23,7 @@ import { scrapeFacebookPage, scrapeInstagramProfile } from '@/lib/apify/social-s
 import { callClaudeChat, parseJsonResponse } from '@/lib/anthropic/client'
 import { deriveSegment, type ProspectSegment } from './segment'
 import type { ScoreSignal } from './score'
+import type { KeywordReportItem } from './keyword-report'
 
 // ─── Result types (persisted verbatim into outbound_prospects.ai_report) ─────
 
@@ -58,6 +59,9 @@ export interface ProspectAnalysis {
   geo_probe:       GeoProbeResult | null
   social_activity: SocialActivity | null
   skips:           string[]
+  /** "What your customers search" — filled on demand for onboarding clients
+   *  (P35.12), not by the base analysis. Absent on cold prospects. */
+  keyword_report?: KeywordReportItem[]
   error?:          string
 }
 

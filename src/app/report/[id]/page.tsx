@@ -108,6 +108,9 @@ export default async function ReportPage({ params }: { params: { id: string } })
   const rivals = (probe && !probe.mentioned ? probe.competitors_mentioned : []).slice(0, 3)
   const tradeLabel = INDUSTRY_LABELS[p.industry] ?? p.industry.replace(/_/g, ' ')
   const social = p.ai_report?.social_activity
+  // "What your customers search" — only present once generated for an onboarding
+  // client (P35.12); cold prospects don't carry it, so the section simply omits.
+  const keywords = p.ai_report?.keyword_report ?? []
 
   const keyFinding = report.summary_points[0] ?? ''
   // Pre-fill the lead form with what we already know (we emailed this owner):
@@ -242,6 +245,38 @@ export default async function ReportPage({ params }: { params: { id: string } })
             </div>
             <p className="mt-3 text-xs" style={{ color: 'rgba(26,26,26,0.5)' }}>
               More and more people ask AI instead of Googling. Right now it sends them to your competitors.
+            </p>
+          </section>
+        )}
+
+        {/* What your customers are searching — real local search terms */}
+        {keywords.length > 0 && (
+          <section className="mt-4 rounded-[24px] p-6" style={{ background: '#fff', boxShadow: '0 1px 2px rgba(26,26,26,.04), 0 8px 28px rgba(26,26,26,.06)' }}>
+            <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: OCHRE }}>
+              <span>🔍</span> What your customers are searching
+            </p>
+            <p className="mt-3 text-sm leading-relaxed" style={{ color: 'rgba(26,26,26,0.7)' }}>
+              Real monthly searches in {cityDisplay(p.city)} for what you do — and how hard each is to rank for.
+            </p>
+            <div className="mt-3 space-y-1.5">
+              {keywords.map(k => {
+                const band = k.difficulty === 'easy' ? GREEN : k.difficulty === 'hard' ? RED : OCHRE
+                const bandLabel = k.difficulty === 'easy' ? 'Easy win' : k.difficulty === 'hard' ? 'Competitive' : 'Moderate'
+                return (
+                  <div key={k.phrase} className="flex items-center gap-3 rounded-lg px-3 py-2" style={{ background: IVORY }}>
+                    <span className="flex-1 text-sm font-medium">{k.phrase}</span>
+                    <span className="text-xs tabular-nums" style={{ color: 'rgba(26,26,26,0.55)' }}>
+                      {k.volume.toLocaleString()}/mo
+                    </span>
+                    <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: `${band}1a`, color: band }}>
+                      {bandLabel}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+            <p className="mt-3 text-xs" style={{ color: 'rgba(26,26,26,0.5)' }}>
+              The &ldquo;easy wins&rdquo; are where we&apos;d start — real demand you can realistically rank for.
             </p>
           </section>
         )}

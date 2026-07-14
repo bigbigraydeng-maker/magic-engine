@@ -218,7 +218,7 @@ function DetailDrawer({ id, onClose, onChanged }: { id: string; onClose: () => v
     return () => { active = false }
   }, [id])
 
-  async function act(action: 'archive' | 'opt_out' | 'start_onboarding' | 'mark_converted') {
+  async function act(action: 'archive' | 'opt_out' | 'start_onboarding' | 'mark_converted' | 'generate_keyword_report') {
     // Moving a warm reply into paid onboarding is a real commitment (it says the
     // $19.90 was paid) — confirm so a mis-click can't fake a sale.
     if (action === 'start_onboarding' &&
@@ -304,6 +304,10 @@ function DetailDrawer({ id, onClose, onChanged }: { id: string; onClose: () => v
               {(p.status === 'replied' || p.status === 'contacted') && (
                 <button onClick={() => void act('start_onboarding')} disabled={busy}
                   className="rounded-lg bg-[#C4912E] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">🚀 已收 $19.90 · 开始 onboarding</button>
+              )}
+              {p.status === 'onboarding' && (
+                <button onClick={() => void act('generate_keyword_report')} disabled={busy}
+                  className="rounded-lg border border-me-charcoal/15 px-3 py-1.5 text-xs text-me-charcoal/70 disabled:opacity-40">📊 生成关键词报告</button>
               )}
               {p.status === 'onboarding' && (
                 <button onClick={() => void act('mark_converted')} disabled={busy}

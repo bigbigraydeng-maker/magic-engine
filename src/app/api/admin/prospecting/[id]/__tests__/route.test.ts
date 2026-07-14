@@ -20,6 +20,11 @@ vi.mock('resend', () => ({
   Resend: vi.fn().mockImplementation(() => ({ emails: { send: (...a: unknown[]) => sendMock(...a) } })),
 }))
 
+const buildKeywordReportMock = vi.fn()
+vi.mock('@/lib/prospecting/keyword-report', () => ({
+  buildKeywordReport: (...a: unknown[]) => buildKeywordReportMock(...a),
+}))
+
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
     from: () => ({
@@ -52,11 +57,15 @@ beforeEach(() => {
   updates.length = 0
   updateEqArgs.length = 0
   sendMock.mockReset().mockResolvedValue({ error: null })
+  buildKeywordReportMock.mockReset().mockResolvedValue([])
   process.env.RESEND_API_KEY = 'test-key'
   process.env.OUTREACH_FROM_EMAIL = 'hello@magicengine.cloud'
   selectRow = {
     business_name: 'Oz Flooring Co',
     status: 'outreach_ready',
+    domain: 'ozflooring.co.nz',
+    country: 'NZ',
+    ai_report: { segment: 'core_target', top_problems: [] },
     audit: { tracking: { emails: ['owner@ozflooring.co.nz'] } },
     outreach_email: { subject: 'A quick look', body: 'Hi there, this is a real draft body over forty chars long.' },
   }
@@ -170,5 +179,37 @@ describe("PATCH { action: 'mark_converted' }", () => {
     claimRows = []
     const res = await markConverted()
     expect(res.status).toBe(409)
+  })
+})
+
+const genKeywords = () =>
+  PATCH({ json: () => Promise.resolve({ action: 'generate_keyword_report' }) } as never, { params: { id: ID } })
+
+describe("PATCH { action: 'generate_keyword_report' }", () => {
+  it('stores the report on ai_report.keyword_report when data comes back', async () => {
+    buildKeywordReportMock.mockResolvedValue([{ phrase: 'kitchen reno', volume: 800, difficulty: 'easy' }])
+    const res = await genKeywords()
+    expect(res.status).toBe(200)
+    expect(buildKeywordReportMock).toHaveBeenCalledWith('ozflooring.co.nz', 'NZ')
+    // Merged into the existing ai_report, not overwriting it.
+    const written = updates[0].ai_report as { segment: string; keyword_report: unknown[] }
+    expect(written.segment).toBe('core_target')
+    expect(written.keyword_report).toHaveLength(1)
+  })
+
+  it('degrades to count:0 without writing when the data source is empty', async () => {
+    buildKeywordReportMock.mockResolvedValue([])
+    const res = await genKeywords()
+    expect(res.status).toBe(200)
+    const body = await res.json() as { count: number }
+    expect(body.count).toBe(0)
+    expect(updates).toHaveLength(0)          // nothing persisted on empty
+  })
+
+  it('409s a prospect with no AI analysis yet', async () => {
+    selectRow!.ai_report = null
+    const res = await genKeywords()
+    expect(res.status).toBe(409)
+    expect(buildKeywordReportMock).not.toHaveBeenCalled()
   })
 })
