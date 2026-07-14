@@ -25,8 +25,12 @@ import { getVoiceStore } from '../../src/lib/voice/store'
 import { getRealtimeProvider } from '../../src/lib/voice/providers'
 import { buildSession } from '../../src/lib/voice/realtime/worker'
 import { RecordingSink } from '../../src/lib/voice/realtime/session'
+import { startRealtimeSession, type OpenAiRealtimeBridge } from '../../src/lib/voice/realtime/openai-bridge'
 
 const PORT = Number(process.env.REALTIME_WORKER_PORT ?? 4100)
+
+// active real-call bridges, keyed by callId (for /stop + cleanup)
+const activeBridges = new Map<string, OpenAiRealtimeBridge>()
 
 function json(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { 'Content-Type': 'application/json' })
@@ -42,19 +46,16 @@ async function readBody(req: IncomingMessage): Promise<string> {
 /**
  * Real-integration extension point: open the OpenAI realtime control socket
  *   wss://api.openai.com/v1/realtime?call_id={openaiCallId}
- * with Authorization: Bearer OPENAI_API_KEY, map raw events → NormalizedEvent, and
- * feed them into the CallSession. Not wired in P0 (mock loop covers the data path).
+ * Real path: startRealtimeSession() opens the socket via OpenAiRealtimeBridge and
+ * feeds mapped events into the CallSession. Mock path: buildSession + RecordingSink.
  */
-async function connectRealtimeSocket(openaiCallId: string): Promise<void> {
-  // eslint-disable-next-line no-console
-  console.log(`[worker] TODO: open realtime ws for ${openaiCallId} (real-integration extension point)`)
+function isAuthorized(req: IncomingMessage): boolean {
+  const token = getVoiceConfig().env.INTERNAL_WORKER_TOKEN
+  return Boolean(token) && req.headers['authorization'] === `Bearer ${token}`
 }
 
 async function handleSession(req: IncomingMessage, res: ServerResponse) {
-  const cfg = getVoiceConfig()
-  const token = cfg.env.INTERNAL_WORKER_TOKEN
-  const auth = req.headers['authorization']
-  if (!token || auth !== `Bearer ${token}`) return json(res, 401, { error: 'unauthorized' })
+  if (!isAuthorized(req)) return json(res, 401, { error: 'unauthorized' })
 
   const body = JSON.parse((await readBody(req)) || '{}')
   const callId = body.callId as string | undefined
@@ -63,14 +64,26 @@ async function handleSession(req: IncomingMessage, res: ServerResponse) {
   const store = await getVoiceStore()
   const provider = getRealtimeProvider()
   try {
-    const session = await buildSession(store, provider, callId, new RecordingSink())
-    await session.start()
-    const call = await store.getCallById(callId)
-    if (call?.openai_call_id && !provider.simulated) await connectRealtimeSocket(call.openai_call_id)
+    if (provider.simulated) {
+      // mock: no live socket — start the session against a recording sink
+      const session = await buildSession(store, provider, callId, new RecordingSink())
+      await session.start()
+      return json(res, 202, { status: 'session_started_mock', callId })
+    }
+    // real: open the OpenAI realtime control socket and hold it open
+    const bridge = await startRealtimeSession(store, callId)
+    activeBridges.set(callId, bridge)
     return json(res, 202, { status: 'session_started', callId })
   } catch (e) {
     return json(res, 500, { error: (e as Error).message })
   }
+}
+
+async function handleStop(req: IncomingMessage, callId: string, res: ServerResponse) {
+  if (!isAuthorized(req)) return json(res, 401, { error: 'unauthorized' })
+  const bridge = activeBridges.get(callId)
+  if (bridge) { bridge.close(); activeBridges.delete(callId) }
+  return json(res, 200, { status: 'stopped', callId })
 }
 
 const server = createServer((req, res) => {
@@ -81,6 +94,8 @@ const server = createServer((req, res) => {
     catch (e) { return json(res, 503, { status: 'unready', error: (e as Error).message }) }
   }
   if (req.method === 'POST' && url === '/internal/realtime/sessions') return void handleSession(req, res)
+  const stop = url.match(/^\/internal\/realtime\/sessions\/([^/]+)\/stop$/)
+  if (req.method === 'POST' && stop) return void handleStop(req, decodeURIComponent(stop[1]), res)
   json(res, 404, { error: 'not found' })
 })
 

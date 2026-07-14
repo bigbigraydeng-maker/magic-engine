@@ -39,6 +39,7 @@ npx vitest run src/lib/voice      # unit + integration (mock closed loop)
 | Providers (mock + OpenAI + webhook HMAC) | `src/lib/voice/providers/` |
 | Webhook handler | `src/lib/voice/webhook/openai-handler.ts` |
 | Realtime session + worker + outbound | `src/lib/voice/realtime/` |
+| OpenAI realtime ws bridge (raw event map + socket) | `src/lib/voice/realtime/openai-bridge.ts` |
 | Outbound compliance gate | `src/lib/voice/outbound-gate.ts` |
 | Finalize (summary + non-destructive lead merge) | `src/lib/voice/finalize.ts` |
 | API routes | `src/app/api/voice/` |
