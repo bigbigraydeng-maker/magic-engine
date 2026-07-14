@@ -260,6 +260,7 @@ async function writeThreeBooks(
       .insert({
         client_id: clientId,
         title: `【社媒 ${today}】工厂自动发布 Reel — ${angle}`.slice(0, 200),
+        description: `工厂自动发布 Reel「${angle}」→ ${vendor}(${ref.permalink ?? ref.post_id})`,
         dimension: 'social',
         status: 'completed',
         fix_type: 'me_auto',
