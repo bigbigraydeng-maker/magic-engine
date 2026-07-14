@@ -12,8 +12,10 @@ vi.mock('@/lib/diagnostic/runner', () => ({
   executeDiagnosticRun: (...a: unknown[]) => mockExecuteRun(...a),
 }))
 
-// Supabase mock: diagnostic_runs in-flight lookup + clients update + fde log insert.
+// Supabase mock: diagnostic_runs in-flight lookup + clients select/update + fde log insert.
 let inFlight: { id: string } | null = null
+let clientRow: { onboarding_completed_at: string | null } | null = { onboarding_completed_at: null }
+const clientsSelect = vi.fn().mockImplementation(() => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: clientRow, error: null }) }) }))
 const clientsUpdate = vi.fn().mockReturnValue({ eq: () => Promise.resolve({ error: null }) })
 const fdeInsert = vi.fn().mockReturnValue({ then: (cb: (r: { error: null }) => void) => cb({ error: null }) })
 vi.mock('@/lib/supabase', () => ({
@@ -22,7 +24,7 @@ vi.mock('@/lib/supabase', () => ({
       if (table === 'diagnostic_runs') {
         return { select: () => ({ eq: () => ({ in: () => ({ limit: () => ({ maybeSingle: () => Promise.resolve({ data: inFlight, error: null }) }) }) }) }) }
       }
-      if (table === 'clients') return { update: clientsUpdate }
+      if (table === 'clients') return { select: clientsSelect, update: clientsUpdate }
       if (table === 'fde_work_logs') return { insert: fdeInsert }
       return {}
     },
@@ -39,6 +41,7 @@ describe('POST /api/clients/[id]/onboarding/complete', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     inFlight = null
+    clientRow = { onboarding_completed_at: null }
     mockRequire.mockResolvedValue({ ok: true, user: { email: 'owner@shop.co.nz' } })
     mockCreateRun.mockResolvedValue('run-1')
     mockExecuteRun.mockResolvedValue(undefined)
@@ -65,6 +68,19 @@ describe('POST /api/clients/[id]/onboarding/complete', () => {
     const json = await res.json()
     expect(json.diagnostic_run_id).toBe('existing-run')
     expect(mockCreateRun).not.toHaveBeenCalled() // <-- anti cost-DoS on resubmit
+  })
+
+  it('does NOT start a new diagnostic on a sequential resubmit after onboarding already completed once', async () => {
+    // The first run finished (status flipped to 'completed'/'failed'), so it no
+    // longer shows up as in-flight — only clients.onboarding_completed_at proves
+    // this client already had its one free baseline run. A naive in-flight-only
+    // dedup would re-trigger a full-price diagnostic here (P0 caught by 魏征).
+    clientRow = { onboarding_completed_at: '2026-07-01T00:00:00.000Z' }
+    const res = await POST(req({}), { params: { id: 'c1' } })
+    const json = await res.json()
+    expect(json.ok).toBe(true)
+    expect(json.diagnostic_run_id).toBeNull()
+    expect(mockCreateRun).not.toHaveBeenCalled() // <-- anti cost-DoS on sequential replay
   })
 
   it('records a help request to the FDE log when steps are skipped', async () => {

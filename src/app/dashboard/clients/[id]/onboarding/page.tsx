@@ -33,7 +33,7 @@ interface StatusResponse {
   completed: boolean
 }
 
-type HelpKey = 'gbp' | 'ga4gsc' | 'meta' | 'website' | 'assets'
+type HelpKey = 'profile' | 'gbp' | 'ga4gsc' | 'meta' | 'website' | 'assets'
 
 // ── Small UI helpers ────────────────────────────────────────────────────────────
 const CARD = 'rounded-2xl border border-me-stone bg-white p-6'
@@ -75,7 +75,7 @@ export default function OnboardingWizardPage() {
   const clientId = params.id
 
   const [status, setStatus] = useState<StatusResponse | null>(null)
-  const [help, setHelp] = useState<Record<HelpKey, boolean>>({ gbp: false, ga4gsc: false, meta: false, website: false, assets: false })
+  const [help, setHelp] = useState<Record<HelpKey, boolean>>({ profile: false, gbp: false, ga4gsc: false, meta: false, website: false, assets: false })
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
 
@@ -143,7 +143,7 @@ export default function OnboardingWizardPage() {
       </div>
 
       <div className="space-y-5">
-        <ProfileStep clientId={clientId} done={Boolean(s?.profile)} onSaved={refresh} />
+        <ProfileStep clientId={clientId} done={Boolean(s?.profile)} onSaved={refresh} help={help.profile} onHelp={() => toggleHelp('profile')} />
         <WebsiteStep clientId={clientId} done={Boolean(s?.website)} onSaved={refresh} help={help.website} onHelp={() => toggleHelp('website')} />
         <ConnectStep clientId={clientId} connectors={s?.connectors ?? {}} help={help} onHelp={toggleHelp} onSaved={refresh} />
         <AssetsStep clientId={clientId} done={Boolean(s?.assets)} onSaved={refresh} help={help.assets} onHelp={() => toggleHelp('assets')} />
@@ -168,15 +168,16 @@ export default function OnboardingWizardPage() {
 }
 
 const HELP_LABELS: Record<HelpKey, string> = {
+  profile: 'Business details — sort on visit',
   gbp: 'Google Business Profile — connect on visit',
   ga4gsc: 'Website analytics — set up on visit',
   meta: 'Facebook/Instagram ads — set up on visit',
   website: 'Website — sort on visit',
-  assets: 'Photos / customer list — bring on visit',
+  assets: 'Photos — bring on visit',
 }
 
 // ── Step 1: Business profile ────────────────────────────────────────────────────
-function ProfileStep({ clientId, done, onSaved }: { clientId: string; done: boolean; onSaved: () => Promise<void> }) {
+function ProfileStep({ clientId, done, onSaved, help, onHelp }: { clientId: string; done: boolean; onSaved: () => Promise<void>; help: boolean; onHelp: () => void }) {
   const [f, setF] = useState({ company_name: '', industry: '', target_audience: '', core_differentiator: '', brand_voice: '' })
   const [keywords, setKeywords] = useState('')
   const [saving, setSaving] = useState(false)
@@ -207,12 +208,13 @@ function ProfileStep({ clientId, done, onSaved }: { clientId: string; done: bool
         <div><label className={LABEL}>Who your customers are</label><input className={INPUT} value={f.target_audience} onChange={e => setF({ ...f, target_audience: e.target.value })} placeholder="e.g. Homeowners in West Auckland" /></div>
         <div><label className={LABEL}>What makes you different</label><input className={INPUT} value={f.core_differentiator} onChange={e => setF({ ...f, core_differentiator: e.target.value })} placeholder="e.g. Same-day service, 20 years local" /></div>
         <div><label className={LABEL}>How you like to sound</label><input className={INPUT} value={f.brand_voice} onChange={e => setF({ ...f, brand_voice: e.target.value })} placeholder="e.g. Friendly and straight-up" /></div>
-        <div><label className={LABEL}>Services you want to be found for <span className="font-medium text-me-charcoal/40">(comma-separated)</span></label><input className={INPUT} value={keywords} onChange={e => setKeywords(e.target.value)} placeholder="blocked drains, hot water, gas fitting" /></div>
+        <div><label className={LABEL}>Services you want to be found for <span className="font-medium text-me-charcoal/40">(separate each with a comma)</span></label><input className={INPUT} value={keywords} onChange={e => setKeywords(e.target.value)} placeholder="blocked drains, hot water, gas fitting" /></div>
       </div>
       <div className="mt-4 flex items-center gap-3">
         <button onClick={save} disabled={saving} className={BTN} style={BTN_STYLE}>{saving ? 'Saving…' : 'Save'}</button>
         {msg && <span className="text-xs font-semibold text-me-charcoal/60">{msg}</span>}
       </div>
+      <HelpLink label={HELP_LABELS.profile} active={help} onClick={onHelp} />
     </StepShell>
   )
 }
@@ -237,7 +239,7 @@ function WebsiteStep({ clientId, done, onSaved, help, onHelp }: { clientId: stri
 
   return (
     <StepShell n={2} title="Your website" done={done}>
-      <div><label className={LABEL}>Website address</label><input className={INPUT} value={domain} onChange={e => setDomain(e.target.value)} placeholder="yourbusiness.co.nz" /></div>
+      <div><label className={LABEL}>Website address</label><input className={INPUT} value={domain} onChange={e => setDomain(e.target.value)} placeholder="yourbusiness.co.nz or .com.au" /></div>
       <div className="mt-4 flex items-center gap-3">
         <button onClick={save} disabled={saving} className={BTN} style={BTN_STYLE}>{saving ? 'Saving…' : 'Save'}</button>
         {msg && <span className="text-xs font-semibold text-me-charcoal/60">{msg}</span>}
@@ -291,7 +293,7 @@ function ConnectStep({ clientId, connectors, help, onHelp, onSaved }: { clientId
       <div className="mt-3 rounded-xl bg-me-ivory p-4">
         <p className="text-sm font-semibold text-me-charcoal">Website visitor data</p>
         <p className="mt-1 text-xs leading-relaxed text-me-charcoal/60">
-          Most businesses don&apos;t have this set up yet — <span className="font-semibold text-me-charcoal">that&apos;s one of the things we install for you, free</span>.
+          Most businesses don&apos;t have this set up yet — <span className="font-semibold text-me-charcoal">that&apos;s one of the things included in your setup</span>.
           Nothing to do here now. (Already have Google Analytics? Tell us on the visit and we&apos;ll connect it.)
         </p>
         <HelpLink label={HELP_LABELS.ga4gsc} active={help.ga4gsc} onClick={() => onHelp('ga4gsc')} />

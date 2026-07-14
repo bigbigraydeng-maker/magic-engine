@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/auth/client-access', () => ({
   requireDashboardClientAccess: mocks.requireDashboardClientAccess,
   requirePaidClientAccess: mocks.requireDashboardClientAccess,
+  requireOnboardingClientAccess: mocks.requireDashboardClientAccess,
 }))
 
 vi.mock('@/lib/platform-oauth/connection-store', () => ({

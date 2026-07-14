@@ -6,12 +6,15 @@
  * route stays paid-only, and the diagnostic (6 external collectors) is
  * expensive, so a naive guard flip would re-open a cost-DoS surface. Instead
  * the completion is triggered here under requireOnboardingClientAccess and runs
- * the baseline diagnostic via service role with an in-flight dedup, so
- * re-submitting cannot spam full-price runs.
+ * the baseline diagnostic via service role, deduped both against any
+ * pending/running run AND against `clients.onboarding_completed_at` already
+ * being set — so re-submitting (even sequentially, after the first run
+ * finished) cannot spam full-price runs.
  *
  * Actions:
  *   1. Trigger the FIRST baseline diagnostic (before-report) — deduped against
- *      any pending/running run for this client.
+ *      any pending/running run for this client, and skipped entirely once
+ *      onboarding has already been completed once.
  *   2. Stamp clients.onboarding_completed_at.
  *   3. Best-effort FDE notification (which steps the client couldn't do), so the
  *      in-person kickoff (B2) goes straight to the unfinished steps.
@@ -55,10 +58,26 @@ export async function POST(
     ? body.helpRequests.filter((s): s is string => typeof s === 'string' && s.trim().length > 0).slice(0, 20)
     : []
 
+  // 0. Has this client already completed onboarding once? If so, a repeat
+  //    submit must NOT enqueue another full-price diagnostic — only the
+  //    in-flight check below (pending/running) is not enough, because a
+  //    finished run flips to 'completed'/'failed' and drops out of that
+  //    filter, making it deterministically replayable.
+  const { data: clientRow, error: clientLookupErr } = await supabaseAdmin
+    .from('clients')
+    .select('onboarding_completed_at')
+    .eq('id', clientId)
+    .maybeSingle<{ onboarding_completed_at: string | null }>()
+  if (clientLookupErr) {
+    return NextResponse.json({ error: clientLookupErr.message }, { status: 500 })
+  }
+  const alreadyCompleted = Boolean(clientRow?.onboarding_completed_at)
+
   // 1. Trigger the baseline diagnostic — server-side, deduped so a repeat
-  //    submit reuses the in-flight run instead of enqueuing another.
+  //    submit (in-flight or already-completed) reuses/skips instead of
+  //    enqueuing another.
   let diagnosticRunId = await findInFlightDiagnostic(clientId)
-  if (!diagnosticRunId) {
+  if (!diagnosticRunId && !alreadyCompleted) {
     try {
       diagnosticRunId = await createDiagnosticRun(supabaseAdmin, clientId, 'full')
       // Fire-and-forget: the run is long; the wizard polls diagnostic status.
