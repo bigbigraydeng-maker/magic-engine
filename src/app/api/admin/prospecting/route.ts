@@ -17,7 +17,7 @@ import { complianceFooter, senderIdentity } from '@/lib/prospecting/outreach'
 const PAGE_SIZE = 30
 const VALID_STATUSES = [
   'discovered', 'audited', 'qualified', 'analyzed',
-  'outreach_ready', 'contacted', 'replied', 'converted', 'archived', 'opted_out',
+  'outreach_ready', 'contacted', 'replied', 'onboarding', 'converted', 'archived', 'opted_out',
 ]
 
 export async function GET(req: NextRequest): Promise<NextResponse> {

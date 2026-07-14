@@ -30,6 +30,9 @@ vi.mock('@/lib/supabase', () => ({
         updateEqArgs.push(eqPairs)
         const node = {
           eq: (col: string, val: unknown) => { eqPairs.push([col, val]); return node },
+          // transition() guards on `.in('status', [...])`; capture it like eq so
+          // a test can assert which from-statuses the transition allows.
+          in: (col: string, val: unknown) => { eqPairs.push([col, val]); return node },
           select: () => Promise.resolve({ data: claimRows, error: null }),
           then: (resolve: (v: { error: null }) => unknown) => resolve({ error: null }),
         }
@@ -125,5 +128,27 @@ describe("PATCH { action: 'send' }", () => {
     expect(updates[0].status).toBe('contacted')
     expect(updates[1].status).toBe('outreach_ready')
     expect(updates[1].contacted_at).toBeNull()
+  })
+})
+
+const startOnboarding = () =>
+  PATCH({ json: () => Promise.resolve({ action: 'start_onboarding' }) } as never, { params: { id: ID } })
+
+describe("PATCH { action: 'start_onboarding' }", () => {
+  it('moves a paid reply to onboarding, guarded on replied/contacted only', async () => {
+    claimRows = [{ id: ID }]
+    const res = await startOnboarding()
+    expect(res.status).toBe(200)
+    expect(updates[0].status).toBe('onboarding')
+    // The from-status guard: onboarding must only be reachable from a warm
+    // reply/contact — mutating this list (e.g. allowing 'discovered') breaks it.
+    expect(updateEqArgs[0]).toContainEqual(['status', ['replied', 'contacted']])
+    expect(updateEqArgs[0]).toContainEqual(['id', ID])
+  })
+
+  it('409s when the row is not in a warm state (claim matches zero rows)', async () => {
+    claimRows = []
+    const res = await startOnboarding()
+    expect(res.status).toBe(409)
   })
 })

@@ -55,6 +55,7 @@ type PatchBody =
   | { action: 'edit_email'; subject: string; body: string }
   | { action: 'send' }
   | { action: 'mark_contacted' }
+  | { action: 'start_onboarding' }
   | { action: 'archive' }
   | { action: 'opt_out' }
 
@@ -214,6 +215,14 @@ export async function PATCH(
     case 'mark_contacted':
       return transition(params.id, ['outreach_ready'],
         { status: 'contacted', contacted_at: new Date().toISOString() }, '不在待审状态')
+    case 'start_onboarding':
+      // $19.90 tripwire paid → move a warm reply into delivery. Human-triggered
+      // by an FDE after confirming the manually-sent payment link was paid
+      // (pilot: payment is collected manually, never automated). Allowed from
+      // `replied` (interest form) or `contacted` (owner replied "yes" by email,
+      // which we don't auto-track).
+      return transition(params.id, ['replied', 'contacted'],
+        { status: 'onboarding' }, '只有已联系/已回复的商家才能进入 onboarding')
     case 'archive':
       return transition(params.id, ACTIVE_STATUSES, { status: 'archived' }, '当前状态不可归档')
     case 'opt_out':
