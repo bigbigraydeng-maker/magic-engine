@@ -6,7 +6,6 @@
 // draft=true → DRAFT(不公开,首测验格式);false → PUBLISHED(真发,不可逆)。
 // 幂等对账(魏征 B9 防"发了没记上"重发):caption 埋零宽 wo 标记,findExisting 扫最近 Reel 描述比对。
 
-import { getFacebookPageToken } from '@/lib/social/facebook-publisher'
 import type { PublishAdapter, PublishTarget, PublishedRef } from '../types'
 
 const GRAPH = 'https://graph.facebook.com/v25.0'
@@ -23,15 +22,31 @@ export function encodeIdemTag(woId: string): string {
   return ZW_ANCHOR + Array.from(bits).map((b) => (b === '1' ? ZW1 : ZW0)).join('')
 }
 
-async function resolveToken(target: PublishTarget): Promise<{ accessToken: string; pageId: string }> {
-  if (!target.fb_source_id) throw new Error('publish_target.fb_source_id 缺失(FB 页 token 来源)')
-  const creds = await getFacebookPageToken(target.fb_source_id)
-  if (!creds) throw new Error(`FB source 无效或未激活: ${target.fb_source_id}`)
-  // 防串(魏征 B9):token 反查到的 page 必须 === 目标 page,绝不拿别客户 token 发本页
-  if (target.page_id && creds.pageId !== target.page_id) {
-    throw new Error(`token 页(${creds.pageId})≠ 目标页(${target.page_id})—— 防误发拦截`)
+// 品牌名归一(去 Pty Ltd/空格/符号/大小写)用于防误发页名匹配
+function normBrand(s: string): string {
+  return s.toLowerCase().replace(/pty\.?\s*ltd\.?/g, '').replace(/[^a-z0-9]/g, '')
+}
+
+// 系统用户 token(env META_SYSTEM_USER_TOKEN,永不过期)→ 换该页的 page token + 页名。
+// 页名同时做防误发第三重断言(魏征 B9):页名必须 ~ 该客户品牌,否则绝不发(防把 A 客户片发到 B 页)。
+async function resolveToken(target: PublishTarget): Promise<{ accessToken: string; pageId: string; pageName: string }> {
+  const sysToken = process.env.META_SYSTEM_USER_TOKEN
+  if (!sysToken) throw new Error('META_SYSTEM_USER_TOKEN 未配置')
+  if (!target.page_id) throw new Error('publish_target.page_id 缺失')
+  const res = await fetch(`${GRAPH}/${target.page_id}?fields=access_token,name&access_token=${sysToken}`)
+  const j = (await res.json().catch(() => ({}))) as Record<string, unknown>
+  if (!res.ok || typeof j['access_token'] !== 'string') {
+    throw new Error(`取页 token 失败 ${res.status}: ${JSON.stringify(j)}`)
   }
-  return creds
+  const pageName = typeof j['name'] === 'string' ? (j['name'] as string) : ''
+  if (target.expect_brand && pageName) {
+    const a = normBrand(pageName)
+    const b = normBrand(target.expect_brand)
+    if (a && b && !a.includes(b) && !b.includes(a)) {
+      throw new Error(`页名(${pageName})与客户品牌(${target.expect_brand})不符 —— 防误发拦截`)
+    }
+  }
+  return { accessToken: j['access_token'] as string, pageId: target.page_id, pageName }
 }
 
 async function graphPost(path: string, params: Record<string, string>): Promise<Record<string, unknown>> {
@@ -45,7 +60,7 @@ async function graphPost(path: string, params: Record<string, string>): Promise<
 export const facebookReelAdapter: PublishAdapter = {
   platform: 'facebook',
 
-  async publish({ videoUrl, caption, target, idempotencyTag, draft }) {
+  async publish({ videoUrl, caption, target, idempotencyTag, draft, onStarted }) {
     const { accessToken, pageId } = await resolveToken(target)
     const description = caption + encodeIdemTag(idempotencyTag)
 
@@ -53,6 +68,8 @@ export const facebookReelAdapter: PublishAdapter = {
     const start = await graphPost(`/${pageId}/video_reels`, { upload_phase: 'start', access_token: accessToken })
     const videoId = String(start['video_id'] ?? '')
     if (!videoId) throw new Error(`FB start 未返回 video_id: ${JSON.stringify(start)}`)
+    // 本地幂等锚(魏征 B9):上传/finish 之前先把 video_id 落回 ME 库。中途崩后重来靠它判断,不盲目重发。
+    if (onStarted) await onStarted(videoId)
 
     // ② upload:file_url 头让 FB 自己拉 Supabase 视频
     const upRes = await fetch(`${RUPLOAD}/${videoId}`, {

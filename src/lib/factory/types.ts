@@ -180,13 +180,13 @@ export interface VerifiedOffer {
 /** 发布目标(clients.factory_config.publish_target 存,FDE 配)。缺 → 不发标失败,绝不猜/误发别客户页。 */
 export interface PublishTarget {
   platform: 'facebook' | 'publer'
-  /** facebook:页 id(如 Oztop 748077498...) */
+  /** facebook:页 id(如 Oztop 748077268383005)。token 走 env META_SYSTEM_USER_TOKEN 换页 token */
   page_id?: string
-  /** facebook:页 token 来源记录 id(facebook-publisher getFacebookPageToken 用) */
-  fb_source_id?: string
   /** publer:CTS 账号 id */
   publer_account_id?: string
   publer_provider?: string
+  /** 防误发(魏征 B9 第三重):期望的客户品牌名,resolveToken 校验 FB 页名 ~ 此值,不符不发 */
+  expect_brand?: string
 }
 
 /** 发布回执(存 published_ref):幂等对账锚(防"发出去没记上"重发)+ P1 measure 数据源。一次存全。 */
@@ -205,13 +205,18 @@ export interface PublishedRef {
  */
 export interface PublishAdapter {
   readonly platform: 'facebook' | 'publer'
-  /** 发布一条成片,返回回执。draft=true 只发草稿/不公开(首测验格式)。 */
+  /**
+   * 发布一条成片,返回回执。draft=true 只发草稿/不公开(首测验格式)。
+   * onStarted(魏征 B9 防双发):拿到平台 video_id 的第一时间(上传/finish 之前)回调,
+   * 让 worker 把 video_id 落本地库当幂等锚——中途崩后重来能靠本地锚判断,不盲目重发。
+   */
   publish(args: {
     videoUrl: string
     caption: string
     target: PublishTarget
     idempotencyTag: string
     draft: boolean
+    onStarted?: (videoId: string) => Promise<void>
   }): Promise<PublishedRef>
   /** 幂等对账(魏征 B9 防双发):查平台侧该 wo(靠 idempotencyTag)是否已发。已发→回执,未发→null。 */
   findExisting(args: { target: PublishTarget; idempotencyTag: string }): Promise<PublishedRef | null>
