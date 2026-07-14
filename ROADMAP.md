@@ -335,6 +335,15 @@ FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Mar
   - **② GBP + Facebook 主页拉邮箱**：官方 API（GBP + Meta），覆盖官网没明写邮箱的。
   - **③ 有表单没邮箱的自动填表投递询盘（PM 批准最激进一条）**：F12 抓表单真实 POST/GraphQL → `javascript_tool`/Chrome DevTools 复现提交，把询盘打进对方 CRM。符合「卡点必自动化、无人工兜底」，且应沉淀为 ME 可复用的 media/lead 模块能力（跨客户复用）。
   - 顺带小 bug：`facebook_url` 检测把命名空间声明 `xmlns:fb="http://www.facebook.com/2008/fbml"` 误抓成 `facebook.com/2008/`（多家命中），深挖时一并修。
+- [ ] **P35.12 $19.90 Tripwire Onboarding（获客漏斗第一钩，PM 拍板 2026-07-13）⭐⭐**：一次性 $19.90「onboarding 数字优化」当 tripwire → 建联建信任 → 上钩 $990 套餐（GEO / FB 代运营 / newsletter+WhatsApp）。**设计原则**：每个 $19.9 交付物 = 一个 $990 套餐的「种子」，展示价值同时暴露只有 $990 能补的缺口。
+  - **Wave 1 行业 = 家装/翻新簇**（kitchen/bathroom renovation + builders + landscaping）。**依据 = 真实邮箱命中率**（见下）：装修簇 FB 广告契合最高、before/after 完全合规、客单最高（$990 是零头）、决策周期长（newsletter nurture 铺垫顺）、现成干净邮箱 ~137 家。**医美/IG 簇推迟**——ME 尚未实操 IG、内容太粗不符 IG 审美，等社媒内容引擎补齐（见 P35.13）。
+  - **各行业邮箱命中率实测（2026-07-13）**：plumbers 76% / landscaping 70% / bathroom_reno 68% / electricians 67% / dentists 63% / builders 61% / kitchen_reno 61% / hvac 60% / roofing 59% / cosmetic 54% / flooring 53% / accountants 10%（枯）。commercial_cleaning 82% 但 B2B、FB 弱，排除。
+  - **广告 3 项 / 交付 6 项（under-promise, over-deliver）**：广告吹①数字体检报告②GBP 整理+首批帖③3 条用工程照做的 FB 帖；交付时多塞④本地关键词报告⑤AI 可见度快照⑥评论引擎种子（催评模板+扫码短链）。英雄种子 = **FB 代运营**（装修），GEO/其余轻放报告结尾「接下来还能补」。全部零/极少人工、多数零客户站权限。
+  - **第一封邮件（板桥审后锁定，Wave 1 装修版）**：tripwire 定位「我们发现你经营不错但数字/AI 时代缺曝光、缺临门一脚 → 市场动辄几千纽币、今天 $19.90 → 坦白这是建联、无任何隐藏绑定」。钩子 = 你的工程照没在 FB 为你干活 + 竞品在投广告。**CTA = 回复 "yes" hold 名额（不上在线支付）**；稀缺 = 全 NZ 只收 15 家/行业。红线：挂交付不挂结果 · 真实身份 · 退订。板桥改点：去批量扫描味、ChatGPT 点名+「a couple of nearby」防竞品爆雷、「the catch? there isn't one」、稀缺软化。
+  - **🔴 授权前置清单（$19.9 自助化的三缺口，2026-07-13 调查）**：① **#533 未合** → self_serve 客户在 main 上连自己账户被 403（连接路由仍 paid-only），自助连接卡在分支 `claude/magic-engine-brief-lezoyg`；② **GA4 property_id 纯手填**（老板不知去哪找）→ 需自动找/引导 UX；③ **Meta/FB 无客户侧 OAuth** → FB 代运营授权有缺口（现靠 ME 系统 token + 手填 ad_account）。真一键 OAuth 只有 **GSC + GBP**（GBP 待 GBP.0 开 API）。**第一波 pilot 务实路径**：FDE 用 admin 后台替客户连（main 上 paid 权限可用，~5 分钟/家，15 家可接受），先跑通验证「极少人力」；规模化自助再补三缺口。
+  - **待建实施链（PM 选「先登记」，实施待后续 go）**：a.「replied → 自动发收款+onboarding 链接」触发链 b. 6 项交付物「打包成客户可见交付页/邮件」 c. GBP 自动优化（依赖 GBP.0） d. FB 相册/3 帖 → Publer 排期自动化。**建议先建 a+b**（零权限 4 项报告即可端到端跑通，不依赖 GBP/FB）。
+  - **PM 待操作/决策**：① GBP.0（Google Cloud enable Business Profile API）② $19.90 收款方式（不上在线支付 → 手动 payment link？先交付后收？）③ #533 合并 go。
+- [ ] **P35.13 社媒内容引擎升级（IG 原生 + 品牌套件，为 $990 代运营铺路）**：现输出主打 FB 文字帖、太粗不符 IG。三支柱：① IG 原生格式模板库（轮播/Reel/精修图/Story）② **每客户品牌套件**（从 logo/官网抽主色+2 字体+滤镜，治「粗犷」根因，精致来自模板不是原始 AI）③ 视频优先（Higgsfield shorts_studio/Seedance 出竖版 Reel + virality_predictor 筛）。能力已有（Atlas/Higgsfield/HeyGen/Publer），缺模板+品牌系统。医美 before/after 有 Meta+NZ 合规限制 → 主打不需临床照的科普/团队/FAQ。**先建一套医美 IG 样板跑通一家再产品化**。此项是「医美 Wave 2」的前置。
 
 **成本模型**：1000 家/月 ≈ 发现 $10 + 规则审计 $25 + AI 只跑 qualified（~15%）$20 ≈ **$55/月**，合格线索 AI 成本 ~$0.13（Brief 目标 <$0.10 贴线）。
 
