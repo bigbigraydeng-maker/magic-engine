@@ -1,14 +1,17 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { WorkOrderStatus } from '@/lib/factory/types'
 import { STATUS_META, STATUS_ORDER } from './_components/statusMeta'
+import { ReviewInbox } from './_components/ReviewInbox'
 
-// P21.J M2 — Content Factory Ops 后台(spec §6.1)
-// 工单管线可视 + dead_letter 一键复活。单运营者视图,不做复杂筛选。
+// P21.J 驾驶舱 — 看片 + 对话框 + 全局工单状态,一页搞定(PM:factory 页 = 驾驶舱)
+// 顶部审片区复用 ReviewInbox(clientId)= 视频审核(左)+ 问 Claude 对话框(右)合体屏;
+// 客户切换 chip 选看谁;底部折叠全局工单状态(死信复活/worker 健康)。
 
 interface WorkOrder {
   id: string
+  client_id: string
   client_name: string
   status: WorkOrderStatus
   order_type: string
@@ -37,12 +40,13 @@ function WorkerHealth({ lastHeartbeat, activeCount }: { lastHeartbeat: string | 
   )
 }
 
-export default function FactoryOpsPage() {
+export default function FactoryCockpitPage() {
   const [orders, setOrders] = useState<WorkOrder[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [reviving, setReviving] = useState<string | null>(null)
   const [worker, setWorker] = useState<{ last_heartbeat_at: string | null; active_count: number }>({ last_heartbeat_at: null, active_count: 0 })
+  const [selectedClient, setSelectedClient] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -78,20 +82,38 @@ export default function FactoryOpsPage() {
     }
   }, [load])
 
-  // 全局工单看板 = 纯跨客户状态总览。交互审核(卡+通过+对话框)在客户页概览,不在这
+  // 待审客户(有 in_review 成片的)→ 顶部审片区的客户切换
+  const reviewClients = useMemo(() => {
+    const m = new Map<string, { id: string; name: string; count: number }>()
+    for (const o of orders) {
+      if (o.status !== 'in_review') continue
+      const e = m.get(o.client_id) ?? { id: o.client_id, name: o.client_name, count: 0 }
+      e.count += 1
+      m.set(o.client_id, e)
+    }
+    return Array.from(m.values()).sort((a, b) => b.count - a.count)
+  }, [orders])
+
+  // 自动选中第一个有待审的客户;当前选中的客户没待审了 → 跳到下一个
+  useEffect(() => {
+    if (reviewClients.length === 0) { setSelectedClient(null); return }
+    if (!reviewClients.some((c) => c.id === selectedClient)) setSelectedClient(reviewClients[0].id)
+  }, [reviewClients, selectedClient])
+
   const grouped = STATUS_ORDER
     .map((status) => ({ status, items: orders.filter((o) => o.status === status) }))
     .filter((g) => g.items.length > 0)
 
   const deadCount = orders.filter((o) => o.status === 'dead_letter').length
+  const totalPending = reviewClients.reduce((s, c) => s + c.count, 0)
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-6 max-w-6xl mx-auto">
+      <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">内容工厂 · 工单看板</h1>
+          <h1 className="text-2xl font-semibold text-slate-900">内容工厂 · 驾驶舱</h1>
           <p className="text-sm text-slate-500 mt-1 flex items-center gap-3 flex-wrap">
-            <span>共 {orders.length} 条工单{deadCount > 0 ? ` · ⚠️ ${deadCount} 条卡住了,需你手动重试` : ''}</span>
+            <span>看片拍板 + 跟 Claude 说人话改片,都在这一页</span>
             <WorkerHealth lastHeartbeat={worker.last_heartbeat_at} activeCount={worker.active_count} />
           </p>
         </div>
@@ -101,62 +123,111 @@ export default function FactoryOpsPage() {
         >刷新</button>
       </div>
 
-      <p className="text-xs text-slate-400 mb-5">要审片 / 改画面 / 调预算,进对应客户页的「概览」tab —— 那里有成片 + Claude 对话框。这页只看全局状态。</p>
-
       {error && (
         <div className="mb-4 px-4 py-3 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>
       )}
-      {loading && <p className="text-slate-400 text-sm">加载中…</p>}
-      {!loading && orders.length === 0 && (
-        <p className="text-slate-400 text-sm">暂无工单。信号进来后会自动生成。</p>
-      )}
 
-      <div className="space-y-6">
-        {grouped.map((g) => {
-          const meta = STATUS_META[g.status] // Record<WorkOrderStatus> 穷举,必有值
-          return (
-            <section key={g.status}>
-              <h2 className="text-sm font-medium text-slate-600 mb-2 flex items-center gap-2">
-                <span className={`inline-block px-2 py-0.5 rounded-full text-xs ${meta.color}`}>{meta.label}</span>
-                <span className="text-slate-400">{g.items.length}</span>
-              </h2>
-              <div className="space-y-2">
-                {g.items.map((o) => (
-                  <div key={o.id} className="border border-slate-200 rounded-lg p-3 bg-white">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 text-sm">
-                          <span className="font-medium text-slate-800">{o.client_name}</span>
-                          <span className="text-slate-400">·</span>
-                          <span className="text-slate-500">{o.order_type}</span>
-                          {o.source_ad_id && <span className="text-xs text-slate-400">({o.source_ad_id})</span>}
-                        </div>
-                        <p className="text-sm text-slate-700 mt-1">{o.rationale_one_liner}</p>
-                        <p className="text-xs text-slate-400 mt-0.5">角度: {o.angle}</p>
-                        {o.reject_reason && (
-                          <p className="text-xs text-red-600 mt-1">失败原因: {o.reject_reason}</p>
-                        )}
-                        <p className="text-xs text-slate-400 mt-1">
-                          成本 ${Number(o.actual_cost_usd).toFixed(2)} / 上限 ${Number(o.budget_cap_usd).toFixed(2)}
-                          {o.attempt_count > 0 ? ` · 尝试 ${o.attempt_count}` : ''}
-                          {o.reclaim_count > 0 ? ` · 回收 ${o.reclaim_count}` : ''}
-                        </p>
-                      </div>
-                      {o.status === 'dead_letter' && (
-                        <button
-                          onClick={() => void revive(o.id)}
-                          disabled={reviving === o.id}
-                          className="shrink-0 px-3 py-1.5 text-sm rounded-lg bg-slate-900 text-white hover:bg-slate-700 disabled:opacity-50"
-                        >{reviving === o.id ? '重试中…' : '↻ 重新排队重试'}</button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+      {/* ── 审片驾驶舱:客户切换 + 视频审核 + 对话框 ───────────────────────────── */}
+      <section className="mb-10">
+        <div className="flex items-center gap-3 mb-3 flex-wrap">
+          <h2 className="text-base font-semibold text-slate-800">看片 · 拍板</h2>
+          {totalPending > 0 && (
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">{totalPending} 条待审</span>
+          )}
+        </div>
+
+        {loading && orders.length === 0 ? (
+          <p className="text-slate-400 text-sm">加载中…</p>
+        ) : reviewClients.length === 0 ? (
+          <div className="border border-slate-200 rounded-xl bg-white p-8 text-center text-slate-400 text-sm">
+            暂无待审成片。信号进来、片子做好后会出现在这里。
+          </div>
+        ) : (
+          <>
+            {reviewClients.length > 1 && (
+              <div className="flex flex-wrap gap-2 mb-4">
+                {reviewClients.map((c) => {
+                  const active = c.id === selectedClient
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => setSelectedClient(c.id)}
+                      className={`px-3 h-9 rounded-lg text-sm font-medium border transition-colors inline-flex items-center gap-2 ${
+                        active ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      {c.name}
+                      <span className={`text-xs px-1.5 rounded-full ${active ? 'bg-white/20' : 'bg-amber-100 text-amber-800'}`}>{c.count}</span>
+                    </button>
+                  )
+                })}
               </div>
-            </section>
-          )
-        })}
-      </div>
+            )}
+
+            {/* ReviewInbox(clientId)= 视频审核(左)+ 问 Claude 对话框(右)。key 切客户时重挂,刷新历史 */}
+            {selectedClient && <ReviewInbox key={selectedClient} clientId={selectedClient} />}
+          </>
+        )}
+      </section>
+
+      {/* ── 全局工单状态(次要,折叠)────────────────────────────────────────────── */}
+      <details className="group">
+        <summary className="cursor-pointer text-sm font-medium text-slate-600 flex items-center gap-2 select-none">
+          <span className="text-slate-400 group-open:rotate-90 transition-transform inline-block">▸</span>
+          全部工单状态 · {orders.length} 条
+          {deadCount > 0 && <span className="text-red-600">· ⚠️ {deadCount} 条卡住了,需你手动重试</span>}
+        </summary>
+
+        <div className="mt-4 space-y-6">
+          {orders.length === 0 && (
+            <p className="text-slate-400 text-sm">暂无工单。信号进来后会自动生成。</p>
+          )}
+          {grouped.map((g) => {
+            const meta = STATUS_META[g.status]
+            return (
+              <section key={g.status}>
+                <h3 className="text-sm font-medium text-slate-600 mb-2 flex items-center gap-2">
+                  <span className={`inline-block px-2 py-0.5 rounded-full text-xs ${meta.color}`}>{meta.label}</span>
+                  <span className="text-slate-400">{g.items.length}</span>
+                </h3>
+                <div className="space-y-2">
+                  {g.items.map((o) => (
+                    <div key={o.id} className="border border-slate-200 rounded-lg p-3 bg-white">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 text-sm">
+                            <span className="font-medium text-slate-800">{o.client_name}</span>
+                            <span className="text-slate-400">·</span>
+                            <span className="text-slate-500">{o.order_type}</span>
+                            {o.source_ad_id && <span className="text-xs text-slate-400">({o.source_ad_id})</span>}
+                          </div>
+                          <p className="text-sm text-slate-700 mt-1">{o.rationale_one_liner}</p>
+                          <p className="text-xs text-slate-400 mt-0.5">角度: {o.angle}</p>
+                          {o.reject_reason && (
+                            <p className="text-xs text-red-600 mt-1">失败原因: {o.reject_reason}</p>
+                          )}
+                          <p className="text-xs text-slate-400 mt-1">
+                            成本 ${Number(o.actual_cost_usd).toFixed(2)} / 上限 ${Number(o.budget_cap_usd).toFixed(2)}
+                            {o.attempt_count > 0 ? ` · 尝试 ${o.attempt_count}` : ''}
+                            {o.reclaim_count > 0 ? ` · 回收 ${o.reclaim_count}` : ''}
+                          </p>
+                        </div>
+                        {o.status === 'dead_letter' && (
+                          <button
+                            onClick={() => void revive(o.id)}
+                            disabled={reviving === o.id}
+                            className="shrink-0 px-3 py-1.5 text-sm rounded-lg bg-slate-900 text-white hover:bg-slate-700 disabled:opacity-50"
+                          >{reviving === o.id ? '重试中…' : '↻ 重新排队重试'}</button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )
+          })}
+        </div>
+      </details>
     </div>
   )
 }

@@ -120,11 +120,13 @@ export interface GateContext {
   clipStock: ClipSlice[]
   /** 附录 A: CTS=true,他客默认 false */
   allowBTrackLandmarkAds: boolean
+  /** B4:客户级持久真促销(factory_config.verified_offer),该客户所有活动默认带上;单条活动可用 signal 覆盖 */
+  verifiedOffer: VerifiedOffer | null
 }
 
 export interface AngleSource {
   /** 'inventory_gap' 仅 asset_gap 类工单用:补库存不是创意角度,溯源指向 evidence.scene_tag(魏征 M1-F11) */
-  type: 'content_pillar' | 'keyword_seed' | 'core_proposition' | 'winner_structure' | 'inventory_gap'
+  type: 'content_pillar' | 'core_proposition' | 'winner_structure' | 'inventory_gap'
   ref_id: string
   ref_text: string
 }
@@ -230,3 +232,5 @@ export type RejectReason =
   | 'daily_cost_cap'
   | 'rationale_template_failed'
   | 'unsupported_signal'
+  /** 价格广告红线:verifiedOffer(真价)客户无真拍(a_real)素材,不许用 AI 底料背书真价 */
+  | 'price_ad_needs_real_footage'

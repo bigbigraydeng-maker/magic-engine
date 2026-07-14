@@ -42,6 +42,7 @@ function makeCtx(over: Partial<GateContext> = {}): GateContext {
     dailyCostUsd: 0,
     clipStock: [],
     allowBTrackLandmarkAds: true,
+    verifiedOffer: null,
     ...over,
   }
 }
@@ -416,6 +417,62 @@ describe('实库形状兼容', () => {
           keyword_seeds: [],
           excluded_topics: [],
         },
+      }),
+    )
+    expect((d as { reason: string }).reason).toBe('angle_not_traceable')
+  })
+})
+
+describe('价格广告红线焊死 · verifiedOffer 客户真价只配真料', () => {
+  it('只有 AI 素材(b_generated)+ 有真价 → 拒单 price_ad_needs_real_footage(AI 绝不背书真价)', () => {
+    const d = decideSignal(
+      makeCtx({
+        verifiedOffer: { price_from: '$35.50/m²' },
+        allowBTrackLandmarkAds: true, // 即便 clipAllowed 放行 b_generated,价格广线仍拒
+        clipStock: [
+          { id: 'ai1', scene_tag: 'oz_kitchen_1', motion_type: null, track: 'b_generated', usage_count: 0, last_used_at: null },
+          { id: 'ai2', scene_tag: 'oz_bath_2', motion_type: null, track: 'b_generated', usage_count: 0, last_used_at: null },
+        ],
+      }),
+    )
+    expect((d as { reason: string }).reason).toBe('price_ad_needs_real_footage')
+  })
+
+  it('真料不足 5 镜 → 有几条真料出几镜,全真、0 生成(不掺 AI 补位)', () => {
+    const real = (id: string, tag: string) => ({ id, scene_tag: tag, motion_type: null, track: 'a_real' as const, usage_count: 0, last_used_at: null })
+    const d = decideSignal(
+      makeCtx({
+        verifiedOffer: { price_from: '$35.50/m²' },
+        clipStock: [real('r1', 'showroom_a'), real('r2', 'showroom_b')], // 只有 2 条真料
+      }),
+    )
+    const wo = (d as { workOrder: { brief: { segments: unknown[]; clip_generation_plan: unknown[] }; clip_links: unknown[] } }).workOrder
+    expect(wo.brief.segments).toHaveLength(2) // 2 真料 → 2 镜,不补到 5
+    expect(wo.brief.clip_generation_plan).toHaveLength(0) // 关键:不生成 AI 补位
+    expect(wo.clip_links).toHaveLength(2)
+  })
+})
+
+describe('修复作品根因 · 选片按来源 + 角度不用竞品词', () => {
+  it('选片:真实产品片(track=a_real)优先于 AI(b_generated),按来源判非文件名', () => {
+    // AI 片 scene_tag 看着更"产品"(oz_kitchen),真拍片中性名——只按 track 判。变异:去掉 track 排序 → 原序 'ai' 先 → fail
+    const d = decideSignal(
+      makeCtx({
+        clipStock: [
+          { id: 'ai', scene_tag: 'oz_kitchen_1', motion_type: null, track: 'b_generated', usage_count: 0, last_used_at: null },
+          { id: 'real', scene_tag: 'clip_zzz', motion_type: null, track: 'a_real', usage_count: 0, last_used_at: null },
+        ],
+      }),
+    )
+    const wo = (d as { workOrder: { clip_links: Array<{ clip_id: string }> } }).workOrder
+    expect(wo.clip_links[0].clip_id).toBe('real') // a_real 先挂,AI 沉后
+  })
+
+  it('pickAngle 不拿 keyword_seeds 当广告角度(竞品名不当自家角度)', () => {
+    // brief 只有 keyword_seeds(含竞品名 mapei/karndean)→ 无可溯源广告角度。变异:仍用 keyword_seeds → accepted → fail
+    const d = decideSignal(
+      makeCtx({
+        brief: { id: 'b', core_proposition: null, content_pillars: [], keyword_seeds: ['mapei brisbane', 'karndean brisbane'], excluded_topics: [] },
       }),
     )
     expect((d as { reason: string }).reason).toBe('angle_not_traceable')
