@@ -51,6 +51,7 @@ npm test           # 测试套件
 ## 文档
 
 - [CLAUDE.md](./CLAUDE.md) — 开发工作指南（AI Agent 指令）
+- [docs/voice-agent/](./docs/voice-agent/) — Voice Agent（AI 电话销售/客服）本地跑通、SIP/WhatsApp 配置、Runbook
 - [ROADMAP.md](./ROADMAP.md) — 产品路线图与任务跟踪
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — 技术架构设计
 - [PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md) — 产品视角概览
