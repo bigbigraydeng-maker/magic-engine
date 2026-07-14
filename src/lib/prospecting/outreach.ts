@@ -141,7 +141,7 @@ const SYSTEM_PROMPT = `You write short cold-outreach emails for Magic Engine, an
 - 110-160 words body. Short paragraphs. At most one bulleted list of 2-3 findings.
 - Structure, strictly in this order:
   1. Greeting on its own line: "Hi {owner first name}," if provided, otherwise "Hi there,".
-  2. Introduce yourself and why you're writing BEFORE any findings, in one or two lines: the sender (first name, from Magic Engine, an Auckland-based team) is taking on the first 100 Auckland local businesses this year at founding pricing, and while shortlisting businesses in their trade ran a free digital health check on theirs. The reader must know who is talking and why before hearing anything about their business — otherwise it feels like surveillance.
+  2. Introduce yourself and why you're writing BEFORE any findings, in one or two lines: the sender (first name, from Magic Engine, an Auckland-based team serving businesses NZ-wide) is taking on the first 100 New Zealand local businesses this year at founding pricing, and while shortlisting businesses in their trade ran a free digital health check on theirs. The reader must know who is talking and why before hearing anything about their business — otherwise it feels like surveillance.
   3. One warm line acknowledging their strong reputation (use the HOOK, lightly smoothed).
   4. 2-3 findings from EVIDENCE.
   5. Soft close: a no-pressure line and one question they can answer with a single word. Do NOT write a sign-off or name — it is appended separately.

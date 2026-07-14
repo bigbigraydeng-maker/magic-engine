@@ -217,8 +217,9 @@ export default async function ReportPage({ params }: { params: { id: string } })
         <div className="mt-4 flex items-center gap-2.5 rounded-2xl px-4 py-3" style={{ background: '#fff', border: `1px solid ${STONE}` }}>
           <span className="text-base">📍</span>
           <p className="text-xs leading-relaxed" style={{ color: 'rgba(26,26,26,0.65)' }}>
-            We&apos;re a local <span className="font-semibold" style={{ color: CHARCOAL }}>Auckland team</span> — real people, no offshore
-            call centre. Happy to jump on a call or <span className="font-semibold" style={{ color: CHARCOAL }}>pop in and see you in person</span>.
+            We&apos;re a <span className="font-semibold" style={{ color: CHARCOAL }}>New Zealand team</span> — real people, no offshore
+            call centre. In Auckland? <span className="font-semibold" style={{ color: CHARCOAL }}>We&apos;ll pop in and see you</span>. Anywhere
+            else in NZ? We do it all remotely.
           </p>
         </div>
 
@@ -372,16 +373,16 @@ export default async function ReportPage({ params }: { params: { id: string } })
           </section>
         )}
 
-        {/* Offer — founding deal, Auckland only (in-person promise) */}
+        {/* Offer — NZ-wide founding deal (Auckland in-person, rest of NZ remote) */}
         <section id="start" className="mt-6 scroll-mt-6 rounded-[24px] p-6 text-white" style={{ background: CHARCOAL }}>
           <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider"
                 style={{ background: 'rgba(235,203,139,0.16)', color: GOLD }}>
-            ★ Founding offer · first 100 Auckland businesses only
+            ★ Founding offer · first 100 New Zealand businesses only
           </span>
           <h2 className="mt-3 text-lg font-semibold" style={{ fontFamily: DISPLAY }}>We fix all of this in 90 days</h2>
           <p className="mt-2 text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.72)' }}>
             Get found, plug the leaks, and make it effortless for customers to reach you — search, social, ads
-            and follow-up, all done for you by AI and our Auckland team.
+            and follow-up, all done for you by AI and our New Zealand team.
           </p>
 
           {/* Price anchor */}
@@ -410,8 +411,8 @@ export default async function ReportPage({ params }: { params: { id: string } })
             <span className="text-lg">🤝</span>
             <p className="text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.75)' }}>
               <span className="font-bold text-white">Why this price?</span> You&apos;d be one of our first 100
-              Auckland partners. We come to you in person, do the work — and with your OK, your
-              before-and-after becomes one of our success stories. That&apos;s the trade.
+              New Zealand partners — in person if you&apos;re in Auckland, remotely anywhere else in NZ. We do the
+              work, and with your OK your before-and-after becomes one of our success stories. That&apos;s the trade.
             </p>
           </div>
 

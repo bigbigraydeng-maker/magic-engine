@@ -67,16 +67,17 @@ export const FOCUS_INDUSTRIES = [
 ] as const
 
 /**
- * First-wave city list. The $990 founding offer is Auckland-only (in-person
- * visits), so we stay inside Auckland — but search by AREA rather than one
- * Auckland-wide query. This (a) surfaces far more distinct local businesses
- * (each area returns its own top results) and (b) tags every prospect with the
- * area it was found in, so the outreach can name it ("...plumbers in West
- * Auckland..."), which lands better with a local operator. Still all Auckland,
- * so the visit promise holds. Widen via SWEEP_CITIES if the offer ever expands.
+ * City list — NZ-wide (P35.12, PM 2026-07-14). The $19.90 onboarding is fully
+ * automated and the $990 build is done-for-you by AI + team, so delivery no
+ * longer needs an in-person visit: Auckland gets the in-person option, the rest
+ * of NZ is served remotely. Auckland is still searched by AREA (each returns its
+ * own top results + a nameable local tag like "West Auckland"); the other metros
+ * are one query each. Widen/narrow via SWEEP_CITIES without a deploy.
  */
 export const FOCUS_CITIES = [
   'north_shore', 'west_auckland', 'south_auckland', 'east_auckland', 'central_auckland',
+  'wellington', 'christchurch', 'hamilton', 'tauranga', 'napier_hastings',
+  'palmerston_north', 'nelson', 'dunedin', 'rotorua',
 ] as const
 
 function envList(name: string, valid: (key: string) => boolean, fallback: readonly string[]): string[] {

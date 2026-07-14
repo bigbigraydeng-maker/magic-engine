@@ -67,7 +67,7 @@ export default function ReportLeadForm({
       <div className="rounded-2xl p-5 text-center" style={{ background: 'rgba(92,138,74,0.22)' }}>
         <p className="text-base font-semibold" style={{ color: '#A7D18F' }}>Thanks — we’ve got it ✓</p>
         <p className="mt-1.5 text-sm" style={{ color: 'rgba(255,255,255,0.78)' }}>
-          One of the Auckland team will be in touch within one business day. Talk soon.
+          One of our New Zealand team will be in touch within one business day. Talk soon.
         </p>
       </div>
     )
