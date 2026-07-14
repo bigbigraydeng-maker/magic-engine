@@ -108,6 +108,14 @@ describe("PATCH { action: 'send' }", () => {
     expect(updates).toHaveLength(0)
   })
 
+  it('falls back to the email column when audit.tracking has no email (P35.11 re-scan)', async () => {
+    selectRow!.audit = null                       // re-scan wrote only the email column
+    ;(selectRow as Record<string, unknown>).email = 'found@rescanned.co.nz'
+    const res = await send()
+    expect(res.status).toBe(200)
+    expect((sendMock.mock.calls[0][0] as { to: string }).to).toBe('found@rescanned.co.nz')
+  })
+
   it('422s a placeholder/service email (mysite.com) — never sends or claims', async () => {
     selectRow!.audit = { tracking: { emails: ['info@mysite.com'] } }
     const res = await send()

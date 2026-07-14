@@ -18,8 +18,12 @@ import { guardAdmin } from '@/lib/auth/require-admin'
 import { discoverContactEmail, type ProspectAudit } from '@/lib/prospecting/audit'
 import { isJunkContactEmail } from '@/lib/prospecting/tracking-detector'
 
-const DEFAULT_BATCH = 20
-const MAX_BATCH = 50
+const DEFAULT_BATCH = 12
+const MAX_BATCH = 20
+// Each prospect is up to 1 homepage + 8 contact-page fetches, all serial, so
+// bound the whole request by wall-clock too — stop cleanly and return what we
+// scanned rather than letting the platform gateway time the request out.
+const TIME_BUDGET_MS = 60_000
 
 // Statuses where a backfilled email actually unblocks the prospect. outreach_ready
 // first (has a draft → instantly sendable), then the funnel stages that gate on
@@ -45,8 +49,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   let scanned = 0
   let found = 0
+  const deadline = Date.now() + TIME_BUDGET_MS
 
   for (const p of (batch ?? []) as Array<{ id: string; website_url: string | null; domain: string | null; audit: ProspectAudit | null; status: string }>) {
+    if (Date.now() > deadline) break   // return what we have; the rest waits for the next click
     scanned++
     const site = p.website_url ?? p.domain
     if (!site) continue

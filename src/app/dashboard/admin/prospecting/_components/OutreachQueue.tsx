@@ -114,7 +114,7 @@ export default function OutreachQueue() {
     setBusy('rescan'); setError(''); setMessage('')
     try {
       const res = await fetch('/api/admin/prospecting/rescan-emails', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit: 40 }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit: 12 }),
       })
       const data = await res.json() as { scanned?: number; found?: number; remaining?: number; error?: string }
       if (!res.ok) throw new Error(data.error ?? '补扫失败')

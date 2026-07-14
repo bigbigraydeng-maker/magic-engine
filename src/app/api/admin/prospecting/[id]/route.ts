@@ -114,14 +114,18 @@ async function handleSend(id: string): Promise<NextResponse> {
 
   const { data: row, error: readError } = await supabaseAdmin
     .from('outbound_prospects')
-    .select('business_name, status, audit, outreach_email')
+    .select('business_name, status, audit, email, outreach_email')
     .eq('id', id)
-    .maybeSingle<{ business_name: string; status: string; audit: ProspectAudit | null; outreach_email: OutreachEmail | null }>()
+    .maybeSingle<{ business_name: string; status: string; audit: ProspectAudit | null; email: string | null; outreach_email: OutreachEmail | null }>()
   if (readError) return NextResponse.json({ error: readError.message }, { status: 500 })
   if (!row) return NextResponse.json({ error: 'not found' }, { status: 404 })
   if (row.status !== 'outreach_ready') return NextResponse.json({ error: '不在待审状态（可能已发送）' }, { status: 409 })
 
-  const to = row.audit?.tracking?.emails?.[0]?.trim()
+  // Read audit.tracking.emails first, but fall back to the `email` column — the
+  // two can diverge (the email re-scan / P35.11 writes the column when the audit
+  // had no tracking), and the queue UI decides "sendable" off the column, so
+  // without this fallback a card looks sendable but 400s here.
+  const to = (row.audit?.tracking?.emails?.[0] ?? row.email)?.trim()
   if (!to) return NextResponse.json({ error: '该商家没有邮箱，只能电话跟进' }, { status: 400 })
   // Refuse placeholder / marketing-service addresses scraped before the junk
   // filter widened — sending there wastes a send and dents domain reputation.
