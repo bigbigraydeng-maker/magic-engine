@@ -81,7 +81,10 @@ function buildNonDestructiveLeadPatch(existing: LeadRow | null, s: CallSummary):
   fill('currency', u.currency)
   fill('preferred_area', u.preferred_area)
   fill('timeline', u.timeline)
-  if (existing == null && (s.intent_level)) patch.intent_level = s.intent_level
+  // intent_level is set only when finalize itself is creating the lead — an existing
+  // lead already carries the TOOL-confirmed intent (create_or_update_lead always sets
+  // it), which the summary must never overwrite. Intentional, not a fill() (子牙 INFO-B).
+  if (existing == null && s.intent_level) patch.intent_level = s.intent_level
   return patch
 }
 

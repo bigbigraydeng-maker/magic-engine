@@ -191,8 +191,15 @@ export class SupabaseVoiceStore implements VoiceStore {
     return { isNew: true, row: data as WebhookEventRow }
   }
   async markWebhookProcessed(id: string, status: string, error?: string) {
+    // increment attempts to match the in-memory store's semantics (子牙复审 BUG-1).
+    // PostgREST can't self-reference a column in UPDATE, so read-then-write; attempts
+    // is a soft observability counter, so a non-atomic bump is acceptable here.
+    const cur = await this.one<{ attempts: number }>(
+      this.db.from('voice_webhook_events').select('attempts').eq('id', id).maybeSingle(),
+    )
     await this.db.from('voice_webhook_events')
-      .update({ status, error: error ?? null, processed_at: new Date().toISOString() }).eq('id', id)
+      .update({ status, error: error ?? null, processed_at: new Date().toISOString(), attempts: (cur?.attempts ?? 0) + 1 })
+      .eq('id', id)
   }
 
   async isSuppressed(tenantId: string, phoneE164: string) {
