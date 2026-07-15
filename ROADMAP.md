@@ -4903,9 +4903,9 @@ P33.9（PR #301/#302 — Goal filter 状态 chips 数字跟随）/ P33.10（未�
 - [x] provision CLI（真实号建租户+agent+route，不碰 SQL）+ 生产库配好测试号 Mia
 
 剩余开发（不依赖付款，可先做）：
-- [ ] **SupabaseVoiceStore 活库集成测试**（最大残留风险，上真客户前必补 · ~1d）
-- [ ] **知识库上传 UI**（现在只能后台灌，无界面 · ~1.5d）
-- [ ] **tenant→client 映射 + 转接白名单 Settings UI**（CLAUDE.md 红线：配置类必须有 UI · ~1.5d）
+- [x] **SupabaseVoiceStore 活库集成测试**（真库 SQL 验证 7/7 通过 + `scripts/voice/test-supabase-store.ts` JS 集成测试 · PR #601）
+- [x] **知识库上传 UI**（粘文本版 · PR #600）
+- [x] **tenant→client 映射 + 转接白名单 Settings UI + agent/路由后台配置**（PR #600，零 SQL）
 - [ ] 首呼后校准 `mapRealtimeEvent`（需真呼一次才知实际事件名）
 
 ### 36.B 助攻式双语外呼（Phase 2，spec 已锁）📋 L 档 ≈ 3–4 周
