@@ -95,45 +95,11 @@ services:
           name: magic-engine
           property: host
 
-  # ── Voice Agent realtime worker (persistent private service) ──
-  # spec §4/§23: holds the OpenAI realtime control WebSocket open per call. MUST be a
-  # long-lived process (private service), NOT a cron/serverless function.
-  # The web service dispatches accepted calls to this worker at REALTIME_WORKER_URL
-  # (its private internal URL — set REALTIME_WORKER_URL on the web service to
-  # http://voice-realtime-worker:<internal-port> shown in the Render dashboard).
-  # buildCommand uses --include=dev so `tsx` (a devDependency) is available at runtime.
-  - type: pserv
-    name: voice-realtime-worker
-    env: node
-    plan: starter
-    buildCommand: npm install --include=dev
-    startCommand: npx tsx scripts/voice/realtime-worker.ts
-    healthCheckPath: /health/ready
-    envVars:
-      - key: NEXT_PUBLIC_SUPABASE_URL
-        sync: false
-      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: OPENAI_PROJECT_ID
-        sync: false
-      - key: OPENAI_REALTIME_MODEL
-        value: gpt-realtime-2.1-mini
-      - key: OPENAI_SUMMARY_MODEL
-        value: gpt-4o-mini
-      - key: OPENAI_KB_MODEL
-        value: gpt-4o-mini
-      - key: INTERNAL_WORKER_TOKEN
-        sync: false
-      - key: VOICE_STORE
-        value: supabase
-      - key: DEFAULT_COUNTRY
-        value: NZ
-      - key: DEFAULT_TIMEZONE
-        value: Pacific/Auckland
+  # NOTE: Voice Agent realtime link runs IN-PROCESS inside the web service (MVP mode) —
+  # the webhook opens the OpenAI realtime WebSocket directly, so NO separate worker
+  # service is needed. To scale it out later, deploy scripts/voice/realtime-worker.ts as
+  # a Render private service and set REALTIME_WORKER_URL on the web service to its
+  # internal URL (see docs/voice-agent/RUNBOOK.md).
 
   # Vision Asset Intelligence analyzer — every 2 minutes
   # Picks up pending client_assets, runs GPT-4o-mini Vision, writes scores.

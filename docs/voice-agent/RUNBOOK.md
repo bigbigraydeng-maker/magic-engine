@@ -2,18 +2,16 @@
 
 ## Processes
 
-- **Web + API** (Next.js, Render `web`): webhooks, admin API, dashboard.
-- **Realtime worker** (`scripts/voice/realtime-worker.ts`): a **persistent** Node
-  process that holds the OpenAI realtime control WebSocket per call. Deployed as a
-  Render **private service** (`pserv` `voice-realtime-worker` in render.yaml) — never a
-  serverless/cron function that dies after ~30s. Health: `GET /health/live`, `/health/ready`.
-  - Listens on `PORT` (Render) → falls back to `REALTIME_WORKER_PORT` → 4100.
-  - `buildCommand: npm install --include=dev` so `tsx` (a devDependency) is available.
-  - The web service dispatches accepted calls via `POST {REALTIME_WORKER_URL}/internal/realtime/sessions`
-    with `Authorization: Bearer INTERNAL_WORKER_TOKEN` (same token on both services).
-    Set `REALTIME_WORKER_URL` to the worker's Render **internal URL**.
-  - Deploy order: worker first (get its internal URL) → set `REALTIME_WORKER_URL` on
-    web → redeploy web. Full go-live steps: `docs/voice-agent/SIP_SETUP.md`.
+- **Web + API** (Next.js, Render `web`): webhooks, admin API, dashboard — **and, by
+  default, the realtime link itself**. The `/api/voice/webhooks/openai` route opens the
+  OpenAI realtime WebSocket **in-process** (the web service is a persistent `next start`
+  Node server, so the fire-and-forget ws lives on the event loop). **No separate worker
+  service is required for MVP.** Trade-off: a web redeploy drops in-flight calls.
+- **Realtime worker (optional, for scale)** (`scripts/voice/realtime-worker.ts`): a
+  persistent process that offloads the ws from the web service. Deploy it as a Render
+  **private service** and set `REALTIME_WORKER_URL` (+ matching `INTERNAL_WORKER_TOKEN`)
+  on the web service to its internal URL; the webhook then dispatches to it instead of
+  running in-process. Health: `GET /health/live`, `/health/ready`. Listens on `PORT`.
 
 ## Outbound safety (hard rules)
 

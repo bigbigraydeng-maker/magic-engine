@@ -59,22 +59,24 @@ inbound to an **external SIP URI**, (b) **TLS/sips** supported, (c) **passes the
 called number** (To / P-Called-Party-ID / Diversion). The CPaaS options above have
 all three by default.
 
-## C. Render env
+## C. Render env (web service only — no separate worker)
 
-**web service `magic-engine`** — set (render.yaml already declares them):
-`OPENAI_API_KEY`, `OPENAI_PROJECT_ID`, `OPENAI_WEBHOOK_SECRET`, `INTERNAL_WORKER_TOKEN`
-(any strong random string), `REALTIME_WORKER_URL` (see below), `VOICE_STORE=supabase`,
-`OUTBOUND_CALLING_ENABLED=false`.
+The realtime link runs **in-process inside the web service** (MVP mode), so you only
+configure the existing **`magic-engine` web service** — no new service, no private
+networking. Set these env vars (render.yaml declares them):
 
-**private service `voice-realtime-worker`** (new in render.yaml) — set the same
-`SUPABASE_*`, `OPENAI_API_KEY`, `OPENAI_PROJECT_ID`, `INTERNAL_WORKER_TOKEN`.
+- `OPENAI_API_KEY`
+- `OPENAI_PROJECT_ID` = `proj_...`
+- `OPENAI_WEBHOOK_SECRET` = your `whsec_...`
+- `VOICE_DEFAULT_AGENT_ID` = the agent id from provisioning (single-number fallback)
+- `VOICE_STORE` = `supabase`
+- `OUTBOUND_CALLING_ENABLED` = `false`
 
-**Wire the dispatch**: after the worker deploys, Render shows its **internal URL**.
-Set `REALTIME_WORKER_URL` on the **web** service to `http://voice-realtime-worker:<port>`
-(the internal host:port Render shows). Redeploy the web service.
+Leave `REALTIME_WORKER_URL` **unset** — that keeps the ws in-process. (Only set it later
+if you deploy the optional standalone worker for scale; see RUNBOOK.)
 
-> `INTERNAL_WORKER_TOKEN` must be **identical** on web + worker (web authenticates its
-> dispatch to the worker with it).
+> ⚠️ A failed workspace payment on Render blocks all deploys — fix billing first, or the
+> env changes and code won't go live.
 
 ## D. Provision your real number (no SQL)
 
