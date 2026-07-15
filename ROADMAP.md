@@ -4880,3 +4880,53 @@ P33.9（PR #301/#302 — Goal filter 状态 chips 数字跟随）/ P33.10（未�
 - `website/ai-training.html`、`website/ai-automation.html`、`website/ai-marketing-smes.html` 以及 `/cn/` 对应页已上线，SME-first public surface 补齐
 - `website/index.html`、`website/cn/index.html`、`website/robots.txt`、`website/sitemap.xml` 已同步新页面入口与抓取路径
 
+
+---
+
+## Phase 36 — Voice Agent（AI 电话销售/客服）🔄 建设中
+
+> 多租户 AI 语音销售 + 电话客服，底层 OpenAI Realtime 原生 SIP。DAPE「E 执行」新战线，
+> 跨 6 支柱的销售/口碑触达。spec: `docs/voice-agent/`（LOCAL_SETUP / SIP_SETUP / RUNBOOK /
+> assisted-bilingual-outbound）。三审：子牙 + 魏征 + 板桥。
+>
+> **总闸依赖**：Render 付款恢复 + 真 OpenAI key + SIP 号（首测 US/AU，NZ 生产号 PM 采购）。
+
+### 36.A 基础全自动通话（P0）— 代码基本完成
+
+已完成（PR #593/#594/#596/#597 已合 main）：
+- [x] 14 张 `voice_` 表 migration（已 apply + RLS 验证）
+- [x] 多租户引擎：webhook 验签+幂等、号码路由、prompt compiler、tool router、6 工具
+- [x] 知识库关键词检索 + 租户隔离；finalize 摘要 + 非破坏性 lead 合并
+- [x] 真实 OpenAI realtime ws 桥接（mapRealtimeEvent 纯映射 + verbatim 注入范本）
+- [x] Dashboard（通话/线索/总览，promises_made 最显眼）
+- [x] in-process 模式（ws 跑 web 服务内，不建独立 worker）+ 默认 agent 兜底
+- [x] provision CLI（真实号建租户+agent+route，不碰 SQL）+ 生产库配好测试号 Mia
+
+剩余开发（不依赖付款，可先做）：
+- [ ] **SupabaseVoiceStore 活库集成测试**（最大残留风险，上真客户前必补 · ~1d）
+- [ ] **知识库上传 UI**（现在只能后台灌，无界面 · ~1.5d）
+- [ ] **tenant→client 映射 + 转接白名单 Settings UI**（CLAUDE.md 红线：配置类必须有 UI · ~1.5d）
+- [ ] 首呼后校准 `mapRealtimeEvent`（需真呼一次才知实际事件名）
+
+### 36.B 助攻式双语外呼（Phase 2，spec 已锁）📋 L 档 ≈ 3–4 周
+
+真人后台**纯语音** driving，AI 当嘴+翻译+资料库，客户听母语 AI 语音。两模式：纯人工输出 /
+AI Mix（读知识库）。spec: `docs/voice-agent/assisted-bilingual-outbound.md`。
+- [ ] **0. 真机 spike**（验 verbatim 哑巴模式，最先做 · 1d）— 决定后 3 周走法
+- [ ] 1. **真实外呼发起**（现为 mock stub，provider 真拨号 API · 2–3d）
+- [ ] 2. 浏览器↔通话实时通道（SSE 下行 + POST 上行 · 3–4d）
+- [ ] 3. operator 编排层（STT→翻译/KB→注入 · 3–4d）
+- [ ] 4. bridge 改造（逐字朗读 + 哑巴模式 + 垫场 · 4–6d）
+- [ ] 5. 操作台 UI（纯语音，双语字幕+模式开关+价格确认+kill switch · 4–5d）
+- [ ] 6. 操作员语音转文字 STT 接入（1–2d）
+- [ ] 7. 安全（通道租户鉴权 + kill switch + 掉线兜底 · 2–3d）+ 狄仁杰攻击验证
+- [ ] 8. 填充语/轮次管理/快捷话术打磨（2–3d）
+- [ ] 9. 合规（披露脚本 + DNC + 录音，**过法务** · 1–2d + 法务）
+- 验收硬指标：被叫客户冷场秒数；陪 Roman 跑 3–5 通真实电话。
+
+### 36.C Backlog（第二步，PM 明确降级 2026-07-16）
+
+- [ ] WhatsApp 文字 + 语音消息（P1）
+- [ ] CRM adapter（接外部 CRM，现只内置权威）
+- [ ] 全自动外呼 campaign（批量）+ suppression 逻辑
+- [ ] 生产级知识库（OpenAI 向量库语义检索，替代关键词版）
