@@ -4,9 +4,16 @@
 
 - **Web + API** (Next.js, Render `web`): webhooks, admin API, dashboard.
 - **Realtime worker** (`scripts/voice/realtime-worker.ts`): a **persistent** Node
-  process that holds the OpenAI realtime control WebSocket per call. Must run on
-  Render/Fly/Railway as a **`worker`** service — never a serverless function that
-  dies after ~30s. Health: `GET /health/live`, `/health/ready`.
+  process that holds the OpenAI realtime control WebSocket per call. Deployed as a
+  Render **private service** (`pserv` `voice-realtime-worker` in render.yaml) — never a
+  serverless/cron function that dies after ~30s. Health: `GET /health/live`, `/health/ready`.
+  - Listens on `PORT` (Render) → falls back to `REALTIME_WORKER_PORT` → 4100.
+  - `buildCommand: npm install --include=dev` so `tsx` (a devDependency) is available.
+  - The web service dispatches accepted calls via `POST {REALTIME_WORKER_URL}/internal/realtime/sessions`
+    with `Authorization: Bearer INTERNAL_WORKER_TOKEN` (same token on both services).
+    Set `REALTIME_WORKER_URL` to the worker's Render **internal URL**.
+  - Deploy order: worker first (get its internal URL) → set `REALTIME_WORKER_URL` on
+    web → redeploy web. Full go-live steps: `docs/voice-agent/SIP_SETUP.md`.
 
 ## Outbound safety (hard rules)
 

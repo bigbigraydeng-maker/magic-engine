@@ -27,7 +27,8 @@ import { buildSession } from '../../src/lib/voice/realtime/worker'
 import { RecordingSink } from '../../src/lib/voice/realtime/session'
 import { startRealtimeSession, type OpenAiRealtimeBridge } from '../../src/lib/voice/realtime/openai-bridge'
 
-const PORT = Number(process.env.REALTIME_WORKER_PORT ?? 4100)
+// Render assigns PORT for private/web services; fall back to the configured/dev port.
+const PORT = Number(process.env.PORT ?? process.env.REALTIME_WORKER_PORT ?? 4100)
 
 // active real-call bridges, keyed by callId (for /stop + cleanup)
 const activeBridges = new Map<string, OpenAiRealtimeBridge>()
