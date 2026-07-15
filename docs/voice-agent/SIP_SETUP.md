@@ -24,24 +24,34 @@ Do the steps in order. **A–B–C need a computer + third-party consoles; D–E
 
 ## B. SIP provider — buy a number + forward to OpenAI
 
-Pick one. **Telnyx** and **SignalWire** are both self-serve, AU+NZ capable, and
-natively forward inbound calls to an external SIP URI over TLS.
+Pick one. Both are self-serve, AU+NZ capable, and forward inbound calls to an
+external SIP URI over TLS.
 
-### Option 1 — Telnyx (recommended)
-1. Buy an **AU or NZ number** (Numbers → Search & Buy).
-2. **Voice → SIP Trunking** → create a connection (FQDN / Outbound Voice Profile).
-3. Point the connection's **destination / origination URI** at:
+### Option 1 — SignalWire (recommended; cXML `<Dial><Sip>`)
+1. Sign up at signalwire.com → create a **Space** (pick a subdomain).
+2. **Phone Numbers → Buy a Number** → filter **AU** or **NZ** → buy.
+3. **cXML Scripts** (a.k.a. LaML Bins) → **New** → paste (replace `{OPENAI_PROJECT_ID}`):
+   ```xml
+   <?xml version="1.0" encoding="UTF-8"?>
+   <Response>
+     <Dial answerOnBridge="true">
+       <Sip>sip:{OPENAI_PROJECT_ID}@sip.api.openai.com;transport=tls</Sip>
+     </Dial>
+   </Response>
    ```
-   sip:{OPENAI_PROJECT_ID}@sip.api.openai.com;transport=tls
-   ```
-4. Attach the purchased number's **inbound** to that connection. Ensure **TLS**
-   (port 5061) and that the **called (To) number is passed through** (default).
+   Transport defaults to TLS; the `<Sip>` noun accepts external URIs. Save → note its URL.
+4. **Phone Numbers → your number → Voice settings → Handle Calls Using → cXML Script**
+   → select the script → Save.
 
-### Option 2 — SignalWire
-1. Buy an AU/NZ number.
-2. Set the number's **inbound handler → SIP forward** to:
-   `sip:{OPENAI_PROJECT_ID}@sip.api.openai.com;transport=tls`
-3. Confirm TLS + called-number pass-through.
+> ⚠️ cXML `<Dial><Sip>` rewrites the SIP `To` to the OpenAI URI, so OpenAI may not see
+> your original DID. For a single number, set **`VOICE_DEFAULT_AGENT_ID`** (step D prints
+> the agent id) on the **web** service so the call routes to that agent regardless.
+
+### Option 2 — Telnyx (if you prefer a raw SIP trunk)
+1. Buy an **AU/NZ number**. 2. **Voice → SIP Trunking** → create a connection. 3. Point
+its **origination URI** at `sip:{OPENAI_PROJECT_ID}@sip.api.openai.com;transport=tls`.
+4. Attach the number's inbound to it (TLS 5061; passes the called number by default →
+no default-agent needed).
 
 ### Local telcos (Devoli NZ+AU / 2talk NZ / Symbio·MaxoTel AU)
 Cheaper local minutes / porting, but **confirm before buying**: (a) can forward

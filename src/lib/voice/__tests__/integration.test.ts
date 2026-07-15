@@ -166,6 +166,21 @@ describe('Voice Agent — full mock closed loop', () => {
     expect(provider.log.rejected.length).toBe(1)
   })
 
+  it('unknown DID + VOICE_DEFAULT_AGENT_ID set → accepted via default agent (single-number fallback)', async () => {
+    process.env.VOICE_DEFAULT_AGENT_ID = tenantOf(seed, 'magic-engine-demo').agentId
+    resetVoiceConfigCache()
+    try {
+      const wh = buildIncomingWebhook({ calledNumber: '+6499999999', callerNumber: '+61400111222' })
+      const res = await handleOpenAiWebhook(wh.rawBody, wh.headers, { store, provider })
+      expect(res.accepted).toBe(true)
+      const call = await store.getCallById(res.callId!)
+      expect(call?.agent_id).toBe(tenantOf(seed, 'magic-engine-demo').agentId)
+    } finally {
+      delete process.env.VOICE_DEFAULT_AGENT_ID
+      resetVoiceConfigCache()
+    }
+  })
+
   it('outbound: gate blocks non-test number; test number runs full loop', async () => {
     // outbound disabled, no test numbers configured → non-test blocked
     process.env.VOICE_TEST_NUMBERS = '+6421999999'

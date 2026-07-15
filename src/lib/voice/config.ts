@@ -49,6 +49,9 @@ const EnvSchema = z.object({
   OUTBOUND_CALLING_ENABLED: z.string().optional(),
   VOICE_TEST_NUMBERS: z.string().optional(), // 逗号分隔的沙盒白名单 E.164
 
+  // 单号首呼兜底：DID 未透传时用此 agent（spec §8.2 step 8）
+  VOICE_DEFAULT_AGENT_ID: z.string().optional(),
+
   VOICE_STORE: z.enum(['auto', 'memory', 'supabase']).default('auto'),
 })
 

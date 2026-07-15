@@ -35,6 +35,8 @@ services:
         value: "false"        # sandbox only until real-call go-live (板桥 硬闸 #3)
       - key: VOICE_TEST_NUMBERS
         sync: false
+      - key: VOICE_DEFAULT_AGENT_ID
+        sync: false           # single-number fallback when the DID isn't preserved
       - key: DEFAULT_COUNTRY
         value: NZ
       - key: DEFAULT_TIMEZONE

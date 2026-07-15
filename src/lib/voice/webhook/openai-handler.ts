@@ -101,17 +101,28 @@ export async function handleOpenAiWebhook(
     return { httpStatus: 400, body: { error: 'REALTIME_TOOL_INVALID_ARGS', reason: 'missing call_id' } }
   }
 
-  // 5. resolve route
+  // 5. resolve route by dialed number; fall back to a configured default agent when
+  //    the DID isn't preserved (some providers' cXML <Dial><Sip> rewrites the To to the
+  //    OpenAI URI). spec §8.2 step 8. Set VOICE_DEFAULT_AGENT_ID for single-number setups.
   const routes = await store.listActiveRoutes()
   const route = resolveRoute(routes, calledNumber)
-  if (!route) {
+
+  let tenant
+  let agent
+  let channel = 'sip'
+  if (route) {
+    tenant = await store.getTenantById(route.tenant_id)
+    agent = await store.getAgentById(route.agent_id)
+    channel = route.channel ?? 'sip'
+  } else if (cfg.env.VOICE_DEFAULT_AGENT_ID) {
+    agent = await store.getAgentById(cfg.env.VOICE_DEFAULT_AGENT_ID)
+    tenant = agent ? await store.getTenantById(agent.tenant_id) : null
+  } else {
     await provider.reject(openaiCallId, 'no route for called number')
     await markProcessed(store, eventId, 'processed', 'ROUTE_NOT_FOUND')
     return { httpStatus: 200, body: { received: true, status: 'rejected', reason: 'ROUTE_NOT_FOUND' } }
   }
 
-  const tenant = await store.getTenantById(route.tenant_id)
-  const agent = await store.getAgentById(route.agent_id)
   if (!tenant || !agent) {
     await provider.reject(openaiCallId, 'route misconfigured')
     await markProcessed(store, eventId, 'failed', 'route misconfigured')
@@ -135,7 +146,7 @@ export async function handleOpenAiWebhook(
   // 7. create call (ringing)
   const call = await store.createCall({
     tenant_id: tenant.id, agent_id: agent.id, contact_id: contactId, lead_id: null,
-    channel: route.channel ?? 'sip', direction: 'inbound', provider: provider.simulated ? 'mock' : 'openai',
+    channel, direction: 'inbound', provider: provider.simulated ? 'mock' : 'openai',
     is_simulated: provider.simulated, provider_call_id: null, openai_call_id: openaiCallId,
     from_number: callerNumber, to_number: calledNumber, status: 'ringing',
     started_at: new Date().toISOString(), answered_at: null, ended_at: null, duration_seconds: null,
