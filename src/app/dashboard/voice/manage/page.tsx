@@ -1,6 +1,7 @@
 /** Voice Agent admin hub — tenants list + create. Configure agents end-to-end, no SQL. */
 import Link from 'next/link'
 import { getVoiceStore } from '@/lib/voice/store'
+import { MePanel, MePanelHeader, MeButton, MeChip } from '@/components/ui/me-primitives'
 import { CreateTenantForm } from '../_components/admin-forms'
 
 export const dynamic = 'force-dynamic'
@@ -20,28 +21,41 @@ export default async function VoiceManagePage() {
   } catch (e) { error = (e as Error).message }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto text-slate-100">
-      <div className="flex items-center justify-between mb-1">
-        <h1 className="text-2xl font-semibold">Voice Agent — Manage</h1>
-        <Link href="/dashboard/voice" className="text-sm text-slate-400 hover:text-slate-200">← overview</Link>
-      </div>
-      <p className="text-slate-400 mb-6 text-sm">配置语音租户 / agent / 号码路由 / 知识库 —— 全程后台，不碰 SQL。</p>
+    <div className="font-sans">
+      <header className="sticky top-0 z-20 flex items-center justify-between gap-5 border-b border-black/10 bg-[#FBF8F3]/80 px-8 py-5 backdrop-blur-md">
+        <div>
+          <h1 className="font-display text-2xl font-semibold tracking-tight text-me-charcoal">Voice Agent · 配置</h1>
+          <p className="mt-0.5 text-[13px] text-black/55">配置语音租户 / agent / 号码路由 / 知识库 —— 全程后台，不碰 SQL。</p>
+        </div>
+        <MeButton href="/dashboard/voice" variant="ghost" size="sm">← 总览</MeButton>
+      </header>
 
-      {error && <div className="rounded border border-amber-600/50 bg-amber-900/20 p-3 mb-4 text-sm text-amber-200">Voice tables unavailable: {error}</div>}
+      <div className="px-8 py-7 space-y-6 max-w-5xl">
+        {error && (
+          <MePanel className="border-[#C4912E]/30 bg-[#C4912E]/[.06]">
+            <div className="text-sm text-black/60">Voice tables unavailable: {error}</div>
+          </MePanel>
+        )}
 
-      <div className="mb-6"><CreateTenantForm /></div>
+        <CreateTenantForm />
 
-      <h2 className="text-lg font-medium mb-2">Tenants</h2>
-      <div className="space-y-2">
-        {tenants.map((t) => (
-          <Link key={t.id} href={`/dashboard/voice/tenants/${t.id}`} className="block rounded-lg border border-slate-700 bg-slate-800/40 p-4 hover:bg-slate-800">
-            <div className="flex items-center justify-between">
-              <div><span className="font-medium">{t.name}</span> <span className="text-slate-500 text-sm">/{t.slug}</span></div>
-              <div className="text-xs text-slate-400">{t.agents} agents · {t.routes} routes · {t.kb} docs · {t.client_id ? 'mapped ✓' : 'no client map'}</div>
-            </div>
-          </Link>
-        ))}
-        {tenants.length === 0 && !error && <div className="text-slate-500 text-sm">No tenants yet — create one above.</div>}
+        <MePanel>
+          <MePanelHeader title="Tenants" right={<MeChip>{tenants.length}</MeChip>} />
+          <div className="space-y-2">
+            {tenants.map((t) => (
+              <Link key={t.id} href={`/dashboard/voice/tenants/${t.id}`} className="block rounded-2xl border border-black/[.06] px-4 py-3.5 transition-colors hover:bg-[#FBF8F3]">
+                <div className="flex items-center justify-between gap-3">
+                  <div><span className="font-display font-semibold text-me-charcoal">{t.name}</span> <span className="text-[13px] text-black/40">/{t.slug}</span></div>
+                  <div className="flex items-center gap-1.5 text-xs">
+                    <MeChip>{t.agents} agents</MeChip><MeChip>{t.routes} routes</MeChip><MeChip>{t.kb} docs</MeChip>
+                    <MeChip gold={Boolean(t.client_id)}>{t.client_id ? '已映射' : '未映射'}</MeChip>
+                  </div>
+                </div>
+              </Link>
+            ))}
+            {tenants.length === 0 && !error && <div className="text-sm text-black/45">还没有租户 — 上方新建一个。</div>}
+          </div>
+        </MePanel>
       </div>
     </div>
   )
