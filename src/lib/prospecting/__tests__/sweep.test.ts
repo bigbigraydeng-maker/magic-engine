@@ -97,6 +97,19 @@ describe('buildCombos', () => {
     expect(industries.has('travel_agencies')).toBe(false)
   })
 
+  it('excludes the low-fit industries retired 2026-07-16 (PM go)', () => {
+    const industries = new Set(buildCombos([...FOCUS_INDUSTRIES]).map(c => c.industry))
+    // Captive trades + soft-market builders + B2B cleaning — no longer swept.
+    for (const cut of ['builders', 'plumbers', 'electricians', 'commercial_cleaning']) {
+      expect(industries.has(cut), cut).toBe(false)
+    }
+    // …and the discretionary / people-led expansion IS swept (each also needs a
+    // Places search label, or buildCombos would silently drop it).
+    for (const kept of ['hvac', 'beauty_salons', 'driving_schools', 'music_schools', 'tutoring']) {
+      expect(industries.has(kept), kept).toBe(true)
+    }
+  })
+
   it('drops unknown industry keys instead of seeding a labelless search', () => {
     const combos = buildCombos(['plumbers', 'not_a_real_industry'])
     expect(new Set(combos.map(c => c.industry))).toEqual(new Set(['plumbers']))

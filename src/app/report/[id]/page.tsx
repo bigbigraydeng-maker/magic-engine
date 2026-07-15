@@ -138,7 +138,7 @@ export default async function ReportPage({ params }: { params: { id: string } })
 
   // Industries where the practitioner IS the brand — a presenter-video add-on
   // (AI avatar, plain-language, no vendor name) lands; trades don't need it.
-  const PERSONAL_BRAND = new Set(['lawyers', 'cosmetic_clinics', 'dentists', 'accountants', 'mortgage_brokers', 'education_consultants'])
+  const PERSONAL_BRAND = new Set(['lawyers', 'cosmetic_clinics', 'dentists', 'accountants', 'mortgage_brokers', 'education_consultants', 'beauty_salons', 'driving_schools', 'music_schools', 'tutoring'])
   const personalBrand = PERSONAL_BRAND.has(p.industry)
 
   // The real package phases (weeks 1–3 foundation → 3–8 lead engine → 9–12

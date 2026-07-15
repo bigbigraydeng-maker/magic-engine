@@ -101,6 +101,10 @@ export const INDUSTRY_LABELS: Record<string, string> = {
   travel_agencies:     'travel agency',
   landscaping:         'landscaping company',
   commercial_cleaning: 'commercial cleaning company',
+  beauty_salons:       'beauty salon',
+  driving_schools:     'driving school',
+  music_schools:       'music school',
+  tutoring:            'tutoring centre',
 }
 
 const HOMEPAGE_CHAR_CAP = 6_000
