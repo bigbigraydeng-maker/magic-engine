@@ -46,7 +46,10 @@ export default async function VoiceDashboardPage() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto text-slate-100">
-      <h1 className="text-2xl font-semibold mb-1">Voice Agent</h1>
+      <div className="flex items-center justify-between mb-1">
+        <h1 className="text-2xl font-semibold">Voice Agent</h1>
+        <a href="/dashboard/voice/manage" className="rounded bg-slate-700 px-3 py-1.5 text-sm hover:bg-slate-600">⚙ Manage / 配置</a>
+      </div>
       <p className="text-slate-400 mb-6 text-sm">AI phone sales &amp; support · P0 (mock closed loop)</p>
 
       {/* Integration status */}
