@@ -25,6 +25,11 @@ import type {
   GscSearchData,
   DiscoveredGoogleAdsData,
   AdvancedFacebookProfile,
+  DiscoveredMediaChannel,
+  DiscoveredMarketContext,
+  MediaChannelCategory,
+  SanityIssue,
+  SanityIssueCategory,
 } from '@/lib/zhangqian/types'
 import { useState } from 'react'
 
@@ -1394,5 +1399,274 @@ export function OnPageAuditCard({ data }: { data: OnPageAuditData }) {
         )}
       </div>
     </CardShell>
+  )
+}
+
+// ─── v1.1 · Plugin merge cards (P8.13.E) ─────────────────────────────────────
+//
+// LocalMediaChannelsCard · MarketContextCard · SanityCheckBanner
+// See src/lib/zhangqian/html-generator.ts for the client-shareable HTML deck
+// rendering the same three dimensions.
+
+const MEDIA_CATEGORY_LABELS: Record<MediaChannelCategory, string> = {
+  print_newspaper:      '本地报刊',
+  print_magazine:       '本地杂志',
+  community_fb_group:   '社区 FB 群',
+  neighbourly:          'Neighbourly',
+  newsletter_edm:       'Newsletter',
+  podcast:              '播客',
+  youtube_channel:      'YouTube',
+  radio:                '电台',
+  tv:                   '电视',
+  sponsorship_event:    '活动赞助',
+  chinese_media:        '华人媒体',
+  school_publication:   '学校刊物',
+  business_association: '商会',
+  other:                '其他',
+}
+
+const MEDIA_CATEGORY_STYLES: Record<MediaChannelCategory, string> = {
+  print_newspaper:      'bg-slate-100 text-slate-700',
+  print_magazine:       'bg-slate-100 text-slate-700',
+  community_fb_group:   'bg-blue-100 text-blue-700',
+  neighbourly:          'bg-blue-100 text-blue-700',
+  newsletter_edm:       'bg-purple-100 text-purple-700',
+  podcast:              'bg-purple-100 text-purple-700',
+  youtube_channel:      'bg-red-100 text-red-700',
+  radio:                'bg-amber-100 text-amber-700',
+  tv:                   'bg-amber-100 text-amber-700',
+  sponsorship_event:    'bg-emerald-100 text-emerald-700',
+  chinese_media:        'bg-yellow-100 text-yellow-800',
+  school_publication:   'bg-indigo-100 text-indigo-700',
+  business_association: 'bg-teal-100 text-teal-700',
+  other:                'bg-gray-100 text-gray-700',
+}
+
+export function LocalMediaChannelsCard({
+  channels,
+}: {
+  channels: DiscoveredMediaChannel[]
+}) {
+  if (!channels || channels.length === 0) return null
+
+  // Sort by roi_rank (1 = highest priority) · null last
+  const sorted = [...channels].sort((a, b) => {
+    const ra = a.roi_rank ?? 99
+    const rb = b.roi_rank ?? 99
+    return ra - rb
+  })
+
+  return (
+    <CardShell title={`本地媒体 · ${channels.length}`}>
+      <ul className="space-y-3">
+        {sorted.map((c, i) => (
+          <li key={`${c.media_name}-${i}`} className="border-l-2 border-amber-300 pl-3 py-1">
+            <div className="flex items-center gap-2 flex-wrap mb-1">
+              <span className="font-semibold text-sm text-gray-800">{c.media_name}</span>
+              <Badge className={MEDIA_CATEGORY_STYLES[c.category] ?? 'bg-gray-100 text-gray-700'}>
+                {MEDIA_CATEGORY_LABELS[c.category] ?? c.category}
+              </Badge>
+              {c.chinese_relevant && (
+                <Badge className="bg-yellow-100 text-yellow-800">华人段</Badge>
+              )}
+              {c.roi_rank && (
+                <Badge className="bg-slate-800 text-white">ROI {c.roi_rank}</Badge>
+              )}
+            </div>
+            {c.coverage_note && (
+              <p className="text-xs text-gray-500 mb-1">覆盖 · {c.coverage_note}</p>
+            )}
+            {c.reach_number !== null && c.reach_number !== undefined && (
+              <p className="text-xs text-gray-500 mb-1">
+                Reach · {c.reach_number.toLocaleString()}
+                {c.reach_metric && c.reach_metric !== 'unknown' && (
+                  <span className="text-gray-400"> ({c.reach_metric})</span>
+                )}
+              </p>
+            )}
+            {c.pricing_notes && (
+              <p className="text-xs text-gray-500 mb-1">价格 · {c.pricing_notes}</p>
+            )}
+            {c.recommended_play && (
+              <p className="text-xs text-gray-700 mt-1 font-medium">🎯 {c.recommended_play}</p>
+            )}
+            {(c.contact_email || c.advertise_url) && (
+              <p className="text-xs text-gray-400 mt-1">
+                {c.contact_email && (
+                  <a href={`mailto:${c.contact_email}`} className="text-indigo-500 hover:text-indigo-700">
+                    {c.contact_email}
+                  </a>
+                )}
+                {c.contact_email && c.advertise_url && <span> · </span>}
+                {c.advertise_url && (
+                  <a href={c.advertise_url} target="_blank" rel="noopener" className="text-indigo-500 hover:text-indigo-700">
+                    刊登信息 →
+                  </a>
+                )}
+              </p>
+            )}
+            {c.traps_to_avoid && c.traps_to_avoid.length > 0 && (
+              <p className="text-xs text-red-600 mt-1">⚠️ {c.traps_to_avoid.join(' · ')}</p>
+            )}
+          </li>
+        ))}
+      </ul>
+    </CardShell>
+  )
+}
+
+export function MarketContextCard({ mc }: { mc: DiscoveredMarketContext }) {
+  const heat = mc.market_heat
+  const demo = mc.demographics
+  const yoyClass =
+    heat?.median_yoy_pct !== undefined && heat.median_yoy_pct !== null
+      ? heat.median_yoy_pct >= 0 ? 'text-emerald-600' : 'text-red-600'
+      : ''
+
+  return (
+    <CardShell title={`市场速写 · ${mc.region_name}`}>
+      <div className="space-y-3">
+        {mc.suburbs && mc.suburbs.length > 0 && (
+          <p className="text-xs text-gray-500">
+            {mc.suburbs.join(' · ')}
+          </p>
+        )}
+
+        {/* Median prices */}
+        {mc.median_prices && mc.median_prices.length > 0 && (
+          <div>
+            <h4 className="text-xs uppercase tracking-wide text-gray-400 mb-1">Median 房价</h4>
+            <div className="space-y-1">
+              {mc.median_prices.map((p, i) => (
+                <div key={`${p.suburb}-${i}`} className="flex justify-between text-xs">
+                  <span className="text-gray-700">{p.suburb}</span>
+                  <span className="text-gray-800 font-medium tabular-nums">
+                    {p.median_price !== null
+                      ? `${p.currency ?? 'NZD'} ${p.median_price.toLocaleString()}`
+                      : '—'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Market heat + demographics */}
+        {(heat || demo) && (
+          <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">
+            {heat?.median_yoy_pct !== undefined && heat.median_yoy_pct !== null && (
+              <div>
+                <p className={`text-lg font-bold ${yoyClass} tabular-nums`}>
+                  {heat.median_yoy_pct > 0 ? '+' : ''}{heat.median_yoy_pct}%
+                </p>
+                <p className="text-xs text-gray-400">Median YoY</p>
+              </div>
+            )}
+            {heat?.days_on_market && (
+              <div>
+                <p className="text-lg font-bold text-gray-700 tabular-nums">{heat.days_on_market}</p>
+                <p className="text-xs text-gray-400">平均成交天数</p>
+              </div>
+            )}
+            {demo?.chinese_ethnicity_pct !== null && demo?.chinese_ethnicity_pct !== undefined && (
+              <div>
+                <p className="text-lg font-bold text-gray-700 tabular-nums">{demo.chinese_ethnicity_pct}%</p>
+                <p className="text-xs text-gray-400">华人占比</p>
+              </div>
+            )}
+            {demo?.asian_ethnicity_pct !== null && demo?.asian_ethnicity_pct !== undefined &&
+              (demo.chinese_ethnicity_pct === null || demo.chinese_ethnicity_pct === undefined) && (
+              <div>
+                <p className="text-lg font-bold text-gray-700 tabular-nums">{demo.asian_ethnicity_pct}%</p>
+                <p className="text-xs text-gray-400">亚裔占比</p>
+              </div>
+            )}
+            {heat?.buyer_or_seller_market && heat.buyer_or_seller_market !== 'unknown' && (
+              <div>
+                <p className="text-sm font-semibold text-gray-700 capitalize">{heat.buyer_or_seller_market}</p>
+                <p className="text-xs text-gray-400">Market type</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* School zones */}
+        {mc.school_zones && mc.school_zones.length > 0 && (
+          <div className="pt-2 border-t border-gray-100">
+            <h4 className="text-xs uppercase tracking-wide text-gray-400 mb-1">学区</h4>
+            <ul className="text-xs text-gray-700 space-y-1">
+              {mc.school_zones.map((sz, i) => (
+                <li key={`${sz.zone_name}-${i}`}>
+                  <span className="font-medium">{sz.zone_name}</span>
+                  {sz.premium_note && <span className="text-gray-400"> · {sz.premium_note}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Key insights */}
+        {mc.key_insights && mc.key_insights.length > 0 && (
+          <div className="pt-2 border-t border-gray-100">
+            <h4 className="text-xs uppercase tracking-wide text-amber-700 mb-1">战略洞察</h4>
+            <ul className="text-xs text-gray-700 list-disc pl-4 space-y-0.5">
+              {mc.key_insights.map((k, i) => <li key={i}>{k}</li>)}
+            </ul>
+          </div>
+        )}
+
+        {/* Data gaps */}
+        {mc.data_gaps && mc.data_gaps.length > 0 && (
+          <p className="text-xs text-gray-400 italic pt-1">
+            未能验证：{mc.data_gaps.join(' · ')}
+          </p>
+        )}
+      </div>
+    </CardShell>
+  )
+}
+
+const SANITY_CATEGORY_LABELS: Record<SanityIssueCategory, string> = {
+  fabricated_number:    '编数字',
+  unmarked_uncertainty: '未标不确定',
+  cross_geography:      '跨地理',
+  weakness_omitted:     '短板遗漏',
+  other:                '其他',
+}
+
+export function SanityCheckBanner({ issues }: { issues: SanityIssue[] }) {
+  if (!issues || issues.length === 0) return null
+  const reds = issues.filter(i => i.severity === 'red')
+  const yellows = issues.filter(i => i.severity === 'yellow')
+
+  return (
+    <div className={`rounded-lg border p-4 ${reds.length > 0 ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50'}`}>
+      <div className="flex items-start gap-3">
+        <div className="text-2xl">{reds.length > 0 ? '🔴' : '⚠️'}</div>
+        <div className="flex-1">
+          <h3 className={`text-sm font-semibold ${reds.length > 0 ? 'text-red-900' : 'text-amber-900'}`}>
+            数据质量提示 · {reds.length} red / {yellows.length} yellow
+          </h3>
+          <p className={`mt-1 text-xs leading-relaxed ${reds.length > 0 ? 'text-red-800' : 'text-amber-800'}`}>
+            FDE 请先处理红色标记再 confirm · 黄色标记按需修
+          </p>
+          <ul className="mt-3 space-y-2">
+            {[...reds, ...yellows].map((issue, i) => (
+              <li key={i} className={`text-xs border-l-2 pl-3 py-1 ${issue.severity === 'red' ? 'border-red-300' : 'border-amber-300'}`}>
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <Badge className={issue.severity === 'red' ? 'bg-red-600 text-white' : 'bg-amber-500 text-white'}>
+                    {issue.severity.toUpperCase()}
+                  </Badge>
+                  <span className="text-gray-600">{SANITY_CATEGORY_LABELS[issue.category] ?? issue.category}</span>
+                  <code className="text-xs bg-white/60 px-1.5 py-0.5 rounded text-gray-700">{issue.location}</code>
+                </div>
+                <p className="text-gray-700">{issue.issue}</p>
+                <p className="text-gray-500 mt-0.5">建议 · {issue.fix_suggestion}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
   )
 }

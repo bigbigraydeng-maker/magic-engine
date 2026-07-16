@@ -25,6 +25,10 @@ import {
   TechStackCard,
   DomainWhoisCard,
   OnPageAuditCard,
+  // v1.1 · Plugin merge cards (P8.13.E)
+  LocalMediaChannelsCard,
+  MarketContextCard,
+  SanityCheckBanner,
 } from './cards'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -190,14 +194,34 @@ function DiscoveryReviewCards({
   return (
     <div className="space-y-5">
       {/* Meta bar */}
-      <div className="flex flex-wrap gap-3 text-xs text-gray-500">
+      <div className="flex flex-wrap gap-3 text-xs text-gray-500 items-center">
         <span>域名: <strong className="text-gray-700">{discovery.domain}</strong></span>
         <span>费用: <strong className="text-gray-700">${discovery.cost_usd.toFixed(3)}</strong></span>
         <span>工具调用: <strong className="text-gray-700">{discovery.tool_calls}</strong></span>
         <span>生成时间: <strong className="text-gray-700">
           {new Date(discovery.generated_at).toLocaleString('zh-CN', { timeZone: 'Pacific/Auckland' })}
         </strong></span>
+        {/* v1.1 · client-shareable HTML deck */}
+        <a
+          href={`/api/clients/${clientId}/zhangqian/html`}
+          target="_blank"
+          rel="noopener"
+          className="ml-auto inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-white px-2 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50 transition-colors"
+        >
+          📄 HTML 提案
+        </a>
+        <a
+          href={`/api/clients/${clientId}/zhangqian/html?download=1`}
+          className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+        >
+          ⬇ 下载
+        </a>
       </div>
+
+      {/* v1.1 · Sanity check banner (P8.13.E) — 4-类硬伤 issues surfaced above the fold */}
+      {p.sanity_issues && p.sanity_issues.length > 0 && (
+        <SanityCheckBanner issues={p.sanity_issues} />
+      )}
 
       {/* Diagnosis gate — 完整诊断需注册会员 */}
       <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-5 flex items-start gap-4">
@@ -254,6 +278,14 @@ function DiscoveryReviewCards({
         {/* P8.13.D — On-page SEO audit */}
         {p.onpage_audit && (
           <OnPageAuditCard data={p.onpage_audit} />
+        )}
+
+        {/* v1.1 · Plugin merge cards (P8.13.E) */}
+        {p.local_media_channels && p.local_media_channels.length > 0 && (
+          <LocalMediaChannelsCard channels={p.local_media_channels} />
+        )}
+        {p.market_context && (
+          <MarketContextCard mc={p.market_context} />
         )}
       </div>
 
