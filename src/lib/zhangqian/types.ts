@@ -213,6 +213,145 @@ export interface DiagnosisBlock {
   }
 }
 
+// ─── v1.1 · Plugin merge dimensions (P8.13.E) ────────────────────────────────
+//
+// Ported from `plugins/me-client-discovery/schemas/` (v0.1.0 Roman Hu case)
+// into 张骞 v1.1 · 2026-07 · so the ME-native "Add new client" flow captures
+// local media outreach targets, regional market context, and 4-类 sanity issues
+// alongside the existing 15+ discovery dimensions. See
+// `plugins/me-client-discovery/docs/FUTURE-ME-COMPAT.md` for the merge rationale.
+
+export type MediaChannelCategory =
+  | 'print_newspaper'
+  | 'print_magazine'
+  | 'community_fb_group'
+  | 'neighbourly'
+  | 'newsletter_edm'
+  | 'podcast'
+  | 'youtube_channel'
+  | 'radio'
+  | 'tv'
+  | 'sponsorship_event'
+  | 'chinese_media'
+  | 'school_publication'
+  | 'business_association'
+  | 'other'
+
+export type MediaChannelReachMetric =
+  | 'print_circulation'
+  | 'readers_nielsen'
+  | 'fb_members'
+  | 'email_subs'
+  | 'podcast_downloads'
+  | 'tv_viewers'
+  | 'unknown'
+
+/**
+ * A local media / newsletter / community / sponsorship channel discovered in
+ * the client's target region. Consumed by 诸葛亮 (Prescription) when choosing
+ * where to invest organic PR / editorial / sponsorship budget.
+ *
+ * Free-form text fields (`coverage_note`, `pricing_notes`) are used so the
+ * agent can capture the messy real-world variance ("Full page $2,752 · Front
+ * page solus 2x8 $900") without a rigid rate-card schema.
+ */
+export interface DiscoveredMediaChannel {
+  media_name: string
+  category: MediaChannelCategory
+  /** Free-form: which suburbs / audience segments this channel reaches. */
+  coverage_note?: string | null
+  /** Numeric reach when the source publishes one; null when unknown. */
+  reach_number?: number | null
+  reach_metric?: MediaChannelReachMetric | null
+  /** Free-form pricing summary; leave null if not published. */
+  pricing_notes?: string | null
+  contact_email?: string | null
+  contact_phone?: string | null
+  advertise_url?: string | null
+  /**
+   * True if this channel is specifically Chinese-language or has a strong
+   * Chinese audience. Drives Prescription-side segmentation.
+   */
+  chinese_relevant: boolean
+  /** One-line recommended action, e.g. "月刊 1/4 版 + 季度署名 op-ed". */
+  recommended_play?: string | null
+  /** 1 = must-do first, 5 = optional. Used to sort in the UI. */
+  roi_rank?: number | null
+  /** Known blockers, e.g. "主赞助被 Barfoot 占了 10+ 年". */
+  traps_to_avoid?: string[] | null
+  source_urls?: string[] | null
+}
+
+/**
+ * Regional market context — median prices, school zones, demographics, market
+ * heat. Consumed by 华佗 (Analysis) as the baseline against which to score the
+ * client's positioning, and by 诸葛亮 (Prescription) to inform pricing / target
+ * suburb selection.
+ *
+ * One record per (client, target region) — the agent may skip this dimension
+ * entirely when the client is a non-place-based business (SaaS, ecommerce).
+ */
+export interface DiscoveredMarketContext {
+  region_name: string
+  suburbs?: string[] | null
+  median_prices?: Array<{
+    suburb: string
+    median_price: number | null
+    currency?: string
+    as_of?: string | null
+    source_url?: string | null
+  }> | null
+  school_zones?: Array<{
+    zone_name: string
+    covered_suburbs?: string[] | null
+    premium_note?: string | null
+  }> | null
+  demographics?: {
+    chinese_ethnicity_pct?: number | null
+    asian_ethnicity_pct?: number | null
+    census_year?: number | null
+    census_source_url?: string | null
+  } | null
+  market_heat?: {
+    median_yoy_pct?: number | null
+    sales_volume_yoy_pct?: number | null
+    days_on_market?: number | null
+    buyer_or_seller_market?: 'buyer' | 'seller' | 'balanced' | 'unknown'
+    source_urls?: string[] | null
+  } | null
+  buyer_profiles?: string[] | null
+  platform_penetration?: {
+    facebook_pct_pop?: number | null
+    instagram_pct_pop?: number | null
+    wechat_note?: string | null
+    xiaohongshu_note?: string | null
+  } | null
+  key_insights?: string[] | null
+  source_urls?: string[] | null
+  data_gaps?: string[] | null
+}
+
+/**
+ * A single 4-类硬伤 issue surfaced by the sanity check that runs post-agent,
+ * pre-persist. Non-blocking (report is still stored) but shown to the FDE in
+ * the review UI so they can decide whether to accept, edit, or re-run.
+ */
+export type SanityIssueCategory =
+  | 'fabricated_number'      // 数字无来源
+  | 'unmarked_uncertainty'   // LLM 声称但未标 low-confidence
+  | 'cross_geography'        // 提到超出目标地理的 suburb / region
+  | 'weakness_omitted'       // 只有 differentiators / strengths · 无 weaknesses / gaps
+  | 'other'
+
+export interface SanityIssue {
+  severity: 'red' | 'yellow'
+  category: SanityIssueCategory
+  /** Dotted path into the report, e.g. "competitors.2.monthly_traffic" */
+  location: string
+  issue: string
+  fix_suggestion: string
+}
+
 // ─── Top-level report ─────────────────────────────────────────────────────────
 
 export interface DiscoveryReport {
@@ -322,6 +461,27 @@ export interface DiscoveryReport {
       https:            boolean
     }
   } | null
+
+  /**
+   * v1.1 · Local media / newsletter / community / sponsorship channels for
+   * organic PR outreach in the client's target region. Populated by prompt
+   * step 10 (P8.13.E · me-client-discovery plugin merge). Null when the agent
+   * skipped this dimension (non-place-based business, or no signals found).
+   */
+  local_media_channels?: DiscoveredMediaChannel[] | null
+
+  /**
+   * v1.1 · Regional market context (medians / school zones / demographics /
+   * market heat). Populated by prompt step 11. Null when not relevant
+   * (SaaS, ecommerce without local footprint).
+   */
+  market_context?: DiscoveredMarketContext | null
+
+  /**
+   * v1.1 · 4-类硬伤 sanity issues detected by score-guardrails post-agent.
+   * Never populated by Claude — always computed server-side after validation.
+   */
+  sanity_issues?: SanityIssue[] | null
 
   /**
    * Advanced discovery payload — populated after a connector (meta-ads / gbp)

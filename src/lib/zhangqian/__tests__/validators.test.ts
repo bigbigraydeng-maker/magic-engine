@@ -568,3 +568,190 @@ describe('validateDiscoveryReport — diagnosis 深度 coerce', () => {
     if (r.ok) expect(r.value.diagnosis?.crisis_type).toBeNull()
   })
 })
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// v1.1 · Plugin merge dimensions (P8.13.E · me-client-discovery ports)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const validMediaChannel = {
+  media_name: 'East & Bays Courier',
+  category: 'print_newspaper',
+  chinese_relevant: false,
+  coverage_note: 'Bayside 全覆盖',
+  reach_metric: 'print_circulation',
+  pricing_notes: 'Full page $2,752',
+  contact_email: 'david.gadd@stuff.co.nz',
+  roi_rank: 1,
+  source_urls: ['https://advertise.stuff.co.nz'],
+}
+
+const validMarketContext = {
+  region_name: 'Auckland Bayside',
+  suburbs: ['Mission Bay', 'Kohimarama'],
+  median_prices: [
+    { suburb: 'Mission Bay', median_price: 2100000, currency: 'NZD', source_url: 'https://homes.co.nz' },
+  ],
+  demographics: { asian_ethnicity_pct: 34.5, census_year: 2023 },
+  market_heat: { median_yoy_pct: -1.92, days_on_market: 34, buyer_or_seller_market: 'buyer' },
+  key_insights: ['双市场双话术'],
+  data_gaps: ['St Heliers 独立 median 未拿到'],
+}
+
+const validSocialFixture = { platform: 'instagram', handle: '@test', url: 'https://ig.com/test', confidence: 0.9 }
+
+describe('validateDiscoveryReport · local_media_channels (v1.1)', () => {
+  it('missing field → null', () => {
+    const report = makeValidReport([validSocialFixture])
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.local_media_channels).toBeNull()
+  })
+
+  it('valid array → passes through', () => {
+    const report = makeValidReport([validSocialFixture])
+    report.local_media_channels = [validMediaChannel, { ...validMediaChannel, media_name: 'Verve', category: 'print_magazine' }]
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.value.local_media_channels).toHaveLength(2)
+      expect(r.value.local_media_channels?.[0].media_name).toBe('East & Bays Courier')
+    }
+  })
+
+  it('bad category → row filtered out', () => {
+    const report = makeValidReport([validSocialFixture])
+    report.local_media_channels = [
+      validMediaChannel,
+      { ...validMediaChannel, media_name: 'Bad', category: 'billboard_freeway' },  // invalid category
+    ]
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.value.local_media_channels).toHaveLength(1)
+      expect(r.value.local_media_channels?.[0].media_name).toBe('East & Bays Courier')
+    }
+  })
+
+  it('missing media_name → row filtered out', () => {
+    const report = makeValidReport([validSocialFixture])
+    report.local_media_channels = [
+      validMediaChannel,
+      { ...validMediaChannel, media_name: '' },  // empty name
+    ]
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.local_media_channels).toHaveLength(1)
+  })
+
+  it('chinese_relevant missing → coerced to false (not rejected)', () => {
+    const report = makeValidReport([validSocialFixture])
+    const { chinese_relevant, ...withoutFlag } = validMediaChannel
+    void chinese_relevant
+    report.local_media_channels = [withoutFlag]
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.local_media_channels?.[0].chinese_relevant).toBe(false)
+  })
+
+  it('roi_rank out of 1-5 range → coerced to null', () => {
+    const report = makeValidReport([validSocialFixture])
+    report.local_media_channels = [{ ...validMediaChannel, roi_rank: 99 }]
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.local_media_channels?.[0].roi_rank).toBeNull()
+  })
+
+  it('bad reach_metric → coerced to "unknown"', () => {
+    const report = makeValidReport([validSocialFixture])
+    report.local_media_channels = [{ ...validMediaChannel, reach_metric: 'skywriting' }]
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.local_media_channels?.[0].reach_metric).toBe('unknown')
+  })
+
+  it('root non-array → null (does not reject report)', () => {
+    const report = makeValidReport([validSocialFixture])
+    report.local_media_channels = 'not an array'
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.local_media_channels).toBeNull()
+  })
+})
+
+describe('validateDiscoveryReport · market_context (v1.1)', () => {
+  it('missing field → null', () => {
+    const report = makeValidReport([validSocialFixture])
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.market_context).toBeNull()
+  })
+
+  it('valid market context → passes through', () => {
+    const report = makeValidReport([validSocialFixture])
+    report.market_context = validMarketContext
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.value.market_context?.region_name).toBe('Auckland Bayside')
+      expect(r.value.market_context?.median_prices).toHaveLength(1)
+    }
+  })
+
+  it('missing region_name → coerced to null (whole context dropped)', () => {
+    const report = makeValidReport([validSocialFixture])
+    const { region_name, ...withoutRegion } = validMarketContext
+    void region_name
+    report.market_context = withoutRegion
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.market_context).toBeNull()
+  })
+
+  it('bad median_price entry filtered but rest survives', () => {
+    const report = makeValidReport([validSocialFixture])
+    report.market_context = {
+      ...validMarketContext,
+      median_prices: [
+        { suburb: 'Mission Bay', median_price: 2100000 },
+        { median_price: 999 },  // missing suburb
+        { suburb: 'Kohi', median_price: 'not a number' },  // bad price coerced to null
+      ],
+    }
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      // Entry without suburb filtered; other two kept (bad price → null)
+      expect(r.value.market_context?.median_prices).toHaveLength(2)
+    }
+  })
+
+  it('non-object market_context → null', () => {
+    const report = makeValidReport([validSocialFixture])
+    report.market_context = 'not an object'
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.market_context).toBeNull()
+  })
+})
+
+describe('validateDiscoveryReport · sanity_issues (v1.1)', () => {
+  it('missing field → null', () => {
+    const report = makeValidReport([validSocialFixture])
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.sanity_issues).toBeNull()
+  })
+
+  it('valid issues pass through, bad ones dropped', () => {
+    const report = makeValidReport([validSocialFixture])
+    report.sanity_issues = [
+      { severity: 'red', category: 'fabricated_number', location: 'x.y', issue: 'i', fix_suggestion: 'f' },
+      { severity: 'green', category: 'fabricated_number', location: 'x', issue: 'i', fix_suggestion: 'f' }, // bad severity
+      { severity: 'yellow', category: 'not_a_category', location: 'x', issue: 'i', fix_suggestion: 'f' },  // bad category
+      { severity: 'red', category: 'cross_geography', location: '', issue: 'i', fix_suggestion: 'f' },  // empty location
+    ]
+    const r = validateDiscoveryReport(report)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value.sanity_issues).toHaveLength(1)
+  })
+})
