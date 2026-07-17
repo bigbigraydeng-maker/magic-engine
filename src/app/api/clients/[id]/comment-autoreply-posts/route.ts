@@ -66,7 +66,7 @@ export async function GET(
   const pageToken = await getPageAccessToken(userToken, pageId)
   if (!pageToken) return NextResponse.json({ error: '无法解析 Page access token' }, { status: 502 })
 
-  const fields = 'id,message,story,created_time,comments.summary(true).limit(0)'
+  const fields = 'id,message,story,created_time,comments.filter(stream).summary(true).limit(0)'
   let url: string | null =
     `${GRAPH_BASE}/${pageId}/published_posts?fields=${fields}&limit=50&access_token=${encodeURIComponent(pageToken)}`
 
@@ -135,7 +135,7 @@ export async function GET(
 
 /** Fetch one ad story post's snippet + comment count via the Page token. */
 async function fetchStoryDetail(storyId: string, pageToken: string): Promise<PostSummary | null> {
-  const fields = 'id,message,story,created_time,comments.summary(true).limit(0)'
+  const fields = 'id,message,story,created_time,comments.filter(stream).summary(true).limit(0)'
   const url = `${GRAPH_BASE}/${storyId}?fields=${fields}&access_token=${encodeURIComponent(pageToken)}`
   let res: Response
   try {

@@ -44,7 +44,7 @@ describe('detectUnverifiableClaims — obvious claims', () => {
 })
 
 describe('detectUnverifiableClaims — red-team escape strings are now caught', () => {
-  const escapes: Array<[string, string]> = [
+  const escapes: Array<[string, string, string]> = [
     ['currency-first AUD', 'AUD 900 per person', 'price'],
     ['currency-first NZD', 'just NZD 500', 'price'],
     ['spelled-out dollars', 'only nine hundred dollars for the trip', 'price'],

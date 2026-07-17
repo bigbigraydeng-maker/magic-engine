@@ -41,6 +41,10 @@ export async function fetchPostComments(
 ): Promise<PageComment[]> {
   const params = new URLSearchParams({
     fields: 'id,message,created_time,from',
+    // 'stream' returns ALL comments (top-level + nested replies + comments that
+    // arrived via paid/boosted delivery), whereas the default 'toplevel' hides
+    // most of them on a boosted post/Reel.
+    filter: 'stream',
     order: 'reverse_chronological',
     limit: String(limit),
     access_token: pageAccessToken,

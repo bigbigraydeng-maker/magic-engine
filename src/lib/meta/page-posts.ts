@@ -129,7 +129,7 @@ export async function fetchPageReels(
   pageAccessToken: string,
   limit = 50,
 ): Promise<PagePost[]> {
-  const fields = ['id', 'created_time', 'description', 'comments.summary(true).limit(0)'].join(',')
+  const fields = ['id', 'created_time', 'description', 'comments.filter(stream).summary(true).limit(0)'].join(',')
   const url = `${GRAPH_BASE}/${pageId}/video_reels?fields=${fields}&limit=${limit}&access_token=${encodeURIComponent(pageAccessToken)}`
 
   let res: Response
