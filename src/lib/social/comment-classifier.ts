@@ -4,41 +4,49 @@
  * The LLM is trusted for exactly ONE free-form job: writing a warm reply to
  * genuine praise. Everything else (questions, complaints, spam) is handled by
  * deterministic safe templates in comment-guardrails.ts — the LLM is NEVER
- * allowed to author an answer to a factual question, because that would risk
- * fabricating itinerary / price / date details (CLAUDE.md red line).
+ * allowed to author an answer to a factual question.
  *
- * Even the praise reply passes detectUnverifiableClaims() before it can be
- * returned; a tripped filter falls back to safePraiseReply(). So no matter what
- * an adversarial commenter injects, the worst case is a claim-free thank-you.
+ * A praise draft is only used if it clears isPraiseReplySafe() (no digit, link,
+ * handle, or claim shape) AND the classifier is confident (>= threshold).
+ * Otherwise it falls back to a rotating safe template. So the worst case from
+ * an adversarial commenter is a claim-free thank-you.
+ *
+ * DM-first: for questions/complaints the engine sends the DM first, then picks
+ * the public reply — publicReplyAfterDm when the DM landed (so it can say
+ * "we've messaged you"), publicReply otherwise (no false "we messaged you").
  */
 
 import { getAnthropicClient, MODEL_HAIKU } from '@/lib/anthropic/client'
 import {
   ReplyContext,
+  isPraiseReplySafe,
   detectUnverifiableClaims,
   safePraiseReply,
-  safeQuestionPublicReply,
+  safeQuestionPublicReplyNoDm,
+  safeQuestionPublicReplyWithDm,
   safeQuestionPrivateReply,
-  safeComplaintPublicReply,
+  safeComplaintPublicReplyNoDm,
+  safeComplaintPublicReplyWithDm,
   safeComplaintPrivateReply,
 } from './comment-guardrails'
 
 export type CommentCategory = 'praise' | 'question' | 'complaint' | 'spam' | 'other'
 
+/** Praise below this classifier confidence falls back to a safe template. */
+export const PRAISE_CONFIDENCE_THRESHOLD = 0.85
+
 export interface CommentDecision {
   category: CommentCategory
   confidence: number
-  /** Public reply to post under the comment, or null to stay silent. */
+  /** Public reply to post when no DM is sent (praise reply, or question/complaint no-DM variant). */
   publicReply: string | null
-  /** Private (DM) reply, or null. Only sent when the comment surface allows it. */
+  /** Public reply to post INSTEAD when a DM was successfully sent (question/complaint only). */
+  publicReplyAfterDm: string | null
+  /** Private (DM) reply, or null. */
   privateReply: string | null
-  /** True → hide the comment (spam). */
   shouldHide: boolean
-  /** True → surface in FDE audit view for offline follow-up (questions/complaints/other). */
   needsHuman: boolean
-  /** Claim-filter flags that were tripped on the LLM draft (empty = clean). */
   guardrailFlags: string[]
-  /** Where publicReply came from — 'llm' (praise draft) or 'fallback' (safe template). */
   replySource: 'llm' | 'fallback' | 'none'
 }
 
@@ -49,7 +57,7 @@ interface LlmClassification {
   praise_reply: string | null
 }
 
-const SYSTEM_PROMPT = `You are a social media community manager for a travel/tourism brand in Australia/New Zealand.
+const SYSTEM_PROMPT = `You are a social media community manager for a travel/tourism brand in Australia/New Zealand with an older, sincere audience.
 Classify a single Facebook comment and, ONLY if it is genuine praise, draft a short warm reply.
 
 Categories:
@@ -61,9 +69,10 @@ Categories:
 
 Rules for the praise reply (praise_reply) — CRITICAL:
 - ONLY fill praise_reply when category is "praise". Otherwise set it to null.
-- NEVER state any price, discount, date, duration, itinerary detail, or "we arrange/include X" claim. You do not have that information and must not invent it.
-- Keep it to 1-2 warm sentences, thanking them. You may gently invite them to reach out. No specific facts.
-- Match warm AU/NZ English. One or two emoji max.
+- NEVER state any price, discount, date, duration, itinerary detail, phone, link, or "we arrange/include X" claim, and NEVER include any digit. You do not have that information and must not invent it.
+- Do NOT add a sales invitation or "plan your next trip / next adventure" line — especially if the comment is a memory or a general compliment. Just warmly acknowledge what they actually said.
+- Reference the specific thing they mentioned (a place, a memory, their experience) in a natural, grounded tone — avoid peppy marketing language.
+- 1-2 warm sentences. At most one emoji, and only if it feels natural (prefer 🙏 for thanks). AU/NZ English.
 
 Also set purchase_intent=true if the commenter signals they want to travel/book/go (so we can DM them).
 
@@ -97,12 +106,15 @@ function parseClassification(raw: string): LlmClassification | null {
 
 /**
  * Classify a comment and decide the full auto-reply action.
- * On any LLM/parse failure, returns a safe 'other' decision that routes to a
+ * On any LLM/parse failure returns a safe 'other' decision that routes to a
  * human — it never guesses or auto-sends when uncertain.
+ *
+ * @param seed rotates praise fallback templates to avoid a botted-looking feed.
  */
 export async function classifyComment(
   commentText: string,
   ctx: ReplyContext,
+  seed = 0,
 ): Promise<CommentDecision> {
   let llm: LlmClassification | null = null
   try {
@@ -123,28 +135,31 @@ export async function classifyComment(
   }
 
   if (!llm) {
-    // Uncertain → never auto-send. Route to human.
     return {
-      category: 'other', confidence: 0, publicReply: null, privateReply: null,
-      shouldHide: false, needsHuman: true, guardrailFlags: [], replySource: 'none',
+      category: 'other', confidence: 0, publicReply: null, publicReplyAfterDm: null,
+      privateReply: null, shouldHide: false, needsHuman: true, guardrailFlags: [], replySource: 'none',
     }
   }
 
-  return decideByCategory(llm, ctx)
+  return decideByCategory(llm, ctx, seed)
 }
 
 /** Map an LLM classification to a guardrailed reply decision. Pure + testable. */
-export function decideByCategory(llm: LlmClassification, ctx: ReplyContext): CommentDecision {
+export function decideByCategory(llm: LlmClassification, ctx: ReplyContext, seed = 0): CommentDecision {
   switch (llm.category) {
     case 'praise': {
       const draft = llm.praise_reply?.trim()
       const flags = draft ? detectUnverifiableClaims(draft) : []
-      const clean = draft && flags.length === 0
+      // Use the LLM draft only if it's confident AND clears the strict praise gate.
+      const clean = !!draft
+        && llm.confidence >= PRAISE_CONFIDENCE_THRESHOLD
+        && isPraiseReplySafe(draft)
       return {
         category: 'praise',
         confidence: llm.confidence,
-        publicReply: clean ? draft! : safePraiseReply(ctx),
-        // DM only when they signal intent — avoids spamming every "nice pic".
+        publicReply: clean ? draft! : safePraiseReply(ctx, seed),
+        publicReplyAfterDm: null,
+        // DM only on genuine purchase intent — avoids spamming every "nice pic".
         privateReply: llm.purchase_intent ? safeQuestionPrivateReply(ctx) : null,
         shouldHide: false,
         needsHuman: false,
@@ -155,26 +170,28 @@ export function decideByCategory(llm: LlmClassification, ctx: ReplyContext): Com
     case 'question':
       return {
         category: 'question', confidence: llm.confidence,
-        publicReply: safeQuestionPublicReply(ctx),
+        publicReply: safeQuestionPublicReplyNoDm(ctx),
+        publicReplyAfterDm: safeQuestionPublicReplyWithDm(ctx),
         privateReply: safeQuestionPrivateReply(ctx),
         shouldHide: false, needsHuman: true, guardrailFlags: [], replySource: 'fallback',
       }
     case 'complaint':
       return {
         category: 'complaint', confidence: llm.confidence,
-        publicReply: safeComplaintPublicReply(ctx),
+        publicReply: safeComplaintPublicReplyNoDm(ctx),
+        publicReplyAfterDm: safeComplaintPublicReplyWithDm(ctx),
         privateReply: safeComplaintPrivateReply(ctx),
         shouldHide: false, needsHuman: true, guardrailFlags: [], replySource: 'fallback',
       }
     case 'spam':
       return {
-        category: 'spam', confidence: llm.confidence, publicReply: null, privateReply: null,
-        shouldHide: true, needsHuman: false, guardrailFlags: [], replySource: 'none',
+        category: 'spam', confidence: llm.confidence, publicReply: null, publicReplyAfterDm: null,
+        privateReply: null, shouldHide: true, needsHuman: false, guardrailFlags: [], replySource: 'none',
       }
     default:
       return {
-        category: 'other', confidence: llm.confidence, publicReply: null, privateReply: null,
-        shouldHide: false, needsHuman: true, guardrailFlags: [], replySource: 'none',
+        category: 'other', confidence: llm.confidence, publicReply: null, publicReplyAfterDm: null,
+        privateReply: null, shouldHide: false, needsHuman: true, guardrailFlags: [], replySource: 'none',
       }
   }
 }

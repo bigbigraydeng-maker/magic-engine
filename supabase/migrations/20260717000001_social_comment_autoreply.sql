@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS public.social_comment_engagements (
   reply_source       text,   -- 'llm'|'fallback'|'none'
 
   -- Reply state
-  reply_status       text NOT NULL DEFAULT 'pending',   -- pending|replied|dm_sent|hidden|skipped|failed|reverted
+  reply_status       text NOT NULL DEFAULT 'pending',   -- processing|pending|replied|dm_sent|hidden|skipped|failed|reverted
+  attempts           int  NOT NULL DEFAULT 0,           -- send attempts (bounds 'failed' retries)
   public_reply_text  text,
   public_reply_id    text,   -- returned comment id of our reply
   private_reply_text text,
