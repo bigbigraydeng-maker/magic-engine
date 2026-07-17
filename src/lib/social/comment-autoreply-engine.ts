@@ -73,9 +73,12 @@ export async function processClientComments(config: CommentConfig): Promise<Clie
 
     const ctxBase = await loadClientContext(clientId)
 
+    // lookback_days bounds COMMENT freshness, NOT post age — an evergreen post
+    // from months ago that still gets fresh comments must be handled. Scan the
+    // page's recent posts (up to 100) regardless of when they were published,
+    // then reply only to comments newer than the cutoff.
     const cutoff = Date.now() - config.lookback_days * 86_400_000
-    const posts = (await fetchPagePosts(config.fb_page_id, pageToken, 25))
-      .filter(p => new Date(p.createdAt).getTime() >= cutoff)
+    const posts = await fetchPagePosts(config.fb_page_id, pageToken, 100)
 
     const comments: PageComment[] = []
     for (const post of posts) {

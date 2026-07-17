@@ -331,7 +331,7 @@ export function CommentAutoReplyPanel({ clientId }: Props) {
           <input type="number" min={1} max={30} value={draft.lookback_days}
             onChange={e => set('lookback_days', Number(e.target.value))} disabled={saving}
             className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500" />
-          <p className="mt-1 text-xs text-slate-400">1–30 天。私信有 7 天窗，建议 ≤7</p>
+          <p className="mt-1 text-xs text-slate-400">只回复最近 N 天内的<b>评论</b>（帖子多久前发都会扫）。私信仅 7 天窗，想回更老评论就调大，但那些只会公开回帖、不发私信</p>
         </div>
         <div>
           <label className="block text-xs font-bold uppercase tracking-wide text-slate-500">每次最多回复</label>
