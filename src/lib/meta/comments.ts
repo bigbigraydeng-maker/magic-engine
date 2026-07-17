@@ -141,6 +141,33 @@ export async function sendPrivateReply(
 }
 
 /**
+ * Delete a comment we own (e.g. revert an auto-reply from the audit view).
+ * Returns true on success.
+ */
+export async function deleteComment(
+  commentId: string,
+  pageAccessToken: string,
+): Promise<boolean> {
+  const url = `${GRAPH_BASE}/${commentId}?access_token=${encodeURIComponent(pageAccessToken)}`
+  let res: Response
+  try {
+    res = await fetch(url, { method: 'DELETE' })
+  } catch (err) {
+    console.error('[meta/comments] deleteComment error:', err)
+    return false
+  }
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    console.error(`[meta/comments] deleteComment HTTP ${res.status}:`, body.slice(0, 300))
+    return false
+  }
+
+  const json = (await res.json()) as { success?: boolean }
+  return json.success === true
+}
+
+/**
  * Hide (not delete) a comment — used for spam.
  * Returns true on success.
  */
