@@ -22,6 +22,7 @@ interface ConfigBody {
   private_reply_enabled?: unknown
   lookback_days?: unknown
   max_replies_per_run?: unknown
+  pinned_post_ids?: unknown
 }
 
 const DEFAULTS = {
@@ -34,6 +35,7 @@ const DEFAULTS = {
   private_reply_enabled: true,
   lookback_days: 7,
   max_replies_per_run: 20,
+  pinned_post_ids: [] as string[],
 }
 
 export async function GET(
@@ -61,6 +63,18 @@ function clampInt(v: unknown, min: number, max: number, fallback: number): numbe
   const n = typeof v === 'number' ? Math.round(v) : NaN
   if (Number.isNaN(n)) return fallback
   return Math.min(max, Math.max(min, n))
+}
+
+/** Normalise pinned post ids: strings only, trimmed, deduped, capped. */
+function cleanPostIds(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  const seen = new Set<string>()
+  for (const raw of v) {
+    if (typeof raw !== 'string') continue
+    const id = raw.trim()
+    if (id && !seen.has(id) && seen.size < 25) seen.add(id)
+  }
+  return Array.from(seen)
 }
 
 export async function PATCH(
@@ -100,6 +114,7 @@ export async function PATCH(
     private_reply_enabled: bool(body.private_reply_enabled, DEFAULTS.private_reply_enabled),
     lookback_days: clampInt(body.lookback_days, 1, 30, DEFAULTS.lookback_days),
     max_replies_per_run: clampInt(body.max_replies_per_run, 1, 100, DEFAULTS.max_replies_per_run),
+    pinned_post_ids: cleanPostIds(body.pinned_post_ids),
     updated_at: new Date().toISOString(),
   }
 

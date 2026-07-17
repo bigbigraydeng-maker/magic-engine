@@ -34,6 +34,7 @@ export interface CommentConfig {
   private_reply_enabled: boolean
   lookback_days: number
   max_replies_per_run: number
+  pinned_post_ids?: string[] | null
 }
 
 export interface ClientRunResult {
@@ -78,11 +79,15 @@ export async function processClientComments(config: CommentConfig): Promise<Clie
     // page's recent posts (up to 100) regardless of when they were published,
     // then reply only to comments newer than the cutoff.
     const cutoff = Date.now() - config.lookback_days * 86_400_000
-    const posts = await fetchPagePosts(config.fb_page_id, pageToken, 100)
+    const recent = await fetchPagePosts(config.fb_page_id, pageToken, 100)
+    // Scan recent posts + any pinned evergreen posts (which may be older than
+    // the recent-100 window but still get fresh comments).
+    const postIds = new Set(recent.map(p => p.postId))
+    for (const pid of config.pinned_post_ids ?? []) if (pid) postIds.add(pid)
 
     const comments: PageComment[] = []
-    for (const post of posts) {
-      const cs = await fetchPostComments(post.postId, config.fb_page_id, pageToken, 50)
+    for (const postId of Array.from(postIds)) {
+      const cs = await fetchPostComments(postId, config.fb_page_id, pageToken, 100)
       comments.push(...cs.filter(c => !c.isFromPage && new Date(c.createdAt).getTime() >= cutoff))
     }
 
@@ -100,7 +105,7 @@ export async function processClientComments(config: CommentConfig): Promise<Clie
       tally.failed += outcome.failed ? 1 : 0
     }
 
-    return { client_id: clientId, ok: true, posts_scanned: posts.length, new_comments: candidates.length, ...tally }
+    return { client_id: clientId, ok: true, posts_scanned: postIds.size, new_comments: candidates.length, ...tally }
   } catch (err) {
     return { client_id: clientId, ok: false, error: err instanceof Error ? err.message : 'unknown' }
   }

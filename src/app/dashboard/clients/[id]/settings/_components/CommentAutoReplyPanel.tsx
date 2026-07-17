@@ -27,6 +27,14 @@ interface Config {
   private_reply_enabled: boolean
   lookback_days: number
   max_replies_per_run: number
+  pinned_post_ids: string[]
+}
+
+interface PostSummary {
+  post_id: string
+  snippet: string
+  created_at: string
+  comment_count: number
 }
 
 type PanelState =
@@ -72,6 +80,7 @@ const DEFAULT_DRAFT: Config = {
   private_reply_enabled: true,
   lookback_days: 7,
   max_replies_per_run: 20,
+  pinned_post_ids: [],
 }
 
 function Toggle({ label, hint, checked, onChange, disabled }: {
@@ -114,6 +123,9 @@ export function CommentAutoReplyPanel({ clientId }: Props) {
   const [probe, setProbe] = useState<ProbeResult | null>(null)
   const [running, setRunning] = useState(false)
   const [runResult, setRunResult] = useState<RunResult | null>(null)
+  const [posts, setPosts] = useState<PostSummary[] | null>(null)
+  const [loadingPosts, setLoadingPosts] = useState(false)
+  const [postsError, setPostsError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setState({ phase: 'loading' })
@@ -190,6 +202,21 @@ export function CommentAutoReplyPanel({ clientId }: Props) {
       })
     } finally {
       setProbing(false)
+    }
+  }
+
+  const loadPosts = async () => {
+    setLoadingPosts(true)
+    setPostsError(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/comment-autoreply-posts`)
+      const body = (await res.json()) as { posts?: PostSummary[]; error?: string }
+      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`)
+      setPosts(body.posts ?? [])
+    } catch (err) {
+      setPostsError(err instanceof Error ? err.message : '加载失败')
+    } finally {
+      setLoadingPosts(false)
     }
   }
 
@@ -340,6 +367,65 @@ export function CommentAutoReplyPanel({ clientId }: Props) {
             className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500" />
           <p className="mt-1 text-xs text-slate-400">1–100 条 / 次运行</p>
         </div>
+      </div>
+
+      {/* Pinned posts (evergreen) */}
+      <div className="mt-4 rounded-lg border border-slate-200 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <div className="text-sm font-bold text-slate-700">长期监控帖子（钉住老帖）</div>
+            <div className="text-xs text-slate-400">爆帖发了几个月还在收新评论、排在最近 100 帖之外时，钉住它就永远会被扫。也是诊断工具：能看到每条帖真实评论数。</div>
+          </div>
+          <button
+            type="button" onClick={loadPosts} disabled={loadingPosts}
+            className="flex-shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+          >
+            {loadingPosts ? '加载中…' : posts ? '刷新列表' : '加载帖子列表'}
+          </button>
+        </div>
+
+        {draft.pinned_post_ids.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {draft.pinned_post_ids.map(pid => (
+              <span key={pid} className="inline-flex items-center gap-1 rounded-full bg-cyan-100 px-2 py-0.5 text-[11px] font-semibold text-cyan-800">
+                📌 {pid}
+                <button type="button" onClick={() => set('pinned_post_ids', draft.pinned_post_ids.filter(x => x !== pid))}
+                  className="text-cyan-500 hover:text-cyan-800">✕</button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {postsError && <p className="mt-2 text-xs text-red-600">⚠ {postsError}</p>}
+
+        {posts && (
+          <div className="mt-2 max-h-64 space-y-1 overflow-y-auto rounded-lg border border-slate-100 bg-slate-50 p-1.5">
+            {posts.length === 0 && <p className="p-2 text-xs text-slate-400">该主页没有可读的帖子。</p>}
+            {posts.map(p => {
+              const pinned = draft.pinned_post_ids.includes(p.post_id)
+              return (
+                <div key={p.post_id} className="flex items-start gap-2 rounded-md bg-white px-2 py-1.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-xs text-slate-700">{p.snippet || <span className="italic text-slate-400">（无文字，可能是图片/视频帖）</span>}</div>
+                    <div className="mt-0.5 text-[11px] text-slate-400">
+                      {p.created_at ? new Date(p.created_at).toLocaleDateString('zh-CN') : '—'} · 💬 {p.comment_count} 条评论
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => set('pinned_post_ids', pinned ? draft.pinned_post_ids.filter(x => x !== p.post_id) : [...draft.pinned_post_ids, p.post_id])}
+                    className={[
+                      'flex-shrink-0 rounded-md px-2 py-1 text-[11px] font-bold transition',
+                      pinned ? 'bg-cyan-600 text-white hover:bg-cyan-700' : 'border border-slate-300 bg-white text-slate-600 hover:bg-slate-50',
+                    ].join(' ')}
+                  >
+                    {pinned ? '已钉 ✓' : '钉住'}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* Save row */}
