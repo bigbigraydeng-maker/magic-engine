@@ -2762,6 +2762,22 @@ Body: { title, description, dimension, fix_type?, due_date?, notes? }
 | Phase 22 = 主动任务注入 | **Phase 22.D = 主动任务生成器** | 主动任务是 Phase 22 的一个子模块（22.D）|
 | Phase 23（未命名）| **Phase 23 = Cross-Agent Memory Layer** | L3 长期学习，升级自原 Phase 8.M |
 
+### Phase 20.D.social — Facebook 评论 AI 全自动回复 🔄 开发中（2026-07-17，PR #607）
+
+> 社媒支柱 / DAPE 执行段。全自动拉取 FB 主页评论 → AI 分类 → 回复（公开 + 可选私信）/ 隐藏垃圾 → 回流社媒飞轮。
+> Spec：`docs/superpowers/specs/2026-07-17-social-comment-autoreply-v0.1.md` · 三审：魏征/板桥/狄仁杰
+
+| ID | 内容 | 状态 |
+|----|------|------|
+| P20.D.s1 | 数据层 + Graph 封装 + 护栏 + 分类器 + 测试 | ✅ |
+| P20.D.s2 | per-client 编排引擎（claim-first 幂等）+ 每 30 分 cron | ✅ |
+| P20.D.s3 | 配置 + 审计 API + FDE Settings UI（§3.5） | ✅ |
+| P20.D.s4 | 三审加固（幂等 P0 / DM-first / 护栏补强 / 口吻） | ✅ |
+| P20.D.s5 | 权限探针（面板一键检查 3 scope） | ✅ |
+| P20.D.s6 | migration apply（待 PM `go apply`）| ⏳ |
+| P20.D.s7 | 真 token 环境验证 + 生产开启 | ⏳ |
+| P20.D.s8 | webhook 实时化（Phase 2，需 App Review）| 📋 |
+
 ---
 
 ## Phase 24 — Execution Loop Closure（执行闭环修复）📋 已登记，2026-06-06 启动
