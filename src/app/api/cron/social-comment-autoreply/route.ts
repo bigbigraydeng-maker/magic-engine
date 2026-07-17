@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await supabaseAdmin
     .from('social_comment_config')
-    .select('client_id, fb_page_id, auto_reply_praise, auto_reply_question, auto_reply_complaint, auto_hide_spam, private_reply_enabled, lookback_days, max_replies_per_run')
+    .select('client_id, fb_page_id, auto_reply_praise, auto_reply_question, auto_reply_complaint, auto_hide_spam, private_reply_enabled, lookback_days, max_replies_per_run, pinned_post_ids')
     .eq('enabled', true)
 
   if (error) {

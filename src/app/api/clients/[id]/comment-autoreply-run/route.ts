@@ -28,13 +28,18 @@ export async function POST(
 
   const { data: config, error } = await supabaseAdmin
     .from('social_comment_config')
-    .select('client_id, fb_page_id, auto_reply_praise, auto_reply_question, auto_reply_complaint, auto_hide_spam, private_reply_enabled, lookback_days, max_replies_per_run')
+    .select('client_id, enabled, fb_page_id, auto_reply_praise, auto_reply_question, auto_reply_complaint, auto_hide_spam, private_reply_enabled, lookback_days, max_replies_per_run, pinned_post_ids')
     .eq('client_id', clientId)
     .maybeSingle()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   if (!config) {
     return NextResponse.json({ error: '尚未配置 —— 先填 Page ID 并保存' }, { status: 400 })
+  }
+  // Respect the master switch: a disabled client must never receive posts,
+  // whether via cron or this manual trigger.
+  if (!(config as { enabled: boolean }).enabled) {
+    return NextResponse.json({ error: '总开关未开启 —— 先打开「全自动评论回复」并保存再运行' }, { status: 400 })
   }
   if (!(config as { fb_page_id: string }).fb_page_id) {
     return NextResponse.json({ error: '缺少 Facebook 主页 ID' }, { status: 400 })
