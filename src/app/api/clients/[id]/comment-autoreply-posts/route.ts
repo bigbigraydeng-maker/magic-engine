@@ -14,7 +14,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
-import { getPageAccessToken } from '@/lib/meta/page-posts'
+import { getPageAccessToken, fetchPageReels } from '@/lib/meta/page-posts'
 
 const GRAPH_BASE = 'https://graph.facebook.com/v20.0'
 const MAX_POSTS = 200
@@ -25,6 +25,7 @@ interface PostSummary {
   snippet: string
   created_at: string
   comment_count: number
+  is_reel?: boolean
 }
 
 interface RawFeedPost {
@@ -91,5 +92,22 @@ export async function GET(
     url = json.paging?.next ?? null
   }
 
-  return NextResponse.json({ posts, count: posts.length })
+  // Reels — their comments live on the video object, so /published_posts
+  // undercounts them. Surface reels separately with their real comment count.
+  const reels = await fetchPageReels(pageId, pageToken, 100)
+  const reelSummaries: PostSummary[] = reels.map(r => ({
+    post_id: r.postId,
+    full_id: r.fullId,
+    snippet: (r.message || '').replace(/\s+/g, ' ').trim().slice(0, 90),
+    created_at: r.createdAt,
+    comment_count: r.comments,
+    is_reel: true,
+  }))
+
+  // Merge, drop feed duplicates of reels (same short id), newest first.
+  const reelIds = new Set(reelSummaries.map(r => r.post_id))
+  const merged = [...reelSummaries, ...posts.filter(p => !reelIds.has(p.post_id))]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+  return NextResponse.json({ posts: merged, count: merged.length })
 }

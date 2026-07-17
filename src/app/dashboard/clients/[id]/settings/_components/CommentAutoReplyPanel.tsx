@@ -35,6 +35,7 @@ interface PostSummary {
   snippet: string
   created_at: string
   comment_count: number
+  is_reel?: boolean
 }
 
 type PanelState =
@@ -406,7 +407,10 @@ export function CommentAutoReplyPanel({ clientId }: Props) {
               return (
                 <div key={p.post_id} className="flex items-start gap-2 rounded-md bg-white px-2 py-1.5">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-xs text-slate-700">{p.snippet || <span className="italic text-slate-400">（无文字，可能是图片/视频帖）</span>}</div>
+                    <div className="flex items-center gap-1.5">
+                      {p.is_reel && <span className="flex-shrink-0 rounded bg-fuchsia-100 px-1.5 py-0.5 text-[10px] font-bold text-fuchsia-700">Reel</span>}
+                      <span className="truncate text-xs text-slate-700">{p.snippet || <span className="italic text-slate-400">（无文字，可能是图片/视频帖）</span>}</span>
+                    </div>
                     <div className="mt-0.5 text-[11px] text-slate-400">
                       {p.created_at ? new Date(p.created_at).toLocaleDateString('zh-CN') : '—'} · 💬 {p.comment_count} 条评论
                     </div>

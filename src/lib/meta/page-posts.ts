@@ -116,6 +116,62 @@ export function rankVideoWinners(
 }
 
 /**
+ * Fetch a Page's Reels (video reels). Reels are video objects — their comments
+ * live on the video object, NOT on the /published_posts "feed" representation
+ * (which undercounts). Returns PagePost-shaped rows so callers can treat reels
+ * and posts uniformly; `postId` here is the reel's video id, usable directly
+ * with the /{id}/comments edge.
+ *
+ * Graceful: returns [] on any error (the edge/permission may vary per account).
+ */
+export async function fetchPageReels(
+  pageId: string,
+  pageAccessToken: string,
+  limit = 50,
+): Promise<PagePost[]> {
+  const fields = ['id', 'created_time', 'description', 'comments.summary(true).limit(0)'].join(',')
+  const url = `${GRAPH_BASE}/${pageId}/video_reels?fields=${fields}&limit=${limit}&access_token=${encodeURIComponent(pageAccessToken)}`
+
+  let res: Response
+  try {
+    res = await fetch(url)
+  } catch (err) {
+    console.error('[meta/page-posts] fetchPageReels error:', err)
+    return []
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    console.error(`[meta/page-posts] fetchPageReels HTTP ${res.status}:`, body.slice(0, 200))
+    return []
+  }
+
+  const body = (await res.json()) as {
+    data?: Array<{ id: string; created_time?: string; description?: string; comments?: { summary?: { total_count?: number } } }>
+    error?: { message: string }
+  }
+  if (body.error) {
+    console.error('[meta/page-posts] fetchPageReels error:', body.error.message)
+    return []
+  }
+
+  return (body.data ?? []).map((r) => {
+    const createdAt = r.created_time ?? new Date().toISOString()
+    const cm = r.comments?.summary?.total_count ?? 0
+    return {
+      postId: r.id,
+      fullId: r.id,
+      createdAt,
+      message: r.description ?? '',
+      mediaType: 'reel',
+      reactions: 0,
+      comments: cm,
+      shares: 0,
+      score: 0,
+    }
+  })
+}
+
+/**
  * Exchange the caller's User access token for a Page access token.
  * Meta's /me/accounts endpoint returns each Page the user manages + its own token.
  */

@@ -19,7 +19,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
-import { getPageAccessToken, fetchPagePosts } from '@/lib/meta/page-posts'
+import { getPageAccessToken, fetchPagePosts, fetchPageReels } from '@/lib/meta/page-posts'
 import { fetchPostComments, replyToComment, sendPrivateReply, hideComment, PageComment } from '@/lib/meta/comments'
 import { classifyComment, CommentDecision, CommentCategory } from './comment-classifier'
 import { ReplyContext } from './comment-guardrails'
@@ -79,10 +79,13 @@ export async function processClientComments(config: CommentConfig): Promise<Clie
     // page's recent posts (up to 100) regardless of when they were published,
     // then reply only to comments newer than the cutoff.
     const cutoff = Date.now() - config.lookback_days * 86_400_000
-    const recent = await fetchPagePosts(config.fb_page_id, pageToken, 100)
-    // Scan recent posts + any pinned evergreen posts (which may be older than
-    // the recent-100 window but still get fresh comments).
-    const postIds = new Set(recent.map(p => p.postId))
+    // Scan recent feed posts + Reels (whose comments live on the video object,
+    // not the /published_posts representation) + any pinned evergreen posts.
+    const [recent, reels] = await Promise.all([
+      fetchPagePosts(config.fb_page_id, pageToken, 100),
+      fetchPageReels(config.fb_page_id, pageToken, 100),
+    ])
+    const postIds = new Set([...recent.map(p => p.postId), ...reels.map(r => r.postId)])
     for (const pid of config.pinned_post_ids ?? []) if (pid) postIds.add(pid)
 
     const comments: PageComment[] = []
