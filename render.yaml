@@ -502,3 +502,20 @@ services:
     envVars:
       - key: CRON_SECRET
         sync: false
+
+  # Social comment auto-reply — every 30 min for enabled clients.
+  # Pulls recent FB Page comments → classify → guardrailed auto reply (public +
+  # optional DM) / hide spam. 30-min cadence keeps DM private_replies inside
+  # Meta's 7-day window. Kill switch: SOCIAL_COMMENT_AUTOREPLY_KILL=1
+  # Reference: ROADMAP.md P20.D (social pillar / DAPE Execution)
+  - type: cron
+    name: social-comment-autoreply
+    env: node
+    schedule: "*/30 * * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/social-comment-autoreply
+    envVars:
+      - key: CRON_SECRET
+        sync: false
