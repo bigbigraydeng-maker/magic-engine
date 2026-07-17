@@ -15,6 +15,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { getPageAccessToken, fetchPageReels } from '@/lib/meta/page-posts'
+import { fetchAdStoryIds } from '@/lib/meta/ads-posts'
 
 const GRAPH_BASE = 'https://graph.facebook.com/v20.0'
 const MAX_POSTS = 200
@@ -26,6 +27,7 @@ interface PostSummary {
   created_at: string
   comment_count: number
   is_reel?: boolean
+  is_ad?: boolean
 }
 
 interface RawFeedPost {
@@ -51,6 +53,13 @@ export async function GET(
     .maybeSingle()
   const pageId = (config?.fb_page_id as string) || ''
   if (!pageId) return NextResponse.json({ error: '先填 Facebook 主页 ID 并保存' }, { status: 400 })
+
+  const { data: clientRow } = await supabaseAdmin
+    .from('clients')
+    .select('meta_ad_account_id')
+    .eq('id', clientId)
+    .maybeSingle()
+  const adAccountId = (clientRow?.meta_ad_account_id as string) || ''
 
   const userToken = await getMetaTokenForClient(clientId)
   if (!userToken) return NextResponse.json({ error: '未找到该客户的 Meta token' }, { status: 400 })
@@ -104,10 +113,47 @@ export async function GET(
     is_reel: true,
   }))
 
+  // Boosted-ad story posts — carry paid-delivery comments the organic edges miss.
+  const adSummaries: PostSummary[] = []
+  if (adAccountId) {
+    const storyIds = await fetchAdStoryIds(adAccountId, userToken).catch(() => [])
+    const known = new Set([...posts.map(p => p.full_id), ...reelSummaries.map(r => r.full_id)])
+    for (const sid of storyIds) {
+      if (known.has(sid)) continue // same as an organic post already listed
+      const detail = await fetchStoryDetail(sid, pageToken)
+      if (detail) adSummaries.push(detail)
+    }
+  }
+
   // Merge, drop feed duplicates of reels (same short id), newest first.
   const reelIds = new Set(reelSummaries.map(r => r.post_id))
-  const merged = [...reelSummaries, ...posts.filter(p => !reelIds.has(p.post_id))]
+  const merged = [...adSummaries, ...reelSummaries, ...posts.filter(p => !reelIds.has(p.post_id))]
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
   return NextResponse.json({ posts: merged, count: merged.length })
+}
+
+/** Fetch one ad story post's snippet + comment count via the Page token. */
+async function fetchStoryDetail(storyId: string, pageToken: string): Promise<PostSummary | null> {
+  const fields = 'id,message,story,created_time,comments.summary(true).limit(0)'
+  const url = `${GRAPH_BASE}/${storyId}?fields=${fields}&access_token=${encodeURIComponent(pageToken)}`
+  let res: Response
+  try {
+    res = await fetch(url)
+  } catch {
+    return null
+  }
+  if (!res.ok) return null
+  const p = (await res.json()) as RawFeedPost & { error?: unknown }
+  if (!p || p.error || !p.id) return null
+  const shortId = p.id.includes('_') ? p.id.split('_')[1] : p.id
+  const text = (p.message ?? p.story ?? '').replace(/\s+/g, ' ').trim()
+  return {
+    post_id: shortId,
+    full_id: p.id,
+    snippet: text.slice(0, 90),
+    created_at: p.created_time ?? '',
+    comment_count: p.comments?.summary?.total_count ?? 0,
+    is_ad: true,
+  }
 }

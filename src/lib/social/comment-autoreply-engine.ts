@@ -20,6 +20,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { getPageAccessToken, fetchPagePosts, fetchPageReels } from '@/lib/meta/page-posts'
+import { fetchAdStoryIds } from '@/lib/meta/ads-posts'
 import { fetchPostComments, replyToComment, sendPrivateReply, hideComment, PageComment } from '@/lib/meta/comments'
 import { classifyComment, CommentDecision, CommentCategory } from './comment-classifier'
 import { ReplyContext } from './comment-guardrails'
@@ -87,6 +88,12 @@ export async function processClientComments(config: CommentConfig): Promise<Clie
     ])
     const postIds = new Set([...recent.map(p => p.postId), ...reels.map(r => r.postId)])
     for (const pid of config.pinned_post_ids ?? []) if (pid) postIds.add(pid)
+    // Boosted posts/Reels carry paid-delivery comments on the ad's story object,
+    // which the organic endpoints undercount. Pull those story ids via the Ads API.
+    if (ctxBase.adAccountId) {
+      const storyIds = await fetchAdStoryIds(ctxBase.adAccountId, userToken).catch(() => [])
+      for (const sid of storyIds) postIds.add(sid)
+    }
 
     const comments: PageComment[] = []
     for (const postId of Array.from(postIds)) {
@@ -114,17 +121,22 @@ export async function processClientComments(config: CommentConfig): Promise<Clie
   }
 }
 
-interface CommentContext extends ReplyContext { clientId: string }
+interface CommentContext extends ReplyContext { clientId: string; adAccountId: string | null }
 
 async function loadClientContext(clientId: string): Promise<CommentContext> {
   const { data } = await supabaseAdmin
     .from('clients')
-    .select('name, domain')
+    .select('name, domain, meta_ad_account_id')
     .eq('id', clientId)
     .maybeSingle()
   const name = (data?.name as string) ?? 'our team'
   const domain = (data?.domain as string) ?? ''
-  return { clientId, clientName: name, siteUrl: domain ? `https://${domain}` : '' }
+  return {
+    clientId,
+    clientName: name,
+    siteUrl: domain ? `https://${domain}` : '',
+    adAccountId: (data?.meta_ad_account_id as string) ?? null,
+  }
 }
 
 interface ExistingRow { comment_id: string; reply_status: string; attempts: number }

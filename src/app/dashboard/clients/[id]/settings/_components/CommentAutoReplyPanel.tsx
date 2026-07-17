@@ -36,6 +36,7 @@ interface PostSummary {
   created_at: string
   comment_count: number
   is_reel?: boolean
+  is_ad?: boolean
 }
 
 type PanelState =
@@ -409,6 +410,7 @@ export function CommentAutoReplyPanel({ clientId }: Props) {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
                       {p.is_reel && <span className="flex-shrink-0 rounded bg-fuchsia-100 px-1.5 py-0.5 text-[10px] font-bold text-fuchsia-700">Reel</span>}
+                      {p.is_ad && <span className="flex-shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">广告帖</span>}
                       <span className="truncate text-xs text-slate-700">{p.snippet || <span className="italic text-slate-400">（无文字，可能是图片/视频帖）</span>}</span>
                     </div>
                     <div className="mt-0.5 text-[11px] text-slate-400">
