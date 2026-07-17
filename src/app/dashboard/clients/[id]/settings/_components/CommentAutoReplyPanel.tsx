@@ -50,6 +50,18 @@ const SCOPE_LABEL: Record<string, string> = {
   pages_messaging: '私信引导',
 }
 
+interface RunResult {
+  ok: boolean
+  posts_scanned?: number
+  new_comments?: number
+  public_replies?: number
+  private_replies?: number
+  hidden?: number
+  needs_human?: number
+  failed?: number
+  error?: string
+}
+
 const DEFAULT_DRAFT: Config = {
   enabled: false,
   fb_page_id: '',
@@ -100,6 +112,8 @@ export function CommentAutoReplyPanel({ clientId }: Props) {
   const [errMsg, setErrMsg] = useState<string | null>(null)
   const [probing, setProbing] = useState(false)
   const [probe, setProbe] = useState<ProbeResult | null>(null)
+  const [running, setRunning] = useState(false)
+  const [runResult, setRunResult] = useState<RunResult | null>(null)
 
   const load = useCallback(async () => {
     setState({ phase: 'loading' })
@@ -179,6 +193,20 @@ export function CommentAutoReplyPanel({ clientId }: Props) {
     }
   }
 
+  const runNow = async () => {
+    setRunning(true)
+    setRunResult(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/comment-autoreply-run`, { method: 'POST' })
+      const body = (await res.json()) as { result?: RunResult; error?: string }
+      setRunResult(body.result ?? { ok: false, error: body.error ?? `HTTP ${res.status}` })
+    } catch (err) {
+      setRunResult({ ok: false, error: err instanceof Error ? err.message : '运行失败' })
+    } finally {
+      setRunning(false)
+    }
+  }
+
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       {/* Master switch */}
@@ -214,15 +242,42 @@ export function CommentAutoReplyPanel({ clientId }: Props) {
           disabled={saving}
         />
         <p className="mt-1 text-xs text-slate-400">开启自动回复必须填。Page token 由后台按客户解析（无需在此填 token）。</p>
-        <div className="mt-2">
+        <div className="mt-2 flex flex-wrap gap-2">
           <button
             type="button" onClick={runProbe} disabled={probing}
             className="rounded-lg border border-cyan-300 bg-cyan-50 px-3 py-1.5 text-xs font-bold text-cyan-800 transition hover:bg-cyan-100 disabled:opacity-50"
           >
             {probing ? '验证中…' : '检查 Meta 权限'}
           </button>
+          <button
+            type="button" onClick={runNow} disabled={running}
+            className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-50"
+            title="立即跑一次（不等 30 分 cron），会真实回复符合条件的评论"
+          >
+            {running ? '运行中…' : '立即运行一次'}
+          </button>
         </div>
       </div>
+
+      {/* Manual run result */}
+      {runResult && (
+        <div className={[
+          'mb-2 rounded-lg border p-3 text-xs',
+          runResult.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-red-200 bg-red-50 text-red-700',
+        ].join(' ')}>
+          {runResult.ok ? (
+            <span>
+              ✅ 运行完成 · 扫 {runResult.posts_scanned ?? 0} 帖 · 新评论 {runResult.new_comments ?? 0} 条
+              {' → '}回帖 {runResult.public_replies ?? 0} · 私信 {runResult.private_replies ?? 0}
+              · 隐藏 {runResult.hidden ?? 0} · 需人工 {runResult.needs_human ?? 0}
+              {(runResult.failed ?? 0) > 0 && ` · 失败 ${runResult.failed}`}
+              <span className="ml-1 text-emerald-600">（详情看下面「最近自动回复」）</span>
+            </span>
+          ) : (
+            <span>⚠ 运行失败：{runResult.error}</span>
+          )}
+        </div>
+      )}
 
       {/* Probe result */}
       {probe && (
