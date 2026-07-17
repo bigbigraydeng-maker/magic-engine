@@ -34,6 +34,22 @@ type PanelState =
   | { phase: 'error'; message: string }
   | { phase: 'ready'; config: Config }
 
+interface ProbeResult {
+  token_resolved: boolean
+  page_token_resolved: boolean
+  permissions: Record<string, boolean>
+  live_read_ok: boolean
+  sample_comment_count: number | null
+  ready: boolean
+  notes: string[]
+}
+
+const SCOPE_LABEL: Record<string, string> = {
+  pages_read_engagement: '读取评论',
+  pages_manage_engagement: '回帖 / 隐藏',
+  pages_messaging: '私信引导',
+}
+
 const DEFAULT_DRAFT: Config = {
   enabled: false,
   fb_page_id: '',
@@ -82,6 +98,8 @@ export function CommentAutoReplyPanel({ clientId }: Props) {
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [errMsg, setErrMsg] = useState<string | null>(null)
+  const [probing, setProbing] = useState(false)
+  const [probe, setProbe] = useState<ProbeResult | null>(null)
 
   const load = useCallback(async () => {
     setState({ phase: 'loading' })
@@ -144,6 +162,23 @@ export function CommentAutoReplyPanel({ clientId }: Props) {
   const isDirty = JSON.stringify(draft) !== JSON.stringify({ ...DEFAULT_DRAFT, ...state.config })
   const set = <K extends keyof Config>(k: K, v: Config[K]) => setDraft(d => ({ ...d, [k]: v }))
 
+  const runProbe = async () => {
+    setProbing(true)
+    setProbe(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/comment-autoreply-probe`)
+      setProbe((await res.json()) as ProbeResult)
+    } catch (err) {
+      setProbe({
+        token_resolved: false, page_token_resolved: false, permissions: {}, live_read_ok: false,
+        sample_comment_count: null, ready: false,
+        notes: [err instanceof Error ? err.message : '验证请求失败'],
+      })
+    } finally {
+      setProbing(false)
+    }
+  }
+
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       {/* Master switch */}
@@ -179,7 +214,51 @@ export function CommentAutoReplyPanel({ clientId }: Props) {
           disabled={saving}
         />
         <p className="mt-1 text-xs text-slate-400">开启自动回复必须填。Page token 由后台按客户解析（无需在此填 token）。</p>
+        <div className="mt-2">
+          <button
+            type="button" onClick={runProbe} disabled={probing}
+            className="rounded-lg border border-cyan-300 bg-cyan-50 px-3 py-1.5 text-xs font-bold text-cyan-800 transition hover:bg-cyan-100 disabled:opacity-50"
+          >
+            {probing ? '验证中…' : '检查 Meta 权限'}
+          </button>
+        </div>
       </div>
+
+      {/* Probe result */}
+      {probe && (
+        <div className={[
+          'mb-2 rounded-lg border p-3 text-xs',
+          probe.ready ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50',
+        ].join(' ')}>
+          <div className="mb-1.5 flex items-center gap-2 font-bold">
+            <span>{probe.ready ? '✅ 就绪' : '⚠ 尚未就绪'}</span>
+            <span className="font-normal text-slate-500">
+              token {probe.token_resolved ? '✓' : '✗'} · Page token {probe.page_token_resolved ? '✓' : '✗'}
+              {probe.live_read_ok && ` · 读到 ${probe.sample_comment_count ?? 0} 条评论`}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {Object.entries(SCOPE_LABEL).map(([scope, label]) => {
+              const granted = probe.permissions[scope]
+              return (
+                <span key={scope} className={[
+                  'rounded-full px-2 py-0.5 font-semibold',
+                  granted === true ? 'bg-emerald-100 text-emerald-700'
+                    : granted === false ? 'bg-red-100 text-red-700'
+                    : 'bg-slate-100 text-slate-500',
+                ].join(' ')}>
+                  {label}：{granted === true ? '有' : granted === false ? '缺' : '未知'}
+                </span>
+              )
+            })}
+          </div>
+          {probe.notes.length > 0 && (
+            <ul className="mt-2 list-disc space-y-0.5 pl-4 text-slate-600">
+              {probe.notes.map((n, i) => <li key={i}>{n}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* Category toggles */}
       <div className="mt-3 divide-y divide-slate-100 border-t border-slate-100">
