@@ -111,6 +111,7 @@ export const CITY_COORDS: Record<string, { coord: string; country: 'AU' | 'NZ' }
   nelson:          { coord: '-41.2706,173.2840', country: 'NZ' },
   dunedin:         { coord: '-45.8788,170.5028', country: 'NZ' },
   rotorua:         { coord: '-38.1368,176.2497', country: 'NZ' },
+  new_plymouth:    { coord: '-39.0556,174.0752', country: 'NZ' },
 }
 
 const DEFAULT_RADIUS_KM = 25

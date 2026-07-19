@@ -42,9 +42,21 @@ export function jobKeywordPool(): string[] {
 
 // Company-name tokens that mark a recruiter or a marketing/digital agency
 // (= competitor). Word-boundary matched so "Marketing" in "Markwell" or a real
-// brand that merely *contains* a fragment is not falsely dropped.
+// brand that merely *contains* a fragment is not falsely dropped. NB: bare
+// "consult" is deliberately NOT here — it false-dropped "Construction Cost
+// Consultants" (a real end-employer). Marketing consultancies are caught by
+// their other tokens (digital/marketing) or the classification / exact list.
 const AGENCY_NAME_PATTERN =
-  /\b(recruit(ment|ing)?|talent|staffing|agency|agencies|consult(ing|ants?)?|digital|marketing|media|creative|advertising|seo|ppc|growth partners?)\b/i
+  /\b(recruit(ment|ing|er)?|talent|staffing|personnel|agency|agencies|digital|marketing|media|creative|advertising|seo|ppc|growth partners?)\b/i
+
+// Recruiters/consultancies whose names carry NO agency keyword — a curated
+// exact-match list that grows as we spot slip-throughs (a live run surfaced
+// "Positive People", "Working In", "PN Personnel"). Kept separate from the
+// pattern so broadening it never costs a real end-employer.
+const KNOWN_RECRUITERS = new Set([
+  'positive people', 'working in', 'eq consultants', 'hays', 'madison recruitment',
+  'beyond recruitment', 'frog recruitment', 'rice consulting', 'kinetic recruitment',
+])
 
 // Board categories that only agencies/recruiters post under.
 const AGENCY_CLASSIFICATIONS = new Set([
@@ -60,6 +72,7 @@ const AGENCY_CLASSIFICATIONS = new Set([
  * only costs one lead.
  */
 export function isAgencyOrRecruiter(company: string, classification: string | null): boolean {
+  if (KNOWN_RECRUITERS.has(company.toLowerCase().trim())) return true
   if (AGENCY_NAME_PATTERN.test(company)) return true
   if (classification && AGENCY_CLASSIFICATIONS.has(classification.toLowerCase().trim())) return true
   return false

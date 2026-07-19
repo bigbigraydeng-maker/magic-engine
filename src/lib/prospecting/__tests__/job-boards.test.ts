@@ -17,9 +17,18 @@ describe('isAgencyOrRecruiter', () => {
 
   it('keeps real end-employers whose names merely contain a fragment', () => {
     // "Markwell" must NOT trip \bmarketing\b; these are all genuine prospects.
+    // "Construction Cost Consultants" must NOT be dropped — bare "consult" was
+    // removed after it false-dropped this real end-employer on a live run.
     for (const c of ['Downlow Burgers', '3 Wise Men', 'Markwell Foods', 'Hills Hats Limited',
-                     'Rangiora Vet centre', 'Plumbing World', 'KIWI NZ VENTURE LIMITED']) {
+                     'Rangiora Vet centre', 'Plumbing World', 'KIWI NZ VENTURE LIMITED',
+                     'Construction Cost Consultants']) {
       expect(isAgencyOrRecruiter(c, null)).toBe(false)
+    }
+  })
+
+  it('catches recruiters whose names carry no agency keyword (exact list + personnel)', () => {
+    for (const c of ['Positive People', 'Working In', 'EQ Consultants', 'PN Personnel']) {
+      expect(isAgencyOrRecruiter(c, null)).toBe(true)
     }
   })
 
@@ -91,6 +100,7 @@ describe('normaliseLocationToSeedKey', () => {
     expect(normaliseLocationToSeedKey('Lower Hutt, Wellington')).toBe('wellington')
     expect(normaliseLocationToSeedKey('Christchurch Central, Canterbury')).toBe('christchurch')
     expect(normaliseLocationToSeedKey('Mount Maunganui, Bay of Plenty')).toBe('tauranga')
+    expect(normaliseLocationToSeedKey('Bell Block, Taranaki')).toBe('new_plymouth')
   })
   it('returns null for empty or unknown locations (no free text in the city column)', () => {
     expect(normaliseLocationToSeedKey('')).toBeNull()

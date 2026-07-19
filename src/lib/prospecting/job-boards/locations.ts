@@ -38,6 +38,7 @@ const REGION_TO_SEED: Record<string, string> = {
   'manawatu-whanganui': 'palmerston_north',
   tasman:          'nelson',
   nelson:          'nelson',
+  taranaki:        'new_plymouth',
 }
 
 /** Suburb/area keyword → finer Auckland seed key (only within the Auckland region). */
