@@ -206,6 +206,23 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # Job-signal discovery — weekly (Mon 02:00 UTC ≈ Mon 2pm/3pm NZST).
+  # Harvests NZ marketing-role postings (Seek), resolves each hiring company via
+  # Places, inserts new ones as discovered(job_board). The prospecting-sweep then
+  # audits/analyses/drafts them. No-ops unless JOB_SIGNAL_INGEST_ENABLED=true on
+  # the web service (ships dark; PM turns it on). Sending stays human downstream.
+  - type: cron
+    name: job-boards-weekly
+    env: node
+    schedule: "0 2 * * 1"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/job-boards-weekly
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # Blog generation sweeper — every 5 minutes
   # Marks blog_posts stuck at status='generating' (>10 min) as failed.
   # Background generation in /api/clients/[id]/blog is fire-and-forget;
