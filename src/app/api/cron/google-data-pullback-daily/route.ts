@@ -29,6 +29,7 @@ import { fetchAccountInsights, loadGoogleAdsCreds } from '@/lib/google-ads/clien
 import { SEO_METRIC_KEY, GA4_METRIC_KEY, ADS_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import { MetaAdsAdapter } from '@/lib/flywheel/adapters/MetaAdsAdapter'
 import { startCronRun } from '@/lib/cron/run-logger'
+import { syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 900
@@ -59,6 +60,8 @@ interface ClientResult {
    *  snapshot table yet, so `metrics_written` mirrors the spend/impressions
    *  count instead of a `snapshot_id`. */
   google_ads?: { success: boolean; metrics_written?: number; error?: string }
+  /** P21.K.1 campaign-level daily series → ad_daily_insights. */
+  ad_daily?:  { success: boolean; rows_written?: number; backfilled?: boolean; error?: string }
 }
 
 // ─── Route ───────────────────────────────────────────────────────────────────
@@ -200,6 +203,19 @@ export async function GET(req: NextRequest) {
         || process.env.META_SYSTEM_USER_TOKEN
       if (metaToken) {
         result.meta = await syncMeta(client.client_id, client.meta_ad_account_id, metaToken, slug)
+
+        // P21.K.1: campaign-level DAILY series for the Ad Strategy Engine.
+        // Separate from the 30-day rolling snapshot above, which cannot answer
+        // "has this campaign decayed against its own baseline" — its rows
+        // overlap by 29 days and truncate campaigns to the top 10 by spend.
+        // Kept non-fatal: the snapshot is the pre-existing contract (read by
+        // MetaAdsAdapter, the monthly report and the production-package view)
+        // and must not regress if this newer pull fails.
+        result.ad_daily = await syncCampaignDailyInsights(
+          client.client_id,
+          client.meta_ad_account_id,
+          metaToken,
+        )
       }
     }
 
@@ -215,22 +231,26 @@ export async function GET(req: NextRequest) {
   const ga4Synced       = results.filter(r => r.ga4?.success).length
   const metaSynced      = results.filter(r => r.meta?.success).length
   const googleAdsSynced = results.filter(r => r.google_ads?.success).length
+  const adDailySynced   = results.filter(r => r.ad_daily?.success).length
+  const adDailyRows     = results.reduce((sum, r) => sum + (r.ad_daily?.rows_written ?? 0), 0)
   const failed          = results.filter(
     r =>
       r.gsc?.success === false ||
       r.ga4?.success === false ||
       r.meta?.success === false ||
-      r.google_ads?.success === false,
+      r.google_ads?.success === false ||
+      r.ad_daily?.success === false,
   ).length
 
   // Collect per-client errors so postmortem is possible without Render logs.
   // Diagnostic only — no behavior change.
   const errors = results.flatMap(r => {
-    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'; error: string }> = []
+    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'; error: string }> = []
     if (r.gsc?.success === false && r.gsc.error)               out.push({ client_id: r.client_id, source: 'gsc',        error: r.gsc.error })
     if (r.ga4?.success === false && r.ga4.error)               out.push({ client_id: r.client_id, source: 'ga4',        error: r.ga4.error })
     if (r.meta?.success === false && r.meta.error)             out.push({ client_id: r.client_id, source: 'meta',       error: r.meta.error })
     if (r.google_ads?.success === false && r.google_ads.error) out.push({ client_id: r.client_id, source: 'google_ads', error: r.google_ads.error })
+    if (r.ad_daily?.success === false && r.ad_daily.error)     out.push({ client_id: r.client_id, source: 'ad_daily',   error: r.ad_daily.error })
     return out
   })
 
@@ -238,7 +258,7 @@ export async function GET(req: NextRequest) {
     processed: results.length,
     completed: results.length - failed,
     failed,
-    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, google_ads_synced: googleAdsSynced, errors },
+    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, errors },
   })
   return NextResponse.json({
     success:           true,
@@ -247,6 +267,8 @@ export async function GET(req: NextRequest) {
     ga4_synced:        ga4Synced,
     meta_synced:       metaSynced,
     google_ads_synced: googleAdsSynced,
+    ad_daily_synced:   adDailySynced,
+    ad_daily_rows:     adDailyRows,
     failed,
     results,
   })

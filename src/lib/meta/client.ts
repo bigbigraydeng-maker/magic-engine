@@ -176,6 +176,220 @@ function parseCampaignRow(row: GraphCampaignRow): MetaCampaignInsight | null {
   }
 }
 
+// ── Campaign daily time series (P21.K.1 — Ad Strategy Engine data spine) ──────
+
+/**
+ * One campaign's metrics for one calendar day.
+ *
+ * P21.K.1: feeds `ad_daily_insights`, the time series the Ad Strategy Engine
+ * needs for relative-baseline fatigue detection (7d median vs the campaign's
+ * own best 7d). The pre-existing `getAdCampaignInsights` cannot serve this —
+ * it returns a single 30-day rolling aggregate capped at 10 campaigns.
+ */
+export interface MetaCampaignDailyRow {
+  campaign_id:   string
+  campaign_name: string
+  insight_date:  string        // YYYY-MM-DD
+  spend:         number
+  impressions:   number
+  reach:         number | null
+  clicks:        number
+  frequency:     number | null // impressions / reach, as reported by Meta
+  cpm:           number | null
+  ctr:           number | null // fraction (0.0318 = 3.18%), outbound CTR preferred
+  cpc:           number | null
+  leads:         number        // action_type 'lead' (Lead Form submissions)
+  messaging_conversations: number // CTWA conversations started
+  results:       number        // leads + messaging_conversations (the north-star unit)
+  cost_per_result: number | null
+}
+
+interface GraphCampaignDailyRow extends GraphCampaignRow {
+  date_start?: string
+  reach?:      string
+  frequency?:  string
+  cpm?:        string
+}
+
+const LEAD_ACTION_TYPES = ['lead', 'onsite_conversion.lead_grouped']
+const MESSAGING_ACTION_TYPES = [
+  'onsite_conversion.messaging_conversation_started_7d',
+  'onsite_conversion.total_messaging_connection',
+]
+
+function sumActions(
+  actions: Array<{ action_type: string; value: string }> | undefined,
+  wanted: string[],
+): number {
+  if (!actions) return 0
+  return actions
+    .filter(a => wanted.includes(a.action_type))
+    .reduce((sum, a) => sum + (parseInt(a.value, 10) || 0), 0)
+}
+
+function parseCampaignDailyRow(row: GraphCampaignDailyRow): MetaCampaignDailyRow | null {
+  if (!row.campaign_id || !row.date_start) return null
+
+  const base  = parseInsights(row)
+  const reach = row.reach !== undefined ? parseInt(row.reach, 10) || null : null
+
+  // Prefer Meta's own outbound CTR (percent → fraction); fall back to clicks/impressions.
+  const outbound = row.outbound_clicks_ctr?.[0]
+  const ctr = outbound ? (parseFloat(outbound.value) / 100 || null) : base.ctr
+
+  const leads     = sumActions(row.actions, LEAD_ACTION_TYPES)
+  const messaging = sumActions(row.actions, MESSAGING_ACTION_TYPES)
+  const results   = leads + messaging
+
+  return {
+    campaign_id:   row.campaign_id,
+    campaign_name: row.campaign_name ?? row.campaign_id,
+    insight_date:  row.date_start,
+    spend:         base.spend,
+    impressions:   base.impressions,
+    reach,
+    clicks:        base.clicks,
+    frequency:     row.frequency !== undefined ? parseFloat(row.frequency) || null : null,
+    cpm:           row.cpm !== undefined ? parseFloat(row.cpm) || null : null,
+    ctr,
+    cpc:           base.cpc,
+    leads,
+    messaging_conversations: messaging,
+    results,
+    cost_per_result: results > 0 ? base.spend / results : null,
+  }
+}
+
+const DAILY_FIELDS = [
+  'campaign_id',
+  'campaign_name',
+  'spend',
+  'impressions',
+  'reach',
+  'clicks',
+  'frequency',
+  'cpm',
+  'actions',
+  'outbound_clicks_ctr',
+].join(',')
+
+/** Hard cap on pagination follows — a runaway-loop backstop, not a real limit. */
+const MAX_INSIGHT_PAGES = 25
+
+/**
+ * Fetch per-campaign, per-day insights across a date range, following pagination.
+ *
+ * Unlike `getAdCampaignInsights` this returns EVERY campaign (no spend-sorted
+ * top-N truncation) broken down by day, which is what a time series requires.
+ *
+ * Returns [] on any transport/HTTP error, matching this module's convention of
+ * degrading rather than throwing (callers treat [] as "nothing to write").
+ */
+export async function getCampaignDailyInsights(
+  adAccountId: string,
+  accessToken: string,
+  since: string,
+  until: string,
+): Promise<MetaCampaignDailyRow[]> {
+  const params = new URLSearchParams({
+    fields: DAILY_FIELDS,
+    time_range: JSON.stringify({ since, until }),
+    access_token: accessToken,
+    level: 'campaign',
+    time_increment: '1',
+    limit: '500',
+  })
+
+  let url: string | undefined = `${GRAPH_BASE}/${adAccountId}/insights?${params.toString()}`
+  const rows: MetaCampaignDailyRow[] = []
+
+  for (let page = 0; page < MAX_INSIGHT_PAGES && url; page++) {
+    let res: Response
+    try {
+      res = await fetch(url)
+    } catch (err) {
+      console.error('[meta/client] campaign daily fetch error:', err)
+      return rows
+    }
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      console.error(`[meta/client] campaign daily HTTP ${res.status}:`, body.slice(0, 300))
+      return rows
+    }
+
+    const json = await res.json() as {
+      data?: GraphCampaignDailyRow[]
+      paging?: { next?: string }
+    }
+
+    for (const raw of json.data ?? []) {
+      const parsed = parseCampaignDailyRow(raw)
+      if (parsed) rows.push(parsed)
+    }
+
+    url = json.paging?.next
+  }
+
+  return rows
+}
+
+/**
+ * Fetch each campaign's frequency over a whole window (typically 7 days).
+ *
+ * Frequency is impressions/reach and is NOT additive — averaging seven daily
+ * frequencies does not give the 7-day frequency, because reach deduplicates
+ * people across the window. It must be requested for the window itself.
+ */
+export async function getCampaignWindowFrequency(
+  adAccountId: string,
+  accessToken: string,
+  since: string,
+  until: string,
+): Promise<Map<string, number>> {
+  const params = new URLSearchParams({
+    fields: 'campaign_id,frequency',
+    time_range: JSON.stringify({ since, until }),
+    access_token: accessToken,
+    level: 'campaign',
+    limit: '500',
+  })
+
+  const out = new Map<string, number>()
+  let url: string | undefined = `${GRAPH_BASE}/${adAccountId}/insights?${params.toString()}`
+
+  for (let page = 0; page < MAX_INSIGHT_PAGES && url; page++) {
+    let res: Response
+    try {
+      res = await fetch(url)
+    } catch (err) {
+      console.error('[meta/client] window frequency fetch error:', err)
+      return out
+    }
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      console.error(`[meta/client] window frequency HTTP ${res.status}:`, body.slice(0, 300))
+      return out
+    }
+
+    const json = await res.json() as {
+      data?: Array<{ campaign_id?: string; frequency?: string }>
+      paging?: { next?: string }
+    }
+
+    for (const row of json.data ?? []) {
+      if (!row.campaign_id || row.frequency === undefined) continue
+      const freq = parseFloat(row.frequency)
+      if (Number.isFinite(freq)) out.set(row.campaign_id, freq)
+    }
+
+    url = json.paging?.next
+  }
+
+  return out
+}
+
 // ── Campaign management ───────────────────────────────────────────────────────
 
 export interface CampaignDetails {
