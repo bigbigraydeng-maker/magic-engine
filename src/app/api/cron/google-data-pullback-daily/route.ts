@@ -30,6 +30,7 @@ import { SEO_METRIC_KEY, GA4_METRIC_KEY, ADS_METRIC_KEY } from '@/lib/flywheel/v
 import { MetaAdsAdapter } from '@/lib/flywheel/adapters/MetaAdsAdapter'
 import { startCronRun } from '@/lib/cron/run-logger'
 import { syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
+import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 900
@@ -62,6 +63,8 @@ interface ClientResult {
   google_ads?: { success: boolean; metrics_written?: number; error?: string }
   /** P21.K.1 campaign-level daily series → ad_daily_insights. */
   ad_daily?:  { success: boolean; rows_written?: number; backfilled?: boolean; error?: string }
+  /** P21.K.2 daily ad-health verdict → ad_health_narratives. */
+  ad_health?: { success: boolean; overall_verdict?: string; campaigns_evaluated?: number; error?: string }
 }
 
 // ─── Route ───────────────────────────────────────────────────────────────────
@@ -216,6 +219,18 @@ export async function GET(req: NextRequest) {
           client.meta_ad_account_id,
           metaToken,
         )
+
+        // P21.K.2: judge each campaign against its own baseline and store the
+        // day's account-health narrative. Reads the series just written above.
+        // Non-fatal — a judging failure must not affect data collection.
+        if (result.ad_daily?.success) {
+          const insightDate = new Date()
+          insightDate.setUTCDate(insightDate.getUTCDate() - 1)
+          result.ad_health = await evaluateClientAdHealth(
+            client.client_id,
+            insightDate.toISOString().slice(0, 10),
+          )
+        }
       }
     }
 
@@ -233,24 +248,28 @@ export async function GET(req: NextRequest) {
   const googleAdsSynced = results.filter(r => r.google_ads?.success).length
   const adDailySynced   = results.filter(r => r.ad_daily?.success).length
   const adDailyRows     = results.reduce((sum, r) => sum + (r.ad_daily?.rows_written ?? 0), 0)
+  const adHealthSynced  = results.filter(r => r.ad_health?.success).length
+  const adHealthAlerts  = results.filter(r => r.ad_health?.overall_verdict === 'alert').length
   const failed          = results.filter(
     r =>
       r.gsc?.success === false ||
       r.ga4?.success === false ||
       r.meta?.success === false ||
       r.google_ads?.success === false ||
-      r.ad_daily?.success === false,
+      r.ad_daily?.success === false ||
+      r.ad_health?.success === false,
   ).length
 
   // Collect per-client errors so postmortem is possible without Render logs.
   // Diagnostic only — no behavior change.
   const errors = results.flatMap(r => {
-    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'; error: string }> = []
+    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_health'; error: string }> = []
     if (r.gsc?.success === false && r.gsc.error)               out.push({ client_id: r.client_id, source: 'gsc',        error: r.gsc.error })
     if (r.ga4?.success === false && r.ga4.error)               out.push({ client_id: r.client_id, source: 'ga4',        error: r.ga4.error })
     if (r.meta?.success === false && r.meta.error)             out.push({ client_id: r.client_id, source: 'meta',       error: r.meta.error })
     if (r.google_ads?.success === false && r.google_ads.error) out.push({ client_id: r.client_id, source: 'google_ads', error: r.google_ads.error })
     if (r.ad_daily?.success === false && r.ad_daily.error)     out.push({ client_id: r.client_id, source: 'ad_daily',   error: r.ad_daily.error })
+    if (r.ad_health?.success === false && r.ad_health.error)   out.push({ client_id: r.client_id, source: 'ad_health', error: r.ad_health.error })
     return out
   })
 
@@ -258,7 +277,7 @@ export async function GET(req: NextRequest) {
     processed: results.length,
     completed: results.length - failed,
     failed,
-    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, errors },
+    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, errors },
   })
   return NextResponse.json({
     success:           true,
@@ -269,6 +288,8 @@ export async function GET(req: NextRequest) {
     google_ads_synced: googleAdsSynced,
     ad_daily_synced:   adDailySynced,
     ad_daily_rows:     adDailyRows,
+    ad_health_synced:  adHealthSynced,
+    ad_health_alerts:  adHealthAlerts,
     failed,
     results,
   })
