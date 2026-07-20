@@ -211,20 +211,29 @@ interface GraphCampaignDailyRow extends GraphCampaignRow {
   cpm?:        string
 }
 
-const LEAD_ACTION_TYPES = ['lead', 'onsite_conversion.lead_grouped']
-const MESSAGING_ACTION_TYPES = [
+// Meta's `actions` array is HIERARCHICAL: parent and child action types both
+// appear for the same conversions and their values overlap. `lead` is the
+// aggregate; `onsite_conversion.lead_grouped` is the Instant-Form child of it.
+// SUMMING them double-counts (leads inflate up to 2×, halving cost_per_result).
+// So each metric picks ONE type by priority, never adds across the list.
+// Ref: https://developers.facebook.com/docs/marketing-api/reference/ads-action-stats/
+const LEAD_ACTION_PRIORITY = ['lead', 'onsite_conversion.lead_grouped']
+const MESSAGING_ACTION_PRIORITY = [
   'onsite_conversion.messaging_conversation_started_7d',
   'onsite_conversion.total_messaging_connection',
 ]
 
-function sumActions(
+/** Return the value of the first action type present, by priority. Never sums. */
+function pickAction(
   actions: Array<{ action_type: string; value: string }> | undefined,
-  wanted: string[],
+  priority: string[],
 ): number {
   if (!actions) return 0
-  return actions
-    .filter(a => wanted.includes(a.action_type))
-    .reduce((sum, a) => sum + (parseInt(a.value, 10) || 0), 0)
+  for (const wanted of priority) {
+    const hit = actions.find(a => a.action_type === wanted)
+    if (hit) return parseInt(hit.value, 10) || 0
+  }
+  return 0
 }
 
 function parseCampaignDailyRow(row: GraphCampaignDailyRow): MetaCampaignDailyRow | null {
@@ -237,8 +246,8 @@ function parseCampaignDailyRow(row: GraphCampaignDailyRow): MetaCampaignDailyRow
   const outbound = row.outbound_clicks_ctr?.[0]
   const ctr = outbound ? (parseFloat(outbound.value) / 100 || null) : base.ctr
 
-  const leads     = sumActions(row.actions, LEAD_ACTION_TYPES)
-  const messaging = sumActions(row.actions, MESSAGING_ACTION_TYPES)
+  const leads     = pickAction(row.actions, LEAD_ACTION_PRIORITY)
+  const messaging = pickAction(row.actions, MESSAGING_ACTION_PRIORITY)
   const results   = leads + messaging
 
   return {

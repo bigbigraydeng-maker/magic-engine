@@ -43,6 +43,11 @@ CREATE TABLE IF NOT EXISTS ad_daily_insights (
   -- run). Frequency is NOT additive: averaging seven daily values does not
   -- yield the 7-day figure, because reach deduplicates people across the
   -- window. It therefore has to be requested for the window itself.
+  -- ⚠️ CONTRACT: this column is SPARSE — during a 30-day backfill only the
+  -- newest day carries a value, the rest are NULL. Downstream baseline queries
+  -- MUST filter `WHERE frequency_7d IS NOT NULL`; never take a median/avg over
+  -- the raw column or NULLs will skew it. Use the daily `frequency` column
+  -- (dense, every day) if you need a per-day series.
   frequency_7d   NUMERIC,
 
   cpm            NUMERIC,

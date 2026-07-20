@@ -20,8 +20,15 @@ import {
   MetaCampaignDailyRow,
 } from '@/lib/meta/client'
 
-/** Days of history to request. 1 = yesterday only (the steady-state daily run). */
-export const DEFAULT_LOOKBACK_DAYS = 1
+/**
+ * Days of history to request on a steady-state run. 7 (not 1) so that any gap
+ * of up to 6 days self-heals: if a backfill fails partway through pagination,
+ * getCampaignDailyInsights swallows the error and returns the rows it got, so
+ * `needsBackfill` (count > 0) then sees history and never backfills again — a
+ * 1-day lookback would leave that hole forever. Re-pulling the last 7 days
+ * daily is cheap because the upsert is idempotent.
+ */
+export const DEFAULT_LOOKBACK_DAYS = 7
 
 /**
  * Backfill depth for a client with no rows yet. 30 days gives the relative

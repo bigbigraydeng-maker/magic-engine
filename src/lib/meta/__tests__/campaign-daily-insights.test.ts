@@ -144,6 +144,44 @@ describe('getCampaignDailyInsights', () => {
     ).resolves.toEqual([])
   })
 
+  it('does NOT double-count when parent+child action types both appear', async () => {
+    // Meta returns `lead` (aggregate) AND `onsite_conversion.lead_grouped`
+    // (its Instant-Form child) for the same submissions; likewise the two
+    // messaging types overlap. Summing would inflate results up to 2×.
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      data: [{
+        campaign_id: 'a', date_start: '2026-07-13',
+        spend: '80', impressions: '5000', clicks: '150',
+        actions: [
+          { action_type: 'lead', value: '10' },
+          { action_type: 'onsite_conversion.lead_grouped', value: '10' },
+          { action_type: 'onsite_conversion.messaging_conversation_started_7d', value: '4' },
+          { action_type: 'onsite_conversion.total_messaging_connection', value: '4' },
+        ],
+      }],
+    }))
+
+    const rows = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
+    // 10 leads + 4 messaging = 14, NOT 20 + 8 = 28.
+    expect(rows[0].leads).toBe(10)
+    expect(rows[0].messaging_conversations).toBe(4)
+    expect(rows[0].results).toBe(14)
+  })
+
+  it('falls back to the child action type when the parent is absent', async () => {
+    // Some accounts report only `lead_grouped`, no aggregate `lead`.
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      data: [{
+        campaign_id: 'a', date_start: '2026-07-13',
+        spend: '80', impressions: '5000', clicks: '150',
+        actions: [{ action_type: 'onsite_conversion.lead_grouped', value: '7' }],
+      }],
+    }))
+
+    const rows = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
+    expect(rows[0].leads).toBe(7)
+  })
+
   it('counts zero results when there are no lead or messaging actions', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({
       data: [{
