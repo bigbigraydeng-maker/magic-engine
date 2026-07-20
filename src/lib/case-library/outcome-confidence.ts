@@ -115,6 +115,57 @@ export async function fetchOutcomeConfidenceMap(
   }
 }
 
+// ── 诸葛亮 v2: per-client outcome history (agent-tools readonly) ──────────────
+
+/**
+ * Per-client outcome confidence — the client-scoped counterpart of
+ * fetchOutcomeConfidenceMap.
+ *
+ * 🔴 SECURITY (spec §3.3 条款 A): fetchOutcomeConfidenceMap queries the WHOLE
+ * flywheel_outcomes table (all clients) — correct for Huatuo's global baseline,
+ * but a cross-client leak if exposed as a per-client agent tool. This function
+ * ALWAYS filters `flywheel_actions.client_id = clientId` (same guard pattern as
+ * fetchSeoBlogConfidenceByMode) so the 诸葛亮 query_flywheel_history tool can
+ * only ever see the current client's own action outcomes.
+ *
+ * Returns a confidence map keyed by action_type, scoped to one client.
+ * Fails silently — returns {} on any DB error.
+ *
+ * @param filters.flywheel    Optional — restrict to one flywheel (seo/geo/ads/social).
+ * @param filters.actionType  Optional — restrict to one action_type.
+ */
+export async function fetchClientOutcomeHistory(
+  supabase: SupabaseClient,
+  clientId: string,
+  filters?: { flywheel?: string; actionType?: string },
+): Promise<OutcomeConfidenceMap> {
+  if (!clientId) return {}
+  try {
+    let query = supabase
+      .from('flywheel_outcomes')
+      .select('verdict, flywheel_actions!inner(action_type, flywheel, client_id)')
+      .eq('flywheel_actions.client_id', clientId) // 🔴 hard client scope — never removed
+
+    if (filters?.flywheel) query = query.eq('flywheel_actions.flywheel', filters.flywheel)
+    if (filters?.actionType) query = query.eq('flywheel_actions.action_type', filters.actionType)
+
+    const { data, error } = await query
+    if (error || !data) return {}
+
+    const rows: RawOutcomeConfidenceRow[] = (data as Array<{
+      verdict: string
+      flywheel_actions: { action_type: string } | Array<{ action_type: string }>
+    }>).map(r => {
+      const actions = Array.isArray(r.flywheel_actions) ? r.flywheel_actions[0] : r.flywheel_actions
+      return { action_type: actions?.action_type ?? 'unknown', verdict: r.verdict }
+    })
+
+    return computeConfidenceMap(rows)
+  } catch {
+    return {}
+  }
+}
+
 // ── P14.C.5: SEO blog outcome → mode-level feedback loop ─────────────────────
 
 /** Aggregated success stats per content_mode for one client's SEO blog history. */

@@ -8,6 +8,7 @@
  * Reference: ROADMAP.md Phase 12.G
  */
 
+import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Client } from '@/types/magic-engine'
 import type { DiagnosticDimension, DiagnosticFinding } from '@/types/diagnostic'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
@@ -191,6 +192,21 @@ export interface ZhugeInput {
    * backward-compatible). Self-Serve callers should pass 'short' to save tokens.
    */
   promptMode?: ZhugePromptMode
+  /**
+   * 诸葛亮 v2 — 传入 supabase 则**启用只读工具**（多步下钻：关键词/GSC/GA4/
+   * 本客户飞轮成效），让 conductor 决策前回源查一手数据。
+   * **不传则完全回退 v1 单步行为**（callClaudeChat，向后兼容，现有测试不变）。
+   * spec: docs/superpowers/specs/2026-07-16-zhuge-v2-agent-tools-readonly.md
+   */
+  supabase?: SupabaseClient
+}
+
+/** 诸葛亮 v2 — 单条只读工具调用轨迹（落库摘要，spec §5 条款 D）。 */
+export interface ZhugeToolTraceEntry {
+  name: string
+  input: unknown
+  summary: string
+  is_error: boolean
 }
 
 /** Structured work order produced by the conductor. */
@@ -203,4 +219,11 @@ export interface ZhugeOutput {
   /** Tokens consumed. */
   input_tokens: number
   output_tokens: number
+  /**
+   * 诸葛亮 v2 — 决策前调用的只读工具轨迹（供归因落库）。
+   * 仅当传入 supabase 启用工具时存在；单步模式为 undefined。
+   */
+  tool_trace?: ZhugeToolTraceEntry[]
+  /** 诸葛亮 v2 — 实际执行的工具轮数（0 = 未下钻直接拍板）。 */
+  tool_rounds?: number
 }

@@ -41,6 +41,10 @@ export const INDUSTRY_SEARCH_LABEL: Record<string, string> = {
   travel_agencies:     'travel agency',
   landscaping:         'landscaping',
   commercial_cleaning: 'commercial cleaning',
+  beauty_salons:       'beauty salon',
+  driving_schools:     'driving school',
+  music_schools:       'music school',
+  tutoring:            'tutoring centre',
 }
 
 const COUNTRY_NAME: Record<'AU' | 'NZ', string> = { AU: 'Australia', NZ: 'New Zealand' }

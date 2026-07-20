@@ -1,0 +1,450 @@
+'use client'
+
+/**
+ * CommentAutoReplyPanel — FDE-managed Facebook comment auto-reply settings.
+ *
+ * Single write entry for social_comment_config. Backs the full-auto comment
+ * reply engine (cron: social-comment-autoreply). Mirrors SocialHandlesPanel's
+ * loading/error/ready three-state + draft/save pattern.
+ *
+ * Enabling requires an fb_page_id (the API refuses otherwise) — without it the
+ * cron would silently no-op.
+ */
+
+import { useState, useEffect, useCallback } from 'react'
+
+interface Props {
+  clientId: string
+}
+
+interface Config {
+  enabled: boolean
+  fb_page_id: string
+  auto_reply_praise: boolean
+  auto_reply_question: boolean
+  auto_reply_complaint: boolean
+  auto_hide_spam: boolean
+  private_reply_enabled: boolean
+  lookback_days: number
+  max_replies_per_run: number
+  pinned_post_ids: string[]
+}
+
+interface PostSummary {
+  post_id: string
+  snippet: string
+  created_at: string
+  comment_count: number
+  is_reel?: boolean
+  is_ad?: boolean
+}
+
+type PanelState =
+  | { phase: 'loading' }
+  | { phase: 'error'; message: string }
+  | { phase: 'ready'; config: Config }
+
+interface ProbeResult {
+  token_resolved: boolean
+  page_token_resolved: boolean
+  permissions: Record<string, boolean>
+  live_read_ok: boolean
+  sample_comment_count: number | null
+  ready: boolean
+  notes: string[]
+}
+
+const SCOPE_LABEL: Record<string, string> = {
+  pages_read_engagement: '读取评论',
+  pages_manage_engagement: '回帖 / 隐藏',
+  pages_messaging: '私信引导',
+}
+
+interface RunResult {
+  ok: boolean
+  posts_scanned?: number
+  new_comments?: number
+  public_replies?: number
+  private_replies?: number
+  hidden?: number
+  needs_human?: number
+  failed?: number
+  error?: string
+}
+
+const DEFAULT_DRAFT: Config = {
+  enabled: false,
+  fb_page_id: '',
+  auto_reply_praise: true,
+  auto_reply_question: true,
+  auto_reply_complaint: true,
+  auto_hide_spam: false,
+  private_reply_enabled: true,
+  lookback_days: 7,
+  max_replies_per_run: 20,
+  pinned_post_ids: [],
+}
+
+function Toggle({ label, hint, checked, onChange, disabled }: {
+  label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean
+}) {
+  return (
+    <label className="flex cursor-pointer items-start justify-between gap-3 py-2">
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold text-slate-700">{label}</span>
+        {hint && <span className="block text-xs text-slate-400">{hint}</span>}
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        className={[
+          'relative mt-0.5 h-6 w-11 flex-shrink-0 rounded-full transition',
+          checked ? 'bg-cyan-600' : 'bg-slate-300',
+          disabled ? 'cursor-not-allowed opacity-50' : '',
+        ].join(' ')}
+      >
+        <span className={[
+          'absolute top-0.5 h-5 w-5 rounded-full bg-white transition',
+          checked ? 'left-[22px]' : 'left-0.5',
+        ].join(' ')} />
+      </button>
+    </label>
+  )
+}
+
+export function CommentAutoReplyPanel({ clientId }: Props) {
+  const [state, setState] = useState<PanelState>({ phase: 'loading' })
+  const [draft, setDraft] = useState<Config>(DEFAULT_DRAFT)
+  const [saving, setSaving] = useState(false)
+  const [savedAt, setSavedAt] = useState<string | null>(null)
+  const [errMsg, setErrMsg] = useState<string | null>(null)
+  const [probing, setProbing] = useState(false)
+  const [probe, setProbe] = useState<ProbeResult | null>(null)
+  const [running, setRunning] = useState(false)
+  const [runResult, setRunResult] = useState<RunResult | null>(null)
+  const [posts, setPosts] = useState<PostSummary[] | null>(null)
+  const [loadingPosts, setLoadingPosts] = useState(false)
+  const [postsError, setPostsError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setState({ phase: 'loading' })
+    try {
+      const res = await fetch(`/api/clients/${clientId}/comment-autoreply-config`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const { config } = (await res.json()) as { config: Config }
+      setState({ phase: 'ready', config })
+      setDraft({ ...DEFAULT_DRAFT, ...config })
+    } catch (err) {
+      setState({ phase: 'error', message: err instanceof Error ? err.message : String(err) })
+    }
+  }, [clientId])
+
+  useEffect(() => { void load() }, [load])
+
+  const handleSave = async () => {
+    setSaving(true)
+    setErrMsg(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/comment-autoreply-config`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(draft),
+      })
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+        throw new Error(error)
+      }
+      const { config } = (await res.json()) as { config: Config }
+      setState({ phase: 'ready', config })
+      setDraft({ ...DEFAULT_DRAFT, ...config })
+      setSavedAt(new Date().toLocaleTimeString('zh-CN'))
+    } catch (err) {
+      setErrMsg(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (state.phase === 'loading') {
+    return (
+      <div className="flex items-center gap-2 text-sm text-slate-500">
+        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-cyan-600" />
+        正在加载评论自动回复配置…
+      </div>
+    )
+  }
+
+  if (state.phase === 'error') {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <p className="font-bold">加载失败</p>
+        <p>{state.message}</p>
+        <button onClick={load} className="mt-2 font-medium underline">重试</button>
+      </div>
+    )
+  }
+
+  const isDirty = JSON.stringify(draft) !== JSON.stringify({ ...DEFAULT_DRAFT, ...state.config })
+  const set = <K extends keyof Config>(k: K, v: Config[K]) => setDraft(d => ({ ...d, [k]: v }))
+
+  const runProbe = async () => {
+    setProbing(true)
+    setProbe(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/comment-autoreply-probe`)
+      setProbe((await res.json()) as ProbeResult)
+    } catch (err) {
+      setProbe({
+        token_resolved: false, page_token_resolved: false, permissions: {}, live_read_ok: false,
+        sample_comment_count: null, ready: false,
+        notes: [err instanceof Error ? err.message : '验证请求失败'],
+      })
+    } finally {
+      setProbing(false)
+    }
+  }
+
+  const loadPosts = async () => {
+    setLoadingPosts(true)
+    setPostsError(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/comment-autoreply-posts`)
+      const body = (await res.json()) as { posts?: PostSummary[]; error?: string }
+      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`)
+      setPosts(body.posts ?? [])
+    } catch (err) {
+      setPostsError(err instanceof Error ? err.message : '加载失败')
+    } finally {
+      setLoadingPosts(false)
+    }
+  }
+
+  const runNow = async () => {
+    setRunning(true)
+    setRunResult(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/comment-autoreply-run`, { method: 'POST' })
+      const body = (await res.json()) as { result?: RunResult; error?: string }
+      setRunResult(body.result ?? { ok: false, error: body.error ?? `HTTP ${res.status}` })
+    } catch (err) {
+      setRunResult({ ok: false, error: err instanceof Error ? err.message : '运行失败' })
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      {/* Master switch */}
+      <div className="mb-4 flex items-start justify-between gap-4 rounded-lg bg-slate-50 p-3">
+        <span className="min-w-0">
+          <span className="block text-sm font-black text-slate-800">全自动评论回复</span>
+          <span className="block text-xs text-slate-500">
+            开启后每 30 分钟自动拉取该客户 FB 主页评论并回复。AI 只对「夸赞」自由发挥，问题一律走安全话术不作答。
+          </span>
+        </span>
+        <button
+          type="button" role="switch" aria-checked={draft.enabled}
+          onClick={() => set('enabled', !draft.enabled)} disabled={saving}
+          className={['relative mt-0.5 h-6 w-11 flex-shrink-0 rounded-full transition',
+            draft.enabled ? 'bg-emerald-600' : 'bg-slate-300', saving ? 'opacity-50' : ''].join(' ')}
+        >
+          <span className={['absolute top-0.5 h-5 w-5 rounded-full bg-white transition',
+            draft.enabled ? 'left-[22px]' : 'left-0.5'].join(' ')} />
+        </button>
+      </div>
+
+      {/* FB Page ID */}
+      <div className="mb-2">
+        <label className="block text-xs font-bold uppercase tracking-wide text-slate-500">
+          Facebook 主页 ID（Page ID）
+        </label>
+        <input
+          type="text"
+          value={draft.fb_page_id}
+          onChange={e => set('fb_page_id', e.target.value)}
+          placeholder="例：123456789012345（数字 Page ID，不是主页 URL）"
+          className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+          disabled={saving}
+        />
+        <p className="mt-1 text-xs text-slate-400">开启自动回复必须填。Page token 由后台按客户解析（无需在此填 token）。</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button" onClick={runProbe} disabled={probing}
+            className="rounded-lg border border-cyan-300 bg-cyan-50 px-3 py-1.5 text-xs font-bold text-cyan-800 transition hover:bg-cyan-100 disabled:opacity-50"
+          >
+            {probing ? '验证中…' : '检查 Meta 权限'}
+          </button>
+          <button
+            type="button" onClick={runNow} disabled={running}
+            className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-50"
+            title="立即跑一次（不等 30 分 cron），会真实回复符合条件的评论"
+          >
+            {running ? '运行中…' : '立即运行一次'}
+          </button>
+        </div>
+      </div>
+
+      {/* Manual run result */}
+      {runResult && (
+        <div className={[
+          'mb-2 rounded-lg border p-3 text-xs',
+          runResult.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-red-200 bg-red-50 text-red-700',
+        ].join(' ')}>
+          {runResult.ok ? (
+            <span>
+              ✅ 运行完成 · 扫 {runResult.posts_scanned ?? 0} 帖 · 新评论 {runResult.new_comments ?? 0} 条
+              {' → '}回帖 {runResult.public_replies ?? 0} · 私信 {runResult.private_replies ?? 0}
+              · 隐藏 {runResult.hidden ?? 0} · 需人工 {runResult.needs_human ?? 0}
+              {(runResult.failed ?? 0) > 0 && ` · 失败 ${runResult.failed}`}
+              <span className="ml-1 text-emerald-600">（详情看下面「最近自动回复」）</span>
+            </span>
+          ) : (
+            <span>⚠ 运行失败：{runResult.error}</span>
+          )}
+        </div>
+      )}
+
+      {/* Probe result */}
+      {probe && (
+        <div className={[
+          'mb-2 rounded-lg border p-3 text-xs',
+          probe.ready ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50',
+        ].join(' ')}>
+          <div className="mb-1.5 flex items-center gap-2 font-bold">
+            <span>{probe.ready ? '✅ 就绪' : '⚠ 尚未就绪'}</span>
+            <span className="font-normal text-slate-500">
+              token {probe.token_resolved ? '✓' : '✗'} · Page token {probe.page_token_resolved ? '✓' : '✗'}
+              {probe.live_read_ok && ` · 读到 ${probe.sample_comment_count ?? 0} 条评论`}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {Object.entries(SCOPE_LABEL).map(([scope, label]) => {
+              const granted = probe.permissions[scope]
+              return (
+                <span key={scope} className={[
+                  'rounded-full px-2 py-0.5 font-semibold',
+                  granted === true ? 'bg-emerald-100 text-emerald-700'
+                    : granted === false ? 'bg-red-100 text-red-700'
+                    : 'bg-slate-100 text-slate-500',
+                ].join(' ')}>
+                  {label}：{granted === true ? '有' : granted === false ? '缺' : '未知'}
+                </span>
+              )
+            })}
+          </div>
+          {probe.notes.length > 0 && (
+            <ul className="mt-2 list-disc space-y-0.5 pl-4 text-slate-600">
+              {probe.notes.map((n, i) => <li key={i}>{n}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* Category toggles */}
+      <div className="mt-3 divide-y divide-slate-100 border-t border-slate-100">
+        <Toggle label="回复夸赞评论" hint="AI 起草暖回复（过 claim 过滤器后才发）" checked={draft.auto_reply_praise} onChange={v => set('auto_reply_praise', v)} disabled={saving} />
+        <Toggle label="回应提问评论" hint="固定安全话术「已私信你」+ 转人工，绝不 AI 作答" checked={draft.auto_reply_question} onChange={v => set('auto_reply_question', v)} disabled={saving} />
+        <Toggle label="回应负面评论" hint="共情话术 + 私信转真人处理" checked={draft.auto_reply_complaint} onChange={v => set('auto_reply_complaint', v)} disabled={saving} />
+        <Toggle label="自动隐藏垃圾评论" hint="默认关（保守）" checked={draft.auto_hide_spam} onChange={v => set('auto_hide_spam', v)} disabled={saving} />
+        <Toggle label="允许私信引导" hint="对有购买意向的评论发私信引导（Meta 7 天窗内）" checked={draft.private_reply_enabled} onChange={v => set('private_reply_enabled', v)} disabled={saving} />
+      </div>
+
+      {/* Numeric limits */}
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-bold uppercase tracking-wide text-slate-500">回溯天数</label>
+          <input type="number" min={1} max={30} value={draft.lookback_days}
+            onChange={e => set('lookback_days', Number(e.target.value))} disabled={saving}
+            className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500" />
+          <p className="mt-1 text-xs text-slate-400">只回复最近 N 天内的<b>评论</b>（帖子多久前发都会扫）。私信仅 7 天窗，想回更老评论就调大，但那些只会公开回帖、不发私信</p>
+        </div>
+        <div>
+          <label className="block text-xs font-bold uppercase tracking-wide text-slate-500">每次最多回复</label>
+          <input type="number" min={1} max={100} value={draft.max_replies_per_run}
+            onChange={e => set('max_replies_per_run', Number(e.target.value))} disabled={saving}
+            className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500" />
+          <p className="mt-1 text-xs text-slate-400">1–100 条 / 次运行</p>
+        </div>
+      </div>
+
+      {/* Pinned posts (evergreen) */}
+      <div className="mt-4 rounded-lg border border-slate-200 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <div className="text-sm font-bold text-slate-700">长期监控帖子（钉住老帖）</div>
+            <div className="text-xs text-slate-400">爆帖发了几个月还在收新评论、排在最近 100 帖之外时，钉住它就永远会被扫。也是诊断工具：能看到每条帖真实评论数。</div>
+          </div>
+          <button
+            type="button" onClick={loadPosts} disabled={loadingPosts}
+            className="flex-shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+          >
+            {loadingPosts ? '加载中…' : posts ? '刷新列表' : '加载帖子列表'}
+          </button>
+        </div>
+
+        {draft.pinned_post_ids.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {draft.pinned_post_ids.map(pid => (
+              <span key={pid} className="inline-flex items-center gap-1 rounded-full bg-cyan-100 px-2 py-0.5 text-[11px] font-semibold text-cyan-800">
+                📌 {pid}
+                <button type="button" onClick={() => set('pinned_post_ids', draft.pinned_post_ids.filter(x => x !== pid))}
+                  className="text-cyan-500 hover:text-cyan-800">✕</button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {postsError && <p className="mt-2 text-xs text-red-600">⚠ {postsError}</p>}
+
+        {posts && (
+          <div className="mt-2 max-h-64 space-y-1 overflow-y-auto rounded-lg border border-slate-100 bg-slate-50 p-1.5">
+            {posts.length === 0 && <p className="p-2 text-xs text-slate-400">该主页没有可读的帖子。</p>}
+            {posts.map(p => {
+              const pinned = draft.pinned_post_ids.includes(p.post_id)
+              return (
+                <div key={p.post_id} className="flex items-start gap-2 rounded-md bg-white px-2 py-1.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      {p.is_reel && <span className="flex-shrink-0 rounded bg-fuchsia-100 px-1.5 py-0.5 text-[10px] font-bold text-fuchsia-700">Reel</span>}
+                      {p.is_ad && <span className="flex-shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">广告帖</span>}
+                      <span className="truncate text-xs text-slate-700">{p.snippet || <span className="italic text-slate-400">（无文字，可能是图片/视频帖）</span>}</span>
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-slate-400">
+                      {p.created_at ? new Date(p.created_at).toLocaleDateString('zh-CN') : '—'} · 💬 {p.comment_count} 条评论
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => set('pinned_post_ids', pinned ? draft.pinned_post_ids.filter(x => x !== p.post_id) : [...draft.pinned_post_ids, p.post_id])}
+                    className={[
+                      'flex-shrink-0 rounded-md px-2 py-1 text-[11px] font-bold transition',
+                      pinned ? 'bg-cyan-600 text-white hover:bg-cyan-700' : 'border border-slate-300 bg-white text-slate-600 hover:bg-slate-50',
+                    ].join(' ')}
+                  >
+                    {pinned ? '已钉 ✓' : '钉住'}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Save row */}
+      <div className="mt-5 flex items-center justify-between gap-3">
+        <div className="text-xs text-slate-500">
+          {savedAt && !isDirty && <span className="text-emerald-700">✓ 已保存 · {savedAt}</span>}
+          {errMsg && <span className="text-red-700">⚠ {errMsg}</span>}
+        </div>
+        <button onClick={handleSave} disabled={!isDirty || saving}
+          className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-bold text-white transition hover:bg-cyan-800 disabled:cursor-not-allowed disabled:opacity-50">
+          {saving ? '保存中…' : '保存'}
+        </button>
+      </div>
+    </div>
+  )
+}

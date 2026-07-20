@@ -104,15 +104,32 @@ describe('calculateProspectScore', () => {
     expect(r.breakdown.find(s => s.signal === 'no_enquiry_path')?.points).toBe(8)
   })
 
-  it('scores a weak business below threshold even with a weak site', () => {
+  it('scores a genuinely weak business just below the threshold and does not qualify', () => {
     const r = calculateProspectScore(input({
       rating: 3.1, review_count: 4, has_phone: false, is_claimed: false,
-      tracking: NO_TRACKING,
+      https_ok: true,                       // secure site → no no_https (10)
+      tracking: { ga4: false, gtm: false, meta_pixel: false, clarity: false, legacy_ua: false, contact_form: false, emails: [], facebook_url: null, instagram_url: null },
       onpage: null,
     }))
-    // strength: only has_website 6; weakness 14+8+10+4+2+3 = 41 → 47 (< 55)
-    expect(r.score).toBeLessThan(QUALIFICATION_THRESHOLD)
+    // strength: only has_website 6; weakness 14(form)+8(no path)+10(pixel)+4(ga4)
+    // +2(gtm) = 38 → 44 (< 45).
+    expect(r.score).toBe(44)
     expect(r.qualified).toBe(false)
+  })
+
+  it('qualifies a healthy-but-under-marketed site in the 45–54 band the old 55 bar rejected', () => {
+    // rating 4.2 (+8) + 5 reviews (+6) + phone (+4) + claimed (+4) + website (+6)
+    // = 28 strength; weakness no_meta_pixel(10) + no_ga4(4) + no_gtm(2) = 16 → 44…
+    // add a missing title (+4) → 48: clears 45, would have failed 55.
+    const r = calculateProspectScore(input({
+      rating: 4.2, review_count: 5, has_phone: true, is_claimed: true, https_ok: true,
+      tracking: { ga4: false, gtm: false, meta_pixel: false, clarity: true, legacy_ua: false, contact_form: true, emails: ['x@y.co.nz'], facebook_url: null, instagram_url: null },
+      onpage: { word_count: 500, core_web_vitals: { lcp: 2000, cls: 0.1, tbt: 100 },
+        checks: { no_title: true, no_description: false, no_h1: false, missing_alt_text: false, broken_links: false, redirect_chain: false, https: true } },
+    }))
+    expect(r.score).toBeGreaterThanOrEqual(QUALIFICATION_THRESHOLD)
+    expect(r.score).toBeLessThan(55)        // the band the old bar rejected
+    expect(r.qualified).toBe(true)
   })
 
   it('does not claim "no GA4" when GTM is present (GA4 may live in the container)', () => {

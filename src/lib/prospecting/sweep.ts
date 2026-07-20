@@ -49,9 +49,17 @@ export interface Combo { industry: string; city: string }
  * (leak-fix + review engine + GBP + Meta video) all land, so the first
  * outreach wave has the strongest, fastest-to-results story.
  *
- * cosmetic_clinics added 2026-07-09; hvac / dentists / commercial_cleaning
- * added 2026-07-10 (PM go): all high-value Auckland local businesses that fit
- * the $990 fast-results playbook (trade search + GBP, or personal-brand nurture).
+ * Cleaned 2026-07-16 (PM go). Kept: discretionary / considered-purchase trades
+ * where FB/IG visual content + our SOP levers land, plus people-led services
+ * (health / beauty / education) that already invest in marketing.
+ *   - Removed builders — NZ property market is soft, demand thin.
+ *   - Removed plumbers / electricians — captive emergency demand won by
+ *     word-of-mouth, price-insensitive to marketing.
+ *   - Removed commercial_cleaning — B2B tender / relationship sales, not a
+ *     consumer-marketing or visual-content fit.
+ *   - Kept hvac — heat-pump installs are high-ticket, considered purchases.
+ *   - Added beauty_salons / driving_schools / music_schools / tutoring — local
+ *     English-serving discretionary spend, heavy FB/IG advertisers.
  *
  * Deliberately excluded here (present in the catalogue but not swept):
  *   - education_consultants / travel_agencies — skew to foreign / non-English
@@ -61,22 +69,23 @@ export interface Combo { industry: string; city: string }
  *     angle. Widen via SWEEP_INDUSTRIES when ready.
  */
 export const FOCUS_INDUSTRIES = [
-  'kitchen_renovation', 'bathroom_renovation', 'builders', 'landscaping',
-  'roofing', 'flooring', 'electricians', 'plumbers', 'cosmetic_clinics',
-  'hvac', 'dentists', 'commercial_cleaning',
+  'kitchen_renovation', 'bathroom_renovation', 'landscaping', 'roofing',
+  'flooring', 'hvac', 'dentists', 'cosmetic_clinics',
+  'beauty_salons', 'driving_schools', 'music_schools', 'tutoring',
 ] as const
 
 /**
- * First-wave city list. The $990 founding offer is Auckland-only (in-person
- * visits), so we stay inside Auckland — but search by AREA rather than one
- * Auckland-wide query. This (a) surfaces far more distinct local businesses
- * (each area returns its own top results) and (b) tags every prospect with the
- * area it was found in, so the outreach can name it ("...plumbers in West
- * Auckland..."), which lands better with a local operator. Still all Auckland,
- * so the visit promise holds. Widen via SWEEP_CITIES if the offer ever expands.
+ * City list — NZ-wide (P35.12, PM 2026-07-14). The $19.90 onboarding is fully
+ * automated and the $990 build is done-for-you by AI + team, so delivery no
+ * longer needs an in-person visit: Auckland gets the in-person option, the rest
+ * of NZ is served remotely. Auckland is still searched by AREA (each returns its
+ * own top results + a nameable local tag like "West Auckland"); the other metros
+ * are one query each. Widen/narrow via SWEEP_CITIES without a deploy.
  */
 export const FOCUS_CITIES = [
   'north_shore', 'west_auckland', 'south_auckland', 'east_auckland', 'central_auckland',
+  'wellington', 'christchurch', 'hamilton', 'tauranga', 'napier', 'hastings',
+  'palmerston_north', 'nelson', 'dunedin', 'rotorua',
 ] as const
 
 function envList(name: string, valid: (key: string) => boolean, fallback: readonly string[]): string[] {

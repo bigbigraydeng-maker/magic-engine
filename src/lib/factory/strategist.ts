@@ -11,7 +11,7 @@ import {
   FACTORY_DAILY_ORDER_CAP,
   FACTORY_MIN_BALANCE_USD,
   FACTORY_ORDER_BUDGET_CAP_USD,
-  FACTORY_SEGMENT_TEMPLATE,
+  FACTORY_SHOT_PLAN,
   FACTORY_WINNER_FREQUENCY_UNLOCK,
 } from './constants'
 import type {
@@ -200,9 +200,10 @@ export function pickAngle(ctx: GateContext, winner: WinnerSlice | null): AnglePi
     const refId = typeof p === 'object' && p?.id ? `content_pillars.${p.id}` : `content_pillars[${i}]`
     candidates.push({ angle: name, source: { type: 'content_pillar', ref_id: refId, ref_text: name } })
   })
-  ;(brief.keyword_seeds ?? []).forEach((k, i) => {
-    if (k) candidates.push({ angle: k, source: { type: 'keyword_seed', ref_id: `keyword_seeds[${i}]`, ref_text: k } })
-  })
+  // 不用 keyword_seeds 当广告角度(修复作品根因):keyword_seeds 是 SEO 目标词,常含**竞品品牌名**
+  // (Oztop 的 "mapei brisbane"/"karndean brisbane")。拿竞品名当自家广告角度 = 事故(rationale 写
+  // 「按你品牌主线 mapei brisbane」)+ 潜在商标问题。广告角度只来自 content_pillars(策划的创意主题)
+  // + core_proposition。keyword_seeds 留给 SEO 内容,不进广告创意角度。
   if (brief.core_proposition) {
     candidates.push({
       angle: brief.core_proposition,
@@ -256,41 +257,59 @@ function sceneAngleOverlap(sceneTag: string, angle: string): number {
   return sceneTokens.filter((t) => angleTokens.has(t)).length
 }
 
-export function selectClips(ctx: GateContext, angle: string): ClipSelection {
-  // 匹配角度优先(token 重叠 desc),同分冷素材优先(usage asc, last_used asc)防审美疲劳
+/**
+ * @param requireRealFootage 价格广告红线(verifiedOffer 客户):真价会盖在底料上,底料只能真拍(a_real)。
+ *   为 true 时:①池子只留 a_real(排除 b_generated)②真料不够的镜**跳过、不生成 AI 补位**(AI 绝不背书真价)。
+ *   全真料不足 5 镜 → 少几镜也全真(endcard 仍给 CTA);一条真料都没有 → segments 空,调用方拒单。
+ */
+export function selectClips(ctx: GateContext, angle: string, requireRealFootage: boolean): ClipSelection {
+  // 排序:①角度 token 重叠(货对题)②真实产品片优先 ③冷素材优先(防审美疲劳)
   const pool = ctx.clipStock
     .filter((c) => clipAllowed(ctx, c))
+    .filter((c) => !requireRealFootage || c.track === 'a_real') // 价格广告红线:AI/生成绝不背书真价
     .sort((a, b) => {
       const ov = sceneAngleOverlap(b.scene_tag, angle) - sceneAngleOverlap(a.scene_tag, angle)
       if (ov !== 0) return ov
+      // 真实产品片(track='a_real',客户真拍)优先于 AI/stock(b_generated):治「AI 冒充真产品打真价+漏水印」
+      // 「CTA 配狗」。**按来源(track)判真假,不靠文件名**(隔壁契约 + [[real-vs-generated-clip-provenance]])。
+      const real = (a.track === 'a_real' ? 0 : 1) - (b.track === 'a_real' ? 0 : 1)
+      if (real !== 0) return real
       if (a.usage_count !== b.usage_count) return a.usage_count - b.usage_count
       const at = a.last_used_at ? new Date(a.last_used_at).getTime() : 0
       const bt = b.last_used_at ? new Date(b.last_used_at).getTime() : 0
       return at - bt
     })
 
-  const roles: Array<'hook' | 'middle' | 'cta'> = ['hook', 'middle', 'cta']
   const segments: WorkOrderBrief['segments'] = []
   const clipLinks: WorkOrderDraft['clip_links'] = []
   const generationPlan: ClipGenerationPlanItem[] = []
   const used = new Set<string>()
+  // 按 scene_tag(内容身份)去重,不止 clip.id:同一场景多行(如 bath1_factory×2 同源不同 id)
+  // 不能跨镜重复出镜,否则成片「素材单一」。distinct 场景不够 → 该镜 generationPlan 补生成。
+  const usedScenes = new Set<string>()
 
-  roles.forEach((role, i) => {
-    const clip = pool.find((c) => !used.has(c.id))
+  // 5 镜方案(中段拆 3 短镜):每镜拉一条不同场景 clip = 治定格 + 素材单一 + 太平(护栏 2/7)
+  FACTORY_SHOT_PLAN.forEach((shot, i) => {
+    const role = shot.role
+    const clip = pool.find((c) => !used.has(c.id) && !(c.scene_tag && usedScenes.has(c.scene_tag)))
     if (clip) {
       used.add(clip.id)
+      if (clip.scene_tag) usedScenes.add(clip.scene_tag)
       segments.push({
         role,
-        duration_hint_s: FACTORY_SEGMENT_TEMPLATE[role],
+        duration_hint_s: shot.duration_hint_s,
         description: `${role} — ${clip.scene_tag}`,
         clip_ids: [clip.id],
       })
       clipLinks.push({ clip_id: clip.id, segment_role: role, position: i })
+    } else if (requireRealFootage) {
+      // 价格广告:真料不够不生成 AI 补位(红线)。这一镜跳过——少几镜也全真,不掺 AI。
+      return
     } else {
       // 库存不足 → 同工单附 clip_generation_plan(idempotency_key 防重烧,魏征 F10③)
       segments.push({
         role,
-        duration_hint_s: FACTORY_SEGMENT_TEMPLATE[role],
+        duration_hint_s: shot.duration_hint_s,
         description: `${role} — to generate for angle: ${angle}`,
         clip_ids: [],
       })
@@ -346,6 +365,9 @@ export function buildRationale(ctx: GateContext, angle: string): string | null {
  * asset_gap 独立分支(魏征 M1-F11):spec §3.2「只出 clip 生成工单,不出成片」——
  * 不挂既有 clip、不烧 brief 角度进去重窗、scene_tag 取自 evidence。
  */
+// 红线前提锁(魏征 B9):asset_gap 豁免「价格广告真料」红线,**依赖它只出 clip_generation 补库存、
+// 绝不直出成片**(spec §3.2)。产出的 AI 片进 clipStock=b_generated,未来价格单的 selectClips 会过滤掉,
+// 真价永不盖到它们头上。**若日后 asset_gap 被改成能直出成片,requireRealFootage 红线必须同步下沉到这里。**
 function decideAssetGap(ctx: GateContext): Decision {
   const brief = ctx.brief!
   const goal = ctx.goal!
@@ -420,7 +442,12 @@ export function decideSignal(ctx: GateContext): Decision {
   }
 
   const budgetCap = FACTORY_ORDER_BUDGET_CAP_USD
-  const { segments, clipLinks, generationPlan } = selectClips(ctx, anglePick.angle)
+  // 价格广告红线:有 verifiedOffer(真价)→ 底料强制真拍(a_real),AI 绝不背书真价(魏征 B8)
+  const requireRealFootage = ctx.verifiedOffer != null
+  const { segments, clipLinks, generationPlan } = selectClips(ctx, anglePick.angle, requireRealFootage)
+  if (requireRealFootage && segments.length === 0) {
+    return { outcome: 'rejected', reason: 'price_ad_needs_real_footage', detail: 'verified_offer set but no a_real footage available' }
+  }
 
   const orderType =
     winner && anglePick.source.type === 'winner_structure' ? 'variant_from_winner' : 'fresh_angle'

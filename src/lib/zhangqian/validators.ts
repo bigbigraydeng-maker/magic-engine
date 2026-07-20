@@ -29,6 +29,11 @@ import type {
   AiQuestionCategory,
   Market,
   DiagnosisBlock,
+  DiscoveredMediaChannel,
+  DiscoveredMarketContext,
+  MediaChannelCategory,
+  MediaChannelReachMetric,
+  SanityIssue,
 } from './types'
 
 // ─── Result type ──────────────────────────────────────────────────────────────
@@ -404,6 +409,118 @@ function isDiagnosis(v: unknown): v is DiagnosisBlock {
   return true
 }
 
+// ─── v1.1 · Plugin merge guards (P8.13.E) ─────────────────────────────────────
+//
+// Lenient shape checks for the 3 dimensions ported from
+// `plugins/me-client-discovery/schemas/` — always coerce, never throw. A single
+// malformed media row must not waste a $0.70 discovery run.
+
+const MEDIA_CHANNEL_CATEGORIES: ReadonlySet<MediaChannelCategory> = new Set<MediaChannelCategory>([
+  'print_newspaper', 'print_magazine', 'community_fb_group', 'neighbourly',
+  'newsletter_edm', 'podcast', 'youtube_channel', 'radio', 'tv',
+  'sponsorship_event', 'chinese_media', 'school_publication',
+  'business_association', 'other',
+])
+
+const MEDIA_CHANNEL_REACH_METRICS: ReadonlySet<MediaChannelReachMetric> = new Set<MediaChannelReachMetric>([
+  'print_circulation', 'readers_nielsen', 'fb_members', 'email_subs',
+  'podcast_downloads', 'tv_viewers', 'unknown',
+])
+
+function isMediaChannel(v: unknown): v is DiscoveredMediaChannel {
+  if (!isRecord(v)) return false
+  if (!isString(v.media_name) || v.media_name.length === 0) return false
+  if (!isString(v.category) || !MEDIA_CHANNEL_CATEGORIES.has(v.category as MediaChannelCategory)) return false
+  // chinese_relevant must be explicit boolean — undefined coerced to false
+  if (typeof v.chinese_relevant !== 'boolean') v.chinese_relevant = false
+  // Numeric roi_rank clamped to 1-5; anything outside → null
+  if (v.roi_rank !== undefined && v.roi_rank !== null) {
+    if (!isNumber(v.roi_rank) || !inRange(v.roi_rank, 1, 5)) v.roi_rank = null
+    else v.roi_rank = Math.round(v.roi_rank)
+  }
+  if (v.reach_number !== undefined && v.reach_number !== null && !isNumber(v.reach_number)) {
+    v.reach_number = null
+  }
+  if (v.reach_metric !== undefined && v.reach_metric !== null) {
+    if (!isString(v.reach_metric) || !MEDIA_CHANNEL_REACH_METRICS.has(v.reach_metric as MediaChannelReachMetric)) {
+      v.reach_metric = 'unknown'
+    }
+  }
+  // Coerce arrays row-by-row to string[] · drop garbage entries silently
+  if (v.traps_to_avoid !== undefined && v.traps_to_avoid !== null) {
+    v.traps_to_avoid = Array.isArray(v.traps_to_avoid)
+      ? (v.traps_to_avoid as unknown[]).filter(isString)
+      : null
+  }
+  if (v.source_urls !== undefined && v.source_urls !== null) {
+    v.source_urls = Array.isArray(v.source_urls)
+      ? (v.source_urls as unknown[]).filter(isString)
+      : null
+  }
+  return true
+}
+
+/**
+ * Lenient guard for the optional market_context block. Every sub-field is
+ * coerced individually so one bad median entry doesn't null out the whole
+ * regional snapshot.
+ */
+function isMarketContext(v: unknown): v is DiscoveredMarketContext {
+  if (!isRecord(v)) return false
+  if (!isString(v.region_name) || v.region_name.length === 0) return false
+
+  if (v.suburbs !== undefined && v.suburbs !== null) {
+    v.suburbs = Array.isArray(v.suburbs)
+      ? (v.suburbs as unknown[]).filter(isString)
+      : null
+  }
+  if (Array.isArray(v.median_prices)) {
+    v.median_prices = (v.median_prices as unknown[]).filter(entry => {
+      if (!isRecord(entry) || !isString(entry.suburb)) return false
+      if (entry.median_price !== null && !isNumber(entry.median_price)) entry.median_price = null
+      return true
+    })
+  }
+  if (Array.isArray(v.school_zones)) {
+    v.school_zones = (v.school_zones as unknown[]).filter(entry =>
+      isRecord(entry) && isString(entry.zone_name),
+    )
+  }
+  if (v.demographics !== undefined && v.demographics !== null && !isRecord(v.demographics)) {
+    v.demographics = null
+  }
+  if (v.market_heat !== undefined && v.market_heat !== null && !isRecord(v.market_heat)) {
+    v.market_heat = null
+  }
+  if (v.platform_penetration !== undefined && v.platform_penetration !== null && !isRecord(v.platform_penetration)) {
+    v.platform_penetration = null
+  }
+  for (const key of ['buyer_profiles', 'key_insights', 'source_urls', 'data_gaps'] as const) {
+    if (v[key] !== undefined && v[key] !== null) {
+      v[key] = Array.isArray(v[key])
+        ? (v[key] as unknown[]).filter(isString)
+        : null
+    }
+  }
+  return true
+}
+
+/**
+ * Lenient guard for a single SanityIssue. Rejects the row rather than
+ * coercing because a partially-formed sanity issue is worse than none —
+ * FDE seeing "issue: (empty)" in the UI is more confusing than a missing entry.
+ */
+function isSanityIssue(v: unknown): v is SanityIssue {
+  if (!isRecord(v)) return false
+  if (v.severity !== 'red' && v.severity !== 'yellow') return false
+  const validCategories = ['fabricated_number', 'unmarked_uncertainty', 'cross_geography', 'weakness_omitted', 'other']
+  if (!isString(v.category) || !validCategories.includes(v.category)) return false
+  if (!isString(v.location) || v.location.length === 0) return false
+  if (!isString(v.issue) || v.issue.length === 0) return false
+  if (!isString(v.fix_suggestion) || v.fix_suggestion.length === 0) return false
+  return true
+}
+
 /**
  * Lenient guard for the optional visual_dna block (P8.10.S2.F.3).
  * All three arrays are coerced to clean string arrays; a malformed shape
@@ -508,6 +625,16 @@ export function validateDiscoveryReport(
       domain_whois: isRecord(v.domain_whois) ? v.domain_whois as DiscoveryReport['domain_whois'] : null,
       // Sprint D — OnPage audit pass-through (P8.13.D.3)
       onpage_audit: isRecord(v.onpage_audit) ? v.onpage_audit as DiscoveryReport['onpage_audit'] : null,
+      // v1.1 — Plugin merge dimensions (P8.13.E · me-client-discovery ports)
+      local_media_channels: Array.isArray(v.local_media_channels)
+        ? (v.local_media_channels as unknown[]).filter(isMediaChannel)
+        : null,
+      market_context: isMarketContext(v.market_context) ? v.market_context : null,
+      // sanity_issues: never set by Claude — computed server-side by score-guardrails
+      // after validation. Always initialized to null here; persistor fills it.
+      sanity_issues: Array.isArray(v.sanity_issues)
+        ? (v.sanity_issues as unknown[]).filter(isSanityIssue)
+        : null,
     },
   }
 }

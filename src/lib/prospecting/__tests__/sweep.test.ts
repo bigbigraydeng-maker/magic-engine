@@ -76,11 +76,18 @@ describe('pickStage — drain the pipeline before pulling more in', () => {
 })
 
 describe('buildCombos', () => {
-  it('covers the Auckland sub-areas (in-person founding offer) × the focus industries', () => {
+  it('covers NZ-wide cities (Auckland areas + main metros) × the focus industries', () => {
     const combos = buildCombos([...FOCUS_INDUSTRIES], [...FOCUS_CITIES])
-    expect(new Set(combos.map(c => c.city))).toEqual(
-      new Set(['north_shore', 'west_auckland', 'south_auckland', 'east_auckland', 'central_auckland']),
-    )
+    const cities = new Set(combos.map(c => c.city))
+    // Auckland stays split by area for the in-person option…
+    for (const area of ['north_shore', 'west_auckland', 'south_auckland', 'east_auckland', 'central_auckland']) {
+      expect(cities.has(area)).toBe(true)
+    }
+    // …and every remote-served metro is in too (explicit so a dropped/merge-
+    // eaten city line fails here — the length check alone can't catch that).
+    for (const metro of ['wellington', 'christchurch', 'hamilton', 'tauranga', 'napier', 'hastings', 'palmerston_north', 'nelson', 'dunedin', 'rotorua']) {
+      expect(cities.has(metro)).toBe(true)
+    }
     expect(combos.length).toBe(FOCUS_INDUSTRIES.length * FOCUS_CITIES.length)
   })
 
@@ -88,6 +95,19 @@ describe('buildCombos', () => {
     const industries = new Set(buildCombos([...FOCUS_INDUSTRIES]).map(c => c.industry))
     expect(industries.has('education_consultants')).toBe(false)
     expect(industries.has('travel_agencies')).toBe(false)
+  })
+
+  it('excludes the low-fit industries retired 2026-07-16 (PM go)', () => {
+    const industries = new Set(buildCombos([...FOCUS_INDUSTRIES]).map(c => c.industry))
+    // Captive trades + soft-market builders + B2B cleaning — no longer swept.
+    for (const cut of ['builders', 'plumbers', 'electricians', 'commercial_cleaning']) {
+      expect(industries.has(cut), cut).toBe(false)
+    }
+    // …and the discretionary / people-led expansion IS swept (each also needs a
+    // Places search label, or buildCombos would silently drop it).
+    for (const kept of ['hvac', 'beauty_salons', 'driving_schools', 'music_schools', 'tutoring']) {
+      expect(industries.has(kept), kept).toBe(true)
+    }
   })
 
   it('drops unknown industry keys instead of seeding a labelless search', () => {
@@ -108,19 +128,19 @@ describe('sweepCities — env override', () => {
     else process.env.SWEEP_CITIES = original
   })
 
-  it('defaults to the Auckland sub-areas when the env is unset', () => {
+  it('defaults to the NZ-wide focus cities when the env is unset', () => {
     delete process.env.SWEEP_CITIES
-    expect(sweepCities()).toEqual(['north_shore', 'west_auckland', 'south_auckland', 'east_auckland', 'central_auckland'])
+    expect(sweepCities()).toEqual([...FOCUS_CITIES])
   })
 
-  it('honours a valid override for a later expansion, dropping unknown keys', () => {
+  it('honours a valid override for a narrower wave, dropping unknown keys', () => {
     process.env.SWEEP_CITIES = 'auckland, wellington, atlantis'
     expect(sweepCities()).toEqual(['auckland', 'wellington'])
   })
 
-  it('falls back to the Auckland sub-areas when the override has no valid keys', () => {
+  it('falls back to the NZ-wide focus cities when the override has no valid keys', () => {
     process.env.SWEEP_CITIES = 'atlantis'
-    expect(sweepCities()).toEqual(['north_shore', 'west_auckland', 'south_auckland', 'east_auckland', 'central_auckland'])
+    expect(sweepCities()).toEqual([...FOCUS_CITIES])
   })
 })
 

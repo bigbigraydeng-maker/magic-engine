@@ -16,6 +16,9 @@ import { Resend } from 'resend'
 import { supabaseAdmin } from '@/lib/supabase'
 import { guardAdmin } from '@/lib/auth/require-admin'
 import { renderFullOutreachBody, senderIdentity, type OutreachEmail } from '@/lib/prospecting/outreach'
+import { isJunkContactEmail } from '@/lib/prospecting/tracking-detector'
+import { buildKeywordReport } from '@/lib/prospecting/keyword-report'
+import type { ProspectAnalysis } from '@/lib/prospecting/analyze'
 import type { ProspectAudit } from '@/lib/prospecting/audit'
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -54,6 +57,9 @@ type PatchBody =
   | { action: 'edit_email'; subject: string; body: string }
   | { action: 'send' }
   | { action: 'mark_contacted' }
+  | { action: 'start_onboarding' }
+  | { action: 'mark_converted' }
+  | { action: 'generate_keyword_report' }
   | { action: 'archive' }
   | { action: 'opt_out' }
 
@@ -108,15 +114,24 @@ async function handleSend(id: string): Promise<NextResponse> {
 
   const { data: row, error: readError } = await supabaseAdmin
     .from('outbound_prospects')
-    .select('business_name, status, audit, outreach_email')
+    .select('business_name, status, audit, email, outreach_email')
     .eq('id', id)
-    .maybeSingle<{ business_name: string; status: string; audit: ProspectAudit | null; outreach_email: OutreachEmail | null }>()
+    .maybeSingle<{ business_name: string; status: string; audit: ProspectAudit | null; email: string | null; outreach_email: OutreachEmail | null }>()
   if (readError) return NextResponse.json({ error: readError.message }, { status: 500 })
   if (!row) return NextResponse.json({ error: 'not found' }, { status: 404 })
   if (row.status !== 'outreach_ready') return NextResponse.json({ error: '不在待审状态（可能已发送）' }, { status: 409 })
 
-  const to = row.audit?.tracking?.emails?.[0]?.trim()
+  // Read audit.tracking.emails first, but fall back to the `email` column — the
+  // two can diverge (the email re-scan / P35.11 writes the column when the audit
+  // had no tracking), and the queue UI decides "sendable" off the column, so
+  // without this fallback a card looks sendable but 400s here.
+  const to = (row.audit?.tracking?.emails?.[0] ?? row.email)?.trim()
   if (!to) return NextResponse.json({ error: '该商家没有邮箱，只能电话跟进' }, { status: 400 })
+  // Refuse placeholder / marketing-service addresses scraped before the junk
+  // filter widened — sending there wastes a send and dents domain reputation.
+  if (isJunkContactEmail(to)) {
+    return NextResponse.json({ error: '占位/服务邮箱，跳过（需人工核实真实邮箱）' }, { status: 422 })
+  }
   const subject = row.outreach_email?.subject?.trim()
   const draftBody = row.outreach_email?.body?.trim()
   if (!subject || !draftBody) return NextResponse.json({ error: '邮件草稿缺失' }, { status: 409 })
@@ -167,6 +182,47 @@ async function handleSend(id: string): Promise<NextResponse> {
   return NextResponse.json({ ok: true })
 }
 
+/**
+ * Fetch the "what your customers search" keyword report on demand and store it
+ * on the prospect's ai_report (jsonb, no new column). Delivery-time artifact for
+ * a paid onboarding client — the DataForSEO call is why it is not run for every
+ * cold prospect. buildKeywordReport never throws (degrades to []), so a data
+ * outage returns count:0 rather than a 500.
+ */
+async function handleGenerateKeywordReport(id: string): Promise<NextResponse> {
+  const { data: row, error: readError } = await supabaseAdmin
+    .from('outbound_prospects')
+    .select('status, domain, country, ai_report, updated_at')
+    .eq('id', id)
+    .maybeSingle<{ status: string; domain: string | null; country: string; ai_report: ProspectAnalysis | null; updated_at: string }>()
+  if (readError) return NextResponse.json({ error: readError.message }, { status: 500 })
+  if (!row) return NextResponse.json({ error: 'not found' }, { status: 404 })
+  // Delivery artifact — gate on the paid onboarding stage so a stray script can't
+  // burn DataForSEO on cold prospects (defence beyond the onboarding-only button).
+  if (row.status !== 'onboarding') return NextResponse.json({ error: '只有 onboarding（付费交付）阶段才生成关键词报告' }, { status: 409 })
+  if (!row.ai_report) return NextResponse.json({ error: '该商家还没有 AI 分析报告，先跑分析' }, { status: 409 })
+
+  const keyword_report = await buildKeywordReport(row.domain, row.country)
+  if (keyword_report.length === 0) {
+    return NextResponse.json({ ok: true, count: 0, note: '没拿到关键词数据（网站太新/无排名，或数据源暂不可用）' })
+  }
+
+  // Optimistic lock on updated_at (same as edit_email): the DataForSEO round-trip
+  // is seconds long, so guard against clobbering an ai_report rewritten meanwhile.
+  const merged: ProspectAnalysis = { ...row.ai_report, keyword_report }
+  const { data: written, error } = await supabaseAdmin
+    .from('outbound_prospects')
+    .update({ ai_report: merged, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('updated_at', row.updated_at)
+    .select('id')
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (!written || written.length === 0) {
+    return NextResponse.json({ error: '保存冲突：该商家资料刚被其他操作修改，请刷新后重试' }, { status: 409 })
+  }
+  return NextResponse.json({ ok: true, count: keyword_report.length })
+}
+
 async function transition(
   id: string,
   fromStatuses: string[],
@@ -208,8 +264,25 @@ export async function PATCH(
     case 'mark_contacted':
       return transition(params.id, ['outreach_ready'],
         { status: 'contacted', contacted_at: new Date().toISOString() }, '不在待审状态')
+    case 'start_onboarding':
+      // $19.90 tripwire paid → move a warm reply into delivery. Human-triggered
+      // by an FDE after confirming the manually-sent payment link was paid
+      // (pilot: payment is collected manually, never automated). Allowed from
+      // `replied` (interest form) or `contacted` (owner replied "yes" by email,
+      // which we don't auto-track).
+      return transition(params.id, ['replied', 'contacted'],
+        { status: 'onboarding' }, '只有已联系/已回复的商家才能进入 onboarding')
+    case 'generate_keyword_report':
+      return handleGenerateKeywordReport(params.id)
+    case 'mark_converted':
+      // Forward exit from onboarding: the $19.90 client bought the $990 build.
+      // Without this the funnel has no endpoint and onboarding rows pile up.
+      return transition(params.id, ['onboarding'],
+        { status: 'converted' }, '只有 onboarding 阶段才能标记成交')
     case 'archive':
-      return transition(params.id, ACTIVE_STATUSES, { status: 'archived' }, '当前状态不可归档')
+      // onboarding included so a fell-through / mis-clicked / refunded $19.90
+      // row has an exit — otherwise it's a dead end needing manual SQL.
+      return transition(params.id, [...ACTIVE_STATUSES, 'onboarding'], { status: 'archived' }, '当前状态不可归档')
     case 'opt_out':
       // Footer promise: "you won't hear from us again". Terminal from any
       // pre-conversion state — including contacted/replied, where the

@@ -62,7 +62,7 @@ export function senderIdentity(): { name: string; firstName: string; company: st
   return {
     name,
     firstName,
-    company: process.env.OUTREACH_SENDER_COMPANY ?? 'Magic Engine · Auckland, New Zealand',
+    company: process.env.OUTREACH_SENDER_COMPANY ?? 'Magic Engine · New Zealand',
     website: process.env.OUTREACH_WEBSITE ?? 'magicengine.cloud',
     // A "The X Team" signature reads as bulk mail — the console warns until a
     // real person's name signs the outreach.
@@ -136,12 +136,12 @@ const ANGLE_BRIEFS: Record<ProspectSegment, string> = {
 
 // ─── Generation ───────────────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `You write short cold-outreach emails for Magic Engine, an Auckland-based digital upgrade service for New Zealand local businesses. Rules:
+const SYSTEM_PROMPT = `You write short cold-outreach emails for Magic Engine, a New Zealand digital upgrade service for local businesses. Rules:
 - New Zealand English. Warm, plain, tradie-friendly. No marketing buzzwords (avoid "digital presence", "leverage", "solutions"), no exclamation marks, no emoji.
 - 110-160 words body. Short paragraphs. At most one bulleted list of 2-3 findings.
 - Structure, strictly in this order:
   1. Greeting on its own line: "Hi {owner first name}," if provided, otherwise "Hi there,".
-  2. Introduce yourself and why you're writing BEFORE any findings, in one or two lines: the sender (first name, from Magic Engine, an Auckland-based team) is taking on the first 100 Auckland local businesses this year at founding pricing, and while shortlisting businesses in their trade ran a free digital health check on theirs. The reader must know who is talking and why before hearing anything about their business — otherwise it feels like surveillance.
+  2. Introduce yourself and why you're writing BEFORE any findings, in one or two lines: the sender (first name, from Magic Engine, a New Zealand team) is taking on the first 100 New Zealand local businesses this year at founding pricing, and while shortlisting businesses in their trade ran a free digital health check on theirs. The reader must know who is talking and why before hearing anything about their business — otherwise it feels like surveillance.
   3. One warm line acknowledging their strong reputation (use the HOOK, lightly smoothed).
   4. 2-3 findings from EVIDENCE.
   5. Soft close: a no-pressure line and one question they can answer with a single word. Do NOT write a sign-off or name — it is appended separately.

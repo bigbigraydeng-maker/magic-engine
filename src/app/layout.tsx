@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Inter, Space_Grotesk } from 'next/font/google'
 import GaScripts from '@/components/marketing/GaScripts'
+import MetaPixelScripts from '@/components/marketing/MetaPixelScripts'
 import './globals.css'
 
 const inter = Inter({
@@ -43,6 +44,13 @@ export const metadata: Metadata = {
     title: 'Magic Engine',
     description: siteDescription,
   },
+  // Meta (Facebook) Business Manager domain ownership verification —
+  // required for Aggregated Event Measurement + trusted delivery of Meta
+  // ads pointing at this domain. Value comes from Business Settings →
+  // Brand Safety → Domains → magicengine.com.au (asset 1591700959300128).
+  other: {
+    'facebook-domain-verification': 'o3eut05f26ow89p225dihdmxeai483',
+  },
 }
 
 export default function RootLayout({
@@ -55,6 +63,7 @@ export default function RootLayout({
       <body className="font-sans">
         {children}
         <GaScripts />
+        <MetaPixelScripts />
       </body>
     </html>
   )

@@ -26,11 +26,20 @@ export function getAnthropicClient(): Anthropic {
   if (!apiKey) {
     throw new Error('ANTHROPIC_API_KEY environment variable is not set')
   }
-  // CF AI Gateway Authenticated mode requires a cf-aig-authorization header.
-  // When CF_AIG_TOKEN is unset, omit the header (gateway must then be unauthenticated).
+  // CF AI Gateway Authenticated mode requires a cf-aig-authorization header —
+  // without it the gateway 401s outright (confirmed 2026-07-14, same bug as
+  // openai-client.ts). A missing token means "skip the gateway", not
+  // "gateway must be unauthenticated".
   const aigToken = process.env.CF_AIG_TOKEN
-  const defaultHeaders = aigToken ? { 'cf-aig-authorization': `Bearer ${aigToken}` } : undefined
-  return new Anthropic({ apiKey, baseURL: CF_GATEWAY_BASE, defaultHeaders })
+  if (!aigToken) {
+    console.warn('[anthropic-client] CF_AIG_TOKEN not set — bypassing CF AI Gateway, calls go direct to Anthropic (no gateway logging/caching)')
+    return new Anthropic({ apiKey })
+  }
+  return new Anthropic({
+    apiKey,
+    baseURL: CF_GATEWAY_BASE,
+    defaultHeaders: { 'cf-aig-authorization': `Bearer ${aigToken}` },
+  })
 }
 
 /**
@@ -332,6 +341,12 @@ export interface ClaudeToolLoopResult {
   tool_rounds: number
   /** 全部工具调用明细 — 供持久化进 meta */
   tool_calls: ClaudeToolCall[]
+  /**
+   * 最终一轮 Claude 的 stop_reason。'max_tokens' 表示输出被截断 —
+   * 调用方若要解析 JSON（如诸葛亮 conductor）必须检查此字段，
+   * 否则截断的坏 JSON 会被 jsonrepair 静默补全成残缺结果（spec §3.4）。
+   */
+  stop_reason: string | null
 }
 
 const DEFAULT_MAX_TOOL_ROUNDS = 6
@@ -362,6 +377,7 @@ function buildToolLoopResult(
   outputTok: number,
   toolRounds: number,
   toolCalls: ClaudeToolCall[],
+  stopReason: string | null,
 ): ClaudeToolLoopResult {
   const costUsd = (inputTok / 1_000_000) * PRICE_INPUT_PER_M
     + (outputTok / 1_000_000) * PRICE_OUTPUT_PER_M
@@ -372,6 +388,7 @@ function buildToolLoopResult(
     cost_usd: costUsd,
     tool_rounds: toolRounds,
     tool_calls: toolCalls,
+    stop_reason: stopReason,
   }
 }
 
@@ -429,6 +446,7 @@ export async function callClaudeWithTools(params: {
       return buildToolLoopResult(
         extractTextFromBlocks(message.content),
         totalInput, totalOutput, toolRounds, toolCalls,
+        message.stop_reason,
       )
     }
 
@@ -481,6 +499,7 @@ export async function callClaudeWithTools(params: {
   return buildToolLoopResult(
     extractTextFromBlocks(finalMessage.content),
     totalInput, totalOutput, toolRounds, toolCalls,
+    finalMessage.stop_reason,
   )
 }
 

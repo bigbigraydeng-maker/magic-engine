@@ -1,9 +1,10 @@
-name: P21.J — Factory Sweepers (worker + review)
+name: P21.J — Factory Sweeper (worker)
 
-# 每 5 分钟触发内容工厂两个 sweeper:
-#   worker-sweeper:收回心跳超时(>10min)的 claimed/producing 工单(不消耗 attempt)
-#   review-sweeper:rendered → Airtable 审核卡 / 审核动作回流 / Winner Intake 入库
-# 两者均幂等,GH Actions schedule 抖动/重复触发无害。
+# 每 5 分钟触发 worker-sweeper:收回心跳超时(>10min)的 claimed/producing 工单(不消耗 attempt)。幂等。
+#
+# review-sweeper(Airtable 同步)已退役:审核搬到 ME 驾驶舱 /dashboard/factory(PR #581),
+# Airtable 退役(PM 决策 · C 段拆脚手架)。该 cron 依赖 AIRTABLE_API_KEY,Airtable 停用后必 500。
+# route + review-sync 的完整删除属 C 段清理。
 #
 # 配置:GitHub repo Secrets: CRON_SECRET(与 Render env 同值)
 # Reference: docs/superpowers/specs/2026-07-11-content-factory-ads-loop-v0.1.md §6.1/§7.2
@@ -29,7 +30,7 @@ jobs:
           fi
 
           fail=0
-          for path in factory-worker-sweeper factory-review-sweeper; do
+          for path in factory-worker-sweeper; do
             url="$BASE_URL/api/cron/$path"
             echo "Triggering: $url"
             status=$(curl -sSL -o /tmp/body.json -w "%{http_code}" \

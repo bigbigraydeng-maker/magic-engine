@@ -42,6 +42,7 @@ function makeCtx(over: Partial<GateContext> = {}): GateContext {
     dailyCostUsd: 0,
     clipStock: [],
     allowBTrackLandmarkAds: true,
+    verifiedOffer: null,
     ...over,
   }
 }
@@ -226,9 +227,9 @@ describe('骨架 + 工单组装', () => {
     expect(wo.rationale_one_liner).toContain('2.8')
     expect(wo.angle_source.type).toBe('content_pillar')
     expect(wo.brief.max_new_clips).toBe(8)
-    // 零库存 → 三段全部进 clip_generation_plan(§5.1 步骤 5)
-    expect(wo.brief.clip_generation_plan).toHaveLength(3)
-    expect(wo.brief.segments).toHaveLength(3)
+    // 零库存 → 5 镜全部进 clip_generation_plan(§5.1 步骤 5;分镜方案 hook+3middle+cta)
+    expect(wo.brief.clip_generation_plan).toHaveLength(5)
+    expect(wo.brief.segments).toHaveLength(5)
     expect(wo.goal_id).toBe('goal-1')
     expect(wo.master_brief_id).toBe('brief-1')
   })
@@ -244,8 +245,28 @@ describe('骨架 + 工单组装', () => {
     )
     const wo = (d as { workOrder: { clip_links: Array<{ clip_id: string; segment_role: string }>; brief: { clip_generation_plan: unknown[] } } }).workOrder
     expect(wo.clip_links[0]).toMatchObject({ clip_id: 'clip-cold', segment_role: 'hook' })
+    expect(wo.clip_links).toHaveLength(2) // 2 个不同场景 → 挂 2 镜
+    expect(wo.brief.clip_generation_plan).toHaveLength(3) // 剩 3 镜(2 middle + cta)补生成
+  })
+
+  it('素材单一根治:同 scene_tag 多行只出镜一次,重复场景落生成计划(去重按内容不止 id)', () => {
+    // 真实 bug 现场:Oztop bath1_factory 有 2 行(同源不同 id),旧代码只按 id 去重 → hook+middle 都选 bath = 成片单一。
+    const d = decideSignal(
+      makeCtx({
+        clipStock: [
+          { id: 'bath-a', scene_tag: 'bath1_factory', motion_type: null, track: 'a_real', usage_count: 0, last_used_at: null },
+          { id: 'bath-b', scene_tag: 'bath1_factory', motion_type: null, track: 'a_real', usage_count: 0, last_used_at: null },
+          { id: 'water', scene_tag: 'broll_water_tile', motion_type: null, track: 'a_real', usage_count: 0, last_used_at: null },
+        ],
+      }),
+    )
+    const wo = (d as { workOrder: { clip_links: Array<{ clip_id: string }>; brief: { clip_generation_plan: unknown[] } } }).workOrder
+    // 只有 2 个 distinct 场景 → 只挂 2 镜,其余 3 镜落生成计划(不重复同一 bath 场景)
     expect(wo.clip_links).toHaveLength(2)
-    expect(wo.brief.clip_generation_plan).toHaveLength(1) // 只缺 cta 段
+    expect(wo.brief.clip_generation_plan).toHaveLength(3)
+    const sceneOf: Record<string, string> = { 'bath-a': 'bath1_factory', 'bath-b': 'bath1_factory', water: 'broll_water_tile' }
+    const usedScenes = new Set(wo.clip_links.map((l) => sceneOf[l.clip_id]))
+    expect(usedScenes.size).toBe(2) // 两条挂载 clip 必须来自不同场景
   })
 
   it('A/B 轨治理:B 轨地标 clip 默认排除;客户显式接受风险(CTS)才放行(护栏 6/附录 A)', () => {
@@ -396,6 +417,62 @@ describe('实库形状兼容', () => {
           keyword_seeds: [],
           excluded_topics: [],
         },
+      }),
+    )
+    expect((d as { reason: string }).reason).toBe('angle_not_traceable')
+  })
+})
+
+describe('价格广告红线焊死 · verifiedOffer 客户真价只配真料', () => {
+  it('只有 AI 素材(b_generated)+ 有真价 → 拒单 price_ad_needs_real_footage(AI 绝不背书真价)', () => {
+    const d = decideSignal(
+      makeCtx({
+        verifiedOffer: { price_from: '$35.50/m²' },
+        allowBTrackLandmarkAds: true, // 即便 clipAllowed 放行 b_generated,价格广线仍拒
+        clipStock: [
+          { id: 'ai1', scene_tag: 'oz_kitchen_1', motion_type: null, track: 'b_generated', usage_count: 0, last_used_at: null },
+          { id: 'ai2', scene_tag: 'oz_bath_2', motion_type: null, track: 'b_generated', usage_count: 0, last_used_at: null },
+        ],
+      }),
+    )
+    expect((d as { reason: string }).reason).toBe('price_ad_needs_real_footage')
+  })
+
+  it('真料不足 5 镜 → 有几条真料出几镜,全真、0 生成(不掺 AI 补位)', () => {
+    const real = (id: string, tag: string) => ({ id, scene_tag: tag, motion_type: null, track: 'a_real' as const, usage_count: 0, last_used_at: null })
+    const d = decideSignal(
+      makeCtx({
+        verifiedOffer: { price_from: '$35.50/m²' },
+        clipStock: [real('r1', 'showroom_a'), real('r2', 'showroom_b')], // 只有 2 条真料
+      }),
+    )
+    const wo = (d as { workOrder: { brief: { segments: unknown[]; clip_generation_plan: unknown[] }; clip_links: unknown[] } }).workOrder
+    expect(wo.brief.segments).toHaveLength(2) // 2 真料 → 2 镜,不补到 5
+    expect(wo.brief.clip_generation_plan).toHaveLength(0) // 关键:不生成 AI 补位
+    expect(wo.clip_links).toHaveLength(2)
+  })
+})
+
+describe('修复作品根因 · 选片按来源 + 角度不用竞品词', () => {
+  it('选片:真实产品片(track=a_real)优先于 AI(b_generated),按来源判非文件名', () => {
+    // AI 片 scene_tag 看着更"产品"(oz_kitchen),真拍片中性名——只按 track 判。变异:去掉 track 排序 → 原序 'ai' 先 → fail
+    const d = decideSignal(
+      makeCtx({
+        clipStock: [
+          { id: 'ai', scene_tag: 'oz_kitchen_1', motion_type: null, track: 'b_generated', usage_count: 0, last_used_at: null },
+          { id: 'real', scene_tag: 'clip_zzz', motion_type: null, track: 'a_real', usage_count: 0, last_used_at: null },
+        ],
+      }),
+    )
+    const wo = (d as { workOrder: { clip_links: Array<{ clip_id: string }> } }).workOrder
+    expect(wo.clip_links[0].clip_id).toBe('real') // a_real 先挂,AI 沉后
+  })
+
+  it('pickAngle 不拿 keyword_seeds 当广告角度(竞品名不当自家角度)', () => {
+    // brief 只有 keyword_seeds(含竞品名 mapei/karndean)→ 无可溯源广告角度。变异:仍用 keyword_seeds → accepted → fail
+    const d = decideSignal(
+      makeCtx({
+        brief: { id: 'b', core_proposition: null, content_pillars: [], keyword_seeds: ['mapei brisbane', 'karndean brisbane'], excluded_topics: [] },
       }),
     )
     expect((d as { reason: string }).reason).toBe('angle_not_traceable')

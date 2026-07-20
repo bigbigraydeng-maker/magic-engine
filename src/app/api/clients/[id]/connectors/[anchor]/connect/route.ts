@@ -8,15 +8,23 @@
  * Body: { config?: { page_url?: string } }
  * Returns: { success, advanced_job_id? }
  *
- * Security: session-cookie via requirePaidClientAccess
- * Reference: ROADMAP.md P8.10.S0.22
+ * Security: session-cookie via requireOnboardingClientAccess — self-serve
+ * clients must be able to connect their OWN accounts during onboarding.
+ * Isolation is unchanged (caller can only touch their own client).
+ * Reference: ROADMAP.md P8.10.S0.22 · Phase B $990 self-serve onboarding
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requireOnboardingClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getLatestDiscovery } from '@/lib/zhangqian/persistor'
 import { startAdvancedDiscovery } from '@/lib/zhangqian/start-advanced-discovery'
+
+// Valid connector anchors. MUST stay in sync with CONNECTOR_CATALOGUE in
+// ../../status/route.ts. `anchor` is a path param written straight into
+// client_connectors, so it is whitelisted here to keep junk rows out of the
+// table (the DB column has no CHECK constraint).
+const VALID_ANCHORS = new Set(['gsc', 'google-ads', 'gbp', 'meta-ads', 'reviews', 'ga4', 'publer', 'social'])
 
 // Anchors that unlock advanced discovery when connected.
 const ADVANCED_DISCOVERY_TRIGGERS = new Set(['meta-ads', 'gbp', 'gsc', 'google-ads'])
@@ -26,9 +34,13 @@ export async function POST(
   { params }: { params: { id: string; anchor: string } },
 ): Promise<NextResponse> {
   const { id: clientId, anchor } = params
-  const access = await requirePaidClientAccess(clientId)
+  const access = await requireOnboardingClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status })
+  }
+
+  if (!VALID_ANCHORS.has(anchor)) {
+    return NextResponse.json({ success: false, error: `Unknown connector: ${anchor}` }, { status: 400 })
   }
 
   // Parse optional config from request body
@@ -39,6 +51,21 @@ export async function POST(
   } catch {
     // No body or non-JSON; config stays null.
   }
+
+  // Was this connector ALREADY connected before this request? Advanced
+  // discovery is expensive (external API + LLM); it must fire only on the
+  // first connect of an anchor, never on every re-POST. Without this gate a
+  // self_serve client could loop "connect → wait for completion → connect
+  // again" to keep re-triggering full-price discovery runs (魏征/狄仁杰 D1
+  // re-review). The in-flight dedup in startAdvancedDiscovery only covers
+  // concurrent clicks; this covers the complete-then-retrigger loop.
+  const { data: prior } = await supabaseAdmin
+    .from('client_connectors')
+    .select('status')
+    .eq('client_id', clientId)
+    .eq('anchor', anchor)
+    .maybeSingle<{ status: string }>()
+  const wasConnected = prior?.status === 'connected'
 
   // Upsert connector status
   const now = new Date().toISOString()
@@ -60,8 +87,8 @@ export async function POST(
     return NextResponse.json({ success: false, error: upsertError.message }, { status: 500 })
   }
 
-  // Trigger advanced discovery for supported connectors
-  if (!ADVANCED_DISCOVERY_TRIGGERS.has(anchor)) {
+  // Trigger advanced discovery for supported connectors — first connect only.
+  if (!ADVANCED_DISCOVERY_TRIGGERS.has(anchor) || wasConnected) {
     return NextResponse.json({ success: true })
   }
 

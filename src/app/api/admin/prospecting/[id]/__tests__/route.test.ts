@@ -20,6 +20,11 @@ vi.mock('resend', () => ({
   Resend: vi.fn().mockImplementation(() => ({ emails: { send: (...a: unknown[]) => sendMock(...a) } })),
 }))
 
+const buildKeywordReportMock = vi.fn()
+vi.mock('@/lib/prospecting/keyword-report', () => ({
+  buildKeywordReport: (...a: unknown[]) => buildKeywordReportMock(...a),
+}))
+
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
     from: () => ({
@@ -30,6 +35,9 @@ vi.mock('@/lib/supabase', () => ({
         updateEqArgs.push(eqPairs)
         const node = {
           eq: (col: string, val: unknown) => { eqPairs.push([col, val]); return node },
+          // transition() guards on `.in('status', [...])`; capture it like eq so
+          // a test can assert which from-statuses the transition allows.
+          in: (col: string, val: unknown) => { eqPairs.push([col, val]); return node },
           select: () => Promise.resolve({ data: claimRows, error: null }),
           then: (resolve: (v: { error: null }) => unknown) => resolve({ error: null }),
         }
@@ -49,11 +57,16 @@ beforeEach(() => {
   updates.length = 0
   updateEqArgs.length = 0
   sendMock.mockReset().mockResolvedValue({ error: null })
+  buildKeywordReportMock.mockReset().mockResolvedValue([])
   process.env.RESEND_API_KEY = 'test-key'
   process.env.OUTREACH_FROM_EMAIL = 'hello@magicengine.cloud'
   selectRow = {
     business_name: 'Oz Flooring Co',
     status: 'outreach_ready',
+    domain: 'ozflooring.co.nz',
+    country: 'NZ',
+    updated_at: 't0',
+    ai_report: { segment: 'core_target', top_problems: [] },
     audit: { tracking: { emails: ['owner@ozflooring.co.nz'] } },
     outreach_email: { subject: 'A quick look', body: 'Hi there, this is a real draft body over forty chars long.' },
   }
@@ -95,6 +108,22 @@ describe("PATCH { action: 'send' }", () => {
     expect(updates).toHaveLength(0)
   })
 
+  it('falls back to the email column when audit.tracking has no email (P35.11 re-scan)', async () => {
+    selectRow!.audit = null                       // re-scan wrote only the email column
+    ;(selectRow as Record<string, unknown>).email = 'found@rescanned.co.nz'
+    const res = await send()
+    expect(res.status).toBe(200)
+    expect((sendMock.mock.calls[0][0] as { to: string }).to).toBe('found@rescanned.co.nz')
+  })
+
+  it('422s a placeholder/service email (mysite.com) — never sends or claims', async () => {
+    selectRow!.audit = { tracking: { emails: ['info@mysite.com'] } }
+    const res = await send()
+    expect(res.status).toBe(422)
+    expect(sendMock).not.toHaveBeenCalled()
+    expect(updates).toHaveLength(0)
+  })
+
   it('409s when the prospect is not outreach_ready', async () => {
     selectRow!.status = 'contacted'
     const res = await send()
@@ -117,5 +146,97 @@ describe("PATCH { action: 'send' }", () => {
     expect(updates[0].status).toBe('contacted')
     expect(updates[1].status).toBe('outreach_ready')
     expect(updates[1].contacted_at).toBeNull()
+  })
+})
+
+const startOnboarding = () =>
+  PATCH({ json: () => Promise.resolve({ action: 'start_onboarding' }) } as never, { params: { id: ID } })
+
+describe("PATCH { action: 'start_onboarding' }", () => {
+  it('moves a paid reply to onboarding, guarded on replied/contacted only', async () => {
+    claimRows = [{ id: ID }]
+    const res = await startOnboarding()
+    expect(res.status).toBe(200)
+    expect(updates[0].status).toBe('onboarding')
+    // The from-status guard: onboarding must only be reachable from a warm
+    // reply/contact — mutating this list (e.g. allowing 'discovered') breaks it.
+    expect(updateEqArgs[0]).toContainEqual(['status', ['replied', 'contacted']])
+    expect(updateEqArgs[0]).toContainEqual(['id', ID])
+  })
+
+  it('409s when the row is not in a warm state (claim matches zero rows)', async () => {
+    claimRows = []
+    const res = await startOnboarding()
+    expect(res.status).toBe(409)
+  })
+})
+
+const markConverted = () =>
+  PATCH({ json: () => Promise.resolve({ action: 'mark_converted' }) } as never, { params: { id: ID } })
+
+describe("PATCH { action: 'mark_converted' }", () => {
+  it('moves onboarding → converted, guarded on onboarding only', async () => {
+    claimRows = [{ id: ID }]
+    const res = await markConverted()
+    expect(res.status).toBe(200)
+    expect(updates[0].status).toBe('converted')
+    // Forward exit is reachable ONLY from onboarding — the funnel endpoint.
+    expect(updateEqArgs[0]).toContainEqual(['status', ['onboarding']])
+  })
+
+  it('409s when the row is not in onboarding', async () => {
+    claimRows = []
+    const res = await markConverted()
+    expect(res.status).toBe(409)
+  })
+})
+
+const genKeywords = () =>
+  PATCH({ json: () => Promise.resolve({ action: 'generate_keyword_report' }) } as never, { params: { id: ID } })
+
+describe("PATCH { action: 'generate_keyword_report' }", () => {
+  beforeEach(() => { selectRow!.status = 'onboarding' })  // delivery-stage only
+
+  it('stores the report on ai_report.keyword_report when data comes back', async () => {
+    buildKeywordReportMock.mockResolvedValue([{ phrase: 'kitchen reno', volume: 800, difficulty: 'easy' }])
+    const res = await genKeywords()
+    expect(res.status).toBe(200)
+    expect(buildKeywordReportMock).toHaveBeenCalledWith('ozflooring.co.nz', 'NZ')
+    // Merged into the existing ai_report, not overwriting it.
+    const written = updates[0].ai_report as { segment: string; keyword_report: unknown[] }
+    expect(written.segment).toBe('core_target')
+    expect(written.keyword_report).toHaveLength(1)
+    // Optimistic lock: the write is guarded on the read updated_at.
+    expect(updateEqArgs[0]).toContainEqual(['updated_at', 't0'])
+  })
+
+  it('degrades to count:0 without writing when the data source is empty', async () => {
+    buildKeywordReportMock.mockResolvedValue([])
+    const res = await genKeywords()
+    expect(res.status).toBe(200)
+    const body = await res.json() as { count: number }
+    expect(body.count).toBe(0)
+    expect(updates).toHaveLength(0)          // nothing persisted on empty
+  })
+
+  it('409s when the prospect is not in onboarding (cost gate) — never calls DataForSEO', async () => {
+    selectRow!.status = 'replied'
+    const res = await genKeywords()
+    expect(res.status).toBe(409)
+    expect(buildKeywordReportMock).not.toHaveBeenCalled()
+  })
+
+  it('409s a prospect with no AI analysis yet', async () => {
+    selectRow!.ai_report = null
+    const res = await genKeywords()
+    expect(res.status).toBe(409)
+    expect(buildKeywordReportMock).not.toHaveBeenCalled()
+  })
+
+  it('409s on an optimistic-lock conflict (row changed mid-fetch)', async () => {
+    buildKeywordReportMock.mockResolvedValue([{ phrase: 'kitchen reno', volume: 800, difficulty: 'easy' }])
+    claimRows = []                            // update matched zero rows
+    const res = await genKeywords()
+    expect(res.status).toBe(409)
   })
 })

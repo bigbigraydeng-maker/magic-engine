@@ -14,13 +14,13 @@
  * Returns: { success, snapshot_id, site_url, period_start, period_end,
  *             total_clicks, total_impressions }
  *
- * Security: Bearer token (INTERNAL_API_KEY)
+ * Security: session cookie via requireOnboardingClientAccess (own client only)
  * Reference: ROADMAP.md P17.A.1
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requireOnboardingClientAccess } from '@/lib/auth/client-access'
 import { fetchGscSnapshot, GscApiError } from '@/lib/gsc/client'
 
 export const dynamic = 'force-dynamic'
@@ -32,7 +32,7 @@ export async function POST(
   { params }: { params: { id: string } },
 ): Promise<NextResponse> {
   const { id: clientId } = params
-  const access = await requirePaidClientAccess(clientId)
+  const access = await requireOnboardingClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }

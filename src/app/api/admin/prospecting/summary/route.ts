@@ -13,7 +13,7 @@ import { guardAdmin } from '@/lib/auth/require-admin'
 
 const STATUSES = [
   'discovered', 'audited', 'qualified', 'analyzed',
-  'outreach_ready', 'contacted', 'replied', 'converted', 'archived', 'opted_out',
+  'outreach_ready', 'contacted', 'replied', 'onboarding', 'converted', 'archived', 'opted_out',
 ] as const
 
 async function countStatus(status: string): Promise<number> {

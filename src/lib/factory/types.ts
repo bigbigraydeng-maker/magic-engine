@@ -120,11 +120,13 @@ export interface GateContext {
   clipStock: ClipSlice[]
   /** 附录 A: CTS=true,他客默认 false */
   allowBTrackLandmarkAds: boolean
+  /** B4:客户级持久真促销(factory_config.verified_offer),该客户所有活动默认带上;单条活动可用 signal 覆盖 */
+  verifiedOffer: VerifiedOffer | null
 }
 
 export interface AngleSource {
   /** 'inventory_gap' 仅 asset_gap 类工单用:补库存不是创意角度,溯源指向 evidence.scene_tag(魏征 M1-F11) */
-  type: 'content_pillar' | 'keyword_seed' | 'core_proposition' | 'winner_structure' | 'inventory_gap'
+  type: 'content_pillar' | 'core_proposition' | 'winner_structure' | 'inventory_gap'
   ref_id: string
   ref_text: string
 }
@@ -155,6 +157,69 @@ export interface AdCopySegment {
 export interface AdCopy {
   segments: AdCopySegment[]
   endcard: { cta: string; offer: string[]; url: string; vo?: string }
+}
+
+/**
+ * B4 verified_offer(板桥+魏征):PM/FDE 录入的**客户白纸黑字确认的真实促销事实**。
+ * 红线放行通道——文案里的价格/折扣数字只有出现在这里才允许用,否则一律视为 AI 编造被拦。
+ * 全部可选字符串,PM 按活动实际填(留空 = 无促销 = 禁一切数字)。走 signal.evidence.verified_offer 传入。
+ */
+export interface VerifiedOffer {
+  /** 现价,如 "$35.50/m²" */
+  price_from?: string
+  /** 原价,如 "$59/m²"(可选,有则可做 was/now 对比) */
+  was_price?: string
+  /** 折扣,如 "40% off"(可选) */
+  discount?: string
+  /** 截止,如 "31 July" / "end of July"(可选) */
+  offer_expiry?: string
+}
+
+// ── P0.1 发布(publish-worker)────────────────────────────────────────────────
+
+/** 发布目标(clients.factory_config.publish_target 存,FDE 配)。缺 → 不发标失败,绝不猜/误发别客户页。 */
+export interface PublishTarget {
+  platform: 'facebook' | 'publer'
+  /** facebook:页 id(如 Oztop 748077268383005)。token 走 env META_SYSTEM_USER_TOKEN 换页 token */
+  page_id?: string
+  /** publer:CTS 账号 id */
+  publer_account_id?: string
+  publer_provider?: string
+  /** 防误发(魏征 B9 第三重):期望的客户品牌名,resolveToken 校验 FB 页名 ~ 此值,不符不发 */
+  expect_brand?: string
+}
+
+/** 发布回执(存 published_ref):幂等对账锚(防"发出去没记上"重发)+ P1 measure 数据源。一次存全。 */
+export interface PublishedRef {
+  platform: 'facebook' | 'publer'
+  page_id?: string
+  post_id: string
+  video_id?: string
+  published_at: string
+  permalink?: string
+}
+
+/**
+ * 发布适配器契约(子牙 B8):publish-worker 主体只认 adapter + 状态机 + 三落库,平台差异全塞进 adapter。
+ * 加 CTS = 多写个 PublerAdapter,worker 一行不改。
+ */
+export interface PublishAdapter {
+  readonly platform: 'facebook' | 'publer'
+  /**
+   * 发布一条成片,返回回执。draft=true 只发草稿/不公开(首测验格式)。
+   * onStarted(魏征 B9 防双发):拿到平台 video_id 的第一时间(上传/finish 之前)回调,
+   * 让 worker 把 video_id 落本地库当幂等锚——中途崩后重来能靠本地锚判断,不盲目重发。
+   */
+  publish(args: {
+    videoUrl: string
+    caption: string
+    target: PublishTarget
+    idempotencyTag: string
+    draft: boolean
+    onStarted?: (videoId: string) => Promise<void>
+  }): Promise<PublishedRef>
+  /** 幂等对账(魏征 B9 防双发):查平台侧该 wo(靠 idempotencyTag)是否已发。已发→回执,未发→null。 */
+  findExisting(args: { target: PublishTarget; idempotencyTag: string }): Promise<PublishedRef | null>
 }
 
 export interface WorkOrderBrief {
@@ -214,3 +279,5 @@ export type RejectReason =
   | 'daily_cost_cap'
   | 'rationale_template_failed'
   | 'unsupported_signal'
+  /** 价格广告红线:verifiedOffer(真价)客户无真拍(a_real)素材,不许用 AI 底料背书真价 */
+  | 'price_ad_needs_real_footage'

@@ -14,6 +14,33 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+      # ── Voice Agent (docs/voice-agent/) ──
+      - key: OPENAI_PROJECT_ID
+        sync: false
+      - key: OPENAI_WEBHOOK_SECRET
+        sync: false
+      - key: OPENAI_REALTIME_MODEL
+        value: gpt-realtime-2.1-mini
+      - key: OPENAI_SUMMARY_MODEL
+        value: gpt-4o-mini
+      - key: OPENAI_KB_MODEL
+        value: gpt-4o-mini
+      - key: INTERNAL_WORKER_TOKEN
+        sync: false
+      - key: REALTIME_WORKER_URL
+        sync: false           # private URL of the voice-realtime-worker service
+      - key: VOICE_STORE
+        value: supabase
+      - key: OUTBOUND_CALLING_ENABLED
+        value: "false"        # sandbox only until real-call go-live (板桥 硬闸 #3)
+      - key: VOICE_TEST_NUMBERS
+        sync: false
+      - key: VOICE_DEFAULT_AGENT_ID
+        sync: false           # single-number fallback when the DID isn't preserved
+      - key: DEFAULT_COUNTRY
+        value: NZ
+      - key: DEFAULT_TIMEZONE
+        value: Pacific/Auckland
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: ATLAS_API_KEY
@@ -67,6 +94,12 @@ services:
           type: web
           name: magic-engine
           property: host
+
+  # NOTE: Voice Agent realtime link runs IN-PROCESS inside the web service (MVP mode) —
+  # the webhook opens the OpenAI realtime WebSocket directly, so NO separate worker
+  # service is needed. To scale it out later, deploy scripts/voice/realtime-worker.ts as
+  # a Render private service and set REALTIME_WORKER_URL on the web service to its
+  # internal URL (see docs/voice-agent/RUNBOOK.md).
 
   # Vision Asset Intelligence analyzer — every 2 minutes
   # Picks up pending client_assets, runs GPT-4o-mini Vision, writes scores.
@@ -169,6 +202,23 @@ services:
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/prospecting-sweep
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # Job-signal discovery — weekly (Mon 02:00 UTC ≈ Mon 2pm/3pm NZST).
+  # Harvests NZ marketing-role postings (Seek), resolves each hiring company via
+  # Places, inserts new ones as discovered(job_board). The prospecting-sweep then
+  # audits/analyses/drafts them. No-ops unless JOB_SIGNAL_INGEST_ENABLED=true on
+  # the web service (ships dark; PM turns it on). Sending stays human downstream.
+  - type: cron
+    name: job-boards-weekly
+    env: node
+    schedule: "0 2 * * 1"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/job-boards-weekly
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -466,6 +516,23 @@ services:
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/seo-patrol-daily \
         && curl -fsS "https://hc-ping.com/db58fff5-fd32-45e0-a7fd-b067bede6689"
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # Social comment auto-reply — every 30 min for enabled clients.
+  # Pulls recent FB Page comments → classify → guardrailed auto reply (public +
+  # optional DM) / hide spam. 30-min cadence keeps DM private_replies inside
+  # Meta's 7-day window. Kill switch: SOCIAL_COMMENT_AUTOREPLY_KILL=1
+  # Reference: ROADMAP.md P20.D (social pillar / DAPE Execution)
+  - type: cron
+    name: social-comment-autoreply
+    env: node
+    schedule: "*/30 * * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/social-comment-autoreply
     envVars:
       - key: CRON_SECRET
         sync: false

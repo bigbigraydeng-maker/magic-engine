@@ -107,6 +107,26 @@ export default function OutreachQueue() {
 
   useEffect(() => { void fetchQueue() }, [fetchQueue])
 
+  // Re-scan emailless prospects' sites (homepage + contact pages) for an email —
+  // backfills ones audited before contact-page scraping existed, so an emailless
+  // draft becomes sendable. Free fetches; runs a bounded batch per click.
+  async function rescanEmails() {
+    setBusy('rescan'); setError(''); setMessage('')
+    try {
+      const res = await fetch('/api/admin/prospecting/rescan-emails', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit: 12 }),
+      })
+      const data = await res.json() as { scanned?: number; found?: number; remaining?: number; error?: string }
+      if (!res.ok) throw new Error(data.error ?? '补扫失败')
+      setMessage(`补扫 ${data.scanned} 家，找到邮箱 ${data.found} 家，还剩 ${data.remaining} 家没邮箱`)
+      await fetchQueue()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '补扫失败')
+    } finally {
+      setBusy('')
+    }
+  }
+
   async function draftBatch() {
     setBusy('draft'); setError(''); setMessage('')
     try {
@@ -273,6 +293,10 @@ export default function OutreachQueue() {
             </button>
           ) : null
         })()}
+        <button onClick={() => void rescanEmails()} disabled={busy !== ''}
+          className="rounded-lg border border-me-charcoal/20 px-4 py-2 text-sm text-me-charcoal/70 disabled:opacity-40">
+          {busy === 'rescan' ? '补扫中…' : '🔍 补扫没邮箱的'}
+        </button>
         <button onClick={() => void draftBatch()} disabled={busy !== ''}
           className="rounded-lg bg-me-charcoal px-4 py-2 text-sm text-white disabled:opacity-40">
           {busy === 'draft' ? '撰写中…' : '✍️ 生成邮件草稿 (5)'}

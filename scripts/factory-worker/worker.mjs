@@ -240,23 +240,76 @@ async function resolveClips(wo, tmp, onCost) {
 
 // ── 装配(make_promo.py)────────────────────────────────────────────────────────
 
+// B3 皮按客户走:brandkit 根可放 factory_profile.json 定义创意配置,worker 下发引擎。
+// { music?: 曲名(相对 _shared/music)或绝对路径, music_mood?, look?, caption_mode?, xfade? }。
+// 缺文件 = 全部保持引擎默认(不给无 profile 的客户偷偷改风格/换曲)。
+const SHARED_MUSIC = join(STUDIO_ROOT, '_shared/music')
+
+function creativeProfile(brandKit) {
+  const p = join(brandKit, 'factory_profile.json')
+  if (!existsSync(p)) return {}
+  try {
+    return JSON.parse(readFileSync(p, 'utf8'))
+  } catch {
+    log(`⚠️ factory_profile.json 解析失败: ${p},用引擎默认`)
+    return {}
+  }
+}
+
+// BGM 解析:profile.music(绝对路径或 _shared/music 下曲名)优先,回退 env / brandkit 自带曲。
+// make_promo 只在 cfg.music 存在时才铺床(ducked -14dB),无 music 且无 music_mood = 无背景乐。
+function resolveBgm(profile, brandKit) {
+  if (profile.music) {
+    const abs = profile.music.startsWith('/') ? profile.music : join(SHARED_MUSIC, profile.music)
+    if (existsSync(abs)) return abs
+    // 魏征 P1:打错曲名且声明了 music_mood 时,别静默砸 brandkit 默认曲(可能串 CTS),
+    // 返回 null 让 assemble 落到 music_mood(客户声明的次优意图)。仅无 mood 才兜底默认曲。
+    log(`⚠️ factory_profile.music 找不到: ${abs}${profile.music_mood ? ',回退 music_mood' : ',回退默认曲'}`)
+    if (profile.music_mood) return null
+  }
+  const fallback = ENV.FACTORY_BGM_PATH || join(brandKit, 'assets/music_bright.wav')
+  return existsSync(fallback) ? fallback : null
+}
+
+// 定格兜底:取 clip 真实时长,装配时 dur 不超过它(短 clip 撑长时段会定格,PM 反馈 6-10s 定格)。
+// ffprobe 取不到 → 返回 null,退回 duration_hint_s(保持旧行为,不炸)。
+function probeClipDuration(p) {
+  try {
+    const out = execFileSync(
+      '/usr/local/bin/ffprobe',
+      ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', p],
+    ).toString().trim()
+    const d = parseFloat(out)
+    return Number.isFinite(d) && d > 0 ? d : null
+  } catch {
+    return null
+  }
+}
+
 function assemble(wo, localPaths, copy, tmp) {
   const brief = wo.brief
   const out = join(tmp, 'final.mp4')
   const brandKit = brandkitFor(wo.client_id) // B3:brandkit 按客户,不再硬编 CTS
-  // BGM:默认该客户 brandkit 自带 music_bright.wav,可 env 覆盖(FACTORY_BGM_PATH)。
-  // make_promo 只在 cfg.music 存在时才铺床(ducked -14dB),无此字段 = 无背景乐。
-  const bgm = ENV.FACTORY_BGM_PATH || join(brandKit, 'assets/music_bright.wav')
+  const profile = creativeProfile(brandKit)
+  const bgm = resolveBgm(profile, brandKit)
   const cfg = {
     output: out,
     brand_kit: brandKit,
-    ...(existsSync(bgm) ? { music: bgm } : {}),
-    segments: brief.segments.map((seg, i) => ({
-      src: localPaths[i],
-      ss: 0,
-      dur: seg.duration_hint_s,
-      ...(copy.segments[i] || {}),
-    })),
+    // 音乐:显式曲优先;无显式曲但 profile 给了 mood → 交引擎按库自动选。
+    ...(bgm ? { music: bgm } : profile.music_mood ? { music_mood: profile.music_mood } : {}),
+    // 质量参数(reel 感):仅 profile 显式声明才下发,不给无 profile 客户偷改。
+    ...(profile.look ? { look: profile.look } : {}),
+    ...(profile.caption_mode != null ? { caption_mode: profile.caption_mode } : {}),
+    ...(profile.xfade != null ? { xfade: profile.xfade } : {}),
+    // endcard_panel:false = logo 直接放深色渐变(白字 logo 用,如 Oztop),不套白卡片(否则白字消失)。
+    ...(profile.endcard_panel != null ? { endcard_panel: profile.endcard_panel } : {}),
+    segments: brief.segments.map((seg, i) => {
+      const clipDur = probeClipDuration(localPaths[i])
+      // 定格根治:dur 不超过 clip 实长(留 0.1s 余量避免边界撑帧);探测失败退回 hint
+      const dur = clipDur ? Math.min(seg.duration_hint_s, clipDur - 0.1) : seg.duration_hint_s
+      // 地板 1.0s > make_promo XFADE(0.5):防"dur==xfade → 该段偏移不前进被过渡吞帧"(魏征 P2)
+      return { src: localPaths[i], ss: 0, dur: Math.max(dur, 1.0), ...(copy.segments[i] || {}) }
+    }),
     endcard: copy.endcard,
   }
   const cfgPath = join(tmp, 'promo.json')

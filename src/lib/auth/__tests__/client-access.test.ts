@@ -10,7 +10,7 @@ vi.mock('@/lib/supabase', () => ({
   },
 }))
 
-import { requireDashboardClientAccess, requirePaidClientAccess } from '../client-access'
+import { requireDashboardClientAccess, requirePaidClientAccess, requireOnboardingClientAccess } from '../client-access'
 import { requireSession } from '../require-session'
 import { supabaseAdmin } from '@/lib/supabase'
 import type { AccessType } from '../access-types'
@@ -187,6 +187,88 @@ describe('requireDashboardClientAccess', () => {
 
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.tier).toBe('self_serve')
+  })
+})
+
+describe('requireOnboardingClientAccess', () => {
+  const saved: Record<string, string | undefined> = {}
+
+  beforeEach(() => {
+    vi.resetAllMocks()
+    for (const key of KEYS) {
+      saved[key] = process.env[key]
+      delete process.env[key]
+    }
+  })
+
+  afterEach(() => {
+    for (const key of KEYS) {
+      if (saved[key] === undefined) delete process.env[key]
+      else process.env[key] = saved[key]
+    }
+  })
+
+  // The whole point of the guard: self_serve MUST pass (unlike requirePaidClientAccess,
+  // which 403s it). This is the anti-regression test for the D1 fix — if someone
+  // re-tightens onboarding to paid-only, this fails.
+  it('ALLOWS self_serve (the D1 fix — they must onboard their own account)', async () => {
+    mockUser('free@example.com')
+    mockPortalRows([{ client_id: CLIENT_ID, access_type: 'self_serve' }])
+
+    const result = await requireOnboardingClientAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.tier).toBe('self_serve')
+  })
+
+  it('allows paid_client and admin too', async () => {
+    mockUser('paid@example.com')
+    mockPortalRows([{ client_id: CLIENT_ID, access_type: 'client' }])
+    const paid = await requireOnboardingClientAccess(CLIENT_ID)
+    expect(paid.ok).toBe(true)
+    if (paid.ok) expect(paid.tier).toBe('paid_client')
+
+    vi.resetAllMocks()
+    process.env.ADMIN_EMAILS = 'pm@magiclab.com'
+    mockUser('pm@magiclab.com')
+    const admin = await requireOnboardingClientAccess(CLIENT_ID)
+    expect(admin.ok).toBe(true)
+    if (admin.ok) expect(admin.tier).toBe('admin')
+  })
+
+  // Isolation must be identical to the dashboard guard: a self_serve user can
+  // never reach ANOTHER client's onboarding routes. Guards the tenant boundary.
+  it('DENIES cross-client access (isolation unchanged)', async () => {
+    mockUser('free@example.com')
+    mockPortalRows([{ client_id: OTHER_CLIENT_ID, access_type: 'self_serve' }])
+
+    const result = await requireOnboardingClientAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(403)
+      expect(result.reason).toBe('forbidden')
+    }
+  })
+
+  it('propagates 401 when there is no session', async () => {
+    mockRequireSession.mockResolvedValue({ ok: false, status: 401, error: 'Unauthorized' })
+    const result = await requireOnboardingClientAccess(CLIENT_ID)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(401)
+  })
+
+  it('fails closed (500 lookup_failed) when the permission lookup errors', async () => {
+    mockUser('free@example.com')
+    mockPortalRows([], { message: 'database unavailable' })
+
+    const result = await requireOnboardingClientAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(500)
+      expect(result.reason).toBe('lookup_failed')
+    }
   })
 })
 

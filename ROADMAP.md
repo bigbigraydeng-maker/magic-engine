@@ -329,6 +329,21 @@ FDE 现在可以：从 Initiative 卡片展开关联 Campaign / 一键生成 Mar
 - [ ] **P35.8** 定价页 / 官网 Digital Foundation 套餐文案（板桥必审：C 端文案）。**退款保证措辞红线（PM 拍板 2026-07-06）**：保证挂「交付」不挂「效果」——「7 天内四项升级全部交付并附验证截图，做不到全额退款」；绝不承诺排名/客流/生意变好（SEO 见效 8-12 周，写效果 = 给退款开后门）；交付验证截图（前后对比）同时是 case study 素材；「提升」的证据由 $199 Keep-Alive 月报在第 2-3 个月兑现（续费 + 升 FDE 钩子）
 - [ ] **P35.9** AI 语音外呼（PM 指定方向 2026-07-06）：ElevenLabs Conversational AI / Bland.ai / Vapi 选型 PoC。用途分级：**warm 跟进优先**（邮件已回复/未接来电回拨），cold call 需先查 AU Do Not Call Register 合规（企业号码也可注册 DNC）。AU/NZ 口音语音 + 通话结果回写 outbound_prospects
 - [ ] **P35.10** 外呼专用域名（PM 已拍板不用主域）：候选近似域名查询 → PM 选定注册 → SPF/DKIM/DMARC 配置 → 2-3 周预热计划。主域只收回复，保 magic link 通道信誉
+- [x] **P35.11a** 发送端假邮箱闸 + AI 阶段邮箱闸（2026-07-13，PR #572 + #578）：**治标** —— `tracking-detector.EMAIL_JUNK` 扩容（Wix 默认 mysite/wixsite + 营销服务发件域 notifyboost/klaviyo/mailchimp/sendgrid/mailgun/sparkpost）+ `isJunkContactEmail()` 发送端 422 拦截；`analyzeBatch`/`draftBatch`/`countDraftable`/新 `countSendableQualified` 全部加 `email IS NOT NULL` 闸，AI 不再烧在发不出的商家上、审核队列只留可发卡片。存量 9 个假邮箱 email 列已清。
+- [ ] **P35.11 邮箱深挖（治本，PM 拍板 2026-07-13）⭐**：**「假邮箱」≠「没邮箱」** —— 诊断 9 个被判无邮箱的商家（Maddren Homes / Clinic 1 / ETF Electrical / Roofing Excellence / Space Air / The Cosmetic Store / Factory Carpets / Voltsy / Moore Quality），**全部有真实官网 + 电话，4 家还有在线询盘表单**。根因 = 抓取器只读首页 HTML、抓到主题占位符（`user@domain.com`/Wix `mysite.com`）就当邮箱、漏了真邮箱。三条深挖路径（PM 全部同意）：
+  - **① 爬 /contact + /about 页**：不只首页，多页 mailto/正文邮箱抽取（最省事，能捞回一大批）。
+  - **② GBP + Facebook 主页拉邮箱**：官方 API（GBP + Meta），覆盖官网没明写邮箱的。
+  - **③ 有表单没邮箱的自动填表投递询盘（PM 批准最激进一条）**：F12 抓表单真实 POST/GraphQL → `javascript_tool`/Chrome DevTools 复现提交，把询盘打进对方 CRM。符合「卡点必自动化、无人工兜底」，且应沉淀为 ME 可复用的 media/lead 模块能力（跨客户复用）。
+  - 顺带小 bug：`facebook_url` 检测把命名空间声明 `xmlns:fb="http://www.facebook.com/2008/fbml"` 误抓成 `facebook.com/2008/`（多家命中），深挖时一并修。
+- [ ] **P35.12 $19.90 Tripwire Onboarding（获客漏斗第一钩，PM 拍板 2026-07-13）⭐⭐**：一次性 $19.90「onboarding 数字优化」当 tripwire → 建联建信任 → 上钩 $990 套餐（GEO / FB 代运营 / newsletter+WhatsApp）。**设计原则**：每个 $19.9 交付物 = 一个 $990 套餐的「种子」，展示价值同时暴露只有 $990 能补的缺口。
+  - **Wave 1 行业 = 家装/翻新簇**（kitchen/bathroom renovation + builders + landscaping）。**依据 = 真实邮箱命中率**（见下）：装修簇 FB 广告契合最高、before/after 完全合规、客单最高（$990 是零头）、决策周期长（newsletter nurture 铺垫顺）、现成干净邮箱 ~137 家。**医美/IG 簇推迟**——ME 尚未实操 IG、内容太粗不符 IG 审美，等社媒内容引擎补齐（见 P35.13）。
+  - **各行业邮箱命中率实测（2026-07-13）**：plumbers 76% / landscaping 70% / bathroom_reno 68% / electricians 67% / dentists 63% / builders 61% / kitchen_reno 61% / hvac 60% / roofing 59% / cosmetic 54% / flooring 53% / accountants 10%（枯）。commercial_cleaning 82% 但 B2B、FB 弱，排除。
+  - **广告 3 项 / 交付 6 项（under-promise, over-deliver）**：广告吹①数字体检报告②GBP 整理+首批帖③3 条用工程照做的 FB 帖；交付时多塞④本地关键词报告⑤AI 可见度快照⑥评论引擎种子（催评模板+扫码短链）。英雄种子 = **FB 代运营**（装修），GEO/其余轻放报告结尾「接下来还能补」。全部零/极少人工、多数零客户站权限。
+  - **第一封邮件（板桥审后锁定，Wave 1 装修版）**：tripwire 定位「我们发现你经营不错但数字/AI 时代缺曝光、缺临门一脚 → 市场动辄几千纽币、今天 $19.90 → 坦白这是建联、无任何隐藏绑定」。钩子 = 你的工程照没在 FB 为你干活 + 竞品在投广告。**CTA = 回复 "yes" hold 名额（不上在线支付）**；稀缺 = 全 NZ 只收 15 家/行业。红线：挂交付不挂结果 · 真实身份 · 退订。板桥改点：去批量扫描味、ChatGPT 点名+「a couple of nearby」防竞品爆雷、「the catch? there isn't one」、稀缺软化。
+  - **🔴 授权前置清单（$19.9 自助化的三缺口，2026-07-13 调查）**：① **#533 未合** → self_serve 客户在 main 上连自己账户被 403（连接路由仍 paid-only），自助连接卡在分支 `claude/magic-engine-brief-lezoyg`；② **GA4 property_id 纯手填**（老板不知去哪找）→ 需自动找/引导 UX；③ **Meta/FB 无客户侧 OAuth** → FB 代运营授权有缺口（现靠 ME 系统 token + 手填 ad_account）。真一键 OAuth 只有 **GSC + GBP**（GBP 待 GBP.0 开 API）。**第一波 pilot 务实路径**：FDE 用 admin 后台替客户连（main 上 paid 权限可用，~5 分钟/家，15 家可接受），先跑通验证「极少人力」；规模化自助再补三缺口。
+  - **待建实施链（PM 选「先登记」，实施待后续 go）**：a.「replied → 自动发收款+onboarding 链接」触发链 b. 6 项交付物「打包成客户可见交付页/邮件」 c. GBP 自动优化（依赖 GBP.0） d. FB 相册/3 帖 → Publer 排期自动化。**建议先建 a+b**（零权限 4 项报告即可端到端跑通，不依赖 GBP/FB）。
+  - **PM 待操作/决策**：① GBP.0（Google Cloud enable Business Profile API）② $19.90 收款方式（不上在线支付 → 手动 payment link？先交付后收？）③ #533 合并 go。
+- [ ] **P35.13 社媒内容引擎升级（IG 原生 + 品牌套件，为 $990 代运营铺路）**：现输出主打 FB 文字帖、太粗不符 IG。三支柱：① IG 原生格式模板库（轮播/Reel/精修图/Story）② **每客户品牌套件**（从 logo/官网抽主色+2 字体+滤镜，治「粗犷」根因，精致来自模板不是原始 AI）③ 视频优先（Higgsfield shorts_studio/Seedance 出竖版 Reel + virality_predictor 筛）。能力已有（Atlas/Higgsfield/HeyGen/Publer），缺模板+品牌系统。医美 before/after 有 Meta+NZ 合规限制 → 主打不需临床照的科普/团队/FAQ。**先建一套医美 IG 样板跑通一家再产品化**。此项是「医美 Wave 2」的前置。
 
 **成本模型**：1000 家/月 ≈ 发现 $10 + 规则审计 $25 + AI 只跑 qualified（~15%）$20 ≈ **$55/月**，合格线索 AI 成本 ~$0.13（Brief 目标 <$0.10 贴线）。
 
@@ -2747,6 +2762,22 @@ Body: { title, description, dimension, fix_type?, due_date?, notes? }
 | Phase 22 = 主动任务注入 | **Phase 22.D = 主动任务生成器** | 主动任务是 Phase 22 的一个子模块（22.D）|
 | Phase 23（未命名）| **Phase 23 = Cross-Agent Memory Layer** | L3 长期学习，升级自原 Phase 8.M |
 
+### Phase 20.D.social — Facebook 评论 AI 全自动回复 🔄 开发中（2026-07-17，PR #607）
+
+> 社媒支柱 / DAPE 执行段。全自动拉取 FB 主页评论 → AI 分类 → 回复（公开 + 可选私信）/ 隐藏垃圾 → 回流社媒飞轮。
+> Spec：`docs/superpowers/specs/2026-07-17-social-comment-autoreply-v0.1.md` · 三审：魏征/板桥/狄仁杰
+
+| ID | 内容 | 状态 |
+|----|------|------|
+| P20.D.s1 | 数据层 + Graph 封装 + 护栏 + 分类器 + 测试 | ✅ |
+| P20.D.s2 | per-client 编排引擎（claim-first 幂等）+ 每 30 分 cron | ✅ |
+| P20.D.s3 | 配置 + 审计 API + FDE Settings UI（§3.5） | ✅ |
+| P20.D.s4 | 三审加固（幂等 P0 / DM-first / 护栏补强 / 口吻） | ✅ |
+| P20.D.s5 | 权限探针（面板一键检查 3 scope） | ✅ |
+| P20.D.s6 | migration apply（待 PM `go apply`）| ⏳ |
+| P20.D.s7 | 真 token 环境验证 + 生产开启 | ⏳ |
+| P20.D.s8 | webhook 实时化（Phase 2，需 App Review）| 📋 |
+
 ---
 
 ## Phase 24 — Execution Loop Closure（执行闭环修复）📋 已登记，2026-06-06 启动
@@ -4886,3 +4917,53 @@ P33.9（PR #301/#302 — Goal filter 状态 chips 数字跟随）/ P33.10（未�
 - `website/ai-training.html`、`website/ai-automation.html`、`website/ai-marketing-smes.html` 以及 `/cn/` 对应页已上线，SME-first public surface 补齐
 - `website/index.html`、`website/cn/index.html`、`website/robots.txt`、`website/sitemap.xml` 已同步新页面入口与抓取路径
 
+
+---
+
+## Phase 36 — Voice Agent（AI 电话销售/客服）🔄 建设中
+
+> 多租户 AI 语音销售 + 电话客服，底层 OpenAI Realtime 原生 SIP。DAPE「E 执行」新战线，
+> 跨 6 支柱的销售/口碑触达。spec: `docs/voice-agent/`（LOCAL_SETUP / SIP_SETUP / RUNBOOK /
+> assisted-bilingual-outbound）。三审：子牙 + 魏征 + 板桥。
+>
+> **总闸依赖**：Render 付款恢复 + 真 OpenAI key + SIP 号（首测 US/AU，NZ 生产号 PM 采购）。
+
+### 36.A 基础全自动通话（P0）— 代码基本完成
+
+已完成（PR #593/#594/#596/#597 已合 main）：
+- [x] 14 张 `voice_` 表 migration（已 apply + RLS 验证）
+- [x] 多租户引擎：webhook 验签+幂等、号码路由、prompt compiler、tool router、6 工具
+- [x] 知识库关键词检索 + 租户隔离；finalize 摘要 + 非破坏性 lead 合并
+- [x] 真实 OpenAI realtime ws 桥接（mapRealtimeEvent 纯映射 + verbatim 注入范本）
+- [x] Dashboard（通话/线索/总览，promises_made 最显眼）
+- [x] in-process 模式（ws 跑 web 服务内，不建独立 worker）+ 默认 agent 兜底
+- [x] provision CLI（真实号建租户+agent+route，不碰 SQL）+ 生产库配好测试号 Mia
+
+剩余开发（不依赖付款，可先做）：
+- [x] **SupabaseVoiceStore 活库集成测试**（真库 SQL 验证 7/7 通过 + `scripts/voice/test-supabase-store.ts` JS 集成测试 · PR #601）
+- [x] **知识库上传 UI**（粘文本版 · PR #600）
+- [x] **tenant→client 映射 + 转接白名单 Settings UI + agent/路由后台配置**（PR #600，零 SQL）
+- [ ] 首呼后校准 `mapRealtimeEvent`（需真呼一次才知实际事件名）
+
+### 36.B 助攻式双语外呼（Phase 2，spec 已锁）📋 L 档 ≈ 3–4 周
+
+真人后台**纯语音** driving，AI 当嘴+翻译+资料库，客户听母语 AI 语音。两模式：纯人工输出 /
+AI Mix（读知识库）。spec: `docs/voice-agent/assisted-bilingual-outbound.md`。
+- [ ] **0. 真机 spike**（验 verbatim 哑巴模式，最先做 · 1d）— 决定后 3 周走法
+- [ ] 1. **真实外呼发起**（现为 mock stub，provider 真拨号 API · 2–3d）
+- [ ] 2. 浏览器↔通话实时通道（SSE 下行 + POST 上行 · 3–4d）
+- [ ] 3. operator 编排层（STT→翻译/KB→注入 · 3–4d）
+- [ ] 4. bridge 改造（逐字朗读 + 哑巴模式 + 垫场 · 4–6d）
+- [ ] 5. 操作台 UI（纯语音，双语字幕+模式开关+价格确认+kill switch · 4–5d）
+- [ ] 6. 操作员语音转文字 STT 接入（1–2d）
+- [ ] 7. 安全（通道租户鉴权 + kill switch + 掉线兜底 · 2–3d）+ 狄仁杰攻击验证
+- [ ] 8. 填充语/轮次管理/快捷话术打磨（2–3d）
+- [ ] 9. 合规（披露脚本 + DNC + 录音，**过法务** · 1–2d + 法务）
+- 验收硬指标：被叫客户冷场秒数；陪 Roman 跑 3–5 通真实电话。
+
+### 36.C Backlog（第二步，PM 明确降级 2026-07-16）
+
+- [ ] WhatsApp 文字 + 语音消息（P1）
+- [ ] CRM adapter（接外部 CRM，现只内置权威）
+- [ ] 全自动外呼 campaign（批量）+ suppression 逻辑
+- [ ] 生产级知识库（OpenAI 向量库语义检索，替代关键词版）

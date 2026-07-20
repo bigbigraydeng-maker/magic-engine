@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { detectTrackingSignals } from '../tracking-detector'
+import { detectTrackingSignals, isJunkContactEmail } from '../tracking-detector'
 
 const MODERN_SITE = `
 <html><head>
@@ -66,6 +66,15 @@ describe('detectTrackingSignals', () => {
     expect(s.emails).toEqual(['info@whiteroofing.co.nz', 'admin@naturescapes.co.nz'])
   })
 
+  it('filters Wix default (mysite.com) and marketing-service (notifyboost) addresses', () => {
+    const html = `
+      <a href="mailto:info@mysite.com">wix default</a>
+      <a href="mailto:back-in-stock@notifyboost.net">service</a>
+      <a href="mailto:sales@thekitchenfactory.co.nz">real</a>`
+    const s = detectTrackingSignals(html)
+    expect(s.emails).toEqual(['sales@thekitchenfactory.co.nz'])
+  })
+
   it('detects a contact form named by attribute without email input', () => {
     const s = detectTrackingSignals('<form class="enquiry-form"><input type="text"></form>')
     expect(s.contact_form).toBe(true)
@@ -103,5 +112,25 @@ describe('detectTrackingSignals', () => {
       <a href="https://www.facebook.com/pages/Foo-Bar/123456">page</a>
       <a href="https://www.facebook.com/groups/tradies">group</a>`
     expect(detectTrackingSignals(html).facebook_url).toBeNull()
+  })
+})
+
+describe('isJunkContactEmail', () => {
+  it('flags placeholder / Wix-default / marketing-service addresses', () => {
+    for (const junk of [
+      'info@mysite.com', 'example@mysite.com', 'back-in-stock@notifyboost.net',
+      'you@example.com', 'user@domain.com', 'x@sentry-next.wixpress.com', ' Info@MySite.com ',
+    ]) {
+      expect(isJunkContactEmail(junk), junk).toBe(true)
+    }
+  })
+
+  it('keeps real business addresses', () => {
+    for (const real of [
+      'info@aquariusbathrooms.com', 'sales@thekitchenfactory.co.nz',
+      'admin@campbellplumbing.co.nz', 'jemma@thesoftsuite.co.nz',
+    ]) {
+      expect(isJunkContactEmail(real), real).toBe(false)
+    }
   })
 })

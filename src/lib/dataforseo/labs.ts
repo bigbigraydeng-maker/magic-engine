@@ -131,17 +131,21 @@ export async function getKeywordsForSite(
 
   const items = json.tasks?.[0]?.result?.[0]?.items ?? []
 
+  // keywords_for_site returns FLAT items (keyword / keyword_info /
+  // keyword_properties at the top level), matching the response type above.
+  // A 2026 bulk edit wrongly switched this to a nested `it.keyword_data` that
+  // the type never had — tsc flagged it (TS2339) but `ignoreBuildErrors` hid it,
+  // so at runtime every item was dropped and this returned []. Read flat.
   return items
-    .filter(it => it.keyword_data?.keyword)
+    .filter(it => it.keyword)
     .map(it => {
-      const kd = it.keyword_data!
-      const cpc = kd.keyword_info?.cpc ?? null
+      const cpc = it.keyword_info?.cpc ?? null
       return {
-        keyword:            kd.keyword ?? '',
-        search_volume:      kd.keyword_info?.search_volume ?? null,
-        keyword_difficulty: kd.keyword_difficulty ?? null,
+        keyword:            it.keyword ?? '',
+        search_volume:      it.keyword_info?.search_volume ?? null,
+        keyword_difficulty: it.keyword_properties?.keyword_difficulty ?? null,
         cpc,
-        competition:        kd.keyword_info?.competition ?? null,
+        competition:        it.keyword_info?.competition ?? null,
         intent:             deriveIntent(cpc),
         position:           null,
       }

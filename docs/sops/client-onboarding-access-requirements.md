@@ -1,4 +1,8 @@
-# 客户接入 — 必要访问权限清单 SOP
+# 客户接入 — 必要访问权限清单 SOP（🟦 FDE 月付轨专用）
+
+> **⚠️ 轨道边界（2026-07-08 拆分）**：本 SOP **只适用于 FDE 月付客户**（`client_portal_users.access_type = 'paid_client'`）——由**我们后台代配**、收 Editor 权限、逐项验证。
+> **$990 中小客户（`self_serve` 轨）不走这份**：他们自己在 ME 向导里上传/绑定/授权，见 [`990-self-serve-onboarding.md`](./990-self-serve-onboarding.md)。
+> 别把这份的「不齐不能签合同」硬门槛套到 $990 小 trades 头上——他们多半没有 GA4/GSC/GTM，那些是我们帮他们建的。
 
 > **目的**：每个新 FDE 客户启动前，把这份清单走完。Magic Lab 需要客户在自己的营销账户体系里**给我们至少 Editor 级别**，否则后续优化动作（配 GA4 key event、改 GTM tag、调 Meta ads、修 GBP profile）都要反复打扰客户，效率灾难。
 > **定位**：客户接入合同 / Kickoff 邮件的附件。

@@ -41,10 +41,15 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
   outreach_ready: { label: '待人审',   cls: 'bg-me-ochre/10 text-me-ochre' },
   contacted:      { label: '已联系',   cls: 'bg-me-ivory text-me-charcoal/60' },
   replied:        { label: '已回复',   cls: 'bg-[#5C8A4A]/12 text-[#5C8A4A]' },
+  onboarding:     { label: '🚀 交付中', cls: 'bg-me-ochre/12 text-me-ochre' },
   converted:      { label: '已转化',   cls: 'bg-[#5C8A4A]/20 text-[#5C8A4A]' },
   archived:       { label: '已归档',   cls: 'bg-me-charcoal/5 text-me-charcoal/40' },
   opted_out:      { label: '🚫 拒收',  cls: 'bg-[#C2453A]/10 text-[#C2453A]/70' },
 }
+
+// Statuses whose row expands to a detail drawer (has an ai_report worth showing).
+// Single source so the click handler and the row's hover affordance never diverge.
+const EXPANDABLE_STATUSES = ['analyzed', 'outreach_ready', 'contacted', 'replied', 'onboarding', 'converted']
 
 const FILTERS = ['all', 'discovered', 'qualified', 'analyzed', 'audited'] as const
 
@@ -173,7 +178,7 @@ export default function ProspectingPage() {
       setExpandedId(null); setDetail(null); detailRequestRef.current = null
       return
     }
-    if (!['analyzed', 'outreach_ready', 'contacted', 'replied', 'converted'].includes(status)) return
+    if (!EXPANDABLE_STATUSES.includes(status)) return
     setExpandedId(id); setDetail(null)
     detailRequestRef.current = id
     try {
@@ -318,7 +323,7 @@ export default function ProspectingPage() {
             )}
             {rows.map(r => {
               const meta = STATUS_META[r.status] ?? { label: r.status, cls: 'bg-me-ivory text-me-charcoal/60' }
-              const expandable = ['analyzed', 'outreach_ready', 'contacted', 'replied', 'converted'].includes(r.status)
+              const expandable = EXPANDABLE_STATUSES.includes(r.status)
               return [
                 <tr key={r.id} onClick={() => void toggleDetail(r.id, r.status)}
                   className={`border-b border-me-charcoal/5 ${expandable ? 'cursor-pointer hover:bg-me-ivory/40' : ''}`}>

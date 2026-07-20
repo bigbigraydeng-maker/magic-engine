@@ -8,7 +8,8 @@
  * Reference: ROADMAP.md Phase 12.G (P12.G.1)
  */
 
-import { callClaudeChat } from '@/lib/anthropic/client'
+import { callClaudeChat, callClaudeWithTools } from '@/lib/anthropic/client'
+import { buildReadonlyTools, summariseToolTrace } from '@/lib/agent-tools/readonly'
 import { jsonrepair } from 'jsonrepair'
 import { formatMemoryForPrompt } from '@/lib/memory/format'
 import {
@@ -36,6 +37,28 @@ const MAX_ACTIONS_SHORT = 3
 // We size completion budget proportionally.
 const MAX_OUTPUT_TOKENS_LONG = 2048
 const MAX_OUTPUT_TOKENS_SHORT = 1024
+
+// 诸葛亮 v2 — 只读工具循环上限。short 省 token（自助轨），long 深度（FDE 轨）。
+// 见 spec §4 成本控制：不用默认 6，避免成本失控。
+const MAX_TOOL_ROUNDS_LONG = 4
+const MAX_TOOL_ROUNDS_SHORT = 2
+
+// 诸葛亮 v2 — 追加到 system prompt 的工具使用指引（仅工具启用时注入）。
+// 强调「辅助非必调」，避免 Claude 每次跑满工具轮拖慢/加成本（板桥关切）。
+const TOOL_GUIDANCE = `
+
+## 可用只读工具（决策前下钻 — 辅助，非必调）
+你可以调用以下只读工具，核实低分维度背后的一手数据，再拍板：
+- query_keyword_detail：本客户网站的关键词明细（词/搜索量/KD/意图）
+- query_search_console：本客户 GSC 近 N 天真实点击/曝光/排名
+- query_analytics：本客户 GA4 近 N 天真实流量/转化
+- query_flywheel_history：本客户历史各动作的成功率（这招上次灵不灵）
+
+使用原则：
+1. 只在**分数存疑、需要归因证据、或要判断某打法对本客户是否有效**时才下钻。
+2. **不要每次都跑满工具**；能直接判断就直接给 JSON。
+3. 所有工具只查**当前客户**的数据，你无法指定查别的客户/站/域名。
+4. 下钻完，最终仍必须**只输出 JSON work order**（schema 同上），不要输出工具过程说明。`
 
 // ── System prompts (DAPE W2 dual-mode) ────────────────────────────────────────
 
@@ -348,6 +371,14 @@ export async function conductPriorityActions(input: ZhugeInput): Promise<ZhugeOu
     feedback_total: input.feedbackSummary?.total ?? 0,
   }))
 
+  // 诸葛亮 v2 — opt-in：传入 supabase 则启用只读工具（多步下钻）；
+  // 否则完全回退 v1 单步（callClaudeChat），向后兼容。
+  if (input.supabase) {
+    return await conductWithTools(input, {
+      systemPrompt, userPrompt, maxOutputTokens, actionCap, mode,
+    })
+  }
+
   const result = await callClaudeChat({
     systemPrompt,
     messages: [{ role: 'user', content: userPrompt }],
@@ -362,6 +393,60 @@ export async function conductPriorityActions(input: ZhugeInput): Promise<ZhugeOu
     cost_usd: result.cost_usd,
     input_tokens: result.input_tokens,
     output_tokens: result.output_tokens,
+  }
+}
+
+/**
+ * 诸葛亮 v2 — 带只读工具的多步决策路径。
+ * 决策前 Claude 可自行调工具下钻一手数据（关键词/GSC/GA4/本客户飞轮成效），
+ * 再输出 JSON work order。工具调用轨迹落进 ZhugeOutput.tool_trace 供归因。
+ */
+async function conductWithTools(
+  input: ZhugeInput,
+  ctx: {
+    systemPrompt: string
+    userPrompt: string
+    maxOutputTokens: number
+    actionCap: number
+    mode: ZhugePromptMode
+  },
+): Promise<ZhugeOutput> {
+  const supabase = input.supabase!
+  const market: 'AU' | 'NZ' = input.businessContext.market === 'NZ' ? 'NZ' : 'AU'
+  const maxToolRounds = ctx.mode === 'short' ? MAX_TOOL_ROUNDS_SHORT : MAX_TOOL_ROUNDS_LONG
+
+  // 🔴 资源身份 4 轴全部服务端注入（§3.3）。
+  const { tools, handlers } = await buildReadonlyTools({
+    clientId: input.client.id,
+    domain: input.client.domain ?? null,
+    supabase,
+    market,
+  })
+
+  const result = await callClaudeWithTools({
+    systemPrompt: ctx.systemPrompt + TOOL_GUIDANCE,
+    messages: [{ role: 'user', content: ctx.userPrompt }],
+    tools,
+    toolHandlers: handlers,
+    maxOutputTokens: ctx.maxOutputTokens,
+    maxToolRounds,
+  })
+
+  // 🔴 §3.4 截断保护：max_tokens 截断的坏 JSON 绝不静默流下去。
+  if (result.stop_reason === 'max_tokens') {
+    throw new Error('诸葛亮 conductor 输出被 max_tokens 截断，拒绝解析残缺 work order')
+  }
+
+  const top_actions = parseOutput(result.text)
+
+  return {
+    top_actions: top_actions.slice(0, ctx.actionCap),
+    generated_at: new Date().toISOString(),
+    cost_usd: result.cost_usd,
+    input_tokens: result.input_tokens,
+    output_tokens: result.output_tokens,
+    tool_trace: summariseToolTrace(result.tool_calls),  // §5 条款 D：仅摘要落库
+    tool_rounds: result.tool_rounds,
   }
 }
 

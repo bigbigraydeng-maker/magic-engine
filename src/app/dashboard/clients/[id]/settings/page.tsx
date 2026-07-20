@@ -24,6 +24,8 @@ import { SocialHandlesPanel } from './_components/SocialHandlesPanel'
 import { ApiKeysPanel } from './_components/ApiKeysPanel'
 import { ExcludedTopicsPanel } from './_components/ExcludedTopicsPanel'
 import { BrandRedlinesPanel } from './_components/BrandRedlinesPanel'
+import { CommentAutoReplyPanel } from './_components/CommentAutoReplyPanel'
+import { CommentAuditList } from './_components/CommentAuditList'
 
 const ERROR_MESSAGES: Record<string, string> = {
   token_exchange_failed: '无法从 Google 获取访问令牌，请重试。',
@@ -206,6 +208,30 @@ export default function ClientSettingsPage() {
             <h2 className="font-black text-slate-800">Instagram · Facebook · TikTok</h2>
           </div>
           <SocialHandlesPanel clientId={clientId} />
+        </section>
+
+        {/* ── §3.5 社媒评论自动回复（social 支柱 / DAPE 执行） ──────────────── */}
+        <div className="mt-10 mb-2 flex items-baseline gap-2">
+          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+            § 3.5 · 评论自动回复
+          </p>
+          <span className="text-xs text-slate-400">全自动 · AI 分类 + 护栏</span>
+        </div>
+
+        <section>
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-base">💬</span>
+            <h2 className="font-black text-slate-800">Facebook 评论自动回复</h2>
+          </div>
+          <CommentAutoReplyPanel clientId={clientId} />
+        </section>
+
+        <section className="mt-6">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-base">🗂️</span>
+            <h2 className="font-black text-slate-800">最近自动回复（审计）</h2>
+          </div>
+          <CommentAuditList clientId={clientId} />
         </section>
 
         {/* ── §4 程序化访问（Phase 34） ───────────────────────────────────── */}

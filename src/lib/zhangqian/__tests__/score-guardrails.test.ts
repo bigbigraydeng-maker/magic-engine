@@ -199,3 +199,207 @@ describe('applyReputationGuardrail', () => {
     expect(clamped.diagnosis?.scores.overall).toBe(20)
   })
 })
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// v1.1 · runSanityCheck 4-类硬伤 tests (P8.13.E · plugin merge)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import { runSanityCheck } from '../score-guardrails'
+import type {
+  DiscoveredCompetitor,
+  DiscoveredBusiness,
+  AiVisibilityResult,
+} from '../types'
+
+function baseBusiness(city = 'Auckland', region = 'Auckland'): DiscoveredBusiness {
+  return {
+    name: 'Test Co',
+    industry: ['real estate'],
+    location: { city, region, country: 'NZ' },
+    description: 'Test business',
+    target_audience: ['home buyers'],
+    unique_selling_points: ['bilingual', 'local expertise', 'auction skill'],
+    confidence: 0.9,
+  }
+}
+
+function baseReport(overrides: Partial<DiscoveryReport> = {}): DiscoveryReport {
+  return {
+    schema_version: 1,
+    domain: 'test.co.nz',
+    business: baseBusiness(),
+    social_profiles: [],
+    gbp: null,
+    review_platforms: [],
+    seed_keywords: [],
+    competitors: [],
+    ai_tracker_questions: [],
+    notes: '',
+    meta: { model: 'test', tool_calls: 0, cost_usd: 0, duration_ms: 0, truncated: false },
+    ...overrides,
+  }
+}
+
+function comp(overrides: Partial<DiscoveredCompetitor> & { domain: string; name: string }): DiscoveredCompetitor {
+  return {
+    relevance: 'direct',
+    rationale: 'test competitor',
+    ...overrides,
+  } as DiscoveredCompetitor
+}
+
+describe('runSanityCheck', () => {
+  it('empty report → 0 issues (baseline clean)', () => {
+    const issues = runSanityCheck(baseReport())
+    expect(issues).toEqual([])
+  })
+
+  it('never throws — a broken sub-field is silently skipped', () => {
+    // Mangle the business.location to trigger detector edge cases
+    const bad = baseReport()
+    // @ts-expect-error deliberate mangle
+    bad.business.location = null
+    expect(() => runSanityCheck(bad)).not.toThrow()
+  })
+
+  // ─── Detector 1: fabricated_number ─────────────────────────────────────────
+
+  it('flags precise rating with < 5 reviews (fractional impossibility)', () => {
+    const report = baseReport({
+      review_platforms: [
+        { platform: 'google', url: 'https://g.com', rating: 4.7, review_count: 3 },
+      ],
+    })
+    const issues = runSanityCheck(report)
+    const fab = issues.find(i => i.category === 'fabricated_number')
+    expect(fab).toBeDefined()
+    expect(fab?.location).toBe('review_platforms.0.rating')
+    expect(fab?.severity).toBe('yellow')
+  })
+
+  it('does NOT flag round rating (5.0) with few reviews', () => {
+    const report = baseReport({
+      review_platforms: [
+        { platform: 'google', url: 'https://g.com', rating: 5.0, review_count: 3 },
+      ],
+    })
+    const issues = runSanityCheck(report).filter(i => i.category === 'fabricated_number')
+    expect(issues).toEqual([])  // 5.0 with 3 reviews is possible; only fractional flagged
+  })
+
+  it('flags competitor monthly_traffic without source cited in rationale', () => {
+    const report = baseReport({
+      competitors: [
+        comp({ domain: 'comp1.com', name: 'Comp 1', monthly_traffic: 15234, rationale: 'a direct competitor with big brand' }),
+      ],
+    })
+    const issues = runSanityCheck(report).filter(i => i.category === 'fabricated_number')
+    expect(issues.length).toBeGreaterThan(0)
+    expect(issues[0].location).toBe('competitors.0.monthly_traffic')
+  })
+
+  it('does NOT flag competitor monthly_traffic when rationale cites source', () => {
+    const report = baseReport({
+      competitors: [
+        comp({ domain: 'comp1.com', name: 'Comp 1', monthly_traffic: 15234, rationale: '根据 SEMrush 数据显示流量领先' }),
+      ],
+    })
+    const issues = runSanityCheck(report).filter(i => i.category === 'fabricated_number')
+    expect(issues).toEqual([])
+  })
+
+  // ─── Detector 2: unmarked_uncertainty ──────────────────────────────────────
+
+  it('flags high reputation score with too few reviews', () => {
+    const report = baseReport({
+      review_platforms: [
+        { platform: 'google', url: 'https://g.com', rating: 5.0, review_count: 8 },
+      ],
+      diagnosis: baseDiagnosis(65, 35),
+    })
+    const issues = runSanityCheck(report).filter(i => i.category === 'unmarked_uncertainty')
+    expect(issues.length).toBe(1)
+    expect(issues[0].location).toBe('diagnosis.scores.reputation')
+  })
+
+  it('flags single AI visibility question — insufficient sample', () => {
+    const single: AiVisibilityResult = { question: 'q1', top_brands: [], client_mentioned: false }
+    const report = baseReport({ ai_visibility_results: [single] })
+    const issues = runSanityCheck(report).filter(i => i.category === 'unmarked_uncertainty')
+    expect(issues.length).toBe(1)
+    expect(issues[0].location).toBe('ai_visibility_results')
+  })
+
+  it('does NOT flag when 2+ AI visibility questions tested', () => {
+    const twoQuestions: AiVisibilityResult[] = [
+      { question: 'q1', top_brands: [], client_mentioned: false },
+      { question: 'q2', top_brands: [], client_mentioned: false },
+    ]
+    const report = baseReport({ ai_visibility_results: twoQuestions })
+    const issues = runSanityCheck(report).filter(i => i.category === 'unmarked_uncertainty')
+    expect(issues).toEqual([])
+  })
+
+  // ─── Detector 3: cross_geography ───────────────────────────────────────────
+
+  it('flags direct competitor in Wellington when client is Auckland', () => {
+    const report = baseReport({
+      business: baseBusiness('Auckland', 'Auckland'),
+      competitors: [
+        comp({ domain: 'welly.co.nz', name: 'Welly Rival', relevance: 'direct', location: 'Wellington, NZ' }),
+      ],
+    })
+    const issues = runSanityCheck(report).filter(i => i.category === 'cross_geography')
+    expect(issues.length).toBe(1)
+    expect(issues[0].severity).toBe('yellow')
+  })
+
+  it('does NOT flag adjacent-relevance competitor in a different city', () => {
+    const report = baseReport({
+      business: baseBusiness('Auckland', 'Auckland'),
+      competitors: [
+        comp({ domain: 'welly.co.nz', name: 'Welly Adjacent', relevance: 'adjacent', location: 'Wellington, NZ' }),
+      ],
+    })
+    const issues = runSanityCheck(report).filter(i => i.category === 'cross_geography')
+    expect(issues).toEqual([])
+  })
+
+  it('skips detection when client has no city/region anchor', () => {
+    const report = baseReport({
+      business: baseBusiness('', ''),
+      competitors: [
+        comp({ domain: 'x.co.nz', name: 'X', location: 'Wellington' }),
+      ],
+    })
+    expect(runSanityCheck(report).filter(i => i.category === 'cross_geography')).toEqual([])
+  })
+
+  // ─── Detector 4: weakness_omitted ──────────────────────────────────────────
+
+  it('flags red when business has USPs but diagnosis actions all empty', () => {
+    const empty = baseDiagnosis(50, 50)
+    empty.actions = { quick_fix: [], important: [], talk_to_us: [] }
+    const report = baseReport({ diagnosis: empty })
+    const issues = runSanityCheck(report).filter(i => i.category === 'weakness_omitted')
+    expect(issues.length).toBe(1)
+    expect(issues[0].severity).toBe('red')
+  })
+
+  it('flags yellow when only talk_to_us has entries (no self-serve quick wins)', () => {
+    const onlyTalk = baseDiagnosis(50, 50)
+    onlyTalk.actions = { quick_fix: [], important: [], talk_to_us: ['Book a strategy call'] }
+    const report = baseReport({ diagnosis: onlyTalk })
+    const issues = runSanityCheck(report).filter(i => i.category === 'weakness_omitted')
+    expect(issues.length).toBe(1)
+    expect(issues[0].severity).toBe('yellow')
+  })
+
+  it('does NOT flag when there are quick_fix actions', () => {
+    const balanced = baseDiagnosis(50, 50)
+    balanced.actions = { quick_fix: ['Add H1 to homepage'], important: [], talk_to_us: [] }
+    const report = baseReport({ diagnosis: balanced })
+    const issues = runSanityCheck(report).filter(i => i.category === 'weakness_omitted')
+    expect(issues).toEqual([])
+  })
+})

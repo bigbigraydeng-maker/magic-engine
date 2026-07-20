@@ -99,6 +99,19 @@ export const CITY_COORDS: Record<string, { coord: string; country: 'AU' | 'NZ' }
   wellington:   { coord: '-41.2866,174.7756', country: 'NZ' },
   christchurch: { coord: '-43.5321,172.6362', country: 'NZ' },
   hamilton:     { coord: '-37.7870,175.2793', country: 'NZ' },
+  // NZ-wide expansion (P35.12, 2026-07-14): the top metros beyond Auckland,
+  // for the remote-delivery offer. Auckland stays split by area (finer-grained);
+  // these smaller metros are one query each.
+  tauranga:        { coord: '-37.6878,176.1651', country: 'NZ' },
+  // Napier & Hastings are twin cities ~18km apart — separate search seeds, not
+  // a "Napier Hastings" combined string (which is not a real place name).
+  napier:          { coord: '-39.4928,176.9120', country: 'NZ' },
+  hastings:        { coord: '-39.6395,176.8380', country: 'NZ' },
+  palmerston_north:{ coord: '-40.3523,175.6082', country: 'NZ' },
+  nelson:          { coord: '-41.2706,173.2840', country: 'NZ' },
+  dunedin:         { coord: '-45.8788,170.5028', country: 'NZ' },
+  rotorua:         { coord: '-38.1368,176.2497', country: 'NZ' },
+  new_plymouth:    { coord: '-39.0556,174.0752', country: 'NZ' },
 }
 
 const DEFAULT_RADIUS_KM = 25

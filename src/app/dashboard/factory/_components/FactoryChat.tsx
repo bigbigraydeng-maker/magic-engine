@@ -10,7 +10,7 @@ interface Msg { role: 'user' | 'assistant'; content: string }
 
 export function FactoryChat({ clientId, onActed }: { clientId: string; onActed?: () => void }) {
   const [messages, setMessages] = useState<Msg[]>([
-    { role: 'assistant', content: '有片要改就跟我说,比如「第一条节奏太慢,开头改成价格反转」或「把预算降到 $20」。通过投放你在左边点按钮。' },
+    { role: 'assistant', content: '有片要改就跟我说,比如「第一条节奏太慢,开头改成价格反转」或「把预算降到 $20」。通过·待发布你在左边点按钮。' },
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)

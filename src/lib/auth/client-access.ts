@@ -81,6 +81,32 @@ export async function requireDashboardClientAccess(
 }
 
 /**
+ * Onboarding-scoped access (Phase B · $990 self-serve).
+ *
+ * Isolation is IDENTICAL to requireDashboardClientAccess — allows admin,
+ * paid_client, AND self_serve, and the caller can only ever touch the
+ * client(s) their verified email is a member of (email → client_portal_users).
+ * This function adds NO extra narrowing of its own.
+ *
+ * The "onboarding-only" scope is a CONVENTION enforced by WHICH routes adopt
+ * this guard, not by the function: it exists purely so every route
+ * deliberately opened to self_serve for onboarding (connect their own
+ * accounts, upload their own assets, write their own profile fields) is
+ * greppable for a security audit, instead of being lost among the many
+ * routes that use requireDashboardClientAccess for other reasons.
+ *
+ * Adopt it ONLY on genuine self-serve onboarding routes. Anything that is a
+ * paid deliverable must stay on requirePaidClientAccess — that is what keeps
+ * self_serve out of paid-only aggregate surfaces (/dashboard/content,
+ * /dashboard/visuals, etc.); this guard does not touch those either way.
+ */
+export async function requireOnboardingClientAccess(
+  clientId: string,
+): Promise<ClientAccessResult> {
+  return requireDashboardClientAccess(clientId)
+}
+
+/**
  * Phase X.S2 — Paid-only gate. Wraps requireDashboardClientAccess and
  * additionally rejects self_serve users with a structured 403 so the
  * frontend can render the "Talk to Us / Class" upsell modal instead of

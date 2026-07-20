@@ -36,7 +36,8 @@ const COLUMNS: Array<{ status: string; label: string; dot: string; step: number 
   { status: 'outreach_ready', label: 'Ready to send', dot: '#C4912E', step: 4 },
   { status: 'contacted',      label: 'Contacted',     dot: '#B7B1A5', step: 5 },
   { status: 'replied',        label: 'Replied 💬',    dot: '#5C8A4A', step: 6 },
-  { status: 'converted',      label: 'Won ★',         dot: '#EBCB8B', step: 7 },
+  { status: 'onboarding',     label: 'Onboarding 🚀', dot: '#C4912E', step: 7 },
+  { status: 'converted',      label: 'Won ★',         dot: '#EBCB8B', step: 8 },
 ]
 const STEP_BY_STATUS: Record<string, number> =
   Object.fromEntries(COLUMNS.map(c => [c.status, c.step]))
@@ -54,7 +55,9 @@ function Stepper({ status }: { status: string }) {
   const done = STEP_BY_STATUS[status] ?? 0
   return (
     <div className="flex gap-[3px]">
-      {[1, 2, 3, 4, 5, 6, 7].map(i => (
+      {/* One tick per pipeline step — derived from COLUMNS so adding a stage
+          (e.g. onboarding) never leaves converted indistinguishable from it. */}
+      {Array.from({ length: COLUMNS.length }, (_, i) => i + 1).map(i => (
         <span key={i} className="h-[3px] w-3 rounded-full"
           style={{ background: i <= done ? '#C4912E' : '#EAE6DF' }} />
       ))}
@@ -215,7 +218,13 @@ function DetailDrawer({ id, onClose, onChanged }: { id: string; onClose: () => v
     return () => { active = false }
   }, [id])
 
-  async function act(action: 'archive' | 'opt_out') {
+  async function act(action: 'archive' | 'opt_out' | 'start_onboarding' | 'mark_converted' | 'generate_keyword_report') {
+    // Moving a warm reply into paid onboarding is a real commitment (it says the
+    // $19.90 was paid) — confirm so a mis-click can't fake a sale.
+    if (action === 'start_onboarding' &&
+        !window.confirm(`确认 ${p?.business_name ?? '这家'} 已支付 $19.90？将移入 Onboarding（交付）阶段。`)) return
+    if (action === 'mark_converted' &&
+        !window.confirm(`确认 ${p?.business_name ?? '这家'} 已成交 $990 套餐？将标记为 Won。`)) return
     setBusy(true); setMsg('')
     try {
       const res = await fetch(`/api/admin/prospecting/${id}`, {
@@ -291,6 +300,18 @@ function DetailDrawer({ id, onClose, onChanged }: { id: string; onClose: () => v
               {reportBase && (
                 <a href={`${reportBase.replace(/\/$/, '')}/report/${p.id}`} target="_blank" rel="noreferrer"
                   className="rounded-lg bg-me-charcoal px-3 py-1.5 text-xs font-semibold text-white">看客户报告页 →</a>
+              )}
+              {(p.status === 'replied' || p.status === 'contacted') && (
+                <button onClick={() => void act('start_onboarding')} disabled={busy}
+                  className="rounded-lg bg-[#C4912E] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">🚀 已收 $19.90 · 开始 onboarding</button>
+              )}
+              {p.status === 'onboarding' && (
+                <button onClick={() => void act('generate_keyword_report')} disabled={busy}
+                  className="rounded-lg border border-me-charcoal/15 px-3 py-1.5 text-xs text-me-charcoal/70 disabled:opacity-40">📊 生成关键词报告</button>
+              )}
+              {p.status === 'onboarding' && (
+                <button onClick={() => void act('mark_converted')} disabled={busy}
+                  className="rounded-lg bg-[#5C8A4A] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">✅ 已成交 $990 · 标记 Won</button>
               )}
               <button onClick={() => void act('archive')} disabled={busy}
                 className="rounded-lg border border-me-charcoal/15 px-3 py-1.5 text-xs text-me-charcoal/70 disabled:opacity-40">归档</button>

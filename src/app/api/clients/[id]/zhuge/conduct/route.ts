@@ -109,6 +109,8 @@ export async function POST(
       industryBenchmarkSummary,
       feedbackSummary,
       promptMode,
+      // 诸葛亮 v2 — 启用只读工具（多步下钻）。资源身份 4 轴由 clientId 服务端注入。
+      supabase: supabaseAdmin,
     })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)

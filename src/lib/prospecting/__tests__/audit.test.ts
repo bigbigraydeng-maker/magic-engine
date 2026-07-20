@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { normaliseUrl, isPrivateIp, runProspectAudit } from '../audit'
+import { normaliseUrl, isPrivateIp, runProspectAudit, discoverContactEmail } from '../audit'
 
 vi.mock('@/lib/validation-utils', () => ({
   validateEnvVar: () => 'test',
@@ -130,5 +130,35 @@ describe('runProspectAudit', () => {
     const audit = await runProspectAudit('https://8.8.8.8/')
     expect(audit.tracking?.emails).toEqual(['info@onhome.co.nz'])
     expect(mockFetch).toHaveBeenCalledTimes(1) // homepage only — no contact-page fetches
+  })
+})
+
+describe('discoverContactEmail (P35.11 re-scan)', () => {
+  beforeEach(() => mockFetch.mockReset())
+  const okPage = (url: string, html: string) => ({
+    ok: true, status: 200, url, headers: new Headers(), text: () => Promise.resolve(html),
+  } as unknown as Response)
+
+  it('returns the homepage email without touching contact pages', async () => {
+    mockFetch.mockResolvedValueOnce(okPage('https://8.8.8.8/', '<a href="mailto:info@biz.co.nz">a</a>'))
+    expect(await discoverContactEmail('https://8.8.8.8/')).toEqual(['info@biz.co.nz'])
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('falls through to a contact page when the homepage has no email', async () => {
+    mockFetch
+      .mockResolvedValueOnce(okPage('https://8.8.8.8/', '<html>phone 09 1234</html>'))
+      .mockResolvedValueOnce(okPage('https://8.8.8.8/contact', '<a href="mailto:hi@biz.co.nz">x</a>'))
+    expect(await discoverContactEmail('8.8.8.8')).toEqual(['hi@biz.co.nz'])
+  })
+
+  it('returns [] on an invalid URL without fetching', async () => {
+    expect(await discoverContactEmail('not a url')).toEqual([])
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it('returns [] (never throws) when the fetch fails', async () => {
+    mockFetch.mockImplementationOnce(() => { throw new Error('dns') })
+    expect(await discoverContactEmail('https://8.8.8.8/')).toEqual([])
   })
 })
