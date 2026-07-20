@@ -49,7 +49,7 @@ export interface NarrativePayload {
   overall_verdict: Verdict
   headline: string
   campaigns: CampaignNarrative[]
-  /** Campaign ids the engine had too little history to judge. */
+  /** Total campaigns evaluated (each carries its own verdict, incl. insufficient_history). */
   evaluated: number
   generated_for: string   // insight_date
 }

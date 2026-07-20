@@ -49,6 +49,10 @@ export interface BaselineConfig {
    * even if the smoothed drop never quite crosses the one-shot alert line.
    * The real Reborn case is exactly this — a two-week 🟡 the median kept just
    * above 🔴; without escalation it would nag forever and never say "act".
+   *
+   * Unit is CONSECUTIVE WINDOWS, not calendar days. Windows overlap by
+   * windowDays-1, so 7 breaching windows ≈ a week-plus of sustained decline
+   * (each window is a 7-day median). Do not read "7" as "7 days".
    */
   escalateWatchAfterDays: number
 }
@@ -75,9 +79,7 @@ export interface MetricVerdict {
 export interface CampaignVerdict {
   verdict: Verdict          // worst of the metric verdicts
   metrics: MetricVerdict[]
-  /** True when frequency is flat but CTR fell — creative is stale, not audience
-   *  fatigue. Set by the caller who has frequency; left undefined here. */
-  headline: string
+  headline: string          // one-line, PM-facing summary of the worst metric
 }
 
 function median(values: number[]): number | null {
@@ -131,7 +133,14 @@ function evaluateMetric(
     }
   }
 
-  const medians = windowMedians(points, pick, cfg.windowDays)
+  // Window over the DENSE sub-series (days that actually have this metric), not
+  // the full calendar. For CTR this is a no-op (it is present almost every day),
+  // but cost_per_result is sparse — many campaigns (ThruPlay, messaging pools)
+  // have results only some days. Windowing over the raw series would let a
+  // window holding a single cheap day become the Math.min baseline floor and
+  // then flag a chronic false 🔴, and would let `recent` read a weeks-old
+  // window when the latest days have no results. Densifying fixes both.
+  const medians = windowMedians(withValue, pick, cfg.windowDays)
   if (medians.length < 2) {
     return {
       metric, verdict: 'insufficient_history',
@@ -145,7 +154,18 @@ function evaluateMetric(
   const baseline = direction === 'lower_is_worse'
     ? Math.max(...medians)   // best CTR week
     : Math.min(...medians)   // cheapest CPL week
-  const ratio = baseline === 0 ? null : recent / baseline
+
+  // A zero baseline (e.g. impressions but never a click for 14+ days) has no
+  // meaningful ratio — treat as "can't judge" rather than silently 'healthy',
+  // which would paint a dead campaign green.
+  if (baseline <= 0) {
+    return {
+      metric, verdict: 'insufficient_history',
+      baseline: null, recent: null, ratio: null,
+      reason: '无有效基线(该指标长期为零),暂不判定',
+    }
+  }
+  const ratio = recent / baseline
 
   const watchRatio = direction === 'lower_is_worse' ? cfg.ctrWatchRatio : cfg.cplWatchRatio
   const alertRatio = direction === 'lower_is_worse' ? cfg.ctrAlertRatio : cfg.cplAlertRatio
@@ -155,11 +175,11 @@ function evaluateMetric(
     direction === 'lower_is_worse' ? r < alertRatio : r > alertRatio
 
   const label = metric === 'ctr' ? '点击率' : '每个询盘成本'
-  const pct = ratio != null ? Math.round(Math.abs(1 - ratio) * 100) : 0
+  const pct = Math.round(Math.abs(1 - ratio) * 100)
 
   let verdict: Verdict = 'healthy'
   let escalated = false
-  if (ratio != null) {
+  {
     if (alerts(ratio)) {
       verdict = 'alert'
     } else if (breaches(ratio)) {

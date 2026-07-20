@@ -118,6 +118,30 @@ describe('judgeCampaign — core behaviour', () => {
     expect(v.verdict).not.toBe('insufficient_history') // CTR carried it
   })
 
+  it('does not false-alarm on sparse cost-per-result (one cheap early day)', () => {
+    // A messaging/ThruPlay-style campaign: results only some days. One cheap
+    // early conversion ($2) must NOT become a baseline floor that makes every
+    // later $8 look like a 4× blowup. Windowing over dense days prevents this.
+    const points: DailyPoint[] = []
+    for (let i = 1; i <= 21; i++) {
+      const day = `2026-07-${String(i).padStart(2, '0')}`
+      // results only every 3rd day; one very cheap conversion on day 1.
+      const cpr = i === 1 ? 2 : i % 3 === 0 ? 8 : null
+      points.push(pt(day, 0.03, cpr))
+    }
+    const cprVerdict = judgeCampaign(points).metrics.find(m => m.metric === 'cost_per_result')!
+    // Steady $8 with one $2 outlier should read healthy or insufficient — never alert.
+    expect(cprVerdict.verdict).not.toBe('alert')
+  })
+
+  it('will not paint a zero-click campaign green', () => {
+    // 20 days of impressions, never a click → CTR baseline is 0 → can't judge.
+    const points = Array.from({ length: 20 }, (_, i) =>
+      pt(`2026-07-${String(i + 1).padStart(2, '0')}`, 0))
+    const ctr = judgeCampaign(points).metrics.find(m => m.metric === 'ctr')!
+    expect(ctr.verdict).toBe('insufficient_history')
+  })
+
   it('reports the worst of the two metrics', () => {
     const points: DailyPoint[] = []
     // CTR healthy (flat 3%), CPR collapses (10 → 18)
