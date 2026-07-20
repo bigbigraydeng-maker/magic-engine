@@ -1,6 +1,7 @@
-# Ad Strategy Engine · 投放师大脑 · spec v0.2
+# Ad Strategy Engine · 投放师大脑 · spec v0.3
 
 > 起草:子牙 · 2026-07-13 · Track B(ME 产品化)· v0.2 吸收魏征(needs_rework→修 2 P0)+ 板桥(approve_with_fixes,C 端 2 P0)双审
+> **v0.3(2026-07-20)· 两处重大修订**:①**触发线绝对→相对自身基线**(§12 重写,被 Reborn 真实疲劳事件证伪:CTR 掉 41% 而三条绝对线一条没响)②**数据脊柱不新建、改造现有 `google-data-pullback-daily`**(§2/§5 修订:该 cron 已每日拉 Meta 账户级+campaign 级,v0.2「无每日自动拉取」的判断是错的)
 > 载体样例:CTS Tours NZ(Meta 广告 pilot)—— **CTS 只是第一个真实案例,不是产品本身**。全 spec client-agnostic,所有 CTS 具体值(campaign ID / 触发阈值 / 预算锁 / 漏斗层结构)都是**per-client 配置的初值**,不是产品硬编码。
 > 原型:`docs/clients/cts/2026-07-12-ad-battle-plan.md` §8(方法论)+ `~/.claude/scheduled-tasks/cts-meta-daily-selfcheck/SKILL.md`(手工前身)
 > 姊妹 spec(作品层,不重复):`docs/superpowers/specs/2026-07-11-creative-lifecycle-engine.md`
@@ -47,7 +48,7 @@
 
 | 能力 | 现状 | 缺口 |
 |---|---|---|
-| **数据** | `meta_ads_snapshots`(手动触发 + 期级,非日度)· `flywheel_metrics` 有 7 个**账户级**日指标(`google-data-pullback-daily` cron 写) | 🔴 **没有每日 campaign/ad 级自动拉取 cron** —— 触发线要 7d 滚动 freq、连续日 CTR/CPL,现有日度只到账户级 |
+| **数据** | ✅ **`google-data-pullback-daily` 已每日拉 Meta**(`render.yaml`,`0 3 * * *`;`route.ts:456-511` 同时调 `getAdAccountInsights` + `getAdCampaignInsights`)→ 写 `meta_ads_snapshots` + `flywheel_metrics`(`ads.account.*`) | 🟡 **不是「没有」,是「存法不可用」**:①存的是**30 天滚动窗口累计**不是日度(`route.ts:463-467`),相邻行重叠 29 天,行差 ≠ 当日值(会被归因回填污染)②campaign 数据塞在 `campaigns` JSONB 里、只取 spend 前 10(`client.ts:118` 硬 `limit:10`,无分页),查不了历史趋势 ③无唯一约束,只能 insert 不能 upsert ④无 `ads.campaign.*` metric key |
 | **诊断** | `diagnostic_runs` / `findings` / `narratives` 已有 · 6 支柱含 `ads` 维度 · `ads-collector.ts` 已在 | `diagnostic_narratives` **不适合**放日度叙事(schema 冲突,见 §6.3)→ 新建独立表 |
 | **执行** | `AdsAuditSection` + `/api/clients/[id]/meta-ads/execute` 已能 pause / 调价 / 重激活 + 审计留痕 | 🟡 改预算后**不自动重激活**——撞 force-pause 坑(§10);且无 budget_policy 硬闸 |
 | **winner-sync** | `winner_reel_sync_config` / `_log` 已上线(Phase 34.A),**Render Cron** 每日 03:00 NZST server-side 跑 | 无(直接复用) |
@@ -112,11 +113,23 @@
 
 ---
 
-## 5. P1 · 数据脊柱(每日 campaign 级拉取)
+## 5. P1 · 数据脊柱 ⭐ v0.3:**改造现有 cron,不新建**
 
-**目标**:补掉「没有每日 campaign/ad 级自动拉取」缺口,给触发线引擎喂日度时序。
+> 🔴 **v0.2「新建每日拉取 cron」作废**。审计确认 `google-data-pullback-daily` 已经在每天拉 Meta 账户级 + campaign 级数据。**再起一条新 cron = 重复写入 + 浪费 Meta API 配额 + 两套数据源打架**。P1 的正确形态是**在现有 cron 的 Meta 分支上做外科手术**。
 
-- **cron**:**Render Cron**(与 winner-sync + google-data-pullback 同栈,`render.yaml`)。参照 winner-sync 的 `curl -H 'Authorization: Bearer <CRON_SECRET>' https://app.magicengine.com.au/api/cron/...` pattern。时刻 04:00 NZST(winner-sync 03:00 之后,拿当日完整数据 + winner-sync 结果)。**窗口按广告账户 NZST/AEST 对齐**,cron 时刻只是触发器不是窗口边界。**绝不用 GHA**(§2 事故教训)。
+**改造点(只有三处,其余不动)**:
+
+| # | 改哪 | 怎么改 |
+|---|---|---|
+| 1 | `route.ts:463-467` 的 30 天滚动窗 | **补**一次 `date_preset=yesterday` 的日度增量拉取(保留原 30d 快照不动,向后兼容 `MetaAdsAdapter` / 月报 / 生产包等现有读取方) |
+| 2 | campaign 数据存 JSONB 前 10 | 抽成规范化时序表 `ad_daily_insights`,主键 `(client_id, level, entity_id, insight_date)`;`getAdCampaignInsights` **加分页 + 提高 limit**(现 `client.ts:118` 硬 `limit:10` 无分页,大账户会截断) |
+| 3 | 无 7d frequency | **额外一次 `date_preset=last_7d`** 取 7d frequency(§6.1:不能由日度 freq 聚合) |
+
+- **cron**:**复用 `google-data-pullback-daily`**(Render Cron,`0 3 * * *`)。**不新增 cron 条目**。
+- **归属映射(必做)**:落库按 **campaign → client** 显式映射,**不能假设「整个账户 = 一个客户」**。实测 CTS 账户 `2775766642787274` 内含 4 条 Oztop 历史遗留 campaign(90d 约 $175;近 7d 已零花费,但账户级聚合被历史污染)。PM 2026-07-20 确认:该账户为历史遗留混用,Oztop 已有自有账户,此账户现专供 CTS。→ 引擎按 campaign 归属过滤,顺带治好账户级数字偏高的老毛病。
+- **token**:统一用 `getMetaTokenForClient()`(`src/lib/meta/token-manager.ts:43`,domain→`META_SYSTEM_USER_TOKEN_<DOMAIN>`)。⚠️ 现有 `google-data-pullback-daily:197-200` 内联了**另一套**命名(`<NAME>_META_SYSTEM_USER_TOKEN`,基于 `clients.name`),两套并存 —— 改造时收敛到前者,并保留 fallback 免得断线。
+- **运行日志**:复用 `startCronRun()`(`src/lib/cron/run-logger.ts`)写 `cron_run_logs`,已有的 `daily-cron-digest` 会自动把失败推邮件。
+- **降级**:单客户 token 失效/401 → 落 `pull_failed` 跳过(**真活信号**,喂 §8.3 预警),不挂整个 cron。沿用现有 `{success:false, error}` 不抛错的隔离范式(`route.ts:600-602`)。
 - **拉取**:server-side Graph API `insights`,复用 winner-sync 的 **env-based per-client token 解析路径**(`getMetaTokenForClient()`,domain→env-key;token 在 env 不在 DB)。
   - `level=campaign`(策略层触发线主食)+ `level=account`(综合掉线线)
   - **日度增量**:`date_preset=yesterday` 落一天(spend / impressions / reach / ctr / outbound_clicks / actions[leads + messaging_conversation_started] / cost_per_action / date_start)
@@ -135,6 +148,8 @@
 引擎每日读时序,对每条 campaign 按其**配置的触发线**(§11,per-client)逐条判。**最高纪律**(继承 SKILL 步骤 5):
 
 > **单日坏数据 ≠ 触发**。必须「持续/多日」才算真信号。**频次和 CTR 趋势比单日 CPL 可信**(真疲劳 = 频次爬升 + CTR 下行,不是 CPL 单日跳)。
+
+**主判定 = 相对该 campaign 自身历史基线,不是绝对阈值**(§12 v0.3 重写,已被真实事件证伪绝对线)。绝对线只作补充。引擎若只跑绝对线未做基线对比 → 报 `baseline_check_missing`,不得报 🟢。
 
 **冷启动纪律**(P1-4):rolling window 数据点 **< 触发线要求的 N 天** → 该触发线输出 `insufficient_history`,**不报 🔴**(对齐姊妹 spec `insufficient_delivery` 同款纪律)。新客户/新表头几天静默积累,不误报。
 
@@ -335,22 +350,73 @@ battle-plan §8 方法论固化成 ME 可复用能力,防「拉了点数据就�
 
 ---
 
-## 12. 触发线定标(CTS pilot 实测基线 · 直接用)
+## 12. 触发线定标 ⭐ v0.3 重写:绝对线 → 相对自身基线
 
-**CTS pilot 配置初值**(SKILL 步骤 5,2026-07-13 实测锚定)。**其他客户不套用** —— 每客户上线用自己 2 周真实数据定标(§13)。
+> 🔴 **v0.2 的绝对线全部作废** —— 那是拍脑袋,已被真实疲劳事件证伪(下方回测)。这跟姊妹 spec §8「幸存者偏差棘轮」是同一个教训的两面:**绝对阈值抓不住慢性衰退**。
 
-| 层 | Campaign(CTS) | 🔴 告警线(持续/多日) | 健康基线(7/13) | delivery 门槛 | 命中处方(locked=非预算) |
+### 12.1 证伪证据(2026-07-20 Reborn 真实疲劳事件回测)
+
+PM 于 7/20 靠人眼发现「CPL 越来越高」并手动暂停 Reborn。事后拉 `time_increment=1` 日序列复盘:
+
+| 日期 | CTR | frequency | CPM |
+|---|---|---|---|
+| 6/26–6/29(峰) | **4.2–4.4%** | 1.14–1.18 | $20–25 |
+| 7/10 | 2.83% | 1.15 | $14.39 |
+| 7/13 | 2.46%(最低) | 1.13 | $13.41 |
+| 7/20 | 2.50% | 1.12 | $13.56 |
+
+**CTR 从 4.22% 烂到 2.50%,掉 41%。而 v0.2 的三条线一条都没响**:
+
+| v0.2 绝对线 | 实际 | 结果 |
+|---|---|---|
+| freq(7d) > 2.5 | 全程 **1.09–1.22**,从没接近 | ❌ 永不触发 |
+| CTR 连续 < 2% | 最低 **2.46%**,始终没跌破 | ❌ 永不触发 |
+| CPL 连续 4 天 > $12 | 可能触发,但最晚 | 🟡 唯一可能响的,且滞后 |
+
+**三个由真实数据推翻的 v0.2 假设**:
+1. **freq 在这个账户根本不是疲劳信号**:CTS 受众池够大 + 预算不高,frequency 常年 1.1,永远撞不到任何合理阈值。把 freq 当主判 = 装了个永不响的警报。
+2. **绝对 CTR 死线抓不住慢性衰退**:4.2%→2.5% 已是灾难性衰退,却因为没跌破 2% 而"全绿"。
+3. **不是观众看腻,是创意失效**:freq 平稳 + CPM 反而**下降**(竞争没变激烈)+ CTR 独跌 → 排除受众饱和与竞价环境,归因于创意本身老化。**对策是换素材,不是换人群**(与 PM 判断一致)。
+
+### 12.2 主判定:相对自身基线(所有客户通用产品逻辑)
+
+对每条在投 campaign,取 `last_30d` 日序列:
+- **基线** = 该 campaign **自身最好 7 天**的指标中位数(不是池中位数、不是绝对值、不是行业基准)
+- **近况** = 最近 7 天中位数
+
+| 衰退幅度 | verdict | 处方方向 |
+|---|---|---|
+| 近况 < 基线 × **0.70**(掉 30%+) | 🔴 | 创意疲劳 → 换素材 |
+| 近况 < 基线 × **0.80**(掉 20–30%) | 🟡 | 走弱 → 盯着 + 备素材 |
+| 其余 | 🟢 | — |
+
+**CPL 同款反向**:近 7 天 CPL 中位数 > 自身最好 7 天 × **1.4** → 🔴。
+
+**为什么用「自身最好 7 天」而不是「首周」**:campaign 常有 learning 期爬坡,首周未必是真实力;取历史最好 7 天更能代表「这条创意本来能做到什么水平」。**为什么用中位数不用均值**:单日尖峰(投放饥饿 / 归因回填)不该拉动基线。
+
+**回测验证**:Reborn 基线 CTR ≈ 4.2%(6/26–6/29),×0.7 = 2.94%。7/10 近 7 天中位数已跌破 → **7/10 报 🔴,比人眼发现早 10 天**;按 $80/天计,可少烧约 **$800** 低效投放。这是本引擎第一个可量化的价值证明。
+
+### 12.3 辅助线(绝对值 · 只作补充,不作主判)
+
+保留但降级 —— 用于捕捉相对线抓不到的**突发**问题(如受众真打透、成本失控):
+
+| 层 | Campaign(CTS pilot) | 补充观察线 | 健康基线(7/13) | delivery 门槛 | 命中处方(locked=非预算) |
 |---|---|---|---|---|---|
-| 冷 | Reborn Lead Form | freq(7d) >2.5 **或** CTR 连续 <2% **或** CPL 连续 4 天 >$12 | freq 1.15 / CTR ~3.3% / CPL $12.20 | spend≥$30 & impr≥3000/日 | winner-sync 池挑 1-2 条 Lead Form 版**加进** ad set(不替换、不加预算) |
+| 冷 | Reborn Lead Form | freq(7d) >2.5 ⚠️**此账户历史从没超 1.3,基本不会响** | freq 1.15 / CTR ~3.3% / CPL $12.20 | spend≥$30 & impr≥3000/日 | winner-sync 池挑 1-2 条 Lead Form 版**加进** ad set(不替换、不加预算) |
 | 温 | Retargeting Warm | freq(7d) >3 | freq 1.66 / CPL $5.06 | spend≥$10 & impr≥1000/日 | 打透 → 预算**回调 $25**(降,不加) |
 | 蓄水 | ThruPlay Pool | 完播成本 >$0.05 **或** 花不出预算 | $0.015/完播 | spend≥$8 & impr≥800/日 | winner-sync 生命周期轮换,不加预算 |
 | 转化 | CTWA WhatsApp | 单对话成本连续 3-5 天 >$25 **且** 无一转 lead | $15.36/对话 / freq 1.75 | spend≥$8 & impr≥800/日 | 先改 offer/文案提转化,不加预算 |
 
-> delivery 门槛为 CTS 初值示例(campaign 级 min spend/impr),供 §7.1 对抗守门用;实现期按真实 CPM 复核。
+> **实现强约束**:引擎报告里若只跑了绝对线而没做相对基线对比,**等于没检查**,必须报 `baseline_check_missing` 而不是 🟢。
 
 **综合掉线线**:日均 leads + WhatsApp 询盘**连续 3 天 < 8** → 触发 §7.2 深度复盘。
 
-**判定纪律**:Reborn 单条 $80/天出 3–12 lead,一个坏日子把当日 CPL 冲到 $30 —— 噪音不是疲劳。必须频次爬升 + CTR 下行的**持续趋势**才算真疲劳。
+### 12.4 判定纪律
+
+1. **单日坏数据 ≠ 触发**:Reborn $80/天出 3–12 lead,一个坏日子就能把当日 CPL 冲到 $30。一律用 **7 天中位数**,不用单日值。
+2. **相对线是主判,绝对线是补充**(§12.1 证伪)。
+3. **区分两种疲劳**:freq 爬升 = 观众看腻(换人群/降频);freq 平稳但 CTR 下滑 = 创意失效(换素材)。**处方必须对应正确的病因**,否则换错药。
+4. **冷启动**:日序列 < 14 天 → 基线不可靠,输出 `insufficient_history`,不报 🔴(§6.1)。
 
 ---
 
