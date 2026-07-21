@@ -3,7 +3,43 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { defaultConfig, resolveDigestRecipients } from '../config'
+
+const maybeSingle = vi.fn()
+vi.mock('@/lib/supabase', () => ({
+  supabaseAdmin: {
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle }) }) }),
+  },
+}))
+
+import { defaultConfig, resolveDigestRecipients, loadAdStrategyConfigWithSource } from '../config'
+
+describe('loadAdStrategyConfigWithSource — asymmetric fail-open', () => {
+  beforeEach(() => { maybeSingle.mockReset(); vi.spyOn(console, 'warn').mockImplementation(() => {}) })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('marks a read error as fallback (so the caller can skip emailing)', async () => {
+    maybeSingle.mockResolvedValue({ data: null, error: { message: 'timeout' } })
+    const { config, source } = await loadAdStrategyConfigWithSource('c1')
+    // Still enabled for data collection, but flagged as a guess.
+    expect(config.enabled).toBe(true)
+    expect(source).toBe('fallback')
+  })
+
+  it('marks a missing row as default (a fresh client, legitimately on)', async () => {
+    maybeSingle.mockResolvedValue({ data: null, error: null })
+    const { config, source } = await loadAdStrategyConfigWithSource('c1')
+    expect(config.enabled).toBe(true)
+    expect(source).toBe('default')
+  })
+
+  it('passes a real row through as source row', async () => {
+    maybeSingle.mockResolvedValue({ data: { client_id: 'c1', enabled: false, digest_recipients: ['a@b.com'] }, error: null })
+    const { config, source } = await loadAdStrategyConfigWithSource('c1')
+    expect(config.enabled).toBe(false)
+    expect(config.digest_recipients).toEqual(['a@b.com'])
+    expect(source).toBe('row')
+  })
+})
 
 describe('defaultConfig', () => {
   it('defaults a client with no row to enabled, global recipient', () => {

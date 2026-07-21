@@ -32,7 +32,7 @@ import { startCronRun } from '@/lib/cron/run-logger'
 import { syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
 import { sendAdHealthDigest } from '@/lib/ads-strategy/digest'
-import { loadAdStrategyConfig, resolveDigestRecipients } from '@/lib/ads-strategy/config'
+import { loadAdStrategyConfigWithSource, resolveDigestRecipients } from '@/lib/ads-strategy/config'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 900
@@ -214,7 +214,8 @@ export async function GET(req: NextRequest) {
         // P21.K.5: per-client on/off. The snapshot above still runs (it feeds
         // the monthly report etc.); only the Ad Strategy Engine honours the
         // switch, so an FDE can silence a client without losing base data.
-        const adStrategyConfig = await loadAdStrategyConfig(client.client_id)
+        const { config: adStrategyConfig, source: adConfigSource } =
+          await loadAdStrategyConfigWithSource(client.client_id)
 
         // P21.K.1: campaign-level DAILY series for the Ad Strategy Engine.
         // Separate from the 30-day rolling snapshot above, which cannot answer
@@ -242,7 +243,10 @@ export async function GET(req: NextRequest) {
             // P21.K.4: email the day's digest (best-effort). Green is
             // de-frequenced so the PM isn't trained to ignore a daily 🟢.
             // Recipients come from per-client config (P21.K.5), else global inbox.
-            if (result.ad_health?.success && result.ad_health.overall_verdict) {
+            // Skip sending when the config was a read-error fallback: enabled is
+            // then a guess, and re-opening a paused client to email is the one
+            // irreversible mistake we don't fail-open on (魏征).
+            if (adConfigSource !== 'fallback' && result.ad_health?.success && result.ad_health.overall_verdict) {
               const digest = await sendAdHealthDigest(
                 client.client_id,
                 client.client_name ?? 'Client',
