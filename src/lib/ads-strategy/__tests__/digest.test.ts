@@ -37,6 +37,11 @@ describe('decideSend — green is de-frequenced, alerts always send', () => {
     expect(decideSend('insufficient_history', null, true)).toBe('skip')
     expect(decideSend('insufficient_history', 'healthy', false)).toBe('skip')
   })
+
+  it('never emails on an unexpected verdict value', () => {
+    // Defensive: a garbage verdict must not fall through to a green send.
+    expect(decideSend('nonsense' as never, null, true)).toBe('skip')
+  })
 })
 
 describe('buildSubject — PM can triage from the subject line', () => {

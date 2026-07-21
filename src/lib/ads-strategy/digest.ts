@@ -51,10 +51,12 @@ export function decideSend(
 ): SendDecision {
   if (current === 'alert') return 'alert'
   if (current === 'watch') return 'watch'
-  if (current === 'insufficient_history') return 'skip'
-  // current === 'healthy'
-  if (previous === 'alert' || previous === 'watch') return 'recovery'
-  if (isWeeklyDay) return 'weekly_healthy'
+  if (current === 'healthy') {
+    if (previous === 'alert' || previous === 'watch') return 'recovery'
+    if (isWeeklyDay) return 'weekly_healthy'
+    return 'skip'
+  }
+  // insufficient_history or any unexpected value → never email on a non-verdict.
   return 'skip'
 }
 
@@ -85,15 +87,17 @@ export function buildBody(
   decision: SendDecision,
   dashboardUrl: string,
 ): string {
-  const needAction = payload.campaigns.filter(c => c.verdict === 'alert' || c.verdict === 'watch')
+  const campaigns = payload.campaigns ?? []
+  const evaluated = payload.evaluated ?? campaigns.length
+  const needAction = campaigns.filter(c => c.verdict === 'alert' || c.verdict === 'watch')
 
   let lead: string
   let items = ''
 
   if (decision === 'weekly_healthy' || decision === 'recovery') {
     lead = decision === 'recovery'
-      ? `🟢 广告恢复健康了 —— ${payload.evaluated} 条广告目前都无需动手。`
-      : `🟢 本周你的 ${payload.evaluated} 条广告持续健康,无需动手。系统仍每天替你盯着。`
+      ? `🟢 广告恢复健康了 —— ${evaluated} 条广告目前都无需动手。`
+      : `🟢 本周你的 ${evaluated} 条广告持续健康,无需动手。系统仍每天替你盯着。`
   } else {
     const n = needAction.length
     lead = `${decision === 'alert' ? '🔴' : '🟡'} 今天有 ${n} 件事${decision === 'alert' ? '要看' : '可以留意'}:`
@@ -107,7 +111,7 @@ export function buildBody(
           <div style="margin-top:6px;font-size:12px;color:#64748b">→ 具体怎么处理,下一步的处方会给到,无需你手动操作。</div>
         </div>`
     }).join('')
-    const healthy = payload.evaluated - needAction.length
+    const healthy = evaluated - needAction.length
     if (healthy > 0) items += `<p style="font-size:13px;color:#16a34a;margin:10px 0 0">✅ 其余 ${healthy} 条广告健康,无需动手。</p>`
   }
 
@@ -141,11 +145,12 @@ export async function sendAdHealthDigest(
   insightDate: string,
 ): Promise<DigestResult> {
   try {
-    // Today's narrative + the previous day's verdict (for green de-frequency).
+    // Today's narrative (+ its email state, for idempotency) and the previous
+    // day's verdict (for green de-frequency).
     const [todayRes, prevRes] = await Promise.all([
       supabaseAdmin
         .from('ad_health_narratives')
-        .select('payload')
+        .select('payload, email_status')
         .eq('client_id', clientId)
         .eq('insight_date', insightDate)
         .maybeSingle(),
@@ -170,6 +175,13 @@ export async function sendAdHealthDigest(
 
     if (decision === 'skip') {
       await markEmailStatus(clientId, insightDate, 'skipped')
+      return { decision, sent: false }
+    }
+
+    // Idempotency: if today's digest already went out (cron re-run / manual
+    // retry / scheduler retry), do not send a duplicate. evaluate's daily upsert
+    // does not touch email_status, so a prior 'sent' survives its re-runs.
+    if (todayRes.data?.email_status === 'sent') {
       return { decision, sent: false }
     }
 
