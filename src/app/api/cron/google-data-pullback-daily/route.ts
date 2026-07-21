@@ -31,6 +31,7 @@ import { MetaAdsAdapter } from '@/lib/flywheel/adapters/MetaAdsAdapter'
 import { startCronRun } from '@/lib/cron/run-logger'
 import { syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
+import { sendAdHealthDigest } from '@/lib/ads-strategy/digest'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 900
@@ -65,6 +66,8 @@ interface ClientResult {
   ad_daily?:  { success: boolean; rows_written?: number; backfilled?: boolean; error?: string }
   /** P21.K.2 daily ad-health verdict → ad_health_narratives. */
   ad_health?: { success: boolean; overall_verdict?: string; campaigns_evaluated?: number; error?: string }
+  /** P21.K.4 daily email digest decision + send outcome. */
+  ad_digest?: { sent: boolean; decision: string; error?: string }
 }
 
 // ─── Route ───────────────────────────────────────────────────────────────────
@@ -226,10 +229,19 @@ export async function GET(req: NextRequest) {
         if (result.ad_daily?.success) {
           const insightDate = new Date()
           insightDate.setUTCDate(insightDate.getUTCDate() - 1)
-          result.ad_health = await evaluateClientAdHealth(
-            client.client_id,
-            insightDate.toISOString().slice(0, 10),
-          )
+          const insightDateStr = insightDate.toISOString().slice(0, 10)
+          result.ad_health = await evaluateClientAdHealth(client.client_id, insightDateStr)
+
+          // P21.K.4: email the day's digest (best-effort). Green is
+          // de-frequenced so the PM isn't trained to ignore a daily 🟢.
+          if (result.ad_health?.success && result.ad_health.overall_verdict) {
+            const digest = await sendAdHealthDigest(
+              client.client_id,
+              client.client_name ?? 'Client',
+              insightDateStr,
+            )
+            result.ad_digest = { sent: digest.sent, decision: digest.decision, error: digest.error }
+          }
         }
       }
     }
