@@ -6,7 +6,13 @@
 //    但那是几天后跑 cron 时才发现,配的时候就该拦住。
 
 import { describe, expect, it } from 'vitest'
-import { mergeFactoryConfig, projectFactoryConfig } from './client-config'
+import {
+  EMPTY_CREATIVE_PROFILE,
+  compactCreativeProfile,
+  mergeFactoryConfig,
+  projectCreativeProfile,
+  projectFactoryConfig,
+} from './client-config'
 
 const CTS_LIKE = {
   factory_goal_id: 'ef92d878-c283-4a1c-be7d-1462c8c4a83c',
@@ -19,6 +25,7 @@ describe('projectFactoryConfig — 投影', () => {
     expect(projectFactoryConfig({})).toEqual({
       publish_target: null, factory_goal_id: null, verified_offer: null,
       allow_b_track_landmark_ads: false, auto_order_enabled: false,
+      creative_profile: EMPTY_CREATIVE_PROFILE,
     })
     expect(projectFactoryConfig(null).publish_target).toBeNull()
   })
@@ -128,6 +135,59 @@ describe('mergeFactoryConfig — Goal 与开关', () => {
   it('🔴 豁免开关传非布尔 → 拒(护栏 6 的开关,不能被字符串 "false" 误开)', () => {
     expect(mergeFactoryConfig({}, { allow_b_track_landmark_ads: 'false' }).ok).toBe(false)
     expect(mergeFactoryConfig({}, { allow_b_track_landmark_ads: 1 }).ok).toBe(false)
+  })
+})
+
+describe('出片风格 — 投影与下发', () => {
+  it('空配置 → 全 null(= 用引擎默认)', () => {
+    expect(projectCreativeProfile(undefined)).toEqual(EMPTY_CREATIVE_PROFILE)
+  })
+
+  it('🔴 下发给装配脚本时剔掉空值 —— null 会被当成"显式要求默认",覆盖掉本地兜底', () => {
+    const compact = compactCreativeProfile(projectCreativeProfile({ look: 'golden_hour' }))
+    expect(compact).toEqual({ look: 'golden_hour' })
+    expect('music' in compact).toBe(false)
+  })
+
+  it('全空 → 下发空对象(建单侧据此判断"不下发",让本地文件兜底)', () => {
+    expect(compactCreativeProfile(projectCreativeProfile({}))).toEqual({})
+  })
+
+  it('🔴 转场超范围/非数字 → 拒(静默降级更糟:以为设了 1.5 秒,实际是引擎默认)', () => {
+    expect(mergeFactoryConfig({}, { creative_profile: { xfade: 5 } }).ok).toBe(false)
+    expect(mergeFactoryConfig({}, { creative_profile: { xfade: -1 } }).ok).toBe(false)
+    expect(mergeFactoryConfig({}, { creative_profile: { xfade: '0.35' } }).ok).toBe(false)
+  })
+
+  it('转场边界值放行', () => {
+    expect(mergeFactoryConfig({}, { creative_profile: { xfade: 0 } }).ok).toBe(true)
+    expect(mergeFactoryConfig({}, { creative_profile: { xfade: 2 } }).ok).toBe(true)
+  })
+
+  it('endcard_panel 传非布尔 → 拒', () => {
+    expect(mergeFactoryConfig({}, { creative_profile: { endcard_panel: 'off' } }).ok).toBe(false)
+  })
+
+  it('endcard_panel = false 要能存下(白字 logo 客户靠它,别被当成空值丢掉)', () => {
+    const r = mergeFactoryConfig({}, { creative_profile: { endcard_panel: false } })
+    expect(r.ok).toBe(true)
+    expect(r.ok && (r.config.creative_profile as Record<string, unknown>).endcard_panel).toBe(false)
+  })
+
+  it('风格全清空 → 删掉整个 key(回到引擎默认 + 本地兜底)', () => {
+    const r = mergeFactoryConfig({ creative_profile: { look: 'x' } }, { creative_profile: {} })
+    expect(r.ok && 'creative_profile' in r.config).toBe(false)
+  })
+
+  it('改风格不碰其他配置', () => {
+    const r = mergeFactoryConfig(
+      { publish_target: { platform: 'facebook', page_id: '123456' }, factory_goal_note: '备注' },
+      { creative_profile: { look: 'golden_hour' } },
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.config.publish_target).toBeDefined()
+    expect(r.config.factory_goal_note).toBe('备注')
   })
 })
 

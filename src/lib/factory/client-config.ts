@@ -20,6 +20,35 @@ export const SUPPORTED_PLATFORMS = ['facebook'] as const
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const PAGE_ID_RE = /^\d{5,32}$/
 const MAX_TEXT = 120
+/** 转场超过这个秒数会把短片段整段吞掉(worker 的段时长地板是 1.0s) */
+const MAX_XFADE_SEC = 2
+
+/**
+ * 出片风格。字段名**必须**跟装配脚本真正读的键一致 —— worker.mjs 的 assemble() 只认
+ * music / music_mood / look / caption_mode / xfade / endcard_panel 这几个。
+ *
+ * ⚠️ 真实教训:CTS 的 brandkit/factory_profile.json 里写的是 `caption_style` 和 `vo`,
+ * 而 worker 读的是 `caption_mode`、根本不读 `vo` —— 那两条风格设置从来没生效过。
+ * 所以这里只放脚本真吃的键,不放看着合理但没人读的字段。
+ */
+export interface CreativeProfile {
+  /** 曲名(相对 _shared/music)或绝对路径。worker 找不到文件时按 music_mood 回退 */
+  music: string | null
+  /** 按情绪自动选曲(如 epic_cinematic / peaceful_serene),music 缺失时生效 */
+  music_mood: string | null
+  /** 调色(如 golden_hour) */
+  look: string | null
+  /** 字幕模式(注意是 caption_mode,不是 caption_style) */
+  caption_mode: string | null
+  /** 转场时长(秒) */
+  xfade: number | null
+  /** 结尾卡是否套白底面板。白字 logo(如 Oztop)要设 false,否则字消失 */
+  endcard_panel: boolean | null
+}
+
+export const EMPTY_CREATIVE_PROFILE: CreativeProfile = {
+  music: null, music_mood: null, look: null, caption_mode: null, xfade: null, endcard_panel: null,
+}
 
 export interface FactoryConfigView {
   publish_target: { platform: string; page_id: string } | null
@@ -28,6 +57,8 @@ export interface FactoryConfigView {
   allow_b_track_landmark_ads: boolean
   /** 自动排产开关(factory-order-scheduler 读)。默认关 —— 自动下单 = 自动花钱。 */
   auto_order_enabled: boolean
+  /** 出片风格。建单时注入工单 brief,worker 优先用它、本地 factory_profile.json 兜底。 */
+  creative_profile: CreativeProfile
 }
 
 export type MergeResult =
@@ -58,7 +89,29 @@ export function projectFactoryConfig(raw: unknown): FactoryConfigView {
       : null,
     allow_b_track_landmark_ads: cfg.allow_b_track_landmark_ads === true,
     auto_order_enabled: cfg.auto_order_enabled === true,
+    creative_profile: projectCreativeProfile(cfg.creative_profile),
   }
+}
+
+/** 风格投影:脏数据一律降级 null,不把半个对象抛给前端或下发给装配脚本。 */
+export function projectCreativeProfile(raw: unknown): CreativeProfile {
+  const p = (raw ?? {}) as Record<string, unknown>
+  const xfade = typeof p.xfade === 'number' && Number.isFinite(p.xfade) ? p.xfade : null
+  return {
+    music: asTrimmed(p.music),
+    music_mood: asTrimmed(p.music_mood),
+    look: asTrimmed(p.look),
+    caption_mode: asTrimmed(p.caption_mode),
+    xfade: xfade !== null && xfade >= 0 && xfade <= MAX_XFADE_SEC ? xfade : null,
+    endcard_panel: typeof p.endcard_panel === 'boolean' ? p.endcard_panel : null,
+  }
+}
+
+/** 只保留非空键:下发给装配脚本时,空值意味着"用引擎默认",不能塞 null 进去。 */
+export function compactCreativeProfile(p: CreativeProfile): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(p)) if (v !== null) out[k] = v
+  return out
 }
 
 /**
@@ -119,6 +172,28 @@ export function mergeFactoryConfig(
       return { ok: false, error: 'allow_b_track_landmark_ads 必须是 true/false' }
     }
     next.allow_b_track_landmark_ads = body.allow_b_track_landmark_ads
+  }
+
+  if ('creative_profile' in body) {
+    const raw = body.creative_profile as Record<string, unknown> | null
+    if (raw === null) {
+      delete next.creative_profile
+    } else {
+      // xfade 单独硬校验:传字符串或超范围会让装配脚本行为诡异(段被过渡吞掉),
+      // 静默降级成 null 更糟 —— 用户以为设了 1.5 秒,实际是引擎默认。宁可报错。
+      if (raw.xfade != null) {
+        const x = Number(raw.xfade)
+        if (typeof raw.xfade !== 'number' || !Number.isFinite(x) || x < 0 || x > MAX_XFADE_SEC) {
+          return { ok: false, error: `转场时长要填 0 到 ${MAX_XFADE_SEC} 之间的数字` }
+        }
+      }
+      if (raw.endcard_panel != null && typeof raw.endcard_panel !== 'boolean') {
+        return { ok: false, error: 'endcard_panel 必须是 true/false' }
+      }
+      const cleaned = compactCreativeProfile(projectCreativeProfile(raw))
+      if (Object.keys(cleaned).length === 0) delete next.creative_profile
+      else next.creative_profile = cleaned
+    }
   }
 
   if ('auto_order_enabled' in body) {
