@@ -24,6 +24,7 @@ import { SocialHandlesPanel } from './_components/SocialHandlesPanel'
 import { ApiKeysPanel } from './_components/ApiKeysPanel'
 import { ExcludedTopicsPanel } from './_components/ExcludedTopicsPanel'
 import { BrandRedlinesPanel } from './_components/BrandRedlinesPanel'
+import { ProductsPanel } from './_components/ProductsPanel'
 import { FactoryConfigPanel } from './_components/FactoryConfigPanel'
 import { CommentAutoReplyPanel } from './_components/CommentAutoReplyPanel'
 import { CommentAuditList } from './_components/CommentAuditList'
@@ -156,6 +157,14 @@ export default function ClientSettingsPage() {
         </div>
 
         <section>
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-base">📦</span>
+            <h2 className="font-black text-slate-800">主力产品（AI 写文案时逐条读）</h2>
+          </div>
+          <ProductsPanel clientId={clientId} />
+        </section>
+
+        <section className="mt-6">
           <div className="mb-3 flex items-center gap-2">
             <span className="text-base">🎯</span>
             <h2 className="font-black text-slate-800">主关键词清单</h2>
