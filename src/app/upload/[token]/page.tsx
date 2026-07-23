@@ -59,6 +59,9 @@ export default function ClientUploadPage() {
   return (
     <div className="min-h-screen bg-slate-50 px-5 py-10">
       <div className="mx-auto max-w-md">
+        {/* 客户收到的是一条陌生链接。整页没有任何标识时,打开像钓鱼网站,人不敢传。
+            这里放我们自己的品牌(不是客户数据,不违反「这页不显示客户信息」的约束)。 */}
+        <p className="mb-6 text-xs font-bold uppercase tracking-[0.18em] text-cyan-700">Magic Engine</p>
         <h1 className="text-2xl font-black text-slate-900">上传素材</h1>
         <p className="mt-2 text-sm leading-6 text-slate-600">
           把门店、产品、施工过程的照片和视频传上来就行。

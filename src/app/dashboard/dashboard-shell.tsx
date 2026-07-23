@@ -142,6 +142,10 @@ function buildSelfServeSections(clientId: string): NavSection[] {
     {
       title: 'Create',
       items: [
+        // 锁定到当前客户(?client=)—— 客户导航里的每一项都是客户维度,视频工厂不该是例外。
+        // 不带参数的 /dashboard/factory 保留在内部导航,做跨客户总览。
+        { key: 'factory', label: '视频工厂', mark: 'VF', href: `/dashboard/factory?client=${clientId}` },
+        { key: 'assets',  label: '素材库',   mark: 'AS', href: `/dashboard/clients/${clientId}/assets` },
         { key: 'visuals', label: 'Visual Studio', mark: 'VS', href: '/dashboard/visuals' },
         { key: 'content', label: 'Content',       mark: 'CT', href: '/dashboard/content' },
       ],
