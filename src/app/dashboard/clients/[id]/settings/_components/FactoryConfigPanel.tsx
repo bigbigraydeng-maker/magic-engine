@@ -21,6 +21,7 @@ interface Config {
   factory_goal_id: string | null
   verified_offer: { price_from: string; offer_expiry: string } | null
   allow_b_track_landmark_ads: boolean
+  auto_order_enabled: boolean
 }
 
 interface Goal {
@@ -46,6 +47,7 @@ interface Draft {
   priceFrom: string
   offerExpiry: string
   allowLandmark: boolean
+  autoOrder: boolean
 }
 
 const toDraft = (c: Config): Draft => ({
@@ -54,16 +56,19 @@ const toDraft = (c: Config): Draft => ({
   priceFrom: c.verified_offer?.price_from ?? '',
   offerExpiry: c.verified_offer?.offer_expiry ?? '',
   allowLandmark: c.allow_b_track_landmark_ads,
+  autoOrder: c.auto_order_enabled,
 })
 
 const eqDraft = (a: Draft, b: Draft) =>
   a.pageId === b.pageId && a.goalId === b.goalId && a.priceFrom === b.priceFrom &&
-  a.offerExpiry === b.offerExpiry && a.allowLandmark === b.allowLandmark
+  a.offerExpiry === b.offerExpiry && a.allowLandmark === b.allowLandmark &&
+  a.autoOrder === b.autoOrder
 
 export function FactoryConfigPanel({ clientId }: Props) {
   const [state, setState] = useState<PanelState>({ phase: 'loading' })
   const [draft, setDraft] = useState<Draft>(toDraft({
-    publish_target: null, factory_goal_id: null, verified_offer: null, allow_b_track_landmark_ads: false,
+    publish_target: null, factory_goal_id: null, verified_offer: null,
+    allow_b_track_landmark_ads: false, auto_order_enabled: false,
   }))
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<string | null>(null)
@@ -98,6 +103,7 @@ export function FactoryConfigPanel({ clientId }: Props) {
             ? { price_from: draft.priceFrom.trim(), offer_expiry: draft.offerExpiry.trim() }
             : null,
           allow_b_track_landmark_ads: draft.allowLandmark,
+          auto_order_enabled: draft.autoOrder,
         }),
       })
       const json = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
@@ -225,6 +231,35 @@ export function FactoryConfigPanel({ clientId }: Props) {
             否则系统会一直拿它去做片。
           </p>
         </div>
+
+        {/* 自动排产 —— 这是唯一会自动花钱的开关,放在最显眼处并写清楚代价 */}
+        <label
+          className={[
+            'flex cursor-pointer items-start justify-between gap-3 rounded-lg border p-3',
+            draft.autoOrder ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 bg-white',
+          ].join(' ')}
+        >
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold text-slate-700">每天自动排一条片</span>
+            <span className="block text-xs text-slate-500">
+              打开后系统每天早上自动给这个客户下一条出片单,不用人催。
+              <span className="font-medium text-slate-700">这是唯一会自动花钱的开关</span> ——
+              每条片子成本上限 $2,每个客户每天最多 3 条。余额不足会自动停,不会超支。
+              {!publishReady && (
+                <span className="mt-1 block font-medium text-amber-700">
+                  ⚠️ 要先配好上面的发布主页才能打开,否则片子做出来无处可发,白花钱。
+                </span>
+              )}
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            checked={draft.autoOrder}
+            onChange={(e) => setDraft((d) => ({ ...d, autoOrder: e.target.checked }))}
+            disabled={saving || (!publishReady && !draft.autoOrder)}
+            className="mt-0.5 h-4 w-4 flex-shrink-0 accent-emerald-600 disabled:opacity-40"
+          />
+        </label>
 
         {/* 护栏豁免 */}
         <label className="flex cursor-pointer items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3">

@@ -17,7 +17,8 @@ const CTS_LIKE = {
 describe('projectFactoryConfig — 投影', () => {
   it('空配置 → 全 null / false,不抛', () => {
     expect(projectFactoryConfig({})).toEqual({
-      publish_target: null, factory_goal_id: null, verified_offer: null, allow_b_track_landmark_ads: false,
+      publish_target: null, factory_goal_id: null, verified_offer: null,
+      allow_b_track_landmark_ads: false, auto_order_enabled: false,
     })
     expect(projectFactoryConfig(null).publish_target).toBeNull()
   })
@@ -127,5 +128,39 @@ describe('mergeFactoryConfig — Goal 与开关', () => {
   it('🔴 豁免开关传非布尔 → 拒(护栏 6 的开关,不能被字符串 "false" 误开)', () => {
     expect(mergeFactoryConfig({}, { allow_b_track_landmark_ads: 'false' }).ok).toBe(false)
     expect(mergeFactoryConfig({}, { allow_b_track_landmark_ads: 1 }).ok).toBe(false)
+  })
+})
+
+describe('mergeFactoryConfig — 自动排产开关(花钱闸)', () => {
+  const WITH_TARGET = { publish_target: { platform: 'facebook', page_id: '1616575215312482' } }
+
+  it('🔴 没配发布主页就想开自动排产 → 拒(片子照做照花钱,做完无处可发)', () => {
+    const r = mergeFactoryConfig({}, { auto_order_enabled: true })
+    expect(r.ok).toBe(false)
+    expect(!r.ok && r.error).toContain('发布主页')
+  })
+
+  it('已配发布主页 → 允许开', () => {
+    const r = mergeFactoryConfig(WITH_TARGET, { auto_order_enabled: true })
+    expect(r.ok && r.config.auto_order_enabled).toBe(true)
+  })
+
+  it('同一次请求里先配主页再开开关 → 允许(读的是合并后的状态,不是旧状态)', () => {
+    const r = mergeFactoryConfig({}, { ...WITH_TARGET, auto_order_enabled: true })
+    expect(r.ok && r.config.auto_order_enabled).toBe(true)
+  })
+
+  it('关掉开关不需要发布主页(随时能踩刹车)', () => {
+    const r = mergeFactoryConfig({ auto_order_enabled: true }, { auto_order_enabled: false })
+    expect(r.ok && r.config.auto_order_enabled).toBe(false)
+  })
+
+  it('🔴 传非布尔 → 拒(字符串 "true" 不能开这个花钱开关)', () => {
+    expect(mergeFactoryConfig(WITH_TARGET, { auto_order_enabled: 'true' }).ok).toBe(false)
+  })
+
+  it('默认关:投影里没这个 key 时是 false', () => {
+    expect(projectFactoryConfig({}).auto_order_enabled).toBe(false)
+    expect(projectFactoryConfig({ auto_order_enabled: 'true' }).auto_order_enabled).toBe(false)
   })
 })
