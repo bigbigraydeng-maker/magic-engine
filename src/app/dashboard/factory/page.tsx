@@ -170,7 +170,7 @@ export default function FactoryCockpitPage() {
           )}
         </div>
 
-        {loading && orders.length === 0 ? (
+        {loading && visibleOrders.length === 0 ? (
           <p className="text-slate-400 text-sm">加载中…</p>
         ) : reviewClients.length === 0 ? (
           <div className="border border-slate-200 rounded-xl bg-white p-8 text-center text-slate-400 text-sm">
@@ -208,12 +208,12 @@ export default function FactoryCockpitPage() {
       <details className="group">
         <summary className="cursor-pointer text-sm font-medium text-slate-600 flex items-center gap-2 select-none">
           <span className="text-slate-400 group-open:rotate-90 transition-transform inline-block">▸</span>
-          全部工单状态 · {orders.length} 条
+          全部工单状态 · {visibleOrders.length} 条
           {deadCount > 0 && <span className="text-red-600">· ⚠️ {deadCount} 条卡住了,需你手动重试</span>}
         </summary>
 
         <div className="mt-4 space-y-6">
-          {orders.length === 0 && (
+          {visibleOrders.length === 0 && (
             <p className="text-slate-400 text-sm">暂无工单。信号进来后会自动生成。</p>
           )}
           {grouped.map((g) => {

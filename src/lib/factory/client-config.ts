@@ -20,8 +20,11 @@ export const SUPPORTED_PLATFORMS = ['facebook'] as const
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const PAGE_ID_RE = /^\d{5,32}$/
 const MAX_TEXT = 120
-/** 转场超过这个秒数会把短片段整段吞掉(worker 的段时长地板是 1.0s) */
-const MAX_XFADE_SEC = 2
+/**
+ * 必须**严格小于** worker 的段时长地板 1.0s(worker.mjs assemble 里那个 Math.max(dur, 1.0))。
+ * 转场 ≥ 段时长时,该段偏移不前进、整段被过渡吞掉 —— 这个 bug 修过一次,别用配置项放回来。
+ */
+const MAX_XFADE_SEC = 0.9
 
 /**
  * 出片风格。字段名**必须**跟装配脚本真正读的键一致 —— worker.mjs 的 assemble() 只认

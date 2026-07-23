@@ -68,6 +68,8 @@ export async function POST(
       .select('id, storage_url, original_filename, vision_metadata')
       .eq('client_id', params.id)
       .eq('status', 'analyzed')
+      // 同 storyboard-generator:视频虽标 analyzed 但没有画面分析结果,不能当图片推荐出去
+      .not('vision_metadata->>kind', 'eq', 'video')
       .is('archived_at', null)
       .not('storage_url', 'is', null)
 

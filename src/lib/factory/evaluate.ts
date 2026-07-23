@@ -157,6 +157,14 @@ async function loadContext(
   }
 }
 
+/** 去掉指令里的「open with a … hook」分句,只留画面手法(给非首段用)。 */
+function stripHookClause(directive: string): string {
+  const parts = directive.split(': ')
+  if (parts.length < 2) return directive
+  const kept = parts.slice(1).join(': ').split('; ').filter((s) => !/^open with a .* hook$/i.test(s.trim()))
+  return kept.length > 0 ? `${parts[0]}: ${kept.join('; ')}` : directive
+}
+
 /** B4:从 signal.evidence.verified_offer 安全提取 PM 录入的真实促销(只取非空字符串字段,防脏数据)。 */
 function parseVerifiedOffer(raw: unknown): VerifiedOffer | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
@@ -261,11 +269,15 @@ async function persistDecision(
       ...draft.brief,
       ...(needsIdemResolve
         ? {
-            clip_generation_plan: draft.brief.clip_generation_plan.map((p) => ({
+            clip_generation_plan: draft.brief.clip_generation_plan.map((p, i) => ({
               ...p,
               idempotency_key: p.idempotency_key.replace('{work_order_id}', order.id),
-              // worker 把 prompt_hint 原样喂给 i2v 模型,所以配方必须落在这里才真正生效
-              prompt_hint: clipDirective ? `${p.prompt_hint} — ${clipDirective}` : p.prompt_hint,
+              // worker 把 prompt_hint 原样喂给 i2v 模型,所以配方必须落在这里才真正生效。
+              // ⚠️ 「开场钩子」那半句只给第一段:拼给每一段的话,中段和结尾也会被要求
+              // 拍成开场镜头,一条片子里出现三四个开场感画面,节奏直接毁掉。
+              prompt_hint: clipDirective
+                ? `${p.prompt_hint} — ${i === 0 ? clipDirective : stripHookClause(clipDirective)}`
+                : p.prompt_hint,
             })),
           }
         : {}),

@@ -64,6 +64,10 @@ export async function selectAssetsForTheme(
     .select('id, storage_url, original_filename, hook_score, middle_score, cta_score, recommended_use, vision_metadata')
     .eq('client_id', clientId)
     .eq('status', 'analyzed')
+    // 视频入库时被标成 analyzed(为了让 vision-analyzer 跳过,它只认图片),但分数恒为 0、
+    // vision_metadata 里也没有 scene/objects。不排掉的话选片会把 mp4 当合格图片选进分镜,
+    // 拿着视频 URL 和空描述去生成提示词。
+    .not('vision_metadata->>kind', 'eq', 'video')
     .is('archived_at', null)
 
   if (error) throw new Error(`Failed to load assets: ${error.message}`)

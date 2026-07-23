@@ -42,7 +42,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   //    so we SELECT the IDs first, then UPDATE by ID.
   const { data: pending, error: selectErr } = await supabaseAdmin
     .from('client_assets')
-    .select('id, storage_url, original_filename')
+    // 带上 vision_metadata:分析结果要**合并**写回而不是整体覆盖,否则会抹掉入库时写的
+    // 溯源字段(source='client_upload_link' 等)—— 那是判断「是不是客户真拍的」的依据。
+    .select('id, storage_url, original_filename, vision_metadata')
     .eq('status', 'pending')
     .is('archived_at', null)
     .order('created_at', { ascending: true })
@@ -85,7 +87,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         .from('client_assets')
         .update({
           status:           'analyzed',
-          vision_metadata:  metadata,
+          // 合并而非覆盖:保住 source / uploaded_at 这些入库时写的溯源字段
+          vision_metadata:  { ...((asset.vision_metadata ?? {}) as Record<string, unknown>), ...metadata },
           hook_score:       scores.hook_score,
           middle_score:     scores.middle_score,
           cta_score:        scores.cta_score,
