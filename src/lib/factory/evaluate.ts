@@ -6,6 +6,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { FACTORY_ANGLE_DEDUPE_DAYS } from './constants'
 import { generateAdCopy } from './copy-generator'
+import { compactCreativeProfile, projectCreativeProfile } from './client-config'
 import { decideSignal, pickFactoryGoal } from './strategist'
 import { detectContentGoal, getViralClipDirective } from '@/lib/reels/viral-style-advisor'
 import type { AdCopy, DemandSignal, Decision, GateContext, GoalSlice, VerifiedOffer } from './types'
@@ -21,7 +22,12 @@ export function nzDay(d: Date): string {
 
 async function loadContext(
   signal: DemandSignal,
-): Promise<{ ctx: GateContext; fullBrief: MasterBrief | null; industry: string | null }> {
+): Promise<{
+  ctx: GateContext
+  fullBrief: MasterBrief | null
+  industry: string | null
+  creativeProfile: Record<string, unknown>
+}> {
   const now = new Date()
   const since = new Date(now.getTime() - FACTORY_ANGLE_DEDUPE_DAYS * 86_400_000).toISOString()
 
@@ -142,7 +148,13 @@ async function loadContext(
     allowBTrackLandmarkAds: factoryConfig['allow_b_track_landmark_ads'] === true,
     verifiedOffer: parseVerifiedOffer(factoryConfig['verified_offer']), // B4:客户级持久真促销
   }
-  return { ctx, fullBrief: fullBrief ?? null, industry: (client?.industry as string | null) ?? null }
+  return {
+    ctx,
+    fullBrief: fullBrief ?? null,
+    industry: (client?.industry as string | null) ?? null,
+    // 出片风格:PM 在 ME 配置页填的,建单时注入 brief 下发给 worker(见 persistDecision)
+    creativeProfile: compactCreativeProfile(projectCreativeProfile(factoryConfig['creative_profile'])),
+  }
 }
 
 /** B4:从 signal.evidence.verified_offer 安全提取 PM 录入的真实促销(只取非空字符串字段,防脏数据)。 */
@@ -169,6 +181,7 @@ async function persistDecision(
   decision: Decision,
   fullBrief: MasterBrief | null,
   industry: string | null,
+  creativeProfile: Record<string, unknown>,
   goal: GateContext['goal'],
   clientOffer: VerifiedOffer | null, // B4:客户级持久 offer,signal 无 override 时用它
 ): Promise<string | null> {
@@ -259,6 +272,9 @@ async function persistDecision(
       ...(copy ? { copy } : {}),
       ...(attribution ? { attribution } : {}),
       ...(clipDirective ? { viral_style_directive: clipDirective } : {}),
+      // 风格下发:worker 优先用它,本地 factory_profile.json 仅在这里为空时兜底。
+      // 空对象不写 —— 否则 worker 会以为 ME 显式要求「全用引擎默认」,把本地配置也盖掉。
+      ...(Object.keys(creativeProfile).length > 0 ? { creative_profile: creativeProfile } : {}),
     }
     const { error: upErr } = await supabaseAdmin
       .from('content_work_orders')
@@ -310,9 +326,9 @@ export async function evaluateSignal(signalId: string): Promise<EvaluateResult> 
 
     await supabaseAdmin.from('content_demand_signals').update({ status: 'evaluating' }).eq('id', signalId)
 
-    const { ctx, fullBrief, industry } = await loadContext(signal as DemandSignal)
+    const { ctx, fullBrief, industry, creativeProfile } = await loadContext(signal as DemandSignal)
     const decision = decideSignal(ctx)
-    const orderId = await persistDecision(signal as DemandSignal, decision, fullBrief, industry, ctx.goal, ctx.verifiedOffer)
+    const orderId = await persistDecision(signal as DemandSignal, decision, fullBrief, industry, creativeProfile, ctx.goal, ctx.verifiedOffer)
 
     if (decision.outcome === 'accepted') {
       return { outcome: 'accepted', work_order_id: orderId ?? undefined }

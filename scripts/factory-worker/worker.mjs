@@ -245,7 +245,18 @@ async function resolveClips(wo, tmp, onCost) {
 // 缺文件 = 全部保持引擎默认(不给无 profile 的客户偷偷改风格/换曲)。
 const SHARED_MUSIC = join(STUDIO_ROOT, '_shared/music')
 
-function creativeProfile(brandKit) {
+// 2026-07-24:风格改由 ME 配置页维护(clients.factory_config.creative_profile),建单时
+// 注入 wo.brief.creative_profile 下发。ME 有值就用 ME 的,没有才读本地 factory_profile.json。
+//
+// 为什么要迁:风格此前只能手改 Dropbox 里的 JSON,ME 完全不知道它存在 —— 违反「配置类
+// 数据必须有 UI」。而且本地文件的键名容易写错却不报错:CTS 那份写的是 caption_style / vo,
+// 而这里读的是 caption_mode、根本不读 vo —— 那两条设置从来没生效过,没人发现。
+function creativeProfile(brandKit, wo) {
+  const fromMe = wo?.brief?.creative_profile
+  if (fromMe && typeof fromMe === 'object' && Object.keys(fromMe).length > 0) {
+    log(`🎨 风格来自 ME 配置: ${Object.keys(fromMe).join(', ')}`)
+    return fromMe
+  }
   const p = join(brandKit, 'factory_profile.json')
   if (!existsSync(p)) return {}
   try {
@@ -290,7 +301,7 @@ function assemble(wo, localPaths, copy, tmp) {
   const brief = wo.brief
   const out = join(tmp, 'final.mp4')
   const brandKit = brandkitFor(wo.client_id) // B3:brandkit 按客户,不再硬编 CTS
-  const profile = creativeProfile(brandKit)
+  const profile = creativeProfile(brandKit, wo)
   const bgm = resolveBgm(profile, brandKit)
   const cfg = {
     output: out,

@@ -22,6 +22,21 @@ interface Config {
   verified_offer: { price_from: string; offer_expiry: string } | null
   allow_b_track_landmark_ads: boolean
   auto_order_enabled: boolean
+  creative_profile: Style
+}
+
+/** 字段名跟装配脚本真正读的键一致(worker.mjs assemble)。改名前先看那边。 */
+interface Style {
+  music: string | null
+  music_mood: string | null
+  look: string | null
+  caption_mode: string | null
+  xfade: number | null
+  endcard_panel: boolean | null
+}
+
+const EMPTY_STYLE: Style = {
+  music: null, music_mood: null, look: null, caption_mode: null, xfade: null, endcard_panel: null,
 }
 
 interface Goal {
@@ -48,6 +63,12 @@ interface Draft {
   offerExpiry: string
   allowLandmark: boolean
   autoOrder: boolean
+  music: string
+  musicMood: string
+  look: string
+  captionMode: string
+  xfade: string
+  endcardPanel: 'default' | 'on' | 'off'
 }
 
 const toDraft = (c: Config): Draft => ({
@@ -57,18 +78,26 @@ const toDraft = (c: Config): Draft => ({
   offerExpiry: c.verified_offer?.offer_expiry ?? '',
   allowLandmark: c.allow_b_track_landmark_ads,
   autoOrder: c.auto_order_enabled,
+  music: c.creative_profile?.music ?? '',
+  musicMood: c.creative_profile?.music_mood ?? '',
+  look: c.creative_profile?.look ?? '',
+  captionMode: c.creative_profile?.caption_mode ?? '',
+  xfade: c.creative_profile?.xfade != null ? String(c.creative_profile.xfade) : '',
+  endcardPanel: c.creative_profile?.endcard_panel == null ? 'default' : (c.creative_profile.endcard_panel ? 'on' : 'off'),
 })
 
 const eqDraft = (a: Draft, b: Draft) =>
   a.pageId === b.pageId && a.goalId === b.goalId && a.priceFrom === b.priceFrom &&
   a.offerExpiry === b.offerExpiry && a.allowLandmark === b.allowLandmark &&
-  a.autoOrder === b.autoOrder
+  a.autoOrder === b.autoOrder && a.music === b.music && a.musicMood === b.musicMood &&
+  a.look === b.look && a.captionMode === b.captionMode && a.xfade === b.xfade &&
+  a.endcardPanel === b.endcardPanel
 
 export function FactoryConfigPanel({ clientId }: Props) {
   const [state, setState] = useState<PanelState>({ phase: 'loading' })
   const [draft, setDraft] = useState<Draft>(toDraft({
     publish_target: null, factory_goal_id: null, verified_offer: null,
-    allow_b_track_landmark_ads: false, auto_order_enabled: false,
+    allow_b_track_landmark_ads: false, auto_order_enabled: false, creative_profile: EMPTY_STYLE,
   }))
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<string | null>(null)
@@ -104,6 +133,14 @@ export function FactoryConfigPanel({ clientId }: Props) {
             : null,
           allow_b_track_landmark_ads: draft.allowLandmark,
           auto_order_enabled: draft.autoOrder,
+          creative_profile: {
+            music: draft.music.trim() || null,
+            music_mood: draft.musicMood.trim() || null,
+            look: draft.look.trim() || null,
+            caption_mode: draft.captionMode.trim() || null,
+            xfade: draft.xfade.trim() === '' ? null : Number(draft.xfade),
+            endcard_panel: draft.endcardPanel === 'default' ? null : draft.endcardPanel === 'on',
+          },
         }),
       })
       const json = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
@@ -229,6 +266,79 @@ export function FactoryConfigPanel({ clientId }: Props) {
           <p className="mt-1 text-xs text-slate-400">
             会被写进片子的文案钩子。<span className="font-medium text-amber-700">优惠下架了就把价格清空</span>,
             否则系统会一直拿它去做片。
+          </p>
+        </div>
+
+        {/* 出片风格 —— 此前只能手改 Dropbox 里的 JSON,ME 完全不知道它存在 */}
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">出片风格</p>
+          <p className="mt-0.5 text-xs text-slate-400">
+            留空 = 用引擎默认。填了就以这里为准(会覆盖客户素材包里的同名设置)。
+          </p>
+
+          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <label className="block">
+              <span className="text-xs text-slate-500">背景音乐(曲名)</span>
+              <input
+                type="text" value={draft.music} disabled={saving}
+                onChange={(e) => setDraft((d) => ({ ...d, music: e.target.value }))}
+                placeholder="例:龙旗破云.mp3"
+                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs text-slate-500">或按情绪自动选曲</span>
+              <input
+                type="text" value={draft.musicMood} disabled={saving}
+                onChange={(e) => setDraft((d) => ({ ...d, musicMood: e.target.value }))}
+                placeholder="例:epic_cinematic"
+                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs text-slate-500">调色</span>
+              <input
+                type="text" value={draft.look} disabled={saving}
+                onChange={(e) => setDraft((d) => ({ ...d, look: e.target.value }))}
+                placeholder="例:golden_hour"
+                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs text-slate-500">字幕模式</span>
+              <input
+                type="text" value={draft.captionMode} disabled={saving}
+                onChange={(e) => setDraft((d) => ({ ...d, captionMode: e.target.value }))}
+                placeholder="例:short_big"
+                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs text-slate-500">转场时长(秒,0–2)</span>
+              <input
+                type="number" step="0.05" min="0" max="2" value={draft.xfade} disabled={saving}
+                onChange={(e) => setDraft((d) => ({ ...d, xfade: e.target.value }))}
+                placeholder="例:0.35"
+                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs text-slate-500">结尾卡白底面板</span>
+              <select
+                value={draft.endcardPanel} disabled={saving}
+                onChange={(e) => setDraft((d) => ({ ...d, endcardPanel: e.target.value as Draft['endcardPanel'] }))}
+                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              >
+                <option value="default">默认</option>
+                <option value="on">套白底</option>
+                <option value="off">不套(白字 logo 用)</option>
+              </select>
+            </label>
+          </div>
+
+          <p className="mt-2 text-xs text-slate-400">
+            音乐文件要放在制作机的共享音乐目录里;找不到时会按上面的情绪自动挑一首。
+            白字 logo(如 Oztop)结尾卡要选<span className="font-medium text-slate-600">「不套」</span>,否则字会看不见。
           </p>
         </div>
 
