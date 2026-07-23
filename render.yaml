@@ -536,3 +536,36 @@ services:
     envVars:
       - key: CRON_SECRET
         sync: false
+
+  # ── 内容工厂:发布最后一米 ────────────────────────────────────────────────
+  # 这两个 cron 的 route 早已实现(PR #592)但从未注册,approved 的成片因此停在
+  # 「已通过·待发布」永远不动 —— 工厂链路的最后一段一直是断的。
+  #
+  # 🔴 安全阀:未设 FACTORY_PUBLISH_LIVE=true 时**只发草稿**(video_state=DRAFT,
+  #    不公开),供 PM 验格式。验完 PM 显式 go 才在 Render 设 true 真发客户主页(不可逆)。
+  # 发布正文在 publish-worker 内另有红线闸(scanPublishCaption),命中即终态不发。
+  - type: cron
+    name: factory-publish-worker
+    env: node
+    schedule: "*/10 * * * *"   # 一轮领 1 条(FB 视频上传慢),10 分钟一轮够用
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/factory-publish-worker
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # 卡死回收:publishing 超 10 分钟(进程被杀/超时)→ 退回 approved 等下轮重领。
+  # 没有它,一次崩溃就会让那条工单永远卡在 publishing,没人能再领。
+  - type: cron
+    name: factory-publish-sweeper
+    env: node
+    schedule: "*/15 * * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 120 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/factory-publish-sweeper
+    envVars:
+      - key: CRON_SECRET
+        sync: false
