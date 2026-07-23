@@ -40,6 +40,9 @@ const ADMIN_SECTIONS: NavSection[] = [
   {
     title: 'Create',
     items: [
+      // 每天高频入口:看片 + 拍板。页面早就存在,但此前全站没有任何链接指向它,
+      // 只能手敲 URL —— 等于不存在。排在本组第一位是因为它是日常最常来的地方。
+      { key: 'factory', label: '视频工厂', mark: 'VF', href: '/dashboard/factory' },
       { key: 'poster-studio', label: '内容工作室', mark: 'CS', href: '/dashboard/poster-studio' },
     ],
   },

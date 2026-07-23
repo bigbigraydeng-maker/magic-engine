@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { WorkOrderStatus } from '@/lib/factory/types'
 import { STATUS_META, STATUS_ORDER } from './_components/statusMeta'
@@ -117,10 +118,20 @@ export default function FactoryCockpitPage() {
             <WorkerHealth lastHeartbeat={worker.last_heartbeat_at} activeCount={worker.active_count} />
           </p>
         </div>
-        <button
-          onClick={() => void load()}
-          className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 hover:bg-slate-50"
-        >刷新</button>
+        <div className="flex items-center gap-2">
+          {/* 配置是一次性的(发布主页/目标/自动排产),放客户设置页跟其他客户配置在一起。
+              但从这里得能一步跳过去 —— 否则日常在这页发现配置不对,要绕回客户列表再翻设置。 */}
+          {selectedClient && (
+            <Link
+              href={`/dashboard/clients/${selectedClient}/settings`}
+              className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600"
+            >⚙️ 该客户工厂配置</Link>
+          )}
+          <button
+            onClick={() => void load()}
+            className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 hover:bg-slate-50"
+          >刷新</button>
+        </div>
       </div>
 
       {error && (
