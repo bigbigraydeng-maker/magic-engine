@@ -7,6 +7,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { FACTORY_ANGLE_DEDUPE_DAYS } from './constants'
 import { generateAdCopy } from './copy-generator'
 import { decideSignal, pickFactoryGoal } from './strategist'
+import { detectContentGoal, getViralClipDirective } from '@/lib/reels/viral-style-advisor'
 import type { AdCopy, DemandSignal, Decision, GateContext, GoalSlice, VerifiedOffer } from './types'
 import type { MasterBrief } from '@/types/magic-engine'
 
@@ -20,7 +21,7 @@ export function nzDay(d: Date): string {
 
 async function loadContext(
   signal: DemandSignal,
-): Promise<{ ctx: GateContext; fullBrief: MasterBrief | null }> {
+): Promise<{ ctx: GateContext; fullBrief: MasterBrief | null; industry: string | null }> {
   const now = new Date()
   const since = new Date(now.getTime() - FACTORY_ANGLE_DEDUPE_DAYS * 86_400_000).toISOString()
 
@@ -73,7 +74,8 @@ async function loadContext(
   // client 先查(拿 factory_config,含 B0 圈定的 factory_goal_id)
   const { data: client, error: cErr } = await supabaseAdmin
     .from('clients')
-    .select('brand_redline_phrases, factory_config')
+    // industry:查爆款参考库的键(travel / flooring / …)。空 = 拿不到参考,静默跳过。
+    .select('brand_redline_phrases, factory_config, industry')
     .eq('id', signal.client_id)
     .maybeSingle()
   if (cErr) throw new Error(`clients query failed: ${cErr.message}`)
@@ -140,7 +142,7 @@ async function loadContext(
     allowBTrackLandmarkAds: factoryConfig['allow_b_track_landmark_ads'] === true,
     verifiedOffer: parseVerifiedOffer(factoryConfig['verified_offer']), // B4:客户级持久真促销
   }
-  return { ctx, fullBrief: fullBrief ?? null }
+  return { ctx, fullBrief: fullBrief ?? null, industry: (client?.industry as string | null) ?? null }
 }
 
 /** B4:从 signal.evidence.verified_offer 安全提取 PM 录入的真实促销(只取非空字符串字段,防脏数据)。 */
@@ -166,6 +168,7 @@ async function persistDecision(
   signal: DemandSignal,
   decision: Decision,
   fullBrief: MasterBrief | null,
+  industry: string | null,
   goal: GateContext['goal'],
   clientOffer: VerifiedOffer | null, // B4:客户级持久 offer,signal 无 override 时用它
 ): Promise<string | null> {
@@ -218,6 +221,27 @@ async function persistDecision(
     const attribution = goal
       ? { goal_id: draft.goal_id, expected_metric: goal.primary_metric_key }
       : undefined
+    // 爆款配方接回工厂:按客户行业查参考库,把「开场钩子 + 高频手法」揉进每个 clip 的
+    // 生成提示词。爆款库(606 条)本就是为工厂做的,但一直只挂在 reels 那条产线上,
+    // 工厂选角度/写提示词时根本不查 —— 有配方,厨房没用。
+    // best-effort:查不到参考(行业为空/该行业无样本)就保持原提示词不变,绝不阻塞建单。
+    let clipDirective: string | null = null
+    try {
+      if (industry) {
+        clipDirective = await getViralClipDirective(
+          industry,
+          // 有真促销数字 = 走转化向的参考;否则品牌向。复用 reels 那套判定,不另立规则。
+          detectContentGoal({
+            offer: (signal.evidence?.['verified_offer'] ? 'offer' : null) ?? clientOffer?.price_from ?? null,
+            campaign_angle: draft.angle,
+            channel_goal: goal?.primary_metric_key ?? null,
+          }),
+        )
+      }
+    } catch (e) {
+      console.error(`[factory] viral directive failed (signal ${signal.id}): ${e instanceof Error ? e.message : e}`)
+    }
+
     // idempotency_key 占位符 → 真实工单 id(魏征 M1-F3:跨工单 key 碰撞会让 worker 张冠李戴复用 clip)
     const needsIdemResolve = draft.brief.clip_generation_plan.length > 0
     const resolvedBrief = {
@@ -227,11 +251,14 @@ async function persistDecision(
             clip_generation_plan: draft.brief.clip_generation_plan.map((p) => ({
               ...p,
               idempotency_key: p.idempotency_key.replace('{work_order_id}', order.id),
+              // worker 把 prompt_hint 原样喂给 i2v 模型,所以配方必须落在这里才真正生效
+              prompt_hint: clipDirective ? `${p.prompt_hint} — ${clipDirective}` : p.prompt_hint,
             })),
           }
         : {}),
       ...(copy ? { copy } : {}),
       ...(attribution ? { attribution } : {}),
+      ...(clipDirective ? { viral_style_directive: clipDirective } : {}),
     }
     const { error: upErr } = await supabaseAdmin
       .from('content_work_orders')
@@ -283,9 +310,9 @@ export async function evaluateSignal(signalId: string): Promise<EvaluateResult> 
 
     await supabaseAdmin.from('content_demand_signals').update({ status: 'evaluating' }).eq('id', signalId)
 
-    const { ctx, fullBrief } = await loadContext(signal as DemandSignal)
+    const { ctx, fullBrief, industry } = await loadContext(signal as DemandSignal)
     const decision = decideSignal(ctx)
-    const orderId = await persistDecision(signal as DemandSignal, decision, fullBrief, ctx.goal, ctx.verifiedOffer)
+    const orderId = await persistDecision(signal as DemandSignal, decision, fullBrief, industry, ctx.goal, ctx.verifiedOffer)
 
     if (decision.outcome === 'accepted') {
       return { outcome: 'accepted', work_order_id: orderId ?? undefined }

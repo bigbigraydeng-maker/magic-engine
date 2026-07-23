@@ -14,15 +14,30 @@ export type ContentGoal = 'brand' | 'sales' | 'ugc' | 'education'
  * Returns a formatted style guidance block, or null if no done references exist.
  * References are ordered by view_count desc — most viral examples weigh heaviest.
  */
-export async function getViralStyleHint(
-  industry: string,
-  contentGoal: ContentGoal = 'brand'
-): Promise<string | null> {
-  // Try with exact content_goal match first
-  // Filter: only learnable (good views) and NOT our own videos
-  const FIELDS = 'style_description, style_tags, key_techniques, persona_fit, view_count, video_title, channel_title, opening_hook'
+const FIELDS = 'style_description, style_tags, key_techniques, persona_fit, view_count, video_title, channel_title, opening_hook'
 
-  let { data: refs } = await supabaseAdmin
+interface ViralRef {
+  style_description?: string | null
+  style_tags?: string[] | null
+  key_techniques?: string[] | null
+  view_count?: number | null
+  opening_hook?: { type?: string; script?: string; feel?: string } | null
+}
+
+/**
+ * Top-5 references for an industry, most-viral first.
+ *
+ * Extracted so the two consumers (the long prompt block below, and the content
+ * factory's compact clip directive) share one query — the filters here encode
+ * real rules (`is_learnable` = good views, `is_our_video` = don't learn from
+ * ourselves) and having them drift between callers would be a silent quality bug.
+ */
+export async function fetchViralRefs(
+  industry: string,
+  contentGoal: ContentGoal = 'brand',
+): Promise<ViralRef[]> {
+  // Exact content_goal match first; only learnable and not our own videos.
+  const { data: exact } = await supabaseAdmin
     .from('viral_reference_library')
     .select(FIELDS)
     .eq('industry', industry)
@@ -32,22 +47,27 @@ export async function getViralStyleHint(
     .eq('is_our_video', false)
     .order('view_count', { ascending: false, nullsFirst: false })
     .limit(5)
+  if (exact && exact.length > 0) return exact as ViralRef[]
 
-  // Fallback: if no goal-specific refs, fall back to any goal (but still learnable + not ours)
-  if (!refs || refs.length === 0) {
-    const fallback = await supabaseAdmin
-      .from('viral_reference_library')
-      .select(FIELDS)
-      .eq('industry', industry)
-      .eq('analysis_status', 'done')
-      .eq('is_learnable', true)
-      .eq('is_our_video', false)
-      .order('view_count', { ascending: false, nullsFirst: false })
-      .limit(5)
-    refs = fallback.data ?? null
-  }
+  // Fallback: any goal, still learnable + not ours
+  const { data: fallback } = await supabaseAdmin
+    .from('viral_reference_library')
+    .select(FIELDS)
+    .eq('industry', industry)
+    .eq('analysis_status', 'done')
+    .eq('is_learnable', true)
+    .eq('is_our_video', false)
+    .order('view_count', { ascending: false, nullsFirst: false })
+    .limit(5)
+  return (fallback ?? []) as ViralRef[]
+}
 
-  if (!refs || refs.length === 0) return null
+export async function getViralStyleHint(
+  industry: string,
+  contentGoal: ContentGoal = 'brand'
+): Promise<string | null> {
+  const refs = await fetchViralRefs(industry, contentGoal)
+  if (refs.length === 0) return null
 
   // Separate hook data for aggregated summary (top 3 hook types across all refs)
   const hookTypes = refs
@@ -99,6 +119,55 @@ export async function getViralStyleHint(
       : null,
     `Apply the energy, visual language, and techniques above to this brief.`,
   ].filter((line): line is string => line !== null).join('\n')
+}
+
+/**
+ * Compact, prompt-safe style directive for the content factory.
+ *
+ * Why not reuse getViralStyleHint(): that returns a multi-line study block with
+ * examples and view counts — right for a text-LLM system prompt, wrong for an
+ * i2v clip prompt, where the factory worker passes prompt_hint straight to the
+ * video model. Long blocks there dilute the visual instruction and cost tokens
+ * per clip. This returns one short phrase built from the same references:
+ * the dominant opening-hook type plus the most common techniques.
+ *
+ * Returns null when the industry has no usable references (caller keeps its
+ * original prompt untouched).
+ */
+export async function getViralClipDirective(
+  industry: string,
+  contentGoal: ContentGoal = 'brand',
+): Promise<string | null> {
+  const refs = await fetchViralRefs(industry, contentGoal)
+  if (refs.length === 0) return null
+
+  const topBy = (values: string[], n: number): string[] => {
+    const freq = new Map<string, number>()
+    for (const v of values) {
+      const k = v.trim().toLowerCase()
+      if (k) freq.set(k, (freq.get(k) ?? 0) + 1)
+    }
+    return Array.from(freq.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, n)
+      .map(([k]) => k)
+  }
+
+  // 剔掉纯声音类手法:这段字最终喂给 image-to-video 模型,只能描述画面。
+  // 实库里 travel 前三高频就有 "meme-audio-integration" —— 喂进画面提示词是纯噪音。
+  // 只排明确属于声音的,不做主观好坏判断(那属于人的编辑决定,不是这里该猜的)。
+  const AUDIO_ONLY = /audio|sound|music|voice|voiceover|narration|asmr|song|beat/i
+  const isVisual = (t: string) => !AUDIO_ONLY.test(t)
+
+  const hooks = topBy(refs.map((r) => r.opening_hook?.type ?? '').filter(Boolean), 1)
+  const techniques = topBy(refs.flatMap((r) => r.key_techniques ?? []).filter(isVisual), 3)
+
+  const parts: string[] = []
+  if (hooks.length > 0) parts.push(`open with a ${hooks[0]} hook`)
+  if (techniques.length > 0) parts.push(techniques.join(', '))
+  if (parts.length === 0) return null
+
+  return `proven ${industry} style: ${parts.join('; ')}`
 }
 
 function formatViewCount(n: number): string {
