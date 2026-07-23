@@ -6,6 +6,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import type { PublishAdapter, PublishTarget, PublishedRef } from '../types'
+import { scanRedlineHits } from '../worker-guard'
 import { facebookReelAdapter } from './facebook-reel-adapter'
 
 const MAX_PUBLISH_ATTEMPTS = 3
@@ -82,6 +83,48 @@ async function resolveTarget(clientId: string): Promise<PublishTarget | null> {
   return t
 }
 
+/**
+ * 发布正文红线闸(补 B10)。
+ *
+ * 为什么非补不可:交付时 complete-work-order 扫的是 `output.caption` + 分镜文字,
+ * 而真正发到 Facebook 的正文是 buildCaption() 从 brief.copy.endcard 另拼的**另一串字**。
+ * 这两串从来不是同一个东西 —— 审片界面显示「干净」,发出去的却是没被任何红线扫过的文案。
+ * 红线写进库、审片界面标红都到位之后,这里是最后一处仍然裸奔的地方。
+ *
+ * fail-closed:查不到红线 ≠ 没有红线,查询出错一律当拦截处理(与 complete-work-order 同规矩)。
+ * 返回 null = 放行;返回字符串 = 拦截原因。
+ */
+async function scanPublishCaption(
+  clientId: string,
+  masterBriefId: unknown,
+  caption: string,
+): Promise<string | null> {
+  const { data: client, error: cErr } = await supabaseAdmin
+    .from('clients')
+    .select('brand_redline_phrases')
+    .eq('id', clientId)
+    .maybeSingle()
+  if (cErr || !client) return '红线查询失败,保守不发'
+
+  let excluded: string[] = []
+  if (typeof masterBriefId === 'string' && masterBriefId) {
+    const { data: brief, error: bErr } = await supabaseAdmin
+      .from('master_briefs')
+      .select('excluded_topics')
+      .eq('id', masterBriefId)
+      .maybeSingle()
+    if (bErr) return 'brief 查询失败,保守不发'
+    excluded = (brief?.excluded_topics as string[] | null) ?? []
+  }
+
+  const hits = scanRedlineHits(
+    [caption],
+    (client.brand_redline_phrases as string[] | null) ?? [],
+    excluded,
+  )
+  return hits.length > 0 ? `发布正文命中品牌红线: ${hits.join(' / ')}` : null
+}
+
 async function validateVideoUrl(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, { method: 'HEAD' })
@@ -100,8 +143,15 @@ const PUBLIC_BASE = () =>
   `${process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''}/storage/v1/object/public/content-factory`
 
 // ── 失败落库(退避重试 / terminal)───────────────────────────────────────────
-async function markFailed(id: string, attempts: number, reason: string): Promise<void> {
-  const terminal = attempts + 1 >= MAX_PUBLISH_ATTEMPTS
+async function markFailed(
+  id: string,
+  attempts: number,
+  reason: string,
+  /** true = 直接终态,不排重试。用于「重试也不会变好」的失败(如红线命中):
+   *  退避重试只会每 10 分钟重扫一次同一串文案、每次都命中,白耗且刷屏。 */
+  forceTerminal = false,
+): Promise<void> {
+  const terminal = forceTerminal || attempts + 1 >= MAX_PUBLISH_ATTEMPTS
   const backoffMin = RETRY_BACKOFF_MIN * Math.pow(2, attempts)
   await supabaseAdmin
     .from('content_work_orders')
@@ -179,10 +229,18 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
     return { order_id: id, result: 'failed', detail: 'bad_video_url' }
   }
 
-  // caption:品牌接地文案(endcard.url 已锁客户域名);正文红线再扫留待 review 补(TODO B10)
+  // caption:品牌接地文案(endcard.url 已锁客户域名)
   const copy = (brief['copy'] ?? {}) as Record<string, unknown>
   const endcard = (copy['endcard'] ?? {}) as Record<string, unknown>
   const caption = buildCaption(copy, endcard)
+
+  // 发布正文红线闸(补 B10):这串字跟审片时扫过的不是同一串,发出去前必须自己过一次。
+  // 命中 → 终态失败不重试(重试只会每轮重扫同一串文案、每次都命中),等人工改文案或改红线。
+  const redlineErr = await scanPublishCaption(clientId, wo['master_brief_id'], caption)
+  if (redlineErr) {
+    await markFailed(id, attempts, redlineErr, true)
+    return { order_id: id, result: 'failed', detail: 'redline_hit' }
+  }
 
   // 发布(draft 由 opts 控制:首测=草稿不公开)
   let ref: PublishedRef
