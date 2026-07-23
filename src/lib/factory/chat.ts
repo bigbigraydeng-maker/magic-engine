@@ -60,14 +60,26 @@ function buildFactoryChatTools(ctx: FactoryChatCtx): {
     async list_pending_reviews() {
       const { data, error } = await ctx.supabase
         .from('content_work_orders')
-        .select('id, angle, rationale_one_liner, created_at')
+        // 带上 output:里面的 redline_hits 是交付时服务端复扫命中的品牌红线词。不带的话
+        // 对话框这边完全看不见红线,问「这条有没有问题」只能答干净的,跟 ReviewInbox 的红色
+        // 提示对不上(护栏「命中不打回、标红给人看」的另一半)。
+        .select('id, angle, rationale_one_liner, created_at, output')
         .eq('client_id', ctx.clientId)
         .eq('status', 'in_review')
         .order('created_at', { ascending: true })
       if (error) return `查询失败: ${error.message}`
       if (!data || data.length === 0) return '当前没有待审成片。'
       return JSON.stringify(
-        data.map((w, i) => ({ 序号: i + 1, id: w.id, 角度: w.angle, 理由: w.rationale_one_liner })),
+        data.map((w, i) => {
+          const hits = (w.output as { redline_hits?: unknown } | null)?.redline_hits
+          return {
+            序号: i + 1,
+            id: w.id,
+            角度: w.angle,
+            理由: w.rationale_one_liner,
+            ...(Array.isArray(hits) && hits.length > 0 ? { 命中品牌红线: hits } : {}),
+          }
+        }),
       )
     },
 

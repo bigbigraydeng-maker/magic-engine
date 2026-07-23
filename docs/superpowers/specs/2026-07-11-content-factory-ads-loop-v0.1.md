@@ -377,7 +377,7 @@ CREATE TABLE factory_balance_ledger (
 |---|---|---|
 | `/api/factory/worker/claim` | POST | 调 `factory_claim_work_order` RPC(`FOR UPDATE SKIP LOCKED`,§4.6)认领最老 `queued` 工单,置 `claimed` + `claimed_by/claimed_at`;响应含完整 brief(含 `max_new_clips` 硬数)+ clip URL 清单 + **Storage signed upload URLs**(成片/segments/srt 三个) |
 | `/api/factory/worker/[id]/heartbeat` | POST | 刷 `heartbeat_at`;body 可带 `{stage, cost_so_far_usd}`,实时累计 `actual_cost_usd`(超 cap 返回 `abort:true` —— 第二道防线,第一道是 worker 本地 max_new_clips 预扣 check) |
-| `/api/factory/worker/[id]/complete` | POST | body `{video_url, segments_json_url, srt_url, caption, actual_cost_usd, new_clips:[...]}`;**先跑 F9 前缀/track 校验 + 红线复扫**(下述),通过才置 `rendered`,新 clip 批量入 `video_clips`(带 idempotency_key);随后自动转 `in_review` + 推 Airtable(§7) |
+| `/api/factory/worker/[id]/complete` | POST | body `{video_url, segments_json_url, srt_url, caption, actual_cost_usd, new_clips:[...]}`;**先跑 F9 前缀/track 校验 + 红线复扫**(下述),通过才置 **`in_review`**,新 clip 批量入 `video_clips`(带 idempotency_key) |
 | `/api/factory/worker/[id]/fail` | POST | body `{error, retryable}`;retryable → `queued` + `attempt_count+1`;不可重试或超 `max_attempts=2` → `dead_letter` + digest 告警 |
 
 **成片级红线复扫(板桥 #7 修订)**:`complete` handler 对 `caption` + brief 全部 `text_overlay` 跑 `clients.brand_redline_phrases` + `excluded_topics` 词面扫描 —— 闸 1 只扫过「角度」层,而「Auckland since 1928」这类真实红线恰恰是**文案级措辞**问题。命中**不自动打回**(避免误杀),但写入 `output.redline_hits`,审核卡标红「含疑似红线词:XXX」,让人审有的放矢而不是靠肉眼扫全片。

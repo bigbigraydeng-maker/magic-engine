@@ -8,7 +8,9 @@ export const STATUS_META: Record<WorkOrderStatus, { label: string; color: string
   queued: { label: '排队中', color: 'bg-slate-100 text-slate-700' },
   claimed: { label: '已领取', color: 'bg-blue-100 text-blue-700' },
   producing: { label: '生产中', color: 'bg-blue-100 text-blue-700' },
-  rendered: { label: '已出片', color: 'bg-indigo-100 text-indigo-700' },
+  // 已停止产出(2026-07-23,详见 types.ts 注释)。只会有历史行落在这一组,且没有任何代码
+  // 能再推进它们 —— label 明写「停用」,免得看板上看着像个活的中间态。
+  rendered: { label: '已出片(历史·停用)', color: 'bg-slate-100 text-slate-500' },
   in_review: { label: '待审核', color: 'bg-amber-100 text-amber-800' },
   review_rejected: { label: '已打回', color: 'bg-orange-100 text-orange-700' },
   approved: { label: '已通过', color: 'bg-emerald-100 text-emerald-700' },

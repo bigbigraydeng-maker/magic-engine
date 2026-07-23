@@ -19,6 +19,9 @@ export type OrderType = 'variant_from_winner' | 'fresh_angle' | 'clip_generation
  * 分段:M1 生产 → M2 审核 → M3 发布/归因 → 终态。
  */
 export type WorkOrderStatus =
+  // ⚠️ 'rendered' 已停止产出(2026-07-23):交付直接落 'in_review'。原先靠 factory-review-sweeper
+  //    推 Airtable 时才转 in_review,Airtable 退役后那条搬运路径已停,rendered 成死胡同。
+  //    保留此值仅为读取历史行,**不要再往里写**——写进去的工单不会出现在任何审片队列。
   | 'queued' | 'claimed' | 'producing' | 'rendered'          // M1/M2 生产
   | 'in_review' | 'review_rejected' | 'approved'             // 审核
   | 'publishing' | 'publish_failed' | 'published' | 'measuring' | 'closed' // M3 发布/归因

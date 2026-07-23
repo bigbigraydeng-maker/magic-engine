@@ -15,8 +15,15 @@ interface WorkOrder {
   status: WorkOrderStatus
   angle: string
   rationale_one_liner: string
-  output: { video_path?: string } | null
+  // redline_hits:交付时服务端复扫命中的品牌红线词(complete-work-order.ts)。
+  // 设计是「命中不打回,标红让人审有的放矢」——但此前唯一的「标红」实现在 Airtable 审核卡里,
+  // 随 Airtable 退役一起没了。成片直连 in_review 后这条护栏必须在这里补上,否则命中红线的片子
+  // 和干净片子长得一模一样,人审拿不到任何信息 = 护栏静默失效。
+  output: { video_path?: string; redline_hits?: string[] } | null
 }
+
+const redlineHitsOf = (o: WorkOrder): string[] =>
+  Array.isArray(o.output?.redline_hits) ? o.output.redline_hits.filter((h) => typeof h === 'string' && h) : []
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
 const publicUrl = (path?: string) =>
@@ -110,6 +117,17 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
               </div>
               <p className="text-sm text-slate-700 bg-blue-50 rounded-lg px-3 py-2 mb-4">{o.rationale_one_liner}</p>
 
+              {redlineHitsOf(o).length > 0 && (
+                <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                  <p className="text-sm font-medium text-red-800">⚠️ 文案命中品牌红线,请逐字核对后再通过</p>
+                  <p className="mt-1 flex flex-wrap gap-1.5">
+                    {redlineHitsOf(o).map((h) => (
+                      <span key={h} className="text-xs bg-red-100 text-red-800 rounded px-1.5 py-0.5 font-mono">{h}</span>
+                    ))}
+                  </p>
+                </div>
+              )}
+
               <button
                 onClick={() => setConfirming(o)}
                 disabled={busy === o.id}
@@ -129,7 +147,26 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
         <div className="fixed inset-0 z-40 bg-black/45 grid place-items-center p-4" onClick={() => setConfirming(null)}>
           <div className="bg-white rounded-xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
             <p className="font-medium text-slate-900 mb-1">通过并排入发布队列</p>
-            <p className="text-sm text-slate-600 mb-5">通过 = 标记这条合格、排队等发布。<span className="font-medium text-slate-900">真实发布与投放($50 上限)链路正在建设(P0)</span>,现在通过不会自动发出去或花钱。确定通过?</p>
+
+            {redlineHitsOf(confirming).length > 0 && (
+              <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                <p className="text-sm font-medium text-red-800">⚠️ 这条命中了品牌红线</p>
+                <p className="mt-1 flex flex-wrap gap-1.5">
+                  {redlineHitsOf(confirming).map((h) => (
+                    <span key={h} className="text-xs bg-red-100 text-red-800 rounded px-1.5 py-0.5 font-mono">{h}</span>
+                  ))}
+                </p>
+              </div>
+            )}
+
+            {/* 文案必须跟发布链路的真实状态一致。旧文案写「链路正在建设,通过不会发出去」,而
+                publish-worker(facebook-reel-adapter 真打 Graph API)此后已经落地,只是 cron 未注册
+                —— 说死「不会发」是骗人的。这里只陈述能保证的事实。 */}
+            <p className="text-sm text-slate-600 mb-5">
+              通过 = 标记这条合格、<span className="font-medium text-slate-900">排入发布队列</span>。
+              发布程序已实现但定时器尚未启用,所以现在通过不会立刻发出;
+              <span className="font-medium text-slate-900">一旦启用,队列里的片子会自动发到客户主页</span>,请按「已经会发出去」的标准把关。确定通过?
+            </p>
             <div className="flex gap-3">
               <button
                 onClick={() => void act(confirming.id, { action: 'approve' })}
