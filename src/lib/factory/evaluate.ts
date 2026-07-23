@@ -13,7 +13,8 @@ import type { MasterBrief } from '@/types/magic-engine'
 const TERMINAL_STATUSES = ['closed', 'archived', 'dead_letter', 'superseded']
 
 /** 日配额按客户营业日重置(CLAUDE.md:时区默认 NZST 不是 UTC;魏征 M1-F5) */
-function nzDay(d: Date): string {
+/** NZ 日界。日配额、自动下单的 dedupe_key 都按这个切天,必须用同一套口径。 */
+export function nzDay(d: Date): string {
   return d.toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' })
 }
 

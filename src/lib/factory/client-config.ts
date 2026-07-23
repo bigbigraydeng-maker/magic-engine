@@ -26,6 +26,8 @@ export interface FactoryConfigView {
   factory_goal_id: string | null
   verified_offer: { price_from: string; offer_expiry: string } | null
   allow_b_track_landmark_ads: boolean
+  /** 自动排产开关(factory-order-scheduler 读)。默认关 —— 自动下单 = 自动花钱。 */
+  auto_order_enabled: boolean
 }
 
 export type MergeResult =
@@ -55,6 +57,7 @@ export function projectFactoryConfig(raw: unknown): FactoryConfigView {
       ? { price_from: priceFrom, offer_expiry: asTrimmed(vo?.offer_expiry) ?? '' }
       : null,
     allow_b_track_landmark_ads: cfg.allow_b_track_landmark_ads === true,
+    auto_order_enabled: cfg.auto_order_enabled === true,
   }
 }
 
@@ -116,6 +119,18 @@ export function mergeFactoryConfig(
       return { ok: false, error: 'allow_b_track_landmark_ads 必须是 true/false' }
     }
     next.allow_b_track_landmark_ads = body.allow_b_track_landmark_ads
+  }
+
+  if ('auto_order_enabled' in body) {
+    if (typeof body.auto_order_enabled !== 'boolean') {
+      return { ok: false, error: 'auto_order_enabled 必须是 true/false' }
+    }
+    // 开自动排产必须先配发布目标:否则片子每天照做照花钱,做完却无处可发,
+    // 只会在「已通过·待发布」堆着 —— 白烧。
+    if (body.auto_order_enabled === true && !next.publish_target) {
+      return { ok: false, error: '开自动排产前要先配好发布主页,否则片子做出来无处可发,只会白花钱' }
+    }
+    next.auto_order_enabled = body.auto_order_enabled
   }
 
   return { ok: true, config: next, goalIdToVerify }

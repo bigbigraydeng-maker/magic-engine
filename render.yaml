@@ -556,6 +556,24 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # 自动排产 — 工厂的「开始按钮」。整条链是 下单→做片→审片→发布,前三段都在跑,
+  # 但此前**没有任何东西会自动创建工单**(唯一入口 /api/factory/signals 无调用方),
+  # 所以工厂修得再好也不会自己动。每天给开了 auto_order_enabled 的客户各下一单。
+  # 🔴 按客户显式开关、默认关(自动下单=自动花钱)。余额下限/日单量/日花费上限
+  #    全部沿用 strategist 既有护栏,不另开口子。dedupe_key 按 NZ 日切天 = 一天一单。
+  # 20:00 UTC ≈ 08:00 NZST,落在 NZ 当天早上,当天有一整天可以出片+审片。
+  - type: cron
+    name: factory-order-scheduler
+    env: node
+    schedule: "0 20 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 120 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/factory-order-scheduler
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # 卡死回收:publishing 超 10 分钟(进程被杀/超时)→ 退回 approved 等下轮重领。
   # 没有它,一次崩溃就会让那条工单永远卡在 publishing,没人能再领。
   - type: cron
