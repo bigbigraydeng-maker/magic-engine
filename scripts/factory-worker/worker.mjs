@@ -352,7 +352,7 @@ async function processOrder(wo) {
       new_clips: newClips,
     })
     if (!r.ok) throw new Error(`complete ${r.status}: ${JSON.stringify(r.json)}`)
-    log(`✅ 工单 ${woId} 完成 → rendered`, r.json.redline_hits?.length ? `(红线标记: ${r.json.redline_hits})` : '')
+    log(`✅ 工单 ${woId} 完成 → ${r.json.status ?? 'in_review'}`, r.json.redline_hits?.length ? `(红线标记: ${r.json.redline_hits})` : '')
     return true
   } catch (e) {
     log(`❌ 工单 ${woId} 失败: ${e.message}`)

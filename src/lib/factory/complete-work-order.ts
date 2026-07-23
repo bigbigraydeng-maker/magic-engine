@@ -1,5 +1,10 @@
 // P21.J A3 — 工单交付的多表写编排(从 complete route 抽出,魏征架构整理:route 只留鉴权/校验)。
-// 红线复扫 → B 轨 scene_tag 白名单 → clip 幂等入库 → 台账 spend → 工单转 rendered。
+// 红线复扫 → B 轨 scene_tag 白名单 → clip 幂等入库 → 台账 spend → 工单转 in_review。
+//
+// 2026-07-23:交付直接转 in_review(原先转 rendered,再由 factory-review-sweeper 推 Airtable
+// 审核卡时改 in_review)。Airtable 已退役、该 sweeper 已停调度,rendered 于是成了死胡同——
+// 成片永远进不了 /dashboard/factory 的审片队列。审核既然已搬进 ME 驾驶舱,中间这一站没有存在
+// 意义,去掉它比再养一个 sweeper 少一个失败点。`rendered` 保留在状态枚举里,仅为历史行兼容。
 // route 已做:鉴权 + worker_id 归属 + 预算硬顶 + 路径前缀校验。这里做落库副作用。
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -32,7 +37,7 @@ export interface CompleteParams {
 }
 
 export type CompleteResult =
-  | { ok: true; status: 'rendered'; redlineHits: string[]; newClipIds: string[] }
+  | { ok: true; status: 'in_review'; redlineHits: string[]; newClipIds: string[] }
   | { ok: false; status: number; error: string }
 
 export async function completeWorkOrder(
@@ -148,7 +153,7 @@ export async function completeWorkOrder(
   const { data: updated, error: upErr } = await supabase
     .from('content_work_orders')
     .update({
-      status: 'rendered',
+      status: 'in_review',
       actual_cost_usd: Math.max(Number(wo.actual_cost_usd), actualCost),
       output,
       heartbeat_at: new Date().toISOString(),
@@ -164,5 +169,5 @@ export async function completeWorkOrder(
     return { ok: false, status: 409, error: 'work order reclaimed mid-flight' }
   }
 
-  return { ok: true, status: 'rendered', redlineHits, newClipIds: insertedClipIds }
+  return { ok: true, status: 'in_review', redlineHits, newClipIds: insertedClipIds }
 }

@@ -1,6 +1,8 @@
 # Content Factory 本地 worker(P21.J M2)
 
-单机 Mac 产线。领 ME 的 queued 工单 → 生成/取库存 clip → `make_promo.py` 装配 9:16 + brandkit → 上传成片 → 标 rendered。之后 `factory-review-sweeper` cron 每 5 分钟把 rendered 推到 Airtable `ME Factory Ops` 审核卡。
+单机 Mac 产线。领 ME 的 queued 工单 → 生成/取库存 clip → `make_promo.py` 装配 9:16 + brandkit → 上传成片 → 标 `in_review`,直接进 ME 驾驶舱 `/dashboard/factory` 审片队列。
+
+> 2026-07-23 起交付直接转 `in_review`。此前是转 `rendered`,再由 `factory-review-sweeper` cron 推 Airtable 审核卡时改 `in_review`;Airtable 已退役、该 cron 已停调度,`rendered` 成了死胡同(成片永远进不了审片队列),故去掉中间这一站。
 
 ## 依赖
 
@@ -33,7 +35,7 @@ node scripts/factory-worker/worker.mjs --loop   # 常驻轮询(生产)
 2. **clip 就绪**:每段优先用 `clip_ids` 库存实拍;缺则按 `clip_generation_plan` 调 muapi Kling I2V 生成。**预扣硬数本地强制 check**:已生成数 ≥ `max_new_clips` 立即 fail(不可重试)。
 3. **文案**:OpenAI 溯源 `angle`+`rationale` 写短文案;无 key 走模板 fallback(不编价格数字)。
 4. **装配**:`make_promo.py` 出 1080×1920、brandkit watermark + endcard + 音乐 + 转场。
-5. **上传+complete**:三件套(final.mp4 / segments.json / captions.srt)+ 生成 clip 传签名 URL;`complete` 服务端复扫红线 + 校验路径前缀 + 预算硬顶,过 → `rendered`。
+5. **上传+complete**:三件套(final.mp4 / segments.json / captions.srt)+ 生成 clip 传签名 URL;`complete` 服务端复扫红线 + 校验路径前缀 + 预算硬顶,过 → `in_review`。
 6. **心跳**:关键步骤前后发 heartbeat(cost_so_far),超预算返回 `abort`。
 
 ## 失败语义
