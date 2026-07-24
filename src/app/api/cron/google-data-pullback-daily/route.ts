@@ -29,6 +29,7 @@ import { fetchAccountInsights, loadGoogleAdsCreds } from '@/lib/google-ads/clien
 import { SEO_METRIC_KEY, GA4_METRIC_KEY, ADS_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import { MetaAdsAdapter } from '@/lib/flywheel/adapters/MetaAdsAdapter'
 import { startCronRun } from '@/lib/cron/run-logger'
+import { domainToEnvKey } from '@/lib/meta/token-manager'
 import { syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
 import { sendAdHealthDigest } from '@/lib/ads-strategy/digest'
@@ -48,6 +49,7 @@ interface ConnectorRow {
 interface ClientWork {
   client_id:               string
   client_name?:            string
+  client_domain?:          string
   site_url?:               string
   property_id?:            string
   meta_ad_account_id?:     string
@@ -97,7 +99,7 @@ export async function GET(req: NextRequest) {
       .eq('status', 'connected'),
     supabaseAdmin
       .from('clients')
-      .select('id, name, meta_ad_account_id')
+      .select('id, name, domain, meta_ad_account_id')
       .not('meta_ad_account_id', 'is', null),
     // Google Ads customer_id lives in platform_oauth_connections.account_id
     // for now (PR #2 moves it to clients.google_ads_customer_id with a
@@ -119,7 +121,7 @@ export async function GET(req: NextRequest) {
   }
 
   const connectors = connResult.data
-  const metaClients = (metaResult.data ?? []) as Array<{ id: string; name: string; meta_ad_account_id: string }>
+  const metaClients = (metaResult.data ?? []) as Array<{ id: string; name: string; domain: string | null; meta_ad_account_id: string }>
   // googleAdsResult.error is non-fatal (table may not exist in some envs) — log
   // and proceed with an empty list rather than failing the whole cron run.
   if (googleAdsResult.error) {
@@ -155,6 +157,7 @@ export async function GET(req: NextRequest) {
   for (const c of metaClients) {
     const entry = workMap.get(c.id) ?? { client_id: c.id }
     entry.client_name = c.name
+    entry.client_domain = c.domain ?? undefined
     entry.meta_ad_account_id = c.meta_ad_account_id
     workMap.set(c.id, entry)
   }
@@ -204,9 +207,19 @@ export async function GET(req: NextRequest) {
     }
 
     if (client.meta_ad_account_id) {
-      // Per-client token: {SLUG}_META_SYSTEM_USER_TOKEN, fallback to global META_SYSTEM_USER_TOKEN
+      // Token resolution, three schemes in priority order:
+      //   1. META_SYSTEM_USER_TOKEN_<DOMAIN> via getMetaTokenForClient — the
+      //      scheme winner-sync runs on in production (proven working for CTS)
+      //   2. legacy {NAME_SLUG}_META_SYSTEM_USER_TOKEN (kept for back-compat)
+      //   3. global META_SYSTEM_USER_TOKEN (getMetaTokenForClient's own fallback)
+      // The old slug-first order made CTS pull fail on 2026-07-24: the global
+      // token has no access to act_2775766642787274, while the domain-scheme
+      // token does — but was never consulted here.
       const slug = (client.client_name ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '_')
-      const metaToken = (slug && process.env[`${slug}_META_SYSTEM_USER_TOKEN`])
+      const domainKey = client.client_domain ? domainToEnvKey(client.client_domain) : null
+      const metaToken =
+        (domainKey ? process.env[`META_SYSTEM_USER_TOKEN_${domainKey}`] : undefined)
+        || (slug ? process.env[`${slug}_META_SYSTEM_USER_TOKEN`] : undefined)
         || process.env.META_SYSTEM_USER_TOKEN
       if (metaToken) {
         result.meta = await syncMeta(client.client_id, client.meta_ad_account_id, metaToken, slug)
@@ -289,13 +302,14 @@ export async function GET(req: NextRequest) {
   // Collect per-client errors so postmortem is possible without Render logs.
   // Diagnostic only — no behavior change.
   const errors = results.flatMap(r => {
-    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_health'; error: string }> = []
+    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_health'|'ad_digest'; error: string }> = []
     if (r.gsc?.success === false && r.gsc.error)               out.push({ client_id: r.client_id, source: 'gsc',        error: r.gsc.error })
     if (r.ga4?.success === false && r.ga4.error)               out.push({ client_id: r.client_id, source: 'ga4',        error: r.ga4.error })
     if (r.meta?.success === false && r.meta.error)             out.push({ client_id: r.client_id, source: 'meta',       error: r.meta.error })
     if (r.google_ads?.success === false && r.google_ads.error) out.push({ client_id: r.client_id, source: 'google_ads', error: r.google_ads.error })
     if (r.ad_daily?.success === false && r.ad_daily.error)     out.push({ client_id: r.client_id, source: 'ad_daily',   error: r.ad_daily.error })
     if (r.ad_health?.success === false && r.ad_health.error)   out.push({ client_id: r.client_id, source: 'ad_health', error: r.ad_health.error })
+    if (r.ad_digest && !r.ad_digest.sent && r.ad_digest.error)  out.push({ client_id: r.client_id, source: 'ad_digest', error: r.ad_digest.error })
     return out
   })
 
