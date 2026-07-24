@@ -69,10 +69,12 @@ export function prescribe(input: PrescribeInput): Prescription | null {
   if (ctrBad) {
     return {
       kind: 'refresh_creatives',
-      title: '补新素材进这条广告',
-      why: '观众没被打扰过度(频次很低),但点击率持续走低 —— 是素材本身老化失效,补新的进去最对症。',
+      // Scope is honest: winner-sync adds into the configured creative pool
+      // ad set, which is NOT necessarily this card's campaign (魏征 P1-1).
+      title: '从爆款池补新素材',
+      why: '观众没被打扰过度(频次很低),但点击率持续走低 —— 是素材本身老化失效,补新素材最对症。',
       executable: true,
-      execute_hint: '从爆款池挑表现最好的内容加进广告组;新素材默认暂停,不花钱,等你确认再开。',
+      execute_hint: '把近期表现最好的内容补进付费素材池;新素材一律先暂停、不花钱,你确认开启后才投。',
     }
   }
 

@@ -115,6 +115,12 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
   // ── Execute action ────────────────────────────────────────────────────────
   let after: typeof before
   let metaSuccess = false
+  // Set when the force-pause guard could not certify the campaign is still
+  // ACTIVE after a budget change — surfaced in the response AND the audit row,
+  // never swallowed (魏征 P1-4: a guard that fails silently is worse than none,
+  // because the record then claims everything is fine).
+  let guardWarning: string | null = null
+  let guardMarker: 'reread_failed' | 'reactivate_failed' | null = null
 
   if (action_type === ADS_ACTION_TYPE.PAUSE_CAMPAIGN) {
     metaSuccess = await setCampaignStatus(campaign_id, accessToken, 'PAUSED')
@@ -168,13 +174,20 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     // reactivate — otherwise "adjust budget" quietly becomes "stop the ads".
     if (metaSuccess && before.status === 'ACTIVE') {
       const reread = await getCampaignDetails(campaign_id, accessToken)
-      if (reread && reread.status !== 'ACTIVE') {
+      if (!reread) {
+        // Can't certify the post-change status — say so instead of optimistically
+        // recording ACTIVE in the audit trail.
+        guardMarker = 'reread_failed'
+        guardWarning = '预算已改,但无法确认广告是否仍在投放中 — 请到 Meta 广告后台核对这条广告没有被停。'
+      } else if (reread.status !== 'ACTIVE') {
         const reactivated = await setCampaignStatus(campaign_id, accessToken, 'ACTIVE')
         after = {
           ...after,
           status: reactivated ? 'ACTIVE' : reread.status,
         }
         if (!reactivated) {
+          guardMarker = 'reactivate_failed'
+          guardWarning = '预算已改,但广告被平台自动暂停且自动重启失败 — 广告目前是停的,请到 Meta 广告后台手动开启。'
           console.error(`[meta-ads/execute] budget update force-paused ${campaign_id} and reactivation FAILED`)
         }
       }
@@ -204,6 +217,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
         campaign_id,
         before,
         after,
+        ...(guardMarker ? { force_pause_guard: guardMarker } : {}),
       },
     })
     .select('id, executed_at')
@@ -230,5 +244,6 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     campaignId: campaign_id,
     before,
     after,
+    ...(guardWarning ? { warning: guardWarning } : {}),
   })
 }

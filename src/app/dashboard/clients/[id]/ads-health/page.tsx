@@ -172,7 +172,7 @@ function PrescriptionBlock({ clientId, c }: { clientId: string; c: CampaignNarra
       setResult({
         kind: 'ok',
         text: n > 0
-          ? `已补 ${n} 条新素材(暂停状态,不花钱),去执行看板确认后开启。`
+          ? `已补 ${n} 条新素材,一律暂停、不花钱。要开启时去 Meta 广告后台把它们打开(团队也已收到通知)。`
           : '本轮爆款池里暂时没有新的合格素材,系统明天会再自动扫。',
       })
     } catch (err) {

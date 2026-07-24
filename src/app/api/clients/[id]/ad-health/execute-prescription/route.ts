@@ -70,7 +70,12 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
 
   // skipFatiguePause: a button labelled "补新素材" must ONLY add — pausing other
   // ads here would be an action beyond what the user consented to.
-  const result = await syncWinnerReels(clientId, { skipFatiguePause: true })
+  // newAdStatusOverride: the confirm dialog promises "暂停、不花钱" — hold that
+  // promise even if the client's winner-sync config defaults new ads to ACTIVE.
+  const result = await syncWinnerReels(clientId, {
+    skipFatiguePause: true,
+    newAdStatusOverride: 'PAUSED',
+  })
 
   if (result.status === 'error') {
     return NextResponse.json(

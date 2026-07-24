@@ -122,6 +122,14 @@ export interface SyncOptions {
    * omits this and keeps the full pipeline.
    */
   skipFatiguePause?: boolean
+  /**
+   * Force the status new ads are created with, overriding the client config.
+   * The prescription button PROMISES "暂停、不花钱" in its confirm dialog, so it
+   * must hold even after a client's config flips new_ad_default_status to
+   * ACTIVE (Level-2 rollout) — a button may never spend money it said it
+   * wouldn't (魏征 P1-2). The cron keeps following config.
+   */
+  newAdStatusOverride?: 'PAUSED'
 }
 
 export async function syncWinnerReels(clientId: string, opts: SyncOptions = {}): Promise<SyncResult> {
@@ -190,7 +198,7 @@ export async function syncWinnerReels(clientId: string, opts: SyncOptions = {}):
           pageId: cfg.fbPageId,
           postId: w.postId,
           name,
-          status: cfg.newAdDefaultStatus,
+          status: opts.newAdStatusOverride ?? cfg.newAdDefaultStatus,
           accessToken: userToken,
         })
         result.adsAdded.push({ adId, name, postId: w.postId, score: w.score })
