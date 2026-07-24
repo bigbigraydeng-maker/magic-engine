@@ -108,7 +108,7 @@ services:
   - type: cron
     name: vision-analyzer
     env: node
-    schedule: "*/2 * * * *"
+    schedule: "*/10 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 120 -X POST -H "Authorization: Bearer $CRON_SECRET" \
@@ -123,7 +123,7 @@ services:
   - type: cron
     name: poll-visual-jobs
     env: node
-    schedule: "*/2 * * * *"
+    schedule: "*/10 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
@@ -179,7 +179,7 @@ services:
   - type: cron
     name: zhangqian-sweeper
     env: node
-    schedule: "*/5 * * * *"
+    schedule: "*/15 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
@@ -197,7 +197,7 @@ services:
   - type: cron
     name: prospecting-sweep
     env: node
-    schedule: "*/10 * * * *"
+    schedule: "*/30 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
@@ -232,7 +232,7 @@ services:
   - type: cron
     name: blog-stuck-generating-sweeper
     env: node
-    schedule: "*/5 * * * *"
+    schedule: "*/15 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
@@ -397,7 +397,7 @@ services:
   - type: cron
     name: viral-analyzer-worker
     env: node
-    schedule: "*/2 * * * *"
+    schedule: "*/10 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
