@@ -145,6 +145,9 @@ function CtrStrip({ series, ctr }: { series: Array<{ date: string; ctr: number |
 function PrescriptionBlock({ clientId, c }: { clientId: string; c: CampaignNarrative }) {
   const p = c.prescription
   const [running, setRunning] = useState(false)
+  // Once a run succeeds the button stays disabled for this page session —
+  // a fast second click must not add a second batch (板桥 #7).
+  const [done, setDone] = useState(false)
   const [result, setResult] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
 
   if (!p) {
@@ -157,7 +160,9 @@ function PrescriptionBlock({ clientId, c }: { clientId: string; c: CampaignNarra
   }
 
   const run = async () => {
-    if (!window.confirm(`确定执行「${p.title}」?\n${p.execute_hint ?? ''}`)) return
+    // The one line that makes it safe to press (板桥): existing ads untouched.
+    const confirmText = `确定执行「${p.title}」?\n现有广告一条都不动,只是往里加暂停状态的新素材。\n${p.execute_hint ?? ''}`
+    if (!window.confirm(confirmText)) return
     setRunning(true)
     setResult(null)
     try {
@@ -169,14 +174,17 @@ function PrescriptionBlock({ clientId, c }: { clientId: string; c: CampaignNarra
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
       const n = (json.adsAdded ?? []).length
+      setDone(true)
       setResult({
         kind: 'ok',
         text: n > 0
-          ? `已补 ${n} 条新素材,一律暂停、不花钱。要开启时去 Meta 广告后台把它们打开(团队也已收到通知)。`
+          ? `已补 ${n} 条新素材,全部暂停、不花钱。团队已收到通知会跟进开启;你也可以自己去 Meta 广告后台提前打开。`
           : '本轮爆款池里暂时没有新的合格素材,系统明天会再自动扫。',
       })
     } catch (err) {
-      setResult({ kind: 'err', text: err instanceof Error ? err.message : '执行失败,请稍后重试' })
+      // Raw API errors are English tech-speak — log them, speak human (板桥 #5).
+      console.error('[ads-health] execute-prescription failed:', err)
+      setResult({ kind: 'err', text: '这次没执行成功,系统已记录。你可以稍后再点一次;连续失败请找团队。' })
     } finally {
       setRunning(false)
     }
@@ -193,11 +201,11 @@ function PrescriptionBlock({ clientId, c }: { clientId: string; c: CampaignNarra
         {p.executable && (
           <button
             type="button"
-            disabled={running}
+            disabled={running || done}
             onClick={run}
             className="shrink-0 rounded-lg bg-gray-800 px-3 py-1.5 text-sm text-white hover:bg-gray-700 disabled:opacity-50"
           >
-            {running ? '执行中…' : '执行'}
+            {running ? '执行中…' : done ? '已执行 ✓' : '执行'}
           </button>
         )}
       </div>

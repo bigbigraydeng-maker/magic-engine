@@ -59,10 +59,10 @@ export function prescribe(input: PrescribeInput): Prescription | null {
   if (ctrBad && freqHigh) {
     return {
       kind: 'rotate_audience',
-      title: '换人群 / 降低触达频次',
+      title: '换一批人看,别让同一批人反复刷到',
       why: `同一批人平均已看 ${input.frequency_7d!.toFixed(1)} 次且点击率在掉 —— 是观众看腻了,不是素材问题。换素材治不了,要换人群。`,
       executable: false,
-      execute_hint: '涉及受众策略,需要 FDE 判断,系统不自动动。',
+      execute_hint: '换哪批人需要团队判断,系统不自动动。',
     }
   }
 
@@ -70,11 +70,13 @@ export function prescribe(input: PrescribeInput): Prescription | null {
     return {
       kind: 'refresh_creatives',
       // Scope is honest: winner-sync adds into the configured creative pool
-      // ad set, which is NOT necessarily this card's campaign (魏征 P1-1).
+      // ad set, which is NOT necessarily this card's campaign (魏征 P1-1,
+      // 板桥 #4: say so in the hint too, or the PM thinks the button is broken
+      // when THIS campaign doesn't visibly change).
       title: '从爆款池补新素材',
       why: '观众没被打扰过度(频次很低),但点击率持续走低 —— 是素材本身老化失效,补新素材最对症。',
       executable: true,
-      execute_hint: '把近期表现最好的内容补进付费素材池;新素材一律先暂停、不花钱,你确认开启后才投。',
+      execute_hint: '把近期表现最好的内容补进账户统一的爆款广告组(不一定是这张卡这条);新素材一律先暂停、不花钱,你确认开启后才投。',
     }
   }
 
@@ -84,7 +86,7 @@ export function prescribe(input: PrescribeInput): Prescription | null {
       title: '检查报价文案和落地流程',
       why: '点击没变差但每个询盘变贵了 —— 问题多半不在广告,在点进去之后(表单/报价/页面)。',
       executable: false,
-      execute_hint: '涉及文案和页面,需要 FDE 判断,系统不自动动。',
+      execute_hint: '涉及文案和页面,需要团队判断,系统不自动动。',
     }
   }
 
@@ -92,7 +94,7 @@ export function prescribe(input: PrescribeInput): Prescription | null {
   return {
     kind: 'review_offer',
     title: '人工看一眼这条广告',
-    why: '指标组合不典型,建议 FDE 复核。',
+    why: '数据表现不太常见,已标记给团队人工检查,你不用操作。',
     executable: false,
   }
 }
