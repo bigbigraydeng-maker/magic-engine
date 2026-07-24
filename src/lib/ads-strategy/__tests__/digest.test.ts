@@ -91,6 +91,40 @@ describe('buildBody — inverted pyramid, only exceptions up top', () => {
     expect(html).not.toContain('件事')
   })
 
+  it('does NOT count paused campaigns as healthy (the PR #631 lie, email exit)', () => {
+    // Oztop scenario: 1 alert + 2 healthy + 5 paused. The old copy said
+    // "其余 7 条广告健康" — 5 of them were stopped.
+    const withPaused = {
+      ...alertPayload,
+      evaluated: 8,
+      campaigns: [
+        ...alertPayload.campaigns,
+        ...Array.from({ length: 5 }, (_, i) => ({
+          campaign_name: `Stopped-${i}`, verdict: 'paused' as const,
+          headline: '已停投', latest_spend_7d: 0, latest_results_7d: 0,
+        })),
+      ],
+    }
+    const html = buildBody(withPaused, 'alert', 'https://x')
+    expect(html).toContain('其余 2 条广告健康')
+    expect(html).not.toContain('其余 7 条')
+    expect(html).toContain('另 5 条已停投')
+  })
+
+  it('counts only active campaigns in the weekly-healthy lead', () => {
+    const mixed = {
+      ...alertPayload,
+      overall_verdict: 'healthy' as const,
+      campaigns: [
+        { campaign_name: 'Live', verdict: 'healthy' as const, headline: '健康', latest_spend_7d: 100, latest_results_7d: 5 },
+        { campaign_name: 'Stopped', verdict: 'paused' as const, headline: '已停投', latest_spend_7d: 0, latest_results_7d: 0 },
+      ],
+    }
+    const html = buildBody(mixed, 'weekly_healthy', 'https://x')
+    expect(html).toContain('在投的 1 条广告持续健康')
+    expect(html).toContain('另 1 条已停投')
+  })
+
   it('escapes campaign names to prevent HTML injection in the email', () => {
     const evil = {
       ...alertPayload,

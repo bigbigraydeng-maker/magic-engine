@@ -24,7 +24,9 @@ export interface DailyPoint {
   impressions: number
 }
 
-export type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history'
+// 'paused' = the campaign isn't delivering (stopped); a calendar-level status
+// set by the evaluator, never produced by the per-metric fatigue judgement here.
+export type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history' | 'paused'
 
 /** Which direction a metric is "bad" in — CTR falling is bad, CPL rising is bad. */
 type Direction = 'lower_is_worse' | 'higher_is_worse'
@@ -243,7 +245,7 @@ function fmtMoney(v: number): string {
 }
 
 const VERDICT_RANK: Record<Verdict, number> = {
-  alert: 3, watch: 2, healthy: 1, insufficient_history: 0,
+  alert: 3, watch: 2, healthy: 1, insufficient_history: 0, paused: 0,
 }
 
 /**

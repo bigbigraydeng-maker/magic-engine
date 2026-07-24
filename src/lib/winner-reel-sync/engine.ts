@@ -114,7 +114,25 @@ async function notifySlack(webhook: string | null, text: string): Promise<void> 
 // Main entry — syncWinnerReels(clientId)
 // ────────────────────────────────────────────────────────────────────────────
 
-export async function syncWinnerReels(clientId: string): Promise<SyncResult> {
+export interface SyncOptions {
+  /**
+   * Skip Step 4 (fatigue-pause pass). Used by the ads-health "补新素材" button
+   * (P21.K.6): a button labelled "add creatives" must never also pause ads —
+   * that would be an action beyond what the user consented to. The daily cron
+   * omits this and keeps the full pipeline.
+   */
+  skipFatiguePause?: boolean
+  /**
+   * Force the status new ads are created with, overriding the client config.
+   * The prescription button PROMISES "暂停、不花钱" in its confirm dialog, so it
+   * must hold even after a client's config flips new_ad_default_status to
+   * ACTIVE (Level-2 rollout) — a button may never spend money it said it
+   * wouldn't (魏征 P1-2). The cron keeps following config.
+   */
+  newAdStatusOverride?: 'PAUSED'
+}
+
+export async function syncWinnerReels(clientId: string, opts: SyncOptions = {}): Promise<SyncResult> {
   const result: SyncResult = {
     clientId,
     postsScanned: 0,
@@ -180,7 +198,7 @@ export async function syncWinnerReels(clientId: string): Promise<SyncResult> {
           pageId: cfg.fbPageId,
           postId: w.postId,
           name,
-          status: cfg.newAdDefaultStatus,
+          status: opts.newAdStatusOverride ?? cfg.newAdDefaultStatus,
           accessToken: userToken,
         })
         result.adsAdded.push({ adId, name, postId: w.postId, score: w.score })
@@ -192,7 +210,9 @@ export async function syncWinnerReels(clientId: string): Promise<SyncResult> {
 
     // ── Step 4 · Fatigue pause pass (with guards)
     const active = currentAds.filter((a) => a.status === 'ACTIVE')
-    if (active.length < cfg.minActiveAds) {
+    if (opts.skipFatiguePause) {
+      result.guardsHit.push('fatigue_pause_skipped')
+    } else if (active.length < cfg.minActiveAds) {
       result.guardsHit.push('min_active_ads')
     } else {
       const cutoff = Date.now() - cfg.adMinAgeDays * 86_400_000
