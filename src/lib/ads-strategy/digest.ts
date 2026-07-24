@@ -15,7 +15,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { Resend } from 'resend'
 
-type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history'
+type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history' | 'paused'
 
 interface CampaignNarrative {
   campaign_name: string

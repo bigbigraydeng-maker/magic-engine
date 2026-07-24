@@ -63,11 +63,13 @@ export interface EvaluateResult {
 }
 
 const VERDICT_RANK: Record<Verdict, number> = {
-  alert: 3, watch: 2, healthy: 1, insufficient_history: 0,
+  alert: 3, watch: 2, healthy: 1, insufficient_history: 0, paused: -1,
 }
 
 function worstVerdict(verdicts: Verdict[]): Verdict {
-  const real = verdicts.filter(v => v !== 'insufficient_history')
+  // Paused campaigns don't participate in account health — a stopped ad can't
+  // be sick. Insufficient-history ones don't either, unless nothing else exists.
+  const real = verdicts.filter(v => v !== 'insufficient_history' && v !== 'paused')
   if (real.length === 0) return 'insufficient_history'
   return real.reduce((worst, v) => (VERDICT_RANK[v] > VERDICT_RANK[worst] ? v : worst), 'healthy')
 }
@@ -94,16 +96,59 @@ function toDailyPoints(rows: InsightRow[]): DailyPoint[] {
   }))
 }
 
-function buildCampaignNarrative(rows: InsightRow[], cfg: BaselineConfig): CampaignNarrative {
-  const sorted = [...rows].sort((a, b) => (a.insight_date < b.insight_date ? -1 : 1))
-  const points = toDailyPoints(sorted)
-  const judged = judgeCampaign(points, cfg)
+/**
+ * A campaign counts as stopped when it hasn't spent anything in this many
+ * calendar days up to the evaluation date. Meta writes a row only for days
+ * with delivery, so "no recent rows" = "not delivering". 3 days (not 1)
+ * absorbs reporting lag and brief pauses without flapping.
+ */
+const PAUSED_AFTER_DAYS = 3
 
-  const last7 = sorted.slice(-7)
+function shiftDateStr(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+function buildCampaignNarrative(
+  rows: InsightRow[],
+  insightDate: string,
+  cfg: BaselineConfig,
+): CampaignNarrative {
+  const sorted = [...rows].sort((a, b) => (a.insight_date < b.insight_date ? -1 : 1))
+
+  // "近 7 天" must mean the REAL last 7 calendar days ending on insightDate —
+  // not the last 7 rows that have data. A stopped campaign's last rows are
+  // weeks old; labelling those "近 7 天" showed stale spend as current (real
+  // incident: 5 stopped Oztop campaigns displayed their pre-stop week as
+  // "recent" spend. PM 2026-07-23).
+  const windowStart = shiftDateStr(insightDate, -6)
+  const last7 = sorted.filter(r => r.insight_date >= windowStart && r.insight_date <= insightDate)
   const latestSpend7d   = last7.reduce((s, r) => s + (r.spend ?? 0), 0)
   const latestResults7d = last7.reduce((s, r) => s + (r.results ?? 0), 0)
-  // frequency_7d is sparse (only the newest day carries it); take the latest non-null.
-  const freq7d = [...sorted].reverse().find(r => r.frequency_7d != null)?.frequency_7d ?? null
+
+  const lastDataDate = sorted[sorted.length - 1].insight_date
+  const isPaused = lastDataDate < shiftDateStr(insightDate, -(PAUSED_AFTER_DAYS - 1))
+
+  if (isPaused) {
+    return {
+      campaign_id:   sorted[0].entity_id,
+      campaign_name: sorted[sorted.length - 1].entity_name ?? sorted[0].entity_id,
+      verdict:       'paused',
+      headline:      `已停投(最后花钱是 ${lastDataDate})`,
+      metrics:       [],
+      ctr_series:    [],
+      latest_spend_7d:   Math.round(latestSpend7d * 100) / 100, // 0 unless stopped mid-window
+      latest_results_7d: latestResults7d,
+      frequency_7d:      null,
+    }
+  }
+
+  const points = toDailyPoints(sorted)
+  const judged = judgeCampaign(points, cfg)
+  // frequency_7d is sparse (only the newest day carries it); take the latest
+  // non-null — but only from inside the current window, never a stale value.
+  const freq7d = [...last7].reverse().find(r => r.frequency_7d != null)?.frequency_7d ?? null
 
   return {
     campaign_id:   sorted[0].entity_id,
@@ -120,11 +165,14 @@ function buildCampaignNarrative(rows: InsightRow[], cfg: BaselineConfig): Campai
 
 function buildOverallHeadline(verdict: Verdict, campaigns: CampaignNarrative[]): string {
   if (verdict === 'insufficient_history') return '广告数据仍在积累,暂无健康判定'
-  const alerts = campaigns.filter(c => c.verdict === 'alert')
+  const alerts  = campaigns.filter(c => c.verdict === 'alert')
   const watches = campaigns.filter(c => c.verdict === 'watch')
-  if (alerts.length > 0) return `${alerts.length} 条广告该动手了,${watches.length} 条要留意`
-  if (watches.length > 0) return `${watches.length} 条广告开始走弱,建议留意`
-  return `${campaigns.length} 条广告全部健康,无需动手`
+  const paused  = campaigns.filter(c => c.verdict === 'paused')
+  const active  = campaigns.length - paused.length
+  const pausedNote = paused.length > 0 ? `(另 ${paused.length} 条已停投)` : ''
+  if (alerts.length > 0) return `${alerts.length} 条广告该动手了,${watches.length} 条要留意${pausedNote}`
+  if (watches.length > 0) return `${watches.length} 条广告开始走弱,建议留意${pausedNote}`
+  return `在投的 ${active} 条广告全部健康,无需动手${pausedNote}`
 }
 
 /**
@@ -138,8 +186,8 @@ export function buildNarrativePayload(
 ): NarrativePayload {
   const campaigns = Array.from(rowsByCampaign.values())
     .filter(rows => rows.length > 0)
-    .map(rows => buildCampaignNarrative(rows, cfg))
-    // Worst first so the dashboard and email lead with what needs action.
+    .map(rows => buildCampaignNarrative(rows, insightDate, cfg))
+    // Worst first; paused sinks to the bottom (rank -1).
     .sort((a, b) => VERDICT_RANK[b.verdict] - VERDICT_RANK[a.verdict])
 
   const overall = worstVerdict(campaigns.map(c => c.verdict))

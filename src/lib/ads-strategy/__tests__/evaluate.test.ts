@@ -96,4 +96,52 @@ describe('buildNarrativePayload', () => {
     expect(p.campaigns[0].latest_spend_7d).toBe(560)
     expect(p.campaigns[0].latest_results_7d).toBe(14)
   })
+
+  // ── Stopped campaigns (real incident: 5 stopped Oztop campaigns showed their
+  //    pre-stop week as "近 7 天" spend. PM 2026-07-23) ────────────────────────
+
+  it('marks a long-stopped campaign as paused with ZERO recent spend', () => {
+    // Data ends 2026-07-08; evaluating as of 2026-07-21 (13 days later).
+    const stopped = series('a', 'Stopped', Array.from({ length: 8 }, () => 0.03))
+    const p = buildNarrativePayload(grouped(stopped), '2026-07-21')
+    const c = p.campaigns[0]
+    expect(c.verdict).toBe('paused')
+    // The old bug: this showed $640 (its final 8 rows). Must be the REAL last
+    // 7 calendar days — which contain nothing.
+    expect(c.latest_spend_7d).toBe(0)
+    expect(c.latest_results_7d).toBe(0)
+    expect(c.headline).toContain('已停投')
+  })
+
+  it('does not let paused campaigns drag the account verdict or the count', () => {
+    const stopped = series('a', 'Stopped', Array.from({ length: 8 }, () => 0.03))
+    const live = series('b', 'Live', HEALTHY)
+    const p = buildNarrativePayload(grouped(stopped, live), '2026-07-21')
+    expect(p.overall_verdict).toBe('healthy')
+    expect(p.headline).toContain('在投的 1 条广告全部健康')
+    expect(p.headline).toContain('另 1 条已停投')
+  })
+
+  it('sorts paused campaigns to the bottom', () => {
+    const stopped = series('a', 'Stopped', Array.from({ length: 8 }, () => 0.03))
+    const live = series('b', 'Live', HEALTHY)
+    const p = buildNarrativePayload(grouped(stopped, live), '2026-07-21')
+    expect(p.campaigns[0].campaign_name).toBe('Live')
+    expect(p.campaigns[1].verdict).toBe('paused')
+  })
+
+  it('keeps a briefly-lagging campaign (2 days without data) judged, not paused', () => {
+    // Data ends 2026-07-19, evaluating 2026-07-21 → within the 3-day grace.
+    const lagging = series('a', 'Lagging', Array.from({ length: 19 }, () => 0.03))
+    const p = buildNarrativePayload(grouped(lagging), '2026-07-21')
+    expect(p.campaigns[0].verdict).not.toBe('paused')
+  })
+
+  it('windows 近7天 by calendar days, not by last-7-rows', () => {
+    // 19 daily rows ending 2026-07-19, evaluated as of 2026-07-21: the real
+    // last-7-calendar-day window (7/15–7/21) holds only 5 data days.
+    const lagging = series('a', 'Lagging', Array.from({ length: 19 }, () => 0.03))
+    const p = buildNarrativePayload(grouped(lagging), '2026-07-21')
+    expect(p.campaigns[0].latest_spend_7d).toBe(400)  // 5 × $80, not 7 × $80
+  })
 })

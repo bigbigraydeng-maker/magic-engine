@@ -14,7 +14,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 
-type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history'
+type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history' | 'paused'
 
 interface MetricVerdict {
   metric: 'ctr' | 'cost_per_result'
@@ -63,6 +63,7 @@ const VERDICT_META: Record<Verdict, { label: string; dot: string; tint: string; 
   watch:                { label: '留意',     dot: 'bg-amber-500',  tint: 'bg-amber-50 border-amber-200',   text: 'text-amber-700' },
   healthy:              { label: '健康',     dot: 'bg-emerald-500', tint: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700' },
   insufficient_history: { label: '数据积累中', dot: 'bg-gray-400',  tint: 'bg-gray-50 border-gray-200',     text: 'text-gray-500' },
+  paused:               { label: '已停投',   dot: 'bg-gray-300',  tint: 'bg-gray-50 border-gray-200 opacity-70', text: 'text-gray-400' },
 }
 
 function fmtPct(fraction: number | null): string {
@@ -70,7 +71,7 @@ function fmtPct(fraction: number | null): string {
 }
 
 const VERDICT_RANK: Record<Verdict, number> = {
-  alert: 3, watch: 2, healthy: 1, insufficient_history: 0,
+  alert: 3, watch: 2, healthy: 1, insufficient_history: 0, paused: -1,
 }
 
 /** Short date like "7/14" for the mobile-friendly strip endpoints. */
