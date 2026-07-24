@@ -196,7 +196,7 @@ export interface MetaCampaignDailyRow {
   clicks:        number
   frequency:     number | null // impressions / reach, as reported by Meta
   cpm:           number | null
-  ctr:           number | null // fraction (0.0318 = 3.18%), outbound CTR preferred
+  ctr:           number | null // fraction (0.0318 = 3.18%), always clicks/impressions
   cpc:           number | null
   leads:         number        // action_type 'lead' (Lead Form submissions)
   messaging_conversations: number // CTWA conversations started
@@ -242,9 +242,14 @@ function parseCampaignDailyRow(row: GraphCampaignDailyRow): MetaCampaignDailyRow
   const base  = parseInsights(row)
   const reach = row.reach !== undefined ? parseInt(row.reach, 10) || null : null
 
-  // Prefer Meta's own outbound CTR (percent → fraction); fall back to clicks/impressions.
-  const outbound = row.outbound_clicks_ctr?.[0]
-  const ctr = outbound ? (parseFloat(outbound.value) / 100 || null) : base.ctr
+  // CTR is ALWAYS clicks/impressions — never outbound_clicks_ctr. For campaigns
+  // whose clicks don't leave Meta (Lead Forms, CTWA), Meta returns
+  // outbound_clicks_ctr on some days (~0.1%) and omits it on others; preferring
+  // it mixed two metrics an order of magnitude apart in one campaign's series,
+  // which poisons the relative-baseline fatigue judgement. A day that served
+  // impressions but got zero clicks is a real 0 (the worst day there is), not a
+  // gap — null only when nothing was served.
+  const ctr = base.impressions > 0 ? base.clicks / base.impressions : null
 
   const leads     = pickAction(row.actions, LEAD_ACTION_PRIORITY)
   const messaging = pickAction(row.actions, MESSAGING_ACTION_PRIORITY)
@@ -279,7 +284,6 @@ const DAILY_FIELDS = [
   'frequency',
   'cpm',
   'actions',
-  'outbound_clicks_ctr',
 ].join(',')
 
 /** Hard cap on pagination follows — a runaway-loop backstop, not a real limit. */
