@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Resend } from 'resend'
 import { createClient } from '@supabase/supabase-js'
 import { normaliseAttribution } from '@/lib/marketing/attribution'
+import { meMailFrom } from '@/lib/email/sender'
 
 const TO_EMAIL = 'raydeng@magicengine.com.au'
 
@@ -53,7 +54,7 @@ export async function POST(req: NextRequest) {
     : ''
 
   const { error } = await resend.emails.send({
-    from: 'Magic Engine Contact <onboarding@resend.dev>',
+    from: meMailFrom('Magic Engine Contact'),
     to: [TO_EMAIL],
     replyTo: email,
     subject: `New enquiry from ${name.trim()} - Magic Engine`,

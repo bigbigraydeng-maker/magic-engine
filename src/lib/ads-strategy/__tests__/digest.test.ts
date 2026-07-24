@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { decideSend, buildSubject, buildBody } from '../digest'
+import { decideSend, buildSubject, buildBody, describeSendError } from '../digest'
 
 describe('decideSend — green is de-frequenced, alerts always send', () => {
   it('always sends on alert', () => {
@@ -133,5 +133,30 @@ describe('buildBody — inverted pyramid, only exceptions up top', () => {
     const html = buildBody(evil, 'alert', 'https://x')
     expect(html).not.toContain('<script>x</script>')
     expect(html).toContain('&lt;script&gt;')
+  })
+})
+
+describe('describeSendError — a failed send must say WHY', () => {
+  it('renders the Resend error object instead of "[object Object]"', () => {
+    // The real 2026-07-23 shape: a plain object, not an Error. String() on it
+    // produced "[object Object]" and cost us the only diagnosis we had.
+    const out = describeSendError({
+      statusCode: 403,
+      name: 'validation_error',
+      message: 'You can only send testing emails to your own email address',
+    })
+    expect(out).not.toContain('[object Object]')
+    expect(out).toContain('403')
+    expect(out).toContain('validation_error')
+    expect(out).toContain('own email address')
+  })
+
+  it('falls back to JSON for an unexpected error shape', () => {
+    expect(describeSendError({ weird: 'shape' })).toBe('{"weird":"shape"}')
+  })
+
+  it('still handles strings and Errors', () => {
+    expect(describeSendError('boom')).toBe('boom')
+    expect(describeSendError(new Error('kaboom'))).toContain('kaboom')
   })
 })

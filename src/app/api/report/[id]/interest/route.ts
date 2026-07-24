@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Resend } from 'resend'
 import { supabaseAdmin } from '@/lib/supabase'
 import type { ProspectAnalysis } from '@/lib/prospecting/analyze'
+import { meMailFrom } from '@/lib/email/sender'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -98,7 +99,7 @@ async function notify(businessName: string, lead: LeadResponse): Promise<void> {
   const resend = new Resend(apiKey)
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   await resend.emails.send({
-    from: 'Magic Engine Leads <onboarding@resend.dev>',
+    from: meMailFrom('Magic Engine Leads'),
     to: [to],
     replyTo: lead.email,
     subject: `🔥 Report reply from ${businessName}`,

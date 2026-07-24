@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { Resend } from 'resend'
 import { startCronRun } from '@/lib/cron/run-logger'
+import { meMailFrom } from '@/lib/email/sender'
 
 const TO_EMAIL = 'raydeng@magicengine.com.au'
 
@@ -76,7 +77,7 @@ export async function GET(req: NextRequest) {
   `
 
   const { error: sendError } = await resend.emails.send({
-    from: 'Magic Engine Monitor <onboarding@resend.dev>',
+    from: meMailFrom('Magic Engine Monitor'),
     to: [TO_EMAIL],
     subject: `⚠ ${failedRuns.length} cron job failure(s) — ${new Date().toLocaleDateString('en-NZ', { timeZone: 'Pacific/Auckland' })}`,
     html,
