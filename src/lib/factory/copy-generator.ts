@@ -71,6 +71,58 @@ function normNum(n: string): string {
   return Number.isFinite(f) ? String(f) : n
 }
 
+/**
+ * 第二道硬闸:时间/日期/政策类断言。
+ *
+ * 为什么必须有:2026-07-25 实测,prompt 里逐条写明「禁止编造政策/数字」之后,AI 依然吐出
+ * 「Fifteen days」「convert to 30-day tourist visa」「Valid through December 2025」——
+ * 而当时是 2026 年 7 月,那个日期既是编的又已过期。**prompt 是软约束,防不住编造。**
+ *
+ * 原有的 hasInventedNumber 只匹配 PRICE_DISCOUNT_RE(货币/百分比/裸价),天数、日期、
+ * 拼写出来的数字一律漏网。客户照着编错的签证天数行动是实质伤害,比编错价格更严重。
+ *
+ * 判定口径:文案里出现时间量/日期,而该表述在**品牌资料原文**里找不到 → 判为编造。
+ * 宁可误杀(落模板兜底,文案平淡)也不放行(客户被误导)。
+ */
+const DURATION_RE =
+  /\b(?:\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|twenty|thirty|forty|fifty|sixty|ninety)[\s-]?(?:day|days|night|nights|hour|hours|week|weeks|month|months|year|years)\b/gi
+const DATE_RE =
+  /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{2,4}\b|\b(?:19|20)\d{2}\b/gi
+
+/** 归一化时间/日期表述,便于跟品牌资料原文比对(去连字符、压空格、小写)。 */
+function normClaim(s: string): string {
+  return s.toLowerCase().replace(/[-\s]+/g, ' ').trim()
+}
+
+/**
+ * 从品牌资料原文抽出所有合法的时间/日期表述 —— 资料里写过的才准出现在文案里。
+ * 同时收入 verified_offer 的截止日(PM 人工录入,可信)。
+ */
+export function allowedClaimsFrom(
+  briefText: string,
+  offer: VerifiedOffer | null | undefined,
+): Set<string> {
+  const allowed = new Set<string>()
+  const harvest = (src: string | null | undefined) => {
+    if (typeof src !== 'string') return
+    for (const m of src.match(DURATION_RE) ?? []) allowed.add(normClaim(m))
+    for (const m of src.match(DATE_RE) ?? []) allowed.add(normClaim(m))
+  }
+  harvest(briefText)
+  harvest(offer?.offer_expiry)
+  return allowed
+}
+
+/** 文案里出现了品牌资料没有的时间/日期断言 → true(判为编造)。 */
+export function hasInventedClaim(copy: AdCopy, allowed: Set<string>): boolean {
+  for (const text of collectTexts(copy)) {
+    for (const m of [...(text.match(DURATION_RE) ?? []), ...(text.match(DATE_RE) ?? [])]) {
+      if (!allowed.has(normClaim(m))) return true
+    }
+  }
+  return false
+}
+
 function collectTexts(copy: AdCopy): string[] {
   const texts: Array<string | undefined> = []
   for (const s of copy.segments ?? []) texts.push(s.title_main, s.title_sub, s.caption, s.vo)
@@ -109,7 +161,12 @@ function hasInventedNumber(copy: AdCopy, allowed: Set<string>): boolean {
 
 /** copy 生成同步塞在信号入口链路(persistDecision),Sonnet 卡住会拖满入口(魏征 A2-§4)。
  *  硬超时 → 走模板 fallback,不拖垮 signals POST(maxDuration 60s)。 */
-const COPY_GEN_TIMEOUT_MS = 8000
+// 🔴 2026-07-25 从 8000 提到 25000。8 秒是**永远不够**的:实测最简单的一句话请求就要
+// ~9.5 秒,生成 1024 token 的结构化文案只会更久 —— 也就是说文案生成此前**每次都超时**,
+// 100% 静默落模板兜底。PM 看到的「所有片子都是品牌播报腔、千篇一律」根因就在这:
+// 精心写的 prompt 从来没被执行过。
+// 上限受调用方约束:signals 路由 maxDuration=60s,25s 给 AI + 其余查询留足余量。
+const COPY_GEN_TIMEOUT_MS = 25000
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -164,15 +221,22 @@ export async function generateAdCopy(params: {
         `按这个结构写:①hook=「我/我们做了什么」的具体行动(不是口号);②中段=经历里的具体细节,一句一个,` +
         `每句 ≤6 词;③临近结尾要有一句**情感回扣**(写人的反应/感受,不是产品卖点);④cta=把话转向观众` +
         `(「你也可以…」),用邀请口吻不用命令口吻。全程「我/我们」,禁止第三人称自称品牌名。` +
-        `**只讲品牌资料里能溯源的真实内容,绝不替「${personaName}」编造他没做过的经历或不存在的行程。**`
+        `\n\n🔴 **编造红线(实测 AI 会犯,逐条禁止)**:` +
+        `①**禁止编造任何具体客户/人名/引语/对话**(如「Margaret called me last week」「'I never thought we'd go'」)——` +
+        `真实客户案例只能由人工提供,AI 一律不许虚构;情感回扣改用不指名的普遍感受。` +
+        `②**禁止编造行程细节**:景点、时段、玩法、节奏(如「Great Wall sunrise」——真实行程是慕田峪全天、` +
+        `缆车上滑道下、并无日出)。只能用品牌资料里明确写到的内容。` +
+        `③**禁止编造政策/数字**:签证天数、价格、时长、人数一律不写,除非上方资料明确给出。` +
+        `④拿不准就写得虚一点(「planning made simple」),**宁可平淡也不许编**——编造会让客户到店体验落差,是事故。`
       : ''
+    const briefText = formatBriefForPrompt(brief)
     const systemPrompt =
       `你为「${brand}」写 9:16 竖屏**信息流短视频广告**(Facebook/Instagram Reels)文案。` +
       `这是刷到就要在前 3 秒留住观众的广告,不是品牌宣传片——第一段(hook)是全片生死线。` +
       narrativeBlock +
       `严格遵守下面的品牌约束,AU 英语拼写。**除下方"客户已确认真实促销事实"明确给出的数字外,不编造任何价格/折扣/数字**` +
       `(没依据的 $X、X% off 一律不写;无促销数字时紧迫感用 clearance / while stocks last / limited stock 这类真实表达)。` +
-      `只返回 JSON,不要解释。\n\n${formatBriefForPrompt(brief)}`
+      `只返回 JSON,不要解释。\n\n${briefText}`
     const user =
       `角度(必须溯源品牌主线): ${angle}\n为什么做这条: ${rationale}\n` +
       (offerFacts
@@ -205,10 +269,20 @@ export async function generateAdCopy(params: {
       parsed.endcard.url = url // 硬锁品牌网址,不信 LLM 填的
       if (!Array.isArray(parsed.endcard.offer)) parsed.endcard.offer = []
       // 红线硬拦:LLM 吐的价格/折扣数字不在 verified_offer 白名单 → 编造 → 整条不可信,落模板(不 return)
-      if (!hasInventedNumber(parsed, allowed)) return parsed
+      // 两道硬闸都过才采用 LLM 结果:①编造价格/折扣 ②编造时间/日期/政策断言
+      const claimAllowed = allowedClaimsFrom(briefText, verifiedOffer)
+      if (hasInventedNumber(parsed, allowed)) {
+        console.warn('[copy-generator] LLM 吐出未授权价格数字,判为编造 → 落模板兜底')
+      } else if (hasInventedClaim(parsed, claimAllowed)) {
+        console.warn('[copy-generator] LLM 吐出品牌资料里没有的时间/日期断言(如签证天数),判为编造 → 落模板兜底')
+      } else {
+        return parsed
+      }
     }
-  } catch {
-    // 落模板 fallback
+  } catch (e) {
+    // 落模板 fallback。**必须留日志**:此前这里是静默 catch,导致「每次都超时」这个
+    // 问题藏了很久没人发现 —— 片子照出,只是文案永远是模板腔。
+    console.warn(`[copy-generator] AI 文案生成失败,落模板兜底: ${e instanceof Error ? e.message : e}`)
   }
 
   // 品牌接地模板 fallback(LLM 挂时用,不硬编任何客户名/网址)。
