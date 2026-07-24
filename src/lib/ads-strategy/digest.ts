@@ -143,6 +143,7 @@ export async function sendAdHealthDigest(
   clientId: string,
   clientName: string,
   insightDate: string,
+  recipients?: string[],
 ): Promise<DigestResult> {
   try {
     // Today's narrative (+ its email state, for idempotency) and the previous
@@ -191,13 +192,15 @@ export async function sendAdHealthDigest(
       return { decision, sent: false, error: 'RESEND_API_KEY not configured' }
     }
 
-    const to = process.env.AD_HEALTH_DIGEST_TO || 'raydeng@magicengine.com.au'
+    const to = recipients && recipients.length > 0
+      ? recipients
+      : [process.env.AD_HEALTH_DIGEST_TO || 'raydeng@magicengine.com.au']
     const dashboardUrl = `https://app.magicengine.com.au/dashboard/clients/${clientId}/ads-health`
 
     const resend = new Resend(apiKey)
     const { error } = await resend.emails.send({
       from: 'Magic Engine 广告自检 <onboarding@resend.dev>',
-      to: [to],
+      to,
       subject: buildSubject(clientName, insightDate, decision),
       html: buildBody(payload, decision, dashboardUrl),
     })

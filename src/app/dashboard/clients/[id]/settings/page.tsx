@@ -17,6 +17,7 @@ import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
 import { GbpPanel } from './_components/GbpPanel'
 import { GoogleAdsPanel } from './_components/GoogleAdsPanel'
+import { AdStrategyPanel } from './_components/AdStrategyPanel'
 import { CompetitorDomainsPanel } from './_components/CompetitorDomainsPanel'
 import { PrimaryKeywordsPanel } from './_components/PrimaryKeywordsPanel'
 import { BrandAliasesPanel } from './_components/BrandAliasesPanel'
@@ -114,6 +115,14 @@ export default function ClientSettingsPage() {
             <h2 className="font-black text-slate-800">Google Ads</h2>
           </div>
           <GoogleAdsPanel clientId={clientId} />
+        </section>
+
+        <section className="mt-6">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-base">🩺</span>
+            <h2 className="font-black text-slate-800">广告健康监测</h2>
+          </div>
+          <AdStrategyPanel clientId={clientId} />
         </section>
 
         {/* Other connectors — managed on the legacy connectors page.
