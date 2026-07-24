@@ -164,6 +164,11 @@ function buildCampaignNarrative(
 }
 
 function buildOverallHeadline(verdict: Verdict, campaigns: CampaignNarrative[]): string {
+  // All stopped is not "still gathering data" — the data is plentiful, the ads
+  // just aren't running. Saying "积累中" here reads as a broken system (魏征).
+  if (campaigns.length > 0 && campaigns.every(c => c.verdict === 'paused')) {
+    return `所有 ${campaigns.length} 条广告都已停投,无在投广告可体检`
+  }
   if (verdict === 'insufficient_history') return '广告数据仍在积累,暂无健康判定'
   const alerts  = campaigns.filter(c => c.verdict === 'alert')
   const watches = campaigns.filter(c => c.verdict === 'watch')
