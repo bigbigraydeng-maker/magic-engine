@@ -16,6 +16,7 @@ import {
   BaselineConfig,
   DEFAULT_BASELINE_CONFIG,
 } from './baseline'
+import { prescribe, Prescription } from './prescription'
 
 /** How many days of history to load for the baseline (needs ≥ 2 windows). */
 const HISTORY_DAYS = 30
@@ -43,6 +44,8 @@ export interface CampaignNarrative {
   latest_spend_7d: number
   latest_results_7d: number
   frequency_7d: number | null
+  /** DAPE P: the one concrete remedy for this card, null when nothing to act on. */
+  prescription: Prescription | null
 }
 
 export interface NarrativePayload {
@@ -141,6 +144,7 @@ function buildCampaignNarrative(
       latest_spend_7d:   Math.round(latestSpend7d * 100) / 100, // 0 unless stopped mid-window
       latest_results_7d: latestResults7d,
       frequency_7d:      null,
+      prescription:      null,
     }
   }
 
@@ -160,6 +164,7 @@ function buildCampaignNarrative(
     latest_spend_7d:   Math.round(latestSpend7d * 100) / 100,
     latest_results_7d: latestResults7d,
     frequency_7d:      freq7d,
+    prescription: prescribe({ verdict: judged.verdict, metrics: judged.metrics, frequency_7d: freq7d }),
   }
 }
 

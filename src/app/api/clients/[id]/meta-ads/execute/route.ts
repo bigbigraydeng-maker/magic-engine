@@ -23,6 +23,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import {
   getCampaignDetails,
   setCampaignStatus,
@@ -84,10 +85,14 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
   }
 
   // ── Token ─────────────────────────────────────────────────────────────────
-  const accessToken = process.env.META_SYSTEM_USER_TOKEN
+  // Per-client token first (META_SYSTEM_USER_TOKEN_<DOMAIN>, the path the daily
+  // pull and winner-sync already run on in production), falling back to the
+  // global env inside getMetaTokenForClient. The old global-only read 424'd on
+  // installs where only per-client tokens exist.
+  const accessToken = await getMetaTokenForClient(clientId)
   if (!accessToken) {
     return NextResponse.json(
-      { error: 'META_SYSTEM_USER_TOKEN is not configured. Add it to Render environment variables.' },
+      { error: 'No Meta token configured for this client (META_SYSTEM_USER_TOKEN_<DOMAIN> or META_SYSTEM_USER_TOKEN).' },
       { status: 424 },
     )
   }
@@ -156,6 +161,24 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
 
     metaSuccess = await setCampaignDailyBudget(campaign_id, accessToken, budgetCents)
     after = { ...before, daily_budget: String(budgetCents) }
+
+    // Force-pause guard: Meta silently pauses an entity whose daily_budget was
+    // just updated (memory: budget-update-forces-pause). If the campaign was
+    // ACTIVE before, re-read the ENTITY status (instant, unlike insights) and
+    // reactivate — otherwise "adjust budget" quietly becomes "stop the ads".
+    if (metaSuccess && before.status === 'ACTIVE') {
+      const reread = await getCampaignDetails(campaign_id, accessToken)
+      if (reread && reread.status !== 'ACTIVE') {
+        const reactivated = await setCampaignStatus(campaign_id, accessToken, 'ACTIVE')
+        after = {
+          ...after,
+          status: reactivated ? 'ACTIVE' : reread.status,
+        }
+        if (!reactivated) {
+          console.error(`[meta-ads/execute] budget update force-paused ${campaign_id} and reactivation FAILED`)
+        }
+      }
+    }
   } else {
     return NextResponse.json({ error: 'Unhandled action type' }, { status: 422 })
   }

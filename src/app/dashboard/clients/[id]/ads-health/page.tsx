@@ -25,6 +25,14 @@ interface MetricVerdict {
   reason: string
 }
 
+interface Prescription {
+  kind: 'refresh_creatives' | 'rotate_audience' | 'review_offer'
+  title: string
+  why: string
+  executable: boolean
+  execute_hint?: string
+}
+
 interface CampaignNarrative {
   campaign_id: string
   campaign_name: string
@@ -35,6 +43,8 @@ interface CampaignNarrative {
   latest_spend_7d: number
   latest_results_7d: number
   frequency_7d: number | null
+  /** Optional: narratives written before the prescription layer have none. */
+  prescription?: Prescription | null
 }
 
 interface Payload {
@@ -130,9 +140,79 @@ function CtrStrip({ series, ctr }: { series: Array<{ date: string; ctr: number |
   )
 }
 
+// ─── Prescription block (DAPE P→E: the remedy + the button) ───────────────────
+
+function PrescriptionBlock({ clientId, c }: { clientId: string; c: CampaignNarrative }) {
+  const p = c.prescription
+  const [running, setRunning] = useState(false)
+  const [result, setResult] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+
+  if (!p) {
+    // Old narratives (pre-prescription) — keep the original placeholder line.
+    return (
+      <p className="mt-3 text-xs text-gray-400 border-t border-gray-200/60 pt-2">
+        → 具体怎么处理（换素材 / 调整），下一步的处方会给到，无需你手动操作。
+      </p>
+    )
+  }
+
+  const run = async () => {
+    if (!window.confirm(`确定执行「${p.title}」?\n${p.execute_hint ?? ''}`)) return
+    setRunning(true)
+    setResult(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/ad-health/execute-prescription`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: p.kind }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
+      const n = (json.adsAdded ?? []).length
+      setResult({
+        kind: 'ok',
+        text: n > 0
+          ? `已补 ${n} 条新素材(暂停状态,不花钱),去执行看板确认后开启。`
+          : '本轮爆款池里暂时没有新的合格素材,系统明天会再自动扫。',
+      })
+    } catch (err) {
+      setResult({ kind: 'err', text: err instanceof Error ? err.message : '执行失败,请稍后重试' })
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <div className="mt-3 border-t border-gray-200/60 pt-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-gray-700">处方:{p.title}</p>
+          <p className="mt-1 text-xs text-gray-500 leading-relaxed">{p.why}</p>
+          {p.execute_hint && <p className="mt-1 text-xs text-gray-400">{p.execute_hint}</p>}
+        </div>
+        {p.executable && (
+          <button
+            type="button"
+            disabled={running}
+            onClick={run}
+            className="shrink-0 rounded-lg bg-gray-800 px-3 py-1.5 text-sm text-white hover:bg-gray-700 disabled:opacity-50"
+          >
+            {running ? '执行中…' : '执行'}
+          </button>
+        )}
+      </div>
+      {result && (
+        <p className={`mt-2 text-xs ${result.kind === 'ok' ? 'text-emerald-600' : 'text-red-600'}`}>
+          {result.text}
+        </p>
+      )}
+    </div>
+  )
+}
+
 // ─── Campaign card ─────────────────────────────────────────────────────────────
 
-function CampaignCard({ c }: { c: CampaignNarrative }) {
+function CampaignCard({ clientId, c }: { clientId: string; c: CampaignNarrative }) {
   const meta = VERDICT_META[c.verdict]
   const ctrMetric = c.metrics.find(m => m.metric === 'ctr')
   // Cost per lead is always derivable from the 7-day aggregates when there are
@@ -167,9 +247,7 @@ function CampaignCard({ c }: { c: CampaignNarrative }) {
       </div>
 
       {(c.verdict === 'alert' || c.verdict === 'watch') && (
-        <p className="mt-3 text-xs text-gray-400 border-t border-gray-200/60 pt-2">
-          → 具体怎么处理（换素材 / 调整），下一步的处方会给到，无需你手动操作。
-        </p>
+        <PrescriptionBlock clientId={clientId} c={c} />
       )}
     </div>
   )
@@ -248,7 +326,7 @@ export default function AdsHealthPage() {
             {[...latest.payload.campaigns]
               .sort((a, b) => VERDICT_RANK[b.verdict] - VERDICT_RANK[a.verdict])
               .map(c => (
-                <CampaignCard key={c.campaign_id} c={c} />
+                <CampaignCard key={c.campaign_id} clientId={clientId} c={c} />
               ))}
           </div>
 
