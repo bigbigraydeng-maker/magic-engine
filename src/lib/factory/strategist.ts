@@ -267,6 +267,8 @@ export function selectClips(
   angle: string,
   requireRealFootage: boolean,
   recipe: ShotRecipe = pickShotRecipe(null, 0),
+  /** i2v 源图池(抓来的素材公开 URL)。空则 worker 退回占位帧 —— 那正是「所有画面一个样」的老路。 */
+  sourceImagePool: readonly string[] = [],
 ): ClipSelection {
   // 排序:①角度 token 重叠(货对题)②真实产品片优先 ③冷素材优先(防审美疲劳)
   const pool = ctx.clipStock
@@ -288,6 +290,7 @@ export function selectClips(
   const segments: WorkOrderBrief['segments'] = []
   const clipLinks: WorkOrderDraft['clip_links'] = []
   const generationPlan: ClipGenerationPlanItem[] = []
+  let genIndex = 0 // 源图轮换游标:跨 segment 连续递增,保证各段源图不重样
   const used = new Set<string>()
   // 按 scene_tag(内容身份)去重,不止 clip.id:同一场景多行(如 bath1_factory×2 同源不同 id)
   // 不能跨镜重复出镜,否则成片「素材单一」。distinct 场景不够 → 该镜 generationPlan 补生成。
@@ -328,9 +331,16 @@ export function selectClips(
         motion_type: shot.motion,
         prompt_hint: `${angle} — ${role} segment, real motion, 9:16 vertical`,
         idempotency_key: `{work_order_id}:${role}:${i}`,
-        source_image_url: null,
-        requires_source_resolution: true,
+        // 源图轮换:每个待生成片段用**不同**的库存图当 i2v 底子。
+        // 🔴 此前这里恒为 null,worker 就无条件退回同一张 seed/cts_source.jpg ——
+        // 所有 AI 画面都从同一张图长出来,换多少提示词都改不掉底子。这是「千篇一律」
+        // 的根因之一。按 position 取模轮换,保证同一条片子里各段源图不重样。
+        source_image_url: sourceImagePool.length > 0
+          ? sourceImagePool[genIndex % sourceImagePool.length]
+          : null,
+        requires_source_resolution: sourceImagePool.length === 0,
       })
+      genIndex += 1
     }
   })
 

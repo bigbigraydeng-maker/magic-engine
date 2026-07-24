@@ -144,8 +144,10 @@ export interface ClipGenerationPlanItem {
   prompt_hint: string
   /** `{work_order_id占位}:{segment_role}:{position}` — worker 侧防重烧(魏征 F10③) */
   idempotency_key: string
-  source_image_url: null
-  requires_source_resolution: true
+  /** i2v 底图。有值 = 建单时已从素材池挑好;null = worker 退回占位帧(所有画面同一个样的老路) */
+  source_image_url: string | null
+  /** true = 还没挑到源图,交给 worker 兜底 */
+  requires_source_resolution: boolean
 }
 
 /** 段级广告文案(A2:后端生成,品牌接地) */

@@ -106,3 +106,42 @@ describe('入库规则', () => {
     expect(build({ images: [] })).toEqual([])
   })
 })
+
+// ── 源图轮换(治「所有 AI 画面从同一张图长出来」)────────────────────────────
+import { selectClips } from './strategist'
+import { SHOT_RECIPES } from './shot-recipes'
+
+const ctxWithNoStock = {
+  clipStock: [],                 // 无库存 → 每段都要生成 → 每段都需要源图
+  blocklist: [], recentAngles: [], activeWinners: [],
+  now: new Date('2026-07-25T00:00:00Z'),
+} as never
+
+describe('🔴 i2v 源图轮换 —— 治「所有画面从同一张图长出来」', () => {
+  const recipe = SHOT_RECIPES.find((r) => r.key === 'personal_story')!
+  const pool = ['https://cdn/a.jpg', 'https://cdn/b.jpg', 'https://cdn/c.jpg']
+
+  it('给了素材池 → 各段源图不重样(不再是同一张种子图)', () => {
+    const { generationPlan } = selectClips(ctxWithNoStock, 'x', false, recipe, pool)
+    const used = generationPlan.map((p) => p.source_image_url)
+    expect(used.length).toBeGreaterThan(1)
+    expect(new Set(used).size).toBeGreaterThan(1)   // 关键:不是全同一张
+    expect(used.every((u) => u !== null)).toBe(true)
+  })
+
+  it('池子比段数少 → 循环复用,不越界不返回 undefined', () => {
+    const { generationPlan } = selectClips(ctxWithNoStock, 'x', false, recipe, ['https://cdn/only.jpg'])
+    expect(generationPlan.every((p) => p.source_image_url === 'https://cdn/only.jpg')).toBe(true)
+  })
+
+  it('池子为空 → 退回 null 交给 worker 兜底(保持老行为,不炸)', () => {
+    const { generationPlan } = selectClips(ctxWithNoStock, 'x', false, recipe, [])
+    expect(generationPlan.every((p) => p.source_image_url === null)).toBe(true)
+    expect(generationPlan.every((p) => p.requires_source_resolution === true)).toBe(true)
+  })
+
+  it('有源图时 requires_source_resolution=false(worker 不该再去兜底)', () => {
+    const { generationPlan } = selectClips(ctxWithNoStock, 'x', false, recipe, pool)
+    expect(generationPlan.every((p) => p.requires_source_resolution === false)).toBe(true)
+  })
+})
