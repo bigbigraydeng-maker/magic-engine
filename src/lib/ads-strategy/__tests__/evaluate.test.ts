@@ -130,6 +130,22 @@ describe('buildNarrativePayload', () => {
     expect(p.campaigns[1].verdict).toBe('paused')
   })
 
+  it('flips to paused at exactly 3 full days without data (the boundary)', () => {
+    // Data ends 2026-07-18, evaluated 2026-07-21 → 3 whole days missing → paused.
+    // Locks the `<` comparison: a slip to `<=` or an off-by-one in the shift
+    // would move this boundary and pass the other two (2-day / 13-day) tests.
+    const atBoundary = series('a', 'Boundary', Array.from({ length: 18 }, () => 0.03))
+    const p = buildNarrativePayload(grouped(atBoundary), '2026-07-21')
+    expect(p.campaigns[0].verdict).toBe('paused')
+  })
+
+  it('says all-stopped, not "data accumulating", when every campaign is paused', () => {
+    const stopped = series('a', 'Stopped', Array.from({ length: 8 }, () => 0.03))
+    const p = buildNarrativePayload(grouped(stopped), '2026-07-21')
+    expect(p.headline).toContain('都已停投')
+    expect(p.headline).not.toContain('积累')
+  })
+
   it('keeps a briefly-lagging campaign (2 days without data) judged, not paused', () => {
     // Data ends 2026-07-19, evaluating 2026-07-21 → within the 3-day grace.
     const lagging = series('a', 'Lagging', Array.from({ length: 19 }, () => 0.03))

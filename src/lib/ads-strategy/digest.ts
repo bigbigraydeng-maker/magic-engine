@@ -88,16 +88,22 @@ export function buildBody(
   dashboardUrl: string,
 ): string {
   const campaigns = payload.campaigns ?? []
-  const evaluated = payload.evaluated ?? campaigns.length
   const needAction = campaigns.filter(c => c.verdict === 'alert' || c.verdict === 'watch')
+  // Count ONLY campaigns actually judged healthy. `evaluated` includes paused
+  // ones — using it here re-created the exact lie this engine exists to kill
+  // ("其余 7 条健康" when 5 of them were stopped; 魏征 review of PR #631).
+  const healthyCount = campaigns.filter(c => c.verdict === 'healthy').length
+  const pausedCount  = campaigns.filter(c => c.verdict === 'paused').length
+  const pausedNote   = pausedCount > 0 ? `(另 ${pausedCount} 条已停投)` : ''
 
   let lead: string
   let items = ''
 
   if (decision === 'weekly_healthy' || decision === 'recovery') {
+    const active = campaigns.length - pausedCount
     lead = decision === 'recovery'
-      ? `🟢 广告恢复健康了 —— ${evaluated} 条广告目前都无需动手。`
-      : `🟢 本周你的 ${evaluated} 条广告持续健康,无需动手。系统仍每天替你盯着。`
+      ? `🟢 广告恢复健康了 —— 在投的 ${active} 条广告目前都无需动手。${pausedNote}`
+      : `🟢 本周你在投的 ${active} 条广告持续健康,无需动手。${pausedNote}系统仍每天替你盯着。`
   } else {
     const n = needAction.length
     lead = `${decision === 'alert' ? '🔴' : '🟡'} 今天有 ${n} 件事${decision === 'alert' ? '要看' : '可以留意'}:`
@@ -111,8 +117,8 @@ export function buildBody(
           <div style="margin-top:6px;font-size:12px;color:#64748b">→ 具体怎么处理,下一步的处方会给到,无需你手动操作。</div>
         </div>`
     }).join('')
-    const healthy = evaluated - needAction.length
-    if (healthy > 0) items += `<p style="font-size:13px;color:#16a34a;margin:10px 0 0">✅ 其余 ${healthy} 条广告健康,无需动手。</p>`
+    if (healthyCount > 0) items += `<p style="font-size:13px;color:#16a34a;margin:10px 0 0">✅ 其余 ${healthyCount} 条广告健康,无需动手。${pausedNote}</p>`
+    else if (pausedCount > 0) items += `<p style="font-size:13px;color:#94a3b8;margin:10px 0 0">另 ${pausedCount} 条已停投。</p>`
   }
 
   return `
