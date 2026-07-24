@@ -3558,6 +3558,7 @@ FDE 未来 Wizard：客户信息 → 选启用渠道 → 客户提供 credential
 - [x] **P21.K.4 Resend 日报** ✅(1 天):倒金字塔正文(全绿版一行 / 🔴 版≤3 条)+ 处方下一步归属 + **全绿降频抗疲劳**(只状态变化即时发)+ 术语翻译表落 UI + 域名验证 + 失败降级。替代 Zapier Gmail(免费额度撞 402)
 - [x] **P21.K.5 跨客户** ✅(2-3 天):配置 UI(红线:**自动定标预填**不给 PM 空框 + 人话 label + 当前值参照)+ `funnel_layers` per-client + 泛化到有 Meta 账户的客户 + handoff schema `creative_supply_requests`(策略层→作品层)
 - [x] **顺带** ✅(force-pause 守卫已随 #634 落地):`/meta-ads/execute` force-pause 守卫(改预算后 entity read 回读 + 短重试 + 自动重激活)+ budget_policy 硬闸。codify memory `reference-meta-mcp-budget-update-forces-pause`
+- [ ] **P21.K.7 ad 级数据脊柱**(登记 2026-07-25,PM 拍板):日度 cron 补拉 **ad 级**(每条广告每天一行,复用 `ad_daily_insights` 的 `level='ad'`),让「某天新增了哪条广告 / 哪条在拖后腿」可被系统自查,不依赖 Meta MCP(Oztop 账户未开通)也不用人翻广告后台。**背书案例**:Oztop Lead Form Cold Broad 的 CPL 7/17 起翻倍,campaign 级只能定位到「填表率腰斩 + 出现出站点击」。含 `parent_id` 列(ad→campaign 归属,**migration 待 PM `go apply`**)+ 首拉 30 天回补 + 分页完整性守卫。顺带铺好 34.B Creative Lifecycle 要的作品层日度基础设施
 - [ ] **多视角对抗复盘工作流**(1-2 天,可后置):battle-plan §8 方法论固化成可复用 Workflow/agent(N 视角互相证伪前提 → 作战计划 → 喂鲁班),异常触发非每日跑
 - [ ] **开放项**:三张新表 migration 逐次 PM `go apply`(`ad_daily_insights` / `ad_strategy_configs`+`_triggers` / `ad_health_narratives`)· P5 泛化首批客户(Oztop?)· 姊妹 spec Creative Lifecycle 同一 GHA 笔误待独立小 PR 修
 
