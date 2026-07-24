@@ -65,7 +65,7 @@ describe('getCampaignDailyInsights', () => {
       }],
     }))
 
-    const rows = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
+    const { rows } = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
 
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({
@@ -96,7 +96,7 @@ describe('getCampaignDailyInsights', () => {
         data: [{ campaign_id: 'b', date_start: '2026-07-13', spend: '2', impressions: '20', clicks: '2' }],
       }))
 
-    const rows = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
+    const { rows } = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(rows.map(r => r.campaign_id)).toEqual(['a', 'b'])
@@ -121,11 +121,11 @@ describe('getCampaignDailyInsights', () => {
       ],
     }))
 
-    const rows = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
+    const { rows } = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
     expect(rows.map(r => r.campaign_id)).toEqual(['c'])
   })
 
-  it('returns rows gathered so far when a later page fails', async () => {
+  it('returns rows gathered so far when a later page fails, flagged incomplete', async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({
         data:   [{ campaign_id: 'a', date_start: '2026-07-13', spend: '1', impressions: '10', clicks: '1' }],
@@ -133,15 +133,18 @@ describe('getCampaignDailyInsights', () => {
       }))
       .mockResolvedValueOnce(errorResponse(500))
 
-    const rows = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
+    const { rows, complete } = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
     expect(rows.map(r => r.campaign_id)).toEqual(['a'])
+    expect(complete).toBe(false)
   })
 
-  it('returns [] rather than throwing when the request blows up', async () => {
+  it('flags incomplete rather than throwing when the request blows up', async () => {
+    // An empty result and a failed request must not look the same: silence
+    // would read as "this account ran nothing yesterday".
     fetchMock.mockRejectedValueOnce(new Error('network down'))
     await expect(
       getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13'),
-    ).resolves.toEqual([])
+    ).resolves.toEqual({ rows: [], complete: false })
   })
 
   it('does NOT double-count when parent+child action types both appear', async () => {
@@ -161,7 +164,7 @@ describe('getCampaignDailyInsights', () => {
       }],
     }))
 
-    const rows = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
+    const { rows } = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
     // 10 leads + 4 messaging = 14, NOT 20 + 8 = 28.
     expect(rows[0].leads).toBe(10)
     expect(rows[0].messaging_conversations).toBe(4)
@@ -178,7 +181,7 @@ describe('getCampaignDailyInsights', () => {
       }],
     }))
 
-    const rows = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
+    const { rows } = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
     expect(rows[0].leads).toBe(7)
   })
 
@@ -191,7 +194,7 @@ describe('getCampaignDailyInsights', () => {
       }],
     }))
 
-    const rows = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
+    const { rows } = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
     expect(rows[0].results).toBe(0)
     // No results means cost-per-result is undefined, not zero or Infinity.
     expect(rows[0].cost_per_result).toBeNull()

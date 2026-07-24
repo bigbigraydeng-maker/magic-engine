@@ -14,9 +14,18 @@ const fetchWindow = vi.fn()
 const upsert      = vi.fn()
 const countHead   = vi.fn()
 
+/**
+ * The fetchers return a page walk, not a bare array. Tests hand back a plain
+ * array for the common "walk finished" case; passing {rows, complete:false}
+ * explicitly is how a test opts into a truncated walk.
+ */
+function asWalk(value: unknown) {
+  return Array.isArray(value) ? { rows: value, complete: true } : value
+}
+
 vi.mock('@/lib/meta/client', () => ({
-  getCampaignDailyInsights: (...a: unknown[]) => fetchDaily(...a),
-  getAdDailyInsights: (...a: unknown[]) => fetchAds(...a),
+  getCampaignDailyInsights: async (...a: unknown[]) => asWalk(await fetchDaily(...a)),
+  getAdDailyInsights: async (...a: unknown[]) => asWalk(await fetchAds(...a)),
   getCampaignWindowFrequency: (...a: unknown[]) => fetchWindow(...a),
 }))
 
@@ -182,6 +191,29 @@ describe('syncCampaignDailyInsights', () => {
     await syncCampaignDailyInsights('client-1', 'act_1', 'tok')
     expect(probedLevel()).toBe('campaign')
   })
+
+  it('writes nothing when a BACKFILL walk stopped early', async () => {
+    // Writing the partial rows would make the next run see history and never
+    // request the missing days again — a silent, permanent hole.
+    countHead.mockResolvedValue({ count: 0, error: null })
+    fetchDaily.mockResolvedValue({ rows: [dayRow()], complete: false })
+
+    const res = await syncCampaignDailyInsights('client-1', 'act_1', 'tok')
+
+    expect(upsert).not.toHaveBeenCalled()
+    expect(res.success).toBe(false)
+    expect(res.backfilled).toBe(false)
+    expect(res.error).toContain('retries the full')
+  })
+
+  it('does not pass a failed pull off as "no delivery yesterday"', async () => {
+    countHead.mockResolvedValue({ count: 5, error: null })
+    fetchDaily.mockResolvedValue({ rows: [], complete: false })
+
+    const res = await syncCampaignDailyInsights('client-1', 'act_1', 'tok')
+    expect(res.success).toBe(false)
+    expect(res.rows_written).toBe(0)
+  })
 })
 
 describe('syncAdDailyInsights', () => {
@@ -290,5 +322,45 @@ describe('syncAdDailyInsights', () => {
     const res = await syncAdDailyInsights('client-1', 'act_1', 'tok')
     expect(res).toMatchObject({ success: false })
     expect(res.error).toContain('parent_id')
+  })
+
+  it('abandons a partial backfill instead of half-filling the history', async () => {
+    countHead.mockResolvedValue({ count: 0, error: null })
+    fetchAds.mockResolvedValue({ rows: [adRow()], complete: false })
+
+    const res = await syncAdDailyInsights('client-1', 'act_1', 'tok')
+
+    expect(upsert).not.toHaveBeenCalled()
+    expect(res.success).toBe(false)
+    expect(res.backfilled).toBe(false)
+  })
+
+  it('still writes a truncated steady-state window, but reports it', async () => {
+    // Unlike a backfill, the 7-day window is re-pulled tomorrow, so partial
+    // rows are worth keeping — they just must not look clean.
+    countHead.mockResolvedValue({ count: 900, error: null })
+    fetchAds.mockResolvedValue({ rows: [adRow()], complete: false })
+
+    const res = await syncAdDailyInsights('client-1', 'act_1', 'tok')
+
+    expect(upsert).toHaveBeenCalledTimes(1)
+    expect(res.rows_written).toBe(1)
+    expect(res.success).toBe(false)
+    expect(res.error).toContain('page walk stopped early')
+  })
+
+  it('chunks the upsert so one bad batch cannot cost the whole pull', async () => {
+    countHead.mockResolvedValue({ count: 900, error: null })
+    // 30 days × 40 ads is the realistic backfill shape — well past one statement.
+    fetchAds.mockResolvedValue(
+      Array.from({ length: 1200 }, (_, i) => adRow({ ad_id: `a${i % 40}`, insight_date: `2026-06-${(i % 28) + 1}` })),
+    )
+
+    const res = await syncAdDailyInsights('client-1', 'act_1', 'tok')
+
+    expect(upsert).toHaveBeenCalledTimes(3)
+    expect((upsert.mock.calls[0][0] as unknown[]).length).toBe(500)
+    expect((upsert.mock.calls[2][0] as unknown[]).length).toBe(200)
+    expect(res.rows_written).toBe(1200)
   })
 })

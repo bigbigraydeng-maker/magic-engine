@@ -297,18 +297,31 @@ const DAILY_FIELDS = DAILY_FIELD_LIST.join(',')
 const MAX_INSIGHT_PAGES = 25
 
 /**
+ * The rows a page walk gathered, plus whether it actually reached the end.
+ *
+ * `complete: false` is the difference between "this account ran no ads" and
+ * "Meta rate-limited us on page 3" — indistinguishable from an empty array, and
+ * the distinction is what stops a half-fetched backfill from being mistaken for
+ * a finished one and leaving a permanent hole in the series.
+ */
+export interface InsightPageWalk<T> {
+  rows:     T[]
+  complete: boolean
+}
+
+/**
  * Walk an /insights cursor, parsing each page.
  *
- * Returns the rows gathered SO FAR on any transport/HTTP error rather than
- * throwing or discarding them: a half-fetched backfill is still better than
- * nothing, and callers treat [] as "nothing to write". `label` only shapes the
- * log line so campaign- and ad-level failures stay distinguishable in Render.
+ * Keeps the rows gathered SO FAR on any transport/HTTP error rather than
+ * throwing or discarding them, but flags the walk incomplete so the caller can
+ * decide whether partial data is usable. `label` only shapes the log line so
+ * campaign- and ad-level failures stay distinguishable in Render.
  */
 async function fetchInsightPages<Raw, Out>(
   firstUrl: string,
   label: string,
   parse: (row: Raw) => Out | null,
-): Promise<Out[]> {
+): Promise<InsightPageWalk<Out>> {
   let url: string | undefined = firstUrl
   const rows: Out[] = []
 
@@ -318,13 +331,13 @@ async function fetchInsightPages<Raw, Out>(
       res = await fetch(url)
     } catch (err) {
       console.error(`[meta/client] ${label} fetch error:`, err)
-      return rows
+      return { rows, complete: false }
     }
 
     if (!res.ok) {
       const body = await res.text().catch(() => '')
       console.error(`[meta/client] ${label} HTTP ${res.status}:`, body.slice(0, 300))
-      return rows
+      return { rows, complete: false }
     }
 
     const json = await res.json() as { data?: Raw[]; paging?: { next?: string } }
@@ -337,7 +350,15 @@ async function fetchInsightPages<Raw, Out>(
     url = json.paging?.next
   }
 
-  return rows
+  // Loop ended with a cursor still in hand: the page cap truncated us. Silent
+  // truncation would look exactly like a finished walk (25 × 500 = 12,500 rows,
+  // reachable at ad level on a 30-day backfill of a busy account).
+  if (url) {
+    console.warn(`[meta/client] ${label} hit the ${MAX_INSIGHT_PAGES}-page cap — result truncated`)
+    return { rows, complete: false }
+  }
+
+  return { rows, complete: true }
 }
 
 /**
@@ -346,15 +367,15 @@ async function fetchInsightPages<Raw, Out>(
  * Unlike `getAdCampaignInsights` this returns EVERY campaign (no spend-sorted
  * top-N truncation) broken down by day, which is what a time series requires.
  *
- * Returns [] on any transport/HTTP error, matching this module's convention of
- * degrading rather than throwing (callers treat [] as "nothing to write").
+ * Degrades rather than throwing: on any transport/HTTP error it returns the
+ * rows gathered so far with `complete: false`.
  */
 export async function getCampaignDailyInsights(
   adAccountId: string,
   accessToken: string,
   since: string,
   until: string,
-): Promise<MetaCampaignDailyRow[]> {
+): Promise<InsightPageWalk<MetaCampaignDailyRow>> {
   const params = new URLSearchParams({
     fields: DAILY_FIELDS,
     time_range: JSON.stringify({ since, until }),
@@ -417,17 +438,17 @@ const AD_DAILY_FIELDS = [...DAILY_FIELD_LIST, 'ad_id', 'ad_name'].join(',')
 /**
  * Fetch per-ad, per-day insights across a date range, following pagination.
  *
- * Same contract as `getCampaignDailyInsights` (every entity, no top-N
- * truncation, [] on failure) one level down. Row volume is roughly
- * ads × days, so the 500-per-page limit matters more here than at campaign
- * level — Meta's BUC quota is charged per call, not per row.
+ * Same contract as `getCampaignDailyInsights` one level down. Row volume is
+ * roughly ads × days, so this is the caller that actually paginates: a 30-day
+ * backfill of ~17 ads already spills past one 500-row page, which is why the
+ * walk reports whether it finished.
  */
 export async function getAdDailyInsights(
   adAccountId: string,
   accessToken: string,
   since: string,
   until: string,
-): Promise<MetaAdDailyRow[]> {
+): Promise<InsightPageWalk<MetaAdDailyRow>> {
   const params = new URLSearchParams({
     fields: AD_DAILY_FIELDS,
     time_range: JSON.stringify({ since, until }),

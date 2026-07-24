@@ -311,9 +311,13 @@ export async function GET(req: NextRequest) {
       r.meta?.success === false ||
       r.google_ads?.success === false ||
       r.ad_daily?.success === false ||
-      r.ad_level?.success === false ||
       r.ad_health?.success === false,
   ).length
+  // ad_level is deliberately NOT in `failed`: this count drives
+  // cron_run_logs.failed_count, which the daily-cron-digest emails on. The
+  // ad-level pull is best-effort (nothing reads it yet, and it needs the
+  // parent_id column), so a gap there must not train the PM to ignore cron
+  // alerts. It still surfaces per-client in `errors` below.
 
   // Collect per-client errors so postmortem is possible without Render logs.
   // Diagnostic only — no behavior change.

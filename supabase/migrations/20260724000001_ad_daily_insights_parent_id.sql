@@ -17,6 +17,8 @@ COMMENT ON COLUMN ad_daily_insights.parent_id IS
   'Owning entity one level up: campaign_id for level=''ad''. NULL for level=''campaign''.';
 
 -- "Every ad inside campaign X over the last N days" — the read that turns a
--- campaign-level alert into a named culprit.
+-- campaign-level alert into a named culprit. Partial: campaign rows all carry
+-- NULL here and have no business in this index.
 CREATE INDEX IF NOT EXISTS idx_ad_daily_insights_parent_series
-  ON ad_daily_insights (client_id, level, parent_id, insight_date DESC);
+  ON ad_daily_insights (client_id, parent_id, insight_date DESC)
+  WHERE parent_id IS NOT NULL;

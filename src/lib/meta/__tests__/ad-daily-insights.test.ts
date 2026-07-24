@@ -79,7 +79,7 @@ describe('getAdDailyInsights', () => {
       }],
     }))
 
-    const rows = await getAdDailyInsights(ACCOUNT, TOKEN, '2026-07-17', '2026-07-17')
+    const { rows } = await getAdDailyInsights(ACCOUNT, TOKEN, '2026-07-17', '2026-07-17')
 
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({
@@ -103,7 +103,7 @@ describe('getAdDailyInsights', () => {
       data: [{ ad_id: '2001', campaign_id: '120', date_start: '2026-07-17', spend: '1', impressions: '10', clicks: '1' }],
     }))
 
-    const rows = await getAdDailyInsights(ACCOUNT, TOKEN, '2026-07-17', '2026-07-17')
+    const { rows } = await getAdDailyInsights(ACCOUNT, TOKEN, '2026-07-17', '2026-07-17')
     expect(rows[0].ad_name).toBe('2001')
     expect(rows[0].campaign_name).toBe('120')
   })
@@ -115,7 +115,7 @@ describe('getAdDailyInsights', () => {
       data: [{ ad_id: '2001', date_start: '2026-07-17', spend: '1', impressions: '10', clicks: '1' }],
     }))
 
-    const rows = await getAdDailyInsights(ACCOUNT, TOKEN, '2026-07-17', '2026-07-17')
+    const { rows } = await getAdDailyInsights(ACCOUNT, TOKEN, '2026-07-17', '2026-07-17')
     expect(rows[0].campaign_id).toBe('')
     expect(rows[0].campaign_name).toBe('')
   })
@@ -129,7 +129,7 @@ describe('getAdDailyInsights', () => {
       ],
     }))
 
-    const rows = await getAdDailyInsights(ACCOUNT, TOKEN, '2026-07-17', '2026-07-17')
+    const { rows } = await getAdDailyInsights(ACCOUNT, TOKEN, '2026-07-17', '2026-07-17')
     expect(rows.map(r => r.ad_id)).toEqual(['c'])
   })
 
@@ -143,13 +143,15 @@ describe('getAdDailyInsights', () => {
         data: [{ ad_id: 'b', campaign_id: '120', date_start: '2026-07-17', spend: '2', impressions: '20', clicks: '2' }],
       }))
 
-    const rows = await getAdDailyInsights(ACCOUNT, TOKEN, '2026-07-17', '2026-07-17')
+    const { rows } = await getAdDailyInsights(ACCOUNT, TOKEN, '2026-07-17', '2026-07-17')
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(rows.map(r => r.ad_id)).toEqual(['a', 'b'])
   })
 
-  it('keeps the rows gathered so far when a later page fails', async () => {
+  it('flags the walk incomplete when a later page fails, keeping what it got', async () => {
+    // The signal the sync layer needs: without it a half-fetched 30-day
+    // backfill looks finished and the missing days are never requested again.
     fetchMock
       .mockResolvedValueOnce(jsonResponse({
         data:   [{ ad_id: 'a', campaign_id: '120', date_start: '2026-07-17', spend: '1', impressions: '10', clicks: '1' }],
@@ -157,15 +159,37 @@ describe('getAdDailyInsights', () => {
       }))
       .mockResolvedValueOnce(errorResponse(500))
 
-    const rows = await getAdDailyInsights(ACCOUNT, TOKEN, '2026-07-17', '2026-07-17')
+    const { rows, complete } = await getAdDailyInsights(ACCOUNT, TOKEN, '2026-07-17', '2026-07-17')
     expect(rows.map(r => r.ad_id)).toEqual(['a'])
+    expect(complete).toBe(false)
   })
 
-  it('returns [] rather than throwing when the request blows up', async () => {
+  it('reports complete on a clean walk', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ data: [] }))
+    const walk = await getAdDailyInsights(ACCOUNT, TOKEN, '2026-07-17', '2026-07-17')
+    expect(walk).toEqual({ rows: [], complete: true })
+  })
+
+  it('flags incomplete rather than throwing when the request blows up', async () => {
     fetchMock.mockRejectedValueOnce(new Error('network down'))
     await expect(
       getAdDailyInsights(ACCOUNT, TOKEN, '2026-07-17', '2026-07-17'),
-    ).resolves.toEqual([])
+    ).resolves.toEqual({ rows: [], complete: false })
+  })
+
+  it('flags incomplete when the page cap truncates a still-paging account', async () => {
+    // 25 × 500 rows is reachable on a 30-day ad-level backfill; silent
+    // truncation would look exactly like a finished walk.
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    fetchMock.mockResolvedValue(jsonResponse({
+      data:   [{ ad_id: 'a', campaign_id: '120', date_start: '2026-07-17', spend: '1', impressions: '10', clicks: '1' }],
+      paging: { next: 'https://graph.facebook.com/next-page' },
+    }))
+
+    const { complete } = await getAdDailyInsights(ACCOUNT, TOKEN, '2026-07-17', '2026-07-17')
+
+    expect(fetchMock).toHaveBeenCalledTimes(25)
+    expect(complete).toBe(false)
   })
 
   it('applies the same action-type de-duplication as the campaign level', async () => {
@@ -181,7 +205,7 @@ describe('getAdDailyInsights', () => {
       }],
     }))
 
-    const rows = await getAdDailyInsights(ACCOUNT, TOKEN, '2026-07-17', '2026-07-17')
+    const { rows } = await getAdDailyInsights(ACCOUNT, TOKEN, '2026-07-17', '2026-07-17')
     expect(rows[0].leads).toBe(10)
     expect(rows[0].results).toBe(10)
   })

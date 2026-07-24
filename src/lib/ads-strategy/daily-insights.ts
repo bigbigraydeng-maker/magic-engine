@@ -136,6 +136,41 @@ function toInsightRow(i: InsightRowInput) {
 const UPSERT_KEY = { onConflict: 'client_id,platform,level,entity_id,insight_date' }
 
 /**
+ * Rows per upsert request. A 30-day ad-level backfill is thousands of rows and
+ * a single statement makes the day all-or-nothing; chunking keeps one bad batch
+ * from costing the whole pull.
+ */
+const UPSERT_CHUNK = 500
+
+/** Upsert in chunks, stopping at the first failure. Returns its message. */
+async function upsertChunked(rows: Array<Record<string, unknown>>): Promise<string | null> {
+  for (let i = 0; i < rows.length; i += UPSERT_CHUNK) {
+    const { error } = await supabaseAdmin
+      .from('ad_daily_insights')
+      .upsert(rows.slice(i, i + UPSERT_CHUNK), UPSERT_KEY)
+    if (error) return error.message
+  }
+  return null
+}
+
+/**
+ * A backfill that stopped mid-pagination must not be mistaken for a finished
+ * one. Writing its partial rows would make `needsBackfill` see history forever
+ * after, so the un-fetched days would never be requested again — a silent,
+ * permanent hole. Dropping them costs one day and the next run retries the
+ * whole window.
+ */
+function abandonPartialBackfill(lookback: number): SyncDailyInsightsResult {
+  return {
+    success: false,
+    rows_written: 0,
+    days_requested: lookback,
+    backfilled: false,
+    error: `backfill page walk stopped early — nothing written so the next run retries the full ${lookback}-day window`,
+  }
+}
+
+/**
  * The trailing 7-day window frequency belongs to ONE row per campaign: the
  * latest day. Frequency is impressions/reach and is not additive — averaging
  * seven daily frequencies is not the 7-day frequency, because reach
@@ -168,9 +203,15 @@ export async function syncCampaignDailyInsights(
     const backfill = await needsBackfill(clientId, 'campaign')
     const { since, until, lookback } = requestWindow(backfill)
 
-    const rows = await getCampaignDailyInsights(adAccountId, accessToken, since, until)
+    const { rows, complete } = await getCampaignDailyInsights(adAccountId, accessToken, since, until)
+    if (backfill && !complete) return abandonPartialBackfill(lookback)
     if (rows.length === 0) {
-      return { success: true, rows_written: 0, days_requested: lookback, backfilled: backfill }
+      // An empty result only means "no delivery" when the walk actually
+      // finished; otherwise Meta failed and silence would look identical.
+      return complete
+        ? { success: true, rows_written: 0, days_requested: lookback, backfilled: backfill }
+        : { success: false, rows_written: 0, days_requested: lookback, backfilled: backfill,
+            error: 'Meta returned no usable page — check the token and rate limit' }
     }
 
     const latestDate = rows.reduce(
@@ -200,17 +241,17 @@ export async function syncCampaignDailyInsights(
       stampedAt,
     }))
 
-    const { error } = await supabaseAdmin
-      .from('ad_daily_insights')
-      .upsert(payload, UPSERT_KEY)
-
-    if (error) return { success: false, error: error.message }
+    const failure = await upsertChunked(payload)
+    if (failure) return { success: false, error: failure }
 
     return {
-      success: true,
+      success: complete,
       rows_written: payload.length,
       days_requested: lookback,
       backfilled: backfill,
+      // Steady-state runs re-pull the same window daily, so a short window is
+      // self-healing — but it should still be visible rather than silent.
+      error: complete ? undefined : 'page walk stopped early — window may be short until the next run',
     }
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' }
@@ -240,9 +281,13 @@ export async function syncAdDailyInsights(
     const backfill = await needsBackfill(clientId, 'ad')
     const { since, until, lookback } = requestWindow(backfill)
 
-    const rows = await getAdDailyInsights(adAccountId, accessToken, since, until)
+    const { rows, complete } = await getAdDailyInsights(adAccountId, accessToken, since, until)
+    if (backfill && !complete) return abandonPartialBackfill(lookback)
     if (rows.length === 0) {
-      return { success: true, rows_written: 0, days_requested: lookback, backfilled: backfill }
+      return complete
+        ? { success: true, rows_written: 0, days_requested: lookback, backfilled: backfill }
+        : { success: false, rows_written: 0, days_requested: lookback, backfilled: backfill,
+            error: 'Meta returned no usable page — check the token and rate limit' }
     }
 
     const stampedAt = new Date().toISOString()
@@ -260,17 +305,15 @@ export async function syncAdDailyInsights(
       parent_id: r.campaign_id || null,
     }))
 
-    const { error } = await supabaseAdmin
-      .from('ad_daily_insights')
-      .upsert(payload, UPSERT_KEY)
-
-    if (error) return { success: false, error: error.message }
+    const failure = await upsertChunked(payload)
+    if (failure) return { success: false, error: failure }
 
     return {
-      success: true,
+      success: complete,
       rows_written: payload.length,
       days_requested: lookback,
       backfilled: backfill,
+      error: complete ? undefined : 'page walk stopped early — window may be short until the next run',
     }
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' }
