@@ -3542,7 +3542,7 @@ FDE 未来 Wizard：客户信息 → 选启用渠道 → 客户提供 credential
 
 ---
 
-### Phase 21.K — Ad Strategy Engine(投放师大脑 · 广告策略层)⭐⭐⭐ 📋 spec 已过双审 · PM 已批开工(2026-07-13)
+### Phase 21.K — Ad Strategy Engine(投放师大脑 · 广告策略层)⭐⭐⭐ ✅ 全部上线(2026-07-24 · PR #618/#619/#620/#621/#622/#631/#633/#634)
 
 > **登记日期**:2026-07-13 · **状态**:📋 spec v0.2 定稿(子牙起草 → 魏征 needs_rework 修 2 P0 + 板桥 approve_with_fixes 修 2 P0)· **PM 已批开工**「这是 ME 的广告核心功能」;migration apply 需逐次显式 `go apply`
 > **Spec**:`docs/superpowers/specs/2026-07-13-ad-strategy-engine.md`
@@ -3552,12 +3552,12 @@ FDE 未来 Wizard：客户信息 → 选启用渠道 → 客户提供 credential
 > **DAPE**:D 司马徽发现异常(未建,先规则触发)· A 华佗评分 · P 诸葛亮触发线+处方 · E 鲁班执行 · 广告支柱 · FDE 轨 · memory 客户级+行业级(含 PM 误报驳回回灌)
 > **两审 4 个 P0 修正**:①cron 栈 GHA→**Render Cron**(winner-sync 已迁,PR #542/#545,GHA best-effort 漏跑)②落库改独立 `ad_health_narratives` 表(`diagnostic_narratives` 的 CHECK+run_id+UNIQUE 三重约束堵死日度叙事)③日报正文 wireframe(倒金字塔·只讲例外,防平铺 payload 过载)④处方带「下一步归属」三类(就地做/已通知创意流水线/需 PM 定方向)
 
-- [ ] **P21.K.1 数据脊柱**(1.5-2 天):Render Cron 每日拉取(复用 `getMetaTokenForClient` env 路径)+ 日度增量 + **额外 last_7d 拉 7d frequency**(不聚合日度)+ learning/delivery 探测 + `ad_daily_insights` 表(**migration 待 PM `go apply`**)+ 多客户隔离降级。补掉「无每日 campaign 级自动拉取」缺口
-- [ ] **P21.K.2 大脑落库**(2-2.5 天):触发线引擎(config 驱动 + 冷启动 `insufficient_history` + 持续≠单日纪律)+ 漏斗层视图(per-client layers)+ 多视角对抗守门(证伪单日噪音/投放饥饿/learning 期噪音)+ budget_policy **execute 层硬闸** + 落 `ad_health_narratives`(**migration 待 PM `go apply`**)
-- [ ] **P21.K.3 仪表盘**(2-2.5 天):`/dashboard/clients/[id]/ads-health` 分层视图(PM 默认 + 专业下钻,不平铺六区块)+ verdict 卡含**近 7 天原始值序列**(信任核对)+ **驳回按钮**(误报回灌 memory)+ 趋势自然语言注解 + 漏斗生意语言
-- [ ] **P21.K.4 Resend 日报**(1 天):倒金字塔正文(全绿版一行 / 🔴 版≤3 条)+ 处方下一步归属 + **全绿降频抗疲劳**(只状态变化即时发)+ 术语翻译表落 UI + 域名验证 + 失败降级。替代 Zapier Gmail(免费额度撞 402)
-- [ ] **P21.K.5 跨客户**(2-3 天):配置 UI(红线:**自动定标预填**不给 PM 空框 + 人话 label + 当前值参照)+ `funnel_layers` per-client + 泛化到有 Meta 账户的客户 + handoff schema `creative_supply_requests`(策略层→作品层)
-- [ ] **顺带(可先合,无 migration)**:`/meta-ads/execute` force-pause 守卫(改预算后 entity read 回读 + 短重试 + 自动重激活)+ budget_policy 硬闸。codify memory `reference-meta-mcp-budget-update-forces-pause`
+- [x] **P21.K.1 数据脊柱** ✅(1.5-2 天):Render Cron 每日拉取(复用 `getMetaTokenForClient` env 路径)+ 日度增量 + **额外 last_7d 拉 7d frequency**(不聚合日度)+ learning/delivery 探测 + `ad_daily_insights` 表(**migration 待 PM `go apply`**)+ 多客户隔离降级。补掉「无每日 campaign 级自动拉取」缺口
+- [x] **P21.K.2 大脑落库** ✅(2-2.5 天):触发线引擎(config 驱动 + 冷启动 `insufficient_history` + 持续≠单日纪律)+ 漏斗层视图(per-client layers)+ 多视角对抗守门(证伪单日噪音/投放饥饿/learning 期噪音)+ budget_policy **execute 层硬闸** + 落 `ad_health_narratives`(**migration 待 PM `go apply`**)
+- [x] **P21.K.3 仪表盘** ✅(2-2.5 天):`/dashboard/clients/[id]/ads-health` 分层视图(PM 默认 + 专业下钻,不平铺六区块)+ verdict 卡含**近 7 天原始值序列**(信任核对)+ **驳回按钮**(误报回灌 memory)+ 趋势自然语言注解 + 漏斗生意语言
+- [x] **P21.K.4 Resend 日报** ✅(1 天):倒金字塔正文(全绿版一行 / 🔴 版≤3 条)+ 处方下一步归属 + **全绿降频抗疲劳**(只状态变化即时发)+ 术语翻译表落 UI + 域名验证 + 失败降级。替代 Zapier Gmail(免费额度撞 402)
+- [x] **P21.K.5 跨客户** ✅(2-3 天):配置 UI(红线:**自动定标预填**不给 PM 空框 + 人话 label + 当前值参照)+ `funnel_layers` per-client + 泛化到有 Meta 账户的客户 + handoff schema `creative_supply_requests`(策略层→作品层)
+- [x] **顺带** ✅(force-pause 守卫已随 #634 落地):`/meta-ads/execute` force-pause 守卫(改预算后 entity read 回读 + 短重试 + 自动重激活)+ budget_policy 硬闸。codify memory `reference-meta-mcp-budget-update-forces-pause`
 - [ ] **多视角对抗复盘工作流**(1-2 天,可后置):battle-plan §8 方法论固化成可复用 Workflow/agent(N 视角互相证伪前提 → 作战计划 → 喂鲁班),异常触发非每日跑
 - [ ] **开放项**:三张新表 migration 逐次 PM `go apply`(`ad_daily_insights` / `ad_strategy_configs`+`_triggers` / `ad_health_narratives`)· P5 泛化首批客户(Oztop?)· 姊妹 spec Creative Lifecycle 同一 GHA 笔误待独立小 PR 修
 
