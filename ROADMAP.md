@@ -3517,6 +3517,29 @@ FDE 未来 Wizard：客户信息 → 选启用渠道 → 客户提供 credential
 - [ ] **P21.J.M3 闭环**(≈1-2 周):发布($50 绝对硬顶 + publish_intent 幂等 + publish_failed 收敛)+ UTM 沿用 + 表现回流单链路 + winner 判定拆片入库 + 工厂内部自发疲劳信号。验收:真实成片上 CTS Meta 账户(**PM 显式 go 后才首发**,$10/天×3 天)+ 回流数据落 `flywheel_metrics` + 工作日志人话叙事无"工厂"字眼
 - [ ] **开放项**:信号契约与 34.A 对齐冻结(M1 前置)· asset_gap 信号归属 · MTC 计费触点(v1 占位不扣)· Airtable 观测层↔ME 真值同步(M2 起)
 
+#### P21.J 收敛 + 补线上化(2026-07-24 · 一天做通,9 PR 合并 #623–#630)
+
+> **背景**:此前工厂"后台全套但停摆"。这天把断点接通 + 配置搬进 ME + 三审整改 + 安全止血,并做了线上检测。M1/M2/M3 的**代码链路**已实质打通(交付→审片→发布全通),剩下的是运行态开关和一批挂账。
+
+- [x] **审片断点修复**(#623):交付直接落 `in_review`(原 `rendered` 靠已退役的 Airtable sweeper 转,成死胡同)。成片终于能进 `/dashboard/factory` 审片队列
+- [x] **客户配置页 + 客户维度入口**(#624/#630):`clients.factory_config` 有 UI(发布主页/目标/优惠/护栏);视频工厂进客户详情页工具卡(`?client=` 锁定单客户)
+- [x] **发布最后一米**(#625):`factory-publish-worker` 注册 render.yaml `*/10` + 发布正文补红线扫描(扫的=实际发 FB 的 `buildCaption`,同一段字)
+- [x] **自动排产**(#626):`factory-order-scheduler` 注册 render.yaml `0 20 * * *`;按客户开关 `auto_order_enabled`(默认关=自动花钱要显式开)
+- [x] **爆款配方接回工厂**(#627)+ **出片风格搬进 ME**(#629,字段级覆盖本地 `factory_profile.json`)+ **主力产品填写**(#629)+ **客户免登录上传链接**(#629,AES-256-GCM 令牌,不含明文 client_id)
+- [x] **三审整改 9 项**(#630):上传静默丢文件/OOM 前置拦/风格整套覆盖/转场吞帧/self-serve 死链 等
+- [x] **安全止血**(#630):5 个真裸奔的"烧 AI 额度"接口(reels/campaign/brief 生成)补 `requireDashboardClientAccess`。线上核验未登录一律 401
+
+**⚠️ 挂账(PM 2026-07-24 拍板登记,另开专项,不混进本 Phase):**
+- [ ] **P21.J.SEC 接口安全完整审计**:狄仁杰三审报"26 个 `/api/clients/[id]/*` 无鉴权",逐个核实后发现多数(ads 执行/cms 发布)其实已有锁、是误报,真裸奔仅 5 个已补。**需一次系统性复核**:grep 全部 access 守卫关键词 + 逐个确认,把"真裸奔"与"已有锁被误报"彻底分开,补齐真缺的。今天只是止血
+- [ ] **P21.J.UP 上传链接两取舍**:①无单条吊销(作废靠换 `UPLOAD_LINK_SECRET`,所有链接一起失效)②无速率限制(有真链接者可刷存储/烧 Vision 额度)。规模化前需补 per-client 限流 + 单链接吊销
+
+**🔧 运行态待办(线上检测 2026-07-24 发现 · 代码通了但"没通电"):**
+- [ ] **本地 worker 没在认领**:今天 00:18 有 CTS 新工单卡在 `queued` 没人做 = 那台 Mac 的 worker 没跑/没连。工厂要真转,先确认 worker 进程在跑(仓库无 launchd/pm2 配置,`ps`/`pm2 list` 上机看)且已在 07-24 后重启(否则风格下发用旧逻辑)
+- [ ] **`FACTORY_PUBLISH_LIVE` 未设 = 静默发草稿**:未配时片子 `status=published`+三落库全绿,FB 主页却只是没人看见的 DRAFT。验完草稿格式后 PM 显式在 Render 设 `=true` 才真发
+- [ ] **`auto_order_enabled` 无客户开启**:调度器每天照跑但一单不下(安全默认)。要工厂自己下单,逐客户开;首个跑通客户 = CTS
+- [ ] **`creative_profile` 无客户填**:出片风格仍全靠本地 JSON。CTS 现有风格(龙旗破云/golden_hour/短句大字/xfade 0.35)可抄进 ME 配置页接管
+- [ ] **1 条 `rendered` 旧单**(CTS 07-12,有 caption)永久卡住:交付直连修复只对新单生效,这条旧单需手动迁 `in_review` 或归档(PM 判断)
+
 ---
 
 ### Phase 21.K — Ad Strategy Engine(投放师大脑 · 广告策略层)⭐⭐⭐ 📋 spec 已过双审 · PM 已批开工(2026-07-13)
