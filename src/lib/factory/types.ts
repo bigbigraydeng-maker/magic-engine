@@ -231,6 +231,9 @@ export interface WorkOrderBrief {
     duration_hint_s: number
     description: string
     clip_ids: string[]
+    /** 「转入本段」的转场(ffmpeg xfade 名)。worker 原样下发给 make_promo,
+     *  不填则装配层用默认 fade —— 那正是「每条片子转场都一样」的来源。 */
+    transition?: string
   }>
   /** 闸 2 预扣制硬数(护栏 8):worker 提交 muapi 前本地强制 check */
   max_new_clips: number
