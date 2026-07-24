@@ -8,17 +8,19 @@
  * cron failure digest AND the public contact form were all failing silently,
  * while the one path that used a verified domain sender kept working.
  *
- * `magicengine.com.au` is a verified sending domain, so notifications sent from
- * it reach any recipient. Override with ME_MAIL_FROM if the address changes.
+ * `hello@magicengine.cloud` is the address that path used, on a verified sending
+ * domain — PM's call to standardise on it rather than introduce a second sender,
+ * so every outbound mail comes from one already-proven address. Override with
+ * ME_MAIL_FROM if it ever changes.
  */
 
 /** Verified-domain address every internal notification is sent from. */
 export const ME_MAIL_FROM_ADDRESS =
-  process.env.ME_MAIL_FROM ?? 'notifications@magicengine.com.au'
+  process.env.ME_MAIL_FROM ?? 'hello@magicengine.cloud'
 
 /**
  * Build a From header with a human label, e.g.
- * `meMailFrom('Magic Engine 广告自检')` → `Magic Engine 广告自检 <notifications@magicengine.com.au>`
+ * `meMailFrom('Magic Engine 广告自检')` → `Magic Engine 广告自检 <hello@magicengine.cloud>`
  */
 export function meMailFrom(label: string): string {
   return `${label} <${ME_MAIL_FROM_ADDRESS}>`
