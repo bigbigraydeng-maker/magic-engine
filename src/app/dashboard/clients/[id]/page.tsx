@@ -638,6 +638,9 @@ export default function ClientDetailPage() {
                 <ToolCard href={`/dashboard/ai-visibility/${clientId}`}          title="AI 可见度追踪" desc="监控 AI 搜索中的品牌曝光"         badge="in_house" />
                 <ToolCard href={`/dashboard/clients/${clientId}/connectors`}     title="广告连接器"    desc="连接 Meta · Google 广告账户"      badge="in_house" />
                 <ToolCard href={`/dashboard/clients/${clientId}/ads-health`}     title="广告健康"      desc="每天自动体检 · 每条广告跟自己最好一周比 · 疲劳预警" badge="in_house" />
+                {/* 视频工厂此前只在内部导航(跨客户总览),客户维度没有入口 —— 跟紧邻的
+                    「素材库」不一致,而且 PM 是按客户干活的。?client= 进去只看这个客户。 */}
+                <ToolCard href={`/dashboard/factory?client=${clientId}`}          title="视频工厂"      desc="看片 · 拍板 · 跟 Claude 说人话改片 · 只看这个客户"  badge="in_house" />
                 <ToolCard href={`/dashboard/clients/${clientId}/assets`}          title="素材库"        desc="上传图片 → Vision AI 自动分析 → Hook/Middle/CTA 评分 → 视频提示词"  badge="in_house" />
                 <ToolCard href={`/dashboard/visuals?client=${clientId}`}         title="Launch Hub"    desc="Reels · 图片 · 视频素材生产"      badge="in_house" />
                 <ToolCard href={`/dashboard/clients/${clientId}/production`}     title="内容生产包"    desc="查看各维度内容包状态 · 生成内容后自动归集" badge="in_house" />

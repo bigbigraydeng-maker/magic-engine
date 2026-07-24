@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { runBriefPipeline } from '@/lib/brief/pipeline'
 import type { BriefGenerateRequest } from '@/types/magic-engine'
 
@@ -19,6 +20,10 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  // 🔒 登录校验:此接口会消耗 AI 额度(生成内容),必须确认调用者有权访问该客户。
+  // 此前完全裸奔 —— 知道 client_id 就能匿名反复调用烧钱。admin 直接过,client-viewer 限本人。
+  const access = await requireDashboardClientAccess(params.id)
+  if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
   try {
     const body = (await req.json()) as Partial<BriefGenerateRequest>
 

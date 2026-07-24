@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import type { WorkOrderStatus } from '@/lib/factory/types'
 import { STATUS_META, STATUS_ORDER } from './_components/statusMeta'
 import { ReviewInbox } from './_components/ReviewInbox'
@@ -42,6 +43,11 @@ function WorkerHealth({ lastHeartbeat, activeCount }: { lastHeartbeat: string | 
 }
 
 export default function FactoryCockpitPage() {
+  // ?client=<id> = 锁定单客户视图。客户导航里的「视频工厂」走这条路径 ——
+  // PM 的实际工作方式是一个窗口锁一个客户,不跨客户串;不锁的话每次进来还要先点一遍
+  // 客户 chip,而且底部工单列表混着别的客户,看着乱。
+  // 不带参数 = 跨客户总览(内部导航 Create 组那个入口)。
+  const lockedClient = useSearchParams().get('client')
   const [orders, setOrders] = useState<WorkOrder[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -83,38 +89,55 @@ export default function FactoryCockpitPage() {
     }
   }, [load])
 
+  // 锁定客户时,整页(审片区 + 底部工单状态)都只看这一个客户
+  const visibleOrders = useMemo(
+    () => (lockedClient ? orders.filter((o) => o.client_id === lockedClient) : orders),
+    [orders, lockedClient],
+  )
+
   // 待审客户(有 in_review 成片的)→ 顶部审片区的客户切换
   const reviewClients = useMemo(() => {
     const m = new Map<string, { id: string; name: string; count: number }>()
-    for (const o of orders) {
+    for (const o of visibleOrders) {
       if (o.status !== 'in_review') continue
       const e = m.get(o.client_id) ?? { id: o.client_id, name: o.client_name, count: 0 }
       e.count += 1
       m.set(o.client_id, e)
     }
     return Array.from(m.values()).sort((a, b) => b.count - a.count)
-  }, [orders])
+  }, [visibleOrders])
 
   // 自动选中第一个有待审的客户;当前选中的客户没待审了 → 跳到下一个
   useEffect(() => {
+    // 锁定视图:恒等于锁定的客户。即便当前没有待审成片,页头的「该客户工厂配置」
+    // 链接也要指得对 —— 没片子的时候恰恰最需要去检查配置。
+    if (lockedClient) { setSelectedClient(lockedClient); return }
     if (reviewClients.length === 0) { setSelectedClient(null); return }
     if (!reviewClients.some((c) => c.id === selectedClient)) setSelectedClient(reviewClients[0].id)
-  }, [reviewClients, selectedClient])
+  }, [reviewClients, selectedClient, lockedClient])
 
   const grouped = STATUS_ORDER
-    .map((status) => ({ status, items: orders.filter((o) => o.status === status) }))
+    .map((status) => ({ status, items: visibleOrders.filter((o) => o.status === status) }))
     .filter((g) => g.items.length > 0)
 
-  const deadCount = orders.filter((o) => o.status === 'dead_letter').length
+  const deadCount = visibleOrders.filter((o) => o.status === 'dead_letter').length
+  // 客户名只能从工单里拿。该客户一条工单都没有时拿不到 —— 标题退回「驾驶舱」而不是显示空白。
+  const lockedClientName = lockedClient ? (visibleOrders[0]?.client_name ?? null) : null
   const totalPending = reviewClients.reduce((s, c) => s + c.count, 0)
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">内容工厂 · 驾驶舱</h1>
+          <h1 className="text-2xl font-semibold text-slate-900">
+            视频工厂{lockedClientName ? ` · ${lockedClientName}` : ' · 驾驶舱'}
+          </h1>
           <p className="text-sm text-slate-500 mt-1 flex items-center gap-3 flex-wrap">
-            <span>看片拍板 + 跟 Claude 说人话改片,都在这一页</span>
+            <span>
+              {lockedClient
+                ? '只看这个客户。看片拍板 + 跟 Claude 说人话改片,都在这一页'
+                : '看片拍板 + 跟 Claude 说人话改片,都在这一页'}
+            </span>
             <WorkerHealth lastHeartbeat={worker.last_heartbeat_at} activeCount={worker.active_count} />
           </p>
         </div>
@@ -147,7 +170,7 @@ export default function FactoryCockpitPage() {
           )}
         </div>
 
-        {loading && orders.length === 0 ? (
+        {loading && visibleOrders.length === 0 ? (
           <p className="text-slate-400 text-sm">加载中…</p>
         ) : reviewClients.length === 0 ? (
           <div className="border border-slate-200 rounded-xl bg-white p-8 text-center text-slate-400 text-sm">
@@ -155,7 +178,7 @@ export default function FactoryCockpitPage() {
           </div>
         ) : (
           <>
-            {reviewClients.length > 1 && (
+            {!lockedClient && reviewClients.length > 1 && (
               <div className="flex flex-wrap gap-2 mb-4">
                 {reviewClients.map((c) => {
                   const active = c.id === selectedClient
@@ -185,12 +208,12 @@ export default function FactoryCockpitPage() {
       <details className="group">
         <summary className="cursor-pointer text-sm font-medium text-slate-600 flex items-center gap-2 select-none">
           <span className="text-slate-400 group-open:rotate-90 transition-transform inline-block">▸</span>
-          全部工单状态 · {orders.length} 条
+          全部工单状态 · {visibleOrders.length} 条
           {deadCount > 0 && <span className="text-red-600">· ⚠️ {deadCount} 条卡住了,需你手动重试</span>}
         </summary>
 
         <div className="mt-4 space-y-6">
-          {orders.length === 0 && (
+          {visibleOrders.length === 0 && (
             <p className="text-slate-400 text-sm">暂无工单。信号进来后会自动生成。</p>
           )}
           {grouped.map((g) => {

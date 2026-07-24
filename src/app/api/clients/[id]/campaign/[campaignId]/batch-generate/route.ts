@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { getActiveBrief, formatBriefForPrompt } from '@/lib/content/brief-injector'
 import { getCampaignById, formatCampaignForPrompt } from '@/lib/content/campaign-injector'
 import { auditSocialPost } from '@/lib/content/social-quality-audit'
@@ -38,6 +39,10 @@ export async function POST(
   { params }: { params: { id: string; campaignId: string } }
 ) {
   const { id: clientId, campaignId } = params
+  // 🔒 登录校验:此接口会消耗 AI 额度(生成内容),必须确认调用者有权访问该客户。
+  // 此前完全裸奔 —— 知道 client_id 就能匿名反复调用烧钱。admin 直接过,client-viewer 限本人。
+  const access = await requireDashboardClientAccess(params.id)
+  if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
   try {
     const body: BatchGenerateRequest = await req.json()

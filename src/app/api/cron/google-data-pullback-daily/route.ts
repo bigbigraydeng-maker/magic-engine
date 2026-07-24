@@ -32,6 +32,7 @@ import { startCronRun } from '@/lib/cron/run-logger'
 import { syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
 import { sendAdHealthDigest } from '@/lib/ads-strategy/digest'
+import { loadAdStrategyConfigWithSource, resolveDigestRecipients } from '@/lib/ads-strategy/config'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 900
@@ -210,6 +211,12 @@ export async function GET(req: NextRequest) {
       if (metaToken) {
         result.meta = await syncMeta(client.client_id, client.meta_ad_account_id, metaToken, slug)
 
+        // P21.K.5: per-client on/off. The snapshot above still runs (it feeds
+        // the monthly report etc.); only the Ad Strategy Engine honours the
+        // switch, so an FDE can silence a client without losing base data.
+        const { config: adStrategyConfig, source: adConfigSource } =
+          await loadAdStrategyConfigWithSource(client.client_id)
+
         // P21.K.1: campaign-level DAILY series for the Ad Strategy Engine.
         // Separate from the 30-day rolling snapshot above, which cannot answer
         // "has this campaign decayed against its own baseline" — its rows
@@ -217,30 +224,37 @@ export async function GET(req: NextRequest) {
         // Kept non-fatal: the snapshot is the pre-existing contract (read by
         // MetaAdsAdapter, the monthly report and the production-package view)
         // and must not regress if this newer pull fails.
-        result.ad_daily = await syncCampaignDailyInsights(
-          client.client_id,
-          client.meta_ad_account_id,
-          metaToken,
-        )
+        if (adStrategyConfig.enabled) {
+          result.ad_daily = await syncCampaignDailyInsights(
+            client.client_id,
+            client.meta_ad_account_id,
+            metaToken,
+          )
 
-        // P21.K.2: judge each campaign against its own baseline and store the
-        // day's account-health narrative. Reads the series just written above.
-        // Non-fatal — a judging failure must not affect data collection.
-        if (result.ad_daily?.success) {
-          const insightDate = new Date()
-          insightDate.setUTCDate(insightDate.getUTCDate() - 1)
-          const insightDateStr = insightDate.toISOString().slice(0, 10)
-          result.ad_health = await evaluateClientAdHealth(client.client_id, insightDateStr)
+          // P21.K.2: judge each campaign against its own baseline and store the
+          // day's account-health narrative. Reads the series just written above.
+          // Non-fatal — a judging failure must not affect data collection.
+          if (result.ad_daily?.success) {
+            const insightDate = new Date()
+            insightDate.setUTCDate(insightDate.getUTCDate() - 1)
+            const insightDateStr = insightDate.toISOString().slice(0, 10)
+            result.ad_health = await evaluateClientAdHealth(client.client_id, insightDateStr)
 
-          // P21.K.4: email the day's digest (best-effort). Green is
-          // de-frequenced so the PM isn't trained to ignore a daily 🟢.
-          if (result.ad_health?.success && result.ad_health.overall_verdict) {
-            const digest = await sendAdHealthDigest(
-              client.client_id,
-              client.client_name ?? 'Client',
-              insightDateStr,
-            )
-            result.ad_digest = { sent: digest.sent, decision: digest.decision, error: digest.error }
+            // P21.K.4: email the day's digest (best-effort). Green is
+            // de-frequenced so the PM isn't trained to ignore a daily 🟢.
+            // Recipients come from per-client config (P21.K.5), else global inbox.
+            // Skip sending when the config was a read-error fallback: enabled is
+            // then a guess, and re-opening a paused client to email is the one
+            // irreversible mistake we don't fail-open on (魏征).
+            if (adConfigSource !== 'fallback' && result.ad_health?.success && result.ad_health.overall_verdict) {
+              const digest = await sendAdHealthDigest(
+                client.client_id,
+                client.client_name ?? 'Client',
+                insightDateStr,
+                resolveDigestRecipients(adStrategyConfig),
+              )
+              result.ad_digest = { sent: digest.sent, decision: digest.decision, error: digest.error }
+            }
           }
         }
       }

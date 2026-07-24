@@ -251,12 +251,7 @@ const SHARED_MUSIC = join(STUDIO_ROOT, '_shared/music')
 // 为什么要迁:风格此前只能手改 Dropbox 里的 JSON,ME 完全不知道它存在 —— 违反「配置类
 // 数据必须有 UI」。而且本地文件的键名容易写错却不报错:CTS 那份写的是 caption_style / vo,
 // 而这里读的是 caption_mode、根本不读 vo —— 那两条设置从来没生效过,没人发现。
-function creativeProfile(brandKit, wo) {
-  const fromMe = wo?.brief?.creative_profile
-  if (fromMe && typeof fromMe === 'object' && Object.keys(fromMe).length > 0) {
-    log(`🎨 风格来自 ME 配置: ${Object.keys(fromMe).join(', ')}`)
-    return fromMe
-  }
+function readLocalProfile(brandKit) {
   const p = join(brandKit, 'factory_profile.json')
   if (!existsSync(p)) return {}
   try {
@@ -265,6 +260,18 @@ function creativeProfile(brandKit, wo) {
     log(`⚠️ factory_profile.json 解析失败: ${p},用引擎默认`)
     return {}
   }
+}
+
+function creativeProfile(brandKit, wo) {
+  const local = readLocalProfile(brandKit)
+  const fromMe = wo?.brief?.creative_profile
+  if (fromMe && typeof fromMe === 'object' && Object.keys(fromMe).length > 0) {
+    // 🔴 必须是**字段级**覆盖,不能整套替换。整套替换的话:PM 在 ME 里只改了个调色,
+    // 本地的 endcard_panel:false 就一起没了 —— Oztop 白字 logo 的结尾卡当场消失。
+    log(`🎨 风格:ME 覆盖 [${Object.keys(fromMe).join(', ')}],其余用本地配置`)
+    return { ...local, ...fromMe }
+  }
+  return local
 }
 
 // BGM 解析:profile.music(绝对路径或 _shared/music 下曲名)优先,回退 env / brandkit 自带曲。

@@ -26,6 +26,8 @@ const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/hei
 const ALLOWED_VIDEO_TYPES = ['video/mp4', 'video/quicktime', 'video/webm']
 const MAX_SIZE_BYTES = 200 * 1024 * 1024 // 视频比图片大得多;手机随手拍一段轻松过 50MB
 const MAX_FILES_PER_REQUEST = 20         // 防一次糊上来几百个文件把请求拖死
+/** 整个请求体上限。必须在读 body 之前用 content-length 拦,否则 formData() 先把它全缓冲了 */
+const MAX_REQUEST_BYTES = 400 * 1024 * 1024
 const BUCKET = 'visual-assets'
 
 export async function POST(
@@ -44,6 +46,16 @@ export async function POST(
     .maybeSingle()
   if (!client) return NextResponse.json({ error: '链接无效或已失效' }, { status: 404 })
 
+  // ⚠️ 必须在 formData() 之前拦:formData() 会把整个请求体读进内存,
+  // 20 个 200MB 文件 = 4GB 一次性缓冲,进程直接 OOM —— 之后的大小检查救不了它。
+  const declaredLength = Number(req.headers.get('content-length') ?? '0')
+  if (declaredLength > MAX_REQUEST_BYTES) {
+    return NextResponse.json(
+      { error: '这一批太大了,请分几次传' },
+      { status: 413 },
+    )
+  }
+
   let formData: FormData
   try {
     formData = await req.formData()
@@ -51,11 +63,18 @@ export async function POST(
     return NextResponse.json({ error: '上传数据有误,请重试' }, { status: 400 })
   }
 
-  const files = (formData.getAll('files') as File[]).slice(0, MAX_FILES_PER_REQUEST)
-  if (files.length === 0) return NextResponse.json({ error: '没有选择文件' }, { status: 400 })
+  const allFiles = formData.getAll('files') as File[]
+  if (allFiles.length === 0) return NextResponse.json({ error: '没有选择文件' }, { status: 400 })
 
+  const files = allFiles.slice(0, MAX_FILES_PER_REQUEST)
   const uploaded: string[] = []
   const errors: string[] = []
+
+  // 超量的必须如实回报。此前是静默 slice 掉 —— 店员一次选 50 张,只存 20 张,
+  // 页面还显示「✅ 收到 50 个」,30 张人间蒸发且双方都不知道(三路审查独立命中)。
+  if (allFiles.length > MAX_FILES_PER_REQUEST) {
+    errors.push(`一次最多传 ${MAX_FILES_PER_REQUEST} 个,后面 ${allFiles.length - MAX_FILES_PER_REQUEST} 个没传,请再点一次继续传`)
+  }
 
   for (const file of files) {
     const isImage = ALLOWED_IMAGE_TYPES.includes(file.type)
@@ -89,8 +108,10 @@ export async function POST(
         // 图片交给 analyzer;视频标 analyzed 让它跳过(见头注)
         status: isVideo ? 'analyzed' : 'pending',
         vision_metadata: {
-          // 🔴 溯源:这是客户自己传的真实素材,不是 AI 生成、也不是图库。
-          // 「真价只配真画面」那条红线要靠这个字段判断,必须在入库这一刻就记准。
+          // 溯源:记录「从哪条通道进来的」。**注意它的可信度上限就是通道本身** ——
+          // 链接可无限转发,客户完全可能把网图或 AI 生成图从这里传进来。
+          // 所以它是「客户主动提供」的证据,**不等于「真实拍摄」**,别拿它直接当
+          // 「真价只配真画面」那条红线的判据(目前也确实还没有代码消费它)。
           source: 'client_upload_link',
           uploaded_at: new Date().toISOString(),
           ...(isVideo ? { kind: 'video', analyzed: false, note: '视频未做画面分析' } : { kind: 'image' }),

@@ -159,9 +159,20 @@ describe('出片风格 — 投影与下发', () => {
     expect(mergeFactoryConfig({}, { creative_profile: { xfade: '0.35' } }).ok).toBe(false)
   })
 
-  it('转场边界值放行', () => {
-    expect(mergeFactoryConfig({}, { creative_profile: { xfade: 0 } }).ok).toBe(true)
-    expect(mergeFactoryConfig({}, { creative_profile: { xfade: 2 } }).ok).toBe(true)
+  it('🔴 转场必须小于 1 秒 —— worker 的段时长地板是 1.0s,转场 ≥ 段长会把整段吞掉', () => {
+    // 这个 bug 修过一次,别用配置项放回来
+    expect(mergeFactoryConfig({}, { creative_profile: { xfade: 1 } }).ok).toBe(false)
+    expect(mergeFactoryConfig({}, { creative_profile: { xfade: 2 } }).ok).toBe(false)
+  })
+
+  it('🔴 转场边界值放行并如实落库(0 不能被当空值剔掉,跟 endcard_panel:false 同类)', () => {
+    const zero = mergeFactoryConfig({}, { creative_profile: { xfade: 0 } })
+    expect(zero.ok).toBe(true)
+    expect(zero.ok && (zero.config.creative_profile as Record<string, unknown>).xfade).toBe(0)
+
+    const max = mergeFactoryConfig({}, { creative_profile: { xfade: 0.9 } })
+    expect(max.ok).toBe(true)
+    expect(max.ok && (max.config.creative_profile as Record<string, unknown>).xfade).toBe(0.9)
   })
 
   it('endcard_panel 传非布尔 → 拒', () => {

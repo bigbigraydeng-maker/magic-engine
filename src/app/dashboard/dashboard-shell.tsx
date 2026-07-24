@@ -142,6 +142,12 @@ function buildSelfServeSections(clientId: string): NavSection[] {
     {
       title: 'Create',
       items: [
+        // ⚠️ 这里是 **self-serve 客户** 的导航,不是内部导航。
+        // 「视频工厂」不能放这儿:middleware 对 client-viewer 只放行 /dashboard/clients/<自己>/**,
+        // /dashboard/factory 会被直接 redirect 回工作台(点了没反应);就算放行,
+        // /api/factory/work-orders 是 guardAdmin,整页也只会是 403 红条。
+        // 内部人员的入口在 ADMIN_SECTIONS 里(不带 ?client=,跨客户总览)。
+        { key: 'assets',  label: '素材库',   mark: 'AS', href: `/dashboard/clients/${clientId}/assets` },
         { key: 'visuals', label: 'Visual Studio', mark: 'VS', href: '/dashboard/visuals' },
         { key: 'content', label: 'Content',       mark: 'CT', href: '/dashboard/content' },
       ],
@@ -177,7 +183,9 @@ export default function DashboardShell({ children, userEmail, userRole, userTier
       for (const item of section.items) {
         if (!item.href) continue
         const exact = item.key === 'overview' || item.key === 'client-home'
-        if (exact ? pathname === item.href : (pathname === item.href || pathname.startsWith(item.href + '/'))) {
+        // href 可能带 query(如 ?client=xxx),而 pathname 永远不含 query —— 不剥掉就永不高亮
+        const hrefPath = item.href.split('?')[0]
+        if (exact ? pathname === hrefPath : (pathname === hrefPath || pathname.startsWith(hrefPath + '/'))) {
           return item.key
         }
       }
