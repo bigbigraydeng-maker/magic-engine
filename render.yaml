@@ -1,99 +1,16 @@
 services:
-  - type: web
-    name: magic-engine
-    env: node
-    plan: standard
-    buildCommand: npm install && npm run build
-    startCommand: npm start
-    envVars:
-      - key: NEXT_PUBLIC_SUPABASE_URL
-        sync: false
-      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
-      - key: OPENAI_API_KEY
-        sync: false
-      # ── Voice Agent (docs/voice-agent/) ──
-      - key: OPENAI_PROJECT_ID
-        sync: false
-      - key: OPENAI_WEBHOOK_SECRET
-        sync: false
-      - key: OPENAI_REALTIME_MODEL
-        value: gpt-realtime-2.1-mini
-      - key: OPENAI_SUMMARY_MODEL
-        value: gpt-4o-mini
-      - key: OPENAI_KB_MODEL
-        value: gpt-4o-mini
-      - key: INTERNAL_WORKER_TOKEN
-        sync: false
-      - key: REALTIME_WORKER_URL
-        sync: false           # private URL of the voice-realtime-worker service
-      - key: VOICE_STORE
-        value: supabase
-      - key: OUTBOUND_CALLING_ENABLED
-        value: "false"        # sandbox only until real-call go-live (板桥 硬闸 #3)
-      - key: VOICE_TEST_NUMBERS
-        sync: false
-      - key: VOICE_DEFAULT_AGENT_ID
-        sync: false           # single-number fallback when the DID isn't preserved
-      - key: DEFAULT_COUNTRY
-        value: NZ
-      - key: DEFAULT_TIMEZONE
-        value: Pacific/Auckland
-      - key: ANTHROPIC_API_KEY
-        sync: false
-      - key: ATLAS_API_KEY
-        sync: false
-      - key: HEYGEN_API_KEY
-        sync: false
-      - key: HEYGEN_DEFAULT_AVATAR_ID
-        sync: false
-      - key: HEYGEN_DEFAULT_VOICE_ID
-        sync: false
-      - key: SEMRUSH_API_KEY
-        sync: false
-      - key: SEMRUSH_DB
-        value: au
-      - key: DATAFORSEO_LOGIN
-        sync: false
-      - key: DATAFORSEO_PASSWORD
-        sync: false
-      - key: GITHUB_TOKEN
-        sync: false
-      - key: GITHUB_WEBHOOK_SECRET
-        sync: false
-      - key: PUBLER_API_KEY
-        sync: false
-      - key: PUBLER_WORKSPACE_ID
-        sync: false
-      - key: PERPLEXITY_API_KEY
-        sync: false
-      - key: CRON_SECRET
-        sync: false
-      - key: NEXT_PUBLIC_APP_URL
-        value: https://app.magicengine.com.au
-      - key: APP_URL
-        value: https://app.magicengine.com.au
-      - key: OPENAI_BASE_URL
-        value: https://gateway.ai.cloudflare.com/v1/bbd84393da8e5707ba617749dc17117c/magic-engine/openai
-      - key: ANTHROPIC_BASE_URL
-        value: https://gateway.ai.cloudflare.com/v1/bbd84393da8e5707ba617749dc17117c/magic-engine/anthropic
-      - key: YOUTUBE_API_KEY
-        sync: false
-      - key: CLOUDFLARE_MGMT_TOKEN
-        sync: false
-      - key: ADMIN_EMAILS
-        sync: false
-      - key: CLIENT_VIEWERS
-        sync: false
-      - key: RESEND_API_KEY
-        sync: false
-      - key: RENDER_EXTERNAL_URL
-        fromService:
-          type: web
-          name: magic-engine
-          property: host
+
+  # ⚠️ 本 blueprint 不定义 web 服务。
+  #
+  # 对外的生产 Web 服务是 Render 上的 `crazycontent`(srv-d79s6d95pdvs73boptcg),
+  # 它持有 app.magicengine.com.au / magicengine.com.au / magicengine.cloud 三个域名、
+  # 55 个环境变量(含 CRON_SECRET 与全部 API key),从 bigbigraydeng-maker/magic-engine
+  # 的 main 分支自动部署,归属另一个 blueprint。
+  #
+  # 这里原本还定义了一个同仓同分支的 web 服务 `magic-engine` —— 它没有域名、
+  # 环境变量只配了 16 个(缺 CRON_SECRET 和所有 API key),从未对外服务过,
+  # 只是每次 push 都构建一次、失败一次、发一封告警邮件。已于 2026-07-25 移除。
+  # 下面的 cron 全部 curl app.magicengine.com.au,即打到 crazycontent,与此无关。
 
   # NOTE: Voice Agent realtime link runs IN-PROCESS inside the web service (MVP mode) —
   # the webhook opens the OpenAI realtime WebSocket directly, so NO separate worker
