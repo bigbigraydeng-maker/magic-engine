@@ -3517,9 +3517,32 @@ FDE 未来 Wizard：客户信息 → 选启用渠道 → 客户提供 credential
 - [ ] **P21.J.M3 闭环**(≈1-2 周):发布($50 绝对硬顶 + publish_intent 幂等 + publish_failed 收敛)+ UTM 沿用 + 表现回流单链路 + winner 判定拆片入库 + 工厂内部自发疲劳信号。验收:真实成片上 CTS Meta 账户(**PM 显式 go 后才首发**,$10/天×3 天)+ 回流数据落 `flywheel_metrics` + 工作日志人话叙事无"工厂"字眼
 - [ ] **开放项**:信号契约与 34.A 对齐冻结(M1 前置)· asset_gap 信号归属 · MTC 计费触点(v1 占位不扣)· Airtable 观测层↔ME 真值同步(M2 起)
 
+#### P21.J 收敛 + 补线上化(2026-07-24 · 一天做通,9 PR 合并 #623–#630)
+
+> **背景**:此前工厂"后台全套但停摆"。这天把断点接通 + 配置搬进 ME + 三审整改 + 安全止血,并做了线上检测。M1/M2/M3 的**代码链路**已实质打通(交付→审片→发布全通),剩下的是运行态开关和一批挂账。
+
+- [x] **审片断点修复**(#623):交付直接落 `in_review`(原 `rendered` 靠已退役的 Airtable sweeper 转,成死胡同)。成片终于能进 `/dashboard/factory` 审片队列
+- [x] **客户配置页 + 客户维度入口**(#624/#630):`clients.factory_config` 有 UI(发布主页/目标/优惠/护栏);视频工厂进客户详情页工具卡(`?client=` 锁定单客户)
+- [x] **发布最后一米**(#625):`factory-publish-worker` 注册 render.yaml `*/10` + 发布正文补红线扫描(扫的=实际发 FB 的 `buildCaption`,同一段字)
+- [x] **自动排产**(#626):`factory-order-scheduler` 注册 render.yaml `0 20 * * *`;按客户开关 `auto_order_enabled`(默认关=自动花钱要显式开)
+- [x] **爆款配方接回工厂**(#627)+ **出片风格搬进 ME**(#629,字段级覆盖本地 `factory_profile.json`)+ **主力产品填写**(#629)+ **客户免登录上传链接**(#629,AES-256-GCM 令牌,不含明文 client_id)
+- [x] **三审整改 9 项**(#630):上传静默丢文件/OOM 前置拦/风格整套覆盖/转场吞帧/self-serve 死链 等
+- [x] **安全止血**(#630):5 个真裸奔的"烧 AI 额度"接口(reels/campaign/brief 生成)补 `requireDashboardClientAccess`。线上核验未登录一律 401
+
+**⚠️ 挂账(PM 2026-07-24 拍板登记,另开专项,不混进本 Phase):**
+- [ ] **P21.J.SEC 接口安全完整审计**:狄仁杰三审报"26 个 `/api/clients/[id]/*` 无鉴权",逐个核实后发现多数(ads 执行/cms 发布)其实已有锁、是误报,真裸奔仅 5 个已补。**需一次系统性复核**:grep 全部 access 守卫关键词 + 逐个确认,把"真裸奔"与"已有锁被误报"彻底分开,补齐真缺的。今天只是止血
+- [ ] **P21.J.UP 上传链接两取舍**:①无单条吊销(作废靠换 `UPLOAD_LINK_SECRET`,所有链接一起失效)②无速率限制(有真链接者可刷存储/烧 Vision 额度)。规模化前需补 per-client 限流 + 单链接吊销
+
+**🔧 运行态待办(线上检测 2026-07-24 发现 · 代码通了但"没通电"):**
+- [ ] **本地 worker 没在认领**:今天 00:18 有 CTS 新工单卡在 `queued` 没人做 = 那台 Mac 的 worker 没跑/没连。工厂要真转,先确认 worker 进程在跑(仓库无 launchd/pm2 配置,`ps`/`pm2 list` 上机看)且已在 07-24 后重启(否则风格下发用旧逻辑)
+- [ ] **`FACTORY_PUBLISH_LIVE` 未设 = 静默发草稿**:未配时片子 `status=published`+三落库全绿,FB 主页却只是没人看见的 DRAFT。验完草稿格式后 PM 显式在 Render 设 `=true` 才真发
+- [ ] **`auto_order_enabled` 无客户开启**:调度器每天照跑但一单不下(安全默认)。要工厂自己下单,逐客户开;首个跑通客户 = CTS
+- [ ] **`creative_profile` 无客户填**:出片风格仍全靠本地 JSON。CTS 现有风格(龙旗破云/golden_hour/短句大字/xfade 0.35)可抄进 ME 配置页接管
+- [ ] **1 条 `rendered` 旧单**(CTS 07-12,有 caption)永久卡住:交付直连修复只对新单生效,这条旧单需手动迁 `in_review` 或归档(PM 判断)
+
 ---
 
-### Phase 21.K — Ad Strategy Engine(投放师大脑 · 广告策略层)⭐⭐⭐ 📋 spec 已过双审 · PM 已批开工(2026-07-13)
+### Phase 21.K — Ad Strategy Engine(投放师大脑 · 广告策略层)⭐⭐⭐ ✅ 全部上线(2026-07-24 · PR #618/#619/#620/#621/#622/#631/#633/#634)
 
 > **登记日期**:2026-07-13 · **状态**:📋 spec v0.2 定稿(子牙起草 → 魏征 needs_rework 修 2 P0 + 板桥 approve_with_fixes 修 2 P0)· **PM 已批开工**「这是 ME 的广告核心功能」;migration apply 需逐次显式 `go apply`
 > **Spec**:`docs/superpowers/specs/2026-07-13-ad-strategy-engine.md`
@@ -3529,12 +3552,13 @@ FDE 未来 Wizard：客户信息 → 选启用渠道 → 客户提供 credential
 > **DAPE**:D 司马徽发现异常(未建,先规则触发)· A 华佗评分 · P 诸葛亮触发线+处方 · E 鲁班执行 · 广告支柱 · FDE 轨 · memory 客户级+行业级(含 PM 误报驳回回灌)
 > **两审 4 个 P0 修正**:①cron 栈 GHA→**Render Cron**(winner-sync 已迁,PR #542/#545,GHA best-effort 漏跑)②落库改独立 `ad_health_narratives` 表(`diagnostic_narratives` 的 CHECK+run_id+UNIQUE 三重约束堵死日度叙事)③日报正文 wireframe(倒金字塔·只讲例外,防平铺 payload 过载)④处方带「下一步归属」三类(就地做/已通知创意流水线/需 PM 定方向)
 
-- [ ] **P21.K.1 数据脊柱**(1.5-2 天):Render Cron 每日拉取(复用 `getMetaTokenForClient` env 路径)+ 日度增量 + **额外 last_7d 拉 7d frequency**(不聚合日度)+ learning/delivery 探测 + `ad_daily_insights` 表(**migration 待 PM `go apply`**)+ 多客户隔离降级。补掉「无每日 campaign 级自动拉取」缺口
-- [ ] **P21.K.2 大脑落库**(2-2.5 天):触发线引擎(config 驱动 + 冷启动 `insufficient_history` + 持续≠单日纪律)+ 漏斗层视图(per-client layers)+ 多视角对抗守门(证伪单日噪音/投放饥饿/learning 期噪音)+ budget_policy **execute 层硬闸** + 落 `ad_health_narratives`(**migration 待 PM `go apply`**)
-- [ ] **P21.K.3 仪表盘**(2-2.5 天):`/dashboard/clients/[id]/ads-health` 分层视图(PM 默认 + 专业下钻,不平铺六区块)+ verdict 卡含**近 7 天原始值序列**(信任核对)+ **驳回按钮**(误报回灌 memory)+ 趋势自然语言注解 + 漏斗生意语言
-- [ ] **P21.K.4 Resend 日报**(1 天):倒金字塔正文(全绿版一行 / 🔴 版≤3 条)+ 处方下一步归属 + **全绿降频抗疲劳**(只状态变化即时发)+ 术语翻译表落 UI + 域名验证 + 失败降级。替代 Zapier Gmail(免费额度撞 402)
-- [ ] **P21.K.5 跨客户**(2-3 天):配置 UI(红线:**自动定标预填**不给 PM 空框 + 人话 label + 当前值参照)+ `funnel_layers` per-client + 泛化到有 Meta 账户的客户 + handoff schema `creative_supply_requests`(策略层→作品层)
-- [ ] **顺带(可先合,无 migration)**:`/meta-ads/execute` force-pause 守卫(改预算后 entity read 回读 + 短重试 + 自动重激活)+ budget_policy 硬闸。codify memory `reference-meta-mcp-budget-update-forces-pause`
+- [x] **P21.K.1 数据脊柱** ✅(1.5-2 天):Render Cron 每日拉取(复用 `getMetaTokenForClient` env 路径)+ 日度增量 + **额外 last_7d 拉 7d frequency**(不聚合日度)+ learning/delivery 探测 + `ad_daily_insights` 表(**migration 待 PM `go apply`**)+ 多客户隔离降级。补掉「无每日 campaign 级自动拉取」缺口
+- [x] **P21.K.2 大脑落库** ✅(2-2.5 天):触发线引擎(config 驱动 + 冷启动 `insufficient_history` + 持续≠单日纪律)+ 漏斗层视图(per-client layers)+ 多视角对抗守门(证伪单日噪音/投放饥饿/learning 期噪音)+ budget_policy **execute 层硬闸** + 落 `ad_health_narratives`(**migration 待 PM `go apply`**)
+- [x] **P21.K.3 仪表盘** ✅(2-2.5 天):`/dashboard/clients/[id]/ads-health` 分层视图(PM 默认 + 专业下钻,不平铺六区块)+ verdict 卡含**近 7 天原始值序列**(信任核对)+ **驳回按钮**(误报回灌 memory)+ 趋势自然语言注解 + 漏斗生意语言
+- [x] **P21.K.4 Resend 日报** ✅(1 天):倒金字塔正文(全绿版一行 / 🔴 版≤3 条)+ 处方下一步归属 + **全绿降频抗疲劳**(只状态变化即时发)+ 术语翻译表落 UI + 域名验证 + 失败降级。替代 Zapier Gmail(免费额度撞 402)
+- [x] **P21.K.5 跨客户** ✅(2-3 天):配置 UI(红线:**自动定标预填**不给 PM 空框 + 人话 label + 当前值参照)+ `funnel_layers` per-client + 泛化到有 Meta 账户的客户 + handoff schema `creative_supply_requests`(策略层→作品层)
+- [x] **顺带** ✅(force-pause 守卫已随 #634 落地):`/meta-ads/execute` force-pause 守卫(改预算后 entity read 回读 + 短重试 + 自动重激活)+ budget_policy 硬闸。codify memory `reference-meta-mcp-budget-update-forces-pause`
+- [ ] **P21.K.7 ad 级数据脊柱**(登记 2026-07-25,PM 拍板):日度 cron 补拉 **ad 级**(每条广告每天一行,复用 `ad_daily_insights` 的 `level='ad'`),让「某天新增了哪条广告 / 哪条在拖后腿」可被系统自查,不依赖 Meta MCP(Oztop 账户未开通)也不用人翻广告后台。**背书案例**:Oztop Lead Form Cold Broad 的 CPL 7/17 起翻倍,campaign 级只能定位到「填表率腰斩 + 出现出站点击」。含 `parent_id` 列(ad→campaign 归属,**migration 待 PM `go apply`**)+ 首拉 30 天回补 + 分页完整性守卫。顺带铺好 34.B Creative Lifecycle 要的作品层日度基础设施
 - [ ] **多视角对抗复盘工作流**(1-2 天,可后置):battle-plan §8 方法论固化成可复用 Workflow/agent(N 视角互相证伪前提 → 作战计划 → 喂鲁班),异常触发非每日跑
 - [ ] **开放项**:三张新表 migration 逐次 PM `go apply`(`ad_daily_insights` / `ad_strategy_configs`+`_triggers` / `ad_health_narratives`)· P5 泛化首批客户(Oztop?)· 姊妹 spec Creative Lifecycle 同一 GHA 笔误待独立小 PR 修
 

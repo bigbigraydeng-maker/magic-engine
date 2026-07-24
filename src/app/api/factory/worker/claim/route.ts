@@ -79,18 +79,22 @@ export async function POST(req: NextRequest) {
     if (clipErr) {
       return NextResponse.json({ error: `clip lookup failed: ${clipErr.message}` }, { status: 500 })
     }
-    for (const c of clipRows ?? []) {
-      let signed: string | null = null
-      if (typeof c.storage_url === 'string' && !/^[a-z]+:\/\//i.test(c.storage_url)) {
+    // 并行签名:此前是 for + await 串行,每个 clip 一次网络往返排队等。
+    // 一个工单十几个签名 = 十几次往返串起来,服务端稍慢就整体超过 Cloudflare 的
+    // 超时阈值 → worker 领单收到 522(2026-07-24 实测 39s 超时)。
+    const signedClips = await Promise.all(
+      (clipRows ?? []).map(async (c) => {
+        const isPath = typeof c.storage_url === 'string' && !/^[a-z]+:\/\//i.test(c.storage_url)
+        if (!isPath) {
+          return { clip_id: c.id as string, storage_url: c.storage_url as string, signed_url: c.storage_url as string }
+        }
         const { data: s } = await supabaseAdmin.storage
           .from(FACTORY_BUCKET)
-          .createSignedUrl(c.storage_url, SIGNED_DOWNLOAD_TTL_S)
-        signed = s?.signedUrl ?? null
-      } else {
-        signed = c.storage_url as string
-      }
-      clips.push({ clip_id: c.id as string, storage_url: c.storage_url as string, signed_url: signed })
-    }
+          .createSignedUrl(c.storage_url as string, SIGNED_DOWNLOAD_TTL_S)
+        return { clip_id: c.id as string, storage_url: c.storage_url as string, signed_url: s?.signedUrl ?? null }
+      }),
+    )
+    clips.push(...signedClips)
   }
 
   // 三件套签名上传 URL(路径即 complete 时的前缀校验契约)
@@ -100,10 +104,15 @@ export async function POST(req: NextRequest) {
     srt: `renders/${clientId}/${workOrderId}/captions.srt`,
   }
   const uploads: Record<string, { path: string; signed_url: string; token: string } | null> = {}
-  for (const [key, path] of Object.entries(uploadPaths)) {
-    const { data: u, error: uErr } = await supabaseAdmin.storage
-      .from(FACTORY_BUCKET)
-      .createSignedUploadUrl(path, { upsert: true })
+  const uploadResults = await Promise.all(
+    Object.entries(uploadPaths).map(async ([key, path]) => {
+      const { data: u, error: uErr } = await supabaseAdmin.storage
+        .from(FACTORY_BUCKET)
+        .createSignedUploadUrl(path, { upsert: true })
+      return { key, path, u, uErr }
+    }),
+  )
+  for (const { key, path, u, uErr } of uploadResults) {
     if (uErr || !u) {
       return NextResponse.json(
         { error: `signed upload url failed (${key}): ${uErr?.message ?? 'unknown'}` },
@@ -119,14 +128,19 @@ export async function POST(req: NextRequest) {
     ? (brief['clip_generation_plan'] as Array<Record<string, unknown>>)
     : []
   const clipUploads: Array<{ idempotency_key: string; path: string; signed_url: string; token: string }> = []
-  for (const item of genPlan) {
-    const role = String(item['segment_role'] ?? 'clip')
-    const pos = Number(item['position'] ?? 0)
-    // 生成式统一进 b-generated;实拍补拍走 a-real(v1 生成为主)
-    const path = `clips/b-generated/${clientId}/${workOrderId}_${role}_${pos}.mp4`
-    const { data: u, error: uErr } = await supabaseAdmin.storage
-      .from(FACTORY_BUCKET)
-      .createSignedUploadUrl(path, { upsert: true })
+  const genResults = await Promise.all(
+    genPlan.map(async (item) => {
+      const role = String(item['segment_role'] ?? 'clip')
+      const pos = Number(item['position'] ?? 0)
+      // 生成式统一进 b-generated;实拍补拍走 a-real(v1 生成为主)
+      const path = `clips/b-generated/${clientId}/${workOrderId}_${role}_${pos}.mp4`
+      const { data: u, error: uErr } = await supabaseAdmin.storage
+        .from(FACTORY_BUCKET)
+        .createSignedUploadUrl(path, { upsert: true })
+      return { item, role, pos, path, u, uErr }
+    }),
+  )
+  for (const { item, role, pos, path, u, uErr } of genResults) {
     if (uErr || !u) {
       return NextResponse.json(
         { error: `signed clip upload url failed (${role}:${pos}): ${uErr?.message ?? 'unknown'}` },

@@ -18,6 +18,14 @@ export async function getActiveBrief(clientId: string): Promise<MasterBrief | nu
 }
 
 export function formatBriefForPrompt(brief: MasterBrief): string {
+  // 叙事人格(brand_voice.persona):有则本条内容用「这个真人」的第一人称口吻写,
+  // 没有则保持原来的品牌口吻 —— 不是所有客户都适合真人视角(个人 IP 适合,
+  // 匿名品牌号硬套「我」会变成编造身份)。
+  const persona = (brief.brand_voice as { persona?: { name?: string; role?: string } } | null)?.persona
+  const personaLine = persona?.name
+    ? `\n- 叙事人格：${persona.name}${persona.role ? `（${persona.role}）` : ''} —— 用第一人称「我/我们」讲,不用旁白腔`
+    : ''
+
   // Resolve visual style — prefer structured vi_* fields, fall back to legacy
   const styleKeywords = brief.vi_style_keywords?.join(', ')
     || brief.visual_style
@@ -69,7 +77,7 @@ export function formatBriefForPrompt(brief: MasterBrief): string {
 - 目标客群：${brief.primary_audience || (brief.target_audience as { description?: string } | null)?.description || '未设置'}
 - 客群痛点：${brief.pain_points?.join('、') || '未设置'}
 - 购买触发点：${brief.buying_trigger || '未设置'}
-- 品牌语气：${brief.tone || (brief.brand_voice as { tone?: string } | null)?.tone || '专业友好'}
+- 品牌语气：${brief.tone || (brief.brand_voice as { tone?: string } | null)?.tone || '专业友好'}${personaLine}
 - 语气示例：${brief.voice_examples?.join(' / ') || '未设置'}
 - 禁止使用的词：${brief.avoid_words?.join('、') || '无'}
 - 主力产品：${brief.products?.map((p: { name: string; usp?: string }) => `${p.name}（${p.usp}）`).join('；') || '未设置'}

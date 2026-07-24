@@ -152,9 +152,24 @@ export async function generateAdCopy(params: {
           .map(([k, v]) => `${k}=${v}`)
           .join('、')
       : ''
+    // 叙事人格:PM 2026-07-25 定 CTS 用「Baker Gu · China Travel Specialist」第一人称。
+    // 依据是真实爆款对照(FB reel「I Took My Parents to Zhangjiajie」,28s,原声,105 赞):
+    // 打动人的是「一个具体的人带着情感讲经历」,不是品牌播报卖点。
+    // 🔴 但第一人称有编造身份的风险:必须是客户真实存在的人(PM 提供),且只用 name+role,
+    // 绝不替这个人编经历/编行程 —— 具体地点行程仍只能来自 brief 的可溯源条目。
+    const persona = (brief.brand_voice as { persona?: { name?: string; role?: string } } | null)?.persona
+    const personaName = typeof persona?.name === 'string' ? persona.name.trim() : ''
+    const narrativeBlock = personaName
+      ? `\n\n**用第一人称叙事,不要写成广告**:你就是「${personaName}」${persona?.role ? `(${persona.role})` : ''}。` +
+        `按这个结构写:①hook=「我/我们做了什么」的具体行动(不是口号);②中段=经历里的具体细节,一句一个,` +
+        `每句 ≤6 词;③临近结尾要有一句**情感回扣**(写人的反应/感受,不是产品卖点);④cta=把话转向观众` +
+        `(「你也可以…」),用邀请口吻不用命令口吻。全程「我/我们」,禁止第三人称自称品牌名。` +
+        `**只讲品牌资料里能溯源的真实内容,绝不替「${personaName}」编造他没做过的经历或不存在的行程。**`
+      : ''
     const systemPrompt =
       `你为「${brand}」写 9:16 竖屏**信息流短视频广告**(Facebook/Instagram Reels)文案。` +
       `这是刷到就要在前 3 秒留住观众的广告,不是品牌宣传片——第一段(hook)是全片生死线。` +
+      narrativeBlock +
       `严格遵守下面的品牌约束,AU 英语拼写。**除下方"客户已确认真实促销事实"明确给出的数字外,不编造任何价格/折扣/数字**` +
       `(没依据的 $X、X% off 一律不写;无促销数字时紧迫感用 clearance / while stocks last / limited stock 这类真实表达)。` +
       `只返回 JSON,不要解释。\n\n${formatBriefForPrompt(brief)}`
@@ -208,7 +223,9 @@ export async function generateAdCopy(params: {
           ? { role, title_main: price, title_sub: angle } // 真价当 hook 主视觉
           : i === segmentRoles.length - 1
             ? { role, caption: urgency }
-            : { role, caption: wasLine },
+            : i === 1
+              ? { role, caption: wasLine } // 只带一次,不逐段复读
+              : { role },
       ),
       endcard: { cta: 'Shop now', offer: [urgency], url },
     }
@@ -216,10 +233,14 @@ export async function generateAdCopy(params: {
   // 无 verified_offer:绝不编数字。CTA 按 Goal 微调但绝对安全(魏征 B4-P1:不硬编行业专属服务承诺)。
   const isConversion = expectedMetric === 'monthly_revenue' || expectedMetric === 'leads_count'
   return {
+    // 中间段留空,只在第 2 镜带一次 angle:配方拉长到 8 镜后,原来「每段都填 angle」
+    // 会让同一句话在画面上重复 7 次。宁可留白让画面说话,也不要满屏复读。
     segments: segmentRoles.map((role, i) =>
       i === 0
         ? { role, title_main: brand.toUpperCase().slice(0, 24), title_sub: angle }
-        : { role, caption: angle },
+        : i === 1
+          ? { role, caption: angle }
+          : { role },
     ),
     endcard: isConversion
       ? { cta: 'Enquire now', offer: ['Talk to us today'], url }

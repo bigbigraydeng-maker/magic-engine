@@ -57,7 +57,6 @@ describe('getCampaignDailyInsights', () => {
         clicks:        '150',
         frequency:     '1.13',
         cpm:           '13.41',
-        outbound_clicks_ctr: [{ action_type: 'outbound_click', value: '2.46' }],
         actions: [
           { action_type: 'lead', value: '6' },
           { action_type: 'onsite_conversion.messaging_conversation_started_7d', value: '2' },
@@ -65,7 +64,7 @@ describe('getCampaignDailyInsights', () => {
       }],
     }))
 
-    const rows = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
+    const { rows } = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
 
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({
@@ -80,10 +79,51 @@ describe('getCampaignDailyInsights', () => {
       messaging_conversations: 2,
       results:      8,
     })
-    // 2.46% arrives as a percent and is stored as a fraction.
-    expect(rows[0].ctr).toBeCloseTo(0.0246, 6)
+    // CTR is clicks/impressions, stored as a fraction.
+    expect(rows[0].ctr).toBeCloseTo(150 / 6097, 6)
     // cost_per_result = spend / results
     expect(rows[0].cost_per_result).toBeCloseTo(81.77 / 8, 6)
+  })
+
+  it('keeps ONE ctr metric per campaign — outbound_clicks_ctr never leaks in', async () => {
+    // Lead Form / CTWA campaigns: Meta returns outbound_clicks_ctr on some days
+    // (an order of magnitude smaller than click CTR) and omits it on others.
+    // Preferring it when present mixed two metrics in one campaign's series and
+    // broke the relative-baseline fatigue judgement. Both days below must come
+    // out on the same clicks/impressions basis.
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      data: [
+        {
+          campaign_id: 'lead-form', date_start: '2026-07-13',
+          spend: '30', impressions: '4000', clicks: '80',
+          outbound_clicks_ctr: [{ action_type: 'outbound_click', value: '0.10' }],
+        },
+        {
+          campaign_id: 'lead-form', date_start: '2026-07-14',
+          spend: '30', impressions: '4000', clicks: '80',
+        },
+      ],
+    }))
+
+    const { rows } = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-14')
+    expect(rows[0].ctr).toBeCloseTo(80 / 4000, 6) // NOT 0.0010 from outbound
+    expect(rows[1].ctr).toBeCloseTo(80 / 4000, 6)
+    expect(rows[0].ctr).toBe(rows[1].ctr)
+  })
+
+  it('records a zero-click day as ctr 0, not a gap', async () => {
+    // The baseline windows drop nulls; a served-but-unclicked day is the worst
+    // day there is and must count against the campaign.
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      data: [
+        { campaign_id: 'a', date_start: '2026-07-13', spend: '10', impressions: '2000', clicks: '0' },
+        { campaign_id: 'a', date_start: '2026-07-14', spend: '0', impressions: '0', clicks: '0' },
+      ],
+    }))
+
+    const { rows } = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-14')
+    expect(rows[0].ctr).toBe(0)     // impressions served, zero clicks
+    expect(rows[1].ctr).toBeNull()  // nothing served — genuinely no data
   })
 
   it('follows pagination instead of truncating (the top-10 bug this replaces)', async () => {
@@ -96,7 +136,7 @@ describe('getCampaignDailyInsights', () => {
         data: [{ campaign_id: 'b', date_start: '2026-07-13', spend: '2', impressions: '20', clicks: '2' }],
       }))
 
-    const rows = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
+    const { rows } = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(rows.map(r => r.campaign_id)).toEqual(['a', 'b'])
@@ -121,11 +161,11 @@ describe('getCampaignDailyInsights', () => {
       ],
     }))
 
-    const rows = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
+    const { rows } = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
     expect(rows.map(r => r.campaign_id)).toEqual(['c'])
   })
 
-  it('returns rows gathered so far when a later page fails', async () => {
+  it('returns rows gathered so far when a later page fails, flagged incomplete', async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({
         data:   [{ campaign_id: 'a', date_start: '2026-07-13', spend: '1', impressions: '10', clicks: '1' }],
@@ -133,15 +173,18 @@ describe('getCampaignDailyInsights', () => {
       }))
       .mockResolvedValueOnce(errorResponse(500))
 
-    const rows = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
+    const { rows, complete } = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
     expect(rows.map(r => r.campaign_id)).toEqual(['a'])
+    expect(complete).toBe(false)
   })
 
-  it('returns [] rather than throwing when the request blows up', async () => {
+  it('flags incomplete rather than throwing when the request blows up', async () => {
+    // An empty result and a failed request must not look the same: silence
+    // would read as "this account ran nothing yesterday".
     fetchMock.mockRejectedValueOnce(new Error('network down'))
     await expect(
       getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13'),
-    ).resolves.toEqual([])
+    ).resolves.toEqual({ rows: [], complete: false })
   })
 
   it('does NOT double-count when parent+child action types both appear', async () => {
@@ -161,7 +204,7 @@ describe('getCampaignDailyInsights', () => {
       }],
     }))
 
-    const rows = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
+    const { rows } = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
     // 10 leads + 4 messaging = 14, NOT 20 + 8 = 28.
     expect(rows[0].leads).toBe(10)
     expect(rows[0].messaging_conversations).toBe(4)
@@ -178,7 +221,7 @@ describe('getCampaignDailyInsights', () => {
       }],
     }))
 
-    const rows = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
+    const { rows } = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
     expect(rows[0].leads).toBe(7)
   })
 
@@ -191,7 +234,7 @@ describe('getCampaignDailyInsights', () => {
       }],
     }))
 
-    const rows = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
+    const { rows } = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
     expect(rows[0].results).toBe(0)
     // No results means cost-per-result is undefined, not zero or Infinity.
     expect(rows[0].cost_per_result).toBeNull()

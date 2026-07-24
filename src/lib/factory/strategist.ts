@@ -11,9 +11,9 @@ import {
   FACTORY_DAILY_ORDER_CAP,
   FACTORY_MIN_BALANCE_USD,
   FACTORY_ORDER_BUDGET_CAP_USD,
-  FACTORY_SHOT_PLAN,
   FACTORY_WINNER_FREQUENCY_UNLOCK,
 } from './constants'
+import { pickShotRecipe, type ShotRecipe } from './shot-recipes'
 import type {
   AngleSource,
   ClipGenerationPlanItem,
@@ -262,7 +262,12 @@ function sceneAngleOverlap(sceneTag: string, angle: string): number {
  *   为 true 时:①池子只留 a_real(排除 b_generated)②真料不够的镜**跳过、不生成 AI 补位**(AI 绝不背书真价)。
  *   全真料不足 5 镜 → 少几镜也全真(endcard 仍给 CTA);一条真料都没有 → segments 空,调用方拒单。
  */
-export function selectClips(ctx: GateContext, angle: string, requireRealFootage: boolean): ClipSelection {
+export function selectClips(
+  ctx: GateContext,
+  angle: string,
+  requireRealFootage: boolean,
+  recipe: ShotRecipe = pickShotRecipe(null, 0),
+): ClipSelection {
   // 排序:①角度 token 重叠(货对题)②真实产品片优先 ③冷素材优先(防审美疲劳)
   const pool = ctx.clipStock
     .filter((c) => clipAllowed(ctx, c))
@@ -288,8 +293,9 @@ export function selectClips(ctx: GateContext, angle: string, requireRealFootage:
   // 不能跨镜重复出镜,否则成片「素材单一」。distinct 场景不够 → 该镜 generationPlan 补生成。
   const usedScenes = new Set<string>()
 
-  // 5 镜方案(中段拆 3 短镜):每镜拉一条不同场景 clip = 治定格 + 素材单一 + 太平(护栏 2/7)
-  FACTORY_SHOT_PLAN.forEach((shot, i) => {
+  // 分镜按配方走(治「千篇一律」):段数/时长/转场/运镜都由配方决定,不再是写死的 5 段等长。
+  // 每镜仍拉一条不同场景 clip = 治定格 + 素材单一(护栏 2/7)。
+  recipe.shots.forEach((shot, i) => {
     const role = shot.role
     const clip = pool.find((c) => !used.has(c.id) && !(c.scene_tag && usedScenes.has(c.scene_tag)))
     if (clip) {
@@ -300,6 +306,7 @@ export function selectClips(ctx: GateContext, angle: string, requireRealFootage:
         duration_hint_s: shot.duration_hint_s,
         description: `${role} — ${clip.scene_tag}`,
         clip_ids: [clip.id],
+        transition: shot.transition,
       })
       clipLinks.push({ clip_id: clip.id, segment_role: role, position: i })
     } else if (requireRealFootage) {
@@ -312,12 +319,13 @@ export function selectClips(ctx: GateContext, angle: string, requireRealFootage:
         duration_hint_s: shot.duration_hint_s,
         description: `${role} — to generate for angle: ${angle}`,
         clip_ids: [],
+        transition: shot.transition,
       })
       generationPlan.push({
         segment_role: role,
         position: i,
         scene_tag: 'pending_resolution',
-        motion_type: role === 'hook' ? 'push_in' : role === 'middle' ? 'lateral_truck' : 'pull_back',
+        motion_type: shot.motion,
         prompt_hint: `${angle} — ${role} segment, real motion, 9:16 vertical`,
         idempotency_key: `{work_order_id}:${role}:${i}`,
         source_image_url: null,
@@ -444,7 +452,14 @@ export function decideSignal(ctx: GateContext): Decision {
   const budgetCap = FACTORY_ORDER_BUDGET_CAP_USD
   // 价格广告红线:有 verifiedOffer(真价)→ 底料强制真拍(a_real),AI 绝不背书真价(魏征 B8)
   const requireRealFootage = ctx.verifiedOffer != null
-  const { segments, clipLinks, generationPlan } = selectClips(ctx, anglePick.angle, requireRealFootage)
+  // 分镜配方(治千篇一律):有真促销 → 偏转化型节奏;否则走品牌叙事。
+  // 轮换种子用该客户最近工单数 —— 否则「按目标选」会退化成每条 sales 片都是快剪型。
+  const recipe = pickShotRecipe(
+    ctx.verifiedOffer != null ? 'sales' : 'brand',
+    ctx.recentAngles.length,
+    ctx.hasPersona === true,
+  )
+  const { segments, clipLinks, generationPlan } = selectClips(ctx, anglePick.angle, requireRealFootage, recipe)
   if (requireRealFootage && segments.length === 0) {
     return { outcome: 'rejected', reason: 'price_ad_needs_real_footage', detail: 'verified_offer set but no a_real footage available' }
   }
