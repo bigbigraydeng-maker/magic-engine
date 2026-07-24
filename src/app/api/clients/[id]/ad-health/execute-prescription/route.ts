@@ -68,7 +68,9 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     )
   }
 
-  const result = await syncWinnerReels(clientId)
+  // skipFatiguePause: a button labelled "补新素材" must ONLY add — pausing other
+  // ads here would be an action beyond what the user consented to.
+  const result = await syncWinnerReels(clientId, { skipFatiguePause: true })
 
   if (result.status === 'error') {
     return NextResponse.json(
