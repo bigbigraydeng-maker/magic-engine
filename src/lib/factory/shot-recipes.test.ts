@@ -40,11 +40,11 @@ describe('配方结构 — 防静默毁片', () => {
     }
   })
 
-  it('总时长落在竖屏完播甜区 10–20s', () => {
+  it('总时长落在竖屏完播甜区 10–30s(故事型刻意更长:讲情感需要时间)', () => {
     for (const r of SHOT_RECIPES) {
       const total = r.shots.reduce((s, x) => s + x.duration_hint_s, 0)
       expect(total, `${r.key} 总时长 ${total}s 越界`).toBeGreaterThanOrEqual(10)
-      expect(total).toBeLessThanOrEqual(20)
+      expect(total).toBeLessThanOrEqual(30)
     }
   })
 
@@ -88,6 +88,20 @@ describe('pickShotRecipe — 选择与轮换', () => {
   it('有真促销走转化型节奏,纯品牌走叙事型', () => {
     expect(pickShotRecipe('sales', 0).key).toBe('fast_cut')
     expect(pickShotRecipe('brand', 0).key).toBe('narrative')
+  })
+
+  it('🔴 有叙事人格 → 强制故事型(第一人称需要时间铺情感,短配方讲不完)', () => {
+    for (const goal of ['sales', 'brand', null]) {
+      expect(pickShotRecipe(goal, 0, true).key).toBe('personal_story')
+    }
+    // 无人格时不受影响,仍按目标选
+    expect(pickShotRecipe('sales', 0, false).key).toBe('fast_cut')
+  })
+
+  it('故事型总时长接近真实爆款量级(≥24s,对标 28.2s 那条)', () => {
+    const story = SHOT_RECIPES.find((r) => r.key === 'personal_story')!
+    const total = story.shots.reduce((s, x) => s + x.duration_hint_s, 0)
+    expect(total).toBeGreaterThanOrEqual(24)
   })
 
   it('未知/空目标不炸,返回合法配方', () => {

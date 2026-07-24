@@ -125,6 +125,8 @@ export interface GateContext {
   allowBTrackLandmarkAds: boolean
   /** B4:客户级持久真促销(factory_config.verified_offer),该客户所有活动默认带上;单条活动可用 signal 覆盖 */
   verifiedOffer: VerifiedOffer | null
+  /** 客户是否配了叙事人格(master_briefs.brand_voice.persona)→ 选故事型分镜 + 第一人称文案 */
+  hasPersona?: boolean
 }
 
 export interface AngleSource {

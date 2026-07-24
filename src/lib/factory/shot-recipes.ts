@@ -92,6 +92,24 @@ export const SHOT_RECIPES: ShotRecipe[] = [
     ],
   },
   {
+    key: 'personal_story',
+    label: '故事型 · 8 镜 26 秒',
+    fits: '真人第一人称叙事 —— 有叙事人格的客户优先用这个',
+    // 对标真实爆款(FB「I Took My Parents to Zhangjiajie」28.2s,原声,第一人称)。
+    // 关键是**够长**:12-15s 讲不完一个有情感的故事,只能堆卖点。
+    // 节奏设计:开场稍长立人物 → 中段推进 → 情感回扣那镜留足 3.2s 给观众反应 → 收尾邀请。
+    shots: [
+      { role: 'hook',   duration_hint_s: 3.6, transition: 'fade',        motion: 'push_in' },
+      { role: 'middle', duration_hint_s: 3.0, transition: 'dissolve',    motion: 'lateral_truck' },
+      { role: 'middle', duration_hint_s: 2.8, transition: 'smoothleft',  motion: 'push_in' },
+      { role: 'middle', duration_hint_s: 2.8, transition: 'wipeleft',    motion: 'pull_back' },
+      { role: 'middle', duration_hint_s: 3.0, transition: 'dissolve',    motion: 'lateral_truck' },
+      { role: 'middle', duration_hint_s: 3.2, transition: 'smoothright', motion: 'static_hold' },
+      { role: 'middle', duration_hint_s: 3.4, transition: 'fade',        motion: 'push_in' },
+      { role: 'cta',    duration_hint_s: 3.2, transition: 'circleopen',  motion: 'pull_back' },
+    ],
+  },
+  {
     key: 'single_focus',
     label: '单点聚焦 · 3 镜讲透',
     fits: '单品、单卖点 —— 不贪多,一个点说清楚',
@@ -118,7 +136,16 @@ const GOAL_PREFERENCE: Record<string, string[]> = {
  * 否则「按目标选」很快会退化成新的千篇一律(每条 sales 片都是快剪型)。
  * 纯函数、零随机:同样输入永远同样输出,可测、可复现(Date.now/Math.random 在本仓禁用)。
  */
-export function pickShotRecipe(contentGoal: string | null, rotationSeed: number): ShotRecipe {
+export function pickShotRecipe(
+  contentGoal: string | null,
+  rotationSeed: number,
+  /** 客户配了叙事人格(brand_voice.persona)→ 优先故事型:第一人称需要时间铺情感 */
+  hasPersona = false,
+): ShotRecipe {
+  if (hasPersona) {
+    const story = SHOT_RECIPES.find((r) => r.key === 'personal_story')
+    if (story) return story
+  }
   const keys = GOAL_PREFERENCE[contentGoal ?? ''] ?? ['narrative', 'fast_cut', 'problem_solution', 'single_focus']
   const seed = Number.isFinite(rotationSeed) && rotationSeed >= 0 ? Math.floor(rotationSeed) : 0
   const key = keys[seed % keys.length]

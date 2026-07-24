@@ -454,7 +454,11 @@ export function decideSignal(ctx: GateContext): Decision {
   const requireRealFootage = ctx.verifiedOffer != null
   // 分镜配方(治千篇一律):有真促销 → 偏转化型节奏;否则走品牌叙事。
   // 轮换种子用该客户最近工单数 —— 否则「按目标选」会退化成每条 sales 片都是快剪型。
-  const recipe = pickShotRecipe(ctx.verifiedOffer != null ? 'sales' : 'brand', ctx.recentAngles.length)
+  const recipe = pickShotRecipe(
+    ctx.verifiedOffer != null ? 'sales' : 'brand',
+    ctx.recentAngles.length,
+    ctx.hasPersona === true,
+  )
   const { segments, clipLinks, generationPlan } = selectClips(ctx, anglePick.angle, requireRealFootage, recipe)
   if (requireRealFootage && segments.length === 0) {
     return { outcome: 'rejected', reason: 'price_ad_needs_real_footage', detail: 'verified_offer set but no a_real footage available' }

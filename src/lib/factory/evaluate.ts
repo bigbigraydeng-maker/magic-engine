@@ -147,6 +147,10 @@ async function loadContext(
     clipStock: clips ?? [],
     allowBTrackLandmarkAds: factoryConfig['allow_b_track_landmark_ads'] === true,
     verifiedOffer: parseVerifiedOffer(factoryConfig['verified_offer']), // B4:客户级持久真促销
+    // 叙事人格:配了就走故事型分镜 + 第一人称文案(见 copy-generator / shot-recipes)
+    hasPersona: Boolean(
+      ((fullBrief?.brand_voice ?? null) as { persona?: { name?: string } } | null)?.persona?.name,
+    ),
   }
   return {
     ctx,
