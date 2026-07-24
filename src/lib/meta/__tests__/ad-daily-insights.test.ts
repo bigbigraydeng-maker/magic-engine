@@ -58,6 +58,8 @@ describe('getAdDailyInsights', () => {
     expect(url).toContain('ad_name')
     // campaign_id still resolves at ad level — it is what makes attribution possible.
     expect(url).toContain('campaign_id')
+    // Not requested at all: ctr is clicks/impressions everywhere since #637.
+    expect(url).not.toContain('outbound_clicks_ctr')
   })
 
   it('parses an ad row with its campaign attribution', async () => {
@@ -74,6 +76,8 @@ describe('getAdDailyInsights', () => {
         clicks:        '90',
         frequency:     '1.07',
         cpm:           '13.33',
+        // Present on purpose: #637 made clicks/impressions the single yardstick,
+        // and the ad level must not quietly reintroduce the mixed one.
         outbound_clicks_ctr: [{ action_type: 'outbound_click', value: '1.20' }],
         actions: [{ action_type: 'lead', value: '2' }],
       }],
@@ -94,7 +98,8 @@ describe('getAdDailyInsights', () => {
       leads:         2,
       results:       2,
     })
-    expect(rows[0].ctr).toBeCloseTo(0.012, 6)
+    // 90 / 3000 — NOT the 1.20% outbound figure sitting in the same payload.
+    expect(rows[0].ctr).toBeCloseTo(0.03, 6)
     expect(rows[0].cost_per_result).toBeCloseTo(20, 6)
   })
 
