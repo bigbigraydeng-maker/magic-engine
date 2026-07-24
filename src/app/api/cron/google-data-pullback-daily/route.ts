@@ -334,9 +334,19 @@ export async function GET(req: NextRequest) {
     return out
   })
 
+  // The failure email renders `error_message`, not the summary JSONB, so
+  // without this the PM's alert reads "2 failed · —" and says nothing. Only the
+  // errors that actually count as failures belong here — ad_level is excluded
+  // above and must not become the headline of an email it never triggered.
+  const headlineError = errors.find(e => e.source !== 'ad_level')
+  const errorMessage = failed > 0 && headlineError
+    ? `${headlineError.source}: ${headlineError.error}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ''}`
+    : undefined
+
   await cronRun.finish({
     processed: results.length,
     completed: results.length - failed,
+    error: errorMessage,
     failed,
     summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, errors },
   })

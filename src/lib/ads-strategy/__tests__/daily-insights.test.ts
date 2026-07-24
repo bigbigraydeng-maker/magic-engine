@@ -12,7 +12,7 @@ const fetchDaily  = vi.fn()
 const fetchAds    = vi.fn()
 const fetchWindow = vi.fn()
 const upsert      = vi.fn()
-const countHead   = vi.fn()
+const historyProbe = vi.fn()
 
 /**
  * The fetchers return a page walk, not a bare array. Tests hand back a plain
@@ -32,10 +32,13 @@ vi.mock('@/lib/meta/client', () => ({
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
     from: () => ({
-      // needsBackfill(): select(...).eq('client_id', id).eq('level', level) → { count }
+      // needsBackfill(): select('insight_date').eq('client_id', id)
+      //   .eq('level', level).order(...).limit(1) → { data: [{insight_date}] }
       select: () => ({
         eq: (...clientEq: unknown[]) => ({
-          eq: (...levelEq: unknown[]) => countHead(...clientEq, ...levelEq),
+          eq: (...levelEq: unknown[]) => ({
+            order: () => ({ limit: () => historyProbe(...clientEq, ...levelEq) }),
+          }),
         }),
       }),
       upsert: (...a: unknown[]) => upsert(...a),
@@ -52,8 +55,19 @@ import {
 
 /** The level the backfill probe was scoped to on the Nth call. */
 function probedLevel(call = 0): unknown {
-  return countHead.mock.calls[call]?.[3]
+  return historyProbe.mock.calls[call]?.[3]
 }
+
+/** A stored history whose oldest row is `daysAgo` old. */
+function historyReachingBack(daysAgo: number) {
+  const d = new Date()
+  d.setUTCDate(d.getUTCDate() - daysAgo)
+  return { data: [{ insight_date: d.toISOString().slice(0, 10) }], error: null }
+}
+
+const NO_HISTORY   = { data: [], error: null }
+/** Deeper than the backfill window — nothing left to reach back for. */
+const DEEP_HISTORY = historyReachingBack(BACKFILL_LOOKBACK_DAYS + 10)
 
 function dayRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -86,7 +100,7 @@ beforeEach(() => {
   fetchAds.mockReset()
   fetchWindow.mockReset()
   upsert.mockReset()
-  countHead.mockReset()
+  historyProbe.mockReset()
   upsert.mockResolvedValue({ error: null })
   fetchWindow.mockResolvedValue(new Map())
 })
@@ -95,7 +109,7 @@ afterEach(() => vi.restoreAllMocks())
 
 describe('syncCampaignDailyInsights', () => {
   it('backfills 30 days when the client has no rows yet', async () => {
-    countHead.mockResolvedValue({ count: 0, error: null })
+    historyProbe.mockResolvedValue(NO_HISTORY)
     fetchDaily.mockResolvedValue([dayRow()])
 
     const res = await syncCampaignDailyInsights('client-1', 'act_1', 'tok')
@@ -106,7 +120,7 @@ describe('syncCampaignDailyInsights', () => {
   })
 
   it('pulls only the latest day once history exists', async () => {
-    countHead.mockResolvedValue({ count: 42, error: null })
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
     fetchDaily.mockResolvedValue([dayRow()])
 
     const res = await syncCampaignDailyInsights('client-1', 'act_1', 'tok')
@@ -116,7 +130,7 @@ describe('syncCampaignDailyInsights', () => {
   })
 
   it('attaches 7-day window frequency to the latest day only', async () => {
-    countHead.mockResolvedValue({ count: 5, error: null })
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
     fetchDaily.mockResolvedValue([
       dayRow({ insight_date: '2026-07-12' }),
       dayRow({ insight_date: '2026-07-13' }), // latest
@@ -134,7 +148,7 @@ describe('syncCampaignDailyInsights', () => {
   })
 
   it('upserts on the entity+day key so a re-run updates in place', async () => {
-    countHead.mockResolvedValue({ count: 5, error: null })
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
     fetchDaily.mockResolvedValue([dayRow()])
 
     await syncCampaignDailyInsights('client-1', 'act_1', 'tok')
@@ -145,7 +159,7 @@ describe('syncCampaignDailyInsights', () => {
   })
 
   it('writes nothing and reports success when Meta returns no rows', async () => {
-    countHead.mockResolvedValue({ count: 5, error: null })
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
     fetchDaily.mockResolvedValue([])
 
     const res = await syncCampaignDailyInsights('client-1', 'act_1', 'tok')
@@ -157,7 +171,7 @@ describe('syncCampaignDailyInsights', () => {
   })
 
   it('degrades to {success:false} instead of throwing on fetch failure', async () => {
-    countHead.mockResolvedValue({ count: 5, error: null })
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
     fetchDaily.mockRejectedValue(new Error('meta 500'))
 
     const res = await syncCampaignDailyInsights('client-1', 'act_1', 'tok')
@@ -166,7 +180,7 @@ describe('syncCampaignDailyInsights', () => {
   })
 
   it('surfaces a db upsert error as {success:false}', async () => {
-    countHead.mockResolvedValue({ count: 5, error: null })
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
     fetchDaily.mockResolvedValue([dayRow()])
     upsert.mockResolvedValue({ error: { message: 'unique violation' } })
 
@@ -176,7 +190,7 @@ describe('syncCampaignDailyInsights', () => {
 
   it('does not backfill when the row-count probe itself errors', async () => {
     // A failed probe must not trigger a 30-day pull on every single run.
-    countHead.mockResolvedValue({ count: null, error: { message: 'timeout' } })
+    historyProbe.mockResolvedValue({ data: null, error: { message: 'timeout' } })
     fetchDaily.mockResolvedValue([dayRow()])
 
     const res = await syncCampaignDailyInsights('client-1', 'act_1', 'tok')
@@ -185,29 +199,40 @@ describe('syncCampaignDailyInsights', () => {
   })
 
   it('scopes the backfill probe to campaign rows', async () => {
-    countHead.mockResolvedValue({ count: 5, error: null })
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
     fetchDaily.mockResolvedValue([dayRow()])
 
     await syncCampaignDailyInsights('client-1', 'act_1', 'tok')
     expect(probedLevel()).toBe('campaign')
   })
 
-  it('writes nothing when a BACKFILL walk stopped early', async () => {
-    // Writing the partial rows would make the next run see history and never
-    // request the missing days again — a silent, permanent hole.
-    countHead.mockResolvedValue({ count: 0, error: null })
+  it('keeps a truncated walk but reports it, so the day is not silently short', async () => {
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
     fetchDaily.mockResolvedValue({ rows: [dayRow()], complete: false })
 
     const res = await syncCampaignDailyInsights('client-1', 'act_1', 'tok')
 
-    expect(upsert).not.toHaveBeenCalled()
+    expect(upsert).toHaveBeenCalledTimes(1)
+    expect(res.rows_written).toBe(1)
     expect(res.success).toBe(false)
-    expect(res.backfilled).toBe(false)
-    expect(res.error).toContain('retries the full')
+    expect(res.error).toContain('page walk stopped early')
+  })
+
+  it('re-requests the deep window while stored history is too shallow', async () => {
+    // The self-healing property: whatever cut the last backfill short — a
+    // truncated page walk, a chunked write that died halfway — leaves the
+    // history shallow, and shallow means the deep window is asked for again.
+    historyProbe.mockResolvedValue(historyReachingBack(3))
+    fetchDaily.mockResolvedValue([dayRow()])
+
+    const res = await syncCampaignDailyInsights('client-1', 'act_1', 'tok')
+
+    expect(res.backfilled).toBe(true)
+    expect(res.days_requested).toBe(BACKFILL_LOOKBACK_DAYS)
   })
 
   it('does not pass a failed pull off as "no delivery yesterday"', async () => {
-    countHead.mockResolvedValue({ count: 5, error: null })
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
     fetchDaily.mockResolvedValue({ rows: [], complete: false })
 
     const res = await syncCampaignDailyInsights('client-1', 'act_1', 'tok')
@@ -218,7 +243,7 @@ describe('syncCampaignDailyInsights', () => {
 
 describe('syncAdDailyInsights', () => {
   it('stores the ad as the entity, with its campaign as parent_id', async () => {
-    countHead.mockResolvedValue({ count: 12, error: null })
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
     fetchAds.mockResolvedValue([adRow()])
 
     const res = await syncAdDailyInsights('client-1', 'act_1', 'tok')
@@ -240,7 +265,7 @@ describe('syncAdDailyInsights', () => {
   })
 
   it('stores NULL rather than an empty parent when Meta omits the campaign', async () => {
-    countHead.mockResolvedValue({ count: 12, error: null })
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
     fetchAds.mockResolvedValue([adRow({ campaign_id: '' })])
 
     await syncAdDailyInsights('client-1', 'act_1', 'tok')
@@ -252,7 +277,7 @@ describe('syncAdDailyInsights', () => {
   it('backfills 30 days even when campaign rows already exist', async () => {
     // The probe is level-scoped: campaign history must not mask a missing ad
     // history, or every existing client would start from a 7-day stub.
-    countHead.mockResolvedValue({ count: 0, error: null })
+    historyProbe.mockResolvedValue(NO_HISTORY)
     fetchAds.mockResolvedValue([adRow()])
 
     const res = await syncAdDailyInsights('client-1', 'act_1', 'tok')
@@ -263,7 +288,7 @@ describe('syncAdDailyInsights', () => {
   })
 
   it('pulls only the recent window once ad history exists', async () => {
-    countHead.mockResolvedValue({ count: 900, error: null })
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
     fetchAds.mockResolvedValue([adRow()])
 
     const res = await syncAdDailyInsights('client-1', 'act_1', 'tok')
@@ -272,7 +297,7 @@ describe('syncAdDailyInsights', () => {
   })
 
   it('leaves frequency_7d null and spends no extra Graph call on it', async () => {
-    countHead.mockResolvedValue({ count: 12, error: null })
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
     fetchAds.mockResolvedValue([adRow()])
 
     await syncAdDailyInsights('client-1', 'act_1', 'tok')
@@ -284,7 +309,7 @@ describe('syncAdDailyInsights', () => {
   })
 
   it('upserts on the same key so level keeps ad and campaign rows apart', async () => {
-    countHead.mockResolvedValue({ count: 12, error: null })
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
     fetchAds.mockResolvedValue([adRow()])
 
     await syncAdDailyInsights('client-1', 'act_1', 'tok')
@@ -295,7 +320,7 @@ describe('syncAdDailyInsights', () => {
   })
 
   it('writes nothing and reports success when Meta returns no ads', async () => {
-    countHead.mockResolvedValue({ count: 12, error: null })
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
     fetchAds.mockResolvedValue([])
 
     const res = await syncAdDailyInsights('client-1', 'act_1', 'tok')
@@ -304,7 +329,7 @@ describe('syncAdDailyInsights', () => {
   })
 
   it('degrades to {success:false} instead of throwing on fetch failure', async () => {
-    countHead.mockResolvedValue({ count: 12, error: null })
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
     fetchAds.mockRejectedValue(new Error('meta 500'))
 
     const res = await syncAdDailyInsights('client-1', 'act_1', 'tok')
@@ -315,7 +340,7 @@ describe('syncAdDailyInsights', () => {
   it('surfaces a db upsert error as {success:false}', async () => {
     // Notably how a not-yet-applied parent_id migration shows up, rather than
     // silently dropping the column.
-    countHead.mockResolvedValue({ count: 12, error: null })
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
     fetchAds.mockResolvedValue([adRow()])
     upsert.mockResolvedValue({ error: { message: "Could not find the 'parent_id' column" } })
 
@@ -324,21 +349,10 @@ describe('syncAdDailyInsights', () => {
     expect(res.error).toContain('parent_id')
   })
 
-  it('abandons a partial backfill instead of half-filling the history', async () => {
-    countHead.mockResolvedValue({ count: 0, error: null })
-    fetchAds.mockResolvedValue({ rows: [adRow()], complete: false })
-
-    const res = await syncAdDailyInsights('client-1', 'act_1', 'tok')
-
-    expect(upsert).not.toHaveBeenCalled()
-    expect(res.success).toBe(false)
-    expect(res.backfilled).toBe(false)
-  })
-
-  it('still writes a truncated steady-state window, but reports it', async () => {
-    // Unlike a backfill, the 7-day window is re-pulled tomorrow, so partial
-    // rows are worth keeping — they just must not look clean.
-    countHead.mockResolvedValue({ count: 900, error: null })
+  it('keeps a truncated walk, and the shallow history brings the next run back', async () => {
+    // Partial rows are worth keeping: the depth probe will notice the history
+    // is short tomorrow and ask for the missing days again.
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
     fetchAds.mockResolvedValue({ rows: [adRow()], complete: false })
 
     const res = await syncAdDailyInsights('client-1', 'act_1', 'tok')
@@ -349,11 +363,23 @@ describe('syncAdDailyInsights', () => {
     expect(res.error).toContain('page walk stopped early')
   })
 
-  it('chunks the upsert so one bad batch cannot cost the whole pull', async () => {
-    countHead.mockResolvedValue({ count: 900, error: null })
+  it('backfills again while the ad history is shallower than the window', async () => {
+    historyProbe.mockResolvedValue(historyReachingBack(2))
+    fetchAds.mockResolvedValue([adRow()])
+
+    const res = await syncAdDailyInsights('client-1', 'act_1', 'tok')
+
+    expect(probedLevel()).toBe('ad')
+    expect(res.backfilled).toBe(true)
+    expect(res.days_requested).toBe(BACKFILL_LOOKBACK_DAYS)
+  })
+
+  it('chunks the upsert newest-day-first so a half-written batch stays detectable', async () => {
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
     // 30 days × 40 ads is the realistic backfill shape — well past one statement.
     fetchAds.mockResolvedValue(
-      Array.from({ length: 1200 }, (_, i) => adRow({ ad_id: `a${i % 40}`, insight_date: `2026-06-${(i % 28) + 1}` })),
+      Array.from({ length: 1200 }, (_, i) =>
+        adRow({ ad_id: `a${i % 40}`, insight_date: `2026-06-${String((i % 30) + 1).padStart(2, '0')}` })),
     )
 
     const res = await syncAdDailyInsights('client-1', 'act_1', 'tok')
@@ -362,5 +388,32 @@ describe('syncAdDailyInsights', () => {
     expect((upsert.mock.calls[0][0] as unknown[]).length).toBe(500)
     expect((upsert.mock.calls[2][0] as unknown[]).length).toBe(200)
     expect(res.rows_written).toBe(1200)
+
+    // Ordering is the safety property: if the run dies after chunk 1, the gap
+    // must land on the OLDEST days — the only place the depth probe looks.
+    const firstChunk = upsert.mock.calls[0][0] as Array<Record<string, string>>
+    const lastChunk  = upsert.mock.calls[2][0] as Array<Record<string, string>>
+    const oldestOfFirst = firstChunk.map(r => r.insight_date).sort()[0]
+    const newestOfLast  = lastChunk.map(r => r.insight_date).sort().reverse()[0]
+    expect(oldestOfFirst >= newestOfLast).toBe(true)
+  })
+
+  it('leaves the oldest days unwritten when a chunk fails, not the newest', async () => {
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
+    fetchAds.mockResolvedValue(
+      Array.from({ length: 600 }, (_, i) =>
+        adRow({ ad_id: `a${i % 20}`, insight_date: `2026-06-${String((i % 30) + 1).padStart(2, '0')}` })),
+    )
+    upsert
+      .mockResolvedValueOnce({ error: null })
+      .mockResolvedValueOnce({ error: { message: 'statement timeout' } })
+
+    const res = await syncAdDailyInsights('client-1', 'act_1', 'tok')
+
+    expect(res).toMatchObject({ success: false, error: 'statement timeout' })
+    // The surviving write is the newest slice, so tomorrow's depth probe still
+    // sees a history that is too shallow and re-requests the rest.
+    const written = upsert.mock.calls[0][0] as Array<Record<string, string>>
+    expect(written.map(r => r.insight_date).sort()[0]).toBe('2026-06-06')
   })
 })

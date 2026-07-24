@@ -22,19 +22,18 @@ import {
 } from '@/lib/meta/client'
 
 /**
- * Days of history to request on a steady-state run. 7 (not 1) so that any gap
- * of up to 6 days self-heals: if a backfill fails partway through pagination,
- * getCampaignDailyInsights swallows the error and returns the rows it got, so
- * `needsBackfill` (count > 0) then sees history and never backfills again — a
- * 1-day lookback would leave that hole forever. Re-pulling the last 7 days
- * daily is cheap because the upsert is idempotent.
+ * Days of history to request on a steady-state run. 7 (not 1) so that a gap of
+ * up to 6 days at the recent edge self-heals without waiting for the depth
+ * check: Meta also restates the last few days as attribution lands. Re-pulling
+ * the last 7 days daily is cheap because the upsert is idempotent.
  */
 export const DEFAULT_LOOKBACK_DAYS = 7
 
 /**
- * Backfill depth for a client with no rows yet. 30 days gives the relative
- * baseline (best 7 days vs latest 7 days) something to stand on from day one,
- * instead of the engine sitting in `insufficient_history` for two weeks.
+ * How deep the stored history should reach. 30 days gives the relative baseline
+ * (best 7 days vs latest 7 days) something to stand on from day one, instead of
+ * the engine sitting in `insufficient_history` for two weeks. Doubles as the
+ * depth `needsBackfill` measures against.
  */
 export const BACKFILL_LOOKBACK_DAYS = 30
 
@@ -59,25 +58,41 @@ function shiftDays(from: Date, days: number): Date {
 type InsightLevel = 'campaign' | 'ad'
 
 /**
- * True when this client has no `ad_daily_insights` rows AT THIS LEVEL yet,
- * meaning the first run should reach back further than a single day.
+ * True when this client's stored history AT THIS LEVEL does not reach back far
+ * enough, so the run should request the deep window instead of the recent one.
+ *
+ * This asks "how deep is the history" rather than "are there any rows at all",
+ * and that difference is what makes every partial write self-healing. A
+ * row-count probe treats one surviving row as proof the backfill finished, so a
+ * page walk cut short by rate limiting — or a chunked write that died halfway —
+ * silently freezes the missing days out forever. Depth is re-checked daily, so
+ * the next run simply asks for them again.
  *
  * The level filter is load-bearing, not cosmetic: campaign rows land first, so
  * an unfiltered probe would see them, conclude the ad level has history too and
- * skip its backfill forever — leaving every existing client with ad data that
- * starts at a 7-day stub.
+ * skip its backfill entirely.
+ *
+ * Cost of being self-healing: an account whose ads are younger than the backfill
+ * window can never satisfy the depth test (no data exists before its first day),
+ * so it re-requests the deep window daily. That is one extra page walk and an
+ * idempotent re-upsert — cheap next to a silent hole nobody can see.
  */
 async function needsBackfill(clientId: string, level: InsightLevel): Promise<boolean> {
-  const { count, error } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('ad_daily_insights')
-    .select('id', { count: 'exact', head: true })
+    .select('insight_date')
     .eq('client_id', clientId)
     .eq('level', level)
+    .order('insight_date', { ascending: true })
+    .limit(1)
 
-  // On error, assume no backfill — a failed count must not trigger a 30-day
+  // On error, assume no backfill — a failed probe must not trigger a deep
   // pull on every run.
   if (error) return false
-  return (count ?? 0) === 0
+
+  const earliest = (data as Array<{ insight_date: string }> | null)?.[0]?.insight_date
+  if (!earliest) return true
+  return earliest > toIsoDate(shiftDays(new Date(), -BACKFILL_LOOKBACK_DAYS))
 }
 
 /** The date window a run should request, given whether it is backfilling. */
@@ -142,32 +157,29 @@ const UPSERT_KEY = { onConflict: 'client_id,platform,level,entity_id,insight_dat
  */
 const UPSERT_CHUNK = 500
 
-/** Upsert in chunks, stopping at the first failure. Returns its message. */
+/**
+ * Upsert in chunks, oldest day LAST, stopping at the first failure. Returns the
+ * failure message, or null.
+ *
+ * The ordering is the safety property, not cosmetics. Chunking means a partial
+ * write is possible, and where the resulting gap lands decides whether anyone
+ * ever fills it: writing newest-first leaves the gap at the OLD edge, which is
+ * exactly what `needsBackfill`'s depth test looks at, so the next run re-requests
+ * it. Oldest-first would leave the gap in the middle of the window, where
+ * nothing looks for it.
+ */
 async function upsertChunked(rows: Array<Record<string, unknown>>): Promise<string | null> {
-  for (let i = 0; i < rows.length; i += UPSERT_CHUNK) {
+  const newestFirst = [...rows].sort((a, b) =>
+    String(b.insight_date).localeCompare(String(a.insight_date)),
+  )
+
+  for (let i = 0; i < newestFirst.length; i += UPSERT_CHUNK) {
     const { error } = await supabaseAdmin
       .from('ad_daily_insights')
-      .upsert(rows.slice(i, i + UPSERT_CHUNK), UPSERT_KEY)
+      .upsert(newestFirst.slice(i, i + UPSERT_CHUNK), UPSERT_KEY)
     if (error) return error.message
   }
   return null
-}
-
-/**
- * A backfill that stopped mid-pagination must not be mistaken for a finished
- * one. Writing its partial rows would make `needsBackfill` see history forever
- * after, so the un-fetched days would never be requested again — a silent,
- * permanent hole. Dropping them costs one day and the next run retries the
- * whole window.
- */
-function abandonPartialBackfill(lookback: number): SyncDailyInsightsResult {
-  return {
-    success: false,
-    rows_written: 0,
-    days_requested: lookback,
-    backfilled: false,
-    error: `backfill page walk stopped early — nothing written so the next run retries the full ${lookback}-day window`,
-  }
 }
 
 /**
@@ -204,7 +216,6 @@ export async function syncCampaignDailyInsights(
     const { since, until, lookback } = requestWindow(backfill)
 
     const { rows, complete } = await getCampaignDailyInsights(adAccountId, accessToken, since, until)
-    if (backfill && !complete) return abandonPartialBackfill(lookback)
     if (rows.length === 0) {
       // An empty result only means "no delivery" when the walk actually
       // finished; otherwise Meta failed and silence would look identical.
@@ -251,7 +262,7 @@ export async function syncCampaignDailyInsights(
       backfilled: backfill,
       // Steady-state runs re-pull the same window daily, so a short window is
       // self-healing — but it should still be visible rather than silent.
-      error: complete ? undefined : 'page walk stopped early — window may be short until the next run',
+      error: complete ? undefined : 'page walk stopped early — window is short; the next run re-requests the missing depth',
     }
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' }
@@ -282,7 +293,6 @@ export async function syncAdDailyInsights(
     const { since, until, lookback } = requestWindow(backfill)
 
     const { rows, complete } = await getAdDailyInsights(adAccountId, accessToken, since, until)
-    if (backfill && !complete) return abandonPartialBackfill(lookback)
     if (rows.length === 0) {
       return complete
         ? { success: true, rows_written: 0, days_requested: lookback, backfilled: backfill }
@@ -313,7 +323,7 @@ export async function syncAdDailyInsights(
       rows_written: payload.length,
       days_requested: lookback,
       backfilled: backfill,
-      error: complete ? undefined : 'page walk stopped early — window may be short until the next run',
+      error: complete ? undefined : 'page walk stopped early — window is short; the next run re-requests the missing depth',
     }
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' }
