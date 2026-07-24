@@ -166,7 +166,10 @@ function hasInventedNumber(copy: AdCopy, allowed: Set<string>): boolean {
 // 100% 静默落模板兜底。PM 看到的「所有片子都是品牌播报腔、千篇一律」根因就在这:
 // 精心写的 prompt 从来没被执行过。
 // 上限受调用方约束:signals 路由 maxDuration=60s,25s 给 AI + 其余查询留足余量。
-const COPY_GEN_TIMEOUT_MS = 25000
+// 2026-07-25 再提到 45000:25 秒仍不够 —— SDK 先失败(Node 24 兼容问题)再走 fetch 兜底,
+// 两段叠加会超。文案生成本来就是这条链上最慢的一步,而 signals 路由 maxDuration=60s,
+// 45 秒留 15 秒给其余查询,是安全上限。
+const COPY_GEN_TIMEOUT_MS = 45000
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -248,8 +251,8 @@ export async function generateAdCopy(params: {
       `- hook 段(第一段)必须是能让刷手指的人停下的狠话:戳痛点/反常识/紧迫,禁止"品牌名+定位"式平淡开场。\n` +
       `- 每个文本字段 ≤ 6 词;AU 英语;无把握的价格/折扣改用「Free measure & quote」「Talk to us」式表达,绝不编数字。\n` +
       `- endcard.url 固定填 "${url}";segments 数量 = ${segmentRoles.length};CTA 体现上面的 CTA 目标。\n\n` +
-      `返回 JSON:{"segments":[{"role":"hook|middle|cta","title_main"?,"title_sub"?,"caption"?,"vo"?}],` +
-      `"endcard":{"cta","offer":["..."],"url":"${url}","vo"?}}`
+      `返回 JSON:{"segments":[{"role":"hook|middle|cta","title_main"?,"title_sub"?,"caption"?}],` +
+      `"endcard":{"cta","offer":["..."],"url":"${url}"}}`
 
     const { text } = await withTimeout(
       callClaudeChat({
@@ -271,6 +274,13 @@ export async function generateAdCopy(params: {
       // 红线硬拦:LLM 吐的价格/折扣数字不在 verified_offer 白名单 → 编造 → 整条不可信,落模板(不 return)
       // 两道硬闸都过才采用 LLM 结果:①编造价格/折扣 ②编造时间/日期/政策断言
       const claimAllowed = allowedClaimsFrom(briefText, verifiedOffer)
+      // 🔴 强制剥掉 vo:装配层会给**每一个**带 vo 的段落生成一条 TTS,全部叠在一起播 ——
+      // PM 2026-07-25 实测听到「3-4 个不同的声音同时在说话」,根因就是这里。
+      // 而且用的是 voice.onnx 机器音(PM 早前已反馈质量差)。真人配音要走 ElevenLabs,
+      // 不是这条路。所以无论 LLM 吐不吐 vo,一律不落库。
+      for (const s of parsed.segments ?? []) delete (s as unknown as Record<string, unknown>).vo
+      if (parsed.endcard) delete (parsed.endcard as unknown as Record<string, unknown>).vo
+
       if (hasInventedNumber(parsed, allowed)) {
         console.warn('[copy-generator] LLM 吐出未授权价格数字,判为编造 → 落模板兜底')
       } else if (hasInventedClaim(parsed, claimAllowed)) {
