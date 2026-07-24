@@ -30,7 +30,7 @@ import { SEO_METRIC_KEY, GA4_METRIC_KEY, ADS_METRIC_KEY } from '@/lib/flywheel/v
 import { MetaAdsAdapter } from '@/lib/flywheel/adapters/MetaAdsAdapter'
 import { startCronRun } from '@/lib/cron/run-logger'
 import { domainToEnvKey } from '@/lib/meta/token-manager'
-import { syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
+import { syncAdDailyInsights, syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
 import { sendAdHealthDigest } from '@/lib/ads-strategy/digest'
 import { loadAdStrategyConfigWithSource, resolveDigestRecipients } from '@/lib/ads-strategy/config'
@@ -67,6 +67,8 @@ interface ClientResult {
   google_ads?: { success: boolean; metrics_written?: number; error?: string }
   /** P21.K.1 campaign-level daily series → ad_daily_insights. */
   ad_daily?:  { success: boolean; rows_written?: number; backfilled?: boolean; error?: string }
+  /** P21.K.7 ad-level daily series → ad_daily_insights (level='ad'). */
+  ad_level?:  { success: boolean; rows_written?: number; backfilled?: boolean; error?: string }
   /** P21.K.2 daily ad-health verdict → ad_health_narratives. */
   ad_health?: { success: boolean; overall_verdict?: string; campaigns_evaluated?: number; error?: string }
   /** P21.K.4 daily email digest decision + send outcome. */
@@ -269,6 +271,17 @@ export async function GET(req: NextRequest) {
               result.ad_digest = { sent: digest.sent, decision: digest.decision, error: digest.error }
             }
           }
+
+          // P21.K.7: ad-level daily series, same table one level down. Runs
+          // LAST on purpose — it is the biggest pull of the three (rows scale
+          // with ads × days) and nothing above reads it, so a slow or failing
+          // ad pull must not delay the health verdict or the digest that the
+          // PM actually opens.
+          result.ad_level = await syncAdDailyInsights(
+            client.client_id,
+            client.meta_ad_account_id,
+            metaToken,
+          )
         }
       }
     }
@@ -287,6 +300,8 @@ export async function GET(req: NextRequest) {
   const googleAdsSynced = results.filter(r => r.google_ads?.success).length
   const adDailySynced   = results.filter(r => r.ad_daily?.success).length
   const adDailyRows     = results.reduce((sum, r) => sum + (r.ad_daily?.rows_written ?? 0), 0)
+  const adLevelSynced   = results.filter(r => r.ad_level?.success).length
+  const adLevelRows     = results.reduce((sum, r) => sum + (r.ad_level?.rows_written ?? 0), 0)
   const adHealthSynced  = results.filter(r => r.ad_health?.success).length
   const adHealthAlerts  = results.filter(r => r.ad_health?.overall_verdict === 'alert').length
   const failed          = results.filter(
@@ -296,18 +311,20 @@ export async function GET(req: NextRequest) {
       r.meta?.success === false ||
       r.google_ads?.success === false ||
       r.ad_daily?.success === false ||
+      r.ad_level?.success === false ||
       r.ad_health?.success === false,
   ).length
 
   // Collect per-client errors so postmortem is possible without Render logs.
   // Diagnostic only — no behavior change.
   const errors = results.flatMap(r => {
-    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_health'|'ad_digest'; error: string }> = []
+    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'ad_health'|'ad_digest'; error: string }> = []
     if (r.gsc?.success === false && r.gsc.error)               out.push({ client_id: r.client_id, source: 'gsc',        error: r.gsc.error })
     if (r.ga4?.success === false && r.ga4.error)               out.push({ client_id: r.client_id, source: 'ga4',        error: r.ga4.error })
     if (r.meta?.success === false && r.meta.error)             out.push({ client_id: r.client_id, source: 'meta',       error: r.meta.error })
     if (r.google_ads?.success === false && r.google_ads.error) out.push({ client_id: r.client_id, source: 'google_ads', error: r.google_ads.error })
     if (r.ad_daily?.success === false && r.ad_daily.error)     out.push({ client_id: r.client_id, source: 'ad_daily',   error: r.ad_daily.error })
+    if (r.ad_level?.success === false && r.ad_level.error)     out.push({ client_id: r.client_id, source: 'ad_level',   error: r.ad_level.error })
     if (r.ad_health?.success === false && r.ad_health.error)   out.push({ client_id: r.client_id, source: 'ad_health', error: r.ad_health.error })
     if (r.ad_digest && !r.ad_digest.sent && r.ad_digest.error)  out.push({ client_id: r.client_id, source: 'ad_digest', error: r.ad_digest.error })
     return out
@@ -317,7 +334,7 @@ export async function GET(req: NextRequest) {
     processed: results.length,
     completed: results.length - failed,
     failed,
-    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, errors },
+    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, errors },
   })
   return NextResponse.json({
     success:           true,
@@ -328,6 +345,8 @@ export async function GET(req: NextRequest) {
     google_ads_synced: googleAdsSynced,
     ad_daily_synced:   adDailySynced,
     ad_daily_rows:     adDailyRows,
+    ad_level_synced:   adLevelSynced,
+    ad_level_rows:     adLevelRows,
     ad_health_synced:  adHealthSynced,
     ad_health_alerts:  adHealthAlerts,
     failed,

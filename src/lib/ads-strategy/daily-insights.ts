@@ -1,7 +1,7 @@
 /**
- * P21.K.1 — Ad Strategy Engine data spine.
+ * P21.K.1 / P21.K.7 — Ad Strategy Engine data spine.
  *
- * Pulls per-campaign, per-day advertising metrics into `ad_daily_insights`,
+ * Pulls per-campaign and per-ad, per-day advertising metrics into `ad_daily_insights`,
  * the time series the engine needs to judge fatigue against a campaign's own
  * historical baseline (spec §12) rather than against fixed absolute thresholds
  * — thresholds that a real fatigue event proved blind to: Reborn's CTR fell 41%
@@ -15,6 +15,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import {
+  getAdDailyInsights,
   getCampaignDailyInsights,
   getCampaignWindowFrequency,
   MetaCampaignDailyRow,
@@ -55,21 +56,84 @@ function shiftDays(from: Date, days: number): Date {
   return out
 }
 
+type InsightLevel = 'campaign' | 'ad'
+
 /**
- * True when this client has no `ad_daily_insights` rows yet, meaning the first
- * run should reach back further than a single day.
+ * True when this client has no `ad_daily_insights` rows AT THIS LEVEL yet,
+ * meaning the first run should reach back further than a single day.
+ *
+ * The level filter is load-bearing, not cosmetic: campaign rows land first, so
+ * an unfiltered probe would see them, conclude the ad level has history too and
+ * skip its backfill forever — leaving every existing client with ad data that
+ * starts at a 7-day stub.
  */
-async function needsBackfill(clientId: string): Promise<boolean> {
+async function needsBackfill(clientId: string, level: InsightLevel): Promise<boolean> {
   const { count, error } = await supabaseAdmin
     .from('ad_daily_insights')
     .select('id', { count: 'exact', head: true })
     .eq('client_id', clientId)
+    .eq('level', level)
 
   // On error, assume no backfill — a failed count must not trigger a 30-day
   // pull on every run.
   if (error) return false
   return (count ?? 0) === 0
 }
+
+/** The date window a run should request, given whether it is backfilling. */
+function requestWindow(backfill: boolean): { since: string; until: string; lookback: number } {
+  const lookback = backfill ? BACKFILL_LOOKBACK_DAYS : DEFAULT_LOOKBACK_DAYS
+  // Meta reports in the ad account's timezone; "yesterday" is the last day
+  // guaranteed to be complete.
+  const today = new Date()
+  return {
+    since: toIsoDate(shiftDays(today, -lookback)),
+    until: toIsoDate(shiftDays(today, -1)),
+    lookback,
+  }
+}
+
+interface InsightRowInput {
+  clientId:     string
+  adAccountId:  string
+  level:        InsightLevel
+  entityId:     string
+  entityName:   string
+  frequency7d:  number | null
+  metrics:      MetaCampaignDailyRow
+  stampedAt:    string
+}
+
+/** Map one parsed Meta row onto the `ad_daily_insights` column set. */
+function toInsightRow(i: InsightRowInput) {
+  const m = i.metrics
+  return {
+    client_id:     i.clientId,
+    ad_account_id: i.adAccountId,
+    platform:      'meta',
+    level:         i.level,
+    entity_id:     i.entityId,
+    entity_name:   i.entityName,
+    insight_date:  m.insight_date,
+    spend:         m.spend,
+    impressions:   m.impressions,
+    reach:         m.reach,
+    clicks:        m.clicks,
+    frequency:     m.frequency,
+    frequency_7d:  i.frequency7d,
+    cpm:           m.cpm,
+    ctr:           m.ctr,
+    cpc:           m.cpc,
+    leads:                   m.leads,
+    messaging_conversations: m.messaging_conversations,
+    results:                 m.results,
+    cost_per_result:         m.cost_per_result,
+    fetched_at: i.stampedAt,
+    updated_at: i.stampedAt,
+  }
+}
+
+const UPSERT_KEY = { onConflict: 'client_id,platform,level,entity_id,insight_date' }
 
 /**
  * The trailing 7-day window frequency belongs to ONE row per campaign: the
@@ -101,14 +165,8 @@ export async function syncCampaignDailyInsights(
   accessToken: string,
 ): Promise<SyncDailyInsightsResult> {
   try {
-    const backfill = await needsBackfill(clientId)
-    const lookback = backfill ? BACKFILL_LOOKBACK_DAYS : DEFAULT_LOOKBACK_DAYS
-
-    // Meta reports in the ad account's timezone; "yesterday" is the last day
-    // guaranteed to be complete.
-    const today     = new Date()
-    const until     = toIsoDate(shiftDays(today, -1))
-    const since     = toIsoDate(shiftDays(today, -lookback))
+    const backfill = await needsBackfill(clientId, 'campaign')
+    const { since, until, lookback } = requestWindow(backfill)
 
     const rows = await getCampaignDailyInsights(adAccountId, accessToken, since, until)
     if (rows.length === 0) {
@@ -130,34 +188,81 @@ export async function syncCampaignDailyInsights(
     )
     const freq7dFor = windowFrequencyByRow(latestDate, windowFreq)
 
-    const payload = rows.map(r => ({
-      client_id:     clientId,
-      ad_account_id: adAccountId,
-      platform:      'meta',
-      level:         'campaign',
-      entity_id:     r.campaign_id,
-      entity_name:   r.campaign_name,
-      insight_date:  r.insight_date,
-      spend:         r.spend,
-      impressions:   r.impressions,
-      reach:         r.reach,
-      clicks:        r.clicks,
-      frequency:     r.frequency,
-      frequency_7d:  freq7dFor(r.campaign_id, r.insight_date),
-      cpm:           r.cpm,
-      ctr:           r.ctr,
-      cpc:           r.cpc,
-      leads:                   r.leads,
-      messaging_conversations: r.messaging_conversations,
-      results:                 r.results,
-      cost_per_result:         r.cost_per_result,
-      fetched_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+    const stampedAt = new Date().toISOString()
+    const payload = rows.map(r => toInsightRow({
+      clientId,
+      adAccountId,
+      level:       'campaign',
+      entityId:    r.campaign_id,
+      entityName:  r.campaign_name,
+      frequency7d: freq7dFor(r.campaign_id, r.insight_date),
+      metrics:     r,
+      stampedAt,
     }))
 
     const { error } = await supabaseAdmin
       .from('ad_daily_insights')
-      .upsert(payload, { onConflict: 'client_id,platform,level,entity_id,insight_date' })
+      .upsert(payload, UPSERT_KEY)
+
+    if (error) return { success: false, error: error.message }
+
+    return {
+      success: true,
+      rows_written: payload.length,
+      days_requested: lookback,
+      backfilled: backfill,
+    }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' }
+  }
+}
+
+/**
+ * Pull and store one client's AD-level daily series (P21.K.7).
+ *
+ * Same table, same idempotent key, one level down — `level='ad'` was reserved
+ * in the P21.K.1 schema for exactly this, so nothing about the campaign series
+ * changes and every existing reader already filters `level='campaign'`.
+ *
+ * Two deliberate differences from the campaign path:
+ *   - `parent_id` carries the ad's campaign, so "which ad dragged THIS campaign
+ *     down" is a query rather than a trip to Ads Manager.
+ *   - No 7-day window frequency. It would double the Graph calls for a number
+ *     the fatigue engine only reads at campaign level, and Meta's BUC quota is
+ *     charged per call. The dense daily `frequency` column is still populated.
+ */
+export async function syncAdDailyInsights(
+  clientId: string,
+  adAccountId: string,
+  accessToken: string,
+): Promise<SyncDailyInsightsResult> {
+  try {
+    const backfill = await needsBackfill(clientId, 'ad')
+    const { since, until, lookback } = requestWindow(backfill)
+
+    const rows = await getAdDailyInsights(adAccountId, accessToken, since, until)
+    if (rows.length === 0) {
+      return { success: true, rows_written: 0, days_requested: lookback, backfilled: backfill }
+    }
+
+    const stampedAt = new Date().toISOString()
+    const payload = rows.map(r => ({
+      ...toInsightRow({
+        clientId,
+        adAccountId,
+        level:       'ad',
+        entityId:    r.ad_id,
+        entityName:  r.ad_name,
+        frequency7d: null,
+        metrics:     r,
+        stampedAt,
+      }),
+      parent_id: r.campaign_id || null,
+    }))
+
+    const { error } = await supabaseAdmin
+      .from('ad_daily_insights')
+      .upsert(payload, UPSERT_KEY)
 
     if (error) return { success: false, error: error.message }
 

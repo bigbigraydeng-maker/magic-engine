@@ -236,9 +236,10 @@ function pickAction(
   return 0
 }
 
-function parseCampaignDailyRow(row: GraphCampaignDailyRow): MetaCampaignDailyRow | null {
-  if (!row.campaign_id || !row.date_start) return null
+/** Metric half of a daily row — identical at campaign and ad level. */
+type DailyMetrics = Omit<MetaCampaignDailyRow, 'campaign_id' | 'campaign_name' | 'insight_date'>
 
+function parseDailyMetrics(row: GraphCampaignDailyRow): DailyMetrics {
   const base  = parseInsights(row)
   const reach = row.reach !== undefined ? parseInt(row.reach, 10) || null : null
 
@@ -251,9 +252,6 @@ function parseCampaignDailyRow(row: GraphCampaignDailyRow): MetaCampaignDailyRow
   const results   = leads + messaging
 
   return {
-    campaign_id:   row.campaign_id,
-    campaign_name: row.campaign_name ?? row.campaign_id,
-    insight_date:  row.date_start,
     spend:         base.spend,
     impressions:   base.impressions,
     reach,
@@ -269,7 +267,18 @@ function parseCampaignDailyRow(row: GraphCampaignDailyRow): MetaCampaignDailyRow
   }
 }
 
-const DAILY_FIELDS = [
+function parseCampaignDailyRow(row: GraphCampaignDailyRow): MetaCampaignDailyRow | null {
+  if (!row.campaign_id || !row.date_start) return null
+
+  return {
+    campaign_id:   row.campaign_id,
+    campaign_name: row.campaign_name ?? row.campaign_id,
+    insight_date:  row.date_start,
+    ...parseDailyMetrics(row),
+  }
+}
+
+const DAILY_FIELD_LIST = [
   'campaign_id',
   'campaign_name',
   'spend',
@@ -280,10 +289,56 @@ const DAILY_FIELDS = [
   'cpm',
   'actions',
   'outbound_clicks_ctr',
-].join(',')
+]
+
+const DAILY_FIELDS = DAILY_FIELD_LIST.join(',')
 
 /** Hard cap on pagination follows — a runaway-loop backstop, not a real limit. */
 const MAX_INSIGHT_PAGES = 25
+
+/**
+ * Walk an /insights cursor, parsing each page.
+ *
+ * Returns the rows gathered SO FAR on any transport/HTTP error rather than
+ * throwing or discarding them: a half-fetched backfill is still better than
+ * nothing, and callers treat [] as "nothing to write". `label` only shapes the
+ * log line so campaign- and ad-level failures stay distinguishable in Render.
+ */
+async function fetchInsightPages<Raw, Out>(
+  firstUrl: string,
+  label: string,
+  parse: (row: Raw) => Out | null,
+): Promise<Out[]> {
+  let url: string | undefined = firstUrl
+  const rows: Out[] = []
+
+  for (let page = 0; page < MAX_INSIGHT_PAGES && url; page++) {
+    let res: Response
+    try {
+      res = await fetch(url)
+    } catch (err) {
+      console.error(`[meta/client] ${label} fetch error:`, err)
+      return rows
+    }
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      console.error(`[meta/client] ${label} HTTP ${res.status}:`, body.slice(0, 300))
+      return rows
+    }
+
+    const json = await res.json() as { data?: Raw[]; paging?: { next?: string } }
+
+    for (const raw of json.data ?? []) {
+      const parsed = parse(raw)
+      if (parsed) rows.push(parsed)
+    }
+
+    url = json.paging?.next
+  }
+
+  return rows
+}
 
 /**
  * Fetch per-campaign, per-day insights across a date range, following pagination.
@@ -309,38 +364,84 @@ export async function getCampaignDailyInsights(
     limit: '500',
   })
 
-  let url: string | undefined = `${GRAPH_BASE}/${adAccountId}/insights?${params.toString()}`
-  const rows: MetaCampaignDailyRow[] = []
+  return fetchInsightPages<GraphCampaignDailyRow, MetaCampaignDailyRow>(
+    `${GRAPH_BASE}/${adAccountId}/insights?${params.toString()}`,
+    'campaign daily',
+    parseCampaignDailyRow,
+  )
+}
 
-  for (let page = 0; page < MAX_INSIGHT_PAGES && url; page++) {
-    let res: Response
-    try {
-      res = await fetch(url)
-    } catch (err) {
-      console.error('[meta/client] campaign daily fetch error:', err)
-      return rows
-    }
+// ── Ad-level daily time series (P21.K.7) ─────────────────────────────────────
 
-    if (!res.ok) {
-      const body = await res.text().catch(() => '')
-      console.error(`[meta/client] campaign daily HTTP ${res.status}:`, body.slice(0, 300))
-      return rows
-    }
+/**
+ * One AD's metrics for one calendar day.
+ *
+ * Campaign-level rows can say "this campaign's CPL doubled on the 17th"; only
+ * ad-level rows can say WHICH ad appeared that day and dragged it there. Oztop's
+ * Lead Form Cold Broad is the case that forced this: campaign data showed the
+ * form-fill rate halving with outbound clicks suddenly appearing, but proving a
+ * new website-destination ad went live on 7/16–17 meant a human opening Ads
+ * Manager. `campaign_id` rides along so an ad can be attributed to the campaign
+ * whose numbers moved.
+ */
+export interface MetaAdDailyRow extends MetaCampaignDailyRow {
+  ad_id:   string
+  ad_name: string
+}
 
-    const json = await res.json() as {
-      data?: GraphCampaignDailyRow[]
-      paging?: { next?: string }
-    }
+interface GraphAdDailyRow extends GraphCampaignDailyRow {
+  ad_id?:   string
+  ad_name?: string
+}
 
-    for (const raw of json.data ?? []) {
-      const parsed = parseCampaignDailyRow(raw)
-      if (parsed) rows.push(parsed)
-    }
+/**
+ * Empty strings, not the ad's own id, when Meta omits campaign attribution:
+ * a fabricated parent would silently mis-group the ad under a campaign that
+ * does not exist. The caller stores '' as NULL.
+ */
+function parseAdDailyRow(row: GraphAdDailyRow): MetaAdDailyRow | null {
+  if (!row.ad_id || !row.date_start) return null
 
-    url = json.paging?.next
+  return {
+    ad_id:         row.ad_id,
+    ad_name:       row.ad_name ?? row.ad_id,
+    campaign_id:   row.campaign_id ?? '',
+    campaign_name: row.campaign_name ?? row.campaign_id ?? '',
+    insight_date:  row.date_start,
+    ...parseDailyMetrics(row),
   }
+}
 
-  return rows
+const AD_DAILY_FIELDS = [...DAILY_FIELD_LIST, 'ad_id', 'ad_name'].join(',')
+
+/**
+ * Fetch per-ad, per-day insights across a date range, following pagination.
+ *
+ * Same contract as `getCampaignDailyInsights` (every entity, no top-N
+ * truncation, [] on failure) one level down. Row volume is roughly
+ * ads × days, so the 500-per-page limit matters more here than at campaign
+ * level — Meta's BUC quota is charged per call, not per row.
+ */
+export async function getAdDailyInsights(
+  adAccountId: string,
+  accessToken: string,
+  since: string,
+  until: string,
+): Promise<MetaAdDailyRow[]> {
+  const params = new URLSearchParams({
+    fields: AD_DAILY_FIELDS,
+    time_range: JSON.stringify({ since, until }),
+    access_token: accessToken,
+    level: 'ad',
+    time_increment: '1',
+    limit: '500',
+  })
+
+  return fetchInsightPages<GraphAdDailyRow, MetaAdDailyRow>(
+    `${GRAPH_BASE}/${adAccountId}/insights?${params.toString()}`,
+    'ad daily',
+    parseAdDailyRow,
+  )
 }
 
 /**
