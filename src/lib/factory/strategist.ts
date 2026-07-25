@@ -304,10 +304,17 @@ export function selectClips(
   // i2v 一次都不触发 → 每条片子都在同一批老素材里循环(= PM 说的「千篇一律」),
   // 抓来改好的图也永远进不了成片。
   // 价格广告(requireRealFootage)例外:那条红线要求全真拍,不能掺生成。
-  const stockQuota =
-    sourceImagePool.length > 0 && !requireRealFootage
-      ? Math.max(1, Math.floor(recipe.shots.length * FACTORY_MAX_STOCK_SHARE))
-      : recipe.shots.length
+  //
+  // 🔴 源图**不重复**是硬保证(PM 2026-07-26 看片:「11 秒和 20 秒是同一个图」)。
+  // 根因:池里只有 3 张改好的图却要填 4 个生成镜头 → genIndex % 3 绕回第 1 张。
+  // 所以生成镜头数 ≤ 池子大小;不够的那些**退回用库存**,宁可少几个新画面,
+  // 也绝不在同一条片子里重复同一张源图。
+  const uniqueSources = Array.from(new Set(sourceImagePool))
+  const maxGenerated =
+    uniqueSources.length > 0 && !requireRealFootage
+      ? Math.min(uniqueSources.length, recipe.shots.length - Math.max(1, Math.floor(recipe.shots.length * FACTORY_MAX_STOCK_SHARE)))
+      : 0
+  const stockQuota = recipe.shots.length - maxGenerated
   let stockUsed = 0
 
   recipe.shots.forEach((shot, i) => {
@@ -328,6 +335,16 @@ export function selectClips(
         transition: shot.transition,
       })
       clipLinks.push({ clip_id: clip.id, segment_role: role, position: i })
+    } else if (uniqueSources.length > 0 && genIndex >= uniqueSources.length) {
+      // 源图用完了:这一镜跳过,不排生成计划。
+      // ⚠️ 这是**冗余的第二道防线** —— maxGenerated 已把生成数限到 ≤ 池子大小,
+      // 正常路径走不到这里(变异测试确认:去掉它测试仍全绿 = 等价变异)。
+      // 保留的理由:未来若有人改动 maxGenerated 的算法,这道闸能兜住,
+      // 代价只是一个永不执行的分支。
+      // 不跳的话 source_image_url 会是 null,worker 退回那张固定种子图 ——
+      // 等于又回到「所有画面从同一张图长出来」。宁可片子短一镜,也不要重复画面。
+      // (库存充足时上面的分支已经用库存补上了,走不到这里。)
+      return
     } else if (requireRealFootage) {
       // 价格广告:真料不够不生成 AI 补位(红线)。这一镜跳过——少几镜也全真,不掺 AI。
       return
@@ -351,10 +368,12 @@ export function selectClips(
         // 🔴 此前这里恒为 null,worker 就无条件退回同一张 seed/cts_source.jpg ——
         // 所有 AI 画面都从同一张图长出来,换多少提示词都改不掉底子。这是「千篇一律」
         // 的根因之一。按 position 取模轮换,保证同一条片子里各段源图不重样。
-        source_image_url: sourceImagePool.length > 0
-          ? sourceImagePool[genIndex % sourceImagePool.length]
-          : null,
-        requires_source_resolution: sourceImagePool.length === 0,
+        // 按顺序取,取完为止 —— **绝不取模绕回**。取模正是 PM 实测抓到的病
+        // (11 秒和 20 秒同一张图):池 3 张填 4 镜 → genIndex%3 绕回第 1 张。
+        // 现在 maxGenerated 已保证 genIndex < 池子大小,所以这里等价于「按序取」;
+        // 写成下标直取而非取模,是让「不许绕回」这条意图在代码里显式可读。
+        source_image_url: uniqueSources[genIndex] ?? null,
+        requires_source_resolution: uniqueSources[genIndex] === undefined,
       })
       genIndex += 1
     }

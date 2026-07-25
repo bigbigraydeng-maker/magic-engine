@@ -9,6 +9,11 @@
  * 但像素全部重新生成 = **衍生创作,不是原图搬运**。产出另存为新的 clip 行,
  * 标 `is_ai_transformed: true`,并用 `derived_from` 指回原图以便溯源。
  *
+ * 🔴 **调色不在这一步做**(2026-07-26 事故):此前把客户 creative_profile.look
+ * (CTS = golden_hour)注入改图指令,而装配层 make_promo 拿到同一个 look 又调一遍 ——
+ * **同一份调色做了两遍**,叠成过饱和橙色。PM 看片直接判「AI 生成的图很夸张,太假」。
+ * 改图只负责产出**中性写实**的底子,调色统一交给装配层。
+ *
  * 🔴 红线(evaluate 侧配套执行):**只有改过的图能进 sourceImagePool**。
  * 原图只作为改图的输入留在库里,永远不进成片 —— 这是版权隔离的落点,
  * 不能因为「改图失败了就先用原图顶上」而放宽。
@@ -31,29 +36,30 @@ export const TRANSFORM_COST_USD = 0.04
 export function buildTransformPrompt(params: {
   /** 原图标题(抓取时带的,用于提示场景内容) */
   title?: string | null
-  /** 客户风格倾向(creative_profile.look,如 golden_hour) */
+  /** ⚠️ 已废弃:调色不在这一步做,见下方说明。保留参数只为不破坏调用方。 */
   look?: string | null
   /** 场景语义提示(scene_tag 之类) */
   sceneHint?: string | null
 }): string {
-  const { title, look, sceneHint } = params
+  const { title, sceneHint } = params
   const subject = title?.trim() ? `Subject: ${title.trim().slice(0, 120)}. ` : ''
-  const lookLine = look?.trim()
-    ? `Grade toward ${look.trim().replace(/_/g, ' ')}. `
-    : 'Natural daylight grade. '
   const scene = sceneHint?.trim() ? `${sceneHint.trim()}. ` : ''
 
   return (
-    `Recreate this photograph as an original cinematic travel still. ` +
+    `Recreate this photograph as an original, natural-looking travel photo. ` +
     `${subject}${scene}` +
     // ① 保场景保构图
     `Keep the same scene, subject placement and camera angle. ` +
-    // ② 真实摄影质感,不要插画感
-    `Photorealistic, shot on full-frame camera, natural textures, realistic depth of field. ` +
-    `${lookLine}` +
-    `Not an illustration, not a painting, no oil-paint or watercolour look. ` +
-    // ③ 无文字无 logo
-    `No text, no letters, no watermark, no logo, no signage with readable words. ` +
+    // ② 真实感 —— PM 2026-07-26 看片:「AI 生成的图很夸张,太假」
+    `Documentary realism: neutral daylight, true-to-life colours, restrained contrast. ` +
+    `Looks like an unedited photo from a real camera. ` +
+    `Not cinematic, not dramatic, not over-saturated, no heavy golden or orange cast, ` +
+    `no glow, no HDR look, no illustration, no painting, no 3D render. ` +
+    // ③ 彻底禁字 —— PM 看片:红伞那张招牌上是乱码中文
+    `Remove all text: replace every sign, banner, lantern or plaque that carries writing ` +
+    `with a plain, blank, untextured surface. There must be zero letters, zero Chinese ` +
+    `characters, zero glyphs or symbols resembling writing anywhere in the image. ` +
+    `No watermark, no logo. ` +
     // 竖屏成片用
     `Vertical 9:16 composition with clean space in the upper third for caption overlay.`
   )

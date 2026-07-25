@@ -125,13 +125,18 @@ describe('🔴 i2v 源图轮换 —— 治「所有画面从同一张图长出�
     const { generationPlan } = selectClips(ctxWithNoStock, 'x', false, recipe, pool)
     const used = generationPlan.map((p) => p.source_image_url)
     expect(used.length).toBeGreaterThan(1)
-    expect(new Set(used).size).toBeGreaterThan(1)   // 关键:不是全同一张
+    expect(new Set(used).size).toBe(used.length)   // 关键:每张都不同,不是绕回复用
     expect(used.every((u) => u !== null)).toBe(true)
   })
 
-  it('池子比段数少 → 循环复用,不越界不返回 undefined', () => {
-    const { generationPlan } = selectClips(ctxWithNoStock, 'x', false, recipe, ['https://cdn/only.jpg'])
-    expect(generationPlan.every((p) => p.source_image_url === 'https://cdn/only.jpg')).toBe(true)
+  it('🔴 池子比段数少 → **不循环复用**(旧行为会让同片出现两个一样的画面)', () => {
+    // 这条曾经断言「循环复用」,正是 PM 看片抓到的病(11 秒和 20 秒同图)。
+    // 现在的正确行为:只生成池子那么多个,其余用库存补。
+    const { segments, generationPlan } = selectClips(ctxWithNoStock, 'x', false, recipe, ['https://cdn/only.jpg'])
+    expect(generationPlan).toHaveLength(1)
+    // 无库存可补 → 宁可片子少几镜,也不重复同一张源图
+    expect(segments).toHaveLength(1)
+    expect(new Set(generationPlan.map((p) => p.source_image_url)).size).toBe(1)
   })
 
   it('池子为空 → 退回 null 交给 worker 兜底(保持老行为,不炸)', () => {
@@ -142,6 +147,8 @@ describe('🔴 i2v 源图轮换 —— 治「所有画面从同一张图长出�
 
   it('有源图时 requires_source_resolution=false(worker 不该再去兜底)', () => {
     const { generationPlan } = selectClips(ctxWithNoStock, 'x', false, recipe, pool)
+    expect(generationPlan.length).toBeGreaterThan(0)
+    // 每个生成镜头都拿到了真源图 —— 没有一个要 worker 退回种子图
     expect(generationPlan.every((p) => p.requires_source_resolution === false)).toBe(true)
   })
 })
@@ -174,8 +181,11 @@ describe('🔴 库存配额 —— 让抓来改好的图真能进成片', () => 
     expect(segments).toHaveLength(recipe.shots.length) // 段数不变,只是来源变了
   })
 
-  it('库存占比不超过上限(其余留给新生成)', () => {
-    const { segments } = selectClips(ctxRichStock, 'x', false, recipe, pool)
+  it('池子充足时,库存占比不超过上限(其余留给新生成)', () => {
+    // 注意:池子**不足**时库存本就该多补(源图不够宁可用库存,也不重复同一张),
+    // 所以这条只在池子够的前提下断言 —— 用 8 张池子测 8 段配方
+    const bigPool = Array.from({ length: 8 }, (_, i) => `https://cdn/p${i}.png`)
+    const { segments } = selectClips(ctxRichStock, 'x', false, recipe, bigPool)
     const fromStock = segments.filter((s) => (s.clip_ids ?? []).length > 0).length
     expect(fromStock).toBeLessThanOrEqual(Math.floor(recipe.shots.length * FACTORY_MAX_STOCK_SHARE))
   })
@@ -206,6 +216,42 @@ describe('🔴 库存配额 —— 让抓来改好的图真能进成片', () => 
     } as never
     const { generationPlan } = selectClips(realStock, 'x', true, recipe, pool)
     expect(generationPlan).toHaveLength(0)
+  })
+
+  it('🔴 同一条片子里源图绝不重复(PM 实测:11 秒和 20 秒是同一张图)', () => {
+    // 根因:池里 3 张却要填 4 个生成镜头 → 取模绕回第 1 张。
+    // 现在的硬保证:生成镜头数 ≤ 池子大小,不够的退回用库存。
+    const { generationPlan } = selectClips(ctxRichStock, 'x', false, recipe, pool)
+    const urls = generationPlan.map((p) => p.source_image_url)
+    expect(new Set(urls).size).toBe(urls.length)   // 全不重样
+    expect(urls.every((u) => u !== null)).toBe(true) // 也没有 null 混进来
+  })
+
+  it('🔴 池子只有 1 张 → 只生成 1 个镜头,其余用库存(不复制同一张凑数)', () => {
+    const { segments, generationPlan } = selectClips(ctxRichStock, 'x', false, recipe, ['https://cdn/only.png'])
+    expect(generationPlan).toHaveLength(1)
+    expect(segments).toHaveLength(recipe.shots.length) // 段数不减,缺的用库存补
+  })
+
+  it('🔴 池子有重复项 → 去重后按去重数生成(变异测试:不去重会让同片出现重复画面)', () => {
+    // 池子里混进同一张图两次(线上可能:同一张原图被改两次 / 查询返回重复)
+    const dup = ['https://cdn/a.png', 'https://cdn/a.png', 'https://cdn/b.png']
+    const { generationPlan } = selectClips(ctxWithNoStock, 'x', false, recipe, dup)
+    const urls = generationPlan.map((p) => p.source_image_url)
+    expect(new Set(urls).size).toBe(urls.length)  // 绝无重复
+    expect(urls).toHaveLength(2)                  // 去重后只剩 2 张 → 只生成 2 镜
+  })
+
+  it('🔴 无库存可补 + 池子不足 → 段数缩到池子大小,绝不用种子图凑数', () => {
+    // 变异测试专用:去掉「源图用完就跳过」那个分支时,这里会多出没有源图的镜头
+    const { segments, generationPlan } = selectClips(
+      ctxWithNoStock, 'x', false, recipe, ['https://cdn/x1.png', 'https://cdn/x2.png'],
+    )
+    expect(generationPlan).toHaveLength(2)
+    expect(segments).toHaveLength(2)
+    // 每一个生成镜头都必须有真源图 —— 一个 null 都不许有
+    expect(generationPlan.every((p) => typeof p.source_image_url === 'string')).toBe(true)
+    expect(generationPlan.every((p) => p.requires_source_resolution === false)).toBe(true)
   })
 
   it('生成的镜头拿到的是改好的图(源图池里的),不是种子图', () => {
