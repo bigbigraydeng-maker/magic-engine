@@ -469,7 +469,13 @@ export function decideSignal(ctx: GateContext): Decision {
     ctx.recentAngles.length,
     ctx.hasPersona === true,
   )
-  const { segments, clipLinks, generationPlan } = selectClips(ctx, anglePick.angle, requireRealFootage, recipe)
+  const { segments, clipLinks, generationPlan } = selectClips(
+    ctx,
+    anglePick.angle,
+    requireRealFootage,
+    recipe,
+    ctx.sourceImagePool ?? [],
+  )
   if (requireRealFootage && segments.length === 0) {
     return { outcome: 'rejected', reason: 'price_ad_needs_real_footage', detail: 'verified_offer set but no a_real footage available' }
   }

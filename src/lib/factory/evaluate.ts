@@ -20,6 +20,16 @@ export function nzDay(d: Date): string {
   return d.toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' })
 }
 
+/** video_clips.storage_url(相对路径)→ content-factory bucket 公开 URL;已是完整 URL 直接用。
+ *  worker 的 i2v 只接受可下载的公开地址,所以源图必须是 http(s) URL。 */
+export function toPublicClipUrl(storageUrl: string | null): string | null {
+  if (!storageUrl) return null
+  if (/^https?:\/\//i.test(storageUrl)) return storageUrl
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL
+  if (!base) return null // 缺 base 宁可不给,也不拼出一个打不开的地址(worker i2v 会失败)
+  return `${base}/storage/v1/object/public/content-factory/${storageUrl.replace(/^\/+/, '')}`
+}
+
 async function loadContext(
   signal: DemandSignal,
 ): Promise<{
@@ -124,10 +134,24 @@ async function loadContext(
 
   const { data: clips, error: clErr } = await supabaseAdmin
     .from('video_clips')
-    .select('id, scene_tag, motion_type, track, usage_count, last_used_at')
+    .select('id, scene_tag, motion_type, track, usage_count, last_used_at, storage_url, source_meta')
     .eq('client_id', signal.client_id)
     .eq('status', 'active')
   if (clErr) throw new Error(`video_clips query failed: ${clErr.message}`)
+
+  // 🔴 静图/视频分流(在数据源头,不靠下游记得过滤):
+  // 抓来的静图(source_meta.is_still_image=true)只能当 i2v 源图,**绝不能进 clipStock** ——
+  // selectClips 会把 clipStock 里的东西当**现成视频**直接塞进 segments,worker 下载静图当
+  // mp4 播 = 黑屏。用 JS 分流而非 SQL `.not.eq`:后者对没有该字段的旧真视频行(->>返回 NULL)
+  // 会因三值逻辑一并排除,把好素材也滤掉。
+  const isStill = (c: { source_meta?: unknown }) =>
+    ((c.source_meta ?? null) as { is_still_image?: unknown } | null)?.is_still_image === true
+  const allClips = clips ?? []
+  const videoClips = allClips.filter((c) => !isStill(c))
+  const stillImages = allClips.filter(isStill)
+  const sourceImagePool = stillImages
+    .map((c) => toPublicClipUrl(c.storage_url as string | null))
+    .filter((u): u is string => !!u)
 
   const factoryConfig = (client?.factory_config ?? {}) as Record<string, unknown>
 
@@ -144,13 +168,15 @@ async function loadContext(
     balanceUsd: typeof balance === 'number' ? balance : Number(balance ?? NaN) || null,
     dailyOrderCount,
     dailyCostUsd,
-    clipStock: clips ?? [],
+    clipStock: videoClips, // 已排除静图:只留真能当片段用的视频
     allowBTrackLandmarkAds: factoryConfig['allow_b_track_landmark_ads'] === true,
     verifiedOffer: parseVerifiedOffer(factoryConfig['verified_offer']), // B4:客户级持久真促销
     // 叙事人格:配了就走故事型分镜 + 第一人称文案(见 copy-generator / shot-recipes)
     hasPersona: Boolean(
       ((fullBrief?.brand_voice ?? null) as { persona?: { name?: string } } | null)?.persona?.name,
     ),
+    // i2v 源图池:抓来的静图,喂给 generationPlan 当底图(见 selectClips 源图轮换)
+    sourceImagePool,
   }
   return {
     ctx,

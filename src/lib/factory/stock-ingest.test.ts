@@ -19,7 +19,7 @@ const img = (o: Partial<HarvestedImage> = {}): HarvestedImage => ({
 })
 
 const WHITELIST = ['establishing', 'texture_macro', 'lifestyle_moment'] as const
-const okPath = (_: HarvestedImage, i: number) => `clips/b-generated/c-1/stock_${i}.mp4`
+const okPath = (_: HarvestedImage, i: number) => `stock/c-1/stock_${i}.jpg`
 
 const build = (over: Partial<Parameters<typeof buildStockClipRows>[0]> = {}) =>
   buildStockClipRows({
@@ -75,14 +75,14 @@ describe('入库规则', () => {
       images: [img({ url: 'a' }), img({ url: 'b' }), img({ url: 'c' })],
       query: 'x', sceneTagWhitelist: WHITELIST,
       // 第二张搬运失败
-      storagePathFor: (_, i) => (i === 1 ? null : `clips/b-generated/c-1/s${i}.mp4`),
+      storagePathFor: (_, i) => (i === 1 ? null : `stock/c-1/s${i}.jpg`),
     })
     expect(rows).toHaveLength(2)
     expect(JSON.stringify(rows)).not.toContain('i.pinimg') // 绝不拿外链当 storage_url
   })
 
   it('storage_url 用的是搬运后的自家路径', () => {
-    expect(build()[0].storage_url).toBe('clips/b-generated/c-1/stock_0.mp4')
+    expect(build()[0].storage_url).toBe('stock/c-1/stock_0.jpg')
   })
 
   it('溯源信息齐全:能一路查回原图和为什么选它', () => {

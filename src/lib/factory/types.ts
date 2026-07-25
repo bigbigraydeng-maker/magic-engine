@@ -127,6 +127,9 @@ export interface GateContext {
   verifiedOffer: VerifiedOffer | null
   /** 客户是否配了叙事人格(master_briefs.brand_voice.persona)→ 选故事型分镜 + 第一人称文案 */
   hasPersona?: boolean
+  /** i2v 源图池:抓来的静图公开 URL。喂给 generationPlan 当底图,每段轮换用不同的一张。
+   *  由 evaluate 从 video_clips 里 is_still_image=true 的行装配。空 = worker 退回占位帧。 */
+  sourceImagePool?: readonly string[]
 }
 
 export interface AngleSource {

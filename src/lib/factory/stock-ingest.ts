@@ -98,6 +98,11 @@ export function buildStockClipRows(params: {
         harvested_at: new Date().toISOString(),
         // 明确标注:**不是客户真拍**,别拿去打真价
         is_real_footage: false,
+        // 🔴🔴 最关键的一条:这是**静图**,不是视频片段。
+        // selectClips 会把 clipStock 里的东西当**现成视频**直接塞进 segments[].clip_ids,
+        // worker 下载它当 mp4 播 —— 静图当视频 = 黑屏/装配失败。
+        // selectClips 必须靠这个标记把它排除出视频池,只当 i2v 源图用(sourceImagePool)。
+        is_still_image: true,
       },
     })
   })
