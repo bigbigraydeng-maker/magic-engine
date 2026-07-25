@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto'
 import { supabaseAdmin } from '@/lib/supabase'
 import { buildSearchQueries, normalizeHarvest, type HarvestedImage } from './stock-harvest'
 import { buildStockClipRows } from './stock-ingest'
+import { TRANSFORM_COST_USD, buildTransformPrompt, buildTransformedMeta } from './stock-transform'
 import { FACTORY_B_TRACK_SCENE_TAGS } from './constants'
 
 const BUCKET = 'content-factory'
@@ -159,6 +160,111 @@ export async function ingestHarvestedImages(
   }
 
   return { ingested: fresh.length, skipped: picked.length - fresh.length, errors }
+}
+
+/**
+ * 抓来的原图 → AI 改图 → 落库成新 clip。
+ *
+ * 这是 PM 反复要求的「抓图,用 ai 改图(防止版权问题),从图再升视频」的中间那段,
+ * 此前完全缺失。改完的图才是 i2v 的合法源图 —— 原图只留作输入,永不进成片。
+ *
+ * 成本:gpt-image-1 每张约 $0.04。所以只改**还没改过的**,且限量。
+ */
+export async function transformStockImages(
+  clientId: string,
+  opts: { max?: number; look?: string | null } = {},
+): Promise<{ transformed: number; skipped: number; errors: string[] }> {
+  const max = Math.min(opts.max ?? 8, 16)
+  const errors: string[] = []
+
+  // 待改的:抓来的原图里,还没有衍生图的那些
+  const { data: sources } = await supabaseAdmin
+    .from('video_clips')
+    .select('id, storage_url, title, scene_tag, source_meta')
+    .eq('client_id', clientId)
+    .eq('status', 'active')
+    .eq('source_meta->>origin', 'stock_harvest')
+    .limit(60)
+
+  const { data: derived } = await supabaseAdmin
+    .from('video_clips')
+    .select('source_meta')
+    .eq('client_id', clientId)
+    .eq('source_meta->>origin', 'stock_transformed')
+  const alreadyDerived = new Set(
+    (derived ?? [])
+      .map((d) => ((d.source_meta ?? {}) as Record<string, unknown>).derived_from_clip_id)
+      .filter((v): v is string => typeof v === 'string'),
+  )
+
+  const todo = (sources ?? []).filter((s) => !alreadyDerived.has(s.id as string)).slice(0, max)
+  if (todo.length === 0) return { transformed: 0, skipped: 0, errors }
+
+  const { transformImage } = await import('@/lib/visual/openai-images')
+  const rows: Record<string, unknown>[] = []
+
+  // 串行:gpt-image-1 慢且贵,并发容易撞速率限制,也不便于中途叫停
+  for (const src of todo) {
+    try {
+      const publicUrl = toPublicUrl(src.storage_url as string)
+      if (!publicUrl) { errors.push(`源图地址不可用: ${src.id}`); continue }
+      const res = await fetch(publicUrl, { headers: DL_HEADERS, signal: AbortSignal.timeout(DL_TIMEOUT_MS) })
+      if (!res.ok) { errors.push(`源图下载失败(${res.status})`); continue }
+      const buf = Buffer.from(await res.arrayBuffer())
+
+      const prompt = buildTransformPrompt({
+        title: src.title as string | null,
+        look: opts.look ?? null,
+        sceneHint: src.scene_tag as string | null,
+      })
+      const { b64 } = await transformImage({
+        image: buf,
+        prompt,
+        aspect_ratio: '9:16',
+        filename: (src.storage_url as string).split('/').pop() ?? 'source.jpg',
+      })
+
+      const outBuf = Buffer.from(b64, 'base64')
+      const path = `${STOCK_PREFIX}/${clientId}/ai_${src.id}.png`
+      const { error: upErr } = await supabaseAdmin.storage
+        .from(BUCKET)
+        .upload(path, outBuf, { contentType: 'image/png', upsert: true })
+      if (upErr) { errors.push(`改后图上传失败: ${upErr.message}`); continue }
+
+      rows.push({
+        client_id: clientId,
+        scene_tag: src.scene_tag,
+        track: 'b_generated',
+        storage_url: path,
+        duration_seconds: 4,
+        motion_type: null,
+        title: src.title,
+        generation_cost_usd: TRANSFORM_COST_USD,
+        source_meta: buildTransformedMeta({
+          sourceClipId: src.id as string,
+          sourceUrl: ((src.source_meta ?? {}) as Record<string, unknown>).source_url as string | null,
+          prompt,
+          query: ((src.source_meta ?? {}) as Record<string, unknown>).query as string | null,
+        }),
+      })
+    } catch (e) {
+      errors.push(`改图失败: ${e instanceof Error ? e.message : e}`)
+    }
+  }
+
+  if (rows.length > 0) {
+    const { error: insErr } = await supabaseAdmin.from('video_clips').insert(rows)
+    if (insErr) { errors.push(`改后图入库失败: ${insErr.message}`); return { transformed: 0, skipped: todo.length, errors } }
+  }
+  return { transformed: rows.length, skipped: todo.length - rows.length, errors }
+}
+
+/** storage 相对路径 → 公开 URL(改图要先把源图下载下来) */
+function toPublicUrl(storageUrl: string | null): string | null {
+  if (!storageUrl) return null
+  if (/^https?:\/\//i.test(storageUrl)) return storageUrl
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL
+  return base ? `${base}/storage/v1/object/public/${BUCKET}/${storageUrl.replace(/^\/+/, '')}` : null
 }
 
 /**

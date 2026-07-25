@@ -50,7 +50,7 @@ vi.mock('@/lib/supabase', () => {
   }
 })
 
-const { ingestHarvestedImages } = await import('./stock-pipeline')
+import { ingestHarvestedImages } from './stock-pipeline'
 
 const img = (u: string): HarvestedImage => ({
   url: u, width: 800, height: 1280, saves: 500,

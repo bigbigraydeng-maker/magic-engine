@@ -144,12 +144,18 @@ async function loadContext(
   // selectClips 会把 clipStock 里的东西当**现成视频**直接塞进 segments,worker 下载静图当
   // mp4 播 = 黑屏。用 JS 分流而非 SQL `.not.eq`:后者对没有该字段的旧真视频行(->>返回 NULL)
   // 会因三值逻辑一并排除,把好素材也滤掉。
-  const isStill = (c: { source_meta?: unknown }) =>
-    ((c.source_meta ?? null) as { is_still_image?: unknown } | null)?.is_still_image === true
+  const meta = (c: { source_meta?: unknown }) =>
+    ((c.source_meta ?? null) as Record<string, unknown> | null) ?? {}
+  const isStill = (c: { source_meta?: unknown }) => meta(c).is_still_image === true
   const allClips = clips ?? []
   const videoClips = allClips.filter((c) => !isStill(c))
-  const stillImages = allClips.filter(isStill)
-  const sourceImagePool = stillImages
+
+  // 🔴 版权隔离:**只有 AI 改过的图能进出片池**。
+  // 抓来的原图是别人的作品,只作为改图的输入留在库里,永远不进成片 ——
+  // 这是 PM 定的「抓图 → AI 改图(防版权)→ 图转视频」里「防版权」那一步的落点。
+  // 绝不能因为「改图失败了就先用原图顶上」而放宽:那等于把版权风险直接发给客户。
+  const sourceImagePool = allClips
+    .filter((c) => isStill(c) && meta(c).is_ai_transformed === true)
     .map((c) => toPublicClipUrl(c.storage_url as string | null))
     .filter((u): u is string => !!u)
 
