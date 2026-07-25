@@ -43,6 +43,10 @@ services:
         value: Pacific/Auckland
       - key: ANTHROPIC_API_KEY
         sync: false
+      # 素材抓取(factory-stock-refill cron 用)。未配 → harvestAndIngestForClient 直接抛错,
+      # cron 返回 500 而不是静默跳过 —— 宁可报错也不让「素材池没补上」悄悄发生。
+      - key: APIFY_TOKEN
+        sync: false
       - key: ATLAS_API_KEY
         sync: false
       - key: HEYGEN_API_KEY
@@ -570,6 +574,25 @@ services:
     startCommand: |
       curl -fsS --max-time 120 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/factory-order-scheduler
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # 素材池自动补货 — 治「所有 AI 画面从同一张种子图长出来」。
+  # 没有这条 cron,stock-pipeline 就是零调用方的死代码:素材池永远停在手工灌的那几张,
+  # sourceImagePool 恒空 → worker 每段都退回同一张 seed/cts_source.jpg。
+  # 🔴 花钱路径:抓取按张计费(≈$0.002/张)。护栏在 lib 层且天然收敛 ——
+  #    只给配了 factory_config 的客户抓 · 池子够 24 张就跳过 · 每客户最多 3 词×12 张 ·
+  #    搜索词必须能溯源到 master_brief(拼不出就不抓)。单次全量最坏 $0.2 量级。
+  # 每周一 19:00 UTC ≈ 周二 07:00 NZST,赶在当天 08:00 排产之前把池子补好。
+  - type: cron
+    name: factory-stock-refill
+    env: node
+    schedule: "0 19 * * 1"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/factory-stock-refill
     envVars:
       - key: CRON_SECRET
         sync: false

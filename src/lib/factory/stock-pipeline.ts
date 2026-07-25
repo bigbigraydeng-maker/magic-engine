@@ -25,6 +25,15 @@ const BUCKET = 'content-factory'
 const STOCK_PREFIX = 'stock'
 // 有些图床对无 UA 的请求直接 403(Pexels/Pixabay 咬过),带上常规 UA
 const DL_HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; MagicEngineBot/1.0)' }
+const DEFAULT_MAX = 12
+/** 硬上限:调用方传再大也不超过这个数,防一次把整批图读进内存 */
+const HARD_MAX = 30
+/** 同时在飞的下载数 */
+const DL_CONCURRENCY = 4
+/** 单张下载超时:图床挂起时不能让整条 cron 卡死 */
+const DL_TIMEOUT_MS = 20_000
+/** 单张图上限 15MB:Pinterest original 通常 1-3MB,超这个量级多半不是我们要的东西 */
+const MAX_IMAGE_BYTES = 15 * 1024 * 1024
 
 export interface IngestResult {
   ingested: number
@@ -55,32 +64,73 @@ export async function ingestHarvestedImages(
   query: string,
   opts: { max?: number } = {},
 ): Promise<IngestResult> {
-  const max = opts.max ?? 12
+  // 硬上限:防调用方(或未来的 cron)传个大数,把整批图同时读进内存
+  const max = Math.min(opts.max ?? DEFAULT_MAX, HARD_MAX)
   const picked = images.slice(0, max)
   const errors: string[] = []
 
-  // 先把图搬进 bucket,记下每张的落地路径(失败的 → null,buildStockClipRows 会跳过)
+  // 🔴 先查后下:storage path = sha256(url) 的纯函数,**在任何网络 IO 之前就能算出**。
+  // 此前是先把每张图都 fetch(1-3MB)+ upload 一遍,最后才查重 —— cron 每天重跑同一个
+  // 搜索词会命中大部分同样的图,等于每天白下载白上传一整批。
+  const pathOf = (img: HarvestedImage) => `${STOCK_PREFIX}/${clientId}/${fileNameFor(img.url)}`
+  const { data: existingRows } = await supabaseAdmin
+    .from('video_clips')
+    .select('storage_url')
+    .eq('client_id', clientId)
+    .in('storage_url', picked.map(pathOf))
+  const knownPaths = new Set((existingRows ?? []).map((r) => r.storage_url as string))
+
+  // 有行 **且** 桶里对象还在,才算真的已入库。只看行会留下悬空行 ——
+  // 桶被清过的话,evaluate 会把一个 404 地址当源图喂给 i2v,那次生成必然失败。
+  const alreadyIngested = new Set<string>()
+  if (knownPaths.size > 0) {
+    const { data: objects } = await supabaseAdmin.storage
+      .from(BUCKET)
+      .list(`${STOCK_PREFIX}/${clientId}`, { limit: 1000 })
+    const present = new Set((objects ?? []).map((o) => `${STOCK_PREFIX}/${clientId}/${o.name}`))
+    knownPaths.forEach((p) => { if (present.has(p)) alreadyIngested.add(p) })
+  }
+
+  const todo = picked.filter((img) => !alreadyIngested.has(pathOf(img)))
+
+  // 把图搬进 bucket,记下每张的落地路径(失败的 → null,buildStockClipRows 会跳过)
   const pathByIndex = new Map<number, string | null>()
-  await Promise.all(
-    picked.map(async (img, i) => {
-      try {
-        const res = await fetch(img.url, { headers: DL_HEADERS })
-        if (!res.ok) { errors.push(`下载失败(${res.status}): ${img.url.slice(-40)}`); pathByIndex.set(i, null); return }
-        const buf = Buffer.from(await res.arrayBuffer())
-        if (buf.length === 0) { errors.push(`空文件: ${img.url.slice(-40)}`); pathByIndex.set(i, null); return }
-        const name = fileNameFor(img.url)
-        const path = `${STOCK_PREFIX}/${clientId}/${name}`
-        const { error: upErr } = await supabaseAdmin.storage
-          .from(BUCKET)
-          .upload(path, buf, { contentType: contentTypeFor(name), upsert: true })
-        if (upErr) { errors.push(`上传失败: ${upErr.message}`); pathByIndex.set(i, null); return }
-        pathByIndex.set(i, path)
-      } catch (e) {
-        errors.push(`搬运异常: ${e instanceof Error ? e.message : e}`)
-        pathByIndex.set(i, null)
-      }
-    }),
-  )
+  // 已入库的直接记路径,不再下载
+  picked.forEach((img, i) => {
+    if (alreadyIngested.has(pathOf(img))) pathByIndex.set(i, pathOf(img))
+  })
+
+  // 限并发:一次最多 4 个下载在飞,避免大图并发把内存顶爆
+  const indexOfImg = new Map(picked.map((img, i) => [img, i] as const))
+  for (let start = 0; start < todo.length; start += DL_CONCURRENCY) {
+    const batch = todo.slice(start, start + DL_CONCURRENCY)
+    await Promise.all(
+      batch.map(async (img) => {
+        const i = indexOfImg.get(img)!
+        try {
+          // 超时:图床挂起时不能让整条 cron 卡死
+          const res = await fetch(img.url, { headers: DL_HEADERS, signal: AbortSignal.timeout(DL_TIMEOUT_MS) })
+          if (!res.ok) { errors.push(`下载失败(${res.status}): ${img.url.slice(-40)}`); pathByIndex.set(i, null); return }
+          // 内容类型必须真是图片:HTTP 200 也可能返回一个错误页 HTML,存进去 i2v 会失败
+          const ct = res.headers.get('content-type') ?? ''
+          if (!ct.startsWith('image/')) { errors.push(`非图片(${ct}): ${img.url.slice(-40)}`); pathByIndex.set(i, null); return }
+          const buf = Buffer.from(await res.arrayBuffer())
+          if (buf.length === 0) { errors.push(`空文件: ${img.url.slice(-40)}`); pathByIndex.set(i, null); return }
+          if (buf.length > MAX_IMAGE_BYTES) { errors.push(`图太大(${Math.round(buf.length / 1e6)}MB): ${img.url.slice(-40)}`); pathByIndex.set(i, null); return }
+          const name = fileNameFor(img.url)
+          const path = `${STOCK_PREFIX}/${clientId}/${name}`
+          const { error: upErr } = await supabaseAdmin.storage
+            .from(BUCKET)
+            .upload(path, buf, { contentType: contentTypeFor(name), upsert: true })
+          if (upErr) { errors.push(`上传失败: ${upErr.message}`); pathByIndex.set(i, null); return }
+          pathByIndex.set(i, path)
+        } catch (e) {
+          errors.push(`搬运异常: ${e instanceof Error ? e.message : e}`)
+          pathByIndex.set(i, null)
+        }
+      }),
+    )
+  }
 
   const rows = buildStockClipRows({
     clientId,
@@ -95,15 +145,10 @@ export async function ingestHarvestedImages(
     return { ingested: 0, skipped: picked.length, errors }
   }
 
-  // 去重:同 storage_url 已入库过就不重插(重复抓同一批时幂等)
-  const paths = rows.map((r) => r.storage_url)
-  const { data: existing } = await supabaseAdmin
-    .from('video_clips')
-    .select('storage_url')
-    .eq('client_id', clientId)
-    .in('storage_url', paths)
-  const seen = new Set((existing ?? []).map((r) => r.storage_url as string))
-  const fresh = rows.filter((r) => !seen.has(r.storage_url))
+  // 去重复用开头那次查询的结果(knownPaths):库里已有行的不重插。
+  // 注意跟 alreadyIngested 的区别 —— 那个还要求桶里对象在;这里只要有行就不该重插,
+  // 否则「行在但对象被清掉」的情况会插出重复行。对象缺失的那些上面已重新上传补回。
+  const fresh = rows.filter((r) => !knownPaths.has(r.storage_url))
 
   if (fresh.length > 0) {
     const { error: insErr } = await supabaseAdmin.from('video_clips').insert(fresh)
