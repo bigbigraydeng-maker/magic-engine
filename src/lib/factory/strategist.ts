@@ -6,6 +6,7 @@
 import {
   FACTORY_B_TRACK_SCENE_TAGS,
   FACTORY_CLIP_UNIT_COST_USD,
+  FACTORY_MAX_STOCK_SHARE,
   FACTORY_COST_MARGIN,
   FACTORY_DAILY_COST_CAP_USD,
   FACTORY_DAILY_ORDER_CAP,
@@ -298,9 +299,24 @@ export function selectClips(
 
   // 分镜按配方走(治「千篇一律」):段数/时长/转场/运镜都由配方决定,不再是写死的 5 段等长。
   // 每镜仍拉一条不同场景 clip = 治定格 + 素材单一(护栏 2/7)。
+  // 🔴 库存配额:有改好的源图时,最多六成镜头用库存视频,其余强制新生成。
+  // 不设这个上限的话,CTS 那 17 条库存视频会把 8 段全填满 → generationPlan 恒为空 →
+  // i2v 一次都不触发 → 每条片子都在同一批老素材里循环(= PM 说的「千篇一律」),
+  // 抓来改好的图也永远进不了成片。
+  // 价格广告(requireRealFootage)例外:那条红线要求全真拍,不能掺生成。
+  const stockQuota =
+    sourceImagePool.length > 0 && !requireRealFootage
+      ? Math.max(1, Math.floor(recipe.shots.length * FACTORY_MAX_STOCK_SHARE))
+      : recipe.shots.length
+  let stockUsed = 0
+
   recipe.shots.forEach((shot, i) => {
     const role = shot.role
-    const clip = pool.find((c) => !used.has(c.id) && !(c.scene_tag && usedScenes.has(c.scene_tag)))
+    const clip =
+      stockUsed < stockQuota
+        ? pool.find((c) => !used.has(c.id) && !(c.scene_tag && usedScenes.has(c.scene_tag)))
+        : undefined
+    if (clip) stockUsed += 1
     if (clip) {
       used.add(clip.id)
       if (clip.scene_tag) usedScenes.add(clip.scene_tag)
