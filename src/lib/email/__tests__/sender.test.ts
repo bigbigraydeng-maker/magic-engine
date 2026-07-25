@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { meMailFrom, ME_MAIL_FROM_ADDRESS } from '../sender'
+import { meMailFrom, ME_MAIL_FROM_ADDRESS, ME_MAIL_TO_ADDRESS } from '../sender'
 
 describe('meMailFrom — must send from a verified domain', () => {
   it('never uses the provider sandbox sender', () => {
@@ -23,5 +23,15 @@ describe('meMailFrom — must send from a verified domain', () => {
     expect(meMailFrom('Magic Engine 广告自检')).toBe(
       'Magic Engine 广告自检 <hello@magicengine.cloud>',
     )
+  })
+})
+
+describe('ME_MAIL_TO_ADDRESS — the inbox notifications land in', () => {
+  it('defaults to the shared verified-domain address', () => {
+    expect(ME_MAIL_TO_ADDRESS).toBe('hello@magicengine.cloud')
+  })
+
+  it('is on a verified domain, never the provider sandbox', () => {
+    expect(ME_MAIL_TO_ADDRESS).not.toContain('resend.dev')
   })
 })

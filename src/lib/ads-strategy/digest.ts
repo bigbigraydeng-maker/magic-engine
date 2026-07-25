@@ -14,7 +14,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { Resend } from 'resend'
-import { meMailFrom } from '@/lib/email/sender'
+import { meMailFrom, ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
 
 type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history' | 'paused'
 
@@ -201,7 +201,7 @@ export async function sendAdHealthDigest(
 
     const to = recipients && recipients.length > 0
       ? recipients
-      : [process.env.AD_HEALTH_DIGEST_TO || 'raydeng@magicengine.com.au']
+      : [process.env.AD_HEALTH_DIGEST_TO || ME_MAIL_TO_ADDRESS]
     const dashboardUrl = `https://app.magicengine.com.au/dashboard/clients/${clientId}/ads-health`
 
     const resend = new Resend(apiKey)
