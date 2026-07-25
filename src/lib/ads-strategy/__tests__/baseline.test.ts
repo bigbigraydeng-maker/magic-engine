@@ -142,6 +142,57 @@ describe('judgeCampaign — core behaviour', () => {
     expect(ctr.verdict).toBe('insufficient_history')
   })
 
+  it('does not alert a video / ThruPlay campaign whose CTR lives at 0.1% (the CTS false-🔴)', () => {
+    // Real incident 2026-07-24: CTS ThruPlay Reels, best-week CTR ~0.1%, latest
+    // ~0.0%, 0 results. The relative baseline saw "down 100%" and cried 🔴. A
+    // watch-time campaign's link CTR is noise — its own best week never clears
+    // the signal floor, so CTR must not be judged.
+    const points: DailyPoint[] = []
+    for (let i = 1; i <= 14; i++) points.push(pt(`2026-07-${String(i).padStart(2, '0')}`, 0.001))
+    for (let i = 15; i <= 21; i++) points.push(pt(`2026-07-${String(i).padStart(2, '0')}`, 0.0002))
+    const v = judgeCampaign(points)
+    const ctr = v.metrics.find(m => m.metric === 'ctr')!
+    expect(ctr.verdict).toBe('insufficient_history')
+    expect(v.verdict).not.toBe('alert')
+    expect(v.verdict).not.toBe('watch')
+  })
+
+  it('the CTR floor is scoped to CTR — a cheap cost-per-result week is never silenced by it', () => {
+    // Kills the mutation "drop `metric === 'ctr'`": cost_per_result values live
+    // in dollars, so a sub-$0.005 CPR week must NOT be mistaken for a below-floor
+    // signal. Cheapest week $0.004 → later steady $0.008 (a real 2× climb) must
+    // still be judged, not swallowed as insufficient_history.
+    const points: DailyPoint[] = []
+    for (let i = 1; i <= 14; i++) points.push(pt(`2026-07-${String(i).padStart(2, '0')}`, 0.03, 0.004))
+    for (let i = 15; i <= 21; i++) points.push(pt(`2026-07-${String(i).padStart(2, '0')}`, 0.03, 0.008))
+    const cpr = judgeCampaign(points).metrics.find(m => m.metric === 'cost_per_result')!
+    expect(cpr.verdict).not.toBe('insufficient_history')
+    expect(cpr.baseline).not.toBeNull()   // it was evaluated, not floor-skipped
+  })
+
+  it('a campaign just ABOVE the floor (0.6% best week) collapsing to 0 still alerts', () => {
+    // Guards against setting the floor too conservatively: 0.6% clears 0.5%, so
+    // this campaign IS click-driven and a collapse to ~0 must fire, not hide.
+    const points: DailyPoint[] = []
+    for (let i = 1; i <= 14; i++) points.push(pt(`2026-07-${String(i).padStart(2, '0')}`, 0.006))
+    for (let i = 15; i <= 21; i++) points.push(pt(`2026-07-${String(i).padStart(2, '0')}`, 0.0005))
+    const v = judgeCampaign(points)
+    const ctr = v.metrics.find(m => m.metric === 'ctr')!
+    expect(ctr.verdict).toBe('alert')
+    expect(v.verdict).toBe('alert')
+  })
+
+  it('still judges a click-driven campaign at 1%+ CTR (floor does not swallow real signal)', () => {
+    // A lead/traffic campaign whose best week is ~2% and collapses to ~1.2%
+    // (down ~40%) is above the floor and must still alert — the floor only
+    // silences campaigns that were never click-driven.
+    const points: DailyPoint[] = []
+    for (let i = 1; i <= 14; i++) points.push(pt(`2026-07-${String(i).padStart(2, '0')}`, 0.02))
+    for (let i = 15; i <= 21; i++) points.push(pt(`2026-07-${String(i).padStart(2, '0')}`, 0.012))
+    const v = judgeCampaign(points)
+    expect(v.metrics.find(m => m.metric === 'ctr')!.verdict).toBe('alert')
+  })
+
   it('reports the worst of the two metrics', () => {
     const points: DailyPoint[] = []
     // CTR healthy (flat 3%), CPR collapses (10 → 18)
