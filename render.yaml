@@ -43,10 +43,6 @@ services:
         value: Pacific/Auckland
       - key: ANTHROPIC_API_KEY
         sync: false
-      # 素材抓取(factory-stock-refill cron 用)。未配 → harvestAndIngestForClient 直接抛错,
-      # cron 返回 500 而不是静默跳过 —— 宁可报错也不让「素材池没补上」悄悄发生。
-      - key: APIFY_TOKEN
-        sync: false
       - key: ATLAS_API_KEY
         sync: false
       - key: HEYGEN_API_KEY

@@ -279,8 +279,11 @@ export async function harvestAndIngestForClient(params: {
   perQuery?: number
 }): Promise<{ query: string; result: IngestResult }[]> {
   const { clientId, contentPillars, coreProposition, perQuery = 12 } = params
-  const token = params.apifyToken ?? process.env.APIFY_TOKEN
-  if (!token) throw new Error('APIFY_TOKEN 未配置,无法自动抓取素材')
+  // 用全仓既有的 APIFY_API_KEY(诊断/口碑/社媒采集器都在用,Render 上早已配好)。
+  // 🔴 教训:我本来新造了个 APIFY_TOKEN —— 平白多一个要人工配的变量,
+  // 而同一个账号的 key 仓里到处都在用。写新 env 前先 grep 既有命名。
+  const token = params.apifyToken ?? process.env.APIFY_API_KEY ?? process.env.APIFY_TOKEN
+  if (!token) throw new Error('APIFY_API_KEY 未配置,无法自动抓取素材')
 
   const queries = buildSearchQueries({ contentPillars, coreProposition, max: 3 })
   const out: { query: string; result: IngestResult }[] = []
