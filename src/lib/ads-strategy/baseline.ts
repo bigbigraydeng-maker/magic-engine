@@ -57,6 +57,32 @@ export interface BaselineConfig {
    * (each window is a 7-day median). Do not read "7" as "7 days".
    */
   escalateWatchAfterDays: number
+  /**
+   * Below this best-week CTR, CTR carries no usable fatigue signal, so the
+   * metric is judged `insufficient_history` instead of alert/watch.
+   *
+   * Why a floor exists at all: CTR = clicks/impressions, and a video / ThruPlay
+   * campaign is optimised for watch-time, not clicks — its link CTR sits in the
+   * 0.1% band where a swing from 0.1% to 0.0% reads as "down 100%" while being
+   * pure rounding noise. The real incident (CTS ThruPlay Reels, 2026-07-24):
+   * verdict=alert, "点击率比自身最好一周低 100%(0.1% → 0.0%)", $69 spend / 0
+   * results — a false 🔴 that erodes PM trust in the whole engine.
+   *
+   * A campaign whose OWN best week never cleared this line is not click-driven,
+   * so CTR is simply the wrong lens for it. Lead-form / traffic campaigns sit
+   * well above (1%+), so their real decay is untouched. This is a statistical
+   * signal-floor, NOT the objective (which the spine does not yet store — the
+   * proper objective-aware metric switch is the P21.K follow-up gated on a
+   * migration). Default 0.5%: comfortably above video-view noise, far below any
+   * click-optimised campaign's floor.
+   *
+   * Load-bearing assumption: CTR here is Meta's ALL-clicks / impressions
+   * (meta/client.ts parseDailyMetrics — outbound_clicks_ctr is deliberately
+   * discarded), which for click-driven campaigns sits at 1%+. If that caliber
+   * ever changes to inbound/outbound link clicks (~0.1–0.5%), this floor would
+   * start swallowing real lead campaigns and MUST be re-evaluated.
+   */
+  ctrSignalFloor: number
 }
 
 export const DEFAULT_BASELINE_CONFIG: BaselineConfig = {
@@ -67,6 +93,7 @@ export const DEFAULT_BASELINE_CONFIG: BaselineConfig = {
   cplAlertRatio: 1.40,
   cplWatchRatio: 1.25,
   escalateWatchAfterDays: 7,
+  ctrSignalFloor: 0.005,
 }
 
 export interface MetricVerdict {
@@ -165,6 +192,19 @@ function evaluateMetric(
       metric, verdict: 'insufficient_history',
       baseline: null, recent: null, ratio: null,
       reason: '无有效基线(该指标长期为零),暂不判定',
+    }
+  }
+
+  // CTR signal floor: a campaign whose OWN best week never cleared the floor is
+  // not click-driven (video / ThruPlay, optimised for watch-time), so its 0.1%-
+  // band CTR is noise where a 0.1%→0.0% swing reads as "down 100%". Don't judge
+  // CTR here — report insufficient_history so the campaign isn't falsely 🔴.
+  // Scoped to CTR: cost_per_result has no such floor (a cheap week is real).
+  if (metric === 'ctr' && baseline < cfg.ctrSignalFloor) {
+    return {
+      metric, verdict: 'insufficient_history',
+      baseline: null, recent: null, ratio: null,
+      reason: `点击率长期低于 ${fmtPct(cfg.ctrSignalFloor)}(该广告非点击驱动,可能是视频/播放量目标),不以点击率判定`,
     }
   }
   const ratio = recent / baseline

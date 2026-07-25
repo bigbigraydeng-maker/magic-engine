@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { Resend } from 'resend'
 import { startCronRun } from '@/lib/cron/run-logger'
-import { meMailFrom } from '@/lib/email/sender'
+import { meMailFrom, ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
 
-const TO_EMAIL = 'raydeng@magicengine.com.au'
+const TO_EMAIL = ME_MAIL_TO_ADDRESS
 
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get('authorization')
