@@ -37,12 +37,57 @@ export interface HarvestOptions {
   minAspectRatio?: number
   /** 最少收藏数,过滤没人认可的图 */
   minSaves?: number
+  /** 🔴 客户级禁区词(地理/品类):中国游客户填 paris/italy/santorini,建材客户填 beverage/drink */
+  offTopic?: readonly string[]
 }
 
 const DEFAULTS: Required<HarvestOptions> = {
   minWidth: 700,
   minAspectRatio: 1.2,
   minSaves: 50,
+  offTopic: [],
+}
+
+/**
+ * 🔴 标题黑名单:抓回来但**不能当客户素材**的东西。
+ *
+ * 2026-07-26 PM 看片后查库,实测抓到的垃圾(全部真实样本):
+ * - CTS(中国游)抓到 Positano/Amalfi(意大利)、paris trip planning、Santorini(希腊)
+ *   → 画面配着「Your China trip starts here」出现 = 误导客户,踩「绝不编业务事实」红线
+ * - CTS 还抓到「5 steps to choosing travel insurance」「asia travel map」「wallpaper 4k」
+ *   → 资讯图/地图/壁纸根本不是可用的场景素材
+ * - Oztop(建材)抓到 Schweppes 汽水、matcha 饮料、俄语设计教程、「Text portrait」海报
+ *   → 一张建材都没有
+ *
+ * 光靠搜索词治不了 —— Pinterest 的相关推荐必然混进这些。所以入库前再筛一道。
+ */
+const TITLE_BLOCKLIST = [
+  // 非场景素材:资讯图/教程/海报/地图/壁纸(有文字、没画面价值)
+  /\b(infographics?|tutorials?|posters?|wallpapers?|templates?|mockups?|checklists?)\b/i,
+  /\b(tips?|guide|how\s?to|steps?\s+to|ways?\s+to)\b/i,
+  /\bmap\b/i,
+  // 明显的社媒运营/设计类内容,不是实拍场景
+  /\b(social media|branding concept|hero product shot)\b/i,
+  // 非拉丁噪音标题(俄语/其他语种的教程推广)
+  /[Ѐ-ӿ]/,
+]
+
+/** 标题是否该被挡掉(纯函数,可测) */
+export function isBlockedTitle(title: string | null | undefined): boolean {
+  if (!title) return false // 无标题不拦:Pinterest 很多好图没标题
+  const t = title.trim()
+  if (t.length <= 2) return true // "1" "💨" 这种
+  return TITLE_BLOCKLIST.some((re) => re.test(t))
+}
+
+/**
+ * 标题跟业务锚点是否冲突 —— 地理/品类跑偏的硬闸。
+ * @param offTopic 客户级禁区词(如中国游客户禁 paris/italy;建材客户禁 beverage)
+ */
+export function isOffTopic(title: string | null | undefined, offTopic: readonly string[]): boolean {
+  if (!title || offTopic.length === 0) return false
+  const t = title.toLowerCase()
+  return offTopic.some((w) => w.trim() && t.includes(w.trim().toLowerCase()))
 }
 
 /** Apify 抓回来的原始行 → 规范化 + 按可用性过滤。纯函数,可测。 */
@@ -77,6 +122,11 @@ export function normalizeHarvest(
     const saves = Number(r.saves) || 0
     if (saves < o.minSaves) continue
 
+    // 🔴 内容相关性两道闸(实测抓到过意大利/巴黎/希腊/汽水/俄语教程,见 TITLE_BLOCKLIST 头注)
+    const title = typeof r.title === 'string' ? r.title : null
+    if (isBlockedTitle(title)) continue          // 不是可用的场景素材
+    if (isOffTopic(title, o.offTopic)) continue  // 跟客户业务对不上
+
     seen.add(url)
     out.push({
       url,
@@ -100,19 +150,48 @@ export function normalizeHarvest(
 export function buildSearchQueries(params: {
   contentPillars: Array<{ name?: string } | string> | null
   coreProposition: string | null
+  /** 🔴 业务锚点(行业 + 地域):必须拼进每一条搜索词,否则抓回来的东西跟客户没关系 */
+  anchor?: string | null
   max?: number
 }): string[] {
-  const { contentPillars, coreProposition, max = 4 } = params
+  const { contentPillars, coreProposition, anchor, max = 4 } = params
+  const a = anchor?.trim()
+  // 没有业务锚点就不抓 —— 抓回来也是废图,还要花钱
+  if (!a) return []
+
   const qs: string[] = []
   for (const p of contentPillars ?? []) {
     const name = typeof p === 'string' ? p : p?.name
-    if (name && name.trim()) qs.push(`${name.trim()} photography vertical`)
+    if (!name?.trim()) continue
+    // 抽象支柱名单独当搜索词会跑偏(实测:"Product Education & How-To photography"
+    // 搜出一堆摄影教程;"Travel Planning & Education" 搜出保险资讯图和巴黎)。
+    // 只取支柱里的**具体名词**,并且永远跟业务锚点绑在一起。
+    const concrete = pillarKeywords(name)
+    qs.push(concrete ? `${a} ${concrete}` : a)
     if (qs.length >= max) break
   }
   if (qs.length === 0 && coreProposition) {
-    // 兜底:取 core_proposition 前几个实词,避免整句当搜索词(搜不到东西)
-    const words = coreProposition.split(/\s+/).filter((w) => w.length > 3).slice(0, 4)
-    if (words.length) qs.push(`${words.join(' ')} photography vertical`)
+    const words = coreProposition.split(/\s+/).filter((w) => w.length > 3).slice(0, 3)
+    qs.push(words.length ? `${a} ${words.join(' ')}` : a)
   }
-  return qs.slice(0, max)
+  // 去重后返回(不同支柱可能压出同一条词)
+  return Array.from(new Set(qs)).slice(0, max)
+}
+
+/**
+ * 从支柱名里剥出可搜的具体名词。
+ * 「Product Education & How-To」「Destination Inspiration」这类是**内部策划用语**,
+ * 直接拿去搜图必然跑偏 —— 剥掉这些抽象词,只留下有画面感的部分;全被剥光则返回 null,
+ * 让调用方只用业务锚点搜(宁可宽泛也不要搜错方向)。
+ */
+function pillarKeywords(name: string): string | null {
+  const ABSTRACT =
+    /\b(education|educational|how[- ]?to|tips?|guide|guides|inspiration|trends?|planning|highlights?|offers?|social|proof|celebration|story|stories|expertise|heritage|product)\b/gi
+  const cleaned = name
+    .replace(/&/g, ' ')
+    .replace(ABSTRACT, ' ')
+    .replace(/[^A-Za-z0-9一-龥\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return cleaned.length >= 3 ? cleaned.toLowerCase() : null
 }

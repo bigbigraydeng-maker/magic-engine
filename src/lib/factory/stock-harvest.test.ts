@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { buildSearchQueries, normalizeHarvest } from './stock-harvest'
+import { buildSearchQueries, isBlockedTitle, isOffTopic, normalizeHarvest } from './stock-harvest'
 
 /** 真实抓取样本(节选自 dataset 2uvObLM6gVcKikIHc) */
 const REAL = [
@@ -76,31 +76,106 @@ describe('normalizeHarvest — 用真实抓取样本', () => {
   })
 })
 
-describe('buildSearchQueries — 搜索词只从品牌资料溯源', () => {
-  it('用内容支柱拼词(跟角度溯源同一条纪律)', () => {
-    const q = buildSearchQueries({
-      contentPillars: [{ name: 'Destination Inspiration' }, { name: 'Cultural Heritage' }],
-      coreProposition: null,
-    })
-    expect(q[0]).toContain('Destination Inspiration')
-    expect(q[0]).toContain('vertical')
+describe('buildSearchQueries — 必须带业务锚点', () => {
+  it('🔴 没有业务锚点 → 一条都不搜(抓回来也是废图,还花钱)', () => {
+    expect(buildSearchQueries({
+      contentPillars: [{ name: 'Destination Inspiration' }], coreProposition: 'x',
+    })).toEqual([])
   })
 
-  it('支柱为空 → 退回 core_proposition 的实词,不把整句当搜索词', () => {
+  it('🔴 每条搜索词都带上锚点(实测:不带锚点 CTS 抓回意大利/巴黎/希腊)', () => {
+    const q = buildSearchQueries({
+      contentPillars: [{ name: 'Destination Inspiration' }, { name: 'Cultural Heritage' }],
+      coreProposition: null, anchor: 'china travel',
+    })
+    expect(q.length).toBeGreaterThan(0)
+    expect(q.every((s) => s.startsWith('china travel'))).toBe(true)
+  })
+
+  it('🔴 抽象策划词被剥掉(不然搜出来是教程和资讯图)', () => {
+    // 实测:"Product Education & How-To photography" 搜出一堆摄影教程
+    const q = buildSearchQueries({
+      contentPillars: [{ name: 'Product Education & How-To' }],
+      coreProposition: null, anchor: 'timber flooring',
+    })
+    expect(q[0]).not.toMatch(/education|how.?to/i)
+    expect(q[0]).toContain('timber flooring')
+  })
+
+  it('支柱全是抽象词 → 只用锚点搜(宁可宽泛也不搜错方向)', () => {
+    const q = buildSearchQueries({
+      contentPillars: [{ name: 'Offers & Highlights' }],
+      coreProposition: null, anchor: 'timber flooring',
+    })
+    expect(q).toEqual(['timber flooring'])
+  })
+
+  it('支柱为空 → 退回 core_proposition 实词,仍带锚点', () => {
     const q = buildSearchQueries({
       contentPillars: null,
       coreProposition: 'Backed by China Travel Service with Kiwi-led operations',
+      anchor: 'china travel',
     })
     expect(q).toHaveLength(1)
-    expect(q[0].split(/\s+/).length).toBeLessThanOrEqual(6)
+    expect(q[0]).toContain('china travel')
   })
 
-  it('两者都空 → 空数组(绝不瞎编搜索词)', () => {
-    expect(buildSearchQueries({ contentPillars: null, coreProposition: null })).toEqual([])
-  })
-
-  it('限制条数,不无限发请求(每条都要花钱)', () => {
+  it('限制条数并去重(每条都要花钱)', () => {
     const many = Array.from({ length: 20 }, (_, i) => ({ name: `Pillar ${i}` }))
-    expect(buildSearchQueries({ contentPillars: many, coreProposition: null, max: 3 })).toHaveLength(3)
+    expect(buildSearchQueries({ contentPillars: many, coreProposition: null, anchor: 'a', max: 3 }))
+      .toHaveLength(3)
+  })
+})
+
+describe('🔴 内容相关性闸 —— 用实测抓到的垃圾做样本', () => {
+  it('挡掉非场景素材:资讯图/教程/地图/壁纸/海报', () => {
+    for (const bad of [
+      '5 steps to choosing the right travel insurance',
+      'asia travel map', 'wallpaper 4k', 'Trending Posters',
+      '3 Tips for Elevating Your Product Photography',
+      'How to Take Stunning Product Photos with Your Phone',
+      'rioca Matcha | Social Media',
+    ]) {
+      expect(isBlockedTitle(bad), bad).toBe(true)
+    }
+  })
+
+  it('挡掉非拉丁噪音标题(俄语教程推广)', () => {
+    expect(isBlockedTitle('"Жми" на Пин, PROMPT+ туториал')).toBe(true)
+    expect(isBlockedTitle('Екатерина/ ДИЗАЙНЕР инфографики')).toBe(true)
+  })
+
+  it('挡掉无意义标题', () => {
+    expect(isBlockedTitle('1')).toBe(true)
+    expect(isBlockedTitle('💨')).toBe(true)
+  })
+
+  it('正常场景标题放行', () => {
+    for (const ok of ['Zhangjiajie', 'Fanjing Heights', 'Jiufen', 'Explore China']) {
+      expect(isBlockedTitle(ok), ok).toBe(false)
+    }
+  })
+
+  it('无标题不拦(Pinterest 很多好图没标题)', () => {
+    expect(isBlockedTitle(null)).toBe(false)
+  })
+
+  it('🔴 地理跑偏被挡(CTS 是中国游,实测抓回意大利/巴黎/希腊)', () => {
+    const off = ['paris', 'italia', 'santorini']
+    expect(isOffTopic('Positano, Coasta Amalfi, Italia', off)).toBe(true)
+    expect(isOffTopic('paris trip planning', off)).toBe(true)
+    expect(isOffTopic('Santorini sunset aesthetic', off)).toBe(true)
+    expect(isOffTopic('Zhangjiajie', off)).toBe(false)
+  })
+
+  it('normalizeHarvest 端到端:垃圾进不来', () => {
+    const rows = [
+      { title: 'Zhangjiajie', imageUrls: { original: 'https://x/ok.jpg' }, width: 800, height: 1280, saves: 2440 },
+      { title: 'asia travel map', imageUrls: { original: 'https://x/map.jpg' }, width: 800, height: 1280, saves: 9999 },
+      { title: 'Positano, Italia', imageUrls: { original: 'https://x/it.jpg' }, width: 800, height: 1280, saves: 9999 },
+    ]
+    const r = normalizeHarvest(rows, { offTopic: ['italia'] })
+    expect(r).toHaveLength(1)
+    expect(r[0].title).toBe('Zhangjiajie')
   })
 })

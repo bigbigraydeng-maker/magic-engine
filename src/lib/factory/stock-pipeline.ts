@@ -275,17 +275,21 @@ export async function harvestAndIngestForClient(params: {
   clientId: string
   contentPillars: Array<{ name?: string } | string> | null
   coreProposition: string | null
+  /** 🔴 业务锚点(行业+地域,如 "china travel"/"flooring tiles Sydney")。缺则不抓。 */
+  anchor?: string | null
+  /** 🔴 客户级禁区词(地理/品类跑偏) */
+  offTopic?: readonly string[]
   apifyToken?: string
   perQuery?: number
 }): Promise<{ query: string; result: IngestResult }[]> {
-  const { clientId, contentPillars, coreProposition, perQuery = 12 } = params
+  const { clientId, contentPillars, coreProposition, anchor, offTopic = [], perQuery = 12 } = params
   // 用全仓既有的 APIFY_API_KEY(诊断/口碑/社媒采集器都在用,Render 上早已配好)。
   // 🔴 教训:我本来新造了个 APIFY_TOKEN —— 平白多一个要人工配的变量,
   // 而同一个账号的 key 仓里到处都在用。写新 env 前先 grep 既有命名。
   const token = params.apifyToken ?? process.env.APIFY_API_KEY ?? process.env.APIFY_TOKEN
   if (!token) throw new Error('APIFY_API_KEY 未配置,无法自动抓取素材')
 
-  const queries = buildSearchQueries({ contentPillars, coreProposition, max: 3 })
+  const queries = buildSearchQueries({ contentPillars, coreProposition, anchor, max: 3 })
   const out: { query: string; result: IngestResult }[] = []
 
   for (const query of queries) {
@@ -303,7 +307,7 @@ export async function harvestAndIngestForClient(params: {
       continue
     }
     const raw = (await res.json()) as unknown[]
-    const images = normalizeHarvest(raw)
+    const images = normalizeHarvest(raw, { offTopic })
     const result = await ingestHarvestedImages(clientId, images, query, { max: perQuery })
     out.push({ query, result })
   }

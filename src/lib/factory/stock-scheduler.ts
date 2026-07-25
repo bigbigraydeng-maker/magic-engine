@@ -41,7 +41,7 @@ export interface StockRefillOutcome {
 export async function runStockRefill(): Promise<{ scanned: number; outcomes: StockRefillOutcome[] }> {
   const { data: clients, error } = await supabaseAdmin
     .from('clients')
-    .select('id, name, factory_config')
+    .select('id, name, factory_config, industry')
     .not('factory_config', 'is', null)
   if (error) throw new Error(`clients query failed: ${error.message}`)
 
@@ -74,7 +74,7 @@ export async function runStockRefill(): Promise<{ scanned: number; outcomes: Sto
       // 搜索词只从品牌资料溯源(跟角度溯源同一条纪律),没资料就不抓 —— 绝不瞎编词去花钱
       const { data: brief } = await supabaseAdmin
         .from('master_briefs')
-        .select('content_pillars, core_proposition')
+        .select('content_pillars, core_proposition, brand_name, tagline')
         .eq('client_id', clientId)
         .or('status.eq.active,is_active.eq.true')
         .order('version', { ascending: false })
@@ -88,10 +88,28 @@ export async function runStockRefill(): Promise<{ scanned: number; outcomes: Sto
         continue
       }
 
+      // 🔴 业务锚点 + 禁区词:从客户资料推导,不硬编码任何客户。
+      // 没有锚点就不抓 —— 2026-07-26 实测教训:只用抽象支柱名搜,CTS(中国游)抓回
+      // 意大利/巴黎/希腊,Oztop(建材)抓回汽水和俄语教程,全是花钱买废图。
+      const cfg = (c.factory_config ?? {}) as Record<string, unknown>
+      const anchor = deriveAnchor(
+        { ...cfg, __industry: (c as Record<string, unknown>).industry },
+        brief as Record<string, unknown> | null,
+      )
+      if (!anchor) {
+        outcomes.push({ client_id: clientId, client_name: clientName, result: 'skipped_no_brief', before,
+          detail: '缺业务锚点(stock_anchor / industry),不抓以免买到废图' })
+        continue
+      }
+
       const results = await harvestAndIngestForClient({
         clientId,
         contentPillars: pillars,
         coreProposition: core,
+        anchor,
+        offTopic: Array.isArray(cfg.stock_off_topic)
+          ? (cfg.stock_off_topic as unknown[]).filter((x): x is string => typeof x === 'string')
+          : [],
       })
       const ingested = results.reduce((s, r) => s + r.result.ingested, 0)
       const errs = results.flatMap((r) => r.result.errors)
@@ -115,4 +133,27 @@ export async function runStockRefill(): Promise<{ scanned: number; outcomes: Sto
   }
 
   return { scanned: targets.length, outcomes }
+}
+
+/**
+ * 业务锚点:每条搜索词都要带上它,否则抓回来的图跟客户没关系。
+ *
+ * 优先级:
+ * ① `factory_config.stock_anchor` —— PM 手填,最准(如 "china travel"、"timber flooring Sydney")
+ * ② `clients.industry` —— 建档时就有的行业字段
+ * 都没有则返回 null → 调度器跳过该客户,**不抓**。
+ *
+ * 为什么不从 core_proposition 自动提炼:那是一整段营销文案,提炼出来的词不可控,
+ * 而搜错方向是要花钱的。宁可让 PM 填一次,也不要每周买一批废图。
+ */
+export function deriveAnchor(
+  factoryConfig: Record<string, unknown>,
+  brief: Record<string, unknown> | null,
+): string | null {
+  const explicit = factoryConfig.stock_anchor
+  if (typeof explicit === 'string' && explicit.trim()) return explicit.trim().slice(0, 60)
+  const industry = factoryConfig.__industry
+  if (typeof industry === 'string' && industry.trim()) return industry.trim().slice(0, 60)
+  void brief
+  return null
 }
