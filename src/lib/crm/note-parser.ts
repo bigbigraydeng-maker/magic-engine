@@ -140,7 +140,21 @@ Rules:
 - competitor: another travel company the customer mentioned using or quoting. Null if none.
 - callback_at: only when a specific time was agreed AND you can express it as an ISO 8601 instant. A vague "call next week" is null.
 - Never invent. If the note does not say it, the field is null.
-- outcome / do_not_contact are decided by rules elsewhere; fill your best guess, it will be overridden.`
+- outcome / do_not_contact are decided by rules elsewhere; fill your best guess, it will be overridden.
+
+TWO MISTAKES THAT KEEP HAPPENING — read these twice:
+
+1. A DATE AT THE END OF THE NOTE IS WHEN THE SALESPERSON MADE THE CALL, NOT WHEN THE
+   CUSTOMER TRAVELS. "voice message 9 July", "brochure sent 13 July", "nice talk 17 July"
+   all mean the agent logged that call on that day. travel_window is null for all of them.
+   Only fill travel_window when the note says the CUSTOMER goes then — "wants to travel
+   next March", "not until end of next year", "March 2027 departure".
+
+2. THE TOUR NAMES BELOW BELONG TO THE AGENCY ITSELF, NOT TO A COMPETITOR. Seeing one of
+   them means the customer is interested in OUR product. competitor is null.
+   Nor is a nationality, ethnicity or a person's name a competitor.
+   competitor is ONLY a rival travel company the customer says they used, booked with, or
+   got a quote from — e.g. "just back from China with Inspiring Vacations".`
 
 const NOTE_JSON_SCHEMA = {
   type: 'object',
@@ -173,10 +187,76 @@ function safeInstant(raw: string | null): string | null {
 }
 
 /**
+ * 模型有时把「没有」写成字符串 "null"/"none"/"N/A"。原样存进去，
+ * 后面所有「有没有值」的判断都会把它当成有值。
+ */
+function cleanNullish(v: string | null): string | null {
+  if (v == null) return null
+  const s = v.trim()
+  if (!s) return null
+  if (/^(null|none|n\/?a|unknown|not\s*(specified|stated|mentioned))$/i.test(s)) return null
+  return s
+}
+
+/**
+ * 只有真的是别家旅行社才算竞品。
+ *
+ * 实测被误判成竞品的：客户自己的品牌 "CTS"、客户自己的团名 "Legacy" /
+ * "Panorama"、以及销售随手写的族裔 "indian"。这些混进去会让「被谁抢了」
+ * 这张表彻底没法看。
+ */
+function cleanCompetitor(v: string | null, brandTerms: string[]): string | null {
+  const s = cleanNullish(v)
+  if (!s) return null
+  const low = s.toLowerCase()
+  if (brandTerms.some((b) => low === b || low.includes(b) || b.includes(low))) return null
+  // "another company" 这类没名字的说法留不下情报价值
+  if (/^(another|other)\s+(company|agency|operator)$/i.test(s)) return null
+  // 单个族裔/国籍词不是公司
+  if (/^(indian|chinese|kiwi|maori|asian|european)$/i.test(s)) return null
+  return s
+}
+
+/**
+ * 出行时间里最常见的假阳性：备注末尾的「9 July」其实是销售打电话那天。
+ * 提示词已经强调过，这里再兜一道 —— 早于当前年份的年份一律丢掉。
+ */
+function cleanTravelWindow(v: string | null, now: Date): string | null {
+  const s = cleanNullish(v)
+  if (!s) return null
+  const year = s.match(/(19|20)\d{2}/)
+  if (year && Number(year[0]) < now.getFullYear()) return null
+  return s
+}
+
+/** 客户自己的品牌和团名 —— 出现这些不是竞品，是对我们的产品有兴趣。 */
+export const CTS_BRAND_TERMS = [
+  'cts',
+  'cts tours',
+  'china travel service',
+  'best of china',
+  'tale of two cities',
+  'silk road',
+  'silk road discovery',
+  'shanghai & surroundings',
+  'china panorama',
+  'panorama',
+  'legacy',
+  'china legacy',
+  'china discovery',
+  'china signature',
+]
+
+/**
  * 解析一条记录。没有 API key 时退回纯规则版本，
  * 这样导入脚本和测试永远不依赖网络。
  */
-export async function parseNote(raw: string): Promise<NoteParse> {
+export async function parseNote(
+  raw: string,
+  opts: { brandTerms?: string[]; now?: Date } = {},
+): Promise<NoteParse> {
+  const brandTerms = (opts.brandTerms ?? CTS_BRAND_TERMS).map((b) => b.toLowerCase())
+  const now = opts.now ?? new Date()
   const rules = classifyNote(raw)
   const base: NoteParse = {
     outcome: rules.outcome,
@@ -212,10 +292,22 @@ export async function parseNote(raw: string): Promise<NoteParse> {
       // 规则赢。「别再联系」不交给 AI 判断，而且两边取并集。
       outcome: rules.outcome,
       do_not_contact: rules.do_not_contact || parsed.do_not_contact,
-      callback_at: safeInstant(parsed.callback_at),
+      // 模型的自由文本字段全部过一遍清洗 —— 实测它会返回字符串 "null"、
+      // 把客户自己的团名当竞品、把销售的通话日期当出行时间。
+      travel_window: cleanTravelWindow(parsed.travel_window, now),
+      tour_interest: cleanNullish(parsed.tour_interest),
+      competitor: cleanCompetitor(parsed.competitor, brandTerms),
+      callback_at: safeInstant(cleanNullish(parsed.callback_at)),
     }
   } catch {
     // AI 挂了不能让整批导入失败 —— 规则版本已经覆盖了最要紧的三件事。
     return base
   }
 }
+
+// 只为测试导出。清洗逻辑是这批数据里最容易回归的部分（提示词一改就漂），
+// 必须能被单测直接钉住。
+export const cleanNullishForTest = cleanNullish
+export const cleanCompetitorForTest = (v: string | null) =>
+  cleanCompetitor(v, CTS_BRAND_TERMS.map((b) => b.toLowerCase()))
+export const cleanTravelWindowForTest = cleanTravelWindow

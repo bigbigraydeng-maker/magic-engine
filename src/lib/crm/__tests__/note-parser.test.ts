@@ -105,3 +105,52 @@ describe('优先级：坏号码 > 拒绝 > 没接通 > 没兴趣 > 约回电', (
     expect(outcome('voice mail call tomorrow')).toBe('no_answer')
   })
 })
+
+/**
+ * AI 层的清洗。第一轮富化 287 条真实记录时，模型交出了这些垃圾：
+ * 把客户自己的品牌 CTS 和自家团名 Legacy / Panorama 当成竞品、
+ * 把销售的族裔备注 "indian" 当公司、返回字符串 "null"、
+ * 把备注末尾的通话日期 "9 July" 当成客户的出行时间。
+ * 提示词已经改过，这里是最后一道闸 —— 提示词会漂，代码不会。
+ */
+import { cleanCompetitorForTest, cleanTravelWindowForTest, cleanNullishForTest } from '../note-parser'
+
+describe('AI 输出清洗', () => {
+  it('字符串 "null" 不是值', () => {
+    expect(cleanNullishForTest('null')).toBeNull()
+    expect(cleanNullishForTest('N/A')).toBeNull()
+    expect(cleanNullishForTest('  ')).toBeNull()
+    expect(cleanNullishForTest('not specified')).toBeNull()
+  })
+
+  it('客户自己的品牌和团名不是竞品', () => {
+    expect(cleanCompetitorForTest('CTS')).toBeNull()
+    expect(cleanCompetitorForTest('Legacy')).toBeNull()
+    expect(cleanCompetitorForTest('Panorama')).toBeNull()
+    expect(cleanCompetitorForTest('Best of China')).toBeNull()
+  })
+
+  it('族裔不是公司', () => {
+    expect(cleanCompetitorForTest('indian')).toBeNull()
+  })
+
+  it('没名字的说法留不下情报', () => {
+    expect(cleanCompetitorForTest('another company')).toBeNull()
+  })
+
+  it('真竞品留下 —— 这条是全批唯一有价值的一条', () => {
+    expect(cleanCompetitorForTest('Inspiring Vacations')).toBe('Inspiring Vacations')
+  })
+
+  it('过去的年份不可能是出行时间', () => {
+    const now = new Date('2026-07-26T00:00:00Z')
+    expect(cleanTravelWindowForTest('2023-07-09', now)).toBeNull()
+    expect(cleanTravelWindowForTest('2024 年底', now)).toBeNull()
+  })
+
+  it('未来的时间留下', () => {
+    const now = new Date('2026-07-26T00:00:00Z')
+    expect(cleanTravelWindowForTest('明年三月', now)).toBe('明年三月')
+    expect(cleanTravelWindowForTest('2027 年三月', now)).toBe('2027 年三月')
+  })
+})
