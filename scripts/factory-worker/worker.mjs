@@ -334,8 +334,17 @@ function assemble(wo, localPaths, copy, tmp) {
       const clipDur = probeClipDuration(localPaths[i])
       // 定格根治:dur 不超过 clip 实长(留 0.1s 余量避免边界撑帧);探测失败退回 hint
       const dur = clipDur ? Math.min(seg.duration_hint_s, clipDur - 0.1) : seg.duration_hint_s
+      // 🔴 transition 必须透传:make_promo 读 segs[i].transition,读不到就一律用默认 fade。
+      // 这里以前只 spread 了 copy 字段,把 brief.segments[i].transition 丢了 ——
+      // 结果是**每一条片子的每一个转场都是 fade**,配方里精心排的 dissolve/wipeleft/circleopen
+      // 一次都没生效。PM 看片说的「没有转场,千篇一律」根因就在这一行。
+      const transition = typeof seg.transition === 'string' && seg.transition.trim() ? seg.transition.trim() : null
       // 地板 1.0s > make_promo XFADE(0.5):防"dur==xfade → 该段偏移不前进被过渡吞帧"(魏征 P2)
-      return { src: localPaths[i], ss: 0, dur: Math.max(dur, 1.0), ...(copy.segments[i] || {}) }
+      return {
+        src: localPaths[i], ss: 0, dur: Math.max(dur, 1.0),
+        ...(transition ? { transition } : {}),
+        ...(copy.segments[i] || {}),
+      }
     }),
     endcard: copy.endcard,
   }

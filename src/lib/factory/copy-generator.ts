@@ -145,6 +145,23 @@ export function allowedNumbersFrom(offer: VerifiedOffer | null | undefined): Set
   return allowed
 }
 
+/** 第一人称主语:只认真正的「我」,不认 island / it's 这类里的字母 i */
+const FIRST_PERSON_RE = /\b(I|I'm|I've|I'll|I'd|my|me)\b/i
+
+/**
+ * 数「上屏大字里有几句是第一人称」。
+ *
+ * 🔴 为什么只数 title_main:装配引擎(make_promo)在 title_main 存在时**完全不画 caption**。
+ * 2026-07-26 事故:AI 把第一人称全写进 caption,上屏的却是「We own the ground in China」,
+ * PM 看完直接问「第一人称视角的片子呢」。所以合格与否只看 title_main,caption 写得再好也不算。
+ */
+export function countFirstPersonHeadlines(copy: AdCopy): number {
+  return (copy.segments ?? []).filter((s) => {
+    const t = typeof s.title_main === 'string' ? s.title_main : ''
+    return t.trim().length > 0 && FIRST_PERSON_RE.test(t)
+  }).length
+}
+
 /**
  * 红线硬拦(魏征 B4-P1 + 板桥 verified_offer):扫 output 价格/折扣片段,任一片段的数字不在白名单
  * (verified_offer 的真数字)→ 判定 AI 编造 → 整条落模板。无 verified_offer = 白名单空 = 禁一切价格/折扣数字。
@@ -221,9 +238,14 @@ export async function generateAdCopy(params: {
     const personaName = typeof persona?.name === 'string' ? persona.name.trim() : ''
     const narrativeBlock = personaName
       ? `\n\n**用第一人称叙事,不要写成广告**:你就是「${personaName}」${persona?.role ? `(${persona.role})` : ''}。` +
-        `按这个结构写:①hook=「我/我们做了什么」的具体行动(不是口号);②中段=经历里的具体细节,一句一个,` +
+        `\n\n🔴 **第一人称必须写进 title_main**(实测踩过:AI 把第一人称写进 caption,而 caption 根本不上屏,` +
+        `观众看到的全是「We own the ground in China」这种公司口吻,PM 当场问「第一人称的片子呢」)。` +
+        `所以:**每一段的 title_main 都要有「我」**——用 I / I've / I'll / my,` +
+        `**至少 ${Math.max(2, Math.ceil(segmentRoles.length / 2))} 段的 title_main 以 I 开头**。` +
+        `「We/Our」是公司口吻,只能偶尔用,不能当主语基调。` +
+        `按这个结构写:①hook=「我做了什么/我见过什么」的具体行动(不是口号);②中段=经历里的具体细节,一句一个,` +
         `每句 ≤6 词;③临近结尾要有一句**情感回扣**(写人的反应/感受,不是产品卖点);④cta=把话转向观众` +
-        `(「你也可以…」),用邀请口吻不用命令口吻。全程「我/我们」,禁止第三人称自称品牌名。` +
+        `(「你也可以…」),用邀请口吻不用命令口吻。禁止第三人称自称品牌名。` +
         `\n\n🔴 **编造红线(实测 AI 会犯,逐条禁止)**:` +
         `①**禁止编造任何具体客户/人名/引语/对话**(如「Margaret called me last week」「'I never thought we'd go'」)——` +
         `真实客户案例只能由人工提供,AI 一律不许虚构;情感回扣改用不指名的普遍感受。` +
@@ -247,6 +269,10 @@ export async function generateAdCopy(params: {
         : '') +
       `${hookIntentFor(expectedMetric)}\n${ctaIntentFor(expectedMetric)}\n` +
       `段落顺序(${segmentRoles.length} 段): ${segmentRoles.join(', ')}\n\n` +
+      `🔴 **三个字段各上哪儿(装配引擎的真实行为,写错就白写)**:\n` +
+      `- \`title_main\` = **唯一真正压在画面上的大字**(约 104px)。观众只读它。**全片主信息必须在这里。**\n` +
+      `- \`title_sub\` = 大字下面的小字(46px),可选,用来补一句短的。\n` +
+      `- \`caption\` = **不上屏**,只进帖子正文。有 title_main 时引擎完全不画 caption。所以别把好句子藏这儿。\n` +
       `要求:\n` +
       `- hook 段(第一段)必须是能让刷手指的人停下的狠话:戳痛点/反常识/紧迫,禁止"品牌名+定位"式平淡开场。\n` +
       `- 每个文本字段 ≤ 6 词;AU 英语;无把握的价格/折扣改用「Free measure & quote」「Talk to us」式表达,绝不编数字。\n` +
@@ -254,15 +280,33 @@ export async function generateAdCopy(params: {
       `返回 JSON:{"segments":[{"role":"hook|middle|cta","title_main"?,"title_sub"?,"caption"?}],` +
       `"endcard":{"cta","offer":["..."],"url":"${url}"}}`
 
-    const { text } = await withTimeout(
-      callClaudeChat({
-        systemPrompt,
-        messages: [{ role: 'user', content: user }],
-        maxOutputTokens: 1024,
-      }),
-      COPY_GEN_TIMEOUT_MS,
-    )
-    const parsed = parseJsonResponse<AdCopy>(text)
+    // 🔴 第一人称重试:配了叙事人格却写成公司口吻 → 再给一次机会(附上它自己写的反面例子)。
+    // 只重试一次 —— 再不行就用它,总比落回模板腔强。
+    const minFirstPerson = Math.max(2, Math.ceil(segmentRoles.length / 2))
+    let parsed: AdCopy | null = null
+    for (let attempt = 0; attempt < (personaName ? 2 : 1); attempt++) {
+      const retryNote =
+        attempt === 0
+          ? ''
+          : `\n\n上一版不合格:上屏大字(title_main)写成了公司口吻。` +
+            `重写,让至少 ${minFirstPerson} 段的 title_main **以 I 开头**(I've / I'll / I watched / I tell…),` +
+            `这是「${personaName}」在跟观众说话,不是品牌播报。`
+      const { text } = await withTimeout(
+        callClaudeChat({
+          systemPrompt,
+          messages: [{ role: 'user', content: user + retryNote }],
+          maxOutputTokens: 1024,
+        }),
+        COPY_GEN_TIMEOUT_MS,
+      )
+      parsed = parseJsonResponse<AdCopy>(text)
+      if (!personaName || !parsed) break
+      if (countFirstPersonHeadlines(parsed) >= minFirstPerson) break
+      console.warn(
+        `[copy-generator] 第一人称不足(上屏大字里只有 ${countFirstPersonHeadlines(parsed)}/${minFirstPerson} 句带「I」)` +
+          (attempt === 0 ? ',重试一次' : ',重试后仍不足,先用着'),
+      )
+    }
     if (
       parsed &&
       Array.isArray(parsed.segments) &&

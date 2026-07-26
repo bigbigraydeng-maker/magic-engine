@@ -16,7 +16,16 @@
 import { callOpenAIVision } from './stock-vision-client'
 
 export interface VisionVerdict {
-  /** 是否跟客户业务相关 */
+  /**
+   * 🔴 是否真的拿到了判定。false = 调用挂了/返回解析不了,**不是**「模型说不相关」。
+   *
+   * 事故(2026-07-26,当天第三次栽在同一类错上):调用层因环境问题全部失败,
+   * 而失败一律返回 relevant:false,调用方把「不相关」等同于「该下架」——
+   * 7 张好图被一次性误下架。**调用失败不是证据。**
+   * 所以:ok=false 时只能「这一轮别用」,绝不能据此下架或做任何不可逆动作。
+   */
+  ok: boolean
+  /** 是否跟客户业务相关(仅当 ok=true 才有意义) */
   relevant: boolean
   /** 画面里是什么(用于日志和溯源) */
   subject: string
@@ -51,20 +60,26 @@ export function parseVisionVerdict(raw: string): VisionVerdict {
   try {
     const clean = raw.replace(/^```json\s*|\s*```$/g, '').trim()
     const d = JSON.parse(clean) as Record<string, unknown>
+    // relevant 必须是真布尔才算「拿到判定」;缺字段 = 返回不完整 = 当调用失败处理,不据此下架
+    if (typeof d.relevant !== 'boolean') {
+      return { ok: false, relevant: false, subject: '(no verdict)', reason: '模型没给出 relevant 布尔值' }
+    }
     return {
-      // 只有明确 true 才算通过 —— 缺字段/非布尔一律拦
-      relevant: d.relevant === true,
+      ok: true,
+      relevant: d.relevant,
       subject: typeof d.subject === 'string' ? d.subject.slice(0, 80) : '(unknown)',
       reason: typeof d.reason === 'string' && d.reason.trim() ? d.reason.slice(0, 120) : null,
     }
   } catch {
-    return { relevant: false, subject: '(parse failed)', reason: '模型返回无法解析,保守判为不相关' }
+    return { ok: false, relevant: false, subject: '(parse failed)', reason: '模型返回无法解析' }
   }
 }
 
 /**
  * 看一张图,判断跟业务相不相关。
- * 调用失败 → 判为不相关(fail-closed:宁可少一张,也不让错图进成片)。
+ *
+ * 调用失败 → `ok:false`(这一轮别用这张图),**不是**「判定为不相关」。
+ * 调用方必须看 ok 再决定要不要做下架这类不可逆动作(见 VisionVerdict.ok 的事故注解)。
  */
 export async function screenImage(
   imageUrl: string,
@@ -75,6 +90,7 @@ export async function screenImage(
     return parseVisionVerdict(raw)
   } catch (e) {
     return {
+      ok: false,
       relevant: false,
       subject: '(vision failed)',
       reason: `视觉判定失败: ${e instanceof Error ? e.message.slice(0, 80) : e}`,

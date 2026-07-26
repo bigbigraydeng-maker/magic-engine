@@ -215,6 +215,25 @@ export async function transformStockImages(
     try {
       const publicUrl = toPublicUrl(src.storage_url as string)
       if (!publicUrl) { errors.push(`源图地址不可用: ${src.id}`); continue }
+
+      // 🔴 改图前先过闸(省钱):看一眼 $0.0002,改一张 $0.04 —— 差 200 倍。
+      // 意大利那张原图本来就跟中国游无关,改成什么样都还是无关,没必要先花钱改再判。
+      // 判掉的原图直接下架,免得每次补库都重新看一遍。
+      if (businessContext) {
+        const pre = await screenImage(publicUrl, businessContext)
+        // 🔴 只有真拿到判定(ok)且判定不相关,才下架 —— 调用挂了只跳过这一轮。
+        // 实测教训:环境问题让 7 次调用连续失败,旧代码把它们全下架了。
+        if (!pre.ok) {
+          errors.push(`视觉闸没跑成,本轮跳过(未下架): ${pre.reason ?? pre.subject}`)
+          continue
+        }
+        if (!pre.relevant) {
+          await supabaseAdmin.from('video_clips').update({ status: 'archived' }).eq('id', src.id)
+          errors.push(`原图不相关已下架: ${pre.subject}${pre.reason ? ' — ' + pre.reason : ''}`)
+          continue
+        }
+      }
+
       const res = await fetch(publicUrl, { headers: DL_HEADERS, signal: AbortSignal.timeout(DL_TIMEOUT_MS) })
       if (!res.ok) { errors.push(`源图下载失败(${res.status})`); continue }
       const buf = Buffer.from(await res.arrayBuffer())
@@ -238,17 +257,21 @@ export async function transformStockImages(
         .upload(path, outBuf, { contentType: 'image/png', upsert: true })
       if (upErr) { errors.push(`改后图上传失败: ${upErr.message}`); continue }
 
-      // 🔴 视觉相关性闸(2026-07-26,同一个错犯两次后加的):
+      // 🔴 视觉相关性闸第二道(2026-07-26,同一个错犯两次后加的):
       // 标题闸对**无标题图**完全失效 —— 实测 10 张改图里 7 张原图无标题,
       // 意大利/希腊/台湾九份就这么一路进了成片。只有看图才拦得住。
-      // 放在改图**之后**:改完的图才是真正要进成片的那张,判它才准。
+      // 改图之后再判一次:改完的图才是真正要进成片的那张(AI 有时会把主体改跑偏)。
+      // 这里**不入库**就够了,不做下架,所以 ok=false 也只是不收 —— 无不可逆后果。
       if (businessContext) {
-        const publicUrl = toPublicUrl(path)
-        const verdict = publicUrl
-          ? await screenImage(publicUrl, businessContext)
-          : { relevant: false, subject: '(no url)', reason: '改后图地址不可用' }
-        if (!verdict.relevant) {
-          errors.push(`视觉闸拦下: ${verdict.subject}${verdict.reason ? ' — ' + verdict.reason : ''}`)
+        const outUrl = toPublicUrl(path)
+        const verdict = outUrl
+          ? await screenImage(outUrl, businessContext)
+          : { ok: true, relevant: false, subject: '(no url)', reason: '改后图地址不可用' }
+        if (!verdict.ok || !verdict.relevant) {
+          errors.push(
+            `${verdict.ok ? '视觉闸拦下' : '视觉闸没跑成,不收'}: ${verdict.subject}` +
+              (verdict.reason ? ' — ' + verdict.reason : ''),
+          )
           continue // 不入库 —— 图已上传但没有行,下次跑会重新改(可接受,比错图进片子好)
         }
       }

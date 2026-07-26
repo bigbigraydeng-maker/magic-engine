@@ -88,3 +88,53 @@ describe('allowedClaimsFrom — 白名单来源', () => {
     expect(allowedClaimsFrom('', null).size).toBe(0)
   })
 })
+
+// ── 第一人称闸(2026-07-26 事故:第一人称写进 caption,而 caption 根本不上屏)────────
+import { countFirstPersonHeadlines } from './copy-generator'
+
+const withHeadlines = (segs: Array<{ title_main?: string; caption?: string }>): AdCopy =>
+  ({
+    segments: segs.map((s, i) => ({ role: i === 0 ? 'hook' : 'middle', ...s })),
+    endcard: { cta: 'Learn more', offer: [], url: 'https://example.com' },
+  }) as AdCopy
+
+describe('🔴 countFirstPersonHeadlines —— 只认上屏的大字', () => {
+  it('🔴 第一人称藏在 caption 里不算数(正是那条不合格片子的原样)', () => {
+    // 真实样本:caption 是漂亮的第一人称,title_main 却是公司口吻 —— 观众只看得到后者
+    const real = withHeadlines([
+      { title_main: 'Most China tours miss everything.', caption: "I've watched travellers come back disappointed." },
+      { title_main: 'We own the ground in China.', caption: 'Our own offices. Our own guides.' },
+      { title_main: 'No middlemen. No markups.', caption: 'No one dropping the ball mid-trip.' },
+    ])
+    expect(countFirstPersonHeadlines(real)).toBe(0)
+  })
+
+  it('第一人称写进 title_main 才算数', () => {
+    expect(
+      countFirstPersonHeadlines(
+        withHeadlines([
+          { title_main: "I've sent 400 Kiwis to China." },
+          { title_main: 'I book the guides myself.' },
+          { title_main: 'We own the ground in China.' },
+        ]),
+      ),
+    ).toBe(2)
+  })
+
+  it('🔴 不能把 island / it 里的字母 i 当第一人称(词边界)', () => {
+    expect(
+      countFirstPersonHeadlines(
+        withHeadlines([{ title_main: 'Island mornings in Guilin.' }, { title_main: "It's quieter than you think." }]),
+      ),
+    ).toBe(0)
+  })
+
+  it('my / me 也算第一人称(不是只有 I)', () => {
+    expect(countFirstPersonHeadlines(withHeadlines([{ title_main: 'My first trip changed me.' }]))).toBe(1)
+  })
+
+  it('空 title_main 不计数,也不炸', () => {
+    expect(countFirstPersonHeadlines(withHeadlines([{ title_main: '  ' }, { caption: 'I went there.' }]))).toBe(0)
+    expect(countFirstPersonHeadlines({ segments: [], endcard: null } as unknown as AdCopy)).toBe(0)
+  })
+})
