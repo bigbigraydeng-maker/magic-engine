@@ -259,3 +259,46 @@ describe('🔴 库存配额 —— 让抓来改好的图真能进成片', () => 
     expect(generationPlan.every((p) => pool.includes(p.source_image_url!))).toBe(true)
   })
 })
+
+// ── 运镜必须进提示词(2026-07-26:shot.motion 是「配了没人读」的死字段)────────────
+import { MOTION_PROMPT } from './strategist'
+
+describe('🔴 运镜写进 i2v 提示词 —— 治「每个生成镜运镜都一样」', () => {
+  const recipe = SHOT_RECIPES.find((r) => r.key === 'personal_story')!
+  const pool = Array.from({ length: 8 }, (_, i) => `https://cdn/p${i}.png`)
+
+  it('🔴 提示词里不再是写死的 "real motion"', () => {
+    const { generationPlan } = selectClips(ctxWithNoStock, 'x', false, recipe, pool)
+    expect(generationPlan.length).toBeGreaterThan(0)
+    for (const p of generationPlan) {
+      expect(p.prompt_hint).not.toMatch(/, real motion,/)
+    }
+  })
+
+  it('🔴 每一镜的提示词带上该镜自己的运镜(配方排的运镜真的生效了)', () => {
+    const { generationPlan } = selectClips(ctxWithNoStock, 'x', false, recipe, pool)
+    for (const p of generationPlan) {
+      const expected = MOTION_PROMPT[p.motion_type as string]
+      expect(expected, `motion_type=${p.motion_type} 没有对应措辞`).toBeTruthy()
+      expect(p.prompt_hint).toContain(expected)
+    }
+  })
+
+  it('🔴 同一条片子里出现多种运镜(只有一种就等于没改)', () => {
+    const { generationPlan } = selectClips(ctxWithNoStock, 'x', false, recipe, pool)
+    const kinds = new Set(generationPlan.map((p) => p.motion_type))
+    expect(kinds.size).toBeGreaterThan(1)
+  })
+
+  it('配方用到的每种运镜都有措辞,不会掉进兜底', () => {
+    const used = new Set(SHOT_RECIPES.flatMap((r) => r.shots.map((s) => s.motion)))
+    for (const m of used) expect(MOTION_PROMPT[m], m).toBeTruthy()
+  })
+
+  it('措辞是具体的镜头指令,不是含糊的形容词(含糊模型会自由发挥,又回到千篇一律)', () => {
+    for (const [k, v] of Object.entries(MOTION_PROMPT)) {
+      expect(v.length, k).toBeGreaterThan(20)
+      expect(v, k).toMatch(/camera|dolly|track|static|push|pull/i)
+    }
+  })
+})

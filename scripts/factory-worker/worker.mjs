@@ -283,9 +283,38 @@ function creativeProfile(brandKit, wo) {
   return local
 }
 
-// BGM 解析:profile.music(绝对路径或 _shared/music 下曲名)优先,回退 env / brandkit 自带曲。
+/**
+ * 🔴 曲库轮换:治「每条片子都是同一首曲子」。
+ *
+ * PM 反馈「罐头 BGM」,根因不是曲子难听,是**永远是同一首**。CTS 的
+ * factory_profile.json 把 music 写死成一个绝对路径,而它自己的 styleRules 里
+ * 明明写着「BGM 用 龙旗破云 / 青瓷回声 / Jade River Journey」—— 三首里只用了第一首。
+ *
+ * 现在支持 `music_pool: [...]`:按工单 id 稳定轮换。
+ * 稳定 = 同一工单重跑永远选同一首(可复现,便于排查);不同工单换曲。
+ * 本仓禁用 Math.random(见 CLAUDE.md),所以用 id 的字符和当种子。
+ */
+function pickFromPool(pool, seedStr) {
+  const usable = pool
+    .map((m) => (typeof m === 'string' && m.startsWith('/') ? m : join(SHARED_MUSIC, String(m))))
+    .filter((p) => existsSync(p))
+  if (usable.length === 0) return null
+  let seed = 0
+  for (const ch of String(seedStr)) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0
+  return usable[seed % usable.length]
+}
+
+// BGM 解析:music_pool(轮换)> profile.music(单曲)> env / brandkit 自带曲。
 // make_promo 只在 cfg.music 存在时才铺床(ducked -14dB),无 music 且无 music_mood = 无背景乐。
-function resolveBgm(profile, brandKit) {
+function resolveBgm(profile, brandKit, seedStr = '') {
+  if (Array.isArray(profile.music_pool) && profile.music_pool.length > 0) {
+    const picked = pickFromPool(profile.music_pool, seedStr)
+    if (picked) {
+      log(`🎵 曲库轮换(${profile.music_pool.length} 首)→ ${picked.split('/').pop()}`)
+      return picked
+    }
+    log(`⚠️ music_pool 里没有一首文件存在,回退单曲/默认曲`)
+  }
   if (profile.music) {
     const abs = profile.music.startsWith('/') ? profile.music : join(SHARED_MUSIC, profile.music)
     if (existsSync(abs)) return abs
@@ -318,7 +347,7 @@ function assemble(wo, localPaths, copy, tmp) {
   const out = join(tmp, 'final.mp4')
   const brandKit = brandkitFor(wo.client_id) // B3:brandkit 按客户,不再硬编 CTS
   const profile = creativeProfile(brandKit, wo)
-  const bgm = resolveBgm(profile, brandKit)
+  const bgm = resolveBgm(profile, brandKit, wo.work_order_id)
   const cfg = {
     output: out,
     brand_kit: brandKit,
@@ -339,9 +368,15 @@ function assemble(wo, localPaths, copy, tmp) {
       // 结果是**每一条片子的每一个转场都是 fade**,配方里精心排的 dissolve/wipeleft/circleopen
       // 一次都没生效。PM 看片说的「没有转场,千篇一律」根因就在这一行。
       const transition = typeof seg.transition === 'string' && seg.transition.trim() ? seg.transition.trim() : null
+      const finalDur = Math.max(dur, 1.0)
+      // 🔴 入点错开:以前 ss 写死 0,muapi 出的 5 秒 clip 永远只用开头那两三秒 ——
+      // 同一批素材反复出现同一段画面,是「千篇一律」的第三个来源。
+      // 按段号错开入点,取剩余空间的一部分;算不出实长(probe 失败)就退回 0 保持老行为。
+      const room = clipDur ? clipDur - finalDur - 0.1 : 0
+      const ss = room > 0.3 ? Math.round(Math.min(room, (i % 3) * 0.6) * 100) / 100 : 0
       // 地板 1.0s > make_promo XFADE(0.5):防"dur==xfade → 该段偏移不前进被过渡吞帧"(魏征 P2)
       return {
-        src: localPaths[i], ss: 0, dur: Math.max(dur, 1.0),
+        src: localPaths[i], ss, dur: finalDur,
         ...(transition ? { transition } : {}),
         ...(copy.segments[i] || {}),
       }

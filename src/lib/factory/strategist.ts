@@ -27,6 +27,23 @@ import type {
   WorkOrderDraft,
 } from './types'
 
+/**
+ * 配方里的运镜 → 喂给 i2v 模型的自然语言。
+ *
+ * 🔴 存在理由:shot.motion 之前是个「配了没人读」的死字段 —— 只写进
+ * clip_generation_plan.motion_type 当 DB 元数据,提示词里却是写死的 'real motion'。
+ * 所以配方为每一镜排的运镜从未影响过成片,每个生成镜的镜头语言都一样。
+ *
+ * 措辞刻意具体(讲清镜头怎么动),模糊的词(如 "dynamic")模型会自由发挥,
+ * 反而回到千篇一律。
+ */
+export const MOTION_PROMPT: Record<string, string> = {
+  push_in: 'slow steady dolly push-in toward the subject',
+  pull_back: 'slow dolly pull-back revealing more of the scene',
+  lateral_truck: 'smooth lateral tracking move across the scene',
+  static_hold: 'locked-off static camera, only the scene itself moves',
+}
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 export function normalizeAngle(s: string): string {
@@ -362,7 +379,12 @@ export function selectClips(
         position: i,
         scene_tag: 'pending_resolution',
         motion_type: shot.motion,
-        prompt_hint: `${angle} — ${role} segment, real motion, 9:16 vertical`,
+        // 🔴 运镜必须写进提示词。此前这里是字面量 'real motion',而配方里为每一镜
+        // 精心排好的 shot.motion(push_in / pull_back / lateral_truck / static_hold)
+        // 只被写进 motion_type 当 DB 元数据 —— 没有任何东西读它,既不进 ffmpeg 也不进
+        // i2v 提示词。结果就是同一条片子里每个生成镜的运镜都一个样,这是「千篇一律」
+        // 除源图之外的第二个根因。喂给模型后,同一批素材能长出不同的镜头语言。
+        prompt_hint: `${angle} — ${role} segment, ${MOTION_PROMPT[shot.motion] ?? 'real camera motion'}, 9:16 vertical`,
         idempotency_key: `{work_order_id}:${role}:${i}`,
         // 源图轮换:每个待生成片段用**不同**的库存图当 i2v 底子。
         // 🔴 此前这里恒为 null,worker 就无条件退回同一张 seed/cts_source.jpg ——
