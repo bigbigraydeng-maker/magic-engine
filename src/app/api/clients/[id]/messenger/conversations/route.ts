@@ -108,6 +108,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
 
   return NextResponse.json({
     conversations,
+    // Two CTS mailboxes share this screen and every send is filed under whoever
+    // is signed in, so the page states which account is about to speak.
+    viewerEmail: access.user.email ?? null,
     counts: {
       total: conversations.length,
       awaitingReply: conversations.filter((c) => c.awaitingReply).length,

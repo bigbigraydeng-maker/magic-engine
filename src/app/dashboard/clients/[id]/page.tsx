@@ -653,6 +653,9 @@ export default function ClientDetailPage() {
           <section>
             <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">诊断与分析</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {/* 客户消息不是"诊断",但它跟诊断一样是每天要开的页;放生产区会被
+                  一堆内容工具淹掉,所以放在诊断与分析区首位 —— 销售一进客户页就看到。 */}
+              <ToolCard href={`/dashboard/clients/${clientId}/messenger`}          title="客户消息"       desc="Facebook 私信 · AI 写好需求卡和回复草稿 · 你按发送"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/zhangqian`}          title="张骞发现"       desc="扫描社媒、评价、关键词、竞品，生成品牌现状全景报告"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/diagnostic`}         title="华佗深度诊断"   desc="从 SEO/社媒/口碑/广告/AI可见/竞品六维打分，找到核心病灶"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/prescription/new`}   title="诸葛亮处方"     desc="基于华佗诊断结果，生成优先级排序的具体执行行动路线图"  badge="in_house" />
