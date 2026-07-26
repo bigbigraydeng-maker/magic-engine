@@ -71,7 +71,7 @@ function stubTables({ owned, messages }: { owned: boolean; messages: MessageRow[
     limit: vi.fn().mockResolvedValue({ data: messages, error: null }),
   }
   mockFrom.mockImplementation((table: string) =>
-    (table === 'messenger_conversations' ? conversations : messageQuery) as never,
+    (table === 'conversations' ? conversations : messageQuery) as never,
   )
   return { conversations, messageQuery }
 }

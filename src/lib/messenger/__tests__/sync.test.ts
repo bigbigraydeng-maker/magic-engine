@@ -56,7 +56,7 @@ function stubSupabase(opts: { watermarkRow?: { meta_updated_time: string } | nul
       maybeSingle: async () => result,
       then: (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve),
       upsert: (payload: Record<string, unknown> | Record<string, unknown>[]) => {
-        if (table === 'messenger_conversations') {
+        if (table === 'conversations') {
           captured.conversations.push(payload as Record<string, unknown>)
           result = { data: { id: 'row-uuid' }, error: null }
         } else {
@@ -67,7 +67,7 @@ function stubSupabase(opts: { watermarkRow?: { meta_updated_time: string } | nul
       },
     }
 
-    if (table === 'messenger_conversations') {
+    if (table === 'conversations') {
       // The SELECT path (watermark lookup) resolves to the configured row.
       result = { data: opts.watermarkRow ?? null, error: null }
     }

@@ -32,7 +32,7 @@ interface ConversationRow {
   message_count: number
   last_message_at: string | null
   last_message_from: string | null
-  messenger_briefs: {
+  conversation_briefs: {
     source_message_count: number
     regen_count: number
     regen_count_date: string | null
@@ -40,7 +40,7 @@ interface ConversationRow {
 }
 
 function toCandidate(row: ConversationRow): BriefCandidate {
-  const brief = row.messenger_briefs?.[0]
+  const brief = row.conversation_briefs?.[0]
   return {
     conversationId: row.id,
     clientId: row.client_id,
@@ -54,7 +54,7 @@ function toCandidate(row: ConversationRow): BriefCandidate {
 
 async function loadMessages(conversationId: string): Promise<StoredMessage[]> {
   const { data } = await supabaseAdmin
-    .from('messenger_messages')
+    .from('conversation_messages')
     .select('direction, sender_name, body, sent_at')
     .eq('conversation_id', conversationId)
     .order('sent_at', { ascending: true })
@@ -84,9 +84,9 @@ export async function GET(req: NextRequest) {
   const now = new Date()
 
   const { data, error } = await supabaseAdmin
-    .from('messenger_conversations')
+    .from('conversations')
     .select(
-      'id, client_id, message_count, last_message_at, last_message_from, messenger_briefs(source_message_count, regen_count, regen_count_date)',
+      'id, client_id, message_count, last_message_at, last_message_from, conversation_briefs(source_message_count, regen_count, regen_count_date)',
     )
     .gt('message_count', 0)
     .order('last_message_at', { ascending: false })

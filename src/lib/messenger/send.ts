@@ -78,7 +78,7 @@ interface ConversationRow {
 /** Most recent message the CUSTOMER sent — the clock Meta's window runs on. */
 async function lastInboundAt(conversationId: string): Promise<string | null> {
   const { data } = await supabaseAdmin
-    .from('messenger_messages')
+    .from('conversation_messages')
     .select('sent_at')
     .eq('conversation_id', conversationId)
     .eq('direction', 'inbound')
@@ -131,7 +131,7 @@ export async function sendReply(input: SendReplyInput): Promise<SendReplyResult>
   }
 
   const { data: convo } = await supabaseAdmin
-    .from('messenger_conversations')
+    .from('conversations')
     .select('id, client_id, page_id, participant_psid')
     .eq('id', input.conversationId)
     .maybeSingle<ConversationRow>()
@@ -161,7 +161,7 @@ export async function sendReply(input: SendReplyInput): Promise<SendReplyResult>
   }
 
   const { data: audit } = await supabaseAdmin
-    .from('messenger_outbound_log')
+    .from('conversation_outbound_log')
     .insert({
       conversation_id: convo.id,
       client_id: convo.client_id,
@@ -175,7 +175,7 @@ export async function sendReply(input: SendReplyInput): Promise<SendReplyResult>
     .single()
 
   const finish = async (patch: Record<string, unknown>) => {
-    if (audit?.id) await supabaseAdmin.from('messenger_outbound_log').update(patch).eq('id', audit.id)
+    if (audit?.id) await supabaseAdmin.from('conversation_outbound_log').update(patch).eq('id', audit.id)
   }
 
   const userToken = await getMetaTokenForClient(convo.client_id)
@@ -195,7 +195,7 @@ export async function sendReply(input: SendReplyInput): Promise<SendReplyResult>
 
   // Write the message straight into the thread so the card is correct
   // immediately, instead of looking unanswered until the next hourly sync.
-  await supabaseAdmin.from('messenger_messages').insert({
+  await supabaseAdmin.from('conversation_messages').insert({
     conversation_id: convo.id,
     message_id: sent.messageId ?? `me-${audit?.id ?? Date.now()}`,
     direction: 'outbound',
@@ -206,7 +206,7 @@ export async function sendReply(input: SendReplyInput): Promise<SendReplyResult>
   })
 
   await supabaseAdmin
-    .from('messenger_conversations')
+    .from('conversations')
     .update({ last_message_at: new Date().toISOString(), last_message_from: 'page' })
     .eq('id', convo.id)
 

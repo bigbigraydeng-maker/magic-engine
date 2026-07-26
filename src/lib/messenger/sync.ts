@@ -1,6 +1,6 @@
 /**
  * Messenger inbox sync — pulls a client's Facebook Page threads into
- * messenger_conversations / messenger_messages.
+ * conversations / conversation_messages.
  *
  * Step 1 of the Messenger → sales-brief pipeline. This module only stores the
  * raw conversation; summarising it into a needs card is a later step.
@@ -43,7 +43,7 @@ const WATERMARK_LOOKBACK_MS = 6 * 60 * 60 * 1000
  */
 async function getWatermark(clientId: string): Promise<string | undefined> {
   const { data } = await supabaseAdmin
-    .from('messenger_conversations')
+    .from('conversations')
     .select('meta_updated_time')
     .eq('client_id', clientId)
     .not('meta_updated_time', 'is', null)
@@ -65,7 +65,7 @@ async function storeConversation(
   const last = convo.messages[convo.messages.length - 1]
 
   const { data: row, error } = await supabaseAdmin
-    .from('messenger_conversations')
+    .from('conversations')
     .upsert(
       {
         client_id: clientId,
@@ -95,7 +95,7 @@ async function storeConversation(
   // ignoreDuplicates keeps already-stored messages untouched, so the returned
   // rows are exactly the ones that were new this run.
   const { data: inserted, error: msgError } = await supabaseAdmin
-    .from('messenger_messages')
+    .from('conversation_messages')
     .upsert(
       convo.messages.map((m) => ({
         conversation_id: row.id,

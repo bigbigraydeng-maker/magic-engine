@@ -3,7 +3,7 @@
  *
  * Send a Messenger reply as the client's Page. A human must have pressed send —
  * nothing here is triggered by the AI. Every attempt is written to
- * messenger_outbound_log with the signed-in email attached.
+ * conversation_outbound_log with the signed-in email attached.
  *
  * Body: { body: string, usedAiDraft?: boolean }
  *
