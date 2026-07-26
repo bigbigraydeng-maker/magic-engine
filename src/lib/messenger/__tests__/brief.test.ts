@@ -11,6 +11,7 @@ import {
   shouldGenerateBrief,
   fallbackBrief,
   stripMarkdown,
+  normaliseFollowUpDueAt,
   QUIET_PERIOD_MS,
   MAX_REGENS_PER_DAY,
   type BriefCandidate,
@@ -156,5 +157,36 @@ describe('stripMarkdown', () => {
   it('is a no-op on plain text', () => {
     const plain = 'Hi Kam, happy to send the full itinerary.'
     expect(stripMarkdown(plain)).toBe(plain)
+  })
+})
+
+/**
+ * follow_up_due_at lands in a TIMESTAMPTZ column. A model that answers with a
+ * phrase does not merely look wrong — the INSERT throws and the salesperson
+ * gets no card for that thread at all. One bad date must not cost the brief.
+ */
+describe('normaliseFollowUpDueAt', () => {
+  it('keeps a real instant, normalised to ISO', () => {
+    expect(normaliseFollowUpDueAt('2026-08-03T21:00:00Z')).toBe('2026-08-03T21:00:00.000Z')
+  })
+
+  it('accepts a bare date as that day at midnight UTC', () => {
+    expect(normaliseFollowUpDueAt('2026-08-03')).toBe('2026-08-03T00:00:00.000Z')
+  })
+
+  it('drops a Chinese phrase instead of letting the whole brief fail to save', () => {
+    expect(normaliseFollowUpDueAt('下周三')).toBeNull()
+  })
+
+  it('drops an English phrase', () => {
+    expect(normaliseFollowUpDueAt('in 3 days')).toBeNull()
+  })
+
+  it('drops whitespace-only text', () => {
+    expect(normaliseFollowUpDueAt('   ')).toBeNull()
+  })
+
+  it('passes null through', () => {
+    expect(normaliseFollowUpDueAt(null)).toBeNull()
   })
 })

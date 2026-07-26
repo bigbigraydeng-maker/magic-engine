@@ -11,7 +11,7 @@
 
 import React, { useCallback, useState } from 'react'
 import type { Conversation, ContactDetails, ThreadResponse, TripDetails } from '../types'
-import { BulletBlock, IntentBadge, WindowNotice, formatMoment } from './bits'
+import { BulletBlock, FollowUpChip, IntentBadge, WindowNotice, formatMoment } from './bits'
 import { ReplyBox } from './ReplyBox'
 import { Transcript } from './Transcript'
 
@@ -123,11 +123,19 @@ export function ConversationCard({
         <IntentBadge level={brief?.intent_level ?? 'unknown'} />
       </div>
 
-      {awaiting && (
-        <p className="mt-2.5 inline-block rounded-full bg-[#C2453A]/10 px-2.5 py-1 text-xs font-black text-[#C2453A]">
-          等我们回{conversation.hoursWaiting !== null && ` · 已经 ${conversation.hoursWaiting} 小时`}
-        </p>
-      )}
+      <div className="mt-2.5 flex flex-wrap gap-2 empty:mt-0">
+        {awaiting && (
+          <p className="inline-block rounded-full bg-[#C2453A]/10 px-2.5 py-1 text-xs font-black text-[#C2453A]">
+            等我们回{conversation.hoursWaiting !== null && ` · 已经 ${conversation.hoursWaiting} 小时`}
+          </p>
+        )}
+        {!replied && (
+          <FollowUpChip
+            dueAt={conversation.followUpDueAt}
+            overdue={conversation.followUpOverdue}
+          />
+        )}
+      </div>
 
       {!brief && (
         <p className="mt-3 rounded-lg bg-me-ivory px-3 py-2.5 text-sm text-me-charcoal/60">

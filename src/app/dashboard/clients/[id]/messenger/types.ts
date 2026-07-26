@@ -31,6 +31,7 @@ export interface Brief {
   objections: string[]
   promises_made: string[]
   next_action: string | null
+  follow_up_due_at: string | null
   risk_flags: string[]
   trip: TripDetails
   contact: ContactDetails
@@ -45,6 +46,10 @@ export interface Conversation {
   lastMessageAt: string | null
   awaitingReply: boolean
   hoursWaiting: number | null
+  /** When the AI said to chase this person, ISO. Null when there is no date. */
+  followUpDueAt: string | null
+  /** That date has passed and nobody has been back to them. */
+  followUpOverdue: boolean
   /** Only computed by the list view when the customer spoke last. */
   replyWindow: ReplyWindow | null
   brief: Brief | null
@@ -53,7 +58,7 @@ export interface Conversation {
 export interface ConversationsResponse {
   conversations: Conversation[]
   viewerEmail: string | null
-  counts: { total: number; awaitingReply: number; highIntent: number }
+  counts: { total: number; awaitingReply: number; followUpOverdue: number; highIntent: number }
   error?: string
 }
 

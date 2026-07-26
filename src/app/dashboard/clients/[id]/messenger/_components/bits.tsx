@@ -55,6 +55,34 @@ export function IntentBadge({ level }: { level: IntentLevel }) {
   )
 }
 
+// ─── Follow-up ────────────────────────────────────────────────────────────────
+
+/**
+ * The date the AI set for chasing this person back.
+ *
+ * An overdue follow-up is the quietest way to lose a booking: the thread reads
+ * as answered, nothing is flagged, and the person we promised to call never
+ * hears from us again. So overdue says how late, in days, in red.
+ */
+export function FollowUpChip({ dueAt, overdue }: { dueAt: string | null; overdue: boolean }) {
+  if (!dueAt) return null
+
+  if (!overdue) {
+    return (
+      <p className="inline-block rounded-full bg-me-stone px-2.5 py-1 text-xs font-semibold text-me-charcoal/70">
+        约好 {formatMoment(dueAt)} 回访
+      </p>
+    )
+  }
+
+  const days = Math.floor((Date.now() - new Date(dueAt).getTime()) / 86_400_000)
+  return (
+    <p className="inline-block rounded-full bg-[#C2453A]/10 px-2.5 py-1 text-xs font-black text-[#C2453A]">
+      该回访了{days >= 1 && ` · 晚了 ${days} 天`}
+    </p>
+  )
+}
+
 // ─── Reply window ─────────────────────────────────────────────────────────────
 
 /**

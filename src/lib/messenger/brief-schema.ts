@@ -72,6 +72,14 @@ export const MessengerBriefSchema = z.object({
   promises_made: z.array(z.string()).default([]),
   /** Chinese. The single most useful thing to do next. */
   next_action: z.string().nullable().default(null),
+  /**
+   * When to chase this person, as an ISO 8601 instant.
+   *
+   * This lands in a TIMESTAMPTZ column, so "下周三" or "in 3 days" does not just
+   * display oddly — the whole brief fails to save and the salesperson gets no
+   * card at all. The prompt asks for ISO and normaliseFollowUpDueAt() drops
+   * anything that is not.
+   */
   follow_up_due_at: z.string().nullable().default(null),
   /** Chinese. Things that could go wrong — misquoted price, unanswered promise, upset customer. */
   risk_flags: z.array(z.string()).default([]),
@@ -104,7 +112,12 @@ export const MESSENGER_BRIEF_JSON_SCHEMA = {
     objections: { type: 'array', items: { type: 'string' } },
     promises_made: { type: 'array', items: { type: 'string' } },
     next_action: { type: ['string', 'null'] },
-    follow_up_due_at: { type: ['string', 'null'] },
+    follow_up_due_at: {
+      type: ['string', 'null'],
+      description:
+        'When CTS should chase this person, as an ISO 8601 instant in UTC (e.g. "2026-08-03T21:00:00Z"). ' +
+        'Never a phrase like "next week". Null when the thread gives no reason to follow up on a particular day.',
+    },
     risk_flags: { type: 'array', items: { type: 'string' } },
     trip: {
       type: 'object',

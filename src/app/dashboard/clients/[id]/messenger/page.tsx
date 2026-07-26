@@ -16,16 +16,18 @@ import Link from 'next/link'
 import type { Conversation, ConversationsResponse } from './types'
 import { ConversationCard } from './_components/ConversationCard'
 
-type Filter = 'awaiting' | 'high' | 'all'
+type Filter = 'awaiting' | 'followUp' | 'high' | 'all'
 
 const FILTER_LABEL: Record<Filter, string> = {
   awaiting: '等我们回',
+  followUp: '该回访',
   high: '高意向',
   all: '全部',
 }
 
 function matches(c: Conversation, filter: Filter): boolean {
   if (filter === 'awaiting') return c.awaitingReply
+  if (filter === 'followUp') return c.followUpOverdue
   if (filter === 'high') return c.brief?.intent_level === 'high'
   return true
 }
@@ -33,7 +35,7 @@ function matches(c: Conversation, filter: Filter): boolean {
 /** Big number + label. The three counts a salesperson steers by. */
 function Stat({ value, label, strong }: { value: number; label: string; strong?: boolean }) {
   return (
-    <div className="flex-1 rounded-xl border border-black/10 bg-white px-3 py-3 text-center">
+    <div className="rounded-xl border border-black/10 bg-white px-3 py-3 text-center">
       <p className={`text-2xl font-black ${strong && value > 0 ? 'text-[#C2453A]' : 'text-me-charcoal'}`}>
         {value}
       </p>
@@ -63,7 +65,13 @@ export default function MessengerPage() {
       }
       setData(json)
       // Land on the queue that matters, but never on an empty screen.
-      setFilter(json.counts.awaitingReply > 0 ? 'awaiting' : 'all')
+      setFilter(
+        json.counts.awaitingReply > 0
+          ? 'awaiting'
+          : json.counts.followUpOverdue > 0
+            ? 'followUp'
+            : 'all',
+      )
     } catch {
       setError('加载失败，检查网络后再试。')
     } finally {
@@ -122,14 +130,16 @@ export default function MessengerPage() {
 
       {!loading && !error && data && data.counts.total > 0 && (
         <>
-          <div className="flex gap-2">
+          {/* 手机上四个横排会挤成一条,两行两列反而看得清 */}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Stat value={data.counts.awaitingReply} label="等我们回" strong />
+            <Stat value={data.counts.followUpOverdue} label="该回访" strong />
             <Stat value={data.counts.highIntent} label="高意向" />
             <Stat value={data.counts.total} label="全部对话" />
           </div>
 
           <div className="mt-4 flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {(['awaiting', 'high', 'all'] as Filter[]).map((key) => (
+            {(['awaiting', 'followUp', 'high', 'all'] as Filter[]).map((key) => (
               <button
                 key={key}
                 type="button"

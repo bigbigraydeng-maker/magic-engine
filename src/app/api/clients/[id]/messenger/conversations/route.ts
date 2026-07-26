@@ -30,6 +30,7 @@ interface BriefRow {
   objections: string[]
   promises_made: string[]
   next_action: string | null
+  follow_up_due_at: string | null
   risk_flags: string[]
   trip: Record<string, unknown>
   contact: Record<string, unknown>
@@ -62,7 +63,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     .from('messenger_conversations')
     .select(
       'id, participant_name, message_count, last_message_at, last_message_from, ' +
-        'messenger_briefs(summary, intent_level, customer_needs, objections, promises_made, next_action, risk_flags, trip, contact, draft_reply, generated_at)',
+        'messenger_briefs(summary, intent_level, customer_needs, objections, promises_made, next_action, follow_up_due_at, risk_flags, trip, contact, draft_reply, generated_at)',
     )
     .eq('client_id', clientId)
     .order('last_message_at', { ascending: false })
@@ -81,12 +82,21 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     // second query, so the detail view is authoritative for the countdown.
     const window = awaitingReply ? messagingWindow(row.last_message_at, now) : null
 
+    // A thread we already answered can still be owed something: the AI dated the
+    // promise ("send the itinerary Monday") and until now nobody ever saw that
+    // date. Overdue threads look answered, so they need their own signal.
+    const followUpDueAt = brief?.follow_up_due_at ?? null
+    const followUpOverdue =
+      followUpDueAt !== null && new Date(followUpDueAt).getTime() <= now.getTime()
+
     return {
       id: row.id,
       participantName: row.participant_name,
       messageCount: row.message_count,
       lastMessageAt: row.last_message_at,
       awaitingReply,
+      followUpDueAt,
+      followUpOverdue,
       hoursWaiting:
         awaitingReply && row.last_message_at
           ? Math.round((now.getTime() - new Date(row.last_message_at).getTime()) / 3_600_000)
@@ -99,6 +109,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   conversations.sort((a, b) => {
     // Threads waiting on us always float to the top.
     if (a.awaitingReply !== b.awaitingReply) return a.awaitingReply ? -1 : 1
+    // Then the ones we said we would come back to and haven't. These read as
+    // "handled" everywhere else, which is exactly why they get missed.
+    if (a.followUpOverdue !== b.followUpOverdue) return a.followUpOverdue ? -1 : 1
     const rank =
       (INTENT_RANK[a.brief?.intent_level ?? 'unknown'] ?? 3) -
       (INTENT_RANK[b.brief?.intent_level ?? 'unknown'] ?? 3)
@@ -114,6 +127,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     counts: {
       total: conversations.length,
       awaitingReply: conversations.filter((c) => c.awaitingReply).length,
+      followUpOverdue: conversations.filter((c) => c.followUpOverdue).length,
       highIntent: conversations.filter((c) => c.brief?.intent_level === 'high').length,
     },
   })

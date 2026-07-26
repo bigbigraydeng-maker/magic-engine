@@ -148,6 +148,7 @@ export async function generateBrief(
   const brief = MessengerBriefSchema.parse(JSON.parse(text))
   return {
     ...brief,
+    follow_up_due_at: normaliseFollowUpDueAt(brief.follow_up_due_at),
     summary: stripMarkdown(brief.summary),
     next_action: brief.next_action ? stripMarkdown(brief.next_action) : null,
     customer_needs: brief.customer_needs.map(stripMarkdown),
@@ -155,6 +156,27 @@ export async function generateBrief(
     promises_made: brief.promises_made.map(stripMarkdown),
     draft_reply: stripMarkdown(brief.draft_reply),
   }
+}
+
+/**
+ * follow_up_due_at goes straight into a TIMESTAMPTZ column, so a model that
+ * answers "下周三" or "in 3 days" does not merely render oddly — the INSERT
+ * throws and the salesperson gets NO card for that thread at all. One unusable
+ * date must not cost the whole brief, so anything unparseable becomes null.
+ *
+ * Bare dates ("2026-08-03") are accepted; Postgres would take them anyway and
+ * midnight UTC is a reasonable reading of "that day".
+ */
+export function normaliseFollowUpDueAt(raw: string | null): string | null {
+  if (!raw) return null
+
+  const trimmed = raw.trim()
+  if (trimmed.length === 0) return null
+
+  const parsed = new Date(trimmed)
+  if (Number.isNaN(parsed.getTime())) return null
+
+  return parsed.toISOString()
 }
 
 /**
