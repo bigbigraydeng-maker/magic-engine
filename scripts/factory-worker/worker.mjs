@@ -367,7 +367,21 @@ function assemble(wo, localPaths, copy, tmp) {
       // 这里以前只 spread 了 copy 字段,把 brief.segments[i].transition 丢了 ——
       // 结果是**每一条片子的每一个转场都是 fade**,配方里精心排的 dissolve/wipeleft/circleopen
       // 一次都没生效。PM 看片说的「没有转场,千篇一律」根因就在这一行。
-      const transition = typeof seg.transition === 'string' && seg.transition.trim() ? seg.transition.trim() : null
+      let transition = typeof seg.transition === 'string' && seg.transition.trim() ? seg.transition.trim() : null
+      // 🔴 硬切:配方里的 'cut' 在这里翻译成「fade + 1 帧过渡」。
+      // 数据依据:爆款库 383 条样本里「视觉冲击+硬切」中位播放 1994 万,
+      // 「风景空镜+溶解」只有 221 万 —— 我们原来做的正是后者。实测把 0.35s 溶解
+      // 降到 0.18s **没用**(场景检测仍只认出 1 个切点),必须真的切。
+      //
+      // 为什么在 worker 翻译、而不是把 'cut' 直接发给引擎:make_promo 不在 git 里,
+      // 且它对 transition 名**零校验**直接拼进 ffmpeg —— 线上万一是旧版引擎,
+      // 收到 'cut' 会当场装配失败、整单报废。翻译成合法的 fade + 一个数字字段后,
+      // 旧引擎最坏只是忽略该字段退回普通转场,不会炸。
+      let xfadeOverride = null
+      if (transition === 'cut') {
+        transition = 'fade'
+        xfadeOverride = 0.034 // 1 帧 @30fps
+      }
       const finalDur = Math.max(dur, 1.0)
       // 🔴 入点错开:以前 ss 写死 0,muapi 出的 5 秒 clip 永远只用开头那两三秒 ——
       // 同一批素材反复出现同一段画面,是「千篇一律」的第三个来源。
@@ -378,6 +392,7 @@ function assemble(wo, localPaths, copy, tmp) {
       return {
         src: localPaths[i], ss, dur: finalDur,
         ...(transition ? { transition } : {}),
+        ...(xfadeOverride != null ? { xfade: xfadeOverride } : {}),
         ...(copy.segments[i] || {}),
       }
     }),

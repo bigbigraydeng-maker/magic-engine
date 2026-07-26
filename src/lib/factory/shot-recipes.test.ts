@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { SHOT_RECIPES, XFADE_TRANSITIONS, pickShotRecipe } from './shot-recipes'
+import { ALLOWED_TRANSITIONS, PSEUDO_TRANSITIONS, SHOT_RECIPES, XFADE_TRANSITIONS, pickShotRecipe } from './shot-recipes'
 
 /** ME 配置页允许的转场时长上限(client-config.ts MAX_XFADE_SEC) */
 const MAX_XFADE_SEC = 0.9
@@ -18,7 +18,7 @@ describe('配方结构 — 防静默毁片', () => {
   it('🔴 所有转场名都在 ffmpeg 实测白名单里(传错名字=整单装配失败)', () => {
     for (const r of SHOT_RECIPES) {
       for (const s of r.shots) {
-        expect(XFADE_TRANSITIONS, `${r.key}/${s.role} 用了白名单外的转场 "${s.transition}"`)
+        expect(ALLOWED_TRANSITIONS, `${r.key}/${s.role} 用了白名单外的转场 "${s.transition}"`)
           .toContain(s.transition)
       }
     }
@@ -114,6 +114,41 @@ describe('pickShotRecipe — 选择与轮换', () => {
   it('种子为负 / 非整数 / 极大值都不炸', () => {
     for (const seed of [-5, 2.7, 1e9, NaN]) {
       expect(SHOT_RECIPES).toContain(pickShotRecipe('brand', seed))
+    }
+  })
+})
+
+// ── 硬切(2026-07-26:实测把溶解调短没用,场景检测仍只认出 1 个切点)────────────
+describe('🔴 硬切 —— 治「整条片子是一个长镜头」', () => {
+  it('🔴 cut 绝不能混进 ffmpeg 真名白名单(那个白名单的契约是「可零校验直接拼进滤镜」)', () => {
+    for (const p of PSEUDO_TRANSITIONS) {
+      expect(XFADE_TRANSITIONS, `${p} 不是 ffmpeg 转场,混进去白名单的保证就失真了`)
+        .not.toContain(p as never)
+    }
+  })
+
+  it('伪转场仍在「配方允许值」里,配方可以用', () => {
+    for (const p of PSEUDO_TRANSITIONS) expect(ALLOWED_TRANSITIONS).toContain(p)
+  })
+
+  it('🔴 有 persona 的客户走的 personal_story 必须以硬切为主(不是零星点缀)', () => {
+    const r = SHOT_RECIPES.find((x) => x.key === 'personal_story')!
+    const joins = r.shots.slice(1) // 第 0 段无「转入」转场
+    const cuts = joins.filter((s) => s.transition === 'cut').length
+    expect(cuts / joins.length, `硬切只占 ${cuts}/${joins.length}`).toBeGreaterThan(0.5)
+  })
+
+  it('🔴 但不能全是硬切 —— 至少留一处有意义的转场做断章/收束', () => {
+    const r = SHOT_RECIPES.find((x) => x.key === 'personal_story')!
+    const real = r.shots.slice(1).filter((s) => s.transition !== 'cut')
+    expect(real.length).toBeGreaterThanOrEqual(1)
+    for (const s of real) expect(XFADE_TRANSITIONS).toContain(s.transition)
+  })
+
+  it('末镜(cta)不用硬切 —— 收尾要有收束感', () => {
+    for (const r of SHOT_RECIPES) {
+      const last = r.shots[r.shots.length - 1]
+      expect(last.transition, `${r.key} 末镜用了硬切`).not.toBe('cut')
     }
   })
 })

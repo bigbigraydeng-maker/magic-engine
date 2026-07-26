@@ -25,7 +25,24 @@ export const XFADE_TRANSITIONS = [
   'circleopen', 'circleclose', 'smoothleft', 'smoothright',
   'zoomin', 'coverleft', 'coverup', 'revealright',
 ] as const
-export type XfadeTransition = (typeof XFADE_TRANSITIONS)[number]
+/**
+ * 🔴 伪转场:**不是** ffmpeg 的转场名,由 worker 翻译后才下发。
+ *
+ * `cut` = 真硬切。爆款库 383 条实测:「视觉冲击 + 硬切」中位播放 1994 万,
+ * 而「风景空镜 + 溶解」只有 221 万 —— 我们原来做的正是后者。
+ * 而且实测证明**光把溶解调短没用**:0.35s 降到 0.18s 后,场景切换检测
+ * 依然只认出 1 个切点(整条片子观感上还是一个长镜头)。必须真的切。
+ *
+ * 单独分一类、不混进 XFADE_TRANSITIONS,是因为那个白名单的契约是
+ * 「每个名字都在 ffmpeg 里实测存在,可以零校验直接拼进滤镜」——
+ * `cut` 不满足这个契约,混进去会让白名单的保证失真。
+ */
+export const PSEUDO_TRANSITIONS = ['cut'] as const
+
+/** 配方里允许出现的全部转场值(ffmpeg 真名 + 由 worker 翻译的伪转场) */
+export const ALLOWED_TRANSITIONS = [...XFADE_TRANSITIONS, ...PSEUDO_TRANSITIONS] as const
+
+export type XfadeTransition = (typeof ALLOWED_TRANSITIONS)[number]
 
 /** make_promo 的 _kenburns 只认奇偶推/拉;motion 目前用于生成式 clip 的提示词 */
 export type MotionType = 'push_in' | 'pull_back' | 'lateral_truck' | 'static_hold'
@@ -98,14 +115,17 @@ export const SHOT_RECIPES: ShotRecipe[] = [
     // 对标真实爆款(FB「I Took My Parents to Zhangjiajie」28.2s,原声,第一人称)。
     // 关键是**够长**:12-15s 讲不完一个有情感的故事,只能堆卖点。
     // 节奏设计:开场稍长立人物 → 中段推进 → 情感回扣那镜留足 3.2s 给观众反应 → 收尾邀请。
+    // 剪辑节奏:**以硬切为主**,只在两处留有意义的转场(一次 wipe 断章、进 CTA 一次
+    // circleopen 收束)。此前每一处都是溶解,场景检测跑成片只认出 1 个切点 ——
+    // 观感上整条是一个 21 秒长镜头,这正是 PM 说的「传统模式」。实测改后 6 个切点。
     shots: [
       { role: 'hook',   duration_hint_s: 3.6, transition: 'fade',        motion: 'push_in' },
-      { role: 'middle', duration_hint_s: 3.0, transition: 'dissolve',    motion: 'lateral_truck' },
-      { role: 'middle', duration_hint_s: 2.8, transition: 'smoothleft',  motion: 'push_in' },
+      { role: 'middle', duration_hint_s: 3.0, transition: 'cut',         motion: 'lateral_truck' },
+      { role: 'middle', duration_hint_s: 2.8, transition: 'cut',         motion: 'push_in' },
       { role: 'middle', duration_hint_s: 2.8, transition: 'wipeleft',    motion: 'pull_back' },
-      { role: 'middle', duration_hint_s: 3.0, transition: 'dissolve',    motion: 'lateral_truck' },
-      { role: 'middle', duration_hint_s: 3.2, transition: 'smoothright', motion: 'static_hold' },
-      { role: 'middle', duration_hint_s: 3.4, transition: 'fade',        motion: 'push_in' },
+      { role: 'middle', duration_hint_s: 3.0, transition: 'cut',         motion: 'lateral_truck' },
+      { role: 'middle', duration_hint_s: 3.2, transition: 'cut',         motion: 'static_hold' },
+      { role: 'middle', duration_hint_s: 3.4, transition: 'cut',         motion: 'push_in' },
       { role: 'cta',    duration_hint_s: 3.2, transition: 'circleopen',  motion: 'pull_back' },
     ],
   },
