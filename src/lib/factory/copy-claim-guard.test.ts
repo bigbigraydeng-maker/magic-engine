@@ -138,3 +138,53 @@ describe('🔴 countFirstPersonHeadlines —— 只认上屏的大字', () => {
     expect(countFirstPersonHeadlines({ segments: [], endcard: null } as unknown as AdCopy)).toBe(0)
   })
 })
+
+// ── 角度不该被废片烧掉(2026-07-26:CTS 6 个角度被当天调试的废片占满,工厂停产)──
+import { anglesThatBurn } from './evaluate'
+
+const order = (angle: string, status: string, reject_category: string | null = null) =>
+  ({ angle, status, reject_category })
+
+describe('🔴 anglesThatBurn —— 「这条角度不行」≠「这次做砸了」', () => {
+  it('🔴 因质量打回的角度可以再用(角度没问题,是那次做砸了)', () => {
+    const burned = anglesThatBurn([order('Destination Inspiration', 'review_rejected', 'quality')])
+    expect(burned).toEqual([])
+  })
+
+  it('🔴 因角度不对打回 → 角度照烧(否则等于「打回就能无限重试同一角度」)', () => {
+    expect(anglesThatBurn([order('Offers & Alerts', 'review_rejected', 'wrong_angle')]))
+      .toEqual(['Offers & Alerts'])
+  })
+
+  it('踩红线 / 预算 / 其他原因打回 → 也照烧(只放行 quality 一类)', () => {
+    for (const cat of ['brand_redline', 'budget', 'other', null]) {
+      expect(anglesThatBurn([order('A', 'review_rejected', cat)]), String(cat)).toEqual(['A'])
+    }
+  })
+
+  it('在审 / 已批 / 已发 / 归档 —— 全都算用过', () => {
+    for (const st of ['in_review', 'approved', 'published', 'archived', 'queued', 'failed']) {
+      expect(anglesThatBurn([order('A', st)]), st).toEqual(['A'])
+    }
+  })
+
+  it('🔴 状态是 review_rejected 但分类是 quality 才放行 —— 两个条件缺一不可', () => {
+    // 只看分类会漏:一条在审的单子若带着 quality 分类残留,不该被当成可重用
+    expect(anglesThatBurn([order('A', 'in_review', 'quality')])).toEqual(['A'])
+  })
+
+  it('混合场景:只有那条质量废片的角度回到池子里', () => {
+    expect(
+      anglesThatBurn([
+        order('Heritage', 'in_review'),
+        order('Planning', 'review_rejected', 'quality'),
+        order('Social Proof', 'review_rejected', 'wrong_angle'),
+      ]),
+    ).toEqual(['Heritage', 'Social Proof'])
+  })
+
+  it('空角度 / 缺字段不炸', () => {
+    expect(anglesThatBurn([{ angle: null, status: 'in_review' }, {}])).toEqual([])
+    expect(anglesThatBurn([])).toEqual([])
+  })
+})

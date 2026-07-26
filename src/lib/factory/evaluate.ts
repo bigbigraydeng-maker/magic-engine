@@ -59,7 +59,7 @@ async function loadContext(
   // 近 14 天全部工单(角度去重含打回/归档,魏征 F4;同时供日配额统计)
   const { data: recentOrders, error: roErr } = await supabaseAdmin
     .from('content_work_orders')
-    .select('angle, created_at, actual_cost_usd, status')
+    .select('angle, created_at, actual_cost_usd, status, reject_category')
     .eq('client_id', signal.client_id)
     .gte('created_at', since)
   if (roErr) throw new Error(`work_orders query failed: ${roErr.message}`)
@@ -168,7 +168,7 @@ async function loadContext(
     brief: brief ?? null,
     goal: goal ?? null,
     brandRedlines: client ? (client.brand_redline_phrases ?? []) : null,
-    recentAngles: (recentOrders ?? []).map((o) => o.angle).filter(Boolean),
+    recentAngles: anglesThatBurn(recentOrders ?? []),
     blocklist: blocklist ?? [],
     activeWinners: winners ?? [],
     balanceUsd: typeof balance === 'number' ? balance : Number(balance ?? NaN) || null,
@@ -363,6 +363,26 @@ export interface EvaluateResult {
  * 入口:信号落库后调用。全体收进 try(魏征 M1-F10):
  * 任何异常 → 尽力把信号收敛为 rejected(gate_data_unavailable),自身绝不 throw。
  */
+/**
+ * 近 14 天里,哪些角度算「用过了」。
+ *
+ * 🔴 因**画面/文案质量**被打回的那条不算 —— 角度本身没问题,是那次做砸了。
+ * 实测(2026-07-26):CTS 只有 6 个可溯源角度,当天调试出的废片把角度全占了,
+ * 工厂直接停产报 `no_angle_available`。「这条角度不行」和「这次做砸了」是两回事,
+ * 表里本来就用 reject_category 区分(wrong_angle vs quality),这里照它执行。
+ *
+ * 其余一律仍然算用过(含 wrong_angle 打回、归档、在审、已发)——
+ * 只放行 quality 这一类,避免变成「打回就能无限重试同一角度」。
+ */
+export function anglesThatBurn(
+  orders: Array<{ angle?: string | null; status?: string | null; reject_category?: string | null }>,
+): string[] {
+  return orders
+    .filter((o) => !(o.status === 'review_rejected' && o.reject_category === 'quality'))
+    .map((o) => o.angle)
+    .filter((a): a is string => !!a)
+}
+
 export async function evaluateSignal(signalId: string): Promise<EvaluateResult> {
   try {
     const { data: signal, error } = await supabaseAdmin
