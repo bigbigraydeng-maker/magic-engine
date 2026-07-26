@@ -19,6 +19,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { buildSearchQueries, normalizeHarvest, type HarvestedImage } from './stock-harvest'
 import { buildStockClipRows } from './stock-ingest'
 import { TRANSFORM_COST_USD, buildTransformPrompt, buildTransformedMeta } from './stock-transform'
+import { screenImage } from './stock-vision-gate'
 import { FACTORY_B_TRACK_SCENE_TAGS } from './constants'
 
 const BUCKET = 'content-factory'
@@ -172,8 +173,14 @@ export async function ingestHarvestedImages(
  */
 export async function transformStockImages(
   clientId: string,
-  opts: { max?: number; look?: string | null } = {},
+  opts: {
+    max?: number
+    look?: string | null
+    /** 🔴 业务语境:喂给视觉闸判断图跟客户对不对。不传 = 跳过视觉闸(不推荐) */
+    businessContext?: string | null
+  } = {},
 ): Promise<{ transformed: number; skipped: number; errors: string[] }> {
+  const businessContext = opts.businessContext?.trim() || null
   const max = Math.min(opts.max ?? 8, 16)
   const errors: string[] = []
 
@@ -230,6 +237,21 @@ export async function transformStockImages(
         .from(BUCKET)
         .upload(path, outBuf, { contentType: 'image/png', upsert: true })
       if (upErr) { errors.push(`改后图上传失败: ${upErr.message}`); continue }
+
+      // 🔴 视觉相关性闸(2026-07-26,同一个错犯两次后加的):
+      // 标题闸对**无标题图**完全失效 —— 实测 10 张改图里 7 张原图无标题,
+      // 意大利/希腊/台湾九份就这么一路进了成片。只有看图才拦得住。
+      // 放在改图**之后**:改完的图才是真正要进成片的那张,判它才准。
+      if (businessContext) {
+        const publicUrl = toPublicUrl(path)
+        const verdict = publicUrl
+          ? await screenImage(publicUrl, businessContext)
+          : { relevant: false, subject: '(no url)', reason: '改后图地址不可用' }
+        if (!verdict.relevant) {
+          errors.push(`视觉闸拦下: ${verdict.subject}${verdict.reason ? ' — ' + verdict.reason : ''}`)
+          continue // 不入库 —— 图已上传但没有行,下次跑会重新改(可接受,比错图进片子好)
+        }
+      }
 
       rows.push({
         client_id: clientId,

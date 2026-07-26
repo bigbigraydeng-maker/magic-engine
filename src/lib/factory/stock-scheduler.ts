@@ -111,15 +111,21 @@ export async function runStockRefill(): Promise<{ scanned: number; outcomes: Sto
           ? (cfg.stock_off_topic as unknown[]).filter((x): x is string => typeof x === 'string')
           : [],
       })
+      // 抓完立刻改图 + 过视觉闸 —— 原图不能进成片,而视觉闸是唯一拦得住无标题错图的闸
+      const { transformStockImages } = await import('./stock-pipeline')
+      const tr = await transformStockImages(clientId, {
+        max: 8,
+        businessContext: buildBusinessContext(anchor, core, cfg),
+      })
       const ingested = results.reduce((s, r) => s + r.result.ingested, 0)
-      const errs = results.flatMap((r) => r.result.errors)
+      const errs = [...results.flatMap((r) => r.result.errors), ...tr.errors]
       outcomes.push({
         client_id: clientId,
         client_name: clientName,
         result: 'refilled',
         before,
         ingested,
-        detail: errs.length ? `${errs.length} 张失败: ${errs[0]}` : undefined,
+        detail: `改图 ${tr.transformed} 张` + (errs.length ? ' · ' : '') + (errs.length ? `${errs.length} 项问题: ${errs[0]}` : ''),
       })
     } catch (e) {
       outcomes.push({
@@ -156,4 +162,21 @@ export function deriveAnchor(
   if (typeof industry === 'string' && industry.trim()) return industry.trim().slice(0, 60)
   void brief
   return null
+}
+
+/** 视觉闸用的业务语境:告诉模型这个客户做什么、图该是什么样。 */
+export function buildBusinessContext(
+  anchor: string,
+  coreProposition: string | null,
+  factoryConfig: Record<string, unknown>,
+): string {
+  const off = Array.isArray(factoryConfig.stock_off_topic)
+    ? (factoryConfig.stock_off_topic as unknown[]).filter((x): x is string => typeof x === 'string')
+    : []
+  const core = coreProposition?.trim().slice(0, 200)
+  return (
+    `${anchor}.` +
+    (core ? ` About the business: ${core}` : '') +
+    (off.length ? ` Imagery must NOT show: ${off.slice(0, 10).join(', ')}.` : '')
+  )
 }
