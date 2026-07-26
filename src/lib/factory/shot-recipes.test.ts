@@ -152,3 +152,29 @@ describe('🔴 硬切 —— 治「整条片子是一个长镜头」', () => {
     }
   })
 })
+
+// ── 人格客户也要轮换(2026-07-26:hasPersona 无条件 return,轮换从未生效)────────
+describe('🔴 有人格的客户不能被锁死在同一套配方', () => {
+  it('🔴 连续出片时配方会变(旧行为:CTS 每条都是 personal_story)', () => {
+    const got = new Set([0, 1, 2, 3, 4, 5].map((s) => pickShotRecipe('brand', s, true).key))
+    expect(got.size, `轮换失效,永远只出 ${[...got]}`).toBeGreaterThan(1)
+  })
+
+  it('候选池仍偏向叙事型 —— 第一人称需要时间铺情感,不该轮到快剪型', () => {
+    for (const s of [0, 1, 2, 3, 4, 5]) {
+      expect(['personal_story', 'narrative', 'problem_solution']).toContain(pickShotRecipe('sales', s, true).key)
+    }
+  })
+
+  it('第一条仍是故事型(人格客户的默认形态不变)', () => {
+    expect(pickShotRecipe('brand', 0, true).key).toBe('personal_story')
+  })
+
+  it('无人格客户的行为不受影响', () => {
+    expect(pickShotRecipe('sales', 0, false).key).toBe('fast_cut')
+  })
+
+  it('仍是纯函数:同输入同输出', () => {
+    expect(pickShotRecipe('brand', 7, true).key).toBe(pickShotRecipe('brand', 7, true).key)
+  })
+})

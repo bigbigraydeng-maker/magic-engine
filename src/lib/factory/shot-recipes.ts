@@ -162,11 +162,16 @@ export function pickShotRecipe(
   /** 客户配了叙事人格(brand_voice.persona)→ 优先故事型:第一人称需要时间铺情感 */
   hasPersona = false,
 ): ShotRecipe {
-  if (hasPersona) {
-    const story = SHOT_RECIPES.find((r) => r.key === 'personal_story')
-    if (story) return story
-  }
-  const keys = GOAL_PREFERENCE[contentGoal ?? ''] ?? ['narrative', 'fast_cut', 'problem_solution', 'single_focus']
+  // 🔴 配了人格的客户**也要轮换**,只是候选池偏向叙事型。
+  //
+  // 原来这里是 `if (hasPersona) return personal_story` —— 无条件返回,
+  // 下面那行 rotationSeed 轮换**永远走不到**。CTS 配了「Baker Gu」人格,
+  // 于是每一条片子都锁死在同一套 8 镜、同样时长曲线、同样转场序列上。
+  // 第四轮做的「配方轮换」对 CTS 从来没生效过 —— 这正是 PM 连说四轮
+  // 「还是千篇一律」的其中一块,而前四轮全在调转场/曲子/运镜,没人看这里。
+  const keys = hasPersona
+    ? ['personal_story', 'narrative', 'problem_solution']
+    : GOAL_PREFERENCE[contentGoal ?? ''] ?? ['narrative', 'fast_cut', 'problem_solution', 'single_focus']
   const seed = Number.isFinite(rotationSeed) && rotationSeed >= 0 ? Math.floor(rotationSeed) : 0
   const key = keys[seed % keys.length]
   return SHOT_RECIPES.find((r) => r.key === key) ?? SHOT_RECIPES[0]
