@@ -1,0 +1,223 @@
+/**
+ * 「这是不是同一个人」—— 四个渠道共用的合并逻辑。
+ *
+ * 每个渠道给的身份都不一样：
+ *   Meta 即时表单  电话 "p:+6421363598" + 邮箱
+ *   官网表单       电话（已是 E.164）+ 邮箱
+ *   邮件           邮箱
+ *   Messenger      Facebook PSID（客户自己打字留下的电话/邮箱才有）
+ *   外呼           电话
+ *
+ * 只认电话和邮箱，不认姓名。真实依据（CTS info@ 信箱 2026-07-26 实测）：
+ * 一位客户邮箱 hemitekoha@hotmail.com、显示名 Chris Brown、正文自称
+ * Christine、订的是儿子 Isaac Brown 的团。四个名字，一个人。
+ *
+ * 只在 Messenger 上聊过、从没留电话邮箱的人，就是合并不到任何人 —— 如实
+ * 返回一个只带 fb_psid 的 contact，不假装跟谁是同一个（假装合上比合不上危险）。
+ */
+
+import { supabaseAdmin } from '@/lib/supabase'
+
+export type IdentityKind = 'phone' | 'email' | 'fb_psid'
+
+export interface Identity {
+  kind: IdentityKind
+  value: string
+}
+
+/**
+ * 电话统一成 E.164，否则四个渠道永远对不上。
+ *
+ * 处理的真实脏数据：
+ *   "p:+6421363598"  Meta 导出前缀
+ *   "021 363 598"    人手打的本地格式
+ *   "0064213 63598"  国际前缀写成 00
+ *   "+64 21 363-598" 带空格和横杠
+ *
+ * defaultCountry 决定本地号码怎么补国码；CTS/Oztop 都在 NZ/AU，
+ * 所以调用方按 clients 的市场传进来，不在这里写死。
+ * 认不出来就返回 null —— 存一个错的号码比不存更糟，将来会打给陌生人。
+ */
+export function normalisePhone(raw: string | null | undefined, defaultCountry: 'NZ' | 'AU' = 'NZ'): string | null {
+  if (!raw) return null
+
+  // 去掉 Meta 的 "p:" 前缀和一切非数字/加号字符
+  let s = String(raw).trim().replace(/^p:/i, '')
+  s = s.replace(/[^\d+]/g, '')
+  if (!s) return null
+
+  // 00 开头是国际前缀的另一种写法
+  if (s.startsWith('00')) s = `+${s.slice(2)}`
+
+  const cc = defaultCountry === 'NZ' ? '64' : '61'
+
+  if (s.startsWith('+')) {
+    const digits = s.slice(1)
+    // 国际号码至少 8 位、最多 15 位（E.164 上限）
+    if (digits.length < 8 || digits.length > 15) return null
+    return `+${digits}`
+  }
+
+  // 本地格式：0 开头去掉 0 再补国码
+  if (s.startsWith('0')) {
+    const digits = s.slice(1)
+    if (digits.length < 7 || digits.length > 12) return null
+    return `+${cc}${digits}`
+  }
+
+  // 已经带国码但没写加号
+  if (s.startsWith(cc) && s.length >= 10) return `+${s}`
+
+  // 剩下的认不出来。宁可不存，也不要存一个会打给陌生人的号码。
+  return null
+}
+
+/** 邮箱去空格转小写。认不出来返回 null，不做花式清洗。 */
+export function normaliseEmail(raw: string | null | undefined): string | null {
+  if (!raw) return null
+  const s = String(raw).trim().toLowerCase()
+  // 够用的判断：有 @、两边都有东西、域名带点。
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) return null
+  return s
+}
+
+/**
+ * 把一行原始渠道数据变成一组可用于合并的身份。
+ * 顺序有意义：电话和邮箱能跨渠道合并，fb_psid 只在 Messenger 内有效。
+ */
+export function buildIdentities(input: {
+  phone?: string | null
+  email?: string | null
+  fbPsid?: string | null
+  defaultCountry?: 'NZ' | 'AU'
+}): Identity[] {
+  const out: Identity[] = []
+  const phone = normalisePhone(input.phone, input.defaultCountry ?? 'NZ')
+  if (phone) out.push({ kind: 'phone', value: phone })
+  const email = normaliseEmail(input.email)
+  if (email) out.push({ kind: 'email', value: email })
+  if (input.fbPsid) out.push({ kind: 'fb_psid', value: String(input.fbPsid).trim() })
+  return out
+}
+
+export interface ResolveInput {
+  clientId: string
+  identities: Identity[]
+  displayName?: string | null
+  /** 记录第一次是从哪个渠道看到这个人的。 */
+  source?: string
+  /** 这次接触的时间；用于维护 last_seen_at。 */
+  seenAt?: string
+}
+
+export interface ResolveResult {
+  contactId: string
+  /** true = 这次新建了一个人；false = 命中了已有的人。 */
+  created: boolean
+  /** 命中的身份数（0 表示全是新身份）。 */
+  matchedIdentities: number
+}
+
+/**
+ * 找到这个人，找不到就新建，并把这次带来的新身份挂上去。
+ *
+ * 幂等：同一批数据重跑不会产生重复的人，因为 contact_identities 上有
+ * (client_id, kind, value) 唯一约束，命中即复用。
+ *
+ * 注意「合并冲突」：如果这次带来的两个身份分别指向两个已存在的人（例如
+ * 之前电话建过一个、邮箱建过另一个，现在客户同时留了两样），我们选最早
+ * 创建的那个作为主体，把另一批身份迁过去。不做自动删除 —— 合并是不可逆的，
+ * 剩下那个空壳留着，由人来看。
+ */
+export async function resolveContact(input: ResolveInput): Promise<ResolveResult> {
+  const { clientId, identities } = input
+  if (identities.length === 0) {
+    throw new Error('resolveContact 需要至少一个身份（电话 / 邮箱 / fb_psid）')
+  }
+
+  const seenAt = input.seenAt ?? new Date().toISOString()
+
+  const { data: hits } = await supabaseAdmin
+    .from('contact_identities')
+    .select('contact_id, kind, value')
+    .eq('client_id', clientId)
+    .in('value', identities.map((i) => i.value))
+
+  // 只认 kind 和 value 都对上的，避免电话号码恰好等于某个 fb_psid 的巧合。
+  const matched = (hits ?? []).filter((h) =>
+    identities.some((i) => i.kind === h.kind && i.value === h.value),
+  )
+  const contactIds = [...new Set(matched.map((m) => m.contact_id as string))]
+
+  let contactId: string
+  let created = false
+
+  if (contactIds.length === 0) {
+    const { data, error } = await supabaseAdmin
+      .from('contacts')
+      .insert({
+        client_id: clientId,
+        display_name: input.displayName ?? null,
+        primary_phone: identities.find((i) => i.kind === 'phone')?.value ?? null,
+        primary_email: identities.find((i) => i.kind === 'email')?.value ?? null,
+        first_seen_at: seenAt,
+        last_seen_at: seenAt,
+      })
+      .select('id')
+      .single()
+    if (error || !data) throw new Error(`建 contact 失败: ${error?.message}`)
+    contactId = data.id as string
+    created = true
+  } else {
+    // 多个命中 = 之前被拆成了两个人，现在有证据说明是同一个。选最早的做主体。
+    if (contactIds.length > 1) {
+      const { data: rows } = await supabaseAdmin
+        .from('contacts')
+        .select('id, created_at')
+        .in('id', contactIds)
+        .order('created_at', { ascending: true })
+      contactId = ((rows ?? [])[0]?.id as string) ?? contactIds[0]
+      const others = contactIds.filter((id) => id !== contactId)
+      if (others.length > 0) {
+        await supabaseAdmin
+          .from('contact_identities')
+          .update({ contact_id: contactId })
+          .in('contact_id', others)
+        await supabaseAdmin
+          .from('contact_touchpoints')
+          .update({ contact_id: contactId })
+          .in('contact_id', others)
+      }
+    } else {
+      contactId = contactIds[0]
+    }
+
+    await supabaseAdmin
+      .from('contacts')
+      .update({
+        last_seen_at: seenAt,
+        ...(input.displayName ? { display_name: input.displayName } : {}),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', contactId)
+  }
+
+  // 把这次带来的身份补齐。已存在的靠唯一约束忽略。
+  const fresh = identities.filter(
+    (i) => !matched.some((m) => m.kind === i.kind && m.value === i.value),
+  )
+  if (fresh.length > 0) {
+    await supabaseAdmin.from('contact_identities').upsert(
+      fresh.map((i) => ({
+        contact_id: contactId,
+        client_id: clientId,
+        kind: i.kind,
+        value: i.value,
+        first_source: input.source ?? null,
+      })),
+      { onConflict: 'client_id,kind,value', ignoreDuplicates: true },
+    )
+  }
+
+  return { contactId, created, matchedIdentities: matched.length }
+}
