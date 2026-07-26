@@ -606,3 +606,29 @@ services:
     envVars:
       - key: CRON_SECRET
         sync: false
+
+  # 客户私信 → 需求卡。PR #652/#653 把这两条接口合进来了,但没有人调用它们,
+  # 「客户消息」页会永远是空的 —— 这里补上调用方。
+  #
+  # 一个服务串两步,不是两个:brief 必须在 sync 之后跑(没入库的对话没得总结),
+  # 用 && 串起来顺序天然保证,也省一个 Render cron 服务。
+  # sync 失败时 brief 不会跑 —— 这是想要的:宁可这一轮不出卡,也不要基于半截
+  # 数据写卡给销售看。
+  #
+  # 只同步 clients.facebook_page_id 有值的客户(设置页里选主页才会有值),
+  # 所以新增客户不需要动这里。
+  # 跑在每小时第 10 分钟,避开整点那一堆日更 cron。
+  # max-time 跟接口的 maxDuration 对齐(sync 600s / brief 800s)再留一点余量。
+  - type: cron
+    name: messenger-hourly
+    env: node
+    schedule: "10 * * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/messenger-sync-hourly \
+      && curl -fsS --max-time 820 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/messenger-brief-hourly
+    envVars:
+      - key: CRON_SECRET
+        sync: false
