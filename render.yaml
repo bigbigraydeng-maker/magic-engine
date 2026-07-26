@@ -460,6 +460,23 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # Proposal view digest — every day at 19:00 UTC (~07:00 NZST next morning)
+  # Rolls up who opened a Magic Engine sales proposal in the past 24h from
+  # website_lead_events (source='proposal_tracking'), and emails the read
+  # pattern to hello@magicengine.cloud. Sends nothing on a quiet day, so the
+  # arrival of the email is itself the signal.
+  - type: cron
+    name: proposal-view-digest
+    env: node
+    schedule: "0 19 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/proposal-view-digest
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # Agent Learning Rollup — DAPE W3 (spec §3.3)
   # Weekly aggregator: takes the previous ISO week (Mon 00:00 UTC → Mon 00:00 UTC)
   # of flywheel_outcomes + zhuge_feedback_events and writes ONE summary
