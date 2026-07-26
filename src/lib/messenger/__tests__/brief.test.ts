@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest'
 import {
   shouldGenerateBrief,
   fallbackBrief,
+  stripMarkdown,
   QUIET_PERIOD_MS,
   MAX_REGENS_PER_DAY,
   type BriefCandidate,
@@ -123,5 +124,37 @@ describe('fallbackBrief', () => {
 
   it('counts only the customer messages', () => {
     expect(fallbackBrief(messages).summary).toContain('客户共发送 1 条消息')
+  })
+
+  it('leaves contact empty rather than guessing', () => {
+    expect(fallbackBrief(messages).contact).toEqual({ phone: null, email: null })
+  })
+})
+
+/**
+ * Messenger renders markdown literally, and the source threads are full of it
+ * (the Meta agent writes `**Best of China**`). Anything reaching a real customer
+ * with visible asterisks is a defect, so this is belt-and-braces over the prompt.
+ */
+describe('stripMarkdown', () => {
+  it('unwraps bold', () => {
+    expect(stripMarkdown('our **Best of China** tour')).toBe('our Best of China tour')
+  })
+
+  it('unwraps italics and code', () => {
+    expect(stripMarkdown('a *great* trip with `code`')).toBe('a great trip with code')
+    expect(stripMarkdown('an _early_ start')).toBe('an early start')
+  })
+
+  it('leaves a lone asterisk and mid-word underscores alone', () => {
+    expect(stripMarkdown('5 * 3 seats left')).toBe('5 * 3 seats left')
+    expect(stripMarkdown('email best_of_china@example.com')).toBe(
+      'email best_of_china@example.com',
+    )
+  })
+
+  it('is a no-op on plain text', () => {
+    const plain = 'Hi Kam, happy to send the full itinerary.'
+    expect(stripMarkdown(plain)).toBe(plain)
   })
 })

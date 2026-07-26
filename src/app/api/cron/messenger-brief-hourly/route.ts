@@ -31,6 +31,7 @@ interface ConversationRow {
   client_id: string
   message_count: number
   last_message_at: string | null
+  last_message_from: string | null
   messenger_briefs: {
     source_message_count: number
     regen_count: number
@@ -85,7 +86,7 @@ export async function GET(req: NextRequest) {
   const { data, error } = await supabaseAdmin
     .from('messenger_conversations')
     .select(
-      'id, client_id, message_count, last_message_at, messenger_briefs(source_message_count, regen_count, regen_count_date)',
+      'id, client_id, message_count, last_message_at, last_message_from, messenger_briefs(source_message_count, regen_count, regen_count_date)',
     )
     .gt('message_count', 0)
     .order('last_message_at', { ascending: false })
@@ -96,7 +97,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  const due = ((data ?? []) as ConversationRow[])
+  const rows = (data ?? []) as ConversationRow[]
+  const byId = new Map(rows.map((r) => [r.id, r]))
+
+  const due = rows
     .map(toCandidate)
     .filter((c) => shouldGenerateBrief(c, now))
     .slice(0, MAX_BRIEFS_PER_RUN)
@@ -108,7 +112,13 @@ export async function GET(req: NextRequest) {
     try {
       const messages = await loadMessages(candidate.conversationId)
       if (messages.length === 0) continue
-      const brief = await generateBrief(messages)
+      const row = byId.get(candidate.conversationId)!
+      const brief = await generateBrief(messages, {
+        awaitingReply: row.last_message_from === 'customer',
+        hoursSinceLastMessage: candidate.lastMessageAt
+          ? Math.round((now.getTime() - new Date(candidate.lastMessageAt).getTime()) / 3_600_000)
+          : 0,
+      })
       await storeBrief(candidate, brief, now)
       generated++
     } catch (err) {
