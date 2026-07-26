@@ -55,11 +55,14 @@ export function buildTransformPrompt(params: {
     `Looks like an unedited photo from a real camera. ` +
     `Not cinematic, not dramatic, not over-saturated, no heavy golden or orange cast, ` +
     `no glow, no HDR look, no illustration, no painting, no 3D render. ` +
-    // ③ 彻底禁字 —— PM 看片:红伞那张招牌上是乱码中文
-    `Remove all text: replace every sign, banner, lantern or plaque that carries writing ` +
-    `with a plain, blank, untextured surface. There must be zero letters, zero Chinese ` +
-    `characters, zero glyphs or symbols resembling writing anywhere in the image. ` +
-    `No watermark, no logo. ` +
+    // ③ 彻底禁字 —— PM 看片:红伞那张招牌上是乱码中文。
+    // 🔴 但「留一块空白牌子」也不行:实测出来是几块悬空的白板,比乱码还假。
+    // 正确做法是**把牌子整个拿掉**,用场景本来就有的东西补位(树叶/墙面/天空)。
+    `Remove signage entirely rather than blanking it: delete every sign, board, banner or ` +
+    `plaque from the scene and fill the space naturally with surrounding foliage, wall or sky — ` +
+    `never leave empty white panels or blank rectangles floating in the frame. ` +
+    `There must be zero letters, zero Chinese characters, zero glyphs or symbols resembling ` +
+    `writing anywhere in the image. No watermark, no logo. ` +
     // 竖屏成片用
     `Vertical 9:16 composition with clean space in the upper third for caption overlay.`
   )

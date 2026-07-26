@@ -210,6 +210,12 @@ export async function transformStockImages(
   const { transformImage } = await import('@/lib/visual/openai-images')
   const rows: Record<string, unknown>[] = []
 
+  // 桶里已有哪些改后图 —— 列一次,循环里查 Set(不要每张打一次 storage API)
+  const { data: objects } = await supabaseAdmin.storage
+    .from(BUCKET)
+    .list(`${STOCK_PREFIX}/${clientId}`, { limit: 1000 })
+  const presentObjects = new Set((objects ?? []).map((o) => `${STOCK_PREFIX}/${clientId}/${o.name}`))
+
   // 串行:gpt-image-1 慢且贵,并发容易撞速率限制,也不便于中途叫停
   for (const src of todo) {
     try {
@@ -227,35 +233,42 @@ export async function transformStockImages(
           errors.push(`视觉闸没跑成,本轮跳过(未下架): ${pre.reason ?? pre.subject}`)
           continue
         }
-        if (!pre.relevant) {
+        // 🔴 原图这一道**只管跑题**,不管有没有字:原图带字很正常(改图的任务之一就是去字),
+        // 因为有字就把原图下架 = 把大量好素材误杀。带字的图照常送去改,由改后那道闸验收。
+        if (pre.reject === 'off_topic') {
           await supabaseAdmin.from('video_clips').update({ status: 'archived' }).eq('id', src.id)
           errors.push(`原图不相关已下架: ${pre.subject}${pre.reason ? ' — ' + pre.reason : ''}`)
           continue
         }
       }
 
-      const res = await fetch(publicUrl, { headers: DL_HEADERS, signal: AbortSignal.timeout(DL_TIMEOUT_MS) })
-      if (!res.ok) { errors.push(`源图下载失败(${res.status})`); continue }
-      const buf = Buffer.from(await res.arrayBuffer())
-
+      const path = `${STOCK_PREFIX}/${clientId}/ai_${src.id}.png`
       const prompt = buildTransformPrompt({
         title: src.title as string | null,
         look: opts.look ?? null,
         sceneHint: src.scene_tag as string | null,
       })
-      const { b64 } = await transformImage({
-        image: buf,
-        prompt,
-        aspect_ratio: '9:16',
-        filename: (src.storage_url as string).split('/').pop() ?? 'source.jpg',
-      })
 
-      const outBuf = Buffer.from(b64, 'base64')
-      const path = `${STOCK_PREFIX}/${clientId}/ai_${src.id}.png`
-      const { error: upErr } = await supabaseAdmin.storage
-        .from(BUCKET)
-        .upload(path, outBuf, { contentType: 'image/png', upsert: true })
-      if (upErr) { errors.push(`改后图上传失败: ${upErr.message}`); continue }
+      // 🔴 先查后改(跟 ingest 的「先查后下」同一条纪律):改图路径由源图 id 决定,是确定的。
+      // 上一轮跑到一半超时,图已经改好传进桶里了、只是没落库 —— 不查就等于把 $0.04 再花一遍。
+      if (!presentObjects.has(path)) {
+        const res = await fetch(publicUrl, { headers: DL_HEADERS, signal: AbortSignal.timeout(DL_TIMEOUT_MS) })
+        if (!res.ok) { errors.push(`源图下载失败(${res.status})`); continue }
+        const buf = Buffer.from(await res.arrayBuffer())
+
+        const { b64 } = await transformImage({
+          image: buf,
+          prompt,
+          aspect_ratio: '9:16',
+          filename: (src.storage_url as string).split('/').pop() ?? 'source.jpg',
+        })
+
+        const outBuf = Buffer.from(b64, 'base64')
+        const { error: upErr } = await supabaseAdmin.storage
+          .from(BUCKET)
+          .upload(path, outBuf, { contentType: 'image/png', upsert: true })
+        if (upErr) { errors.push(`改后图上传失败: ${upErr.message}`); continue }
+      }
 
       // 🔴 视觉相关性闸第二道(2026-07-26,同一个错犯两次后加的):
       // 标题闸对**无标题图**完全失效 —— 实测 10 张改图里 7 张原图无标题,
@@ -266,7 +279,7 @@ export async function transformStockImages(
         const outUrl = toPublicUrl(path)
         const verdict = outUrl
           ? await screenImage(outUrl, businessContext)
-          : { ok: true, relevant: false, subject: '(no url)', reason: '改后图地址不可用' }
+          : { ok: true, relevant: false, hasText: false, subject: '(no url)', reject: null, reason: '改后图地址不可用' }
         if (!verdict.ok || !verdict.relevant) {
           errors.push(
             `${verdict.ok ? '视觉闸拦下' : '视觉闸没跑成,不收'}: ${verdict.subject}` +
@@ -276,7 +289,7 @@ export async function transformStockImages(
         }
       }
 
-      rows.push({
+      const row = {
         client_id: clientId,
         scene_tag: src.scene_tag,
         track: 'b_generated',
@@ -291,16 +304,19 @@ export async function transformStockImages(
           prompt,
           query: ((src.source_meta ?? {}) as Record<string, unknown>).query as string | null,
         }),
-      })
+      }
+      // 🔴 逐张入库,不攒到最后一次性写。
+      // 实测教训:一次跑 7 张要 15 分钟,超时中断时「攒着的行」全丢 ——
+      // 钱已经花了($0.04/张)、图已经在桶里了,却一行没落库,下次跑还得重花一遍。
+      // 每张单独写:中断也只损失当前这一张。
+      const { error: insErr } = await supabaseAdmin.from('video_clips').insert([row])
+      if (insErr) { errors.push(`改后图入库失败: ${insErr.message}`); continue }
+      rows.push(row)
     } catch (e) {
       errors.push(`改图失败: ${e instanceof Error ? e.message : e}`)
     }
   }
 
-  if (rows.length > 0) {
-    const { error: insErr } = await supabaseAdmin.from('video_clips').insert(rows)
-    if (insErr) { errors.push(`改后图入库失败: ${insErr.message}`); return { transformed: 0, skipped: todo.length, errors } }
-  }
   return { transformed: rows.length, skipped: todo.length - rows.length, errors }
 }
 
