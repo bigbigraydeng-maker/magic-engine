@@ -37,6 +37,17 @@ export function formatMoment(iso: string | null): string {
   ).padStart(2, '0')}`
 }
 
+/**
+ * "8月4日" — no clock. The AI picks a DAY to chase someone on; rendering the
+ * stored midnight-UTC as "12:00" invents a precision nobody meant, and reads as
+ * an appointment time the customer was never given.
+ */
+export function formatDay(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return `${d.getMonth() + 1}月${d.getDate()}日`
+}
+
 // ─── Intent ───────────────────────────────────────────────────────────────────
 
 const INTENT_META: Record<IntentLevel, { label: string; className: string }> = {
@@ -70,7 +81,7 @@ export function FollowUpChip({ dueAt, overdue }: { dueAt: string | null; overdue
   if (!overdue) {
     return (
       <p className="inline-block rounded-full bg-me-stone px-2.5 py-1 text-xs font-semibold text-me-charcoal/70">
-        约好 {formatMoment(dueAt)} 回访
+        约好 {formatDay(dueAt)}回访
       </p>
     )
   }
@@ -92,8 +103,8 @@ export function FollowUpChip({ dueAt, overdue }: { dueAt: string | null; overdue
  */
 export function WindowNotice({ window }: { window: ReplyWindow }) {
   const text: Record<WindowKind, string> = {
-    standard:    `还有 ${formatRemaining(window.msRemaining)} 可以直接回复`,
-    human_agent: `已超过 24 小时，还能在 ${formatRemaining(window.msRemaining)} 内回一次`,
+    standard:    `还有 ${formatRemaining(window.msRemaining)}可以直接回复`,
+    human_agent: `已超过 24 小时，还能在 ${formatRemaining(window.msRemaining)}内回一次`,
     closed:      'Facebook 已经不让回这条了 —— 请改用电话或邮件联系',
   }
   const tone: Record<WindowKind, string> = {
