@@ -25,7 +25,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
   const collector = new SeoCollector(60_000)
   let score: number | null = null
   try {
-    const result = await collector.collect('baseline-placeholder', row.domain, row.keywords)
+    // baseline_domains has no per-row market, so fall back to the deploy default.
+    const result = await collector.collect('baseline-placeholder', row.domain, row.keywords, [], process.env.SEMRUSH_DB ?? 'au')
     score = result.score
   } catch (err: any) {
     return NextResponse.json({ error: `Collector failed: ${err.message}` }, { status: 500 })

@@ -9,6 +9,15 @@ function getCredentials(): { login: string; password: string } {
   }
 }
 
+// DataForSEO location_code by client market (clients.semrush_db):
+// 2036 = Australia, 2554 = New Zealand.
+const LOCATION_CODE_BY_DB: Record<string, number> = { au: 2036, nz: 2554 }
+
+/** Resolve a client's market (clients.semrush_db) to a DataForSEO location_code. */
+export function locationCodeFor(db: string | null | undefined): number {
+  return LOCATION_CODE_BY_DB[db ?? 'au'] ?? LOCATION_CODE_BY_DB.au
+}
+
 export interface CompetitorDomain {
   domain: string
   overlap_score: number  // 0–1, shared keyword ratio vs client
@@ -19,6 +28,7 @@ export interface CompetitorDomain {
 export async function getCompetitorDomains(
   domain: string,
   limit: number = 5,
+  db: string = 'au',
 ): Promise<CompetitorDomain[]> {
   const { login, password } = getCredentials()
   const credentials = Buffer.from(`${login}:${password}`).toString('base64')
@@ -32,7 +42,7 @@ export async function getCompetitorDomains(
     body: JSON.stringify([
       {
         keyword: `site:${domain}`,
-        location_code: 2554,  // Australia
+        location_code: locationCodeFor(db),
         language_code: 'en',
         depth: 10,
       },
@@ -121,9 +131,6 @@ export interface SerpRanking {
   fetched_at: string
 }
 
-// DataForSEO location_code: 2554 = Australia, 2554 + 2540 supported. NZ = 2554? No: NZ = 2540.
-const LOCATION_CODE_BY_DB: Record<string, number> = { au: 2036, nz: 2554 }
-
 export async function getSerpRankings(
   domain: string,
   keywords: string[],
@@ -132,7 +139,7 @@ export async function getSerpRankings(
   if (keywords.length === 0) return []
   const { login, password } = getCredentials()
   const credentials = Buffer.from(`${login}:${password}`).toString('base64')
-  const location_code = LOCATION_CODE_BY_DB[db] ?? LOCATION_CODE_BY_DB.au
+  const location_code = locationCodeFor(db)
 
   const body = keywords.map(keyword => ({
     keyword,
