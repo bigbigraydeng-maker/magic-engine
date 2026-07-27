@@ -20,7 +20,7 @@ export const INDUSTRY_DICTIONARY: IndustryMapEntry[] = [
   },
   {
     category: 'tourism_operator',
-    keywords: ['旅游', '观光', '游船', '导游', '景区', '旅行社', 'tourism', 'tour operator', 'travel agency', 'sightseeing', 'cruise'],
+    keywords: ['旅游', '观光', '游船', '导游', '景区', '旅行社', 'tourism', 'tour operator', 'travel', 'travel agency', 'sightseeing', 'cruise'],
   },
   {
     category: 'accounting_advisory',
