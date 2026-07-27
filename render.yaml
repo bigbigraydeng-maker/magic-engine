@@ -537,6 +537,30 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # Weekly SEO loop — every Monday at 2:30am UTC, 30 min after the existing
+  # keyword-snapshots-weekly slot so the two never contend for DataForSEO.
+  #
+  # Collects our ranked keywords + competitor ranked keywords, builds the
+  # week-over-week / head-to-head / opportunity-gap comparisons, and writes 3
+  # topic candidates per client. It does NOT draft or publish anything.
+  #
+  # ⚠️ CRON_SECRET must be set on THIS service in the Render dashboard. It is
+  # `sync: false`, i.e. per-service and NOT inherited from the blueprint. The
+  # keyword-snapshots-weekly service has been silently failing auth since at
+  # least 2026-06-04 for exactly this reason — 0 rows in cron_run_logs, because
+  # `curl -fsS` exits non-zero on 401 before the handler can log anything.
+  - type: cron
+    name: seo-loop-weekly
+    env: node
+    schedule: "30 2 * * 1"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/seo-loop-weekly
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # Social comment auto-reply — every 30 min for enabled clients.
   # Pulls recent FB Page comments → classify → guardrailed auto reply (public +
   # optional DM) / hide spam. 30-min cadence keeps DM private_replies inside
