@@ -33,7 +33,7 @@ interface Row {
   message_count?: number
   last_message_at: string | null
   last_message_from: 'customer' | 'page' | null
-  messenger_briefs: Array<Record<string, unknown>>
+  conversation_briefs: Array<Record<string, unknown>>
 }
 
 function brief(over: Record<string, unknown> = {}) {
@@ -91,7 +91,7 @@ function row(id: string, over: Partial<Row> = {}): Row {
     message_count: 3,
     last_message_at: '2026-07-26T09:00:00Z',
     last_message_from: 'page',
-    messenger_briefs: [brief()],
+    conversation_briefs: [brief()],
     ...over,
   }
 }
@@ -137,7 +137,7 @@ describe('conversations — follow-up is derived, not guessed', () => {
   it('marks a passed follow-up date as overdue', async () => {
     allow()
     stubRows([
-      row('a', { messenger_briefs: [brief({ follow_up_due_at: '2026-07-24T00:00:00Z' })] }),
+      row('a', { conversation_briefs: [brief({ follow_up_due_at: '2026-07-24T00:00:00Z' })] }),
     ])
 
     const json = (await (await GET(request(), params())).json()) as {
@@ -155,7 +155,7 @@ describe('conversations — follow-up is derived, not guessed', () => {
   it('does not mark a future follow-up as overdue', async () => {
     allow()
     stubRows([
-      row('a', { messenger_briefs: [brief({ follow_up_due_at: '2026-07-30T00:00:00Z' })] }),
+      row('a', { conversation_briefs: [brief({ follow_up_due_at: '2026-07-30T00:00:00Z' })] }),
     ])
 
     const json = (await (await GET(request(), params())).json()) as {
@@ -169,7 +169,7 @@ describe('conversations — follow-up is derived, not guessed', () => {
 
   it('reports no follow-up at all for a thread with no brief', async () => {
     allow()
-    stubRows([row('a', { messenger_briefs: [] })])
+    stubRows([row('a', { conversation_briefs: [] })])
 
     const json = (await (await GET(request(), params())).json()) as {
       conversations: Array<{ followUpDueAt: string | null; followUpOverdue: boolean }>
@@ -184,7 +184,7 @@ describe('conversations — what a salesperson sees first', () => {
     allow()
     stubRows([
       row('overdue-follow-up', {
-        messenger_briefs: [brief({ follow_up_due_at: '2026-07-01T00:00:00Z' })],
+        conversation_briefs: [brief({ follow_up_due_at: '2026-07-01T00:00:00Z' })],
       }),
       row('customer-waiting', { last_message_from: 'customer' }),
     ])
@@ -195,9 +195,9 @@ describe('conversations — what a salesperson sees first', () => {
   it('puts an overdue follow-up above a high-intent thread nobody owes anything', async () => {
     allow()
     stubRows([
-      row('hot-but-settled', { messenger_briefs: [brief({ intent_level: 'high' })] }),
+      row('hot-but-settled', { conversation_briefs: [brief({ intent_level: 'high' })] }),
       row('overdue-follow-up', {
-        messenger_briefs: [brief({ intent_level: 'low', follow_up_due_at: '2026-07-01T00:00:00Z' })],
+        conversation_briefs: [brief({ intent_level: 'low', follow_up_due_at: '2026-07-01T00:00:00Z' })],
       }),
     ])
 
@@ -209,8 +209,8 @@ describe('conversations — what a salesperson sees first', () => {
   it('still ranks by intent once nobody is owed anything', async () => {
     allow()
     stubRows([
-      row('low', { messenger_briefs: [brief({ intent_level: 'low' })] }),
-      row('high', { messenger_briefs: [brief({ intent_level: 'high' })] }),
+      row('low', { conversation_briefs: [brief({ intent_level: 'low' })] }),
+      row('high', { conversation_briefs: [brief({ intent_level: 'high' })] }),
     ])
 
     expect(await names()).toEqual(['high', 'low'])

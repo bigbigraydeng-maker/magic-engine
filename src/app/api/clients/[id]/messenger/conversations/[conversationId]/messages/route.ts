@@ -43,7 +43,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   // than inferred from the client id the guard just verified — same rule the
   // send path follows.
   const { data: convo } = await supabaseAdmin
-    .from('messenger_conversations')
+    .from('conversations')
     .select('id')
     .eq('id', params.conversationId)
     .eq('client_id', params.id)
@@ -54,7 +54,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   }
 
   const { data, error } = await supabaseAdmin
-    .from('messenger_messages')
+    .from('conversation_messages')
     .select('direction, sender_name, body, sent_at')
     .eq('conversation_id', params.conversationId)
     .order('sent_at', { ascending: true })

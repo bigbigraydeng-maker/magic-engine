@@ -44,7 +44,7 @@ interface ConversationRow {
   message_count: number
   last_message_at: string | null
   last_message_from: string | null
-  messenger_briefs: BriefRow[]
+  conversation_briefs: BriefRow[]
 }
 
 const INTENT_RANK: Record<string, number> = { high: 0, medium: 1, low: 2, unknown: 3 }
@@ -60,10 +60,10 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   // client_id is filtered here, never taken from anything the caller controls
   // beyond the id the guard above already verified membership for.
   const { data, error } = await supabaseAdmin
-    .from('messenger_conversations')
+    .from('conversations')
     .select(
       'id, participant_name, message_count, last_message_at, last_message_from, ' +
-        'messenger_briefs(summary, intent_level, customer_needs, objections, promises_made, next_action, follow_up_due_at, risk_flags, trip, contact, draft_reply, generated_at)',
+        'conversation_briefs(summary, intent_level, customer_needs, objections, promises_made, next_action, follow_up_due_at, risk_flags, trip, contact, draft_reply, generated_at)',
     )
     .eq('client_id', clientId)
     .order('last_message_at', { ascending: false })
@@ -75,7 +75,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
 
   const now = new Date()
   const conversations = ((data ?? []) as unknown as ConversationRow[]).map((row) => {
-    const brief = row.messenger_briefs?.[0] ?? null
+    const brief = row.conversation_briefs?.[0] ?? null
     const awaitingReply = row.last_message_from === 'customer'
     // The window runs off the customer's last message. When they spoke last that
     // is last_message_at; otherwise this list view cannot know it without a

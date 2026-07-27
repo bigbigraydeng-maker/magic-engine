@@ -7,7 +7,7 @@ import { startCronRun } from '@/lib/cron/run-logger'
  * GET /api/cron/messenger-sync-hourly
  *
  * Hourly cron — pulls each opted-in client's Facebook Page Messenger inbox into
- * messenger_conversations / messenger_messages.
+ * conversations / conversation_messages.
  *
  * Opt-in is per client: only rows with clients.facebook_page_id set are synced.
  * As of 2026-07-26 that is CTS Tours NZ only.

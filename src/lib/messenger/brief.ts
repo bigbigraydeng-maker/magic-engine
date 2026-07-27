@@ -230,7 +230,7 @@ export async function storeBrief(
   const today = now.toISOString().slice(0, 10)
   const countedToday = candidate.regenCountDate === today ? candidate.regenCount : 0
 
-  const { error } = await supabaseAdmin.from('messenger_briefs').upsert(
+  const { error } = await supabaseAdmin.from('conversation_briefs').upsert(
     {
       conversation_id: candidate.conversationId,
       client_id: candidate.clientId,

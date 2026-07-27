@@ -65,7 +65,7 @@ function stubSupabase(opts: {
       limit: () => chain,
       single: async () => result,
       maybeSingle: async () => {
-        if (table === 'messenger_messages' && selectingInbound) {
+        if (table === 'conversation_messages' && selectingInbound) {
           return {
             data: opts.lastInboundAt ? { sent_at: opts.lastInboundAt } : null,
             error: null,
@@ -75,23 +75,23 @@ function stubSupabase(opts: {
       },
       then: (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve),
       insert: (payload: Record<string, unknown>) => {
-        if (table === 'messenger_outbound_log') {
+        if (table === 'conversation_outbound_log') {
           captured.auditInserts.push(payload)
           result = { data: { id: 'audit-1' }, error: null }
-        } else if (table === 'messenger_messages') {
+        } else if (table === 'conversation_messages') {
           captured.messageInserts.push(payload)
           result = { data: null, error: null }
         }
         return chain
       },
       update: (payload: Record<string, unknown>) => {
-        if (table === 'messenger_outbound_log') captured.auditUpdates.push(payload)
+        if (table === 'conversation_outbound_log') captured.auditUpdates.push(payload)
         result = { data: null, error: null }
         return chain
       },
     }
 
-    if (table === 'messenger_conversations') {
+    if (table === 'conversations') {
       result = {
         data:
           opts.convoClientId === null
