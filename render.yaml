@@ -497,6 +497,24 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # Benchmark Accumulator — ME 自有客户实测结果 → industry_benchmarks 增长字段
+  #   读最近 180 天 flywheel_outcomes 的 delta_pct，按 (行业, 维度) 取中位增幅，
+  #   写 realistic_3mo_growth_pct + growth_* provenance。只写 GROWTH 字段，
+  #   不碰外部研究来源的 score_p50/p75/p90。
+  #   Mon 08:30 UTC — 排在 agent-learning-rollup (07:00) 之后，避开既有槽位。
+  #   注意：route 只实现 GET，不要加 -X POST（会 405）。
+  - type: cron
+    name: benchmark-accumulator
+    env: node
+    schedule: "30 8 * * 1"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/benchmark-accumulator
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # SEO Patrol — Phase 22.E.S2b
   #   Daily SEO opportunity engine: reads keyword_snapshots + GSC snapshots,
   #   runs the rule engine, persists fresh findings, and routes the top 3 onto
