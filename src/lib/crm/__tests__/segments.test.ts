@@ -148,3 +148,43 @@ describe('今天的名单', () => {
     expect(Object.values(counts).reduce((a, b) => a + b, 0)).toBe(people.length)
   })
 })
+
+describe('员工推进过的阶段要真的消名单', () => {
+  // 这一段是「改阶段」有没有用的分水岭：改完人还留在名单上，它就退化成
+  // 又一个没人填的状态列，跟 CTS 那份手工 CRM 死法一样。
+  it('推进到成交 / 转售后 / 停止营销的人，不再出现在今天的名单', () => {
+    const c = contact({
+      stageSuppressed: true,
+      stageLabel: '已付全款',
+      // 同时具备最强的两个进名单理由：客户刚回信 + 约好的时间到了
+      touchpoints: [
+        call('2026-07-20T00:00:00Z', 'callback_set', { callbackAt: '2026-07-25T00:00:00Z' }),
+        { channel: 'email', direction: 'inbound', occurredAt: '2026-07-26T11:00:00Z' },
+      ],
+    })
+    const r = segmentContact(c, NOW)
+    expect(r.segment).toBe('excluded')
+    expect(r.suggestedChannel).toBe('none')
+    // 理由要说人话，销售看得懂为什么这个人不在名单上
+    expect(r.reason).toContain('已付全款')
+  })
+
+  it('还在跟进的阶段不影响原本的分段', () => {
+    const c = contact({
+      stageSuppressed: false,
+      stageLabel: '已报价',
+      touchpoints: [form('2026-07-26T06:00:00Z')],
+    })
+    expect(segmentContact(c, NOW).segment).toBe('new_untouched')
+  })
+
+  it('「别再联系」优先于阶段 —— 合规话术不能被阶段文案盖掉', () => {
+    const c = contact({ doNotContact: true, stageSuppressed: true, stageLabel: '已付全款' })
+    expect(segmentContact(c, NOW).reason).toBe('客户明确说过别再联系')
+  })
+
+  it('没配阶段的人（stage 为空）照旧走原有分段', () => {
+    const c = contact({ touchpoints: [form('2026-07-26T06:00:00Z')] })
+    expect(segmentContact(c, NOW).segment).toBe('new_untouched')
+  })
+})

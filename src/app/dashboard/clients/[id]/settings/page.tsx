@@ -29,6 +29,7 @@ import { ProductsPanel } from './_components/ProductsPanel'
 import { UploadLinkPanel } from './_components/UploadLinkPanel'
 import { FactoryConfigPanel } from './_components/FactoryConfigPanel'
 import { CommentAutoReplyPanel } from './_components/CommentAutoReplyPanel'
+import { PipelineStagesPanel } from './_components/PipelineStagesPanel'
 import { CommentAuditList } from './_components/CommentAuditList'
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -180,6 +181,14 @@ export default function ClientSettingsPage() {
             <h2 className="font-black text-slate-800">客户素材上传链接（免登录）</h2>
           </div>
           <UploadLinkPanel clientId={clientId} />
+        </section>
+
+        <section className="mt-6">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-base">🪜</span>
+            <h2 className="font-black text-slate-800">客人跟进步骤</h2>
+          </div>
+          <PipelineStagesPanel clientId={clientId} />
         </section>
 
         <section className="mt-6">

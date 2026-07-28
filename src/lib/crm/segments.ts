@@ -41,6 +41,17 @@ export interface ContactLike {
   displayName: string | null
   doNotContact: boolean
   touchpoints: TouchpointLike[]
+  /**
+   * 员工把这个人推进到了「结论性」阶段(成交 / 转售后 / 停止营销 / 终态)。
+   *
+   * 触点算不出这类状态 —— 「付了定金」不会自己变成一条通话记录。没有这一条,
+   * 员工改完阶段人照旧留在明日名单上,「改阶段」就退化成又一个没人看的状态列,
+   * 跟 CTS 那份手工 CRM 死法一模一样。判断在 lib/crm/pipeline 里(marketing_action
+   * ∈ suppress/postsale/won 或 is_terminal)。
+   */
+  stageSuppressed?: boolean
+  /** 当前阶段的中文名,只用于展示。 */
+  stageLabel?: string | null
 }
 
 export interface SegmentResult {
@@ -101,6 +112,11 @@ export function segmentContact(contact: ContactLike, now: Date): SegmentResult {
   // 1) 客户说过别再联系，或结局已定 —— 最先判，避免被后面任何规则捞回名单
   if (contact.doNotContact) {
     return make('excluded', '客户明确说过别再联系', 'none')
+  }
+  // 员工已经把他推进到结论性阶段（成交 / 转售后 / 停止营销）—— 名单里不该再有他。
+  if (contact.stageSuppressed) {
+    const label = contact.stageLabel?.trim()
+    return make('excluded', label ? `已经是「${label}」了` : '已推进到不再联系的阶段', 'none')
   }
   if (outcomes.some((o) => DEAD_OUTCOMES.has(o))) {
     const why = latestOutcome === 'bad_number' ? '号码是坏的，打不通也发不了短信'

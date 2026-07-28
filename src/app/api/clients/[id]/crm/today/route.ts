@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { todayWorklist, segmentCounts, type ContactLike } from '@/lib/crm/segments'
+import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 
 interface RouteParams {
   params: { id: string }
@@ -27,6 +28,7 @@ interface ContactRow {
   primary_phone: string | null
   primary_email: string | null
   do_not_contact: boolean
+  stage: string | null
 }
 
 interface TouchRow {
@@ -45,10 +47,14 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
-  const [{ data: contacts, error: cErr }, { data: touches, error: tErr }] = await Promise.all([
+  const [
+    { data: contacts, error: cErr },
+    { data: touches, error: tErr },
+    { data: stageRows },
+  ] = await Promise.all([
     supabaseAdmin
       .from('contacts')
-      .select('id, display_name, primary_phone, primary_email, do_not_contact')
+      .select('id, display_name, primary_phone, primary_email, do_not_contact, stage')
       .eq('client_id', clientId)
       .limit(5000),
     supabaseAdmin
@@ -57,6 +63,10 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       .eq('client_id', clientId)
       .order('occurred_at', { ascending: false })
       .limit(20000),
+    supabaseAdmin
+      .from('client_pipeline_stages')
+      .select('stage_key, label, marketing_action, is_terminal')
+      .eq('client_id', clientId),
   ])
 
   if (cErr || tErr) {
@@ -70,20 +80,48 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     byContact.set(t.contact_id, list)
   }
 
+  // 阶段 map:决定这个人还该不该出现在今天的名单上（成交 / 转售后 / 停止营销 → 不该）。
+  const stageMeta = new Map<string, { label: string; suppressed: boolean }>()
+  for (const s of (stageRows ?? []) as {
+    stage_key: string
+    label: string
+    marketing_action: string
+    is_terminal: boolean
+  }[]) {
+    stageMeta.set(s.stage_key, {
+      label: s.label,
+      // 认不出来的动作（DB 加了新值而代码还没跟上）当「停止营销」处理，宁可少打一通。
+      suppressed: stageSuppressesWorklist(
+        isMarketingAction(s.marketing_action) ? s.marketing_action : 'suppress',
+        s.is_terminal,
+      ),
+    })
+  }
+
   const rows = (contacts ?? []) as ContactRow[]
-  const models: ContactLike[] = rows.map((c) => ({
-    id: c.id,
-    displayName: c.display_name,
-    doNotContact: c.do_not_contact,
-    touchpoints: (byContact.get(c.id) ?? []).map((t) => ({
-      channel: t.channel,
-      direction: t.direction,
-      occurredAt: t.occurred_at,
-      outcome: (t.metadata?.outcome as string) ?? null,
-      travelWindow: (t.metadata?.travel_window as string) ?? null,
-      callbackAt: (t.metadata?.callback_at as string) ?? null,
-    })),
-  }))
+  const models: ContactLike[] = rows.map((c) => {
+    const tps = byContact.get(c.id) ?? []
+    const stage = c.stage ? stageMeta.get(c.stage) : undefined
+    return {
+      id: c.id,
+      displayName: c.display_name,
+      // 「别再联系」的真相源是不可变的触点：contacts 列是尽力维护的反规范化，
+      // 它写失败过（或历史数据没有）时，只要任何一条触点解析出过 DNC，就照样排除。
+      // 少打一通电话的代价，远小于打给明确说过别打的人。
+      doNotContact:
+        c.do_not_contact || tps.some((t) => t.metadata?.do_not_contact === true),
+      stageSuppressed: stage?.suppressed ?? false,
+      stageLabel: stage?.label ?? null,
+      touchpoints: tps.map((t) => ({
+        channel: t.channel,
+        direction: t.direction,
+        occurredAt: t.occurred_at,
+        outcome: (t.metadata?.outcome as string) ?? null,
+        travelWindow: (t.metadata?.travel_window as string) ?? null,
+        callbackAt: (t.metadata?.callback_at as string) ?? null,
+      })),
+    }
+  })
 
   const now = new Date()
   const contactById = new Map(rows.map((c) => [c.id, c]))
@@ -99,6 +137,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
         name: c.displayName || '未留姓名',
         phone: row?.primary_phone ?? null,
         email: row?.primary_email ?? null,
+        stage: row?.stage ?? null,
+        // 认不出的 stage_key（配置里被删掉了）不留空白，显示原值以便排查。
+        stageLabel: row?.stage ? (stageMeta.get(row.stage)?.label ?? row.stage) : null,
         segment: c.seg.segment,
         temperature: c.seg.temperature,
         reason: c.seg.reason,
