@@ -52,6 +52,11 @@ function stubSupabase(opts: { watermarkRow?: { meta_updated_time: string } | nul
       not: () => chain,
       order: () => chain,
       limit: () => chain,
+      // in/is/lt/update back the identity-index load + contact linking added to sync.
+      in: () => chain,
+      is: () => chain,
+      lt: () => chain,
+      update: () => chain,
       single: async () => result,
       maybeSingle: async () => result,
       then: (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve),
@@ -65,6 +70,14 @@ function stubSupabase(opts: { watermarkRow?: { meta_updated_time: string } | nul
         }
         return chain
       },
+    }
+
+    // The identity-index load (contact_identities) resolves to an empty set here,
+    // so linking is a no-op in these sync tests — link behaviour is covered in
+    // link-contacts.test.ts. Without this the .in() call would read the shared
+    // `result` and mis-handle it; an empty list keeps the index empty.
+    if (table === 'contact_identities') {
+      result = { data: [], error: null }
     }
 
     if (table === 'conversations') {

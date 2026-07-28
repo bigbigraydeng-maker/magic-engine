@@ -13,6 +13,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { getPageAccessToken } from '@/lib/meta/page-posts'
 import { fetchPageConversations, type MessengerConversation } from '@/lib/meta/conversations'
+import { linkMessengerConversation, loadIdentityIndex } from '@/lib/messenger/link-contacts'
 
 export interface MessengerSyncClient {
   id: string
@@ -27,6 +28,8 @@ export interface MessengerSyncResult {
   conversations: number
   /** Messages newly inserted this run. */
   messages: number
+  /** Threads newly linked to an existing contact this run. */
+  linked: number
   skipped?: 'no_page_id' | 'no_meta_token' | 'no_page_token'
   error?: string
 }
@@ -56,12 +59,25 @@ async function getWatermark(clientId: string): Promise<string | undefined> {
   return new Date(new Date(newest).getTime() - WATERMARK_LOOKBACK_MS).toISOString()
 }
 
-/** Store one thread and its messages. Returns how many messages were new. */
+interface StoredConversation {
+  /** conversations.id (UUID). */
+  id: string
+  /** Current contact_id on the row (null until linked). */
+  contactId: string | null
+  /** Messages newly inserted this run. */
+  newMessages: number
+}
+
+/**
+ * Store one thread and its messages.
+ * Throws on the conversation upsert failing — the per-thread try/catch in the
+ * caller isolates it so one bad thread never aborts the client's remaining threads.
+ */
 async function storeConversation(
   clientId: string,
   pageId: string,
   convo: MessengerConversation,
-): Promise<number> {
+): Promise<StoredConversation> {
   const last = convo.messages[convo.messages.length - 1]
 
   const { data: row, error } = await supabaseAdmin
@@ -82,15 +98,22 @@ async function storeConversation(
       },
       { onConflict: 'client_id,conversation_id' },
     )
-    .select('id')
+    // contact_id comes back so the linker knows whether this thread is already
+    // attached to a person (upsert preserves it — we never send it here).
+    .select('id, contact_id')
     .single()
 
   if (error || !row) {
-    console.error('[messenger/sync] conversation upsert failed:', error)
-    return 0
+    throw new Error(`conversation upsert failed: ${error?.message}`)
   }
 
-  if (convo.messages.length === 0) return 0
+  const base: StoredConversation = {
+    id: row.id as string,
+    contactId: (row.contact_id as string | null) ?? null,
+    newMessages: 0,
+  }
+
+  if (convo.messages.length === 0) return base
 
   // ignoreDuplicates keeps already-stored messages untouched, so the returned
   // rows are exactly the ones that were new this run.
@@ -111,11 +134,12 @@ async function storeConversation(
     .select('id')
 
   if (msgError) {
+    // Messages are best-effort; the thread row is stored, so linking can still run.
     console.error('[messenger/sync] message upsert failed:', msgError)
-    return 0
+    return base
   }
 
-  return inserted?.length ?? 0
+  return { ...base, newMessages: inserted?.length ?? 0 }
 }
 
 /**
@@ -125,7 +149,7 @@ async function storeConversation(
 export async function syncClientMessenger(
   client: MessengerSyncClient,
 ): Promise<MessengerSyncResult> {
-  const base = { clientId: client.id, clientName: client.name, conversations: 0, messages: 0 }
+  const base = { clientId: client.id, clientName: client.name, conversations: 0, messages: 0, linked: 0 }
 
   const pageId = client.facebook_page_id
   if (!pageId) return { ...base, skipped: 'no_page_id' }
@@ -140,12 +164,46 @@ export async function syncClientMessenger(
     const watermark = await getWatermark(client.id)
     const conversations = await fetchPageConversations(pageId, pageToken, watermark)
 
+    // Load the client's identity index once so each thread matches in-memory
+    // (no per-thread DB scan). Mutated in place as new psids get attached.
+    const index = await loadIdentityIndex(client.id)
+
     let messages = 0
+    let linked = 0
     for (const convo of conversations) {
-      messages += await storeConversation(client.id, pageId, convo)
+      // Per-thread isolation: a store/link failure on one thread must not abort
+      // the client's remaining threads (adding throwing link logic to a shared
+      // try would otherwise drop everything after the first bad thread).
+      try {
+        const stored = await storeConversation(client.id, pageId, convo)
+        messages += stored.newMessages
+
+        const last = convo.messages[convo.messages.length - 1]
+        const res = await linkMessengerConversation(
+          {
+            clientId: client.id,
+            conversationId: stored.id,
+            psid: convo.participantPsid,
+            participantName: convo.participantName,
+            messageCount: convo.messageCount,
+            lastMessageFrom: last ? (last.direction === 'inbound' ? 'customer' : 'page') : null,
+            lastMessageAt: last?.sentAt ?? null,
+            messages: convo.messages.map((m) => ({
+              direction: m.direction,
+              body: m.body,
+              sentAt: m.sentAt,
+            })),
+            existingContactId: stored.contactId,
+          },
+          index,
+        )
+        if (res.linked) linked++
+      } catch (err) {
+        console.error(`[messenger/sync] thread ${convo.conversationId} failed:`, err)
+      }
     }
 
-    return { ...base, conversations: conversations.length, messages }
+    return { ...base, conversations: conversations.length, messages, linked }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
     console.error(`[messenger/sync] client ${client.id} failed:`, error)
