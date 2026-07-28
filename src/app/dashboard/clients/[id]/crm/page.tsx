@@ -16,6 +16,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
+import { ComposeNote, type StageOption } from './_components/ComposeNote'
+import { CrmTabs } from './_components/CrmTabs'
 
 type Segment =
   | 'replied' | 'callback_due' | 'new_untouched'
@@ -105,11 +107,6 @@ interface Payload {
   /** 今天已经联系了多少人 —— 没有进度感的名单永远像干不完。 */
   doneToday: number
   error?: string
-}
-
-interface StageOption {
-  stageKey: string
-  label: string
 }
 
 const CHANNEL_HINT: Record<Row['suggestedChannel'], string> = {
@@ -302,131 +299,6 @@ function BatchEmail({
       >
         {logging ? '记着…' : '都发出去了，帮我记一笔'}
       </button>
-    </div>
-  )
-}
-
-/**
- * 「记一笔」输入框。
- *
- * 幂等键在挂载时生成一次、整个提交生命周期复用 —— 双击不会记成两笔。
- * （若在点击时才生成，每次点击都是新键，重复提交就挡不住了。）
- */
-function ComposeNote({
-  clientId,
-  row,
-  stages,
-  onDone,
-  onCancel,
-}: {
-  clientId: string
-  row: Row
-  stages: StageOption[]
-  onDone: (msg: string) => void
-  onCancel: () => void
-}) {
-  const [clientRef] = useState(() => globalThis.crypto.randomUUID())
-  const [note, setNote] = useState('')
-  const [inbound, setInbound] = useState(false)
-  const [nextStage, setNextStage] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-
-  const submit = async () => {
-    if (!note.trim() || saving) return
-    setSaving(true)
-    setErr(null)
-    try {
-      const res = await fetch(`/api/clients/${clientId}/crm/touchpoints`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contactId: row.contactId,
-          direction: inbound ? 'inbound' : 'outbound',
-          note: note.trim(),
-          clientRef,
-        }),
-      })
-      const json = (await res.json()) as { error?: string; created?: boolean }
-      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
-
-      // created=false 说明这一笔之前就存过（同一个记录框重试）。要说出来，
-      // 否则用户以为补写的内容存上了，其实服务端保留的是第一版。
-      if (json.created === false) {
-        onDone('这一笔之前已经记过了，没有重复记')
-        return
-      }
-
-      // 顺手把人改到下一步（可跳过）。改失败不能吞——用户以为推进了其实没有。
-      if (nextStage && nextStage !== row.stage) {
-        const stageRes = await fetch(
-          `/api/clients/${clientId}/crm/contacts/${row.contactId}/stage`,
-          {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ toStage: nextStage }),
-          },
-        )
-        if (!stageRes.ok) {
-          onDone('✓ 记好了。但他的进度没改上，再点一下改一次。')
-          return
-        }
-      }
-      onDone('✓ 记好了')
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '没存上，再试一次')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const pill = (on: boolean) =>
-    `rounded-full px-3 py-1 text-xs font-bold ${on ? 'bg-me-charcoal text-white' : 'bg-me-ivory text-me-charcoal/50'}`
-
-  return (
-    <div className="mt-3 rounded-lg border border-black/10 bg-me-ivory p-3">
-      <div className="mb-2 flex gap-2">
-        <button onClick={() => setInbound(false)} className={pill(!inbound)}>我联系的</button>
-        <button onClick={() => setInbound(true)} className={pill(inbound)}>客户来找的</button>
-      </div>
-
-      <textarea
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-        rows={3}
-        autoFocus
-        placeholder="这次聊了什么？例：聊得不错，想明年三月去，问了长城那个团"
-        className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm focus:border-me-charcoal focus:outline-none"
-      />
-
-      {stages.length > 0 && (
-        <div className="mt-2">
-          <label className="text-xs text-me-charcoal/50">要更新他到哪一步吗？（可跳过）</label>
-          <select
-            value={nextStage}
-            onChange={(e) => setNextStage(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
-          >
-            <option value="">不改，就记这一笔</option>
-            {stages.map((s) => (
-              <option key={s.stageKey} value={s.stageKey}>{s.label}</option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {err && <p className="mt-2 text-xs font-semibold text-[#C2453A]">⚠ {err}</p>}
-
-      <div className="mt-3 flex items-center gap-2">
-        <button
-          onClick={() => void submit()}
-          disabled={!note.trim() || saving}
-          className="rounded-lg bg-me-charcoal px-4 py-2 text-sm font-black text-white disabled:bg-me-charcoal/30"
-        >
-          {saving ? '存着…' : '存这一笔'}
-        </button>
-        <button onClick={onCancel} className="text-sm text-me-charcoal/40">取消</button>
-      </div>
     </div>
   )
 }
@@ -902,7 +774,10 @@ export default function CrmTodayPage() {
         <Link href={`/dashboard/clients/${clientId}`} className="text-sm text-me-charcoal/40 hover:text-me-charcoal">
           ← 返回客户
         </Link>
-        <h1 className="mt-2 text-2xl font-black text-me-charcoal">今天该联系谁</h1>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-black text-me-charcoal">今天该联系谁</h1>
+          <CrmTabs clientId={clientId} active="today" />
+        </div>
         <p className="mt-1 text-sm leading-relaxed text-me-charcoal/45">
           人已经按情况分好了，<span className="font-semibold text-me-charcoal/60">一次做一批</span> ——
           点上面任意一批，只看这一批的人。
