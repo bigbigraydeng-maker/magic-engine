@@ -54,6 +54,13 @@ type TimelineEntry =
       competitor: string | null
     }
   | {
+      kind: 'message'
+      at: string
+      direction: 'inbound' | 'outbound'
+      senderName: string | null
+      body: string
+    }
+  | {
       kind: 'stage'
       at: string
       fromStage: string | null
@@ -133,6 +140,28 @@ function TimelineItem({ e }: { e: TimelineEntry }) {
       </li>
     )
   }
+  if (e.kind === 'message') {
+    // 私信 / 邮件原文。方向决定气泡:入站=客人(白底),出站=我们(灰底)。
+    // sender 名放前面,一眼知道谁说的,系统自动回复(出站)也不会被当成客人的话。
+    const inbound = e.direction === 'inbound'
+    return (
+      <li className="flex gap-3">
+        <span className="mt-1 shrink-0 text-xs text-me-charcoal/35">{relTime(e.at)}</span>
+        <div className={`min-w-0 flex-1 ${inbound ? '' : 'flex justify-end'}`}>
+          <div
+            className={`inline-block max-w-[85%] rounded-2xl px-3 py-1.5 text-sm leading-relaxed ${
+              inbound ? 'bg-white text-me-charcoal ring-1 ring-black/5' : 'bg-me-charcoal/5 text-me-charcoal/80'
+            }`}
+          >
+            <span className="mr-1.5 text-[11px] font-bold text-me-charcoal/45">
+              {inbound ? e.senderName || '客户' : e.senderName || '我们'}
+            </span>
+            <span className="whitespace-pre-wrap break-words">{e.body}</span>
+          </div>
+        </div>
+      </li>
+    )
+  }
   const badge = (text: string) => (
     <span className="rounded bg-white px-1.5 py-0.5 text-[11px] font-semibold text-me-charcoal/60 ring-1 ring-black/5">
       {text}
@@ -165,6 +194,7 @@ function ContactDetail({
   row,
   stages,
   timeline,
+  omitted,
   loading,
   onWrote,
 }: {
@@ -172,6 +202,7 @@ function ContactDetail({
   row: ContactRow
   stages: StageOption[]
   timeline: TimelineEntry[] | null
+  omitted: number
   loading: boolean
   onWrote: (msg: string) => void
 }) {
@@ -218,7 +249,7 @@ function ContactDetail({
       <div>
         <p className="mb-2 text-xs font-bold uppercase tracking-wide text-me-charcoal/40">往来记录</p>
         {loading && <p className="text-sm text-me-charcoal/40">加载中…</p>}
-        {!loading && timeline && timeline.length === 0 && (
+        {!loading && timeline && timeline.length === 0 && omitted === 0 && (
           <p className="text-sm text-me-charcoal/45">还没有任何往来记录 —— 打完 / 聊完顺手在下面记一笔。</p>
         )}
         {!loading && timeline && timeline.length > 0 && (
@@ -237,6 +268,9 @@ function ContactDetail({
               </button>
             )}
           </>
+        )}
+        {!loading && omitted > 0 && (
+          <p className="mt-2 text-xs text-me-charcoal/40">另有 {omitted} 条图片 / 表情 / 附件没显示。</p>
         )}
       </div>
 
@@ -310,6 +344,7 @@ export default function CrmAllContactsPage() {
 
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [timeline, setTimeline] = useState<TimelineEntry[] | null>(null)
+  const [timelineOmitted, setTimelineOmitted] = useState(0)
   const [timelineLoading, setTimelineLoading] = useState(false)
   // 防乱序：快速点开 A 又点开 B 时，A 的时间线不能盖到 B 底下。
   const timelineReqRef = useRef<string | null>(null)
@@ -352,13 +387,15 @@ export default function CrmAllContactsPage() {
   const loadTimeline = useCallback(
     async (contactId: string) => {
       setTimeline(null)
+      setTimelineOmitted(0)
       setTimelineLoading(true)
       timelineReqRef.current = contactId
       try {
         const res = await fetch(`/api/clients/${clientId}/crm/contacts/${contactId}/timeline`)
-        const json = (await res.json()) as { timeline?: TimelineEntry[] }
+        const json = (await res.json()) as { timeline?: TimelineEntry[]; omittedMessages?: number }
         if (timelineReqRef.current !== contactId) return
         setTimeline(res.ok ? (json.timeline ?? []) : [])
+        setTimelineOmitted(res.ok ? (json.omittedMessages ?? 0) : 0)
       } catch {
         if (timelineReqRef.current === contactId) setTimeline([])
       } finally {
@@ -545,6 +582,7 @@ export default function CrmAllContactsPage() {
                             row={r}
                             stages={stages}
                             timeline={timeline}
+                            omitted={timelineOmitted}
                             loading={timelineLoading}
                             onWrote={afterWrite}
                           />

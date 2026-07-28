@@ -47,6 +47,13 @@ type TimelineEntry =
       competitor: string | null
     }
   | {
+      kind: 'message'
+      at: string
+      direction: 'inbound' | 'outbound'
+      senderName: string | null
+      body: string
+    }
+  | {
       kind: 'stage'
       at: string
       fromStage: string | null
@@ -85,12 +92,17 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     { data: touches, error: tErr },
     { data: events, error: eErr },
     { data: stageRows },
+    { data: convs },
   ] = await Promise.all([
+    // messenger 触点是「N 条往来」摘要占位（raw 恒空），真正的对话原文在
+    // conversation_messages —— 下面单独拉、渲染成对话记录。这里排除 messenger，
+    // 免得「Messenger 私信（5 条往来）」和真实 5 条消息在时间线里重复。
     supabaseAdmin
       .from('contact_touchpoints')
       .select('channel, direction, occurred_at, summary, metadata')
       .eq('client_id', clientId)
       .eq('contact_id', contactId)
+      .neq('channel', 'messenger')
       .order('occurred_at', { ascending: false })
       .limit(2000),
     supabaseAdmin
@@ -104,10 +116,35 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       .from('client_pipeline_stages')
       .select('stage_key, label')
       .eq('client_id', clientId),
+    // 这个人的对话（Messenger / 邮件线程），按 client_id + contact_id 收口。
+    supabaseAdmin
+      .from('conversations')
+      .select('id')
+      .eq('client_id', clientId)
+      .eq('contact_id', contactId),
   ])
 
   if (tErr || eErr) {
     return NextResponse.json({ error: tErr?.message ?? eErr?.message }, { status: 500 })
+  }
+
+  // 对话原文（私信 / 邮件正文）。conv id 已按 client_id + contact_id 收口，消息
+  // 按这些 id 取跨不了客户。空 body（图片 / 表情 / 附件 / 系统事件）下面丢掉。
+  const convIds = ((convs ?? []) as { id: string }[]).map((c) => c.id)
+  let messages: {
+    direction: 'inbound' | 'outbound'
+    sender_name: string | null
+    body: string | null
+    sent_at: string
+  }[] = []
+  if (convIds.length > 0) {
+    const { data: msgs } = await supabaseAdmin
+      .from('conversation_messages')
+      .select('direction, sender_name, body, sent_at')
+      .in('conversation_id', convIds)
+      .order('sent_at', { ascending: false })
+      .limit(3000)
+    messages = (msgs ?? []) as typeof messages
   }
 
   const stageLabel = new Map<string, string>()
@@ -159,7 +196,26 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     })
   }
 
-  // 触点和阶段事件合成一条线，最新在上。
+  // 对话原文：只渲染有文本的消息。空 body 是图片 / 表情 / 附件 / 系统事件，
+  // 铺成空气泡只会干扰，数出来在页尾提一句。方向 + sender 已能区分是客人还是
+  // 我们（出站 sender 恒为客户主页名），系统自动回复也一眼看得出，不误当客人的话。
+  let omittedMessages = 0
+  for (const msg of messages) {
+    const body = (msg.body ?? '').trim()
+    if (!body) {
+      omittedMessages++
+      continue
+    }
+    entries.push({
+      kind: 'message',
+      at: msg.sent_at,
+      direction: msg.direction,
+      senderName: msg.sender_name,
+      body,
+    })
+  }
+
+  // 触点 / 对话 / 阶段事件合成一条线，最新在上。
   entries.sort((a, b) => ts(b.at) - ts(a.at))
 
   return NextResponse.json({
@@ -172,5 +228,6 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       stageLabel: contact.stage ? (stageLabel.get(contact.stage) ?? contact.stage) : null,
     },
     timeline: entries,
+    omittedMessages,
   })
 }
