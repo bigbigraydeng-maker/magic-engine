@@ -36,6 +36,14 @@ export interface RecordTouchpointInput {
   brandTerms?: string[]
   /** contact 现有的 last_seen_at,用于取 max、不把时间往回拨。 */
   currentLastSeenAt?: string | null
+  /**
+   * 已经解析好的结果,给「整批同一句话」的场景用(如群发邮件后一次记 108 人)。
+   *
+   * 不传就自己解析。批量场景必须传 —— 否则同一句系统文案会被送去 AI 解析
+   * 108 次,既慢(每次约 1 秒,整个请求必超时)又白花钱,而且那句话是系统自己
+   * 生成的、根本不含客户信息,解析它没有任何意义。
+   */
+  parsed?: NoteParse
 }
 
 export interface RecordTouchpointResult {
@@ -64,7 +72,7 @@ export async function recordManualTouchpoint(
     throw new Error('recordManualTouchpoint 需要 clientRef(幂等键)')
   }
 
-  const parsed = await parseNote(note, { brandTerms: input.brandTerms })
+  const parsed = input.parsed ?? (await parseNote(note, { brandTerms: input.brandTerms }))
 
   // 1) 幂等写触点。ignoreDuplicates → ON CONFLICT DO NOTHING:
   //    命中冲突时 select 返回空,maybeSingle() 得到 null,created=false。

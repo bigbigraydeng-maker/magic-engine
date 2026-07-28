@@ -92,7 +92,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   }
 
   // 阶段 map:决定这个人还该不该出现在今天的名单上（成交 / 转售后 / 停止营销 → 不该）。
-  const stageMeta = new Map<string, { label: string; suppressed: boolean }>()
+  const stageMeta = new Map<string, { label: string; suppressed: boolean; action: string }>()
   for (const s of (stageRows ?? []) as {
     stage_key: string
     label: string
@@ -101,6 +101,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   }[]) {
     stageMeta.set(s.stage_key, {
       label: s.label,
+      action: s.marketing_action,
       // 认不出来的动作（DB 加了新值而代码还没跟上）当「停止营销」处理，宁可少打一通。
       suppressed: stageSuppressesWorklist(
         isMarketingAction(s.marketing_action) ? s.marketing_action : 'suppress',
@@ -162,6 +163,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       reason: c.seg.reason,
       suggestedChannel: c.seg.suggestedChannel,
       dueAt: c.seg.dueAt,
+      lastTouchAt: c.seg.lastTouchAt,
       lastNote: last?.summary ?? null,
     }
   }
@@ -172,7 +174,13 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   // 混在 108 个「打不通」里，最烫的人被埋掉，销售看到的还是一大坨。
   // 现在一次只做一桶，每桶单独封顶 —— 最大的桶(打不通 108)也装得下。
   const PER_BUCKET_LIMIT = 300
-  const ORDER: Segment[] = ['replied', 'callback_due', 'new_untouched', 'retry_channel']
+  const ORDER: Segment[] = [
+    'replied',
+    'callback_due',
+    'new_untouched',
+    'retry_channel',
+    'stale_conversation',
+  ]
 
   const buckets = ORDER.map((segment) => {
     const all = ranked.filter((c) => c.seg.segment === segment)
@@ -205,18 +213,38 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     .slice(0, 300)
     .map(({ c, seg }) => {
       const row = contactById.get(c.id)
+      const meta = row?.stage ? stageMeta.get(row.stage) : undefined
       return {
         contactId: c.id,
         name: c.displayName || '未留姓名',
         phone: row?.primary_phone ?? null,
         email: row?.primary_email ?? null,
         stage: row?.stage ?? null,
-        stageLabel: row?.stage ? (stageMeta.get(row.stage)?.label ?? row.stage) : null,
+        stageLabel: meta?.label ?? row?.stage ?? null,
         segment: seg.segment,
         reason: seg.reason,
+        // 为什么不在今天名单上。成交跟「明确拒绝」混在一堆叫「已排除」很刺眼，
+        // 而且成交客户恰恰最该继续维护（催余款、确认行程）—— 页面按这个分开显示。
+        group:
+          meta?.action === 'won' || meta?.action === 'postsale'
+            ? ('won' as const)
+            : seg.segment === 'nurture_future'
+              ? ('later' as const)
+              : ('stop' as const),
         lastNote: (byContact.get(c.id) ?? [])[0]?.summary ?? null,
       }
     })
+
+  // 今天已经动了多少人。没有这个数字，销售打了 15 通电话也看不到自己的进度 ——
+  // 名单只会越看越像干不完，明天就不想打开了。
+  // 按触点的发生时间算（不是写入时间），补记昨天的电话不会算进今天。
+  const startOfDay = new Date(now)
+  startOfDay.setHours(0, 0, 0, 0)
+  const doneToday = new Set(
+    ((touches ?? []) as TouchRow[])
+      .filter((t) => t.direction === 'outbound' && new Date(t.occurred_at) >= startOfDay)
+      .map((t) => t.contact_id),
+  ).size
 
   return NextResponse.json({
     buckets,
@@ -224,6 +252,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     counts: segmentCounts(models, now),
     totalContacts: models.length,
     todoTotal: ranked.length,
+    doneToday,
     generatedAt: now.toISOString(),
   })
 }

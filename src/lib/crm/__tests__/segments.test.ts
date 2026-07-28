@@ -122,6 +122,42 @@ describe('数据里存在、但手工表没有的三段', () => {
     })
     expect(segmentContact(c, NOW).segment).toBe('nurture_future')
   })
+
+  /**
+   * 「聊过一轮就断了」以前被兜底并进「以后才走」，还被贴上「打了是打扰」的标签
+   * 埋进折叠区 —— 客户根本没说过以后才走，是系统替他说的，这批最该回头捞的
+   * 温线索就此消失。现在必须单独成桶、并且进今天的名单。
+   */
+  it('聊过一轮没约下次 ≠ 以后才走 —— 单独成桶，且必须留在今天名单里', () => {
+    const c = contact({ touchpoints: [call('2026-07-20T00:00:00Z', 'spoke')] })
+    const r = segmentContact(c, NOW)
+    expect(r.segment).toBe('stale_conversation')
+    expect(r.temperature).toBe('warm')
+    expect(r.reason).toContain('6 天')
+  })
+
+  it('客户真说了以后才走，才归「以后才走」—— 两者不能混', () => {
+    const spoke = segmentContact(contact({ touchpoints: [call('2026-07-20T00:00:00Z', 'spoke')] }), NOW)
+    const later = segmentContact(
+      contact({ touchpoints: [call('2026-07-20T00:00:00Z', 'spoke', { travelWindow: '明年三月' })] }),
+      NOW,
+    )
+    expect(spoke.segment).not.toBe(later.segment)
+    expect(later.segment).toBe('nurture_future')
+  })
+
+  it('「打过没人接」不能说成「打不通」—— 只知道打了没接，晚上可能就接了', () => {
+    const c = contact({ touchpoints: [call('2026-07-23T00:00:00Z', 'no_answer')] })
+    const r = segmentContact(c, NOW)
+    expect(r.segment).toBe('retry_channel')
+    expect(r.reason).toContain('没人接')
+    expect(r.reason).not.toContain('打不通')
+  })
+
+  it('带上最后来往时间 —— 卡片要显示「等了几天」，同桶排序也靠它', () => {
+    const c = contact({ touchpoints: [call('2026-07-20T00:00:00Z', 'spoke')] })
+    expect(segmentContact(c, NOW).lastTouchAt).toBe('2026-07-20T00:00:00.000Z')
+  })
 })
 
 describe('今天的名单', () => {
@@ -146,6 +182,31 @@ describe('今天的名单', () => {
   it('计数覆盖每一个人，一个都不能漏', () => {
     const counts = segmentCounts(people, NOW)
     expect(Object.values(counts).reduce((a, b) => a + b, 0)).toBe(people.length)
+  })
+
+  /**
+   * 同一桶里 priority 相同、dueAt 多半是 null —— 没有这层排序，顺序基本是随机的，
+   * 销售会问「凭什么先打这个」。等得最久的排前面才说得通。
+   */
+  it('同一桶里，等得最久的排前面', () => {
+    const sameBucket: ContactLike[] = [
+      contact({ id: 'waited-1day', touchpoints: [call('2026-07-25T00:00:00Z', 'no_answer')] }),
+      contact({ id: 'waited-20days', touchpoints: [call('2026-07-06T00:00:00Z', 'no_answer')] }),
+      contact({ id: 'waited-6days', touchpoints: [call('2026-07-20T00:00:00Z', 'no_answer')] }),
+    ]
+    expect(todayWorklist(sameBucket, NOW).map((c) => c.id)).toEqual([
+      'waited-20days',
+      'waited-6days',
+      'waited-1day',
+    ])
+  })
+
+  it('「聊过了没下文」进名单，但排在所有该打电话的后面', () => {
+    const mixed: ContactLike[] = [
+      contact({ id: 'stale', touchpoints: [call('2026-07-01T00:00:00Z', 'spoke')] }),
+      contact({ id: 'new', touchpoints: [form('2026-07-26T06:00:00Z')] }),
+    ]
+    expect(todayWorklist(mixed, NOW).map((c) => c.id)).toEqual(['new', 'stale'])
   })
 })
 
