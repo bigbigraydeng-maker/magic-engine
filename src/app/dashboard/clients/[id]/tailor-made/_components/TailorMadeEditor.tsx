@@ -10,11 +10,18 @@ import {
   type TailorMadeRecord,
   type TailorMadeStatus,
 } from '@/lib/tailor-made/types';
+import type { ReviewItem } from '@/lib/tailor-made/extract';
+import AiComposer, { type ChatTurn } from './AiComposer';
+import ReviewPanel, { sectionIdForPath } from './ReviewPanel';
 
 /**
  * Tailor-made 行程单编辑器。
  *
- * 左边填表，右边是行程单本体的实时预览 —— 预览用的就是最终出 PDF 的那份 HTML，
+ * 主入口是对话框：顾问把现成的行程文字整段粘进来，AI 转成结构化数据。
+ * 下面的逐项表单是**校对面**，不是录入面 —— 没人会为一份 20 天的行程
+ * 一格一格地填。默认折叠，AI 标出需要确认的地方时再展开。
+ *
+ * 右边是行程单本体的实时预览，用的就是最终出 PDF 的那份 HTML，
  * 所以顾问不需要「导出看看效果」这一步。
  */
 
@@ -35,6 +42,13 @@ export default function TailorMadeEditor({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
+  // AI 对话
+  const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [review, setReview] = useState<ReviewItem[]>([]);
+  const [fieldsOpen, setFieldsOpen] = useState(false);
+
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const objectUrlRef = useRef<string | null>(null);
 
@@ -46,6 +60,51 @@ export default function TailorMadeEditor({
       return next;
     });
     setDirty(true);
+  }, []);
+
+  /* ---------------- AI 抽取 ---------------- */
+
+  const askAi = useCallback(
+    async (message: string) => {
+      setAiBusy(true);
+      setAiError(null);
+      // 先把用户这句放进历史，界面立刻有反馈；失败再回滚
+      setTurns((prev) => [...prev, { role: 'user', content: message }]);
+
+      try {
+        const res = await fetch(`/api/clients/${clientId}/tailor-made/extract`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message, current: payload, history: turns }),
+          credentials: 'include',
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'AI 解析失败');
+
+        setPayload(data.payload);
+        setDirty(true);
+        setReview(data.review ?? []);
+        setTurns((prev) => [...prev, { role: 'assistant', content: data.reply }]);
+        // 有待确认项时自动展开校对面，否则顾问看不到要改哪里
+        if ((data.review ?? []).length > 0) setFieldsOpen(true);
+      } catch (err) {
+        setAiError(err instanceof Error ? err.message : 'AI 解析失败');
+        setTurns((prev) => prev.slice(0, -1));
+      } finally {
+        setAiBusy(false);
+      }
+    },
+    [clientId, payload, turns]
+  );
+
+  /** 点「待确认」里的一条，展开校对面并滚到对应区块 */
+  const jumpToField = useCallback((path: string) => {
+    setFieldsOpen(true);
+    const id = sectionIdForPath(path);
+    // 等展开动画/渲染完成再滚
+    requestAnimationFrame(() => {
+      document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   }, []);
 
   /* ---------------- 预览 ---------------- */
@@ -189,9 +248,28 @@ export default function TailorMadeEditor({
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        {/* ---------- 左：表单 ---------- */}
-        <div className="space-y-6">
-          <Section title="终端客户与报价">
+        {/* ---------- 左：AI 对话 + 校对 ---------- */}
+        <div className="space-y-4">
+          <AiComposer onSubmit={askAi} busy={aiBusy} turns={turns} error={aiError} />
+
+          <ReviewPanel
+            items={review}
+            onJump={jumpToField}
+            onDismiss={(i) => setReview((prev) => prev.filter((_, idx) => idx !== i))}
+          />
+
+          {/* 校对面：AI 填完之后逐项核对用的，不是录入用的，所以默认折叠 */}
+          <button
+            type="button"
+            onClick={() => setFieldsOpen((v) => !v)}
+            className="flex w-full items-center justify-between rounded-xl border border-black/10 bg-white px-5 py-3 text-sm font-bold text-me-charcoal hover:border-me-ochre/40"
+          >
+            <span>逐项校对 · {payload.days.length} 天</span>
+            <span className="text-me-charcoal/40">{fieldsOpen ? '收起 ▴' : '展开 ▾'}</span>
+          </button>
+
+          <div className={fieldsOpen ? 'space-y-6' : 'hidden'}>
+          <Section id="tm-client" title="终端客户与报价">
             <Grid2>
               <Text label="终端客户称呼" hint="行程单要发给的人，出现在封面 Prepared for" value={payload.client.name}
                 onChange={(v) => edit((d) => { d.client.name = v; })} />
@@ -212,7 +290,7 @@ export default function TailorMadeEditor({
             </Grid2>
           </Section>
 
-          <Section title="行程概览">
+          <Section id="tm-trip" title="行程概览">
             <Text label="行程名称" value={payload.trip.title}
               onChange={(v) => edit((d) => { d.trip.title = v; })} />
             <Text label="城市线" hint="用逗号分隔，如 Beijing, Xi'an, Shanghai" value={payload.trip.route.join(', ')}
@@ -246,6 +324,7 @@ export default function TailorMadeEditor({
           </Section>
 
           <Section
+            id="tm-days"
             title={`逐日行程（${payload.days.length} 天）`}
             action={
               <button type="button" className={ghostBtn}
@@ -269,7 +348,7 @@ export default function TailorMadeEditor({
             </div>
           </Section>
 
-          <Section title="价格">
+          <Section id="tm-pricing" title="价格">
             <Area label="计价基准" rows={2} value={payload.pricing.basis}
               onChange={(v) => edit((d) => { d.pricing.basis = v; })} />
             <Grid2>
@@ -313,7 +392,7 @@ export default function TailorMadeEditor({
             </div>
           </Section>
 
-          <Section title="含 / 不含 / 条款">
+          <Section id="tm-terms" title="含 / 不含 / 条款">
             <Area label="费用包含" rows={5} hint="一行一条" value={payload.inclusions.join('\n')}
               onChange={(v) => edit((d) => { d.inclusions = splitLines(v); })} />
             <Area label="费用不含" rows={5} hint="一行一条" value={payload.exclusions.join('\n')}
@@ -334,6 +413,7 @@ export default function TailorMadeEditor({
               ))}
             </div>
           </Section>
+          </div>
         </div>
 
         {/* ---------- 右：预览 ---------- */}
@@ -371,9 +451,9 @@ const inputCls =
 const ghostBtn =
   'rounded-md border border-black/10 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-me-ivory';
 
-function Section({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
+function Section({ id, title, action, children }: { id?: string; title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <section className="rounded-lg border border-black/10 bg-white p-5">
+    <section id={id} className="scroll-mt-24 rounded-lg border border-black/10 bg-white p-5">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="font-display text-base font-semibold">{title}</h2>
         {action}
