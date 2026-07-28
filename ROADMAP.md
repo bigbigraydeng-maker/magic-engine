@@ -2587,6 +2587,40 @@ AI 可见度层（ME 独有 ✅）
 
 **新表强约束**：三表带 `client_id NOT NULL`，RLS 用 service_role 幂等模板，写完 grep `workspace_id|client_team|auth.uid`；`client_ad_entities` 白名单必须配 UI（禁 FDE 进 Studio 直填）。
 
+### Phase 18.E — Audience Asset Engine / 中介私域买家库 🔄 建池器已落地（2026-07-29 登记）
+
+> **蓝图**：[`docs/superpowers/specs/2026-07-28-audience-asset-engine.md`](./docs/superpowers/specs/2026-07-28-audience-asset-engine.md)（v0.3 · 经魏征 + 板桥双审 + PM 四项拍板）
+> **定位**：广告柱第三块 —— 18.D 管**创意**生死、Ad Strategy Engine 管**账户**健康，18.E 管**受众资产**沉淀与归属。三者边界铁律：资产层永不裁创意、永不动预算，只输出信号。
+> **三段模型**：冷广告灌池 → 暖池便宜转化 → 智能化判断每人在哪一级并自动递进。
+
+**⭐ A 线机制验证已通过（2026-07-29 · 零新增预算，从 CTS 现有投放读出）**
+
+| | 暖池组 `Retargeting - VideoViewers + FormOpeners` | 冷启动组 `Reborn-Winner-Stand-in-Front` |
+|---|---|---|
+| 定向 | 3 个自定义受众 + 排除已转化 · **受众扩展关** | 无自定义受众 · 广投 · 扩展开 |
+| 花费 / Leads | NZ$665.30 / 100 | NZ$1,623.20 / 146 |
+| **单 lead 成本** | **NZ$6.65** | **NZ$11.12** |
+
+**暖池 CPL 低 40%**，且 CPM 更贵 → 省钱来自转化率而非便宜流量。同账户同期同指标，n=100/146。
+> 口径说明：两条均为 **CTS campaign 级**对比，不受 18.D.0「混账户读聚合污染」影响（那条针对账户级归一）。
+> ⚠️ **反例**：同一暖池投 Messenger 对话单次成本 NZ$38.53（n=5，已暂停）→ **暖池优势在表单 lead 上成立，消息对话未验证**。30 Kiteroa 走 Messenger，**不可直接引用 40%**。
+
+| 任务 | 内容 | 依赖 | 状态 |
+|------|------|------|------|
+| **P18.E.0 建池器** | `src/lib/meta/audience-ladder.ts` — `planLadder()` 纯函数出计划 + `createLadder()` 幂等执行（按名匹配，重跑不产生重复）。规则形状取自 CTS 生产受众实读 | 无 | ✅ 完成（16 单测 + 3 变异测试全捕获） |
+| **P18.E.1 语法验证** | 视频源规则（`video_view_15s` / `video_view_50_percent`）需用 Render 上的 `META_SYSTEM_USER_TOKEN` 实调验证；MCP 工具面建不了（错误 2654）但**平台 UI 支持 + CTS 生产在用** | Render token | 📋 |
+| **P18.E.2 账本表** | `client_audience_assets`：`audience_id ↔ client_id / layer / ladder_stage / scope / owner_account / source_type(organic\|paid)`。**存 id 不靠解析名字**（重名/改名会静默炸） | 🔴 **PM 拍板 migration** | 📋 |
+| **P18.E.3 采集** | 池 size 快照 → `flywheel_metrics` 的 `ads.audience.*`；台账画**净增 = 新进 − 到期掉出**（受众是衰减存量，不能只画总量）。**新 cron 必须 link `me-shared-cron-secret`** | P18.E.2 | 📋 |
+| **P18.E.4 画像** | 现有 `google-data-pullback-daily` 加 `breakdowns=age,gender`（不新起 cron；`ads_entity_schedule_report` gated 与此无关） | 无 | 📋 |
+| **P18.E.5 归属交付** | 归属条款 + 隐私告知（IPP 3/6/7/9/**12 跨境披露**）+ 同意文书 → **必须在任何受众共享动作之前完成** | PM 定条款 | 📋 |
+| **P18.E.6 月报** | 《你的买家库月报》客户面渲染（客户永不见 `L0/L1` 代号） | P18.E.3 | 📋 |
+
+**PM 已拍板**：①归属=中介（红线，删除「带不走」黏性论）②无独家，平行服务多 agent（红线是「绝不搬」不是「不重叠」）③定价随 agent package 再定 ④Roman 只作结构样板，效果样板用后续楼盘。
+
+**待 PM**：Roman vendor deck「500+ Chinese buyer database」口径 · 海外买家资格口径（OIA 2018）· 开发商合同数据条款。
+
+**kill criteria**：暖池 CPL 若相对冷启动无显著优势 → 产品叙事重估。**当前未触发**（表单 lead 低 40%）。
+
 ### 安全边界
 
 - 所有操作必须校验 `client_id` + 广告账户 ownership（防租户穿越）✅ `requireDashboardClientAccess`
