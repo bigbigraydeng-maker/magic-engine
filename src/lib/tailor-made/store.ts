@@ -16,7 +16,7 @@ import {
  * 猜到 B 客户的行程 uuid 就能读到别人的报价单。调用方还须先过
  * requireDashboardClientAccess(clientId)。
  *
- * 建表 SQL：supabase/migrations/20260728120000_tailor_made_itineraries.sql
+ * 建表 SQL：supabase/migrations/20260728115948_tailor_made_itineraries.sql
  */
 
 const TABLE = 'tailor_made_itineraries'

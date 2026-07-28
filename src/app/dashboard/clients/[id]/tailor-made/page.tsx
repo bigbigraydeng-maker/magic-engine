@@ -42,7 +42,7 @@ export default async function TailorMadeListPage({ params }: { params: { id: str
         <Notice
           title="读取行程单列表失败"
           body={error}
-          hint="若提示表不存在，需先执行 supabase/migrations/20260728120000_tailor_made_itineraries.sql"
+          hint="若提示表不存在，需先执行 supabase/migrations/20260728115948_tailor_made_itineraries.sql"
         />
       )}
 
