@@ -649,6 +649,22 @@ export default function ClientDetailPage() {
             </section>
           </BriefGateBanner>
 
+          {/* Zone A2: 经营工具
+              注意：这一区不属于 DAPE 任何一段，也不对应 6 支柱 —— 它不是 ME 替客户做的
+              营销动作，而是客户拿去做自己生意的工具。单独成区，别混进「内容生产」。
+              不套 BriefGateBanner：Brief 是营销服务的前置，跟客户自己的日常经营无关。 */}
+          <section>
+            <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">经营工具</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <ToolCard
+                href={`/dashboard/clients/${clientId}/tailor-made`}
+                title="Tailor-made 行程单"
+                desc="定制行程报价单：填表 → 预览 → 导出品牌 PDF 发给客户"
+                badge="in_house"
+              />
+            </div>
+          </section>
+
           {/* Zone B: 诊断与分析 */}
           <section>
             <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">诊断与分析</p>

@@ -1,0 +1,257 @@
+{
+  "meta": {
+    "quoteRef": "SAMPLE-2027-001",
+    "issuedDate": "27 July 2026",
+    "validUntil": "",
+    "consultant": {
+      "name": "[Consultant Name]",
+      "title": "China Travel Specialist",
+      "phone": "0800 287 888",
+      "email": "info@ctstours.co.nz"
+    }
+  },
+  "client": {
+    "name": "[Client Name]",
+    "travellers": "2 adults, twin share"
+  },
+  "trip": {
+    "title": "China Grand Discovery Tour",
+    "route": ["Beijing", "Xi'an", "Chengdu", "Chongqing", "Zhangjiajie", "Guangzhou"],
+    "dateRange": "8 May – 28 May 2027",
+    "duration": "20 days",
+    "heroImage": "",
+    "summary": "Twenty days across the length of China, moving at an unhurried pace by high-speed rail. You begin in Beijing with the Forbidden City and the Great Wall at Mutianyu, travel south to Xi'an's Terracotta Warriors, then on to Chengdu's pandas, Chongqing's rock carvings and river city, the sandstone pillars of Zhangjiajie, and finally Guangzhou. Throughout, a private English-speaking guide and dedicated driver look after every arrival, transfer and entrance ticket.",
+    "highlights": [
+      "The Great Wall at Mutianyu — one of the ten wonders of the world",
+      "The Forbidden City and Tian'anmen Square, the heart of imperial Beijing",
+      "The Terracotta Warriors, interred with Emperor Qin Shi Huang over 2,000 years ago",
+      "Giant pandas up close at the Chengdu Panda Base",
+      "The Dazu Rock Carvings, the pinnacle of late Chinese grotto art",
+      "Zhangjiajie's Yuanjiajie peaks and Tianmen Mountain",
+      "A Pearl River night cruise through Guangzhou"
+    ],
+    "facts": [
+      { "label": "Duration", "value": "20 days / 19 nights" },
+      { "label": "Travelling", "value": "2 adults, twin share" },
+      { "label": "Accommodation", "value": "4★ hotels or similar" },
+      { "label": "Guiding", "value": "Private English-speaking guide" },
+      { "label": "On the ground", "value": "Dedicated driver throughout" },
+      { "label": "Between cities", "value": "2nd-class high-speed rail" }
+    ]
+  },
+  "days": [
+    {
+      "day": 1,
+      "date": "8 May",
+      "weekday": "Saturday",
+      "route": "Auckland → Guangzhou",
+      "body": "Make your own way to Auckland Airport for your flight CZ306, departing at 22:30 for Guangzhou.",
+      "travel": "Flight CZ306 · Auckland → Guangzhou · dep 22:30",
+      "accommodation": ""
+    },
+    {
+      "day": 2,
+      "date": "9 May",
+      "weekday": "Sunday",
+      "route": "Guangzhou → Beijing",
+      "body": "On arrival in Guangzhou you clear customs and immigration and connect to your domestic flight — your luggage is checked through to Beijing, so there is no need to collect it. Our CTS local representative meets you at Beijing airport and escorts you to your hotel. The afternoon is yours to rest and recover from the long flight. An optional Peking Duck banquet can be arranged for this evening.",
+      "travel": "Flight CZ3101 · Guangzhou → Beijing · 08:00 / 11:00",
+      "accommodation": "New World Centre Tongpai Hotel or similar 4★"
+    },
+    {
+      "day": 3,
+      "date": "10 May",
+      "weekday": "Monday",
+      "route": "Beijing",
+      "body": "This morning, visit Tian'anmen Square, the largest public square in the world, with a photo stop at the National Centre for the Performing Arts — known locally as \"The Egg\". Continue into the Forbidden City, home to successive emperors for over 500 years. After lunch, tour Beihai Park.",
+      "travel": "",
+      "accommodation": "New World Centre Tongpai Hotel or similar 4★"
+    },
+    {
+      "day": 4,
+      "date": "11 May",
+      "weekday": "Tuesday",
+      "route": "Beijing",
+      "body": "A morning tour to the Great Wall at Mutianyu, one of the ten wonders of the world. On the return journey you view the exterior of the Water Cube and the Bird's Nest.",
+      "travel": "",
+      "accommodation": "New World Centre Tongpai Hotel or similar 4★"
+    },
+    {
+      "day": 5,
+      "date": "12 May",
+      "weekday": "Wednesday",
+      "route": "Beijing",
+      "body": "A morning tour of the Hutong — Beijing's old lanes — followed by free time at your own leisure.",
+      "travel": "",
+      "accommodation": "New World Centre Tongpai Hotel or similar 4★"
+    },
+    {
+      "day": 6,
+      "date": "13 May",
+      "weekday": "Thursday",
+      "route": "Beijing → Xi'an",
+      "body": "Transfer to the railway station for the fast train to Xi'an. On arrival, transfer to your hotel to rest.",
+      "travel": "High-speed train · Beijing → Xi'an",
+      "accommodation": "Mercure Downtown or similar 4★"
+    },
+    {
+      "day": 7,
+      "date": "14 May",
+      "weekday": "Friday",
+      "route": "Xi'an",
+      "body": "A morning tour to see the Terracotta Warriors, one of the greatest archaeological discoveries of the century, interred with Emperor Qin Shi Huang over 2,000 years ago. Your visit includes the Circle Vision movie and the Bronze Chariot exhibit.",
+      "travel": "",
+      "accommodation": "Mercure Downtown or similar 4★"
+    },
+    {
+      "day": 8,
+      "date": "15 May",
+      "weekday": "Saturday",
+      "route": "Xi'an",
+      "body": "This morning, visit the Old City Wall and the Big Wild Goose Pagoda — the earliest and largest surviving square pavilion-style brick pagoda of the Tang dynasty. Free time afterwards in the Muslim Quarter.",
+      "travel": "",
+      "accommodation": "Mercure Downtown or similar 4★"
+    },
+    {
+      "day": 9,
+      "date": "16 May",
+      "weekday": "Sunday",
+      "route": "Xi'an → Chengdu",
+      "body": "Transfer to the railway station for the fast train to Chengdu. Meet your guide and visit Kuanzhai Alley — Wide Alley, Narrow Alley and Well Alley — a quarter of restored courtyards in blue-grey brick and tile.",
+      "travel": "High-speed train · Xi'an → Chengdu",
+      "accommodation": "Holiday Inn Express Gulou Chengdu or similar 4★"
+    },
+    {
+      "day": 10,
+      "date": "17 May",
+      "weekday": "Monday",
+      "route": "Chengdu",
+      "body": "Visit the Panda Base to see the giant pandas up close, then Jinli, where you can enjoy local customs and traditional snacks.",
+      "travel": "",
+      "accommodation": "Holiday Inn Express Gulou Chengdu or similar 4★"
+    },
+    {
+      "day": 11,
+      "date": "18 May",
+      "weekday": "Tuesday",
+      "route": "Chengdu → Chongqing",
+      "body": "Transfer to the railway station for the fast train to Chongqing, the \"Mountain City\". On arrival, visit Ciqikou Old Town with its Ming and Qing dynasty architecture, steep pedestrian streets, shops, restaurants and tea houses.",
+      "travel": "High-speed train · Chengdu → Chongqing",
+      "accommodation": "Fairfield by Marriott Chongqing Nan'an or similar 4★"
+    },
+    {
+      "day": 12,
+      "date": "19 May",
+      "weekday": "Wednesday",
+      "route": "Chongqing",
+      "body": "A morning drive of about 1.5 hours to the Dazu Rock Carvings — a large-scale group of carvings spanning the Tang through Ming and Qing dynasties, representing the pinnacle of late Chinese grotto art.",
+      "travel": "",
+      "accommodation": "Fairfield by Marriott Chongqing Nan'an or similar 4★"
+    },
+    {
+      "day": 13,
+      "date": "20 May",
+      "weekday": "Thursday",
+      "route": "Chongqing",
+      "body": "A full day of city sightseeing including the Yangtze River Cableway, Jiefangbei pedestrian street, Kuixing Pavilion, Hongya Cave, and the Liziba light rail line that runs straight through an apartment building.",
+      "travel": "",
+      "accommodation": "Fairfield by Marriott Chongqing Nan'an or similar 4★"
+    },
+    {
+      "day": 14,
+      "date": "21 May",
+      "weekday": "Friday",
+      "route": "Chongqing → Zhangjiajie",
+      "body": "Transfer to the railway station for the fast train to Zhangjiajie. On arrival, visit the Grand Canyon, filled with waterfalls, springs and lush vegetation.",
+      "travel": "High-speed train · Chongqing → Zhangjiajie",
+      "accommodation": "Zhangjiajie Jinxiu East Capital Hotel or similar 4★"
+    },
+    {
+      "day": 15,
+      "date": "22 May",
+      "weekday": "Saturday",
+      "route": "Zhangjiajie",
+      "body": "After breakfast, take the Bailong Elevator up to the Yuanjiajie Scenic Area, taking in the First Bridge Under Heaven, the Enchanting Terrace, the Spectacular Wall of Peaks, Tianzi Mountain Helong Park and the Xihai Stone Forest. Descend by the Tianzi Mountain cableway.",
+      "travel": "",
+      "accommodation": "Zhangjiajie Jinxiu East Capital Hotel or similar 4★"
+    },
+    {
+      "day": 16,
+      "date": "23 May",
+      "weekday": "Sunday",
+      "route": "Zhangjiajie",
+      "body": "After breakfast, visit the Tianmen Mountain Scenic Area (1,350–1,500m), with karst plateau cliff landscapes above and karst peak forest canyon landscapes below, dotted with hills, stone buds, depressions, sinkholes and caves.",
+      "travel": "",
+      "accommodation": "Zhangjiajie Dongyue Hotel or similar 4★"
+    },
+    {
+      "day": 17,
+      "date": "24 May",
+      "weekday": "Monday",
+      "route": "Zhangjiajie → Guangzhou",
+      "body": "Transfer to the railway station for the fast train to Guangzhou. On arrival, transfer to your hotel to rest.",
+      "travel": "High-speed train · Zhangjiajie → Guangzhou",
+      "accommodation": "Elong Hotel Guangzhou or similar 4★"
+    },
+    {
+      "day": 18,
+      "date": "25 May",
+      "weekday": "Tuesday",
+      "route": "Guangzhou",
+      "body": "Tour Shamian Island, a historic treaty port and commercial hub, and visit the Chen Clan Ancestral Hall, a masterpiece of Lingnan architecture. Experience L4 autonomous driving technology; see the Pearl River's \"Kiss\", the tram and the Zhujiang Brewery Exchange; and stroll through Huacheng Square and the guqin-shaped Sea Heart Bridge. This evening, enjoy a Pearl River night cruise.",
+      "travel": "",
+      "accommodation": "Elong Hotel Guangzhou or similar 4★"
+    },
+    {
+      "day": 19,
+      "date": "26 May",
+      "weekday": "Wednesday",
+      "route": "Guangzhou",
+      "body": "A free day at leisure.",
+      "travel": "",
+      "accommodation": ""
+    },
+    {
+      "day": 20,
+      "date": "27 May",
+      "weekday": "Thursday",
+      "route": "Guangzhou → Auckland",
+      "body": "Free time until your transfer to the airport for flight CZ305, departing 28 May (Friday) at 00:50 for New Zealand, arriving into Auckland at 15:30.",
+      "travel": "Flight CZ305 · Guangzhou → Auckland · dep 28 May 00:50, arr 15:30",
+      "accommodation": ""
+    }
+  ],
+  "pricing": {
+    "basis": "Land only, per person, based on two people sharing a twin/double room",
+    "currency": "NZD",
+    "amount": null,
+    "amountNote": "Quotation issued separately — see covering email",
+    "optional": [
+      { "label": "Domestic airfare, Beijing → Chengdu (estimate)", "value": "NZD $490 per person" },
+      { "label": "Tipping", "value": "NZD $15 per person per day" }
+    ]
+  },
+  "inclusions": [
+    "Accommodation (1 twin room) as listed in the itinerary",
+    "English-speaking guide throughout",
+    "Land transfers",
+    "Admission to sightseeing places as per the itinerary",
+    "2nd-class train tickets as per the itinerary"
+  ],
+  "exclusions": [
+    "International airfare, Auckland – Guangzhou return (including the Guangzhou – Beijing domestic sector) — current fare subject to change",
+    "Domestic airfare (estimate, Beijing to Chengdu: NZD $490 per person)",
+    "Personal expenses",
+    "Tipping (NZD $15 per person per day)"
+  ],
+  "notes": [
+    "For itineraries involving train tickets, availability and details can only be confirmed within 15 days prior to departure.",
+    "For visits to the Forbidden City, ticket confirmation is only possible within 7 days of the intended visit date.",
+    "Final itinerary and pricing are subject to confirmation upon booking."
+  ],
+  "nextSteps": [
+    { "title": "Tell us what to adjust", "body": "Reply to this itinerary with anything you would like changed — pace, hotels, cities, or the time of year. Revisions are part of the service." },
+    { "title": "We confirm and hold", "body": "Once you are happy, we confirm hotels and rail seats and issue your invoice and booking conditions." },
+    { "title": "Travel documents", "body": "Final documents, guide details and local contact numbers are issued before you depart." }
+  ]
+}
