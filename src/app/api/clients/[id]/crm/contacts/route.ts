@@ -16,6 +16,191 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { buildIdentities, resolveContact, AmbiguousIdentityError } from '@/lib/crm/identity'
+import {
+  segmentContact,
+  SEGMENT_ACTION_META,
+  type ContactLike,
+} from '@/lib/crm/segments'
+import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
+import {
+  extractCustomColumns,
+  visibleCustomColumns,
+  type CustomColumnKey,
+  type TouchpointForColumn,
+} from '@/lib/crm/table-columns'
+
+interface ContactRow {
+  id: string
+  display_name: string | null
+  primary_phone: string | null
+  primary_email: string | null
+  do_not_contact: boolean
+  stage: string | null
+  first_seen_at: string
+}
+
+interface TouchRow {
+  contact_id: string
+  channel: string
+  direction: 'inbound' | 'outbound'
+  occurred_at: string
+  summary: string | null
+  metadata: Record<string, unknown> | null
+}
+
+function ts(v: string | null | undefined): number {
+  if (!v) return 0
+  const t = new Date(v).getTime()
+  return Number.isNaN(t) ? 0 : t
+}
+
+/**
+ * GET /api/clients/[id]/crm/contacts
+ *
+ * 「全部客人」横表的读模型。一次拉这个客户的人 + 触点 + 阶段模型，在内存里
+ * 逐人组装 —— 冷热分级复用 lib/crm/segments 的纯函数，自定义列复用
+ * lib/crm/table-columns。335 人 / ~640 触点量级下比 SQL 窗口函数简单，到几千人
+ * 再换物化视图（跟 today 路由同一个天花板）。
+ *
+ * 隔离：requirePaidClientAccess + 所有读按 client_id 收口。admin 也从 URL 收口。
+ */
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: { id: string } },
+): Promise<NextResponse> {
+  const clientId = params.id
+  const access = await requirePaidClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
+  }
+
+  const [
+    { data: contacts, error: cErr },
+    { data: touches, error: tErr },
+    { data: stageRows },
+  ] = await Promise.all([
+    supabaseAdmin
+      .from('contacts')
+      .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, first_seen_at')
+      .eq('client_id', clientId)
+      .limit(5000),
+    supabaseAdmin
+      .from('contact_touchpoints')
+      .select('contact_id, channel, direction, occurred_at, summary, metadata')
+      .eq('client_id', clientId)
+      .order('occurred_at', { ascending: false })
+      .limit(20000),
+    supabaseAdmin
+      .from('client_pipeline_stages')
+      .select('stage_key, label, marketing_action, is_terminal')
+      .eq('client_id', clientId),
+  ])
+
+  if (cErr || tErr) {
+    return NextResponse.json({ error: cErr?.message ?? tErr?.message }, { status: 500 })
+  }
+
+  const byContact = new Map<string, TouchRow[]>()
+  for (const t of (touches ?? []) as TouchRow[]) {
+    const list = byContact.get(t.contact_id) ?? []
+    list.push(t)
+    byContact.set(t.contact_id, list)
+  }
+
+  // 阶段 map：label 给「跟进到哪步」列，suppressed 决定这个人算不算已结论（影响冷热）。
+  const stageMeta = new Map<string, { label: string; suppressed: boolean }>()
+  for (const s of (stageRows ?? []) as {
+    stage_key: string
+    label: string
+    marketing_action: string
+    is_terminal: boolean
+  }[]) {
+    stageMeta.set(s.stage_key, {
+      label: s.label,
+      suppressed: stageSuppressesWorklist(
+        isMarketingAction(s.marketing_action) ? s.marketing_action : 'suppress',
+        s.is_terminal,
+      ),
+    })
+  }
+
+  const now = new Date()
+  const rows = (contacts ?? []) as ContactRow[]
+
+  // 逐人组装。custom 存起来供数据驱动的「显不显示这列」判断。
+  const customPerContact: Array<Record<CustomColumnKey, string | null>> = []
+  const out = rows.map((c) => {
+    const tps = byContact.get(c.id) ?? []
+    const stage = c.stage ? stageMeta.get(c.stage) : undefined
+
+    const model: ContactLike = {
+      id: c.id,
+      displayName: c.display_name,
+      // 「别再联系」真相源是不可变触点（contacts 列写失败过 / 历史导入只写 outcome）。
+      doNotContact:
+        c.do_not_contact ||
+        tps.some(
+          (t) => t.metadata?.do_not_contact === true || t.metadata?.outcome === 'do_not_contact',
+        ),
+      stageSuppressed: stage?.suppressed ?? false,
+      stageLabel: stage?.label ?? null,
+      touchpoints: tps.map((t) => ({
+        channel: t.channel,
+        direction: t.direction,
+        occurredAt: t.occurred_at,
+        outcome: (t.metadata?.outcome as string) ?? null,
+        travelWindow: (t.metadata?.travel_window as string) ?? null,
+        callbackAt: (t.metadata?.callback_at as string) ?? null,
+      })),
+    }
+    const seg = segmentContact(model, now)
+
+    // 进线时间 = 真实最早一条触点（不是导入日期）；没触点退回 first_seen_at。
+    // 最近联系 = 最晚一条触点；0 触点显式 null —— 绝不 fallback last_seen_at
+    // （它默认 = 建档时的 NOW()，会假装有过一次根本没发生的沟通）。
+    let firstTouch = 0
+    let lastTouch = 0
+    for (const t of tps) {
+      const v = ts(t.occurred_at)
+      if (v > 0) {
+        if (firstTouch === 0 || v < firstTouch) firstTouch = v
+        if (v > lastTouch) lastTouch = v
+      }
+    }
+
+    const forColumns: TouchpointForColumn[] = tps.map((t) => ({
+      channel: t.channel,
+      occurredAt: t.occurred_at,
+      metadata: t.metadata,
+    }))
+    const custom = extractCustomColumns(forColumns)
+    customPerContact.push(custom)
+
+    return {
+      contactId: c.id,
+      name: c.display_name || '未留姓名',
+      firstSeenAt: firstTouch > 0 ? new Date(firstTouch).toISOString() : c.first_seen_at,
+      lastTouchAt: lastTouch > 0 ? new Date(lastTouch).toISOString() : null,
+      phone: c.primary_phone,
+      email: c.primary_email,
+      // 电话邮箱都没有时，页面据此显示「仅 FB 私信」而不是「没留联系方式」。
+      hasMessenger: tps.some((t) => t.channel === 'messenger'),
+      stage: c.stage,
+      // 认不出的 stage_key（配置里删了）显示原值，别留空白。
+      stageLabel: c.stage ? (stageMeta.get(c.stage)?.label ?? c.stage) : null,
+      segment: seg.segment,
+      segmentLabel: SEGMENT_ACTION_META[seg.segment].label,
+      temperature: seg.temperature,
+      custom,
+    }
+  })
+
+  return NextResponse.json({
+    totalContacts: out.length,
+    columns: visibleCustomColumns(customPerContact),
+    contacts: out,
+  })
+}
 
 interface Body {
   name?: unknown
