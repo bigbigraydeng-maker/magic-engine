@@ -673,6 +673,7 @@ export default function ClientDetailPage() {
                   一堆内容工具淹掉,所以放在诊断与分析区首位 —— 销售一进客户页就看到。 */}
               {/* 销售每天第一件事就是开这一页,放在诊断区最前面。 */}
               <ToolCard href={`/dashboard/clients/${clientId}/crm`}                title="今天该联系谁"   desc="全渠道接触记录自动排序 · 说过别再联系的已挡在名单外"  badge="in_house" />
+              <ToolCard href={`/dashboard/clients/${clientId}/crm/all`}            title="全部客人"       desc="一张表看全部客人 · 点开看往来记录、记一笔、改跟进阶段"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/messenger`}          title="客户消息"       desc="Facebook 私信 · AI 写好需求卡和回复草稿 · 你按发送"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/zhangqian`}          title="张骞发现"       desc="扫描社媒、评价、关键词、竞品，生成品牌现状全景报告"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/diagnostic`}         title="华佗深度诊断"   desc="从 SEO/社媒/口碑/广告/AI可见/竞品六维打分，找到核心病灶"  badge="in_house" />
