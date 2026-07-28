@@ -49,12 +49,26 @@ interface OffRow {
   lastNote: string | null
 }
 
+/** 一桶 = 一批「同一种人、同一个做法」。一次只做一桶。 */
+interface Bucket {
+  segment: Segment
+  label: string
+  /** 这批人该怎么办（后端和页面共用一份文案，见 lib/crm/segments）。 */
+  howTo: string
+  batch: 'call_one_by_one' | 'send_email' | 'none'
+  total: number
+  truncated: boolean
+  people: Row[]
+  /** 整桶群发用的邮箱（只有「该发邮件」的桶才有）。 */
+  batchEmails: string[]
+}
+
 interface Payload {
-  worklist: Row[]
+  buckets: Bucket[]
   offList: OffRow[]
   counts: Record<Segment, number>
   totalContacts: number
-  truncated: boolean
+  todoTotal: number
   error?: string
 }
 
@@ -63,18 +77,6 @@ interface StageOption {
   label: string
 }
 
-const SEGMENT_LABEL: Record<Segment, string> = {
-  replied: '客户回话了',
-  callback_due: '约好的时间到了',
-  new_untouched: '新进线，没人碰过',
-  retry_channel: '电话打不通',
-  nurture_future: '以后才走',
-  excluded: '别再联系',
-}
-
-/** 顺序即优先级，跟接口排出来的一致。 */
-const GROUPS: Segment[] = ['replied', 'callback_due', 'new_untouched', 'retry_channel']
-
 const CHANNEL_HINT: Record<Row['suggestedChannel'], string> = {
   phone: '打电话',
   sms: '发短信',
@@ -82,11 +84,96 @@ const CHANNEL_HINT: Record<Row['suggestedChannel'], string> = {
   none: '别联系',
 }
 
-function Stat({ n, label, strong }: { n: number; label: string; strong?: boolean }) {
+/** 前两桶是烫的（客户在等我们），数字标红催一下。 */
+const HOT: ReadonlySet<Segment> = new Set<Segment>(['replied', 'callback_due'])
+
+/**
+ * 选桶。一次只做一桶 —— 这是这一页的核心。
+ *
+ * 之前把 4 桶一次全铺：CTS 真实数据下 6 个「客户回话了」躺在 108 个
+ * 「打不通」中间，最该打的人反而看不见。
+ */
+function BucketTabs({
+  buckets,
+  active,
+  onPick,
+}: {
+  buckets: Bucket[]
+  active: Segment | null
+  onPick: (s: Segment) => void
+}) {
   return (
-    <div className="rounded-xl border border-black/10 bg-white px-3 py-3 text-center">
-      <p className={`text-2xl font-black ${strong && n > 0 ? 'text-[#C2453A]' : 'text-me-charcoal'}`}>{n}</p>
-      <p className="mt-0.5 text-[11px] font-semibold text-me-charcoal/45">{label}</p>
+    <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
+      {buckets.map((b) => {
+        const on = b.segment === active
+        const empty = b.total === 0
+        return (
+          <button
+            key={b.segment}
+            onClick={() => onPick(b.segment)}
+            disabled={empty}
+            className={`shrink-0 rounded-xl border px-3.5 py-2.5 text-left transition ${
+              on
+                ? 'border-me-charcoal bg-me-charcoal text-white'
+                : empty
+                  ? 'border-black/5 bg-white text-me-charcoal/25'
+                  : 'border-black/10 bg-white text-me-charcoal'
+            }`}
+          >
+            <p
+              className={`text-xl font-black leading-none ${
+                on ? 'text-white' : HOT.has(b.segment) && !empty ? 'text-[#C2453A]' : ''
+              }`}
+            >
+              {b.total}
+            </p>
+            <p className={`mt-1 whitespace-nowrap text-[11px] font-bold ${on ? 'text-white/70' : 'text-me-charcoal/45'}`}>
+              {b.label}
+            </p>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * 整桶一起发邮件。
+ *
+ * 「打不通」是最大的一桶（CTS 108 人）。让销售一个个点开再打一遍，是在
+ * 重复已经失败过的动作。这批人该一次性发邮件 —— 复制出来粘进邮件客户端
+ * 就能群发，不必等邮件系统接进来。
+ */
+function BatchEmail({ emails, total }: { emails: string[]; total: number }) {
+  const [copied, setCopied] = useState(false)
+
+  if (emails.length === 0) return null
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(emails.join('; '))
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  const missing = total - emails.length
+
+  return (
+    <div className="mt-3 rounded-xl border border-black/10 bg-white p-3">
+      <button
+        onClick={() => void copy()}
+        className="w-full rounded-lg bg-me-charcoal py-2.5 text-sm font-black text-white"
+      >
+        {copied ? '✓ 已复制，粘到邮件收件人里' : `复制这 ${emails.length} 个邮箱，一次性群发`}
+      </button>
+      {missing > 0 && (
+        <p className="mt-2 text-xs text-me-charcoal/45">
+          还有 {missing} 人没留邮箱，只能逐个打或发短信。
+        </p>
+      )}
     </div>
   )
 }
@@ -549,6 +636,16 @@ export default function CrmTodayPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  /** 用户点过的桶。没点过就自动落在最靠前的非空桶（= 最该先做的那批）。 */
+  const [picked, setPicked] = useState<Segment | null>(null)
+
+  const buckets = data?.buckets ?? []
+  // 打完最后一个人这桶会空掉，此时自动落到下一桶，而不是停在空白页。
+  const activeSeg =
+    (picked && buckets.find((b) => b.segment === picked && b.total > 0)?.segment) ??
+    buckets.find((b) => b.total > 0)?.segment ??
+    null
+  const active = buckets.find((b) => b.segment === activeSeg) ?? null
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -588,11 +685,10 @@ export default function CrmTodayPage() {
         </Link>
         <h1 className="mt-2 text-2xl font-black text-me-charcoal">今天该联系谁</h1>
         <p className="mt-1 text-sm leading-relaxed text-me-charcoal/45">
-          系统按所有渠道的接触记录自己排的 ——
-          <span className="font-semibold text-me-charcoal/60">不用任何人去填状态。</span>
-          说过别再联系的人已经被挡在名单外。
+          人已经按情况分好了，<span className="font-semibold text-me-charcoal/60">一次做一批</span> ——
+          点上面任意一批，只看这一批的人。
           <br />
-          打完随手记一笔就行，名单系统自己更新。
+          打完随手记一笔就行，名单系统自己更新。说过别再联系的人已经挡在外面。
         </p>
       </header>
 
@@ -615,12 +711,7 @@ export default function CrmTodayPage() {
 
       {!error && data && (
         <>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <Stat n={data.counts.replied} label="回话了" strong />
-            <Stat n={data.counts.callback_due} label="约好的到了" strong />
-            <Stat n={data.counts.new_untouched} label="没人碰过" />
-            <Stat n={data.counts.retry_channel} label="打不通" />
-          </div>
+          <BucketTabs buckets={data.buckets} active={activeSeg} onPick={setPicked} />
 
           <p className="mt-3 text-xs leading-relaxed text-me-charcoal/45">
             另有 <span className="font-semibold text-me-charcoal/70">{data.counts.nurture_future}</span> 人说了以后才走（现在打是打扰，进培育）、
@@ -630,37 +721,39 @@ export default function CrmTodayPage() {
 
           <NewContact clientId={clientId} onDone={() => afterWrite('✓ 存进来了')} />
 
-          {data.worklist.length === 0 && (
+          {data.todoTotal === 0 && (
             <p className="py-12 text-center text-sm text-me-charcoal/45">今天没有需要联系的人。</p>
           )}
 
-          {GROUPS.map((seg) => {
-            const rows = data.worklist.filter((r) => r.segment === seg)
-            if (rows.length === 0) return null
-            return (
-              <section key={seg} className="mt-6">
-                <p className="mb-2 text-[11px] font-black uppercase tracking-[0.14em] text-me-ochre">
-                  {SEGMENT_LABEL[seg]} · {rows.length}
+          {active && active.total > 0 && (
+            <section className="mt-5">
+              <div className="rounded-xl border border-me-ochre/25 bg-me-ochre/8 px-4 py-3">
+                <p className="text-sm font-black text-me-charcoal">
+                  {active.label} · {active.total} 人
                 </p>
-                <div className="space-y-3">
-                  {rows.map((r) => (
-                    <PersonCard
-                      key={r.contactId}
-                      clientId={clientId}
-                      row={r}
-                      stages={stages}
-                      onSaved={afterWrite}
-                    />
-                  ))}
-                </div>
-              </section>
-            )
-          })}
+                <p className="mt-1 text-sm leading-relaxed text-me-charcoal/60">{active.howTo}</p>
+              </div>
 
-          {data.truncated && (
-            <p className="mt-6 text-center text-xs text-me-charcoal/40">
-              名单太长，这里只显示前 100 个 —— 先把上面的打完。
-            </p>
+              <BatchEmail emails={active.batchEmails} total={active.total} />
+
+              <div className="mt-3 space-y-3">
+                {active.people.map((r) => (
+                  <PersonCard
+                    key={r.contactId}
+                    clientId={clientId}
+                    row={r}
+                    stages={stages}
+                    onSaved={afterWrite}
+                  />
+                ))}
+              </div>
+
+              {active.truncated && (
+                <p className="mt-4 text-center text-xs text-me-charcoal/40">
+                  这一桶人太多，先显示 {active.people.length} 个 —— 打完再刷新。
+                </p>
+              )}
+            </section>
           )}
 
           <OffList

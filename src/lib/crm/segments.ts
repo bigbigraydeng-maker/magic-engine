@@ -27,6 +27,58 @@ export type Segment =
 
 export type Temperature = 'hot' | 'warm' | 'cold' | 'off'
 
+/**
+ * 每一桶「是什么人 / 该拿他怎么办」。
+ *
+ * 为什么要有这个:一次把 186 个人铺成一条长河,最烫的 6 个人会被 108 个
+ * 打不通的埋掉 —— 销售看到的还是「一大坨」,跟他逃离的 Excel 没区别。
+ * 分了桶还不够,每桶必须直说「这批人该怎么办」,否则销售面对 108 个
+ * 打不通的人只会继续一个个空打(已经证明打不通了)。
+ *
+ * API 和页面共用这一份,避免两边各写一套文案、日后漂移。
+ */
+export interface SegmentActionMeta {
+  /** 桶名(销售看的)。 */
+  label: string
+  /** 这批人该怎么办 —— 一句话,带动作。 */
+  howTo: string
+  /** 整桶一起做的动作:逐个打电话,还是一次性群发。 */
+  batch: 'call_one_by_one' | 'send_email' | 'none'
+}
+
+export const SEGMENT_ACTION_META: Record<Segment, SegmentActionMeta> = {
+  replied: {
+    label: '客户回话了',
+    howTo: '他主动来消息了，今天必须回 —— 这批最容易成。',
+    batch: 'call_one_by_one',
+  },
+  callback_due: {
+    label: '约好的时间到了',
+    howTo: '之前答应了这个时间打给他，现在到点了。',
+    batch: 'call_one_by_one',
+  },
+  new_untouched: {
+    label: '新进线，没人碰过',
+    howTo: '刚留资料还热着，越快打通越容易成。',
+    batch: 'call_one_by_one',
+  },
+  retry_channel: {
+    label: '电话打不通',
+    howTo: '已经打过打不通了，再打还是打不通 —— 这批该发邮件，不是继续打。',
+    batch: 'send_email',
+  },
+  nurture_future: {
+    label: '以后才走',
+    howTo: '他说了以后才走，现在打是打扰。到时间系统会把他捞回名单。',
+    batch: 'none',
+  },
+  excluded: {
+    label: '别再联系',
+    howTo: '明确拒绝过 / 号码是坏的 / 已经成交。不要联系。',
+    batch: 'none',
+  },
+}
+
 export interface TouchpointLike {
   channel: string
   direction: 'inbound' | 'outbound'

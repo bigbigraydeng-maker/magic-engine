@@ -7,15 +7,26 @@
  * 这个量级下比在 SQL 里堆窗口函数简单得多，也让分段规则能被单测直接钉住。
  * 到几千人再换成物化视图。
  *
+ * 返回按「桶」分组 —— 一次只做一桶。平铺成一条长河的版本在 CTS 真实数据上
+ * 就废了：186 人的名单里，最烫的 6 个「客户回话了」被 108 个「打不通」埋掉，
+ * 销售看到的还是一大坨，跟他要逃离的 Excel 没区别。
+ *
  * Responses:
- *   200  { worklist, counts, generatedAt }
+ *   200  { buckets, offList, counts, totalContacts, todoTotal, generatedAt }
  *   401 / 403 / 500
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
-import { todayWorklist, segmentCounts, segmentContact, type ContactLike } from '@/lib/crm/segments'
+import {
+  todayWorklist,
+  segmentCounts,
+  segmentContact,
+  SEGMENT_ACTION_META,
+  type ContactLike,
+  type Segment,
+} from '@/lib/crm/segments'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 
 interface RouteParams {
@@ -133,28 +144,56 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   const now = new Date()
   const contactById = new Map(rows.map((c) => [c.id, c]))
 
-  const worklist = todayWorklist(models, now)
-    // 名单本身不封顶会变成没人看的长列表；截断要说出来（见页面底部）。
-    .slice(0, 100)
-    .map((c) => {
-      const row = contactById.get(c.id)
-      const last = (byContact.get(c.id) ?? [])[0]
-      return {
-        contactId: c.id,
-        name: c.displayName || '未留姓名',
-        phone: row?.primary_phone ?? null,
-        email: row?.primary_email ?? null,
-        stage: row?.stage ?? null,
-        // 认不出的 stage_key（配置里被删掉了）不留空白，显示原值以便排查。
-        stageLabel: row?.stage ? (stageMeta.get(row.stage)?.label ?? row.stage) : null,
-        segment: c.seg.segment,
-        temperature: c.seg.temperature,
-        reason: c.seg.reason,
-        suggestedChannel: c.seg.suggestedChannel,
-        dueAt: c.seg.dueAt,
-        lastNote: last?.summary ?? null,
-      }
-    })
+  const ranked = todayWorklist(models, now)
+
+  const toRow = (c: (typeof ranked)[number]) => {
+    const row = contactById.get(c.id)
+    const last = (byContact.get(c.id) ?? [])[0]
+    return {
+      contactId: c.id,
+      name: c.displayName || '未留姓名',
+      phone: row?.primary_phone ?? null,
+      email: row?.primary_email ?? null,
+      stage: row?.stage ?? null,
+      // 认不出的 stage_key（配置里被删掉了）不留空白，显示原值以便排查。
+      stageLabel: row?.stage ? (stageMeta.get(row.stage)?.label ?? row.stage) : null,
+      segment: c.seg.segment,
+      temperature: c.seg.temperature,
+      reason: c.seg.reason,
+      suggestedChannel: c.seg.suggestedChannel,
+      dueAt: c.seg.dueAt,
+      lastNote: last?.summary ?? null,
+    }
+  }
+
+  // 按桶返回，不再拉成一条长河。
+  //
+  // 之前把 4 个段一次全铺、全局截断 100：CTS 真实分布是 6 个「回话了」
+  // 混在 108 个「打不通」里，最烫的人被埋掉，销售看到的还是一大坨。
+  // 现在一次只做一桶，每桶单独封顶 —— 最大的桶(打不通 108)也装得下。
+  const PER_BUCKET_LIMIT = 300
+  const ORDER: Segment[] = ['replied', 'callback_due', 'new_untouched', 'retry_channel']
+
+  const buckets = ORDER.map((segment) => {
+    const all = ranked.filter((c) => c.seg.segment === segment)
+    const people = all.slice(0, PER_BUCKET_LIMIT).map(toRow)
+    const meta = SEGMENT_ACTION_META[segment]
+    return {
+      segment,
+      label: meta.label,
+      howTo: meta.howTo,
+      batch: meta.batch,
+      total: all.length,
+      truncated: all.length > people.length,
+      people,
+      // 整桶一次性群发用。只给「该发邮件」的桶 —— 这批人已经证明电话打不通，
+      // 逐个点等于继续做无用功。没邮箱的人不在这里，页面要说出差额。
+      batchEmails:
+        meta.batch === 'send_email'
+          ? people.map((p) => p.email).filter((e): e is string => !!e)
+          : [],
+    }
+  })
 
   // 不在今天名单上的人（已成交 / 明确拒绝 / 以后才走）也要能找回来。
   // 否则员工一点「已付定金」，这个人就从 ME 唯一的 CRM 页面消失、再也翻不到 ——
@@ -180,11 +219,11 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     })
 
   return NextResponse.json({
-    worklist,
+    buckets,
     offList: off,
     counts: segmentCounts(models, now),
     totalContacts: models.length,
-    truncated: todayWorklist(models, now).length > worklist.length,
+    todoTotal: ranked.length,
     generatedAt: now.toISOString(),
   })
 }
