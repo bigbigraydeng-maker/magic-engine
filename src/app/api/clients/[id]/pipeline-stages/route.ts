@@ -117,8 +117,9 @@ export async function PATCH(
     if (!isMarketingAction(raw.marketingAction)) {
       return NextResponse.json({ error: `「${label}」的处理方式不合法` }, { status: 400 })
     }
+    // 上限挡住 int4 溢出（溢出会变成 500 带原始英文报错，运营看不懂）。
     const sortOrder = Number(raw.sortOrder)
-    if (!Number.isFinite(sortOrder)) {
+    if (!Number.isFinite(sortOrder) || sortOrder < 0 || sortOrder > 100_000) {
       return NextResponse.json({ error: `「${label}」的排序值不合法` }, { status: 400 })
     }
     rows.push({
@@ -141,10 +142,16 @@ export async function PATCH(
   const existingKeys = new Set((existing ?? []).map((r) => r.stage_key as string))
 
   const updates = rows.filter((r) => r.stageKey !== null)
+  const seenKeys = new Set<string>()
   for (const u of updates) {
     if (!existingKeys.has(u.stageKey as string)) {
       return NextResponse.json({ error: '有阶段已被改动，请刷新后重试' }, { status: 400 })
     }
+    // 同一个 key 在一个 upsert 里出现两次 → Postgres 直接报错。挡在这里给人话。
+    if (seenKeys.has(u.stageKey as string)) {
+      return NextResponse.json({ error: '同一个阶段重复了，请刷新后重试' }, { status: 400 })
+    }
+    seenKeys.add(u.stageKey as string)
   }
   const inserts = rows.filter((r) => r.stageKey === null)
 

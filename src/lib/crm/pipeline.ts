@@ -64,20 +64,23 @@ export const MARKETING_ACTION_META: Record<MarketingAction, MarketingActionMeta>
     tone: 'defer',
   },
   suppress: {
+    // 注意：这一档不只是「不自动发」，人也会从「今天该联系谁」里移走
+    // （见 SUPPRESSING_ACTIONS）。文案必须说出这件事，否则运营会以为
+    // 只是关掉了自动邮件，结果销售的通话名单里也不见了这个人。
     title: '停止营销',
-    behaviour: '系统不再自动发内容（你仍可自己手动联系）',
+    behaviour: '不再自动发内容，也不出现在销售今天的名单里（还能在「不在名单上的人」里找到）',
     example: '打不通、暂时没兴趣',
     tone: 'stop',
   },
   postsale: {
     title: '已成交 · 转售后',
-    behaviour: '停止推销，转成售后服务、继续照顾他',
+    behaviour: '停止推销，转成售后服务；也不再出现在销售今天的名单里',
     example: '付了定金 / 全款、行程还没走完',
     tone: 'postsale',
   },
   won: {
     title: '成交结案',
-    behaviour: '归档收好，不再有任何自动动作',
+    behaviour: '归档收好，不再有任何自动动作，也不出现在今天的名单里',
     example: '旅程结束、这单彻底完成',
     tone: 'won',
   },

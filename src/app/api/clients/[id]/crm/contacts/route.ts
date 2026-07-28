@@ -15,7 +15,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
-import { buildIdentities, resolveContact } from '@/lib/crm/identity'
+import { buildIdentities, resolveContact, AmbiguousIdentityError } from '@/lib/crm/identity'
 
 interface Body {
   name?: unknown
@@ -67,9 +67,35 @@ export async function POST(
       identities,
       displayName: name || null,
       source: 'me_manual',
+      // 手工录入:电话打错一位就可能撞上另一个老客户。自动合并会把两个真人的
+      // 全部历史搅在一起且不可逆,所以交给人看一眼;也不拿新名字盖掉老客户的名字。
+      mergeStrategy: 'reject',
+      overwriteDisplayName: false,
     })
     return NextResponse.json({ contactId: result.contactId, created: result.created })
   } catch (err) {
+    if (err instanceof AmbiguousIdentityError) {
+      // 电话和邮箱分别属于两个已存在的人 —— 多半是打错了。把两边摆出来让人看。
+      const { data: rows } = await supabaseAdmin
+        .from('contacts')
+        .select('id, display_name, primary_phone, primary_email')
+        .in('id', err.contactIds)
+        .eq('client_id', clientId)
+
+      return NextResponse.json(
+        {
+          error: '这个电话和邮箱分别属于两位已有的客人，请确认是不是填错了',
+          reason: 'ambiguous',
+          candidates: (rows ?? []).map((r) => ({
+            contactId: r.id,
+            name: r.display_name ?? '未留姓名',
+            phone: r.primary_phone,
+            email: r.primary_email,
+          })),
+        },
+        { status: 409 },
+      )
+    }
     return NextResponse.json(
       { error: err instanceof Error ? err.message : '录入失败' },
       { status: 500 },

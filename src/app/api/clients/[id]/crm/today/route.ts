@@ -15,7 +15,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
-import { todayWorklist, segmentCounts, type ContactLike } from '@/lib/crm/segments'
+import { todayWorklist, segmentCounts, segmentContact, type ContactLike } from '@/lib/crm/segments'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 
 interface RouteParams {
@@ -106,10 +106,17 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       id: c.id,
       displayName: c.display_name,
       // 「别再联系」的真相源是不可变的触点：contacts 列是尽力维护的反规范化，
-      // 它写失败过（或历史数据没有）时，只要任何一条触点解析出过 DNC，就照样排除。
+      // 它写失败过（或历史数据没有）时，只要任何一条触点说过 DNC，就照样排除。
+      // 两种写法都认：新写入走 metadata.do_not_contact，历史导入的 294 条
+      // 跟进记录只写了 metadata.outcome（见 scripts/import-cts-fb-leads.ts）。
       // 少打一通电话的代价，远小于打给明确说过别打的人。
       doNotContact:
-        c.do_not_contact || tps.some((t) => t.metadata?.do_not_contact === true),
+        c.do_not_contact ||
+        tps.some(
+          (t) =>
+            t.metadata?.do_not_contact === true ||
+            t.metadata?.outcome === 'do_not_contact',
+        ),
       stageSuppressed: stage?.suppressed ?? false,
       stageLabel: stage?.label ?? null,
       touchpoints: tps.map((t) => ({
@@ -149,8 +156,32 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       }
     })
 
+  // 不在今天名单上的人（已成交 / 明确拒绝 / 以后才走）也要能找回来。
+  // 否则员工一点「已付定金」，这个人就从 ME 唯一的 CRM 页面消失、再也翻不到 ——
+  // 而「已付定金」「即将出行」恰恰是最需要继续跟进的两批（催余款、确认行程）。
+  // 误点也必须能改回来，所以这里带上他们的当前阶段。
+  const off = models
+    .map((c) => ({ c, seg: segmentContact(c, now) }))
+    .filter((x) => x.seg.temperature === 'cold' || x.seg.temperature === 'off')
+    .slice(0, 300)
+    .map(({ c, seg }) => {
+      const row = contactById.get(c.id)
+      return {
+        contactId: c.id,
+        name: c.displayName || '未留姓名',
+        phone: row?.primary_phone ?? null,
+        email: row?.primary_email ?? null,
+        stage: row?.stage ?? null,
+        stageLabel: row?.stage ? (stageMeta.get(row.stage)?.label ?? row.stage) : null,
+        segment: seg.segment,
+        reason: seg.reason,
+        lastNote: (byContact.get(c.id) ?? [])[0]?.summary ?? null,
+      }
+    })
+
   return NextResponse.json({
     worklist,
+    offList: off,
     counts: segmentCounts(models, now),
     totalContacts: models.length,
     truncated: todayWorklist(models, now).length > worklist.length,

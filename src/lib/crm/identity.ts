@@ -108,6 +108,31 @@ export interface ResolveInput {
   source?: string
   /** 这次接触的时间；用于维护 last_seen_at。 */
   seenAt?: string
+  /**
+   * 这批身份同时命中两个已存在的人时怎么办。
+   *
+   *   'auto'（默认）  合并成一个 —— 渠道适配器用这个。Meta 表单里的电话和
+   *                  邮箱天然来自同一次提交，是同一个人的两个身份，合并才对。
+   *   'reject'       不合并，抛 AmbiguousIdentityError 交给人判断 —— 手工
+   *                  录入用这个。销售打字时电话打错一位、正好撞到另一个老客户，
+   *                  自动合并会把两个真人的全部历史搅在一起，且不可逆。
+   */
+  mergeStrategy?: 'auto' | 'reject'
+  /**
+   * 命中已有联系人时，要不要用这次的 displayName 覆盖原名。
+   *
+   * 默认 true：渠道适配器拿到的名字来自客户自己填的表单，越新越准。
+   * 手工录入传 false —— 打错电话撞到老客户时，不该把人家的名字改掉。
+   */
+  overwriteDisplayName?: boolean
+}
+
+/** 一批身份指向了两个不同的既有联系人，且调用方要求人工判断。 */
+export class AmbiguousIdentityError extends Error {
+  constructor(public readonly contactIds: string[]) {
+    super('这些联系方式分别属于两个已存在的客人')
+    this.name = 'AmbiguousIdentityError'
+  }
 }
 
 export interface ResolveResult {
@@ -170,6 +195,12 @@ export async function resolveContact(input: ResolveInput): Promise<ResolveResult
     created = true
   } else {
     // 多个命中 = 之前被拆成了两个人，现在有证据说明是同一个。选最早的做主体。
+    // 但「有证据」只对渠道适配器成立（同一次表单提交里的电话+邮箱）。手工录入
+    // 传 mergeStrategy='reject'：打错一位数就撞上另一个人是常态，合并不可逆，
+    // 必须交给人看一眼。
+    if (contactIds.length > 1 && input.mergeStrategy === 'reject') {
+      throw new AmbiguousIdentityError(contactIds)
+    }
     if (contactIds.length > 1) {
       const { data: rows } = await supabaseAdmin
         .from('contacts')
@@ -192,11 +223,14 @@ export async function resolveContact(input: ResolveInput): Promise<ResolveResult
       contactId = contactIds[0]
     }
 
+    // overwriteDisplayName=false 时不动原名 —— 手工录入撞到老客户，
+    // 不该把人家的名字改成新客人的。
+    const renameOk = input.overwriteDisplayName !== false
     await supabaseAdmin
       .from('contacts')
       .update({
         last_seen_at: seenAt,
-        ...(input.displayName ? { display_name: input.displayName } : {}),
+        ...(input.displayName && renameOk ? { display_name: input.displayName } : {}),
         updated_at: new Date().toISOString(),
       })
       .eq('id', contactId)

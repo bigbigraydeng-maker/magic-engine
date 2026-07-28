@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   MARKETING_ACTIONS,
   actionMeta,
+  stageSuppressesWorklist,
   type MarketingAction,
   type PipelineStage,
 } from '@/lib/crm/pipeline'
@@ -123,7 +124,10 @@ export function PipelineStagesPanel({ clientId }: Props) {
       setDirty(false)
       setSavedAt(new Date().toLocaleTimeString())
     } catch (err) {
-      setErrMsg(err instanceof Error ? err.message : String(err))
+      // 保存不是事务的：可能前几条已经落库。以服务端为准重新拉一次，
+      // 否则用户再点一次保存会把已存进去的那几条重复新增一遍。
+      setErrMsg(`${err instanceof Error ? err.message : String(err)}（已刷新成系统里的最新状态，请检查后重试）`)
+      await load()
     } finally {
       setSaving(false)
     }
@@ -227,7 +231,12 @@ export function PipelineStagesPanel({ clientId }: Props) {
                 </span>
 
                 <button
-                  onClick={() => void removeStage(row)}
+                  onClick={() => {
+                    // 删除会立刻以服务端为准重新加载，未保存的改名会丢。
+                    if (dirty && !window.confirm('你还有没保存的修改，删除会把它们丢掉。要先取消、去保存吗？\n\n点「确定」继续删除。')) return
+                    if (!row.isNew && !window.confirm(`确定删掉「${row.label}」这一步？`)) return
+                    void removeStage(row)
+                  }}
                   className="shrink-0 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-500 hover:border-red-300 hover:text-red-600"
                 >
                   删除
@@ -288,7 +297,9 @@ export function PipelineStagesPanel({ clientId }: Props) {
               {rows
                 .filter((r) => !r.isNew && r.stageKey !== blocked.stageKey)
                 .map((r) => (
-                  <option key={r.stageKey} value={r.stageKey}>{r.label}</option>
+                  <option key={r.stageKey} value={r.stageKey}>
+                    {r.label}（{actionMeta(r.marketingAction).title}）
+                  </option>
                 ))}
             </select>
             <button
@@ -305,6 +316,16 @@ export function PipelineStagesPanel({ clientId }: Props) {
               先不删
             </button>
           </div>
+          {(() => {
+            const target = rows.find((r) => r.stageKey === blocked.to)
+            if (!target || !stageSuppressesWorklist(target.marketingAction, target.isTerminal)) return null
+            return (
+              <p className="mt-2 text-xs font-bold text-red-700">
+                ⚠ 挪到「{target.label}」之后，这 {blocked.count} 位客人会从销售今天的名单里消失
+                （还能在「不在名单上的人」里找到）。
+              </p>
+            )
+          })()}
         </div>
       )}
 

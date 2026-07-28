@@ -36,8 +36,22 @@ interface Row {
   lastNote: string | null
 }
 
+/** 不在今天名单上的人：已成交 / 明确拒绝 / 以后才走。要能翻回来。 */
+interface OffRow {
+  contactId: string
+  name: string
+  phone: string | null
+  email: string | null
+  stage: string | null
+  stageLabel: string | null
+  segment: Segment
+  reason: string
+  lastNote: string | null
+}
+
 interface Payload {
   worklist: Row[]
+  offList: OffRow[]
   counts: Record<Segment, number>
   totalContacts: number
   truncated: boolean
@@ -93,7 +107,7 @@ function ComposeNote({
   clientId: string
   row: Row
   stages: StageOption[]
-  onDone: () => void
+  onDone: (msg: string) => void
   onCancel: () => void
 }) {
   const [clientRef] = useState(() => globalThis.crypto.randomUUID())
@@ -118,18 +132,32 @@ function ComposeNote({
           clientRef,
         }),
       })
-      const json = (await res.json()) as { error?: string }
+      const json = (await res.json()) as { error?: string; created?: boolean }
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
 
-      // 顺手把人改到下一步（可跳过）。
-      if (nextStage && nextStage !== row.stage) {
-        await fetch(`/api/clients/${clientId}/crm/contacts/${row.contactId}/stage`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ toStage: nextStage }),
-        })
+      // created=false 说明这一笔之前就存过（同一个记录框重试）。要说出来，
+      // 否则用户以为补写的内容存上了，其实服务端保留的是第一版。
+      if (json.created === false) {
+        onDone('这一笔之前已经记过了，没有重复记')
+        return
       }
-      onDone()
+
+      // 顺手把人改到下一步（可跳过）。改失败不能吞——用户以为推进了其实没有。
+      if (nextStage && nextStage !== row.stage) {
+        const stageRes = await fetch(
+          `/api/clients/${clientId}/crm/contacts/${row.contactId}/stage`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ toStage: nextStage }),
+          },
+        )
+        if (!stageRes.ok) {
+          onDone('✓ 记好了，但这一步没改上，再点一下试试')
+          return
+        }
+      }
+      onDone('✓ 记好了')
     } catch (e) {
       setErr(e instanceof Error ? e.message : '没存上，再试一次')
     } finally {
@@ -279,10 +307,142 @@ function PersonCard({
           row={row}
           stages={stages}
           onCancel={() => setComposing(false)}
-          onDone={() => { setComposing(false); onSaved('✓ 记好了') }}
+          onDone={(msg) => { setComposing(false); onSaved(msg) }}
         />
       )}
     </article>
+  )
+}
+
+/**
+ * 不在今天名单上的人。
+ *
+ * 已成交 / 已付定金 / 明确拒绝 / 以后才走的人不该占着今天的名单，但必须能翻回来 ——
+ * 「已付定金」「即将出行」恰恰是最需要继续跟进的两批（催余款、确认行程），
+ * 而且点错了也得能改回来。没有这一块，一次误点这个人就在系统里失踪了。
+ */
+function OffList({
+  clientId,
+  rows,
+  stages,
+  onSaved,
+}: {
+  clientId: string
+  rows: OffRow[]
+  stages: StageOption[]
+  onSaved: (msg: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const [editing, setEditing] = useState<string | null>(null)
+
+  if (rows.length === 0) return null
+
+  const kw = q.trim().toLowerCase()
+  const shown = kw
+    ? rows.filter(
+        (r) =>
+          r.name.toLowerCase().includes(kw) ||
+          (r.phone ?? '').includes(kw) ||
+          (r.email ?? '').toLowerCase().includes(kw),
+      )
+    : rows
+
+  const changeStage = async (row: OffRow, toStage: string, label: string) => {
+    if (!window.confirm(`现在：${row.stageLabel ?? '还没分步骤'} → 改成「${label}」？`)) return
+    setEditing(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/crm/contacts/${row.contactId}/stage`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ toStage }),
+      })
+      if (!res.ok) throw new Error()
+      onSaved('✓ 改好了')
+    } catch {
+      onSaved('没改上，再试一次')
+    }
+  }
+
+  return (
+    <section className="mt-8">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-left"
+      >
+        <span className="text-sm font-black text-me-charcoal">
+          {open ? '▾' : '▸'} 不在今天名单上的人 · {rows.length}
+        </span>
+        <span className="ml-2 text-xs text-me-charcoal/45">已成交 / 以后才走 / 别再联系</span>
+      </button>
+
+      {open && (
+        <div className="mt-3">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="按名字、电话或邮箱找人"
+            className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm focus:border-me-charcoal focus:outline-none"
+          />
+
+          <div className="mt-3 space-y-2">
+            {shown.map((r) => (
+              <article key={r.contactId} className="rounded-xl border border-black/10 bg-white p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <h4 className="min-w-0 truncate text-sm font-black text-me-charcoal">{r.name}</h4>
+                  {r.stageLabel && (
+                    <span className="shrink-0 rounded-full bg-me-ivory px-2 py-0.5 text-[11px] font-bold text-me-charcoal/60">
+                      {r.stageLabel}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-me-charcoal/55">{r.reason}</p>
+
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {r.phone && (
+                    <a href={`tel:${r.phone}`} className="rounded-lg border border-me-stone px-2.5 py-1.5 text-xs font-semibold text-me-charcoal">
+                      📞 {r.phone}
+                    </a>
+                  )}
+                  {r.email && (
+                    <a href={`mailto:${r.email}`} className="break-all rounded-lg border border-me-stone px-2.5 py-1.5 text-xs font-semibold text-me-charcoal">
+                      ✉️ {r.email}
+                    </a>
+                  )}
+                  {stages.length > 0 && (
+                    <button
+                      onClick={() => setEditing(editing === r.contactId ? null : r.contactId)}
+                      className="rounded-full border border-black/10 px-2.5 py-1 text-xs font-semibold text-me-charcoal/60"
+                    >
+                      改一下他到哪步了
+                    </button>
+                  )}
+                </div>
+
+                {editing === r.contactId && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {stages
+                      .filter((s) => s.stageKey !== r.stage)
+                      .map((s) => (
+                        <button
+                          key={s.stageKey}
+                          onClick={() => void changeStage(r, s.stageKey, s.label)}
+                          className="rounded-full bg-me-ivory px-3 py-1.5 text-xs font-bold text-me-charcoal"
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </article>
+            ))}
+            {shown.length === 0 && (
+              <p className="py-6 text-center text-sm text-me-charcoal/40">没找到这个人。</p>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -294,18 +454,30 @@ function NewContact({ clientId, onDone }: { clientId: string; onDone: () => void
   const [email, setEmail] = useState('')
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  /** 电话和邮箱指向两个不同的老客人 —— 多半是打错了，摆出来让人看。 */
+  const [clash, setClash] = useState<{ name: string; phone: string | null; email: string | null }[] | null>(null)
 
   const submit = async () => {
     if (saving) return
     setSaving(true)
     setErr(null)
+    setClash(null)
     try {
       const res = await fetch(`/api/clients/${clientId}/crm/contacts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, phone, email }),
       })
-      const json = (await res.json()) as { error?: string }
+      const json = (await res.json()) as {
+        error?: string
+        reason?: string
+        candidates?: { name: string; phone: string | null; email: string | null }[]
+      }
+      if (res.status === 409 && json.reason === 'ambiguous') {
+        setClash(json.candidates ?? [])
+        setErr(json.error ?? '这个电话和邮箱分别属于两位已有的客人')
+        return
+      }
       if (!res.ok) throw new Error(json.error ?? '录入失败')
       setName(''); setPhone(''); setEmail(''); setOpen(false)
       onDone()
@@ -339,6 +511,21 @@ function NewContact({ clientId, onDone }: { clientId: string; onDone: () => void
       </div>
       <p className="mt-2 text-xs text-me-charcoal/40">电话和邮箱至少填一个。已经在系统里的人不会重复建。</p>
       {err && <p className="mt-2 text-xs font-semibold text-[#C2453A]">⚠ {err}</p>}
+      {clash && (
+        <div className="mt-2 rounded-lg border border-[#C2453A]/30 bg-[#C2453A]/8 p-3">
+          <p className="text-xs font-bold text-[#C2453A]">这两位已经在系统里了：</p>
+          <ul className="mt-1 space-y-1">
+            {clash.map((c, i) => (
+              <li key={i} className="text-xs text-me-charcoal/70">
+                · {c.name}　{c.phone ?? ''} {c.email ?? ''}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-me-charcoal/60">
+            检查一下是不是号码或邮箱打错了。确实是同一个人的话，先只填一个联系方式。
+          </p>
+        </div>
+      )}
       <div className="mt-3 flex items-center gap-2">
         <button
           onClick={() => void submit()}
@@ -475,6 +662,13 @@ export default function CrmTodayPage() {
               名单太长，这里只显示前 100 个 —— 先把上面的打完。
             </p>
           )}
+
+          <OffList
+            clientId={clientId}
+            rows={data.offList ?? []}
+            stages={stages}
+            onSaved={afterWrite}
+          />
         </>
       )}
     </div>

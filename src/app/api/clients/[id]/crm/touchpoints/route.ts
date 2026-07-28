@@ -24,6 +24,9 @@ import { recordManualTouchpoint } from '@/lib/crm/touchpoints'
 // 否则会压制 segments 里「客户回话了」的判定。
 const FUTURE_SKEW_MS = 5 * 60 * 1000
 
+/** 一条跟进记录的上限。真实数据里最长的一条 300 字符出头。 */
+const MAX_NOTE_CHARS = 5000
+
 interface Body {
   contactId?: unknown
   direction?: unknown
@@ -60,7 +63,11 @@ export async function POST(
     return NextResponse.json({ error: '缺少 clientRef(幂等键)' }, { status: 400 })
   }
 
-  const note = typeof body.note === 'string' ? body.note.trim() : ''
+  // 剥掉 NUL（Postgres 的 text 收不了，会把整条写入炸成 500）；再封顶,
+  // 一条跟进记录不该是一篇文章,而且原文会整条送去解析。
+  const note = typeof body.note === 'string'
+    ? body.note.replace(/\u0000/g, '').trim().slice(0, MAX_NOTE_CHARS)
+    : ''
   if (!note) {
     return NextResponse.json({ error: '接触记录不能为空' }, { status: 400 })
   }
