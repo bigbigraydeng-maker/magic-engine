@@ -18,6 +18,7 @@ import {
   linkMessengerConversation,
   type IdentityIndex,
 } from '../link-contacts'
+import { segmentContact, type ContactLike, type TouchpointLike } from '@/lib/crm/segments'
 
 function index(opts: { emails?: [string, string][]; psids?: [string, string][] }): IdentityIndex {
   return {
@@ -135,11 +136,12 @@ const baseInput = {
   psid: 'psid_9',
   participantName: 'Robyn Richards',
   messageCount: 4,
-  lastMessageFrom: 'customer' as const,
+  lastMessageFrom: 'page' as const,
   lastMessageAt: '2026-07-24T10:00:00+0000',
+  // 客户先留言(带邮箱)→ 真人在收件箱回复(source:chat)。真人回复才写 outbound 触点。
   messages: [
-    { direction: 'outbound' as const, body: 'Hi from CTS', sentAt: '2026-07-24T08:00:00+0000' },
-    { direction: 'inbound' as const, body: 'robyn.richards1@gmail.com', sentAt: '2026-07-24T10:00:00+0000' },
+    { direction: 'inbound' as const, body: 'robyn.richards1@gmail.com', sentAt: '2026-07-24T08:00:00+0000' },
+    { direction: 'outbound' as const, body: 'Hi from CTS', sentAt: '2026-07-24T10:00:00+0000', tags: ['source:chat'] },
   ],
   existingContactId: null,
 }
@@ -190,5 +192,88 @@ describe('linkMessengerConversation', () => {
     expect(calls.conversationsUpdate).toBe(0) // 已接过，不再改 contact_id
     expect(calls.touchpointUpserts[0]).toHaveLength(2) // 但触点照常刷新
     expect(calls.contactsWrite).toBe(0)
+  })
+})
+
+// ── 端到端:三种线程 → 分段 ──────────────────────────────────────────────────
+//
+// 魏征在 PR #673 复审提的:Page 出站包含 Meta 自动回复(instant reply / Business AI),
+// 把它当「我们联系过」会让热新线索掉出「今天该联系谁」名单。这里把 linker 实际写出的
+// 触点喂回 segments,断言最终分段 —— 核心:一条 AI 自动回复不该改变新线索的分段。
+
+const NOW = new Date('2026-07-25T00:00:00Z')
+const AT = (h: number) => `2026-07-24T${String(h).padStart(2, '0')}:00:00+0000`
+
+type ThreadMsg = { direction: 'inbound' | 'outbound'; body: string; sentAt: string; tags?: string[] }
+
+/** 跑一遍 linker（按 psid 强制接上人），把它写出的触点转成 ContactLike，返回最终分段。 */
+async function segmentAfterLink(messages: ThreadMsg[]) {
+  const calls = stubSupabase()
+  await linkMessengerConversation(
+    { ...baseInput, messages, existingContactId: null, psid: 'psid_9' },
+    index({ psids: [['psid_9', 'contact-Z']] }),
+  )
+  const rows = calls.touchpointUpserts[0] ?? []
+  const touchpoints: TouchpointLike[] = rows.map((r) => ({
+    channel: r.channel as string,
+    direction: r.direction as 'inbound' | 'outbound',
+    occurredAt: r.occurred_at as string,
+  }))
+  const contact: ContactLike = { id: 'contact-Z', displayName: 'Robyn', doNotContact: false, touchpoints }
+  return { segment: segmentContact(contact, NOW).segment, directions: touchpoints.map((t) => t.direction).sort() }
+}
+
+describe('linkMessengerConversation → segments（真人回复 vs AI 自动回复）', () => {
+  it('customer-last：客户留言、没人回 → new_untouched（从没人碰过）', async () => {
+    const { segment, directions } = await segmentAfterLink([
+      { direction: 'inbound', body: 'hi, I want the China tour', sentAt: AT(8) },
+    ])
+    expect(directions).toEqual(['inbound'])
+    expect(segment).toBe('new_untouched')
+  })
+
+  it('AI-last：客户留言后只有 Business AI 自动回了一句 → 仍是 new_untouched（修复点）', async () => {
+    const { segment, directions } = await segmentAfterLink([
+      { direction: 'inbound', body: 'hi, I want the China tour', sentAt: AT(8) },
+      {
+        direction: 'outbound',
+        body: 'Thanks for messaging CTS! An agent will reply soon.',
+        sentAt: AT(9),
+        tags: ['inbox', 'source:business_ai'],
+      },
+    ])
+    // 关键:AI 自动回复没写 outbound 触点 → lastOutbound 仍为 0 → 跟「没人回」同一段。
+    expect(directions).toEqual(['inbound'])
+    expect(segment).toBe('new_untouched')
+  })
+
+  it('human-last：客户留言后真人客服回了（source:chat）→ 写 outbound 触点、脱离 new_untouched', async () => {
+    const { segment, directions } = await segmentAfterLink([
+      { direction: 'inbound', body: 'hi, I want the China tour', sentAt: AT(8) },
+      { direction: 'outbound', body: 'Sure! Which dates suit you?', sentAt: AT(9), tags: ['inbox', 'source:chat'] },
+    ])
+    expect(directions).toEqual(['inbound', 'outbound'])
+    // 真人回过、客户还没接话 → 聊过没下文（仍在名单里，只是不再冒充「从没人碰过」）。
+    expect(segment).toBe('stale_conversation')
+  })
+
+  it('欢迎语在客户开口之前（即便 tag 像真人）→ 不算人工联系 → new_untouched', async () => {
+    const { segment, directions } = await segmentAfterLink([
+      { direction: 'outbound', body: 'Welcome to CTS 👋', sentAt: AT(8), tags: ['source:chat'] },
+      { direction: 'inbound', body: 'hi', sentAt: AT(10) },
+    ])
+    expect(directions).toEqual(['inbound'])
+    expect(segment).toBe('new_untouched')
+  })
+
+  it('真人回复后客户又追问、末尾还有 AI 自动确认 → replied（AI 确认不掩盖真人欠回复）', async () => {
+    const { segment } = await segmentAfterLink([
+      { direction: 'inbound', body: 'hi', sentAt: AT(8) },
+      { direction: 'outbound', body: 'Sure, which dates?', sentAt: AT(9), tags: ['source:chat'] },
+      { direction: 'inbound', body: 'early November', sentAt: AT(10) },
+      { direction: 'outbound', body: 'Thanks, an agent will follow up.', sentAt: AT(11), tags: ['source:business_ai'] },
+    ])
+    // lastHumanOut = 09:00，客户最后一条 10:00 更晚 → 客户在等我们（真人）回。
+    expect(segment).toBe('replied')
   })
 })

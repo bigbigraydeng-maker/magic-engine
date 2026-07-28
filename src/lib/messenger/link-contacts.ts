@@ -16,6 +16,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { isAutomatedPageMessage } from '@/lib/messenger/automation'
 
 export interface IdentityIndex {
   /** 归一化邮箱 -> contactId（同一 client 下邮箱唯一，所以是 1:1）。 */
@@ -89,7 +90,13 @@ export interface LinkConversationInput {
   lastMessageFrom: 'customer' | 'page' | null
   /** conversations.last_message_at，用于把 contact.last_seen_at 往前推。 */
   lastMessageAt: string | null
-  messages: { direction: 'inbound' | 'outbound'; body: string; sentAt: string }[]
+  messages: {
+    direction: 'inbound' | 'outbound'
+    body: string
+    sentAt: string
+    /** Meta 的 `tags.data[].name`（判定真人 vs 自动回复用，见 lib/messenger/automation）。 */
+    tags?: string[]
+  }[]
   /** conversations.contact_id 现值；非空则已接过，只刷新触点、不重新匹配。 */
   existingContactId: string | null
 }
@@ -109,6 +116,34 @@ function lastSentAt(
   let latest: string | null = null
   for (const m of messages) {
     if (m.direction !== direction) continue
+    if (!latest || m.sentAt > latest) latest = m.sentAt
+  }
+  return latest
+}
+
+/**
+ * 最后一条**真人**出站消息的时间 —— Meta 的自动回复(欢迎语 / Business AI)不算。
+ *
+ * 只有真人回复才配写「我们联系过」触点:一条机器人自动问候不是「我们联系过」,把它
+ * 当人工联系会让本该 `new_untouched` 的热新线索掉出「今天该联系谁」名单(见
+ * lib/messenger/automation 的判定说明)。返回 null = 这段对话里没有任何真人回复。
+ */
+function lastHumanOutboundAt(messages: LinkConversationInput['messages']): string | null {
+  // 某条出站消息「之前是否已有客户来信」= 线程里存在时间不晚于它的 inbound。
+  // 取最早的一条 inbound 时间做界:出站时间 >= 它 → 客户先留过言 → 这条出站才可能
+  // 是真人在回客户;否则是我们先开口 = 自动欢迎语/广播。
+  let firstInboundAt: string | null = null
+  for (const m of messages) {
+    if (m.direction === 'inbound' && (firstInboundAt === null || m.sentAt < firstInboundAt)) {
+      firstInboundAt = m.sentAt
+    }
+  }
+
+  let latest: string | null = null
+  for (const m of messages) {
+    if (m.direction !== 'outbound') continue
+    const hasPriorInbound = firstInboundAt !== null && m.sentAt >= firstInboundAt
+    if (isAutomatedPageMessage({ tags: m.tags ?? [], hasPriorInbound })) continue
     if (!latest || m.sentAt > latest) latest = m.sentAt
   }
   return latest
@@ -164,8 +199,11 @@ export async function linkMessengerConversation(
 
   // 写/刷新两条汇总触点：客户来信 + 我们回复。分两条，segments 才能让
   // 「客户在等我们」只在客户更晚时才触发，而不是一段对话糊成一个方向。
+  //
+  // 出站只认**真人**回复:Meta 的自动回复(欢迎语/Business AI)不写「我们联系过」，
+  // 否则一条机器人问候会把从没人碰过的热新线索顶出「今天该联系谁」名单。
   const lastIn = lastSentAt(input.messages, 'inbound')
-  const lastOut = lastSentAt(input.messages, 'outbound')
+  const lastOut = lastHumanOutboundAt(input.messages)
 
   const rows: Record<string, unknown>[] = []
   if (lastIn) {

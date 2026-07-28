@@ -192,6 +192,7 @@ export async function syncClientMessenger(
               direction: m.direction,
               body: m.body,
               sentAt: m.sentAt,
+              tags: m.tags,
             })),
             existingContactId: stored.contactId,
           },
