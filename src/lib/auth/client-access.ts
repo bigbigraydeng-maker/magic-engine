@@ -41,12 +41,17 @@ export async function requireDashboardClientAccess(
   const envPerms = getUserPermissions(email)
 
   if (envPerms?.role === 'admin') {
+    // 受限管理员（DEMO_ADMINS）：FDE 能力不变，但只在自己那一个客户范围内。
+    // 不加这个判断的话，演示账号改一下 URL 就能读到全部真实客户的数据。
+    if (envPerms.allowedClientId && envPerms.allowedClientId !== clientId) {
+      return { ok: false, status: 403, error: 'Forbidden', reason: 'forbidden' }
+    }
     return {
       ok: true,
       user: session.user,
       role: 'admin',
       tier: 'admin',
-      allowedClientId: null,
+      allowedClientId: envPerms.allowedClientId,
     }
   }
 
