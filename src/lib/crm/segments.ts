@@ -163,6 +163,16 @@ const SEGMENT_META: Record<Segment, { temperature: Temperature; priority: number
 /** 结论性的通话结果 —— 这些人不该出现在今天的名单上。 */
 const DEAD_OUTCOMES = new Set(['bad_number', 'not_interested', 'do_not_contact'])
 
+/** 逾期超过这个时长的「约定回电」视为解析错误，不再进名单。 */
+const STALE_CALLBACK_MS = 14 * 86_400_000
+
+/**
+ * 这几桶按「最近的排前面」—— 线索是会凉的，今天进线的今天打最容易接。
+ * 其余桶（打过没人接 / 聊过没下文）保持「等得最久的排前面」，
+ * 那批人单独成桶的目的就是防止沉底。
+ */
+const FRESH_FIRST_SEGMENTS = new Set<Segment>(['replied', 'new_untouched'])
+
 function ts(v: string | null | undefined): number {
   if (!v) return 0
   const t = new Date(v).getTime()
@@ -225,10 +235,22 @@ export function segmentContact(contact: ContactLike, now: Date): SegmentResult {
   }
 
   // 3) 约好的时间到了
+  //
+  // 两处都要防：
+  //  · 取「最近的一条」而不是最早的 —— 同一个人可能被改约过几次，
+  //    该按最后一次约定打，而不是翻出半年前那次。
+  //  · 丢掉早于 14 天的 —— 那种约定几乎必然是留言解析漏了年份。
+  //    CTS 线上 23 条 callback_at 全部落在 30 天以前，最早 2023-07-07，
+  //    名单上显示成「该回电了 · 1118 天前」。入库侧已经拦了，这里再拦一次，
+  //    让存量坏数据不必等清洗就先不出现在名单上。
   const dueCallback = tps
     .map((t) => t.callbackAt)
-    .filter((c): c is string => !!c && ts(c) <= nowMs)
-    .sort((a, b) => ts(a) - ts(b))[0]
+    .filter((c): c is string => {
+      if (!c) return false
+      const at = ts(c)
+      return at <= nowMs && nowMs - at <= STALE_CALLBACK_MS
+    })
+    .sort((a, b) => ts(b) - ts(a))[0]
   if (dueCallback) {
     return make('callback_due', '之前约好这个时间回电', 'phone', dueCallback)
   }
@@ -296,8 +318,17 @@ export function todayWorklist(
         a.seg.priority - b.seg.priority ||
         // 约好的时间越早越该先打
         (a.seg.dueAt && b.seg.dueAt ? ts(a.seg.dueAt) - ts(b.seg.dueAt) : 0) ||
-        // 其余按最久没动静的排前面（0 = 从没来往过，也排前面）
-        ts(a.seg.lastTouchAt) - ts(b.seg.lastTouchAt),
+        // 其余按桶的性质决定方向 —— 两种需求是真的冲突，不能一刀切：
+        //
+        //  · 热线索桶（新客人 / 客户回话了）：最近的排前面。线索会凉，
+        //    今天填表的人今天打最容易接；原先「最久没动静排最前」把三个月前
+        //    的压在今天进线的前面，跟「新客人」桶自己写的「先打里面最新的」
+        //    自相矛盾。
+        //  · 回捞桶（打过没人接 / 聊过没下文）：等得最久的排前面。这批人本来
+        //    就是要防止沉底才单独成桶的，按最近排等于让老线索永远轮不到。
+        (FRESH_FIRST_SEGMENTS.has(a.seg.segment) && FRESH_FIRST_SEGMENTS.has(b.seg.segment)
+          ? ts(b.seg.lastTouchAt) - ts(a.seg.lastTouchAt)
+          : ts(a.seg.lastTouchAt) - ts(b.seg.lastTouchAt)),
     )
 }
 
