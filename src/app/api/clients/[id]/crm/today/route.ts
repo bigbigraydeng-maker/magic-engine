@@ -41,6 +41,7 @@ interface ContactRow {
   primary_email: string | null
   do_not_contact: boolean
   stage: string | null
+  pinned_at: string | null
 }
 
 interface TouchRow {
@@ -78,7 +79,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       fetchAll<ContactRow>((from, to) =>
         supabaseAdmin
           .from('contacts')
-          .select('id, display_name, primary_phone, primary_email, do_not_contact, stage')
+          .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, pinned_at')
           .eq('client_id', clientId)
           .order('id', { ascending: true })
           .range(from, to),
@@ -165,6 +166,44 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
 
   const ranked = todayWorklist(models, now)
 
+  /**
+   * 系统提议改阶段 —— 提议，不自动改。
+   *
+   * 为什么不自动改：改错了阶段，人得去翻「哪里被改了」，一次就不再信这一页。
+   * 提议错了他忽略掉即可，代价不对称。
+   *
+   * 为什么必须有：阶段目前 100% 靠人点，而 CTS 那份手工 CRM 正是死在这 ——
+   * 128 行里「阶段」列 0 个填了，自动提醒退化成 122 条一模一样的红字。
+   * 不给提示，这套系统会以同样的方式腐烂一遍。
+   *
+   * 只做一条高置信度的：客户明确说了不感兴趣 / 别再联系，而阶段还停在
+   * 会继续被催的档位 → 提议移到该客户的「停止营销」阶段。
+   * 用 marketing_action 而不是写死阶段名 —— 每个客户的阶段是自己配的
+   * （诊所叫「不适合治疗」，旅行社叫「已流失」）。
+   */
+  const suppressStage = stageRows.find(
+    (s) => s.marketing_action === 'suppress',
+  )
+
+  const suggestStage = (
+    c: (typeof ranked)[number],
+    currentStage: string | null,
+  ): { toStage: string; label: string; why: string } | null => {
+    if (!suppressStage) return null
+    if (currentStage === suppressStage.stage_key) return null
+
+    const dead = c.touchpoints.some(
+      (t) => t.outcome === 'not_interested' || t.outcome === 'do_not_contact',
+    )
+    if (!dead) return null
+
+    return {
+      toStage: suppressStage.stage_key,
+      label: suppressStage.label,
+      why: '通话记录里客户明确说过不感兴趣 / 别再联系',
+    }
+  }
+
   const toRow = (c: (typeof ranked)[number]) => {
     const row = contactById.get(c.id)
     const last = (byContact.get(c.id) ?? [])[0]
@@ -183,6 +222,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       dueAt: c.seg.dueAt,
       lastTouchAt: c.seg.lastTouchAt,
       lastNote: last?.summary ?? null,
+      pinned: Boolean(row?.pinned_at),
+      pinnedAt: row?.pinned_at ?? null,
+      suggestedStage: suggestStage(c, row?.stage ?? null),
     }
   }
 
@@ -214,7 +256,18 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   }
 
   const buckets = GROUPS.map(({ key, members }) => {
-    const all = ranked.filter((c) => members.includes(c.seg.segment))
+    const all = ranked
+      .filter((c) => members.includes(c.seg.segment))
+      // 置顶的排最前（多个置顶按最近钉的在上）。只在桶内生效 ——
+      // 跨桶置顶会让人脱离「这批该怎么办」的说明，反而不知道要干嘛。
+      .sort((a, b) => {
+        const pa = contactById.get(a.id)?.pinned_at ?? null
+        const pb = contactById.get(b.id)?.pinned_at ?? null
+        if (pa && pb) return pb.localeCompare(pa)
+        if (pa) return -1
+        if (pb) return 1
+        return 0
+      })
     const people = all.slice(0, PER_BUCKET_LIMIT).map(toRow)
     const base = SEGMENT_ACTION_META[members[0]]
     const meta = { ...base, ...(GROUP_META[key] ?? {}) }
