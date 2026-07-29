@@ -59,6 +59,28 @@ describe('DEMO_ADMINS — 受限管理员', () => {
     })
   })
 
+  it('即使邮箱属于 ADMIN_EMAIL_DOMAIN 提权域名，仍保持受限', () => {
+    // 通用演示账号很可能就叫 demo@magicengine.com.au —— 正好落在提权域名里。
+    // 判定顺序（DEMO_ADMINS 在最前）是唯一的防线，将来有人调换顺序
+    // 会静默把演示账号提成完整管理员，所以必须锁死。
+    process.env.DEMO_ADMINS = `demo@magicengine.com.au:${DEMO}`
+    process.env.ADMIN_EMAIL_DOMAIN = 'magicengine.com.au'
+    expect(getUserPermissions('demo@magicengine.com.au')).toEqual({
+      role: 'admin',
+      allowedClientId: DEMO,
+    })
+  })
+
+  it('同域名的其他邮箱仍按域名规则拿到完整管理员', () => {
+    // 确认上一条没有把整个域名规则误伤掉
+    process.env.DEMO_ADMINS = `demo@magicengine.com.au:${DEMO}`
+    process.env.ADMIN_EMAIL_DOMAIN = 'magicengine.com.au'
+    expect(getUserPermissions('zhong@magicengine.com.au')).toEqual({
+      role: 'admin',
+      allowedClientId: null,
+    })
+  })
+
   it('不在名单里的邮箱仍然拿不到任何权限', () => {
     process.env.DEMO_ADMINS = `friend@example.com:${DEMO}`
     expect(getUserPermissions('stranger@example.com')).toBeNull()
