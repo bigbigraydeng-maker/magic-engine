@@ -12,6 +12,7 @@ import type {
   ProvenPattern,
   FailedExperiment,
   DecisionHistory,
+  GlobalLesson,
   CreateLearnedPreferenceInput,
   CreateProvenPatternInput,
   CreateFailedExperimentInput,
@@ -35,13 +36,16 @@ export async function loadMemoryForClient(
     minConfidence = 0.6,
   } = options
 
-  const [preferences, patterns, experiments, decisions] = await Promise.all([
+  const [preferences, patterns, experiments, decisions, globalLessons] = await Promise.all([
     loadPreferences(supabase, clientId, flywheel, minConfidence),
     loadPatterns(supabase, clientId, flywheel),
     loadFailedExperiments(supabase, clientId),
     loadRecentDecisions(supabase, clientId, maxRecentDecisions),
+    loadGlobalLessons(supabase, clientId, flywheel, minConfidence),
   ])
 
+  // 🔴 刻意不含 globalLessons：全局经验对每个客户都存在，计入会让 has_content 恒为
+  // true，从而改变所有既有调用方的行为（原本无记忆的客户不输出 memory 块）。
   const has_content =
     preferences.length > 0 ||
     patterns.length > 0 ||
@@ -54,6 +58,14 @@ export async function loadMemoryForClient(
       content: p.content,
       confidence_score: p.confidence_score,
       flywheel: p.flywheel ?? null,
+    })),
+    global_lessons: globalLessons.map((l) => ({
+      lesson: l.lesson,
+      rationale: l.rationale ?? null,
+      scope: l.scope,
+      industry: l.industry ?? null,
+      flywheel: l.flywheel ?? null,
+      confidence: l.confidence,
     })),
     proven_patterns: patterns.map((p) => ({
       pattern_type: p.pattern_type,
@@ -104,6 +116,72 @@ async function loadPreferences(
       return []
     }
     return (data ?? []) as LearnedPreference[]
+  } catch {
+    return []
+  }
+}
+
+/**
+ * 加载跨客户经验（global_learned_lessons）。
+ *
+ * 匹配规则（三选一即命中）：
+ *   - scope='global'                    → 对所有客户生效
+ *   - scope='channel'                   → 渠道通用（如「Meta AI 会删合规词」）
+ *   - scope='industry' 且 industry 相符 → 仅同行业客户
+ *
+ * 额外过滤：
+ *   - is_active=true
+ *   - confidence >= minConfidence（与客户级 preferences 同一门槛）
+ *   - contradicted_count <= confirmed_count（被反例推翻更多次的经验不再注入）
+ *
+ * 任何失败都降级为空数组，绝不阻塞 agent —— 与本文件其他 loader 行为一致。
+ */
+async function loadGlobalLessons(
+  supabase: SupabaseClient,
+  clientId: string,
+  flywheel?: string,
+  minConfidence?: number,
+): Promise<GlobalLesson[]> {
+  try {
+    // 先取客户行业；取不到就只拿 global/channel 两层，不影响主流程
+    let industry: string | null = null
+    const { data: clientRow } = await supabase
+      .from('clients')
+      .select('industry')
+      .eq('id', clientId)
+      .maybeSingle()
+    if (clientRow && typeof (clientRow as { industry?: unknown }).industry === 'string') {
+      industry = (clientRow as { industry: string }).industry
+    }
+
+    let q = supabase
+      .from('global_learned_lessons')
+      .select('*')
+      .eq('is_active', true)
+      .gte('confidence', minConfidence ?? 0.6)
+      .order('confidence', { ascending: false })
+      .limit(25)
+
+    // scope 匹配：global / channel 恒命中；industry 层只在行业相符时命中
+    q = industry
+      ? q.or(`scope.eq.global,scope.eq.channel,and(scope.eq.industry,industry.eq.${industry})`)
+      : q.or('scope.eq.global,scope.eq.channel')
+
+    if (flywheel) {
+      // 'cross' 表示跨飞轮通用，任何飞轮都应读到
+      q = q.or(`flywheel.eq.${flywheel},flywheel.eq.cross,flywheel.is.null`)
+    }
+
+    const { data, error } = await q
+    if (error) {
+      console.warn('[memory] loadGlobalLessons error:', error.message)
+      return []
+    }
+
+    // 被推翻次数多于确认次数的经验不再注入（把偶然当规律的防线）
+    return ((data ?? []) as GlobalLesson[]).filter(
+      (l) => (l.contradicted_count ?? 0) <= (l.confirmed_count ?? 1),
+    )
   } catch {
     return []
   }
