@@ -41,6 +41,7 @@ interface ContactRow {
 }
 
 interface TouchRow {
+  id: string
   contact_id: string
   channel: string
   direction: 'inbound' | 'outbound'
@@ -101,9 +102,12 @@ export async function GET(
       fetchAll<TouchRow>((from, to) =>
         supabaseAdmin
           .from('contact_touchpoints')
-          .select('contact_id, channel, direction, occurred_at, summary, metadata')
+          .select('id, contact_id, channel, direction, occurred_at, summary, metadata')
           .eq('client_id', clientId)
           .order('occurred_at', { ascending: false })
+          // 同一时刻的多条（导入数据里表单与通话常共用一个时间戳）需要一个
+          // 确定的次序，否则每次刷新顺序都可能不同。
+          .order('id', { ascending: false })
           .range(from, to),
       ),
       fetchAll<StageRow>((from, to) =>
@@ -161,7 +165,12 @@ export async function GET(
         ),
       stageSuppressed: stage?.suppressed ?? false,
       stageLabel: stage?.label ?? null,
-      touchpoints: tps.map((t) => ({
+      // 时间线按时间正序：最早的在最上，一条条往下读，跟人回忆一段关系的
+      // 顺序一致。原先是倒序（最新在最上），于是「填了表单」出现在它引发的
+      // 那条留言下面 —— 因果被倒过来，读起来是乱的。
+      // 查询本身仍是倒序（上面的 min/max 与分段逻辑与顺序无关），只在
+      // 输出时翻转，避免影响其它依赖该顺序的调用方。
+      touchpoints: [...tps].reverse().map((t) => ({
         channel: t.channel,
         direction: t.direction,
         occurredAt: t.occurred_at,

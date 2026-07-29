@@ -40,6 +40,9 @@ interface Row {
   dueAt: string | null
   lastTouchAt: string | null
   lastNote: string | null
+  pinned: boolean
+  pinnedAt: string | null
+  suggestedStage: { toStage: string; label: string; why: string } | null
 }
 
 interface OffRow {
@@ -109,32 +112,82 @@ function dueText(iso: string): string {
   return `${day} ${time}`
 }
 
-/** 看板上的一张人卡。列很窄，只放最少的信息，其余进抽屉。 */
-function Card({ row, onOpen }: { row: Row; onOpen: () => void }) {
+/**
+ * 看板上的一张人卡。列很窄，只放最少的信息，其余进抽屉。
+ *
+ * 整张卡不能再是一个 <button> —— 图钉和「改阶段」提议都要能单独点，
+ * 按钮套按钮既是非法 HTML，点击也会互相吞掉。所以主体是可点区域，
+ * 另外两个动作各自成键。
+ */
+function Card({
+  row,
+  onOpen,
+  onTogglePin,
+  onAcceptStage,
+}: {
+  row: Row
+  onOpen: () => void
+  onTogglePin: (row: Row) => void
+  onAcceptStage: (row: Row) => void
+}) {
   const waited = waitedText(row.lastTouchAt)
   return (
-    <button
-      onClick={onOpen}
-      className="mb-2 block w-full rounded-xl border border-me-charcoal/10 bg-white p-3 text-left shadow-sm transition hover:border-me-ochre/50"
+    <div
+      className={`relative mb-2 rounded-xl border bg-white shadow-sm transition ${
+        row.pinned ? 'border-me-ochre/60' : 'border-me-charcoal/10 hover:border-me-ochre/50'
+      }`}
     >
-      <div className="truncate text-[13px] font-black text-me-charcoal">{row.name}</div>
-      <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-me-charcoal/55">{row.reason}</p>
+      {/* 图钉：钉住的人排在本桶最前 */}
+      <button
+        type="button"
+        onClick={() => onTogglePin(row)}
+        title={row.pinned ? '取消置顶' : '置顶到这一批最前面'}
+        aria-label={row.pinned ? '取消置顶' : '置顶'}
+        className={`absolute right-1.5 top-1.5 z-10 rounded-md px-1.5 py-1 text-[13px] leading-none transition ${
+          row.pinned
+            ? 'text-me-ochre'
+            : 'text-me-charcoal/20 hover:bg-me-ivory hover:text-me-charcoal/50'
+        }`}
+      >
+        {row.pinned ? '📌' : '📍'}
+      </button>
 
-      {row.dueAt && (
-        <p className="mt-1.5 rounded-md bg-[#C2453A]/8 px-2 py-1 text-[10px] font-bold text-[#C2453A]">
-          约的是：{dueText(row.dueAt)}
-        </p>
-      )}
+      <button onClick={onOpen} className="block w-full p-3 pr-8 text-left">
+        <div className="truncate text-[13px] font-black text-me-charcoal">{row.name}</div>
+        <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-me-charcoal/55">{row.reason}</p>
 
-      <div className="mt-1.5 flex items-center justify-between gap-2">
-        {waited && <span className="text-[10px] text-me-charcoal/35">{waited}</span>}
-        {row.stageLabel && (
-          <span className="truncate rounded-full bg-me-ivory px-1.5 py-0.5 text-[10px] font-bold text-me-charcoal/55">
-            {row.stageLabel}
-          </span>
+        {row.dueAt && (
+          <p className="mt-1.5 rounded-md bg-[#C2453A]/8 px-2 py-1 text-[10px] font-bold text-[#C2453A]">
+            约的是：{dueText(row.dueAt)}
+          </p>
         )}
-      </div>
-    </button>
+
+        <div className="mt-1.5 flex items-center justify-between gap-2">
+          {waited && <span className="text-[10px] text-me-charcoal/35">{waited}</span>}
+          {row.stageLabel && (
+            <span className="truncate rounded-full bg-me-ivory px-1.5 py-0.5 text-[10px] font-bold text-me-charcoal/55">
+              {row.stageLabel}
+            </span>
+          )}
+        </div>
+      </button>
+
+      {/* 系统提议改阶段 —— 提议，不自动改。点一下才生效。 */}
+      {row.suggestedStage && (
+        <div className="border-t border-me-charcoal/8 bg-me-ivory/60 px-3 py-2">
+          <p className="text-[10px] leading-snug text-me-charcoal/55">
+            {row.suggestedStage.why}
+          </p>
+          <button
+            type="button"
+            onClick={() => onAcceptStage(row)}
+            className="mt-1.5 w-full rounded-lg border border-me-ochre/40 bg-white px-2 py-1 text-[11px] font-bold text-me-ochre hover:bg-me-ochre/10"
+          >
+            改成「{row.suggestedStage.label}」
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -471,6 +524,43 @@ export default function CrmTodayPage() {
     window.setTimeout(() => setToast(null), 2200)
   }
 
+  /** 图钉：钉住的人排在本桶最前。 */
+  const togglePin = async (row: Row) => {
+    const next = !row.pinned
+    try {
+      const res = await fetch(`/api/clients/${clientId}/crm/contacts/${row.contactId}/pin`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pinned: next }),
+        credentials: 'include',
+      })
+      if (!res.ok) throw new Error('操作失败')
+      afterWrite(next ? `已置顶 ${row.name}` : `已取消置顶 ${row.name}`)
+    } catch {
+      afterWrite('置顶失败，请重试', false)
+    }
+  }
+
+  /** 接受系统提议的阶段变更 —— 人点了才改。 */
+  const acceptStage = async (row: Row) => {
+    if (!row.suggestedStage) return
+    try {
+      const res = await fetch(`/api/clients/${clientId}/crm/contacts/${row.contactId}/stage`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          toStage: row.suggestedStage.toStage,
+          note: `系统提议：${row.suggestedStage.why}`,
+        }),
+        credentials: 'include',
+      })
+      if (!res.ok) throw new Error('操作失败')
+      afterWrite(`${row.name} 已改为「${row.suggestedStage.label}」`)
+    } catch {
+      afterWrite('改阶段失败，请重试', false)
+    }
+  }
+
   const buckets = data?.buckets ?? []
   const doneToday = (data?.doneToday ?? 0) + localDone
 
@@ -486,6 +576,11 @@ export default function CrmTodayPage() {
           suggestedChannel: 'none' as const,
           dueAt: null,
           lastTouchAt: null,
+          // 不在名单上的人不参与置顶排序，也不给阶段提议 ——
+          // 他们已经是结论性状态（成交 / 拒绝 / 以后才走）。
+          pinned: false,
+          pinnedAt: null,
+          suggestedStage: null,
         })),
       ].filter(
         (r) =>
@@ -550,7 +645,7 @@ export default function CrmTodayPage() {
               <p className="mb-2 text-xs font-bold text-me-charcoal/45">找到 {found.length} 人</p>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                 {found.map((r) => (
-                  <Card key={r.contactId} row={r} onOpen={() => setPicked(r)} />
+                  <Card key={r.contactId} row={r} onOpen={() => setPicked(r)} onTogglePin={togglePin} onAcceptStage={acceptStage} />
                 ))}
               </div>
               {found.length === 0 && (
@@ -584,7 +679,7 @@ export default function CrmTodayPage() {
                     )}
 
                     {b.people.map((r) => (
-                      <Card key={r.contactId} row={r} onOpen={() => setPicked(r)} />
+                      <Card key={r.contactId} row={r} onOpen={() => setPicked(r)} onTogglePin={togglePin} onAcceptStage={acceptStage} />
                     ))}
 
                     {b.total === 0 && (

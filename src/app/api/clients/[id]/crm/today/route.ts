@@ -41,6 +41,7 @@ interface ContactRow {
   primary_email: string | null
   do_not_contact: boolean
   stage: string | null
+  pinned_at: string | null
 }
 
 interface TouchRow {
@@ -78,7 +79,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       fetchAll<ContactRow>((from, to) =>
         supabaseAdmin
           .from('contacts')
-          .select('id, display_name, primary_phone, primary_email, do_not_contact, stage')
+          .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, pinned_at')
           .eq('client_id', clientId)
           .order('id', { ascending: true })
           .range(from, to),
@@ -105,6 +106,30 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       { error: err instanceof Error ? err.message : '读取失败' },
       { status: 500 },
     )
+  }
+
+  // 已发出的行程单 —— 用来提议「已报价」。
+  //
+  // 这是最值钱的一条提议：行程单工具就在同一个系统里，「发出去了」这个动作
+  // 系统自己知道，不需要任何人记得回来改阶段。而「发了报价还停在新询价」
+  // 恰恰是手工 CRM 最常烂掉的地方。
+  //
+  // 按终端客户名匹配（行程单上没有 contact_id）。取不到就算了 —— 提议缺失
+  // 只是少一个便利，提议错了才是伤害。
+  let quotedNames = new Set<string>()
+  try {
+    const { data: quotes } = await supabaseAdmin
+      .from('tailor_made_itineraries')
+      .select('end_client_name, status')
+      .eq('client_id', clientId)
+      .in('status', ['sent', 'confirmed'])
+    quotedNames = new Set(
+      (quotes ?? [])
+        .map((q) => (q.end_client_name ?? '').trim().toLowerCase())
+        .filter(Boolean),
+    )
+  } catch {
+    // 行程单表不存在或读失败：跳过这条提议，其余照常
   }
 
   const byContact = new Map<string, TouchRow[]>()
@@ -165,6 +190,75 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
 
   const ranked = todayWorklist(models, now)
 
+  /**
+   * 系统提议改阶段 —— 提议，不自动改。
+   *
+   * 为什么不自动改：改错了阶段，人得去翻「哪里被改了」，一次就不再信这一页。
+   * 提议错了他忽略掉即可，代价不对称。
+   *
+   * 为什么必须有：阶段目前 100% 靠人点，而 CTS 那份手工 CRM 正是死在这 ——
+   * 128 行里「阶段」列 0 个填了，自动提醒退化成 122 条一模一样的红字。
+   * 不给提示，这套系统会以同样的方式腐烂一遍。
+   *
+   * 只做一条高置信度的：客户明确说了不感兴趣 / 别再联系，而阶段还停在
+   * 会继续被催的档位 → 提议移到该客户的「停止营销」阶段。
+   * 用 marketing_action 而不是写死阶段名 —— 每个客户的阶段是自己配的
+   * （诊所叫「不适合治疗」，旅行社叫「已流失」）。
+   */
+  const suppressStage = stageRows.find(
+    (s) => s.marketing_action === 'suppress',
+  )
+
+  const suggestStage = (
+    c: (typeof ranked)[number],
+    currentStage: string | null,
+  ): { toStage: string; label: string; why: string } | null => {
+    if (!suppressStage) return null
+    if (currentStage === suppressStage.stage_key) return null
+
+    const dead = c.touchpoints.some(
+      (t) => t.outcome === 'not_interested' || t.outcome === 'do_not_contact',
+    )
+    if (!dead) return null
+
+    return {
+      toStage: suppressStage.stage_key,
+      label: suppressStage.label,
+      why: '通话记录里客户明确说过不感兴趣 / 别再联系',
+    }
+  }
+
+  /**
+   * 行程单已发出，但阶段还停在「已发行程单」之前 → 提议推进。
+   *
+   * 用 sort_order 判断「之前」而不是写死 stage_key：每个客户的阶段是自己配的。
+   * 找不到名字里带「报价 / 行程单 / quote」的阶段就不提议 —— 猜错了比不提更糟。
+   */
+  const quoteStage = stageRows.find((st) =>
+    /报价|行程单|quote/i.test(st.label) || /quote/i.test(st.stage_key),
+  )
+  const stageOrder = new Map(stageRows.map((st, i) => [st.stage_key, i]))
+
+  const suggestQuoted = (
+    name: string | null,
+    currentStage: string | null,
+  ): { toStage: string; label: string; why: string } | null => {
+    if (!quoteStage || !name) return null
+    if (!quotedNames.has(name.trim().toLowerCase())) return null
+    if (currentStage === quoteStage.stage_key) return null
+
+    // 已经走得比「已报价」更靠后（已付订金 / 出行中）就别往回拉
+    const cur = currentStage ? stageOrder.get(currentStage) : undefined
+    const target = stageOrder.get(quoteStage.stage_key)
+    if (cur !== undefined && target !== undefined && cur >= target) return null
+
+    return {
+      toStage: quoteStage.stage_key,
+      label: quoteStage.label,
+      why: '行程单已经发给这位客人了',
+    }
+  }
+
   const toRow = (c: (typeof ranked)[number]) => {
     const row = contactById.get(c.id)
     const last = (byContact.get(c.id) ?? [])[0]
@@ -183,6 +277,11 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       dueAt: c.seg.dueAt,
       lastTouchAt: c.seg.lastTouchAt,
       lastNote: last?.summary ?? null,
+      pinned: Boolean(row?.pinned_at),
+      pinnedAt: row?.pinned_at ?? null,
+      suggestedStage:
+        suggestStage(c, row?.stage ?? null) ??
+        suggestQuoted(c.displayName, row?.stage ?? null),
     }
   }
 
@@ -192,21 +291,45 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   // 混在 108 个「打不通」里，最烫的人被埋掉，销售看到的还是一大坨。
   // 现在一次只做一桶，每桶单独封顶 —— 最大的桶(打不通 108)也装得下。
   const PER_BUCKET_LIMIT = 300
-  const ORDER: Segment[] = [
-    'replied',
-    'callback_due',
-    'travel_due',
-    'new_untouched',
-    'retry_channel',
-    'stale_conversation',
+  // 展示用分桶。
+  //
+  //「客户回话了」与「该回电了」合成一桶：对销售来说这两批的动作完全一样 ——
+  // 今天打这个电话。分成两个名字相近的桶，只是让人在「这俩有什么区别」上
+  // 多花一秒。区别保留在每个人卡片下面那行原因里（seg.reason），
+  // 那才是有用的粒度：「客户来消息了，已经等了 18 小时」比桶名更能说明问题。
+  const GROUPS: Array<{ key: string; members: Segment[] }> = [
+    { key: 'following_up',      members: ['replied', 'callback_due'] },
+    { key: 'travel_due',        members: ['travel_due'] },
+    { key: 'new_untouched',     members: ['new_untouched'] },
+    { key: 'retry_channel',     members: ['retry_channel'] },
+    { key: 'stale_conversation',members: ['stale_conversation'] },
   ]
 
-  const buckets = ORDER.map((segment) => {
-    const all = ranked.filter((c) => c.seg.segment === segment)
+  const GROUP_META: Record<string, { label: string; howTo: string }> = {
+    following_up: {
+      label: '今天要跟进',
+      howTo: '客户来了消息，或之前约好今天打 —— 这批最容易成，今天一定要联系。每个人下面写了他为什么在这儿。',
+    },
+  }
+
+  const buckets = GROUPS.map(({ key, members }) => {
+    const all = ranked
+      .filter((c) => members.includes(c.seg.segment))
+      // 置顶的排最前（多个置顶按最近钉的在上）。只在桶内生效 ——
+      // 跨桶置顶会让人脱离「这批该怎么办」的说明，反而不知道要干嘛。
+      .sort((a, b) => {
+        const pa = contactById.get(a.id)?.pinned_at ?? null
+        const pb = contactById.get(b.id)?.pinned_at ?? null
+        if (pa && pb) return pb.localeCompare(pa)
+        if (pa) return -1
+        if (pb) return 1
+        return 0
+      })
     const people = all.slice(0, PER_BUCKET_LIMIT).map(toRow)
-    const meta = SEGMENT_ACTION_META[segment]
+    const base = SEGMENT_ACTION_META[members[0]]
+    const meta = { ...base, ...(GROUP_META[key] ?? {}) }
     return {
-      segment,
+      segment: key,
       label: meta.label,
       howTo: meta.howTo,
       batch: meta.batch,
