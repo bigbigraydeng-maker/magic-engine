@@ -25,7 +25,17 @@ export async function GET() {
 
     // ── 2. Admin shortcut — return everything ─────────────────────────────
     const adminPerms = getUserPermissions(email)
-    const isAdmin = adminPerms?.role === 'admin'
+    // 受限管理员（DEMO_ADMINS）不能走这条捷径 —— 否则客户列表会把
+    // 全部真实客户的名字和域名摊给演示账号。收敛成只返回它自己那一个。
+    const isAdmin = adminPerms?.role === 'admin' && !adminPerms.allowedClientId
+
+    if (adminPerms?.role === 'admin' && adminPerms.allowedClientId) {
+      const { data } = await supabaseAdmin
+        .from('clients')
+        .select('id, name, domain, created_at, semrush_db, plan_tier')
+        .eq('id', adminPerms.allowedClientId)
+      return NextResponse.json({ clients: data ?? [] })
+    }
 
     // ── 3. Non-admin: filter to client_portal_users.email matches only ────
     let allowedIds: string[] | null = null

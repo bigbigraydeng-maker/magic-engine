@@ -69,9 +69,29 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl)
   }
 
-  // Admin check (fast env-var path: ADMIN_EMAILS / ADMIN_EMAIL_DOMAIN)
+  // Admin check (fast env-var path: ADMIN_EMAILS / ADMIN_EMAIL_DOMAIN / DEMO_ADMINS)
   const adminPerms = getUserPermissions(user.email ?? '')
   if (adminPerms?.role === 'admin') {
+    // 受限管理员（DEMO_ADMINS）：FDE 视角照给，但锁死在自己那一个客户上。
+    // 平台级页面（客户总览 / 账单 / MTC / Prospecting …）会聚合全部客户数据，
+    // 所以统一弹回自己的客户主页 —— 不能只靠前端不显示入口来挡。
+    const scopedClientId = adminPerms.allowedClientId
+    if (scopedClientId) {
+      const onOwnClient =
+        path.startsWith('/dashboard/clients/') && path.split('/')[3] === scopedClientId
+
+      if (!onOwnClient) {
+        return NextResponse.redirect(
+          new URL(`/dashboard/clients/${scopedClientId}`, request.url)
+        )
+      }
+
+      requestHeaders.set('x-user-role', 'admin')
+      requestHeaders.set('x-user-tier', 'admin')
+      requestHeaders.set('x-allowed-client-id', scopedClientId)
+      return NextResponse.next({ request: { headers: requestHeaders } })
+    }
+
     requestHeaders.set('x-user-role', 'admin')
     requestHeaders.set('x-user-tier', 'admin')
     return NextResponse.next({ request: { headers: requestHeaders } })
