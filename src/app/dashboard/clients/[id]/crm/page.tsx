@@ -20,8 +20,8 @@ import { ComposeNote, type StageOption } from './_components/ComposeNote'
 import { CrmTabs } from './_components/CrmTabs'
 
 type Segment =
-  | 'replied' | 'callback_due' | 'new_untouched'
-  | 'retry_channel' | 'nurture_future' | 'excluded'
+  | 'replied' | 'callback_due' | 'travel_due' | 'new_untouched'
+  | 'retry_channel' | 'stale_conversation' | 'nurture_future' | 'excluded'
 
 interface Row {
   contactId: string
@@ -116,8 +116,8 @@ const CHANNEL_HINT: Record<Row['suggestedChannel'], string> = {
   none: '别联系',
 }
 
-/** 前两桶是烫的（客户在等我们），数字标红催一下。 */
-const HOT: ReadonlySet<Segment> = new Set<Segment>(['replied', 'callback_due'])
+/** 烫的（客户在等我们 / 购买窗口到了），数字标红催一下。 */
+const HOT: ReadonlySet<Segment> = new Set<Segment>(['replied', 'callback_due', 'travel_due'])
 
 /**
  * 选桶。一次只做一桶 —— 这是这一页的核心。

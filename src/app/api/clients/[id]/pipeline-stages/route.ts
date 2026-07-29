@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { isMarketingAction, type PipelineStage } from '@/lib/crm/pipeline'
+import { fetchAll } from '@/lib/supabase-paginate'
 
 interface StageRow {
   stage_key: string
@@ -28,22 +29,27 @@ interface StageRow {
 
 /** 读该客户全部阶段 + 每档当前人数。GET 和 PATCH 成功后都用它返回。 */
 async function loadStages(clientId: string): Promise<PipelineStage[]> {
-  const [{ data: stages }, { data: contacts }] = await Promise.all([
+  // 人数统计必须分页拉全 —— Supabase 单次硬顶 1000 行，`.limit(50000)` 会被
+  // 静默砍掉。数错了每一档的人数，删除守卫就会放行一个其实还有人的阶段。
+  const [{ data: stages }, contacts] = await Promise.all([
     supabaseAdmin
       .from('client_pipeline_stages')
       .select('stage_key, label, sort_order, marketing_action, is_terminal')
       .eq('client_id', clientId)
       .order('sort_order', { ascending: true }),
-    supabaseAdmin
-      .from('contacts')
-      .select('stage')
-      .eq('client_id', clientId)
-      .not('stage', 'is', null)
-      .limit(50000),
+    fetchAll<{ stage: string | null }>((from, to) =>
+      supabaseAdmin
+        .from('contacts')
+        .select('stage')
+        .eq('client_id', clientId)
+        .not('stage', 'is', null)
+        .order('id', { ascending: true })
+        .range(from, to),
+    ),
   ])
 
   const counts = new Map<string, number>()
-  for (const c of (contacts ?? []) as { stage: string | null }[]) {
+  for (const c of contacts) {
     if (c.stage) counts.set(c.stage, (counts.get(c.stage) ?? 0) + 1)
   }
 

@@ -154,6 +154,45 @@ describe('数据里存在、但手工表没有的三段', () => {
     expect(r.reason).not.toContain('打不通')
   })
 
+  /**
+   * 这一组是「以后才走」这批人的分水岭：以前只要说过出行时间就被无限期
+   * 压在培育里，到了日子也没有任何东西把人叫醒 —— 系统亲手把最明确的
+   * 购买意图放凉。CTS 19 个人卡在这个状态。
+   */
+  it('出行时间还早 —— 留在培育里，现在打是打扰', () => {
+    const c = contact({
+      touchpoints: [call('2026-07-14T00:00:00Z', 'spoke', { travelWindow: '明年三月' })],
+    })
+    expect(segmentContact(c, NOW).segment).toBe('nurture_future')
+  })
+
+  it('出行时间快到了 —— 自动捞回名单，而且是热的', () => {
+    // 2026-06-19 说「下个月左右」= 2026-07 出行；NOW 是 7-26，早进跟进窗口了
+    const c = contact({
+      touchpoints: [call('2026-06-19T00:00:00Z', 'spoke', { travelWindow: '下个月左右' })],
+    })
+    const r = segmentContact(c, NOW)
+    expect(r.segment).toBe('travel_due')
+    expect(r.temperature).toBe('hot')
+    expect(r.reason).toContain('下个月左右')
+  })
+
+  it('出行时间算不出来的（「看情况」）不瞎猜，留在培育里', () => {
+    const c = contact({
+      touchpoints: [call('2026-06-19T00:00:00Z', 'spoke', { travelWindow: '看情况再说' })],
+    })
+    expect(segmentContact(c, NOW).segment).toBe('nurture_future')
+  })
+
+  it('快出行的人排在新 lead 前面 —— 他已经说了要走，比没碰过的更该打', () => {
+    const soon = contact({
+      id: 'soon',
+      touchpoints: [call('2026-06-19T00:00:00Z', 'spoke', { travelWindow: '下个月左右' })],
+    })
+    const fresh = contact({ id: 'fresh', touchpoints: [form('2026-07-26T06:00:00Z')] })
+    expect(todayWorklist([fresh, soon], NOW).map((c) => c.id)).toEqual(['soon', 'fresh'])
+  })
+
   it('带上最后来往时间 —— 卡片要显示「等了几天」，同桶排序也靠它', () => {
     const c = contact({ touchpoints: [call('2026-07-20T00:00:00Z', 'spoke')] })
     expect(segmentContact(c, NOW).lastTouchAt).toBe('2026-07-20T00:00:00.000Z')

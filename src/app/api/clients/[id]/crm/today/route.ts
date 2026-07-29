@@ -28,6 +28,7 @@ import {
   type Segment,
 } from '@/lib/crm/segments'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
+import { fetchAll } from '@/lib/supabase-paginate'
 
 interface RouteParams {
   params: { id: string }
@@ -51,6 +52,13 @@ interface TouchRow {
   metadata: Record<string, unknown> | null
 }
 
+interface StageRow {
+  stage_key: string
+  label: string
+  marketing_action: string
+  is_terminal: boolean
+}
+
 export async function GET(_req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
   const clientId = params.id
   const access = await requirePaidClientAccess(clientId)
@@ -58,34 +66,49 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
-  const [
-    { data: contacts, error: cErr },
-    { data: touches, error: tErr },
-    { data: stageRows },
-  ] = await Promise.all([
-    supabaseAdmin
-      .from('contacts')
-      .select('id, display_name, primary_phone, primary_email, do_not_contact, stage')
-      .eq('client_id', clientId)
-      .limit(5000),
-    supabaseAdmin
-      .from('contact_touchpoints')
-      .select('contact_id, channel, direction, occurred_at, summary, metadata')
-      .eq('client_id', clientId)
-      .order('occurred_at', { ascending: false })
-      .limit(20000),
-    supabaseAdmin
-      .from('client_pipeline_stages')
-      .select('stage_key, label, marketing_action, is_terminal')
-      .eq('client_id', clientId),
-  ])
-
-  if (cErr || tErr) {
-    return NextResponse.json({ error: cErr?.message ?? tErr?.message }, { status: 500 })
+  // 必须分页拉全 —— Supabase 单次查询硬顶 1000 行，`.limit(20000)` 会被静默
+  // 砍掉且不报错。配合 order desc，丢掉的正是最老的记录：一位客户六月说过
+  // 「下个月左右走」，那条排在 1000 名开外，系统就完全看不见他要出行。
+  // 实测 CTS：库里 1271 条，limit(20000) 只回 1000 条。
+  let contacts: ContactRow[]
+  let touches: TouchRow[]
+  let stageRows: StageRow[]
+  try {
+    ;[contacts, touches, stageRows] = await Promise.all([
+      fetchAll<ContactRow>((from, to) =>
+        supabaseAdmin
+          .from('contacts')
+          .select('id, display_name, primary_phone, primary_email, do_not_contact, stage')
+          .eq('client_id', clientId)
+          .order('id', { ascending: true })
+          .range(from, to),
+      ),
+      fetchAll<TouchRow>((from, to) =>
+        supabaseAdmin
+          .from('contact_touchpoints')
+          .select('contact_id, channel, direction, occurred_at, summary, metadata')
+          .eq('client_id', clientId)
+          .order('occurred_at', { ascending: false })
+          .range(from, to),
+      ),
+      fetchAll<StageRow>((from, to) =>
+        supabaseAdmin
+          .from('client_pipeline_stages')
+          .select('stage_key, label, marketing_action, is_terminal')
+          .eq('client_id', clientId)
+          .order('sort_order', { ascending: true })
+          .range(from, to),
+      ),
+    ])
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : '读取失败' },
+      { status: 500 },
+    )
   }
 
   const byContact = new Map<string, TouchRow[]>()
-  for (const t of (touches ?? []) as TouchRow[]) {
+  for (const t of touches) {
     const list = byContact.get(t.contact_id) ?? []
     list.push(t)
     byContact.set(t.contact_id, list)
@@ -93,12 +116,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
 
   // 阶段 map:决定这个人还该不该出现在今天的名单上（成交 / 转售后 / 停止营销 → 不该）。
   const stageMeta = new Map<string, { label: string; suppressed: boolean; action: string }>()
-  for (const s of (stageRows ?? []) as {
-    stage_key: string
-    label: string
-    marketing_action: string
-    is_terminal: boolean
-  }[]) {
+  for (const s of stageRows) {
     stageMeta.set(s.stage_key, {
       label: s.label,
       action: s.marketing_action,
@@ -110,7 +128,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     })
   }
 
-  const rows = (contacts ?? []) as ContactRow[]
+  const rows = contacts
   const models: ContactLike[] = rows.map((c) => {
     const tps = byContact.get(c.id) ?? []
     const stage = c.stage ? stageMeta.get(c.stage) : undefined
@@ -177,6 +195,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   const ORDER: Segment[] = [
     'replied',
     'callback_due',
+    'travel_due',
     'new_untouched',
     'retry_channel',
     'stale_conversation',
@@ -241,7 +260,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   const startOfDay = new Date(now)
   startOfDay.setHours(0, 0, 0, 0)
   const doneToday = new Set(
-    ((touches ?? []) as TouchRow[])
+    touches
       .filter((t) => t.direction === 'outbound' && new Date(t.occurred_at) >= startOfDay)
       .map((t) => t.contact_id),
   ).size

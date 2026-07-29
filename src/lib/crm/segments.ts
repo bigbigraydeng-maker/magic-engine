@@ -20,11 +20,14 @@
 export type Segment =
   | 'replied'          // 客户回了，还没人接话
   | 'callback_due'     // 约好的时间到了
+  | 'travel_due'       // 他说的出行时间快到了，该跟进定行程
   | 'new_untouched'    // 进线了，没人联系过
   | 'retry_channel'    // 打过一次没人接
   | 'stale_conversation' // 聊过一轮就断了，没约下次
-  | 'nurture_future'   // 说了以后才走
+  | 'nurture_future'   // 说了以后才走，时候还没到
   | 'excluded'         // 别再联系 / 号码是坏的 / 明确没兴趣
+
+import { resolveTravelDate, isDueToWake } from './travel-date'
 
 export type Temperature = 'hot' | 'warm' | 'cold' | 'off'
 
@@ -56,6 +59,13 @@ export const SEGMENT_ACTION_META: Record<Segment, SegmentActionMeta> = {
   callback_due: {
     label: '该回电了',
     howTo: '之前答应了这个时间给他打，现在到点了。现在就打，拖了显得不上心。',
+    batch: 'call_one_by_one',
+  },
+  // 客人自己说过什么时候走，现在时间快到了。这是最明确的购买窗口 ——
+  // 以前这批人被无限期压在「以后才走」里，没有任何东西会把他们叫醒。
+  travel_due: {
+    label: '快出行了，该定了',
+    howTo: '他说过这段时间走，现在该跟进定行程了 —— 再晚位子和机票都紧张。',
     batch: 'call_one_by_one',
   },
   new_untouched: {
@@ -140,11 +150,13 @@ export interface SegmentResult {
 const SEGMENT_META: Record<Segment, { temperature: Temperature; priority: number }> = {
   replied:            { temperature: 'hot',  priority: 1 },
   callback_due:       { temperature: 'hot',  priority: 2 },
-  new_untouched:      { temperature: 'warm', priority: 3 },
-  retry_channel:      { temperature: 'warm', priority: 4 },
+  // 客人自己说的出行时间快到了 —— 购买意图最明确的一批,排在新 lead 之前。
+  travel_due:         { temperature: 'hot',  priority: 3 },
+  new_untouched:      { temperature: 'warm', priority: 4 },
+  retry_channel:      { temperature: 'warm', priority: 5 },
   // 温的:聊过一轮、人是热的,只是断了没人跟。排最后但必须进名单。
-  stale_conversation: { temperature: 'warm', priority: 5 },
-  nurture_future:     { temperature: 'cold', priority: 6 },
+  stale_conversation: { temperature: 'warm', priority: 6 },
+  nurture_future:     { temperature: 'cold', priority: 7 },
   excluded:           { temperature: 'off',  priority: 9 },
 }
 
@@ -221,10 +233,23 @@ export function segmentContact(contact: ContactLike, now: Date): SegmentResult {
     return make('callback_due', '之前约好这个时间回电', 'phone', dueCallback)
   }
 
-  // 4) 说了以后才走 —— 排在「新 lead」之前，避免被当成待首联反复打
-  const future = tps.map((t) => t.travelWindow).find((w) => !!w)
-  if (future) {
-    return make('nurture_future', `客户说 ${future} 才走，现在打是打扰`, 'email')
+  // 4) 客户说过什么时候走。
+  //
+  //    以前这里只判断「有没有说过」，说过就无限期压进「以后才走」——
+  //    于是「明年三月」永远是明年三月，到了三月也没有任何东西把人叫醒。
+  //    19 个 CTS 客人卡在这个状态，其中一位说的是「下个月左右」，
+  //    那句话是上个月说的。
+  //
+  //    现在把那句话实时算成出行月份（不落库，历史数据自动生效），
+  //    到了跟进窗口就捞回名单。算不出来的（「看情况」「还没定」）
+  //    照旧留在培育里 —— 猜一个日期比承认不知道更糟。
+  const spoken = tps.find((t) => !!t.travelWindow)
+  if (spoken) {
+    const travelAt = resolveTravelDate(spoken.travelWindow, new Date(ts(spoken.occurredAt)))
+    if (isDueToWake(travelAt, now)) {
+      return make('travel_due', `客户说 ${spoken.travelWindow} 走，该跟进定行程了`, 'phone', travelAt)
+    }
+    return make('nurture_future', `客户说 ${spoken.travelWindow} 才走，现在打是打扰`, 'email')
   }
 
   // 5) 进线了但从没人联系过
@@ -279,7 +304,7 @@ export function todayWorklist(
 /** 各段人数，给页面顶部的统计条。 */
 export function segmentCounts(contacts: ContactLike[], now: Date): Record<Segment, number> {
   const out: Record<Segment, number> = {
-    replied: 0, callback_due: 0, new_untouched: 0,
+    replied: 0, callback_due: 0, travel_due: 0, new_untouched: 0,
     retry_channel: 0, stale_conversation: 0, nurture_future: 0, excluded: 0,
   }
   for (const c of contacts) out[segmentContact(c, now).segment]++
