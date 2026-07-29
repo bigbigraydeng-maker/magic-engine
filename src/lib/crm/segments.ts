@@ -173,6 +173,20 @@ const STALE_CALLBACK_MS = 14 * 86_400_000
  */
 const FRESH_FIRST_SEGMENTS = new Set<Segment>(['replied', 'new_untouched'])
 
+/**
+ * 把毫秒差说成人话。
+ *
+ * 原先一律用小时，于是名单上出现「进线 835 小时还没人联系」——
+ * 835 小时没人能一眼换算成「一个多月」，反而削弱了紧迫感。
+ * 两天以内说小时（今天/昨天的事，小时才有意义），更久说天。
+ */
+function humanGap(ms: number): string {
+  if (ms < 3_600_000) return '不到 1 小时'
+  const hours = Math.floor(ms / 3_600_000)
+  if (hours < 48) return `${hours} 小时`
+  return `${Math.floor(ms / 86_400_000)} 天`
+}
+
 function ts(v: string | null | undefined): number {
   if (!v) return 0
   const t = new Date(v).getTime()
@@ -230,8 +244,7 @@ export function segmentContact(contact: ContactLike, now: Date): SegmentResult {
   //    · 客户的消息严格晚于我们最后一次外呼（相等不算：导入的历史数据里
   //      表单和通话共用同一个时间戳）
   if (lastOutbound > 0 && lastInbound > lastOutbound) {
-    const hours = Math.floor((nowMs - lastInbound) / 3_600_000)
-    return make('replied', `客户来消息了，已经等了 ${hours} 小时`, 'phone')
+    return make('replied', `客户来消息了，已经等了 ${humanGap(nowMs - lastInbound)}`, 'phone')
   }
 
   // 3) 约好的时间到了
@@ -276,8 +289,7 @@ export function segmentContact(contact: ContactLike, now: Date): SegmentResult {
 
   // 5) 进线了但从没人联系过
   if (lastOutbound === 0) {
-    const hours = lastInbound > 0 ? Math.floor((nowMs - lastInbound) / 3_600_000) : 0
-    return make('new_untouched', `进线 ${hours} 小时还没人联系`, 'phone')
+    return make('new_untouched', `进线 ${humanGap(nowMs - lastInbound)} 还没人联系`, 'phone')
   }
 
   // 6) 打过一次没人接。

@@ -163,7 +163,10 @@ function Card({
         )}
 
         <div className="mt-1.5 flex items-center justify-between gap-2">
-          {waited && <span className="text-[10px] text-me-charcoal/35">{waited}</span>}
+          {/* 原因里已经说了「等了多久」，这里不再用另一个单位重复一遍 ——
+              「进线 835 小时还没人联系 / 等了 34 天」同一件事说两遍，
+              单位还不一致，读的人要先做换算才能确认它们说的是同一件事。 */}
+          <span />
           {row.stageLabel && (
             <span className="truncate rounded-full bg-me-ivory px-1.5 py-0.5 text-[10px] font-bold text-me-charcoal/55">
               {row.stageLabel}
