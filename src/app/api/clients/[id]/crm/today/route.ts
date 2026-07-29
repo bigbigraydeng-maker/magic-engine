@@ -108,6 +108,30 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     )
   }
 
+  // 已发出的行程单 —— 用来提议「已报价」。
+  //
+  // 这是最值钱的一条提议：行程单工具就在同一个系统里，「发出去了」这个动作
+  // 系统自己知道，不需要任何人记得回来改阶段。而「发了报价还停在新询价」
+  // 恰恰是手工 CRM 最常烂掉的地方。
+  //
+  // 按终端客户名匹配（行程单上没有 contact_id）。取不到就算了 —— 提议缺失
+  // 只是少一个便利，提议错了才是伤害。
+  let quotedNames = new Set<string>()
+  try {
+    const { data: quotes } = await supabaseAdmin
+      .from('tailor_made_itineraries')
+      .select('end_client_name, status')
+      .eq('client_id', clientId)
+      .in('status', ['sent', 'confirmed'])
+    quotedNames = new Set(
+      (quotes ?? [])
+        .map((q) => (q.end_client_name ?? '').trim().toLowerCase())
+        .filter(Boolean),
+    )
+  } catch {
+    // 行程单表不存在或读失败：跳过这条提议，其余照常
+  }
+
   const byContact = new Map<string, TouchRow[]>()
   for (const t of touches) {
     const list = byContact.get(t.contact_id) ?? []
@@ -204,6 +228,37 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     }
   }
 
+  /**
+   * 行程单已发出，但阶段还停在「已发行程单」之前 → 提议推进。
+   *
+   * 用 sort_order 判断「之前」而不是写死 stage_key：每个客户的阶段是自己配的。
+   * 找不到名字里带「报价 / 行程单 / quote」的阶段就不提议 —— 猜错了比不提更糟。
+   */
+  const quoteStage = stageRows.find((st) =>
+    /报价|行程单|quote/i.test(st.label) || /quote/i.test(st.stage_key),
+  )
+  const stageOrder = new Map(stageRows.map((st, i) => [st.stage_key, i]))
+
+  const suggestQuoted = (
+    name: string | null,
+    currentStage: string | null,
+  ): { toStage: string; label: string; why: string } | null => {
+    if (!quoteStage || !name) return null
+    if (!quotedNames.has(name.trim().toLowerCase())) return null
+    if (currentStage === quoteStage.stage_key) return null
+
+    // 已经走得比「已报价」更靠后（已付订金 / 出行中）就别往回拉
+    const cur = currentStage ? stageOrder.get(currentStage) : undefined
+    const target = stageOrder.get(quoteStage.stage_key)
+    if (cur !== undefined && target !== undefined && cur >= target) return null
+
+    return {
+      toStage: quoteStage.stage_key,
+      label: quoteStage.label,
+      why: '行程单已经发给这位客人了',
+    }
+  }
+
   const toRow = (c: (typeof ranked)[number]) => {
     const row = contactById.get(c.id)
     const last = (byContact.get(c.id) ?? [])[0]
@@ -224,7 +279,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       lastNote: last?.summary ?? null,
       pinned: Boolean(row?.pinned_at),
       pinnedAt: row?.pinned_at ?? null,
-      suggestedStage: suggestStage(c, row?.stage ?? null),
+      suggestedStage:
+        suggestStage(c, row?.stage ?? null) ??
+        suggestQuoted(c.displayName, row?.stage ?? null),
     }
   }
 
