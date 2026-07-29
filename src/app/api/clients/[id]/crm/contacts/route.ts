@@ -22,6 +22,7 @@ import {
   type ContactLike,
 } from '@/lib/crm/segments'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
+import { fetchAll } from '@/lib/supabase-paginate'
 import {
   extractCustomColumns,
   visibleCustomColumns,
@@ -46,6 +47,13 @@ interface TouchRow {
   occurred_at: string
   summary: string | null
   metadata: Record<string, unknown> | null
+}
+
+interface StageRow {
+  stage_key: string
+  label: string
+  marketing_action: string
+  is_terminal: boolean
 }
 
 function ts(v: string | null | undefined): number {
@@ -74,34 +82,48 @@ export async function GET(
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
-  const [
-    { data: contacts, error: cErr },
-    { data: touches, error: tErr },
-    { data: stageRows },
-  ] = await Promise.all([
-    supabaseAdmin
-      .from('contacts')
-      .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, first_seen_at')
-      .eq('client_id', clientId)
-      .limit(5000),
-    supabaseAdmin
-      .from('contact_touchpoints')
-      .select('contact_id, channel, direction, occurred_at, summary, metadata')
-      .eq('client_id', clientId)
-      .order('occurred_at', { ascending: false })
-      .limit(20000),
-    supabaseAdmin
-      .from('client_pipeline_stages')
-      .select('stage_key, label, marketing_action, is_terminal')
-      .eq('client_id', clientId),
-  ])
-
-  if (cErr || tErr) {
-    return NextResponse.json({ error: cErr?.message ?? tErr?.message }, { status: 500 })
+  // 必须分页拉全 —— Supabase 单次查询硬顶 1000 行，`.limit(20000)` 会被静默
+  // 砍掉且不报错。实测 CTS：库里 1271 条触点只回 1000 条；配合 order desc，
+  // 丢掉的是最老的记录，于是「最后接触」「往来次数」这些列全是错的。
+  let contacts: ContactRow[]
+  let touches: TouchRow[]
+  let stageRows: StageRow[]
+  try {
+    ;[contacts, touches, stageRows] = await Promise.all([
+      fetchAll<ContactRow>((from, to) =>
+        supabaseAdmin
+          .from('contacts')
+          .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, first_seen_at')
+          .eq('client_id', clientId)
+          .order('id', { ascending: true })
+          .range(from, to),
+      ),
+      fetchAll<TouchRow>((from, to) =>
+        supabaseAdmin
+          .from('contact_touchpoints')
+          .select('contact_id, channel, direction, occurred_at, summary, metadata')
+          .eq('client_id', clientId)
+          .order('occurred_at', { ascending: false })
+          .range(from, to),
+      ),
+      fetchAll<StageRow>((from, to) =>
+        supabaseAdmin
+          .from('client_pipeline_stages')
+          .select('stage_key, label, marketing_action, is_terminal')
+          .eq('client_id', clientId)
+          .order('sort_order', { ascending: true })
+          .range(from, to),
+      ),
+    ])
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : '读取失败' },
+      { status: 500 },
+    )
   }
 
   const byContact = new Map<string, TouchRow[]>()
-  for (const t of (touches ?? []) as TouchRow[]) {
+  for (const t of touches) {
     const list = byContact.get(t.contact_id) ?? []
     list.push(t)
     byContact.set(t.contact_id, list)
@@ -109,12 +131,7 @@ export async function GET(
 
   // 阶段 map：label 给「跟进到哪步」列，suppressed 决定这个人算不算已结论（影响冷热）。
   const stageMeta = new Map<string, { label: string; suppressed: boolean }>()
-  for (const s of (stageRows ?? []) as {
-    stage_key: string
-    label: string
-    marketing_action: string
-    is_terminal: boolean
-  }[]) {
+  for (const s of stageRows) {
     stageMeta.set(s.stage_key, {
       label: s.label,
       suppressed: stageSuppressesWorklist(
@@ -125,7 +142,7 @@ export async function GET(
   }
 
   const now = new Date()
-  const rows = (contacts ?? []) as ContactRow[]
+  const rows = contacts
 
   // 逐人组装。custom 存起来供数据驱动的「显不显示这列」判断。
   const customPerContact: Array<Record<CustomColumnKey, string | null>> = []
