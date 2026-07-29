@@ -41,6 +41,7 @@ export default function TailorMadeEditor({
   const [note, setNote] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
 
   // AI 对话
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -157,8 +158,12 @@ export default function TailorMadeEditor({
 
         if (nextStatus) setStatus(nextStatus);
         setDirty(false);
-        setNote({ kind: 'ok', text: nextStatus ? `已保存，状态：${TAILOR_MADE_STATUS_LABEL[nextStatus]}` : '已保存' });
-        setTimeout(() => setNote(null), 2500);
+        setSavedAt(new Date());
+        // 状态变更给明确回执；普通自动保存不弹提示，避免每次打字都闪一下
+        if (nextStatus) {
+          setNote({ kind: 'ok', text: `已保存，状态：${TAILOR_MADE_STATUS_LABEL[nextStatus]}` });
+          setTimeout(() => setNote(null), 2500);
+        }
       } catch (err) {
         setNote({ kind: 'err', text: err instanceof Error ? err.message : '保存失败' });
       } finally {
@@ -167,6 +172,19 @@ export default function TailorMadeEditor({
     },
     [payload, record.id, clientId]
   );
+
+  /**
+   * 自动保存。
+   *
+   * 顾问不该需要「想着去点保存」—— 尤其 AI 一次生成 20 天内容要跑十几秒，
+   * 那之后所有东西都只在浏览器内存里，关掉标签页就没了。
+   * 改动停止 1.5 秒后自动落库；save() 会把 dirty 置回 false，所以不会循环。
+   */
+  useEffect(() => {
+    if (!dirty || saving) return;
+    const timer = setTimeout(() => { void save(); }, 1500);
+    return () => clearTimeout(timer);
+  }, [dirty, saving, save]);
 
   // ⌘S / Ctrl+S 保存 —— 顾问改长行程时会本能地按
   useEffect(() => {
@@ -213,7 +231,15 @@ export default function TailorMadeEditor({
             </div>
             <div className="text-xs text-gray-500">
               {record.quote_ref} · {TAILOR_MADE_STATUS_LABEL[status]}
-              {dirty && <span className="ml-2 text-me-ochre">● 有未保存改动</span>}
+              <span className="ml-2">
+                {saving
+                  ? <span className="text-me-charcoal/50">保存中…</span>
+                  : dirty
+                    ? <span className="text-me-ochre">● 待保存</span>
+                    : savedAt
+                      ? <span className="text-[#5C8A4A]">✓ 已自动保存 {savedAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
+                      : <span className="text-me-charcoal/40">✓ 已保存</span>}
+              </span>
             </div>
           </div>
 
@@ -227,7 +253,7 @@ export default function TailorMadeEditor({
             disabled={saving}
             className="rounded-md bg-me-charcoal px-4 py-2 text-sm font-medium text-white disabled:bg-gray-300"
           >
-            {saving ? '保存中…' : '保存草稿'}
+            {saving ? '保存中…' : '立即保存'}
           </button>
           <button
             type="button"
