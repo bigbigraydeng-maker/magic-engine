@@ -25,6 +25,7 @@ import { SocialHandlesPanel } from './_components/SocialHandlesPanel'
 import { ApiKeysPanel } from './_components/ApiKeysPanel'
 import { ExcludedTopicsPanel } from './_components/ExcludedTopicsPanel'
 import { BrandRedlinesPanel } from './_components/BrandRedlinesPanel'
+import { IndustryPanel } from './_components/IndustryPanel'
 import { ProductsPanel } from './_components/ProductsPanel'
 import { UploadLinkPanel } from './_components/UploadLinkPanel'
 import { FactoryConfigPanel } from './_components/FactoryConfigPanel'
@@ -169,6 +170,14 @@ export default function ClientSettingsPage() {
         </div>
 
         <section>
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-base">🏢</span>
+            <h2 className="font-black text-slate-800">所属行业（决定 AI 读不读同行经验）</h2>
+          </div>
+          <IndustryPanel clientId={clientId} />
+        </section>
+
+        <section className="mt-6">
           <div className="mb-3 flex items-center gap-2">
             <span className="text-base">📦</span>
             <h2 className="font-black text-slate-800">主力产品（AI 写文案时逐条读）</h2>

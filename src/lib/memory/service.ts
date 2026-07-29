@@ -154,37 +154,77 @@ async function loadGlobalLessons(
       industry = (clientRow as { industry: string }).industry
     }
 
-    let q = supabase
-      .from('global_learned_lessons')
-      .select('*')
-      .eq('is_active', true)
-      .gte('confidence', minConfidence ?? 0.6)
-      .order('confidence', { ascending: false })
-      .limit(25)
+    // 公共过滤（两条 scope 支线共用）
+    const baseQuery = () => {
+      let q = supabase
+        .from('global_learned_lessons')
+        .select('*')
+        .eq('is_active', true)
+        .gte('confidence', minConfidence ?? 0.6)
+        .order('confidence', { ascending: false })
+        .limit(25)
 
-    // scope 匹配：global / channel 恒命中；industry 层只在行业相符时命中
-    q = industry
-      ? q.or(`scope.eq.global,scope.eq.channel,and(scope.eq.industry,industry.eq.${industry})`)
-      : q.or('scope.eq.global,scope.eq.channel')
-
-    if (flywheel) {
-      // 'cross' 表示跨飞轮通用，任何飞轮都应读到
-      q = q.or(`flywheel.eq.${flywheel},flywheel.eq.cross,flywheel.is.null`)
+      if (flywheel) {
+        // 'cross' 表示跨飞轮通用，任何飞轮都应读到
+        q = q.or(`flywheel.eq.${flywheel},flywheel.eq.cross,flywheel.is.null`)
+      }
+      return q
     }
 
-    const { data, error } = await q
-    if (error) {
-      console.warn('[memory] loadGlobalLessons error:', error.message)
-      return []
+    // 🔴 industry 是 PM 在后台自由填写的文本，绝不能拼进 .or() 过滤串：
+    //   - 值里带 `,` `(` `)` 会破坏 PostgREST 语法 → 整条查询失败 → 该客户读不到
+    //     任何全局经验（连恒命中的 global/channel 也丢），且只有一行 warn，静默出错
+    //   - 精心构造的值能闭合 and(...) 分组、注入额外 scope 条件 → 读到别行业的经验，
+    //     击穿「地产的课只喂地产客户」这道隔离闸（已实测复现）
+    // 因此拆成两条查询：scope 用固定字面量，industry 走参数化 .in()。
+    const industryCandidates = buildIndustryMatchCandidates(industry)
+
+    const [baseRes, industryRes] = await Promise.all([
+      baseQuery().in('scope', ['global', 'channel']),
+      industryCandidates.length > 0
+        ? baseQuery().eq('scope', 'industry').in('industry', industryCandidates)
+        : Promise.resolve({ data: [] as GlobalLesson[], error: null }),
+    ])
+
+    if (baseRes.error) {
+      console.warn('[memory] loadGlobalLessons base error:', baseRes.error.message)
+    }
+    if (industryRes.error) {
+      console.warn('[memory] loadGlobalLessons industry error:', industryRes.error.message)
     }
 
-    // 被推翻次数多于确认次数的经验不再注入（把偶然当规律的防线）
-    return ((data ?? []) as GlobalLesson[]).filter(
-      (l) => (l.contradicted_count ?? 0) <= (l.confirmed_count ?? 1),
+    // 两条支线各自降级：一条失败不牵连另一条
+    const merged = [
+      ...((baseRes.data ?? []) as GlobalLesson[]),
+      ...((industryRes.data ?? []) as GlobalLesson[]),
+    ]
+
+    return (
+      merged
+        // 被推翻次数多于确认次数的经验不再注入（把偶然当规律的防线）
+        .filter((l) => (l.contradicted_count ?? 0) <= (l.confirmed_count ?? 1))
+        .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
+        .slice(0, 25)
     )
   } catch {
     return []
   }
+}
+
+/**
+ * 把 clients.industry（PM 自由填写）归一成能跟 global_learned_lessons.industry
+ * （代码侧规范值，如 `real_estate`）对上的候选列表。
+ *
+ * 同时保留原值与归一值，所以 `Real Estate` / `real estate` / `real_estate`
+ * 三种写法都能命中同一批行业经验 —— 后台填写不规范不该让客户读不到课。
+ * 返回空数组 = 不查 industry 层（只吃 global/channel）。
+ */
+function buildIndustryMatchCandidates(raw: string | null): string[] {
+  const trimmed = raw?.trim()
+  if (!trimmed) return []
+
+  const normalized = trimmed.toLowerCase().replace(/[\s-]+/g, '_')
+  return normalized === trimmed ? [trimmed] : [trimmed, normalized]
 }
 
 async function loadPatterns(
