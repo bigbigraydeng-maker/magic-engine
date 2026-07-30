@@ -1,0 +1,59 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { supabaseAdmin } from '@/lib/supabase'
+import {
+  FACTORY_STAGES,
+  stageOfContentPost,
+  type ContentPostStatus,
+  type FactoryStage,
+} from '@/lib/factory/content-stages'
+
+export const dynamic = 'force-dynamic'
+
+// GET /api/clients/[id]/content-factory/board
+// 内容工厂看板数据：把该客户的 organic 内容(content_posts)按 5 段分组。
+// organic 走 content_posts（广告线走 content_work_orders，不在这个看板）。
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: { id: string } },
+) {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('content_posts')
+      .select('id, title, status, source_video_url, platforms, scheduled_at, published_at, created_at')
+      .eq('client_id', params.id)
+      .order('created_at', { ascending: false })
+      .limit(300)
+
+    if (error) throw error
+
+    const stages: Record<FactoryStage, unknown[]> = {
+      选题: [], 录制: [], 出片: [], 发布: [], 复盘: [],
+    }
+
+    for (const p of data ?? []) {
+      const status = p.status as ContentPostStatus
+      const hasVideo = Boolean(p.source_video_url)
+      const stage = stageOfContentPost({ status, hasVideo })
+      stages[stage].push({
+        id: p.id,
+        title: p.title || '(无标题)',
+        status,
+        stage,
+        hasVideo,
+        platforms: p.platforms ?? [],
+        scheduledAt: p.scheduled_at,
+        publishedAt: p.published_at,
+        createdAt: p.created_at,
+      })
+    }
+
+    const counts = Object.fromEntries(
+      FACTORY_STAGES.map((s) => [s, stages[s].length]),
+    ) as Record<FactoryStage, number>
+
+    return NextResponse.json({ stages, counts })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
+}
