@@ -1,28 +1,23 @@
 'use client'
 
-// 内容工厂看板（第一期 · 只读）
-// 一条 organic 内容从左流到右：选题 → 录制 → 出片 → 发布 → 复盘。
+// 内容工厂看板（第一期 · 只读 · 客户+FDE 都可看）
+// 一条内容从左流到右：选题 → 备料 → 出片 → 发布 → 看表现。
 // 数据来自 GET /api/clients/[id]/content-factory/board（读 content_posts 推导分段）。
-//
-// ⚠️ 待定（问 PM/板桥，未拍板前用内部占位）：
-//   - 列名最终叫法（现为内部说法）
-//   - 受众（FDE 内部 vs 客户老板）→ 决定卡片露出哪些信息
-//   - 卡片信息集
-// 建完拉魏征挑逻辑 + 板桥看体验，再上。
+// 客户安全：不暴露生产手法（不写"抄爆款"、不露"真拍/AI"），只展示进度。
 
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 
-const STAGES = ['选题', '录制', '出片', '发布', '复盘'] as const
+const STAGES = ['选题', '备料', '出片', '发布', '看表现'] as const
 type Stage = (typeof STAGES)[number]
 
-// 每列的一句话职责 + 空列时的引导（空看板最容易让人以为系统没干活 → 给下一步提示，不留白）
+// 每列一句话职责 + 空列引导（空看板最容易让人以为没在干活 → 每格都给"下一步"，不留白）
 const STAGE_META: Record<Stage, { hint: string; empty: string }> = {
-  选题: { hint: '爆款改写来的候选，待确认', empty: '还没有候选 — 选题助理抓爆款后会出现在这里' },
-  录制: { hint: '已确认，等录制/传素材', empty: '没有待录的 — 确认候选后进这一列' },
-  出片: { hint: '素材到位，出片中/已出片', empty: '没有在出片的' },
-  发布: { hint: '文案封面就绪，待发/已排期', empty: '没有待发布的' },
-  复盘: { hint: '已发布，回收数据', empty: '还没有已发布的内容' },
+  选题: { hint: '待确认的选题方向', empty: '还没有选题 — 有新方向会出现在这里' },
+  备料: { hint: '已确认，准备素材中', empty: '没有待备料的 — 选题定了会进这一列' },
+  出片: { hint: '素材齐了，正在做片', empty: '还没有在做的片 — 素材齐了会自动进来' },
+  发布: { hint: '做好了，等发布 / 已排期', empty: '没有待发布的 — 做好的片会排到这里' },
+  看表现: { hint: '已发布，看数据', empty: '还没有发布的内容 — 发出去后来这看表现' },
 }
 
 interface Card {
@@ -46,6 +41,32 @@ const PLATFORM_LABEL: Record<string, string> = {
   xiaohongshu: '小红书', douyin: '抖音', facebook: 'FB', tiktok: 'TikTok',
 }
 
+// 状态点颜色（走 ME status 令牌）
+function dotClass(status: string): string {
+  switch (status) {
+    case 'published': return 'bg-status-track'   // 绿 = 已发
+    case 'scheduled': return 'bg-status-sched'   // 蓝 = 已排期
+    case 'approved':  return 'bg-status-exec'    // 琥珀 = 进行中
+    case 'rejected':  return 'bg-status-rej'     // 红 = 打回
+    default:          return 'bg-me-taupe'       // 灰 = 等待(draft)
+  }
+}
+
+function shortDate(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return `${d.getMonth() + 1}/${d.getDate()}`
+}
+
+// 每列露最相关的日期
+function cardDate(c: Card): string {
+  if (c.stage === '发布' && c.scheduledAt) return `排期 ${shortDate(c.scheduledAt)}`
+  if (c.stage === '看表现' && c.publishedAt) return `发布 ${shortDate(c.publishedAt)}`
+  if (c.createdAt) return `建于 ${shortDate(c.createdAt)}`
+  return ''
+}
+
 export default function ContentFactoryBoardPage() {
   const params = useParams<{ id: string }>()
   const clientId = params?.id
@@ -54,7 +75,7 @@ export default function ContentFactoryBoardPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!clientId) return
+    if (!clientId) { setLoading(false); return }   // 魏征 M4：无 id 不再无限"加载中"
     let alive = true
     setLoading(true)
     fetch(`/api/clients/${clientId}/content-factory/board`)
@@ -69,18 +90,13 @@ export default function ContentFactoryBoardPage() {
   }, [clientId])
 
   return (
-    <div className="p-6 max-w-[1400px] mx-auto">
-      <div className="flex items-baseline gap-3 mb-1">
-        <h1 className="text-xl font-bold">内容工厂</h1>
-        <span className="text-xs text-slate-500">选题 → 录制 → 出片 → 发布 → 复盘</span>
-      </div>
-      <p className="text-sm text-slate-500 mb-5">
-        一条内容从左流到右。列名/信息为内部占位，待板桥定稿。
-      </p>
+    <div className="p-6 max-w-[1400px] mx-auto text-me-charcoal">
+      <h1 className="text-xl font-display font-bold">内容工厂</h1>
+      <p className="text-sm text-me-taupe mb-5">选题 → 备料 → 出片 → 发布 → 看表现，一条内容从左走到右。</p>
 
-      {loading && <div className="text-sm text-slate-400 py-10 text-center">加载中…</div>}
+      {loading && <div className="text-sm text-me-taupe py-10 text-center">加载中…</div>}
       {error && (
-        <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
+        <div className="text-sm text-status-rej bg-me-ivory border border-me-stone rounded-2xl p-3">
           加载失败：{error}
         </div>
       )}
@@ -90,33 +106,36 @@ export default function ContentFactoryBoardPage() {
           {STAGES.map((stage) => {
             const cards = board.stages[stage] ?? []
             return (
-              <div key={stage} className="bg-slate-50 border border-slate-200 rounded-xl p-3 min-h-[220px] flex flex-col gap-2">
+              <div key={stage} className="bg-me-ivory border border-me-stone rounded-2xl p-3 min-h-[220px] flex flex-col gap-2">
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="font-semibold text-sm">{stage}</div>
-                    <div className="text-[11px] text-slate-400">{STAGE_META[stage].hint}</div>
+                    <div className="font-display font-semibold text-sm">{stage}</div>
+                    <div className="text-[11px] text-me-taupe">{STAGE_META[stage].hint}</div>
                   </div>
-                  <span className="text-[11px] text-slate-500 bg-white border border-slate-200 rounded-full px-2 tabular-nums">
+                  <span className="text-[11px] text-me-charcoal bg-white border border-me-stone rounded-full px-2 tabular-nums">
                     {cards.length}
                   </span>
                 </div>
 
                 {cards.length === 0 ? (
-                  <div className="text-[11px] text-slate-400 text-center border border-dashed border-slate-200 rounded-lg py-6 px-2 mt-1">
+                  <div className="text-[11px] text-me-taupe text-center border border-dashed border-me-stone rounded-xl py-6 px-2 mt-1">
                     {STAGE_META[stage].empty}
                   </div>
                 ) : (
                   cards.map((c) => (
-                    <div key={c.id} className="bg-white border border-slate-200 rounded-lg p-2.5 shadow-sm">
-                      <div className="text-[13px] font-medium leading-snug mb-1.5">{c.title}</div>
-                      <div className="flex flex-wrap gap-1">
+                    <div key={c.id} className="bg-white border border-me-stone rounded-xl p-2.5">
+                      <div className="flex items-start gap-1.5 mb-1.5">
+                        <span className={`mt-1 w-1.5 h-1.5 rounded-full flex-none ${dotClass(c.status)}`} />
+                        <span className="text-[13px] font-medium leading-snug">{c.title}</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1">
                         {(c.platforms ?? []).map((p) => (
-                          <span key={p} className="text-[10px] bg-slate-100 text-slate-600 rounded px-1.5 py-0.5">
+                          <span key={p} className="text-[10px] bg-me-ivory text-me-charcoal border border-me-stone rounded px-1.5 py-0.5">
                             {PLATFORM_LABEL[p] ?? p}
                           </span>
                         ))}
-                        {c.hasVideo && (
-                          <span className="text-[10px] bg-emerald-50 text-emerald-700 rounded px-1.5 py-0.5">有片</span>
+                        {cardDate(c) && (
+                          <span className="text-[10px] text-me-taupe ml-auto tabular-nums">{cardDate(c)}</span>
                         )}
                       </div>
                     </div>

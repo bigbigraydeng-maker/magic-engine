@@ -644,6 +644,7 @@ export default function ClientDetailPage() {
                 <ToolCard href={`/dashboard/clients/${clientId}/assets`}          title="素材库"        desc="上传图片 → Vision AI 自动分析 → Hook/Middle/CTA 评分 → 视频提示词"  badge="in_house" />
                 <ToolCard href={`/dashboard/visuals?client=${clientId}`}         title="Launch Hub"    desc="Reels · 图片 · 视频素材生产"      badge="in_house" />
                 <ToolCard href={`/dashboard/clients/${clientId}/production`}     title="内容生产包"    desc="查看各维度内容包状态 · 生成内容后自动归集" badge="in_house" />
+                <ToolCard href={`/dashboard/clients/${clientId}/content-factory`} title="内容工厂"      desc="选题 → 备料 → 出片 → 发布 → 看表现 · 一条内容的流水线看板" badge="in_house" />
                 <ToolCard onClick={() => setGenerationOpen(true)}              title="生成单条内容" desc="按关键词 · 视频 · 话题快速生成一条社媒帖子"  badge="in_house" />
               </div>
             </section>

@@ -17,17 +17,19 @@ export async function GET(
   { params }: { params: { id: string } },
 ) {
   try {
+    // 上限 500：organic 内容短期到不了这量级。魏征 M5：若客户内容超 500，
+    // 最老的(通常已发布)会被丢、counts 偏少——到量级前先记着，需要时改分页。
     const { data, error } = await supabaseAdmin
       .from('content_posts')
       .select('id, title, status, source_video_url, platforms, scheduled_at, published_at, created_at')
       .eq('client_id', params.id)
       .order('created_at', { ascending: false })
-      .limit(300)
+      .limit(500)
 
     if (error) throw error
 
     const stages: Record<FactoryStage, unknown[]> = {
-      选题: [], 录制: [], 出片: [], 发布: [], 复盘: [],
+      选题: [], 备料: [], 出片: [], 发布: [], 看表现: [],
     }
 
     for (const p of data ?? []) {
