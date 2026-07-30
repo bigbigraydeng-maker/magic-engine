@@ -564,6 +564,24 @@ export default function CrmTodayPage() {
     }
   }
 
+  // 待认领的 Facebook 对话数 —— 认不出是谁的消息不会进名单，
+  // 不在这里提一句，这批人（CTS 142 段）就静静烂在后台没人知道。
+  const [unclaimed, setUnclaimed] = useState(0)
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/messenger/unclaimed`, {
+          credentials: 'include',
+        })
+        if (!res.ok) return
+        const json = await res.json()
+        setUnclaimed(json.total ?? 0)
+      } catch {
+        // 拿不到就不显示这个入口，不影响主名单
+      }
+    })()
+  }, [clientId])
+
   const buckets = data?.buckets ?? []
   const doneToday = (data?.doneToday ?? 0) + localDone
 
@@ -608,6 +626,19 @@ export default function CrmTodayPage() {
           </div>
           <CrmTabs clientId={clientId} active="today" />
         </div>
+
+        {unclaimed > 0 && (
+          <Link
+            href={`/dashboard/clients/${clientId}/crm/unclaimed`}
+            className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-me-ochre/35 bg-me-ochre/8 px-4 py-2.5 transition hover:bg-me-ochre/15"
+          >
+            <span className="text-[13px] leading-snug text-me-charcoal/75">
+              还有 <strong className="font-black text-me-ochre">{unclaimed}</strong> 条 Facebook 消息认不出是谁，
+              没进下面的名单
+            </span>
+            <span className="flex-none text-[12px] font-black text-me-ochre">去认领 →</span>
+          </Link>
+        )}
       </header>
 
       {toast && (
