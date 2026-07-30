@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
+import Link from 'next/link'
 
 const STAGES = ['选题', '备料', '出片', '发布', '看表现'] as const
 type Stage = (typeof STAGES)[number]
@@ -115,7 +116,15 @@ export default function ContentFactoryBoardPage() {
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto text-me-charcoal">
-      <h1 className="text-xl font-display font-bold">内容工厂</h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-xl font-display font-bold">内容工厂</h1>
+        {clientId && (
+          <Link href={`/dashboard/clients/${clientId}/content-factory/settings`}
+            className="text-xs text-me-charcoal border border-me-stone rounded-full px-3 py-1 hover:border-me-ochre">
+            ⚙ 进料设置
+          </Link>
+        )}
+      </div>
       <p className="text-sm text-me-taupe mb-5">选题 → 备料 → 出片 → 发布 → 看表现，一条内容从左走到右。点卡片看全文。</p>
 
       {loading && <div className="text-sm text-me-taupe py-10 text-center">加载中…</div>}
