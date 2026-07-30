@@ -189,6 +189,7 @@ function buildScopedAdminSections(clientId: string): NavSection[] {
       title: '经营工具',
       items: [
         { key: 'tailor-made', label: '行程单',   mark: 'TM', href: at('/tailor-made') },
+        { key: 'listings',    label: '房子',     mark: 'LI', href: at('/listings') },
         { key: 'crm',         label: '客户跟进', mark: 'CR', href: at('/crm') },
         { key: 'connectors',  label: '数据连接', mark: 'CN', href: at('/connectors') },
       ],

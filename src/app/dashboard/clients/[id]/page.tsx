@@ -663,6 +663,12 @@ export default function ClientDetailPage() {
                 desc="定制行程报价单：填表 → 预览 → 导出品牌 PDF 发给客户"
                 badge="in_house"
               />
+              <ToolCard
+                href={`/dashboard/clients/${clientId}/listings`}
+                title="房子"
+                desc="中介手上的每一套房：建档、改状态、看每套房带来了多少客人"
+                badge="in_house"
+              />
             </div>
           </section>
 

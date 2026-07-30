@@ -100,6 +100,7 @@ function inferAreaLabel(pathname: string | null, clientId: string): string {
   if (tail.startsWith('/assets'))         return '素材库'
   if (tail.startsWith('/goal'))           return 'Goal 战略层'
   if (tail.startsWith('/goals'))          return 'Goal 战略层'
+  if (tail.startsWith('/listings'))       return '房子'
   if (tail.startsWith('/memory'))         return '客户记忆库'
   if (tail.startsWith('/wallet'))         return '钱包'
   if (tail.startsWith('/settings'))       return '设置'
