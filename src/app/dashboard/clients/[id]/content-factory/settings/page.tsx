@@ -22,7 +22,7 @@ const PLATFORM_LABEL: Record<string, string> = { xiaohongshu: '小红书', douyi
 const CADENCE_LABEL: Record<string, string> = { off: '先关着', weekly: '每周一次', daily: '每天一次' }
 
 const GREETING =
-  '你好，我来帮你把"选题进料"设好——系统会照这个，定时去小红书/抖音抓爆款，再按你的人设改写成候选。\n先问一句：你的生意主要围绕什么？想让内容覆盖哪些话题或赛道？'
+  '你好，我来帮你把"选题进料"设好——设好之后，系统会照着你的方向，定期从小红书、抖音这些平台找到当下受欢迎的内容风向，帮你产出贴合品牌的选题候选。\n不用一次说全，我们一样样来，随时能回来改。\n先说说：这个品牌主要做什么、想让内容覆盖哪些话题或赛道？'
 
 export default function IntakeSettingsPage() {
   const params = useParams<{ id: string }>()
@@ -65,7 +65,7 @@ export default function IntakeSettingsPage() {
   return (
     <div className="p-6 max-w-[1100px] mx-auto text-me-charcoal">
       <h1 className="text-xl font-display font-bold">内容工厂 · 进料设置</h1>
-      <p className="text-sm text-me-taupe mb-5">跟我聊，把"抓什么、抓哪、多久、什么风格"定下来。设好后系统就自动去抓爆款、改写成候选。</p>
+      <p className="text-sm text-me-taupe mb-5">跟我聊，把"覆盖什么话题、在哪些平台、多久一次、什么风格"定下来。设好后系统会定期帮你产出贴合品牌的选题候选。</p>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* 对话 */}
@@ -113,9 +113,11 @@ export default function IntakeSettingsPage() {
           ) : (
             <div className="flex flex-col gap-3 text-sm">
               <Row label="状态" value={
-                <span className={config.enabled ? 'text-status-track' : 'text-me-taupe'}>
-                  {config.enabled ? '已开启自动进料' : '未开启'}
-                </span>
+                (() => {
+                  // 频率=先关着 等于没开，避免"已开启 + 先关着"自相矛盾
+                  const on = config.enabled && config.cadence !== 'off'
+                  return <span className={on ? 'text-status-track' : 'text-me-taupe'}>{on ? '已开启自动进料' : '未开启'}</span>
+                })()
               } />
               <Row label="平台" value={(config.platforms ?? []).map((p) => PLATFORM_LABEL[p] ?? p).join(' · ') || '—'} />
               <Row label="频率" value={CADENCE_LABEL[config.cadence] ?? config.cadence} />
@@ -129,7 +131,7 @@ export default function IntakeSettingsPage() {
                     : <span className="text-xs text-me-taupe">—</span>}
                 </div>
               </div>
-              <Row label="每次改写" value={`${config.rewriteCount} 条候选`} />
+              <Row label="每次给几个选题" value={`${config.rewriteCount} 条`} />
               {config.preferences && (
                 <div>
                   <div className="text-[11px] text-me-taupe mb-1">喜好 / 风格</div>

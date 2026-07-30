@@ -26,6 +26,14 @@ export const DEFAULT_INTAKE: IntakeConfig = {
   preferences: '',
 }
 
+// 成本硬顶：无论对话助理/前端传什么，落库前 clamp，防一次改写几百条烧钱。
+const MAX_REWRITE = 10
+const MAX_SCRAPE = 50
+const clampInt = (v: unknown, def: number, min: number, max: number): number => {
+  const n = typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : def
+  return Math.min(max, Math.max(min, n))
+}
+
 /** 读某客户的进料配置（无则给默认，且带上 clients.primary_keywords 当种子）。 */
 export async function getIntakeConfig(clientId: string): Promise<IntakeConfig> {
   const { data } = await supabaseAdmin
@@ -39,11 +47,13 @@ export async function getIntakeConfig(clientId: string): Promise<IntakeConfig> {
 
   return {
     ...DEFAULT_INTAKE,
-    // 没配过关键词时，用客户已有的主关键词当种子，别让它空着
-    keywords: saved?.keywords?.length ? saved.keywords : seedKeywords,
     ...saved,
+    // 没配过关键词时，用客户已有的主关键词当种子，别让它空着（必须放 ...saved 之后，否则被 saved.keywords=[] 盖掉）
+    keywords: saved?.keywords?.length ? saved.keywords : seedKeywords,
     // 保证数组/字段类型稳
     platforms: saved?.platforms?.length ? saved.platforms : DEFAULT_INTAKE.platforms,
+    scrapePerPlatform: clampInt(saved?.scrapePerPlatform, DEFAULT_INTAKE.scrapePerPlatform, 1, MAX_SCRAPE),
+    rewriteCount: clampInt(saved?.rewriteCount, DEFAULT_INTAKE.rewriteCount, 1, MAX_REWRITE),
   }
 }
 
@@ -53,7 +63,13 @@ export async function saveIntakeConfig(
   patch: Partial<IntakeConfig>,
 ): Promise<IntakeConfig> {
   const current = await getIntakeConfig(clientId)
-  const next: IntakeConfig = { ...current, ...patch }
+  const merged: IntakeConfig = { ...current, ...patch }
+  // 落库前再 clamp 一次（对话助理/前端可能传超大值）
+  const next: IntakeConfig = {
+    ...merged,
+    scrapePerPlatform: clampInt(merged.scrapePerPlatform, DEFAULT_INTAKE.scrapePerPlatform, 1, MAX_SCRAPE),
+    rewriteCount: clampInt(merged.rewriteCount, DEFAULT_INTAKE.rewriteCount, 1, MAX_REWRITE),
+  }
 
   const { data } = await supabaseAdmin
     .from('clients')

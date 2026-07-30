@@ -10,13 +10,17 @@ type Row = Record<string, unknown>
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 const num = (v: unknown): number => (typeof v === 'number' ? v : 0)
 
-// content_posts 里已有的、来自同一爆款的标题，避免重复抓同一条反复改写
+// 去重键：只用标题，不带点赞数（点赞会变，带上就永远命中不了、同一条反复改写烧钱）
+const sourceKey = (title: string): string => `抓自：${title}`.trim()
+
+// content_posts 里已有的、来自同一爆款的 source，避免重复抓同一条反复改写
 async function existingSources(clientId: string): Promise<Set<string>> {
   const { data } = await supabaseAdmin
     .from('content_posts')
     .select('source')
     .eq('client_id', clientId)
     .not('source', 'is', null)
+    .order('created_at', { ascending: false })
     .limit(500)
   return new Set((data ?? []).map((r) => str((r as Row).source)))
 }
@@ -88,8 +92,9 @@ export async function runIntakeForClient(clientId: string): Promise<IntakeRunRes
 
   let created = 0
   for (const v of picks) {
-    const source = `抓自：${v.title} ${v.engagement}`
+    const source = sourceKey(v.title)
     if (seen.has(source)) continue
+    seen.add(source)  // 本轮内也去重（同一次抓到两条同标题不重复改写）
     try {
       const c = await generateCandidate(clientId, v)
       const { error } = await supabaseAdmin.from('content_posts').insert({
