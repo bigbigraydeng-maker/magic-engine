@@ -32,6 +32,8 @@ interface Payload {
   page_id: string | null
   pages: ManagedPage[] | null
   pages_error: PagesError | null
+  /** Live答案：ME 现在读不读得到这个主页。false = 绑了但拉不到东西。 */
+  reachable: boolean | null
 }
 
 type PanelState =
@@ -99,6 +101,7 @@ export function FacebookPagePanel({ clientId }: Props) {
           page_id: json.page_id ?? null,
           pages: json.pages ?? null,
           pages_error: json.pages_error ?? null,
+          reachable: json.reachable ?? null,
         },
       })
       setDraft(json.page_id ?? '')
@@ -133,11 +136,13 @@ export function FacebookPagePanel({ clientId }: Props) {
     )
   }
 
-  const { page_id, pages, pages_error } = state.data
+  const { page_id, pages, pages_error, reachable } = state.data
   const dirty = draft.trim() !== (page_id ?? '').trim()
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <LiveStatus pageId={page_id} reachable={reachable} />
+
       <p className="mb-3 text-sm text-slate-600">
         选中客户的 Facebook 主页后，系统每小时自动把主页私信拉进来，AI 写成需求卡，
         显示在<span className="font-bold">「客户消息」</span>页。不选就完全不动这个客户的私信。
@@ -215,6 +220,47 @@ export function FacebookPagePanel({ clientId }: Props) {
         保存后最快等一小时出现第一批对话。
       </p>
     </div>
+  )
+}
+
+/**
+ * Standing answer to "is this actually working right now", shown on every load.
+ *
+ * The failure it exists for is silent: a Page can be bound while the client has
+ * only granted us permission to *advertise* with it, not to read its inbox. Ads
+ * spend, nothing arrives, and every screen looks normal. 30 Kiteroa sat like
+ * that with money going out and zero conversations in ME. The save-time message
+ * did say it once, but it disappeared on the next load — so this repeats it for
+ * as long as it is true, and names the fix rather than just the symptom.
+ */
+function LiveStatus({ pageId, reachable }: { pageId: string | null; reachable: boolean | null }) {
+  if (pageId === null) return null
+
+  if (reachable === true) {
+    return (
+      <p className="mb-3 rounded-lg bg-cyan-50 px-3 py-2 text-xs font-bold text-cyan-800">
+        ✓ 私信正在同步 —— ME 读得到这个主页。
+      </p>
+    )
+  }
+
+  if (reachable === false) {
+    return (
+      <p className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-700">
+        <span className="font-bold">⚠ 绑了主页，但线索进不来。</span>
+        <br />
+        ME 读不到这个主页，所以私信一条都同步不进来 —— 广告照跑照花钱，客人发来的消息只留在对方主页的收件箱里。
+        <br />
+        多半是对方只允许我们「用他的主页投广告」，没有把主页共享给我们读消息。请客户到 Meta 商务设置里把主页共享给
+        Magic Engine，并给到能看私信的权限。
+      </p>
+    )
+  }
+
+  return (
+    <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+      绑了主页，但现在连不上 Meta，没法确认同步是否正常。
+    </p>
   )
 }
 

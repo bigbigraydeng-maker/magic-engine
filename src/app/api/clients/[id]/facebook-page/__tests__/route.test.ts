@@ -79,6 +79,66 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
+/**
+ * GET must answer "is this binding live", not just "what is stored".
+ *
+ * 30 Kiteroa had a Page bound, ads spending, and an hourly sync skipping with
+ * `no_page_token` — the client had granted us permission to advertise with the
+ * Page but never shared it, so Meta hands us no Page token. Every screen looked
+ * healthy. PATCH already reported this at save time; GET stayed silent, so the
+ * warning survived exactly one page load.
+ */
+describe('facebook-page — is the binding actually live', () => {
+  it('reports reachable when Meta hands us the bound Page', async () => {
+    allow()
+    stubClients(CTS_PAGE)
+    mockToken.mockResolvedValue('user-token')
+    mockPages.mockResolvedValue([{ id: CTS_PAGE, name: 'CTS Tours' }] as never)
+
+    const res = await GET(getRequest(), params())
+    const json = (await res.json()) as { reachable: boolean | null }
+
+    expect(res.status).toBe(200)
+    expect(json.reachable).toBe(true)
+  })
+
+  it('reports NOT reachable when the Page is bound but Meta will not hand it over', async () => {
+    allow()
+    stubClients('227633594573276') // 30 Kiteroa: bound, advertised with, never shared
+    mockToken.mockResolvedValue('user-token')
+    // Meta lists the Pages we may act for — the bound one is absent.
+    mockPages.mockResolvedValue([{ id: CTS_PAGE, name: 'CTS Tours' }] as never)
+
+    const res = await GET(getRequest(), params())
+    const json = (await res.json()) as { reachable: boolean | null }
+
+    expect(json.reachable).toBe(false)
+  })
+
+  it('says unknown rather than broken when Meta cannot be asked', async () => {
+    allow()
+    stubClients(CTS_PAGE)
+    mockToken.mockResolvedValue(null) // no token → no pick-list, no verdict
+
+    const res = await GET(getRequest(), params())
+    const json = (await res.json()) as { reachable: boolean | null }
+
+    expect(json.reachable).toBeNull()
+  })
+
+  it('says unknown when nothing is bound, so the UI shows no alarm', async () => {
+    allow()
+    stubClients(null)
+    mockToken.mockResolvedValue('user-token')
+    mockPages.mockResolvedValue([{ id: CTS_PAGE, name: 'CTS Tours' }] as never)
+
+    const res = await GET(getRequest(), params())
+    const json = (await res.json()) as { reachable: boolean | null }
+
+    expect(json.reachable).toBeNull()
+  })
+})
+
 describe('facebook-page — authorisation', () => {
   it('rejects a caller who is not a member of the client', async () => {
     mockAccess.mockResolvedValue({ ok: false, status: 403, error: 'Forbidden' } as never)
