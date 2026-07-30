@@ -197,6 +197,20 @@ export async function linkMessengerConversation(
     }
   }
 
+  // 来源归因：这两条触点的 attr_* 列**故意全部留 NULL**。
+  //
+  // 私信同步走 Graph `/{page}/conversations`（见 lib/meta/conversations.ts，messages
+  // 只请求 `id,created_time,message,from,tags`）。广告点进来的 referral / ctwa_clid
+  // 只在 **Webhook** 的 messaging_referrals 事件里出现，读接口根本不返回。所以对
+  // 每一段私信，我们都不知道它是自然来的还是从广告点进来的。
+  //
+  // 那就别写。填 'organic_social' 是撒谎（可能真是广告带来的），填 'meta' 也是撒谎
+  // （可能是自然搜到主页私信的）—— 两种都会污染「哪条广告有效」的分母，而这个分母
+  // 正是整套学习的地基。留 NULL = 如实说「不知道」。
+  //
+  // 要真正拿到私信的广告归因，得接 Messenger Webhook（另一条工作线：需要
+  // 订阅 messaging_referrals + 主页 token 权限），不是在这里能补的。
+  //
   // 写/刷新两条汇总触点：客户来信 + 我们回复。分两条，segments 才能让
   // 「客户在等我们」只在客户更晚时才触发，而不是一段对话糊成一个方向。
   //
