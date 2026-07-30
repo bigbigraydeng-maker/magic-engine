@@ -48,8 +48,26 @@ export const CONTENT_POST_STAGE: Record<ContentPostStatus, FactoryStage> = {
 }
 
 export function stageOfWorkOrder(status: WorkOrderStatus): FactoryStage {
+  // content_work_orders 是 Meta 广告工厂（有 budget/ad_id）。这个映射留给"广告线看板"，
+  // 大瑞的 organic 小红书/抖音内容不走这里 —— 走下面 stageOfContentPost。
   return WORK_ORDER_STAGE[status]
 }
-export function stageOfContentPost(status: ContentPostStatus): FactoryStage {
-  return CONTENT_POST_STAGE[status]
+
+/**
+ * organic 内容（content_posts）→ 5 段。零 migration：从已有字段推导，不新增状态。
+ * - 选题：draft/rejected 候选（选题助理产出，待确认）
+ * - 录制：approved 但还没有视频（已确认，等大瑞录/传素材）
+ * - 出片：approved 且已有视频（素材到位，出片助理处理中/已出片，待排期）
+ * - 发布：scheduled 或已进发布通道
+ * - 复盘：published（回收数据）
+ */
+export function stageOfContentPost(input: {
+  status: ContentPostStatus
+  hasVideo: boolean
+}): FactoryStage {
+  const { status, hasVideo } = input
+  if (status === 'published') return '复盘'
+  if (status === 'scheduled') return '发布'
+  if (status === 'approved') return hasVideo ? '出片' : '录制'
+  return '选题' // draft / rejected
 }
