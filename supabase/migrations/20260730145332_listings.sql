@@ -1,6 +1,6 @@
 -- listings —— 「一套房」终于成为一个对象
 --
--- ⚠️ 本文件**尚未** apply。migration 必须 PM 拍板后才执行(CLAUDE.md 铁律)。
+-- ✅ 已 apply(2026-07-30, PM 显式 go apply)。库内版本号见文件名。
 --
 -- WHY
 -- ---
