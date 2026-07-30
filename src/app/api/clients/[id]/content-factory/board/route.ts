@@ -21,7 +21,7 @@ export async function GET(
     // 最老的(通常已发布)会被丢、counts 偏少——到量级前先记着，需要时改分页。
     const { data, error } = await supabaseAdmin
       .from('content_posts')
-      .select('id, title, status, source_video_url, platforms, scheduled_at, published_at, created_at')
+      .select('id, title, status, source_video_url, platforms, scheduled_at, published_at, created_at, script, caption, source, pillar_id, visual_brief')
       .eq('client_id', params.id)
       .order('created_at', { ascending: false })
       .limit(500)
@@ -46,6 +46,12 @@ export async function GET(
         scheduledAt: p.scheduled_at,
         publishedAt: p.published_at,
         createdAt: p.created_at,
+        // 详情抽屉用的全文字段
+        hook: p.caption ?? '',
+        script: p.script ?? '',
+        pillar: p.pillar_id ?? '',
+        source: p.source ?? '',
+        visualBrief: p.visual_brief ?? '',
       })
     }
 
