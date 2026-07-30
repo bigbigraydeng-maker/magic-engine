@@ -10,7 +10,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
-import { getMetaTokenForClient } from '@/lib/meta/token-manager'
+import { getMetaTokenForClient, getStoredPageToken } from '@/lib/meta/token-manager'
 import { getPageAccessToken } from '@/lib/meta/page-posts'
 import { fetchPageConversations, type MessengerConversation } from '@/lib/meta/conversations'
 import { linkMessengerConversation, loadIdentityIndex } from '@/lib/messenger/link-contacts'
@@ -154,10 +154,18 @@ export async function syncClientMessenger(
   const pageId = client.facebook_page_id
   if (!pageId) return { ...base, skipped: 'no_page_id' }
 
-  const userToken = await getMetaTokenForClient(client.id)
-  if (!userToken) return { ...base, skipped: 'no_meta_token' }
+  // Preferred: a Page token stored by the "连接 Meta" button. Falls back to
+  // deriving one from an env-var user token, which only works when that
+  // identity holds a role on the Page — the gap that left 30 Kiteroa skipping
+  // with `no_page_token` while its ads spent and its inbox filled up.
+  let pageToken = await getStoredPageToken(client.id, pageId)
 
-  const pageToken = await getPageAccessToken(userToken, pageId)
+  if (!pageToken) {
+    const userToken = await getMetaTokenForClient(client.id)
+    if (!userToken) return { ...base, skipped: 'no_meta_token' }
+    pageToken = await getPageAccessToken(userToken, pageId)
+  }
+
   if (!pageToken) return { ...base, skipped: 'no_page_token' }
 
   try {
