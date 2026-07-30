@@ -425,6 +425,22 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # 内容工厂 · 选题进料 — 每天 UTC 22:00 (~10am NZST) 抓爆款+按人设改写成候选。
+  # cron 每天打；路由内部按每个客户的 topic_intake.cadence 过滤(daily 每天/weekly 只周一/off 跳)。
+  # ⚠️ 部署后需在 Render 手动 link me-shared-cron-secret env group，否则每天静默 401。
+  #    建议再配一个 healthchecks.io ping(&& curl hc-ping.com/<uuid>)防"没跑"不报警。
+  - type: cron
+    name: content-factory-intake
+    env: node
+    schedule: "0 22 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/content-factory-intake
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # Daily anomaly detector — every day at 5am UTC (~5pm NZST / 3pm AEST)
   # Two-step pipeline:
   #   Step 1: AnomalyDetectorJob — scans flywheel_metrics, writes anomaly_signals
