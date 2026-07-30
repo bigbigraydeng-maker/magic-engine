@@ -254,6 +254,26 @@ describe('官网表单 lead → CRM', () => {
     expect(touchpointUpserts).toEqual([])
   })
 
+  it('撞到已有客户时，绝不用表单里的名字覆盖他 —— 公开端点不许改已有客户资料', async () => {
+    // 场景：某人（或某脚本）知道老客户的邮箱，用它提交表单并填一个别的名字。
+    // 如果放过去，CRM 里那位真实客户的姓名就被匿名提交改掉了，销售当场认不出人。
+    mockDb([{ contact_id: 'person-old', kind: 'email', value: EMAIL.value }])
+
+    const r = await mirrorWebFormLead({
+      clientId: CLIENT,
+      leadId: 'lead-4',
+      name: '改成别的名字',
+      phone: null,
+      email: 'chris@example.com',
+    })
+
+    expect(r.contactId).toBe('person-old')
+    // 归因回填那次 update 可以有，但**任何一次** update 都不许带 display_name
+    for (const call of contactUpdates) {
+      expect(call.patch).not.toHaveProperty('display_name')
+    }
+  })
+
   it('底层报错时不抛出去（lead 已经存了，客户不该看到提交失败）', async () => {
     ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation(() => {
       throw new Error('db down')
