@@ -1,0 +1,42 @@
+name: Demo client refresh (Daily)
+
+# 演示客户 Harbourline Physio 的数据每天前滚一天，
+# 保证管理员演示账号任何时候登录看到的都是「活的」数据。
+
+on:
+  schedule:
+    # 每天 17:10 UTC = 新西兰时间次日 05:10（NZST）/ 06:10（NZDT）
+    - cron: '10 17 * * *'
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger demo-refresh endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          DEMO_REFRESH_URL: ${{ secrets.DEMO_REFRESH_URL || 'https://app.magicengine.com.au/api/cron/demo-refresh' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET secret not set"
+            exit 1
+          fi
+
+          echo "Triggering: $DEMO_REFRESH_URL"
+          response=$(curl -fsSL -w "\nHTTP_STATUS:%{http_code}" \
+            -X GET \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            --max-time 120 \
+            "$DEMO_REFRESH_URL")
+
+          status=$(echo "$response" | tail -n1 | sed 's/HTTP_STATUS://')
+          body=$(echo "$response" | sed '$d')
+
+          echo "$body"
+
+          if [ "$status" != "200" ]; then
+            echo "::error::demo-refresh returned HTTP $status"
+            exit 1
+          fi

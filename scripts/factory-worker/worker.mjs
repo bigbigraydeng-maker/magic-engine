@@ -215,8 +215,17 @@ async function resolveClips(wo, tmp, onCost) {
     const wo_key = plan.idempotency_key.replace('{work_order_id}', wo.work_order_id)
     const up = uploadByKey.get(wo_key) || uploadByKey.get(plan.idempotency_key)
     if (!up) throw new Error(`生成 clip 无上传通道(key=${wo_key})`)
-    // source image:v1 用 brandkit 占位帧(真实接入时来自 clip 库首帧/客户图)
-    const srcImg = ENV.MUAPI_SOURCE_IMAGE_URL || `${ENV.NEXT_PUBLIC_SUPABASE_URL || ''}/storage/v1/object/public/content-factory/seed/cts_source.jpg`
+    // source image:优先用建单时挑好的源图(plan.source_image_url),没有才退回占位帧。
+    //
+    // 🔴 这是「所有片子长得一样」的根因之一:此前**无条件**用同一张 seed/cts_source.jpg,
+    // 所有 i2v 画面都从同一张图长出来 —— 换多少种提示词都改不掉底子。
+    // 建单侧现在会把抓来的素材填进 source_image_url(见 lib/factory/stock-ingest.ts),
+    // 每条片子的源图不同,画面才可能不同。
+    const srcImg =
+      (typeof plan.source_image_url === 'string' && plan.source_image_url.trim())
+        ? plan.source_image_url.trim()
+        : (ENV.MUAPI_SOURCE_IMAGE_URL || `${ENV.NEXT_PUBLIC_SUPABASE_URL || ''}/storage/v1/object/public/content-factory/seed/cts_source.jpg`)
+    if (plan.source_image_url) log(`  源图来自素材库: ${String(plan.source_image_url).slice(-40)}`)
     log(`  生成 clip ${seg.role}:${i} via muapi…`)
     const gen = await muapiGenerate(plan, srcImg)
     writeFileSync(dst, gen.buf)

@@ -127,6 +127,9 @@ export interface GateContext {
   verifiedOffer: VerifiedOffer | null
   /** 客户是否配了叙事人格(master_briefs.brand_voice.persona)→ 选故事型分镜 + 第一人称文案 */
   hasPersona?: boolean
+  /** i2v 源图池:抓来的静图公开 URL。喂给 generationPlan 当底图,每段轮换用不同的一张。
+   *  由 evaluate 从 video_clips 里 is_still_image=true 的行装配。空 = worker 退回占位帧。 */
+  sourceImagePool?: readonly string[]
 }
 
 export interface AngleSource {
@@ -144,8 +147,10 @@ export interface ClipGenerationPlanItem {
   prompt_hint: string
   /** `{work_order_id占位}:{segment_role}:{position}` — worker 侧防重烧(魏征 F10③) */
   idempotency_key: string
-  source_image_url: null
-  requires_source_resolution: true
+  /** i2v 底图。有值 = 建单时已从素材池挑好;null = worker 退回占位帧(所有画面同一个样的老路) */
+  source_image_url: string | null
+  /** true = 还没挑到源图,交给 worker 兜底 */
+  requires_source_resolution: boolean
 }
 
 /** 段级广告文案(A2:后端生成,品牌接地) */

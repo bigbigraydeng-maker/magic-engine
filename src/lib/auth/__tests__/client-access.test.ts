@@ -34,12 +34,13 @@ function mockUser(email: string) {
  * to keep legacy tests (that pre-date tier support) passing unchanged.
  */
 function mockPortalRows(
-  rows: Array<{ client_id: string; access_type?: AccessType }>,
+  rows: Array<{ client_id: string; access_type?: AccessType; scoped_admin?: boolean }>,
   error: unknown = null,
 ) {
   const enriched = rows.map(r => ({
     client_id: r.client_id,
     access_type: r.access_type ?? 'dashboard',
+    scoped_admin: r.scoped_admin ?? false,
   }))
   const chain = {
     select: vi.fn().mockReturnThis(),
@@ -66,6 +67,45 @@ describe('requireDashboardClientAccess', () => {
       if (saved[key] === undefined) delete process.env[key]
       else process.env[key] = saved[key]
     }
+  })
+
+  // ── 受限管理员（client_portal_users.scoped_admin） ─────────────────────────
+  // 这是演示账号与真实客户数据之间唯一的一道闸。
+
+  it('scoped_admin 行在自己的客户上拿到 admin 角色与 FDE 视角', async () => {
+    mockUser('demo@example.com')
+    mockPortalRows([{ client_id: CLIENT_ID, access_type: 'both', scoped_admin: true }])
+
+    const result = await requireDashboardClientAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.role).toBe('admin')
+      expect(result.tier).toBe('admin')
+      // 关键：范围仍锁死在这一个客户，不是 null（null = 可访问全部客户）
+      expect(result.allowedClientId).toBe(CLIENT_ID)
+    }
+  })
+
+  it('scoped_admin 访问别的客户仍然 403', async () => {
+    // 演示账号只在自己那一行上有 scoped_admin；换个 clientId 查不到行 → 拒绝
+    mockUser('demo@example.com')
+    mockPortalRows([{ client_id: CLIENT_ID, access_type: 'both', scoped_admin: true }])
+
+    const result = await requireDashboardClientAccess('99999999-9999-9999-9999-999999999999')
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(403)
+  })
+
+  it('scoped_admin=false 的普通行仍是 client-viewer', async () => {
+    mockUser('viewer@example.com')
+    mockPortalRows([{ client_id: CLIENT_ID, access_type: 'both', scoped_admin: false }])
+
+    const result = await requireDashboardClientAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.role).toBe('client-viewer')
   })
 
   it('returns 401 when there is no Magic Link session', async () => {

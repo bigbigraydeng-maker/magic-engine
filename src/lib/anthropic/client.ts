@@ -176,17 +176,40 @@ export async function callClaudeChat(params: {
 }): Promise<ClaudeCallResult> {
   const { systemPrompt, messages, maxOutputTokens = 4096 } = params
 
-  const client = getAnthropicClient()
-
-  const message = await client.messages.create({
+  const body = {
     model: MODEL_SONNET,
     max_tokens: maxOutputTokens,
     system: systemPrompt,
-    messages: messages.map(m => ({
-      role: m.role,
-      content: m.content,
-    })),
-  })
+    messages: messages.map(m => ({ role: m.role, content: m.content })),
+  }
+
+  let message: Anthropic.Message
+  try {
+    message = await getAnthropicClient().messages.create(body)
+  } catch (sdkErr) {
+    // SDK 兜底:@anthropic-ai/sdk 0.32.1(2024 年版)在 Node 24 上会
+    // `Invalid response body ... Premature close` —— 同样的请求 curl/fetch 直连是通的,
+    // 纯粹是老 SDK 的 HTTP 层与新版 Node 打架。2026-07-25 本机实测复现 100%。
+    // 静默失败的代价:调用方(如 copy-generator)只会看到抛错并落模板兜底,
+    // 表现为「AI 文案永远不生效」,极难反查。所以这里用原生 fetch 重试一次。
+    const msg = sdkErr instanceof Error ? sdkErr.message : String(sdkErr)
+    console.warn(`[anthropic-client] SDK 调用失败,改用原生 fetch 重试: ${msg}`)
+    const apiKey = process.env.ANTHROPIC_API_KEY
+    if (!apiKey) throw sdkErr
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+      throw new Error(`Anthropic fetch fallback failed (${res.status}): ${(await res.text()).slice(0, 300)}`)
+    }
+    message = (await res.json()) as Anthropic.Message
+  }
 
   const text = message.content
     .filter((b): b is Anthropic.TextBlock => b.type === 'text')

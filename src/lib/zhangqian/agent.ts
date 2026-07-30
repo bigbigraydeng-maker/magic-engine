@@ -95,6 +95,34 @@ const WEB_SEARCH_TOOL = {
 } as unknown as Anthropic.Messages.Tool
 
 /**
+ * Drop any `server_tool_use` block that has no matching `web_search_tool_result`
+ * in the same assistant message.
+ *
+ * Anthropic validates server-tool pairing on every subsequent request: an
+ * orphaned `server_tool_use` (e.g. the turn was cut short mid-search) makes the
+ * *next* call 400 with "web_search tool use with id ... was found without a
+ * corresponding web_search_tool_result block". Since the block carries no
+ * information without its result, dropping it is lossless.
+ */
+export function stripUnpairedServerToolUse(
+  content: Anthropic.Messages.ContentBlock[],
+): Anthropic.Messages.ContentBlock[] {
+  const resolvedIds = new Set<string>()
+  for (const block of content) {
+    const b = block as { type: string; tool_use_id?: string }
+    if (b.type === 'web_search_tool_result' && b.tool_use_id) {
+      resolvedIds.add(b.tool_use_id)
+    }
+  }
+
+  return content.filter(block => {
+    const b = block as { type: string; id?: string }
+    if (b.type !== 'server_tool_use') return true
+    return b.id !== undefined && resolvedIds.has(b.id)
+  })
+}
+
+/**
  * Client-side tool: fetch a URL via Jina Reader and return markdown.
  * We resolve this in the tool loop.
  */
@@ -469,10 +497,22 @@ export async function runZhangqian(
       }
     }
 
-    // Append assistant message to conversation
-    messages.push({ role: 'assistant', content: response.content })
+    // Append assistant message to conversation. Unpaired server_tool_use blocks
+    // are stripped first — leaving one in history 400s every subsequent call.
+    messages.push({
+      role: 'assistant',
+      content: stripUnpairedServerToolUse(response.content),
+    })
 
     // ── Inspect stop reason ────────────────────────────────────────────────
+    // `pause_turn`: Anthropic's server-side tool loop hit its own iteration cap
+    // mid-search. Re-send the conversation as-is (no extra user turn — the API
+    // detects the trailing server_tool_use and resumes on its own).
+    // (`pause_turn` postdates SDK 0.32.1's stop_reason union — compare as string.)
+    if ((response.stop_reason as string) === 'pause_turn') {
+      continue
+    }
+
     if (response.stop_reason === 'end_turn') {
       // Done — final text should be JSON
       const finalText = response.content

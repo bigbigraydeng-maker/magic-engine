@@ -37,11 +37,13 @@ export class CompetitorCollector {
     clientId: string,
     domain: string,
     _keywords: string[],
+    db: string = 'au',
   ): Promise<CompetitorCollectorResult> {
-    // 1. Get competitor domains from DataForSEO
+    // 1. Get competitor domains from DataForSEO — SERP is market-scoped, so an
+    // NZ client must query the NZ location or the whole competitor set is wrong.
     let competitors: CompetitorDomain[]
     try {
-      competitors = await getCompetitorDomains(domain, 5)
+      competitors = await getCompetitorDomains(domain, 5, db)
     } catch {
       competitors = []
     }

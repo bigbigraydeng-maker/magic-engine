@@ -41,12 +41,17 @@ export async function requireDashboardClientAccess(
   const envPerms = getUserPermissions(email)
 
   if (envPerms?.role === 'admin') {
+    // 受限管理员（DEMO_ADMINS）：FDE 能力不变，但只在自己那一个客户范围内。
+    // 不加这个判断的话，演示账号改一下 URL 就能读到全部真实客户的数据。
+    if (envPerms.allowedClientId && envPerms.allowedClientId !== clientId) {
+      return { ok: false, status: 403, error: 'Forbidden', reason: 'forbidden' }
+    }
     return {
       ok: true,
       user: session.user,
       role: 'admin',
       tier: 'admin',
-      allowedClientId: null,
+      allowedClientId: envPerms.allowedClientId,
     }
   }
 
@@ -67,6 +72,18 @@ export async function requireDashboardClientAccess(
       }
     }
     return { ok: false, status: 403, error: 'Forbidden', reason: 'forbidden' }
+  }
+
+  // 受限管理员（DB 版）：给 admin 角色与 FDE 视角，但 allowedClientId 仍是
+  // 这一个客户 —— 上面的 row 查找已经保证了只有本人有权的客户才走到这里。
+  if (row.scopedAdmin) {
+    return {
+      ok: true,
+      user: session.user,
+      role: 'admin',
+      tier: 'admin',
+      allowedClientId: clientId,
+    }
   }
 
   const tier = tierForAccessType(row.accessType)
@@ -138,6 +155,8 @@ export async function requirePaidClientAccess(
 interface DashboardAccessRow {
   clientId: string
   accessType: AccessType
+  /** true = 该邮箱在此客户下是受限管理员（FDE 视角，但只能访问这一个客户） */
+  scopedAdmin: boolean
 }
 
 async function getDashboardAccessForEmail(email: string): Promise<
@@ -146,7 +165,7 @@ async function getDashboardAccessForEmail(email: string): Promise<
 > {
   const { data, error } = await supabaseAdmin
     .from('client_portal_users')
-    .select('client_id, access_type')
+    .select('client_id, access_type, scoped_admin')
     .eq('email', email)
     .in('access_type', ACCESS_TYPES_DASHBOARD as readonly string[] as string[])
 
@@ -158,8 +177,9 @@ async function getDashboardAccessForEmail(email: string): Promise<
   return {
     ok: true,
     rows: (data ?? []).map((row) => ({
-      clientId:   row.client_id as string,
-      accessType: row.access_type as AccessType,
+      clientId:    row.client_id as string,
+      accessType:  row.access_type as AccessType,
+      scopedAdmin: (row as { scoped_admin?: boolean }).scoped_admin === true,
     })),
   }
 }

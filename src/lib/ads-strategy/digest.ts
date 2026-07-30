@@ -14,6 +14,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { Resend } from 'resend'
+import { meMailFrom, ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
 
 type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history' | 'paused'
 
@@ -200,12 +201,12 @@ export async function sendAdHealthDigest(
 
     const to = recipients && recipients.length > 0
       ? recipients
-      : [process.env.AD_HEALTH_DIGEST_TO || 'raydeng@magicengine.com.au']
+      : [process.env.AD_HEALTH_DIGEST_TO || ME_MAIL_TO_ADDRESS]
     const dashboardUrl = `https://app.magicengine.com.au/dashboard/clients/${clientId}/ads-health`
 
     const resend = new Resend(apiKey)
     const { error } = await resend.emails.send({
-      from: 'Magic Engine 广告自检 <onboarding@resend.dev>',
+      from: meMailFrom('Magic Engine 广告自检'),
       to,
       subject: buildSubject(clientName, insightDate, decision),
       html: buildBody(payload, decision, dashboardUrl),
@@ -213,7 +214,10 @@ export async function sendAdHealthDigest(
 
     if (error) {
       await markEmailStatus(clientId, insightDate, 'failed')
-      return { decision, sent: false, error: String(error) }
+      // Resend returns a plain object ({name, message, statusCode}); String()
+      // on it yields "[object Object]", which swallowed the only clue we had
+      // when the 2026-07-23 Oztop alert failed to send. Keep it readable.
+      return { decision, sent: false, error: describeSendError(error) }
     }
 
     await markEmailStatus(clientId, insightDate, 'sent')
@@ -221,6 +225,31 @@ export async function sendAdHealthDigest(
   } catch (err) {
     return { decision: 'skip', sent: false, error: err instanceof Error ? err.message : 'Unknown error' }
   }
+}
+
+/**
+ * Render a Resend send error as something a human can act on.
+ *
+ * Resend's `error` is `{ name, message, statusCode }` — not an Error — so both
+ * `String(e)` and `e.message` on the union lose it. Fall back to JSON so a new
+ * error shape is still legible rather than silently blank.
+ */
+export function describeSendError(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const e = error as { name?: unknown; message?: unknown; statusCode?: unknown }
+    const parts = [
+      typeof e.statusCode === 'number' ? `HTTP ${e.statusCode}` : null,
+      typeof e.name === 'string' ? e.name : null,
+      typeof e.message === 'string' ? e.message : null,
+    ].filter(Boolean)
+    if (parts.length > 0) return parts.join(': ')
+    try {
+      return JSON.stringify(error)
+    } catch {
+      return 'Unserialisable Resend error'
+    }
+  }
+  return String(error)
 }
 
 async function markEmailStatus(

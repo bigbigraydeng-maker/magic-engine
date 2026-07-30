@@ -7,6 +7,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
 
 export interface AdStrategyConfig {
   client_id: string
@@ -72,5 +73,5 @@ export async function loadAdStrategyConfig(clientId: string): Promise<AdStrategy
  */
 export function resolveDigestRecipients(config: AdStrategyConfig): string[] {
   if (config.digest_recipients.length > 0) return config.digest_recipients
-  return [process.env.AD_HEALTH_DIGEST_TO || 'raydeng@magicengine.com.au']
+  return [process.env.AD_HEALTH_DIGEST_TO || ME_MAIL_TO_ADDRESS]
 }

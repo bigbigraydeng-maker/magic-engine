@@ -108,7 +108,7 @@ services:
   - type: cron
     name: vision-analyzer
     env: node
-    schedule: "*/2 * * * *"
+    schedule: "*/10 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 120 -X POST -H "Authorization: Bearer $CRON_SECRET" \
@@ -123,7 +123,7 @@ services:
   - type: cron
     name: poll-visual-jobs
     env: node
-    schedule: "*/2 * * * *"
+    schedule: "*/10 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
@@ -179,7 +179,7 @@ services:
   - type: cron
     name: zhangqian-sweeper
     env: node
-    schedule: "*/5 * * * *"
+    schedule: "*/15 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
@@ -197,7 +197,7 @@ services:
   - type: cron
     name: prospecting-sweep
     env: node
-    schedule: "*/10 * * * *"
+    schedule: "*/30 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
@@ -232,7 +232,7 @@ services:
   - type: cron
     name: blog-stuck-generating-sweeper
     env: node
-    schedule: "*/5 * * * *"
+    schedule: "*/15 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
@@ -397,7 +397,7 @@ services:
   - type: cron
     name: viral-analyzer-worker
     env: node
-    schedule: "*/2 * * * *"
+    schedule: "*/10 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
@@ -456,6 +456,23 @@ services:
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/daily-cron-digest \
         && curl -fsS "https://hc-ping.com/10c101e8-05a0-4026-9531-39edddd7c74d"
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # Proposal view digest — every day at 19:00 UTC (~07:00 NZST next morning)
+  # Rolls up who opened a Magic Engine sales proposal in the past 24h from
+  # website_lead_events (source='proposal_tracking'), and emails the read
+  # pattern to hello@magicengine.cloud. Sends nothing on a quiet day, so the
+  # arrival of the email is itself the signal.
+  - type: cron
+    name: proposal-view-digest
+    env: node
+    schedule: "0 19 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/proposal-view-digest
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -574,6 +591,25 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # 素材池自动补货 — 治「所有 AI 画面从同一张种子图长出来」。
+  # 没有这条 cron,stock-pipeline 就是零调用方的死代码:素材池永远停在手工灌的那几张,
+  # sourceImagePool 恒空 → worker 每段都退回同一张 seed/cts_source.jpg。
+  # 🔴 花钱路径:抓取按张计费(≈$0.002/张)。护栏在 lib 层且天然收敛 ——
+  #    只给配了 factory_config 的客户抓 · 池子够 24 张就跳过 · 每客户最多 3 词×12 张 ·
+  #    搜索词必须能溯源到 master_brief(拼不出就不抓)。单次全量最坏 $0.2 量级。
+  # 每周一 19:00 UTC ≈ 周二 07:00 NZST,赶在当天 08:00 排产之前把池子补好。
+  - type: cron
+    name: factory-stock-refill
+    env: node
+    schedule: "0 19 * * 1"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/factory-stock-refill
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # 卡死回收:publishing 超 10 分钟(进程被杀/超时)→ 退回 approved 等下轮重领。
   # 没有它,一次崩溃就会让那条工单永远卡在 publishing,没人能再领。
   - type: cron
@@ -584,6 +620,32 @@ services:
     startCommand: |
       curl -fsS --max-time 120 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/factory-publish-sweeper
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # 客户私信 → 需求卡。PR #652/#653 把这两条接口合进来了,但没有人调用它们,
+  # 「客户消息」页会永远是空的 —— 这里补上调用方。
+  #
+  # 一个服务串两步,不是两个:brief 必须在 sync 之后跑(没入库的对话没得总结),
+  # 用 && 串起来顺序天然保证,也省一个 Render cron 服务。
+  # sync 失败时 brief 不会跑 —— 这是想要的:宁可这一轮不出卡,也不要基于半截
+  # 数据写卡给销售看。
+  #
+  # 只同步 clients.facebook_page_id 有值的客户(设置页里选主页才会有值),
+  # 所以新增客户不需要动这里。
+  # 跑在每小时第 10 分钟,避开整点那一堆日更 cron。
+  # max-time 跟接口的 maxDuration 对齐(sync 600s / brief 800s)再留一点余量。
+  - type: cron
+    name: messenger-hourly
+    env: node
+    schedule: "10 * * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/messenger-sync-hourly \
+      && curl -fsS --max-time 820 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/messenger-brief-hourly
     envVars:
       - key: CRON_SECRET
         sync: false

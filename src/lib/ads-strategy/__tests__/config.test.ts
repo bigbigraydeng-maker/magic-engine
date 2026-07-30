@@ -65,8 +65,8 @@ describe('resolveDigestRecipients', () => {
       .toEqual(['ops@magicengine.com.au'])
   })
 
-  it('falls back to the hardcoded ME inbox when no env is set', () => {
+  it('falls back to the shared verified-domain ME inbox when no env is set', () => {
     expect(resolveDigestRecipients({ client_id: 'x', enabled: true, digest_recipients: [] }))
-      .toEqual(['raydeng@magicengine.com.au'])
+      .toEqual(['hello@magicengine.cloud'])
   })
 })

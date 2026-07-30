@@ -131,6 +131,8 @@ interface ClientData {
   country: string | null
   /** Free-text industry (e.g. 'travel', 'flooring'). Drives reputation-collector source weights. */
   industry: string | null
+  /** Client market ('au' | 'nz'). Drives DataForSEO location_code for SERP-scoped calls. */
+  semrush_db: string | null
 }
 
 async function fetchClientData(
@@ -138,18 +140,19 @@ async function fetchClientData(
   clientId: string,
 ): Promise<[ClientData, string[], string[]]> {
   const [clientRes, kwRes, discoveryRes] = await Promise.all([
-    supabase.from('clients').select('domain, name, city, country, industry').eq('id', clientId).single(),
+    supabase.from('clients').select('domain, name, city, country, industry, semrush_db').eq('id', clientId).single(),
     supabase.from('keywords').select('keyword').eq('client_id', clientId).eq('status', 'approved'),
     supabase.from('client_discovery').select('payload').eq('client_id', clientId).maybeSingle(),
   ])
 
-  const raw = clientRes.data as { domain: string | null; name: string | null; city: string | null; country: string | null; industry: string | null } | null
+  const raw = clientRes.data as { domain: string | null; name: string | null; city: string | null; country: string | null; industry: string | null; semrush_db: string | null } | null
   const client: ClientData = {
     domain: raw?.domain ?? '',
     name: raw?.name ?? null,
     city: raw?.city ?? null,
     country: raw?.country ?? null,
     industry: raw?.industry ?? null,
+    semrush_db: raw?.semrush_db ?? null,
   }
   const keywords =
     (kwRes.data as { keyword: string }[] | null)?.map(k => k.keyword) ?? []
@@ -177,7 +180,7 @@ async function runCollectors(
   const jobs: Array<{ dim: string; promise: Promise<RunnerCollectorResult> }> = []
 
   if (module === 'seo' || module === 'full') {
-    jobs.push({ dim: 'seo', promise: new SeoCollector().collect(clientId, domain, keywords, gscQueries) })
+    jobs.push({ dim: 'seo', promise: new SeoCollector().collect(clientId, domain, keywords, gscQueries, client.semrush_db ?? 'au') })
   }
   if (module === 'social' || module === 'full') {
     jobs.push({ dim: 'social', promise: new SocialCollector(supabase).collect(clientId, domain, keywords) })
@@ -194,7 +197,7 @@ async function runCollectors(
     })
   }
   if (module === 'competitor' || module === 'full') {
-    jobs.push({ dim: 'competitor', promise: new CompetitorCollector().collect(clientId, domain, keywords) })
+    jobs.push({ dim: 'competitor', promise: new CompetitorCollector().collect(clientId, domain, keywords, client.semrush_db ?? 'au') })
   }
   if (module === 'ai_visibility' || module === 'full') {
     // P8.10.S2.5: real-time probe runs alongside the snapshot read so freshly

@@ -165,16 +165,52 @@ function buildSelfServeSections(clientId: string): NavSection[] {
   ]
 }
 
+/**
+ * 受限管理员（DEMO_ADMINS）的导航。
+ *
+ * 给的是 FDE 视角 —— 客户工作台里该有的都有；但平台级入口（客户总览、
+ * 账单、MTC、Prospecting、Cron 健康…）一律不出现，因为那些页面聚合的是
+ * 全部客户的数据。middleware 已在服务端挡死，这里是不让它们出现在眼前。
+ */
+function buildScopedAdminSections(clientId: string): NavSection[] {
+  const at = (p: string) => `/dashboard/clients/${clientId}${p}`
+  return [
+    { items: [{ key: 'client-home', label: '客户工作台', mark: 'CL', href: at('') }] },
+    {
+      title: '诊断与策略',
+      items: [
+        { key: 'zhangqian',  label: '品牌扫描', mark: 'ZQ', href: at('/zhangqian') },
+        { key: 'diagnostic', label: '深度诊断', mark: 'DG', href: at('/diagnostic') },
+        { key: 'goals',      label: '目标',     mark: 'GO', href: at('/goals') },
+        { key: 'strategy',   label: '策略',     mark: 'ST', href: at('/strategy') },
+        { key: 'execution',  label: '执行追踪', mark: 'EX', href: at('/execution') },
+      ],
+    },
+    {
+      title: '经营工具',
+      items: [
+        { key: 'tailor-made', label: '行程单',   mark: 'TM', href: at('/tailor-made') },
+        { key: 'crm',         label: '客户跟进', mark: 'CR', href: at('/crm') },
+        { key: 'connectors',  label: '数据连接', mark: 'CN', href: at('/connectors') },
+      ],
+    },
+  ]
+}
+
 export default function DashboardShell({ children, userEmail, userRole, userTier, allowedClientId }: Props) {
   const pathname = usePathname()
   const [lockModalFeature, setLockModalFeature] = useState<string | null>(null)
 
   const isClientViewer = userRole === 'client-viewer' && allowedClientId
   const isSelfServe = isClientViewer && userTier === 'self_serve'
+  // 受限管理员（DEMO_ADMINS）：FDE 视角，但只在一个客户范围内
+  const isScopedAdmin = userRole === 'admin' && Boolean(allowedClientId)
 
-  const sections: NavSection[] | null = isSelfServe && allowedClientId
-    ? buildSelfServeSections(allowedClientId)
-    : null
+  const sections: NavSection[] | null = isScopedAdmin && allowedClientId
+    ? buildScopedAdminSections(allowedClientId)
+    : isSelfServe && allowedClientId
+      ? buildSelfServeSections(allowedClientId)
+      : null
 
   // Compute the active nav key off whichever section list is in play.
   const activeKey = (() => {

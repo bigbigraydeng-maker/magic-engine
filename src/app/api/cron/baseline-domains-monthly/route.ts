@@ -138,7 +138,8 @@ async function runCollection(triggeredBy: 'cron' | 'admin_manual', existingRunId
       }
 
       try {
-        const result = await collector.collect('baseline-cron', row.domain, row.keywords)
+        // baseline_domains has no per-row market, so fall back to the deploy default.
+        const result = await collector.collect('baseline-cron', row.domain, row.keywords, [], process.env.SEMRUSH_DB ?? 'au')
         const score  = result.score
 
         if (score === null) {

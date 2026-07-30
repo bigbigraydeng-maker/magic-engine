@@ -649,10 +649,32 @@ export default function ClientDetailPage() {
             </section>
           </BriefGateBanner>
 
+          {/* Zone A2: 经营工具
+              注意：这一区不属于 DAPE 任何一段，也不对应 6 支柱 —— 它不是 ME 替客户做的
+              营销动作，而是客户拿去做自己生意的工具。单独成区，别混进「内容生产」。
+              不套 BriefGateBanner：Brief 是营销服务的前置，跟客户自己的日常经营无关。 */}
+          <section>
+            <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">经营工具</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <ToolCard
+                href={`/dashboard/clients/${clientId}/tailor-made`}
+                title="Tailor-made 行程单"
+                desc="定制行程报价单：填表 → 预览 → 导出品牌 PDF 发给客户"
+                badge="in_house"
+              />
+            </div>
+          </section>
+
           {/* Zone B: 诊断与分析 */}
           <section>
             <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">诊断与分析</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {/* 客户消息不是"诊断",但它跟诊断一样是每天要开的页;放生产区会被
+                  一堆内容工具淹掉,所以放在诊断与分析区首位 —— 销售一进客户页就看到。 */}
+              {/* 销售每天第一件事就是开这一页,放在诊断区最前面。 */}
+              <ToolCard href={`/dashboard/clients/${clientId}/crm`}                title="今天该联系谁"   desc="全渠道接触记录自动排序 · 说过别再联系的已挡在名单外"  badge="in_house" />
+              <ToolCard href={`/dashboard/clients/${clientId}/crm/all`}            title="全部客人"       desc="一张表看全部客人 · 点开看往来记录、记一笔、改跟进阶段"  badge="in_house" />
+              <ToolCard href={`/dashboard/clients/${clientId}/messenger`}          title="客户消息"       desc="Facebook 私信 · AI 写好需求卡和回复草稿 · 你按发送"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/zhangqian`}          title="张骞发现"       desc="扫描社媒、评价、关键词、竞品，生成品牌现状全景报告"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/diagnostic`}         title="华佗深度诊断"   desc="从 SEO/社媒/口碑/广告/AI可见/竞品六维打分，找到核心病灶"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/prescription/new`}   title="诸葛亮处方"     desc="基于华佗诊断结果，生成优先级排序的具体执行行动路线图"  badge="in_house" />
