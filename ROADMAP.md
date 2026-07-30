@@ -4090,6 +4090,16 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 
 ## 9. 功能完成日志
 
+### 2026-07-30（Facebook 表单的新人自动进 CRM [P28]）
+
+**问题**：FB 即时表单来的人只能靠人手导 CSV 跑 `scripts/import-cts-fb-leads.ts`（脚本头部自己写着「不是长期管道」）。实测后果：CTS 的 CRM 里最后一个新人停在 7/25，Meta 后台 7/26–7/30 又进了 27 个人，销售的「今天该联系谁」里一个都没有，广告每天仍在花 NZ$78–85。
+
+**修复**：补上「取数 → 建人 → 写触点」这条链 —— `lib/meta/lead-forms.ts`（Graph 只读）+ `lib/crm/meta-lead.ts`（复用 `resolveContact`）+ `lib/meta/leads-sync.ts`（按客户编排 + 水位线）+ `api/cron/meta-leads-sync`，render.yaml 注册 `meta-leads-hourly`（每小时第 25 分，岔开私信同步避 Meta 限流）。开关沿用 `clients.facebook_page_id`。
+
+**无 migration**：`channel='meta_lead_form'` 与 `(client_id, source, source_ref)` 唯一键都已存在。幂等键跟人手导入脚本对齐（都是 Meta 的 lead id），首次回补不会把 7/26 已导的 335 人写成第二份。33 新测试 + 368 个 crm/meta/messenger 测试全过，三处关键校验做过变异测试。
+
+**上线还需 PM 一步**：Render 上给这个 cron link `me-shared-cron-secret` 环境变量组；Page token 若缺 `leads_retrieval` 权限，cron 日志会把 Graph 原话报出来。
+
 ### 2026-07-06（Phase 35 司马徽 Outbound Prospecting M1+M2 落地 [P35.1-P35.4]）
 
 ME 自己的获客管线前三步上线（内部销售工具）：DataForSEO Business Listings 批量发现（18 行业 × AU/NZ 12 城）→ 零 AI 规则审计（tracking 检测 + OnPage instant，~$0.005/家）→ 规则机会分（强生意 × 弱数字地基）。新表 `outbound_prospects`（migration 待 PM apply）+ 3 个 admin API。17 新单测全过。定价阶梯与退款保证 PM 已拍板（见 Phase 35 章节）。
