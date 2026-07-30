@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
+import Link from 'next/link'
 
 interface IntakeConfig {
   enabled: boolean
@@ -32,9 +33,42 @@ export default function IntakeSettingsPage() {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [running, setRunning] = useState(false)
+  const [runNote, setRunNote] = useState<string | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+
+  // 重进页面时把已存配置读回来，填满右侧面板（否则面板空白，像没配过）
+  useEffect(() => {
+    if (!clientId) return
+    void fetch(`/api/clients/${clientId}/content-factory/config-chat`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d?.config) setConfig(d.config as IntakeConfig) })
+      .catch(() => {})
+  }, [clientId])
+
+  // 现在先跑一次：立刻抓一批 + 改写成候选，让人当场看到效果，不用等定时任务
+  async function runNow() {
+    if (!clientId || running) return
+    setRunning(true)
+    setRunNote(null)
+    setError(null)
+    try {
+      const r = await fetch(`/api/clients/${clientId}/content-factory/run-intake`, { method: 'POST' })
+      const d = (await r.json().catch(() => ({}))) as { created?: number; scanned?: number; errors?: string[]; error?: string }
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`)
+      setRunNote(
+        (d.created ?? 0) > 0
+          ? `已产出 ${d.created} 条新选题，去"内容工厂"看板的"选题"列查看。`
+          : `这次没有新选题${d.errors?.length ? `（${d.errors[0]}）` : '（可能没配关键词，或已抓过的没有更新）'}。`,
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRunning(false)
+    }
+  }
 
   async function send() {
     const text = input.trim()
@@ -64,6 +98,14 @@ export default function IntakeSettingsPage() {
 
   return (
     <div className="p-6 max-w-[1100px] mx-auto text-me-charcoal">
+      {clientId && (
+        <Link
+          href={`/dashboard/clients/${clientId}/content-factory`}
+          className="inline-flex items-center gap-1 text-xs text-me-taupe hover:text-me-charcoal mb-3"
+        >
+          ← 返回内容工厂
+        </Link>
+      )}
       <h1 className="text-xl font-display font-bold">内容工厂 · 进料设置</h1>
       <p className="text-sm text-me-taupe mb-5">跟我聊，把"覆盖什么话题、在哪些平台、多久一次、什么风格"定下来。设好后系统会定期帮你产出贴合品牌的选题候选。</p>
 
@@ -138,6 +180,21 @@ export default function IntakeSettingsPage() {
                   <div className="text-xs leading-relaxed">{config.preferences}</div>
                 </div>
               )}
+
+              {/* 现在先跑一次：当场验证，不用等定时任务 */}
+              <div className="border-t border-me-stone pt-3 mt-1">
+                <button
+                  onClick={() => void runNow()}
+                  disabled={running || !(config.keywords ?? []).length}
+                  className="w-full text-sm font-semibold text-white bg-me-charcoal rounded-xl py-2.5 disabled:opacity-40"
+                >
+                  {running ? '正在抓取 + 出选题…' : '现在先跑一次'}
+                </button>
+                {!(config.keywords ?? []).length && (
+                  <div className="text-[11px] text-me-taupe mt-1.5">先聊定关键词，才能跑。</div>
+                )}
+                {runNote && <div className="text-[11px] text-me-charcoal mt-2 leading-relaxed">{runNote}</div>}
+              </div>
             </div>
           )}
         </div>
