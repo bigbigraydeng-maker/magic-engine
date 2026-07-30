@@ -665,3 +665,23 @@ services:
     envVars:
       - key: CRON_SECRET
         sync: false
+
+  # Facebook 即时表单 → CRM。之前这条路只有人手一条(导 CSV 跑 import-cts-fb-leads.ts),
+  # 2026-07-30 查出来的后果:CTS 的 CRM 里最后一个新人停在 7/25,而 Meta 后台
+  # 7/26–7/30 又进了 27 个人,销售的「今天该联系谁」里一个都没有。
+  #
+  # 只同步 clients.facebook_page_id 有值的客户(跟私信同步同一个开关),
+  # 所以新增客户不需要动这里。
+  # 跑在每小时第 25 分钟:避开整点那一堆日更 cron,也避开第 10 分钟的私信同步
+  # ——两条都会调 Meta Graph,岔开跑不容易撞上 Meta 的限流。
+  - type: cron
+    name: meta-leads-hourly
+    env: node
+    schedule: "25 * * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/meta-leads-sync
+    envVars:
+      - key: CRON_SECRET
+        sync: false
