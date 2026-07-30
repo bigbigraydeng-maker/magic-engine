@@ -28,8 +28,14 @@ export interface MessengerSyncResult {
   conversations: number
   /** Messages newly inserted this run. */
   messages: number
-  /** Threads newly linked to an existing contact this run. */
+  /** Threads newly attached to a contact this run (matched or newly created). */
   linked: number
+  /**
+   * Contacts newly CREATED this run from a Facebook-only chatter (fb_psid, no
+   * phone/email). Counted separately from `linked` because it is the number PM
+   * actually asks about — "how many new people did Messenger bring in today".
+   */
+  created: number
   skipped?: 'no_page_id' | 'no_meta_token' | 'no_page_token'
   error?: string
 }
@@ -149,7 +155,14 @@ async function storeConversation(
 export async function syncClientMessenger(
   client: MessengerSyncClient,
 ): Promise<MessengerSyncResult> {
-  const base = { clientId: client.id, clientName: client.name, conversations: 0, messages: 0, linked: 0 }
+  const base = {
+    clientId: client.id,
+    clientName: client.name,
+    conversations: 0,
+    messages: 0,
+    linked: 0,
+    created: 0,
+  }
 
   const pageId = client.facebook_page_id
   if (!pageId) return { ...base, skipped: 'no_page_id' }
@@ -178,6 +191,7 @@ export async function syncClientMessenger(
 
     let messages = 0
     let linked = 0
+    let created = 0
     for (const convo of conversations) {
       // Per-thread isolation: a store/link failure on one thread must not abort
       // the client's remaining threads (adding throwing link logic to a shared
@@ -207,12 +221,13 @@ export async function syncClientMessenger(
           index,
         )
         if (res.linked) linked++
+        if (res.created) created++
       } catch (err) {
         console.error(`[messenger/sync] thread ${convo.conversationId} failed:`, err)
       }
     }
 
-    return { ...base, conversations: conversations.length, messages, linked }
+    return { ...base, conversations: conversations.length, messages, linked, created }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
     console.error(`[messenger/sync] client ${client.id} failed:`, error)

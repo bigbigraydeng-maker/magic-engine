@@ -1,22 +1,45 @@
 /**
- * 把一段 Messenger 对话接到「已有的真人」身上 —— 只 LINK，绝不 CREATE。
+ * 把一段 Messenger 对话接到人身上：优先接已有的真人，接不上就**只按 fb_psid** 建人。
  *
- * 为什么不建人（三审焊死的红线）：Meta 的 Page 自动回复 / Business AI 会把业务
- * 自己的 info@ctstours.co.nz、电话写进对话正文。从正文抽联系方式建人，会造出一个
- * 假的「info@」客户并把几十段对话错并上去（魏征）。所以反过来：只有「已存在的真实
- * 客户身份」出现在对话里（psid 已知，或客户自己的邮箱原样出现在正文、排除业务自家
- * 域名），才把对话接到那个人身上。对不上就留白 —— 只在 FB 上匿名聊过、从没留过邮箱
- * 的人合并不到任何人，如实不接（板桥：不弄脏干净的联系人表）。
+ * ─────────────────────────────────────────────────────────────────────────
+ * 原来的红线，和这次为什么能安全地开一个口子
+ * ─────────────────────────────────────────────────────────────────────────
+ * 原规则是「只 LINK，绝不 CREATE」。理由（三审焊死）：Meta 的 Page 自动回复 /
+ * Business AI 会把业务自己的 info@ctstours.co.nz、电话写进对话正文，**从正文抽
+ * 联系方式建人**会造出一个假的「info@」客户，并把几十段对话错并上去（魏征）。
  *
- * 因此这里刻意不走 resolveContact 的合并分支：不新建、不合并两个既有人，就没有
- * 「不可逆错误合并」和「合并后 conversations.contact_id 悬挂」这两个问题。
+ * 那条理由针对的是「**从正文正则抽出来的**联系方式」，不是「建人」本身。
+ * 2026-07-30 量出来的代价：CTS 458 段对话里 151 段挂不到任何人，其中 130 段是
+ * 有来有回的真人；最近 3 天有新消息的 24 段里 22 段是系统看不见的人 —— 这些人
+ * 永远不会出现在「今天该联系谁」。
  *
- * 幂等：conversations 只补 NULL；fb_psid 身份 ON CONFLICT DO NOTHING；触点按
- * (thread + 方向) 唯一键 upsert（重同步刷新 occurred_at）；last_seen 只往前推。
+ * 所以这次只开这一个口子：**建人只用 fb_psid**（Meta 在 participants 里给的那个
+ * 人的唯一编号），绝不用正文里抽到的邮箱/电话建人。原来的坑结构上进不来 ——
+ * 自动回复写进正文的 info@ 不是 psid，造不出假客户。
+ *
+ * 两条护栏跟着这个口子一起焊死：
+ *   1. **客户自己开过口才建人**（线程里至少有一条 inbound）。纯出站的群发 /
+ *      自动欢迎语不配升级成客户（板桥「护栏 · 一等公民」：只有真实双向触点才算）。
+ *   2. **建人时只带 fb_psid 一个身份** → resolveContact 最多命中一个既有联系人，
+ *      **结构上不可能触发两个真人的不可逆合并**。这正是本模块原来绕开
+ *      resolveContact 的那个风险，单身份调用把它消掉了，所以这里可以放心用它。
+ *      （identity.ts 的模块注释本来就写着这种人应「如实返回一个只带 fb_psid 的
+ *      contact」—— 这次是把那句话兑现，不是新发明。）
+ *
+ * 接已有人的匹配规则不变：psid 已知，或客户自己的邮箱原样出现在正文（排除业务自家
+ * 域名）；命中两个不同的人 = 歧义，宁可留白也不错接。
+ *
+ * 建出来的人只有 Facebook 身份、没有电话邮箱 —— 销售只能在 Messenger 回他。等他
+ * 哪天留了邮箱/电话，靠 contact_identities 的唯一约束自动并成同一个人。
+ *
+ * 幂等：conversations 只补 NULL；fb_psid 身份 ON CONFLICT DO NOTHING（所以重跑
+ * 不会把同一个人建两次）；触点按 (thread + 方向) 唯一键 upsert（重同步刷新
+ * occurred_at）；last_seen 只往前推。
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { isAutomatedPageMessage } from '@/lib/messenger/automation'
+import { buildIdentities, resolveContact } from '@/lib/crm/identity'
 
 export interface IdentityIndex {
   /** 归一化邮箱 -> contactId（同一 client 下邮箱唯一，所以是 1:1）。 */
@@ -103,9 +126,12 @@ export interface LinkConversationInput {
 
 export interface LinkConversationResult {
   contactId: string | null
-  /** true = 这次新接上了一个人。 */
+  /** true = 这次新接上了一个人（含新建的）。 */
   linked: boolean
-  matchedBy: 'psid' | 'email' | 'already' | null
+  /** true = 这次**新建**了一个只带 Facebook 身份的人。`linked` 也会同时为 true。 */
+  created: boolean
+  /** 'created' = 接不到任何已有的人，按 fb_psid 新建的。 */
+  matchedBy: 'psid' | 'email' | 'already' | 'created' | null
 }
 
 /** 取某个方向最后一条消息的时间。 */
@@ -150,9 +176,36 @@ function lastHumanOutboundAt(messages: LinkConversationInput['messages']): strin
 }
 
 /**
- * 把一段已入库的对话接到已有的人身上并写触点。绝不新建联系人。
+ * 只在 Facebook 上聊过的人 → 建一个**只带 fb_psid** 的联系人。建不了返回 null。
  *
- * index 会在命中时就地更新（把新挂的 psid 记进去），让同一次同步里后面的对话
+ * 两条前置条件都不满足就不建（理由见模块头部护栏 1/2）：
+ *   · 没有 psid —— 没有唯一编号就没有可靠身份，宁可留白
+ *   · 线程里没有任何一条客户来信 —— 纯出站的群发/自动欢迎语不算「一个客户」
+ *
+ * 身份只传 fb_psid 一个，所以 resolveContact 最多命中一个既有联系人，
+ * **不可能触发两个真人的合并**。
+ */
+async function createContactFromPsid(input: LinkConversationInput): Promise<string | null> {
+  if (!input.psid) return null
+  if (!input.messages.some((m) => m.direction === 'inbound')) return null
+
+  const { contactId } = await resolveContact({
+    clientId: input.clientId,
+    identities: buildIdentities({ fbPsid: input.psid }),
+    // Facebook 的资料名。overwriteDisplayName=false：万一这个 psid 已经挂在某个
+    // 真人身上（并发同步 / 索引过期），不拿 FB 昵称去改人家已有的名字。
+    displayName: input.participantName,
+    overwriteDisplayName: false,
+    source: 'messenger',
+    seenAt: input.lastMessageAt ?? undefined,
+  })
+  return contactId
+}
+
+/**
+ * 把一段已入库的对话接到人身上并写触点：先找已有的人，找不到就按 fb_psid 新建。
+ *
+ * index 会在命中/新建时就地更新（把 psid 记进去），让同一次同步里后面的对话
  * 能直接命中，不用重查库。
  */
 export async function linkMessengerConversation(
@@ -162,16 +215,24 @@ export async function linkMessengerConversation(
   let contactId = input.existingContactId
   let matchedBy: LinkConversationResult['matchedBy'] = contactId ? 'already' : null
   let newlyLinked = false
+  let created = false
 
   if (!contactId) {
     const match = matchConversationToContact(
       { psid: input.psid, messageBodies: input.messages.map((m) => m.body) },
       index,
     )
-    if (!match) return { contactId: null, linked: false, matchedBy: null }
 
-    contactId = match.contactId
-    matchedBy = match.matchedBy
+    if (match) {
+      contactId = match.contactId
+      matchedBy = match.matchedBy
+    } else {
+      // 接不到任何已有的人 —— 这是只在 Facebook 上聊过的新客人，按 psid 建。
+      contactId = await createContactFromPsid(input)
+      if (!contactId) return { contactId: null, linked: false, created: false, matchedBy: null }
+      matchedBy = 'created'
+      created = true
+    }
     newlyLinked = true
 
     // 只在仍为 NULL 时写，幂等；别覆盖别处已接好的人。
@@ -270,7 +331,7 @@ export async function linkMessengerConversation(
       .lt('last_seen_at', input.lastMessageAt)
   }
 
-  return { contactId, linked: newlyLinked, matchedBy }
+  return { contactId, linked: newlyLinked, created, matchedBy }
 }
 
 /** 一次同步开始时加载该客户的身份索引（邮箱 + psid），供逐条对话就地匹配。 */

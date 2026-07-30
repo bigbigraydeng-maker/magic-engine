@@ -1,11 +1,13 @@
 /**
- * Messenger → 已有联系人 的「只 LINK 不 CREATE」接线。
+ * Messenger → 联系人 的接线。
  *
- * 钉住三件最容易悄悄错的事：
+ * 钉住四件最容易悄悄错的事：
  *   1. 业务自家邮箱(info@ctstours.co.nz)出现在正文里，绝不能当成客户身份 —— 否则
  *      Meta 自动回复会把几十段对话错并到一个假「info@」客户上。
  *   2. 一段对话命中两个不同的人 = 歧义，宁可不接（错接不可逆）。
- *   3. 无论如何都不新建/合并联系人：对不上就留白，绝不 insert contacts。
+ *   3. **建人只能靠 fb_psid**，绝不能靠正文里正则抽出来的邮箱/电话 —— 第 1 条那个
+ *      坑必须在结构上进不来。
+ *   4. **客户自己开过口才建人**：纯出站的群发 / 自动欢迎语不配升级成一个客户。
  */
 
 import { describe, expect, it, vi } from 'vitest'
@@ -88,7 +90,8 @@ interface Calls {
   identityUpserts: Record<string, unknown>[]
   touchpointUpserts: Record<string, unknown>[][]
   contactsUpdate: number
-  contactsWrite: number // insert/upsert into contacts —— 必须恒为 0
+  contactsWrite: number // insert/upsert into contacts —— 只有「按 psid 建人」那条路允许 >0
+  contactInserts: Record<string, unknown>[]
 }
 
 function stubSupabase(): Calls {
@@ -98,6 +101,7 @@ function stubSupabase(): Calls {
     touchpointUpserts: [],
     contactsUpdate: 0,
     contactsWrite: 0,
+    contactInserts: [],
   }
   ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
     const chain: Record<string, unknown> = {
@@ -106,7 +110,8 @@ function stubSupabase(): Calls {
       is: () => chain,
       lt: () => chain,
       in: () => chain,
-      single: async () => ({ data: null, error: null }),
+      // resolveContact 建人时走 insert().select().single()，要还它一个 id。
+      single: async () => ({ data: { id: 'contact-NEW' }, error: null }),
       then: (resolve: (v: unknown) => unknown) =>
         Promise.resolve({ data: null, error: null }).then(resolve),
       update: () => {
@@ -114,12 +119,17 @@ function stubSupabase(): Calls {
         else if (table === 'contacts') calls.contactsUpdate++
         return chain
       },
-      insert: () => {
-        if (table === 'contacts') calls.contactsWrite++
+      insert: (payload: Record<string, unknown>) => {
+        if (table === 'contacts') {
+          calls.contactsWrite++
+          calls.contactInserts.push(payload)
+        }
         return chain
       },
       upsert: (payload: Record<string, unknown> | Record<string, unknown>[]) => {
-        if (table === 'contact_identities') calls.identityUpserts.push(payload as Record<string, unknown>)
+        if (table === 'contact_identities')
+          // resolveContact 传数组、link-contacts 传单对象 —— 摊平成一串行，断言只看行。
+          calls.identityUpserts.push(...(Array.isArray(payload) ? payload : [payload]))
         else if (table === 'contact_touchpoints') calls.touchpointUpserts.push(payload as Record<string, unknown>[])
         else if (table === 'contacts') calls.contactsWrite++
         return chain
@@ -147,17 +157,81 @@ const baseInput = {
 }
 
 describe('linkMessengerConversation', () => {
-  it('对不上任何人 → 一次写库都不发生（尤其不建 contact）', async () => {
+  it('对不上任何人、但客户开过口 → 按 psid 建一个只带 Facebook 身份的人', async () => {
     const calls = stubSupabase()
     const res = await linkMessengerConversation(
-      { ...baseInput, psid: 'nobody', messages: [{ direction: 'inbound', body: 'hi', sentAt: '2026-07-24T10:00:00+0000' }] },
+      {
+        ...baseInput,
+        psid: 'nobody',
+        messages: [{ direction: 'inbound', body: 'hi', sentAt: '2026-07-24T10:00:00+0000' }],
+      },
       index({}),
     )
-    expect(res.linked).toBe(false)
-    expect(res.contactId).toBeNull()
-    expect(calls.conversationsUpdate).toBe(0)
-    expect(calls.touchpointUpserts.length).toBe(0)
+
+    expect(res).toMatchObject({ contactId: 'contact-NEW', linked: true, created: true, matchedBy: 'created' })
+    expect(calls.contactsWrite).toBe(1)
+    // 只有 Facebook 身份，电话邮箱留空 —— 不假装知道他的联系方式。
+    expect(calls.contactInserts[0]).toMatchObject({
+      client_id: 'client-A',
+      display_name: 'Robyn Richards',
+      primary_phone: null,
+      primary_email: null,
+    })
+    // 对话接上了，触点也写了 —— 这个人从此出现在「今天该联系谁」里。
+    expect(calls.conversationsUpdate).toBe(1)
+    expect(calls.touchpointUpserts[0]).toHaveLength(1)
+  })
+
+  it('建人时只带 fb_psid 一个身份 —— 结构上不可能合并两个真人', async () => {
+    const calls = stubSupabase()
+    await linkMessengerConversation(
+      {
+        ...baseInput,
+        psid: 'nobody',
+        // 正文里同时有邮箱和电话：**都不许**参与建人（那正是假 info@ 客户的来路）。
+        messages: [
+          { direction: 'inbound', body: 'me@gmail.com / 021 363 598', sentAt: '2026-07-24T10:00:00+0000' },
+        ],
+      },
+      index({}),
+    )
+
+    const kinds = calls.identityUpserts.map((i) => i.kind)
+    expect(new Set(kinds)).toEqual(new Set(['fb_psid']))
+    expect(kinds).not.toContain('email')
+    expect(kinds).not.toContain('phone')
+  })
+
+  it('没有 psid → 不建人（没有唯一编号就没有可靠身份）', async () => {
+    const calls = stubSupabase()
+    const res = await linkMessengerConversation(
+      {
+        ...baseInput,
+        psid: null,
+        messages: [{ direction: 'inbound', body: 'hi', sentAt: '2026-07-24T10:00:00+0000' }],
+      },
+      index({}),
+    )
+    expect(res).toMatchObject({ contactId: null, linked: false, created: false })
     expect(calls.contactsWrite).toBe(0)
+    expect(calls.touchpointUpserts.length).toBe(0)
+  })
+
+  it('客户一句话都没说（纯出站群发）→ 不建人', async () => {
+    const calls = stubSupabase()
+    const res = await linkMessengerConversation(
+      {
+        ...baseInput,
+        psid: 'nobody',
+        messages: [
+          { direction: 'outbound', body: '欢迎联系 CTS', sentAt: '2026-07-24T10:00:00+0000', tags: ['source:chat'] },
+        ],
+      },
+      index({}),
+    )
+    expect(res).toMatchObject({ contactId: null, linked: false, created: false })
+    expect(calls.contactsWrite).toBe(0)
+    expect(calls.conversationsUpdate).toBe(0)
   })
 
   it('命中邮箱 → 接上人、挂 psid 身份、写来信+回复两条触点，绝不建 contact', async () => {
