@@ -35,11 +35,32 @@ interface Card {
   script: string
   pillar: string
   visualBrief: string
+  mode?: string          // '讲课式' 等制作形态
+}
+
+interface Lesson extends Card {
+  lessonNo: number
+}
+interface Course {
+  name: string
+  source: string
+  lessons: Lesson[]
 }
 
 interface BoardData {
   stages: Record<Stage, Card[]>
   counts: Record<Stage, number>
+  courses?: Course[]
+}
+
+// 单讲在流程里的人话状态(比看板段更细)
+function lessonStatus(l: Card): { label: string; cls: string } {
+  if (l.status === 'published') return { label: '已发布', cls: 'text-status-track' }
+  if (l.status === 'scheduled') return { label: '待发布', cls: 'text-status-sched' }
+  if (l.hasVideo) return { label: '成片待审', cls: 'text-status-exec' }
+  if (l.status === 'approved') return { label: '做片中', cls: 'text-me-ochre' }
+  if (l.status === 'rejected') return { label: '已打回', cls: 'text-status-rej' }
+  return { label: '脚本待审', cls: 'text-me-taupe' }
 }
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -202,6 +223,49 @@ export default function ContentFactoryBoardPage() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* 课程区：成系列的内容收在一起，逐讲流转 */}
+      {board?.courses && board.courses.length > 0 && (
+        <div className="mt-8">
+          <h2 className="text-lg font-display font-bold">课程 · 成系列的内容</h2>
+          <p className="text-sm text-me-taupe mb-4">整套课收在一起，逐讲审脚本 → 出片 → 发布。点每讲看全文。</p>
+          <div className="flex flex-col gap-4">
+            {board.courses.map((course) => {
+              const done = course.lessons.filter((l) => l.status === 'published').length
+              return (
+                <div key={course.source} className="bg-me-ivory border border-me-stone rounded-2xl p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="font-display font-semibold">{course.name}</div>
+                    <span className="text-[11px] text-me-taupe tabular-nums">{course.lessons.length} 讲 · 已发 {done}</span>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {course.lessons.map((l) => {
+                      const st = lessonStatus(l)
+                      return (
+                        <button
+                          key={l.id}
+                          onClick={() => setSelected(l)}
+                          className="text-left bg-white border border-me-stone rounded-xl px-3 py-2.5 hover:border-me-ochre transition-colors flex items-center gap-3"
+                        >
+                          <span className="text-[11px] font-semibold text-me-taupe w-12 flex-none tabular-nums">第{l.lessonNo}讲</span>
+                          <span className="flex-1 text-[13px] font-medium leading-snug">{l.title.replace(/^【系列课·第\d+讲】/, '')}</span>
+                          {l.mode && <span className="text-[10px] text-me-charcoal bg-me-ivory border border-me-stone rounded px-1.5 py-0.5 flex-none">{l.mode}</span>}
+                          <span className="hidden sm:flex flex-none items-center gap-1">
+                            {(l.platforms ?? []).slice(0, 3).map((p) => (
+                              <span key={p} className="text-[10px] text-me-taupe">{PLATFORM_LABEL[p] ?? p}</span>
+                            ))}
+                          </span>
+                          <span className={`text-[11px] font-semibold flex-none w-16 text-right ${st.cls}`}>{st.label}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
 
