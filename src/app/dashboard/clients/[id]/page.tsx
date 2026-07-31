@@ -644,10 +644,33 @@ export default function ClientDetailPage() {
                 <ToolCard href={`/dashboard/clients/${clientId}/assets`}          title="素材库"        desc="上传图片 → Vision AI 自动分析 → Hook/Middle/CTA 评分 → 视频提示词"  badge="in_house" />
                 <ToolCard href={`/dashboard/visuals?client=${clientId}`}         title="Launch Hub"    desc="Reels · 图片 · 视频素材生产"      badge="in_house" />
                 <ToolCard href={`/dashboard/clients/${clientId}/production`}     title="内容生产包"    desc="查看各维度内容包状态 · 生成内容后自动归集" badge="in_house" />
+                <ToolCard href={`/dashboard/clients/${clientId}/content-factory`} title="内容工厂"      desc="选题 → 备料 → 出片 → 发布 → 看表现 · 一条内容的流水线看板" badge="in_house" />
                 <ToolCard onClick={() => setGenerationOpen(true)}              title="生成单条内容" desc="按关键词 · 视频 · 话题快速生成一条社媒帖子"  badge="in_house" />
               </div>
             </section>
           </BriefGateBanner>
+
+          {/* Zone A2: 经营工具
+              注意：这一区不属于 DAPE 任何一段，也不对应 6 支柱 —— 它不是 ME 替客户做的
+              营销动作，而是客户拿去做自己生意的工具。单独成区，别混进「内容生产」。
+              不套 BriefGateBanner：Brief 是营销服务的前置，跟客户自己的日常经营无关。 */}
+          <section>
+            <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">经营工具</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <ToolCard
+                href={`/dashboard/clients/${clientId}/tailor-made`}
+                title="Tailor-made 行程单"
+                desc="定制行程报价单：填表 → 预览 → 导出品牌 PDF 发给客户"
+                badge="in_house"
+              />
+              <ToolCard
+                href={`/dashboard/clients/${clientId}/listings`}
+                title="房子"
+                desc="中介手上的每一套房：建档、改状态、看每套房带来了多少客人"
+                badge="in_house"
+              />
+            </div>
+          </section>
 
           {/* Zone B: 诊断与分析 */}
           <section>
@@ -657,6 +680,7 @@ export default function ClientDetailPage() {
                   一堆内容工具淹掉,所以放在诊断与分析区首位 —— 销售一进客户页就看到。 */}
               {/* 销售每天第一件事就是开这一页,放在诊断区最前面。 */}
               <ToolCard href={`/dashboard/clients/${clientId}/crm`}                title="今天该联系谁"   desc="全渠道接触记录自动排序 · 说过别再联系的已挡在名单外"  badge="in_house" />
+              <ToolCard href={`/dashboard/clients/${clientId}/crm/all`}            title="全部客人"       desc="一张表看全部客人 · 点开看往来记录、记一笔、改跟进阶段"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/messenger`}          title="客户消息"       desc="Facebook 私信 · AI 写好需求卡和回复草稿 · 你按发送"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/zhangqian`}          title="张骞发现"       desc="扫描社媒、评价、关键词、竞品，生成品牌现状全景报告"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/diagnostic`}         title="华佗深度诊断"   desc="从 SEO/社媒/口碑/广告/AI可见/竞品六维打分，找到核心病灶"  badge="in_house" />

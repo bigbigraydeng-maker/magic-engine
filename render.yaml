@@ -425,6 +425,22 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # 内容工厂 · 选题进料 — 每天 UTC 22:00 (~10am NZST) 抓爆款+按人设改写成候选。
+  # cron 每天打；路由内部按每个客户的 topic_intake.cadence 过滤(daily 每天/weekly 只周一/off 跳)。
+  # ⚠️ 部署后需在 Render 手动 link me-shared-cron-secret env group，否则每天静默 401。
+  #    建议再配一个 healthchecks.io ping(&& curl hc-ping.com/<uuid>)防"没跑"不报警。
+  - type: cron
+    name: content-factory-intake
+    env: node
+    schedule: "0 22 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/content-factory-intake
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # Daily anomaly detector — every day at 5am UTC (~5pm NZST / 3pm AEST)
   # Two-step pipeline:
   #   Step 1: AnomalyDetectorJob — scans flywheel_metrics, writes anomaly_signals
@@ -649,3 +665,48 @@ services:
     envVars:
       - key: CRON_SECRET
         sync: false
+
+  # Facebook 即时表单 → CRM。之前这条路只有人手一条(导 CSV 跑 import-cts-fb-leads.ts),
+  # 2026-07-30 查出来的后果:CTS 的 CRM 里最后一个新人停在 7/25,而 Meta 后台
+  # 7/26–7/30 又进了 27 个人,销售的「今天该联系谁」里一个都没有。
+  #
+  # 只同步 clients.facebook_page_id 有值的客户(跟私信同步同一个开关),
+  # 所以新增客户不需要动这里。
+  # 跑在每小时第 25 分钟:避开整点那一堆日更 cron,也避开第 10 分钟的私信同步
+  # ——两条都会调 Meta Graph,岔开跑不容易撞上 Meta 的限流。
+  - type: cron
+    name: meta-leads-hourly
+    env: node
+    schedule: "25 * * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/meta-leads-sync
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # 做片拼片 worker — 常驻容器(node+python-PIL+ffmpeg)轮询 content_factory_render_jobs，
+  # 领排队任务 → 分镜 → 画面(gpt-image+Muapi i2v) → 配音(MiniMax) → ffmpeg 拼竖屏成片 → 标待审。
+  # 独立服务的原因：单条 i2v/拼接跑 15-30 分钟，塞不进 web 请求。
+  # ⚠️ 部署后需在 Render 填 sync:false 密钥；首跑验证中文字体(NotoSansCJK ttc)PIL 能读。
+  - type: worker
+    name: content-factory-render-worker
+    env: docker
+    dockerfilePath: ./scripts/render-worker/Dockerfile
+    plan: starter
+    envVars:
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: MUAPI_API_KEY
+        sync: false
+      - key: CF_AIG_TOKEN
+        sync: false
+      - key: FACTORY_CJK_FONT
+        value: /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc

@@ -1,6 +1,6 @@
 import { getKeywordsForSite } from '@/lib/dataforseo/labs'
 import type { LabsKeyword } from '@/lib/dataforseo/labs'
-import { getBacklinkSummary, getSerpRankings } from '@/lib/dataforseo/client'
+import { getBacklinkSummary, getSerpRankings, locationCodeFor } from '@/lib/dataforseo/client'
 import type { BacklinkSummary, SerpRanking } from '@/lib/dataforseo/client'
 import { auditTechnicalSeo } from '@/lib/diagnostic/technical-seo'
 import type { TechnicalSeoSignals } from '@/lib/diagnostic/technical-seo'
@@ -39,6 +39,7 @@ export class SeoCollector {
     clientDomain: string,
     keywords: string[],
     gscQueries: string[] = [],
+    db: string = 'au',
   ): Promise<CollectorResult> {
     // Use approved target keywords first; fall back to real GSC queries when
     // no target keywords are configured but the client has authorised GSC.
@@ -57,7 +58,7 @@ export class SeoCollector {
     )
 
     try {
-      return await Promise.race([this.fetchAndScore(clientId, clientDomain, effectiveKeywords), timeout])
+      return await Promise.race([this.fetchAndScore(clientId, clientDomain, effectiveKeywords, db), timeout])
     } catch {
       return fallback
     }
@@ -67,10 +68,12 @@ export class SeoCollector {
     clientId: string,
     domain: string,
     keywords: string[],
+    db: string,
   ): Promise<CollectorResult> {
-    // Map SEMRUSH_DB region env var to DataForSEO location code (AU=2036, NZ=2554).
-    const locationCode = process.env.SEMRUSH_DB === 'nz' ? 2554 : 2036
-    const db = process.env.SEMRUSH_DB ?? 'au'
+    // Market comes from the client's semrush_db (AU=2036, NZ=2554) — NOT the
+    // global SEMRUSH_DB env, which forced every client onto the deploy default
+    // and gave NZ clients AU keyword + SERP data.
+    const locationCode = locationCodeFor(db)
     const serpKeywords = keywords.slice(0, SERP_SAMPLE_KEYWORDS)
 
     // getKeywordsForSite is critical — let it throw so the outer catch degrades gracefully.

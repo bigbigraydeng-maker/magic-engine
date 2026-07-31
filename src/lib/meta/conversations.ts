@@ -25,6 +25,13 @@ export interface MessengerMessage {
   senderName: string | null
   body: string
   sentAt: string
+  /**
+   * Meta's `tags.data[].name` — folder + source-of-message markers. The only
+   * signal that hints whether an outbound Page message was typed by a human in
+   * the inbox (`source:chat`) or produced by an automation (instant reply / away
+   * message / Business AI). Empty when Meta returns none. See lib/messenger/automation.
+   */
+  tags: string[]
 }
 
 export interface MessengerConversation {
@@ -47,6 +54,7 @@ interface RawMessage {
   created_time?: string
   message?: string
   from?: { id?: string; name?: string }
+  tags?: { data?: { name?: string }[] }
 }
 
 interface RawConversation {
@@ -89,6 +97,7 @@ function toMessage(raw: RawMessage, pageId: string): MessengerMessage | null {
     // "who spoke last" stay correct, and mark it so the summariser sees it.
     body: raw.message ?? '[non-text message]',
     sentAt: raw.created_time,
+    tags: (raw.tags?.data ?? []).map((t) => t.name).filter((n): n is string => !!n),
   }
 }
 
@@ -102,7 +111,7 @@ export async function fetchConversationMessages(
   pageAccessToken: string,
 ): Promise<MessengerMessage[]> {
   const params = new URLSearchParams({
-    fields: 'id,created_time,message,from',
+    fields: 'id,created_time,message,from,tags',
     limit: '100',
     access_token: pageAccessToken,
   })
@@ -138,7 +147,7 @@ export async function fetchPageConversations(
   const params = new URLSearchParams({
     platform: 'messenger',
     fields:
-      'id,updated_time,message_count,participants,messages.limit(100){id,created_time,message,from}',
+      'id,updated_time,message_count,participants,messages.limit(100){id,created_time,message,from,tags}',
     limit: '25',
     access_token: pageAccessToken,
   })

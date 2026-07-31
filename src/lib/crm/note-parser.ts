@@ -90,6 +90,17 @@ const NOT_INTERESTED_PATTERNS: RegExp[] = [
   /no\s*interest/i,
   /already\s*(booked|sorted)/i,
   /all\s*sorted/i,
+  // 中文。原先整组只有英文，而 CTS 员工的通话备注绝大多数是中文写的 ——
+  //「客户对旅游不感兴趣」一条都匹配不上，人照旧留在今天的名单里被反复打。
+  /不感兴趣/,
+  /没有?兴趣/,
+  /不想去/,
+  /不打算去/,
+  // 「已经在别家订了」「找了另一家」——「已经…订」中间常隔着地点词，
+  // 「另一家」也和「别家」一样常见，所以这里放宽而不是逐字枚举。
+  /已经?.{0,6}(订|预订|报名|买)了/,
+  /(找|换)了(别|另|其他).{0,3}家/,
+  /(别|另|其他).{0,3}家(订|预订|报名)了/,
 ]
 
 const CALLBACK_PATTERNS: RegExp[] = [
@@ -184,6 +195,31 @@ function safeInstant(raw: string | null): string | null {
   if (!raw) return null
   const d = new Date(raw.trim())
   return Number.isNaN(d.getTime()) ? null : d.toISOString()
+}
+
+/** 回电时间的合理窗口：过去 14 天到未来 2 年。 */
+const CALLBACK_PAST_LIMIT_MS = 14 * 86_400_000
+const CALLBACK_FUTURE_LIMIT_MS = 730 * 86_400_000
+
+/**
+ * 回电时间的合理性校验。
+ *
+ * 只判断「能不能解析」是不够的：留言里常见「2月20日」这种不带年份的写法，
+ * 解析器会自行补一个年份，存进去之后名单上就出现「该回电了 · 1118 天前」。
+ * CTS 线上 23 条 callback_at **全部**落在 30 天以前，最早 2023-07-07 ——
+ * 没有一条是真的约定。
+ *
+ * 一个两周前就过期的回电几乎不可能是真实约定，而是解析出错。宁可丢掉，
+ * 也不要让名单上出现明显荒谬的时间 —— 那会让销售连带不信整页。
+ */
+export function saneCallbackInstant(raw: string | null, now: Date = new Date()): string | null {
+  const iso = safeInstant(raw)
+  if (!iso) return null
+
+  const delta = new Date(iso).getTime() - now.getTime()
+  if (delta < -CALLBACK_PAST_LIMIT_MS) return null   // 太久以前 → 多半漏了年份
+  if (delta > CALLBACK_FUTURE_LIMIT_MS) return null  // 太远的未来 → 多半年份解析错
+  return iso
 }
 
 /**
@@ -297,7 +333,7 @@ export async function parseNote(
       travel_window: cleanTravelWindow(parsed.travel_window, now),
       tour_interest: cleanNullish(parsed.tour_interest),
       competitor: cleanCompetitor(parsed.competitor, brandTerms),
-      callback_at: safeInstant(cleanNullish(parsed.callback_at)),
+      callback_at: saneCallbackInstant(cleanNullish(parsed.callback_at)),
     }
   } catch {
     // AI 挂了不能让整批导入失败 —— 规则版本已经覆盖了最要紧的三件事。

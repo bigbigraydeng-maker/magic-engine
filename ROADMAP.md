@@ -2587,6 +2587,40 @@ AI 可见度层（ME 独有 ✅）
 
 **新表强约束**：三表带 `client_id NOT NULL`，RLS 用 service_role 幂等模板，写完 grep `workspace_id|client_team|auth.uid`；`client_ad_entities` 白名单必须配 UI（禁 FDE 进 Studio 直填）。
 
+### Phase 18.E — Audience Asset Engine / 中介私域买家库 🔄 建池器已落地（2026-07-29 登记）
+
+> **蓝图**：[`docs/superpowers/specs/2026-07-28-audience-asset-engine.md`](./docs/superpowers/specs/2026-07-28-audience-asset-engine.md)（v0.3 · 经魏征 + 板桥双审 + PM 四项拍板）
+> **定位**：广告柱第三块 —— 18.D 管**创意**生死、Ad Strategy Engine 管**账户**健康，18.E 管**受众资产**沉淀与归属。三者边界铁律：资产层永不裁创意、永不动预算，只输出信号。
+> **三段模型**：冷广告灌池 → 暖池便宜转化 → 智能化判断每人在哪一级并自动递进。
+
+**⭐ A 线机制验证已通过（2026-07-29 · 零新增预算，从 CTS 现有投放读出）**
+
+| | 暖池组 `Retargeting - VideoViewers + FormOpeners` | 冷启动组 `Reborn-Winner-Stand-in-Front` |
+|---|---|---|
+| 定向 | 3 个自定义受众 + 排除已转化 · **受众扩展关** | 无自定义受众 · 广投 · 扩展开 |
+| 花费 / Leads | NZ$665.30 / 100 | NZ$1,623.20 / 146 |
+| **单 lead 成本** | **NZ$6.65** | **NZ$11.12** |
+
+**暖池 CPL 低 40%**，且 CPM 更贵 → 省钱来自转化率而非便宜流量。同账户同期同指标，n=100/146。
+> 口径说明：两条均为 **CTS campaign 级**对比，不受 18.D.0「混账户读聚合污染」影响（那条针对账户级归一）。
+> ⚠️ **反例**：同一暖池投 Messenger 对话单次成本 NZ$38.53（n=5，已暂停）→ **暖池优势在表单 lead 上成立，消息对话未验证**。30 Kiteroa 走 Messenger，**不可直接引用 40%**。
+
+| 任务 | 内容 | 依赖 | 状态 |
+|------|------|------|------|
+| **P18.E.0 建池器** | `src/lib/meta/audience-ladder.ts` — `planLadder()` 纯函数出计划 + `createLadder()` 幂等执行（按名匹配，重跑不产生重复）。规则形状取自 CTS 生产受众实读 | 无 | ✅ 完成（16 单测 + 3 变异测试全捕获） |
+| **P18.E.1 语法验证** | 视频源规则（`video_view_15s` / `video_view_50_percent`）需用 Render 上的 `META_SYSTEM_USER_TOKEN` 实调验证；MCP 工具面建不了（错误 2654）但**平台 UI 支持 + CTS 生产在用** | Render token | 📋 |
+| **P18.E.2 账本表** | `client_audience_assets`：`audience_id ↔ client_id / layer / ladder_stage / scope / owner_account / source_type(organic\|paid)`。**存 id 不靠解析名字**（重名/改名会静默炸） | 🔴 **PM 拍板 migration** | 📋 |
+| **P18.E.3 采集** | 池 size 快照 → `flywheel_metrics` 的 `ads.audience.*`；台账画**净增 = 新进 − 到期掉出**（受众是衰减存量，不能只画总量）。**新 cron 必须 link `me-shared-cron-secret`** | P18.E.2 | 📋 |
+| **P18.E.4 画像** | 现有 `google-data-pullback-daily` 加 `breakdowns=age,gender`（不新起 cron；`ads_entity_schedule_report` gated 与此无关） | 无 | 📋 |
+| **P18.E.5 归属交付** | 归属条款 + 隐私告知（IPP 3/6/7/9/**12 跨境披露**）+ 同意文书 → **必须在任何受众共享动作之前完成** | PM 定条款 | 📋 |
+| **P18.E.6 月报** | 《你的买家库月报》客户面渲染（客户永不见 `L0/L1` 代号） | P18.E.3 | 📋 |
+
+**PM 已拍板**：①归属=中介（红线，删除「带不走」黏性论）②无独家，平行服务多 agent（红线是「绝不搬」不是「不重叠」）③定价随 agent package 再定 ④Roman 只作结构样板，效果样板用后续楼盘。
+
+**待 PM**：Roman vendor deck「500+ Chinese buyer database」口径 · 海外买家资格口径（OIA 2018）· 开发商合同数据条款。
+
+**kill criteria**：暖池 CPL 若相对冷启动无显著优势 → 产品叙事重估。**当前未触发**（表单 lead 低 40%）。
+
 ### 安全边界
 
 - 所有操作必须校验 `client_id` + 广告账户 ownership（防租户穿越）✅ `requireDashboardClientAccess`
@@ -3559,6 +3593,8 @@ FDE 未来 Wizard：客户信息 → 选启用渠道 → 客户提供 credential
 - [x] **P21.K.5 跨客户** ✅(2-3 天):配置 UI(红线:**自动定标预填**不给 PM 空框 + 人话 label + 当前值参照)+ `funnel_layers` per-client + 泛化到有 Meta 账户的客户 + handoff schema `creative_supply_requests`(策略层→作品层)
 - [x] **顺带** ✅(force-pause 守卫已随 #634 落地):`/meta-ads/execute` force-pause 守卫(改预算后 entity read 回读 + 短重试 + 自动重激活)+ budget_policy 硬闸。codify memory `reference-meta-mcp-budget-update-forces-pause`
 - [ ] **P21.K.7 ad 级数据脊柱**(登记 2026-07-25,PM 拍板):日度 cron 补拉 **ad 级**(每条广告每天一行,复用 `ad_daily_insights` 的 `level='ad'`),让「某天新增了哪条广告 / 哪条在拖后腿」可被系统自查,不依赖 Meta MCP(Oztop 账户未开通)也不用人翻广告后台。**背书案例**:Oztop Lead Form Cold Broad 的 CPL 7/17 起翻倍,campaign 级只能定位到「填表率腰斩 + 出现出站点击」。含 `parent_id` 列(ad→campaign 归属,**migration 待 PM `go apply`**)+ 首拉 30 天回补 + 分页完整性守卫。顺带铺好 34.B Creative Lifecycle 要的作品层日度基础设施
+- [x] **P21.K 止血:视频/ThruPlay 广告不再被点击率误判 🔴** ✅(2026-07-26 · PR #648):事故 CTS「ThruPlay Reels - Pool builder」被判 🔴「点击率比自身最好一周低 100%(0.1%→0.0%)」,近 7 天 $69/0 询盘。根因:视频广告优化目标是观看不是点击,clicks/impressions 本在 0.1% 噪声量级,被相对基线误判。修复:`BaselineConfig` 新增 `ctrSignalFloor`(默认 0.5%),自身最好一周 CTR 都低于此的广告=非点击驱动,CTR 判 `insufficient_history` 不再误标红;Lead/traffic 1%+ 与 Reborn 4.4% 回归不受影响。子牙+魏征双审 GO,补 4 测试(含 2 变异杀手),ads-strategy 87/87
+- [ ] **P21.K.8 objective 感知 + 视频疲劳正向检测**(登记 2026-07-26,PM 拍板 `排`):把 P21.K 止血从「不误判视频广告」升级到「真正体检视频广告好不好」。需 ① `ad_daily_insights` 加 `objective` 列 + 采集时拉 campaign 节点 objective(**migration 待 PM `go apply`**)② 脊柱补拉视频完播指标(ThruPlay 完播成本 / CPM / video_p100)③ 按 objective 切换判定指标:视频/播放量目标用完播成本或 CPM,表单/流量目标保留 ctr+cost_per_result,拿不到 objective 或样本太少判 `insufficient_history`。价值:CTS 这类主打视频的客户,看完成本涨→主动提醒换素材。半天到一天。附:止血注释已在 `baseline.ts` 登记本项为 follow-up
 - [ ] **多视角对抗复盘工作流**(1-2 天,可后置):battle-plan §8 方法论固化成可复用 Workflow/agent(N 视角互相证伪前提 → 作战计划 → 喂鲁班),异常触发非每日跑
 - [ ] **开放项**:三张新表 migration 逐次 PM `go apply`(`ad_daily_insights` / `ad_strategy_configs`+`_triggers` / `ad_health_narratives`)· P5 泛化首批客户(Oztop?)· 姊妹 spec Creative Lifecycle 同一 GHA 笔误待独立小 PR 修
 
@@ -4055,6 +4091,56 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-07-31（治本：私信建人前先「唯一全名认亲」· PM 反馈重名）
+
+**问题**：PM 反馈「CRM 里有大量重名的」。根因是同一个人被拆成两条 —— 先填 Facebook 表单（留电话邮箱、**没有 psid**），后来又来私信（有 psid、**没有邮箱**），两边没有任何共同的键。CTS 实测 132 个只有 Facebook 身份的人里 **29 个**是这么拆出来的。
+
+**方案（治本优先，不是做个页面让人点）**：认人从两级变三级 —— ①身份键（psid / 正文邮箱）②**唯一全名** ③新建。第 2 级三条同时满足才认：完整姓名（≥2 词、非占位符）+ 全库唯一同名 + 对方身上还没有 fb_psid；任一不满足即弃权，照旧独立建人。实测规则在 CTS 上命中 29、模糊案例 **0**。
+
+**为什么不触碰 identity.ts 的红线**：那条红线禁的是「把两个**已存在**的人按姓名合成一个」（两份历史永久搅在一起、不可逆）。这里是「给一个已存在的人**多挂一个身份**」，什么都没销毁，认错了摘掉那条 fb_psid 即可复原。
+
+**顺带修**：Meta 的占位名「Facebook 用户」不再当人名存（存 null）。它正好是两个词、能通过词数检查 —— 不单独挡掉的话，CTS 那 14 个互不相干的「Facebook 用户」会互相认亲、并到同一个人身上。
+
+7 个新测试，284 个 crm/messenger/timeline 测试全过；三条护栏（占位符 / 唯一性 / 对方已有 psid）各做过变异测试。**无 migration**。存量那 29 对另行清理（不可逆，需 PM 过目后执行）。
+
+### 2026-07-31（CRM 往来记录改成正序 · PM 反馈）
+
+**问题**：PM 反馈「CRM 里的聊天记录是倒序排列的，阅读体验不佳」。时间线原本「最新在上」，但这条线里混着私信原文 —— 倒序会把一段对话的**回答排在提问前面**，一问一答读起来是反的。
+
+**修复**：`GET /crm/contacts/[cid]/timeline` 的合并排序改成从旧到新（最新在最下面），跟聊天软件一致；抽屉顶部仍是人的基本信息，对话往下延伸。
+
+**没跟着改的地方（关键）**：取 `conversation_messages` 时的 `ascending: false` + `limit(3000)` **保持不变** —— 那个倒序是为了超量时留下**最近**的 3000 条，一起改成正序会变成只留最老的，话痨客户的近期对话全丢。排序只在合并那一行做。3 个新测试钉住这两件事，并做过变异测试。
+
+### 2026-07-31（补挂积压的历史私信对话 [P28]）
+
+**问题**：「按 psid 建人」上线后，PM 拿手机 Business Suite 收件箱核对 —— 8 个人只有当天还在说话的 3 个进了 CRM，昨天聊完的 5 个全在系统外。根因：每小时同步只向 Meta 要「最近有更新的」线程（水位线），早就聊完的老对话永远等不到一次重新处理。CTS 积压 149 条。
+
+**修复**：`src/lib/messenger/backfill.ts` —— 这些对话的正文早就存在 `conversations` + `conversation_messages` 里，补挂**不用再问 Meta 要一次**：读本地表、走同一套 `linkMessengerConversation`，护栏自动适用。挂在每小时同步尾巴上，每轮 50 条自愈式消化，无新 cron、无新密钥、无人工。
+
+**关键正确性坑**：`conversation_messages` **没存 Meta 的 tags**，所以补挂时分不出「真人客服回的」和「Business AI 自动回的」（CTS 收件箱满屏 `FB AI responding`）。照写出站触点 = 把机器人问候当「我们联系过」，热线索直接掉出「今天该联系谁」。故新增 `tagsAvailable` 开关，补挂时**一条出站触点都不写** —— 按 automation.ts 头部写明的取舍，宁可让人多露一次面。
+
+6 个新测试（含该护栏的变异测试），274 个 crm/messenger 测试全过。**无 migration**。
+
+### 2026-07-30（只在 Facebook 私信聊过的人也进 CRM [P28]）
+
+**问题**：Messenger 对话每小时自动同步（CTS 458 段，活的），但**人进不来** —— 151 段挂不到任何联系人，其中 130 段是有来有回的真人；最近 3 天有新消息的 24 段里 22 段是系统看不见的人。这些人永远不出现在「今天该联系谁」。
+
+**根因不是 bug，是当初焊死的规则**：`link-contacts.ts` 原本「只 LINK 绝不 CREATE」，因为 Meta 自动回复会把 CTS 自家 info@ / 电话写进对话正文，从正文抽联系方式建人会造出假的「info@ 客户」并错并几十段对话。
+
+**修复**：那条理由针对的是「**从正文正则抽出来的**联系方式」，不是建人本身。所以只开一个口子 —— **建人只用 fb_psid**（Meta 在 participants 里给的唯一编号），原坑结构上进不来。两条护栏同时焊死：①客户自己开过口（线程至少一条 inbound）才建人 ②建人只带 fb_psid 一个身份 → `resolveContact` 最多命中一个既有联系人，**结构上不可能触发两个真人的不可逆合并**（这正是本模块原来绕开 resolveContact 的风险）。
+
+建出来的人只有 Facebook 身份、无电话邮箱，销售只能在 Messenger 回；日后他留了邮箱/电话靠唯一约束自动并成一条。cron 返回值新增 `newContacts`（今天私信带进来几个新人）。**无 migration**。4 个新测试 + 268 个 crm/messenger 测试全过；两条护栏 + 「只用 psid 建人」做过变异测试。
+
+### 2026-07-30（Facebook 表单的新人自动进 CRM [P28]）
+
+**问题**：FB 即时表单来的人只能靠人手导 CSV 跑 `scripts/import-cts-fb-leads.ts`（脚本头部自己写着「不是长期管道」）。实测后果：CTS 的 CRM 里最后一个新人停在 7/25，Meta 后台 7/26–7/30 又进了 27 个人，销售的「今天该联系谁」里一个都没有，广告每天仍在花 NZ$78–85。
+
+**修复**：补上「取数 → 建人 → 写触点」这条链 —— `lib/meta/lead-forms.ts`（Graph 只读）+ `lib/crm/meta-lead.ts`（复用 `resolveContact`）+ `lib/meta/leads-sync.ts`（按客户编排 + 水位线）+ `api/cron/meta-leads-sync`，render.yaml 注册 `meta-leads-hourly`（每小时第 25 分，岔开私信同步避 Meta 限流）。开关沿用 `clients.facebook_page_id`。
+
+**无 migration**：`channel='meta_lead_form'` 与 `(client_id, source, source_ref)` 唯一键都已存在。幂等键跟人手导入脚本对齐（都是 Meta 的 lead id），首次回补不会把 7/26 已导的 335 人写成第二份。33 新测试 + 368 个 crm/meta/messenger 测试全过，三处关键校验做过变异测试。
+
+**上线还需 PM 一步**：Render 上给这个 cron link `me-shared-cron-secret` 环境变量组；Page token 若缺 `leads_retrieval` 权限，cron 日志会把 Graph 原话报出来。
 
 ### 2026-07-06（Phase 35 司马徽 Outbound Prospecting M1+M2 落地 [P35.1-P35.4]）
 
