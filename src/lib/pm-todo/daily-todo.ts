@@ -29,8 +29,9 @@ const DASHBOARD_BASE = 'https://app.magicengine.com.au/dashboard/clients'
 
 // ── Rolling weekday themes (PM 拍板 2026-07-31) ────────────────────────────────
 // 口碑 (Wed) / 竞品 (Thu) slots take over when those pillars come online.
+// Exported: the /dashboard/today page and the email render the SAME schedule.
 
-const DAY_THEMES: Record<number, { title: string; hint: string }> = {
+export const DAY_THEMES: Record<number, { title: string; hint: string }> = {
   1: { title: '周报日', hint: '读周报邮件，把里面的「待点头」清单过一遍' },
   2: { title: 'Blog 审稿日', hint: '昨夜自动生成的草稿在等你审，改完点发布' },
   3: { title: 'SEO 发现日', hint: '看看巡逻员这周抓到的排名问题和机会' },
@@ -122,7 +123,7 @@ export interface TodoEmail {
   totalItems: number
 }
 
-const ZH_DAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+export const ZH_DAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
 export function buildTodoEmail(weekday: number, counts: TodoCounts, nzDateLabel: string): TodoEmail {
   const theme = DAY_THEMES[weekday] ?? { title: '日常', hint: '' }
@@ -182,6 +183,7 @@ export function buildTodoEmail(weekday: number, counts: TodoCounts, nzDateLabel:
       ${body}
       <p style="margin-top:18px;font-size:12px;color:#94a3b8">
         这封信每个工作日早上自动发，数字实时统计，办完的第二天自动消失。
+        随时可在后台 <a href="https://app.magicengine.com.au/dashboard/today" style="color:#0891b2">今日待办</a> 页查看同一份清单。
       </p>
     </div>`
 
