@@ -36,6 +36,7 @@ export interface CronJobResponse {
   cleaned_jobs: number
   failed_jobs_found: number
   resumed_jobs: number
+  zombies_failed: number
 }
 
 export interface ApiErrorResponse {
@@ -102,6 +103,37 @@ export async function POST(
       throw new Error(`Watchdog check failed: ${message}`)
     }
 
+    // 3b. Watchdog (22.E.S15): fail in_progress jobs stuck > 2 hours.
+    // A deploy restart kills the in-process crawl but leaves the row
+    // in_progress forever — which then blocks every future weekly crawl
+    // for that client (the weekly cron skips when a job is in progress).
+    let zombiesFailed = 0
+    try {
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+      const { data: zombies, error: zombieErr } = await supabaseAdmin
+        .from('site_audit_jobs')
+        .select('id')
+        .eq('status', 'in_progress')
+        .lt('started_at', twoHoursAgo)
+
+      if (zombieErr) throw new Error(zombieErr.message)
+
+      for (const zombie of (zombies ?? []) as Array<{ id: string }>) {
+        try {
+          await jobRunner.failJob(zombie.id, 'Watchdog: in_progress > 2h (crawl process died)')
+          zombiesFailed++
+        } catch (failErr: unknown) {
+          console.error(
+            `[site-audit/cron] Failed to fail zombie job ${zombie.id}:`,
+            failErr instanceof Error ? failErr.message : String(failErr),
+          )
+        }
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Zombie watchdog failed'
+      throw new Error(`Zombie watchdog failed: ${message}`)
+    }
+
     // 4. Recovery: Resume pending jobs stuck > 1 hour
     let resumedJobs = 0
     try {
@@ -144,7 +176,7 @@ export async function POST(
       processed: cleanedJobs + resumedJobs,
       completed: cleanedJobs + resumedJobs,
       failed: failedJobsFound,
-      summary: { cleaned_jobs: cleanedJobs, failed_jobs_found: failedJobsFound, resumed_jobs: resumedJobs },
+      summary: { cleaned_jobs: cleanedJobs, failed_jobs_found: failedJobsFound, resumed_jobs: resumedJobs, zombies_failed: zombiesFailed },
     })
     return NextResponse.json<CronJobResponse>(
       {
@@ -152,6 +184,7 @@ export async function POST(
         cleaned_jobs: cleanedJobs,
         failed_jobs_found: failedJobsFound,
         resumed_jobs: resumedJobs,
+        zombies_failed: zombiesFailed,
       },
       { status: 200 }
     )

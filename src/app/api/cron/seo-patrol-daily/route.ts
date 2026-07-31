@@ -101,6 +101,7 @@ export async function GET(
       summary: {
         total_findings: result.total_findings,
         total_actions: result.total_actions,
+        page_data_problems: result.page_data_problems,
         hygiene,
       },
     })

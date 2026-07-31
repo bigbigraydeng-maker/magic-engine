@@ -28,10 +28,14 @@ export async function fetchUrlAsMarkdown(url: string): Promise<JinaFetchResult> 
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
 
+      // Optional API key lifts the anonymous ~20 RPM tier that caused CTS's
+      // structural 429 failures (10/30 pages, 2026-05). Works without it.
+      const jinaKey = process.env.JINA_API_KEY
       const res = await fetch(jinaUrl, {
         headers: {
           'Accept': 'text/plain',
           'X-Return-Format': 'markdown',
+          ...(jinaKey ? { Authorization: `Bearer ${jinaKey}` } : {}),
         },
         signal: controller.signal,
       })

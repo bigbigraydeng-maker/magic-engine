@@ -4,9 +4,11 @@
  * GET   → returns the persisted config ({ weekly_blog: boolean }).
  * PATCH → merges known keys into clients.seo_config.
  *
- * Consumed by the blog-weekly cron (src/lib/blog/weekly-blog.ts): clients
- * with weekly_blog=true get one auto-topic blog draft per week, always
- * awaiting human review before publish.
+ * SEMANTICS (22.E.S15): weekly_blog doubles as the FOCUS-CLIENT MASTER
+ * SWITCH for the whole SEO watchdog line — it gates the blog-weekly cron
+ * AND the site-audit-weekly recrawl (which feeds the patrol's R2 link
+ * signals). Turning it off for a client silences all of it. Split into
+ * separate keys only when a client genuinely needs one without the other.
  *
  * Mirrors src/app/api/clients/[id]/brand-aliases/route.ts.
  */

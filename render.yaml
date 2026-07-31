@@ -534,6 +534,23 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # Weekly site recrawl — Sunday 01:00 UTC. Refreshes client_site_pages for
+  # focus clients (seo_config.weekly_blog=true) so the patrol's link-graph
+  # (R2) and blog page-context stay at most a week old.
+  # ⚠️ sync:false does NOT auto-fill: after first deploy, link the
+  #    me-shared-cron-secret env group to this service in the Render dashboard.
+  - type: cron
+    name: site-audit-weekly
+    env: node
+    schedule: "0 1 * * 0"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/site-audit-weekly
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # PM daily to-do — 19:00 UTC Sun-Thu = NZ weekday mornings (07:00 NZST /
   # 08:00 NZDT). Rolling pillar theme + live counts of drafts/findings/cards
   # awaiting the PM. Route double-guards NZ weekends.

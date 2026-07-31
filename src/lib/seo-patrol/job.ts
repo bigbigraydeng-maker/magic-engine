@@ -26,6 +26,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { persistZhugeActions } from '@/lib/zhuge/action-persister'
 import type { PriorityAction, ZhugeOutput } from '@/lib/zhuge/types'
 import { runSeoPatrolRules } from './rules'
+import { buildPageSignals } from './page-signals'
 import type {
   SeoPatrolFinding,
   SeoPatrolInput,
@@ -72,6 +73,8 @@ export interface SeoPatrolClientResult {
   findings_detected: number
   findings_persisted: number
   actions_created: number
+  /** R2 page-signal feed health — 'missing'/'error' means R2 was off this run. */
+  page_data_status?: PageDataStatus
   error?: string
 }
 
@@ -129,14 +132,18 @@ export function assembleSeoPatrolInput(
     }
   })
 
-  // R2/R5 page signals are not yet collectable (see file header note).
+  // Page signals are attached by loadSeoPatrolInput (buildPageSignals, S15) —
+  // this pure assembler only shapes the keyword side.
   return { clientId, keywords, pages: [] }
 }
+
+/** Health of the R2 page-signal feed for one client (surfaced in cron summary). */
+export type PageDataStatus = 'ok' | 'missing' | 'error'
 
 async function loadSeoPatrolInput(
   supabase: SupabaseClient,
   client: SeoPatrolClient,
-): Promise<SeoPatrolInput> {
+): Promise<{ input: SeoPatrolInput; pageDataStatus: PageDataStatus }> {
   const locationCode = locationCodeFor(client.semrush_db)
 
   // Latest snapshot date, then the newest date strictly before it. Two point
@@ -186,7 +193,25 @@ async function loadSeoPatrolInput(
 
   const gscQueries = ((gsc as { top_queries?: GscQueryRow[] } | null)?.top_queries ?? [])
 
-  return assembleSeoPatrolInput(client.id, currentKeywords, priorKeywords, gscQueries)
+  const input = assembleSeoPatrolInput(client.id, currentKeywords, priorKeywords, gscQueries)
+
+  // 22.E.S15: page signals (crawl link graph × GSC top_pages) feed R2.
+  // A signals failure degrades to keyword-only patrol, never breaks it —
+  // but the degradation is REPORTED via page_data_status, not swallowed
+  // (a silent pages:[] is exactly how R2 stayed dead for months).
+  let pageDataStatus: PageDataStatus = 'error'
+  try {
+    const { pages, meta } = await buildPageSignals(client.id, client.domain, supabase)
+    input.pages = pages
+    pageDataStatus = meta.crawl_data_missing ? 'missing' : 'ok'
+  } catch (err) {
+    console.warn(
+      `[seo-patrol] page signals failed for ${client.domain} (R2 off this run):`,
+      err instanceof Error ? err.message : String(err),
+    )
+  }
+
+  return { input, pageDataStatus }
 }
 
 async function fetchKeywordRows(
@@ -339,7 +364,8 @@ export async function runSeoPatrolForClient(
   }
 
   try {
-    const input = await loadSeoPatrolInput(supabase, client)
+    const { input, pageDataStatus } = await loadSeoPatrolInput(supabase, client)
+    base.page_data_status = pageDataStatus
     const findings = runSeoPatrolRules(input)
     base.findings_detected = findings.length
 
@@ -386,6 +412,8 @@ export interface SeoPatrolBatchResult {
   total_findings: number
   total_actions: number
   failed: number
+  /** Clients whose R2 page-signal feed was missing or errored this run. */
+  page_data_problems: number
   results: SeoPatrolClientResult[]
 }
 
@@ -416,6 +444,9 @@ export async function runSeoPatrol(
     total_findings: results.reduce((s, r) => s + r.findings_detected, 0),
     total_actions: results.reduce((s, r) => s + r.actions_created, 0),
     failed: results.filter((r) => r.error).length,
+    page_data_problems: results.filter(
+      (r) => r.page_data_status && r.page_data_status !== 'ok',
+    ).length,
     results,
   }
 }
