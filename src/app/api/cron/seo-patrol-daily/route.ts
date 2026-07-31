@@ -33,7 +33,10 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { runSeoPatrol, type SeoPatrolBatchResult } from '@/lib/seo-patrol/job'
+import { expireStaleDrafts } from '@/lib/blog/draft-expiry'
+import { supersedeStaleZhugeCards } from '@/lib/zhuge/card-expiry'
 import { startCronRun } from '@/lib/cron/run-logger'
+import { supabaseAdmin } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
 // Sequential per-client DB reads + persister writes. Allow 5 min.
@@ -74,11 +77,32 @@ export async function GET(
         `findings=${result.total_findings} actions=${result.total_actions} ` +
         `failed=${result.failed}`,
     )
+
+    // To-do hygiene (22.E.S18 前置): drafts untouched >30d auto-expire,
+    // zhuge cards pending >14d auto-supersede. Non-blocking — a hygiene
+    // failure must not fail the patrol.
+    let hygiene: { drafts_expired: number; cards_superseded: number } | { error: string }
+    try {
+      const [drafts, cards] = await Promise.all([
+        expireStaleDrafts(supabaseAdmin),
+        supersedeStaleZhugeCards(supabaseAdmin),
+      ])
+      hygiene = { drafts_expired: drafts.expired, cards_superseded: cards.superseded }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error('[seo-patrol/cron] hygiene failed (non-blocking):', message)
+      hygiene = { error: message }
+    }
+
     await cronRun.finish({
       processed: result.clients_processed,
       completed: result.clients_processed - result.failed,
       failed: result.failed,
-      summary: { total_findings: result.total_findings, total_actions: result.total_actions },
+      summary: {
+        total_findings: result.total_findings,
+        total_actions: result.total_actions,
+        hygiene,
+      },
     })
     return NextResponse.json<CronResponse>({ success: true, timestamp, ...result })
   } catch (err) {
