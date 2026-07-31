@@ -14,7 +14,9 @@ vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
     from: vi.fn(() => ({
       select: vi.fn(() => ({
-        not: mockClientsQuery,
+        eq: vi.fn(() => ({
+          not: mockClientsQuery,
+        })),
       })),
     })),
   },
@@ -22,6 +24,11 @@ vi.mock('@/lib/supabase', () => ({
 
 vi.mock('@/lib/seo-intelligence/keyword-snapshots', () => ({
   snapshotRankedKeywordsForClient: mockSnapshotRankedKeywordsForClient,
+}))
+
+// startCronRun writes to cron_run_logs via supabaseAdmin — out of scope here
+vi.mock('@/lib/cron/run-logger', () => ({
+  startCronRun: vi.fn(async () => ({ finish: vi.fn(async () => {}) })),
 }))
 
 function makeRequest(secret: string | null) {

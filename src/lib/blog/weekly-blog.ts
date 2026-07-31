@@ -315,9 +315,11 @@ export async function runWeeklyBlogBatch(
 ): Promise<WeeklyBlogBatchResult> {
   const startedAt = Date.now()
 
+  // 真客户闸门：周期性监测只对 active 客户跑（DataForSEO 计划 阶段 0）
   const { data: clients, error } = await supabase
     .from('clients')
     .select('id, name, domain')
+    .eq('client_status', 'active')
     .contains('seo_config', { weekly_blog: true })
 
   if (error) throw new Error(`Failed to load clients: ${error.message}`)

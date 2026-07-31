@@ -15,6 +15,7 @@
 
 import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
+import { ClientStatusPanel } from './_components/ClientStatusPanel'
 import { GbpPanel } from './_components/GbpPanel'
 import { GoogleAdsPanel } from './_components/GoogleAdsPanel'
 import { AdStrategyPanel } from './_components/AdStrategyPanel'
@@ -95,8 +96,24 @@ export default function ClientSettingsPage() {
           </div>
         )}
 
-        {/* ── §1 平台连接（OAuth 类） ────────────────────────────────────── */}
+        {/* ── §0 客户状态（真客户闸门） ──────────────────────────────────── */}
         <div className="mt-8 mb-2 flex items-baseline gap-2">
+          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+            § 0 · 客户状态
+          </p>
+          <span className="text-xs text-slate-400">周期性监测的成本闸门</span>
+        </div>
+
+        <section>
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-base">🚦</span>
+            <h2 className="font-black text-slate-800">真客户 / 调研档案</h2>
+          </div>
+          <ClientStatusPanel clientId={clientId} />
+        </section>
+
+        {/* ── §1 平台连接（OAuth 类） ────────────────────────────────────── */}
+        <div className="mt-10 mb-2 flex items-baseline gap-2">
           <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
             § 1 · 平台连接
           </p>

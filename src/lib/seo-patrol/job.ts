@@ -420,9 +420,11 @@ export interface SeoPatrolBatchResult {
 export async function runSeoPatrol(
   supabase: SupabaseClient = supabaseAdmin,
 ): Promise<SeoPatrolBatchResult> {
+  // 真客户闸门：周期性监测只对 active 客户跑（DataForSEO 计划 阶段 0）
   const { data: clients, error } = await supabase
     .from('clients')
     .select('id, domain, semrush_db')
+    .eq('client_status', 'active')
     .not('domain', 'is', null)
 
   if (error) {

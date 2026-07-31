@@ -100,10 +100,12 @@ export async function scanClient(clientId: string): Promise<AnomalySignal[]> {
 // ── Private helpers ───────────────────────────────────────────────────────────
 
 async function fetchActiveClientIds(errors: string[]): Promise<string[]> {
+  // clients 表从来没有 status 列 —— 这里此前一直静默查空（列不存在报错被吞）。
+  // 阶段 0 加了 client_status 后，按真客户闸门的本意改读它。
   const { data, error } = await supabaseAdmin
     .from('clients')
     .select('id')
-    .eq('status', 'active')
+    .eq('client_status', 'active')
 
   if (error) {
     errors.push(`fetchActiveClientIds: ${error.message}`)

@@ -58,9 +58,11 @@ export async function GET(req: NextRequest) {
   const cronRun = await startCronRun('site-audit-weekly')
 
   try {
+    // 真客户闸门：周期性监测只对 active 客户跑（DataForSEO 计划 阶段 0）
     const { data: clients, error } = await supabaseAdmin
       .from('clients')
       .select('id, name, domain')
+      .eq('client_status', 'active')
       .contains('seo_config', { weekly_blog: true })
       .not('domain', 'is', null)
 
