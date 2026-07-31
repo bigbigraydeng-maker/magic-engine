@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { generateWithQualityRetry } from '@/lib/blog/generate-with-quality'
 import type { BlogGeneratorOutput } from '@/lib/blog/generator'
 import { auditExistingContent } from '@/lib/blog/content-auditor'
+import { checkContentDuplicate } from '@/lib/blog/content-gate'
 import { fetchRelatedPages, buildPagesContextBlock } from '@/lib/blog/pages-context'
 import { checkInternalLinks } from '@/lib/blog/internal-link-checker'
 import { clampLimit } from '@/lib/validation-utils'
@@ -123,6 +124,35 @@ export async function POST(
 
     // ── Content Audit (synchronous — fast feedback before queuing) ─────────────
     if (!body.skip_audit) {
+      // Layer 1 (deterministic, DB-only): the content-duplicate gate — the
+      // single authority shared with the weekly cron. Blocks re-drafting
+      // anything already published / in a PR / live on the crawled site.
+      // Returned in the audit's 'upgrade' shape so the existing UI dialog
+      // ("already covered — upgrade instead") handles it without changes.
+      const gate = await checkContentDuplicate(clientId, {
+        topic: body.topic,
+        primary_keyword: body.primary_keyword ?? null,
+      }).catch(() => null)
+
+      if (gate?.verdict === 'duplicate') {
+        return NextResponse.json({
+          success: true,
+          action: 'upgrade',
+          audit: {
+            action: 'upgrade',
+            existing_url: gate.source === 'site_page' ? gate.existing_ref : null,
+            existing_title: gate.existing_title,
+            reason:
+              `This topic already exists (${gate.source === 'site_page' ? 'live site page' : 'blog post'}: ` +
+              `${gate.existing_title ?? gate.existing_ref}). Refresh the existing content instead of publishing a duplicate.`,
+            confidence: 1,
+            discovered_urls: [],
+          },
+          post: null,
+        })
+      }
+
+      // Layer 2 (crawl + AI second opinion) — unchanged.
       const { data: clientData } = await supabaseAdmin
         .from('clients')
         .select('id, name, domain')
