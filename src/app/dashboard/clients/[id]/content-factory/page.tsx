@@ -26,6 +26,7 @@ interface Card {
   status: string
   stage: Stage
   hasVideo: boolean
+  videoUrl: string | null
   platforms: string[]
   scheduledAt: string | null
   publishedAt: string | null
@@ -199,6 +200,18 @@ export default function ContentFactoryBoardPage() {
             </div>
 
             <h2 className="text-base font-display font-bold leading-snug mb-3">{selected.title}</h2>
+
+            {selected.videoUrl && (
+              <div className="mb-3">
+                <div className="text-[11px] font-semibold text-me-taupe mb-1">成片</div>
+                <video
+                  src={selected.videoUrl}
+                  controls
+                  playsInline
+                  className="w-full max-h-[420px] rounded-xl bg-black"
+                />
+              </div>
+            )}
 
             {selected.hook && (
               <div className="mb-3">

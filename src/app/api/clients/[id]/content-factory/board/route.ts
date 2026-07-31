@@ -42,6 +42,7 @@ export async function GET(
         status,
         stage,
         hasVideo,
+        videoUrl: p.source_video_url ?? null,
         platforms: p.platforms ?? [],
         scheduledAt: p.scheduled_at,
         publishedAt: p.published_at,
