@@ -165,6 +165,23 @@ export class GithubClient {
   }
 
   /**
+   * Read a PR's lifecycle state. Used by blog pr-sync (2026-08-01): posts in
+   * status 'pr_open' poll this to learn whether the human merged or closed
+   * the PR, so the post's status (and the site-content registry) stays true.
+   */
+  async getPullRequestState(
+    owner: string,
+    repo: string,
+    prNumber: number,
+  ): Promise<{ state: 'open' | 'closed'; merged: boolean }> {
+    const pr = await this.request<{ state: 'open' | 'closed'; merged: boolean }>(
+      'GET',
+      `/repos/${owner}/${repo}/pulls/${prNumber}`,
+    )
+    return { state: pr.state, merged: pr.merged === true }
+  }
+
+  /**
    * Close a pull request without merging.
    * Used by GEO-B+ Stage 1 B2: when re-publishing the same directive, the
    * previous still-open PR is closed and a fresh one opened, so review

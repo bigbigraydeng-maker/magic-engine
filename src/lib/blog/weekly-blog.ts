@@ -28,6 +28,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { generateWithQualityRetry } from '@/lib/blog/generate-with-quality'
 import { getWeakSpotOpportunities } from '@/lib/blog/topic-selector'
 import { auditExistingContent } from '@/lib/blog/content-auditor'
+import { checkContentDuplicate } from '@/lib/blog/content-gate'
 import { fetchRelatedPages, buildPagesContextBlock } from '@/lib/blog/pages-context'
 import { checkInternalLinks } from '@/lib/blog/internal-link-checker'
 import { SeoContentAdapter } from '@/lib/flywheel/adapters/SeoContentAdapter'
@@ -193,25 +194,34 @@ async function runForClient(
       return { ...base, outcome: 'skipped_no_topic' }
     }
 
-    // 2b. Site audit the top candidates: if the client's site already covers
-    //     the topic (action 'upgrade'), move to the next candidate. Audit
-    //     failures don't block generation (.catch → null = proceed).
+    // 2b. Per-candidate duplicate defence, two layers:
+    //     Layer 1 — content-gate (deterministic, permanent: published posts,
+    //     open PRs, crawled site pages). The 60-day blocklist above is a
+    //     cheap pre-filter only; THIS is the authority (a published article
+    //     never stops being a duplicate — 2026-08-01 CTS incident).
+    //     Layer 2 — auditExistingContent (crawl + AI second opinion).
+    //     Failures of either layer don't block generation (.catch → pass).
     let picked: BlogOpportunity | null = null
-    if (client.domain) {
-      for (const candidate of fresh.slice(0, MAX_CONTENT_AUDITS)) {
+    for (const candidate of fresh.slice(0, MAX_CONTENT_AUDITS)) {
+      const gate = await checkContentDuplicate(
+        client.id,
+        { topic: candidate.query_text, primary_keyword: candidate.primary_keyword ?? null },
+        supabase,
+      ).catch(() => null)
+      if (gate?.verdict === 'duplicate') continue
+
+      if (client.domain) {
         const audit = await auditExistingContent(
           client.domain,
           candidate.query_text,
           candidate.query_text,
           client.id,
         ).catch(() => null)
-        if (!audit || audit.action === 'new') {
-          picked = candidate
-          break
-        }
+        if (audit && audit.action !== 'new') continue
       }
-    } else {
-      picked = fresh[0]
+
+      picked = candidate
+      break
     }
 
     if (!picked) {

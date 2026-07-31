@@ -191,6 +191,9 @@ function buildScopedAdminSections(clientId: string): NavSection[] {
       items: [
         { key: 'tailor-made', label: '行程单',   mark: 'TM', href: at('/tailor-made') },
         { key: 'listings',    label: '房子',     mark: 'LI', href: at('/listings') },
+        // 中介在车里 / 开放日现场用手机开的那一页：按房子列人，点一下说清楚他到哪一步。
+        // 放在「客户跟进」前面 —— 他每天开的是这一页，不是内部那张排班表。
+        { key: 'contacts',    label: '我的客人', mark: 'MY', href: at('/contacts') },
         { key: 'crm',         label: '客户跟进', mark: 'CR', href: at('/crm') },
         { key: 'connectors',  label: '数据连接', mark: 'CN', href: at('/connectors') },
       ],
