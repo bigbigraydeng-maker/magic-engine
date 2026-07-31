@@ -122,6 +122,16 @@ export interface LinkConversationInput {
   }[]
   /** conversations.contact_id 现值；非空则已接过，只刷新触点、不重新匹配。 */
   existingContactId: string | null
+  /**
+   * 这批消息带没带 Meta 的 `tags`。默认 true（实时同步从 Graph 直接拿，带）。
+   *
+   * 回补历史对话时是 **false**：`conversation_messages` 表根本没存 tags
+   * （建表时就没这一列），所以分不出「真人客服回的」和「Business AI 自动回的」。
+   * 这种情况下**一条出站触点都不写** —— 宁可让这个人在「今天该联系谁」里多露一次
+   * 面，也不要把机器人问候当成「我们联系过」，把该打的热线索埋掉。
+   * automation.ts 头部已经写明这是两个错里更便宜的那一个。
+   */
+  tagsAvailable?: boolean
 }
 
 export interface LinkConversationResult {
@@ -278,7 +288,8 @@ export async function linkMessengerConversation(
   // 出站只认**真人**回复:Meta 的自动回复(欢迎语/Business AI)不写「我们联系过」，
   // 否则一条机器人问候会把从没人碰过的热新线索顶出「今天该联系谁」名单。
   const lastIn = lastSentAt(input.messages, 'inbound')
-  const lastOut = lastHumanOutboundAt(input.messages)
+  // tags 缺失时一条出站触点都不写（理由见 LinkConversationInput.tagsAvailable）。
+  const lastOut = input.tagsAvailable === false ? null : lastHumanOutboundAt(input.messages)
 
   const rows: Record<string, unknown>[] = []
   if (lastIn) {

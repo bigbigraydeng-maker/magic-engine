@@ -4090,6 +4090,16 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 
 ## 9. 功能完成日志
 
+### 2026-07-31（补挂积压的历史私信对话 [P28]）
+
+**问题**：「按 psid 建人」上线后，PM 拿手机 Business Suite 收件箱核对 —— 8 个人只有当天还在说话的 3 个进了 CRM，昨天聊完的 5 个全在系统外。根因：每小时同步只向 Meta 要「最近有更新的」线程（水位线），早就聊完的老对话永远等不到一次重新处理。CTS 积压 149 条。
+
+**修复**：`src/lib/messenger/backfill.ts` —— 这些对话的正文早就存在 `conversations` + `conversation_messages` 里，补挂**不用再问 Meta 要一次**：读本地表、走同一套 `linkMessengerConversation`，护栏自动适用。挂在每小时同步尾巴上，每轮 50 条自愈式消化，无新 cron、无新密钥、无人工。
+
+**关键正确性坑**：`conversation_messages` **没存 Meta 的 tags**，所以补挂时分不出「真人客服回的」和「Business AI 自动回的」（CTS 收件箱满屏 `FB AI responding`）。照写出站触点 = 把机器人问候当「我们联系过」，热线索直接掉出「今天该联系谁」。故新增 `tagsAvailable` 开关，补挂时**一条出站触点都不写** —— 按 automation.ts 头部写明的取舍，宁可让人多露一次面。
+
+6 个新测试（含该护栏的变异测试），274 个 crm/messenger 测试全过。**无 migration**。
+
 ### 2026-07-30（只在 Facebook 私信聊过的人也进 CRM [P28]）
 
 **问题**：Messenger 对话每小时自动同步（CTS 458 段，活的），但**人进不来** —— 151 段挂不到任何联系人，其中 130 段是有来有回的真人；最近 3 天有新消息的 24 段里 22 段是系统看不见的人。这些人永远不出现在「今天该联系谁」。

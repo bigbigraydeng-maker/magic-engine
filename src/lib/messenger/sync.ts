@@ -14,6 +14,7 @@ import { getMetaTokenForClient, getStoredPageToken } from '@/lib/meta/token-mana
 import { getPageAccessToken } from '@/lib/meta/page-posts'
 import { fetchPageConversations, type MessengerConversation } from '@/lib/meta/conversations'
 import { linkMessengerConversation, loadIdentityIndex } from '@/lib/messenger/link-contacts'
+import { backfillUnlinkedConversations } from '@/lib/messenger/backfill'
 
 export interface MessengerSyncClient {
   id: string
@@ -36,6 +37,14 @@ export interface MessengerSyncResult {
    * actually asks about — "how many new people did Messenger bring in today".
    */
   created: number
+  /**
+   * Contacts created this run by sweeping OLD stored threads that were never
+   * attached to anyone (see lib/messenger/backfill). Separate from `created`,
+   * which only counts threads Meta returned as recently updated.
+   */
+  backfilled: number
+  /** Stored threads still attached to nobody after this run's sweep. */
+  backfillRemaining: number
   skipped?: 'no_page_id' | 'no_meta_token' | 'no_page_token'
   error?: string
 }
@@ -162,6 +171,8 @@ export async function syncClientMessenger(
     messages: 0,
     linked: 0,
     created: 0,
+    backfilled: 0,
+    backfillRemaining: 0,
   }
 
   const pageId = client.facebook_page_id
@@ -227,7 +238,19 @@ export async function syncClientMessenger(
       }
     }
 
-    return { ...base, conversations: conversations.length, messages, linked, created }
+    // 补挂历史：水位线只带回「最近更新过的」线程，早就聊完的老对话永远等不到
+    // 一次重新处理。放在实时同步之后，且复用同一个 index（刚建的人已经在里面）。
+    const sweep = await backfillUnlinkedConversations(client.id, index)
+
+    return {
+      ...base,
+      conversations: conversations.length,
+      messages,
+      linked,
+      created,
+      backfilled: sweep.created,
+      backfillRemaining: sweep.remaining,
+    }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
     console.error(`[messenger/sync] client ${client.id} failed:`, error)
