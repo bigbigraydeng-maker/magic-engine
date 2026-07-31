@@ -139,20 +139,34 @@ async function loadSeoPatrolInput(
 ): Promise<SeoPatrolInput> {
   const locationCode = locationCodeFor(client.semrush_db)
 
-  // Distinct snapshot dates, newest first (need current + one prior).
-  const { data: dates } = await supabase
+  // Latest snapshot date, then the newest date strictly before it. Two point
+  // queries instead of scanning N rows: a row-limit scan breaks once a single
+  // snapshot exceeds the limit (Oztop: 124 rows/snapshot ate a 60-row window,
+  // so priorDate was always null and R3 could never fire).
+  const { data: currentRow } = await supabase
     .from('keyword_snapshots')
     .select('snapshot_date')
     .eq('client_id', client.id)
     .eq('location_code', locationCode)
     .order('snapshot_date', { ascending: false })
-    .limit(60)
+    .limit(1)
+    .maybeSingle()
 
-  const distinctDates = Array.from(
-    new Set(((dates ?? []) as { snapshot_date: string }[]).map((d) => d.snapshot_date)),
-  )
-  const currentDate = distinctDates[0] ?? null
-  const priorDate = distinctDates[1] ?? null
+  const currentDate = (currentRow as { snapshot_date: string } | null)?.snapshot_date ?? null
+
+  let priorDate: string | null = null
+  if (currentDate) {
+    const { data: priorRow } = await supabase
+      .from('keyword_snapshots')
+      .select('snapshot_date')
+      .eq('client_id', client.id)
+      .eq('location_code', locationCode)
+      .lt('snapshot_date', currentDate)
+      .order('snapshot_date', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    priorDate = (priorRow as { snapshot_date: string } | null)?.snapshot_date ?? null
+  }
 
   const currentKeywords = currentDate
     ? await fetchKeywordRows(supabase, client.id, locationCode, currentDate)
@@ -259,18 +273,18 @@ export function findingsToActions(findings: SeoPatrolFinding[]): PriorityAction[
  * leftovers from a prior run) and insert the current set. Already-actioned or
  * dismissed findings are preserved (we only clear status='fresh').
  *
+ * The clear runs even when `findings` is empty: a client whose issues have all
+ * resolved must not keep last week's fresh rows on display.
+ *
  * All findings in `findings` belong to a single client (per-client orchestration).
  */
 async function persistFindings(
   supabase: SupabaseClient,
+  clientId: string,
   findings: SeoPatrolFinding[],
 ): Promise<number> {
-  if (findings.length === 0) return 0
-
-  const clientId = findings[0].clientId
-
-  // Clear prior un-actioned findings so re-running the same day refreshes
-  // rather than accumulating duplicate fresh rows.
+  // Clear prior un-actioned findings so re-running refreshes rather than
+  // accumulating duplicate or stale fresh rows.
   const { error: deleteErr } = await supabase
     .from('seo_patrol_findings')
     .delete()
@@ -280,6 +294,8 @@ async function persistFindings(
   if (deleteErr) {
     throw new Error(`seo_patrol_findings clear failed: ${deleteErr.message}`)
   }
+
+  if (findings.length === 0) return 0
 
   const rows = findings.map((f) => ({
     client_id: f.clientId,
@@ -327,9 +343,10 @@ export async function runSeoPatrolForClient(
     const findings = runSeoPatrolRules(input)
     base.findings_detected = findings.length
 
-    if (findings.length === 0) return base
+    // Runs even with zero findings: clears stale fresh rows from prior days.
+    base.findings_persisted = await persistFindings(supabase, client.id, findings)
 
-    base.findings_persisted = await persistFindings(supabase, findings)
+    if (findings.length === 0) return base
 
     const actions = findingsToActions(findings)
     if (actions.length === 0) return base
