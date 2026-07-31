@@ -7,9 +7,22 @@ import { runRenderGeneration } from '@/lib/factory/render-pipeline'
 import { assembleRenderJob } from '@/lib/factory/render-assemble'
 
 const POLL_MS = Number(process.env.RENDER_WORKER_POLL_MS || '20000')
+const STALE_MIN = Number(process.env.RENDER_WORKER_STALE_MIN || '45')
 
 function log(...a: unknown[]) {
   console.log(new Date().toISOString(), '[render-worker]', ...a)
+}
+
+/** 卡死回收：进程崩/重启/超时会把任务永久留在中间态，没人再碰。超时的标 failed，防死锁。 */
+async function reapStale(): Promise<void> {
+  const cutoff = new Date(Date.now() - STALE_MIN * 60_000).toISOString()
+  const { data } = await supabaseAdmin
+    .from('content_factory_render_jobs')
+    .update({ status: 'failed', error: `卡死回收：超过 ${STALE_MIN} 分钟无进展`, updated_at: new Date().toISOString() })
+    .in('status', ['planning', 'rendering', 'assembling'])
+    .lt('updated_at', cutoff)
+    .select('id')
+  if (data && data.length) log('回收卡死任务', data.length, '条')
 }
 
 /** 领一条排队任务：先读最老的 queued，再用 status 守卫抢占，防多 worker 双领。 */
@@ -47,6 +60,7 @@ async function main(): Promise<void> {
   // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
+      await reapStale()
       const id = await claimNext()
       if (id) {
         try {

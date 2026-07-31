@@ -14,11 +14,12 @@ export async function PATCH(
   try {
     const body = (await req.json().catch(() => ({}))) as { action?: string }
     const status =
-      body.action === 'confirm' ? 'approved'
-      : body.action === 'reject' ? 'rejected'
+      body.action === 'confirm' ? 'approved'    // 选题：确认做 → 建做片任务
+      : body.action === 'reject' ? 'rejected'    // 打回
+      : body.action === 'schedule' ? 'scheduled' // 出片：满意 → 去发布
       : null
     if (!status) {
-      return NextResponse.json({ error: "action 必须是 'confirm' 或 'reject'" }, { status: 400 })
+      return NextResponse.json({ error: "action 必须是 'confirm' / 'reject' / 'schedule'" }, { status: 400 })
     }
 
     const { data, error } = await supabaseAdmin

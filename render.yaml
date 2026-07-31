@@ -706,5 +706,7 @@ services:
         sync: false
       - key: MUAPI_API_KEY
         sync: false
+      - key: CF_AIG_TOKEN
+        sync: false
       - key: FACTORY_CJK_FONT
         value: /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc

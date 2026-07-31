@@ -17,6 +17,9 @@ export interface ScenePlan {
   scenes: Scene[]
 }
 
+// 成本硬顶：每段 i2v+配音都花钱，模型抽风返一堆段时截断，防烧钱。
+const MAX_SCENES = 8
+
 const SYSTEM = `你是短视频"分镜师"。把一条口播逐字稿切成 4-6 段镜头，每段给旁白、屏幕字幕、画面、运镜。
 
 铁律（违反即失败）：
@@ -73,5 +76,7 @@ export async function planScenes(params: {
   })).filter((s) => s.voText.length > 0)
 
   if (scenes.length === 0) throw new Error('scene plan produced only empty scenes')
-  return { scenes }
+  // 截断到上限并重排 index（防烧钱）
+  const capped = scenes.slice(0, MAX_SCENES).map((s, i) => ({ ...s, index: i }))
+  return { scenes: capped }
 }

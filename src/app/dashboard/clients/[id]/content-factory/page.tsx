@@ -14,8 +14,8 @@ type Stage = (typeof STAGES)[number]
 
 const STAGE_META: Record<Stage, { hint: string; empty: string }> = {
   选题: { hint: '待确认的选题方向', empty: '还没有选题 — 有新方向会出现在这里' },
-  备料: { hint: '已确认，准备素材中', empty: '没有待备料的 — 选题定了会进这一列' },
-  出片: { hint: '素材齐了，正在做片', empty: '还没有在做的片 — 素材齐了会自动进来' },
+  备料: { hint: '已确认 · 做片中（约15-30分钟）', empty: '没有在做的 — 确认选题后会进这一列做片' },
+  出片: { hint: '片子做好了 · 待你审', empty: '还没有做好的片 — 做片完成会自动进来' },
   发布: { hint: '做好了，等发布 / 已排期', empty: '没有待发布的 — 做好的片会排到这里' },
   看表现: { hint: '已发布，看数据', empty: '还没有发布的内容 — 发出去后来这看表现' },
 }
@@ -34,7 +34,6 @@ interface Card {
   hook: string
   script: string
   pillar: string
-  source: string
   visualBrief: string
 }
 
@@ -79,6 +78,7 @@ export default function ContentFactoryBoardPage() {
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Card | null>(null)
   const [acting, setActing] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!clientId) { setLoading(false); return }
@@ -96,7 +96,7 @@ export default function ContentFactoryBoardPage() {
 
   useEffect(() => { void load() }, [load])
 
-  async function act(action: 'confirm' | 'reject') {
+  async function act(action: 'confirm' | 'reject' | 'schedule') {
     if (!selected || !clientId) return
     setActing(true)
     try {
@@ -105,8 +105,18 @@ export default function ContentFactoryBoardPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
       })
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`)
+      const data = (await r.json().catch(() => ({}))) as { error?: string; render?: { error?: string } }
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`)
       setSelected(null)
+      setError(null)
+      // 给运营一句能安心的反馈（做片要 15-30 分钟，别让人以为丢了）
+      if (action === 'confirm') {
+        setNotice(data.render?.error
+          ? `已确认，但建做片任务失败：${data.render.error}（可再点一次确认重试）`
+          : '已确认 · 正在做片，约 15-30 分钟后会出现在「出片」列')
+      } else if (action === 'schedule') {
+        setNotice('已通过 · 已进「发布」列')
+      }
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -132,6 +142,12 @@ export default function ContentFactoryBoardPage() {
       {error && (
         <div className="text-sm text-status-rej bg-me-ivory border border-me-stone rounded-2xl p-3 mb-3">
           {error}
+        </div>
+      )}
+      {notice && (
+        <div className="flex items-start gap-2 text-sm text-me-charcoal bg-me-ivory border border-me-stone rounded-2xl p-3 mb-3">
+          <span className="flex-1">{notice}</span>
+          <button className="text-me-taupe text-xs" onClick={() => setNotice(null)}>✕</button>
         </div>
       )}
 
@@ -166,6 +182,11 @@ export default function ContentFactoryBoardPage() {
                         <span className={`mt-1 w-1.5 h-1.5 rounded-full flex-none ${dotClass(c.status)}`} />
                         <span className="text-[13px] font-medium leading-snug">{c.title}</span>
                       </div>
+                      {c.status === 'approved' && !c.hasVideo && (
+                        <div className="inline-flex items-center gap-1 text-[10px] text-me-ochre bg-me-ivory border border-me-stone rounded px-1.5 py-0.5 mb-1.5">
+                          <span className="animate-pulse">⏳</span> 制作中
+                        </div>
+                      )}
                       {c.hook && <div className="text-[11px] text-me-taupe leading-snug mb-1.5 line-clamp-2">{c.hook}</div>}
                       <div className="flex flex-wrap items-center gap-1">
                         {(c.platforms ?? []).map((p) => (
@@ -236,7 +257,6 @@ export default function ContentFactoryBoardPage() {
 
             <div className="flex flex-wrap gap-3 text-[11px] text-me-taupe mb-4">
               {(selected.platforms ?? []).map((p) => <span key={p}>{PLATFORM_LABEL[p] ?? p}</span>)}
-              {selected.source && <span>· {selected.source}</span>}
             </div>
 
             {/* 选题段：确认 / 打回 */}
@@ -255,6 +275,26 @@ export default function ContentFactoryBoardPage() {
                   className="text-sm text-status-rej border border-me-stone rounded-xl px-4 disabled:opacity-50"
                 >
                   打回
+                </button>
+              </div>
+            )}
+
+            {/* 出片段：满意去发布 / 打回重做 */}
+            {selected.stage === '出片' && (
+              <div className="flex gap-2 sticky bottom-0 bg-white pt-3 border-t border-me-stone">
+                <button
+                  disabled={acting}
+                  onClick={() => act('schedule')}
+                  className="flex-1 text-sm font-semibold text-white bg-status-track rounded-xl py-2.5 disabled:opacity-50"
+                >
+                  {acting ? '处理中…' : '满意 · 去发布'}
+                </button>
+                <button
+                  disabled={acting}
+                  onClick={() => act('reject')}
+                  className="text-sm text-status-rej border border-me-stone rounded-xl px-4 disabled:opacity-50"
+                >
+                  打回重做
                 </button>
               </div>
             )}

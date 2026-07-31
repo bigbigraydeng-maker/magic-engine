@@ -51,7 +51,6 @@ export async function GET(
         hook: p.caption ?? '',
         script: p.script ?? '',
         pillar: p.pillar_id ?? '',
-        source: p.source ?? '',
         visualBrief: p.visual_brief ?? '',
       })
     }
