@@ -221,11 +221,14 @@ export class JobRunner {
     const cutoffDate = new Date()
     cutoffDate.setDate(cutoffDate.getDate() - retentionDays)
 
+    // NOTE: .neq('completed_at', null) serialises to the literal string "null"
+    // and Postgres rejects it as a timestamptz — it failed this cron for weeks.
+    // NULL rows are already excluded by the .lt() comparison semantics.
     const { data, error } = await this.supabase
       .from('site_audit_jobs')
       .delete()
       .lt('completed_at', cutoffDate.toISOString())
-      .neq('completed_at', null)
+      .not('completed_at', 'is', null)
       .select('id')
 
     if (error) throw new Error(`Failed to cleanup jobs: ${error.message}`)

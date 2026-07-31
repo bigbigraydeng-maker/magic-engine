@@ -852,12 +852,12 @@ describe('JobRunner', () => {
         error: null,
       })
 
-      const mockNeq = vi.fn().mockReturnValue({
+      const mockNot = vi.fn().mockReturnValue({
         select: mockSelect,
       })
 
       const mockLt = vi.fn().mockReturnValue({
-        neq: mockNeq,
+        not: mockNot,
       })
 
       const mockDelete = vi.fn().mockReturnValue({
@@ -871,7 +871,9 @@ describe('JobRunner', () => {
       const result = await jobRunner.cleanupOldJobs(30)
 
       expect(result).toBe(2)
-      expect(mockNeq).toHaveBeenCalledWith('completed_at', null)
+      // .neq('completed_at', null) was the original bug: PostgREST serialises
+      // it to the string "null" and Postgres rejects the timestamptz cast.
+      expect(mockNot).toHaveBeenCalledWith('completed_at', 'is', null)
     })
 
     it('should return 0 when no jobs to cleanup', async () => {
@@ -880,12 +882,12 @@ describe('JobRunner', () => {
         error: null,
       })
 
-      const mockNeq = vi.fn().mockReturnValue({
+      const mockNot = vi.fn().mockReturnValue({
         select: mockSelect,
       })
 
       const mockLt = vi.fn().mockReturnValue({
-        neq: mockNeq,
+        not: mockNot,
       })
 
       const mockDelete = vi.fn().mockReturnValue({
@@ -917,12 +919,12 @@ describe('JobRunner', () => {
         error: { message: 'Delete failed' },
       })
 
-      const mockNeq = vi.fn().mockReturnValue({
+      const mockNot = vi.fn().mockReturnValue({
         select: mockSelect,
       })
 
       const mockLt = vi.fn().mockReturnValue({
-        neq: mockNeq,
+        not: mockNot,
       })
 
       const mockDelete = vi.fn().mockReturnValue({
