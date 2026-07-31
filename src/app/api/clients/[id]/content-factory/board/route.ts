@@ -59,7 +59,10 @@ export async function GET(
       FACTORY_STAGES.map((s) => [s, stages[s].length]),
     ) as Record<FactoryStage, number>
 
-    return NextResponse.json({ stages, counts })
+    // 看板是每客户实时数据，绝不能被边缘/浏览器缓存(否则新写入的选题/成片看不到)。
+    return NextResponse.json({ stages, counts }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate', 'CDN-Cache-Control': 'no-store' },
+    })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return NextResponse.json({ error: message }, { status: 500 })
