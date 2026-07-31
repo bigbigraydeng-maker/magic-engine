@@ -679,6 +679,7 @@ export default function ClientDetailPage() {
               {/* 客户消息不是"诊断",但它跟诊断一样是每天要开的页;放生产区会被
                   一堆内容工具淹掉,所以放在诊断与分析区首位 —— 销售一进客户页就看到。 */}
               {/* 销售每天第一件事就是开这一页,放在诊断区最前面。 */}
+              <ToolCard href={`/dashboard/clients/${clientId}/contacts`}          title="我的客人"       desc="手机上按房子列人 · 点一下说清楚他到哪一步了（中介自己用）"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/crm`}                title="今天该联系谁"   desc="全渠道接触记录自动排序 · 说过别再联系的已挡在名单外"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/crm/all`}            title="全部客人"       desc="一张表看全部客人 · 点开看往来记录、记一笔、改跟进阶段"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/messenger`}          title="客户消息"       desc="Facebook 私信 · AI 写好需求卡和回复草稿 · 你按发送"  badge="in_house" />
