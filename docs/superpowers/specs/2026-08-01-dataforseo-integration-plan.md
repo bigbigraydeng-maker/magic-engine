@@ -1,7 +1,7 @@
-# DataForSEO 接入计划 · 数据地基扩容 · 分阶段 spec v0.2
+# DataForSEO 接入计划 · 数据地基扩容 · 分阶段 spec v0.3
 
-> 起草:子牙 · v0.1 2026-08-01 · **v0.2 2026-08-01(魏征审后修订)**
-> 审查沿革:v0.1 → 魏征挑刺 **needs_rework**(5 必修:抓取/成本口径矛盾、标准队列迁移路线被自家脚注推翻、"死表"其实月报在读、竞品占位抓了没落表、前后数字打架)→ v0.2 全部吸收
+> 起草:子牙 · v0.1 2026-08-01 · v0.2 2026-08-01(魏征审后修订) · **v0.3 2026-08-01(PM 提出真客户/调研区分 → 新增阶段 0)**
+> 审查沿革:v0.1 → 魏征挑刺 **needs_rework**(5 必修:抓取/成本口径矛盾、标准队列迁移路线被自家脚注推翻、"死表"其实月报在读、竞品占位抓了没落表、前后数字打架)→ v0.2 全部吸收 → v0.3 补阶段 0(真客户闸门)
 > 对外大白话名:**「Keyword Intelligence」**(封装名,UI/报告/客户交付物禁止出现 DataForSEO 真名)
 > 状态:spec · 未实现任何代码 / 表 / cron
 > 数据来源声明:全部单价来自 DataForSEO 官方计价页(逐条附 URL);仓库/数据库事实来自 2026-08-01 只读盘点(魏征抽查 13 处全验);**无一个数字是编的**,标注「上限假设」处除外
@@ -90,6 +90,22 @@ env:`DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD`(Render 已配,`render.yaml:58,60`
 
 ## 4. 分阶段接入安排
 
+### 阶段 0 · 真客户闸门(前置,PM 2026-08-01 提出,不花 API 钱)
+
+**问题(PM 陈述 + 库中证实)**:`clients` 表 25 行里**只有 5 家是真客户**——CTS、Oztop、Roman Hu、30 Kiteroa(Roman 销售的楼盘)、Parkhomes(开发商,Roman 负责销售,ME 负责整体推广)。其余是 PM 在后台跑 Discovery 产生的**潜在客户/调研档案**(后台建档的原因:前台 Discovery 表格不够完整)。表里没有任何字段区分两者,现有 cron 选客户条件是 `domain IS NOT NULL`——**今天每周排名快照已在给 14 家跑,其中 9 家是调研壳子,钱和算力一直在白烧**,新计划若不设闸门会把浪费放大四倍。
+
+**做什么**:
+1. `clients` 加 `client_status` 字段(`active` 真客户 / `prospect` 调研·默认值 / `archived`)——migration,**必 PM go apply**
+2. Settings 页加状态开关(强约束:配置必带 UI,PM 不碰数据库)
+3. **所有周期性监测 cron(含现有 keyword-snapshots-weekly / ai-tracker-weekly,以及本计划阶段 1-4 全部新 cron)选客户条件统一改为 `client_status = 'active'`**;张骞 Discovery / prospecting 的一次性调用**不受影响**(它们本来就该对调研档案跑)
+4. 数据回填:5 家真客户标 `active`,其余标 `prospect`。⚠️ Parkhomes 库里有**重复建档两条**(memory 已记),标记前先并档,防止两条都进监测
+
+**喂给谁**:所有监测 cron 的成本闸门 + 后台客户列表可按状态过滤(真客户/调研分开看)。
+
+**月成本**:0(纯工程,反而立刻省下现有 cron 里 9 家壳子的白烧)。
+
+---
+
 ### 阶段 1 · SERP 深挖:把已经付钱买到的数据捡回来(AI 可见度 + SEO + 竞品支柱,D/A 段)
 
 **接什么**:每周对**全部追踪关键词(≈1,135 词,即 keyword_snapshots 全量口径;按 keyword+location_code 去重)**跑一次 SERP API organic Live advanced,把结果里**本来就自带**的三样东西落库:
@@ -171,6 +187,7 @@ env:`DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD`(Render 已配,`render.yaml:58,60`
 
 | 阶段 | 月增成本(Live 档,与 §3/§4 同一套数) |
 |---|---|
+| 0 真客户闸门 | 0(反而省现有 cron 的白烧) |
 | 1 SERP 深挖 | US$9.8 |
 | 2 口碑监测 | US$1.5(上限假设) |
 | 3 外链周报 | US$6.5(明细拉满时 14) |
@@ -178,6 +195,14 @@ env:`DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD`(Render 已配,`render.yaml:58,60`
 | **合计** | **≈US$19/月;全部上限情形(外链明细拉满 + 阶段 1 开异步 AI Overview 参数再 +$9.8)≈US$33** |
 
 **给 PM 的一句话:每月大约多花 20 美金、封顶 30 出头,是当年白烧那个 cron(US$360/月)的零头。**
+
+> ⚠️ 上表按库里全部客户量算,是**上限**。阶段 0 落地后所有监测只对 5 家真客户跑,真实账单显著低于此数(阶段 1 的 1,135 词里含 9 家调研壳子的词,过滤后自然缩水)。
+
+---
+
+## 5.1 spec 版本沿革
+
+- **v0.2 → v0.3(2026-08-01)**:PM 指出 clients 表混着真客户和 Discovery 调研档案 → 新增**阶段 0 真客户闸门**(client_status 字段 + Settings UI + 全部监测 cron 过滤),并确认真客户名单 5 家;总账标注为上限口径。
 
 ---
 
