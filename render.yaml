@@ -685,3 +685,26 @@ services:
     envVars:
       - key: CRON_SECRET
         sync: false
+
+  # 做片拼片 worker — 常驻容器(node+python-PIL+ffmpeg)轮询 content_factory_render_jobs，
+  # 领排队任务 → 分镜 → 画面(gpt-image+Muapi i2v) → 配音(MiniMax) → ffmpeg 拼竖屏成片 → 标待审。
+  # 独立服务的原因：单条 i2v/拼接跑 15-30 分钟，塞不进 web 请求。
+  # ⚠️ 部署后需在 Render 填 sync:false 密钥；首跑验证中文字体(NotoSansCJK ttc)PIL 能读。
+  - type: worker
+    name: content-factory-render-worker
+    env: docker
+    dockerfilePath: ./scripts/render-worker/Dockerfile
+    plan: starter
+    envVars:
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: MUAPI_API_KEY
+        sync: false
+      - key: FACTORY_CJK_FONT
+        value: /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
