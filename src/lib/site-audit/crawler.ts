@@ -49,6 +49,16 @@ export const DEFAULT_LIMIT = 100
 export const DEFAULT_TIMEOUT = 10_000
 export const DEFAULT_RATE_LIMIT_MS = 1_000
 export const MAX_BFS_LINKS = 50
+/**
+ * Direct-fetch discovery yielding fewer URLs than this is treated as suspicious
+ * (WAF challenge pages often contain exactly one same-domain link) and we
+ * escalate to Jina-proxied discovery instead of returning early.
+ * 2026-08-01 Oztop incident: SiteGround blocks Render IPs; the challenge page
+ * yielded 1 URL and the crawler never reached the Jina levels.
+ */
+export const MIN_DISCOVERED_URLS = 2
+/** Spacing between Jina child-sitemap fetches (anonymous tier ≈ 20 RPM). */
+export const JINA_SITEMAP_DELAY_MS = 3_500
 
 // ---------------------------------------------------------------------------
 // Internal helpers (exported for unit testing)
@@ -203,14 +213,27 @@ export function delay(ms: number): Promise<void> {
  *   1. /sitemap.xml (direct fetch)
  *   2. /sitemap_index.xml (direct fetch)
  *   4. BFS homepage link extraction (direct fetch, max 50 links)
- *   5a. Jina Reader fetch of /sitemap.xml — bypasses WAF/bot-blocking
+ *   5a. Jina Reader raw fetch of /sitemap.xml + /sitemap_index.xml — bypasses
+ *       WAF/bot-blocking (Jina's IPs, not Render's) and recurses into child
+ *       sitemaps
  *   5b. Jina Reader fetch of homepage — extracts links from markdown
+ *
+ * Direct levels (0-4) yielding fewer than MIN_DISCOVERED_URLS results are
+ * treated as suspicious (likely a WAF challenge page) and discovery escalates
+ * to the Jina levels instead of returning early. The best direct result is
+ * kept as a fallback if Jina finds nothing better.
  *
  * Returns unique, same-domain URLs only.
  * Returns [] if robots.txt fully blocks crawling (and logs a warning).
  */
 export async function discoverSitemapUrls(domain: string): Promise<string[]> {
   const origin = normaliseDomain(domain)
+  let best: string[] = []
+  const keepOrEscalate = (urls: string[]): string[] | null => {
+    if (urls.length >= MIN_DISCOVERED_URLS) return urls
+    if (urls.length > best.length) best = urls
+    return null
+  }
 
   // Check robots.txt first for crawl permission
   try {
@@ -224,10 +247,8 @@ export async function discoverSitemapUrls(domain: string): Promise<string[]> {
       // Try sitemap directives from robots.txt
       const directives = parseSitemapDirectives(robotsTxt)
       if (directives.length > 0) {
-        const urls = await resolveSitemapUrls(directives, origin)
-        if (urls.length > 0) {
-          return dedupeAndFilter(urls, origin)
-        }
+        const urls = keepOrEscalate(dedupeAndFilter(await resolveSitemapUrls(directives, origin), origin))
+        if (urls) return urls
       }
     }
   } catch {
@@ -239,10 +260,8 @@ export async function discoverSitemapUrls(domain: string): Promise<string[]> {
     const res = await fetch(`${origin}/sitemap.xml`)
     if (res.ok) {
       const xml = await res.text()
-      const locs = parseLocsFromXml(xml)
-      if (locs.length > 0) {
-        return dedupeAndFilter(locs, origin)
-      }
+      const urls = keepOrEscalate(dedupeAndFilter(parseLocsFromXml(xml), origin))
+      if (urls) return urls
     }
   } catch {
     // fall through
@@ -267,9 +286,8 @@ export async function discoverSitemapUrls(domain: string): Promise<string[]> {
           // skip unreachable child sitemap
         }
       }
-      if (allLocs.length > 0) {
-        return dedupeAndFilter(allLocs, origin)
-      }
+      const urls = keepOrEscalate(dedupeAndFilter(allLocs, origin))
+      if (urls) return urls
     }
   } catch {
     // fall through
@@ -280,27 +298,30 @@ export async function discoverSitemapUrls(domain: string): Promise<string[]> {
     const res = await fetch(origin)
     if (res.ok) {
       const html = await res.text()
-      const links = extractSameDomainLinks(html, origin, MAX_BFS_LINKS)
-      if (links.length > 0) return links
+      const urls = keepOrEscalate(extractSameDomainLinks(html, origin, MAX_BFS_LINKS))
+      if (urls) return urls
     }
   } catch {
     // fall through to Level 5
   }
 
-  // Level 5a: Jina Reader — fetch sitemap.xml bypassing WAF
-  // Jina proxies the request; the raw XML is preserved in the markdown response.
-  try {
-    const { fetchUrlAsMarkdown } = await import('../brief/jina')
-    const jinaXml = await fetchUrlAsMarkdown(`${origin}/sitemap.xml`)
-    if (jinaXml.markdown) {
-      const locs = parseLocsFromXml(jinaXml.markdown)
-      if (locs.length > 0) {
-        console.info(`[crawler] Level 5a Jina sitemap found ${locs.length} URLs for ${origin}`)
-        return dedupeAndFilter(locs, origin)
+  // Level 5a: Jina Reader — fetch sitemap(s) bypassing WAF. Jina's render
+  // pipeline passes challenge redirects (SiteGround sgcaptcha) that direct
+  // fetch is stuck on; sitemap URLs are recovered from the rendered output
+  // by fetchSitemapPagesViaJina (<loc> tags or bare/markdown links). The old
+  // implementation only looked for <loc> in markdown output — dead code.
+  for (const path of ['/sitemap.xml', '/sitemap_index.xml']) {
+    try {
+      const locs = await fetchSitemapPagesViaJina(`${origin}${path}`, 0)
+      const urls = dedupeAndFilter(locs, origin)
+      if (urls.length > 0) {
+        console.info(`[crawler] Level 5a Jina sitemap (${path}) found ${urls.length} URLs for ${origin}`)
+        if (urls.length >= MIN_DISCOVERED_URLS) return urls
+        if (urls.length > best.length) best = urls
       }
+    } catch {
+      // fall through
     }
-  } catch {
-    // fall through to Level 5b
   }
 
   // Level 5b: Jina Reader — fetch homepage and extract same-origin links from markdown
@@ -309,16 +330,74 @@ export async function discoverSitemapUrls(domain: string): Promise<string[]> {
     const jinaResult = await fetchUrlAsMarkdown(origin)
     if (jinaResult.markdown) {
       const links = extractMarkdownLinks(jinaResult.markdown, origin, MAX_BFS_LINKS)
-      if (links.length > 0) {
+      if (links.length >= MIN_DISCOVERED_URLS) {
         console.info(`[crawler] Level 5b Jina homepage found ${links.length} URLs for ${origin}`)
         return links
       }
+      if (links.length > best.length) best = links
     }
   } catch {
     // nothing more to try
   }
 
-  return []
+  return best
+}
+
+/**
+ * Recursively fetch page URLs from a sitemap (or sitemap index) via Jina
+ * Reader, so WAF-blocked domains resolve through Jina's IPs. Child sitemaps
+ * (any same-request .xml locs) are recursed into with rate-limit spacing.
+ * Exported for unit testing — production callers go through discoverSitemapUrls.
+ */
+export async function fetchSitemapPagesViaJina(
+  url: string,
+  depth: number,
+  delayMs: number = JINA_SITEMAP_DELAY_MS,
+  visited: Set<string> = new Set()
+): Promise<string[]> {
+  if (depth >= MAX_SITEMAP_DEPTH || visited.has(url)) return []
+  visited.add(url)
+  const { fetchUrlRaw } = await import('../brief/jina')
+  const raw = await fetchUrlRaw(url)
+
+  let locs = parseLocsFromXml(raw)
+  if (locs.length === 0) {
+    // Jina's markdown output has no <loc> tags — recover bare/markdown-link URLs
+    locs = extractBareUrls(raw)
+  }
+
+  const isSitemapUrl = (u: string) => /\.xml(\?[^#]*)?$/i.test(u)
+  const pages = locs.filter(u => !isSitemapUrl(u))
+  // visited guards self-references: Jina's "URL Source:" header repeats the
+  // fetched .xml URL, which would otherwise recurse into itself every level
+  const children = locs.filter(u => isSitemapUrl(u) && !visited.has(u))
+
+  const all = [...pages]
+  for (const child of children) {
+    if (visited.has(child)) continue
+    try {
+      if (delayMs > 0) await delay(delayMs)
+      all.push(...(await fetchSitemapPagesViaJina(child, depth + 1, delayMs, visited)))
+    } catch {
+      // skip unreachable child sitemap
+    }
+  }
+  return all
+}
+
+/**
+ * Extract every bare http(s) URL from a text blob (no same-origin filtering —
+ * callers run the result through dedupeAndFilter). Used when Jina renders a
+ * sitemap without its XML tags.
+ */
+export function extractBareUrls(text: string): string[] {
+  const seen = new Set<string>()
+  const re = /https?:\/\/[^\s"'<>)\]]+/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    seen.add(m[0])
+  }
+  return Array.from(seen)
 }
 
 /**
