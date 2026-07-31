@@ -31,6 +31,7 @@ import {
 } from '@/lib/meta/client'
 import { checkBudgetWithinSafeRange } from '@/lib/meta/guardrails'
 import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
+import { resolveAndLogAdsExpectedMetric } from '@/lib/flywheel/ads-expected-metric'
 
 const SUPPORTED_ACTION_TYPES = new Set([
   ADS_ACTION_TYPE.PAUSE_CAMPAIGN,
@@ -111,6 +112,16 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     name:         beforeDetails.name,
     daily_budget: beforeDetails.daily_budget ?? null,
   }
+
+  // Resolve the outcome metric from the campaign's own objective BEFORE
+  // touching Meta, so a resolver problem can never leave an executed change
+  // without an audit row. A sales campaign is graded on ROAS, a Messenger
+  // campaign on cost per conversation — the old code promised nothing at all,
+  // which is why every action here produced zero outcomes.
+  const expectedMetric = resolveAndLogAdsExpectedMetric(
+    { objective: beforeDetails.objective },
+    'meta-ads/execute',
+  )
 
   // ── Execute action ────────────────────────────────────────────────────────
   let after: typeof before
@@ -219,6 +230,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
         after,
         ...(guardMarker ? { force_pause_guard: guardMarker } : {}),
       },
+      expected_metric: expectedMetric,
     })
     .select('id, executed_at')
     .single()

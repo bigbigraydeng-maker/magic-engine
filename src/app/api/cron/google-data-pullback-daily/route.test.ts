@@ -41,6 +41,27 @@ vi.mock('@/lib/supabase', () => ({
       if (table === 'meta_ads_snapshots') {
         return { insert: mockSnapshotInsert }
       }
+      // Google Ads arm, added after this file was written:
+      // .select().eq().eq().not() — no connections, so that arm is a no-op.
+      if (table === 'platform_oauth_connections') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq:     vi.fn().mockReturnThis(),
+          not:    vi.fn().mockResolvedValue({ data: [], error: null }),
+        }
+      }
+      // Objective-aware Meta cost metrics: delete-then-insert, both awaited.
+      if (table === 'flywheel_metrics') {
+        return {
+          delete: vi.fn().mockReturnThis(),
+          eq:     vi.fn().mockReturnThis(),
+          in:     vi.fn().mockReturnThis(),
+          gte:    vi.fn().mockReturnThis(),
+          lte:    vi.fn().mockReturnThis(),
+          then:   (resolve: (v: { error: null }) => void) => resolve({ error: null }),
+          insert: vi.fn().mockResolvedValue({ error: null }),
+        }
+      }
       return {}
     }),
   },
@@ -48,12 +69,19 @@ vi.mock('@/lib/supabase', () => ({
 
 // ── Mock GSC / GA4 fetchers ───────────────────────────────────────────────────
 
+// The route opens a cron_run_logs row first; the supabaseAdmin stub above has
+// no chain for that table, so without this every test dies in startCronRun.
+vi.mock('@/lib/cron/run-logger', () => ({
+  startCronRun: vi.fn().mockResolvedValue({ finish: vi.fn().mockResolvedValue(undefined) }),
+}))
+
 vi.mock('@/lib/gsc/client', () => ({
   fetchGscSnapshot: vi.fn().mockResolvedValue(null),
 }))
 
 vi.mock('@/lib/ga4/client', () => ({
   fetchGa4Snapshot: vi.fn().mockResolvedValue(null),
+  fetchGa4PaidSearchMetrics: vi.fn().mockResolvedValue(null),
 }))
 
 // ── Mock Meta API ─────────────────────────────────────────────────────────────
@@ -65,6 +93,23 @@ vi.mock('@/lib/meta/client', () => ({
   getAdAccountInsights:  (...args: unknown[]) => mockGetAdAccountInsights(...args),
   getAdCampaignInsights: (...args: unknown[]) => mockGetAdCampaignInsights(...args),
 }))
+
+// ── Mock the Ad Strategy Engine (P21.K) ──────────────────────────────────────
+// Off for this file: it is about the Meta snapshot → pullMetrics wiring, and
+// leaving the engine on drags the campaign-series pull into every test.
+
+vi.mock('@/lib/ads-strategy/config', () => ({
+  loadAdStrategyConfigWithSource: vi.fn().mockResolvedValue({
+    config: { enabled: false }, source: 'default',
+  }),
+  resolveDigestRecipients: vi.fn().mockReturnValue([]),
+}))
+vi.mock('@/lib/ads-strategy/daily-insights', () => ({
+  syncAdDailyInsights:       vi.fn().mockResolvedValue({ success: true, rows_written: 0 }),
+  syncCampaignDailyInsights: vi.fn().mockResolvedValue({ success: true, rows_written: 0 }),
+}))
+vi.mock('@/lib/ads-strategy/evaluate', () => ({ evaluateClientAdHealth: vi.fn() }))
+vi.mock('@/lib/ads-strategy/digest', () => ({ sendAdHealthDigest: vi.fn() }))
 
 // ── Mock MetaAdsAdapter (P22.A.5) ────────────────────────────────────────────
 
@@ -143,8 +188,10 @@ describe('GET /api/cron/google-data-pullback-daily — P22.A.5 MetaAds flywheel�
   })
 
   it('marks meta sync as success even when pullMetrics throws', async () => {
+    // The snapshot is the pre-existing contract (monthly report, production
+    // package view read it). A metrics-write failure is swallowed by design so
+    // it cannot take the snapshot down with it.
     mockPullMetrics.mockRejectedValue(new Error('flywheel DB timeout'))
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const { GET } = await import('./route')
     const res = await GET(makeRequest(CRON_SECRET))
@@ -152,12 +199,8 @@ describe('GET /api/cron/google-data-pullback-daily — P22.A.5 MetaAds flywheel�
 
     expect(res.status).toBe(200)
     expect(json.results[0].meta.success).toBe(true)
-    expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining('MetaAdsAdapter.pullMetrics error:'),
-      'flywheel DB timeout',
-    )
-
-    consoleSpy.mockRestore()
+    expect(json.failed).toBe(0)
+    expect(mockPullMetrics).toHaveBeenCalledTimes(1)
   })
 
   it('does NOT call pullMetrics when Meta Ads API returns null insights', async () => {

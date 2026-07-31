@@ -28,6 +28,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ZhugeOutput, PriorityAction, DiagnosticDimension } from './types'
 import type { FlywheelName, ExecutionMode } from '@/lib/flywheel/adapters/types'
 import { saveDecisionHistory } from '@/lib/memory/service'
+import { assertAdsExpectedMetric } from '@/lib/flywheel/metric-registry'
+import { resolveClientAdsExpectedMetric } from '@/lib/flywheel/ads-expected-metric'
 
 // ── Dimension mappings ────────────────────────────────────────────────────────
 
@@ -39,10 +41,12 @@ const DIMENSION_TO_FLYWHEEL: Partial<Record<DiagnosticDimension, FlywheelName>> 
   // reputation + competitor: external_manual, no flywheel ingest
 }
 
+// `ads` is deliberately absent: it has no fixed answer. Which metric an ads
+// action is judged on depends on what the client's campaigns actually produce,
+// so it is resolved per client by resolveClientAdsExpectedMetric().
 const DIMENSION_TO_METRIC: Partial<Record<DiagnosticDimension, string>> = {
   seo: 'seo.domain.organic_traffic',
   ai_visibility: 'geo.query.mention_rate',
-  ads: 'ads.account.roas',
   social: 'social.posts.published_count',
 }
 
@@ -205,7 +209,18 @@ export async function persistZhugeActions(
   let ids: string[] = []
 
   if (insertable.length > 0) {
-    const rows = insertable.map((action) => buildRow(action, input.clientId, sessionKey, input))
+    // Ads actions get the metric this client is actually measured on, resolved
+    // once for the batch. The old hard-coded `ads.account.roas` was a promise
+    // no Messenger / lead-gen client could ever redeem, so every ads action
+    // written here was unattributable from birth.
+    const adsExpectedMetric = insertable.some((a) => DIMENSION_TO_FLYWHEEL[a.dimension] === 'ads')
+      ? await resolveClientAdsExpectedMetric(supabase, input.clientId)
+      : null
+    assertAdsExpectedMetric(adsExpectedMetric, 'persistZhugeActions')
+
+    const rows = insertable.map((action) =>
+      buildRow(action, input.clientId, sessionKey, input, adsExpectedMetric),
+    )
 
     const { data: inserted, error: insertError } = await supabase
       .from('flywheel_actions')
@@ -252,6 +267,8 @@ function buildRow(
   clientId: string,
   sessionKey: string,
   input: PersistZhugeActionsInput,
+  /** Client-resolved ads metric; ignored for non-ads dimensions. */
+  adsExpectedMetric: string | null,
 ) {
   return {
     client_id: clientId,
@@ -271,7 +288,9 @@ function buildRow(
       discovery_id: input.discoveryId,
       diagnostic_run_id: input.diagnosticRunId,
     },
-    expected_metric: DIMENSION_TO_METRIC[action.dimension] ?? null,
+    expected_metric: action.dimension === 'ads'
+      ? adsExpectedMetric
+      : DIMENSION_TO_METRIC[action.dimension] ?? null,
     expected_delta: null as number | null,
     executed_at: input.output.generated_at,
   }

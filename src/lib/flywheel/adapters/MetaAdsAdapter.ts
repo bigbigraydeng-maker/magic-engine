@@ -17,6 +17,7 @@
 
 import { supabaseAdmin } from '../../supabase'
 import { isValidAdsActionType, ADS_METRIC_KEY } from '../vocabulary'
+import { assertAdsExpectedMetric } from '../metric-registry'
 import { registerAdapter } from './registry'
 import type {
   ExecuteActionInput,
@@ -35,6 +36,11 @@ export class MetaAdsAdapter implements FlywheelAdapter {
           `Valid values are defined in ADS_ACTION_TYPE (vocabulary.ts).`
       )
     }
+
+    // Reconciliation gate: an action may only promise a metric something
+    // actually pulls. Throws — the row is not written, and the caller hears
+    // about it instead of discovering an empty flywheel months later.
+    assertAdsExpectedMetric(input.expectedMetric, 'MetaAdsAdapter.execute')
 
     const { data, error } = await supabaseAdmin
       .from('flywheel_actions')
