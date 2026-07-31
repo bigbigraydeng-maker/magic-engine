@@ -296,6 +296,28 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (req.headers.get('authorization') !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+
+  // ── Kill switch — PM 2026-07-31「停批量」────────────────────────────────────
+  // 这个 cron 每天跑 61 个域名 × (10 个 SERP depth=100 + Labs + Backlinks)
+  // ≈ US$12/次 × 30 次 = 约 US$360/月，而它产出的 industry_benchmarks 行
+  // 从 2026-05-13 起就没成功写入过（upsert 引用了不存在的 snapshot_date 列，
+  // 错误被吞）。2026-07 更是 1830 次尝试里 1192 次超时，钱照付没结果。
+  //
+  // 默认关闭：Render 上的 cron job 是后台手工建的、不在 render.yaml 里，
+  // 而本仓没有 Render API 凭证，所以在代码层止血是唯一不需要人去点的路径。
+  // 要恢复，在 Render 给 magic-engine 服务加 BASELINE_CRON_ENABLED=true。
+  //
+  // 只挡自动触发。下面的 POST（管理页「▶ Run SEO baselines」按钮）不受影响，
+  // FDE 仍可按需手动跑一次。
+  if (process.env.BASELINE_CRON_ENABLED !== 'true') {
+    console.warn('[baseline cron] skipped — BASELINE_CRON_ENABLED is not "true" (paused 2026-07-31)')
+    return NextResponse.json({
+      success: true,
+      skipped: true,
+      message: 'Baseline collection is paused. Set BASELINE_CRON_ENABLED=true to resume.',
+    })
+  }
+
   // Respond immediately so Cloudflare doesn't 524; collection runs in background
   void runCollection('cron')
   return NextResponse.json(
