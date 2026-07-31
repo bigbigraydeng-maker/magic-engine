@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { enqueueRenderJob } from '@/lib/factory/render-queue'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,7 +32,17 @@ export async function PATCH(
     if (error) throw error
     if (!data) return NextResponse.json({ error: '未找到该内容' }, { status: 404 })
 
-    return NextResponse.json({ post: data })
+    // 确认 = 建做片任务(流水线入口)。best-effort：建任务失败不回滚确认，只回报。
+    let render: { jobId: string | null; created: boolean; reason?: string; error?: string } | undefined
+    if (body.action === 'confirm') {
+      try {
+        render = await enqueueRenderJob({ clientId: params.id, contentPostId: params.postId })
+      } catch (e) {
+        render = { jobId: null, created: false, error: e instanceof Error ? e.message : String(e) }
+      }
+    }
+
+    return NextResponse.json({ post: data, render })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return NextResponse.json({ error: message }, { status: 500 })
