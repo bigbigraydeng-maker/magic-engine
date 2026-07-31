@@ -34,6 +34,7 @@ const ADMIN_SECTIONS: NavSection[] = [
   {
     items: [
       { key: 'overview',  label: 'Overview', mark: 'OV', href: '/dashboard' },
+      { key: 'today',     label: '今日待办', mark: 'TD', href: '/dashboard/today' },
       { key: 'clients',   label: 'Clients',  mark: 'CL', href: '/dashboard/clients' },
     ],
   },
