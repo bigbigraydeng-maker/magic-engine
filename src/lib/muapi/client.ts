@@ -5,6 +5,8 @@
 
 const MUAPI_BASE = 'https://api.muapi.ai/api/v1'
 const POLL_INTERVAL_MS = 4000
+const REQUEST_TIMEOUT_MS = 30000       // 单次 HTTP 超时——防连接挂起绕过整体 deadline
+const MAX_TRANSIENT_POLL_ERRORS = 4    // 轮询容忍的连续瞬时错误数（429/5xx/网络抖动）
 
 function getMuapiKey(): string {
   const key = process.env.MUAPI_API_KEY
@@ -28,6 +30,7 @@ export async function submitMuapi(
     method: 'POST',
     headers: { 'x-api-key': getMuapiKey(), 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   })
   if (!res.ok) {
     throw new Error(`Muapi submit ${model} error ${res.status}: ${await res.text()}`)
@@ -45,18 +48,36 @@ export async function pollMuapiResult(
   timeoutMs = 300000,
 ): Promise<MuapiResult> {
   const deadline = Date.now() + timeoutMs
+  let transientErrors = 0
   while (Date.now() < deadline) {
-    const res = await fetch(`${MUAPI_BASE}/predictions/${requestId}/result`, {
-      headers: { 'x-api-key': getMuapiKey() },
-    })
-    if (!res.ok) {
-      throw new Error(`Muapi poll error ${res.status}: ${await res.text()}`)
-    }
-    const d = (await res.json()) as {
-      status?: string
-      outputs?: unknown
-      error?: string
-      cost?: { amount_usd?: number }
+    let d: { status?: string; outputs?: unknown; error?: string; cost?: { amount_usd?: number } }
+    try {
+      const res = await fetch(`${MUAPI_BASE}/predictions/${requestId}/result`, {
+        headers: { 'x-api-key': getMuapiKey() },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      })
+      // 429/5xx/网络抖动是瞬时的：任务在 Muapi 侧可能还在跑，别一次抖动就判死整单
+      // （否则上层若"重试=再 submit"会二次扣费）。连续多次才放弃。
+      if (res.status === 429 || res.status >= 500) {
+        throw new Error(`Muapi poll transient ${res.status}`)
+      }
+      if (!res.ok) {
+        throw new Error(`Muapi poll error ${res.status}: ${await res.text()}`)
+      }
+      d = (await res.json()) as typeof d
+      transientErrors = 0
+    } catch (e) {
+      const status = (e as { name?: string })?.name
+      const msg = e instanceof Error ? e.message : String(e)
+      // 明确的非瞬时错误（非 429/5xx、非超时/网络）直接抛
+      if (!/transient|timeout|abort|network|fetch failed|ECONN|ETIMEDOUT/i.test(`${status} ${msg}`)) {
+        throw e
+      }
+      if (++transientErrors > MAX_TRANSIENT_POLL_ERRORS) {
+        throw new Error(`Muapi poll gave up after ${transientErrors} transient errors (job ${requestId} may still be running; do NOT blindly re-submit): ${msg}`)
+      }
+      await sleep(POLL_INTERVAL_MS)
+      continue
     }
     const status = d.status ?? 'processing'
     const costUsd = d.cost?.amount_usd
