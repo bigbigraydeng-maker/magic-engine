@@ -17,6 +17,9 @@ import type { IdentityIndex } from '../link-contacts'
 
 const CLIENT = 'client-cts'
 
+/** attachByUniqueFullName 查同名时库里返回什么（默认没有同名的人）。 */
+let nameLookupRows: { id: string; display_name: string | null }[] = []
+
 const emptyIndex = (): IdentityIndex => ({ byEmail: new Map(), byPsid: new Map() })
 
 interface Captured {
@@ -35,6 +38,7 @@ function mockDb(
   remaining = 0,
 ): Captured {
   const captured: Captured = { touchpointRows: [], contactInserts: [], conversationUpdates: 0 }
+  nameLookupRows = []
 
   ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
     if (table === 'conversations') {
@@ -73,7 +77,13 @@ function mockDb(
           captured.contactInserts.push(payload)
           return { select: () => ({ single: () => Promise.resolve({ data: { id: 'person-new' } }) }) }
         },
-        select: () => ({ in: () => ({ order: () => Promise.resolve({ data: [] }) }) }),
+        select: () => ({
+          in: () => ({ order: () => Promise.resolve({ data: [] }) }),
+          // attachByUniqueFullName 的同名查询：默认查不到同名的人，走新建那条路。
+          eq: () => ({
+            ilike: () => ({ limit: async () => ({ data: nameLookupRows, error: null }) }),
+          }),
+        }),
         update: () => ({
           eq: () => ({
             eq: () => ({ lt: () => Promise.resolve({ error: null }) }),
@@ -187,5 +197,20 @@ describe('backfillUnlinkedConversations', () => {
 
     const res = await backfillUnlinkedConversations(CLIENT, emptyIndex())
     expect(res).toEqual({ processed: 0, linked: 0, created: 0, remaining: 0 })
+  })
+})
+
+describe('补挂时也走「唯一全名认亲」', () => {
+  it('老对话的名字唯一命中已有的人 → 挂上去，不再多建一条', async () => {
+    const captured = mockDb(
+      [convo()],
+      [{ direction: 'inbound', body: '你们有长城的团吗', sent_at: '2026-07-30T04:20:00Z' }],
+    )
+    nameLookupRows = [{ id: 'contact-FORM', display_name: 'Susan Storer' }]
+
+    const res = await backfillUnlinkedConversations(CLIENT, emptyIndex())
+
+    expect(res).toMatchObject({ processed: 1, linked: 1, created: 0 })
+    expect(captured.contactInserts).toEqual([]) // 没有多出一条重复记录
   })
 })

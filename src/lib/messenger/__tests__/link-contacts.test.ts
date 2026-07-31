@@ -94,7 +94,13 @@ interface Calls {
   contactInserts: Record<string, unknown>[]
 }
 
+/** attachByUniqueFullName 查同名时，库里返回什么 / 它拿什么名字去查。 */
+let nameLookupRows: { id: string; display_name: string | null }[] = []
+let nameLookupArg: string | null = null
+
 function stubSupabase(): Calls {
+  nameLookupRows = []
+  nameLookupArg = null
   const calls: Calls = {
     conversationsUpdate: 0,
     identityUpserts: [],
@@ -106,6 +112,10 @@ function stubSupabase(): Calls {
   ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
     const chain: Record<string, unknown> = {
       select: () => chain,
+      ilike: (_col: string, value: string) => {
+        nameLookupArg = value
+        return { limit: async () => ({ data: nameLookupRows, error: null }) }
+      },
       eq: () => chain,
       is: () => chain,
       lt: () => chain,
@@ -349,5 +359,94 @@ describe('linkMessengerConversation → segments（真人回复 vs AI 自动回�
     ])
     // lastHumanOut = 09:00，客户最后一条 10:00 更晚 → 客户在等我们（真人）回。
     expect(segment).toBe('replied')
+  })
+})
+
+// ── 唯一全名认亲（2026-07-31 PM 反馈「有大量重名的」后加的第 2 级）─────────────
+//
+// 一个人先填表单（留电话邮箱、没有 psid）、后来又来私信（有 psid、没邮箱），
+// 两边没有共同的键 → 被拆成两条。这一级用「完整姓名 + 全库唯一 + 对方还没 psid」
+// 把 psid 挂到已有的人身上，而不是新建第二条。
+describe('唯一全名认亲', () => {
+  const inbound = [{ direction: 'inbound' as const, body: '想问长城团', sentAt: '2026-07-24T10:00:00+0000' }]
+
+  it('唯一同名、对方还没 Facebook 身份 → 挂上去，不新建', async () => {
+    const calls = stubSupabase()
+    nameLookupRows = [{ id: 'contact-FORM', display_name: 'Robyn Richards' }]
+
+    const res = await linkMessengerConversation(
+      { ...baseInput, psid: 'new_psid', messages: inbound },
+      index({}),
+    )
+
+    expect(res).toMatchObject({ contactId: 'contact-FORM', linked: true, created: false, matchedBy: 'name' })
+    expect(calls.contactsWrite).toBe(0) // 关键：一条新记录都没多出来
+    expect(calls.identityUpserts).toContainEqual(
+      expect.objectContaining({ kind: 'fb_psid', value: 'new_psid', contact_id: 'contact-FORM' }),
+    )
+  })
+
+  it('🔴「Facebook 用户」是占位符，绝不参与认亲（否则 14 个陌生人会互相认成一个）', async () => {
+    const calls = stubSupabase()
+    // 就算库里真有一条同名的，也不许拿这个名字去认。
+    nameLookupRows = [{ id: 'contact-OTHER', display_name: 'Facebook 用户' }]
+
+    const res = await linkMessengerConversation(
+      { ...baseInput, psid: 'new_psid', participantName: 'Facebook 用户', messages: inbound },
+      index({}),
+    )
+
+    expect(res.matchedBy).toBe('created')
+    expect(nameLookupArg).toBeNull() // 压根没去查
+    // 占位符也不当人名存 —— 列表里不会出现一堆一模一样的「人」
+    expect(calls.contactInserts[0].display_name).toBeNull()
+  })
+
+  it('单字名不认（重名概率太高）', async () => {
+    stubSupabase()
+    nameLookupRows = [{ id: 'contact-X', display_name: 'Robyn' }]
+    const res = await linkMessengerConversation(
+      { ...baseInput, psid: 'new_psid', participantName: 'Robyn', messages: inbound },
+      index({}),
+    )
+    expect(res.matchedBy).toBe('created')
+    expect(nameLookupArg).toBeNull()
+  })
+
+  it('撞到两个同名 → 弃权，照旧独立建人', async () => {
+    const calls = stubSupabase()
+    nameLookupRows = [
+      { id: 'contact-1', display_name: 'Robyn Richards' },
+      { id: 'contact-2', display_name: 'Robyn Richards' },
+    ]
+    const res = await linkMessengerConversation(
+      { ...baseInput, psid: 'new_psid', messages: inbound },
+      index({}),
+    )
+    expect(res.matchedBy).toBe('created')
+    expect(calls.contactsWrite).toBe(1)
+  })
+
+  it('同名的那个人身上已经有 Facebook 身份 → 弃权（他是另一个 Messenger 用户，抢不得）', async () => {
+    const calls = stubSupabase()
+    nameLookupRows = [{ id: 'contact-TAKEN', display_name: 'Robyn Richards' }]
+    const res = await linkMessengerConversation(
+      { ...baseInput, psid: 'new_psid', messages: inbound },
+      // 索引里 contact-TAKEN 已经挂着另一个 psid
+      index({ psids: [['some_other_psid', 'contact-TAKEN']] }),
+    )
+    expect(res.matchedBy).toBe('created')
+    expect(calls.contactsWrite).toBe(1)
+  })
+
+  it('身份键能认到的时候不走这一级（psid 命中优先）', async () => {
+    stubSupabase()
+    nameLookupRows = [{ id: 'contact-FORM', display_name: 'Robyn Richards' }]
+    const res = await linkMessengerConversation(
+      { ...baseInput, psid: 'psid_9', messages: inbound },
+      index({ psids: [['psid_9', 'contact-A']] }),
+    )
+    expect(res).toMatchObject({ contactId: 'contact-A', matchedBy: 'psid' })
+    expect(nameLookupArg).toBeNull()
   })
 })

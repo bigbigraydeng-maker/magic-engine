@@ -29,6 +29,15 @@
  * 接已有人的匹配规则不变：psid 已知，或客户自己的邮箱原样出现在正文（排除业务自家
  * 域名）；命中两个不同的人 = 歧义，宁可留白也不错接。
  *
+ * ── 认人的三级顺序（2026-07-31 补了中间这一级）───────────────────────────
+ *   1. **身份键**：psid 已知 / 正文里出现已有客户的邮箱          → 接上
+ *   2. **唯一全名**：完整姓名 + 全库唯一同名 + 对方还没有 psid   → 挂上去，不新建
+ *   3. 都认不到                                                  → 按 psid 新建
+ *
+ * 第 2 级是为了修「同一个人被拆成两条」：表单不给 psid、私信不给邮箱，先填表后私信
+ * 的人两边没有共同的键。CTS 实测 132 个只有 Facebook 身份的人里 29 个是这么拆出来的
+ * （详见 attachByUniqueFullName 的说明，含它为什么不触碰 identity.ts 的那条红线）。
+ *
  * 建出来的人只有 Facebook 身份、没有电话邮箱 —— 销售只能在 Messenger 回他。等他
  * 哪天留了邮箱/电话，靠 contact_identities 的唯一约束自动并成同一个人。
  *
@@ -50,6 +59,26 @@ export interface IdentityIndex {
 
 /** 这些域名出现在正文里是「业务自己的」联系方式，不能当成客户身份。 */
 const BUSINESS_EMAIL_DOMAINS = ['ctstours.co.nz']
+
+/**
+ * Meta 在拿不到用户资料名时返回的**占位符**，不是人名。
+ *
+ * 为什么必须单独列出来、不能只靠「≥2 个词」筛掉：「Facebook 用户」正好是两个词，
+ * 会通过词数检查。CTS 实测有 14 个人都叫这个 —— 一旦让它参与按姓名认亲，这 14 个
+ * 互不相干的真人就会互相认亲，接到同一个人身上。
+ */
+const META_PLACEHOLDER_NAMES = new Set([
+  'facebook 用户',
+  'facebook用户',
+  'facebook user',
+])
+
+/** 占位符 / 空白一律当「没有名字」。返回 null 表示这个人还没留下真名。 */
+export function realDisplayName(raw: string | null | undefined): string | null {
+  const s = (raw ?? '').trim()
+  if (!s) return null
+  return META_PLACEHOLDER_NAMES.has(s.toLowerCase()) ? null : s
+}
 
 const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi
 
@@ -140,8 +169,11 @@ export interface LinkConversationResult {
   linked: boolean
   /** true = 这次**新建**了一个只带 Facebook 身份的人。`linked` 也会同时为 true。 */
   created: boolean
-  /** 'created' = 接不到任何已有的人，按 fb_psid 新建的。 */
-  matchedBy: 'psid' | 'email' | 'already' | 'created' | null
+  /**
+   * 'name'    = 按「唯一全名」认到一个已存在的人，把 psid 挂了上去（没新建）
+   * 'created' = 连名字都认不到，按 fb_psid 新建的
+   */
+  matchedBy: 'psid' | 'email' | 'already' | 'name' | 'created' | null
 }
 
 /** 取某个方向最后一条消息的时间。 */
@@ -202,14 +234,64 @@ async function createContactFromPsid(input: LinkConversationInput): Promise<stri
   const { contactId } = await resolveContact({
     clientId: input.clientId,
     identities: buildIdentities({ fbPsid: input.psid }),
-    // Facebook 的资料名。overwriteDisplayName=false：万一这个 psid 已经挂在某个
-    // 真人身上（并发同步 / 索引过期），不拿 FB 昵称去改人家已有的名字。
-    displayName: input.participantName,
+    // Facebook 的资料名。占位符存成 null —— 把「Facebook 用户」当人名存，
+    // 列表里就会出现十几个一模一样的「人」，看起来像重复其实是不同的人。
+    // overwriteDisplayName=false：万一这个 psid 已经挂在某个真人身上（并发同步 /
+    // 索引过期），不拿 FB 昵称去改人家已有的名字。
+    displayName: realDisplayName(input.participantName),
     overwriteDisplayName: false,
     source: 'messenger',
     seenAt: input.lastMessageAt ?? undefined,
   })
   return contactId
+}
+
+/**
+ * 「唯一全名认亲」—— 把这段对话挂到一个**已存在**的人身上，而不是新建第二条。
+ *
+ * WHY（2026-07-31 PM 反馈「有大量重名的」）
+ * ----------------------------------------
+ * 一个人先填了 Facebook 表单（留下电话邮箱），后来又来私信 —— 表单不给 psid、
+ * 私信不给邮箱，两边没有任何共同的键，于是同一个人被拆成两条。CTS 实测 132 个
+ * 只有 Facebook 身份的人里，29 个是这样拆出来的。
+ *
+ * 三条同时满足才认，缺一即弃权（弃权 = 照旧独立建人，宁可分开也不认错）：
+ *   1. 名字是**完整姓名**（≥2 个词）且不是 Meta 占位符
+ *   2. 全客户下**只有一个**同名的人
+ *   3. 那个人身上**还没有** fb_psid —— 否则他已经是另一个 Messenger 用户，抢不得
+ *
+ * 为什么这不是 identity.ts 里禁止的那件事：那条红线禁的是「把两个**已存在**的人
+ * 按姓名合成一个」—— 两份历史永久搅在一起、不可逆。这里是「给一个已存在的人**多挂
+ * 一个身份**」，没有任何东西被销毁；万一认错，摘掉这一条 fb_psid 身份即可复原。
+ *
+ * 条件 3 直接用内存里的身份索引判断（loadIdentityIndex 已把全部 fb_psid 载入），
+ * 不额外查库。
+ */
+async function attachByUniqueFullName(
+  input: LinkConversationInput,
+  index: IdentityIndex,
+): Promise<string | null> {
+  const name = realDisplayName(input.participantName)
+  if (!name) return null
+  if (name.split(/\s+/).filter(Boolean).length < 2) return null
+
+  // ilike 不带通配符 = 大小写不敏感的相等比较。limit 5：只要不是唯一命中就弃权，
+  // 多取几条足够判断「不止一个」。
+  const { data, error } = await supabaseAdmin
+    .from('contacts')
+    .select('id, display_name')
+    .eq('client_id', input.clientId)
+    .ilike('display_name', name)
+    .limit(5)
+
+  if (error || !data) return null
+
+  const alreadyHasPsid = new Set(index.byPsid.values())
+  const candidates = (data as { id: string; display_name: string | null }[])
+    .filter((c) => (c.display_name ?? '').trim().toLowerCase() === name.toLowerCase())
+    .filter((c) => !alreadyHasPsid.has(c.id))
+
+  return candidates.length === 1 ? candidates[0].id : null
 }
 
 /**
@@ -237,11 +319,18 @@ export async function linkMessengerConversation(
       contactId = match.contactId
       matchedBy = match.matchedBy
     } else {
-      // 接不到任何已有的人 —— 这是只在 Facebook 上聊过的新客人，按 psid 建。
-      contactId = await createContactFromPsid(input)
-      if (!contactId) return { contactId: null, linked: false, created: false, matchedBy: null }
-      matchedBy = 'created'
-      created = true
+      // 身份键（psid / 正文里的邮箱）认不到 —— 再试一次「唯一全名认亲」，
+      // 认到就挂上去，认不到才新建。顺序不能反：优先接已有的人，少制造重复。
+      const sameName = await attachByUniqueFullName(input, index)
+      if (sameName) {
+        contactId = sameName
+        matchedBy = 'name'
+      } else {
+        contactId = await createContactFromPsid(input)
+        if (!contactId) return { contactId: null, linked: false, created: false, matchedBy: null }
+        matchedBy = 'created'
+        created = true
+      }
     }
     newlyLinked = true
 
