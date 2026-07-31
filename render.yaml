@@ -533,9 +533,25 @@ services:
     envVars:
       - key: CRON_SECRET
         sync: false
-      - key: OZTOP_WP_USERNAME
-        sync: false
-      - key: OZTOP_WP_APP_PASSWORD
+
+  # Weekly blog draft — Tuesday 3am UTC (after Monday keyword snapshots +
+  # Monday AI tracker runs, so both topic-selection legs are fresh).
+  # One auto-topic draft per client with seo_config.weekly_blog=true.
+  # Drafts await human review in Blog Studio — never auto-publishes.
+  # ⚠️ sync:false does NOT auto-fill: after first deploy, link the
+  #    me-shared-cron-secret env group to this service in the Render
+  #    dashboard, or every run 401s silently (daily-cron-digest lesson).
+  # Reference: ROADMAP.md 22.E.S16
+  - type: cron
+    name: blog-weekly
+    env: node
+    schedule: "0 3 * * 2"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/blog-weekly
+    envVars:
+      - key: CRON_SECRET
         sync: false
 
   # Reference: ROADMAP.md § Phase 22.E · docs/seo-sop-implementation-design.md
