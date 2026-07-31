@@ -92,13 +92,13 @@ env:`DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD`(Render 已配,`render.yaml:58,60`
 
 ### 阶段 0 · 真客户闸门(前置,PM 2026-08-01 提出,不花 API 钱)
 
-**问题(PM 陈述 + 库中证实)**:`clients` 表 25 行里**只有 5 家是真客户**——CTS、Oztop、Roman Hu、30 Kiteroa(Roman 销售的楼盘)、Parkhomes(开发商,Roman 负责销售,ME 负责整体推广)。其余是 PM 在后台跑 Discovery 产生的**潜在客户/调研档案**(后台建档的原因:前台 Discovery 表格不够完整)。表里没有任何字段区分两者,现有 cron 选客户条件是 `domain IS NOT NULL`——**今天每周排名快照已在给 14 家跑,其中 9 家是调研壳子,钱和算力一直在白烧**,新计划若不设闸门会把浪费放大四倍。
+**问题(PM 陈述 + 库中证实)**:`clients` 表里真客户只有 **8 家**——外部 5 家:CTS、Oztop、Roman Hu、30 Kiteroa(Roman 销售的楼盘)、Parkhomes(开发商,Roman 负责销售,ME 负责整体推广);自有品牌 3 家:Magic Lab Class、Magic Lab、Magic Engine(PM 2026-08-01 确认;**Magic Engine 目前库里无档案,阶段 0 落地时一并建**)。其余全是 PM 在后台跑 Discovery 产生的**潜在客户/调研档案**(后台建档的原因:前台 Discovery 表格不够完整)。表里没有任何字段区分两者,现有 cron 选客户条件是 `domain IS NOT NULL`——**今天每周排名快照已在给 14 家跑,其中过半是调研壳子,钱和算力一直在白烧**,新计划若不设闸门会把浪费成倍放大。
 
 **做什么**:
 1. `clients` 加 `client_status` 字段(`active` 真客户 / `prospect` 调研·默认值 / `archived`)——migration,**必 PM go apply**
 2. Settings 页加状态开关(强约束:配置必带 UI,PM 不碰数据库)
 3. **所有周期性监测 cron(含现有 keyword-snapshots-weekly / ai-tracker-weekly,以及本计划阶段 1-4 全部新 cron)选客户条件统一改为 `client_status = 'active'`**;张骞 Discovery / prospecting 的一次性调用**不受影响**(它们本来就该对调研档案跑)
-4. 数据回填:5 家真客户标 `active`,其余标 `prospect`。⚠️ Parkhomes 库里有**重复建档两条**(memory 已记),标记前先并档,防止两条都进监测
+4. 数据回填:8 家真客户标 `active`(Magic Engine 先建档),其余标 `prospect`。✅ Parkhomes 重复建档已于 2026-08-01 并档:保留域名正确的 `19e025b7`(名字已改为 "Parkhomes"),删除错域名(parhomes.nz)的旧档及其 3 条废 Discovery 记录
 
 **喂给谁**:所有监测 cron 的成本闸门 + 后台客户列表可按状态过滤(真客户/调研分开看)。
 
@@ -202,7 +202,7 @@ env:`DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD`(Render 已配,`render.yaml:58,60`
 
 ## 5.1 spec 版本沿革
 
-- **v0.2 → v0.3(2026-08-01)**:PM 指出 clients 表混着真客户和 Discovery 调研档案 → 新增**阶段 0 真客户闸门**(client_status 字段 + Settings UI + 全部监测 cron 过滤),并确认真客户名单 5 家;总账标注为上限口径。
+- **v0.2 → v0.3(2026-08-01)**:PM 指出 clients 表混着真客户和 Discovery 调研档案 → 新增**阶段 0 真客户闸门**(client_status 字段 + Settings UI + 全部监测 cron 过滤);PM 确认真客户名单 8 家(外部 5 + 自有品牌 3);总账标注为上限口径;Parkhomes 重复档案已并(留 19e025b7,删错域名旧档)。
 
 ---
 
