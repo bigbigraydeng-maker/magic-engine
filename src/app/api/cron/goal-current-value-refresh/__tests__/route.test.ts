@@ -12,6 +12,11 @@ vi.mock('@/lib/strategy/auto-fetch', () => ({
   autoFetchMetricValue: vi.fn(),
 }))
 
+// startCronRun writes to cron_run_logs via supabaseAdmin — out of scope here
+vi.mock('@/lib/cron/run-logger', () => ({
+  startCronRun: vi.fn(async () => ({ finish: vi.fn(async () => {}) })),
+}))
+
 import { GET } from '../route'
 import { supabaseAdmin } from '@/lib/supabase'
 import { autoFetchMetricValue } from '@/lib/strategy/auto-fetch'
@@ -69,6 +74,16 @@ describe('GET /api/cron/goal-current-value-refresh', () => {
           update: () => ({ eq: () => Promise.resolve({ error: null }) }),
         }
       }
+      if (table === 'clients') {
+        // 真客户闸门：两个客户都是 active
+        return {
+          select: () => ({
+            in: () => ({
+              eq: () => Promise.resolve({ data: [{ id: 'c1' }, { id: 'c2' }], error: null }),
+            }),
+          }),
+        }
+      }
       return {} as any
     })
 
@@ -89,6 +104,15 @@ describe('GET /api/cron/goal-current-value-refresh', () => {
       { id: 'g1', client_id: 'c1', primary_metric_key: 'ai_visibility_score' },
     ]
     ;(supabaseAdmin.from as any).mockImplementation((table: string) => {
+      if (table === 'clients') {
+        return {
+          select: () => ({
+            in: () => ({
+              eq: () => Promise.resolve({ data: [{ id: 'c1' }], error: null }),
+            }),
+          }),
+        }
+      }
       return {
         select: () => ({ eq: () => Promise.resolve({ data: goals, error: null }) }),
         update: () => ({ eq: () => Promise.resolve({ error: null }) }),

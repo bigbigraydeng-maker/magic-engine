@@ -8,12 +8,13 @@ import { NextRequest } from 'next/server'
 // ── Mock supabaseAdmin ────────────────────────────────────────────────────────
 
 const mockClientsQuery = vi.fn()
+const mockEq = vi.fn()
 
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
     from: vi.fn(() => ({
       select: vi.fn(() => ({
-        eq: vi.fn(() => ({
+        eq: mockEq.mockImplementation(() => ({
           not: mockClientsQuery,
         })),
       })),
@@ -122,6 +123,8 @@ describe('GET /api/cron/flywheel-seo-weekly', () => {
     expect(json.clients_processed).toBe(1)
     expect(json.metrics_written).toBe(4)
     expect(json.failed).toBe(0)
+    // 真客户闸门：选客户必须按 client_status='active' 过滤
+    expect(mockEq).toHaveBeenCalledWith('client_status', 'active')
     expect(json.results[0]).toMatchObject({ client_id: 'client-cts', metrics_written: 4 })
   })
 

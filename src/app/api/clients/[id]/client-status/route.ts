@@ -58,6 +58,12 @@ export async function PATCH(
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
+  // client_status 是 ME 内部的监测成本闸门，不是客户业务字段 ——
+  // 客户侧账号（client-viewer / paid_client）不能开关自己的监测（魏征 🟡3）
+  if (access.tier !== 'admin') {
+    return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
+  }
+
   let body: PatchBody
   try {
     body = (await req.json()) as PatchBody

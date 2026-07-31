@@ -67,10 +67,11 @@ interface TikTokSyncResult {
 }
 
 async function syncTikTokProfiles(): Promise<TikTokSyncResult> {
-  // Load all clients that have a TikTok handle configured
+  // 真客户闸门：TikTok 拉取走 Apify（花钱），只对 active 客户跑（DataForSEO 计划 阶段 0）
   const { data: clients, error } = await supabaseAdmin
     .from('clients')
     .select('id')
+    .eq('client_status', 'active')
     .not('tiktok_handle', 'is', null)
 
   if (error || !clients || clients.length === 0) {

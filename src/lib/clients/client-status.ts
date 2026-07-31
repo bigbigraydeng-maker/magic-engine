@@ -31,9 +31,3 @@ const BY_VALUE = new Map(CLIENT_STATUS_OPTIONS.map((o) => [o.value, o]))
 export function isKnownClientStatus(value: string): value is ClientStatus {
   return BY_VALUE.has(value as ClientStatus)
 }
-
-/** 渲染用标签。词表外的值原样返回，后台要能看见当前存的是什么。 */
-export function clientStatusLabel(value: string | null | undefined): string {
-  if (!value) return CLIENT_STATUS_OPTIONS[1].label // 库里默认 prospect
-  return BY_VALUE.get(value as ClientStatus)?.label ?? value
-}
