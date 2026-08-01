@@ -15,6 +15,16 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
+import { AUTO_TAG_ACTOR } from '@/lib/crm/qualified-buyer'
+
+/**
+ * 「谁改的」的显示名。系统自动打标写的是一个英文标记（审计要机器可读），
+ * 中介看到的必须是人话 —— 而且必须看得出这一档不是同事标的。
+ */
+function changedByLabel(raw: string): string {
+  if (raw === AUTO_TAG_ACTOR) return '系统自动'
+  return raw.split('@')[0]
+}
 
 export interface TimelineEntry {
   kind: 'touch' | 'stage' | 'message'
@@ -133,7 +143,7 @@ export function ContactTimeline({ clientId, contactId }: { clientId: string; con
               <span>🔀</span>
               <span>
                 {e.fromLabel ?? '还没标'} → <span className="font-bold text-me-charcoal/70">{e.toLabel}</span>
-                {e.changedBy ? ` · ${e.changedBy.split('@')[0]}` : ''} · {when(e.at)}
+                {e.changedBy ? ` · ${changedByLabel(e.changedBy)}` : ''} · {when(e.at)}
               </span>
             </div>
           )
