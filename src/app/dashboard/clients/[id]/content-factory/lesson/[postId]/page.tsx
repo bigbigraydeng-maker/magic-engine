@@ -145,6 +145,43 @@ export default function LectureWorkbenchPage() {
     await patch({ action: 'save_script', lecture: draft }, 'save', '脚本已保存')
   }
 
+  // 口播稿导出：只含要念的词(不含课件文字)，【】段落标记是给自己看的提醒、不念。
+  // 导出的是屏幕上正在编辑的版本——改了没保存也照样导最新的。
+  function spokenText(): string {
+    if (!draft) return ''
+    const lines: string[] = [
+      `《${draft.title}》${data?.post.lessonNo ? ` 第${data.post.lessonNo}讲` : ''} · 口播稿`,
+      '(【】里的标记不用念，只是提醒你讲到哪段)',
+      '',
+      '【开场钩子】',
+      draft.hookSpoken.trim(),
+    ]
+    draft.sections.forEach((s, i) => {
+      lines.push('', `【要点${i + 1} · ${s.slideTitle.trim()}】`, s.spoken.trim())
+    })
+    if (draft.ctaSpoken?.trim()) lines.push('', '【结尾】', draft.ctaSpoken.trim())
+    return lines.join('\n')
+  }
+
+  async function copySpoken() {
+    try {
+      await navigator.clipboard.writeText(spokenText())
+      setNotice('口播稿已复制 ✅ 粘到备忘录或提词器里，照着录就行')
+    } catch {
+      setError('复制没成功(浏览器不让)——点旁边的「下载」拿文件版')
+    }
+  }
+
+  function downloadSpoken() {
+    const blob = new Blob([spokenText()], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${data?.post.lessonNo ? `第${data.post.lessonNo}讲-` : ''}口播稿.txt`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   /**
    * 有没保存的修改时先帮用户存一把(板桥审:换制作方式/重写/上传都会刷新页面数据，
    * 没保存的修改会被静默清掉——用户会以为系统丢了他的字)。存失败就中断动作。
@@ -314,15 +351,33 @@ export default function LectureWorkbenchPage() {
 
       {/* ① 脚本审 */}
       <section className="bg-me-ivory border border-me-stone rounded-2xl p-4 mb-4">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between gap-2 mb-3">
           <h2 className="font-display font-semibold">① 脚本 · 念的词和课件都在这</h2>
-          <button
-            disabled={!dirty || busy !== null}
-            onClick={saveScript}
-            className="text-xs font-semibold text-white bg-status-track rounded-full px-4 py-1.5 disabled:opacity-40"
-          >
-            {busy === 'save' ? '保存中…' : dirty ? '保存修改' : '已保存'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              disabled={busy !== null}
+              onClick={copySpoken}
+              className="text-xs text-me-charcoal border border-me-stone rounded-full px-3 py-1.5 hover:border-me-ochre disabled:opacity-40"
+              title="把要念的词复制到剪贴板，粘到备忘录/提词器里照着录"
+            >
+              复制口播稿
+            </button>
+            <button
+              disabled={busy !== null}
+              onClick={downloadSpoken}
+              className="text-xs text-me-charcoal border border-me-stone rounded-full px-3 py-1.5 hover:border-me-ochre disabled:opacity-40"
+              title="存成文本文件，方便发到手机上"
+            >
+              下载
+            </button>
+            <button
+              disabled={!dirty || busy !== null}
+              onClick={saveScript}
+              className="text-xs font-semibold text-white bg-status-track rounded-full px-4 py-1.5 disabled:opacity-40"
+            >
+              {busy === 'save' ? '保存中…' : dirty ? '保存修改' : '已保存'}
+            </button>
+          </div>
         </div>
 
         <label className="block text-[11px] font-semibold text-me-taupe mb-1">开场钩子(前3秒)</label>
