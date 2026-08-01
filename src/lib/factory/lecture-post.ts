@@ -13,11 +13,18 @@ import type { LectureScript } from './lecture-script'
 
 export type LectureMethod = 'self_record' | 'digital_human'
 
+/** 某个教学要点配的录屏(讲到这段时上半屏放它，替掉课件)。键 = 要点序号(从 0 起)。 */
+export interface SectionClip {
+  url: string
+  added_at: string
+}
+
 export interface LectureProduction {
   method: LectureMethod
   recording_url?: string
   recording_uploaded_at?: string
   changed_at?: string        // 最后一次改制作方式/换录像的时间(用来判断旧报错是否过期)
+  section_clips?: Record<string, SectionClip>
 }
 
 interface LectureSnapshot {
@@ -141,6 +148,34 @@ export async function setLectureProduction(params: {
     ...(recordingUrl
       ? { recording_url: recordingUrl, recording_uploaded_at: new Date().toISOString() }
       : {}),
+  }
+  await patchSnapshot(clientId, postId, { lecture_production: production })
+}
+
+/**
+ * 给某个教学要点配 / 取消录屏。制作方式保持不动(录屏是叠在课件位上的插入画面，
+ * 跟「自己录还是数字人」是两件事)。
+ */
+export async function setSectionClip(params: {
+  clientId: string
+  postId: string
+  index: number
+  url: string | null          // null = 取消这一段的录屏
+}): Promise<void> {
+  const { clientId, postId, index, url } = params
+  const current = await loadLecturePost(clientId, postId)
+  if (!current) throw new Error('未找到该讲')
+  if (!current.lecture.sections[index]) throw new Error('要点不存在')
+
+  const prev = current.production
+  const clips = { ...(prev?.section_clips ?? {}) }
+  if (url) clips[String(index)] = { url, added_at: new Date().toISOString() }
+  else delete clips[String(index)]
+
+  const production: LectureProduction = {
+    ...(prev ?? { method: 'self_record' }),
+    section_clips: clips,
+    changed_at: new Date().toISOString(),
   }
   await patchSnapshot(clientId, postId, { lecture_production: production })
 }

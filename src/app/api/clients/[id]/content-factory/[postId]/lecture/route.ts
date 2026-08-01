@@ -1,6 +1,6 @@
 // 单讲工作台 API — 讲课式内容的脚本审改 / 制作方式 / 录像直传 / 重做 / 开始做片。
 // GET   详情(结构化脚本 + 制作方式 + 做片任务状态 + 客户 VI 色)
-// PATCH { action: save_script | set_method | recording_uploaded | recording_link | redo_section | regen_script | start_render }
+// PATCH { action: save_script | set_method | recording_uploaded | recording_link | section_clip | redo_section | regen_script | start_render }
 // POST  { fileName } → 录像签名直传 URL(大文件不走 API body，直传存储)
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -18,6 +18,7 @@ import {
   loadLecturePost,
   saveLectureScript,
   setLectureProduction,
+  setSectionClip,
   type LectureMethod,
 } from '@/lib/factory/lecture-post'
 import { enqueueRenderJob } from '@/lib/factory/render-queue'
@@ -116,6 +117,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       path?: string
       link?: string
       index?: number
+      clear?: boolean
       instruction?: string
     }
     const loaded = await loadLecturePost(params.id, params.postId)
@@ -185,6 +187,37 @@ export async function PATCH(req: NextRequest, { params }: Params) {
           recordingUrl: norm.url,
         })
         return NextResponse.json({ ok: true, recordingUrl: norm.url })
+      }
+
+      case 'section_clip': {
+        // 给某个教学要点配录屏(讲到那段时上半屏换成录屏画面)。clear=true 则取消。
+        const index = body.index
+        if (typeof index !== 'number' || !loaded.lecture.sections[index]) {
+          return NextResponse.json({ error: '这个要点不存在，刷新页面再试一次' }, { status: 400 })
+        }
+        if (body.clear) {
+          await setSectionClip({ clientId: params.id, postId: params.postId, index, url: null })
+          return NextResponse.json({ ok: true })
+        }
+        const norm = normalizeRecordingLink(body.link ?? '')
+        if (!norm.ok || !norm.url) {
+          return NextResponse.json({ error: norm.error ?? '这个链接用不了' }, { status: 400 })
+        }
+        let probe: Response
+        try {
+          probe = await fetch(norm.url, {
+            headers: { Range: 'bytes=0-1023' },
+            redirect: 'follow',
+            signal: AbortSignal.timeout(20000),
+          })
+        } catch {
+          return NextResponse.json({ error: '打不开这个链接 — 确认链接没过期、并且设成「知道链接的人都能看」' }, { status: 400 })
+        }
+        if ((!probe.ok && probe.status !== 206) || !looksLikeVideoResponse(probe.headers.get('content-type'), norm.url)) {
+          return NextResponse.json({ error: '这个链接指向的不是视频 — 在 Dropbox 里对着那条录屏「复制链接」再粘一次' }, { status: 400 })
+        }
+        await setSectionClip({ clientId: params.id, postId: params.postId, index, url: norm.url })
+        return NextResponse.json({ ok: true })
       }
 
       case 'redo_section': {
