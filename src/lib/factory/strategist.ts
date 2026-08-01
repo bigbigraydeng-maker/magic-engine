@@ -484,6 +484,7 @@ export function decideSignal(ctx: GateContext): Decision {
     ctx.verifiedOffer != null ? 'sales' : 'brand',
     ctx.recentAngles.length,
     ctx.hasPersona === true,
+    ctx.rhythmHint ?? null,
   )
   const { segments, clipLinks, generationPlan } = selectClips(
     ctx,

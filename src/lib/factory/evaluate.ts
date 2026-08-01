@@ -3,6 +3,7 @@
 // 魏征 M1 评审修订:F2 语义去重直查 source_ad_id 无时间窗 / F4 部分失败收敛 /
 // F5 日配额含终态工单 + NZ 日界 / F6 brief 双轨兼容 / F9 余额 SQL 聚合 / F10 全体收进 try。
 
+import { loadViralStructure } from './viral-structure'
 import { supabaseAdmin } from '@/lib/supabase'
 import { FACTORY_ANGLE_DEDUPE_DAYS } from './constants'
 import { generateAdCopy } from './copy-generator'
@@ -161,6 +162,15 @@ async function loadContext(
 
   const factoryConfig = (client?.factory_config ?? {}) as Record<string, unknown>
 
+  // 同行业爆款结构：只取节奏数字，画面/文案一律不过境（见 viral-structure 硬边界）。
+  // 失败不阻断出片 —— 学不到就按原逻辑走。
+  const viralStructure = await loadViralStructure(
+    (client?.industry as string | null) ?? null,
+  ).catch(() => null)
+  const rhythmHint = viralStructure
+    ? { medianShotSeconds: viralStructure.medianShotSeconds, sampleSize: viralStructure.sampleSize }
+    : null
+
   const ctx: GateContext = {
     now,
     signal,
@@ -183,6 +193,8 @@ async function loadContext(
     ),
     // i2v 源图池:抓来的静图,喂给 generationPlan 当底图(见 selectClips 源图轮换)
     sourceImagePool,
+    // 同行业爆款节奏基线(只有数字)。样本不足/查询失败 = null → 选配方走原逻辑。
+    rhythmHint,
   }
   return {
     ctx,

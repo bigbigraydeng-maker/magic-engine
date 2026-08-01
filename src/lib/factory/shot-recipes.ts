@@ -129,25 +129,61 @@ const GOAL_PREFERENCE: Record<string, string[]> = {
   ugc:       ['fast_cut', 'problem_solution', 'narrative'],
 }
 
+export function recipeMedianShotSeconds(recipe: ShotRecipe): number {
+  const xs = recipe.shots.map((s) => s.duration_hint_s).sort((a, b) => a - b)
+  if (xs.length === 0) return 0
+  const mid = Math.floor(xs.length / 2)
+  return xs.length % 2 === 0 ? (xs[mid - 1] + xs[mid]) / 2 : xs[mid]
+}
+
+/**
+ * 同行业爆款的节奏基线。只收数字 —— 本模块刻意不 import viral-structure,
+ * 保持纯函数、零依赖、可单测（内容字段根本进不来这个类型）。
+ */
+export interface RhythmHint {
+  medianShotSeconds: number
+  sampleSize: number
+}
+
+/** 候选镜长与爆款中位数的相对偏差在此以内才算「节奏对得上」。 */
+const RHYTHM_TOLERANCE = 0.45
+
 /**
  * 挑一个配方。
  *
  * `rotationSeed` 传该客户已有工单数 —— 同一客户连续出片时在候选里轮换,
  * 否则「按目标选」很快会退化成新的千篇一律(每条 sales 片都是快剪型)。
  * 纯函数、零随机:同样输入永远同样输出,可测、可复现(Date.now/Math.random 在本仓禁用)。
+ *
+ * `rhythm`(同行业爆款中位镜长)用来**缩小候选池**,不是直接选中最接近的那个：
+ * 直接选最接近 = 每次都同一个配方 = 又回到千篇一律。缩池后轮换照跑,
+ * 于是「有依据」和「不重样」两个目标同时成立。缩完不足 2 个则整池保留。
  */
 export function pickShotRecipe(
   contentGoal: string | null,
   rotationSeed: number,
   /** 客户配了叙事人格(brand_voice.persona)→ 优先故事型:第一人称需要时间铺情感 */
   hasPersona = false,
+  rhythm: RhythmHint | null = null,
 ): ShotRecipe {
   if (hasPersona) {
     const story = SHOT_RECIPES.find((r) => r.key === 'personal_story')
     if (story) return story
   }
   const keys = GOAL_PREFERENCE[contentGoal ?? ''] ?? ['narrative', 'fast_cut', 'problem_solution', 'single_focus']
+
+  let candidates = keys
+  if (rhythm && rhythm.medianShotSeconds > 0) {
+    const onRhythm = keys.filter((k) => {
+      const r = SHOT_RECIPES.find((x) => x.key === k)
+      if (!r) return false
+      const mine = recipeMedianShotSeconds(r)
+      return Math.abs(mine - rhythm.medianShotSeconds) / rhythm.medianShotSeconds <= RHYTHM_TOLERANCE
+    })
+    if (onRhythm.length >= 2) candidates = onRhythm
+  }
+
   const seed = Number.isFinite(rotationSeed) && rotationSeed >= 0 ? Math.floor(rotationSeed) : 0
-  const key = keys[seed % keys.length]
+  const key = candidates[seed % candidates.length]
   return SHOT_RECIPES.find((r) => r.key === key) ?? SHOT_RECIPES[0]
 }

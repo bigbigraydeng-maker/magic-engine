@@ -130,6 +130,9 @@ export interface GateContext {
   /** i2v 源图池:抓来的静图公开 URL。喂给 generationPlan 当底图,每段轮换用不同的一张。
    *  由 evaluate 从 video_clips 里 is_still_image=true 的行装配。空 = worker 退回占位帧。 */
   sourceImagePool?: readonly string[]
+  /** 同行业爆款的节奏基线(只有数字,无任何画面/文案)。由 evaluate 装配,
+   *  strategist 用它缩小配方候选池。null = 样本不足或查询失败 → 走原逻辑。 */
+  rhythmHint?: { medianShotSeconds: number; sampleSize: number } | null
 }
 
 export interface AngleSource {
