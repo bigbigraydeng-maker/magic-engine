@@ -6,7 +6,7 @@
 //   ⚠️ 线已接好但未实测(生成要花钱，PM 拍板先不烧)；模型名/入参以首跑实测为准。
 //
 // 布局(1080x1920)：上半 0-960 课件(内容下沉避开平台 UI 顶部遮挡)，下半 960-1920 人像，
-// 字幕在 y≈1020 起的横带(安全区内、压在人像上沿)。配色走客户 master_brief.vi_colors。
+// 字幕在 y≈1150 起的横带(Reel 安全区内、落在人像胸口高度)。配色走客户 master_brief.vi_colors。
 
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -39,7 +39,9 @@ const OMNIHUMAN_MODEL = 'omnihuman-1-5'
 const W = 1080
 const H = 1920
 const SLIDE_H = 960          // 上半课件高
-const SUB_Y = 1020           // 字幕带 y(全帧坐标，安全区内)
+// 字幕带 y(全帧坐标)。1020 太高会压在脸上(PM 首片反馈)，下移到人像胸口高度；
+// 底部 ~1248 是 Reel 安全区下沿(再低会被平台 UI 盖住)，68px 字 + 描边刚好卡在里面。
+const SUB_Y = 1150
 
 interface SlideColors {
   bg: string
@@ -125,7 +127,8 @@ async function whisperTranscribe(audioFile: string): Promise<TranscriptSegment[]
 
 // ---------- PIL 画课件 / 字幕 ----------
 
-// 课件 slide：深色底 + 顶部品牌条 + 大标题 + 要点列表。内容从 y=300 起(避开平台 UI 顶部遮挡)。
+// 课件 slide：深色底 + 强调色短横 + 大标题 + 要点列表。内容从 y=300 起(避开平台 UI 顶部遮挡)。
+// 不打品牌名(PM:保持单纯分享)。文字按实测宽度折行 + 字号自适应，绝不裁字。
 const SLIDE_PY = `
 import sys, json
 from PIL import Image, ImageDraw, ImageFont
@@ -135,7 +138,7 @@ img = Image.new("RGBA", (W, H), cfg["bg"])
 d = ImageDraw.Draw(img)
 PAD = 80
 TOP = 300                 # 内容起点(避开平台 UI 顶部遮挡)
-BRAND_H = 110             # 底部品牌行占位:要点绝不许压上去
+BOTTOM_PAD = 110          # 底部留白:要点绝不许贴到边
 BULLET_X = PAD + 44
 MAX_W = W - BULLET_X - PAD
 
@@ -176,7 +179,7 @@ def layout(title_size, point_size, gap):
     return y, ops
 
 # 字号自适应:先按标准字号排，超出可用高度就整体缩小(最小 34)，保证一个字都不被裁
-avail = H - BRAND_H
+avail = H - BOTTOM_PAD
 title_size, point_size = 76, 52
 while True:
     total, ops = layout(title_size, point_size, 0)
@@ -193,9 +196,6 @@ for op in ops:
     else:
         d.text((op[1], op[2]), op[3], font=op[4], fill=cfg["text"])
 
-if cfg.get("brand"):
-    small_font = ImageFont.truetype(cfg["font"], 34)
-    d.text((PAD, H - 72), cfg["brand"], font=small_font, fill=cfg["accent"])
 img.save(cfg["out"])
 `
 
@@ -220,19 +220,21 @@ interface SlideSpec {
   points: string[]
 }
 
-/** 每个时间段一张课件：钩子=本讲封面，要点=各自课件，CTA=收尾页。 */
-export function slidesOfLecture(lecture: LectureScript, brandName: string): SlideSpec[] {
+/**
+ * 每个时间段一张课件：钩子=本讲封面，要点=各自课件，CTA=收尾页。
+ * 课件上不打品牌名(PM 拍板：保持单纯分享的感觉，不做成宣传物料)。
+ */
+export function slidesOfLecture(lecture: LectureScript): SlideSpec[] {
   return [
     { title: lecture.title, points: ['本讲重点', ...lecture.sections.map((s) => s.slideTitle)] },
     ...lecture.sections.map((s) => ({ title: s.slideTitle, points: s.slidePoints })),
-    { title: '关注看全系列', points: [`主页合集 · ${brandName}`, '下一讲更实操'] },
+    { title: '关注看全系列', points: ['主页合集里有全套', '下一讲更实操'] },
   ]
 }
 
 async function renderSlides(
   slides: SlideSpec[],
   colors: SlideColors,
-  brand: string,
   dir: string,
 ): Promise<string[]> {
   const files: string[] = []
@@ -244,7 +246,6 @@ async function renderSlides(
       font: CJK_FONT,
       title: slides[i].title.trim(),
       points: slides[i].points.slice(0, 4),
-      brand,
       out,
     }
     await exec('python3', ['-c', SLIDE_PY, JSON.stringify(cfg)])
@@ -399,10 +400,9 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
       text: DEFAULT_COLORS.text,
       accent: hexOk(vi?.secondary) ? vi.secondary : DEFAULT_COLORS.accent,
     }
-    const brand = brief?.brand_name || ''
     // 口播与课件从同一份结构过滤——空口播段(如没写 CTA)连同它的课件一起剔掉，
     // 绝不让后面的课件错位一页(魏征 m4)
-    const allSlides = slidesOfLecture(lecture, brand)
+    const allSlides = slidesOfLecture(lecture)
     const entries = [
       { spoken: lecture.hookSpoken, slide: allSlides[0] },
       ...lecture.sections.map((s, i) => ({ spoken: s.spoken, slide: allSlides[1 + i] })),
@@ -454,7 +454,7 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
 
     await patchJob(jobId, { status: 'assembling' })
 
-    const slideFiles = await renderSlides(entries.map((e) => e.slide), colors, brand, dir)
+    const slideFiles = await renderSlides(entries.map((e) => e.slide), colors, dir)
     const captionFiles = await renderCaptions(captionChunks, dir)
 
     const outFile = join(dir, 'final.mp4')
