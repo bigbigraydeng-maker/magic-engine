@@ -183,11 +183,15 @@ export function groupAdHistories(rows: AdRow[]): AdEntityHistory[] {
     })
   }
 
-  for (const history of byEntity.values()) {
+  // Array.from rather than spreading/iterating the Map directly: tsconfig sets
+  // no `target`, so TS defaults to ES5 and rejects Map iterators without
+  // --downlevelIteration.
+  const histories = Array.from(byEntity.values())
+  for (const history of histories) {
     history.days.sort((a, b) => a.insightDate.localeCompare(b.insightDate))
   }
 
-  return [...byEntity.values()]
+  return histories
 }
 
 /** Average daily spend across the last 7 days that actually spent. */
@@ -199,7 +203,7 @@ export function averageRecentDailySpend(histories: AdEntityHistory[]): number {
       byDate.set(day.insightDate, (byDate.get(day.insightDate) ?? 0) + day.spend)
     }
   }
-  const recent = [...byDate.entries()]
+  const recent = Array.from(byDate.entries())
     .sort((a, b) => a[0].localeCompare(b[0]))
     .slice(-7)
     .map(([, spend]) => spend)
