@@ -290,7 +290,9 @@ async function buildDigitalHumanTrack(params: {
     // 逐段生成最坏要 30-45 分钟，每段 touch 一次防被 45 分钟卡死回收误杀(魏征 M3)
     await heartbeat(jobId, 'rendering')
     const vo = await generateVoiceover({ clientId, text: parts[i], voiceId, folder: 'lecture-vo' })
-    const result = await runMuapi(OMNIHUMAN_MODEL, { image_url: avatarUrl, audio_url: vo.audioUrl })
+    // 口播人像生成很慢(实测 20 秒音频可超 5 分钟默认上限)，放宽到 15 分钟/段。
+    // 心跳在段首已 touch，15 分钟仍远小于 45 分钟卡死回收线。
+    const result = await runMuapi(OMNIHUMAN_MODEL, { image_url: avatarUrl, audio_url: vo.audioUrl }, 15 * 60 * 1000)
     const clipUrl = result.outputs[0]
     if (result.status !== 'completed' || !clipUrl) {
       throw new Error(`数字人生成失败(第${i + 1}段): ${result.error ?? result.status}`)
