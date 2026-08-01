@@ -20,6 +20,8 @@ import { getClientLocale } from '@/lib/locale/client-locale'
 import { LISTING_BRIEF_SYSTEM_PROMPT, buildBriefUserMessage } from './brief-prompt'
 import { normalizeAiDraft, type ListingBriefContent } from './brief-schema'
 import { insertBriefDraft, type ListingBriefRow } from './brief-queries'
+import { fetchListingAdReference } from './ad-benchmark-queries'
+import type { AdReferenceBlock } from './ad-benchmarks'
 import type { ListingRow } from './queries'
 
 const MAX_OUTPUT_TOKENS = 6000
@@ -158,12 +160,20 @@ export async function generateListingBrief(input: GenerateBriefInput): Promise<G
     warnings.push(`没读到这个客户的市场设置,按新西兰处理(${err instanceof Error ? err.message : String(err)})。`)
   }
 
+  // 我们自己投过什么。**参考材料**:提示词里连同「不许据此改排序」的禁令一起给,
+  // 落库时挂在 ad_reference 单独一栏(见 ad-benchmarks.ts 纪律 ①)。
+  // 取不到就是没有 —— 绝不因此中断生成。
+  const adRef = await fetchListingAdReference(listing)
+  if (adRef.warning) warnings.push(adRef.warning)
+  const adReference: AdReferenceBlock | null = adRef.reference
+
   const userMessage = buildBriefUserMessage({
     listing,
     pageMarkdown,
     pageUrl: input.pageUrl ?? null,
     country,
     city,
+    adReference,
   })
 
   let attempt: ModelAttempt
@@ -205,6 +215,7 @@ export async function generateListingBrief(input: GenerateBriefInput): Promise<G
     content: attempt.content,
     modelUsed: MODEL_SONNET,
     inputTokens: attempt.inputTokens,
+    adReference,
   })
   if (!saved.ok) return { ok: false, status: 500, error: saved.error, warnings }
 

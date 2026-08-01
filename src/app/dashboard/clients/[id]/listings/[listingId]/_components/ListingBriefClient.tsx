@@ -24,6 +24,7 @@ import {
   UnitVariantsEditor,
 } from './BriefFieldEditors'
 import { BriefFactsEditor, GapsEditor, SourcesOverview } from './BriefFactsEditor'
+import { AdReferencePanel } from './AdReferencePanel'
 
 type State =
   | { phase: 'loading' }
@@ -250,6 +251,10 @@ export function ListingBriefClient({ listingId }: { listingId: string }) {
             />
             <GapsEditor value={draft.gaps} onChange={v => setDraft({ ...draft, gaps: v })} />
           </fieldset>
+
+          {/* 实测摆在判断的**下面**、编辑区**外面**:先看该怎么打，再看我们投过什么。
+              放进编辑区就等于暗示它可以改上面的排序 —— 那正是要防的那件事。 */}
+          <AdReferencePanel block={selected.ad_reference ?? null} />
 
           <section>
             <p className="mb-2 text-[11px] font-black uppercase tracking-[.1em] text-me-charcoal/45">
