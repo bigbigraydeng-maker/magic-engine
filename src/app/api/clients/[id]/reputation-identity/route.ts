@@ -67,6 +67,12 @@ export async function PATCH(
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
+  // 口碑身份是花钱配置（竞品列表直接放大每周 API 成本），
+  // 与 client-status 同款收紧：客户侧账号只读不写
+  if (access.tier !== 'admin') {
+    return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
+  }
+
   let body: PatchBody
   try {
     body = (await req.json()) as PatchBody
@@ -104,6 +110,13 @@ export async function PATCH(
     if (parsed.length !== body.competitor_gbp.length) {
       return NextResponse.json(
         { error: 'Every competitor_gbp entry needs non-empty `name` and `place_id`' },
+        { status: 400 },
+      )
+    }
+    // 成本上限：竞品条数封顶（spec 预算按全网 43 竞品算，单客户 10 家足够）
+    if (parsed.length > 10) {
+      return NextResponse.json(
+        { error: 'At most 10 competitor GBP entries per client' },
         { status: 400 },
       )
     }

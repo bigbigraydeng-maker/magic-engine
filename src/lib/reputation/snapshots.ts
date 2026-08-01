@@ -164,10 +164,13 @@ export async function captureReputationForClient(
 
       const gbp = await getGbpReviewsByIdentity(identity, 30)
 
-      // 评论响应没带档案时（部分商家）补一发 my_business_info
+      // 评论响应没带档案时（部分商家）补一发 my_business_info。
+      // 它只收 keyword —— 绝不能把 place_id 字符串塞进去搜（会搜出错商家，魏征 🔴1）
       let profile = gbp?.profile ?? null
       if (!profile) {
-        const info = await getGmbInfo(identity.place_id ?? identity.keyword ?? entity.name)
+        const fallbackKeyword =
+          entity.entity_type === 'client' ? gbpKeywordFor(client) : entity.name
+        const info = await getGmbInfo(fallbackKeyword)
         if (info) profile = { rating: info.rating, review_count: info.review_count }
       }
 
@@ -234,6 +237,14 @@ export async function captureReputationForClient(
       console.error('[reputation] tripadvisor failed:', err instanceof Error ? err.message : err)
       result.entities_failed++
     }
+  }
+
+  // 全实体失败 = 这个客户本周 0 数据 —— 必须响，不能记成 completed
+  // （daily-cron-digest 51 天静默事故的同款盲区：跑了但全空也算成功）
+  if (result.entities_captured === 0 && result.entities_failed > 0) {
+    throw new Error(
+      `all ${result.entities_failed} entities failed — check place_id / identity config`,
+    )
   }
 
   if (snapshotRows.length > 0) {

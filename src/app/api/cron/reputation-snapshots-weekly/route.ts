@@ -66,6 +66,7 @@ export async function GET(req: NextRequest) {
 
   const results: Array<ReputationCaptureResult | {
     client_id: string
+    name: string
     error: string
   }> = []
 
@@ -76,6 +77,7 @@ export async function GET(req: NextRequest) {
     } catch (err) {
       results.push({
         client_id: client.id,
+        name: client.name,
         error: err instanceof Error ? err.message : 'Unknown error',
       })
     }

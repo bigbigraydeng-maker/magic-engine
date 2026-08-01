@@ -180,6 +180,24 @@ describe('captureReputationForClient', () => {
     await expect(captureReputationForClient(CLIENT)).rejects.toThrow(/upsert failed/)
   })
 
+  it('throws when ALL entities fail (silent all-empty must not look completed)', async () => {
+    mockGbpReviews.mockRejectedValue(new Error('DataForSEO 500'))
+    await expect(captureReputationForClient(CLIENT)).rejects.toThrow(/all 2 entities failed/)
+  })
+
+  it('client GBP fallback uses name-city-country keyword, never the place_id string', async () => {
+    // 评论响应无档案 → 走 getGmbInfo 兜底；client 实体必须用 keyword 而不是 place_id
+    mockGbpReviews.mockResolvedValue({ profile: null, reviews: [] })
+    mockGmbInfo.mockResolvedValue({ rating: 4.0, review_count: 10 })
+
+    await captureReputationForClient(CLIENT)
+
+    const calledWith = mockGmbInfo.mock.calls.map(c => c[0] as string)
+    expect(calledWith).toContain('CTS Tours NZ Auckland NZ') // client 实体
+    expect(calledWith).toContain('Rival Tours')              // 竞品实体
+    expect(calledWith.some(k => k.startsWith('ChIJ'))).toBe(false)
+  })
+
   it('throws when the is_new flip fails (stale "new" flags must not survive)', async () => {
     mockFlip.mockResolvedValueOnce({ error: { message: 'timeout' } })
     await expect(captureReputationForClient(CLIENT)).rejects.toThrow(/is_new flip failed/)
