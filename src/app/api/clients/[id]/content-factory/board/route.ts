@@ -67,10 +67,31 @@ export async function GET(
       }
     }
 
+    // 课程区的讲要能在列表上看到「做片失败」，不然失败永远显示「做片中」(板桥审)
+    const lessonIds = Array.from(courseMap.values()).flatMap((c) =>
+      (c.lessons as { id: string; status: string }[]).filter((l) => l.status === 'approved').map((l) => l.id),
+    )
+    const failedPosts = new Set<string>()
+    if (lessonIds.length > 0) {
+      const { data: jobs } = await supabaseAdmin
+        .from('content_factory_render_jobs')
+        .select('content_post_id, status, created_at')
+        .in('content_post_id', lessonIds)
+        .order('created_at', { ascending: false })
+      const seen = new Set<string>()
+      for (const j of jobs ?? []) {
+        if (seen.has(j.content_post_id)) continue // 只看每讲最新一条任务
+        seen.add(j.content_post_id)
+        if (j.status === 'failed') failedPosts.add(j.content_post_id)
+      }
+    }
+
     const courses = Array.from(courseMap.values()).map((c) => ({
       name: c.name,
       source: c.source,
-      lessons: (c.lessons as { lessonNo: number }[]).sort((a, b) => a.lessonNo - b.lessonNo),
+      lessons: (c.lessons as { id: string; lessonNo: number }[])
+        .map((l) => ({ ...l, renderFailed: failedPosts.has(l.id) }))
+        .sort((a, b) => a.lessonNo - b.lessonNo),
     }))
 
     const counts = Object.fromEntries(

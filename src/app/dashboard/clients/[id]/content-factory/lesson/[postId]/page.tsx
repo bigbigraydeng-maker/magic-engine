@@ -30,6 +30,7 @@ interface RenderJob {
   status: string
   error: string | null
   output_url: string | null
+  updated_at: string | null
 }
 interface Detail {
   post: {
@@ -55,6 +56,16 @@ function xhsWarnings(text: string): string[] {
 }
 
 const ACTIVE_JOB = ['queued', 'planning', 'rendering', 'assembling']
+
+const PLATFORM_LABEL: Record<string, string> = {
+  xiaohongshu: '小红书', douyin: '抖音', facebook: 'FB', tiktok: 'TikTok',
+}
+
+/** 做片任务超过 1 小时没动静 = 大概率卡住了，别让用户干等。 */
+function jobLooksStuck(job: RenderJob | null): boolean {
+  if (!job?.updated_at) return false
+  return Date.now() - new Date(job.updated_at).getTime() > 60 * 60 * 1000
+}
 
 export default function LectureWorkbenchPage() {
   const params = useParams<{ id: string; postId: string }>()
@@ -134,7 +145,38 @@ export default function LectureWorkbenchPage() {
     await patch({ action: 'save_script', lecture: draft }, 'save', '脚本已保存')
   }
 
+  /**
+   * 有没保存的修改时先帮用户存一把(板桥审:换制作方式/重写/上传都会刷新页面数据，
+   * 没保存的修改会被静默清掉——用户会以为系统丢了他的字)。存失败就中断动作。
+   */
+  async function ensureSaved(): Promise<boolean> {
+    if (!dirty || !draft) return true
+    setBusy('save')
+    try {
+      const r = await fetch(`${base}/lecture`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save_script', lecture: draft }),
+      })
+      const json = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(json.error || `HTTP ${r.status}`)
+      setDirty(false)
+      return true
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      return false
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function setMethod(method: 'self_record' | 'digital_human') {
+    if (!(await ensureSaved())) return
+    await patch({ action: 'set_method', method }, 'method')
+  }
+
   async function redoSection(index: number) {
+    if (!(await ensureSaved())) return
     const ok = await patch(
       { action: 'redo_section', index, instruction: redoNote.trim() || undefined },
       `redo-${index}`,
@@ -143,7 +185,17 @@ export default function LectureWorkbenchPage() {
     if (ok) { setRedoIdx(null); setRedoNote('') }
   }
 
+  async function startRender() {
+    if (data?.post.videoUrl) {
+      const spend = data.production?.method === 'digital_human' ? '用数字人的话会再产生几块钱成本。' : ''
+      if (!window.confirm(`确定重做整条？会重新做一条新片(约 15-30 分钟)，做好后替换现在这条。${spend}`)) return
+    }
+    if (!(await ensureSaved())) return
+    await patch({ action: 'start_render' }, 'render', '已开始做片，约 15-30 分钟。做好会出现在下面「成片」区')
+  }
+
   async function uploadRecording(file: File) {
+    if (!(await ensureSaved())) return
     setBusy('upload')
     setError(null)
     setUploadPct(0)
@@ -163,8 +215,8 @@ export default function LectureWorkbenchPage() {
         xhr.upload.onprogress = (ev) => {
           if (ev.lengthComputable) setUploadPct(Math.round((ev.loaded / ev.total) * 100))
         }
-        xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`上传失败 HTTP ${xhr.status}`)))
-        xhr.onerror = () => reject(new Error('上传失败(网络中断?)，请重试'))
+        xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error('上传断了 — 重新点一次「上传你录的视频」(大文件建议在 WiFi 下传)')))
+        xhr.onerror = () => reject(new Error('上传断了 — 重新点一次「上传你录的视频」(大文件建议在 WiFi 下传)'))
         xhr.send(file)
       })
 
@@ -197,7 +249,10 @@ export default function LectureWorkbenchPage() {
       })
       const json = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(json.error || `HTTP ${r.status}`)
-      setNotice(action === 'schedule' ? '已通过 · 进入发布' : '已打回')
+      const platformNames = (data?.post.platforms ?? []).map((p) => PLATFORM_LABEL[p] ?? p).join(' / ')
+      setNotice(action === 'schedule'
+        ? `已通过 ✅ 会按排期自动发到 ${platformNames || '你配置的平台'}，不用你再操作`
+        : '已打回')
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -303,7 +358,7 @@ export default function LectureWorkbenchPage() {
                   onClick={() => redoSection(i)}
                   className="text-xs font-semibold text-white bg-me-ochre rounded-lg px-3 disabled:opacity-40"
                 >
-                  {busy === `redo-${i}` ? '重写中…' : '重写这段'}
+                  {busy === `redo-${i}` ? '重写中…约1分钟，别刷新' : '重写这段'}
                 </button>
               </div>
             )}
@@ -361,7 +416,7 @@ export default function LectureWorkbenchPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
           <button
             disabled={busy !== null}
-            onClick={() => patch({ action: 'set_method', method: 'self_record' }, 'method')}
+            onClick={() => setMethod('self_record')}
             className={`text-left border rounded-xl p-3 transition-colors ${method === 'self_record' ? 'border-me-ochre bg-white' : 'border-me-stone bg-white/60 hover:border-me-ochre'}`}
           >
             <div className="text-sm font-semibold mb-1">{method === 'self_record' ? '● ' : '○ '}我自己录</div>
@@ -372,7 +427,7 @@ export default function LectureWorkbenchPage() {
           </button>
           <button
             disabled={busy !== null}
-            onClick={() => patch({ action: 'set_method', method: 'digital_human' }, 'method')}
+            onClick={() => setMethod('digital_human')}
             className={`text-left border rounded-xl p-3 transition-colors ${method === 'digital_human' ? 'border-me-ochre bg-white' : 'border-me-stone bg-white/60 hover:border-me-ochre'}`}
           >
             <div className="text-sm font-semibold mb-1">{method === 'digital_human' ? '● ' : '○ '}用数字人</div>
@@ -409,17 +464,23 @@ export default function LectureWorkbenchPage() {
           </div>
         )}
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             disabled={busy !== null || Boolean(jobActive) || !method || (method === 'self_record' && !hasRecording)}
-            onClick={() => patch({ action: 'start_render' }, 'render', '已开始做片，约 15-30 分钟。做好会出现在下面「成片」区')}
+            onClick={startRender}
             className="text-sm font-semibold text-white bg-status-track rounded-xl px-5 py-2.5 disabled:opacity-40"
           >
             {busy === 'render' ? '排队中…' : data.post.videoUrl ? '重新做片' : '开始做片'}
           </button>
-          {jobActive && <span className="text-xs text-me-ochre"><span className="animate-pulse">⏳</span> 做片中，约 15-30 分钟，这页会自动刷新</span>}
-          {job?.status === 'failed' && job.error && job.error !== '被重做替代' && (
-            <span className="text-xs text-status-rej">上次做片失败：{job.error}(可再点一次重试)</span>
+          {dirty && !jobActive && <span className="text-xs text-me-taupe">会先自动保存你在 ① 改的脚本</span>}
+          {jobActive && !jobLooksStuck(job) && (
+            <span className="text-xs text-me-ochre"><span className="animate-pulse">⏳</span> 做片中，约 15-30 分钟，这页会自动刷新</span>
+          )}
+          {jobActive && jobLooksStuck(job) && (
+            <span className="text-xs text-status-rej">等太久了？可能卡住了 — 直接联系我们，或等它自动失败后点「重新做片」</span>
+          )}
+          {job?.status === 'failed' && job.error && !job.error.includes('被重做替代') && (
+            <span className="text-xs text-status-rej">{job.error}</span>
           )}
         </div>
       </section>
@@ -491,10 +552,15 @@ export default function LectureWorkbenchPage() {
         <h2 className="font-display font-semibold mb-1">⑤ 成片</h2>
         {data.post.videoUrl ? (
           <>
+            {jobActive && (
+              <div className="text-xs text-me-ochre bg-white border border-me-stone rounded-xl px-3 py-2 mt-2">
+                ⏳ 新片制作中 — 下面这条是旧成片，做好后会自动替换
+              </div>
+            )}
             <video src={data.post.videoUrl} controls playsInline className="w-full max-h-[480px] rounded-xl bg-black my-2" />
             <div className="flex gap-2">
               <button
-                disabled={busy !== null || data.post.status === 'scheduled' || data.post.status === 'published'}
+                disabled={busy !== null || Boolean(jobActive) || data.post.status === 'scheduled' || data.post.status === 'published'}
                 onClick={() => publishAction('schedule')}
                 className="flex-1 text-sm font-semibold text-white bg-status-track rounded-xl py-2.5 disabled:opacity-40"
               >
@@ -502,7 +568,7 @@ export default function LectureWorkbenchPage() {
               </button>
               <button
                 disabled={busy !== null || Boolean(jobActive)}
-                onClick={() => patch({ action: 'start_render' }, 'render', '已重新排做片，约 15-30 分钟')}
+                onClick={startRender}
                 className="text-sm text-me-charcoal border border-me-stone rounded-xl px-4 hover:border-me-ochre disabled:opacity-40"
               >
                 打回重做(整条)

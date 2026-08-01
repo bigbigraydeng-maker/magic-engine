@@ -40,6 +40,7 @@ interface Card {
 
 interface Lesson extends Card {
   lessonNo: number
+  renderFailed?: boolean
 }
 interface Course {
   name: string
@@ -54,11 +55,15 @@ interface BoardData {
 }
 
 // 单讲在流程里的人话状态(比看板段更细)
-function lessonStatus(l: Card): { label: string; cls: string } {
+function lessonStatus(l: Card & { renderFailed?: boolean }): { label: string; cls: string } {
   if (l.status === 'published') return { label: '已发布', cls: 'text-status-track' }
   if (l.status === 'scheduled') return { label: '待发布', cls: 'text-status-sched' }
   if (l.hasVideo) return { label: '成片待审', cls: 'text-status-exec' }
-  if (l.status === 'approved') return { label: '做片中', cls: 'text-me-ochre' }
+  if (l.status === 'approved') {
+    return l.renderFailed
+      ? { label: '做片失败', cls: 'text-status-rej' }
+      : { label: '做片中', cls: 'text-me-ochre' }
+  }
   if (l.status === 'rejected') return { label: '已打回', cls: 'text-status-rej' }
   return { label: '脚本待审', cls: 'text-me-taupe' }
 }

@@ -26,13 +26,23 @@ export interface LectureScript {
   ctaVariants?: LectureCtaVariants // 发布正文按平台两版本
 }
 
-// 小红书导流红线词：CTA 里出现任何一个 = 有限流风险，直接判不合格。
+// 小红书导流红线词(严格版，只用于纯 CTA 字段)：出现任何一个 = 有限流风险，判不合格。
 const XHS_BANNED = ['私信', '加微', '微信', 'vx', 'wx', 'whatsapp', '扣1', '扣 1', 'dd我', '滴滴我']
+
+// 口播导流句式(宽松版，用于钩子/要点/结尾口播)：只拦「冲观众喊」的导流，
+// 不误杀正当教学内容(如「用 Manychat 自动私信发问卷」「以前获客靠微信朋友圈」)。
+const SPOKEN_DIVERSION = ['私信我', '私我', '加我微信', '加微信', '加个微信', '加v', '扣1', '扣 1', 'dd我', '滴滴我']
 
 /** 检查小红书 CTA 是否踩导流红线，返回命中的词(空数组 = 安全)。 */
 export function xhsCtaViolations(text: string): string[] {
   const lower = text.toLowerCase()
   return XHS_BANNED.filter((w) => lower.includes(w.toLowerCase()))
+}
+
+/** 检查口播是否有冲观众喊的导流句式(同片发小红书会限流)。 */
+export function spokenDiversionViolations(text: string): string[] {
+  const lower = text.toLowerCase()
+  return SPOKEN_DIVERSION.filter((w) => lower.includes(w.toLowerCase()))
 }
 
 const SYSTEM = `你是短视频「讲课式文案」编剧。把一个选题写成「上课件 + 下真人口播」的讲课短视频脚本。
@@ -81,10 +91,19 @@ function validateScript(parsed: LectureScript | null): LectureScript {
   if (!parsed?.hookSpoken || !Array.isArray(parsed.sections) || parsed.sections.length === 0) {
     throw new Error('lecture script incomplete')
   }
-  const xhs = parsed.ctaVariants?.xiaohongshu ?? ''
-  const violations = [...xhsCtaViolations(xhs), ...xhsCtaViolations(parsed.ctaSpoken ?? '')]
+  // 每段口播必须非空——空段会让做片时课件和口播错位一页
+  if (parsed.sections.some((s) => !s.spoken?.trim() || !s.slideTitle?.trim())) {
+    throw new Error('lecture section has empty spoken/slideTitle')
+  }
+  // 纯 CTA 字段走严格名单；口播只拦冲观众喊的导流句式(同一条片的音轨要发小红书)
+  const spokenAll = [parsed.hookSpoken, ...parsed.sections.map((s) => s.spoken)]
+  const violations = [
+    ...xhsCtaViolations(parsed.ctaVariants?.xiaohongshu ?? ''),
+    ...xhsCtaViolations(parsed.ctaSpoken ?? ''),
+    ...spokenAll.flatMap((t) => spokenDiversionViolations(t)),
+  ]
   if (violations.length > 0) {
-    throw new Error(`小红书 CTA/口播 CTA 踩导流红线：${violations.join('、')}`)
+    throw new Error(`口播/小红书 CTA 踩导流红线：${violations.join('、')}`)
   }
   return parsed
 }

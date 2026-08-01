@@ -45,12 +45,25 @@ interface SlideColors {
 }
 const DEFAULT_COLORS: SlideColors = { bg: '#1A1A2E', text: '#FFFFFF', accent: '#E94560' }
 
+/**
+ * 更新任务(带防复活守卫)：任务若已被卡死回收(failed)，绝不改回活状态——
+ * 否则被回收后 PM 重排的新任务和原 worker 会重复做片、双倍花钱(魏征 M3)。
+ * 被回收时抛错，让当前 worker 停手。
+ */
 async function patchJob(jobId: string, patch: Record<string, unknown>): Promise<void> {
-  const { error } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('content_factory_render_jobs')
     .update({ ...patch, updated_at: new Date().toISOString() })
     .eq('id', jobId)
+    .neq('status', 'failed')
+    .select('id')
   if (error) throw error
+  if (!data || data.length === 0) throw new Error('任务已被回收(超时标失败)，本次做片作废')
+}
+
+/** 心跳：长阶段(逐段生成)期间定期 touch updated_at，防被卡死回收误杀。 */
+async function heartbeat(jobId: string, status: string): Promise<void> {
+  await patchJob(jobId, { status })
 }
 
 async function download(url: string, dest: string): Promise<void> {
@@ -263,16 +276,19 @@ async function composeLecture(params: {
 /** 逐段配音 + omnihuman 口播人像，concat 成整段人像视频；返回文件与各段时长。 */
 async function buildDigitalHumanTrack(params: {
   clientId: string
+  jobId: string
   parts: string[]           // 各部分口播词
   voiceId: string
   avatarUrl: string
   dir: string
 }): Promise<{ personFile: string; durations: number[] }> {
-  const { clientId, parts, voiceId, avatarUrl, dir } = params
+  const { clientId, jobId, parts, voiceId, avatarUrl, dir } = params
   const durations: number[] = []
   const files: string[] = []
 
   for (let i = 0; i < parts.length; i++) {
+    // 逐段生成最坏要 30-45 分钟，每段 touch 一次防被 45 分钟卡死回收误杀(魏征 M3)
+    await heartbeat(jobId, 'rendering')
     const vo = await generateVoiceover({ clientId, text: parts[i], voiceId, folder: 'lecture-vo' })
     const result = await runMuapi(OMNIHUMAN_MODEL, { image_url: avatarUrl, audio_url: vo.audioUrl })
     const clipUrl = result.outputs[0]
@@ -326,14 +342,24 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
 
     const brief = await getActiveBrief(job.client_id).catch(() => null)
     const vi = (brief?.vi_colors ?? null) as Partial<Record<'primary' | 'secondary' | 'accent', string>> | null
+    // 只认 #rrggbb —— 存成 rgb(...)/色名会炸 PIL 和 ffmpeg，回落默认色(魏征 m5)
+    const hexOk = (c: string | undefined): c is string => Boolean(c && /^#[0-9a-f]{6}$/i.test(c))
     const colors: SlideColors = {
-      bg: vi?.primary || DEFAULT_COLORS.bg,
+      bg: hexOk(vi?.primary) ? vi.primary : DEFAULT_COLORS.bg,
       text: DEFAULT_COLORS.text,
-      accent: vi?.secondary || DEFAULT_COLORS.accent,
+      accent: hexOk(vi?.secondary) ? vi.secondary : DEFAULT_COLORS.accent,
     }
     const brand = brief?.brand_name || ''
-    const spokenParts = [lecture.hookSpoken, ...lecture.sections.map((s) => s.spoken), lecture.ctaSpoken]
-      .filter((s) => s && s.trim())
+    // 口播与课件从同一份结构过滤——空口播段(如没写 CTA)连同它的课件一起剔掉，
+    // 绝不让后面的课件错位一页(魏征 m4)
+    const allSlides = slidesOfLecture(lecture, brand)
+    const entries = [
+      { spoken: lecture.hookSpoken, slide: allSlides[0] },
+      ...lecture.sections.map((s, i) => ({ spoken: s.spoken, slide: allSlides[1 + i] })),
+      { spoken: lecture.ctaSpoken ?? '', slide: allSlides[allSlides.length - 1] },
+    ].filter((e) => e.spoken && e.spoken.trim())
+    if (entries.length === 0) throw new Error('脚本没有任何口播内容')
+    const spokenParts = entries.map((e) => e.spoken)
 
     await patchJob(jobId, { status: 'rendering' })
 
@@ -357,6 +383,7 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
       const renderCfg = await clientRenderConfig(job.client_id)
       const track = await buildDigitalHumanTrack({
         clientId: job.client_id,
+        jobId,
         parts: spokenParts,
         voiceId: renderCfg.voiceId,
         avatarUrl: renderCfg.avatarUrl,
@@ -375,15 +402,13 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
 
     await patchJob(jobId, { status: 'assembling' })
 
-    const slideFiles = await renderSlides(slidesOfLecture(lecture, brand), colors, brand, dir)
-    // 课件数 = 钩子 + 要点 N + CTA；口播部分数与其一致(空口播已过滤，课件按 parts 长度对齐截取)
-    const usableSlides = slideFiles.slice(0, parts.length)
+    const slideFiles = await renderSlides(entries.map((e) => e.slide), colors, brand, dir)
     const captionFiles = await renderCaptions(captionChunks, dir)
 
     const outFile = join(dir, 'final.mp4')
     await composeLecture({
       personFile, duration, parts,
-      slideFiles: usableSlides,
+      slideFiles,
       captionChunks, captionFiles,
       bg: colors.bg, outFile,
     })
@@ -394,11 +419,13 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
     const { data: pub } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(path)
 
     await patchJob(jobId, { status: 'ready_for_review', output_url: pub.publicUrl })
+    // 只在内容还在审片前的状态时回写成片——已排发/已发布的绝不悄悄换片(魏征 M4)
     await supabaseAdmin
       .from('content_posts')
       .update({ source_video_url: pub.publicUrl })
       .eq('client_id', job.client_id)
       .eq('id', job.content_post_id)
+      .not('status', 'in', '(scheduled,published)')
 
     return { outputUrl: pub.publicUrl }
   } catch (e) {

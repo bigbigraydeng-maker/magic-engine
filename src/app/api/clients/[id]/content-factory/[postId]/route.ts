@@ -27,11 +27,16 @@ export async function PATCH(
       .update({ status })
       .eq('client_id', params.id)   // 双重限定，防越权改到别客户
       .eq('id', params.postId)
-      .select('id, status')
+      .select('id, status, format')
       .single()
 
     if (error) throw error
     if (!data) return NextResponse.json({ error: '未找到该内容' }, { status: 404 })
+
+    // 讲课式不在这里排做片——要先在单讲工作台选制作方式/传录像，直接排必失败(魏征 m2)
+    if (body.action === 'confirm' && data.format === '讲课式') {
+      return NextResponse.json({ post: data, render: { jobId: null, created: false, reason: '讲课式内容请进该讲的工作台开始做片' } })
+    }
 
     // 确认 = 建做片任务(流水线入口)。best-effort：建任务失败不回滚确认，只回报。
     let render: { jobId: string | null; created: boolean; reason?: string; error?: string } | undefined

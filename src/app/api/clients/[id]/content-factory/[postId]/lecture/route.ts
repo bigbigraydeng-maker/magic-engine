@@ -9,6 +9,7 @@ import { getActiveBrief } from '@/lib/content/brief-injector'
 import {
   planLectureScript,
   redoLectureSection,
+  spokenDiversionViolations,
   xhsCtaViolations,
   type LectureScript,
 } from '@/lib/factory/lecture-script'
@@ -28,6 +29,19 @@ const ACTIVE_JOB_STATUSES = ['queued', 'planning', 'rendering', 'assembling']
 
 type Params = { params: { id: string; postId: string } }
 
+/**
+ * 做片失败原因翻成人话再给前端(板桥审:原始 error 含供应商名/黑话，绝不能直出客户屏幕)。
+ * 原始 error 留在任务表里给我们排查用。
+ */
+function humanJobError(raw: string | null): string | null {
+  if (!raw) return null
+  if (raw.includes('被重做替代')) return raw // 前端据此隐藏，不展示
+  if (/API_KEY|未配置|not set|configuration/i.test(raw)) return '系统配置还没弄好，请直接联系我们，我们来处理'
+  if (/听写|whisper|语音/i.test(raw)) return '没听清录像里的声音 — 换个安静点的环境重录一条，再点「重新做片」'
+  if (/下载失败|录像/.test(raw)) return '录像文件读取失败 — 重新上传一次录像，再点「重新做片」'
+  return '做片出错了 — 点「重新做片」再试一次；连续两次失败请直接联系我们'
+}
+
 async function latestJob(postId: string) {
   const { data } = await supabaseAdmin
     .from('content_factory_render_jobs')
@@ -35,7 +49,8 @@ async function latestJob(postId: string) {
     .eq('content_post_id', postId)
     .order('created_at', { ascending: false })
     .limit(1)
-  return data?.[0] ?? null
+  const job = data?.[0]
+  return job ? { ...job, error: humanJobError(job.error as string | null) } : null
 }
 
 export async function GET(_req: NextRequest, { params }: Params) {
@@ -65,7 +80,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
       { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate', 'CDN-Cache-Control': 'no-store' } },
     )
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Unknown error' }, { status: 500 })
+    return NextResponse.json({ error: '出错了，刷新页面再试一次；反复出错请直接联系我们' }, { status: 500 })
   }
 }
 
@@ -76,12 +91,17 @@ function validateLecturePayload(lecture: LectureScript): string | null {
     if (!s.spoken?.trim() || !s.slideTitle?.trim()) return '每个要点的口播词和课件标题都不能为空'
     if (!Array.isArray(s.slidePoints)) return '课件要点格式不对'
   }
+  // 魏征 m3:口播也要扫——同一条片的音轨要发小红书。纯 CTA 字段走严格名单，
+  // 口播只拦冲观众喊的导流句式(不误杀「用工具自动私信」这类教学内容)。
+  // 只有 FB/TikTok 文案版允许「私信」。
+  const spokenAll = [lecture.hookSpoken, ...lecture.sections.map((s) => s.spoken)]
   const violations = [
     ...xhsCtaViolations(lecture.ctaVariants?.xiaohongshu ?? ''),
     ...xhsCtaViolations(lecture.ctaSpoken ?? ''),
+    ...spokenAll.flatMap((t) => spokenDiversionViolations(t ?? '')),
   ]
   if (violations.length > 0) {
-    return `小红书版 CTA 和口播 CTA 里不能出现「${violations.join('、')}」——小红书导流会被限流`
+    return `口播和小红书文案里不能出现「${Array.from(new Set(violations)).join('、')}」——这条片要发小红书，带导流词会被限流`
   }
   return null
 }
@@ -110,17 +130,18 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
       case 'set_method': {
         if (body.method !== 'self_record' && body.method !== 'digital_human') {
-          return NextResponse.json({ error: "method 必须是 'self_record' / 'digital_human'" }, { status: 400 })
+          return NextResponse.json({ error: '操作没成功，刷新页面再试一次' }, { status: 400 })
         }
         await setLectureProduction({ clientId: params.id, postId: params.postId, method: body.method })
         return NextResponse.json({ ok: true })
       }
 
       case 'recording_uploaded': {
-        // path 必须落在本讲自己的目录下，防拿别人的文件当自己的录像
-        const prefix = `${params.id}/lecture/${params.postId}/`
-        if (!body.path || !body.path.startsWith(prefix)) {
-          return NextResponse.json({ error: '上传路径不合法' }, { status: 400 })
+        // path 必须严格是本讲目录下 POST 签出的文件名格式(魏征 M1:startsWith 会被 `..` 穿透，
+        // getPublicUrl 纯拼串、下载时 URL 归一化后能指到别的客户目录)
+        const pathRe = new RegExp(`^${params.id}/lecture/${params.postId}/recording-\\d+\\.(mp4|mov|m4v|webm)$`)
+        if (!body.path || !pathRe.test(body.path)) {
+          return NextResponse.json({ error: '上传没成功，请重新点「上传你录的视频」再传一次' }, { status: 400 })
         }
         const { data: pub } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(body.path)
         await setLectureProduction({
@@ -135,30 +156,43 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       case 'redo_section': {
         const index = body.index
         if (typeof index !== 'number' || !loaded.lecture.sections[index]) {
-          return NextResponse.json({ error: '要重做的段落不存在' }, { status: 400 })
+          return NextResponse.json({ error: '要重做的段落不存在，刷新页面再试一次' }, { status: 400 })
         }
-        const section = await redoLectureSection({
-          clientId: params.id,
-          lecture: loaded.lecture,
-          sectionIndex: index,
-          instruction: body.instruction,
-        })
-        const lecture: LectureScript = {
-          ...loaded.lecture,
-          sections: loaded.lecture.sections.map((s, i) => (i === index ? section : s)),
+        try {
+          const section = await redoLectureSection({
+            clientId: params.id,
+            lecture: loaded.lecture,
+            sectionIndex: index,
+            instruction: body.instruction,
+          })
+          const lecture: LectureScript = {
+            ...loaded.lecture,
+            sections: loaded.lecture.sections.map((s, i) => (i === index ? section : s)),
+          }
+          await saveLectureScript({ clientId: params.id, postId: params.postId, lecture, backupPrev: true })
+          return NextResponse.json({ ok: true, lecture })
+        } catch {
+          // AI 生成失败的原始报错含供应商名/英文黑话，不给客户看
+          return NextResponse.json({ error: '这段没重写成功 — 等半分钟再点一次；反复失败请直接联系我们' }, { status: 502 })
         }
-        await saveLectureScript({ clientId: params.id, postId: params.postId, lecture, backupPrev: true })
-        return NextResponse.json({ ok: true, lecture })
       }
 
       case 'regen_script': {
-        const topic = [loaded.post.title, body.instruction].filter(Boolean).join('\n重写要求：')
-        const lecture = await planLectureScript({ clientId: params.id, topic })
-        await saveLectureScript({ clientId: params.id, postId: params.postId, lecture, backupPrev: true })
-        return NextResponse.json({ ok: true, lecture })
+        try {
+          const topic = [loaded.post.title, body.instruction].filter(Boolean).join('\n重写要求：')
+          const lecture = await planLectureScript({ clientId: params.id, topic })
+          await saveLectureScript({ clientId: params.id, postId: params.postId, lecture, backupPrev: true })
+          return NextResponse.json({ ok: true, lecture })
+        } catch {
+          return NextResponse.json({ error: '重写没成功 — 等半分钟再点一次；反复失败请直接联系我们' }, { status: 502 })
+        }
       }
 
       case 'start_render': {
+        // 魏征 M4:已排发/已发布的内容不许再悄悄换片——发出去的必须和审过的是同一条
+        if (loaded.post.status === 'scheduled' || loaded.post.status === 'published') {
+          return NextResponse.json({ error: '这条已经进发布了，不能再重做。真要换，先联系我们把它撤下来' }, { status: 409 })
+        }
         const production = loaded.production
         if (!production?.method) {
           return NextResponse.json({ error: '先选制作方式(自己录 / 数字人)' }, { status: 400 })
@@ -186,10 +220,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       }
 
       default:
-        return NextResponse.json({ error: '不认识的 action' }, { status: 400 })
+        return NextResponse.json({ error: '操作没成功，刷新页面再试一次' }, { status: 400 })
     }
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Unknown error' }, { status: 500 })
+    return NextResponse.json({ error: '出错了，刷新页面再试一次；反复出错请直接联系我们' }, { status: 500 })
   }
 }
 
@@ -209,6 +243,6 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     return NextResponse.json({ path: data.path, signedUrl: data.signedUrl, token: data.token })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Unknown error' }, { status: 500 })
+    return NextResponse.json({ error: '出错了，刷新页面再试一次；反复出错请直接联系我们' }, { status: 500 })
   }
 }
