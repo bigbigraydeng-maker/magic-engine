@@ -58,6 +58,7 @@ export function replaceMetaForSlug(
   slug: string,
   newTitle: string,
   newDesc: string,
+  descField: 'description' | 'excerpt' = 'description',
 ): MetaReplacement | null {
   const slugIdx = source.indexOf(`slug: '${slug}'`)
   if (slugIdx === -1) return null
@@ -69,7 +70,7 @@ export function replaceMetaForSlug(
   const window = source.slice(slugIdx, windowEnd)
 
   const titleRe = new RegExp(`(title:\\s*)${STRING_LITERAL.source}`)
-  const descRe = new RegExp(`(description:\\s*)${STRING_LITERAL.source}`)
+  const descRe = new RegExp(`(${descField}:\\s*)${STRING_LITERAL.source}`)
 
   const titleMatch = window.match(titleRe)
   const descMatch = window.match(descRe)
@@ -109,6 +110,8 @@ export interface MetaCandidate {
   keyword: string
   impressions: number
   position: number
+  /** Blog posts live in per-post data files with `excerpt` as the meta desc. */
+  isBlog: boolean
 }
 
 export function pickCandidates(
@@ -152,6 +155,7 @@ export function pickCandidates(
       keyword: match?.query ?? slug.replace(/-/g, ' '),
       impressions: page.impressions ?? 0,
       position: page.position ?? 0,
+      isBlog: (page.page ?? '').includes('/blog/'),
     })
   }
   return out
@@ -243,10 +247,25 @@ export async function runCtsMetaPr(
     }
     const defaultBranch = branch || 'main'
     const github = new GithubClient(plainToken)
-    const file = await github.getFileContent(repoOwner, repoName, META_FILE_PATH, defaultBranch)
 
-    // 3. Narrow-lane edits — slugs not managed by the meta file are skipped.
-    let source = file.decodedContent
+    // 3. Narrow-lane edits, two lanes:
+    //    · hub pages   → META_FILE_PATH        (field: description)
+    //    · blog posts  → blogs-<slug>.ts each  (field: excerpt — it IS the
+    //      meta description in this repo, and also the visible headline/card
+    //      copy, which is exactly what a CTR fix should change)
+    //    Slugs whose file/entry can't be found are skipped — never guess.
+    const fileCache = new Map<string, { source: string; sha: string; dirty: boolean }>()
+    const loadFile = async (path: string) => {
+      if (!fileCache.has(path)) {
+        const f = await github
+          .getFileContent(repoOwner, repoName, path, defaultBranch)
+          .catch(() => null)
+        if (!f) return null
+        fileCache.set(path, { source: f.decodedContent, sha: f.sha, dirty: false })
+      }
+      return fileCache.get(path)!
+    }
+
     const applied: Array<{
       candidate: MetaCandidate
       newTitle: string
@@ -256,11 +275,25 @@ export async function runCtsMetaPr(
     }> = []
 
     for (const candidate of candidates) {
+      const path = candidate.isBlog
+        ? `src/lib/data/blogs-${candidate.slug}.ts`
+        : META_FILE_PATH
+      const entry = await loadFile(path)
+      if (!entry) continue
+
       const meta = await generateCtsMeta(candidate.keyword, candidate.pageUrl)
       if (!meta.desc) continue
-      const replaced = replaceMetaForSlug(source, candidate.slug, meta.title, meta.desc)
+
+      const replaced = replaceMetaForSlug(
+        entry.source,
+        candidate.slug,
+        meta.title,
+        meta.desc,
+        candidate.isBlog ? 'excerpt' : 'description',
+      )
       if (!replaced) continue
-      source = replaced.updated
+      entry.source = replaced.updated
+      entry.dirty = true
       applied.push({
         candidate,
         newTitle: meta.title,
@@ -271,20 +304,23 @@ export async function runCtsMetaPr(
     }
     if (applied.length === 0) return { outcome: 'nothing_editable' }
 
-    // 4. Branch + commit + PR (CI gate + human merge)
+    // 4. Branch + one commit per touched file + PR (CI gate + human merge)
     const day = new Date().toISOString().slice(0, 10)
     const prBranch = `feat/me-seo-meta-${day}`
     const baseSha = await github.getBranchSha(repoOwner, repoName, defaultBranch)
     await github.createBranch(repoOwner, repoName, prBranch, baseSha)
-    await github.commitFile(
-      repoOwner,
-      repoName,
-      META_FILE_PATH,
-      prBranch,
-      source,
-      `seo: refresh meta titles for ${applied.map((a) => a.candidate.slug).join(', ')} [Magic Engine]`,
-      file.sha,
-    )
+    for (const [path, entry] of Array.from(fileCache.entries())) {
+      if (!entry.dirty) continue
+      await github.commitFile(
+        repoOwner,
+        repoName,
+        path,
+        prBranch,
+        entry.source,
+        `seo: refresh meta for ${path.split('/').pop()} [Magic Engine]`,
+        entry.sha,
+      )
+    }
 
     const body = applied
       .map(
@@ -295,7 +331,7 @@ export async function runCtsMetaPr(
 
     const pr = await github.createPullRequest(repoOwner, repoName, {
       title: `[Magic Engine] SEO 标题优化 ×${applied.length}`,
-      body: `${body}\n\n> 巡逻发现这些页面排名在 4-20 名但标题点击力不足。只改了 seo-pages.ts 的字符串，构建检查通过后合并即生效。`,
+      body: `${body}\n\n> 巡逻发现这些页面排名在 4-20 名但标题点击力不足。只改了 meta 数据文件里的标题/摘要字符串（blog 的标题和摘要同时是页面可见文案，正是点击力要改的东西）。构建检查通过后合并即生效。`,
       head: prBranch,
       base: defaultBranch,
     })

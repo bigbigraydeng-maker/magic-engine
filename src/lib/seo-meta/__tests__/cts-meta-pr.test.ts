@@ -46,6 +46,32 @@ describe('replaceMetaForSlug — narrow lane', () => {
   it('returns null for slugs the meta file does not manage (skip, never guess)', () => {
     expect(replaceMetaForSlug(SOURCE, 'not-a-page', 'x', 'y')).toBeNull()
   })
+
+  it('blog lane: edits title + excerpt in a per-post data file', () => {
+    const blogSource = `export const chongqingVsChengduPost: BlogPost = {
+  id: 'lt-1',
+  slug: 'chongqing-vs-chengdu',
+  title: 'Chongqing vs Chengdu: Which Should NZ Travellers Visit in 2026?',
+  excerpt:
+    'Hotpot capital vs panda capital — old excerpt.',
+  author: 'Baker Gu',
+};
+`
+    const result = replaceMetaForSlug(
+      blogSource, 'chongqing-vs-chengdu', 'New CQ Title | CTS', 'New excerpt with CTA.', 'excerpt',
+    )
+    expect(result).not.toBeNull()
+    expect(result!.updated).toContain("title: 'New CQ Title | CTS'")
+    expect(result!.updated).toContain("'New excerpt with CTA.'")
+    expect(result!.oldDesc).toBe('Hotpot capital vs panda capital — old excerpt.')
+    // author line untouched
+    expect(result!.updated).toContain("author: 'Baker Gu'")
+  })
+
+  it('blog lane: returns null when the post has no excerpt field', () => {
+    const noExcerpt = `export const xPost: BlogPost = { slug: 'x-post', title: 'T', author: 'A' };`
+    expect(replaceMetaForSlug(noExcerpt, 'x-post', 'a', 'b', 'excerpt')).toBeNull()
+  })
 })
 
 describe('pickCandidates', () => {
