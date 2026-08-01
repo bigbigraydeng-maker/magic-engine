@@ -11,6 +11,9 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
+import { createWriteStream } from 'node:fs'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { supabaseAdmin } from '@/lib/supabase'
@@ -66,10 +69,16 @@ async function heartbeat(jobId: string, status: string): Promise<void> {
   await patchJob(jobId, { status })
 }
 
-async function download(url: string, dest: string): Promise<void> {
-  const res = await fetch(url, { signal: AbortSignal.timeout(180000) })
-  if (!res.ok) throw new Error(`下载失败 ${res.status}: ${url}`)
-  await writeFile(dest, Buffer.from(await res.arrayBuffer()))
+/**
+ * 边下边写盘 —— 绝不把整个文件读进内存。
+ * 真实事故(2026-08-01):160MB 手机录像走 arrayBuffer + Buffer.from = 内存里两份共 320MB，
+ * 512MB 的做片容器被系统直接杀掉，任务静悄悄卡在 rendering 连报错都没留下。
+ * 超时按大文件放宽到 20 分钟(整段录像可能几百 MB)。
+ */
+async function download(url: string, dest: string, timeoutMs = 20 * 60 * 1000): Promise<void> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
+  if (!res.ok || !res.body) throw new Error(`下载失败 ${res.status}: ${url}`)
+  await pipeline(Readable.fromWeb(res.body as import('node:stream/web').ReadableStream), createWriteStream(dest))
 }
 
 async function ffprobeDuration(file: string): Promise<number> {
@@ -124,23 +133,69 @@ cfg = json.loads(sys.argv[1])
 W, H = cfg["w"], cfg["h"]
 img = Image.new("RGBA", (W, H), cfg["bg"])
 d = ImageDraw.Draw(img)
-title_font = ImageFont.truetype(cfg["font"], 76)
-point_font = ImageFont.truetype(cfg["font"], 52)
-small_font = ImageFont.truetype(cfg["font"], 34)
 PAD = 80
-y = 300
-d.rectangle([PAD, y, PAD + 120, y + 12], fill=cfg["accent"])
-y += 48
-for line in cfg["title_lines"]:
-    d.text((PAD, y), line, font=title_font, fill=cfg["text"])
-    y += 96
-y += 36
-for p in cfg["points"]:
-    d.ellipse([PAD, y + 22, PAD + 18, y + 40], fill=cfg["accent"])
-    d.text((PAD + 44, y), p, font=point_font, fill=cfg["text"])
-    y += 88
+TOP = 300                 # 内容起点(避开平台 UI 顶部遮挡)
+BRAND_H = 110             # 底部品牌行占位:要点绝不许压上去
+BULLET_X = PAD + 44
+MAX_W = W - BULLET_X - PAD
+
+def wrap(text, font, max_w):
+    """按测量宽度折行(中文没有词边界，逐字累加)。"""
+    lines, cur = [], ""
+    for ch in text:
+        if d.textlength(cur + ch, font=font) <= max_w:
+            cur += ch
+        else:
+            if cur:
+                lines.append(cur)
+            cur = ch
+    if cur:
+        lines.append(cur)
+    return lines or [""]
+
+def layout(title_size, point_size, gap):
+    """按给定字号排一遍，返回(总高, 画的指令)。放不下就让调用方缩字号。"""
+    tf = ImageFont.truetype(cfg["font"], title_size)
+    pf = ImageFont.truetype(cfg["font"], point_size)
+    ops, y = [], TOP
+    ops.append(("rect", PAD, y, PAD + 120, y + 12))
+    y += 48
+    for line in wrap(cfg["title"], tf, W - 2 * PAD)[:2]:
+        ops.append(("text", PAD, y, line, tf))
+        y += int(title_size * 1.26)
+    y += 36
+    for p in cfg["points"]:
+        if not p.strip():
+            continue
+        wrapped = wrap(p.strip(), pf, MAX_W)[:2]
+        ops.append(("dot", PAD, y + int(point_size * 0.42), PAD + 18, y + int(point_size * 0.42) + 18))
+        for i, line in enumerate(wrapped):
+            ops.append(("text", BULLET_X, y, line, pf))
+            y += int(point_size * 1.28)
+        y += int(point_size * 0.3)
+    return y, ops
+
+# 字号自适应:先按标准字号排，超出可用高度就整体缩小(最小 34)，保证一个字都不被裁
+avail = H - BRAND_H
+title_size, point_size = 76, 52
+while True:
+    total, ops = layout(title_size, point_size, 0)
+    if total <= avail or point_size <= 34:
+        break
+    title_size = max(48, title_size - 4)
+    point_size -= 3
+
+for op in ops:
+    if op[0] == "rect":
+        d.rectangle([op[1], op[2], op[3], op[4]], fill=cfg["accent"])
+    elif op[0] == "dot":
+        d.ellipse([op[1], op[2], op[3], op[4]], fill=cfg["accent"])
+    else:
+        d.text((op[1], op[2]), op[3], font=op[4], fill=cfg["text"])
+
 if cfg.get("brand"):
-    d.text((PAD, H - 80), cfg["brand"], font=small_font, fill=cfg["accent"])
+    small_font = ImageFont.truetype(cfg["font"], 34)
+    d.text((PAD, H - 72), cfg["brand"], font=small_font, fill=cfg["accent"])
 img.save(cfg["out"])
 `
 
@@ -159,13 +214,6 @@ x = (W - (box[2] - box[0])) // 2
 d.text((x, cfg["y"]), text, font=font, fill="white", stroke_width=5, stroke_fill="black")
 img.save(cfg["out"])
 `
-
-/** 课件标题过长时切两行(≤9 字/行，最多两行)。 */
-function slideTitleLines(title: string): string[] {
-  const t = title.trim()
-  if (t.length <= 9) return [t]
-  return [t.slice(0, 9), t.slice(9, 18)]
-}
 
 interface SlideSpec {
   title: string
@@ -194,7 +242,7 @@ async function renderSlides(
       w: W, h: SLIDE_H,
       bg: colors.bg, text: colors.text, accent: colors.accent,
       font: CJK_FONT,
-      title_lines: slideTitleLines(slides[i].title),
+      title: slides[i].title.trim(),
       points: slides[i].points.slice(0, 4),
       brand,
       out,
@@ -374,8 +422,10 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
       if (!production.recording_url) throw new Error('没有上传的录像')
       personFile = join(dir, 'rec.mp4')
       await download(production.recording_url, personFile)
+      await heartbeat(jobId, 'rendering')   // 大文件下载可能几分钟，别让卡死回收误杀
       duration = await ffprobeDuration(personFile)
       const segments = await whisperTranscribe(await extractAudio(personFile, dir))
+      await heartbeat(jobId, 'rendering')
       parts = alignPartsToSegments(spokenParts, segments)
       // 对轴结果首尾对齐整条录像(录像可能比第一句早开始/最后一句晚结束)
       parts[0] = { ...parts[0], start: 0 }
