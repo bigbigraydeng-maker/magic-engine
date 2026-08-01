@@ -5,10 +5,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
-const { mockClientsQuery, mockEq, mockSnapshotRankedKeywordsForClient } = vi.hoisted(() => ({
+const { mockClientsQuery, mockEq, mockSnapshotRankedKeywordsForClient, mockCaptureSerpForClient } = vi.hoisted(() => ({
   mockClientsQuery: vi.fn(),
   mockEq: vi.fn(),
   mockSnapshotRankedKeywordsForClient: vi.fn(),
+  mockCaptureSerpForClient: vi.fn(),
 }))
 
 vi.mock('@/lib/supabase', () => ({
@@ -25,6 +26,10 @@ vi.mock('@/lib/supabase', () => ({
 
 vi.mock('@/lib/seo-intelligence/keyword-snapshots', () => ({
   snapshotRankedKeywordsForClient: mockSnapshotRankedKeywordsForClient,
+}))
+
+vi.mock('@/lib/seo-intelligence/serp-capture', () => ({
+  captureSerpForClient: mockCaptureSerpForClient,
 }))
 
 // startCronRun writes to cron_run_logs via supabaseAdmin — out of scope here
@@ -47,6 +52,15 @@ describe('GET /api/cron/keyword-snapshots-weekly', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     process.env.CRON_SECRET = CRON_SECRET
+    // Step 2 (SERP capture) default: succeeds with nothing captured.
+    mockCaptureSerpForClient.mockResolvedValue({
+      client_id: 'x',
+      domain: 'x',
+      keywords_captured: 0,
+      serp_rows_written: 0,
+      local_pack_hits: 0,
+      keywords_failed: 0,
+    })
   })
 
   it('returns 500 when CRON_SECRET env var is not set', async () => {
@@ -129,6 +143,8 @@ describe('GET /api/cron/keyword-snapshots-weekly', () => {
       id: 'client-cts',
       domain: 'ctstours.com.au',
       semrush_db: 'au',
+      name: '',
+      brand_aliases: null,
     })
   })
 
@@ -166,6 +182,61 @@ describe('GET /api/cron/keyword-snapshots-weekly', () => {
       client_id: 'client-ok',
       snapshots_written: 120,
     })
+  })
+
+  it('runs SERP capture (step 2) per client and reports its counts', async () => {
+    mockClientsQuery.mockResolvedValueOnce({
+      data: [{ id: 'client-cts', domain: 'ctstours.com.au', semrush_db: 'au', name: 'CTS', brand_aliases: [] }],
+      error: null,
+    })
+    mockSnapshotRankedKeywordsForClient.mockResolvedValueOnce({
+      client_id: 'client-cts',
+      domain: 'ctstours.com.au',
+      location_code: 2036,
+      keywords_seen: 10,
+      snapshots_written: 10,
+    })
+    mockCaptureSerpForClient.mockResolvedValueOnce({
+      client_id: 'client-cts',
+      domain: 'ctstours.com.au',
+      keywords_captured: 10,
+      serp_rows_written: 10,
+      local_pack_hits: 3,
+      keywords_failed: 0,
+    })
+
+    const { GET } = await import('./route')
+    const res = await GET(makeRequest(CRON_SECRET))
+    const json = await res.json()
+
+    expect(mockCaptureSerpForClient).toHaveBeenCalledTimes(1)
+    expect(json.serp_rows_written).toBe(10)
+    expect(json.serp_failed).toBe(0)
+    expect(json.results[0].serp).toMatchObject({ local_pack_hits: 3 })
+  })
+
+  it('SERP capture failure does not fail the client (step 1 already landed)', async () => {
+    mockClientsQuery.mockResolvedValueOnce({
+      data: [{ id: 'client-cts', domain: 'ctstours.com.au', semrush_db: 'au', name: 'CTS', brand_aliases: [] }],
+      error: null,
+    })
+    mockSnapshotRankedKeywordsForClient.mockResolvedValueOnce({
+      client_id: 'client-cts',
+      domain: 'ctstours.com.au',
+      location_code: 2036,
+      keywords_seen: 10,
+      snapshots_written: 10,
+    })
+    mockCaptureSerpForClient.mockRejectedValueOnce(new Error('DataForSEO SERP error: 500'))
+
+    const { GET } = await import('./route')
+    const res = await GET(makeRequest(CRON_SECRET))
+    const json = await res.json()
+
+    expect(json.failed).toBe(0)
+    expect(json.serp_failed).toBe(1)
+    expect(json.snapshots_written).toBe(10)
+    expect(json.results[0].serp_error).toMatch(/DataForSEO/)
   })
 
   it('filters out clients that have null or empty domain', async () => {
