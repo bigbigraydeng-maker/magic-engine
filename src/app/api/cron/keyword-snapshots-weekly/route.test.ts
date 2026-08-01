@@ -182,6 +182,8 @@ describe('GET /api/cron/keyword-snapshots-weekly', () => {
       client_id: 'client-ok',
       snapshots_written: 120,
     })
+    // 步 2 只对步 1 成功的客户跑（防止把 SERP 步挪到 try 外的变异）
+    expect(mockCaptureSerpForClient).toHaveBeenCalledTimes(1)
   })
 
   it('runs SERP capture (step 2) per client and reports its counts', async () => {

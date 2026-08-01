@@ -518,6 +518,11 @@ async function collectLocalVisibilityFromSnapshots(
     const latest = latestRow as { snapshot_date: string; semrush_db: string | null } | null
     if (!latest) return null
 
+    // 时效闸：采集断掉后不能把陈年 local pack 数据当当期展示（月报按月出，
+    // 放宽到 35 天覆盖月初出上月报的场景）。过期就走 fallback。
+    const ageMs = Date.now() - new Date(`${latest.snapshot_date}T00:00:00Z`).getTime()
+    if (ageMs > 35 * 24 * 60 * 60 * 1000) return null
+
     const { data: rows, error } = await supabaseAdmin
       .from('keyword_snapshots')
       .select('keyword, local_pack_rank')

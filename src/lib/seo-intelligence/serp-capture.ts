@@ -68,10 +68,13 @@ export function domainRoot(input: string | null | undefined): string {
 
 const normalise = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
 
+/** 短于此的 needle 只做全等匹配 —— "cts" 子串会命中 "produCTS"（魏征 🟡2）。 */
+const MIN_SUBSTRING_LEN = 4
+
 /**
  * 客户在 local pack 里的名次（1-3），不在返回 null。
  * 匹配优先级：listing domain 命中客户 domain 根 → listing 名字含
- * 客户 brand alias / 客户名（大小写、空格归一后子串匹配）。
+ * 客户 brand alias / 客户名（归一后子串匹配；短 needle 只全等）。
  */
 export function resolveLocalPackRank(
   localPack: DfseSerpResult['local_pack'],
@@ -90,26 +93,43 @@ export function resolveLocalPackRank(
     if (clientRoot && entryRoot && entryRoot === clientRoot) return i + 1
 
     const entryName = normalise(entry.name)
-    if (entryName && nameNeedles.some(n => entryName.includes(n))) return i + 1
+    if (
+      entryName &&
+      nameNeedles.some(n =>
+        n.length < MIN_SUBSTRING_LEN ? entryName === n : entryName.includes(n),
+      )
+    ) {
+      return i + 1
+    }
   }
   return null
 }
 
-/** SERP 结果 → serp_ai_overview_snapshots 一行。 */
+/**
+ * SERP 结果 → serp_ai_overview_snapshots 一行。
+ * snapshot_date 用关键词快照的真实日期（不是"今天"）——步 1 当周瞬时 0 词时
+ * 关键词来自上周快照，用今天当键会让 local_pack_rank 回写静默匹配 0 行（魏征 🔴2），
+ * 也让本表能按日期与 keyword_snapshots join 对齐。
+ */
 export function buildSerpSnapshotRow(
   client: SerpCaptureClient,
   keyword: string,
   serp: DfseSerpResult,
+  snapshotDate: string,
   measuredAt: Date,
 ): SerpSnapshotRow {
-  const measuredAtIso = measuredAt.toISOString()
   const clientRoot = domainRoot(client.domain)
 
   const citedSources = serp.ai_overview_sources.filter(Boolean)
   const hasAiOverview = serp.ai_overview_text !== null || citedSources.length > 0
+  // host 全等或以 ".{clientRoot}" 结尾 —— 裸 includes 会把
+  // "myctstours.co.nz.evil.com" 或路径里提到域名的第三方页当成引用（魏征 🟡3）
   const clientCited =
     clientRoot.length > 0 &&
-    citedSources.some(url => domainRoot(url) === clientRoot || url.toLowerCase().includes(clientRoot))
+    citedSources.some(url => {
+      const host = domainRoot(url)
+      return host === clientRoot || host.endsWith(`.${clientRoot}`)
+    })
 
   const topOrganicDomains = Array.from(
     new Set(serp.organic_results.map(r => domainRoot(r.url)).filter(Boolean)),
@@ -119,12 +139,12 @@ export function buildSerpSnapshotRow(
     client_id: client.id,
     keyword,
     location_code: locationCodeForDb(client.semrush_db),
-    snapshot_date: measuredAtIso.slice(0, 10),
+    snapshot_date: snapshotDate,
     has_ai_overview: hasAiOverview,
     client_cited: clientCited,
     cited_sources: citedSources,
     top_organic_domains: topOrganicDomains,
-    measured_at: measuredAtIso,
+    measured_at: measuredAt.toISOString(),
   }
 }
 
@@ -182,10 +202,11 @@ export async function captureSerpForClient(
   }
 
   const snapshot = await getLatestKeywordSnapshotForClient(client)
+  const snapshotDate = snapshot.snapshot_date
   const keywords = Array.from(new Set(snapshot.keywords.map(k => k.keyword))).filter(
     k => k.trim().length > 0,
   )
-  if (keywords.length === 0) return base
+  if (!snapshotDate || keywords.length === 0) return base
 
   const countryCode = (client.semrush_db === 'nz' ? 'nz' : 'au') as 'au' | 'nz'
   const measuredAt = new Date()
@@ -198,7 +219,7 @@ export async function captureSerpForClient(
   const packRanks: Array<{ keyword: string; rank: number | null }> = []
   for (const r of serpResults) {
     if (!r.result) continue
-    rows.push(buildSerpSnapshotRow(client, r.item, r.result, measuredAt))
+    rows.push(buildSerpSnapshotRow(client, r.item, r.result, snapshotDate, measuredAt))
     packRanks.push({ keyword: r.item, rank: resolveLocalPackRank(r.result.local_pack, client) })
   }
   base.keywords_captured = rows.length
@@ -217,9 +238,9 @@ export async function captureSerpForClient(
   base.serp_rows_written = written?.length ?? rows.length
 
   // local_pack_rank 回写：按名次分组批量 UPDATE（最多 3 发）。
-  // 只写命中的词 —— 当天快照行刚建好，默认已是 null，不用清。
+  // 只写命中的词 —— 快照行刚建好，默认已是 null，不用清。
+  // 日期键 = 快照真实日期（与上面 rows 同一基准，见 buildSerpSnapshotRow 注释）。
   const locationCode = locationCodeForDb(client.semrush_db)
-  const snapshotDate = measuredAt.toISOString().slice(0, 10)
   const groups = groupKeywordsByPackRank(packRanks)
 
   for (const [rank, kws] of groups) {

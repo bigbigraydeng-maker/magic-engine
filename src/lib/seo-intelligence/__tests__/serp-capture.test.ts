@@ -72,6 +72,14 @@ describe('resolveLocalPackRank', () => {
     const pack = [entry('Anything', 'x.co.nz')]
     expect(resolveLocalPackRank(pack, anon)).toBeNull()
   })
+
+  it('short aliases (<4 chars) only match on exact name equality', () => {
+    const shortAlias = { ...CTS, domain: 'cts.co.nz', brand_aliases: ['cts'] }
+    // "products" contains "cts" as substring — must NOT match
+    expect(resolveLocalPackRank([entry('Best Products Ltd', null)], shortAlias)).toBeNull()
+    // exact equality still matches
+    expect(resolveLocalPackRank([entry('CTS', null)], shortAlias)).toBe(1)
+  })
 })
 
 describe('buildSerpSnapshotRow', () => {
@@ -85,7 +93,7 @@ describe('buildSerpSnapshotRow', () => {
         'https://competitor.co.nz/page',
       ],
     })
-    const row = buildSerpSnapshotRow(CTS, 'china tours auckland', serp, measuredAt)
+    const row = buildSerpSnapshotRow(CTS, 'china tours auckland', serp, '2026-08-03', measuredAt)
 
     expect(row.has_ai_overview).toBe(true)
     expect(row.client_cited).toBe(true)
@@ -95,7 +103,7 @@ describe('buildSerpSnapshotRow', () => {
   })
 
   it('no AI overview → both flags false', () => {
-    const row = buildSerpSnapshotRow(CTS, 'china tours', makeSerp(), measuredAt)
+    const row = buildSerpSnapshotRow(CTS, 'china tours', makeSerp(), '2026-08-03', measuredAt)
     expect(row.has_ai_overview).toBe(false)
     expect(row.client_cited).toBe(false)
     expect(row.cited_sources).toEqual([])
@@ -106,9 +114,26 @@ describe('buildSerpSnapshotRow', () => {
       ai_overview_text: 'answer',
       ai_overview_sources: ['https://competitor.co.nz/page'],
     })
-    const row = buildSerpSnapshotRow(CTS, 'china tours', serp, measuredAt)
+    const row = buildSerpSnapshotRow(CTS, 'china tours', serp, '2026-08-03', measuredAt)
     expect(row.has_ai_overview).toBe(true)
     expect(row.client_cited).toBe(false)
+  })
+
+  it('client subdomain counts as cited; lookalike host does not', () => {
+    const sub = makeSerp({
+      ai_overview_text: 'answer',
+      ai_overview_sources: ['https://blog.ctstours.co.nz/guide'],
+    })
+    expect(buildSerpSnapshotRow(CTS, 'kw', sub, '2026-08-03', measuredAt).client_cited).toBe(true)
+
+    const evil = makeSerp({
+      ai_overview_text: 'answer',
+      ai_overview_sources: [
+        'https://myctstours.co.nz.evil.com/page',
+        'https://third-party.co.nz/why-ctstours.co.nz-is-great',
+      ],
+    })
+    expect(buildSerpSnapshotRow(CTS, 'kw', evil, '2026-08-03', measuredAt).client_cited).toBe(false)
   })
 
   it('dedupes organic domains and keeps at most 10', () => {
@@ -121,7 +146,7 @@ describe('buildSerpSnapshotRow', () => {
         })),
       ],
     })
-    const row = buildSerpSnapshotRow(CTS, 'china tours', serp, measuredAt)
+    const row = buildSerpSnapshotRow(CTS, 'china tours', serp, '2026-08-03', measuredAt)
     expect(row.top_organic_domains[0]).toBe('a.co.nz')
     expect(row.top_organic_domains).toHaveLength(10)
     expect(new Set(row.top_organic_domains).size).toBe(10)
