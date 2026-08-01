@@ -223,6 +223,13 @@ async function postBusinessDataTask(
   return t.id
 }
 
+/**
+ * 排队中（继续等）：40601 Task Handed / 40602 Task In Queue。
+ * 官方标注 transient（deadline 内重试，别把已付费任务一炮打死，魏征 🟡1）：
+ * 40202 分钟级限流 / 40209 并发过多 / 50301 3rd Party Unavailable / 50401 Timeout。
+ */
+const TASK_WAIT_CODES = new Set([40601, 40602, 40202, 40209, 50301, 50401])
+
 /** Poll task_get until the task completes; returns result[0] payload. */
 async function pollBusinessDataTask<T>(
   endpoint: string,
@@ -230,22 +237,42 @@ async function pollBusinessDataTask<T>(
 ): Promise<T | null> {
   const deadline = Date.now() + TASK_POLL_TIMEOUT_MS
   for (;;) {
-    const res = await fetch(
-      `${DATAFORSEO_API_BASE}/business_data/${endpoint}/task_get/${taskId}`,
-      { headers: { Authorization: authHeader() } },
-    )
-    if (!res.ok) throw new Error(`DataForSEO ${endpoint} task_get error: ${res.status}`)
+    let code = 0
+    let message: string | undefined
+    let payload: T | null | undefined
 
-    const json = await res.json() as {
-      tasks?: Array<{ status_code?: number; status_message?: string; result?: T[] | null }>
+    try {
+      const res = await fetch(
+        `${DATAFORSEO_API_BASE}/business_data/${endpoint}/task_get/${taskId}`,
+        { headers: { Authorization: authHeader() } },
+      )
+      if (res.ok) {
+        const json = await res.json() as {
+          status_code?: number
+          status_message?: string
+          tasks?: Array<{ status_code?: number; status_message?: string; result?: T[] | null }>
+        }
+        const t = json.tasks?.[0]
+        if (t) {
+          code = t.status_code ?? 0
+          message = t.status_message
+          payload = t.result?.[0] ?? null
+        } else if ((json.status_code ?? 0) >= 40000) {
+          // 顶层就挂了（如鉴权失败）—— 别哑等满 240s（魏征 ⚪2）
+          throw new Error(
+            `DataForSEO ${endpoint} task_get top-level failure: ${json.status_code} ${json.status_message}`,
+          )
+        }
+      }
+      // res 非 200 → code 保持 0，按瞬时抖动处理，deadline 内重试
+    } catch (err) {
+      if (err instanceof Error && /top-level failure/.test(err.message)) throw err
+      // 网络级抖动同样在 deadline 内重试
     }
-    const t = json.tasks?.[0]
-    const code = t?.status_code ?? 0
 
-    if (code === 20000) return t?.result?.[0] ?? null
-    // 40601/40602 = queued / in progress — keep waiting; anything ≥40000 else is terminal
-    if (code >= 40000 && code !== 40601 && code !== 40602) {
-      throw new Error(`DataForSEO ${endpoint} task failed: ${code} ${t?.status_message}`)
+    if (code === 20000) return payload ?? null
+    if (code >= 40000 && !TASK_WAIT_CODES.has(code)) {
+      throw new Error(`DataForSEO ${endpoint} task failed: ${code} ${message}`)
     }
     if (Date.now() >= deadline) {
       throw new Error(`DataForSEO ${endpoint} task ${taskId} timed out after ${TASK_POLL_TIMEOUT_MS}ms`)
@@ -324,30 +351,45 @@ export async function getGbpReviewsByIdentity(
  * Tripadvisor listing snapshot via the task queue（live 端点同样不存在）。
  *
  * DataForSEO: /business_data/tripadvisor/search/task_post → task_get
+ * - `location_name` 是 task_post 必填（缺了直接被拒，实测确认）
+ * - 返回是搜索结果列表：**必须按名字匹配到目标商家**，盲取第一条会把
+ *   竞品的评分记到客户头上（实测 "CTS Tours" 第一条是 Haka Tours）
+ * - rating 是对象 {value, votes_count}，不是数字（实测确认）
  */
 export async function getTripadvisorSnapshot(
   keyword: string,
+  options: { locationName: string },
 ): Promise<TripadvisorInfo | null> {
   const taskId = await postBusinessDataTask('tripadvisor/search', {
     keyword,
-    language_name: 'English',
+    location_name: options.locationName,
   })
   const result = await pollBusinessDataTask<{
     items?: Array<{
+      type?: string | null
       title?: string | null
       url?: string | null
-      rating?: number | null
+      rating?: { value?: number | null; votes_count?: number | null } | null
       reviews_count?: number | null
     }>
   }>('tripadvisor/search', taskId)
 
-  const item = result?.items?.[0]
+  const normalise = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
+  const needle = normalise(keyword)
+
+  const item = (result?.items ?? [])
+    .filter(it => (it.type ?? 'tripadvisor_search_organic') === 'tripadvisor_search_organic')
+    .find(it => {
+      const title = normalise(it.title ?? '')
+      return title.length > 0 && (title.includes(needle) || needle.includes(title))
+    })
+
   if (!item) return null
   return {
-    name:         item.title         ?? null,
-    url:          item.url           ?? null,
-    rating:       item.rating        ?? null,
-    review_count: item.reviews_count ?? null,
+    name:         item.title ?? null,
+    url:          item.url   ?? null,
+    rating:       item.rating?.value ?? null,
+    review_count: item.reviews_count ?? item.rating?.votes_count ?? null,
   }
 }
 

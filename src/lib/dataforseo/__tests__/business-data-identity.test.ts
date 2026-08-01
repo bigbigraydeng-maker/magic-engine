@@ -85,19 +85,72 @@ describe('getGbpReviewsByIdentity (queue mode)', () => {
 })
 
 describe('getTripadvisorSnapshot (queue mode)', () => {
-  it('posts keyword task and parses the first listing', async () => {
-    queueHappyPath({
-      items: [{ title: 'CTS Tours', url: 'https://ta/x', rating: 4.5, reviews_count: 40 }],
-    })
-
-    const result = await getTripadvisorSnapshot('CTS Tours New Zealand')
-
-    expect(mockFetch.mock.calls[0][0]).toContain('tripadvisor/search/task_post')
-    expect(result).toEqual({ name: 'CTS Tours', url: 'https://ta/x', rating: 4.5, review_count: 40 })
+  const taItem = (title: string, ratingValue: number, votes: number) => ({
+    type: 'tripadvisor_search_organic',
+    title,
+    url: `https://ta/${title}`,
+    rating: { value: ratingValue, votes_count: votes }, // rating 是对象（实测确认）
+    reviews_count: votes,
   })
 
-  it('returns null when no listing found', async () => {
-    queueHappyPath({ items: [] })
-    expect(await getTripadvisorSnapshot('nonexistent business')).toBeNull()
+  it('posts keyword + REQUIRED location_name; matches listing by title, never item[0]', async () => {
+    queueHappyPath({
+      // 第一条是竞品 —— 盲取 item[0] 就把 Haka Tours 的评分记到客户头上
+      items: [taItem('Haka Tours', 4.5, 236), taItem('CTS Tours New Zealand', 4.8, 40)],
+    })
+
+    const result = await getTripadvisorSnapshot('CTS Tours', { locationName: 'New Zealand' })
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string) as Array<Record<string, unknown>>
+    expect(mockFetch.mock.calls[0][0]).toContain('tripadvisor/search/task_post')
+    expect(body[0].location_name).toBe('New Zealand')
+    expect(result).toEqual({
+      name: 'CTS Tours New Zealand',
+      url: 'https://ta/CTS Tours New Zealand',
+      rating: 4.8,
+      review_count: 40,
+    })
+  })
+
+  it('returns null when no title-matching listing exists (competitors only)', async () => {
+    queueHappyPath({ items: [taItem('Haka Tours', 4.5, 236), taItem('Red Carpet Tours', 5, 534)] })
+    expect(await getTripadvisorSnapshot('CTS Tours', { locationName: 'New Zealand' })).toBeNull()
+  })
+})
+
+describe('pollBusinessDataTask behaviour (via getGbpReviewsByIdentity)', () => {
+  it('keeps polling through queue codes (40602) until 20000', async () => {
+    vi.useFakeTimers()
+    try {
+      mockFetch
+        .mockReturnValueOnce(jsonResponse({ tasks: [{ id: 'task-q', status_code: 20100 }] }))
+        .mockReturnValueOnce(jsonResponse({ tasks: [{ status_code: 40602, status_message: 'In Queue' }] }))
+        .mockReturnValueOnce(jsonResponse({ tasks: [{ status_code: 20000, result: [{ items: [] }] }] }))
+
+      const promise = getGbpReviewsByIdentity({ place_id: 'ChIJ_x' }, 30)
+      await vi.advanceTimersByTimeAsync(10_000) // 一个轮询周期
+      const result = await promise
+
+      expect(result).not.toBeNull()
+      expect(mockFetch).toHaveBeenCalledTimes(3) // post + 2 次 poll
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('retries transient codes (40602 rate-ish) but times out at the deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      mockFetch.mockReturnValueOnce(jsonResponse({ tasks: [{ id: 'task-t', status_code: 20100 }] }))
+      // 之后每次 poll 都返回排队中
+      mockFetch.mockReturnValue(jsonResponse({ tasks: [{ status_code: 40602 }] }))
+
+      const promise = getGbpReviewsByIdentity({ place_id: 'ChIJ_x' }, 30)
+      const assertion = expect(promise).rejects.toThrow(/timed out/)
+      await vi.advanceTimersByTimeAsync(250_000) // 越过 240s deadline
+      await assertion
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
