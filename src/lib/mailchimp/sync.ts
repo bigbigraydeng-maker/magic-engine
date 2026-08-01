@@ -42,11 +42,42 @@ function sourceRef(campaignId: string, contactId: string): string {
 }
 
 /**
+ * 内部命名的垃圾值 —— 这些出现在时间线上等于没说。
+ *
+ * 真实案例（2026-08-02 PM 反馈）：CTS 有人在 Mailchimp 里复制了一封邮件没改名，
+ * campaign 的 title 字面就是 " (copy 01)"，于是 160 条记录写成「打开了《 (copy 01)》」。
+ * 它非空，所以旧的 `title || subject` 判断认为它有效。
+ */
+const JUNK_TITLE_RE = /^\s*(\(未命名\)|\(?\s*copy(\s*\d+)?\s*\)?|copy\s*of\b.*)\s*$/i
+
+/** Mailchimp 的合并标记（*|FNAME|*）原样铺给销售看是噪音，去掉。 */
+function stripMergeTags(raw: string): string {
+  return raw.replace(/\*\|[^|]*\|\*/g, '').replace(/\s{2,}/g, ' ').trim()
+}
+
+/**
+ * 这封邮件在时间线上叫什么。
+ *
+ * **主题优先于内部名**：主题是客户真正看到的那行字（「no visa needed for China」），
+ * 内部名是运营自己的标签（「auto_e3_batch_20260716」）。销售读时间线时，前者一眼
+ * 懂、后者什么都不是。两个都不可用才退回「一封邮件」—— 宁可不说，也不要把
+ * 「(copy 01)」这种内部垃圾当成邮件名铺给人看。
+ */
+export function campaignLabel(campaign: { title?: string; subject?: string }): string {
+  const candidates = [campaign.subject, campaign.title]
+  for (const raw of candidates) {
+    const cleaned = stripMergeTags(raw ?? '')
+    if (cleaned && !JUNK_TITLE_RE.test(cleaned)) return cleaned
+  }
+  return '一封邮件'
+}
+
+/**
  * 一条人话摘要，销售在时间线上直接读。
  * 「点了链接」是最强信号，要排在最前面说。
  */
 function summarise(campaign: MailchimpCampaign, act: MemberActivity): string {
-  const name = campaign.title || campaign.subject || '一封邮件'
+  const name = campaignLabel(campaign)
   if (act.clicked) return `点了《${name}》里的链接`
   if (act.opened) return `打开了《${name}》`
   return `收到《${name}》`
@@ -129,6 +160,8 @@ export async function syncMailchimpActivity(opts: {
         metadata: {
           email_campaign_id: campaign.id,
           email_campaign_title: campaign.title,
+          // 主题是客户真正看到的那行字 —— 存下来，将来要改显示口径不用重拉 Mailchimp。
+          email_campaign_subject: campaign.subject,
           email_opened: act.opened,
           email_clicked: act.clicked,
         },

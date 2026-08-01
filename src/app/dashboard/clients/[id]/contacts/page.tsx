@@ -54,6 +54,15 @@ interface Stage {
 }
 
 interface Board {
+  /**
+   * 这一页适不适用于这个客户。整页是围绕「按房子分组」建的（中介在开放日现场用
+   * 手机标客人）。2026-08-02 PM 在**旅游**客户 CTS 身上打开它，看到的是
+   * 「按房子分开列」+ 一大坨没分组的人 —— 文案在说房子、客户没有房子。
+   * 不适用时不渲染这一页，直接指回「客户跟进」。
+   */
+  applicable?: boolean
+  /** 有没有真的录了房子 —— 页头要不要提「按房子分开列」看它。 */
+  hasListings?: boolean
   stages: Stage[]
   groups: Group[]
   totalPeople: number
@@ -291,12 +300,36 @@ export default function MyContactsPage() {
     [board, clientId, setStageLocally],
   )
 
+  // 不适用这一页的客户（不是地产、也没录过房子）：不铺一屏说房子的界面给他，
+  // 直接指到真正该去的那页。跟导航里「行程单」「房子」同样的处理口径 ——
+  // 入口都在，页面自己说清楚适不适用。
+  if (board && board.applicable === false) {
+    return (
+      <div className="mx-auto max-w-3xl p-4 sm:p-6">
+        <h1 className="text-xl font-black text-me-charcoal">我的客人</h1>
+        <div className="mt-3 rounded-2xl border border-me-charcoal/10 bg-white p-5">
+          <p className="text-sm leading-relaxed text-me-charcoal/70">
+            这一页是给<strong>按房子跟客人的中介</strong>做的 —— 手机上一屏把「谁到哪一步了」标完。
+            这个客户没有按房子经营，用它反而绕远。
+          </p>
+          <a
+            href={`/dashboard/clients/${clientId}/crm`}
+            className="mt-4 inline-block rounded-xl bg-me-charcoal px-4 py-2.5 text-sm font-bold text-white"
+          >
+            去「客户跟进」看今天该联系谁 →
+          </a>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="mx-auto max-w-3xl space-y-4 p-4 sm:p-6">
       <header>
         <h1 className="text-xl font-black text-me-charcoal">我的客人</h1>
         <p className="mt-1 text-sm leading-relaxed text-me-charcoal/55">
-          按房子分开列。每个人点一下就能说清楚他到哪一步了 —— 你标的这一下，是系统唯一学不会的东西。
+          {board?.hasListings ? '按房子分开列。' : ''}
+          每个人点一下就能说清楚他到哪一步了 —— 你标的这一下，是系统唯一学不会的东西。
         </p>
       </header>
 

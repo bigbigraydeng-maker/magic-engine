@@ -148,6 +148,13 @@ function listingTitle(l: ListingRow): string {
 
 async function loadAll(clientId: string) {
   return Promise.all([
+    // 行业 —— 只用来判断这一页适不适用于这个客户（见下面 applicable 的说明）。
+    supabaseAdmin
+      .from('clients')
+      .select('industry')
+      .eq('id', clientId)
+      .maybeSingle()
+      .then((r) => (r.data as { industry: string | null } | null)?.industry ?? null),
     fetchAll<ContactRow>((from, to) =>
       supabaseAdmin
         .from('contacts')
@@ -315,7 +322,7 @@ export async function GET(
     )
   }
 
-  const [contacts, touches, listings, stageRows, conversations, briefs] = loaded
+  const [industry, contacts, touches, listings, stageRows, conversations, briefs] = loaded
   const stages: BoardStage[] = stageRows.map((s) => ({ stageKey: s.stage_key, label: s.label }))
   const people = buildPeople({
     contacts,
@@ -324,7 +331,21 @@ export async function GET(
     stages,
   })
 
+  // 这一页适不适用于这个客户。
+  //
+  // 它整页是围绕「按房子分组」建的（中介在开放日现场用手机标客人）。2026-08-02
+  // PM 在**旅游**客户 CTS 身上打开它，看到的是「按房子分开列」+ 一大坨没有分组的
+  // 人 —— 文案在说房子、客户根本没有房子，可读性必然差。
+  //
+  // 判据取「行业是地产」**或**「已经建了房子」两者之一：前者覆盖刚接进来还没录房
+  // 的中介（30 Kiteroa），后者覆盖行业没填对、但确实在按房子跟客人的客户。
+  // 两者都不是（CTS：旅游 + 0 套房）→ 不给这一页，指回「客户跟进」。
+  const applicable = industry === 'real_estate' || listings.length > 0
+
   return NextResponse.json({
+    applicable,
+    /** 有没有真的录了房子 —— 页头文案要不要提「按房子分开列」看它。 */
+    hasListings: listings.length > 0,
     stages,
     groups: buildGroups(people, listings),
     totalPeople: people.length,

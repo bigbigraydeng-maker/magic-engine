@@ -49,6 +49,13 @@ function fakeDb(tables: Record<string, Row[]>) {
       },
       order: () => builder,
       range: (from: number, to: number) => run(from, to),
+      // 行业查询走 maybeSingle（不翻页）—— 它决定这一页适不适用于这个客户。
+      maybeSingle: () => {
+        const rows = (tables[table] ?? []).filter((r) =>
+          filters.every(([col, val]) => r[col] === val),
+        )
+        return Promise.resolve({ data: rows[0] ?? null, error: null })
+      },
     }
     return builder
   }
@@ -58,6 +65,11 @@ const LISTING_A = { id: 'l-a', client_id: 'client-a', address_line: '30 Kiteroa 
 const LISTING_B = { id: 'l-b', client_id: 'client-b', address_line: '999 Stranger St', suburb: 'Elsewhere', status: 'live' }
 
 const DATA = {
+  // 地产客户 —— 这一页对它适用。
+  clients: [
+    { id: 'client-a', industry: 'real_estate' },
+    { id: 'client-b', industry: 'real_estate' },
+  ],
   contacts: [
     // 自己人：挂在自己的房子上，有广告名。
     { id: 'a1', client_id: 'client-a', display_name: '张先生', stage: null, listing_id: 'l-a', attr_ad_name: '30 Kiteroa - Reel A', attr_platform: 'meta' },
@@ -207,5 +219,47 @@ describe('GET /api/clients/[id]/contacts — 读模型', () => {
       'contacted',
       'qualified',
     ])
+  })
+})
+
+// ── 这一页适不适用（2026-08-02 PM 反馈）─────────────────────────────────────
+//
+// 整页围绕「按房子分组」建的。PM 在**旅游**客户 CTS 身上打开它，看到「按房子
+// 分开列」+ 一大坨没分组的人 —— 文案在说房子、客户根本没有房子。
+describe('这一页适不适用于这个客户', () => {
+  const call = (clientId: string) =>
+    GET(new NextRequest('http://localhost:3001/x'), { params: { id: clientId } })
+
+  it('地产客户 → 适用', async () => {
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation(fakeDb(DATA))
+    const body = await (await call('client-a')).json()
+    expect(body.applicable).toBe(true)
+  })
+
+  it('🔴 旅游客户、0 套房 → 不适用（CTS 就是这个）', async () => {
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation(
+      fakeDb({ ...DATA, clients: [{ id: 'client-a', industry: 'travel' }], listings: [] }),
+    )
+    const body = await (await call('client-a')).json()
+    expect(body.applicable).toBe(false)
+    expect(body.hasListings).toBe(false)
+  })
+
+  it('行业没填对、但确实录了房子 → 仍然适用（别因为配置漏填就锁掉在用的人）', async () => {
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation(
+      fakeDb({ ...DATA, clients: [{ id: 'client-a', industry: 'other' }] }),
+    )
+    const body = await (await call('client-a')).json()
+    expect(body.applicable).toBe(true)
+    expect(body.hasListings).toBe(true)
+  })
+
+  it('地产客户但还没录房子 → 适用，只是页头不提「按房子分开列」', async () => {
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation(
+      fakeDb({ ...DATA, listings: [] }),
+    )
+    const body = await (await call('client-a')).json()
+    expect(body.applicable).toBe(true)
+    expect(body.hasListings).toBe(false)
   })
 })
