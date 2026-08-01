@@ -91,9 +91,12 @@ async function runCollection(triggeredBy: 'cron' | 'admin_manual', existingRunId
 
   try {
     // 2. Load all baseline domains
+    // is_active=false 的域名一分钱都不花（migration 20260731100000 起）。
+    // 用停用而不是删除，是因为历史评分要留着 —— 物流那 18 个域名已攒了 690 条。
     const { data: rows, error: loadError } = await supabaseAdmin
       .from('baseline_domains')
       .select('id, industry, sub_industry, domain, keywords')
+      .eq('is_active', true)
       .order('sub_industry')
 
     if (loadError) {
