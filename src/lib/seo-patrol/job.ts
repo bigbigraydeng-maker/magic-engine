@@ -50,7 +50,9 @@ const RULE_IMPACT: Record<SeoPatrolFinding['ruleId'], 'low' | 'medium' | 'high'>
   stale_content: 'high',
   keyword_opportunity: 'medium',
   missing_internal_link: 'medium',
-  not_indexed: 'low',
+  // 'low' was a placeholder from the data-less era; a page Google won't
+  // index earns zero traffic — resubmission is cheap and unblocks it all.
+  not_indexed: 'medium',
 }
 
 const RULE_EFFORT: Record<SeoPatrolFinding['ruleId'], 'low' | 'medium' | 'high'> = {
