@@ -1,0 +1,165 @@
+name: 数据停摆外部检查 (Daily · 独立于 ME)
+
+# 第三层：谁来看门狗？
+#
+# 第二层（/api/cron/data-freshness-check）跑在 Render 上、经 ME 的 Next.js 服务、
+# 用 CRON_SECRET 鉴权。这三样任何一样坏了，第二层就跟着一起哑，而且哑得毫无声音 ——
+# 2026-08-01 已经证实过：Render 的 cron 密钥是每个任务各自单独设的（sync: false），
+# 密钥不对就 401，而写日志的代码在鉴权之后，所以数据库里连一条失败记录都不会留。
+# keyword-snapshots-weekly 就这样静默失踪了 53 天，daily-cron-digest 哑了 51 天 + 30 天。
+#
+# 所以这个检查刻意跑在完全另一套基础设施上（GitHub Actions），并且刻意不碰：
+#   ✗ ME 的 Next.js 服务       ✗ Render        ✗ CRON_SECRET
+#   ✗ ME 仓库里的任何代码（不 checkout）       ✗ npm / node_modules
+# 它只用 GitHub 自带的 curl + jq，直连 Supabase 的 REST 接口读 max(时间戳)。
+#
+# 需要的 GitHub repo secrets（Settings → Secrets and variables → Actions）：
+#   SUPABASE_URL               例：https://xxxx.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY  service role key
+#   RESEND_API_KEY   （可选）配了就直接发邮件；没配就只靠 GitHub 自己的失败通知
+#   ALERT_EMAIL_TO   （可选）收件人，默认 hello@magicengine.cloud
+#
+# 注意：这里的检查清单是写死在本文件里的，故意不去读 data_freshness_expectations。
+# 登记表被清空 / 被改坏也是一种失明，而第三层的职责就是在那种情况下依然能出声。
+# 全量、可扩展的覆盖是第二层的活。
+
+on:
+  schedule:
+    # 每天 09:00 UTC（第二层 06:10 UTC 跑完之后约 3 小时）
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 直连数据库检查关键表最后写入时间
+        # 显式关掉 -e：这个脚本靠自己统计问题数量决定退出码，
+        # 不能因为中间某一条探测失败就半路退出、漏掉后面的表。
+        shell: bash --noprofile --norc {0}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo "::error::SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY 没配，外部检查等于没跑"
+            exit 1
+          fi
+
+          # 格式：表名|时间戳列|过滤列|过滤值|最多几天没写就报警|中文名
+          # 过滤列/过滤值留空表示整表检查。
+          CHECKS=$(cat <<'EOF'
+          data_freshness_alerts|created_at|||2|每日数据体检本身
+          gsc_performance_snapshots|created_at|||5|Google 搜索表现
+          ga4_traffic_snapshots|created_at|||5|网站访问数据 GA4
+          ad_daily_insights|created_at|||3|广告每日花费与效果
+          keyword_snapshots|created_at|||10|关键词排名
+          ai_visibility_snapshots|created_at|||10|AI 可见度快照
+          cron_run_logs|started_at|job_name|keyword-snapshots-weekly|10|任务心跳 · 关键词排名周更
+          cron_run_logs|started_at|job_name|daily-cron-digest|2|任务心跳 · 每日任务汇总
+          cron_run_logs|started_at|job_name|data-freshness-check|2|任务心跳 · 每日数据体检
+          EOF
+          )
+
+          NOW_EPOCH=$(date -u +%s)
+          PROBLEMS=""
+          PROBLEM_COUNT=0
+          OK_COUNT=0
+
+          while IFS='|' read -r table tscol fcol fval maxdays label; do
+            if [ -z "$table" ]; then
+              continue
+            fi
+
+            url="${SUPABASE_URL}/rest/v1/${table}?select=${tscol}&order=${tscol}.desc&limit=1"
+            if [ -n "$fcol" ] && [ -n "$fval" ]; then
+              url="${url}&${fcol}=eq.${fval}"
+            fi
+
+            body=$(curl -sS --max-time 30 \
+              -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+              "$url") || body=""
+
+            if [ -z "$body" ]; then
+              PROBLEMS="${PROBLEMS}- ${label}：连数据库都读不到（检查本身失败）\n"
+              PROBLEM_COUNT=$((PROBLEM_COUNT + 1))
+              continue
+            fi
+
+            # PostgREST 出错时返回的是一个带 message 的对象，不是数组 ——
+            # 要跟「表在、但一行都没有」区分开，否则「表被删了」会被误报成「没数据」。
+            api_error=$(echo "$body" | jq -r 'if type=="object" and (.message? // .code?) then ((.code // "") + " " + (.message // "")) else "" end' 2>/dev/null) || api_error=""
+            if [ -n "$api_error" ]; then
+              PROBLEMS="${PROBLEMS}- ${label}：这张表读不出来（${api_error}）\n"
+              PROBLEM_COUNT=$((PROBLEM_COUNT + 1))
+              echo "ERROR  ${label}: ${api_error}"
+              continue
+            fi
+
+            last=$(echo "$body" | jq -r --arg c "$tscol" 'if type=="array" and length>0 then (.[0][$c] // "") else "" end' 2>/dev/null) || last=""
+
+            if [ -z "$last" ] || [ "$last" = "null" ]; then
+              PROBLEMS="${PROBLEMS}- ${label}：一条数据都没有\n"
+              PROBLEM_COUNT=$((PROBLEM_COUNT + 1))
+              echo "EMPTY  ${label}"
+              continue
+            fi
+
+            clean=$(echo "$last" | sed 's/\.[0-9]*//')
+            last_epoch=$(date -u -d "$clean" +%s 2>/dev/null || echo "")
+            if [ -z "$last_epoch" ]; then
+              PROBLEMS="${PROBLEMS}- ${label}：时间戳看不懂（${last}）\n"
+              PROBLEM_COUNT=$((PROBLEM_COUNT + 1))
+              continue
+            fi
+
+            age_days=$(( (NOW_EPOCH - last_epoch) / 86400 ))
+            if [ "$age_days" -gt "$maxdays" ]; then
+              PROBLEMS="${PROBLEMS}- ${label}：已经 ${age_days} 天没有新数据（正常应该 ${maxdays} 天内就有一次）\n"
+              PROBLEM_COUNT=$((PROBLEM_COUNT + 1))
+              echo "STALE  ${label}: ${age_days}d > ${maxdays}d (last ${last})"
+            else
+              OK_COUNT=$((OK_COUNT + 1))
+              echo "OK     ${label}: ${age_days}d (last ${last})"
+            fi
+          done <<< "$CHECKS"
+
+          echo "----------------------------------------"
+          echo "正常 ${OK_COUNT} 条 / 有问题 ${PROBLEM_COUNT} 条"
+
+          if [ "$PROBLEM_COUNT" -eq 0 ]; then
+            echo "全部正常。"
+            exit 0
+          fi
+
+          TODAY=$(date -u +%F)
+          SUBJECT="🚨 外部检查：${PROBLEM_COUNT} 条关键数据停止更新 · ${TODAY}"
+          BODY=$(printf "%b" "这封信来自 GitHub，不经过 Magic Engine 的任何服务器 —— 也就是说 ME 整个挂掉它照样会发出来。\n\n${PROBLEMS}\n正常的有 ${OK_COUNT} 条。\n\n最常见的原因：Render 上某个定时任务的 CRON_SECRET 没填。密钥不对会被直接拒绝，而且不会留下任何失败记录，所以只能靠「数据有没有真的写进来」来发现。")
+
+          printf "%b\n" "$BODY"
+
+          if [ -n "${RESEND_API_KEY:-}" ]; then
+            TO="${ALERT_EMAIL_TO:-hello@magicengine.cloud}"
+            payload=$(jq -n --arg to "$TO" --arg subject "$SUBJECT" --arg text "$BODY" \
+              '{from:"Magic Engine 外部检查 <hello@magicengine.cloud>", to:[$to], subject:$subject, text:$text}')
+            code=$(curl -sS -o /tmp/resend.out -w "%{http_code}" --max-time 30 \
+              -X POST https://api.resend.com/emails \
+              -H "Authorization: Bearer ${RESEND_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "$payload")
+            echo "邮件发送 HTTP ${code}"
+            cat /tmp/resend.out || true
+          else
+            echo "::warning::RESEND_API_KEY 没配，只能靠 GitHub 的任务失败通知"
+          fi
+
+          # 无论邮件发没发出去，都让这一步失败 —— GitHub 自己的失败通知是最后一道兜底，
+          # 它不依赖任何第三方。
+          echo "::error::${PROBLEM_COUNT} 条关键数据停止更新"
+          exit 1

@@ -833,3 +833,24 @@ services:
         https://app.magicengine.com.au/api/cron/mailchimp-activity-sync
     envVars:
       - fromGroup: me-shared-cron-secret
+
+  # 每日数据体检（第二层）：逐条数据线比对「最后一次真正写入」跟登记的期望。
+  #
+  # 它刻意不看任何任务「跑没跑成功」—— 2026-08-01 已经证明那个信号靠不住：
+  # 密钥没配 → 401 → 写日志的代码在鉴权之后 → 数据库里连失败记录都不留。
+  # keyword-snapshots-weekly 就这样静默失踪 53 天。唯一诚实的信号是最终产物。
+  #
+  # ⚠️ 密钥必须走 fromGroup，别改成 sync: false 再手打一个值 ——
+  # 那正是本任务负责发现的那类事故。
+  #
+  # 06:10 UTC：排在 03:00 那批数据采集 cron 之后，也排在 09:00 的 GitHub 外部检查之前。
+  - type: cron
+    name: data-freshness-check
+    env: node
+    schedule: "10 6 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 180 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/data-freshness-check
+    envVars:
+      - fromGroup: me-shared-cron-secret
