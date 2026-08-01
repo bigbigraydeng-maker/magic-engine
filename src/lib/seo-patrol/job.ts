@@ -244,7 +244,16 @@ export function findingsToActions(findings: SeoPatrolFinding[]): PriorityAction[
   const sorted = [...findings].sort(
     (a, b) => RULE_RANK[a.ruleId] - RULE_RANK[b.ruleId],
   )
-  const top = sorted.slice(0, MAX_ACTIONS_PER_CLIENT)
+  // One action per (rule, subject): duplicate findings for the same keyword
+  // (e.g. duplicate snapshot rows) must not become duplicate kanban cards.
+  const seen = new Set<string>()
+  const deduped = sorted.filter((f) => {
+    const key = `${f.ruleId}::${(f.keyword ?? f.url ?? 'site').toLowerCase()}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  const top = deduped.slice(0, MAX_ACTIONS_PER_CLIENT)
 
   return top.map((f, idx) => {
     const subject = f.keyword ?? f.url ?? 'site'
