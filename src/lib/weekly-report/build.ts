@@ -22,16 +22,24 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { FOCUS_CLIENT_IDS } from '@/lib/pm-todo/daily-todo'
 
 const STALE_AFTER_DAYS = 3
+/** Keyword snapshots are WEEKLY by design — 8 days tolerance, not 3, or
+ *  every Monday report would falsely cry 断流 on perfectly-on-schedule data
+ *  (happened on the very first send, 2026-08-02). */
+const SEO_STALE_AFTER_DAYS = 8
 
 export interface FreshnessStamp {
   latest: string | null
   stale: boolean
 }
 
-export function freshness(latestIso: string | null, now: Date): FreshnessStamp {
+export function freshness(
+  latestIso: string | null,
+  now: Date,
+  staleAfterDays: number = STALE_AFTER_DAYS,
+): FreshnessStamp {
   if (!latestIso) return { latest: null, stale: true }
   const ageDays = (now.getTime() - Date.parse(latestIso)) / 86_400_000
-  return { latest: latestIso.slice(0, 10), stale: ageDays > STALE_AFTER_DAYS }
+  return { latest: latestIso.slice(0, 10), stale: ageDays > staleAfterDays }
 }
 
 export interface KeywordMover {
@@ -254,7 +262,7 @@ async function gatherClient(
       gsc_clicks_28d: gscRow?.total_clicks ?? null,
       gsc_impressions_28d: gscRow?.total_impressions ?? null,
       findings_week: findings.count ?? 0,
-      freshness: freshness(current ? `${current}T00:00:00Z` : null, now),
+      freshness: freshness(current ? `${current}T00:00:00Z` : null, now, SEO_STALE_AFTER_DAYS),
     },
     auto_changes: {
       titles_applied_week: (titles.data ?? []).length,

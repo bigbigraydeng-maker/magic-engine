@@ -14,6 +14,13 @@ describe('freshness', () => {
     expect(freshness('2026-07-20T00:00:00Z', NOW)).toEqual({ latest: '2026-07-20', stale: true })
     expect(freshness(null, NOW)).toEqual({ latest: null, stale: true })
   })
+
+  it('weekly-cadence data with an 8-day tolerance is NOT stale at 6 days (首发误报回归)', () => {
+    // Monday report reading the previous Monday-ish snapshot (2026-07-28,
+    // 6 days before NOW) must not cry 断流 — snapshots are weekly by design.
+    expect(freshness('2026-07-28T00:00:00Z', NOW, 8)).toEqual({ latest: '2026-07-28', stale: false })
+    expect(freshness('2026-07-20T00:00:00Z', NOW, 8)).toEqual({ latest: '2026-07-20', stale: true })
+  })
 })
 
 describe('computeSeoWeek', () => {
