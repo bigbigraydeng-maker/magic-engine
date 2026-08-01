@@ -145,22 +145,15 @@ export default function LectureWorkbenchPage() {
     await patch({ action: 'save_script', lecture: draft }, 'save', '脚本已保存')
   }
 
-  // 口播稿导出：只含要念的词(不含课件文字)，【】段落标记是给自己看的提醒、不念。
+  // 口播稿导出：一条录到底用的连贯逐字稿——只有要念的词，从头念到尾，
+  // 不加任何标记/标题(PM 反馈:标记打断提词阅读)。段落空行 = 自然换气点。
   // 导出的是屏幕上正在编辑的版本——改了没保存也照样导最新的。
   function spokenText(): string {
     if (!draft) return ''
-    const lines: string[] = [
-      `《${draft.title}》${data?.post.lessonNo ? ` 第${data.post.lessonNo}讲` : ''} · 口播稿`,
-      '(【】里的标记不用念，只是提醒你讲到哪段)',
-      '',
-      '【开场钩子】',
-      draft.hookSpoken.trim(),
-    ]
-    draft.sections.forEach((s, i) => {
-      lines.push('', `【要点${i + 1} · ${s.slideTitle.trim()}】`, s.spoken.trim())
-    })
-    if (draft.ctaSpoken?.trim()) lines.push('', '【结尾】', draft.ctaSpoken.trim())
-    return lines.join('\n')
+    return [draft.hookSpoken, ...draft.sections.map((s) => s.spoken), draft.ctaSpoken]
+      .map((t) => (t ?? '').trim())
+      .filter(Boolean)
+      .join('\n\n')
   }
 
   async function copySpoken() {

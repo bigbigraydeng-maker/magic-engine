@@ -20,7 +20,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import {
   getGbpReviewsByIdentity,
   getGmbInfo,
-  getTripadvisorInfo,
+  getTripadvisorSnapshot,
   type GbpReviewItem,
 } from '@/lib/dataforseo/business-data'
 
@@ -154,87 +154,110 @@ export async function captureReputationForClient(
   const snapshotRows: ReputationSnapshotRow[] = []
   const reviewRows: ReviewItemRow[] = []
 
-  for (const entity of buildEntities(client)) {
-    try {
-      const identity = entity.place_id
-        ? { place_id: entity.place_id }
-        : entity.entity_type === 'client'
-          ? { keyword: gbpKeywordFor(client) }
-          : { keyword: entity.name }
+  // 评论走 DataForSEO 队列模式（无 live，实测 404），单任务 ~40-60s 才出结果。
+  // 实体并发提交各自的任务再各自等结果 —— 每客户墙钟 ≈ 一个任务的时长，
+  // 顺序跑的话 3 实体就要 3 分钟，8 客户直接顶穿 cron 900s 预算。
+  const isNz = (client.country ?? '').toUpperCase() === 'NZ'
+  const locationCode = isNz ? 2554 : 2036
+  const entities = buildEntities(client)
 
-      const gbp = await getGbpReviewsByIdentity(identity, 30)
+  // Tripadvisor（配了才拉 —— 旅游类客户）。同为 40-240s 的队列任务，
+  // 与实体批并发提交，不串行挂在后面白等一轮（魏征 🟡3）
+  const taKeyword = (client.tripadvisor_keyword ?? '').trim()
+  const taPromise = taKeyword
+    ? getTripadvisorSnapshot(taKeyword, { locationName: isNz ? 'New Zealand' : 'Australia' })
+        .then(ta => ({ ta, taError: null as string | null }))
+        .catch((err: unknown) => ({
+          ta: null,
+          taError: err instanceof Error ? err.message : String(err),
+        }))
+    : null
 
-      // 评论响应没带档案时（部分商家）补一发 my_business_info。
-      // 它只收 keyword —— 绝不能把 place_id 字符串塞进去搜（会搜出错商家，魏征 🔴1）
-      let profile = gbp?.profile ?? null
-      if (!profile) {
-        const fallbackKeyword =
-          entity.entity_type === 'client' ? gbpKeywordFor(client) : entity.name
-        const info = await getGmbInfo(fallbackKeyword)
-        if (info) profile = { rating: info.rating, review_count: info.review_count }
-      }
+  const entityOutcomes = await Promise.all(
+    entities.map(async entity => {
+      try {
+        const identity = entity.place_id
+          ? { place_id: entity.place_id }
+          : entity.entity_type === 'client'
+            ? { keyword: gbpKeywordFor(client) }
+            : { keyword: entity.name }
 
-      if (profile || (gbp && gbp.reviews.length > 0)) {
-        snapshotRows.push({
-          client_id: client.id,
-          entity_type: entity.entity_type,
-          entity_name: entity.name,
-          place_id: entity.place_id,
-          source: 'gbp',
-          rating: profile?.rating ?? null,
-          review_count: profile?.review_count ?? null,
-          snapshot_date: snapshotDate,
-          measured_at: measuredAtIso,
-        })
-        for (const review of gbp?.reviews ?? []) {
-          reviewRows.push({
-            client_id: client.id,
-            entity_type: entity.entity_type,
-            entity_name: entity.name,
-            source: 'gbp',
-            review_uid: reviewUid(review),
-            author: review.author,
-            rating: review.rating,
-            text: review.text || null,
-            review_date: review.date,
-          })
+        const gbp = await getGbpReviewsByIdentity(identity, 30, { locationCode })
+
+        // 评论结果没带档案时（部分商家）补一发 my_business_info。
+        // 它只收 keyword —— 绝不能把 place_id 字符串塞进去搜（会搜出错商家，魏征 🔴1）
+        let profile = gbp?.profile ?? null
+        if (!profile) {
+          const fallbackKeyword =
+            entity.entity_type === 'client' ? gbpKeywordFor(client) : entity.name
+          const info = await getGmbInfo(fallbackKeyword)
+          if (info) profile = { rating: info.rating, review_count: info.review_count }
         }
-        result.entities_captured++
-      } else {
-        result.entities_failed++
+
+        return { entity, gbp, profile }
+      } catch (err) {
+        console.error(
+          `[reputation] entity "${entity.name}" (${entity.entity_type}) failed:`,
+          err instanceof Error ? err.message : err,
+        )
+        return { entity, gbp: null, profile: null, failed: true as const }
       }
-    } catch (err) {
-      console.error(
-        `[reputation] entity "${entity.name}" (${entity.entity_type}) failed:`,
-        err instanceof Error ? err.message : err,
-      )
+    }),
+  )
+
+  for (const outcome of entityOutcomes) {
+    const { entity, gbp, profile } = outcome
+    if ('failed' in outcome || (!profile && !(gbp && gbp.reviews.length > 0))) {
       result.entities_failed++
+      continue
     }
+    snapshotRows.push({
+      client_id: client.id,
+      entity_type: entity.entity_type,
+      entity_name: entity.name,
+      place_id: entity.place_id,
+      source: 'gbp',
+      rating: profile?.rating ?? null,
+      review_count: profile?.review_count ?? null,
+      snapshot_date: snapshotDate,
+      measured_at: measuredAtIso,
+    })
+    for (const review of gbp?.reviews ?? []) {
+      reviewRows.push({
+        client_id: client.id,
+        entity_type: entity.entity_type,
+        entity_name: entity.name,
+        source: 'gbp',
+        review_uid: reviewUid(review),
+        author: review.author,
+        rating: review.rating,
+        text: review.text || null,
+        review_date: review.date,
+      })
+    }
+    result.entities_captured++
   }
 
-  // Tripadvisor（配了才拉 —— 旅游类客户）
-  const taKeyword = (client.tripadvisor_keyword ?? '').trim()
-  if (taKeyword) {
-    try {
-      const ta = await getTripadvisorInfo(taKeyword)
-      if (ta && (ta.rating !== null || ta.review_count !== null)) {
-        snapshotRows.push({
-          client_id: client.id,
-          entity_type: 'client',
-          entity_name: ta.name ?? client.name,
-          place_id: null,
-          source: 'tripadvisor',
-          rating: ta.rating,
-          review_count: ta.review_count,
-          snapshot_date: snapshotDate,
-          measured_at: measuredAtIso,
-        })
-        result.entities_captured++
-      } else {
-        result.entities_failed++
-      }
-    } catch (err) {
-      console.error('[reputation] tripadvisor failed:', err instanceof Error ? err.message : err)
+  if (taPromise) {
+    const { ta, taError } = await taPromise
+    if (taError) {
+      console.error('[reputation] tripadvisor failed:', taError)
+      result.entities_failed++
+    } else if (ta && (ta.rating !== null || ta.review_count !== null)) {
+      snapshotRows.push({
+        client_id: client.id,
+        entity_type: 'client',
+        entity_name: ta.name ?? client.name,
+        place_id: null,
+        source: 'tripadvisor',
+        rating: ta.rating,
+        review_count: ta.review_count,
+        snapshot_date: snapshotDate,
+        measured_at: measuredAtIso,
+      })
+      result.entities_captured++
+    } else {
+      // 搜不到同名 listing（getTripadvisorSnapshot 按名字匹配，绝不拿第一条充数）
       result.entities_failed++
     }
   }
