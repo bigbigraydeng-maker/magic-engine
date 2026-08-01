@@ -19,6 +19,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
 import { inspectUrl, InspectQuotaError } from '@/lib/gsc/inspect'
+import { isHtmlPageUrl } from '@/lib/seo/url-kind'
 
 const URLS_PER_CLIENT_PER_DAY = 20
 
@@ -83,18 +84,24 @@ async function runForClient(
     .eq('client_id', client.client_id)
     .eq('crawl_status', 'crawled')
     .order('index_checked_at', { ascending: true, nullsFirst: true })
-    .limit(URLS_PER_CLIENT_PER_DAY)
+    // Over-fetch: asset URLs (images/PDFs the crawler picked up) are dropped
+    // below, and each one would otherwise waste a day's inspection slot.
+    .limit(URLS_PER_CLIENT_PER_DAY * 3)
 
   if (error) {
     result.error = `pages load failed: ${error.message}`
     return result
   }
 
-  for (const page of (pages ?? []) as Array<{
+  const pageRows = ((pages ?? []) as Array<{
     id: string
     url: string
     first_not_indexed_at: string | null
-  }>) {
+  }>)
+    .filter((p) => isHtmlPageUrl(p.url))
+    .slice(0, URLS_PER_CLIENT_PER_DAY)
+
+  for (const page of pageRows) {
     try {
       const inspection = await inspectUrl(client.site_url, page.url, client.client_id)
       if (!inspection) {

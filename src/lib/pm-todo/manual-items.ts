@@ -19,6 +19,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { isHtmlPageUrl } from '@/lib/seo/url-kind'
 
 /** Meta queued this long without being applied = the applier is stuck. */
 const META_PENDING_STALE_DAYS = 3
@@ -103,7 +104,7 @@ export async function loadManualItems(
       .in('client_id', ids),
     supabase
       .from('client_site_pages')
-      .select('client_id, url, index_verdict, first_not_indexed_at')
+      .select('client_id, url, index_verdict, first_not_indexed_at, word_count')
       .not('first_not_indexed_at', 'is', null)
       .in('client_id', ids),
     supabase
@@ -146,20 +147,40 @@ export async function loadManualItems(
     url: string
     index_verdict: string | null
     first_not_indexed_at: string | null
+    word_count: number | null
   }>) {
+    // Assets (images/PDFs) are not pages — "not indexed as a page" is normal
+    // for them and flagging it burns the whole list's credibility.
+    if (!isHtmlPageUrl(row.url)) continue
+
     const days = daysAgo(row.first_not_indexed_at, now)
     const siteUrl = siteUrlOf.get(row.client_id)
     if (!siteUrl) continue
-    const verdict =
-      row.index_verdict === 'URL is unknown to Google'
-        ? '谷歌根本不知道这个网址'
-        : '谷歌爬过但没收录'
+
+    // The advice MUST match the verdict. "Crawled - currently not indexed"
+    // means Google already looked and declined — sending someone to press
+    // 「请求编入索引」 there is busywork that changes nothing. Thin content is
+    // the usual cause, so say that instead.
+    const unknown = row.index_verdict === 'URL is unknown to Google'
+    const thin = (row.word_count ?? 0) < 300
+    const age = days !== null ? `（已 ${days} 天）` : ''
+
+    const what = unknown
+      ? `${row.url} 谷歌根本不知道这个网址${age}，它拿不到任何谷歌流量`
+      : `${row.url} 谷歌爬过但决定不收录${age}${thin ? `，正文只有 ${row.word_count ?? 0} 词` : ''}，它拿不到任何谷歌流量`
+
+    const how = unknown
+      ? '打开链接（已定位到这个网址），点「请求编入索引」；如果它本来就不该被搜到，回我一句，我把它从检查名单去掉'
+      : thin
+        ? '这条别点「请求编入索引」——谷歌已经看过并拒绝了。真问题是内容太薄：要么把它补厚（300 词以上、配图、加内链），要么合并进相关页面并做跳转。拿不准回我一句'
+        : '先点一次「请求编入索引」；如果一周后还是不收录，说明谷歌认为内容价值不够，需要补内链和内容'
+
     items.push({
       kind: 'not_indexed',
       client_id: row.client_id,
       client_name: nameOf(row.client_id),
-      what: `${row.url} ${verdict}${days !== null ? `（已 ${days} 天）` : ''}，这个页面拿不到任何谷歌流量`,
-      how: '打开链接（已定位到这个网址），点页面上的「请求编入索引」，然后就不用管了',
+      what,
+      how,
       href: gscInspectUrl(siteUrl, row.url),
     })
   }
