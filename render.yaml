@@ -811,3 +811,25 @@ services:
         sync: false
       - key: FACTORY_CJK_FONT
         value: /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
+
+  # 邮件反应 → CRM：谁收到了、谁打开了、谁点了行程链接。
+  #
+  # 这条接口 2026-07 就写好了（PR #686），但**从来没被注册**，一次都没跑过 ——
+  # 2026-08-01 体检才发现：销售看不到「谁点了行程链接」，只能按「我们打没打过他」排序。
+  #
+  # ⚠️ 密钥用 fromGroup 自动挂，**不要**改回 `sync: false`：
+  # 手挂密钥是这个仓库反复踩的坑 —— meta-leads-hourly 上线当天就因为手挂的值跟接口
+  # 对不上，连着两小时 401、库里一条运行记录都没有；更早还有一条 cron 因此哑了 51 天。
+  # 环境变量组 `me-shared-cron-secret` 已存在（Render 的 Link Environment Group 里能选到）。
+  # 万一 Render 不认这个写法，回退方案是 `- key: CRON_SECRET` + `sync: false`，
+  # 然后**必须**手动 link 同一个组 —— 别只填一个手打的值。
+  - type: cron
+    name: mailchimp-activity-daily
+    env: node
+    schedule: "40 4 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/mailchimp-activity-sync
+    envVars:
+      - fromGroup: me-shared-cron-secret

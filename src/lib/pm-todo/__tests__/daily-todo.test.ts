@@ -3,10 +3,11 @@
  * (loadTodoCounts is a thin Supabase read verified at integration time.)
  */
 
-import { describe, it, expect } from 'vitest'
-import { buildTodoEmail, nzWeekday, type TodoCounts } from '../daily-todo'
+import { describe, it, expect, vi } from 'vitest'
+import { buildTodoEmail, loadGbpSetupTasks, nzWeekday, type TodoCounts } from '../daily-todo'
 
 const EMPTY: TodoCounts = {
+  setupTasks: [],
   draftsByClient: [],
   findingsByClient: [],
   recentCardsByClient: [],
@@ -14,6 +15,115 @@ const EMPTY: TodoCounts = {
   manualItems: [],
   cronFailures24h: 0,
 }
+
+describe('buildTodoEmail · setup tasks', () => {
+  const SETUP: TodoCounts['setupTasks'] = [
+    {
+      name: 'CTS Tours NZ',
+      id: 'cid-1',
+      label: '连接 Google 商家页（点一次授权，之后自动发帖）',
+      href: 'https://app.magicengine.com.au/api/auth/google/gbp/start?clientId=cid-1',
+    },
+    {
+      name: 'oztop',
+      id: 'cid-2',
+      label: '连接 Google 商家页（点一次授权，之后自动发帖）',
+      href: 'https://app.magicengine.com.au/api/auth/google/gbp/start?clientId=cid-2',
+    },
+  ]
+
+  it('renders one authorise link per client and counts into the total', () => {
+    const email = buildTodoEmail(3, { ...EMPTY, setupTasks: SETUP }, '1 Aug')
+
+    expect(email.totalItems).toBe(2)
+    expect(email.subject).toContain('2 件')
+    expect(email.html).toContain('去连接')
+    expect(email.html).toContain('gbp/start?clientId=cid-1')
+    expect(email.html).toContain('gbp/start?clientId=cid-2')
+  })
+
+  it('setup card is rendered above the routine review queues', () => {
+    const email = buildTodoEmail(2, {
+      ...EMPTY,
+      setupTasks: SETUP.slice(0, 1),
+      draftsByClient: [{ name: 'oztop', id: 'cid-2', drafts: 3 }],
+    }, '1 Aug')
+
+    const setupAt = email.html.indexOf('去连接')
+    const draftsAt = email.html.indexOf('Blog 草稿待审')
+    expect(setupAt).toBeGreaterThan(-1)
+    expect(draftsAt).toBeGreaterThan(-1)
+    expect(setupAt).toBeLessThan(draftsAt)
+    expect(email.totalItems).toBe(4)
+  })
+
+  it('no setup card once every client is authorised', () => {
+    const email = buildTodoEmail(3, { ...EMPTY, draftsByClient: [{ name: 'x', id: 'y', drafts: 1 }] }, '1 Aug')
+    expect(email.html).not.toContain('去连接')
+  })
+})
+
+describe('loadGbpSetupTasks', () => {
+  const makeSupabase = (
+    clients: Array<{ id: string; name: string }>,
+    connections: Array<{ client_id: string; status: string; location_name: string | null }>,
+  ) => ({
+    from: vi.fn((table: string) => {
+      if (table === 'clients') {
+        return {
+          select: () => ({ eq: () => ({ not: () => Promise.resolve({ data: clients }) }) }),
+        }
+      }
+      return { select: () => ({ eq: () => Promise.resolve({ data: connections }) }) }
+    }),
+  })
+
+  const CLIENTS = [
+    { id: 'cts', name: 'CTS Tours NZ' },
+    { id: 'oz', name: 'oztop' },
+  ]
+
+  it('lists clients with no connection at all', async () => {
+    const tasks = await loadGbpSetupTasks(makeSupabase(CLIENTS, []) as never)
+    expect(tasks.map((t) => t.id)).toEqual(['cts', 'oz'])
+    expect(tasks[0].href).toContain('gbp/start?clientId=cts')
+  })
+
+  it('a connected client WITHOUT a confirmed storefront stays on the list', async () => {
+    // 板桥 必改 3: 这条以前第二天就消失了，PM 会以为办完了，
+    // 实际上这个客户一条内容都发不出去。
+    const tasks = await loadGbpSetupTasks(
+      makeSupabase(CLIENTS, [
+        { client_id: 'cts', status: 'active', location_name: null },
+        { client_id: 'oz', status: 'active', location_name: 'accounts/1/locations/2' },
+      ]) as never,
+    )
+    expect(tasks.map((t) => t.id)).toEqual(['cts'])
+    expect(tasks[0].label).toContain('哪一家门店')
+    expect(tasks[0].href).toContain('/settings')
+  })
+
+  it('an errored connection needs the consent click again', async () => {
+    const tasks = await loadGbpSetupTasks(
+      makeSupabase(CLIENTS, [
+        { client_id: 'cts', status: 'error', location_name: 'accounts/1/locations/2' },
+        { client_id: 'oz', status: 'active', location_name: 'accounts/1/locations/3' },
+      ]) as never,
+    )
+    expect(tasks.map((t) => t.id)).toEqual(['cts'])
+    expect(tasks[0].href).toContain('gbp/start')
+  })
+
+  it('fully set up → empty list', async () => {
+    const tasks = await loadGbpSetupTasks(
+      makeSupabase(CLIENTS, [
+        { client_id: 'cts', status: 'active', location_name: 'accounts/1/locations/2' },
+        { client_id: 'oz', status: 'active', location_name: 'accounts/1/locations/3' },
+      ]) as never,
+    )
+    expect(tasks).toEqual([])
+  })
+})
 
 describe('buildTodoEmail', () => {
   it('quiet day → all-clear subject and body, no section cards', () => {

@@ -17,6 +17,7 @@ import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
 import { ClientStatusPanel } from './_components/ClientStatusPanel'
 import { GbpPanel } from './_components/GbpPanel'
+import { GbpLocationPanel } from './_components/GbpLocationPanel'
 import { GoogleAdsPanel } from './_components/GoogleAdsPanel'
 import { AdStrategyPanel } from './_components/AdStrategyPanel'
 import { CompetitorDomainsPanel } from './_components/CompetitorDomainsPanel'
@@ -38,9 +39,9 @@ import { PipelineStagesPanel } from './_components/PipelineStagesPanel'
 import { CommentAuditList } from './_components/CommentAuditList'
 
 const ERROR_MESSAGES: Record<string, string> = {
-  token_exchange_failed: '无法从 Google 获取访问令牌，请重试。',
-  gbp_api_failed:        'Google Business Profile API 返回错误，请检查账号权限后重试。',
-  no_gbp_accounts:       '该 Google 账号下未找到 GBP 业务账户，请确认已创建 GBP 主页。',
+  token_exchange_failed: 'Google 那边没给我们通行证，请再试一次。',
+  gbp_api_failed:        'Google 拒绝了这次连接，多半是这个账号没有管理这家商家页的权限 —— 换成客户老板的账号再试一次。',
+  no_gbp_accounts:       '这个 Google 账号名下没有任何商家页 —— 十有八九是登错账号了，退出 Google 换客户老板的账号重来。',
 }
 
 export default function ClientSettingsPage() {
@@ -79,9 +80,26 @@ export default function ClientSettingsPage() {
           <div className="mt-5 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
             <span className="text-xl">✅</span>
             <div>
-              <p className="font-black text-emerald-800">Google Business Profile 已成功连接！</p>
+              <p className="font-black text-emerald-800">Google 商家页已连接，门店也确认好了！</p>
               <p className="mt-0.5 text-sm text-emerald-700">
-                数据将在下次同步时开始更新。
+                线已经接通。接下来我们会把每周要发的商家页内容写好，放进你的今日待办等你点确认 ——
+                你不点，就不会有任何东西发到客户的 Google 页面上。
+              </p>
+            </div>
+          </div>
+        )}
+
+        {gbpStatus === 'needs_location' && (
+          <div className="mt-5 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <span className="text-xl">⚠️</span>
+            <div>
+              <p className="font-black text-amber-800">连上了，但还差最后一步：我们没认出是哪一家门店</p>
+              <p className="mt-0.5 text-sm text-amber-700">
+                这个 Google 账号下面挂了不止一家门店，名字和网址都对不上，我们不敢猜 ——
+                猜错就会把内容发到别人家的页面上。在确认之前，我们一条内容都不会发。
+              </p>
+              <p className="mt-1.5 text-sm font-bold text-amber-800">
+                下一步：把客户名字和正确的门店名发给 Ray，我们指定一下，一般当天就能好。
               </p>
             </div>
           </div>
@@ -128,6 +146,14 @@ export default function ClientSettingsPage() {
             <h2 className="font-black text-slate-800">Google Business Profile</h2>
           </div>
           <GbpPanel clientId={clientId} />
+        </section>
+
+        <section className="mt-6">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-base">🏪</span>
+            <h2 className="font-black text-slate-800">发到哪一家门店</h2>
+          </div>
+          <GbpLocationPanel clientId={clientId} />
         </section>
 
         {/* Google Ads Connection Section */}

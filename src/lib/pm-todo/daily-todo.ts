@@ -41,6 +41,12 @@ export const DAY_THEMES: Record<number, { title: string; hint: string }> = {
 }
 
 export interface TodoCounts {
+  /**
+   * One-off setup actions only a human can complete (OAuth consent screens).
+   * Surfaced here so the PM/FDE never has to hunt for them in Settings —
+   * these block whole pillars until done.
+   */
+  setupTasks: Array<{ name: string; id: string; label: string; href: string }>
   /** [{ name, id, drafts }] — clients with blog drafts awaiting review. */
   draftsByClient: Array<{ name: string; id: string; drafts: number }>
   /** [{ name, id, findings }] — clients with fresh patrol findings. */
@@ -59,6 +65,78 @@ export interface TodoCounts {
 /** reels_drafts statuses that mean "a human needs to look at this". */
 const REEL_REVIEW_STATUSES = ['video_ready', 'images_ready', 'in_review'] as const
 
+const APP_BASE = 'https://app.magicengine.com.au'
+
+/** 板桥审：给 PM/FDE 看的 GBP 待办文案（含「用谁的账号」这个最易翻车点）。 */
+const GBP_CONNECT_LABEL =
+  '连接 Google 商家页 · 约 1 分钟。连上后不会自动发东西，每条帖子仍要你点确认才发。' +
+  '跳到 Google 后要用「能管理这家客户商家页的那个账号」登录 —— 通常是客户老板的账号，不是你自己的；' +
+  '用错账号连不上，退出重来一次就行，不会弄坏任何东西。一般由 Ray 或客户老板本人点，FDE 看到转给 Ray 就行。'
+
+const GBP_LOCATION_LABEL =
+  'Google 商家页差最后一步：还没确认是哪一家门店（在确认前不会发任何内容）。' +
+  '把客户名字和正确的门店名发给 Ray，我们指定一下，一般当天就能好。'
+
+/**
+ * Clients that still need a human on the Google Business Profile setup.
+ *
+ * "Should have GBP" is inferred from `gbp_place_id` — a client only gets that
+ * field once we've confirmed they have a Google storefront (口碑监测身份).
+ * So the list extends itself as more clients are configured; no hardcoded roster.
+ *
+ * TWO ways to be unfinished, and both must stay on the list (板桥 必改 3):
+ *   1. no active connection at all → needs the consent click
+ *   2. connected but `location_name` still null → we could not tell which
+ *      storefront is theirs, so nothing will ever publish
+ * Case 2 used to vanish from the to-do the next day (its row IS `active`),
+ * leaving a dead pillar behind an "all clear" — the to-do would be lying.
+ */
+export async function loadGbpSetupTasks(
+  supabase: SupabaseClient,
+): Promise<TodoCounts['setupTasks']> {
+  const [{ data: clients }, { data: connections }] = await Promise.all([
+    supabase
+      .from('clients')
+      .select('id, name')
+      .eq('client_status', 'active')
+      .not('gbp_place_id', 'is', null),
+    supabase
+      .from('platform_oauth_connections')
+      .select('client_id, status, location_name')
+      .eq('provider', 'google_gbp'),
+  ])
+
+  const rows = (connections ?? []) as Array<{
+    client_id: string
+    status: string
+    location_name: string | null
+  }>
+
+  /** Live connection AND pointed at a specific storefront = actually done. */
+  const ready = new Set(
+    rows
+      .filter((c) => c.status === 'active' && (c.location_name ?? '').length > 0)
+      .map((c) => c.client_id),
+  )
+  const connectedButUnlocated = new Set(
+    rows
+      .filter((c) => c.status === 'active' && !(c.location_name ?? '').length)
+      .map((c) => c.client_id),
+  )
+
+  return ((clients ?? []) as Array<{ id: string; name: string }>)
+    .filter((c) => !ready.has(c.id))
+    .map((c) => ({
+      name: c.name,
+      id: c.id,
+      label: connectedButUnlocated.has(c.id) ? GBP_LOCATION_LABEL : GBP_CONNECT_LABEL,
+      href: connectedButUnlocated.has(c.id)
+        ? `${APP_BASE}/dashboard/clients/${c.id}/settings`
+        : `${APP_BASE}/api/auth/google/gbp/start?clientId=${c.id}`,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
 // ── Data loading ────────────────────────────────────────────────────────────────
 
 export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCounts> {
@@ -66,7 +144,7 @@ export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCoun
   cardCutoff.setDate(cardCutoff.getDate() - RECENT_CARD_DAYS)
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
-  const [drafts, findings, cards, reels, failures] = await Promise.all([
+  const [drafts, findings, cards, reels, failures, setupTasks] = await Promise.all([
     supabase
       .from('blog_posts')
       .select('client_id, clients(name)')
@@ -89,6 +167,7 @@ export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCoun
       .from('cron_run_logs')
       .select('id, status, failed_count')
       .gte('started_at', since24h),
+    loadGbpSetupTasks(supabase),
   ])
 
   const countByClient = (
@@ -119,6 +198,7 @@ export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCoun
     .filter((r) => r.status === 'failed' || (r.failed_count ?? 0) > 0)
 
   return {
+    setupTasks,
     draftsByClient: toList(countByClient(drafts.data as never), 'drafts') as TodoCounts['draftsByClient'],
     findingsByClient: toList(countByClient(findings.data as never), 'findings') as TodoCounts['findingsByClient'],
     recentCardsByClient: toList(countByClient(cards.data as never), 'cards') as TodoCounts['recentCardsByClient'],
@@ -161,8 +241,21 @@ export function buildTodoEmail(weekday: number, counts: TodoCounts, nzDateLabel:
       ${label}：<b>${count}</b> ${unit} · <a href="${href}" style="color:#0891b2">去处理</a>
     </p>`
 
-  // Manual lane goes FIRST: automated work continues without anyone; these
-  // items stay frozen until a human acts, so they earn the top slot.
+  // Setup first: these are one-off consent clicks that block a whole pillar
+  // until done, so they outrank the day's routine review queue.
+  const setupTasks = counts.setupTasks ?? []
+  if (setupTasks.length > 0) {
+    sections.push(sectionCard('🔌', '要你点一次的连接（做一次，以后不再出现）',
+      setupTasks.map((t) => `
+        <p style="margin:0 0 8px;font-size:14px;color:#334155">
+          <b>${t.name}</b> · <a href="${t.href}" style="color:#0891b2">去连接</a><br/>
+          <span style="font-size:12px;color:#64748b">${t.label}</span>
+        </p>`),
+    ))
+  }
+
+  // Then the manual lane: work the system genuinely cannot finish. Routine
+  // sections below move on their own; these stay frozen until a human acts.
   const manualItems = counts.manualItems ?? []
   if (manualItems.length > 0) {
     const rows = manualItems.map((m) => `
@@ -208,8 +301,8 @@ export function buildTodoEmail(weekday: number, counts: TodoCounts, nzDateLabel:
   }
 
   const totalItems =
-    totalDrafts + totalFindings + totalCards + totalReels +
-    manualItems.length + counts.cronFailures24h
+    setupTasks.length + manualItems.length +
+    totalDrafts + totalFindings + totalCards + totalReels + counts.cronFailures24h
 
   const body = sections.length > 0
     ? sections.join('')
