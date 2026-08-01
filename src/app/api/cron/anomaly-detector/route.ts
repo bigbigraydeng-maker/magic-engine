@@ -33,9 +33,10 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { runAnomalyDetector } from '@/lib/flywheel/anomaly'
+import { runAnomalyDetector, runWatchers } from '@/lib/flywheel/anomaly'
 import { runProactivePass } from '@/lib/zhuge/proactive'
 import type { AnomalyDetectorResult } from '@/lib/flywheel/anomaly/AnomalyDetectorJob'
+import type { WatcherRunResult } from '@/lib/flywheel/anomaly'
 import type { BatchProactiveResult } from '@/lib/zhuge/proactive'
 import { startCronRun } from '@/lib/cron/run-logger'
 
@@ -47,6 +48,7 @@ interface CronResponse {
   success: boolean
   timestamp: string
   step1: AnomalyDetectorResult
+  watchers?: WatcherRunResult
   step2?: BatchProactiveResult
   step2_skipped?: boolean
 }
@@ -72,7 +74,11 @@ export async function GET(
   }
 
   const timestamp = new Date().toISOString()
-  const cronRun = await startCronRun('anomaly-detector-daily')
+  // expectsWork: a healthy run always scans at least one serviced client.
+  // This job spent 2026-07-03..07-31 reporting `completed` with
+  // scannedClients:0 while the client query was throwing. Declaring the
+  // expectation is what turns that shape into a visible failure.
+  const cronRun = await startCronRun('anomaly-detector-daily', { expectsWork: true })
 
   // ── Step 1: AnomalyDetectorJob ────────────────────────────────────────────
   let step1: AnomalyDetectorResult
@@ -90,19 +96,51 @@ export async function GET(
     return NextResponse.json<ErrorResponse>({ error: `Step 1 failed: ${message}` }, { status: 500 })
   }
 
+  // ── Step 1b: standing watchers ────────────────────────────────────────────
+  // Recency/continuity detection (ad delivery, content supply, page handover).
+  // Separate from step 1 because the value-threshold engine structurally cannot
+  // see the failures that show up as MISSING rows rather than bad numbers.
+  let watchers: WatcherRunResult
+  try {
+    watchers = await runWatchers()
+    console.log(
+      `[anomaly-detector/cron] watchers: clients=${watchers.scannedClients} ` +
+      `detected=${watchers.signalsDetected} persisted=${watchers.signalsPersisted} ` +
+      `excluded=${watchers.excludedClients.length} errors=${watchers.errors.length}`
+    )
+  } catch (err) {
+    // A roster we cannot build means the watchers are blind, not idle.
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[anomaly-detector/cron] watchers unhandled error:', message)
+    await cronRun.finish({
+      processed: step1.scannedClients,
+      failed: step1.errors.length + 1,
+      summary: { step1, watchers_error: message },
+      error: `Watchers failed: ${message}`,
+    })
+    return NextResponse.json<ErrorResponse>(
+      { error: `Watchers failed: ${message}` },
+      { status: 500 }
+    )
+  }
+
+  const totalPersisted = step1.signalsPersisted + watchers.signalsPersisted
+  const totalErrors = step1.errors.length + watchers.errors.length
+
   // ── Step 2: 诸葛亮 Proactive ──────────────────────────────────────────────
   // Skip if no new signals were persisted (nothing fresh to act on).
-  if (step1.signalsPersisted === 0) {
+  if (totalPersisted === 0) {
     await cronRun.finish({
       processed: step1.scannedClients,
       completed: step1.scannedClients,
-      failed: step1.errors.length,
-      summary: { step1, step2_skipped: true },
+      failed: totalErrors,
+      summary: { step1, watchers, step2_skipped: true },
     })
     return NextResponse.json<CronResponse>({
       success: true,
       timestamp,
       step1,
+      watchers,
       step2_skipped: true,
     })
   }
@@ -130,13 +168,14 @@ export async function GET(
     await cronRun.finish({
       processed: step1.scannedClients,
       completed: step1.scannedClients - step1.errors.length,
-      failed: step1.errors.length,
-      summary: { step1, step2: partialStep2 },
+      failed: totalErrors,
+      summary: { step1, watchers, step2: partialStep2 },
     })
     return NextResponse.json<CronResponse>({
       success: true,
       timestamp,
       step1,
+      watchers,
       step2: partialStep2,
     })
   }
@@ -144,13 +183,14 @@ export async function GET(
   await cronRun.finish({
     processed: step1.scannedClients,
     completed: step1.scannedClients - step1.errors.length,
-    failed: step1.errors.length + step2.errors.length,
-    summary: { step1, step2 },
+    failed: totalErrors + step2.errors.length,
+    summary: { step1, watchers, step2 },
   })
   return NextResponse.json<CronResponse>({
     success: true,
     timestamp,
     step1,
+    watchers,
     step2,
   })
 }
