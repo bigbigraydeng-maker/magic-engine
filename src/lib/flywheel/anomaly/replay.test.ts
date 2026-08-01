@@ -124,6 +124,18 @@ describe('replay · CTS "Lead Form — Reborn" stopped after 2026-07-20', () => 
     expect(signals.filter(s => s.ruleId === 'ad-spend-no-result')).toHaveLength(0)
   })
 
+  it('does not call a one- or two-day reporting gap a blackout', () => {
+    // Meta's insights lag roughly a day, and a weekend can stretch that. If a
+    // single missing row counted as "stopped", this would fire on almost every
+    // campaign almost every week and the alert would stop meaning anything.
+    // (Found by mutation testing: lowering DARK_DAYS_THRESHOLD to 1 originally
+    // broke nothing, because no test covered the short-gap case.)
+    for (const date of ['2026-07-21', '2026-07-22']) {
+      const signals = runWatchersOverSnapshot(ctsSnapshotAsOf(date), date)
+      expect(signals.filter(s => s.ruleId === 'ad-delivery-dark')).toHaveLength(0)
+    }
+  })
+
   it('goes quiet once the campaign is back on 07-31', () => {
     const signals = runWatchersOverSnapshot(ctsSnapshotAsOf('2026-07-31'), '2026-07-31')
 
