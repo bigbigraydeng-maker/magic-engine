@@ -401,10 +401,27 @@ export async function runProactivePass(
   const errors: string[] = []
 
   // Fetch all fresh signals (up to 200 — avoids runaway queries)
+  //
+  // Standing-watcher rows (metric_key 'watcher.*') are deliberately excluded.
+  // Two reasons, both load-bearing:
+  //
+  //   1. v1 of the watchers is classify-only by PM instruction. They already
+  //      carry their own verdict (auto / needs_approval) decided by explicit
+  //      rules; handing the same call to an LLM would silently override it.
+  //   2. This prompt is built for value-threshold signals and is told to
+  //      dismiss rows whose metric_key is unfamiliar or whose reference_value
+  //      is ~0 — which is every watcher row. Dismissal sets status='dismissed',
+  //      and AnomalySignalPanel only renders non-dismissed rows, so the LLM
+  //      would delete the findings off the human's screen before anyone saw
+  //      them. That is worse than doing nothing.
+  //
+  // Watcher rows stay 'fresh' and surface in AnomalySignalPanel on the
+  // execution kanban. Wiring them into an actioning path is a later decision.
   const { data: rawSignals, error: fetchErr } = await supabaseAdmin
     .from('anomaly_signals')
     .select('id, client_id, flywheel, metric_key, rule_id, severity, current_value, reference_value, delta_pct, description, detected_at')
     .eq('status', 'fresh')
+    .not('metric_key', 'like', 'watcher.%')
     .order('detected_at', { ascending: false })
     .limit(200)
 

@@ -124,12 +124,14 @@ export async function GET(
     )
   }
 
-  const totalPersisted = step1.signalsPersisted + watchers.signalsPersisted
   const totalErrors = step1.errors.length + watchers.errors.length
 
   // ── Step 2: 诸葛亮 Proactive ──────────────────────────────────────────────
-  // Skip if no new signals were persisted (nothing fresh to act on).
-  if (totalPersisted === 0) {
+  // Gated on step 1 only, on purpose: runProactivePass deliberately excludes
+  // watcher rows (see the comment on its fetch), so watcher signals alone give
+  // it nothing to read. Watcher findings reach a human through
+  // AnomalySignalPanel on the execution kanban instead.
+  if (step1.signalsPersisted === 0) {
     await cronRun.finish({
       processed: step1.scannedClients,
       completed: step1.scannedClients,
