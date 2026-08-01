@@ -1,6 +1,6 @@
 // 单讲工作台 API — 讲课式内容的脚本审改 / 制作方式 / 录像直传 / 重做 / 开始做片。
 // GET   详情(结构化脚本 + 制作方式 + 做片任务状态 + 客户 VI 色)
-// PATCH { action: save_script | set_method | recording_uploaded | redo_section | regen_script | start_render }
+// PATCH { action: save_script | set_method | recording_uploaded | recording_link | redo_section | regen_script | start_render }
 // POST  { fileName } → 录像签名直传 URL(大文件不走 API body，直传存储)
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -13,6 +13,7 @@ import {
   xhsCtaViolations,
   type LectureScript,
 } from '@/lib/factory/lecture-script'
+import { looksLikeVideoResponse, normalizeRecordingLink } from '@/lib/factory/recording-link'
 import {
   loadLecturePost,
   saveLectureScript,
@@ -113,6 +114,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       lecture?: LectureScript
       method?: LectureMethod
       path?: string
+      link?: string
       index?: number
       instruction?: string
     }
@@ -151,6 +153,38 @@ export async function PATCH(req: NextRequest, { params }: Params) {
           recordingUrl: pub.publicUrl,
         })
         return NextResponse.json({ ok: true, recordingUrl: pub.publicUrl })
+      }
+
+      case 'recording_link': {
+        // 手机录完直接同步 Dropbox → 粘共享链接，比再导出上传快(PM 2026-08-01)
+        const norm = normalizeRecordingLink(body.link ?? '')
+        if (!norm.ok || !norm.url) {
+          return NextResponse.json({ error: norm.error ?? '这个链接用不了' }, { status: 400 })
+        }
+        // 当场探一下能不能真下到视频——别拖到做片时才失败(dl=0 的分享页会返回网页)
+        let head: Response
+        try {
+          head = await fetch(norm.url, {
+            headers: { Range: 'bytes=0-1023' },
+            redirect: 'follow',
+            signal: AbortSignal.timeout(20000),
+          })
+        } catch {
+          return NextResponse.json({ error: '打不开这个链接 — 确认链接没过期、并且设成「知道链接的人都能看」' }, { status: 400 })
+        }
+        if (!head.ok && head.status !== 206) {
+          return NextResponse.json({ error: '打不开这个链接 — 确认链接没过期、并且设成「知道链接的人都能看」' }, { status: 400 })
+        }
+        if (!looksLikeVideoResponse(head.headers.get('content-type'), norm.url)) {
+          return NextResponse.json({ error: '这个链接指向的不是视频文件 — 在 Dropbox 里对着那条视频本身「复制链接」再粘一次' }, { status: 400 })
+        }
+        await setLectureProduction({
+          clientId: params.id,
+          postId: params.postId,
+          method: 'self_record',
+          recordingUrl: norm.url,
+        })
+        return NextResponse.json({ ok: true, recordingUrl: norm.url })
       }
 
       case 'redo_section': {

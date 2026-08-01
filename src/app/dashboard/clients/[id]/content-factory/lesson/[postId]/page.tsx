@@ -83,6 +83,7 @@ export default function LectureWorkbenchPage() {
   const [redoNote, setRedoNote] = useState('')
   const [uploadPct, setUploadPct] = useState<number | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const [linkInput, setLinkInput] = useState('')
 
   const base = `/api/clients/${clientId}/content-factory/${postId}`
 
@@ -222,6 +223,17 @@ export default function LectureWorkbenchPage() {
     }
     if (!(await ensureSaved())) return
     await patch({ action: 'start_render' }, 'render', '已开始做片，约 15-30 分钟。做好会出现在下面「成片」区')
+  }
+
+  async function applyRecordingLink() {
+    if (!linkInput.trim()) return
+    if (!(await ensureSaved())) return
+    const ok = await patch(
+      { action: 'recording_link', link: linkInput.trim() },
+      'link',
+      '录像链接已接上 ✅ 点「开始做片」，系统自动加课件和字幕',
+    )
+    if (ok) setLinkInput('')
   }
 
   async function uploadRecording(file: File) {
@@ -489,8 +501,16 @@ export default function LectureWorkbenchPage() {
           <div className="bg-white border border-me-stone rounded-xl p-3 mb-3">
             {hasRecording && (
               <div className="mb-2">
-                <div className="text-[11px] font-semibold text-me-taupe mb-1">已上传的录像</div>
+                <div className="text-[11px] font-semibold text-me-taupe mb-1">
+                  当前录像
+                  {data.production!.recording_url!.includes('dropbox') && '（来自 Dropbox 链接）'}
+                </div>
                 <video src={data.production!.recording_url} controls playsInline className="w-full max-h-[300px] rounded-lg bg-black" />
+                {data.production!.recording_url!.includes('dropbox') && (
+                  <div className="text-[10px] text-me-taupe mt-1">
+                    Dropbox 链接的视频这里可能放不出来，不影响做片（做片时后台会自己去取）。
+                  </div>
+                )}
               </div>
             )}
             <input
@@ -509,6 +529,32 @@ export default function LectureWorkbenchPage() {
                 ? `上传中… ${uploadPct ?? 0}%`
                 : hasRecording ? '重新上传录像' : '上传你录的视频'}
             </button>
+
+            {/* 手机录完直接同步 Dropbox 的，粘链接比再导出上传快 */}
+            <div className="mt-3 pt-3 border-t border-me-stone">
+              <div className="text-[11px] font-semibold text-me-taupe mb-1">
+                或者粘 Dropbox 链接（手机录完自动同步的，直接粘更快）
+              </div>
+              <div className="flex gap-2">
+                <input
+                  value={linkInput}
+                  onChange={(e) => setLinkInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void applyRecordingLink() }}
+                  placeholder="https://www.dropbox.com/…"
+                  className="flex-1 min-w-0 text-sm border border-me-stone rounded-lg px-2 py-2"
+                />
+                <button
+                  disabled={busy !== null || !linkInput.trim()}
+                  onClick={applyRecordingLink}
+                  className="flex-none text-sm font-semibold text-me-charcoal border border-me-stone rounded-lg px-3 hover:border-me-ochre disabled:opacity-40"
+                >
+                  {busy === 'link' ? '检查中…' : '用这个链接'}
+                </button>
+              </div>
+              <div className="text-[10px] text-me-taupe mt-1">
+                在 Dropbox 里对着那条视频「复制链接」即可，权限设成「知道链接的人都能看」。
+              </div>
+            </div>
           </div>
         )}
 
