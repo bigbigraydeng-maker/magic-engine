@@ -244,3 +244,31 @@ describe('decideAutoTags · 批量', () => {
     expect(decideAutoTags([])).toEqual([])
   })
 })
+
+describe('看房意向 · 否定句必须挡住（复审补）', () => {
+  // 复审时实测：加否定层之前，下面 6 句全部被判成「想看房」。
+  // 后果不是漏标而是**误标**——把明确拒绝的人算进真买家，而真买家数正是
+  // 判断这套房成不成功的指标，标错方向是往上虚报。
+  const refusals = [
+    '我不想看房',
+    '暂时不考虑看房',
+    '不用安排看房了',
+    '看了照片就够了，不想去看房',
+    'not interested in a viewing',
+    'no need for an open home',
+  ]
+  for (const text of refusals) {
+    it(`「${text}」不算意向`, () => {
+      expect(detectViewingRequest([text])).toBeNull()
+    })
+  }
+
+  it('肯定句照常命中', () => {
+    expect(detectViewingRequest(['周六能约看房吗'])).not.toBeNull()
+    expect(detectViewingRequest(['can I book a viewing this weekend'])).not.toBeNull()
+  })
+
+  it('先拒后允：同一句里有一处没被否定就算', () => {
+    expect(detectViewingRequest(['这周不想看房，下周想约看房'])).not.toBeNull()
+  })
+})

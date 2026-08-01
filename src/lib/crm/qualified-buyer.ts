@@ -107,10 +107,50 @@ export interface ViewingRequestHit {
 const EXCERPT_MAX_CHARS = 80
 
 /**
+ * 否定词。命中看房说法之前的一小段窗口里出现这些，就不算意向。
+ *
+ * 为什么必须有这一层：纯子串匹配下，「我**不想看房**」「not interested in **a viewing**」
+ * 会照样命中，把明确拒绝的人标成真买家 —— 而真买家数正是判断这套房跑得成不成功的
+ * 那个指标，标错方向是往上虚报。复审实测：6 句否定全部被误判。
+ */
+const NEGATION_MARKERS: readonly string[] = [
+  // 中文（含单字「不 / 没 / 别」，宁可误伤也不放过）
+  '不', '没', '别', '无需', '暂不', '免',
+  // 英文
+  'not', 'no ', "n't", 'never', 'cannot', 'without',
+]
+
+/**
+ * 分句符。否定只在**同一个子句内**生效 —— 固定长度的窗口两头不讨好：
+ * 英文「not interested in a viewing」隔了 15 个字符，窗口小了漏；
+ * 中文「这周不想看房，下周想约看房」窗口大了又会让前半句的「不」
+ * 把后半句真实的意向也一起否掉。
+ */
+const CLAUSE_BREAKS = /[，,。.；;！!？?\n、]/
+
+/** 命中点所在的那个子句里有没有否定词。 */
+function isNegated(haystack: string, hitIndex: number): boolean {
+  const before = haystack.slice(0, hitIndex)
+  // 往前找最近的分句符，只看它之后那一段。
+  let start = 0
+  for (let i = before.length - 1; i >= 0; i--) {
+    if (CLAUSE_BREAKS.test(before[i])) {
+      start = i + 1
+      break
+    }
+  }
+  const clause = before.slice(start)
+  return NEGATION_MARKERS.some((marker) => clause.includes(marker))
+}
+
+/**
  * 这堆文本里有没有人说「想去看房」。返回第一个命中，附上原话（审计要有出处）。
  *
  * 只做子串匹配，故意不做词形还原 / 模糊匹配：宁可漏标（这个人下次多说两句就会
  * 被规则一捞到），也不要把「我们给他发了开放日时间」这种我们自己的话算成他的意向。
+ *
+ * 同一句里可能出现多次同一说法（「不想看房，改天再看房」），所以每个位置都查一遍，
+ * 只要有一处没被否定就算命中。
  */
 export function detectViewingRequest(texts: readonly string[]): ViewingRequestHit | null {
   for (const raw of texts) {
@@ -119,10 +159,15 @@ export function detectViewingRequest(texts: readonly string[]): ViewingRequestHi
 
     const haystack = text.toLowerCase()
     for (const phrase of VIEWING_REQUEST_PHRASES) {
-      if (!haystack.includes(phrase)) continue
-      const excerpt =
-        text.length > EXCERPT_MAX_CHARS ? `${text.slice(0, EXCERPT_MAX_CHARS)}…` : text
-      return { phrase, excerpt }
+      let at = haystack.indexOf(phrase)
+      while (at !== -1) {
+        if (!isNegated(haystack, at)) {
+          const excerpt =
+            text.length > EXCERPT_MAX_CHARS ? `${text.slice(0, EXCERPT_MAX_CHARS)}…` : text
+          return { phrase, excerpt }
+        }
+        at = haystack.indexOf(phrase, at + phrase.length)
+      }
     }
   }
   return null
