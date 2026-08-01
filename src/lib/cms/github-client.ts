@@ -206,6 +206,23 @@ export class GithubClient {
     )
   }
 
+  /**
+   * List a directory's entries (name + path + type). Used by the SEO meta
+   * executor to discover which data files exist before reading them, instead
+   * of guessing filenames from URL slugs.
+   */
+  async listDirectory(
+    owner:  string,
+    repo:   string,
+    path:   string,
+    branch: string,
+  ): Promise<Array<{ name: string; path: string; type: string }>> {
+    return this.request<Array<{ name: string; path: string; type: string }>>(
+      'GET',
+      `/repos/${owner}/${repo}/contents/${encodeFilePath(path)}?ref=${branch}`,
+    )
+  }
+
   // ── Private request helper ──────────────────────────────────────────────────
 
   private async request<T>(

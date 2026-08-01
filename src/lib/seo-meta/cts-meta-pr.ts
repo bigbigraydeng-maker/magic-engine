@@ -7,9 +7,10 @@
  *   1. GSC top_pages: positions 4-20 with impressions ≥ 10 (real CTR upside)
  *   2. Best matching query from top_queries → AI (Haiku) writes a sharper
  *      title + description (NZ China-travel voice, "| CTS" suffix)
- *   3. THE NARROW LANE: edits ONLY string literals inside the site's
- *      centralized meta data file (src/lib/data/seo-pages.ts) — pages whose
- *      meta lives elsewhere are skipped, никакой TSX logic is ever touched
+ *   3. THE NARROW LANE: edits ONLY title/description string literals inside
+ *      src/lib/data/*.ts entries, located via a content-built slug index
+ *      (filenames don't track URL slugs, and batch files hold many posts).
+ *      Slugs found in no data file are skipped — no TSX logic is ever touched
  *   4. One PR per week (≤ MAX_PAGES_PER_RUN pages), CI must pass, the PM
  *      merges — same human gate as blog publishing (魏征 M2: PR + 人合).
  *   5. seo_meta_log rows drive the 30-day per-slug cooldown and the weekly
@@ -27,7 +28,7 @@ import { getConnection } from '@/lib/cms/connection-store'
 import { GithubClient } from '@/lib/cms/github-client'
 
 export const CTS_CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
-const META_FILE_PATH = 'src/lib/data/seo-pages.ts'
+const DATA_DIR = 'src/lib/data'
 const MAX_PAGES_PER_RUN = 3
 const COOLDOWN_DAYS = 30
 const MIN_POSITION = 4
@@ -49,27 +50,36 @@ export interface MetaReplacement {
 }
 
 /**
- * Replace the title/description literals of the meta object whose
+ * Replace the title + description/excerpt literals of the entry whose
  * `slug: '<slug>'` appears in the source. Returns null when the slug isn't
- * managed by this file (caller skips that page — never guess elsewhere).
+ * in this file, or when the entry lacks either field (caller skips — the
+ * executor never guesses).
+ *
+ * The edit window ends at whichever comes first: the NEXT entry's `slug:`
+ * or the next `export const`. Batch files hold many posts inside ONE export,
+ * so an export-only boundary would let an entry missing its own excerpt
+ * silently overwrite the next post's (魏征-style neighbour corruption).
  */
 export function replaceMetaForSlug(
   source: string,
   slug: string,
   newTitle: string,
   newDesc: string,
-  descField: 'description' | 'excerpt' = 'description',
 ): MetaReplacement | null {
   const slugIdx = source.indexOf(`slug: '${slug}'`)
   if (slugIdx === -1) return null
 
-  // Window: from this slug to the next exported meta object (or EOF) so we
-  // never touch a neighbouring page's strings.
-  const nextExport = source.indexOf('\nexport const', slugIdx)
-  const windowEnd = nextExport === -1 ? source.length : nextExport
+  const bounds = [
+    source.indexOf("slug: '", slugIdx + 1),
+    source.indexOf('\nexport const', slugIdx),
+  ].filter((i) => i !== -1)
+  const windowEnd = bounds.length > 0 ? Math.min(...bounds) : source.length
   const window = source.slice(slugIdx, windowEnd)
 
   const titleRe = new RegExp(`(title:\\s*)${STRING_LITERAL.source}`)
+  // Hub pages use `description`, blog posts use `excerpt` — both are the
+  // rendered meta description in this repo. Detect, don't configure.
+  const descField = /(\bdescription:\s*)'/.test(window) ? 'description' : 'excerpt'
   const descRe = new RegExp(`(${descField}:\\s*)${STRING_LITERAL.source}`)
 
   const titleMatch = window.match(titleRe)
@@ -92,6 +102,29 @@ export function replaceMetaForSlug(
   }
 }
 
+/**
+ * slug → file path, built by scanning the data files' CONTENT.
+ *
+ * Filenames do not track URL slugs in this repo: /blog/liziba-station-
+ * chongqing-guide lives in blogs-liziba-monorail-guide.ts, and four of CTS's
+ * top-opportunity posts sit inside shared batch files (blogs-longtail-batch1
+ * .ts etc). Guessing `blogs-<slug>.ts` found 2 of 6 — the first two runs
+ * produced no PR for exactly this reason.
+ */
+export function buildSlugIndex(
+  files: Array<{ path: string; source: string }>,
+): Map<string, string> {
+  const index = new Map<string, string>()
+  const slugRe = /slug:\s*'([^']+)'/g
+  for (const file of files) {
+    let m: RegExpExecArray | null
+    while ((m = slugRe.exec(file.source)) !== null) {
+      if (!index.has(m[1])) index.set(m[1], file.path)
+    }
+  }
+  return index
+}
+
 // ── Pure: GSC candidate picking ─────────────────────────────────────────────────
 
 interface GscPageRow {
@@ -110,8 +143,6 @@ export interface MetaCandidate {
   keyword: string
   impressions: number
   position: number
-  /** Blog posts live in per-post data files with `excerpt` as the meta desc. */
-  isBlog: boolean
 }
 
 export function pickCandidates(
@@ -163,7 +194,6 @@ export function pickCandidates(
       keyword: match?.query ?? slug.replace(/-/g, ' '),
       impressions: page.impressions ?? 0,
       position: page.position ?? 0,
-      isBlog: (page.page ?? '').includes('/blog/'),
     })
   }
   return out
@@ -266,23 +296,26 @@ export async function runCtsMetaPr(
     const defaultBranch = branch || 'main'
     const github = new GithubClient(plainToken)
 
-    // 3. Narrow-lane edits, two lanes:
-    //    · hub pages   → META_FILE_PATH        (field: description)
-    //    · blog posts  → blogs-<slug>.ts each  (field: excerpt — it IS the
-    //      meta description in this repo, and also the visible headline/card
-    //      copy, which is exactly what a CTR fix should change)
-    //    Slugs whose file/entry can't be found are skipped — never guess.
+    // 3. Build the slug → file index by READING the data files, never by
+    //    guessing filenames (filenames don't track URL slugs here, and batch
+    //    files hold many posts each — see buildSlugIndex).
+    const dir = await github
+      .listDirectory(repoOwner, repoName, DATA_DIR, defaultBranch)
+      .catch(() => [])
+    const dataFiles = dir.filter(
+      (e) => e.type === 'file' && /^(seo-pages|blogs).*\.ts$/.test(e.name),
+    )
+
     const fileCache = new Map<string, { source: string; sha: string; dirty: boolean }>()
-    const loadFile = async (path: string) => {
-      if (!fileCache.has(path)) {
-        const f = await github
-          .getFileContent(repoOwner, repoName, path, defaultBranch)
-          .catch(() => null)
-        if (!f) return null
-        fileCache.set(path, { source: f.decodedContent, sha: f.sha, dirty: false })
-      }
-      return fileCache.get(path)!
+    for (const entry of dataFiles) {
+      const f = await github
+        .getFileContent(repoOwner, repoName, entry.path, defaultBranch)
+        .catch(() => null)
+      if (f) fileCache.set(entry.path, { source: f.decodedContent, sha: f.sha, dirty: false })
     }
+    const slugIndex = buildSlugIndex(
+      Array.from(fileCache.entries()).map(([path, v]) => ({ path, source: v.source })),
+    )
 
     const applied: Array<{
       candidate: MetaCandidate
@@ -298,12 +331,10 @@ export async function runCtsMetaPr(
 
     for (const candidate of candidates) {
       if (applied.length >= MAX_PAGES_PER_RUN) break
-      const path = candidate.isBlog
-        ? `src/lib/data/blogs-${candidate.slug}.ts`
-        : META_FILE_PATH
-      const entry = await loadFile(path)
+      const path = slugIndex.get(candidate.slug)
+      const entry = path ? fileCache.get(path) : undefined
       if (!entry) {
-        attempts.push({ slug: candidate.slug, step: 'file_not_found' })
+        attempts.push({ slug: candidate.slug, step: 'slug_not_in_any_data_file' })
         continue
       }
 
@@ -318,7 +349,6 @@ export async function runCtsMetaPr(
         candidate.slug,
         meta.title,
         meta.desc,
-        candidate.isBlog ? 'excerpt' : 'description',
       )
       if (!replaced) {
         attempts.push({ slug: candidate.slug, step: 'slug_not_in_file' })

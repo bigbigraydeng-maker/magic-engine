@@ -1,12 +1,13 @@
 /**
  * Unit tests for the pure parts of the CTS meta executor (22.E.S17):
- * the narrow-lane source editor and the GSC candidate picker.
+ * the narrow-lane source editor, the content-built slug index, and the
+ * GSC candidate picker.
  */
 
 import { describe, it, expect } from 'vitest'
-import { replaceMetaForSlug, pickCandidates } from '../cts-meta-pr'
+import { replaceMetaForSlug, buildSlugIndex, pickCandidates } from '../cts-meta-pr'
 
-const SOURCE = `// SEO Pages Data
+const HUB_SOURCE = `// SEO Pages Data
 export const chinaToursMeta: SeoPageMeta = {
   slug: 'china-tours',
   title: 'China Tours from New Zealand 2026-27 · 4 Itineraries | CTS',
@@ -23,54 +24,97 @@ export const beijingToursMeta: CityHubMeta = {
 };
 `
 
+/** Real shape of blogs-longtail-batch1.ts: many posts inside ONE export. */
+const BATCH_SOURCE = `import type { BlogPost } from '@/lib/types/blog-post';
+
+export const longtailBatch1Posts: BlogPost[] = [
+  {
+    id: 'lt-a1',
+    slug: 'beijing-xian-itinerary-10-days',
+    title: '10-Day Beijing & Xi\\'an Itinerary for NZ Travellers',
+    excerpt: 'A practical day-by-day guide to 10 days in Beijing and Xi\\'an.',
+    author: 'Baker Gu',
+  },
+  {
+    id: 'lt-a3',
+    slug: 'beijing-to-xian-high-speed-train',
+    title: 'Beijing to Xi\\'an High-Speed Train: NZ Travel Guide',
+    excerpt: 'The high-speed train between Beijing and Xi\\'an is one of the best.',
+    author: 'Baker Gu',
+  },
+];
+`
+
 describe('replaceMetaForSlug — narrow lane', () => {
-  it('replaces only the target slug object, neighbours untouched', () => {
-    const result = replaceMetaForSlug(SOURCE, 'beijing-tours', 'New Beijing Title | CTS', 'New beijing desc.')
+  it('replaces only the target entry, neighbours untouched (hub file)', () => {
+    const result = replaceMetaForSlug(HUB_SOURCE, 'beijing-tours', 'New Beijing Title | CTS', 'New beijing desc.')
     expect(result).not.toBeNull()
     expect(result!.updated).toContain("title: 'New Beijing Title | CTS'")
     expect(result!.updated).toContain("description: 'New beijing desc.'")
-    // china-tours object stays byte-identical
     expect(result!.updated).toContain("title: 'China Tours from New Zealand 2026-27 · 4 Itineraries | CTS'")
     expect(result!.oldTitle).toBe('Beijing Tours | CTS')
     expect(result!.oldDesc).toBe('Old beijing description.')
   })
 
   it('handles escaped quotes in old values and escapes them in new values', () => {
-    const result = replaceMetaForSlug(SOURCE, 'china-tours', "NZ's Best China Tours | CTS", "Kiwi's choice.")
+    const result = replaceMetaForSlug(HUB_SOURCE, 'china-tours', "NZ's Best China Tours | CTS", "Kiwi's choice.")
     expect(result).not.toBeNull()
     expect(result!.oldDesc).toBe("Compare 4 China tours from NZ. New Zealand's dedicated specialist.")
     expect(result!.updated).toContain("title: 'NZ\\'s Best China Tours | CTS'")
     expect(result!.updated).toContain("'Kiwi\\'s choice.'")
   })
 
-  it('returns null for slugs the meta file does not manage (skip, never guess)', () => {
-    expect(replaceMetaForSlug(SOURCE, 'not-a-page', 'x', 'y')).toBeNull()
+  it('returns null for slugs the file does not contain (skip, never guess)', () => {
+    expect(replaceMetaForSlug(HUB_SOURCE, 'not-a-page', 'x', 'y')).toBeNull()
   })
 
-  it('blog lane: edits title + excerpt in a per-post data file', () => {
-    const blogSource = `export const chongqingVsChengduPost: BlogPost = {
-  id: 'lt-1',
-  slug: 'chongqing-vs-chengdu',
-  title: 'Chongqing vs Chengdu: Which Should NZ Travellers Visit in 2026?',
-  excerpt:
-    'Hotpot capital vs panda capital — old excerpt.',
-  author: 'Baker Gu',
-};
-`
+  it('batch file: edits the right post and auto-detects the excerpt field', () => {
     const result = replaceMetaForSlug(
-      blogSource, 'chongqing-vs-chengdu', 'New CQ Title | CTS', 'New excerpt with CTA.', 'excerpt',
+      BATCH_SOURCE, 'beijing-to-xian-high-speed-train', 'New Train Title | CTS', 'New train excerpt.',
     )
     expect(result).not.toBeNull()
-    expect(result!.updated).toContain("title: 'New CQ Title | CTS'")
-    expect(result!.updated).toContain("'New excerpt with CTA.'")
-    expect(result!.oldDesc).toBe('Hotpot capital vs panda capital — old excerpt.')
-    // author line untouched
-    expect(result!.updated).toContain("author: 'Baker Gu'")
+    expect(result!.oldTitle).toBe("Beijing to Xi'an High-Speed Train: NZ Travel Guide")
+    expect(result!.updated).toContain("title: 'New Train Title | CTS'")
+    expect(result!.updated).toContain("excerpt: 'New train excerpt.'")
+    // the sibling post inside the SAME export is byte-identical
+    expect(result!.updated).toContain("title: '10-Day Beijing & Xi\\'an Itinerary for NZ Travellers'")
+    expect(result!.updated).toContain("excerpt: 'A practical day-by-day guide to 10 days in Beijing and Xi\\'an.'")
   })
 
-  it('blog lane: returns null when the post has no excerpt field', () => {
-    const noExcerpt = `export const xPost: BlogPost = { slug: 'x-post', title: 'T', author: 'A' };`
-    expect(replaceMetaForSlug(noExcerpt, 'x-post', 'a', 'b', 'excerpt')).toBeNull()
+  it('batch file: a post missing its excerpt does NOT steal the next post\'s (neighbour corruption guard)', () => {
+    const missingExcerpt = `export const posts: BlogPost[] = [
+  {
+    slug: 'no-excerpt-post',
+    title: 'No Excerpt Post',
+  },
+  {
+    slug: 'healthy-post',
+    title: 'Healthy Post',
+    excerpt: 'Do not touch me.',
+  },
+];
+`
+    expect(replaceMetaForSlug(missingExcerpt, 'no-excerpt-post', 'a', 'b')).toBeNull()
+  })
+})
+
+describe('buildSlugIndex', () => {
+  it('maps every slug to its containing file, including batch files', () => {
+    const index = buildSlugIndex([
+      { path: 'src/lib/data/seo-pages.ts', source: HUB_SOURCE },
+      { path: 'src/lib/data/blogs-longtail-batch1.ts', source: BATCH_SOURCE },
+    ])
+    expect(index.get('china-tours')).toBe('src/lib/data/seo-pages.ts')
+    // filename says "batch1", URL slug says "beijing-to-xian…" — the whole point
+    expect(index.get('beijing-to-xian-high-speed-train')).toBe('src/lib/data/blogs-longtail-batch1.ts')
+    expect(index.get('beijing-xian-itinerary-10-days')).toBe('src/lib/data/blogs-longtail-batch1.ts')
+    expect(index.get('nope')).toBeUndefined()
+  })
+
+  it('first file wins on duplicate slugs (deterministic)', () => {
+    const a = { path: 'a.ts', source: "slug: 'dup'" }
+    const b = { path: 'b.ts', source: "slug: 'dup'" }
+    expect(buildSlugIndex([a, b]).get('dup')).toBe('a.ts')
   })
 })
 
