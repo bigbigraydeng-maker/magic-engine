@@ -202,9 +202,16 @@ export async function getGbpReviewsByIdentity(
     language_code: 'en',
     sort_by: 'newest',
   }
-  if (identity.place_id) task.place_id = identity.place_id
-  else if (identity.keyword) task.keyword = identity.keyword
-  else return null
+  // GBP 身份两种格式：ChIJ… 是 place_id，纯数字是 cid（GBP OAuth 连接器里
+  // 存的就是 cid）—— DataForSEO 是两个不同的 task 字段，塞错查不到
+  if (identity.place_id) {
+    if (/^\d+$/.test(identity.place_id)) task.cid = identity.place_id
+    else task.place_id = identity.place_id
+  } else if (identity.keyword) {
+    task.keyword = identity.keyword
+  } else {
+    return null
+  }
 
   const res = await fetch(
     `${DATAFORSEO_API_BASE}/business_data/google/reviews/live`,

@@ -37,6 +37,16 @@ describe('getGbpReviewsByIdentity', () => {
     expect(body[0].depth).toBe(30) // depth = 条数（旧 getGoogleReviews 的 /10 是既有 bug）
   })
 
+  it('numeric identity is sent as cid, not place_id (GBP connector stores cid)', async () => {
+    mockFetch.mockReturnValueOnce(makeResponse({ items: [] }))
+
+    await getGbpReviewsByIdentity({ place_id: '18353373651244656739' }, 30)
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string) as Array<Record<string, unknown>>
+    expect(body[0].cid).toBe('18353373651244656739')
+    expect(body[0].place_id).toBeUndefined()
+  })
+
   it('falls back to keyword when no place_id; returns null with neither', async () => {
     mockFetch.mockReturnValueOnce(makeResponse({ items: [] }))
     await getGbpReviewsByIdentity({ keyword: 'Oztop Building Supplies' })
