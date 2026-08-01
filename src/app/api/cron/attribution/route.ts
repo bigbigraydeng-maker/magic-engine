@@ -39,6 +39,8 @@ export interface AttributionCronResponse {
     clients_processed: number
     outcomes_written: number
     skipped: number
+    excluded: Record<string, number>
+    unclassified_types: string[]
     errors: string[]
   }
 }
@@ -94,6 +96,10 @@ export async function POST(
     clients_processed: 0,
     outcomes_written:  0,
     skipped:           0,
+    /** Actions excluded from SEO scoring, by reason — surfaced in cron logs. */
+    excluded:          {} as Record<string, number>,
+    /** Action types no classifier rule recognised — needs a human decision. */
+    unclassified_types: [] as string[],
     errors:            [] as string[],
   }
 
@@ -101,10 +107,18 @@ export async function POST(
     const clientIds = await loadGscClientIds(clientId)
 
     for (const cid of clientIds) {
-      const r = await runGscAttributionForClient(cid)
+      // window_days must reach the GSC pass too. It used to be parsed, accepted
+      // and then dropped here, so SEO attribution silently ignored the param.
+      const r = await runGscAttributionForClient(cid, windowDays)
       gscResult.clients_processed++
       gscResult.outcomes_written += r.outcomes_written
       gscResult.skipped           += r.skipped
+      for (const [category, count] of Object.entries(r.excluded)) {
+        gscResult.excluded[category] = (gscResult.excluded[category] ?? 0) + (count ?? 0)
+      }
+      for (const t of r.unclassified_types) {
+        if (!gscResult.unclassified_types.includes(t)) gscResult.unclassified_types.push(t)
+      }
       if (r.errors.length) gscResult.errors.push(...r.errors)
     }
 

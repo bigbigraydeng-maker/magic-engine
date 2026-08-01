@@ -15,7 +15,19 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 export interface RawOutcomeConfidenceRow {
   action_type: string
   verdict: string
+  /** Optional — when present, non-scoring metrics are excluded from the rate. */
+  metric_key?: string
 }
+
+/**
+ * Metrics that are recorded for context but must never move a success rate.
+ *
+ * `seo.gsc.avg_position` is site-wide average rank: publishing anything new
+ * drags it down because new pages enter the average at rank 40+, so counting it
+ * makes "did more work" read as "performed worse". It is still stored and shown;
+ * it just does not get a vote.
+ */
+const NON_SCORING_METRIC_KEYS = new Set<string>(['seo.gsc.avg_position'])
 
 export interface ConfidenceEntry {
   successRate: number
@@ -30,6 +42,7 @@ export type OutcomeConfidenceMap = Record<string, ConfidenceEntry>
 export function computeConfidenceMap(rows: RawOutcomeConfidenceRow[]): OutcomeConfidenceMap {
   const buckets = new Map<string, { confirmed: number; total: number }>()
   for (const r of rows) {
+    if (r.metric_key && NON_SCORING_METRIC_KEYS.has(r.metric_key)) continue
     const b = buckets.get(r.action_type) ?? { confirmed: 0, total: 0 }
     b.total++
     if (r.verdict === 'confirmed') b.confirmed++
@@ -97,16 +110,17 @@ export async function fetchOutcomeConfidenceMap(
   try {
     const { data, error } = await supabase
       .from('flywheel_outcomes')
-      .select('verdict, flywheel_actions!inner(action_type)')
+      .select('verdict, metric_key, flywheel_actions!inner(action_type)')
 
     if (error || !data) return {}
 
     const rows: RawOutcomeConfidenceRow[] = (data as Array<{
       verdict: string
+      metric_key?: string
       flywheel_actions: { action_type: string } | Array<{ action_type: string }>
     }>).map(r => {
       const actions = Array.isArray(r.flywheel_actions) ? r.flywheel_actions[0] : r.flywheel_actions
-      return { action_type: actions?.action_type ?? 'unknown', verdict: r.verdict }
+      return { action_type: actions?.action_type ?? 'unknown', verdict: r.verdict, metric_key: r.metric_key }
     })
 
     return computeConfidenceMap(rows)
@@ -143,7 +157,7 @@ export async function fetchClientOutcomeHistory(
   try {
     let query = supabase
       .from('flywheel_outcomes')
-      .select('verdict, flywheel_actions!inner(action_type, flywheel, client_id)')
+      .select('verdict, metric_key, flywheel_actions!inner(action_type, flywheel, client_id)')
       .eq('flywheel_actions.client_id', clientId) // 🔴 hard client scope — never removed
 
     if (filters?.flywheel) query = query.eq('flywheel_actions.flywheel', filters.flywheel)
@@ -154,10 +168,11 @@ export async function fetchClientOutcomeHistory(
 
     const rows: RawOutcomeConfidenceRow[] = (data as Array<{
       verdict: string
+      metric_key?: string
       flywheel_actions: { action_type: string } | Array<{ action_type: string }>
     }>).map(r => {
       const actions = Array.isArray(r.flywheel_actions) ? r.flywheel_actions[0] : r.flywheel_actions
-      return { action_type: actions?.action_type ?? 'unknown', verdict: r.verdict }
+      return { action_type: actions?.action_type ?? 'unknown', verdict: r.verdict, metric_key: r.metric_key }
     })
 
     return computeConfidenceMap(rows)
@@ -201,7 +216,7 @@ export async function fetchSeoBlogConfidenceByMode(
   try {
     const { data, error } = await supabase
       .from('flywheel_outcomes')
-      .select('verdict, flywheel_actions!inner(action_type, payload, client_id)')
+      .select('verdict, metric_key, flywheel_actions!inner(action_type, payload, client_id)')
       .eq('flywheel_actions.client_id', clientId)
       .eq('flywheel_actions.action_type', 'seo.publish_blog')
 
@@ -215,8 +230,10 @@ export async function fetchSeoBlogConfidenceByMode(
 
     for (const row of data as Array<{
       verdict: string
+      metric_key?: string
       flywheel_actions: { payload?: { mode?: string } | null } | Array<{ payload?: { mode?: string } | null }>
     }>) {
+      if (row.metric_key && NON_SCORING_METRIC_KEYS.has(row.metric_key)) continue
       const action = Array.isArray(row.flywheel_actions) ? row.flywheel_actions[0] : row.flywheel_actions
       const mode = action?.payload?.mode
       if (!mode || !(mode in buckets)) continue

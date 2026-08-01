@@ -13,11 +13,15 @@
 
 import { supabaseAdmin } from '../../supabase'
 import type { OutcomeVerdict } from '../adapters/types'
-
-const DEFAULT_WINDOW_DAYS = 14
+import { getAttributionWindow } from './windows'
 
 export interface AttributionJobOptions {
-  /** Days after action.executed_at to look for an "after" metric. Default 14. */
+  /**
+   * Override how far after executed_at to look for an "after" metric.
+   * When omitted, the window is taken per channel (see windows.ts): SEO waits
+   * 28 days for indexing and looks out to 90; every other channel measures
+   * immediately over 14 days, as before.
+   */
   windowDays?: number
   /** Restrict to a single client (e.g. for manual reruns). */
   clientId?: string
@@ -34,11 +38,9 @@ export interface AttributionJobResult {
 export async function runAttributionJob(
   options: AttributionJobOptions = {}
 ): Promise<AttributionJobResult> {
-  const windowDays = options.windowDays ?? DEFAULT_WINDOW_DAYS
-
   let actionsQuery = supabaseAdmin
     .from('flywheel_actions')
-    .select('id, client_id, expected_metric, expected_delta, executed_at')
+    .select('id, client_id, flywheel, expected_metric, expected_delta, executed_at')
     .not('expected_metric', 'is', null)
 
   if (options.clientId) {
@@ -58,7 +60,7 @@ export async function runAttributionJob(
 
   for (const action of actions) {
     try {
-      const didWrite = await processAction(action as ActionRow, windowDays)
+      const didWrite = await processAction(action as ActionRow, options.windowDays)
       if (didWrite) written++
       else skipped++
     } catch (err) {
@@ -76,14 +78,29 @@ export async function runAttributionJob(
 interface ActionRow {
   id: string
   client_id: string
+  flywheel?: string | null
   expected_metric: string
   expected_delta: number | null
   executed_at: string
 }
 
-async function processAction(action: ActionRow, windowDays: number): Promise<boolean> {
+async function processAction(
+  action: ActionRow,
+  windowDaysOverride?: number,
+): Promise<boolean> {
   const { id, client_id, expected_metric, expected_delta, executed_at } = action
+
+  // Window is per channel unless the caller pinned one. The maturation lag is
+  // never overridden: it exists because measuring a page Google has not settled
+  // on yet is meaningless regardless of what window the caller asked for.
+  const channelWindow = getAttributionWindow(action.flywheel)
+  const windowDays = windowDaysOverride ?? channelWindow.maxWindowDays
+
   const executedAt = new Date(executed_at)
+
+  const measureFrom = new Date(executedAt)
+  measureFrom.setDate(measureFrom.getDate() + channelWindow.maturationDays)
+
   const windowEnd = new Date(executedAt)
   windowEnd.setDate(windowEnd.getDate() + windowDays)
 
@@ -107,7 +124,7 @@ async function processAction(action: ActionRow, windowDays: number): Promise<boo
     .select('metric_value')
     .eq('client_id', client_id)
     .eq('metric_key', expected_metric)
-    .gte('measured_at', executedAt.toISOString())
+    .gte('measured_at', measureFrom.toISOString())
     .lte('measured_at', windowEnd.toISOString())
     .order('measured_at', { ascending: false })
     .limit(1)
