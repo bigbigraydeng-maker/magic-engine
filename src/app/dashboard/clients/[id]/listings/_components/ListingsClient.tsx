@@ -11,6 +11,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
+import Link from 'next/link'
 import {
   propertyTypeLabel,
   priceBandLabel,
@@ -116,7 +117,7 @@ export function ListingsClient({ clientId }: { clientId: string }) {
       {state.listings.length === 0 && editing === null && <EmptyState />}
 
       {state.listings.length > 0 && (
-        <ListingTable listings={state.listings} onEdit={setEditing} />
+        <ListingTable clientId={clientId} listings={state.listings} onEdit={setEditing} />
       )}
     </div>
   )
@@ -138,9 +139,11 @@ function EmptyState() {
 }
 
 function ListingTable({
+  clientId,
   listings,
   onEdit,
 }: {
+  clientId: string
   listings: ListingWithCount[]
   onEdit: (l: ListingWithCount) => void
 }) {
@@ -187,6 +190,14 @@ function ListingTable({
                 {l.listed_on || '—'}
               </td>
               <td className="px-4 py-3 text-right">
+                {/* 档案 = 这套房怎么打(AI 出稿 + 人校正);编辑 = 房子本身的资料。
+                    两件事分开,不然一行表格塞不下十几栏判断。 */}
+                <Link
+                  href={`/dashboard/clients/${clientId}/listings/${l.id}`}
+                  className="mr-3 text-xs font-black text-me-charcoal/50 hover:text-me-ochre"
+                >
+                  档案
+                </Link>
                 <button
                   onClick={() => onEdit(l)}
                   className="text-xs font-black text-me-charcoal/50 hover:text-me-ochre"
