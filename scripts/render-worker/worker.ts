@@ -5,6 +5,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { runRenderGeneration } from '@/lib/factory/render-pipeline'
 import { assembleRenderJob } from '@/lib/factory/render-assemble'
+import { runLectureRender } from '@/lib/factory/lecture-render'
 
 const POLL_MS = Number(process.env.RENDER_WORKER_POLL_MS || '20000')
 const STALE_MIN = Number(process.env.RENDER_WORKER_STALE_MIN || '45')
@@ -45,7 +46,29 @@ async function claimNext(): Promise<string | null> {
   return claimed && claimed.length ? id : null
 }
 
+/** 讲课式内容走单独管线(上下分屏)，其余走原 b-roll 蒙太奇管线。 */
+async function isLectureJob(jobId: string): Promise<boolean> {
+  const { data: job } = await supabaseAdmin
+    .from('content_factory_render_jobs')
+    .select('content_post_id')
+    .eq('id', jobId)
+    .single()
+  if (!job) return false
+  const { data: post } = await supabaseAdmin
+    .from('content_posts')
+    .select('format')
+    .eq('id', job.content_post_id)
+    .single()
+  return post?.format === '讲课式'
+}
+
 async function processOne(jobId: string): Promise<void> {
+  if (await isLectureJob(jobId)) {
+    log('领到任务', jobId, '→ 讲课式(上课件下真人)')
+    await runLectureRender(jobId)      // 全程到 ready_for_review
+    log(jobId, '✅ 成片，待审')
+    return
+  }
   log('领到任务', jobId, '→ 生成画面+配音')
   await runRenderGeneration(jobId)   // → assembling
   log(jobId, '→ 拼接')

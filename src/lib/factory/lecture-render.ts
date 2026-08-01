@@ -1,0 +1,424 @@
+// 讲课式做片 — 「上课件 slide + 下真人」上下分屏成片。只在 worker 容器里跑(需 ffmpeg + python-PIL)。
+//
+// 自己录(self_record)：下载 PM 录的整段视频 → 抽音轨给 Whisper 听写 → 按脚本对轴(lecture-align)
+//   → PIL 画课件/字幕 PNG → 一次 ffmpeg 合成(底色 + 下半人像 + 上半课件按段换页 + 短句大字字幕)。
+// 数字人(digital_human)：逐段 MiniMax 克隆声配音 → omnihuman 出口播人像段 → 同一套合成。
+//   ⚠️ 线已接好但未实测(生成要花钱，PM 拍板先不烧)；模型名/入参以首跑实测为准。
+//
+// 布局(1080x1920)：上半 0-960 课件(内容下沉避开平台 UI 顶部遮挡)，下半 960-1920 人像，
+// 字幕在 y≈1020 起的横带(安全区内、压在人像上沿)。配色走客户 master_brief.vi_colors。
+
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { supabaseAdmin } from '@/lib/supabase'
+import { generateVoiceover } from '@/lib/audio/minimax-voice'
+import { runMuapi } from '@/lib/muapi/client'
+import { getActiveBrief } from '@/lib/content/brief-injector'
+import { loadLecturePost } from './lecture-post'
+import type { LectureScript } from './lecture-script'
+import {
+  alignPartsToSegments,
+  splitSubtitleChunks,
+  type SubtitleChunk,
+  type TimedPart,
+  type TranscriptSegment,
+} from './lecture-align'
+
+const exec = promisify(execFile)
+const BUCKET = 'content-factory'
+const CJK_FONT = process.env.FACTORY_CJK_FONT || '/System/Library/Fonts/Supplemental/Arial Unicode.ttf'
+// 数字人模型(Muapi)。⚠️ 未实测：首跑前确认 slug 与入参(见文件头)。
+const OMNIHUMAN_MODEL = 'omnihuman-1-5'
+
+const W = 1080
+const H = 1920
+const SLIDE_H = 960          // 上半课件高
+const SUB_Y = 1020           // 字幕带 y(全帧坐标，安全区内)
+
+interface SlideColors {
+  bg: string
+  text: string
+  accent: string
+}
+const DEFAULT_COLORS: SlideColors = { bg: '#1A1A2E', text: '#FFFFFF', accent: '#E94560' }
+
+async function patchJob(jobId: string, patch: Record<string, unknown>): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from('content_factory_render_jobs')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', jobId)
+  if (error) throw error
+}
+
+async function download(url: string, dest: string): Promise<void> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(180000) })
+  if (!res.ok) throw new Error(`下载失败 ${res.status}: ${url}`)
+  await writeFile(dest, Buffer.from(await res.arrayBuffer()))
+}
+
+async function ffprobeDuration(file: string): Promise<number> {
+  const { stdout } = await exec('ffprobe', ['-v', 'quiet', '-show_entries', 'format=duration', '-of', 'csv=p=0', file])
+  const d = parseFloat(stdout.trim())
+  if (!Number.isFinite(d) || d <= 0) throw new Error(`无法读取时长: ${file}`)
+  return d
+}
+
+// ---------- Whisper 听写(自己录的整段视频) ----------
+
+/** 抽单声道低码率音轨(Whisper API 限 25MB，视频直接传会爆)。 */
+async function extractAudio(videoFile: string, dir: string): Promise<string> {
+  const out = join(dir, 'audio.mp3')
+  await exec('ffmpeg', ['-y', '-loglevel', 'error', '-i', videoFile, '-vn', '-ac', '1', '-ar', '16000', '-b:a', '48k', out])
+  return out
+}
+
+/** OpenAI Whisper 听写，返回带时间戳的分段。 */
+async function whisperTranscribe(audioFile: string): Promise<TranscriptSegment[]> {
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) throw new Error('OPENAI_API_KEY 未配置，无法听写字幕')
+
+  const form = new FormData()
+  form.append('file', new Blob([new Uint8Array(await readFile(audioFile))], { type: 'audio/mpeg' }), 'audio.mp3')
+  form.append('model', 'whisper-1')
+  form.append('language', 'zh')
+  form.append('response_format', 'verbose_json')
+
+  const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+    signal: AbortSignal.timeout(300000),
+  })
+  if (!res.ok) throw new Error(`Whisper 听写失败 ${res.status}: ${await res.text()}`)
+  const json = (await res.json()) as { segments?: { start: number; end: number; text: string }[] }
+  const segments = (json.segments ?? [])
+    .map((s) => ({ start: s.start, end: s.end, text: (s.text ?? '').trim() }))
+    .filter((s) => s.text)
+  if (segments.length === 0) throw new Error('听写结果为空(录像里没有可识别的语音?)')
+  return segments
+}
+
+// ---------- PIL 画课件 / 字幕 ----------
+
+// 课件 slide：深色底 + 顶部品牌条 + 大标题 + 要点列表。内容从 y=300 起(避开平台 UI 顶部遮挡)。
+const SLIDE_PY = `
+import sys, json
+from PIL import Image, ImageDraw, ImageFont
+cfg = json.loads(sys.argv[1])
+W, H = cfg["w"], cfg["h"]
+img = Image.new("RGBA", (W, H), cfg["bg"])
+d = ImageDraw.Draw(img)
+title_font = ImageFont.truetype(cfg["font"], 76)
+point_font = ImageFont.truetype(cfg["font"], 52)
+small_font = ImageFont.truetype(cfg["font"], 34)
+PAD = 80
+y = 300
+d.rectangle([PAD, y, PAD + 120, y + 12], fill=cfg["accent"])
+y += 48
+for line in cfg["title_lines"]:
+    d.text((PAD, y), line, font=title_font, fill=cfg["text"])
+    y += 96
+y += 36
+for p in cfg["points"]:
+    d.ellipse([PAD, y + 22, PAD + 18, y + 40], fill=cfg["accent"])
+    d.text((PAD + 44, y), p, font=point_font, fill=cfg["text"])
+    y += 88
+if cfg.get("brand"):
+    d.text((PAD, H - 80), cfg["brand"], font=small_font, fill=cfg["accent"])
+img.save(cfg["out"])
+`
+
+// 字幕：全帧透明 PNG，短句大字白字黑描边，字幕带起点 y 由参数给。
+const CAPTION_PY = `
+import sys, json
+from PIL import Image, ImageDraw, ImageFont
+cfg = json.loads(sys.argv[1])
+W, H = cfg["w"], cfg["h"]
+img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+d = ImageDraw.Draw(img)
+font = ImageFont.truetype(cfg["font"], 68)
+text = cfg["text"]
+box = d.textbbox((0, 0), text, font=font, stroke_width=5)
+x = (W - (box[2] - box[0])) // 2
+d.text((x, cfg["y"]), text, font=font, fill="white", stroke_width=5, stroke_fill="black")
+img.save(cfg["out"])
+`
+
+/** 课件标题过长时切两行(≤9 字/行，最多两行)。 */
+function slideTitleLines(title: string): string[] {
+  const t = title.trim()
+  if (t.length <= 9) return [t]
+  return [t.slice(0, 9), t.slice(9, 18)]
+}
+
+interface SlideSpec {
+  title: string
+  points: string[]
+}
+
+/** 每个时间段一张课件：钩子=本讲封面，要点=各自课件，CTA=收尾页。 */
+export function slidesOfLecture(lecture: LectureScript, brandName: string): SlideSpec[] {
+  return [
+    { title: lecture.title, points: ['本讲重点', ...lecture.sections.map((s) => s.slideTitle)] },
+    ...lecture.sections.map((s) => ({ title: s.slideTitle, points: s.slidePoints })),
+    { title: '关注看全系列', points: [`主页合集 · ${brandName}`, '下一讲更实操'] },
+  ]
+}
+
+async function renderSlides(
+  slides: SlideSpec[],
+  colors: SlideColors,
+  brand: string,
+  dir: string,
+): Promise<string[]> {
+  const files: string[] = []
+  for (let i = 0; i < slides.length; i++) {
+    const out = join(dir, `slide${i}.png`)
+    const cfg = {
+      w: W, h: SLIDE_H,
+      bg: colors.bg, text: colors.text, accent: colors.accent,
+      font: CJK_FONT,
+      title_lines: slideTitleLines(slides[i].title),
+      points: slides[i].points.slice(0, 4),
+      brand,
+      out,
+    }
+    await exec('python3', ['-c', SLIDE_PY, JSON.stringify(cfg)])
+    files.push(out)
+  }
+  return files
+}
+
+async function renderCaptions(chunks: SubtitleChunk[], dir: string): Promise<string[]> {
+  const files: string[] = []
+  for (let i = 0; i < chunks.length; i++) {
+    const out = join(dir, `cap${i}.png`)
+    await exec('python3', ['-c', CAPTION_PY, JSON.stringify({ w: W, h: H, y: SUB_Y, text: chunks[i].text, font: CJK_FONT, out })])
+    files.push(out)
+  }
+  return files
+}
+
+// ---------- 合成 ----------
+
+/**
+ * 一次 ffmpeg 合成：底色画布 → 下半人像 → 上半课件按时间段换页 → 字幕按块进出 → 人像原声。
+ * personFile 提供画面与声音(自己录的整段，或数字人拼好的整段)。
+ */
+async function composeLecture(params: {
+  personFile: string
+  duration: number
+  parts: TimedPart[]           // 与 slideFiles 等长
+  slideFiles: string[]
+  captionChunks: SubtitleChunk[]
+  captionFiles: string[]
+  bg: string
+  outFile: string
+}): Promise<void> {
+  const { personFile, duration, parts, slideFiles, captionChunks, captionFiles, bg, outFile } = params
+  if (parts.length !== slideFiles.length) throw new Error('课件数和时间段数不一致')
+
+  const inputs: string[] = ['-i', personFile]
+  for (const f of [...slideFiles, ...captionFiles]) inputs.push('-i', f)
+
+  const bgHex = `0x${bg.replace('#', '')}`
+  const filters: string[] = [
+    `color=c=${bgHex}:s=${W}x${H}:d=${duration.toFixed(3)}[base]`,
+    `[0:v]scale=${W}:${H - SLIDE_H}:force_original_aspect_ratio=increase,crop=${W}:${H - SLIDE_H}[person]`,
+    `[base][person]overlay=0:${SLIDE_H}:shortest=0[v0]`,
+  ]
+  let cur = 'v0'
+  slideFiles.forEach((_f, i) => {
+    const inIdx = 1 + i
+    const { start, end } = parts[i]
+    const next = `vs${i}`
+    filters.push(`[${cur}][${inIdx}:v]overlay=0:0:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'[${next}]`)
+    cur = next
+  })
+  captionFiles.forEach((_f, i) => {
+    const inIdx = 1 + slideFiles.length + i
+    const { start, end } = captionChunks[i]
+    const next = `vc${i}`
+    filters.push(`[${cur}][${inIdx}:v]overlay=0:0:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'[${next}]`)
+    cur = next
+  })
+
+  await exec('ffmpeg', [
+    '-y', '-loglevel', 'error',
+    ...inputs,
+    '-filter_complex', filters.join(';'),
+    '-map', `[${cur}]`, '-map', '0:a',
+    '-t', duration.toFixed(3),
+    '-r', '30', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac', '-ar', '44100',
+    outFile,
+  ], { maxBuffer: 32 * 1024 * 1024 })
+}
+
+// ---------- 数字人路径(线已接好，未实测) ----------
+
+/** 逐段配音 + omnihuman 口播人像，concat 成整段人像视频；返回文件与各段时长。 */
+async function buildDigitalHumanTrack(params: {
+  clientId: string
+  parts: string[]           // 各部分口播词
+  voiceId: string
+  avatarUrl: string
+  dir: string
+}): Promise<{ personFile: string; durations: number[] }> {
+  const { clientId, parts, voiceId, avatarUrl, dir } = params
+  const durations: number[] = []
+  const files: string[] = []
+
+  for (let i = 0; i < parts.length; i++) {
+    const vo = await generateVoiceover({ clientId, text: parts[i], voiceId, folder: 'lecture-vo' })
+    const result = await runMuapi(OMNIHUMAN_MODEL, { image_url: avatarUrl, audio_url: vo.audioUrl })
+    const clipUrl = result.outputs[0]
+    if (result.status !== 'completed' || !clipUrl) {
+      throw new Error(`数字人生成失败(第${i + 1}段): ${result.error ?? result.status}`)
+    }
+    const f = join(dir, `dh${i}.mp4`)
+    await download(clipUrl, f)
+    durations.push(await ffprobeDuration(f))
+    files.push(f)
+  }
+
+  const list = files.map((f) => `file '${f}'`).join('\n')
+  await writeFile(join(dir, 'dhlist.txt'), list)
+  const personFile = join(dir, 'dhall.mp4')
+  await exec('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', join(dir, 'dhlist.txt'),
+    '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ar', '44100', personFile])
+  return { personFile, durations }
+}
+
+/** 数字人路径没有听写：字幕直接用脚本文本，时间在各段内按字数比例分。 */
+export function scriptedSubtitles(parts: string[], durations: number[]): SubtitleChunk[] {
+  let t = 0
+  const segments: TranscriptSegment[] = parts.map((text, i) => {
+    const seg = { start: t, end: t + durations[i], text }
+    t += durations[i]
+    return seg
+  })
+  return splitSubtitleChunks(segments)
+}
+
+// ---------- 主入口(worker 调) ----------
+
+/** 跑一条讲课式做片任务：从领取到成片落库全程。任何失败标 failed + 记原因。 */
+export async function runLectureRender(jobId: string): Promise<{ outputUrl: string }> {
+  const { data: job, error: jErr } = await supabaseAdmin
+    .from('content_factory_render_jobs')
+    .select('id, client_id, content_post_id')
+    .eq('id', jobId)
+    .single()
+  if (jErr || !job) throw new Error(`render job not found: ${jobId}`)
+
+  const dir = await mkdtemp(join(tmpdir(), 'lecture-'))
+  try {
+    await patchJob(jobId, { status: 'planning', error: null })
+
+    const loaded = await loadLecturePost(job.client_id, job.content_post_id)
+    if (!loaded) throw new Error('讲课式内容未找到')
+    const { lecture, production } = loaded
+    if (!production?.method) throw new Error('未选制作方式(自己录 / 数字人)')
+
+    const brief = await getActiveBrief(job.client_id).catch(() => null)
+    const vi = (brief?.vi_colors ?? null) as Partial<Record<'primary' | 'secondary' | 'accent', string>> | null
+    const colors: SlideColors = {
+      bg: vi?.primary || DEFAULT_COLORS.bg,
+      text: DEFAULT_COLORS.text,
+      accent: vi?.secondary || DEFAULT_COLORS.accent,
+    }
+    const brand = brief?.brand_name || ''
+    const spokenParts = [lecture.hookSpoken, ...lecture.sections.map((s) => s.spoken), lecture.ctaSpoken]
+      .filter((s) => s && s.trim())
+
+    await patchJob(jobId, { status: 'rendering' })
+
+    let personFile: string
+    let duration: number
+    let parts: TimedPart[]
+    let captionChunks: SubtitleChunk[]
+
+    if (production.method === 'self_record') {
+      if (!production.recording_url) throw new Error('没有上传的录像')
+      personFile = join(dir, 'rec.mp4')
+      await download(production.recording_url, personFile)
+      duration = await ffprobeDuration(personFile)
+      const segments = await whisperTranscribe(await extractAudio(personFile, dir))
+      parts = alignPartsToSegments(spokenParts, segments)
+      // 对轴结果首尾对齐整条录像(录像可能比第一句早开始/最后一句晚结束)
+      parts[0] = { ...parts[0], start: 0 }
+      parts[parts.length - 1] = { ...parts[parts.length - 1], end: duration }
+      captionChunks = splitSubtitleChunks(segments)
+    } else {
+      const renderCfg = await clientRenderConfig(job.client_id)
+      const track = await buildDigitalHumanTrack({
+        clientId: job.client_id,
+        parts: spokenParts,
+        voiceId: renderCfg.voiceId,
+        avatarUrl: renderCfg.avatarUrl,
+        dir,
+      })
+      personFile = track.personFile
+      duration = track.durations.reduce((a, b) => a + b, 0)
+      let t = 0
+      parts = track.durations.map((d) => {
+        const p = { start: t, end: t + d }
+        t += d
+        return p
+      })
+      captionChunks = scriptedSubtitles(spokenParts, track.durations)
+    }
+
+    await patchJob(jobId, { status: 'assembling' })
+
+    const slideFiles = await renderSlides(slidesOfLecture(lecture, brand), colors, brand, dir)
+    // 课件数 = 钩子 + 要点 N + CTA；口播部分数与其一致(空口播已过滤，课件按 parts 长度对齐截取)
+    const usableSlides = slideFiles.slice(0, parts.length)
+    const captionFiles = await renderCaptions(captionChunks, dir)
+
+    const outFile = join(dir, 'final.mp4')
+    await composeLecture({
+      personFile, duration, parts,
+      slideFiles: usableSlides,
+      captionChunks, captionFiles,
+      bg: colors.bg, outFile,
+    })
+
+    const path = `${job.client_id}/render/${jobId}/final.mp4`
+    const up = await supabaseAdmin.storage.from(BUCKET).upload(path, await readFile(outFile), { contentType: 'video/mp4', upsert: true })
+    if (up.error) throw up.error
+    const { data: pub } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(path)
+
+    await patchJob(jobId, { status: 'ready_for_review', output_url: pub.publicUrl })
+    await supabaseAdmin
+      .from('content_posts')
+      .update({ source_video_url: pub.publicUrl })
+      .eq('client_id', job.client_id)
+      .eq('id', job.content_post_id)
+
+    return { outputUrl: pub.publicUrl }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    await patchJob(jobId, { status: 'failed', error: `讲课式做片失败：${message}` }).catch(() => {})
+    throw e
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {})
+  }
+}
+
+/** 读客户做片配置(声音 + 数字人形象)。缺配置给人话报错。 */
+async function clientRenderConfig(clientId: string): Promise<{ voiceId: string; avatarUrl: string }> {
+  const { data } = await supabaseAdmin
+    .from('clients')
+    .select('factory_config')
+    .eq('id', clientId)
+    .single()
+  const render = (data?.factory_config as { render?: { voice_id?: string; avatar_image_url?: string } } | null)?.render
+  if (!render?.voice_id) throw new Error('该客户未配置配音声音（clients.factory_config.render.voice_id）')
+  if (!render?.avatar_image_url) throw new Error('该客户未配置数字人形象照（clients.factory_config.render.avatar_image_url）')
+  return { voiceId: render.voice_id, avatarUrl: render.avatar_image_url }
+}

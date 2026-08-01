@@ -1,21 +1,38 @@
 // 讲课式文案 — 把一个选题写成「上课件 + 下真人数字人口播」讲课短视频的结构化脚本。
 // 输出：开场钩子 + 2-4 个教学要点(每个带 口播词 + 课件 slide 标题/要点) + 结尾 CTA。
 // 铁律：第一人称人设 / 禁词 / 不编数字用【】/ 不带货 / 口播能一口气念。
+// v2(PM「太水」返工)：要点必须是可操作步骤(真实工具名+怎么做)，禁口号；CTA 按平台分两版本，
+// 小红书版绝不导流私信(限流红线)，口播 CTA 用平台通用安全版(只说关注/合集)。
 
 import { callClaudeChat, parseJsonResponse } from '@/lib/anthropic/client'
 import { getActiveBrief, formatBriefForPrompt } from '@/lib/content/brief-injector'
 
 export interface LectureSection {
-  spoken: string        // 这一段数字人念的口播词
+  spoken: string        // 这一段口播词(真人/数字人念)
   slideTitle: string    // 课件 slide 大标题
   slidePoints: string[] // 课件 slide 要点(每条短）
 }
 
+export interface LectureCtaVariants {
+  fbTiktok: string      // FB/TikTok 发布正文 CTA：留言关键词 → 私信送资料
+  xiaohongshu: string   // 小红书发布正文 CTA：关注 + 主页合集(禁私信导流)
+}
+
 export interface LectureScript {
   title: string         // 视频标题
-  hookSpoken: string    // 开场钩子口播(数字人念)
+  hookSpoken: string    // 开场钩子口播
   sections: LectureSection[]
-  ctaSpoken: string     // 结尾行动号召口播
+  ctaSpoken: string     // 结尾口播 CTA(平台通用安全版：只说关注/主页合集，不提私信)
+  ctaVariants?: LectureCtaVariants // 发布正文按平台两版本
+}
+
+// 小红书导流红线词：CTA 里出现任何一个 = 有限流风险，直接判不合格。
+const XHS_BANNED = ['私信', '加微', '微信', 'vx', 'wx', 'whatsapp', '扣1', '扣 1', 'dd我', '滴滴我']
+
+/** 检查小红书 CTA 是否踩导流红线，返回命中的词(空数组 = 安全)。 */
+export function xhsCtaViolations(text: string): string[] {
+  const lower = text.toLowerCase()
+  return XHS_BANNED.filter((w) => lower.includes(w.toLowerCase()))
 }
 
 const SYSTEM = `你是短视频「讲课式文案」编剧。把一个选题写成「上课件 + 下真人口播」的讲课短视频脚本。
@@ -23,17 +40,54 @@ const SYSTEM = `你是短视频「讲课式文案」编剧。把一个选题写�
 结构(固定)：
 1. 开场钩子(hookSpoken)：3 秒抓人的一句，口播，制造好奇或戳痛点。
 2. 2-4 个教学要点(sections)：每个要点给
-   - spoken：这段口播词(口语、短句、能一口气念，约 15-30 字)
+   - spoken：这段口播词(口语、短句、能一口气念，约 30-60 字)
    - slideTitle：课件大标题(≤10 字，抓这段核心)
-   - slidePoints：课件要点 2-3 条(每条 ≤12 字，大白话)
-3. 结尾(ctaSpoken)：一句行动号召口播(关注 / 私信 / 留言)。
+   - slidePoints：课件要点 2-3 条(每条 ≤14 字)
+3. 结尾(ctaSpoken)：一句行动号召口播。
+4. ctaVariants：发布正文的 CTA，按平台两版本(见下)。
+
+内容必须「实」(违反 = 整篇失败)：
+- 每个要点必须是听完就能上手的具体做法：说清用什么工具(写真实工具名，如 ChatGPT / Canva / Google Maps)、
+  第一步打开哪里、输入什么、能得到什么。观众记笔记能照着做。
+- 禁止口号式空话(「AI 是趋势」「让 AI 为你打工」这类)。形容词堆砌 = 水。
+- slidePoints 同样要实：写步骤和工具名，不写形容词。
+- 每讲至少给 1 个能直接抄走的例子(如一句可以直接复制的 AI 提示词、一个具体操作路径)。
+
+CTA 规则(违反 = 失败)：
+- ctaSpoken(口播，视频里念出来的)：平台通用安全版，只引导「关注 + 主页合集看全系列」。
+  绝不能出现「私信」「加微信」等任何导流词——同一条片要发小红书，念了就会被限流。
+- ctaVariants.fbTiktok(FB/TikTok 发布正文)：引导「留言【一个跟本讲相关的关键词】，我私信发你 XX」。
+- ctaVariants.xiaohongshu(小红书发布正文)：只引导「关注 + 主页合集看全系列」，
+  绝不出现 私信/加微/微信/vx/whatsapp/扣1 等任何导流词。
 
 铁律(违反即失败)：
 - 全程第一人称，严格按客户 master_brief 的人设 / 语气 / 支柱 / 禁词。禁词一个都不能出现。
 - 绝不编造客户的业务数字或事实。任何具体数字用【】占位(如【填真实数字】)，让客户自己填。
 - 教的是「怎么用 AI」，客户不带货，别写成卖货。
-- 全部口播加起来 40-60 秒的量。
+- 全部口播加起来 60-90 秒的量(讲清楚步骤比压时长重要)。
 - 输出必须是严格 JSON，前后无多余文字、不带 markdown 代码围栏。`
+
+const OUTPUT_SHAPE =
+  '{"title":"视频标题","hookSpoken":"开场钩子口播","sections":[{"spoken":"这段口播词","slideTitle":"课件标题","slidePoints":["要点1","要点2"]}],"ctaSpoken":"结尾口播(只说关注+合集)","ctaVariants":{"fbTiktok":"FB/TK正文CTA(留言关键词→私信)","xiaohongshu":"小红书正文CTA(关注+合集，禁导流词)"}}'
+
+async function briefBlockOf(clientId: string): Promise<string> {
+  const brief = await getActiveBrief(clientId)
+  return brief
+    ? formatBriefForPrompt(brief)
+    : '（该客户暂无 master_brief，按通用中文口播人设，务必保守，绝不编造任何事实与数字）'
+}
+
+function validateScript(parsed: LectureScript | null): LectureScript {
+  if (!parsed?.hookSpoken || !Array.isArray(parsed.sections) || parsed.sections.length === 0) {
+    throw new Error('lecture script incomplete')
+  }
+  const xhs = parsed.ctaVariants?.xiaohongshu ?? ''
+  const violations = [...xhsCtaViolations(xhs), ...xhsCtaViolations(parsed.ctaSpoken ?? '')]
+  if (violations.length > 0) {
+    throw new Error(`小红书 CTA/口播 CTA 踩导流红线：${violations.join('、')}`)
+  }
+  return parsed
+}
 
 /** 生成一条讲课式短视频的结构化文案。 */
 export async function planLectureScript(params: {
@@ -44,20 +98,15 @@ export async function planLectureScript(params: {
   const { clientId, topic, reference } = params
   if (!topic.trim()) throw new Error('topic is empty')
 
-  const brief = await getActiveBrief(clientId)
-  const briefBlock = brief
-    ? formatBriefForPrompt(brief)
-    : '（该客户暂无 master_brief，按通用中文口播人设，务必保守，绝不编造任何事实与数字）'
-
   const userMsg = [
     '# 客户人设(master_brief)',
-    briefBlock,
+    await briefBlockOf(clientId),
     '',
     `# 选题\n${topic}`,
     reference ? `\n# 爆款参考(抄它的结构 / 钩子，不抄字)\n${reference}` : '',
     '',
     '# 输出(严格 JSON，无多余文字)',
-    '{"title":"视频标题","hookSpoken":"开场钩子口播","sections":[{"spoken":"这段口播词","slideTitle":"课件标题","slidePoints":["要点1","要点2"]}],"ctaSpoken":"结尾号召口播"}',
+    OUTPUT_SHAPE,
   ]
     .filter(Boolean)
     .join('\n')
@@ -65,12 +114,48 @@ export async function planLectureScript(params: {
   const result = await callClaudeChat({
     systemPrompt: SYSTEM,
     messages: [{ role: 'user', content: userMsg }],
-    maxOutputTokens: 2500,
+    maxOutputTokens: 3000,
   })
 
-  const parsed = parseJsonResponse<LectureScript>(result.text)
-  if (!parsed?.hookSpoken || !Array.isArray(parsed.sections) || parsed.sections.length === 0) {
-    throw new Error('lecture script incomplete')
+  return validateScript(parseJsonResponse<LectureScript>(result.text))
+}
+
+/** 只重写脚本里的某一段(段落重做)：保留全篇上下文，产出替换用的新段。 */
+export async function redoLectureSection(params: {
+  clientId: string
+  lecture: LectureScript
+  sectionIndex: number
+  instruction?: string   // 可选：PM 打回时写的一句话要求(如「步骤再具体点」)
+}): Promise<LectureSection> {
+  const { clientId, lecture, sectionIndex, instruction } = params
+  const target = lecture.sections[sectionIndex]
+  if (!target) throw new Error(`section ${sectionIndex} 不存在`)
+
+  const userMsg = [
+    '# 客户人设(master_brief)',
+    await briefBlockOf(clientId),
+    '',
+    `# 整篇脚本(上下文)\n${JSON.stringify(lecture, null, 2)}`,
+    '',
+    `# 任务\n只重写第 ${sectionIndex + 1} 个教学要点(sections[${sectionIndex}])，其余不动。`,
+    '新版本必须换一个讲法(不是改几个字)，且比原版更实：具体工具名 + 可照做的步骤 + 能抄走的例子。',
+    instruction ? `\n# 客户的重做要求\n${instruction}` : '',
+    '',
+    '# 输出(严格 JSON，只输出这一段，无多余文字)',
+    '{"spoken":"这段口播词","slideTitle":"课件标题","slidePoints":["要点1","要点2"]}',
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  const result = await callClaudeChat({
+    systemPrompt: SYSTEM,
+    messages: [{ role: 'user', content: userMsg }],
+    maxOutputTokens: 1200,
+  })
+
+  const parsed = parseJsonResponse<LectureSection>(result.text)
+  if (!parsed?.spoken || !parsed.slideTitle || !Array.isArray(parsed.slidePoints)) {
+    throw new Error('redo section incomplete')
   }
   return parsed
 }
