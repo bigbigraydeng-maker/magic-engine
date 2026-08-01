@@ -34,6 +34,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { runSeoPatrol, type SeoPatrolBatchResult } from '@/lib/seo-patrol/job'
 import { expireStaleDrafts } from '@/lib/blog/draft-expiry'
+import { runIndexCheckBatch } from '@/lib/seo-patrol/index-check'
 import { syncPrOpenPosts } from '@/lib/blog/pr-sync'
 import { supersedeStaleZhugeCards } from '@/lib/zhuge/card-expiry'
 import { startCronRun } from '@/lib/cron/run-logger'
@@ -72,6 +73,22 @@ export async function GET(
   const timestamp = new Date().toISOString()
 
   try {
+    // R5 收录检查 rotation runs FIRST so today's verdicts feed today's rules.
+    // Non-blocking: a quota/API failure degrades R5, never kills the patrol.
+    let indexCheck: { clients: number; checked: number; not_indexed: number } | { error: string }
+    try {
+      const batch = await runIndexCheckBatch()
+      indexCheck = {
+        clients: batch.clients,
+        checked: batch.checked,
+        not_indexed: batch.not_indexed,
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error('[seo-patrol/cron] index check failed (non-blocking):', message)
+      indexCheck = { error: message }
+    }
+
     const result = await runSeoPatrol()
     console.log(
       `[seo-patrol/cron] clients=${result.clients_processed} ` +
@@ -115,6 +132,7 @@ export async function GET(
         total_findings: result.total_findings,
         total_actions: result.total_actions,
         page_data_problems: result.page_data_problems,
+        index_check: indexCheck,
         hygiene,
       },
     })

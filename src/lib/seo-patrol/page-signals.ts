@@ -29,6 +29,14 @@ import type { PageSignal } from './types'
 interface CrawledPage {
   url: string
   markdown_content: string | null
+  first_not_indexed_at?: string | null
+}
+
+export function daysSince(iso: string | null | undefined, now: Date = new Date()): number | null {
+  if (!iso) return null
+  const t = Date.parse(iso)
+  if (Number.isNaN(t)) return null
+  return Math.floor((now.getTime() - t) / 86_400_000)
 }
 
 interface GscPageRow {
@@ -105,7 +113,7 @@ export async function buildPageSignals(
   const [{ data: crawled }, { data: gsc }] = await Promise.all([
     supabase
       .from('client_site_pages')
-      .select('url, markdown_content')
+      .select('url, markdown_content, first_not_indexed_at')
       .eq('client_id', clientId)
       .eq('crawl_status', 'crawled'),
     supabase
@@ -159,6 +167,28 @@ export async function buildPageSignals(
       hasInternalLink: (inbound.get(canonical) ?? 0) > 0,
       discoveredNotIndexed: false,
       daysNotIndexed: null,
+    })
+  }
+
+  // R5 leg: pages the index-check rotation flagged as not indexed. These by
+  // definition have no GSC performance rows (an unindexed page can't rank),
+  // so they enter as zero-traffic signals rather than via the GSC join.
+  const signalled = new Set(
+    signals.map((s) => canonicalUrl(s.url)).filter((u): u is string => u !== null),
+  )
+  for (const page of pages) {
+    if (!page.first_not_indexed_at) continue
+    const canonical = canonicalUrl(page.url)
+    if (!canonical || signalled.has(canonical)) continue
+    signals.push({
+      url: page.url,
+      clicks: 0,
+      impressions: 0,
+      ctr: 0,
+      position: 0,
+      hasInternalLink: (inbound.get(canonical) ?? 0) > 0,
+      discoveredNotIndexed: true,
+      daysNotIndexed: daysSince(page.first_not_indexed_at),
     })
   }
 
