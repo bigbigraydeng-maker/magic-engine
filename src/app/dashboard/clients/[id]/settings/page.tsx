@@ -20,6 +20,7 @@ import { GbpPanel } from './_components/GbpPanel'
 import { GoogleAdsPanel } from './_components/GoogleAdsPanel'
 import { AdStrategyPanel } from './_components/AdStrategyPanel'
 import { CompetitorDomainsPanel } from './_components/CompetitorDomainsPanel'
+import { ReputationIdentityPanel } from './_components/ReputationIdentityPanel'
 import { PrimaryKeywordsPanel } from './_components/PrimaryKeywordsPanel'
 import { BrandAliasesPanel } from './_components/BrandAliasesPanel'
 import { SocialHandlesPanel } from './_components/SocialHandlesPanel'
@@ -249,6 +250,14 @@ export default function ClientSettingsPage() {
             <h2 className="font-black text-slate-800">竞品域名清单</h2>
           </div>
           <CompetitorDomainsPanel clientId={clientId} />
+        </section>
+
+        <section className="mt-6">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-base">⭐</span>
+            <h2 className="font-black text-slate-800">口碑监测身份（GBP / Tripadvisor / 竞品）</h2>
+          </div>
+          <ReputationIdentityPanel clientId={clientId} />
         </section>
 
         <section className="mt-6">

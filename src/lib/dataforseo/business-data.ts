@@ -172,6 +172,103 @@ export async function getGoogleReviews(
     }))
 }
 
+// ─── Reputation monitoring (DataForSEO 计划 阶段 2) ──────────────────────────
+
+export interface GbpReviewItem extends GoogleReview {
+  /** DataForSEO review_id — dedup key for review_items. null when absent. */
+  review_id: string | null
+}
+
+export interface GbpReviewsWithProfile {
+  /** Listing-level rating from the reviews response (saves a my_business_info call). */
+  profile: { rating: number | null; review_count: number | null } | null
+  reviews: GbpReviewItem[]
+}
+
+/**
+ * Fetch reviews + listing profile for a GBP identity in ONE call.
+ * place_id is exact (no wrong-business risk); keyword is the fallback.
+ *
+ * DataForSEO endpoint: /business_data/google/reviews/live
+ */
+export async function getGbpReviewsByIdentity(
+  identity: { place_id?: string | null; keyword?: string | null },
+  limit: number = 30,
+): Promise<GbpReviewsWithProfile | null> {
+  const depth = Math.max(1, Math.ceil(limit / 10)) * 10
+
+  const task: Record<string, unknown> = {
+    depth,
+    language_code: 'en',
+    sort_by: 'newest',
+  }
+  // GBP 身份两种格式：ChIJ… 是 place_id，纯数字是 cid（GBP OAuth 连接器里
+  // 存的就是 cid）—— DataForSEO 是两个不同的 task 字段，塞错查不到
+  if (identity.place_id) {
+    if (/^\d+$/.test(identity.place_id)) task.cid = identity.place_id
+    else task.place_id = identity.place_id
+  } else if (identity.keyword) {
+    task.keyword = identity.keyword
+  } else {
+    return null
+  }
+
+  const res = await fetch(
+    `${DATAFORSEO_API_BASE}/business_data/google/reviews/live`,
+    {
+      method:  'POST',
+      headers: { Authorization: authHeader(), 'Content-Type': 'application/json' },
+      body: JSON.stringify([task]),
+    },
+  )
+
+  if (!res.ok) throw new Error(`DataForSEO Google reviews error: ${res.status}`)
+
+  const json = await res.json() as {
+    tasks?: Array<{
+      result?: Array<{
+        rating?: {
+          value?:       number | null
+          votes_count?: number | null
+        } | null
+        reviews_count?: number | null
+        items?: Array<{
+          review_id?:   string | null
+          rating?: {
+            value?: number | null
+          } | null
+          review_text?: string | null
+          timestamp?:   string | null
+          author_name?: string | null
+        }>
+      }>
+    }>
+  }
+
+  const result = json.tasks?.[0]?.result?.[0]
+  if (!result) return null
+
+  const profile = result.rating
+    ? {
+        rating:       result.rating.value ?? null,
+        review_count: result.reviews_count ?? result.rating.votes_count ?? null,
+      }
+    : null
+
+  const reviews = (result.items ?? [])
+    .filter(it => typeof it.rating?.value === 'number')
+    .slice(0, limit)
+    .map(it => ({
+      review_id: it.review_id ?? null,
+      rating:    it.rating!.value as number,
+      text:      it.review_text?.trim() ?? '',
+      date:      it.timestamp ?? null,
+      author:    it.author_name ?? null,
+    }))
+
+  return { profile, reviews }
+}
+
 /**
  * Search for a Tripadvisor listing by keyword.
  * Intended for tourism-sector clients (CTS Tours).
