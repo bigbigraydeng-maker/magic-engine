@@ -154,6 +154,15 @@ export interface ContactLike {
   stageSuppressed?: boolean
   /** 当前阶段的中文名,只用于展示。 */
   stageLabel?: string | null
+  /**
+   * 这个人**实际能怎么被联系到**。
+   *
+   * 三个都不传 = 调用方没提供这个信息，此时保持规则原本建议的渠道（向后兼容，
+   * 不替老调用方猜）。传了就必须如实 —— 建议一个联系不到的渠道，比不建议更糟。
+   */
+  hasPhone?: boolean
+  hasEmail?: boolean
+  hasMessenger?: boolean
 }
 
 export interface SegmentResult {
@@ -163,8 +172,15 @@ export interface SegmentResult {
   priority: number
   /** 一句人话，告诉销售为什么这个人在今天的名单上。 */
   reason: string
-  /** 建议用哪个渠道 —— 打过没人接的，再打一次多半还是没人接。 */
-  suggestedChannel: 'phone' | 'sms' | 'email' | 'none'
+  /**
+   * 建议用哪个渠道 —— 打过没人接的，再打一次多半还是没人接。
+   *
+   * **它必须落在这个人真的能被联系到的渠道上。** 2026-08-02 PM 反馈：
+   * 「新客人，还没打过」桶写着「越早打通越容易成」，但 CTS 名单里 124 人（26%）
+   * 根本没有电话号码 —— 其中 106 人只有 Facebook 身份（私信补挂进来的）。
+   * 让销售去打一个打不了的人，这一页就会开始不被信任。
+   */
+  suggestedChannel: 'phone' | 'sms' | 'email' | 'messenger' | 'none'
   /** 约定的回电时间，有就带上。销售拿起电话前一定会想「我约的几点」。 */
   dueAt: string | null
   /**
@@ -204,6 +220,40 @@ const STALE_CALLBACK_MS = 14 * 86_400_000
  * 那批人单独成桶的目的就是防止沉底。
  */
 const FRESH_FIRST_SEGMENTS = new Set<Segment>(['replied', 'new_untouched'])
+
+/**
+ * 把规则想用的渠道，降级到这个人**真的能被联系到**的渠道。
+ *
+ * 顺序按「能不能当场把事办了」：电话 > 私信 > 邮件。私信排在邮件前面，是因为
+ * ME 里能直接回私信，而邮件目前只能批量发。
+ *
+ * 调用方没提供任何联系方式信息（三个字段都 undefined）→ 原样返回，不替老调用方
+ * 猜。这是**向后兼容**，不是默认值：一旦提供了，就以它为准。
+ */
+export function reachableChannel(
+  wanted: SegmentResult['suggestedChannel'],
+  reach: Pick<ContactLike, 'hasPhone' | 'hasEmail' | 'hasMessenger'>,
+): SegmentResult['suggestedChannel'] {
+  const known =
+    reach.hasPhone !== undefined ||
+    reach.hasEmail !== undefined ||
+    reach.hasMessenger !== undefined
+  if (!known) return wanted
+  if (wanted === 'none') return 'none'
+
+  const can = (ch: SegmentResult['suggestedChannel']): boolean =>
+    ch === 'phone' || ch === 'sms' ? reach.hasPhone === true
+      : ch === 'messenger' ? reach.hasMessenger === true
+      : ch === 'email' ? reach.hasEmail === true
+      : false
+
+  if (can(wanted)) return wanted
+  // 想要的用不了 —— 按「能当场办事」的顺序找一个能用的。
+  for (const fallback of ['phone', 'messenger', 'email'] as const) {
+    if (can(fallback)) return fallback
+  }
+  return 'none'
+}
 
 function ts(v: string | null | undefined): number {
   if (!v) return 0
@@ -261,7 +311,7 @@ export function segmentContact(contact: ContactLike, now: Date): SegmentResult {
     segment,
     ...SEGMENT_META[segment],
     reason,
-    suggestedChannel: ch,
+    suggestedChannel: reachableChannel(ch, contact),
     dueAt,
     lastTouchAt,
   })

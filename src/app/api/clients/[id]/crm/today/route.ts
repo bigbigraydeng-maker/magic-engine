@@ -186,6 +186,11 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
         // 否则「打开了邮件」会冒充「客户回话了」挤进最高优先桶。
         engagement: engagementFromMetadata(t.metadata),
       })),
+      // 这个人实际能怎么被联系到 —— 决定「建议用哪个渠道」落在哪。
+      // 私信能力看他有没有 messenger 触点（有触点就说明那条线是通的）。
+      hasPhone: !!c.primary_phone,
+      hasEmail: !!c.primary_email,
+      hasMessenger: tps.some((t) => t.channel === 'messenger'),
     }
   })
 

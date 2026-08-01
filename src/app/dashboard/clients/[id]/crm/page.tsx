@@ -36,7 +36,7 @@ interface Row {
   segment: Segment
   temperature: 'hot' | 'warm' | 'cold' | 'off'
   reason: string
-  suggestedChannel: 'phone' | 'sms' | 'email' | 'none'
+  suggestedChannel: 'phone' | 'sms' | 'email' | 'messenger' | 'none'
   dueAt: string | null
   lastTouchAt: string | null
   lastNote: string | null
@@ -113,6 +113,45 @@ function dueText(iso: string): string {
 }
 
 /**
+ * 「怎么联系他」—— 卡片底部那一条。
+ *
+ * 为什么必须在卡上、而不是点进去才看得到（PM 2026-08-02 反馈）：这一页一次铺
+ * 几百张卡，每张多两次点击就等于没人用。
+ *
+ * 更要命的是**渠道对不对**：CTS 名单里 124 人（26%）没有电话号码，其中 106 人
+ * 只有 Facebook 身份（从私信补挂进来的）。而「新客人，还没打过」这个桶的说明
+ * 写着「越早打通越容易成」—— 销售点开发现根本打不了，这一页就开始不被信任。
+ *
+ * 渠道由后端按「他实际能被联系到什么」算好（segments 的 reachableChannel），
+ * 这里只把它变成一个能当场点的动作。
+ */
+function ReachAction({ row }: { row: Row }) {
+  const base = 'block border-t border-me-charcoal/8 px-3 py-2.5 text-[14px] font-bold'
+
+  if ((row.suggestedChannel === 'phone' || row.suggestedChannel === 'sms') && row.phone) {
+    return (
+      <a
+        href={`tel:${row.phone}`}
+        onClick={(e) => e.stopPropagation()}
+        className={`${base} bg-me-ivory/60 text-me-charcoal hover:bg-me-ivory`}
+      >
+        📞 {row.phone}
+      </a>
+    )
+  }
+
+  if (row.suggestedChannel === 'messenger') {
+    return <p className={`${base} bg-me-ivory/40 text-me-charcoal/60`}>💬 没留电话 —— 只能在 Messenger 回他</p>
+  }
+
+  if (row.suggestedChannel === 'email') {
+    return <p className={`${base} bg-me-ivory/40 text-me-charcoal/60`}>✉️ 没留电话 —— 只能发邮件</p>
+  }
+
+  return null
+}
+
+/**
  * 看板上的一张人卡。列很窄，只放最少的信息，其余进抽屉。
  *
  * 整张卡不能再是一个 <button> —— 图钉和「改阶段」提议都要能单独点，
@@ -153,35 +192,40 @@ function Card({
       </button>
 
       <button onClick={onOpen} className="block w-full p-3 pr-8 text-left">
-        <div className="truncate text-[13px] font-black text-me-charcoal">{row.name}</div>
-        <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-me-charcoal/55">{row.reason}</p>
+        <div className="truncate text-[16px] font-black text-me-charcoal">{row.name}</div>
+        <p className="mt-1 line-clamp-2 text-[14px] leading-snug text-me-charcoal/65">{row.reason}</p>
 
         {row.dueAt && (
-          <p className="mt-1.5 rounded-md bg-[#C2453A]/8 px-2 py-1 text-[10px] font-bold text-[#C2453A]">
+          <p className="mt-2 rounded-md bg-[#C2453A]/8 px-2 py-1 text-[13px] font-bold text-[#C2453A]">
             约的是：{dueText(row.dueAt)}
           </p>
         )}
 
-        <div className="mt-1.5 flex items-center justify-between gap-2">
-          {waited && <span className="text-[10px] text-me-charcoal/35">{waited}</span>}
+        <div className="mt-2 flex items-center justify-between gap-2">
+          {waited && <span className="text-[13px] text-me-charcoal/45">{waited}</span>}
           {row.stageLabel && (
-            <span className="truncate rounded-full bg-me-ivory px-1.5 py-0.5 text-[10px] font-bold text-me-charcoal/55">
+            <span className="truncate rounded-full bg-me-ivory px-2 py-0.5 text-[12px] font-bold text-me-charcoal/60">
               {row.stageLabel}
             </span>
           )}
         </div>
       </button>
 
+      {/* 怎么联系他 —— 卡上直接给，不用点进去。
+          没号码的人绝不显示「打电话」：CTS 名单里 124 人（26%）没有电话，
+          其中 106 人只有 Facebook 身份。让销售去打一个打不了的人，这一页就废了。 */}
+      <ReachAction row={row} />
+
       {/* 系统提议改阶段 —— 提议，不自动改。点一下才生效。 */}
       {row.suggestedStage && (
         <div className="border-t border-me-charcoal/8 bg-me-ivory/60 px-3 py-2">
-          <p className="text-[10px] leading-snug text-me-charcoal/55">
+          <p className="text-[13px] leading-snug text-me-charcoal/55">
             {row.suggestedStage.why}
           </p>
           <button
             type="button"
             onClick={() => onAcceptStage(row)}
-            className="mt-1.5 w-full rounded-lg border border-me-ochre/40 bg-white px-2 py-1 text-[11px] font-bold text-me-ochre hover:bg-me-ochre/10"
+            className="mt-1.5 w-full rounded-lg border border-me-ochre/40 bg-white px-2 py-1.5 text-[13px] font-bold text-me-ochre hover:bg-me-ochre/10"
           >
             改成「{row.suggestedStage.label}」
           </button>
@@ -256,7 +300,7 @@ function BatchEmail({
     return (
       <button
         onClick={() => setOpen(true)}
-        className="mb-2 w-full rounded-lg border border-me-charcoal/15 bg-white py-2 text-[11px] font-bold text-me-charcoal/70"
+        className="mb-2 w-full rounded-lg border border-me-charcoal/15 bg-white py-2 text-[13px] font-bold text-me-charcoal/70"
       >
         ✉️ 给这批发邮件（{emails.length}）
       </button>
@@ -267,21 +311,21 @@ function BatchEmail({
     <div className="mb-2 rounded-xl border border-me-charcoal/10 bg-white p-2.5">
       <button
         onClick={() => void copy()}
-        className="w-full rounded-lg bg-me-charcoal py-2 text-[11px] font-black text-white"
+        className="w-full rounded-lg bg-me-charcoal py-2 text-[13px] font-black text-white"
       >
         {copied ? '✓ 已复制 —— 记得粘到「密送」' : `复制这 ${emails.length} 个邮箱`}
       </button>
 
       <div className="mt-2 rounded-lg border border-[#C2453A]/30 bg-[#C2453A]/8 px-2 py-1.5">
-        <p className="text-[10px] font-black leading-snug text-[#C2453A]">
+        <p className="text-[12px] font-black leading-snug text-[#C2453A]">
           ⚠️ 一定要粘进「密送 / BCC」那一栏
         </p>
-        <p className="mt-0.5 text-[10px] leading-snug text-me-charcoal/65">
+        <p className="mt-0.5 text-[12px] leading-snug text-me-charcoal/65">
           粘到「收件人」栏的话，这 {emails.length} 位客人会互相看到对方的邮箱。
         </p>
       </div>
 
-      <ol className="mt-1.5 space-y-0.5 text-[10px] leading-snug text-me-charcoal/50">
+      <ol className="mt-1.5 space-y-0.5 text-[12px] leading-snug text-me-charcoal/50">
         <li>① 点上面按钮复制</li>
         <li>② 新建邮件，收件人填你自己</li>
         <li>③ 地址粘到「密送 / BCC」</li>
@@ -292,24 +336,24 @@ function BatchEmail({
           readOnly
           value={emails.join('; ')}
           rows={3}
-          className="mt-1.5 w-full rounded-lg border border-me-charcoal/10 bg-me-ivory px-2 py-1 text-[10px]"
+          className="mt-1.5 w-full rounded-lg border border-me-charcoal/10 bg-me-ivory px-2 py-1 text-[12px]"
         />
       )}
 
       {missing > 0 && (
-        <p className="mt-1.5 text-[10px] text-me-charcoal/45">另有 {missing} 人没留邮箱。</p>
+        <p className="mt-1.5 text-[12px] text-me-charcoal/45">另有 {missing} 人没留邮箱。</p>
       )}
 
       <button
         onClick={() => void logSent()}
         disabled={logging}
-        className="mt-2 w-full rounded-lg border border-me-stone py-1.5 text-[11px] font-bold text-me-charcoal disabled:opacity-40"
+        className="mt-2 w-full rounded-lg border border-me-stone py-1.5 text-[13px] font-bold text-me-charcoal disabled:opacity-40"
       >
         {logging ? '记着…' : '都发出去了，帮我记一笔'}
       </button>
       <button
         onClick={() => setOpen(false)}
-        className="mt-1 w-full text-[10px] text-me-charcoal/35"
+        className="mt-1 w-full text-[12px] text-me-charcoal/35"
       >
         收起
       </button>
@@ -444,7 +488,7 @@ function OffList({
             if (list.length === 0) return null
             return (
               <div key={g}>
-                <p className="mb-2 text-[11px] font-black uppercase tracking-[0.14em] text-me-ochre">
+                <p className="mb-2 text-[13px] font-black tracking-[0.08em] text-me-ochre">
                   {OFF_GROUP_LABEL[g]} · {list.length}
                 </p>
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -455,14 +499,14 @@ function OffList({
                       className="rounded-xl border border-me-charcoal/10 bg-white p-3 text-left hover:border-me-ochre/50"
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <span className="truncate text-sm font-black text-me-charcoal">{r.name}</span>
+                        <span className="truncate text-[16px] font-black text-me-charcoal">{r.name}</span>
                         {r.stageLabel && (
-                          <span className="shrink-0 rounded-full bg-me-ivory px-2 py-0.5 text-[10px] font-bold text-me-charcoal/55">
+                          <span className="shrink-0 rounded-full bg-me-ivory px-2 py-0.5 text-[12px] font-bold text-me-charcoal/55">
                             {r.stageLabel}
                           </span>
                         )}
                       </div>
-                      <p className="mt-1 text-[11px] text-me-charcoal/50">{r.reason}</p>
+                      <p className="mt-1 text-[13px] text-me-charcoal/55">{r.reason}</p>
                     </button>
                   ))}
                 </div>
@@ -657,21 +701,21 @@ export default function CrmTodayPage() {
               {/* 看板：宽屏并排成列，手机堆成竖排 */}
               <div className="flex flex-col gap-3 lg:flex-row lg:overflow-x-auto lg:pb-2">
                 {buckets.map((b) => (
-                  <div key={b.segment} className="lg:w-[230px] lg:flex-none">
+                  <div key={b.segment} className="lg:w-[260px] lg:flex-none">
                     <div className="mb-2 rounded-lg bg-white px-2.5 py-2 lg:bg-transparent lg:px-1 lg:py-0">
                       <div className="flex items-baseline justify-between gap-2">
-                        <span className="text-[11px] font-black uppercase tracking-wide text-me-charcoal/60">
+                        <span className="text-[14px] font-black tracking-wide text-me-charcoal/70">
                           {b.label}
                         </span>
                         <span
-                          className={`text-base font-black ${
+                          className={`text-lg font-black ${
                             HOT.has(b.segment) && b.total > 0 ? 'text-[#C2453A]' : 'text-me-charcoal/70'
                           }`}
                         >
                           {b.total}
                         </span>
                       </div>
-                      <p className="mt-0.5 text-[10px] leading-snug text-me-charcoal/40">{b.howTo}</p>
+                      <p className="mt-0.5 text-[12px] leading-snug text-me-charcoal/45">{b.howTo}</p>
                     </div>
 
                     {b.batch === 'send_email' && (
@@ -683,12 +727,12 @@ export default function CrmTodayPage() {
                     ))}
 
                     {b.total === 0 && (
-                      <p className="rounded-xl border border-dashed border-me-charcoal/10 py-4 text-center text-[11px] text-me-charcoal/25">
+                      <p className="rounded-xl border border-dashed border-me-charcoal/10 py-4 text-center text-[13px] text-me-charcoal/30">
                         这批清空了 ✓
                       </p>
                     )}
                     {b.truncated && (
-                      <p className="py-1 text-center text-[10px] text-me-charcoal/35">
+                      <p className="py-1 text-center text-[12px] text-me-charcoal/40">
                         + 还有 {b.total - b.people.length} 人
                       </p>
                     )}
