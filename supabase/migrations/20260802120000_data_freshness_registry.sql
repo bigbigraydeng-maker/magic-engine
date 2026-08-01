@@ -53,7 +53,12 @@ CREATE TABLE IF NOT EXISTS data_freshness_expectations (
   -- the expectation itself: alert when now() - max(timestamp_column) exceeds this
   max_age_hours     integer NOT NULL CHECK (max_age_hours > 0),
 
-  -- don't alert on an empty table before this date (feature not shipped yet)
+  -- Don't alert on an empty table before this date (feature not shipped yet).
+  --
+  -- Set it to the day AFTER the stream's first expected write, not the launch
+  -- day itself: the daily check runs at 06:10 UTC, so a stream whose first write
+  -- lands later that same day would be reported "never written" on its own
+  -- launch morning. Nine of the seeded rows below are dated that way on purpose.
   monitor_from      date,
 
   enabled           boolean NOT NULL DEFAULT true,
@@ -145,11 +150,11 @@ INSERT INTO data_freshness_expectations
 VALUES
   -- --- 六支柱产物 ------------------------------------------------------------
   ('gsc_performance_snapshots', 'created_at', NULL, NULL, 'client_id',
-   'Google 搜索表现（每日）', 'seo', 120, '2026-05-26', 'critical',
+   'Google 搜索表现（每日）', 'seo', 120, '2026-05-27', 'critical',
    '每日 cron。真实历史最大健康间隔 4 天（周末 + GSC 自身延迟），阈值取 5 天。'),
 
   ('ga4_traffic_snapshots', 'created_at', NULL, NULL, 'client_id',
-   '网站访问数据 GA4（每日）', 'seo', 120, '2026-05-29', 'critical',
+   '网站访问数据 GA4（每日）', 'seo', 120, '2026-05-30', 'critical',
    '每日 cron。与 GSC 同一节奏，同样跳周末，真实最大间隔 4 天。'),
 
   ('ad_daily_insights', 'created_at', NULL, NULL, 'client_id',
@@ -167,11 +172,11 @@ VALUES
    '每周一写入（ai-tracker-weekly），历史规律。阈值 10 天。'),
 
   ('competitor_snapshots', 'created_at', NULL, NULL, 'client_id',
-   '竞品快照（每周）', 'competitor', 240, '2026-06-11', 'warn',
+   '竞品快照（每周）', 'competitor', 240, '2026-06-12', 'warn',
    '每周 cron。阈值 10 天。'),
 
   ('reputation_snapshots', 'created_at', NULL, NULL, 'client_id',
-   '口碑评分快照（每周）', 'reputation', 240, '2026-08-01', 'warn',
+   '口碑评分快照（每周）', 'reputation', 240, '2026-08-02', 'warn',
    '2026-08-01 才上线（reputation-snapshots-weekly）。monitor_from 设为上线日，'
    '避免对上线前的空表报警。'),
 
@@ -188,7 +193,7 @@ VALUES
    '跟 ai-tracker-weekly 同步，每周一写入 —— 是周更不是日更，阈值 10 天。'),
 
   ('flywheel_metrics', 'created_at', 'metric_key', 'social.', 'client_id',
-   '飞轮指标 · 社媒', 'social', 240, '2026-05-31', 'critical',
+   '飞轮指标 · 社媒', 'social', 240, '2026-06-01', 'critical',
    '教科书级案例：social-engagement-pullback 连续 30 天 status=completed，'
    '而这条流 2026-05-31 到 2026-08-01 之间一行都没写。表级 max(created_at) 天天显示'
    '「今天」，只有按前缀分流才看得见。'),
@@ -199,7 +204,7 @@ VALUES
    'anomaly detector 的最终产物。连续 7 天全客户零异常本身就可疑。'),
 
   ('industry_benchmarks', 'created_at', NULL, NULL, NULL,
-   '行业基准（每月）', 'ops', 1080, '2026-05-13', 'warn',
+   '行业基准（每月）', 'ops', 1080, '2026-05-14', 'warn',
    '阈值 45 天 = 一个月 + 半个月缓冲。注意：这条目前是 PM 主动暂停的（每月约 US$360），'
    '不是故障。要恢复就把 BASELINE_CRON_ENABLED 设成 true；要停掉这条告警就把本行 enabled 设为 false。'),
 
@@ -207,15 +212,15 @@ VALUES
   -- 密钥没配 -> 401 -> 鉴权之后的写日志代码根本没执行 -> cron_run_logs 里连失败都没有。
   -- 所以「这个 job 的日志停了 / 从来没有过」本身就是密钥没配的直接信号。
   ('cron_run_logs', 'started_at', 'job_name', 'keyword-snapshots-weekly', NULL,
-   '任务心跳 · 关键词排名周更', 'ops', 240, '2026-07-28', 'critical',
+   '任务心跳 · 关键词排名周更', 'ops', 240, '2026-07-29', 'critical',
    '2026-07-28 之前这里一条记录都没有，整整 53 天。'),
 
   ('cron_run_logs', 'started_at', 'job_name', 'daily-cron-digest', NULL,
-   '任务心跳 · 每日任务汇总', 'ops', 48, '2026-07-26', 'critical',
+   '任务心跳 · 每日任务汇总', 'ops', 48, '2026-07-28', 'critical',
    '哑过两次（51 天 + 30 天），两次都是同一个根因：CRON_SECRET 没填。'),
 
   ('cron_run_logs', 'started_at', 'job_name', 'anomaly-detector-daily', NULL,
-   '任务心跳 · 每日异常检测', 'ops', 48, '2026-07-02', 'warn', NULL),
+   '任务心跳 · 每日异常检测', 'ops', 48, '2026-07-03', 'warn', NULL),
 
   ('cron_run_logs', 'started_at', 'job_name', 'data-freshness-check', NULL,
    '任务心跳 · 本检查自己', 'ops', 48, NULL, 'critical',
