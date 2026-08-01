@@ -9,6 +9,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import type { ListingBriefContent, ListingBriefPatch } from './brief-schema'
 import type { ListingBriefStatus, ListingBriefVerdict } from './brief-constants'
+import { applyAdReferenceToDraft, type AdReferenceBlock } from './ad-benchmarks'
 
 /** listing_briefs 表的一行(跟 20260801150000_listing_briefs.sql 一一对应)。 */
 export interface ListingBriefRow extends ListingBriefContent {
@@ -21,6 +22,12 @@ export interface ListingBriefRow extends ListingBriefContent {
   input_tokens: number | null
   outcomes: Record<string, unknown> | null
   verdict: ListingBriefVerdict
+  /**
+   * 生成这一版时我们自己的投放实测(20260801170000 加的列)。
+   * 只给人看 —— 它**不在** ListingBriefContent 里,所以人手 PATCH 也改不到它,
+   * AI 更写不了它。见 ad-benchmarks.ts 文件头纪律 ①。
+   */
+  ad_reference: AdReferenceBlock | null
   created_at: string
   updated_at: string
 }
@@ -74,14 +81,22 @@ export async function nextBriefVersion(listingId: string): Promise<number> {
   return typeof top === 'number' && top > 0 ? top + 1 : 1
 }
 
-/** AI 生成完落库,一律先进 draft —— 没有人看过的东西不许直接生效。 */
+/**
+ * AI 生成完落库,一律先进 draft —— 没有人看过的东西不许直接生效。
+ *
+ * adReference 走 applyAdReferenceToDraft 挂在旁边,**不并进 content**:
+ * 实测数据只显示,不参与判断(ad-benchmarks.ts 纪律 ①)。这里也是它唯一的
+ * 写入路径 —— PATCH 那条路走 ListingBriefPatch,结构上就够不到这一列。
+ */
 export async function insertBriefDraft(params: {
   listingId: string
   content: ListingBriefContent
   modelUsed: string
   inputTokens: number
+  adReference?: AdReferenceBlock | null
 }): Promise<Result<ListingBriefRow>> {
   const version = await nextBriefVersion(params.listingId)
+  const payload = applyAdReferenceToDraft(params.content, params.adReference ?? null)
 
   const { data, error } = await supabaseAdmin
     .from(TABLE)
@@ -89,7 +104,8 @@ export async function insertBriefDraft(params: {
       listing_id: params.listingId,
       version,
       status: 'draft',
-      ...params.content,
+      ...payload.content,
+      ad_reference: payload.ad_reference,
       generated_by: 'claude',
       model_used: params.modelUsed,
       input_tokens: params.inputTokens,

@@ -18,6 +18,13 @@ import {
   LISTING_HESITATIONS,
   BRIEF_SOURCE_KINDS,
 } from './brief-constants'
+import {
+  formatCostWithSample,
+  formatSpendWithSample,
+  benchmarkConfidenceLabel,
+  type AdReferenceBlock,
+  type AdReferenceGroup,
+} from './ad-benchmarks'
 import type { ListingRow } from './queries'
 
 export const LISTING_BRIEF_SYSTEM_PROMPT = `You are a residential real-estate marketing analyst working for a NZ/AU agency back office.
@@ -31,6 +38,7 @@ Your job: read a property listing page (already fetched for you) plus current pu
 3. Every meaningful field must appear in "sources" with kind = "cited" (you saw it, give the url), "inferred" (your judgement, no direct source) or "missing" (you looked and could not find it).
 4. If one listing page describes SEVERAL different unit configurations (e.g. "units 3 & 11 are 108m2" and "units 5/7/9 are 139.7m2 with study and internal garage"), you MUST split them into separate entries in "unit_variants". Do not flatten them into one. Different configurations attract different buyers, and collapsing them makes the whole brief useless for targeting.
 5. Use ONLY the enum values listed below. Do not invent new ones. If nothing fits, leave the array shorter and explain in "gaps".
+6. If the message includes a section called "Our own past ad results", it is REFERENCE ONLY. You MUST NOT let it change "angle_ranking" or "buyer_segments". Rank the angles on what this property actually is — location, configuration, school zone, price method, the vendor's wording — exactly as you would if that section were absent. Those numbers come from a handful of conversations; a cheaper cost-per-conversation on one ad is noise, not evidence. Treating it as evidence is a known, already-committed mistake we are deliberately preventing here. Do not mention those numbers in "rationale" either.
 
 ## Output
 
@@ -83,6 +91,54 @@ export interface BriefPromptInput {
   /** 客户所在市场,给 web search 和文案口径用。 */
   country: 'AU' | 'NZ'
   city: string | null
+  /**
+   * 我们自己投放的实测。**参考材料**,不是判断依据 —— 提示词里会连同禁令一起给。
+   * 没有就是 null(这一整段不出现)。
+   */
+  adReference?: AdReferenceBlock | null
+}
+
+/** 一组实测写成人能读、也让模型看得见样本量的一行。 */
+function describeGroup(label: string, group: AdReferenceGroup | null): string {
+  if (!group) return `- ${label}: 没有数据`
+  const mixed = group.mixed_with_other_listings
+    ? '（这是整个广告账户的合计，里面还混着同账户的其他房源，拆不开）'
+    : ''
+  return [
+    `- ${label}:`,
+    `  · 每次对话多少钱: ${formatCostWithSample(group)}`,
+    `  · 一共花了: ${formatSpendWithSample(group)}`,
+    `  · 样本覆盖: ${group.sample.listings} 套房源 / ${group.sample.clients} 个客户账户${mixed}`,
+  ].join('\n')
+}
+
+/**
+ * 「我们自己投过什么」这一段。
+ *
+ * 🔴 禁令跟数字**贴在一起**,不是丢在系统提示词里就算数:模型读到数字的那一刻
+ *    就在推理了,禁令离得越远越不管用。同理每个数字后面直接缝着样本量 ——
+ *    不给样本量,模型会像人一样把 1 次对话当成结论(这正是本功能要防的那次错误)。
+ */
+export function describeAdReference(block: AdReferenceBlock | null): string {
+  if (!block) return ''
+  const lines = [
+    '## Our own past ad results (REFERENCE ONLY — must not change your ranking)',
+    '',
+    '🔴 Read rule 6 again before you use anything below. These numbers describe how our own ads have',
+    'performed. They are NOT evidence about which angle this property should lead with, because the',
+    'sample sizes are tiny and the numbers are NOT broken down by angle at all.',
+    '',
+    describeGroup('这套房所属客户的账户', block.own),
+    describeGroup('同类房源（同价格档 × 同区 × 同房型）', block.peers),
+    '',
+    `- 这份实测的成色: ${benchmarkConfidenceLabel(block.pattern)}`,
+    '',
+    '限制（这些数字不能拿来干什么）:',
+    ...block.limitations.map(l => `  · ${l}`),
+    '',
+    'Rank the angles as if this section did not exist. Do not cite these numbers in "rationale".',
+  ]
+  return lines.join('\n')
 }
 
 /** 房子本身在 ME 里已知的事实。这些是**确定的**,不要让模型再去推一遍。 */
@@ -103,6 +159,7 @@ function describeListing(l: ListingRow): string {
 
 export function buildBriefUserMessage(input: BriefPromptInput): string {
   const { listing, pageMarkdown, pageUrl, country, city } = input
+  const referenceBlock = describeAdReference(input.adReference ?? null)
 
   const marketLine = city
     ? `The market is ${city}, ${country}. Use ${country} sources and ${country} conventions.`
@@ -119,7 +176,7 @@ export function buildBriefUserMessage(input: BriefPromptInput): string {
 ${describeListing(listing)}
 
 ${pageBlock}
-
+${referenceBlock ? `\n${referenceBlock}\n` : ''}
 ## Allowed enum values (use these exact strings, nothing else)
 
 ${buildEnumReference()}
@@ -129,7 +186,7 @@ ${buildEnumReference()}
 1. Extract the hard facts from the listing page (price method, configuration(s), school zone, what is nearby, anything the vendor's own wording reveals about motivation).
 2. If the page describes more than one unit configuration, split them into separate "unit_variants" entries.
 3. Search the web for current market data for this suburb: median sale price, year-on-year change, rental yield, and the area's average yield. Cite every number. If a number is not findable, omit it and say so in "gaps".
-4. Decide which buyer segments this property realistically attracts, rank the selling angles, and list what those buyers will hesitate over.
+4. Decide which buyer segments this property realistically attracts, rank the selling angles, and list what those buyers will hesitate over. Base this on the property itself. If "Our own past ad results" was included above, it must NOT move a single angle up or down.
 5. Fill "sources" so every meaningful field is marked cited / inferred / missing.
 
 Return the JSON object only.`
