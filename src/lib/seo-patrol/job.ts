@@ -26,6 +26,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { persistZhugeActions } from '@/lib/zhuge/action-persister'
 import type { PriorityAction, ZhugeOutput } from '@/lib/zhuge/types'
 import { runSeoPatrolRules } from './rules'
+import { buildPageSignals } from './page-signals'
 import type {
   SeoPatrolFinding,
   SeoPatrolInput,
@@ -49,7 +50,9 @@ const RULE_IMPACT: Record<SeoPatrolFinding['ruleId'], 'low' | 'medium' | 'high'>
   stale_content: 'high',
   keyword_opportunity: 'medium',
   missing_internal_link: 'medium',
-  not_indexed: 'low',
+  // 'low' was a placeholder from the data-less era; a page Google won't
+  // index earns zero traffic — resubmission is cheap and unblocks it all.
+  not_indexed: 'medium',
 }
 
 const RULE_EFFORT: Record<SeoPatrolFinding['ruleId'], 'low' | 'medium' | 'high'> = {
@@ -72,6 +75,8 @@ export interface SeoPatrolClientResult {
   findings_detected: number
   findings_persisted: number
   actions_created: number
+  /** R2 page-signal feed health — 'missing'/'error' means R2 was off this run. */
+  page_data_status?: PageDataStatus
   error?: string
 }
 
@@ -129,30 +134,48 @@ export function assembleSeoPatrolInput(
     }
   })
 
-  // R2/R5 page signals are not yet collectable (see file header note).
+  // Page signals are attached by loadSeoPatrolInput (buildPageSignals, S15) —
+  // this pure assembler only shapes the keyword side.
   return { clientId, keywords, pages: [] }
 }
+
+/** Health of the R2 page-signal feed for one client (surfaced in cron summary). */
+export type PageDataStatus = 'ok' | 'missing' | 'error'
 
 async function loadSeoPatrolInput(
   supabase: SupabaseClient,
   client: SeoPatrolClient,
-): Promise<SeoPatrolInput> {
+): Promise<{ input: SeoPatrolInput; pageDataStatus: PageDataStatus }> {
   const locationCode = locationCodeFor(client.semrush_db)
 
-  // Distinct snapshot dates, newest first (need current + one prior).
-  const { data: dates } = await supabase
+  // Latest snapshot date, then the newest date strictly before it. Two point
+  // queries instead of scanning N rows: a row-limit scan breaks once a single
+  // snapshot exceeds the limit (Oztop: 124 rows/snapshot ate a 60-row window,
+  // so priorDate was always null and R3 could never fire).
+  const { data: currentRow } = await supabase
     .from('keyword_snapshots')
     .select('snapshot_date')
     .eq('client_id', client.id)
     .eq('location_code', locationCode)
     .order('snapshot_date', { ascending: false })
-    .limit(60)
+    .limit(1)
+    .maybeSingle()
 
-  const distinctDates = Array.from(
-    new Set(((dates ?? []) as { snapshot_date: string }[]).map((d) => d.snapshot_date)),
-  )
-  const currentDate = distinctDates[0] ?? null
-  const priorDate = distinctDates[1] ?? null
+  const currentDate = (currentRow as { snapshot_date: string } | null)?.snapshot_date ?? null
+
+  let priorDate: string | null = null
+  if (currentDate) {
+    const { data: priorRow } = await supabase
+      .from('keyword_snapshots')
+      .select('snapshot_date')
+      .eq('client_id', client.id)
+      .eq('location_code', locationCode)
+      .lt('snapshot_date', currentDate)
+      .order('snapshot_date', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    priorDate = (priorRow as { snapshot_date: string } | null)?.snapshot_date ?? null
+  }
 
   const currentKeywords = currentDate
     ? await fetchKeywordRows(supabase, client.id, locationCode, currentDate)
@@ -172,7 +195,25 @@ async function loadSeoPatrolInput(
 
   const gscQueries = ((gsc as { top_queries?: GscQueryRow[] } | null)?.top_queries ?? [])
 
-  return assembleSeoPatrolInput(client.id, currentKeywords, priorKeywords, gscQueries)
+  const input = assembleSeoPatrolInput(client.id, currentKeywords, priorKeywords, gscQueries)
+
+  // 22.E.S15: page signals (crawl link graph × GSC top_pages) feed R2.
+  // A signals failure degrades to keyword-only patrol, never breaks it —
+  // but the degradation is REPORTED via page_data_status, not swallowed
+  // (a silent pages:[] is exactly how R2 stayed dead for months).
+  let pageDataStatus: PageDataStatus = 'error'
+  try {
+    const { pages, meta } = await buildPageSignals(client.id, client.domain, supabase)
+    input.pages = pages
+    pageDataStatus = meta.crawl_data_missing ? 'missing' : 'ok'
+  } catch (err) {
+    console.warn(
+      `[seo-patrol] page signals failed for ${client.domain} (R2 off this run):`,
+      err instanceof Error ? err.message : String(err),
+    )
+  }
+
+  return { input, pageDataStatus }
 }
 
 async function fetchKeywordRows(
@@ -205,7 +246,16 @@ export function findingsToActions(findings: SeoPatrolFinding[]): PriorityAction[
   const sorted = [...findings].sort(
     (a, b) => RULE_RANK[a.ruleId] - RULE_RANK[b.ruleId],
   )
-  const top = sorted.slice(0, MAX_ACTIONS_PER_CLIENT)
+  // One action per (rule, subject): duplicate findings for the same keyword
+  // (e.g. duplicate snapshot rows) must not become duplicate kanban cards.
+  const seen = new Set<string>()
+  const deduped = sorted.filter((f) => {
+    const key = `${f.ruleId}::${(f.keyword ?? f.url ?? 'site').toLowerCase()}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  const top = deduped.slice(0, MAX_ACTIONS_PER_CLIENT)
 
   return top.map((f, idx) => {
     const subject = f.keyword ?? f.url ?? 'site'
@@ -259,18 +309,18 @@ export function findingsToActions(findings: SeoPatrolFinding[]): PriorityAction[
  * leftovers from a prior run) and insert the current set. Already-actioned or
  * dismissed findings are preserved (we only clear status='fresh').
  *
+ * The clear runs even when `findings` is empty: a client whose issues have all
+ * resolved must not keep last week's fresh rows on display.
+ *
  * All findings in `findings` belong to a single client (per-client orchestration).
  */
 async function persistFindings(
   supabase: SupabaseClient,
+  clientId: string,
   findings: SeoPatrolFinding[],
 ): Promise<number> {
-  if (findings.length === 0) return 0
-
-  const clientId = findings[0].clientId
-
-  // Clear prior un-actioned findings so re-running the same day refreshes
-  // rather than accumulating duplicate fresh rows.
+  // Clear prior un-actioned findings so re-running refreshes rather than
+  // accumulating duplicate or stale fresh rows.
   const { error: deleteErr } = await supabase
     .from('seo_patrol_findings')
     .delete()
@@ -280,6 +330,8 @@ async function persistFindings(
   if (deleteErr) {
     throw new Error(`seo_patrol_findings clear failed: ${deleteErr.message}`)
   }
+
+  if (findings.length === 0) return 0
 
   const rows = findings.map((f) => ({
     client_id: f.clientId,
@@ -323,13 +375,15 @@ export async function runSeoPatrolForClient(
   }
 
   try {
-    const input = await loadSeoPatrolInput(supabase, client)
+    const { input, pageDataStatus } = await loadSeoPatrolInput(supabase, client)
+    base.page_data_status = pageDataStatus
     const findings = runSeoPatrolRules(input)
     base.findings_detected = findings.length
 
-    if (findings.length === 0) return base
+    // Runs even with zero findings: clears stale fresh rows from prior days.
+    base.findings_persisted = await persistFindings(supabase, client.id, findings)
 
-    base.findings_persisted = await persistFindings(supabase, findings)
+    if (findings.length === 0) return base
 
     const actions = findingsToActions(findings)
     if (actions.length === 0) return base
@@ -369,15 +423,19 @@ export interface SeoPatrolBatchResult {
   total_findings: number
   total_actions: number
   failed: number
+  /** Clients whose R2 page-signal feed was missing or errored this run. */
+  page_data_problems: number
   results: SeoPatrolClientResult[]
 }
 
 export async function runSeoPatrol(
   supabase: SupabaseClient = supabaseAdmin,
 ): Promise<SeoPatrolBatchResult> {
+  // 真客户闸门：周期性监测只对 active 客户跑（DataForSEO 计划 阶段 0）
   const { data: clients, error } = await supabase
     .from('clients')
     .select('id, domain, semrush_db')
+    .eq('client_status', 'active')
     .not('domain', 'is', null)
 
   if (error) {
@@ -399,6 +457,9 @@ export async function runSeoPatrol(
     total_findings: results.reduce((s, r) => s + r.findings_detected, 0),
     total_actions: results.reduce((s, r) => s + r.actions_created, 0),
     failed: results.filter((r) => r.error).length,
+    page_data_problems: results.filter(
+      (r) => r.page_data_status && r.page_data_status !== 'ok',
+    ).length,
     results,
   }
 }

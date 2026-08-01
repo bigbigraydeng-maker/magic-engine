@@ -13,18 +13,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
-vi.mock('@/lib/meta/token-manager', () => ({ getMetaTokenForClient: vi.fn() }))
+vi.mock('@/lib/meta/token-manager', () => ({
+  getMetaTokenForClient: vi.fn(),
+  getStoredPageToken: vi.fn(),
+}))
 vi.mock('@/lib/meta/page-posts', () => ({ getPageAccessToken: vi.fn() }))
 vi.mock('@/lib/meta/conversations', () => ({ fetchPageConversations: vi.fn() }))
 
 import { syncClientMessenger } from '../sync'
 import { supabaseAdmin } from '@/lib/supabase'
-import { getMetaTokenForClient } from '@/lib/meta/token-manager'
+import { getMetaTokenForClient, getStoredPageToken } from '@/lib/meta/token-manager'
 import { getPageAccessToken } from '@/lib/meta/page-posts'
 import { fetchPageConversations } from '@/lib/meta/conversations'
 
 const mockFrom = vi.mocked(supabaseAdmin.from)
 const mockUserToken = vi.mocked(getMetaTokenForClient)
+const mockStoredToken = vi.mocked(getStoredPageToken)
 const mockPageToken = vi.mocked(getPageAccessToken)
 const mockFetch = vi.mocked(fetchPageConversations)
 
@@ -121,6 +125,9 @@ function convo(lastDirection: 'inbound' | 'outbound') {
 
 beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => {})
+  // Default: no stored connection, so existing cases keep exercising the
+  // env-var path they were written for.
+  mockStoredToken.mockResolvedValue(null)
   mockUserToken.mockResolvedValue('user-tok')
   mockPageToken.mockResolvedValue('page-tok')
   mockFetch.mockResolvedValue([])
@@ -234,5 +241,42 @@ describe('syncClientMessenger — resilience', () => {
 
     expect(res.error).toBe('rate limited')
     expect(res.conversations).toBe(0)
+  })
+})
+
+/**
+ * The whole point of the "连接 Meta" button: a stored Page token must be used
+ * in preference to deriving one from an env-var user token, and the old path
+ * must keep working for clients configured that way (CTS).
+ */
+describe('syncClientMessenger — where the Page token comes from', () => {
+  it('uses the stored connection and never touches the env-var path', async () => {
+    stubSupabase({ watermarkRow: null })
+    mockStoredToken.mockResolvedValue('stored-page-tok')
+
+    await syncClientMessenger(CLIENT)
+
+    expect(mockUserToken).not.toHaveBeenCalled()
+    expect(mockPageToken).not.toHaveBeenCalled()
+    expect(mockFetch).toHaveBeenCalledWith(CLIENT.facebook_page_id, 'stored-page-tok', undefined)
+  })
+
+  it('falls back to the env-var path when nothing is stored', async () => {
+    stubSupabase({ watermarkRow: null })
+    mockStoredToken.mockResolvedValue(null)
+
+    await syncClientMessenger(CLIENT)
+
+    expect(mockPageToken).toHaveBeenCalled()
+    expect(mockFetch).toHaveBeenCalledWith(CLIENT.facebook_page_id, 'page-tok', undefined)
+  })
+
+  it('still reports no_page_token when neither source yields one', async () => {
+    mockStoredToken.mockResolvedValue(null)
+    mockPageToken.mockResolvedValue(null)
+
+    const res = await syncClientMessenger(CLIENT)
+
+    expect(res.skipped).toBe('no_page_token')
   })
 })

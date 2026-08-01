@@ -3576,6 +3576,17 @@ FDE 未来 Wizard：客户信息 → 选启用渠道 → 客户提供 credential
 
 ---
 
+### Phase 21.L — 讲课式系列课 · 单讲工作台(大瑞 IP「AI海外获客」6 讲试点)
+
+> **登记日期**:2026-08-01 · **形态**:讲课式短视频(上课件 slide + 下真人)· 客户 = Magic Lab Class(377468af)
+> **一句话**:系列课收进内容工厂「课程」区，点每讲进单讲工作台 —— 审改脚本 → 选「自己录/数字人」→ 传录像 → 系统自动加课件+字幕拼上下分屏成片 → 审成片去发布。PM 拍板:自己录整条跑通优先，数字人接线不实测(生成要花钱，说一声再试)
+
+- [x] **层1-2 讲课式文案生成器 + 课程分组视图**(2026-08-01,PR #726 merged):`planLectureScript` 结构化脚本(钩子/要点[口播+课件]/CTA)+ 看板「课程」区逐讲状态行
+- [x] **层3 单讲工作台 + 讲课式做片管线**(2026-08-01,PR #735):工作台五区(脚本审改/制作方式/课件预览/平台CTA两版本/成片审);worker 讲课式管线(录像→听写→脚本对轴→课件/短句大字字幕→上下分屏);文案生成器 v2(要点必须真实工具名+可照做步骤,禁口号;CTA 分平台两版本,小红书导流红线分级双闸);6 讲文案已按「更实」重生成回库(旧稿备份可回滚)。魏征+板桥双审全处置
+- [ ] **挂账**:做片任务表防双击唯一索引(动数据库,PM `go apply`)· 数字人首跑实测(花钱,PM 说试)· 发布端按平台带不同 CTA 接线
+
+---
+
 ### Phase 21.K — Ad Strategy Engine(投放师大脑 · 广告策略层)⭐⭐⭐ ✅ 全部上线(2026-07-24 · PR #618/#619/#620/#621/#622/#631/#633/#634)
 
 > **登记日期**:2026-07-13 · **状态**:📋 spec v0.2 定稿(子牙起草 → 魏征 needs_rework 修 2 P0 + 板桥 approve_with_fixes 修 2 P0)· **PM 已批开工**「这是 ME 的广告核心功能」;migration apply 需逐次显式 `go apply`
@@ -3593,6 +3604,8 @@ FDE 未来 Wizard：客户信息 → 选启用渠道 → 客户提供 credential
 - [x] **P21.K.5 跨客户** ✅(2-3 天):配置 UI(红线:**自动定标预填**不给 PM 空框 + 人话 label + 当前值参照)+ `funnel_layers` per-client + 泛化到有 Meta 账户的客户 + handoff schema `creative_supply_requests`(策略层→作品层)
 - [x] **顺带** ✅(force-pause 守卫已随 #634 落地):`/meta-ads/execute` force-pause 守卫(改预算后 entity read 回读 + 短重试 + 自动重激活)+ budget_policy 硬闸。codify memory `reference-meta-mcp-budget-update-forces-pause`
 - [ ] **P21.K.7 ad 级数据脊柱**(登记 2026-07-25,PM 拍板):日度 cron 补拉 **ad 级**(每条广告每天一行,复用 `ad_daily_insights` 的 `level='ad'`),让「某天新增了哪条广告 / 哪条在拖后腿」可被系统自查,不依赖 Meta MCP(Oztop 账户未开通)也不用人翻广告后台。**背书案例**:Oztop Lead Form Cold Broad 的 CPL 7/17 起翻倍,campaign 级只能定位到「填表率腰斩 + 出现出站点击」。含 `parent_id` 列(ad→campaign 归属,**migration 待 PM `go apply`**)+ 首拉 30 天回补 + 分页完整性守卫。顺带铺好 34.B Creative Lifecycle 要的作品层日度基础设施
+- [x] **P21.K 止血:视频/ThruPlay 广告不再被点击率误判 🔴** ✅(2026-07-26 · PR #648):事故 CTS「ThruPlay Reels - Pool builder」被判 🔴「点击率比自身最好一周低 100%(0.1%→0.0%)」,近 7 天 $69/0 询盘。根因:视频广告优化目标是观看不是点击,clicks/impressions 本在 0.1% 噪声量级,被相对基线误判。修复:`BaselineConfig` 新增 `ctrSignalFloor`(默认 0.5%),自身最好一周 CTR 都低于此的广告=非点击驱动,CTR 判 `insufficient_history` 不再误标红;Lead/traffic 1%+ 与 Reborn 4.4% 回归不受影响。子牙+魏征双审 GO,补 4 测试(含 2 变异杀手),ads-strategy 87/87
+- [ ] **P21.K.8 objective 感知 + 视频疲劳正向检测**(登记 2026-07-26,PM 拍板 `排`):把 P21.K 止血从「不误判视频广告」升级到「真正体检视频广告好不好」。需 ① `ad_daily_insights` 加 `objective` 列 + 采集时拉 campaign 节点 objective(**migration 待 PM `go apply`**)② 脊柱补拉视频完播指标(ThruPlay 完播成本 / CPM / video_p100)③ 按 objective 切换判定指标:视频/播放量目标用完播成本或 CPM,表单/流量目标保留 ctr+cost_per_result,拿不到 objective 或样本太少判 `insufficient_history`。价值:CTS 这类主打视频的客户,看完成本涨→主动提醒换素材。半天到一天。附:止血注释已在 `baseline.ts` 登记本项为 follow-up
 - [ ] **多视角对抗复盘工作流**(1-2 天,可后置):battle-plan §8 方法论固化成可复用 Workflow/agent(N 视角互相证伪前提 → 作战计划 → 喂鲁班),异常触发非每日跑
 - [ ] **开放项**:三张新表 migration 逐次 PM `go apply`(`ad_daily_insights` / `ad_strategy_configs`+`_triggers` / `ad_health_narratives`)· P5 泛化首批客户(Oztop?)· 姊妹 spec Creative Lifecycle 同一 GHA 笔误待独立小 PR 修
 
@@ -3715,6 +3728,13 @@ AI Content Factory  ←──反馈──  Data Engine  ←──分析──  �
 | `22.E.S11` | **MAX_ACTIONS_PER_CLIENT 客户可配** — 适配 FDE 产能（默认 3，可调 1-5）| P3 | 📋 |
 | `22.E.S12` | **PM 决策层 vs FDE 执行层分流** — 战略级 action（高量高 KD）走 PM 审 | P3 | 📋 |
 | `22.E.S13` | **SEO 子类型精细分流** — drawer 按 action_type 走不同生成器（落地页 + 现有页面 SEO 元素优化）| **P2** | 🔨 决战日核心 |
+| `22.E.S14` | **盯梢复活三连修** — 巡逻 prior 快照 60 行扫描 bug（Oztop R3 失明）/ ranked_keywords KD 解析路径错（全库恒空）/ site-audit cleanup null 比较崩溃 14 天 + 零发现清陈旧 fresh | **P0** | ✅ PR #709 |
+| `22.E.S15` | **内链 + 收录数据采集** — 补 R2/R5 的 pages 输入（site-audit 爬虫内链图 + GSC 收录状态）；内链改动按 PM 界线进待办审批（不全自动，魏征 B3）| P1 | 📋 |
+| `22.E.S16` | **每周 Blog 恢复** — CTS/Oztop 每家每周 1 篇，自动选题（AI 可见度弱项 × R4 机会词），直调 generateBlogPost lib（禁内部 HTTP 自调用），产出进待办等 PM 点头发布 | P1 | 📋 |
+| `22.E.S17` | **CTS 自动执行手** — 照 seo_meta_log 队列模式，CTS Next.js 仓 meta 安全窄道 + applied 回执；blog 发布通道（自动 PR + 人 merge）单独估算（魏征 B4/M1/M2）| P1 | 📋 |
+| `22.E.S18` | **每周一 SEO 周报邮件** — 排名变化/自动改动/待点头 + 社媒栏 + 社媒广告栏；每栏带数据新鲜度检查，断流标注不装新鲜（魏征 M4/M5）| P1 | 📋 |
+
+> **2026-07-31 盯梢体系立项说明**：PM 拍板四决定 ①小修（标题/描述/旧文小更新）全自动+周报可见，新文章/新页面/内链进待办等点头 ②Blog 每家每周 1 篇 ③每周一人话周报邮件，大异常当天单发 ④先修断的再上新的。S14 已上线；S15-S18 按序推进。
 
 **S9-S13 来源**：2026-06-04 PM 反馈 + Oztop SEO 方案借鉴。详见"S9-S13 设计要点"段。
 
@@ -4089,6 +4109,94 @@ brand_voice        品牌语气（下拉：Professional / Friendly / Bold / Witt
 ---
 
 ## 9. 功能完成日志
+
+### 2026-08-02（PM 反馈：客人页面可读性差 —— 两个真 bug + 一次行业收口）
+
+**背景**：PM 在 CTS（旅游）打开「我的客人」页，看到「按房子分开列」和「打开了《 (copy 01)》」，反馈可读性差、日期看不到。查明这一页是 PR #721 为**地产中介手机端**做的，跟 `/crm`（PM 原来用的 prospecting 式看板）**并存**，不是替换 —— `/crm` 一行没改。
+
+**修 1 · 行业收口**：`/contacts` 读接口新增 `applicable`。判据 = 行业是 `real_estate` **或**已录了房子；两者都不是（CTS：旅游 + 0 套房）→ 页面不铺那一屏地产 UI，直接指回「客户跟进」。用「或」而不是只看行业，是为了不因为 FDE 漏填配置就锁掉真在用的客户。页头的「按房子分开列」也改成只在真有房子时才出现。导航入口保持不变 —— 跟「行程单」「房子」同一口径：入口都在，页面自己说清楚适不适用。
+
+**修 2 · 邮件在时间线上叫什么**：`campaignLabel()` 改成**主题优先于内部名**（主题是客户看到的那行字，内部名是运营标签），去掉 Mailchimp 的合并标记 `*|FNAME|*`，并把 `(copy 01)` / `(未命名)` / `copy of …` 这类内部垃圾判为无效。存量 195 条「《 (copy 01)》」已用 SQL 改成中性说法。metadata 补存 `email_campaign_subject`。
+
+9 个新测试，304 个相关测试全过；两处判据做过变异测试。**无 migration。**
+
+### 2026-08-02（P0：邮件「打开」冒充「客户回话了」，把最高优先桶从 15 撑到 200）
+
+**事故**：当天打开邮件反应同步后，`segmentContact` 把「打开了邮件」当成了「客户回话了」。规则 2 只看 `direction`、**不看这条触点是不是真人消息**，而邮件打开是以 `inbound` 写入的。实测最高优先桶 15 人 → **200 人**，其中 185 人只是打开过邮件、175 人连链接都没点 —— 15 个真在等回复的客户被埋掉。Apple 隐私保护还会替用户自动打开邮件，所以「打开」连「他看过」都不能证明。
+
+**这个坑三孤岛方案里被明确警告过**（「opens/clicks 不写触点 —— segmentContact 不读 channel」），当时的结论是「干脆别写」；本次改成**写但分开算**，因为「谁点了行程链接」正是最值钱的销售信号，不该为了避坑丢掉。
+
+**修复**：`TouchpointLike` 新增 `engagement: 'open' | 'click' | null`；行为信号不参与 `lastInbound / lastOutbound / lastAny` —— 既不能升进「客户回话了」，也不该把「等了几天」重置。判据 `engagementFromMetadata()` 导出给两个读模型共用，避免同一个人在两页属于不同桶。
+
+**顺带把信号变成产能**：新增段位 `clicked_link`「看了行程，还没人跟」（warm，优先级 5，排在新客人之后、打过没人接之前）。条件：60 天内点过链接 **且那之后没有真人联系过**。另外在「以后才走」分支前拦一道 —— 说过明年走但刚点了链接的人，会被捞回名单而不是埋进培育桶。CTS 命中 44 人，其中 14 人从没被打过电话。
+
+11 个新测试，370 个 crm/messenger/timeline 测试全过；四处护栏做过变异测试（其中「把打开当点击」一开始没被抓到，补测后才抓住）。**无 migration**。
+
+### 2026-08-01（CRM 聚合体检 + 邮件反应同步终于接上）
+
+**体检结论**：三条定时任务（私信 / 表单 / 需求卡）12 小时跑满 12 次、零失败零报错。CTS 485 人 / 1471 条往来记录 / 460 段对话；Roman HU 50 人 / 82 条 / 51 段。空壳联系人 0。挂不上人的 16 段对话**全部是「客户一句话没说」的纯群发线程** —— 护栏在正确工作，不是漏。
+
+**发现并修复**：`mailchimp-activity-sync`（PR #686 写好的邮件反应同步）**从来没被注册进 render.yaml，一次都没跑过** —— 销售看不到「谁打开了邮件、谁点了行程链接」，只能按「我们打没打过他」排序。本次注册为 `mailchimp-activity-daily`（每天 04:40 UTC）。
+
+**密钥改用 `fromGroup: me-shared-cron-secret` 自动挂**，不再 `sync: false` 手挂：手挂是本仓反复踩的坑 —— meta-leads-hourly 上线当天因手打值与接口对不上，连续两小时 401、零运行记录；更早还有一条 cron 因此哑了 51 天。
+
+**仍需一次点击**：CTS 的 `leads_config.mailchimp_enabled` 默认关闭，要在客户设置页打开（UI 已存在 `LeadsConfigPanel`，不需要碰数据库）。
+
+**体检暴露的另外两个缺口（未修）**：①info@ 邮箱仍无连接器，7/29 那 20 条是手动灌的；②广告归因覆盖率仅 7%（私信来的人拿不到广告归因，Meta 读接口不给）。
+
+### 2026-07-31（SEO 盯梢复活三连修 [22.E.S14] · PR #709）
+
+盯梢体系立项（PM 盘问拍板四决定）后先修断的：①巡逻取历史快照的 60 行扫描 bug——Oztop 词多超限永远看不到上次排名，下跌规则失明（魏征审出）②DataForSEO 难度值解析漏一层字段，全库恒空，机会规则前提永不成立 ③网站体检 cron 把「空」当字面文字传库，连崩 14 天 ④零发现时清掉客户陈旧 fresh 建议（CTS 7/1 的躺了一个月）。S15-S18（内链收录采集 / 每周 blog / CTS 执行手 / 周报）按序推进。
+
+### 2026-07-31（治本：私信建人前先「唯一全名认亲」· PM 反馈重名）
+
+**问题**：PM 反馈「CRM 里有大量重名的」。根因是同一个人被拆成两条 —— 先填 Facebook 表单（留电话邮箱、**没有 psid**），后来又来私信（有 psid、**没有邮箱**），两边没有任何共同的键。CTS 实测 132 个只有 Facebook 身份的人里 **29 个**是这么拆出来的。
+
+**方案（治本优先，不是做个页面让人点）**：认人从两级变三级 —— ①身份键（psid / 正文邮箱）②**唯一全名** ③新建。第 2 级三条同时满足才认：完整姓名（≥2 词、非占位符）+ 全库唯一同名 + 对方身上还没有 fb_psid；任一不满足即弃权，照旧独立建人。实测规则在 CTS 上命中 29、模糊案例 **0**。
+
+**为什么不触碰 identity.ts 的红线**：那条红线禁的是「把两个**已存在**的人按姓名合成一个」（两份历史永久搅在一起、不可逆）。这里是「给一个已存在的人**多挂一个身份**」，什么都没销毁，认错了摘掉那条 fb_psid 即可复原。
+
+**顺带修**：Meta 的占位名「Facebook 用户」不再当人名存（存 null）。它正好是两个词、能通过词数检查 —— 不单独挡掉的话，CTS 那 14 个互不相干的「Facebook 用户」会互相认亲、并到同一个人身上。
+
+7 个新测试，284 个 crm/messenger/timeline 测试全过；三条护栏（占位符 / 唯一性 / 对方已有 psid）各做过变异测试。**无 migration**。存量那 29 对另行清理（不可逆，需 PM 过目后执行）。
+
+### 2026-07-31（CRM 往来记录改成正序 · PM 反馈）
+
+**问题**：PM 反馈「CRM 里的聊天记录是倒序排列的，阅读体验不佳」。时间线原本「最新在上」，但这条线里混着私信原文 —— 倒序会把一段对话的**回答排在提问前面**，一问一答读起来是反的。
+
+**修复**：`GET /crm/contacts/[cid]/timeline` 的合并排序改成从旧到新（最新在最下面），跟聊天软件一致；抽屉顶部仍是人的基本信息，对话往下延伸。
+
+**没跟着改的地方（关键）**：取 `conversation_messages` 时的 `ascending: false` + `limit(3000)` **保持不变** —— 那个倒序是为了超量时留下**最近**的 3000 条，一起改成正序会变成只留最老的，话痨客户的近期对话全丢。排序只在合并那一行做。3 个新测试钉住这两件事，并做过变异测试。
+
+### 2026-07-31（补挂积压的历史私信对话 [P28]）
+
+**问题**：「按 psid 建人」上线后，PM 拿手机 Business Suite 收件箱核对 —— 8 个人只有当天还在说话的 3 个进了 CRM，昨天聊完的 5 个全在系统外。根因：每小时同步只向 Meta 要「最近有更新的」线程（水位线），早就聊完的老对话永远等不到一次重新处理。CTS 积压 149 条。
+
+**修复**：`src/lib/messenger/backfill.ts` —— 这些对话的正文早就存在 `conversations` + `conversation_messages` 里，补挂**不用再问 Meta 要一次**：读本地表、走同一套 `linkMessengerConversation`，护栏自动适用。挂在每小时同步尾巴上，每轮 50 条自愈式消化，无新 cron、无新密钥、无人工。
+
+**关键正确性坑**：`conversation_messages` **没存 Meta 的 tags**，所以补挂时分不出「真人客服回的」和「Business AI 自动回的」（CTS 收件箱满屏 `FB AI responding`）。照写出站触点 = 把机器人问候当「我们联系过」，热线索直接掉出「今天该联系谁」。故新增 `tagsAvailable` 开关，补挂时**一条出站触点都不写** —— 按 automation.ts 头部写明的取舍，宁可让人多露一次面。
+
+6 个新测试（含该护栏的变异测试），274 个 crm/messenger 测试全过。**无 migration**。
+
+### 2026-07-30（只在 Facebook 私信聊过的人也进 CRM [P28]）
+
+**问题**：Messenger 对话每小时自动同步（CTS 458 段，活的），但**人进不来** —— 151 段挂不到任何联系人，其中 130 段是有来有回的真人；最近 3 天有新消息的 24 段里 22 段是系统看不见的人。这些人永远不出现在「今天该联系谁」。
+
+**根因不是 bug，是当初焊死的规则**：`link-contacts.ts` 原本「只 LINK 绝不 CREATE」，因为 Meta 自动回复会把 CTS 自家 info@ / 电话写进对话正文，从正文抽联系方式建人会造出假的「info@ 客户」并错并几十段对话。
+
+**修复**：那条理由针对的是「**从正文正则抽出来的**联系方式」，不是建人本身。所以只开一个口子 —— **建人只用 fb_psid**（Meta 在 participants 里给的唯一编号），原坑结构上进不来。两条护栏同时焊死：①客户自己开过口（线程至少一条 inbound）才建人 ②建人只带 fb_psid 一个身份 → `resolveContact` 最多命中一个既有联系人，**结构上不可能触发两个真人的不可逆合并**（这正是本模块原来绕开 resolveContact 的风险）。
+
+建出来的人只有 Facebook 身份、无电话邮箱，销售只能在 Messenger 回；日后他留了邮箱/电话靠唯一约束自动并成一条。cron 返回值新增 `newContacts`（今天私信带进来几个新人）。**无 migration**。4 个新测试 + 268 个 crm/messenger 测试全过；两条护栏 + 「只用 psid 建人」做过变异测试。
+
+### 2026-07-30（Facebook 表单的新人自动进 CRM [P28]）
+
+**问题**：FB 即时表单来的人只能靠人手导 CSV 跑 `scripts/import-cts-fb-leads.ts`（脚本头部自己写着「不是长期管道」）。实测后果：CTS 的 CRM 里最后一个新人停在 7/25，Meta 后台 7/26–7/30 又进了 27 个人，销售的「今天该联系谁」里一个都没有，广告每天仍在花 NZ$78–85。
+
+**修复**：补上「取数 → 建人 → 写触点」这条链 —— `lib/meta/lead-forms.ts`（Graph 只读）+ `lib/crm/meta-lead.ts`（复用 `resolveContact`）+ `lib/meta/leads-sync.ts`（按客户编排 + 水位线）+ `api/cron/meta-leads-sync`，render.yaml 注册 `meta-leads-hourly`（每小时第 25 分，岔开私信同步避 Meta 限流）。开关沿用 `clients.facebook_page_id`。
+
+**无 migration**：`channel='meta_lead_form'` 与 `(client_id, source, source_ref)` 唯一键都已存在。幂等键跟人手导入脚本对齐（都是 Meta 的 lead id），首次回补不会把 7/26 已导的 335 人写成第二份。33 新测试 + 368 个 crm/meta/messenger 测试全过，三处关键校验做过变异测试。
+
+**上线还需 PM 一步**：Render 上给这个 cron link `me-shared-cron-secret` 环境变量组；Page token 若缺 `leads_retrieval` 权限，cron 日志会把 Graph 原话报出来。
 
 ### 2026-07-06（Phase 35 司马徽 Outbound Prospecting M1+M2 落地 [P35.1-P35.4]）
 

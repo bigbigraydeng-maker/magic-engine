@@ -34,6 +34,7 @@ const ADMIN_SECTIONS: NavSection[] = [
   {
     items: [
       { key: 'overview',  label: 'Overview', mark: 'OV', href: '/dashboard' },
+      { key: 'today',     label: '今日待办', mark: 'TD', href: '/dashboard/today' },
       { key: 'clients',   label: 'Clients',  mark: 'CL', href: '/dashboard/clients' },
     ],
   },
@@ -43,7 +44,6 @@ const ADMIN_SECTIONS: NavSection[] = [
       // 每天高频入口:看片 + 拍板。页面早就存在,但此前全站没有任何链接指向它,
       // 只能手敲 URL —— 等于不存在。排在本组第一位是因为它是日常最常来的地方。
       { key: 'factory', label: '视频工厂', mark: 'VF', href: '/dashboard/factory' },
-      { key: 'poster-studio', label: '内容工作室', mark: 'CS', href: '/dashboard/poster-studio' },
     ],
   },
   {
@@ -190,6 +190,10 @@ function buildScopedAdminSections(clientId: string): NavSection[] {
       title: '经营工具',
       items: [
         { key: 'tailor-made', label: '行程单',   mark: 'TM', href: at('/tailor-made') },
+        { key: 'listings',    label: '房子',     mark: 'LI', href: at('/listings') },
+        // 中介在车里 / 开放日现场用手机开的那一页：按房子列人，点一下说清楚他到哪一步。
+        // 放在「客户跟进」前面 —— 他每天开的是这一页，不是内部那张排班表。
+        { key: 'contacts',    label: '我的客人', mark: 'MY', href: at('/contacts') },
         { key: 'crm',         label: '客户跟进', mark: 'CR', href: at('/crm') },
         { key: 'connectors',  label: '数据连接', mark: 'CN', href: at('/connectors') },
       ],

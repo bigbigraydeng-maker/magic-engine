@@ -27,6 +27,7 @@ import { fetchGa4Snapshot, fetchGa4PaidSearchMetrics } from '@/lib/ga4/client'
 import { getAdAccountInsights, getAdCampaignInsights, MetaAdsInsights } from '@/lib/meta/client'
 import { fetchAccountInsights, loadGoogleAdsCreds } from '@/lib/google-ads/client'
 import { SEO_METRIC_KEY, GA4_METRIC_KEY, ADS_METRIC_KEY } from '@/lib/flywheel/vocabulary'
+import { adsMetricKeysWrittenBy } from '@/lib/flywheel/metric-registry'
 import { MetaAdsAdapter } from '@/lib/flywheel/adapters/MetaAdsAdapter'
 import { startCronRun } from '@/lib/cron/run-logger'
 import { domainToEnvKey } from '@/lib/meta/token-manager'
@@ -617,12 +618,91 @@ async function syncMeta(
     // pullMetrics() reads the latest meta_ads_snapshots row (just inserted above).
     await new MetaAdsAdapter().pullMetrics(clientId).catch(() => { /* non-fatal */ })
 
+    // Objective-aware cost metrics. Deliberately NOT routed through
+    // MetaAdsAdapter: it replays meta_ads_snapshots, whose columns stop at
+    // roas/conversions, and adding columns is a schema change. These come
+    // straight off the insights row we already hold. Non-fatal — the snapshot
+    // is the pre-existing contract and must not regress if this write fails.
+    await writeMetaObjectiveMetrics(clientId, adAccountId, insights, since, until)
+      .catch(() => { /* non-fatal */ })
+
     // Append daily row to Airtable Meta Ads Daily table (non-fatal).
     await appendAirtableMetaDaily(clientSlug, adAccountId, insights, until).catch(() => {})
 
     return { success: true, snapshot_id: (data as { id: string }).id }
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' }
+  }
+}
+
+/**
+ * Write the objective-dependent Meta cost metrics for one client.
+ *
+ * These are the metrics an account is actually judged on when it does not sell
+ * anything: a click-to-Messenger lead-gen account has no purchase and no ROAS,
+ * so before this existed its actions promised `ads.account.roas` and the
+ * attribution job found nothing to compare, forever.
+ *
+ * The key list comes from the registry rather than being written out here, so
+ * "the registry says meta_ads_pullback pulls this" and "meta_ads_pullback pulls
+ * this" are one fact. Null values are SKIPPED, never stored as 0 — Meta not
+ * reporting a cost-per-purchase for a Messenger campaign is an absence, and a
+ * zero would read as "free conversions".
+ */
+async function writeMetaObjectiveMetrics(
+  clientId:    string,
+  adAccountId: string,
+  insights:    MetaAdsInsights,
+  since:       string,
+  until:       string,
+): Promise<void> {
+  const valueByKey: Record<string, number | null> = {
+    [ADS_METRIC_KEY.CPA]:                   insights.cpa,
+    [ADS_METRIC_KEY.COST_PER_LEAD]:         insights.cost_per_lead,
+    [ADS_METRIC_KEY.COST_PER_CONVERSATION]: insights.cost_per_conversation,
+  }
+
+  const measuredAt = new Date().toISOString()
+  const today      = measuredAt.slice(0, 10)
+
+  // Delete today's rows for THESE keys and THIS source only, so a cron retry
+  // refreshes instead of stacking duplicates, and MetaAdsAdapter's own rows
+  // (source 'meta_ads', different keys) are never touched.
+  await supabaseAdmin
+    .from('flywheel_metrics')
+    .delete()
+    .eq('client_id', clientId)
+    .eq('source', 'meta_ads_pullback')
+    .in('metric_key', adsMetricKeysWrittenBy('meta_ads_pullback'))
+    .gte('measured_at', `${today}T00:00:00.000Z`)
+    .lte('measured_at', `${today}T23:59:59.999Z`)
+    .then(() => {}, () => {})
+
+  const rows = adsMetricKeysWrittenBy('meta_ads_pullback')
+    .filter(key => {
+      if (!(key in valueByKey)) {
+        // The registry promised this key and this function cannot produce it —
+        // the exact drift the registry exists to prevent, so it must be noisy.
+        console.error(`[cron] meta_ads_pullback registered for "${key}" but has no value source`)
+        return false
+      }
+      return valueByKey[key] !== null
+    })
+    .map(key => ({
+      client_id:    clientId,
+      flywheel:     'ads' as const,
+      metric_key:   key,
+      metric_value: valueByKey[key],
+      source:       'meta_ads_pullback',
+      source_ref:   { ad_account_id: adAccountId, period_start: since, period_end: until },
+      measured_at:  measuredAt,
+    }))
+
+  if (rows.length === 0) return
+
+  const { error } = await supabaseAdmin.from('flywheel_metrics').insert(rows)
+  if (error) {
+    console.error('[cron] meta objective metrics insert failed:', error.message)
   }
 }
 
@@ -667,15 +747,9 @@ async function syncGoogleAds(
     const today      = new Date().toISOString().slice(0, 10)
     const todayStart = `${today}T00:00:00.000Z`
     const todayEnd   = `${today}T23:59:59.999Z`
-    const adsMetricKeys = [
-      ADS_METRIC_KEY.SPEND,
-      ADS_METRIC_KEY.IMPRESSIONS,
-      ADS_METRIC_KEY.CLICKS,
-      ADS_METRIC_KEY.CTR,
-      ADS_METRIC_KEY.CPC,
-      ADS_METRIC_KEY.CONVERSIONS,
-      ADS_METRIC_KEY.CPA,
-    ]
+    // Derived from the registry, not hand-listed: the same map the write gate
+    // reads, so a key can never be pulled here without being declared there.
+    const adsMetricKeys = adsMetricKeysWrittenBy('google_ads_pullback')
     await supabaseAdmin
       .from('flywheel_metrics')
       .delete()

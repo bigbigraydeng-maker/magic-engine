@@ -19,6 +19,7 @@ import {
 } from '../meta/ads-manager'
 import { fetchPagePosts, getPageAccessToken, rankVideoWinners } from '../meta/page-posts'
 import { getMetaTokenForClient } from '../meta/token-manager'
+import { linkAdToCreative } from '../ads/creative-link'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -47,7 +48,14 @@ export interface SyncResult {
   clientId: string
   postsScanned: number
   winnersFound: number
-  adsAdded:  Array<{ adId: string; name: string; postId: string; score: number }>
+  adsAdded:  Array<{
+    adId: string
+    name: string
+    postId: string
+    score: number
+    /** 这条广告投的是 ME 的哪条片子;null = 认不出来(如实留白,绝不猜)。 */
+    creativeRef: string | null
+  }>
   adsPaused: Array<{ adId: string; name: string; reason: string; ctr: number | null }>
   guardsHit: string[]
   status: 'ok' | 'skipped' | 'error'
@@ -201,7 +209,16 @@ export async function syncWinnerReels(clientId: string, opts: SyncOptions = {}):
           status: opts.newAdStatusOverride ?? cfg.newAdDefaultStatus,
           accessToken: userToken,
         })
-        result.adsAdded.push({ adId, name, postId: w.postId, score: w.score })
+        // 记「这条广告投的是哪条片」。必须紧跟建广告 —— 这是唯一知道对应关系的时刻。
+        // 永不抛异常,所以放在同一个 try 里也不会把已建出的广告算成失败。
+        const link = await linkAdToCreative({
+          clientId: cfg.clientId,
+          adId,
+          postId: w.postId,
+          pageId: cfg.fbPageId,
+          createdBy: 'winner_reel_sync',
+        })
+        result.adsAdded.push({ adId, name, postId: w.postId, score: w.score, creativeRef: link.creativeRef })
       } catch (e) {
         // one failure should not block the rest
         result.guardsHit.push(`create_failed:${w.postId}`)

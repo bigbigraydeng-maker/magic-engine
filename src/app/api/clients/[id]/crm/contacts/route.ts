@@ -16,10 +16,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { buildIdentities, resolveContact, AmbiguousIdentityError } from '@/lib/crm/identity'
+import { EMPTY_ATTRIBUTION } from '@/lib/crm/attribution'
 import {
   segmentContact,
   SEGMENT_ACTION_META,
   type ContactLike,
+  engagementFromMetadata,
 } from '@/lib/crm/segments'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 import { fetchAll } from '@/lib/supabase-paginate'
@@ -177,6 +179,9 @@ export async function GET(
         outcome: (t.metadata?.outcome as string) ?? null,
         travelWindow: (t.metadata?.travel_window as string) ?? null,
         callbackAt: (t.metadata?.callback_at as string) ?? null,
+        // 邮件被打开 / 链接被点 = 行为信号，不是真人消息。分段逻辑必须区分，
+        // 否则「打开了邮件」会冒充「客户回话了」挤进最高优先桶。
+        engagement: engagementFromMetadata(t.metadata),
       })),
     }
     const seg = segmentContact(model, now)
@@ -282,6 +287,10 @@ export async function POST(
       // 全部历史搅在一起且不可逆,所以交给人看一眼;也不拿新名字盖掉老客户的名字。
       mergeStrategy: 'reject',
       overwriteDisplayName: false,
+      // 员工手工录进来的人:平台就是 'manual',广告层级一律 NULL —— 我们**不知道**
+      // 他从哪来(线下认识 / 电话打进来 / 朋友介绍),编一个 platform 会污染
+      // 「哪条广告有效」的分母。留 manual 是如实标注「这条没有广告归因」。
+      attribution: { ...EMPTY_ATTRIBUTION, platform: 'manual' },
     })
     return NextResponse.json({ contactId: result.contactId, created: result.created })
   } catch (err) {

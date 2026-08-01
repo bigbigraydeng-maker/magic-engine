@@ -1,0 +1,12 @@
+# 防宿主机 node_modules(mac 原生二进制)覆盖容器 linux 安装；防密钥/构建上下文暴涨
+node_modules
+.next
+.git
+.env
+.env.*
+*.log
+.DS_Store
+.claude
+docs
+public/decks
+scripts/factory-worker/CloudStorage

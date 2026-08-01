@@ -8,7 +8,10 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { segmentContact, todayWorklist, segmentCounts, type ContactLike } from '../segments'
+import {
+  segmentContact, todayWorklist, segmentCounts, engagementFromMetadata,
+  type ContactLike, type TouchpointLike,
+} from '../segments'
 
 const NOW = new Date('2026-07-26T12:00:00Z')
 
@@ -326,5 +329,87 @@ describe('员工推进过的阶段要真的消名单', () => {
   it('没配阶段的人（stage 为空）照旧走原有分段', () => {
     const c = contact({ touchpoints: [form('2026-07-26T06:00:00Z')] })
     expect(segmentContact(c, NOW).segment).toBe('new_untouched')
+  })
+})
+
+// ── 邮件行为信号 vs 真人消息（2026-08-02 P0）─────────────────────────────────
+//
+// 邮件反应同步一上线，「打开了邮件」以 inbound 身份进了触点表，把最高优先桶
+// 从 15 人撑到 200 人 —— 15 个真在等回复的客户被 185 个自动打开埋掉。
+// Apple 隐私保护还会替用户自动打开邮件，所以「打开」连「他看过」都不算。
+describe('邮件打开 / 点击不能冒充「客户回话了」', () => {
+  const NOW = new Date('2026-08-02T00:00:00Z')
+  const base = (tps: TouchpointLike[]): ContactLike => ({
+    id: 'c1', displayName: '张三', doNotContact: false, touchpoints: tps,
+  })
+
+  const ourEmail = { channel: 'email', direction: 'outbound' as const, occurredAt: '2026-07-10T00:00:00Z' }
+  const opened = {
+    channel: 'email', direction: 'inbound' as const,
+    occurredAt: '2026-07-11T00:00:00Z', engagement: 'open' as const,
+  }
+  const clicked = {
+    channel: 'email', direction: 'inbound' as const,
+    occurredAt: '2026-07-20T00:00:00Z', engagement: 'click' as const,
+  }
+
+  it('🔴 只是打开了邮件 → 绝不是「客户回话了」', () => {
+    const seg = segmentContact(base([ourEmail, opened]), NOW)
+    expect(seg.segment).not.toBe('replied')
+  })
+
+  it('🔴 只是打开、没点链接 → 也不进「看了行程」桶（Apple 会替用户自动打开）', () => {
+    // 不加这一条，把「打开」当「点击」的实现会悄悄溜过去：CTS 有 221 人打开过
+    // 邮件、只有 44 人真点了链接，混为一谈等于这个桶又变成一大坨。
+    expect(segmentContact(base([ourEmail, opened]), NOW).segment).not.toBe('clicked_link')
+  })
+
+  it('真人回信仍然判「客户回话了」（别把真信号一起误伤）', () => {
+    const realReply = { channel: 'email', direction: 'inbound' as const, occurredAt: '2026-07-11T00:00:00Z' }
+    expect(segmentContact(base([ourEmail, realReply]), NOW).segment).toBe('replied')
+  })
+
+  it('点了行程链接、之后没人跟 → 进「看了行程，还没人跟」', () => {
+    const seg = segmentContact(base([ourEmail, clicked]), NOW)
+    expect(seg.segment).toBe('clicked_link')
+    expect(seg.temperature).toBe('warm')
+    expect(seg.reason).toContain('点开了')
+  })
+
+  it('点完之后已经有人真人联系过 → 不再进这个桶', () => {
+    const calledAfter = { channel: 'phone', direction: 'outbound' as const, occurredAt: '2026-07-25T00:00:00Z' }
+    expect(segmentContact(base([ourEmail, clicked, calledAfter]), NOW).segment).not.toBe('clicked_link')
+  })
+
+  it('点击太久远（超 60 天）→ 不再算数', () => {
+    const oldClick = { ...clicked, occurredAt: '2026-01-01T00:00:00Z' }
+    expect(segmentContact(base([ourEmail, oldClick]), NOW).segment).not.toBe('clicked_link')
+  })
+
+  it('说了「以后才走」但刚点了链接 → 捞回名单，不埋进培育桶', () => {
+    const spoken = {
+      channel: 'phone', direction: 'outbound' as const,
+      occurredAt: '2026-07-01T00:00:00Z', travelWindow: '明年三月',
+    }
+    expect(segmentContact(base([spoken, clicked]), NOW).segment).toBe('clicked_link')
+  })
+
+  it('打开邮件不会把「等了几天」重置 —— 排序仍按真人消息算', () => {
+    const seg = segmentContact(base([ourEmail, opened]), NOW)
+    expect(seg.lastTouchAt).toBe('2026-07-10T00:00:00.000Z')
+  })
+})
+
+describe('engagementFromMetadata —— 两个读模型共用的判据', () => {
+  it('点击优先于打开（点了必然也打开了，要认更强的那个）', () => {
+    expect(engagementFromMetadata({ email_opened: true, email_clicked: true })).toBe('click')
+  })
+  it('只打开', () => {
+    expect(engagementFromMetadata({ email_opened: true, email_clicked: false })).toBe('open')
+  })
+  it('普通触点（电话 / 表单 / 真人回信）不是行为信号', () => {
+    expect(engagementFromMetadata({ outcome: 'no_answer' })).toBeNull()
+    expect(engagementFromMetadata(null)).toBeNull()
+    expect(engagementFromMetadata(undefined)).toBeNull()
   })
 })

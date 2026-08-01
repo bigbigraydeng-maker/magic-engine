@@ -165,6 +165,23 @@ export class GithubClient {
   }
 
   /**
+   * Read a PR's lifecycle state. Used by blog pr-sync (2026-08-01): posts in
+   * status 'pr_open' poll this to learn whether the human merged or closed
+   * the PR, so the post's status (and the site-content registry) stays true.
+   */
+  async getPullRequestState(
+    owner: string,
+    repo: string,
+    prNumber: number,
+  ): Promise<{ state: 'open' | 'closed'; merged: boolean }> {
+    const pr = await this.request<{ state: 'open' | 'closed'; merged: boolean }>(
+      'GET',
+      `/repos/${owner}/${repo}/pulls/${prNumber}`,
+    )
+    return { state: pr.state, merged: pr.merged === true }
+  }
+
+  /**
    * Close a pull request without merging.
    * Used by GEO-B+ Stage 1 B2: when re-publishing the same directive, the
    * previous still-open PR is closed and a fresh one opened, so review
@@ -186,6 +203,23 @@ export class GithubClient {
     await this.request(
       'DELETE',
       `/repos/${owner}/${repo}/git/refs/heads/${branch}`,
+    )
+  }
+
+  /**
+   * List a directory's entries (name + path + type). Used by the SEO meta
+   * executor to discover which data files exist before reading them, instead
+   * of guessing filenames from URL slugs.
+   */
+  async listDirectory(
+    owner:  string,
+    repo:   string,
+    path:   string,
+    branch: string,
+  ): Promise<Array<{ name: string; path: string; type: string }>> {
+    return this.request<Array<{ name: string; path: string; type: string }>>(
+      'GET',
+      `/repos/${owner}/${repo}/contents/${encodeFilePath(path)}?ref=${branch}`,
     )
   }
 

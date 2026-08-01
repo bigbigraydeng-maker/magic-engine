@@ -66,9 +66,12 @@ function labelSubIndustry(key: string): string {
   const labels: Record<string, string> = {
     inbound_tour_operator:    'Inbound Tour Operator — NZ (National)',
     outbound_tour_operator:   'Outbound Tour Operator — NZ → Overseas (National)',
-    real_estate_auckland:     'Real Estate — Auckland (City)',
-    flooring_tiles_brisbane:  'Flooring & Tiles — Brisbane (City)',
-    logistics_3pl_nz:         '3PL Logistics — New Zealand (National)',
+    // Slugs follow resolveSubIndustry() in lib/huatuo/benchmarks.ts —
+    // `<INDUSTRY_DICTIONARY category>_<city>` — so huatuo's live percentile
+    // lookup hits these groups. Renamed by 20260728000002.
+    real_estate_agency_auckland: 'Real Estate — Auckland (City)',
+    building_supplies_brisbane:  'Flooring & Tiles — Brisbane (City)',
+    logistics_3pl_nz:            '3PL Logistics — New Zealand (National)',
   }
   return labels[key] ?? key
 }

@@ -4,7 +4,8 @@
  * 一个人的全渠道往来记录。
  *
  * 看板上点开一个人时展示：他填过的表单、我们打过的每通电话、双方发过的每条
- * 私信（以后是邮件、外呼录音），按时间倒序合成一条线。
+ * 私信（以后是邮件、外呼录音），按时间**从旧到新**合成一条线（最新在最下面）。
+ * 顺序由接口给定，这里原样渲染 —— 聊天记录倒着排会把回答排在提问前面，读不通。
  *
  * 「以后会接更多沟通渠道进来」这件事在这里是**零改动**的：渲染按 `kind` 分派，
  * 触点只认 `channel` 字段取一个图标 —— 新渠道进来自动出现在同一条线上，
@@ -14,6 +15,16 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
+import { AUTO_TAG_ACTOR } from '@/lib/crm/qualified-buyer'
+
+/**
+ * 「谁改的」的显示名。系统自动打标写的是一个英文标记（审计要机器可读），
+ * 中介看到的必须是人话 —— 而且必须看得出这一档不是同事标的。
+ */
+function changedByLabel(raw: string): string {
+  if (raw === AUTO_TAG_ACTOR) return '系统自动'
+  return raw.split('@')[0]
+}
 
 export interface TimelineEntry {
   kind: 'touch' | 'stage' | 'message'
@@ -132,7 +143,7 @@ export function ContactTimeline({ clientId, contactId }: { clientId: string; con
               <span>🔀</span>
               <span>
                 {e.fromLabel ?? '还没标'} → <span className="font-bold text-me-charcoal/70">{e.toLabel}</span>
-                {e.changedBy ? ` · ${e.changedBy.split('@')[0]}` : ''} · {when(e.at)}
+                {e.changedBy ? ` · ${changedByLabel(e.changedBy)}` : ''} · {when(e.at)}
               </span>
             </div>
           )

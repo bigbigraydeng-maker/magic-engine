@@ -5,6 +5,7 @@
 export type { ContentAuditResult } from '@/lib/blog/content-auditor'
 
 export type ClientPlan = 'starter' | 'growth' | 'enterprise'
+export type ClientStatus = 'active' | 'prospect' | 'archived'
 export type KeywordIntent = 'informational' | 'commercial' | 'transactional' | 'navigational'
 export type KeywordSource = 'semrush_batch' | 'semrush_related' | 'semrush_gap' | 'campaign' | 'master_brief' | 'manual'
 export type KeywordStatus = 'new' | 'reviewed' | 'approved' | 'rejected' | 'page_created' | 'published'
@@ -23,6 +24,7 @@ export interface Client {
   semrush_db: string
   monthly_quota: number
   plan_tier: ClientPlan
+  client_status?: ClientStatus
   created_at: string
 }
 

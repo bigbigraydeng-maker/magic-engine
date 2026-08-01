@@ -1,5 +1,13 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { INDUSTRY_DICTIONARY } from '@/lib/huatuo/industry-mapper'
+
+// `industry` is the aggregation key the baseline cron writes straight into
+// industry_benchmarks.industry_category. Anything outside INDUSTRY_DICTIONARY
+// produces benchmarks that no reader ever looks up — which is exactly how
+// flooring_tiles / real_estate / logistics_3pl drifted (see migration
+// 20260728000002). Reject it here rather than discovering it months later.
+const VALID_INDUSTRIES = new Set(INDUSTRY_DICTIONARY.map(e => e.category))
 
 // GET /api/baselines/domains?sub_industry=inbound_tour_operator
 // Returns all domains for a sub-industry (or all if no filter)
@@ -33,6 +41,15 @@ export async function POST(req: Request) {
 
   if (!body.industry || !body.sub_industry || !body.domain) {
     return NextResponse.json({ error: 'industry, sub_industry, domain are required' }, { status: 400 })
+  }
+
+  if (!VALID_INDUSTRIES.has(body.industry)) {
+    return NextResponse.json(
+      {
+        error: `Unknown industry "${body.industry}". Must be one of: ${[...VALID_INDUSTRIES].sort().join(', ')}`,
+      },
+      { status: 400 },
+    )
   }
 
   // Normalise domain

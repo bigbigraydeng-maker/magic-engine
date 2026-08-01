@@ -50,14 +50,28 @@ export async function GET(req: NextRequest) {
 
   const conversations = results.reduce((n, r) => n + r.conversations, 0)
   const messages = results.reduce((n, r) => n + r.messages, 0)
+  // 「今天 Messenger 带进来几个新人」—— PM 真正会问的那个数。
+  const newContacts = results.reduce((n, r) => n + r.created, 0)
+  // 补挂历史老对话认出来的人 + 还剩多少没挂上（能看出还要几轮清完积压）。
+  const backfilled = results.reduce((n, r) => n + r.backfilled, 0)
+  const backfillRemaining = results.reduce((n, r) => n + r.backfillRemaining, 0)
   const failed = results.filter((r) => r.error).length
 
   await run.finish({
     processed: results.length,
     completed: results.length - failed,
     failed,
-    summary: { conversations, messages, results },
+    summary: { conversations, messages, newContacts, backfilled, backfillRemaining, results },
   })
 
-  return NextResponse.json({ ok: true, clients: results.length, conversations, messages, results })
+  return NextResponse.json({
+    ok: true,
+    clients: results.length,
+    conversations,
+    messages,
+    newContacts,
+    backfilled,
+    backfillRemaining,
+    results,
+  })
 }
