@@ -316,6 +316,23 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # Weekly reputation snapshots — every Monday at 3:30am UTC (~3:30pm NZST)
+  # GBP / Tripadvisor rating + review count + incremental reviews for active
+  # clients with reputation identities configured (DataForSEO 计划 阶段 2).
+  # ⚠️ 新 cron 上线后必须在 Render 后台 link "me-shared-cron-secret" env group，
+  #    否则 CRON_SECRET 为空 → 每周 401 静默失败（daily-cron-digest 事故教训）。
+  - type: cron
+    name: reputation-snapshots-weekly
+    env: node
+    schedule: "30 3 * * 1"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/reputation-snapshots-weekly
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # Daily social engagement pullback — every day at 4am UTC
   # Pulls Publer post likes/comments/shares into flywheel_metrics.
   # Reference: ROADMAP.md P12.C.3
