@@ -585,6 +585,23 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # CTS title executor — Monday 05:30 UTC, right after oztop-seo-optimizer.
+  # GSC pos-4-20 pages → AI title/desc → narrow-lane edit of the site repo's
+  # meta data file → ONE weekly PR (human merges, client repo CI gates).
+  # ⚠️ sync:false does NOT auto-fill: after first deploy, link the
+  #    me-shared-cron-secret env group to this service in the Render dashboard.
+  - type: cron
+    name: cts-seo-optimizer
+    env: node
+    schedule: "30 5 * * 1"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/cts-seo-optimizer
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # Weekly blog draft — Tuesday 3am UTC (after Monday keyword snapshots +
   # Monday AI tracker runs, so both topic-selection legs are fresh).
   # One auto-topic draft per client with seo_config.weekly_blog=true.

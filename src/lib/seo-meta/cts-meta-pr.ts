@@ -1,0 +1,328 @@
+/**
+ * CTS meta executor (22.E.S17 · CTS 标题执行手).
+ *
+ * Gives CTS the same "auto-apply small title fixes" treatment Oztop already
+ * enjoys — but through the code-repo channel, since CTS has no WordPress:
+ *
+ *   1. GSC top_pages: positions 4-20 with impressions ≥ 10 (real CTR upside)
+ *   2. Best matching query from top_queries → AI (Haiku) writes a sharper
+ *      title + description (NZ China-travel voice, "| CTS" suffix)
+ *   3. THE NARROW LANE: edits ONLY string literals inside the site's
+ *      centralized meta data file (src/lib/data/seo-pages.ts) — pages whose
+ *      meta lives elsewhere are skipped, никакой TSX logic is ever touched
+ *   4. One PR per week (≤ MAX_PAGES_PER_RUN pages), CI must pass, the PM
+ *      merges — same human gate as blog publishing (魏征 M2: PR + 人合).
+ *   5. seo_meta_log rows drive the 30-day per-slug cooldown and the weekly
+ *      report's 自动改动 column.
+ *
+ * CTS-specific constants live here on purpose: the repo path and meta-file
+ * layout are properties of the chinatravel codebase, not FDE-editable
+ * config (the FDE-visible switch stays seo_config.weekly_blog).
+ */
+
+import type { SupabaseClient } from '@supabase/supabase-js'
+import Anthropic from '@anthropic-ai/sdk'
+import { supabaseAdmin } from '@/lib/supabase'
+import { getConnection } from '@/lib/cms/connection-store'
+import { GithubClient } from '@/lib/cms/github-client'
+
+export const CTS_CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
+const META_FILE_PATH = 'src/lib/data/seo-pages.ts'
+const MAX_PAGES_PER_RUN = 3
+const COOLDOWN_DAYS = 30
+const MIN_POSITION = 4
+const MAX_POSITION = 20
+const MIN_IMPRESSIONS = 10
+
+// ── Pure: narrow-lane source editing ────────────────────────────────────────────
+
+function escapeSingle(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+}
+
+const STRING_LITERAL = /'(?:[^'\\]|\\.)*'/
+
+export interface MetaReplacement {
+  updated: string
+  oldTitle: string
+  oldDesc: string
+}
+
+/**
+ * Replace the title/description literals of the meta object whose
+ * `slug: '<slug>'` appears in the source. Returns null when the slug isn't
+ * managed by this file (caller skips that page — never guess elsewhere).
+ */
+export function replaceMetaForSlug(
+  source: string,
+  slug: string,
+  newTitle: string,
+  newDesc: string,
+): MetaReplacement | null {
+  const slugIdx = source.indexOf(`slug: '${slug}'`)
+  if (slugIdx === -1) return null
+
+  // Window: from this slug to the next exported meta object (or EOF) so we
+  // never touch a neighbouring page's strings.
+  const nextExport = source.indexOf('\nexport const', slugIdx)
+  const windowEnd = nextExport === -1 ? source.length : nextExport
+  const window = source.slice(slugIdx, windowEnd)
+
+  const titleRe = new RegExp(`(title:\\s*)${STRING_LITERAL.source}`)
+  const descRe = new RegExp(`(description:\\s*)${STRING_LITERAL.source}`)
+
+  const titleMatch = window.match(titleRe)
+  const descMatch = window.match(descRe)
+  if (!titleMatch || !descMatch) return null
+
+  const unquote = (m: string): string =>
+    m.replace(/^[^']*'/, '').replace(/'$/, '').replace(/\\'/g, "'").replace(/\\\\/g, '\\')
+
+  const oldTitle = unquote(titleMatch[0].slice(titleMatch[1].length))
+  const oldDesc = unquote(descMatch[0].slice(descMatch[1].length))
+
+  let newWindow = window.replace(titleRe, `$1'${escapeSingle(newTitle)}'`)
+  newWindow = newWindow.replace(descRe, `$1'${escapeSingle(newDesc)}'`)
+
+  return {
+    updated: source.slice(0, slugIdx) + newWindow + source.slice(windowEnd),
+    oldTitle,
+    oldDesc,
+  }
+}
+
+// ── Pure: GSC candidate picking ─────────────────────────────────────────────────
+
+interface GscPageRow {
+  page?: string
+  impressions?: number
+  position?: number
+}
+interface GscQueryRow {
+  query?: string
+  impressions?: number
+}
+
+export interface MetaCandidate {
+  slug: string
+  pageUrl: string
+  keyword: string
+  impressions: number
+  position: number
+}
+
+export function pickCandidates(
+  topPages: GscPageRow[],
+  topQueries: GscQueryRow[],
+  cooldownSlugs: Set<string>,
+  max: number = MAX_PAGES_PER_RUN,
+): MetaCandidate[] {
+  const out: MetaCandidate[] = []
+
+  const sorted = [...topPages]
+    .filter(
+      (p) =>
+        p.page &&
+        (p.position ?? 0) >= MIN_POSITION &&
+        (p.position ?? 0) <= MAX_POSITION &&
+        (p.impressions ?? 0) >= MIN_IMPRESSIONS,
+    )
+    .sort((a, b) => (b.impressions ?? 0) - (a.impressions ?? 0))
+
+  for (const page of sorted) {
+    if (out.length >= max) break
+    const slug = (page.page ?? '').replace(/\/+$/, '').split('/').pop() ?? ''
+    if (!slug || cooldownSlugs.has(slug)) continue
+
+    // Best query = shares the MOST meaningful slug tokens (len > 3), then
+    // impressions. Token-count-first stops a generic token like "tours"
+    // pulling another page's high-impression query onto this slug.
+    const tokens = slug.split('-').filter((t) => t.length > 3)
+    const match = topQueries
+      .map((q) => ({
+        q,
+        score: q.query ? tokens.filter((t) => q.query!.toLowerCase().includes(t)).length : 0,
+      }))
+      .filter((s) => s.score > 0)
+      .sort((a, b) => b.score - a.score || (b.q.impressions ?? 0) - (a.q.impressions ?? 0))[0]?.q
+
+    out.push({
+      slug,
+      pageUrl: page.page!,
+      keyword: match?.query ?? slug.replace(/-/g, ' '),
+      impressions: page.impressions ?? 0,
+      position: page.position ?? 0,
+    })
+  }
+  return out
+}
+
+// ── AI meta generation ──────────────────────────────────────────────────────────
+
+async function generateCtsMeta(
+  keyword: string,
+  pageUrl: string,
+): Promise<{ title: string; desc: string }> {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  const msg = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 200,
+    messages: [
+      {
+        role: 'user',
+        content: `You are an SEO specialist for a New Zealand-based China travel agency (Auckland, serving Kiwi travellers).
+
+Target keyword: "${keyword}"
+Page URL: ${pageUrl}
+
+Rules:
+- Title: max 60 chars, keyword near the start, mention New Zealand/NZ where natural, end "| CTS" if space allows
+- Description: max 155 chars, include the keyword + a clear call to action, NZ English
+- Factual tone — do NOT invent prices, dates or itinerary details
+- No quotes inside the text
+
+Respond ONLY with valid JSON: {"title":"...","desc":"..."}`,
+      },
+    ],
+  })
+  const text = msg.content[0].type === 'text' ? msg.content[0].text.trim() : '{}'
+  try {
+    const p = JSON.parse(text) as { title?: string; desc?: string }
+    return {
+      title: (p.title ?? keyword).slice(0, 60),
+      desc: (p.desc ?? '').slice(0, 155),
+    }
+  } catch {
+    return { title: keyword.slice(0, 60), desc: '' }
+  }
+}
+
+// ── Runner ──────────────────────────────────────────────────────────────────────
+
+export interface CtsMetaPrResult {
+  outcome: 'pr_opened' | 'no_candidates' | 'no_connection' | 'nothing_editable' | 'error'
+  pr_url?: string
+  pages?: Array<{ slug: string; keyword: string }>
+  error?: string
+}
+
+export async function runCtsMetaPr(
+  supabase: SupabaseClient = supabaseAdmin,
+): Promise<CtsMetaPrResult> {
+  try {
+    // 1. Cooldown + GSC signals
+    const cutoff = new Date(Date.now() - COOLDOWN_DAYS * 86_400_000).toISOString()
+    const [{ data: recent }, { data: gsc }] = await Promise.all([
+      supabase
+        .from('seo_meta_log')
+        .select('page_slug')
+        .eq('client_id', CTS_CLIENT_ID)
+        .gte('optimised_at', cutoff),
+      supabase
+        .from('gsc_performance_snapshots')
+        .select('top_pages, top_queries')
+        .eq('client_id', CTS_CLIENT_ID)
+        .order('period_end', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ])
+
+    const cooldown = new Set(((recent ?? []) as Array<{ page_slug: string }>).map((r) => r.page_slug))
+    const snapshot = gsc as { top_pages?: GscPageRow[]; top_queries?: GscQueryRow[] } | null
+    const candidates = pickCandidates(snapshot?.top_pages ?? [], snapshot?.top_queries ?? [], cooldown)
+    if (candidates.length === 0) return { outcome: 'no_candidates' }
+
+    // 2. Repo connection + meta source file
+    const conn = await getConnection(CTS_CLIENT_ID)
+    if (!conn || !('repoOwner' in conn)) return { outcome: 'no_connection' }
+    const { repoOwner, repoName, branch, plainToken } = conn as unknown as {
+      repoOwner: string
+      repoName: string
+      branch: string
+      plainToken: string
+    }
+    const defaultBranch = branch || 'main'
+    const github = new GithubClient(plainToken)
+    const file = await github.getFileContent(repoOwner, repoName, META_FILE_PATH, defaultBranch)
+
+    // 3. Narrow-lane edits — slugs not managed by the meta file are skipped.
+    let source = file.decodedContent
+    const applied: Array<{
+      candidate: MetaCandidate
+      newTitle: string
+      newDesc: string
+      oldTitle: string
+      oldDesc: string
+    }> = []
+
+    for (const candidate of candidates) {
+      const meta = await generateCtsMeta(candidate.keyword, candidate.pageUrl)
+      if (!meta.desc) continue
+      const replaced = replaceMetaForSlug(source, candidate.slug, meta.title, meta.desc)
+      if (!replaced) continue
+      source = replaced.updated
+      applied.push({
+        candidate,
+        newTitle: meta.title,
+        newDesc: meta.desc,
+        oldTitle: replaced.oldTitle,
+        oldDesc: replaced.oldDesc,
+      })
+    }
+    if (applied.length === 0) return { outcome: 'nothing_editable' }
+
+    // 4. Branch + commit + PR (CI gate + human merge)
+    const day = new Date().toISOString().slice(0, 10)
+    const prBranch = `feat/me-seo-meta-${day}`
+    const baseSha = await github.getBranchSha(repoOwner, repoName, defaultBranch)
+    await github.createBranch(repoOwner, repoName, prBranch, baseSha)
+    await github.commitFile(
+      repoOwner,
+      repoName,
+      META_FILE_PATH,
+      prBranch,
+      source,
+      `seo: refresh meta titles for ${applied.map((a) => a.candidate.slug).join(', ')} [Magic Engine]`,
+      file.sha,
+    )
+
+    const body = applied
+      .map(
+        (a) =>
+          `### /${a.candidate.slug}\n目标词:「${a.candidate.keyword}」(排名 #${a.candidate.position}, 曝光 ${a.candidate.impressions})\n- 标题: ${a.oldTitle}\n- → **${a.newTitle}**\n- 描述: ${a.oldDesc.slice(0, 80)}…\n- → **${a.newDesc}**`,
+      )
+      .join('\n\n')
+
+    const pr = await github.createPullRequest(repoOwner, repoName, {
+      title: `[Magic Engine] SEO 标题优化 ×${applied.length}`,
+      body: `${body}\n\n> 巡逻发现这些页面排名在 4-20 名但标题点击力不足。只改了 seo-pages.ts 的字符串，构建检查通过后合并即生效。`,
+      head: prBranch,
+      base: defaultBranch,
+    })
+
+    // 5. Audit log (drives cooldown + weekly report 自动改动 column)
+    const rows = applied.map((a) => ({
+      client_id: CTS_CLIENT_ID,
+      content_type: 'meta',
+      page_slug: a.candidate.slug,
+      page_url: a.candidate.pageUrl,
+      keyword: a.candidate.keyword,
+      old_title: a.oldTitle,
+      old_desc: a.oldDesc,
+      new_title: a.newTitle,
+      new_desc: a.newDesc,
+      wp_updated: false,
+      optimised_at: new Date().toISOString(),
+    }))
+    const { error: logErr } = await supabase.from('seo_meta_log').insert(rows)
+    if (logErr) console.error('[cts-meta-pr] log insert failed:', logErr.message)
+
+    return {
+      outcome: 'pr_opened',
+      pr_url: pr.html_url ?? undefined,
+      pages: applied.map((a) => ({ slug: a.candidate.slug, keyword: a.candidate.keyword })),
+    }
+  } catch (err) {
+    return { outcome: 'error', error: err instanceof Error ? err.message : String(err) }
+  }
+}
