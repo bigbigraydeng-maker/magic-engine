@@ -24,6 +24,15 @@ interface ClientCount {
   reels?: number
 }
 
+interface ManualItem {
+  kind: string
+  client_name: string
+  client_id: string
+  what: string
+  how: string
+  href: string
+}
+
 interface TodayPayload {
   weekday: number
   weekday_label: string
@@ -34,6 +43,7 @@ interface TodayPayload {
     findingsByClient: ClientCount[]
     recentCardsByClient: ClientCount[]
     reelsByClient: ClientCount[]
+    manualItems: ManualItem[]
     cronFailures24h: number
   }
 }
@@ -135,7 +145,10 @@ export default function TodayPage() {
   const totalFindings = counts.findingsByClient.reduce((s, c) => s + (c.findings ?? 0), 0)
   const totalCards = counts.recentCardsByClient.reduce((s, c) => s + (c.cards ?? 0), 0)
   const totalReels = (counts.reelsByClient ?? []).reduce((s, c) => s + (c.reels ?? 0), 0)
-  const total = totalDrafts + totalFindings + totalCards + totalReels + counts.cronFailures24h
+  const manualItems = counts.manualItems ?? []
+  const total =
+    totalDrafts + totalFindings + totalCards + totalReels +
+    manualItems.length + counts.cronFailures24h
 
   return (
     <div className="mx-auto max-w-3xl p-6">
@@ -157,6 +170,29 @@ export default function TodayPage() {
         </div>
       ) : (
         <div className="space-y-4">
+          {manualItems.length > 0 && (
+            <SectionCard emoji="🙋" title="需要你动手（系统做不了的）">
+              {manualItems.map((m, i) => (
+                <div key={`${m.kind}-${i}`} className="border-b border-slate-100 py-2 last:border-b-0">
+                  <p className="text-sm text-slate-800">
+                    <span className="font-bold">{m.client_name}</span>：{m.what}
+                  </p>
+                  <p className="mt-1 flex items-center gap-2 text-xs text-slate-500">
+                    <span>→ {m.how}</span>
+                    <a
+                      href={m.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="shrink-0 rounded-lg bg-cyan-600 px-3 py-1 text-xs font-bold text-white hover:bg-cyan-700"
+                    >
+                      去做这件事
+                    </a>
+                  </p>
+                </div>
+              ))}
+            </SectionCard>
+          )}
+
           {totalDrafts > 0 && (
             <SectionCard emoji="📝" title="Blog 草稿待审">
               {counts.draftsByClient.map((c) => (

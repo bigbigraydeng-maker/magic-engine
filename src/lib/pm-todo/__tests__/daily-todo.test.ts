@@ -11,6 +11,7 @@ const EMPTY: TodoCounts = {
   findingsByClient: [],
   recentCardsByClient: [],
   reelsByClient: [],
+  manualItems: [],
   cronFailures24h: 0,
 }
 
