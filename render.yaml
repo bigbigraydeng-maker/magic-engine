@@ -551,6 +551,23 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # Weekly watchdog report — 18:30 UTC Sunday = Monday ~06:30 NZST, half an
+  # hour before Monday's daily to-do. Per focus client: rankings / auto
+  # changes / blog / social / ads, every section freshness-stamped.
+  # ⚠️ sync:false does NOT auto-fill: after first deploy, link the
+  #    me-shared-cron-secret env group to this service in the Render dashboard.
+  - type: cron
+    name: weekly-seo-report
+    env: node
+    schedule: "30 18 * * 0"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/weekly-seo-report
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # PM daily to-do — 19:00 UTC Sun-Thu = NZ weekday mornings (07:00 NZST /
   # 08:00 NZDT). Rolling pillar theme + live counts of drafts/findings/cards
   # awaiting the PM. Route double-guards NZ weekends.
