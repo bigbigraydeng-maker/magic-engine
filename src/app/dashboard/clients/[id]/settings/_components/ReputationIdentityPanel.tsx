@@ -152,7 +152,7 @@ export function ReputationIdentityPanel({ clientId }: Props) {
       )}
 
       <label className="mb-1 block text-xs font-bold text-slate-700">
-        客户 GBP place_id
+        客户 GBP place_id / CID
         <span className="ml-1 font-normal text-slate-400">（Google 地图商家的精确身份，防同名店抓错）</span>
       </label>
       <input
@@ -251,8 +251,12 @@ export function ReputationIdentityPanel({ clientId }: Props) {
       </div>
 
       <p className="mt-4 border-t border-slate-100 pt-3 text-xs text-slate-400">
-        消费方：每周口碑快照 cron（评分/评论数/新评论落库）。找 place_id：Google 地图搜商家 →
-        分享链接里的 ChIJ 开头一串，或用 Google 的 place ID finder。
+        消费方：每周口碑快照 cron（评分/评论数/新评论落库）。
+        <strong className="text-slate-500">身份从 Google 地图取</strong>：ChIJ 开头的 place_id，或地图链接里
+        <code className="rounded bg-slate-100 px-1">0x…:0x…</code> 后半段换算出的数字 CID。
+        <br />
+        ⚠️ <strong className="text-slate-500">不要粘 Google 商家后台（GBP 授权）里的位置 ID</strong> ——
+        那是另一套编号，看着也是纯数字，但查评论一条都取不到（CTS 已踩过一次）。
       </p>
     </div>
   )
