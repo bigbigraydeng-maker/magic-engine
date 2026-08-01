@@ -186,21 +186,103 @@ export interface GbpReviewsWithProfile {
 }
 
 /**
- * Fetch reviews + listing profile for a GBP identity in ONE call.
- * place_id is exact (no wrong-business risk); keyword is the fallback.
+ * ⚠️ DataForSEO 的 business_data 评论类端点没有 live 模式（实测 404）：
+ * google/reviews 和 tripadvisor/search 都只有 task_post → task_get 队列模式。
+ * （仓里旧的 getGoogleReviews / getTripadvisorInfo 打的 live URL 是死端点，
+ * 一直被调用方的 catch 吞成 null —— 独立修，不在本模块动。）
+ */
+
+/** 队列任务默认最多等 4 分钟（实测通常 ~40-60s 完成），每 10s 问一次。 */
+const TASK_POLL_INTERVAL_MS = 10_000
+const TASK_POLL_TIMEOUT_MS  = 240_000
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+/** POST a business_data task, return the DataForSEO task id. */
+async function postBusinessDataTask(
+  endpoint: string,
+  task: Record<string, unknown>,
+): Promise<string> {
+  const res = await fetch(`${DATAFORSEO_API_BASE}/business_data/${endpoint}/task_post`, {
+    method:  'POST',
+    headers: { Authorization: authHeader(), 'Content-Type': 'application/json' },
+    body: JSON.stringify([task]),
+  })
+  if (!res.ok) throw new Error(`DataForSEO ${endpoint} task_post error: ${res.status}`)
+
+  const json = await res.json() as {
+    tasks?: Array<{ id?: string; status_code?: number; status_message?: string }>
+  }
+  const t = json.tasks?.[0]
+  // 20100 = Task Created
+  if (!t?.id || (t.status_code !== undefined && t.status_code >= 40000)) {
+    throw new Error(
+      `DataForSEO ${endpoint} task_post rejected: ${t?.status_code} ${t?.status_message}`,
+    )
+  }
+  return t.id
+}
+
+/** Poll task_get until the task completes; returns result[0] payload. */
+async function pollBusinessDataTask<T>(
+  endpoint: string,
+  taskId: string,
+): Promise<T | null> {
+  const deadline = Date.now() + TASK_POLL_TIMEOUT_MS
+  for (;;) {
+    const res = await fetch(
+      `${DATAFORSEO_API_BASE}/business_data/${endpoint}/task_get/${taskId}`,
+      { headers: { Authorization: authHeader() } },
+    )
+    if (!res.ok) throw new Error(`DataForSEO ${endpoint} task_get error: ${res.status}`)
+
+    const json = await res.json() as {
+      tasks?: Array<{ status_code?: number; status_message?: string; result?: T[] | null }>
+    }
+    const t = json.tasks?.[0]
+    const code = t?.status_code ?? 0
+
+    if (code === 20000) return t?.result?.[0] ?? null
+    // 40601/40602 = queued / in progress — keep waiting; anything ≥40000 else is terminal
+    if (code >= 40000 && code !== 40601 && code !== 40602) {
+      throw new Error(`DataForSEO ${endpoint} task failed: ${code} ${t?.status_message}`)
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`DataForSEO ${endpoint} task ${taskId} timed out after ${TASK_POLL_TIMEOUT_MS}ms`)
+    }
+    await sleep(TASK_POLL_INTERVAL_MS)
+  }
+}
+
+interface GbpReviewsTaskResult {
+  rating?: { value?: number | null; votes_count?: number | null } | null
+  reviews_count?: number | null
+  items?: Array<{
+    review_id?:    string | null
+    rating?:       { value?: number | null } | null
+    review_text?:  string | null
+    timestamp?:    string | null
+    /** task_get 的作者字段叫 profile_name（不是 author_name，实测确认） */
+    profile_name?: string | null
+  }>
+}
+
+/**
+ * Fetch reviews + listing profile for a GBP identity via the task queue.
+ * place_id / cid is exact (no wrong-business risk); keyword is the fallback.
  *
- * DataForSEO endpoint: /business_data/google/reviews/live
+ * DataForSEO: /business_data/google/reviews/task_post → task_get
  */
 export async function getGbpReviewsByIdentity(
   identity: { place_id?: string | null; keyword?: string | null },
   limit: number = 30,
+  options: { locationCode?: number } = {},
 ): Promise<GbpReviewsWithProfile | null> {
-  const depth = Math.max(1, Math.ceil(limit / 10)) * 10
-
   const task: Record<string, unknown> = {
-    depth,
+    depth: Math.max(10, limit),
     language_code: 'en',
     sort_by: 'newest',
+    location_code: options.locationCode ?? 2036,
   }
   // GBP 身份两种格式：ChIJ… 是 place_id，纯数字是 cid（GBP OAuth 连接器里
   // 存的就是 cid）—— DataForSEO 是两个不同的 task 字段，塞错查不到
@@ -213,39 +295,8 @@ export async function getGbpReviewsByIdentity(
     return null
   }
 
-  const res = await fetch(
-    `${DATAFORSEO_API_BASE}/business_data/google/reviews/live`,
-    {
-      method:  'POST',
-      headers: { Authorization: authHeader(), 'Content-Type': 'application/json' },
-      body: JSON.stringify([task]),
-    },
-  )
-
-  if (!res.ok) throw new Error(`DataForSEO Google reviews error: ${res.status}`)
-
-  const json = await res.json() as {
-    tasks?: Array<{
-      result?: Array<{
-        rating?: {
-          value?:       number | null
-          votes_count?: number | null
-        } | null
-        reviews_count?: number | null
-        items?: Array<{
-          review_id?:   string | null
-          rating?: {
-            value?: number | null
-          } | null
-          review_text?: string | null
-          timestamp?:   string | null
-          author_name?: string | null
-        }>
-      }>
-    }>
-  }
-
-  const result = json.tasks?.[0]?.result?.[0]
+  const taskId = await postBusinessDataTask('google/reviews', task)
+  const result = await pollBusinessDataTask<GbpReviewsTaskResult>('google/reviews', taskId)
   if (!result) return null
 
   const profile = result.rating
@@ -263,10 +314,41 @@ export async function getGbpReviewsByIdentity(
       rating:    it.rating!.value as number,
       text:      it.review_text?.trim() ?? '',
       date:      it.timestamp ?? null,
-      author:    it.author_name ?? null,
+      author:    it.profile_name ?? null,
     }))
 
   return { profile, reviews }
+}
+
+/**
+ * Tripadvisor listing snapshot via the task queue（live 端点同样不存在）。
+ *
+ * DataForSEO: /business_data/tripadvisor/search/task_post → task_get
+ */
+export async function getTripadvisorSnapshot(
+  keyword: string,
+): Promise<TripadvisorInfo | null> {
+  const taskId = await postBusinessDataTask('tripadvisor/search', {
+    keyword,
+    language_name: 'English',
+  })
+  const result = await pollBusinessDataTask<{
+    items?: Array<{
+      title?: string | null
+      url?: string | null
+      rating?: number | null
+      reviews_count?: number | null
+    }>
+  }>('tripadvisor/search', taskId)
+
+  const item = result?.items?.[0]
+  if (!item) return null
+  return {
+    name:         item.title         ?? null,
+    url:          item.url           ?? null,
+    rating:       item.rating        ?? null,
+    review_count: item.reviews_count ?? null,
+  }
 }
 
 /**

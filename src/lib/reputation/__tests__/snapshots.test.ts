@@ -39,7 +39,7 @@ vi.mock('@/lib/supabase', () => ({
 vi.mock('@/lib/dataforseo/business-data', () => ({
   getGbpReviewsByIdentity: mockGbpReviews,
   getGmbInfo: mockGmbInfo,
-  getTripadvisorInfo: mockTripadvisor,
+  getTripadvisorSnapshot: mockTripadvisor,
 }))
 
 import {
