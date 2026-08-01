@@ -22,6 +22,7 @@ export type Segment =
   | 'callback_due'     // 约好的时间到了
   | 'travel_due'       // 他说的出行时间快到了，该跟进定行程
   | 'new_untouched'    // 进线了，没人联系过
+  | 'clicked_link'     // 点开了邮件里的行程链接，之后没人跟
   | 'retry_channel'    // 打过一次没人接
   | 'stale_conversation' // 聊过一轮就断了，没约下次
   | 'nurture_future'   // 说了以后才走，时候还没到
@@ -73,6 +74,11 @@ export const SEGMENT_ACTION_META: Record<Segment, SegmentActionMeta> = {
     howTo: '刚留下资料，人还热着。越早打通越容易成 —— 先打里面最新的。',
     batch: 'call_one_by_one',
   },
+  clicked_link: {
+    label: '看了行程，还没人跟',
+    howTo: '他自己点开了邮件里的行程链接 —— 人在看了，但那之后没人联系过他。今天打给他，开场就聊他点的那条线。',
+    batch: 'call_one_by_one',
+  },
   // 名字和文案都不能说「打不通」:后台判据只是「打了一次没人接」。
   // 中午没接的人晚上会接 —— 系统斩钉截铁说一件销售凭经验知道是假的事,
   // 他会连带不信这一页其他三桶。而这是最大的一桶(CTS 108 人 / 58%)。
@@ -104,9 +110,32 @@ export interface TouchpointLike {
   channel: string
   direction: 'inbound' | 'outbound'
   occurredAt: string
+  /**
+   * 这条不是「谁说了一句话」，而是**行为信号**：邮件被打开 / 链接被点。
+   *
+   * 必须跟真人消息分开，否则「打开了邮件」会被下面的规则 2 当成「客户回话了」
+   * 塞进最高优先桶。2026-08-02 实测：邮件反应同步打开当天，那个桶从 15 人涨到
+   * 200 人，其中 185 人只是打开过邮件、175 人连链接都没点 —— 15 个真的在等
+   * 回复的客户被埋掉。而且 Apple 的隐私保护会替用户自动打开邮件，「打开」这个
+   * 信号本身就不可信。
+   */
+  engagement?: 'open' | 'click' | null
   outcome?: string | null
   travelWindow?: string | null
   callbackAt?: string | null
+}
+
+/**
+ * 触点的 metadata → 行为信号类型。两个读模型（今天名单 / 全部客人）共用，
+ * 不各写一套 —— 判据漂移会让同一个人在两个页面属于不同的桶。
+ */
+export function engagementFromMetadata(
+  metadata: Record<string, unknown> | null | undefined,
+): 'open' | 'click' | null {
+  if (!metadata) return null
+  if (metadata.email_clicked === true) return 'click'
+  if (metadata.email_opened === true) return 'open'
+  return null
 }
 
 export interface ContactLike {
@@ -153,10 +182,13 @@ const SEGMENT_META: Record<Segment, { temperature: Temperature; priority: number
   // 客人自己说的出行时间快到了 —— 购买意图最明确的一批,排在新 lead 之前。
   travel_due:         { temperature: 'hot',  priority: 3 },
   new_untouched:      { temperature: 'warm', priority: 4 },
-  retry_channel:      { temperature: 'warm', priority: 5 },
+  // 点过行程链接 —— 比「打过没人接」强得多的再打理由:他自己刚看过。
+  // 排在新客人之后:今天刚进线的人比两周前点过链接的更烫。
+  clicked_link:       { temperature: 'warm', priority: 5 },
+  retry_channel:      { temperature: 'warm', priority: 6 },
   // 温的:聊过一轮、人是热的,只是断了没人跟。排最后但必须进名单。
-  stale_conversation: { temperature: 'warm', priority: 6 },
-  nurture_future:     { temperature: 'cold', priority: 7 },
+  stale_conversation: { temperature: 'warm', priority: 7 },
+  nurture_future:     { temperature: 'cold', priority: 8 },
   excluded:           { temperature: 'off',  priority: 9 },
 }
 
@@ -188,14 +220,40 @@ export function segmentContact(contact: ContactLike, now: Date): SegmentResult {
   const tps = contact.touchpoints
   const nowMs = now.getTime()
 
-  const lastInbound = Math.max(0, ...tps.filter((t) => t.direction === 'inbound').map((t) => ts(t.occurredAt)))
-  const lastOutbound = Math.max(0, ...tps.filter((t) => t.direction === 'outbound').map((t) => ts(t.occurredAt)))
+  // 「谁说了一句话」和「邮件被打开」必须分开算。
+  //
+  // segmentContact 原来只看 direction，不看这条触点是不是真人消息。邮件反应
+  // 同步一上线，「打开了邮件」以 inbound 身份进来，规则 2 立刻把它当成
+  // 「客户回话了」—— 2026-08-02 实测那个最高优先桶从 15 人涨到 200 人，
+  // 15 个真的在等回复的客户被 185 个自动打开埋掉。Apple 隐私保护还会替用户
+  // 自动打开邮件，所以「打开」连「他看过」都不能证明。
+  //
+  // 行为信号不参与 lastInbound / lastOutbound / lastAny：它既不能让人升进
+  // 「客户回话了」，也不该把「等了几天」重置成 0。它只在下面的点击规则里用。
+  const messages = tps.filter((t) => !t.engagement)
+  const lastInbound = Math.max(0, ...messages.filter((t) => t.direction === 'inbound').map((t) => ts(t.occurredAt)))
+  const lastOutbound = Math.max(0, ...messages.filter((t) => t.direction === 'outbound').map((t) => ts(t.occurredAt)))
+
+  /**
+   * 最近一次「点了链接」，且**那之后没有任何真人联系过他**。
+   *
+   * 只认点击、不认打开：打开可能是 Apple 自动干的，点击必须有人真的动手。
+   * 60 天窗口 —— 意向会凉，但跟团游决策周期长（客人常提前几个月看），
+   * 30 天会把还在比较的人过早丢掉。
+   */
+  const CLICK_WINDOW_MS = 60 * 86_400_000
+  const lastClick = Math.max(
+    0,
+    ...tps.filter((t) => t.engagement === 'click').map((t) => ts(t.occurredAt)),
+  )
+  const clickPending =
+    lastClick > 0 && nowMs - lastClick <= CLICK_WINDOW_MS && lastOutbound < lastClick
   const outcomes = tps.map((t) => t.outcome).filter(Boolean) as string[]
   const latestOutcome = tps
     .filter((t) => t.outcome)
     .sort((a, b) => ts(b.occurredAt) - ts(a.occurredAt))[0]?.outcome ?? null
 
-  // 最后一次有来往(任意方向)。同桶排序 + 卡片上「等了几天」都用它。
+  // 最后一次有来往(任意方向、只算真人消息)。同桶排序 + 卡片上「等了几天」都用它。
   const lastAny = Math.max(lastInbound, lastOutbound)
   const lastTouchAt = lastAny > 0 ? new Date(lastAny).toISOString() : null
 
@@ -271,6 +329,12 @@ export function segmentContact(contact: ContactLike, now: Date): SegmentResult {
     if (isDueToWake(travelAt, now)) {
       return make('travel_due', `客户说 ${spoken.travelWindow} 走，该跟进定行程了`, 'phone', travelAt)
     }
+    // 他说过「以后才走」，但**刚点开了行程链接** —— 一句几周前说的话，
+    // 抵不过他现在正在看这件事。不拦下来的话，这个人会被埋进培育桶（cold，
+    // 根本不进今天的名单）。
+    if (clickPending) {
+      return make('clicked_link', '他说以后才走，但刚点开了行程链接 —— 现在在看了', 'phone')
+    }
     return make('nurture_future', `客户说 ${spoken.travelWindow} 才走，现在打是打扰`, 'email')
   }
 
@@ -278,6 +342,19 @@ export function segmentContact(contact: ContactLike, now: Date): SegmentResult {
   if (lastOutbound === 0) {
     const hours = lastInbound > 0 ? Math.floor((nowMs - lastInbound) / 3_600_000) : 0
     return make('new_untouched', `进线 ${hours} 小时还没人联系`, 'phone')
+  }
+
+  // 5.5) 点过邮件里的行程链接，之后没人跟。
+  //
+  //      排在「打过没人接」之前:两批人常常是同一个人,但「他后来自己点开了
+  //      行程」是比盲目再打一次强得多的理由 —— 销售拿起电话时有话可说。
+  const clickDays = Math.floor((nowMs - lastClick) / 86_400_000)
+  if (clickPending) {
+    return make(
+      'clicked_link',
+      clickDays <= 0 ? '今天点开了邮件里的行程链接' : `${clickDays} 天前点开了行程链接，之后没人跟`,
+      'phone',
+    )
   }
 
   // 6) 打过一次没人接。
@@ -336,7 +413,8 @@ export function todayWorklist(
 export function segmentCounts(contacts: ContactLike[], now: Date): Record<Segment, number> {
   const out: Record<Segment, number> = {
     replied: 0, callback_due: 0, travel_due: 0, new_untouched: 0,
-    retry_channel: 0, stale_conversation: 0, nurture_future: 0, excluded: 0,
+    clicked_link: 0, retry_channel: 0, stale_conversation: 0,
+    nurture_future: 0, excluded: 0,
   }
   for (const c of contacts) out[segmentContact(c, now).segment]++
   return out

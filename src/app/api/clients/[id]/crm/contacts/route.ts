@@ -21,6 +21,7 @@ import {
   segmentContact,
   SEGMENT_ACTION_META,
   type ContactLike,
+  engagementFromMetadata,
 } from '@/lib/crm/segments'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 import { fetchAll } from '@/lib/supabase-paginate'
@@ -178,6 +179,9 @@ export async function GET(
         outcome: (t.metadata?.outcome as string) ?? null,
         travelWindow: (t.metadata?.travel_window as string) ?? null,
         callbackAt: (t.metadata?.callback_at as string) ?? null,
+        // 邮件被打开 / 链接被点 = 行为信号，不是真人消息。分段逻辑必须区分，
+        // 否则「打开了邮件」会冒充「客户回话了」挤进最高优先桶。
+        engagement: engagementFromMetadata(t.metadata),
       })),
     }
     const seg = segmentContact(model, now)
