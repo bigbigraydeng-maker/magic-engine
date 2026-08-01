@@ -13,7 +13,7 @@
  *
  * Estimated cost:
  *   - getGmbInfo:         ~$0.002 per call
- *   - getGoogleReviews:   ~$0.005 per call (1 depth unit = 10 reviews)
+ *   - getGoogleReviews:   ~$0.00075 per 10 reviews (depth = review count)
  *   - getTripadvisorInfo: ~$0.002 per call
  */
 
@@ -123,14 +123,15 @@ export async function getGmbInfo(keyword: string): Promise<GmbInfo | null> {
  * DataForSEO endpoint: /business_data/google/reviews/live
  *
  * @param keyword  Same business search term as getGmbInfo
- * @param limit    Max reviews to return (default 10; each 10 = 1 depth unit)
+ * @param limit    Max reviews to return (default 10; depth = review count, billed per 10)
  * @returns        Parsed review list, or null if not found.
  */
 export async function getGoogleReviews(
   keyword: string,
   limit: number = 10,
 ): Promise<GoogleReview[] | null> {
-  const depth = Math.max(1, Math.ceil(limit / 10))
+  // DataForSEO depth = number of reviews to fetch (rounded up to a multiple of 10)
+  const depth = Math.max(1, Math.ceil(limit / 10)) * 10
 
   const res = await fetch(
     `${DATAFORSEO_API_BASE}/business_data/google/reviews/live`,
