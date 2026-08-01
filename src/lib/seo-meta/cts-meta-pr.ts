@@ -134,8 +134,16 @@ export function pickCandidates(
 
   for (const page of sorted) {
     if (out.length >= max) break
-    const slug = (page.page ?? '').replace(/\/+$/, '').split('/').pop() ?? ''
-    if (!slug || cooldownSlugs.has(slug)) continue
+    // Proper pathname parsing: the homepage ("https://site/") must not yield
+    // the hostname as a garbage slug (first run burned a slot on exactly that).
+    let slug = ''
+    try {
+      const path = new URL(page.page!).pathname.replace(/\/+$/, '')
+      slug = path.split('/').pop() ?? ''
+    } catch {
+      continue
+    }
+    if (!slug || slug.includes('.') || cooldownSlugs.has(slug)) continue
 
     // Best query = shares the MOST meaningful slug tokens (len > 3), then
     // impressions. Token-count-first stops a generic token like "tours"
@@ -207,6 +215,8 @@ export interface CtsMetaPrResult {
   outcome: 'pr_opened' | 'no_candidates' | 'no_connection' | 'nothing_editable' | 'error'
   pr_url?: string
   pages?: Array<{ slug: string; keyword: string }>
+  /** Per-candidate audit trail (slug → which step it stopped at). */
+  attempts?: Array<{ slug: string; step: string }>
   error?: string
 }
 
@@ -233,7 +243,15 @@ export async function runCtsMetaPr(
 
     const cooldown = new Set(((recent ?? []) as Array<{ page_slug: string }>).map((r) => r.page_slug))
     const snapshot = gsc as { top_pages?: GscPageRow[]; top_queries?: GscQueryRow[] } | null
-    const candidates = pickCandidates(snapshot?.top_pages ?? [], snapshot?.top_queries ?? [], cooldown)
+    // Wide pool: selection must not stop at MAX_PAGES_PER_RUN — a candidate
+    // whose meta lives outside our lanes gets SKIPPED, and the next one takes
+    // its slot (first run burned all 3 slots on 2 un-editable pages).
+    const candidates = pickCandidates(
+      snapshot?.top_pages ?? [],
+      snapshot?.top_queries ?? [],
+      cooldown,
+      12,
+    )
     if (candidates.length === 0) return { outcome: 'no_candidates' }
 
     // 2. Repo connection + meta source file
@@ -274,15 +292,26 @@ export async function runCtsMetaPr(
       oldDesc: string
     }> = []
 
+    // Per-candidate audit trail → cron summary, so the next "why no PR?"
+    // is answerable from the DB in one query instead of a debugging session.
+    const attempts: Array<{ slug: string; step: string }> = []
+
     for (const candidate of candidates) {
+      if (applied.length >= MAX_PAGES_PER_RUN) break
       const path = candidate.isBlog
         ? `src/lib/data/blogs-${candidate.slug}.ts`
         : META_FILE_PATH
       const entry = await loadFile(path)
-      if (!entry) continue
+      if (!entry) {
+        attempts.push({ slug: candidate.slug, step: 'file_not_found' })
+        continue
+      }
 
       const meta = await generateCtsMeta(candidate.keyword, candidate.pageUrl)
-      if (!meta.desc) continue
+      if (!meta.desc) {
+        attempts.push({ slug: candidate.slug, step: 'ai_generation_failed' })
+        continue
+      }
 
       const replaced = replaceMetaForSlug(
         entry.source,
@@ -291,9 +320,13 @@ export async function runCtsMetaPr(
         meta.desc,
         candidate.isBlog ? 'excerpt' : 'description',
       )
-      if (!replaced) continue
+      if (!replaced) {
+        attempts.push({ slug: candidate.slug, step: 'slug_not_in_file' })
+        continue
+      }
       entry.source = replaced.updated
       entry.dirty = true
+      attempts.push({ slug: candidate.slug, step: 'applied' })
       applied.push({
         candidate,
         newTitle: meta.title,
@@ -302,7 +335,7 @@ export async function runCtsMetaPr(
         oldDesc: replaced.oldDesc,
       })
     }
-    if (applied.length === 0) return { outcome: 'nothing_editable' }
+    if (applied.length === 0) return { outcome: 'nothing_editable', attempts }
 
     // 4. Branch + one commit per touched file + PR (CI gate + human merge)
     const day = new Date().toISOString().slice(0, 10)
@@ -357,6 +390,7 @@ export async function runCtsMetaPr(
       outcome: 'pr_opened',
       pr_url: pr.html_url ?? undefined,
       pages: applied.map((a) => ({ slug: a.candidate.slug, keyword: a.candidate.keyword })),
+      attempts,
     }
   } catch (err) {
     return { outcome: 'error', error: err instanceof Error ? err.message : String(err) }

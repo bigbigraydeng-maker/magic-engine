@@ -101,4 +101,13 @@ describe('pickCandidates', () => {
   it('caps at max', () => {
     expect(pickCandidates(pages, queries, new Set(), 1)).toHaveLength(1)
   })
+
+  it('homepage URL never yields the hostname as a garbage slug (首跑事故回归)', () => {
+    const withHome = [
+      { page: 'https://www.ctstours.co.nz/', impressions: 3593, position: 7.9 },
+      { page: 'https://www.ctstours.co.nz/beijing-tours', impressions: 500, position: 6 },
+    ]
+    const out = pickCandidates(withHome, queries, new Set())
+    expect(out.map((c) => c.slug)).toEqual(['beijing-tours'])
+  })
 })
