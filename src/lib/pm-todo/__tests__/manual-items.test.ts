@@ -33,6 +33,7 @@ describe('buildTodoEmail — manual lane', () => {
     recentCardsByClient: [],
     reelsByClient: [],
     manualItems: [],
+    setupTasks: [],
     cronFailures24h: 0,
   }
 
