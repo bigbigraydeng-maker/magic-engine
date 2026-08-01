@@ -17,6 +17,7 @@ export interface LectureProduction {
   method: LectureMethod
   recording_url?: string
   recording_uploaded_at?: string
+  changed_at?: string        // 最后一次改制作方式/换录像的时间(用来判断旧报错是否过期)
 }
 
 interface LectureSnapshot {
@@ -135,6 +136,8 @@ export async function setLectureProduction(params: {
   const production: LectureProduction = {
     ...(prev && prev.method === method ? prev : { method }),
     method,
+    // 改过制作方式/换过录像之后，之前那次失败的报错就过期了(不该再挂在屏幕上吓人)
+    changed_at: new Date().toISOString(),
     ...(recordingUrl
       ? { recording_url: recordingUrl, recording_uploaded_at: new Date().toISOString() }
       : {}),
