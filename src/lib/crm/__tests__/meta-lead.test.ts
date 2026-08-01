@@ -5,6 +5,7 @@
  *   1. 幂等键 = Meta 的 lead id —— 跟人手导入脚本对齐，回补时不会写出第二份
  *   2. 电话邮箱都不成形就不建人 —— contacts 被垃圾提交灌脏比漏一条 lead 贵得多
  *   3. 归因照实写，拿不到就 NULL —— 自然贴文的表单本来就没有广告
+ *      （含素材：ad_id 回查 ad_creative_links，查不到照样 NULL，不猜）
  *   4. 「感兴趣的团」只认问题名带 tour 的自定义问题 —— 不是随便抓第一个自定义答案
  */
 
@@ -42,11 +43,26 @@ let contactInserts: Record<string, unknown>[]
 let touchpointUpserts: Record<string, unknown>[]
 let upsertOptions: Record<string, unknown>[]
 
-function mockDb(identityHits: { contact_id: string; kind: string; value: string }[] = []) {
+function mockDb(
+  identityHits: { contact_id: string; kind: string; value: string }[] = [],
+  /** ad_creative_links 里这条广告对应的片子；null = 这条广告不是 ME 建的。 */
+  creativeLinkRow: { creative_ref: string } | null = null,
+) {
   contactInserts = []
   touchpointUpserts = []
   upsertOptions = []
   ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+    if (table === 'ad_creative_links') {
+      return {
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              eq: () => ({ maybeSingle: () => Promise.resolve({ data: creativeLinkRow, error: null }) }),
+            }),
+          }),
+        }),
+      }
+    }
     if (table === 'contact_identities') {
       return {
         select: () => ({ eq: () => ({ in: () => Promise.resolve({ data: identityHits }) }) }),
@@ -199,6 +215,26 @@ describe('ingestMetaLead', () => {
       attr_campaign_id: null,
     })
     expect((touchpointUpserts[0].metadata as Record<string, unknown>).is_organic).toBe(true)
+  })
+
+  /**
+   * 断链闭合的最后一跳：Meta 的 lead 接口不给 creative id，只能拿 ad_id 回查 ME 在
+   * 建广告那一刻记下的对应关系。这条钉住「查到了就写进人和触点两处」。
+   */
+  it('拿 ad_id 回查得到片子 → 人和触点两处都写上 attr_creative_ref', async () => {
+    mockDb([], { creative_ref: 'wo-1' })
+    await ingestMetaLead({ clientId: CLIENT, defaultCountry: 'NZ', lead: lead() })
+
+    expect(touchpointUpserts[0]).toMatchObject({ attr_ad_id: 'ad1', attr_creative_ref: 'wo-1' })
+    expect(contactInserts[0]).toMatchObject({ attr_creative_ref: 'wo-1' })
+  })
+
+  /** 这条广告不是 ME 建的（或者建的时候就没认出片子）→ 照实留白，绝不拿别的片子顶上。 */
+  it('回查不到片子 → attr_creative_ref 留 NULL', async () => {
+    mockDb([], null)
+    await ingestMetaLead({ clientId: CLIENT, defaultCountry: 'NZ', lead: lead() })
+
+    expect(touchpointUpserts[0]).toMatchObject({ attr_ad_id: 'ad1', attr_creative_ref: null })
   })
 
   it('「感兴趣的团」进 metadata.tour_interest_raw（CRM 横表那一列读它）', async () => {

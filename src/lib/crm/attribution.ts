@@ -26,6 +26,9 @@
  * ❌ 拿不到的
  *    · creative id —— Meta 的 lead 导出不返回创意 id。attr_creative_ref 的
  *      真相源只能是 ME 自己的出片管道(reels_draft / 成片 id),由调用方显式传。
+ *      **这条链现在通了**:src/lib/ads/creative-link.ts 在**建广告那一刻**把
+ *      ad_id ↔ ME 素材 id 记进 ad_creative_links,调用方拿 ad_id 回查即可
+ *      (lookupCreativeRefByAdId)。查不到照旧 null —— 留白仍然是合法结果。
  *    · Messenger 私信的 ad_id / ctwa_clid —— ME 的私信同步走 Graph
  *      `/{page}/conversations`(见 src/lib/meta/conversations.ts,messages 只请求
  *      `id,created_time,message,from,tags`)。CTWA / 广告点进来的 referral 只在

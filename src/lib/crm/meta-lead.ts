@@ -18,6 +18,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { buildIdentities, resolveContact } from '@/lib/crm/identity'
 import { attributionColumns, attributionFromMetaLeadRow } from '@/lib/crm/attribution'
+import { lookupCreativeRefByAdId } from '@/lib/ads/creative-link'
 import type { MetaLead, MetaLeadAnswer } from '@/lib/meta/lead-forms'
 
 /**
@@ -123,8 +124,10 @@ export async function ingestMetaLead(input: IngestMetaLeadInput): Promise<Ingest
       ad_name: lead.adName,
       adset_id: lead.adsetId,
       campaign_id: lead.campaignId,
-      // creative id：Meta 的 lead 接口不给，只能由 ME 出片管道回填 → 一律 null。
-      creative_ref: null,
+      // creative id：Meta 的 lead 接口不给。只能拿 ad_id 回查 ME 自己在建广告那一刻
+      // 记下的对应关系（ad_creative_links）。那条广告不是 ME 建的、或者当时就没认出
+      // 是哪条片子 → 这里照样是 null，如实留白（见 lib/ads/creative-link.ts）。
+      creative_ref: await lookupCreativeRefByAdId(clientId, lead.adId),
     })
 
     const { contactId, created } = await resolveContact({

@@ -25,6 +25,7 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { boostPagePost } from '@/lib/meta/client'
+import { linkAdToCreative } from '@/lib/ads/creative-link'
 
 interface RouteContext {
   params: { id: string }
@@ -115,6 +116,17 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     )
   }
 
+  // 记下「这条广告投的是哪条片」。现在是唯一知道对应关系的时刻 —— 事后问 Meta
+  // 只问得到它自己的帖子 id,问不到 ME 的片子 id。认不出来也照样落一行(留空 +
+  // 写明原因),不静默跳过。永不抛异常:广告已经建出来了。
+  const creativeLink = await linkAdToCreative({
+    clientId,
+    adId: result.ad_id,
+    postId: post_id,
+    pageId: page_id,
+    createdBy: 'boost_post_api',
+  })
+
   return NextResponse.json({
     success: true,
     client_name: client.name,
@@ -124,5 +136,9 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     duration_days: days,
     estimated_total_aud: daily_budget_aud * days,
     ...result,
+    // 调用方一眼看得见这条广告的效果将来算不算得到某条片子头上。
+    creative_ref: creativeLink.creativeRef,
+    creative_link_method: creativeLink.linkMethod,
+    creative_link_note: creativeLink.unresolvedReason,
   })
 }
