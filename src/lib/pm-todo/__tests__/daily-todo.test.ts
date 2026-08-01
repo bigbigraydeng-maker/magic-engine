@@ -10,6 +10,7 @@ const EMPTY: TodoCounts = {
   draftsByClient: [],
   findingsByClient: [],
   recentCardsByClient: [],
+  reelsByClient: [],
   cronFailures24h: 0,
 }
 
@@ -48,6 +49,16 @@ describe('buildTodoEmail', () => {
     expect(email.html).not.toContain('Blog 草稿待审')
     expect(email.html).toContain('系统有活儿没跑成')
     expect(email.totalItems).toBe(2)
+  })
+
+  it('reels awaiting review show as 社媒成片待审 with factory link', () => {
+    const email = buildTodoEmail(4, {
+      ...EMPTY,
+      reelsByClient: [{ name: 'CTS Tours NZ', id: 'cid-1', reels: 11 }],
+    }, '1 Aug')
+    expect(email.totalItems).toBe(11)
+    expect(email.html).toContain('社媒成片待审')
+    expect(email.html).toContain('/dashboard/factory')
   })
 
   it('weekday theme appears in the header', () => {

@@ -21,6 +21,7 @@ interface ClientCount {
   drafts?: number
   findings?: number
   cards?: number
+  reels?: number
 }
 
 interface TodayPayload {
@@ -32,6 +33,7 @@ interface TodayPayload {
     draftsByClient: ClientCount[]
     findingsByClient: ClientCount[]
     recentCardsByClient: ClientCount[]
+    reelsByClient: ClientCount[]
     cronFailures24h: number
   }
 }
@@ -132,7 +134,8 @@ export default function TodayPage() {
   const totalDrafts = counts.draftsByClient.reduce((s, c) => s + (c.drafts ?? 0), 0)
   const totalFindings = counts.findingsByClient.reduce((s, c) => s + (c.findings ?? 0), 0)
   const totalCards = counts.recentCardsByClient.reduce((s, c) => s + (c.cards ?? 0), 0)
-  const total = totalDrafts + totalFindings + totalCards + counts.cronFailures24h
+  const totalReels = (counts.reelsByClient ?? []).reduce((s, c) => s + (c.reels ?? 0), 0)
+  const total = totalDrafts + totalFindings + totalCards + totalReels + counts.cronFailures24h
 
   return (
     <div className="mx-auto max-w-3xl p-6">
@@ -191,6 +194,20 @@ export default function TodayPage() {
                   count={c.cards ?? 0}
                   unit="张"
                   href={`/dashboard/clients/${c.id}/execution`}
+                />
+              ))}
+            </SectionCard>
+          )}
+
+          {totalReels > 0 && (
+            <SectionCard emoji="🎬" title="社媒成片待审">
+              {(counts.reelsByClient ?? []).map((c) => (
+                <ClientRow
+                  key={c.id}
+                  name={c.name}
+                  count={c.reels ?? 0}
+                  unit="条"
+                  href="/dashboard/factory"
                 />
               ))}
             </SectionCard>

@@ -46,9 +46,14 @@ export interface TodoCounts {
   findingsByClient: Array<{ name: string; id: string; findings: number }>
   /** [{ name, id, cards }] — focus clients' pending kanban cards (recent only). */
   recentCardsByClient: Array<{ name: string; id: string; cards: number }>
+  /** [{ name, id, reels }] — clients with factory clips awaiting review. */
+  reelsByClient: Array<{ name: string; id: string; reels: number }>
   /** Cron runs that failed in the last 24h. */
   cronFailures24h: number
 }
+
+/** reels_drafts statuses that mean "a human needs to look at this". */
+const REEL_REVIEW_STATUSES = ['video_ready', 'images_ready', 'in_review'] as const
 
 // ── Data loading ────────────────────────────────────────────────────────────────
 
@@ -57,7 +62,7 @@ export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCoun
   cardCutoff.setDate(cardCutoff.getDate() - RECENT_CARD_DAYS)
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
-  const [drafts, findings, cards, failures] = await Promise.all([
+  const [drafts, findings, cards, reels, failures] = await Promise.all([
     supabase
       .from('blog_posts')
       .select('client_id, clients(name)')
@@ -72,6 +77,10 @@ export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCoun
       .eq('status', 'pending')
       .in('client_id', [...FOCUS_CLIENT_IDS])
       .gte('created_at', cardCutoff.toISOString()),
+    supabase
+      .from('reels_drafts')
+      .select('client_id, clients(name)')
+      .in('status', [...REEL_REVIEW_STATUSES]),
     supabase
       .from('cron_run_logs')
       .select('id, status, failed_count')
@@ -92,7 +101,7 @@ export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCoun
     return map
   }
 
-  const toList = (map: Map<string, { name: string; count: number }>, key: 'drafts' | 'findings' | 'cards') =>
+  const toList = (map: Map<string, { name: string; count: number }>, key: 'drafts' | 'findings' | 'cards' | 'reels') =>
     Array.from(map.entries())
       .map(([id, v]) => ({ name: v.name, id, [key]: v.count }))
       .sort((a, b) => a.name.localeCompare(b.name))
@@ -104,6 +113,7 @@ export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCoun
     draftsByClient: toList(countByClient(drafts.data as never), 'drafts') as TodoCounts['draftsByClient'],
     findingsByClient: toList(countByClient(findings.data as never), 'findings') as TodoCounts['findingsByClient'],
     recentCardsByClient: toList(countByClient(cards.data as never), 'cards') as TodoCounts['recentCardsByClient'],
+    reelsByClient: toList(countByClient(reels.data as never), 'reels') as TodoCounts['reelsByClient'],
     cronFailures24h: failedRuns.length,
   }
 }
@@ -162,13 +172,20 @@ export function buildTodoEmail(weekday: number, counts: TodoCounts, nzDateLabel:
     )))
   }
 
+  const totalReels = counts.reelsByClient.reduce((s, c) => s + c.reels, 0)
+  if (totalReels > 0) {
+    sections.push(sectionCard('🎬', '社媒成片待审', counts.reelsByClient.map((c) =>
+      linkRow(c.name, 'https://app.magicengine.com.au/dashboard/factory', c.reels, '条'),
+    )))
+  }
+
   if (counts.cronFailures24h > 0) {
     sections.push(sectionCard('⚠️', '系统有活儿没跑成', [
       linkRow('过去 24 小时', 'https://app.magicengine.com.au/dashboard/admin/cron-health', counts.cronFailures24h, '次失败'),
     ]))
   }
 
-  const totalItems = totalDrafts + totalFindings + totalCards + counts.cronFailures24h
+  const totalItems = totalDrafts + totalFindings + totalCards + totalReels + counts.cronFailures24h
 
   const body = sections.length > 0
     ? sections.join('')
