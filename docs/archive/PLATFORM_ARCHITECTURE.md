@@ -1,5 +1,10 @@
 # Magic Engine — 平台架构规划
 
+> 🗄️ **已归档 2026-07-25。**
+> §四 / §五 的 MLT 代币与套餐已被 MTC 取代（见 [../specs/PHASE_20_MTC_SPEC.md](../specs/PHASE_20_MTC_SPEC.md)）。
+> §一~§三 / §七~§八 的产品定位内容以 [../PRODUCT.md](../PRODUCT.md) 为准。
+
+
 > 版本：v1.0 — 2026-05-10  
 > 定位：Magic Lab 对外 SaaS 平台，面向 AU/NZ 中小企业
 

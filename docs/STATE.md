@@ -1,0 +1,237 @@
+# Magic Engine — 系统当前状态
+
+> **唯一真相源。** 想知道「现在什么在跑 / 部署在哪 / 配了哪些东西」，只看这一份。
+> 最后核对：**2026-07-25**（从 `render.yaml` / `.github/workflows/` / `src/` / `supabase/migrations/` 实读，非人工回忆）
+>
+> 未完成的事 → [ROADMAP.md](./ROADMAP.md) · 已上线的事 → [history/CHANGELOG.md](./history/CHANGELOG.md)
+> 为什么这么做 → [DECISIONS.md](./DECISIONS.md) · 别再踩的坑 → [PITFALLS.md](./PITFALLS.md) · 环境变量 → [ENV.md](./ENV.md)
+
+---
+
+## 1. 部署
+
+| 项 | 值 |
+|---|---|
+| **生产地址** | `https://app.magicengine.com.au` |
+| **官网**（独立静态站） | `https://magicengine.com.au` ← 源码在仓库 `website/` |
+| **部署平台** | Render Blueprint，读 `render.yaml` |
+| **部署分支** | **`main`**（推 main 自动部署，约 3-5 分钟） |
+| **仓库** | `github.com/bigbigraydeng-maker/magic-engine` |
+| **构建** | `npm install && npm run build` → `npm start` |
+| **Supabase 项目** | `glbdnayojixmexgofbsd` |
+| **AI 网关** | Cloudflare AI Gateway（OpenAI / Anthropic 都走 `*_BASE_URL` 代理） |
+
+> ⚠️ 远程仍存在一个历史 `master` 分支。**部署跟它无关**，别往那推。
+
+**服务构成**：1 个 web service + **28 个 Render Cron Job** + 4 个 GitHub Actions workflow（其中 3 个当 cron 用）。
+
+## 2. 代码规模
+
+| 项 | 数量 |
+|---|---|
+| API 路由（`route.ts`） | **403** |
+| 页面（`page.tsx`） | **92** |
+| `src/lib/` 业务域 | **78 个目录 / 672 文件** |
+| React 组件 | 43 |
+| 测试文件 | 315（vitest）+ 5 个 Playwright spec |
+| Supabase migration | **172 个文件 → 141 张表** |
+
+技术栈：Next.js 14 App Router · TypeScript 5 strict · Tailwind 3.4 · Supabase(PG + Storage) ·
+OpenAI GPT-4o-mini · Anthropic Claude Sonnet · Muapi/Atlas Cloud(图/视频) · HeyGen(头像) ·
+DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(邮件)。
+
+**数据访问模型**：全部走 `supabaseAdmin`（service-role key）+ Bearer-token API，**不用 end-user RLS**。
+新建表的 RLS policy 一律 service-role 模板，见 [DECISIONS.md](./DECISIONS.md)。
+
+## 3. 模块 ↔ 代码映射
+
+| 模块 | 状态 | 主要代码 | 主要表 |
+|---|---|---|---|
+| **SEO 内容引擎** | ✅ 成熟 | `lib/{blog,keywords,seo-gap,seo-intelligence,seo-patrol,site-audit,page-rewriter,dataforseo,gsc}` · `api/keyword-intelligence` · `api/clients/[id]/{blog,site-audit,strategy}` | `blog_posts` `keywords` `client_site_pages` `content_strategy_items` `gsc_performance_snapshots` |
+| **GEO / AI 可见度** | ✅ 成熟 | `lib/{geo,ai-tracker,industry-ai-visibility}` · `api/ai-tracker` · `api/baselines` | `geo_directives` `geo_deployments` `ai_visibility_{queries,runs,snapshots}` `industry_ai_visibility_*` `baseline_domains` |
+| **社媒内容矩阵** | ✅ 成熟 | `lib/{brief,content,social,reels,visual,images,publer,scheduling}` · `api/clients/[id]/{brief,campaign}` · `api/content/route-{a,b,c}` · `api/visual` | `master_briefs` `campaign_briefs` `content_posts` `visual_assets` `reels_drafts` |
+| **AI Content Factory** (P21) | 🔄 建设中 | `lib/{factory,ai-factory,winner-reel-sync}` · `api/factory` · `scripts/factory-worker/` | `content_work_orders` `content_work_order_clips` `factory_balance_ledger` `factory_angle_blocklist` |
+| **Ads Intelligence** | 🔄 建设中 | `lib/{meta,google-ads,tiktok-ads,ads-strategy}` · `api/clients/[id]/ad-health` | `ad_daily_insights` `ad_strategy_configs` `ad_health_narratives` |
+| **策略层**（Goal→Initiative→Action） | ✅ 上线 | `lib/{strategy,marketing-plan,execution,zhuge}` · `api/{goals,initiatives}` | `goals` `initiatives` `marketing_plans` `execution_items` |
+| **飞轮数据闭环** (P12) | ✅ 上线 | `lib/flywheel` · `api/flywheel` | `flywheel_actions` `flywheel_metrics` `flywheel_outcomes` |
+| **诊断 / 数据回流** | ✅ 上线 | `lib/{diagnostic,scoring,ga4,gbp,places,competitors,monthly-report,reports}` | `diagnostic_{runs,findings,narratives}` `ga4_traffic_snapshots` `anomaly_signals` |
+| **Agent 层** | ✅ 上线 | `lib/{huatuo,zhuge,zhangqian,luban,agent-tools,memory}` | `client_{learned_preferences,proven_patterns,failed_experiments,decision_history}` |
+| **MTC 计费 / Portal** (P20) | ✅ 上线 | `lib/{mtc,billing}` · `api/{mtc,stripe}` · `app/portal` | `mtc_*` `client_portal_users` |
+| **ME MCP Server** (P34) | ✅ 上线 | `lib/mcp` · `api/mcp` · `api/mcp-admin` | `admin_api_keys` `client_api_keys` `api_key_settings` |
+| **Outbound Prospecting** (P35) | 🔄 建设中 | `lib/prospecting` · `api/admin/prospecting` · `api/prospect` | `outbound_prospects` `discovery_leads` |
+| **Voice Agent** (P36) | 🔄 建设中 | `lib/voice` · `api/voice` · `scripts/voice/` | 见 `docs/voice-agent/` |
+
+**六支柱诊断维度（不变）**：`seo` / `ai_visibility` / `ads` / `social` / `reputation` / `competitor`。
+其中 `reputation` + `competitor` 只诊断、不接飞轮（FDE 外部完成）。
+
+## 4. 定时任务全表
+
+### 4.1 Render Cron（39 个，全部 curl `https://app.magicengine.com.au/api/cron/*`，带 `CRON_SECRET` Bearer）
+
+| Cron 名 | 调度 (UTC) | 端点 |
+|---|---|---|
+| vision-analyzer | `*/10 * * * *` | `/api/cron/vision-analyzer` |
+| poll-visual-jobs | `*/10 * * * *` | `/api/cron/poll-visual-jobs` |
+| viral-analyzer-worker | `*/10 * * * *` | `/api/cron/viral-analyzer-worker` |
+| factory-publish-worker | `*/10 * * * *` | `/api/cron/factory-publish-worker` |
+| zhangqian-sweeper | `*/15 * * * *` | `/api/cron/zhangqian-sweeper` |
+| blog-stuck-generating-sweeper | `*/15 * * * *` | `/api/cron/blog-stuck-generating` |
+| factory-publish-sweeper | `*/15 * * * *` | `/api/cron/factory-publish-sweeper` |
+| prospecting-sweep | `*/30 * * * *` | `/api/cron/prospecting-sweep` |
+| social-comment-autoreply | `*/30 * * * *` | `/api/cron/social-comment-autoreply` |
+| messenger-hourly | `10 * * * *` | `/api/cron/messenger-sync-hourly` |
+| meta-leads-hourly | `25 * * * *` | `/api/cron/meta-leads-sync` |
+| viral-discovery-weekly | `0 0 * * *` | `/api/cron/viral-discovery-weekly` |
+| site-audit-cron | `0 2 * * *` | `/api/cron/site-audit-jobs` |
+| industry-ai-visibility-daily | `30 2 * * *` | `/api/cron/ai-visibility-weekly` |
+| goal-current-value-refresh | `0 3 * * *` | `/api/cron/goal-current-value-refresh` |
+| google-data-pullback-daily | `0 3 * * *` | `/api/cron/google-data-pullback-daily` |
+| social-engagement-pullback | `0 4 * * *` | `/api/cron/social-engagement-pullback` |
+| seo-patrol-daily | `0 4 * * *` | `/api/cron/seo-patrol-daily` |
+| mailchimp-activity-daily | `40 4 * * *` | `/api/cron/mailchimp-activity-sync` |
+| anomaly-detector-daily | `0 5 * * *` | `/api/cron/anomaly-detector` |
+| daily-cron-digest | `0 6 * * *` | `/api/cron/daily-cron-digest` |
+| winner-reel-sync-daily | `0 15 * * *` | `/api/cron/winner-reel-sync-daily` |
+| proposal-view-digest | `0 19 * * *` | `/api/cron/proposal-view-digest` |
+| factory-order-scheduler | `0 20 * * *` | `/api/cron/factory-order-scheduler` |
+| content-factory-intake | `0 22 * * *` | `/api/cron/content-factory-intake` |
+| attribution-cron | `0 */6 * * *` | `/api/cron/attribution` |
+| pm-daily-todo | `0 19 * * 0-4` | `/api/cron/pm-daily-todo` |
+| site-audit-weekly | `0 1 * * 0` | `/api/cron/site-audit-weekly` |
+| weekly-seo-report | `30 18 * * 0` | `/api/cron/weekly-seo-report` |
+| ai-tracker-weekly | `0 1 * * 1` | `/api/cron/ai-tracker-weekly` |
+| job-boards-weekly | `0 2 * * 1` | `/api/cron/job-boards-weekly` |
+| keyword-snapshots-weekly | `0 2 * * 1` | `/api/cron/keyword-snapshots-weekly` |
+| zhuge-weekly-recalculate | `0 3 * * 1` | `/api/cron/zhuge-recalculate` |
+| reputation-snapshots-weekly | `30 3 * * 1` | `/api/cron/reputation-snapshots-weekly` |
+| oztop-seo-optimizer | `0 5 * * 1` | `/api/cron/oztop-seo-optimizer?max=8` |
+| cts-seo-optimizer | `30 5 * * 1` | `/api/cron/cts-seo-optimizer` |
+| agent-learning-rollup | `0 7 * * 1` | `/api/cron/agent-learning-rollup` |
+| factory-stock-refill | `0 19 * * 1` | `/api/cron/factory-stock-refill` |
+| blog-weekly | `0 3 * * 2` | `/api/cron/blog-weekly` |
+
+### 4.2 GitHub Actions（3 个当 cron 用 + 1 个手动）
+
+| Workflow | 调度 (UTC) | 端点 |
+|---|---|---|
+| `factory-sweepers.yml` | `*/5 * * * *` | `/api/cron/factory-worker-sweeper` |
+| `goals-expiry-check.yml` | `30 3 * * *` | `/api/cron/goals-expiry-check` |
+| `baseline-domains-monthly.yml` | `0 3 1 * *` | `/api/cron/baseline-domains-monthly` |
+| `winner-reel-sync-daily.yml` | **仅 `workflow_dispatch`** | 定时已迁到 Render（见 DECISIONS 2026-07-12） |
+
+### 4.3 🔴 有路由但没有任何调度器 —— 这些功能永远不会自动跑
+
+`src/app/api/cron/` 共 **50 个**端点，被调度的有 **44 个**。剩下 6 个：
+
+| 端点 | 判断 |
+|---|---|
+| `admin-key-expiry` | ❓ 需确认是有意停用还是漏配 |
+| `benchmark-accumulator` | ❓ 同上 |
+| `flywheel-seo-weekly` | ❓ 同上（Phase 12.I 建的，ROADMAP 标已完成） |
+| `kpi-backfill` | ❓ 同上 |
+| `memory-extractor` | ❓ 同上（Phase 23 Memory Layer） |
+| `factory-review-sweeper` | ✅ **有意退役** —— 审核已搬到 `/dashboard/factory`（PR #581），Airtable 停用后该端点必 500 |
+
+> `poster-studio-daily` 原也在此列，已于 2026-08-01 前接上调度，不再是孤儿。
+
+> 新建 `/api/cron/*` 路由时，**同一个 PR 里就要加 `render.yaml` 条目**，否则就会多一个僵尸端点。
+> `bash scripts/doctor.sh --cron` 会自动查这件事。
+
+### 4.4 常驻 worker（不在 Render 上）
+
+`scripts/factory-worker/worker.mjs` 跑在**本地一台 Mac** 上，认领 Factory 工单。
+仓库里**没有 launchd / pm2 配置**，进程挂了没有任何告警 —— 工单会静默卡在 `queued`。见 [PITFALLS F4](./PITFALLS.md)。
+
+## 5. 外部服务
+
+| 服务 | 用途 | 对外封装名 |
+|---|---|---|
+| OpenAI GPT-4o-mini | 文案 / Vision / Realtime | **Content Engine** |
+| Anthropic Claude Sonnet | Brief / 策略 / 诸葛亮 | **Strategy Engine** |
+| Muapi (ModelsLab) | 图 / 视频（P21.J 后主用） | **Visual Studio / Video Studio** |
+| Atlas Cloud (WaveSpeed / Seedance) | 图 / 视频 | 同上 |
+| HeyGen | 数字人头像视频 | **Avatar Studio** |
+| DataForSEO | 关键词 / SERP / 外链（**主数据源**） | **Keyword Intelligence** |
+| SerpAPI | SERP / Google AI Overviews | — |
+| Publer | 多平台排期发布 | **Publishing Hub** |
+| Stripe | MTC 充值 | — |
+| Resend | 全部事务邮件 | — |
+| Cloudflare AI Gateway | OpenAI / Anthropic 代理 | — |
+| Apify | scraper（Pinterest / IG / FB 等） | — |
+| Unsplash | 免费商用图库 | — |
+| Jina.ai Reader | 网页抓取 | **Site Analyzer** |
+| Airtable | **正在退役** — 代码仅剩 3 处引用 | **Content Workspace** |
+| SEMrush | **已被 DataForSEO 取代** — 代码 0 引用（`SEMRUSH_DB` 除外） | **Keyword Intelligence** |
+| Zapier | **已完全移除** | — |
+
+> **UI / 报告 / 客户交付物中禁止出现真实供应商名**，只用封装名。API 路由内部、错误日志、环境变量可用真名。
+
+## 6. 环境变量
+
+完整表见 [ENV.md](./ENV.md)。要点：
+
+- 代码在用 **113** 个 · `.env.example` 59 个 · `render.yaml` 44 个
+- **62 个在用变量此前无任何登记**（已在 `ENV.md` 中标 ❌），包括整套 Stripe、`UPLOAD_LINK_SECRET`、`FACTORY_WORKER_TOKEN`、`ADMIN_KEY_KILL_SWITCH`
+- 🔴 **已知问题**：`render.yaml` 声明 `ATLAS_API_KEY`，代码读 `ATLAS_CLOUD_API_KEY`。已在 blueprint 补上正确名字，旧名暂留待确认后清理
+
+## 7. 自检
+
+```bash
+bash scripts/doctor.sh          # 全查
+bash scripts/doctor.sh --env    # 环境变量（掩码，不打印值）
+bash scripts/doctor.sh --api    # 外部 API 连通性
+bash scripts/doctor.sh --cron   # cron 调度覆盖 + cron_run_logs 最近执行
+bash scripts/doctor.sh --md     # 输出 Markdown，可直接粘回本文件 §8
+```
+
+## 8. 最近一次 doctor 结果
+
+> 跑于 **2026-07-25**，在**审计容器**里（该容器的网络策略禁止访问外网，
+> 且没有任何生产凭证）。所以下面**只有 cron 调度那一段是真实结论**——
+> 它不依赖网络或密钥，纯读仓库文件。
+> **环境变量与外部 API 两段必须在能拿到 `.env.local` 的机器上重跑才有意义。**
+
+### 环境变量
+
+未采集 —— 审计容器无任何生产凭证，全部报 `未设置`，无参考价值。
+请在本地 `.env.local` 就位后跑 `bash scripts/doctor.sh --env`。
+
+### 外部 API 连通性
+
+未采集 —— 容器代理对全部外部主机返回 `403 CONNECT`（policy denial），
+`https://app.magicengine.com.au` 等均无法握手。**这是审计环境限制，不代表生产不可用。**
+
+### Cron 调度覆盖 ✅ 真实结论
+
+```
+✅  cron 路由总数      50 个 (src/app/api/cron/)
+✅  已被调度           44 个 (render.yaml + .github/workflows)
+❌  admin-key-expiry           有路由但没有任何调度器 → 永远不会自动跑
+❌  benchmark-accumulator      有路由但没有任何调度器 → 永远不会自动跑
+❌  flywheel-seo-weekly        有路由但没有任何调度器 → 永远不会自动跑
+❌  kpi-backfill               有路由但没有任何调度器 → 永远不会自动跑
+❌  memory-extractor           有路由但没有任何调度器 → 永远不会自动跑
+⚠️  factory-review-sweeper     无调度 — 已知有意退役（Airtable 停用）
+✅  被调度但路由不存在的        无
+```
+
+> 数字为 2026-08-01 并入 main 后重跑的结果（原审计时是 38 路由 / 31 调度 / 7 孤儿）。
+> `poster-studio-daily` 已在这期间接上调度，不再是孤儿。
+
+### cron_run_logs 最近执行
+
+未采集 —— 需 Supabase 凭证。本地重跑 `bash scripts/doctor.sh --cron` 即可看到每个 job 的最近一次执行时间与状态。
+
+---
+
+## 9. 已知待办（从本次自检直接产出）
+
+| 优先级 | 事项 | 出处 |
+|---|---|---|
+| 🔴 高 | 确认 Render 面板里 `ATLAS_CLOUD_API_KEY` 是否已配 —— 没配则图片/视频生成在生产上是坏的 | [PITFALLS A1](./PITFALLS.md) |
+| 🔴 高 | 6 个孤儿 cron 逐个定性：接调度 还是 标记停用 | §4.3 |
+| 🟡 中 | 62 个未登记环境变量补进 `.env.example`（已补，需 review） | [ENV.md](./ENV.md) |
+| 🟡 中 | `APIFY_API_KEY` / `APIFY_TOKEN` 双名统一 | [PITFALLS A3](./PITFALLS.md) |
+| 🟡 中 | `SEMRUSH_API_KEY` 从 `render.yaml` 清理（注意 `SEMRUSH_DB` 要留） | [ENV.md §4](./ENV.md) |
+| 🟡 中 | `src/` 有 22 个文件的注释指向已移走的 `docs/superpowers/specs/*` —— 现在是死路径，跟到底是空。9 份已在 `docs/specs/` 下同名存在，`2026-06-04-a21-stepc-design-v3.md` 本来就不存在（PR 之前就断）。本 PR 刻意没动 `src/`（保住「一行没改」的可复核性），需一个独立小 PR 批量改路径 | 本次并入 main 时发现 |
+| 🟢 低 | 远程 `master` 分支及 24 个特性分支清理（须先 verify PR MERGED） | [PITFALLS C2](./PITFALLS.md) |

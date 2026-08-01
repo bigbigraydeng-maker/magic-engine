@@ -1,5 +1,10 @@
 # Magic Lab Token 计费系统
 
+> 🗄️ **已归档 2026-07-25 — 不要按这份做。**
+> MLT（Magic Lab Token）计费体系已被 **MTC（Magic Token Coin）** 取代。
+> `MLT` 在 `src/` 中 0 引用，`MTC` 在 58 个文件里。现行设计见 [../specs/PHASE_20_MTC_SPEC.md](../specs/PHASE_20_MTC_SPEC.md)。
+
+
 > 版本：v2.0 — 2026-05-10  
 > 适用：所有 Magic Lab 陪跑客户（首个客户：CTS Tours）
 

@@ -227,7 +227,7 @@ MVP **不做**以下事项,避免 scope creep:
 
 ## 9. 参考
 
-- [ROADMAP.md § Phase 13](../ROADMAP.md) — 任务登记
+- [ROADMAP.md § Phase 13](./ROADMAP.md) — 任务登记
 - [supabase/migrations/20260513000001_diagnostic_engine.sql](../supabase/migrations/20260513000001_diagnostic_engine.sql) — `diagnostic_dimension` enum 定义
 - [supabase/migrations/20260517000001_flywheel_data_skeleton.sql](../supabase/migrations/20260517000001_flywheel_data_skeleton.sql) — `flywheel_name` enum + `execution_items.execution_target`
 - [supabase/migrations/20260518000003_execution_content_link.sql](../supabase/migrations/20260518000003_execution_content_link.sql) — 现有 `execution_items ↔ content_posts` 1:1 链路

@@ -1,5 +1,11 @@
 # Magic Engine — Roadmap
 
+> 🗄️ **全量历史底稿，冻结于 2026-07-25。**
+> 拆分去向：未完成事项 → [../ROADMAP.md](../ROADMAP.md) · 完成日志（§9，890 行）→
+> [../history/CHANGELOG.md](../history/CHANGELOG.md) · 决策日志（§8）→ [../DECISIONS.md](../DECISIONS.md)。
+> 本文件保留是为了不丢失 344 条已完成条目的上下文，**不再更新**。
+
+
 > 最后更新：2026-06-11 16:53 NZST · 当前阶段：**⭐ DAPE 核心引擎 v0.2 ✅ 上线 production (Week 1+2+3 全部 merged, 17 PR / 6126+ 行代码 / 2 P0 hotfix)；Phase 24.A Platform OAuth Connector ✅；Phase 14.C ✅；Phase 14.B ✅；Phase 23 Cross-Agent Memory Layer ✅；Phase 19 IDOR 修复 ✅**。
 >
 > **⭐ 核心引擎重定义（2026-06-08 PM 拍板）**：ME 核心引擎从 GIMPT (11 层堆叠) 改为 **DAPE** = **Discovery / Analysis / Prescription / Execution** 4 段循环 + AI 贯穿 + 6 大支柱矩阵。详见 [CLAUDE.md § ME 核心引擎 = DAPE](./CLAUDE.md) 顶部段落 + [DAPE spec v0.2](./docs/superpowers/specs/2026-06-08-me-dape-redefine-v0.2.md)（949 行, 5-agent 签字）+ 本文 § 9 DAPE 上线记录。
