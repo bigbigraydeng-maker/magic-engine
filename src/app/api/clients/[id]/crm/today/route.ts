@@ -30,12 +30,22 @@ import {
 } from '@/lib/crm/segments'
 import { WORKLIST_GROUPS, groupDisplayMeta } from '@/lib/crm/worklist-groups'
 import { contactCardTitle } from '@/lib/crm/display-name'
+import { followUpMarks, localDay } from '@/lib/crm/follow-up-marks'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 import { fetchAll } from '@/lib/supabase-paginate'
 
 interface RouteParams {
   params: { id: string }
 }
+
+/**
+ * 这些来源写出来的「我们发出的」是**机器发的**，不是人做的动作。
+ *
+ * 不分开的话，一封 Mailchimp 群发会把整块看板标成「今天已经跟过」—— 销售
+ * 第二天早上看到几百张灰卡，会以为活都做完了。群发那一笔仍然会出现在时间线上
+ * （客人确实收到了），只是不算「有人跟过他」。
+ */
+const AUTOMATED_SOURCES = new Set(['mailchimp'])
 
 interface ContactRow {
   id: string
@@ -50,6 +60,7 @@ interface ContactRow {
 interface TouchRow {
   contact_id: string
   channel: string
+  source: string | null
   direction: 'inbound' | 'outbound'
   occurred_at: string
   summary: string | null
@@ -90,7 +101,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       fetchAll<TouchRow>((from, to) =>
         supabaseAdmin
           .from('contact_touchpoints')
-          .select('contact_id, channel, direction, occurred_at, summary, metadata')
+          .select('contact_id, channel, direction, occurred_at, summary, metadata, source')
           .eq('client_id', clientId)
           .order('occurred_at', { ascending: false })
           .range(from, to),
@@ -198,6 +209,25 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
 
   const now = new Date()
   const contactById = new Map(rows.map((c) => [c.id, c]))
+
+  /**
+   * 「今天」按客户所在地算，不按服务器。
+   *
+   * 服务器跑在 UTC，销售在纽西兰（UTC+12/+13）：他上午做完的活，在 UTC 里
+   * 还落在昨天；等纽西兰到中午 UTC 跨日，「今天已经跟过」会集体消失 ——
+   * 销售会以为系统把他一早的活弄丢了。
+   */
+  let timeZone = 'Pacific/Auckland'
+  try {
+    const { data: cli } = await supabaseAdmin
+      .from('clients')
+      .select('country')
+      .eq('id', clientId)
+      .maybeSingle()
+    if ((cli?.country ?? '').toUpperCase() === 'AU') timeZone = 'Australia/Sydney'
+  } catch {
+    // 读不到就按 NZ —— 两个客户目前都在纽西兰，猜错也只差两小时。
+  }
 
   const ranked = todayWorklist(models, now)
 
@@ -318,7 +348,26 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   const toRow = (c: (typeof ranked)[number]) => {
     const row = contactById.get(c.id)
     const last = (byContact.get(c.id) ?? [])[0]
+    // 早上打开这一页要一眼看懂：今天动过没有、上次谁跟的、聊到哪了。
+    const marks = followUpMarks(
+      (byContact.get(c.id) ?? []).map((t) => ({
+        direction: t.direction,
+        occurredAt: t.occurred_at,
+        summary: t.summary,
+        engagement: engagementFromMetadata(t.metadata),
+        loggedBy: (t.metadata?.logged_by as string | null) ?? null,
+        automated: AUTOMATED_SOURCES.has(t.source ?? ''),
+      })),
+      now,
+      timeZone,
+    )
     return {
+      /** 今天已经有人联系过他 —— 卡片当场变浅，不用靠记。 */
+      doneToday: marks.doneToday,
+      /** 上次是谁跟的。不知道就是 null，页面不假装。 */
+      lastBy: marks.lastBy,
+      /** 他打开过邮件、之后没人跟。只做提示，不参与排序（打开可能是 Apple 替他开的）。 */
+      openedDaysAgo: marks.openedDaysAgo,
       contactId: c.id,
       name: contactCardTitle(c.displayName, firstSaid.get(c.id)),
       phone: row?.primary_phone ?? null,
@@ -349,7 +398,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   const PER_BUCKET_LIMIT = 300
   // 展示用分桶在 lib/crm/worklist-groups 里，不在这个文件里 —— 它漏一行就会让
   // 整段客人从页面上消失（2026-08-02 的 33 人事故），必须能被测试钉住。
-  const buckets = WORKLIST_GROUPS.map(({ key, members }) => {
+  const buckets = WORKLIST_GROUPS.map(({ key, members, layer }) => {
     const all = ranked
       .filter((c) => members.includes(c.seg.segment))
       // 置顶的排最前（多个置顶按最近钉的在上）。只在桶内生效 ——
@@ -363,9 +412,11 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
         return 0
       })
     const people = all.slice(0, PER_BUCKET_LIMIT).map(toRow)
-    const meta = groupDisplayMeta({ key, members })
+    const meta = groupDisplayMeta({ key, members, layer })
     return {
       segment: key,
+      // 这一列在页面上属于哪一层（要人做的 / 刚有动作的 / 先放着的）。
+      layer,
       label: meta.label,
       howTo: meta.howTo,
       batch: meta.batch,
@@ -413,14 +464,27 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       }
     })
 
-  // 今天已经动了多少人。没有这个数字，销售打了 15 通电话也看不到自己的进度 ——
-  // 名单只会越看越像干不完，明天就不想打开了。
-  // 按触点的发生时间算（不是写入时间），补记昨天的电话不会算进今天。
-  const startOfDay = new Date(now)
-  startOfDay.setHours(0, 0, 0, 0)
+  /**
+   * 今天已经动过多少人。没有这个数字，销售打了 15 通电话也看不到自己的进度 ——
+   * 名单只会越看越像干不完，明天就不想打开了。按触点的**发生时间**算
+   * （不是写入时间），补记昨天的电话不会算进今天。
+   *
+   * 两处曾经算错，都会让这个数字骗人：
+   *  · 按服务器（UTC）的日子算 —— 纽西兰上午做的活，到中午 UTC 跨日会集体
+   *    清零，销售以为系统把他一早的活弄丢了。
+   *  · 把 Mailchimp 群发算进去 —— 一封群发能让这个数字跳到几百，而实际上
+   *    没有任何一个人被真的跟过。
+   */
+  const today = localDay(now.toISOString(), timeZone)
   const doneToday = new Set(
     touches
-      .filter((t) => t.direction === 'outbound' && new Date(t.occurred_at) >= startOfDay)
+      .filter(
+        (t) =>
+          t.direction === 'outbound' &&
+          !AUTOMATED_SOURCES.has(t.source ?? '') &&
+          !engagementFromMetadata(t.metadata) &&
+          localDay(t.occurred_at, timeZone) === today,
+      )
       .map((t) => t.contact_id),
   ).size
 

@@ -43,6 +43,12 @@ interface Row {
   pinned: boolean
   pinnedAt: string | null
   suggestedStage: { toStage: string; label: string; why: string } | null
+  /** 今天已经有人联系过他 —— 卡片变浅，不用靠记。 */
+  doneToday?: boolean
+  /** 上次是谁跟的。不知道就是 null，页面不假装。 */
+  lastBy?: string | null
+  /** 他打开过邮件、之后没人跟。只是提示，不参与排序。 */
+  openedDaysAgo?: number | null
 }
 
 interface OffRow {
@@ -58,8 +64,11 @@ interface OffRow {
   lastNote: string | null
 }
 
+type Layer = 'waiting' | 'acted' | 'queued'
+
 interface Bucket {
   segment: Segment
+  layer: Layer
   label: string
   howTo: string
   batch: 'call_one_by_one' | 'send_email' | 'none'
@@ -80,6 +89,19 @@ interface Payload {
   viewerEmail?: string | null
   error?: string
 }
+
+/**
+ * 三层的标题。
+ *
+ * 这一页只回答一个问题：**现在轮到人做什么**。
+ * 第一层做完，今天就算过关；第二层是系统盯到有动作、自己浮上来的；
+ * 第三层默认折起来 —— 那是库存，不是今天的活。
+ */
+const LAYERS: Array<{ key: Layer; title: string; hint: string; foldByDefault: boolean }> = [
+  { key: 'waiting', title: '客人在等你', hint: '今天必须有人回。做完这一层，今天就算过关。', foldByDefault: false },
+  { key: 'acted', title: '他刚有动作', hint: '系统盯到的 —— 点了我们发的链接，人还热着。', foldByDefault: false },
+  { key: 'queued', title: '先放着的人', hint: '现在不用一个个打。他们一旦有动作，会自动跳到上面两层。', foldByDefault: true },
+]
 
 const OFF_GROUP_LABEL: Record<OffRow['group'], string> = {
   won: '已经成交 · 在走流程',
@@ -154,6 +176,39 @@ function ReachAction({ row }: { row: Row }) {
 }
 
 /**
+ * 跟进标记 —— 早上打开这一页，一眼回答「昨天跟到哪了」。
+ *
+ * 三条信息，按对早上那一刻的价值排：
+ *  · 今天已经跟过 → 整张卡变浅 + 打勾，不用靠记
+ *  · 上次谁跟的 → 两个销售同时跟一个客人，比谁都不跟更糟
+ *  · 上次聊了什么 → 拿起电话前必须想起上下文
+ *
+ * 外加一条弱信号：**他打开过邮件**。它绝不参与排序、绝不进桶（Apple 会替
+ * 用户自动打开邮件），但拿起电话时多一句「看到您看了我们的邮件」是有用的。
+ */
+function FollowUpMarks({ row }: { row: Row }) {
+  const bits: string[] = []
+  if (row.lastBy) bits.push(`上次 ${row.lastBy} 跟的`)
+  if (typeof row.openedDaysAgo === 'number') {
+    bits.push(row.openedDaysAgo <= 0 ? '今天打开过邮件' : `${row.openedDaysAgo} 天前打开过邮件`)
+  }
+  if (bits.length === 0 && !row.lastNote) return null
+
+  return (
+    <div className="border-t border-me-charcoal/8 px-3 py-2">
+      {row.lastNote && (
+        <p className="line-clamp-2 text-[13px] leading-snug text-me-charcoal/60">
+          上次：{row.lastNote}
+        </p>
+      )}
+      {bits.length > 0 && (
+        <p className="mt-1 text-[12px] text-me-charcoal/40">{bits.join(' · ')}</p>
+      )}
+    </div>
+  )
+}
+
+/**
  * 看板上的一张人卡。列很窄，只放最少的信息，其余进抽屉。
  *
  * 整张卡不能再是一个 <button> —— 图钉和「改阶段」提议都要能单独点，
@@ -172,11 +227,14 @@ function Card({
   onAcceptStage: (row: Row) => void
 }) {
   const waited = waitedText(row.lastTouchAt)
+  // 今天已经跟过的整张卡变浅 —— 销售扫一眼就知道还剩哪些没动，
+  // 不用靠脑子记。鼠标移上去恢复，因为还是要能点进去看。
+  const done = row.doneToday === true
   return (
     <div
       className={`relative mb-2 rounded-xl border bg-white shadow-sm transition ${
-        row.pinned ? 'border-me-ochre/60' : 'border-me-charcoal/10 hover:border-me-ochre/50'
-      }`}
+        done ? 'opacity-50 hover:opacity-100' : ''
+      } ${row.pinned ? 'border-me-ochre/60' : 'border-me-charcoal/10 hover:border-me-ochre/50'}`}
     >
       {/* 图钉：钉住的人排在本桶最前 */}
       <button
@@ -194,7 +252,10 @@ function Card({
       </button>
 
       <button onClick={onOpen} className="block w-full p-3 pr-8 text-left">
-        <div className="truncate text-[16px] font-black text-me-charcoal">{row.name}</div>
+        <div className="flex items-baseline gap-1.5">
+          {done && <span className="shrink-0 text-[13px] text-me-ochre" title="今天已经跟过了">✓</span>}
+          <span className="truncate text-[16px] font-black text-me-charcoal">{row.name}</span>
+        </div>
         <p className="mt-1 line-clamp-2 text-[14px] leading-snug text-me-charcoal/65">{row.reason}</p>
 
         {row.dueAt && (
@@ -217,6 +278,9 @@ function Card({
           没号码的人绝不显示「打电话」：CTS 名单里 124 人（26%）没有电话，
           其中 106 人只有 Facebook 身份。让销售去打一个打不了的人，这一页就废了。 */}
       <ReachAction row={row} />
+
+      {/* 早上要一眼看懂的三件事：谁跟的、聊到哪了、他有没有打开过邮件 */}
+      <FollowUpMarks row={row} />
 
       {/* 系统提议改阶段 —— 提议，不自动改。点一下才生效。 */}
       {row.suggestedStage && (
@@ -338,6 +402,73 @@ function BucketColumn({
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * 一层。
+ *
+ * 「先放着的人」默认折起来 —— 那 354 人是库存，不是今天的活。把库存铺在
+ * 「今天该联系谁」上，等于每天早上给销售看一座山；他做不完，就不再打开这一页。
+ * 折起来但**人数照旧显示**，谁都能点开看，不是藏起来。
+ */
+function LayerSection({
+  clientId,
+  layer,
+  buckets,
+  onOpen,
+  onTogglePin,
+  onAcceptStage,
+  onLogged,
+}: {
+  clientId: string
+  layer: (typeof LAYERS)[number]
+  buckets: Bucket[]
+  onOpen: (row: Row) => void
+  onTogglePin: (row: Row) => void
+  onAcceptStage: (row: Row) => void
+  onLogged: (msg: string, reload?: boolean) => void
+}) {
+  const [open, setOpen] = useState(!layer.foldByDefault)
+  if (buckets.length === 0) return null
+
+  const total = buckets.reduce((n, b) => n + b.total, 0)
+
+  return (
+    <section className="mt-5 first:mt-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="mb-2 flex w-full items-baseline gap-2 text-left"
+      >
+        <span className="text-[12px] text-me-charcoal/35">{open ? '▾' : '▸'}</span>
+        <span className="text-[17px] font-black text-me-charcoal">{layer.title}</span>
+        <span className="text-[17px] font-black text-me-ochre">{total}</span>
+        <span className="ml-1 hidden text-[13px] text-me-charcoal/45 sm:inline">{layer.hint}</span>
+      </button>
+
+      {!open && (
+        <p className="rounded-xl border border-dashed border-me-charcoal/15 px-4 py-3 text-[13px] text-me-charcoal/45">
+          {layer.hint} 点上面的标题展开。
+        </p>
+      )}
+
+      {open && (
+        <div className="flex flex-col gap-3 lg:flex-row lg:overflow-x-auto lg:pb-2">
+          {buckets.map((b) => (
+            <BucketColumn
+              key={b.segment}
+              clientId={clientId}
+              bucket={b}
+              onOpen={onOpen}
+              onTogglePin={onTogglePin}
+              onAcceptStage={onAcceptStage}
+              onLogged={onLogged}
+            />
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -804,20 +935,20 @@ export default function CrmTodayPage() {
             </section>
           ) : (
             <>
-              {/* 看板：宽屏并排成列，手机堆成竖排 */}
-              <div className="flex flex-col gap-3 lg:flex-row lg:overflow-x-auto lg:pb-2">
-                {buckets.map((b) => (
-                  <BucketColumn
-                    key={b.segment}
-                    clientId={clientId}
-                    bucket={b}
-                    onOpen={(r) => setPicked(r)}
-                    onTogglePin={togglePin}
-                    onAcceptStage={acceptStage}
-                    onLogged={afterWrite}
-                  />
-                ))}
-              </div>
+              {/* 三层：客人在等你 → 他刚有动作 → 先放着的人。
+                  这一页只回答一个问题：现在轮到人做什么。 */}
+              {LAYERS.map((layer) => (
+                <LayerSection
+                  key={layer.key}
+                  clientId={clientId}
+                  layer={layer}
+                  buckets={buckets.filter((b) => b.layer === layer.key)}
+                  onOpen={(r) => setPicked(r)}
+                  onTogglePin={togglePin}
+                  onAcceptStage={acceptStage}
+                  onLogged={afterWrite}
+                />
+              ))}
 
               <p className="mt-3 text-xs leading-relaxed text-me-charcoal/45">
                 另有 {data.counts.nurture_future} 人今天不用打（说了以后才走，到时间系统会捞回来）。
