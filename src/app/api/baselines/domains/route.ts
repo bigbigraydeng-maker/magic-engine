@@ -8,6 +8,10 @@ import { INDUSTRY_DICTIONARY } from '@/lib/huatuo/industry-mapper'
 // flooring_tiles / real_estate / logistics_3pl drifted (see migration
 // 20260728000002). Reject it here rather than discovering it months later.
 const VALID_INDUSTRIES = new Set(INDUSTRY_DICTIONARY.map(e => e.category))
+// Precomputed for the error message. Built from the array, NOT by spreading the
+// Set — this tsconfig targets < ES2015, where `[...set]` fails to typecheck
+// (TS2802). `npm run build` skips type validation, so it only shows up in tsc.
+const VALID_INDUSTRY_LIST = INDUSTRY_DICTIONARY.map(e => e.category).sort().join(', ')
 
 // GET /api/baselines/domains?sub_industry=inbound_tour_operator
 // Returns all domains for a sub-industry (or all if no filter)
@@ -46,7 +50,7 @@ export async function POST(req: Request) {
   if (!VALID_INDUSTRIES.has(body.industry)) {
     return NextResponse.json(
       {
-        error: `Unknown industry "${body.industry}". Must be one of: ${[...VALID_INDUSTRIES].sort().join(', ')}`,
+        error: `Unknown industry "${body.industry}". Must be one of: ${VALID_INDUSTRY_LIST}`,
       },
       { status: 400 },
     )

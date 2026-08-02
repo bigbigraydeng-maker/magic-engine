@@ -121,25 +121,104 @@ export function alignPartsToSegments(parts: string[], segments: TranscriptSegmen
   return result
 }
 
+const HEAD_MAX_SKIP_SEC = 25   // 最多跳过前 25 秒找开场白，再多就是判错了
+const HEAD_MIN_SCORE = 0.34    // 低于这个相似度不敢跳，宁可从第一句话起
+
+/**
+ * 找成片该从哪一秒开始：录像开头常有寒暄、清嗓、看提词器、重来一遍，
+ * 这些都不在脚本里。拿脚本的开场白去比对听写分段，命中就从那一段起片。
+ * 比不中(自由发挥/开场白改过)就退回第一句话，绝不乱切内容。
+ */
+export function findHeadStart(hookText: string, segments: TranscriptSegment[]): number {
+  if (segments.length === 0) return 0
+  const firstSpeech = segments[0].start
+  const head = normalizeZh(hookText).slice(0, HEAD_LEN)
+  if (head.length < 4) return firstSpeech
+
+  let best = -1
+  let bestScore = 0
+  for (const seg of segments) {
+    if (seg.start > firstSpeech + HEAD_MAX_SKIP_SEC) break
+    const score = bigramSimilarity(head, normalizeZh(seg.text).slice(0, HEAD_LEN))
+    if (score > bestScore) {
+      bestScore = score
+      best = seg.start
+    }
+  }
+  return bestScore >= HEAD_MIN_SCORE && best >= 0 ? best : firstSpeech
+}
+
 const SUB_MAX_CHARS = 14 // 短句大字：一屏最多 14 个字
 
 /** 一段文本按标点优先切成 ≤maxChars 的短句；没标点就硬切。 */
+// 英文单词 / 网址 / 数字不能从中间切开(切了就成乱码:「business profile」→「siness profile」)。
+// 所以切行的最小单位是「词」不是「字」：一串拉丁字母/数字/点斜杠算一个整体。
+const LATIN_CH = /[A-Za-z0-9@._/-]/
+// 一个中文字算 1 宽，英文字母窄得多算 0.55 —— 同一行能多放英文，视觉宽度才对得上
+const LATIN_WIDTH = 0.55
+
+/** 把一段文字拆成不可再分的单位：拉丁串整体一个，中文一字一个。 */
+function tokenize(text: string): string[] {
+  const tokens: string[] = []
+  let buf = ''
+  for (const ch of text) {
+    if (LATIN_CH.test(ch)) {
+      buf += ch
+    } else {
+      if (buf) { tokens.push(buf); buf = '' }
+      if (ch !== ' ') tokens.push(ch)
+      else if (tokens.length) tokens.push(' ')
+    }
+  }
+  if (buf) tokens.push(buf)
+  return tokens
+}
+
+function tokenWidth(t: string): number {
+  let w = 0
+  for (const ch of t) w += LATIN_CH.test(ch) || ch === ' ' ? LATIN_WIDTH : 1
+  return w
+}
+
+// 断句用的标点。注意 `.` `,` `:` 只有在「不夹在英文/数字中间」时才算标点——
+// 否则 business.google.com 会先被拆成三段，后面再怎么保护也拼不回来。
+const SENTENCE_BREAK = /[，。！？；、：…—]+|[!?;]+|(?<![A-Za-z0-9])[.,:]+|[.,:]+(?![A-Za-z0-9])/
+
 export function splitLine(text: string, maxChars = SUB_MAX_CHARS): string[] {
   const clean = text.replace(/\s+/g, ' ').trim()
   if (!clean) return []
-  // 先按标点断开
-  const pieces = clean.split(/[，。！？；、,.!?;:…—]+/).map((p) => p.trim()).filter(Boolean)
+  // 先按标点断句(标点本身丢掉，字幕不显示标点更清爽)
+  const pieces = clean.split(SENTENCE_BREAK).map((p) => (p ?? '').trim()).filter(Boolean)
+
   const lines: string[] = []
   for (const piece of pieces) {
-    if (piece.length <= maxChars) {
-      lines.push(piece)
-    } else {
-      for (let i = 0; i < piece.length; i += maxChars) {
-        lines.push(piece.slice(i, i + maxChars))
+    let cur = ''
+    let curW = 0
+    for (const tok of tokenize(piece)) {
+      const w = tokenWidth(tok)
+      if (cur && curW + w > maxChars) {
+        lines.push(cur.trim())
+        cur = tok === ' ' ? '' : tok
+        curW = tok === ' ' ? 0 : w
+      } else {
+        cur += tok
+        curW += w
       }
     }
+    if (cur.trim()) lines.push(cur.trim())
   }
-  return lines
+
+  // 尾巴太短(1-2 个字)就并进上一行，避免屏幕上闪一个孤字
+  const merged: string[] = []
+  for (const line of lines) {
+    const prev = merged[merged.length - 1]
+    if (prev && line.length <= 2 && tokenWidth(prev) + tokenWidth(line) <= maxChars + 2) {
+      merged[merged.length - 1] = prev + line
+    } else {
+      merged.push(line)
+    }
+  }
+  return merged
 }
 
 /** 把听写分段切成「短句大字」字幕块，时间按各短句字数在原段里按比例分。 */

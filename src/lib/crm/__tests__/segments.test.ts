@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  segmentContact, todayWorklist, segmentCounts, engagementFromMetadata,
+  segmentContact, todayWorklist, segmentCounts, engagementFromMetadata, reachableChannel,
   type ContactLike, type TouchpointLike,
 } from '../segments'
 
@@ -411,5 +411,65 @@ describe('engagementFromMetadata —— 两个读模型共用的判据', () => {
     expect(engagementFromMetadata({ outcome: 'no_answer' })).toBeNull()
     expect(engagementFromMetadata(null)).toBeNull()
     expect(engagementFromMetadata(undefined)).toBeNull()
+  })
+})
+
+/**
+ * 建议的渠道必须落在这个人真的能被联系到的地方。
+ *
+ * 真实数据：CTS 名单 476 人里 124 人（26%）没有电话号码，其中 106 人只有
+ * Facebook 身份（从私信补挂进来的）。而「新客人，还没打过」这个桶的说明写着
+ * 「越早打通越容易成」—— 销售照着打，打到的是一个空号码位。
+ */
+describe('建议的渠道必须真的能联系到人', () => {
+  const reach = (over: Partial<ContactLike>) =>
+    contact({ touchpoints: [form('2026-07-26T00:00:00Z')], hasPhone: false, hasEmail: false, hasMessenger: false, ...over })
+
+  it('新客人有电话 → 还是打电话', () => {
+    expect(segmentContact(reach({ hasPhone: true }), NOW).suggestedChannel).toBe('phone')
+  })
+
+  it('新客人没电话、只有 Facebook → 改成私信，绝不建议打电话', () => {
+    const r = segmentContact(reach({ hasMessenger: true }), NOW)
+    expect(r.segment).toBe('new_untouched')
+    expect(r.suggestedChannel).toBe('messenger')
+  })
+
+  it('新客人没电话、只有邮箱 → 改成邮件', () => {
+    expect(segmentContact(reach({ hasEmail: true }), NOW).suggestedChannel).toBe('email')
+  })
+
+  it('三样都没有 → 老实说联系不上，不瞎给一个渠道', () => {
+    expect(segmentContact(reach({}), NOW).suggestedChannel).toBe('none')
+  })
+
+  it('打不通要改发短信的人，如果压根没号码 → 退到私信', () => {
+    const c = contact({
+      touchpoints: [form('2026-07-01T00:00:00Z'), call('2026-07-01T00:00:00Z', 'no_answer')],
+      hasPhone: false, hasEmail: false, hasMessenger: true,
+    })
+    const r = segmentContact(c, NOW)
+    expect(r.segment).toBe('retry_channel')
+    expect(r.suggestedChannel).toBe('messenger')
+  })
+
+  it('已经排除的人，就算有电话也仍然是「不联系」', () => {
+    const c = contact({ doNotContact: true, hasPhone: true, touchpoints: [form('2026-07-26T00:00:00Z')] })
+    expect(segmentContact(c, NOW).suggestedChannel).toBe('none')
+  })
+
+  /**
+   * 向后兼容：老调用方（脚本 / 还没改的读模型）不传这三个字段，此时不能替它猜
+   * ——把所有人都判成「联系不上」比判错渠道更糟。
+   */
+  it('调用方没给联系方式信息 → 保持规则原本的建议，不擅自降级', () => {
+    const c = contact({ touchpoints: [form('2026-07-26T00:00:00Z')] })
+    expect(segmentContact(c, NOW).suggestedChannel).toBe('phone')
+  })
+
+  it('优先级：电话 > 私信 > 邮件（能当场把事办了的排前面）', () => {
+    expect(reachableChannel('email', { hasPhone: true, hasEmail: true, hasMessenger: true })).toBe('email')
+    expect(reachableChannel('phone', { hasPhone: false, hasEmail: true, hasMessenger: true })).toBe('messenger')
+    expect(reachableChannel('phone', { hasPhone: false, hasEmail: true, hasMessenger: false })).toBe('email')
   })
 })

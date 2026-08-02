@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { gscInspectUrl, daysAgo, type ManualItem } from '../manual-items'
+import { gscInspectUrl, daysAgo, loadManualItems, type ManualItem } from '../manual-items'
 import { buildTodoEmail, type TodoCounts } from '../daily-todo'
 
 describe('gscInspectUrl', () => {
@@ -74,5 +74,40 @@ describe('buildTodoEmail — manual lane', () => {
     const email = buildTodoEmail(3, EMPTY, '1 Aug')
     expect(email.html).not.toContain('需要你动手')
     expect(email.html).toContain('今天没有待办')
+  })
+})
+
+describe('cron_never_ran — 新 cron 没关联密钥组时必须冒出来', () => {
+  // 为什么要有这条测试：这类失败在应用侧**完全没有痕迹**（curl 层就 401 了，
+  // cron_run_logs 一行都不会写）。daily-cron-digest 只报「跑了但失败」，
+  // 看不见「压根没跑」—— 它自己就这么哑了 51 天。
+  function supabaseWith(cronRows: Array<{ job_name: string }>) {
+    const table = (name: string) => {
+      const rows = name === 'cron_run_logs' ? cronRows : []
+      const chain: Record<string, unknown> = {}
+      const self = () => chain
+      for (const m of ['select', 'eq', 'in', 'not', 'order', 'limit', 'gte', 'is']) {
+        chain[m] = self
+      }
+      chain.limit = () => Promise.resolve({ data: rows })
+      chain.then = (res: (v: { data: unknown }) => unknown) => res({ data: rows })
+      return chain
+    }
+    return { from: (name: string) => table(name) } as never
+  }
+
+  it('从来没跑过 → 给出一条能直接照做的人工任务', async () => {
+    const items = await loadManualItems(supabaseWith([]))
+    const cron = items.find((i) => i.kind === 'cron_never_ran')
+    expect(cron).toBeTruthy()
+    expect(cron!.what).toContain('一次都没跑成功过')
+    // 三件套缺一不可：说清影响 / 具体怎么点 / 直达链接
+    expect(cron!.how).toContain('me-shared-cron-secret')
+    expect(cron!.href).toContain('dashboard.render.com')
+  })
+
+  it('已经跑过 → 不再打扰 PM', async () => {
+    const items = await loadManualItems(supabaseWith([{ job_name: 'team-memory-sweeper' }]))
+    expect(items.find((i) => i.kind === 'cron_never_ran')).toBeUndefined()
   })
 })

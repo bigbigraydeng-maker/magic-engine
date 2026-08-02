@@ -16,6 +16,14 @@ import { useState } from 'react'
 export interface StageOption {
   stageKey: string
   label: string
+  /**
+   * 下面三个只给 lib/crm/drawer-actions 算「下一步该改到哪」用。
+   * 丢掉它们的话，抽屉里那几个阶段快捷键会退化成「随便挑两个」——
+   * 顺序算不出来，「谈崩了」的出口也认不出来。
+   */
+  sortOrder?: number
+  marketingAction?: string
+  isTerminal?: boolean
 }
 
 /** ComposeNote 需要的最小联系人形状 —— 两页各自的 Row 都能满足。 */

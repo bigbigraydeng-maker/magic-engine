@@ -31,6 +31,25 @@ export type ManualItemKind =
   | 'not_indexed'
   | 'meta_stuck'
   | 'crawl_stale'
+  | 'cron_never_ran'
+
+/**
+ * 新建的 cron 在 Render 上必须**手动**关联 me-shared-cron-secret 环境变量组。
+ * `sync: false` 不会自动填值 —— 于是 `$CRON_SECRET` 展开成空串、每次 401、
+ * curl 直接退出，应用侧连一行 `cron_run_logs` 都不会有。
+ *
+ * 这就是为什么它必须出现在这里：daily-cron-digest 只报「跑了但失败」，
+ * 「压根没跑」它看不见。daily-cron-digest 自己就是这么哑了 51 天没人发现的。
+ *
+ * 新增 cron 时往这个数组里加一行；它在 cron_run_logs 里出现第一条记录后自动消失。
+ */
+const CRONS_NEEDING_MANUAL_LINK: Array<{ job: string; label: string }> = [
+  { job: 'team-memory-sweeper', label: '团队工作记忆兜底清扫' },
+]
+
+/** Render 蓝图页 —— 从这儿进去挑服务、关联环境变量组 */
+const RENDER_BLUEPRINT_URL =
+  'https://dashboard.render.com/blueprint/exs-d8ejt0og4nts73a1ce50'
 
 export interface ManualItem {
   kind: ManualItemKind
@@ -78,6 +97,10 @@ export async function loadManualItems(
   const clients = new Map(
     ((clientRows ?? []) as ClientRow[]).map((c) => [c.id, c]),
   )
+  // 基础设施类检查要放在这条提前返回**之前**：新建的 cron 有没有接上密钥，
+  // 跟系统里有几个客户毫无关系。放在后面的话，客户表一空它就被跳过了。
+  await appendNeverRanCrons(supabase, items)
+
   if (clients.size === 0) return items
 
   const ids = Array.from(clients.keys())
@@ -230,4 +253,36 @@ export async function loadManualItems(
   }
 
   return items
+}
+
+async function appendNeverRanCrons(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+): Promise<void> {
+  if (CRONS_NEEDING_MANUAL_LINK.length === 0) return
+
+  const { data } = await supabase
+    .from('cron_run_logs')
+    .select('job_name')
+    .in(
+      'job_name',
+      CRONS_NEEDING_MANUAL_LINK.map((c) => c.job),
+    )
+    .limit(200)
+
+  const seen = new Set(
+    ((data ?? []) as Array<{ job_name: string }>).map((r) => r.job_name),
+  )
+
+  for (const cron of CRONS_NEEDING_MANUAL_LINK) {
+    if (seen.has(cron.job)) continue
+    items.push({
+      kind: 'cron_never_ran',
+      client_id: 'infra',
+      client_name: 'Magic Engine 后台',
+      what: `定时任务「${cron.label}」建好之后一次都没跑成功过，多半是密钥没接上，接不上它每天都会白跑`,
+      how: `打开链接 → 找到服务 ${cron.job} → Environment → Linked Environment Groups → 勾 me-shared-cron-secret → 选「Link and apply on next run」。不用碰密钥本身`,
+      href: RENDER_BLUEPRINT_URL,
+    })
+  }
 }
