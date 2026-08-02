@@ -25,6 +25,8 @@ export interface LectureProduction {
   recording_uploaded_at?: string
   changed_at?: string        // 最后一次改制作方式/换录像的时间(用来判断旧报错是否过期)
   section_clips?: Record<string, SectionClip>
+  /** 片头再多剪几秒(自动判得不准时的手动微调，默认 0)。 */
+  extra_head_trim_sec?: number
 }
 
 interface LectureSnapshot {

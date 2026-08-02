@@ -25,6 +25,7 @@ import { detectActiveRegion, planClipFit } from './screen-clip'
 import type { LectureScript } from './lecture-script'
 import {
   alignPartsToSegments,
+  findHeadStart,
   splitSubtitleChunks,
   type SubtitleChunk,
   type TimedPart,
@@ -112,7 +113,12 @@ async function extractAudio(videoFile: string, dir: string): Promise<string> {
 }
 
 /** OpenAI Whisper 听写，返回带时间戳的分段。 */
-async function whisperTranscribe(audioFile: string): Promise<TranscriptSegment[]> {
+interface Transcript {
+  segments: TranscriptSegment[]
+  words: { start: number; end: number; word: string }[]
+}
+
+async function whisperTranscribe(audioFile: string): Promise<Transcript> {
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) throw new Error('OPENAI_API_KEY 未配置，无法听写字幕')
 
@@ -121,6 +127,9 @@ async function whisperTranscribe(audioFile: string): Promise<TranscriptSegment[]
   form.append('model', 'whisper-1')
   form.append('language', 'zh')
   form.append('response_format', 'verbose_json')
+  // 两种粒度都要点名:只要 word 的话接口不返回 segments，对轴就没数据了
+  form.append('timestamp_granularities[]', 'segment')
+  form.append('timestamp_granularities[]', 'word')   // 逐字时间戳:句首时间太粗，掐头会差 1-2 秒
 
   const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
     method: 'POST',
@@ -129,12 +138,33 @@ async function whisperTranscribe(audioFile: string): Promise<TranscriptSegment[]
     signal: AbortSignal.timeout(300000),
   })
   if (!res.ok) throw new Error(`Whisper 听写失败 ${res.status}: ${await res.text()}`)
-  const json = (await res.json()) as { segments?: { start: number; end: number; text: string }[] }
+  const json = (await res.json()) as {
+    segments?: { start: number; end: number; text: string }[]
+    words?: { start: number; end: number; word: string }[]
+  }
   const segments = (json.segments ?? [])
     .map((s) => ({ start: s.start, end: s.end, text: (s.text ?? '').trim() }))
     .filter((s) => s.text)
   if (segments.length === 0) throw new Error('听写结果为空(录像里没有可识别的语音?)')
-  return segments
+  const words = (json.words ?? []).filter((w) => w.word?.trim())
+  return { segments, words }
+}
+
+/**
+ * 找真正开口的那一刻(秒) —— 用听写的逐字时间戳。
+ *
+ * 两次踩坑记在这:
+ * ① 用「句子」的起点 —— 偏早近 2 秒(那只是它标句子的粗略位置)，PM 一耳朵听出来;
+ * ② 用「声音起来的时刻」 —— 抓到的是吸气/唇音；改判「持续说话」又会把字间停顿当没开始。
+ * 逐字时间戳直接给出第一个字的时刻，语义上就是「他开口了」，最准。
+ */
+export function firstWordStart(
+  words: { start: number; word: string }[],
+  notBefore: number,
+  fallback: number,
+): number {
+  const w = words.find((x) => x.word?.trim() && x.start >= notBefore - 0.5)
+  return w ? w.start : fallback
 }
 
 // ---------- PIL 画课件 / 字幕 ----------
@@ -286,6 +316,8 @@ async function renderCaptions(chunks: SubtitleChunk[], dir: string): Promise<str
  */
 async function composeLecture(params: {
   personFile: string
+  /** 从录像的第几秒开始用(掐掉片头还没开口的部分)。 */
+  personStart: number
   duration: number
   parts: TimedPart[]           // 与 slideFiles 等长
   slideFiles: string[]
@@ -296,14 +328,17 @@ async function composeLecture(params: {
   bg: string
   outFile: string
 }): Promise<void> {
-  const { personFile, duration, parts, slideFiles, screenClipFiles, captionChunks, captionFiles, bg, outFile } = params
+  const { personFile, personStart, duration, parts, slideFiles, screenClipFiles, captionChunks, captionFiles, bg, outFile } = params
   if (parts.length !== slideFiles.length) throw new Error('课件数和时间段数不一致')
 
   // 上半屏每段用哪张/哪段:配了录屏就用录屏，否则用课件
   const upperFiles = slideFiles.map((slide, i) => screenClipFiles[i] ?? slide)
   const isClip = slideFiles.map((_s, i) => Boolean(screenClipFiles[i]))
 
-  const inputs: string[] = ['-i', personFile]
+  // -ss 放在 -i 前面 = 精确快进，片头空白直接不进合成
+  const inputs: string[] = personStart > 0.05
+    ? ['-ss', personStart.toFixed(3), '-i', personFile]
+    : ['-i', personFile]
   for (const f of [...upperFiles, ...captionFiles]) inputs.push('-i', f)
 
   const bgHex = `0x${bg.replace('#', '')}`
@@ -504,6 +539,7 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
     await patchJob(jobId, { status: 'rendering' })
 
     let personFile: string
+    let personStart = 0
     let duration: number
     let parts: TimedPart[]
     let captionChunks: SubtitleChunk[]
@@ -513,14 +549,40 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
       personFile = join(dir, 'rec.mp4')
       await download(production.recording_url, personFile)
       await heartbeat(jobId, 'rendering')   // 大文件下载可能几分钟，别让卡死回收误杀
-      duration = await ffprobeDuration(personFile)
-      const segments = await whisperTranscribe(await extractAudio(personFile, dir))
+      const rawDuration = await ffprobeDuration(personFile)
+      const { segments, words } = await whisperTranscribe(await extractAudio(personFile, dir))
       await heartbeat(jobId, 'rendering')
-      parts = alignPartsToSegments(spokenParts, segments)
-      // 对轴结果首尾对齐整条录像(录像可能比第一句早开始/最后一句晚结束)
+
+      // 掐头去尾：录像开头的寒暄/清嗓/看提词器/重来一遍，结尾伸手关录制，都不该进成片。
+      // 起点用脚本开场白去对(不在脚本里的开场废话自动跳过)；找不到就退回第一句话。
+      // extra_head_trim_sec 是手动微调:自动判得不准时 PM 在工作台上拨，不用改代码。
+      const HEAD_LEAD = 0.25
+      const TAIL_TRAIL = 0.6
+      // 两步定起点:①脚本开场白对到「哪一句」②逐字时间戳对到「第一个字」
+      const sentenceStart = findHeadStart(lecture.hookSpoken, segments)
+      const onset = firstWordStart(words, sentenceStart, sentenceStart)
+      const manualExtra = Math.max(0, production.extra_head_trim_sec ?? 0)
+      personStart = Math.max(0, onset - HEAD_LEAD + manualExtra)
+      const speechEnd = Math.min(rawDuration, segments[segments.length - 1].end + TAIL_TRAIL)
+      duration = Math.max(1, speechEnd - personStart)
+
+      // 时间轴整体左移：对轴和字幕都按「掐头之后」的新时间算。
+      // 注意别在「段」这一级把起点拉回 0 —— 那等于把已经被剪掉的字重新铺开，
+      // 第 0 秒会显示一句没声音的字幕。要在「字幕块」这一级丢弃/裁剪。
+      const shifted = segments
+        .map((s) => ({ ...s, start: s.start - personStart, end: s.end - personStart }))
+        .filter((s) => s.end > 0.15)
+      if (shifted.length === 0) throw new Error('片头剪太多了，一句话都不剩')
+
+      parts = alignPartsToSegments(spokenParts, shifted.map((s) => ({ ...s, start: Math.max(0, s.start) })))
       parts[0] = { ...parts[0], start: 0 }
       parts[parts.length - 1] = { ...parts[parts.length - 1], end: duration }
-      captionChunks = splitSubtitleChunks(segments)
+
+      // 字幕：用未夹紧的时间切块(这样每个字还在它原本该出现的时刻)，
+      // 再把落在片头之外的块整块丢掉，跨界的块起点夹到 0。
+      captionChunks = splitSubtitleChunks(shifted)
+        .filter((c) => c.end > 0.15)
+        .map((c) => ({ ...c, start: Math.max(0, c.start) }))
     } else {
       const renderCfg = await clientRenderConfig(job.client_id)
       const track = await buildDigitalHumanTrack({
@@ -561,7 +623,7 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
 
     const outFile = join(dir, 'final.mp4')
     await composeLecture({
-      personFile, duration, parts,
+      personFile, personStart, duration, parts,
       slideFiles, screenClipFiles,
       captionChunks, captionFiles,
       bg: colors.bg, outFile,

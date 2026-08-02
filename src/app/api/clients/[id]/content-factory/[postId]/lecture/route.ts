@@ -9,6 +9,7 @@ import { getActiveBrief } from '@/lib/content/brief-injector'
 import {
   planLectureScript,
   redoLectureSection,
+  regionMismatch,
   spokenDiversionViolations,
   xhsCtaViolations,
   type LectureScript,
@@ -105,6 +106,12 @@ function validateLecturePayload(lecture: LectureScript): string | null {
   if (violations.length > 0) {
     return `口播和小红书文案里不能出现「${Array.from(new Set(violations)).join('、')}」——这条片要发小红书，带导流词会被限流`
   }
+  // 标题写一个地方、内容讲另一个地方 = 课件一放就穿帮(真实事故:标题「澳洲华人」、内容全是奥克兰)
+  const region = regionMismatch({
+    title: lecture.title ?? '',
+    body: [lecture.hookSpoken, ...lecture.sections.map((s) => `${s.spoken} ${s.slidePoints.join(' ')}`)].join(' '),
+  })
+  if (region) return region
   return null
 }
 
