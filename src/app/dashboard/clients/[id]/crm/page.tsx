@@ -238,6 +238,110 @@ function Card({
 }
 
 /**
+ * 看板上的一列。
+ *
+ * 为什么默认只铺 12 张（2026-08-02 PM 截图反馈）：CTS 的「新客人，还没打过」
+ * 有 140 人，整列一路拉到底，销售翻到第 30 张就没有「今天能做完」的感觉了 ——
+ * 那正是他要逃离的 Excel 的感觉。
+ *
+ * **不是截断，是折叠**：人数照旧显示在列头（那是真实总数），下面一行明说
+ * 「还有 128 人」并且点一下就全出来。系统按紧急程度排过序，最上面 12 个
+ * 本来就是最该先打的；剩下的没有藏起来，只是没挡路。
+ */
+const CARDS_BEFORE_FOLD = 12
+
+function BucketColumn({
+  clientId,
+  bucket,
+  onOpen,
+  onTogglePin,
+  onAcceptStage,
+  onLogged,
+}: {
+  clientId: string
+  bucket: Bucket
+  onOpen: (row: Row) => void
+  onTogglePin: (row: Row) => void
+  onAcceptStage: (row: Row) => void
+  onLogged: (msg: string, reload?: boolean) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const shown = expanded ? bucket.people : bucket.people.slice(0, CARDS_BEFORE_FOLD)
+  // 折起来的人数要算上后端封顶没发过来的那些 —— 只数手上这一批会少报，
+  // 让人以为「展开就能看到全部」。
+  const folded = bucket.total - shown.length
+
+  return (
+    <div className="lg:w-[260px] lg:flex-none">
+      <div className="mb-2 rounded-lg bg-white px-2.5 py-2 lg:bg-transparent lg:px-1 lg:py-0">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-[14px] font-black tracking-wide text-me-charcoal/70">
+            {bucket.label}
+          </span>
+          <span
+            className={`text-lg font-black ${
+              HOT.has(bucket.segment) && bucket.total > 0 ? 'text-[#C2453A]' : 'text-me-charcoal/70'
+            }`}
+          >
+            {bucket.total}
+          </span>
+        </div>
+        <p className="mt-0.5 text-[12px] leading-snug text-me-charcoal/45">{bucket.howTo}</p>
+      </div>
+
+      {bucket.batch === 'send_email' && (
+        <BatchEmail clientId={clientId} bucket={bucket} onLogged={onLogged} />
+      )}
+
+      {shown.map((r) => (
+        <Card
+          key={r.contactId}
+          row={r}
+          onOpen={() => onOpen(r)}
+          onTogglePin={onTogglePin}
+          onAcceptStage={onAcceptStage}
+        />
+      ))}
+
+      {bucket.total === 0 && (
+        <p className="rounded-xl border border-dashed border-me-charcoal/10 py-4 text-center text-[13px] text-me-charcoal/30">
+          这批清空了 ✓
+        </p>
+      )}
+
+      {folded > 0 && !expanded && (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="w-full rounded-xl border border-dashed border-me-charcoal/20 py-2.5 text-[13px] font-bold text-me-charcoal/55 hover:border-me-ochre/50 hover:text-me-charcoal"
+        >
+          还有 {folded} 人 —— 展开
+        </button>
+      )}
+
+      {expanded && (
+        <>
+          {/* 后端每列最多发 300 个。展开后仍然差的那些要照实说，
+              否则「展开」看起来像是给全了。 */}
+          {bucket.truncated && (
+            <p className="py-1 text-center text-[12px] text-me-charcoal/40">
+              还有 {bucket.total - bucket.people.length} 人没显示（这一批太大了）
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => setExpanded(false)}
+            className="w-full py-2 text-[13px] font-bold text-me-charcoal/40 hover:text-me-charcoal"
+          >
+            收起
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
+
+/**
  * 整批一起发邮件（只有「打过没人接」这一批有）。
  *
  * 🔴 密送是红线：地址粘进「收件人」栏，这一批客人就互相看到了彼此的邮箱 ——
@@ -703,42 +807,15 @@ export default function CrmTodayPage() {
               {/* 看板：宽屏并排成列，手机堆成竖排 */}
               <div className="flex flex-col gap-3 lg:flex-row lg:overflow-x-auto lg:pb-2">
                 {buckets.map((b) => (
-                  <div key={b.segment} className="lg:w-[260px] lg:flex-none">
-                    <div className="mb-2 rounded-lg bg-white px-2.5 py-2 lg:bg-transparent lg:px-1 lg:py-0">
-                      <div className="flex items-baseline justify-between gap-2">
-                        <span className="text-[14px] font-black tracking-wide text-me-charcoal/70">
-                          {b.label}
-                        </span>
-                        <span
-                          className={`text-lg font-black ${
-                            HOT.has(b.segment) && b.total > 0 ? 'text-[#C2453A]' : 'text-me-charcoal/70'
-                          }`}
-                        >
-                          {b.total}
-                        </span>
-                      </div>
-                      <p className="mt-0.5 text-[12px] leading-snug text-me-charcoal/45">{b.howTo}</p>
-                    </div>
-
-                    {b.batch === 'send_email' && (
-                      <BatchEmail clientId={clientId} bucket={b} onLogged={afterWrite} />
-                    )}
-
-                    {b.people.map((r) => (
-                      <Card key={r.contactId} row={r} onOpen={() => setPicked(r)} onTogglePin={togglePin} onAcceptStage={acceptStage} />
-                    ))}
-
-                    {b.total === 0 && (
-                      <p className="rounded-xl border border-dashed border-me-charcoal/10 py-4 text-center text-[13px] text-me-charcoal/30">
-                        这批清空了 ✓
-                      </p>
-                    )}
-                    {b.truncated && (
-                      <p className="py-1 text-center text-[12px] text-me-charcoal/40">
-                        + 还有 {b.total - b.people.length} 人
-                      </p>
-                    )}
-                  </div>
+                  <BucketColumn
+                    key={b.segment}
+                    clientId={clientId}
+                    bucket={b}
+                    onOpen={(r) => setPicked(r)}
+                    onTogglePin={togglePin}
+                    onAcceptStage={acceptStage}
+                    onLogged={afterWrite}
+                  />
                 ))}
               </div>
 

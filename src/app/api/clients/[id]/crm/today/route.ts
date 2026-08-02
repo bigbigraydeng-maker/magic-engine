@@ -29,6 +29,7 @@ import {
   engagementFromMetadata,
 } from '@/lib/crm/segments'
 import { WORKLIST_GROUPS, groupDisplayMeta } from '@/lib/crm/worklist-groups'
+import { contactCardTitle } from '@/lib/crm/display-name'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 import { fetchAll } from '@/lib/supabase-paginate'
 
@@ -269,12 +270,57 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     }
   }
 
+  /**
+   * 没名字的人说过的第一句话。
+   *
+   * CTS 有 13 个人显示「未留姓名」—— 全是从私信进来的，Meta 那边就没给名字。
+   * 一排「未留姓名」在看板上等于一排看不出该不该打的人，销售只能一个个点开。
+   * 他们说过话，一句「有没有长城的团」比「未留姓名」有用得多。
+   *
+   * 只为**没有名字**的那几个人查（485 人里 13 个），不给整张表加负担。
+   * 查不到就照旧显示「未留姓名」—— 这一块是锦上添花，坏了不能拖垮整页。
+   */
+  const namelessIds = rows.filter((r) => !(r.display_name ?? '').trim()).map((r) => r.id)
+  const firstSaid = new Map<string, string>()
+  if (namelessIds.length > 0) {
+    try {
+      const { data: convos } = await supabaseAdmin
+        .from('conversations')
+        .select('id, contact_id')
+        .eq('client_id', clientId)
+        .in('contact_id', namelessIds)
+
+      const convoIds = (convos ?? []).map((c) => c.id as string)
+      const convoToContact = new Map((convos ?? []).map((c) => [c.id as string, c.contact_id as string]))
+      if (convoIds.length > 0) {
+        const { data: msgs } = await supabaseAdmin
+          .from('conversation_messages')
+          .select('conversation_id, body, sent_at')
+          .in('conversation_id', convoIds)
+          // 只认客人自己说的 —— 我们的自动欢迎语人人一样，
+          // 拿它当标题会让十几张卡长得一模一样。
+          .eq('direction', 'inbound')
+          .order('sent_at', { ascending: true })
+
+        for (const m of msgs ?? []) {
+          const contactId = convoToContact.get(m.conversation_id as string)
+          // 正序遍历 + 只记第一次 = 每个人取他最早说的那句。
+          if (contactId && !firstSaid.has(contactId) && (m.body ?? '').trim()) {
+            firstSaid.set(contactId, m.body as string)
+          }
+        }
+      }
+    } catch {
+      // 取不到就算了，下面会退回「未留姓名」
+    }
+  }
+
   const toRow = (c: (typeof ranked)[number]) => {
     const row = contactById.get(c.id)
     const last = (byContact.get(c.id) ?? [])[0]
     return {
       contactId: c.id,
-      name: c.displayName || '未留姓名',
+      name: contactCardTitle(c.displayName, firstSaid.get(c.id)),
       phone: row?.primary_phone ?? null,
       email: row?.primary_email ?? null,
       stage: row?.stage ?? null,
@@ -348,7 +394,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       const meta = row?.stage ? stageMeta.get(row.stage) : undefined
       return {
         contactId: c.id,
-        name: c.displayName || '未留姓名',
+        name: contactCardTitle(c.displayName, firstSaid.get(c.id)),
         phone: row?.primary_phone ?? null,
         email: row?.primary_email ?? null,
         stage: row?.stage ?? null,
