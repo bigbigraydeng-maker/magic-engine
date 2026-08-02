@@ -28,6 +28,7 @@ import {
   type Segment,
   engagementFromMetadata,
 } from '@/lib/crm/segments'
+import { WORKLIST_GROUPS, groupDisplayMeta } from '@/lib/crm/worklist-groups'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 import { fetchAll } from '@/lib/supabase-paginate'
 
@@ -300,28 +301,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   // 混在 108 个「打不通」里，最烫的人被埋掉，销售看到的还是一大坨。
   // 现在一次只做一桶，每桶单独封顶 —— 最大的桶(打不通 108)也装得下。
   const PER_BUCKET_LIMIT = 300
-  // 展示用分桶。
-  //
-  //「客户回话了」与「该回电了」合成一桶：对销售来说这两批的动作完全一样 ——
-  // 今天打这个电话。分成两个名字相近的桶，只是让人在「这俩有什么区别」上
-  // 多花一秒。区别保留在每个人卡片下面那行原因里（seg.reason），
-  // 那才是有用的粒度：「客户来消息了，已经等了 18 小时」比桶名更能说明问题。
-  const GROUPS: Array<{ key: string; members: Segment[] }> = [
-    { key: 'following_up',      members: ['replied', 'callback_due'] },
-    { key: 'travel_due',        members: ['travel_due'] },
-    { key: 'new_untouched',     members: ['new_untouched'] },
-    { key: 'retry_channel',     members: ['retry_channel'] },
-    { key: 'stale_conversation',members: ['stale_conversation'] },
-  ]
-
-  const GROUP_META: Record<string, { label: string; howTo: string }> = {
-    following_up: {
-      label: '今天要跟进',
-      howTo: '客户来了消息，或之前约好今天打 —— 这批最容易成，今天一定要联系。每个人下面写了他为什么在这儿。',
-    },
-  }
-
-  const buckets = GROUPS.map(({ key, members }) => {
+  // 展示用分桶在 lib/crm/worklist-groups 里，不在这个文件里 —— 它漏一行就会让
+  // 整段客人从页面上消失（2026-08-02 的 33 人事故），必须能被测试钉住。
+  const buckets = WORKLIST_GROUPS.map(({ key, members }) => {
     const all = ranked
       .filter((c) => members.includes(c.seg.segment))
       // 置顶的排最前（多个置顶按最近钉的在上）。只在桶内生效 ——
@@ -335,8 +317,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
         return 0
       })
     const people = all.slice(0, PER_BUCKET_LIMIT).map(toRow)
-    const base = SEGMENT_ACTION_META[members[0]]
-    const meta = { ...base, ...(GROUP_META[key] ?? {}) }
+    const meta = groupDisplayMeta({ key, members })
     return {
       segment: key,
       label: meta.label,

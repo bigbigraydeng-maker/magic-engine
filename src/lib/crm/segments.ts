@@ -192,7 +192,7 @@ export interface SegmentResult {
   lastTouchAt: string | null
 }
 
-const SEGMENT_META: Record<Segment, { temperature: Temperature; priority: number }> = {
+export const SEGMENT_META: Record<Segment, { temperature: Temperature; priority: number }> = {
   replied:            { temperature: 'hot',  priority: 1 },
   callback_due:       { temperature: 'hot',  priority: 2 },
   // 客人自己说的出行时间快到了 —— 购买意图最明确的一批,排在新 lead 之前。
