@@ -73,6 +73,18 @@ export async function GET(req: NextRequest) {
     authUrl.searchParams.set('scope', MICROSOFT_MAIL_SCOPES.join(' '))
     // 每次都要刷新令牌 —— 没有它，一小时后同步会安静地停掉。
     authUrl.searchParams.set('prompt', 'consent')
+
+    // 想连哪个邮箱，说给 Microsoft 听。
+    //
+    // 2026-08-02 CTS 踩到：浏览器里已经登着一个 Microsoft 账号时，Microsoft
+    // **不会问**你要用哪个 —— 直接拿当前这个走完全程。结果连上的是管理员自己的
+    // `bdm@`，而他想连的是 `info@`。连错邮箱是这条管道最贵的错误（会把别人的
+    // 私人邮件抓进客户的 CRM），不能靠人在登录页上自己反应过来。
+    //
+    // 这只是个「提示」不是「限制」：真正连上的是哪个，仍然由回调那边去问
+    // Microsoft 要（fetchMailboxAddress），并显示在设置页上让人当面核对。
+    const hint = req.nextUrl.searchParams.get('loginHint')?.trim()
+    if (hint) authUrl.searchParams.set('login_hint', hint)
   }
 
   const res = NextResponse.redirect(authUrl.toString())
