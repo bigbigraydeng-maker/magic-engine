@@ -55,9 +55,19 @@
 
 | 客户 | 数量 | 位置 | 说明 |
 |---|---|---|---|
-| **30 Kiteroa** | 12 | `Magic Engine/by-client/05_Kiteroa/IMG_76xx.MOV` | iPhone 原件，2026-07-24 与 07-27 两批 |
+| **30 Kiteroa** | 12 | `Magic Engine/by-client/05_Kiteroa/IMG_76xx.MOV` | iPhone 原件。**07-24 那 7 条已在系统里**（挂在 Roman HU 名下，`project: 30-kiteroa`），07-27 那 5 条未入库 |
 | **Oztop** | 3 | `MagicLab_Studio/Oztop/footage/client_provided/` | 见下方归档记录 |
 | **CTS** | 0 | — | — |
+
+### 系统里已有的真实片段（`video_clips` 表，`track='a_real'`）
+| 客户 | 条数 | 来源 | 用过 |
+|---|---|---|---|
+| Oztop | 7 | 展厅实拍（`Oztop/footage/brand/`） | 0 次 |
+| Roman HU | 7 | 30 Kiteroa 实拍（PM iPhone 2026-07-24） | 各 0-1 次 |
+| CTS | **0** | — | — |
+
+> **只有 CTS 是「不花钱就出不了片」的**。Oztop 和 Roman 都已有真实片段可用，而且几乎没被用过。
+> 归属存疑：30 Kiteroa 的实拍挂在 Roman HU 名下，但系统里另有 `30 Kiteroa Rothesay Bay` 客户档（0 素材）。
 
 **Oztop 那 3 条**（本次从 `~/Downloads/Media` 归档，**复制不移动**，原文件未动）：
 - `OZtop PetFlooring 26.6.4.mov` — 宠物踩地板实拍
