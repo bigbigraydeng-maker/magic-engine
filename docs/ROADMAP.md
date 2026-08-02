@@ -123,6 +123,28 @@
 - [ ] P24.C.1 `deploy/page.tsx` + `DeploymentForm.tsx` 改造
 - [ ] P24.C.2 `publish-geo-snippet/route.ts` 新增路由
 
+## Phase 24.M — Leads 营销中心（多渠道 CRM · 拳头产品，与内容工厂同级）🔄 邮件已通，其余待开工
+
+> PM 2026-08-02 定方向：CRM 要把邮件 / WhatsApp / Messenger / 电话收进一个地方，
+> 客户从一处就能看到全部进度。给**所有** ME 客户用，不是 CTS 专属。
+> 渠道优先级（PM 拍板）：**电话 · 邮件 · Messenger · WhatsApp 高**；短信和 newsletter 靠后（它们不是实时交流）。
+> AI 客服路由（PM 拍板）：客户开通了 Meta AI 客服就默认用它（CTS 就是这么配的）；没开通的改用 WhatsApp Business API 接我们自己的客服中心。
+
+- [x] M1 多渠道发送总线 `lib/messaging/channels.ts` + Messenger 适配器（PR #779）
+- [x] M2 公司邮箱接进来：授权 + 读信 + 落成人 + 每小时同步（PR #774 / #780 / #781）
+- [ ] **M3 从 CRM 里回邮件** —— 权限已经要了 `Mail.Send`，缺一个邮件适配器接进总线（`lib/messaging/adapters/mail.ts`）
+- [ ] **M4 邮件线程接进多渠道读取路径** —— 现在私信页面靠 `channel = 'messenger'` 把邮件挡在外面（PR #781），挡住≠接好；需要一个不挑渠道的对话页
+- [ ] **M5 WhatsApp Business API（新号）** —— 申请清单已给 PM（`docs/sops/whatsapp-business-api-申请清单.md`）。⚠️ AU/NZ 单价未核实（这台开发机连不上 Meta 站点），拿到后台截图后补
+- [ ] **M6 客户员工账号 + 角色 + 归属 + 转派 + 推手机** —— PM：「ME 的登陆系统需要给到 client 的员工层级」。`conversations` 已有 `owner_email` / `snooze_until` 两列待用，不需要 migration
+- [ ] **M7 「谁来回」开关 + Meta AI 客服配置**（AI 先答 / 人工先答 / 分时段）
+- [ ] **M8 IP 电话外呼 + 通话记录回流**（与 Phase 36 Voice Agent 合流）
+- [ ] M9 短信 · M10 从 ME 发 newsletter（优先级靠后，PM 明确）
+
+**已知待补**（都不影响现在上线）：
+- [ ] 设置页那个 ✅「私信正在同步」是写死的，没连也显示绿勾 —— 会骗人，要改成真状态
+- [ ] `mailchimp-activity-sync` 没有 run-logging，断了看不出来
+- [ ] segments / display-name 里有 3 处写死的旅游业措辞，接第二个行业前要抽出来
+
 ## Phase 25 — Self-Serve Portal ⚠️ 已并入 Phase 20.0
 
 - [ ] **P25.A.1** Migration：`public_scan_jobs` 加 `client_id` 可空 FK
