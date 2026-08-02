@@ -28,14 +28,27 @@ const MAX_ASSETS = 40
 /** 视觉分析给的质量分低于此值不进池（1-10）。 */
 const MIN_QUALITY = 5
 
+/**
+ * ⚠️ `quality_score` 是 `vision_metadata` 里的一个键，**不是表上的列**。
+ * 首版按顶层列写，PostgREST 直接报「column does not exist」→ 错误被吞 →
+ * 整个功能静默返回空。而单测用的是自己编的行形状，测试全绿、生产全空。
+ * 教训：纯函数测试保证不了查询正确，行形状必须照着真实 schema 写。
+ */
 export interface AssetRow {
   storage_url: string | null
-  quality_score?: number | null
   vision_metadata?: unknown
 }
 
 function visionOf(row: AssetRow): Record<string, unknown> {
   return (row.vision_metadata ?? {}) as Record<string, unknown>
+}
+
+/** 视觉分析给的 1-10 分；缺失返回 null（老数据不该被误伤）。 */
+function qualityOf(row: AssetRow): number | null {
+  const raw = visionOf(row).quality_score
+  if (raw == null) return null
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : null
 }
 
 /**
@@ -49,10 +62,10 @@ export function selectAssetUrls(rows: AssetRow[], max: number = MAX_ASSETS): str
     .filter((r) => {
       if (!r.storage_url) return false
       if (visionOf(r).kind === 'video') return false
-      const q = r.quality_score
-      return q == null || Number(q) >= MIN_QUALITY
+      const q = qualityOf(r)
+      return q == null || q >= MIN_QUALITY
     })
-    .sort((a, b) => Number(b.quality_score ?? 0) - Number(a.quality_score ?? 0))
+    .sort((a, b) => (qualityOf(b) ?? 0) - (qualityOf(a) ?? 0))
     .map((r) => r.storage_url as string)
     .slice(0, max)
 }
@@ -69,7 +82,7 @@ export async function loadClientAssetPool(
 ): Promise<string[]> {
   const { data, error } = await supabase
     .from('client_assets')
-    .select('storage_url, quality_score, vision_metadata')
+    .select('storage_url, vision_metadata')
     .eq('client_id', clientId)
     .eq('status', 'analyzed')
     .is('archived_at', null)

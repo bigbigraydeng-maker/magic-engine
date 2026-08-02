@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { normaliseSource } from '@/lib/assets/provenance'
 
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']
 const MAX_SIZE_BYTES = 50 * 1024 * 1024 // 50 MB per file
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
 
   const { data, error } = await supabaseAdmin
     .from('client_assets')
-    .select('id, storage_url, original_filename, status, vision_metadata, hook_score, middle_score, cta_score, recommended_use, created_at')
+    .select('id, storage_url, original_filename, status, vision_metadata, hook_score, middle_score, cta_score, recommended_use, created_at, source, ownership, verified_by, verified_at')
     .eq('client_id', clientId)
     .is('archived_at', null)
     .order('created_at', { ascending: false })
@@ -66,6 +67,10 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   if (files.length === 0) {
     return NextResponse.json({ success: false, error: 'No files provided' }, { status: 400 })
   }
+
+  // 来源由上传者指定；认不出一律降级 unknown（打不了真价，但不挡住上传）。
+  // 注意这里收不到 client_verified —— 那个只能走素材库页的确认通道升级，带审计。
+  const source = normaliseSource(formData.get('source'))
 
   await ensureBucket()
 
@@ -104,6 +109,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           file_size_bytes: file.size,
           mime_type: file.type,
           status: 'pending',
+          source,
+          ownership: 'client_exclusive',
         })
         .select('id, storage_url, original_filename')
         .single()

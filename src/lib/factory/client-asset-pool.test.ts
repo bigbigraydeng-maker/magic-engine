@@ -1,10 +1,18 @@
 import { describe, it, expect } from 'vitest'
 import { selectAssetUrls, type AssetRow } from './client-asset-pool'
 
+/**
+ * ⚠️ 行形状照真实 schema 写：`quality_score` 在 `vision_metadata` 里面，
+ * 不是表上的列。首版这里编了个顶层 `quality_score` 字段，测试全绿而生产
+ * 查询直接报错返回空 —— 别再把便于测试的形状当成真实形状。
+ */
 const row = (url: string | null, quality?: number | null, kind?: string): AssetRow => ({
   storage_url: url,
-  quality_score: quality,
-  vision_metadata: kind ? { kind } : { scene: 'interior' },
+  vision_metadata: {
+    scene: 'interior',
+    ...(kind ? { kind } : {}),
+    ...(quality == null ? {} : { quality_score: quality }),
+  },
 })
 
 describe('selectAssetUrls', () => {
@@ -24,6 +32,16 @@ describe('selectAssetUrls', () => {
 
   it('没有质量分的图仍收（老数据不该被误伤）', () => {
     expect(selectAssetUrls([row('legacy', null)])).toEqual(['legacy'])
+  })
+
+  it('质量分是字符串也认（jsonb 取出来是文本）', () => {
+    const stringy: AssetRow = { storage_url: 'sv', vision_metadata: { quality_score: '9' } }
+    const low: AssetRow = { storage_url: 'lo', vision_metadata: { quality_score: '2' } }
+    expect(selectAssetUrls([low, stringy])).toEqual(['sv'])
+  })
+
+  it('vision_metadata 缺失整个字段也不炸', () => {
+    expect(selectAssetUrls([{ storage_url: 'bare' }])).toEqual(['bare'])
   })
 
   it('空地址跳过，不产出打不开的链接', () => {
