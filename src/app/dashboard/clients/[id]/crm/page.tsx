@@ -783,7 +783,16 @@ export default function CrmTodayPage() {
       setData(json)
       if (stageRes.ok) {
         const s = (await stageRes.json()) as { stages?: StageOption[] }
-        setStages((s.stages ?? []).map((x) => ({ stageKey: x.stageKey, label: x.label })))
+        // 排序和阶段类型必须一起带过去 —— 抽屉要靠它们算出「下一步」和「出口」。
+        setStages(
+          (s.stages ?? []).map((x) => ({
+            stageKey: x.stageKey,
+            label: x.label,
+            sortOrder: x.sortOrder,
+            marketingAction: x.marketingAction,
+            isTerminal: x.isTerminal,
+          })),
+        )
       }
     } catch {
       setError('加载失败，检查网络后再试。')
