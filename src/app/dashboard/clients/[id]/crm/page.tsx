@@ -76,6 +76,8 @@ interface Payload {
   totalContacts: number
   todoTotal: number
   doneToday: number
+  /** 从抽屉里发私信时，发出去的话挂在谁名下。 */
+  viewerEmail?: string | null
   error?: string
 }
 
@@ -760,6 +762,7 @@ export default function CrmTodayPage() {
           clientId={clientId}
           row={picked}
           stages={stages}
+          viewerEmail={data?.viewerEmail ?? null}
           onClose={() => { setPicked(null); void load() }}
           onSaved={afterWrite}
         />

@@ -381,6 +381,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   return NextResponse.json({
     buckets,
     offList: off,
+    // 在这一页直接回私信时，发出去的话是挂在谁名下的 —— 两个 CTS 邮箱共用
+    // 这块屏，发送框要当面说清楚现在是谁在说话（跟私信页同一口径）。
+    viewerEmail: access.user.email ?? null,
     counts: segmentCounts(models, now),
     totalContacts: models.length,
     todoTotal: ranked.length,

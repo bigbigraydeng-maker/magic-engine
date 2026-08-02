@@ -10,6 +10,7 @@
 import { useState } from 'react'
 import { ComposeNote, type StageOption } from './ComposeNote'
 import { ContactTimeline } from './ContactTimeline'
+import { MessengerReply } from './MessengerReply'
 
 export interface DrawerRow {
   contactId: string
@@ -26,12 +27,15 @@ export function PersonDrawer({
   clientId,
   row,
   stages,
+  viewerEmail,
   onClose,
   onSaved,
 }: {
   clientId: string
   row: DrawerRow
   stages: StageOption[]
+  /** 从这里发出去的私信挂在谁名下 —— 发送框要当面说清楚。 */
+  viewerEmail: string | null
   onClose: () => void
   onSaved: (msg: string, reload?: boolean) => void
 }) {
@@ -155,6 +159,20 @@ export function PersonDrawer({
               />
             )}
           </div>
+
+          {/* 在这一页直接回私信 —— 没有私信线的人这里什么都不渲染。
+              110 位 CTS 客人只有 Facebook 身份，卡上写着「只能在 Messenger
+              回他」，之前却要跳去另一个页面才回得了。 */}
+          <MessengerReply
+            clientId={clientId}
+            contactId={row.contactId}
+            customerName={row.name}
+            viewerEmail={viewerEmail}
+            onSent={() => {
+              setTimelineKey((k) => k + 1)
+              onSaved('✓ 私信已发出', false)
+            }}
+          />
 
           {/* 往来记录：表单 / 电话 / 私信（以后是邮件、外呼），一条线倒序 */}
           <div className="mt-5">
