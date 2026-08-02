@@ -22,6 +22,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
+import { projectOrFilter } from '@/lib/clients/project-scope'
 
 /** 每个客户最多取这么多张当底图池 —— 够轮换即可，不必全量。 */
 const MAX_ASSETS = 40
@@ -79,14 +80,22 @@ export function selectAssetUrls(rows: AssetRow[], max: number = MAX_ASSETS): str
 export async function loadClientAssetPool(
   clientId: string,
   supabase: SupabaseClient = supabaseAdmin,
+  /** 出片对象楼盘。中介客户(Roman)名下多个楼盘时必须给,否则会跨楼盘串用。 */
+  projectId: string | null = null,
 ): Promise<string[]> {
-  const { data, error } = await supabase
+  let q = supabase
     .from('client_assets')
     .select('storage_url, vision_metadata')
     .eq('client_id', clientId)
     .eq('status', 'analyzed')
     .is('archived_at', null)
-    .limit(MAX_ASSETS * 3)
+
+  // 楼盘级隔离(PM 2026-08-03):做某个楼盘时,只能用该楼盘的 + 不属于任何楼盘的素材;
+  // 不做楼盘时,楼盘专属素材一律不给 —— 别把 A 楼盘的房子放进 B 楼盘或别的客户的片子。
+  const orFilter = projectOrFilter(projectId)
+  q = orFilter ? q.or(orFilter) : q.is('project_id', null)
+
+  const { data, error } = await q.limit(MAX_ASSETS * 3)
 
   if (error || !data) return []
   return selectAssetUrls(data as AssetRow[])
