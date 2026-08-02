@@ -25,6 +25,7 @@ interface Production {
   recording_url?: string
   recording_uploaded_at?: string
   changed_at?: string
+  section_clips?: Record<string, { url: string; added_at: string }>
 }
 interface RenderJob {
   id: string
@@ -100,6 +101,8 @@ export default function LectureWorkbenchPage() {
   const [uploadPct, setUploadPct] = useState<number | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const [linkInput, setLinkInput] = useState('')
+  const [clipIdx, setClipIdx] = useState<number | null>(null)   // 正在给哪个要点配录屏
+  const [clipLink, setClipLink] = useState('')
 
   const base = `/api/clients/${clientId}/content-factory/${postId}`
 
@@ -252,6 +255,20 @@ export default function LectureWorkbenchPage() {
     if (ok) setLinkInput('')
   }
 
+  async function applySectionClip(index: number) {
+    if (!clipLink.trim()) return
+    const ok = await patch(
+      { action: 'section_clip', index, link: clipLink.trim() },
+      `clip-${index}`,
+      '录屏已配上 ✅ 讲到这一段时，上半屏会自动换成你的录屏',
+    )
+    if (ok) { setClipIdx(null); setClipLink('') }
+  }
+
+  async function clearSectionClip(index: number) {
+    await patch({ action: 'section_clip', index, clear: true }, `clip-${index}`, '已取消这一段的录屏')
+  }
+
   async function uploadRecording(file: File) {
     // 直传有 50MB 硬上限(存储服务的限制)。手机拍的讲课视频普遍上百 MB，
     // 传到 98% 才被拒最气人 —— 超了当场拦住，指去 Dropbox 链接那条路(无上限)。
@@ -333,6 +350,8 @@ export default function LectureWorkbenchPage() {
       setBusy(null)
     }
   }
+
+  const sectionClip = (i: number) => data?.production?.section_clips?.[String(i)] ?? null
 
   const vi = data?.viColors
   const slideBg = vi?.primary || '#1A1A2E'
@@ -429,14 +448,56 @@ export default function LectureWorkbenchPage() {
           <div key={i} className="bg-white border border-me-stone rounded-xl p-3 mb-3">
             <div className="flex items-center justify-between mb-2">
               <div className="text-[11px] font-semibold text-me-taupe">要点 {i + 1}</div>
-              <button
-                className="text-[11px] text-me-ochre hover:underline disabled:opacity-40"
-                disabled={busy !== null}
-                onClick={() => { setRedoIdx(redoIdx === i ? null : i); setRedoNote('') }}
-              >
-                这段不行，重写 ↻
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  className="text-[11px] text-me-charcoal hover:underline disabled:opacity-40"
+                  disabled={busy !== null}
+                  onClick={() => { setClipIdx(clipIdx === i ? null : i); setClipLink('') }}
+                >
+                  {sectionClip(i) ? '录屏已配 ✓ 换一个' : '＋ 配录屏'}
+                </button>
+                <button
+                  className="text-[11px] text-me-ochre hover:underline disabled:opacity-40"
+                  disabled={busy !== null}
+                  onClick={() => { setRedoIdx(redoIdx === i ? null : i); setRedoNote('') }}
+                >
+                  这段不行，重写 ↻
+                </button>
+              </div>
             </div>
+            {clipIdx === i && (
+              <div className="bg-me-ivory border border-me-stone rounded-lg p-2 mb-2">
+                <div className="text-[11px] text-me-taupe mb-1">
+                  粘这一段要配的录屏链接(Dropbox)。讲到这段时上半屏自动换成录屏，讲完自动切回课件；
+                  画面会自动裁到操作区放大、并配合这段的长度。
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    value={clipLink}
+                    onChange={(e) => setClipLink(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') void applySectionClip(i) }}
+                    placeholder="https://www.dropbox.com/…"
+                    className="flex-1 min-w-0 text-xs border border-me-stone rounded-lg px-2 py-1.5"
+                  />
+                  <button
+                    disabled={busy !== null || !clipLink.trim()}
+                    onClick={() => applySectionClip(i)}
+                    className="flex-none text-xs font-semibold text-white bg-me-ochre rounded-lg px-3 disabled:opacity-40"
+                  >
+                    {busy === `clip-${i}` ? '检查中…' : '用这个'}
+                  </button>
+                </div>
+                {sectionClip(i) && (
+                  <button
+                    disabled={busy !== null}
+                    onClick={() => clearSectionClip(i)}
+                    className="text-[11px] text-status-rej hover:underline mt-1.5 disabled:opacity-40"
+                  >
+                    取消这一段的录屏
+                  </button>
+                )}
+              </div>
+            )}
             {redoIdx === i && (
               <div className="flex gap-2 mb-2">
                 <input

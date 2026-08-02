@@ -16,6 +16,8 @@ interface BaselineDomain {
   notes: string | null
   city: string | null
   geo_scope: 'city' | 'state' | 'national' | null
+  /** false = cron skips it entirely (no spend). Older rows predate the column. */
+  is_active?: boolean
 }
 
 // Group domains by sub_industry
@@ -72,6 +74,12 @@ function labelSubIndustry(key: string): string {
     real_estate_agency_auckland: 'Real Estate — Auckland (City)',
     building_supplies_brisbane:  'Flooring & Tiles — Brisbane (City)',
     logistics_3pl_nz:            '3PL Logistics — New Zealand (National)',
+    // AU/NZ expansion — 20260731100000
+    real_estate_agency_au:       'Real Estate — Australia (National)',
+    real_estate_agency_nz:       'Real Estate — New Zealand (National)',
+    building_supplies_nz:        'Flooring & Building Supplies — New Zealand (National)',
+    tourism_operator_au:         'Tourism Operators — Australia (National)',
+    tourism_operator_nz:         'Tourism Operators — New Zealand (National)',
   }
   return labels[key] ?? key
 }
@@ -237,7 +245,15 @@ function DomainRow({
     <tr className="border-t border-black/5 transition-colors hover:bg-me-ivory">
       <td className="px-4 py-2.5">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-sm font-semibold text-me-charcoal">{domain.domain}</span>
+          <span className={`font-mono text-sm font-semibold ${domain.is_active === false ? 'text-me-charcoal/40 line-through' : 'text-me-charcoal'}`}>{domain.domain}</span>
+          {domain.is_active === false && (
+            <span
+              className="rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-me-charcoal/50"
+              title="已停用 — 定时任务跳过它，不产生数据费用。历史评分保留。"
+            >
+              已停用
+            </span>
+          )}
           {domain.is_client && (
             <span className="rounded-full bg-me-ochre/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-me-ochre">CLIENT</span>
           )}
@@ -296,7 +312,11 @@ function SubIndustryPanel({
   onRefresh: () => void
 }) {
   const [showAdd, setShowAdd] = useState(false)
-  const stats = computeStats(domains)
+  // Paused domains stop being re-scored, so their numbers go stale — keep them
+  // visible in the table but out of the percentiles.
+  const activeDomains = domains.filter(d => d.is_active !== false)
+  const pausedCount = domains.length - activeDomains.length
+  const stats = computeStats(activeDomains)
   const sharedKeywords = domains[0]?.keywords ?? []
 
   async function handleCollect(id: string) {
@@ -321,7 +341,10 @@ function SubIndustryPanel({
       <div className="flex items-center justify-between border-b border-black/10 px-4 py-3">
         <div>
           <h3 className="font-display text-sm font-bold text-me-charcoal">{labelSubIndustry(subIndustry)}</h3>
-          <p className="mt-0.5 text-xs font-semibold text-me-charcoal/45">{domains.length} domains</p>
+          <p className="mt-0.5 text-xs font-semibold text-me-charcoal/45">
+            {activeDomains.length} domains
+            {pausedCount > 0 && <span className="ml-1 text-me-charcoal/35">· {pausedCount} 已停用（不计费、不计入分位）</span>}
+          </p>
         </div>
 
         {/* Percentile badges + trend */}

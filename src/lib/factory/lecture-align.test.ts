@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   alignPartsToSegments,
+  findHeadStart,
   bigramSimilarity,
   normalizeZh,
   splitLine,
@@ -80,8 +81,28 @@ describe('splitLine', () => {
   it('短句原样保留(去掉标点分隔)', () => {
     expect(splitLine('第一步，打开谷歌地图。')).toEqual(['第一步', '打开谷歌地图'])
   })
-  it('超长无标点硬切', () => {
-    expect(splitLine('一二三四五六七八九十一二三四五六', 14)).toEqual(['一二三四五六七八九十一二三四', '五六'])
+  it('超长无标点按上限切(尾巴太短会并进上一行)', () => {
+    expect(splitLine('一二三四五六七八九十甲乙丙丁戊己庚辛', 14))
+      .toEqual(['一二三四五六七八九十甲乙丙丁', '戊己庚辛'])
+  })
+
+  it('英文单词绝不从中间切断(真实事故:business profile → siness profile)', () => {
+    const lines = splitLine('打开你的 business profile 页面看一下', 14)
+    expect(lines.join('')).toContain('business')
+    // 每个英文词都必须完整出现，不能被切成半截
+    for (const w of ['business', 'profile']) {
+      expect(lines.some((l) => l.includes(w))).toBe(true)
+    }
+  })
+
+  it('网址不被切断', () => {
+    const lines = splitLine('打开 business.google.com 这个网址', 14)
+    expect(lines.some((l) => l.includes('business.google.com'))).toBe(true)
+  })
+
+  it('整段就是一个超长英文串:宁可这一行长一点也不切成乱码', () => {
+    const lines = splitLine('abcdefghijklmnopqrstuvwxyz0123456789', 14)
+    expect(lines).toEqual(['abcdefghijklmnopqrstuvwxyz0123456789'])
   })
   it('空文本返回空数组', () => {
     expect(splitLine('   ')).toEqual([])
@@ -104,5 +125,47 @@ describe('splitSubtitleChunks', () => {
 
   it('跳过空段', () => {
     expect(splitSubtitleChunks([{ start: 0, end: 1, text: '  ' }])).toEqual([])
+  })
+})
+
+describe('findHeadStart', () => {
+  const HOOK = '你有没有试过在Google上搜你自己的生意'
+
+  it('开头有寒暄/清嗓时，从真正讲开场白那一段起片', () => {
+    const segs = [
+      { start: 0.5, end: 2.0, text: '好 那我开始了啊' },
+      { start: 2.1, end: 3.4, text: '等一下 我调一下' },
+      { start: 3.6, end: 8.0, text: '你有没有试过在Google上搜你自己的生意' },
+    ]
+    expect(findHeadStart(HOOK, segs)).toBe(3.6)
+  })
+
+  it('一上来就进正题:不跳，从第一句起', () => {
+    const segs = [
+      { start: 1.2, end: 6.0, text: '你有没有试过在Google上搜你自己的生意' },
+      { start: 6.1, end: 9.0, text: '结果根本找不到' },
+    ]
+    expect(findHeadStart(HOOK, segs)).toBe(1.2)
+  })
+
+  it('完全对不上(自由发挥)时退回第一句，不乱切', () => {
+    const segs = [
+      { start: 0.8, end: 4.0, text: '今天我们聊点别的东西' },
+      { start: 4.1, end: 9.0, text: '完全不一样的内容在这里' },
+    ]
+    expect(findHeadStart(HOOK, segs)).toBe(0.8)
+  })
+
+  it('开场白出现得太晚(超过 25 秒)不跳，防判错切掉正片', () => {
+    const segs = [
+      { start: 0.5, end: 3.0, text: '随便说点什么东西' },
+      { start: 40, end: 46, text: '你有没有试过在Google上搜你自己的生意' },
+    ]
+    expect(findHeadStart(HOOK, segs)).toBe(0.5)
+  })
+
+  it('空输入不崩', () => {
+    expect(findHeadStart(HOOK, [])).toBe(0)
+    expect(findHeadStart('', [{ start: 2, end: 5, text: '随便' }])).toBe(2)
   })
 })

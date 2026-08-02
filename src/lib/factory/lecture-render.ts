@@ -10,7 +10,7 @@
 
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { createWriteStream } from 'node:fs'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -21,9 +21,11 @@ import { generateVoiceover } from '@/lib/audio/minimax-voice'
 import { runMuapi } from '@/lib/muapi/client'
 import { getActiveBrief } from '@/lib/content/brief-injector'
 import { loadLecturePost } from './lecture-post'
+import { detectActiveRegion, planClipFit } from './screen-clip'
 import type { LectureScript } from './lecture-script'
 import {
   alignPartsToSegments,
+  findHeadStart,
   splitSubtitleChunks,
   type SubtitleChunk,
   type TimedPart,
@@ -78,9 +80,20 @@ async function heartbeat(jobId: string, status: string): Promise<void> {
  * 超时按大文件放宽到 20 分钟(整段录像可能几百 MB)。
  */
 async function download(url: string, dest: string, timeoutMs = 20 * 60 * 1000): Promise<void> {
-  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
-  if (!res.ok || !res.body) throw new Error(`下载失败 ${res.status}: ${url}`)
-  await pipeline(Readable.fromWeb(res.body as import('node:stream/web').ReadableStream), createWriteStream(dest))
+  // 几百 MB 的下载偶尔会被网络掐断，重试两次再判死(整单重来代价太大)
+  let lastErr: unknown
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
+      if (!res.ok || !res.body) throw new Error(`下载失败 ${res.status}`)
+      await pipeline(Readable.fromWeb(res.body as import('node:stream/web').ReadableStream), createWriteStream(dest))
+      return
+    } catch (e) {
+      lastErr = e
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 3000 * attempt))
+    }
+  }
+  throw new Error(`下载失败(重试 3 次): ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`)
 }
 
 async function ffprobeDuration(file: string): Promise<number> {
@@ -100,7 +113,12 @@ async function extractAudio(videoFile: string, dir: string): Promise<string> {
 }
 
 /** OpenAI Whisper 听写，返回带时间戳的分段。 */
-async function whisperTranscribe(audioFile: string): Promise<TranscriptSegment[]> {
+interface Transcript {
+  segments: TranscriptSegment[]
+  words: { start: number; end: number; word: string }[]
+}
+
+async function whisperTranscribe(audioFile: string): Promise<Transcript> {
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) throw new Error('OPENAI_API_KEY 未配置，无法听写字幕')
 
@@ -109,6 +127,9 @@ async function whisperTranscribe(audioFile: string): Promise<TranscriptSegment[]
   form.append('model', 'whisper-1')
   form.append('language', 'zh')
   form.append('response_format', 'verbose_json')
+  // 两种粒度都要点名:只要 word 的话接口不返回 segments，对轴就没数据了
+  form.append('timestamp_granularities[]', 'segment')
+  form.append('timestamp_granularities[]', 'word')   // 逐字时间戳:句首时间太粗，掐头会差 1-2 秒
 
   const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
     method: 'POST',
@@ -117,12 +138,33 @@ async function whisperTranscribe(audioFile: string): Promise<TranscriptSegment[]
     signal: AbortSignal.timeout(300000),
   })
   if (!res.ok) throw new Error(`Whisper 听写失败 ${res.status}: ${await res.text()}`)
-  const json = (await res.json()) as { segments?: { start: number; end: number; text: string }[] }
+  const json = (await res.json()) as {
+    segments?: { start: number; end: number; text: string }[]
+    words?: { start: number; end: number; word: string }[]
+  }
   const segments = (json.segments ?? [])
     .map((s) => ({ start: s.start, end: s.end, text: (s.text ?? '').trim() }))
     .filter((s) => s.text)
   if (segments.length === 0) throw new Error('听写结果为空(录像里没有可识别的语音?)')
-  return segments
+  const words = (json.words ?? []).filter((w) => w.word?.trim())
+  return { segments, words }
+}
+
+/**
+ * 找真正开口的那一刻(秒) —— 用听写的逐字时间戳。
+ *
+ * 两次踩坑记在这:
+ * ① 用「句子」的起点 —— 偏早近 2 秒(那只是它标句子的粗略位置)，PM 一耳朵听出来;
+ * ② 用「声音起来的时刻」 —— 抓到的是吸气/唇音；改判「持续说话」又会把字间停顿当没开始。
+ * 逐字时间戳直接给出第一个字的时刻，语义上就是「他开口了」，最准。
+ */
+export function firstWordStart(
+  words: { start: number; word: string }[],
+  notBefore: number,
+  fallback: number,
+): number {
+  const w = words.find((x) => x.word?.trim() && x.start >= notBefore - 0.5)
+  return w ? w.start : fallback
 }
 
 // ---------- PIL 画课件 / 字幕 ----------
@@ -200,6 +242,7 @@ img.save(cfg["out"])
 `
 
 // 字幕：全帧透明 PNG，短句大字白字黑描边，字幕带起点 y 由参数给。
+const CAPTION_H = 160        // 字幕条高度(只画这一条，不画整帧)
 const CAPTION_PY = `
 import sys, json
 from PIL import Image, ImageDraw, ImageFont
@@ -211,7 +254,8 @@ font = ImageFont.truetype(cfg["font"], 68)
 text = cfg["text"]
 box = d.textbbox((0, 0), text, font=font, stroke_width=5)
 x = (W - (box[2] - box[0])) // 2
-d.text((x, cfg["y"]), text, font=font, fill="white", stroke_width=5, stroke_fill="black")
+y = (H - (box[3] - box[1])) // 2
+d.text((x, y), text, font=font, fill="white", stroke_width=5, stroke_fill="black")
 img.save(cfg["out"])
 `
 
@@ -258,7 +302,7 @@ async function renderCaptions(chunks: SubtitleChunk[], dir: string): Promise<str
   const files: string[] = []
   for (let i = 0; i < chunks.length; i++) {
     const out = join(dir, `cap${i}.png`)
-    await exec('python3', ['-c', CAPTION_PY, JSON.stringify({ w: W, h: H, y: SUB_Y, text: chunks[i].text, font: CJK_FONT, out })])
+    await exec('python3', ['-c', CAPTION_PY, JSON.stringify({ w: W, h: CAPTION_H, text: chunks[i].text, font: CJK_FONT, out })])
     files.push(out)
   }
   return files
@@ -272,19 +316,30 @@ async function renderCaptions(chunks: SubtitleChunk[], dir: string): Promise<str
  */
 async function composeLecture(params: {
   personFile: string
+  /** 从录像的第几秒开始用(掐掉片头还没开口的部分)。 */
+  personStart: number
   duration: number
   parts: TimedPart[]           // 与 slideFiles 等长
   slideFiles: string[]
+  /** 该段若配了录屏(已切好、时长与该段一致)，上半屏放录屏而不是课件。 */
+  screenClipFiles: (string | null)[]
   captionChunks: SubtitleChunk[]
   captionFiles: string[]
   bg: string
   outFile: string
 }): Promise<void> {
-  const { personFile, duration, parts, slideFiles, captionChunks, captionFiles, bg, outFile } = params
+  const { personFile, personStart, duration, parts, slideFiles, screenClipFiles, captionChunks, captionFiles, bg, outFile } = params
   if (parts.length !== slideFiles.length) throw new Error('课件数和时间段数不一致')
 
-  const inputs: string[] = ['-i', personFile]
-  for (const f of [...slideFiles, ...captionFiles]) inputs.push('-i', f)
+  // 上半屏每段用哪张/哪段:配了录屏就用录屏，否则用课件
+  const upperFiles = slideFiles.map((slide, i) => screenClipFiles[i] ?? slide)
+  const isClip = slideFiles.map((_s, i) => Boolean(screenClipFiles[i]))
+
+  // -ss 放在 -i 前面 = 精确快进，片头空白直接不进合成
+  const inputs: string[] = personStart > 0.05
+    ? ['-ss', personStart.toFixed(3), '-i', personFile]
+    : ['-i', personFile]
+  for (const f of [...upperFiles, ...captionFiles]) inputs.push('-i', f)
 
   const bgHex = `0x${bg.replace('#', '')}`
   const filters: string[] = [
@@ -293,18 +348,24 @@ async function composeLecture(params: {
     `[base][person]overlay=0:${SLIDE_H}:shortest=0[v0]`,
   ]
   let cur = 'v0'
-  slideFiles.forEach((_f, i) => {
+  upperFiles.forEach((_f, i) => {
     const inIdx = 1 + i
     const { start, end } = parts[i]
     const next = `vs${i}`
-    filters.push(`[${cur}][${inIdx}:v]overlay=0:0:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'[${next}]`)
+    if (isClip[i]) {
+      // 录屏是视频:把它的时间轴平移到本段起点，再只在本段窗口内显示
+      filters.push(`[${inIdx}:v]setpts=PTS-STARTPTS+${start.toFixed(3)}/TB[sc${i}]`)
+      filters.push(`[${cur}][sc${i}]overlay=0:0:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'[${next}]`)
+    } else {
+      filters.push(`[${cur}][${inIdx}:v]overlay=0:0:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'[${next}]`)
+    }
     cur = next
   })
   captionFiles.forEach((_f, i) => {
-    const inIdx = 1 + slideFiles.length + i
+    const inIdx = 1 + upperFiles.length + i
     const { start, end } = captionChunks[i]
     const next = `vc${i}`
-    filters.push(`[${cur}][${inIdx}:v]overlay=0:0:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'[${next}]`)
+    filters.push(`[${cur}][${inIdx}:v]overlay=0:${SUB_Y}:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'[${next}]`)
     cur = next
   })
 
@@ -318,6 +379,65 @@ async function composeLecture(params: {
     '-c:a', 'aac', '-ar', '44100',
     outFile,
   ], { maxBuffer: 32 * 1024 * 1024 })
+}
+
+// ---------- 录屏插入(智能剪辑) ----------
+
+/** 读视频的宽高(裁切框要按源分辨率算)。 */
+async function probeSize(file: string): Promise<{ w: number; h: number }> {
+  const { stdout } = await exec('ffprobe', [
+    '-v', 'quiet', '-select_streams', 'v:0',
+    '-show_entries', 'stream=width,height', '-of', 'csv=p=0:s=x', file,
+  ])
+  const [w, h] = stdout.trim().split('x').map((n) => parseInt(n, 10))
+  if (!w || !h) throw new Error(`无法读取分辨率: ${file}`)
+  return { w, h }
+}
+
+/**
+ * 把一段录屏切成能直接铺在课件位的画面：自动裁到内容区 → 配速对齐该段时长 → 出 1080x960 无声片。
+ * 失败(链接挂了/格式怪)不炸整单：返回 null，那一段照常用课件。
+ */
+async function prepareScreenClip(params: {
+  url: string
+  targetSec: number
+  dir: string
+  index: number
+}): Promise<string | null> {
+  const { url, targetSec, dir, index } = params
+  try {
+    const raw = join(dir, `screen_src_${index}.mp4`)
+    await download(url, raw)
+    const { w, h } = await probeSize(raw)
+    const clipSec = await ffprobeDuration(raw)
+
+    const probeDir = join(dir, `probe_${index}`)
+    await mkdir(probeDir, { recursive: true })
+    const box = await detectActiveRegion({
+      videoFile: raw, frameW: w, frameH: h, durationSec: clipSec, aspect: W / SLIDE_H, dir: probeDir,
+    })
+    const cropFilter = box
+      ? `crop=${box.w}:${box.h}:${box.x}:${box.y}`
+      // 检测不出内容区(整段几乎静止)：退回按目标比例居中裁，至少不变形
+      : `crop='min(iw,ih*${(W / SLIDE_H).toFixed(4)})':'min(ih,iw/${(W / SLIDE_H).toFixed(4)})'`
+
+    const fit = planClipFit(clipSec, targetSec)
+    const chain = [cropFilter, `scale=${W}:${SLIDE_H}`, 'fps=30']
+    if (fit.speed > 1) chain.push(`setpts=PTS/${fit.speed.toFixed(4)}`)
+    if (fit.padSeconds > 0) chain.push(`tpad=stop_mode=clone:stop_duration=${(fit.padSeconds + 0.5).toFixed(2)}`)
+
+    const out = join(dir, `screen_${index}.mp4`)
+    await exec('ffmpeg', [
+      '-y', '-loglevel', 'error', '-i', raw,
+      '-vf', chain.join(','), '-an',
+      '-t', targetSec.toFixed(3),
+      '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+      out,
+    ], { maxBuffer: 32 * 1024 * 1024 })
+    return out
+  } catch {
+    return null
+  }
 }
 
 // ---------- 数字人路径(线已接好，未实测) ----------
@@ -403,10 +523,15 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
     // 口播与课件从同一份结构过滤——空口播段(如没写 CTA)连同它的课件一起剔掉，
     // 绝不让后面的课件错位一页(魏征 m4)
     const allSlides = slidesOfLecture(lecture)
+    const sectionClips = production.section_clips ?? {}
     const entries = [
-      { spoken: lecture.hookSpoken, slide: allSlides[0] },
-      ...lecture.sections.map((s, i) => ({ spoken: s.spoken, slide: allSlides[1 + i] })),
-      { spoken: lecture.ctaSpoken ?? '', slide: allSlides[allSlides.length - 1] },
+      { spoken: lecture.hookSpoken, slide: allSlides[0], clipUrl: null as string | null },
+      ...lecture.sections.map((s, i) => ({
+        spoken: s.spoken,
+        slide: allSlides[1 + i],
+        clipUrl: sectionClips[String(i)]?.url ?? null,   // 该要点配的录屏
+      })),
+      { spoken: lecture.ctaSpoken ?? '', slide: allSlides[allSlides.length - 1], clipUrl: null },
     ].filter((e) => e.spoken && e.spoken.trim())
     if (entries.length === 0) throw new Error('脚本没有任何口播内容')
     const spokenParts = entries.map((e) => e.spoken)
@@ -414,6 +539,7 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
     await patchJob(jobId, { status: 'rendering' })
 
     let personFile: string
+    let personStart = 0
     let duration: number
     let parts: TimedPart[]
     let captionChunks: SubtitleChunk[]
@@ -423,14 +549,40 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
       personFile = join(dir, 'rec.mp4')
       await download(production.recording_url, personFile)
       await heartbeat(jobId, 'rendering')   // 大文件下载可能几分钟，别让卡死回收误杀
-      duration = await ffprobeDuration(personFile)
-      const segments = await whisperTranscribe(await extractAudio(personFile, dir))
+      const rawDuration = await ffprobeDuration(personFile)
+      const { segments, words } = await whisperTranscribe(await extractAudio(personFile, dir))
       await heartbeat(jobId, 'rendering')
-      parts = alignPartsToSegments(spokenParts, segments)
-      // 对轴结果首尾对齐整条录像(录像可能比第一句早开始/最后一句晚结束)
+
+      // 掐头去尾：录像开头的寒暄/清嗓/看提词器/重来一遍，结尾伸手关录制，都不该进成片。
+      // 起点用脚本开场白去对(不在脚本里的开场废话自动跳过)；找不到就退回第一句话。
+      // extra_head_trim_sec 是手动微调:自动判得不准时 PM 在工作台上拨，不用改代码。
+      const HEAD_LEAD = 0.25
+      const TAIL_TRAIL = 0.6
+      // 两步定起点:①脚本开场白对到「哪一句」②逐字时间戳对到「第一个字」
+      const sentenceStart = findHeadStart(lecture.hookSpoken, segments)
+      const onset = firstWordStart(words, sentenceStart, sentenceStart)
+      const manualExtra = Math.max(0, production.extra_head_trim_sec ?? 0)
+      personStart = Math.max(0, onset - HEAD_LEAD + manualExtra)
+      const speechEnd = Math.min(rawDuration, segments[segments.length - 1].end + TAIL_TRAIL)
+      duration = Math.max(1, speechEnd - personStart)
+
+      // 时间轴整体左移：对轴和字幕都按「掐头之后」的新时间算。
+      // 注意别在「段」这一级把起点拉回 0 —— 那等于把已经被剪掉的字重新铺开，
+      // 第 0 秒会显示一句没声音的字幕。要在「字幕块」这一级丢弃/裁剪。
+      const shifted = segments
+        .map((s) => ({ ...s, start: s.start - personStart, end: s.end - personStart }))
+        .filter((s) => s.end > 0.15)
+      if (shifted.length === 0) throw new Error('片头剪太多了，一句话都不剩')
+
+      parts = alignPartsToSegments(spokenParts, shifted.map((s) => ({ ...s, start: Math.max(0, s.start) })))
       parts[0] = { ...parts[0], start: 0 }
       parts[parts.length - 1] = { ...parts[parts.length - 1], end: duration }
-      captionChunks = splitSubtitleChunks(segments)
+
+      // 字幕：用未夹紧的时间切块(这样每个字还在它原本该出现的时刻)，
+      // 再把落在片头之外的块整块丢掉，跨界的块起点夹到 0。
+      captionChunks = splitSubtitleChunks(shifted)
+        .filter((c) => c.end > 0.15)
+        .map((c) => ({ ...c, start: Math.max(0, c.start) }))
     } else {
       const renderCfg = await clientRenderConfig(job.client_id)
       const track = await buildDigitalHumanTrack({
@@ -455,12 +607,24 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
     await patchJob(jobId, { status: 'assembling' })
 
     const slideFiles = await renderSlides(entries.map((e) => e.slide), colors, dir)
+
+    // 配了录屏的段:切成正好这段长度的画面，铺在课件位上(切不出来就照常用课件)
+    const screenClipFiles: (string | null)[] = []
+    for (let i = 0; i < entries.length; i++) {
+      const url = entries[i].clipUrl
+      if (!url) { screenClipFiles.push(null); continue }
+      await heartbeat(jobId, 'assembling')
+      screenClipFiles.push(await prepareScreenClip({
+        url, targetSec: parts[i].end - parts[i].start, dir, index: i,
+      }))
+    }
+
     const captionFiles = await renderCaptions(captionChunks, dir)
 
     const outFile = join(dir, 'final.mp4')
     await composeLecture({
-      personFile, duration, parts,
-      slideFiles,
+      personFile, personStart, duration, parts,
+      slideFiles, screenClipFiles,
       captionChunks, captionFiles,
       bg: colors.bg, outFile,
     })

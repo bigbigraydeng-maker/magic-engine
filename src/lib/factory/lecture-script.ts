@@ -39,6 +39,32 @@ export function xhsCtaViolations(text: string): string[] {
   return XHS_BANNED.filter((w) => lower.includes(w.toLowerCase()))
 }
 
+// 地域词:标题说一个国家、正文全是另一个国家 = 穿帮(真实事故见 SYSTEM 规则)
+const REGION_WORDS: Record<string, string[]> = {
+  澳洲: ['澳洲', '澳大利亚', '悉尼', '墨尔本', '布里斯班', '珀斯', 'australia', 'sydney', 'melbourne', 'brisbane'],
+  新西兰: ['新西兰', '奥克兰', '惠灵顿', '基督城', 'new zealand', 'auckland', 'wellington', 'christchurch', ' nz'],
+}
+
+function regionsIn(text: string): string[] {
+  const lower = (text ?? '').toLowerCase()
+  return Object.entries(REGION_WORDS)
+    .filter(([, words]) => words.some((w) => lower.includes(w)))
+    .map(([region]) => region)
+}
+
+/**
+ * 标题写的地域和正文讲的地域对不上 → 返回提示；一致或都没提 → null。
+ * 只在「正文完全没提标题那个地域」时判定穿帮，避免误杀真的在做两地对比的内容。
+ */
+export function regionMismatch(params: { title: string; body: string }): string | null {
+  const inTitle = regionsIn(params.title)
+  const inBody = regionsIn(params.body)
+  if (inTitle.length === 0 || inBody.length === 0) return null
+  const clash = inTitle.find((r) => !inBody.includes(r))
+  if (!clash) return null
+  return `标题写的是${clash}，但内容讲的是${inBody.join('、')} — 改成一致再保存`
+}
+
 /** 检查口播是否有冲观众喊的导流句式(同片发小红书会限流)。 */
 export function spokenDiversionViolations(text: string): string[] {
   const lower = text.toLowerCase()
@@ -72,6 +98,8 @@ const SYSTEM = `你是短视频「讲课式文案」编剧。把一个选题写�
   (例:不能第二步就要求「描述里带关键词」，第三步才教怎么找关键词——找词必须在写描述之前，或者干脆合成一步)。
 - 多个要点若都在同一个页面/后台里操作，只保留一个要点讲「怎么把它填好」，其余要点换到别的战场
   (例:主页填好之后 → 转向「怎么持续更新」「怎么把词用到别处」)。
+- **地域全篇必须一致**:标题、课件、口播里出现的国家/城市必须是同一个市场
+  (真实事故:标题写「澳洲华人」，正文全是奥克兰/惠灵顿/NZ，课件一放上去就穿帮)。
 
 CTA 规则(违反 = 失败)：
 - ctaSpoken(口播，视频里念出来的)：平台通用安全版，只引导「关注 + 主页合集看全系列」。
