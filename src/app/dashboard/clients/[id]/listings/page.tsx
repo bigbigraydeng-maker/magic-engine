@@ -10,6 +10,7 @@
 
 import Link from 'next/link'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { clientHasIndustryFeature, INDUSTRY_FEATURE_NOTICE } from '@/lib/clients/industry-guard'
 import { ListingsClient } from './_components/ListingsClient'
 
 export const dynamic = 'force-dynamic'
@@ -22,6 +23,25 @@ export default async function ListingsPage({ params }: { params: { id: string } 
         <div className="rounded-xl border border-[#C2453A]/30 bg-[#C2453A]/8 p-4">
           <p className="text-sm font-black text-[#C2453A]">无权访问</p>
           <p className="mt-1 text-sm font-semibold text-me-charcoal/70">{access.error}</p>
+        </div>
+      </div>
+    )
+  }
+
+  // 行业闸:导航已经藏了入口,这里挡直接敲网址的情况 —— 旅行社后台不该有地产页面。
+  if (!(await clientHasIndustryFeature(params.id, 'listings'))) {
+    const notice = INDUSTRY_FEATURE_NOTICE.listings
+    return (
+      <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8">
+        <div className="rounded-xl border border-me-charcoal/12 bg-me-charcoal/[0.03] p-4">
+          <p className="text-sm font-black text-me-charcoal">{notice.title}</p>
+          <p className="mt-1 text-sm font-semibold text-me-charcoal/70">{notice.body}</p>
+          <Link
+            href={`/dashboard/clients/${params.id}`}
+            className="mt-3 inline-block text-xs font-bold text-me-ochre hover:underline"
+          >
+            ← 返回工作台
+          </Link>
         </div>
       </div>
     )

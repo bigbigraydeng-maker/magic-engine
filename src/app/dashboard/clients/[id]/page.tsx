@@ -18,6 +18,7 @@ import { BriefGateBanner } from './_components/BriefGateBanner';
 import { GoalBanner } from './_components/GoalBanner';
 import { WorkLogPanel } from './_components/WorkLogPanel';
 import { ReviewInbox } from '../../factory/_components/ReviewInbox';
+import { industryFeatureFlags } from '@/lib/clients/industry-features';
 
 
 interface Client {
@@ -25,6 +26,8 @@ interface Client {
   name: string;
   domain?: string;
   created_at: string;
+  /** 决定「房子」「行程单」这类行业专属入口显不显示。空 = 认不出，一个都不给。 */
+  industry?: string | null;
 }
 
 // ─── Brand Health Widget ──────────────────────────────────────────────────────
@@ -657,18 +660,24 @@ export default function ClientDetailPage() {
           <section>
             <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">经营工具</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              <ToolCard
-                href={`/dashboard/clients/${clientId}/tailor-made`}
-                title="Tailor-made 行程单"
-                desc="定制行程报价单：填表 → 预览 → 导出品牌 PDF 发给客户"
-                badge="in_house"
-              />
-              <ToolCard
-                href={`/dashboard/clients/${clientId}/listings`}
-                title="房子"
-                desc="中介手上的每一套房：建档、改状态、看每套房带来了多少客人"
-                badge="in_house"
-              />
+              {/* 行业专属:旅行社后台不该有地产工具,建材客户后台不该有旅游行程单
+                  (PM 2026-08-03 点名)。认不出行业就都不给 —— lib/clients/industry-features */}
+              {industryFeatureFlags(client?.industry).tailor_made && (
+                <ToolCard
+                  href={`/dashboard/clients/${clientId}/tailor-made`}
+                  title="Tailor-made 行程单"
+                  desc="定制行程报价单：填表 → 预览 → 导出品牌 PDF 发给客户"
+                  badge="in_house"
+                />
+              )}
+              {industryFeatureFlags(client?.industry).listings && (
+                <ToolCard
+                  href={`/dashboard/clients/${clientId}/listings`}
+                  title="房子"
+                  desc="中介手上的每一套房：建档、改状态、看每套房带来了多少客人"
+                  badge="in_house"
+                />
+              )}
             </div>
           </section>
 

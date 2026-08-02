@@ -20,12 +20,25 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const allowedClientId = headersList.get('x-allowed-client-id') ?? null
   const roleLabel = userRole === 'client-viewer' ? 'Client view' : 'Admin cockpit'
 
+  // 行业决定哪些行业专属入口可见（「房子」只给地产、「行程单」只给旅游）。
+  // 不取行业时一律按「认不出」处理 → 两个入口都不显示，见 lib/clients/industry-features。
+  let clientIndustry: string | null = null
+  if (allowedClientId) {
+    const { data } = await supabase
+      .from('clients')
+      .select('industry')
+      .eq('id', allowedClientId)
+      .maybeSingle()
+    clientIndustry = (data?.industry as string | null) ?? null
+  }
+
   return (
     <DashboardShell
       userEmail={user.email ?? ''}
       userRole={userRole}
       userTier={userTier}
       allowedClientId={allowedClientId}
+      clientIndustry={clientIndustry}
       roleLabel={roleLabel}
     >
       {children}
