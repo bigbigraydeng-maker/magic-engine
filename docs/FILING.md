@@ -30,6 +30,8 @@ PM 问：「发票合同和素材，该放 Claude 客户档案下还是 Dropbox 
 
 ⚠️ **同一个客户在两处的名字不一样**，这已经出过事：30 Kiteroa 的 12 条实拍视频被放进了
 合同库 `by-client/05_Kiteroa/`，系统永远读不到（素材只扫 `MagicLab_Studio`）。
+**2026-08-03 已修正** —— 素材移到 `MagicLab_Studio/Roman_HU/projects/30-Kiteroa/`，
+`05_Kiteroa/` 已清空删除；合同发票留在 `03_WeiWorks_Kiteroa/`（位置本来就对）。
 
 **放错的判断很简单**：是 PDF/DOCX 就进 `by-client`，是 mp4/mov/jpg 就进 `MagicLab_Studio`。
 
@@ -51,6 +53,23 @@ PM 问：「发票合同和素材，该放 Claude 客户档案下还是 Dropbox 
 | `相机上传/` 及其它顶层目录 | **不扫**（混私人内容） | — |
 
 > 拿不准就丢 `_shared/raw_intake/` —— 猜错的代价是点一下确认，不是数据泄漏。
+
+### 中介客户多一层：楼盘
+
+地产中介名下有多个楼盘，素材**绝不能跨楼盘串用**（背后是竞品开发商）。所以路径多一层：
+
+```
+MagicLab_Studio/<中介名>/projects/<楼盘名>/
+    footage/client_provided/   ← 该楼盘实拍（能打真实价格）
+    output/reels/              ← 我们做的成片（不是素材）
+    scripts/                   ← 出片脚本
+```
+
+实例：`MagicLab_Studio/Roman_HU/projects/30-Kiteroa/`。
+
+⚠️ **同一个楼盘的合同发票不跟素材放一起** —— 发票走 `by-client/<开票主体>/`，
+按**开票公司名**建目录（30 Kiteroa 的开票主体是 Wei Works Ltd，所以在
+`03_WeiWorks_Kiteroa/`）。素材按楼盘分，账按付钱的公司分，这两个维度本来就不一样。
 
 ---
 

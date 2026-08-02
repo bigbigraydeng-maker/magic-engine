@@ -55,7 +55,7 @@
 
 | 客户 | 数量 | 位置 | 说明 |
 |---|---|---|---|
-| **30 Kiteroa** | 12 | `Magic Engine/by-client/05_Kiteroa/IMG_76xx.MOV` | iPhone 原件。**07-24 那 7 条已在系统里**（挂在 Roman HU 名下，`project: 30-kiteroa`），07-27 那 5 条未入库 |
+| **30 Kiteroa** | 12 | `MagicLab_Studio/Roman_HU/projects/30-Kiteroa/footage/client_provided/` | iPhone 原件。**2026-08-03 全部 12 条已入库**，挂在 Kiteroa 楼盘下，共 173 秒 |
 | **Oztop** | 3 | `MagicLab_Studio/Oztop/footage/client_provided/` | 见下方归档记录 |
 | **CTS** | 0 | — | — |
 
