@@ -13,19 +13,30 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   discoverSitemapUrls,
+  fetchSitemapPagesViaJina,
   crawlPages,
   normaliseDomain,
   parseLocsFromXml,
   parseSitemapDirectives,
   isFullyCrawlBlocked,
   extractSameDomainLinks,
+  extractBareUrls,
   extractTitle,
   delay,
   DEFAULT_LIMIT,
   DEFAULT_TIMEOUT,
   DEFAULT_RATE_LIMIT_MS,
   MAX_BFS_LINKS,
+  MIN_DISCOVERED_URLS,
 } from '../crawler'
+import { fetchUrlRaw, fetchUrlAsMarkdown } from '../../brief/jina'
+
+// The crawler imports jina dynamically; mock it module-wide so discovery tests
+// control the Jina escalation path. crawlPages tests override via vi.doMock.
+vi.mock('../../brief/jina', () => ({
+  fetchUrlAsMarkdown: vi.fn(),
+  fetchUrlRaw: vi.fn(),
+}))
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -311,6 +322,9 @@ describe('extractTitle', () => {
 describe('discoverSitemapUrls', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
+    // Default: Jina unavailable — direct-fetch tests exercise levels 0-4 only
+    vi.mocked(fetchUrlRaw).mockReset().mockRejectedValue(new Error('jina unavailable'))
+    vi.mocked(fetchUrlAsMarkdown).mockReset().mockRejectedValue(new Error('jina unavailable'))
   })
 
   afterEach(() => {
@@ -541,6 +555,158 @@ describe('discoverSitemapUrls', () => {
       const urls = await discoverSitemapUrls('example.com')
       expect(urls).toEqual([])
     })
+  })
+
+  describe('WAF-blocked domain — Jina escalation (2026-08-01 Oztop/SiteGround)', () => {
+    const CHALLENGE_HTML_ONE_LINK = `<!DOCTYPE html>
+<html><head><title>Checking your browser</title></head>
+<body><h1>One moment please...</h1>
+<a href="https://example.com/">Retry</a>
+</body></html>`
+
+    it('discovers full sitemap via Jina when every direct fetch is blocked', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse('Forbidden', 403)))
+      vi.mocked(fetchUrlRaw).mockResolvedValue(SITEMAP_XML_10_URLS)
+
+      const urls = await discoverSitemapUrls('example.com')
+      expect(urls).toHaveLength(10)
+      expect(vi.mocked(fetchUrlRaw)).toHaveBeenCalledWith('https://example.com/sitemap.xml')
+    })
+
+    it('escalates past a 1-link challenge page instead of returning it (the Oztop bug)', async () => {
+      // Direct homepage fetch "succeeds" but returns a WAF challenge page with
+      // exactly one same-domain link — previously the crawler returned that
+      // single URL and never reached the Jina levels.
+      vi.stubGlobal('fetch', vi.fn()
+        .mockResolvedValueOnce(mockNotFound())                             // robots.txt
+        .mockResolvedValueOnce(mockNotFound())                             // sitemap.xml
+        .mockResolvedValueOnce(mockNotFound())                             // sitemap_index.xml
+        .mockResolvedValueOnce(mockResponse(CHALLENGE_HTML_ONE_LINK, 200)) // homepage (challenge)
+      )
+      vi.mocked(fetchUrlRaw).mockResolvedValue(SITEMAP_XML_10_URLS)
+
+      const urls = await discoverSitemapUrls('example.com')
+      expect(urls).toHaveLength(10)
+      expect(urls).toContain('https://example.com/page-1')
+    })
+
+    it('falls back to the best direct result when Jina also fails', async () => {
+      vi.stubGlobal('fetch', vi.fn()
+        .mockResolvedValueOnce(mockNotFound())                             // robots.txt
+        .mockResolvedValueOnce(mockNotFound())                             // sitemap.xml
+        .mockResolvedValueOnce(mockNotFound())                             // sitemap_index.xml
+        .mockResolvedValueOnce(mockResponse(CHALLENGE_HTML_ONE_LINK, 200)) // homepage (challenge)
+      )
+      // Jina mocks stay rejected (beforeEach default)
+
+      const urls = await discoverSitemapUrls('example.com')
+      expect(urls).toEqual(['https://example.com/'])
+    })
+
+    it('recovers URLs when Jina strips the XML tags (bare-URL fallback)', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('blocked')))
+      vi.mocked(fetchUrlRaw).mockResolvedValue(`XML Sitemap
+https://example.com/page-1
+https://example.com/page-2
+https://example.com/page-3
+https://other-domain.com/external`)
+
+      const urls = await discoverSitemapUrls('example.com')
+      expect(urls).toHaveLength(3)
+      expect(urls.every(u => u.startsWith('https://example.com'))).toBe(true)
+    })
+
+    it('does not call Jina when a direct level already found enough URLs', async () => {
+      vi.stubGlobal('fetch', vi.fn()
+        .mockResolvedValueOnce(mockResponse(ROBOTS_TXT_EMPTY))
+        .mockResolvedValueOnce(mockResponse(SITEMAP_XML_10_URLS))
+      )
+
+      await discoverSitemapUrls('example.com')
+      expect(vi.mocked(fetchUrlRaw)).not.toHaveBeenCalled()
+      expect(vi.mocked(fetchUrlAsMarkdown)).not.toHaveBeenCalled()
+    })
+
+    it('MIN_DISCOVERED_URLS is 2', () => {
+      expect(MIN_DISCOVERED_URLS).toBe(2)
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// fetchSitemapPagesViaJina — sitemap-index recursion through Jina
+// ---------------------------------------------------------------------------
+
+describe('fetchSitemapPagesViaJina', () => {
+  beforeEach(() => {
+    vi.mocked(fetchUrlRaw).mockReset()
+  })
+
+  it('recurses into child sitemaps of a sitemap index', async () => {
+    vi.mocked(fetchUrlRaw).mockImplementation(async (url: string) => {
+      if (url === 'https://example.com/sitemap.xml') return SITEMAP_INDEX_XML
+      if (url === 'https://example.com/sitemap-posts.xml') return SITEMAP_POSTS_XML
+      if (url === 'https://example.com/sitemap-pages.xml') return SITEMAP_PAGES_XML
+      throw new Error(`Unexpected URL: ${url}`)
+    })
+
+    const urls = await fetchSitemapPagesViaJina('https://example.com/sitemap.xml', 0, 0)
+    expect(urls).toHaveLength(6)
+    expect(urls).toContain('https://example.com/post-1')
+    expect(urls).toContain('https://example.com/about')
+  })
+
+  it('skips unreachable child sitemaps and keeps the rest', async () => {
+    vi.mocked(fetchUrlRaw).mockImplementation(async (url: string) => {
+      if (url === 'https://example.com/sitemap.xml') return SITEMAP_INDEX_XML
+      if (url === 'https://example.com/sitemap-pages.xml') return SITEMAP_PAGES_XML
+      throw new Error('Timeout')
+    })
+
+    const urls = await fetchSitemapPagesViaJina('https://example.com/sitemap.xml', 0, 0)
+    expect(urls).toHaveLength(3)
+    expect(urls).toContain('https://example.com/about')
+  })
+
+  it('fetches a self-referencing sitemap only once (Jina "URL Source:" header)', async () => {
+    // Jina's markdown output repeats the fetched URL, which looks like a child
+    // sitemap — the visited set must stop it from recursing into itself.
+    vi.mocked(fetchUrlRaw).mockResolvedValue(
+      'URL Source: https://example.com/sitemap.xml\n\nhttps://example.com/page-1'
+    )
+
+    const urls = await fetchSitemapPagesViaJina('https://example.com/sitemap.xml', 0, 0)
+    expect(urls).toEqual(['https://example.com/page-1'])
+    expect(vi.mocked(fetchUrlRaw)).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops recursion at max depth', async () => {
+    // Chain of distinct sitemaps a → b → c → d; depth 3 must be refused
+    vi.mocked(fetchUrlRaw).mockImplementation(async (url: string) => {
+      const next = { a: 'b', b: 'c', c: 'd', d: 'e' }[url.match(/sitemap-(\w)/)![1]]
+      return `<sitemapindex><sitemap><loc>https://example.com/sitemap-${next}.xml</loc></sitemap></sitemapindex>`
+    })
+
+    const urls = await fetchSitemapPagesViaJina('https://example.com/sitemap-a.xml', 0, 0)
+    expect(urls).toEqual([])
+    // depth 0 (a), 1 (b), 2 (c) fetched; d at depth 3 refused
+    expect(vi.mocked(fetchUrlRaw)).toHaveBeenCalledTimes(3)
+  })
+})
+
+describe('extractBareUrls', () => {
+  it('extracts and de-duplicates bare URLs from text', () => {
+    const text = 'see https://example.com/a and https://example.com/b plus https://example.com/a again'
+    expect(extractBareUrls(text)).toEqual(['https://example.com/a', 'https://example.com/b'])
+  })
+
+  it('returns empty array when no URLs present', () => {
+    expect(extractBareUrls('no links here')).toEqual([])
+  })
+
+  it('stops URLs at quotes and angle brackets', () => {
+    const text = '<loc>https://example.com/x</loc> href="https://example.com/y"'
+    expect(extractBareUrls(text)).toEqual(['https://example.com/x', 'https://example.com/y'])
   })
 })
 

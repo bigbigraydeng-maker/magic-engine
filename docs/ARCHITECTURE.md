@@ -1,7 +1,25 @@
 # Magic Engine — Technical Architecture
 
-> 版本：2026-05-23 · 生产环境：https://magic-engine.onrender.com
-> 配套文档：[PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)（产品视角）· [CLAUDE.md](./CLAUDE.md)（AI 工作指南）· [ROADMAP.md](./ROADMAP.md)（任务路线图）
+> 生产环境：**https://app.magicengine.com.au** · 部署分支 **`main`**
+> 配套文档：[PRODUCT.md](./PRODUCT.md)（产品视角）· [CLAUDE.md](../CLAUDE.md)（AI 工作指南）· [ROADMAP.md](./ROADMAP.md)（未完成任务）
+>
+> ## ⚠️ 本文件是深度设计文档，**不是系统现状**
+>
+> 主体内容写于 **2026-05-23**，此后系统规模增长了一个数量级。**要看现状请去 [STATE.md](./STATE.md)。**
+>
+> 具体差距（2026-07-25 核对）：
+> - **§4 API 路由总览**列了约 45 个端点，实际有 **403 个**。其中 `/api/semrush/*` 已改名
+>   `/api/keyword-intelligence/*`；`/api/cron/sync-airtable`、`/api/cron/weekly-tracker`、
+>   `/api/webhooks/airtable-approved`、`/api/airtable/*` **均已不存在**
+> - **§3 数据库表结构**记录约 15 张表，实际 **141 张**。整块缺失：策略层（`goals` /
+>   `initiatives` / `marketing_plans` / `execution_items`）· Content Factory · MTC 计费 ·
+>   Ads · Memory · MCP · 数据回流快照
+> - **§8 关键环境变量**已被 [ENV.md](./ENV.md) 取代（113 个变量的完整表）。文中的
+>   `ZAPIER_WEBHOOK_SECRET` 全仓 0 引用
+> - **§10 当前状态与待办**停在 2026-05-01 / Phase 8，现已到 Phase 21.K / 36
+>
+> **仍然有效的部分**：§6 核心功能流程 · §11 GEO Composer 设计 · §12 AI Visibility Tracker 设计 ·
+> §13 双信号博客设计 —— 这些模块的设计意图没变。
 
 ---
 
@@ -16,7 +34,7 @@ Magic Engine 是 **Magic Lab 2026 旗舰产品**，承担两大角色：
 - **GEO 优化层**（AI 推荐可见度，2026 Q2 核心建设）⭐
 - **社媒内容矩阵**（全平台内容生产，已成熟）
 
-**对外品牌封装**：客户可见层不暴露第三方真实供应商名，详见 [CLAUDE.md §三 代号映射表](./CLAUDE.md)。
+**对外品牌封装**：客户可见层不暴露第三方真实供应商名，详见 [CLAUDE.md §三 代号映射表](../CLAUDE.md)。
 
 ---
 
@@ -52,7 +70,7 @@ Magic Engine是一个 AI 驱动的社媒内容运营平台，面向代理公司�
 | 网页抓取 | Jina.ai Reader（免费，URL→Markdown） |
 | 内容发布 | Publer API（排期、账户管理） |
 | 数据同步 | Airtable REST API（双向同步） |
-| 部署 | Render（master 分支自动部署） |
+| 部署 | Render（**main** 分支自动部署，读 `render.yaml` Blueprint） |
 
 ---
 
@@ -663,7 +681,7 @@ Step 6: 发布 + 追踪
 
 ## 7. 外部服务一览（含对外封装名）
 
-> ⚠️ **客户/UI 可见层禁止出现"真实服务"列内容**。详见 [CLAUDE.md §三](./CLAUDE.md)。
+> ⚠️ **客户/UI 可见层禁止出现"真实服务"列内容**。详见 [CLAUDE.md §三](../CLAUDE.md)。
 
 | 真实服务 | 对外封装名 | 用途 | 计费模式 |
 |---------|-----------|------|---------|
@@ -714,7 +732,7 @@ CRON_SECRET=                       # Cron job 鉴权
 ZAPIER_WEBHOOK_SECRET=             # Airtable webhook 鉴权
 
 # App
-NEXT_PUBLIC_APP_URL=https://magic-engine.onrender.com
+NEXT_PUBLIC_APP_URL=https://app.magicengine.com.au
 ```
 
 ---
@@ -1178,7 +1196,11 @@ keywords (SEMrush) ──→ blog/opportunities API
 
 | 文档 | 受众 | 内容 |
 |------|------|------|
-| [`PRODUCT_OVERVIEW.md`](./PRODUCT_OVERVIEW.md) | 全员 | 产品愿景、能力体系、商业模式 |
-| [`ROADMAP.md`](./ROADMAP.md) | 项目管理 | 阶段路线图与任务跟踪 |
-| [`ARCHITECTURE.md`](./ARCHITECTURE.md) | 开发团队 | 技术架构（本文件） |
-| [`CLAUDE.md`](./CLAUDE.md) | AI 助手 | 工作指南与代号映射 |
+| [`STATE.md`](./STATE.md) | 全员 | **唯一真相源** — 系统当前状态、部署、cron、模块↔代码映射 |
+| [`ROADMAP.md`](./ROADMAP.md) | 项目管理 | 未完成任务（已完成的在 `history/CHANGELOG.md`） |
+| [`ENV.md`](./ENV.md) | 开发 / 运维 | 环境变量总表 |
+| [`DECISIONS.md`](./DECISIONS.md) | 全员 | 架构与业务决策记录（含已作废的决策） |
+| [`PITFALLS.md`](./PITFALLS.md) | 开发 | 踩坑清单 — 动手前扫一眼 |
+| [`ARCHITECTURE.md`](./ARCHITECTURE.md) | 开发团队 | 技术架构深度设计（本文件） |
+| [`PRODUCT.md`](./PRODUCT.md) | 全员 | 产品愿景、能力体系、商业模式 |
+| [`../CLAUDE.md`](../CLAUDE.md) | AI 助手 | 工作指南与铁律 |

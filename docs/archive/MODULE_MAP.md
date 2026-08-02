@@ -1,5 +1,10 @@
 # Magic Engine — 模块功能映射表
 
+> 🗄️ **已归档 2026-07-25 — 路径已失效。**
+> 文中引用的 `src/lib/semrush/` 和 `src/app/api/semrush/` **已不存在**（改名 `keyword-intelligence`，
+> 入口是 `src/lib/keywords/resolver.ts`）。现行模块↔代码映射见 [../STATE.md §3](../STATE.md)。
+
+
 > 本文件是 Magic Engine 四大模块与线上功能、代码路径、ROADMAP Phase 的完整对照。
 > 最后更新：2026-05-12
 >

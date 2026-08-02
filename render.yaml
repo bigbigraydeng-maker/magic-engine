@@ -43,7 +43,12 @@ services:
         value: Pacific/Auckland
       - key: ANTHROPIC_API_KEY
         sync: false
-      - key: ATLAS_API_KEY
+      # ⚠️ 代码读的是 ATLAS_CLOUD_API_KEY（src/lib/visual/{atlas,seedance,wavespeed}.ts）。
+      # ATLAS_API_KEY 是历史遗留名字，代码里没有任何地方读它 —— 只填它 = 图片/视频生成挂掉。
+      # 两个都先留着，等确认 Render 面板现状后再删旧名。见 docs/PITFALLS.md A1。
+      - key: ATLAS_CLOUD_API_KEY
+        sync: false
+      - key: ATLAS_API_KEY          # 待清理（无代码读取）
         sync: false
       - key: HEYGEN_API_KEY
         sync: false
@@ -101,9 +106,9 @@ services:
   # a Render private service and set REALTIME_WORKER_URL on the web service to its
   # internal URL (see docs/voice-agent/RUNBOOK.md).
 
-  # Vision Asset Intelligence analyzer — every 2 minutes
+  # Vision Asset Intelligence analyzer — every 10 minutes (降频于 2026-07-21, commit b9f8189)
   # Picks up pending client_assets, runs GPT-4o-mini Vision, writes scores.
-  # Reference: ROADMAP.md P21.B.3
+  # Reference: docs/history/CHANGELOG.md (P21.B.3)
   # healthchecks.io: vision-analyzer (1b1cd19b-583a-41ac-baaa-c9415241d5e8)
   - type: cron
     name: vision-analyzer

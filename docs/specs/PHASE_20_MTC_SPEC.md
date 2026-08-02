@@ -327,7 +327,7 @@ async function deductMtc(clientId: string, amount: number, serviceKey: string, r
 
 ## 九、关联文档
 
-- [ROADMAP.md](./ROADMAP.md) — Phase 20 摘要条目
-- [BILLING_TOKEN_SYSTEM.md](./BILLING_TOKEN_SYSTEM.md) — MTC 原始设计文件（FDE 版本参考）
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — 技术架构总览
-- [CLAUDE.md](./CLAUDE.md) — 当前焦点与工作协议
+- [ROADMAP.md](../ROADMAP.md) — Phase 20 摘要条目
+- [archive/BILLING_TOKEN_SYSTEM.md](../archive/BILLING_TOKEN_SYSTEM.md) — MTC 原始设计文件（FDE 版本参考）
+- [ARCHITECTURE.md](../ARCHITECTURE.md) — 技术架构总览
+- [CLAUDE.md](../../CLAUDE.md) — 当前焦点与工作协议
