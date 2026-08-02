@@ -110,10 +110,13 @@ services:
   # Picks up pending client_assets, runs GPT-4o-mini Vision, writes scores.
   # Reference: docs/history/CHANGELOG.md (P21.B.3)
   # healthchecks.io: vision-analyzer (1b1cd19b-583a-41ac-baaa-c9415241d5e8)
+  # 2026-08-03 降频 */10 → */30：24h 内 144 次运行全部零产出（client_assets
+  # 无 pending 行，最新素材停在 2026-06-10）。非交互式批处理——客户传完素材就走，
+  # 由 FDE 事后审阅，晚 30 分钟开始分析无感知。审计见 docs/audits/supabase-request-audit.md §8 P0-1
   - type: cron
     name: vision-analyzer
     env: node
-    schedule: "*/10 * * * *"
+    schedule: "*/30 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 120 -X POST -H "Authorization: Bearer $CRON_SECRET" \
@@ -123,7 +126,13 @@ services:
       - key: CRON_SECRET
         sync: false
 
-  # Poll visual generation jobs every 2 minutes
+  # Poll visual generation jobs every 10 minutes
+  #
+  # ⚠️ 2026-08-03 审计：本任务 24h 内 144 次运行同样零产出，但**刻意不降频**。
+  # 它是用户点了「生成视频」之后在等的完成检查（ReelsStudio 的生成按钮会写
+  # reels_drafts.status='video_generating'，另有 3 个接口写 visual_assets
+  # generation_status='generating'），降频 = 让人干等。空跑只说明当下没人在生成，
+  # 不代表可以放慢。别顺手把它跟隔壁三个一起降了。
   # healthchecks.io: poll-visual-jobs (0dd2b641-499f-4f2f-8b73-73085050a5f0)
   - type: cron
     name: poll-visual-jobs
@@ -181,10 +190,13 @@ services:
   # The status route's stale check is reactive (UI-poll driven), so jobs
   # whose UI was closed mid-run would otherwise sit running forever.
   # healthchecks.io: zhangqian-sweeper (071910fe-b9b7-435d-8b72-f141818eb03d)
+  # 2026-08-03 降频 */15 → */30：24h 内 96 次运行全部零产出。纯超时兜底，从不干活。
+  # 只降到 30 分钟而非每小时：超时阈值是 6 分钟，每小时跑会让真卡住的任务在界面上
+  # 「运行中」挂最多 66 分钟，FDE 会误判系统坏了；30 分钟档最坏 36 分钟。
   - type: cron
     name: zhangqian-sweeper
     env: node
-    schedule: "*/15 * * * *"
+    schedule: "*/30 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
@@ -234,10 +246,13 @@ services:
   # if Render restarts mid-run, rows would otherwise sit generating forever.
   # Reference: ROADMAP.md P14.C.1
   # healthchecks.io: blog-stuck-generating-sweeper (180d3e65-1910-4f8d-a778-409571d5fb46)
+  # 2026-08-03 降频 */15 → */30：24h 内 96 次运行全部零产出（blog_posts 无 generating 行）。
+  # 纯超时兜底，从不干活。同 zhangqian-sweeper，只降到 30 分钟：超时阈值 10 分钟，
+  # 每小时跑会让卡住的文章在界面上「生成中」挂最多 70 分钟；30 分钟档最坏 40 分钟。
   - type: cron
     name: blog-stuck-generating-sweeper
     env: node
-    schedule: "*/15 * * * *"
+    schedule: "*/30 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
