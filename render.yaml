@@ -800,7 +800,9 @@ services:
     name: content-factory-render-worker
     env: docker
     dockerfilePath: ./scripts/render-worker/Dockerfile
-    plan: starter
+    # standard(1 CPU / 2GB)——starter 的半颗 CPU 跑 1080x1920 视频编码要 40-60 分钟/条，
+    # 512MB 还被 160MB 录像撑爆过一次。PM 2026-08-02 拍板升 standard(+US$18/月)。
+    plan: standard
     envVars:
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false

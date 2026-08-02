@@ -314,56 +314,43 @@ async function renderCaptions(chunks: SubtitleChunk[], dir: string): Promise<str
  * 一次 ffmpeg 合成：底色画布 → 下半人像 → 上半课件按时间段换页 → 字幕按块进出 → 人像原声。
  * personFile 提供画面与声音(自己录的整段，或数字人拼好的整段)。
  */
-async function composeLecture(params: {
+/**
+ * 分段合成 —— 一段一次 ffmpeg，最后 concat。
+ *
+ * 为什么不一把梭:近 3 分钟的讲课有 ~80 条字幕，一次性丢给 ffmpeg 就是 86 个输入、
+ * 86 层 overlay。在做片容器(半颗 CPU / 512MB)上会**又慢又危险**——
+ * 真实事故:线上首跑卡在拼片 45 分钟，分不清是在慢慢干还是已经死了，最后被看门狗判死。
+ * 拆成每段一次(≤15 个输入)后:内存有界、每段之间能报平安、失败也只丢一段的时间。
+ */
+async function composePart(params: {
   personFile: string
-  /** 从录像的第几秒开始用(掐掉片头还没开口的部分)。 */
-  personStart: number
-  duration: number
-  parts: TimedPart[]           // 与 slideFiles 等长
-  slideFiles: string[]
-  /** 该段若配了录屏(已切好、时长与该段一致)，上半屏放录屏而不是课件。 */
-  screenClipFiles: (string | null)[]
-  captionChunks: SubtitleChunk[]
+  personSeek: number          // 在原录像里的绝对起点
+  duration: number            // 本段时长
+  upperFile: string           // 本段上半屏:课件 PNG 或录屏 MP4
+  upperIsClip: boolean
+  captions: SubtitleChunk[]   // 时间已换算成「本段内相对秒」
   captionFiles: string[]
   bg: string
   outFile: string
 }): Promise<void> {
-  const { personFile, personStart, duration, parts, slideFiles, screenClipFiles, captionChunks, captionFiles, bg, outFile } = params
-  if (parts.length !== slideFiles.length) throw new Error('课件数和时间段数不一致')
-
-  // 上半屏每段用哪张/哪段:配了录屏就用录屏，否则用课件
-  const upperFiles = slideFiles.map((slide, i) => screenClipFiles[i] ?? slide)
-  const isClip = slideFiles.map((_s, i) => Boolean(screenClipFiles[i]))
-
-  // -ss 放在 -i 前面 = 精确快进，片头空白直接不进合成
-  const inputs: string[] = personStart > 0.05
-    ? ['-ss', personStart.toFixed(3), '-i', personFile]
-    : ['-i', personFile]
-  for (const f of [...upperFiles, ...captionFiles]) inputs.push('-i', f)
+  const { personFile, personSeek, duration, upperFile, upperIsClip, captions, captionFiles, bg, outFile } = params
+  const inputs: string[] = ['-ss', personSeek.toFixed(3), '-t', duration.toFixed(3), '-i', personFile]
+  if (upperIsClip) inputs.push('-i', upperFile)
+  else inputs.push('-loop', '1', '-t', duration.toFixed(3), '-i', upperFile)
+  for (const f of captionFiles) inputs.push('-i', f)
 
   const bgHex = `0x${bg.replace('#', '')}`
   const filters: string[] = [
     `color=c=${bgHex}:s=${W}x${H}:d=${duration.toFixed(3)}[base]`,
     `[0:v]scale=${W}:${H - SLIDE_H}:force_original_aspect_ratio=increase,crop=${W}:${H - SLIDE_H}[person]`,
     `[base][person]overlay=0:${SLIDE_H}:shortest=0[v0]`,
+    `[1:v]scale=${W}:${SLIDE_H}[up]`,
+    `[v0][up]overlay=0:0[v1]`,
   ]
-  let cur = 'v0'
-  upperFiles.forEach((_f, i) => {
-    const inIdx = 1 + i
-    const { start, end } = parts[i]
-    const next = `vs${i}`
-    if (isClip[i]) {
-      // 录屏是视频:把它的时间轴平移到本段起点，再只在本段窗口内显示
-      filters.push(`[${inIdx}:v]setpts=PTS-STARTPTS+${start.toFixed(3)}/TB[sc${i}]`)
-      filters.push(`[${cur}][sc${i}]overlay=0:0:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'[${next}]`)
-    } else {
-      filters.push(`[${cur}][${inIdx}:v]overlay=0:0:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'[${next}]`)
-    }
-    cur = next
-  })
+  let cur = 'v1'
   captionFiles.forEach((_f, i) => {
-    const inIdx = 1 + upperFiles.length + i
-    const { start, end } = captionChunks[i]
+    const inIdx = 2 + i
+    const { start, end } = captions[i]
     const next = `vc${i}`
     filters.push(`[${cur}][${inIdx}:v]overlay=0:${SUB_Y}:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'[${next}]`)
     cur = next
@@ -376,8 +363,67 @@ async function composeLecture(params: {
     '-map', `[${cur}]`, '-map', '0:a',
     '-t', duration.toFixed(3),
     '-r', '30', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
-    '-c:a', 'aac', '-ar', '44100',
+    '-c:a', 'aac', '-ar', '44100', '-ac', '1',
     outFile,
+  ], { maxBuffer: 32 * 1024 * 1024 })
+}
+
+/** 逐段合成 + 拼接。每段做完 touch 一次任务，长活不会被看门狗误杀。 */
+async function composeLecture(params: {
+  jobId: string
+  personFile: string
+  personStart: number
+  parts: TimedPart[]
+  slideFiles: string[]
+  screenClipFiles: (string | null)[]
+  captionChunks: SubtitleChunk[]
+  captionFiles: string[]
+  bg: string
+  dir: string
+  outFile: string
+}): Promise<void> {
+  const { jobId, personFile, personStart, parts, slideFiles, screenClipFiles, captionChunks, captionFiles, bg, dir, outFile } = params
+  if (parts.length !== slideFiles.length) throw new Error('课件数和时间段数不一致')
+
+  const partFiles: string[] = []
+  for (let i = 0; i < parts.length; i++) {
+    const { start, end } = parts[i]
+    const dur = Math.max(0.3, end - start)
+
+    // 本段内的字幕(时间换算成段内相对秒；跨界的裁到段边界)
+    const caps: SubtitleChunk[] = []
+    const capFiles: string[] = []
+    captionChunks.forEach((c, ci) => {
+      if (c.end <= start || c.start >= end) return
+      caps.push({
+        text: c.text,
+        start: Math.max(0, c.start - start),
+        end: Math.min(dur, c.end - start),
+      })
+      capFiles.push(captionFiles[ci])
+    })
+
+    const partOut = join(dir, `part_${String(i).padStart(2, '0')}.mp4`)
+    await composePart({
+      personFile,
+      personSeek: personStart + start,
+      duration: dur,
+      upperFile: screenClipFiles[i] ?? slideFiles[i],
+      upperIsClip: Boolean(screenClipFiles[i]),
+      captions: caps,
+      captionFiles: capFiles,
+      bg,
+      outFile: partOut,
+    })
+    partFiles.push(partOut)
+    await heartbeat(jobId, 'assembling')   // 每段报一次平安
+  }
+
+  const listFile = join(dir, 'parts.txt')
+  await writeFile(listFile, partFiles.map((f) => `file '${f}'`).join('\n'))
+  await exec('ffmpeg', [
+    '-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', listFile,
+    '-c', 'copy', outFile,
   ], { maxBuffer: 32 * 1024 * 1024 })
 }
 
@@ -623,10 +669,10 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
 
     const outFile = join(dir, 'final.mp4')
     await composeLecture({
-      personFile, personStart, duration, parts,
+      jobId, personFile, personStart, parts,
       slideFiles, screenClipFiles,
       captionChunks, captionFiles,
-      bg: colors.bg, outFile,
+      bg: colors.bg, dir, outFile,
     })
 
     const path = `${job.client_id}/render/${jobId}/final.mp4`
