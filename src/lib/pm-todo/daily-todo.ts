@@ -15,7 +15,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { loadManualItems, type ManualItem } from './manual-items'
+import { loadManualItems, dropBrokenLinks, type ManualItem } from './manual-items'
 
 /** FDE focus clients: CTS + Oztop. */
 export const FOCUS_CLIENT_IDS = [
@@ -189,10 +189,15 @@ export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCoun
       .map(([id, v]) => ({ name: v.name, id, [key]: v.count }))
       .sort((a, b) => a.name.localeCompare(b.name))
 
-  const manualItems = await loadManualItems(supabase).catch((err: unknown) => {
+  const rawManualItems = await loadManualItems(supabase).catch((err: unknown) => {
     console.error('[pm-todo] manual items load failed:', err instanceof Error ? err.message : String(err))
     return [] as ManualItem[]
   })
+  // 链接打不开的不下发（PM 2026-08-03：「点过去就是 404，徒增我和 fde 的工作时间」）。
+  // 闸本身出问题时原样放行 —— 少过滤好过整栏消失。
+  const manualItems = await dropBrokenLinks(rawManualItems)
+    .then((r) => r.kept)
+    .catch(() => rawManualItems)
 
   const failedRuns = ((failures.data ?? []) as Array<{ status: string; failed_count: number | null }>)
     .filter((r) => r.status === 'failed' || (r.failed_count ?? 0) > 0)

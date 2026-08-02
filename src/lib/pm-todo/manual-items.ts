@@ -70,6 +70,11 @@ interface ClientRow {
 }
 
 /** GSC URL-inspection deep link — the exact screen with the resubmit button. */
+/**
+ * @deprecated 深链在实际使用中会 404（PM 2026-08-03 实测）。
+ * 用 `gscPropertyUrl` + `gscInspectSteps` 代替 —— 稳定入口 + 文字步骤。
+ * 保留只为让老测试还能引用到它，新代码不要用。
+ */
 export function gscInspectUrl(siteUrl: string, pageUrl: string): string {
   return (
     'https://search.google.com/search-console/inspect' +
@@ -77,11 +82,44 @@ export function gscInspectUrl(siteUrl: string, pageUrl: string): string {
   )
 }
 
+import { gscPropertyUrl, gscInspectSteps, verifyActionLink } from './action-link'
+
 export function daysAgo(iso: string | null, now: Date): number | null {
   if (!iso) return null
   const t = Date.parse(iso)
   if (Number.isNaN(t)) return null
   return Math.floor((now.getTime() - t) / 86_400_000)
+}
+
+/**
+ * 下发前过一遍链接闸。
+ *
+ * PM 2026-08-03:「点过去就是 404，徒增我和 fde 的工作时间」。
+ * 所以公开网址实测不通的**直接不下发** —— 宁可这条今天不提醒,也不给一个白跑的链接。
+ * 登录类站点验不了(见 action-link 头注),它们的 how 里必带文字步骤,不靠链接落点。
+ *
+ * 单条验证失败不拖累其他条目;整体超时也只是少过滤,不阻断待办。
+ */
+export async function dropBrokenLinks(
+  items: ManualItem[],
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ kept: ManualItem[]; dropped: ManualItem[] }> {
+  const verdicts = await Promise.all(
+    items.map((it) =>
+      verifyActionLink(it.href, fetchImpl).catch(() => ({ kind: 'unverifiable' as const })),
+    ),
+  )
+  const kept: ManualItem[] = []
+  const dropped: ManualItem[] = []
+  items.forEach((it, i) => {
+    if (verdicts[i].kind === 'broken') {
+      dropped.push(it)
+      console.warn(`[manual-items] 链接打不开,本条不下发: ${it.kind} ${it.href}`)
+    } else {
+      kept.push(it)
+    }
+  })
+  return { kept, dropped }
 }
 
 export async function loadManualItems(
@@ -192,11 +230,14 @@ export async function loadManualItems(
       ? `${row.url} 谷歌根本不知道这个网址${age}，它拿不到任何谷歌流量`
       : `${row.url} 谷歌爬过但决定不收录${age}${thin ? `，正文只有 ${row.word_count ?? 0} 词` : ''}，它拿不到任何谷歌流量`
 
+    // 🔴 链接要指向**动作真正发生的地方**,不是「跟这事有关的地方」。
+    //    内容太薄 → 活儿在网页上,给页面链接;谷歌不认识这网址 → 活儿在 GSC。
+    //    此前一律给 GSC 深链,结果既 404、方向也错(补内容不在 GSC 里做)。
     const how = unknown
-      ? '打开链接（已定位到这个网址），点「请求编入索引」；如果它本来就不该被搜到，回我一句，我把它从检查名单去掉'
+      ? `打开 Google Search Console，${gscInspectSteps(row.url)}，然后点「请求编入索引」；如果这页本来就不该被搜到，回我一句，我把它从检查名单去掉`
       : thin
-        ? '这条别点「请求编入索引」——谷歌已经看过并拒绝了。真问题是内容太薄：要么把它补厚（300 词以上、配图、加内链），要么合并进相关页面并做跳转。拿不准回我一句'
-        : '先点一次「请求编入索引」；如果一周后还是不收录，说明谷歌认为内容价值不够，需要补内链和内容'
+        ? `这条别去点「请求编入索引」——谷歌已经看过并拒绝了，再点一次也一样。真问题是内容太薄（${row.word_count ?? 0} 词）：打开链接看这一页，要么补厚到 300 词以上并配图加内链，要么合并进相关页面做跳转。拿不准回我一句`
+        : `先打开 Google Search Console，${gscInspectSteps(row.url)}，点一次「请求编入索引」；如果一周后还是不收录，说明谷歌认为内容价值不够，要补内链和内容`
 
     items.push({
       kind: 'not_indexed',
@@ -204,7 +245,9 @@ export async function loadManualItems(
       client_name: nameOf(row.client_id),
       what,
       how,
-      href: gscInspectUrl(siteUrl, row.url),
+      // 补内容的活儿落在网页上,给页面本身(公开网址,能实测);
+      // 要 GSC 操作的给属性首页(稳定入口,不是会 404 的深链)。
+      href: thin && !unknown ? row.url : gscPropertyUrl(siteUrl),
     })
   }
 
