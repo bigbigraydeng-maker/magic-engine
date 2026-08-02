@@ -15,8 +15,11 @@ import { describe, expect, it } from 'vitest'
 import {
   WORKLIST_GROUPS,
   WORKLIST_GROUP_META,
+  LAYER_META,
   groupDisplayMeta,
+  groupsInLayer,
   worklistSegments,
+  type WorklistLayer,
 } from '../worklist-groups'
 import { SEGMENT_META, type Segment } from '../segments'
 
@@ -44,11 +47,35 @@ describe('看板的列必须盖住所有该联系的人', () => {
     expect(new Set(covered).size).toBe(covered.length)
   })
 
-  it('列的先后就是优先级的先后 —— 最该打的排最左', () => {
-    const firstPriority = WORKLIST_GROUPS.map((g) =>
-      Math.min(...g.members.map((m) => SEGMENT_META[m].priority)),
-    )
-    expect(firstPriority).toEqual([...firstPriority].sort((a, b) => a - b))
+  /**
+   * 2026-08-02 分层之后，顺序规则从「全局按优先级」变成「先按层，层内按优先级」。
+   *
+   * 层的先后是产品判断，不是优先级数字能表达的：「他刚有动作」（点了链接，
+   * 人还热着）必须排在「先放着的人」前面，哪怕后者里的「新客人」优先级数字
+   * 更小 —— 新客人会交给自动流程，不需要人一个个打。
+   */
+  it('层的先后固定：客人在等你 → 他刚有动作 → 先放着的人', () => {
+    const order: WorklistLayer[] = ['waiting', 'acted', 'queued']
+    const seen = WORKLIST_GROUPS.map((g) => order.indexOf(g.layer))
+    expect(seen).toEqual([...seen].sort((a, b) => a - b))
+    // 每一层都必须真的有列 —— 空层等于页面上一个说了话却什么都没有的标题
+    for (const layer of order) {
+      expect(groupsInLayer(layer).length, `${layer} 层是空的`).toBeGreaterThan(0)
+    }
+  })
+
+  it('同一层里，最该打的排最左', () => {
+    for (const layer of ['waiting', 'acted', 'queued'] as WorklistLayer[]) {
+      const p = groupsInLayer(layer).map((g) =>
+        Math.min(...g.members.map((m) => SEGMENT_META[m].priority)),
+      )
+      expect(p, `${layer} 层内顺序乱了`).toEqual([...p].sort((a, b) => a - b))
+    }
+  })
+
+  it('每一列都必须属于某一层 —— 漏掉的列在页面上无处可去', () => {
+    const valid = new Set(['waiting', 'acted', 'queued'])
+    expect(WORKLIST_GROUPS.filter((g) => !valid.has(g.layer))).toEqual([])
   })
 })
 
@@ -70,6 +97,15 @@ describe('每一列都说得出「这是谁、该怎么办」', () => {
   it('单段的列直接用那一段自己的文案，不重复维护一份', () => {
     const single = WORKLIST_GROUPS.find((g) => g.members.length === 1 && !WORKLIST_GROUP_META[g.key])
     expect(single).toBeDefined()
+  })
+})
+
+describe('每一层都说得出自己是什么', () => {
+  it('三层都有标题和说明 —— 措辞就是这一页的产品说明书，不是装饰', () => {
+    for (const layer of ['waiting', 'acted', 'queued'] as WorklistLayer[]) {
+      expect(LAYER_META[layer].title.trim().length, `${layer} 缺标题`).toBeGreaterThan(0)
+      expect(LAYER_META[layer].hint.trim().length, `${layer} 缺说明`).toBeGreaterThan(0)
+    }
   })
 })
 

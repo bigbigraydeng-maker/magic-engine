@@ -122,6 +122,9 @@ export async function POST(
       clientRef,
       brandTerms,
       currentLastSeenAt: contact.last_seen_at as string | null,
+      // 谁记的。销售早上打开名单要分得清「昨天聊过」是不是自己聊的 ——
+      // 在此之前这个信息一条都没存过。
+      loggedByEmail: access.user?.email ?? null,
     })
 
     return NextResponse.json({
