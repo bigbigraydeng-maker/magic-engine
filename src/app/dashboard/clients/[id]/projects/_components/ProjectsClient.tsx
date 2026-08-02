@@ -55,6 +55,7 @@ const draftFrom = (p: ClientProject): Draft => ({
 export function ProjectsClient({ clientId, clientName }: Props) {
   const [projects, setProjects] = useState<ClientProject[]>([])
   const [assetCounts, setAssetCounts] = useState<Record<string, number>>({})
+  const [listingCounts, setListingCounts] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState<string | 'new' | null>(null)
@@ -70,6 +71,7 @@ export function ProjectsClient({ clientId, clientName }: Props) {
       if (!json.success) throw new Error(json.error ?? '读取失败')
       setProjects(json.projects ?? [])
       setAssetCounts(json.assetCounts ?? {})
+      setListingCounts(json.listingCounts ?? {})
     } catch (e) {
       setError(e instanceof Error ? e.message : '读取失败')
     } finally {
@@ -212,6 +214,7 @@ export function ProjectsClient({ clientId, clientName }: Props) {
         <div className="space-y-2">
           {projects.map(p => {
             const assets = assetCounts[p.id] ?? 0
+            const listings = listingCounts[p.id] ?? 0
             return (
               <div key={p.id} className="rounded-xl border border-me-charcoal/12 bg-white p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -230,12 +233,16 @@ export function ProjectsClient({ clientId, clientName }: Props) {
                     {typeof p.brief?.note === 'string' && p.brief.note && (
                       <p className="mt-1 text-xs font-semibold text-me-charcoal/55">{p.brief.note as string}</p>
                     )}
+                    <BriefFacts brief={p.brief} />
                     <div className="mt-2 flex flex-wrap gap-3 text-[11px] font-semibold">
                       {/* 这两条是最容易漏的，漏了就说清楚漏了什么、后果是什么 */}
                       {p.invoice_to_name ? (
                         <span className="text-me-charcoal/55">发票开给：{p.invoice_to_name}</span>
                       ) : (
                         <span className="text-[#C2453A]">⚠️ 没填发票开给谁 —— 这单的钱不知道找谁要</span>
+                      )}
+                      {listings > 0 && (
+                        <span className="text-me-charcoal/55">{listings} 套房</span>
                       )}
                       {assets > 0 ? (
                         <span className="text-me-charcoal/55">专属素材 {assets} 条</span>
@@ -268,6 +275,79 @@ export function ProjectsClient({ clientId, clientName }: Props) {
       >
         ← 返回工作台
       </Link>
+    </div>
+  )
+}
+
+/**
+ * 楼盘档里已有的事实。
+ *
+ * 这些不是手填的 —— 是系统里已经跑出来的分析（listing_briefs / 张骞 Discovery）
+ * 直接接过来。**存了不显示等于没存**，所以哪怕只有几条也要露出来。
+ */
+function BriefFacts({ brief }: { brief: Record<string, unknown> }) {
+  const str = (k: string) => (typeof brief[k] === 'string' ? (brief[k] as string) : null)
+  const arr = (k: string) => (Array.isArray(brief[k]) ? (brief[k] as unknown[]).map(String) : [])
+  const market = (brief.market ?? {}) as Record<string, unknown>
+  const num = (k: string) => (typeof market[k] === 'number' ? (market[k] as number) : null)
+
+  const angles = arr('top_angles')
+  const segments = arr('buyer_segments')
+  const projectsKnown = arr('known_projects')
+  const blockers = arr('blockers')
+  const median = num('median_price')
+  const yoy = num('yoy_change_pct')
+  const openQ = typeof brief.open_questions_count === 'number' ? brief.open_questions_count : null
+
+  const hasAny =
+    angles.length || segments.length || projectsKnown.length || blockers.length ||
+    median != null || str('school_zone') || str('source')
+  if (!hasAny) return null
+
+  return (
+    <div className="mt-2 space-y-1.5 rounded-lg bg-me-charcoal/[0.03] p-2.5">
+      {angles.length > 0 && <Row label="主打卖点" items={angles} />}
+      {segments.length > 0 && <Row label="买家画像" items={segments} />}
+      {projectsKnown.length > 0 && <Row label="已知项目" items={projectsKnown} />}
+      {str('school_zone') && (
+        <p className="text-[11px] font-semibold text-me-charcoal/55">学区：{str('school_zone')}</p>
+      )}
+      {median != null && (
+        <p className="text-[11px] font-semibold text-me-charcoal/55">
+          区域中位价 ${median.toLocaleString()}
+          {yoy != null && (
+            <span className={yoy < 0 ? 'text-[#C2453A]' : 'text-[#5C8A4A]'}>
+              {' '}（同比 {yoy > 0 ? '+' : ''}{yoy}%）
+            </span>
+          )}
+        </p>
+      )}
+      {blockers.length > 0 && (
+        <p className="text-[11px] font-semibold text-me-ochre">
+          还缺 {blockers.length} 项资料：{blockers.join('、')}
+        </p>
+      )}
+      {openQ != null && openQ > 0 && (
+        <p className="text-[11px] font-semibold text-me-ochre">
+          分析报告里有 {openQ} 条存疑，对外用之前要核实
+        </p>
+      )}
+      {str('source') && (
+        <p className="text-[10px] font-semibold text-me-charcoal/35">来源：{str('source')}</p>
+      )}
+    </div>
+  )
+}
+
+function Row({ label, items }: { label: string; items: string[] }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      <span className="text-[10px] font-black text-me-charcoal/45">{label}</span>
+      {items.map(x => (
+        <span key={x} className="rounded bg-white px-1.5 py-0.5 text-[10px] font-bold text-me-charcoal/65">
+          {x}
+        </span>
+      ))}
     </div>
   )
 }

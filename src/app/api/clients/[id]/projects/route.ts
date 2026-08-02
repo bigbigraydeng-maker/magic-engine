@@ -14,6 +14,7 @@ import {
   listProjects,
   createProject,
   countProjectAssets,
+  countProjectListings,
   normaliseProjectInput,
 } from '@/lib/clients/projects-store'
 
@@ -40,11 +41,12 @@ export async function GET(_req: NextRequest, { params }: RouteContext) {
   if (blocked) return blocked
 
   try {
-    const [projects, assetCounts] = await Promise.all([
+    const [projects, assetCounts, listingCounts] = await Promise.all([
       listProjects(params.id),
       countProjectAssets(params.id),
+      countProjectListings(params.id),
     ])
-    return NextResponse.json({ success: true, projects, assetCounts })
+    return NextResponse.json({ success: true, projects, assetCounts, listingCounts })
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     console.error('[projects/GET]', message)

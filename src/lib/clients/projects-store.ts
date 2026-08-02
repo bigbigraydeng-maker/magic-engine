@@ -140,6 +140,21 @@ export async function updateProject(
   return (data as ClientProject | null) ?? null
 }
 
+/** 每个楼盘挂了多少套房 —— 楼盘下面没房源说明还没建档完。 */
+export async function countProjectListings(clientId: string): Promise<Record<string, number>> {
+  const counts: Record<string, number> = {}
+  const { data } = await supabaseAdmin
+    .from('listings')
+    .select('project_id')
+    .eq('client_id', clientId)
+    .not('project_id', 'is', null)
+  for (const row of data ?? []) {
+    const pid = (row as { project_id: string }).project_id
+    counts[pid] = (counts[pid] ?? 0) + 1
+  }
+  return counts
+}
+
 /** 每个楼盘挂了多少素材 —— 界面上要让人一眼看出哪个楼盘还没料。 */
 export async function countProjectAssets(clientId: string): Promise<Record<string, number>> {
   const counts: Record<string, number> = {}
