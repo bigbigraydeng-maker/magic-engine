@@ -14,6 +14,13 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+      # ── 客户公司邮箱（Microsoft Graph，把客人发来的信接回 CRM）──
+      # 在 Azure 门户注册一次 Magic Engine 自己的应用即可，所有客户共用。
+      # 步骤见 docs/sops/microsoft-邮箱应用注册清单.md
+      - key: MICROSOFT_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_SECRET
+        sync: false
       # ── Voice Agent (docs/voice-agent/) ──
       - key: OPENAI_PROJECT_ID
         sync: false
