@@ -670,6 +670,14 @@ export default function ClientDetailPage() {
                   badge="in_house"
                 />
               )}
+              {industryFeatureFlags(client?.industry).projects && (
+                <ToolCard
+                  href={`/dashboard/clients/${clientId}/projects`}
+                  title="楼盘"
+                  desc="中介名下每个开发项目：各自的卖点、策略、素材，发票开给开发商"
+                  badge="in_house"
+                />
+              )}
               {industryFeatureFlags(client?.industry).listings && (
                 <ToolCard
                   href={`/dashboard/clients/${clientId}/listings`}

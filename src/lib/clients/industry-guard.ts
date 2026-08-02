@@ -32,6 +32,10 @@ export async function clientHasIndustryFeature(
 
 /** 挡下时给客户看的话 —— 说清楚是「不适用」，不是「你没权限」或者「坏了」。 */
 export const INDUSTRY_FEATURE_NOTICE: Record<IndustryFeature, { title: string; body: string }> = {
+  projects: {
+    title: '这个功能不适用于你的业务',
+    body: '「楼盘」是给房地产中介用的（Magic Engine 海外地产版）。如果这里应该出现，请在客户设置里把行业填成房地产。',
+  },
   listings: {
     title: '这个功能不适用于你的业务',
     body: '「房子」是给房地产中介用的。如果这里应该出现，请在客户设置里把行业填成房地产。',

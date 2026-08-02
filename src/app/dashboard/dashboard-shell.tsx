@@ -183,6 +183,8 @@ function buildScopedAdminSections(clientId: string, industry: string | null): Na
   const feat = industryFeatureFlags(industry)
   const industryTools: NavItem[] = [
     ...(feat.tailor_made ? [{ key: 'tailor-made', label: '行程单', mark: 'TM', href: at('/tailor-made') }] : []),
+    // 楼盘在「房子」前面:先有楼盘,房子才挂得上去
+    ...(feat.projects ? [{ key: 'projects', label: '楼盘', mark: 'PJ', href: at('/projects') }] : []),
     ...(feat.listings ? [{ key: 'listings', label: '房子', mark: 'LI', href: at('/listings') }] : []),
   ]
   return [

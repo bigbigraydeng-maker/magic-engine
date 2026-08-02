@@ -41,11 +41,18 @@ describe('hasIndustryFeature —— 库里的真实取值', () => {
 
   it('🔴 行业为空 → 一个都不给（默认隐藏，不是默认显示）', () => {
     // 库里 15 个客户行业是空的。默认显示就等于把地产按钮塞给所有人 —— 正是现在的 bug
-    for (const f of ['listings', 'tailor_made'] as const) {
+    for (const f of ['listings', 'projects', 'tailor_made'] as const) {
       expect(hasIndustryFeature(null, f)).toBe(false)
       expect(hasIndustryFeature('', f)).toBe(false)
       expect(hasIndustryFeature('Healthcare — Physiotherapy', f)).toBe(false)
     }
+  })
+
+  it('🔴 「楼盘」是海外地产版独有工具 —— 只给地产,别的行业一律看不到', () => {
+    expect(hasIndustryFeature('real_estate', 'projects')).toBe(true)
+    expect(hasIndustryFeature('travel', 'projects')).toBe(false)
+    expect(hasIndustryFeature('flooring', 'projects')).toBe(false)
+    expect(hasIndustryFeature(null, 'projects')).toBe(false)
   })
 
   it('中文行业也认', () => {
@@ -61,8 +68,8 @@ describe('hasIndustryFeature —— 库里的真实取值', () => {
 
 describe('industryFeatureFlags', () => {
   it('一次拿全部开关', () => {
-    expect(industryFeatureFlags('real_estate')).toEqual({ listings: true, tailor_made: false })
-    expect(industryFeatureFlags('travel')).toEqual({ listings: false, tailor_made: true })
-    expect(industryFeatureFlags(null)).toEqual({ listings: false, tailor_made: false })
+    expect(industryFeatureFlags('real_estate')).toEqual({ listings: true, projects: true, tailor_made: false })
+    expect(industryFeatureFlags('travel')).toEqual({ listings: false, projects: false, tailor_made: true })
+    expect(industryFeatureFlags(null)).toEqual({ listings: false, projects: false, tailor_made: false })
   })
 })

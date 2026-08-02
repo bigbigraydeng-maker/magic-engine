@@ -18,7 +18,7 @@
  */
 
 /** 行业专属功能。加新功能前先问：这东西对别的行业有意义吗？有就别加进来。 */
-export type IndustryFeature = 'listings' | 'tailor_made'
+export type IndustryFeature = 'listings' | 'projects' | 'tailor_made'
 
 /**
  * 归一化：下划线/连字符/多余空格统一，大小写拉平。
@@ -34,8 +34,17 @@ export function normaliseIndustry(raw: string | null | undefined): string {
 }
 
 /** 每个功能认哪些行业关键词。中英文都要有 —— 库里两种都存在。 */
+const REAL_ESTATE_KEYWORDS = [
+  'real estate', 'realestate', 'property', 'realty', 'realtor', 'homes',
+  '房地产', '地产', '中介', '楼盘',
+]
+
 const FEATURE_KEYWORDS: Record<IndustryFeature, string[]> = {
-  listings: ['real estate', 'realestate', 'property', 'realty', 'realtor', 'homes', '房地产', '地产', '中介', '楼盘'],
+  // 「房子」= 中介手上在卖的每一套房
+  listings: REAL_ESTATE_KEYWORDS,
+  // 「楼盘」= 中介名下的开发项目,各带自己的 brief/策略/素材(PM 2026-08-03:
+  // 这是 Magic Engine 海外地产版的独有工具,别的行业不该看到)
+  projects: REAL_ESTATE_KEYWORDS,
   tailor_made: ['travel', 'tour', 'tourism', 'sightseeing', 'cruise', '旅游', '旅行', '观光', '行程'],
 }
 
@@ -57,6 +66,7 @@ export function hasIndustryFeature(
 export function industryFeatureFlags(industry: string | null | undefined): Record<IndustryFeature, boolean> {
   return {
     listings: hasIndustryFeature(industry, 'listings'),
+    projects: hasIndustryFeature(industry, 'projects'),
     tailor_made: hasIndustryFeature(industry, 'tailor_made'),
   }
 }
