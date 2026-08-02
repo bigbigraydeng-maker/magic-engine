@@ -838,3 +838,25 @@ services:
         https://app.magicengine.com.au/api/cron/mailchimp-activity-sync
     envVars:
       - fromGroup: me-shared-cron-secret
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Team Working Memory 兜底清扫 — 每 30 分钟
+  #
+  # 本机 hook 在会话结束时会自己触发提炼，这条 cron 是兜底：
+  # 笔记本睡了 / 断网 / 进程被杀导致那一枪没打中的会话，在这里补上；
+  # 顺带把被推翻的教训撤下、连续砸锅的套路下架（PM 选了全自动，收拾也得机器做）。
+  #
+  # ⚠️ 部署后必须在 Render 后台把这个 cron 关联到 me-shared-cron-secret 环境变量组。
+  #    sync:false 不会自动填值 —— daily-cron-digest 就是因为这个哑了 51 天没人发现，
+  #    而 digest 只报「失败」不报「没跑」，所以静默失效不会有任何告警。
+  - type: cron
+    name: team-memory-sweeper
+    env: node
+    schedule: "*/30 * * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/team-memory-sweeper
+    envVars:
+      - key: CRON_SECRET
+        sync: false
