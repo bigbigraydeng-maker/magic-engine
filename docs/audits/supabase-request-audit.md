@@ -13,7 +13,9 @@
 > | P1-1 拓客巡逻慢查询（占全库 DB 时间 24.6%） | ✅ **已上线** 728.8ms → 5.8ms | PR [#784](https://github.com/bigbigraydeng-maker/magic-engine/pull/784) · §6.1 |
 > | P0-1 空跑 cron 降频 | ✅ **已上线** 808 → 616 次运行/天。**估算由 7–11% 下修至 2.3–3.1%**，复盘见 §8 | 本 PR · §8 |
 > | 🔴 RLS 策略对匿名访客敞开（118 条） | ✅ **已上线** 客户联系资料 / API key 表此前可被任何人读写。**初稿曾误判为「不是漏洞」** | PR [#789](https://github.com/bigbigraydeng-maker/magic-engine/pull/789) · §7.1 |
-> | 其余 P0 / P1 / P2 | 📋 待 PM 逐条拍板 | §8 |
+> | P0-3 4 个函数对匿名开放 | ✅ **已上线** 复测返回 `permission denied` | §7.2 |
+> | 🔴 MTC 原子扣费自上线起从未跑通 | ✅ **已修复** 两个 bug，被兜底静默掩盖 5 周 | §7.3 |
+> | 其余 P1 / P2 | 📋 待 PM 逐条拍板 | §8 |
 
 ---
 
@@ -498,7 +500,50 @@ Execution Time: 54.444 ms
 
 ---
 
-**其余安全项**：`anon_security_definer_function_executable` 的 4 个函数（`activate_geo_directive` / `mtc_deduct_atomic` / `sync_execution_item_on_post_published` / `zhangqian_rate_limit_consume`）—— 调用方全部使用 `supabaseAdmin`，收权不影响功能；`mtc_deduct_atomic` 已有 `p_mtc_amount <= 0` 校验，无法靠负数充值。**尚未处理，见 §8 P0-3。**
+### 7.2 ✅ 4 个 SECURITY DEFINER 函数已收权（2026-08-03）
+
+`activate_geo_directive` / `mtc_deduct_atomic` / `sync_execution_item_on_post_published` / `zhangqian_rate_limit_consume` —— 这类函数以定义者身份运行、**天生绕过 RLS**，所以 §7.1 那轮把 RLS 收回 `service_role` 挡不住它们。实测匿名调用返回的是函数内部的业务错误而非权限拒绝，证明确实可执行。
+
+已 `REVOKE EXECUTE ... FROM PUBLIC, anon, authenticated` 并显式 `GRANT ... TO service_role`。复测：匿名调用返回 `42501 permission denied for function`；服务端 4 个函数全部仍可执行。
+
+调用方全部是 `supabaseAdmin`，收权零功能影响。`mtc_deduct_atomic` 本就有 `p_mtc_amount <= 0` 校验，无法靠负数充值。
+
+### 7.3 🔴 顺带挖出：MTC 原子扣费**自上线起从未成功执行过一次**
+
+查这 4 个函数时，匿名探针对 `mtc_deduct_atomic` 返回的不是权限错误，而是 `0A000: FOR UPDATE is not allowed with aggregate functions` —— **函数自身的 SQL 是错的**。用 service_role 复现，同样报错，定位到 `line 13`。
+
+修好第一个 bug 后，第二个才暴露：`line 42` 的 `42804 column "reference_id" is of type uuid but expression is of type text`（`mtc_ledger.reference_id` 是 uuid，参数是 text，计划期错误，传 NULL 也一样炸）。
+
+**两个 bug 叠在一起，第二个被第一个挡住 —— 说明这个函数从建立（migration `20260626000006`，2026-06-26）起从未被真正运行过。**
+
+#### 实际影响
+
+**金额没有出错。** [src/lib/mtc/deduct.ts:58](../../src/lib/mtc/deduct.ts#L58) 有兜底分支，RPC 一失败就回落到旧的非原子 JS 实现。5 周来 21 笔扣费全部由它完成，账目正确（当前总余额 5,137，账本 24 条）。
+
+但：
+
+- Phase X.S6 M-1 声称修好的**并发竞争一直是活的** —— 兜底分支自己的注释就写着 "Documented race"。
+- `deduct.ts` 原注释写着「跑一周稳定后就可以删掉兜底」。**真按它删了，MTC 扣费会全线中断**，而且只会以 `console.warn` 静默失败。
+- 每次扣费都打一条 warn，5 周无人察觉。
+
+用量极低（30 天仅 1 笔扣费），撞上竞争的概率接近零，**未发现任何账目损失**。
+
+#### 修复与验证
+
+两个 bug 已修（migration `20260803094500` / `20260803094900`）。用**真客户真扣**在事务内验证后回滚：
+
+```
+扣前余额 500 → 函数返回 490 → 批次表实际 490 → 账本记 10 点   ✅ 三处一致
+回滚后生产总余额仍 5,137、账本仍 24 条                        ✅ 未被改动
+```
+
+`deduct.ts` 的误导性注释已改写，并写明：**删除兜底前必须先确认生产日志里 `atomic RPC failed` 连续多日为零**，别再靠注释里的「应该没问题」做判断。
+
+#### 教训
+
+> **「已修复」不等于「修好了」。** 一个 5 周前合并、写了详尽注释、声称消除竞争的修复，实际一次都没跑起来过。
+>
+> 带兜底的改动尤其危险 —— 兜底会把失败吞成一条没人看的 warn，让"坏了"看起来像"好了"。**凡是带 fallback 的新路径，上线后必须验证主路径真的走通了，而不是被兜底静默接管。**
 
 ---
 
@@ -510,7 +555,8 @@ Execution Time: 54.444 ms
 |---|---|---|---|---:|---|
 | ~~**P0-1**~~ ✅ **已上线（估算已下修，见下方复盘）** | 4 个 cron 24h 内 480 次运行 **零产出** | 只降 3 个：`vision-analyzer` `*/10`→`*/30`、`zhangqian-sweeper` `*/15`→`*/30`、`blog-stuck-generating-sweeper` `*/15`→`*/30`。**`poll-visual-jobs` 刻意保持 `*/10`** | `render.yaml` | **~580–770 次/天（2.3–3.1%）** | 低。用户无感 |
 | **P0-2** | 每次 cron 写 2 次记账（占 PostgREST 31.6%） | 合并为 1 次：结束时一次性 INSERT 完整行（`startCronRun` 只在内存记 `startedAt`）。代价：任务崩溃时不留"running"记录 —— 可用 Render 自身的 job 状态兜底 | [src/lib/cron/run-logger.ts](../../src/lib/cron/run-logger.ts) | **~800–1,200 次/天（3–5%）** | 中。需确认 `cron-health` 页与 `daily-cron-digest` 不依赖 `status='running'` 中间态 |
-| **P0-3** | `anon` 可执行 4 个 SECURITY DEFINER 函数 | **先查是否有真实调用方**，无则 `REVOKE EXECUTE ... FROM anon` | 待定位 migration | 0 | 低（但需先确认，见 §11） |
+| ~~**P0-3**~~ ✅ **已上线** | `anon` 可执行 4 个 SECURITY DEFINER 函数 | `REVOKE ... FROM PUBLIC, anon, authenticated` + `GRANT ... TO service_role`。复测返回 `42501 permission denied` | migration `20260803094500` | 0 | 已完成，见 §7.2 |
+| 🔴 **新发现** ✅ **已修复** | MTC 原子扣费函数自 2026-06-26 上线起**从未成功执行过一次**（两个 bug） | 修 `FOR UPDATE`+聚合同句、`reference_id` 类型转换；真客户事务内验证后回滚 | migration `20260803094500`/`094900` + [deduct.ts](../../src/lib/mtc/deduct.ts) 注释 | 0 | 见 §7.3。金额无损失，但并发保险一直是空的 |
 
 #### 📉 P0-1 估算下修复盘（初稿 7–11% → 实际 2.3–3.1%）
 
@@ -612,7 +658,8 @@ group by job_name order by runs desc;
 |---|---|---|---|
 | P0-1 cron 降频 | `render.yaml` 改回原 `schedule`，重新部署 | ~5 分钟 | **零**。纯调度参数 |
 | P0-2 记账合并 | `git revert` [run-logger.ts](../../src/lib/cron/run-logger.ts) 的 commit | ~5 分钟 | **零**。只影响日志写入方式，不影响任务本身 |
-| P0-3 REVOKE EXECUTE | `GRANT EXECUTE ON FUNCTION ... TO anon` | 立即 | **零**。纯权限 |
+| P0-3 REVOKE EXECUTE | `GRANT EXECUTE ON FUNCTION <签名> TO anon, authenticated`（不建议 —— 等于把 RPC 重新对外敞开）| 立即 | **零**。纯权限 |
+| MTC 扣费函数修复 | 重新执行 `20260626000006`（但那是坏的，回退等于把 bug 装回去）| 立即 | **零**。纯函数体，不动数据 |
 | P1-1 查询条件调整 | `git revert` | ~5 分钟 | **零**。只读查询 |
 | P1-2 移除 `raw_response` | `git revert` | ~5 分钟 | **零**。只读查询 |
 | P1-3 / P1-4 前端 | `git revert` | ~5 分钟 | **零** |

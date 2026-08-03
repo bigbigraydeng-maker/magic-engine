@@ -11,8 +11,22 @@ import type { ServiceKey, MtcSource, DeductResult } from './types'
  * The JS-side legacy implementation is preserved as a fallback for safety:
  * if the RPC errors out (e.g. not deployed, transient DB issue), we fall
  * back to the non-atomic path with a logged warning rather than 500-ing on
- * every deduction. Once we've confirmed the RPC is stable everywhere
- * (~1 week in prod), the fallback can be removed.
+ * every deduction.
+ *
+ * ⚠️ 2026-08-03：这个兜底救了命，别急着删。
+ *
+ * 审计发现 mtc_deduct_atomic 自 2026-06-26 上线起**从未成功执行过一次** ——
+ * 函数里有两个 bug（`FOR UPDATE` 与聚合同句 → 0A000；reference_id text 写进
+ * uuid 列 → 42804），第二个还被第一个挡着。5 周里 21 笔扣费全部由下面这个
+ * 兜底完成，金额正确，但「原子扣费」这道保险实际一直是空的。
+ *
+ * 原注释写的「跑一周稳定后就可以删掉兜底」是基于一个从未被验证的前提 ——
+ * 真按它删了，MTC 扣费会全线中断，而且只会以 console.warn 的形式静默失败。
+ *
+ * 两个 bug 已修（migration 20260803094500），并用真客户在事务内验证过
+ * 扣费 → 账本 → 批次表三处一致。**删除兜底前，先确认生产日志里
+ * 「atomic RPC failed」这条 warn 已经连续多日为零** —— 别再靠注释里的
+ * 「应该没问题」做判断。
  */
 export async function deductMtc(
   clientId: string,
