@@ -12,18 +12,44 @@ vi.mock('./execution-generator', () => ({
 
 import { landPrescription, type LandablePrescription } from './prescription-landing'
 
-/** 记录每一次 update 调用，用来断言「到底往表里写了什么」。 */
-function fakeSupabase(opts: { updateError?: Record<string, string> } = {}) {
-  const updates: Array<{ table: string; patch: Record<string, unknown> }> = []
+/**
+ * 记录每一次 update 调用，用来断言「到底往表里写了什么」。
+ *
+ * `matched` 控制每次 update 命中几行 —— 默认 1。设成 0 用来复现
+ * 「PostgREST 匹配 0 行也返回 error:null」那种静默失败。
+ */
+function fakeSupabase(
+  opts: {
+    updateError?: Record<string, string>
+    /** 按 `表名:status` 指定命中行数，如 `{'prescriptions:approved': 0}` */
+    matched?: Record<string, number>
+    /** execution_items 被作废的条数 */
+    supersededItems?: number
+  } = {},
+) {
+  const updates: Array<{ table: string; patch: Record<string, unknown>; filters: string[] }> = []
   const from = (table: string) => ({
     update: (patch: Record<string, unknown>) => {
-      updates.push({ table, patch })
+      const rec = { table, patch, filters: [] as string[] }
+      updates.push(rec)
+      const key = `${table}:${String(patch.status)}`
       const err = opts.updateError?.[String(patch.status)]
+      const rowCount =
+        table === 'execution_items'
+          ? (opts.supersededItems ?? 2)
+          : (opts.matched?.[key] ?? 1)
       const chain: Record<string, unknown> = {}
-      const self = () => chain
+      const self = (...args: unknown[]) => {
+        rec.filters.push(String(args[0]))
+        return chain
+      }
       chain.eq = self
-      chain.then = (res: (v: { error: { message: string } | null }) => unknown) =>
-        res({ error: err ? { message: err } : null })
+      chain.in = self
+      chain.select = () =>
+        Promise.resolve({
+          data: err ? null : Array.from({ length: rowCount }, (_, i) => ({ id: `r${i}` })),
+          error: err ? { message: err } : null,
+        })
       return chain
     },
   })
@@ -80,7 +106,25 @@ describe('landPrescription —— 方案变成看板上的活儿', () => {
   it('修订版落地 → 把被它替代的上一版归档，否则看板上同时挂着两版方案', async () => {
     const { supabase, updates } = fakeSupabase()
     await landPrescription(supabase, { ...PRES, supersedes_id: 'old1' })
-    expect(updates.some((u) => u.patch.status === 'superseded')).toBe(true)
+    expect(updates.some((u) => u.table === 'prescriptions' && u.patch.status === 'superseded')).toBe(true)
+  })
+
+  it('🔴 归档上一版时，它名下**没人动过**的旧动作也要一起作废 —— 否则堆的是动作不是处方', async () => {
+    const { supabase, updates } = fakeSupabase({ supersededItems: 47 })
+    const r = await landPrescription(supabase, { ...PRES, supersedes_id: 'old1' })
+
+    const itemUpdate = updates.find((u) => u.table === 'execution_items')
+    expect(itemUpdate).toBeTruthy()
+    expect(itemUpdate!.patch.status).toBe('superseded')
+    // 只作废 pending —— 进行中/已完成的是别人的工作记录，抹掉等于抹掉战果
+    expect(itemUpdate!.filters).toContain('status')
+    expect(r.supersededItems).toBe(47)
+  })
+
+  it('没有上一版时，一条旧动作都不许碰', async () => {
+    const { supabase, updates } = fakeSupabase()
+    await landPrescription(supabase, PRES)
+    expect(updates.some((u) => u.table === 'execution_items')).toBe(false)
   })
 
   it('旧版归档失败不致命 —— 新方案已经落地了，只是界面上多一份', async () => {
@@ -93,6 +137,11 @@ describe('landPrescription —— 方案变成看板上的活儿', () => {
   it('🔴 标记已批准失败要 throw —— 落地了却没记上，下周会重复开一份一样的方案', async () => {
     const { supabase } = fakeSupabase({ updateError: { approved: '列不存在' } })
     await expect(landPrescription(supabase, PRES)).rejects.toThrow('标记处方已批准失败')
+  })
+
+  it('🔴 UPDATE 一行都没命中也要 throw —— PostgREST 这时不报错，不自己查就当成功了', async () => {
+    const { supabase } = fakeSupabase({ matched: { 'prescriptions:approved': 0 } })
+    await expect(landPrescription(supabase, PRES)).rejects.toThrow('没有匹配到这条处方')
   })
 
   it('🔴 只写表里真有的列 —— approved_by 不是表字段，写进去整条 UPDATE 会失败', async () => {

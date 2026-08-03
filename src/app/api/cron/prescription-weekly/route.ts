@@ -19,7 +19,14 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 800
 
 export async function GET(req: NextRequest) {
-  if (req.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
+  // 🔴 密钥没配时，比较目标会变成字面量 "Bearer undefined" —— 任何人发这个头就进来了，
+  //    而这条链会打 AI、写客户数据。仓库里 54 个定时接口有 34 个带这道守卫，
+  //    这里必须是带的那一半。
+  const cronSecret = process.env.CRON_SECRET
+  if (!cronSecret) {
+    return NextResponse.json({ error: 'CRON_SECRET not configured' }, { status: 500 })
+  }
+  if (req.headers.get('authorization') !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

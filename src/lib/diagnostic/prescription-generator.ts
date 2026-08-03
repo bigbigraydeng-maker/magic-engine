@@ -69,6 +69,15 @@ const SYSTEM_PROMPT = `你是 Magic Engine 平台的资深数字营销策略师�
 
 - 恰好 3 个阶段：阶段 1（快速见效，2–4 周）、阶段 2（结构性建设，4–8 周）、阶段 3（长期护城河，8–12 周）
 - 每个 action 的 "phase" 字段必须等于其父 phase_number（1、2 或 3）
+- **每个 phase 必须填 initiative_seed** —— 处方落地时系统用它把这个阶段挂到客户目标下。
+  漏填的阶段，它底下的动作会全部变成「未归类」，在按目标筛选的看板上一条都看不见。
+- initiative_type 选择（terminal 直接驱动目标结论 / supporting 服务 terminal）：
+  - **terminal**：demand_generation 需求生成 / conversion_optimization 转化优化 /
+    trust_building 信任建设 / competitive_defense 竞争防御 / market_education 市场教育
+  - **supporting**：content_asset_production 内容资产生产（自己的 KPI 是"产了多少弹药"）
+  - 一个目标下至少要有 1 个 terminal，不要三个阶段全填 supporting
+- initiative_seed.title 跟 phase.name 一致或更精炼，**用客户看得懂的话**
+  （如「Brisbane 询盘获客」），禁用「止血 / 建设 / 护城河」这类抽象隐喻
 - budget_allocation 各项金额之和**最多**等于客户输入的 monthly_budget_aud（绝不可超过）
 - 优先处理 critical 和 high 级别的问题，忽略 medium/low
 - 如果输入中提供了「Synthesis Insights」段落（市场上下文 / 竞品分析 / 维度叙事 / 分数解释），**必须将其作为撰写处方的主要依据**：
@@ -94,8 +103,15 @@ const SYSTEM_PROMPT = `你是 Magic Engine 平台的资深数字营销策略师�
   "phases": [
     {
       "phase_number": 1,
-      "name": "string（中文，如「第一阶段：止血与快速见效」）",
+      "name": "string（中文，跟 initiative_seed.title 一致，如「Brisbane 询盘获客」。**禁用「止血/建设/护城河」**）",
       "duration_weeks": number,
+      "initiative_seed": {
+        "initiative_type": "demand_generation|conversion_optimization|trust_building|competitive_defense|market_education|content_asset_production",
+        "title": "中文 Initiative 标题（跟 phase.name 一致或更精炼）",
+        "posture": "offensive|defensive|fast|slow",
+        "budget_percent": number,
+        "hypothesis": "中文 1–2 句战略假设（为什么押这一条，90 天后验证）"
+      },
       "actions": [
         {
           "id": "unique-string",

@@ -20,6 +20,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isHtmlPageUrl } from '@/lib/seo/url-kind'
+import { AUTO_LANDED_AGENT } from '@/lib/diagnostic/auto-prescribe'
 
 /** Meta queued this long without being applied = the applier is stuck. */
 const META_PENDING_STALE_DAYS = 3
@@ -568,8 +569,9 @@ async function pushPrescriptionItems(
   const since = new Date(now.getTime() - PRESCRIPTION_FRESH_DAYS * 86_400_000).toISOString()
   const { data } = await supabase
     .from('prescriptions')
-    .select('id, client_id, goal_id, approved_at')
+    .select('id, client_id, goal_id, approved_at, agent_name')
     .eq('status', 'approved')
+    .eq('agent_name', AUTO_LANDED_AGENT)
     .gte('approved_at', since)
     .order('approved_at', { ascending: false })
     .limit(50)
@@ -588,10 +590,18 @@ async function pushPrescriptionItems(
     if (seen.has(p.client_id)) continue
     seen.add(p.client_id)
 
-    const { count } = await supabase
+    // 🔴 两个数分开数：动作总数，和其中**真的挂到了目标下**的。
+    //    首版只数了总数，却在文案里说「照着目标 X 排的」——
+    //    而当时的开方提示词根本不产出挂载信息，等于每周对 PM 说一句假话。
+    const { count: total } = await supabase
       .from('execution_items')
       .select('id', { count: 'exact', head: true })
       .eq('prescription_id', p.id)
+    const { count: hung } = await supabase
+      .from('execution_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('prescription_id', p.id)
+      .not('initiative_id', 'is', null)
 
     let goalTitle: string | null = null
     if (p.goal_id) {
@@ -603,13 +613,24 @@ async function pushPrescriptionItems(
       goalTitle = g?.title ?? null
     }
 
+    const n = total ?? 0
+    const onGoal = hung ?? 0
+    let tail: string
+    if (goalTitle && onGoal === n && n > 0) {
+      tail = `，全部排在目标《${goalTitle}》下`
+    } else if (goalTitle && onGoal > 0) {
+      tail = `，其中 ${onGoal} 个排在目标《${goalTitle}》下，其余 ${n - onGoal} 个还没归类`
+    } else if (goalTitle) {
+      tail = `，本该排在目标《${goalTitle}》下，但一个都没归类上 —— 按目标筛看板会看不到它们`
+    } else {
+      tail = '，没挂到任何目标上'
+    }
+
     items.push({
       kind: 'prescription_updated',
       client_id: p.client_id,
       client_name: nameOf(p.client_id),
-      what:
-        `本周方案已更新并进了执行看板 —— 新增 ${count ?? 0} 个动作` +
-        (goalTitle ? `，照着目标《${goalTitle}》排的` : '，但没挂到任何目标上'),
+      what: `本周方案已更新并进了执行看板 —— 新增 ${n} 个动作${tail}`,
       how: '不用你操作，动作已经在看板里排队了。点开扫一眼方向对不对，觉得排错了告诉我，我改',
       href: `https://app.magicengine.com.au/dashboard/clients/${p.client_id}/execution`,
     })

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   pickPrescribeCandidates,
+  pickGoalForPrescription,
   lowestDimensions,
   urgencyFromGoal,
   buildIntake,
@@ -25,7 +26,9 @@ const goal = (over: Partial<GoalRow> = {}): GoalRow =>
   ({
     id: 'g1',
     title: '把自然流量做到每月 800 次',
-    budget_amount: 1500,
+    // 生产库实测：CTS / Oztop **全部**进行中目标的 budget_amount 都是 null。
+    // 默认值取 null 才是真实形状，别拿一个"看起来合理"的数当默认。
+    budget_amount: null,
     period_end: '2026-09-05',
     ...over,
   }) as GoalRow
@@ -125,33 +128,81 @@ describe('urgencyFromGoal —— 按日期算，不猜', () => {
   })
 })
 
-describe('buildIntake —— 一项都不许编', () => {
+describe('pickGoalForPrescription —— 一个客户好几个目标时挂哪个', () => {
+  it('🔴 挂最先到期的那个，不是"最近建的"', () => {
+    // 生产库真实形状：CTS 3 个、Oztop 4 个进行中目标，创建时间戳一模一样
+    //（2026-06-04 16:25:32 批量建的），按"最近建的"挑等于随便挑一个还看不出来
+    const picked = pickGoalForPrescription([
+      goal({ id: 'a', title: '慢的', period_end: '2026-12-01' }),
+      goal({ id: 'b', title: '最急的', period_end: '2026-08-20' }),
+      goal({ id: 'c', title: '中间的', period_end: '2026-10-01' }),
+    ])
+    expect(picked!.title).toBe('最急的')
+  })
+
+  it('一个目标都没有 → 返回 null，不硬挑', () => {
+    expect(pickGoalForPrescription([])).toBeNull()
+  })
+
+  it('目标都没填到期日 → 不炸，退回第一个', () => {
+    const picked = pickGoalForPrescription([goal({ id: 'a', period_end: null as never })])
+    expect(picked!.id).toBe('a')
+  })
+})
+
+describe('buildIntake —— 一项都不许编，跟目标走的每次重算', () => {
   const prior: PrescriptionIntake = {
-    business_goal: 'PM 当初亲手填的业务目标',
-    timeline_urgency: 'immediate',
-    monthly_budget_aud: 9999,
+    business_goal: '3个月内产生15位flooring客户',
+    timeline_urgency: 'long_term',
+    monthly_budget_aud: 3000,
     priority_dimensions: ['ads'],
     notes: '人工备注',
   }
 
-  it('🔴 有上一份就照抄 —— 那是人真填的业务意图，系统没资格替他改写', () => {
-    expect(buildIntake(goal(), { seo: 10 }, prior, NOW)).toEqual(prior)
+  it('🔴 业务目标永远等于本次挂的那个目标 —— 不许照抄上一份的旧口径', () => {
+    // 真实事故形状：库里 Oztop 最近一份口径是 5/14 填的「3个月内产生15位flooring客户」，
+    // 而目标是 6/4 建的《Oztop Walnut 地板清仓》。照抄等于让 AI 两头都够不着。
+    const intake = buildIntake(goal({ title: 'Oztop Walnut 地板清仓' }), { seo: 10 }, prior, NOW)
+    expect(intake.business_goal).toBe('Oztop Walnut 地板清仓')
+    // 人填过的那句话不丢，降级成背景写进备注
+    expect(intake.notes).toContain('3个月内产生15位flooring客户')
+    expect(intake.notes).toContain('不是本次的目标')
   })
 
-  it('没有上一份才现推，且每项都指得出来源', () => {
-    const intake = buildIntake(goal(), { seo: 64, ai_visibility: 31, ads: 72 }, null, NOW)
-    expect(intake.business_goal).toBe('把自然流量做到每月 800 次') // ← 目标标题
-    expect(intake.monthly_budget_aud).toBe(1500) // ← 目标预算
-    // 默认目标 2026-09-05 到期，离 NOW 32 天 → immediate。
-    // 这正是 CTS / Oztop 现在进行中目标的真实到期日。
-    expect(intake.timeline_urgency).toBe('immediate') // ← 目标结束日算出来的
-    expect(intake.priority_dimensions).toEqual(['ai_visibility', 'seo', 'ads']) // ← 体检分数
-    expect(intake.notes).toContain('自动推得')
+  it('🔴 重点维度每次用本周体检重算 —— 冻在旧口径等于每周白采数据', () => {
+    const intake = buildIntake(goal(), { seo: 64, ai_visibility: 31, ads: 72 }, prior, NOW)
+    expect(intake.priority_dimensions).toEqual(['ai_visibility', 'seo', 'ads'])
+    expect(intake.priority_dimensions).not.toEqual(prior.priority_dimensions)
   })
 
-  it('🔴 目标没填预算 → 记 0，不替客户编一个数', () => {
+  it('🔴 紧迫度按本次目标的到期日算，不照抄', () => {
+    const intake = buildIntake(goal({ period_end: '2026-08-20' }), { seo: 1 }, prior, NOW)
+    expect(intake.timeline_urgency).toBe('immediate')
+    expect(prior.timeline_urgency).toBe('long_term') // 上一份说的是别的
+  })
+
+  it('目标自带预算 → 用目标的', () => {
+    const intake = buildIntake(goal({ budget_amount: 1500 }), { seo: 1 }, prior, NOW)
+    expect(intake.monthly_budget_aud).toBe(1500)
+    expect(intake.notes).toContain('目标自带预算')
+  })
+
+  it('🔴 目标没填预算但人工填过 → 沿用人工的，并写明这是沿用来的', () => {
+    // 生产库实测：CTS/Oztop 全部进行中目标的预算字段都是空的
+    const intake = buildIntake(goal({ budget_amount: null as never }), { seo: 1 }, prior, NOW)
+    expect(intake.monthly_budget_aud).toBe(3000)
+    expect(intake.notes).toContain('沿用')
+  })
+
+  it('🔴 两边都没预算 → 记 0，不替客户编一个数', () => {
     const intake = buildIntake(goal({ budget_amount: null as never }), { seo: 1 }, null, NOW)
     expect(intake.monthly_budget_aud).toBe(0)
+  })
+
+  it('没有上一份时，业务目标仍然是目标标题，且写明没人填过', () => {
+    const intake = buildIntake(goal(), { seo: 64, ai_visibility: 31, ads: 72 }, null, NOW)
+    expect(intake.business_goal).toBe('把自然流量做到每月 800 次')
+    expect(intake.notes).toContain('没有人工填过')
   })
 
   it('体检一个维度都没采到 → 重点维度留空并写明，不硬塞', () => {

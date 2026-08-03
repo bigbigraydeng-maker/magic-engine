@@ -6,7 +6,7 @@
  * 所以抽出来给两边共用 —— 复制一份等于以后修 bug 要修两处，必漏一处。
  *
  * 顺序是有讲究的，别改：
- *   派生 Initiative → 生成执行项 → 归档被修订的旧处方 → 最后才标 approved
+ *   派生 Initiative → 生成执行项 → 归档上一版（含它没人动过的动作）→ 最后才标 approved
  * 执行项生成失败时处方保持 draft —— 宁可"没批准"，也不能"已批准但看板上没动作"，
  * 后者从界面上完全看不出来，等于把问题藏起来。
  */
@@ -22,17 +22,46 @@ export type LandablePrescription = Pick<
   'id' | 'client_id' | 'goal_id' | 'version' | 'content' | 'supersedes_id'
 >
 
+/**
+ * 归档上一版时，哪些动作可以跟着一起作废。
+ *
+ * 🔴 只作废**没人动过的**。in_progress 是 FDE 已经开了工，completed 是已经做完的战果，
+ *    把这两种抹成 superseded 等于抹掉别人的工作记录。skipped 是人主动跳过的，也不动。
+ */
+const SUPERSEDABLE_ITEM_STATUSES = ['pending'] as const
+
 export interface LandPrescriptionResult {
-  /** 派生出的 Initiative 数 */
+  /** 派生出的 Initiative 数。**0 表示这批动作没挂到任何目标下** —— 调用方要照实说 */
   initiativesInserted: number
   /** 生成的执行项数 —— 这是「方案有没有真的变成活儿」的唯一硬指标 */
   executionItems: number
+  /** 归档上一版时顺带作废的旧动作数 */
+  supersededItems: number
   /** 人话日志，给 cron summary / console 用 */
   notes: string[]
 }
 
+/** 只写一行、且必须命中一行的 update。命中 0 行时 PostgREST 不报错，得自己发现。 */
+async function updateOneRow(
+  supabase: SupabaseClient,
+  patch: Record<string, unknown>,
+  where: { id: string; clientId: string },
+): Promise<{ ok: true } | { ok: false; why: string }> {
+  const { data, error } = await supabase
+    .from('prescriptions')
+    .update(patch)
+    .eq('id', where.id)
+    .eq('client_id', where.clientId)
+    .select('id')
+  if (error) return { ok: false, why: error.message }
+  // 🔴 命中 0 行也是 error:null —— 不显式检查的话，"什么都没写进去"会被当成成功。
+  //    团队记忆里那条「PATCH 匹配 0 行前后都 204，探针分辨不出两种结果」就是这个形状。
+  if (!data || data.length === 0) return { ok: false, why: '没有匹配到这条处方（id 或客户对不上）' }
+  return { ok: true }
+}
+
 /**
- * 落地。失败会 throw —— 调用方负责决定怎么呈现（路由返 500 / cron 记 error）。
+ * 落地。失败会 throw —— 调用方负责决定怎么呈现（路由返 500 / cron 记 error 并把处方标 failed）。
  *
  * @param approvedBy 谁批的。写进日志备查；**不写进表**（prescriptions 没有这一列，
  *                   写了整条 UPDATE 会失败）。
@@ -44,6 +73,7 @@ export async function landPrescription(
 ): Promise<LandPrescriptionResult> {
   const notes: string[] = []
   let initiativesInserted = 0
+  let supersededItems = 0
   let initiativeIdsByPhase: Record<number, string> = {}
 
   // Initiative 派生失败**不阻塞**落地 —— 沿用原路由的既定行为：
@@ -65,29 +95,43 @@ export async function landPrescription(
   })
   notes.push(`生成执行项 ${items.length} 条`)
 
-  // 修订版落地 → 把被它替代的那一份归档，否则看板上会同时挂着两版方案
+  // 归档上一版。不做的话看板会一周一层往上堆，且新旧动作长得一模一样、分不出哪条还算数。
   if (prescription.supersedes_id) {
-    const { error } = await supabase
-      .from('prescriptions')
-      .update({ status: 'superseded' })
-      .eq('id', prescription.supersedes_id)
-      .eq('client_id', prescription.client_id)
-    if (error) {
+    const archived = await updateOneRow(
+      supabase,
+      { status: 'superseded' },
+      { id: prescription.supersedes_id, clientId: prescription.client_id },
+    )
+    if (!archived.ok) {
       // 非致命：新方案已经落地了，旧的没归档只是界面上多一份
-      notes.push(`旧处方归档失败（非致命）：${error.message}`)
+      notes.push(`上一版处方归档失败（非致命）：${archived.why}`)
     } else {
-      notes.push('已归档被替代的上一版处方')
+      // 光归档处方不够 —— 看板查执行项时只按客户过滤，不看处方状态。
+      // 旧方案里没人动过的动作必须一起作废，否则堆积的是动作不是处方。
+      const { data: dropped, error: dropErr } = await supabase
+        .from('execution_items')
+        .update({ status: 'superseded' })
+        .eq('prescription_id', prescription.supersedes_id)
+        .eq('client_id', prescription.client_id)
+        .in('status', SUPERSEDABLE_ITEM_STATUSES as unknown as string[])
+        .select('id')
+      if (dropErr) {
+        notes.push(`旧动作作废失败（非致命）：${dropErr.message}`)
+      } else {
+        supersededItems = dropped?.length ?? 0
+        notes.push(`归档上一版，顺带作废没人动过的旧动作 ${supersededItems} 条（进行中/已完成的不动）`)
+      }
     }
   }
 
-  const { error: updErr } = await supabase
-    .from('prescriptions')
-    .update({ status: 'approved', approved_at: new Date().toISOString() })
-    .eq('id', prescription.id)
-    .eq('client_id', prescription.client_id)
-  if (updErr) throw new Error(`标记处方已批准失败：${updErr.message}`)
+  const marked = await updateOneRow(
+    supabase,
+    { status: 'approved', approved_at: new Date().toISOString() },
+    { id: prescription.id, clientId: prescription.client_id },
+  )
+  if (!marked.ok) throw new Error(`标记处方已批准失败：${marked.why}`)
 
   if (approvedBy) notes.push(`批准人：${approvedBy}`)
 
-  return { initiativesInserted, executionItems: items.length, notes }
+  return { initiativesInserted, executionItems: items.length, supersededItems, notes }
 }
