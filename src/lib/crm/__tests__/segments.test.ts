@@ -597,3 +597,61 @@ describe('打了没接：三天之内人再试，之后交给系统', () => {
     expect(segmentContact(c, NOW).segment).toBe('replied')
   })
 })
+
+/**
+ * 进线很久、一直没人联系过的人 —— 不是「新客人」，是积压。
+ *
+ * 这条界是 2026-08-03 改「AI 秒回不算我们回过」时**被迫补上的**：在那之前，
+ * Meta 的自动回复被算成「我们联系过」，于是 2019 年留过言、只收到一句自动问候
+ * 的人因为 lastOutbound > 0 而进不了「新客人」—— 那是一层**意外的保护**。
+ * 把自动回复滤掉之后这层保护没了，CTS 有 63 个人超过一年没动静，会一股脑冒进
+ * 「还没搭上话」，写着「进线 43800 小时还没人联系」。
+ *
+ * 所以这一组钉的是：**今天真的新的人要在，陈年积压不许挤进来。**
+ */
+describe('从没人联系过：新的留在名单上，陈年积压交给系统', () => {
+  const enquiredAt = (at: string) => contact({ touchpoints: [form(at)] })
+
+  it.each([
+    ['今天', '2026-07-26T06:00:00Z'],
+    ['三天前', '2026-07-23T00:00:00Z'],
+    ['十三天前', '2026-07-13T12:00:00Z'],
+  ])('%s进线、还没人碰 → 还是新客人，留在名单上', (_label, at) => {
+    const r = segmentContact(enquiredAt(at), NOW)
+    expect(r.segment).toBe('new_untouched')
+    expect(r.suggestedChannel).toBe('phone')
+  })
+
+  it.each([
+    ['十四天前', '2026-07-12T00:00:00Z'],
+    ['两个月前', '2026-05-26T00:00:00Z'],
+    ['五年前', '2021-07-26T00:00:00Z'],
+  ])('%s进线、一直没人碰 → 交给系统，别占今天的时间', (_label, at) => {
+    const r = segmentContact(enquiredAt(at), NOW)
+    expect(r.segment).toBe('handoff_sop')
+    expect(r.reason).toContain('一直没人联系过')
+  })
+
+  /** 五年前的人绝不能显示成「进线 43800 小时还没人联系」。 */
+  it('陈年的人不说荒唐的小时数', () => {
+    const r = segmentContact(enquiredAt('2021-07-26T00:00:00Z'), NOW)
+    expect(r.reason).not.toContain('小时')
+    expect(r.reason).toContain('天')
+  })
+
+  /** 交给系统 ≠ 放弃：他哪天回话了，立刻回到最上面那层。 */
+  it('陈年积压的人一开口，立刻回到「客人在等你」', () => {
+    const c = contact({
+      touchpoints: [
+        form('2021-07-26T00:00:00Z'),
+        call('2026-07-20T00:00:00Z', 'spoke'),
+        { channel: 'messenger', direction: 'inbound', occurredAt: '2026-07-26T10:00:00Z' },
+      ],
+    })
+    expect(segmentContact(c, NOW).segment).toBe('replied')
+  })
+
+  it('陈年积压仍然是 warm —— 不是被埋进折叠区就等于扔了', () => {
+    expect(segmentContact(enquiredAt('2021-07-26T00:00:00Z'), NOW).temperature).toBe('warm')
+  })
+})
