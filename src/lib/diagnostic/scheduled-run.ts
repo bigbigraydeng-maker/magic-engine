@@ -26,7 +26,7 @@ export const RERUN_COOLDOWN_DAYS = 5
 export interface ScheduledDiagnosticOutcome {
   clientId: string
   clientName: string
-  result: 'ran' | 'skipped_recent' | 'error'
+  result: 'ran' | 'skipped_recent' | 'skipped_no_industry' | 'error'
   runId?: string
   detail?: string
 }
@@ -40,6 +40,7 @@ export interface EligibleClient {
   id: string
   name: string
   domain: string | null
+  industry: string | null
 }
 
 /**
@@ -58,6 +59,23 @@ export function pickEligible(
   for (const c of clients) {
     // 没域名 = 没网站 = SEO/竞品采集器无从下手，跑了也是空的
     if (!c.domain || !c.domain.trim()) continue
+
+    // 🔴 光看域名拦不住内部账号 —— 首版以为「内部账号没网站」，
+    //    实际 Magic Engine(magicengine.com.au) / Magic Lab(magiclab.onrender.com) /
+    //    Magic Lab Class(bigray.ai) 三个都有域名，6 个 active 里有 3 个是我们自己，
+    //    等于一半的诊断预算白烧。单测当时全绿，因为测试数据里给它们填的是 null。
+    //    真实判据是**有没有填行业** —— 三个内部账号都是空的，三个真客户都有。
+    //    这一条要进 skipped（不像没域名那样静默丢弃）：万一是真客户漏填行业，
+    //    必须在运行记录里看得见，否则又变成「跑了但没人知道谁被漏掉」。
+    if (!c.industry || !c.industry.trim()) {
+      skipped.push({
+        clientId: c.id,
+        clientName: c.name,
+        result: 'skipped_no_industry',
+        detail: '没填行业 —— 按内部账号处理。如果这是真客户，去客户设置里补上行业就会开始跑',
+      })
+      continue
+    }
 
     const last = lastRunByClient.get(c.id)
     if (last) {
@@ -83,7 +101,7 @@ export async function runScheduledDiagnostics(
 ): Promise<ScheduledDiagnosticSummary> {
   const { data: clientRows, error } = await supabase
     .from('clients')
-    .select('id, name, domain')
+    .select('id, name, domain, industry')
     .eq('client_status', 'active')
   if (error) throw new Error(`clients query failed: ${error.message}`)
 
