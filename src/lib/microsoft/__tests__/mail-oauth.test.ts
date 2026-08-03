@@ -86,15 +86,48 @@ describe('要哪些权限 —— 这是一份契约，不是一个随手改的�
   })
 })
 
+/**
+ * 管理员替全公司批准的入口。
+ *
+ * ## 这一组原先是假的（2026-08-03）
+ *
+ * 上一版这里断言的是 `/common/adminconsent` —— 也就是把当时写错的那个地址
+ * 原样抄进了测试。测试全绿，而线上 CTS 的管理员点完、页面跳回来了、
+ * `info@` 再去连照样撞「需要管理员批准」。
+ *
+ * **一条只是把实现照抄一遍的断言，不验证任何东西，它只是把 bug 焊死。**
+ * 所以下面每一条都对着
+ * [微软的文档](https://learn.microsoft.com/en-us/entra/identity-platform/v2-admin-consent)
+ * 写，而不是对着我们的代码写。
+ */
 describe('管理员替全公司批准的入口', () => {
   /**
-   * 有些公司的 Microsoft 365 关掉了「员工可以自己给外部软件授权」，info@ 自己
-   * 点会撞上「需要管理员批准」。这条链接是给管理员走的。
+   * **必须是 v2.0 端点。**
+   *
+   * v1 的 `/adminconsent` 不接受 `scope`，它批的是应用注册里静态配置的权限。
+   * 我们整套走动态授权（权限在请求时才带，注册里一条都没静态配），
+   * 所以 v1 批下去的是空集合 —— 批了等于没批，而且**页面还显示成功**。
    */
-  it('用 adminconsent 专用端点', () => {
-    expect(MICROSOFT_ADMIN_CONSENT_URL).toBe(
+  it('用 v2.0 的 adminconsent 端点', () => {
+    expect(MICROSOFT_ADMIN_CONSENT_URL).toContain('/v2.0/adminconsent')
+  })
+
+  /** 明确钉住那个错地址，别再回去。 */
+  it('不是 v1 的那个地址', () => {
+    expect(MICROSOFT_ADMIN_CONSENT_URL).not.toBe(
       'https://login.microsoftonline.com/common/adminconsent',
     )
+  })
+
+  /**
+   * 租户段只能是 GUID / 域名 / `organizations`，**`common` 不在文档的合法值里**。
+   *
+   * 语义上也该是 `organizations`：管理员批准这件事只对公司账号成立 ——
+   * 个人 Outlook.com 账号没有「管理员」这回事。
+   */
+  it('租户段用 organizations，不用 common', () => {
+    expect(MICROSOFT_ADMIN_CONSENT_URL).toContain('/organizations/')
+    expect(MICROSOFT_ADMIN_CONSENT_URL).not.toContain('/common/')
   })
 
   /**
@@ -107,9 +140,11 @@ describe('管理员替全公司批准的入口', () => {
     expect(MICROSOFT_ADMIN_CONSENT_URL).not.toContain('/authorize')
   })
 
-  /** `common`：客户可能是 Outlook.com 个人账号，也可能是公司的 Microsoft 365。 */
+  /** 不写死某一家公司的租户号 —— 这是要卖给多个客户的模块。 */
   it('不写死某一个公司的租户号', () => {
-    expect(MICROSOFT_ADMIN_CONSENT_URL).toContain('/common/')
+    expect(MICROSOFT_ADMIN_CONSENT_URL).not.toMatch(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
+    )
   })
 })
 

@@ -67,10 +67,17 @@ export async function GET(req: NextRequest) {
   authUrl.searchParams.set('redirect_uri', microsoftRedirectUri())
   authUrl.searchParams.set('state', nonce)
 
+  // 两条路**都要**带 scope。
+  //
+  // 2026-08-03 踩到：管理员那条路原先没带，于是批下去的是应用注册里静态配置的
+  // 权限（我们一个都没配，全走动态）—— 等于批了个空集合。管理员点完、页面也
+  // 跳回来了，`info@` 再去连照样撞墙。v2.0 的 adminconsent 端点把 `scope`
+  // 列为**必填**，不是可选。
+  authUrl.searchParams.set('scope', MICROSOFT_MAIL_SCOPES.join(' '))
+
   if (!adminConsent) {
     authUrl.searchParams.set('response_type', 'code')
     authUrl.searchParams.set('response_mode', 'query')
-    authUrl.searchParams.set('scope', MICROSOFT_MAIL_SCOPES.join(' '))
     // 每次都要刷新令牌 —— 没有它，一小时后同步会安静地停掉。
     authUrl.searchParams.set('prompt', 'consent')
 
