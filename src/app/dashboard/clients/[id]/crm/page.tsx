@@ -21,10 +21,10 @@ import Link from 'next/link'
 import { type StageOption } from './_components/ComposeNote'
 import { CrmTabs } from './_components/CrmTabs'
 import { PersonDrawer, type DrawerRow } from './_components/PersonDrawer'
-
-type Segment =
-  | 'replied' | 'callback_due' | 'travel_due' | 'new_untouched'
-  | 'retry_channel' | 'stale_conversation' | 'nurture_future' | 'excluded'
+// 从唯一那份定义引，**不要在这里再抄一遍**。
+// 2026-08-03 就是抄的那份走散了：lib 里删掉了一个段，页面这份还留着，
+// 两边对不上，tsc 才把它顶出来 —— 而它本可以一直静静地错下去。
+import type { Segment } from '@/lib/crm/segments'
 
 interface Row {
   contactId: string
@@ -62,7 +62,7 @@ interface OffRow {
   stageLabel: string | null
   segment: Segment
   reason: string
-  group: 'won' | 'later' | 'stop' | 'snoozed'
+  group: 'won' | 'later' | 'stop' | 'snoozed' | 'fix_number'
   lastNote: string | null
   /** 被推迟到什么时候 —— 有值就能一键提前叫回来。 */
   snoozeUntil?: string | null
@@ -146,11 +146,14 @@ const OFF_GROUP_LABEL: Record<OffRow['group'], string> = {
   // 被人手推迟的必须跟「规则排除的」分开显示 —— 混在一起，销售想把某个人
   // 提前叫回来，就得在一堆「明确拒绝」里找他上周随手放一放的那个人。
   snoozed: '你放一放的人 · 到期自己回来',
+  // 号码抄错了的真客人，以前跟「明确拒绝」混在一起被永久静默排除。
+  // 单拎出来是为了让它变成一件**有人能动手修**的事。
+  fix_number: '号码是坏的 · 补一个对的就能继续跟',
   stop: '不用再联系',
 }
 
 /** 客人正在等我们 / 购买窗口到了 —— 列头数字标红催一下。 */
-const HOT: ReadonlySet<Segment> = new Set<Segment>(['replied', 'callback_due', 'travel_due'])
+const HOT: ReadonlySet<Segment> = new Set<Segment>(['replied', 'callback_due', 'clicked_link'])
 
 /** 「等了 3 天」。同一列里等得最久的排最前，卡片上要说出来。 */
 function waitedText(iso: string | null): string | null {
@@ -1001,14 +1004,14 @@ function OffList({
         <span className="text-sm font-black text-me-charcoal">
           {open ? '▾' : '▸'} 不在今天名单上的人 · {rows.length}
         </span>
-        <span className="ml-2 text-xs text-me-charcoal/45">你放一放的人 / 已成交 / 以后才走 / 不用再联系</span>
+        <span className="ml-2 text-xs text-me-charcoal/45">你放一放的人 / 号码要修 / 已成交 / 以后才走 / 不用再联系</span>
       </button>
 
       {open && (
         <div className="mt-3 space-y-4">
           {/* 「你放一放的人」排最前：这是唯一一组还可能被主动叫回来的 —— 其余三组
               都是结论已定。放最后等于让人翻半页才找得到自己上周放的那个人。 */}
-          {(['snoozed', 'won', 'later', 'stop'] as const).map((g) => {
+          {(['snoozed', 'fix_number', 'won', 'later', 'stop'] as const).map((g) => {
             const list = rows.filter((r) => r.group === g)
             if (list.length === 0) return null
             return (

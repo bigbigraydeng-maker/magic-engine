@@ -102,8 +102,8 @@ describe('第三段：新 lead 待首联', () => {
 
 describe('数据里存在、但手工表没有的三段', () => {
   it('打不通的人改渠道，而不是明天再空打一次', () => {
-    // 110 个人卡在这里，是最大的一块
-    const c = contact({ touchpoints: [form('2026-07-01T00:00:00Z'), call('2026-07-01T00:00:00Z', 'no_answer')] })
+    // 昨天打的 —— 三天之内还值得真人再试一次
+    const c = contact({ touchpoints: [form('2026-07-25T00:00:00Z'), call('2026-07-25T00:00:00Z', 'no_answer')] })
     const r = segmentContact(c, NOW)
     expect(r.segment).toBe('retry_channel')
     expect(r.suggestedChannel).toBe('sms')
@@ -150,7 +150,7 @@ describe('数据里存在、但手工表没有的三段', () => {
   })
 
   it('「打过没人接」不能说成「打不通」—— 只知道打了没接，晚上可能就接了', () => {
-    const c = contact({ touchpoints: [call('2026-07-23T00:00:00Z', 'no_answer')] })
+    const c = contact({ touchpoints: [call('2026-07-25T00:00:00Z', 'no_answer')] })
     const r = segmentContact(c, NOW)
     expect(r.segment).toBe('retry_channel')
     expect(r.reason).toContain('没人接')
@@ -169,15 +169,22 @@ describe('数据里存在、但手工表没有的三段', () => {
     expect(segmentContact(c, NOW).segment).toBe('nurture_future')
   })
 
-  it('出行时间快到了 —— 自动捞回名单，而且是热的', () => {
-    // 2026-06-19 说「下个月左右」= 2026-07 出行；NOW 是 7-26，早进跟进窗口了
+  /**
+   * PM 2026-08-03 拿掉了「快出行了，该定了」这一批：它靠 AI 从通话里解析出的
+   * 月份去推断「他该定了」—— 是猜的，不是客人说的。这一页现在只认客人**真的
+   * 说过话 / 真的动过手**。
+   *
+   * 拿掉之后不能把人弄丢：到了出行月份的人**照旧留在今天的名单上**，只是
+   * 理由老实写「聊过一轮就断了」，不假装知道他急不急。
+   */
+  it('出行时间到了 —— 不再单独成批，但人必须还在名单上', () => {
     const c = contact({
       touchpoints: [call('2026-06-19T00:00:00Z', 'spoke', { travelWindow: '下个月左右' })],
     })
     const r = segmentContact(c, NOW)
-    expect(r.segment).toBe('travel_due')
-    expect(r.temperature).toBe('hot')
-    expect(r.reason).toContain('下个月左右')
+    expect(r.segment).toBe('stale_conversation')
+    // 关键：还在今天的名单里（warm），没有掉进折叠区
+    expect(r.temperature).toBe('warm')
   })
 
   it('出行时间算不出来的（「看情况」）不瞎猜，留在培育里', () => {
@@ -187,13 +194,14 @@ describe('数据里存在、但手工表没有的三段', () => {
     expect(segmentContact(c, NOW).segment).toBe('nurture_future')
   })
 
-  it('快出行的人排在新 lead 前面 —— 他已经说了要走，比没碰过的更该打', () => {
-    const soon = contact({
-      id: 'soon',
+  /** 拿掉「快出行了」之后，今天刚进线的人排在聊过就断了的人前面 —— 线索会凉。 */
+  it('今天刚进线的排在「聊过就断了」前面', () => {
+    const stale = contact({
+      id: 'stale',
       touchpoints: [call('2026-06-19T00:00:00Z', 'spoke', { travelWindow: '下个月左右' })],
     })
     const fresh = contact({ id: 'fresh', touchpoints: [form('2026-07-26T06:00:00Z')] })
-    expect(todayWorklist([fresh, soon], NOW).map((c) => c.id)).toEqual(['soon', 'fresh'])
+    expect(todayWorklist([fresh, stale], NOW).map((c) => c.id)).toEqual(['fresh', 'stale'])
   })
 
   it('带上最后来往时间 —— 卡片要显示「等了几天」，同桶排序也靠它', () => {
@@ -231,14 +239,15 @@ describe('今天的名单', () => {
    * 销售会问「凭什么先打这个」。等得最久的排前面才说得通。
    */
   it('同一桶里，等得最久的排前面', () => {
+    // 三个都在「打了没接」的 3 天窗口内 —— 同一桶，才验得到桶内排序
     const sameBucket: ContactLike[] = [
       contact({ id: 'waited-1day', touchpoints: [call('2026-07-25T00:00:00Z', 'no_answer')] }),
-      contact({ id: 'waited-20days', touchpoints: [call('2026-07-06T00:00:00Z', 'no_answer')] }),
-      contact({ id: 'waited-6days', touchpoints: [call('2026-07-20T00:00:00Z', 'no_answer')] }),
+      contact({ id: 'waited-almost3days', touchpoints: [call('2026-07-23T18:00:00Z', 'no_answer')] }),
+      contact({ id: 'waited-2days', touchpoints: [call('2026-07-24T00:00:00Z', 'no_answer')] }),
     ]
     expect(todayWorklist(sameBucket, NOW).map((c) => c.id)).toEqual([
-      'waited-20days',
-      'waited-6days',
+      'waited-almost3days',
+      'waited-2days',
       'waited-1day',
     ])
   })
@@ -445,7 +454,7 @@ describe('建议的渠道必须真的能联系到人', () => {
 
   it('打不通要改发短信的人，如果压根没号码 → 退到私信', () => {
     const c = contact({
-      touchpoints: [form('2026-07-01T00:00:00Z'), call('2026-07-01T00:00:00Z', 'no_answer')],
+      touchpoints: [form('2026-07-25T00:00:00Z'), call('2026-07-25T00:00:00Z', 'no_answer')],
       hasPhone: false, hasEmail: false, hasMessenger: true,
     })
     const r = segmentContact(c, NOW)
@@ -538,6 +547,53 @@ describe('推迟：到点自己回来，不用人记得', () => {
   /** 存了一句坏数据也不能让整块看板炸掉。 */
   it('推迟时间是坏数据 → 当没推迟处理，不炸', () => {
     const c = contact({ snoozeUntil: '不是个时间', touchpoints: hot() })
+    expect(segmentContact(c, NOW).segment).toBe('replied')
+  })
+})
+
+/**
+ * 打了没接：三天之内人再试，超过三天交给系统。
+ *
+ * PM 2026-08-03 定的规则。三天是个真实的判断 —— 中午没接的人晚上会接、周一没接的
+ * 周二会接；但打到第四天还没接上，再打的收益已经很低，那段时间应该还给真的有人
+ * 在等的那一批。关键是**他一开口就要跳回最上面**，交给系统不等于放弃。
+ */
+describe('打了没接：三天之内人再试，之后交给系统', () => {
+  const noAnswerAt = (at: string) => contact({ touchpoints: [call(at, 'no_answer')] })
+
+  it.each([
+    ['今天', '2026-07-26T06:00:00Z'],
+    ['昨天', '2026-07-25T00:00:00Z'],
+    ['两天前', '2026-07-24T00:00:00Z'],
+  ])('%s打的 → 还让人再试一次', (_label, at) => {
+    expect(segmentContact(noAnswerAt(at), NOW).segment).toBe('retry_channel')
+  })
+
+  it.each([
+    ['三天前', '2026-07-23T00:00:00Z'],
+    ['五天前', '2026-07-21T00:00:00Z'],
+    ['二十天前', '2026-07-06T00:00:00Z'],
+  ])('%s打的 → 交给系统跟，不再占人的时间', (_label, at) => {
+    const r = segmentContact(noAnswerAt(at), NOW)
+    expect(r.segment).toBe('handoff_sop')
+    expect(r.reason).toContain('交给系统')
+  })
+
+  /**
+   * 「交给系统」不是放弃。这批人仍然是 warm —— 他一旦回消息或点链接，
+   * 上面那些规则会先命中，人自己跳回最上面那层。
+   */
+  it('交给系统的人还是 warm —— 他一开口就跳回去，不是被埋掉', () => {
+    expect(segmentContact(noAnswerAt('2026-07-06T00:00:00Z'), NOW).temperature).toBe('warm')
+  })
+
+  it('他后来回话了 → 立刻回到「客人在等你」，三天规则拦不住', () => {
+    const c = contact({
+      touchpoints: [
+        call('2026-07-06T00:00:00Z', 'no_answer'),
+        { channel: 'messenger', direction: 'inbound', occurredAt: '2026-07-26T10:00:00Z' },
+      ],
+    })
     expect(segmentContact(c, NOW).segment).toBe('replied')
   })
 })

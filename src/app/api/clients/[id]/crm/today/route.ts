@@ -60,6 +60,20 @@ interface TouchRow {
   metadata: Record<string, unknown> | null
 }
 
+/**
+ * 这个人最近一次通话的结果。分「号码要修」那一组用。
+ *
+ * touches 已经按 occurred_at 倒序（见下面的查询），所以第一条带 outcome 的
+ * 就是最近的那次。
+ */
+function latestOutcomeOf(touches: TouchRow[]): string | null {
+  for (const t of touches) {
+    const o = t.metadata?.outcome
+    if (typeof o === 'string' && o) return o
+  }
+  return null
+}
+
 interface StageRow {
   stage_key: string
   label: string
@@ -453,16 +467,26 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
         // 而且成交客户恰恰最该继续维护（催余款、确认行程）—— 页面按这个分开显示。
         /** 被推迟到什么时候。有值 = 他是被人手推迟的，不是被规则排除的。 */
         snoozeUntil: row?.snooze_until ?? null,
+        /**
+         * 号码是坏的 —— 这一条要单独拎出来。
+         *
+         * 它以前跟「明确拒绝」混在同一堆「不用再联系」里，于是一个**只是号码
+         * 抄错了**的真客人被永久静默排除，没有任何地方提醒谁去补一个对的号码。
+         * 交给自动跟进也没用：号码是坏的，SOP 再激活也发不出去。
+         * 单独成组 = 变成一件人能动手修的事（铁律 3）。
+         */
         // 「被推迟」必须能跟「已停止」分开。混在一起的话，销售想把一个人提前
         // 叫回来就无从下手 —— 他会在一堆「明确拒绝」里找一个自己上周放一放的人。
         group:
           row?.snooze_until && new Date(row.snooze_until).getTime() > now.getTime()
             ? ('snoozed' as const)
-            : meta?.action === 'won' || meta?.action === 'postsale'
-              ? ('won' as const)
-              : seg.segment === 'nurture_future'
-                ? ('later' as const)
-                : ('stop' as const),
+            : latestOutcomeOf(byContact.get(c.id) ?? []) === 'bad_number'
+              ? ('fix_number' as const)
+              : meta?.action === 'won' || meta?.action === 'postsale'
+                ? ('won' as const)
+                : seg.segment === 'nurture_future'
+                  ? ('later' as const)
+                  : ('stop' as const),
         lastNote: (byContact.get(c.id) ?? [])[0]?.summary ?? null,
       }
     })
