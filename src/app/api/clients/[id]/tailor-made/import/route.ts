@@ -4,6 +4,7 @@ import { callClaudeWithDocs } from '@/lib/anthropic/client'
 import { extractItinerary, applyPatch } from '@/lib/tailor-made/extract'
 import { detectKind, docxToText, plainToText } from '@/lib/tailor-made/read-source'
 import { heroForTrip, pickHeroName } from '@/lib/tailor-made/hero'
+import { parseFlightPdf } from '@/lib/tailor-made/flights'
 import type { TailorMadeItinerary } from '@/lib/tailor-made/types'
 
 /**
@@ -45,6 +46,24 @@ async function pdfToText(base64: string, filename: string): Promise<string> {
   return res.text.trim()
 }
 
+/**
+ * 这份文件是出票单还是行程？
+ *
+ * 甲方两个框都传了，但导出的行程里航段是 0 —— 两个上传框长得一样、
+ * 都收 PDF，传错框太容易，而传错之后系统还一声不吭当成行程去解析。
+ *
+ * 与其让人分辨，不如系统自己认：出票单和行程 Word 的特征差得很远。
+ * 三个条件同时满足才算出票单，宁可漏判（当行程解析，顾问看得出来），
+ * 也不要误判（把真行程当出票单，整份行程就没了）。
+ */
+function looksLikeTicket(text: string): boolean {
+  const t = text.slice(0, 4000)
+  const hasFlightNo = /\b[A-Z]{2}\s?\d{2,4}\b/.test(t)
+  const hasLeg = /(departure|arrival|出发|到达)/i.test(t)
+  const hasTicketMarker = /(booking\s*ref|\bPNR\b|e-?ticket|check-?in|操作航班|电子客票)/i.test(t)
+  return hasFlightNo && hasLeg && hasTicketMarker
+}
+
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const access = await requireDashboardClientAccess(params.id)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
@@ -82,8 +101,30 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     if (text.length > 80_000) text = text.slice(0, 80_000)
 
+    // 传错框也能救回来：认出是出票单就走航班解析，不当行程糟蹋掉
+    if (kind === 'pdf' && looksLikeTicket(text)) {
+      const flights = await parseFlightPdf(Buffer.from(buf).toString('base64'), file.name)
+      return NextResponse.json({
+        payload: { ...current, flights: flights.flights, bookingRef: flights.bookingRef || current.bookingRef },
+        review: [],
+        reply: `这份是出票单，不是行程 —— 已按航班读取。${flights.note}`,
+        detectedAs: 'ticket',
+      })
+    }
+
     const result = await extractItinerary({ message: text, current })
     const payload = applyPatch(current, result.patch)
+
+    // 航班不能被行程导入冲掉。
+    //
+    // extractItinerary 压根不把 flights 传给模型（也不该传 —— 那是另一份
+    // 文件的事），所以 patch 里永远没有 flights。但只要客户端传来的 current
+    // 是旧的（先传航班、再传行程，两次点击之间 state 没跟上），航段就没了。
+    // 甲方实测就是「第一版有航班，重新生成后没了」。
+    if (!('flights' in (result.patch as Record<string, unknown>))) {
+      payload.flights = current.flights ?? payload.flights
+      payload.bookingRef = current.bookingRef || payload.bookingRef
+    }
 
     // 封面按目的地自动选；顾问没手动指定过才覆盖
     // 自动选一定有猜错的时候（「重庆+张家界」哪个当主打？）。所以把选中的
