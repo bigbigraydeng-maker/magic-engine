@@ -9,6 +9,7 @@ import {
   type TailorMadeItinerary,
   type TailorMadeRecord,
   type TailorMadeStatus,
+  type TailorMadeFlight,
 } from '@/lib/tailor-made/types';
 import type { ReviewItem } from '@/lib/tailor-made/extract';
 import AiComposer, { type ChatTurn } from './AiComposer';
@@ -49,6 +50,9 @@ export default function TailorMadeEditor({
   const [aiError, setAiError] = useState<string | null>(null);
   const [review, setReview] = useState<ReviewItem[]>([]);
   const [fieldsOpen, setFieldsOpen] = useState(false);
+  const [flightBusy, setFlightBusy] = useState(false);
+  const [flightNote, setFlightNote] = useState<string | null>(null);
+  const [expandingDay, setExpandingDay] = useState<number | null>(null);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const objectUrlRef = useRef<string | null>(null);
@@ -96,6 +100,66 @@ export default function TailorMadeEditor({
       }
     },
     [clientId, payload, turns]
+  );
+
+  /**
+   * 上传出票单 PDF，读出航段。
+   *
+   * 航班是另一份文件（Amadeus / 航司出的），以前只能人工照抄进行程 ——
+   * 抄错一个航站楼客人就跑错地方。
+   */
+  const uploadFlights = useCallback(
+    async (file: File) => {
+      setFlightBusy(true);
+      setFlightNote(null);
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        const res = await fetch(`/api/clients/${clientId}/tailor-made/flights`, {
+          method: 'POST',
+          body: fd,
+          credentials: 'include',
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '解析失败');
+
+        edit((d) => {
+          d.flights = data.flights as TailorMadeFlight[];
+          if (data.bookingRef) d.bookingRef = data.bookingRef;
+        });
+        setFlightNote(data.note ?? null);
+      } catch (err) {
+        setFlightNote(err instanceof Error ? err.message : '解析失败');
+      } finally {
+        setFlightBusy(false);
+      }
+    },
+    [clientId, edit]
+  );
+
+  /** 把某一天的正文展开写细。返回结果先落到编辑器，顾问看过才保存。 */
+  const expandOneDay = useCallback(
+    async (index: number) => {
+      setExpandingDay(index);
+      try {
+        const res = await fetch(`/api/clients/${clientId}/tailor-made/expand-day`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ day: payload.days[index], trip: payload.trip }),
+          credentials: 'include',
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '展开失败');
+        edit((d) => { d.days[index].body = data.body; });
+        setNote({ kind: 'ok', text: data.note || '已展开' });
+        setTimeout(() => setNote(null), 3000);
+      } catch (err) {
+        setNote({ kind: 'err', text: err instanceof Error ? err.message : '展开失败' });
+      } finally {
+        setExpandingDay(null);
+      }
+    },
+    [clientId, payload, edit]
   );
 
   /** 点「待确认」里的一条，展开校对面并滚到对应区块 */
@@ -349,6 +413,50 @@ export default function TailorMadeEditor({
             </div>
           </Section>
 
+          <Section id="tm-flights" title={`航班（${payload.flights?.length ?? 0} 段）`}>
+            <p className="text-xs text-me-charcoal/55">
+              上传航司或 Amadeus 出的出票单 PDF，系统读出航段填进行程单。
+              <strong className="text-me-charcoal/75">只照抄不补全</strong> —— 单子上没印的航站楼会留空。
+            </p>
+            <label className={`inline-block cursor-pointer rounded-md border border-black/15 px-3 py-2 text-sm ${flightBusy ? 'opacity-50' : 'hover:bg-me-ivory'}`}>
+              {flightBusy ? '解析中…' : '选择出票单 PDF'}
+              <input
+                type="file"
+                accept="application/pdf,.pdf"
+                disabled={flightBusy}
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void uploadFlights(f);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+            {flightNote && <p className="text-xs text-me-charcoal/60">{flightNote}</p>}
+
+            {(payload.flights ?? []).length > 0 && (
+              <div className="space-y-2">
+                {(payload.flights ?? []).map((f, i) => (
+                  <div key={i} className="rounded-md border border-black/10 p-2.5 text-xs">
+                    <div className="font-bold">
+                      {f.flightNo} <span className="font-normal text-me-charcoal/50">{f.date}</span>
+                      {f.operatedBy && <span className="ml-2 font-normal italic text-me-charcoal/45">{f.operatedBy}</span>}
+                    </div>
+                    <div className="mt-0.5">
+                      {f.departTime} {f.from} → {f.arriveTime}{f.arriveDayOffset} {f.to}
+                    </div>
+                    <div className="mt-0.5 text-me-charcoal/45">
+                      {[f.duration, f.cabin, f.departTerminal && `出发 ${f.departTerminal}`, f.arriveTerminal && `到达 ${f.arriveTerminal}`]
+                        .filter(Boolean).join(' · ')}
+                    </div>
+                  </div>
+                ))}
+                <Text label="订位号" value={payload.bookingRef ?? ''}
+                  onChange={(v) => edit((d) => { d.bookingRef = v; })} />
+              </div>
+            )}
+          </Section>
+
           <Section
             id="tm-days"
             title={`逐日行程（${payload.days.length} 天）`}
@@ -369,6 +477,8 @@ export default function TailorMadeEditor({
                   onChange={(patch) => edit((d) => { Object.assign(d.days[i], patch); })}
                   onMove={(dir) => edit((d) => { moveDay(d.days, i, dir); })}
                   onRemove={() => edit((d) => { d.days.splice(i, 1); renumber(d.days); })}
+                  onExpand={() => void expandOneDay(i)}
+                  expanding={expandingDay === i}
                 />
               ))}
             </div>
@@ -517,13 +627,15 @@ function Area({ label, value, onChange, rows = 3, hint }: {
   );
 }
 
-function DayCard({ day, index, total, onChange, onMove, onRemove }: {
+function DayCard({ day, index, total, onChange, onMove, onRemove, onExpand, expanding }: {
   day: TailorMadeDay;
   index: number;
   total: number;
   onChange: (patch: Partial<TailorMadeDay>) => void;
   onMove: (dir: -1 | 1) => void;
   onRemove: () => void;
+  onExpand: () => void;
+  expanding: boolean;
 }) {
   return (
     <div className="rounded-md border border-black/10 p-4">
@@ -532,6 +644,13 @@ function DayCard({ day, index, total, onChange, onMove, onRemove }: {
         <div className="ml-auto flex gap-1">
           <button type="button" className={ghostBtn} disabled={index === 0} onClick={() => onMove(-1)}>↑</button>
           <button type="button" className={ghostBtn} disabled={index === total - 1} onClick={() => onMove(1)}>↓</button>
+          {/* 展开：源行程常常一天只有一句「Visit Ciqikou, Liziba…」，
+              客人看不出这天在干什么。只扩描述，不加时间/价格/酒店。 */}
+          <button type="button" className={ghostBtn} disabled={expanding || !day.body?.trim()}
+            title={day.body?.trim() ? '把这天写细一点' : '先写一句正文再展开'}
+            onClick={onExpand}>
+            {expanding ? '展开中…' : '展开描述'}
+          </button>
           <button type="button" className={ghostBtn} onClick={onRemove}>删除</button>
         </div>
       </div>

@@ -156,6 +156,21 @@ ul.ticks li svg{position:absolute;left:0;top:1.1mm;width:3.4mm;height:3.4mm}
 
 /* ---------- two-column list ---------- */
 .cols{display:grid;grid-template-columns:1fr 1fr;gap:8mm}
+/* ---------- 航班 ---------- */
+.fl{border-top:.5pt solid var(--line);padding:3mm 0}
+.fl:first-of-type{border-top:1.4pt solid var(--red)}
+.fl__top{display:flex;align-items:baseline;gap:3mm;margin-bottom:1.2mm}
+.fl__no{font-weight:700;font-size:10pt;letter-spacing:.02em}
+.fl__date{font-size:8pt;color:var(--muted)}
+.fl__op{font-size:7.6pt;color:var(--muted);font-style:italic}
+.fl__leg{display:flex;align-items:baseline;gap:2.5mm;font-size:9.6pt}
+.fl__city{font-weight:600}
+.fl__time{font-family:'Playfair Display',Georgia,serif;font-size:11pt}
+.fl__arrow{color:var(--gold)}
+.fl__sup{font-size:6.6pt;color:var(--red);font-weight:700;vertical-align:super}
+.fl__meta{margin-top:1.2mm;font-size:7.6pt;color:var(--muted);display:flex;flex-wrap:wrap;gap:1mm 5mm}
+.fl__ref{margin-top:2mm;font-size:8pt;color:var(--muted)}
+.fl__ref b{color:var(--ink);letter-spacing:.08em}
 
 /* ---------- price ---------- */
 .price{display:flex;align-items:flex-end;justify-content:space-between;gap:8mm;background:var(--cream);padding:7mm;border-top:2.2pt solid var(--red)}
@@ -551,6 +566,35 @@ function blocks(d){
       </div>
       <div class="quote">Every detail here can be changed. Tell me what you would like to see more of — or less of — and I will rework the itinerary until it is yours.</div>
     </div>`);
+
+  /* --- 航班 --- */
+  if (d.flights && d.flights.length){
+    push(`<div class="blk"><div class="eyebrow">Your flights</div><h2 class="sec serif">航班</h2>
+      ${d.bookingRef ? `<p class="fl__ref">订位号 Booking ref <b>${esc(d.bookingRef)}</b></p>` : ''}
+    </div>`, true);
+
+    push(`<div class="blk">${d.flights.map(f=>`
+      <div class="fl">
+        <div class="fl__top">
+          <span class="fl__no">${esc(f.flightNo)}</span>
+          <span class="fl__date">${esc(f.date)}</span>
+          ${f.operatedBy ? `<span class="fl__op">${esc(f.operatedBy)}</span>` : ''}
+        </div>
+        <div class="fl__leg">
+          <span class="fl__time">${esc(f.departTime)}</span>
+          <span class="fl__city">${esc(f.from)}</span>
+          <span class="fl__arrow">→</span>
+          <span class="fl__time">${esc(f.arriveTime)}</span><span class="fl__sup">${esc(f.arriveDayOffset||'')}</span>
+          <span class="fl__city">${esc(f.to)}</span>
+        </div>
+        <div class="fl__meta">
+          ${f.duration ? `<span>飞行时长 ${esc(f.duration)}</span>` : ''}
+          ${f.cabin ? `<span>${esc(f.cabin)}</span>` : ''}
+          ${f.departTerminal ? `<span>出发航站楼 ${esc(f.departTerminal)}</span>` : ''}
+          ${f.arriveTerminal ? `<span>到达航站楼 ${esc(f.arriveTerminal)}</span>` : ''}
+        </div>
+      </div>`).join('')}</div>`);
+  }
 
   /* --- day by day --- */
   push(`<div class="blk"><div class="eyebrow">Day by day</div><h2 class="sec serif">Your itinerary</h2></div>`, true);

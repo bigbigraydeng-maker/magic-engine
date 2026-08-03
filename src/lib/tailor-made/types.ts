@@ -33,6 +33,31 @@ export interface TailorMadeDay {
   meals?: string;
 }
 
+/**
+ * 一个航段。
+ *
+ * 字段照抄航司/GDS 出票单上的原文 —— 这份东西要发给旅客本人，
+ * 他会拿着它去值机。任何一个字段被「顺手补全」都可能让人跑错航站楼。
+ */
+export interface TailorMadeFlight {
+  /** 出发日期，如 "1 Nov" */
+  date: string;
+  /** 航班号，如 "NZ 3889"；代码共享写明 */
+  flightNo: string;
+  /** 承运方备注，如 "Operated by Air China CA784" */
+  operatedBy?: string;
+  from: string;
+  to: string;
+  departTime: string;
+  arriveTime: string;
+  /** 跨天时标注，如 "+1" */
+  arriveDayOffset?: string;
+  duration?: string;
+  cabin?: string;
+  departTerminal?: string;
+  arriveTerminal?: string;
+}
+
 export interface TailorMadePricingLine {
   label: string;
   value: string;
@@ -66,6 +91,14 @@ export interface TailorMadeItinerary {
     facts: TailorMadeFact[];
   };
   days: TailorMadeDay[];
+  /**
+   * 航班。单独成段而不是塞进 days[].travel —— 出票单上的信息量
+   * （订位号、舱位、航站楼、机型）远超一行文字能承载的，
+   * 而旅客值机时要的正是这些。留空则整段不渲染。
+   */
+  flights?: TailorMadeFlight[];
+  /** 订位号 / PNR，如 "DFSNHG" */
+  bookingRef?: string;
   pricing: {
     basis: string;
     currency: string;
@@ -140,6 +173,8 @@ export function createBlankItinerary(quoteRef: string): TailorMadeItinerary {
       ],
     },
     days: [blankDay(1)],
+    flights: [],
+    bookingRef: '',
     pricing: {
       basis: 'Land only, per person, based on two people sharing a twin/double room',
       currency: 'NZD',
