@@ -32,6 +32,7 @@ export type ManualItemKind =
   | 'meta_stuck'
   | 'crawl_stale'
   | 'cron_never_ran'
+  | 'video_credits_out'
 
 /**
  * 新建的 cron 在 Render 上必须**手动**关联 me-shared-cron-secret 环境变量组。
@@ -138,6 +139,8 @@ export async function loadManualItems(
   // 基础设施类检查要放在这条提前返回**之前**：新建的 cron 有没有接上密钥，
   // 跟系统里有几个客户毫无关系。放在后面的话，客户表一空它就被跳过了。
   await appendNeverRanCrons(supabase, items)
+  // 出片余额用完 —— 只有人能充值，必须当天摆到眼前，不能烂在工单的 error 字段里
+  await pushVideoCreditsItem(supabase, items, now)
 
   if (clients.size === 0) return items
 
@@ -328,4 +331,51 @@ async function appendNeverRanCrons(
       href: RENDER_BLUEPRINT_URL,
     })
   }
+}
+
+
+/** 出片余额充值页 —— 用户自己的账户页,不是深链,登录后一定打得开。 */
+const MUAPI_TOPUP_URL = 'https://muapi.ai/topup'
+
+/**
+ * AI 出片余额用完 —— 必须下发给人，因为只有人能充值。
+ *
+ * 2026-08-03 实测:Oztop 重跑到第二个镜头时 402 Insufficient credits,整单失败。
+ * 这种失败以前只写进工单的 error 字段 —— 没人会去翻,于是「工厂又没出片」
+ * 变成一个查不出原因的现象。余额这种事必须当天摆到眼前。
+ *
+ * 判据用「近 3 天有没有因余额失败的工单」,不是查余额接口 ——
+ * 那个接口不对外(实测 404),而失败记录是我们自己的、一定拿得到。
+ */
+async function pushVideoCreditsItem(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  now: Date,
+): Promise<void> {
+  const since = new Date(now.getTime() - 3 * 86_400_000).toISOString()
+  // ⚠️ 不按 status 过滤:余额不足时 worker 把工单**退回 queued** 让下轮重领,
+  //    status 并不会变成 failed。按状态筛会一条都查不到 —— 实测踩到。
+  const { data } = await supabase
+    .from('content_work_orders')
+    .select('id, client_id, updated_at, reject_reason')
+    .not('reject_reason', 'is', null)
+    .gte('updated_at', since)
+    .limit(50)
+
+  // ⚠️ 字段叫 reject_reason，不是 failure_reason。首版按后者写，查询会直接报错、
+  //    被 catch 吞掉 → 这条待办永远不出现。跟 quality_score 那次是同一个毛病：
+  //    **写 select 前必须先查真实列名**。
+  const hit = ((data ?? []) as Array<{ reject_reason?: string | null }>).find((r) =>
+    /insufficient credit|INSUFFICIENT_CREDITS/i.test(r.reject_reason ?? ''),
+  )
+  if (!hit) return
+
+  items.push({
+    kind: 'video_credits_out',
+    client_id: 'infra',
+    client_name: 'Magic Engine 后台',
+    what: 'AI 出片的余额用完了 —— 工厂现在做到一半就会断，做出来的半成品也白花了钱',
+    how: '打开链接充值（这是我们生成视频画面用的账户）。充完回我一句，我把断掉的那几单重跑',
+    href: MUAPI_TOPUP_URL,
+  })
 }
