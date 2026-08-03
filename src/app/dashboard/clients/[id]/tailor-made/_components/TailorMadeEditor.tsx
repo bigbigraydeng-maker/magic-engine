@@ -58,6 +58,12 @@ export default function TailorMadeEditor({
   const [heroName, setHeroName] = useState<string | null>(null);
   const [heroChoices, setHeroChoices] = useState<Array<{ name: string; label: string }>>([]);
 
+  // 上传要用最新的 payload：先传航班再传行程时，两次 onChange 之间
+  // React state 未必已经提交，闭包里的 payload 可能是旧的 —— 旧的传上去
+  // 就会把刚读到的航段冲掉（甲方实测：第一版有航班，重新生成后没了）。
+  const payloadRef = useRef(payload);
+  useEffect(() => { payloadRef.current = payload; }, [payload]);
+
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const objectUrlRef = useRef<string | null>(null);
 
@@ -149,7 +155,7 @@ export default function TailorMadeEditor({
       try {
         const fd = new FormData();
         fd.append('file', file);
-        fd.append('current', JSON.stringify(payload));
+        fd.append('current', JSON.stringify(payloadRef.current));
         const res = await fetch(`/api/clients/${clientId}/tailor-made/import`, {
           method: 'POST', body: fd, credentials: 'include',
         });
@@ -168,7 +174,7 @@ export default function TailorMadeEditor({
         setImportBusy(false);
       }
     },
-    [clientId, payload]
+    [clientId]
   );
 
   /** 换封面 —— 自动选会猜错，得留个换的入口 */
@@ -408,27 +414,30 @@ export default function TailorMadeEditor({
               上传后系统直接解析出行程和航班，右边立刻能看到成品。不用填表。
             </p>
 
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <label className={`block cursor-pointer rounded-lg border border-dashed border-black/20 p-3 text-center ${importBusy ? 'opacity-50' : 'hover:border-me-ochre/50 hover:bg-me-ivory/50'}`}>
-                <div className="text-sm font-bold text-me-charcoal">
-                  {importBusy ? '解析中…' : '每日行程'}
-                </div>
-                <div className="mt-0.5 text-[11px] text-me-charcoal/45">Word / PDF / 纯文本</div>
-                <input type="file" className="hidden" disabled={importBusy}
-                  accept=".docx,.pdf,.txt,.md,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                  onChange={(e) => { const f = e.target.files?.[0]; if (f) void importSource(f); e.target.value=''; }} />
-              </label>
+            <label className={`mt-3 block cursor-pointer rounded-lg border border-dashed border-black/20 p-5 text-center ${(importBusy || flightBusy) ? 'opacity-50' : 'hover:border-me-ochre/50 hover:bg-me-ivory/50'}`}>
+              <div className="text-sm font-bold text-me-charcoal">
+                {(importBusy || flightBusy) ? '解析中…' : '选择文件上传'}
+              </div>
+              <div className="mt-1 text-[11px] leading-relaxed text-me-charcoal/45">
+                每日行程（Word / PDF / 文本）和出票单（PDF）都扔这里 —— 系统自己认是哪一种。
+                <br />两份都要传，可以一次一份。
+              </div>
+              <input
+                type="file"
+                className="hidden"
+                disabled={importBusy || flightBusy}
+                accept=".docx,.pdf,.txt,.md,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) void importSource(f); e.target.value=''; }}
+              />
+            </label>
 
-              <label className={`block cursor-pointer rounded-lg border border-dashed border-black/20 p-3 text-center ${flightBusy ? 'opacity-50' : 'hover:border-me-ochre/50 hover:bg-me-ivory/50'}`}>
-                <div className="text-sm font-bold text-me-charcoal">
-                  {flightBusy ? '解析中…' : '出票单（航班）'}
-                </div>
-                <div className="mt-0.5 text-[11px] text-me-charcoal/45">
-                  PDF{(payload.flights?.length ?? 0) > 0 ? ` · 已读到 ${payload.flights?.length} 段` : ''}
-                </div>
-                <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={flightBusy}
-                  onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadFlights(f); e.target.value=''; }} />
-              </label>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-me-charcoal/50">
+              <span>行程：{payload.days.length > 1 ? `已读到 ${payload.days.length} 天` : '未上传'}</span>
+              <span>
+                航班：{(payload.flights?.length ?? 0) > 0
+                  ? `已读到 ${payload.flights?.length} 段${payload.bookingRef ? ` · ${payload.bookingRef}` : ''}`
+                  : '未上传'}
+              </span>
             </div>
 
             {(importNote || flightNote) && (
