@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import type { PlatformConnectionSummary } from '@/lib/platform-oauth/vocabulary'
 
 /**
@@ -193,8 +193,13 @@ function ConnectWizard({
   )
 }
 
+/** 授权回来时地址栏上带的那几个参数（见 /api/auth/microsoft/mail/callback）。 */
+const FLASH_PARAMS = ['mail', 'addr', 'why'] as const
+
 export function MailboxPanel({ clientId }: { clientId: string }) {
   const params = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
   const [connections, setConnections] = useState<PlatformConnectionSummary[] | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -215,12 +220,48 @@ export function MailboxPanel({ clientId }: { clientId: string }) {
     void load()
   }, [load])
 
-  // 授权回来时带的那句话（见 /api/auth/microsoft/mail/callback）。
-  const justConnected = params.get('mail') === 'ok' ? params.get('addr') : null
-  const justFailed = params.get('mail') === 'error' ? (params.get('why') ?? '连接失败') : null
-  const adminApproved = params.get('mail') === 'admin_ok'
+  /**
+   * 授权回来时带的那句话，**只读一次**。
+   *
+   * 2026-08-03 PM 反馈「页面还是显示 bdm@，看不懂」：这几个参数留在地址栏上，
+   * 于是「✓ 连上了 bdm@」跟着 URL 一直挂着，每次回到这一页都重播一遍，
+   * 跟下面的邮箱列表一模一样地重复一次 —— 同一个邮箱在页面上出现两次，
+   * 人自然以为哪里出了问题。而且它那句「还没同步过就等于什么都没发生」
+   * 在第一次同步之后就变成了假话。
+   *
+   * 所以：进页面时抓进 state，随即把地址栏擦掉。只擦我们自己加的那几个参数，
+   * 别的参数不动 —— 这一页还挂着其他板块。
+   */
+  const [flash] = useState(() => ({
+    connected: params.get('mail') === 'ok' ? params.get('addr') : null,
+    failed: params.get('mail') === 'error' ? (params.get('why') ?? '连接失败') : null,
+    adminOk: params.get('mail') === 'admin_ok',
+  }))
+
+  useEffect(() => {
+    if (!params.get('mail')) return
+    const next = new URLSearchParams(params.toString())
+    for (const k of FLASH_PARAMS) next.delete(k)
+    const q = next.toString()
+    router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false })
+  }, [params, pathname, router])
+
+  const justConnected = flash.connected
+  const justFailed = flash.failed
+  const adminApproved = flash.adminOk
 
   const active = (connections ?? []).filter((c) => c.status === 'active')
+
+  /**
+   * 刚连上的这个邮箱，同步跑过没有。
+   *
+   * 决定上面那句撤销提示能不能说「等于什么都没发生」—— 跑过一轮之后就不能说了，
+   * 那时候别人的邮件已经在客户的 CRM 里，断开连接并不会把它们收回去。
+   */
+  const flashConn = justConnected
+    ? active.find((c) => c.display_name === justConnected)
+    : undefined
+  const flashNeverSynced = !flashConn?.last_synced_at
 
   const disconnect = async (id: string, addr: string) => {
     if (!window.confirm(`断开 ${addr}？断开后，客人发到这个邮箱的信不会再进 CRM。`)) return
@@ -241,12 +282,14 @@ export function MailboxPanel({ clientId }: { clientId: string }) {
           <p className="mt-0.5 text-xs text-emerald-700">
             客人发到这个邮箱的信，从现在起会自动出现在「今天该联系谁」里。
             {/*
-              连错邮箱是这条管道最贵的错误，而它只在这一刻可以零代价撤销 ——
-              一旦同步跑过一轮，别人的私人邮件就已经进了客户的 CRM。
-              所以这句话必须出现在人刚连上、还盯着屏幕的那一秒。
+              连错邮箱是这条管道最贵的错误，而它只在同步跑起来之前可以零代价撤销 ——
+              一旦跑过一轮，别人的私人邮件就已经进了客户的 CRM，断开也收不回来。
+              所以这两句话必须分开说，不能一直说「等于什么都没发生」。
             */}
             <strong className="ml-1">
-              地址不对？现在点「断开」，还没同步过就等于什么都没发生。
+              {flashNeverSynced
+                ? '地址不对？现在点「断开」，还没同步过就等于什么都没发生。'
+                : '地址不对？点「断开」会停止收信 —— 但已经收进来的信要另外清，来找我们。'}
             </strong>
           </p>
         </div>
