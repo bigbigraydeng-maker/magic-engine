@@ -5,6 +5,7 @@
 
 import { loadViralStructure } from './viral-structure'
 import { loadClientAssetPool } from './client-asset-pool'
+import { buildPromptHint } from './narrative-beats'
 import { supabaseAdmin } from '@/lib/supabase'
 import { FACTORY_ANGLE_DEDUPE_DAYS } from './constants'
 import { generateAdCopy } from './copy-generator'
@@ -336,9 +337,23 @@ async function persistDecision(
               // worker 把 prompt_hint 原样喂给 i2v 模型,所以配方必须落在这里才真正生效。
               // ⚠️ 「开场钩子」那半句只给第一段:拼给每一段的话,中段和结尾也会被要求
               // 拍成开场镜头,一条片子里出现三四个开场感画面,节奏直接毁掉。
-              prompt_hint: clipDirective
-                ? `${p.prompt_hint} — ${i === 0 ? clipDirective : stripHookClause(clipDirective)}`
-                : p.prompt_hint,
+              //
+              // 🔴 叙事位置插在风格**前面**(PM 2026-08-03 看片反馈:结尾出现施工画面,
+              //    而前一镜已经是装好的成品)。真因是每个镜头独立瞎编 —— 提示词从没说过
+              //    「你是第几拍、前面演过什么」,而风格里那句 process-reveal 正是把
+              //    施工画面带进结尾的元凶。让约束先说话。
+              prompt_hint: (() => {
+                const withBeat = buildPromptHint({
+                  base: p.prompt_hint,
+                  role: p.segment_role,
+                  index: i,
+                  total: draft.brief.clip_generation_plan.length,
+                  styleDirective: clipDirective
+                    ? (i === 0 ? clipDirective : stripHookClause(clipDirective))
+                    : null,
+                })
+                return withBeat
+              })(),
             })),
           }
         : {}),
