@@ -12,6 +12,7 @@
 > |---|---|---|
 > | P1-1 拓客巡逻慢查询（占全库 DB 时间 24.6%） | ✅ **已上线** 728.8ms → 5.8ms | PR [#784](https://github.com/bigbigraydeng-maker/magic-engine/pull/784) · §6.1 |
 > | P0-1 空跑 cron 降频 | ✅ **已上线** 808 → 616 次运行/天。**估算由 7–11% 下修至 2.3–3.1%**，复盘见 §8 | 本 PR · §8 |
+> | 🔴 RLS 策略对匿名访客敞开（118 条） | ✅ **已上线** 客户联系资料 / API key 表此前可被任何人读写。**初稿曾误判为「不是漏洞」** | PR [#789](https://github.com/bigbigraydeng-maker/magic-engine/pull/789) · §7.1 |
 > | 其余 P0 / P1 / P2 | 📋 待 PM 逐条拍板 | §8 |
 
 ---
@@ -403,7 +404,7 @@ Execution Time: 54.444 ms
 
 | 类型 | 数量 | 级别 | 判定 |
 |---|---:|---|---|
-| `rls_policy_always_true` | **118** | WARN | ✅ **符合 ME 架构，不是漏洞。** CLAUDE.md 强约束规定新表 RLS 一律用 `service_role_full ... USING (true)` 模板，因为 ME 的访问模型是 **service-role + Bearer-token API**，从不走 end-user RLS。**不要因为这 118 条告警去改 RLS** |
+| `rls_policy_always_true` | **118** | WARN | 🔴🔴 **初稿判定为「符合架构、不是漏洞、不要改」—— 这个判断是错的，已于 2026-08-03 修正并修复。见下方 §7.1** |
 | `function_search_path_mutable` | **28** | WARN | 🟡 **真问题，但优先级低**。`search_path` 可变的函数理论上可被 search_path 注入。示例：`public.handle_updated_at`。修复=加 `SET search_path = public, pg_temp`，无行为变化 |
 | `anon_security_definer_function_executable` | **4** | WARN | 🔴 **需要确认**。`anon` 角色可通过 `/rest/v1/rpc/*` 调用 SECURITY DEFINER 函数，例：`public.activate_geo_directive(p_client_id uuid, p_directive_id uuid)`。**匿名用户传任意 client_id 就能激活别的客户的 GEO 指令 —— 这是跨客户越权的形状**。需先确认是否有真实调用方，再决定 `REVOKE EXECUTE FROM anon` |
 | `authenticated_security_definer_function_executable` | 4 | WARN | 🟡 同上，风险低一档（需已登录） |
@@ -411,7 +412,53 @@ Execution Time: 54.444 ms
 | `auth_otp_long_expiry` | 1 | WARN | 🟡 邮件 OTP 有效期 > 1 小时，建议收到 1 小时内 |
 | `auth_leaked_password_protection` | 1 | WARN | 🟡 未启用 HaveIBeenPwned 泄露密码检查，Dashboard 一键开启 |
 
-**唯一需要 PM 层面知道的安全项**：`anon_security_definer_function_executable` 的 4 个函数。其余要么是架构设计（118 条 RLS），要么是配置项开关。
+### 7.1 🔴 初稿误判修正：118 条 RLS 里有 118 条是真漏洞（2026-08-03）
+
+> **初稿写的是「符合 ME 架构，不是漏洞，不要因为这 118 条告警去改 RLS」。这句话是错的，而且是本次审计最严重的一处失误。**
+>
+> **错在哪**：我只看了告警的**类型名**（`rls_policy_always_true`），认定它对应 CLAUDE.md 那条「service-role 模板」强约束，就判成设计使然。**没有去查这些策略实际授权给了哪些角色。**
+
+#### 真相
+
+`CREATE POLICY ... FOR ALL USING (true)` **不写 `TO` 子句 = `TO PUBLIC` = 对所有角色生效**，包含 `anon`。而 Supabase 默认已给 `anon` / `authenticated` GRANT 了 public schema 下所有表的增删改查 —— 平时全靠 RLS 兜底，这个模板等于把兜底拆了。
+
+**策略的名字叫 `service_role_full`，实际谁都能用。名字骗了所有人两个月。**
+
+`clients` / `master_briefs` 等早期表写法是对的（`{service_role}`），所以对照测试能挡住 —— 这也是初稿没被戳穿的原因。
+
+#### 实测（生产环境公开 anon key，随浏览器 bundle 公开分发）
+
+| 表 | 匿名可读 |
+|---|---:|
+| `outbound_prospects` | 2,678 行 |
+| `conversation_messages` | 2,135 行 |
+| `contact_identities` | 1,260 行 |
+| `contacts` | 557 行 |
+| `client_connectors` | 12 行 |
+| `client_api_keys` | **7 行** |
+| `cms_connections` | **3 行** |
+| `admin_api_keys` | **1 行** |
+
+写入同样开放：修复后同一请求返回 `42501 new row violates row-level security policy`，修复前无此拒绝。
+
+**未波及**：`platform_oauth_connections`（第三方令牌）、`mtc_purchases` / `mtc_ledger`（充值消费）、`client_portal_users`、`clients`、`master_briefs`、`client_assets`、`voice_*`。
+
+#### 修复
+
+已于 2026-08-03 上线：118 条策略 `ALTER POLICY ... TO service_role`（只改角色不动条件，无「表裸奔」窗口）。保留 `local_cities_read_all` 公开只读（城市名参考数据）。
+
+复测结果：上表全部归零；`local_cities` 仍可读（证明 key 有效、非整体封禁）。
+
+根因已修：`docs/DECISIONS.md` 模板补 `TO service_role` + 事故记录 + 自查 SQL；`CLAUDE.md` 对应条目标红。
+
+#### 两条教训
+
+1. **告警的「类型」不等于「结论」。** 判定一条安全告警是否可忽略，必须查它的**实际生效对象**，不能靠类型名 + 架构假设推断。这次差一点让一个真实的对外数据泄露被一句「符合架构，不要改」封存。
+2. **探针要能分辨两种结果。** 初次写权限测试用 `PATCH ?id=eq.<不存在的id>`，前后都返回 204 —— 因为「被拒绝」和「允许但匹配 0 行」返回值相同，**这个探针根本测不出东西**，却被当成了「可写」的证据。有效探针是 `INSERT {}`：`42501` = 被 RLS 拒绝，`23502` = 放行了只是字段不合法。
+
+---
+
+**其余安全项**：`anon_security_definer_function_executable` 的 4 个函数（`activate_geo_directive` / `mtc_deduct_atomic` / `sync_execution_item_on_post_published` / `zhangqian_rate_limit_consume`）—— 调用方全部使用 `supabaseAdmin`，收权不影响功能；`mtc_deduct_atomic` 已有 `p_mtc_amount <= 0` 校验，无法靠负数充值。**尚未处理，见 §8 P0-3。**
 
 ---
 
