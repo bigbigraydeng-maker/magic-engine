@@ -49,6 +49,13 @@ async function supersedeUntouchedItems(
     .select('id, generation_error')
     .eq('prescription_id', priorPrescriptionId)
     .eq('client_id', clientId)
+    // 🔴 只碰**这份方案自己生成的**动作。
+    //    诸葛亮的看板推荐卡也会写同一个 prescription_id，但那是**归属标记**
+    //    （这批建议是在哪份方案的上下文下产生的），不是「属于这份方案的执行计划」。
+    //    不加这一条的话，每周会把诸葛亮当天刚算出来、让 FDE 今天去做的事一起抹掉 ——
+    //    库里实测 CTS 挂在方案下的 9 条待办**全是**诸葛亮昨天生成的。
+    //    而且是循环的：诸葛亮每次把新卡挂到当前方案上，方案周更每周连卡一起清。
+    .eq('source', 'diagnostic')
     .in('status', SUPERSEDABLE_ITEM_STATUSES as unknown as string[])
   if (error) return { count: 0, kept: 0, error: error.message }
 
@@ -60,11 +67,17 @@ async function supersedeUntouchedItems(
   let kept = all.length - untouched.length
   if (untouched.length === 0) return { count: 0, kept }
 
-  // 留过操作日志的：有人在上面写过东西，留着
-  const { data: logged } = await supabase
+  // 留过操作日志的：有人在上面写过东西，留着。
+  // 🔴 这一步查失败必须**整轮不删**（fail-closed）。原来没接 error：
+  //    查询一挂 `logged` 就是 null、`hasLog` 是空集，于是"有人动过就留着"
+  //    这道保护静默消失、全部照删 —— 保护性查询失败偏向"删"是反的。
+  const { data: logged, error: logErr } = await supabase
     .from('execution_logs')
     .select('execution_item_id')
     .in('execution_item_id', untouched.map((r) => r.id))
+  if (logErr) {
+    return { count: 0, kept: all.length, error: `查不到操作记录，这轮不动任何旧动作：${logErr.message}` }
+  }
   const hasLog = new Set(
     ((logged ?? []) as Array<{ execution_item_id: string }>).map((l) => l.execution_item_id),
   )
@@ -77,6 +90,10 @@ async function supersedeUntouchedItems(
     .update({ status: 'superseded' })
     .in('id', finalIds)
     .eq('client_id', clientId)
+    // 🔴 状态条件必须**再查一遍**。上面 SELECT 到这里 UPDATE 之间隔了两个来回，
+    //    FDE 点一下「生成内容」就会把某条从待办提到进行中 —— 不带这个条件
+    //    就会把他刚开工的活盖成作废。原来是单条 UPDATE 内联的，拆成三步才漏出这个窗口。
+    .in('status', SUPERSEDABLE_ITEM_STATUSES as unknown as string[])
     .select('id')
   if (dropErr) return { count: 0, kept, error: dropErr.message }
   return { count: dropped?.length ?? 0, kept }

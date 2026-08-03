@@ -29,6 +29,8 @@ function fakeSupabase(
     priorItems?: Array<{ id: string; generation_error: string | null }>
     /** 这些动作留过操作日志 —— 有人在上面写过东西 */
     itemsWithLogs?: string[]
+    /** 查操作日志这一步失败 —— 保护性查询挂了，必须整轮不删 */
+    logsQueryFails?: boolean
   } = {},
 ) {
   const updates: Array<{
@@ -56,14 +58,18 @@ function fakeSupabase(
         return chain
       }
       for (const m of ['eq', 'in', 'order', 'limit']) chain[m] = self
-      chain.then = (res: (v: { data: unknown; error: null }) => unknown) =>
-        res({
+      chain.then = (res: (v: { data: unknown; error: unknown }) => unknown) => {
+        if (table === 'execution_logs' && opts.logsQueryFails) {
+          return res({ data: null, error: { message: '查询超时' } })
+        }
+        return res({
           data:
             table === 'execution_logs'
               ? (opts.itemsWithLogs ?? []).map((id) => ({ execution_item_id: id }))
               : priorItems,
           error: null,
         })
+      }
       void selArgs
       return chain
     },
@@ -192,6 +198,31 @@ describe('landPrescription —— 方案变成看板上的活儿', () => {
     const r = await landPrescription(supabase, { ...PRES, supersedes_id: 'old1' })
     expect(r.supersededItems).toBe(1)
     expect(r.notes.join()).toContain('1 条有人动过')
+  })
+
+  it('🔴 只碰这份方案自己生成的动作 —— 诸葛亮的看板推荐卡也挂同一个方案号，但那是归属标记', async () => {
+    // 库里实测：CTS 挂在当前方案下的 9 条待办**全是**诸葛亮昨天生成的建议。
+    // 不加来源过滤的话，每周会把它当天刚算出来、让 FDE 今天去做的事一起抹掉。
+    const { supabase, readCalls } = fakeSupabase({ supersededItems: 3 })
+    await landPrescription(supabase, { ...PRES, supersedes_id: 'old1' })
+    const sourceFilter = readCalls.find((c) => c[0] === 'execution_items' && c[1] === 'source')
+    expect(sourceFilter?.[2]).toBe('diagnostic')
+  })
+
+  it('🔴 最终写回时状态条件要再查一遍 —— 中间隔了两个来回，FDE 可能刚把某条开工了', async () => {
+    const { supabase, updates } = fakeSupabase({ supersededItems: 2 })
+    await landPrescription(supabase, { ...PRES, supersedes_id: 'old1' })
+    const itemUpdate = updates.find((u) => u.table === 'execution_items')!
+    const statusGuard = itemUpdate.calls.find((c) => c[0] === 'in' && c[1] === 'status')
+    expect(statusGuard?.[2]).toEqual(['pending'])
+  })
+
+  it('🔴 查操作记录失败 → 整轮一条都不动，不能偏向"删"', async () => {
+    const { supabase, updates } = fakeSupabase({ logsQueryFails: true })
+    const r = await landPrescription(supabase, { ...PRES, supersedes_id: 'old1' })
+    expect(r.supersededItems).toBe(0)
+    expect(updates.some((u) => u.table === 'execution_items')).toBe(false)
+    expect(r.notes.join()).toContain('这轮不动任何旧动作')
   })
 
   it('上一版的动作全都有人动过 → 一条都不作废', async () => {

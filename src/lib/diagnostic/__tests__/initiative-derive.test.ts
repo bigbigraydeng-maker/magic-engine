@@ -29,13 +29,18 @@ import { listInitiativesForGoal, createInitiative } from '@/lib/strategy/initiat
  */
 let goalBudgetAmount: number | null = null
 const supabase = {
-  from: () => ({
-    select: () => ({
-      eq: () => ({
-        maybeSingle: () => Promise.resolve({ data: { budget_amount: goalBudgetAmount }, error: null }),
+  from: (table: string) => {
+    // 认不出的表要炸，不能静默返回 { budget_amount: null } ——
+    // 哪天派生逻辑多查一张表，静默兜底会让测试假绿
+    if (table !== 'goals') throw new Error(`测试假件没准备 ${table} 表的数据`)
+    return {
+      select: () => ({
+        eq: () => ({
+          maybeSingle: () => Promise.resolve({ data: { budget_amount: goalBudgetAmount }, error: null }),
+        }),
       }),
-    }),
-  }),
+    }
+  },
 } as never
 
 function makePhase(
@@ -89,6 +94,10 @@ function mockCreateOk(idPrefix: string) {
 describe('deriveInitiativesFromPrescription()', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // 必须在这儿重置：靠某条用例末尾那句 `goalBudgetAmount = null` 收尾的话，
+    // 那条用例一旦在断言处失败，收尾就跑不到，后面所有用例都带着旧值跑，
+    // 报出一堆跟真因无关的红。
+    goalBudgetAmount = null
   })
 
   it('skips entirely when prescription has no goal_id (legacy 模式不破坏)', async () => {
@@ -188,7 +197,6 @@ describe('deriveInitiativesFromPrescription()', () => {
     await deriveInitiativesFromPrescription(supabase, presc)
 
     expect(vi.mocked(createInitiative).mock.calls[0][1].budget_percent).toBe(40)
-    goalBudgetAmount = null
   })
 
   it('🔴 认不出来的战线类型不许静默蒸发 —— 要记进跳过数并留下日志', async () => {

@@ -573,7 +573,7 @@ async function pushPrescriptionItems(
   const since = new Date(now.getTime() - PRESCRIPTION_FRESH_DAYS * 86_400_000).toISOString()
   const { data } = await supabase
     .from('prescriptions')
-    .select('id, client_id, goal_id, approved_at, agent_name')
+    .select('id, client_id, goal_id, approved_at, agent_name, supersedes_id')
     .eq('status', 'approved')
     .eq('agent_name', AUTO_LANDED_AGENT)
     .gte('approved_at', since)
@@ -585,6 +585,7 @@ async function pushPrescriptionItems(
     client_id: string
     goal_id: string | null
     approved_at: string
+    supersedes_id: string | null
   }>
   if (rows.length === 0) return
 
@@ -617,18 +618,31 @@ async function pushPrescriptionItems(
       goalTitle = g?.title ?? null
     }
 
-    // 上一版有多少条被这次接管时作废了 —— 只报「新增了多少」不报「清掉了多少」，
-    // 跟只报好消息是一回事。这个数是现成的，不需要跟上一版比对。
-    const { count: dropped } = await supabase
-      .from('execution_items')
-      .select('id', { count: 'exact', head: true })
-      .eq('client_id', p.client_id)
-      .eq('status', 'superseded')
-      .gte('updated_at', p.approved_at)
+    // 上一版有多少条被这次接管时收起来了 —— 只报「新增了多少」不报「收起了多少」，
+    // 跟只报好消息是一回事。
+    //
+    // 🔴 必须按**因果**数（这批动作属于被替代的那一版），不能按时间窗数。
+    //    首版写的是「这个客户 8 天内变成 superseded 的」，两头都错：
+    //    ① 收起旧动作发生在写批准时间**之前**，所以 `updated_at >= approved_at`
+    //       对这批动作正好是 false —— 数不数得到全看两边时钟差几毫秒；
+    //    ② 每日巡逻任务会把诸葛亮过期的推荐卡整批标成同一个状态、同一个客户，
+    //       于是这个数一天比一天大，同一份方案周二说 0 个、周日说 60 个。
+    let dropped = 0
+    if (p.supersedes_id) {
+      const { count } = await supabase
+        .from('execution_items')
+        .select('id', { count: 'exact', head: true })
+        .eq('prescription_id', p.supersedes_id)
+        .eq('client_id', p.client_id)
+        .eq('status', 'superseded')
+      dropped = count ?? 0
+    }
 
     const n = total ?? 0
     const onGoal = hung ?? 0
-    const day = p.approved_at.slice(5, 10).replace('-', ' 月 ') + ' 日'
+    // 中文日期不带前导零 —— 「08 月 04 日」一眼就是机器拼的
+    const [mm, dd] = p.approved_at.slice(5, 10).split('-')
+    const day = `${Number(mm)} 月 ${Number(dd)} 日`
 
     // 一个动作都没排出来 → 这是「这周空转了」，不是「更新成功」，得分开说
     if (n === 0) {
@@ -643,7 +657,14 @@ async function pushPrescriptionItems(
       continue
     }
 
-    const cleaned = dropped && dropped > 0 ? `，同时清掉上一版没人认领的 ${dropped} 个` : ''
+    // 「收起来」不是「删掉」—— 事实上也确实没删，只是换了个状态。
+    // 括号那句必须留着：PM 看到「清掉」的第一反应是「FDE 做了一半的活会不会没了」，
+    // 而这恰恰是代码里防得最严的地方（进行中/已完成/主动跳过/等着重跑/留过记录的
+    // 一条都不动）。为一个已经解决的问题让他叫停整条自动落地，太亏。
+    const cleaned =
+      dropped > 0
+        ? `，同时把上一版还没开始做的 ${dropped} 个收起来（做了一半的、已完成的、还有等着重跑的都留着）`
+        : ''
     let tail: string
     let how: string
     if (goalTitle && onGoal === n) {
@@ -665,7 +686,7 @@ async function pushPrescriptionItems(
       client_id: p.client_id,
       client_name: nameOf(p.client_id),
       // 带上日期：这条会连着几天出现在待办里，不带日期 PM 会以为方案被改了好几次
-      what: `${day}出的新方案已进执行看板 —— 新增 ${n} 个动作${tail}${cleaned}`,
+      what: `${day}出的新方案已经排进执行看板 —— 新增 ${n} 个动作${tail}${cleaned}`,
       how,
       href: `https://app.magicengine.com.au/dashboard/clients/${p.client_id}/execution`,
     })

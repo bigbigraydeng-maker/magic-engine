@@ -295,7 +295,10 @@ export function buildTodoEmail(weekday: number, counts: TodoCounts, nzDateLabel:
         <p style="margin:0 0 2px;font-size:14px;color:#0f172a"><b>${m.client_name}</b>：${m.what}</p>
         <p style="margin:0;font-size:13px;color:#475569">→ ${m.how} · <a href="${m.href}" style="color:#0891b2">去看看</a></p>
       </div>`)
-    sections.push(sectionCard('📣', '这周系统替你做了什么（不用动手）', rows))
+    // 「不用动手」字面上等于「可以跳过」，但这条通知存在的全部理由，
+    // 就是让 PM 知道客户的方向被自动改成了什么 —— 他不用干活，但必须过目。
+    // 「看一眼就行」两件事一起说清楚。
+    sections.push(sectionCard('📣', '这周系统替你做了什么（看一眼就行）', rows))
   }
 
   const totalDrafts = counts.draftsByClient.reduce((s, c) => s + c.drafts, 0)
