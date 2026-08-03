@@ -25,6 +25,25 @@ interface Client {
   name: string;
   domain?: string;
   created_at: string;
+  industry?: string | null;
+}
+
+/**
+ * 工具按行业收敛。
+ *
+ * 之前所有工具发给所有客户 —— CTS（旅行社）的工作台上摆着「房子」，
+ * 「我的客人」的说明还写着「按房子列人（中介自己用）」。客人登录第一眼
+ * 就看到别的行业的词，会直接怀疑这套系统是不是给他们做的。
+ *
+ * 用 clients.industry 判断，不用「有没有数据」—— 新客户数据还是空的，
+ * 按数据判会让他一个工具都看不到。
+ */
+function isRealEstate(industry?: string | null): boolean {
+  return /real[_\s-]?estate|property|地产|房产/i.test(industry ?? '');
+}
+
+function isTravel(industry?: string | null): boolean {
+  return /travel|tour|旅游|旅行/i.test(industry ?? '');
 }
 
 // ─── Brand Health Widget ──────────────────────────────────────────────────────
@@ -657,18 +676,22 @@ export default function ClientDetailPage() {
           <section>
             <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">经营工具</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              <ToolCard
-                href={`/dashboard/clients/${clientId}/tailor-made`}
-                title="Tailor-made 行程单"
-                desc="定制行程报价单：填表 → 预览 → 导出品牌 PDF 发给客户"
-                badge="in_house"
-              />
-              <ToolCard
-                href={`/dashboard/clients/${clientId}/listings`}
-                title="房子"
-                desc="中介手上的每一套房：建档、改状态、看每套房带来了多少客人"
-                badge="in_house"
-              />
+              {isTravel(client?.industry) && (
+                <ToolCard
+                  href={`/dashboard/clients/${clientId}/tailor-made`}
+                  title="Tailor-made 行程单"
+                  desc="定制行程：粘贴行程 → AI 解析 → 上传出票单读航班 → 导出品牌 PDF"
+                  badge="in_house"
+                />
+              )}
+              {isRealEstate(client?.industry) && (
+                <ToolCard
+                  href={`/dashboard/clients/${clientId}/listings`}
+                  title="房子"
+                  desc="中介手上的每一套房：建档、改状态、看每套房带来了多少客人"
+                  badge="in_house"
+                />
+              )}
             </div>
           </section>
 
@@ -679,7 +702,9 @@ export default function ClientDetailPage() {
               {/* 客户消息不是"诊断",但它跟诊断一样是每天要开的页;放生产区会被
                   一堆内容工具淹掉,所以放在诊断与分析区首位 —— 销售一进客户页就看到。 */}
               {/* 销售每天第一件事就是开这一页,放在诊断区最前面。 */}
-              <ToolCard href={`/dashboard/clients/${clientId}/contacts`}          title="我的客人"       desc="手机上按房子列人 · 点一下说清楚他到哪一步了（中介自己用）"  badge="in_house" />
+              {isRealEstate(client?.industry) && (
+                <ToolCard href={`/dashboard/clients/${clientId}/contacts`}        title="我的客人"       desc="手机上按房子列人 · 点一下说清楚他到哪一步了（中介自己用）"  badge="in_house" />
+              )}
               <ToolCard href={`/dashboard/clients/${clientId}/crm`}                title="今天该联系谁"   desc="全渠道接触记录自动排序 · 说过别再联系的已挡在名单外"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/crm/all`}            title="全部客人"       desc="一张表看全部客人 · 点开看往来记录、记一笔、改跟进阶段"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/messenger`}          title="客户消息"       desc="Facebook 私信 · AI 写好需求卡和回复草稿 · 你按发送"  badge="in_house" />
