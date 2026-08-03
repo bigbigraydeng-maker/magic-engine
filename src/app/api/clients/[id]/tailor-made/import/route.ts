@@ -3,7 +3,7 @@ import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { callClaudeWithDocs } from '@/lib/anthropic/client'
 import { extractItinerary, applyPatch } from '@/lib/tailor-made/extract'
 import { detectKind, docxToText, plainToText } from '@/lib/tailor-made/read-source'
-import { heroForTrip } from '@/lib/tailor-made/hero'
+import { heroForTrip, pickHeroName } from '@/lib/tailor-made/hero'
 import type { TailorMadeItinerary } from '@/lib/tailor-made/types'
 
 /**
@@ -86,12 +86,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const payload = applyPatch(current, result.patch)
 
     // 封面按目的地自动选；顾问没手动指定过才覆盖
-    let heroPicked = false
+    // 自动选一定有猜错的时候（「重庆+张家界」哪个当主打？）。所以把选中的
+    // 名字一并回传，界面上明说「系统选了 X」并给换的入口 —— 静默选错的话
+    // 顾问未必注意到，直到客人收到才发现。
+    let heroName: string | null = null
     if (!payload.trip.heroImage) {
       const hero = await heroForTrip(payload.trip)
       if (hero) {
         payload.trip.heroImage = hero
-        heroPicked = true
+        heroName = pickHeroName(payload.trip)
       }
     }
 
@@ -99,7 +102,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       payload,
       review: result.review,
       reply: result.reply,
-      heroPicked,
+      heroName,
       sourceKind: kind,
     })
   } catch (error) {
