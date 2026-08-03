@@ -226,7 +226,7 @@ export function saneCallbackInstant(raw: string | null, now: Date = new Date()):
  * 模型有时把「没有」写成字符串 "null"/"none"/"N/A"。原样存进去，
  * 后面所有「有没有值」的判断都会把它当成有值。
  */
-function cleanNullish(v: string | null): string | null {
+export function cleanNullish(v: string | null): string | null {
   if (v == null) return null
   const s = v.trim()
   if (!s) return null
@@ -241,7 +241,7 @@ function cleanNullish(v: string | null): string | null {
  * "Panorama"、以及销售随手写的族裔 "indian"。这些混进去会让「被谁抢了」
  * 这张表彻底没法看。
  */
-function cleanCompetitor(v: string | null, brandTerms: string[]): string | null {
+export function cleanCompetitor(v: string | null, brandTerms: string[]): string | null {
   const s = cleanNullish(v)
   if (!s) return null
   const low = s.toLowerCase()
@@ -257,7 +257,7 @@ function cleanCompetitor(v: string | null, brandTerms: string[]): string | null 
  * 出行时间里最常见的假阳性：备注末尾的「9 July」其实是销售打电话那天。
  * 提示词已经强调过，这里再兜一道 —— 早于当前年份的年份一律丢掉。
  */
-function cleanTravelWindow(v: string | null, now: Date): string | null {
+export function cleanTravelWindow(v: string | null, now: Date): string | null {
   const s = cleanNullish(v)
   if (!s) return null
   const year = s.match(/(19|20)\d{2}/)
