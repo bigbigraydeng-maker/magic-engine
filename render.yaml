@@ -787,25 +787,14 @@ services:
       - key: CRON_SECRET
         sync: false
 
-  # 公司邮箱 → CRM。客人发到 info@ 的询价此前系统里一个字都看不到 ——
-  # 四条获客管道里唯一一条在往外漏的。
+  # 公司邮箱 → CRM：**不再是一条独立的 cron 服务**（2026-08-03）。
   #
-  # 只跑「设置页里连过邮箱」的客户(platform_oauth_connections 里有 active 的
-  # microsoft_mail),没连的客户一次网络调用都不发生,所以新增客户不用动这里。
+  # 它原来在这里是一条新增的 cron 服务，结果一次都没跑过 —— Render 的蓝图对
+  # 新增服务不会自动生效，要有人进后台点一次 Apply，而这件事不会报任何错。
+  # 现在挂在上面 messenger-hourly 那条**已经在跑**的任务里（见那个路由的文件头）。
+  # `/api/cron/mailbox-sync` 路由保留，用于单独手动触发。
   #
-  # 跑在每小时第 25 分钟:跟私信(第 10 分)错开,两条都要读外部 API,挤在一起
-  # 只会互相抢那台机器的时间。
-  - type: cron
-    name: mailbox-sync-hourly
-    env: node
-    schedule: "25 * * * *"
-    buildCommand: ""
-    startCommand: |
-      curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/mailbox-sync
-    envVars:
-      - key: CRON_SECRET
-        sync: false
+  # 以后再加渠道同步，优先挂进已有任务，别新开服务 —— 新服务 = 一个人工步骤。
 
   # Facebook 即时表单 → CRM。之前这条路只有人手一条(导 CSV 跑 import-cts-fb-leads.ts),
   # 2026-07-30 查出来的后果:CTS 的 CRM 里最后一个新人停在 7/25,而 Meta 后台
