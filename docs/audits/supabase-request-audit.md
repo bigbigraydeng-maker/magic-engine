@@ -394,7 +394,7 @@ Execution Time: 54.444 ms
 
 | 类型 | 数量 | 级别 | 判定 |
 |---|---:|---|---|
-| `unused_index` | **95** | INFO | 🟡 **值得清理**。95 个从未被使用的索引持续拖慢所有写入。已确认实例：`idx_visual_assets_queued_at`、`reels_drafts_storyboard_idx` 等 `idx_scan = 0` |
+| `unused_index` | **95** | INFO | ⚪ **不建议清理（2026-08-03 核实后推翻初稿判断，见 §6.6）**。初稿写"值得清理，持续拖慢写入"—— 量化后不成立：全部 182 个零使用索引合计仅 **7 MB**，且受影响表的写入量最高只有 **63 次/天** |
 | `unindexed_foreign_keys` | **59** | INFO | ⚪ **本轮不动**。当前无外键相关慢查询，盲目补索引会加重写放大。**符合你"未经 EXPLAIN 不批量建索引"的要求** |
 | `auth_rls_initplan` | 13 | WARN | ⚪ 不适用。ME 不走 end-user RLS |
 | `multiple_permissive_policies` | 5 | WARN | ⚪ 同上 |
@@ -403,6 +403,40 @@ Execution Time: 54.444 ms
 
 **你要求检查的字段索引覆盖情况**：
 `user_id` / `organisation_id` / `tenant_id` —— **ME 库不存在这些列**（无多租户模型，见 CLAUDE.md 强约束）。实际热点字段是 `client_id` / `status` / `created_at` / `started_at`，**已确认核心表均有覆盖索引且正常命中**（`idx_ai_runs_client_ran_at`、`outbound_prospects_status_score`、`idx_visual_assets_pending`、`cron_run_logs_started_at_idx`）。
+
+### 6.6 ⚪ 初稿判断推翻：95 个"未使用索引"**不该清理**（2026-08-03 核实）
+
+> 初稿 §6.5 / §8 P2-1 写的是「值得清理，95 个从未被使用的索引持续拖慢所有写入」。**量化之后这个理由不成立，撤回该建议。**
+
+**统计窗口可信**：`pg_stat_user_indexes` 自 2026-04-25 起累积 **99 天**，从未重置（`pg_stat_database.stats_reset` 为 null）。所以"零使用"不是窗口太短造成的假象。
+
+#### 三条否决理由
+
+**1. 省不下空间。** 全部 182 个 `idx_scan = 0` 的索引合计 **7,312 kB**，其中 4.4 MB 集中在**一个**索引（`idx_client_site_pages_search_vector`）。本库最大的表 `cron_run_logs` 才 24 MB —— 清理 7 MB 无意义。
+
+**2. "拖慢写入"在本库量级下约等于零。** 带零使用索引的表里，写入量最高的是：
+
+| 表 | 99 天写入 | 折算 | 零使用索引 |
+|---|---:|---:|---:|
+| `conversation_briefs` | 6,258 | **63 次/天** | 1（唯一约束，不可删）|
+| `baseline_domain_score_history` | 4,358 | 44 次/天 | 1（唯一约束，不可删）|
+| `execution_items` | 2,795 | 28 次/天 | 1 |
+| `industry_ai_visibility_snapshots` | 2,156 | 22 次/天 | 3 |
+
+对照：真正的写入热点 `cron_run_logs` 是 **1,180 次/天**，而它的 3 个索引**全部在用**。索引维护成本集中在热表，而热表没有冗余索引。
+
+**3. 最危险的一条 —— `idx_admin_api_keys_hash` 正被登录鉴权代码使用。**
+[src/lib/auth/api-key-access.ts:148](../../src/lib/auth/api-key-access.ts#L148) / [:169](../../src/lib/auth/api-key-access.ts#L169) 用 `.eq('key_hash', hash)` 查 `admin_api_keys` / `client_api_keys`。它 `idx_scan = 0` 只是因为**管理密钥登录本身很少发生**，不是因为不需要。删掉它，等真有人用 API key 鉴权时就变成全表扫描。
+
+#### 核心教训
+
+> **`idx_scan = 0` 的含义是「到目前为止还没用过」，不是「不需要」。**
+>
+> 这跟 §8 P0-1 那 4 个空跑 cron 是**同一个陷阱的两个面**：空跑率 100% ≠ 可以降频，零使用 ≠ 可以删除。两处都要再问一句 —— **它是闲置，还是在待命？**
+
+#### 唯一可考虑的一条（收益依然很小，建议一并放弃）
+
+`idx_client_site_pages_search_vector`（4.4 MB，占零使用总量 60%）—— 全仓 grep `search_vector` / `textSearch` / `plainto_tsquery` **零命中**，确无代码使用。但 `client_site_pages` 只有 898 次/99 天的写入（9 次/天），删了省 4.4 MB、几乎不改变任何性能指标，而一旦将来上站内搜索又要重建。**不值得为它开一次 DDL。**
 
 ---
 
@@ -508,7 +542,7 @@ Execution Time: 54.444 ms
 
 | ID | 问题 | 动作 | 预计收益 |
 |---|---|---|---|
-| **P2-1** | 95 个从未使用的索引拖慢所有写入 | 逐个核对后分批 DROP（**必须先确认不是新建功能的预留索引**） | 写入变快，存储下降 |
+| ~~**P2-1**~~ ❌ **已撤回** | ~~95 个从未使用的索引拖慢所有写入~~ | **不做。** 量化后否决：合计仅 7 MB，受影响表最高 63 次写入/天，且 `idx_admin_api_keys_hash` 正被鉴权代码使用。复盘见 §6.6 | — |
 | **P2-2** | 30 处 `setInterval` 无页面可见性守卫 | 抽公共 `useVisiblePolling` hook，复用 [use-diagnostic-status.ts](../../src/app/dashboard/clients/[id]/diagnostic/_hooks/use-diagnostic-status.ts) 的成熟实现 | 后台标签页归零 |
 | **P2-3** | 28 个函数 `search_path` 可变 | 统一加 `SET search_path = public, pg_temp` | 安全加固 |
 | **P2-4** | middleware + 每路由重复 `getUser()`（5 倍放大） | 中间件解析一次，经 header 下传 | 当前收益小，**客户数上去后收益大** |
@@ -582,9 +616,12 @@ group by job_name order by runs desc;
 | P1-1 查询条件调整 | `git revert` | ~5 分钟 | **零**。只读查询 |
 | P1-2 移除 `raw_response` | `git revert` | ~5 分钟 | **零**。只读查询 |
 | P1-3 / P1-4 前端 | `git revert` | ~5 分钟 | **零** |
-| P2-1 DROP 未使用索引 | `CREATE INDEX CONCURRENTLY` 重建（DDL 需 PM `go apply`） | 每个 ~1 分钟 | **零数据风险**，但重建期间写入略慢 |
+| ~~P2-1 DROP 未使用索引~~ | **已撤回，不执行**（见 §6.6） | — | — |
+| RLS 策略收回 service_role | 用 §7.1 记录的精确策略名快照 `ALTER POLICY ... TO public` 逐条还原 | ~1 分钟 | **零数据风险**。但回退 = 重新打开对外读写 |
 
-**全局回滚**：所有 P0/P1 均为纯代码/配置变更，**不涉及任何 schema 变更、不删任何数据**，`git revert` + 重新部署即可完全恢复。P2-1 是唯一涉及 DDL 的项，按 CLAUDE.md 强约束**必须 PM 显式 `go apply`**。
+**全局回滚**：所有 P0/P1 代码/配置变更均可 `git revert` + 重新部署完全恢复，不涉及 schema 变更、不删任何数据。
+
+唯一动过数据库的是 **RLS 收权**（migration `20260803020716`）—— 它只改策略的授权角色、不动任何数据、不动表结构，回退用 §7.1 留存的精确策略名快照逐条 `ALTER POLICY ... TO public` 即可。**P2-1（DROP 索引）已撤回，本次审计最终未执行任何 DROP。**
 
 ---
 
