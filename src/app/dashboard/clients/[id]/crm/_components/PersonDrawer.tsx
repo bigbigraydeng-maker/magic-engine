@@ -11,6 +11,7 @@ import { useState } from 'react'
 import { ComposeNote, type StageOption } from './ComposeNote'
 import { ContactTimeline } from './ContactTimeline'
 import { MessengerReply } from './MessengerReply'
+import { clearPendingCallFor, markDialled } from './pending-call'
 import { drawerActions, nextStageChoices, type Channel } from '@/lib/crm/drawer-actions'
 import type { Segment } from '@/lib/crm/segments'
 
@@ -96,6 +97,8 @@ export function PersonDrawer({
       })
       if (!res.ok) throw new Error()
       setTimelineKey((k) => k + 1)
+      // 这个人的结果已经记了 —— 别让看板上那条「刚才那通怎么样」再问一遍。
+      clearPendingCallFor(row.contactId)
       onSaved(`✓ 记下了：${note}`, false)
     } catch {
       onSaved('没记上，再点一下试试', false)
@@ -135,12 +138,7 @@ export function PersonDrawer({
           {/* 联系方式 —— 手机上点一下就拨 */}
           <div className="flex flex-wrap gap-2">
             {row.phone && (
-              <a
-                href={`tel:${row.phone}`}
-                className="rounded-lg border border-me-stone bg-white px-3 py-2 text-sm font-semibold text-me-charcoal"
-              >
-                📞 {row.phone}
-              </a>
+              <DialLink contactId={row.contactId} name={row.name} phone={row.phone} />
             )}
             {row.email && (
               <a
@@ -231,6 +229,8 @@ export function PersonDrawer({
                 onDone={(msg) => {
                   setComposing(false)
                   setTimelineKey((k) => k + 1)
+                  // 同上：结果已经在这儿记了，看板不用再问一遍。
+                  clearPendingCallFor(row.contactId)
                   // 不重拉整块看板 —— 抽屉还开着，脚下的列表跳动会让人失去位置。
                   onSaved(msg, false)
                 }}
@@ -262,5 +262,26 @@ export function PersonDrawer({
         </div>
       </aside>
     </>
+  )
+}
+
+/**
+ * 抽屉里的拨号按钮。
+ *
+ * 单独拆出来只为一件事：`phone` 在这里是确定有值的 `string`，不用往
+ * markDialled 里塞一个 `as string`（那种断言正是以后悄悄传进 null 的入口）。
+ *
+ * 点了之后除了拨出去，还在浏览器里记一个待办 —— 人常常拨完直接关掉抽屉，
+ * 那时候看板上那条「刚才那通怎么样」是唯一还会问结果的地方。
+ */
+function DialLink({ contactId, name, phone }: { contactId: string; name: string; phone: string }) {
+  return (
+    <a
+      href={`tel:${phone}`}
+      onClick={() => markDialled({ contactId, name, phone })}
+      className="rounded-lg border border-me-stone bg-white px-3 py-2 text-sm font-semibold text-me-charcoal"
+    >
+      📞 {phone}
+    </a>
   )
 }

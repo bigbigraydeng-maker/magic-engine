@@ -18,8 +18,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
+import { CallPrompt } from './_components/CallPrompt'
 import { type StageOption } from './_components/ComposeNote'
 import { CrmTabs } from './_components/CrmTabs'
+import { markDialled } from './_components/pending-call'
 import { PersonDrawer, type DrawerRow } from './_components/PersonDrawer'
 // 从唯一那份定义引，**不要在这里再抄一遍**。
 // 2026-08-03 就是抄的那份走散了：lib 里删掉了一个段，页面这份还留着，
@@ -191,15 +193,24 @@ function dueText(iso: string): string {
  *
  * 渠道由后端按「他实际能被联系到什么」算好（segments 的 reachableChannel），
  * 这里只把它变成一个能当场点的动作。
+ *
+ * 点号码除了拨出去，还会在浏览器里记一个「待办」（markDialled）——
+ * 回到这一页时上面会问「刚才那通怎么样」。**故意不在这里写触点**：
+ * 那条触点会立刻把这个人从「还没搭上话」里拿掉，而如果销售最后没记结果，
+ * 他就静悄悄地掉出名单。理由细节见 pending-call.ts。
  */
 function ReachAction({ row }: { row: Row }) {
   const base = 'block border-t border-me-charcoal/8 px-3 py-2.5 text-[14px] font-bold'
 
   if ((row.suggestedChannel === 'phone' || row.suggestedChannel === 'sms') && row.phone) {
+    const phone = row.phone
     return (
       <a
-        href={`tel:${row.phone}`}
-        onClick={(e) => e.stopPropagation()}
+        href={`tel:${phone}`}
+        onClick={(e) => {
+          e.stopPropagation()
+          markDialled({ contactId: row.contactId, name: row.name, phone })
+        }}
         className={`${base} bg-me-ivory/60 text-me-charcoal hover:bg-me-ivory`}
       >
         📞 {row.phone}
@@ -1210,8 +1221,14 @@ export default function CrmTodayPage() {
         </div>
       </header>
 
+      {/* 「刚才那通电话怎么样？」—— 拨号回来时问一句，不问就没人记。
+          放在最上面且吸顶：人从电话应用切回来时停在哪个位置都能看见。 */}
+      <CallPrompt clientId={clientId} onLogged={afterWrite} />
+
+      {/* z 比上面那条高一级：记失败时的提示必须压在提问条上面，否则看不见。
+          它 2.2 秒就消失，挡一下不影响接着点。 */}
       {toast && (
-        <div className="sticky top-2 z-30 mb-3 rounded-xl bg-me-charcoal px-4 py-2 text-center text-sm font-black text-white">
+        <div className="sticky top-2 z-50 mb-3 rounded-xl bg-me-charcoal px-4 py-2 text-center text-sm font-black text-white">
           {toast}
         </div>
       )}
