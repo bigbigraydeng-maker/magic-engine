@@ -35,6 +35,7 @@ export type ManualItemKind =
   | 'video_credits_out'
   | 'cron_not_running'
   | 'cron_blind'
+  | 'goal_baseline_mismatch'
 
 /**
  * 新建的 cron 在 Render 上必须**手动**关联 me-shared-cron-secret 环境变量组。
@@ -87,6 +88,7 @@ export function gscInspectUrl(siteUrl: string, pageUrl: string): string {
 
 import { gscPropertyUrl, gscInspectSteps, verifyActionLink } from './action-link'
 import { checkCronHealth } from '@/lib/cron/health'
+import { auditGoalBaselines } from '@/lib/strategy/baseline-audit'
 
 export function daysAgo(iso: string | null, now: Date): number | null {
   if (!iso) return null
@@ -146,6 +148,8 @@ export async function loadManualItems(
   await pushVideoCreditsItem(supabase, items, now)
   // 按时没跑 / 查不出跑没跑 —— PM 2026-08-03 要求「不能完成需要有报错」
   await pushCronHealthItems(supabase, items, now)
+  // 目标数字口径对不上 —— 错的方向感比没数字更危险(2026-08-03 差点据此给出反向建议)
+  await pushBaselineItems(supabase, items)
 
   if (clients.size === 0) return items
 
@@ -429,6 +433,34 @@ async function pushCronHealthItems(
       what: `${r.blind.length} 个自动任务不写运行记录，跑没跑查不出来：${r.blind.map((h) => h.service).join('、')}`,
       how: '这条不用你动手 —— 是我们代码里的欠账（接口没接运行记录）。回我一句「补记录」我就去补，补完它们才进得了这套监控',
       href: RENDER_DASHBOARD_URL,
+    })
+  }
+}
+
+
+/**
+ * 目标的「起点」和「现值」口径对不上 → 下发。
+ *
+ * 2026-08-03 真实事故：仪表盘显示 CTS 自然流量跌 39%、Oztop 跌 28%，
+ * 我据此差点建议 PM 砍掉正在见效的动作。查下去两个都是假的 ——
+ * 起点填的是**总会话数**，现值只算**自然流量**。真实是涨 42% / 涨 203%。
+ *
+ * 🔴 这类问题必须当天摆出来：**错的方向感比没有数字危险得多**。
+ *    仪表盘一旦说反话，越认真看的人被误导得越狠。
+ *
+ * 不自动改客户的目标数字 —— 那是业务事实，PM 拍板。这里只负责说清楚。
+ */
+async function pushBaselineItems(supabase: SupabaseClient, items: ManualItem[]): Promise<void> {
+  const suspects = await auditGoalBaselines(supabase).catch(() => [])
+  for (const s of suspects) {
+    items.push({
+      kind: 'goal_baseline_mismatch',
+      client_id: s.clientId,
+      client_name: s.clientName,
+      what: `目标「${s.title}」的仪表盘数字可能是反的 —— ${s.reason}`,
+      how: `打开目标页核对：如果确认起点填错了，把它改成 ${s.recomputedBaseline}，仪表盘才会说真话。改之前先想一下这个目标当初是按哪个口径定的`,
+      // 真实路径是 /clients/<客户id>/goal/<目标id> —— 首版拼成 /clients/<目标id>，那是 404
+      href: `https://app.magicengine.com.au/dashboard/clients/${s.clientId}/goal/${s.goalId}`,
     })
   }
 }

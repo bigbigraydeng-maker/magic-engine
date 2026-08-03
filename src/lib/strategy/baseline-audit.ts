@@ -25,6 +25,8 @@ const AUTO_METRICS = ['organic_traffic', 'brand_search_volume', 'form_submission
 
 export interface BaselineSuspect {
   goalId: string
+  /** 拼目标页地址要用它 —— 少了它就只能拼出 404（2026-08-03 差点又发一个死链）。 */
+  clientId: string
   clientName: string
   title: string
   metricKey: string
@@ -103,6 +105,7 @@ export async function auditGoalBaselines(supabase: SupabaseClient): Promise<Base
     const clientName = ((g.clients as { name?: string } | null)?.name) ?? '未知客户'
     out.push({
       goalId: g.id as string,
+      clientId: g.client_id as string,
       clientName,
       title: g.title as string,
       metricKey,
