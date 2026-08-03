@@ -138,6 +138,16 @@
 - [ ] **M2.3 用 `crm_segment_feedback` 改判据** —— 表建好了，还没有人去看它。
       攒够一批「分错了」之后要回去改 `lib/crm/segments` 的规则，否则这个按钮
       就变成一个只进不出的许愿池
+- [x] M2.4 分批规则按「只认真实对话」重做；秒回=机器（Meta AI 回复不再冒充真人跟进）；
+      打了没接 3 天转自动跟进；拿掉「快出行了」；号码坏了单独成组（PR #797）
+- [ ] **M2.5 新人邮件（PM 规则 1，本次明确没做）** —— 客人第一次进来当天自动发一封。
+      卡在两件事上：① 挑发信通道（Mailchimp / Resend）② 文案要按铁律 8 先 grounding
+      客户官网、逐句标可溯来源，且发出去之前 PM 要看过。做完之后第二层才配叫
+      「发过新人邮件」，现在老实叫「还没搭上话」
+- [ ] **M2.6 确认 Meta 自动化消息的真实 tag** —— `lib/messenger/automation` 里
+      `AUTOMATED_MESSAGE_SOURCES` 那两个值（`subscription` / `business_ai`）到今天
+      **仍是猜的**，Meta 没公开文档。现在靠「秒回 = 机器」兜住了，但拿一条 CTS 真实
+      收件箱的 Graph 返回确认一次，判据会更硬。这台开发机连不上 facebook.com，做不了
 - [ ] **M3 从 CRM 里回邮件** —— 权限已经要了 `Mail.Send`，缺一个邮件适配器接进总线（`lib/messaging/adapters/mail.ts`）
 - [ ] **M4 邮件线程接进多渠道读取路径** —— 现在私信页面靠 `channel = 'messenger'` 把邮件挡在外面（PR #781），挡住≠接好；需要一个不挑渠道的对话页
 - [ ] **M5 WhatsApp Business API（新号）** —— 申请清单已给 PM（`docs/sops/whatsapp-business-api-申请清单.md`）。⚠️ AU/NZ 单价未核实（这台开发机连不上 Meta 站点），拿到后台截图后补
