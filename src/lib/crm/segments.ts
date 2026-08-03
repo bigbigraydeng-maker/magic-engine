@@ -82,8 +82,10 @@ export const SEGMENT_ACTION_META: Record<Segment, SegmentActionMeta> = {
   // 中午没接的人晚上会接 —— 系统斩钉截铁说一件销售凭经验知道是假的事,
   // 他会连带不信这一页其他三桶。而这是最大的一桶(CTS 108 人 / 58%)。
   handoff_sop: {
-    label: '联系不上，系统接手',
-    howTo: '打过、超过 3 天没接上。今天不用一个个打了 —— 交给自动跟进，他一开口会自己跳回上面。',
+    label: '交给系统跟',
+    // 两种来路都落在这批：打过没接上的、和进线太久一直没人碰的。
+    // 每个人卡片下面那行原因会说清楚他是哪一种。
+    howTo: '今天不用一个个打了 —— 有的打过没接上，有的进线太久。系统会继续碰，他一开口就跳回最上面。',
     batch: 'send_email',
   },
   retry_channel: {
@@ -248,6 +250,22 @@ const DEAD_OUTCOMES = new Set(['bad_number', 'not_interested', 'do_not_contact']
  * 还没接上，再打的收益已经很低，那段时间应该还给真的有人在等的那一批。
  */
 const HANDOFF_AFTER_DAYS = 3
+
+/**
+ * 「进线了但从没人联系过」超过这个天数，就不再算「新客人」。
+ *
+ * 为什么非有这个界不可（2026-08-03，改「AI 秒回不算我们回过」时暴露的）：
+ * 在那之前，Meta 的自动回复被算成「我们联系过」—— 于是 2019 年在主页留过言、
+ * 只收到一句自动问候的人，因为 lastOutbound > 0 而进不了「新客人」。那是一层
+ * **意外的保护**。把自动回复滤掉之后，这层保护跟着没了：CTS 有 358 个人
+ * 只被机器回过，其中 **63 个超过一年没动静**。他们会一股脑冒进「还没搭上话」，
+ * 写着「进线 43800 小时还没人联系」—— 荒唐，而且把今天真正的新线索淹掉。
+ *
+ * 14 天：一条两周前进来、一次都没人碰过的询价，已经不是「新的」，是积压。
+ * 它该交给自动跟进，不该占今天的时间。CTS 现实分布：14 天内 37 人（一天能做完），
+ * 30 天内 185 人（做不完）。
+ */
+const FRESH_LEAD_DAYS = 14
 
 /** 逾期超过这个时长的「约定回电」视为解析错误，不再进名单。 */
 const STALE_CALLBACK_MS = 14 * 86_400_000
@@ -440,6 +458,11 @@ export function segmentContact(contact: ContactLike, now: Date): SegmentResult {
 
   // 5) 进线了但从没人联系过
   if (lastOutbound === 0) {
+    const days = lastInbound > 0 ? Math.floor((nowMs - lastInbound) / 86_400_000) : 0
+    // 太久了就不是「新客人」了，是积压 —— 交给自动跟进（理由见 FRESH_LEAD_DAYS）。
+    if (days >= FRESH_LEAD_DAYS) {
+      return make('handoff_sop', `进线 ${days} 天，一直没人联系过 —— 交给系统跟`, 'email')
+    }
     const hours = lastInbound > 0 ? Math.floor((nowMs - lastInbound) / 3_600_000) : 0
     return make('new_untouched', `进线 ${hours} 小时还没人联系`, 'phone')
   }
