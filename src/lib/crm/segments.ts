@@ -159,6 +159,14 @@ export interface ContactLike {
   /** 当前阶段的中文名,只用于展示。 */
   stageLabel?: string | null
   /**
+   * 销售把这个人推迟到了这个时间（contacts.snooze_until）。
+   *
+   * 在此之前不进今天的名单，**到点自动回来** —— 不需要任何人记得把他放回去。
+   * 这是「推迟」和「手动改分组」的关键区别：它改变的是系统看到的事实，
+   * 于是重算的结果跟着变；而手动改分组是把结果按住，那种状态没人会去维护。
+   */
+  snoozeUntil?: string | null
+  /**
    * 这个人**实际能怎么被联系到**。
    *
    * 三个都不传 = 调用方没提供这个信息，此时保持规则原本建议的渠道（向后兼容，
@@ -210,6 +218,22 @@ export const SEGMENT_META: Record<Segment, { temperature: Temperature; priority:
   stale_conversation: { temperature: 'warm', priority: 7 },
   nurture_future:     { temperature: 'cold', priority: 8 },
   excluded:           { temperature: 'off',  priority: 9 },
+}
+
+/**
+ * 「先放着，X 回来」里的那个 X。
+ *
+ * 说「10 月 3 日」而不是「61 天后」—— 销售脑子里记的是日期不是天数，
+ * 而且天数每天都在变，看两眼就不信了。今明两天单独说，那是最常用的两档。
+ */
+function snoozeText(iso: string, now: Date): string {
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return '以后'
+  const days = Math.round((at.getTime() - now.getTime()) / 86_400_000)
+  if (days <= 0) return '马上'
+  if (days === 1) return '明天'
+  if (days === 2) return '后天'
+  return `${at.getMonth() + 1} 月 ${at.getDate()} 日`
 }
 
 /** 结论性的通话结果 —— 这些人不该出现在今天的名单上。 */
@@ -324,6 +348,14 @@ export function segmentContact(contact: ContactLike, now: Date): SegmentResult {
   if (contact.doNotContact) {
     return make('excluded', '客户明确说过别再联系', 'none')
   }
+  // 销售说了「这人先放一放」。**只在到期之前挡住**，过了那天他自己回名单 ——
+  // 这里不写任何「解除推迟」的逻辑，因为根本不需要：分批每次刷新都重算，
+  // 时间一过这条判断就不成立了。少一个需要有人记得去点的按钮。
+  const snoozedUntil = contact.snoozeUntil ? ts(contact.snoozeUntil) : 0
+  if (snoozedUntil > nowMs) {
+    return make('excluded', `先放着，${snoozeText(contact.snoozeUntil!, now)}回来`, 'none')
+  }
+
   // 员工已经把他推进到结论性阶段（成交 / 转售后 / 停止营销）—— 名单里不该再有他。
   if (contact.stageSuppressed) {
     const label = contact.stageLabel?.trim()

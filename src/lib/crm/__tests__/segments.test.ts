@@ -473,3 +473,71 @@ describe('建议的渠道必须真的能联系到人', () => {
     expect(reachableChannel('phone', { hasPhone: false, hasEmail: true, hasMessenger: false })).toBe('email')
   })
 })
+
+/**
+ * 推迟。
+ *
+ * PM 2026-08-03 问「能不能手动切换分组」。答案是不给那个开关，但给「推迟」——
+ * 因为它不是把结果按住，而是**告诉系统一个事实**（这人现在不该联系），
+ * 系统据此重算。区别在这几条上：
+ *   · 到期**自己回来**，不需要任何人记得去解除 —— 手动状态列就是死在「没人回去改」
+ *   · 挡不住「别再联系」这类更硬的结论
+ *   · 到期后照常参与所有规则，不留后遗症
+ */
+describe('推迟：到点自己回来，不用人记得', () => {
+  const hot = () => [
+    { channel: 'email', direction: 'inbound' as const, occurredAt: '2026-07-26T11:00:00Z' },
+    call('2026-07-20T00:00:00Z', 'spoke'),
+  ]
+
+  it('推迟到以后 → 不进今天的名单', () => {
+    const c = contact({ snoozeUntil: '2026-09-01T00:00:00Z', touchpoints: hot() })
+    const r = segmentContact(c, NOW)
+    expect(r.segment).toBe('excluded')
+    expect(r.suggestedChannel).toBe('none')
+  })
+
+  /** 这条是「推迟」和「手动改分组」的全部区别 —— 没有它就又是一个没人维护的状态列。 */
+  it('到期之后自己回来，不需要任何人去解除', () => {
+    const c = contact({ snoozeUntil: '2026-07-20T00:00:00Z', touchpoints: hot() })
+    expect(segmentContact(c, NOW).segment).toBe('replied')
+  })
+
+  it('刚好到期的当下就算回来了，不多压一天', () => {
+    const c = contact({ snoozeUntil: NOW.toISOString(), touchpoints: hot() })
+    expect(segmentContact(c, NOW).segment).toBe('replied')
+  })
+
+  /** 合规优先级不能被一个普通的「先放放」盖过去。 */
+  it('挡不住「别再联系」—— 那句话更硬', () => {
+    const c = contact({ doNotContact: true, snoozeUntil: '2026-09-01T00:00:00Z' })
+    expect(segmentContact(c, NOW).reason).toBe('客户明确说过别再联系')
+  })
+
+  it('没设推迟的人完全不受影响', () => {
+    expect(segmentContact(contact({ touchpoints: hot() }), NOW).segment).toBe('replied')
+  })
+
+  /**
+   * 理由说的是日期不是天数：销售脑子里记的是「10 月 3 日」，
+   * 而天数每天都在变，看两眼就不信了。
+   */
+  it('理由里说的是哪天回来，不是「还有几天」', () => {
+    const c = contact({ snoozeUntil: '2026-10-03T00:00:00Z' })
+    expect(segmentContact(c, NOW).reason).toContain('10 月 3 日')
+    expect(segmentContact(c, NOW).reason).not.toContain('天后')
+  })
+
+  it.each([
+    ['2026-07-27T12:00:00Z', '明天'],
+    ['2026-07-28T12:00:00Z', '后天'],
+  ])('近的两档说人话（%s → %s）', (until, word) => {
+    expect(segmentContact(contact({ snoozeUntil: until }), NOW).reason).toContain(word)
+  })
+
+  /** 存了一句坏数据也不能让整块看板炸掉。 */
+  it('推迟时间是坏数据 → 当没推迟处理，不炸', () => {
+    const c = contact({ snoozeUntil: '不是个时间', touchpoints: hot() })
+    expect(segmentContact(c, NOW).segment).toBe('replied')
+  })
+})

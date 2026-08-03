@@ -47,6 +47,7 @@ interface ContactRow {
   do_not_contact: boolean
   stage: string | null
   pinned_at: string | null
+  snooze_until: string | null
 }
 
 interface TouchRow {
@@ -85,7 +86,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       fetchAll<ContactRow>((from, to) =>
         supabaseAdmin
           .from('contacts')
-          .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, pinned_at')
+          .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, pinned_at, snooze_until')
           .eq('client_id', clientId)
           .order('id', { ascending: true })
           .range(from, to),
@@ -180,6 +181,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
         ),
       stageSuppressed: stage?.suppressed ?? false,
       stageLabel: stage?.label ?? null,
+      // 销售把他推迟了 —— 到期之前不进名单，到期自己回来（见 lib/crm/segments）。
+      snoozeUntil: c.snooze_until,
       touchpoints: tps.map((t) => ({
         channel: t.channel,
         direction: t.direction,
@@ -376,6 +379,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       lastNote: last?.summary ?? null,
       pinned: Boolean(row?.pinned_at),
       pinnedAt: row?.pinned_at ?? null,
+      /** 被推迟到什么时候。今天名单上的人这里恒为 null —— 推迟的人已经被挡在外面了。 */
+      snoozeUntil: row?.snooze_until ?? null,
       suggestedStage:
         suggestStage(c, row?.stage ?? null) ??
         suggestQuoted(c.displayName, row?.stage ?? null),
@@ -446,12 +451,18 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
         reason: seg.reason,
         // 为什么不在今天名单上。成交跟「明确拒绝」混在一堆叫「已排除」很刺眼，
         // 而且成交客户恰恰最该继续维护（催余款、确认行程）—— 页面按这个分开显示。
+        /** 被推迟到什么时候。有值 = 他是被人手推迟的，不是被规则排除的。 */
+        snoozeUntil: row?.snooze_until ?? null,
+        // 「被推迟」必须能跟「已停止」分开。混在一起的话，销售想把一个人提前
+        // 叫回来就无从下手 —— 他会在一堆「明确拒绝」里找一个自己上周放一放的人。
         group:
-          meta?.action === 'won' || meta?.action === 'postsale'
-            ? ('won' as const)
-            : seg.segment === 'nurture_future'
-              ? ('later' as const)
-              : ('stop' as const),
+          row?.snooze_until && new Date(row.snooze_until).getTime() > now.getTime()
+            ? ('snoozed' as const)
+            : meta?.action === 'won' || meta?.action === 'postsale'
+              ? ('won' as const)
+              : seg.segment === 'nurture_future'
+                ? ('later' as const)
+                : ('stop' as const),
         lastNote: (byContact.get(c.id) ?? [])[0]?.summary ?? null,
       }
     })
