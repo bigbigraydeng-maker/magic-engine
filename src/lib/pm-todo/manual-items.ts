@@ -33,6 +33,8 @@ export type ManualItemKind =
   | 'crawl_stale'
   | 'cron_never_ran'
   | 'video_credits_out'
+  | 'cron_not_running'
+  | 'cron_blind'
 
 /**
  * 新建的 cron 在 Render 上必须**手动**关联 me-shared-cron-secret 环境变量组。
@@ -84,6 +86,7 @@ export function gscInspectUrl(siteUrl: string, pageUrl: string): string {
 }
 
 import { gscPropertyUrl, gscInspectSteps, verifyActionLink } from './action-link'
+import { checkCronHealth } from '@/lib/cron/health'
 
 export function daysAgo(iso: string | null, now: Date): number | null {
   if (!iso) return null
@@ -141,6 +144,8 @@ export async function loadManualItems(
   await appendNeverRanCrons(supabase, items)
   // 出片余额用完 —— 只有人能充值，必须当天摆到眼前，不能烂在工单的 error 字段里
   await pushVideoCreditsItem(supabase, items, now)
+  // 按时没跑 / 查不出跑没跑 —— PM 2026-08-03 要求「不能完成需要有报错」
+  await pushCronHealthItems(supabase, items, now)
 
   if (clients.size === 0) return items
 
@@ -378,4 +383,52 @@ async function pushVideoCreditsItem(
     how: '打开链接充值（这是我们生成视频画面用的账户）。充完回我一句，我把断掉的那几单重跑',
     href: MUAPI_TOPUP_URL,
   })
+}
+
+
+/** Render 后台首页 —— 稳定入口，登录后一定打得开（不是会 404 的深链）。 */
+const RENDER_DASHBOARD_URL = 'https://dashboard.render.com'
+
+/**
+ * 自动任务该跑没跑 → 下发。
+ *
+ * 现有 daily-cron-digest 只报「跑了但失败」。**「压根没跑」没有任何记录**，
+ * 在 digest 眼里跟一切正常完全一样 —— 工厂排产停摆 8 天、digest 自己哑 51 天，
+ * 都是死在这个盲区。这里补上。
+ *
+ * 逾期和从没跑过合成一条，别把待办刷屏：一条说清楚有几个、分别是谁。
+ */
+async function pushCronHealthItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  now: Date,
+): Promise<void> {
+  const r = await checkCronHealth(supabase, now).catch(() => null)
+  if (!r) return
+
+  const stopped = [...r.neverRan, ...r.overdue]
+  if (stopped.length > 0) {
+    const names = stopped.map((h) => h.service).join('、')
+    items.push({
+      kind: 'cron_not_running',
+      client_id: 'infra',
+      client_name: 'Magic Engine 后台',
+      what: `${stopped.length} 个自动任务该跑没跑：${names} —— 它们负责的活儿现在没人干，而且不会自己好`,
+      how: '打开链接 → 找到这几个服务 → 看 Events 里最后一次运行是什么结果。多半是 Environment 里没关联 me-shared-cron-secret，勾上再选「Link and apply on next run」即可',
+      href: RENDER_DASHBOARD_URL,
+    })
+  }
+
+  // 「查不出跑没跑」是我们自己的代码欠账，不该天天催 PM ——
+  // 但也不能不说，否则它会永远躺在暗处。合成一条，说清楚这是开发要补的。
+  if (r.blind.length > 0) {
+    items.push({
+      kind: 'cron_blind',
+      client_id: 'infra',
+      client_name: 'Magic Engine 后台',
+      what: `${r.blind.length} 个自动任务不写运行记录，跑没跑查不出来：${r.blind.map((h) => h.service).join('、')}`,
+      how: '这条不用你动手 —— 是我们代码里的欠账（接口没接运行记录）。回我一句「补记录」我就去补，补完它们才进得了这套监控',
+      href: RENDER_DASHBOARD_URL,
+    })
+  }
 }
