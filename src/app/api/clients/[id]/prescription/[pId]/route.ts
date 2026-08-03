@@ -3,8 +3,8 @@
  *   → Full prescription detail (intake + content + status)
  *
  * PATCH /api/clients/[id]/prescription/[pId]
- *   Body: { status: 'approved'|'rejected', approved_by?: string, rejection_note?: string }
- *   - 'approved' → save approval + synchronously generate execution_items
+ *   Body: { status: 'approved'|'rejected', rejection_note?: string }
+ *   - 'approved' → save approval (含批准人，取自会话) + synchronously generate execution_items
  *   - 'rejected'  → record rejection note
  *   - Already-approved prescription → 409 Conflict
  *
@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { landPrescription } from '@/lib/diagnostic/prescription-landing'
+import { buildPrescriptionDecisionPatch } from '@/lib/diagnostic/prescription-patch'
 import type { Prescription, PrescriptionStatus } from '@/types/diagnostic'
 
 // 关键：禁用 Next.js 路由缓存，否则华佗异步 polling 拿不到刚写入的 content。
@@ -68,7 +69,6 @@ export async function GET(
 
 type PatchBody = {
   status: 'approved' | 'rejected'
-  approved_by?: string
   rejection_note?: string
 }
 
@@ -120,7 +120,8 @@ export async function PATCH(
     //   不会卡在"已批准但看板上没动作"这种从界面完全看不出来的状态。）
     if (body.status === 'approved') {
       try {
-        const landed = await landPrescription(supabaseAdmin, current, body.approved_by)
+        // 批准人取自登录会话，不认前端传的值（前端说自己是谁不算数）
+        const landed = await landPrescription(supabaseAdmin, current, access.user.email)
         console.info('[prescription PATCH] landed:', {
           prescriptionId: pId,
           goalId: current.goal_id,
@@ -152,10 +153,11 @@ export async function PATCH(
     }
 
     // Build update payload（走到这儿只剩 rejected）
-    const patch: Record<string, unknown> = { status: body.status }
-    if (body.status === 'rejected' && body.rejection_note) {
-      patch.rejection_note = body.rejection_note
-    }
+    // 只允许写真实存在的列 —— 见 prescription-patch.ts 的列白名单
+    const patch = buildPrescriptionDecisionPatch({
+      status: body.status,
+      rejection_note: body.rejection_note,
+    })
 
     const { data: updated, error: updateError } = await supabaseAdmin
       .from('prescriptions')

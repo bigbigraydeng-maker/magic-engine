@@ -11,6 +11,7 @@ vi.mock('./execution-generator', () => ({
 }))
 
 import { landPrescription, type LandablePrescription } from './prescription-landing'
+import { PRESCRIPTION_COLUMNS } from './prescription-patch'
 
 /**
  * 记录每一次 update 调用，用来断言「到底往表里写了什么」。
@@ -272,10 +273,21 @@ describe('landPrescription —— 方案变成看板上的活儿', () => {
     await expect(landPrescription(supabase, PRES)).rejects.toThrow('没有匹配到这条处方')
   })
 
-  it('🔴 只写表里真有的列 —— approved_by 不是表字段，写进去整条 UPDATE 会失败', async () => {
+  it('🔴 只写表里真有的列 —— 批准人落在 approved_by（20260804020000 补的列）', async () => {
     const { supabase, updates } = fakeSupabase()
     await landPrescription(supabase, PRES, '张三')
     const approved = updates.find((u) => u.patch.status === 'approved')!
-    expect(Object.keys(approved.patch).sort()).toEqual(['approved_at', 'status'])
+    expect(Object.keys(approved.patch).sort()).toEqual(['approved_at', 'approved_by', 'status'])
+    expect(approved.patch.approved_by).toBe('张三')
+    for (const key of Object.keys(approved.patch)) {
+      expect(PRESCRIPTION_COLUMNS.includes(key as never), `幻觉列: ${key}`).toBe(true)
+    }
+  })
+
+  it('没传批准人时不写空值 —— 别在留痕列里留一堆空字符串', async () => {
+    const { supabase, updates } = fakeSupabase()
+    await landPrescription(supabase, PRES)
+    const approved = updates.find((u) => u.patch.status === 'approved')!
+    expect(approved.patch).not.toHaveProperty('approved_by')
   })
 })
