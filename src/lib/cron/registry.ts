@@ -36,6 +36,7 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   { service: 'content-factory-intake', jobName: 'content-factory-intake', schedule: '0 22 * * *', logsRuns: true },
   { service: 'cts-seo-optimizer', jobName: 'cts-seo-optimizer', schedule: '30 5 * * 1', logsRuns: true },
   { service: 'daily-cron-digest', jobName: 'daily-cron-digest', schedule: '0 6 * * *', logsRuns: true },
+  { service: 'diagnostic-weekly', jobName: 'diagnostic-weekly', schedule: '0 8 * * 1', logsRuns: true },
   { service: 'factory-order-scheduler', jobName: 'factory-order-scheduler', schedule: '0 20 * * *', logsRuns: true },
   { service: 'factory-publish-sweeper', jobName: 'factory-publish-sweeper', schedule: '*/15 * * * *', logsRuns: true },
   { service: 'factory-publish-worker', jobName: 'factory-publish-worker', schedule: '*/10 * * * *', logsRuns: true },

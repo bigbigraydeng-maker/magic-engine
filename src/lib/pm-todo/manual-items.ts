@@ -36,6 +36,7 @@ export type ManualItemKind =
   | 'cron_not_running'
   | 'cron_blind'
   | 'goal_baseline_mismatch'
+  | 'diagnostic_findings'
 
 /**
  * 新建的 cron 在 Render 上必须**手动**关联 me-shared-cron-secret 环境变量组。
@@ -150,11 +151,14 @@ export async function loadManualItems(
   await pushCronHealthItems(supabase, items, now)
   // 目标数字口径对不上 —— 错的方向感比没数字更危险(2026-08-03 差点据此给出反向建议)
   await pushBaselineItems(supabase, items)
-
   if (clients.size === 0) return items
 
   const ids = Array.from(clients.keys())
   const nameOf = (id: string) => clients.get(id)?.name ?? '未知客户'
+
+  // 新诊断结果 —— PM 2026-08-03 拍板要逐条看；没有消费方的自动化 = 再造一个没人看的数据源。
+  // 必须放在 nameOf 定义之后：待办上显示 uuid 等于没显示。
+  await pushDiagnosticItems(supabase, items, now, nameOf)
 
   // GSC property identifiers (needed for the inspect deep link).
   const { data: connectors } = await supabase
@@ -461,6 +465,68 @@ async function pushBaselineItems(supabase: SupabaseClient, items: ManualItem[]):
       how: `打开目标页核对：如果确认起点填错了，把它改成 ${s.recomputedBaseline}，仪表盘才会说真话。改之前先想一下这个目标当初是按哪个口径定的`,
       // 真实路径是 /clients/<客户id>/goal/<目标id> —— 首版拼成 /clients/<目标id>，那是 404
       href: `https://app.magicengine.com.au/dashboard/clients/${s.clientId}/goal/${s.goalId}`,
+    })
+  }
+}
+
+
+/** 新诊断出的问题多久内算「新」—— 周更任务，给一周多一点余量。 */
+const DIAGNOSTIC_FRESH_DAYS = 8
+
+/**
+ * 本周新诊断出的严重问题 → 下发。
+ *
+ * PM 2026-08-03 拍板：诊断结果进今日待办逐条看。
+ *
+ * 🔴 **每个客户只出一条汇总，不是每个发现出一条。**
+ *    库里光 critical + high 就有 98 条。全塞进待办 = 刷屏 = PM 直接不看 ——
+ *    那跟没做一样，而且比没做更糟（占了注意力还不产生行动）。
+ *    一条说清楚「几个严重问题 + 最要紧的是哪个 + 去哪看全部」。
+ */
+async function pushDiagnosticItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  now: Date,
+  /** 客户名查表 —— 待办上要显示客户名，显示 uuid 等于没显示。 */
+  nameOf: (id: string) => string,
+): Promise<void> {
+  const since = new Date(now.getTime() - DIAGNOSTIC_FRESH_DAYS * 86_400_000).toISOString()
+  const { data } = await supabase
+    .from('diagnostic_findings')
+    .select('client_id, severity, title, priority_score, created_at')
+    .in('severity', ['critical', 'high'])
+    .gte('created_at', since)
+    .order('priority_score', { ascending: false })
+    .limit(300)
+
+  const rows = (data ?? []) as Array<{
+    client_id: string
+    severity: string
+    title: string
+  }>
+  if (rows.length === 0) return
+
+  // 按客户归堆；因为已按 priority_score 倒序取回，每堆第一条就是最要紧的
+  const byClient = new Map<string, { critical: number; high: number; top: string }>()
+  for (const r of rows) {
+    const cur = byClient.get(r.client_id) ?? { critical: 0, high: 0, top: r.title }
+    if (r.severity === 'critical') cur.critical += 1
+    else cur.high += 1
+    byClient.set(r.client_id, cur)
+  }
+
+  for (const [clientId, v] of Array.from(byClient.entries())) {
+    const counts = [
+      v.critical > 0 ? `${v.critical} 个严重` : null,
+      v.high > 0 ? `${v.high} 个高优先` : null,
+    ].filter(Boolean).join('、')
+    items.push({
+      kind: 'diagnostic_findings',
+      client_id: clientId,
+      client_name: nameOf(clientId),
+      what: `本周体检查出 ${counts}问题。最要紧的一条：${v.top}`,
+      how: '打开链接看完整诊断报告，挑要处理的告诉我，能自动做的我直接做掉',
+      href: `https://app.magicengine.com.au/dashboard/clients/${clientId}/diagnostic`,
     })
   }
 }
