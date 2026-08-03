@@ -1,6 +1,6 @@
 // 单讲工作台 API — 讲课式内容的脚本审改 / 制作方式 / 录像直传 / 重做 / 开始做片。
 // GET   详情(结构化脚本 + 制作方式 + 做片任务状态 + 客户 VI 色)
-// PATCH { action: save_script | set_method | recording_uploaded | recording_link | section_clip | redo_section | regen_script | start_render }
+// PATCH { action: save_script | save_captions | set_method | recording_uploaded | recording_link | section_clip | redo_section | regen_script | start_render }
 // POST  { fileName } → 录像签名直传 URL(大文件不走 API body，直传存储)
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -17,6 +17,7 @@ import {
 import { looksLikeVideoResponse, normalizeRecordingLink } from '@/lib/factory/recording-link'
 import {
   loadLecturePost,
+  saveCaptions,
   saveLectureScript,
   setLectureProduction,
   setSectionClip,
@@ -77,6 +78,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
         },
         lecture: loaded.lecture,
         production: loaded.production,
+        captions: loaded.captions ?? [],
         renderJob: await latestJob(params.postId),
         viColors,
       },
@@ -125,6 +127,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       link?: string
       index?: number
       clear?: boolean
+      captions?: string[]
       instruction?: string
     }
     const loaded = await loadLecturePost(params.id, params.postId)
@@ -194,6 +197,26 @@ export async function PATCH(req: NextRequest, { params }: Params) {
           recordingUrl: norm.url,
         })
         return NextResponse.json({ ok: true, recordingUrl: norm.url })
+      }
+
+      case 'save_captions': {
+        // 客户校准字幕:只收文字，时间沿用(改时间容易和口型对不上)
+        if (!Array.isArray(body.captions)) {
+          return NextResponse.json({ error: '没收到字幕内容' }, { status: 400 })
+        }
+        try {
+          const { saved } = await saveCaptions({
+            clientId: params.id,
+            postId: params.postId,
+            texts: body.captions,
+          })
+          return NextResponse.json({ ok: true, saved })
+        } catch (e) {
+          return NextResponse.json(
+            { error: e instanceof Error ? e.message : '字幕没保存成功，刷新页面再试一次' },
+            { status: 400 },
+          )
+        }
       }
 
       case 'section_clip': {

@@ -20,7 +20,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { generateVoiceover } from '@/lib/audio/minimax-voice'
 import { runMuapi } from '@/lib/muapi/client'
 import { getActiveBrief } from '@/lib/content/brief-injector'
-import { loadLecturePost } from './lecture-post'
+import { loadLecturePost, saveTranscriptAndCaptions } from './lecture-post'
 import { detectActiveRegion, planClipFit } from './screen-clip'
 import type { LectureScript } from './lecture-script'
 import {
@@ -660,11 +660,24 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
       step(jobId, '录像下载完成')
       await heartbeat(jobId, 'rendering')   // 大文件下载可能几分钟，别让卡死回收误杀
       const rawDuration = await ffprobeDuration(personFile)
-      step(jobId, '抽音轨')
-      const audioFile = await extractAudio(personFile, dir)
-      step(jobId, '开始听写')
-      const { segments, words } = await whisperTranscribe(audioFile)
-      step(jobId, `听写完成(${segments.length} 段)`)
+
+      // 听写结果有留档且录像没换过 → 直接复用(省一次听写费用，也保住客户校准过的字幕)
+      const cached = loaded.transcript
+      let segments: TranscriptSegment[]
+      let words: { start: number; end: number; word: string }[]
+      if (cached && cached.recordingUrl === production.recording_url && cached.segments.length > 0) {
+        step(jobId, `复用已存的听写结果(${cached.segments.length} 段)`)
+        segments = cached.segments
+        words = cached.words ?? []
+      } else {
+        step(jobId, '抽音轨')
+        const audioFile = await extractAudio(personFile, dir)
+        step(jobId, '开始听写')
+        const t = await whisperTranscribe(audioFile)
+        segments = t.segments
+        words = t.words
+        step(jobId, `听写完成(${segments.length} 段)`)
+      }
       await heartbeat(jobId, 'rendering')
 
       // 掐头去尾：录像开头的寒暄/清嗓/看提词器/重来一遍，结尾伸手关录制，都不该进成片。
@@ -697,6 +710,26 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
       captionChunks = splitSubtitleChunks(shifted)
         .filter((c) => c.end > 0.15)
         .map((c) => ({ ...c, start: Math.max(0, c.start) }))
+
+      // 客户校准过字幕就以他的为准(时间不动、只换字)。条数对不上说明脚本/录像变过，按新的来。
+      const corrected = loaded.captions
+      if (corrected && corrected.length === captionChunks.length) {
+        step(jobId, `用客户校准过的字幕(${corrected.length} 条)`)
+        captionChunks = captionChunks.map((c, i) => ({ ...c, text: corrected[i].text }))
+      }
+
+      // 留档:客户能在页面上校准，下次重做片也不用再听写
+      await saveTranscriptAndCaptions({
+        clientId: job.client_id,
+        postId: job.content_post_id,
+        transcript: {
+          recordingUrl: production.recording_url,
+          segments,
+          words,
+          savedAt: new Date().toISOString(),
+        },
+        captions: captionChunks,
+      }).catch(() => { /* 留档失败不该让整单白干 */ })
     } else {
       const renderCfg = await clientRenderConfig(job.client_id)
       const track = await buildDigitalHumanTrack({

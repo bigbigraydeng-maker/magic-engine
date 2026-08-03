@@ -13,6 +13,25 @@ import type { LectureScript } from './lecture-script'
 
 export type LectureMethod = 'self_record' | 'digital_human'
 
+/** 一条字幕(时间是成片里的时间，不是原始录像时间)。 */
+export interface CaptionLine {
+  start: number
+  end: number
+  text: string
+}
+
+/**
+ * 听写结果留档 —— 存下来有两个用处：
+ * ①客户能在页面上校准字幕(机器听写会有错字);②重做片不必再听写一次(省钱省时间)。
+ * recordingUrl 用来判断录像有没有换过——换了就作废重听。
+ */
+export interface LectureTranscript {
+  recordingUrl: string
+  segments: { start: number; end: number; text: string }[]
+  words: { start: number; end: number; word: string }[]
+  savedAt: string
+}
+
 /** 某个教学要点配的录屏(讲到这段时上半屏放它，替掉课件)。键 = 要点序号(从 0 起)。 */
 export interface SectionClip {
   url: string
@@ -33,6 +52,9 @@ interface LectureSnapshot {
   lecture?: LectureScript
   lecture_prev?: LectureScript
   lecture_production?: LectureProduction
+  lecture_transcript?: LectureTranscript
+  /** 客户校准过的字幕(有就以它为准，时间不动、只改字)。 */
+  lecture_captions?: CaptionLine[]
   lesson_no?: number
   [k: string]: unknown
 }
@@ -64,7 +86,14 @@ export function spokenScriptOf(lecture: LectureScript): string {
 export async function loadLecturePost(
   clientId: string,
   postId: string,
-): Promise<{ post: LecturePostRow; lecture: LectureScript; production: LectureProduction | null; lessonNo: number | null } | null> {
+): Promise<{
+  post: LecturePostRow
+  lecture: LectureScript
+  production: LectureProduction | null
+  transcript: LectureTranscript | null
+  captions: CaptionLine[] | null
+  lessonNo: number | null
+} | null> {
   const { data, error } = await supabaseAdmin
     .from('content_posts')
     .select('id, client_id, title, status, platforms, source, source_video_url, format, generation_context_snapshot')
@@ -82,8 +111,43 @@ export async function loadLecturePost(
     post,
     lecture,
     production: snap?.lecture_production ?? null,
+    transcript: snap?.lecture_transcript ?? null,
+    captions: snap?.lecture_captions ?? null,
     lessonNo: typeof snap?.lesson_no === 'number' ? snap.lesson_no : null,
   }
+}
+
+/** 做片时把听写结果和最终字幕留档，供客户校准 / 下次重做片复用。 */
+export async function saveTranscriptAndCaptions(params: {
+  clientId: string
+  postId: string
+  transcript: LectureTranscript
+  captions: CaptionLine[]
+}): Promise<void> {
+  const { clientId, postId, transcript, captions } = params
+  await patchSnapshot(clientId, postId, {
+    lecture_transcript: transcript,
+    lecture_captions: captions,
+  })
+}
+
+/** 客户在页面上改完字幕:只收文字，时间沿用原来的(改时间容易和口型对不上)。 */
+export async function saveCaptions(params: {
+  clientId: string
+  postId: string
+  texts: string[]
+}): Promise<{ saved: number }> {
+  const { clientId, postId, texts } = params
+  const current = await loadLecturePost(clientId, postId)
+  if (!current) throw new Error('未找到该讲')
+  const existing = current.captions
+  if (!existing || existing.length === 0) throw new Error('还没有字幕可改 — 先做一次片')
+  if (texts.length !== existing.length) throw new Error('字幕条数对不上，请刷新页面重试')
+
+  const merged = existing.map((c, i) => ({ ...c, text: (texts[i] ?? '').trim() }))
+    .filter((c) => c.text)
+  await patchSnapshot(clientId, postId, { lecture_captions: merged })
+  return { saved: merged.length }
 }
 
 /** 合并写 snapshot 的某几个键(读-改-写；单讲编辑是单人低频操作，不做乐观锁)。 */

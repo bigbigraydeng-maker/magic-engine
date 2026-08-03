@@ -1,7 +1,7 @@
 'use client'
 
 // 单讲工作台 — 一讲从脚本到成片的全部操作都在这一页：
-// ① 脚本审(可改) ② 制作方式(自己录 / 数字人) ③ 课件预览 ④ 平台 CTA 两版本 ⑤ 成片审。
+// ① 脚本审(可改) ② 制作方式(自己录 / 数字人) ③ 课件预览 ④ 平台 CTA 两版本 ⑤ 成片审 ⑥ 字幕校准。
 // 客户安全：不暴露生产手法，人话文案。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -34,6 +34,11 @@ interface RenderJob {
   output_url: string | null
   updated_at: string | null
 }
+interface CaptionLine {
+  start: number
+  end: number
+  text: string
+}
 interface Detail {
   post: {
     id: string
@@ -46,6 +51,7 @@ interface Detail {
   }
   lecture: Lecture
   production: Production | null
+  captions: CaptionLine[]
   renderJob: RenderJob | null
   viColors: { primary?: string; secondary?: string; accent?: string } | null
 }
@@ -103,6 +109,8 @@ export default function LectureWorkbenchPage() {
   const [linkInput, setLinkInput] = useState('')
   const [clipIdx, setClipIdx] = useState<number | null>(null)   // 正在给哪个要点配录屏
   const [clipLink, setClipLink] = useState('')
+  const [capDraft, setCapDraft] = useState<string[] | null>(null)   // 字幕校准草稿
+  const [capDirty, setCapDirty] = useState(false)
 
   const base = `/api/clients/${clientId}/content-factory/${postId}`
 
@@ -114,6 +122,8 @@ export default function LectureWorkbenchPage() {
       if (!r.ok) throw new Error(json.error || `HTTP ${r.status}`)
       setData(json)
       setDraft(json.lecture)
+      setCapDraft((json.captions ?? []).map((c: CaptionLine) => c.text))
+      setCapDirty(false)
       setDirty(false)
       setError(null)
     } catch (e) {
@@ -242,6 +252,16 @@ export default function LectureWorkbenchPage() {
     }
     if (!(await ensureSaved())) return
     await patch({ action: 'start_render' }, 'render', '已开始做片，约 15-30 分钟。做好会出现在下面「成片」区')
+  }
+
+  async function saveCaptionsEdit() {
+    if (!capDraft) return
+    const ok = await patch(
+      { action: 'save_captions', captions: capDraft },
+      'captions',
+      '字幕已保存 ✅ 点「重新做片」才会用上新字幕',
+    )
+    if (ok) setCapDirty(false)
   }
 
   async function applyRecordingLink() {
@@ -731,6 +751,44 @@ export default function LectureWorkbenchPage() {
           </div>
         </div>
       </section>
+
+      {/* ⑥ 字幕校准 —— 机器听写会有错字，客户在这里改，时间不动 */}
+      {(data.captions ?? []).length > 0 && capDraft && (
+        <section className="bg-me-ivory border border-me-stone rounded-2xl p-4 mb-4">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <h2 className="font-display font-semibold">⑥ 字幕校准</h2>
+            <button
+              disabled={!capDirty || busy !== null}
+              onClick={saveCaptionsEdit}
+              className="text-xs font-semibold text-white bg-status-track rounded-full px-4 py-1.5 disabled:opacity-40"
+            >
+              {busy === 'captions' ? '保存中…' : capDirty ? '保存字幕' : '已保存'}
+            </button>
+          </div>
+          <p className="text-xs text-me-taupe mb-3">
+            这是片子里显示的字幕，按你实际说的话自动听出来的 —— 会有错字（比如把「生意」听成「身影」）。
+            对着成片改错字就行，时间不用动。改完点「保存字幕」，再点「重新做片」才会用上。
+          </p>
+          <div className="max-h-[420px] overflow-y-auto flex flex-col gap-1.5 pr-1">
+            {capDraft.map((text, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span className="text-[10px] text-me-taupe w-12 flex-none tabular-nums">
+                  {Math.floor((data.captions[i]?.start ?? 0) / 60)}:
+                  {String(Math.floor((data.captions[i]?.start ?? 0) % 60)).padStart(2, '0')}
+                </span>
+                <input
+                  value={text}
+                  onChange={(e) => {
+                    setCapDraft((d) => (d ? d.map((t, j) => (j === i ? e.target.value : t)) : d))
+                    setCapDirty(true)
+                  }}
+                  className="flex-1 min-w-0 text-sm bg-white border border-me-stone rounded-lg px-2 py-1.5"
+                />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ⑤ 成片审 */}
       <section className="bg-me-ivory border border-me-stone rounded-2xl p-4 mb-8">
