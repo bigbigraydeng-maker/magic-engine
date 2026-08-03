@@ -103,11 +103,39 @@
 
 ## 2026-06-05 · 新表 migration 的 RLS 一律 service-role 模板
 
-**决策**：新建表 migration 的 RLS policy 固定写法：`ENABLE ROW LEVEL SECURITY` + `CREATE POLICY "service_role_full" ... FOR ALL USING (true)`（包在 `DO $$ ... EXCEPTION WHEN duplicate_object` 里）。禁止引用 `clients.workspace_id`（不存在）、`client_team`（不存在）、`auth.uid()` / `auth.jwt()`（ME 没用 Supabase Auth 做 end-user 鉴权）。
+**决策**：新建表 migration 的 RLS policy 固定写法：`ENABLE ROW LEVEL SECURITY` + `CREATE POLICY "service_role_full" ... FOR ALL TO service_role USING (true)`（包在 `DO $$ ... EXCEPTION WHEN duplicate_object` 里）。禁止引用 `clients.workspace_id`（不存在）、`client_team`（不存在）、`auth.uid()` / `auth.jwt()`（ME 没用 Supabase Auth 做 end-user 鉴权）。
 
 **为什么**：审计发现 13 处 schema 漂移（9 表未建 + 4 列缺失），根因是早期 migration 的 `CREATE POLICY` 引用了不存在的对象，apply 时炸在 policy 步骤、**整个事务回滚** —— 文件在仓里但 DB 里啥都没建。影响 19 客户关键词排名 cron 全瘫 + 5 个模块功能。
 
 **影响**：写完 migration 必须 grep `workspace_id\|client_team\|auth\.uid\|auth\.jwt`，命中就重写。
+
+> ### 🔴 2026-08-03 修正：`TO service_role` 不是可选项，漏了就是对外敞开
+>
+> **上面这条决策原本的模板漏了 `TO service_role`**，写成 `FOR ALL USING (true)`。
+> Postgres 里 `CREATE POLICY` **不写 `TO` 子句 = `TO PUBLIC` = 对所有角色生效**，
+> 包含 `anon`。而 Supabase 默认已给 `anon` / `authenticated` GRANT 了 public schema
+> 下所有表的增删改查 —— 平时全靠 RLS 兜底，这个模板等于把兜底拆了。
+>
+> 策略名字叫 `service_role_full`，实际谁都能用。**名字骗了所有人两个月。**
+>
+> **实测**（2026-08-03，用生产环境公开 anon key —— 它随浏览器 bundle 公开分发）：
+> 匿名可读 `outbound_prospects` 2,678 行、`conversation_messages` 2,135 行、
+> `contact_identities` 1,260 行；匿名 `PATCH` 返回 204（可写）。
+> 共 118 条策略中招（105 表全权限 + 10 INSERT + 2 UPDATE + 1 SELECT）。
+> 未波及：第三方令牌、充值消费记录、客户账号表 —— 那几张的写法恰好是对的。
+>
+> 修复：`20260803020000_rls_lock_policies_to_service_role.sql`（用 `ALTER POLICY`
+> 只改角色不动条件，无裸奔窗口）。
+>
+> **今后自查**：写完 migration 除了 grep 上面四个禁用对象，**再 grep 一次
+> `FOR ALL USING`** —— 中间没有 `TO service_role` 就是这个洞。
+> 或直接跑：
+> ```sql
+> select tablename, policyname from pg_policies
+>  where schemaname='public' and roles::text='{public}'
+>    and coalesce(qual,'true')='true' and coalesce(with_check,'true')='true';
+> ```
+> 除 `local_cities_read_all`（城市名参考数据，刻意公开）外应为空。
 
 ## 2026-06-02 · ME 定位升级
 
