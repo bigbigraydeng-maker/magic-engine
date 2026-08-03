@@ -33,7 +33,6 @@ export type ManualItemKind =
   | 'not_indexed'
   | 'meta_stuck'
   | 'crawl_stale'
-  | 'cron_never_ran'
   | 'video_credits_out'
   | 'cron_not_running'
   | 'cron_blind'
@@ -41,32 +40,7 @@ export type ManualItemKind =
   | 'diagnostic_findings'
   | 'prescription_updated'
 
-/**
- * 新建的 cron 在 Render 上必须**手动**关联 me-shared-cron-secret 环境变量组。
- * `sync: false` 不会自动填值 —— 于是 `$CRON_SECRET` 展开成空串、每次 401、
- * curl 直接退出，应用侧连一行 `cron_run_logs` 都不会有。
- *
- * 这就是为什么它必须出现在这里：daily-cron-digest 只报「跑了但失败」，
- * 「压根没跑」它看不见。daily-cron-digest 自己就是这么哑了 51 天没人发现的。
- *
- * 新增 cron 时往这个数组里加一行；它在 cron_run_logs 里出现第一条记录后自动消失。
- */
-const CRONS_NEEDING_MANUAL_LINK: Array<{ job: string; label: string }> = [
-  { job: 'team-memory-sweeper', label: '团队工作记忆兜底清扫' },
-  // 2026-08-03 体检查出的三个「建好之后一次都没跑过」——「没跑过」跟「跑了没结果」
-  // 是两回事，前者以前没有任何地方会报。
-  { job: 'factory-order-scheduler', label: '视频工厂排产' },
-  { job: 'job-boards-weekly', label: '招聘信号周扫' },
-  // 名字里带 weekly，实际排班是每天 0 点（render.yaml / registry 都是 `0 0 * * *`）。
-  // 给 PM 看的名字按**实际**排班写 —— 服务名不好改，标签总能说真话。
-  { job: 'viral-discovery-weekly', label: '爆款素材每日挖' },
-  // 2026-08-03/04 新建的两个 —— 它们是 DAPE 分析段和处方段的全部动力来源。
-  // 密钥没接上的话，体检和方案就都不会有，而且一声不吭。
-  { job: 'diagnostic-weekly', label: '客户深度体检周更' },
-  { job: 'prescription-weekly', label: '客户方案周更' },
-]
-
-/** Render 蓝图页 —— 从这儿进去挑服务、关联环境变量组 */
+/** Render 蓝图页 —— 从这儿进去挑服务、看运行历史 */
 const RENDER_BLUEPRINT_URL =
   'https://dashboard.render.com/blueprint/exs-d8ejt0og4nts73a1ce50'
 
@@ -156,9 +130,8 @@ export async function loadManualItems(
   const clients = new Map(
     ((clientRows ?? []) as ClientRow[]).map((c) => [c.id, c]),
   )
-  // 基础设施类检查要放在这条提前返回**之前**：新建的 cron 有没有接上密钥，
-  // 跟系统里有几个客户毫无关系。放在后面的话，客户表一空它就被跳过了。
-  await appendNeverRanCrons(supabase, items)
+  // 基础设施类检查要放在这条提前返回**之前**：定时任务健康跟系统里有几个客户
+  // 毫无关系。放在后面的话，客户表一空它就被跳过了。
   // 出片余额用完 —— 只有人能充值，必须当天摆到眼前，不能烂在工单的 error 字段里
   await pushVideoCreditsItem(supabase, items, now)
   // 按时没跑 / 查不出跑没跑 —— PM 2026-08-03 要求「不能完成需要有报错」
@@ -331,39 +304,6 @@ export async function loadManualItems(
   return items
 }
 
-async function appendNeverRanCrons(
-  supabase: SupabaseClient,
-  items: ManualItem[],
-): Promise<void> {
-  if (CRONS_NEEDING_MANUAL_LINK.length === 0) return
-
-  const { data } = await supabase
-    .from('cron_run_logs')
-    .select('job_name')
-    .in(
-      'job_name',
-      CRONS_NEEDING_MANUAL_LINK.map((c) => c.job),
-    )
-    .limit(200)
-
-  const seen = new Set(
-    ((data ?? []) as Array<{ job_name: string }>).map((r) => r.job_name),
-  )
-
-  for (const cron of CRONS_NEEDING_MANUAL_LINK) {
-    if (seen.has(cron.job)) continue
-    items.push({
-      kind: 'cron_never_ran',
-      client_id: 'infra',
-      client_name: 'Magic Engine 后台',
-      // 别写「每天都会白跑」—— 名单里有周任务，PM 照链接去看运行记录一周才一条，
-      // 跟这句话对不上，下次他就不信这条提醒了
-      what: `定时任务「${cron.label}」建好之后一次都没跑成功过，多半是密钥没接上，接不上它每次到点都会空跑一遍、永远不出结果`,
-      how: `打开链接 → 找到服务 ${cron.job} → Environment → Linked Environment Groups → 勾 me-shared-cron-secret → 选「Link and apply on next run」。不用碰密钥本身`,
-      href: RENDER_BLUEPRINT_URL,
-    })
-  }
-}
 
 
 /** 出片余额充值页 —— 用户自己的账户页,不是深链,登录后一定打得开。 */

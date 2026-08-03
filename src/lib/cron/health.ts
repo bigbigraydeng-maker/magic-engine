@@ -101,6 +101,7 @@ export async function checkCronHealth(
     schedule: e.schedule,
     logsRuns: e.logsRuns,
     lastRunAt: lastRun.get(e.jobName) ?? null,
+    registeredAt: e.addedAt ? new Date(`${e.addedAt}T00:00:00Z`) : null,
   }))
 
   const bad = unhealthyJobs(inputs, now)

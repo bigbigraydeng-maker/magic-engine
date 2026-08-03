@@ -24,6 +24,14 @@ export interface CronRegistryEntry {
   schedule: string
   /** 这个接口有没有写运行记录 */
   logsRuns: boolean
+  /**
+   * 这条登记是什么时候加进来的（YYYY-MM-DD）。
+   *
+   * 🔴 只有一个用途：判断「从没跑过」是不是误报。新建的任务在第一次排班到点
+   *    之前当然没有运行记录，那是正常的，不是故障。加新任务时填上当天日期；
+   *    老任务不用补（它们早跑过很多轮，这层保护对它们没意义）。
+   */
+  addedAt?: string
 }
 
 export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
@@ -36,7 +44,7 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   { service: 'content-factory-intake', jobName: 'content-factory-intake', schedule: '0 22 * * *', logsRuns: true },
   { service: 'cts-seo-optimizer', jobName: 'cts-seo-optimizer', schedule: '30 5 * * 1', logsRuns: true },
   { service: 'daily-cron-digest', jobName: 'daily-cron-digest', schedule: '0 6 * * *', logsRuns: true },
-  { service: 'diagnostic-weekly', jobName: 'diagnostic-weekly', schedule: '0 8 * * 1', logsRuns: true },
+  { service: 'diagnostic-weekly', jobName: 'diagnostic-weekly', schedule: '0 8 * * 1', logsRuns: true, addedAt: '2026-08-03' },
   { service: 'factory-order-scheduler', jobName: 'factory-order-scheduler', schedule: '0 20 * * *', logsRuns: true },
   { service: 'factory-publish-sweeper', jobName: 'factory-publish-sweeper', schedule: '*/15 * * * *', logsRuns: true },
   { service: 'factory-publish-worker', jobName: 'factory-publish-worker', schedule: '*/10 * * * *', logsRuns: true },
@@ -53,7 +61,7 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   { service: 'oztop-seo-optimizer', jobName: 'oztop-seo-optimizer', schedule: '0 5 * * 1', logsRuns: true },
   { service: 'pm-daily-todo', jobName: 'pm-daily-todo', schedule: '0 19 * * 0-4', logsRuns: true },
   { service: 'poll-visual-jobs', jobName: 'poll-visual-jobs', schedule: '*/10 * * * *', logsRuns: true },
-  { service: 'prescription-weekly', jobName: 'prescription-weekly', schedule: '0 8 * * 2', logsRuns: true },
+  { service: 'prescription-weekly', jobName: 'prescription-weekly', schedule: '0 8 * * 2', logsRuns: true, addedAt: '2026-08-04' },
   { service: 'proposal-view-digest', jobName: 'proposal-view-digest', schedule: '0 19 * * *', logsRuns: true },
   { service: 'prospecting-sweep', jobName: 'prospecting-sweep', schedule: '*/30 * * * *', logsRuns: true },
   { service: 'reputation-snapshots-weekly', jobName: 'reputation-snapshots-weekly', schedule: '30 3 * * 1', logsRuns: true },
