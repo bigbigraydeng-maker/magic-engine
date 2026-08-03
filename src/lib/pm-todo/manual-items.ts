@@ -21,6 +21,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isHtmlPageUrl } from '@/lib/seo/url-kind'
 import { AUTO_LANDED_AGENT } from '@/lib/diagnostic/auto-prescribe'
+import { isHandAddedItem } from '@/lib/diagnostic/prescription-landing'
 
 /** Meta queued this long without being applied = the applier is stuck. */
 const META_PENDING_STALE_DAYS = 3
@@ -606,17 +607,21 @@ async function pushPrescriptionItems(
     //    不是这份方案的动作；③「收起了 N 个」会把清理逻辑压根没碰的行算进去。
     //    写侧和读侧是一对，条件必须永远一致 —— 上一轮就是只补了写侧、
     //    读侧照数不误，堵上的那句谎从报数这边原样漏了回来。
-    const { count: total } = await supabase
+    // 一次取回来自己数，不发两条 count —— 两条 count 就是两处要维护的过滤条件，
+    // 而这条链三轮里有三次缺陷都是「两边口径分家」。手工加的那道排除
+    // 直接复用清理侧导出的 `isHandAddedItem`，同一份代码，想分家都难。
+    const { data: itemRows } = await supabase
       .from('execution_items')
-      .select('id', { count: 'exact', head: true })
+      .select('id, initiative_id, steps_json')
       .eq('prescription_id', p.id)
       .eq('source', 'diagnostic')
-    const { count: hung } = await supabase
-      .from('execution_items')
-      .select('id', { count: 'exact', head: true })
-      .eq('prescription_id', p.id)
-      .eq('source', 'diagnostic')
-      .not('initiative_id', 'is', null)
+    const ownItems = ((itemRows ?? []) as Array<{
+      id: string
+      initiative_id: string | null
+      steps_json: Record<string, unknown> | null
+    }>).filter((r) => !isHandAddedItem(r))
+    const total = ownItems.length
+    const hung = ownItems.filter((r) => r.initiative_id != null).length
 
     let goalTitle: string | null = null
     if (p.goal_id) {
@@ -639,18 +644,19 @@ async function pushPrescriptionItems(
     //       于是这个数一天比一天大，同一份方案周二说 0 个、周日说 60 个。
     let dropped = 0
     if (p.supersedes_id) {
-      const { count } = await supabase
+      const { data: droppedRows } = await supabase
         .from('execution_items')
-        .select('id', { count: 'exact', head: true })
+        .select('id, steps_json')
         .eq('prescription_id', p.supersedes_id)
         .eq('client_id', p.client_id)
         .eq('source', 'diagnostic')
         .eq('status', 'superseded')
-      dropped = count ?? 0
+      dropped = ((droppedRows ?? []) as Array<{ steps_json: Record<string, unknown> | null }>)
+        .filter((r) => !isHandAddedItem(r)).length
     }
 
-    const n = total ?? 0
-    const onGoal = hung ?? 0
+    const n = total
+    const onGoal = hung
     // 中文日期不带前导零 —— 「08 月 04 日」一眼就是机器拼的
     const [mm, dd] = p.approved_at.slice(5, 10).split('-')
     const day = `${Number(mm)} 月 ${Number(dd)} 日`

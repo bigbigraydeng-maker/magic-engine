@@ -31,6 +31,28 @@ export type LandablePrescription = Pick<
 const SUPERSEDABLE_ITEM_STATUSES = ['pending'] as const
 
 /**
+ * 这条动作是不是 FDE 在看板上**手工加**的。
+ *
+ * 🔴 手工加的活也会落成 `source='diagnostic'` —— 那条路由（`execution/route.ts`
+ *    里「手动新增执行项」那个 insert）没写 source 列，吃的是数据库默认值，
+ *    真正的出处埋在 `steps_json` 里。库里现存 3 条，其中 1 条还是 pending。
+ *    它三道保护一道都不占：状态是待办、没有生成失败、而那条路由补操作日志是
+ *    「发了不管」（不 await），可能压根没写上。
+ *
+ * 🔴 **导出**给报数那侧共用，不许两边各写一遍。
+ *    这个函数所在的这条链，三轮复审里有三次缺陷都出在「写侧改了读侧没跟上」：
+ *    时间窗 → 诸葛亮的卡 → 手工加的活。判据必须是同一份代码，不是同一个意思。
+ *
+ * 🔴 也别想着在 SQL 里写 `.not('steps_json->>source', 'eq', 'fde_manual_add')`：
+ *    库里 116 条 diagnostic 动作有 113 条根本没有 source 这个键，
+ *    `NOT (NULL = 'x')` 是 NULL 不是 true —— 那样写会把 116 条全过滤掉、
+ *    数字恒等于 0，且不报任何错。必须取回来在代码里判。
+ */
+export function isHandAddedItem(row: { steps_json: Record<string, unknown> | null }): boolean {
+  return row.steps_json?.source === 'fde_manual_add'
+}
+
+/**
  * 作废上一版里**真的没人碰过**的动作。
  *
  * 🔴 光看 status='pending' 不够 —— pending 里混着已经被人动过的：
@@ -66,16 +88,8 @@ async function supersedeUntouchedItems(
   }>
   if (all.length === 0) return { count: 0, kept: 0 }
 
-  // 🔴 FDE 在看板上手工加的活也会落成 source='diagnostic'（那条路由没写这一列，
-  //    吃的是数据库默认值），真正的出处埋在 steps_json 里。它三道保护一道都不占：
-  //    状态是待办、没有生成失败、而那条路由补日志是「发了不管」，可能压根没写上。
-  //    根因在别的模块（该把 source 列写对），改动会连带 UI 分组变化，不塞进这个 PR ——
-  //    但在这儿先挡住：人手工加的活绝不能被当成"方案自己生成、没人碰过"的收走。
-  const isHandAdded = (r: (typeof all)[number]) =>
-    typeof r.steps_json?.source === 'string' && r.steps_json.source === 'fde_manual_add'
-
   // 生成失败过的：有人在等着重试，留着。人手工加的：本来就不归这份方案管，留着
-  const untouched = all.filter((r) => r.generation_error == null && !isHandAdded(r))
+  const untouched = all.filter((r) => r.generation_error == null && !isHandAddedItem(r))
   let kept = all.length - untouched.length
   if (untouched.length === 0) return { count: 0, kept }
 
