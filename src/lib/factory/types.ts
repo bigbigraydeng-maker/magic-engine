@@ -125,6 +125,8 @@ export interface GateContext {
   allowBTrackLandmarkAds: boolean
   /** B4:客户级持久真促销(factory_config.verified_offer),该客户所有活动默认带上;单条活动可用 signal 覆盖 */
   verifiedOffer: VerifiedOffer | null
+  /** sourceImagePool 里哪些来自客户自己上传的素材。 */
+  clientOwnedSources?: ReadonlySet<string>
   /** 客户是否配了叙事人格(master_briefs.brand_voice.persona)→ 选故事型分镜 + 第一人称文案 */
   hasPersona?: boolean
   /** i2v 源图池:抓来的静图公开 URL。喂给 generationPlan 当底图,每段轮换用不同的一张。

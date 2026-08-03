@@ -6,6 +6,7 @@
 import {
   FACTORY_B_TRACK_SCENE_TAGS,
   FACTORY_CLIP_UNIT_COST_USD,
+  FACTORY_CLIENT_DERIVED_SCENE_TAG,
   FACTORY_MAX_STOCK_SHARE,
   FACTORY_COST_MARGIN,
   FACTORY_DAILY_COST_CAP_USD,
@@ -270,6 +271,8 @@ export function selectClips(
   recipe: ShotRecipe = pickShotRecipe(null, 0),
   /** i2v 源图池(抓来的素材公开 URL)。空则 worker 退回占位帧 —— 那正是「所有画面一个样」的老路。 */
   sourceImagePool: readonly string[] = [],
+  /** 上面哪些地址来自**客户自己上传的素材**（决定入库时走哪一类护栏 6 判定）。 */
+  clientOwnedSources: ReadonlySet<string> = new Set(),
 ): ClipSelection {
   // 排序:①角度 token 重叠(货对题)②真实产品片优先 ③冷素材优先(防审美疲劳)
   const pool = ctx.clipStock
@@ -340,10 +343,18 @@ export function selectClips(
         clip_ids: [],
         transition: shot.transition,
       })
+      const chosenSource = sourceImagePool.length > 0
+        ? sourceImagePool[genIndex % sourceImagePool.length]
+        : null
       generationPlan.push({
         segment_role: role,
         position: i,
-        scene_tag: 'pending_resolution',
+        // 🔴 标签在这里就定死,不留 'pending_resolution'。
+        //    2026-08-03 实测:留待定 → worker 兜底成 gen_middle → 入库闸不认识 → 整单卡死。
+        //    「待定」从来没有人去定,它就是个永远不会兑现的欠条。
+        scene_tag: chosenSource && clientOwnedSources.has(chosenSource)
+          ? FACTORY_CLIENT_DERIVED_SCENE_TAG
+          : FACTORY_B_TRACK_SCENE_TAGS[genIndex % FACTORY_B_TRACK_SCENE_TAGS.length],
         motion_type: shot.motion,
         prompt_hint: `${angle} — ${role} segment, real motion, 9:16 vertical`,
         idempotency_key: `{work_order_id}:${role}:${i}`,
@@ -351,9 +362,7 @@ export function selectClips(
         // 🔴 此前这里恒为 null,worker 就无条件退回同一张 seed/cts_source.jpg ——
         // 所有 AI 画面都从同一张图长出来,换多少提示词都改不掉底子。这是「千篇一律」
         // 的根因之一。按 position 取模轮换,保证同一条片子里各段源图不重样。
-        source_image_url: sourceImagePool.length > 0
-          ? sourceImagePool[genIndex % sourceImagePool.length]
-          : null,
+        source_image_url: chosenSource,
         requires_source_resolution: sourceImagePool.length === 0,
       })
       genIndex += 1
@@ -492,6 +501,7 @@ export function decideSignal(ctx: GateContext): Decision {
     requireRealFootage,
     recipe,
     ctx.sourceImagePool ?? [],
+    ctx.clientOwnedSources ?? new Set(),
   )
   if (requireRealFootage && segments.length === 0) {
     return { outcome: 'rejected', reason: 'price_ad_needs_real_footage', detail: 'verified_offer set but no a_real footage available' }

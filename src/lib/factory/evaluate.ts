@@ -169,6 +169,8 @@ async function loadContext(
 
   // 客户自有的排前面:真东西比抓来改写的更贴业务,轮换时优先被取到。
   const sourceImagePool = [...clientAssetPool, ...transformedPool]
+  // 记住哪些是客户自己上传的 —— 入库时护栏 6 按这个分流(客户照片衍生 vs AI 抓图改写)
+  const clientOwnedSources = new Set(clientAssetPool)
 
   const factoryConfig = (client?.factory_config ?? {}) as Record<string, unknown>
 
@@ -203,6 +205,7 @@ async function loadContext(
     ),
     // i2v 源图池:抓来的静图,喂给 generationPlan 当底图(见 selectClips 源图轮换)
     sourceImagePool,
+    clientOwnedSources,
     // 同行业爆款节奏基线(只有数字)。样本不足/查询失败 = null → 选配方走原逻辑。
     rhythmHint,
   }
