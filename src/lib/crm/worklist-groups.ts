@@ -29,11 +29,19 @@ import { SEGMENT_META, SEGMENT_ACTION_META, type Segment } from './segments'
  * 所以分三层，这一页只回答一个问题：**现在轮到人做什么**。
  */
 export type WorklistLayer =
-  /** 客人正在等我们回话 —— 今天必须有人做。永远只有十几个。 */
+  /**
+   * **客人真的开过口或动过手，而且没有真人回过他。**
+   *
+   * PM 2026-08-03 把这一层的定义收紧成一句话：以各渠道**真实对话内容**为准 ——
+   * 邮箱回信、Messenger 回复、以后的 WhatsApp / 电话 / 短信。加上「点了我们
+   * 邮件里的链接」（点击要真人动手；**打开不算**，苹果会替客人自动打开）。
+   *
+   * 「机器回过了」不算回过：Meta 的 AI 客服接了话，客人照样在等一个真人。
+   */
   | 'waiting'
-  /** 他刚有动作（点了链接等），系统自动抬上来的。 */
+  /** 还没搭上话的：新进来的、打过一次没接上的。要人主动出击。 */
   | 'acted'
-  /** 还没轮到人。折叠，只看数字。 */
+  /** 人不再一个个打了，交给自动跟进。折叠，只看数字。 */
   | 'queued'
 
 export interface WorklistGroup {
@@ -52,11 +60,18 @@ export interface WorklistGroup {
  */
 export const WORKLIST_GROUPS: WorklistGroup[] = [
   { key: 'following_up',       members: ['replied', 'callback_due'], layer: 'waiting' },
-  { key: 'travel_due',         members: ['travel_due'],              layer: 'waiting' },
-  { key: 'clicked_link',       members: ['clicked_link'],            layer: 'acted' },
-  { key: 'new_untouched',      members: ['new_untouched'],           layer: 'queued' },
-  { key: 'retry_channel',      members: ['retry_channel'],           layer: 'queued' },
+  // 点了链接 = 客人自己动了手，跟「他回话了」是同一件事：有人在等。
+  // （2026-08-03 从 acted 挪上来。PM 原话说的是「打开了邮件」，但打开证明不了
+  //  任何事 —— 苹果的隐私保护会替用户自动打开；点击才要真人动手。）
+  { key: 'clicked_link',       members: ['clicked_link'],            layer: 'waiting' },
+  // 新进来的人在这里等第一步。原来它被放在最下面那层、还默认折起来 ——
+  // 等于每天新来的询价一进系统就被折叠了。
+  { key: 'new_untouched',      members: ['new_untouched'],           layer: 'acted' },
+  { key: 'retry_channel',      members: ['retry_channel'],           layer: 'acted' },
+  // 「聊过一轮就断了」排在「联系不上」前面：那批人我们真的说上过话，
+  // 回头捞的价值比一个从没接通过的电话高。
   { key: 'stale_conversation', members: ['stale_conversation'],      layer: 'queued' },
+  { key: 'handoff_sop',        members: ['handoff_sop'],             layer: 'queued' },
 ]
 
 /** 每一层在页面上怎么说。措辞就是这一页的产品说明书，不是装饰。 */
@@ -66,12 +81,12 @@ export const LAYER_META: Record<WorklistLayer, { title: string; hint: string }> 
     hint: '今天必须有人回。做完这一层，今天就算过关。',
   },
   acted: {
-    title: '他刚有动作',
-    hint: '系统盯到的 —— 点了我们发的链接，人还热着。不用你去翻，有动作自己浮上来。',
+    title: '还没搭上话',
+    hint: '新进来的、和打过一次没接上的。要你主动出击 —— 越早联系越容易成。',
   },
   queued: {
-    title: '先放着的人',
-    hint: '现在不用一个个打。他们一旦有动作（回消息、点链接），会自动跳到上面两层。',
+    title: '先放着，系统盯着',
+    hint: '打了三天还没接上，人不用再一个个打了。他一旦开口或点链接，会自己跳回最上面。',
   },
 }
 

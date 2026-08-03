@@ -32,20 +32,12 @@ import { WORKLIST_GROUPS, groupDisplayMeta } from '@/lib/crm/worklist-groups'
 import { contactCardTitle } from '@/lib/crm/display-name'
 import { followUpMarks, localDay } from '@/lib/crm/follow-up-marks'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
+import { isAutomatedTouch } from '@/lib/crm/automated-touch'
 import { fetchAll } from '@/lib/supabase-paginate'
 
 interface RouteParams {
   params: { id: string }
 }
-
-/**
- * 这些来源写出来的「我们发出的」是**机器发的**，不是人做的动作。
- *
- * 不分开的话，一封 Mailchimp 群发会把整块看板标成「今天已经跟过」—— 销售
- * 第二天早上看到几百张灰卡，会以为活都做完了。群发那一笔仍然会出现在时间线上
- * （客人确实收到了），只是不算「有人跟过他」。
- */
-const AUTOMATED_SOURCES = new Set(['mailchimp'])
 
 interface ContactRow {
   id: string
@@ -55,6 +47,7 @@ interface ContactRow {
   do_not_contact: boolean
   stage: string | null
   pinned_at: string | null
+  snooze_until: string | null
 }
 
 interface TouchRow {
@@ -65,6 +58,20 @@ interface TouchRow {
   occurred_at: string
   summary: string | null
   metadata: Record<string, unknown> | null
+}
+
+/**
+ * 这个人最近一次通话的结果。分「号码要修」那一组用。
+ *
+ * touches 已经按 occurred_at 倒序（见下面的查询），所以第一条带 outcome 的
+ * 就是最近的那次。
+ */
+function latestOutcomeOf(touches: TouchRow[]): string | null {
+  for (const t of touches) {
+    const o = t.metadata?.outcome
+    if (typeof o === 'string' && o) return o
+  }
+  return null
 }
 
 interface StageRow {
@@ -93,7 +100,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       fetchAll<ContactRow>((from, to) =>
         supabaseAdmin
           .from('contacts')
-          .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, pinned_at')
+          .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, pinned_at, snooze_until')
           .eq('client_id', clientId)
           .order('id', { ascending: true })
           .range(from, to),
@@ -188,6 +195,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
         ),
       stageSuppressed: stage?.suppressed ?? false,
       stageLabel: stage?.label ?? null,
+      // 销售把他推迟了 —— 到期之前不进名单，到期自己回来（见 lib/crm/segments）。
+      snoozeUntil: c.snooze_until,
       touchpoints: tps.map((t) => ({
         channel: t.channel,
         direction: t.direction,
@@ -356,7 +365,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
         summary: t.summary,
         engagement: engagementFromMetadata(t.metadata),
         loggedBy: (t.metadata?.logged_by as string | null) ?? null,
-        automated: AUTOMATED_SOURCES.has(t.source ?? ''),
+        automated: isAutomatedTouch(t.source, t.metadata),
       })),
       now,
       timeZone,
@@ -384,6 +393,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       lastNote: last?.summary ?? null,
       pinned: Boolean(row?.pinned_at),
       pinnedAt: row?.pinned_at ?? null,
+      /** 被推迟到什么时候。今天名单上的人这里恒为 null —— 推迟的人已经被挡在外面了。 */
+      snoozeUntil: row?.snooze_until ?? null,
       suggestedStage:
         suggestStage(c, row?.stage ?? null) ??
         suggestQuoted(c.displayName, row?.stage ?? null),
@@ -454,12 +465,28 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
         reason: seg.reason,
         // 为什么不在今天名单上。成交跟「明确拒绝」混在一堆叫「已排除」很刺眼，
         // 而且成交客户恰恰最该继续维护（催余款、确认行程）—— 页面按这个分开显示。
+        /** 被推迟到什么时候。有值 = 他是被人手推迟的，不是被规则排除的。 */
+        snoozeUntil: row?.snooze_until ?? null,
+        /**
+         * 号码是坏的 —— 这一条要单独拎出来。
+         *
+         * 它以前跟「明确拒绝」混在同一堆「不用再联系」里，于是一个**只是号码
+         * 抄错了**的真客人被永久静默排除，没有任何地方提醒谁去补一个对的号码。
+         * 交给自动跟进也没用：号码是坏的，SOP 再激活也发不出去。
+         * 单独成组 = 变成一件人能动手修的事（铁律 3）。
+         */
+        // 「被推迟」必须能跟「已停止」分开。混在一起的话，销售想把一个人提前
+        // 叫回来就无从下手 —— 他会在一堆「明确拒绝」里找一个自己上周放一放的人。
         group:
-          meta?.action === 'won' || meta?.action === 'postsale'
-            ? ('won' as const)
-            : seg.segment === 'nurture_future'
-              ? ('later' as const)
-              : ('stop' as const),
+          row?.snooze_until && new Date(row.snooze_until).getTime() > now.getTime()
+            ? ('snoozed' as const)
+            : latestOutcomeOf(byContact.get(c.id) ?? []) === 'bad_number'
+              ? ('fix_number' as const)
+              : meta?.action === 'won' || meta?.action === 'postsale'
+                ? ('won' as const)
+                : seg.segment === 'nurture_future'
+                  ? ('later' as const)
+                  : ('stop' as const),
         lastNote: (byContact.get(c.id) ?? [])[0]?.summary ?? null,
       }
     })
@@ -481,7 +508,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       .filter(
         (t) =>
           t.direction === 'outbound' &&
-          !AUTOMATED_SOURCES.has(t.source ?? '') &&
+          !isAutomatedTouch(t.source, t.metadata) &&
           !engagementFromMetadata(t.metadata) &&
           localDay(t.occurred_at, timeZone) === today,
       )

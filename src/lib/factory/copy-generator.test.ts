@@ -11,6 +11,7 @@ vi.mock('@/lib/anthropic/client', () => ({
 
 import { allowedNumbersFrom, ctaIntentFor, generateAdCopy, hookIntentFor , hasInventedServicePromise} from './copy-generator'
 import type { MasterBrief } from '@/types/magic-engine'
+import type { AdCopy } from './types'
 
 const BRIEF = {
   id: 'mb-1', brand_name: 'Oztop', website: 'oztopbuildingsupplies.com.au',

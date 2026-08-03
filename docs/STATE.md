@@ -66,7 +66,7 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 
 ## 4. 定时任务全表
 
-### 4.1 Render Cron（40 个，全部 curl `https://app.magicengine.com.au/api/cron/*`，带 `CRON_SECRET` Bearer）
+### 4.1 Render Cron（41 个，全部 curl `https://app.magicengine.com.au/api/cron/*`，带 `CRON_SECRET` Bearer）
 
 | Cron 名 | 调度 (UTC) | 端点 |
 |---|---|---|
@@ -82,6 +82,7 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 | social-comment-autoreply | `*/30 * * * *` | `/api/cron/social-comment-autoreply` |
 | messenger-hourly | `10 * * * *` | `/api/cron/messenger-sync-hourly` |
 | meta-leads-hourly | `25 * * * *` | `/api/cron/meta-leads-sync` |
+| mailbox-sync-hourly | `25 * * * *` | `/api/cron/mailbox-sync` |
 | viral-discovery-weekly | `0 0 * * *` | `/api/cron/viral-discovery-weekly` |
 | site-audit-cron | `0 2 * * *` | `/api/cron/site-audit-jobs` |
 | industry-ai-visibility-daily | `30 2 * * *` | `/api/cron/ai-visibility-weekly` |

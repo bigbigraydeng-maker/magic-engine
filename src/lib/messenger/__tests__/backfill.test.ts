@@ -43,11 +43,16 @@ function mockDb(
   ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
     if (table === 'conversations') {
       const chain: Record<string, unknown> = {
-        select: (_cols: string, opts?: { head?: boolean }) =>
-          opts?.head
-            ? // 结尾那次「还剩几条」的计数查询
-              { eq: () => ({ is: () => Promise.resolve({ count: remaining }) }) }
-            : chain,
+        select: (_cols: string, opts?: { head?: boolean }) => {
+          if (!opts?.head) return chain
+          // 结尾那次「还剩几条」的计数查询。链式写成可以连着 .eq() 任意多次，
+          // 免得以后往查询里多加一个过滤条件（比如「只算私信」）就把测试打挂。
+          const count: Record<string, unknown> = {
+            eq: () => count,
+            is: () => Promise.resolve({ count: remaining }),
+          }
+          return count
+        },
         eq: () => chain,
         is: () => chain,
         order: () => chain,
@@ -185,15 +190,17 @@ describe('backfillUnlinkedConversations', () => {
   })
 
   it('读表失败时如实返回空，不抛异常（不能拖垮本轮实时同步）', async () => {
-    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-      select: () => ({
-        eq: () => ({
-          is: () => ({
-            order: () => ({ limit: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }),
-          }),
-        }),
-      }),
-    }))
+    // 写成全链式的，往查询里多加一个过滤条件不会把这条用例打挂 ——
+    // 它要验的是「读表失败怎么办」，不是「查询长什么样」。
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      const chain: Record<string, unknown> = {
+        eq: () => chain,
+        is: () => chain,
+        order: () => chain,
+        limit: () => Promise.resolve({ data: null, error: { message: 'boom' } }),
+      }
+      return { select: () => chain }
+    })
 
     const res = await backfillUnlinkedConversations(CLIENT, emptyIndex())
     expect(res).toEqual({ processed: 0, linked: 0, created: 0, remaining: 0 })

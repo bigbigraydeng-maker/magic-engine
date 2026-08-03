@@ -82,6 +82,7 @@
 | `SERPAPI_API_KEY` | SERP 抓取 / Google AI Overviews | Render-web | ✅ (仅 example) |
 | `GOOGLE_SERVICE_ACCOUNT_CREDENTIALS` | GA4 / GSC 服务账号 JSON | Render-web | ❌ |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth（客户授权 GSC / GA4 / GBP） | Render-web | ❌ |
+| `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` | 客户公司邮箱授权（Microsoft Graph，把客人发来的邮件接回 CRM） | Render-web | ❌ |
 | `GOOGLE_GBP_ACCESS_TOKEN` | Google Business Profile | Render-web | ❌ |
 | `GOOGLE_PLACES_API_KEY` | 本地商户 / 口碑数据 | Render-web | ❌ |
 | `YOUTUBE_API_KEY` | YouTube 数据 | Render-web | ✅ |

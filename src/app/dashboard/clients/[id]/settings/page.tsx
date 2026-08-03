@@ -19,6 +19,7 @@ import { ClientStatusPanel } from './_components/ClientStatusPanel'
 import { GbpPanel } from './_components/GbpPanel'
 import { GbpLocationPanel } from './_components/GbpLocationPanel'
 import { GoogleAdsPanel } from './_components/GoogleAdsPanel'
+import { MailboxPanel } from './_components/MailboxPanel'
 import { AdStrategyPanel } from './_components/AdStrategyPanel'
 import { CompetitorDomainsPanel } from './_components/CompetitorDomainsPanel'
 import { ReputationIdentityPanel } from './_components/ReputationIdentityPanel'
@@ -154,6 +155,16 @@ export default function ClientSettingsPage() {
             <h2 className="font-black text-slate-800">发到哪一家门店</h2>
           </div>
           <GbpLocationPanel clientId={clientId} />
+        </section>
+
+        {/* 客户自己的邮箱 —— 四条获客管道里唯一一条还在往外漏线索的。
+            这一步只有客户那边的人能点，所以必须是一个按钮 + 一句人话。 */}
+        <section className="mt-6">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-base">✉️</span>
+            <h2 className="font-black text-slate-800">公司邮箱（客人发来的信）</h2>
+          </div>
+          <MailboxPanel clientId={clientId} />
         </section>
 
         {/* Google Ads Connection Section */}

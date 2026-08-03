@@ -3,7 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { guardAdmin } from '@/lib/auth/require-admin'
 
-// industry 供前端决定行业专属入口显不显示(「房子」只给地产、「行程单」只给旅游)
+// industry 供前端决定行业专属入口显不显示(「房子」「楼盘」只给地产、「行程单」只给旅游)
 const SELECT_FIELDS = 'id, name, domain, created_at, semrush_db, plan_tier, monthly_mtc_cap, country, city, industry'
 
 export async function GET(

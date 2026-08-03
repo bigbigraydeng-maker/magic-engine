@@ -9,6 +9,7 @@ import {
   type TailorMadeItinerary,
   type TailorMadeRecord,
   type TailorMadeStatus,
+  type TailorMadeFlight,
 } from '@/lib/tailor-made/types';
 import type { ReviewItem } from '@/lib/tailor-made/extract';
 import AiComposer, { type ChatTurn } from './AiComposer';
@@ -49,6 +50,13 @@ export default function TailorMadeEditor({
   const [aiError, setAiError] = useState<string | null>(null);
   const [review, setReview] = useState<ReviewItem[]>([]);
   const [fieldsOpen, setFieldsOpen] = useState(false);
+  const [flightBusy, setFlightBusy] = useState(false);
+  const [flightNote, setFlightNote] = useState<string | null>(null);
+  const [expandingDay, setExpandingDay] = useState<number | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importNote, setImportNote] = useState<string | null>(null);
+  const [heroName, setHeroName] = useState<string | null>(null);
+  const [heroChoices, setHeroChoices] = useState<Array<{ name: string; label: string }>>([]);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const objectUrlRef = useRef<string | null>(null);
@@ -96,6 +104,121 @@ export default function TailorMadeEditor({
       }
     },
     [clientId, payload, turns]
+  );
+
+  /**
+   * 上传出票单 PDF，读出航段。
+   *
+   * 航班是另一份文件（Amadeus / 航司出的），以前只能人工照抄进行程 ——
+   * 抄错一个航站楼客人就跑错地方。
+   */
+  const uploadFlights = useCallback(
+    async (file: File) => {
+      setFlightBusy(true);
+      setFlightNote(null);
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        const res = await fetch(`/api/clients/${clientId}/tailor-made/flights`, {
+          method: 'POST',
+          body: fd,
+          credentials: 'include',
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '解析失败');
+
+        edit((d) => {
+          d.flights = data.flights as TailorMadeFlight[];
+          if (data.bookingRef) d.bookingRef = data.bookingRef;
+        });
+        setFlightNote(data.note ?? null);
+      } catch (err) {
+        setFlightNote(err instanceof Error ? err.message : '解析失败');
+      } finally {
+        setFlightBusy(false);
+      }
+    },
+    [clientId, edit]
+  );
+
+  /** 上传每日行程文件（Word / PDF / 纯文本），一次解析成整份行程。 */
+  const importSource = useCallback(
+    async (file: File) => {
+      setImportBusy(true);
+      setImportNote(null);
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('current', JSON.stringify(payload));
+        const res = await fetch(`/api/clients/${clientId}/tailor-made/import`, {
+          method: 'POST', body: fd, credentials: 'include',
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '解析失败');
+
+        setPayload(data.payload);
+        setDirty(true);
+        setReview(data.review ?? []);
+        if (data.heroName) setHeroName(data.heroName);
+        setImportNote(data.reply ?? '已导入');
+        if ((data.review ?? []).length > 0) setFieldsOpen(true);
+      } catch (err) {
+        setImportNote(err instanceof Error ? err.message : '解析失败');
+      } finally {
+        setImportBusy(false);
+      }
+    },
+    [clientId, payload]
+  );
+
+  /** 换封面 —— 自动选会猜错，得留个换的入口 */
+  const changeHero = useCallback(
+    async (name: string) => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/tailor-made/heroes?name=${encodeURIComponent(name)}`, {
+          credentials: 'include',
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '换图失败');
+        edit((d) => { d.trip.heroImage = data.dataUri; });
+        setHeroName(name);
+      } catch { /* 换图失败不打断主流程 */ }
+    },
+    [clientId, edit]
+  );
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/tailor-made/heroes`, { credentials: 'include' });
+        if (res.ok) setHeroChoices((await res.json()).choices ?? []);
+      } catch { /* 拿不到就不显示换图入口 */ }
+    })();
+  }, [clientId]);
+
+  /** 把某一天的正文展开写细。返回结果先落到编辑器，顾问看过才保存。 */
+  const expandOneDay = useCallback(
+    async (index: number, instruction?: string) => {
+      setExpandingDay(index);
+      try {
+        const res = await fetch(`/api/clients/${clientId}/tailor-made/expand-day`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ day: payload.days[index], trip: payload.trip, instruction }),
+          credentials: 'include',
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '展开失败');
+        edit((d) => { d.days[index].body = data.body; });
+        setNote({ kind: 'ok', text: data.note || '已展开' });
+        setTimeout(() => setNote(null), 3000);
+      } catch (err) {
+        setNote({ kind: 'err', text: err instanceof Error ? err.message : '展开失败' });
+      } finally {
+        setExpandingDay(null);
+      }
+    },
+    [clientId, payload, edit]
   );
 
   /** 点「待确认」里的一条，展开校对面并滚到对应区块 */
@@ -276,6 +399,65 @@ export default function TailorMadeEditor({
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {/* ---------- 左：AI 对话 + 校对 ---------- */}
         <div className="space-y-4">
+          {/* 第一步：两份文件。这是甲方描述的真实起点 ——
+              「他们会先输入 2 个信息：航班信息 pdf 和每日行程文本文件」。
+              以前上传入口埋在「逐项校对」里，等于没有。 */}
+          <section className="rounded-xl border border-black/10 bg-white p-5">
+            <h2 className="text-sm font-black text-me-charcoal">① 上传两份文件</h2>
+            <p className="mt-1 text-xs text-me-charcoal/55">
+              上传后系统直接解析出行程和航班，右边立刻能看到成品。不用填表。
+            </p>
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className={`block cursor-pointer rounded-lg border border-dashed border-black/20 p-3 text-center ${importBusy ? 'opacity-50' : 'hover:border-me-ochre/50 hover:bg-me-ivory/50'}`}>
+                <div className="text-sm font-bold text-me-charcoal">
+                  {importBusy ? '解析中…' : '每日行程'}
+                </div>
+                <div className="mt-0.5 text-[11px] text-me-charcoal/45">Word / PDF / 纯文本</div>
+                <input type="file" className="hidden" disabled={importBusy}
+                  accept=".docx,.pdf,.txt,.md,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) void importSource(f); e.target.value=''; }} />
+              </label>
+
+              <label className={`block cursor-pointer rounded-lg border border-dashed border-black/20 p-3 text-center ${flightBusy ? 'opacity-50' : 'hover:border-me-ochre/50 hover:bg-me-ivory/50'}`}>
+                <div className="text-sm font-bold text-me-charcoal">
+                  {flightBusy ? '解析中…' : '出票单（航班）'}
+                </div>
+                <div className="mt-0.5 text-[11px] text-me-charcoal/45">
+                  PDF{(payload.flights?.length ?? 0) > 0 ? ` · 已读到 ${payload.flights?.length} 段` : ''}
+                </div>
+                <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={flightBusy}
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadFlights(f); e.target.value=''; }} />
+              </label>
+            </div>
+
+            {(importNote || flightNote) && (
+              <p className="mt-2 rounded-lg bg-me-ivory/70 px-3 py-2 text-xs leading-relaxed text-me-charcoal/70">
+                {[importNote, flightNote].filter(Boolean).join(' · ')}
+              </p>
+            )}
+
+            {/* 封面：系统按目的地自动选，但一定有猜错的时候，所以明说选了什么并给换的入口 */}
+            {heroChoices.length > 0 && (
+              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-black/5 pt-3">
+                <span className="text-xs text-me-charcoal/55">
+                  封面：
+                  {heroName
+                    ? <strong className="ml-1 text-me-charcoal/80">系统选了「{heroChoices.find(c=>c.name===heroName)?.label ?? heroName}」</strong>
+                    : <span className="ml-1">默认</span>}
+                </span>
+                <select
+                  value={heroName ?? ''}
+                  onChange={(e) => e.target.value && void changeHero(e.target.value)}
+                  className="rounded-md border border-black/15 px-2 py-1 text-xs"
+                >
+                  <option value="">换一张…</option>
+                  {heroChoices.map((c) => <option key={c.name} value={c.name}>{c.label}</option>)}
+                </select>
+              </div>
+            )}
+          </section>
+
           <AiComposer onSubmit={askAi} busy={aiBusy} turns={turns} error={aiError} />
 
           <ReviewPanel
@@ -290,7 +472,7 @@ export default function TailorMadeEditor({
             onClick={() => setFieldsOpen((v) => !v)}
             className="flex w-full items-center justify-between rounded-xl border border-black/10 bg-white px-5 py-3 text-sm font-bold text-me-charcoal hover:border-me-ochre/40"
           >
-            <span>逐项校对 · {payload.days.length} 天</span>
+            <span>高级 · 逐项校对（{payload.days.length} 天）</span>
             <span className="text-me-charcoal/40">{fieldsOpen ? '收起 ▴' : '展开 ▾'}</span>
           </button>
 
@@ -349,6 +531,50 @@ export default function TailorMadeEditor({
             </div>
           </Section>
 
+          <Section id="tm-flights" title={`航班（${payload.flights?.length ?? 0} 段）`}>
+            <p className="text-xs text-me-charcoal/55">
+              上传航司或 Amadeus 出的出票单 PDF，系统读出航段填进行程单。
+              <strong className="text-me-charcoal/75">只照抄不补全</strong> —— 单子上没印的航站楼会留空。
+            </p>
+            <label className={`inline-block cursor-pointer rounded-md border border-black/15 px-3 py-2 text-sm ${flightBusy ? 'opacity-50' : 'hover:bg-me-ivory'}`}>
+              {flightBusy ? '解析中…' : '选择出票单 PDF'}
+              <input
+                type="file"
+                accept="application/pdf,.pdf"
+                disabled={flightBusy}
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void uploadFlights(f);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+            {flightNote && <p className="text-xs text-me-charcoal/60">{flightNote}</p>}
+
+            {(payload.flights ?? []).length > 0 && (
+              <div className="space-y-2">
+                {(payload.flights ?? []).map((f, i) => (
+                  <div key={i} className="rounded-md border border-black/10 p-2.5 text-xs">
+                    <div className="font-bold">
+                      {f.flightNo} <span className="font-normal text-me-charcoal/50">{f.date}</span>
+                      {f.operatedBy && <span className="ml-2 font-normal italic text-me-charcoal/45">{f.operatedBy}</span>}
+                    </div>
+                    <div className="mt-0.5">
+                      {f.departTime} {f.from} → {f.arriveTime}{f.arriveDayOffset} {f.to}
+                    </div>
+                    <div className="mt-0.5 text-me-charcoal/45">
+                      {[f.duration, f.cabin, f.departTerminal && `出发 ${f.departTerminal}`, f.arriveTerminal && `到达 ${f.arriveTerminal}`]
+                        .filter(Boolean).join(' · ')}
+                    </div>
+                  </div>
+                ))}
+                <Text label="订位号" value={payload.bookingRef ?? ''}
+                  onChange={(v) => edit((d) => { d.bookingRef = v; })} />
+              </div>
+            )}
+          </Section>
+
           <Section
             id="tm-days"
             title={`逐日行程（${payload.days.length} 天）`}
@@ -369,6 +595,8 @@ export default function TailorMadeEditor({
                   onChange={(patch) => edit((d) => { Object.assign(d.days[i], patch); })}
                   onMove={(dir) => edit((d) => { moveDay(d.days, i, dir); })}
                   onRemove={() => edit((d) => { d.days.splice(i, 1); renumber(d.days); })}
+                  onExpand={(instruction) => void expandOneDay(i, instruction)}
+                  expanding={expandingDay === i}
                 />
               ))}
             </div>
@@ -517,14 +745,17 @@ function Area({ label, value, onChange, rows = 3, hint }: {
   );
 }
 
-function DayCard({ day, index, total, onChange, onMove, onRemove }: {
+function DayCard({ day, index, total, onChange, onMove, onRemove, onExpand, expanding }: {
   day: TailorMadeDay;
   index: number;
   total: number;
   onChange: (patch: Partial<TailorMadeDay>) => void;
   onMove: (dir: -1 | 1) => void;
   onRemove: () => void;
+  onExpand: (instruction?: string) => void;
+  expanding: boolean;
 }) {
+  const [instruction, setInstruction] = useState('');
   return (
     <div className="rounded-md border border-black/10 p-4">
       <div className="mb-3 flex items-center gap-2">
@@ -532,6 +763,13 @@ function DayCard({ day, index, total, onChange, onMove, onRemove }: {
         <div className="ml-auto flex gap-1">
           <button type="button" className={ghostBtn} disabled={index === 0} onClick={() => onMove(-1)}>↑</button>
           <button type="button" className={ghostBtn} disabled={index === total - 1} onClick={() => onMove(1)}>↓</button>
+          {/* 展开：源行程常常一天只有一句「Visit Ciqikou, Liziba…」，
+              客人看不出这天在干什么。只扩描述，不加时间/价格/酒店。 */}
+          <button type="button" className={ghostBtn} disabled={expanding || !day.body?.trim()}
+            title={day.body?.trim() ? '把这天写细一点' : '先写一句正文再展开'}
+            onClick={() => onExpand(instruction.trim() || undefined)}>
+            {expanding ? '改写中…' : instruction.trim() ? '按要求改写' : '展开描述'}
+          </button>
           <button type="button" className={ghostBtn} onClick={onRemove}>删除</button>
         </div>
       </div>
@@ -547,6 +785,21 @@ function DayCard({ day, index, total, onChange, onMove, onRemove }: {
         </div>
         <textarea className={inputCls} rows={4} value={day.body} placeholder="当天行程正文"
           onChange={(e) => onChange({ body: e.target.value })} />
+
+        {/* 这一天有特殊安排时，用人话说，别让顾问自己改字 */}
+        <input
+          className={`${inputCls} text-xs`}
+          value={instruction}
+          disabled={expanding}
+          placeholder="这天要改什么？例如「加一句晚上洪崖洞夜景」「写细一点」"
+          onChange={(e) => setInstruction(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && instruction.trim() && !expanding) {
+              e.preventDefault();
+              onExpand(instruction.trim());
+            }
+          }}
+        />
         <div className="grid gap-3 sm:grid-cols-3">
           <input className={inputCls} value={day.travel ?? ''} placeholder="交通（可留空）"
             onChange={(e) => onChange({ travel: e.target.value })} />
