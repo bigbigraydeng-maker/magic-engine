@@ -598,14 +598,24 @@ async function pushPrescriptionItems(
     // 🔴 两个数分开数：动作总数，和其中**真的挂到了目标下**的。
     //    首版只数了总数，却在文案里说「照着目标 X 排的」——
     //    而当时的开方提示词根本不产出挂载信息，等于每周对 PM 说一句假话。
+    // 🔴 三个数都必须带 `source='diagnostic'`，跟清理那一侧的口径**逐字一致**。
+    //    诸葛亮的看板推荐卡也挂同一个方案号（那是归属标记），每跑一次挂一批。
+    //    不过滤的话：①「新增 N 个动作」会一天比一天大 —— 同一个日期、同一份方案，
+    //    数字却在涨，比不带日期更让人糊涂；②诸葛亮的卡不走战线派生，会全落进
+    //    「还没归类」那一堆，PM 按提示切到「全部」看到的是一批日常建议，
+    //    不是这份方案的动作；③「收起了 N 个」会把清理逻辑压根没碰的行算进去。
+    //    写侧和读侧是一对，条件必须永远一致 —— 上一轮就是只补了写侧、
+    //    读侧照数不误，堵上的那句谎从报数这边原样漏了回来。
     const { count: total } = await supabase
       .from('execution_items')
       .select('id', { count: 'exact', head: true })
       .eq('prescription_id', p.id)
+      .eq('source', 'diagnostic')
     const { count: hung } = await supabase
       .from('execution_items')
       .select('id', { count: 'exact', head: true })
       .eq('prescription_id', p.id)
+      .eq('source', 'diagnostic')
       .not('initiative_id', 'is', null)
 
     let goalTitle: string | null = null
@@ -634,6 +644,7 @@ async function pushPrescriptionItems(
         .select('id', { count: 'exact', head: true })
         .eq('prescription_id', p.supersedes_id)
         .eq('client_id', p.client_id)
+        .eq('source', 'diagnostic')
         .eq('status', 'superseded')
       dropped = count ?? 0
     }
@@ -650,7 +661,9 @@ async function pushPrescriptionItems(
         kind: 'prescription_updated',
         client_id: p.client_id,
         client_name: nameOf(p.client_id),
-        what: `${day}出的新方案一个可执行动作都没排出来 —— 等于这周没往前推`,
+        // ⚠️ 开头：这条挂在「系统替你做了什么」这个报喜标题下，
+        // 是唯一一条坏消息，不自己抢眼一点会被连标题一起扫过去
+        what: `⚠️ ${day}出的新方案一个可执行动作都没排出来 —— 等于这周没往前推`,
         how: '这是我们这边的毛病，不用你动手。回我一句我去查是哪一步卡住的',
         href: `https://app.magicengine.com.au/dashboard/clients/${p.client_id}/execution`,
       })
@@ -661,9 +674,12 @@ async function pushPrescriptionItems(
     // 括号那句必须留着：PM 看到「清掉」的第一反应是「FDE 做了一半的活会不会没了」，
     // 而这恰恰是代码里防得最严的地方（进行中/已完成/主动跳过/等着重跑/留过记录的
     // 一条都不动）。为一个已经解决的问题让他叫停整条自动落地，太亏。
+    // 独立成一句（不是逗号接在后面）：前半句讲这次新增，后半句讲上一版怎么处理。
+    // 挤在一句里时，「其余 4 个还没归类」和「还没开始做的 5 个」两个「还没」贴着，
+    // 说的却是完全不相干的两件事，PM 很容易把两个数当成一回事。
     const cleaned =
       dropped > 0
-        ? `，同时把上一版还没开始做的 ${dropped} 个收起来（做了一半的、已完成的、还有等着重跑的都留着）`
+        ? `。上一版还没开始做的 ${dropped} 个已经收起来了（做了一半的、已完成的、还有等着重跑的都留着）`
         : ''
     let tail: string
     let how: string
@@ -678,7 +694,10 @@ async function pushPrescriptionItems(
       how = '打开看板后把顶上的目标筛选切到「全部」才看得到这批动作。没归类上是我们这边的毛病，回我一句我去修，不用你动手'
     } else {
       tail = '，没挂到任何目标上'
-      how = '打开看板后把顶上的目标筛选切到「全部」才看得到。这个客户还没定目标，要不要定一个你说了算'
+      // 别说「这个客户还没定目标」—— 那是猜的，而且会让他去建个重复的。
+      // 开方流程强制要有目标才会跑（没目标直接跳过），所以走到这一支只有一种可能：
+      // 方案挂的那个目标后来被删了。
+      how = '打开看板后把顶上的目标筛选切到「全部」才看得到。这份方案原本挂的目标已经不在了 —— 要不要重新定一个你说了算'
     }
 
     items.push({

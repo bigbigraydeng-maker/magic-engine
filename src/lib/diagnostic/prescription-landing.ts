@@ -46,7 +46,7 @@ async function supersedeUntouchedItems(
 ): Promise<{ count: number; kept: number; error?: string }> {
   const { data: rows, error } = await supabase
     .from('execution_items')
-    .select('id, generation_error')
+    .select('id, generation_error, steps_json')
     .eq('prescription_id', priorPrescriptionId)
     .eq('client_id', clientId)
     // 🔴 只碰**这份方案自己生成的**动作。
@@ -59,11 +59,23 @@ async function supersedeUntouchedItems(
     .in('status', SUPERSEDABLE_ITEM_STATUSES as unknown as string[])
   if (error) return { count: 0, kept: 0, error: error.message }
 
-  const all = (rows ?? []) as Array<{ id: string; generation_error: string | null }>
+  const all = (rows ?? []) as Array<{
+    id: string
+    generation_error: string | null
+    steps_json: Record<string, unknown> | null
+  }>
   if (all.length === 0) return { count: 0, kept: 0 }
 
-  // 生成失败过的：有人在等着重试，留着
-  const untouched = all.filter((r) => r.generation_error == null)
+  // 🔴 FDE 在看板上手工加的活也会落成 source='diagnostic'（那条路由没写这一列，
+  //    吃的是数据库默认值），真正的出处埋在 steps_json 里。它三道保护一道都不占：
+  //    状态是待办、没有生成失败、而那条路由补日志是「发了不管」，可能压根没写上。
+  //    根因在别的模块（该把 source 列写对），改动会连带 UI 分组变化，不塞进这个 PR ——
+  //    但在这儿先挡住：人手工加的活绝不能被当成"方案自己生成、没人碰过"的收走。
+  const isHandAdded = (r: (typeof all)[number]) =>
+    typeof r.steps_json?.source === 'string' && r.steps_json.source === 'fde_manual_add'
+
+  // 生成失败过的：有人在等着重试，留着。人手工加的：本来就不归这份方案管，留着
+  const untouched = all.filter((r) => r.generation_error == null && !isHandAdded(r))
   let kept = all.length - untouched.length
   if (untouched.length === 0) return { count: 0, kept }
 

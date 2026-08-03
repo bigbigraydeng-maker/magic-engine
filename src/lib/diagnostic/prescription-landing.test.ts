@@ -26,7 +26,11 @@ function fakeSupabase(
     /** 上一版名下 pending 的旧动作条数（默认全部干净、可作废） */
     supersededItems?: number
     /** 直接给定上一版的旧动作，用来构造"有人动过"的情况 */
-    priorItems?: Array<{ id: string; generation_error: string | null }>
+    priorItems?: Array<{
+      id: string
+      generation_error: string | null
+      steps_json?: Record<string, unknown>
+    }>
     /** 这些动作留过操作日志 —— 有人在上面写过东西 */
     itemsWithLogs?: string[]
     /** 查操作日志这一步失败 —— 保护性查询挂了，必须整轮不删 */
@@ -223,6 +227,18 @@ describe('landPrescription —— 方案变成看板上的活儿', () => {
     expect(r.supersededItems).toBe(0)
     expect(updates.some((u) => u.table === 'execution_items')).toBe(false)
     expect(r.notes.join()).toContain('这轮不动任何旧动作')
+  })
+
+  it('🔴 FDE 在看板上手工加的活不许收 —— 它也落成同一个来源，三道保护一道都不占', async () => {
+    const { supabase } = fakeSupabase({
+      priorItems: [
+        { id: 'auto1', generation_error: null },
+        { id: 'byhand', generation_error: null, steps_json: { source: 'fde_manual_add' } },
+      ],
+    })
+    const r = await landPrescription(supabase, { ...PRES, supersedes_id: 'old1' })
+    expect(r.supersededItems).toBe(1)
+    expect(r.notes.join()).toContain('1 条有人动过')
   })
 
   it('上一版的动作全都有人动过 → 一条都不作废', async () => {
