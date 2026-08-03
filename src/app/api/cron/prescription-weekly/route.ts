@@ -30,6 +30,26 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  // 🔴 同一时间只许跑一轮。
+  //    两轮同时跑的后果不是"多花一次 AI 的钱"那么轻：两边都会读到同一份
+  //    「当前生效的方案」，于是都去归档它、都落地一份新的 —— 同一个目标下
+  //    留下两份生效方案、两套动作，而下周只会归档其中一份，另一份永远孤儿。
+  //    待办按客户去重，PM 一辈子看不见。
+  //    这不是严格互斥（真同一毫秒的两个请求还是能双双读空），但整个危险窗口
+  //    是 AI 调用那几十秒，这一招足以把它从"静默双写客户数据"压到"明确报跳过"。
+  //    治本是给（目标, 版本号）加唯一索引，那要动数据库，留给下一批。
+  //    必须在 startCronRun 之前查 —— 之后查会读到自己刚插进去的那条。
+  const { data: inFlight } = await supabaseAdmin
+    .from('cron_run_logs')
+    .select('id')
+    .eq('job_name', 'prescription-weekly')
+    .eq('status', 'running')
+    .gte('started_at', new Date(Date.now() - 30 * 60_000).toISOString())
+    .limit(1)
+  if (inFlight && inFlight.length > 0) {
+    return NextResponse.json({ ok: true, skipped: '已有一轮在跑，本次跳过' })
+  }
+
   const cronRun = await startCronRun('prescription-weekly')
   try {
     const summary = await runAutoPrescribe(supabaseAdmin)

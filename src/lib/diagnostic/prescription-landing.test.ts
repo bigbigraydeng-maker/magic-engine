@@ -23,37 +23,76 @@ function fakeSupabase(
     updateError?: Record<string, string>
     /** 按 `表名:status` 指定命中行数，如 `{'prescriptions:approved': 0}` */
     matched?: Record<string, number>
-    /** execution_items 被作废的条数 */
+    /** 上一版名下 pending 的旧动作条数（默认全部干净、可作废） */
     supersededItems?: number
+    /** 直接给定上一版的旧动作，用来构造"有人动过"的情况 */
+    priorItems?: Array<{ id: string; generation_error: string | null }>
+    /** 这些动作留过操作日志 —— 有人在上面写过东西 */
+    itemsWithLogs?: string[]
   } = {},
 ) {
-  const updates: Array<{ table: string; patch: Record<string, unknown>; filters: string[] }> = []
+  const updates: Array<{
+    table: string
+    patch: Record<string, unknown>
+    /** 记 `[方法名, 字段, 值]` 三元组 —— 只记字段名的话，`.in('status', [...])` 里
+     *  那个数组会被丢掉，于是"只作废 pending"这条断言其实什么都没锁住。 */
+    calls: Array<[string, unknown, unknown]>
+  }> = []
+  /** 读操作上带的过滤条件，`[表名, 字段, 值]` */
+  const readCalls: Array<[string, unknown, unknown]> = []
+  /** 上一版名下的旧动作，供 select 用 */
+  const priorItems =
+    opts.priorItems ??
+    Array.from({ length: opts.supersededItems ?? 2 }, (_, i) => ({
+      id: `old${i}`,
+      generation_error: null as string | null,
+    }))
   const from = (table: string) => ({
+    // 读旧动作 / 读操作日志
+    select: (...selArgs: unknown[]) => {
+      const chain: Record<string, unknown> = {}
+      const self = (...args: unknown[]) => {
+        readCalls.push([table, args[0], args[1]])
+        return chain
+      }
+      for (const m of ['eq', 'in', 'order', 'limit']) chain[m] = self
+      chain.then = (res: (v: { data: unknown; error: null }) => unknown) =>
+        res({
+          data:
+            table === 'execution_logs'
+              ? (opts.itemsWithLogs ?? []).map((id) => ({ execution_item_id: id }))
+              : priorItems,
+          error: null,
+        })
+      void selArgs
+      return chain
+    },
     update: (patch: Record<string, unknown>) => {
-      const rec = { table, patch, filters: [] as string[] }
+      const rec = { table, patch, calls: [] as Array<[string, unknown, unknown]> }
       updates.push(rec)
       const key = `${table}:${String(patch.status)}`
       const err = opts.updateError?.[String(patch.status)]
-      const rowCount =
-        table === 'execution_items'
-          ? (opts.supersededItems ?? 2)
-          : (opts.matched?.[key] ?? 1)
       const chain: Record<string, unknown> = {}
-      const self = (...args: unknown[]) => {
-        rec.filters.push(String(args[0]))
+      const method = (name: string) => (...args: unknown[]) => {
+        rec.calls.push([name, args[0], args[1]])
         return chain
       }
-      chain.eq = self
-      chain.in = self
-      chain.select = () =>
-        Promise.resolve({
+      chain.eq = method('eq')
+      chain.in = method('in')
+      chain.select = () => {
+        // execution_items 的作废是按 id 列表打的，命中数就是列表长度
+        const inIds = rec.calls.find((c) => c[0] === 'in' && c[1] === 'id')?.[2] as string[] | undefined
+        const rowCount =
+          table === 'execution_items' ? (inIds?.length ?? 0) : (opts.matched?.[key] ?? 1)
+        return Promise.resolve({
           data: err ? null : Array.from({ length: rowCount }, (_, i) => ({ id: `r${i}` })),
           error: err ? { message: err } : null,
         })
+      }
       return chain
     },
   })
-  return { supabase: { from } as never, updates }
+  return { supabase: { from } as never, updates, readCalls }
 }
 
 const PRES: LandablePrescription = {
@@ -116,9 +155,51 @@ describe('landPrescription —— 方案变成看板上的活儿', () => {
     const itemUpdate = updates.find((u) => u.table === 'execution_items')
     expect(itemUpdate).toBeTruthy()
     expect(itemUpdate!.patch.status).toBe('superseded')
-    // 只作废 pending —— 进行中/已完成的是别人的工作记录，抹掉等于抹掉战果
-    expect(itemUpdate!.filters).toContain('status')
     expect(r.supersededItems).toBe(47)
+  })
+
+  it('🔴 候选**只能**是 pending —— 把进行中/已完成也拉进来等于抹掉别人的工作记录', async () => {
+    // 这是整个改动里唯一会破坏已有成果的一条，必须精确锁住取哪些状态。
+    // 上一版这条断言只查了「filters 里出现过 status」，把 ['pending'] 改成
+    // ['pending','in_progress','completed'] 照样全绿 —— 等于没锁。
+    const { supabase, readCalls } = fakeSupabase({ supersededItems: 3 })
+    await landPrescription(supabase, { ...PRES, supersedes_id: 'old1' })
+    const statusIn = readCalls.find((c) => c[0] === 'execution_items' && c[1] === 'status')
+    expect(statusIn?.[2]).toEqual(['pending'])
+  })
+
+  it('🔴 生成失败退回 pending 的不许动 —— 那是 FDE 等着重试的活，不是没人要的活', async () => {
+    const { supabase } = fakeSupabase({
+      priorItems: [
+        { id: 'clean1', generation_error: null },
+        { id: 'failed1', generation_error: '生成超时' },
+        { id: 'clean2', generation_error: null },
+      ],
+    })
+    const r = await landPrescription(supabase, { ...PRES, supersedes_id: 'old1' })
+    expect(r.supersededItems).toBe(2)
+    expect(r.notes.join()).toContain('1 条有人动过')
+  })
+
+  it('🔴 留过操作日志的不许动 —— 有人在上面写过东西', async () => {
+    const { supabase } = fakeSupabase({
+      priorItems: [
+        { id: 'clean1', generation_error: null },
+        { id: 'logged1', generation_error: null },
+      ],
+      itemsWithLogs: ['logged1'],
+    })
+    const r = await landPrescription(supabase, { ...PRES, supersedes_id: 'old1' })
+    expect(r.supersededItems).toBe(1)
+    expect(r.notes.join()).toContain('1 条有人动过')
+  })
+
+  it('上一版的动作全都有人动过 → 一条都不作废', async () => {
+    const { supabase } = fakeSupabase({
+      priorItems: [{ id: 'a', generation_error: '失败了' }],
+    })
+    const r = await landPrescription(supabase, { ...PRES, supersedes_id: 'old1' })
+    expect(r.supersededItems).toBe(0)
   })
 
   it('没有上一版时，一条旧动作都不许碰', async () => {

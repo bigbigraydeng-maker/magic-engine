@@ -494,7 +494,14 @@ describe('generatePrescription()', () => {
     await generatePrescription(supabase as never, RUN_ID, CLIENT_ID, INTAKE)
 
     const call = mockMessagesCreate.mock.calls[0][0] as { system: string }
-    expect(call.system).toContain('initiative_seed')
+
+    // 🔴 必须出现在**输出 JSON 骨架**里，不能只在散文规则里提一句。
+    //    模型照抄的是骨架；只在散文里说，它多半不会输出这个字段 ——
+    //    上一版这条断言只查了「整个提示词里出现过 initiative_seed」，
+    //    把骨架里那块删掉、散文一字不动，测试照样全绿，等于没锁。
+    const schemaBlock = call.system.slice(call.system.indexOf('"phases"'))
+    expect(schemaBlock).toContain('"initiative_seed"')
+
     // 光提一句不够，要给全 6 个可选类型，否则 AI 会自己编一个枚举值
     for (const t of [
       'demand_generation',

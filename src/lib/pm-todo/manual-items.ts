@@ -56,7 +56,9 @@ const CRONS_NEEDING_MANUAL_LINK: Array<{ job: string; label: string }> = [
   // 是两回事，前者以前没有任何地方会报。
   { job: 'factory-order-scheduler', label: '视频工厂排产' },
   { job: 'job-boards-weekly', label: '招聘信号周扫' },
-  { job: 'viral-discovery-weekly', label: '爆款素材周挖' },
+  // 名字里带 weekly，实际排班是每天 0 点（render.yaml / registry 都是 `0 0 * * *`）。
+  // 给 PM 看的名字按**实际**排班写 —— 服务名不好改，标签总能说真话。
+  { job: 'viral-discovery-weekly', label: '爆款素材每日挖' },
   // 2026-08-03/04 新建的两个 —— 它们是 DAPE 分析段和处方段的全部动力来源。
   // 密钥没接上的话，体检和方案就都不会有，而且一声不吭。
   { job: 'diagnostic-weekly', label: '客户深度体检周更' },
@@ -353,7 +355,9 @@ async function appendNeverRanCrons(
       kind: 'cron_never_ran',
       client_id: 'infra',
       client_name: 'Magic Engine 后台',
-      what: `定时任务「${cron.label}」建好之后一次都没跑成功过，多半是密钥没接上，接不上它每天都会白跑`,
+      // 别写「每天都会白跑」—— 名单里有周任务，PM 照链接去看运行记录一周才一条，
+      // 跟这句话对不上，下次他就不信这条提醒了
+      what: `定时任务「${cron.label}」建好之后一次都没跑成功过，多半是密钥没接上，接不上它每次到点都会空跑一遍、永远不出结果`,
       how: `打开链接 → 找到服务 ${cron.job} → Environment → Linked Environment Groups → 勾 me-shared-cron-secret → 选「Link and apply on next run」。不用碰密钥本身`,
       href: RENDER_BLUEPRINT_URL,
     })
@@ -613,25 +617,56 @@ async function pushPrescriptionItems(
       goalTitle = g?.title ?? null
     }
 
+    // 上一版有多少条被这次接管时作废了 —— 只报「新增了多少」不报「清掉了多少」，
+    // 跟只报好消息是一回事。这个数是现成的，不需要跟上一版比对。
+    const { count: dropped } = await supabase
+      .from('execution_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('client_id', p.client_id)
+      .eq('status', 'superseded')
+      .gte('updated_at', p.approved_at)
+
     const n = total ?? 0
     const onGoal = hung ?? 0
+    const day = p.approved_at.slice(5, 10).replace('-', ' 月 ') + ' 日'
+
+    // 一个动作都没排出来 → 这是「这周空转了」，不是「更新成功」，得分开说
+    if (n === 0) {
+      items.push({
+        kind: 'prescription_updated',
+        client_id: p.client_id,
+        client_name: nameOf(p.client_id),
+        what: `${day}出的新方案一个可执行动作都没排出来 —— 等于这周没往前推`,
+        how: '这是我们这边的毛病，不用你动手。回我一句我去查是哪一步卡住的',
+        href: `https://app.magicengine.com.au/dashboard/clients/${p.client_id}/execution`,
+      })
+      continue
+    }
+
+    const cleaned = dropped && dropped > 0 ? `，同时清掉上一版没人认领的 ${dropped} 个` : ''
     let tail: string
-    if (goalTitle && onGoal === n && n > 0) {
+    let how: string
+    if (goalTitle && onGoal === n) {
       tail = `，全部排在目标《${goalTitle}》下`
+      how = '不用你操作，动作已经在看板里排队了。点开扫一眼方向对不对，觉得排错了回我一句，我这周重排'
     } else if (goalTitle && onGoal > 0) {
       tail = `，其中 ${onGoal} 个排在目标《${goalTitle}》下，其余 ${n - onGoal} 个还没归类`
+      how = '打开看板后把顶上的目标筛选切到「全部」，才看得到没归类的那几个。方向不对回我一句，我重排'
     } else if (goalTitle) {
-      tail = `，本该排在目标《${goalTitle}》下，但一个都没归类上 —— 按目标筛看板会看不到它们`
+      tail = `，本该排在目标《${goalTitle}》下，但一个都没归类上`
+      how = '打开看板后把顶上的目标筛选切到「全部」才看得到这批动作。没归类上是我们这边的毛病，回我一句我去修，不用你动手'
     } else {
       tail = '，没挂到任何目标上'
+      how = '打开看板后把顶上的目标筛选切到「全部」才看得到。这个客户还没定目标，要不要定一个你说了算'
     }
 
     items.push({
       kind: 'prescription_updated',
       client_id: p.client_id,
       client_name: nameOf(p.client_id),
-      what: `本周方案已更新并进了执行看板 —— 新增 ${n} 个动作${tail}`,
-      how: '不用你操作，动作已经在看板里排队了。点开扫一眼方向对不对，觉得排错了告诉我，我改',
+      // 带上日期：这条会连着几天出现在待办里，不带日期 PM 会以为方案被改了好几次
+      what: `${day}出的新方案已进执行看板 —— 新增 ${n} 个动作${tail}${cleaned}`,
+      how,
       href: `https://app.magicengine.com.au/dashboard/clients/${p.client_id}/execution`,
     })
   }

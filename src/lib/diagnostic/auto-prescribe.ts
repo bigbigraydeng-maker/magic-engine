@@ -40,6 +40,19 @@ const PRIORITY_DIMENSION_COUNT = 3
  */
 export const AUTO_LANDED_AGENT = 'prescription-weekly'
 
+/**
+ * 六个维度的中文名。这段文字会跟着开方口径存进库、可能出现在界面上，
+ * 不能留 `ai_visibility` 这种字段名给人看（对外一律用中文封装名）。
+ */
+const DIMENSION_LABELS: Record<DiagnosticDimension, string> = {
+  seo: 'SEO',
+  ai_visibility: 'AI 可见度',
+  ads: '广告',
+  social: '社媒',
+  reputation: '口碑',
+  competitor: '竞品',
+}
+
 export interface CompletedRun {
   id: string
   clientId: string
@@ -141,26 +154,49 @@ export function lowestDimensions(
 /**
  * 客户有好几个进行中目标时，这次的方案服务哪一个。
  *
- * 🔴 首版取「最近建的那个」，被复审打回：库里 CTS 3 个、Oztop 4 个进行中目标，
- *    **创建时间戳完全相同**（都是 2026-06-04 16:25:32 批量建的），
- *    "最近建的"实际是任意挑一个，还看不出是任意挑的。
+ * 规矩：**在还没到期的目标里，挑最先到期的那个** —— 时间压力最大的先排。
+ * 挂了哪个会写进待办通知，PM 一眼看得出挂错。
  *
- * 改成**最先到期的那个** —— 时间压力最大的先排，是个说得出理由的规矩，
- * 而且到期日各不相同，选出来是确定的。挂了哪个会写进待办通知，PM 一眼看得出挂错。
+ * 🔴 「先滤掉已过期的」不是防御性编程，是今天就会踩的坑：
+ *    Oztop《Oztop Walnut 地板清仓》的到期日是 2026-08-03，但状态还挂在「进行中」
+ *    （目标到期不会自动改状态）。不滤的话，下周二第一次跑就会选中它，
+ *    还会因为剩余天数是负数而被算成「马上要」，然后生成几十条动作
+ *    瞄准一个已经关掉的窗口。3 个合格客户里就中 1 个。
+ *
+ * 🔴 到期日会打平（CTS 有两个目标都是 2026-09-02）。打平时取先建的那个，
+ *    让结果是确定的 —— 靠入参顺序碰巧稳定不算设计。
  */
-export function pickGoalForPrescription(goals: GoalRow[]): GoalRow | null {
-  if (goals.length === 0) return null
-  const dated = goals.filter((g) => g.period_end)
-  if (dated.length === 0) return goals[0]
-  return dated.reduce((soonest, g) =>
-    new Date(g.period_end as string) < new Date(soonest.period_end as string) ? g : soonest,
-  )
+export function pickGoalForPrescription(goals: GoalRow[], now: Date): GoalRow | null {
+  const live = goals.filter((g) => !g.period_end || new Date(g.period_end) >= startOfDay(now))
+  if (live.length === 0) return null
+
+  const dated = live.filter((g) => g.period_end)
+  if (dated.length === 0) return live[0]
+
+  return dated.reduce((soonest, g) => {
+    const a = new Date(g.period_end as string).getTime()
+    const b = new Date(soonest.period_end as string).getTime()
+    if (a !== b) return a < b ? g : soonest
+    // 到期日打平 → 先建的优先，保证同样的输入永远选出同一个
+    return new Date(g.created_at) < new Date(soonest.created_at) ? g : soonest
+  })
 }
 
-/** 目标离到期还有多久 → 紧迫度。纯粹按日期算，不猜。 */
+/** 只比日期不比时刻 —— 到期当天仍算有效，不能因为差几个小时就把目标判死。 */
+function startOfDay(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
+}
+
+/**
+ * 目标离到期还有多久 → 紧迫度。纯粹按日期算，不猜。
+ *
+ * 已过期的目标走不到这儿（`pickGoalForPrescription` 已经滤掉），
+ * 但真传进来也不能让负数落进「马上要」—— 那是把一个关掉的窗口报成最紧急。
+ */
 export function urgencyFromGoal(goal: GoalRow, now: Date): TimelineUrgency {
   if (!goal.period_end) return 'short_term'
-  const days = (new Date(goal.period_end).getTime() - now.getTime()) / 86_400_000
+  const days = (new Date(goal.period_end).getTime() - startOfDay(now).getTime()) / 86_400_000
+  if (days < 0) return 'long_term'
   if (days <= 45) return 'immediate'
   if (days <= 120) return 'short_term'
   return 'long_term'
@@ -187,17 +223,21 @@ export function buildIntake(
   now: Date,
 ): PrescriptionIntake {
   const priority = lowestDimensions(dimensionScores)
-  // 预算：先认目标自己的，目标没填才退回人工填过的旧口径，都没有就是 0。
-  // 宁可让 AI 知道"没预算"，也不替客户编一个数。
-  const budget = goal.budget_amount ?? priorIntake?.monthly_budget_aud ?? 0
-  const budgetSource = goal.budget_amount != null
-    ? '目标自带预算'
-    : priorIntake
-      ? '目标没填预算，沿用人工填过的月预算'
-      : '目标和人工口径都没有预算，按 0 处理'
+  // 🔴 预算**只认这个目标自己的**，没填就是 0。
+  //    上一版退回过「目标没填就沿用上一份口径的月预算」，被复审打回，打得对：
+  //    库里 CTS 3 个 + Oztop 4 个进行中目标的预算字段**全是空的**，
+  //    所以那条兜底不是边角情况，是每周必走 —— 等于每周拿一个 5 月填的、
+  //    跟本目标毫无关系的数字（1000 / 3000）去让 AI 切分钱方案。
+  //    这正是这段文档块上面刚判过死刑的「凭空注入客户业务数据」。
+  //    宁可让 AI 知道"没预算"，也不替客户编一个数。
+  const budget = goal.budget_amount ?? 0
+  const budgetSource = goal.budget_amount != null ? '目标自带预算' : '这个目标没填预算，按 0 处理'
 
+  // 🔴 措辞不能写死「人工填过的」：这条链自己产出的方案也是 approved 状态，
+  //    取上一份时必须把机器那份排掉（见 runAutoPrescribe），否则第二周起
+  //    抄到的其实是上周机器自己写的那份，而文案还在说这是人填的。
   const priorLine = priorIntake
-    ? `　人工填过的原始业务目标（保留作背景，不是本次的目标）：${priorIntake.business_goal}`
+    ? `　上一份开方口径（供参考，不是本次的目标）：${priorIntake.business_goal}`
     : '　该客户此前没有人工填过开方口径。'
 
   return {
@@ -210,7 +250,7 @@ export function buildIntake(
     notes:
       `本次开方服务于目标《${goal.title}》。\n` +
       `　预算口径：${budgetSource}（${budget} AUD/月）。\n` +
-      `　重点维度：${priority.length > 0 ? `本周体检最低分的 ${priority.join(' / ')}` : '本周体检未采到任何维度分数'}。\n` +
+      `　重点维度：${priority.length > 0 ? `本周体检最低分的 ${priority.map((d) => DIMENSION_LABELS[d]).join(' / ')}` : '本周体检未采到任何维度分数'}。\n` +
       priorLine,
   }
 }
@@ -265,7 +305,7 @@ export async function runAutoPrescribe(
   // 🔴 intake 只认 approved 的：被拒过 / 生成失败 的口径不该复活。
   const { data: presRows } = await supabase
     .from('prescriptions')
-    .select('client_id, created_at, intake, status, goal_id')
+    .select('client_id, created_at, intake, status, goal_id, agent_name')
     .order('created_at', { ascending: false })
     .limit(500)
 
@@ -275,6 +315,7 @@ export async function runAutoPrescribe(
     intake: PrescriptionIntake | null
     status: string
     goal_id: string | null
+    agent_name: string | null
   }>
 
   const lastPrescribed = new Map<string, Date>()
@@ -287,7 +328,16 @@ export async function runAutoPrescribe(
     if (p.status !== 'failed' && !lastPrescribed.has(p.client_id)) {
       lastPrescribed.set(p.client_id, new Date(p.created_at))
     }
-    if (p.status === 'approved' && p.intake && !priorIntake.has(p.client_id)) {
+    // 🔴 只认**人**开的那份口径，且必须是批准过的。
+    //    这条链自己产出的方案也是 approved —— 不把机器那份排掉的话，
+    //    第二周抄到的就是上周机器自己写的，一周抄一周，机器把自己的输出
+    //    当成人的输入滚雪球，而 AI 还照着它去开方、变成看板上真的动作。
+    if (
+      p.status === 'approved' &&
+      p.agent_name !== AUTO_LANDED_AGENT &&
+      p.intake &&
+      !priorIntake.has(p.client_id)
+    ) {
       priorIntake.set(p.client_id, p.intake)
     }
   }
@@ -358,13 +408,16 @@ export async function runAutoPrescribe(
     let draftId: string | null = null
     try {
       const goals = await listActiveGoals(supabase, cand.clientId)
-      const goal = pickGoalForPrescription(goals)
+      const goal = pickGoalForPrescription(goals, now)
       if (!goal) {
         outcomes.push({
           clientId: cand.clientId,
           clientName,
           result: 'skipped',
-          detail: '这个客户没有进行中的目标，方案无从挂起 —— 先给他定个目标',
+          detail:
+            goals.length === 0
+              ? '这个客户没有进行中的目标，方案无从挂起 —— 先给他定个目标'
+              : `这个客户 ${goals.length} 个目标全都过期了（状态还挂着"进行中"），先定个新目标再开方`,
         })
         continue
       }
@@ -392,11 +445,22 @@ export async function runAutoPrescribe(
       // 它名下没人动过的动作会一直挂在看板上，一周叠一层
       const supersedesId = activeByGoal.get(goal.id) ?? null
 
-      const { error: linkErr } = await supabase
+      // agent_name 一起在这次写 —— 它是 PM 通知的唯一开关，单独发一条不查返回值的
+      // update 等于给自己留一个「通知全没了但 cron 报成功」的静默失败。
+      // 提前写是安全的：落地失败会把这份标成 failed，而通知只查 approved。
+      const { data: linked, error: linkErr } = await supabase
         .from('prescriptions')
-        .update({ goal_id: goal.id, version: nextVersion, supersedes_id: supersedesId })
+        .update({
+          goal_id: goal.id,
+          version: nextVersion,
+          supersedes_id: supersedesId,
+          agent_name: AUTO_LANDED_AGENT,
+        })
         .eq('id', prescriptionId)
+        .eq('client_id', cand.clientId)
+        .select('id')
       if (linkErr) throw new Error(`处方挂目标失败：${linkErr.message}`)
+      if (!linked || linked.length === 0) throw new Error('处方挂目标失败：没有匹配到刚生成的那条')
 
       const landed = await landPrescription(
         supabase,
@@ -416,14 +480,6 @@ export async function runAutoPrescribe(
       // 但同客户多目标时这一步能防止把刚落地的这份当成"上一版"再归档一次
       activeByGoal.set(goal.id, prescriptionId)
 
-      // 打上"这份是机器自动落地的"标记 —— 待办通知靠它区分「不用你操作」
-      // 和「你自己刚点的批准」，否则 PM 手工批完第二天会收到一条说不用他操作的通知。
-      await supabase
-        .from('prescriptions')
-        .update({ agent_name: AUTO_LANDED_AGENT })
-        .eq('id', prescriptionId)
-        .eq('client_id', cand.clientId)
-
       prescribed += 1
       outcomes.push({
         clientId: cand.clientId,
@@ -441,11 +497,17 @@ export async function runAutoPrescribe(
       //    ① 白占 6 天冷却（下周照样不重试）② 被当成"上一份口径"抄走。
       //    「4 份草稿从 5 月躺到今天」就是这么来的，别再造新的。
       if (draftId) {
-        await supabase
-          .from('prescriptions')
-          .update({ status: 'failed', error_message: msg })
-          .eq('id', draftId)
-          .eq('client_id', cand.clientId)
+        // 这一句本身也可能抛。它在 catch 里，抛出去就穿出整个 for 循环，
+        // 「一个客户失败不拖累其他客户」当场失效 —— 所以必须再包一层。
+        try {
+          await supabase
+            .from('prescriptions')
+            .update({ status: 'failed', error_message: msg })
+            .eq('id', draftId)
+            .eq('client_id', cand.clientId)
+        } catch {
+          // 标不掉就算了，下面的 outcome 里已经记了真正的失败原因
+        }
       }
       // 一个客户失败不拖累其他客户，但原因必须留下
       outcomes.push({

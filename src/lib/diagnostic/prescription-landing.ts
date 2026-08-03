@@ -30,6 +30,58 @@ export type LandablePrescription = Pick<
  */
 const SUPERSEDABLE_ITEM_STATUSES = ['pending'] as const
 
+/**
+ * 作废上一版里**真的没人碰过**的动作。
+ *
+ * 🔴 光看 status='pending' 不够 —— pending 里混着已经被人动过的：
+ *    内容生成失败时状态会**退回 pending**，同时留下 `generation_error`，
+ *    卡片在界面上显示「失败 [重试]」，那是 FDE 等着重跑的活，不是没人要的活。
+ *    留过操作日志（execution_logs）的同理。库里实测这两类都真实存在。
+ *    抹掉它们 = 悄悄吃掉别人的在办事项，而且从界面上完全看不出来。
+ */
+async function supersedeUntouchedItems(
+  supabase: SupabaseClient,
+  priorPrescriptionId: string,
+  clientId: string,
+): Promise<{ count: number; kept: number; error?: string }> {
+  const { data: rows, error } = await supabase
+    .from('execution_items')
+    .select('id, generation_error')
+    .eq('prescription_id', priorPrescriptionId)
+    .eq('client_id', clientId)
+    .in('status', SUPERSEDABLE_ITEM_STATUSES as unknown as string[])
+  if (error) return { count: 0, kept: 0, error: error.message }
+
+  const all = (rows ?? []) as Array<{ id: string; generation_error: string | null }>
+  if (all.length === 0) return { count: 0, kept: 0 }
+
+  // 生成失败过的：有人在等着重试，留着
+  const untouched = all.filter((r) => r.generation_error == null)
+  let kept = all.length - untouched.length
+  if (untouched.length === 0) return { count: 0, kept }
+
+  // 留过操作日志的：有人在上面写过东西，留着
+  const { data: logged } = await supabase
+    .from('execution_logs')
+    .select('execution_item_id')
+    .in('execution_item_id', untouched.map((r) => r.id))
+  const hasLog = new Set(
+    ((logged ?? []) as Array<{ execution_item_id: string }>).map((l) => l.execution_item_id),
+  )
+  const finalIds = untouched.filter((r) => !hasLog.has(r.id)).map((r) => r.id)
+  kept += untouched.length - finalIds.length
+  if (finalIds.length === 0) return { count: 0, kept }
+
+  const { data: dropped, error: dropErr } = await supabase
+    .from('execution_items')
+    .update({ status: 'superseded' })
+    .in('id', finalIds)
+    .eq('client_id', clientId)
+    .select('id')
+  if (dropErr) return { count: 0, kept, error: dropErr.message }
+  return { count: dropped?.length ?? 0, kept }
+}
+
 export interface LandPrescriptionResult {
   /** 派生出的 Initiative 数。**0 表示这批动作没挂到任何目标下** —— 调用方要照实说 */
   initiativesInserted: number
@@ -108,18 +160,19 @@ export async function landPrescription(
     } else {
       // 光归档处方不够 —— 看板查执行项时只按客户过滤，不看处方状态。
       // 旧方案里没人动过的动作必须一起作废，否则堆积的是动作不是处方。
-      const { data: dropped, error: dropErr } = await supabase
-        .from('execution_items')
-        .update({ status: 'superseded' })
-        .eq('prescription_id', prescription.supersedes_id)
-        .eq('client_id', prescription.client_id)
-        .in('status', SUPERSEDABLE_ITEM_STATUSES as unknown as string[])
-        .select('id')
-      if (dropErr) {
-        notes.push(`旧动作作废失败（非致命）：${dropErr.message}`)
+      const dropResult = await supersedeUntouchedItems(
+        supabase,
+        prescription.supersedes_id,
+        prescription.client_id,
+      )
+      if (dropResult.error) {
+        notes.push(`旧动作作废失败（非致命）：${dropResult.error}`)
       } else {
-        supersededItems = dropped?.length ?? 0
-        notes.push(`归档上一版，顺带作废没人动过的旧动作 ${supersededItems} 条（进行中/已完成的不动）`)
+        supersededItems = dropResult.count
+        notes.push(
+          `归档上一版，作废没人碰过的旧动作 ${supersededItems} 条` +
+            (dropResult.kept > 0 ? `；另有 ${dropResult.kept} 条有人动过，原样留着` : ''),
+        )
       }
     }
   }

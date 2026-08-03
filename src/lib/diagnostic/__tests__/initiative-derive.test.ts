@@ -22,7 +22,21 @@ vi.mock('@/lib/strategy/initiatives', () => ({
 import { deriveInitiativesFromPrescription } from '../initiative-derive'
 import { listInitiativesForGoal, createInitiative } from '@/lib/strategy/initiatives'
 
-const supabase = {} as never  // 我们 mock 了 lib/strategy/initiatives, supabase 实参不被读
+/**
+ * 派生逻辑现在会读一次目标的预算字段（决定要不要给 Initiative 传预算占比），
+ * 所以 supabase 不能再是空对象。默认返回「目标没填预算」——
+ * 这是生产库的真实形状：CTS / Oztop 7 个进行中目标的预算字段全是空的。
+ */
+let goalBudgetAmount: number | null = null
+const supabase = {
+  from: () => ({
+    select: () => ({
+      eq: () => ({
+        maybeSingle: () => Promise.resolve({ data: { budget_amount: goalBudgetAmount }, error: null }),
+      }),
+    }),
+  }),
+} as never
 
 function makePhase(
   phaseNumber: number,
@@ -146,6 +160,51 @@ describe('deriveInitiativesFromPrescription()', () => {
     expect(r.notes.some(n => n.includes('降级为 unassigned'))).toBe(true)
   })
 
+  it('🔴 目标没填预算时不给 Initiative 传预算占比 —— 免得一个不影响任何事的数字去撞 100% 上限', async () => {
+    // 真实形状：CTS《Best of China》已被 FDE 的 3 条战线占了 70%，
+    // 任何正常三阶段切分都会被「同目标占比之和 ≤ 100%」挡掉大半；
+    // 而旧战线从不归档，基数只涨不落 —— 两三周后新方案一条都插不进去，
+    // 整条派生链自己勒死，回到「动作全部未归类」的原状。
+    goalBudgetAmount = null
+    mockListEmpty()
+    mockCreateOk('init')
+
+    const presc = makePrescription([
+      makePhase(1, { initiative_type: 'demand_generation', title: 'A', budget_percent: 40 }),
+    ])
+    await deriveInitiativesFromPrescription(supabase, presc)
+
+    expect(vi.mocked(createInitiative).mock.calls[0][1].budget_percent).toBeUndefined()
+  })
+
+  it('目标填了预算时照常传占比', async () => {
+    goalBudgetAmount = 5000
+    mockListEmpty()
+    mockCreateOk('init')
+
+    const presc = makePrescription([
+      makePhase(1, { initiative_type: 'demand_generation', title: 'A', budget_percent: 40 }),
+    ])
+    await deriveInitiativesFromPrescription(supabase, presc)
+
+    expect(vi.mocked(createInitiative).mock.calls[0][1].budget_percent).toBe(40)
+    goalBudgetAmount = null
+  })
+
+  it('🔴 认不出来的战线类型不许静默蒸发 —— 要记进跳过数并留下日志', async () => {
+    mockListEmpty()
+    mockCreateOk('init')
+
+    const presc = makePrescription([
+      makePhase(1, { initiative_type: 'brand_awareness' as never, title: '飘出来的类型' }),
+    ])
+    const r = await deriveInitiativesFromPrescription(supabase, presc)
+
+    expect(r.inserted).toBe(0)
+    expect(r.skipped).toBe(1)
+    expect(r.notes.join()).toContain('不认识的战线类型')
+  })
+
   it('skips when title duplicates an existing Initiative (CTS 保护)', async () => {
     // 模拟 CTS Goal 下已有"Brisbane 询盘"Initiative
     vi.mocked(listInitiativesForGoal).mockResolvedValue([
@@ -162,6 +221,13 @@ describe('deriveInitiativesFromPrescription()', () => {
 
     expect(r.inserted).toBe(1)  // 只 phase 2 入
     expect(r.skipped).toBe(1)   // phase 1 同名跳过
+
+    // 🔴 跳过 ≠ 丢掉：这个阶段的动作必须挂回那条**已存在**的 Initiative。
+    //    原来只回一个 skipped、不回 id，于是 phase 1 的执行项 initiative_id 全是 null，
+    //    在按目标筛的看板上一条都看不见。而处方提示词恰恰在往「标题稳定」上推
+    //    （跟阶段名一致、用客户看得懂的话），标题越听话越容易撞、动作越挂不上 ——
+    //    幂等保护反倒成了挂载杀手。
+    expect(r.initiativeIdsByPhase[1]).toBe('cts-old')
     expect(r.notes.some(n => n.includes('幂等保护'))).toBe(true)
     expect(createInitiative).toHaveBeenCalledTimes(1)
   })
