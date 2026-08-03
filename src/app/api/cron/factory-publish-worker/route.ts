@@ -6,22 +6,31 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { runPublishWorker } from '@/lib/factory/publish/publish-worker'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
+// 🔴 必须写 cron_run_logs(2026-08-03 补):此前这条路由不留任何运行痕迹,
+// 于是「跑了但没事干」和「压根没跑」长得一模一样,监控无法分辨。
+// 本仓有 daily-cron-digest 哑 51 天、工厂排产停摆 8 天都没告警的前科。
 export async function GET(req: NextRequest) {
   if (req.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+
+  const cronRun = await startCronRun('factory-publish-worker')
   const live = process.env.FACTORY_PUBLISH_LIVE === 'true' // 未设 = 草稿模式(安全默认)
   try {
     const outcome = await runPublishWorker({
       draft: !live,
       workerId: `cron-${process.env.RENDER_INSTANCE_ID ?? 'local'}`,
     })
+    await cronRun.finish({ summary: { live, ...outcome } })
     return NextResponse.json({ ok: true, live, ...outcome })
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 })
+    const msg = e instanceof Error ? e.message : String(e)
+    await cronRun.finish({ error: msg })
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

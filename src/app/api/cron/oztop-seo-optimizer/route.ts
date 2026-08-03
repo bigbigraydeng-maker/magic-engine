@@ -25,6 +25,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from '@/lib/supabase'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -101,13 +102,18 @@ async function getRecentlyOptimised(daysBack: number): Promise<Set<string>> {
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
 
+// 🔴 必须写 cron_run_logs(2026-08-03 补):此前不留任何运行痕迹,
+// 「跑了但没机会词」和「压根没跑」监控分辨不出。鉴权在建记录之前 ——
+// 401 不该产生运行记录,否则会被外部探测刷满。
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  const cronSecret = process.env.CRON_SECRET
+  if (!cronSecret) return NextResponse.json({ error: 'CRON_SECRET not set' }, { status: 500 })
+  if (req.headers.get('Authorization') !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const cronRun = await startCronRun('oztop-seo-optimizer')
   try {
-    const cronSecret = process.env.CRON_SECRET
-    if (!cronSecret) return NextResponse.json({ error: 'CRON_SECRET not set' }, { status: 500 })
-    if (req.headers.get('Authorization') !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
 
     const params   = req.nextUrl.searchParams
     const dryRun   = params.get('dry_run') === 'true'
@@ -124,6 +130,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .single()
 
     if (gscErr || !snapshot) {
+      await cronRun.finish({ error: `没有 Oztop 的 GSC 数据: ${gscErr?.message ?? '快照为空'}` })
       return NextResponse.json({ error: 'No GSC data for Oztop', detail: gscErr?.message }, { status: 404 })
     }
 
@@ -205,6 +212,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       })
     }
 
+    await cronRun.finish({
+      processed: opportunities.length,
+      completed: queued.length,
+      summary: { dry_run: dryRun, opportunities: opportunities.length, queued: queued.length, skipped: skipped.length },
+    })
     return NextResponse.json({
       success:        true,
       dry_run:        dryRun,
@@ -217,6 +229,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
+    await cronRun.finish({ error: msg })
     return NextResponse.json({ error: 'Internal error', detail: msg }, { status: 500 })
   }
 }

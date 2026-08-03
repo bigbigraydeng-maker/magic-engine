@@ -24,8 +24,15 @@ export interface HealthReport {
   overdue: JobHealth[]
   /** 调度表达式看不懂 */
   unknown: JobHealth[]
-  /** 近 24 小时有失败的（跟上面互不重叠：这类是跑了但没跑成） */
-  failing: { service: string; failed: number; total: number }[]
+  /**
+   * **最近一次**就是失败的（跟上面互不重叠：这类是跑了但没跑成）。
+   *
+   * 🔴 判据是「最后一次的结果」，不是「窗口内失败过几次」——
+   *    site-audit-cron 两周内失败 11 次，但 8/1 起已连续成功三天（那个 bug 当天修的）。
+   *    按「失败过就报」会把已经修好的东西天天摆出来，人一旦学会忽略它，
+   *    真坏的那天也会被一起忽略。
+   */
+  failing: { service: string; lastError: string | null }[]
 }
 
 /**
@@ -56,24 +63,25 @@ async function lastRunByJob(supabase: SupabaseClient, jobNames: string[]): Promi
   return out
 }
 
-async function failuresLast24h(
+/** 每个任务**最近一次**的结果 —— 只有最后一次失败才算「现在是坏的」。 */
+async function lastOutcome(
   supabase: SupabaseClient,
-  now: Date,
-): Promise<Map<string, { failed: number; total: number }>> {
-  const since = new Date(now.getTime() - 86_400_000).toISOString()
-  const { data } = await supabase
-    .from('cron_run_logs')
-    .select('job_name, status')
-    .gte('started_at', since)
-    .limit(5000)
-
-  const out = new Map<string, { failed: number; total: number }>()
-  for (const row of (data ?? []) as Array<{ job_name: string; status: string }>) {
-    const cur = out.get(row.job_name) ?? { failed: 0, total: 0 }
-    cur.total += 1
-    if (row.status === 'failed') cur.failed += 1
-    out.set(row.job_name, cur)
-  }
+  jobNames: string[],
+): Promise<Map<string, { status: string; error: string | null }>> {
+  const out = new Map<string, { status: string; error: string | null }>()
+  const rows = await Promise.all(
+    jobNames.map(async (name) => {
+      const { data } = await supabase
+        .from('cron_run_logs')
+        .select('status, error_message')
+        .eq('job_name', name)
+        .order('started_at', { ascending: false })
+        .limit(1)
+      const r = (data ?? [])[0] as { status: string; error_message: string | null } | undefined
+      return [name, r ? { status: r.status, error: r.error_message } : null] as const
+    }),
+  )
+  for (const [name, v] of rows) if (v) out.set(name, v)
   return out
 }
 
@@ -81,9 +89,10 @@ export async function checkCronHealth(
   supabase: SupabaseClient,
   now: Date = new Date(),
 ): Promise<HealthReport> {
-  const [lastRun, fails] = await Promise.all([
-    lastRunByJob(supabase, Array.from(new Set(CRON_REGISTRY.map((e) => e.jobName)))),
-    failuresLast24h(supabase, now),
+  const names = Array.from(new Set(CRON_REGISTRY.map((e) => e.jobName)))
+  const [lastRun, outcomes] = await Promise.all([
+    lastRunByJob(supabase, names),
+    lastOutcome(supabase, names),
   ])
 
   const inputs: JobHealthInput[] = CRON_REGISTRY.map((e) => ({
@@ -103,9 +112,9 @@ export async function checkCronHealth(
     neverRan: bad.filter((h) => h.state === 'never_ran'),
     overdue: bad.filter((h) => h.state === 'overdue'),
     unknown: bad.filter((h) => h.state === 'unknown_schedule'),
-    failing: CRON_REGISTRY.map((e) => ({ service: e.service, ...(fails.get(e.jobName) ?? { failed: 0, total: 0 }) }))
-      .filter((f) => f.failed > 0)
-      .sort((a, b) => b.failed - a.failed),
+    failing: CRON_REGISTRY
+      .filter((e) => outcomes.get(e.jobName)?.status === 'failed')
+      .map((e) => ({ service: e.service, lastError: outcomes.get(e.jobName)?.error ?? null })),
   }
 }
 

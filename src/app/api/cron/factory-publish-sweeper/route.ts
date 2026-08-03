@@ -5,16 +5,22 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 const STUCK_MIN = 10 // 与 worker-sweeper 同阈值
 
+// 🔴 必须写 cron_run_logs(2026-08-03 补):此前这条路由不留任何运行痕迹,
+// 于是「跑了但没事干」和「压根没跑」长得一模一样,监控无法分辨。
+// 本仓有 daily-cron-digest 哑 51 天、工厂排产停摆 8 天都没告警的前科。
 export async function GET(req: NextRequest) {
   if (req.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+
+  const cronRun = await startCronRun('factory-publish-sweeper')
   const cutoff = new Date(Date.now() - STUCK_MIN * 60_000).toISOString()
   try {
     const { data, error } = await supabaseAdmin
@@ -26,8 +32,11 @@ export async function GET(req: NextRequest) {
     if (error) throw new Error(error.message)
     const ids = (data ?? []).map((r) => r.id)
     if (ids.length) console.warn(`[factory-publish-sweeper] 收回卡死 publishing ${ids.length} 条: ${ids.join(',')}`)
+    await cronRun.finish({ processed: ids.length, completed: ids.length, summary: { recovered: ids.length, ids } })
     return NextResponse.json({ ok: true, recovered: ids.length, ids })
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 })
+    const msg = e instanceof Error ? e.message : String(e)
+    await cronRun.finish({ error: msg })
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
