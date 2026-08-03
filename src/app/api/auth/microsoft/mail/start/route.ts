@@ -7,10 +7,11 @@
  * 跟 Google GBP 那条流程刻意保持同一形状（一次性随机数进 httpOnly cookie、
  * 只有随机数进 state、clientId 留在服务端），差别只在两个 Microsoft 特有的点：
  *
- *  · `prompt=consent` —— 强制每次都回传刷新令牌。少了它，第二次连接会拿到
- *    一个没有刷新能力的令牌，一小时后同步安静地停掉。
+ *  · `prompt=select_account` —— 强制弹账号选择页，**绝不能写成 `consent`**
+ *    （那会绕过管理员已经批过的租户级授权，见下面那一大段）。
  *  · scope 里必须带 `offline_access`，且要跟刷新时传的那一串**完全一致**
- *    （见 lib/microsoft/mail-oauth.ts 里的说明）。
+ *    （见 lib/microsoft/mail-oauth.ts 里的说明）。刷新令牌是它给的，
+ *    不是 `prompt` 给的。
  *
  * Responses:
  *   302  → Microsoft 登录页
@@ -78,8 +79,32 @@ export async function GET(req: NextRequest) {
   if (!adminConsent) {
     authUrl.searchParams.set('response_type', 'code')
     authUrl.searchParams.set('response_mode', 'query')
-    // 每次都要刷新令牌 —— 没有它，一小时后同步会安静地停掉。
-    authUrl.searchParams.set('prompt', 'consent')
+    /**
+     * `select_account`，**绝不能是 `consent`**。
+     *
+     * ## 2026-08-03：`prompt=consent` 把管理员的批准整个绕过去了
+     *
+     * 那天 CTS 的管理员成功批准了全公司（页面显示「✓ 管理员批准了」，
+     * 回调也确实拿到 `admin_consent=True`）。然后 `info@` 去连，**照样撞
+     * 「需要管理员批准」**。
+     *
+     * 原因：`prompt=consent` 的意思是「**不管之前批过没有，都让当前这个人
+     * 再批一次**」。于是 Entra 走的是「用户自己授权」那条路 —— 而这家公司
+     * （以及 Entra 的默认策略）不允许员工给未验证发布者的应用授权，
+     * 于是当场拒掉。**管理员那次租户级批准根本没被查询。**
+     *
+     * 换成 `select_account`：
+     *   · 仍然强制弹账号选择页 —— 那才是我们真正要的（浏览器里登着别人时
+     *     Microsoft 会默认拿当前账号走完，2026-08-02 就是这么连错成 `bdm@` 的）
+     *   · 不强制重新授权 —— 已有的租户级批准会被正常认下来，直接放行
+     *
+     * ## 顺带纠正一个误解
+     *
+     * 原先这行的注释写着「没有它，一小时后同步会安静地停掉」。刷新令牌不是
+     * `prompt` 给的，是 **scope 里的 `offline_access`** 给的 —— 那一条一直都在，
+     * 拿掉 `prompt=consent` 不影响刷新。
+     */
+    authUrl.searchParams.set('prompt', 'select_account')
 
     // 想连哪个邮箱，说给 Microsoft 听。
     //

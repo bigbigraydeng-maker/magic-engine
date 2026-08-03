@@ -50,9 +50,37 @@ describe('普通登录（要连的那个人自己点）', () => {
     expect(u.searchParams.get('client_id')).toBe('app-guid')
   })
 
-  /** 少了它第二次连接会拿到不能刷新的令牌，一小时后同步安静地停掉。 */
-  it('强制每次都回传刷新令牌', async () => {
-    expect((await target()).searchParams.get('prompt')).toBe('consent')
+  /**
+   * **`prompt` 绝不能是 `consent`。**
+   *
+   * 2026-08-03：CTS 的管理员成功批准了全公司（页面显示「✓ 管理员批准了」，
+   * 回调也拿到了 `admin_consent=True`），然后 `info@` 去连，照样撞
+   * 「需要管理员批准」。
+   *
+   * 因为 `prompt=consent` 的意思是「不管之前批过没有，都让当前这个人再批
+   * 一次」—— Entra 于是走「用户自己授权」那条路，而这条路被租户策略禁掉了
+   * （未验证发布者）。**管理员那次租户级批准根本没被查询。**
+   *
+   * `select_account` 保住我们真正要的那件事（强制弹账号选择页，防连错邮箱），
+   * 又不会把已有的批准绕过去。
+   */
+  it('强制弹账号选择页，但不强制重新授权', async () => {
+    expect((await target()).searchParams.get('prompt')).toBe('select_account')
+  })
+
+  it('绝不用 prompt=consent —— 那会绕过管理员已经批过的授权', async () => {
+    expect((await target()).searchParams.get('prompt')).not.toBe('consent')
+  })
+
+  /**
+   * 刷新令牌是 `offline_access` 给的，不是 `prompt` 给的。
+   *
+   * 原先那行注释写反了（「没有 prompt=consent 一小时后同步会停」），
+   * 拿掉 prompt 之后这一条就是唯一的保障，必须钉死 —— 少了它，同步会在
+   * 一小时后**安静地**停掉，没有任何报错。
+   */
+  it('scope 里必须有 offline_access —— 刷新令牌全靠它', async () => {
+    expect((await target()).searchParams.get('scope')).toContain('offline_access')
   })
 
   /**
