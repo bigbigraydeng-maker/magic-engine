@@ -488,8 +488,9 @@ services:
   # 此前深度诊断**没有任何定时任务**:只能人工点按钮或新客户建档时跑一次,
   # 最近一次 2026-07-20。于是执行段天天在跑,执行的却是两个月前的结论。
   # 🔴 花钱路径:六维度全量采集 + AI 综合,比规则引擎型的 anomaly-detector 贵一个量级,
-  #    所以周更不日更;且只跑「有域名的 active 客户」—— 内部账号没网站,跑了纯烧接口额度。
-  #    同客户 5 天冷却,防手工刚跑完 cron 又跑一遍。
+  #    所以周更不日更;且只跑「有域名 + 填了行业的 active 客户」—— 内部账号
+  #    (Magic Engine / Magic Lab / Magic Lab Class) 三个都有域名,光看域名拦不住,
+  #    真实判据是有没有填行业。同客户 5 天冷却,防手工刚跑完 cron 又跑一遍。
   # 周一 08:00 UTC ≈ 周一 20:00 NZST,跑完赶上周二早上的待办。
   - type: cron
     name: diagnostic-weekly
@@ -499,6 +500,22 @@ services:
     startCommand: |
       curl -fsS --max-time 800 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/diagnostic-weekly
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # DAPE P 段(处方)—— 吃周一体检的结果开方,并自动落地成执行看板上的动作。
+  # 🔴 花钱路径:每个客户打一次 AI。同客户 6 天冷却。
+  #    刻意跟体检分成两个任务:混在一起挂了分不清是没采到数据还是没生成方案。
+  # 周二 08:00 UTC,排在体检后一天。
+  - type: cron
+    name: prescription-weekly
+    env: node
+    schedule: "0 8 * * 2"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 800 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/prescription-weekly
     envVars:
       - key: CRON_SECRET
         sync: false

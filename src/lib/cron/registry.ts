@@ -53,6 +53,7 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   { service: 'oztop-seo-optimizer', jobName: 'oztop-seo-optimizer', schedule: '0 5 * * 1', logsRuns: true },
   { service: 'pm-daily-todo', jobName: 'pm-daily-todo', schedule: '0 19 * * 0-4', logsRuns: true },
   { service: 'poll-visual-jobs', jobName: 'poll-visual-jobs', schedule: '*/10 * * * *', logsRuns: true },
+  { service: 'prescription-weekly', jobName: 'prescription-weekly', schedule: '0 8 * * 2', logsRuns: true },
   { service: 'proposal-view-digest', jobName: 'proposal-view-digest', schedule: '0 19 * * *', logsRuns: true },
   { service: 'prospecting-sweep', jobName: 'prospecting-sweep', schedule: '*/30 * * * *', logsRuns: true },
   { service: 'reputation-snapshots-weekly', jobName: 'reputation-snapshots-weekly', schedule: '30 3 * * 1', logsRuns: true },

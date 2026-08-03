@@ -37,6 +37,7 @@ export type ManualItemKind =
   | 'cron_blind'
   | 'goal_baseline_mismatch'
   | 'diagnostic_findings'
+  | 'prescription_updated'
 
 /**
  * 新建的 cron 在 Render 上必须**手动**关联 me-shared-cron-secret 环境变量组。
@@ -50,6 +51,15 @@ export type ManualItemKind =
  */
 const CRONS_NEEDING_MANUAL_LINK: Array<{ job: string; label: string }> = [
   { job: 'team-memory-sweeper', label: '团队工作记忆兜底清扫' },
+  // 2026-08-03 体检查出的三个「建好之后一次都没跑过」——「没跑过」跟「跑了没结果」
+  // 是两回事，前者以前没有任何地方会报。
+  { job: 'factory-order-scheduler', label: '视频工厂排产' },
+  { job: 'job-boards-weekly', label: '招聘信号周扫' },
+  { job: 'viral-discovery-weekly', label: '爆款素材周挖' },
+  // 2026-08-03/04 新建的两个 —— 它们是 DAPE 分析段和处方段的全部动力来源。
+  // 密钥没接上的话，体检和方案就都不会有，而且一声不吭。
+  { job: 'diagnostic-weekly', label: '客户深度体检周更' },
+  { job: 'prescription-weekly', label: '客户方案周更' },
 ]
 
 /** Render 蓝图页 —— 从这儿进去挑服务、关联环境变量组 */
@@ -159,6 +169,9 @@ export async function loadManualItems(
   // 新诊断结果 —— PM 2026-08-03 拍板要逐条看；没有消费方的自动化 = 再造一个没人看的数据源。
   // 必须放在 nameOf 定义之后：待办上显示 uuid 等于没显示。
   await pushDiagnosticItems(supabase, items, now, nameOf)
+
+  // 本周方案已自动落地 —— 只通知，不要求 PM 操作（PM 2026-08-04 拍板）
+  await pushPrescriptionItems(supabase, items, now, nameOf)
 
   // GSC property identifiers (needed for the inspect deep link).
   const { data: connectors } = await supabase
@@ -527,6 +540,78 @@ async function pushDiagnosticItems(
       what: `本周体检查出 ${counts}问题。最要紧的一条：${v.top}`,
       how: '打开链接看完整诊断报告，挑要处理的告诉我，能自动做的我直接做掉',
       href: `https://app.magicengine.com.au/dashboard/clients/${clientId}/diagnostic`,
+    })
+  }
+}
+
+
+/** 方案多新算「本周的」—— 跟体检同一个窗口。 */
+const PRESCRIPTION_FRESH_DAYS = 8
+
+/**
+ * 本周自动落地的方案 → 通知一声。
+ *
+ * PM 2026-08-04 拍板：方案自动落地，不等他一份份点头。所以这条**不是要他干活**，
+ * 是让他知道「这周客户的方向被改了、改成什么」——
+ * 自动落地如果连告知都没有，就成了系统背着人改客户的方向。
+ *
+ * 🔴 只报数得出来的：新增几个动作、挂在哪个目标。
+ *    不写「去掉了几个」之类需要跟上一版比对才知道的数 —— 没算过就不能写，
+ *    错的数字比没有数字更危险（2026-08-03 目标口径事故就是这么来的）。
+ */
+async function pushPrescriptionItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  now: Date,
+  nameOf: (id: string) => string,
+): Promise<void> {
+  const since = new Date(now.getTime() - PRESCRIPTION_FRESH_DAYS * 86_400_000).toISOString()
+  const { data } = await supabase
+    .from('prescriptions')
+    .select('id, client_id, goal_id, approved_at')
+    .eq('status', 'approved')
+    .gte('approved_at', since)
+    .order('approved_at', { ascending: false })
+    .limit(50)
+
+  const rows = (data ?? []) as Array<{
+    id: string
+    client_id: string
+    goal_id: string | null
+    approved_at: string
+  }>
+  if (rows.length === 0) return
+
+  // 一个客户只出最新一条 —— 同一周落地两份方案时，刷屏没有意义
+  const seen = new Set<string>()
+  for (const p of rows) {
+    if (seen.has(p.client_id)) continue
+    seen.add(p.client_id)
+
+    const { count } = await supabase
+      .from('execution_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('prescription_id', p.id)
+
+    let goalTitle: string | null = null
+    if (p.goal_id) {
+      const { data: g } = await supabase
+        .from('goals')
+        .select('title')
+        .eq('id', p.goal_id)
+        .maybeSingle<{ title: string }>()
+      goalTitle = g?.title ?? null
+    }
+
+    items.push({
+      kind: 'prescription_updated',
+      client_id: p.client_id,
+      client_name: nameOf(p.client_id),
+      what:
+        `本周方案已更新并进了执行看板 —— 新增 ${count ?? 0} 个动作` +
+        (goalTitle ? `，照着目标《${goalTitle}》排的` : '，但没挂到任何目标上'),
+      how: '不用你操作，动作已经在看板里排队了。点开扫一眼方向对不对，觉得排错了告诉我，我改',
+      href: `https://app.magicengine.com.au/dashboard/clients/${p.client_id}/execution`,
     })
   }
 }

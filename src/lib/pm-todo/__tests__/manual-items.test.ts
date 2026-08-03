@@ -106,8 +106,13 @@ describe('cron_never_ran — 新 cron 没关联密钥组时必须冒出来', () 
     expect(cron!.href).toContain('dashboard.render.com')
   })
 
-  it('已经跑过 → 不再打扰 PM', async () => {
+  it('已经跑过的那个不再打扰 PM，还没跑过的照旧要报', async () => {
+    // 名单里现在有好几个 cron。跑过的应该消失，没跑过的必须还在 ——
+    // 首版这里断言的是「一条都不剩」，那只在名单只有一个的时候成立，
+    // 名单一加东西就红，而红的原因跟被测行为无关。
     const items = await loadManualItems(supabaseWith([{ job_name: 'team-memory-sweeper' }]))
-    expect(items.find((i) => i.kind === 'cron_never_ran')).toBeUndefined()
+    const never = items.filter((i) => i.kind === 'cron_never_ran')
+    expect(never.some((i) => i.what.includes('团队工作记忆兜底清扫'))).toBe(false)
+    expect(never.length).toBeGreaterThan(0)
   })
 })
