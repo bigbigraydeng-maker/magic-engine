@@ -186,6 +186,18 @@ export interface VerifiedOffer {
   discount?: string
   /** 截止,如 "31 July" / "end of July"(可选) */
   offer_expiry?: string
+  /**
+   * 客户**真的提供**的服务承诺,逐条列。如 ["free in-home measure", "free quote"]。
+   *
+   * 存在理由(2026-08-03 Oztop 首次试跑实测):AI 给结尾写了
+   * 「Free in-home measure & quote」「Expert consultation at no cost」,
+   * 而品牌资料里只有 expert consultation,**没有「免费」也没有「上门测量」**。
+   * 现有红线闸只拦数字与日期,拦不住这类**服务承诺** —— 而承诺一旦发出去
+   * 客户就得兑现,编错了是真实商业损失。
+   *
+   * 空 = 一条服务承诺都不许出现在文案里(默认最严,不是默认放行)。
+   */
+  verified_services?: string[]
 }
 
 // ── P0.1 发布(publish-worker)────────────────────────────────────────────────

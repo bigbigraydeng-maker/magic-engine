@@ -19,7 +19,12 @@ interface Props {
 interface Config {
   publish_target: { platform: string; page_id: string } | null
   factory_goal_id: string | null
-  verified_offer: { price_from: string; offer_expiry: string } | null
+  verified_offer: {
+    price_from: string
+    offer_expiry: string
+    /** 客户**真的提供**的服务承诺。空 = 文案里一条「免费 xx」都不许出现。 */
+    verified_services?: string[]
+  } | null
   allow_b_track_landmark_ads: boolean
   auto_order_enabled: boolean
   creative_profile: Style
@@ -61,6 +66,8 @@ interface Draft {
   goalId: string
   priceFrom: string
   offerExpiry: string
+  /** 一行一条,客户真的提供的免费服务。空 = 文案里不许出现任何「免费 xx」。 */
+  verifiedServices: string
   allowLandmark: boolean
   autoOrder: boolean
   music: string
@@ -76,6 +83,7 @@ const toDraft = (c: Config): Draft => ({
   goalId: c.factory_goal_id ?? '',
   priceFrom: c.verified_offer?.price_from ?? '',
   offerExpiry: c.verified_offer?.offer_expiry ?? '',
+  verifiedServices: (c.verified_offer?.verified_services ?? []).join('\n'),
   allowLandmark: c.allow_b_track_landmark_ads,
   autoOrder: c.auto_order_enabled,
   music: c.creative_profile?.music ?? '',
@@ -88,7 +96,8 @@ const toDraft = (c: Config): Draft => ({
 
 const eqDraft = (a: Draft, b: Draft) =>
   a.pageId === b.pageId && a.goalId === b.goalId && a.priceFrom === b.priceFrom &&
-  a.offerExpiry === b.offerExpiry && a.allowLandmark === b.allowLandmark &&
+  a.offerExpiry === b.offerExpiry && a.verifiedServices === b.verifiedServices &&
+  a.allowLandmark === b.allowLandmark &&
   a.autoOrder === b.autoOrder && a.music === b.music && a.musicMood === b.musicMood &&
   a.look === b.look && a.captionMode === b.captionMode && a.xfade === b.xfade &&
   a.endcardPanel === b.endcardPanel
@@ -128,8 +137,14 @@ export function FactoryConfigPanel({ clientId }: Props) {
         body: JSON.stringify({
           publish_target: draft.pageId.trim() ? { platform: 'facebook', page_id: draft.pageId.trim() } : null,
           factory_goal_id: draft.goalId || null,
-          verified_offer: draft.priceFrom.trim()
-            ? { price_from: draft.priceFrom.trim(), offer_expiry: draft.offerExpiry.trim() }
+          // 服务承诺可以单独存在(有免费测量但没在做特价),所以只要两者之一有值就落库
+          verified_offer: (draft.priceFrom.trim() || draft.verifiedServices.trim())
+            ? {
+                price_from: draft.priceFrom.trim(),
+                offer_expiry: draft.offerExpiry.trim(),
+                verified_services: draft.verifiedServices
+                  .split('\n').map((x) => x.trim()).filter(Boolean),
+              }
             : null,
           allow_b_track_landmark_ads: draft.allowLandmark,
           auto_order_enabled: draft.autoOrder,
@@ -266,6 +281,24 @@ export function FactoryConfigPanel({ clientId }: Props) {
           <p className="mt-1 text-xs text-slate-400">
             会被写进片子的文案钩子。<span className="font-medium text-amber-700">优惠下架了就把价格清空</span>,
             否则系统会一直拿它去做片。
+          </p>
+
+          {/* 服务承诺白名单 —— 2026-08-03 Oztop 试跑,AI 自己写了「免费上门测量」,
+              而资料里根本没这项。承诺一发出去客户就得兑现,必须逐条登记才准写。 */}
+          <label className="mt-3 block text-xs font-bold uppercase tracking-wide text-slate-500">
+            客户真的提供的免费服务(一行一条)
+          </label>
+          <textarea
+            value={draft.verifiedServices}
+            onChange={(e) => setDraft((d) => ({ ...d, verifiedServices: e.target.value }))}
+            rows={3}
+            placeholder={'free in-home measure\nfree quote\n免费送货'}
+            className="mt-2 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+            disabled={saving}
+          />
+          <p className="mt-1 text-xs text-slate-400">
+            <span className="font-medium text-amber-700">留空 = 片子里一句「免费 xx」都不许出现</span>。
+            这里没登记的免费服务,系统会当成编造的自动拦掉 —— 因为承诺一旦发出去,客户就得兑现。
           </p>
         </div>
 
