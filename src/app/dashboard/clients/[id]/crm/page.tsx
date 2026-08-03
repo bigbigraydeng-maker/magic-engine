@@ -232,7 +232,7 @@ function Card({
   const done = row.doneToday === true
   return (
     <div
-      className={`relative mb-2 rounded-xl border bg-white shadow-sm transition ${
+      className={`relative rounded-xl border bg-white shadow-sm transition ${
         done ? 'opacity-50 hover:opacity-100' : ''
       } ${row.pinned ? 'border-me-ochre/60' : 'border-me-charcoal/10 hover:border-me-ochre/50'}`}
     >
@@ -314,7 +314,16 @@ function Card({
  */
 const CARDS_BEFORE_FOLD = 12
 
-function BucketColumn({
+/**
+ * 一个批次。
+ *
+ * **占满整行宽度，卡片在里面按网格排** —— 这里原来是一根固定 260px 的窄列，
+ * 几根并排放在 1400px 的页面里，右边永远空着一大半（PM 2026-08-03：「大量留白，
+ * 不够友好」）。而且列一多就要横向滚动，早上扫一眼这一页的人得左右拖。
+ *
+ * 现在一行摆 4 张卡，页面多宽就用多宽，窄屏自动掉成 1 列。
+ */
+function BucketBlock({
   clientId,
   bucket,
   onOpen,
@@ -336,36 +345,39 @@ function BucketColumn({
   const folded = bucket.total - shown.length
 
   return (
-    <div className="lg:w-[260px] lg:flex-none">
-      <div className="mb-2 rounded-lg bg-white px-2.5 py-2 lg:bg-transparent lg:px-1 lg:py-0">
-        <div className="flex items-baseline justify-between gap-2">
-          <span className="text-[14px] font-black tracking-wide text-me-charcoal/70">
-            {bucket.label}
-          </span>
-          <span
-            className={`text-lg font-black ${
-              HOT.has(bucket.segment) && bucket.total > 0 ? 'text-[#C2453A]' : 'text-me-charcoal/70'
-            }`}
-          >
-            {bucket.total}
-          </span>
-        </div>
-        <p className="mt-0.5 text-[12px] leading-snug text-me-charcoal/45">{bucket.howTo}</p>
+    <div>
+      {/* 标题行：批次名 + 人数 + 怎么做，一行说完，不占一整块 */}
+      <div className="mb-2 flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+        <span className="text-[15px] font-black tracking-wide text-me-charcoal">
+          {bucket.label}
+        </span>
+        <span
+          className={`text-[19px] font-black leading-none ${
+            HOT.has(bucket.segment) && bucket.total > 0 ? 'text-[#C2453A]' : 'text-me-charcoal/60'
+          }`}
+        >
+          {bucket.total}
+        </span>
+        <p className="text-[13px] leading-snug text-me-charcoal/50">{bucket.howTo}</p>
       </div>
 
       {bucket.batch === 'send_email' && (
         <BatchEmail clientId={clientId} bucket={bucket} onLogged={onLogged} />
       )}
 
-      {shown.map((r) => (
-        <Card
-          key={r.contactId}
-          row={r}
-          onOpen={() => onOpen(r)}
-          onTogglePin={onTogglePin}
-          onAcceptStage={onAcceptStage}
-        />
-      ))}
+      {shown.length > 0 && (
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {shown.map((r) => (
+            <Card
+              key={r.contactId}
+              row={r}
+              onOpen={() => onOpen(r)}
+              onTogglePin={onTogglePin}
+              onAcceptStage={onAcceptStage}
+            />
+          ))}
+        </div>
+      )}
 
       {bucket.total === 0 && (
         <p className="rounded-xl border border-dashed border-me-charcoal/10 py-4 text-center text-[13px] text-me-charcoal/30">
@@ -377,7 +389,7 @@ function BucketColumn({
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="w-full rounded-xl border border-dashed border-me-charcoal/20 py-2.5 text-[13px] font-bold text-me-charcoal/55 hover:border-me-ochre/50 hover:text-me-charcoal"
+          className="mt-2 w-full rounded-xl border border-dashed border-me-charcoal/20 py-2.5 text-[13px] font-bold text-me-charcoal/55 hover:border-me-ochre/50 hover:text-me-charcoal"
         >
           还有 {folded} 人 —— 展开
         </button>
@@ -385,7 +397,7 @@ function BucketColumn({
 
       {expanded && (
         <>
-          {/* 后端每列最多发 300 个。展开后仍然差的那些要照实说，
+          {/* 后端每批最多发 300 个。展开后仍然差的那些要照实说，
               否则「展开」看起来像是给全了。 */}
           {bucket.truncated && (
             <p className="py-1 text-center text-[12px] text-me-charcoal/40">
@@ -454,9 +466,11 @@ function LayerSection({
       )}
 
       {open && (
-        <div className="flex flex-col gap-3 lg:flex-row lg:overflow-x-auto lg:pb-2">
+        // 批次竖着堆，每个占满整行 —— 原来是并排的窄列 + 横向滚动，
+        // 宽屏上右边空一大片，窄屏上要左右拖，两头都不讨好。
+        <div className="flex flex-col gap-5">
           {buckets.map((b) => (
-            <BucketColumn
+            <BucketBlock
               key={b.segment}
               clientId={clientId}
               bucket={b}
