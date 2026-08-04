@@ -77,8 +77,39 @@ describe('judgeJob', () => {
     expect(h.state).toBe('blind')
   })
 
-  it('从来没跑过 → never_ran（factory-order-scheduler 当时就是这个）', () => {
+  it('从来没跑过 → never_ran（没登记加入时间时按老规矩报）', () => {
     expect(judgeJob({ ...base, lastRunAt: null }, NOW).state).toBe('never_ran')
+  })
+
+  it('🔴 刚加进来、还没轮到第一次排班 → 算健康，不许报「从没跑过」', () => {
+    // 2026-08-03 实测踩到：prescription-weekly 当天建好、下周二才第一次跑；
+    // job-boards-weekly 上周一跑过但那时代码还没写运行记录。两个都健康，
+    // 却都会被报成「从没跑过，多半是密钥没接上」——
+    // 而那句诊断当晚就被证伪了：三个「从没跑过」里有两个密钥早就接着。
+    // 误报成了常态，真出事那天也会被当噪音划掉。
+    const h = judgeJob(
+      { ...base, lastRunAt: null, registeredAt: new Date(NOW.getTime() - 3 * 3_600_000) },
+      NOW,
+    )
+    expect(h.state).toBe('ok')
+  })
+
+  it('🔴 加进来够久了还是没跑过 → 该报就报，别把保护变成掩盖', () => {
+    const h = judgeJob(
+      { ...base, lastRunAt: null, registeredAt: new Date(NOW.getTime() - 60 * 86_400_000) },
+      NOW,
+    )
+    expect(h.state).toBe('never_ran')
+  })
+
+  it('报「从没跑过」时要给出排查顺序，不能只甩一句猜测', () => {
+    const h = judgeJob({ ...base, lastRunAt: null }, NOW)
+    if (h.state === 'never_ran') {
+      // 三种真实原因都要提到：服务不在/暂停、跑了但失败、成功但没记录
+      expect(h.detail).toContain('暂停')
+      expect(h.detail).toContain('失败')
+      expect(h.detail).toContain('startCronRun')
+    }
   })
 
   it('超过宽限期 → overdue，并说清楚差多久', () => {

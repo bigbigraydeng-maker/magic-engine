@@ -1,6 +1,6 @@
 // 单讲工作台 API — 讲课式内容的脚本审改 / 制作方式 / 录像直传 / 重做 / 开始做片。
 // GET   详情(结构化脚本 + 制作方式 + 做片任务状态 + 客户 VI 色)
-// PATCH { action: save_script | set_method | recording_uploaded | recording_link | section_clip | redo_section | regen_script | start_render }
+// PATCH { action: save_script | save_captions | publish_facebook | set_method | recording_uploaded | recording_link | section_clip | redo_section | regen_script | start_render }
 // POST  { fileName } → 录像签名直传 URL(大文件不走 API body，直传存储)
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -17,12 +17,15 @@ import {
 import { looksLikeVideoResponse, normalizeRecordingLink } from '@/lib/factory/recording-link'
 import {
   loadLecturePost,
+  saveCaptions,
   saveLectureScript,
   setLectureProduction,
+  setPublishRequest,
   setSectionClip,
   type LectureMethod,
 } from '@/lib/factory/lecture-post'
 import { enqueueRenderJob } from '@/lib/factory/render-queue'
+import { loadLecturePrefs, recordRedoReason, saveLecturePrefs } from '@/lib/factory/lecture-learning'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120 // redo_section / regen_script 要等 Claude
@@ -77,6 +80,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
         },
         lecture: loaded.lecture,
         production: loaded.production,
+        captions: loaded.captions ?? [],
+        published: loaded.published ?? [],
+        publishRequest: loaded.publishRequest ?? null,
         renderJob: await latestJob(params.postId),
         viColors,
       },
@@ -125,6 +131,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       link?: string
       index?: number
       clear?: boolean
+      captions?: string[]
+      redoReason?: string
       instruction?: string
     }
     const loaded = await loadLecturePost(params.id, params.postId)
@@ -194,6 +202,43 @@ export async function PATCH(req: NextRequest, { params }: Params) {
           recordingUrl: norm.url,
         })
         return NextResponse.json({ ok: true, recordingUrl: norm.url })
+      }
+
+      case 'publish_facebook': {
+        // 只登记请求,真发交给后台 cron —— 发布要等 Facebook 拉几十 MB 视频,
+        // 塞在网页请求里会被网关掐断(真实事故:PM 点了拿到 HTTP 502)。
+        if (!loaded.post.source_video_url) {
+          return NextResponse.json({ error: '还没有成片 — 先做完片再发' }, { status: 400 })
+        }
+        if (loaded.publishRequest?.status === 'pending' || loaded.publishRequest?.status === 'sending') {
+          return NextResponse.json({ error: '已经在发了，等几分钟看结果' }, { status: 409 })
+        }
+        await setPublishRequest({
+          clientId: params.id,
+          postId: params.postId,
+          request: { platform: 'facebook', status: 'pending', requestedAt: new Date().toISOString() },
+        })
+        return NextResponse.json({ ok: true, queued: true })
+      }
+
+      case 'save_captions': {
+        // 客户校准字幕:只收文字，时间沿用(改时间容易和口型对不上)
+        if (!Array.isArray(body.captions)) {
+          return NextResponse.json({ error: '没收到字幕内容' }, { status: 400 })
+        }
+        try {
+          const { saved } = await saveCaptions({
+            clientId: params.id,
+            postId: params.postId,
+            texts: body.captions,
+          })
+          return NextResponse.json({ ok: true, saved })
+        } catch (e) {
+          return NextResponse.json(
+            { error: e instanceof Error ? e.message : '字幕没保存成功，刷新页面再试一次' },
+            { status: 400 },
+          )
+        }
       }
 
       case 'section_clip': {
@@ -290,7 +335,18 @@ export async function PATCH(req: NextRequest, { params }: Params) {
           .eq('client_id', params.id)
           .eq('id', params.postId)
         const render = await enqueueRenderJob({ clientId: params.id, contentPostId: params.postId })
-        return NextResponse.json({ ok: true, render })
+
+        // 记一次打回原因(客户可不填)。同一个原因反复出现 = 系统该改的地方，不是客户该忍的
+        let suggestRule = false
+        if (body.redoReason?.trim()) {
+          try {
+            const prefs = await loadLecturePrefs(params.id)
+            const res = recordRedoReason(prefs.redoReasons, body.redoReason, new Date().toISOString())
+            await saveLecturePrefs(params.id, { redoReasons: res.reasons })
+            suggestRule = res.suggestRule
+          } catch { /* 记不上不影响重做 */ }
+        }
+        return NextResponse.json({ ok: true, render, suggestRule })
       }
 
       default:

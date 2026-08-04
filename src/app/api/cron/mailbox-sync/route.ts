@@ -4,6 +4,7 @@ import { syncMailbox, type MailboxTarget } from '@/lib/microsoft/mail-ingest'
 import { MICROSOFT_MAIL_PROVIDER } from '@/lib/microsoft/mail-oauth'
 import { CONNECTION_STATUS } from '@/lib/platform-oauth/vocabulary'
 import { startCronRun } from '@/lib/cron/run-logger'
+import { readDomainRules } from '@/lib/crm/contact-kind'
 
 /**
  * GET /api/cron/mailbox-sync
@@ -62,9 +63,11 @@ export async function GET(req: NextRequest) {
   }
   const clientIds = Array.from(new Set(connections.map((c) => c.client_id)))
 
+  // leads_config 一起取回来：里面有设置页填的「客户自己的邮件域名」（关联公司），
+  // 官网域名和收信域名都覆盖不到它 —— `pa@chinatravel.co.nz` 就是这么变成客人的。
   const { data: clients, error } = await supabaseAdmin
     .from('clients')
-    .select('id, name, domain')
+    .select('id, name, domain, leads_config')
     .in('id', clientIds)
 
   if (error) {
@@ -73,10 +76,14 @@ export async function GET(req: NextRequest) {
   }
 
   const byClient = new Map(
-    ((clients ?? []) as { id: string; name: string | null; domain: string | null }[]).map((c) => [
-      c.id,
-      c,
-    ]),
+    (
+      (clients ?? []) as {
+        id: string
+        name: string | null
+        domain: string | null
+        leads_config: unknown
+      }[]
+    ).map((c) => [c.id, c]),
   )
 
   const targets: MailboxTarget[] = connections
@@ -88,6 +95,7 @@ export async function GET(req: NextRequest) {
       domain: byClient.get(c.client_id)?.domain ?? null,
       connectionId: c.id,
       mailbox: c.account_id,
+      ownDomains: readDomainRules(byClient.get(c.client_id)?.leads_config).own,
     }))
 
   const results = []

@@ -45,6 +45,7 @@ import { UploadLinkPanel } from './_components/UploadLinkPanel'
 import { FactoryConfigPanel } from './_components/FactoryConfigPanel'
 import { CommentAutoReplyPanel } from './_components/CommentAutoReplyPanel'
 import { LeadsConfigPanel } from './_components/LeadsConfigPanel'
+import { DomainRulesPanel } from './_components/DomainRulesPanel'
 import { PipelineStagesPanel } from './_components/PipelineStagesPanel'
 import { CommentAuditList } from './_components/CommentAuditList'
 import {
@@ -163,6 +164,9 @@ function TabBody({ tab, clientId }: { tab: SettingsTab; clientId: string }) {
         <>
           <SettingsSection first icon="🪜" title="客人跟进步骤">
             <PipelineStagesPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🤝" title="谁是自己人 / 谁是同行（按邮箱域名认）">
+            <DomainRulesPanel clientId={clientId} />
           </SettingsSection>
           <SettingsSection icon="📧" title="邮件反应同步（谁打开了 / 谁点了链接）">
             <LeadsConfigPanel clientId={clientId} />

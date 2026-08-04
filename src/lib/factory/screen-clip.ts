@@ -155,6 +155,19 @@ export async function detectActiveRegion(params: {
   dir: string
 }): Promise<CropBox | null> {
   const { videoFile, frameW, frameH, durationSec, aspect, dir } = params
+
+  // 手机竖屏录制(高宽比 > 1.9)：内容基本都在屏幕上半部，中下部常是大片空白。
+  // 按「哪里在变」裁会框到空白、还切边(真实事故:Ads Manager 手机录屏裁出一片黑)。
+  // 直接从状态栏下方往下取一整条，宽度铺满 —— 手机 UI 是顶部对齐的，这样最稳。
+  if (frameH / frameW > 1.9) {
+    const bandH = Math.min(Math.round(frameW / aspect), frameH)
+    const statusBar = Math.round(frameH * 0.045)
+    return fitBoxToAspect(
+      { x: 0, y: statusBar, w: frameW, h: bandH },
+      frameW, frameH, aspect,
+    )
+  }
+
   const shots = 6
   for (let i = 0; i < shots; i++) {
     const t = (durationSec * (i + 0.5)) / shots

@@ -25,6 +25,8 @@ import { PersonDrawer, type DrawerRow } from './_components/PersonDrawer'
 // 2026-08-03 就是抄的那份走散了：lib 里删掉了一个段，页面这份还留着，
 // 两边对不上，tsc 才把它顶出来 —— 而它本可以一直静静地错下去。
 import type { Segment } from '@/lib/crm/segments'
+import { CONTACT_KIND_LABEL, type ContactKind } from '@/lib/crm/contact-kind'
+import { countTrade, filterBucketByKind, type KindView } from '@/lib/crm/kind-filter'
 
 interface Row {
   contactId: string
@@ -51,6 +53,8 @@ interface Row {
   openedDaysAgo?: number | null
   /** 被推迟到什么时候。今天名单上的人恒为 null —— 推迟的人已经被挡在外面。 */
   snoozeUntil?: string | null
+  /** 终端客户还是同行。自己人根本不会出现在这一页（后端就丢掉了）。 */
+  kind?: ContactKind
 }
 
 interface OffRow {
@@ -66,6 +70,7 @@ interface OffRow {
   lastNote: string | null
   /** 被推迟到什么时候 —— 有值就能一键提前叫回来。 */
   snoozeUntil?: string | null
+  kind?: ContactKind
 }
 
 type Layer = 'waiting' | 'acted' | 'queued'
@@ -154,16 +159,6 @@ const OFF_GROUP_LABEL: Record<OffRow['group'], string> = {
 
 /** 客人正在等我们 / 购买窗口到了 —— 列头数字标红催一下。 */
 const HOT: ReadonlySet<Segment> = new Set<Segment>(['replied', 'callback_due', 'clicked_link'])
-
-/** 「等了 3 天」。同一列里等得最久的排最前，卡片上要说出来。 */
-function waitedText(iso: string | null): string | null {
-  if (!iso) return null
-  const ms = Date.now() - new Date(iso).getTime()
-  const days = Math.floor(ms / 86_400_000)
-  if (days >= 1) return `等了 ${days} 天`
-  const hours = Math.floor(ms / 3_600_000)
-  return hours >= 1 ? `等了 ${hours} 小时` : '刚刚'
-}
 
 /** 「约的是：今天 14:00（已经过了 3 小时）」—— 打之前一定要看见。 */
 function dueText(iso: string): string {
@@ -273,7 +268,6 @@ function Card({
   onAcceptStage: (row: Row) => void
   onLogged: (msg: string, reload?: boolean) => void
 }) {
-  const waited = waitedText(row.lastTouchAt)
   // 今天已经跟过的整张卡变浅 —— 销售扫一眼就知道还剩哪些没动，
   // 不用靠脑子记。鼠标移上去恢复，因为还是要能点进去看。
   const done = row.doneToday === true
@@ -302,6 +296,13 @@ function Card({
         <div className="flex items-baseline gap-1.5">
           {done && <span className="shrink-0 text-[13px] text-me-ochre" title="今天已经跟过了">✓</span>}
           <span className="truncate text-[16px] font-black text-me-charcoal">{row.name}</span>
+          {/* 同行标记。**放在名字旁边、不放在最底下** —— 销售拿起电话之前
+              必须先知道对面是同行还是散客，那决定他开口第一句话说什么。 */}
+          {row.kind && row.kind !== 'retail' && (
+            <span className="shrink-0 rounded-full bg-me-charcoal/8 px-1.5 py-0.5 text-[11px] font-bold text-me-charcoal/55">
+              {CONTACT_KIND_LABEL[row.kind]}
+            </span>
+          )}
         </div>
         <p className="mt-1 line-clamp-2 text-[14px] leading-snug text-me-charcoal/65">{row.reason}</p>
 
@@ -311,8 +312,11 @@ function Card({
           </p>
         )}
 
-        <div className="mt-2 flex items-center justify-between gap-2">
-          {waited && <span className="text-[13px] text-me-charcoal/45">{waited}</span>}
+        <div className="mt-1.5 flex items-center justify-between gap-2">
+          {/* 原因里已经说了「等了多久」，这里不再用另一个单位重复一遍 ——
+              「进线 835 小时还没人联系 / 等了 34 天」同一件事说两遍，
+              单位还不一致，读的人要先做换算才能确认它们说的是同一件事。 */}
+          <span />
           {row.stageLabel && (
             <span className="truncate rounded-full bg-me-ivory px-2 py-0.5 text-[12px] font-bold text-me-charcoal/60">
               {row.stageLabel}
@@ -1080,6 +1084,16 @@ export default function CrmTodayPage() {
   const [toast, setToast] = useState<string | null>(null)
   const [localDone, setLocalDone] = useState(0)
   const [q, setQ] = useState('')
+  /**
+   * 只看终端客户 / 只看同行 / 全部。
+   *
+   * PM 2026-08-04：「今天该联系谁主要还是终端客户」。所以**默认只看终端客户** ——
+   * CTS 的名单里同行占了相当一部分（House of Travel 四个门店、TravelManagers、
+   * Orbit…），混在一起时销售会用「您考虑得怎么样了」去问一个每周订十次位的同行。
+   *
+   * 但绝不把同行藏掉：他们是真业务，只是跟进方式不同。切一下就全在。
+   */
+  const [kindView, setKindView] = useState<KindView>('retail')
   /** 点开的那个人（看板卡片 / 搜索结果 / 名单外的人 都用同一个抽屉）。 */
   const [picked, setPicked] = useState<DrawerRow | null>(null)
 
@@ -1164,7 +1178,37 @@ export default function CrmTodayPage() {
     }
   }
 
-  const buckets = data?.buckets ?? []
+  // 待认领的 Facebook 对话数 —— 认不出是谁的消息不会进名单，
+  // 不在这里提一句，这批人（CTS 142 段）就静静烂在后台没人知道。
+  const [unclaimed, setUnclaimed] = useState(0)
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/messenger/unclaimed`, {
+          credentials: 'include',
+        })
+        if (!res.ok) return
+        const json = await res.json()
+        setUnclaimed(json.total ?? 0)
+      } catch {
+        // 拿不到就不显示这个入口，不影响主名单
+      }
+    })()
+  }, [clientId])
+
+  /**
+   * 同行不参与分批和排序，只在这里被筛掉 —— 判据跟散客完全一样。
+   *
+   * 筛选逻辑在 lib/crm/kind-filter，**不写在这里**：它决定的不是显示什么，
+   * 是谁会收到那封群发邮件。第一版就在这里错过一次（只筛了人、没筛群发地址），
+   * 那种错误必须被单测钉住，而页面组件测不了。
+   */
+  const keepKind = (k: ContactKind | undefined) =>
+    kindView === 'all' || (k ?? 'retail') === kindView
+
+  const rawBuckets = data?.buckets ?? []
+  const tradeCount = countTrade(rawBuckets, data?.offList ?? [])
+  const buckets = rawBuckets.map((b) => filterBucketByKind(b, kindView))
   const doneToday = (data?.doneToday ?? 0) + localDone
 
   // 搜全部人：看板各列 + 不在名单上的，合起来就是这个客户的所有人。
@@ -1208,6 +1252,19 @@ export default function CrmTodayPage() {
           </div>
           <CrmTabs clientId={clientId} active="today" />
         </div>
+
+        {unclaimed > 0 && (
+          <Link
+            href={`/dashboard/clients/${clientId}/crm/unclaimed`}
+            className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-me-ochre/35 bg-me-ochre/8 px-4 py-2.5 transition hover:bg-me-ochre/15"
+          >
+            <span className="text-[13px] leading-snug text-me-charcoal/75">
+              还有 <strong className="font-black text-me-ochre">{unclaimed}</strong> 条 Facebook 消息认不出是谁，
+              没进下面的名单
+            </span>
+            <span className="flex-none text-[12px] font-black text-me-ochre">去认领 →</span>
+          </Link>
+        )}
       </header>
 
       {toast && (
@@ -1236,6 +1293,30 @@ export default function CrmTodayPage() {
               className="min-w-[240px] flex-1 rounded-xl border border-me-charcoal/15 bg-white px-4 py-2 text-sm focus:border-me-charcoal focus:outline-none"
             />
             <NewContact clientId={clientId} onDone={() => afterWrite('✓ 存进来了')} />
+            {/* 终端客户 / 同行。只有这个客户真的有同行时才显示 —— 一个永远是
+                「0 同行」的切换器只是噪音。 */}
+            {tradeCount > 0 && (
+              <div className="flex overflow-hidden rounded-xl border border-me-charcoal/15 bg-white">
+                {([
+                  { k: 'retail' as const, label: '终端客户' },
+                  { k: 'trade' as const, label: `同行 ${tradeCount}` },
+                  { k: 'all' as const, label: '全部' },
+                ]).map((o) => (
+                  <button
+                    key={o.k}
+                    type="button"
+                    onClick={() => setKindView(o.k)}
+                    className={`px-3 py-2 text-sm font-bold transition ${
+                      kindView === o.k
+                        ? 'bg-me-charcoal text-white'
+                        : 'text-me-charcoal/55 hover:bg-me-ivory'
+                    }`}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            )}
             {doneToday > 0 && (
               <span className="rounded-full bg-me-ochre/12 px-3 py-1.5 text-xs font-black text-me-ochre">
                 今天已联系 {doneToday} 人 👍
@@ -1291,7 +1372,7 @@ export default function CrmTodayPage() {
 
               <OffList
                 clientId={clientId}
-                rows={data.offList ?? []}
+                rows={(data.offList ?? []).filter((r) => keepKind(r.kind))}
                 onOpen={(r) => setPicked(r)}
                 onLogged={afterWrite}
               />

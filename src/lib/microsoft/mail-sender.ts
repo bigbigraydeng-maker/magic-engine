@@ -23,9 +23,22 @@
 /**
  * 一看就不是活人的发件人。
  *
- * 用「开头匹配」而不是「包含」：`newsletter@` 要挡，但一个真名叫
- * `Bonnie.Newsletter@…` 的人不该被误伤（真实姓名里出现这些词的概率很低，
- * 但开头匹配几乎不可能误伤）。
+ * ## 2026-08-04：从「开头匹配」改成「按段匹配」
+ *
+ * 原先只判开头，理由是怕误伤一个真名叫 `Bonnie.Newsletter@…` 的人。
+ * 那个顾虑是想出来的，**而漏判是真发生的**：`testflight_no_reply@email.apple.com`
+ * 顺利变成了 CTS 名单上的一张卡，显示名是「Meta Platform,lnc. via TestFlight」——
+ * 客户当场反馈「contact 里怎么还有这些」。
+ *
+ * `前缀_noreply@` / `前缀-noreply@` 是系统邮件最常见的形式之一
+ * （`testflight_no_reply`、`github-noreply`、`notifications-noreply`），
+ * 只判开头等于把这一整类放过去。
+ *
+ * 现在把 `.` `_` `-` `+` 统一成一个分隔符，然后判**整段相等 / 开头 / 结尾**。
+ * 代价是 `Bonnie.Newsletter@` 这种真会被误伤 —— 但这一组词
+ * （noreply / bounce / invoice / accounts…）没有一个是真实的姓氏，
+ * 而文件开头那条原则本来就写着：**宁可漏判一个真客人，也不要让一个
+ * noreply 变成一张卡** —— 前者是少一次便利，后者是让整页不可信。
  */
 const ROBOT_LOCAL_PARTS = [
   'noreply',
@@ -50,6 +63,28 @@ const ROBOT_LOCAL_PARTS = [
   'accounts',
   'noreply-',
 ]
+
+/**
+ * 本地部分看起来是不是机器。
+ *
+ * 把 `.` `_` `-` `+` 统一成 `-`（词表里的 `no-reply` / `no_reply` 也一起归一），
+ * 然后判：**整个相等 / 以它开头 / 以它结尾**，边界都必须落在分隔符上。
+ *
+ *   testflight_no_reply → testflight-no-reply → 以 `-no-reply` 结尾  ✅ 挡住
+ *   noreply123          → noreply123          → 以 `noreply` 开头    ✅ 挡住
+ *   accounts            → accounts            → 整个相等            ✅ 挡住
+ *   andrew.bounceback   → andrew-bounceback   → `bounce` 不成段      ✅ 放行
+ *
+ * 最后一条是这个写法的重点：**不能退化成「包含」** —— 那会把
+ * `bounceback` `accountant` `invoiced` 里的真人一并误伤。
+ */
+function looksRobotic(local: string): boolean {
+  const norm = local.replace(/[._+-]+/g, '-')
+  return ROBOT_LOCAL_PARTS.some((raw) => {
+    const w = raw.replace(/[._+-]+/g, '-')
+    return norm === w || norm.startsWith(`${w}-`) || norm.endsWith(`-${w}`) || norm.startsWith(w)
+  })
+}
 
 /** 邮件地址拆成 本地部分 / 域名。拆不开就是脏数据。 */
 function split(address: string): { local: string; domain: string } | null {
@@ -91,7 +126,7 @@ export function classifySender(input: ClassifySenderInput): SenderVerdict {
   const own = (input.ownDomains ?? []).map((d) => d.trim().toLowerCase()).filter(Boolean)
   if (own.includes(domain)) return { kind: 'skip', why: '公司内部邮箱' }
 
-  if (ROBOT_LOCAL_PARTS.some((p) => local.startsWith(p))) {
+  if (looksRobotic(local)) {
     return { kind: 'skip', why: '系统发件人（noreply 一类）' }
   }
 
