@@ -40,6 +40,7 @@ export type ManualItemKind =
   | 'diagnostic_findings'
   | 'prescription_updated'
   | 'leads_metric_untrusted'
+  | 'factory_worker_idle'
 
 export interface ManualItem {
   kind: ManualItemKind
@@ -76,6 +77,7 @@ import { gscPropertyUrl, gscInspectSteps, verifyActionLink } from './action-link
 import { checkCronHealth } from '@/lib/cron/health'
 import { fetchGa4KeyEventBreakdown } from '@/lib/ga4/client'
 import { judgeLeadsSanity } from '@/lib/strategy/leads-sanity'
+import { judgeWorkerPresence } from '@/lib/factory/worker-presence'
 import { auditGoalBaselines } from '@/lib/strategy/baseline-audit'
 
 export function daysAgo(iso: string | null, now: Date): number | null {
@@ -137,6 +139,10 @@ export async function loadManualItems(
   await pushCronHealthItems(supabase, items, now)
   // 目标数字口径对不上 —— 错的方向感比没数字更危险(2026-08-03 差点据此给出反向建议)
   await pushBaselineItems(supabase, items)
+  // 出片工单排队但没人干活 —— 装配跑在一台 Mac 上，不开机就没人做，而队列里看不出来
+  await pushFactoryWorkerItems(supabase, items, now).catch((e) =>
+    console.warn('[manual-items] 出片工人在岗检查失败（不阻塞其他待办）:', e),
+  )
   if (clients.size === 0) return items
 
   const ids = Array.from(clients.keys())
@@ -483,6 +489,53 @@ async function pushLeadsSanityItems(
       href: `https://app.magicengine.com.au/dashboard/clients/${g.client_id}/goal/${g.id}`,
     })
   }
+}
+
+/**
+ * 出片工单在排队但没人干活 → 下发。
+ *
+ * 装配环节跑在一台 Mac 上，没人开机时工单就静静躺在队列里 ——
+ * 队列里有活、看板上没动静，而「这周怎么没出片」要等人想起来问才发现。
+ * 只在**真的有活在等**时才报（没活时工人没开机完全正常，报了就是噪音）。
+ */
+async function pushFactoryWorkerItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  now: Date,
+): Promise<void> {
+  // 真实列名（已核实）：status / created_at / heartbeat_at
+  const { data: queuedRows } = await supabase
+    .from('content_work_orders')
+    .select('id, created_at')
+    .eq('status', 'queued')
+    .order('created_at', { ascending: true })
+  const queued = (queuedRows ?? []) as Array<{ id: string; created_at: string }>
+  if (queued.length === 0) return
+
+  const { data: hbRows } = await supabase
+    .from('content_work_orders')
+    .select('heartbeat_at')
+    .not('heartbeat_at', 'is', null)
+    .order('heartbeat_at', { ascending: false })
+    .limit(1)
+  const lastHb = (hbRows ?? [])[0] as { heartbeat_at: string } | undefined
+
+  const hours = (iso: string) => (now.getTime() - Date.parse(iso)) / 3_600_000
+  const verdict = judgeWorkerPresence({
+    queued: queued.length,
+    oldestQueuedHours: hours(queued[0].created_at),
+    lastHeartbeatHours: lastHb ? hours(lastHb.heartbeat_at) : null,
+  })
+  if (verdict.idle) return
+
+  items.push({
+    kind: 'factory_worker_idle',
+    client_id: 'infra',
+    client_name: 'Magic Engine 后台',
+    what: `${verdict.humanReason} —— 出片这一步跑在你那台 Mac 上，它不开机就没人做`,
+    how: '在那台 Mac 上跑 `node scripts/factory-worker/worker.mjs --loop`，它会自己把排队的活领走。如果你希望这事不再依赖某一台机器，回我一句，我们单独排',
+    href: 'https://app.magicengine.com.au/dashboard/factory',
+  })
 }
 
 /** 拉一个客户的关键事件构成并判定。任何一步拿不到就返回 null（不误报）。 */
