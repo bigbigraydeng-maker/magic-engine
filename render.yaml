@@ -68,6 +68,12 @@ services:
         sync: false
       - key: GITHUB_WEBHOOK_SECRET
         sync: false
+      # TikTok 自动发布(Content Posting API)。在 developers.tiktok.com 建应用后拿到。
+      # ⚠️ 应用没过 TikTok 审核之前,发出去的片子只有作者自己可见——这是 TikTok 的规定。
+      - key: TIKTOK_CLIENT_KEY
+        sync: false
+      - key: TIKTOK_CLIENT_SECRET
+        sync: false
       - key: PUBLER_API_KEY
         sync: false
       - key: PUBLER_WORKSPACE_ID

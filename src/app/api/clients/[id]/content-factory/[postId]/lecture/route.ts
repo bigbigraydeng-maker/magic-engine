@@ -216,6 +216,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         // live=true 才真的公开;不填一律只发草稿。这个决定跟着这一条片走,
         // 不再靠一个「一开全客户都真发」的全局开关。
         const live = body.live === true
+        // 发到哪个平台。不填按 Facebook 走(老调用方一行不用改)。
+        const platform = body.platform === 'tiktok' ? 'tiktok' as const : 'facebook' as const
         if (live && !loaded.captions?.length) {
           return NextResponse.json(
             { error: '还没校准过字幕 — 公开发之前先看一遍第⑥步' },
@@ -225,9 +227,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         await setPublishRequest({
           clientId: params.id,
           postId: params.postId,
-          request: { platform: 'facebook', status: 'pending', live, requestedAt: new Date().toISOString() },
+          request: { platform, status: 'pending', live, requestedAt: new Date().toISOString() },
         })
-        return NextResponse.json({ ok: true, queued: true, live })
+        return NextResponse.json({ ok: true, queued: true, live, platform })
       }
 
       case 'save_captions': {

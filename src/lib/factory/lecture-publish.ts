@@ -6,6 +6,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { facebookReelAdapter, promoteReelToPublished } from './publish/facebook-reel-adapter'
+import { checkTikTokStatus, humanTikTokError, publishToTikTok } from './publish/tiktok-adapter'
 import type { PublishTarget } from './types'
 import { loadLecturePost, recordPublished, setPublishRequest } from './lecture-post'
 
@@ -33,6 +34,67 @@ export interface PublishOutcome {
   alreadyPublished?: boolean
 }
 
+/**
+ * 发到 TikTok。跟 Facebook 那条路两点不同,都不是小事:
+ * ① 应用没过 TikTok 审核之前,发出去的片子**只有作者自己看得见** —— 这是 TikTok 定的规矩。
+ *    所以「发成功」不等于「别人看得到」,回执里必须如实记成非公开,不能骗自己也不能骗客户。
+ * ② TikTok 收下文件 ≠ 已经发出去,后面还要转码。不查状态就当成功,就会出现
+ *    「系统说发了、TikTok 上找不到」这种最难查的情况。所以这里等它一小会儿。
+ */
+async function publishLectureToTikTok(params: {
+  clientId: string
+  postId: string
+  videoUrl: string
+  caption: string
+  live: boolean
+}): Promise<PublishOutcome> {
+  const { clientId, postId, videoUrl, caption, live } = params
+  try {
+    const result = await publishToTikTok({
+      clientId, videoUrl, caption,
+      privacy: live ? 'PUBLIC_TO_EVERYONE' : 'SELF_ONLY',
+    })
+
+    // 等转码。最多约 2 分钟——还没好也不算失败(TikTok 会自己发完),
+    // 只是回执上要说清「还在处理」,而不是假装已经在线上了。
+    let status = await checkTikTokStatus(clientId, result.publishId)
+    for (let i = 0; i < 12 && status.status === 'processing'; i++) {
+      await new Promise((r) => setTimeout(r, 10_000))
+      status = await checkTikTokStatus(clientId, result.publishId)
+    }
+    if (status.status === 'failed') {
+      throw new Error(`TikTok 处理失败: ${status.detail ?? ''}`)
+    }
+
+    await recordPublished({
+      clientId, postId,
+      entry: {
+        platform: 'tiktok',
+        pageId: '',
+        videoId: result.publishId,
+        draft: result.privacy !== 'PUBLIC_TO_EVERYONE',
+        at: new Date().toISOString(),
+      },
+    })
+    await setPublishRequest({ clientId, postId, request: null })
+    return { postId, ok: true, draft: result.privacy !== 'PUBLIC_TO_EVERYONE' }
+  } catch (e) {
+    const raw = e instanceof Error ? e.message : String(e)
+    console.error(`[lecture-publish/tiktok] ${postId} 失败:`, raw)
+    await setPublishRequest({
+      clientId, postId,
+      request: {
+        platform: 'tiktok',
+        status: 'failed',
+        requestedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        error: humanTikTokError(raw),
+      },
+    }).catch(() => { /* 回写失败也别把异常吞了 */ })
+    return { postId, ok: false, error: humanTikTokError(raw) }
+  }
+}
+
 /** 处理一条待发布请求。成功失败都回写，绝不静默。 */
 export async function runOneLecturePublish(params: {
   clientId: string
@@ -51,7 +113,8 @@ export async function runOneLecturePublish(params: {
   // 真实事故(2026-08-04):同一条讲课片被连发三次——上游读到过期状态就会反复触发,
   // 而这里当时对「已经发过了」毫无察觉,来一次发一次。
   // 注意只在「已经是要的那个状态」时才拦:草稿→公开是一次正当的状态推进,不能被当成重发挡掉。
-  const already = loaded.published.find((p) => p.platform === 'facebook')
+  const platform = loaded.publishRequest?.platform ?? 'facebook'
+  const already = loaded.published.find((p) => p.platform === platform)
   if (already && already.draft === draft) {
     await setPublishRequest({ clientId, postId, request: null })
     return { postId, ok: true, draft: already.draft, alreadyPublished: true }
@@ -59,11 +122,21 @@ export async function runOneLecturePublish(params: {
 
   await setPublishRequest({
     clientId, postId,
-    request: { platform: 'facebook', status: 'sending', requestedAt: loaded.publishRequest?.requestedAt ?? new Date().toISOString(), startedAt: new Date().toISOString() },
+    request: { platform, status: 'sending', requestedAt: loaded.publishRequest?.requestedAt ?? new Date().toISOString(), startedAt: new Date().toISOString() },
   })
 
   try {
     if (!loaded.post.source_video_url) throw new Error('还没有成片')
+
+    if (platform === 'tiktok') {
+      return await publishLectureToTikTok({
+        clientId, postId,
+        videoUrl: loaded.post.source_video_url,
+        caption: loaded.lecture.ctaVariants?.fbTiktok ?? loaded.lecture.title,
+        live,
+      })
+    }
+
     const { data: client } = await supabaseAdmin
       .from('clients').select('factory_config').eq('id', clientId).single()
     const stored = (client?.factory_config as { publish_target?: PublishTarget } | null)?.publish_target
@@ -142,7 +215,7 @@ export async function runOneLecturePublish(params: {
     await setPublishRequest({
       clientId, postId,
       request: {
-        platform: 'facebook',
+        platform,
         status: 'failed',
         requestedAt: loaded.publishRequest?.requestedAt ?? new Date().toISOString(),
         finishedAt: new Date().toISOString(),

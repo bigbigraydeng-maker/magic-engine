@@ -51,7 +51,7 @@ export interface LectureProduction {
 
 /** 发到平台之后的回执(存下来才知道发过没、发到哪、什么时候)。 */
 export interface LecturePublished {
-  platform: 'facebook'
+  platform: 'facebook' | 'tiktok'
   pageId: string
   videoId: string
   permalink?: string
@@ -65,7 +65,7 @@ export interface LecturePublished {
  * 所以点按钮只登记请求，真正发布交给后台 cron，成功失败都回写这里。
  */
 export interface LecturePublishRequest {
-  platform: 'facebook'
+  platform: 'facebook' | 'tiktok'
   status: 'pending' | 'sending' | 'done' | 'failed'
   /**
    * true = 这一条要真的公开发出去;不填 = 只发草稿(主页后台可见、公众看不到)。
