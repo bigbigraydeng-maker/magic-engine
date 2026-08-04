@@ -49,6 +49,31 @@ export interface LectureProduction {
   extra_head_trim_sec?: number
 }
 
+/** 发到平台之后的回执(存下来才知道发过没、发到哪、什么时候)。 */
+export interface LecturePublished {
+  platform: 'facebook'
+  pageId: string
+  videoId: string
+  permalink?: string
+  draft: boolean
+  at: string
+}
+
+/**
+ * 发布请求 —— 发布是慢活(要等 Facebook 把几十 MB 视频拉过去)，塞在网页请求里会超时
+ * (真实事故:PM 点了按钮拿到 HTTP 502,那是被网关掐断,不是我们的报错)。
+ * 所以点按钮只登记请求，真正发布交给后台 cron，成功失败都回写这里。
+ */
+export interface LecturePublishRequest {
+  platform: 'facebook'
+  status: 'pending' | 'sending' | 'done' | 'failed'
+  requestedAt: string
+  startedAt?: string
+  finishedAt?: string
+  /** 失败原因(人话)。留痕才查得到——以前失败只在屏幕上闪一下。 */
+  error?: string
+}
+
 interface LectureSnapshot {
   lecture?: LectureScript
   lecture_prev?: LectureScript
@@ -56,6 +81,10 @@ interface LectureSnapshot {
   lecture_transcript?: LectureTranscript
   /** 客户校准过的字幕(有就以它为准，时间不动、只改字)。 */
   lecture_captions?: CaptionLine[]
+  /** 发布回执:发过哪个平台、草稿还是公开。 */
+  lecture_published?: LecturePublished[]
+  /** 待发布/发布中的请求(后台 cron 处理)。 */
+  lecture_publish_request?: LecturePublishRequest | null
   lesson_no?: number
   [k: string]: unknown
 }
@@ -93,6 +122,8 @@ export async function loadLecturePost(
   production: LectureProduction | null
   transcript: LectureTranscript | null
   captions: CaptionLine[] | null
+  published: LecturePublished[]
+  publishRequest: LecturePublishRequest | null
   lessonNo: number | null
 } | null> {
   const { data, error } = await supabaseAdmin
@@ -114,6 +145,8 @@ export async function loadLecturePost(
     production: snap?.lecture_production ?? null,
     transcript: snap?.lecture_transcript ?? null,
     captions: snap?.lecture_captions ?? null,
+    published: snap?.lecture_published ?? [],
+    publishRequest: snap?.lecture_publish_request ?? null,
     lessonNo: typeof snap?.lesson_no === 'number' ? snap.lesson_no : null,
   }
 }
@@ -161,6 +194,27 @@ export async function saveCaptions(params: {
   } catch { /* 学不到不影响客户保存字幕 */ }
 
   return { saved: merged.length }
+}
+
+/** 登记/更新发布请求(点按钮只登记，真发交给后台)。 */
+export async function setPublishRequest(params: {
+  clientId: string
+  postId: string
+  request: LecturePublishRequest | null
+}): Promise<void> {
+  await patchSnapshot(params.clientId, params.postId, { lecture_publish_request: params.request })
+}
+
+/** 记一条发布回执(追加，不覆盖——同一条片可能先发草稿再发公开)。 */
+export async function recordPublished(params: {
+  clientId: string
+  postId: string
+  entry: LecturePublished
+}): Promise<void> {
+  const { clientId, postId, entry } = params
+  const current = await loadLecturePost(clientId, postId)
+  const list = [...(current?.published ?? []), entry].slice(-10)
+  await patchSnapshot(clientId, postId, { lecture_published: list })
 }
 
 /** 合并写 snapshot 的某几个键(读-改-写；单讲编辑是单人低频操作，不做乐观锁)。 */

@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest'
 import {
   contactKindOf,
   normaliseDomain,
+  parseDomainList,
   readDomainRules,
   EMPTY_RULES,
   type DomainRules,
@@ -131,5 +132,105 @@ describe('读配置：一个填错的配置不该让整页打不开', () => {
     expect(readDomainRules({ own_email_domains: ['', '   ', 'ctstours.co.nz'] }).own).toEqual([
       'ctstours.co.nz',
     ])
+  })
+})
+
+/**
+ * 设置页那两个框是给人填的，人会填公司名、半截地址、一句话。
+ *
+ * **这种东西必须当场退回去。** 默默存下来的话它永远不会命中任何邮箱，
+ * 而填的人以为自己已经把同行标好了 —— 那批人继续躺在散客名单里，
+ * 谁也不知道为什么。这一类「看起来生效了其实没有」的错最难查。
+ */
+describe('设置页填进来的东西', () => {
+  it('一行一个', () => {
+    expect(parseDomainList('hot.co.nz\ntravelmanagers.co.nz').domains).toEqual([
+      'hot.co.nz',
+      'travelmanagers.co.nz',
+    ])
+  })
+
+  it.each([
+    ['逗号', 'hot.co.nz, travelmanagers.co.nz'],
+    ['中文逗号', 'hot.co.nz，travelmanagers.co.nz'],
+    ['分号', 'hot.co.nz; travelmanagers.co.nz'],
+    ['空格', 'hot.co.nz travelmanagers.co.nz'],
+  ])('%s 也能分开 —— 从表格里粘过来是什么样都能收', (_label, text) => {
+    expect(parseDomainList(text).domains).toHaveLength(2)
+  })
+
+  it.each([
+    ['整个邮箱粘进来', 'pieta@hot.co.nz', 'hot.co.nz'],
+    ['带网址前缀', 'https://www.hot.co.nz/about', 'hot.co.nz'],
+    ['大写和空格', '  HOT.CO.NZ  ', 'hot.co.nz'],
+    ['末尾带标点', 'hot.co.nz,', 'hot.co.nz'],
+  ])('%s → %s', (_label, raw, want) => {
+    expect(parseDomainList(raw).domains).toEqual([want])
+  })
+
+  it('重复的只留一个', () => {
+    expect(parseDomainList('hot.co.nz\nHOT.co.nz\nmail@hot.co.nz').domains).toEqual(['hot.co.nz'])
+  })
+
+  it.each([
+    'House of Travel',
+    'travelmanagers',
+    '同行',
+    '.co.nz',
+    '192.168.1.1',
+  ])('认不出是域名的原样退回：%s', (bad) => {
+    const r = parseDomainList(bad)
+    expect(r.domains).toEqual([])
+    expect(r.rejected).toEqual([bad])
+  })
+
+  /** 几条填错不该让已经填对的十条一起丢掉。 */
+  it('好的存下来，坏的单独说 —— 不因为几条错就整次拒绝', () => {
+    const r = parseDomainList('hot.co.nz\nHouse of Travel\ntravelmanagers.co.nz')
+    expect(r.domains).toEqual(['hot.co.nz', 'travelmanagers.co.nz'])
+    expect(r.rejected).toEqual(['House of Travel'])
+  })
+
+  it('数组也收（存下来的清单直接回填）', () => {
+    expect(parseDomainList(['hot.co.nz', 'orbit.co.nz']).domains).toHaveLength(2)
+  })
+
+  it.each([null, undefined, 42, {}])('不是文字也不是清单（%s）→ 空，不炸', (junk) => {
+    expect(parseDomainList(junk).domains).toEqual([])
+  })
+
+  it('子域名本身也是合法的一条 —— 有人只想标一个分部', () => {
+    expect(parseDomainList('auckland.hot.co.nz').domains).toEqual(['auckland.hot.co.nz'])
+  })
+})
+
+/**
+ * 空格拆不拆，取决于拆开之后是不是全都成立。
+ *
+ * 无条件拆 → `House of Travel` 变成「House、of、Travel 不是域名」，
+ * 填的人看了只会更懵、还以为系统坏了。完全不拆 → 一行粘两个域名就全废。
+ */
+describe('一行里带空格', () => {
+  it('全是域名 → 拆开', () => {
+    expect(parseDomainList('hot.co.nz travelmanagers.co.nz').domains).toEqual([
+      'hot.co.nz',
+      'travelmanagers.co.nz',
+    ])
+  })
+
+  it('公司名 → 整条退回，不拆成三段', () => {
+    expect(parseDomainList('House of Travel').rejected).toEqual(['House of Travel'])
+  })
+
+  it('半是半不是 → 整条退回（拆一半更让人糊涂）', () => {
+    const r = parseDomainList('House of Travel hot.co.nz')
+    expect(r.rejected).toEqual(['House of Travel hot.co.nz'])
+    expect(r.domains).toEqual([])
+  })
+
+  it('这一行填错不影响别的行', () => {
+    const r = parseDomainList('hot.co.nz\nHouse of Travel\norbit.co.nz')
+    expect(r.domains).toEqual(['hot.co.nz', 'orbit.co.nz'])
+    expect(r.rejected).toEqual(['House of Travel'])
   })
 })

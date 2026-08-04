@@ -80,6 +80,8 @@ async function resolveTarget(clientId: string): Promise<PublishTarget | null> {
       .maybeSingle()
     if (mb?.brand_name) t.expect_brand = mb.brand_name as string
   }
+  // adapter 靠 client_id 去取「连接 Meta」存下的页 token(配置里不存这个字段,这里补)
+  t.client_id = clientId
   return t
 }
 

@@ -1,6 +1,6 @@
 // 单讲工作台 API — 讲课式内容的脚本审改 / 制作方式 / 录像直传 / 重做 / 开始做片。
 // GET   详情(结构化脚本 + 制作方式 + 做片任务状态 + 客户 VI 色)
-// PATCH { action: save_script | save_captions | set_method | recording_uploaded | recording_link | section_clip | redo_section | regen_script | start_render }
+// PATCH { action: save_script | save_captions | publish_facebook | set_method | recording_uploaded | recording_link | section_clip | redo_section | regen_script | start_render }
 // POST  { fileName } → 录像签名直传 URL(大文件不走 API body，直传存储)
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -20,6 +20,7 @@ import {
   saveCaptions,
   saveLectureScript,
   setLectureProduction,
+  setPublishRequest,
   setSectionClip,
   type LectureMethod,
 } from '@/lib/factory/lecture-post'
@@ -80,6 +81,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
         lecture: loaded.lecture,
         production: loaded.production,
         captions: loaded.captions ?? [],
+        published: loaded.published ?? [],
+        publishRequest: loaded.publishRequest ?? null,
         renderJob: await latestJob(params.postId),
         viColors,
       },
@@ -199,6 +202,23 @@ export async function PATCH(req: NextRequest, { params }: Params) {
           recordingUrl: norm.url,
         })
         return NextResponse.json({ ok: true, recordingUrl: norm.url })
+      }
+
+      case 'publish_facebook': {
+        // 只登记请求,真发交给后台 cron —— 发布要等 Facebook 拉几十 MB 视频,
+        // 塞在网页请求里会被网关掐断(真实事故:PM 点了拿到 HTTP 502)。
+        if (!loaded.post.source_video_url) {
+          return NextResponse.json({ error: '还没有成片 — 先做完片再发' }, { status: 400 })
+        }
+        if (loaded.publishRequest?.status === 'pending' || loaded.publishRequest?.status === 'sending') {
+          return NextResponse.json({ error: '已经在发了，等几分钟看结果' }, { status: 409 })
+        }
+        await setPublishRequest({
+          clientId: params.id,
+          postId: params.postId,
+          request: { platform: 'facebook', status: 'pending', requestedAt: new Date().toISOString() },
+        })
+        return NextResponse.json({ ok: true, queued: true })
       }
 
       case 'save_captions': {

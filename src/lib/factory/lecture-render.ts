@@ -23,7 +23,7 @@ import { getActiveBrief } from '@/lib/content/brief-injector'
 import { loadLecturePost, saveTranscriptAndCaptions } from './lecture-post'
 import { detectActiveRegion, planClipFit } from './screen-clip'
 import { normalizeTerms } from './term-glossary'
-import { bandTopForFace, detectFaceY } from './face-frame'
+import { bandTopForFace, resolveFaceY, resolveZoom } from './face-frame'
 import { applyClientGlossary, loadLecturePrefs, saveLecturePrefs } from './lecture-learning'
 import type { LectureScript } from './lecture-script'
 import {
@@ -358,29 +358,26 @@ async function prepPersonTrack(params: {
   seek: number
   duration: number
   dir: string
-  clientId: string
-  faceYPrior: number | null
+  faceY: number
+  zoom: number
 }): Promise<string> {
-  const { src, seek, duration, dir, clientId, faceYPrior } = params
+  const { src, seek, duration, dir, faceY, zoom } = params
   const out = join(dir, 'person.mp4')
 
   // 取景跟着脸走:原来固定取正中间，客户在车里录、脸偏上时成片里脸就掉到很低(PM 反馈)。
   // 先按宽度缩放，再在缩放后的高度上按人脸位置取一条。
+  // 先放大再截:不放大的话客户在自己镜头里偏小、车顶/背景占一大片,脸没分量。
   const size = await probeSize(src)
-  const scaledH = Math.round((size.h * W) / size.w)          // 按宽度缩放后的高度
   const bandH = H - SLIDE_H
-  let cropY = Math.max(0, Math.round((scaledH - bandH) / 2)) // 兜底:居中
-  if (scaledH > bandH) {
-    const faceY = await detectFaceY({ videoFile: src, durationSec: duration, dir, prior: faceYPrior })
-    cropY = bandTopForFace(faceY, scaledH, bandH)
-    // 学回去:这个客户惯常的取景位置,下次认不出脸时按他的习惯兜底
-    await saveLecturePrefs(clientId, { faceY }).catch(() => { /* 学习失败不影响出片 */ })
-  }
+  const scaledW = Math.max(W, Math.round((W * zoom) / 2) * 2)
+  const scaledH = Math.round((size.h * scaledW) / size.w / 2) * 2
+  const cropX = Math.max(0, Math.round((scaledW - W) / 2 / 2) * 2)
+  const cropY = scaledH > bandH ? bandTopForFace(faceY, scaledH, bandH) : 0
 
   await exec('ffmpeg', [
     '-y', '-loglevel', 'error',
     '-ss', seek.toFixed(3), '-t', duration.toFixed(3), '-i', src,
-    '-vf', `scale=${W}:-2,crop=${W}:${bandH}:0:${cropY},fps=30`,
+    '-vf', `scale=${scaledW}:-2,crop=${W}:${bandH}:${cropX}:${cropY},fps=30`,
     '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p',
     '-c:a', 'aac', '-ar', '44100', '-ac', '1',
     out,
@@ -467,7 +464,7 @@ async function composeLecture(params: {
   const prefs = await loadLecturePrefs(clientId).catch(() => null)
   const personTrack = await prepPersonTrack({
     src: personFile, seek: personStart, duration: totalDur, dir,
-    clientId, faceYPrior: prefs?.faceY ?? null,
+    faceY: resolveFaceY(prefs?.faceY), zoom: resolveZoom(prefs?.faceZoom),
   })
   await heartbeat(jobId, 'assembling')
 

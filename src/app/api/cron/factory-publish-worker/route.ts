@@ -6,6 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { runPublishWorker } from '@/lib/factory/publish/publish-worker'
+import { runLecturePublishSweep, type PublishOutcome } from '@/lib/factory/lecture-publish'
 import { startCronRun } from '@/lib/cron/run-logger'
 
 export const dynamic = 'force-dynamic'
@@ -26,8 +27,23 @@ export async function GET(req: NextRequest) {
       draft: !live,
       workerId: `cron-${process.env.RENDER_INSTANCE_ID ?? 'local'}`,
     })
-    await cronRun.finish({ summary: { live, ...outcome } })
-    return NextResponse.json({ ok: true, live, ...outcome })
+
+    // 讲课片发布搭在这条 cron 上跑,不另开一条。
+    // 原因(2026-08-04 实测):新建的 Render cron 服务不会自动拿到 CRON_SECRET(sync:false),
+    // 建了也只会每次 401 静默失败——排进队列的片等了 14 分钟没人管,cron_run_logs 里一条记录都没有。
+    // 这条 worker 的密钥早就配好、每 10 分钟稳定在跑,挂上去就不需要任何人去后台点配置。
+    // 一轮只发 1 条:跟工单发布共用同一个 300 秒预算。
+    // 单独 try:讲课片这条线出问题不该把工单发布的运行记录也带成「失败」——
+    // 那会让人以为工单没发出去,查错查到另一条线上去。
+    let lecture: PublishOutcome[] | { error: string }
+    try {
+      lecture = (await runLecturePublishSweep({ max: 1 })).handled
+    } catch (e) {
+      lecture = { error: e instanceof Error ? e.message : String(e) }
+    }
+
+    await cronRun.finish({ summary: { live, ...outcome, lecture } })
+    return NextResponse.json({ ok: true, live, ...outcome, lecture })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     await cronRun.finish({ error: msg })

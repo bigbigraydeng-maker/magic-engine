@@ -6,6 +6,7 @@
 // draft=true → DRAFT(不公开,首测验格式);false → PUBLISHED(真发,不可逆)。
 // 幂等对账(魏征 B9 防"发了没记上"重发):caption 埋零宽 wo 标记,findExisting 扫最近 Reel 描述比对。
 
+import { getStoredPageToken } from '@/lib/meta/token-manager'
 import type { PublishAdapter, PublishTarget, PublishedRef } from '../types'
 
 const GRAPH = 'https://graph.facebook.com/v25.0'
@@ -27,26 +28,52 @@ function normBrand(s: string): string {
   return s.toLowerCase().replace(/pty\.?\s*ltd\.?/g, '').replace(/[^a-z0-9]/g, '')
 }
 
-// 系统用户 token(env META_SYSTEM_USER_TOKEN,永不过期)→ 换该页的 page token + 页名。
+// 取该页的 page token + 页名。
+//
+// 两条来源,顺序有讲究(2026-08-04 修正):
+// ① 库里存的页 token —— 客户在设置页点过「连接 Meta」,那是有角色的人亲自授的权。
+// ② env 里的全局 system user token —— 老路,只在「那个身份恰好在这个页上有角色」时才成立。
+//    Magic Lab Class 发讲课片失败就是撞在这:全局 token 换不出 MagicLab Academy 的页 token。
+// 先库后 env:已经按老路配好的客户(CTS)一行不用改,新客户点一下按钮就通。
+//
 // 页名同时做防误发第三重断言(魏征 B9):页名必须 ~ 该客户品牌,否则绝不发(防把 A 客户片发到 B 页)。
 async function resolveToken(target: PublishTarget): Promise<{ accessToken: string; pageId: string; pageName: string }> {
-  const sysToken = process.env.META_SYSTEM_USER_TOKEN
-  if (!sysToken) throw new Error('META_SYSTEM_USER_TOKEN 未配置')
   if (!target.page_id) throw new Error('publish_target.page_id 缺失')
-  const res = await fetch(`${GRAPH}/${target.page_id}?fields=access_token,name&access_token=${sysToken}`)
-  const j = (await res.json().catch(() => ({}))) as Record<string, unknown>
-  if (!res.ok || typeof j['access_token'] !== 'string') {
-    throw new Error(`取页 token 失败 ${res.status}: ${JSON.stringify(j)}`)
+
+  let accessToken: string | null = null
+  if (target.client_id) {
+    accessToken = await getStoredPageToken(target.client_id, target.page_id).catch(() => null)
   }
-  const pageName = typeof j['name'] === 'string' ? (j['name'] as string) : ''
-  if (target.expect_brand && pageName) {
-    const a = normBrand(pageName)
-    const b = normBrand(target.expect_brand)
-    if (a && b && !a.includes(b) && !b.includes(a)) {
-      throw new Error(`页名(${pageName})与客户品牌(${target.expect_brand})不符 —— 防误发拦截`)
+
+  if (!accessToken) {
+    const sysToken = process.env.META_SYSTEM_USER_TOKEN
+    if (!sysToken) throw new Error('这个主页还没连过 Meta,env META_SYSTEM_USER_TOKEN 也没配')
+    const res = await fetch(`${GRAPH}/${target.page_id}?fields=access_token&access_token=${sysToken}`)
+    const j = (await res.json().catch(() => ({}))) as Record<string, unknown>
+    if (!res.ok || typeof j['access_token'] !== 'string') {
+      throw new Error(`取页 token 失败 ${res.status}: ${JSON.stringify(j)}`)
     }
+    accessToken = j['access_token'] as string
   }
-  return { accessToken: j['access_token'] as string, pageId: target.page_id, pageName }
+
+  // 页名单独取:库里存的就是页 token,拿它问自己是谁最直接,两条来源共用同一段校验。
+  const nameRes = await fetch(`${GRAPH}/${target.page_id}?fields=name&access_token=${accessToken}`)
+  const nameJson = (await nameRes.json().catch(() => ({}))) as Record<string, unknown>
+  if (!nameRes.ok) throw new Error(`取页名失败 ${nameRes.status}: ${JSON.stringify(nameJson)}`)
+  const pageName = typeof nameJson['name'] === 'string' ? (nameJson['name'] as string) : ''
+
+  assertBrandMatches(pageName, target.expect_brand)
+  return { accessToken, pageId: target.page_id, pageName }
+}
+
+/** 防误发:页名对不上客户品牌就绝不发(单独抽出来是为了能直接测)。 */
+export function assertBrandMatches(pageName: string, expectBrand?: string): void {
+  if (!expectBrand || !pageName) return
+  const a = normBrand(pageName)
+  const b = normBrand(expectBrand)
+  if (a && b && !a.includes(b) && !b.includes(a)) {
+    throw new Error(`页名(${pageName})与客户品牌(${expectBrand})不符 —— 防误发拦截`)
+  }
 }
 
 async function graphPost(path: string, params: Record<string, string>): Promise<Record<string, unknown>> {
