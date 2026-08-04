@@ -93,11 +93,16 @@ export function patchStaticHtmlPage(
       return { ok: false, reason: 'Managed content markers are incomplete; refusing to patch body.' }
     }
     if (start !== -1 && end > start) {
-      const before = content.slice(0, start + MANAGED_CONTENT_START.length)
-      const after = content.slice(end)
-      content = `${before}\n${upgrade.htmlBody.trim()}\n${after}`
-      bodyApplied = true
-      if (content !== source) updatedFields.push('content_html')
+      const bodyStart = start + MANAGED_CONTENT_START.length
+      const currentBody = content.slice(bodyStart, end).trim()
+      const nextBody = upgrade.htmlBody.trim()
+      if (currentBody !== nextBody) {
+        const before = content.slice(0, bodyStart)
+        const after = content.slice(end)
+        content = `${before}\n${nextBody}\n${after}`
+        bodyApplied = true
+        updatedFields.push('content_html')
+      }
     }
   }
 
