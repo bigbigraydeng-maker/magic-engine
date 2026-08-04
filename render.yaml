@@ -733,6 +733,21 @@ services:
   #
   # 🔴 安全阀:未设 FACTORY_PUBLISH_LIVE=true 时**只发草稿**(video_state=DRAFT,
   #    不公开),供 PM 验格式。验完 PM 显式 go 才在 Render 设 true 真发客户主页(不可逆)。
+  # 讲课片发布 — 每 5 分钟把「点了发布」的讲课片真正发到平台。
+  # 单独一条的原因:发布要等 Facebook 拉几十 MB 视频(几分钟),塞网页请求里会 502 超时
+  # (真实事故 2026-08-04:PM 点按钮拿到 HTTP 502)。点按钮只登记,这里执行。
+  - type: cron
+    name: lecture-publish
+    env: node
+    schedule: "*/5 * * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/lecture-publish
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # 发布正文在 publish-worker 内另有红线闸(scanPublishCaption),命中即终态不发。
   - type: cron
     name: factory-publish-worker

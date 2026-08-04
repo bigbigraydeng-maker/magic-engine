@@ -47,6 +47,12 @@ interface PublishedRef {
   draft: boolean
   at: string
 }
+interface PublishRequest {
+  platform: 'facebook'
+  status: 'pending' | 'sending' | 'done' | 'failed'
+  requestedAt: string
+  error?: string
+}
 interface Detail {
   post: {
     id: string
@@ -61,6 +67,7 @@ interface Detail {
   production: Production | null
   captions: CaptionLine[]
   published: PublishedRef[]
+  publishRequest: PublishRequest | null
   renderJob: RenderJob | null
   viColors: { primary?: string; secondary?: string; accent?: string } | null
 }
@@ -306,7 +313,7 @@ export default function LectureWorkbenchPage() {
 
   async function publishToFacebook() {
     if (!window.confirm('发到 Facebook 主页？第一次会先发成草稿，你在主页后台能看到、公众看不到。')) return
-    await patch({ action: 'publish_facebook' }, 'fb')
+    await patch({ action: 'publish_facebook' }, 'fb', '已排队 ✅ 后台在发，几分钟后这里会显示结果')
   }
 
   async function applyRecordingLink() {
@@ -814,15 +821,28 @@ export default function LectureWorkbenchPage() {
               ⬇ 下载成片
             </a>
             <button
-              disabled={busy !== null}
+              disabled={busy !== null || data.publishRequest?.status === 'pending' || data.publishRequest?.status === 'sending'}
               onClick={publishToFacebook}
               className="text-sm font-semibold text-me-charcoal border border-me-stone rounded-xl px-4 py-2.5 hover:border-me-ochre disabled:opacity-40"
             >
-              {busy === 'fb' ? '发送中…' : '发到 Facebook'}
+              {busy === 'fb' ? '排队中…'
+                : data.publishRequest?.status === 'pending' ? '已排队，等后台发'
+                : data.publishRequest?.status === 'sending' ? '正在发…'
+                : '发到 Facebook'}
             </button>
             <span className="text-[11px] text-me-taupe">小红书 / 抖音没有官方接口，下载后手动发</span>
           </div>
 
+          {data.publishRequest?.status === 'failed' && data.publishRequest.error && (
+            <div className="text-xs text-status-rej bg-white border border-me-stone rounded-xl px-3 py-2 mb-3">
+              上次发布没成功：{data.publishRequest.error}
+            </div>
+          )}
+          {(data.publishRequest?.status === 'pending' || data.publishRequest?.status === 'sending') && (
+            <div className="text-xs text-me-ochre bg-white border border-me-stone rounded-xl px-3 py-2 mb-3">
+              <span className="animate-pulse">⏳</span> 后台正在发到 Facebook，几分钟后刷新看结果
+            </div>
+          )}
           {(data.published ?? []).length > 0 && (
             <div className="text-[11px] text-me-taupe mb-3">
               {data.published.map((p, i) => (
