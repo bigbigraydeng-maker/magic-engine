@@ -39,10 +39,7 @@ export type ManualItemKind =
   | 'goal_baseline_mismatch'
   | 'diagnostic_findings'
   | 'prescription_updated'
-
-/** Render 蓝图页 —— 从这儿进去挑服务、看运行历史 */
-const RENDER_BLUEPRINT_URL =
-  'https://dashboard.render.com/blueprint/exs-d8ejt0og4nts73a1ce50'
+  | 'leads_metric_untrusted'
 
 export interface ManualItem {
   kind: ManualItemKind
@@ -77,6 +74,8 @@ export function gscInspectUrl(siteUrl: string, pageUrl: string): string {
 
 import { gscPropertyUrl, gscInspectSteps, verifyActionLink } from './action-link'
 import { checkCronHealth } from '@/lib/cron/health'
+import { fetchGa4KeyEventBreakdown } from '@/lib/ga4/client'
+import { judgeLeadsSanity } from '@/lib/strategy/leads-sanity'
 import { auditGoalBaselines } from '@/lib/strategy/baseline-audit'
 
 export function daysAgo(iso: string | null, now: Date): number | null {
@@ -149,6 +148,11 @@ export async function loadManualItems(
 
   // 本周方案已自动落地 —— 只通知，不要求 PM 操作（PM 2026-08-04 拍板）
   await pushPrescriptionItems(supabase, items, now, nameOf)
+
+  // 客资数值不值得信 —— 值不值得信只有查了统计后台才知道，别让人自己去翻
+  await pushLeadsSanityItems(supabase, items, nameOf).catch((e) =>
+    console.warn('[manual-items] 客资口径检查失败（不阻塞其他待办）:', e),
+  )
 
   // GSC property identifiers (needed for the inspect deep link).
   const { data: connectors } = await supabase
@@ -426,6 +430,76 @@ async function pushBaselineItems(supabase: SupabaseClient, items: ManualItem[]):
       href: `https://app.magicengine.com.au/dashboard/clients/${s.clientId}/goal/${s.goalId}`,
     })
   }
+}
+
+
+/**
+ * 「客资数」这个目标指标值不值得信 —— 不值得就说清为什么。
+ *
+ * 2026-08-04 实测起因：CTS 目标《Best of China 团报名》目标值 30、当前 344，
+ * 仪表盘上 1147% 达成。查下来是网站那个「产生线索」事件触发条件太宽 ——
+ * 28 天响 341 次，而真正开始填表只有 86 次，连关于我们、签证指南这种
+ * 没有表单的页面都在响。
+ *
+ * 这个数只有客户自己能修（在他们的统计后台改触发条件），所以必须下发；
+ * 但下发的话要说清「这个数为什么不能信」，而不是让人自己去后台翻。
+ */
+async function pushLeadsSanityItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  nameOf: (id: string) => string,
+): Promise<void> {
+  const { data: goals } = await supabase
+    .from('goals')
+    .select('id, client_id, title, current_value')
+    .eq('status', 'active')
+    .eq('primary_metric_key', 'leads_count')
+  const rows = (goals ?? []) as Array<{
+    id: string
+    client_id: string
+    title: string
+    current_value: number | null
+  }>
+  if (rows.length === 0) return
+
+  // 一个客户查一次就够 —— 同客户多个客资目标共用同一份统计数据
+  const checked = new Map<string, Awaited<ReturnType<typeof checkClientLeads>>>()
+  for (const g of rows) {
+    if (!checked.has(g.client_id)) {
+      checked.set(g.client_id, await checkClientLeads(supabase, g.client_id))
+    }
+    const verdict = checked.get(g.client_id)
+    if (!verdict || verdict.trustworthy) continue
+
+    items.push({
+      kind: 'leads_metric_untrusted',
+      client_id: g.client_id,
+      client_name: nameOf(g.client_id),
+      what:
+        `目标「${g.title}」现在显示 ${g.current_value ?? '—'}，但这个数不能信 —— ${verdict.humanReason}`,
+      how:
+        '这个要在客户的网站统计后台改（把「产生线索」的触发条件收窄到真的提交了表单），' +
+        '我改不了。你确认一下该找谁改；在那之前别拿这个数判断这个目标做得好不好',
+      href: `https://app.magicengine.com.au/dashboard/clients/${g.client_id}/goal/${g.id}`,
+    })
+  }
+}
+
+/** 拉一个客户的关键事件构成并判定。任何一步拿不到就返回 null（不误报）。 */
+async function checkClientLeads(supabase: SupabaseClient, clientId: string) {
+  const { data: conn } = await supabase
+    .from('client_connectors')
+    .select('config')
+    .eq('client_id', clientId)
+    .eq('anchor', 'ga4')
+    .eq('status', 'connected')
+    .maybeSingle<{ config: { property_id?: string } | null }>()
+  const propertyId = conn?.config?.property_id
+  if (!propertyId) return null
+
+  const breakdown = await fetchGa4KeyEventBreakdown(propertyId, clientId).catch(() => null)
+  if (!breakdown) return null
+  return judgeLeadsSanity(breakdown)
 }
 
 
