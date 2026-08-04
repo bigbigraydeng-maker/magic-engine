@@ -99,8 +99,11 @@ function makeStepsJson(fixType: string, title: string): Record<string, unknown> 
 
 /** Build a minimal supabase mock for the execution generator.
  *
- *  Key: tracks `execution_items` call count across separate from() calls
- *  so idempotency (call 1 = check, call 2 = fetch) is correctly simulated.
+ *  Models the `execution_items` TABLE rather than the generator's call order:
+ *  a `head: true` select answers the count probe, a plain select answers the
+ *  read-back. The previous version keyed off "first from() call vs second",
+ *  which silently stopped matching the generator once its idempotency check
+ *  moved from "is there any row?" to "are there as many rows as expected?".
  */
 function buildSupabaseMock(opts: {
   existingItems?: unknown[]
@@ -140,46 +143,36 @@ function buildSupabaseMock(opts: {
 
   const finalInserted = insertedItems ?? defaultInserted
 
-  // Track how many times from('execution_items') is called across the whole test
-  let eiCallCount = 0
+  // Shared across every from('execution_items') so a test can prove that no
+  // write happened, not merely that from() was called.
+  const insert = vi.fn().mockReturnValue({
+    select: vi.fn().mockResolvedValue({ data: finalInserted, error: null }),
+  })
 
   return {
+    /** Test handle — not part of the SupabaseClient surface. */
+    _insert: insert,
     from: vi.fn().mockImplementation((table: string) => {
       if (table === 'execution_items') {
-        eiCallCount++
-        const thisCall = eiCallCount
-
-        if (existingItems.length > 0) {
-          // Idempotency path:
-          //   call 1 → idempotency check (select id + limit)
-          //   call 2 → fetch all existing (select * + order)
-          if (thisCall === 1) {
-            return {
-              select: vi.fn().mockReturnThis(),
-              eq:     vi.fn().mockReturnThis(),
-              limit:  vi.fn().mockResolvedValue({ data: existingItems, error: null }),
-            }
-          }
-          return {
-            select: vi.fn().mockReturnThis(),
-            eq:     vi.fn().mockReturnThis(),
-            order:  vi.fn().mockResolvedValue({ data: finalInserted, error: null }),
-          }
-        }
-
-        // Normal path:
-        //   call 1 → idempotency check returns empty
-        //   call 2 → insert
-        if (thisCall === 1) {
-          return {
-            select: vi.fn().mockReturnThis(),
-            eq:     vi.fn().mockReturnThis(),
-            limit:  vi.fn().mockResolvedValue({ data: [], error: null }),
-          }
-        }
         return {
-          insert: vi.fn().mockReturnValue({
-            select: vi.fn().mockResolvedValue({ data: finalInserted, error: null }),
+          insert,
+          select: vi.fn().mockImplementation((_cols: string, selectOpts?: { head?: boolean }) => {
+            // `.select('id', { count: 'exact', head: true })` — the count probe
+            if (selectOpts?.head) {
+              return {
+                eq: vi.fn().mockResolvedValue({
+                  count: existingItems.length,
+                  data:  null,
+                  error: null,
+                }),
+              }
+            }
+            // `.select('*').eq(...).order(...)` — read back what's already there
+            return {
+              eq: vi.fn().mockReturnValue({
+                order: vi.fn().mockResolvedValue({ data: existingItems, error: null }),
+              }),
+            }
           }),
         }
       }
@@ -275,20 +268,31 @@ describe('generateExecutionItems()', () => {
   // 4. Idempotent: same prescription_id → no duplicate generation
   // =========================================================================
   it('returns existing items without re-inserting when items already exist', async () => {
-    const alreadyExisting = [{ id: 'ei-existing' }]
+    // The prescription has 3 actions, so a complete set is 3 rows.
+    const alreadyExisting = [
+      { id: 'ei-existing-1', phase: 1, sort_order: 0 },
+      { id: 'ei-existing-2', phase: 2, sort_order: 100 },
+      { id: 'ei-existing-3', phase: 3, sort_order: 200 },
+    ]
     const supabase = buildSupabaseMock({ existingItems: alreadyExisting })
 
     const items = await generateExecutionItems(supabase as never, PRESCRIPTION_ID, CLIENT_ID)
 
-    // Should return existing items, not re-insert
-    expect(items.length).toBeGreaterThan(0)
+    // Returns what was already there…
+    expect(items.map(i => i.id)).toEqual(['ei-existing-1', 'ei-existing-2', 'ei-existing-3'])
+    // …and writes nothing.
+    expect(supabase._insert).not.toHaveBeenCalled()
+  })
 
-    // Verify insert was NOT called (idempotency)
-    const insertCalls = (supabase.from as ReturnType<typeof vi.fn>).mock.calls
-      .filter((c: unknown[]) => c[0] === 'execution_items')
-    // The from('execution_items') is called once for idempotency check and once for SELECT
-    // but insert should not appear
-    expect(insertCalls.length).toBeGreaterThanOrEqual(1)
+  // Regression for 78791451: a stray partial set must NOT count as "already
+  // generated", otherwise the remaining actions are lost with no error.
+  it('re-generates when only some items exist (partial set is not done)', async () => {
+    const supabase = buildSupabaseMock({ existingItems: [{ id: 'ei-stray', phase: 1, sort_order: 0 }] })
+
+    const items = await generateExecutionItems(supabase as never, PRESCRIPTION_ID, CLIENT_ID)
+
+    expect(supabase._insert).toHaveBeenCalledOnce()
+    expect(items.length).toBe(3)
   })
 
   // =========================================================================
