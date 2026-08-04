@@ -82,7 +82,7 @@ async function loadPreviousStatuses(checkedOn: string): Promise<PreviousStreamSt
   }
 
   if (latest.size === 0) return null
-  return [...latest.entries()].map(([streamKey, status]) => ({ streamKey, status }))
+  return Array.from(latest.entries()).map(([streamKey, status]) => ({ streamKey, status }))
 }
 
 async function notify(

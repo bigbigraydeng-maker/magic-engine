@@ -461,7 +461,7 @@ describe('seeded registry matches the calibration table', () => {
     /\n {2}\('([a-z0-9_]+)',\s*'([a-z0-9_]+)',\s*(NULL|'[^']*'),\s*(NULL|'[^']*'),\s*(NULL|'[^']*'),\s*'[^']*',\s*'([a-z_]+)',\s*(\d+)\s*,/g
 
   const seeded = new Map<string, number>()
-  for (const m of sql.matchAll(ROW)) {
+  for (const m of Array.from(sql.matchAll(ROW))) {
     const [, table, , , filterPrefix, , , maxAge] = m
     const prefix = filterPrefix === 'NULL' ? '' : filterPrefix.slice(1, -1)
     seeded.set(prefix ? `${table}:${prefix}` : table, Number(maxAge))

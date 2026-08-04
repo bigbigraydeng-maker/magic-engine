@@ -230,7 +230,7 @@ export function toPillarFreshness(results: FreshnessResult[]): PillarFreshness[]
     else byPillar.set(result.pillar, [result]);
   }
 
-  return [...byPillar.entries()]
+  return Array.from(byPillar.entries())
     .map(([pillar, group]) => {
       const broken = group.filter((r) => r.status !== 'fresh');
       const status: FreshnessStatus = broken.some((r) => r.status === 'never')
@@ -338,7 +338,7 @@ export function decideNotification(
   const ongoing = brokenNow.filter((r) => previousBroken.has(r.streamKey));
 
   const freshKeys = new Set(results.filter((r) => r.status === 'fresh').map((r) => r.streamKey));
-  const recovered = [...previousBroken.keys()].filter((key) => freshKeys.has(key));
+  const recovered = Array.from(previousBroken.keys()).filter((key) => freshKeys.has(key));
 
   const isMonday = now.getUTCDay() === MONDAY;
 
@@ -565,7 +565,7 @@ export function toClientPillars(streams: ClientStreamFreshness[]): ClientPillarF
     else byPillar.set(stream.pillar, [stream]);
   }
 
-  return [...byPillar.entries()].map(([pillar, group]) => {
+  return Array.from(byPillar.entries()).map(([pillar, group]) => {
     const stale = group.filter((s) => s.status === 'stale');
     const fresh = group.filter((s) => s.status === 'fresh');
     const notConnected = group.filter((s) => s.status === 'not_connected');
