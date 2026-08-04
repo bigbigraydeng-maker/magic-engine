@@ -91,9 +91,12 @@ async function runCollection(triggeredBy: 'cron' | 'admin_manual', existingRunId
 
   try {
     // 2. Load all baseline domains
+    // is_active=false 的域名一分钱都不花（migration 20260731100000 起）。
+    // 用停用而不是删除，是因为历史评分要留着 —— 物流那 18 个域名已攒了 690 条。
     const { data: rows, error: loadError } = await supabaseAdmin
       .from('baseline_domains')
       .select('id, industry, sub_industry, domain, keywords')
+      .eq('is_active', true)
       .order('sub_industry')
 
     if (loadError) {
@@ -139,7 +142,13 @@ async function runCollection(triggeredBy: 'cron' | 'admin_manual', existingRunId
 
       try {
         // baseline_domains has no per-row market, so fall back to the deploy default.
-        const result = await collector.collect('baseline-cron', row.domain, row.keywords, [], process.env.SEMRUSH_DB ?? 'au')
+        // skipSerp: this cron keeps only `score` and discards `findings`, and
+        // SERP feeds findings only — it is not in the score formula. Skipping it
+        // drops ~75% of the per-domain cost (10 keywords × depth=100 ≈ US$0.20)
+        // for a byte-identical score. Client diagnostics still get SERP.
+        const result = await collector.collect(
+          'baseline-cron', row.domain, row.keywords, [], process.env.SEMRUSH_DB ?? 'au', { skipSerp: true },
+        )
         const score  = result.score
 
         if (score === null) {
@@ -287,6 +296,38 @@ async function finalizeRun(runId: string, fields: {
     .eq('id', runId)
 }
 
+/** 每周最多跑一次。Render 上的 cron 频率改不了(后台手工建的)，所以在代码层节流。 */
+const MIN_DAYS_BETWEEN_RUNS = 7
+
+/**
+ * 距离上一次「真的跑出结果」够 7 天了吗？
+ *
+ * 手动触发(admin_manual)也算数 —— FDE 刚手动刷过，数据就是新的，
+ * 没理由第二天再花一次钱。
+ *
+ * 读不到状态时**选择不跑**：这是花钱的操作，宁可漏跑一周，
+ * 也不要因为读不到上次时间而每天重复烧钱。
+ */
+async function weeklyThrottleCheck(): Promise<{ skip: boolean; daysSince?: number }> {
+  const { data, error } = await supabaseAdmin
+    .from('baseline_cron_runs')
+    .select('started_at')
+    .in('status', ['completed', 'partial'])
+    .order('started_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[baseline cron] throttle check failed — skipping to avoid repeat spend:', error.message)
+    return { skip: true }
+  }
+  // 从没成功跑过 → 放行
+  if (!data) return { skip: false }
+
+  const daysSince = (Date.now() - new Date((data as { started_at: string }).started_at).getTime()) / 86_400_000
+  return { skip: daysSince < MIN_DAYS_BETWEEN_RUNS, daysSince }
+}
+
 // GET — cron trigger (Bearer auth, fire-and-forget to avoid Cloudflare 524)
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const cronSecret = process.env.CRON_SECRET
@@ -297,24 +338,36 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  // ── Kill switch — PM 2026-07-31「停批量」────────────────────────────────────
-  // 这个 cron 每天跑 61 个域名 × (10 个 SERP depth=100 + Labs + Backlinks)
-  // ≈ US$12/次 × 30 次 = 约 US$360/月，而它产出的 industry_benchmarks 行
-  // 从 2026-05-13 起就没成功写入过（upsert 引用了不存在的 snapshot_date 列，
-  // 错误被吞）。2026-07 更是 1830 次尝试里 1192 次超时，钱照付没结果。
+  // ── 成本闸门 — PM 2026-07-31「每周省到底」──────────────────────────────────
+  // 背景：这个 cron 原本每天跑 61 个域名 ≈ US$12/次 × 30 = 约 US$360/月，
+  // 而它产出的 industry_benchmarks 行从 2026-05-13 起就没成功写入过
+  // （upsert 引用了不存在的 snapshot_date 列，错误被吞，PR #664 才修）。
   //
-  // 默认关闭：Render 上的 cron job 是后台手工建的、不在 render.yaml 里，
-  // 而本仓没有 Render API 凭证，所以在代码层止血是唯一不需要人去点的路径。
-  // 要恢复，在 Render 给 magic-engine 服务加 BASELINE_CRON_ENABLED=true。
+  // 两道闸把它压到约 US$13/月：
+  //   1. skipSerp（见下方 processDomain）—— 砍掉占 75% 成本、却不参与打分的
+  //      SERP 调用。分数一模一样，不是省钱换质量。
+  //   2. 每周节流（本段）—— Render 上那个 cron job 是后台手工建的、不在
+  //      render.yaml 里，本仓也没有 Render API 凭证，改不了它的频率。
+  //      所以让它照常每天敲门，由代码判断「距上次成功跑够不够 7 天」。
+  //      好处是频率跟代码一起走，不依赖任何人去后台点。
   //
-  // 只挡自动触发。下面的 POST（管理页「▶ Run SEO baselines」按钮）不受影响，
-  // FDE 仍可按需手动跑一次。
-  if (process.env.BASELINE_CRON_ENABLED !== 'true') {
-    console.warn('[baseline cron] skipped — BASELINE_CRON_ENABLED is not "true" (paused 2026-07-31)')
+  // 完全停用：设 BASELINE_CRON_ENABLED=false。
+  // 强制立刻跑一次：管理页「▶ Run SEO baselines」按钮（POST），不受本段影响。
+  if (process.env.BASELINE_CRON_ENABLED === 'false') {
+    console.warn('[baseline cron] skipped — BASELINE_CRON_ENABLED=false')
     return NextResponse.json({
-      success: true,
-      skipped: true,
-      message: 'Baseline collection is paused. Set BASELINE_CRON_ENABLED=true to resume.',
+      success: true, skipped: true, reason: 'disabled',
+      message: 'Baseline collection is disabled via BASELINE_CRON_ENABLED=false.',
+    })
+  }
+
+  const throttle = await weeklyThrottleCheck()
+  if (throttle.skip) {
+    console.info(`[baseline cron] skipped — last successful run ${throttle.daysSince?.toFixed(1)}d ago (<${MIN_DAYS_BETWEEN_RUNS}d)`)
+    return NextResponse.json({
+      success: true, skipped: true, reason: 'throttled',
+      days_since_last_run: throttle.daysSince,
+      message: `Runs at most once every ${MIN_DAYS_BETWEEN_RUNS} days.`,
     })
   }
 

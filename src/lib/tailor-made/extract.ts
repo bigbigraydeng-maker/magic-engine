@@ -102,6 +102,23 @@ const SYSTEM_PROMPT = `你是旅行社顾问的行程单助手。把顾问给的
 - 行程正文（days[].body）保持原文语言（通常是英文），不要翻译成中文
 - days[].route 是当天的城市，或跨城时写 "Beijing → Xi'an"
 
+## trip.route —— 最容易搞错的一个字段
+
+trip.route 是**目的地国家里实际停留过夜的城市**，按行程先后顺序、去重。
+
+它不是航段，也不是逐日路线的拼接。一份从新西兰出发的中国行程，
+第 1 天写的是「Wellington to Auckland to Shanghai」——
+Wellington 和 Auckland 是**出发地和中转机场**，绝不能进 trip.route。
+
+  正确：["Beijing", "Xi'an", "Chongqing", "Shanghai"]
+  错误：["Auckland"]、["Wellington","Auckland","Beijing",...]
+
+判断标准：客人在那里住过至少一晚、或安排了游览，才算一站。
+只是转机、只是从那里起飞，不算。
+
+这个字段同时决定封面图和行程单第 2 页的城市线 —— 填成出发地，
+封面就会选错城市。
+
 ## review 怎么写
 
 - label 用中文，是给顾问看的人话，例如「第 9 天的酒店」「每人价格」
@@ -204,6 +221,24 @@ ${message}`
  * 把 patch 合并进当前行程。
  * 对象递归合并，数组整体替换（days / highlights 这类局部合并没有意义且容易错位）。
  */
+/**
+ * 出发地 / 中转地 —— 不算行程的一站。
+ *
+ * CTS 的客人都从新西兰出发，行程第一天必然是「某地 → 奥克兰 → 中国某地」。
+ * 澳洲城市一并列入：跨塔斯曼中转很常见。
+ */
+const ORIGIN_CITIES = [
+  'auckland', 'wellington', 'christchurch', 'queenstown', 'dunedin', 'hamilton',
+  'sydney', 'melbourne', 'brisbane', 'perth', 'adelaide',
+  '奥克兰', '惠灵顿', '基督城', '皇后镇', '悉尼', '墨尔本', '布里斯班',
+]
+
+function isOriginCity(stop: string): boolean {
+  const s = stop.trim().toLowerCase()
+  if (!s) return true
+  return ORIGIN_CITIES.some((c) => s === c || s.includes(c))
+}
+
 export function applyPatch(
   current: TailorMadeItinerary,
   patch: Partial<TailorMadeItinerary>
@@ -221,6 +256,18 @@ export function applyPatch(
   }
 
   const merged = merge(current, patch) as TailorMadeItinerary
+
+  // 兜底：把出发地/中转地从 trip.route 里剔掉。
+  //
+  // prompt 已经写清楚了，但模型仍会偶尔把第 1 天的「Wellington to Auckland
+  // to Shanghai」整段当成路线 —— 实测 CTS-2026-0008 就只识别出 ["Auckland"]，
+  // 连带封面选图也跟着错。route 错了下游全错，值得在代码里再挡一层。
+  if (Array.isArray(merged.trip?.route)) {
+    const cleaned = merged.trip.route.filter((stop) => !isOriginCity(stop))
+    // 全被过滤掉说明模型只给了出发地 —— 与其留一个错的，不如留空，
+    // 让封面走兜底、城市线不显示，也好过印出「Auckland」误导客人。
+    merged.trip.route = cleaned
+  }
 
   // day 编号以数组顺序为准，避免模型给出跳号
   merged.days = (merged.days ?? []).map((d, i) => ({ ...d, day: i + 1 }))

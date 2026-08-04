@@ -45,10 +45,13 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   const allAssetIds = [sb.hook_asset_id, sb.cta_asset_id, ...(sb.middle_asset_ids ?? [])]
     .filter(Boolean) as string[]
 
+  // 恒带 client_id：按 id 直取会让「分镜引用了别家素材 id」这种上游 bug
+  // 直接变成跨客户素材外流。客户实拍绝不跨客户（PM 2026-08-02 拍板）。
   const { data: assets, error: assetsErr } = await supabaseAdmin
     .from('client_assets')
     .select('id, storage_url')
     .in('id', allAssetIds)
+    .eq('client_id', clientId)
 
   if (assetsErr) {
     return NextResponse.json({ success: false, error: assetsErr.message }, { status: 500 })

@@ -94,6 +94,9 @@ export async function GET(req: NextRequest) {
       'id, client_id, message_count, last_message_at, last_message_from, conversation_briefs(source_message_count, regen_count, regen_count_date)',
     )
     .gt('message_count', 0)
+    // 只认私信。这个任务写出来的是「Facebook 私信简报」，喂邮件进去会得到一张
+    // 说错渠道的卡，而销售会照着它去 Messenger 找一个从没在那说过话的人。
+    .eq('channel', 'messenger')
     .order('last_message_at', { ascending: false })
     .limit(500)
 

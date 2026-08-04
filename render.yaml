@@ -110,10 +110,13 @@ services:
   # Picks up pending client_assets, runs GPT-4o-mini Vision, writes scores.
   # Reference: docs/history/CHANGELOG.md (P21.B.3)
   # healthchecks.io: vision-analyzer (1b1cd19b-583a-41ac-baaa-c9415241d5e8)
+  # 2026-08-03 降频 */10 → */30：24h 内 144 次运行全部零产出（client_assets
+  # 无 pending 行，最新素材停在 2026-06-10）。非交互式批处理——客户传完素材就走，
+  # 由 FDE 事后审阅，晚 30 分钟开始分析无感知。审计见 docs/audits/supabase-request-audit.md §8 P0-1
   - type: cron
     name: vision-analyzer
     env: node
-    schedule: "*/10 * * * *"
+    schedule: "*/30 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 120 -X POST -H "Authorization: Bearer $CRON_SECRET" \
@@ -123,7 +126,13 @@ services:
       - key: CRON_SECRET
         sync: false
 
-  # Poll visual generation jobs every 2 minutes
+  # Poll visual generation jobs every 10 minutes
+  #
+  # ⚠️ 2026-08-03 审计：本任务 24h 内 144 次运行同样零产出，但**刻意不降频**。
+  # 它是用户点了「生成视频」之后在等的完成检查（ReelsStudio 的生成按钮会写
+  # reels_drafts.status='video_generating'，另有 3 个接口写 visual_assets
+  # generation_status='generating'），降频 = 让人干等。空跑只说明当下没人在生成，
+  # 不代表可以放慢。别顺手把它跟隔壁三个一起降了。
   # healthchecks.io: poll-visual-jobs (0dd2b641-499f-4f2f-8b73-73085050a5f0)
   - type: cron
     name: poll-visual-jobs
@@ -181,10 +190,13 @@ services:
   # The status route's stale check is reactive (UI-poll driven), so jobs
   # whose UI was closed mid-run would otherwise sit running forever.
   # healthchecks.io: zhangqian-sweeper (071910fe-b9b7-435d-8b72-f141818eb03d)
+  # 2026-08-03 降频 */15 → */30：24h 内 96 次运行全部零产出。纯超时兜底，从不干活。
+  # 只降到 30 分钟而非每小时：超时阈值是 6 分钟，每小时跑会让真卡住的任务在界面上
+  # 「运行中」挂最多 66 分钟，FDE 会误判系统坏了；30 分钟档最坏 36 分钟。
   - type: cron
     name: zhangqian-sweeper
     env: node
-    schedule: "*/15 * * * *"
+    schedule: "*/30 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
@@ -234,10 +246,13 @@ services:
   # if Render restarts mid-run, rows would otherwise sit generating forever.
   # Reference: ROADMAP.md P14.C.1
   # healthchecks.io: blog-stuck-generating-sweeper (180d3e65-1910-4f8d-a778-409571d5fb46)
+  # 2026-08-03 降频 */15 → */30：24h 内 96 次运行全部零产出（blog_posts 无 generating 行）。
+  # 纯超时兜底，从不干活。同 zhangqian-sweeper，只降到 30 分钟：超时阈值 10 分钟，
+  # 每小时跑会让卡住的文章在界面上「生成中」挂最多 70 分钟；30 分钟档最坏 40 分钟。
   - type: cron
     name: blog-stuck-generating-sweeper
     env: node
-    schedule: "*/15 * * * *"
+    schedule: "*/30 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
@@ -469,6 +484,42 @@ services:
   #   Step 2: 诸葛亮 Proactive — reads fresh signals, creates proactive execution tasks
   # Reference: ROADMAP.md § Phase 22.D.3
   # healthchecks.io: anomaly-detector-daily (ff78126a-25e2-4a50-abcb-edbcb1dfaec9)
+  # 深度诊断周更 —— 补上 DAPE 的 A 段(分析)。
+  # 此前深度诊断**没有任何定时任务**:只能人工点按钮或新客户建档时跑一次,
+  # 最近一次 2026-07-20。于是执行段天天在跑,执行的却是两个月前的结论。
+  # 🔴 花钱路径:六维度全量采集 + AI 综合,比规则引擎型的 anomaly-detector 贵一个量级,
+  #    所以周更不日更;且只跑「有域名 + 填了行业的 active 客户」—— 内部账号
+  #    (Magic Engine / Magic Lab / Magic Lab Class) 三个都有域名,光看域名拦不住,
+  #    真实判据是有没有填行业。同客户 5 天冷却,防手工刚跑完 cron 又跑一遍。
+  # 周一 08:00 UTC ≈ 周一 20:00 NZST,跑完赶上周二早上的待办。
+  - type: cron
+    name: diagnostic-weekly
+    env: node
+    schedule: "0 8 * * 1"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 800 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/diagnostic-weekly
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # DAPE P 段(处方)—— 吃周一体检的结果开方,并自动落地成执行看板上的动作。
+  # 🔴 花钱路径:每个客户打一次 AI。同客户 6 天冷却。
+  #    刻意跟体检分成两个任务:混在一起挂了分不清是没采到数据还是没生成方案。
+  # 周二 08:00 UTC,排在体检后一天。
+  - type: cron
+    name: prescription-weekly
+    env: node
+    schedule: "0 8 * * 2"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 800 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/prescription-weekly
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   - type: cron
     name: anomaly-detector-daily
     env: node
@@ -772,6 +823,15 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # 公司邮箱 → CRM：**不再是一条独立的 cron 服务**（2026-08-03）。
+  #
+  # 它原来在这里是一条新增的 cron 服务，结果一次都没跑过 —— Render 的蓝图对
+  # 新增服务不会自动生效，要有人进后台点一次 Apply，而这件事不会报任何错。
+  # 现在挂在上面 messenger-hourly 那条**已经在跑**的任务里（见那个路由的文件头）。
+  # `/api/cron/mailbox-sync` 路由保留，用于单独手动触发。
+  #
+  # 以后再加渠道同步，优先挂进已有任务，别新开服务 —— 新服务 = 一个人工步骤。
+
   # Facebook 即时表单 → CRM。之前这条路只有人手一条(导 CSV 跑 import-cts-fb-leads.ts),
   # 2026-07-30 查出来的后果:CTS 的 CRM 里最后一个新人停在 7/25,而 Meta 后台
   # 7/26–7/30 又进了 27 个人,销售的「今天该联系谁」里一个都没有。
@@ -800,7 +860,9 @@ services:
     name: content-factory-render-worker
     env: docker
     dockerfilePath: ./scripts/render-worker/Dockerfile
-    plan: starter
+    # standard(1 CPU / 2GB)——starter 的半颗 CPU 跑 1080x1920 视频编码要 40-60 分钟/条，
+    # 512MB 还被 160MB 录像撑爆过一次。PM 2026-08-02 拍板升 standard(+US$18/月)。
+    plan: standard
     envVars:
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
@@ -838,6 +900,28 @@ services:
         https://app.magicengine.com.au/api/cron/mailchimp-activity-sync
     envVars:
       - fromGroup: me-shared-cron-secret
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Team Working Memory 兜底清扫 — 每 30 分钟
+  #
+  # 本机 hook 在会话结束时会自己触发提炼，这条 cron 是兜底：
+  # 笔记本睡了 / 断网 / 进程被杀导致那一枪没打中的会话，在这里补上；
+  # 顺带把被推翻的教训撤下、连续砸锅的套路下架（PM 选了全自动，收拾也得机器做）。
+  #
+  # ⚠️ 部署后必须在 Render 后台把这个 cron 关联到 me-shared-cron-secret 环境变量组。
+  #    sync:false 不会自动填值 —— daily-cron-digest 就是因为这个哑了 51 天没人发现，
+  #    而 digest 只报「失败」不报「没跑」，所以静默失效不会有任何告警。
+  - type: cron
+    name: team-memory-sweeper
+    env: node
+    schedule: "*/30 * * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/team-memory-sweeper
+    envVars:
+      - key: CRON_SECRET
+        sync: false
 
   # 每日数据体检（第二层）：逐条数据线比对「最后一次真正写入」跟登记的期望。
   #

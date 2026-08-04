@@ -103,6 +103,15 @@ export async function generateExecutionItems(
 interface ExecutionRow {
   prescription_id: string
   client_id:       string
+  /**
+   * 🔴 显式写死，不吃数据库默认值。
+   *
+   * 归档上一版时靠 `source='diagnostic'` 圈定「这份方案自己生成的动作」——
+   * 而这一列此前从没被显式写过，全靠列默认值恰好是 'diagnostic'。
+   * 默认值哪天被人改掉，归档会**静默变成一条都不收**，且不报任何错。
+   * 一个功能的生死不该挂在另一处的默认值上。
+   */
+  source:          'diagnostic'
   finding_id:      string | null
   dimension:       DiagnosticDimension
   phase:           number
@@ -141,6 +150,7 @@ function buildExecutionRows(
       rows.push({
         prescription_id: prescriptionId,
         client_id:       clientId,
+        source:          'diagnostic',
         finding_id:      asUuidOrNull(findingIds[0]),
         dimension:       action.dimension,
         phase:           phase.phase_number,

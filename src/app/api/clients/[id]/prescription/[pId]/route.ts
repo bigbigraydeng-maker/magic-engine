@@ -3,8 +3,8 @@
  *   → Full prescription detail (intake + content + status)
  *
  * PATCH /api/clients/[id]/prescription/[pId]
- *   Body: { status: 'approved'|'rejected', approved_by?: string, rejection_note?: string }
- *   - 'approved' → save approval + synchronously generate execution_items
+ *   Body: { status: 'approved'|'rejected', rejection_note?: string }
+ *   - 'approved' → save approval (含批准人，取自会话) + synchronously generate execution_items
  *   - 'rejected'  → record rejection note
  *   - Already-approved prescription → 409 Conflict
  *
@@ -15,8 +15,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
-import { generateExecutionItems } from '@/lib/diagnostic/execution-generator'
-import { deriveInitiativesFromPrescription } from '@/lib/diagnostic/initiative-derive'
+import { landPrescription } from '@/lib/diagnostic/prescription-landing'
+import { buildPrescriptionDecisionPatch } from '@/lib/diagnostic/prescription-patch'
 import type { Prescription, PrescriptionStatus } from '@/types/diagnostic'
 
 // 关键：禁用 Next.js 路由缓存，否则华佗异步 polling 拿不到刚写入的 content。
@@ -69,7 +69,6 @@ export async function GET(
 
 type PatchBody = {
   status: 'approved' | 'rejected'
-  approved_by?: string
   rejection_note?: string
 }
 
@@ -114,62 +113,51 @@ export async function PATCH(
       )
     }
 
-    // ── 批准：先派生 Initiative + 生成 execution_items，成功后才标记 approved ──
-    // （顺序很重要：若生成失败，status 保持 draft，不会卡在"已批准但无执行项"）
-    let initiativeMap: Record<number, string> = {}
+    // ── 批准 = 落地 ──
+    // 派生 Initiative → 生成执行项 → 归档旧版 → 标 approved，整套在
+    // lib/diagnostic/prescription-landing.ts 里，跟处方周更共用同一段代码。
+    // （顺序很重要：若执行项生成失败，status 保持 draft，
+    //   不会卡在"已批准但看板上没动作"这种从界面完全看不出来的状态。）
     if (body.status === 'approved') {
-      // DAPE W4: Initiative 自动派生 (BUG-FMT-F21 修法)
-      // 失败不阻塞 — Initiative 派生不影响处方批准, 只记日志, 防止误删 CTS 4 active goals
       try {
-        const r = await deriveInitiativesFromPrescription(supabaseAdmin, current)
-        initiativeMap = r.initiativeIdsByPhase
-        console.info('[prescription PATCH] Initiative derivation:', {
+        // 批准人取自登录会话，不认前端传的值（前端说自己是谁不算数）
+        const landed = await landPrescription(supabaseAdmin, current, access.user.email)
+        console.info('[prescription PATCH] landed:', {
           prescriptionId: pId,
           goalId: current.goal_id,
-          inserted: r.inserted,
-          skipped: r.skipped,
+          initiatives: landed.initiativesInserted,
+          executionItems: landed.executionItems,
         })
-        for (const note of r.notes) console.info('  ', note)
-      } catch (initErr: unknown) {
-        // 故意不阻塞 — Initiative 派生失败不能挡处方批准
-        const msg = initErr instanceof Error ? initErr.message : String(initErr)
-        console.warn('[prescription PATCH] Initiative derivation failed (non-blocking):', msg)
-      }
-
-      try {
-        await generateExecutionItems(supabaseAdmin, pId, clientId, { initiativeIdsByPhase: initiativeMap })
-      } catch (genErr: unknown) {
-        const msg = genErr instanceof Error ? genErr.message : String(genErr)
-        console.error('[prescription PATCH] generateExecutionItems failed:', msg, genErr)
+        for (const note of landed.notes) console.info('  ', note)
+      } catch (landErr: unknown) {
+        const msg = landErr instanceof Error ? landErr.message : String(landErr)
+        console.error('[prescription PATCH] landPrescription failed:', msg, landErr)
         return NextResponse.json(
           { success: false, error: `生成执行计划失败：${msg}` },
           { status: 500 },
         )
       }
 
-      // 修订处方批准 → 把被修订的原处方置 superseded（归档）
-      if (current.supersedes_id) {
-        const { error: supErr } = await supabaseAdmin
-          .from('prescriptions')
-          .update({ status: 'superseded' })
-          .eq('id', current.supersedes_id)
-          .eq('client_id', clientId)
-        if (supErr) {
-          console.error('[prescription PATCH] supersede prior failed:', supErr)
-          // 非致命 — 新处方已批准，原处方归档失败只记日志
-        }
+      // 落地时已经把 status/approved_at 写好了，直接读回来返回给调用方
+      const { data: landedRow, error: readErr } = await supabaseAdmin
+        .from('prescriptions')
+        .select('*')
+        .eq('id', pId)
+        .eq('client_id', clientId)
+        .single<Prescription>()
+      if (readErr || !landedRow) {
+        console.error('[prescription PATCH] read-back after landing failed:', readErr)
+        return NextResponse.json({ success: false, error: 'Failed to update prescription' }, { status: 500 })
       }
+      return NextResponse.json({ success: true, prescription: landedRow })
     }
 
-    // Build update payload
-    const patch: Record<string, unknown> = { status: body.status }
-    if (body.status === 'approved') {
-      patch.approved_at = new Date().toISOString()
-      if (body.approved_by) patch.approved_by = body.approved_by
-    }
-    if (body.status === 'rejected' && body.rejection_note) {
-      patch.rejection_note = body.rejection_note
-    }
+    // Build update payload（走到这儿只剩 rejected）
+    // 只允许写真实存在的列 —— 见 prescription-patch.ts 的列白名单
+    const patch = buildPrescriptionDecisionPatch({
+      status: body.status,
+      rejection_note: body.rejection_note,
+    })
 
     const { data: updated, error: updateError } = await supabaseAdmin
       .from('prescriptions')

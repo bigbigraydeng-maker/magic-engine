@@ -15,7 +15,18 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { loadManualItems, type ManualItem } from './manual-items'
+import {
+  loadManualItems,
+  dropBrokenLinks,
+  type ManualItem,
+  type ManualItemKind,
+} from './manual-items'
+
+/**
+ * 这些是**知会**，不是待办 —— 单独一栏，也不计进「今天有几件事」。
+ * 判断标准：PM 不动手也不会出事。会出事的一律留在「需要你动手」那栏。
+ */
+const INFORMATIONAL_KINDS: ManualItemKind[] = ['prescription_updated']
 
 /** FDE focus clients: CTS + Oztop. */
 export const FOCUS_CLIENT_IDS = [
@@ -189,10 +200,15 @@ export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCoun
       .map(([id, v]) => ({ name: v.name, id, [key]: v.count }))
       .sort((a, b) => a.name.localeCompare(b.name))
 
-  const manualItems = await loadManualItems(supabase).catch((err: unknown) => {
+  const rawManualItems = await loadManualItems(supabase).catch((err: unknown) => {
     console.error('[pm-todo] manual items load failed:', err instanceof Error ? err.message : String(err))
     return [] as ManualItem[]
   })
+  // 链接打不开的不下发（PM 2026-08-03：「点过去就是 404，徒增我和 fde 的工作时间」）。
+  // 闸本身出问题时原样放行 —— 少过滤好过整栏消失。
+  const manualItems = await dropBrokenLinks(rawManualItems)
+    .then((r) => r.kept)
+    .catch(() => rawManualItems)
 
   const failedRuns = ((failures.data ?? []) as Array<{ status: string; failed_count: number | null }>)
     .filter((r) => r.status === 'failed' || (r.failed_count ?? 0) > 0)
@@ -257,13 +273,32 @@ export function buildTodoEmail(weekday: number, counts: TodoCounts, nzDateLabel:
   // Then the manual lane: work the system genuinely cannot finish. Routine
   // sections below move on their own; these stay frozen until a human acts.
   const manualItems = counts.manualItems ?? []
-  if (manualItems.length > 0) {
-    const rows = manualItems.map((m) => `
+  // 🔴 「需要你动手」这一栏的全部价值，在于**里面每一条不动就不会好**。
+  //    往里塞不用动手的通知，等于每周每个客户往里加一行噪音；栏目一被稀释，
+  //    真正等他动手的那条（比如"出片余额用完了"）会被一起划过去。
+  //    所以纯知会型的单独一栏，且不计进"要你办的事"。
+  const actionItems = manualItems.filter((m) => !INFORMATIONAL_KINDS.includes(m.kind))
+  const infoItems = manualItems.filter((m) => INFORMATIONAL_KINDS.includes(m.kind))
+
+  if (actionItems.length > 0) {
+    const rows = actionItems.map((m) => `
       <div style="margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid #f1f5f9">
         <p style="margin:0 0 2px;font-size:14px;color:#0f172a"><b>${m.client_name}</b>：${m.what}</p>
         <p style="margin:0;font-size:13px;color:#475569">→ ${m.how} · <a href="${m.href}" style="color:#0891b2">去做这件事</a></p>
       </div>`)
     sections.push(sectionCard('🙋', '需要你动手（系统做不了的）', rows))
+  }
+
+  if (infoItems.length > 0) {
+    const rows = infoItems.map((m) => `
+      <div style="margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid #f1f5f9">
+        <p style="margin:0 0 2px;font-size:14px;color:#0f172a"><b>${m.client_name}</b>：${m.what}</p>
+        <p style="margin:0;font-size:13px;color:#475569">→ ${m.how} · <a href="${m.href}" style="color:#0891b2">去看看</a></p>
+      </div>`)
+    // 「不用动手」字面上等于「可以跳过」，但这条通知存在的全部理由，
+    // 就是让 PM 知道客户的方向被自动改成了什么 —— 他不用干活，但必须过目。
+    // 「看一眼就行」两件事一起说清楚。
+    sections.push(sectionCard('📣', '这周系统替你做了什么（看一眼就行）', rows))
   }
 
   const totalDrafts = counts.draftsByClient.reduce((s, c) => s + c.drafts, 0)
@@ -300,8 +335,10 @@ export function buildTodoEmail(weekday: number, counts: TodoCounts, nzDateLabel:
     ]))
   }
 
+  // 只知会、不用他动手的那些不计进「今天有几件事」—— 否则数字会虚高，
+  // 他以为有 5 件要办，点进去 3 件写着「不用你操作」，这个数字就不可信了
   const totalItems =
-    setupTasks.length + manualItems.length +
+    setupTasks.length + actionItems.length +
     totalDrafts + totalFindings + totalCards + totalReels + counts.cronFailures24h
 
   const body = sections.length > 0

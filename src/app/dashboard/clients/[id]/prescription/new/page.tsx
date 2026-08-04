@@ -531,11 +531,13 @@ export default function NewPrescriptionPage() {
 
   const handleReject = async () => {
     if (!prescriptionId) return
-    await fetch(`/api/clients/${clientId}/prescription/${prescriptionId}`, {
+    const res = await fetch(`/api/clients/${clientId}/prescription/${prescriptionId}`, {
       method:  'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ status: 'rejected', rejection_note: '用户要求重新生成' }),
     })
+    // 标记失败不挡重新生成，但必须说出来 —— 否则旧草稿会静默留在版本列表里
+    setGenerateError(res.ok ? null : '上一份处方没能标记为「已拒绝」，它会继续留在版本列表里。可以直接重新生成。')
     setStep(1)
     setContent(null)
     setPrescriptionId(null)

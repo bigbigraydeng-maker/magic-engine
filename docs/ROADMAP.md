@@ -11,6 +11,10 @@
 
 ## 近期待办（跨 Phase 汇总）
 
+- [ ] **TM.1** 团队工作记忆 · 套路层出第一条：机器已建好，但要先吃几天真实会话数据才提炼得出可复用套路。观察 `team_skills` 是否开始有行；一周后没有就回头看 distill prompt 的套路判据是不是太严
+- [ ] **TM.2** 团队工作记忆 · 后台页 `/dashboard/team-memory` 补视觉验证：功能上线时页面在登录墙后未做视觉检查，数据层与接口层已验
+- [ ] **TM.3** 团队工作记忆 · 补第二个 agent 复审：按铁律 4 属大任务（加表 + 新 endpoint + 新 UI），交付时只做了自审 + 变异测试，缺魏征挑刺那一刀
+
 - [ ] **P29.SEO.14** AU/NZ SME service page QA pass - verify titles, canonicals, internal links, sitemap exposure, and only make tiny fixes if the new service pages need one more polish pass.
 - [ ] **P30.S2.4** real_estate_auckland 8 个域名采集 + 写 industry_benchmarks
 - [ ] **P30.S2.5** flooring_tiles_brisbane 12 个域名采集 + 写 industry_benchmarks
@@ -119,6 +123,44 @@
 - [ ] P24.C.1 `deploy/page.tsx` + `DeploymentForm.tsx` 改造
 - [ ] P24.C.2 `publish-geo-snippet/route.ts` 新增路由
 
+## Phase 24.M — Leads 营销中心（多渠道 CRM · 拳头产品，与内容工厂同级）🔄 邮件已通，其余待开工
+
+> PM 2026-08-02 定方向：CRM 要把邮件 / WhatsApp / Messenger / 电话收进一个地方，
+> 客户从一处就能看到全部进度。给**所有** ME 客户用，不是 CTS 专属。
+> 渠道优先级（PM 拍板）：**电话 · 邮件 · Messenger · WhatsApp 高**；短信和 newsletter 靠后（它们不是实时交流）。
+> AI 客服路由（PM 拍板）：客户开通了 Meta AI 客服就默认用它（CTS 就是这么配的）；没开通的改用 WhatsApp Business API 接我们自己的客服中心。
+
+- [x] M1 多渠道发送总线 `lib/messaging/channels.ts` + Messenger 适配器（PR #779）
+- [x] M2 公司邮箱接进来：授权 + 读信 + 落成人 + 每小时同步（PR #774 / #780 / #781）
+- [x] M2.1 「今天该联系谁」版式重做：三层带底色 + 批次缩进 + 铺满宽度（PR #788 / #792）
+- [x] M2.2 销售的三个出口：推迟（到期自己回来）/ 他不买了 / 这批分错了（PR #792）
+      **刻意不给「手动改分组」** —— 手动状态列必烂，见 CHANGELOG 2026-08-03
+- [ ] **M2.3 用 `crm_segment_feedback` 改判据** —— 表建好了，还没有人去看它。
+      攒够一批「分错了」之后要回去改 `lib/crm/segments` 的规则，否则这个按钮
+      就变成一个只进不出的许愿池
+- [x] M2.4 分批规则按「只认真实对话」重做；秒回=机器（Meta AI 回复不再冒充真人跟进）；
+      打了没接 3 天转自动跟进；拿掉「快出行了」；号码坏了单独成组（PR #797）
+- [ ] **M2.5 新人邮件（PM 规则 1，本次明确没做）** —— 客人第一次进来当天自动发一封。
+      卡在两件事上：① 挑发信通道（Mailchimp / Resend）② 文案要按铁律 8 先 grounding
+      客户官网、逐句标可溯来源，且发出去之前 PM 要看过。做完之后第二层才配叫
+      「发过新人邮件」，现在老实叫「还没搭上话」
+- [ ] **M2.6 确认 Meta 自动化消息的真实 tag** —— `lib/messenger/automation` 里
+      `AUTOMATED_MESSAGE_SOURCES` 那两个值（`subscription` / `business_ai`）到今天
+      **仍是猜的**，Meta 没公开文档。现在靠「秒回 = 机器」兜住了，但拿一条 CTS 真实
+      收件箱的 Graph 返回确认一次，判据会更硬。这台开发机连不上 facebook.com，做不了
+- [ ] **M3 从 CRM 里回邮件** —— 权限已经要了 `Mail.Send`，缺一个邮件适配器接进总线（`lib/messaging/adapters/mail.ts`）
+- [ ] **M4 邮件线程接进多渠道读取路径** —— 现在私信页面靠 `channel = 'messenger'` 把邮件挡在外面（PR #781），挡住≠接好；需要一个不挑渠道的对话页
+- [ ] **M5 WhatsApp Business API（新号）** —— 申请清单已给 PM（`docs/sops/whatsapp-business-api-申请清单.md`）。⚠️ AU/NZ 单价未核实（这台开发机连不上 Meta 站点），拿到后台截图后补
+- [ ] **M6 客户员工账号 + 角色 + 归属 + 转派 + 推手机** —— PM：「ME 的登陆系统需要给到 client 的员工层级」。`conversations` 已有 `owner_email` / `snooze_until` 两列待用，不需要 migration
+- [ ] **M7 「谁来回」开关 + Meta AI 客服配置**（AI 先答 / 人工先答 / 分时段）
+- [ ] **M8 IP 电话外呼 + 通话记录回流**（与 Phase 36 Voice Agent 合流）
+- [ ] M9 短信 · M10 从 ME 发 newsletter（优先级靠后，PM 明确）
+
+**已知待补**（都不影响现在上线）：
+- [ ] 设置页那个 ✅「私信正在同步」是写死的，没连也显示绿勾 —— 会骗人，要改成真状态
+- [ ] `mailchimp-activity-sync` 没有 run-logging，断了看不出来
+- [ ] segments / display-name 里有 3 处写死的旅游业措辞，接第二个行业前要抽出来
+
 ## Phase 25 — Self-Serve Portal ⚠️ 已并入 Phase 20.0
 
 - [ ] **P25.A.1** Migration：`public_scan_jobs` 加 `client_id` 可空 FK
@@ -169,10 +211,12 @@
 > PM 已拍板：①归属=中介（红线，删除「带不走」黏性论）②无独家，平行服务多 agent ③定价随 agent package 再定 ④Roman 只作结构样板。
 > kill criteria：暖池 CPL 若相对冷启动无显著优势 → 产品叙事重估。**当前未触发**。
 
-## Phase 21.L — 讲课式系列课 · 单讲工作台（大瑞 IP「AI海外获客」6 讲试点）🔄 层1-3 已上线
+## Phase 21.L — 讲课式系列课 · 单讲工作台（大瑞 IP「AI海外获客」6 讲试点）✅ 首条成片定版（2026-08-02）
 
 > 登记 2026-08-01 · 客户 = Magic Lab Class（`377468af`）· 形态：上课件 slide + 下真人的讲课式短视频。
-> 层1-2（PR #726）与层3（PR #735）已上线，详见 [history/CHANGELOG.md](./history/CHANGELOG.md)。
+> 层1-2（PR #726）、层3（PR #735）、录屏智能剪辑（#765）、PM 实拍反馈四修（#757/#772）已上线。
+> **制作方案定版**：[sops/lecture-video-production.md](./sops/lecture-video-production.md)（客户三步 + 系统自动七件事 + 七个已修的坑 + 换客户要准备什么）。
+> 第 1 讲成片 169 秒，PM 验收通过。
 
 - [ ] **做片任务表防双击唯一索引** —— 动数据库，🔴 **PM `go apply`**
 - [ ] **数字人首跑实测** —— 生成要花钱，需 PM 说一声再试
