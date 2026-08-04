@@ -111,6 +111,7 @@ export default function LectureWorkbenchPage() {
   const [clipLink, setClipLink] = useState('')
   const [capDraft, setCapDraft] = useState<string[] | null>(null)   // 字幕校准草稿
   const [capDirty, setCapDirty] = useState(false)
+  const [redoReason, setRedoReason] = useState('')   // 打回重做时可选填的原因
 
   const base = `/api/clients/${clientId}/content-factory/${postId}`
 
@@ -260,7 +261,12 @@ export default function LectureWorkbenchPage() {
       if (!window.confirm(`确定重做整条？会重新做一条新片(约 15-30 分钟)，做好后替换现在这条。${spend}`)) return
     }
     if (!(await ensureSaved())) return
-    await patch({ action: 'start_render' }, 'render', '已开始做片，约 15-30 分钟。做好会出现在下面「成片」区')
+    const ok = await patch(
+      { action: 'start_render', redoReason: redoReason.trim() || undefined },
+      'render',
+      '已开始做片，约 15-30 分钟。做好会出现在下面「成片」区',
+    )
+    if (ok) setRedoReason('')
   }
 
   /**
@@ -901,6 +907,12 @@ export default function LectureWorkbenchPage() {
                 打回重做(整条)
               </button>
             </div>
+            <input
+              value={redoReason}
+              onChange={(e) => setRedoReason(e.target.value)}
+              placeholder="哪里不行?一句话就行(可不填) — 同样的问题反复出现，我们会改系统"
+              className="w-full text-xs bg-white border border-me-stone rounded-lg px-2 py-1.5 mt-2"
+            />
             <p className="text-[11px] text-me-taupe mt-2">哪段词不行 → 回 ① 改词或「重写这段」，保存后再点「重新做片」。</p>
           </>
         ) : (

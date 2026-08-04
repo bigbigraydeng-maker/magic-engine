@@ -24,6 +24,7 @@ import {
   type LectureMethod,
 } from '@/lib/factory/lecture-post'
 import { enqueueRenderJob } from '@/lib/factory/render-queue'
+import { loadLecturePrefs, recordRedoReason, saveLecturePrefs } from '@/lib/factory/lecture-learning'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120 // redo_section / regen_script 要等 Claude
@@ -128,6 +129,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       index?: number
       clear?: boolean
       captions?: string[]
+      redoReason?: string
       instruction?: string
     }
     const loaded = await loadLecturePost(params.id, params.postId)
@@ -313,7 +315,18 @@ export async function PATCH(req: NextRequest, { params }: Params) {
           .eq('client_id', params.id)
           .eq('id', params.postId)
         const render = await enqueueRenderJob({ clientId: params.id, contentPostId: params.postId })
-        return NextResponse.json({ ok: true, render })
+
+        // 记一次打回原因(客户可不填)。同一个原因反复出现 = 系统该改的地方，不是客户该忍的
+        let suggestRule = false
+        if (body.redoReason?.trim()) {
+          try {
+            const prefs = await loadLecturePrefs(params.id)
+            const res = recordRedoReason(prefs.redoReasons, body.redoReason, new Date().toISOString())
+            await saveLecturePrefs(params.id, { redoReasons: res.reasons })
+            suggestRule = res.suggestRule
+          } catch { /* 记不上不影响重做 */ }
+        }
+        return NextResponse.json({ ok: true, render, suggestRule })
       }
 
       default:

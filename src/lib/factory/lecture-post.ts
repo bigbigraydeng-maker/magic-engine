@@ -10,6 +10,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import type { LectureScript } from './lecture-script'
+import { extractTermEdits, loadLecturePrefs, mergeGlossary, saveLecturePrefs } from './lecture-learning'
 
 export type LectureMethod = 'self_record' | 'digital_human'
 
@@ -147,6 +148,18 @@ export async function saveCaptions(params: {
   const merged = existing.map((c, i) => ({ ...c, text: (texts[i] ?? '').trim() }))
     .filter((c) => c.text)
   await patchSnapshot(clientId, postId, { lecture_captions: merged })
+
+  // 从这次校准里学术语:客户把 A 改成 B,同一改法攒够次数就进这个客户的词表,
+  // 以后自动纠——同样的错不该让人改第三遍。学习失败不影响保存。
+  try {
+    const edits = extractTermEdits(existing.map((c) => c.text), merged.map((c) => c.text))
+    if (edits.length > 0) {
+      const prefs = await loadLecturePrefs(clientId)
+      const glossary = mergeGlossary(prefs.glossary, edits, new Date().toISOString())
+      await saveLecturePrefs(clientId, { glossary })
+    }
+  } catch { /* 学不到不影响客户保存字幕 */ }
+
   return { saved: merged.length }
 }
 
@@ -206,8 +219,11 @@ export async function setLectureProduction(params: {
   const { clientId, postId, method, recordingUrl } = params
   const current = await loadLecturePost(clientId, postId)
   const prev = current?.production
+  // 真实事故(2026-08-04):换制作方式时用 `{ method }` 起头，把 recording_url 和
+  // section_clips 一起抹掉了 —— 客户传的录像和配好的录屏全没了，切回来也不恢复。
+  // 换方式只该换方式，其它配置一律留着(客户可能只是想比一比两种效果)。
   const production: LectureProduction = {
-    ...(prev && prev.method === method ? prev : { method }),
+    ...(prev ?? {}),
     method,
     // 改过制作方式/换过录像之后，之前那次失败的报错就过期了(不该再挂在屏幕上吓人)
     changed_at: new Date().toISOString(),

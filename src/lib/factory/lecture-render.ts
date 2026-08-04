@@ -22,6 +22,9 @@ import { runMuapi } from '@/lib/muapi/client'
 import { getActiveBrief } from '@/lib/content/brief-injector'
 import { loadLecturePost, saveTranscriptAndCaptions } from './lecture-post'
 import { detectActiveRegion, planClipFit } from './screen-clip'
+import { normalizeTerms } from './term-glossary'
+import { bandTopForFace, detectFaceY } from './face-frame'
+import { applyClientGlossary, loadLecturePrefs, saveLecturePrefs } from './lecture-learning'
 import type { LectureScript } from './lecture-script'
 import {
   alignPartsToSegments,
@@ -355,13 +358,29 @@ async function prepPersonTrack(params: {
   seek: number
   duration: number
   dir: string
+  clientId: string
+  faceYPrior: number | null
 }): Promise<string> {
-  const { src, seek, duration, dir } = params
+  const { src, seek, duration, dir, clientId, faceYPrior } = params
   const out = join(dir, 'person.mp4')
+
+  // 取景跟着脸走:原来固定取正中间，客户在车里录、脸偏上时成片里脸就掉到很低(PM 反馈)。
+  // 先按宽度缩放，再在缩放后的高度上按人脸位置取一条。
+  const size = await probeSize(src)
+  const scaledH = Math.round((size.h * W) / size.w)          // 按宽度缩放后的高度
+  const bandH = H - SLIDE_H
+  let cropY = Math.max(0, Math.round((scaledH - bandH) / 2)) // 兜底:居中
+  if (scaledH > bandH) {
+    const faceY = await detectFaceY({ videoFile: src, durationSec: duration, dir, prior: faceYPrior })
+    cropY = bandTopForFace(faceY, scaledH, bandH)
+    // 学回去:这个客户惯常的取景位置,下次认不出脸时按他的习惯兜底
+    await saveLecturePrefs(clientId, { faceY }).catch(() => { /* 学习失败不影响出片 */ })
+  }
+
   await exec('ffmpeg', [
     '-y', '-loglevel', 'error',
     '-ss', seek.toFixed(3), '-t', duration.toFixed(3), '-i', src,
-    '-vf', `scale=${W}:${H - SLIDE_H}:force_original_aspect_ratio=increase,crop=${W}:${H - SLIDE_H},fps=30`,
+    '-vf', `scale=${W}:-2,crop=${W}:${bandH}:0:${cropY},fps=30`,
     '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p',
     '-c:a', 'aac', '-ar', '44100', '-ac', '1',
     out,
@@ -428,6 +447,7 @@ async function composePart(params: {
 /** 逐段合成 + 拼接。每段做完 touch 一次任务，长活不会被看门狗误杀。 */
 async function composeLecture(params: {
   jobId: string
+  clientId: string
   personFile: string
   personStart: number
   parts: TimedPart[]
@@ -439,12 +459,16 @@ async function composeLecture(params: {
   dir: string
   outFile: string
 }): Promise<void> {
-  const { jobId, personFile, personStart, parts, slideFiles, screenClipFiles, captionChunks, captionFiles, bg, dir, outFile } = params
+  const { jobId, clientId, personFile, personStart, parts, slideFiles, screenClipFiles, captionChunks, captionFiles, bg, dir, outFile } = params
   if (parts.length !== slideFiles.length) throw new Error('课件数和时间段数不一致')
 
   // 先把录像转成「已裁好的下半屏 H.264」并掐掉片头，后面每段直接切片用
   const totalDur = parts[parts.length - 1].end
-  const personTrack = await prepPersonTrack({ src: personFile, seek: personStart, duration: totalDur, dir })
+  const prefs = await loadLecturePrefs(clientId).catch(() => null)
+  const personTrack = await prepPersonTrack({
+    src: personFile, seek: personStart, duration: totalDur, dir,
+    clientId, faceYPrior: prefs?.faceY ?? null,
+  })
   await heartbeat(jobId, 'assembling')
 
   const partFiles: string[] = []
@@ -688,7 +712,9 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
       // 两步定起点:①脚本开场白对到「哪一句」②逐字时间戳对到「第一个字」
       const sentenceStart = findHeadStart(lecture.hookSpoken, segments)
       const onset = firstWordStart(words, sentenceStart, sentenceStart)
-      const manualExtra = Math.max(0, production.extra_head_trim_sec ?? 0)
+      // 这一讲没单独设就用这个客户的习惯值(他反复要求多剪时学到的)
+      const learnedTrim = (await loadLecturePrefs(job.client_id).catch(() => null))?.headTrimSec
+      const manualExtra = Math.max(0, production.extra_head_trim_sec ?? learnedTrim ?? 0)
       personStart = Math.max(0, onset - HEAD_LEAD + manualExtra)
       const speechEnd = Math.min(rawDuration, segments[segments.length - 1].end + TAIL_TRAIL)
       duration = Math.max(1, speechEnd - personStart)
@@ -709,7 +735,13 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
       // 再把落在片头之外的块整块丢掉，跨界的块起点夹到 0。
       captionChunks = splitSubtitleChunks(shifted)
         .filter((c) => c.end > 0.15)
-        .map((c) => ({ ...c, start: Math.max(0, c.start) }))
+        .map((c) => ({ ...c, start: Math.max(0, c.start), text: normalizeTerms(c.text) }))
+
+      // 这个客户自己学到的词表(从历次字幕校准里攒出来的)也过一遍
+      const learned = await loadLecturePrefs(job.client_id).catch(() => null)
+      if (learned?.glossary && Object.keys(learned.glossary).length > 0) {
+        captionChunks = captionChunks.map((c) => ({ ...c, text: applyClientGlossary(c.text, learned.glossary) }))
+      }
 
       // 客户校准过字幕就以他的为准(时间不动、只换字)。条数对不上说明脚本/录像变过，按新的来。
       const corrected = loaded.captions
@@ -773,7 +805,7 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
     step(jobId, '开始合成')
     const outFile = join(dir, 'final.mp4')
     await composeLecture({
-      jobId, personFile, personStart, parts,
+      jobId, clientId: job.client_id, personFile, personStart, parts,
       slideFiles, screenClipFiles,
       captionChunks, captionFiles,
       bg: colors.bg, dir, outFile,
