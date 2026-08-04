@@ -29,6 +29,8 @@ export interface PublishOutcome {
   ok: boolean
   draft?: boolean
   error?: string
+  /** 这一轮什么都没发——之前已经发过了。留在运行记录里,重复触发看得见。 */
+  alreadyPublished?: boolean
 }
 
 /** 处理一条待发布请求。成功失败都回写，绝不静默。 */
@@ -39,6 +41,15 @@ export async function runOneLecturePublish(params: {
   const { clientId, postId } = params
   const loaded = await loadLecturePost(clientId, postId)
   if (!loaded) return { postId, ok: false, error: '未找到该讲' }
+
+  // 🔴 本地防重发闸。发布是不可逆的对外动作,「宁可漏发一次让人再点,也不能重复发」。
+  // 真实事故(2026-08-04):同一条讲课片被连发三次——上游读到过期状态就会反复触发,
+  // 而这里当时对「已经发过了」毫无察觉,来一次发一次。
+  const already = loaded.published.find((p) => p.platform === 'facebook')
+  if (already) {
+    await setPublishRequest({ clientId, postId, request: null })
+    return { postId, ok: true, draft: already.draft, alreadyPublished: true }
+  }
 
   await setPublishRequest({
     clientId, postId,
@@ -53,6 +64,26 @@ export async function runOneLecturePublish(params: {
     if (!stored?.page_id) throw new Error('没配 publish_target.page_id')
     // client_id 不存在配置里,发的时候补上——adapter 靠它去取「连接 Meta」存下的页 token
     const target: PublishTarget = { ...stored, client_id: clientId }
+
+    // 第二道闸:问平台侧「这条片我是不是已经发过了」。本地回执万一没写成(写库失败、
+    // 被旧快照覆盖),就靠这一问兜住,绝不重复上传一遍。查不动不算「没发过」——
+    // 查询本身出错时保持保守,直接报错让人再点,而不是闷头再发一次。
+    const existing = await facebookReelAdapter.findExisting({ target, idempotencyTag: postId })
+    if (existing) {
+      await recordPublished({
+        clientId, postId,
+        entry: {
+          platform: 'facebook',
+          pageId: existing.page_id ?? target.page_id,
+          videoId: existing.video_id ?? existing.post_id ?? '',
+          permalink: existing.permalink,
+          draft: process.env.FACTORY_PUBLISH_LIVE !== 'true',
+          at: existing.published_at ?? new Date().toISOString(),
+        },
+      })
+      await setPublishRequest({ clientId, postId, request: null })
+      return { postId, ok: true, alreadyPublished: true }
+    }
 
     // 安全阀:没显式开 FACTORY_PUBLISH_LIVE 就只发草稿(主页后台可见、公众看不到)
     const draft = process.env.FACTORY_PUBLISH_LIVE !== 'true'
