@@ -25,6 +25,7 @@ import { PersonDrawer, type DrawerRow } from './_components/PersonDrawer'
 // 2026-08-03 就是抄的那份走散了：lib 里删掉了一个段，页面这份还留着，
 // 两边对不上，tsc 才把它顶出来 —— 而它本可以一直静静地错下去。
 import type { Segment } from '@/lib/crm/segments'
+import { FIRST_SOURCE_LABEL, type FirstSource } from '@/lib/crm/first-source'
 
 interface Row {
   contactId: string
@@ -49,6 +50,8 @@ interface Row {
   lastBy?: string | null
   /** 他打开过邮件、之后没人跟。只是提示，不参与排序。 */
   openedDaysAgo?: number | null
+  /** 他最早从哪条渠道来的。**纯提示**，不参与任何判断。 */
+  firstSource?: FirstSource | null
   /** 被推迟到什么时候。今天名单上的人恒为 null —— 推迟的人已经被挡在外面。 */
   snoozeUntil?: string | null
 }
@@ -235,6 +238,17 @@ function FollowUpMarks({ row }: { row: Row }) {
   if (typeof row.openedDaysAgo === 'number') {
     bits.push(row.openedDaysAgo <= 0 ? '今天打开过邮件' : `${row.openedDaysAgo} 天前打开过邮件`)
   }
+  /**
+   * 他当初是从哪来的。
+   *
+   * **跟上面那条「怎么联系他」不是一回事**：一个人可能是 Facebook 广告表单来的，
+   * 现在却只在邮件上谈。CTS 520 人里只有 156 个是单一渠道，所以这两个经常不一样。
+   *
+   * 排在最后、字最小 —— PM 定的口径是「只做一个提示作用」，它不参与任何判断。
+   */
+  const src = row.firstSource ? FIRST_SOURCE_LABEL[row.firstSource] : null
+  if (src) bits.push(`${src.icon} ${src.label}来的`)
+
   if (bits.length === 0 && !row.lastNote) return null
 
   return (

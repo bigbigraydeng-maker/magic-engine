@@ -33,6 +33,7 @@ import { contactCardTitle } from '@/lib/crm/display-name'
 import { followUpMarks, localDay } from '@/lib/crm/follow-up-marks'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 import { isAutomatedTouch } from '@/lib/crm/automated-touch'
+import { firstSourceOf } from '@/lib/crm/first-source'
 import { fetchAll } from '@/lib/supabase-paginate'
 
 interface RouteParams {
@@ -377,6 +378,14 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       lastBy: marks.lastBy,
       /** 他打开过邮件、之后没人跟。只做提示，不参与排序（打开可能是 Apple 替他开的）。 */
       openedDaysAgo: marks.openedDaysAgo,
+      /**
+       * 他最早是从哪条渠道来的。**纯提示** —— 不进分批、不进排序、不进优先级。
+       *
+       * 跟 `suggestedChannel` 是两件事：那个答「现在该在哪回他」，这个答
+       * 「他当初怎么找上来的」。CTS 520 人里只有 156 个是单一渠道，其余都跨渠道，
+       * 所以这两个问题的答案经常不一样。
+       */
+      firstSource: firstSourceOf(c.touchpoints),
       contactId: c.id,
       name: contactCardTitle(c.displayName, firstSaid.get(c.id)),
       phone: row?.primary_phone ?? null,
