@@ -1,7 +1,7 @@
 'use client'
 
 // 单讲工作台 — 一讲从脚本到成片的全部操作都在这一页：
-// ① 脚本审(可改) ② 制作方式(自己录 / 数字人) ③ 课件预览 ④ 平台 CTA 两版本 ⑤ 成片审 ⑥ 字幕校准。
+// ① 脚本审 ② 制作方式 ③ 课件预览 ④ 平台 CTA 两版本 ⑤ 成片审 ⑥ 字幕校准 ⑦ 发布(下载+各平台文案)。
 // 客户安全：不暴露生产手法，人话文案。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -111,6 +111,7 @@ export default function LectureWorkbenchPage() {
   const [clipLink, setClipLink] = useState('')
   const [capDraft, setCapDraft] = useState<string[] | null>(null)   // 字幕校准草稿
   const [capDirty, setCapDirty] = useState(false)
+  const [redoReason, setRedoReason] = useState('')   // 打回重做时可选填的原因
 
   const base = `/api/clients/${clientId}/content-factory/${postId}`
 
@@ -186,6 +187,15 @@ export default function LectureWorkbenchPage() {
       .join('\n\n')
   }
 
+  async function copyText(text: string, what: string) {
+    try {
+      await navigator.clipboard.writeText(text)
+      setNotice(`${what}已复制 ✅`)
+    } catch {
+      setError('复制没成功(浏览器不让) — 手动选中文字复制')
+    }
+  }
+
   async function copySpoken() {
     try {
       await navigator.clipboard.writeText(spokenText())
@@ -251,17 +261,38 @@ export default function LectureWorkbenchPage() {
       if (!window.confirm(`确定重做整条？会重新做一条新片(约 15-30 分钟)，做好后替换现在这条。${spend}`)) return
     }
     if (!(await ensureSaved())) return
-    await patch({ action: 'start_render' }, 'render', '已开始做片，约 15-30 分钟。做好会出现在下面「成片」区')
+    const ok = await patch(
+      { action: 'start_render', redoReason: redoReason.trim() || undefined },
+      'render',
+      '已开始做片，约 15-30 分钟。做好会出现在下面「成片」区',
+    )
+    if (ok) setRedoReason('')
   }
 
-  async function saveCaptionsEdit() {
+  /**
+   * 保存字幕并直接重做片 —— 改字幕的唯一目的就是让成片跟着变，
+   * 不该让客户再去别的区找「重新做片」(真实事故:PM 改完以为没生效)。
+   */
+  async function saveCaptionsAndRerender() {
     if (!capDraft) return
-    const ok = await patch(
-      { action: 'save_captions', captions: capDraft },
-      'captions',
-      '字幕已保存 ✅ 点「重新做片」才会用上新字幕',
-    )
-    if (ok) setCapDirty(false)
+    setBusy('captions')
+    setError(null)
+    try {
+      const r = await fetch(`${base}/lecture`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save_captions', captions: capDraft }),
+      })
+      const json = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(json.error || `HTTP ${r.status}`)
+      setCapDirty(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setBusy(null)
+      return
+    }
+    setBusy(null)
+    await patch({ action: 'start_render' }, 'render', '字幕已保存 ✅ 正在用新字幕重做片，约 5-10 分钟')
   }
 
   async function applyRecordingLink() {
@@ -359,9 +390,8 @@ export default function LectureWorkbenchPage() {
       })
       const json = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(json.error || `HTTP ${r.status}`)
-      const platformNames = (data?.post.platforms ?? []).map((p) => PLATFORM_LABEL[p] ?? p).join(' / ')
       setNotice(action === 'schedule'
-        ? `已通过 ✅ 会按排期自动发到 ${platformNames || '你配置的平台'}，不用你再操作`
+        ? '已通过 ✅ 下面「发布」区拿成片和文案，自己发到各平台'
         : '已打回')
       await load()
     } catch (e) {
@@ -752,22 +782,82 @@ export default function LectureWorkbenchPage() {
         </div>
       </section>
 
+      {/* ⑦ 发布 —— 小红书/抖音没有官方接口，任何工具都做不到全自动，
+           所以这里把「下载成片 + 各平台文案」摆到手边，你手动发但零摩擦。 */}
+      {data.post.videoUrl && (
+        <section className="bg-me-ivory border border-me-stone rounded-2xl p-4 mb-4">
+          <h2 className="font-display font-semibold mb-1">⑦ 发布</h2>
+          <p className="text-xs text-me-taupe mb-3">
+            成片和文案都在这，下载后发到各平台。（小红书和抖音没有官方发布接口，只能手动发；这里帮你把东西备齐。）
+          </p>
+
+          <a
+            href={data.post.videoUrl}
+            download={`${data.post.lessonNo ? `第${data.post.lessonNo}讲` : '成片'}.mp4`}
+            className="inline-block text-sm font-semibold text-white bg-status-track rounded-xl px-5 py-2.5 mb-3"
+          >
+            ⬇ 下载成片
+          </a>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="bg-white border border-me-stone rounded-xl p-3">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-semibold text-me-taupe">Facebook / TikTok 文案</span>
+                <button
+                  onClick={() => copyText(draft.ctaVariants?.fbTiktok ?? '', 'FB/TikTok 文案')}
+                  className="text-[11px] text-me-ochre hover:underline"
+                >
+                  复制
+                </button>
+              </div>
+              <div className="text-xs whitespace-pre-wrap leading-relaxed">
+                {draft.ctaVariants?.fbTiktok || '（还没写）'}
+              </div>
+            </div>
+
+            <div className="bg-white border border-me-stone rounded-xl p-3">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-semibold text-me-taupe">小红书文案</span>
+                <button
+                  onClick={() => copyText(draft.ctaVariants?.xiaohongshu ?? '', '小红书文案')}
+                  className="text-[11px] text-me-ochre hover:underline"
+                >
+                  复制
+                </button>
+              </div>
+              <div className="text-xs whitespace-pre-wrap leading-relaxed">
+                {draft.ctaVariants?.xiaohongshu || '（还没写）'}
+              </div>
+              {xhsIssues.length === 0 && (
+                <div className="text-[10px] text-me-taupe mt-1">✓ 没踩小红书导流红线</div>
+              )}
+            </div>
+          </div>
+
+          <div className="text-[11px] text-me-taupe mt-3">
+            发完记得回来点 ⑤ 区的「满意 · 去发布」把这一讲标成已处理，课程列表才看得出进度。
+          </div>
+        </section>
+      )}
+
       {/* ⑥ 字幕校准 —— 机器听写会有错字，客户在这里改，时间不动 */}
       {(data.captions ?? []).length > 0 && capDraft && (
         <section className="bg-me-ivory border border-me-stone rounded-2xl p-4 mb-4">
           <div className="flex items-center justify-between gap-2 mb-1">
             <h2 className="font-display font-semibold">⑥ 字幕校准</h2>
             <button
-              disabled={!capDirty || busy !== null}
-              onClick={saveCaptionsEdit}
+              disabled={!capDirty || busy !== null || Boolean(jobActive)}
+              onClick={saveCaptionsAndRerender}
               className="text-xs font-semibold text-white bg-status-track rounded-full px-4 py-1.5 disabled:opacity-40"
             >
-              {busy === 'captions' ? '保存中…' : capDirty ? '保存字幕' : '已保存'}
+              {busy === 'captions' ? '保存中…'
+                : busy === 'render' ? '排队中…'
+                : capDirty ? '保存并重做片' : '已保存'}
             </button>
           </div>
           <p className="text-xs text-me-taupe mb-3">
             这是片子里显示的字幕，按你实际说的话自动听出来的 —— 会有错字（比如把「生意」听成「身影」）。
-            对着成片改错字就行，时间不用动。改完点「保存字幕」，再点「重新做片」才会用上。
+            对着成片改错字就行，时间不用动。改完点「保存并重做片」，系统会用新字幕重出一条（约 5-10 分钟，比第一次快）。
           </p>
           <div className="max-h-[420px] overflow-y-auto flex flex-col gap-1.5 pr-1">
             {capDraft.map((text, i) => (
@@ -817,6 +907,12 @@ export default function LectureWorkbenchPage() {
                 打回重做(整条)
               </button>
             </div>
+            <input
+              value={redoReason}
+              onChange={(e) => setRedoReason(e.target.value)}
+              placeholder="哪里不行?一句话就行(可不填) — 同样的问题反复出现，我们会改系统"
+              className="w-full text-xs bg-white border border-me-stone rounded-lg px-2 py-1.5 mt-2"
+            />
             <p className="text-[11px] text-me-taupe mt-2">哪段词不行 → 回 ① 改词或「重写这段」，保存后再点「重新做片」。</p>
           </>
         ) : (
