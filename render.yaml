@@ -738,6 +738,10 @@ services:
   # 新建的 cron 服务不会自动拿到 CRON_SECRET(sync:false 只声明不填值),建了也只是每轮 401
   # 静默失败 —— 2026-08-04 实测:排队的片等了 14 分钟没动,cron_run_logs 里连一条运行记录都没有。
   # 挂在已经配好密钥、稳定在跑的 worker 上,就不需要任何人去后台补配置。
+  # 讲课片发布也在这条 worker 里顺带跑(runLecturePublishSweep),**不另开 cron**:
+  # 新建的 cron 服务不会自动拿到 CRON_SECRET(sync:false 只声明不填值),建了也只是每轮 401
+  # 静默失败 —— 2026-08-04 实测:排队的片等了 14 分钟没动,cron_run_logs 里连一条运行记录都没有。
+  # 挂在已经配好密钥、稳定在跑的 worker 上,就不需要任何人去后台补配置。
   - type: cron
     name: factory-publish-worker
     env: node

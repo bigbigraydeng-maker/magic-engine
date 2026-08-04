@@ -234,6 +234,13 @@ export interface MailboxTarget {
   connectionId: string
   /** 这个邮箱的地址。同时是线程归属标记（写进 conversations.page_id）。 */
   mailbox: string
+  /**
+   * 设置页上填的「客户自己的邮件域名」（关联公司等）。
+   *
+   * 官网域名和收信域名覆盖不到关联公司 —— `pa@chinatravel.co.nz` 就是这么
+   * 变成客人的。这份清单只有 FDE 知道，所以要能填、且在建人这一步就生效。
+   */
+  ownDomains?: string[]
 }
 
 export interface MailSyncResult {
@@ -293,11 +300,27 @@ async function getMailWatermark(clientId: string, mailbox: string): Promise<Date
 /**
  * 客户自己的邮件域名。
  *
- * 两个来源都要：连进来的那个邮箱的域名（info@ctstours.co.nz → ctstours.co.nz），
- * 加上 clients.domain（官网域名可能跟收信域名不同，比如官网 .com、邮箱 .co.nz）。
+ * 三个来源都要：
+ *   · 连进来的那个邮箱的域名（info@ctstours.co.nz → ctstours.co.nz）
+ *   · clients.domain（官网域名可能跟收信域名不同，比如官网 .com、邮箱 .co.nz）
+ *   · **设置页上填的那份清单**（`extra`）
+ *
+ * 第三条是 2026-08-04 补的，起因是 `pa@chinatravel.co.nz` —— CTS 的关联公司，
+ * 员工却进了客人名单，客户当场反馈。前两条都覆盖不到关联公司的域名，
+ * 而这种域名只有 FDE 知道，所以必须能填、且填了要在**这里**生效：
+ * 只在归类那一侧认它的话，同事的邮件照样会建出一个新联系人来，
+ * 只是建完之后被藏起来 —— 数据还是脏的。
  */
-export function ownDomainsOf(mailbox: string | null, clientDomain: string | null): string[] {
+export function ownDomainsOf(
+  mailbox: string | null,
+  clientDomain: string | null,
+  extra: readonly string[] = [],
+): string[] {
   const out = new Set<string>()
+  for (const d of extra) {
+    const v = d.trim().toLowerCase()
+    if (v) out.add(v)
+  }
   const at = (mailbox ?? '').lastIndexOf('@')
   if (at > 0) out.add(mailbox!.slice(at + 1).trim().toLowerCase())
   const d = (clientDomain ?? '')
@@ -491,7 +514,7 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
   }
 
   const plan = planMailIngest(all, {
-    ownDomains: ownDomainsOf(target.mailbox, target.domain),
+    ownDomains: ownDomainsOf(target.mailbox, target.domain, target.ownDomains ?? []),
   })
 
   // **从旧到新处理**，配合下面「一条失败就停」。

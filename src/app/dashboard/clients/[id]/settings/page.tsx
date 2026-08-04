@@ -1,16 +1,25 @@
 'use client'
 
 /**
- * /dashboard/clients/[id]/settings
+ * /dashboard/clients/[id]/settings —— 客户配置中心。
  *
- * Client platform-connection settings page.
- * Primary entry point after the GBP OAuth callback redirect.
+ * ## 2026-08-03 改成分页签（PM：「当前的页面太长，不好用」）
  *
- * URL params handled:
- *   ?gbp=connected               → show success banner
- *   ?gbp=error&reason=<slug>     → show error banner
+ * 原先是 **23 个板块堆在一根 768px 的竖列里，全部展开**。人来这一页永远是为了
+ * 办一件事，却要从 22 个不相干的板块里滚过去；而且每个板块自己 fetch 自己的
+ * 数据，打开一次同时发 20 多个请求。
  *
- * Phase 24.A.7
+ * 现在按「你来干什么」分五组，**只挂载当前这一组** —— 不是把别的藏起来，是
+ * 根本不渲染，所以那些请求压根不会发出去。分组和页签逻辑在 `SettingsTabs`。
+ *
+ * ## URL 参数
+ *
+ *   ?tab=connect|profile|crm|content|advanced   落在哪一组
+ *   ?gbp=connected / needs_location / error     商家页授权回跳
+ *   ?mail=ok / admin_ok / error                 邮箱授权回跳（见 MailboxPanel）
+ *
+ * 带 `gbp` 或 `mail` 时**强制落在「接通」** —— 那两条的提示都渲染在那一组里，
+ * 落错组的话人授权完看到的是一片跟他无关的东西，会以为没成功。
  */
 
 import Link from 'next/link'
@@ -36,8 +45,15 @@ import { UploadLinkPanel } from './_components/UploadLinkPanel'
 import { FactoryConfigPanel } from './_components/FactoryConfigPanel'
 import { CommentAutoReplyPanel } from './_components/CommentAutoReplyPanel'
 import { LeadsConfigPanel } from './_components/LeadsConfigPanel'
+import { DomainRulesPanel } from './_components/DomainRulesPanel'
 import { PipelineStagesPanel } from './_components/PipelineStagesPanel'
 import { CommentAuditList } from './_components/CommentAuditList'
+import {
+  SettingsSection,
+  SettingsTabBar,
+  useSettingsTab,
+  type SettingsTab,
+} from './_components/SettingsTabs'
 
 const ERROR_MESSAGES: Record<string, string> = {
   token_exchange_failed: 'Google 那边没给我们通行证，请再试一次。',
@@ -45,23 +61,168 @@ const ERROR_MESSAGES: Record<string, string> = {
   no_gbp_accounts:       '这个 Google 账号名下没有任何商家页 —— 十有八九是登错账号了，退出 Google 换客户老板的账号重来。',
 }
 
+/** 还在旧「Connectors」页面管理的连接器。 */
+const LEGACY_CONNECTORS = [
+  { anchor: 'gsc',      label: 'Google Search Console', icon: '🔍', hint: 'GSC 搜索表现 + Indexing API' },
+  { anchor: 'ga4',      label: 'Google Analytics 4',    icon: '📈', hint: '网站真实流量数据' },
+  { anchor: 'meta-ads', label: 'Facebook 主页',          icon: '📊', hint: 'Meta 广告库 + 公开粉丝数' },
+]
+
+function LegacyConnectors({ clientId }: { clientId: string }) {
+  return (
+    <>
+      <p className="mb-3 text-xs text-slate-500">
+        以下连接器在「Connectors」页面管理，后续会逐步迁移到本页。
+      </p>
+      <div className="space-y-2">
+        {LEGACY_CONNECTORS.map((p) => (
+          <Link
+            key={p.anchor}
+            href={`/dashboard/clients/${clientId}/connectors/${p.anchor}`}
+            className="group flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 transition hover:border-cyan-300 hover:bg-cyan-50"
+          >
+            <span>{p.icon}</span>
+            <div className="min-w-0 flex-1">
+              <div className="font-bold">{p.label}</div>
+              <div className="text-xs text-slate-500">{p.hint}</div>
+            </div>
+            <span className="text-cyan-600 opacity-0 transition group-hover:opacity-100">→</span>
+          </Link>
+        ))}
+      </div>
+    </>
+  )
+}
+
+/**
+ * 当前这一组的内容。
+ *
+ * **必须是一个函数、按 tab 分支返回**，不能把五组都渲染出来再用 CSS 藏 ——
+ * 藏起来的板块照样会挂载、照样会发请求，那就白改了。
+ */
+function TabBody({ tab, clientId }: { tab: SettingsTab; clientId: string }) {
+  switch (tab) {
+    case 'connect':
+      return (
+        <>
+          <SettingsSection first icon="🚦" title="真客户 / 调研档案">
+            <ClientStatusPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="✉️" title="公司邮箱（客人发来的信）">
+            <MailboxPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="📍" title="Google Business Profile">
+            <GbpPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🏪" title="发到哪一家门店">
+            <GbpLocationPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="📢" title="Google Ads">
+            <GoogleAdsPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🩺" title="广告健康监测">
+            <AdStrategyPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🔗" title="其他平台连接">
+            <LegacyConnectors clientId={clientId} />
+          </SettingsSection>
+        </>
+      )
+
+    case 'profile':
+      return (
+        <>
+          <SettingsSection first icon="🏢" title="所属行业（决定 AI 读不读同行经验）">
+            <IndustryPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="📦" title="主力产品（AI 写文案时逐条读）">
+            <ProductsPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🎯" title="主关键词清单">
+            <PrimaryKeywordsPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🏷️" title="品牌词别名">
+            <BrandAliasesPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🥊" title="竞品域名清单">
+            <CompetitorDomainsPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="⭐" title="口碑监测身份（GBP / Tripadvisor / 竞品）">
+            <ReputationIdentityPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🚫" title="排除品类词（关键词 gap 过滤）">
+            <ExcludedTopicsPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="⛔" title="品牌红线短语（内容工厂拒单闸）">
+            <BrandRedlinesPanel clientId={clientId} />
+          </SettingsSection>
+        </>
+      )
+
+    case 'crm':
+      return (
+        <>
+          <SettingsSection first icon="🪜" title="客人跟进步骤">
+            <PipelineStagesPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🤝" title="谁是自己人 / 谁是同行（按邮箱域名认）">
+            <DomainRulesPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="📧" title="邮件反应同步（谁打开了 / 谁点了链接）">
+            <LeadsConfigPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="📤" title="客户素材上传链接（免登录）">
+            <UploadLinkPanel clientId={clientId} />
+          </SettingsSection>
+        </>
+      )
+
+    case 'content':
+      return (
+        <>
+          <SettingsSection first icon="📱" title="社媒账号（Instagram · Facebook · TikTok）">
+            <SocialHandlesPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="📝" title="每周自动 Blog（SEO 盯梢）">
+            <WeeklyBlogPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🎬" title="视频工厂配置（出片 / 发片）">
+            <FactoryConfigPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="💬" title="Facebook 评论自动回复">
+            <CommentAutoReplyPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🗂️" title="最近自动回复（审计）">
+            <CommentAuditList clientId={clientId} />
+          </SettingsSection>
+        </>
+      )
+
+    case 'advanced':
+      return (
+        <SettingsSection first icon="🔌" title="MCP API 访问">
+          <ApiKeysPanel clientId={clientId} />
+        </SettingsSection>
+      )
+  }
+}
+
 export default function ClientSettingsPage() {
-  const params       = useParams<{ id: string }>()
+  const params = useParams<{ id: string }>()
   const searchParams = useSearchParams()
+  const [tab, pickTab] = useSettingsTab()
 
   const clientId = params.id
-  const gbpStatus = searchParams.get('gbp')    // 'connected' | 'error' | null
+  const gbpStatus = searchParams.get('gbp')
   const gbpReason = searchParams.get('reason') ?? ''
 
-  const errorMessage = gbpStatus === 'error'
-    ? (ERROR_MESSAGES[gbpReason] ?? '连接过程中发生未知错误，请重试。')
-    : null
+  const errorMessage =
+    gbpStatus === 'error' ? (ERROR_MESSAGES[gbpReason] ?? '连接过程中发生未知错误，请重试。') : null
 
   return (
     <div className="min-h-screen bg-[#f6f7f2]">
-      <div className="mx-auto max-w-3xl px-5 py-8">
-
-        {/* Breadcrumb */}
+      {/* 原先是 max-w-3xl（768px）—— 分组之后内容变短，宽一点少一半的滚动。 */}
+      <div className="mx-auto max-w-4xl px-5 py-8">
         <div className="mb-6 flex items-center gap-2 text-sm text-slate-500">
           <Link
             href={`/dashboard/clients/${clientId}`}
@@ -72,11 +233,7 @@ export default function ClientSettingsPage() {
         </div>
 
         <h1 className="text-2xl font-black text-slate-950">客户配置中心</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          管理客户的平台连接（OAuth 授权）和基础信息（竞品、品牌词等元数据）
-        </p>
 
-        {/* OAuth callback banners */}
         {gbpStatus === 'connected' && (
           <div className="mt-5 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
             <span className="text-xl">✅</span>
@@ -116,275 +273,11 @@ export default function ClientSettingsPage() {
           </div>
         )}
 
-        {/* ── §0 客户状态（真客户闸门） ──────────────────────────────────── */}
-        <div className="mt-8 mb-2 flex items-baseline gap-2">
-          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-            § 0 · 客户状态
-          </p>
-          <span className="text-xs text-slate-400">周期性监测的成本闸门</span>
+        <SettingsTabBar active={tab} onPick={pickTab} />
+
+        <div className="mt-6">
+          <TabBody tab={tab} clientId={clientId} />
         </div>
-
-        <section>
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">🚦</span>
-            <h2 className="font-black text-slate-800">真客户 / 调研档案</h2>
-          </div>
-          <ClientStatusPanel clientId={clientId} />
-        </section>
-
-        {/* ── §1 平台连接（OAuth 类） ────────────────────────────────────── */}
-        <div className="mt-10 mb-2 flex items-baseline gap-2">
-          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-            § 1 · 平台连接
-          </p>
-          <span className="text-xs text-slate-400">OAuth 授权</span>
-        </div>
-
-        {/* GBP Connection Section */}
-        <section>
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">📍</span>
-            <h2 className="font-black text-slate-800">Google Business Profile</h2>
-          </div>
-          <GbpPanel clientId={clientId} />
-        </section>
-
-        <section className="mt-6">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">🏪</span>
-            <h2 className="font-black text-slate-800">发到哪一家门店</h2>
-          </div>
-          <GbpLocationPanel clientId={clientId} />
-        </section>
-
-        {/* 客户自己的邮箱 —— 四条获客管道里唯一一条还在往外漏线索的。
-            这一步只有客户那边的人能点，所以必须是一个按钮 + 一句人话。 */}
-        <section className="mt-6">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">✉️</span>
-            <h2 className="font-black text-slate-800">公司邮箱（客人发来的信）</h2>
-          </div>
-          <MailboxPanel clientId={clientId} />
-        </section>
-
-        {/* Google Ads Connection Section */}
-        <section className="mt-6">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">📢</span>
-            <h2 className="font-black text-slate-800">Google Ads</h2>
-          </div>
-          <GoogleAdsPanel clientId={clientId} />
-        </section>
-
-        <section className="mt-6">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">🩺</span>
-            <h2 className="font-black text-slate-800">广告健康监测</h2>
-          </div>
-          <AdStrategyPanel clientId={clientId} />
-        </section>
-
-        {/* Other connectors — managed on the legacy connectors page.
-            google-ads is intentionally removed from this list (Phase 18.B.3
-            moved it to a dedicated GoogleAdsPanel above). */}
-        <section className="mt-6">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">🔗</span>
-            <h2 className="font-black text-slate-800">其他平台连接</h2>
-          </div>
-          <p className="mb-3 text-xs text-slate-500">
-            以下连接器在「Connectors」页面管理（前期 Phase 14 已上线）。后续会逐步迁移到本页统一管理。
-          </p>
-          <div className="space-y-2">
-            {[
-              { anchor: 'gsc',         label: 'Google Search Console', icon: '🔍', hint: 'GSC 搜索表现 + Indexing API' },
-              { anchor: 'ga4',         label: 'Google Analytics 4',    icon: '📈', hint: '网站真实流量数据' },
-              { anchor: 'meta-ads',    label: 'Facebook 主页',          icon: '📊', hint: 'Meta 广告库 + 公开粉丝数' },
-            ].map(p => (
-              <Link
-                key={p.anchor}
-                href={`/dashboard/clients/${clientId}/connectors/${p.anchor}`}
-                className="group flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 transition hover:border-cyan-300 hover:bg-cyan-50"
-              >
-                <span>{p.icon}</span>
-                <div className="min-w-0 flex-1">
-                  <div className="font-bold">{p.label}</div>
-                  <div className="text-xs text-slate-500">{p.hint}</div>
-                </div>
-                <span className="text-cyan-600 opacity-0 transition group-hover:opacity-100">→</span>
-              </Link>
-            ))}
-          </div>
-        </section>
-
-        {/* ── §2 SEO 基础信息（客户元数据） ───────────────────────────────── */}
-        <div className="mt-10 mb-2 flex items-baseline gap-2">
-          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-            § 2 · SEO 基础信息
-          </p>
-          <span className="text-xs text-slate-400">客户元数据 · 多支柱共用</span>
-        </div>
-
-        <section>
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">🏢</span>
-            <h2 className="font-black text-slate-800">所属行业（决定 AI 读不读同行经验）</h2>
-          </div>
-          <IndustryPanel clientId={clientId} />
-        </section>
-
-        <section className="mt-6">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">📦</span>
-            <h2 className="font-black text-slate-800">主力产品（AI 写文案时逐条读）</h2>
-          </div>
-          <ProductsPanel clientId={clientId} />
-        </section>
-
-        <section className="mt-6">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">📤</span>
-            <h2 className="font-black text-slate-800">客户素材上传链接（免登录）</h2>
-          </div>
-          <UploadLinkPanel clientId={clientId} />
-        </section>
-
-        <section className="mt-6">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">📧</span>
-            <h2 className="font-black text-slate-800">邮件反应同步（谁打开了 / 谁点了链接）</h2>
-          </div>
-          <LeadsConfigPanel clientId={clientId} />
-        </section>
-
-        <section className="mt-6">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">🪜</span>
-            <h2 className="font-black text-slate-800">客人跟进步骤</h2>
-          </div>
-          <PipelineStagesPanel clientId={clientId} />
-        </section>
-
-        <section className="mt-6">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">🎯</span>
-            <h2 className="font-black text-slate-800">主关键词清单</h2>
-          </div>
-          <PrimaryKeywordsPanel clientId={clientId} />
-        </section>
-
-        <section className="mt-6">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">🏷️</span>
-            <h2 className="font-black text-slate-800">品牌词别名</h2>
-          </div>
-          <BrandAliasesPanel clientId={clientId} />
-        </section>
-
-        <section className="mt-6">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">🥊</span>
-            <h2 className="font-black text-slate-800">竞品域名清单</h2>
-          </div>
-          <CompetitorDomainsPanel clientId={clientId} />
-        </section>
-
-        <section className="mt-6">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">⭐</span>
-            <h2 className="font-black text-slate-800">口碑监测身份（GBP / Tripadvisor / 竞品）</h2>
-          </div>
-          <ReputationIdentityPanel clientId={clientId} />
-        </section>
-
-        <section className="mt-6">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">🚫</span>
-            <h2 className="font-black text-slate-800">排除品类词（关键词 gap 过滤）</h2>
-          </div>
-          <ExcludedTopicsPanel clientId={clientId} />
-        </section>
-
-        <section className="mt-6">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">📝</span>
-            <h2 className="font-black text-slate-800">每周自动 Blog（SEO 盯梢）</h2>
-          </div>
-          <WeeklyBlogPanel clientId={clientId} />
-        </section>
-
-        <section className="mt-6">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">⛔</span>
-            <h2 className="font-black text-slate-800">品牌红线短语（内容工厂拒单闸）</h2>
-          </div>
-          <BrandRedlinesPanel clientId={clientId} />
-        </section>
-
-        <section className="mt-6">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">🎬</span>
-            <h2 className="font-black text-slate-800">视频工厂配置（出片 / 发片）</h2>
-          </div>
-          <FactoryConfigPanel clientId={clientId} />
-        </section>
-
-        {/* ── §3 社媒账号（诊断 social 维度数据源） ──────────────────────── */}
-        <div className="mt-10 mb-2 flex items-baseline gap-2">
-          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-            § 3 · 社媒账号
-          </p>
-          <span className="text-xs text-slate-400">驱动诊断引擎社媒维度</span>
-        </div>
-
-        <section>
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">📱</span>
-            <h2 className="font-black text-slate-800">Instagram · Facebook · TikTok</h2>
-          </div>
-          <SocialHandlesPanel clientId={clientId} />
-        </section>
-
-        {/* ── §3.5 社媒评论自动回复（social 支柱 / DAPE 执行） ──────────────── */}
-        <div className="mt-10 mb-2 flex items-baseline gap-2">
-          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-            § 3.5 · 评论自动回复
-          </p>
-          <span className="text-xs text-slate-400">全自动 · AI 分类 + 护栏</span>
-        </div>
-
-        <section>
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">💬</span>
-            <h2 className="font-black text-slate-800">Facebook 评论自动回复</h2>
-          </div>
-          <CommentAutoReplyPanel clientId={clientId} />
-        </section>
-
-        <section className="mt-6">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">🗂️</span>
-            <h2 className="font-black text-slate-800">最近自动回复（审计）</h2>
-          </div>
-          <CommentAuditList clientId={clientId} />
-        </section>
-
-        {/* ── §4 程序化访问（Phase 34） ───────────────────────────────────── */}
-        <div className="mt-10 mb-2 flex items-baseline gap-2">
-          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-            § 4 · 程序化访问
-          </p>
-          <span className="text-xs text-slate-400">客户用自己的 MCP 客户端查看本客户数据</span>
-        </div>
-
-        <section>
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-base">🔌</span>
-            <h2 className="font-black text-slate-800">MCP API 访问</h2>
-          </div>
-          <ApiKeysPanel clientId={clientId} />
-        </section>
-
       </div>
     </div>
   )
