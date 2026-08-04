@@ -1,0 +1,28 @@
+# Magic Engine
+
+> Magic Engine is an AI growth engine for Australian and New Zealand businesses. It connects discovery, analysis, recommended actions, execution and outcome tracking.
+
+## Core product
+
+- [AI Growth Engine](https://magicengine.com.au/ai-growth-engine): how the Magic Engine operating loop works
+- [Free Growth Diagnosis](https://magicengine.com.au/discover): identify the most useful next growth action
+- [AI Adoption and Training](https://magicengine.com.au/training): practical AI rollout for AU/NZ teams
+- [GEO and AI Visibility](https://magicengine.com.au/geo): help search and AI systems understand and recommend a business
+
+## Industry solutions
+
+- [Real Estate](https://magicengine.com.au/real-estate): audience growth for agents and brand/project demand for developers
+- [Travel](https://magicengine.com.au/travel): content, SEO, GEO, paid demand, effective leads and CRM conversion
+- [Local Services](https://magicengine.com.au/local-services): local visibility, reputation, enquiries and follow-up
+
+## Product principles
+
+- Magic Engine is a growth and execution layer, not a forced replacement for every CRM or website.
+- Anonymous advertising audiences are not represented as identifiable people.
+- Raw audience and contact data is never transferred between clients.
+- Funnel stages are reported as known, unknown or connected; missing outcomes are not inferred.
+- Public claims should be grounded in client-provided facts or traceable source data.
+
+## Markets and languages
+
+Magic Engine is designed for Australia and New Zealand. Delivery supports English and Chinese-speaking teams.
