@@ -610,9 +610,13 @@ async function pushDiagnosticItems(
       kind: 'diagnostic_findings',
       client_id: clientId,
       client_name: nameOf(clientId),
+      // 🔴 别再让人去体检页「挑要处理的」——那页是只读报告，一个可执行按钮都没有
+      //    （2026-08-04 PM 实测：「点击到健康体检页面，出现的页面我不知道应该做什么」）。
+      //    体检查出的问题现在由每周方案自动排成看板上的动作，所以这条只报「查到了什么」，
+      //    并把人送到**真的能动手的地方**（执行看板），不是送到报告里。
       what: `本周体检查出 ${counts}问题。最要紧的一条：${v.top}`,
-      how: '打开链接看完整诊断报告，挑要处理的告诉我，能自动做的我直接做掉',
-      href: `https://app.magicengine.com.au/dashboard/clients/${clientId}/diagnostic`,
+      how: '不用你挑 —— 每周方案会把这些自动排成看板上的动作。点开是执行看板，看方向对不对；觉得漏了哪条回我一句，我单独加',
+      href: `https://app.magicengine.com.au/dashboard/clients/${clientId}/execution`,
     })
   }
 }
