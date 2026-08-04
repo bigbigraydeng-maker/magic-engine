@@ -2,7 +2,7 @@
  * PATCH /api/clients/[id]/zhangqian/confirm
  *
  * Fires when a user approves the Zhangqian discovery report. Writes discovered
- * data back into operational tables (clients + keywords) and stamps the
+ * data back into operational tables (clients + master_briefs) and stamps the
  * discovery row as confirmed.
  *
  * Security: Bearer token (INTERNAL_API_KEY)
@@ -15,7 +15,8 @@ import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { getLatestDiscovery } from '@/lib/zhangqian/persistor'
 import { syncAiTrackerQuestions } from '@/lib/zhangqian/sync-ai-visibility'
 import { getActiveBrief } from '@/lib/content/brief-injector'
-import type { DiscoveredCompetitor, DiscoveryReport, KeywordType } from '@/lib/zhangqian/types'
+import { newSeedKeywords, mergedSeedKeywords } from '@/lib/zhangqian/seed-keywords'
+import type { DiscoveredCompetitor, DiscoveryReport } from '@/lib/zhangqian/types'
 
 // ─── Request body types ───────────────────────────────────────────────────────
 
@@ -27,16 +28,12 @@ interface BusinessPatch {
   tiktok_handle?: string
 }
 
-interface KeywordInput {
-  keyword: string
-  type: KeywordType
-  estimated_volume?: number | null
-}
-
 interface ConfirmBody {
   confirmed_by: string
   business?: BusinessPatch
-  keywords?: KeywordInput[]
+  // No `keywords` field: seed keywords are read from the stored discovery
+  // payload, not resent by the caller. The old field was never populated by
+  // any caller and wrote to a table that no longer exists.
 }
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
@@ -63,8 +60,16 @@ export async function PATCH(
     }
 
     const clientUpdated = await applyBusinessPatch(clientId, body.business)
-    const keywordsAdded = await upsertKeywords(clientId, body.keywords)
     await stampConfirmed(discovery.id, body.confirmed_by)
+
+    // Seed keywords into the active brief. Non-fatal, same as the two syncs
+    // below: a brief that does not exist yet must not block confirmation.
+    let keywordsAdded = 0
+    try {
+      keywordsAdded = await mergeSeedKeywordsIntoBrief(clientId, discovery.payload as DiscoveryReport)
+    } catch (seedErr) {
+      console.error('[zhangqian/confirm] seed keyword merge failed (non-fatal)', seedErr)
+    }
 
     // Bridge to AI Visibility — sync Zhangqian's ai_tracker_questions into
     // the AI Visibility queries table. Non-fatal: a sync failure must not
@@ -123,30 +128,46 @@ async function applyBusinessPatch(
   return true
 }
 
-async function upsertKeywords(
+/**
+ * Merges Zhangqian's discovered seed keywords into the active master brief's
+ * keyword_seeds. Preserves anything already there. Returns how many are new.
+ *
+ * 🔴 Why the brief and not clients.primary_keywords — src/lib/keywords/resolver.ts
+ *    defines two layers: clients.primary_keywords is the FDE's hand-picked
+ *    authoritative list, master_briefs.keyword_seeds is the discovery-inferred
+ *    one, and the FDE layer always wins on read. Writing discovery output into
+ *    the FDE layer would silently overwrite hand-picked keywords, and the
+ *    resolver explicitly prohibits direct writes to it outside
+ *    PATCH /api/clients/[id]/primary-keywords.
+ *
+ * Only the keyword strings move across. The volume / kd numbers on these rows
+ * are the agent's own guesses — some payload rationales say so in as many words
+ * ("DataForSEO returned empty, values are inferred") — and persisting a guess
+ * as if it were measured is what the client-data rule forbids. Real volumes
+ * arrive later from the weekly keyword_snapshots run.
+ *
+ * (This replaces an `upsertKeywords` that wrote to the `keywords` table,
+ * archived on 2026-05-30. It was unreachable dead code — the UI has only ever
+ * sent `confirmed_by` — so Zhangqian's keywords went nowhere at all.)
+ */
+async function mergeSeedKeywordsIntoBrief(
   clientId: string,
-  keywords: KeywordInput[] | undefined,
+  payload: DiscoveryReport,
 ): Promise<number> {
-  if (!keywords || keywords.length === 0) return 0
+  const activeBrief = await getActiveBrief(clientId)
+  if (!activeBrief) return 0
 
-  const rows = keywords.map((kw) => ({
-    client_id: clientId,
-    keyword: kw.keyword,
-    status: 'pending' as const,
-    source: 'zhangqian' as const,
-    volume: kw.estimated_volume ?? 0,
-    intent: kw.type === 'transactional' ? ('transactional' as const) : ('informational' as const),
-    kd: 0,
-    cpc: 0,
-    opportunity_score: 50,
-  }))
+  const existing = (activeBrief.keyword_seeds as string[] | null) ?? []
+  const toAdd = newSeedKeywords(payload.seed_keywords, existing)
+  if (toAdd.length === 0) return 0
 
   const { error } = await supabaseAdmin
-    .from('keywords')
-    .upsert(rows, { onConflict: 'client_id,keyword' })
+    .from('master_briefs')
+    .update({ keyword_seeds: mergedSeedKeywords(payload.seed_keywords, existing) })
+    .eq('id', activeBrief.id)
 
-  if (error) throw new Error(`Failed to upsert keywords: ${error.message}`)
-  return rows.length
+  if (error) throw new Error(`Failed to update brief keyword_seeds: ${error.message}`)
+  return toAdd.length
 }
 
 async function stampConfirmed(discoveryId: string, confirmedBy: string): Promise<void> {

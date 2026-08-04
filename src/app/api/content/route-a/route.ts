@@ -40,16 +40,22 @@ export async function POST(req: NextRequest) {
     const campaign = campaign_id ? await getCampaignById(client_id, campaign_id) : null
     const campaignText = campaign ? formatCampaignForPrompt(campaign) : ''
 
-    // 2. Find keyword record if it exists (to get SEO context + ID)
+    // 2. Most recent measurement of this keyword, for SEO context in the prompt.
+    //    🔴 2026-08-05: this read the `keywords` table, archived on 2026-05-30.
+    //    The live source is `keyword_snapshots` — a time series, so order by
+    //    date and take one. `.single()` would throw here once a keyword has
+    //    been measured more than once (PGRST116).
     const { data: kwRecord } = await supabaseAdmin
-      .from('keywords')
-      .select('id, keyword, volume, intent, opportunity_score')
+      .from('keyword_snapshots')
+      .select('keyword, search_volume, keyword_difficulty, intent')
       .eq('client_id', client_id)
       .eq('keyword', keyword)
-      .single()
+      .order('snapshot_date', { ascending: false })
+      .limit(1)
+      .maybeSingle()
 
     const seoContext = kwRecord
-      ? `SEO Data: Monthly Volume ${kwRecord.volume ?? 'N/A'}, Intent: ${kwRecord.intent ?? 'N/A'}, Opportunity Score: ${kwRecord.opportunity_score ?? 'N/A'}`
+      ? `SEO Data: Monthly Volume ${kwRecord.search_volume ?? 'N/A'}, Intent: ${kwRecord.intent ?? 'N/A'}, Keyword Difficulty: ${kwRecord.keyword_difficulty ?? 'N/A'}`
       : ''
 
     // 3. Generate V1 and V2 text content in parallel
@@ -147,7 +153,9 @@ The script should be 100-200 words. Caption 50-100 words. 8-12 hashtags includin
       route: 'route_a' as const,
       platforms: targetPlatforms,
       source_brief_id: brief.id,
-      source_keyword_id: kwRecord?.id ?? null,
+      // No source_keyword_id: that column does not exist on content_posts in
+      // production, so every insert here failed with PGRST204 (unknown column)
+      // — this route has never actually saved a post. Verified 2026-08-05.
       campaign_id: campaign?.id ?? null,
       content_mode: campaign ? 'campaign' : 'brand',
       status: 'draft' as const,
