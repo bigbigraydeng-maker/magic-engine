@@ -20,7 +20,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { generateVoiceover } from '@/lib/audio/minimax-voice'
 import { runMuapi } from '@/lib/muapi/client'
 import { getActiveBrief } from '@/lib/content/brief-injector'
-import { loadLecturePost } from './lecture-post'
+import { loadLecturePost, saveTranscriptAndCaptions } from './lecture-post'
 import { detectActiveRegion, planClipFit } from './screen-clip'
 import type { LectureScript } from './lecture-script'
 import {
@@ -34,6 +34,11 @@ import {
 
 const exec = promisify(execFile)
 const BUCKET = 'content-factory'
+
+/** 分步日志:做片是长活，出问题必须一眼看出死在哪一步(Render 日志里直接可读)。 */
+function step(jobId: string, msg: string): void {
+  console.log(`[lecture ${jobId.slice(0, 8)}] ${new Date().toISOString()} ${msg}`)
+}
 const CJK_FONT = process.env.FACTORY_CJK_FONT || '/System/Library/Fonts/Supplemental/Arial Unicode.ttf'
 // 数字人模型(Muapi)。⚠️ 未实测：首跑前确认 slug 与入参(见文件头)。
 const OMNIHUMAN_MODEL = 'omnihuman-1-5'
@@ -58,14 +63,26 @@ const DEFAULT_COLORS: SlideColors = { bg: '#1A1A2E', text: '#FFFFFF', accent: '#
  * 被回收时抛错，让当前 worker 停手。
  */
 async function patchJob(jobId: string, patch: Record<string, unknown>): Promise<void> {
-  const { data, error } = await supabaseAdmin
-    .from('content_factory_render_jobs')
-    .update({ ...patch, updated_at: new Date().toISOString() })
-    .eq('id', jobId)
-    .neq('status', 'failed')
-    .select('id')
-  if (error) throw error
-  if (!data || data.length === 0) throw new Error('任务已被回收(超时标失败)，本次做片作废')
+  // 写状态失败不该让整单白干:网络抖一下重试两次
+  let lastErr: unknown
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('content_factory_render_jobs')
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq('id', jobId)
+        .neq('status', 'failed')
+        .select('id')
+      if (error) throw error
+      if (!data || data.length === 0) throw new Error('任务已被回收(超时标失败)，本次做片作废')
+      return
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('已被回收')) throw e
+      lastErr = e
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 2000 * attempt))
+    }
+  }
+  throw new Error(`更新任务状态失败(重试 3 次): ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`)
 }
 
 /** 心跳：长阶段(逐段生成)期间定期 touch updated_at，防被卡死回收误杀。 */
@@ -131,12 +148,24 @@ async function whisperTranscribe(audioFile: string): Promise<Transcript> {
   form.append('timestamp_granularities[]', 'segment')
   form.append('timestamp_granularities[]', 'word')   // 逐字时间戳:句首时间太粗，掐头会差 1-2 秒
 
-  const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: form,
-    signal: AbortSignal.timeout(300000),
-  })
+  // 听写要上传几 MB 音频，网络抖一下就整单作废——重试 3 次(和下载同样的保护)
+  let res: Response | null = null
+  let lastErr: unknown
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form,
+        signal: AbortSignal.timeout(300000),
+      })
+      break
+    } catch (e) {
+      lastErr = e
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 4000 * attempt))
+    }
+  }
+  if (!res) throw new Error(`听写请求发不出去(重试 3 次): ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`)
   if (!res.ok) throw new Error(`Whisper 听写失败 ${res.status}: ${await res.text()}`)
   const json = (await res.json()) as {
     segments?: { start: number; end: number; text: string }[]
@@ -315,6 +344,32 @@ async function renderCaptions(chunks: SubtitleChunk[], dir: string): Promise<str
  * personFile 提供画面与声音(自己录的整段，或数字人拼好的整段)。
  */
 /**
+ * 录像预处理 —— 先一次性转成「已裁成下半屏尺寸的 H.264」，后面每段直接用。
+ *
+ * 为什么必须做:手机录的是 HEVC(H.265)，软件解码比 H.264 贵 3-5 倍；
+ * 原来每段合成都要重新解一遍 HEVC 再缩放，单核机器上一段 7 秒的片头就要 4 分钟。
+ * 转成小的 H.264 之后，后面 6 段的解码几乎不要钱。
+ */
+async function prepPersonTrack(params: {
+  src: string
+  seek: number
+  duration: number
+  dir: string
+}): Promise<string> {
+  const { src, seek, duration, dir } = params
+  const out = join(dir, 'person.mp4')
+  await exec('ffmpeg', [
+    '-y', '-loglevel', 'error',
+    '-ss', seek.toFixed(3), '-t', duration.toFixed(3), '-i', src,
+    '-vf', `scale=${W}:${H - SLIDE_H}:force_original_aspect_ratio=increase,crop=${W}:${H - SLIDE_H},fps=30`,
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac', '-ar', '44100', '-ac', '1',
+    out,
+  ], { maxBuffer: 32 * 1024 * 1024 })
+  return out
+}
+
+/**
  * 分段合成 —— 一段一次 ffmpeg，最后 concat。
  *
  * 为什么不一把梭:近 3 分钟的讲课有 ~80 条字幕，一次性丢给 ffmpeg 就是 86 个输入、
@@ -334,6 +389,7 @@ async function composePart(params: {
   outFile: string
 }): Promise<void> {
   const { personFile, personSeek, duration, upperFile, upperIsClip, captions, captionFiles, bg, outFile } = params
+  // personFile 已是「裁好的下半屏 H.264」(见 prepPersonTrack)，这里只做定位不再缩放
   const inputs: string[] = ['-ss', personSeek.toFixed(3), '-t', duration.toFixed(3), '-i', personFile]
   if (upperIsClip) inputs.push('-i', upperFile)
   else inputs.push('-loop', '1', '-t', duration.toFixed(3), '-i', upperFile)
@@ -342,8 +398,7 @@ async function composePart(params: {
   const bgHex = `0x${bg.replace('#', '')}`
   const filters: string[] = [
     `color=c=${bgHex}:s=${W}x${H}:d=${duration.toFixed(3)}[base]`,
-    `[0:v]scale=${W}:${H - SLIDE_H}:force_original_aspect_ratio=increase,crop=${W}:${H - SLIDE_H}[person]`,
-    `[base][person]overlay=0:${SLIDE_H}:shortest=0[v0]`,
+    `[base][0:v]overlay=0:${SLIDE_H}:shortest=0[v0]`,
     `[1:v]scale=${W}:${SLIDE_H}[up]`,
     `[v0][up]overlay=0:0[v1]`,
   ]
@@ -362,7 +417,9 @@ async function composePart(params: {
     '-filter_complex', filters.join(';'),
     '-map', `[${cur}]`, '-map', '0:a',
     '-t', duration.toFixed(3),
-    '-r', '30', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+    // veryfast/crf25:ultrafast 虽快但文件大 5 倍(4分半片子 227MB)，会撞存储 50MB 上限——
+    // 真实事故:第2讲成片做完了却连传三次失败。真正的提速在录像预转码那一步，这里换回稳的。
+    '-r', '30', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '25', '-pix_fmt', 'yuv420p',
     '-c:a', 'aac', '-ar', '44100', '-ac', '1',
     outFile,
   ], { maxBuffer: 32 * 1024 * 1024 })
@@ -385,6 +442,11 @@ async function composeLecture(params: {
   const { jobId, personFile, personStart, parts, slideFiles, screenClipFiles, captionChunks, captionFiles, bg, dir, outFile } = params
   if (parts.length !== slideFiles.length) throw new Error('课件数和时间段数不一致')
 
+  // 先把录像转成「已裁好的下半屏 H.264」并掐掉片头，后面每段直接切片用
+  const totalDur = parts[parts.length - 1].end
+  const personTrack = await prepPersonTrack({ src: personFile, seek: personStart, duration: totalDur, dir })
+  await heartbeat(jobId, 'assembling')
+
   const partFiles: string[] = []
   for (let i = 0; i < parts.length; i++) {
     const { start, end } = parts[i]
@@ -405,8 +467,8 @@ async function composeLecture(params: {
 
     const partOut = join(dir, `part_${String(i).padStart(2, '0')}.mp4`)
     await composePart({
-      personFile,
-      personSeek: personStart + start,
+      personFile: personTrack,
+      personSeek: start,        // 预转码时已掐掉片头，这里用段内相对时间
       duration: dur,
       upperFile: screenClipFiles[i] ?? slideFiles[i],
       upperIsClip: Boolean(screenClipFiles[i]),
@@ -593,10 +655,29 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
     if (production.method === 'self_record') {
       if (!production.recording_url) throw new Error('没有上传的录像')
       personFile = join(dir, 'rec.mp4')
+      step(jobId, '开始下载录像')
       await download(production.recording_url, personFile)
+      step(jobId, '录像下载完成')
       await heartbeat(jobId, 'rendering')   // 大文件下载可能几分钟，别让卡死回收误杀
       const rawDuration = await ffprobeDuration(personFile)
-      const { segments, words } = await whisperTranscribe(await extractAudio(personFile, dir))
+
+      // 听写结果有留档且录像没换过 → 直接复用(省一次听写费用，也保住客户校准过的字幕)
+      const cached = loaded.transcript
+      let segments: TranscriptSegment[]
+      let words: { start: number; end: number; word: string }[]
+      if (cached && cached.recordingUrl === production.recording_url && cached.segments.length > 0) {
+        step(jobId, `复用已存的听写结果(${cached.segments.length} 段)`)
+        segments = cached.segments
+        words = cached.words ?? []
+      } else {
+        step(jobId, '抽音轨')
+        const audioFile = await extractAudio(personFile, dir)
+        step(jobId, '开始听写')
+        const t = await whisperTranscribe(audioFile)
+        segments = t.segments
+        words = t.words
+        step(jobId, `听写完成(${segments.length} 段)`)
+      }
       await heartbeat(jobId, 'rendering')
 
       // 掐头去尾：录像开头的寒暄/清嗓/看提词器/重来一遍，结尾伸手关录制，都不该进成片。
@@ -629,6 +710,26 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
       captionChunks = splitSubtitleChunks(shifted)
         .filter((c) => c.end > 0.15)
         .map((c) => ({ ...c, start: Math.max(0, c.start) }))
+
+      // 客户校准过字幕就以他的为准(时间不动、只换字)。条数对不上说明脚本/录像变过，按新的来。
+      const corrected = loaded.captions
+      if (corrected && corrected.length === captionChunks.length) {
+        step(jobId, `用客户校准过的字幕(${corrected.length} 条)`)
+        captionChunks = captionChunks.map((c, i) => ({ ...c, text: corrected[i].text }))
+      }
+
+      // 留档:客户能在页面上校准，下次重做片也不用再听写
+      await saveTranscriptAndCaptions({
+        clientId: job.client_id,
+        postId: job.content_post_id,
+        transcript: {
+          recordingUrl: production.recording_url,
+          segments,
+          words,
+          savedAt: new Date().toISOString(),
+        },
+        captions: captionChunks,
+      }).catch(() => { /* 留档失败不该让整单白干 */ })
     } else {
       const renderCfg = await clientRenderConfig(job.client_id)
       const track = await buildDigitalHumanTrack({
@@ -652,6 +753,7 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
 
     await patchJob(jobId, { status: 'assembling' })
 
+    step(jobId, '画课件')
     const slideFiles = await renderSlides(entries.map((e) => e.slide), colors, dir)
 
     // 配了录屏的段:切成正好这段长度的画面，铺在课件位上(切不出来就照常用课件)
@@ -665,8 +767,10 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
       }))
     }
 
+    step(jobId, `画字幕(${captionChunks.length} 条)`)
     const captionFiles = await renderCaptions(captionChunks, dir)
 
+    step(jobId, '开始合成')
     const outFile = join(dir, 'final.mp4')
     await composeLecture({
       jobId, personFile, personStart, parts,
@@ -675,9 +779,30 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
       bg: colors.bg, dir, outFile,
     })
 
+    step(jobId, '合成完成，上传成片')
     const path = `${job.client_id}/render/${jobId}/final.mp4`
-    const up = await supabaseAdmin.storage.from(BUCKET).upload(path, await readFile(outFile), { contentType: 'video/mp4', upsert: true })
-    if (up.error) throw up.error
+    // 成片几十 MB，上传掉线会把前面几分钟的活全废掉——重试 3 次(真实事故:第2讲连挂三次都死在这)
+    const bytes = await readFile(outFile)
+    const MB = bytes.length / 1048576
+    step(jobId, `成片 ${MB.toFixed(1)}MB`)
+    if (MB > 49) {
+      throw new Error(`成片 ${MB.toFixed(0)}MB 超过存储上限(50MB) — 这一讲录得太长了，分成两条会更好`)
+    }
+    let upErr: unknown
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const up = await supabaseAdmin.storage.from(BUCKET)
+          .upload(path, bytes, { contentType: 'video/mp4', upsert: true })
+        if (up.error) throw up.error
+        upErr = null
+        break
+      } catch (e) {
+        upErr = e
+        step(jobId, `上传失败(第 ${attempt} 次)，重试`)
+        if (attempt < 3) await new Promise((r) => setTimeout(r, 5000 * attempt))
+      }
+    }
+    if (upErr) throw new Error(`成片上传失败(重试 3 次): ${upErr instanceof Error ? upErr.message : String(upErr)}`)
     const { data: pub } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(path)
 
     await patchJob(jobId, { status: 'ready_for_review', output_url: pub.publicUrl })

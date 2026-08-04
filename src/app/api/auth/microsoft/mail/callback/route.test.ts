@@ -127,10 +127,19 @@ describe('不该发生的事', () => {
 })
 
 describe('客户在 Microsoft 那边点了取消', () => {
-  it('不是故障 —— 照实说一句，别让人以为系统坏了', async () => {
+  /**
+   * Microsoft 没给原因时，措辞必须是**中性**的。
+   *
+   * 原先这里写死「取消了授权」，但 `access_denied` 同样会在「你不是管理员」
+   * 「这个租户不允许」时返回 —— 断言人点了取消，会把他往错的方向推
+   * （他会再点一次，而问题根本不在他这）。给了 `error_description` 就原样带出来，
+   * 没给就只说「没有完成」，不猜原因。
+   */
+  it('不是故障 —— 照实说一句，但不替 Microsoft 编原因', async () => {
     const url = landed(await call({ error: 'access_denied' }))
     expect(url.searchParams.get('mail')).toBe('error')
-    expect(url.searchParams.get('why')).toContain('取消')
+    expect(url.searchParams.get('why')).toContain('没有完成授权')
+    expect(url.searchParams.get('why')).not.toContain('取消')
     expect(exchangeCodeForTokens).not.toHaveBeenCalled()
   })
 })
@@ -172,6 +181,45 @@ describe('管理员替全公司批准之后回来', () => {
     expect(url.searchParams.get('mail')).toBe('error')
     expect(url.searchParams.get('why')).toContain('没有批准')
     expect(upsertConnection).not.toHaveBeenCalled()
+  })
+
+  /**
+   * **这条是 2026-08-03 那次事故的根因。**
+   *
+   * v2.0 的 adminconsent 端点失败时回的是 `admin_consent=True` **加上** 一个
+   * `error=...`。只看 `admin_consent` 就会把一次彻底失败读成成功 —— 于是页面
+   * 显示「✓ 管理员批准了」，PM 照着做下一步，`info@` 再次撞墙，而所有人都以为
+   * 批准已经生效，去别处找原因。
+   *
+   * 报错成功比报错失败贵得多：后者会让人重试，前者会让人朝错的方向找一整天。
+   */
+  it('带着 error 回来 → 必须报失败，哪怕 admin_consent=True', async () => {
+    const u = new URL('https://app.magicengine.com.au/api/auth/microsoft/mail/callback')
+    u.searchParams.set('admin_consent', 'True')
+    u.searchParams.set('error', 'consent_required')
+    const req = new NextRequest(u, {
+      headers: { cookie: `ms_mail_oauth_state=${NONCE}:${CLIENT}` },
+    })
+    const url = landed(await GET(req))
+    expect(url.searchParams.get('mail')).toBe('error')
+    expect(url.searchParams.get('mail')).not.toBe('admin_ok')
+  })
+
+  /**
+   * 把 Microsoft 自己的说法带出来。
+   *
+   * 原先一律写「在 Microsoft 那边取消了授权」，而真实原因往往是「你不是管理员」
+   * 「这个租户不允许」—— **说错原因比不说更糟**，人会照着错的方向去试。
+   */
+  it('把 Microsoft 给的原因原样带回去，不自己编一个', async () => {
+    const u = new URL('https://app.magicengine.com.au/api/auth/microsoft/mail/callback')
+    u.searchParams.set('error', 'access_denied')
+    u.searchParams.set('error_description', 'AADSTS90094: 需要管理员权限')
+    const req = new NextRequest(u, {
+      headers: { cookie: `ms_mail_oauth_state=${NONCE}:${CLIENT}` },
+    })
+    const url = landed(await GET(req))
+    expect(url.searchParams.get('why')).toContain('AADSTS90094')
   })
 
   /** 没有授权码这条路走不到换令牌，但「不存」这件事必须是明确的，不能靠巧合。 */

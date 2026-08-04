@@ -15,6 +15,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Prescription } from '@/types/diagnostic'
 import { deriveInitiativesFromPrescription } from './initiative-derive'
 import { generateExecutionItems } from './execution-generator'
+import { buildPrescriptionDecisionPatch } from './prescription-patch'
 
 /** 落地一份处方需要的最小字段集 —— 调用方自己 select 这几列即可。 */
 export type LandablePrescription = Pick<
@@ -158,8 +159,10 @@ async function updateOneRow(
 /**
  * 落地。失败会 throw —— 调用方负责决定怎么呈现（路由返 500 / cron 记 error 并把处方标 failed）。
  *
- * @param approvedBy 谁批的。写进日志备查；**不写进表**（prescriptions 没有这一列，
- *                   写了整条 UPDATE 会失败）。
+ * @param approvedBy 谁批的。写进 `approved_by` 列 + 日志备查。
+ *                   这一列由 20260804020000 补上（在那之前写它会让整条 UPDATE 失败，
+ *                   所以老代码只敢记日志）。人工批准传登录会话里的邮箱，周更自动落地传
+ *                   'prescription-weekly（自动落地）'—— 事后要分得清哪份是人批的。
  */
 export async function landPrescription(
   supabase: SupabaseClient,
@@ -222,7 +225,7 @@ export async function landPrescription(
 
   const marked = await updateOneRow(
     supabase,
-    { status: 'approved', approved_at: new Date().toISOString() },
+    buildPrescriptionDecisionPatch({ status: 'approved', approved_by: approvedBy }),
     { id: prescription.id, clientId: prescription.client_id },
   )
   if (!marked.ok) throw new Error(`标记处方已批准失败：${marked.why}`)

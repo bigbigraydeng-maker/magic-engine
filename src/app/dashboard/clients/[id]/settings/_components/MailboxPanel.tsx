@@ -89,6 +89,110 @@ function ConnectButton({
   )
 }
 
+/**
+ * 连邮箱的两步向导。
+ *
+ * 为什么做成**编号的两步**，而不是一个按钮加一段说明（CTS 实测连挂两次）：
+ *
+ *   第一次 —— info@ 点了按钮，撞上「需要管理员批准」，卡死。
+ *   第二次 —— 管理员点了同一个按钮，浏览器里已经登着他自己的账号，
+ *             Microsoft 根本没问要用哪个，直接把 `bdm@` 连了上去。
+ *
+ * 两次都不是人没看清，是界面把**两件必须分开做的事**摆成了一个按钮：
+ * 「让公司放行」和「连上那个邮箱」。所以现在它们是第 1 步和第 2 步，
+ * 各自有各自的按钮，第 2 步强制先说清楚要连哪个邮箱。
+ */
+function ConnectWizard({
+  clientId,
+  adminApproved,
+}: {
+  clientId: string
+  adminApproved: boolean
+}) {
+  const [addr, setAddr] = useState('')
+  const target = addr.trim()
+  const connectHref =
+    `/api/auth/microsoft/mail/start?clientId=${clientId}` +
+    (target ? `&loginHint=${encodeURIComponent(target)}` : '')
+
+  const step = 'flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-black'
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-slate-700">
+        还没连。客人现在发到公司邮箱的询价，<strong>系统里看不到</strong>。
+      </p>
+
+      {/* ── 第 1 步 ───────────────────────────────────────── */}
+      <div className="flex gap-3">
+        <span
+          className={`${step} ${adminApproved ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-white'}`}
+        >
+          {adminApproved ? '✓' : '1'}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold text-slate-800">
+            让公司放行 —— <span className="font-normal text-slate-500">管理员点一次，只用做一遍</span>
+          </p>
+          <p className="mt-0.5 text-xs text-slate-500">
+            很多公司的 Microsoft 365 不让员工自己给外部软件授权。
+            <strong>这一步不会连上任何邮箱</strong>，它只是开门 —— 所以谁点都不会连错。
+          </p>
+          {adminApproved ? (
+            <p className="mt-1.5 text-xs font-bold text-emerald-700">✓ 已经批准过了，去做第 2 步</p>
+          ) : (
+            <a
+              href={`/api/auth/microsoft/mail/start?clientId=${clientId}&admin=1`}
+              className="mt-2 inline-block rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+            >
+              管理员批准
+            </a>
+          )}
+        </div>
+      </div>
+
+      {/* ── 第 2 步 ───────────────────────────────────────── */}
+      <div className="flex gap-3">
+        <span className={`${step} bg-slate-900 text-white`}>2</span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold text-slate-800">连上要收信的那个邮箱</p>
+          <p className="mt-0.5 text-xs text-slate-500">
+            先写清楚要连哪个 —— 浏览器里已经登着别的 Microsoft 账号时，
+            <strong>Microsoft 不会问你用哪个，会直接拿当前那个走完</strong>。写了地址它就会把那个账号摆出来。
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <input
+              type="email"
+              value={addr}
+              onChange={(e) => setAddr(e.target.value)}
+              placeholder="要连哪个邮箱？例如 info@example.co.nz"
+              className="min-w-[16rem] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+            <a
+              href={connectHref}
+              aria-disabled={!target}
+              className={
+                target
+                  ? 'shrink-0 rounded-lg bg-slate-900 px-4 py-2 text-sm font-black text-white hover:bg-slate-700'
+                  : 'pointer-events-none shrink-0 rounded-lg bg-slate-200 px-4 py-2 text-sm font-black text-slate-400'
+              }
+            >
+              连接这个邮箱
+            </a>
+          </div>
+          {!target && (
+            <p className="mt-1 text-xs text-slate-400">填了邮箱地址才能继续 —— 这一步就是用来防连错的。</p>
+          )}
+        </div>
+      </div>
+
+      <p className="text-xs text-slate-400">
+        我们只读这一个邮箱，不碰公司里其他任何邮箱；也不会改它 —— 不标已读、不移动、不删除。
+      </p>
+    </div>
+  )
+}
+
 export function MailboxPanel({ clientId }: { clientId: string }) {
   const params = useSearchParams()
   const [connections, setConnections] = useState<PlatformConnectionSummary[] | null>(null)
@@ -166,17 +270,7 @@ export function MailboxPanel({ clientId }: { clientId: string }) {
       {connections === null ? (
         <p className="text-sm text-slate-400">读取中…</p>
       ) : active.length === 0 ? (
-        <>
-          <p className="text-sm text-slate-700">
-            还没连。客人现在发到公司邮箱的询价，<strong>系统里看不到</strong>。
-          </p>
-          <p className="mt-1 text-xs text-slate-500">
-            点下面的按钮，用<strong>平时收这个邮箱的那个账号</strong>登录一次就好。
-            我们只读这一个邮箱，不碰公司里其他任何邮箱。
-          </p>
-          <ConnectButton clientId={clientId} label="连接公司邮箱" primary />
-          <AdminConsentHint clientId={clientId} />
-        </>
+        <ConnectWizard clientId={clientId} adminApproved={adminApproved} />
       ) : (
         <>
           <ul className="space-y-2">

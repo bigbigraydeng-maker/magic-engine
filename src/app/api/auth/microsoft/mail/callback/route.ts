@@ -41,9 +41,10 @@ export async function GET(req: NextRequest) {
   const code = url.searchParams.get('code')
   const state = url.searchParams.get('state')
 
-  // 客户在 Microsoft 页面上点了「取消」，或者管理员拒绝了 —— 不是故障，
+  // 客户在 Microsoft 页面上点了「取消」，或者管理员那一步没批成 —— 不是故障，
   // 照实说一句，别让人以为系统坏了。
   const denied = url.searchParams.get('error')
+  const deniedWhy = url.searchParams.get('error_description')
 
   const cookie = req.cookies.get(MICROSOFT_STATE_COOKIE)?.value ?? ''
   const [nonce, clientId] = cookie.split(':')
@@ -53,8 +54,24 @@ export async function GET(req: NextRequest) {
   // 里为什么必须分两步）。这一步不存任何东西 —— 门开了，还得 info@ 自己进。
   const adminConsent = url.searchParams.get('admin_consent')
 
+  /**
+   * `error` 必须**先于** `admin_consent` 判断。
+   *
+   * v2.0 的 adminconsent 端点失败时回的是 `admin_consent=True` **加上** 一个
+   * `error=...` —— 只看 `admin_consent` 会把一次彻底失败读成成功。
+   * 2026-08-03 就是这么让 PM（和我）以为批准已经生效，直到 info@ 再次撞墙。
+   *
+   * 顺带把 Microsoft 自己的说法带出来。原先一律写「在 Microsoft 那边取消了
+   * 授权」，而实际原因往往是「你不是管理员」「租户不允许」—— 说错原因比不说
+   * 更糟，人会照着错的方向去试。
+   */
   if (denied) {
-    return back(knownClient, { mail: 'error', why: '在 Microsoft 那边取消了授权' })
+    return back(knownClient, {
+      mail: 'error',
+      why: deniedWhy?.trim()
+        ? `Microsoft 说：${deniedWhy.trim().slice(0, 300)}`
+        : '在 Microsoft 那边没有完成授权',
+    })
   }
   if (adminConsent) {
     return back(

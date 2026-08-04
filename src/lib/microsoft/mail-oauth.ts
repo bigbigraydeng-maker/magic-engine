@@ -70,9 +70,28 @@ export const MICROSOFT_TOKEN_URL = `${AUTHORITY}/token`
  * 的是 IT 管理员，如果它同时回一个授权码，我们就会把**管理员自己的邮箱**存成
  * 客户的收信箱，而这正是这条管道最贵的错误。批准和连接必须是两步：管理员开门，
  * info@ 自己进门。
+ *
+ * ## 2026-08-03：这个地址原先是错的，批了等于没批
+ *
+ * 原先写的是 `https://login.microsoftonline.com/common/adminconsent` —— **v1 的
+ * 端点**。CTS 的管理员点了、页面也跳回来了，然后 `info@` 再去连，照样撞
+ * 「需要管理员批准」。三处错，每一处单独都足以让它失效：
+ *
+ * **① v1 端点不接受 `scope`，它批的是应用注册里「静态配置」的那些权限。**
+ * 我们整套走的是动态授权（权限在请求时才带上，注册里没静态配一份），
+ * 所以 v1 批下去的是一个空集合 —— 一个字都没批到。必须用
+ * [v2.0 端点](https://learn.microsoft.com/en-us/entra/identity-platform/v2-admin-consent)，
+ * 它的 `scope` 是**必填**。
+ *
+ * **② `common` 不是这个端点的合法租户值。** 文档只认 GUID、租户域名、或
+ * `organizations`。管理员批准本来就只对公司账号成立（个人 Outlook.com 账号
+ * 没有「管理员」这回事），所以这里用 `organizations` 才是对的语义。
+ *
+ * **③ 失败时它回的是 `admin_consent=True` **加上** 一个 `error`。**
+ * 只看 `admin_consent` 就会把失败读成成功 —— 见 callback 里必须先判 `error`。
  */
 export const MICROSOFT_ADMIN_CONSENT_URL =
-  'https://login.microsoftonline.com/common/adminconsent'
+  'https://login.microsoftonline.com/organizations/v2.0/adminconsent'
 
 /** 防 CSRF 的一次性随机数存在这个 cookie 里，回调时必须对得上。 */
 export const MICROSOFT_STATE_COOKIE = 'ms_mail_oauth_state'
