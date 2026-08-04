@@ -93,8 +93,10 @@ function readStateDoc(cwd) {
     if (statSync(path).size > STATE_DOC_MAX_BYTES) return ''
     const body = readFileSync(path, 'utf8').trim()
     if (!body) return ''
+    const fresh = stateFreshness(root, body)
     return [
       '## 系统现状（docs/STATE.md · 开窗口自动带上）',
+      ...(fresh ? [`> ${fresh}`] : []),
       '',
       '**唯一真相源**：现在什么在跑 / 部署在哪 / 哪个模块对应哪段代码。',
       '跟印象里的情况冲突时以这份为准；发现它自己过时了就去改它，不要绕过它。',
@@ -104,6 +106,36 @@ function readStateDoc(cwd) {
   } catch {
     return ''
   }
+}
+
+/**
+ * 这份文件有多新 —— 问 git，不信它自己写的。
+ *
+ * STATE.md 顶部有一行手写的「最后核对：**YYYY-MM-DD**」。建档那天写上之后，
+ * 后面四个版本一次都没跟着改，包括 2026-08-03 那两次真往里加了内容的改动。
+ * 于是文件永远自称停在 7/25 —— 2026-08-04 我就是读了那行、当成事实，
+ * 还把「它十天没更新」这个错结论报给了 PM。
+ *
+ * 手写的日期戳指望不上（四次全忘），所以不去要求任何人养成新习惯：
+ * 读的时候直接问 git，谁也骗不了谁。
+ */
+function stateFreshness(root, body) {
+  const committed = git(root, ['log', '-1', '--format=%cs', '--', 'docs/STATE.md'])
+  if (!committed) return '' // 还没提交过就别瞎标日期
+
+  const out = [`最后改动 **${committed}**（据 git，不是文件自己写的）`]
+
+  // 本地改了没提交时，git 那个日期是偏旧的 —— 别用一个谎去替换另一个谎
+  if (git(root, ['status', '--porcelain', '--', 'docs/STATE.md'])) {
+    out.push('本地还有未提交改动，实际比这更新')
+  }
+
+  const claimed = (body.match(/最后核对：\*\*(\d{4}-\d{2}-\d{2})\*\*/) || [])[1]
+  if (claimed && claimed !== committed) {
+    out.push(`⚠️ 文件自称「最后核对 ${claimed}」，是旧的，以 git 为准`)
+  }
+
+  return out.join(' · ')
 }
 
 /** 用本机 git 判断这些 commit 是否已经在 main 里 */
