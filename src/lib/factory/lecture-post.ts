@@ -51,7 +51,7 @@ export interface LectureProduction {
 
 /** 发到平台之后的回执(存下来才知道发过没、发到哪、什么时候)。 */
 export interface LecturePublished {
-  platform: 'facebook'
+  platform: 'facebook' | 'tiktok'
   pageId: string
   videoId: string
   permalink?: string
@@ -65,8 +65,15 @@ export interface LecturePublished {
  * 所以点按钮只登记请求，真正发布交给后台 cron，成功失败都回写这里。
  */
 export interface LecturePublishRequest {
-  platform: 'facebook'
+  platform: 'facebook' | 'tiktok'
   status: 'pending' | 'sending' | 'done' | 'failed'
+  /**
+   * true = 这一条要真的公开发出去;不填 = 只发草稿(主页后台可见、公众看不到)。
+   *
+   * 为什么做成每条片自己带:原来「草稿还是真发」是一个全局环境开关,一开就把**所有客户**
+   * 的发布都变成公开(CTS 的工单也会跟着真发)。审片通过是针对某一条片的决定,不该是全局闸。
+   */
+  live?: boolean
   requestedAt: string
   startedAt?: string
   finishedAt?: string
