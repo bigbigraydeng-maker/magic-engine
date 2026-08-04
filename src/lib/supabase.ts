@@ -24,6 +24,16 @@ if (!supabaseServiceKey) {
   throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY — server cannot start without it');
 }
 export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+  // 🔴 数据库读取绝不许走 Next 的 fetch 缓存。
+  // Next 14 会把 App Router 里的 GET fetch 缓存起来——Supabase 客户端底下就是 fetch，
+  // 于是「读一次库」可能拿到的是上一轮的旧快照。
+  // 真实事故(2026-08-04):讲课片发布成功后清掉了待发布标记,但下一轮 cron 读到的还是
+  // 缓存里那份「待发布」,同一条片连发了三次;而发布回执也被旧快照覆写掉,页面上看着像没发过。
+  // 缓存一条数据库读 = 拿过期状态做决策,对写操作来说等于重复执行。
+  global: {
+    fetch: (input: RequestInfo | URL, init?: RequestInit) =>
+      fetch(input, { ...init, cache: 'no-store' }),
+  },
   auth: {
     autoRefreshToken: false,
     persistSession: false,

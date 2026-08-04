@@ -8,7 +8,7 @@
 // route 已做:鉴权 + worker_id 归属 + 预算硬顶 + 路径前缀校验。这里做落库副作用。
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { FACTORY_B_TRACK_SCENE_TAGS } from './constants'
+import { FACTORY_B_TRACK_SCENE_TAGS, FACTORY_CLIENT_DERIVED_SCENE_TAG } from './constants'
 import { scanRedlineHits, validateClipPath } from './worker-guard'
 
 const ACTIVE_STATUSES = ['claimed', 'producing']
@@ -60,8 +60,14 @@ export async function completeWorkOrder(
   const allowLandmark =
     ((client.factory_config ?? {}) as Record<string, unknown>)['allow_b_track_landmark_ads'] === true
   if (!allowLandmark) {
+    // 客户自己照片衍生的片段另算一类:护栏 6 防的是「AI 编造具体地标」,
+    // 而这类画面拍的就是客户真实的东西,不适用。见 constants 里那条注释。
+    const allowedBTags = [
+      ...(FACTORY_B_TRACK_SCENE_TAGS as readonly string[]),
+      FACTORY_CLIENT_DERIVED_SCENE_TAG,
+    ]
     const badTag = newClips.find(
-      (c) => c.track === 'b_generated' && !(FACTORY_B_TRACK_SCENE_TAGS as readonly string[]).includes(c.scene_tag),
+      (c) => c.track === 'b_generated' && !allowedBTags.includes(c.scene_tag),
     )
     if (badTag) {
       return { ok: false, status: 422, error: `b_generated scene_tag '${badTag.scene_tag}' not in abstract whitelist (护栏 6)` }

@@ -9,8 +9,9 @@ vi.mock('@/lib/anthropic/client', () => ({
 }))
 // formatBriefForPrompt 用真实实现(读 fixture brief 字段即可,无需 mock)
 
-import { allowedNumbersFrom, ctaIntentFor, generateAdCopy, hookIntentFor } from './copy-generator'
+import { allowedNumbersFrom, ctaIntentFor, generateAdCopy, hookIntentFor , hasInventedServicePromise} from './copy-generator'
 import type { MasterBrief } from '@/types/magic-engine'
+import type { AdCopy } from './types'
 
 const BRIEF = {
   id: 'mb-1', brand_name: 'Oztop', website: 'oztopbuildingsupplies.com.au',
@@ -220,5 +221,52 @@ describe('allowedNumbersFrom — 红线白名单构建', () => {
   it('null/undefined → 空集合(禁一切数字)', () => {
     expect(allowedNumbersFrom(null).size).toBe(0)
     expect(allowedNumbersFrom(undefined).size).toBe(0)
+  })
+})
+
+describe('hasInventedServicePromise —— 服务承诺红线（2026-08-03 Oztop 实测）', () => {
+  const withOffer = (offers: string[]): AdCopy => ({
+    segments: [],
+    endcard: { cta: 'Shop Now', url: 'x.com', offer: offers },
+  } as unknown as AdCopy)
+
+  it('🔴 客户没登记免费服务 → 一律判编造（这条是真实事故：AI 自己写了「免费上门测量」）', () => {
+    const copy = withOffer(['Free in-home measure & quote', 'Expert consultation at no cost'])
+    expect(hasInventedServicePromise(copy, undefined)).toBe(true)
+    expect(hasInventedServicePromise(copy, [])).toBe(true)
+  })
+
+  it('登记过就放行 —— PM 2026-08-03 确认 Oztop 真的提供免费测量', () => {
+    const copy = withOffer(['Free in-home measure & quote'])
+    expect(hasInventedServicePromise(copy, ['free in-home measure'])).toBe(false)
+  })
+
+  it('登记了 A 不等于放行 B', () => {
+    const copy = withOffer(['Free installation'])
+    expect(hasInventedServicePromise(copy, ['free in-home measure'])).toBe(true)
+  })
+
+  it('中文「免费」同样拦', () => {
+    const copy = withOffer(['免费上门安装'])
+    expect(hasInventedServicePromise(copy, [])).toBe(true)
+    expect(hasInventedServicePromise(copy, ['免费上门安装'])).toBe(false)
+  })
+
+  it('大小写与多余空格不影响判定', () => {
+    const copy = withOffer(['FREE   In-Home   Measure'])
+    expect(hasInventedServicePromise(copy, ['free in-home measure'])).toBe(false)
+  })
+
+  it('没有承诺词的文案不受影响', () => {
+    const copy = withOffer(['Premium flooring range', 'Expert advice'])
+    expect(hasInventedServicePromise(copy, [])).toBe(false)
+  })
+
+  it('段落正文里的承诺也拦，不只看结尾卡', () => {
+    const copy = {
+      segments: [{ role: 'cta', title_main: 'Free measure today', caption: '', title_sub: '' }],
+      endcard: { cta: 'Go', url: 'x', offer: [] },
+    } as unknown as AdCopy
+    expect(hasInventedServicePromise(copy, [])).toBe(true)
   })
 })

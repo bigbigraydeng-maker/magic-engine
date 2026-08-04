@@ -43,7 +43,12 @@ services:
         value: Pacific/Auckland
       - key: ANTHROPIC_API_KEY
         sync: false
-      - key: ATLAS_API_KEY
+      # ⚠️ 代码读的是 ATLAS_CLOUD_API_KEY（src/lib/visual/{atlas,seedance,wavespeed}.ts）。
+      # ATLAS_API_KEY 是历史遗留名字，代码里没有任何地方读它 —— 只填它 = 图片/视频生成挂掉。
+      # 两个都先留着，等确认 Render 面板现状后再删旧名。见 docs/PITFALLS.md A1。
+      - key: ATLAS_CLOUD_API_KEY
+        sync: false
+      - key: ATLAS_API_KEY          # 待清理（无代码读取）
         sync: false
       - key: HEYGEN_API_KEY
         sync: false
@@ -62,6 +67,12 @@ services:
       - key: GITHUB_TOKEN
         sync: false
       - key: GITHUB_WEBHOOK_SECRET
+        sync: false
+      # TikTok 自动发布(Content Posting API)。在 developers.tiktok.com 建应用后拿到。
+      # ⚠️ 应用没过 TikTok 审核之前,发出去的片子只有作者自己可见——这是 TikTok 的规定。
+      - key: TIKTOK_CLIENT_KEY
+        sync: false
+      - key: TIKTOK_CLIENT_SECRET
         sync: false
       - key: PUBLER_API_KEY
         sync: false
@@ -101,14 +112,17 @@ services:
   # a Render private service and set REALTIME_WORKER_URL on the web service to its
   # internal URL (see docs/voice-agent/RUNBOOK.md).
 
-  # Vision Asset Intelligence analyzer — every 2 minutes
+  # Vision Asset Intelligence analyzer — every 10 minutes (降频于 2026-07-21, commit b9f8189)
   # Picks up pending client_assets, runs GPT-4o-mini Vision, writes scores.
-  # Reference: ROADMAP.md P21.B.3
+  # Reference: docs/history/CHANGELOG.md (P21.B.3)
   # healthchecks.io: vision-analyzer (1b1cd19b-583a-41ac-baaa-c9415241d5e8)
+  # 2026-08-03 降频 */10 → */30：24h 内 144 次运行全部零产出（client_assets
+  # 无 pending 行，最新素材停在 2026-06-10）。非交互式批处理——客户传完素材就走，
+  # 由 FDE 事后审阅，晚 30 分钟开始分析无感知。审计见 docs/audits/supabase-request-audit.md §8 P0-1
   - type: cron
     name: vision-analyzer
     env: node
-    schedule: "*/10 * * * *"
+    schedule: "*/30 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 120 -X POST -H "Authorization: Bearer $CRON_SECRET" \
@@ -118,7 +132,13 @@ services:
       - key: CRON_SECRET
         sync: false
 
-  # Poll visual generation jobs every 2 minutes
+  # Poll visual generation jobs every 10 minutes
+  #
+  # ⚠️ 2026-08-03 审计：本任务 24h 内 144 次运行同样零产出，但**刻意不降频**。
+  # 它是用户点了「生成视频」之后在等的完成检查（ReelsStudio 的生成按钮会写
+  # reels_drafts.status='video_generating'，另有 3 个接口写 visual_assets
+  # generation_status='generating'），降频 = 让人干等。空跑只说明当下没人在生成，
+  # 不代表可以放慢。别顺手把它跟隔壁三个一起降了。
   # healthchecks.io: poll-visual-jobs (0dd2b641-499f-4f2f-8b73-73085050a5f0)
   - type: cron
     name: poll-visual-jobs
@@ -176,10 +196,13 @@ services:
   # The status route's stale check is reactive (UI-poll driven), so jobs
   # whose UI was closed mid-run would otherwise sit running forever.
   # healthchecks.io: zhangqian-sweeper (071910fe-b9b7-435d-8b72-f141818eb03d)
+  # 2026-08-03 降频 */15 → */30：24h 内 96 次运行全部零产出。纯超时兜底，从不干活。
+  # 只降到 30 分钟而非每小时：超时阈值是 6 分钟，每小时跑会让真卡住的任务在界面上
+  # 「运行中」挂最多 66 分钟，FDE 会误判系统坏了；30 分钟档最坏 36 分钟。
   - type: cron
     name: zhangqian-sweeper
     env: node
-    schedule: "*/15 * * * *"
+    schedule: "*/30 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
@@ -229,10 +252,13 @@ services:
   # if Render restarts mid-run, rows would otherwise sit generating forever.
   # Reference: ROADMAP.md P14.C.1
   # healthchecks.io: blog-stuck-generating-sweeper (180d3e65-1910-4f8d-a778-409571d5fb46)
+  # 2026-08-03 降频 */15 → */30：24h 内 96 次运行全部零产出（blog_posts 无 generating 行）。
+  # 纯超时兜底，从不干活。同 zhangqian-sweeper，只降到 30 分钟：超时阈值 10 分钟，
+  # 每小时跑会让卡住的文章在界面上「生成中」挂最多 70 分钟；30 分钟档最坏 40 分钟。
   - type: cron
     name: blog-stuck-generating-sweeper
     env: node
-    schedule: "*/15 * * * *"
+    schedule: "*/30 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
@@ -312,6 +338,23 @@ services:
       curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/keyword-snapshots-weekly \
         && curl -fsS "https://hc-ping.com/db156874-3c69-4b5a-b534-a6bbea63a467"
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # Weekly reputation snapshots — every Monday at 3:30am UTC (~3:30pm NZST)
+  # GBP / Tripadvisor rating + review count + incremental reviews for active
+  # clients with reputation identities configured (DataForSEO 计划 阶段 2).
+  # ⚠️ 新 cron 上线后必须在 Render 后台 link "me-shared-cron-secret" env group，
+  #    否则 CRON_SECRET 为空 → 每周 401 静默失败（daily-cron-digest 事故教训）。
+  - type: cron
+    name: reputation-snapshots-weekly
+    env: node
+    schedule: "30 3 * * 1"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/reputation-snapshots-weekly
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -425,12 +468,102 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # 内容工厂 · 选题进料 — 每天 UTC 22:00 (~10am NZST) 抓爆款+按人设改写成候选。
+  # cron 每天打；路由内部按每个客户的 topic_intake.cadence 过滤(daily 每天/weekly 只周一/off 跳)。
+  # ⚠️ 部署后需在 Render 手动 link me-shared-cron-secret env group，否则每天静默 401。
+  #    建议再配一个 healthchecks.io ping(&& curl hc-ping.com/<uuid>)防"没跑"不报警。
+  - type: cron
+    name: content-factory-intake
+    env: node
+    schedule: "0 22 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/content-factory-intake
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # Daily anomaly detector — every day at 5am UTC (~5pm NZST / 3pm AEST)
   # Two-step pipeline:
   #   Step 1: AnomalyDetectorJob — scans flywheel_metrics, writes anomaly_signals
   #   Step 2: 诸葛亮 Proactive — reads fresh signals, creates proactive execution tasks
   # Reference: ROADMAP.md § Phase 22.D.3
   # healthchecks.io: anomaly-detector-daily (ff78126a-25e2-4a50-abcb-edbcb1dfaec9)
+  # 深度诊断周更 —— 补上 DAPE 的 A 段(分析)。
+  # 此前深度诊断**没有任何定时任务**:只能人工点按钮或新客户建档时跑一次,
+  # 最近一次 2026-07-20。于是执行段天天在跑,执行的却是两个月前的结论。
+  # 🔴 花钱路径:六维度全量采集 + AI 综合,比规则引擎型的 anomaly-detector 贵一个量级,
+  #    所以周更不日更;且只跑「有域名 + 填了行业的 active 客户」—— 内部账号
+  #    (Magic Engine / Magic Lab / Magic Lab Class) 三个都有域名,光看域名拦不住,
+  #    真实判据是有没有填行业。同客户 5 天冷却,防手工刚跑完 cron 又跑一遍。
+  # 周一 08:00 UTC ≈ 周一 20:00 NZST,跑完赶上周二早上的待办。
+  - type: cron
+    name: diagnostic-weekly
+    env: node
+    schedule: "0 8 * * 1"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 800 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/diagnostic-weekly
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # 🔴 效果回流 —— DAPE 这个圈能不能合拢，全靠下面这两条。
+  #
+  # 2026-08-04 查出来：这两个接口**代码早就写好了，但 render.yaml 里没有、
+  # 登记表里也没有 —— 从来没有任何东西调用过它们**。后果是
+  # `prescription_outcomes` 从建库到今天**一条记录都没有**：
+  # 「我们给客户出的方案到底有没有用」这个问题，系统一次都没回答过。
+  # 没有这一环，下一轮出方案时 AI 不知道上一轮哪条管用、哪条白干。
+  # 而且因为它们不在登记表里，连「没跑」的告警都不会报 —— 又是「看不见」。
+
+  # 处方效果实测回填 —— 每天看有没有处方到了批准后 30/60/90 天的节点，
+  # 到了就拉真实指标写进 prescription_outcomes。日更但只在节点当天真干活。
+  - type: cron
+    name: kpi-backfill
+    env: node
+    schedule: "20 6 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/kpi-backfill
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # 行业基准累积 —— 把上面攒下来的实测值按行业/规模/市场分组算 P50/P75/P90。
+  # 周更即可；样本不够时本来就不该写，会在运行记录里写明「等实测结果攒够」。
+  # ⚠️ 这个 route 只实现了 GET，别加 -X POST（会 405）。
+  - type: cron
+    name: benchmark-accumulator
+    env: node
+    schedule: "40 7 * * 1"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/benchmark-accumulator
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # DAPE P 段(处方)—— 吃周一体检的结果开方,并自动落地成执行看板上的动作。
+  # 🔴 花钱路径:每个客户打一次 AI。同客户 6 天冷却。
+  #    刻意跟体检分成两个任务:混在一起挂了分不清是没采到数据还是没生成方案。
+  # 周二 08:00 UTC,排在体检后一天。
+  - type: cron
+    name: prescription-weekly
+    env: node
+    schedule: "0 8 * * 2"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 800 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/prescription-weekly
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   - type: cron
     name: anomaly-detector-daily
     env: node
@@ -497,24 +630,6 @@ services:
       - key: CRON_SECRET
         sync: false
 
-  # Benchmark Accumulator — ME 自有客户实测结果 → industry_benchmarks 增长字段
-  #   读最近 180 天 flywheel_outcomes 的 delta_pct，按 (行业, 维度) 取中位增幅，
-  #   写 realistic_3mo_growth_pct + growth_* provenance。只写 GROWTH 字段，
-  #   不碰外部研究来源的 score_p50/p75/p90。
-  #   Mon 08:30 UTC — 排在 agent-learning-rollup (07:00) 之后，避开既有槽位。
-  #   注意：route 只实现 GET，不要加 -X POST（会 405）。
-  - type: cron
-    name: benchmark-accumulator
-    env: node
-    schedule: "30 8 * * 1"
-    buildCommand: ""
-    startCommand: |
-      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/benchmark-accumulator
-    envVars:
-      - key: CRON_SECRET
-        sync: false
-
   # SEO Patrol — Phase 22.E.S2b
   #   Daily SEO opportunity engine: reads keyword_snapshots + GSC snapshots,
   #   runs the rule engine, persists fresh findings, and routes the top 3 onto
@@ -535,9 +650,93 @@ services:
     envVars:
       - key: CRON_SECRET
         sync: false
-      - key: OZTOP_WP_USERNAME
+
+  # Weekly site recrawl — Sunday 01:00 UTC. Refreshes client_site_pages for
+  # focus clients (seo_config.weekly_blog=true) so the patrol's link-graph
+  # (R2) and blog page-context stay at most a week old.
+  # ⚠️ sync:false does NOT auto-fill: after first deploy, link the
+  #    me-shared-cron-secret env group to this service in the Render dashboard.
+  - type: cron
+    name: site-audit-weekly
+    env: node
+    schedule: "0 1 * * 0"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/site-audit-weekly
+    envVars:
+      - key: CRON_SECRET
         sync: false
-      - key: OZTOP_WP_APP_PASSWORD
+
+  # Weekly watchdog report — 18:30 UTC Sunday = Monday ~06:30 NZST, half an
+  # hour before Monday's daily to-do. Per focus client: rankings / auto
+  # changes / blog / social / ads, every section freshness-stamped.
+  # ⚠️ sync:false does NOT auto-fill: after first deploy, link the
+  #    me-shared-cron-secret env group to this service in the Render dashboard.
+  - type: cron
+    name: weekly-seo-report
+    env: node
+    schedule: "30 18 * * 0"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/weekly-seo-report
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # PM daily to-do — 19:00 UTC Sun-Thu = NZ weekday mornings (07:00 NZST /
+  # 08:00 NZDT). Rolling pillar theme + live counts of drafts/findings/cards
+  # awaiting the PM. Route double-guards NZ weekends.
+  # ⚠️ sync:false does NOT auto-fill: after first deploy, link the
+  #    me-shared-cron-secret env group to this service in the Render dashboard.
+  - type: cron
+    name: pm-daily-todo
+    env: node
+    schedule: "0 19 * * 0-4"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 120 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/pm-daily-todo
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # CTS title executor — Monday 05:30 UTC, right after oztop-seo-optimizer.
+  # GSC pos-4-20 pages → AI title/desc → narrow-lane edit of the site repo's
+  # meta data file → ONE weekly PR (human merges, client repo CI gates).
+  # ⚠️ sync:false does NOT auto-fill: after first deploy, link the
+  #    me-shared-cron-secret env group to this service in the Render dashboard.
+  - type: cron
+    name: cts-seo-optimizer
+    env: node
+    schedule: "30 5 * * 1"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/cts-seo-optimizer
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # Weekly blog draft — Tuesday 3am UTC (after Monday keyword snapshots +
+  # Monday AI tracker runs, so both topic-selection legs are fresh).
+  # One auto-topic draft per client with seo_config.weekly_blog=true.
+  # Drafts await human review in Blog Studio — never auto-publishes.
+  # ⚠️ sync:false does NOT auto-fill: after first deploy, link the
+  #    me-shared-cron-secret env group to this service in the Render
+  #    dashboard, or every run 401s silently (daily-cron-digest lesson).
+  # Reference: ROADMAP.md 22.E.S16
+  - type: cron
+    name: blog-weekly
+    env: node
+    schedule: "0 3 * * 2"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/blog-weekly
+    envVars:
+      - key: CRON_SECRET
         sync: false
 
   # Reference: ROADMAP.md § Phase 22.E · docs/seo-sop-implementation-design.md
@@ -579,6 +778,14 @@ services:
   # 🔴 安全阀:未设 FACTORY_PUBLISH_LIVE=true 时**只发草稿**(video_state=DRAFT,
   #    不公开),供 PM 验格式。验完 PM 显式 go 才在 Render 设 true 真发客户主页(不可逆)。
   # 发布正文在 publish-worker 内另有红线闸(scanPublishCaption),命中即终态不发。
+  # 讲课片发布也在这条 worker 里顺带跑(runLecturePublishSweep),**不另开 cron**:
+  # 新建的 cron 服务不会自动拿到 CRON_SECRET(sync:false 只声明不填值),建了也只是每轮 401
+  # 静默失败 —— 2026-08-04 实测:排队的片等了 14 分钟没动,cron_run_logs 里连一条运行记录都没有。
+  # 挂在已经配好密钥、稳定在跑的 worker 上,就不需要任何人去后台补配置。
+  # 讲课片发布也在这条 worker 里顺带跑(runLecturePublishSweep),**不另开 cron**:
+  # 新建的 cron 服务不会自动拿到 CRON_SECRET(sync:false 只声明不填值),建了也只是每轮 401
+  # 静默失败 —— 2026-08-04 实测:排队的片等了 14 分钟没动,cron_run_logs 里连一条运行记录都没有。
+  # 挂在已经配好密钥、稳定在跑的 worker 上,就不需要任何人去后台补配置。
   - type: cron
     name: factory-publish-worker
     env: node
@@ -664,6 +871,106 @@ services:
         https://app.magicengine.com.au/api/cron/messenger-sync-hourly \
       && curl -fsS --max-time 820 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/messenger-brief-hourly
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # 公司邮箱 → CRM：**不再是一条独立的 cron 服务**（2026-08-03）。
+  #
+  # 它原来在这里是一条新增的 cron 服务，结果一次都没跑过 —— Render 的蓝图对
+  # 新增服务不会自动生效，要有人进后台点一次 Apply，而这件事不会报任何错。
+  # 现在挂在上面 messenger-hourly 那条**已经在跑**的任务里（见那个路由的文件头）。
+  # `/api/cron/mailbox-sync` 路由保留，用于单独手动触发。
+  #
+  # 以后再加渠道同步，优先挂进已有任务，别新开服务 —— 新服务 = 一个人工步骤。
+
+  # Facebook 即时表单 → CRM。之前这条路只有人手一条(导 CSV 跑 import-cts-fb-leads.ts),
+  # 2026-07-30 查出来的后果:CTS 的 CRM 里最后一个新人停在 7/25,而 Meta 后台
+  # 7/26–7/30 又进了 27 个人,销售的「今天该联系谁」里一个都没有。
+  #
+  # 只同步 clients.facebook_page_id 有值的客户(跟私信同步同一个开关),
+  # 所以新增客户不需要动这里。
+  # 跑在每小时第 25 分钟:避开整点那一堆日更 cron,也避开第 10 分钟的私信同步
+  # ——两条都会调 Meta Graph,岔开跑不容易撞上 Meta 的限流。
+  - type: cron
+    name: meta-leads-hourly
+    env: node
+    schedule: "25 * * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/meta-leads-sync
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # 做片拼片 worker — 常驻容器(node+python-PIL+ffmpeg)轮询 content_factory_render_jobs，
+  # 领排队任务 → 分镜 → 画面(gpt-image+Muapi i2v) → 配音(MiniMax) → ffmpeg 拼竖屏成片 → 标待审。
+  # 独立服务的原因：单条 i2v/拼接跑 15-30 分钟，塞不进 web 请求。
+  # ⚠️ 部署后需在 Render 填 sync:false 密钥；首跑验证中文字体(NotoSansCJK ttc)PIL 能读。
+  - type: worker
+    name: content-factory-render-worker
+    env: docker
+    dockerfilePath: ./scripts/render-worker/Dockerfile
+    # standard(1 CPU / 2GB)——starter 的半颗 CPU 跑 1080x1920 视频编码要 40-60 分钟/条，
+    # 512MB 还被 160MB 录像撑爆过一次。PM 2026-08-02 拍板升 standard(+US$18/月)。
+    plan: standard
+    envVars:
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: MUAPI_API_KEY
+        sync: false
+      - key: CF_AIG_TOKEN
+        sync: false
+      - key: FACTORY_CJK_FONT
+        value: /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
+
+  # 邮件反应 → CRM：谁收到了、谁打开了、谁点了行程链接。
+  #
+  # 这条接口 2026-07 就写好了（PR #686），但**从来没被注册**，一次都没跑过 ——
+  # 2026-08-01 体检才发现：销售看不到「谁点了行程链接」，只能按「我们打没打过他」排序。
+  #
+  # ⚠️ 密钥用 fromGroup 自动挂，**不要**改回 `sync: false`：
+  # 手挂密钥是这个仓库反复踩的坑 —— meta-leads-hourly 上线当天就因为手挂的值跟接口
+  # 对不上，连着两小时 401、库里一条运行记录都没有；更早还有一条 cron 因此哑了 51 天。
+  # 环境变量组 `me-shared-cron-secret` 已存在（Render 的 Link Environment Group 里能选到）。
+  # 万一 Render 不认这个写法，回退方案是 `- key: CRON_SECRET` + `sync: false`，
+  # 然后**必须**手动 link 同一个组 —— 别只填一个手打的值。
+  - type: cron
+    name: mailchimp-activity-daily
+    env: node
+    schedule: "40 4 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/mailchimp-activity-sync
+    envVars:
+      - fromGroup: me-shared-cron-secret
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Team Working Memory 兜底清扫 — 每 30 分钟
+  #
+  # 本机 hook 在会话结束时会自己触发提炼，这条 cron 是兜底：
+  # 笔记本睡了 / 断网 / 进程被杀导致那一枪没打中的会话，在这里补上；
+  # 顺带把被推翻的教训撤下、连续砸锅的套路下架（PM 选了全自动，收拾也得机器做）。
+  #
+  # ⚠️ 部署后必须在 Render 后台把这个 cron 关联到 me-shared-cron-secret 环境变量组。
+  #    sync:false 不会自动填值 —— daily-cron-digest 就是因为这个哑了 51 天没人发现，
+  #    而 digest 只报「失败」不报「没跑」，所以静默失效不会有任何告警。
+  - type: cron
+    name: team-memory-sweeper
+    env: node
+    schedule: "*/30 * * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/team-memory-sweeper
     envVars:
       - key: CRON_SECRET
         sync: false

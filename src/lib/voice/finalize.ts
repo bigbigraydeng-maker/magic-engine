@@ -11,6 +11,7 @@
 import { getVoiceConfig } from './config'
 import { CallSummarySchema, CALL_SUMMARY_JSON_SCHEMA, SUMMARY_SCHEMA_VERSION, type CallSummary } from './summary-schema'
 import { leadUpsertKeyForCall } from './domain'
+import { bridgeCallToCrm } from './crm-bridge'
 import type { VoiceStore, CallRow, LeadRow, TranscriptSegmentRow } from './store/types'
 
 export interface FinalizeOptions {
@@ -58,6 +59,34 @@ export async function finalizeCall(
       next_action: existingLead?.next_action ?? summary.next_action ?? null,
       last_contact_at: new Date().toISOString(),
     })
+  }
+
+  // 把这通电话写进 CRM 的往来记录（见 ./crm-bridge 的文件头）。
+  //
+  // 在这之前，语音那套跟 CRM 是两个互不相通的世界：电话打完了，看板上那个人
+  // 仍然是「新客人，还没人联系过」。分批规则说的每一句话都因此不准。
+  //
+  // **绝不能让它把 finalize 判失败**：电话已经打完、摘要已经出好并入库，
+  // 为一条 CRM 记录整个失败，只会让重试机制反复重跑一通结束了的通话。
+  try {
+    const bridged = await bridgeCallToCrm({
+      id: callId,
+      direction: claimed.direction,
+      is_simulated: claimed.is_simulated,
+      from_number: claimed.from_number,
+      to_number: claimed.to_number,
+      started_at: claimed.started_at,
+      ended_at: claimed.ended_at,
+      duration_seconds: claimed.duration_seconds,
+      outcome: summary.outcome,
+      summary: summary.summary,
+    })
+    if (!bridged.ok && bridged.reason !== 'simulated') {
+      // 挂不上不是错误，但要看得见 —— 这个数字能看出外呼名单跟 CRM 脱节多严重。
+      console.warn(`[voice/finalize] 通话 ${callId} 没能挂进 CRM：${bridged.reason} ${bridged.detail ?? ''}`)
+    }
+  } catch (err) {
+    console.error('[voice/finalize] 写 CRM 往来记录失败（不影响通话收尾）:', err)
   }
 
   await store.audit({

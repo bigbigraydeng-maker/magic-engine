@@ -8,12 +8,17 @@ import {
   type BriefCandidate,
   type StoredMessage,
 } from '@/lib/messenger/brief'
+import { autoTagQualifiedBuyers, type AutoTagResult } from '@/lib/crm/qualified-buyer-autotag'
 
 /**
  * GET /api/cron/messenger-brief-hourly
  *
  * Hourly cron — writes the customer brief for every settled Messenger thread
  * that has moved on since its last brief. Trigger rules live in lib/messenger/brief.
+ *
+ * 简报写完后跑第二遍：把够格的人自动标成「真买家」（lib/crm/qualified-buyer）。
+ * 挂在这里而不是新开一个 cron，是因为规则要读刚写好的简报，而且新 cron 要手工
+ * link 密钥的环境变量组、漏了会每天静默 401。第二遍失败不影响简报那一遍。
  *
  * Auth: Bearer ${CRON_SECRET}
  */
@@ -89,6 +94,9 @@ export async function GET(req: NextRequest) {
       'id, client_id, message_count, last_message_at, last_message_from, conversation_briefs(source_message_count, regen_count, regen_count_date)',
     )
     .gt('message_count', 0)
+    // 只认私信。这个任务写出来的是「Facebook 私信简报」，喂邮件进去会得到一张
+    // 说错渠道的卡，而销售会照着它去 Messenger 找一个从没在那说过话的人。
+    .eq('channel', 'messenger')
     .order('last_message_at', { ascending: false })
     .limit(500)
 
@@ -127,12 +135,27 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // 第二遍：自动标真买家。整轮失败也只记一笔，简报那一遍已经写完了，不回滚。
+  let qualifiedBuyers: AutoTagResult | { error: string }
+  try {
+    qualifiedBuyers = await autoTagQualifiedBuyers(now)
+  } catch (err) {
+    qualifiedBuyers = { error: err instanceof Error ? err.message : String(err) }
+    console.error('[crm/qualified-buyer] 自动打标整轮失败:', err)
+  }
+
   await run.finish({
     processed: due.length,
     completed: generated,
     failed,
-    summary: { candidates: due.length, generated, failed, capped: MAX_BRIEFS_PER_RUN },
+    summary: {
+      candidates: due.length,
+      generated,
+      failed,
+      capped: MAX_BRIEFS_PER_RUN,
+      qualifiedBuyers,
+    },
   })
 
-  return NextResponse.json({ ok: true, candidates: due.length, generated, failed })
+  return NextResponse.json({ ok: true, candidates: due.length, generated, failed, qualifiedBuyers })
 }

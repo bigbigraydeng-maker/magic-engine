@@ -22,12 +22,20 @@ vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: { from: vi.fn() },
 }))
 
+// The route opens a cron_run_logs row before doing anything; without this the
+// supabaseAdmin stub below has no `.insert` on that table and every test in the
+// file dies inside startCronRun.
+vi.mock('@/lib/cron/run-logger', () => ({
+  startCronRun: vi.fn().mockResolvedValue({ finish: vi.fn().mockResolvedValue(undefined) }),
+}))
+
 vi.mock('@/lib/gsc/client', () => ({
   fetchGscSnapshot: vi.fn().mockResolvedValue(null),
 }))
 
 vi.mock('@/lib/ga4/client', () => ({
   fetchGa4Snapshot: vi.fn(),
+  fetchGa4PaidSearchMetrics: vi.fn().mockResolvedValue(null),
 }))
 
 vi.mock('@/lib/meta/client', () => ({
@@ -40,12 +48,8 @@ vi.mock('@/lib/google-ads/client', () => ({
   loadGoogleAdsCreds:   vi.fn().mockReturnValue(null),
 }))
 
-const mockGa4PullMetrics = vi.fn().mockResolvedValue([])
-vi.mock('@/lib/flywheel/adapters/Ga4Adapter', () => ({
-  Ga4Adapter: vi.fn().mockImplementation(() => ({
-    pullMetrics: mockGa4PullMetrics,
-  })),
-}))
+// No Ga4Adapter mock: the route writes GA4 metrics inline into
+// flywheel_metrics and has not gone through that adapter since P22.A.2.
 
 vi.mock('@/lib/flywheel/adapters/MetaAdsAdapter', () => ({
   MetaAdsAdapter: vi.fn().mockImplementation(() => ({
@@ -152,7 +156,6 @@ describe('GET /api/cron/google-data-pullback-daily', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     process.env.CRON_SECRET = 'test-secret'
-    mockGa4PullMetrics.mockResolvedValue([])
   })
 
   // ── Auth ──────────────────────────────────────────────────────────────────
@@ -200,12 +203,11 @@ describe('GET /api/cron/google-data-pullback-daily', () => {
     expect(body.gsc_synced).toBe(0)
     expect(body.failed).toBe(0)
     expect(mockFetchGa4).not.toHaveBeenCalled()
-    expect(mockGa4PullMetrics).not.toHaveBeenCalled()
   })
 
   // ── GA4 happy path ────────────────────────────────────────────────────────
 
-  it('syncs GA4 snapshot and calls Ga4Adapter.pullMetrics to write flywheel_metrics [P22.A.2]', async () => {
+  it('syncs GA4 snapshot and writes the five GA4 metrics into flywheel_metrics [P22.A.2]', async () => {
     const { clientConnectorsChain, clientsChain, platformOauthChain } = setupConnectorLoader({
       connectors: [
         { client_id: CLIENT_ID, anchor: 'ga4', config: { property_id: PROPERTY_ID } },
@@ -214,12 +216,26 @@ describe('GET /api/cron/google-data-pullback-daily', () => {
     })
 
     const ga4Upsert = makeUpsertChain('ga4-snap-1')
+    const metricRows: Array<Array<{ metric_key: string }>> = []
+    const metricsChain = {
+      delete: vi.fn().mockReturnThis(),
+      eq:     vi.fn().mockReturnThis(),
+      in:     vi.fn().mockReturnThis(),
+      gte:    vi.fn().mockReturnThis(),
+      lte:    vi.fn().mockReturnThis(),
+      then:   (resolve: (v: { error: null }) => void) => resolve({ error: null }),
+      insert: vi.fn().mockImplementation((rows: Array<{ metric_key: string }>) => {
+        metricRows.push(rows)
+        return Promise.resolve({ error: null })
+      }),
+    }
 
     mockFrom.mockImplementation((table: string) => {
       if (table === 'client_connectors')      return clientConnectorsChain as never
       if (table === 'clients')                return clientsChain           as never
       if (table === 'platform_oauth_connections') return platformOauthChain as never
       if (table === 'ga4_traffic_snapshots')  return ga4Upsert              as never
+      if (table === 'flywheel_metrics')       return metricsChain           as never
       return {} as never
     })
 
@@ -250,9 +266,16 @@ describe('GET /api/cron/google-data-pullback-daily', () => {
       expect.objectContaining({ onConflict: 'client_id,period_start,period_end' }),
     )
 
-    // Ga4Adapter.pullMetrics called with client id — this is what writes flywheel_metrics
-    expect(mockGa4PullMetrics).toHaveBeenCalledTimes(1)
-    expect(mockGa4PullMetrics).toHaveBeenCalledWith(CLIENT_ID)
+    // The route writes GA4 metrics inline (no adapter) — sessions / users /
+    // pageviews / bounce_rate / avg_session_duration.
+    expect(metricRows).toHaveLength(1)
+    expect(metricRows[0].map(r => r.metric_key).sort()).toEqual([
+      'seo.ga4.avg_session_duration',
+      'seo.ga4.bounce_rate',
+      'seo.ga4.pageviews',
+      'seo.ga4.sessions',
+      'seo.ga4.users',
+    ])
   })
 
   // ── GA4 null snapshot ─────────────────────────────────────────────────────
@@ -284,12 +307,11 @@ describe('GET /api/cron/google-data-pullback-daily', () => {
       success: false,
       error:   expect.stringContaining('fetchGa4Snapshot returned null'),
     })
-    expect(mockGa4PullMetrics).not.toHaveBeenCalled()
   })
 
   // ── flywheel_metrics non-fatal ────────────────────────────────────────────
 
-  it('keeps ga4_synced=1 even when Ga4Adapter.pullMetrics rejects (non-fatal)', async () => {
+  it('keeps ga4_synced=1 even when the flywheel_metrics insert rejects (non-fatal)', async () => {
     const { clientConnectorsChain, clientsChain, platformOauthChain } = setupConnectorLoader({
       connectors: [
         { client_id: CLIENT_ID, anchor: 'ga4', config: { property_id: PROPERTY_ID } },
@@ -298,17 +320,26 @@ describe('GET /api/cron/google-data-pullback-daily', () => {
     })
 
     const ga4Upsert = makeUpsertChain('ga4-snap-2')
+    const failingMetrics = {
+      delete: vi.fn().mockReturnThis(),
+      eq:     vi.fn().mockReturnThis(),
+      in:     vi.fn().mockReturnThis(),
+      gte:    vi.fn().mockReturnThis(),
+      lte:    vi.fn().mockReturnThis(),
+      then:   (resolve: (v: { error: null }) => void) => resolve({ error: null }),
+      insert: vi.fn().mockRejectedValue(new Error('flywheel_metrics insert failed')),
+    }
 
     mockFrom.mockImplementation((table: string) => {
       if (table === 'client_connectors')      return clientConnectorsChain as never
       if (table === 'clients')                return clientsChain           as never
       if (table === 'platform_oauth_connections') return platformOauthChain as never
       if (table === 'ga4_traffic_snapshots')  return ga4Upsert              as never
+      if (table === 'flywheel_metrics')       return failingMetrics         as never
       return {} as never
     })
 
     mockFetchGa4.mockResolvedValue(GA4_SNAPSHOT)
-    mockGa4PullMetrics.mockRejectedValueOnce(new Error('flywheel_metrics insert failed'))
 
     const res = await GET(makeRequest({ authorization: 'Bearer test-secret' }))
     expect(res.status).toBe(200)
@@ -318,9 +349,7 @@ describe('GET /api/cron/google-data-pullback-daily', () => {
     expect(body.ga4_synced).toBe(1)
     expect(body.failed).toBe(0)
     expect(body.results[0].ga4).toMatchObject({ success: true, snapshot_id: 'ga4-snap-2' })
-
-    // pullMetrics was attempted (and rejected, swallowed by .catch())
-    expect(mockGa4PullMetrics).toHaveBeenCalledTimes(1)
+    expect(failingMetrics.insert).toHaveBeenCalled()
   })
 
   // ── Bad config skips client ───────────────────────────────────────────────

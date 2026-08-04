@@ -6,6 +6,7 @@ import { cx } from '@/components/ui/me-theme'
 import Link from 'next/link'
 import { useState } from 'react'
 import { FeatureLockModal } from '@/components/auth/FeatureLockGate'
+import { industryFeatureFlags } from '@/lib/clients/industry-features'
 
 interface Props {
   children: React.ReactNode
@@ -14,6 +15,8 @@ interface Props {
   /** Phase X.S4 — semantic tier; drives sidebar lock styling + upsell modal. */
   userTier: 'admin' | 'paid_client' | 'self_serve' | 'portal_only'
   allowedClientId: string | null
+  /** 客户行业 —— 决定「房子」「行程单」这类行业专属入口显不显示。null = 认不出，一个都不给。 */
+  clientIndustry: string | null
   roleLabel: string
 }
 
@@ -34,6 +37,7 @@ const ADMIN_SECTIONS: NavSection[] = [
   {
     items: [
       { key: 'overview',  label: 'Overview', mark: 'OV', href: '/dashboard' },
+      { key: 'today',     label: '今日待办', mark: 'TD', href: '/dashboard/today' },
       { key: 'clients',   label: 'Clients',  mark: 'CL', href: '/dashboard/clients' },
     ],
   },
@@ -43,7 +47,6 @@ const ADMIN_SECTIONS: NavSection[] = [
       // 每天高频入口:看片 + 拍板。页面早就存在,但此前全站没有任何链接指向它,
       // 只能手敲 URL —— 等于不存在。排在本组第一位是因为它是日常最常来的地方。
       { key: 'factory', label: '视频工厂', mark: 'VF', href: '/dashboard/factory' },
-      { key: 'poster-studio', label: '内容工作室', mark: 'CS', href: '/dashboard/poster-studio' },
     ],
   },
   {
@@ -60,6 +63,7 @@ const ADMIN_SECTIONS: NavSection[] = [
       { key: 'prospecting',      label: 'Prospecting',     mark: 'PS', href: '/dashboard/admin/prospecting' },
       { key: 'industry-baselines', label: 'Industry Baselines', mark: 'IB', href: '/dashboard/industry-baselines' },
       { key: 'cron-health',     label: 'Cron Health',     mark: 'CH', href: '/dashboard/admin/cron-health' },
+      { key: 'team-memory',     label: '团队工作记忆',     mark: 'TM', href: '/dashboard/team-memory' },
     ],
   },
 ]
@@ -165,16 +169,71 @@ function buildSelfServeSections(clientId: string): NavSection[] {
   ]
 }
 
-export default function DashboardShell({ children, userEmail, userRole, userTier, allowedClientId }: Props) {
+/**
+ * 受限管理员（DEMO_ADMINS）的导航。
+ *
+ * 给的是 FDE 视角 —— 客户工作台里该有的都有；但平台级入口（客户总览、
+ * 账单、MTC、Prospecting、Cron 健康…）一律不出现，因为那些页面聚合的是
+ * 全部客户的数据。middleware 已在服务端挡死，这里是不让它们出现在眼前。
+ */
+function buildScopedAdminSections(clientId: string, industry: string | null): NavSection[] {
+  const at = (p: string) => `/dashboard/clients/${clientId}${p}`
+  // 行业专属入口:旅行社后台不该有地产工具,建材客户后台不该有旅游行程单
+  // (PM 2026-08-03 点名)。认不出行业就都不给 —— 见 lib/clients/industry-features 头注。
+  const feat = industryFeatureFlags(industry)
+  const industryTools: NavItem[] = [
+    ...(feat.tailor_made ? [{ key: 'tailor-made', label: '行程单', mark: 'TM', href: at('/tailor-made') }] : []),
+    // 楼盘在「房子」前面:先有楼盘,房子才挂得上去
+    ...(feat.projects ? [{ key: 'projects', label: '楼盘', mark: 'PJ', href: at('/projects') }] : []),
+    ...(feat.listings ? [{ key: 'listings', label: '房子', mark: 'LI', href: at('/listings') }] : []),
+  ]
+  return [
+    {
+      items: [
+        { key: 'client-home', label: '客户工作台', mark: 'CL', href: at('') },
+        // 演示账号可能有多个客户（不同行业长出不同的工具）。列表页对受限
+        // 管理员只返回他有权的客户，所以它天然就是切换器。
+        { key: 'clients', label: '切换客户', mark: 'SW', href: '/dashboard/clients' },
+      ],
+    },
+    {
+      title: '诊断与策略',
+      items: [
+        { key: 'zhangqian',  label: '品牌扫描', mark: 'ZQ', href: at('/zhangqian') },
+        { key: 'diagnostic', label: '深度诊断', mark: 'DG', href: at('/diagnostic') },
+        { key: 'goals',      label: '目标',     mark: 'GO', href: at('/goals') },
+        { key: 'strategy',   label: '策略',     mark: 'ST', href: at('/strategy') },
+        { key: 'execution',  label: '执行追踪', mark: 'EX', href: at('/execution') },
+      ],
+    },
+    {
+      title: '经营工具',
+      items: [
+        ...industryTools,
+        // 中介在车里 / 开放日现场用手机开的那一页：按房子列人，点一下说清楚他到哪一步。
+        // 放在「客户跟进」前面 —— 他每天开的是这一页，不是内部那张排班表。
+        { key: 'contacts',    label: '我的客人', mark: 'MY', href: at('/contacts') },
+        { key: 'crm',         label: '客户跟进', mark: 'CR', href: at('/crm') },
+        { key: 'connectors',  label: '数据连接', mark: 'CN', href: at('/connectors') },
+      ],
+    },
+  ]
+}
+
+export default function DashboardShell({ children, userEmail, userRole, userTier, allowedClientId, clientIndustry }: Props) {
   const pathname = usePathname()
   const [lockModalFeature, setLockModalFeature] = useState<string | null>(null)
 
   const isClientViewer = userRole === 'client-viewer' && allowedClientId
   const isSelfServe = isClientViewer && userTier === 'self_serve'
+  // 受限管理员（DEMO_ADMINS）：FDE 视角，但只在一个客户范围内
+  const isScopedAdmin = userRole === 'admin' && Boolean(allowedClientId)
 
-  const sections: NavSection[] | null = isSelfServe && allowedClientId
-    ? buildSelfServeSections(allowedClientId)
-    : null
+  const sections: NavSection[] | null = isScopedAdmin && allowedClientId
+    ? buildScopedAdminSections(allowedClientId, clientIndustry)
+    : isSelfServe && allowedClientId
+      ? buildSelfServeSections(allowedClientId)
+      : null
 
   // Compute the active nav key off whichever section list is in play.
   const activeKey = (() => {

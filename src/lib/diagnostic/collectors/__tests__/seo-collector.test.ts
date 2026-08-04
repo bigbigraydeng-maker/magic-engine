@@ -11,6 +11,8 @@ vi.mock('@/lib/dataforseo/labs', () => ({
 vi.mock('@/lib/dataforseo/client', () => ({
   getBacklinkSummary: vi.fn(),
   getSerpRankings: vi.fn(),
+  // Keep the real mapping — the market-routing tests below assert on it.
+  locationCodeFor: (db?: string | null) => (({ au: 2036, nz: 2554 })[db ?? 'au'] ?? 2036),
 }))
 
 vi.mock('@/lib/diagnostic/technical-seo', () => ({
@@ -248,5 +250,37 @@ describe('SeoCollector.collect()', () => {
     const result = await new SeoCollector().collect(CLIENT_ID, DOMAIN, [], [])
     expect(result.score).toBeNull()
     expect(result.findings[0].finding_type).toBe('keywords_not_configured')
+  })
+})
+
+// ── Market routing (AU=2036, NZ=2554) ───────────────────────────────────────
+//
+// Regression guard: fetchAndScore read the global `process.env.SEMRUSH_DB`, so
+// every client got the deploy default — an NZ client was scored against the AU
+// keyword set and AU SERP. The market must come from the caller (clients.semrush_db).
+describe('SeoCollector.collect() — market routing', () => {
+  it('sends the NZ location code and db for an NZ client', async () => {
+    await new SeoCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS, [], 'nz')
+    expect(mockKeywordsForSite).toHaveBeenCalledWith(DOMAIN, 2554, expect.any(Number))
+    expect(mockSerp).toHaveBeenCalledWith(DOMAIN, expect.any(Array), 'nz')
+  })
+
+  it('sends the AU location code and db for an AU client', async () => {
+    await new SeoCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS, [], 'au')
+    expect(mockKeywordsForSite).toHaveBeenCalledWith(DOMAIN, 2036, expect.any(Number))
+    expect(mockSerp).toHaveBeenCalledWith(DOMAIN, expect.any(Array), 'au')
+  })
+
+  it('ignores the global SEMRUSH_DB env — the client market wins', async () => {
+    vi.stubEnv('SEMRUSH_DB', 'au')
+    await new SeoCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS, [], 'nz')
+    expect(mockKeywordsForSite).toHaveBeenCalledWith(DOMAIN, 2554, expect.any(Number))
+    vi.unstubAllEnvs()
+  })
+
+  it('defaults to AU when the caller omits the market', async () => {
+    await new SeoCollector().collect(CLIENT_ID, DOMAIN, KEYWORDS)
+    expect(mockKeywordsForSite).toHaveBeenCalledWith(DOMAIN, 2036, expect.any(Number))
+    expect(mockSerp).toHaveBeenCalledWith(DOMAIN, expect.any(Array), 'au')
   })
 })

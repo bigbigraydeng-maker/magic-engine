@@ -113,6 +113,41 @@ export function allowedClaimsFrom(
   return allowed
 }
 
+/**
+ * 服务承诺词 —— 一旦出现,客户就得兑现。
+ *
+ * 2026-08-03 Oztop 首次试跑实测:AI 写了「Free in-home measure & quote」
+ * 「Expert consultation at no cost」,而品牌资料只有 expert consultation,
+ * 既没有「免费」也没有「上门测量」。**prompt 里写「不要编」防不住**,
+ * 和当初编价格是同一个毛病 —— 必须在代码里拦。
+ */
+// ⚠️ 英文词要 \b 防误伤(freedom / freehold),中文**不能**加 \b ——
+//    JS 里中文字符不算 word char,\b免费\b 永远匹配不上(本测试用例实测踩到)。
+const SERVICE_PROMISE_RE =
+  /(?:\b(?:free|no[- ]cost|complimentary|no charge|gratis)\b|免费|不收费|免收)[^.!?，。！？]{0,40}/gi
+
+/**
+ * 客户真的提供的服务 = 白名单。空 = 一条服务承诺都不许出现（默认最严）。
+ *
+ * 匹配方式是「白名单里的词组出现在这句承诺里」—— AI 的措辞不会跟录入的一字不差
+ * （录 "free in-home measure",AI 写 "Free in-home measure & quote"）。
+ * 反过来用子串会漏(录 "free quote" 放行 "free quote for 10 rooms"),
+ * 所以只放宽到词组包含,不做模糊匹配。
+ */
+export function hasInventedServicePromise(copy: AdCopy, verifiedServices: string[] | undefined): boolean {
+  const allowed = (verifiedServices ?? [])
+    .map((v) => v.toLowerCase().replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+
+  for (const text of collectTexts(copy)) {
+    for (const m of text.match(SERVICE_PROMISE_RE) ?? []) {
+      const phrase = m.toLowerCase().replace(/\s+/g, ' ').trim()
+      if (!allowed.some((a) => phrase.includes(a))) return true
+    }
+  }
+  return false
+}
+
 /** 文案里出现了品牌资料没有的时间/日期断言 → true(判为编造)。 */
 export function hasInventedClaim(copy: AdCopy, allowed: Set<string>): boolean {
   for (const text of collectTexts(copy)) {
@@ -285,6 +320,9 @@ export async function generateAdCopy(params: {
         console.warn('[copy-generator] LLM 吐出未授权价格数字,判为编造 → 落模板兜底')
       } else if (hasInventedClaim(parsed, claimAllowed)) {
         console.warn('[copy-generator] LLM 吐出品牌资料里没有的时间/日期断言(如签证天数),判为编造 → 落模板兜底')
+      } else if (hasInventedServicePromise(parsed, verifiedOffer?.verified_services)) {
+        // 承诺一发出去客户就得兑现。「免费上门测量」这种,编错了是真实商业损失。
+        console.warn('[copy-generator] LLM 承诺了客户没登记的免费服务,判为编造 → 落模板兜底')
       } else {
         return parsed
       }

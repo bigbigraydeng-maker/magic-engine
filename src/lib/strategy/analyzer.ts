@@ -4,6 +4,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { locationCodeFor } from '@/lib/dataforseo/client'
 import type {
   ClientSitePageSummary,
   WeakAIQuery,
@@ -90,18 +91,79 @@ async function fetchRunsForQuery(
   }
 }
 
+/**
+ * Keyword opportunities = keywords this client already ranks for that are
+ * high-volume and low-difficulty enough to be worth writing content against.
+ *
+ * 🔴 2026-08-05 fix. This used to query a `keywords` table that was renamed to
+ *    `_archived_keywords_2026_05_30` on 2026-05-30. Every call errored, the
+ *    `catch` below swallowed it, and strategy generation therefore saw **zero
+ *    keyword opportunities for over two months** with nobody noticing.
+ *    The live source is `keyword_snapshots` (DataForSEO, written weekly).
+ *
+ * Two things that table forces on us, both verified against production:
+ *  1. It is a *time series* — one row per keyword per week. Querying without a
+ *     date filter drags back a year of history and silently truncates at
+ *     PostgREST's 1000-row ceiling. So: resolve the latest snapshot date first,
+ *     then read only that date.
+ *  2. Its column names differ (`search_volume` / `keyword_difficulty`). The cast
+ *     on the way out is unchecked, so a missing alias would not fail the build —
+ *     it would just make every volume and kd `undefined` at runtime.
+ */
 export async function fetchKeywordOpportunities(clientId: string): Promise<KeywordOpportunity[]> {
   try {
-    const { data, error } = await supabaseAdmin
-      .from('keywords')
-      .select('keyword, volume, kd, intent')
+    const { data: client, error: clientError } = await supabaseAdmin
+      .from('clients')
+      .select('semrush_db')
+      .eq('id', clientId)
+      .maybeSingle()
+
+    // Never guess the market. Defaulting to AU when the client cannot be read
+    // would make an NZ client silently match zero rows and return no
+    // opportunities at all — the same shape as the bug being fixed here, just
+    // with a different cause. Say so instead.
+    if (clientError || !client) {
+      console.warn(
+        `[strategy] keyword opportunities skipped for ${clientId}: client row unreadable`,
+        clientError?.message,
+      )
+      return []
+    }
+
+    const locationCode = locationCodeFor((client as { semrush_db: string | null }).semrush_db)
+
+    const { data: latest } = await supabaseAdmin
+      .from('keyword_snapshots')
+      .select('snapshot_date')
       .eq('client_id', clientId)
-      .gt('volume', 50)
-      .lt('kd', 50)
+      .eq('location_code', locationCode)
+      .order('snapshot_date', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    const snapshotDate = (latest as { snapshot_date: string } | null)?.snapshot_date
+    if (!snapshotDate) return []
+
+    // Filters use real column names; the select uses aliases for the caller.
+    // `keyword_difficulty < 50` deliberately drops rows where difficulty is
+    // NULL: an unknown difficulty is not evidence of an easy keyword, and
+    // inventing one would be fabricating client data.
+    const { data, error } = await supabaseAdmin
+      .from('keyword_snapshots')
+      .select('keyword, volume:search_volume, kd:keyword_difficulty, intent')
+      .eq('client_id', clientId)
+      .eq('location_code', locationCode)
+      .eq('snapshot_date', snapshotDate)
+      .gt('search_volume', 50)
+      .lt('keyword_difficulty', 50)
 
     if (error || !data) return []
     return data as KeywordOpportunity[]
-  } catch {
+  } catch (err) {
+    // The last silent path in this function. An empty array that nobody can
+    // tell apart from "no opportunities" is how the original bug survived two
+    // months; at minimum it has to say something on the way out.
+    console.warn(`[strategy] keyword opportunities failed for ${clientId}`, err)
     return []
   }
 }

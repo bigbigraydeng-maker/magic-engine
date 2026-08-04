@@ -35,6 +35,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sanitizeLead, extractClientIp, type RawLeadInput } from '@/lib/leads/sanitize'
+import { mirrorWebFormLead } from '@/lib/crm/web-form-lead'
 
 interface RouteContext {
   params: { id: string }
@@ -232,6 +233,32 @@ async function handlePost(req: NextRequest, { params }: RouteContext): Promise<N
       { success: false, error: 'Could not save your enquiry — please call us.', code: 'INTERNAL' },
       { status: 500, headers },
     )
+  }
+
+  // Mirror into the unified CRM (contacts + a web_form touchpoint carrying the
+  // utm attribution). Without this bridge a buyer who clicked an ad, landed on
+  // the LP and filled the form simply does not exist in the CRM — the "which ad
+  // produced a deal" chain breaks right here.
+  //
+  // Awaited but never allowed to fail the request: the lead row is already saved,
+  // and a punter who sees "submission failed" walks away. mirrorWebFormLead()
+  // swallows its own errors by contract; the try/catch is belt-and-braces.
+  try {
+    await mirrorWebFormLead({
+      clientId,
+      leadId:      inserted.id as string,
+      name:        clean.lead.name,
+      phone:       clean.lead.phone,
+      email:       clean.lead.email,
+      message:     clean.lead.message,
+      sourceUrl:   clean.lead.source_url,
+      utmSource:   clean.lead.utm_source,
+      utmMedium:   clean.lead.utm_medium,
+      utmCampaign: clean.lead.utm_campaign,
+      submittedAt: clean.lead.submitted_at,
+    })
+  } catch (err) {
+    console.error('[leads POST] CRM mirror failed (lead saved, response unaffected):', err)
   }
 
   return shape({ success: true, lead_id: inserted.id }, { headers })

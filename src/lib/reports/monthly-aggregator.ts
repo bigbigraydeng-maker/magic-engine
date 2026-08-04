@@ -445,6 +445,11 @@ async function collectSearchVisibility(clientId: string): Promise<SearchVisibili
 // ── Phase 8 Collector: Local Visibility ──────────────────────────────────────
 
 async function collectLocalVisibility(clientId: string): Promise<LocalVisibilityData | null> {
+  // 主读 keyword_snapshots.local_pack_rank（每周 SERP 采集写入，DataForSEO
+  // 计划 阶段 1）。旧 local_serp_rankings 只剩 8 行死数据，留作 fallback。
+  const fromSnapshots = await collectLocalVisibilityFromSnapshots(clientId)
+  if (fromSnapshots) return fromSnapshots
+
   try {
     const { data: rows, error } = await supabaseAdmin
       .from('local_serp_rankings')
@@ -485,6 +490,63 @@ async function collectLocalVisibility(clientId: string): Promise<LocalVisibility
       total_cities:          cities.length,
       cities:                cities.slice(0, 8),
       top_opportunity_city:  opportunity?.city ?? null,
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Local visibility from the weekly SERP capture: latest snapshot's
+ * local_pack_rank column. keyword_snapshots is country-level (no city
+ * dimension), so the report gets ONE bucket labelled by market.
+ */
+async function collectLocalVisibilityFromSnapshots(
+  clientId: string,
+): Promise<LocalVisibilityData | null> {
+  try {
+    // Latest snapshot date that actually carries local pack data.
+    const { data: latestRow } = await supabaseAdmin
+      .from('keyword_snapshots')
+      .select('snapshot_date, semrush_db')
+      .eq('client_id', clientId)
+      .not('local_pack_rank', 'is', null)
+      .order('snapshot_date', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    const latest = latestRow as { snapshot_date: string; semrush_db: string | null } | null
+    if (!latest) return null
+
+    // 时效闸：采集断掉后不能把陈年 local pack 数据当当期展示（月报按月出，
+    // 放宽到 35 天覆盖月初出上月报的场景）。过期就走 fallback。
+    const ageMs = Date.now() - new Date(`${latest.snapshot_date}T00:00:00Z`).getTime()
+    if (ageMs > 35 * 24 * 60 * 60 * 1000) return null
+
+    const { data: rows, error } = await supabaseAdmin
+      .from('keyword_snapshots')
+      .select('keyword, local_pack_rank')
+      .eq('client_id', clientId)
+      .eq('snapshot_date', latest.snapshot_date)
+
+    if (error || !rows || rows.length === 0) return null
+
+    type SnapRow = { keyword: string; local_pack_rank: number | null }
+    const inPack = (rows as SnapRow[]).filter(r => r.local_pack_rank != null)
+    if (inPack.length === 0) return null
+
+    const ranks = inPack.map(r => r.local_pack_rank as number)
+    const market = latest.semrush_db === 'nz' ? 'New Zealand' : 'Australia'
+
+    return {
+      total_cities: 1,
+      cities: [{
+        city:             market,
+        avg_rank:         Math.round(ranks.reduce((a, b) => a + b, 0) / ranks.length * 10) / 10,
+        top3_count:       inPack.length, // local pack 本身就是前 3
+        tracked_keywords: rows.length,
+      }],
+      top_opportunity_city: null,
     }
   } catch {
     return null

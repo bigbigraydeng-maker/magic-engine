@@ -34,6 +34,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  // 写运行记录 —— 没有它这个任务在健康检查里是「看不见」那一类：
+  // 跑没跑都查不出来，而这条链已经因为「看不见」瘫过一次（见下方文件头注）。
   const cronRun = await startCronRun('benchmark-accumulator')
 
   try {
@@ -43,9 +45,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       processed: result.benchmarksUpdated + result.groupsSkipped,
       completed: result.benchmarksUpdated,
       failed:    result.errors.length,
+      // 一条基准都没更新时要写清为什么 —— 样本不够是正常的，不是故障
       summary: {
-        groups_skipped:   result.groupsSkipped,
-        clients_unmapped: result.clientsUnmapped,
+        benchmarks_updated:   result.benchmarksUpdated,
+        groups_skipped:       result.groupsSkipped,
+        clients_unmapped:     result.clientsUnmapped,
+        min_sample_threshold: MIN_SAMPLE_THRESHOLD,
+        note:
+          result.benchmarksUpdated === 0
+            ? `没有一组样本量达到 ${MIN_SAMPLE_THRESHOLD}，本轮不写基准（等实测结果攒够）`
+            : undefined,
       },
       error: result.errors.length > 0 ? result.errors.join('; ') : undefined,
     })
@@ -60,6 +69,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
+    // failed: 1 不能少 —— 只写 error 不写 failed，健康检查会把这次崩溃算成「跑成功了」
     await cronRun.finish({ failed: 1, error: msg })
     return NextResponse.json({ error: msg }, { status: 500 })
   }

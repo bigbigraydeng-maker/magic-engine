@@ -22,6 +22,7 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { encryptToken } from '@/lib/platform-oauth/vocabulary'
+import { resolveGbpLocation } from '@/lib/gbp/location'
 import { GBP_STATE_COOKIE } from '../start/route'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -178,9 +179,37 @@ export async function GET(req: NextRequest) {
     console.error('[gbp/callback] Failed to persist connection:', dbError.message)
   }
 
+  // ── 7b. Resolve which location posts go to, while we're here ─────────────
+  // PM asked for a genuine one-click setup: without this the location stays
+  // unresolved and the first weekly post would be the one to discover a
+  // problem. Failure is non-fatal — the connection itself is good, we just
+  // flag that a location still needs picking.
+  // Default to "not confirmed": telling the PM it is ready when we do not
+  // know is the one outcome that must never happen (魏征 🟡5).
+  let locationStatus: 'ready' | 'needs_location' = 'needs_location'
+  try {
+    const { data: clientRow } = await supabaseAdmin
+      .from('clients')
+      .select('id, name, domain')
+      .eq('id', clientId)
+      .single()
+
+    if (clientRow) {
+      const resolved = await resolveGbpLocation(
+        clientRow as { id: string; name: string; domain: string | null },
+      )
+      if (resolved.ok) locationStatus = 'ready'
+      else console.warn('[gbp/callback] location unresolved:', resolved.reason)
+    } else {
+      console.warn('[gbp/callback] client row unreadable — leaving location unconfirmed')
+    }
+  } catch (err) {
+    console.warn('[gbp/callback] location resolution failed:', err instanceof Error ? err.message : err)
+  }
+
   // ── 8. Clear CSRF cookie + redirect to success ────────────────────────────
   const successUrl = buildSettingsUrl(appUrl, clientId)
-  successUrl.searchParams.set('gbp', 'connected')
+  successUrl.searchParams.set('gbp', locationStatus === 'ready' ? 'connected' : 'needs_location')
 
   const response = NextResponse.redirect(successUrl.toString(), 302)
   response.headers.append(
