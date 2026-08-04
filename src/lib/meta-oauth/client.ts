@@ -38,6 +38,10 @@ export const META_PAGE_SCOPES = [
   'pages_show_list',
   'pages_messaging',
   'pages_read_engagement',
+  // 发内容到主页(Reel/贴文)必须有这一条。没有它,存下来的 token 只能读不能发——
+  // 2026-08-04 讲课片发布就卡在「读得到、发不出去」。
+  // 已经连过的客户(CTS/Roman)只做收件箱同步,不受影响;要发内容的客户重新点一次「连接 Meta」即可。
+  'pages_manage_posts',
 ] as const
 
 export interface VerifiedState {

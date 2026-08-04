@@ -51,9 +51,15 @@ describe('selectPendingPublishes', () => {
 
 describe('humanPublishError(报错翻成客户能行动的话)', () => {
   it('不把厂商原始报错甩给客户', () => {
-    expect(humanPublishError('META_SYSTEM_USER_TOKEN 未配置')).toBe('Facebook 授权没配好 — 联系我们处理')
     expect(humanPublishError('页名(X)与客户品牌(Y)不符 —— 防误发拦截'))
       .toContain('目标主页跟这个客户对不上')
+  })
+
+  it('没连过 Meta / 权限不够 → 必须说清去哪点什么,不能只说「配错了」', () => {
+    const notConnected = humanPublishError('这个主页还没连过 Meta,env META_SYSTEM_USER_TOKEN 也没配')
+    expect(notConnected).toContain('连接 Meta')
+    const noPerm = humanPublishError('FB /video_reels 403: {"error":{"code":200,"message":"pages_manage_posts"}}')
+    expect(noPerm).toContain('连接 Meta')
   })
 
   it('认不出的报错也给一句人话,不返回空', () => {

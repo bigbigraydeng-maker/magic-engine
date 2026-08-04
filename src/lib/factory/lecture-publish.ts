@@ -12,8 +12,14 @@ import { loadLecturePost, recordPublished, setPublishRequest } from './lecture-p
 /** 把接口报错翻成客户能行动的话(原始报错留日志给我们排查)。 */
 export function humanPublishError(raw: string): string {
   if (raw.includes('页名')) return '发布被拦住了：目标主页跟这个客户对不上 — 联系我们确认发到哪个主页'
+  // 这条要说清「去哪点什么」——只说「授权没配好」是个死胡同,人拿到了也不知道下一步做什么
+  if (/还没连过 Meta|no_page_token/i.test(raw)) {
+    return '这个主页还没连过 Facebook — 去客户设置里点一次「连接 Meta」，用能管理这个主页的账号授权，之后不用再管'
+  }
+  if (/permission|OAuth|#200|#10|pages_manage_posts/i.test(raw)) {
+    return 'Facebook 说权限不够（发主页内容的权限没给）— 去客户设置里重新点一次「连接 Meta」，授权页面上的勾要全部保留'
+  }
   if (/META_SYSTEM_USER_TOKEN|access_token|token/i.test(raw)) return 'Facebook 授权没配好 — 联系我们处理'
-  if (/permission|OAuth|#200|#10/i.test(raw)) return 'Facebook 权限不够（可能没开发视频的权限）— 联系我们处理'
   if (/file_url|upload/i.test(raw)) return 'Facebook 拉取视频失败 — 稍后再试一次；反复失败联系我们'
   return '发布没成功 — 稍后再试一次；反复失败请联系我们'
 }
@@ -43,8 +49,10 @@ export async function runOneLecturePublish(params: {
     if (!loaded.post.source_video_url) throw new Error('还没有成片')
     const { data: client } = await supabaseAdmin
       .from('clients').select('factory_config').eq('id', clientId).single()
-    const target = (client?.factory_config as { publish_target?: PublishTarget } | null)?.publish_target
-    if (!target?.page_id) throw new Error('没配 publish_target.page_id')
+    const stored = (client?.factory_config as { publish_target?: PublishTarget } | null)?.publish_target
+    if (!stored?.page_id) throw new Error('没配 publish_target.page_id')
+    // client_id 不存在配置里,发的时候补上——adapter 靠它去取「连接 Meta」存下的页 token
+    const target: PublishTarget = { ...stored, client_id: clientId }
 
     // 安全阀:没显式开 FACTORY_PUBLISH_LIVE 就只发草稿(主页后台可见、公众看不到)
     const draft = process.env.FACTORY_PUBLISH_LIVE !== 'true'
