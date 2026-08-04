@@ -118,3 +118,25 @@ describe('反馈 1：名单排序', () => {
 
 /** 与 segments.ts 里的 FRESH_FIRST_SEGMENTS 保持一致（那个不导出）。 */
 const FRESH_FIRST = new Set(['replied', 'new_untouched'])
+
+describe('反馈：时长要说人话，不能是「835 小时」', () => {
+  const seg = (tps: TouchpointLike[]) => segmentContact(contact(tps), NOW)
+
+  it('超过两天的用「天」，不再用小时', () => {
+    const r = seg([{ channel: 'meta_lead_form', direction: 'inbound', occurredAt: daysAgo(34) }])
+    expect(r.reason).toContain('34 天')
+    expect(r.reason).not.toContain('小时')
+  })
+
+  it('两天以内仍然用「小时」—— 今天/昨天的事，小时才有意义', () => {
+    const r = seg([{ channel: 'meta_lead_form', direction: 'inbound', occurredAt: daysAgo(1) }])
+    expect(r.reason).toContain('小时')
+    expect(r.reason).not.toContain('天')
+  })
+
+  it('刚进线不到一小时不显示「0 小时」', () => {
+    const justNow = new Date(NOW.getTime() - 10 * 60_000).toISOString()
+    const r = seg([{ channel: 'meta_lead_form', direction: 'inbound', occurredAt: justNow }])
+    expect(r.reason).toContain('不到 1 小时')
+  })
+})
