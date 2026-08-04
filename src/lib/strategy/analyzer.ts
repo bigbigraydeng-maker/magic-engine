@@ -159,7 +159,11 @@ export async function fetchKeywordOpportunities(clientId: string): Promise<Keywo
 
     if (error || !data) return []
     return data as KeywordOpportunity[]
-  } catch {
+  } catch (err) {
+    // The last silent path in this function. An empty array that nobody can
+    // tell apart from "no opportunities" is how the original bug survived two
+    // months; at minimum it has to say something on the way out.
+    console.warn(`[strategy] keyword opportunities failed for ${clientId}`, err)
     return []
   }
 }

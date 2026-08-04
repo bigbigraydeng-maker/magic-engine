@@ -43,6 +43,31 @@ export function newSeedKeywords(
 }
 
 /**
+ * Whether a *repeat* confirm is allowed to write seed keywords into the brief.
+ *
+ * 🔴 The merge runs above the already-confirmed short-circuit so that a client
+ *    whose brief did not exist at first confirm can still get its seeds. But the
+ *    confirm button stays live on the discovery page forever, so without this
+ *    gate any later click would re-add keywords an FDE had deliberately deleted
+ *    — a silent undo of a human decision, which is the same failure as
+ *    overwriting their spelling, just with content instead of casing.
+ *
+ * So a repeat confirm only writes when the brief is *newer* than the
+ * confirmation: that is exactly the "brief was created afterwards, the seeds
+ * never had anywhere to land" case, and nothing else.
+ */
+export function shouldBackfillSeeds(args: {
+  /** null on a first confirm — nothing has been written yet, always proceed. */
+  confirmedAt: string | null | undefined
+  briefCreatedAt: string | null | undefined
+}): boolean {
+  if (!args.confirmedAt) return true
+  // No timestamp to compare against ⇒ cannot prove this is a backfill ⇒ hands off.
+  if (!args.briefCreatedAt) return false
+  return new Date(args.briefCreatedAt).getTime() > new Date(args.confirmedAt).getTime()
+}
+
+/**
  * The full list to persist: everything already there, then the new arrivals.
  *
  * 🔴 Existing entries are returned **verbatim**. Normalising is for comparison

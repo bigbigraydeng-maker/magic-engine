@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { newSeedKeywords, mergedSeedKeywords } from '../seed-keywords'
+import { newSeedKeywords, mergedSeedKeywords, shouldBackfillSeeds } from '../seed-keywords'
 import type { DiscoveredKeyword } from '../types'
 
 function kw(keyword: string, type: DiscoveredKeyword['type'] = 'category'): DiscoveredKeyword {
@@ -62,5 +62,43 @@ describe('mergedSeedKeywords', () => {
 
   it('没有新词时原样返回，不制造无意义的写入内容变化', () => {
     expect(mergedSeedKeywords([kw('existing')], ['existing'])).toEqual(['existing'])
+  })
+})
+
+// 「确认发现」那颗按钮在已确认之后仍然挂在页面上、随时可点
+// （zhangqian/page.tsx 的 confirmed 分支里还渲染着同一个 onConfirm）。
+// 所以重复点击必须**不能**把 FDE 删掉的词加回来 —— 只有「简报是确认之后才建的」
+// 这一种情况才是真的补漏。
+describe('shouldBackfillSeeds', () => {
+  it('首次确认（还没盖过章）—— 直接写', () => {
+    expect(shouldBackfillSeeds({ confirmedAt: null, briefCreatedAt: '2026-07-01T00:00:00Z' })).toBe(true)
+    expect(shouldBackfillSeeds({ confirmedAt: undefined, briefCreatedAt: null })).toBe(true)
+  })
+
+  it('🔴 重复确认 + 简报早于确认 → 不写。FDE 删掉的词不许被复活', () => {
+    expect(
+      shouldBackfillSeeds({
+        confirmedAt: '2026-07-19T00:00:00Z',
+        briefCreatedAt: '2026-07-01T00:00:00Z',
+      }),
+    ).toBe(false)
+  })
+
+  it('重复确认 + 简报是确认之后才建的 → 写。这才是真正要补的那 3 个客户', () => {
+    expect(
+      shouldBackfillSeeds({
+        confirmedAt: '2026-07-19T00:00:00Z',
+        briefCreatedAt: '2026-07-25T00:00:00Z',
+      }),
+    ).toBe(true)
+  })
+
+  it('🔴 拿不到简报建立时间 → 不写。证不出是补漏就别碰人家的字段', () => {
+    expect(shouldBackfillSeeds({ confirmedAt: '2026-07-19T00:00:00Z', briefCreatedAt: null })).toBe(false)
+  })
+
+  it('时间完全相同不算「之后」，不写', () => {
+    const t = '2026-07-19T00:00:00Z'
+    expect(shouldBackfillSeeds({ confirmedAt: t, briefCreatedAt: t })).toBe(false)
   })
 })

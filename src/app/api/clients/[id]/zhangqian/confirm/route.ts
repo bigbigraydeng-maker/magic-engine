@@ -15,7 +15,7 @@ import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { getLatestDiscovery } from '@/lib/zhangqian/persistor'
 import { syncAiTrackerQuestions } from '@/lib/zhangqian/sync-ai-visibility'
 import { getActiveBrief } from '@/lib/content/brief-injector'
-import { newSeedKeywords, mergedSeedKeywords } from '@/lib/zhangqian/seed-keywords'
+import { newSeedKeywords, mergedSeedKeywords, shouldBackfillSeeds } from '@/lib/zhangqian/seed-keywords'
 import type { DiscoveredCompetitor, DiscoveryReport } from '@/lib/zhangqian/types'
 
 // ─── Request body types ───────────────────────────────────────────────────────
@@ -66,7 +66,11 @@ export async function PATCH(
     let keywordsAdded = 0
     let seedKeywordsPending = false
     try {
-      const merged = await mergeSeedKeywordsIntoBrief(clientId, discovery.payload as DiscoveryReport)
+      const merged = await mergeSeedKeywordsIntoBrief(
+        clientId,
+        discovery.payload as DiscoveryReport,
+        discovery.confirmed_at,
+      )
       keywordsAdded = merged.added
       seedKeywordsPending = merged.noActiveBrief
     } catch (seedErr) {
@@ -169,6 +173,7 @@ async function applyBusinessPatch(
 async function mergeSeedKeywordsIntoBrief(
   clientId: string,
   payload: DiscoveryReport,
+  confirmedAt: string | null,
 ): Promise<{ added: number; noActiveBrief: boolean }> {
   const activeBrief = await getActiveBrief(clientId)
   // "No brief yet" is reported, not swallowed: it looks identical to "no new
@@ -177,6 +182,13 @@ async function mergeSeedKeywordsIntoBrief(
   // lost either way — they stay in client_discovery.payload, the brief-creation
   // form reads them straight from there, and confirming again backfills.
   if (!activeBrief) return { added: 0, noActiveBrief: true }
+
+  // On a repeat confirm, write only when the brief is newer than the
+  // confirmation — see shouldBackfillSeeds. Otherwise a second click would
+  // resurrect keywords the FDE removed on purpose.
+  if (!shouldBackfillSeeds({ confirmedAt, briefCreatedAt: activeBrief.created_at as string | null })) {
+    return { added: 0, noActiveBrief: false }
+  }
 
   const existing = (activeBrief.keyword_seeds as string[] | null) ?? []
   const toAdd = newSeedKeywords(payload.seed_keywords, existing)
