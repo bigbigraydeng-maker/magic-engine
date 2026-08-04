@@ -4,7 +4,8 @@
  * 每天把邮件反应搬进 CRM：谁收到了、谁打开了、谁点了链接。
  *
  * 为什么要它：销售一天打不完 297 个电话。但一批邮件发出去，三分之一会打开、
- * 一成多会点链接（CTS 近 90 天真实数据）—— **点了行程链接的人才是今天该打的**。
+ * 一成多会点链接（CTS 近 90 天真实数据）—— **点了链接的人才是今天该打的**
+ * （只知道点了，不知道点的是哪一条 —— Mailchimp 这个接口不给链接地址）。
  * 在这之前系统完全看不到这件事，销售只能按「我们打没打过他」排序。
  *
  * 跑完之后，这些反应会出现在每个客人的往来记录里，并且参与冷热分级。
@@ -22,13 +23,18 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { syncMailchimpActivity } from '@/lib/mailchimp/sync'
 import { ping } from '@/lib/mailchimp/client'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 // 一个客户几十封邮件 × 每封翻页拉名单，给足时间。
 export const maxDuration = 600
 
+// 🔴 必须写 cron_run_logs(2026-08-03 补):此前不留任何运行痕迹,
+// 「跑了但没客户开这个功能」和「压根没跑」监控分辨不出 —— 每个出口都要收尾。
 async function run(): Promise<NextResponse> {
+  const cronRun = await startCronRun('mailchimp-activity-sync')
   const apiKey = process.env.MAILCHIMP_API_KEY
   if (!apiKey) {
+    await cronRun.finish({ error: 'MAILCHIMP_API_KEY 没配' })
     return NextResponse.json(
       { error: 'MAILCHIMP_API_KEY 没配 —— 去 Render 环境变量加上' },
       { status: 500 },
@@ -39,10 +45,9 @@ async function run(): Promise<NextResponse> {
   try {
     await ping(apiKey)
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Mailchimp 连不上' },
-      { status: 502 },
-    )
+    const msg = err instanceof Error ? err.message : 'Mailchimp 连不上'
+    await cronRun.finish({ error: msg })
+    return NextResponse.json({ error: msg }, { status: 502 })
   }
 
   // 哪些客户要同步：leads_config.mailchimp_enabled = true。
@@ -54,6 +59,7 @@ async function run(): Promise<NextResponse> {
     .not('leads_config', 'is', null)
 
   if (error) {
+    await cronRun.finish({ error: error.message })
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
@@ -62,6 +68,8 @@ async function run(): Promise<NextResponse> {
   )
 
   if (targets.length === 0) {
+    // 空转也要留痕：没客户开这个功能 ≠ 没跑
+    await cronRun.finish({ summary: { note: '没有客户开启邮件同步，本轮空转' } })
     return NextResponse.json({
       ok: true,
       note: '没有客户开启邮件同步（clients.leads_config.mailchimp_enabled）',
@@ -80,6 +88,13 @@ async function run(): Promise<NextResponse> {
     }
   }
 
+  const failed = synced.filter((x) => 'error' in x).length
+  await cronRun.finish({
+    processed: synced.length,
+    completed: synced.length - failed,
+    failed,
+    summary: { synced },
+  })
   return NextResponse.json({ ok: true, synced })
 }
 

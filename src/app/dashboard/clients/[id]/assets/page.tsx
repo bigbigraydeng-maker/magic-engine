@@ -11,6 +11,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
+import {
+  SOURCE_LABELS,
+  FDE_UPLOAD_SOURCES,
+  canBackRealPrice,
+  type AssetSource,
+} from '@/lib/assets/provenance'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -36,6 +42,10 @@ interface ClientAsset {
   cta_score: number
   recommended_use: 'hook' | 'middle' | 'cta' | 'skip' | null
   created_at: string
+  source: AssetSource
+  ownership: string
+  verified_by: string | null
+  verified_at: string | null
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -75,11 +85,50 @@ function UseBadge({ use }: { use: ClientAsset['recommended_use'] }) {
   )
 }
 
+/**
+ * 来源徽章 —— 绿色 = 能拿去打真实价格，灰色 = 不能。
+ * 只有这一个视觉信号区分「真料」和「可能是网图」，别用别的颜色语义。
+ */
+function SourceBadge({ source }: { source: AssetSource }) {
+  const trusted = canBackRealPrice(source)
+  const cls = trusted
+    ? 'bg-emerald-900/70 text-emerald-300'
+    : 'bg-zinc-800/90 text-zinc-400'
+  return (
+    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${cls}`}>
+      {SOURCE_LABELS[source] ?? source}
+    </span>
+  )
+}
+
 // ─── Asset Card ───────────────────────────────────────────────────────────────
 
-function AssetCard({ asset }: { asset: ClientAsset }) {
+function AssetCard({
+  asset,
+  clientId,
+  onChanged,
+}: {
+  asset: ClientAsset
+  clientId: string
+  onChanged: () => void
+}) {
   const [expanded, setExpanded] = useState(false)
+  const [saving, setSaving] = useState(false)
   const vm = asset.vision_metadata
+
+  async function setSource(next: AssetSource) {
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/assets/${asset.id}/provenance`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: next }),
+      })
+      if (res.ok) onChanged()
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <div
@@ -97,6 +146,9 @@ function AssetCard({ asset }: { asset: ClientAsset }) {
         <div className="absolute top-1.5 left-1.5 flex gap-1">
           <StatusBadge status={asset.status} />
           <UseBadge use={asset.recommended_use} />
+        </div>
+        <div className="absolute bottom-1.5 left-1.5 right-1.5 flex">
+          <SourceBadge source={asset.source} />
         </div>
       </div>
 
@@ -147,6 +199,40 @@ function AssetCard({ asset }: { asset: ClientAsset }) {
           )}
         </div>
       )}
+
+      {/* 来源确认 —— 跟分析状态无关，待分析的图也该能标来源 */}
+      {expanded && (
+        <div
+          className="px-2 pb-2 border-t border-zinc-800 pt-2 space-y-1.5"
+          onClick={e => e.stopPropagation()}
+        >
+          <p className="text-[10px] text-zinc-500">
+            这张图哪来的？决定它能不能出现在标了真实价格的内容里。
+          </p>
+          <div className="flex flex-wrap gap-1">
+            {FDE_UPLOAD_SOURCES.concat('client_verified').map(s => (
+              <button
+                key={s}
+                disabled={saving || s === asset.source}
+                onClick={() => setSource(s)}
+                className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+                  s === asset.source
+                    ? 'border-emerald-600 bg-emerald-900/50 text-emerald-300'
+                    : 'border-zinc-700 text-zinc-400 hover:border-zinc-500 disabled:opacity-40'
+                }`}
+              >
+                {SOURCE_LABELS[s]}
+              </button>
+            ))}
+          </div>
+          {asset.verified_by && (
+            <p className="text-[10px] text-zinc-500">
+              由 {asset.verified_by} 确认
+              {asset.verified_at ? ` · ${asset.verified_at.slice(0, 10)}` : ''}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -158,6 +244,9 @@ function UploadZone({ clientId, onUploaded }: { clientId: string; onUploaded: ()
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [errors, setErrors] = useState<string[]>([])
+  // 默认「我们拍的」：FDE 后台上传绝大多数是自己拍的或客户直接给的原件。
+  // 选错的代价只是这批料暂时打不了真价，可以在卡片上逐张改回来。
+  const [source, setSource] = useState<AssetSource>('fde_shot')
   const inputRef = useRef<HTMLInputElement>(null)
 
   const upload = useCallback(async (files: FileList | File[]) => {
@@ -173,6 +262,7 @@ function UploadZone({ clientId, onUploaded }: { clientId: string; onUploaded: ()
       const batch = arr.slice(i, i + BATCH)
       const fd = new FormData()
       batch.forEach(f => fd.append('files', f))
+      fd.append('source', source)
 
       const res = await fetch(`/api/clients/${clientId}/assets`, { method: 'POST', body: fd })
       const json = await res.json()
@@ -183,7 +273,7 @@ function UploadZone({ clientId, onUploaded }: { clientId: string; onUploaded: ()
     setUploading(false)
     setProgress(null)
     onUploaded()
-  }, [clientId, onUploaded])
+  }, [clientId, onUploaded, source])
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -193,6 +283,27 @@ function UploadZone({ clientId, onUploaded }: { clientId: string; onUploaded: ()
 
   return (
     <div className="mb-6">
+      {/* 来源必须在传之前选好 —— 传完再补是没人会做的事 */}
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <span className="text-[11px] text-zinc-500">这批图哪来的：</span>
+        {FDE_UPLOAD_SOURCES.map(s => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => setSource(s)}
+            className={`text-[11px] px-2 py-1 rounded border transition-colors ${
+              s === source
+                ? 'border-cyan-600 bg-cyan-950/40 text-cyan-300'
+                : 'border-zinc-700 text-zinc-400 hover:border-zinc-500'
+            }`}
+          >
+            {SOURCE_LABELS[s]}
+          </button>
+        ))}
+        {!canBackRealPrice(source) && (
+          <span className="text-[11px] text-amber-500/80">这类素材不能用在标了真实价格的内容里</span>
+        )}
+      </div>
       <div
         className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer
           ${dragging ? 'border-cyan-500 bg-cyan-950/20' : 'border-zinc-700 hover:border-zinc-500'}`}
@@ -669,7 +780,7 @@ export default function AssetsPage() {
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
             {filtered.map(asset => (
-              <AssetCard key={asset.id} asset={asset} />
+              <AssetCard key={asset.id} asset={asset} clientId={clientId} onChanged={loadAssets} />
             ))}
           </div>
         )}

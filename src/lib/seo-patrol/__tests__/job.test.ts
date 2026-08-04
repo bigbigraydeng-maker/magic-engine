@@ -143,6 +143,21 @@ describe('findingsToActions', () => {
     expect(findingsToActions([])).toEqual([])
   })
 
+  it('dedupes duplicate findings for the same (rule, subject) — one card per keyword', () => {
+    // Duplicate snapshot rows can fire the same rule twice for one keyword;
+    // that must not become two identical kanban cards (Sungenix 2026-08-01).
+    const actions = findingsToActions([
+      finding({ ruleId: 'stale_content', keyword: 'how often apply sunscreen', suggestedActionType: 'seo.refresh_blog' }),
+      finding({ ruleId: 'stale_content', keyword: 'How Often Apply Sunscreen', suggestedActionType: 'seo.refresh_blog' }),
+      finding({ ruleId: 'stale_content', keyword: 'phoenix beauty eastwood', suggestedActionType: 'seo.refresh_blog' }),
+    ])
+    expect(actions).toHaveLength(2)
+    expect(actions.map((a) => (a.metadata as { keyword: string }).keyword)).toEqual([
+      'how often apply sunscreen',
+      'phoenix beauty eastwood',
+    ])
+  })
+
   it('attaches metadata carrying the real keyword so the Content Workbench can prefill it', () => {
     // Regression guard for the FDE-feedback bug where the studio prefilled
     // the action-type label ("Publish Blog") instead of the rule's keyword.

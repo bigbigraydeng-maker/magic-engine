@@ -729,7 +729,11 @@ export async function getRankedKeywords(
               cpc?:           number | null
               competition?:   number | null
             }
-            keyword_difficulty?: number | null
+            // KD lives under keyword_properties in ranked_keywords responses
+            // (same shape as keyword_ideas/suggestions elsewhere in this file).
+            keyword_properties?: {
+              keyword_difficulty?: number | null
+            }
           }
           ranked_serp_element?: {
             serp_item?: {
@@ -752,7 +756,7 @@ export async function getRankedKeywords(
       return {
         keyword:            kd.keyword ?? '',
         search_volume:      kd.keyword_info?.search_volume ?? null,
-        keyword_difficulty: kd.keyword_difficulty ?? null,
+        keyword_difficulty: kd.keyword_properties?.keyword_difficulty ?? null,
         cpc,
         competition:        kd.keyword_info?.competition ?? null,
         intent:             deriveIntent(cpc),

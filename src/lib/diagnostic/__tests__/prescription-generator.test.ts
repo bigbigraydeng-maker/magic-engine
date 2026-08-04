@@ -478,4 +478,40 @@ describe('generatePrescription()', () => {
     expect(prompt).toContain(INTAKE.timeline_urgency)
     expect(prompt).toContain(String(INTAKE.monthly_budget_aud))
   })
+
+  // =========================================================================
+  // 9. 🔴 提示词必须索要 initiative_seed —— 少了它，动作全变「未归类」
+  // =========================================================================
+  it('🔴 系统提示词必须要求每个阶段填 initiative_seed', async () => {
+    // 为什么锁这一条：2026-08-04 复审发现，这条路径的提示词从来没要过这个字段
+    //（只有华佗那套要）。后果是链路一路静默：AI 不产出 → 派生 0 个 Initiative →
+    // 每条执行项的 initiative_id 都是 null → 看板按目标筛时一条都不显示，
+    // 而系统还在给 PM 报「已按目标排好」。全程没有一个地方会报错。
+    const content = makePrescriptionContent()
+    mockMessagesCreate.mockResolvedValueOnce(makeClaudeResponse(content))
+
+    const supabase = buildSupabaseMock({})
+    await generatePrescription(supabase as never, RUN_ID, CLIENT_ID, INTAKE)
+
+    const call = mockMessagesCreate.mock.calls[0][0] as { system: string }
+
+    // 🔴 必须出现在**输出 JSON 骨架**里，不能只在散文规则里提一句。
+    //    模型照抄的是骨架；只在散文里说，它多半不会输出这个字段 ——
+    //    上一版这条断言只查了「整个提示词里出现过 initiative_seed」，
+    //    把骨架里那块删掉、散文一字不动，测试照样全绿，等于没锁。
+    const schemaBlock = call.system.slice(call.system.indexOf('"phases"'))
+    expect(schemaBlock).toContain('"initiative_seed"')
+
+    // 光提一句不够，要给全 6 个可选类型，否则 AI 会自己编一个枚举值
+    for (const t of [
+      'demand_generation',
+      'conversion_optimization',
+      'trust_building',
+      'competitive_defense',
+      'market_education',
+      'content_asset_production',
+    ]) {
+      expect(call.system).toContain(t)
+    }
+  })
 })

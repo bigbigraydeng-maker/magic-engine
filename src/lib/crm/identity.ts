@@ -17,6 +17,11 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import {
+  firstTouchColumns,
+  isAttributed,
+  type Attribution,
+} from '@/lib/crm/attribution'
 
 export type IdentityKind = 'phone' | 'email' | 'fb_psid'
 
@@ -125,6 +130,19 @@ export interface ResolveInput {
    * 手工录入传 false —— 打错电话撞到老客户时，不该把人家的名字改掉。
    */
   overwriteDisplayName?: boolean
+  /**
+   * 「他是哪条广告 / 哪条视频带来的」。
+   *
+   * first-touch 语义：新建的人直接写上；命中已有的人**只在原来是空的时候**回填，
+   * 绝不覆盖（见下方写入处的注释）。渠道拿不到 ad 级归因就别传，留 NULL 是事实。
+   */
+  attribution?: Attribution
+  /**
+   * 这个人是哪套房带来的（listings.id）。
+   *
+   * 跟 attribution 同样是 first-touch：只在新建或原值为空时写。非地产客户不传。
+   */
+  listingId?: string | null
 }
 
 /** 一批身份指向了两个不同的既有联系人，且调用方要求人工判断。 */
@@ -187,6 +205,9 @@ export async function resolveContact(input: ResolveInput): Promise<ResolveResult
         primary_email: identities.find((i) => i.kind === 'email')?.value ?? null,
         first_seen_at: seenAt,
         last_seen_at: seenAt,
+        // 新建的人：这次带来的归因就是 first-touch，直接写。
+        ...(input.attribution ? firstTouchColumns(input.attribution, seenAt) : {}),
+        ...(input.listingId ? { listing_id: input.listingId } : {}),
       })
       .select('id')
       .single()
@@ -234,6 +255,30 @@ export async function resolveContact(input: ResolveInput): Promise<ResolveResult
         updated_at: new Date().toISOString(),
       })
       .eq('id', contactId)
+
+    // first-touch 回填：**只在原来是空的时候**写。
+    //
+    // 为什么加 .is('first_attributed_at', null) 而不是直接 update：
+    // 一个人会被反复碰到（今天填了 A 房子的表单，下周又填 B 房子的）。不加这个
+    // 条件就变成 last-touch，功劳会被最后那次覆盖 —— 真正带来他的那条广告永远
+    // 拿不到分，学出来的结论是反的。这一条件放在 SQL 里而不是先读后判，是为了
+    // 两个并发写入不会互相盖（Postgres 层面只会有一个赢）。
+    if (input.attribution && isAttributed(input.attribution)) {
+      await supabaseAdmin
+        .from('contacts')
+        .update(firstTouchColumns(input.attribution, seenAt))
+        .eq('id', contactId)
+        .is('first_attributed_at', null)
+    }
+
+    // 房子同理：只补空。已经归到某套房的人，不被后来的另一套房抢走。
+    if (input.listingId) {
+      await supabaseAdmin
+        .from('contacts')
+        .update({ listing_id: input.listingId })
+        .eq('id', contactId)
+        .is('listing_id', null)
+    }
   }
 
   // 把这次带来的身份补齐。已存在的靠唯一约束忽略。

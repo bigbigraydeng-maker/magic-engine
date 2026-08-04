@@ -20,6 +20,8 @@ export interface FormatMemoryOptions {
   includeFailedExperiments?: boolean
   /** 是否包含 recent_decisions 段，默认 true（仅对诸葛亮有意义；其他 Agent 可关闭以节省 token） */
   includeRecentDecisions?: boolean
+  /** 是否包含跨客户经验段，默认 true。新客户没有自身记忆时，这一段往往是唯一可用的先验 */
+  includeGlobalLessons?: boolean
   /** 自定义标题（默认「Client Memory (L3 Long-term Learning)」） */
   heading?: string
   /** 标题前的 markdown 等级，默认 '##'（与诸葛亮 prompt 保持一致） */
@@ -45,12 +47,18 @@ export function formatMemoryForPrompt(
   memory: MemoryContext | undefined,
   options: FormatMemoryOptions = {},
 ): string {
-  if (!memory?.has_content) return ''
+  if (!memory) return ''
 
   const includePreferences        = options.includePreferences        ?? true
   const includeProvenPatterns     = options.includeProvenPatterns     ?? true
   const includeFailedExperiments  = options.includeFailedExperiments  ?? true
   const includeRecentDecisions    = options.includeRecentDecisions    ?? true
+  const includeGlobalLessons      = options.includeGlobalLessons      ?? true
+
+  // has_content 只反映客户级记忆。全局经验独立判断，否则新客户（无自身记忆）
+  // 永远读不到跨客户经验 —— 而那恰恰是最需要先验的时候。
+  const globalLessons = includeGlobalLessons ? (memory.global_lessons ?? []) : []
+  if (!memory.has_content && globalLessons.length === 0) return ''
   const level = options.headingLevel ?? '##'
   const subLevel = level === '##' ? '###' : '####'
   const heading = options.heading ?? 'Client Memory (L3 Long-term Learning)'
@@ -59,6 +67,20 @@ export function formatMemoryForPrompt(
   parts.push('Use this to refine your output — prefer proven patterns, avoid known failures, respect past decisions.\n')
 
   let any = false
+
+  // 放在最前：跨客户经验是硬约束（多为「别再犯」类），应先于客户偏好被读到
+  if (globalLessons.length > 0) {
+    any = true
+    parts.push(`${subLevel} Cross-Client Lessons (learned across the whole portfolio — apply unless this client contradicts them)`)
+    for (const l of globalLessons) {
+      const tag = l.scope === 'industry' && l.industry
+        ? `industry:${l.industry}`
+        : l.scope
+      const fw = l.flywheel ? `/${l.flywheel}` : ''
+      const why = l.rationale ? ` — why: ${l.rationale}` : ''
+      parts.push(`  - [${tag}${fw}] ${l.lesson}${why}`)
+    }
+  }
 
   if (includePreferences && memory.preferences.length > 0) {
     any = true

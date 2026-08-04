@@ -107,6 +107,10 @@ export async function POST(
         mime_type: file.type,
         // 图片交给 analyzer;视频标 analyzed 让它跳过(见头注)
         status: isVideo ? 'analyzed' : 'pending',
+        // 上传链接可无限转发,客户完全可能传网图进来 —— 一律「未核实」。
+        // 要打真价必须由 FDE 逐张确认升成 client_verified,那一步带审计记录。
+        source: 'client_provided',
+        ownership: 'client_exclusive',
         vision_metadata: {
           // 溯源:记录「从哪条通道进来的」。**注意它的可信度上限就是通道本身** ——
           // 链接可无限转发,客户完全可能把网图或 AI 生成图从这里传进来。

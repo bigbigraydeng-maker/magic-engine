@@ -16,6 +16,7 @@ function makeAction(
   action_type: string,
   rank = 1,
   execution_mode: ExecutionMode = 'in_house',
+  metadata?: Record<string, unknown>,
 ): PriorityAction {
   return {
     rank,
@@ -27,6 +28,7 @@ function makeAction(
     effort: 'low',
     execution_mode,
     executable_by: null,
+    ...(metadata ? { metadata } : {}),
   }
 }
 
@@ -45,6 +47,7 @@ interface ExistingRow {
   action_type: string
   source: string
   zhuge_session_id: string | null
+  steps_json?: Record<string, unknown> | null
 }
 
 function makeSupabase(
@@ -269,5 +272,85 @@ describe('writeExecutionItems()', () => {
 
     const rows = supabase._insertFn.mock.calls[0][0] as Array<{ zhuge_session_id: null }>
     expect(rows[0].zhuge_session_id).toBeNull()
+  })
+
+  // ── Keyed dedup (2026-08-01 Sungenix duplicate-cards incident) ───────────────
+
+  it('supersedes only the row with the matching keyword, not siblings of the same action_type', async () => {
+    // Patrol emits 2 cards of one action_type for 2 keywords. Old bug: the
+    // Map keyed by action_type kept ONE existing row, so re-runs superseded
+    // one keyword's card while the other accumulated +1 per day.
+    const existing: ExistingRow[] = [
+      { id: 'old-sunscreen', action_type: 'seo.refresh_blog', source: 'zhuge', zhuge_session_id: 's1', steps_json: { keyword: 'how often apply sunscreen' } },
+      { id: 'old-phoenix',   action_type: 'seo.refresh_blog', source: 'zhuge', zhuge_session_id: 's1', steps_json: { keyword: 'phoenix beauty eastwood' } },
+    ]
+    const supabase = makeSupabase(existing)
+    const actions = [
+      makeAction('seo', 'seo.refresh_blog', 1, 'in_house', { keyword: 'how often apply sunscreen' }),
+      makeAction('seo', 'seo.refresh_blog', 2, 'in_house', { keyword: 'phoenix beauty eastwood' }),
+    ]
+
+    const result = await writeExecutionItems(supabase as never, 'client-1', 's2', actions)
+
+    expect(result.superseded).toBe(2)
+    expect(result.inserted).toBe(2)
+    expect(supabase._updateInFn).toHaveBeenCalledWith('id', ['old-sunscreen', 'old-phoenix'])
+  })
+
+  it('supersedes ALL accumulated duplicate rows sharing one key', async () => {
+    const existing: ExistingRow[] = [
+      { id: 'dup-1', action_type: 'seo.refresh_blog', source: 'zhuge', zhuge_session_id: 's1', steps_json: { keyword: 'kw-a' } },
+      { id: 'dup-2', action_type: 'seo.refresh_blog', source: 'zhuge', zhuge_session_id: 's2', steps_json: { keyword: 'kw-a' } },
+      { id: 'dup-3', action_type: 'seo.refresh_blog', source: 'zhuge', zhuge_session_id: 's3', steps_json: { keyword: 'kw-a' } },
+    ]
+    const supabase = makeSupabase(existing)
+    const actions  = [makeAction('seo', 'seo.refresh_blog', 1, 'in_house', { keyword: 'kw-a' })]
+
+    const result = await writeExecutionItems(supabase as never, 'client-1', 's4', actions)
+
+    expect(result.superseded).toBe(3)
+    expect(result.inserted).toBe(1)
+    expect(supabase._updateInFn).toHaveBeenCalledWith('id', ['dup-1', 'dup-2', 'dup-3'])
+  })
+
+  it('inserts only one card when the same (action_type, keyword) appears twice in a batch', async () => {
+    const supabase = makeSupabase([])
+    const actions = [
+      makeAction('seo', 'seo.refresh_blog', 1, 'in_house', { keyword: 'kw-a' }),
+      makeAction('seo', 'seo.refresh_blog', 2, 'in_house', { keyword: 'kw-a' }),
+      makeAction('seo', 'seo.refresh_blog', 3, 'in_house', { keyword: 'kw-b' }),
+    ]
+
+    const result = await writeExecutionItems(supabase as never, 'client-1', 's1', actions)
+
+    expect(result.inserted).toBe(2)
+    const rows = supabase._insertFn.mock.calls[0][0] as Array<{ steps_json: { keyword: string } }>
+    expect(rows.map((r) => r.steps_json.keyword)).toEqual(['kw-a', 'kw-b'])
+  })
+
+  it('does not supersede a keyworded card when a keywordless action of the same type arrives', async () => {
+    const existing: ExistingRow[] = [
+      { id: 'patrol-card', action_type: 'seo.refresh_blog', source: 'zhuge', zhuge_session_id: 's1', steps_json: { keyword: 'kw-a' } },
+    ]
+    const supabase = makeSupabase(existing)
+    const actions  = [makeAction('seo', 'seo.refresh_blog', 1)] // conduct-style, no metadata
+
+    const result = await writeExecutionItems(supabase as never, 'client-1', 's2', actions)
+
+    expect(result.superseded).toBe(0)
+    expect(result.inserted).toBe(1)
+  })
+
+  it('skips insert when an fde row owns the same (action_type, keyword)', async () => {
+    const existing: ExistingRow[] = [
+      { id: 'fde-card', action_type: 'seo.refresh_blog', source: 'fde', zhuge_session_id: null, steps_json: { keyword: 'kw-a' } },
+    ]
+    const supabase = makeSupabase(existing)
+    const actions  = [makeAction('seo', 'seo.refresh_blog', 1, 'in_house', { keyword: 'kw-a' })]
+
+    const result = await writeExecutionItems(supabase as never, 'client-1', 's1', actions)
+
+    expect(result.inserted).toBe(0)
+    expect(result.superseded).toBe(0)
   })
 })

@@ -48,6 +48,7 @@ function stubSupabase(opts: {
   convoClientId?: string | null
   lastInboundAt?: string | null
   psid?: string | null
+  channel?: string
 }): Captured {
   const captured: Captured = { auditInserts: [], auditUpdates: [], messageInserts: [] }
 
@@ -101,6 +102,9 @@ function stubSupabase(opts: {
                 client_id: opts.convoClientId ?? CTS,
                 page_id: '1616575215312482',
                 participant_psid: opts.psid === undefined ? 'psid_9' : opts.psid,
+                // conversations 是四渠道共用的表。默认给私信，个别用例覆盖成
+                // 别的渠道，验证「不是私信就不许在这里发」。
+                channel: opts.channel ?? 'messenger',
               },
         error: null,
       }
@@ -296,5 +300,23 @@ describe('sendReply — input', () => {
 
     expect(res).toMatchObject({ ok: false, status: 424, reason: 'no_token' })
     expect(captured.auditUpdates[0]).toMatchObject({ status: 'failed' })
+  })
+})
+
+/**
+ * conversations 是四个渠道共用的表（邮件 / 外呼 / WhatsApp 都写这里）。
+ * 走到这里的必须是私信 —— 否则我们会拿一封邮件的线程去调 Meta 的发送接口。
+ */
+describe('sendReply — 渠道', () => {
+  it('邮件线程不许在这里回，而且说清楚是渠道用错了不是窗口关了', async () => {
+    stubSupabase({
+      lastInboundAt: new Date(NOW.getTime() - 3_600_000).toISOString(),
+      channel: 'email',
+    })
+
+    const res = await sendReply(input())
+
+    expect(res).toMatchObject({ ok: false, status: 409, reason: 'wrong_channel' })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

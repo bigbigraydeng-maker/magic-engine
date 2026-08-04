@@ -75,6 +75,45 @@ describe('MetaAdsAdapter', () => {
     ).rejects.toThrow('Unknown Ads action_type')
   })
 
+  it('REFUSES to write an action whose expected_metric nobody pulls', async () => {
+    // The gate must live inside the adapter, not only in the registry module —
+    // a validator no writer calls is exactly how 24 ads actions were written
+    // against a metric that was never collected.
+    const { MetaAdsAdapter } = await import('../MetaAdsAdapter')
+    const adapter = new MetaAdsAdapter()
+
+    await expect(
+      adapter.execute({
+        clientId: 'client-1',
+        actionType: ADS_ACTION_TYPE.PAUSE_CAMPAIGN,
+        executionMode: 'third_party',
+        expectedMetric: 'ads.account.cost_per_click_maybe',
+      })
+    ).rejects.toThrow(/refusing to write flywheel_action/)
+
+    // and the row must not have been inserted
+    expect(mockActionInsert).not.toHaveBeenCalled()
+  })
+
+  it('accepts an expected_metric that a puller is registered for', async () => {
+    mockSingle.mockResolvedValueOnce({
+      data: {
+        id: 'a1', client_id: 'c1', flywheel: 'ads',
+        action_type: ADS_ACTION_TYPE.PAUSE_CAMPAIGN, execution_mode: 'third_party',
+        expected_metric: ADS_METRIC_KEY.COST_PER_CONVERSATION, executed_at: new Date().toISOString(),
+      },
+      error: null,
+    })
+    const { MetaAdsAdapter } = await import('../MetaAdsAdapter')
+    const result = await new MetaAdsAdapter().execute({
+      clientId: 'c1',
+      actionType: ADS_ACTION_TYPE.PAUSE_CAMPAIGN,
+      executionMode: 'third_party',
+      expectedMetric: ADS_METRIC_KEY.COST_PER_CONVERSATION,
+    })
+    expect(result.expectedMetric).toBe(ADS_METRIC_KEY.COST_PER_CONVERSATION)
+  })
+
   it('inserts a flywheel_actions row and returns FlywheelActionRow', async () => {
     const now = new Date().toISOString()
     const dbRow = {

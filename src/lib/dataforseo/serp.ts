@@ -42,6 +42,8 @@ export interface DfseSerpResult {
     rating:       number | null
     review_count: number | null
     address:      string | null
+    /** Listing's website domain when Google exposes it — used to match the client. */
+    domain:       string | null
   }>
   /** Up to 4 People Also Ask question texts — useful as FAQ Schema seed content. */
   people_also_ask?:        string[]
@@ -205,6 +207,7 @@ export async function getSerpPage(
       rating:       it.rating       ?? null,
       review_count: it.reviews_count ?? null,
       address:      it.address      ?? null,
+      domain:       it.domain       ?? null,
     }))
 
   const peopleAlsoAsk = items

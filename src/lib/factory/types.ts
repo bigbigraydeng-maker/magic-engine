@@ -125,11 +125,16 @@ export interface GateContext {
   allowBTrackLandmarkAds: boolean
   /** B4:客户级持久真促销(factory_config.verified_offer),该客户所有活动默认带上;单条活动可用 signal 覆盖 */
   verifiedOffer: VerifiedOffer | null
+  /** sourceImagePool 里哪些来自客户自己上传的素材。 */
+  clientOwnedSources?: ReadonlySet<string>
   /** 客户是否配了叙事人格(master_briefs.brand_voice.persona)→ 选故事型分镜 + 第一人称文案 */
   hasPersona?: boolean
   /** i2v 源图池:抓来的静图公开 URL。喂给 generationPlan 当底图,每段轮换用不同的一张。
    *  由 evaluate 从 video_clips 里 is_still_image=true 的行装配。空 = worker 退回占位帧。 */
   sourceImagePool?: readonly string[]
+  /** 同行业爆款的节奏基线(只有数字,无任何画面/文案)。由 evaluate 装配,
+   *  strategist 用它缩小配方候选池。null = 样本不足或查询失败 → 走原逻辑。 */
+  rhythmHint?: { medianShotSeconds: number; sampleSize: number } | null
 }
 
 export interface AngleSource {
@@ -183,6 +188,18 @@ export interface VerifiedOffer {
   discount?: string
   /** 截止,如 "31 July" / "end of July"(可选) */
   offer_expiry?: string
+  /**
+   * 客户**真的提供**的服务承诺,逐条列。如 ["free in-home measure", "free quote"]。
+   *
+   * 存在理由(2026-08-03 Oztop 首次试跑实测):AI 给结尾写了
+   * 「Free in-home measure & quote」「Expert consultation at no cost」,
+   * 而品牌资料里只有 expert consultation,**没有「免费」也没有「上门测量」**。
+   * 现有红线闸只拦数字与日期,拦不住这类**服务承诺** —— 而承诺一旦发出去
+   * 客户就得兑现,编错了是真实商业损失。
+   *
+   * 空 = 一条服务承诺都不许出现在文案里(默认最严,不是默认放行)。
+   */
+  verified_services?: string[]
 }
 
 // ── P0.1 发布(publish-worker)────────────────────────────────────────────────

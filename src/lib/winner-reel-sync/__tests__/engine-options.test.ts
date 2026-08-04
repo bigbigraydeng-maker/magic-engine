@@ -31,6 +31,18 @@ vi.mock('@/lib/meta/token-manager', () => ({
   getMetaTokenForClient: async () => 'user-token',
 }))
 
+// 建广告后会去记「投的是哪条片」(lib/ads/creative-link)，它走 @/lib/supabase 而不是
+// 下面那个 createClient 替身。这里把库打成空的：链接一条都认不出来 —— 正好用来证明
+// 「认不出片子绝不能拖累建广告本身」，本文件的 adsAdded 断言仍然成立。
+vi.mock('@/lib/supabase', () => ({
+  supabaseAdmin: {
+    from: () => ({
+      select: () => ({ eq: () => ({ not: async () => ({ data: [], error: null }) }) }),
+      upsert: async () => ({ error: null }),
+    }),
+  },
+}))
+
 // Config: new ads default ACTIVE (the Level-2 rollout case) — the override test
 // must win against exactly this. Fatigue pass conditions are all satisfied so
 // the pause WOULD fire unless skipped.
@@ -80,6 +92,8 @@ beforeEach(() => {
   ])
   // a1's CTR is far below median×0.5 → the fatigue pass WOULD pause it.
   fetchCTRForAds.mockReset().mockResolvedValue({ a1: 0.001, a2: 0.02, a3: 0.03 })
+  // 认不出片子会大声 warn（设计如此），这里不让它污染测试输出。
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
 
 describe('syncWinnerReels options — the prescription button contract', () => {

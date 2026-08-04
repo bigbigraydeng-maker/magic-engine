@@ -9,11 +9,25 @@
  * FDE/PM configuration — the migration that added the column says so in a TODO.
  * This closes it.
  *
- * GET   → { page_id, pages, pages_error }
+ * GET   → { page_id, pages, pages_error, reachable }
  *         `pages` is the list the client's Meta token can act for, so the UI can
  *         offer a pick-list instead of asking someone to find a numeric id.
  *         It is null (with a reason in pages_error) when we cannot ask Meta.
+ *         `reachable` answers "is this binding actually live right now" — see below.
  * PATCH → { page_id: string | null } replaces the binding; null clears it.
+ *
+ * WHY GET REPORTS `reachable` (added 2026-07-31)
+ * ---------------------------------------------
+ * A Page can be bound and still pull nothing: the agency can be allowed to
+ * *advertise* with a client's Page without that Page being shared into our
+ * portfolio, and only the second grant lets us read the inbox. PATCH already
+ * said so at save time, but that message vanished on the next page load, so a
+ * dead binding looked identical to a healthy one forever after.
+ *
+ * 30 Kiteroa ran this way: Page bound, ads live and spending, hourly sync
+ * skipping with `no_page_token`, zero conversations in ME, nothing on screen
+ * saying so. Computing it on GET costs nothing — readPages() is already called
+ * here for the pick-list.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -62,6 +76,19 @@ async function readPages(
   return { pages, pages_error: null }
 }
 
+/**
+ * Can ME actually act for the bound Page right now?
+ *   true  → the Page is in the list our token can act for; sync will pull it
+ *   false → bound, but Meta does not hand us this Page (grant missing/expired)
+ *   null  → nothing bound, or we could not ask Meta at all
+ * `false` is the state that used to be invisible, so callers must render it.
+ */
+function computeReachable(pageId: string | null, pages: ManagedPage[] | null): boolean | null {
+  if (pageId === null) return null
+  if (!pages) return null
+  return pages.some((p) => p.id === pageId)
+}
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } },
@@ -89,7 +116,12 @@ export async function GET(
   // binding, so a failed lookup degrades to "no pick-list" rather than a 500.
   const { pages, pages_error } = await readPages(clientId)
 
-  return NextResponse.json({ page_id, pages, pages_error })
+  return NextResponse.json({
+    page_id,
+    pages,
+    pages_error,
+    reachable: computeReachable(page_id, pages),
+  })
 }
 
 export async function PATCH(
@@ -142,7 +174,7 @@ export async function PATCH(
   // is legitimate — but the UI must be able to say "saved, but not live yet"
   // instead of implying the sync has started.
   const { pages, pages_error } = await readPages(clientId)
-  const reachable = next === null ? null : pages ? pages.some((p) => p.id === next) : null
+  const reachable = computeReachable(next, pages)
 
   return NextResponse.json({ success: true, page_id: next, reachable, pages, pages_error })
 }

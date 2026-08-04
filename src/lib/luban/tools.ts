@@ -17,6 +17,8 @@ import type { ExecutionItem, ExecutionLogKind } from '@/types/diagnostic'
 import type { BlogPost } from '@/types/magic-engine'
 import { generateBlogPost } from '@/lib/blog/generator'
 import { publishToGbp, type GbpPostInput } from '@/lib/gbp/publisher'
+import { getGbpAccessToken } from '@/lib/gbp/auth'
+import { resolveGbpLocation } from '@/lib/gbp/location'
 import {
   discoverLocalCompetitors,
   buildYellowPagesUrl,
@@ -313,12 +315,28 @@ export function buildLubanTools(ctx: LubanToolContext): LubanToolset {
         if (!isPublishToGbpInput(input)) {
           return 'publish_to_gbp 调用失败：post_text 不能为空。'
         }
+        // WHO decides which storefront is NOT the model's call (魏征 🔴3).
+        // Any location_name the model produced is discarded; the account and
+        // storefront are resolved server-side from this client's own
+        // authorisation. Same for the token.
+        const { data: clientRow } = await ctx.supabase
+          .from('clients')
+          .select('id, name, domain')
+          .eq('id', ctx.clientId)
+          .maybeSingle()
+
+        const resolved = clientRow
+          ? await resolveGbpLocation(clientRow as { id: string; name: string; domain: string | null })
+          : null
+        const auth = await getGbpAccessToken(ctx.clientId)
+
         const gbpInput: GbpPostInput = {
           post_text: (input as GbpPostInput).post_text.trim(),
           post_type: (input as GbpPostInput).post_type,
           cta_type: (input as GbpPostInput).cta_type,
           cta_url: (input as GbpPostInput).cta_url,
-          location_name: (input as GbpPostInput).location_name,
+          location_name: resolved?.ok ? resolved.locationName : undefined,
+          access_token: auth.ok ? auth.accessToken : undefined,
         }
         const result = await publishToGbp(gbpInput)
 
@@ -362,10 +380,10 @@ export function buildLubanTools(ctx: LubanToolContext): LubanToolset {
         }
 
         return (
-          `📋 GBP 直接发布条件未满足（${result.degradation_reason ?? '权限未配置'}），` +
-          `已生成草稿并写入工作日志。\n\n` +
+          `📋 这条没能直接发到 Google 商家页（${result.degradation_reason ?? '还没连上 Google 商家页'}），` +
+          `已经存成草稿放在工作日志里。\n\n` +
           `${draftContent}\n\n` +
-          `请告知 FDE：按上方草稿登录 business.google.com → 选择地点 → 发帖 → 新建帖子，完成发布。`
+          `要手动发的话：登录 business.google.com → 选择门店 → 发帖 → 新建帖子，把上面的正文粘进去。`
         )
       },
 

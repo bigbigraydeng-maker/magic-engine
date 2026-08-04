@@ -1,0 +1,201 @@
+# Magic Engine — 环境变量总表
+
+> 最后核对：2026-07-25（扫描 `process.env.*` 全仓 + `render.yaml` + `.env.example`）
+> **本文件只写变量名、用途、配在哪个平台 — 永远不写值。**
+
+## 怎么读这张表
+
+| 「配在哪」 | 含义 |
+|---|---|
+| **Render-web** | Render 上 `magic-engine` web service 的 Environment |
+| **Render-cron** | 该变量只有某个 cron job 用得到 |
+| **GH** | GitHub repo → Settings → Secrets and variables → Actions |
+| **本地** | 只在 `.env.local` 或跑脚本时临时传，不需要上平台 |
+| **无需配** | 运行时自动注入，或纯测试夹具 |
+
+| 「登记」 | 含义 |
+|---|---|
+| ✅ | `render.yaml` 或 `.env.example` 里有 |
+| ❌ | **两个地方都没有** — 换台机器 / 换个人接手就会漏配 |
+| 🔴 | 有已知问题，见备注 |
+
+**统计**：代码在用 **113** 个 · `.env.example` 59 个 · `render.yaml` 44 个 · **62 个在用变量此前无任何登记**。
+
+---
+
+## 1. 核心基础设施（缺一个就起不来）
+
+| 变量 | 用途 | 配在哪 | 登记 |
+|---|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase 项目 URL（前端可见） | Render-web + 全部 cron | ✅ |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase 匿名 key | Render-web | ✅ |
+| `SUPABASE_SERVICE_ROLE_KEY` | 服务端全权 key — ME 全部数据访问走它（不用 end-user RLS） | Render-web + 全部 cron | ✅ |
+| `CRON_SECRET` | 所有 `/api/cron/*` 的 Bearer 鉴权 | Render-web + 全部 cron + **GH** | ✅ |
+| `APP_URL` | 应用自身域名（邮件链接 / OAuth callback 拼接） | Render-web | ✅ |
+| `NEXT_PUBLIC_APP_URL` | 同上，前端可见版本 | Render-web | ✅ |
+| `NEXT_PUBLIC_SITE_URL` | 站点 URL（另一处用法） | Render-web | ❌ |
+| `NEXT_PUBLIC_REPORT_BASE_URL` | 报告分享链接基址 | Render-web | ❌ |
+| `NEXT_PUBLIC_PROJECT_ID` | Supabase project ref（前端） | Render-web | ❌ |
+| `RENDER_EXTERNAL_URL` | Render 自动注入的服务 host | 无需配 | ✅ |
+| `RENDER_INSTANCE_ID` | Render 自动注入的实例 ID | 无需配 | — |
+| `NODE_ENV` `PORT` `HOME` | 运行时标准变量 | 无需配 | — |
+
+## 2. AI 模型
+
+| 变量 | 用途 | 配在哪 | 登记 |
+|---|---|---|---|
+| `OPENAI_API_KEY` | GPT-4o-mini 文案 / Vision / Realtime | Render-web | ✅ |
+| `OPENAI_BASE_URL` | 走 Cloudflare AI Gateway 代理（值已内联 render.yaml） | Render-web | ✅ |
+| `ANTHROPIC_API_KEY` | Claude Sonnet（Brief / 策略 / 诸葛亮） | Render-web | ✅ |
+| `ANTHROPIC_BASE_URL` | 走 Cloudflare AI Gateway 代理（值已内联 render.yaml） | Render-web | ✅ |
+| `CF_AIG_TOKEN` | Cloudflare AI Gateway 鉴权 | Render-web | ✅ (仅 example) |
+| `PERPLEXITY_API_KEY` | AI 可见度追踪引擎之一 | Render-web | ✅ |
+| `GEMINI_API_KEY` | Google Gemini（AI 可见度追踪第 4 引擎） | Render-web | ❌ |
+| `AI_TRACKER_ENABLE_CLAUDE` | 开关：AI Tracker 是否跑 Claude 引擎 | Render-web | ❌ |
+
+## 3. 视觉 / 视频 / 素材
+
+| 变量 | 用途 | 配在哪 | 登记 |
+|---|---|---|---|
+| `ATLAS_CLOUD_API_KEY` | WaveSpeed 图片 + Seedance 视频（共用一把 key） | Render-web | 🔴 见下方 |
+| `HEYGEN_API_KEY` | 数字人头像视频 | Render-web | ✅ |
+| `HEYGEN_DEFAULT_AVATAR_ID` / `HEYGEN_DEFAULT_VOICE_ID` | HeyGen 默认形象/音色 | Render-web | ✅ |
+| `MODELSLAB_API_KEY` | Muapi 图/视频引擎（P21.J 后主用） | Render-web | ❌ |
+| `UNSPLASH_ACCESS_KEY` | 免费商用图库（素材抓取政策首选源） | Render-web | ❌ |
+| `APIFY_API_KEY` | Apify scraper | Render-web | ❌ 🔴 |
+| `APIFY_TOKEN` | 同上 — **两个变量名并存，代码里都在读，需统一** | Render-web | ❌ 🔴 |
+| `SUPADATA_API_KEY` | 视频字幕 / 转录 | Render-web | ❌ |
+| `VISION_BASE_URL` | vision-analyzer 脚本目标基址 | 本地 | ❌ |
+
+> 🔴 **`ATLAS_CLOUD_API_KEY` 名字陷阱**：`render.yaml:46` 声明的是 `ATLAS_API_KEY`，但代码只读
+> `ATLAS_CLOUD_API_KEY`（`src/lib/visual/atlas.ts:5`、`seedance.ts:6`、`wavespeed.ts:5`）。
+> 若 Render 面板只填了 `ATLAS_API_KEY`，图片/视频生成在生产上是坏的。
+> 已在 `render.yaml` 补上正确名字的条目，**旧名暂留**（等确认面板现状后再删）。见 [PITFALLS.md](./PITFALLS.md)。
+
+## 4. SEO / 数据源
+
+| 变量 | 用途 | 配在哪 | 登记 |
+|---|---|---|---|
+| `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD` | 关键词量 / KD / SERP / 外链 —— **主数据源** | Render-web + cron | ✅ |
+| `SEMRUSH_DB` | 市场库（默认 `au`，每客户可覆盖 `nz`） | Render-web | ✅ |
+| `SEMRUSH_API_KEY` | 🔴 `render.yaml:54` 声明了，但**全仓无任何代码读取**（已被 DataForSEO 取代，见 DECISIONS.md） | — | ⚠️ 待清理 |
+| `SERPAPI_API_KEY` | SERP 抓取 / Google AI Overviews | Render-web | ✅ (仅 example) |
+| `GOOGLE_SERVICE_ACCOUNT_CREDENTIALS` | GA4 / GSC 服务账号 JSON | Render-web | ❌ |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth（客户授权 GSC / GA4 / GBP） | Render-web | ❌ |
+| `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` | 客户公司邮箱授权（Microsoft Graph，把客人发来的邮件接回 CRM） | Render-web | ❌ |
+| `GOOGLE_GBP_ACCESS_TOKEN` | Google Business Profile | Render-web | ❌ |
+| `GOOGLE_PLACES_API_KEY` | 本地商户 / 口碑数据 | Render-web | ❌ |
+| `YOUTUBE_API_KEY` | YouTube 数据 | Render-web | ✅ |
+| `ABR_GUID` | 澳洲 ABN 企业注册库查询 | Render-web | ✅ |
+| `NZBN_API_KEY` | 新西兰 NZBN 企业注册库查询 | Render-web | ✅ |
+
+## 5. 广告平台
+
+| 变量 | 用途 | 配在哪 | 登记 |
+|---|---|---|---|
+| `META_SYSTEM_USER_TOKEN` | Meta 长效 System User Token（广告执行必需） | Render-web | ✅ (仅 example) |
+| `FACEBOOK_APP_ID` / `FACEBOOK_APP_SECRET` | Meta OAuth 应用 | Render-web | ✅ |
+| `GOOGLE_ADS_DEVELOPER_TOKEN` | Google Ads API（等审核，见 ROADMAP P18.B.0） | Render-web | ✅ |
+| `GOOGLE_ADS_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` / `_MANAGER_ID` | Google Ads OAuth + MCC | Render-web | ✅ |
+| `TIKTOK_ADS_ACCESS_TOKEN` / `TIKTOK_ADS_ADVERTISER_ID` | TikTok Ads | Render-web | ✅ |
+| `AD_HEALTH_DIGEST_TO` | 广告健康日报收件人 | Render-cron | ❌ |
+
+## 6. 发布 / 内容协作
+
+| 变量 | 用途 | 配在哪 | 登记 |
+|---|---|---|---|
+| `PUBLER_API_KEY` / `PUBLER_WORKSPACE_ID` | 多平台排期发布 | Render-web | ✅ |
+| `CMS_TOKEN_ENCRYPTION_KEY` | 客户 WordPress / CMS token 加密 | Render-web | ✅ |
+| `CLOUDFLARE_MGMT_TOKEN` | 客户站点 DNS / Pages 管理 | Render-web | ✅ |
+| `GITHUB_TOKEN` / `GITHUB_WEBHOOK_SECRET` | GitHub CMS 执行闭环（P12.H） | Render-web | ✅ |
+| `AIRTABLE_API_KEY` | Airtable —— **正在退役**，代码仅剩 3 处引用 | Render-web | ❌ |
+| `FACTORY_OPS_BASE_ID` / `FACTORY_REVIEW_TABLE_ID` / `WINNER_INTAKE_TABLE_ID` | Airtable 表 ID（Factory 审核，同上退役中） | Render-web | ❌ |
+| `OZTOP_WP_USERNAME` / `OZTOP_WP_APP_PASSWORD` | Oztop WordPress 直连 | Render-web | ⚠️ render 有，代码走 `cms_connections` 表 |
+
+## 7. 计费 / 变现 — **整块都没登记过**
+
+| 变量 | 用途 | 配在哪 | 登记 |
+|---|---|---|---|
+| `STRIPE_SECRET_KEY` | Stripe 服务端 key（MTC 充值） | Render-web | ❌ |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook 签名校验 | Render-web | ❌ |
+| `STRIPE_PRICE_ID_STARTER` / `_GROWTH` / `_SCALE` | 三档套餐 Price ID | Render-web | ❌ |
+
+## 8. 鉴权 / 安全
+
+| 变量 | 用途 | 配在哪 | 登记 |
+|---|---|---|---|
+| `ADMIN_EMAILS` | 管理员白名单 | Render-web | ✅ |
+| `ADMIN_EMAIL_DOMAIN` | 管理员邮箱域白名单 | Render-web | ✅ |
+| `CLIENT_VIEWERS` | 客户只读账号白名单 | Render-web | ✅ |
+| `INTERNAL_API_KEY` | 内部服务间调用（`api/factory/signals`） | Render-web | ✅ |
+| `INTERNAL_WORKER_TOKEN` | Voice worker 内部鉴权 | Render-web | ✅ |
+| `FACTORY_WORKER_TOKEN` | Factory worker 认领工单鉴权 | Render-web + worker | ❌ |
+| `UPLOAD_LINK_SECRET` | 客户免登录上传链接签名（未配时 fallback 到 `CRON_SECRET`） | Render-web | ❌ |
+| `ADMIN_KEY_KILL_SWITCH` | 紧急关停全部 admin API key（设 `true` 生效） | Render-web | ❌ |
+| `OPENAI_WEBHOOK_SECRET` | OpenAI Realtime webhook 校验 | Render-web | ✅ |
+
+## 9. 邮件 / 通知
+
+| 变量 | 用途 | 配在哪 | 登记 |
+|---|---|---|---|
+| `RESEND_API_KEY` | 全部事务邮件 | Render-web | ✅ |
+| `ME_MAIL_FROM` / `ME_MAIL_TO` | ME 内部通知收发件人 | Render-web | ❌ |
+| `FACTORY_REVIEWER_EMAILS` | Factory 审核通知收件人 | Render-web | ❌ |
+| `OUTREACH_FROM_EMAIL` / `_REPLY_EMAIL` | 线索外联邮件收发地址（P35） | Render-web | ❌ |
+| `OUTREACH_SENDER_NAME` / `_SENDER_FIRST_NAME` / `_SENDER_COMPANY` / `_WEBSITE` | 外联邮件署名 | Render-web | ❌ |
+
+## 10. Voice Agent（Phase 36）
+
+| 变量 | 用途 | 配在哪 | 登记 |
+|---|---|---|---|
+| `OPENAI_PROJECT_ID` | OpenAI 项目 | Render-web | ✅ |
+| `OPENAI_REALTIME_MODEL` / `OPENAI_SUMMARY_MODEL` / `OPENAI_KB_MODEL` / `OPENAI_DEFAULT_VOICE` | 模型选择 | Render-web | ✅ |
+| `REALTIME_WORKER_URL` / `REALTIME_WORKER_PORT` | 独立 worker（当前 in-process 跑，未启用） | Render-web | ✅ |
+| `VOICE_STORE` | 存储后端（`supabase`） | Render-web | ✅ |
+| `VOICE_TEST_NUMBERS` | 测试号码白名单 | Render-web | ✅ |
+| `VOICE_DEFAULT_AGENT_ID` | DID 丢失时的兜底坐席 | Render-web | ✅ |
+| `OUTBOUND_CALLING_ENABLED` | 🔴 **外呼总闸**，当前 `false`（板桥硬闸 #3） | Render-web | ✅ |
+| `DEFAULT_COUNTRY` / `DEFAULT_TIMEZONE` | `NZ` / `Pacific/Auckland` | Render-web | ✅ |
+| `TELEPHONY_PROVIDER` `TWILIO_ACCOUNT_SID` `TWILIO_AUTH_TOKEN` `DEFAULT_HUMAN_TRANSFER_URI` `WEBHOOK_REPLAY_WINDOW_SECONDS` | `.env.example` 有，代码 0 引用（已切 OpenAI 原生 SIP） | — | ⚠️ 待清理 |
+| `WHATSAPP_ACCESS_TOKEN` / `_BUSINESS_ACCOUNT_ID` / `_PHONE_NUMBER_ID` | `.env.example` 有，代码 0 引用（P1 未开工） | — | ⚠️ 待清理 |
+
+## 11. 功能开关 / 灰度
+
+| 变量 | 用途 | 配在哪 |
+|---|---|---|
+| `MOCK_EXTERNAL_SERVICES` | 测试时 mock 全部外部 API | 本地 / CI |
+| `FACTORY_PUBLISH_LIVE` | 🔴 Factory 是否真发布。**未配 = 静默发 DRAFT**（片子落库全绿但 FB 上没人看得见） | Render-web |
+| `FACTORY_WORKER_CLIENT_IDS` | Factory worker 处理的客户白名单 | worker |
+| `PROSPECTING_SWEEP_ENABLED` | 线索挖掘 cron 总闸 | Render-cron |
+| `JOB_SIGNAL_INGEST_ENABLED` / `JOB_SIGNAL_KEYWORDS` | 招聘信号采集开关 + 关键词 | Render-cron |
+| `SOCIAL_COMMENT_AUTOREPLY_KILL` | 社媒评论自动回复紧急关停 | Render-web |
+| `SWEEP_CITIES` / `SWEEP_INDUSTRIES` | 线索扫描城市 / 行业范围 | Render-cron |
+| `ENABLE_REAL_GENERATION` | `.env.example` 有，代码 0 引用 | ⚠️ 待清理 |
+
+## 12. 只在脚本 / 测试里用 — **不需要配到任何平台**
+
+| 变量 | 出处 |
+|---|---|
+| `SB_KEY` `SB_REF` | `scripts/factory-worker/ingest-clips.mjs:23-24`（fallback 到 `SUPABASE_SERVICE_ROLE_KEY`） |
+| `DRY_RUN` | `scripts/archive/backfill-execution-target.ts` · `scripts/archive/p12-a13-cts-e2e.ts` |
+| `WRITE` `SINCE` `CLIENT_ID` `PLAN_ID` | `scripts/archive/regenerate-social-plan-images.ts` |
+| `CITY` `INDUSTRY` `SUB_INDUSTRY` | `scripts/archive/p30-s4-serp-probe.ts` |
+| `TEST_VAR_MAGIC` | `src/lib/__tests__/validation-utils.test.ts` — 纯测试夹具 |
+
+## 13. GitHub Actions Secrets
+
+| 变量 | 用途 |
+|---|---|
+| `CRON_SECRET` | 4 个 workflow 全部依赖（**必需**，与 Render 同值） |
+| `BASELINE_CRON_URL` | 可选覆盖，`.github/workflows/baseline-domains-monthly.yml` |
+| `GOALS_EXPIRY_CRON_URL` | 可选覆盖，`.github/workflows/goals-expiry-check.yml` |
+| `WINNER_REEL_SYNC_URL` | 可选覆盖，`.github/workflows/winner-reel-sync-daily.yml` |
+
+---
+
+## 自检
+
+```bash
+bash scripts/doctor.sh          # 全量：env + 外部 API + cron
+bash scripts/doctor.sh --env    # 只查 env（掩码输出，不打印值）
+```

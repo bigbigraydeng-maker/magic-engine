@@ -2,7 +2,7 @@
  * GET /api/clients/[id]/crm/contacts/[cid]/timeline
  *
  * 一个人的全渠道往来时间线 —— 「全部客人」页点开某行时拉。触点（FB表单 / 电话 /
- * 私信 / 邮件…）+ 阶段流转事件（谁把他从 X 改到 Y）按时间倒序合并成一条线。
+ * 私信 / 邮件…）+ 阶段流转事件（谁把他从 X 改到 Y）按时间**从旧到新**合并成一条线。
  *
  * 隔离（照 touchpoints / stage 路由的既有 pattern）：
  *   IDOR   先 SELECT contact WHERE id=cid AND client_id=clientId → 查不到 404，
@@ -215,8 +215,17 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     })
   }
 
-  // 触点 / 对话 / 阶段事件合成一条线，最新在上。
-  entries.sort((a, b) => ts(b.at) - ts(a.at))
+  // 触点 / 对话 / 阶段事件合成一条线，**从旧到新**（最新在下）。
+  //
+  // 为什么不是「最新在上」（2026-07-31 PM 反馈改的）：这条线里混着私信原文，
+  // 倒序会把一段对话的回答排在提问前面 —— 一问一答读起来是反的，根本读不通。
+  // 聊天记录的天然顺序就是从上往下，抽屉里人的基本信息在顶部、对话往下延伸，
+  // 跟微信 / Messenger 的读法一致。
+  //
+  // ⚠️ 上面取 conversation_messages 时的 `ascending: false` + `limit(3000)`
+  // **不能跟着改**：那里倒序是为了「超量时留下最近的 3000 条」。改成正序会变成
+  // 留下最老的 3000 条，话痨客户的近期对话反而全丢。排序只在这一行做。
+  entries.sort((a, b) => ts(a.at) - ts(b.at))
 
   return NextResponse.json({
     contact: {

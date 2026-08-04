@@ -74,16 +74,20 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     }
 
     // 2. Load hook + cta asset URLs
+    // 恒带 client_id：按 id 直取会让「分镜引用了别家素材 id」这种上游 bug
+    // 直接变成跨客户素材外流。客户实拍绝不跨客户（PM 2026-08-02 拍板）。
     const { data: hookAsset } = await supabaseAdmin
       .from('client_assets')
       .select('storage_url')
       .eq('id', storyboard.hook_asset_id)
+      .eq('client_id', clientId)
       .single()
 
     const { data: ctaAsset } = await supabaseAdmin
       .from('client_assets')
       .select('storage_url')
       .eq('id', storyboard.cta_asset_id)
+      .eq('client_id', clientId)
       .single()
 
     if (!hookAsset?.storage_url) {

@@ -1,14 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { generateBlogPost } from '@/lib/blog/generator'
+import { generateWithQualityRetry } from '@/lib/blog/generate-with-quality'
 import type { BlogGeneratorOutput } from '@/lib/blog/generator'
 import { auditExistingContent } from '@/lib/blog/content-auditor'
+import { checkContentDuplicate } from '@/lib/blog/content-gate'
 import { fetchRelatedPages, buildPagesContextBlock } from '@/lib/blog/pages-context'
-import { auditBlogPost } from '@/lib/blog/quality-audit'
-import type { BlogAuditMetadata } from '@/lib/blog/quality-audit'
 import { checkInternalLinks } from '@/lib/blog/internal-link-checker'
-import { getActiveBrief } from '@/lib/content/brief-injector'
-import { getActiveCampaigns } from '@/lib/content/campaign-injector'
 import { clampLimit } from '@/lib/validation-utils'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { SeoContentAdapter } from '@/lib/flywheel/adapters/SeoContentAdapter'
@@ -127,6 +124,35 @@ export async function POST(
 
     // ── Content Audit (synchronous — fast feedback before queuing) ─────────────
     if (!body.skip_audit) {
+      // Layer 1 (deterministic, DB-only): the content-duplicate gate — the
+      // single authority shared with the weekly cron. Blocks re-drafting
+      // anything already published / in a PR / live on the crawled site.
+      // Returned in the audit's 'upgrade' shape so the existing UI dialog
+      // ("already covered — upgrade instead") handles it without changes.
+      const gate = await checkContentDuplicate(clientId, {
+        topic: body.topic,
+        primary_keyword: body.primary_keyword ?? null,
+      }).catch(() => null)
+
+      if (gate?.verdict === 'duplicate') {
+        return NextResponse.json({
+          success: true,
+          action: 'upgrade',
+          audit: {
+            action: 'upgrade',
+            existing_url: gate.source === 'site_page' ? gate.existing_ref : null,
+            existing_title: gate.existing_title,
+            reason:
+              `This topic already exists (${gate.source === 'site_page' ? 'live site page' : 'blog post'}: ` +
+              `${gate.existing_title ?? gate.existing_ref}). Refresh the existing content instead of publishing a duplicate.`,
+            confidence: 1,
+            discovered_urls: [],
+          },
+          post: null,
+        })
+      }
+
+      // Layer 2 (crawl + AI second opinion) — unchanged.
       const { data: clientData } = await supabaseAdmin
         .from('clients')
         .select('id, name, domain')
@@ -402,71 +428,6 @@ async function linkProductionPackage(
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-async function generateWithQualityRetry(
-  req: GenerateBlogRequest & { client_id: string; mode: string; existing_pages_context?: string },
-  mode: string,
-): Promise<{
-  result: BlogGeneratorOutput
-  qualityScore: number | null
-  contextSnapshot: Record<string, unknown> | null
-}> {
-  const [brief, campaigns] = await Promise.all([
-    getActiveBrief(req.client_id).catch(() => null),
-    getActiveCampaigns(req.client_id).catch(() => []),
-  ])
-  const campaign = campaigns[0] ?? null
-
-  const metadata: BlogAuditMetadata = {
-    brand_name:       brief?.brand_name ?? null,
-    tone:             brief?.tone ?? null,
-    avoid_words:      brief?.avoid_words ?? null,
-    platforms:        brief?.platforms ?? null,
-    primary_audience: brief?.primary_audience ?? null,
-    campaign: campaign ? {
-      title:                  campaign.title ?? null,
-      offer:                  campaign.offer ?? null,
-      primary_cta:            campaign.primary_cta ?? null,
-      campaign_angle:         campaign.campaign_angle ?? null,
-      target_audience_detail: campaign.target_audience_detail ?? null,
-    } : null,
-    primaryKeyword: req.primary_keyword ?? null,
-  }
-
-  const MAX_ATTEMPTS = 3
-  let lastResult: BlogGeneratorOutput | null = null
-  let qualityScore: number | null = null
-  let contextSnapshot: Record<string, unknown> | null = null
-
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    lastResult = await generateBlogPost(req)
-
-    try {
-      const content = lastResult.html_body + '\n' + (lastResult.geo_html_snapshot ?? '')
-      const audit = await auditBlogPost(content, mode, metadata)
-
-      if (!audit) break
-
-      qualityScore = audit.rubricResult.overallScore
-      contextSnapshot = { ...audit.contextSnapshot, attempts: attempt }
-
-      if (audit.rubricResult.pass || attempt === MAX_ATTEMPTS) {
-        if (!audit.rubricResult.pass) {
-          console.warn(
-            `[blog quality] Post failed quality threshold after ${attempt} attempt(s)` +
-            ` (score: ${audit.rubricResult.overallScore}). Proceeding with last result.`
-          )
-        }
-        break
-      }
-    } catch (err) {
-      console.error('[blog quality] Audit error (non-blocking):', err)
-      break
-    }
-  }
-
-  return { result: lastResult!, qualityScore, contextSnapshot }
-}
 
 async function linkStrategyItemToPost(
   clientId: string,

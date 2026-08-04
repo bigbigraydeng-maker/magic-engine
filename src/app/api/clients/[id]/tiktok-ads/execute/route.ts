@@ -30,6 +30,7 @@ import {
 } from '@/lib/tiktok-ads/client'
 import { checkBudgetWithinSafeRange } from '@/lib/tiktok-ads/guardrails'
 import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
+import { resolveAndLogAdsExpectedMetric } from '@/lib/flywheel/ads-expected-metric'
 
 const SUPPORTED_ACTION_TYPES = new Set([
   ADS_ACTION_TYPE.PAUSE_CAMPAIGN,
@@ -128,6 +129,13 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     budget_mode:   beforeDetails.budget_mode,
   }
 
+  // Outcome metric from the campaign's own objective, resolved before the API
+  // call so the audit row can never be written against an unmeasurable metric.
+  const expectedMetric = resolveAndLogAdsExpectedMetric(
+    { objective: beforeDetails.objective_type },
+    'tiktok-ads/execute',
+  )
+
   // ── Execute action ────────────────────────────────────────────────────────
   let after: typeof before
   let actionSuccess: boolean
@@ -196,6 +204,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
       execution_mode:    'third_party',
       vendor:            'tiktok_ads',
       payload:           { before, after, advertiser_id: creds.advertiserId },
+      expected_metric:   expectedMetric,
     })
     .select('id')
     .single()

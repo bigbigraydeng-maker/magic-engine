@@ -32,6 +32,8 @@ interface Payload {
   page_id: string | null
   pages: ManagedPage[] | null
   pages_error: PagesError | null
+  /** Live答案：ME 现在读不读得到这个主页。false = 绑了但拉不到东西。 */
+  reachable: boolean | null
 }
 
 type PanelState =
@@ -99,6 +101,7 @@ export function FacebookPagePanel({ clientId }: Props) {
           page_id: json.page_id ?? null,
           pages: json.pages ?? null,
           pages_error: json.pages_error ?? null,
+          reachable: json.reachable ?? null,
         },
       })
       setDraft(json.page_id ?? '')
@@ -133,11 +136,13 @@ export function FacebookPagePanel({ clientId }: Props) {
     )
   }
 
-  const { page_id, pages, pages_error } = state.data
+  const { page_id, pages, pages_error, reachable } = state.data
   const dirty = draft.trim() !== (page_id ?? '').trim()
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <LiveStatus pageId={page_id} reachable={reachable} />
+
       <p className="mb-3 text-sm text-slate-600">
         选中客户的 Facebook 主页后，系统每小时自动把主页私信拉进来，AI 写成需求卡，
         显示在<span className="font-bold">「客户消息」</span>页。不选就完全不动这个客户的私信。
@@ -209,12 +214,129 @@ export function FacebookPagePanel({ clientId }: Props) {
         {!dirty && page_id === null && <span className="text-xs text-slate-400">未接私信</span>}
       </div>
 
+      <ConnectMeta clientId={clientId} pageId={page_id} />
+
       <p className="mt-4 border-t border-slate-100 pt-3 text-xs leading-relaxed text-slate-400">
         主页网址里的名字（facebook.com/<span className="font-mono">CTSTOURS</span>）不是 ID。
         实在要手填，去主页「关于 → 页面透明度」里找「主页编号」。
         保存后最快等一小时出现第一批对话。
       </p>
     </div>
+  )
+}
+
+/** What the callback redirected back with, said the way the operator needs it. */
+const META_RESULT: Record<string, { ok: boolean; text: string }> = {
+  connected: { ok: true, text: '✓ 连接成功。下一个整点开始同步这个主页的私信。' },
+  denied: { ok: false, text: '授权取消了，没有任何改动。要接私信的话再点一次。' },
+  no_pages: {
+    ok: false,
+    text: '授权成功了，但那个账号名下没有任何主页 —— 多半是登错了账号。请用能在 Business Suite 里看到这个主页消息的账号再试一次。',
+  },
+  page_not_granted: {
+    ok: false,
+    text: '授权成功了，但授权的账号看不到这里绑定的这个主页。请换一个能看到这个主页消息的账号，或者先确认主页 ID 填对了。',
+  },
+  no_page_bound: { ok: false, text: '还没绑定主页 —— 先在上面选好主页并保存，再点连接。' },
+  bad_state: { ok: false, text: '这个连接链接已经过期了，请重新点一次「连接 Meta」。' },
+  exchange_failed: { ok: false, text: 'Meta 那边没有换出凭证，请稍后再试一次。' },
+}
+
+/**
+ * The one-click replacement for hand-editing a server environment variable.
+ *
+ * Every client used to need META_SYSTEM_USER_TOKEN_PAGE_<id> added to Render by
+ * hand, which CLAUDE.md forbids for FDE configuration and which nobody did — so
+ * 30 Kiteroa spent real money with its inbox unreachable. One consent here
+ * stores the Page token for good.
+ */
+function ConnectMeta({ clientId, pageId }: { clientId: string; pageId: string | null }) {
+  const [outcome, setOutcome] = useState<string | null>(null)
+
+  // The callback hands its verdict back through the URL; read it once, then
+  // strip it so a refresh does not replay a stale message.
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    const meta = url.searchParams.get('meta')
+    if (!meta) return
+    setOutcome(meta)
+    url.searchParams.delete('meta')
+    window.history.replaceState({}, '', url.toString())
+  }, [])
+
+  const result = outcome ? META_RESULT[outcome] : null
+
+  return (
+    <div className="mt-3 border-t border-slate-100 pt-3">
+      {result && (
+        <p
+          className={`mb-2 text-xs leading-relaxed ${result.ok ? 'text-cyan-700' : 'text-amber-700'}`}
+        >
+          {result.text}
+        </p>
+      )}
+
+      <a
+        href={`/api/auth/facebook/connect?client_id=${clientId}`}
+        className={`inline-block rounded-lg border px-3 py-1.5 text-xs font-bold ${
+          pageId
+            ? 'border-cyan-300 bg-white text-cyan-700 hover:bg-cyan-50'
+            : 'pointer-events-none border-slate-200 bg-slate-50 text-slate-300'
+        }`}
+        aria-disabled={!pageId}
+      >
+        连接 Meta
+      </a>
+
+      <p className="mt-2 text-xs leading-relaxed text-slate-400">
+        {pageId
+          ? '用一个能在 Business Suite 里看到这个主页消息的账号授权一次，之后不用再管。'
+          : '先选好主页并保存，才能连接。'}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * Standing answer to "is this actually working right now", shown on every load.
+ *
+ * The failure it exists for is silent: a Page can be bound while the client has
+ * only granted us permission to *advertise* with it, not to read its inbox. Ads
+ * spend, nothing arrives, and every screen looks normal. 30 Kiteroa sat like
+ * that with money going out and zero conversations in ME. The save-time message
+ * did say it once, but it disappeared on the next load — so this repeats it for
+ * as long as it is true, and names the fix rather than just the symptom.
+ */
+function LiveStatus({ pageId, reachable }: { pageId: string | null; reachable: boolean | null }) {
+  if (pageId === null) return null
+
+  if (reachable === true) {
+    return (
+      <p className="mb-3 rounded-lg bg-cyan-50 px-3 py-2 text-xs font-bold text-cyan-800">
+        ✓ 私信正在同步 —— ME 读得到这个主页。
+      </p>
+    )
+  }
+
+  if (reachable === false) {
+    return (
+      <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-700">
+        <p>
+          <span className="font-bold">⚠ 绑了主页，但线索进不来。</span>
+          <br />
+          ME 读不到这个主页，所以私信一条都同步不进来 —— 广告照跑照花钱，客人发来的消息只留在对方主页的收件箱里。
+        </p>
+        <p className="mt-1.5">
+          点下面的「连接 Meta」，用一个能看到这个主页消息的账号授权一次就好。
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+      绑了主页，但现在连不上 Meta，没法确认同步是否正常。
+    </p>
   )
 }
 

@@ -38,6 +38,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
+import { decryptToken } from '@/lib/platform-oauth/vocabulary'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -90,4 +91,52 @@ export async function getMetaTokenForClient(clientId: string): Promise<string | 
 
   // 3. Shared fallback.
   return fallback
+}
+
+/**
+ * The Page access token to use for a client's Page, or null when we have none.
+ *
+ * Preferred source is a stored connection from the "连接 Meta" button: someone
+ * with a role on the Page granted consent, and we kept the resulting Page token.
+ *
+ * WHY THIS COMES FIRST (added 2026-07-31)
+ * ---------------------------------------
+ * The older path derives a Page token from a *user* token held in an env var.
+ * That only works when the identity behind that env var happens to hold a role
+ * on the Page — otherwise Meta returns nothing and the sync skips with
+ * `no_page_token`, which is precisely how 30 Kiteroa ran for weeks: ads
+ * spending, inbox full on Meta's side, zero conversations in ME, and no env var
+ * because nobody knew one was owed.
+ *
+ * The env-var path stays as the fallback so clients configured that way (CTS)
+ * keep working untouched.
+ */
+export async function getStoredPageToken(
+  clientId: string,
+  pageId: string,
+): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from('platform_oauth_connections')
+    .select('access_token_enc')
+    .eq('client_id', clientId)
+    .eq('provider', 'meta')
+    .eq('account_id', pageId)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error || !data) return null
+
+  const enc = (data as { access_token_enc?: unknown }).access_token_enc
+  if (typeof enc !== 'string' || enc.length === 0) return null
+
+  // A connection row that cannot be decrypted is worse than none: returning
+  // junk would make Meta reject every call with an opaque error. Fall through
+  // to the env-var path instead.
+  try {
+    return decryptToken(enc)
+  } catch {
+    return null
+  }
 }

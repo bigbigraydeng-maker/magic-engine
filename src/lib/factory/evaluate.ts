@@ -3,6 +3,9 @@
 // 魏征 M1 评审修订:F2 语义去重直查 source_ad_id 无时间窗 / F4 部分失败收敛 /
 // F5 日配额含终态工单 + NZ 日界 / F6 brief 双轨兼容 / F9 余额 SQL 聚合 / F10 全体收进 try。
 
+import { loadViralStructure } from './viral-structure'
+import { loadClientAssetPool } from './client-asset-pool'
+import { buildPromptHint } from './narrative-beats'
 import { supabaseAdmin } from '@/lib/supabase'
 import { FACTORY_ANGLE_DEDUPE_DAYS } from './constants'
 import { generateAdCopy } from './copy-generator'
@@ -154,12 +157,32 @@ async function loadContext(
   // 抓来的原图是别人的作品,只作为改图的输入留在库里,永远不进成片 ——
   // 这是 PM 定的「抓图 → AI 改图(防版权)→ 图转视频」里「防版权」那一步的落点。
   // 绝不能因为「改图失败了就先用原图顶上」而放宽:那等于把版权风险直接发给客户。
-  const sourceImagePool = allClips
+  const transformedPool = allClips
     .filter((c) => isStill(c) && meta(c).is_ai_transformed === true)
     .map((c) => toPublicClipUrl(c.storage_url as string | null))
     .filter((u): u is string => !!u)
 
+  // 客户自有素材(client_assets)也进底图池。上面那条防版权闸针对的是「抓来的
+  // 别人的作品」,客户自己提供的素材不适用 —— 详见 client-asset-pool.ts 头注。
+  // 此前它们被一并挡在门外,导致 CTS 出片可用底图恒为 0。
+  // 失败返回空数组,不阻断出片。
+  const clientAssetPool = await loadClientAssetPool(signal.client_id, supabaseAdmin).catch(() => [])
+
+  // 客户自有的排前面:真东西比抓来改写的更贴业务,轮换时优先被取到。
+  const sourceImagePool = [...clientAssetPool, ...transformedPool]
+  // 记住哪些是客户自己上传的 —— 入库时护栏 6 按这个分流(客户照片衍生 vs AI 抓图改写)
+  const clientOwnedSources = new Set(clientAssetPool)
+
   const factoryConfig = (client?.factory_config ?? {}) as Record<string, unknown>
+
+  // 同行业爆款结构：只取节奏数字，画面/文案一律不过境（见 viral-structure 硬边界）。
+  // 失败不阻断出片 —— 学不到就按原逻辑走。
+  const viralStructure = await loadViralStructure(
+    (client?.industry as string | null) ?? null,
+  ).catch(() => null)
+  const rhythmHint = viralStructure
+    ? { medianShotSeconds: viralStructure.medianShotSeconds, sampleSize: viralStructure.sampleSize }
+    : null
 
   const ctx: GateContext = {
     now,
@@ -183,6 +206,9 @@ async function loadContext(
     ),
     // i2v 源图池:抓来的静图,喂给 generationPlan 当底图(见 selectClips 源图轮换)
     sourceImagePool,
+    clientOwnedSources,
+    // 同行业爆款节奏基线(只有数字)。样本不足/查询失败 = null → 选配方走原逻辑。
+    rhythmHint,
   }
   return {
     ctx,
@@ -311,9 +337,23 @@ async function persistDecision(
               // worker 把 prompt_hint 原样喂给 i2v 模型,所以配方必须落在这里才真正生效。
               // ⚠️ 「开场钩子」那半句只给第一段:拼给每一段的话,中段和结尾也会被要求
               // 拍成开场镜头,一条片子里出现三四个开场感画面,节奏直接毁掉。
-              prompt_hint: clipDirective
-                ? `${p.prompt_hint} — ${i === 0 ? clipDirective : stripHookClause(clipDirective)}`
-                : p.prompt_hint,
+              //
+              // 🔴 叙事位置插在风格**前面**(PM 2026-08-03 看片反馈:结尾出现施工画面,
+              //    而前一镜已经是装好的成品)。真因是每个镜头独立瞎编 —— 提示词从没说过
+              //    「你是第几拍、前面演过什么」,而风格里那句 process-reveal 正是把
+              //    施工画面带进结尾的元凶。让约束先说话。
+              prompt_hint: (() => {
+                const withBeat = buildPromptHint({
+                  base: p.prompt_hint,
+                  role: p.segment_role,
+                  index: i,
+                  total: draft.brief.clip_generation_plan.length,
+                  styleDirective: clipDirective
+                    ? (i === 0 ? clipDirective : stripHookClause(clipDirective))
+                    : null,
+                })
+                return withBeat
+              })(),
             })),
           }
         : {}),

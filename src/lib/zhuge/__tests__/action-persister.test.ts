@@ -62,6 +62,8 @@ interface TableMockConfig {
   executionSelectError?: string
   executionUpdateError?: string
   executionInsertError?: string
+  /** Ads outcome metrics this client has rows for (drives expected_metric). */
+  adsOutcomeMetrics?: { metric_key: string }[]
 }
 
 function makeTableAwareMock(cfg: TableMockConfig = {}) {
@@ -131,6 +133,16 @@ function makeTableAwareMock(cfg: TableMockConfig = {}) {
         return flywheelCallCount === 1 ? flywheelSelectChain : flywheelInsertChain
       }
       if (table === 'execution_items') return executionChain
+      // Ads actions resolve their expected_metric from the outcome metrics this
+      // client has actually collected (default: none → expected_metric null).
+      if (table === 'flywheel_metrics') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq:     vi.fn().mockReturnThis(),
+          in:     vi.fn().mockReturnThis(),
+          gte:    vi.fn().mockResolvedValue({ data: cfg.adsOutcomeMetrics ?? [], error: null }),
+        }
+      }
       return { insert: vi.fn().mockResolvedValue({ error: null }) }
     }),
     _flywheelInsertChain: flywheelInsertChain,
@@ -332,9 +344,10 @@ describe('persistZhugeActions()', () => {
     expect(new Set(keys).size).toBe(1)
   })
 
-  it('uses correct flywheel and expected_metric for each dimension', async () => {
+  /** Run the 4 mappable dimensions and hand back the rows that were inserted. */
+  async function captureDimensionRows(cfg: TableMockConfig = {}) {
     let capturedRows: unknown[] = []
-    const supabase = makeTableAwareMock({ flywheelExisting: [] })
+    const supabase = makeTableAwareMock({ flywheelExisting: [], ...cfg })
     supabase._flywheelInsertChain.insert.mockImplementation((rows: unknown[]) => {
       capturedRows = rows
       return {
@@ -357,12 +370,28 @@ describe('persistZhugeActions()', () => {
       ]),
     })
 
-    type Row = { flywheel: string; expected_metric: string }
-    const rows = capturedRows as Row[]
+    return capturedRows as Array<{ flywheel: string; expected_metric: string | null }>
+  }
+
+  it('uses correct flywheel and expected_metric for each dimension', async () => {
+    // Ads no longer has a fixed answer: this client has collected no ads
+    // outcome metric, so the honest value is null. It used to be a hard-coded
+    // `ads.account.roas` that nothing would ever measure.
+    const rows = await captureDimensionRows()
     expect(rows[0]).toMatchObject({ flywheel: 'seo',    expected_metric: 'seo.domain.organic_traffic' })
     expect(rows[1]).toMatchObject({ flywheel: 'geo',    expected_metric: 'geo.query.mention_rate' })
-    expect(rows[2]).toMatchObject({ flywheel: 'ads',    expected_metric: 'ads.account.roas' })
+    expect(rows[2]).toMatchObject({ flywheel: 'ads',    expected_metric: null })
     expect(rows[3]).toMatchObject({ flywheel: 'social', expected_metric: 'social.posts.published_count' })
+  })
+
+  it('grades an ads action on the outcome metric the client actually collects', async () => {
+    const rows = await captureDimensionRows({
+      adsOutcomeMetrics: [{ metric_key: 'ads.account.cost_per_conversation' }],
+    })
+    expect(rows[2]).toMatchObject({
+      flywheel: 'ads',
+      expected_metric: 'ads.account.cost_per_conversation',
+    })
   })
 
   it('session_key in result matches buildSessionKey independently', async () => {

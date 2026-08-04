@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   DAILY_RECOMMENDATION_MAX,
+  dedupeCandidates,
   rankDailyRecommendations,
   scoreCandidate,
   scoreDueProximity,
@@ -231,5 +232,46 @@ describe('rankDailyRecommendations()', () => {
     expect(result).toHaveLength(1)
     expect(result[0].prescription_id).toBe('pres-xyz')
     expect(result[0].initiative_id).toBe('init-abc')
+  })
+})
+
+// ── dedupeCandidates (2026-08-01 Sungenix duplicate-cards incident) ──────────
+
+describe('dedupeCandidates()', () => {
+  it('collapses same (action_type, keyword) duplicates to the latest created_at', () => {
+    const dups = [
+      makeCandidate('d1', { action_type: 'seo.refresh_blog', steps_json: { keyword: 'how often apply sunscreen' }, created_at: '2026-07-29T04:01:00Z' }),
+      makeCandidate('d2', { action_type: 'seo.refresh_blog', steps_json: { keyword: 'how often apply sunscreen' }, created_at: '2026-07-30T04:01:00Z' }),
+      makeCandidate('d3', { action_type: 'seo.refresh_blog', steps_json: { keyword: 'how often apply sunscreen' }, created_at: '2026-07-31T04:01:00Z' }),
+    ]
+    const result = dedupeCandidates(dups)
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('d3')
+  })
+
+  it('keeps cards of the same action_type with different keywords', () => {
+    const cards = [
+      makeCandidate('a', { action_type: 'seo.refresh_blog', steps_json: { keyword: 'kw-a' } }),
+      makeCandidate('b', { action_type: 'seo.refresh_blog', steps_json: { keyword: 'kw-b' } }),
+    ]
+    expect(dedupeCandidates(cards)).toHaveLength(2)
+  })
+
+  it('never collapses keywordless cards with distinct descriptions (legacy manual cards)', () => {
+    const cards = [
+      makeCandidate('m1', { action_type: null, description: '救 SPC/Hybrid 主线页' }),
+      makeCandidate('m2', { action_type: null, description: '首页 H1 + Hero + Schema' }),
+    ]
+    expect(dedupeCandidates(cards)).toHaveLength(2)
+  })
+
+  it('prefers the in_progress duplicate over a newer pending one', () => {
+    const cards = [
+      makeCandidate('started', { action_type: 'seo.refresh_blog', steps_json: { keyword: 'kw-a' }, status: 'in_progress', created_at: '2026-07-29T00:00:00Z' }),
+      makeCandidate('newer',   { action_type: 'seo.refresh_blog', steps_json: { keyword: 'kw-a' }, status: 'pending',     created_at: '2026-07-31T00:00:00Z' }),
+    ]
+    const result = dedupeCandidates(cards)
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('started')
   })
 })

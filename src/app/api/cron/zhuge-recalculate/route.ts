@@ -58,13 +58,33 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     )
   }
 
-  const clientIds = (discoveries ?? []).map((d) => (d as { client_id: string }).client_id)
+  const candidateIds = (discoveries ?? []).map((d) => (d as { client_id: string }).client_id)
+
+  // 真客户闸门：周期性监测只对 active 客户跑（DataForSEO 计划 阶段 0）。
+  // 调研壳子就算有 confirmed discovery 也不烧 Claude 钱。
+  let clientIds: string[] = []
+  if (candidateIds.length > 0) {
+    const { data: activeClients, error: activeErr } = await supabaseAdmin
+      .from('clients')
+      .select('id')
+      .in('id', candidateIds)
+      .eq('client_status', 'active')
+
+    if (activeErr) {
+      await cronRun.finish({ failed: 1, error: activeErr.message })
+      return NextResponse.json(
+        { error: `Failed to filter active clients: ${activeErr.message}` },
+        { status: 500 },
+      )
+    }
+    clientIds = (activeClients ?? []).map((c) => (c as { id: string }).id)
+  }
 
   if (clientIds.length === 0) {
     await cronRun.finish({ processed: 0, completed: 0, failed: 0 })
     return NextResponse.json({
       success: true,
-      message: 'No clients with confirmed discovery — nothing to recalculate',
+      message: 'No active clients with confirmed discovery — nothing to recalculate',
       clients_processed: 0,
       results: [],
     })

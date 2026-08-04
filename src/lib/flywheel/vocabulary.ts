@@ -260,8 +260,22 @@ export const ADS_METRIC_KEY = {
   /** Total conversion events (purchases, leads, etc.) */
   CONVERSIONS: 'ads.account.conversions',
 
-  /** Cost per acquisition / conversion (spend / conversions) */
+  /** Cost per acquisition / purchase. Meta: cost_per_action_type action_type
+   *  'purchase' (falls back to 'offsite_conversion.fb_pixel_purchase').
+   *  Google Ads: spend / conversions from the account insights query. */
   CPA: 'ads.account.cpa',
+
+  /** Cost per lead-form submission — the outcome unit of a lead-gen campaign.
+   *  Meta: cost_per_action_type action_type 'lead' (falls back to
+   *  'onsite_conversion.lead_grouped', the Instant-Form child of it). */
+  COST_PER_LEAD: 'ads.account.cost_per_lead',
+
+  /** Cost per messaging conversation started — the outcome unit of a
+   *  click-to-Messenger / CTWA campaign, which has no purchase and therefore
+   *  no ROAS at all. Meta: cost_per_action_type action_type
+   *  'onsite_conversion.messaging_conversation_started_7d' (falls back to
+   *  'onsite_conversion.total_messaging_connection'). */
+  COST_PER_CONVERSATION: 'ads.account.cost_per_conversation',
 
   /** Paid Search sessions from GA4 (sessionDefaultChannelGroup == "Paid Search") */
   GA4_PAID_SESSIONS: 'ads.ga4.paid_sessions',

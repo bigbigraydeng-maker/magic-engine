@@ -65,7 +65,26 @@ export async function deriveInitiativesFromPrescription(
 
   // 已有的 Initiatives — 防止重复派生 (CTS 4 active goals 安全保护)
   const existing = await listInitiativesForGoal(supabase, prescription.goal_id, { includeArchived: false })
-  const existingTitles = new Set(existing.map(i => i.title.trim().toLowerCase()))
+  // 🔴 存的是 title → id，不是光存 title。
+  //    原来是 Set：撞上同名就只回一个 skipped，**不回那条已有 Initiative 的 id**，
+  //    于是这个阶段的执行项 initiative_id 全是 null、在按目标筛的看板上一条都看不见。
+  //    而处方提示词恰恰在往「标题稳定」上推（跟阶段名一致、用客户看得懂的话），
+  //    标题越听话越容易撞，动作就越挂不上 —— 幂等保护反而成了挂载杀手。
+  //    改成回传已有 id：重名不是「丢掉」，是「重新挂回那条已有的战线」，
+  //    这才是幂等本来该干的事。
+  const existingTitles = new Map(
+    existing.map(i => [i.title.trim().toLowerCase(), i.id] as const),
+  )
+
+  // 🔴 目标没填预算时，一律不给 Initiative 传预算占比。
+  //    占比在这种情况下算出来是 null（createInitiative 里要目标有预算才折算金额），
+  //    什么都不影响 —— 但它会去撞「同目标占比之和 ≤ 100%」那道闸。
+  //    库里实测：CTS《Best of China》已被 FDE 的 3 条战线占了 70%，
+  //    任何正常的三阶段切分（40/35/25 之类）第一周就有 2/3 挂不上；
+  //    而旧战线从不归档，基数只涨不落，两三周后新方案一条都插不进去 ——
+  //    整条派生链会自己勒死，回到「动作全部未归类」的原状。
+  //    一个什么都不影响的数字，不该有权掐死链条。
+  const goalHasBudget = await goalHasBudgetAmount(supabase, prescription.goal_id)
 
   // 先 pass 1: 收集 terminal initiatives (phase_number → inserted id)
   // 再 pass 2: 解析 supporting 的 supports_phase_number → 真 initiative_id
@@ -105,14 +124,29 @@ export async function deriveInitiativesFromPrescription(
     p => INITIATIVE_TYPE_TIER[p.seed.initiative_type] === 'supporting',
   )
 
+  // 认不出来的类型不能静默蒸发：AI 哪天飘出个没见过的值，
+  // 那个阶段既不算 terminal 也不算 supporting，两趟循环都不碰它 ——
+  // 结果是这个阶段凭空消失，skipped 不加、日志一个字都没有。
+  for (const { phase, seed } of phasesWithSeed) {
+    if (INITIATIVE_TYPE_TIER[seed.initiative_type]) continue
+    result.skipped++
+    result.notes.push(
+      `⚠️ phase ${phase.phase_number}: 不认识的战线类型 "${seed.initiative_type}"，这个阶段没能挂到目标下`,
+    )
+  }
+
   for (const { phase, seed } of terminalPhases) {
-    const r = await tryCreateInitiative(supabase, prescription, phase, seed, existingTitles, undefined)
+    const r = await tryCreateInitiative(
+      supabase, prescription, phase, seed, existingTitles, undefined, goalHasBudget,
+    )
+    // 🔴 先认 id，再看 skipped：撞上同名时两者会同时出现 ——
+    //    没新建（skipped）但拿到了已有那条的 id，动作照样要挂上去。
+    if (r.id) result.initiativeIdsByPhase[phase.phase_number] = r.id
     if (r.skipped) {
       result.skipped++
       result.notes.push(`phase ${phase.phase_number}: ${r.reason}`)
     } else if (r.id) {
       result.inserted++
-      result.initiativeIdsByPhase[phase.phase_number] = r.id
       result.notes.push(`✓ phase ${phase.phase_number}: terminal Initiative "${seed.title}" 已派生 (id=${r.id.slice(0, 8)}…)`)
     }
   }
@@ -138,24 +172,26 @@ export async function deriveInitiativesFromPrescription(
       const r = await tryCreateInitiative(
         supabase, prescription, phase,
         { ...seed, initiative_type: 'unassigned' },
-        existingTitles, undefined,
+        existingTitles, undefined, goalHasBudget,
       )
+      if (r.id) result.initiativeIdsByPhase[phase.phase_number] = r.id
       if (r.skipped) {
         result.skipped++
       } else if (r.id) {
         result.inserted++
-        result.initiativeIdsByPhase[phase.phase_number] = r.id
       }
       continue
     }
 
-    const r = await tryCreateInitiative(supabase, prescription, phase, seed, existingTitles, parentInitiativeId)
+    const r = await tryCreateInitiative(
+      supabase, prescription, phase, seed, existingTitles, parentInitiativeId, goalHasBudget,
+    )
+    if (r.id) result.initiativeIdsByPhase[phase.phase_number] = r.id
     if (r.skipped) {
       result.skipped++
       result.notes.push(`phase ${phase.phase_number}: ${r.reason}`)
     } else if (r.id) {
       result.inserted++
-      result.initiativeIdsByPhase[phase.phase_number] = r.id
       result.notes.push(`✓ phase ${phase.phase_number}: supporting Initiative "${seed.title}" 已派生 (id=${r.id.slice(0, 8)}…)`)
     }
   }
@@ -169,24 +205,42 @@ interface SingleResult {
   reason?: string
 }
 
+/** 目标有没有填预算 —— 决定要不要给派生出的 Initiative 传预算占比。 */
+async function goalHasBudgetAmount(supabase: SupabaseClient, goalId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('goals')
+    .select('budget_amount')
+    .eq('id', goalId)
+    .maybeSingle<{ budget_amount: number | null }>()
+  return data?.budget_amount != null
+}
+
 async function tryCreateInitiative(
   supabase: SupabaseClient,
   prescription: Pick<Prescription, 'id' | 'client_id' | 'goal_id' | 'version'>,
   phase: PrescriptionPhase,
   seed: PhaseInitiativeSeed,
-  existingTitles: Set<string>,
+  existingTitles: Map<string, string>,
   supportsInitiativeId: string | undefined,
+  goalHasBudget: boolean,
 ): Promise<SingleResult> {
   const title = seed.title?.trim() || phase.name?.trim() || `处方 v${prescription.version} - 阶段 ${phase.phase_number}`
   const titleKey = title.toLowerCase()
 
-  // 幂等: 同 Goal 同 title 已有 → 跳过
-  if (existingTitles.has(titleKey)) {
-    return { skipped: true, reason: `已存在同名 Initiative "${title}", 跳过 (幂等保护)` }
+  // 幂等: 同 Goal 同 title 已有 → 不新建，但**把已有那条的 id 回传**，
+  // 这个阶段的动作照样挂得上去（见文件上方那段说明）
+  const existingId = existingTitles.get(titleKey)
+  if (existingId) {
+    return {
+      skipped: true,
+      id: existingId,
+      reason: `已存在同名 Initiative "${title}", 复用它 (幂等保护)`,
+    }
   }
 
-  // 校验 budget_percent 范围 (策略层会再校验, 这里防御性)
-  const budgetPercent = seed.budget_percent != null
+  // 校验 budget_percent 范围 (策略层会再校验, 这里防御性)。
+  // 目标没填预算时一律不传 —— 免得一个不影响任何事的数字去撞 100% 上限
+  const budgetPercent = goalHasBudget && seed.budget_percent != null
     ? Math.max(0, Math.min(100, seed.budget_percent))
     : undefined
 
@@ -205,6 +259,6 @@ async function tryCreateInitiative(
     return { skipped: true, reason: r.error ?? 'createInitiative 失败' }
   }
 
-  existingTitles.add(titleKey)  // 防止本批次重复
+  existingTitles.set(titleKey, r.initiative.id)  // 防止本批次重复
   return { skipped: false, id: r.initiative.id }
 }
