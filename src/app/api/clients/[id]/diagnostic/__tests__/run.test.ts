@@ -177,6 +177,7 @@ describe('GET /api/clients/[id]/diagnostic/latest', () => {
   it('returns 200 with run and findings when a completed run exists', async () => {
     const fakeRun = { id: 'run-xyz', client_id: CLIENT_ID, status: 'completed' }
     const fakeFindings = [{ id: 'f-1', finding_type: 'low_domain_rank', priority_score: 75 }]
+    const fakeNarratives = [{ id: 'n-1', kind: 'score_explanation', dimension: 'seo' }]
 
     vi.mocked(supabaseAdmin.from).mockImplementation((table: string) => {
       if (table === 'diagnostic_runs') {
@@ -192,10 +193,25 @@ describe('GET /api/clients/[id]/diagnostic/latest', () => {
           }),
         } as never
       }
+      if (table === 'diagnostic_findings') {
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              order: vi.fn().mockResolvedValue({ data: fakeFindings }),
+            }),
+          }),
+        } as never
+      }
+      // diagnostic_narratives — sorted by kind, THEN dimension. A single
+      // catch-all branch used to serve both tables, so when the route started
+      // reading narratives the second .order() hit undefined and the endpoint
+      // 500'd inside its own catch.
       return {
         select: vi.fn().mockReturnValue({
           eq: vi.fn().mockReturnValue({
-            order: vi.fn().mockResolvedValue({ data: fakeFindings }),
+            order: vi.fn().mockReturnValue({
+              order: vi.fn().mockResolvedValue({ data: fakeNarratives }),
+            }),
           }),
         }),
       } as never
@@ -204,10 +220,13 @@ describe('GET /api/clients/[id]/diagnostic/latest', () => {
     const req = makeRequest('GET')
     const res = await getLatest(req, PARAMS)
     expect(res.status).toBe(200)
-    const json = await res.json() as { success: boolean; run: unknown; findings: unknown[] }
+    const json = await res.json() as {
+      success: boolean; run: unknown; findings: unknown[]; narratives: unknown[]
+    }
     expect(json.success).toBe(true)
     expect(json.run).toEqual(fakeRun)
     expect(json.findings).toHaveLength(1)
+    expect(json.narratives).toEqual(fakeNarratives)
   })
 })
 
