@@ -9,7 +9,8 @@
  * 硬性要求：3 秒拿不到就放弃。开窗口卡住比少看几条教训糟糕得多。
  */
 
-import { writeFileSync } from 'node:fs'
+import { readFileSync, statSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   readHookInput,
   ensureBufferDir,
@@ -21,6 +22,7 @@ import {
 } from './config.mjs'
 
 const CONTEXT_TIMEOUT_MS = 3000
+const STATE_DOC_MAX_BYTES = 64 * 1024
 
 async function main() {
   const input = await readHookInput()
@@ -59,17 +61,49 @@ async function main() {
     'utf8',
   )
 
-  const text = render(ctx, projectKey)
-  if (!text) return
+  // 现状在前、别人的教训在后：先知道系统是什么样，才判断得了那些教训还成不成立。
+  const sections = [readStateDoc(cwd), render(ctx, projectKey)].filter(Boolean)
+  if (sections.length === 0) return
 
   process.stdout.write(
     JSON.stringify({
       hookSpecificOutput: {
         hookEventName: 'SessionStart',
-        additionalContext: text,
+        additionalContext: sections.join('\n\n---\n\n'),
       },
     }),
   )
+}
+
+/**
+ * 开窗口时自动带上 docs/STATE.md（系统现状）。
+ *
+ * 为什么非得自动：CLAUDE.md 里只有一句「每次开新会话先读 STATE.md」+ 一个链接，
+ * 那是一张纸条，不是一道闸门。2026-08-04 有一场会话照着 CLAUDE.md 干了一整场、
+ * 一次都没打开 STATE.md，于是拿着一份十天前的旧文档体系下判断，还提议去做一件
+ * 早就做完的事。纸条治不了这个，塞进上下文才治得了。
+ *
+ * 没有这个文件的项目（大多数）静默跳过 —— 读不到永远不能拦住开窗口。
+ */
+function readStateDoc(cwd) {
+  const root = git(cwd, ['rev-parse', '--show-toplevel'])
+  if (!root) return ''
+  try {
+    const path = join(root, 'docs', 'STATE.md')
+    if (statSync(path).size > STATE_DOC_MAX_BYTES) return ''
+    const body = readFileSync(path, 'utf8').trim()
+    if (!body) return ''
+    return [
+      '## 系统现状（docs/STATE.md · 开窗口自动带上）',
+      '',
+      '**唯一真相源**：现在什么在跑 / 部署在哪 / 哪个模块对应哪段代码。',
+      '跟印象里的情况冲突时以这份为准；发现它自己过时了就去改它，不要绕过它。',
+      '',
+      body,
+    ].join('\n')
+  } catch {
+    return ''
+  }
 }
 
 /** 用本机 git 判断这些 commit 是否已经在 main 里 */
