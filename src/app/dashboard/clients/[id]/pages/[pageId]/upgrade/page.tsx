@@ -3,6 +3,10 @@
 import { useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import type { PageUpgradeOutput } from '@/lib/blog/upgrade-generator'
+import {
+  buildPageUpgradeDraftStorageKey,
+  createPageUpgradeDraft,
+} from '@/lib/page-rewriter/upgrade-draft'
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -104,6 +108,34 @@ export default function UpgradePage() {
       setError(e instanceof Error ? e.message : '保存失败')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleOpenRewriter = () => {
+    if (!result) return
+    setError(null)
+    try {
+      const createdAt = Date.now()
+      const draftKey = buildPageUpgradeDraftStorageKey(clientId, pageId, createdAt)
+      const draft = createPageUpgradeDraft({
+        clientId,
+        pageId,
+        sourceUrl: result.source_page_url,
+        enhancedTitle: result.enhanced_title,
+        enhancedMetaTitle: result.enhanced_meta_title,
+        enhancedMetaDescription: result.enhanced_meta_description,
+        enhancedHtmlBody: result.enhanced_html_body,
+        createdAt,
+      })
+      window.sessionStorage.setItem(draftKey, JSON.stringify(draft))
+
+      const query = new URLSearchParams({
+        url: result.source_page_url,
+        upgrade_draft_key: draftKey,
+      })
+      router.push(`/dashboard/clients/${clientId}/page-rewriter?${query.toString()}`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '无法打开安全发布流程')
     }
   }
 
@@ -234,7 +266,7 @@ export default function UpgradePage() {
                 </button>
               </div>
             ) : (
-              <div className="flex gap-3 justify-end">
+              <div className="flex flex-wrap gap-3 justify-end">
                 <button
                   onClick={() => router.back()}
                   className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
@@ -244,9 +276,16 @@ export default function UpgradePage() {
                 <button
                   onClick={handleApprove}
                   disabled={saving}
-                  className="rounded-lg bg-green-600 px-5 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                  className="rounded-lg border border-green-600 px-4 py-2 text-sm font-medium text-green-700 hover:bg-green-50 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
                 >
-                  {saving ? '保存中…' : '批准并保存为草稿'}
+                  {saving ? '保存中…' : '仅保存为内容草稿'}
+                </button>
+                <button
+                  onClick={handleOpenRewriter}
+                  disabled={saving}
+                  className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                >
+                  审核并更新原页面 →
                 </button>
               </div>
             )}
@@ -260,7 +299,8 @@ export default function UpgradePage() {
               <strong>升级流程说明</strong><br />
               Strategy Engine（Claude）将：① 通过 Site Analyzer 抓取原页面内容 ② 识别薄弱点（字数不足、缺少 GEO 信号块）
               ③ 生成 SEO + GEO 双重优化的升级版本 ④ 提供变更摘要供你审核。
-              批准后保存为博客草稿，可在内容看板继续编辑后发布。
+              你可以仅保存为内容草稿，或进入安全发布流程：系统会重新读取 WordPress 当前页面、
+              展示逐项差异，并在你再次确认后更新原页面。
             </p>
           </div>
         )}
