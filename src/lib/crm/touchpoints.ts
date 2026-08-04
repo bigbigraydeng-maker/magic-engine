@@ -37,6 +37,17 @@ export interface RecordTouchpointInput {
   /** contact 现有的 last_seen_at,用于取 max、不把时间往回拨。 */
   currentLastSeenAt?: string | null
   /**
+   * 是谁记的这一笔（登录邮箱）。
+   *
+   * 2026-08-02 之前完全没存 —— 1938 条触点里 0 条留下了记录人，于是销售早上
+   * 打开名单，看得到「昨天聊过」却不知道是不是自己聊的，两个人重复打同一个
+   * 客户、或者互相以为对方在跟。这是「每天上班接着跟」这件事的地基。
+   *
+   * 可选：批量记录（群发邮件后一次记 108 人）和历史导入没有这个信息，
+   * 不传就留空，页面按「不知道谁跟的」显示，不假装。
+   */
+  loggedByEmail?: string | null
+  /**
    * 已经解析好的结果,给「整批同一句话」的场景用(如群发邮件后一次记 108 人)。
    *
    * 不传就自己解析。批量场景必须传 —— 否则同一句系统文案会被送去 AI 解析
@@ -65,7 +76,7 @@ function laterIso(a: string | null | undefined, b: string): string {
 export async function recordManualTouchpoint(
   input: RecordTouchpointInput,
 ): Promise<RecordTouchpointResult> {
-  const { clientId, contactId, direction, note, occurredAt, clientRef } = input
+  const { clientId, contactId, direction, note, occurredAt, clientRef, loggedByEmail } = input
 
   if (!clientRef) {
     // 兜底:调用方本该挡住。没有幂等键绝不写(否则双击必重复)。
@@ -94,6 +105,8 @@ export async function recordManualTouchpoint(
           tour_interest: parsed.tour_interest,
           competitor: parsed.competitor,
           callback_at: parsed.callback_at,
+          // 谁记的。没有它，销售早上分不清「昨天聊过」是不是自己聊的。
+          logged_by: loggedByEmail ?? null,
         },
         source: 'me_manual',
         source_ref: clientRef,

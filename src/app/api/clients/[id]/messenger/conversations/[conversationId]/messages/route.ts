@@ -47,6 +47,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     .select('id')
     .eq('id', params.conversationId)
     .eq('client_id', params.id)
+    // 只认私信 —— 这个接口的返回会被渲染成私信气泡并配 Meta 回复框。
+    .eq('channel', 'messenger')
     .maybeSingle()
 
   if (!convo) {

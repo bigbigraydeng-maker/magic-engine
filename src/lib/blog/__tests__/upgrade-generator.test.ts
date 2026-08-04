@@ -105,9 +105,14 @@ describe('generatePageUpgrade', () => {
     await expect(generatePageUpgrade(VALID_REQUEST)).rejects.toThrow('ANTHROPIC_API_KEY')
   })
 
-  it('throws when Jina fetch fails', async () => {
+  // Jina failure is intentionally non-fatal (c02c0dae): future campaign pages
+  // may not be live yet, so we fall back to a title/URL stub and still upgrade.
+  it('falls back to stub content when Jina fetch fails', async () => {
     mockFetchUrl.mockRejectedValue(new Error('Jina timeout'))
-    await expect(generatePageUpgrade(VALID_REQUEST)).rejects.toThrow('Jina timeout')
+    const result = await generatePageUpgrade(VALID_REQUEST)
+    expect(result.original_excerpt).toContain('Content could not be fetched')
+    expect(result.original_excerpt).toContain(VALID_REQUEST.page_url)
+    expect(result.enhanced_title).toBe('Best China Tours from New Zealand — Expert Guided Packages')
   })
 
   it('calls fetchUrlAsMarkdown with the page URL', async () => {
@@ -174,6 +179,13 @@ describe('generatePageUpgrade', () => {
     }) as unknown as InstanceType<typeof Anthropic>)
 
     mockFetchUrl.mockResolvedValue(JINA_RESULT)
-    await expect(generatePageUpgrade(VALID_REQUEST)).rejects.toThrow()
+    // JSON parse failure is intentionally non-fatal (c02c0dae): the caller gets
+    // fallback fields (original title, empty summary) instead of a hard error.
+    const result = await generatePageUpgrade(VALID_REQUEST)
+    expect(result.enhanced_title).toBe('China Tours NZ')
+    expect(result.enhanced_html_body).toBe('<h1>China Tours NZ</h1>')
+    expect(result.word_count).toBe(0)
+    expect(result.changes_summary).toBe('')
+    expect(result.geo_block_html).toBeNull()
   })
 })

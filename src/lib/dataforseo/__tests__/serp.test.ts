@@ -34,9 +34,9 @@ describe('getSerpPage', () => {
     const result = await getSerpPage('flooring brisbane')
 
     expect(result.local_pack).toEqual([
-      { name: 'Shop A', rating: 4.8, review_count: 120, address: '1 Main St' },
-      { name: 'Shop B', rating: 4.2, review_count: 55,  address: null },
-      { name: 'Shop C', rating: null, review_count: null, address: '3 Other Rd' },
+      { name: 'Shop A', rating: 4.8, review_count: 120, address: '1 Main St', domain: null },
+      { name: 'Shop B', rating: 4.2, review_count: 55,  address: null, domain: null },
+      { name: 'Shop C', rating: null, review_count: null, address: '3 Other Rd', domain: null },
     ])
   })
 
@@ -91,7 +91,7 @@ describe('getSerpPage', () => {
     expect(result.paid_advertiser_domains).toEqual(['ads.com'])
     expect(result.ai_overview_text).toBe('AI answer here')
     expect(result.local_pack).toEqual([
-      { name: 'Local Biz', rating: 4.5, review_count: 80, address: '10 King St' },
+      { name: 'Local Biz', rating: 4.5, review_count: 80, address: '10 King St', domain: null },
     ])
     expect(result.people_also_ask).toEqual(['How to choose flooring?'])
   })

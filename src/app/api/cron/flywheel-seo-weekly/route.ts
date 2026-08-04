@@ -34,10 +34,11 @@ export async function GET(req: NextRequest) {
 
   const cronRun = await startCronRun('flywheel-seo-weekly')
 
-  // Fetch all clients that have a domain configured
+  // 真客户闸门：周期性监测只对 active 客户跑（DataForSEO 计划 阶段 0）
   const { data: clients, error: clientErr } = await supabaseAdmin
     .from('clients')
     .select('id, domain')
+    .eq('client_status', 'active')
     .not('domain', 'is', null)
 
   if (clientErr) {

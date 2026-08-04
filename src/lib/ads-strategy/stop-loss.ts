@@ -154,6 +154,12 @@ export interface StopLossOutcome {
   touched: TouchedEntity[]
   currentDaily: number
   newDaily: number | null
+  /**
+   * The campaign's Meta objective, carried out so the caller can record the
+   * action against the metric this campaign is actually graded on. Undefined
+   * when Meta did not report one — never substituted with a guess.
+   */
+  objective?: string
 }
 
 export interface StopLossDeps {
@@ -182,6 +188,7 @@ async function doPause(
     touched: [{ id: campaign.id, name: campaign.name, ok }],
     currentDaily: 0,
     newDaily: 0,
+    objective: campaign.objective,
   }
 }
 
@@ -265,5 +272,6 @@ export async function executeStopLoss(
     touched,
     currentDaily: summary.currentDaily,
     newDaily: summary.plannedDaily,
+    objective: campaign.objective,
   }
 }

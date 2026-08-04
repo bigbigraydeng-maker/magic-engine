@@ -42,3 +42,55 @@ describe('isAutomatedPageMessage', () => {
     expect(isAutomatedPageMessage({ tags: ['source:mercury'], hasPriorInbound: true })).toBe(false)
   })
 })
+
+/**
+ * 秒回 = 机器（2026-08-03 加的第 3 条判据）。
+ *
+ * 为什么非加不可：前两条只挡得住「我们先开口」那种开场问候。真正在漏的是另一种
+ * —— **客户先说话、Meta 的 AI 客服接着回**。那时 hasPriorInbound=true、tag 又没有
+ * 确认过的自动化值，于是判成真人，这个客户就从「客人在等你」里消失了，
+ * 而实际上没有任何真人看过他一眼。
+ *
+ * 阈值 30 秒的依据（CTS 真实数据）：客户消息后 30 秒内就有回复的占比，
+ * 7/20 开了 AI 之后 120/157，7/20 之前 314/345 —— 之前也这么高是因为这个主页
+ * 早就挂着自动回复。两个时期都指向同一件事：秒回就是机器。
+ */
+describe('秒回 = 机器', () => {
+  const human = { tags: ['source:chat'], hasPriorInbound: true }
+
+  it.each([[0], [1_000], [15_000], [29_999]])('客户说完 %s 毫秒就回 → 机器', (gap) => {
+    expect(isAutomatedPageMessage({ ...human, msSincePriorInbound: gap })).toBe(true)
+  })
+
+  /** 真人客服盯着收件箱时一分多钟回是正常的，那必须算真人。 */
+  it.each([[30_000], [45_000], [120_000], [3_600_000]])('隔了 %s 毫秒才回 → 真人', (gap) => {
+    expect(isAutomatedPageMessage({ ...human, msSincePriorInbound: gap })).toBe(false)
+  })
+
+  /**
+   * 不知道间隔（老数据、回补历史）时**不用这条判据**。
+   * 这是 deny-list 的原则：只在有正面证据时才判机器，不猜。
+   */
+  it.each([[null], [undefined]])('不知道间隔（%s）→ 不判，按默认真人走', (gap) => {
+    expect(isAutomatedPageMessage({ ...human, msSincePriorInbound: gap })).toBe(false)
+  })
+
+  /** 负数只可能是数据错乱（出站时间早于它前面那条来信）—— 不拿它当证据。 */
+  it('间隔是负数（时间乱了）→ 不判机器', () => {
+    expect(isAutomatedPageMessage({ ...human, msSincePriorInbound: -5_000 })).toBe(false)
+  })
+
+  /** 这条是整个改动的理由：客人说话 → AI 秒回 → 他仍然在等一个真人。 */
+  it('客户先说话、AI 秒回 —— 不算「我们回过了」', () => {
+    expect(
+      isAutomatedPageMessage({ tags: [], hasPriorInbound: true, msSincePriorInbound: 3_000 }),
+    ).toBe(true)
+  })
+
+  /** 加了新判据不能把老行为改坏：真人隔了几分钟回，照旧是真人。 */
+  it('真人隔几分钟回 —— 老行为不变', () => {
+    expect(
+      isAutomatedPageMessage({ tags: ['source:chat'], hasPriorInbound: true, msSincePriorInbound: 240_000 }),
+    ).toBe(false)
+  })
+})

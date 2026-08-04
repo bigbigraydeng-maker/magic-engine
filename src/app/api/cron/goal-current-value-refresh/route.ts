@@ -56,8 +56,32 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     .select('id, client_id, primary_metric_key')
     .eq('status', 'active')
 
-  const goals = (goalsRes as { data: GoalRow[] | null }).data
-  if (!goals || goals.length === 0) {
+  const allGoals = (goalsRes as { data: GoalRow[] | null }).data ?? []
+
+  // 真客户闸门：周期性监测只对 active 客户跑（DataForSEO 计划 阶段 0）。
+  // autoFetchMetricValue 有 DataForSEO live 直调路径，调研档案的 goal 不刷。
+  let goals: GoalRow[] = []
+  if (allGoals.length > 0) {
+    const clientIds = Array.from(new Set(allGoals.map((g) => g.client_id)))
+    const { data: activeClients, error: activeErr } = await supabaseAdmin
+      .from('clients')
+      .select('id')
+      .in('id', clientIds)
+      .eq('client_status', 'active')
+
+    if (activeErr) {
+      await cronRun.finish({ failed: 1, error: activeErr.message })
+      return NextResponse.json(
+        { error: `Failed to filter active clients: ${activeErr.message}` },
+        { status: 500 },
+      )
+    }
+
+    const activeIds = new Set(((activeClients ?? []) as Array<{ id: string }>).map((c) => c.id))
+    goals = allGoals.filter((g) => activeIds.has(g.client_id))
+  }
+
+  if (goals.length === 0) {
     const result: CronResult = {
       processed: 0,
       succeeded: 0,

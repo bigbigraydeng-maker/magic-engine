@@ -46,7 +46,7 @@ export interface KeywordSnapshotResult {
 export interface LatestKeywordSnapshotResult {
   domain: string
   snapshot_date: string | null
-  keywords: LabsKeyword[]
+  keywords: Array<LabsKeyword & { local_pack_rank: number | null }>
 }
 
 export function locationCodeForDb(semrushDb: string | null | undefined): number {
@@ -150,7 +150,7 @@ export async function getLatestKeywordSnapshotForClient(
 
   const { data, error } = await supabaseAdmin
     .from('keyword_snapshots')
-    .select('keyword, position, search_volume, keyword_difficulty, cpc, competition, intent')
+    .select('keyword, position, search_volume, keyword_difficulty, cpc, competition, intent, local_pack_rank')
     .eq('client_id', client.id)
     .eq('location_code', locationCode)
     .eq('snapshot_date', snapshotDate)
@@ -172,6 +172,7 @@ export async function getLatestKeywordSnapshotForClient(
       cpc: number | null
       competition: number | null
       intent: string | null
+      local_pack_rank: number | null
     }>).map(row => ({
       keyword: row.keyword,
       position: row.position,
@@ -180,6 +181,7 @@ export async function getLatestKeywordSnapshotForClient(
       cpc: row.cpc,
       competition: row.competition,
       intent: row.intent ?? 'informational',
+      local_pack_rank: row.local_pack_rank,
     })),
   }
 }

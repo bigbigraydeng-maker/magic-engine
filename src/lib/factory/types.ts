@@ -125,11 +125,16 @@ export interface GateContext {
   allowBTrackLandmarkAds: boolean
   /** B4:客户级持久真促销(factory_config.verified_offer),该客户所有活动默认带上;单条活动可用 signal 覆盖 */
   verifiedOffer: VerifiedOffer | null
+  /** sourceImagePool 里哪些来自客户自己上传的素材。 */
+  clientOwnedSources?: ReadonlySet<string>
   /** 客户是否配了叙事人格(master_briefs.brand_voice.persona)→ 选故事型分镜 + 第一人称文案 */
   hasPersona?: boolean
   /** i2v 源图池:抓来的静图公开 URL。喂给 generationPlan 当底图,每段轮换用不同的一张。
    *  由 evaluate 从 video_clips 里 is_still_image=true 的行装配。空 = worker 退回占位帧。 */
   sourceImagePool?: readonly string[]
+  /** 同行业爆款的节奏基线(只有数字,无任何画面/文案)。由 evaluate 装配,
+   *  strategist 用它缩小配方候选池。null = 样本不足或查询失败 → 走原逻辑。 */
+  rhythmHint?: { medianShotSeconds: number; sampleSize: number } | null
 }
 
 export interface AngleSource {
@@ -183,6 +188,18 @@ export interface VerifiedOffer {
   discount?: string
   /** 截止,如 "31 July" / "end of July"(可选) */
   offer_expiry?: string
+  /**
+   * 客户**真的提供**的服务承诺,逐条列。如 ["free in-home measure", "free quote"]。
+   *
+   * 存在理由(2026-08-03 Oztop 首次试跑实测):AI 给结尾写了
+   * 「Free in-home measure & quote」「Expert consultation at no cost」,
+   * 而品牌资料里只有 expert consultation,**没有「免费」也没有「上门测量」**。
+   * 现有红线闸只拦数字与日期,拦不住这类**服务承诺** —— 而承诺一旦发出去
+   * 客户就得兑现,编错了是真实商业损失。
+   *
+   * 空 = 一条服务承诺都不许出现在文案里(默认最严,不是默认放行)。
+   */
+  verified_services?: string[]
 }
 
 // ── P0.1 发布(publish-worker)────────────────────────────────────────────────
@@ -190,8 +207,14 @@ export interface VerifiedOffer {
 /** 发布目标(clients.factory_config.publish_target 存,FDE 配)。缺 → 不发标失败,绝不猜/误发别客户页。 */
 export interface PublishTarget {
   platform: 'facebook' | 'publer'
-  /** facebook:页 id(如 Oztop 748077268383005)。token 走 env META_SYSTEM_USER_TOKEN 换页 token */
+  /** facebook:页 id(如 Oztop 748077268383005)。 */
   page_id?: string
+  /**
+   * 哪个客户 —— adapter 靠它去库里取「连接 Meta」存下的页 token。
+   * 没有它就只能退回全局 env token,那条路要求那个身份恰好在这个页上有角色,
+   * 不满足就发不出去(2026-08-04 实测:讲课片发布报「授权没配好」正是这个原因)。
+   */
+  client_id?: string
   /** publer:CTS 账号 id */
   publer_account_id?: string
   publer_provider?: string

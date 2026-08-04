@@ -18,6 +18,8 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import type { FlywheelName } from '@/lib/flywheel/adapters/types'
+import { assertAdsExpectedMetric } from '@/lib/flywheel/metric-registry'
+import { resolveClientAdsExpectedMetric } from '@/lib/flywheel/ads-expected-metric'
 
 type DiagnosticDimension =
   | 'seo'
@@ -31,7 +33,13 @@ interface DimensionMapping {
   flywheel: FlywheelName
   actionType: string
   executionMode: 'in_house' | 'third_party'
-  expectedMetric: string
+  /**
+   * null = resolved per client at write time. The ads dimension has no campaign
+   * context here, and its old hard-coded `ads.account.roas` was wrong for every
+   * client that does not sell online — a Messenger lead-gen account never
+   * accumulates a ROAS row, so the promise could never be redeemed.
+   */
+  expectedMetric: string | null
 }
 
 const DIMENSION_MAP: Partial<Record<DiagnosticDimension, DimensionMapping>> = {
@@ -51,7 +59,7 @@ const DIMENSION_MAP: Partial<Record<DiagnosticDimension, DimensionMapping>> = {
     flywheel:       'ads',
     actionType:     'ads.meta_snapshot',
     executionMode:  'third_party',
-    expectedMetric: 'ads.account.roas',
+    expectedMetric: null,   // resolved from the client's actual ads outcome data
   },
   social: {
     flywheel:       'social',
@@ -85,6 +93,17 @@ export async function logPackagePublishedAction(
   if (!mapping) return null   // reputation / competitor — skip silently
 
   try {
+    const expectedMetric = mapping.flywheel === 'ads'
+      ? await resolveClientAdsExpectedMetric(supabaseAdmin, input.clientId)
+      : mapping.expectedMetric
+
+    // Reconciliation gate: never promise a metric nothing pulls. Deliberately
+    // OUTSIDE the DB insert — a bad mapping is a code bug and must surface, not
+    // become another silently-unattributable row.
+    if (mapping.flywheel === 'ads') {
+      assertAdsExpectedMetric(expectedMetric, 'logPackagePublishedAction')
+    }
+
     const { data, error } = await supabaseAdmin
       .from('flywheel_actions')
       .insert({
@@ -95,7 +114,7 @@ export async function logPackagePublishedAction(
         execution_mode:        mapping.executionMode,
         vendor:                null,
         payload:               { triggered_by: 'package_publish', package_id: input.packageId },
-        expected_metric:       mapping.expectedMetric,
+        expected_metric:       expectedMetric,
         expected_delta:        null,
         production_package_id: input.packageId,
       })

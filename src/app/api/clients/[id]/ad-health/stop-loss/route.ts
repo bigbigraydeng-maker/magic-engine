@@ -22,6 +22,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { getCampaignDetails, setCampaignStatus, setCampaignDailyBudget } from '@/lib/meta/client'
+import { resolveAndLogAdsExpectedMetric } from '@/lib/flywheel/ads-expected-metric'
 import {
   listAdSetsInCampaign, setAdSetDailyBudget, getAdSetStatus, setAdSetStatus,
 } from '@/lib/meta/adsets'
@@ -156,6 +157,10 @@ async function recordAudit(
       action_type: outcome.action === 'pause' ? 'ads.pause_campaign' : 'ads.adjust_bid',
       execution_mode: 'third_party',
       vendor: 'meta',
+      expected_metric: resolveAndLogAdsExpectedMetric(
+        { objective: outcome.objective },
+        'ad-health/stop-loss',
+      ),
       payload: {
         campaign_id: campaignId,
         source: 'ads_health_stop_loss',

@@ -9,13 +9,19 @@ function getApifyKey(): string {
   return key
 }
 
+// Apify API 里 actor id 必须是 username~name 形式；调用方写的 username/name 的 `/`
+// 会把 URL 路径拼断（/acts/user/name/runs → 404 page-not-found），这里统一转成 `~`。
+function normalizeActorId(actorId: string): string {
+  return actorId.replace('/', '~')
+}
+
 export async function runActor(
   actorId: string,
   input: Record<string, unknown>
 ): Promise<ApifyRunResult> {
   const token = getApifyKey()
   const res = await fetch(
-    `${APIFY_BASE}/acts/${actorId}/runs?token=${token}`,
+    `${APIFY_BASE}/acts/${normalizeActorId(actorId)}/runs?token=${token}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -42,7 +48,7 @@ export async function waitForRun(
 
   while (Date.now() < deadline) {
     const res = await fetch(
-      `${APIFY_BASE}/acts/${actorId}/runs/${runId}?token=${token}`
+      `${APIFY_BASE}/acts/${normalizeActorId(actorId)}/runs/${runId}?token=${token}`
     )
 
     if (!res.ok) {

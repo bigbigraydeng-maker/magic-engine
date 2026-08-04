@@ -11,7 +11,13 @@
  *   幂等    body.clientRef(前端生成的 uuid)作 source_ref,靠既有
  *          UNIQUE(client_id,source,source_ref)去重。缺失 → 400。
  *
- * Body: { contactId, direction?, note, occurredAt?, clientRef }
+ * Body: { contactId, direction?, note, occurredAt?, clientRef, outcome? }
+ *
+ * `outcome` 是可选的**一键动作**用的：页面上「没打通」「他不买了」这类按钮，
+ * 内容是我们自己写死的一句话，结论已经确定，没有任何需要 AI 去读的东西。
+ * 传了它就跳过解析 —— 省一次调用（每次约 1 秒 + 费用），更重要的是**结论不再
+ * 靠模型**：一个「他不买了」被解析成 unknown，这个人明天照旧出现在名单上，
+ * 而销售以为自己已经处理完了。
  * Responses: 200 { created, touchpointId, parsed } / 400 / 401 / 403 / 404 / 500
  */
 
@@ -19,6 +25,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { recordManualTouchpoint } from '@/lib/crm/touchpoints'
+import { CONTACT_OUTCOMES, type ContactOutcome } from '@/lib/crm/note-parser'
 
 // 补记历史电话是常态;但明显未来的时间(>5min)几乎都是脏输入,clamp 到 now,
 // 否则会压制 segments 里「客户回话了」的判定。
@@ -30,6 +37,7 @@ const MAX_NOTE_CHARS = 5000
 interface Body {
   contactId?: unknown
   direction?: unknown
+  outcome?: unknown
   note?: unknown
   occurredAt?: unknown
   clientRef?: unknown
@@ -73,6 +81,16 @@ export async function POST(
   }
 
   const direction: 'inbound' | 'outbound' = body.direction === 'inbound' ? 'inbound' : 'outbound'
+
+  // 一键动作可以直说结论，跳过 AI 解析（见文件头）。只认白名单里的值 ——
+  // 随便一个字符串写进 metadata.outcome，分段规则会安静地读不懂它。
+  const presetOutcome =
+    typeof body.outcome === 'string' && (CONTACT_OUTCOMES as readonly string[]).includes(body.outcome)
+      ? (body.outcome as ContactOutcome)
+      : null
+  if (body.outcome !== undefined && !presetOutcome) {
+    return NextResponse.json({ error: '不认识这个结果' }, { status: 400 })
+  }
 
   // occurredAt:默认 now;给了就解析 + clamp 未来。
   const now = Date.now()
@@ -122,6 +140,22 @@ export async function POST(
       clientRef,
       brandTerms,
       currentLastSeenAt: contact.last_seen_at as string | null,
+      // 结论已经确定就不再问 AI。note 是我们自己写死的一句话，
+      // 里面没有任何客户信息，解析它既慢又白花钱，而且可能读错。
+      parsed: presetOutcome
+        ? {
+            summary: note,
+            outcome: presetOutcome,
+            do_not_contact: presetOutcome === 'do_not_contact',
+            travel_window: null,
+            tour_interest: null,
+            competitor: null,
+            callback_at: null,
+          }
+        : undefined,
+      // 谁记的。销售早上打开名单要分得清「昨天聊过」是不是自己聊的 ——
+      // 在此之前这个信息一条都没存过。
+      loggedByEmail: access.user?.email ?? null,
     })
 
     return NextResponse.json({

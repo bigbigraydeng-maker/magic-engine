@@ -66,6 +66,10 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
         'conversation_briefs(summary, intent_level, customer_needs, objections, promises_made, next_action, follow_up_due_at, risk_flags, trip, contact, draft_reply, generated_at)',
     )
     .eq('client_id', clientId)
+    // 只认私信。conversations 是四个渠道共用的表（邮件 / 外呼 / WhatsApp
+    // 都写这里），不筛渠道的话，一封邮件会出现在明确写着「Facebook 私信」的
+    // 页面上，并配一个走 Meta 发送的回复框。
+    .eq('channel', 'messenger')
     .order('last_message_at', { ascending: false })
     .limit(200)
 

@@ -42,6 +42,9 @@ export interface DailyRecommendationCandidate {
   prescription_id: string | null
   initiative_id: string | null
   source: string
+  /** Optional — used only for display-level dedup (patrol cards carry keyword here). */
+  action_type?: string | null
+  steps_json?: Record<string, unknown> | null
 }
 
 export interface DailyRecommendation extends DailyRecommendationCandidate {
@@ -80,7 +83,7 @@ export async function fetchDailyRecommendations(
   const { data, error } = await supabase
     .from('execution_items')
     .select(
-      'id, client_id, title, description, dimension, status, due_date, sort_order, created_at, prescription_id, initiative_id, source',
+      'id, client_id, title, description, dimension, status, due_date, sort_order, created_at, prescription_id, initiative_id, source, action_type, steps_json',
     )
     .eq('client_id', clientId)
     .in('status', ['pending', 'in_progress'])
@@ -93,7 +96,40 @@ export async function fetchDailyRecommendations(
   }
 
   const candidates = (data ?? []) as DailyRecommendationCandidate[]
-  return rankDailyRecommendations(candidates, now)
+  return rankDailyRecommendations(dedupeCandidates(candidates), now)
+}
+
+/**
+ * Display-level dedup safety net (2026-08-01 Sungenix incident): historical
+ * duplicate cards — same action_type + same keyword, inserted on different
+ * days before the persister keyed dedup landed — must not surface as N
+ * identical "today's 3" cards. Keeps ONE card per identity:
+ *   key   = action_type + (steps_json.keyword, falling back to description)
+ *   keep  = in_progress over pending (work already started), then latest created_at
+ * Cards without keyword and with distinct descriptions are never collapsed.
+ */
+export function dedupeCandidates(
+  candidates: DailyRecommendationCandidate[],
+): DailyRecommendationCandidate[] {
+  const byKey = new Map<string, DailyRecommendationCandidate>()
+  for (const c of candidates) {
+    const keyword = typeof c.steps_json?.keyword === 'string' && c.steps_json.keyword.trim().length > 0
+      ? c.steps_json.keyword.trim().toLowerCase()
+      : c.description
+    const key = `${c.action_type ?? ''}::${keyword}`
+    const kept = byKey.get(key)
+    if (!kept || preferCandidate(c, kept)) byKey.set(key, c)
+  }
+  return [...byKey.values()]
+}
+
+/** True when `a` should replace `b` as the surviving duplicate. */
+function preferCandidate(
+  a: DailyRecommendationCandidate,
+  b: DailyRecommendationCandidate,
+): boolean {
+  if (a.status !== b.status) return a.status === 'in_progress'
+  return Date.parse(a.created_at) > Date.parse(b.created_at)
 }
 
 /**

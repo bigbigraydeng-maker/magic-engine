@@ -59,12 +59,34 @@ async function runInBackground() {
     return
   }
 
-  const clientIds = Array.from(
+  const candidateIds = Array.from(
     new Set((clientsWithQueries ?? []).map(r => (r as { client_id: string }).client_id))
   )
 
-  if (clientIds.length === 0) {
+  if (candidateIds.length === 0) {
     console.log('[ai-tracker-weekly] No clients have enabled queries — nothing to run')
+    await cronRun.finish({ processed: 0, completed: 0, failed: 0 })
+    return
+  }
+
+  // 真客户闸门：周期性监测只对 active 客户跑（DataForSEO 计划 阶段 0）。
+  // 调研档案就算配了 enabled query 也不烧 LLM 钱。
+  const { data: activeClients, error: activeErr } = await supabaseAdmin
+    .from('clients')
+    .select('id')
+    .in('id', candidateIds)
+    .eq('client_status', 'active')
+
+  if (activeErr) {
+    console.error('[ai-tracker-weekly] Failed to filter active clients:', activeErr.message)
+    await cronRun.finish({ failed: 1, error: activeErr.message })
+    return
+  }
+
+  const clientIds = (activeClients ?? []).map(r => (r as { id: string }).id)
+
+  if (clientIds.length === 0) {
+    console.log('[ai-tracker-weekly] No active clients have enabled queries — nothing to run')
     await cronRun.finish({ processed: 0, completed: 0, failed: 0 })
     return
   }

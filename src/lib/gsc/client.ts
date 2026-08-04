@@ -356,7 +356,9 @@ async function querySearchAnalytics(
 
 // ─── Token resolution ─────────────────────────────────────────────────────────
 
-async function resolveAccessToken(
+// Exported for src/lib/gsc/inspect.ts (URL Inspection API shares the same
+// connector → OAuth → service-account resolution chain).
+export async function resolveAccessToken(
   clientId?: string,
   opts?: { forceRefresh?: boolean },
 ): Promise<string | null> {

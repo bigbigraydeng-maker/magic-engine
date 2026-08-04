@@ -9,8 +9,18 @@
  *   1 条 inbound 触点  = 他填了表单
  *   1 条 outbound 触点 = 销售打电话的结果（只有写了跟进记录的才有）
  *
+ * 来源归因（2026-07-30 补）：Meta 的 lead 导出带广告层级的列，之前只读了 ad_name、
+ * 而且只塞进触点 metadata，contacts 上一个来源字段都没有 —— 于是「这个人成交了」
+ * 看得到、「他是哪条广告带来的」看不到。现在 ad_id / adset_id / campaign_id / ad_name
+ * 会同时写进 contacts（first-touch）和触点。
+ *
+ * 表头可能没有那几列（CTS 那份存量导出只有 ad_name），缺就是 null，不假装（见
+ * src/lib/crm/attribution.ts 头部的「实测能拿到什么」）。
+ *
  * 用法：
- *   npx tsx scripts/import-cts-fb-leads.ts <csv路径> [--dry]
+ *   npx tsx scripts/import-cts-fb-leads.ts <csv路径> [--dry] [--listing <listings.id>]
+ *
+ *   --listing  这批 lead 是某套房的广告带来的时候传（地产客户）。不传就不挂房子。
  */
 
 import { readFileSync } from 'node:fs'
@@ -49,13 +59,20 @@ function parseCsv(text: string): string[][] {
 async function main() {
   const csvPath = process.argv[2]
   const dry = process.argv.includes('--dry')
+  const listingIdx = process.argv.indexOf('--listing')
+  const listingId = listingIdx > -1 ? process.argv[listingIdx + 1] ?? null : null
   if (!csvPath) {
-    console.error('用法: npx tsx scripts/import-cts-fb-leads.ts <csv路径> [--dry]')
+    console.error(
+      '用法: npx tsx scripts/import-cts-fb-leads.ts <csv路径> [--dry] [--listing <listings.id>]',
+    )
     process.exit(1)
   }
 
   const { resolveContact, buildIdentities } = await import('../src/lib/crm/identity')
   const { classifyNote } = await import('../src/lib/crm/note-parser')
+  const { attributionFromMetaLeadRow, attributionColumns } = await import(
+    '../src/lib/crm/attribution'
+  )
   const { supabaseAdmin } = await import('../src/lib/supabase')
 
   const rows = parseCsv(readFileSync(csvPath, 'utf8'))
@@ -69,6 +86,14 @@ async function main() {
   const iTour = col('which_tour_interests_you_most?')
   const iAd = col('ad_name')
   const iNote = col('员工跟进记录')
+  // 广告层级列。CTS 那份存量导出没有它们（col() 返回 -1），新导出才有 —— 缺就是 null。
+  const iAdId = col('ad_id')
+  const iAdsetId = col('adset_id')
+  const iCampaignId = col('campaign_id')
+
+  /** 表头里没有这一列 / 值为空 → null。绝不猜。 */
+  const cell = (row: string[], idx: number): string | null =>
+    idx > -1 ? row[idx]?.trim() || null : null
 
   const data = rows.slice(1).filter((r) => r.length > 5 && (r[iEmail] || r[iPhone]))
   console.log(`读到 ${data.length} 行`)
@@ -93,12 +118,25 @@ async function main() {
       continue
     }
 
+    // 「他是哪条广告带来的」。这一行来自 Meta lead 导出 → platform 一定是 'meta'
+    // （事实，不是猜的）；ad/adset/campaign id 有就写、没有就 null。
+    const attribution = attributionFromMetaLeadRow({
+      ad_id: cell(r, iAdId),
+      ad_name: cell(r, iAd),
+      adset_id: cell(r, iAdsetId),
+      campaign_id: cell(r, iCampaignId),
+      // creative id：Meta 的 lead 导出不给，只能由 ME 出片管道回填 → 这里一律 null。
+      creative_ref: null,
+    })
+
     const { contactId, created } = await resolveContact({
       clientId: CTS_CLIENT_ID,
       identities,
       displayName: (r[iName] ?? '').trim() || null,
       source: 'meta_lead_form',
       seenAt: submittedAt,
+      attribution,
+      listingId,
     })
     created ? stats.contactsCreated++ : stats.contactsMatched++
 
@@ -112,7 +150,10 @@ async function main() {
         occurred_at: submittedAt,
         summary: `填了 Facebook 表单${r[iTour] ? ` · ${r[iTour]}` : ''}`,
         raw: null,
-        metadata: { tour_interest_raw: r[iTour] ?? null, ad_name: r[iAd] ?? null },
+        metadata: { tour_interest_raw: r[iTour] ?? null, ad_name: cell(r, iAd) },
+        // 触点也存一份归因：同一个人可能被两条不同的广告分别捞到过，只存
+        // contacts 上那份 first-touch 会让第二条广告的贡献永远看不见。
+        ...attributionColumns(attribution),
         source: 'meta_lead_form',
         source_ref: r[iId] || `${r[iEmail]}|${submittedAt}`,
       },
