@@ -6,6 +6,7 @@ import type { GoogleAdsData } from '@/lib/dataforseo/serp'
 import type { CollectorResult, NewFinding } from '../types'
 import { makeEvidence, evidenceSource } from '../types'
 import { MAX_COLLECTOR_TIMEOUT_MS } from '../constants'
+import { fetchOwnAdActivity, isCurrentlyAdvertising } from '../own-ad-activity'
 
 // P8.10.S2.6: Meta + Google ads-library URLs we audit; included as evidence sources.
 const META_AD_LIBRARY_URL = 'https://www.facebook.com/ads/library/'
@@ -119,6 +120,18 @@ export class AdsCollector {
 
     // No active ads anywhere → critical
     if (!metaActive && !googleActive) {
+      // 🔴 下这个结论之前，先看我们自己账户里的真实投放数据。
+      //    公开渠道（广告库 / 搜索结果）看不到，不等于客户没在投 ——
+      //    表单广告、私信广告根本没有网站链接，按域名搜天生搜不到。
+      //    2026-08-05 实测：CTS 当天真实在投两个系列、花了 NZ$211、上万次曝光，
+      //    而这里报的是「没有检测到任何在投广告」并标了 high。
+      //    这条假发现会喂进下一轮方案，让 AI 给正在花钱的客户开「该开始投广告」。
+      const own = await fetchOwnAdActivity(this.supabase, clientId)
+      if (isCurrentlyAdvertising(own)) {
+        findings.push(this.makePublicInvisibleFinding(clientId, own))
+        // 在投但公开渠道看不见 —— 不是「没投」，给个中性分，别把客户判死
+        return { score: 60, findings, meta_ads, google_ads }
+      }
       findings.push(this.makeNoActiveAdsFinding(clientId, meta_ads, google_ads))
       return { score: 0, findings, meta_ads, google_ads }
     }
@@ -209,6 +222,44 @@ export class AdsCollector {
       recommendation: 'Open Client Settings → General and set the primary domain. Re-run diagnostic.',
       fix_type: 'fde_manual',
       priority_score: 80,
+    }
+  }
+
+  /**
+   * 在投，但公开渠道查不到 —— 这是**投放形式**的问题，不是「没投」。
+   *
+   * 表单广告 / 私信广告没有网站链接，按域名去公开广告库搜天生搜不到。
+   * 这不影响投放效果，但会让外部（包括竞品分析、也包括我们自己这套体检）
+   * 看不见这个客户在打什么牌。值得知会，但不是故障。
+   */
+  private makePublicInvisibleFinding(
+    clientId: string,
+    own: { spend: number; impressions: number; latestDate: string | null },
+  ): NewFinding {
+    return {
+      client_id: clientId,
+      dimension: 'ads',
+      finding_type: 'budget_inefficiency',
+      severity: 'low',
+      title: '广告在投，但从公开渠道查不到',
+      description:
+        `近 14 天真实花费 ${own.spend.toFixed(2)}、曝光 ${own.impressions} 次` +
+        `（最近数据 ${own.latestDate ?? '未知'}），但 Meta 公开广告库和 Google 广告透明中心都搜不到。` +
+        '多半是表单广告或私信广告 —— 它们没有网站链接，按域名搜天生搜不到。' +
+        '不影响投放效果，但外部（含竞品分析）看不见你在打什么牌。',
+      evidence: makeEvidence({
+        parsed: {
+          own_account: { spend: own.spend, impressions: own.impressions, latest: own.latestDate },
+          note: '数据来自本平台直连的广告账户，不是公开渠道',
+        },
+        raw: { own },
+        sources: adsSources(),
+      }),
+      recommendation:
+        '不用改投放。如果希望外部也能看到品牌在投什么，可以额外跑一条带网站链接的广告；' +
+        '只想收线索的话保持现状即可。',
+      fix_type: 'fde_manual',
+      priority_score: 20,
     }
   }
 

@@ -171,6 +171,36 @@ export async function fetchPageReels(
   })
 }
 
+export interface ManagedPage {
+  id: string
+  name: string
+}
+
+/**
+ * The Pages this token can act for, so ME can offer a pick-list instead of
+ * asking someone to hunt down a numeric Page ID. The vanity URL a client gives
+ * you (facebook.com/CTSTOURS) is not the id the Graph API needs, and there is
+ * no reliable way to convert one to the other by hand.
+ *
+ * Returns null when the token is rejected — the caller shows "not connected"
+ * rather than an empty list, which would read as "you manage no Pages".
+ */
+export async function listManagedPages(userToken: string): Promise<ManagedPage[] | null> {
+  const url = `${GRAPH_BASE}/me/accounts?fields=id,name&limit=100&access_token=${encodeURIComponent(userToken)}`
+  let res: Response
+  try {
+    res = await fetch(url)
+  } catch {
+    return null
+  }
+  if (!res.ok) return null
+
+  const body = (await res.json()) as { data?: Array<{ id?: string; name?: string }> }
+  return (body.data ?? [])
+    .filter((p): p is { id: string; name?: string } => typeof p.id === 'string')
+    .map((p) => ({ id: p.id, name: p.name ?? p.id }))
+}
+
 /**
  * Exchange the caller's User access token for a Page access token.
  * Meta's /me/accounts endpoint returns each Page the user manages + its own token.

@@ -1,6 +1,6 @@
 import { getKeywordsForSite } from '@/lib/dataforseo/labs'
 import type { LabsKeyword } from '@/lib/dataforseo/labs'
-import { getBacklinkSummary, getSerpRankings } from '@/lib/dataforseo/client'
+import { getBacklinkSummary, getSerpRankings, locationCodeFor } from '@/lib/dataforseo/client'
 import type { BacklinkSummary, SerpRanking } from '@/lib/dataforseo/client'
 import { auditTechnicalSeo } from '@/lib/diagnostic/technical-seo'
 import type { TechnicalSeoSignals } from '@/lib/diagnostic/technical-seo'
@@ -34,11 +34,24 @@ export class SeoCollector {
     this.timeoutMs = timeoutMs
   }
 
+  /**
+   * @param options.skipSerp  Skip the SERP rankings call entirely.
+   *   SERP is the single most expensive thing this collector buys — 10 keywords
+   *   × depth=100 ≈ US$0.20/domain, ~75% of the per-domain cost — and it feeds
+   *   ONLY the informational "buried position" findings. It contributes nothing
+   *   to `score` (see buildResult: raw = coverage + authority + technical).
+   *   Callers that discard findings and keep only the score — the baseline
+   *   domains cron does exactly that — should pass true and get an identical
+   *   score for a quarter of the price. Client diagnostics keep it off (default)
+   *   because that path does surface the findings.
+   */
   async collect(
     clientId: string,
     clientDomain: string,
     keywords: string[],
     gscQueries: string[] = [],
+    db: string = 'au',
+    options: { skipSerp?: boolean } = {},
   ): Promise<CollectorResult> {
     // Use approved target keywords first; fall back to real GSC queries when
     // no target keywords are configured but the client has authorised GSC.
@@ -57,7 +70,10 @@ export class SeoCollector {
     )
 
     try {
-      return await Promise.race([this.fetchAndScore(clientId, clientDomain, effectiveKeywords), timeout])
+      return await Promise.race([
+        this.fetchAndScore(clientId, clientDomain, effectiveKeywords, db, options.skipSerp ?? false),
+        timeout,
+      ])
     } catch {
       return fallback
     }
@@ -67,10 +83,13 @@ export class SeoCollector {
     clientId: string,
     domain: string,
     keywords: string[],
+    db: string,
+    skipSerp: boolean,
   ): Promise<CollectorResult> {
-    // Map SEMRUSH_DB region env var to DataForSEO location code (AU=2036, NZ=2554).
-    const locationCode = process.env.SEMRUSH_DB === 'nz' ? 2554 : 2036
-    const db = process.env.SEMRUSH_DB ?? 'au'
+    // Market comes from the client's semrush_db (AU=2036, NZ=2554) — NOT the
+    // global SEMRUSH_DB env, which forced every client onto the deploy default
+    // and gave NZ clients AU keyword + SERP data.
+    const locationCode = locationCodeFor(db)
     const serpKeywords = keywords.slice(0, SERP_SAMPLE_KEYWORDS)
 
     // getKeywordsForSite is critical — let it throw so the outer catch degrades gracefully.
@@ -79,7 +98,10 @@ export class SeoCollector {
       getKeywordsForSite(domain, locationCode, ORGANIC_KW_LIMIT),
       auditTechnicalSeo(domain),
       getBacklinkSummary(domain).catch((): BacklinkSummary | null => null),
-      getSerpRankings(domain, serpKeywords, db).catch(() => [] as SerpRanking[]),
+      // Not billed at all when skipped — the request is never issued.
+      skipSerp
+        ? Promise.resolve([] as SerpRanking[])
+        : getSerpRankings(domain, serpKeywords, db).catch(() => [] as SerpRanking[]),
     ])
 
     // Derive authority score from DataForSEO backlink rank (0–1000 → 0–100).

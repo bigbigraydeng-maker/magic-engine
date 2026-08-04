@@ -62,8 +62,13 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     .maybeSingle()
 
   if (!cfg?.enabled) {
+    // Not configured is a REAL answer about this client, not an error the PM can
+    // fix by reading jargon. `no_supply` lets the page say "there is nothing to
+    // recycle, so a new one has to be made" and point at the money controls,
+    // instead of the old dead end that named an internal config the PM has
+    // never heard of (2026-07-25).
     return NextResponse.json(
-      { error: '该客户还没接通爆款素材池,暂时无法一键补素材。请先在设置里配置 winner 池。' },
+      { no_supply: true, reason: 'recycle_pool_not_connected' },
       { status: 409 },
     )
   }

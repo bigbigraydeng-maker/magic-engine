@@ -25,3 +25,15 @@ export const ME_MAIL_FROM_ADDRESS =
 export function meMailFrom(label: string): string {
   return `${label} <${ME_MAIL_FROM_ADDRESS}>`
 }
+
+/**
+ * The default inbox every internal notification is delivered TO — the ad-health
+ * digest, the cron-failure digest, and the public contact form. Kept on the same
+ * verified domain as the sender so a sandbox-only account (which may only deliver
+ * to its own owner address) still reaches it. Override with ME_MAIL_TO.
+ *
+ * This is only the FALLBACK: a client that configures its own digest recipients
+ * still wins over this address.
+ */
+export const ME_MAIL_TO_ADDRESS =
+  process.env.ME_MAIL_TO ?? 'hello@magicengine.cloud'

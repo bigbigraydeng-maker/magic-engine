@@ -10,7 +10,7 @@
  * the daily cron; this page only reads ad_health_narratives.
  */
 
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 
@@ -172,19 +172,35 @@ function PrescriptionBlock({ clientId, c }: { clientId: string; c: CampaignNarra
         body: JSON.stringify({ kind: p.kind }),
       })
       const json = await res.json()
+
+      // A prescription that cannot supply creative is NOT an error and must not
+      // read as one. It also must never end with "明天再扫" — a reply with no
+      // next step is what made the PM call this button unclosed (2026-07-25).
+      // Every branch below hands back something to do right now.
+      if (res.status === 409 || json.no_supply) {
+        setDone(true)
+        setResult({
+          kind: 'err',
+          text: '这个客户还没有可回收的老素材,所以补不了 —— 新片要现做。\n钱这边你现在就能按住:上面的「预算降 20%」或「先全停」。做片的事我去接,接通了告诉你。',
+        })
+        return
+      }
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
+
       const n = (json.adsAdded ?? []).length
       setDone(true)
       setResult({
         kind: 'ok',
         text: n > 0
-          ? `已补 ${n} 条新素材,全部暂停、不花钱。团队已收到通知会跟进开启;你也可以自己去 Meta 广告后台提前打开。`
-          : '本轮爆款池里暂时没有新的合格素材,系统明天会再自动扫。',
+          // No invented third party: ME did it, or it needs your click. Nothing
+          // is ever "已通知团队" (板桥) — the PM knows there is no such team.
+          ? `已补 ${n} 条新素材,全部暂停、一分钱不花。要开投的时候你点一下就行。`
+          : '现成的老素材里没有能用的,所以这次没补上 —— 新片要现做。\n钱这边你现在就能按住:上面的「预算降 20%」或「先全停」。做片的事我去接,接通了告诉你。',
       })
     } catch (err) {
       // Raw API errors are English tech-speak — log them, speak human (板桥 #5).
       console.error('[ads-health] execute-prescription failed:', err)
-      setResult({ kind: 'err', text: '这次没执行成功,系统已记录。你可以稍后再点一次;连续失败请找团队。' })
+      setResult({ kind: 'err', text: '这次没执行成功,钱没动。稍后再点一次;连续失败我去查。' })
     } finally {
       setRunning(false)
     }
@@ -220,6 +236,183 @@ function PrescriptionBlock({ clientId, c }: { clientId: string; c: CampaignNarra
 
 // ─── Campaign card ─────────────────────────────────────────────────────────────
 
+/**
+ * The money question, answered before any diagnosis.
+ *
+ * The page used to open with "which ad is sick" and never once said what the
+ * week cost. That is the first thing the PM actually wants to know (板桥), and
+ * every number here is a plain sum of figures already on the cards — nothing
+ * modelled, nothing estimated. Deliberately absent: an account-wide
+ * week-over-week comparison, because the engine only computes that per campaign
+ * and inventing an aggregate would be a fabricated number.
+ */
+function MoneySummary({ campaigns }: { campaigns: CampaignNarrative[] }) {
+  const spend = campaigns.reduce((s, c) => s + c.latest_spend_7d, 0)
+  const results = campaigns.reduce((s, c) => s + c.latest_results_7d, 0)
+  if (spend <= 0) return null
+
+  const perResult = results > 0 ? spend / results : null
+
+  // Name only the single worst payer, and only when it is meaningfully worse
+  // than the average — one name to act on beats a table nobody reads.
+  const worst = campaigns
+    .filter(c => c.latest_results_7d > 0 && c.latest_spend_7d > 0)
+    .map(c => ({ c, per: c.latest_spend_7d / c.latest_results_7d }))
+    .sort((a, b) => b.per - a.per)[0]
+  const showWorst = worst && perResult != null && campaigns.length > 1 && worst.per > perResult * 1.2
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4 mb-4">
+      <p className="text-sm text-gray-700">
+        过去 7 天花了 <span className="font-semibold tabular-nums">${spend.toFixed(0)}</span>
+        {results > 0 ? (
+          <>
+            ,来了 <span className="font-semibold tabular-nums">{results}</span> 个询盘,
+            实付平均 <span className="font-semibold tabular-nums">${perResult!.toFixed(1)}</span> 一个。
+          </>
+        ) : (
+          <>,<span className="font-semibold text-amber-700">一个询盘都没来</span>。</>
+        )}
+      </p>
+      {showWorst && (
+        <p className="mt-1.5 text-xs text-gray-500">
+          最贵的是「<span className="text-gray-700">{worst.c.campaign_name}</span>」——
+          一个询盘 <span className="tabular-nums text-gray-700">${worst.per.toFixed(1)}</span>。
+        </p>
+      )}
+    </div>
+  )
+}
+
+interface StopLossPreview {
+  campaign_name: string
+  current_daily: number
+  planned_daily: number | null
+  cuttable: boolean
+  pausable: boolean
+  error?: string
+}
+
+/**
+ * The money decision, offered BEFORE the creative one.
+ *
+ * Why it leads (板桥, 2026-07-25): behind a 🔴 card the PM is not asking "where
+ * is more creative", he is asking "is my money still burning". Cutting or
+ * pausing is the only action here that changes the answer the moment it is
+ * pressed, and it needs no creative supply at all.
+ *
+ * Real numbers are fetched on click, not on render — a page with six cards must
+ * not fire six ad-platform lookups nobody asked for.
+ */
+function StopLossBlock({ clientId, c }: { clientId: string; c: CampaignNarrative }) {
+  const [busy, setBusy] = useState<'cut' | 'pause' | null>(null)
+  const [result, setResult] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [settled, setSettled] = useState(false)
+
+  const run = async (action: 'cut' | 'pause') => {
+    setBusy(action)
+    setResult(null)
+    try {
+      const pv = await fetch(
+        `/api/clients/${clientId}/ad-health/stop-loss?campaign_id=${c.campaign_id}`,
+      ).then(r => r.json()) as StopLossPreview
+
+      if (pv.error === 'no_meta_token') {
+        setResult({ kind: 'err', text: '这个客户的广告账户还没连上 ME,暂时改不了。我去接,接好告诉你。' })
+        return
+      }
+      if (pv.error) {
+        setResult({ kind: 'err', text: '没读到这条广告的当前预算。稍后再点一次;连续失败我去查。' })
+        return
+      }
+
+      if (action === 'cut' && !pv.cuttable) {
+        // Not a dead end: pausing always works, so offer it as the next step
+        // rather than telling the PM to go into the ad platform himself.
+        setResult({
+          kind: 'err',
+          text: `这条广告的每天预算改不了(它用的不是「每日预算」)。能立刻做的是先全停 —— 要停就点右边的「先全停」。`,
+        })
+        return
+      }
+
+      const confirmText = action === 'cut'
+        ? `把这条广告的每天预算降 20%?\n\n现在每天 $${pv.current_daily.toFixed(2)} → 降到 $${(pv.planned_daily ?? 0).toFixed(2)}\n广告继续跑,只是花得慢一点。随时可以调回来。`
+        : `把这条广告先全停?\n\n它近 7 天花了 $${c.latest_spend_7d.toFixed(0)},带来 ${c.latest_results_7d} 个询盘。\n停了就不再花钱,随时可以重新开。`
+      if (!window.confirm(confirmText)) return
+
+      const res = await fetch(`/api/clients/${clientId}/ad-health/stop-loss`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaign_id: c.campaign_id, action }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
+
+      if (json.not_cuttable) {
+        setResult({ kind: 'err', text: '这条广告的每天预算改不了。能立刻做的是先全停。' })
+        return
+      }
+      if (!json.ok) {
+        setResult({ kind: 'err', text: '广告平台这次没接受这个改动,钱没动。稍后再点一次;连续失败我去查。' })
+        return
+      }
+
+      const warn = (json.warnings as string[] | undefined)?.filter(Boolean) ?? []
+      const done = action === 'cut'
+        ? `已降到每天 $${(json.new_daily as number).toFixed(2)}(原来 $${(json.current_daily as number).toFixed(2)})。广告还在跑。`
+        : '已停投,这条广告不再花钱了。'
+      setResult({ kind: 'ok', text: warn.length > 0 ? `${done}\n⚠️ ${warn.join(' ')}` : done })
+      setSettled(true)
+    } catch (err) {
+      console.error('[ads-health] stop-loss failed:', err)
+      setResult({ kind: 'err', text: '这次没改成功,钱没动。稍后再点一次;连续失败我去查。' })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="mt-3 border-t border-gray-200/60 pt-3">
+      <p className="text-sm font-medium text-gray-700">先按住钱</p>
+      <p className="mt-1 text-xs text-gray-500">
+        换素材要时间。在那之前,先决定这条广告继续按现在的速度花钱,还是先慢下来 / 先停。
+      </p>
+      <div className="mt-2.5 flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={busy !== null || settled}
+          onClick={() => run('cut')}
+          className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+        >
+          {busy === 'cut' ? '正在改…' : '预算降 20%'}
+        </button>
+        <button
+          type="button"
+          disabled={busy !== null || settled}
+          onClick={() => run('pause')}
+          className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+        >
+          {busy === 'pause' ? '正在停…' : '先全停'}
+        </button>
+        <button
+          type="button"
+          disabled={busy !== null || settled}
+          onClick={() => { setSettled(true); setResult({ kind: 'ok', text: '好,先不动。这条继续按原速跑,明天体检还会看它。' }) }}
+          className="rounded-lg px-3 py-1.5 text-sm text-gray-400 hover:text-gray-600 disabled:opacity-50"
+        >
+          先不动
+        </button>
+      </div>
+      {result && (
+        <p className={`mt-2 text-xs whitespace-pre-line ${result.kind === 'ok' ? 'text-emerald-700' : 'text-amber-700'}`}>
+          {result.text}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function CampaignCard({ clientId, c }: { clientId: string; c: CampaignNarrative }) {
   const meta = VERDICT_META[c.verdict]
   const ctrMetric = c.metrics.find(m => m.metric === 'ctr')
@@ -246,16 +439,27 @@ function CampaignCard({ clientId, c }: { clientId: string; c: CampaignNarrative 
       <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-400">
         <span>近 7 天花费 <span className="text-gray-600 tabular-nums">${c.latest_spend_7d.toFixed(0)}</span></span>
         <span>近 7 天询盘 <span className="text-gray-600 tabular-nums">{c.latest_results_7d}</span></span>
+        {/* Labelled 实付 on purpose: this is total spend ÷ total results, i.e.
+            what was actually paid. The headline above compares a TYPICAL DAY
+            (median of daily costs, which resists one freak day skewing the
+            verdict), so the two numbers differ legitimately — without the label
+            they read as a contradiction and cost the page its credibility. */}
         {cpl != null && (
-          <span>每个询盘成本 <span className="text-gray-600 tabular-nums">${cpl.toFixed(1)}</span></span>
+          <span>实付每个询盘 <span className="text-gray-600 tabular-nums">${cpl.toFixed(1)}</span></span>
         )}
         {c.frequency_7d != null && (
           <span>看腻程度 <span className="text-gray-600 tabular-nums">{c.frequency_7d.toFixed(2)}</span>（1 以下算正常，越高越腻）</span>
         )}
       </div>
 
+      {/* Money first, creative second (板桥): the stop-loss decision needs no
+          creative supply and takes effect immediately, so it must not sit below
+          a prescription that may have nothing to give. */}
       {(c.verdict === 'alert' || c.verdict === 'watch') && (
-        <PrescriptionBlock clientId={clientId} c={c} />
+        <>
+          <StopLossBlock clientId={clientId} c={c} />
+          <PrescriptionBlock clientId={clientId} c={c} />
+        </>
       )}
     </div>
   )
@@ -327,6 +531,8 @@ export default function AdsHealthPage() {
               体检日期 {latest.insight_date} · 共 {latest.payload.evaluated} 条广告
             </p>
           </div>
+
+          <MoneySummary campaigns={latest.payload.campaigns} />
 
           {/* Worst first — the engine already sorts, but re-sort as a fallback
               so a bad cron day can't silently bury an alert below healthy cards. */}

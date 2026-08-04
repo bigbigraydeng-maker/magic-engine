@@ -57,7 +57,7 @@ describe('normalizeSelfServeTarget — path traversal close', () => {
       normalizeSelfServeTarget(MY_CLIENT, '/dashboard/admin/billing-monitor'),
     ).toBe(MY_HOME)
     expect(
-      normalizeSelfServeTarget(MY_CLIENT, '/dashboard/keywords'),
+      normalizeSelfServeTarget(MY_CLIENT, '/dashboard/industry-baselines'),
     ).toBe(MY_HOME)
   })
 

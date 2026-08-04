@@ -8,6 +8,7 @@ import { UsersPanel } from './UsersPanel'
 import { LocaleSettingsPanel } from './LocaleSettingsPanel'
 import { MtcBudgetPanel } from './MtcBudgetPanel'
 import { MetaAdAccountPanel } from './MetaAdAccountPanel'
+import { FacebookPagePanel } from './FacebookPagePanel'
 import { PrimaryKeywordsPanel } from '../settings/_components/PrimaryKeywordsPanel'
 import { BrandAliasesPanel } from '../settings/_components/BrandAliasesPanel'
 import { CompetitorDomainsPanel } from '../settings/_components/CompetitorDomainsPanel'
@@ -130,6 +131,19 @@ export function SettingsDrawer({ open, onClose, clientId, client, activeTab, onT
                 </p>
                 <div className="mt-3">
                   <MetaAdAccountPanel clientId={clientId} />
+                </div>
+              </div>
+
+              {/* 私信跟广告账户是两回事:广告账户管花钱,主页管进来的对话。
+                  放一起是因为两者都在 Meta 那头,FDE 接客户时一次配完。 */}
+              <div className="border-t border-black/[.06] pt-5">
+                <p className="text-[11px] font-black uppercase tracking-[0.14em] text-me-ochre">客户私信</p>
+                <h3 className="mt-1 font-display text-lg font-semibold tracking-tight text-me-charcoal">Facebook 主页</h3>
+                <p className="mt-1 text-xs text-me-charcoal/55">
+                  选中主页后，每小时自动把私信拉进来生成需求卡，显示在「客户消息」页。
+                </p>
+                <div className="mt-3">
+                  <FacebookPagePanel clientId={clientId} />
                 </div>
               </div>
 

@@ -8,9 +8,19 @@
  * Returns null gracefully when the token is not configured.
  */
 
+import {
+  LEAD_ACTION_PRIORITY,
+  MESSAGING_ACTION_PRIORITY,
+  PURCHASE_ACTION_PRIORITY,
+  parseObjectiveCosts,
+  pickAction,
+  type MetaActionStat,
+  type MetaObjectiveCosts,
+} from './objective-metrics'
+
 const GRAPH_BASE = 'https://graph.facebook.com/v19.0'
 
-export interface MetaAdsInsights {
+export interface MetaAdsInsights extends MetaObjectiveCosts {
   spend: number
   impressions: number
   clicks: number
@@ -36,9 +46,9 @@ interface GraphInsightsData {
   impressions?: string
   clicks?: string
   purchase_roas?: Array<{ value: string }>
-  actions?: Array<{ action_type: string; value: string }>
-  cost_per_action_type?: Array<{ action_type: string; value: string }>
-  outbound_clicks_ctr?: Array<{ action_type: string; value: string }>
+  actions?: MetaActionStat[]
+  cost_per_action_type?: MetaActionStat[]
+  outbound_clicks_ctr?: MetaActionStat[]
 }
 
 interface GraphCampaignRow extends GraphInsightsData {
@@ -211,30 +221,9 @@ interface GraphCampaignDailyRow extends GraphCampaignRow {
   cpm?:        string
 }
 
-// Meta's `actions` array is HIERARCHICAL: parent and child action types both
-// appear for the same conversions and their values overlap. `lead` is the
-// aggregate; `onsite_conversion.lead_grouped` is the Instant-Form child of it.
-// SUMMING them double-counts (leads inflate up to 2×, halving cost_per_result).
-// So each metric picks ONE type by priority, never adds across the list.
-// Ref: https://developers.facebook.com/docs/marketing-api/reference/ads-action-stats/
-const LEAD_ACTION_PRIORITY = ['lead', 'onsite_conversion.lead_grouped']
-const MESSAGING_ACTION_PRIORITY = [
-  'onsite_conversion.messaging_conversation_started_7d',
-  'onsite_conversion.total_messaging_connection',
-]
-
-/** Return the value of the first action type present, by priority. Never sums. */
-function pickAction(
-  actions: Array<{ action_type: string; value: string }> | undefined,
-  priority: string[],
-): number {
-  if (!actions) return 0
-  for (const wanted of priority) {
-    const hit = actions.find(a => a.action_type === wanted)
-    if (hit) return parseInt(hit.value, 10) || 0
-  }
-  return 0
-}
+// Action-type priority lists and the never-sum picker live in
+// ./objective-metrics — shared with the account-level cost metrics so the
+// hierarchical-double-count rule is stated once.
 
 /** Metric half of a daily row — identical at campaign and ad level. */
 type DailyMetrics = Omit<MetaCampaignDailyRow, 'campaign_id' | 'campaign_name' | 'insight_date'>
@@ -784,16 +773,20 @@ function parseInsights(row: GraphInsightsData): MetaAdsInsights {
   const roasEntry = row.purchase_roas?.[0]
   const roas = roasEntry ? parseFloat(roasEntry.value) || null : null
 
-  // actions: sum purchase / offsite_conversion.fb_pixel_purchase
-  const actions = row.actions ?? []
-  const purchaseAction = actions.find(a =>
-    a.action_type === 'purchase' ||
-    a.action_type === 'offsite_conversion.fb_pixel_purchase'
-  )
-  const conversions = purchaseAction ? parseInt(purchaseAction.value, 10) || null : null
+  // Purchases: pick ONE action type by priority — `purchase` is the aggregate
+  // of the offsite pixel variant, so finding either and summing would
+  // double-count. null (not 0) when the objective produces no purchases.
+  const purchases = pickAction(row.actions, PURCHASE_ACTION_PRIORITY)
+  const conversions = purchases > 0 ? purchases : null
 
   const cpc = spend > 0 && clicks > 0 ? spend / clicks : null
   const ctr = impressions > 0 && clicks > 0 ? clicks / impressions : null
 
-  return { spend, impressions, clicks, conversions, roas, cpc, ctr }
+  // Objective-dependent costs, straight from Meta's cost_per_action_type.
+  // All null for objectives that cannot produce the matching action — a
+  // Messenger campaign has no cost-per-purchase, and inventing one would feed
+  // attribution a number nobody measured.
+  const objectiveCosts = parseObjectiveCosts(row)
+
+  return { spend, impressions, clicks, conversions, roas, cpc, ctr, ...objectiveCosts }
 }

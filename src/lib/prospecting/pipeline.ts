@@ -67,11 +67,19 @@ export async function lastDiscoverAttemptByCombo(
   sinceMs = 7 * 24 * 60 * 60 * 1000,
 ): Promise<Record<string, number>> {
   const since = new Date(Date.now() - sinceMs).toISOString()
+  // Window on started_at, not finished_at: cron_run_logs_job_name_idx is
+  // (job_name, started_at DESC), so filtering on finished_at degrades to a
+  // Filter over every row this job ever wrote (~1.4k rows, each detoasting
+  // `summary`) — 302ms mean, 25% of all PostgREST DB time. started_at is an
+  // Index Cond, so the same window becomes a bounded range scan. The two
+  // differ only by one run's duration (~10s) on a 7-day window.
   const { data } = await supabaseAdmin
     .from('cron_run_logs')
     .select('summary, finished_at')
     .eq('job_name', 'prospecting-sweep')
-    .gte('finished_at', since)
+    .gte('started_at', since)
+    .order('started_at', { ascending: false })
+    .limit(500)
   const out: Record<string, number> = {}
   type Row = { summary: { stage?: string; combo?: { industry?: string; city?: string } } | null; finished_at: string | null }
   for (const r of (data ?? []) as Row[]) {

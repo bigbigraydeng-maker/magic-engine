@@ -62,7 +62,7 @@ export function prescribe(input: PrescribeInput): Prescription | null {
       title: '换一批人看,别让同一批人反复刷到',
       why: `同一批人平均已看 ${input.frequency_7d!.toFixed(1)} 次且点击率在掉 —— 是观众看腻了,不是素材问题。换素材治不了,要换人群。`,
       executable: false,
-      execute_hint: '换哪批人需要团队判断,系统不自动动。',
+      execute_hint: '换人群会改变投给谁,我不自动动。先按住钱(降预算或先停),换人群的方案我来出。',
     }
   }
 
@@ -86,7 +86,7 @@ export function prescribe(input: PrescribeInput): Prescription | null {
       title: '检查报价文案和落地流程',
       why: '点击没变差但每个询盘变贵了 —— 问题多半不在广告,在点进去之后(表单/报价/页面)。',
       executable: false,
-      execute_hint: '涉及文案和页面,需要团队判断,系统不自动动。',
+      execute_hint: '这要改报价文案和落地页,我不自动动。先按住钱(降预算或先停),改哪里我来查了给你。',
     }
   }
 
@@ -94,7 +94,7 @@ export function prescribe(input: PrescribeInput): Prescription | null {
   return {
     kind: 'review_offer',
     title: '人工看一眼这条广告',
-    why: '数据表现不太常见,已标记给团队人工检查,你不用操作。',
+    why: '这条的数据不太常见,我先去查清楚再给你结论。这期间钱要不要先按住,你决定。',
     executable: false,
   }
 }

@@ -304,3 +304,45 @@ function daysAgo(n: number): Date {
 function toIsoDate(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
+
+/**
+ * 关键事件按事件名拆开 + 表单开始次数。
+ *
+ * 存在理由：`leads_count` 取的是 GA4「关键事件」总数，**不区分事件是什么** ——
+ * 只要有人把浏览之类也标成关键事件，或者某个事件的触发规则太宽，
+ * 「客资数」就会虚高，而仪表盘上完全看不出来。
+ * 2026-08-04 实测 CTS：28 天 341 个「客资」，而**开始填表只有 86 次** ——
+ * 人还没动表单，「产生线索」先响了 4 遍。
+ *
+ * 拿这两个数就能判断这个客资数值不值得信。
+ */
+export async function fetchGa4KeyEventBreakdown(
+  propertyId: string,
+  clientId: string,
+  periodDays: number = DEFAULT_PERIOD_DAYS,
+): Promise<{ keyEventsByName: Record<string, number>; formStarts: number } | null> {
+  const token = await getValidAccessToken(clientId)
+  if (!token) return null
+
+  const normalized = normalizePropertyId(propertyId)
+  const periodEnd = toIsoDate(new Date())
+  const periodStart = toIsoDate(daysAgo(periodDays))
+
+  const report = await runReport(token, normalized, periodStart, periodEnd, {
+    dimensions: ['eventName'],
+    metrics: ['keyEvents', 'eventCount'],
+    limit: 100,
+  })
+
+  const keyEventsByName: Record<string, number> = {}
+  let formStarts = 0
+  for (const row of report.rows ?? []) {
+    const name = row.dimensionValues?.[0]?.value ?? ''
+    const key = Number(row.metricValues?.[0]?.value ?? '0')
+    const count = Number(row.metricValues?.[1]?.value ?? '0')
+    if (key > 0) keyEventsByName[name] = key
+    // form_start 是 GA4 增强测量自带的事件，代表「有人真的动了表单」
+    if (name === 'form_start') formStarts = count
+  }
+  return { keyEventsByName, formStarts }
+}

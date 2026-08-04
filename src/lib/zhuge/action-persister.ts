@@ -28,6 +28,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ZhugeOutput, PriorityAction, DiagnosticDimension } from './types'
 import type { FlywheelName, ExecutionMode } from '@/lib/flywheel/adapters/types'
 import { saveDecisionHistory } from '@/lib/memory/service'
+import { assertAdsExpectedMetric } from '@/lib/flywheel/metric-registry'
+import { resolveClientAdsExpectedMetric } from '@/lib/flywheel/ads-expected-metric'
 
 // ── Dimension mappings ────────────────────────────────────────────────────────
 
@@ -39,10 +41,12 @@ const DIMENSION_TO_FLYWHEEL: Partial<Record<DiagnosticDimension, FlywheelName>> 
   // reputation + competitor: external_manual, no flywheel ingest
 }
 
+// `ads` is deliberately absent: it has no fixed answer. Which metric an ads
+// action is judged on depends on what the client's campaigns actually produce,
+// so it is resolved per client by resolveClientAdsExpectedMetric().
 const DIMENSION_TO_METRIC: Partial<Record<DiagnosticDimension, string>> = {
   seo: 'seo.domain.organic_traffic',
   ai_visibility: 'geo.query.mention_rate',
-  ads: 'ads.account.roas',
   social: 'social.posts.published_count',
 }
 
@@ -205,7 +209,18 @@ export async function persistZhugeActions(
   let ids: string[] = []
 
   if (insertable.length > 0) {
-    const rows = insertable.map((action) => buildRow(action, input.clientId, sessionKey, input))
+    // Ads actions get the metric this client is actually measured on, resolved
+    // once for the batch. The old hard-coded `ads.account.roas` was a promise
+    // no Messenger / lead-gen client could ever redeem, so every ads action
+    // written here was unattributable from birth.
+    const adsExpectedMetric = insertable.some((a) => DIMENSION_TO_FLYWHEEL[a.dimension] === 'ads')
+      ? await resolveClientAdsExpectedMetric(supabase, input.clientId)
+      : null
+    assertAdsExpectedMetric(adsExpectedMetric, 'persistZhugeActions')
+
+    const rows = insertable.map((action) =>
+      buildRow(action, input.clientId, sessionKey, input, adsExpectedMetric),
+    )
 
     const { data: inserted, error: insertError } = await supabase
       .from('flywheel_actions')
@@ -252,6 +267,8 @@ function buildRow(
   clientId: string,
   sessionKey: string,
   input: PersistZhugeActionsInput,
+  /** Client-resolved ads metric; ignored for non-ads dimensions. */
+  adsExpectedMetric: string | null,
 ) {
   return {
     client_id: clientId,
@@ -271,7 +288,9 @@ function buildRow(
       discovery_id: input.discoveryId,
       diagnostic_run_id: input.diagnosticRunId,
     },
-    expected_metric: DIMENSION_TO_METRIC[action.dimension] ?? null,
+    expected_metric: action.dimension === 'ads'
+      ? adsExpectedMetric
+      : DIMENSION_TO_METRIC[action.dimension] ?? null,
     expected_delta: null as number | null,
     executed_at: input.output.generated_at,
   }
@@ -299,6 +318,24 @@ export function actionTypeToTitle(actionType: string): string {
   return slug.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+/**
+ * Identity key of one kanban card for dedup/supersede purposes.
+ *
+ * action_type alone is NOT unique: the SEO patrol legitimately emits several
+ * cards of the same action_type for different keywords (e.g. two
+ * seo.refresh_blog cards for two dropped keywords), so the keyword carried in
+ * metadata/steps_json is part of the identity. Actions without a keyword fall
+ * back to action_type-only, preserving the original behaviour for
+ * conduct-sourced actions.
+ */
+export function executionItemDedupKey(actionType: string, keyword: unknown): string {
+  const kw =
+    typeof keyword === 'string' && keyword.trim().length > 0
+      ? keyword.trim().toLowerCase()
+      : ''
+  return `${actionType}::${kw}`
+}
+
 // ── writeExecutionItems ────────────────────────────────────────────────────────
 
 /**
@@ -307,9 +344,13 @@ export function actionTypeToTitle(actionType: string): string {
  * Writes ALL dimensions (including reputation + competitor) unlike
  * flywheel_actions which skips those two.
  *
- * Deduplication logic:
- *   - Existing pending `source='fde'` or `source='luban'` row → skip (don't overwrite human work)
- *   - Existing pending `source='zhuge'` row (old session) → mark superseded, insert new
+ * Deduplication logic — keyed by (action_type, keyword) via executionItemDedupKey,
+ * NOT action_type alone (the patrol emits several cards of one action_type for
+ * different keywords; keying on action_type alone let duplicates of the same
+ * keyword accumulate +1 per run — Sungenix/IB 2026-08-01 incident):
+ *   - Any existing pending `source='fde'`/`'luban'` row with the same key → skip (don't overwrite human work)
+ *   - Existing pending `source='zhuge'` rows with the same key → mark ALL superseded, insert new
+ *   - Duplicate key within the same batch → insert only the first
  *   - No existing pending row → insert new
  *
  * DAPE W5 (spec §2.4.3): `prescriptionId` (when non-null) lands in the new
@@ -328,10 +369,11 @@ export async function writeExecutionItems(
 
   const actionTypes = actions.map((a) => a.action_type)
 
-  // Fetch any existing pending rows for these action types for this client
+  // Fetch any existing pending rows for these action types for this client.
+  // steps_json is needed to rebuild each row's dedup key (keyword lives there).
   const { data: existingRows, error: selectErr } = await supabase
     .from('execution_items')
-    .select('id, action_type, source, zhuge_session_id')
+    .select('id, action_type, source, zhuge_session_id, steps_json')
     .eq('client_id', clientId)
     .eq('status', 'pending')
     .in('action_type', actionTypes)
@@ -340,25 +382,42 @@ export async function writeExecutionItems(
     throw new Error(`execution_items dedup check failed: ${selectErr.message}`)
   }
 
-  type ExistingRow = { id: string; action_type: string; source: string; zhuge_session_id: string | null }
-  const byActionType = new Map<string, ExistingRow>()
+  type ExistingRow = {
+    id: string
+    action_type: string
+    source: string
+    zhuge_session_id: string | null
+    steps_json: Record<string, unknown> | null
+  }
+  // Group (not overwrite) by key: multiple old rows may share one key — e.g.
+  // duplicates accumulated before this dedup existed — and ALL of them must
+  // be superseded, not just whichever the Map kept last.
+  const byDedupKey = new Map<string, ExistingRow[]>()
   for (const row of (existingRows as ExistingRow[] | null) ?? []) {
-    byActionType.set(row.action_type, row)
+    const key = executionItemDedupKey(row.action_type, row.steps_json?.keyword)
+    const group = byDedupKey.get(key)
+    if (group) group.push(row)
+    else byDedupKey.set(key, [row])
   }
 
   const toSupersede: string[] = []
   const toInsert: PriorityAction[] = []
+  const batchKeys = new Set<string>()
 
   for (const action of actions) {
-    const existing = byActionType.get(action.action_type)
-    if (!existing) {
-      toInsert.push(action)
-    } else if (existing.source === 'zhuge') {
-      // Old zhuge item from a different session: supersede it, insert fresh
-      toSupersede.push(existing.id)
-      toInsert.push(action)
+    const key = executionItemDedupKey(action.action_type, action.metadata?.keyword)
+    // Same finding appearing twice in one batch: insert only the first
+    if (batchKeys.has(key)) continue
+    batchKeys.add(key)
+
+    const existing = byDedupKey.get(key) ?? []
+    if (existing.some((r) => r.source !== 'zhuge')) {
+      // fde/luban pending owns this card: leave it alone
+      continue
     }
-    // else fde/luban pending: leave it alone
+    // Old zhuge items from prior sessions: supersede them all, insert fresh
+    toSupersede.push(...existing.map((r) => r.id))
+    toInsert.push(action)
   }
 
   if (toSupersede.length > 0) {

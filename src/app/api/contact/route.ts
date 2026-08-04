@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Resend } from 'resend'
 import { createClient } from '@supabase/supabase-js'
 import { normaliseAttribution } from '@/lib/marketing/attribution'
-import { meMailFrom } from '@/lib/email/sender'
+import { meMailFrom, ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
 
-const TO_EMAIL = 'raydeng@magicengine.com.au'
+const TO_EMAIL = ME_MAIL_TO_ADDRESS
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.RESEND_API_KEY

@@ -1,0 +1,452 @@
+/**
+ * Messenger → 联系人 的接线。
+ *
+ * 钉住四件最容易悄悄错的事：
+ *   1. 业务自家邮箱(info@ctstours.co.nz)出现在正文里，绝不能当成客户身份 —— 否则
+ *      Meta 自动回复会把几十段对话错并到一个假「info@」客户上。
+ *   2. 一段对话命中两个不同的人 = 歧义，宁可不接（错接不可逆）。
+ *   3. **建人只能靠 fb_psid**，绝不能靠正文里正则抽出来的邮箱/电话 —— 第 1 条那个
+ *      坑必须在结构上进不来。
+ *   4. **客户自己开过口才建人**：纯出站的群发 / 自动欢迎语不配升级成一个客户。
+ */
+
+import { describe, expect, it, vi } from 'vitest'
+
+vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
+
+import { supabaseAdmin } from '@/lib/supabase'
+import {
+  matchConversationToContact,
+  linkMessengerConversation,
+  type IdentityIndex,
+} from '../link-contacts'
+import { segmentContact, type ContactLike, type TouchpointLike } from '@/lib/crm/segments'
+
+function index(opts: { emails?: [string, string][]; psids?: [string, string][] }): IdentityIndex {
+  return {
+    byEmail: new Map(opts.emails ?? []),
+    byPsid: new Map(opts.psids ?? []),
+  }
+}
+
+describe('matchConversationToContact', () => {
+  it('已知 psid 直接命中', () => {
+    const res = matchConversationToContact(
+      { psid: 'psid_9', messageBodies: ['hi'] },
+      index({ psids: [['psid_9', 'contact-A']] }),
+    )
+    expect(res).toEqual({ contactId: 'contact-A', matchedBy: 'psid' })
+  })
+
+  it('正文里出现已有客户邮箱 → 命中该客户', () => {
+    const res = matchConversationToContact(
+      { psid: null, messageBodies: ['My email is Robyn.Richards1@gmail.com thanks'] },
+      index({ emails: [['robyn.richards1@gmail.com', 'contact-R']] }),
+    )
+    expect(res).toEqual({ contactId: 'contact-R', matchedBy: 'email' })
+  })
+
+  it('业务自家域名邮箱(info@ctstours.co.nz)绝不当客户身份', () => {
+    const res = matchConversationToContact(
+      { psid: null, messageBodies: ['Please contact us at info@ctstours.co.nz'] },
+      // 就算这个业务邮箱恰好被误登记成某个联系人，也必须被域名规则挡掉
+      index({ emails: [['info@ctstours.co.nz', 'contact-BUSINESS']] }),
+    )
+    expect(res).toBeNull()
+  })
+
+  it('psid 和邮箱指向两个不同的人 = 歧义 → 不接', () => {
+    const res = matchConversationToContact(
+      { psid: 'psid_9', messageBodies: ['also reach me at other@gmail.com'] },
+      index({
+        psids: [['psid_9', 'contact-A']],
+        emails: [['other@gmail.com', 'contact-B']],
+      }),
+    )
+    expect(res).toBeNull()
+  })
+
+  it('psid 和邮箱指向同一个人 → 命中（不算歧义）', () => {
+    const res = matchConversationToContact(
+      { psid: 'psid_9', messageBodies: ['me@gmail.com'] },
+      index({ psids: [['psid_9', 'contact-A']], emails: [['me@gmail.com', 'contact-A']] }),
+    )
+    expect(res?.contactId).toBe('contact-A')
+  })
+
+  it('对不上任何已有身份 → null（不新建）', () => {
+    const res = matchConversationToContact(
+      { psid: 'unknown_psid', messageBodies: ['stranger@gmail.com'] },
+      index({ emails: [['someone.else@gmail.com', 'contact-X']] }),
+    )
+    expect(res).toBeNull()
+  })
+})
+
+// ── 编排层：命中才写，且永不 insert contacts ────────────────────────────────
+
+interface Calls {
+  conversationsUpdate: number
+  identityUpserts: Record<string, unknown>[]
+  touchpointUpserts: Record<string, unknown>[][]
+  contactsUpdate: number
+  contactsWrite: number // insert/upsert into contacts —— 只有「按 psid 建人」那条路允许 >0
+  contactInserts: Record<string, unknown>[]
+}
+
+/** attachByUniqueFullName 查同名时，库里返回什么 / 它拿什么名字去查。 */
+let nameLookupRows: { id: string; display_name: string | null }[] = []
+let nameLookupArg: string | null = null
+
+function stubSupabase(): Calls {
+  nameLookupRows = []
+  nameLookupArg = null
+  const calls: Calls = {
+    conversationsUpdate: 0,
+    identityUpserts: [],
+    touchpointUpserts: [],
+    contactsUpdate: 0,
+    contactsWrite: 0,
+    contactInserts: [],
+  }
+  ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+    const chain: Record<string, unknown> = {
+      select: () => chain,
+      ilike: (_col: string, value: string) => {
+        nameLookupArg = value
+        return { limit: async () => ({ data: nameLookupRows, error: null }) }
+      },
+      eq: () => chain,
+      is: () => chain,
+      lt: () => chain,
+      in: () => chain,
+      // resolveContact 建人时走 insert().select().single()，要还它一个 id。
+      single: async () => ({ data: { id: 'contact-NEW' }, error: null }),
+      then: (resolve: (v: unknown) => unknown) =>
+        Promise.resolve({ data: null, error: null }).then(resolve),
+      update: () => {
+        if (table === 'conversations') calls.conversationsUpdate++
+        else if (table === 'contacts') calls.contactsUpdate++
+        return chain
+      },
+      insert: (payload: Record<string, unknown>) => {
+        if (table === 'contacts') {
+          calls.contactsWrite++
+          calls.contactInserts.push(payload)
+        }
+        return chain
+      },
+      upsert: (payload: Record<string, unknown> | Record<string, unknown>[]) => {
+        if (table === 'contact_identities')
+          // resolveContact 传数组、link-contacts 传单对象 —— 摊平成一串行，断言只看行。
+          calls.identityUpserts.push(...(Array.isArray(payload) ? payload : [payload]))
+        else if (table === 'contact_touchpoints') calls.touchpointUpserts.push(payload as Record<string, unknown>[])
+        else if (table === 'contacts') calls.contactsWrite++
+        return chain
+      },
+    }
+    return chain as never
+  })
+  return calls
+}
+
+const baseInput = {
+  clientId: 'client-A',
+  conversationId: 'convo-uuid-1',
+  psid: 'psid_9',
+  participantName: 'Robyn Richards',
+  messageCount: 4,
+  lastMessageFrom: 'page' as const,
+  lastMessageAt: '2026-07-24T10:00:00+0000',
+  // 客户先留言(带邮箱)→ 真人在收件箱回复(source:chat)。真人回复才写 outbound 触点。
+  messages: [
+    { direction: 'inbound' as const, body: 'robyn.richards1@gmail.com', sentAt: '2026-07-24T08:00:00+0000' },
+    { direction: 'outbound' as const, body: 'Hi from CTS', sentAt: '2026-07-24T10:00:00+0000', tags: ['source:chat'] },
+  ],
+  existingContactId: null,
+}
+
+describe('linkMessengerConversation', () => {
+  it('对不上任何人、但客户开过口 → 按 psid 建一个只带 Facebook 身份的人', async () => {
+    const calls = stubSupabase()
+    const res = await linkMessengerConversation(
+      {
+        ...baseInput,
+        psid: 'nobody',
+        messages: [{ direction: 'inbound', body: 'hi', sentAt: '2026-07-24T10:00:00+0000' }],
+      },
+      index({}),
+    )
+
+    expect(res).toMatchObject({ contactId: 'contact-NEW', linked: true, created: true, matchedBy: 'created' })
+    expect(calls.contactsWrite).toBe(1)
+    // 只有 Facebook 身份，电话邮箱留空 —— 不假装知道他的联系方式。
+    expect(calls.contactInserts[0]).toMatchObject({
+      client_id: 'client-A',
+      display_name: 'Robyn Richards',
+      primary_phone: null,
+      primary_email: null,
+    })
+    // 对话接上了，触点也写了 —— 这个人从此出现在「今天该联系谁」里。
+    expect(calls.conversationsUpdate).toBe(1)
+    expect(calls.touchpointUpserts[0]).toHaveLength(1)
+  })
+
+  it('建人时只带 fb_psid 一个身份 —— 结构上不可能合并两个真人', async () => {
+    const calls = stubSupabase()
+    await linkMessengerConversation(
+      {
+        ...baseInput,
+        psid: 'nobody',
+        // 正文里同时有邮箱和电话：**都不许**参与建人（那正是假 info@ 客户的来路）。
+        messages: [
+          { direction: 'inbound', body: 'me@gmail.com / 021 363 598', sentAt: '2026-07-24T10:00:00+0000' },
+        ],
+      },
+      index({}),
+    )
+
+    const kinds = calls.identityUpserts.map((i) => i.kind)
+    expect(new Set(kinds)).toEqual(new Set(['fb_psid']))
+    expect(kinds).not.toContain('email')
+    expect(kinds).not.toContain('phone')
+  })
+
+  it('没有 psid → 不建人（没有唯一编号就没有可靠身份）', async () => {
+    const calls = stubSupabase()
+    const res = await linkMessengerConversation(
+      {
+        ...baseInput,
+        psid: null,
+        messages: [{ direction: 'inbound', body: 'hi', sentAt: '2026-07-24T10:00:00+0000' }],
+      },
+      index({}),
+    )
+    expect(res).toMatchObject({ contactId: null, linked: false, created: false })
+    expect(calls.contactsWrite).toBe(0)
+    expect(calls.touchpointUpserts.length).toBe(0)
+  })
+
+  it('客户一句话都没说（纯出站群发）→ 不建人', async () => {
+    const calls = stubSupabase()
+    const res = await linkMessengerConversation(
+      {
+        ...baseInput,
+        psid: 'nobody',
+        messages: [
+          { direction: 'outbound', body: '欢迎联系 CTS', sentAt: '2026-07-24T10:00:00+0000', tags: ['source:chat'] },
+        ],
+      },
+      index({}),
+    )
+    expect(res).toMatchObject({ contactId: null, linked: false, created: false })
+    expect(calls.contactsWrite).toBe(0)
+    expect(calls.conversationsUpdate).toBe(0)
+  })
+
+  it('命中邮箱 → 接上人、挂 psid 身份、写来信+回复两条触点，绝不建 contact', async () => {
+    const calls = stubSupabase()
+    const res = await linkMessengerConversation(
+      baseInput,
+      index({ emails: [['robyn.richards1@gmail.com', 'contact-R']] }),
+    )
+
+    expect(res).toMatchObject({ contactId: 'contact-R', linked: true, matchedBy: 'email' })
+    expect(calls.conversationsUpdate).toBe(1)
+    // 挂上 fb_psid 身份
+    expect(calls.identityUpserts).toHaveLength(1)
+    expect(calls.identityUpserts[0]).toMatchObject({ kind: 'fb_psid', value: 'psid_9', contact_id: 'contact-R' })
+    // 一条 inbound + 一条 outbound 触点
+    const tps = calls.touchpointUpserts[0]
+    expect(tps).toHaveLength(2)
+    expect(tps.map((t) => t.direction).sort()).toEqual(['inbound', 'outbound'])
+    expect(tps.every((t) => t.channel === 'messenger')).toBe(true)
+    expect(tps.map((t) => t.source_ref).sort()).toEqual(['convo-uuid-1:in', 'convo-uuid-1:out'])
+    // 最关键：整个过程不许 insert/upsert contacts
+    expect(calls.contactsWrite).toBe(0)
+  })
+
+  it('已接过(existingContactId 有值) → 不重新匹配，只刷新触点', async () => {
+    const calls = stubSupabase()
+    const res = await linkMessengerConversation(
+      { ...baseInput, existingContactId: 'contact-OLD', psid: null },
+      index({}), // 空索引也无所谓，因为不该走匹配
+    )
+    expect(res).toMatchObject({ contactId: 'contact-OLD', linked: false, matchedBy: 'already' })
+    expect(calls.conversationsUpdate).toBe(0) // 已接过，不再改 contact_id
+    expect(calls.touchpointUpserts[0]).toHaveLength(2) // 但触点照常刷新
+    expect(calls.contactsWrite).toBe(0)
+  })
+})
+
+// ── 端到端:三种线程 → 分段 ──────────────────────────────────────────────────
+//
+// 魏征在 PR #673 复审提的:Page 出站包含 Meta 自动回复(instant reply / Business AI),
+// 把它当「我们联系过」会让热新线索掉出「今天该联系谁」名单。这里把 linker 实际写出的
+// 触点喂回 segments,断言最终分段 —— 核心:一条 AI 自动回复不该改变新线索的分段。
+
+const NOW = new Date('2026-07-25T00:00:00Z')
+const AT = (h: number) => `2026-07-24T${String(h).padStart(2, '0')}:00:00+0000`
+
+type ThreadMsg = { direction: 'inbound' | 'outbound'; body: string; sentAt: string; tags?: string[] }
+
+/** 跑一遍 linker（按 psid 强制接上人），把它写出的触点转成 ContactLike，返回最终分段。 */
+async function segmentAfterLink(messages: ThreadMsg[]) {
+  const calls = stubSupabase()
+  await linkMessengerConversation(
+    { ...baseInput, messages, existingContactId: null, psid: 'psid_9' },
+    index({ psids: [['psid_9', 'contact-Z']] }),
+  )
+  const rows = calls.touchpointUpserts[0] ?? []
+  const touchpoints: TouchpointLike[] = rows.map((r) => ({
+    channel: r.channel as string,
+    direction: r.direction as 'inbound' | 'outbound',
+    occurredAt: r.occurred_at as string,
+  }))
+  const contact: ContactLike = { id: 'contact-Z', displayName: 'Robyn', doNotContact: false, touchpoints }
+  return { segment: segmentContact(contact, NOW).segment, directions: touchpoints.map((t) => t.direction).sort() }
+}
+
+describe('linkMessengerConversation → segments（真人回复 vs AI 自动回复）', () => {
+  it('customer-last：客户留言、没人回 → new_untouched（从没人碰过）', async () => {
+    const { segment, directions } = await segmentAfterLink([
+      { direction: 'inbound', body: 'hi, I want the China tour', sentAt: AT(8) },
+    ])
+    expect(directions).toEqual(['inbound'])
+    expect(segment).toBe('new_untouched')
+  })
+
+  it('AI-last：客户留言后只有 Business AI 自动回了一句 → 仍是 new_untouched（修复点）', async () => {
+    const { segment, directions } = await segmentAfterLink([
+      { direction: 'inbound', body: 'hi, I want the China tour', sentAt: AT(8) },
+      {
+        direction: 'outbound',
+        body: 'Thanks for messaging CTS! An agent will reply soon.',
+        sentAt: AT(9),
+        tags: ['inbox', 'source:business_ai'],
+      },
+    ])
+    // 关键:AI 自动回复没写 outbound 触点 → lastOutbound 仍为 0 → 跟「没人回」同一段。
+    expect(directions).toEqual(['inbound'])
+    expect(segment).toBe('new_untouched')
+  })
+
+  it('human-last：客户留言后真人客服回了（source:chat）→ 写 outbound 触点、脱离 new_untouched', async () => {
+    const { segment, directions } = await segmentAfterLink([
+      { direction: 'inbound', body: 'hi, I want the China tour', sentAt: AT(8) },
+      { direction: 'outbound', body: 'Sure! Which dates suit you?', sentAt: AT(9), tags: ['inbox', 'source:chat'] },
+    ])
+    expect(directions).toEqual(['inbound', 'outbound'])
+    // 真人回过、客户还没接话 → 聊过没下文（仍在名单里，只是不再冒充「从没人碰过」）。
+    expect(segment).toBe('stale_conversation')
+  })
+
+  it('欢迎语在客户开口之前（即便 tag 像真人）→ 不算人工联系 → new_untouched', async () => {
+    const { segment, directions } = await segmentAfterLink([
+      { direction: 'outbound', body: 'Welcome to CTS 👋', sentAt: AT(8), tags: ['source:chat'] },
+      { direction: 'inbound', body: 'hi', sentAt: AT(10) },
+    ])
+    expect(directions).toEqual(['inbound'])
+    expect(segment).toBe('new_untouched')
+  })
+
+  it('真人回复后客户又追问、末尾还有 AI 自动确认 → replied（AI 确认不掩盖真人欠回复）', async () => {
+    const { segment } = await segmentAfterLink([
+      { direction: 'inbound', body: 'hi', sentAt: AT(8) },
+      { direction: 'outbound', body: 'Sure, which dates?', sentAt: AT(9), tags: ['source:chat'] },
+      { direction: 'inbound', body: 'early November', sentAt: AT(10) },
+      { direction: 'outbound', body: 'Thanks, an agent will follow up.', sentAt: AT(11), tags: ['source:business_ai'] },
+    ])
+    // lastHumanOut = 09:00，客户最后一条 10:00 更晚 → 客户在等我们（真人）回。
+    expect(segment).toBe('replied')
+  })
+})
+
+// ── 唯一全名认亲（2026-07-31 PM 反馈「有大量重名的」后加的第 2 级）─────────────
+//
+// 一个人先填表单（留电话邮箱、没有 psid）、后来又来私信（有 psid、没邮箱），
+// 两边没有共同的键 → 被拆成两条。这一级用「完整姓名 + 全库唯一 + 对方还没 psid」
+// 把 psid 挂到已有的人身上，而不是新建第二条。
+describe('唯一全名认亲', () => {
+  const inbound = [{ direction: 'inbound' as const, body: '想问长城团', sentAt: '2026-07-24T10:00:00+0000' }]
+
+  it('唯一同名、对方还没 Facebook 身份 → 挂上去，不新建', async () => {
+    const calls = stubSupabase()
+    nameLookupRows = [{ id: 'contact-FORM', display_name: 'Robyn Richards' }]
+
+    const res = await linkMessengerConversation(
+      { ...baseInput, psid: 'new_psid', messages: inbound },
+      index({}),
+    )
+
+    expect(res).toMatchObject({ contactId: 'contact-FORM', linked: true, created: false, matchedBy: 'name' })
+    expect(calls.contactsWrite).toBe(0) // 关键：一条新记录都没多出来
+    expect(calls.identityUpserts).toContainEqual(
+      expect.objectContaining({ kind: 'fb_psid', value: 'new_psid', contact_id: 'contact-FORM' }),
+    )
+  })
+
+  it('🔴「Facebook 用户」是占位符，绝不参与认亲（否则 14 个陌生人会互相认成一个）', async () => {
+    const calls = stubSupabase()
+    // 就算库里真有一条同名的，也不许拿这个名字去认。
+    nameLookupRows = [{ id: 'contact-OTHER', display_name: 'Facebook 用户' }]
+
+    const res = await linkMessengerConversation(
+      { ...baseInput, psid: 'new_psid', participantName: 'Facebook 用户', messages: inbound },
+      index({}),
+    )
+
+    expect(res.matchedBy).toBe('created')
+    expect(nameLookupArg).toBeNull() // 压根没去查
+    // 占位符也不当人名存 —— 列表里不会出现一堆一模一样的「人」
+    expect(calls.contactInserts[0].display_name).toBeNull()
+  })
+
+  it('单字名不认（重名概率太高）', async () => {
+    stubSupabase()
+    nameLookupRows = [{ id: 'contact-X', display_name: 'Robyn' }]
+    const res = await linkMessengerConversation(
+      { ...baseInput, psid: 'new_psid', participantName: 'Robyn', messages: inbound },
+      index({}),
+    )
+    expect(res.matchedBy).toBe('created')
+    expect(nameLookupArg).toBeNull()
+  })
+
+  it('撞到两个同名 → 弃权，照旧独立建人', async () => {
+    const calls = stubSupabase()
+    nameLookupRows = [
+      { id: 'contact-1', display_name: 'Robyn Richards' },
+      { id: 'contact-2', display_name: 'Robyn Richards' },
+    ]
+    const res = await linkMessengerConversation(
+      { ...baseInput, psid: 'new_psid', messages: inbound },
+      index({}),
+    )
+    expect(res.matchedBy).toBe('created')
+    expect(calls.contactsWrite).toBe(1)
+  })
+
+  it('同名的那个人身上已经有 Facebook 身份 → 弃权（他是另一个 Messenger 用户，抢不得）', async () => {
+    const calls = stubSupabase()
+    nameLookupRows = [{ id: 'contact-TAKEN', display_name: 'Robyn Richards' }]
+    const res = await linkMessengerConversation(
+      { ...baseInput, psid: 'new_psid', messages: inbound },
+      // 索引里 contact-TAKEN 已经挂着另一个 psid
+      index({ psids: [['some_other_psid', 'contact-TAKEN']] }),
+    )
+    expect(res.matchedBy).toBe('created')
+    expect(calls.contactsWrite).toBe(1)
+  })
+
+  it('身份键能认到的时候不走这一级（psid 命中优先）', async () => {
+    stubSupabase()
+    nameLookupRows = [{ id: 'contact-FORM', display_name: 'Robyn Richards' }]
+    const res = await linkMessengerConversation(
+      { ...baseInput, psid: 'psid_9', messages: inbound },
+      index({ psids: [['psid_9', 'contact-A']] }),
+    )
+    expect(res).toMatchObject({ contactId: 'contact-A', matchedBy: 'psid' })
+    expect(nameLookupArg).toBeNull()
+  })
+})

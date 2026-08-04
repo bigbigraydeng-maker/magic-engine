@@ -36,6 +36,7 @@ import {
 } from '@/lib/google-ads/client'
 import { checkBudgetWithinSafeRange, microsToDisplay } from '@/lib/google-ads/guardrails'
 import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
+import { resolveAndLogAdsExpectedMetric } from '@/lib/flywheel/ads-expected-metric'
 
 // P18.B supported action types
 const SUPPORTED_ACTION_TYPES = new Set([
@@ -143,6 +144,16 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     name:           campaign.name,
     budget_micros:  campaign.campaignBudget?.amountMicros ?? null,
   }
+
+  // getCampaign's GAQL projection carries no objective field
+  // (advertising_channel_type is not selected), so there is nothing to resolve
+  // from yet — the resolver logs the gap and returns null rather than guessing
+  // ROAS. Widening the query is a Google-Ads-side change, gated on the
+  // developer token still being in review.
+  const expectedMetric = resolveAndLogAdsExpectedMetric(
+    { objective: null },
+    'google-ads/execute',
+  )
 
   // ── Execute action ────────────────────────────────────────────────────────
   let after: typeof before
@@ -254,6 +265,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
         keyword_text:       actionParams.keyword_text ?? null,
         keyword_match_type: actionParams.keyword_match_type ?? null,
       },
+      expected_metric: expectedMetric,
     })
     .select('id, executed_at')
     .single()

@@ -2,7 +2,7 @@ import type { MetadataRoute } from 'next'
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://magicengine.com.au'
 
-const routes = ['/', '/about', '/contact', '/discover', '/geo', '/geo/glossary', '/privacy', '/terms', '/training']
+const routes = ['/', '/about', '/authorisation', '/contact', '/discover', '/geo', '/geo/glossary', '/privacy', '/terms', '/training']
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const now = new Date()

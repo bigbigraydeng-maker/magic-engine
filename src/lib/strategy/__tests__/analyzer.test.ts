@@ -247,48 +247,285 @@ describe('fetchWeakAIQueries', () => {
 // fetchKeywordOpportunities tests
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Per-table Supabase fake for fetchKeywordOpportunities.
+//
+// 🔴 Deliberately NOT the call-order chain above. The bug this function had —
+//    querying a `keywords` table archived on 2026-05-30 — survived two months
+//    precisely because a call-order fake answers happily no matter which table
+//    you ask for. This one is keyed by table name and throws on anything it
+//    does not model.
+//
+//    It also serves **real database column names** and applies `alias:source`
+//    projection only when the select string asks for it. So if the aliases in
+//    the implementation are dropped, volume/kd come back `undefined` and the
+//    tests below go red — which is the whole point.
+// ---------------------------------------------------------------------------
+
+interface SnapshotRow {
+  client_id: string
+  keyword: string
+  search_volume: number | null
+  keyword_difficulty: number | null
+  intent: string
+  location_code: number
+  snapshot_date: string
+}
+
+interface QueryState {
+  columns: string
+  eqs: Array<[string, unknown]>
+  gts: Array<[string, number]>
+  lts: Array<[string, number]>
+  // Recorded, not ignored: a fake that swallows .order() arguments cannot tell
+  // "newest snapshot" from "oldest snapshot", which is the exact silent-zero
+  // failure this whole change exists to kill.
+  orderBy: { column: string; ascending: boolean } | null
+}
+
+function projectRow(row: SnapshotRow, columns: string): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const part of columns.split(',').map((s) => s.trim())) {
+    const [alias, source] = part.includes(':')
+      ? (part.split(':').map((s) => s.trim()) as [string, string])
+      : [part, part]
+    out[alias] = (row as unknown as Record<string, unknown>)[source]
+  }
+  return out
+}
+
+function matches(row: SnapshotRow, state: QueryState): boolean {
+  const value = (col: string) => (row as unknown as Record<string, unknown>)[col]
+  return (
+    state.eqs.every(([c, v]) => value(c) === v) &&
+    // SQL semantics: a comparison against NULL is never true.
+    state.gts.every(([c, v]) => typeof value(c) === 'number' && (value(c) as number) > v) &&
+    state.lts.every(([c, v]) => typeof value(c) === 'number' && (value(c) as number) < v)
+  )
+}
+
+function fakeKeywordSupabase(opts: {
+  semrushDb?: string | null
+  rows?: SnapshotRow[]
+  rowsError?: { message: string } | null
+  clientMissing?: boolean
+  clientError?: { message: string } | null
+}) {
+  const rows = opts.rows ?? []
+
+  return (table: string) => {
+    if (table === 'clients') {
+      const chain: Record<string, unknown> = {}
+      const self = () => chain
+      chain.select = self
+      chain.eq = self
+      chain.maybeSingle = () =>
+        Promise.resolve(
+          opts.clientError
+            ? { data: null, error: opts.clientError }
+            : { data: opts.clientMissing ? null : { semrush_db: opts.semrushDb ?? 'au' }, error: null },
+        )
+      return chain
+    }
+
+    if (table === 'keyword_snapshots') {
+      const state: QueryState = { columns: '', eqs: [], gts: [], lts: [], orderBy: null }
+      const chain: Record<string, unknown> = {}
+      chain.select = (cols: string) => {
+        state.columns = cols
+        return chain
+      }
+      chain.eq = (col: string, val: unknown) => {
+        state.eqs.push([col, val])
+        return chain
+      }
+      chain.gt = (col: string, val: number) => {
+        state.gts.push([col, val])
+        return chain
+      }
+      chain.lt = (col: string, val: number) => {
+        state.lts.push([col, val])
+        return chain
+      }
+      chain.order = (column: string, opts?: { ascending?: boolean }) => {
+        state.orderBy = { column, ascending: opts?.ascending !== false }
+        return chain
+      }
+      chain.limit = () => chain
+
+      // The date probe ends in .maybeSingle(); the row read is awaited.
+      chain.maybeSingle = () => {
+        const hits = rows.filter((r) => matches(r, state))
+        if (state.orderBy) {
+          const { column, ascending } = state.orderBy
+          const key = (r: SnapshotRow) => String((r as unknown as Record<string, unknown>)[column] ?? '')
+          hits.sort((a, b) => (ascending ? key(a).localeCompare(key(b)) : key(b).localeCompare(key(a))))
+        }
+        return Promise.resolve({
+          data: hits.length > 0 ? projectRow(hits[0], state.columns) : null,
+          error: null,
+        })
+      }
+      chain.then = (resolve: (v: { data: unknown; error: unknown }) => void) => {
+        const result = opts.rowsError
+          ? { data: null, error: opts.rowsError }
+          : { data: rows.filter((r) => matches(r, state)).map((r) => projectRow(r, state.columns)), error: null }
+        resolve(result)
+        return Promise.resolve(result)
+      }
+      return chain
+    }
+
+    throw new Error(`fake supabase: table '${table}' is not modelled`)
+  }
+}
+
+function snapshot(over: Partial<SnapshotRow> = {}): SnapshotRow {
+  return {
+    client_id: CLIENT_ID,
+    keyword: 'china tours nz',
+    search_volume: 200,
+    keyword_difficulty: 30,
+    intent: 'commercial',
+    location_code: 2036,
+    snapshot_date: '2026-08-03',
+    ...over,
+  }
+}
+
 describe('fetchKeywordOpportunities', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('returns empty array on DB error', async () => {
-    mockFrom.mockReturnValue(
-      makeSelectChain(null, { message: 'DB error' }) as unknown as ReturnType<typeof mockFrom>
-    )
-    const result = await fetchKeywordOpportunities(CLIENT_ID)
-    expect(result).toEqual([])
+  it('🔴 假件本身的护栏：问一张没建模的表要直接炸，不许静默兜底', () => {
+    const from = fakeKeywordSupabase({})
+    expect(() => from('keywords')).toThrow(/not modelled/)
   })
 
-  it('returns mapped keyword opportunities when DB succeeds', async () => {
-    const dbRows = [
-      { keyword: 'china tours nz', volume: 200, kd: 30, intent: 'commercial' },
-      { keyword: 'nz travel packages', volume: 150, kd: 25, intent: 'informational' },
-    ]
-    mockFrom.mockReturnValue(
-      makeSelectChain(dbRows, null) as unknown as ReturnType<typeof mockFrom>
+  it('reads keyword_snapshots, never the archived keywords table', async () => {
+    mockFrom.mockImplementation(
+      fakeKeywordSupabase({ rows: [snapshot()] }) as unknown as typeof mockFrom,
+    )
+    await fetchKeywordOpportunities(CLIENT_ID)
+    expect(mockFrom).toHaveBeenCalledWith('keyword_snapshots')
+    expect(mockFrom).not.toHaveBeenCalledWith('keywords')
+  })
+
+  it('🔴 列名必须起别名 —— 少一个别名，volume/kd 就是 undefined 而不是数字', async () => {
+    mockFrom.mockImplementation(
+      fakeKeywordSupabase({ rows: [snapshot({ search_volume: 200, keyword_difficulty: 30 })] }) as unknown as typeof mockFrom,
     )
     const result = await fetchKeywordOpportunities(CLIENT_ID)
-    expect(result).toHaveLength(2)
+    expect(result).toHaveLength(1)
     expect(result[0].keyword).toBe('china tours nz')
     expect(result[0].volume).toBe(200)
     expect(result[0].kd).toBe(30)
   })
 
-  it('queries the keywords table', async () => {
-    mockFrom.mockReturnValue(
-      makeSelectChain([], null) as unknown as ReturnType<typeof mockFrom>
-    )
-    await fetchKeywordOpportunities(CLIENT_ID)
-    expect(mockFrom).toHaveBeenCalledWith('keywords')
-  })
-
-  it('returns empty array when data is null with no error', async () => {
-    mockFrom.mockReturnValue(
-      makeSelectChain(null, null) as unknown as ReturnType<typeof mockFrom>
+  it('🔴 只取最新一期 —— 这是时序表，不限日期会把整年历史都拉回来', async () => {
+    mockFrom.mockImplementation(
+      fakeKeywordSupabase({
+        rows: [
+          snapshot({ keyword: 'this week', snapshot_date: '2026-08-03' }),
+          snapshot({ keyword: 'last week', snapshot_date: '2026-07-27' }),
+        ],
+      }) as unknown as typeof mockFrom,
     )
     const result = await fetchKeywordOpportunities(CLIENT_ID)
-    expect(result).toEqual([])
+    expect(result.map((r) => r.keyword)).toEqual(['this week'])
+  })
+
+  it('🔴 难度未知（null）不算机会 —— 「不知道」不能当成「容易」', async () => {
+    mockFrom.mockImplementation(
+      fakeKeywordSupabase({ rows: [snapshot({ keyword_difficulty: null })] }) as unknown as typeof mockFrom,
+    )
+    expect(await fetchKeywordOpportunities(CLIENT_ID)).toEqual([])
+  })
+
+  it('filters out low volume and high difficulty', async () => {
+    mockFrom.mockImplementation(
+      fakeKeywordSupabase({
+        rows: [
+          snapshot({ keyword: 'too small', search_volume: 20 }),
+          snapshot({ keyword: 'too hard', keyword_difficulty: 80 }),
+          snapshot({ keyword: 'just right' }),
+        ],
+      }) as unknown as typeof mockFrom,
+    )
+    const result = await fetchKeywordOpportunities(CLIENT_ID)
+    expect(result.map((r) => r.keyword)).toEqual(['just right'])
+  })
+
+  it('scopes to the client market — an NZ client does not pick up AU rows', async () => {
+    mockFrom.mockImplementation(
+      fakeKeywordSupabase({
+        semrushDb: 'nz',
+        rows: [
+          snapshot({ keyword: 'au row', location_code: 2036 }),
+          snapshot({ keyword: 'nz row', location_code: 2554 }),
+        ],
+      }) as unknown as typeof mockFrom,
+    )
+    const result = await fetchKeywordOpportunities(CLIENT_ID)
+    expect(result.map((r) => r.keyword)).toEqual(['nz row'])
+  })
+
+  it('🔴 别的客户的词绝不许混进来 —— 这是跨客户串数据那根线', async () => {
+    mockFrom.mockImplementation(
+      fakeKeywordSupabase({
+        rows: [
+          snapshot({ keyword: 'mine' }),
+          snapshot({ keyword: 'someone elses', client_id: 'another-client' }),
+        ],
+      }) as unknown as typeof mockFrom,
+    )
+    const result = await fetchKeywordOpportunities(CLIENT_ID)
+    expect(result.map((r) => r.keyword)).toEqual(['mine'])
+  })
+
+  // 空数组有两种来路：**主动放弃**，和**炸了被 catch 吞掉**。
+  // 只断言 `[]` 两者都过 —— 这正是原 bug 活两个月的机制。所以这里断言它
+  // 说出了原因：守卫被拿掉时不会有这句话，测试就红。
+  it('🔴 客户读不出来时主动放弃并说明原因，绝不擅自当成 AU', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      mockFrom.mockImplementation(
+        fakeKeywordSupabase({
+          clientMissing: true,
+          rows: [snapshot({ location_code: 2036 })],
+        }) as unknown as typeof mockFrom,
+      )
+      expect(await fetchKeywordOpportunities(CLIENT_ID)).toEqual([])
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(CLIENT_ID), undefined)
+
+      warn.mockClear()
+      mockFrom.mockImplementation(
+        fakeKeywordSupabase({
+          clientError: { message: 'boom' },
+          rows: [snapshot({ location_code: 2036 })],
+        }) as unknown as typeof mockFrom,
+      )
+      expect(await fetchKeywordOpportunities(CLIENT_ID)).toEqual([])
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(CLIENT_ID), 'boom')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('returns empty array when the client has no snapshots at all', async () => {
+    mockFrom.mockImplementation(fakeKeywordSupabase({ rows: [] }) as unknown as typeof mockFrom)
+    expect(await fetchKeywordOpportunities(CLIENT_ID)).toEqual([])
+  })
+
+  it('returns empty array on DB error', async () => {
+    mockFrom.mockImplementation(
+      fakeKeywordSupabase({
+        rows: [snapshot()],
+        rowsError: { message: 'DB error' },
+      }) as unknown as typeof mockFrom,
+    )
+    expect(await fetchKeywordOpportunities(CLIENT_ID)).toEqual([])
   })
 })
 

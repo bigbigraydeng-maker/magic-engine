@@ -181,6 +181,6 @@ import '@/lib/flywheel/adapters/MetaAdsAdapter'
 ## 8. 相关文档
 
 - 数据库 schema：[supabase/migrations/20260517000001_flywheel_data_skeleton.sql](../supabase/migrations/20260517000001_flywheel_data_skeleton.sql)
-- 整体路线图：[ROADMAP.md § Phase 12](../ROADMAP.md)
+- 整体路线图：[ROADMAP.md § Phase 12](./ROADMAP.md)
 - 产品定位：[CLAUDE.md](../CLAUDE.md)
-- 架构总览：[ARCHITECTURE.md](../ARCHITECTURE.md)
+- 架构总览：[ARCHITECTURE.md](./ARCHITECTURE.md)

@@ -28,8 +28,16 @@ export interface GbpPostInput {
   /**
    * GBP location resource name: accounts/{accountId}/locations/{locationId}.
    * Without this the publisher always falls back to draft mode.
+   * Resolve it with lib/gbp/location.ts > resolveGbpLocation.
    */
   location_name?: string
+  /**
+   * Per-client OAuth access token (lib/gbp/auth.ts > getGbpAccessToken).
+   * Preferred over the legacy GOOGLE_GBP_ACCESS_TOKEN env var, which was
+   * never configured in production — that is why ME had published zero
+   * GBP posts before this path existed.
+   */
+  access_token?: string
 }
 
 export type GbpPublishMode = 'live' | 'draft'
@@ -46,7 +54,12 @@ export interface GbpPublishResult {
 
 const GBP_API_BASE = 'https://mybusiness.googleapis.com/v4'
 
-function getAccessToken(): string | null {
+/**
+ * Static env token — legacy path, never configured in production.
+ * Callers that know their client should pass `access_token` instead
+ * (see lib/gbp/auth.ts > getGbpAccessToken).
+ */
+function getEnvAccessToken(): string | null {
   return process.env.GOOGLE_GBP_ACCESS_TOKEN ?? null
 }
 
@@ -84,14 +97,21 @@ function draftResult(input: GbpPostInput, reason: string): GbpPublishResult {
  * are unavailable.
  */
 export async function publishToGbp(input: GbpPostInput): Promise<GbpPublishResult> {
-  const token = getAccessToken()
+  // Per-client OAuth token (preferred) → legacy env var → draft.
+  const token = input.access_token ?? getEnvAccessToken()
   if (!token) {
-    return draftResult(input, 'GOOGLE_GBP_ACCESS_TOKEN access token not configured — using draft mode.')
+    return draftResult(input, '这个客户的 Google 商家页还没连上 —— 先存成草稿，没有发出去。')
   }
 
   const { location_name } = input
   if (!location_name) {
-    return draftResult(input, 'location_name not provided — cannot identify the GBP location to post to.')
+    return draftResult(input, '还没确认要发到哪一家门店 —— 先存成草稿，没有发出去。')
+  }
+  // Shape guard: this string goes straight into the API path, so anything
+  // that is not exactly accounts/{a}/locations/{l} must not reach Google
+  // (魏征 🔴3 — an LLM-supplied value used to flow in here unchecked).
+  if (!/^accounts\/[^/]+\/locations\/[^/]+$/.test(location_name)) {
+    return draftResult(input, '门店编号格式不对，没敢发 —— 先存成草稿，没有发出去。')
   }
 
   const url = `${GBP_API_BASE}/${location_name}/localPosts`
@@ -118,7 +138,7 @@ export async function publishToGbp(input: GbpPostInput): Promise<GbpPublishResul
     })
 
     if (!res.ok) {
-      return draftResult(input, `GBP API returned HTTP ${res.status} — degrading to draft mode.`)
+      return draftResult(input, `Google 那边拒绝了这次发布（错误码 ${res.status}）—— 先存成草稿，没有发出去。`)
     }
 
     const data = (await res.json()) as { name?: string }
@@ -128,6 +148,6 @@ export async function publishToGbp(input: GbpPostInput): Promise<GbpPublishResul
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    return draftResult(input, `GBP API fetch failed: ${msg}`)
+    return draftResult(input, `没连上 Google（网络或对方服务的问题：${msg}）—— 先存成草稿，没有发出去。`)
   }
 }

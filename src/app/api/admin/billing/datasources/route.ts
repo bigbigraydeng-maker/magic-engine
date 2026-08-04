@@ -34,26 +34,12 @@ export async function GET(req: NextRequest) {
     const month = searchParams.get('month')
 
     if (!month) {
-      // Return available months if no month specified
-      let availableMonths: string[] = []
-
-      try {
-        availableMonths = await getAvailableMonths(supabase)
-      } catch (err) {
-        // Database table might not exist in test environment
-      }
-
-      // Fallback to sample months if no data exists (for development/testing)
-      if (!availableMonths || availableMonths.length === 0) {
-        const now = new Date()
-        const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-        const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-        const lastMonthStr = `${lastMonth.getFullYear()}-${String(lastMonth.getMonth() + 1).padStart(2, '0')}`
-        availableMonths = [currentMonth, lastMonthStr]
-      }
+      // No data ⇒ an empty list. Inventing months to fill the dropdown would
+      // put a month on screen that has no spend behind it.
+      const availableMonths = await getAvailableMonths(supabase)
 
       return NextResponse.json({
-        availableMonths: availableMonths || [],
+        availableMonths,
         message: 'No month specified. Available months returned.',
       })
     }
@@ -66,69 +52,28 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    // Fetch billing data from database
-    let billingData: any[] = []
-    let costsByService: Record<string, number> = {}
+    // 🔴 No fallback, no sample data, no swallowed errors.
+    //
+    // This route used to answer with a hardcoded SAMPLE_DATA block whenever the
+    // query came back empty — "DataForSEO $150.00 / 2500 calls", invented
+    // client ids, invented months — and it wrapped both queries in empty
+    // catches, so a real database failure also landed on the fake numbers.
+    // The page it feeds sits in the admin nav, so those invented figures were
+    // shown as fact; the fabricated $150.00 happened to sit within a few
+    // dollars of the real all-time spend, which is precisely why nobody
+    // questioned it. An empty ledger has to look empty.
+    const billingData = await getBillingByMonth(supabase, month)
+    const costsByService = await getCostsByService(supabase, month)
 
-    try {
-      billingData = await getBillingByMonth(supabase, month)
-    } catch (err) {
-      // Database table might not exist in test environment
-    }
-
-    try {
-      costsByService = await getCostsByService(supabase, month)
-    } catch (err) {
-      // Database table might not exist in test environment
-    }
-
-    // Fallback to sample data if no real data exists (for development/testing)
-    if (!billingData || billingData.length === 0) {
-      const SAMPLE_DATA = [
-        {
-          client_id: 'client-001',
-          service: 'DataForSEO',
-          api_calls: 2500,
-          cost_usd: 150.00,
-          month,
-        },
-        {
-          client_id: 'client-002',
-          service: 'Semrush',
-          api_calls: 1200,
-          cost_usd: 85.50,
-          month,
-        },
-        {
-          client_id: 'client-001',
-          service: 'Publer',
-          api_calls: 500,
-          cost_usd: 35.00,
-          month,
-        },
-      ]
-      billingData = SAMPLE_DATA
-
-      // Generate sample costs by service
-      if (!costsByService || Object.keys(costsByService).length === 0) {
-        costsByService = {
-          'DataForSEO': 150.00,
-          'Semrush': 85.50,
-          'Publer': 35.00,
-        }
-      }
-    }
-
-    // Calculate totals
-    const totalCost = billingData.reduce((sum: number, row: any) => sum + (row.cost_usd || 0), 0)
-    const totalApiCalls = billingData.reduce((sum: number, row: any) => sum + (row.api_calls || 0), 0)
+    const totalCost = billingData.reduce((sum, row) => sum + (row.cost_usd ?? 0), 0)
+    const totalApiCalls = billingData.reduce((sum, row) => sum + (row.api_calls ?? 0), 0)
 
     return NextResponse.json({
       month,
       totalCost,
       totalApiCalls,
-      costsByService: costsByService || {},
-      byClient: billingData.map((row: any) => ({
+      costsByService,
+      byClient: billingData.map((row) => ({
         clientId: row.client_id,
         service: row.service,
         apiCalls: row.api_calls,
