@@ -16,6 +16,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { accumulateBenchmarks, MIN_SAMPLE_THRESHOLD } from '@/lib/case-library/benchmark-accumulator'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 export const maxDuration = 300
 
@@ -33,13 +34,38 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const result = await accumulateBenchmarks(supabaseAdmin)
+  // 写运行记录 —— 没有它这个任务在健康检查里是「看不见」那一类：
+  // 跑没跑都查不出来，而这条链已经因为「看不见」瘫过一次（见下方文件头注）。
+  const cronRun = await startCronRun('benchmark-accumulator')
+  try {
+    const result = await accumulateBenchmarks(supabaseAdmin)
 
-  return NextResponse.json({
-    success: true,
-    benchmarks_updated:  result.benchmarksUpdated,
-    groups_skipped:      result.groupsSkipped,
-    min_sample_threshold: MIN_SAMPLE_THRESHOLD,
-    errors:              result.errors,
-  })
+    await cronRun.finish({
+      processed: result.benchmarksUpdated + result.groupsSkipped,
+      completed: result.benchmarksUpdated,
+      failed: result.errors.length,
+      // 一条基准都没更新时要写清为什么 —— 样本不够是正常的，不是故障
+      summary: {
+        benchmarks_updated: result.benchmarksUpdated,
+        groups_skipped: result.groupsSkipped,
+        min_sample_threshold: MIN_SAMPLE_THRESHOLD,
+        note:
+          result.benchmarksUpdated === 0
+            ? `没有一组样本量达到 ${MIN_SAMPLE_THRESHOLD}，本轮不写基准（等实测结果攒够）`
+            : undefined,
+      },
+    })
+
+    return NextResponse.json({
+      success: true,
+      benchmarks_updated:  result.benchmarksUpdated,
+      groups_skipped:      result.groupsSkipped,
+      min_sample_threshold: MIN_SAMPLE_THRESHOLD,
+      errors:              result.errors,
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    await cronRun.finish({ error: msg })
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
 }
