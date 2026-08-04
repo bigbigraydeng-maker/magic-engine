@@ -101,18 +101,23 @@ function makeSupabase(opts: MockOptions = {}): SupabaseClient {
           select: vi.fn().mockReturnValue({
             eq: vi.fn().mockReturnValue({
               single: vi.fn().mockResolvedValue({
-                data: { domain: clientDomain, instagram_handle: null },
+                // 🔴 关键词现在从 clients.primary_keywords 读（原来查的 `keywords`
+                //    表在生产库里根本不存在）。假件必须映照真实结构，
+                //    否则测的是一个现实中没有的东西。
+                data: { domain: clientDomain, instagram_handle: null, primary_keywords: ['test keyword'] },
                 error: null,
               }),
             }),
           }),
         }
       }
-      if (table === 'keywords') {
+      // 🔴 没建模的表直接抛 —— 静默兜底会让「查了一张不存在的表」这类 bug
+      //    在测试里完全看不见（这次 SEO 整柱失效就是这么藏了两个月）。
+      if (table === 'client_discovery') {
         return {
           select: vi.fn().mockReturnValue({
             eq: vi.fn().mockReturnValue({
-              eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+              maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
             }),
           }),
         }
