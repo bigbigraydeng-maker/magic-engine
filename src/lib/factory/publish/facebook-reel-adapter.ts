@@ -158,3 +158,34 @@ export const facebookReelAdapter: PublishAdapter = {
     }
   },
 }
+
+/**
+ * 把已经躺在主页后台的草稿正式发出去 —— 不重新上传。
+ *
+ * 为什么要单独一条路:审片通过后「真发」如果走重新上传,主页上会同时留着一条草稿和一条正式的,
+ * 等于每条片都要人去删一次。同一个 finish 接口再喊一次、把状态改成 PUBLISHED 就够了。
+ */
+export async function promoteReelToPublished(params: {
+  target: PublishTarget
+  videoId: string
+}): Promise<PublishedRef> {
+  const { accessToken, pageId } = await resolveToken(params.target)
+  await graphPost(`/${pageId}/video_reels`, {
+    upload_phase: 'finish',
+    video_id: params.videoId,
+    video_state: 'PUBLISHED',
+    access_token: accessToken,
+  })
+  const info = await fetch(
+    `${GRAPH}/${params.videoId}?fields=permalink_url&access_token=${accessToken}`,
+  )
+  const j = (await info.json().catch(() => ({}))) as Record<string, unknown>
+  return {
+    platform: 'facebook',
+    page_id: pageId,
+    post_id: params.videoId,
+    video_id: params.videoId,
+    published_at: new Date().toISOString(),
+    permalink: typeof j['permalink_url'] === 'string' ? (j['permalink_url'] as string) : undefined,
+  }
+}

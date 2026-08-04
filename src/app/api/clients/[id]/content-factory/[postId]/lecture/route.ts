@@ -213,12 +213,21 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         if (loaded.publishRequest?.status === 'pending' || loaded.publishRequest?.status === 'sending') {
           return NextResponse.json({ error: '已经在发了，等几分钟看结果' }, { status: 409 })
         }
+        // live=true 才真的公开;不填一律只发草稿。这个决定跟着这一条片走,
+        // 不再靠一个「一开全客户都真发」的全局开关。
+        const live = body.live === true
+        if (live && !loaded.captions?.length) {
+          return NextResponse.json(
+            { error: '还没校准过字幕 — 公开发之前先看一遍第⑥步' },
+            { status: 400 },
+          )
+        }
         await setPublishRequest({
           clientId: params.id,
           postId: params.postId,
-          request: { platform: 'facebook', status: 'pending', requestedAt: new Date().toISOString() },
+          request: { platform: 'facebook', status: 'pending', live, requestedAt: new Date().toISOString() },
         })
-        return NextResponse.json({ ok: true, queued: true })
+        return NextResponse.json({ ok: true, queued: true, live })
       }
 
       case 'save_captions': {

@@ -5,7 +5,7 @@
 // (真实事故 2026-08-04:PM 点按钮拿到 HTTP 502,那不是我们的报错,是超时)。
 
 import { supabaseAdmin } from '@/lib/supabase'
-import { facebookReelAdapter } from './publish/facebook-reel-adapter'
+import { facebookReelAdapter, promoteReelToPublished } from './publish/facebook-reel-adapter'
 import type { PublishTarget } from './types'
 import { loadLecturePost, recordPublished, setPublishRequest } from './lecture-post'
 
@@ -42,11 +42,17 @@ export async function runOneLecturePublish(params: {
   const loaded = await loadLecturePost(clientId, postId)
   if (!loaded) return { postId, ok: false, error: '未找到该讲' }
 
+  // 这一条要真发还是只发草稿。每条片自己带(审片通过是针对这一条的决定),
+  // 全局环境开关只当兜底默认值——它一开会把所有客户都变成真发,不该拿它当日常开关。
+  const live = loaded.publishRequest?.live === true || process.env.FACTORY_PUBLISH_LIVE === 'true'
+  const draft = !live
+
   // 🔴 本地防重发闸。发布是不可逆的对外动作,「宁可漏发一次让人再点,也不能重复发」。
   // 真实事故(2026-08-04):同一条讲课片被连发三次——上游读到过期状态就会反复触发,
   // 而这里当时对「已经发过了」毫无察觉,来一次发一次。
+  // 注意只在「已经是要的那个状态」时才拦:草稿→公开是一次正当的状态推进,不能被当成重发挡掉。
   const already = loaded.published.find((p) => p.platform === 'facebook')
-  if (already) {
+  if (already && already.draft === draft) {
     await setPublishRequest({ clientId, postId, request: null })
     return { postId, ok: true, draft: already.draft, alreadyPublished: true }
   }
@@ -69,6 +75,30 @@ export async function runOneLecturePublish(params: {
     // 被旧快照覆盖),就靠这一问兜住,绝不重复上传一遍。查不动不算「没发过」——
     // 查询本身出错时保持保守,直接报错让人再点,而不是闷头再发一次。
     const existing = await facebookReelAdapter.findExisting({ target, idempotencyTag: postId })
+
+    // 主页上已经有这条片了。要真发就把那条草稿直接转正,**绝不重新上传** ——
+    // 重传会在主页上留下一草稿一正式两条,每条片都要人去删一次。
+    if (existing && live) {
+      const promoted = await promoteReelToPublished({
+        target,
+        videoId: existing.video_id ?? existing.post_id,
+      })
+      await recordPublished({
+        clientId, postId,
+        entry: {
+          platform: 'facebook',
+          pageId: promoted.page_id ?? target.page_id,
+          videoId: promoted.video_id ?? promoted.post_id,
+          permalink: promoted.permalink,
+          draft: false,
+          at: promoted.published_at,
+        },
+      })
+      await setPublishRequest({ clientId, postId, request: null })
+      return { postId, ok: true, draft: false }
+    }
+
+    // 已经有了、而且只要草稿 → 什么都不做,只把回执补回来
     if (existing) {
       await recordPublished({
         clientId, postId,
@@ -77,16 +107,14 @@ export async function runOneLecturePublish(params: {
           pageId: existing.page_id ?? target.page_id,
           videoId: existing.video_id ?? existing.post_id ?? '',
           permalink: existing.permalink,
-          draft: process.env.FACTORY_PUBLISH_LIVE !== 'true',
+          draft: true,
           at: existing.published_at ?? new Date().toISOString(),
         },
       })
       await setPublishRequest({ clientId, postId, request: null })
-      return { postId, ok: true, alreadyPublished: true }
+      return { postId, ok: true, draft: true, alreadyPublished: true }
     }
 
-    // 安全阀:没显式开 FACTORY_PUBLISH_LIVE 就只发草稿(主页后台可见、公众看不到)
-    const draft = process.env.FACTORY_PUBLISH_LIVE !== 'true'
     const ref = await facebookReelAdapter.publish({
       videoUrl: loaded.post.source_video_url,
       caption: loaded.lecture.ctaVariants?.fbTiktok ?? loaded.lecture.title,
