@@ -36,6 +36,7 @@ import { UploadLinkPanel } from './_components/UploadLinkPanel'
 import { FactoryConfigPanel } from './_components/FactoryConfigPanel'
 import { CommentAutoReplyPanel } from './_components/CommentAutoReplyPanel'
 import { LeadsConfigPanel } from './_components/LeadsConfigPanel'
+import { DomainRulesPanel } from './_components/DomainRulesPanel'
 import { PipelineStagesPanel } from './_components/PipelineStagesPanel'
 import { CommentAuditList } from './_components/CommentAuditList'
 
@@ -255,6 +256,14 @@ export default function ClientSettingsPage() {
             <h2 className="font-black text-slate-800">邮件反应同步（谁打开了 / 谁点了链接）</h2>
           </div>
           <LeadsConfigPanel clientId={clientId} />
+        </section>
+
+        <section className="mt-6">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-base">🤝</span>
+            <h2 className="font-black text-slate-800">谁是自己人 / 谁是同行（按邮箱域名认）</h2>
+          </div>
+          <DomainRulesPanel clientId={clientId} />
         </section>
 
         <section className="mt-6">

@@ -64,6 +64,80 @@ export function normaliseDomain(raw: string): string {
 }
 
 /**
+ * 规整之后看起来是不是一个真域名。
+ *
+ * 设置页那两个框是给人填的，人会填进公司名（`House of Travel`）、
+ * 半截地址、一句话。**这种东西必须当场退回去，不能默默存下来** ——
+ * 存下来它永远不会命中任何邮箱，而填的人以为自己已经把同行标好了，
+ * 于是那批人继续躺在散客名单里，谁也不知道为什么。
+ */
+export function isUsableDomain(domain: string): boolean {
+  // 至少两段、只允许字母数字和连字符、末段是字母（排除 IP 和 `a.1`）
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(domain)
+}
+
+export interface ParsedDomainList {
+  domains: string[]
+  /** 认不出来的原样退回，让填的人知道哪几条没生效。 */
+  rejected: string[]
+}
+
+/**
+ * 把人填进框里的一坨文字变成一份干净的域名清单。
+ *
+ * 换行、逗号、分号当分隔符 —— 从表格里粘过来是什么样都能收。
+ *
+ * **空格不是分隔符，除非拆开之后每一段都是域名。**
+ * 拿空格无条件拆，`House of Travel` 会变成三段，退回去的话变成
+ * 「House、of、Travel 不是域名」—— 填的人看了只会更懵，还以为系统坏了。
+ * 而 `hot.co.nz travelmanagers.co.nz` 这种一行粘两个的又确实要拆。
+ * 两个都要，判据就只能是「拆开之后是不是全都成立」。
+ */
+export function parseDomainList(input: unknown): ParsedDomainList {
+  const pieces = Array.isArray(input)
+    ? input.filter((x): x is string => typeof x === 'string')
+    : typeof input === 'string'
+      ? input.split(/[\n\r,;、，；]+/)
+      : []
+
+  const domains: string[] = []
+  const rejected: string[] = []
+
+  const take = (t: string) => {
+    const d = normaliseDomain(t)
+    if (d && isUsableDomain(d)) {
+      if (!domains.includes(d)) domains.push(d)
+      return true
+    }
+    return false
+  }
+
+  for (const piece of pieces) {
+    const t = piece.trim()
+    if (!t) continue
+
+    if (/\s/.test(t)) {
+      // 全都是域名才拆；只要有一段不是，整条当作一个填错的东西退回去。
+      const parts = t.split(/\s+/).filter(Boolean)
+      const allDomains = parts.every((p) => {
+        const d = normaliseDomain(p)
+        return !!d && isUsableDomain(d)
+      })
+      if (allDomains) {
+        parts.forEach(take)
+        continue
+      }
+      if (!rejected.includes(t)) rejected.push(t)
+      continue
+    }
+
+    if (!take(t) && !rejected.includes(t)) rejected.push(t)
+  }
+
+  return { domains, rejected }
+}
+
+/**
  * 地址的域名是不是命中了清单里某一条。
  *
  * 子域名也算（`mail.hot.co.nz` 命中 `hot.co.nz`）—— 大公司的分部经常挂子域名，
