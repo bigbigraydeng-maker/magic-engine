@@ -155,6 +155,20 @@ export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCoun
   cardCutoff.setDate(cardCutoff.getDate() - RECENT_CARD_DAYS)
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
+  // 🔴 在服务的客户名单 —— 待办里的每一条都必须限定在这些客户上。
+  //    2026-08-04 PM 反馈「91 件，很多点进去办不了」，查下来最大一块就是这个：
+  //    SEO 巡逻那一栏**完全没按客户过滤**，把 7-31 给 5 个潜在客户
+  //    （Dixon Homes / IB Real Estate / mobile station / Sungenix / smiledental）
+  //    生成的 26 条陈年发现也算了进来。巡逻本身早就只跑在服务的客户，
+  //    所以这 26 条永远不会被刷新、也永远不会有人去做 —— 纯占数字。
+  const { data: activeRows } = await supabase
+    .from('clients')
+    .select('id')
+    .eq('client_status', 'active')
+  const activeIds = ((activeRows ?? []) as Array<{ id: string }>).map((c) => c.id)
+  // 一个在服务的客户都没有时用一个不存在的 id，避免 .in([]) 变成"不过滤"
+  const activeFilter = activeIds.length > 0 ? activeIds : ['00000000-0000-0000-0000-000000000000']
+
   const [drafts, findings, cards, reels, failures, setupTasks] = await Promise.all([
     supabase
       .from('blog_posts')
@@ -163,7 +177,8 @@ export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCoun
     supabase
       .from('seo_patrol_findings')
       .select('client_id, clients(name)')
-      .eq('status', 'fresh'),
+      .eq('status', 'fresh')
+      .in('client_id', activeFilter),
     supabase
       .from('execution_items')
       .select('client_id, clients(name)')
@@ -308,11 +323,16 @@ export function buildTodoEmail(weekday: number, counts: TodoCounts, nzDateLabel:
     )))
   }
 
+  // 🔴 巡逻发现**不是一批独立的活儿** —— 它当天就被自动排成了下面那栏的建议卡。
+  //    原来两栏各数一遍，同一件事在「今天有几件」里被算了两次，
+  //    这是 91 那个数字虚高的第二个原因（第一个是没按客户过滤）。
+  //    所以这一栏只报「查到什么、已经变成什么」，不进总数。
   const totalFindings = counts.findingsByClient.reduce((s, c) => s + c.findings, 0)
   if (totalFindings > 0) {
-    sections.push(sectionCard('🔎', 'SEO 巡逻新发现', counts.findingsByClient.map((c) =>
-      linkRow(c.name, `${DASHBOARD_BASE}/${c.id}/execution`, c.findings, '条'),
-    )))
+    sections.push(sectionCard('🔎', 'SEO 巡逻查到的（已自动排成下面的建议卡，不用单独处理）',
+      counts.findingsByClient.map((c) =>
+        linkRow(c.name, `${DASHBOARD_BASE}/${c.id}/execution`, c.findings, '条'),
+      )))
   }
 
   const totalCards = counts.recentCardsByClient.reduce((s, c) => s + c.cards, 0)
@@ -337,9 +357,14 @@ export function buildTodoEmail(weekday: number, counts: TodoCounts, nzDateLabel:
 
   // 只知会、不用他动手的那些不计进「今天有几件事」—— 否则数字会虚高，
   // 他以为有 5 件要办，点进去 3 件写着「不用你操作」，这个数字就不可信了
+  // 🔴 「今天有几件」只数**真的要人处理**的：
+  //    巡逻发现不进（它已经是下面的建议卡，数两遍就是虚高）；
+  //    纯知会型的也不进（见上面 INFORMATIONAL_KINDS）。
+  //    PM 2026-08-04：「91 件，很多按钮点了并不能顺利办理」——
+  //    一个数不准的数字比没有数字更糟，他会连带不信这封信里的其他数。
   const totalItems =
     setupTasks.length + actionItems.length +
-    totalDrafts + totalFindings + totalCards + totalReels + counts.cronFailures24h
+    totalDrafts + totalCards + totalReels + counts.cronFailures24h
 
   const body = sections.length > 0
     ? sections.join('')

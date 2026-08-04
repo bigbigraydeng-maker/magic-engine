@@ -59,7 +59,7 @@ import { runDiagnostic, createDiagnosticRun, executeDiagnosticRun, isValidModule
 interface MockOptions {
   runId?: string
   clientDomain?: string
-  /** Rows behind `keywords` (status = approved). */
+  /** 客户的主关键词（真实来源：clients.primary_keywords）。 */
   keywords?: string[]
   /** Search queries inside the `client_discovery` GSC payload. */
   gscQueries?: string[]
@@ -129,19 +129,13 @@ function makeSupabase(opts: MockOptions = {}): SupabaseClient {
                   country: 'NZ',
                   industry: 'travel',
                   semrush_db: 'nz',
+                  // 🔴 关键词的真实来源就是这一列（客户设置页写的就是它）。
+                  //    原来假件给一张叫 `keywords` 的表建了模型 —— 而那张表
+                  //    **在生产库里根本不存在**，查询报错被 `?? []` 吞掉，
+                  //    于是 SEO 采集器每次都拿到空数组、整柱天天被判「跳过」，
+                  //    测试却因为假件"配合"而一直是绿的（2026-08-05 用生产库证实）。
+                  primary_keywords: keywords,
                 },
-                error: null,
-              }),
-            }),
-          }),
-        }
-      }
-      if (table === 'keywords') {
-        return {
-          select: vi.fn().mockReturnValue({
-            eq: vi.fn().mockReturnValue({
-              eq: vi.fn().mockResolvedValue({
-                data: keywords.map(keyword => ({ keyword })),
                 error: null,
               }),
             }),

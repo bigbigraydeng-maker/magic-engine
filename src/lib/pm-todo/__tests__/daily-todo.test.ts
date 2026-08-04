@@ -144,12 +144,26 @@ describe('buildTodoEmail', () => {
       findingsByClient: [{ name: 'oztop', id: 'cid-2', findings: 3 }],
     }, '31 Jul')
 
-    expect(email.totalItems).toBe(17)
-    expect(email.subject).toContain('17 件')
+    // 🔴 14 = 7 + 7 草稿。**巡逻发现那 3 条不进总数** ——
+    //    它们当天就被自动排成了建议卡，跟建议卡是同一批活儿，
+    //    两边各数一遍就是虚高。PM 2026-08-04 收到「91 件」正是这么堆出来的。
+    expect(email.totalItems).toBe(14)
+    expect(email.subject).toContain('14 件')
     expect(email.html).toContain('/clients/cid-1/blog')
     expect(email.html).toContain('/clients/cid-2/execution')
     expect(email.html).toContain('Blog 草稿待审')
-    expect(email.html).toContain('SEO 巡逻新发现')
+    // 发现仍然显示（要看得见系统查到了什么），只是措辞说清它不用单独处理
+    expect(email.html).toContain('SEO 巡逻查到的')
+    expect(email.html).toContain('不用单独处理')
+  })
+
+  it('🔴 巡逻发现再多也不抬高「今天有几件」—— 那是建议卡的原料，不是另一批活', () => {
+    const many = buildTodoEmail(1, {
+      ...EMPTY,
+      findingsByClient: [{ name: 'oztop', id: 'cid-2', findings: 34 }],
+    }, '31 Jul')
+    expect(many.totalItems).toBe(0)
+    expect(many.subject).toContain('无事')
   })
 
   it('zero-count sections are omitted entirely', () => {

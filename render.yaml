@@ -504,6 +504,43 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # 🔴 效果回流 —— DAPE 这个圈能不能合拢，全靠下面这两条。
+  #
+  # 2026-08-04 查出来：这两个接口**代码早就写好了，但 render.yaml 里没有、
+  # 登记表里也没有 —— 从来没有任何东西调用过它们**。后果是
+  # `prescription_outcomes` 从建库到今天**一条记录都没有**：
+  # 「我们给客户出的方案到底有没有用」这个问题，系统一次都没回答过。
+  # 没有这一环，下一轮出方案时 AI 不知道上一轮哪条管用、哪条白干。
+  # 而且因为它们不在登记表里，连「没跑」的告警都不会报 —— 又是「看不见」。
+
+  # 处方效果实测回填 —— 每天看有没有处方到了批准后 30/60/90 天的节点，
+  # 到了就拉真实指标写进 prescription_outcomes。日更但只在节点当天真干活。
+  - type: cron
+    name: kpi-backfill
+    env: node
+    schedule: "20 6 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/kpi-backfill
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # 行业基准累积 —— 把上面攒下来的实测值按行业/规模/市场分组算 P50/P75/P90。
+  # 周更即可；样本不够时本来就不该写，会在运行记录里写明「等实测结果攒够」。
+  - type: cron
+    name: benchmark-accumulator
+    env: node
+    schedule: "40 7 * * 1"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/benchmark-accumulator
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # DAPE P 段(处方)—— 吃周一体检的结果开方,并自动落地成执行看板上的动作。
   # 🔴 花钱路径:每个客户打一次 AI。同客户 6 天冷却。
   #    刻意跟体检分成两个任务:混在一起挂了分不清是没采到数据还是没生成方案。
