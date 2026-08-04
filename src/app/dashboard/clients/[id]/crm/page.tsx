@@ -159,16 +159,6 @@ const OFF_GROUP_LABEL: Record<OffRow['group'], string> = {
 /** 客人正在等我们 / 购买窗口到了 —— 列头数字标红催一下。 */
 const HOT: ReadonlySet<Segment> = new Set<Segment>(['replied', 'callback_due', 'clicked_link'])
 
-/** 「等了 3 天」。同一列里等得最久的排最前，卡片上要说出来。 */
-function waitedText(iso: string | null): string | null {
-  if (!iso) return null
-  const ms = Date.now() - new Date(iso).getTime()
-  const days = Math.floor(ms / 86_400_000)
-  if (days >= 1) return `等了 ${days} 天`
-  const hours = Math.floor(ms / 3_600_000)
-  return hours >= 1 ? `等了 ${hours} 小时` : '刚刚'
-}
-
 /** 「约的是：今天 14:00（已经过了 3 小时）」—— 打之前一定要看见。 */
 function dueText(iso: string): string {
   const d = new Date(iso)
@@ -277,7 +267,6 @@ function Card({
   onAcceptStage: (row: Row) => void
   onLogged: (msg: string, reload?: boolean) => void
 }) {
-  const waited = waitedText(row.lastTouchAt)
   // 今天已经跟过的整张卡变浅 —— 销售扫一眼就知道还剩哪些没动，
   // 不用靠脑子记。鼠标移上去恢复，因为还是要能点进去看。
   const done = row.doneToday === true
@@ -322,8 +311,11 @@ function Card({
           </p>
         )}
 
-        <div className="mt-2 flex items-center justify-between gap-2">
-          {waited && <span className="text-[13px] text-me-charcoal/45">{waited}</span>}
+        <div className="mt-1.5 flex items-center justify-between gap-2">
+          {/* 原因里已经说了「等了多久」，这里不再用另一个单位重复一遍 ——
+              「进线 835 小时还没人联系 / 等了 34 天」同一件事说两遍，
+              单位还不一致，读的人要先做换算才能确认它们说的是同一件事。 */}
+          <span />
           {row.stageLabel && (
             <span className="truncate rounded-full bg-me-ivory px-2 py-0.5 text-[12px] font-bold text-me-charcoal/60">
               {row.stageLabel}
@@ -1185,6 +1177,24 @@ export default function CrmTodayPage() {
     }
   }
 
+  // 待认领的 Facebook 对话数 —— 认不出是谁的消息不会进名单，
+  // 不在这里提一句，这批人（CTS 142 段）就静静烂在后台没人知道。
+  const [unclaimed, setUnclaimed] = useState(0)
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/messenger/unclaimed`, {
+          credentials: 'include',
+        })
+        if (!res.ok) return
+        const json = await res.json()
+        setUnclaimed(json.total ?? 0)
+      } catch {
+        // 拿不到就不显示这个入口，不影响主名单
+      }
+    })()
+  }, [clientId])
+
   /** 同行不参与分批和排序，只在这里被筛掉 —— 判据跟散客完全一样。 */
   const keepKind = (k: ContactKind | undefined) =>
     kindView === 'all' || (k ?? 'retail') === kindView
@@ -1244,6 +1254,19 @@ export default function CrmTodayPage() {
           </div>
           <CrmTabs clientId={clientId} active="today" />
         </div>
+
+        {unclaimed > 0 && (
+          <Link
+            href={`/dashboard/clients/${clientId}/crm/unclaimed`}
+            className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-me-ochre/35 bg-me-ochre/8 px-4 py-2.5 transition hover:bg-me-ochre/15"
+          >
+            <span className="text-[13px] leading-snug text-me-charcoal/75">
+              还有 <strong className="font-black text-me-ochre">{unclaimed}</strong> 条 Facebook 消息认不出是谁，
+              没进下面的名单
+            </span>
+            <span className="flex-none text-[12px] font-black text-me-ochre">去认领 →</span>
+          </Link>
+        )}
       </header>
 
       {toast && (

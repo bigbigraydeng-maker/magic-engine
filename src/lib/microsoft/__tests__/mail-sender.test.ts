@@ -38,11 +38,20 @@ describe('真客人 —— 要建人', () => {
   })
 
   /**
-   * 判据只用「开头匹配」，不用「包含」——「包含」会把一个真名叫
-   * Newsletter 的人误伤掉。真名概率低，但误伤是不可见的损失。
+   * **不能退化成「包含」。**
+   *
+   * 这是新判据（按段匹配）唯一真正的风险：一旦写成 `includes`，
+   * `bounceback` `accountant` `invoiced` 里的真人会被一并误伤，
+   * 而误伤一个真客人是**不可见**的损失 —— 没人会发现少了谁。
+   *
+   * 这几个的机器人词都嵌在更长的词里、不成段，必须放行。
    */
-  it('名字里凑巧含机器人词、但不是开头 → 仍算客人', () => {
-    expect(classifySender({ address: 'bonnie.newsletter@gmail.com', ownDomains: OWN }).kind).toBe('customer')
+  it.each([
+    'andrew.bounceback@gmail.com',
+    'mary-accountant@firm.co.nz',
+    'sam.invoiced@xtra.co.nz',
+  ])('机器人词嵌在更长的词里、不成段（%s）→ 仍算客人', (address) => {
+    expect(classifySender({ address, ownDomains: OWN }).kind).toBe('customer')
   })
 })
 
@@ -60,6 +69,39 @@ describe('机器人 —— 不建人', () => {
   ])('%s 不建人', (address) => {
     expect(classifySender({ address, ownDomains: OWN }).kind).toBe('skip')
   })
+
+  /**
+   * **2026-08-04 的真实事故。**
+   *
+   * `testflight_no_reply@email.apple.com` 不以任何机器人词开头，所以旧的
+   * 「开头匹配」把它放行了 —— 它变成了 CTS 名单上的一张卡，显示名是
+   * 「Meta Platform,lnc. via TestFlight」。客户当场反馈「contact 里怎么还有这些」。
+   *
+   * `前缀_noreply@` / `前缀-noreply@` 是系统邮件最常见的形式之一，
+   * 只判开头等于把这一整类全放过去。
+   */
+  it.each([
+    'testflight_no_reply@email.apple.com',
+    'github-noreply@github.com',
+    'shopify_notifications@shopify.com',
+    'xero.billing@xero.com',
+    'meta-notification@facebookmail.com',
+  ])('机器人词在后面（%s）→ 照样挡住', (address) => {
+    expect(classifySender({ address, ownDomains: OWN }).kind).toBe('skip')
+  })
+
+  /**
+   * 「以机器人词开头、但后面还粘着别的字」也照挡 —— 这是**故意保留**的宽松边界。
+   *
+   * `noreply123@` `notificationsystems@` 这类几乎不可能是真人的名字，
+   * 而它们恰恰是系统邮箱最常见的另一种写法。
+   */
+  it.each(['noreply123@shop.com', 'notificationsystems@company.com'])(
+    '以机器人词开头、后面还粘着字（%s）→ 挡住',
+    (address) => {
+      expect(classifySender({ address, ownDomains: OWN }).kind).toBe('skip')
+    },
+  )
 
   it('说得出为什么不建 —— 将来能回查判错没有', () => {
     const v = classifySender({ address: 'noreply@x.com', ownDomains: OWN })
