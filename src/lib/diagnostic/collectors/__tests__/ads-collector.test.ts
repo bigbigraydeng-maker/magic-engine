@@ -48,18 +48,43 @@ const HEALTHY_GOOGLE = {
   topAdPreviews: ['Top tours NZ', 'Best deals', '5-star reviews'],
 }
 
-function makeSupabase(overrides: { name?: string | null; semrush_db?: string | null } = {}): SupabaseClient {
-  const { name = 'Example Brand', semrush_db = 'nz' } = overrides
+/**
+ * 🔴 **按表建模**，不要对所有表返回同一条链。
+ *    这个假件原来不分表，于是「查自家真实投放数据」那一步会撞上
+ *    一条没有 `.gte` 的链、抛异常、被外层吞成 score:null ——
+ *    症状出现在完全不相干的断言上。（同一个教训今天已经踩过两次。）
+ *
+ * `ownAdRows` = `ad_daily_insights` 里这个客户近 14 天的真实投放行。
+ * 默认空数组 = 我们没有这个客户的自家数据（老行为不变）。
+ */
+function makeSupabase(
+  overrides: {
+    name?: string | null
+    semrush_db?: string | null
+    ownAdRows?: Array<{ insight_date: string; spend: number; impressions: number }>
+  } = {},
+): SupabaseClient {
+  const { name = 'Example Brand', semrush_db = 'nz', ownAdRows = [] } = overrides
   return {
-    from: vi.fn().mockReturnValue({
-      select: vi.fn().mockReturnValue({
-        eq: vi.fn().mockReturnValue({
-          single: vi.fn().mockResolvedValue({
-            data: { name, semrush_db },
-            error: null,
+    from: vi.fn((table: string) => {
+      if (table === 'ad_daily_insights') {
+        const chain: Record<string, unknown> = {}
+        const self = () => chain
+        chain.select = self
+        chain.eq = self
+        chain.gte = () => Promise.resolve({ data: ownAdRows, error: null })
+        return chain
+      }
+      if (table === 'clients') {
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              single: vi.fn().mockResolvedValue({ data: { name, semrush_db }, error: null }),
+            }),
           }),
-        }),
-      }),
+        }
+      }
+      throw new Error(`测试假件没准备 ${table} 表的数据`)
     }),
   } as unknown as SupabaseClient
 }
@@ -129,6 +154,39 @@ describe('AdsCollector.collect() — no active ads', () => {
     const f = result.findings.find(x => x.finding_type === 'budget_inefficiency')
     expect(f).toBeDefined()
     expect(f?.severity).toBe('high')
+  })
+
+  it('🔴 公开渠道查不到、但自家账户有真实花费 → 不许报「没在投」', async () => {
+    // 2026-08-05 真实事故：CTS 当天在投两个系列（NZ$114.19 + NZ$96.88，上万曝光），
+    // 而表单广告没有网站链接、公开广告库按域名天生搜不到 ——
+    // 结果体检报「No active paid advertising detected」并标 high。
+    // 这条假发现会喂进下一轮方案，让 AI 给正花着钱的客户开「该开始投广告」。
+    mockMetaScrape.mockResolvedValue({ ...HEALTHY_META, activeAdsCount: 0, adTypes: [] })
+    mockGoogleScrape.mockResolvedValue({ ...HEALTHY_GOOGLE, activeAdsCount: 0, adFormats: [] })
+    const result = await new AdsCollector(
+      makeSupabase({
+        ownAdRows: [
+          { insight_date: '2026-08-03', spend: 114.19, impressions: 3871 },
+          { insight_date: '2026-08-02', spend: 96.88, impressions: 6183 },
+        ],
+      }),
+    ).collect(CLIENT_ID, DOMAIN, KEYWORDS)
+
+    expect(result.score).toBe(60)
+    const f = result.findings.find(x => x.finding_type === 'budget_inefficiency')
+    expect(f?.severity).toBe('low')
+    expect(f?.title).toContain('公开渠道查不到')
+    expect(f?.description).toContain('211.07')
+  })
+
+  it('🔴 有曝光但零花费 → 仍按「没在投」处理，别把自然触达当投放', async () => {
+    mockMetaScrape.mockResolvedValue({ ...HEALTHY_META, activeAdsCount: 0, adTypes: [] })
+    mockGoogleScrape.mockResolvedValue({ ...HEALTHY_GOOGLE, activeAdsCount: 0, adFormats: [] })
+    const result = await new AdsCollector(
+      makeSupabase({ ownAdRows: [{ insight_date: '2026-08-03', spend: 0, impressions: 9999 }] }),
+    ).collect(CLIENT_ID, DOMAIN, KEYWORDS)
+    expect(result.score).toBe(0)
+    expect(result.findings.find(x => x.finding_type === 'budget_inefficiency')?.severity).toBe('high')
   })
 })
 
