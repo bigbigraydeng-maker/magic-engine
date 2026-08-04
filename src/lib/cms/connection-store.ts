@@ -307,6 +307,7 @@ function rowToStatus(row: CmsConnectionRow): CmsConnectionStatus {
     status:         row.status as CmsConnectionStatus['status'],
     lastError:      row.last_error,
     lastTestedAt:   row.last_tested_at,
+    contentPaths:   parseContentPaths(row.content_paths),
     contentTargets: parseContentTargets(row.content_targets),
   }
 }
@@ -316,6 +317,11 @@ function rowToStatus(row: CmsConnectionRow): CmsConnectionStatus {
  * but a row may have been written outside the app (manual SQL). Drop any
  * malformed elements so the UI never crashes on a bad row.
  */
+function parseContentPaths(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  return raw.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+}
+
 function parseContentTargets(raw: unknown): CmsContentTarget[] {
   if (!Array.isArray(raw)) return []
   return raw.filter(isCmsContentTarget)
