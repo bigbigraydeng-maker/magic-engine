@@ -48,7 +48,10 @@ imply a schedule either. Describing a place is safe; scheduling it is not.
 
 ## Style
 
-- Same language as the source (usually English).
+- ALWAYS write in English, no matter what language the source text or the
+  consultant's instruction is in. This document goes to the end customer,
+  who reads English. A Chinese instruction still produces English prose.
+  Keep hotel names, flight numbers and prices exactly as written.
 - 2–4 sentences per named place, flowing prose — not a bulleted list.
 - Calm and specific. No "breathtaking", "must-see", "unforgettable".
 - Keep every place named in the source, in the same order. Do not add new places.`
