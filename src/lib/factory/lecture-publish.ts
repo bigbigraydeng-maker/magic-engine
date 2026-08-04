@@ -86,8 +86,50 @@ export async function runOneLecturePublish(params: {
   }
 }
 
-/** 扫出所有待发布的讲课片(pending)，逐条发。一次最多 3 条，防单次 cron 超时。 */
-export async function runLecturePublishSweep(): Promise<{ handled: PublishOutcome[] }> {
+/**
+ * 卡在「发送中」多久算死掉、可以重来。
+ * 发布慢是常态(Facebook 自己去拉几十 MB)，但超过这个时间基本是进程被掐了——
+ * 不重试的话这条片会永远停在「发送中」，页面上看起来像还在跑，其实没人管它。
+ */
+const STALE_SENDING_MS = 20 * 60 * 1000
+
+interface SweepRow {
+  id: string
+  client_id: string
+  generation_context_snapshot: {
+    lecture_publish_request?: { status?: string; startedAt?: string } | null
+  } | null
+}
+
+/**
+ * 挑出这一轮该发的片(纯逻辑，好测)。
+ * ①pending = 客户刚点了发布 ②sending 但卡太久 = 上一轮被掐断，重来一次。
+ */
+export function selectPendingPublishes(
+  rows: SweepRow[],
+  nowMs: number,
+  max: number,
+): SweepRow[] {
+  return rows.filter((p) => {
+    const req = p.generation_context_snapshot?.lecture_publish_request
+    if (req?.status === 'pending') return true
+    if (req?.status === 'sending') {
+      const started = req.startedAt ? Date.parse(req.startedAt) : NaN
+      // 时间读不出来也当卡死处理——宁可重发一次(有幂等标记兜着)，也不要永远挂在那
+      return !Number.isFinite(started) || nowMs - started > STALE_SENDING_MS
+    }
+    return false
+  }).slice(0, Math.max(0, max))
+}
+
+/**
+ * 扫出待发布的讲课片，逐条发。
+ * max 默认 1 —— 这个扫描是搭在 factory-publish-worker 那条 cron 上跑的(它每 10 分钟一轮、
+ * 密钥已经配好)，跟工单发布共用同一个 300 秒预算，所以一轮只发一条，别把预算吃光。
+ */
+export async function runLecturePublishSweep(
+  opts: { max?: number } = {},
+): Promise<{ handled: PublishOutcome[] }> {
   const { data } = await supabaseAdmin
     .from('content_posts')
     .select('id, client_id, generation_context_snapshot')
@@ -95,14 +137,11 @@ export async function runLecturePublishSweep(): Promise<{ handled: PublishOutcom
     .not('generation_context_snapshot->lecture_publish_request', 'is', null)
     .limit(20)
 
-  const pending = (data ?? []).filter((p) => {
-    const req = (p.generation_context_snapshot as { lecture_publish_request?: { status?: string } } | null)?.lecture_publish_request
-    return req?.status === 'pending'
-  }).slice(0, 3)
+  const due = selectPendingPublishes((data ?? []) as SweepRow[], Date.now(), opts.max ?? 1)
 
   const handled: PublishOutcome[] = []
-  for (const p of pending) {
-    handled.push(await runOneLecturePublish({ clientId: p.client_id as string, postId: p.id as string }))
+  for (const p of due) {
+    handled.push(await runOneLecturePublish({ clientId: p.client_id, postId: p.id }))
   }
   return { handled }
 }
