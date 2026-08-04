@@ -153,7 +153,19 @@
 - [ ] **M5 WhatsApp Business API（新号）** —— 申请清单已给 PM（`docs/sops/whatsapp-business-api-申请清单.md`）。⚠️ AU/NZ 单价未核实（这台开发机连不上 Meta 站点），拿到后台截图后补
 - [ ] **M6 客户员工账号 + 角色 + 归属 + 转派 + 推手机** —— PM：「ME 的登陆系统需要给到 client 的员工层级」。`conversations` 已有 `owner_email` / `snooze_until` 两列待用，不需要 migration
 - [ ] **M7 「谁来回」开关 + Meta AI 客服配置**（AI 先答 / 人工先答 / 分时段）
-- [ ] **M8 IP 电话外呼 + 通话记录回流**（与 Phase 36 Voice Agent 合流）
+- [ ] **M8 IP 电话外呼 + 通话记录回流**（与 Phase 36 Voice Agent 合流）🔄 判断层已上线
+      - [x] M8.1 判断层 `lib/threecx/call-plan.ts`（PR #821）—— 一通电话在 CRM 里意味着什么。
+            **不依赖 3CX 接口长什么样**，所以对方还没开通也能先做完先审完
+      - [ ] **M8.2 取数层** `lib/threecx/xapi.ts` —— `/connect/token`（client_credentials）
+            → 读通话记录 → 翻译成 `CallRecord`。⚠️ 卡在对方：要开一个分机（$30/月）
+            才有真实记录去验证字段名（3cx.com 在这台机器上打不开，文档看不了）
+      - [ ] **M8.3 凭证怎么存** —— 每个客户一套 PBX 地址 + 密钥。存哪、谁能读是安全决策，
+            动手前单独审，不要顺手塞进 `leads_config`
+      - [ ] M8.4 落库层 —— 复用 `resolveContact`（电话身份）+ `contact_touchpoints`
+            （`channel:'phone'` / `source:'threecx'` / `source_ref` = 通话编号）
+      - [ ] M8.5 录音按需换取，带鉴权，**绝不落公开链接**
+      - [ ] M8.6 `/api/cron/call-sync` + 同一个 PR 内加 `render.yaml` 调度条目
+      > 设计见 [`docs/specs/2026-08-04-threecx-call-ingest.md`](./specs/2026-08-04-threecx-call-ingest.md)
 - [ ] M9 短信 · M10 从 ME 发 newsletter（优先级靠后，PM 明确）
 
 **已知待补**（都不影响现在上线）：
