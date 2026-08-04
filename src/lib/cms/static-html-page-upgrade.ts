@@ -76,12 +76,12 @@ export function patchStaticHtmlPage(
   const updatedFields: string[] = []
 
   const titleResult = replaceTitle(content, upgrade.metaTitle)
-  if (!titleResult.ok) return { ok: false, reason: titleResult.reason }
+  if ('reason' in titleResult) return { ok: false, reason: titleResult.reason }
   content = titleResult.content
   if (titleResult.changed) updatedFields.push('meta_title')
 
   const descriptionResult = replaceMetaDescription(content, upgrade.metaDescription)
-  if (!descriptionResult.ok) return { ok: false, reason: descriptionResult.reason }
+  if ('reason' in descriptionResult) return { ok: false, reason: descriptionResult.reason }
   content = descriptionResult.content
   if (descriptionResult.changed) updatedFields.push('meta_description')
 
