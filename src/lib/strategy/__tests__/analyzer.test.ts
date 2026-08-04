@@ -277,6 +277,10 @@ interface QueryState {
   eqs: Array<[string, unknown]>
   gts: Array<[string, number]>
   lts: Array<[string, number]>
+  // Recorded, not ignored: a fake that swallows .order() arguments cannot tell
+  // "newest snapshot" from "oldest snapshot", which is the exact silent-zero
+  // failure this whole change exists to kill.
+  orderBy: { column: string; ascending: boolean } | null
 }
 
 function projectRow(row: SnapshotRow, columns: string): Record<string, unknown> {
@@ -304,6 +308,8 @@ function fakeKeywordSupabase(opts: {
   semrushDb?: string | null
   rows?: SnapshotRow[]
   rowsError?: { message: string } | null
+  clientMissing?: boolean
+  clientError?: { message: string } | null
 }) {
   const rows = opts.rows ?? []
 
@@ -314,12 +320,16 @@ function fakeKeywordSupabase(opts: {
       chain.select = self
       chain.eq = self
       chain.maybeSingle = () =>
-        Promise.resolve({ data: { semrush_db: opts.semrushDb ?? 'au' }, error: null })
+        Promise.resolve(
+          opts.clientError
+            ? { data: null, error: opts.clientError }
+            : { data: opts.clientMissing ? null : { semrush_db: opts.semrushDb ?? 'au' }, error: null },
+        )
       return chain
     }
 
     if (table === 'keyword_snapshots') {
-      const state: QueryState = { columns: '', eqs: [], gts: [], lts: [] }
+      const state: QueryState = { columns: '', eqs: [], gts: [], lts: [], orderBy: null }
       const chain: Record<string, unknown> = {}
       chain.select = (cols: string) => {
         state.columns = cols
@@ -337,14 +347,20 @@ function fakeKeywordSupabase(opts: {
         state.lts.push([col, val])
         return chain
       }
-      chain.order = () => chain
+      chain.order = (column: string, opts?: { ascending?: boolean }) => {
+        state.orderBy = { column, ascending: opts?.ascending !== false }
+        return chain
+      }
       chain.limit = () => chain
 
       // The date probe ends in .maybeSingle(); the row read is awaited.
       chain.maybeSingle = () => {
-        const hits = rows
-          .filter((r) => matches(r, state))
-          .sort((a, b) => b.snapshot_date.localeCompare(a.snapshot_date))
+        const hits = rows.filter((r) => matches(r, state))
+        if (state.orderBy) {
+          const { column, ascending } = state.orderBy
+          const key = (r: SnapshotRow) => String((r as unknown as Record<string, unknown>)[column] ?? '')
+          hits.sort((a, b) => (ascending ? key(a).localeCompare(key(b)) : key(b).localeCompare(key(a))))
+        }
         return Promise.resolve({
           data: hits.length > 0 ? projectRow(hits[0], state.columns) : null,
           error: null,
@@ -453,6 +469,48 @@ describe('fetchKeywordOpportunities', () => {
     )
     const result = await fetchKeywordOpportunities(CLIENT_ID)
     expect(result.map((r) => r.keyword)).toEqual(['nz row'])
+  })
+
+  it('🔴 别的客户的词绝不许混进来 —— 这是跨客户串数据那根线', async () => {
+    mockFrom.mockImplementation(
+      fakeKeywordSupabase({
+        rows: [
+          snapshot({ keyword: 'mine' }),
+          snapshot({ keyword: 'someone elses', client_id: 'another-client' }),
+        ],
+      }) as unknown as typeof mockFrom,
+    )
+    const result = await fetchKeywordOpportunities(CLIENT_ID)
+    expect(result.map((r) => r.keyword)).toEqual(['mine'])
+  })
+
+  // 空数组有两种来路：**主动放弃**，和**炸了被 catch 吞掉**。
+  // 只断言 `[]` 两者都过 —— 这正是原 bug 活两个月的机制。所以这里断言它
+  // 说出了原因：守卫被拿掉时不会有这句话，测试就红。
+  it('🔴 客户读不出来时主动放弃并说明原因，绝不擅自当成 AU', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      mockFrom.mockImplementation(
+        fakeKeywordSupabase({
+          clientMissing: true,
+          rows: [snapshot({ location_code: 2036 })],
+        }) as unknown as typeof mockFrom,
+      )
+      expect(await fetchKeywordOpportunities(CLIENT_ID)).toEqual([])
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(CLIENT_ID), undefined)
+
+      warn.mockClear()
+      mockFrom.mockImplementation(
+        fakeKeywordSupabase({
+          clientError: { message: 'boom' },
+          rows: [snapshot({ location_code: 2036 })],
+        }) as unknown as typeof mockFrom,
+      )
+      expect(await fetchKeywordOpportunities(CLIENT_ID)).toEqual([])
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(CLIENT_ID), 'boom')
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('returns empty array when the client has no snapshots at all', async () => {

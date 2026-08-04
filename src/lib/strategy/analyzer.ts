@@ -112,13 +112,25 @@ async function fetchRunsForQuery(
  */
 export async function fetchKeywordOpportunities(clientId: string): Promise<KeywordOpportunity[]> {
   try {
-    const { data: client } = await supabaseAdmin
+    const { data: client, error: clientError } = await supabaseAdmin
       .from('clients')
       .select('semrush_db')
       .eq('id', clientId)
       .maybeSingle()
 
-    const locationCode = locationCodeFor((client as { semrush_db: string | null } | null)?.semrush_db)
+    // Never guess the market. Defaulting to AU when the client cannot be read
+    // would make an NZ client silently match zero rows and return no
+    // opportunities at all — the same shape as the bug being fixed here, just
+    // with a different cause. Say so instead.
+    if (clientError || !client) {
+      console.warn(
+        `[strategy] keyword opportunities skipped for ${clientId}: client row unreadable`,
+        clientError?.message,
+      )
+      return []
+    }
+
+    const locationCode = locationCodeFor((client as { semrush_db: string | null }).semrush_db)
 
     const { data: latest } = await supabaseAdmin
       .from('keyword_snapshots')

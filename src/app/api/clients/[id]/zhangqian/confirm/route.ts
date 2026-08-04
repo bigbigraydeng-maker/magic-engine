@@ -55,21 +55,36 @@ export async function PATCH(
     if (!discovery) {
       return NextResponse.json({ error: 'No discovery found for this client' }, { status: 404 })
     }
+    // Seed keywords are merged on EVERY confirm, repeats included — deliberately
+    // above the already_confirmed short-circuit. The merge is idempotent by
+    // construction (newSeedKeywords dedupes against what is stored), and this is
+    // the only route by which a client that had no brief at first confirm can
+    // ever receive its seeds: running discovery before the brief exists is a
+    // normal onboarding order, and 3 of 13 confirmed discoveries in production
+    // are in exactly that state. Below the short-circuit, one failure would be
+    // permanent — the button can never be pressed a second time.
+    let keywordsAdded = 0
+    let seedKeywordsPending = false
+    try {
+      const merged = await mergeSeedKeywordsIntoBrief(clientId, discovery.payload as DiscoveryReport)
+      keywordsAdded = merged.added
+      seedKeywordsPending = merged.noActiveBrief
+    } catch (seedErr) {
+      console.error('[zhangqian/confirm] seed keyword merge failed (non-fatal)', seedErr)
+      seedKeywordsPending = true
+    }
+
     if (discovery.confirmed_at !== null) {
-      return NextResponse.json({ success: true, already_confirmed: true })
+      return NextResponse.json({
+        success: true,
+        already_confirmed: true,
+        keywords_added: keywordsAdded,
+        seed_keywords_pending: seedKeywordsPending,
+      })
     }
 
     const clientUpdated = await applyBusinessPatch(clientId, body.business)
     await stampConfirmed(discovery.id, body.confirmed_by)
-
-    // Seed keywords into the active brief. Non-fatal, same as the two syncs
-    // below: a brief that does not exist yet must not block confirmation.
-    let keywordsAdded = 0
-    try {
-      keywordsAdded = await mergeSeedKeywordsIntoBrief(clientId, discovery.payload as DiscoveryReport)
-    } catch (seedErr) {
-      console.error('[zhangqian/confirm] seed keyword merge failed (non-fatal)', seedErr)
-    }
 
     // Bridge to AI Visibility — sync Zhangqian's ai_tracker_questions into
     // the AI Visibility queries table. Non-fatal: a sync failure must not
@@ -96,6 +111,7 @@ export async function PATCH(
     return NextResponse.json({
       success: true,
       keywords_added: keywordsAdded,
+      seed_keywords_pending: seedKeywordsPending,
       client_updated: clientUpdated,
       ai_visibility_queries_added: aiVisibilityQueriesAdded,
       competitors_merged: competitorsMerged,
@@ -153,13 +169,18 @@ async function applyBusinessPatch(
 async function mergeSeedKeywordsIntoBrief(
   clientId: string,
   payload: DiscoveryReport,
-): Promise<number> {
+): Promise<{ added: number; noActiveBrief: boolean }> {
   const activeBrief = await getActiveBrief(clientId)
-  if (!activeBrief) return 0
+  // "No brief yet" is reported, not swallowed: it looks identical to "no new
+  // keywords" from the outside, and a discovery result that only shows up in a
+  // server log is a discovery that nobody will ever act on. The seeds are not
+  // lost either way — they stay in client_discovery.payload, the brief-creation
+  // form reads them straight from there, and confirming again backfills.
+  if (!activeBrief) return { added: 0, noActiveBrief: true }
 
   const existing = (activeBrief.keyword_seeds as string[] | null) ?? []
   const toAdd = newSeedKeywords(payload.seed_keywords, existing)
-  if (toAdd.length === 0) return 0
+  if (toAdd.length === 0) return { added: 0, noActiveBrief: false }
 
   const { error } = await supabaseAdmin
     .from('master_briefs')
@@ -167,7 +188,7 @@ async function mergeSeedKeywordsIntoBrief(
     .eq('id', activeBrief.id)
 
   if (error) throw new Error(`Failed to update brief keyword_seeds: ${error.message}`)
-  return toAdd.length
+  return { added: toAdd.length, noActiveBrief: false }
 }
 
 async function stampConfirmed(discoveryId: string, confirmedBy: string): Promise<void> {

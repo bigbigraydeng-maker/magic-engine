@@ -492,7 +492,6 @@ POST   /api/webhooks/publer-published         → Publer 发布后回调
 | `/dashboard/clients` | Clients | 客户列表，新建客户 |
 | `/dashboard/clients/[id]` | Client Detail | 含 4 个 Tab 面板 |
 | `/dashboard/content` | Content Board | 帖子列表视图 + 月历日历视图；批量审批；模态框编辑+生成预览图 |
-| `/dashboard/keywords` | Keywords | 关键词研究浏览器 |
 | `/dashboard/visuals` | Launch Hub 🚀 | 电子表格视图，图片/视频 AI 生成 or 手动上传，Publer 排期 |
 | `/dashboard/airtable` | Airtable Views | 各 Airtable 视图嵌入 |
 | `/dashboard/analytics` | Analytics | 数据分析（占位） |

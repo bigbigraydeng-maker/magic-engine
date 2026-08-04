@@ -42,10 +42,19 @@ export function newSeedKeywords(
   return out
 }
 
-/** The full list to persist: everything already there, then the new arrivals. */
+/**
+ * The full list to persist: everything already there, then the new arrivals.
+ *
+ * 🔴 Existing entries are returned **verbatim**. Normalising is for comparison
+ *    only — lowercasing what is already stored would let confirming a discovery
+ *    report silently rewrite keywords an FDE typed by hand, and those strings
+ *    are read back into AI prompts and shown in the brief UI. Quietly editing a
+ *    human-maintained field is the thing this whole merge is built to avoid.
+ */
 export function mergedSeedKeywords(
   discovered: readonly DiscoveredKeyword[] | null | undefined,
   existing: readonly string[] | null | undefined,
 ): string[] {
-  return [...clean(existing ?? []), ...newSeedKeywords(discovered, existing)]
+  const kept = (existing ?? []).filter((k) => k.trim().length > 0)
+  return [...kept, ...newSeedKeywords(discovered, existing)]
 }

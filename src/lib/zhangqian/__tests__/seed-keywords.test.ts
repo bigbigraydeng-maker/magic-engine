@@ -46,6 +46,20 @@ describe('mergedSeedKeywords', () => {
     expect(result).toEqual(['hand picked a', 'hand picked b', 'brand new'])
   })
 
+  it('🔴 FDE 手写的大小写原样保留 —— 确认一次发现报告不许静默改写人工填的字段', () => {
+    expect(mergedSeedKeywords([kw('new one')], ['Oztop Building Supplies', 'SPC Flooring'])).toEqual([
+      'Oztop Building Supplies',
+      'SPC Flooring',
+      'new one',
+    ])
+  })
+
+  it('大小写只用于比对：已存在的词不会因为大小写不同被当成新词加进去', () => {
+    expect(mergedSeedKeywords([kw('oztop building supplies')], ['Oztop Building Supplies'])).toEqual([
+      'Oztop Building Supplies',
+    ])
+  })
+
   it('没有新词时原样返回，不制造无意义的写入内容变化', () => {
     expect(mergedSeedKeywords([kw('existing')], ['existing'])).toEqual(['existing'])
   })
