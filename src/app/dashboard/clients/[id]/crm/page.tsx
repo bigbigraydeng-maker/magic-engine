@@ -26,6 +26,7 @@ import { PersonDrawer, type DrawerRow } from './_components/PersonDrawer'
 // 两边对不上，tsc 才把它顶出来 —— 而它本可以一直静静地错下去。
 import type { Segment } from '@/lib/crm/segments'
 import { CONTACT_KIND_LABEL, type ContactKind } from '@/lib/crm/contact-kind'
+import { countTrade, filterBucketByKind, type KindView } from '@/lib/crm/kind-filter'
 
 interface Row {
   contactId: string
@@ -1092,7 +1093,7 @@ export default function CrmTodayPage() {
    *
    * 但绝不把同行藏掉：他们是真业务，只是跟进方式不同。切一下就全在。
    */
-  const [kindView, setKindView] = useState<'retail' | 'trade' | 'all'>('retail')
+  const [kindView, setKindView] = useState<KindView>('retail')
   /** 点开的那个人（看板卡片 / 搜索结果 / 名单外的人 都用同一个抽屉）。 */
   const [picked, setPicked] = useState<DrawerRow | null>(null)
 
@@ -1195,22 +1196,19 @@ export default function CrmTodayPage() {
     })()
   }, [clientId])
 
-  /** 同行不参与分批和排序，只在这里被筛掉 —— 判据跟散客完全一样。 */
+  /**
+   * 同行不参与分批和排序，只在这里被筛掉 —— 判据跟散客完全一样。
+   *
+   * 筛选逻辑在 lib/crm/kind-filter，**不写在这里**：它决定的不是显示什么，
+   * 是谁会收到那封群发邮件。第一版就在这里错过一次（只筛了人、没筛群发地址），
+   * 那种错误必须被单测钉住，而页面组件测不了。
+   */
   const keepKind = (k: ContactKind | undefined) =>
     kindView === 'all' || (k ?? 'retail') === kindView
 
   const rawBuckets = data?.buckets ?? []
-  const tradeCount = rawBuckets.reduce(
-    (n, b) => n + b.people.filter((p) => (p.kind ?? 'retail') === 'trade').length,
-    0,
-  )
-  const buckets = rawBuckets.map((b) => ({
-    ...b,
-    people: b.people.filter((p) => keepKind(p.kind)),
-    // 列头那个数字必须跟下面实际铺出来的卡片对得上 —— 对不上，人会以为系统丢了人。
-    total: b.people.filter((p) => keepKind(p.kind)).length,
-    batchEmails: b.batchEmails,
-  }))
+  const tradeCount = countTrade(rawBuckets, data?.offList ?? [])
+  const buckets = rawBuckets.map((b) => filterBucketByKind(b, kindView))
   const doneToday = (data?.doneToday ?? 0) + localDone
 
   // 搜全部人：看板各列 + 不在名单上的，合起来就是这个客户的所有人。
