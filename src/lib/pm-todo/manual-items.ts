@@ -23,6 +23,18 @@ import { isHtmlPageUrl } from '@/lib/seo/url-kind'
 import { AUTO_LANDED_AGENT } from '@/lib/diagnostic/auto-prescribe'
 import { isHandAddedItem } from '@/lib/diagnostic/prescription-landing'
 
+/**
+ * 这些条目**链接坏了也照样下发**。
+ *
+ * 链接闸的本意是「别给人一个白跑的链接」，但对红线类问题，
+ * 「链接不好用」远不如「这条根本没人看见」严重 —— 宁可让人自己找入口，
+ * 也不能让一条客户资料串台的告警因为链接问题静默消失。
+ *
+ * 狄仁杰 2026-08-05 实测：串台告警因为 href 写成相对路径被整条丢掉，
+ * kept=0，整套排查产出为零。
+ */
+const NEVER_DROP_KINDS = new Set<ManualItemKind>(['cross_client_leak'])
+
 /** Meta queued this long without being applied = the applier is stuck. */
 const META_PENDING_STALE_DAYS = 3
 /** Crawl data older than this = the weekly recrawl isn't landing. */
@@ -112,10 +124,13 @@ export async function dropBrokenLinks(
   const kept: ManualItem[] = []
   const dropped: ManualItem[] = []
   items.forEach((it, i) => {
-    if (verdicts[i].kind === 'broken') {
+    if (verdicts[i].kind === 'broken' && !NEVER_DROP_KINDS.has(it.kind)) {
       dropped.push(it)
       console.warn(`[manual-items] 链接打不开,本条不下发: ${it.kind} ${it.href}`)
     } else {
+      if (verdicts[i].kind === 'broken') {
+        console.warn(`[manual-items] 链接打不开但这是红线条目,照常下发: ${it.kind} ${it.href}`)
+      }
       kept.push(it)
     }
   })
@@ -488,7 +503,12 @@ async function pushCrossClientItems(supabase: SupabaseClient, items: ManualItem[
         f.severity === 'critical'
           ? '进客户设置页核对这条配置填的是不是本人的。在纠正之前，系统已经拒绝用它发布任何东西'
           : '确认一下归因口径：这笔花费该算给谁，或者要不要拆开记',
-      href: '/dashboard/clients',
+      // 🔴 必须是绝对网址。写成相对路径 `/dashboard/clients` 时，
+      //    链接闸的 `new URL()` 会抛错 → 判成 broken → **整条待办被丢掉**，
+      //    只剩一行 console.warn。狄仁杰 2026-08-05 实跑证实 kept=0 ——
+      //    也就是说这套串台排查产出为零，而我正是在修「发现死在日志里」的时候
+      //    又造了一个。绝对网址会命中「登录类站点」名单 → unverifiable → 保留。
+      href: 'https://app.magicengine.com.au/dashboard/clients',
     })
   }
 }

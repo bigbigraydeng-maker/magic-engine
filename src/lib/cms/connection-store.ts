@@ -20,7 +20,7 @@ import type {
 } from './vocabulary'
 import { validateWordpressSiteUrl } from './url-guard'
 import { validateShopifyShopUrl } from './shopify-guard'
-import { targetBelongsToClient } from './retest'
+import { judgeDomainOwnership } from '@/lib/clients/domain-match'
 
 /**
  * 🔴 客户之间的东西绝不许串。
@@ -39,6 +39,14 @@ import { targetBelongsToClient } from './retest'
  * **抛错而不是返回 null**：null 会被上层当成「这个客户还没配」而静默跳过，
  * 而这是红线条件，必须响。
  */
+export class CrossClientTargetError extends Error {
+  readonly code = 'CROSS_CLIENT_TARGET'
+  constructor(message: string) {
+    super(message)
+    this.name = 'CrossClientTargetError'
+  }
+}
+
 async function assertClientOwnsTarget(
   clientId: string,
   siteUrl: string | null | undefined,
@@ -56,8 +64,8 @@ async function assertClientOwnsTarget(
   if (!data) throw new Error(`客户 ${clientId} 不存在，不交出发布凭据`)
 
   const own = (data as { domain: string | null }).domain
-  if (targetBelongsToClient(siteUrl, own) === false) {
-    throw new Error(
+  if (judgeDomainOwnership(siteUrl, own) === 'foreign') {
+    throw new CrossClientTargetError(
       `🔴 客户配置串台：这条发布通道指向 ${siteUrl}，但该客户自己的网站是 ${own}。` +
         `在纠正之前，系统不会用它发布任何东西。`,
     )
@@ -661,8 +669,10 @@ export async function getShopifyConnection(
   if (!data)  return null
 
   const row        = data as CmsConnectionRow
-  // 同 WordPress：交出令牌前先核对指向的是不是这个客户自己的店
-  await assertClientOwnsTarget(clientId, row.site_url)
+  // 🔴 Shopify **不走域名比对**：它的 shop_url 天生是 `xxx.myshopify.com`，
+  //    而 clients.domain 是店铺的自有域名，两者永不相等 —— 拿域名尺子量，
+  //    第一个接进来的 Shopify 客户会配置完全正确却被判「串台」永远发不出去。
+  //    它的串台风险靠「同一个店挂两家」检测（见 cross-client-audit）。
   const plainToken = decryptToken(row.encrypted_token)
 
   return {

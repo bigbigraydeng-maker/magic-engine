@@ -17,6 +17,10 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { judgeDomainOwnership } from './domain-match'
+
+/** 我们自己的登录邮箱：一人管多家，共用是正常的。 */
+const OUR_OWN_LOGINS = ['bigbigraydeng@gmail.com'] as const
 
 export interface CrossClientFinding {
   /** 哪张表的哪一列 */
@@ -28,29 +32,6 @@ export interface CrossClientFinding {
   /** 说人话：这是什么问题 */
   what: string
   severity: 'critical' | 'warning'
-}
-
-export function bareHost(v: string | null | undefined): string | null {
-  if (!v) return null
-  const s = v.trim().toLowerCase()
-  if (!s) return null
-  const host = s
-    .replace(/^sc-domain:/, '')
-    .replace(/^https?:\/\//, '')
-    .split('/')[0]
-    .split(':')[0]
-  return host.replace(/^www\./, '') || null
-}
-
-/** 这个值指的是这个客户自己的网站吗。null = 判断不了（比如代码仓名） */
-export function ownsHost(
-  stored: string | null | undefined,
-  clientDomain: string | null | undefined,
-): boolean | null {
-  const target = bareHost(stored)
-  const own = bareHost(clientDomain)
-  if (!target || !own) return null
-  return target === own || target.endsWith(`.${own}`)
 }
 
 export interface OwnedIdentifierRow {
@@ -75,16 +56,33 @@ export function findDomainMismatches(
   const out: CrossClientFinding[] = []
   for (const r of rows) {
     if (!r.value) continue
-    if (ownsHost(r.value, domainOf(r.client_id)) !== false) continue
-    const key = `${r.client_id}|${r.value}`
+    const verdict = judgeDomainOwnership(r.value, domainOf(r.client_id))
+    if (verdict === 'owned') continue
+
+    const key = `${r.client_id}|${r.value}|${verdict}`
     if (seen.has(key)) continue
     seen.add(key)
+
+    if (verdict === 'foreign') {
+      out.push({
+        source,
+        clients: [nameOf(r.client_id)],
+        value: r.value,
+        what: `${nameOf(r.client_id)} 名下存着 ${r.value}，但这不是该客户自己的网站（${domainOf(r.client_id) ?? '未填域名'}）`,
+        severity: 'critical',
+      })
+      continue
+    }
+
+    // 🔴 「判断不了」**不等于安全**。客户没填自己的域名（生产里真有 2 个），
+    //    或域名填成了公共后缀 —— 这时闸门放行、排查沉默，那个客户完全不设防。
+    //    必须把这件事本身报出来，而不是当成没问题。
     out.push({
       source,
       clients: [nameOf(r.client_id)],
       value: r.value,
-      what: `${nameOf(r.client_id)} 名下存着 ${r.value}，但这不是该客户自己的网站（${domainOf(r.client_id) ?? '未填域名'}）`,
-      severity: 'critical',
+      what: `${nameOf(r.client_id)} 有对外通道（${r.value}），但没法核对它是不是该客户自己的 —— 客户档案里的域名是「${domainOf(r.client_id) ?? '空'}」。**这个客户的串台检查目前是关闭的**`,
+      severity: 'warning',
     })
   }
   return out
@@ -116,9 +114,9 @@ export function findSharedIdentifiers(
   }
 
   const out: CrossClientFinding[] = []
-  for (const [value, clientIds] of byValue) {
+  for (const [value, clientIds] of Array.from(byValue.entries())) {
     if (clientIds.size < 2) continue
-    const names = Array.from(clientIds).map(nameOf).sort()
+    const names = Array.from(clientIds).map((id) => nameOf(id)).sort()
     out.push({
       source,
       clients: names,
@@ -142,8 +140,8 @@ export async function auditCrossClientLeaks(
   const clients = (clientsRes.data ?? []) as Array<{ id: string; name: string; domain: string | null }>
   const nameOf = (id: string) => clients.find((c) => c.id === id)?.name ?? id
   const domainOf = (id: string) => clients.find((c) => c.id === id)?.domain ?? null
-  // 我们自己的登录账号：一个人管多家客户的站长工具/邮箱，属于正常共用
-  const ourOwnLogins = clients.map((c) => c.name).length > 0 ? ['bigbigraydeng@gmail.com'] : []
+  // 我们自己的登录邮箱 —— 一个人管多家客户的站长工具/邮箱，是正常共用，不是串台。
+  // （这里原来写成一个恒真的三元表达式，看着像跟客户表有关，其实就是个常量。）
 
   const findings: CrossClientFinding[] = []
 
@@ -160,6 +158,25 @@ export async function auditCrossClientLeaks(
     }),
   )
 
+  // 🔴 GitHub 通道的 site_url 是 NULL，域名尺子量不了 —— 它对上面两条检查是双盲的。
+  //    而 CTS 真正在用的、天天在发的，正是 GitHub 这条。
+  //    比不了域名没关系，「同一个代码仓挂在两个客户名下」是能比的。
+  const repo = await supabase.from('cms_connections').select('client_id, repo_owner, repo_name')
+  if (repo.error) throw new Error(`cms_connections(repo) 查询失败: ${repo.error.message}`)
+  findings.push(
+    ...findSharedIdentifiers(
+      '代码仓通道（cms_connections.repo_owner/repo_name）',
+      ((repo.data ?? []) as Array<{ client_id: string; repo_owner: string | null; repo_name: string | null }>)
+        .filter((r) => r.repo_owner && r.repo_name)
+        .map((r) => ({ client_id: r.client_id, value: `${r.repo_owner}/${r.repo_name}` })),
+      nameOf,
+      {
+        what: (v, names) =>
+          `${names.join(' 和 ')} 的代码仓通道都指向 ${v} —— 文章会发到别人家的网站源码里`,
+      },
+    ),
+  )
+
   const oauth = await supabase.from('platform_oauth_connections').select('client_id, provider, account_id')
   if (oauth.error) throw new Error(`platform_oauth_connections 查询失败: ${oauth.error.message}`)
   findings.push(
@@ -170,7 +187,7 @@ export async function auditCrossClientLeaks(
         value: r.account_id,
       })),
       nameOf,
-      { ignore: ourOwnLogins },
+      { ignore: OUR_OWN_LOGINS },
     ),
   )
 

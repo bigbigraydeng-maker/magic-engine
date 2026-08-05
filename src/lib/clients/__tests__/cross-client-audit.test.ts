@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
+import { judgeDomainOwnership, bareHost } from '../domain-match'
 import {
-  ownsHost,
-  bareHost,
   findDomainMismatches,
   findSharedIdentifiers,
   auditCrossClientLeaks,
@@ -15,6 +14,11 @@ const DOMAINS: Record<string, string | null> = {
   kit: null,
 }
 const nameOf = (id: string) => NAMES[id] ?? id
+/** 旧断言用布尔，唯一实现改成三态后在这里转一层，保留原有覆盖 */
+const judgeOwn = (v: string | null | undefined, d: string | null | undefined) => {
+  const r = judgeDomainOwnership(v, d)
+  return r === 'unknown' ? null : r === 'owned'
+}
 const domainOf = (id: string) => DOMAINS[id] ?? null
 
 describe('bareHost / ownsHost', () => {
@@ -25,21 +29,37 @@ describe('bareHost / ownsHost', () => {
   })
 
   it('🔴 真实那条：CTS 名下存着 Oztop 的网站 → 不属于', () => {
-    expect(ownsHost('https://oztopbuildingsupplies.com.au', 'ctstours.co.nz')).toBe(false)
+    expect(judgeOwn('https://oztopbuildingsupplies.com.au', 'ctstours.co.nz')).toBe(false)
   })
 
   it('子域名算自己家', () => {
-    expect(ownsHost('https://shop.oztopbuildingsupplies.com.au', 'oztopbuildingsupplies.com.au')).toBe(true)
+    expect(judgeOwn('https://shop.oztopbuildingsupplies.com.au', 'oztopbuildingsupplies.com.au')).toBe(true)
   })
 
   it('🔴 前缀像但不是同一个域，不许放过', () => {
-    expect(ownsHost('https://ctstours.co.nz.evil.com', 'ctstours.co.nz')).toBe(false)
-    expect(ownsHost('https://xctstours.co.nz', 'ctstours.co.nz')).toBe(false)
+    expect(judgeOwn('https://ctstours.co.nz.evil.com', 'ctstours.co.nz')).toBe(false)
+    expect(judgeOwn('https://xctstours.co.nz', 'ctstours.co.nz')).toBe(false)
+  })
+
+  // 🔴 `用户名@主机` 这种写法里，真正会被访问的是 @ 之后那段。
+  //    不剥的话 evil.com 会被当成路径的一部分，判成「判断不了」——
+  //    而闸门只拦明确的 foreign，判断不了就放行 = 打穿。
+  it('🔴 ctstours.co.nz@evil.com 真正去的是 evil.com，必须判成外人', () => {
+    expect(judgeDomainOwnership('https://ctstours.co.nz@evil.com', 'ctstours.co.nz')).toBe('foreign')
+    expect(judgeDomainOwnership('ctstours.co.nz@evil.com', 'ctstours.co.nz')).toBe('foreign')
+    // 自己家带用户名的照常放行
+    expect(judgeDomainOwnership('https://user@ctstours.co.nz', 'ctstours.co.nz')).toBe('owned')
+  })
+
+  it('🔴 解析不出主机名的一律「判断不了」，不许当成自己家', () => {
+    for (const bad of ['//evil.com/x', 'not a url', '', '   ', 'https://', '192.168.1.1']) {
+      expect(judgeDomainOwnership(bad, 'ctstours.co.nz'), bad).not.toBe('owned')
+    }
   })
 
   it('判断不了返回 null，不当成有问题', () => {
-    expect(ownsHost(null, 'ctstours.co.nz')).toBeNull()
-    expect(ownsHost('https://x.com', null)).toBeNull()
+    expect(judgeOwn(null, 'ctstours.co.nz')).toBeNull()
+    expect(judgeOwn('https://x.com', null)).toBeNull()
   })
 })
 
@@ -60,9 +80,39 @@ describe('findDomainMismatches', () => {
     expect(f[0].what).toContain('不是该客户自己的网站')
   })
 
-  it('没填域名的客户判断不了 → 不报（不能因为资料不全就天天喊狼来了）', () => {
+  // 🔴 这条原来断言「判断不了就不报」—— 那正是一个洞：
+  //    生产里有 2 个客户没填域名，闸门放行、排查沉默，他们完全不设防。
+  //    现在改成：报出来，但标 warning（是「检查关掉了」，不是「确认串台了」）。
+  it('🔴 没填域名 = 这个客户的串台检查是关闭的，必须说出来而不是当没事', () => {
     const f = findDomainMismatches('x', [{ client_id: 'roman', value: 'https://anything.com' }], domainOf, nameOf)
-    expect(f).toEqual([])
+    expect(f).toHaveLength(1)
+    expect(f[0].severity).toBe('warning')
+    expect(f[0].what).toContain('串台检查目前是关闭的')
+  })
+
+  it('🔴 域名填成公共后缀（co.nz）也算判断不了 —— 否则整个后缀都算「自己家」', () => {
+    const f = findDomainMismatches(
+      'x',
+      [{ client_id: 'bad', value: 'https://evil.co.nz' }],
+      () => 'co.nz',
+      () => '域名填错的客户',
+    )
+    expect(f).toHaveLength(1)
+    expect(f[0].severity).toBe('warning')
+  })
+
+  it('确认串台的是 critical，判断不了的是 warning —— 两者不能混为一谈', () => {
+    const f = findDomainMismatches(
+      'x',
+      [
+        { client_id: 'cts', value: 'https://oztopbuildingsupplies.com.au' },
+        { client_id: 'roman', value: 'https://anything.com' },
+      ],
+      domainOf,
+      nameOf,
+    )
+    expect(f.filter((x) => x.severity === 'critical')).toHaveLength(1)
+    expect(f.filter((x) => x.severity === 'warning')).toHaveLength(1)
   })
 
   it('同一条重复出现只报一次', () => {
@@ -199,5 +249,68 @@ describe('auditCrossClientLeaks', () => {
     expect(findings).toHaveLength(1)
     expect(findings[0].severity).toBe('warning')
     expect(findings[0].what).toContain('算进两个客户的成本')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 🔴 GitHub 通道 —— 狄仁杰 2026-08-05 攻击验证指出：
+//    它的 site_url 是 NULL，域名尺子量不了，对上面两条检查是**双盲**的。
+//    而 CTS 真正在用、天天在发的，正是 GitHub 这条（WordPress 那条是坏的）。
+//    比不了域名没关系，「同一个代码仓挂两家」是能比的。
+// ---------------------------------------------------------------------------
+
+describe('auditCrossClientLeaks —— 代码仓通道', () => {
+  it('🔴 两个客户指向同一个代码仓 → 报出来', async () => {
+    const findings = await auditCrossClientLeaks(
+      fakeSupabase({
+        clients: { data: CLIENTS },
+        cms_connections: {
+          data: [
+            { client_id: 'cts', site_url: null, repo_owner: 'me', repo_name: 'chinatravel' },
+            { client_id: 'oz', site_url: null, repo_owner: 'me', repo_name: 'chinatravel' },
+          ],
+        },
+        platform_oauth_connections: { data: [] },
+        meta_ads_snapshots: { data: [] },
+      }),
+    )
+    const repo = findings.filter((f) => f.source.includes('代码仓'))
+    expect(repo).toHaveLength(1)
+    expect(repo[0].severity).toBe('critical')
+    expect(repo[0].what).toContain('别人家的网站源码')
+  })
+
+  it('各用各的仓不报', async () => {
+    const findings = await auditCrossClientLeaks(
+      fakeSupabase({
+        clients: { data: CLIENTS },
+        cms_connections: {
+          data: [
+            { client_id: 'cts', site_url: null, repo_owner: 'me', repo_name: 'chinatravel' },
+            { client_id: 'oz', site_url: null, repo_owner: 'me', repo_name: 'oztop-site' },
+          ],
+        },
+        platform_oauth_connections: { data: [] },
+        meta_ads_snapshots: { data: [] },
+      }),
+    )
+    expect(findings.filter((f) => f.source.includes('代码仓'))).toEqual([])
+  })
+
+  it('🔴 只填了一半的仓（owner 有 name 没有）不参与比对，别造出假的「同一个仓」', async () => {
+    const findings = await auditCrossClientLeaks(
+      fakeSupabase({
+        clients: { data: CLIENTS },
+        cms_connections: {
+          data: [
+            { client_id: 'cts', site_url: null, repo_owner: 'me', repo_name: null },
+            { client_id: 'oz', site_url: null, repo_owner: 'me', repo_name: null },
+          ],
+        },
+        platform_oauth_connections: { data: [] },
+        meta_ads_snapshots: { data: [] },
+      }),
+    )
+    expect(findings.filter((f) => f.source.includes('代码仓'))).toEqual([])
   })
 })

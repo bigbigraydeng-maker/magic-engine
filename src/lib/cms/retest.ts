@@ -21,6 +21,23 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { judgeDomainOwnership } from '@/lib/clients/domain-match'
+
+/**
+ * 通道指向的是不是这个客户自己的站。
+ *
+ * 🔴 判断逻辑**不在这里** —— 全仓唯一一份在 `@/lib/clients/domain-match`。
+ *    先前这里有一份副本，写完当天就跟另一份漂移了（一份剥 `sc-domain:` 一份不剥，
+ *    而生产的 GSC 记录正是那个形状），同一行记录两边给出相反结论。
+ */
+export function targetBelongsToClient(
+  siteUrl: string | null | undefined,
+  clientDomain: string | null | undefined,
+): boolean | null {
+  const v = judgeDomainOwnership(siteUrl, clientDomain)
+  return v === 'unknown' ? null : v === 'owned'
+}
+
 
 /** 同一条连接最短重测间隔。太密等于替客户的防火墙加深对我们的敌意。 */
 export const RETEST_MIN_HOURS = 20
@@ -44,41 +61,6 @@ export interface RetestOutcome {
   error: string | null
   /** 通道指向别的客户 —— 没有测，也绝不会被标成连通 */
   mismatched?: true
-}
-
-function bareHost(v: string | null | undefined): string | null {
-  if (!v) return null
-  const s = v.trim().toLowerCase()
-  if (!s) return null
-  const withoutScheme = s.replace(/^https?:\/\//, '')
-  const host = withoutScheme.split('/')[0].split(':')[0]
-  return host.replace(/^www\./, '') || null
-}
-
-/**
- * 这条通道指向的，确实是这个客户自己的网站吗。
- *
- * 🔴 2026-08-05 实测发现的真事故：**CTS 的 WordPress 通道指向的是 Oztop 的网站。**
- *    CTS 自己的域名是 ctstours.co.nz，那条连接却填着 oztopbuildingsupplies.com.au。
- *    从建档日期能还原：CTS 那条建于 05-25，Oztop 自己那条建于 06-05（晚 11 天），
- *    网址和用户名完全一样 —— 当初填错了客户，补了正确的那条之后，错的没人清理。
- *
- *    它一直是 error 所以从没真发出去过东西。**但自动重测会把它激活**：
- *    Oztop 网站一旦不再拦我们，这条也会被判成连通，
- *    然后 CTS 的文章就会发到 Oztop 的网站上 —— 客户内容串台。
- *
- * 所以：**指向对不上就不测、更不许标成连通**。
- * 返回 null 表示「判断不了」（比如 GitHub 通道指向的是仓库不是域名），
- * 那种情况不拦 —— 仓库名跟域名本来就可以不一样。
- */
-export function targetBelongsToClient(
-  siteUrl: string | null | undefined,
-  clientDomain: string | null | undefined,
-): boolean | null {
-  const target = bareHost(siteUrl)
-  const own = bareHost(clientDomain)
-  if (!target || !own) return null
-  return target === own || target.endsWith(`.${own}`)
 }
 
 /**
@@ -147,9 +129,13 @@ export async function retestBrokenConnections(
     throw new Error(`cms_connections 查询失败: ${error.message}`)
   }
 
-  const rows = ((data ?? []) as Array<
-    RetestCandidateRow & { clients?: { domain: string | null } | null }
-  >).map((r) => ({ ...r, client_domain: r.client_domain ?? r.clients?.domain ?? null }))
+  // PostgREST 的嵌套 select 可能返回对象也可能返回单元素数组，两种都接住
+  const rows = ((data ?? []) as unknown as Array<
+    RetestCandidateRow & { clients?: { domain: string | null } | Array<{ domain: string | null }> | null }
+  >).map((r) => {
+    const joined = Array.isArray(r.clients) ? r.clients[0] : r.clients
+    return { ...r, client_domain: r.client_domain ?? joined?.domain ?? null }
+  })
 
   const due = pickConnectionsToRetest(rows, now)
   const outcomes: RetestOutcome[] = []
