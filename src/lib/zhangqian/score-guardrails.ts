@@ -163,7 +163,9 @@ function detectFabricatedNumbers(report: DiscoveryReport): SanityIssue[] {
   const issues: SanityIssue[] = []
 
   // Rating precision vs review count sanity
-  for (const [i, plat] of (report.review_platforms ?? []).entries()) {
+  const reviewPlatforms = report.review_platforms ?? []
+  for (let i = 0; i < reviewPlatforms.length; i++) {
+    const plat = reviewPlatforms[i]
     if (plat.rating !== null && plat.review_count !== null && plat.review_count < 5) {
       const isPrecise = Number.isFinite(plat.rating) && (plat.rating * 10) % 10 !== 0  // 4.7 vs 5.0
       if (isPrecise) {
@@ -179,7 +181,9 @@ function detectFabricatedNumbers(report: DiscoveryReport): SanityIssue[] {
   }
 
   // Competitor monthly_traffic without rationale citing a source
-  for (const [i, comp] of (report.competitors ?? []).entries()) {
+  const trafficCompetitors = report.competitors ?? []
+  for (let i = 0; i < trafficCompetitors.length; i++) {
+    const comp = trafficCompetitors[i]
     if (comp.monthly_traffic !== null && comp.monthly_traffic !== undefined && comp.monthly_traffic > 0) {
       const rationale = comp.rationale ?? ''
       const mentionsSource = /semrush|dataforseo|ahrefs|similarweb|source|据|来源|数据/i.test(rationale)
@@ -258,7 +262,9 @@ function detectCrossGeography(report: DiscoveryReport): SanityIssue[] {
   const NZ_REGIONS_OTHER_THAN_AUCKLAND = ['wellington', 'christchurch', 'hamilton', 'tauranga', 'dunedin']
   const AU_MAJOR_CITIES = ['sydney', 'melbourne', 'brisbane', 'perth', 'adelaide']
 
-  for (const [i, comp] of (report.competitors ?? []).entries()) {
+  const geoCompetitors = report.competitors ?? []
+  for (let i = 0; i < geoCompetitors.length; i++) {
+    const comp = geoCompetitors[i]
     const loc = (comp.location ?? '').toLowerCase()
     if (!loc) continue
     if (comp.relevance !== 'direct') continue  // only flag DIRECT competitors as wrong region
