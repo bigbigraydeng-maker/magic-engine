@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getAccounts, uploadMediaFromUrl, schedulePost } from '@/lib/publer/client'
 import { judgeOutgoingPost, priceGateMessage } from '@/lib/content/price-claim-gate'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 // POST /api/publer/schedule
 // 手动从 Visuals 页面触发：用指定 asset + 账号 + 时间 发布到 Publer
@@ -20,6 +21,15 @@ export async function POST(req: NextRequest) {
       .single()
 
     if (!asset) return NextResponse.json({ error: 'Asset not found' }, { status: 404 })
+
+    // 🔴 这条路会把东西真发到客户的社媒账号上,却一直没有任何鉴权 ——
+    // 光靠一个 asset_id 就能拿别人客户的素材去发。鉴权必须在读到 asset 之后做:
+    // 该发给谁由**素材自己的 client_id** 决定,不能让调用方传客户身份进来。
+    const access = await requireDashboardClientAccess(asset.client_id)
+    if (!access.ok) {
+      return NextResponse.json({ error: access.error }, { status: access.status })
+    }
+
     if (asset.generation_status !== 'ready') {
       return NextResponse.json({ error: 'Asset not ready' }, { status: 400 })
     }
