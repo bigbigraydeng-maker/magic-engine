@@ -101,8 +101,12 @@ describe('方案更新通知的报数 —— 读侧口径必须跟清理侧一�
       supersedesId: 'p-old',
       droppedItems: [{ id: 'x', status: 'superseded' }],
     })
-    expect(itemQueries.length).toBeGreaterThan(0)
-    for (const q of itemQueries) {
+    // ⚠️ 只看**报数这条链**发出的查询 —— 判据是「按方案号查动作」。
+    //    同一张表上另有别的功能在查（自动执行循环要看全部来源的待办动作），
+    //    那些不归这条口径管；一刀切成「所有查询都必须带 source」会把它们误伤。
+    const reportQueries = itemQueries.filter((q) => q.prescription_id !== undefined)
+    expect(reportQueries.length).toBeGreaterThan(0)
+    for (const q of reportQueries) {
       expect(q.source).toBe('diagnostic')
     }
   })

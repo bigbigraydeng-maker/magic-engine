@@ -488,6 +488,26 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # DAPE E 段(执行)—— 把看板上排好的动作真正跑掉,产物只落草稿。
+  # 🔴 起因:2026-08-05 实测 execution_items 里 281 件待办,最后一件「完成」在 7-21。
+  #    判定用的两道闸(背书+白名单)早写好了,一直零调用方 —— 链子跑到最后一步就断。
+  # 🔴 上线方式(PM 认可):现在挂着 ?dry_run=1,**只选不做**,把名单打出来给人眼确认。
+  #    确认名单对了之后分两步放开:先去掉 dry_run 只留 ?max=1 试水一轮,
+  #    再把 ?max=1 也去掉(一轮最多 3 件,每客户 1 件是代码里的硬上限)。
+  #    这两步各是一行改动,改在这里、看得见、能回滚。
+  # 每天 09:30 UTC,排在周二 08:00 的处方之后 —— 新方案落地当天就能被执行。
+  - type: cron
+    name: execution-auto-run
+    env: node
+    schedule: "30 9 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
+        "https://app.magicengine.com.au/api/cron/execution-auto-run?dry_run=1"
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   - type: cron
     name: anomaly-detector-daily
     env: node

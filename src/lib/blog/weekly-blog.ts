@@ -29,14 +29,15 @@ import { generateWithQualityRetry } from '@/lib/blog/generate-with-quality'
 import { getWeakSpotOpportunities } from '@/lib/blog/topic-selector'
 import { auditExistingContent } from '@/lib/blog/content-auditor'
 import { checkContentDuplicate } from '@/lib/blog/content-gate'
+import { weeklyCooldownStart } from '@/lib/blog/cadence'
 import { fetchRelatedPages, buildPagesContextBlock } from '@/lib/blog/pages-context'
 import { checkInternalLinks } from '@/lib/blog/internal-link-checker'
 import { SeoContentAdapter } from '@/lib/flywheel/adapters/SeoContentAdapter'
 import { SEO_ACTION_TYPE, SEO_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import type { BlogOpportunity } from '@/types/magic-engine'
 
-/** Don't generate if any non-failed post exists newer than this many days. */
-const WEEKLY_COOLDOWN_DAYS = 6
+// 一周一篇的总量约束住在 @/lib/blog/cadence —— DAPE 自动执行循环也读同一个数字，
+// 各自定义会变成一周两篇（见那个文件的头注）。
 /** A candidate topic is "already covered" if a post in this window used it. */
 const TOPIC_DEDUP_DAYS = 60
 /** How many opportunities to consider per client. */
@@ -75,7 +76,7 @@ export interface WeeklyBlogBatchResult {
   results: WeeklyBlogClientResult[]
 }
 
-interface EligibleClient {
+export interface EligibleClient {
   id: string
   name: string
   domain: string | null
@@ -154,7 +155,20 @@ async function loadBlockedTerms(
 
 // ── Per-client orchestration ────────────────────────────────────────────────────
 
-async function runForClient(
+/**
+ * 给一个客户写一篇（如果这周该写、且有题目可写）。
+ *
+ * 🔴 **全仓唯一一条自动写博客的线。** DAPE 的 E 段自动执行
+ * （`src/lib/execution/auto-run.ts`）也走这个函数，不另起炉灶 ——
+ * 因为该拦的东西全长在这里面：一周一篇的总量闸（人跑机器跑都算）、
+ * 60 天题目去重、`checkContentDuplicate` 永久去重、站内已覆盖检查、
+ * 质量重试、以及「产物只落 draft」。
+ *
+ * 另开一条生成线会同时踩两个坑：① 上面这些闸一个都不过；
+ * ② 反向掐死周更 —— 它的冷却是「6 天内有任何非失败 post 就跳过」，
+ * 另一条线写出来的文章会让周更这条线整周不出。
+ */
+export async function generateWeeklyBlogForClient(
   supabase: SupabaseClient,
   client: EligibleClient,
 ): Promise<WeeklyBlogClientResult> {
@@ -167,8 +181,7 @@ async function runForClient(
   try {
     // 1. Weekly cooldown — any real post (human or cron) counts toward the
     //    cadence. failed/rejected rows are empty placeholders, not output.
-    const cooldownStart = new Date()
-    cooldownStart.setDate(cooldownStart.getDate() - WEEKLY_COOLDOWN_DAYS)
+    const cooldownStart = weeklyCooldownStart()
 
     const { data: recentPosts, error: recentErr } = await supabase
       .from('blog_posts')
@@ -346,7 +359,7 @@ export async function runWeeklyBlogBatch(
       })
       continue
     }
-    results.push(await runForClient(supabase, client))
+    results.push(await generateWeeklyBlogForClient(supabase, client))
   }
 
   return {

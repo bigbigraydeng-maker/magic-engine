@@ -4,16 +4,25 @@ import {
   AUTO_RUNNABLE_ACTION_TYPES,
   OUTWARD_ACTION_TYPES,
   NOT_AUTO_RUNNABLE_NEEDS_EXECUTOR,
+  PRESCRIPTION_FRESH_DAYS,
 } from './auto-run-policy'
 
 import type { Endorsement } from './auto-run-policy'
 
-/** 默认给「当前方案还认着」—— 让原有用例专测安全闸那一层 */
+/** 默认给「当前方案还认着 + 客户在服务中」—— 让原有用例专测安全闸那一层 */
 const pending = (
   actionType: string | null,
   fixType: string | null = 'me_auto',
-  endorsement: Endorsement = { kind: 'current_prescription' },
-) => ({ actionType, fixType, status: 'pending', endorsement })
+  endorsement: Endorsement = { kind: 'current_prescription', ageDays: 2 },
+) => ({
+  actionType,
+  fixType,
+  status: 'pending',
+  clientStatus: 'active',
+  weeklyBlogEnabled: true,
+  pinnedTopic: null,
+  endorsement,
+})
 
 describe('judgeAutoRun —— 白名单，认不出就停', () => {
   it('白名单里的、待办的、标着系统能做的 → 跑', () => {
@@ -76,7 +85,8 @@ describe('judgeAutoRun —— 白名单，认不出就停', () => {
     for (const s of ['in_progress', 'completed', 'skipped', 'superseded']) {
       const v = judgeAutoRun({
         actionType: 'generate_blog_post', fixType: 'me_auto', status: s,
-        endorsement: { kind: 'current_prescription' },
+        clientStatus: 'active', weeklyBlogEnabled: true, pinnedTopic: null,
+        endorsement: { kind: 'current_prescription', ageDays: 2 },
       })
       expect(v.run, s).toBe(false)
       if (!v.run) expect(v.reason).toContain('有人动过')
@@ -85,6 +95,9 @@ describe('judgeAutoRun —— 白名单，认不出就停', () => {
 
   it('🔴 白名单本身不许悄悄长胖 —— 每加一条都要重新想「它的产物访客看得到吗」', () => {
     // 这条是给未来改动的人看的：白名单变了这里就红，逼你重新过一遍入选标准。
+    // ⚠️ 还要重新想第二件事：客户闸现在用的是 `seo_config.weekly_blog`，
+    //    因为三种类型全是写博客。这里进了非博客类型，那道闸就名不副实了，
+    //    必须同时拆开（比如按维度各配一个开关），不能沿用。
     expect([...AUTO_RUNNABLE_ACTION_TYPES].sort()).toEqual([
       'generate_blog_post',
       'generate_flooring_blog_post',
@@ -118,7 +131,14 @@ describe('judgeAutoRun —— 白名单，认不出就停', () => {
 })
 
 describe('judgeAutoRun —— 「该不该做」排在「能不能做」前面', () => {
-  const safe = { actionType: 'generate_blog_post', fixType: 'me_auto', status: 'pending' }
+  const safe = {
+    actionType: 'generate_blog_post',
+    fixType: 'me_auto',
+    status: 'pending',
+    clientStatus: 'active',
+    weeklyBlogEnabled: true,
+    pinnedTopic: null,
+  }
 
   it('🔴 不挂任何方案的一律不跑 —— 看板上 272 件里有 204 件是这种，最老的躺了快三个月', () => {
     const v = judgeAutoRun({ ...safe, endorsement: { kind: 'unendorsed', ageDays: 82 } })
@@ -140,7 +160,44 @@ describe('judgeAutoRun —— 「该不该做」排在「能不能做」前面',
   })
 
   it('当前方案还认着 → 放行（其余闸门照常）', () => {
-    expect(judgeAutoRun({ ...safe, endorsement: { kind: 'current_prescription' } }).run).toBe(true)
+    expect(
+      judgeAutoRun({ ...safe, endorsement: { kind: 'current_prescription', ageDays: 3 } }).run,
+    ).toBe(true)
+  })
+
+  it('挂在还在跑的营销计划下也算数 —— 那是第二根有效的锚', () => {
+    expect(
+      judgeAutoRun({ ...safe, endorsement: { kind: 'current_marketing_plan', ageDays: 10 } }).run,
+    ).toBe(true)
+  })
+
+  it('🔴 已结束/未批准的营销计划 → 不跑（库里 6-08 那批 33 件就是这种）', () => {
+    const v = judgeAutoRun({ ...safe, endorsement: { kind: 'stale_marketing_plan' } })
+    expect(v.run).toBe(false)
+    if (!v.run) expect(v.reason).toContain('不补做')
+  })
+
+  it(`🔴 方案批下来超过 ${PRESCRIPTION_FRESH_DAYS} 天就不算「当前」—— 否则它是永久通行证`, () => {
+    // 2026-08-05 实测：库里仅有的 2 件可跑动作，背后的方案是 69 天和 83 天前批的。
+    // 同一套判断里分析产物只给 8 天，方案却无限期有效，那道闸等于没有。
+    for (const age of [69, 83]) {
+      const v = judgeAutoRun({ ...safe, endorsement: { kind: 'current_prescription', ageDays: age } })
+      expect(v.run, `${age} 天`).toBe(false)
+      if (!v.run) expect(v.reason).toContain('太久没复核')
+    }
+    // 边界：正好 45 天还算数，45 天零一点就不算
+    expect(
+      judgeAutoRun({ ...safe, endorsement: { kind: 'current_prescription', ageDays: PRESCRIPTION_FRESH_DAYS } }).run,
+    ).toBe(true)
+    expect(
+      judgeAutoRun({ ...safe, endorsement: { kind: 'current_prescription', ageDays: PRESCRIPTION_FRESH_DAYS + 0.1 } }).run,
+    ).toBe(false)
+  })
+
+  it('营销计划也有同一条保质期', () => {
+    expect(
+      judgeAutoRun({ ...safe, endorsement: { kind: 'current_marketing_plan', ageDays: 100 } }).run,
+    ).toBe(false)
   })
 
   it('近期分析刚出的也算数', () => {
@@ -158,5 +215,51 @@ describe('judgeAutoRun —— 「该不该做」排在「能不能做」前面',
     const v = judgeAutoRun({ ...safe, endorsement: { kind: 'unendorsed', ageDays: 5 } })
     expect(v.run).toBe(false)
     if (!v.run) expect(v.reason).toContain('没有任何一轮分析说过它该做')
+  })
+})
+
+describe('judgeAutoRun —— 客户闸排在所有判断之前', () => {
+  const good = {
+    actionType: 'generate_blog_post',
+    fixType: 'me_auto',
+    status: 'pending',
+    clientStatus: 'active',
+    weeklyBlogEnabled: true,
+    pinnedTopic: null,
+    endorsement: { kind: 'current_prescription' as const, ageDays: 1 },
+  }
+
+  it('🔴 潜客 / 已归档客户的看板一律不碰 —— 他们不是我们的客户', () => {
+    for (const s of ['prospect', 'archived', 'paused', '']) {
+      const v = judgeAutoRun({ ...good, clientStatus: s })
+      expect(v.run, s).toBe(false)
+      if (!v.run) expect(v.reason).toContain('不是在服务的状态')
+    }
+  })
+
+  it('🔴 没开周更的客户不碰 —— 演示账号(DEMO)靠这道闸挡，client_status 拦不住它', () => {
+    const v = judgeAutoRun({ ...good, weeklyBlogEnabled: false })
+    expect(v.run).toBe(false)
+    if (!v.run) expect(v.reason).toContain('没开每周内容')
+  })
+
+  it('🔴 客户闸比背书先判 —— 潜客身上挂着一份有效方案也照样不跑', () => {
+    const v = judgeAutoRun({ ...good, clientStatus: 'prospect' })
+    expect(v.run).toBe(false)
+    // 说的必须是「这家公司不该被碰」，不能拿背书理由搪塞
+    if (!v.run) expect(v.reason).toContain('非客户')
+  })
+
+  it('🔴 卡上点名了要打哪个词 → 停手叫人（我只会按数据自己挑题，会写歪）', () => {
+    const v = judgeAutoRun({ ...good, pinnedTopic: 'spc flooring brisbane' })
+    expect(v.run).toBe(false)
+    if (!v.run) {
+      expect(v.reason).toContain('spc flooring brisbane')
+      expect(v.reason).toContain('这条你来点')
+    }
+  })
+
+  it('没点名的照常跑', () => {
+    expect(judgeAutoRun({ ...good, pinnedTopic: null }).run).toBe(true)
   })
 })

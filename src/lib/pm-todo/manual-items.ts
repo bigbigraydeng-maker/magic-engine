@@ -56,6 +56,8 @@ export type ManualItemKind =
   | 'blog_draft_waiting'
   | 'cross_client_leak'
   | 'price_claim_unbacked'
+  | 'auto_run_blocked'
+  | 'auto_run_stuck'
 
 export interface ManualItem {
   kind: ManualItemKind
@@ -95,6 +97,7 @@ import { judgeLeadsSanity } from '@/lib/strategy/leads-sanity'
 import { judgeWorkerPresence } from '@/lib/factory/worker-presence'
 import { auditGoalBaselines } from '@/lib/strategy/baseline-audit'
 import { fetchBlogDraftTodos } from '@/lib/pm-todo/blog-drafts'
+import { fetchAutoRunTodos } from '@/lib/pm-todo/auto-run-items'
 import { auditCrossClientLeaks } from '@/lib/clients/cross-client-audit'
 import { containsPriceClaim } from '@/lib/content/price-claim'
 import { judgeOutgoingPost } from '@/lib/content/price-claim-gate'
@@ -192,6 +195,12 @@ export async function loadManualItems(
   // 草稿一直沉在库里（实测 3 篇，最老的躺了 5 天，而上一篇真正上线的文章在 47 天前）。
   await pushBlogDraftItems(supabase, items, ids, now, nameOf).catch((e) =>
     console.warn('[manual-items] 草稿待办生成失败（不阻塞其他待办）:', e),
+  )
+
+  // 机器本来能自己做、今天却没做的动作 —— 拦下来的原因必须有人看见。
+  // 只写进 cron 的运行记录 = 发现死在日志里（管道断头那条铁律的反面教材）。
+  await pushAutoRunItems(supabase, items, now, nameOf).catch((e) =>
+    console.warn('[manual-items] 自动执行待办生成失败（不阻塞其他待办）:', e),
   )
 
   // 客户之间有没有串台 —— PM 2026-08-05：「坚决不能胡窜」。
@@ -607,6 +616,31 @@ async function pushBlogDraftItems(
   for (const t of todos) {
     items.push({
       kind: 'blog_draft_waiting',
+      client_id: t.client_id,
+      client_name: nameOf(t.client_id),
+      what: t.what,
+      how: t.how,
+      href: t.href,
+    })
+  }
+}
+
+/**
+ * 自动执行这条线今天的产出说明。
+ *
+ * 两类：机器已经停手的（一条一条报）、被闸门拦下的（按客户汇总一条）。
+ * 判定复用 cron 自己的选择函数，所以这里说的话跟机器真做的事永远一致。
+ */
+async function pushAutoRunItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  now: Date,
+  nameOf: (id: string) => string,
+): Promise<void> {
+  const todos = await fetchAutoRunTodos(supabase, now)
+  for (const t of todos) {
+    items.push({
+      kind: t.stuck ? 'auto_run_stuck' : 'auto_run_blocked',
       client_id: t.client_id,
       client_name: nameOf(t.client_id),
       what: t.what,
