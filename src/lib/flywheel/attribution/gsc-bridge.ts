@@ -136,7 +136,10 @@ async function attributeAction(
     SEO_METRIC_KEY.GSC_PAGE_IMPRESSIONS,
     SEO_METRIC_KEY.GSC_PAGE_AVG_POSITION,
   ]
-  const metricKeys = scope.kind === 'page' ? pageMetricKeys : domainMetricKeys
+  // Include legacy domain keys when a page action becomes live. This cleans up
+  // any outcome written by the old ungated bridge while its PR was still open.
+  const metricKeys =
+    scope.kind === 'page' ? [...domainMetricKeys, ...pageMetricKeys] : domainMetricKeys
 
   // Delete any existing GSC outcomes for this action (idempotent)
   await supabaseAdmin
