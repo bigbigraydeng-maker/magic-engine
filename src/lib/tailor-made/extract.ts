@@ -1,5 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk'
-import { getAnthropicClient, MODEL_SONNET } from '@/lib/anthropic/client'
+import { getAnthropicClientDirect, MODEL_SONNET } from '@/lib/anthropic/client'
 import type { TailorMadeItinerary } from './types'
 
 /**
@@ -207,9 +207,12 @@ ${message}`
     tool_choice: { type: 'tool', name: SUBMIT_TOOL.name },
   }
 
+  // 直连 Anthropic，不经 CF AI Gateway：20 天行程 + max_tokens 8192 常跑
+  // 60-120s，超过网关 ~60s 超时会返回 HTML 524（浏览器端看到的就是
+  // "Unexpected token '<'" JSON 解析错误）。与 #364 Marketing Plan 同根同解。
   let response: Anthropic.Message
   try {
-    response = await getAnthropicClient().messages.create(body)
+    response = await getAnthropicClientDirect().messages.create(body)
   } catch (sdkErr) {
     // 与 lib/anthropic/client.ts 同样的兜底：0.32.1 的 SDK 在 Node 24 上
     // 偶发 "Premature close"，同请求裸 fetch 是通的
