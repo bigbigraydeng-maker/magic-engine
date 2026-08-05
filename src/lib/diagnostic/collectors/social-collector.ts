@@ -66,7 +66,26 @@ export class SocialCollector {
     _keywords: string[],
   ): Promise<SocialCollectorResult> {
     try {
-      if (await this.hasFreshCache(clientId)) return { score: null, findings: [], post_samples: [] }
+      // 🔴 2026-08-05 修复：这里原来是「最近 7 天有过任何一条社媒 finding，
+      //    就返回 score: null」—— 缓存缓的是 **findings，不是分数**，而系统里
+      //    没有任何地方存过社媒的旧分数。于是缓存一命中，**这一柱就被凭空销毁 7 天**。
+      //
+      //    实测后果（CTS）：三个月 12 次体检，**只有 1 次拿到过社媒分数**。
+      //    客户在端口上看到的口碑/社媒分「72 → 空 → 99」，不是他家账号忽好忽坏，
+      //    是这一柱那次到底测没测。而空分数还会被开处方的 AI 读成
+      //    `social: null/100`（= 测了很烂）拿去开方。
+      //
+      //    更隐蔽的第二个 bug：上一轮如果写的是**失败** finding
+      //    （「Facebook data could not be fetched」），也算「新鲜」，
+      //    于是一次抓取失败毒害后续 7 天。
+      //
+      //    改法一次解掉两个：不看「有没有 finding」，改看**上一次到底有没有
+      //    测出分数**。有分数 → 沿用它（省掉重复抓取，这本来就是缓存的本意）；
+      //    没分数 → 说明上次是失败或跳过，**照常去测**。
+      const cached = await this.recentScore(clientId)
+      if (cached !== null) {
+        return { score: cached, findings: [], post_samples: [] }
+      }
 
       const handles = await this.fetchSocialHandles(clientId)
       const configured = [
@@ -249,18 +268,37 @@ export class SocialCollector {
     return { score, findings, post_samples }
   }
 
-  private async hasFreshCache(clientId: string): Promise<boolean> {
+  /**
+   * 缓存窗口内**真的测出过分数**吗。
+   *
+   * 返回分数 = 沿用它（本来就是缓存想省的那次抓取）。
+   * 返回 null = 窗口内没有任何一次成功测量（上次失败了、跳过了、或压根没跑过），
+   * **那就该老老实实去测**，而不是把这一柱交白卷。
+   *
+   * 只认 `status='completed'` 的体检：跑挂了的那次里的分数不算数。
+   */
+  private async recentScore(clientId: string): Promise<number | null> {
     const cutoff = new Date(
       Date.now() - SOCIAL_CACHE_TTL_DAYS * 24 * 60 * 60 * 1000,
     ).toISOString()
-    const { data } = await this.supabase
-      .from('diagnostic_findings')
-      .select('id')
+    const { data, error } = await this.supabase
+      .from('diagnostic_runs')
+      .select('dimension_scores, created_at')
       .eq('client_id', clientId)
-      .eq('dimension', 'social')
+      .eq('status', 'completed')
       .gte('created_at', cutoff)
-      .limit(1)
-    return (data as unknown[])?.length > 0
+      .order('created_at', { ascending: false })
+      .limit(5)
+
+    // 查不出来就当没有缓存去测 —— 「查不到」不能当成「有」，
+    // 那样又会把这一柱交白卷。
+    if (error || !data) return null
+
+    for (const row of data as Array<{ dimension_scores: Record<string, number | null> | null }>) {
+      const s = row.dimension_scores?.social
+      if (typeof s === 'number') return s
+    }
+    return null
   }
 
   private postFrequencyScore(posts: number): number {

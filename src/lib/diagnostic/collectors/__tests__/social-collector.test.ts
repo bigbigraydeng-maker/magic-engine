@@ -52,12 +52,20 @@ const DEFAULT_INSTAGRAM = {
   topPosts30d: DEFAULT_TOP_POSTS,
 }
 
-/** Builds a Supabase mock that controls cache check + client handle fetch */
+/**
+ * 假 supabase —— **按表建模，认不出的表直接抛**。
+ *
+ * 原来的版本对未知表返回 `{}`，于是 collector 里任何一次「查了一张假件没建模的表」
+ * 都会变成 `.select is not a function` → 被 collector 的 try/catch 吞掉 →
+ * 测试看到的是「降级结果」，症状指向别处。今天全仓踩了一整天这个形状。
+ */
 function makeSupabase(opts: {
   instagramHandle?: string | null
-  hasCachedFindings?: boolean
+  /** 缓存窗口内上一次测出的社媒分数；null = 窗口内没有任何一次成功测量 */
+  cachedScore?: number | null
+  runsError?: boolean
 }): SupabaseClient {
-  const { instagramHandle = 'example_brand', hasCachedFindings = false } = opts
+  const { instagramHandle = 'example_brand', cachedScore = null, runsError = false } = opts
 
   return {
     from: vi.fn((table: string) => {
@@ -73,15 +81,18 @@ function makeSupabase(opts: {
           }),
         }
       }
-      if (table === 'diagnostic_findings') {
+      if (table === 'diagnostic_runs') {
+        const rows =
+          cachedScore === null ? [] : [{ dimension_scores: { social: cachedScore }, created_at: '2026-08-01' }]
         return {
           select: vi.fn().mockReturnValue({
             eq: vi.fn().mockReturnValue({
               eq: vi.fn().mockReturnValue({
                 gte: vi.fn().mockReturnValue({
-                  limit: vi.fn().mockResolvedValue({
-                    data: hasCachedFindings ? [{ id: 'cached-finding' }] : [],
-                    error: null,
+                  order: vi.fn().mockReturnValue({
+                    limit: vi.fn().mockResolvedValue(
+                      runsError ? { data: null, error: { message: 'boom' } } : { data: rows, error: null },
+                    ),
                   }),
                 }),
               }),
@@ -89,7 +100,7 @@ function makeSupabase(opts: {
           }),
         }
       }
-      return {}
+      throw new Error(`fake supabase: table '${table}' is not modelled`)
     }),
   } as unknown as SupabaseClient
 }
@@ -250,17 +261,44 @@ describe('SocialCollector.collect() — Apify failure', () => {
 
 describe('SocialCollector.collect() — cache', () => {
   it('does NOT call Apify when fresh social findings exist in DB (within 7 days)', async () => {
-    const supabase = makeSupabase({ hasCachedFindings: true })
+    const supabase = makeSupabase({ cachedScore: 61 })
     await new SocialCollector(supabase).collect(CLIENT_ID, DOMAIN, KEYWORDS)
     expect(mockScrapeInstagramProfile).not.toHaveBeenCalled()
     expect(mockScrapeFacebookPage).not.toHaveBeenCalled()
   })
 
-  it('returns a valid CollectorResult from cache (score=null when cache hit)', async () => {
-    const supabase = makeSupabase({ hasCachedFindings: true })
+  // 🔴 这条原来断言「缓存命中 → score 为 null」，那正是 bug 本身：
+  //    缓存缓的是 findings 不是分数，一命中这一柱就被凭空销毁 7 天。
+  //    实测后果：CTS 三个月 12 次体检只有 1 次拿到过社媒分数，
+  //    而空分数还会被开处方的 AI 读成 `social: null/100`（= 测了很烂）。
+  it('🔴 缓存命中要沿用上次的分数，不能把这一柱交白卷', async () => {
+    const supabase = makeSupabase({ cachedScore: 61 })
     const result = await new SocialCollector(supabase).collect(CLIENT_ID, DOMAIN, KEYWORDS)
-    expect(result.score).toBeNull()
-    expect(Array.isArray(result.findings)).toBe(true)
+    expect(result.score).toBe(61)
+    // 沿用就不该再去抓一遍 —— 这本来就是缓存想省的那次调用
+    expect(mockScrapeInstagramProfile).not.toHaveBeenCalled()
+  })
+
+  it('🔴 窗口内没有任何一次成功测量 → 照常去测，不许当成「缓存命中」', async () => {
+    mockScrapeInstagramProfile.mockResolvedValue(DEFAULT_INSTAGRAM)
+    const supabase = makeSupabase({ cachedScore: null })
+    const result = await new SocialCollector(supabase).collect(CLIENT_ID, DOMAIN, KEYWORDS)
+    expect(mockScrapeInstagramProfile).toHaveBeenCalled()
+    expect(typeof result.score).toBe('number')
+  })
+
+  it('🔴 查不出历史分数时也要去测 ——「查不到」不能当成「有缓存」', async () => {
+    mockScrapeInstagramProfile.mockResolvedValue(DEFAULT_INSTAGRAM)
+    const supabase = makeSupabase({ runsError: true })
+    await new SocialCollector(supabase).collect(CLIENT_ID, DOMAIN, KEYWORDS)
+    expect(mockScrapeInstagramProfile).toHaveBeenCalled()
+  })
+
+  it('🔴 上次是 0 分也算测过 —— 0 是真实测量结果，不是「没测」', async () => {
+    const supabase = makeSupabase({ cachedScore: 0 })
+    const result = await new SocialCollector(supabase).collect(CLIENT_ID, DOMAIN, KEYWORDS)
+    expect(result.score).toBe(0)
+    expect(mockScrapeInstagramProfile).not.toHaveBeenCalled()
   })
 })
 
