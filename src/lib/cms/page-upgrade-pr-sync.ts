@@ -79,7 +79,7 @@ export async function syncPageUpgradePullRequests(
           : { pr_closed_at: transition.occurredAt }),
       }
 
-      const { error: updateError } = await supabase
+      const { data: updatedAction, error: updateError } = await supabase
         .from('flywheel_actions')
         .update({
           payload,
@@ -89,8 +89,11 @@ export async function syncPageUpgradePullRequests(
         })
         .eq('id', action.id)
         .contains('payload', { status: 'pr_open' })
+        .select('id')
+        .maybeSingle()
 
       if (updateError) throw new Error(updateError.message)
+      if (!updatedAction) continue
       if (transition.status === 'live') result.live += 1
       else result.rejected += 1
     } catch (err) {
