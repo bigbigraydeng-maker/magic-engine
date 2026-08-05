@@ -142,6 +142,15 @@ export const SEO_METRIC_KEY = {
   /** Average ranking position across all tracked queries (lower = better) */
   GSC_AVG_POSITION: 'seo.gsc.avg_position',
 
+  /** Clicks attributed to one specific upgraded page */
+  GSC_PAGE_CLICKS: 'seo.gsc.page_clicks',
+
+  /** Impressions attributed to one specific upgraded page */
+  GSC_PAGE_IMPRESSIONS: 'seo.gsc.page_impressions',
+
+  /** Average ranking position for one specific upgraded page (lower = better) */
+  GSC_PAGE_AVG_POSITION: 'seo.gsc.page_avg_position',
+
   // ── GA4-backed traffic metrics (P22.A.2 — pulled from GA4 Reporting API) ──
 
   /** Total website sessions (visits) in the reporting window */
