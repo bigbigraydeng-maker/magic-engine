@@ -156,15 +156,27 @@
 - [ ] **M8 IP 电话外呼 + 通话记录回流**（与 Phase 36 Voice Agent 合流）🔄 判断层已上线
       - [x] M8.1 判断层 `lib/threecx/call-plan.ts`（PR #821）—— 一通电话在 CRM 里意味着什么。
             **不依赖 3CX 接口长什么样**，所以对方还没开通也能先做完先审完
-      - [ ] **M8.2 取数层** `lib/threecx/xapi.ts` —— `/connect/token`（client_credentials）
-            → 读通话记录 → 翻译成 `CallRecord`。⚠️ 卡在对方：要开一个分机（$30/月）
-            才有真实记录去验证字段名（3cx.com 在这台机器上打不开，文档看不了）
-      - [ ] **M8.3 凭证怎么存** —— 每个客户一套 PBX 地址 + 密钥。存哪、谁能读是安全决策，
-            动手前单独审，不要顺手塞进 `leads_config`
+      > ⚠️ **2026-08-05 方案推翻重来**：3CX 那些读通话记录/录音的 REST endpoint
+      > **官方不提供、没有文档、不保证长期可用，对方明确不建议用在生产环境**。
+      > 改用官方支持的 **Data Connector**：我们开一个数据库给他们，3CX 最短
+      > 每 15 分钟把通话记录 + 录音下载链接**推**进来。判断层不受影响（一行没改）。
+      - [ ] **M8.2 落地库** —— 单独开一个 Postgres，**绝不能是主库**。方向反了：
+            原来是我们拿他们的凭证去读，现在是**他们拿我们的凭证来写**，凭证泄露
+            的代价从「读不到通话记录」变成「所有客户的数据」。同实例开个受限角色
+            是「配置对了才安全」，单独一个库是「配置错了也还安全」—— 只选后者。
+            **一个客户一张表 + 一个账号**（3CX 不知道我们的客户编号；混表靠字段区分
+            = 对方配错一次，A 客户的通话记录落进 B 客户的 CRM）
+      - [ ] **M8.3 取数层** `lib/threecx/landing.ts` —— 按水位线读新行 → 翻译成
+            `CallRecord`。水位线要留重叠窗口（跟邮件同理：不留重叠，一次失败就在
+            时间线上留一个永久的洞，而且不报错）
       - [ ] M8.4 落库层 —— 复用 `resolveContact`（电话身份）+ `contact_touchpoints`
             （`channel:'phone'` / `source:'threecx'` / `source_ref` = 通话编号）
-      - [ ] M8.5 录音按需换取，带鉴权，**绝不落公开链接**
-      - [ ] M8.6 `/api/cron/call-sync` + 同一个 PR 内加 `render.yaml` 调度条目
+      - [ ] M8.5 `/api/cron/call-sync` 每 15 分钟 + 同一个 PR 内加 `render.yaml` 调度条目
+      - [ ] **M8.6 ⏳ 录音要不要留档 —— PM 拍板，有到期日** 推过来的是下载链接，
+            录音本身在 3CX 那边**只存 3 个月**。默认做法是只存链接不复制音频
+            （数据最少、风险最小、不花存储钱），代价是 3 个月前的通话将来听不回来。
+            要不要复制进自己的存储是业务+隐私决策 —— **接通后第一个 3 个月内必须定，
+            过了就不是改主意而是已经丢了**
       > 设计见 [`docs/specs/2026-08-04-threecx-call-ingest.md`](./specs/2026-08-04-threecx-call-ingest.md)
 - [ ] M9 短信 · M10 从 ME 发 newsletter（优先级靠后，PM 明确）
 
@@ -192,6 +204,7 @@
 - [ ] **P21.J.M3 闭环**(≈1-2 周):发布($50 绝对硬顶 + publish_intent 幂等 + publish_failed 收敛)+ UTM 沿用 + 表现回流单链路 + winner 判定拆片入库 + 工厂内部自发疲劳信号。验收:真实成片上 CTS Meta 账户(**PM 显式 go 后才首发**,$10/天×3 天)+ 回流数据落 `flywheel_metrics` + 工作日志人话叙事无"工厂"字眼
 - [ ] **开放项**:信号契约与 34.A 对齐冻结(M1 前置)· asset_gap 信号归属 · MTC 计费触点(v1 占位不扣)· Airtable 观测层↔ME 真值同步(M2 起)
 - [ ] **P21.J.SEC 接口安全完整审计**:狄仁杰三审报"26 个 `/api/clients/[id]/*` 无鉴权",逐个核实后发现多数(ads 执行/cms 发布)其实已有锁、是误报,真裸奔仅 5 个已补。**需一次系统性复核**:grep 全部 access 守卫关键词 + 逐个确认,把"真裸奔"与"已有锁被误报"彻底分开,补齐真缺的。今天只是止血
+- [ ] **P21.J.SEC-2 `/api/publer/create-post` 至今无鉴权**:任何人拿一个 `post_id` 就能把该客户的成片发到他的社媒账号。**不能像 schedule/draft 那样直接加登录鉴权** —— 这条同时被 Zapier/Airtable webhook 调用(仅 body 带 `post_id`,没有会话),加了就当场打断线上自动化。正解是 Bearer Token,而 token 要同时配到 Zapier 那边 = 需要 PM 动手一次。此项 2025 年就登记过(`docs/archive/AUTOMATION_SPEC.md` D-2),躺在 archive 里没人看,2026-08-05 补进主线。同批的 `/api/publer/schedule` 与 `/api/publer/draft/[assetId]` 只有后台一个调用方,已直接补上鉴权
 - [ ] **P21.J.UP 上传链接两取舍**:①无单条吊销(作废靠换 `UPLOAD_LINK_SECRET`,所有链接一起失效)②无速率限制(有真链接者可刷存储/烧 Vision 额度)。规模化前需补 per-client 限流 + 单链接吊销
 - [ ] **本地 worker 没在认领**:今天 00:18 有 CTS 新工单卡在 `queued` 没人做 = 那台 Mac 的 worker 没跑/没连。工厂要真转,先确认 worker 进程在跑(仓库无 launchd/pm2 配置,`ps`/`pm2 list` 上机看)且已在 07-24 后重启(否则风格下发用旧逻辑)
 - [ ] **`FACTORY_PUBLISH_LIVE` 未设 = 静默发草稿**:未配时片子 `status=published`+三落库全绿,FB 主页却只是没人看见的 DRAFT。验完草稿格式后 PM 显式在 Render 设 `=true` 才真发

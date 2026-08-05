@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getOpenAIClient } from '@/lib/ai/openai-client'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { normaliseSource, type AssetSource } from '@/lib/assets/provenance'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,6 +14,7 @@ interface AnalyzedAsset {
   storage_url: string | null
   original_filename: string | null
   vision_metadata: VisionMetadata | null
+  source: AssetSource
 }
 
 interface VisionMetadata {
@@ -32,6 +34,8 @@ interface Recommendation {
   reason: string
   quality_score: number
   metadata: VisionMetadata | null
+  /** 素材来源 —— 选图界面按它显示来源徽章,FDE 挑图当下就知道这张能不能打真价。 */
+  source: AssetSource
 }
 
 // POST /api/clients/[id]/asset-library/search
@@ -65,7 +69,7 @@ export async function POST(
 
     const { data, error } = await supabaseAdmin
       .from('client_assets')
-      .select('id, storage_url, original_filename, vision_metadata')
+      .select('id, storage_url, original_filename, vision_metadata, source')
       .eq('client_id', params.id)
       .eq('status', 'analyzed')
       // 同 storyboard-generator:视频虽标 analyzed 但没有画面分析结果,不能当图片推荐出去
@@ -75,7 +79,9 @@ export async function POST(
 
     if (error) throw error
 
-    const assets = (data ?? []) as AnalyzedAsset[]
+    // source 走 normaliseSource 收敛:库里认不出的值降级 unknown,而不是原样漏进界面。
+    const assets: AnalyzedAsset[] = ((data ?? []) as Array<Omit<AnalyzedAsset, 'source'> & { source: unknown }>)
+      .map((row) => ({ ...row, source: normaliseSource(row.source) }))
 
     // Small library: skip the LLM, return everything (best quality first).
     if (assets.length <= topN) {
@@ -117,6 +123,7 @@ function toRecommendation(a: AnalyzedAsset, reason: string): Recommendation {
     reason,
     quality_score: scoreOf(a),
     metadata: a.vision_metadata,
+    source: a.source,
   }
 }
 
