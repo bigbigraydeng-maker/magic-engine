@@ -25,13 +25,31 @@
  *   ③ 不花钱、不发到客户的网站/商家页/社媒上
  */
 export const AUTO_RUNNABLE_ACTION_TYPES = [
-  // 写博客初稿 —— 落成 PR，要人点 Merge 才上线（管道里已有「文章待合」那条待办）
+  // 写博客初稿 —— 产物落成 `blog_posts.status='draft'`，躺在库里等人看。
+  // 🔴 注意安全闸到底在哪：**是 draft 状态，不是 PR**。
+  //    早先这里写的是「落成 PR 等人点 Merge」，那是错的 —— `draft → pr_open`
+  //    需要有人手动调 /api/clients/[id]/cms/publish-blog，没有任何自动化在做。
+  //    照着「PR 是安全闸」的错误理解去扩这个白名单，会扩出真会发到客户网站的东西。
   'generate_blog_post',
   'generate_seo_geo_blog_post',
   'generate_flooring_blog_post',
-  // 刷新已有博客 —— 同样走 PR，不直接改线上
-  'seo.refresh_blog',
 ] as const
+
+/**
+ * 🔴 `seo.refresh_blog` 曾经在上面这个白名单里，**已移除，别加回来**。
+ *
+ * 它根本不是一个动作，是四条不同规则共用的一个标签（`seo-patrol/rules.ts`
+ * 的 R1/R2/R3/R5），而 ME 里**没有任何「刷新已有文章」的执行器** ——
+ * 唯一能改已有页面的 `lib/page-rewriter/` 是浏览器里的人工流程，cron 调不了。
+ *
+ * 把它接到博客生成器上，会按规则不同产生四种错误，最狠的一种是：
+ * 诊断说「这个词从 #8 掉到 #26，去刷新排它的那篇」，机器**新写一篇打同一个词**
+ * → 跟客户自己正在排名的页面抢位置，而且是每周自动地做。
+ *
+ * 将来真要接，判据必须是 `(action_type, steps_json.rule_id)` 的组合，
+ * 不能只看 action_type —— 这也是本白名单当前设计的局限。
+ */
+export const NOT_AUTO_RUNNABLE_NEEDS_EXECUTOR = ['seo.refresh_blog'] as const
 
 /**
  * 明确认定**对外或花钱**的类型 —— 永远不自动跑，进「等你点」。

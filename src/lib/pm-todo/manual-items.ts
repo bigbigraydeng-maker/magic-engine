@@ -41,6 +41,7 @@ export type ManualItemKind =
   | 'prescription_updated'
   | 'leads_metric_untrusted'
   | 'factory_worker_idle'
+  | 'blog_draft_waiting'
 
 export interface ManualItem {
   kind: ManualItemKind
@@ -79,6 +80,7 @@ import { fetchGa4KeyEventBreakdown } from '@/lib/ga4/client'
 import { judgeLeadsSanity } from '@/lib/strategy/leads-sanity'
 import { judgeWorkerPresence } from '@/lib/factory/worker-presence'
 import { auditGoalBaselines } from '@/lib/strategy/baseline-audit'
+import { fetchBlogDraftTodos } from '@/lib/pm-todo/blog-drafts'
 
 export function daysAgo(iso: string | null, now: Date): number | null {
   if (!iso) return null
@@ -158,6 +160,12 @@ export async function loadManualItems(
   // 客资数值不值得信 —— 值不值得信只有查了统计后台才知道，别让人自己去翻
   await pushLeadsSanityItems(supabase, items, nameOf).catch((e) =>
     console.warn('[manual-items] 客资口径检查失败（不阻塞其他待办）:', e),
+  )
+
+  // 写好但没人看过的草稿 —— 这条待办以前只捞 pr_open，于是周更 cron 写出来的
+  // 草稿一直沉在库里（实测 3 篇，最老的躺了 5 天，而上一篇真正上线的文章在 47 天前）。
+  await pushBlogDraftItems(supabase, items, ids, now, nameOf).catch((e) =>
+    console.warn('[manual-items] 草稿待办生成失败（不阻塞其他待办）:', e),
   )
 
   // GSC property identifiers (needed for the inspect deep link).
@@ -450,6 +458,33 @@ async function pushBaselineItems(supabase: SupabaseClient, items: ManualItem[]):
  * 这个数只有客户自己能修（在他们的统计后台改触发条件），所以必须下发；
  * 但下发的话要说清「这个数为什么不能信」，而不是让人自己去后台翻。
  */
+/**
+ * 写好但没人看过的博客草稿。
+ *
+ * 上面那条 `blog_pr_open` 只捞 `status='pr_open'`，而 `draft → pr_open` 需要
+ * 有人手动去点发布 —— 没有任何自动化在做这一步。于是周更 cron 每周写出来的
+ * 草稿全部沉在库里：实测 3 篇没人看过，而上一篇真正上线的文章在 47 天前。
+ */
+async function pushBlogDraftItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  ids: string[],
+  now: Date,
+  nameOf: (id: string) => string,
+): Promise<void> {
+  const todos = await fetchBlogDraftTodos(supabase, ids, now)
+  for (const t of todos) {
+    items.push({
+      kind: 'blog_draft_waiting',
+      client_id: t.client_id,
+      client_name: nameOf(t.client_id),
+      what: t.what,
+      how: t.how,
+      href: t.href,
+    })
+  }
+}
+
 async function pushLeadsSanityItems(
   supabase: SupabaseClient,
   items: ManualItem[],

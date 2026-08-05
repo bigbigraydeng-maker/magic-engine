@@ -3,6 +3,7 @@ import {
   judgeAutoRun,
   AUTO_RUNNABLE_ACTION_TYPES,
   OUTWARD_ACTION_TYPES,
+  NOT_AUTO_RUNNABLE_NEEDS_EXECUTOR,
 } from './auto-run-policy'
 
 import type { Endorsement } from './auto-run-policy'
@@ -88,8 +89,25 @@ describe('judgeAutoRun —— 白名单，认不出就停', () => {
       'generate_blog_post',
       'generate_flooring_blog_post',
       'generate_seo_geo_blog_post',
-      'seo.refresh_blog',
     ])
+  })
+
+  it('🔴 seo.refresh_blog 不许在白名单里 —— 它没有执行器，接上去会自相残杀', () => {
+    // 2026-08-05 移除。它不是一个动作，是 seo-patrol 四条规则（R1/R2/R3/R5）共用的
+    // 一个标签，而全仓没有任何「刷新已有文章」的执行器。接到博客生成器上，
+    // 「这个词掉排名了去刷新那篇」会变成「新写一篇打同一个词」，
+    // 跟客户自己正在排名的页面抢位置 —— 而且是每周自动地做。
+    expect([...AUTO_RUNNABLE_ACTION_TYPES]).not.toContain('seo.refresh_blog')
+    expect([...NOT_AUTO_RUNNABLE_NEEDS_EXECUTOR]).toContain('seo.refresh_blog')
+  })
+
+  it('🔴 两个名单不许有交集 —— 一个类型不能既「能自动跑」又「缺执行器」', () => {
+    for (const t of NOT_AUTO_RUNNABLE_NEEDS_EXECUTOR) {
+      expect(
+        (AUTO_RUNNABLE_ACTION_TYPES as readonly string[]).includes(t),
+        `${t} 同时出现在两个名单里`,
+      ).toBe(false)
+    }
   })
 
   it('🔴 白名单和对外名单不许有交集 —— 有就是自相矛盾', () => {
