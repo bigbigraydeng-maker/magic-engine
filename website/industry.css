@@ -84,7 +84,7 @@
 }
 .sol-hero-panel-item b { display: block; margin-bottom: 4px; font-size: 15px; }
 .sol-hero-panel-item span { color: var(--sol-muted); font-size: 13px; line-height: 1.45; }
-.sol-strip { border-block: 1px solid var(--sol-line); background: var(--sol-ink); color: #fff; }
+.sol-strip { padding: 0; border-block: 1px solid var(--sol-line); background: var(--sol-ink); color: #fff; }
 .sol-strip-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 22px; padding-block: 26px; }
 .sol-strip-item b { display: block; font-size: 13px; }
 .sol-strip-item span { display: block; margin-top: 3px; color: rgba(255,255,255,.58); font-size: 12px; }
