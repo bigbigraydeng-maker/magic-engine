@@ -76,3 +76,14 @@ describe('buildTodoEmail — manual lane', () => {
     expect(email.html).toContain('今天没有待办')
   })
 })
+
+describe('daysAgo → 文案年龄', () => {
+  it('day 0 不该渲染成「已 0 天」（首日实测的文案瑕疵）', () => {
+    const now = new Date('2026-08-01T13:00:00Z')
+    expect(daysAgo('2026-08-01T04:00:00Z', now)).toBe(0)
+    // 渲染层规则：仅当 > 0 才拼年龄，0 天保持安静
+    const age = (d: number | null) => (d !== null && d > 0 ? `（已 ${d} 天）` : '')
+    expect(age(0)).toBe('')
+    expect(age(9)).toBe('（已 9 天）')
+  })
+})

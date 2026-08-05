@@ -280,7 +280,8 @@ export async function loadManualItems(
     // the usual cause, so say that instead.
     const unknown = row.index_verdict === 'URL is unknown to Google'
     const thin = (row.word_count ?? 0) < 300
-    const age = days !== null ? `（已 ${days} 天）` : ''
+    // Day 0 reads as "（已 0 天）" — noise. Say nothing until it has aged.
+    const age = days !== null && days > 0 ? `（已 ${days} 天）` : ''
 
     const what = unknown
       ? `${row.url} 谷歌根本不知道这个网址${age}，它拿不到任何谷歌流量`
