@@ -871,15 +871,39 @@ document.addEventListener('DOMContentLoaded', () => {
     mobileNav.className = 'nav-mobile';
     mobileNav.setAttribute('aria-label', 'Mobile navigation');
     mobileNav.innerHTML = `
-      <a href="/discover"  data-en="Free Discovery" data-zh="免费探查">Free Discovery</a>
-      <a href="/geo"       data-en="GEO"             data-zh="GEO">GEO</a>
-      <a href="/training"  data-en="Training"        data-zh="培训">Training</a>
-      <a href="/ads"       data-en="Ads"             data-zh="广告">Ads</a>
-      <a href="/about"     data-en="About"           data-zh="关于">About</a>
+      <div class="nav-mobile-section nav-mobile-solutions">
+        <span class="nav-mobile-label" data-en="Industry solutions" data-zh="行业解决方案">Industry solutions</span>
+        <a class="nav-mobile-overview" href="/industry-solutions">
+          <strong data-en="Solutions built around your industry" data-zh="贴合行业的增长解决方案">Solutions built around your industry</strong>
+          <span data-en="Compare all solutions →" data-zh="查看全部方案 →">Compare all solutions →</span>
+        </a>
+        <div class="nav-mobile-industry-grid">
+          <a href="/real-estate">
+            <strong data-en="Real Estate" data-zh="地产">Real Estate</strong>
+            <span data-en="Audience & demand" data-zh="受众与需求">Audience & demand</span>
+          </a>
+          <a href="/travel">
+            <strong data-en="Travel" data-zh="旅游">Travel</strong>
+            <span data-en="Content to leads" data-zh="内容到线索">Content to leads</span>
+          </a>
+          <a href="/local-services">
+            <strong data-en="Local Services" data-zh="本地服务">Local Services</strong>
+            <span data-en="Local demand" data-zh="本地需求">Local demand</span>
+          </a>
+        </div>
+      </div>
       <div class="nav-mobile-divider"></div>
-      <a href="https://app.magicengine.com.au/portal/login"
-         class="nav-mobile-portal"
-         data-en="Client portal" data-zh="客户入口">Client portal</a>
+      <div class="nav-mobile-section nav-mobile-secondary">
+        <span class="nav-mobile-label" data-en="Platform & services" data-zh="平台与服务">Platform & services</span>
+        <a href="/ai-growth-engine" data-en="The Engine" data-zh="核心引擎">The Engine</a>
+        <a href="/geo" data-en="GEO & AI Visibility" data-zh="GEO 与 AI 可见度">GEO & AI Visibility</a>
+        <a href="/training" data-en="AI Adoption & Training" data-zh="AI 落地与培训">AI Adoption & Training</a>
+        <a href="/about" data-en="About Magic Engine" data-zh="关于 Magic Engine">About Magic Engine</a>
+      </div>
+      <div class="nav-mobile-divider"></div>
+      <a href="/discover"
+         class="nav-mobile-register"
+         data-en="Get a growth diagnosis" data-zh="获取增长诊断">Get a growth diagnosis</a>
     `;
     mobileNav.querySelectorAll('a').forEach(a => a.addEventListener('click', closeMobileMenu));
     navEl.insertAdjacentElement('afterend', mobileNav);
