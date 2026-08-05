@@ -11,6 +11,7 @@
 
 ## Industry solutions
 
+- [Industry Solutions](https://magicengine.com.au/industry-solutions): compare purpose-built growth systems by industry and customer journey
 - [Real Estate](https://magicengine.com.au/real-estate): audience growth for agents and brand/project demand for developers
 - [Travel](https://magicengine.com.au/travel): content, SEO, GEO, paid demand, effective leads and CRM conversion
 - [Local Services](https://magicengine.com.au/local-services): local visibility, reputation, enquiries and follow-up
