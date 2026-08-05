@@ -42,6 +42,7 @@ export type ManualItemKind =
   | 'leads_metric_untrusted'
   | 'factory_worker_idle'
   | 'blog_draft_waiting'
+  | 'cross_client_leak'
 
 export interface ManualItem {
   kind: ManualItemKind
@@ -81,6 +82,7 @@ import { judgeLeadsSanity } from '@/lib/strategy/leads-sanity'
 import { judgeWorkerPresence } from '@/lib/factory/worker-presence'
 import { auditGoalBaselines } from '@/lib/strategy/baseline-audit'
 import { fetchBlogDraftTodos } from '@/lib/pm-todo/blog-drafts'
+import { auditCrossClientLeaks } from '@/lib/clients/cross-client-audit'
 
 export function daysAgo(iso: string | null, now: Date): number | null {
   if (!iso) return null
@@ -166,6 +168,12 @@ export async function loadManualItems(
   // 草稿一直沉在库里（实测 3 篇，最老的躺了 5 天，而上一篇真正上线的文章在 47 天前）。
   await pushBlogDraftItems(supabase, items, ids, now, nameOf).catch((e) =>
     console.warn('[manual-items] 草稿待办生成失败（不阻塞其他待办）:', e),
+  )
+
+  // 客户之间有没有串台 —— PM 2026-08-05：「坚决不能胡窜」。
+  // 实测查到 CTS 的发布通道指向 Oztop 的网站，填错两个多月没人发现。
+  await pushCrossClientItems(supabase, items).catch((e) =>
+    console.warn('[manual-items] 串台检查失败（不阻塞其他待办）:', e),
   )
 
   // GSC property identifiers (needed for the inspect deep link).
@@ -458,6 +466,33 @@ async function pushBaselineItems(supabase: SupabaseClient, items: ManualItem[]):
  * 这个数只有客户自己能修（在他们的统计后台改触发条件），所以必须下发；
  * 但下发的话要说清「这个数为什么不能信」，而不是让人自己去后台翻。
  */
+/**
+ * 客户之间串台 —— 一个客户名下存着另一个客户的东西。
+ *
+ * 这条**不按客户过滤**：串台天生涉及两个客户，任何一方被过滤掉都会让问题
+ * 从待办里消失。也不做「只报 active 客户」—— 潜客的资料串进正式客户同样是事故。
+ */
+async function pushCrossClientItems(supabase: SupabaseClient, items: ManualItem[]): Promise<void> {
+  const findings = await auditCrossClientLeaks(supabase)
+  for (const f of findings) {
+    items.push({
+      kind: 'cross_client_leak',
+      // 串台涉及多个客户，名字里全列出来，别只挂一个
+      client_id: 'infra',
+      client_name: f.clients.join(' / '),
+      what:
+        f.severity === 'critical'
+          ? `🔴 客户资料串台：${f.what}`
+          : `⚠️ ${f.what}`,
+      how:
+        f.severity === 'critical'
+          ? '进客户设置页核对这条配置填的是不是本人的。在纠正之前，系统已经拒绝用它发布任何东西'
+          : '确认一下归因口径：这笔花费该算给谁，或者要不要拆开记',
+      href: '/dashboard/clients',
+    })
+  }
+}
+
 /**
  * 写好但没人看过的博客草稿。
  *
