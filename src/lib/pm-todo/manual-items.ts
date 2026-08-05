@@ -41,6 +41,7 @@ export type ManualItemKind =
   | 'prescription_updated'
   | 'leads_metric_untrusted'
   | 'factory_worker_idle'
+  | 'price_claim_unbacked'
 
 export interface ManualItem {
   kind: ManualItemKind
@@ -79,6 +80,9 @@ import { fetchGa4KeyEventBreakdown } from '@/lib/ga4/client'
 import { judgeLeadsSanity } from '@/lib/strategy/leads-sanity'
 import { judgeWorkerPresence } from '@/lib/factory/worker-presence'
 import { auditGoalBaselines } from '@/lib/strategy/baseline-audit'
+import { containsPriceClaim } from '@/lib/content/price-claim'
+import { judgeOutgoingPost } from '@/lib/content/price-claim-gate'
+import { SOURCE_LABELS } from '@/lib/assets/provenance'
 
 export function daysAgo(iso: string | null, now: Date): number | null {
   if (!iso) return null
@@ -151,6 +155,11 @@ export async function loadManualItems(
   // 新诊断结果 —— PM 2026-08-03 拍板要逐条看；没有消费方的自动化 = 再造一个没人看的数据源。
   // 必须放在 nameOf 定义之后：待办上显示 uuid 等于没显示。
   await pushDiagnosticItems(supabase, items, now, nameOf)
+
+  // 审批过但被价格闸拦住的帖子 —— 自动发布那条路人不在场,不捞出来就没人知道
+  await pushPriceGateItems(supabase, items, nameOf).catch((e) =>
+    console.warn('[manual-items] 价格闸待办检查失败（不阻塞其他待办）:', e),
+  )
 
   // 本周方案已自动落地 —— 只通知，不要求 PM 操作（PM 2026-08-04 拍板）
   await pushPrescriptionItems(supabase, items, now, nameOf)
@@ -423,6 +432,72 @@ async function pushCronHealthItems(
  *
  * 不自动改客户的目标数字 —— 那是业务事实，PM 拍板。这里只负责说清楚。
  */
+/**
+ * 审批过了但发不出去的帖子 —— 文案报了价，配图来源却背不了真价。
+ *
+ * 为什么必须下发：`/api/publer/create-post` 是 Airtable 审批过就自动跑的，人不在场。
+ * 那道闸拦下来只会往 webhook 回一个 409，**没有任何人会看到** —— 帖子就永远停在
+ * approved，看起来像「排着排着就没了」。发现死在日志里 = 管道断头。
+ *
+ * 不落新状态、不加新表：判定条件跟闸本身同源，改好文案或确认好素材，这条自己就消失。
+ */
+async function pushPriceGateItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  nameOf: (id: string) => string,
+): Promise<void> {
+  const { data: posts } = await supabase
+    .from('content_posts')
+    .select('id, client_id, title, caption')
+    .eq('status', 'approved')
+  const rows = (posts ?? []) as Array<{
+    id: string
+    client_id: string
+    title: string | null
+    caption: string | null
+  }>
+
+  // 绝大多数帖子不报价 —— 先在内存里筛掉，别为了没价格的帖子去查素材。
+  const withPrice = rows.filter((p) => containsPriceClaim(p.caption))
+  if (withPrice.length === 0) return
+
+  for (const post of withPrice) {
+    // 跟 create-post 取图口径一致：外部改过的终版优先，其次选中的，再次最新的。
+    const { data: assets } = await supabase
+      .from('visual_assets')
+      .select('storage_url')
+      .eq('post_id', post.id)
+      .eq('generation_status', 'ready')
+      .order('is_final', { ascending: false })
+      .order('is_selected', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(1)
+    const storageUrl = (assets ?? [])[0]?.storage_url as string | undefined
+    if (!storageUrl) continue // 没配图 = 发不出去是别的原因，不归这条管
+
+    const verdict = await judgeOutgoingPost(supabase, {
+      clientId: post.client_id,
+      caption:  post.caption ?? '',
+      imageUrl: storageUrl,
+    })
+    if (!verdict.blocked) continue
+
+    items.push({
+      kind: 'price_claim_unbacked',
+      client_id: post.client_id,
+      client_name: nameOf(post.client_id),
+      what:
+        `帖子「${post.title ?? post.id}」已审批但发不出去 —— 文案里写了价格，` +
+        `配图来源是「${SOURCE_LABELS[verdict.source]}」。真实价格只能配真实画面，` +
+        '客人按图下单拿到的东西对不上，投诉算客户的。',
+      how:
+        '两条路选一条：① 最快 —— 把价格从文案里去掉；' +
+        '② 如果那张图确实是客户实拍，去素材库点开它，把来源改成「客户实拍（已确认）」，再回来重发。',
+      href: `https://app.magicengine.com.au/dashboard/clients/${post.client_id}/assets`,
+    })
+  }
+}
+
 async function pushBaselineItems(supabase: SupabaseClient, items: ManualItem[]): Promise<void> {
   const suspects = await auditGoalBaselines(supabase).catch(() => [])
   for (const s of suspects) {

@@ -64,6 +64,19 @@ export const FDE_UPLOAD_SOURCES: readonly AssetSource[] = [
   'unknown',
 ]
 
+/**
+ * `visual_assets.provider` → 来源。那张表是「贴文的配图槽」，自己没有来源列。
+ *
+ * 返回 `null` 表示**必须回查素材库**（`client_library` 的图来自 `client_assets`，
+ * 真值只在那边）。机器生成的图不必回查：AI 出的图永远给不了真实价格背书。
+ * 认不出的 provider（历史 `upload` 等）降级 `unknown` —— 保守方向，顶多多问一句。
+ */
+export function sourceForVisualProvider(provider: string | null | undefined): AssetSource | null {
+  if (provider === 'client_library') return null
+  if (provider === 'wavespeed' || provider === 'openai') return 'ai_generated'
+  return 'unknown'
+}
+
 /** 给界面用的中文说明，避免每个页面各写一套。 */
 export const SOURCE_LABELS: Record<AssetSource, string> = {
   client_verified: '客户实拍（已确认）',

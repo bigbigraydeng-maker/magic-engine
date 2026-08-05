@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { getAccounts, uploadMediaFromUrl, schedulePost } from '@/lib/publer/client'
 import { getAdapter } from '@/lib/flywheel/adapters/registry'
 import { SOCIAL_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
+import { judgeOutgoingPost, priceGateMessage } from '@/lib/content/price-claim-gate'
 import '@/lib/flywheel/adapters/SocialContentAdapter'
 
 // POST /api/publer/create-post
@@ -95,6 +96,23 @@ export async function POST(req: NextRequest) {
 
     const hashtags = post.hashtags ? `\n\n${post.hashtags}` : ''
     const caption = `${post.caption || post.script || ''}${hashtags}`.trim()
+
+    // 真价只配真画面 —— 这条是**自动发布**路径（Airtable 审批过就跑），人不在场，
+    // 所以这里是东西出去前的最后一道闸。拦下后本条留在 approved 不动，
+    // 由今日待办的「🙋 需要你动手」把它捞出来（loadManualItems → pushPriceGateItems），
+    // 不让它烂在 webhook 的错误日志里。
+    const verdict = await judgeOutgoingPost(supabaseAdmin, {
+      clientId: post.client_id,
+      caption,
+      imageUrl: asset.storage_url,
+    })
+    if (verdict.blocked) {
+      console.error(`[publer/create-post] 价格闸拦下 post ${post_id}: ${priceGateMessage(verdict.source)}`)
+      return NextResponse.json(
+        { success: false, error: priceGateMessage(verdict.source), code: 'price_claim_unbacked' },
+        { status: 409 },
+      )
+    }
 
     const scheduledAt = schedule_at ?? new Date(Date.now() + 3600_000).toISOString()
     const fileName = asset.storage_url.split('/').pop() ?? 'media'

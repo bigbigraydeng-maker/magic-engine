@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getAccounts, uploadMediaFromUrl, schedulePost } from '@/lib/publer/client'
+import { judgeOutgoingPost, priceGateMessage } from '@/lib/content/price-claim-gate'
 
 // POST /api/publer/schedule
 // 手动从 Visuals 页面触发：用指定 asset + 账号 + 时间 发布到 Publer
@@ -14,7 +15,7 @@ export async function POST(req: NextRequest) {
 
     const { data: asset } = await supabaseAdmin
       .from('visual_assets')
-      .select('id, asset_type, generation_status, storage_url, post_id')
+      .select('id, asset_type, generation_status, storage_url, post_id, client_id')
       .eq('id', asset_id)
       .single()
 
@@ -39,6 +40,19 @@ export async function POST(req: NextRequest) {
         .single()
       const tags = post?.hashtags ? `\n\n${post.hashtags}` : ''
       finalCaption = `${post?.caption ?? ''}${tags}`.trim()
+    }
+
+    // 真价只配真画面 —— 这条路直接排期发布，出去就收不回来了。
+    const verdict = await judgeOutgoingPost(supabaseAdmin, {
+      clientId: asset.client_id,
+      caption:  finalCaption,
+      imageUrl: asset.storage_url,
+    })
+    if (verdict.blocked) {
+      return NextResponse.json(
+        { error: priceGateMessage(verdict.source), code: 'price_claim_unbacked' },
+        { status: 409 },
+      )
     }
 
     const fileName = asset.storage_url.split('/').pop() ?? 'media'

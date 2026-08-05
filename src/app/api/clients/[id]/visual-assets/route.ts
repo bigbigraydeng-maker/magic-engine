@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { submitImageGeneration } from '@/lib/visual/atlas'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
-import { normaliseSource, type AssetSource } from '@/lib/assets/provenance'
+import { normaliseSource, sourceForVisualProvider, type AssetSource } from '@/lib/assets/provenance'
 
 // Shape returned to the gallery UI (PostCard / StoryCard).
 interface GalleryAsset {
@@ -17,20 +17,17 @@ interface GalleryAsset {
 }
 
 /**
- * visual_assets 自己没有来源列(它只是贴文的配图槽),来源的唯一真相在 client_assets。
- * 机器生成的图不必回查:AI 出的图永远给不了真实价格背书,直接判 ai_generated。
- * 认不出的 provider(历史 'upload' 等)降级 unknown —— 保守方向,顶多多问一句。
+ * provider → 来源。素材库来的图(sourceForVisualProvider 返回 null)要按 URL 回查,
+ * 真值只在 client_assets 那边。
  */
 function sourceForProvider(
   provider: string | null,
   storageUrl: string | null,
   libraryByUrl: Map<string, AssetSource>,
 ): AssetSource {
-  if (provider === 'client_library') {
-    return (storageUrl && libraryByUrl.get(storageUrl)) || 'unknown'
-  }
-  if (provider === 'wavespeed' || provider === 'openai') return 'ai_generated'
-  return 'unknown'
+  const direct = sourceForVisualProvider(provider)
+  if (direct) return direct
+  return (storageUrl && libraryByUrl.get(storageUrl)) || 'unknown'
 }
 
 function mapAsset(

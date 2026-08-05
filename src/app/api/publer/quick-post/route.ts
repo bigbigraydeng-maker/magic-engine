@@ -12,6 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { judgeOutgoingPost, priceGateMessage } from '@/lib/content/price-claim-gate'
 
 interface QuickPostBody {
   client_id: string
@@ -49,6 +50,19 @@ export async function POST(req: NextRequest) {
     const fullCaption = hashtags?.length
       ? `${caption}\n\n${hashtags.join(' ')}`
       : caption
+
+    // 真价只配真画面 —— 界面上已经挡过一道，这里挡绕过界面直调的路。
+    const verdict = await judgeOutgoingPost(supabaseAdmin, {
+      clientId: client_id,
+      caption:  fullCaption,
+      imageUrl: image_url,
+    })
+    if (verdict.blocked) {
+      return NextResponse.json(
+        { success: false, error: priceGateMessage(verdict.source), code: 'price_claim_unbacked' },
+        { status: 409 },
+      )
+    }
 
     const { data: inserted, error } = await supabaseAdmin
       .from('content_posts')
