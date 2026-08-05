@@ -30,6 +30,10 @@ export interface RetestCandidateRow {
   provider: string
   status: string
   last_tested_at: string | null
+  /** 通道指向的站点（WordPress/Shopify 才有；GitHub 是仓库，没有这个） */
+  site_url?: string | null
+  /** 这个客户自己的域名，用来核对通道有没有指错人家 */
+  client_domain?: string | null
 }
 
 export interface RetestOutcome {
@@ -38,6 +42,43 @@ export interface RetestOutcome {
   ok: boolean
   /** 失败时的原因原文；成功时为 null */
   error: string | null
+  /** 通道指向别的客户 —— 没有测，也绝不会被标成连通 */
+  mismatched?: true
+}
+
+function bareHost(v: string | null | undefined): string | null {
+  if (!v) return null
+  const s = v.trim().toLowerCase()
+  if (!s) return null
+  const withoutScheme = s.replace(/^https?:\/\//, '')
+  const host = withoutScheme.split('/')[0].split(':')[0]
+  return host.replace(/^www\./, '') || null
+}
+
+/**
+ * 这条通道指向的，确实是这个客户自己的网站吗。
+ *
+ * 🔴 2026-08-05 实测发现的真事故：**CTS 的 WordPress 通道指向的是 Oztop 的网站。**
+ *    CTS 自己的域名是 ctstours.co.nz，那条连接却填着 oztopbuildingsupplies.com.au。
+ *    从建档日期能还原：CTS 那条建于 05-25，Oztop 自己那条建于 06-05（晚 11 天），
+ *    网址和用户名完全一样 —— 当初填错了客户，补了正确的那条之后，错的没人清理。
+ *
+ *    它一直是 error 所以从没真发出去过东西。**但自动重测会把它激活**：
+ *    Oztop 网站一旦不再拦我们，这条也会被判成连通，
+ *    然后 CTS 的文章就会发到 Oztop 的网站上 —— 客户内容串台。
+ *
+ * 所以：**指向对不上就不测、更不许标成连通**。
+ * 返回 null 表示「判断不了」（比如 GitHub 通道指向的是仓库不是域名），
+ * 那种情况不拦 —— 仓库名跟域名本来就可以不一样。
+ */
+export function targetBelongsToClient(
+  siteUrl: string | null | undefined,
+  clientDomain: string | null | undefined,
+): boolean | null {
+  const target = bareHost(siteUrl)
+  const own = bareHost(clientDomain)
+  if (!target || !own) return null
+  return target === own || target.endsWith(`.${own}`)
 }
 
 /**
@@ -60,6 +101,9 @@ export function pickConnectionsToRetest(
 /** 说人话：这次失败属于哪一类，人该做什么。给待办和日志共用。 */
 export function classifyFailure(error: string | null | undefined): string {
   const e = (error ?? '').toLowerCase()
+  if (e.includes('不是该客户自己的网站')) {
+    return '⚠️ 这条通道填的是别的客户的网站，配错了，必须先纠正（在纠正前系统不会碰它）'
+  }
   if (e.includes('captcha') || e.includes('not json') || e.includes('blocking rest api')) {
     return '客户网站的安全防护把我们挡在外面了（不是密码问题）'
   }
@@ -94,7 +138,7 @@ export async function retestBrokenConnections(
 ): Promise<{ checked: number; recovered: number; stillBroken: number; outcomes: RetestOutcome[] }> {
   const { data, error } = await supabase
     .from('cms_connections')
-    .select('client_id, provider, status, last_tested_at')
+    .select('client_id, provider, status, last_tested_at, site_url, clients(domain)')
     .eq('status', 'error')
 
   // 查不出来就报错退出 —— 「没有坏连接」和「没查到」必须分开，
@@ -103,10 +147,31 @@ export async function retestBrokenConnections(
     throw new Error(`cms_connections 查询失败: ${error.message}`)
   }
 
-  const due = pickConnectionsToRetest((data ?? []) as RetestCandidateRow[], now)
+  const rows = ((data ?? []) as Array<
+    RetestCandidateRow & { clients?: { domain: string | null } | null }
+  >).map((r) => ({ ...r, client_domain: r.client_domain ?? r.clients?.domain ?? null }))
+
+  const due = pickConnectionsToRetest(rows, now)
   const outcomes: RetestOutcome[] = []
 
   for (const row of due) {
+    // 🔴 先核对指向。指错客户的通道**连测都不测** —— 测通了就会被标成连通，
+    //    而那正是把「一直沉睡的填错」变成「客户内容串台」的那一步。
+    if (targetBelongsToClient(row.site_url, row.client_domain) === false) {
+      console.warn(
+        `[cms-retest] ${row.client_id}/${row.provider} 指向 ${row.site_url}，` +
+          `不是该客户的域名（${row.client_domain}）—— 跳过，不测也不标连通`,
+      )
+      outcomes.push({
+        client_id: row.client_id,
+        provider: row.provider,
+        ok: false,
+        error: `这条通道指向 ${row.site_url}，不是该客户自己的网站（${row.client_domain}）`,
+        mismatched: true,
+      })
+      continue
+    }
+
     try {
       const res = await deps.testConnection(row.client_id, row.provider)
       await deps.markTested(row.client_id, row.provider, res.ok, res.error)

@@ -4,6 +4,7 @@ import {
   classifyFailure,
   retestBrokenConnections,
   RETEST_MIN_HOURS,
+  targetBelongsToClient,
 } from '../retest'
 import type { RetestCandidateRow } from '../retest'
 
@@ -169,5 +170,87 @@ describe('retestBrokenConnections', () => {
     )
     expect(res.checked).toBe(0)
     expect(test).not.toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 🔴 通道指向核对 —— 2026-08-05 实测真事故：
+//    CTS（ctstours.co.nz）的 WordPress 通道指向 oztopbuildingsupplies.com.au。
+//    它一直是 error 所以从没发出去过东西，但**自动重测会把它激活**：
+//    Oztop 网站一旦不再拦我们，这条也会被判成连通，CTS 的文章就发到 Oztop 站上。
+// ---------------------------------------------------------------------------
+
+describe('targetBelongsToClient', () => {
+  it('🔴 CTS 的通道指向 Oztop 的网站 → 判为不属于（真实数据）', () => {
+    expect(targetBelongsToClient('https://oztopbuildingsupplies.com.au', 'ctstours.co.nz')).toBe(false)
+  })
+
+  it('Oztop 自己那条是对的', () => {
+    expect(targetBelongsToClient('https://oztopbuildingsupplies.com.au', 'oztopbuildingsupplies.com.au')).toBe(true)
+  })
+
+  it('www / 协议 / 结尾斜杠 / 大小写都不算差异', () => {
+    expect(targetBelongsToClient('https://WWW.Ctstours.co.nz/', 'ctstours.co.nz')).toBe(true)
+    expect(targetBelongsToClient('http://ctstours.co.nz', 'www.ctstours.co.nz')).toBe(true)
+  })
+
+  it('子域名算自己家', () => {
+    expect(targetBelongsToClient('https://blog.ctstours.co.nz', 'ctstours.co.nz')).toBe(true)
+  })
+
+  it('🔴 前缀像但不是同一个域，不许放过', () => {
+    expect(targetBelongsToClient('https://ctstours.co.nz.evil.com', 'ctstours.co.nz')).toBe(false)
+    expect(targetBelongsToClient('https://notctstours.co.nz', 'ctstours.co.nz')).toBe(false)
+  })
+
+  it('判断不了就返回 null（GitHub 通道指向仓库，本来就不是域名）', () => {
+    expect(targetBelongsToClient(null, 'ctstours.co.nz')).toBeNull()
+    expect(targetBelongsToClient('https://x.com', null)).toBeNull()
+  })
+})
+
+describe('retestBrokenConnections —— 指错客户的通道', () => {
+  function mismatched(): RetestCandidateRow {
+    return {
+      client_id: 'cts',
+      provider: 'wordpress',
+      status: 'error',
+      last_tested_at: '2026-05-25T00:00:00Z',
+      site_url: 'https://oztopbuildingsupplies.com.au',
+      client_domain: 'ctstours.co.nz',
+    }
+  }
+
+  it('🔴 指错客户的连接**连测都不测** —— 测通了就会被标成连通', async () => {
+    const test = vi.fn()
+    const mark = vi.fn()
+    const res = await retestBrokenConnections(
+      fakeSupabase({ rows: [mismatched()] }),
+      { testConnection: test as never, markTested: mark as never },
+      NOW,
+    )
+    expect(test).not.toHaveBeenCalled()
+    expect(mark).not.toHaveBeenCalled()
+    expect(res.recovered).toBe(0)
+    expect(res.outcomes[0].mismatched).toBe(true)
+  })
+
+  it('🔴 原因要说清是「配错了客户」，不是「连不上」—— 两者的处置完全不同', async () => {
+    const res = await retestBrokenConnections(
+      fakeSupabase({ rows: [mismatched()] }),
+      { testConnection: async () => ({ ok: true }), markTested: async () => {} },
+      NOW,
+    )
+    expect(classifyFailure(res.outcomes[0].error)).toContain('别的客户的网站')
+  })
+
+  it('指对了的照常测，不受影响', async () => {
+    const ok = { ...mismatched(), client_id: 'oztop', client_domain: 'oztopbuildingsupplies.com.au' }
+    const res = await retestBrokenConnections(
+      fakeSupabase({ rows: [ok] }),
+      { testConnection: async () => ({ ok: true }), markTested: async () => {} },
+      NOW,
+    )
+    expect(res.recovered).toBe(1)
   })
 })
