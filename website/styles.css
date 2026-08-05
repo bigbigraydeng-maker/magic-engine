@@ -940,6 +940,78 @@ h3.serif { font-size: clamp(1.2rem, 2vw, 1.6rem); }
   #me-home .me-hero-visual { min-height: 260px; order: -1; }
 }
 
+/* Homepage phone layout: keep the value proposition and CTA above the fold. */
+@media (max-width: 640px) {
+  #me-home .nav { height: 64px; }
+  #me-home .nav-inner { gap: 8px; }
+  #me-home .me-wrap { padding-inline: 20px; }
+
+  #me-home .me-logo-row { gap: 7px; min-width: 0; }
+  #me-home .me-logo-mark { width: 30px; height: 27px; }
+  #me-home .me-logo-text .me-name {
+    display: block;
+    font-size: 16px;
+    white-space: nowrap;
+  }
+  #me-home .me-logo-text .me-sub { display: none; }
+
+  #me-home .nav-actions { gap: 6px; }
+  #me-home .nav-actions .btn-register { display: none; }
+  #me-home .nav-actions .btn-lang {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+  #me-home .nav-actions .btn-portal {
+    padding: 8px 10px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  #me-home .me-hero {
+    padding-top: 36px;
+    padding-bottom: 56px;
+  }
+  #me-home .me-hero-grid { gap: 18px; }
+  #me-home .me-hero h1 {
+    font-size: clamp(36px, 11vw, 44px);
+  }
+  #me-home .me-hero-sub {
+    font-size: 17px;
+    line-height: 1.55;
+  }
+
+  /* The illustration supports the message; it must not push the message down. */
+  #me-home .me-hero-visual {
+    order: initial;
+    min-height: 180px;
+    margin-top: 12px;
+  }
+  #me-home .me-hero-mark { width: min(62vw, 220px); }
+  #me-home .me-hero-glow {
+    right: 50%;
+    top: 50%;
+    width: 190px;
+    height: 190px;
+    transform: translate(50%, -50%);
+    animation: none;
+  }
+
+  #me-home .me-url-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 10px;
+  }
+  #me-home .me-url-bar input { padding: 8px 6px; }
+  #me-home .me-url-bar .me-btn { width: 100%; }
+
+  #me-home .me-hero-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  #me-home .me-hero-actions .me-btn { width: 100%; }
+}
+
 /* ---------- Trust strip ---------- */
 #me-home .me-trust { border-block: 1px solid var(--me-line); background: linear-gradient(0deg, rgba(234,230,223,.4), rgba(234,230,223,.4)); }
 #me-home .me-trust-inner { display: flex; align-items: center; justify-content: space-between; gap: 40px; padding-block: 28px; flex-wrap: wrap; }
