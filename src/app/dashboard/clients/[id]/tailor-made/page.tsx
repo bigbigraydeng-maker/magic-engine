@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { clientHasIndustryFeature, INDUSTRY_FEATURE_NOTICE } from '@/lib/clients/industry-guard'
 import { listItineraries } from '@/lib/tailor-made/store'
 import { TAILOR_MADE_STATUS_LABEL, type TailorMadeSummary } from '@/lib/tailor-made/types'
 import TailorMadeNewButton from './_components/TailorMadeNewButton'
@@ -10,6 +11,12 @@ export default async function TailorMadeListPage({ params }: { params: { id: str
   const access = await requireDashboardClientAccess(params.id)
   if (!access.ok) {
     return <Notice title="无权访问" body={access.error} />
+  }
+
+  // 行业闸:导航已经藏了入口,这里挡直接敲网址的情况 —— 建材客户后台不该有旅游行程单。
+  if (!(await clientHasIndustryFeature(params.id, 'tailor_made'))) {
+    const notice = INDUSTRY_FEATURE_NOTICE.tailor_made
+    return <Notice title={notice.title} body={notice.body} />
   }
 
   let items: TailorMadeSummary[] = []

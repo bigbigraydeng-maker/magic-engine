@@ -19,6 +19,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
+import { parsePageUpgradeDraft } from '@/lib/page-rewriter/upgrade-draft'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -108,12 +109,14 @@ export default function PageRewriterPage() {
   const params       = useParams<{ id: string }>()
   const search       = useSearchParams()
   const clientId     = params?.id ?? ''
-  const kanbanItemId = search?.get('kanban_item_id') ?? null
-  const prefilledUrl = search?.get('url') ?? ''
+  const kanbanItemId  = search?.get('kanban_item_id') ?? null
+  const prefilledUrl  = search?.get('url') ?? ''
+  const upgradeDraftKey = search?.get('upgrade_draft_key') ?? null
 
   const [phase,    setPhase]    = useState<Phase>({ kind: 'lookup' })
   const [busy,     setBusy]     = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [upgradeDraftMode, setUpgradeDraftMode] = useState<'none' | 'full' | 'metadata_only'>('none')
 
   // ── Phase: LOOKUP ───────────────────────────────────────────────────────────
   const [lookupUrl,    setLookupUrl]    = useState(prefilledUrl)
@@ -138,10 +141,36 @@ export default function PageRewriterPage() {
         setErrorMsg(data.error ?? `Lookup failed (HTTP ${res.status})`)
         return
       }
+      let target = targetFromCurrent(data.post)
+      let draftMode: 'none' | 'full' | 'metadata_only' = 'none'
+
+      if (upgradeDraftKey) {
+        const draft = parsePageUpgradeDraft(
+          window.sessionStorage.getItem(upgradeDraftKey),
+          clientId,
+          data.post.link,
+        )
+        if (draft) {
+          const isElementorPage = /(?:elementor-|data-elementor)/i.test(data.post.content)
+          target = {
+            ...target,
+            title:          draft.enhancedTitle,
+            seoTitle:       draft.enhancedMetaTitle,
+            seoDescription: draft.enhancedMetaDescription,
+            contentHtml:    isElementorPage ? target.contentHtml : draft.enhancedHtmlBody,
+            contentDirty:   !isElementorPage && data.post.content !== draft.enhancedHtmlBody,
+          }
+          draftMode = isElementorPage ? 'metadata_only' : 'full'
+        } else {
+          setErrorMsg('升级稿已过期，或与当前客户/页面不匹配。请返回页面升级后重新进入。')
+        }
+      }
+
+      setUpgradeDraftMode(draftMode)
       setPhase({
         kind:     'edit',
         current:  data.post,
-        target:   targetFromCurrent(data.post),
+        target,
         sameHost: data.same_host ?? true,
       })
     } catch (err) {
@@ -149,7 +178,7 @@ export default function PageRewriterPage() {
     } finally {
       setBusy(false)
     }
-  }, [clientId, lookupMode, lookupUrl, lookupPostId, lookupTargetType])
+  }, [clientId, lookupMode, lookupUrl, lookupPostId, lookupTargetType, upgradeDraftKey])
 
   // ── Phase transitions ───────────────────────────────────────────────────────
   const goConfirm = useCallback(() => {
@@ -184,6 +213,7 @@ export default function PageRewriterPage() {
         setErrorMsg(data.error ?? `Submit failed (HTTP ${res.status})`)
         return
       }
+      if (upgradeDraftKey) window.sessionStorage.removeItem(upgradeDraftKey)
       setPhase({
         kind:          'done',
         updatedUrl:    data.updated_url ?? phase.current.link,
@@ -194,24 +224,37 @@ export default function PageRewriterPage() {
     } finally {
       setBusy(false)
     }
-  }, [phase, clientId, kanbanItemId])
+  }, [phase, clientId, kanbanItemId, upgradeDraftKey])
 
   const onAnother = useCallback(() => {
+    if (upgradeDraftKey) window.sessionStorage.removeItem(upgradeDraftKey)
     setLookupUrl('')
     setLookupPostId('')
     setErrorMsg(null)
+    setUpgradeDraftMode('none')
     setPhase({ kind: 'lookup' })
-  }, [])
+  }, [upgradeDraftKey])
 
   // ── Phase rendering ─────────────────────────────────────────────────────────
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
-      <Header clientId={clientId} kanbanItemId={kanbanItemId} />
+      <Header clientId={clientId} kanbanItemId={kanbanItemId} hasUpgradeDraft={Boolean(upgradeDraftKey)} />
       <Stepper phase={phase.kind} />
 
       {errorMsg && (
         <div className="rounded-md border border-red-300 bg-red-50 px-4 py-2 text-sm text-red-800">
           {errorMsg}
+        </div>
+      )}
+
+      {phase.kind === 'edit' && upgradeDraftMode !== 'none' && (
+        <div className="rounded-md border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+          <p className="font-semibold">AI 页面升级稿已载入，请核对下方逐项差异。</p>
+          <p className="mt-1 text-xs text-indigo-700">
+            {upgradeDraftMode === 'metadata_only'
+              ? '检测到 Elementor 页面：为保护版式，仅带入标题和 SEO 元数据；正文请在 WordPress / Elementor 中处理。'
+              : '系统刚刚重新读取了 WordPress 当前版本；只有你在确认页再次提交后，线上页面才会更新。'}
+          </p>
         </div>
       )}
 
@@ -260,7 +303,15 @@ export default function PageRewriterPage() {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function Header({ clientId, kanbanItemId }: { clientId: string; kanbanItemId: string | null }) {
+function Header({
+  clientId,
+  kanbanItemId,
+  hasUpgradeDraft,
+}: {
+  clientId: string
+  kanbanItemId: string | null
+  hasUpgradeDraft: boolean
+}) {
   return (
     <div className="flex items-center gap-3 flex-wrap">
       <Link href={`/dashboard/clients/${clientId}`} className="text-gray-400 hover:text-gray-600 text-sm">
@@ -271,6 +322,11 @@ function Header({ clientId, kanbanItemId }: { clientId: string; kanbanItemId: st
       {kanbanItemId && (
         <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
           Linked to Kanban card
+        </span>
+      )}
+      {hasUpgradeDraft && (
+        <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+          AI upgrade draft
         </span>
       )}
     </div>

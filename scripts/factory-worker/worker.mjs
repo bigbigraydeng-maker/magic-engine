@@ -38,19 +38,44 @@ const MUAPI_KEY = ENV.MUAPI_API_KEY || ''
 // B3:引擎指向 MagicLab_Studio 权威版(治没音乐/素材糙),brandkit 按客户走(治装配层 CTS 尾巴)。
 const STUDIO_ROOT = ENV.STUDIO_ROOT || join(process.env.HOME, 'Dropbox/MagicLab_Studio')
 const MAKE_PROMO = ENV.MAKE_PROMO_PATH || join(STUDIO_ROOT, 'engine/make_promo.py')
-const DEFAULT_BRAND_KIT = ENV.BRAND_KIT_PATH || join(process.env.HOME, 'Documents/CTS_BrandKit')
+// ⚠️ 这里**故意没有默认品牌包**。曾经的默认值是 CTS_BrandKit,任何没配映射的客户
+// 都会拿到 CTS 的 logo —— 2026-08-03 Oztop 成片结尾放了 CTS logo 就是这么来的。
+// 找不到自己的品牌包 = 工单失败,不是换一个凑合。
 // client_id → studio 文件夹名(brandkit=$STUDIO_ROOT/<folder>/brandkit)。JSON env 覆盖。
 const CLIENT_STUDIO = (() => { try { return JSON.parse(ENV.FACTORY_CLIENT_STUDIO || '{}') } catch { return {} } })()
 // make_promo 引擎对这几个资产是无守卫 open(brand_red.txt)/引 logo/watermark —— 缺任一即炸装配。
 // 健康检查到「资产在」而非只「文件夹在」(魏征 B3:半成品目录 existsSync 放行=第三客户定时炸弹)。
 const BRANDKIT_REQUIRED = ['brand_red.txt', 'assets/logo_color.png', 'assets/watermark.png']
 const brandkitHealthy = (kit) => BRANDKIT_REQUIRED.every((r) => existsSync(join(kit, r)))
+/**
+ * 找这个客户自己的品牌包。
+ *
+ * 🔴 **绝不退回别的客户的品牌包**(2026-08-03 真实事故)。
+ *    旧逻辑找不到就退回 DEFAULT_BRAND_KIT(= CTS_BrandKit),结果 Oztop 的成片
+ *    结尾放了 CTS 的 logo —— 客户 A 的品牌出现在客户 B 的对外内容里。
+ *    而 Oztop 自己的品牌包一直是齐的,只是映射没配上,从没被选中。
+ *
+ *    「装不出片」是可以补救的,「发出去带错品牌」不能。所以这里直接抛错,
+ *    让工单失败并留下能照做的修法,不做任何静默兜底。
+ */
 function brandkitFor(clientId) {
   const folder = CLIENT_STUDIO[clientId]
-  const kit = folder ? join(STUDIO_ROOT, folder, 'brandkit') : DEFAULT_BRAND_KIT
-  if (brandkitHealthy(kit)) return kit
-  log(`⚠️ brandkit 资产不全: ${kit}(client=${clientId}),退回默认 ${DEFAULT_BRAND_KIT}`)
-  return DEFAULT_BRAND_KIT
+  if (!folder) {
+    throw new Error(
+      `客户 ${clientId} 没配 studio 目录 —— 无法确定用谁的品牌包。` +
+      `修法:在 worker 的 FACTORY_CLIENT_STUDIO 里加一条 {"${clientId}":"<MagicLab_Studio 下的文件夹名>"}。` +
+      `绝不拿别的客户的品牌包顶上。`,
+    )
+  }
+  const kit = join(STUDIO_ROOT, folder, 'brandkit')
+  if (!brandkitHealthy(kit)) {
+    const missing = BRANDKIT_REQUIRED.filter((r) => !existsSync(join(kit, r)))
+    throw new Error(
+      `客户 ${clientId} 的品牌包缺文件: ${missing.join(', ')}(在 ${kit})。` +
+      `补齐这几个文件再跑。绝不拿别的客户的品牌包顶上。`,
+    )
+  }
+  return kit
 }
 const MUAPI_SLUG = ENV.MUAPI_KLING_SLUG || 'kling-v2.1-standard-i2v'
 const CLIP_UNIT_COST = Number(ENV.FACTORY_CLIP_UNIT_COST_USD || '0.225')

@@ -23,6 +23,11 @@ export const PLATFORM_PROVIDERS = {
   META:       'meta',
   TIKTOK:     'tiktok',
   GOOGLE_ADS: 'google_ads',
+  /**
+   * 客户自己的邮箱（Microsoft Graph —— 同一套接口既服务 Outlook.com
+   * 也服务 Microsoft 365 企业邮箱）。用来把客人发进来的邮件接回 CRM。
+   */
+  MICROSOFT_MAIL: 'microsoft_mail',
 } as const
 
 export type PlatformProvider = (typeof PLATFORM_PROVIDERS)[keyof typeof PLATFORM_PROVIDERS]

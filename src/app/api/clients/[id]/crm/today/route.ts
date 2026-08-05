@@ -32,20 +32,13 @@ import { WORKLIST_GROUPS, groupDisplayMeta } from '@/lib/crm/worklist-groups'
 import { contactCardTitle } from '@/lib/crm/display-name'
 import { followUpMarks, localDay } from '@/lib/crm/follow-up-marks'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
+import { isAutomatedTouch } from '@/lib/crm/automated-touch'
+import { contactKindOf, readDomainRules, type ContactKind } from '@/lib/crm/contact-kind'
 import { fetchAll } from '@/lib/supabase-paginate'
 
 interface RouteParams {
   params: { id: string }
 }
-
-/**
- * 这些来源写出来的「我们发出的」是**机器发的**，不是人做的动作。
- *
- * 不分开的话，一封 Mailchimp 群发会把整块看板标成「今天已经跟过」—— 销售
- * 第二天早上看到几百张灰卡，会以为活都做完了。群发那一笔仍然会出现在时间线上
- * （客人确实收到了），只是不算「有人跟过他」。
- */
-const AUTOMATED_SOURCES = new Set(['mailchimp'])
 
 interface ContactRow {
   id: string
@@ -55,6 +48,7 @@ interface ContactRow {
   do_not_contact: boolean
   stage: string | null
   pinned_at: string | null
+  snooze_until: string | null
 }
 
 interface TouchRow {
@@ -65,6 +59,25 @@ interface TouchRow {
   occurred_at: string
   summary: string | null
   metadata: Record<string, unknown> | null
+}
+
+/**
+ * 这个人最近一次通话的结果。分「号码要修」那一组用。
+ *
+ * touches 已经按 occurred_at 倒序（见下面的查询），所以第一条带 outcome 的
+ * 就是最近的那次。
+ */
+function latestOutcomeOf(touches: TouchRow[]): string | null {
+  for (const t of touches) {
+    const o = t.metadata?.outcome
+    if (typeof o === 'string' && o) return o
+  }
+  return null
+}
+
+interface IdentityRow {
+  contact_id: string
+  value: string
 }
 
 interface StageRow {
@@ -86,16 +99,29 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   // 「下个月左右走」，那条排在 1000 名开外，系统就完全看不见他要出行。
   // 实测 CTS：库里 1271 条，limit(20000) 只回 1000 条。
   let contacts: ContactRow[]
+  let emailIdentities: IdentityRow[]
   let touches: TouchRow[]
   let stageRows: StageRow[]
   try {
-    ;[contacts, touches, stageRows] = await Promise.all([
+    ;[contacts, emailIdentities, touches, stageRows] = await Promise.all([
       fetchAll<ContactRow>((from, to) =>
         supabaseAdmin
           .from('contacts')
-          .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, pinned_at')
+          .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, pinned_at, snooze_until')
           .eq('client_id', clientId)
           .order('id', { ascending: true })
+          .range(from, to),
+      ),
+      // 邮箱身份 —— 用来判「终端客户 / 同行 / 自己人」。
+      // 不能只看 contacts.primary_email：一个人可以挂多个邮箱，同行的人常常
+      // 用私人 Gmail 来问事，而他的公司邮箱才是判据。
+      fetchAll<IdentityRow>((from, to) =>
+        supabaseAdmin
+          .from('contact_identities')
+          .select('contact_id, value')
+          .eq('client_id', clientId)
+          .eq('kind', 'email')
+          .order('contact_id', { ascending: true })
           .range(from, to),
       ),
       fetchAll<TouchRow>((from, to) =>
@@ -146,6 +172,20 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     // 行程单表不存在或读失败：跳过这条提议，其余照常
   }
 
+  // 这个客户的「自己人域名 / 同行域名」清单。读不到就当没配 —— 全按终端客户走，
+  // 跟这条规则上线之前一模一样，不会因为读配置失败让整块看板打不开。
+  let clientRow: { leads_config: unknown } | null = null
+  try {
+    const { data } = await supabaseAdmin
+      .from('clients')
+      .select('leads_config')
+      .eq('id', clientId)
+      .maybeSingle()
+    clientRow = data as { leads_config: unknown } | null
+  } catch {
+    // 同上：读不到就按没配处理
+  }
+
   const byContact = new Map<string, TouchRow[]>()
   for (const t of touches) {
     const list = byContact.get(t.contact_id) ?? []
@@ -167,7 +207,29 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     })
   }
 
-  const rows = contacts
+  /**
+   * 终端客户 / 同行 / 自己人。
+   *
+   * PM 2026-08-04（客户直接反馈「contact 里面怎么还有工作人员」）定的口径：
+   * **同行单独标记、分类；「今天该联系谁」主要还是终端客户。**
+   *
+   * **自己人在这里就整个丢掉** —— 他们根本不该出现在客人名单的任何位置，
+   * 连「不用再联系」那一栏都不该有。同行留着但打上标记，页面默认只看终端客户。
+   *
+   * 判据全在 lib/crm/contact-kind，按域名算，不存列（域名清单一改就该跟着变）。
+   */
+  const rules = readDomainRules(clientRow?.leads_config)
+  const emailsByContact = new Map<string, string[]>()
+  for (const c of contacts) if (c.primary_email) emailsByContact.set(c.id, [c.primary_email])
+  for (const i of emailIdentities) {
+    const list = emailsByContact.get(i.contact_id) ?? []
+    if (!list.includes(i.value)) list.push(i.value)
+    emailsByContact.set(i.contact_id, list)
+  }
+  const kindOf = (id: string): ContactKind =>
+    contactKindOf(emailsByContact.get(id) ?? [], rules)
+
+  const rows = contacts.filter((c) => kindOf(c.id) !== 'staff')
   const models: ContactLike[] = rows.map((c) => {
     const tps = byContact.get(c.id) ?? []
     const stage = c.stage ? stageMeta.get(c.stage) : undefined
@@ -188,6 +250,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
         ),
       stageSuppressed: stage?.suppressed ?? false,
       stageLabel: stage?.label ?? null,
+      // 销售把他推迟了 —— 到期之前不进名单，到期自己回来（见 lib/crm/segments）。
+      snoozeUntil: c.snooze_until,
       touchpoints: tps.map((t) => ({
         channel: t.channel,
         direction: t.direction,
@@ -356,7 +420,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
         summary: t.summary,
         engagement: engagementFromMetadata(t.metadata),
         loggedBy: (t.metadata?.logged_by as string | null) ?? null,
-        automated: AUTOMATED_SOURCES.has(t.source ?? ''),
+        automated: isAutomatedTouch(t.source, t.metadata),
       })),
       now,
       timeZone,
@@ -368,6 +432,11 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       lastBy: marks.lastBy,
       /** 他打开过邮件、之后没人跟。只做提示，不参与排序（打开可能是 Apple 替他开的）。 */
       openedDaysAgo: marks.openedDaysAgo,
+      /**
+       * 终端客户还是同行。**只做标记和筛选，不参与分批和排序** ——
+       * 一个同行今天该不该被联系，判据跟散客完全一样（他有没有开口、等了多久）。
+       */
+      kind: kindOf(c.id),
       contactId: c.id,
       name: contactCardTitle(c.displayName, firstSaid.get(c.id)),
       phone: row?.primary_phone ?? null,
@@ -384,6 +453,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       lastNote: last?.summary ?? null,
       pinned: Boolean(row?.pinned_at),
       pinnedAt: row?.pinned_at ?? null,
+      /** 被推迟到什么时候。今天名单上的人这里恒为 null —— 推迟的人已经被挡在外面了。 */
+      snoozeUntil: row?.snooze_until ?? null,
       suggestedStage:
         suggestStage(c, row?.stage ?? null) ??
         suggestQuoted(c.displayName, row?.stage ?? null),
@@ -454,13 +525,30 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
         reason: seg.reason,
         // 为什么不在今天名单上。成交跟「明确拒绝」混在一堆叫「已排除」很刺眼，
         // 而且成交客户恰恰最该继续维护（催余款、确认行程）—— 页面按这个分开显示。
+        /** 被推迟到什么时候。有值 = 他是被人手推迟的，不是被规则排除的。 */
+        snoozeUntil: row?.snooze_until ?? null,
+        /**
+         * 号码是坏的 —— 这一条要单独拎出来。
+         *
+         * 它以前跟「明确拒绝」混在同一堆「不用再联系」里，于是一个**只是号码
+         * 抄错了**的真客人被永久静默排除，没有任何地方提醒谁去补一个对的号码。
+         * 交给自动跟进也没用：号码是坏的，SOP 再激活也发不出去。
+         * 单独成组 = 变成一件人能动手修的事（铁律 3）。
+         */
+        // 「被推迟」必须能跟「已停止」分开。混在一起的话，销售想把一个人提前
+        // 叫回来就无从下手 —— 他会在一堆「明确拒绝」里找一个自己上周放一放的人。
         group:
-          meta?.action === 'won' || meta?.action === 'postsale'
-            ? ('won' as const)
-            : seg.segment === 'nurture_future'
-              ? ('later' as const)
-              : ('stop' as const),
+          row?.snooze_until && new Date(row.snooze_until).getTime() > now.getTime()
+            ? ('snoozed' as const)
+            : latestOutcomeOf(byContact.get(c.id) ?? []) === 'bad_number'
+              ? ('fix_number' as const)
+              : meta?.action === 'won' || meta?.action === 'postsale'
+                ? ('won' as const)
+                : seg.segment === 'nurture_future'
+                  ? ('later' as const)
+                  : ('stop' as const),
         lastNote: (byContact.get(c.id) ?? [])[0]?.summary ?? null,
+        kind: kindOf(c.id),
       }
     })
 
@@ -481,7 +569,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       .filter(
         (t) =>
           t.direction === 'outbound' &&
-          !AUTOMATED_SOURCES.has(t.source ?? '') &&
+          !isAutomatedTouch(t.source, t.metadata) &&
           !engagementFromMetadata(t.metadata) &&
           localDay(t.occurred_at, timeZone) === today,
       )

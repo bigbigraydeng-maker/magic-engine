@@ -75,6 +75,9 @@ export async function backfillUnlinkedConversations(
     .from('conversations')
     .select('id, participant_psid, participant_name, message_count, last_message_at, last_message_from')
     .eq('client_id', clientId)
+    // 只扫私信。这里靠 fb_psid 认人，邮件线程根本没有 psid ——
+    // 不筛的话每一轮都会把它们捞起来、认不出人、再放回去，白占批次名额。
+    .eq('channel', 'messenger')
     .is('contact_id', null)
     .order('last_message_at', { ascending: false, nullsFirst: false })
     .limit(batch)
@@ -143,6 +146,7 @@ export async function backfillUnlinkedConversations(
     .from('conversations')
     .select('id', { count: 'exact', head: true })
     .eq('client_id', clientId)
+    .eq('channel', 'messenger')
     .is('contact_id', null)
 
   return { processed, linked, created, remaining: count ?? 0 }

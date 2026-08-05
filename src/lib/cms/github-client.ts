@@ -173,12 +173,20 @@ export class GithubClient {
     owner: string,
     repo: string,
     prNumber: number,
-  ): Promise<{ state: 'open' | 'closed'; merged: boolean }> {
-    const pr = await this.request<{ state: 'open' | 'closed'; merged: boolean }>(
+  ): Promise<{ state: 'open' | 'closed'; merged: boolean; mergedAt: string | null }> {
+    const pr = await this.request<{
+      state: 'open' | 'closed'
+      merged: boolean
+      merged_at: string | null
+    }>(
       'GET',
       `/repos/${owner}/${repo}/pulls/${prNumber}`,
     )
-    return { state: pr.state, merged: pr.merged === true }
+    return {
+      state: pr.state,
+      merged: pr.merged === true,
+      mergedAt: pr.merged_at,
+    }
   }
 
   /**

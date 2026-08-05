@@ -1,6 +1,14 @@
 import { DataSourceCollectorBase } from '../collector-base'
 import { BillingMetrics } from '@/types/monthly-report'
 
+interface BillingLogRow {
+  id: number
+  api_calls: number | null
+  cost_usd: number | null
+  service: string | null
+  month: string
+}
+
 export class BillingMonitorCollector extends DataSourceCollectorBase {
   name = 'Billing Monitor'
   datasource_type = 'billing'
@@ -9,16 +17,17 @@ export class BillingMonitorCollector extends DataSourceCollectorBase {
    * Collect billing metrics for a client in a given month
    */
   async collect(clientId: string, month: string): Promise<BillingMetrics | null> {
-    const [year, monthNum] = month.split('-')
-    const monthStart = new Date(parseInt(year), parseInt(monthNum) - 1, 1)
-    const monthEnd = new Date(parseInt(year), parseInt(monthNum), 0)
-
+    // 🔴 This used to filter on a `logged_at` column that does not exist on
+    //    datasource_usage_logs (the columns are client_id / service / api_calls
+    //    / cost_usd / month / created_at / updated_at). PostgREST rejects the
+    //    unknown column, so this collector threw on every single run. The table
+    //    stores one aggregated row per client+service+month, so `month` is the
+    //    filter it was always meant to use.
     const { data: logs, error } = await this.supabase
       .from('datasource_usage_logs')
-      .select('id, api_calls, cost_usd, service, logged_at')
+      .select('id, api_calls, cost_usd, service, month')
       .eq('client_id', clientId)
-      .gte('logged_at', monthStart.toISOString())
-      .lte('logged_at', monthEnd.toISOString())
+      .eq('month', month)
 
     if (error) {
       throw new Error(`Failed to fetch billing logs: ${error.message}`)
@@ -33,14 +42,14 @@ export class BillingMonitorCollector extends DataSourceCollectorBase {
       }
     }
 
-    const metrics = this.normalizeBillingData(logs)
+    const metrics = this.normalizeBillingData(logs as BillingLogRow[])
     return metrics
   }
 
   /**
    * Normalize raw billing data into BillingMetrics
    */
-  private normalizeBillingData(logs: any[]): BillingMetrics {
+  private normalizeBillingData(logs: BillingLogRow[]): BillingMetrics {
     // Aggregate by service
     const costByService = new Map<string, number>()
     const callsByService = new Map<string, number>()
@@ -49,8 +58,8 @@ export class BillingMonitorCollector extends DataSourceCollectorBase {
     let totalCalls = 0
 
     logs.forEach((log) => {
-      const cost = log.cost_usd || 0
-      const calls = log.api_calls || 0
+      const cost = log.cost_usd ?? 0
+      const calls = log.api_calls ?? 0
 
       totalCost += cost
       totalCalls += calls
@@ -60,18 +69,10 @@ export class BillingMonitorCollector extends DataSourceCollectorBase {
       callsByService.set(service, (callsByService.get(service) || 0) + calls)
     })
 
-    // Build monthly trend
-    const dailyTrend = new Map<string, { calls: number; cost: number }>()
-
-    logs.forEach((log) => {
-      const date = new Date(log.logged_at).toISOString().split('T')[0]
-      const existing = dailyTrend.get(date) || { calls: 0, cost: 0 }
-      dailyTrend.set(date, {
-        calls: existing.calls + (log.api_calls || 0),
-        cost: existing.cost + (log.cost_usd || 0),
-      })
-    })
-
+    // Note: `monthly_trend` is a per-service breakdown, not a time series —
+    // this table has no per-day granularity to build one from. A day-by-day
+    // map used to be computed here off the non-existent `logged_at` column and
+    // then thrown away unused; it is gone rather than left looking meaningful.
     const monthlyTrend = Array.from(costByService.entries()).map(([service, cost]) => ({
       service,
       calls: callsByService.get(service) || 0,

@@ -180,14 +180,18 @@ export function formatBenchmarksForPrompt(
     ai_visibility: 'AI可见度',
   }
 
+  let hasLowSampleGrowth = false
+
   for (const dim of ALL_DIMENSIONS) {
     const b = benchmarks[dim]
     if (!b) {
       lines.push(`| ${labelMap[dim]} | — | — | — | — | — | — | 无数据 | — |`)
     } else {
+      const growth3mo = formatGrowthCell(b)
+      if (growth3mo.lowSample) hasLowSampleGrowth = true
       lines.push(
         `| ${labelMap[dim]} | ${b.score_p50 ?? '—'} | ${b.score_p75 ?? '—'} | ${b.score_p90 ?? '—'} | ` +
-        `${b.realistic_3mo_growth_pct ?? '—'}% | ${b.realistic_6mo_growth_pct ?? '—'}% | ` +
+        `${growth3mo.text} | ${b.realistic_6mo_growth_pct != null ? `${b.realistic_6mo_growth_pct}%` : '—'} | ` +
         `${b.typical_monthly_budget_aud ?? '—'} | ${b.confidence.toFixed(2)} | ${b.source ?? '估算'} |`
       )
     }
@@ -196,12 +200,47 @@ export function formatBenchmarksForPrompt(
   lines.push('')
   lines.push('**重要**：KPI target_value 必须落在该行业 P50–P90 区间内，超出者标记 realism_confidence ≤ 0.5。')
 
+  if (hasLowSampleGrowth) {
+    lines.push('')
+    lines.push(
+      '**⚠️ 小样本增长数据**：带 ⚠️ 的「可实现增长」来自 ME 自有客户实测，但样本或客户数不足' +
+      '（少于 3 个客户 = 单客户历史，不是行业基准）。只能当方向性参考，不要拿它当承诺给客户的增长目标。'
+    )
+  }
+
   if (customerBudgetAud != null) {
     lines.push('')
     lines.push(formatBudgetComparison(benchmarks, customerBudgetAud))
   }
 
   return lines.join('\n')
+}
+
+/**
+ * 渲染「3月可实现增长」单元格。
+ *
+ * 该数字若来自 benchmark-accumulator（ME 自有客户实测），要把小样本风险显式
+ * 标出来：少于 3 个客户的聚合本质上是单客户历史，当行业基准用会误导处方。
+ */
+export function formatGrowthCell(
+  b: Pick<
+    IndustryBenchmarkRow,
+    'realistic_3mo_growth_pct' | 'growth_source' | 'growth_sample_size' | 'growth_client_count'
+  >,
+): { text: string; lowSample: boolean } {
+  if (b.realistic_3mo_growth_pct == null) return { text: '—', lowSample: false }
+
+  const pct = `${b.realistic_3mo_growth_pct}%`
+  if (!b.growth_source) return { text: pct, lowSample: false }
+
+  const samples = b.growth_sample_size ?? 0
+  const clients = b.growth_client_count ?? 0
+  const lowSample = clients < 3 || samples < 5
+
+  return {
+    text: lowSample ? `${pct} ⚠️(n=${samples}/客户${clients})` : `${pct} (n=${samples}/客户${clients})`,
+    lowSample,
+  }
 }
 
 /**

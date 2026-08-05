@@ -46,6 +46,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     .select('id, participant_name')
     .eq('client_id', clientId)
     .eq('contact_id', contactId)
+    // 只认私信。这条路由的结果直接决定卡片上给不给「在这里回私信」的框 ——
+    // 拿到一条邮件线程，销售会对着一个从没在 Messenger 说过话的人打字。
+    .eq('channel', 'messenger')
     // 同一个人可能有多条线（换过页面、合并过身份）—— 回最新的那条，
     // 那才是他还在说话的地方。
     .order('last_message_at', { ascending: false })

@@ -102,7 +102,7 @@ Claude Code 干：大范围重构 · 跨模块长链路 · 复杂调试 · 架�
 - 可复用逻辑放 `src/lib`，路由层只放 `src/app/api`
 - **外科手术式改动**：只改必须改的，不顺手「优化」相邻代码 / 注释 / 格式
 - **写前先读**：改任何文件前先读它的 exports、直接调用方、共享工具；不确定某段代码为何如此设计时**先问再改**
-- 新表 migration 的 RLS 一律 service-role 模板（禁止 `workspace_id` / `client_team` / `auth.uid()`），见 [DECISIONS](./docs/DECISIONS.md)
+- 新表 migration 的 RLS 一律 service-role 模板 —— **必须写 `FOR ALL TO service_role USING (true)`，漏掉 `TO service_role` = 对匿名访客敞开读写**（2026-08-03 实测泄露 118 条策略）。禁止 `workspace_id` / `client_team` / `auth.uid()`。见 [DECISIONS](./docs/DECISIONS.md)
 - 新建 `/api/cron/*` 路由必须**同一个 PR 内**加 `render.yaml` 调度条目
 
 ### 8. 客户数据红线（违反 = 直接伤害客户）

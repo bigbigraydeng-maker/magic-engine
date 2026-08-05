@@ -139,13 +139,28 @@ async function fetchClientData(
   supabase: SupabaseClient,
   clientId: string,
 ): Promise<[ClientData, string[], string[]]> {
-  const [clientRes, kwRes, discoveryRes] = await Promise.all([
-    supabase.from('clients').select('domain, name, city, country, industry, semrush_db').eq('id', clientId).single(),
-    supabase.from('keywords').select('keyword').eq('client_id', clientId).eq('status', 'approved'),
+  // 🔴 关键词读 `clients.primary_keywords`。
+  //    原本这里查的是 `keywords` 表 —— **那张表在生产库里根本不存在**。
+  //    PostgREST 报错、`?? []` 把错误吞掉、关键词永远是空数组，于是 SEO 采集器
+  //    每次都走「没配关键词」分支返回 null，六柱里最能干的一柱**每天被判成「跳过」**，
+  //    而外面只看得到 dimensions_skipped 里多了个 seo，看不到任何原因。
+  //    2026-08-04 实测：CTS / Oztop / Roman HU 三个客户、每一次体检，SEO 全部落空；
+  //    而单独跑采集器 14.7 秒就能出分 26 —— 采集器一直是好的，是喂给它的东西是空的。
+  //    真正的关键词在 `clients.primary_keywords`（客户设置页写的就是这个字段，
+  //    CTS 11 个、Oztop 5 个），直接读它。
+  const [clientRes, discoveryRes] = await Promise.all([
+    supabase
+      .from('clients')
+      .select('domain, name, city, country, industry, semrush_db, primary_keywords')
+      .eq('id', clientId)
+      .single(),
     supabase.from('client_discovery').select('payload').eq('client_id', clientId).maybeSingle(),
   ])
 
-  const raw = clientRes.data as { domain: string | null; name: string | null; city: string | null; country: string | null; industry: string | null; semrush_db: string | null } | null
+  const raw = clientRes.data as {
+    domain: string | null; name: string | null; city: string | null; country: string | null
+    industry: string | null; semrush_db: string | null; primary_keywords: string[] | null
+  } | null
   const client: ClientData = {
     domain: raw?.domain ?? '',
     name: raw?.name ?? null,
@@ -154,8 +169,7 @@ async function fetchClientData(
     industry: raw?.industry ?? null,
     semrush_db: raw?.semrush_db ?? null,
   }
-  const keywords =
-    (kwRes.data as { keyword: string }[] | null)?.map(k => k.keyword) ?? []
+  const keywords = (raw?.primary_keywords ?? []).map((k) => k.trim()).filter(Boolean)
 
   // Extract real search queries from GSC advanced discovery payload
   type DiscoveryPayload = { advanced?: { gsc_data?: { rows?: Array<{ query: string }> } } }

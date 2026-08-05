@@ -6,6 +6,7 @@ import { cx } from '@/components/ui/me-theme'
 import Link from 'next/link'
 import { useState } from 'react'
 import { FeatureLockModal } from '@/components/auth/FeatureLockGate'
+import { industryFeatureFlags } from '@/lib/clients/industry-features'
 
 interface Props {
   children: React.ReactNode
@@ -14,6 +15,8 @@ interface Props {
   /** Phase X.S4 — semantic tier; drives sidebar lock styling + upsell modal. */
   userTier: 'admin' | 'paid_client' | 'self_serve' | 'portal_only'
   allowedClientId: string | null
+  /** 客户行业 —— 决定「房子」「行程单」这类行业专属入口显不显示。null = 认不出，一个都不给。 */
+  clientIndustry: string | null
   roleLabel: string
 }
 
@@ -60,6 +63,7 @@ const ADMIN_SECTIONS: NavSection[] = [
       { key: 'prospecting',      label: 'Prospecting',     mark: 'PS', href: '/dashboard/admin/prospecting' },
       { key: 'industry-baselines', label: 'Industry Baselines', mark: 'IB', href: '/dashboard/industry-baselines' },
       { key: 'cron-health',     label: 'Cron Health',     mark: 'CH', href: '/dashboard/admin/cron-health' },
+      { key: 'team-memory',     label: '团队工作记忆',     mark: 'TM', href: '/dashboard/team-memory' },
     ],
   },
 ]
@@ -172,10 +176,26 @@ function buildSelfServeSections(clientId: string): NavSection[] {
  * 账单、MTC、Prospecting、Cron 健康…）一律不出现，因为那些页面聚合的是
  * 全部客户的数据。middleware 已在服务端挡死，这里是不让它们出现在眼前。
  */
-function buildScopedAdminSections(clientId: string): NavSection[] {
+function buildScopedAdminSections(clientId: string, industry: string | null): NavSection[] {
   const at = (p: string) => `/dashboard/clients/${clientId}${p}`
+  // 行业专属入口:旅行社后台不该有地产工具,建材客户后台不该有旅游行程单
+  // (PM 2026-08-03 点名)。认不出行业就都不给 —— 见 lib/clients/industry-features 头注。
+  const feat = industryFeatureFlags(industry)
+  const industryTools: NavItem[] = [
+    ...(feat.tailor_made ? [{ key: 'tailor-made', label: '行程单', mark: 'TM', href: at('/tailor-made') }] : []),
+    // 楼盘在「房子」前面:先有楼盘,房子才挂得上去
+    ...(feat.projects ? [{ key: 'projects', label: '楼盘', mark: 'PJ', href: at('/projects') }] : []),
+    ...(feat.listings ? [{ key: 'listings', label: '房子', mark: 'LI', href: at('/listings') }] : []),
+  ]
   return [
-    { items: [{ key: 'client-home', label: '客户工作台', mark: 'CL', href: at('') }] },
+    {
+      items: [
+        { key: 'client-home', label: '客户工作台', mark: 'CL', href: at('') },
+        // 演示账号可能有多个客户（不同行业长出不同的工具）。列表页对受限
+        // 管理员只返回他有权的客户，所以它天然就是切换器。
+        { key: 'clients', label: '切换客户', mark: 'SW', href: '/dashboard/clients' },
+      ],
+    },
     {
       title: '诊断与策略',
       items: [
@@ -189,8 +209,7 @@ function buildScopedAdminSections(clientId: string): NavSection[] {
     {
       title: '经营工具',
       items: [
-        { key: 'tailor-made', label: '行程单',   mark: 'TM', href: at('/tailor-made') },
-        { key: 'listings',    label: '房子',     mark: 'LI', href: at('/listings') },
+        ...industryTools,
         // 中介在车里 / 开放日现场用手机开的那一页：按房子列人，点一下说清楚他到哪一步。
         // 放在「客户跟进」前面 —— 他每天开的是这一页，不是内部那张排班表。
         { key: 'contacts',    label: '我的客人', mark: 'MY', href: at('/contacts') },
@@ -201,7 +220,7 @@ function buildScopedAdminSections(clientId: string): NavSection[] {
   ]
 }
 
-export default function DashboardShell({ children, userEmail, userRole, userTier, allowedClientId }: Props) {
+export default function DashboardShell({ children, userEmail, userRole, userTier, allowedClientId, clientIndustry }: Props) {
   const pathname = usePathname()
   const [lockModalFeature, setLockModalFeature] = useState<string | null>(null)
 
@@ -211,7 +230,7 @@ export default function DashboardShell({ children, userEmail, userRole, userTier
   const isScopedAdmin = userRole === 'admin' && Boolean(allowedClientId)
 
   const sections: NavSection[] | null = isScopedAdmin && allowedClientId
-    ? buildScopedAdminSections(allowedClientId)
+    ? buildScopedAdminSections(allowedClientId, clientIndustry)
     : isSelfServe && allowedClientId
       ? buildSelfServeSections(allowedClientId)
       : null

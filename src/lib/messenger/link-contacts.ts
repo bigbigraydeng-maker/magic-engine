@@ -207,11 +207,23 @@ function lastHumanOutboundAt(messages: LinkConversationInput['messages']): strin
     }
   }
 
+  // 每条出站消息**紧挨着它前面**那条客户来信是什么时候 —— 秒回判据要用
+  // (见 lib/messenger/automation 第 3 条)。按时间排一遍顺着扫，边走边记
+  // 最近一次 inbound，比每条出站都回头找一遍便宜。
+  const ordered = [...messages].sort((a, b) => a.sentAt.localeCompare(b.sentAt))
+
   let latest: string | null = null
-  for (const m of messages) {
-    if (m.direction !== 'outbound') continue
+  let prevInboundAt: string | null = null
+  for (const m of ordered) {
+    if (m.direction === 'inbound') {
+      prevInboundAt = m.sentAt
+      continue
+    }
     const hasPriorInbound = firstInboundAt !== null && m.sentAt >= firstInboundAt
-    if (isAutomatedPageMessage({ tags: m.tags ?? [], hasPriorInbound })) continue
+    const msSincePriorInbound = prevInboundAt
+      ? new Date(m.sentAt).getTime() - new Date(prevInboundAt).getTime()
+      : null
+    if (isAutomatedPageMessage({ tags: m.tags ?? [], hasPriorInbound, msSincePriorInbound })) continue
     if (!latest || m.sentAt > latest) latest = m.sentAt
   }
   return latest

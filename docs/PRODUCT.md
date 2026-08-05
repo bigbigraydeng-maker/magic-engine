@@ -52,7 +52,7 @@
 
 覆盖传统搜索（Google）和新一代 AI 搜索（GEO）的双轨可见度建设。
 
-- **Keyword Intelligence**：关键词雷达（有机词 / 竞品词 / 缺口分析 / 排名追踪）
+- **Keyword Intelligence**：关键词雷达（有机词排名追踪 + 竞品缺口分析），全自动跑，无手工工作台
 - **Site Analyzer**：客户域名全量采集（DNZ）→ 内容现状快照
 - **Blog Studio**：双信号博客（SEO 关键词 + GEO 隐藏指令 同时优化）
 - **AI Visibility Tracker** ⭐：4 大 AI 引擎（ChatGPT / Claude / Perplexity / Google AIO）品牌排名周度追踪
@@ -154,7 +154,7 @@
 
 | 所属模块 | 子模块封装名 | 功能定位 | 状态 |
 |---------|------------|---------|------|
-| **SEO** | Keyword Intelligence | 关键词数据中枢（SEMrush + DataForSEO） | ✅ |
+| **SEO** | Keyword Intelligence | 关键词数据中枢（DataForSEO；周快照 + 缺口分析，无手工工作台） | ✅ |
 | **SEO** | Site Analyzer | 域名全量内容采集（DNZ） | ✅ |
 | **SEO** | AI Visibility Tracker ⭐ | 4大AI引擎品牌排名追踪 | ✅ |
 | **SEO** | GEO Composer ⭐ | AI 推荐指令生成与注入 | ✅ |

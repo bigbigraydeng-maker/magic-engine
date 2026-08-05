@@ -65,7 +65,14 @@ export type SendReplyResult =
       ok: false
       status: 400 | 403 | 404 | 409 | 424 | 502
       error: string
-      reason: 'not_found' | 'wrong_client' | 'empty_body' | 'window_closed' | 'no_token' | 'graph_failed'
+      reason:
+        | 'not_found'
+        | 'wrong_client'
+        | 'wrong_channel'
+        | 'empty_body'
+        | 'window_closed'
+        | 'no_token'
+        | 'graph_failed'
     }
 
 interface ConversationRow {
@@ -73,6 +80,7 @@ interface ConversationRow {
   client_id: string
   page_id: string
   participant_psid: string | null
+  channel: string
 }
 
 /** Most recent message the CUSTOMER sent — the clock Meta's window runs on. */
@@ -132,7 +140,7 @@ export async function sendReply(input: SendReplyInput): Promise<SendReplyResult>
 
   const { data: convo } = await supabaseAdmin
     .from('conversations')
-    .select('id, client_id, page_id, participant_psid')
+    .select('id, client_id, page_id, participant_psid, channel')
     .eq('id', input.conversationId)
     .maybeSingle<ConversationRow>()
 
@@ -144,6 +152,18 @@ export async function sendReply(input: SendReplyInput): Promise<SendReplyResult>
   // from the request and must be proven to belong to that same client.
   if (convo.client_id !== input.clientId) {
     return { ok: false, status: 403, error: 'Forbidden', reason: 'wrong_client' }
+  }
+
+  // conversations 是四个渠道共用的表。走到这里的必须是私信 —— 否则我们会拿一封
+  // 邮件的线程去调 Meta 的发送接口。没有 psid 时其实也发不出去，但那会报成
+  // 「窗口关了」，把一个渠道用错说成一个时间问题，排查要绕一大圈。
+  if (convo.channel !== 'messenger') {
+    return {
+      ok: false,
+      status: 409,
+      error: '这条不是 Facebook 私信，不能在这里回',
+      reason: 'wrong_channel',
+    }
   }
 
   if (!convo.participant_psid) {

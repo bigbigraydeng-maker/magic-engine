@@ -47,7 +47,7 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 
 | 模块 | 状态 | 主要代码 | 主要表 |
 |---|---|---|---|
-| **SEO 内容引擎** | ✅ 成熟 | `lib/{blog,keywords,seo-gap,seo-intelligence,seo-patrol,site-audit,page-rewriter,dataforseo,gsc}` · `api/keyword-intelligence` · `api/clients/[id]/{blog,site-audit,strategy}` | `blog_posts` `keywords` `client_site_pages` `content_strategy_items` `gsc_performance_snapshots` |
+| **SEO 内容引擎** | ✅ 成熟 | `lib/{blog,keywords,seo-gap,seo-intelligence,seo-patrol,site-audit,page-rewriter,dataforseo,gsc}` · `api/clients/[id]/{blog,site-audit,strategy}` | `blog_posts` `keyword_snapshots` `client_site_pages` `content_strategy_items` `gsc_performance_snapshots` |
 | **GEO / AI 可见度** | ✅ 成熟 | `lib/{geo,ai-tracker,industry-ai-visibility}` · `api/ai-tracker` · `api/baselines` | `geo_directives` `geo_deployments` `ai_visibility_{queries,runs,snapshots}` `industry_ai_visibility_*` `baseline_domains` |
 | **社媒内容矩阵** | ✅ 成熟 | `lib/{brief,content,social,reels,visual,images,publer,scheduling}` · `api/clients/[id]/{brief,campaign}` · `api/content/route-{a,b,c}` · `api/visual` | `master_briefs` `campaign_briefs` `content_posts` `visual_assets` `reels_drafts` |
 | **AI Content Factory** (P21) | 🔄 建设中 | `lib/{factory,ai-factory,winner-reel-sync}` · `api/factory` · `scripts/factory-worker/` | `content_work_orders` `content_work_order_clips` `factory_balance_ledger` `factory_angle_blocklist` |
@@ -66,7 +66,7 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 
 ## 4. 定时任务全表
 
-### 4.1 Render Cron（39 个，全部 curl `https://app.magicengine.com.au/api/cron/*`，带 `CRON_SECRET` Bearer）
+### 4.1 Render Cron（41 个，全部 curl `https://app.magicengine.com.au/api/cron/*`，带 `CRON_SECRET` Bearer）
 
 | Cron 名 | 调度 (UTC) | 端点 |
 |---|---|---|
@@ -78,9 +78,11 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 | blog-stuck-generating-sweeper | `*/15 * * * *` | `/api/cron/blog-stuck-generating` |
 | factory-publish-sweeper | `*/15 * * * *` | `/api/cron/factory-publish-sweeper` |
 | prospecting-sweep | `*/30 * * * *` | `/api/cron/prospecting-sweep` |
+| team-memory-sweeper | `*/30 * * * *` | `/api/cron/team-memory-sweeper` |
 | social-comment-autoreply | `*/30 * * * *` | `/api/cron/social-comment-autoreply` |
 | messenger-hourly | `10 * * * *` | `/api/cron/messenger-sync-hourly` |
 | meta-leads-hourly | `25 * * * *` | `/api/cron/meta-leads-sync` |
+| mailbox-sync-hourly | `25 * * * *` | `/api/cron/mailbox-sync` |
 | viral-discovery-weekly | `0 0 * * *` | `/api/cron/viral-discovery-weekly` |
 | site-audit-cron | `0 2 * * *` | `/api/cron/site-audit-jobs` |
 | industry-ai-visibility-daily | `30 2 * * *` | `/api/cron/ai-visibility-weekly` |

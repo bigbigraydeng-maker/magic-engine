@@ -82,6 +82,7 @@
 | `SERPAPI_API_KEY` | SERP 抓取 / Google AI Overviews | Render-web | ✅ (仅 example) |
 | `GOOGLE_SERVICE_ACCOUNT_CREDENTIALS` | GA4 / GSC 服务账号 JSON | Render-web | ❌ |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth（客户授权 GSC / GA4 / GBP） | Render-web | ❌ |
+| `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` | 客户公司邮箱授权（Microsoft Graph，把客人发来的邮件接回 CRM） | Render-web | ❌ |
 | `GOOGLE_GBP_ACCESS_TOKEN` | Google Business Profile | Render-web | ❌ |
 | `GOOGLE_PLACES_API_KEY` | 本地商户 / 口碑数据 | Render-web | ❌ |
 | `YOUTUBE_API_KEY` | YouTube 数据 | Render-web | ✅ |
@@ -97,6 +98,7 @@
 | `GOOGLE_ADS_DEVELOPER_TOKEN` | Google Ads API（等审核，见 ROADMAP P18.B.0） | Render-web | ✅ |
 | `GOOGLE_ADS_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` / `_MANAGER_ID` | Google Ads OAuth + MCC | Render-web | ✅ |
 | `TIKTOK_ADS_ACCESS_TOKEN` / `TIKTOK_ADS_ADVERTISER_ID` | TikTok Ads | Render-web | ✅ |
+| `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` | TikTok 自动发布（Content Posting API，跟 Ads 是两个应用）| Render-web | ⬜ 待建应用 |
 | `AD_HEALTH_DIGEST_TO` | 广告健康日报收件人 | Render-cron | ❌ |
 
 ## 6. 发布 / 内容协作

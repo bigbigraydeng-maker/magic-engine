@@ -20,6 +20,11 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { SEO_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import { computeVerdict } from './job'
+import {
+  findGscPage,
+  resolveGscAttributionScope,
+  type GscPagePerformance,
+} from './gsc-page-scope'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,12 +33,16 @@ interface GscSnapshotRow {
   total_clicks:      number
   total_impressions: number
   avg_position:      number
+  top_pages:         GscPagePerformance[] | null
 }
 
 interface SeoActionRow {
-  id:          string
-  client_id:   string
-  executed_at: string
+  id:              string
+  client_id:       string
+  executed_at:     string
+  action_type:     string
+  expected_metric: string | null
+  payload:         Record<string, unknown> | null
 }
 
 export interface GscAttributionResult {
@@ -67,9 +76,10 @@ export async function runGscAttributionForClient(
   // Load all SEO flywheel actions for this client
   const { data: actions, error: actionsErr } = await supabaseAdmin
     .from('flywheel_actions')
-    .select('id, client_id, executed_at')
+    .select('id, client_id, executed_at, action_type, expected_metric, payload')
     .eq('client_id', clientId)
     .eq('flywheel', 'seo')
+    .not('expected_metric', 'is', null)
     .order('executed_at', { ascending: false })
 
   if (actionsErr) {
@@ -102,6 +112,9 @@ async function attributeAction(
   action: SeoActionRow,
   windowDays: number,
 ): Promise<number> {
+  const scope = resolveGscAttributionScope(action)
+  if (scope.kind === 'skip') return 0
+
   const executedAt  = action.executed_at
   const windowEnd   = addDays(executedAt, windowDays)
 
@@ -113,21 +126,32 @@ async function attributeAction(
   // Need both snapshots to compute attribution
   if (!baseline || !after) return 0
 
-  // Delete any existing GSC outcomes for this action (idempotent)
-  const gscMetricKeys = [
+  const domainMetricKeys = [
     SEO_METRIC_KEY.GSC_CLICKS,
     SEO_METRIC_KEY.GSC_IMPRESSIONS,
     SEO_METRIC_KEY.GSC_AVG_POSITION,
   ]
+  const pageMetricKeys = [
+    SEO_METRIC_KEY.GSC_PAGE_CLICKS,
+    SEO_METRIC_KEY.GSC_PAGE_IMPRESSIONS,
+    SEO_METRIC_KEY.GSC_PAGE_AVG_POSITION,
+  ]
+  // Include legacy domain keys when a page action becomes live. This cleans up
+  // any outcome written by the old ungated bridge while its PR was still open.
+  const metricKeys =
+    scope.kind === 'page' ? [...domainMetricKeys, ...pageMetricKeys] : domainMetricKeys
 
+  // Delete any existing GSC outcomes for this action (idempotent)
   await supabaseAdmin
     .from('flywheel_outcomes')
     .delete()
     .eq('action_id', action.id)
-    .in('metric_key', gscMetricKeys)
+    .in('metric_key', metricKeys)
 
-  // Write one outcome row per GSC dimension
-  const rows = buildOutcomeRows(action, baseline, after, windowDays)
+  const rows =
+    scope.kind === 'page'
+      ? buildPageOutcomeRows(action, baseline, after, scope.pageUrl, windowDays)
+      : buildOutcomeRows(action, baseline, after, windowDays)
 
   if (rows.length === 0) return 0
 
@@ -144,7 +168,7 @@ async function fetchGscSnapshot(
 ): Promise<GscSnapshotRow | null> {
   let query = supabaseAdmin
     .from('gsc_performance_snapshots')
-    .select('period_end, total_clicks, total_impressions, avg_position')
+    .select('period_end, total_clicks, total_impressions, avg_position, top_pages')
     .eq('client_id', clientId)
 
   if (direction === 'before') {
@@ -225,6 +249,65 @@ function buildOutcomeRows(
       after_value: dim.afterVal,
       delta,
       delta_pct:   deltaPct,
+      confidence,
+      verdict,
+      window_days: windowDays,
+      computed_at: now,
+    }
+  })
+}
+
+function buildPageOutcomeRows(
+  action: SeoActionRow,
+  baseline: GscSnapshotRow,
+  after: GscSnapshotRow,
+  pageUrl: string,
+  windowDays: number,
+): Array<Record<string, unknown>> {
+  const baselinePage = findGscPage(baseline.top_pages, pageUrl)
+  const afterPage = findGscPage(after.top_pages, pageUrl)
+  if (!baselinePage || !afterPage) return []
+
+  const now = new Date().toISOString()
+  const dimensions = [
+    {
+      metricKey: SEO_METRIC_KEY.GSC_PAGE_CLICKS,
+      baselineVal: baselinePage.clicks,
+      afterVal: afterPage.clicks,
+      invertDelta: false,
+    },
+    {
+      metricKey: SEO_METRIC_KEY.GSC_PAGE_IMPRESSIONS,
+      baselineVal: baselinePage.impressions,
+      afterVal: afterPage.impressions,
+      invertDelta: false,
+    },
+    {
+      metricKey: SEO_METRIC_KEY.GSC_PAGE_AVG_POSITION,
+      baselineVal: baselinePage.position,
+      afterVal: afterPage.position,
+      invertDelta: true,
+    },
+  ]
+
+  return dimensions.map((dim) => {
+    const delta = round2(
+      dim.invertDelta
+        ? dim.baselineVal - dim.afterVal
+        : dim.afterVal - dim.baselineVal,
+    )
+    const deltaPct =
+      dim.baselineVal !== 0 ? round2((delta / Math.abs(dim.baselineVal)) * 100) : null
+    const { verdict, confidence } = computeVerdict(delta, deltaPct, 1)
+
+    return {
+      action_id: action.id,
+      client_id: action.client_id,
+      metric_key: dim.metricKey,
+      baseline: dim.baselineVal,
+      after_value: dim.afterVal,
+      delta,
+      delta_pct: deltaPct,
       confidence,
       verdict,
       window_days: windowDays,

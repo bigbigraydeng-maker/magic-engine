@@ -23,13 +23,18 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { syncMailchimpActivity } from '@/lib/mailchimp/sync'
 import { ping } from '@/lib/mailchimp/client'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 // 一个客户几十封邮件 × 每封翻页拉名单，给足时间。
 export const maxDuration = 600
 
+// 🔴 必须写 cron_run_logs(2026-08-03 补):此前不留任何运行痕迹,
+// 「跑了但没客户开这个功能」和「压根没跑」监控分辨不出 —— 每个出口都要收尾。
 async function run(): Promise<NextResponse> {
+  const cronRun = await startCronRun('mailchimp-activity-sync')
   const apiKey = process.env.MAILCHIMP_API_KEY
   if (!apiKey) {
+    await cronRun.finish({ error: 'MAILCHIMP_API_KEY 没配' })
     return NextResponse.json(
       { error: 'MAILCHIMP_API_KEY 没配 —— 去 Render 环境变量加上' },
       { status: 500 },
@@ -40,10 +45,9 @@ async function run(): Promise<NextResponse> {
   try {
     await ping(apiKey)
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Mailchimp 连不上' },
-      { status: 502 },
-    )
+    const msg = err instanceof Error ? err.message : 'Mailchimp 连不上'
+    await cronRun.finish({ error: msg })
+    return NextResponse.json({ error: msg }, { status: 502 })
   }
 
   // 哪些客户要同步：leads_config.mailchimp_enabled = true。
@@ -55,6 +59,7 @@ async function run(): Promise<NextResponse> {
     .not('leads_config', 'is', null)
 
   if (error) {
+    await cronRun.finish({ error: error.message })
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
@@ -63,6 +68,8 @@ async function run(): Promise<NextResponse> {
   )
 
   if (targets.length === 0) {
+    // 空转也要留痕：没客户开这个功能 ≠ 没跑
+    await cronRun.finish({ summary: { note: '没有客户开启邮件同步，本轮空转' } })
     return NextResponse.json({
       ok: true,
       note: '没有客户开启邮件同步（clients.leads_config.mailchimp_enabled）',
@@ -81,6 +88,13 @@ async function run(): Promise<NextResponse> {
     }
   }
 
+  const failed = synced.filter((x) => 'error' in x).length
+  await cronRun.finish({
+    processed: synced.length,
+    completed: synced.length - failed,
+    failed,
+    summary: { synced },
+  })
   return NextResponse.json({ ok: true, synced })
 }
 

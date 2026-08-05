@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { gscInspectUrl, daysAgo, type ManualItem } from '../manual-items'
+import { gscInspectUrl, daysAgo, loadManualItems, type ManualItem } from '../manual-items'
 import { buildTodoEmail, type TodoCounts } from '../daily-todo'
 
 describe('gscInspectUrl', () => {
