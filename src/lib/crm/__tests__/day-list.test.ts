@@ -393,3 +393,68 @@ describe('真正进生产的那个函数', () => {
     expect(rows.map((r) => r.id)).toEqual(['replied', 'fresh'])
   })
 })
+
+/**
+ * 🔴 **升级过的人绝不能算「已处理」。**（子牙 2026-08-06 复审 R2）
+ *
+ * `touchedToday` 只问「我们今天碰过他没有」，不问碰过之后客人又做了什么。
+ * 而这一版把已处理的人整批收进折叠区、还算进进度条的「已完成」——
+ * 于是一个一小时前刚回信的客人会被盖在「✓ 今天处理了 N 人」后面，
+ * 进度条甚至可能弹「今天全推完了 🎉」。
+ *
+ * 这跟 PM 那句「我如何知道哪个已经联系了」是同一类伤害，方向反过来：
+ * 不是做完的看不见，是**没做完的被当成做完了**。
+ */
+describe('客人回过头来找我们的，不算已处理', () => {
+  it('早上发了邮件、客人下午回了话 → 不算已处理', () => {
+    const r = row(
+      person([
+        ...YESTERDAY_LEAD,
+        tp({ direction: 'outbound', occurredAt: '2026-08-05T01:00:00.000Z' }),
+        tp({ direction: 'inbound', occurredAt: '2026-08-05T03:00:00.000Z' }),
+      ]),
+      true,
+    )
+    expect(r.seg.segment).toBe('replied')
+    expect(r.handled).toBe(false)
+    expect(r.handledWhy).toBeNull()
+  })
+
+  it('上午打电话约好下午回电，到点了 → 不算已处理', () => {
+    const r = row(
+      person([
+        ...YESTERDAY_LEAD,
+        tp({
+          direction: 'outbound',
+          occurredAt: '2026-08-05T01:00:00.000Z',
+          callbackAt: '2026-08-05T02:00:00.000Z',
+        }),
+      ]),
+      true,
+    )
+    expect(r.seg.segment).toBe('callback_due')
+    expect(r.handled).toBe(false)
+  })
+
+  /** 打了电话客人没动静 —— 这才是真正「做完了」，照旧变灰。 */
+  it('打了电话客人没动静 → 照旧算已处理', () => {
+    const r = row(
+      person([...YESTERDAY_LEAD, tp({ direction: 'outbound', occurredAt: '2026-08-05T01:00:00.000Z' })]),
+      true,
+    )
+    expect(r.handled).toBe(true)
+  })
+
+  /** 「他不买了」走的是「已下名单」那条路，不是升级 —— 不受这条影响。 */
+  it('今天标了「不买了」→ 仍然算已处理', () => {
+    const r = row(
+      person([
+        ...YESTERDAY_LEAD,
+        tp({ direction: 'outbound', occurredAt: '2026-08-05T03:00:00.000Z', outcome: 'not_interested' }),
+      ]),
+      true,
+    )
+    expect(r.handled).toBe(true)
+    expect(r.handledWhy).toContain('没兴趣')
+  })
+})

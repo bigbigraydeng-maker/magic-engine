@@ -26,7 +26,7 @@ import { PersonDrawer, type DrawerRow } from './_components/PersonDrawer'
 // 两边对不上，tsc 才把它顶出来 —— 而它本可以一直静静地错下去。
 import type { Segment } from '@/lib/crm/segments'
 import { CONTACT_KIND_LABEL, type ContactKind } from '@/lib/crm/contact-kind'
-import { countTrade, filterBucketByKind, type KindView } from '@/lib/crm/kind-filter'
+import { batchRecipients, countTrade, filterBucketByKind, type KindView } from '@/lib/crm/kind-filter'
 import { dayProgress } from '@/lib/crm/day-list'
 
 interface Row {
@@ -859,7 +859,15 @@ function BatchEmail({
   const [logging, setLogging] = useState(false)
   const [clientRef] = useState(() => globalThis.crypto.randomUUID())
 
-  const emails = bucket.batchEmails
+  /**
+   * 收信人只算一次 —— 地址、「记一笔」的名单、「另有几人没邮箱」全从这里出。
+   *
+   * 上一版地址和 contactIds 各推各的：复制出 17 个地址，却给 20 个人各记了
+   * 一笔「群发了一封邮件」，其中 3 位今天刚说过「不买了」。实际收件人和
+   * CRM 记录对不上 —— 那是这套东西最不能犯的错（见 kind-filter 开头）。
+   */
+  const recipients = batchRecipients(bucket)
+  const emails = recipients.map((p) => p.email as string)
   if (emails.length === 0) return null
 
   const copy = async () => {
@@ -881,7 +889,8 @@ function BatchEmail({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contactIds: bucket.people.map((p) => p.contactId),
+          // 跟 emails 同一批人 —— 分开推必然分叉（上一版就是这么错的）
+          contactIds: recipients.map((p) => p.contactId),
           note: '群发了一封邮件',
           clientRef,
         }),
@@ -896,7 +905,9 @@ function BatchEmail({
     }
   }
 
-  const missing = bucket.total - emails.length
+  // 「另有 N 人没留邮箱」：只数**本该收信但没邮箱**的。
+  // 用 total - emails 会把今天已处理的人也算成「没留邮箱」—— 那是另一件事。
+  const missing = bucket.people.filter((p) => !p.doneToday && !p.email).length
 
   if (!open) {
     return (

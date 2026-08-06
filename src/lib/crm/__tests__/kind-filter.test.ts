@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { countTrade, filterBucketByKind, matchesKindView } from '../kind-filter'
+import { batchRecipients, countTrade, filterBucketByKind, matchesKindView } from '../kind-filter'
 import type { ContactKind } from '../contact-kind'
 
 const person = (email: string | null, kind?: ContactKind) => ({ email, kind })
@@ -140,5 +140,42 @@ describe('已经处理过的人不进群发地址', () => {
 
   it('看「全部」时同样排除', () => {
     expect(filterBucketByKind(withDone, 'all').batchEmails).not.toContain('b@gmail.com')
+  })
+})
+
+/**
+ * 地址和「记一笔」的名单，必须是**同一批人**。
+ *
+ * 上一版各推各的：20 人的桶里 3 个今天点了「他不买了」，复制出 17 个地址，
+ * 却给 20 个人各记了一笔「群发了一封邮件」。那 3 位收到了一封他们根本
+ * 没收到的信的记录，而系统回报「已给 20 人记了一笔」。
+ *
+ * 这是这个文件开头标注为「比前面那条更毒」的那一条：实际收件人和 CRM 记录对不上。
+ */
+describe('收信人只有一份', () => {
+  const b = {
+    batch: 'send_email' as const,
+    total: 4,
+    people: [
+      { email: 'a@x.com', kind: 'retail' as const },
+      { email: 'b@x.com', kind: 'retail' as const, doneToday: true },
+      { email: null, kind: 'retail' as const },
+      { email: 'd@x.com', kind: 'retail' as const },
+    ],
+    batchEmails: [],
+  }
+
+  it('地址数 == 会被记一笔的人数', () => {
+    const recipients = batchRecipients(b)
+    expect(recipients).toHaveLength(2)
+    expect(filterBucketByKind(b, 'all').batchEmails).toHaveLength(recipients.length)
+  })
+
+  it('今天已处理的、没邮箱的，两边一起排掉', () => {
+    expect(batchRecipients(b).map((p) => p.email)).toEqual(['a@x.com', 'd@x.com'])
+  })
+
+  it('不该群发的桶 → 一个收信人都没有', () => {
+    expect(batchRecipients({ ...b, batch: 'call_one_by_one' })).toEqual([])
   })
 })

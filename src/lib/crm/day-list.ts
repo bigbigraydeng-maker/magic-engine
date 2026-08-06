@@ -45,15 +45,26 @@
  *
  * ## ⚠️ 已知缺口：「推迟」和「推到成交」目前仍然是点完就消失
  *
- * 这两个改的是 contact 上的字段（`snooze_until` / `stage`），而库里
- * **没有记「什么时候改的」**：`snooze_until` 是个未来日期，`updated_at`
- * 又会被任何一笔触点写动 —— 两个都判不出「是不是今天弄下去的」。
+ * 这两个改的是 contact 上的字段（`snooze_until` / `stage`），冻结副本原样
+ * 带过去，于是两个版本双双「已排除」，被 `dayWorklist` 的 `onList` 过滤掉。
  *
- * 所以它们的行为跟改动前一样（点完人就没了），没变坏但也没修好，
- * 而且会让顶上的「今天一共 N 个」在一天之内缩水。真修要加一个
- * 「什么时候被弄下名单的」时间字段，得 PM 批一次改库。
- * `day-list.test.ts` 里有一条用例把这个现状钉住了 —— 字段加上之后它会失败，
- * 提醒改的人回来把这段说明一起更新。
+ * **不是数据不够 —— 两个出口的时间证据一直都在库里，只是没人读**
+ * （子牙 2026-08-06 复审纠正了这里原先的错误说法）：
+ *
+ *   · 改阶段 → `contacts.stage_updated_at`，**已有的列**
+ *     （20260728000001 建的，`contacts/[cid]/stage/route.ts` 每次都在写），
+ *     只是 `today/route.ts` 的 SELECT 没把它选出来
+ *   · 推迟   → snooze 路由已经写了一笔**今天的、`me_manual` 的出站触点**
+ *     （`contacts/[cid]/snooze/route.ts` 调 `recordManualTouchpoint`），
+ *     也就是说 `touchedToday` 对今天被推迟的人本来就已经是 true 了。
+ *     要认出「这一笔是推迟」，在 metadata（jsonb）里加个键即可 —— **不是加列**
+ *
+ * 所以真修**不需要改库、不需要占用 PM 一次决策**：把这两条读进来，
+ * 让 `withoutOurActionsSince` 在「今天弄下去的」时清掉冻结副本上的
+ * `snoozeUntil` / `stageSuppressed`，行为就是本文件承诺的那个。
+ *
+ * 没在 PR #855 里做，见 `docs/ROADMAP.md` M2.7a。`day-list.test.ts` 里有一条
+ * 用例把现状钉住了 —— 修好之后它会失败，提醒回来把这段说明一起更新。
  */
 
 import type { ContactLike, SegmentResult, TouchpointLike } from './segments'
@@ -112,8 +123,12 @@ export interface DayRowOptions {
  *   · **冻结版** —— 假装我们今天什么都没做（摘掉今天的出站动作）
  *   · **实时版** —— 什么都算
  *
- * 取**更紧急的那一个**。这就是「只增不减」：实时版更热（客人今天回了话）
- * 就跟着升上去；实时版更冷（因为我们刚联系过他）就按冻结版留在原地。
+ * 然后三件事各管各的，**不许混成一条 priority 序**（第一版就是混的，
+ * 裂出两道都伤客户的缝，见 `DayRow.onList` 的注释）：
+ *
+ *   `onList`   在不在名单上   ← 只看冻结版。我们今天做了什么，不能决定他出不出现
+ *   `escalated` 客人今天又动了 ← 实时版更紧急 = 我们碰过他之后他又做了什么
+ *   `handled`  灰不灰         ← 我们碰过他 **且** 他没回过头来找我们
  */
 export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): DayRow {
   const frozen = segmentContact(withoutOurActionsSince(contact, opts.dayStartMs), now)
@@ -128,23 +143,44 @@ export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): Da
   const droppedOff = live.temperature === 'off'
 
   /**
-   * 排哪一批。允许**升级**（客人今天回了话，压在「新客人」里等到明天就凉了）。
+   * **客人今天让他重新变紧急了。**
+   *
+   * 「实时版比冻结版更紧急」这件事只可能由客人造成 —— 我们自己的动作已经
+   * 从冻结版里摘掉了。所以它精确等于「我们碰过他之后，他又做了什么」。
    *
    * `!droppedOff` 是一道**防御闸，目前触发不到**：所有「已排除」的
-   * priority（9）都比任何 hot/warm 大，所以升级判断本来就不会选中它们。
-   * 留着是为了将来万一加进一个优先级很高的「off」段 —— 那时候没有这道闸，
-   * 一个今天说了不买的人会被当成「更紧急」拉回热桶。
+   * priority（9）都比任何 hot/warm 大，升级判断本来就不会选中它们。
+   * 留着是防将来加进一个优先级很高的「off」段。
    * **写清楚它测不到，免得下一个人花时间去构造用例。**
    */
-  const seg = !droppedOff && live.priority < frozen.priority ? live : frozen
+  const escalated = !droppedOff && live.priority < frozen.priority
 
   return {
-    seg,
+    seg: escalated ? live : frozen,
     onList,
-    handled: opts.touchedToday || droppedOff,
+    /**
+     * 🔴 **升级过的人绝不能算「已处理」。**
+     *
+     * `touchedToday` 只问「我们今天碰过他没有」，不问碰过之后客人又做了什么。
+     * 而这一版把已处理的人整批收进折叠区 —— 两者相乘就出事：
+     *
+     *   早上发了邮件、客人下午回了话 → 我们「碰过」他 → 收进「✓ 今天处理了 N 人」
+     *   上午打电话、约好下午两点回电 → 到点了 → 同样被收起来
+     *
+     * 这两个人都在等我们，却被折叠按钮盖住，进度条还把他们算进「已完成」，
+     * 甚至可能弹出「今天全推完了 🎉」。这跟 PM 那句「我如何知道哪个已经联系了」
+     * 是同一类伤害，只是方向反过来：不是做完的看不见，是**没做完的被当成做完了**。
+     */
+    handled: !escalated && (opts.touchedToday || droppedOff),
     // 具体动作优先于泛泛的「联系过了」：「聊过了，明确没兴趣」比
     // 「今天联系过了」信息量大得多，而这个字段存在的全部理由就是说清做了什么。
-    handledWhy: droppedOff ? live.reason : opts.touchedToday ? '今天联系过了' : null,
+    handledWhy: escalated
+      ? null
+      : droppedOff
+        ? live.reason
+        : opts.touchedToday
+          ? '今天联系过了'
+          : null,
   }
 }
 

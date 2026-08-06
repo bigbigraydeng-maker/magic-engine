@@ -467,8 +467,10 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
        * 联系」，而「他不买了 / 号码是坏的」的结论写在触点的 outcome 上，
        * 冻结版看不见 —— 那几个人会留在原地并且看起来没被处理过。
        *
-       * ⚠️ 「推迟」和「推到成交」目前仍然是点完就从名单上消失（库里没记
-       * 「什么时候弄下去的」，判不出来）。详见 lib/crm/day-list 头注释。
+       * ⚠️ 「推迟」和「推到成交」目前仍然是点完就从名单上消失。**不是数据不够**
+       * —— `contacts.stage_updated_at` 是已有的列（这个 SELECT 没选它），
+       * 推迟本身也已经写了一笔今天的 me_manual 触点，只是没人读。
+       * 详见 lib/crm/day-list 头注释 + ROADMAP M2.7a。
        */
       doneToday: c.handled,
       /** 是怎么处理的（今天联系过了 / 已推迟 / 标了不买…）。没处理就是 null。 */

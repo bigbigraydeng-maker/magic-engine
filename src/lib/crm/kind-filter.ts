@@ -70,14 +70,29 @@ export function filterBucketByKind<P extends KindedPerson, B extends KindedBucke
     ...bucket,
     people,
     total: people.length,
-    batchEmails:
-      bucket.batch === 'send_email'
-        ? people
-            .filter((p) => !p.doneToday)
-            .map((p) => p.email)
-            .filter((e): e is string => !!e)
-        : [],
+    batchEmails: batchRecipients({ ...bucket, people }).map((p) => p.email as string),
   }
+}
+
+/**
+ * 这一批群发**到底会发给谁**。
+ *
+ * 🔴 **地址和「记一笔」必须从这一个函数出**，不许各推各的。
+ *
+ * 上一版就是各推各的：地址排掉了今天已处理的人，而「都发出去了，帮我记一笔」
+ * 提交的还是整桶。于是 20 人的桶里 3 个今天点了「他不买了」——
+ * 复制出来 17 个地址，却给 20 个人各记了一笔「群发了一封邮件」。
+ * 那 3 位收到了一封**他们根本没收到的信**的记录，而系统还回报「已给 20 人记了一笔」。
+ *
+ * 这正是 kind-filter 开头标注为「**比前面那条更毒**」的那一条：
+ * 实际收件人和 CRM 记录对不上。而且那笔假触点会把他们的「最后来往时间」
+ * 推到今天，明天在回捞桶里排到队尾。
+ *
+ * 两个条件缺一不可：**今天没处理过** + **有邮箱**。
+ */
+export function batchRecipients<P extends KindedPerson>(bucket: KindedBucket<P>): P[] {
+  if (bucket.batch !== 'send_email') return []
+  return bucket.people.filter((p) => !p.doneToday && !!p.email)
 }
 
 /**
