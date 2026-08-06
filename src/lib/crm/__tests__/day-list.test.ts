@@ -544,9 +544,12 @@ describe('客人在同一个桶里又动了一次', () => {
   /**
    * **卡片上必须是新约的时间，不是那个过期旧约**（R4）。
    *
-   * `callbackAt` 是客人点头同意的约定，跟点击一样属于客人侧事实，
-   * 不该被当成「我们做的动作」冻掉。摘掉的话卡片会翻出两天前那个旧约，
-   * 写着「之前约好这个时间回电 · 2 天前」—— 销售拿起电话第一句就说错。
+   * 摘掉的话卡片会翻出两天前那个旧约，写着「之前约好这个时间回电 · 2 天前」
+   * —— 销售拿起电话第一句就说错。
+   *
+   * ⚠️ 修法的**落点**很要紧：不能把整条带 `callbackAt` 的触点从冻结里豁免
+   * （第一版就是那么干的，副作用见下面「备注里提个时间」那一组），
+   * 只能让 `dueAt` 这一个显示值取实时的。
    */
   it('卡片显示今晨新约的时间，不是过期的旧约', () => {
     const r = row(
@@ -564,5 +567,75 @@ describe('客人在同一个桶里又动了一次', () => {
   it('今天一次都没出手 → 判据不生效', () => {
     const r = row(person(YESTERDAY_LEAD), false)
     expect(r.handled).toBe(false)
+  })
+})
+
+/**
+ * 🔴 **备注里随手提一句时间，人就换桶 / 消失**（子牙 2026-08-06 第四轮 R5）。
+ *
+ * 上一版为了让卡片显示新约的时间，把整条带 `callbackAt` 的触点从冻结里
+ * 豁免了出去 —— 于是这通电话的方向、时间、通话结果、出行意向**全部**
+ * 对冻结版可见，冻结当场失效。而 `note-parser` 会把通话备注里的时间
+ * 自动解析成回电约定，所以触发条件只是「销售随手写了句几点再打」。
+ *
+ * 实测（唯一变量就是备注里提没提时间）：
+ *   没提       → 留在「新客人，还没打过」  ✓
+ *   「今晚6点」 → 跳到「聊过了，没下文」    ✗
+ *   「明年三月走，下周再打」→ **人从名单上彻底消失** ✗
+ *
+ * 最后一条是这个 PR 存在的全部理由被自己的补丁推翻 —— 而那句备注
+ * 是通话记录里最常见的写法之一。
+ */
+describe('通话备注里提了个时间，不许因此换桶或消失', () => {
+  const calledToday = (over: Partial<TouchpointLike> = {}) =>
+    row(
+      person([
+        tp({ direction: 'inbound', occurredAt: '2026-08-04T02:00:00.000Z' }),
+        tp({ direction: 'outbound', occurredAt: '2026-08-05T01:00:00.000Z', ...over }),
+      ]),
+      true,
+    )
+
+  it('基准：备注没提时间 → 留在原桶', () => {
+    expect(calledToday().seg.segment).toBe('new_untouched')
+  })
+
+  it('备注写了「今晚 6 点再打」→ 仍然留在原桶，不许换', () => {
+    expect(calledToday({ callbackAt: '2026-08-05T06:00:00.000Z' }).seg.segment).toBe('new_untouched')
+  })
+
+  /** 最狠的一个：出行意向跟着漏进冻结版，整个人从名单上不见。 */
+  it('备注写「明年三月走，下周再打」→ 人必须还在名单上', () => {
+    const r = calledToday({ callbackAt: '2026-08-12T01:00:00.000Z', travelWindow: '明年三月' })
+    expect(r.onList).toBe(true)
+    expect(r.seg.segment).toBe('new_untouched')
+  })
+
+  /** 备注被解析成「没接」也一样 —— 通话结果同样不该漏进冻结版。 */
+  it('备注解析出「没接」→ 仍然留在原桶', () => {
+    expect(calledToday({ callbackAt: '2026-08-05T06:00:00.000Z', outcome: 'no_answer' }).seg.segment)
+      .toBe('new_untouched')
+  })
+})
+
+/**
+ * 打的就是那个约好的电话 —— 打完要变灰。
+ *
+ * `needsMeAgain` 里 `tsOf(live.dueAt) > ourLast` 这一项守的就是它：
+ * 没有它的话，一个约在 8/3、我们 8/5 打了的人，`live.dueAt` 还是 8/3、
+ * 仍然「已经到点」，`callbackCameDue` 恒为真 —— **这个人打了也永远灰不了，
+ * 明天后天照旧堵在待办最前面**。
+ */
+describe('打的就是那个约好的电话', () => {
+  it('约在两天前、今天补打了 → 算已处理', () => {
+    const r = row(
+      person([
+        tp({ direction: 'inbound', occurredAt: '2026-08-01T02:00:00.000Z' }),
+        tp({ direction: 'outbound', occurredAt: '2026-08-02T02:00:00.000Z', callbackAt: '2026-08-03T02:00:00.000Z' }),
+        tp({ direction: 'outbound', occurredAt: '2026-08-05T01:00:00.000Z' }),
+      ]),
+      true,
+    )
+    expect(r.handled).toBe(true)
   })
 })

@@ -159,7 +159,24 @@ export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): Da
   const stillNeedsMe = needsMeAgain(contact, live, now, opts.dayStartMs)
 
   return {
-    seg: escalated ? live : frozen,
+    /**
+     * 位置按冻结版排，**但「约好几点回电」取实时那个**。
+     *
+     * 这两半各修一个真问题，而且必须分开修：
+     *
+     *   · 位置按冻结版 —— 否则销售在通话备注里随手提一句时间
+     *     （`note-parser` 会把它解析成回电约定），这个人当场换桶；
+     *     写「客人说明年三月走，下周再打给他」的话，`travelWindow` 一并生效，
+     *     **人从名单上彻底消失**。而这正是本文件要修的毛病本身。
+     *   · 时间取实时 —— 否则今晨刚约好的「今天 14:00」被冻结版丢掉，
+     *     卡片翻出身上那个过期旧约「之前约好这个时间回电 · 2 天前」，
+     *     销售拿起电话第一句就说错。
+     *
+     * 上一版把整条带 `callbackAt` 的触点从冻结里豁免出去，等于让这通电话的
+     * 方向、时间、通话结果、出行意向**全部**对冻结版可见 —— 冻结当场失效。
+     * 真正需要逃出冻结的只有 `dueAt` 这一个显示值。
+     */
+    seg: escalated ? live : { ...frozen, dueAt: live.dueAt ?? frozen.dueAt },
     onList,
     /**
      * 🔴 **升级过的人绝不能算「已处理」。**
@@ -263,11 +280,6 @@ export function withoutOurActionsSince(contact: ContactLike, sinceMs: number): C
       if (t.direction !== 'outbound') return true
       // 行为信号（打开 / 点击）是客人做的 —— 不摘。
       if (t.engagement) return true
-      // 「约好几点回电」是**客人点头同意的约定**，跟行为信号同类，也不摘。
-      // 摘掉的话，今晨刚约好的「今天 14:00」会被冻结版丢弃，卡片翻出身上
-      // 那个两天前的过期旧约，写着「之前约好这个时间回电 · 2 天前」——
-      // 销售拿起电话第一句就说错。
-      if (t.callbackAt) return true
       const at = new Date(t.occurredAt).getTime()
       // 时间读不出来的不敢摘 —— 摘错会让一个已经跟过的人重新冒出来当新客人。
       if (Number.isNaN(at)) return true
