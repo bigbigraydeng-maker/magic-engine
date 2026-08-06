@@ -102,6 +102,20 @@ export interface DayRow {
    * 而 PM 问的正是「我如何确认真的记上了」。
    */
   handledWhy: string | null
+  /**
+   * 动过的那一下，**是「还要继续跟」还是「这条线断了」**。
+   *
+   * 板桥 2026-08-06（销售视角复审）：折叠按钮上那个「今天处理了 8 人」
+   * 把两件性质完全不同的事盖在同一个数字里 ——
+   *
+   *   · 打了电话 / 回了邮件 → 活还在，明天继续
+   *   · 标了不买 / 号码不通 → 这条线断了
+   *
+   * 他的原话：「一个不该当业绩看的数字，长得太像业绩了。」
+   * 混着数还有个更别扭的后果 —— **清空今天名单最快的办法变成把人全标死**。
+   * 所以数字必须拆开：`跟进 5 人 · 关掉 3 人`。
+   */
+  handledKind: 'followed' | 'closed' | null
 }
 
 export interface DayRowOptions {
@@ -202,15 +216,24 @@ export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): Da
      * 所以这里直说那件事本身：**我们今天最后一次出手之后，他又动了没有。**
      */
     handled: !stillNeedsMe && (opts.touchedToday || droppedOff),
-    // 具体动作优先于泛泛的「联系过了」：「聊过了，明确没兴趣」比
-    // 「今天联系过了」信息量大得多，而这个字段存在的全部理由就是说清做了什么。
+    /**
+     * 具体动作优先于泛泛的「联系过了」——「聊过了，明确没兴趣」信息量大得多。
+     *
+     * 两处措辞是板桥定的（销售视角）：
+     *   · 「标了：」这三个字说清**这是你刚才做的动作**，不是系统对这个人的评价。
+     *     没有它，卡片上一个绿勾加一句「号码是坏的」，读起来像「✓ 打不通」是个成就
+     *   · 「他还没回」补上后半句 —— 销售真正想知道的是他回了没有。
+     *     这句是**算出来的事实**：`handled` 只在 `!stillNeedsMe` 时为真，
+     *     也就是我们出手之后他确实没再动过
+     */
     handledWhy: stillNeedsMe
       ? null
       : droppedOff
-        ? live.reason
+        ? `标了：${live.reason}`
         : opts.touchedToday
-          ? '今天联系过了'
+          ? '今天联系过了，他还没回'
           : null,
+    handledKind: stillNeedsMe ? null : droppedOff ? 'closed' : opts.touchedToday ? 'followed' : null,
   }
 }
 

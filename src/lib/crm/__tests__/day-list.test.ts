@@ -61,7 +61,10 @@ describe('我们今天做的动作，绝不移动任何人', () => {
       true,
     )
     expect(r.handled).toBe(true)
-    expect(r.handledWhy).toBe('今天联系过了')
+    // 「他还没回」是算出来的事实，不是客套话 —— handled 只在「我们出手之后
+    // 他确实没再动过」时为真。销售真正想知道的正是这半句（板桥）。
+    expect(r.handledWhy).toBe('今天联系过了，他还没回')
+    expect(r.handledKind).toBe('followed')
   })
 
   /** 昨天联系过的人，今天本来就该按「联系过之后」的样子分 —— 不能一起冻住。 */
@@ -312,7 +315,7 @@ describe('真正进生产的那个函数', () => {
    * 留在原来那个「该发邮件」的桶里，群发地址照抄整桶 —— 一个今天亲口说不买的
    * 客人当天会收到一封面向他的群发信，CRM 里还记一笔我们发过。
    */
-  it('今天标了「不买了」：留在名单上、算已处理，理由说的是「没兴趣」不是「联系过了」', () => {
+  it('今天标了「不买了」：留在名单上、算已处理，理由说的是那个动作不是「联系过了」', () => {
     const rows = list(
       person([
         ...YESTERDAY_LEAD,
@@ -322,7 +325,8 @@ describe('真正进生产的那个函数', () => {
     )
     expect(rows).toHaveLength(1)
     expect(rows[0].handled).toBe(true)
-    expect(rows[0].handledWhy).toContain('没兴趣')
+    // 措辞跟按钮上那句一模一样 —— 销售不用在脑子里翻译一次（板桥）
+    expect(rows[0].handledWhy).toContain('他说不买了')
   })
 
   it('今天标了「号码是坏的」：同样算已处理', () => {
@@ -455,7 +459,7 @@ describe('客人回过头来找我们的，不算已处理', () => {
       true,
     )
     expect(r.handled).toBe(true)
-    expect(r.handledWhy).toContain('没兴趣')
+    expect(r.handledWhy).toContain('他说不买了')
   })
 })
 
@@ -637,5 +641,69 @@ describe('打的就是那个约好的电话', () => {
       true,
     )
     expect(r.handled).toBe(true)
+  })
+})
+
+/**
+ * 「跟进了」和「关掉了」必须分得开（板桥 2026-08-06，销售视角复审）。
+ *
+ * 折叠按钮上那个「今天处理了 8 人」把两件性质完全不同的事盖在一个数字里：
+ * 打了电话（活还在）和标了不买（线断了）。他的原话是
+ * **「一个不该当业绩看的数字，长得太像业绩了」**——
+ * 而且混着数之后，清空今天名单最快的办法会变成把人全标死。
+ */
+describe('跟进了 / 关掉了，要分得开', () => {
+  it('打了电话 → 算「跟进」', () => {
+    const r = row(
+      person([...YESTERDAY_LEAD, tp({ direction: 'outbound', occurredAt: '2026-08-05T03:00:00.000Z' })]),
+      true,
+    )
+    expect(r.handledKind).toBe('followed')
+  })
+
+  it.each([
+    ['标了不买', { outcome: 'not_interested' }],
+    ['号码不通', { outcome: 'bad_number' }],
+  ])('%s → 算「关掉」', (_label, over) => {
+    const r = row(
+      person([
+        ...YESTERDAY_LEAD,
+        tp({ direction: 'outbound', occurredAt: '2026-08-05T03:00:00.000Z', ...over }),
+      ]),
+      true,
+    )
+    expect(r.handledKind).toBe('closed')
+  })
+
+  it('没动过的人 → 两边都不算', () => {
+    expect(row(person(YESTERDAY_LEAD)).handledKind).toBeNull()
+  })
+
+  /** 客人回过头来找我们的，既不算跟进也不算关掉 —— 他还欠我们一次动作。 */
+  it('客人又回话了 → 不算已处理，也没有类别', () => {
+    const r = row(
+      person([
+        ...YESTERDAY_LEAD,
+        tp({ direction: 'outbound', occurredAt: '2026-08-05T01:00:00.000Z' }),
+        tp({ direction: 'inbound', occurredAt: '2026-08-05T03:00:00.000Z' }),
+      ]),
+      true,
+    )
+    expect(r.handledKind).toBeNull()
+  })
+
+  /**
+   * 「标了：」这三个字说清**这是你刚才做的动作**，不是系统对这个人的评价。
+   * 没有它，卡片上一个绿勾配一句「号码是坏的」，读起来像「✓ 打不通」是个成就。
+   */
+  it('关掉的理由前面带「标了：」', () => {
+    const r = row(
+      person([
+        ...YESTERDAY_LEAD,
+        tp({ direction: 'outbound', occurredAt: '2026-08-05T03:00:00.000Z', outcome: 'not_interested' }),
+      ]),
+      true,
+    )
+    expect(r.handledWhy?.startsWith('标了：')).toBe(true)
   })
 })

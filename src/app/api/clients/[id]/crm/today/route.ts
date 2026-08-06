@@ -473,8 +473,10 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
        * 详见 lib/crm/day-list 头注释 + ROADMAP M2.7a。
        */
       doneToday: c.handled,
-      /** 是怎么处理的（今天联系过了 / 已推迟 / 标了不买…）。没处理就是 null。 */
+      /** 是怎么处理的（今天联系过了 / 标了：他说不买了…）。没处理就是 null。 */
       handledWhy: c.handledWhy,
+      /** 「跟进了」还是「关掉了」—— 两个数字必须分开显示，见 day-list 里的说明。 */
+      handledKind: c.handledKind,
       /** 上次是谁跟的。不知道就是 null，页面不假装。 */
       lastBy: marks.lastBy,
       /** 他打开过邮件、之后没人跟。只做提示，不参与排序（打开可能是 Apple 替他开的）。 */

@@ -48,8 +48,10 @@ interface Row {
   suggestedStage: { toStage: string; label: string; why: string } | null
   /** 今天已经有人联系过他 —— 卡片变浅，不用靠记。 */
   doneToday?: boolean
-  /** 今天是怎么处理的（今天联系过了 / 已推迟 / 标了不买…）。没处理就是 null。 */
+  /** 今天是怎么处理的（今天联系过了 / 标了：他说不买了…）。没处理就是 null。 */
   handledWhy?: string | null
+  /** 「跟进了」还是「关掉了」—— 两个数字分开显示，不混成一个「处理了 N 人」。 */
+  handledKind?: 'followed' | 'closed' | null
   /** 上次是谁跟的。不知道就是 null，页面不假装。 */
   lastBy?: string | null
   /** 他打开过邮件、之后没人跟。只是提示，不参与排序。 */
@@ -393,7 +395,7 @@ function CardExits({
   row: Row
   onLogged: (msg: string, reload?: boolean) => void
 }) {
-  const [menu, setMenu] = useState<null | 'snooze' | 'wrong'>(null)
+  const [menu, setMenu] = useState<null | 'snooze' | 'wrong' | 'drop'>(null)
   const [busy, setBusy] = useState(false)
 
   const post = async (url: string, body: unknown, ok: string) => {
@@ -428,6 +430,24 @@ function CardExits({
           <button type="button" disabled={busy} onClick={() => setMenu('snooze')} className={quiet}>
             推迟
           </button>
+          {/* 🔴 **不可逆的动作不能一点就生效**（板桥 2026-08-06）。
+              原先这三个键同样的灰字同样的大小，而「推迟」点了会展开二次选择、
+              「他不买了」一点就落库 —— 手滑一下，一个还有戏的客人当天就被
+              排出群发名单，而且他不会发现。所以跟「推迟」一样做成两步。 */}
+          <button type="button" disabled={busy} onClick={() => setMenu('drop')} className={quiet}>
+            他不买了
+          </button>
+          <button type="button" disabled={busy} onClick={() => setMenu('wrong')} className={quiet}>
+            分错了
+          </button>
+        </div>
+      )}
+
+      {menu === 'drop' && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="mr-0.5 text-[12.5px] text-me-charcoal/45">
+            确定？他从今天起不再出现在名单里
+          </span>
           <button
             type="button"
             disabled={busy}
@@ -442,15 +462,18 @@ function CardExits({
                   outcome: 'not_interested',
                   clientRef: crypto.randomUUID(),
                 },
-                '记下了 —— 他不会再出现在名单上',
+                // 板桥：这句原先写「他不会再出现在名单上」，跟眼前的画面说反话
+                // —— 这一版他是留在原地打勾的。销售低头一看人还在，要么以为
+                // 没记上再点一次，要么信了这句话、明天发现人还在，从此不信这一页。
+                '记下了 —— 卡片留在这做个记号，明天起不再出现',
               )
             }
-            className={quiet}
+            className={`${base} bg-[#C2453A]/10 text-[#C2453A] hover:bg-[#C2453A]/15`}
           >
-            他不买了
+            确定
           </button>
-          <button type="button" disabled={busy} onClick={() => setMenu('wrong')} className={quiet}>
-            分错了
+          <button type="button" disabled={busy} onClick={() => setMenu(null)} className={quiet}>
+            算了
           </button>
         </div>
       )}
@@ -471,7 +494,9 @@ function CardExits({
                 void post(
                   `/api/clients/${clientId}/crm/contacts/${row.contactId}/snooze`,
                   { days: o.d, clientRef: crypto.randomUUID() },
-                  `先放着了 —— ${o.label}后他自己回来`,
+                  // 板桥：把话说满。加「从名单上收起来」这几个字，消失就成了
+                  // 预期内的事，不是故障 —— 这一版只有推迟和改阶段还会消失。
+                  `先放着了 —— 从名单上收起来，${o.label}后他自己回来`,
                 )
               }
               className={`${base} border border-me-charcoal/15 text-me-charcoal/70 hover:border-me-ochre/50`}
@@ -584,7 +609,10 @@ const CARDS_BEFORE_FOLD = 12
  * 「已联系 8 人 👍」听着像表扬，但回答不了「我还有多远到头」。一条流水线
  * 最要紧的信息是**还剩几个**：看得见头，人才愿意一路推到底。
  *
- * 全部推完时换一句话，不是把数字变成 0 —— 干完了值得说一声。
+ * **「动过」不是「处理了」，而且干完不庆祝**（板桥 2026-08-06）：
+ * 一个把十来个人全标「不买了」的早上，原先那句「全推完了 🎉」照样会跳出来
+ * —— 庆祝一件没发生的事，比不庆祝伤害大。等下一版能在这里分清
+ * 「跟进」和「关掉」了，再谈庆祝。
  */
 function DayProgressBar({ total, done, left }: { total: number; done: number; left: number }) {
   if (total === 0) return null
@@ -592,7 +620,7 @@ function DayProgressBar({ total, done, left }: { total: number; done: number; le
   if (left === 0) {
     return (
       <span className="rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-black text-emerald-700">
-        今天 {total} 个全推完了 🎉
+        今天这 {total} 个都过了一遍 ✓
       </span>
     )
   }
@@ -601,7 +629,7 @@ function DayProgressBar({ total, done, left }: { total: number; done: number; le
   return (
     <span className="flex items-center gap-2 rounded-full bg-me-ivory px-3 py-1.5 text-xs font-black text-me-charcoal/70">
       <span className="tabular-nums">
-        今天 {total} 个 · 已处理 {done} · <b className="text-me-ochre">还剩 {left}</b>
+        今天 {total} 个 · 动过 {done} · <b className="text-me-ochre">还剩 {left}</b>
       </span>
       <span className="h-1.5 w-16 overflow-hidden rounded-full bg-me-charcoal/10" aria-hidden>
         <span className="block h-full rounded-full bg-me-ochre" style={{ width: `${pct}%` }} />
@@ -639,6 +667,9 @@ function BucketBlock({
    */
   const todo = bucket.people.filter((p) => !p.doneToday)
   const done = bucket.people.filter((p) => p.doneToday)
+  // 「跟进了」和「关掉了」分开数 —— 理由见下面折叠按钮上的注释。
+  const followedCount = done.filter((p) => p.handledKind === 'followed').length
+  const closedCount = done.filter((p) => p.handledKind === 'closed').length
 
   const shown = expanded ? todo : todo.slice(0, CARDS_BEFORE_FOLD)
   // 折起来的人数要算上后端封顶没发过来的那些 —— 只数手上这一批会少报，
@@ -685,17 +716,18 @@ function BucketBlock({
         </div>
       )}
 
+      {/* 「这批现在没人」和「这批今天都过了一遍」意思完全不同，措辞要分得开 ——
+          原先两句都是「清空了 ✓ / 推完了 ✓」，扫一眼分不清是自己干完的
+          还是系统压根没给数据（板桥 2026-08-06）。 */}
       {bucket.total === 0 && (
         <p className="rounded-xl border border-dashed border-me-charcoal/10 py-4 text-center text-[13px] text-me-charcoal/30">
-          这批清空了 ✓
+          这批现在没人
         </p>
       )}
 
-      {/* 这一批今天全推完了 —— 明确说一句。上面空空如也但下面挂着一条
-          「已处理 N 人」，不说的话人会以为数据没加载出来。 */}
       {bucket.total > 0 && todo.length === 0 && done.length > 0 && (
         <p className="rounded-xl border border-dashed border-emerald-300/60 bg-emerald-50/40 py-4 text-center text-[13px] font-bold text-emerald-700">
-          这批今天推完了 ✓
+          这批今天都过了一遍 ✓
         </p>
       )}
 
@@ -706,7 +738,22 @@ function BucketBlock({
             onClick={() => setShowDone((v) => !v)}
             className="w-full rounded-xl bg-me-ivory py-2 text-[13px] font-bold text-me-charcoal/45 hover:text-me-charcoal"
           >
-            ✓ 今天处理了 {done.length} 人 {showDone ? '▾ 收起' : '▸ 看看做了什么'}
+            {/**
+             * 🔴 **「跟进」和「关掉」必须分开数**（板桥 2026-08-06）。
+             *
+             * 原先写「今天处理了 8 人」，而那 8 个里可能只有 5 个是真打了电话、
+             * 回了邮件（活还在），另外 3 个是标死的（线断了）。板桥的原话：
+             * **「一个不该当业绩看的数字，长得太像业绩了。」**
+             *
+             * 更别扭的一层：混着数之后，**清空今天名单最快的办法变成把人全标死**。
+             * 不是说销售会故意这么干，是说这个数字不该长成那样。
+             *
+             * 「处理」也换成「动过」—— 只陈述事实，不像工作量。
+             */}
+            ✓ 今天动过 {done.length} 人
+            {followedCount > 0 && closedCount > 0 && `（跟进 ${followedCount} · 关掉 ${closedCount}）`}
+            {' '}
+            {showDone ? '▾ 收起' : '▸ 展开看'}
           </button>
           {showDone && (
             <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -1281,7 +1328,13 @@ export default function CrmTodayPage() {
         credentials: 'include',
       })
       if (!res.ok) throw new Error('操作失败')
-      afterWrite(`${row.name} 已改为「${row.suggestedStage.label}」`)
+      // 板桥：这个按钮最坑 —— 一点预告都没有，点完人凭空没了，销售第一反应是
+      // 「我是不是把他删了」。**最后半句「在哪能找到他」是关键**：
+      // 销售怕的不是消失，是找不回来。
+      afterWrite(
+        `${row.name} 已改为「${row.suggestedStage.label}」—— 不用再跟了，` +
+          `从今天名单上收起来了。在下面「不用再联系」那一栏能找到他`,
+      )
     } catch {
       afterWrite('改阶段失败，请重试', false)
     }

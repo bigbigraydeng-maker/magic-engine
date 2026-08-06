@@ -404,8 +404,12 @@ export function segmentContact(contact: ContactLike, now: Date): SegmentResult {
     return make('excluded', label ? `已经是「${label}」了` : '已推进到不再联系的阶段', 'none')
   }
   if (outcomes.some((o) => DEAD_OUTCOMES.has(o))) {
-    const why = latestOutcome === 'bad_number' ? '号码是坏的，打不通也发不了短信'
-      : latestOutcome === 'not_interested' ? '聊过了，明确没兴趣'
+    // 措辞按销售的说法写（板桥 2026-08-06）：
+    //  · 「号码是坏的」不是人说的话（电池是坏的；号码是空号 / 停机）
+    //  · 按钮上写「他不买了」，这里原先写「聊过了，明确没兴趣」——
+    //    销售得在脑子里翻译一次才能确认「我刚才点的是这个吗」，两处用同一句话
+    const why = latestOutcome === 'bad_number' ? '号码不通，得换个号才能联系'
+      : latestOutcome === 'not_interested' ? '他说不买了'
       : '结局已定'
     return make('excluded', why, 'none')
   }
