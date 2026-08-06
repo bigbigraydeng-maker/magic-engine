@@ -30,7 +30,7 @@ import {
 import { WORKLIST_GROUPS, groupDisplayMeta } from '@/lib/crm/worklist-groups'
 import { contactCardTitle } from '@/lib/crm/display-name'
 import { followUpMarks, localDay } from '@/lib/crm/follow-up-marks'
-import { dayProgress, dayWorklist, localDayStartMs } from '@/lib/crm/day-list'
+import { dayWorklist, localDayStartMs } from '@/lib/crm/day-list'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 import { isAutomatedTouch } from '@/lib/crm/automated-touch'
 import { contactKindOf, readDomainRules, type ContactKind } from '@/lib/crm/contact-kind'

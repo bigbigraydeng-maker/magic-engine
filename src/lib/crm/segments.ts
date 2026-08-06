@@ -132,6 +132,11 @@ export interface TouchpointLike {
    * 判据在 lib/crm/automated-touch。加在这里是因为 `needsMeAgain`（day-list）
    * 要判「我们今天最后一次**真人**出手是几点」—— 拿一封 16:00 的群发当
    * 「我们出手了」，会把 15:00 客人的回信整个盖住，当天最热的线索被折叠掉。
+   *
+   * ⚠️ **本文件的 `segmentContact` 目前不读它**（ROADMAP M2.7f）—— 一封群发
+   * 照样被它当成「我们最后一次出站」，于是「客人回话了」那条规则不成立，
+   * 人掉进别的桶。这里写明，是因为**一个只接了一半的概念会坑下一个人**，
+   * 而这个字段本身就是为了修那种坑才加的。
    */
   automated?: boolean
   outcome?: string | null
