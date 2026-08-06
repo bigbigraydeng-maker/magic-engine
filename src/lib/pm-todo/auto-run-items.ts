@@ -20,6 +20,11 @@ import {
   MAX_ATTEMPTS,
   type JudgedCandidate,
 } from '@/lib/execution/auto-run'
+import {
+  ENDORSEMENT_FRESH_DAYS,
+  PRESCRIPTION_FRESH_DAYS,
+  type Endorsement,
+} from '@/lib/execution/auto-run-policy'
 
 export interface AutoRunTodo {
   client_id: string
@@ -33,18 +38,40 @@ export interface AutoRunTodo {
 const boardHref = (clientId: string) =>
   `https://app.magicengine.com.au/dashboard/clients/${clientId}/execution`
 
+/**
+ * 背书本身是不是拦下这条的原因 —— 跟 `judgeAutoRun` 里背书那一段判断顺序对齐。
+ *
+ * 🔴 背书新鲜（挂着当前生效的方案/营销计划、没过保鲜期）时，`judgeAutoRun`
+ *    还会往下走白名单/`pinnedTopic`/`fix_type` 几道闸，任何一道都可能才是真正
+ *    拦下这条的原因。这里必须跟那边的判断顺序算出同一个答案，否则「方案批下来
+ *    太久没复核」这种话会说给一个方案根本不老的客户听 —— 见下面 `summariseReasons`。
+ */
+function endorsementIsBlocker(e: Endorsement): boolean {
+  if (e.kind === 'stale_prescription' || e.kind === 'stale_marketing_plan' || e.kind === 'unendorsed') {
+    return true
+  }
+  if (e.kind === 'recent_analysis') return e.ageDays > ENDORSEMENT_FRESH_DAYS
+  return e.ageDays > PRESCRIPTION_FRESH_DAYS // current_prescription / current_marketing_plan
+}
+
 /** 把一堆拦下来的原因归成几类说人话 —— 逐条列原因等于把日志贴给 PM 看。 */
 function summariseReasons(blocked: JudgedCandidate[]): string {
   const buckets = new Map<string, number>()
   for (const b of blocked) {
-    const k = b.endorsement.kind
-    const label =
-      k === 'stale_prescription' ? '挂的方案已经被换掉'
-      : k === 'stale_marketing_plan' ? '挂的营销计划已经结束'
-      : k === 'unendorsed' ? '没有任何一轮分析在认它'
-      : k === 'recent_analysis' ? '分析结论已经过期'
-      : k === 'current_prescription' || k === 'current_marketing_plan' ? '方案批下来太久没复核'
-      : '其他原因'
+    let label: string
+    if (endorsementIsBlocker(b.endorsement)) {
+      const k = b.endorsement.kind
+      label =
+        k === 'stale_prescription' ? '挂的方案已经被换掉'
+        : k === 'stale_marketing_plan' ? '挂的营销计划已经结束'
+        : k === 'unendorsed' ? '没有任何一轮分析在认它'
+        : k === 'recent_analysis' ? '分析结论已经过期'
+        : '方案批下来太久没复核' // current_prescription / current_marketing_plan 过保鲜期
+    } else {
+      // 背书是新鲜的，拦下的另有原因（点名了关键词 / 对外类型 / 标了要人工处理 /
+      // 不在白名单里……）—— 不能套用背书的标签，那是给一个没问题的方案扣错帽子。
+      label = '别的原因（非方案问题，详见原文）'
+    }
     buckets.set(label, (buckets.get(label) ?? 0) + 1)
   }
   return Array.from(buckets.entries())

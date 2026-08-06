@@ -77,9 +77,9 @@ const tables = (items: Row[]) => ({
   execution_items: items,
   clients: [client()],
   prescriptions: [
-    { id: 'presc-old', status: 'approved', approved_at: daysAgo(69), generated_at: daysAgo(70) },
-    { id: 'presc-dead', status: 'superseded', approved_at: daysAgo(3), generated_at: daysAgo(4) },
-    { id: 'presc-fresh', status: 'approved', approved_at: daysAgo(2), generated_at: daysAgo(3) },
+    { id: 'presc-old', client_id: 'oztop', status: 'approved', approved_at: daysAgo(69), generated_at: daysAgo(70) },
+    { id: 'presc-dead', client_id: 'oztop', status: 'superseded', approved_at: daysAgo(3), generated_at: daysAgo(4) },
+    { id: 'presc-fresh', client_id: 'oztop', status: 'approved', approved_at: daysAgo(2), generated_at: daysAgo(3) },
   ],
   marketing_plans: [],
   execution_logs: [],
@@ -115,6 +115,16 @@ describe('fetchAutoRunTodos', () => {
     const what = todos.find((t) => !t.stuck)!.what
     expect(what).toContain('2 件方案批下来太久没复核')
     expect(what).toContain('1 件挂的方案已经被换掉')
+  })
+
+  it('🔴 方案是新鲜的，拦下的是别的原因（点名了关键词）→ 不能说成「方案批下来太久没复核」', async () => {
+    const pinned = [
+      item({ id: 'pinned', prescription_id: 'presc-fresh', steps_json: { keyword: 'spc flooring' } }),
+    ]
+    const todos = await fetchAutoRunTodos(makeFake(tables(pinned)), NOW)
+    const what = todos.find((t) => !t.stuck)!.what
+    expect(what).not.toContain('太久没复核')
+    expect(what).toContain('别的原因')
   })
 
   it('全都能跑时不出这条待办（没事就别占注意力）', async () => {

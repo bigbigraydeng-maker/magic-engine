@@ -198,7 +198,7 @@ export async function selectAutoRunCandidates(
   if (prescriptionIds.length > 0) {
     const { data, error } = await supabase
       .from('prescriptions')
-      .select('id, status, approved_at, generated_at')
+      .select('id, client_id, status, approved_at, generated_at')
       .in('id', prescriptionIds)
     if (error) throw new Error(`方案查询失败: ${error.message}`)
     for (const p of (data ?? []) as Array<PrescriptionAnchor & { id: string }>) {
@@ -210,7 +210,7 @@ export async function selectAutoRunCandidates(
   if (planIds.length > 0) {
     const { data, error } = await supabase
       .from('marketing_plans')
-      .select('id, status, approved_at, end_date')
+      .select('id, client_id, status, approved_at, end_date')
       .in('id', planIds)
     if (error) throw new Error(`营销计划查询失败: ${error.message}`)
     for (const m of (data ?? []) as Array<MarketingPlanAnchor & { id: string }>) {
@@ -225,6 +225,7 @@ export async function selectAutoRunCandidates(
     const endorsement = deriveEndorsement(
       {
         source: row.source,
+        clientId: row.client_id,
         createdAt: row.created_at,
         prescriptionId: row.prescription_id,
         prescription: row.prescription_id

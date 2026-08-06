@@ -168,20 +168,34 @@ function client(over: Row = {}): Row {
   }
 }
 
-function baseTables(over: { items?: Row[]; clients?: Row[] } = {}) {
+function baseTables(over: { items?: Row[]; clients?: Row[]; extraPrescriptions?: Row[] } = {}) {
   return {
     execution_items: over.items ?? [item()],
     clients: over.clients ?? [client()],
     prescriptions: [
-      { id: 'presc-fresh', status: 'approved', approved_at: daysAgo(4), generated_at: daysAgo(5) },
-      { id: 'presc-old', status: 'approved', approved_at: daysAgo(69), generated_at: daysAgo(70) },
-      { id: 'presc-dead', status: 'superseded', approved_at: daysAgo(2), generated_at: daysAgo(3) },
+      { id: 'presc-fresh', client_id: 'oztop', status: 'approved', approved_at: daysAgo(4), generated_at: daysAgo(5) },
+      { id: 'presc-old', client_id: 'oztop', status: 'approved', approved_at: daysAgo(69), generated_at: daysAgo(70) },
+      { id: 'presc-dead', client_id: 'oztop', status: 'superseded', approved_at: daysAgo(2), generated_at: daysAgo(3) },
+      // 🔴 别的客户的一份新鲜方案 —— 专门喂给「跨客户错配」回归测试用，不该被任何 oztop 的动作背书
+      { id: 'presc-other-client', client_id: 'some-other-client', status: 'approved', approved_at: daysAgo(1), generated_at: daysAgo(2) },
+      ...(over.extraPrescriptions ?? []),
     ],
     marketing_plans: [
-      { id: 'plan-done', status: 'completed', approved_at: daysAgo(60), end_date: daysAgo(30).slice(0, 10) },
+      { id: 'plan-done', client_id: 'oztop', status: 'completed', approved_at: daysAgo(60), end_date: daysAgo(30).slice(0, 10) },
     ],
     execution_logs: [],
   }
+}
+
+/** 每个客户各自一份新鲜方案（id 按 `presc-${clientId}`），供多客户测试各自背书自己的动作用。 */
+function freshPrescriptionsFor(clientIds: string[]): Row[] {
+  return clientIds.map((cid) => ({
+    id: `presc-${cid}`,
+    client_id: cid,
+    status: 'approved',
+    approved_at: daysAgo(4),
+    generated_at: daysAgo(5),
+  }))
 }
 
 const okGenerate = (res: Partial<AutoRunGenerateResult> = {}) => ({
@@ -249,6 +263,16 @@ describe('selectAutoRunCandidates —— 选谁、为什么不选', () => {
     expect(r.toRun).toHaveLength(0)
   })
 
+  it('🔴 跨客户错配：prescription_id 指向的方案是「别的客户」新批的（哪怕新鲜、approved）→ 当没背书拦下，不能借别的客户的方案跑这条', async () => {
+    const { fake } = makeFake(
+      baseTables({ items: [item({ prescription_id: 'presc-other-client' })] }),
+    )
+    const r = await selectAutoRunCandidates(fake, NOW)
+    expect(r.toRun).toHaveLength(0)
+    expect(r.judged[0].endorsement.kind).toBe('unendorsed')
+    if (!r.judged[0].verdict.run) expect(r.judged[0].verdict.reason).toContain('没有任何一轮分析说过它该做')
+  })
+
   it('🔴 没有动作类型的 114 件根本进不了候选（SQL 就筛掉了）', async () => {
     const { fake } = makeFake(baseTables({ items: [item({ action_type: null })] }))
     const r = await selectAutoRunCandidates(fake, NOW)
@@ -295,23 +319,26 @@ describe('selectAutoRunCandidates —— 选谁、为什么不选', () => {
   })
 
   it('多客户时一个客户一件，总数不超过上限', async () => {
-    const clients = ['c1', 'c2', 'c3', 'c4'].map((id) => client({ id, name: id }))
-    const items = ['c1', 'c2', 'c3', 'c4'].map((cid) =>
-      item({ id: `i-${cid}`, client_id: cid, created_at: daysAgo(5) }),
+    const ids = ['c1', 'c2', 'c3', 'c4']
+    const clients = ids.map((id) => client({ id, name: id }))
+    const items = ids.map((cid) =>
+      item({ id: `i-${cid}`, client_id: cid, prescription_id: `presc-${cid}`, created_at: daysAgo(5) }),
     )
-    const { fake } = makeFake(baseTables({ items, clients }))
+    const { fake } = makeFake(baseTables({ items, clients, extraPrescriptions: freshPrescriptionsFor(ids) }))
     const r = await selectAutoRunCandidates(fake, NOW)
     expect(r.toRun).toHaveLength(MAX_ITEMS_PER_RUN)
     expect(new Set(r.toRun.map((t) => t.client_id)).size).toBe(MAX_ITEMS_PER_RUN)
   })
 
   it('名额可以往小调（上线首轮 ?max=1），但调不大', async () => {
-    const clients = ['c1', 'c2', 'c3'].map((id) => client({ id, name: id }))
-    const items = ['c1', 'c2', 'c3'].map((cid) => item({ id: `i-${cid}`, client_id: cid }))
-    const small = makeFake(baseTables({ items, clients }))
+    const ids = ['c1', 'c2', 'c3']
+    const clients = ids.map((id) => client({ id, name: id }))
+    const items = ids.map((cid) => item({ id: `i-${cid}`, client_id: cid, prescription_id: `presc-${cid}` }))
+    const extraPrescriptions = freshPrescriptionsFor(ids)
+    const small = makeFake(baseTables({ items, clients, extraPrescriptions }))
     expect((await selectAutoRunCandidates(small.fake, NOW, 1)).toRun).toHaveLength(1)
 
-    const big = makeFake(baseTables({ items, clients }))
+    const big = makeFake(baseTables({ items, clients, extraPrescriptions }))
     expect((await selectAutoRunCandidates(big.fake, NOW, 99)).toRun).toHaveLength(MAX_ITEMS_PER_RUN)
   })
 
@@ -353,8 +380,9 @@ describe('🔴 反向破坏 —— 拆掉客户闸，潜客必须立刻冒出来
   it('同一条动作，客户改成在服务中 → 立刻变成可跑（证明拦它的确实是客户状态）', async () => {
     const { fake } = makeFake(
       baseTables({
-        items: [item({ id: 'prospect-item', client_id: 'lead-co' })],
+        items: [item({ id: 'prospect-item', client_id: 'lead-co', prescription_id: 'presc-lead-co' })],
         clients: [client({ id: 'lead-co', name: '某潜客', client_status: 'active' })],
+        extraPrescriptions: freshPrescriptionsFor(['lead-co']),
       }),
     )
     const r = await selectAutoRunCandidates(fake, NOW)

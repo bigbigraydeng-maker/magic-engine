@@ -14,6 +14,11 @@
  *    `prescription_id` **必为 NULL** —— 只认方案的话，营销计划派下来的动作
  *    会被整批判成「没人认领」（库里 33 件，6-08 那批）。它们不是没人认领，
  *    是挂在另一根锚上，而那根锚有自己的有效期。
+ *
+ * 🔴 join 回来的锚点行必须核对 `client_id` 是不是这条动作自己的客户。
+ *    DB 层没有约束保证 `execution_items.prescription_id` 只能指向同客户的方案 ——
+ *    脏数据或未来 bug 一旦让它指错，不查的话就会拿别的客户的方案背书这条动作。
+ *    这正是本仓库反复出现过的「跨客户错配」事故的同一类洞，主安全闸不能留这个口子。
  */
 
 import type { Endorsement } from './auto-run-policy'
@@ -43,12 +48,14 @@ const ANALYSIS_SOURCES: ReadonlySet<string> = new Set([
 ])
 
 export interface PrescriptionAnchor {
+  client_id: string
   status: string
   approved_at: string | null
   generated_at: string | null
 }
 
 export interface MarketingPlanAnchor {
+  client_id: string
   status: string
   approved_at: string | null
   end_date: string | null
@@ -56,6 +63,8 @@ export interface MarketingPlanAnchor {
 
 export interface EndorsementInput {
   source: string
+  /** 这条动作属于哪个客户 —— 用来核对锚点行是不是这个客户自己的 */
+  clientId: string
   /** 这条动作是什么时候进的看板 */
   createdAt: string | null
   prescriptionId: string | null
@@ -88,6 +97,11 @@ export function deriveEndorsement(input: EndorsementInput, now: Date): Endorseme
     // 方案行查不回来（被删了 / join 没命中）→ 当成没有背书。
     // 🔴 不能当成「有 prescription_id 就算数」：那正是让 stale 分支变死代码的写法。
     if (!p) return { kind: 'unendorsed', ageDays: itemAge }
+    // 🔴 查回来的方案必须是这个客户自己的。没有 DB 层约束保证
+    //    execution_items.prescription_id 只能指向同客户的方案，脏数据/未来 bug
+    //    一旦让它指错，这里不查就会拿别的客户的方案背书这条动作 —— 跟"没有背书"
+    //    一样处理，而不是相信一个查回来但对不上客户的行。
+    if (p.client_id !== input.clientId) return { kind: 'unendorsed', ageDays: itemAge }
 
     if (p.status === 'approved') {
       // 年龄从批准时刻算；没有批准时刻就退回生成时刻，两个都没有就当无穷老。
@@ -105,6 +119,8 @@ export function deriveEndorsement(input: EndorsementInput, now: Date): Endorseme
   if (input.marketingPlanId) {
     const m = input.marketingPlan
     if (!m) return { kind: 'unendorsed', ageDays: itemAge }
+    // 同上：查回来的计划也必须是这个客户自己的
+    if (m.client_id !== input.clientId) return { kind: 'unendorsed', ageDays: itemAge }
 
     if (m.status !== 'approved') {
       // draft / completed / archived —— 计划没在跑，它派下来的活也不该自动跑

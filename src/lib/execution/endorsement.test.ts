@@ -5,9 +5,12 @@ import type { EndorsementInput } from './endorsement'
 const NOW = new Date('2026-08-06T00:00:00Z')
 const daysAgo = (n: number) => new Date(NOW.getTime() - n * 86_400_000).toISOString()
 
+const CLIENT_ID = 'oztop'
+
 function input(over: Partial<EndorsementInput> = {}): EndorsementInput {
   return {
     source: 'zhuge',
+    clientId: CLIENT_ID,
     createdAt: daysAgo(1),
     prescriptionId: null,
     prescription: null,
@@ -18,6 +21,7 @@ function input(over: Partial<EndorsementInput> = {}): EndorsementInput {
 }
 
 const approvedPrescription = (ageDays: number) => ({
+  client_id: CLIENT_ID,
   status: 'approved',
   approved_at: daysAgo(ageDays),
   generated_at: daysAgo(ageDays + 1),
@@ -39,7 +43,7 @@ describe('deriveEndorsement —— source 的 7 个取值每个都有明确归�
         source: 'marketing_plan',
         prescriptionId: null,
         marketingPlanId: 'm1',
-        marketingPlan: { status: 'approved', approved_at: daysAgo(10), end_date: null },
+        marketingPlan: { client_id: CLIENT_ID, status: 'approved', approved_at: daysAgo(10), end_date: null },
       }),
       NOW,
     )
@@ -81,7 +85,7 @@ describe('deriveEndorsement —— 方案这根锚必须看 status，不能只�
       input({
         source: 'diagnostic',
         prescriptionId: 'p1',
-        prescription: { status: 'superseded', approved_at: daysAgo(2), generated_at: null },
+        prescription: { client_id: CLIENT_ID, status: 'superseded', approved_at: daysAgo(2), generated_at: null },
       }),
       NOW,
     )
@@ -93,7 +97,7 @@ describe('deriveEndorsement —— 方案这根锚必须看 status，不能只�
       input({
         source: 'diagnostic',
         prescriptionId: 'p1',
-        prescription: { status: 'draft', approved_at: null, generated_at: daysAgo(1) },
+        prescription: { client_id: CLIENT_ID, status: 'draft', approved_at: null, generated_at: daysAgo(1) },
       }),
       NOW,
     )
@@ -106,7 +110,7 @@ describe('deriveEndorsement —— 方案这根锚必须看 status，不能只�
         input({
           source: 'diagnostic',
           prescriptionId: 'p1',
-          prescription: { status, approved_at: null, generated_at: daysAgo(1) },
+          prescription: { client_id: CLIENT_ID, status, approved_at: null, generated_at: daysAgo(1) },
         }),
         NOW,
       )
@@ -122,12 +126,25 @@ describe('deriveEndorsement —— 方案这根锚必须看 status，不能只�
     expect(e.kind).toBe('unendorsed')
   })
 
+  it('🔴 跨客户错配：查回来的方案是approved且新鲜，但 client_id 对不上 → 当没背书，不能借别的客户的方案背书这条', () => {
+    const e = deriveEndorsement(
+      input({
+        source: 'diagnostic',
+        clientId: CLIENT_ID,
+        prescriptionId: 'p1',
+        prescription: { client_id: 'some-other-client', status: 'approved', approved_at: daysAgo(1), generated_at: null },
+      }),
+      NOW,
+    )
+    expect(e.kind).toBe('unendorsed')
+  })
+
   it('批准时刻缺失时退回生成时刻算年龄，两个都没有就当无穷老', () => {
     const withGenerated = deriveEndorsement(
       input({
         source: 'diagnostic',
         prescriptionId: 'p1',
-        prescription: { status: 'approved', approved_at: null, generated_at: daysAgo(5) },
+        prescription: { client_id: CLIENT_ID, status: 'approved', approved_at: null, generated_at: daysAgo(5) },
       }),
       NOW,
     )
@@ -137,7 +154,7 @@ describe('deriveEndorsement —— 方案这根锚必须看 status，不能只�
       input({
         source: 'diagnostic',
         prescriptionId: 'p1',
-        prescription: { status: 'approved', approved_at: null, generated_at: null },
+        prescription: { client_id: CLIENT_ID, status: 'approved', approved_at: null, generated_at: null },
       }),
       NOW,
     )
@@ -149,9 +166,9 @@ describe('deriveEndorsement —— 方案这根锚必须看 status，不能只�
       input({
         source: 'zhuge',
         prescriptionId: 'p1',
-        prescription: { status: 'superseded', approved_at: daysAgo(1), generated_at: null },
+        prescription: { client_id: CLIENT_ID, status: 'superseded', approved_at: daysAgo(1), generated_at: null },
         marketingPlanId: 'm1',
-        marketingPlan: { status: 'approved', approved_at: daysAgo(1), end_date: null },
+        marketingPlan: { client_id: CLIENT_ID, status: 'approved', approved_at: daysAgo(1), end_date: null },
       }),
       NOW,
     )
@@ -160,27 +177,32 @@ describe('deriveEndorsement —— 方案这根锚必须看 status，不能只�
 })
 
 describe('deriveEndorsement —— 营销计划这根锚', () => {
-  const planItem = (plan: { status: string; approved_at: string | null; end_date: string | null }) =>
+  const planItem = (plan: {
+    client_id: string
+    status: string
+    approved_at: string | null
+    end_date: string | null
+  }) =>
     deriveEndorsement(
       input({ source: 'marketing_plan', marketingPlanId: 'm1', marketingPlan: plan }),
       NOW,
     )
 
   it('🔴 已结束（end_date 过了）→ stale，这一期做完了不补作业', () => {
-    const e = planItem({ status: 'approved', approved_at: daysAgo(30), end_date: daysAgo(2).slice(0, 10) })
+    const e = planItem({ client_id: CLIENT_ID, status: 'approved', approved_at: daysAgo(30), end_date: daysAgo(2).slice(0, 10) })
     expect(e.kind).toBe('stale_marketing_plan')
   })
 
   it('还在期内 → current', () => {
     const future = new Date(NOW.getTime() + 10 * 86_400_000).toISOString().slice(0, 10)
-    expect(planItem({ status: 'approved', approved_at: daysAgo(5), end_date: future }).kind).toBe(
+    expect(planItem({ client_id: CLIENT_ID, status: 'approved', approved_at: daysAgo(5), end_date: future }).kind).toBe(
       'current_marketing_plan',
     )
   })
 
   it('draft / completed / archived 一律 stale', () => {
     for (const status of ['draft', 'completed', 'archived']) {
-      expect(planItem({ status, approved_at: daysAgo(1), end_date: null }).kind, status).toBe(
+      expect(planItem({ client_id: CLIENT_ID, status, approved_at: daysAgo(1), end_date: null }).kind, status).toBe(
         'stale_marketing_plan',
       )
     }
@@ -189,6 +211,20 @@ describe('deriveEndorsement —— 营销计划这根锚', () => {
   it('计划行查不回来 → 当没背书', () => {
     const e = deriveEndorsement(
       input({ source: 'marketing_plan', marketingPlanId: 'm1', marketingPlan: null }),
+      NOW,
+    )
+    expect(e.kind).toBe('unendorsed')
+  })
+
+  it('🔴 跨客户错配：查回来的计划是approved且在期内，但 client_id 对不上 → 当没背书', () => {
+    const future = new Date(NOW.getTime() + 10 * 86_400_000).toISOString().slice(0, 10)
+    const e = deriveEndorsement(
+      input({
+        source: 'marketing_plan',
+        clientId: CLIENT_ID,
+        marketingPlanId: 'm1',
+        marketingPlan: { client_id: 'some-other-client', status: 'approved', approved_at: daysAgo(5), end_date: future },
+      }),
       NOW,
     )
     expect(e.kind).toBe('unendorsed')
