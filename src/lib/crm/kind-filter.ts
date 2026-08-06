@@ -27,6 +27,14 @@ export type KindView = 'retail' | 'trade' | 'all'
 export interface KindedPerson {
   email: string | null
   kind?: ContactKind
+  /**
+   * 今天已经处理过他了。
+   *
+   * 名单改成「一天不变」之后，处理过的人**留在桶里**（就地变灰），
+   * 所以群发地址不能再照抄整桶 —— 否则一个今天亲口说「不买了」的人
+   * 当天会收到一封面向他的群发信。
+   */
+  doneToday?: boolean
 }
 
 export interface KindedBucket<P extends KindedPerson> {
@@ -48,6 +56,10 @@ export function matchesKindView(kind: ContactKind | undefined, view: KindView): 
  *   people      —— 铺出来的卡片
  *   total       —— 列头那个数字（对不上，人会以为系统丢了人）
  *   batchEmails —— **群发地址**（对不上，信会发错人）
+ *
+ * 群发地址还要再窄一层：**今天已经处理过的人不进去**。名单改成「一天不变」
+ * 之后处理过的人留在桶里就地变灰，照抄整桶等于给今天说过「不买了」的人
+ * 发一封面向他的群发信。
  */
 export function filterBucketByKind<P extends KindedPerson, B extends KindedBucket<P>>(
   bucket: B,
@@ -60,7 +72,10 @@ export function filterBucketByKind<P extends KindedPerson, B extends KindedBucke
     total: people.length,
     batchEmails:
       bucket.batch === 'send_email'
-        ? people.map((p) => p.email).filter((e): e is string => !!e)
+        ? people
+            .filter((p) => !p.doneToday)
+            .map((p) => p.email)
+            .filter((e): e is string => !!e)
         : [],
   }
 }

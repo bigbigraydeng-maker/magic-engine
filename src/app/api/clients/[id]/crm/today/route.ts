@@ -464,8 +464,11 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
        * 今天已经动过他了 —— 卡片当场变浅，不用靠记。
        *
        * 取 day-list 算出来的那个，不是 `marks.doneToday`：后者只认「发出过
-       * 联系」，而推迟 / 标不买 / 改阶段**不写触点**，靠它抓不到。名单一旦
-       * 冻结，那几个人会留在原地并且看起来没被处理过 —— 比改之前更糟。
+       * 联系」，而「他不买了 / 号码是坏的」的结论写在触点的 outcome 上，
+       * 冻结版看不见 —— 那几个人会留在原地并且看起来没被处理过。
+       *
+       * ⚠️ 「推迟」和「推到成交」目前仍然是点完就从名单上消失（库里没记
+       * 「什么时候弄下去的」，判不出来）。详见 lib/crm/day-list 头注释。
        */
       doneToday: c.handled,
       /** 是怎么处理的（今天联系过了 / 已推迟 / 标了不买…）。没处理就是 null。 */
@@ -488,7 +491,15 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       stageLabel: row?.stage ? (stageMeta.get(row.stage)?.label ?? row.stage) : null,
       segment: c.seg.segment,
       temperature: c.seg.temperature,
-      reason: c.seg.reason,
+      /**
+       * 卡片正文那句话。
+       *
+       * 已处理的人用 `handledWhy`，**不能用冻结版那句** —— 冻结版是「假装我们
+       * 今天什么都没做」算出来的，于是一张卡上会同时写着「✓ 今天联系过了」
+       * 和「客户来消息了，已经等了 18 小时」，而那个小时数还会**整天变大**。
+       * 两个销售共用这块屏时，第二个人看到「客户等了 18 小时」会再回一遍。
+       */
+      reason: c.handled && c.handledWhy ? c.handledWhy : c.seg.reason,
       suggestedChannel: c.seg.suggestedChannel,
       dueAt: c.seg.dueAt,
       lastTouchAt: c.seg.lastTouchAt,
@@ -538,9 +549,18 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       people,
       // 整桶一次性群发用。只给「该发邮件」的桶 —— 这批人已经证明电话打不通，
       // 逐个点等于继续做无用功。没邮箱的人不在这里，页面要说出差额。
+      //
+      // 🔴 **今天已经处理过的人不进群发地址。** 名单改成「一天不变」之后，
+      //    处理过的人会留在桶里（就地变灰），而这里原样照抄整桶 ——
+      //    于是一个今天亲口说「不买了」的人，当天会收到一封面向他的群发信，
+      //    CRM 里还记一笔我们发过。这是 kind-filter 那次事故的翻版：
+      //    「名单一旦开始说假话，销售就不再信它」，只是这次从筛选侧挪到了冻结侧。
       batchEmails:
         meta.batch === 'send_email'
-          ? people.map((p) => p.email).filter((e): e is string => !!e)
+          ? people
+              .filter((p) => !p.doneToday)
+              .map((p) => p.email)
+              .filter((e): e is string => !!e)
           : [],
     }
   })

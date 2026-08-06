@@ -27,6 +27,7 @@ import { PersonDrawer, type DrawerRow } from './_components/PersonDrawer'
 import type { Segment } from '@/lib/crm/segments'
 import { CONTACT_KIND_LABEL, type ContactKind } from '@/lib/crm/contact-kind'
 import { countTrade, filterBucketByKind, type KindView } from '@/lib/crm/kind-filter'
+import { dayProgress } from '@/lib/crm/day-list'
 
 interface Row {
   contactId: string
@@ -1230,7 +1231,10 @@ export default function CrmTodayPage() {
    */
   const afterWrite = (msg: string, reload = true) => {
     setToast(msg)
-    if (reload) void load()
+    // 重新拉数据时把乐观计数清零 —— 服务端那份已经把这一笔算进去了，
+    // 不清零就会重复计一次：「还剩」提前归零，进度条会在还有活没干完时
+    // 弹出「今天全推完了 🎉」。那跟名单说假话是同一种伤害。
+    if (reload) { setLocalDone(0); void load() }
     else setLocalDone((n) => n + 1)
     window.setTimeout(() => setToast(null), 2200)
   }
@@ -1312,11 +1316,22 @@ export default function CrmTodayPage() {
    * 「还剩」不用总数减：万一两边口径差一点，减出来可能是负数，
    * 而一个负数出现在销售的进度条上，这一页就不可信了。
    */
-  const serverProgress = data?.progress ?? { total: 0, done: data?.doneToday ?? 0, left: 0 }
+  /**
+   * **进度条必须跟屏幕上铺出来的一致。**
+   *
+   * 服务端那份 `data.progress` 是**没按「终端客户 / 同行」筛过**的。直接用它，
+   * 顶上会写「今天 120 个 · 还剩 95」而底下只铺了 40 张卡 —— 销售数得出来对不上，
+   * 而一个数得出来的谎话足以让整页不被信任。
+   *
+   * 所以从筛后的桶现算。`localDone` 只在「还没重新拉数据」的那几秒垫一下，
+   * 拉回来就清零（见 afterWrite）。
+   */
+  const shown = buckets.flatMap((b) => b.people)
+  const base = dayProgress(shown.map((p) => ({ handled: p.doneToday === true })))
   const progress = {
-    total: serverProgress.total,
-    done: Math.min(serverProgress.total, serverProgress.done + localDone),
-    left: Math.max(0, serverProgress.left - localDone),
+    total: base.total,
+    done: Math.min(base.total, base.done + localDone),
+    left: Math.max(0, base.left - localDone),
   }
 
   // 搜全部人：看板各列 + 不在名单上的，合起来就是这个客户的所有人。

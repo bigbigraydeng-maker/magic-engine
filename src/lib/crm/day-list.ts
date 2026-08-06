@@ -38,9 +38,22 @@
  *   · 今天有一笔我们发出的、非机器的联系  → 处理过了
  *   · 或者实时状态已经说他不该在名单上了（标了不买 / 推迟了 / 成交了）→ 也是
  *
- * 第二条尤其要紧：**推迟和「他不买了」不写触点**（推迟改的是 `snooze_until`，
- * 「分错了」写的是反馈表）。它们以前靠「这个人从名单上消失」当反馈；名单
- * 一冻结，他们会留在原地**并且看起来没被处理过** —— 那比改之前更糟。
+ * 「他不买了 / 号码是坏的」走第二条：结论写在**今天的一笔出站触点**上，
+ * 冻结版看不见它，所以人留在原桶 —— 必须靠实时版把他标成已处理，
+ * 并且**把他排出群发地址**（route 里那一层），否则一个今天亲口说不买的人
+ * 当天会收到一封面向他的群发信。
+ *
+ * ## ⚠️ 已知缺口：「推迟」和「推到成交」目前仍然是点完就消失
+ *
+ * 这两个改的是 contact 上的字段（`snooze_until` / `stage`），而库里
+ * **没有记「什么时候改的」**：`snooze_until` 是个未来日期，`updated_at`
+ * 又会被任何一笔触点写动 —— 两个都判不出「是不是今天弄下去的」。
+ *
+ * 所以它们的行为跟改动前一样（点完人就没了），没变坏但也没修好，
+ * 而且会让顶上的「今天一共 N 个」在一天之内缩水。真修要加一个
+ * 「什么时候被弄下名单的」时间字段，得 PM 批一次改库。
+ * `day-list.test.ts` 里有一条用例把这个现状钉住了 —— 字段加上之后它会失败，
+ * 提醒改的人回来把这段说明一起更新。
  */
 
 import type { ContactLike, SegmentResult, TouchpointLike } from './segments'
@@ -50,6 +63,25 @@ import { compareForWorklist, segmentContact } from './segments'
 export interface DayRow {
   /** 今天该把他放在哪一批、写什么理由。 */
   seg: SegmentResult
+  /**
+   * 今天该不该出现在这份名单上。
+   *
+   * **跟「排哪一批」是两件事，必须分开。** 第一版把两者混在一条 priority 序里
+   * （「取更紧急的那一个」），结果同一个假设裂出两道缝，两道都伤客户：
+   *
+   *   · 今天点了「他不买了」的人，结论写在**今天的出站触点**上，冻结版看不见，
+   *     于是冻结版还是 warm、实时版才是「已排除」—— 而「已排除」优先级更低，
+   *     取不到 → 人留在原桶，**邮箱还留在群发按钮里**。一个今天亲口说不买的人
+   *     当天收到一封面向他的群发信，CRM 里还记一笔我们发过。
+   *   · 推迟 / 成交的人两个版本双双是「已排除」，被名单的冷热过滤整个筛掉 ——
+   *     **他们照旧凭空消失**，而这个文件的注释和测试都声称修好了。
+   *
+   * 所以现在三件事各管各的：
+   *   `onList`  在不在名单上、排哪    ← 我们今天的动作**不影响**
+   *   `handled` 灰不灰、写什么         ← 我们今天的动作**只影响这个**
+   *   升级       客人今天让他更紧急了   ← 只在还该在名单上时才允许
+   */
+  onList: boolean
   /** 今天已经动过他了 —— 卡片变灰打勾。 */
   handled: boolean
   /**
@@ -87,18 +119,32 @@ export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): Da
   const frozen = segmentContact(withoutOurActionsSince(contact, opts.dayStartMs), now)
   const live = segmentContact(contact, now)
 
-  // priority 越小越紧急。实时版更紧急就用实时版 —— 客人今天回了话，
-  // 那是必须当场看见的，压在「新客人」那一批里等到明天就凉了。
-  const seg = live.priority < frozen.priority ? live : frozen
+  // 今天开工那一刻他该不该在名单上。**只看冻结版** —— 我们今天做了什么，
+  // 不能决定他今天出不出现，否则就又回到「做完就消失」。
+  const onList = frozen.temperature === 'hot' || frozen.temperature === 'warm'
 
-  // 实时状态说他已经下名单了（标了不买 / 推迟了 / 成交了）—— 那也是「处理过了」。
+  // 实时状态说他已经下名单了（标了不买 / 推迟了 / 成交了）。
   // 这一类不写触点，靠 touchedToday 抓不到。
   const droppedOff = live.temperature === 'off'
 
+  /**
+   * 排哪一批。允许**升级**（客人今天回了话，压在「新客人」里等到明天就凉了）。
+   *
+   * `!droppedOff` 是一道**防御闸，目前触发不到**：所有「已排除」的
+   * priority（9）都比任何 hot/warm 大，所以升级判断本来就不会选中它们。
+   * 留着是为了将来万一加进一个优先级很高的「off」段 —— 那时候没有这道闸，
+   * 一个今天说了不买的人会被当成「更紧急」拉回热桶。
+   * **写清楚它测不到，免得下一个人花时间去构造用例。**
+   */
+  const seg = !droppedOff && live.priority < frozen.priority ? live : frozen
+
   return {
     seg,
+    onList,
     handled: opts.touchedToday || droppedOff,
-    handledWhy: opts.touchedToday ? '今天联系过了' : droppedOff ? live.reason : null,
+    // 具体动作优先于泛泛的「联系过了」：「聊过了，明确没兴趣」比
+    // 「今天联系过了」信息量大得多，而这个字段存在的全部理由就是说清做了什么。
+    handledWhy: droppedOff ? live.reason : opts.touchedToday ? '今天联系过了' : null,
   }
 }
 
@@ -145,7 +191,10 @@ export function dayWorklist(
       ...c,
       ...dayRow(c, now, { dayStartMs: opts.dayStartMs, touchedToday: opts.touchedToday(c.id) }),
     }))
-    .filter((c) => c.seg.temperature === 'hot' || c.seg.temperature === 'warm')
+    // **按 onList 筛，不按 seg.temperature 筛。**
+    // 用 temperature 的话，今天被推迟 / 标不买 / 推成交的人两个版本双双是
+    // 「已排除」，会被整个筛掉 —— 他们照旧凭空消失，而这正是要修的毛病。
+    .filter((c) => c.onList)
     .sort((a, b) => compareForWorklist(a.seg, b.seg))
 }
 
@@ -202,12 +251,7 @@ export interface DayProgress {
   left: number
 }
 
-/**
- * 「还剩 22」比「已联系 8」有用 —— 销售关心的是还有多远到头。两个都给。
- *
- * `left` 是数出来的，不是 `total - done` 减出来的：将来 handled 变成三态时，
- * 减法会静默算错，而两个数一起数，对不上就看得见。
- */
+/** 「还剩 22」比「已联系 8」有用 —— 销售关心的是还有多远到头。两个都给。 */
 export function dayProgress(rows: ReadonlyArray<{ handled: boolean }>): DayProgress {
   return {
     total: rows.length,

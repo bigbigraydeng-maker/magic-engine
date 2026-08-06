@@ -102,3 +102,43 @@ describe('同行总数', () => {
     expect(countTrade([{ people: [person('a', 'retail')] }], [{ kind: 'retail' }])).toBe(0)
   })
 })
+
+/**
+ * 今天已经处理过的人，**不能进群发地址**。
+ *
+ * 名单改成「一天不变」之后（lib/crm/day-list），处理过的人不再消失，而是
+ * 留在桶里就地变灰。群发地址如果照抄整桶 —— 一个今天亲口说「不买了」的人
+ * 当天就会收到一封面向他的群发信，CRM 里还记一笔我们发过。
+ *
+ * 这是这个文件开头那次事故的第二种形态：第一次是筛选没跟上，这次是冻结没跟上。
+ * 同一条教训：**群发地址必须从「真正该收信的那批人」重新推**。
+ */
+describe('已经处理过的人不进群发地址', () => {
+  const withDone = {
+    batch: 'send_email' as const,
+    total: 3,
+    people: [
+      { email: 'a@gmail.com', kind: 'retail' as const },
+      { email: 'b@gmail.com', kind: 'retail' as const, doneToday: true },
+      { email: 'c@gmail.com', kind: 'retail' as const },
+    ],
+    batchEmails: ['a@gmail.com', 'b@gmail.com', 'c@gmail.com'],
+  }
+
+  it('今天标了「不买了」的那个，地址里没有他', () => {
+    const b = filterBucketByKind(withDone, 'retail')
+    expect(b.batchEmails).toEqual(['a@gmail.com', 'c@gmail.com'])
+    expect(b.batchEmails).not.toContain('b@gmail.com')
+  })
+
+  /** 卡片还在（就地变灰），只是不收这封信 —— 两件事不能混。 */
+  it('人还在桶里，只是不收这封信', () => {
+    const b = filterBucketByKind(withDone, 'retail')
+    expect(b.people).toHaveLength(3)
+    expect(b.total).toBe(3)
+  })
+
+  it('看「全部」时同样排除', () => {
+    expect(filterBucketByKind(withDone, 'all').batchEmails).not.toContain('b@gmail.com')
+  })
+})
