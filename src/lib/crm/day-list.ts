@@ -155,6 +155,9 @@ export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): Da
    */
   const escalated = !droppedOff && live.priority < frozen.priority
 
+  // 「他还欠我一次动作吗」—— 这一条决定灰不灰，**不能拿 escalated 代替**。
+  const stillNeedsMe = needsMeAgain(contact, live, now, opts.dayStartMs)
+
   return {
     seg: escalated ? live : frozen,
     onList,
@@ -170,11 +173,21 @@ export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): Da
      * 这两个人都在等我们，却被折叠按钮盖住，进度条还把他们算进「已完成」，
      * 甚至可能弹出「今天全推完了 🎉」。这跟 PM 那句「我如何知道哪个已经联系了」
      * 是同一类伤害，只是方向反过来：不是做完的看不见，是**没做完的被当成做完了**。
+     *
+     * ⚠️ 第一版拿 `escalated`（实时版比冻结版更紧急）当这件事的代理，**不够**：
+     * 它只在客人的动作把人**推去了另一个桶**时成立。客人在**同一个桶**里
+     * 再动一次，两边 priority 相等，代理当场失效。实测漏掉的：
+     *
+     *   · 一天之内来回两轮邮件（接了 info@ 之后 CTS 的日常）——
+     *     卡片自己写着「客户来消息了，已经等了不到 1 小时」，还是被折叠掉
+     *   · 身上挂着一个过期旧约的人，今晨又约了今天下午 —— 同桶，照旧被埋
+     *
+     * 所以这里直说那件事本身：**我们今天最后一次出手之后，他又动了没有。**
      */
-    handled: !escalated && (opts.touchedToday || droppedOff),
+    handled: !stillNeedsMe && (opts.touchedToday || droppedOff),
     // 具体动作优先于泛泛的「联系过了」：「聊过了，明确没兴趣」比
     // 「今天联系过了」信息量大得多，而这个字段存在的全部理由就是说清做了什么。
-    handledWhy: escalated
+    handledWhy: stillNeedsMe
       ? null
       : droppedOff
         ? live.reason
@@ -182,6 +195,58 @@ export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): Da
           ? '今天联系过了'
           : null,
   }
+}
+
+/** 时间读不出来就当没有 —— 不猜。 */
+function tsOf(v: string | null | undefined): number {
+  if (!v) return 0
+  const t = new Date(v).getTime()
+  return Number.isNaN(t) ? 0 : t
+}
+
+/**
+ * 我们今天出手之后，又冒出来「需要我再动一次手」的新事实。
+ *
+ * 这是「灰不灰」的真正判据。**不能用「实时版比冻结版更紧急」当代理** ——
+ * 那个只在客人的动作把人推去了另一个桶时成立；客人在同一个桶里再动一次，
+ * 两边 priority 相等，代理失效，人照旧被折叠进「今天已处理」。
+ *
+ * 两种「新事实」，都是**客人侧**的：
+ *   · 他开了口，或者点了我们发的链接
+ *     （**打开不算** —— Apple 的隐私保护会替用户自动打开邮件，
+ *      这套系统 2026-08-02 已经因为把「打开」当成「回话了」出过一次 P0）
+ *   · 今天约好的回电到点了 —— 这个人今天还欠一通电话
+ *
+ * 判据锚在**我们今天最后一次出手**上，不是锚在「今天零点」：
+ * 早上他来过信、我们中午回了 —— 那笔来信在我们出手之前，不该再算他在等。
+ */
+export function needsMeAgain(
+  contact: ContactLike,
+  live: SegmentResult,
+  now: Date,
+  dayStartMs: number,
+): boolean {
+  const ourLast = Math.max(
+    0,
+    ...contact.touchpoints
+      .filter((t) => t.direction === 'outbound' && !t.engagement && tsOf(t.occurredAt) >= dayStartMs)
+      .map((t) => tsOf(t.occurredAt)),
+  )
+  // 今天还没出过手 —— 那就谈不上「出手之后」，这个人本来就没被标成已处理。
+  if (ourLast === 0) return false
+
+  const customerActed = contact.touchpoints.some(
+    (t) =>
+      ((t.direction === 'inbound' && !t.engagement) || t.engagement === 'click') &&
+      tsOf(t.occurredAt) > ourLast,
+  )
+
+  // 今天约好的回电到点了。约定时间要在我们最后一次出手**之后**——
+  // 否则一个早就过期的旧约会让这个人永远灰不了。
+  const callbackCameDue =
+    live.dueAt !== null && tsOf(live.dueAt) > ourLast && tsOf(live.dueAt) <= now.getTime()
+
+  return customerActed || callbackCameDue
 }
 
 /**
@@ -198,6 +263,11 @@ export function withoutOurActionsSince(contact: ContactLike, sinceMs: number): C
       if (t.direction !== 'outbound') return true
       // 行为信号（打开 / 点击）是客人做的 —— 不摘。
       if (t.engagement) return true
+      // 「约好几点回电」是**客人点头同意的约定**，跟行为信号同类，也不摘。
+      // 摘掉的话，今晨刚约好的「今天 14:00」会被冻结版丢弃，卡片翻出身上
+      // 那个两天前的过期旧约，写着「之前约好这个时间回电 · 2 天前」——
+      // 销售拿起电话第一句就说错。
+      if (t.callbackAt) return true
       const at = new Date(t.occurredAt).getTime()
       // 时间读不出来的不敢摘 —— 摘错会让一个已经跟过的人重新冒出来当新客人。
       if (Number.isNaN(at)) return true

@@ -458,3 +458,111 @@ describe('客人回过头来找我们的，不算已处理', () => {
     expect(r.handledWhy).toContain('没兴趣')
   })
 })
+
+/**
+ * 🔴 **客人在同一个桶里又动了一次**（子牙 2026-08-06 第三轮 R3）。
+ *
+ * 上一版拿「实时版比冻结版更紧急」当「客人又动了」的代理 —— 那只在客人的
+ * 动作把人**推去了另一个桶**时成立。同桶再动一次，两边 priority 相等，
+ * 代理当场失效，人照旧被折叠进「今天已处理」，`waiting` 那一层漏人。
+ *
+ * 实测漏掉的 E1（一天之内来回两轮邮件）是接了 info@ 之后 CTS 的日常，
+ * 不是构造出来的极端值 —— 卡片自己写着「客户来消息了，已经等了不到 1 小时」，
+ * 还是被埋在折叠按钮后面。
+ */
+describe('客人在同一个桶里又动了一次', () => {
+  /** E1：昨天发过 → 今天 12:30 来信 → 今天 14:00 我们回 → 今天 15:30 又来信 */
+  it('一天之内来回两轮邮件 → 最后那封仍在等我们，不算已处理', () => {
+    const r = row(
+      person([
+        tp({ direction: 'outbound', occurredAt: '2026-08-04T02:00:00.000Z' }),
+        tp({ direction: 'inbound', occurredAt: '2026-08-05T00:30:00.000Z' }),
+        tp({ direction: 'outbound', occurredAt: '2026-08-05T02:00:00.000Z' }),
+        tp({ direction: 'inbound', occurredAt: '2026-08-05T03:30:00.000Z' }),
+      ]),
+      true,
+    )
+    expect(r.seg.segment).toBe('replied')
+    expect(r.handled).toBe(false)
+  })
+
+  /** 反过来：他早上来信、我们中午回了、之后没动静 —— 这才是真做完了。 */
+  it('他来信在我们回之前 → 算已处理', () => {
+    const r = row(
+      person([
+        tp({ direction: 'outbound', occurredAt: '2026-08-04T02:00:00.000Z' }),
+        tp({ direction: 'inbound', occurredAt: '2026-08-05T00:30:00.000Z' }),
+        tp({ direction: 'outbound', occurredAt: '2026-08-05T02:00:00.000Z' }),
+      ]),
+      true,
+    )
+    expect(r.handled).toBe(true)
+  })
+
+  /** E3：今天发了信、今天他点了链接 —— 点击是真人动作，算他又动了。 */
+  it('我们今天发了信、他今天点了链接 → 不算已处理', () => {
+    const r = row(
+      person([
+        tp({ direction: 'inbound', occurredAt: '2026-08-04T02:00:00.000Z' }),
+        tp({ direction: 'outbound', occurredAt: '2026-08-05T01:00:00.000Z' }),
+        tp({ direction: 'outbound', occurredAt: '2026-08-05T03:00:00.000Z', engagement: 'click' }),
+      ]),
+      true,
+    )
+    expect(r.handled).toBe(false)
+  })
+
+  /**
+   * **打开不算。** Apple 的隐私保护会替用户自动打开邮件 ——
+   * 这套系统 2026-08-02 已经因为把「打开」当成「回话了」出过一次 P0。
+   */
+  it('他只是打开了邮件（没点）→ 照旧算已处理', () => {
+    const r = row(
+      person([
+        tp({ direction: 'inbound', occurredAt: '2026-08-04T02:00:00.000Z' }),
+        tp({ direction: 'outbound', occurredAt: '2026-08-05T01:00:00.000Z' }),
+        tp({ direction: 'outbound', occurredAt: '2026-08-05T03:00:00.000Z', engagement: 'open' }),
+      ]),
+      true,
+    )
+    expect(r.handled).toBe(true)
+  })
+
+  /** E2：身上挂着一个过期旧约，今晨又约了今天下午 —— 同桶，上一版照旧被埋。 */
+  it('挂着旧约、今晨又约了今天下午，到点了 → 不算已处理', () => {
+    const r = row(
+      person([
+        tp({ direction: 'inbound', occurredAt: '2026-08-01T02:00:00.000Z' }),
+        tp({ direction: 'outbound', occurredAt: '2026-08-02T02:00:00.000Z', callbackAt: '2026-08-03T02:00:00.000Z' }),
+        tp({ direction: 'outbound', occurredAt: '2026-08-04T22:00:00.000Z', callbackAt: '2026-08-05T02:00:00.000Z' }),
+      ]),
+      true,
+    )
+    expect(r.handled).toBe(false)
+  })
+
+  /**
+   * **卡片上必须是新约的时间，不是那个过期旧约**（R4）。
+   *
+   * `callbackAt` 是客人点头同意的约定，跟点击一样属于客人侧事实，
+   * 不该被当成「我们做的动作」冻掉。摘掉的话卡片会翻出两天前那个旧约，
+   * 写着「之前约好这个时间回电 · 2 天前」—— 销售拿起电话第一句就说错。
+   */
+  it('卡片显示今晨新约的时间，不是过期的旧约', () => {
+    const r = row(
+      person([
+        tp({ direction: 'inbound', occurredAt: '2026-08-01T02:00:00.000Z' }),
+        tp({ direction: 'outbound', occurredAt: '2026-08-02T02:00:00.000Z', callbackAt: '2026-08-03T02:00:00.000Z' }),
+        tp({ direction: 'outbound', occurredAt: '2026-08-04T22:00:00.000Z', callbackAt: '2026-08-05T02:00:00.000Z' }),
+      ]),
+      true,
+    )
+    expect(r.seg.dueAt).toBe('2026-08-05T02:00:00.000Z')
+  })
+
+  /** 今天还没出过手 → 谈不上「出手之后」，这个人本来就不是已处理。 */
+  it('今天一次都没出手 → 判据不生效', () => {
+    const r = row(person(YESTERDAY_LEAD), false)
+    expect(r.handled).toBe(false)
+  })
+})
