@@ -15,6 +15,7 @@ import {
   MAX_ITEMS_PER_RUN,
   CLAIM_STALE_MINUTES,
   COOLDOWN_BACKOFF_DAYS,
+  GENERATE_TIMEOUT_MS,
   type AutoRunGenerateResult,
 } from './auto-run'
 
@@ -566,6 +567,28 @@ describe('runAutoRunBatch —— 真跑', () => {
     const r = await runAutoRunBatch(fake, deps, NOW, { dryRun: false })
     expect(r.failed).toBe(1)
     expect(tables.execution_items[0].auto_run_error).toBe('boom')
+  })
+
+  it('🔴 生成卡住不返回（AI 调用 / 数据库查询挂死）→ 超时按失败处理，走 2 天退避，不让整轮批次挂住', async () => {
+    vi.useFakeTimers()
+    try {
+      const { fake, tables } = makeFake(baseTables())
+      // 永远不 resolve/reject，模拟 generateWeeklyBlogForClient 内部卡死
+      const deps = { generateBlog: vi.fn(() => new Promise<AutoRunGenerateResult>(() => {})) }
+      const runPromise = runAutoRunBatch(fake, deps, NOW, { dryRun: false })
+
+      await vi.advanceTimersByTimeAsync(GENERATE_TIMEOUT_MS + 1_000)
+      const r = await runPromise
+
+      expect(r.failed).toBe(1)
+      const row = tables.execution_items[0]
+      expect(row.status).toBe('pending')
+      expect(row.auto_run_attempts).toBe(1)
+      expect(String(row.auto_run_error)).toContain('超时')
+      expect((Date.parse(row.auto_run_next_at as string) - NOW.getTime()) / 86_400_000).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it(`🔴 第 ${MAX_ATTEMPTS} 次失败后停手：不再排下次，等人`, async () => {

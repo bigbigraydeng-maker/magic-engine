@@ -125,34 +125,27 @@ export interface SelectionResult {
   deferredByQuota: number
 }
 
-/**
- * 读候选 + 逐条判定。**纯读，不写任何东西** —— dry-run 和真跑共用这一份，
- * 两边看到的名单永远一致（分家的话，人眼确认过的名单跟机器真跑的名单可以不同，
- * 那次确认就白做了）。
- */
-export async function selectAutoRunCandidates(
-  supabase: SupabaseClient,
-  now: Date,
-  /**
-   * 本轮名额。只允许比 MAX_ITEMS_PER_RUN **更小** —— 上线首轮用 1 试水。
-   * 传大了会被夹回上限：一个能把安全上限调高的旋钮，早晚会被调高。
-   */
-  maxItems: number = MAX_ITEMS_PER_RUN,
-): Promise<SelectionResult> {
-  const quota = Math.max(1, Math.min(MAX_ITEMS_PER_RUN, Math.floor(maxItems)))
-  // ① 性能过滤：哪些客户值得看。跟周更同一个口径（active + 周更开关）。
-  const { data: eligibleRows, error: eligibleErr } = await supabase
+/** ① 性能过滤：哪些客户值得看。跟周更同一个口径（active + 周更开关）。 */
+async function fetchEligibleClientIds(supabase: SupabaseClient): Promise<string[]> {
+  const { data, error } = await supabase
     .from('clients')
     .select('id')
     .eq('client_status', 'active')
     .contains('seo_config', { weekly_blog: true })
-  if (eligibleErr) throw new Error(`客户名单查询失败: ${eligibleErr.message}`)
-  const eligibleIds = ((eligibleRows ?? []) as Array<{ id: string }>).map((c) => c.id)
-  if (eligibleIds.length === 0) return { judged: [], toRun: [], deferredByQuota: 0 }
+  if (error) throw new Error(`客户名单查询失败: ${error.message}`)
+  return ((data ?? []) as Array<{ id: string }>).map((c) => c.id)
+}
 
-  // ② 候选动作。SQL 只做粗筛（状态 + 类型 + 客户），退避和次数放 TS ——
-  //    判定条件集中在一处才不会两边漂移。
-  const { data: itemRows, error: itemErr } = await supabase
+/**
+ * ② 候选动作。SQL 只做粗筛（状态 + 类型 + 客户），退避和次数放 TS ——
+ * 判定条件集中在一处才不会两边漂移。
+ */
+async function fetchCandidateItems(
+  supabase: SupabaseClient,
+  eligibleClientIds: string[],
+  now: Date,
+): Promise<CandidateItemRow[]> {
+  const { data, error } = await supabase
     .from('execution_items')
     .select(
       'id, client_id, title, action_type, fix_type, status, source, prescription_id, ' +
@@ -160,33 +153,45 @@ export async function selectAutoRunCandidates(
     )
     .eq('status', 'pending')
     .in('action_type', AUTO_RUNNABLE_ACTION_TYPES as unknown as string[])
-    .in('client_id', eligibleIds)
+    .in('client_id', eligibleClientIds)
     // 老的排前面：等得最久的那件先做。反过来排会让积压永远排在队尾。
     .order('created_at', { ascending: true })
     .limit(200)
-  if (itemErr) throw new Error(`执行项查询失败: ${itemErr.message}`)
+  if (error) throw new Error(`执行项查询失败: ${error.message}`)
 
-  const items = ((itemRows ?? []) as unknown as CandidateItemRow[]).filter(
-    (r) =>
-      (r.auto_run_attempts ?? 0) < MAX_ATTEMPTS && backoffElapsed(r.auto_run_next_at, now),
+  return ((data ?? []) as unknown as CandidateItemRow[]).filter(
+    (r) => (r.auto_run_attempts ?? 0) < MAX_ATTEMPTS && backoffElapsed(r.auto_run_next_at, now),
   )
-  if (items.length === 0) return { judged: [], toRun: [], deferredByQuota: 0 }
+}
 
-  // ③ 客户真实状态。**这一次不带任何过滤条件**，故意的：
-  //    上面那次是性能过滤，这一次是安全判定的输入。两次读同一张表看着冗余，
-  //    但它们回答的是不同问题 —— 判定要是拿「已经被过滤过的结果」当输入，
-  //    那道闸就是恒真的，等于没有。
-  const clientIds = Array.from(new Set(items.map((r) => r.client_id)))
-  const { data: clientRows, error: clientErr } = await supabase
+/**
+ * ③ 客户真实状态。**这一次不带任何过滤条件**，故意的：
+ * 上一步是性能过滤，这一次是安全判定的输入。两次读同一张表看着冗余，
+ * 但它们回答的是不同问题 —— 判定要是拿「已经被过滤过的结果」当输入，
+ * 那道闸就是恒真的，等于没有。
+ */
+async function fetchClientsByIds(
+  supabase: SupabaseClient,
+  clientIds: string[],
+): Promise<Map<string, CandidateClientRow>> {
+  const { data, error } = await supabase
     .from('clients')
     .select('id, name, domain, client_status, seo_config')
     .in('id', clientIds)
-  if (clientErr) throw new Error(`客户资料查询失败: ${clientErr.message}`)
-  const clients = new Map(
-    ((clientRows ?? []) as CandidateClientRow[]).map((c) => [c.id, c]),
-  )
+  if (error) throw new Error(`客户资料查询失败: ${error.message}`)
+  return new Map(((data ?? []) as CandidateClientRow[]).map((c) => [c.id, c]))
+}
 
-  // ④ 两根锚：方案 / 营销计划。只查候选行真正引用到的那些。
+interface AnchorMaps {
+  prescriptions: Map<string, PrescriptionAnchor>
+  plans: Map<string, MarketingPlanAnchor>
+}
+
+/** ④ 两根锚：方案 / 营销计划。只查候选行真正引用到的那些。 */
+async function fetchAnchors(
+  supabase: SupabaseClient,
+  items: CandidateItemRow[],
+): Promise<AnchorMaps> {
   const prescriptionIds = Array.from(
     new Set(items.map((r) => r.prescription_id).filter((v): v is string => !!v)),
   )
@@ -218,59 +223,91 @@ export async function selectAutoRunCandidates(
     }
   }
 
-  // ⑤ 逐条判定
-  const judged: JudgedCandidate[] = []
-  for (const row of items) {
-    const client = clients.get(row.client_id)
-    const endorsement = deriveEndorsement(
-      {
-        source: row.source,
-        clientId: row.client_id,
-        createdAt: row.created_at,
-        prescriptionId: row.prescription_id,
-        prescription: row.prescription_id
-          ? (prescriptions.get(row.prescription_id) ?? null)
-          : null,
-        marketingPlanId: row.marketing_plan_id,
-        marketingPlan: row.marketing_plan_id ? (plans.get(row.marketing_plan_id) ?? null) : null,
-      },
-      now,
-    )
+  return { prescriptions, plans }
+}
 
-    // 客户行查不回来 = 不知道这家公司现在算什么 → 当成不可跑，别猜
-    const verdict: AutoRunVerdict = client
-      ? judgeAutoRun({
-          actionType: row.action_type,
-          fixType: row.fix_type,
-          status: row.status,
-          clientStatus: client.client_status,
-          weeklyBlogEnabled: weeklyBlogEnabledOf(client.seo_config),
-          pinnedTopic: pinnedTopicOf(row.steps_json),
-          endorsement,
-        })
-      : { run: false, reason: '查不到这条动作属于哪个客户，不动它' }
-
-    judged.push({
-      id: row.id,
-      client_id: row.client_id,
-      client_name: client?.name ?? '未知客户',
-      action_type: row.action_type,
-      title: row.title,
-      verdict,
-      endorsement,
-      attempts: row.auto_run_attempts ?? 0,
-      row,
-      client: client ?? {
-        id: row.client_id,
-        name: '未知客户',
-        domain: null,
-        client_status: 'unknown',
-        seo_config: null,
-      },
-    })
+/** 把判定结果拼回 `JudgedCandidate` 形状。客户行查不回来时填一份占位客户，不让下游猜。 */
+function toJudgedCandidate(
+  row: CandidateItemRow,
+  client: CandidateClientRow | undefined,
+  verdict: AutoRunVerdict,
+  endorsement: Endorsement,
+): JudgedCandidate {
+  return {
+    id: row.id,
+    client_id: row.client_id,
+    client_name: client?.name ?? '未知客户',
+    action_type: row.action_type,
+    title: row.title,
+    verdict,
+    endorsement,
+    attempts: row.auto_run_attempts ?? 0,
+    row,
+    client: client ?? {
+      id: row.client_id,
+      name: '未知客户',
+      domain: null,
+      client_status: 'unknown',
+      seo_config: null,
+    },
   }
+}
 
-  // ⑥ 名额：一轮 N 件、每客户 1 件
+/** 单条判定：一行候选 + 它的客户 / 锚点 → 判定结果。 */
+function judgeOne(
+  row: CandidateItemRow,
+  client: CandidateClientRow | undefined,
+  anchors: AnchorMaps,
+  now: Date,
+): JudgedCandidate {
+  const endorsement = deriveEndorsement(
+    {
+      source: row.source,
+      clientId: row.client_id,
+      createdAt: row.created_at,
+      prescriptionId: row.prescription_id,
+      prescription: row.prescription_id
+        ? (anchors.prescriptions.get(row.prescription_id) ?? null)
+        : null,
+      marketingPlanId: row.marketing_plan_id,
+      marketingPlan: row.marketing_plan_id
+        ? (anchors.plans.get(row.marketing_plan_id) ?? null)
+        : null,
+    },
+    now,
+  )
+
+  // 客户行查不回来 = 不知道这家公司现在算什么 → 当成不可跑，别猜
+  const verdict: AutoRunVerdict = client
+    ? judgeAutoRun({
+        actionType: row.action_type,
+        fixType: row.fix_type,
+        status: row.status,
+        clientStatus: client.client_status,
+        weeklyBlogEnabled: weeklyBlogEnabledOf(client.seo_config),
+        pinnedTopic: pinnedTopicOf(row.steps_json),
+        endorsement,
+      })
+    : { run: false, reason: '查不到这条动作属于哪个客户，不动它' }
+
+  return toJudgedCandidate(row, client, verdict, endorsement)
+}
+
+/** ⑤ 逐条判定：把每一行变成「能不能跑、为什么」。 */
+function judgeCandidates(
+  items: CandidateItemRow[],
+  clients: Map<string, CandidateClientRow>,
+  anchors: AnchorMaps,
+  now: Date,
+): JudgedCandidate[] {
+  return items.map((row) => judgeOne(row, clients.get(row.client_id), anchors, now))
+}
+
+/** ⑥ 名额分配：一轮 N 件、每客户 1 件，被挤掉的数量单独报出来。 */
+function allocateQuota(
+  judged: JudgedCandidate[],
+  quota: number,
+): { toRun: JudgedCandidate[]; deferredByQuota: number } {
   const runnable = judged.filter((j) => j.verdict.run)
   const perClient = new Map<string, number>()
   const toRun: JudgedCandidate[] = []
@@ -281,8 +318,39 @@ export async function selectAutoRunCandidates(
     perClient.set(j.client_id, n + 1)
     toRun.push(j)
   }
+  return { toRun, deferredByQuota: runnable.length - toRun.length }
+}
 
-  return { judged, toRun, deferredByQuota: runnable.length - toRun.length }
+/**
+ * 读候选 + 逐条判定。**纯读，不写任何东西** —— dry-run 和真跑共用这一份，
+ * 两边看到的名单永远一致（分家的话，人眼确认过的名单跟机器真跑的名单可以不同，
+ * 那次确认就白做了）。
+ */
+export async function selectAutoRunCandidates(
+  supabase: SupabaseClient,
+  now: Date,
+  /**
+   * 本轮名额。只允许比 MAX_ITEMS_PER_RUN **更小** —— 上线首轮用 1 试水。
+   * 传大了会被夹回上限：一个能把安全上限调高的旋钮，早晚会被调高。
+   */
+  maxItems: number = MAX_ITEMS_PER_RUN,
+): Promise<SelectionResult> {
+  const quota = Math.max(1, Math.min(MAX_ITEMS_PER_RUN, Math.floor(maxItems)))
+
+  const eligibleIds = await fetchEligibleClientIds(supabase)
+  if (eligibleIds.length === 0) return { judged: [], toRun: [], deferredByQuota: 0 }
+
+  const items = await fetchCandidateItems(supabase, eligibleIds, now)
+  if (items.length === 0) return { judged: [], toRun: [], deferredByQuota: 0 }
+
+  const clientIds = Array.from(new Set(items.map((r) => r.client_id)))
+  const clients = await fetchClientsByIds(supabase, clientIds)
+  const anchors = await fetchAnchors(supabase, items)
+
+  const judged = judgeCandidates(items, clients, anchors, now)
+  const { toRun, deferredByQuota } = allocateQuota(judged, quota)
+
+  return { judged, toRun, deferredByQuota }
 }
 
 // ── 认领 / 归还 ────────────────────────────────────────────────────────────────
@@ -384,6 +452,31 @@ export async function releaseStaleClaims(
 
 // ── 执行 ──────────────────────────────────────────────────────────────────────
 
+/**
+ * 单条生成的超时上限。没有这道保护的话，`generateBlog` 内部一次 AI 调用
+ * 或数据库查询卡住不返回，这条会一直占着认领（已经标成 `in_progress`），
+ * 要等 `CLAIM_STALE_MINUTES`（2 小时）后下一轮 cron 才能把它捞回来 ——
+ * 期间看板上这条「卡在进行中」两小时，没有任何信号。
+ */
+export const GENERATE_TIMEOUT_MS = 5 * 60_000
+
+/** 通用超时包装：到点了让外层 promise 直接 reject，不等原 promise 结束。 */
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms)
+    promise.then(
+      (v) => {
+        clearTimeout(timer)
+        resolve(v)
+      },
+      (err) => {
+        clearTimeout(timer)
+        reject(err)
+      },
+    )
+  })
+}
+
 export interface AutoRunGenerateResult {
   outcome: string
   post_id?: string
@@ -467,6 +560,130 @@ async function logCompletion(
 }
 
 /**
+ * 真正调 `deps.generateBlog`，套超时。无论是超时还是生成器自己抛异常，
+ * 都收敛成 `outcome: 'error'` —— 调用方不用关心是哪种，一律走失败退避。
+ */
+async function generateWithTimeout(
+  deps: AutoRunDeps,
+  client: { id: string; name: string; domain: string | null },
+): Promise<AutoRunGenerateResult> {
+  try {
+    return await withTimeout(
+      deps.generateBlog(client),
+      GENERATE_TIMEOUT_MS,
+      `生成超时（超过 ${Math.round(GENERATE_TIMEOUT_MS / 60_000)} 分钟没有结果，按失败处理）`,
+    )
+  } catch (err) {
+    return { outcome: 'error', error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/** 生成成功：动作标完成 + 写工作日志。 */
+async function markGenerated(
+  supabase: SupabaseClient,
+  j: JudgedCandidate,
+  res: AutoRunGenerateResult,
+  now: Date,
+): Promise<void> {
+  await supabase
+    .from('execution_items')
+    .update({
+      status: 'completed',
+      completed_at: now.toISOString(),
+      auto_run_started_at: null,
+      auto_run_error: null,
+      auto_run_attempts: 0,
+      auto_run_next_at: null,
+    })
+    .eq('id', j.id)
+  await logCompletion(supabase, j, res)
+}
+
+/**
+ * 「这周已经有文章了」「没有可写的题目」都不是失败 —— 不计次数，只压一段退避。
+ * 计成失败的话，三个正常的星期就能把一条好动作永久停掉。
+ */
+async function handleCooldownSkip(
+  supabase: SupabaseClient,
+  j: JudgedCandidate,
+  outcome: 'skipped_recent_post' | 'skipped_no_topic',
+  now: Date,
+): Promise<AutoRunItemResult> {
+  const days = outcome === 'skipped_recent_post' ? COOLDOWN_BACKOFF_DAYS : NO_TOPIC_BACKOFF_DAYS
+  await releaseItem(supabase, j.id, {
+    attempts: j.attempts,
+    nextAt: new Date(now.getTime() + days * 86_400_000),
+    error: null,
+  })
+  return { item_id: j.id, client_id: j.client_id, client_name: j.client_name, outcome }
+}
+
+/** 真失败（含超时）：计一次数，按 2^n 天退避，够次数了就停手交给人。 */
+async function handleFailure(
+  supabase: SupabaseClient,
+  j: JudgedCandidate,
+  error: string,
+  now: Date,
+): Promise<AutoRunItemResult> {
+  const attempts = j.attempts + 1
+  const nextAt = backoffAfterFailure(attempts, now)
+  await releaseItem(supabase, j.id, { attempts, nextAt, error })
+  return {
+    item_id: j.id,
+    client_id: j.client_id,
+    client_name: j.client_name,
+    outcome: attempts >= MAX_ATTEMPTS ? 'gave_up' : 'failed',
+    error,
+  }
+}
+
+/**
+ * 认领 → 生成（带超时）→ 按结果写库，单条动作的完整生命周期。
+ * 抢不到 / 冷却 / 失败 / 成功四条路径都在这里收口。
+ */
+async function executeOneItem(
+  supabase: SupabaseClient,
+  deps: AutoRunDeps,
+  j: JudgedCandidate,
+  now: Date,
+): Promise<AutoRunItemResult> {
+  const claimed = await claimItem(supabase, { id: j.id, started_at: j.row.started_at }, now)
+  if (!claimed) {
+    // 没抢到 = 有人（或另一个实例）先动了这条。跳过，不是失败。
+    return {
+      item_id: j.id,
+      client_id: j.client_id,
+      client_name: j.client_name,
+      outcome: 'skipped_not_claimed',
+    }
+  }
+
+  const res = await generateWithTimeout(deps, {
+    id: j.client.id,
+    name: j.client.name,
+    domain: j.client.domain,
+  })
+
+  if (res.outcome === 'generated') {
+    await markGenerated(supabase, j, res, now)
+    return {
+      item_id: j.id,
+      client_id: j.client_id,
+      client_name: j.client_name,
+      outcome: 'generated',
+      post_id: res.post_id,
+      topic: res.topic,
+    }
+  }
+
+  if (res.outcome === 'skipped_recent_post' || res.outcome === 'skipped_no_topic') {
+    return handleCooldownSkip(supabase, j, res.outcome, now)
+  }
+
+  return handleFailure(supabase, j, res.error ?? '未知原因', now)
+}
+
+/**
  * 跑一轮。
  *
  * `dryRun=true` 时**只选不做**：不认领、不生成、不写任何一行。
@@ -507,87 +724,7 @@ export async function runAutoRunBatch(
       console.warn('[auto-run] 时间预算用完，本轮剩下的留到下一轮')
       break
     }
-
-    const claimed = await claimItem(supabase, { id: j.id, started_at: j.row.started_at }, now)
-    if (!claimed) {
-      // 没抢到 = 有人（或另一个实例）先动了这条。跳过，不是失败。
-      results.push({
-        item_id: j.id,
-        client_id: j.client_id,
-        client_name: j.client_name,
-        outcome: 'skipped_not_claimed',
-      })
-      continue
-    }
-
-    let res: AutoRunGenerateResult
-    try {
-      res = await deps.generateBlog({
-        id: j.client.id,
-        name: j.client.name,
-        domain: j.client.domain,
-      })
-    } catch (err) {
-      res = { outcome: 'error', error: err instanceof Error ? err.message : String(err) }
-    }
-
-    if (res.outcome === 'generated') {
-      await supabase
-        .from('execution_items')
-        .update({
-          status: 'completed',
-          completed_at: now.toISOString(),
-          auto_run_started_at: null,
-          auto_run_error: null,
-          auto_run_attempts: 0,
-          auto_run_next_at: null,
-        })
-        .eq('id', j.id)
-      await logCompletion(supabase, j, res)
-      results.push({
-        item_id: j.id,
-        client_id: j.client_id,
-        client_name: j.client_name,
-        outcome: 'generated',
-        post_id: res.post_id,
-        topic: res.topic,
-      })
-      continue
-    }
-
-    // 「这周已经有文章了」「没有可写的题目」都不是失败 —— 不计次数，只压一段退避。
-    // 计成失败的话，三个正常的星期就能把一条好动作永久停掉。
-    if (res.outcome === 'skipped_recent_post' || res.outcome === 'skipped_no_topic') {
-      const days =
-        res.outcome === 'skipped_recent_post' ? COOLDOWN_BACKOFF_DAYS : NO_TOPIC_BACKOFF_DAYS
-      await releaseItem(supabase, j.id, {
-        attempts: j.attempts,
-        nextAt: new Date(now.getTime() + days * 86_400_000),
-        error: null,
-      })
-      results.push({
-        item_id: j.id,
-        client_id: j.client_id,
-        client_name: j.client_name,
-        outcome: res.outcome,
-      })
-      continue
-    }
-
-    const attempts = j.attempts + 1
-    const nextAt = backoffAfterFailure(attempts, now)
-    await releaseItem(supabase, j.id, {
-      attempts,
-      nextAt,
-      error: res.error ?? '未知原因',
-    })
-    results.push({
-      item_id: j.id,
-      client_id: j.client_id,
-      client_name: j.client_name,
-      outcome: attempts >= MAX_ATTEMPTS ? 'gave_up' : 'failed',
-      error: res.error ?? '未知原因',
-    })
+    results.push(await executeOneItem(supabase, deps, j, now))
   }
 
   return {
