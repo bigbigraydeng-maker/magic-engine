@@ -288,17 +288,18 @@ describe('真正进生产的那个函数', () => {
   })
 
   /**
-   * ⚠️ **已知缺口，不是设计如此**（子牙 2026-08-06 复审 B2）。
+   * ⚠️ **已知缺口，不是设计如此**（见 `day-list.ts` 头注释 + ROADMAP M2.7a）。
    *
    * 「推迟」和「推到成交」改的是 contact 上的字段（`snooze_until` / `stage`），
-   * **库里没有记「什么时候改的」** —— `snooze_until` 是个未来日期，
-   * `updated_at` 又会被任何一笔触点写动，两个都不能用来判「是不是今天弄下去的」。
+   * 冻结副本原样带过去，两个版本双双「已排除」→ 被 `onList` 过滤掉。
    *
-   * 所以这两个出口目前**仍然是「点完人就消失」**。跟改动前一样，没有变坏，
-   * 但也没修好 —— 而且它会让顶上的「今天一共 N 个」在一天之内缩水。
+   * **不是数据不够，也不需要 PM 批改库**（这里原先写「要 PM 批一次改库」，
+   * 那是错的，子牙查了写入侧推翻掉了 —— 而同一个 PR 的 day-list 头注释和
+   * ROADMAP 都已改对，只剩这段没跟上，两份文档互相打脸）：
+   * `contacts.stage_updated_at` 是已有的列，snooze 也已经写了一笔今天的
+   * `me_manual` 触点，两条时间证据一直在库里，只是 `today/route.ts` 没读。
    *
-   * 真修需要加一个「什么时候被弄下名单的」时间字段（要 PM 批一次改库）。
-   * 这条用例存在的意义是**把现状钉住**：将来那个字段加上了，它会失败，
+   * 这条用例的意义是**把现状钉住**：修好之后它会失败，
    * 提醒改的人回来把这段和文件头的说明一起更新。
    */
   it.each([
@@ -705,5 +706,91 @@ describe('跟进了 / 关掉了，要分得开', () => {
       true,
     )
     expect(r.handledWhy?.startsWith('标了：')).toBe(true)
+  })
+})
+
+/**
+ * 🔴 **群发不算「我们出手」**（魏征 2026-08-06 验收）。
+ *
+ * 全仓「我们出手」有三处判据，另外两处都记得排掉机器发的，只有 `needsMeAgain`
+ * 漏了 —— 而它正是这个 PR 为了堵「客人回了信却被折叠」新写的那个函数。
+ *
+ * 实测：同一个人，唯一变量是多一封 16:00 的群发
+ *   没群发 → replied,       handled:false  ✓ 他在等我们
+ *   有群发 → new_untouched, handled:true   ✗ 被折叠掉了
+ *
+ * 触发一点都不苛刻：日发一封 newsletter，当天被真人跟过又回了信的那几个
+ * （名单上最烫的人）全中。
+ */
+describe('群发不算「我们出手」', () => {
+  const withReply = [
+    tp({ direction: 'inbound', occurredAt: '2026-08-04T02:00:00.000Z' }),
+    tp({ direction: 'outbound', occurredAt: '2026-08-04T22:00:00.000Z' }), // 上午真人跟
+    tp({ direction: 'inbound', occurredAt: '2026-08-05T03:00:00.000Z' }), // 下午客人回信
+  ]
+
+  it('基准：真人跟过、客人回了信 → 他在等我们', () => {
+    const r = row(person(withReply), true)
+    expect(r.seg.segment).toBe('replied')
+    expect(r.handled).toBe(false)
+  })
+
+  /**
+   * 修的是 `handled` —— **这个人不许被折叠进「今天已处理」**。
+   *
+   * ⚠️ 他落在哪一批（`seg.segment`）这一版**没修好**：`segmentContact` 在
+   * main 上就不认 automated，一封群发照样被它当成「我们最后一次出站」，
+   * 于是「客人回话了」那条规则不成立，人掉进别的桶。那是既有毛病、
+   * 影响面比这个 PR 大得多（分批规则是所有页面共用的），单独记进
+   * ROADMAP M2.7f，不在这里顺手改。
+   *
+   * 但两半的代价差一个量级：落错桶只是排序不理想，**被折叠掉是根本看不见**。
+   */
+  it('回信之后又发了一封群发 → 不许被当成已处理折叠掉', () => {
+    const r = row(
+      person([
+        ...withReply,
+        tp({ direction: 'outbound', occurredAt: '2026-08-05T03:30:00.000Z', automated: true }),
+      ]),
+      true,
+    )
+    expect(r.handled).toBe(false)
+    expect(r.handledWhy).toBeNull()
+  })
+
+  /** 反过来：只有群发、没有真人跟过 —— 那本来就不该算我们出过手。 */
+  it('只有群发、没人真的跟过 → 判据不生效', () => {
+    const r = row(
+      person([
+        tp({ direction: 'inbound', occurredAt: '2026-08-04T02:00:00.000Z' }),
+        tp({ direction: 'outbound', occurredAt: '2026-08-05T01:00:00.000Z', automated: true }),
+        tp({ direction: 'inbound', occurredAt: '2026-08-05T03:00:00.000Z' }),
+      ]),
+      false,
+    )
+    expect(r.handled).toBe(false)
+  })
+})
+
+/**
+ * **「就地」这两个字，是这个 PR 的招牌承诺 —— 之前一条用例都没有**
+ * （魏征 2026-08-06 验收）。
+ *
+ * 原先只钉了「桶不变」和「两个人的相对顺序」。将来谁给 `dayWorklist` 加一句
+ * 「已处理的沉底」，那些用例一条都不会响 —— 而那正好把这个 PR 要修的毛病
+ * 原样改回去。
+ */
+describe('处理过的人留在原位，顺序一字不变', () => {
+  it('三个人，把中间那个处理掉 → 顺序不变', () => {
+    const people = ['a', 'b', 'c'].map((id) => ({ ...person(YESTERDAY_LEAD), id }))
+    const before = dayWorklist(people, NOW, { dayStartMs: DAY_START, touchedToday: () => false })
+    const after = dayWorklist(people, NOW, {
+      dayStartMs: DAY_START,
+      touchedToday: (id) => id === 'b',
+    })
+
+    expect(before.map((r) => r.id)).toEqual(after.map((r) => r.id))
+    expect(after.map((r) => r.id)).toHaveLength(3)
+    expect(after.find((r) => r.id === 'b')!.handled).toBe(true)
   })
 })

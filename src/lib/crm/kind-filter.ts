@@ -70,7 +70,7 @@ export function filterBucketByKind<P extends KindedPerson, B extends KindedBucke
     ...bucket,
     people,
     total: people.length,
-    batchEmails: batchRecipients({ ...bucket, people }).map((p) => p.email as string),
+    batchEmails: batchRecipients({ ...bucket, people }).map((p) => p.email),
   }
 }
 
@@ -90,9 +90,14 @@ export function filterBucketByKind<P extends KindedPerson, B extends KindedBucke
  *
  * 两个条件缺一不可：**今天没处理过** + **有邮箱**。
  */
-export function batchRecipients<P extends KindedPerson>(bucket: KindedBucket<P>): P[] {
+export function batchRecipients<P extends KindedPerson>(
+  bucket: KindedBucket<P>,
+): Array<P & { email: string }> {
   if (bucket.batch !== 'send_email') return []
-  return bucket.people.filter((p) => !p.doneToday && !!p.email)
+  // 返回类型带上 `email: string`，调用方就不用 `as string` 把 null 硬转过去了。
+  // 那种 cast 在过滤条件哪天改了之后会静静放一个 null 过去，
+  // 群发地址里出现一个空地址。
+  return bucket.people.filter((p): p is P & { email: string } => !p.doneToday && !!p.email)
 }
 
 /**

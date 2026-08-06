@@ -168,6 +168,25 @@
       - [ ] M2.7d 处理完自动跳下一张（设计里有，PR #855 没做 —— 时机判断错了会很烦人）
       - [ ] M2.7e `route.ts` 里 `clients` 同一行查了两次（`leads_config` 一次、`country` 一次），
             合成一次 `select('leads_config, country')`
+      - [ ] **M2.7f 分批规则本身不认「机器发的」** —— `segmentContact` 把一封 Mailchimp
+            群发当成「我们最后一次出站」，于是「客人回话了」那条规则不成立，人掉进别的桶。
+            PR #855 只修了 `needsMeAgain`（他不会再被折叠掉），**落哪一批仍然是错的**。
+            这是既有毛病，影响面比 #855 大（分批规则所有页面共用），单独做：
+            `TouchpointLike.automated` 已经加好了，`segments.ts` 的 `lastOutbound`
+            跟着排掉即可。⚠️ 改之前先想清楚对「打过没人接」那几个桶的连带影响
+      - [ ] M2.7g 群发名单有三个产地、一个消费者（魏征 2026-08-06）：`route.ts` 的
+            `batchEmails`、`kind-filter` 的 `batchEmails`、`batchRecipients`。
+            只有最后一个被读。删掉前两个和 `KindedBucket.batchEmails` 字段
+      - [ ] M2.7h `page.tsx` 1500+ 行（铁律 7 是 800）。`DayProgressBar` /
+            `BatchEmail` / `BucketBlock` 该挪进 `_components/`（目录已有）。
+            另有两处注释错位：`DayProgressBar` 插在 `BucketBlock` 的文档和它的
+            主体之间，导致 `BucketBlock` 没文档；`const shown` 上面挂了两段
+            重复的 `/** */`
+      - [ ] M2.7i 测试收拾（魏征）：三条走同一路径的重复用例（`dayRow` 和
+            `dayWorklist` 各测一遍「标了不买」）；`withoutOurActionsSince` 那条
+            断言把「保留下来的触点顺序」写死了，而顺序不是判据 —— 将来正当重构
+            会无谓地弄红；夏令时那条用例名叫「跟着变，不写死」但测的是两个远离
+            换挡日的日期，该按 M2.7a 的写法把「换挡当天目前差一小时」也钉住
 - [ ] **M2.5 新人邮件（PM 规则 1，本次明确没做）** —— 客人第一次进来当天自动发一封。
       卡在两件事上：① 挑发信通道（Mailchimp / Resend）② 文案要按铁律 8 先 grounding
       客户官网、逐句标可溯来源，且发出去之前 PM 要看过。做完之后第二层才配叫

@@ -262,6 +262,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
         // 邮件被打开 / 链接被点 = 行为信号，不是真人消息。分段逻辑必须区分，
         // 否则「打开了邮件」会冒充「客户回话了」挤进最高优先桶。
         engagement: engagementFromMetadata(t.metadata),
+        // 机器发的（群发 / AI 外呼）不算「我们出手」—— 见 day-list 的 needsMeAgain
+        automated: isAutomatedTouch(t.source, t.metadata),
       })),
       // 这个人实际能怎么被联系到 —— 决定「建议用哪个渠道」落在哪。
       // 私信能力看他有没有 messenger 触点（有触点就说明那条线是通的）。
@@ -619,20 +621,19 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     })
 
   /**
-   * 今天已经动过多少人。没有这个数字，销售打了 15 通电话也看不到自己的进度 ——
-   * 名单只会越看越像干不完，明天就不想打开了。按触点的**发生时间**算
-   * （不是写入时间），补记昨天的电话不会算进今天。
+   * 顶上那条进度**不在这里算**。
    *
-   * 两处曾经算错，都会让这个数字骗人：
-   *  · 按服务器（UTC）的日子算 —— 纽西兰上午做的活，到中午 UTC 跨日会集体
-   *    清零，销售以为系统把他一早的活弄丢了。
-   *  · 把 Mailchimp 群发算进去 —— 一封群发能让这个数字跳到几百，而实际上
-   *    没有任何一个人被真的跟过。
+   * 服务端这份没按「终端客户 / 同行」筛过，页面默认只看终端客户 ——
+   * 直接用会出现「顶上写 120、底下铺 40」这种**数得出来的谎话**。
+   * 所以页面从筛后的桶现算（`page.tsx` 的 `dayProgress(shown)`）。
+   *
+   * 那为什么不在这里按 kind 筛完再算？因为 kind 是**页面上可切的视图**，
+   * 服务端不知道人此刻在看哪一个。
+   *
+   * ⚠️ 之前这里算了 `progress` / `doneToday` 一起返回，页面没人读 ——
+   * 一个「有但不许用」的字段是最坏的选项：下一个人看到 `data.progress`
+   * 就在手边，十有八九会用上，正好掉进上面那个坑（魏征 2026-08-06 验收）。
    */
-  // 名单上今天已经处理掉几个 —— 用名单自己的判据数（`ranked[].handled`），
-  // 不再单独数一遍触点。分两处数必然漂移，而这个数字漂了，顶上那条进度就在说谎。
-  const progress = dayProgress(ranked)
-  const doneToday = progress.done
 
   return NextResponse.json({
     buckets,
@@ -643,9 +644,6 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     counts: segmentCounts(models, now),
     totalContacts: models.length,
     todoTotal: ranked.length,
-    doneToday,
-    /** 顶上那条进度：今天一共几个 · 处理了几个 · 还剩几个。 */
-    progress,
     generatedAt: now.toISOString(),
   })
 }

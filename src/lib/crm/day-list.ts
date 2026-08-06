@@ -269,7 +269,19 @@ export function needsMeAgain(
   const ourLast = Math.max(
     0,
     ...contact.touchpoints
-      .filter((t) => t.direction === 'outbound' && !t.engagement && tsOf(t.occurredAt) >= dayStartMs)
+      // 🔴 **必须排掉机器发的**（魏征 2026-08-06）。全仓「我们出手」有三处判据，
+      //    另外两处（follow-up-marks / today 路由）都记得过滤，只有这里漏了。
+      //    一封 16:00 的 Mailchimp 群发会盖住 15:00 客人的回信 ——
+      //    那个人当天变灰、收进折叠区、算进「已完成」，而他正在等回话。
+      //    `AUTOMATED_SOURCES` 里就有 mailchimp，AI 外呼也标 automated，
+      //    日发一封 newsletter 就能让当天最烫的几个全中。
+      .filter(
+        (t) =>
+          t.direction === 'outbound' &&
+          !t.engagement &&
+          !t.automated &&
+          tsOf(t.occurredAt) >= dayStartMs,
+      )
       .map((t) => tsOf(t.occurredAt)),
   )
   // 今天还没出过手 —— 那就谈不上「出手之后」，这个人本来就没被标成已处理。

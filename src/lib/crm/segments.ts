@@ -126,6 +126,14 @@ export interface TouchpointLike {
    * 信号本身就不可信。
    */
   engagement?: 'open' | 'click' | null
+  /**
+   * 这一笔出站是**机器发的**（群发工具、AI 外呼），不是人做的动作。
+   *
+   * 判据在 lib/crm/automated-touch。加在这里是因为 `needsMeAgain`（day-list）
+   * 要判「我们今天最后一次**真人**出手是几点」—— 拿一封 16:00 的群发当
+   * 「我们出手了」，会把 15:00 客人的回信整个盖住，当天最热的线索被折叠掉。
+   */
+  automated?: boolean
   outcome?: string | null
   travelWindow?: string | null
   callbackAt?: string | null

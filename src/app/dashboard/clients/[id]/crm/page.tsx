@@ -98,9 +98,6 @@ interface Payload {
   counts: Record<Segment, number>
   totalContacts: number
   todoTotal: number
-  doneToday: number
-  /** 今天一共几个 · 处理了几个 · 还剩几个。老版本接口没有这个字段。 */
-  progress?: { total: number; done: number; left: number }
   /** 从抽屉里发私信时，发出去的话挂在谁名下。 */
   viewerEmail?: string | null
   error?: string
@@ -914,7 +911,7 @@ function BatchEmail({
    * CRM 记录对不上 —— 那是这套东西最不能犯的错（见 kind-filter 开头）。
    */
   const recipients = batchRecipients(bucket)
-  const emails = recipients.map((p) => p.email as string)
+  const emails = recipients.map((p) => p.email)
   if (emails.length === 0) return null
 
   const copy = async () => {
