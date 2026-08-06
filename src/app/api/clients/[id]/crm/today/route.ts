@@ -20,7 +20,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import {
-  todayWorklist,
   segmentCounts,
   segmentContact,
   SEGMENT_ACTION_META,
@@ -31,6 +30,7 @@ import {
 import { WORKLIST_GROUPS, groupDisplayMeta } from '@/lib/crm/worklist-groups'
 import { contactCardTitle } from '@/lib/crm/display-name'
 import { followUpMarks, localDay } from '@/lib/crm/follow-up-marks'
+import { dayProgress, dayWorklist, localDayStartMs } from '@/lib/crm/day-list'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 import { isAutomatedTouch } from '@/lib/crm/automated-touch'
 import { contactKindOf, readDomainRules, type ContactKind } from '@/lib/crm/contact-kind'
@@ -293,7 +293,41 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     // 读不到就按 NZ —— 两个客户目前都在纽西兰，猜错也只差两小时。
   }
 
-  const ranked = todayWorklist(models, now)
+  /**
+   * 今天动过谁。
+   *
+   * 必须在排名单**之前**算好：名单要靠它决定哪张卡是灰的，而灰卡必须留在
+   * 原位 —— 这正是 PM 2026-08-05 那句「做完动作回到目录页，我如何知道哪个
+   * 已经联系了」要修的东西。
+   *
+   * 两条排除，两条都是真事故：
+   *  · 群发不算（一封 Mailchimp 能把整页标成已跟过）
+   *  · 打开/点击不算（那是客人做的，不是我们跟进）
+   */
+  const todayLocal = localDay(now.toISOString(), timeZone)
+  const touchedTodayIds = new Set(
+    touches
+      .filter(
+        (t) =>
+          t.direction === 'outbound' &&
+          !isAutomatedTouch(t.source, t.metadata) &&
+          !engagementFromMetadata(t.metadata) &&
+          localDay(t.occurred_at, timeZone) === todayLocal,
+      )
+      .map((t) => t.contact_id),
+  )
+
+  /**
+   * 今天这份名单**一天之内不变**（判据见 lib/crm/day-list）。
+   *
+   * 跟原来的 `todayWorklist` 只差一条：分批按「今天开工那一刻」算，
+   * 于是今天做的动作不会把任何人挪走或挪没 —— 处理过的就地变灰留在原位。
+   * 客人今天的动作照常实时进来（今天进线的当天就上名单，今天回话的当场升顶）。
+   */
+  const ranked = dayWorklist(models, now, {
+    dayStartMs: localDayStartMs(now, timeZone),
+    touchedToday: (id) => touchedTodayIds.has(id),
+  })
 
   /**
    * 系统提议改阶段 —— 提议，不自动改。
@@ -426,8 +460,16 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       timeZone,
     )
     return {
-      /** 今天已经有人联系过他 —— 卡片当场变浅，不用靠记。 */
-      doneToday: marks.doneToday,
+      /**
+       * 今天已经动过他了 —— 卡片当场变浅，不用靠记。
+       *
+       * 取 day-list 算出来的那个，不是 `marks.doneToday`：后者只认「发出过
+       * 联系」，而推迟 / 标不买 / 改阶段**不写触点**，靠它抓不到。名单一旦
+       * 冻结，那几个人会留在原地并且看起来没被处理过 —— 比改之前更糟。
+       */
+      doneToday: c.handled,
+      /** 是怎么处理的（今天联系过了 / 已推迟 / 标了不买…）。没处理就是 null。 */
+      handledWhy: c.handledWhy,
       /** 上次是谁跟的。不知道就是 null，页面不假装。 */
       lastBy: marks.lastBy,
       /** 他打开过邮件、之后没人跟。只做提示，不参与排序（打开可能是 Apple 替他开的）。 */
@@ -563,18 +605,10 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
    *  · 把 Mailchimp 群发算进去 —— 一封群发能让这个数字跳到几百，而实际上
    *    没有任何一个人被真的跟过。
    */
-  const today = localDay(now.toISOString(), timeZone)
-  const doneToday = new Set(
-    touches
-      .filter(
-        (t) =>
-          t.direction === 'outbound' &&
-          !isAutomatedTouch(t.source, t.metadata) &&
-          !engagementFromMetadata(t.metadata) &&
-          localDay(t.occurred_at, timeZone) === today,
-      )
-      .map((t) => t.contact_id),
-  ).size
+  // 名单上今天已经处理掉几个 —— 用名单自己的判据数（`ranked[].handled`），
+  // 不再单独数一遍触点。分两处数必然漂移，而这个数字漂了，顶上那条进度就在说谎。
+  const progress = dayProgress(ranked)
+  const doneToday = progress.done
 
   return NextResponse.json({
     buckets,
@@ -586,6 +620,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     totalContacts: models.length,
     todoTotal: ranked.length,
     doneToday,
+    /** 顶上那条进度：今天一共几个 · 处理了几个 · 还剩几个。 */
+    progress,
     generatedAt: now.toISOString(),
   })
 }

@@ -531,11 +531,21 @@ export function todayWorklist(
   return contacts
     .map((c) => ({ ...c, seg: segmentContact(c, now) }))
     .filter((c) => c.seg.temperature === 'hot' || c.seg.temperature === 'warm')
-    .sort(
-      (a, b) =>
-        a.seg.priority - b.seg.priority ||
+    .sort((a, b) => compareForWorklist(a.seg, b.seg))
+}
+
+/**
+ * 名单里谁排前面。
+ *
+ * 单独导出是因为「今天的名单一天不变」那条路（lib/crm/day-list）要用同一个
+ * 排序 —— 两边各写一套的话，同一个人在两处会排在不同位置，而排序正是
+ * 销售用来记「我推到哪了」的东西。
+ */
+export function compareForWorklist(a: SegmentResult, b: SegmentResult): number {
+  return (
+        a.priority - b.priority ||
         // 约好的时间越早越该先打
-        (a.seg.dueAt && b.seg.dueAt ? ts(a.seg.dueAt) - ts(b.seg.dueAt) : 0) ||
+        (a.dueAt && b.dueAt ? ts(a.dueAt) - ts(b.dueAt) : 0) ||
         // 其余按桶的性质决定方向 —— 两种需求是真的冲突，不能一刀切：
         //
         //  · 热线索桶（新客人 / 客户回话了）：最近的排前面。线索会凉，
@@ -544,10 +554,10 @@ export function todayWorklist(
         //    自相矛盾。
         //  · 回捞桶（打过没人接 / 聊过没下文）：等得最久的排前面。这批人本来
         //    就是要防止沉底才单独成桶的，按最近排等于让老线索永远轮不到。
-        (FRESH_FIRST_SEGMENTS.has(a.seg.segment) && FRESH_FIRST_SEGMENTS.has(b.seg.segment)
-          ? ts(b.seg.lastTouchAt) - ts(a.seg.lastTouchAt)
-          : ts(a.seg.lastTouchAt) - ts(b.seg.lastTouchAt)),
-    )
+        (FRESH_FIRST_SEGMENTS.has(a.segment) && FRESH_FIRST_SEGMENTS.has(b.segment)
+          ? ts(b.lastTouchAt) - ts(a.lastTouchAt)
+          : ts(a.lastTouchAt) - ts(b.lastTouchAt))
+  )
 }
 
 /** 各段人数，给页面顶部的统计条。 */

@@ -47,6 +47,8 @@ interface Row {
   suggestedStage: { toStage: string; label: string; why: string } | null
   /** 今天已经有人联系过他 —— 卡片变浅，不用靠记。 */
   doneToday?: boolean
+  /** 今天是怎么处理的（今天联系过了 / 已推迟 / 标了不买…）。没处理就是 null。 */
+  handledWhy?: string | null
   /** 上次是谁跟的。不知道就是 null，页面不假装。 */
   lastBy?: string | null
   /** 他打开过邮件、之后没人跟。只是提示，不参与排序。 */
@@ -94,6 +96,8 @@ interface Payload {
   totalContacts: number
   todoTotal: number
   doneToday: number
+  /** 今天一共几个 · 处理了几个 · 还剩几个。老版本接口没有这个字段。 */
+  progress?: { total: number; done: number; left: number }
   /** 从抽屉里发私信时，发出去的话挂在谁名下。 */
   viewerEmail?: string | null
   error?: string
@@ -277,6 +281,14 @@ function Card({
         done ? 'opacity-50 hover:opacity-100' : ''
       } ${row.pinned ? 'border-me-ochre/60' : 'border-me-charcoal/10 hover:border-me-ochre/50'}`}
     >
+      {/* 今天是怎么处理的 —— 光一个灰色只说明「动过」，说不清「我到底做了什么」。
+          PM 2026-08-05 问的正是「我如何确认真的记上了」。 */}
+      {done && row.handledWhy && (
+        <p className="rounded-t-xl bg-emerald-50 px-3 py-1 text-[12px] font-bold text-emerald-700">
+          ✓ {row.handledWhy}
+        </p>
+      )}
+
       {/* 图钉：钉住的人排在本桶最前 */}
       <button
         type="button"
@@ -565,6 +577,38 @@ const CARDS_BEFORE_FOLD = 12
  *
  * 现在一行摆 4 张卡，页面多宽就用多宽，窄屏自动掉成 1 列。
  */
+/**
+ * 顶上那条进度 —— 「还剩多少」是销售真正关心的数字。
+ *
+ * 「已联系 8 人 👍」听着像表扬，但回答不了「我还有多远到头」。一条流水线
+ * 最要紧的信息是**还剩几个**：看得见头，人才愿意一路推到底。
+ *
+ * 全部推完时换一句话，不是把数字变成 0 —— 干完了值得说一声。
+ */
+function DayProgressBar({ total, done, left }: { total: number; done: number; left: number }) {
+  if (total === 0) return null
+
+  if (left === 0) {
+    return (
+      <span className="rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-black text-emerald-700">
+        今天 {total} 个全推完了 🎉
+      </span>
+    )
+  }
+
+  const pct = Math.round((done / total) * 100)
+  return (
+    <span className="flex items-center gap-2 rounded-full bg-me-ivory px-3 py-1.5 text-xs font-black text-me-charcoal/70">
+      <span className="tabular-nums">
+        今天 {total} 个 · 已处理 {done} · <b className="text-me-ochre">还剩 {left}</b>
+      </span>
+      <span className="h-1.5 w-16 overflow-hidden rounded-full bg-me-charcoal/10" aria-hidden>
+        <span className="block h-full rounded-full bg-me-ochre" style={{ width: `${pct}%` }} />
+      </span>
+    </span>
+  )
+}
+
 function BucketBlock({
   clientId,
   bucket,
@@ -581,10 +625,25 @@ function BucketBlock({
   onLogged: (msg: string, reload?: boolean) => void
 }) {
   const [expanded, setExpanded] = useState(false)
-  const shown = expanded ? bucket.people : bucket.people.slice(0, CARDS_BEFORE_FOLD)
+  /** 今天已经处理掉的那几个，默认收到这一批的底部。 */
+  const [showDone, setShowDone] = useState(false)
+
+  /**
+   * 待办和已处理分开铺。
+   *
+   * 混在一起的话，处理过的灰卡会夹在没处理的中间，你得一张张认颜色 ——
+   * 那不是流水线。已处理的整批挪到底部收起来，上面永远只剩「还没动的」。
+   * **但它们仍然在这一批里、点得开** —— 收起来不等于消失，
+   * PM 要的正是「我如何确认刚才那一下真的记上了」。
+   */
+  const todo = bucket.people.filter((p) => !p.doneToday)
+  const done = bucket.people.filter((p) => p.doneToday)
+
+  const shown = expanded ? todo : todo.slice(0, CARDS_BEFORE_FOLD)
   // 折起来的人数要算上后端封顶没发过来的那些 —— 只数手上这一批会少报，
-  // 让人以为「展开就能看到全部」。
-  const folded = bucket.total - shown.length
+  // 让人以为「展开就能看到全部」。已处理的不算在「还有 N 人」里：
+  // 那句话说的是「还有多少要做」，把做完的算进去等于在催一件已经做完的事。
+  const folded = bucket.total - done.length - shown.length
 
   return (
     // 缩进 + 左边一根细竖线：从属关系用位置说，不靠标题字号猜。
@@ -629,6 +688,41 @@ function BucketBlock({
         <p className="rounded-xl border border-dashed border-me-charcoal/10 py-4 text-center text-[13px] text-me-charcoal/30">
           这批清空了 ✓
         </p>
+      )}
+
+      {/* 这一批今天全推完了 —— 明确说一句。上面空空如也但下面挂着一条
+          「已处理 N 人」，不说的话人会以为数据没加载出来。 */}
+      {bucket.total > 0 && todo.length === 0 && done.length > 0 && (
+        <p className="rounded-xl border border-dashed border-emerald-300/60 bg-emerald-50/40 py-4 text-center text-[13px] font-bold text-emerald-700">
+          这批今天推完了 ✓
+        </p>
+      )}
+
+      {done.length > 0 && (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => setShowDone((v) => !v)}
+            className="w-full rounded-xl bg-me-ivory py-2 text-[13px] font-bold text-me-charcoal/45 hover:text-me-charcoal"
+          >
+            ✓ 今天处理了 {done.length} 人 {showDone ? '▾ 收起' : '▸ 看看做了什么'}
+          </button>
+          {showDone && (
+            <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {done.map((r) => (
+                <Card
+                  key={r.contactId}
+                  clientId={clientId}
+                  row={r}
+                  onOpen={() => onOpen(r)}
+                  onTogglePin={onTogglePin}
+                  onAcceptStage={onAcceptStage}
+                  onLogged={onLogged}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {folded > 0 && !expanded && (
@@ -1209,7 +1303,21 @@ export default function CrmTodayPage() {
   const rawBuckets = data?.buckets ?? []
   const tradeCount = countTrade(rawBuckets, data?.offList ?? [])
   const buckets = rawBuckets.map((b) => filterBucketByKind(b, kindView))
-  const doneToday = (data?.doneToday ?? 0) + localDone
+  /**
+   * 顶上那条进度：今天一共几个 · 处理了几个 · 还剩几个。
+   *
+   * `localDone` 是**乐观计数** —— 刚点完还没重新拉数据的那几秒，数字先动起来，
+   * 不然人会以为没记上又点一次。服务端一回来就以服务端为准。
+   *
+   * 「还剩」不用总数减：万一两边口径差一点，减出来可能是负数，
+   * 而一个负数出现在销售的进度条上，这一页就不可信了。
+   */
+  const serverProgress = data?.progress ?? { total: 0, done: data?.doneToday ?? 0, left: 0 }
+  const progress = {
+    total: serverProgress.total,
+    done: Math.min(serverProgress.total, serverProgress.done + localDone),
+    left: Math.max(0, serverProgress.left - localDone),
+  }
 
   // 搜全部人：看板各列 + 不在名单上的，合起来就是这个客户的所有人。
   const kw = q.trim().toLowerCase()
@@ -1317,11 +1425,7 @@ export default function CrmTodayPage() {
                 ))}
               </div>
             )}
-            {doneToday > 0 && (
-              <span className="rounded-full bg-me-ochre/12 px-3 py-1.5 text-xs font-black text-me-ochre">
-                今天已联系 {doneToday} 人 👍
-              </span>
-            )}
+            <DayProgressBar total={progress.total} done={progress.done} left={progress.left} />
           </div>
 
           {searching ? (
