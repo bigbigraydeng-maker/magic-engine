@@ -40,6 +40,7 @@ export type ManualItemKind =
   | 'goal_baseline_mismatch'
   | 'diagnostic_findings'
   | 'prescription_updated'
+  | 'leads_not_syncing'
 
 /**
  * 新建的 cron 在 Render 上必须**手动**关联 me-shared-cron-secret 环境变量组。
@@ -104,6 +105,7 @@ export function gscInspectUrl(siteUrl: string, pageUrl: string): string {
 import { gscPropertyUrl, gscInspectSteps, verifyActionLink } from './action-link'
 import { checkCronHealth } from '@/lib/cron/health'
 import { auditGoalBaselines } from '@/lib/strategy/baseline-audit'
+import { findClientsWithUnsyncedLeads } from '@/lib/meta/lead-reconcile'
 
 export function daysAgo(iso: string | null, now: Date): number | null {
   if (!iso) return null
@@ -176,6 +178,9 @@ export async function loadManualItems(
 
   // 本周方案已自动落地 —— 只通知，不要求 PM 操作（PM 2026-08-04 拍板）
   await pushPrescriptionItems(supabase, items, now, nameOf)
+
+  // 广告在收询价人、CRM 一个都没接到 —— 花着钱、人却进不来，这条最贵
+  await pushLeadGapItems(supabase, items, now)
 
   // GSC property identifiers (needed for the inspect deep link).
   const { data: connectors } = await supabase
@@ -484,6 +489,43 @@ async function pushBaselineItems(supabase: SupabaseClient, items: ManualItem[]):
       how: `打开目标页核对：如果确认起点填错了，把它改成 ${s.recomputedBaseline}，仪表盘才会说真话。改之前先想一下这个目标当初是按哪个口径定的`,
       // 真实路径是 /clients/<客户id>/goal/<目标id> —— 首版拼成 /clients/<目标id>，那是 404
       href: `https://app.magicengine.com.au/dashboard/clients/${s.clientId}/goal/${s.goalId}`,
+    })
+  }
+}
+
+
+/**
+ * 广告在收询价人、CRM 却一个都没接到 → 下发。
+ *
+ * 2026-08-10 真实事故：Oztop 的 lead 广告 6/24 起花了 ~AU$1,987、Meta 报了 70 个
+ * 询价人，ME 的 contacts 表里 0 条 —— 姓名、电话、要装哪几个房间，一条都没进来。
+ * 原因只是 `clients.facebook_page_id` 没填。整整 47 天，没有任何地方报过这件事：
+ * 同步任务每小时都「成功」，因为它压根不认识这个客户。
+ *
+ * 🔴 这就是「发现不许死在日志里」的原型：**跑成功了** 和 **这个客户根本没被跑**
+ *    在运行记录里长得一模一样。判据必须来自业务事实（广告在收人）而不是任务状态。
+ *
+ * 系统会先自己试着接主页（meta/page-discovery.ts）。走到这里的都是自动接不上的 ——
+ * 要么客户没把主页授权给我们，要么广告投在好几个主页上得有人拍板。
+ */
+async function pushLeadGapItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  now: Date,
+): Promise<void> {
+  const gaps = await findClientsWithUnsyncedLeads(supabase, now).catch(() => [])
+  for (const g of gaps) {
+    items.push({
+      kind: 'leads_not_syncing',
+      client_id: g.clientId,
+      client_name: g.clientName ?? '未知客户',
+      what:
+        `Facebook 广告最近 30 天收到 ${g.adsReportedLeads} 个询价人（填了表、留了电话），` +
+        '但一个都没进系统 —— 广告费照花，销售那边看不到任何人可以联系',
+      how:
+        '打开链接进客户设置页，在「Facebook 主页」那一栏里选这个客户的主页再保存；' +
+        '如果下拉列表是空的，说明客户还没把主页授权给我们，回我一句我出授权步骤给客户',
+      href: `https://app.magicengine.com.au/dashboard/clients/${g.clientId}/settings`,
     })
   }
 }

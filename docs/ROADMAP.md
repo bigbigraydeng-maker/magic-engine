@@ -148,6 +148,14 @@
       `AUTOMATED_MESSAGE_SOURCES` 那两个值（`subscription` / `business_ai`）到今天
       **仍是猜的**，Meta 没公开文档。现在靠「秒回 = 机器」兜住了，但拿一条 CTS 真实
       收件箱的 Graph 返回确认一次，判据会更硬。这台开发机连不上 facebook.com，做不了
+- [ ] **M2.7 Oztop 表单来的人接进 CRM · 收尾验收** —— 代码已合（自动接主页 + 首次回补 90 天 +
+      「广告在收人、CRM 零条」进今日待办）。**还没在真实环境验过**：上线后第一轮
+      `meta-leads-hourly` 跑完，要看 `cron_run_logs` 里 Oztop 那条 `bindings` 是
+      `bound` 还是 `needs_grant`。落到 `needs_grant` 时唯一要人做的一件事是
+      —— 让 Oztop 在 Business Manager 里把主页分享给我们的系统用户并给「主页信息 +
+      潜在客户资料访问权限」，具体主页 ID 由日志直接给出，不用任何人去找。
+      验收口径见 `lib/meta/lead-reconcile.ts`：广告侧 6/24 起 70 条，CRM 侧要对得上
+      （差异只允许来自「电话邮箱都不成形」「自然贴文表单」「Meta 保留期外」三类）
 - [ ] **M3 从 CRM 里回邮件** —— 权限已经要了 `Mail.Send`，缺一个邮件适配器接进总线（`lib/messaging/adapters/mail.ts`）
 - [ ] **M4 邮件线程接进多渠道读取路径** —— 现在私信页面靠 `channel = 'messenger'` 把邮件挡在外面（PR #781），挡住≠接好；需要一个不挑渠道的对话页
 - [ ] **M5 WhatsApp Business API（新号）** —— 申请清单已给 PM（`docs/sops/whatsapp-business-api-申请清单.md`）。⚠️ AU/NZ 单价未核实（这台开发机连不上 Meta 站点），拿到后台截图后补

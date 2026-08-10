@@ -100,10 +100,12 @@ describe('getLeadWatermark', () => {
     expect(since.toISOString()).toBe('2026-07-24T12:00:00.000Z')
   })
 
-  it('第一次跑往回补 30 天，不是把历史全拉一遍', async () => {
+  // 原来是 30 天 —— 接 Oztop 时露馅：广告 6/24 起就在收人，8/10 第一次同步只回补到
+  // 7/11，早于那天的 20 来个询价人再也补不回来（第二次跑的水位线就停在 7/11 了）。
+  it('第一次跑把允许范围内的历史全补上（90 天），不是只补 30 天', async () => {
     mockWatermark(null)
     const since = await getLeadWatermark('client-cts', NOW)
-    expect(since.toISOString()).toBe('2026-06-30T00:00:00.000Z')
+    expect(since.toISOString()).toBe('2026-05-01T00:00:00.000Z')
   })
 
   it('水位线再老也不往回超过 90 天', async () => {

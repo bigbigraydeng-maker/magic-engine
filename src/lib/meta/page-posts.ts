@@ -209,7 +209,10 @@ export async function getPageAccessToken(
   userToken: string,
   pageId: string,
 ): Promise<string | null> {
-  const url = `${GRAPH_BASE}/me/accounts?fields=id,access_token&access_token=${encodeURIComponent(userToken)}`
+  // limit=100 不是装饰：Graph 默认只给 25 条，代管主页多的令牌会让第 26 个之后的
+  // 主页在这里查不到 → 返回 null → 同步以 `no_page_token` 跳过，看起来像「没授权」。
+  // listManagedPages 早就是 100，两处必须一致，否则设置页列得出来、同步却拿不到。
+  const url = `${GRAPH_BASE}/me/accounts?fields=id,access_token&limit=100&access_token=${encodeURIComponent(userToken)}`
   const res = await fetch(url)
   if (!res.ok) return null
   const body = (await res.json()) as { data?: Array<{ id: string; access_token: string }> }
