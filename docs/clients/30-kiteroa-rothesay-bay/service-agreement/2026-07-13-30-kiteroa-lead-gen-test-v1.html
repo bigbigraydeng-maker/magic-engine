@@ -1,0 +1,451 @@
+<title>Services Agreement · Magic Engine × [Developer] · 30 Kiteroa Lead-Gen Test · July 2026</title>
+
+<!--
+================================================================================
+Type B · Developer-funded Meta lead-generation test · v0.2.0 structure
+================================================================================
+Main body 11 clauses + Schedule A (Scope of Services) attached
+30 Kiteroa Terrace, Unit 2/30 · Meta lead-gen test · NZD 2,000 all-inclusive
+Adds §11 Campaign Data, Leads & Privacy (Type B data-ownership clause)
+
+REV 2026-07-29 — §11 rewritten before signature. PM decision 2026-07-29:
+audience ownership sits with the LISTING AGENT, not the Provider.
+  · 11.2 was "Provider owns and retains ... all custom and engagement
+    audiences" — reversed. Audiences derive from engagement with the Agent's
+    own Page, so they are the Agent's continuing asset after the Term; the
+    Client may reach them again through that Agent on the next project.
+  · 11.3 said personal info is "collected via a landing page" — untrue.
+    There is no landing page; enquiries arrive as Messenger conversations.
+    Rewritten, and made explicit that the Provider uploads no personal
+    contact data to Meta (audiences are built from anonymous signals only).
+  · 11.4 added — hand-back on termination, so "it's yours" is enforceable
+    rather than a slogan.
+================================================================================
+-->
+
+<style>
+  :root {
+    --paper: #FBFAF6;
+    --ink: #14161A;
+    --muted: #666970;
+    --deep: #0B2942;
+    --deep-2: #143a5d;
+    --gold: #A08240;
+    --seal: #952616;
+    --rule: #DDD8CB;
+    --rule-strong: #B6B0A0;
+    --highlight: #FFF3D0;
+    --highlight-border: #DDBB55;
+    --font-display: Charter, 'Iowan Old Style', 'Songti SC', 'Noto Serif SC', 'Times New Roman', serif;
+    --font-body: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Inter, sans-serif;
+    --font-mono: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  }
+  html { color-scheme: light; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--font-body); font-size: 14.5px; line-height: 1.62;
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  }
+  .wrap { max-width: 820px; margin: 0 auto; padding: clamp(40px, 6vw, 72px) clamp(24px, 4vw, 56px) 96px; }
+  .letterhead {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 24px;
+    padding-bottom: 20px; border-bottom: 2px solid var(--ink); margin-bottom: 40px; flex-wrap: wrap;
+  }
+  .letterhead .brand { font-family: var(--font-display); font-weight: 500; font-size: 20px; color: var(--deep); letter-spacing: -0.005em; }
+  .letterhead .meta { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em; color: var(--muted); text-transform: uppercase; }
+  h1 { font-family: var(--font-display); font-weight: 500; font-size: clamp(30px, 5vw, 42px); line-height: 1.1; letter-spacing: -0.01em; margin: 0 0 6px; color: var(--ink); text-wrap: balance; }
+  .doc-sub { font-family: var(--font-body); font-size: 14px; color: var(--muted); margin: 0 0 32px; }
+  .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 24px 40px; padding: 20px 24px; background: rgba(11, 41, 66, 0.04); border-left: 3px solid var(--gold); margin: 0 0 32px; }
+  @media (max-width: 640px) { .parties { grid-template-columns: 1fr; } }
+  .parties h4 { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); margin: 0 0 6px; font-weight: 600; }
+  .parties p { margin: 0 0 2px; font-size: 14px; }
+  .parties .name { font-family: var(--font-display); font-size: 16px; color: var(--deep); font-weight: 500; }
+  .zh-summary { padding: 18px 22px; background: #F7F4EA; border: 1px solid var(--rule-strong); margin: 0 0 36px; font-size: 13.5px; line-height: 1.7; }
+  .zh-summary h4 { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); margin: 0 0 8px; }
+  .zh-summary p { margin: 0 0 6px; }
+  .zh-summary .zh-title { font-family: var(--font-display); font-size: 16px; color: var(--deep); font-weight: 500; margin-bottom: 6px; }
+  .zh-summary strong { color: var(--ink); }
+  .clause { padding-top: 28px; margin-top: 22px; border-top: 1px solid var(--rule); }
+  .clause:first-of-type { padding-top: 0; border-top: none; margin-top: 0; }
+  .clause h2 { font-family: var(--font-display); font-weight: 500; font-size: 22px; color: var(--deep); margin: 0 0 12px; letter-spacing: -0.005em; }
+  .clause h2 .no { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.1em; color: var(--gold); font-weight: 500; margin-right: 10px; text-transform: uppercase; }
+  .clause h3 { font-family: var(--font-display); font-weight: 500; font-size: 16px; color: var(--ink); margin: 16px 0 6px; }
+  .clause p { margin: 0 0 12px; }
+  .clause ol, .clause ul { padding-left: 22px; margin: 6px 0 14px; }
+  .clause li { margin-bottom: 5px; }
+  .clause li::marker { color: var(--gold); font-family: var(--font-mono); font-size: 11px; }
+  .fill { background: var(--highlight); padding: 1px 8px; border-radius: 3px; border: 1px dashed var(--highlight-border); font-family: var(--font-mono); font-size: 12.5px; color: #8b5800; white-space: nowrap; }
+  .table-scroll { overflow-x: auto; margin: 14px -6px 20px; padding: 0 6px; }
+  table.del { width: 100%; min-width: 600px; border-collapse: collapse; font-size: 13.5px; }
+  table.del thead th { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); font-weight: 500; padding: 10px 12px; border-bottom: 1.5px solid var(--ink); text-align: left; }
+  table.del tbody td { padding: 12px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  table.del td.category { font-weight: 600; color: var(--deep); white-space: nowrap; font-family: var(--font-display); }
+  table.del td.qty { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12.5px; text-align: center; }
+  .fee-block { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--rule); border: 1px solid var(--rule); margin: 18px 0 22px; }
+  @media (max-width: 640px) { .fee-block { grid-template-columns: 1fr; } }
+  .fee-cell { background: var(--paper); padding: 16px 20px; }
+  .fee-cell .label { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+  .fee-cell .amount { font-family: var(--font-display); font-size: 24px; color: var(--deep); font-variant-numeric: tabular-nums; font-weight: 500; letter-spacing: -0.01em; }
+  .fee-cell .amount small { font-size: 13px; color: var(--muted); font-weight: 400; margin-left: 4px; }
+  .signatures { margin-top: 44px; display: grid; grid-template-columns: 1fr 1fr; gap: 32px 48px; }
+  @media (max-width: 640px) { .signatures { grid-template-columns: 1fr; gap: 32px; } }
+  .sig h4 { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold); margin: 0 0 20px; }
+  .sig .line { border-bottom: 1px solid var(--ink); height: 42px; margin-bottom: 6px; }
+  .sig .caption { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.05em; color: var(--muted); text-transform: uppercase; }
+  .sig p { font-size: 13.5px; margin: 12px 0 0; color: var(--ink); }
+  .sig .role { font-size: 12.5px; color: var(--muted); }
+  .colophon { margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--rule); font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; color: var(--muted); }
+  .schedule-divider { margin-top: 64px; padding-top: 40px; border-top: 3px double var(--ink); page-break-before: always; }
+  .schedule-divider .schedule-eyebrow { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--gold); margin-bottom: 8px; font-weight: 600; }
+  .schedule-divider h1.schedule-title { font-family: var(--font-display); font-weight: 500; font-size: clamp(26px, 4.4vw, 36px); line-height: 1.1; letter-spacing: -0.01em; margin: 0 0 6px; color: var(--ink); }
+  .schedule-divider .schedule-sub { font-family: var(--font-body); font-size: 14px; color: var(--muted); margin: 0 0 28px; }
+  .schedule-divider .schedule-meta { padding: 12px 18px; background: rgba(160, 130, 64, 0.08); border-left: 3px solid var(--gold); margin-bottom: 24px; font-size: 13px; line-height: 1.55; }
+  .schedule-divider .schedule-meta strong { color: var(--deep); }
+  strong { color: var(--ink); font-weight: 600; }
+  em { font-style: italic; }
+  a { color: var(--deep-2); }
+  @media print {
+    body { background: #fff; font-size: 10.5pt; }
+    .wrap { padding: 20px 30px; }
+    .clause, .signatures { page-break-inside: avoid; }
+    .fill { background: transparent; border: 1px solid #666; }
+    .zh-summary { background: transparent; border: 1px solid #ccc; }
+    .schedule-divider { page-break-before: always; margin-top: 0; padding-top: 30px; }
+  }
+</style>
+
+<div class="wrap">
+
+<!-- ═════════════════ Letterhead ═════════════════ -->
+<div class="letterhead">
+  <div class="brand">Magic Engine</div>
+  <div class="meta">Services Agreement · v1 · 2026-07-13</div>
+</div>
+
+<h1>Services Agreement</h1>
+<p class="doc-sub">Meta Lead-Generation Test Campaign · 30 Kiteroa Terrace, Unit 2/30, Rothesay Bay · 28-day engagement</p>
+
+<!-- ═════════════════ Parties ═════════════════ -->
+<div class="parties">
+  <div>
+    <h4>Provider</h4>
+    <p class="name">Magic Engine</p>
+    <p><span class="fill">[Trading entity name]</span></p>
+    <p><span class="fill">[NZBN]</span> · <span class="fill">[GST No.]</span></p>
+    <p><span class="fill">[Registered address]</span></p>
+    <p>Email: bigbigraydeng@gmail.com</p>
+  </div>
+  <div>
+    <h4>Client (Developer)</h4>
+    <p class="name"><span class="fill">[Developer legal entity — confirm]</span></p>
+    <p>Developer of 30 Kiteroa Terrace, Rothesay Bay</p>
+    <p><span class="fill">[Registered address]</span></p>
+    <p>Contact: <span class="fill">[Name · role]</span></p>
+    <p>Email: <span class="fill">[developer contact email]</span></p>
+  </div>
+</div>
+
+<!-- ═════════════════ Chinese Executive Summary ═════════════════ -->
+<div class="zh-summary">
+  <h4>Executive Summary · 中文摘要（便于快速阅读 · 以下英文条款及 Schedule A 为准）</h4>
+  <p class="zh-title">30 Kiteroa · Meta 引流测试 · 概览</p>
+  <p>· <strong>标的</strong>：Unit 2/30 Kiteroa Terrace, Rothesay Bay（4 bed · 143㎡ · 全新 freestanding townhouse），由 Ray White Mission Bay 的 Roman Hu 作持牌承接中介</p>
+  <p>· <strong>服务范围</strong>：Facebook / Instagram（Meta）付费引流 → 拿 lead / enquiry · 预约看房 · WhatsApp 承接 · 邮件 Newsletter 培育 · 落地页建于 romanhu.com · 中英创意 A/B。<strong>不含</strong>小红书 / 微信内容推广（属 Roman 私域,单独并行）· 每周报表 + 数据包</p>
+  <p>· <strong>目标</strong>：在固定预算内触达这套房的<strong>全部买家</strong>——洋人小家庭、韩国人学区家庭、首置与投资买家——并<strong>额外</strong>覆盖华人买家段（增量,非唯一目标）、统计其占比。曝光次数可估算,而 <strong>lead / enquiry 数量持续产出但不作承诺</strong>（数量由市场决定,见 §8）。<strong>本轮只做 lead / enquiry 获取</strong>，看房、议价、成交由持牌中介线下负责</p>
+  <p>· <strong>费用</strong>：NZD 2,000.00 <strong>全包（含 Meta 投流费用 + GST）</strong>，作为首轮测试。Provider 在自有广告账户内代管投流</p>
+  <p>· <strong>期限</strong>：签约日起 28 天</p>
+  <p>· <strong>数据归属</strong>：广告受众由「与承接中介主页的互动」生成 —— <strong>项目期内用于本项目；项目结束后作为渠道方（Roman Hu / Ray White Mission Bay）的持续资产</strong>，Client 下个项目可再次通过该渠道触达同一批人（起点更暖）。Provider 只保留自有账户基建与聚合（非个人）数据，<strong>不把任何个人联系方式上传给 Meta</strong>。买家联系方式由买家自己在消息中提供、直接进入承接中介收件箱。合约结束的交付清单见 §11.4</p>
+  <p><strong>完整交付清单与 out-of-scope 详见 Schedule A（本合同附件）· 目标数字为期望非承诺（§8）</strong></p>
+</div>
+
+<!-- ═════════════════ 1. Background ═════════════════ -->
+<div class="clause">
+  <h2><span class="no">1.</span>Background</h2>
+  <p>The Client is the developer of a boutique residential townhouse development at 30 Kiteroa Terrace, Rothesay Bay, North Shore, Auckland. One of the completed residences, Unit 2/30 (4 bedrooms, 143m² floor area, freestanding, with Code Compliance Certificate and title issued), is being marketed for sale by Roman Hu, a licensed salesperson and Head of Projects with Ray White Mission Bay (the <strong>"Listing Agent"</strong>).</p>
+  <p>The Client wishes to test paid digital advertising on the Meta platforms (Facebook and Instagram) as a channel for generating qualified buyer enquiries for the residence across the full buyer market (local and European families and upgraders, Korean-speaking school-zone families, and first-home and investor buyers), with the Chinese-speaking buyer segment as an additional audience the Provider is well-placed to reach — incremental to, not in place of, the mainstream market. This engagement is a fixed-budget test intended to measure channel performance before any decision on a larger project-wide campaign.</p>
+  <p>The Provider offers digital marketing and advertising services under the Magic Engine brand and agrees to deliver the scope defined in this Agreement. The Provider is not a licensed real estate agent and provides marketing services only; it does not provide real estate agency work, property advice, or investment advice.</p>
+</div>
+
+<!-- ═════════════════ 2. Services (short reference) ═════════════════ -->
+<div class="clause">
+  <h2><span class="no">2.</span>Services</h2>
+  <p>The Provider will deliver services described as a <strong>"Meta Lead-Generation Test Campaign"</strong> for Unit 2/30 Kiteroa Terrace during the Term.</p>
+  <p>The complete scope of Services — including deliverables, the campaign structure, managed advertising spend, quantities, and out-of-scope items — is set out in <strong>Schedule A (Scope of Services)</strong> attached to and forming part of this Agreement.</p>
+  <p>Any change to the scope defined in Schedule A must be in writing and signed by both parties (see clause 10.2).</p>
+</div>
+
+<!-- ═════════════════ 3. Term ═════════════════ -->
+<div class="clause">
+  <h2><span class="no">3.</span>Term &amp; Timeline</h2>
+  <p>This Agreement commences on the date of signing by both parties (the <strong>"Effective Date"</strong>) and continues for a period of <strong>twenty-eight (28) calendar days</strong>. Advertising activity commences only after the Provider has received the fee under clause 4 and the Client-supplied assets under clause 5.</p>
+  <p>Indicative delivery milestones (subject to Client / Listing Agent turnaround):</p>
+  <ul>
+    <li><strong>Day 1–5</strong>: Setup — Business Manager, ad account, Meta Pixel and Conversions API on romanhu.com, landing page, bilingual video cuts, WhatsApp intake, campaign build</li>
+    <li><strong>Day 6–12</strong>: Lead-generation campaign live; English / Chinese ad variants A/B tested; viewing-booking flow and email newsletter active</li>
+    <li><strong>Day 13–25</strong>: Optimisation — scale the winning creative / language; weekly reporting</li>
+    <li><strong>Day 26–28</strong>: Final performance report and data package handover</li>
+  </ul>
+  <p>Content review and asset-approval turnaround is expected within two (2) business days of each request. Delays in Client or Listing Agent feedback may extend the Term proportionally.</p>
+</div>
+
+<!-- ═════════════════ 4. Fees & Payment ═════════════════ -->
+<div class="clause">
+  <h2><span class="no">4.</span>Fees &amp; Payment</h2>
+
+  <div class="fee-block">
+    <div class="fee-cell">
+      <div class="label">All-Inclusive Campaign Fee</div>
+      <div class="amount">NZD 2,000.00<small>incl. GST &amp; ad spend</small></div>
+    </div>
+    <div class="fee-cell">
+      <div class="label">GST Treatment</div>
+      <div class="amount"><span class="fill">[confirm: GST-inclusive]</span></div>
+    </div>
+  </div>
+
+  <p>The fee is a <strong>single, fixed, all-inclusive amount of NZD 2,000.00</strong> covering the complete engagement: setup, creative production, landing page, campaign management, reporting, and the Meta advertising spend, which the Provider funds and manages through the Provider's own advertising account on the Client's behalf.</p>
+  <p>As this is a fixed-price engagement, there is no separate advertising-spend line item. The Provider allocates and manages the advertising spend at its discretion to optimise campaign performance, and there is no top-up or refund based on actual advertising spend.</p>
+  <p style="font-size:13px;color:var(--muted);"><em>GST note (for PM to confirm before issuing): the NZD 2,000.00 is stated as GST-inclusive. If the parties agree the fee should be exclusive of GST, the total payable becomes NZD 2,300.00 (NZD 2,000.00 + 15% GST). All invoices are issued as tax invoices under the Goods and Services Tax Act 1985.</em></p>
+
+  <h3>Payment schedule</h3>
+  <ol>
+    <li><strong>100% (NZD 2,000.00)</strong> invoiced on the Effective Date, payable within seven (7) days of invoice. The Provider will commence advertising spend only upon receipt of cleared payment, as the Provider funds the Meta spend from its own account.</li>
+  </ol>
+
+  <h3>Bank details</h3>
+  <p>Payment by direct bank transfer to:</p>
+  <p style="font-family:var(--font-mono);font-size:13px;line-height:1.7;">
+    Account name: <span class="fill">[Magic Engine — trading account]</span><br>
+    Bank / Branch: <span class="fill">[Bank name]</span><br>
+    Account number: <span class="fill">[XX-XXXX-XXXXXXX-XXX]</span><br>
+    Reference: <em>KITEROA-2026</em>
+  </p>
+
+  <p>All invoices issued as tax invoices under the New Zealand <em>Goods and Services Tax Act 1985</em>. Provider warrants it is GST-registered under the number stated above.</p>
+  <p>Late payment: interest at <strong>2% per month</strong> compounding may be charged on any amount unpaid seven (7) days after the invoice due date, at Provider's discretion.</p>
+</div>
+
+<!-- ═════════════════ 5. Client Responsibilities ═════════════════ -->
+<div class="clause">
+  <h2><span class="no">5.</span>Client Responsibilities</h2>
+  <p>To enable timely delivery, the Client (directly or through the Listing Agent) will:</p>
+  <ol>
+    <li>Provide the property marketing video, floor plans, interior renders, image gallery, and confirmed pricing / enquiry method for Unit 2/30 within three (3) business days of the Effective Date.</li>
+    <li>Procure that the Listing Agent grants the Provider the necessary Meta access (Facebook Page content and advertiser access) and connects a WhatsApp Business number for enquiry intake.</li>
+    <li>Provide timely review and written approval of advertising creative and landing-page copy within two (2) business days of each request.</li>
+    <li>Warrant that all property claims, pricing, floor areas, compliance status (CCC / title), school-zone statements, and promotional statements supplied to the Provider are accurate and comply with the <em>Fair Trading Act 1986</em>.</li>
+    <li>Ensure that all advertising and published content is approved before publication by the Listing Agent, who is a licensed salesperson under the <em>Real Estate Agents Act 2008</em> (REAA). The Provider is not responsible for obtaining such REAA sign-off.</li>
+    <li>Where advertising targets overseas or non-resident buyers, ensure that representations comply with the <em>Overseas Investment Act 2005</em>. The Provider does not advise buyers on overseas-investment eligibility.</li>
+    <li>Bear all third-party costs (CRM platform, hosting, premium plugins, stock imagery) directly, other than the Meta advertising spend which is included in the fee under clause 4.</li>
+  </ol>
+</div>
+
+<!-- ═════════════════ 6. IP ═════════════════ -->
+<div class="clause">
+  <h2><span class="no">6.</span>Intellectual Property</h2>
+  <p>Upon full payment of all fees under this Agreement, the Provider assigns to the Client all rights, title, and interest in and to the final delivered advertising creative and landing-page content specifically created for Unit 2/30 under this Agreement (excluding any Provider tooling and third-party materials described below).</p>
+  <p>The Provider retains ownership of and the right to reuse:</p>
+  <ul>
+    <li>Underlying templates, code frameworks, workflows, campaign structures, and generic component libraries (Magic Engine internal tooling);</li>
+    <li>The Meta Business Manager, advertising account, Meta Pixel / dataset, and custom audiences used to deliver the Services (see clause 11);</li>
+    <li>Anonymised, aggregated campaign insights and benchmarks (used for the Provider's own portfolio and business development, without identifying the Client's confidential business terms).</li>
+  </ul>
+  <p>The property marketing video and other assets supplied by the Client remain the Client's property. Third-party materials (stock images, fonts, plugins) remain licensed on their original terms.</p>
+</div>
+
+<!-- ═════════════════ 7. Confidentiality ═════════════════ -->
+<div class="clause">
+  <h2><span class="no">7.</span>Confidentiality</h2>
+  <p>Each party will keep confidential any non-public information disclosed by the other party under this Agreement, including business plans, pricing strategy, financial data, and buyer data. This obligation continues for two (2) years after termination or completion of this Agreement.</p>
+  <p>Confidentiality does not apply to information that becomes public through no fault of the receiving party, was already known to the receiving party, or is required to be disclosed by law.</p>
+</div>
+
+<!-- ═════════════════ 8. Warranties & Limitation ═════════════════ -->
+<div class="clause">
+  <h2><span class="no">8.</span>Warranties &amp; Limitation of Liability</h2>
+  <p>The Provider will perform the Services with reasonable care and skill and in accordance with generally accepted industry standards for digital advertising services in New Zealand.</p>
+  <p>The Provider makes <strong>no guarantee</strong> as to lead volume, lead quality, enquiry numbers, cost per lead, viewings, offers, sales, deposits, or any commercial outcome. Advertising outcomes depend on many factors outside the Provider's control (including Meta platform policies, targeting rules and algorithm changes, competitor activity, pricing, and market conditions). Target metrics stated in the Executive Summary or Schedule A are aspirational, not contractual commitments.</p>
+  <p>The Provider is not a licensed real estate agent. Conversion of any lead or enquiry into a viewing, offer, sale, or deposit is the sole responsibility of the Listing Agent. The Provider does not provide real estate agency work, property advice, or financial / investment advice.</p>
+  <p>To the maximum extent permitted by law, the Provider's total aggregate liability under or in connection with this Agreement is limited to the total fees paid by the Client under this Agreement.</p>
+  <p>Neither party is liable for indirect, consequential, or loss-of-profits damages.</p>
+  <p>Nothing in this Agreement limits any rights the Client may have under the New Zealand <em>Consumer Guarantees Act 1993</em> where it applies.</p>
+</div>
+
+<!-- ═════════════════ 9. Termination ═════════════════ -->
+<div class="clause">
+  <h2><span class="no">9.</span>Termination</h2>
+  <p>Either party may terminate this Agreement:</p>
+  <ol>
+    <li><strong>For convenience</strong>, on seven (7) days' written notice. On such termination, the Client will pay Provider for all work performed and advertising spend already committed up to the date of termination, plus reasonable wind-down costs.</li>
+    <li><strong>For cause</strong>, immediately on written notice, if the other party materially breaches this Agreement and fails to remedy the breach within seven (7) days of written notice of the breach.</li>
+  </ol>
+  <p>On termination, the Provider will hand over the final campaign report and any lead data collected up to the date of termination, and return any Client-supplied assets.</p>
+</div>
+
+<!-- ═════════════════ 10. General ═════════════════ -->
+<div class="clause">
+  <h2><span class="no">10.</span>General</h2>
+  <h3>10.1 Governing law</h3>
+  <p>This Agreement is governed by the laws of New Zealand and the parties submit to the exclusive jurisdiction of the New Zealand courts.</p>
+  <h3>10.2 Amendment</h3>
+  <p>Any variation to this Agreement (including any change to Schedule A) must be in writing and signed by both parties.</p>
+  <h3>10.3 Assignment</h3>
+  <p>Neither party may assign this Agreement without the written consent of the other, not to be unreasonably withheld.</p>
+  <h3>10.4 Entire agreement</h3>
+  <p>This Agreement (including Schedule A and the Chinese Executive Summary above, which is provided for convenience only and does not vary the English text) constitutes the entire agreement between the parties and supersedes any prior discussions, proposals, or written communications regarding the Services.</p>
+  <h3>10.5 Notices</h3>
+  <p>Notices under this Agreement may be given by email to the addresses listed in the Parties section and are deemed received on the next business day after sending.</p>
+  <h3>10.6 REAA compliance</h3>
+  <p>The Client acknowledges that publication of any advertising deliverable may require prior sign-off by the Listing Agent under the REAA. The Provider is not responsible for obtaining such sign-off, and is not liable for any REAA, Fair Trading Act, or Overseas Investment Act non-compliance arising from claims or approvals made by the Client or the Listing Agent.</p>
+</div>
+
+<!-- ═════════════════ 11. Campaign Data, Leads & Privacy (Type B) ═════════════════ -->
+<div class="clause">
+  <h2><span class="no">11.</span>Campaign Data, Leads &amp; Privacy</h2>
+  <h3>11.1 Enquiry delivery</h3>
+  <p>Buyer enquiries generated by the campaign arrive as messages in the inbox of the Listing Agent's own Facebook Page (Roman Hu Real Estate) and are answered by the Listing Agent directly. The Client acknowledges that the development is co-listed by multiple agencies and that enquiries generated under this campaign are directed to the Listing Agent.</p>
+
+  <h3>11.2 Advertising audiences &mdash; ownership</h3>
+  <p>The audiences built during the campaign (people who watched the video creative, engaged with the Page, or started a conversation) are derived from engagement with <strong>the Listing Agent's own Facebook Page</strong>. Accordingly:</p>
+  <p>(a) during the Term, those audiences are used solely to market Unit 2/30;<br>
+  (b) after the Term, they remain a <strong>continuing asset of the Listing Agent</strong> as the Client's nominated channel, and the Client may reach that same audience again through the Listing Agent on future projects &mdash; each subsequent project therefore starts from a warmer base;<br>
+  (c) the Provider does not treat those audiences as its own asset, and will not use them to promote a competing agent or a competing development.</p>
+  <p>The Provider retains only its own operating infrastructure (Business Manager, advertising account, pixel / dataset) and aggregated, non-personal performance insights and methodology.</p>
+
+  <h3>11.3 Privacy</h3>
+  <p>Both parties will comply with the <em>Privacy Act 2020</em>. Personal information (names and contact details) is provided voluntarily by buyers within their own messages to the Listing Agent and is held by the Listing Agent. <strong>The Provider does not upload any personal contact information to Meta or to any other third party</strong>, and builds audiences only from anonymous, platform-held engagement signals. The Provider acts as a data processor on behalf of the Client and the Listing Agent for any individual enquiry data it handles.</p>
+
+  <h3>11.4 Hand-back on termination</h3>
+  <p>On termination or expiry the Provider will, within 10 working days and at no charge, provide the Listing Agent with: (a) the full definition of each audience built &mdash; its source, rule and retention window &mdash; in a form that allows it to be recreated in the Listing Agent's own advertising account; (b) the audience ledger showing how each audience grew over the Term; and (c) any individual buyer contact details captured by the Provider. The parties acknowledge that the underlying engagement data resides on the Listing Agent's own Facebook Page and is not withheld by the Provider.</p>
+</div>
+
+<!-- ═════════════════ Signature preamble ═════════════════ -->
+<p style="margin-top:36px;font-size:14px;color:var(--ink);"><strong>By signing below, the parties agree to be bound by this Agreement, together with the attached Schedule A (Scope of Services), which forms an integral part of this Agreement.</strong></p>
+
+<!-- ═════════════════ Signatures ═════════════════ -->
+<div class="signatures">
+  <div class="sig">
+    <h4>Signed for and on behalf of Magic Engine</h4>
+    <div class="line"></div>
+    <div class="caption">Signature</div>
+    <p><span class="fill">[Ray Deng — Print name]</span></p>
+    <p class="role"><span class="fill">[Title, e.g. Director]</span></p>
+    <div class="line" style="margin-top:20px;"></div>
+    <div class="caption">Date</div>
+  </div>
+  <div class="sig">
+    <h4>Signed for and on behalf of the Client (Developer)</h4>
+    <div class="line"></div>
+    <div class="caption">Signature</div>
+    <p><span class="fill">[Print name]</span></p>
+    <p class="role"><span class="fill">[Title]</span><br><span class="fill">[Developer entity]</span></p>
+    <div class="line" style="margin-top:20px;"></div>
+    <div class="caption">Date</div>
+  </div>
+</div>
+
+<!-- ═════════════════ Schedule A · Scope of Services (attached appendix) ═════════════════ -->
+<div class="schedule-divider">
+  <div class="schedule-eyebrow">Schedule A · Attachment to Services Agreement</div>
+  <h1 class="schedule-title">Scope of Services</h1>
+  <p class="schedule-sub">Meta Lead-Generation Test Campaign · 30 Kiteroa Terrace, Unit 2/30 · 28-day engagement</p>
+
+  <div class="schedule-meta">
+    <p><strong>Attached to:</strong> Services Agreement between Magic Engine and <span class="fill">[Developer entity]</span> dated <span class="fill">[date]</span> July 2026.</p>
+    <p><strong>Governs:</strong> The complete list of deliverables, the campaign structure, managed advertising spend, and out-of-scope items comprising the "Services" referenced in clause 2 of the main Agreement.</p>
+    <p><strong>Consideration:</strong> As set out in clause 4 of the main Agreement (NZD 2,000.00 all-inclusive of GST and managed Meta advertising spend).</p>
+  </div>
+
+  <div class="clause">
+    <h2><span class="no">A.1</span>Deliverables</h2>
+    <p>The Provider will deliver the following during the Term:</p>
+
+    <div class="table-scroll">
+      <table class="del">
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th>Deliverable</th>
+            <th>Qty</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="category">Campaign Setup</td>
+            <td>Meta Business Manager and advertising account configuration · Meta Pixel and Conversions API installed on the romanhu.com listing page · Facebook Page linked as publishing identity · advertising configured in line with Meta's applicable housing-advertising and anti-discrimination policies</td>
+            <td class="qty">1 setup</td>
+          </tr>
+          <tr>
+            <td class="category">Landing Page</td>
+            <td>One single-property landing page hosted under romanhu.com (e.g. romanhu.com/listings/30-kiteroa) · bilingual English / Chinese · lead form + WhatsApp click-to-message + booking CTA · mobile-optimised, fast-loading · privacy notice</td>
+            <td class="qty">1 page</td>
+          </tr>
+          <tr>
+            <td class="category">Creative</td>
+            <td>Editing of the Client-supplied property video into 15s / 30s / 60s cuts · school-zone and floor-plan image carousels · English and Chinese versions · produced from Client-supplied assets (no filming)</td>
+            <td class="qty">EN + 中文 set</td>
+          </tr>
+          <tr>
+            <td class="category">Meta Campaign<br>(managed spend)</td>
+            <td>A single focused lead-generation campaign (Advantage+ Leads or manual setup, at Provider's discretion) optimised for leads and enquiries · precision targeting (interest / lookalike / geography, subject to Meta's rules for NZ delivery) · property video as primary creative · English and Chinese ad variants A/B tested · Meta advertising spend funded and managed through the Provider's account (included in the fee)</td>
+            <td class="qty">1 campaign</td>
+          </tr>
+          <tr>
+            <td class="category">Lead Intake</td>
+            <td>Automated WhatsApp acknowledgment (bilingual welcome message) within 60 minutes of lead submission · leads routed to the Listing Agent (Roman Hu / Ray White Mission Bay) for follow-up</td>
+            <td class="qty">Setup</td>
+          </tr>
+          <tr>
+            <td class="category">Viewing Booking</td>
+            <td>Facilitating booking of property viewings / open homes for interested buyers via WhatsApp and a booking link, scheduled into the Listing Agent's open-home and private-viewing times · hosting of the viewings themselves remains the Listing Agent's responsibility</td>
+            <td class="qty">Ongoing</td>
+          </tr>
+          <tr>
+            <td class="category">Email Newsletter</td>
+            <td>An email newsletter / nurture sequence to captured leads (open-home reminders, property and area updates, school-zone content) to warm buyers who are not yet ready to act</td>
+            <td class="qty">Sequence</td>
+          </tr>
+          <tr>
+            <td class="category">Reporting</td>
+            <td>Weekly performance snapshot (leads, CPL, video view cost, Chinese-segment share) · final data package at Day 28 (lead log, enquiry summary, cost per lead, Chinese-buyer share, recommendation on a project-wide campaign)</td>
+            <td class="qty">Weekly<br>+ final</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="clause">
+    <h2><span class="no">A.2</span>Out of Scope</h2>
+    <p>For clarity, the following are <strong>not</strong> included in this engagement and will require a separate scope of work (and separate fee) if requested:</p>
+    <ul>
+      <li>Hosting viewings / open homes, offer negotiation, sale closing, deposit or settlement conversion (Listing Agent's responsibility)</li>
+      <li>Any guarantee of leads, enquiries, sales, or deposits</li>
+      <li>Advertising spend beyond the fixed all-inclusive budget in clause 4</li>
+      <li>Google Ads or any advertising platform other than Meta (Facebook / Instagram)</li>
+      <li>Content creation, posting, or advertising on WeChat, Xiaohongshu (RED), or other Chinese platforms (these remain the Listing Agent's own organic / private-channel activity, not part of this engagement)</li>
+      <li>Property photography, videography, or filming (Client supplies video, renders, floor plans)</li>
+      <li>REAA advertising compliance sign-off (Listing Agent's responsibility per clause 5.5)</li>
+      <li>Overseas Investment Act eligibility advice to buyers</li>
+      <li>CRM platform licence costs or complex API integration beyond the WhatsApp / lead webhook described above</li>
+      <li>Ongoing campaign management after Day 28</li>
+      <li>romanhu.com website build (delivered under the Provider's separate agreement with Roman Hu)</li>
+    </ul>
+  </div>
+
+  <div class="clause">
+    <h2><span class="no">A.3</span>Acceptance</h2>
+    <p>Each deliverable is deemed accepted upon: (a) Client's or Listing Agent's written approval; or (b) silence for five (5) business days after delivery, whichever is earlier. Reasonable revisions requested within the review window are included; substantive rework beyond one full revision round per deliverable is out of scope.</p>
+  </div>
+
+  <p style="margin-top:36px;font-size:13.5px;color:var(--muted);"><em>This Schedule A is signed as a single instrument together with the main Agreement on the signature page above. No separate signature is required for this Schedule.</em></p>
+</div>
+
+<!-- ═════════════════ Colophon ═════════════════ -->
+<div class="colophon">
+  <p><strong>Services Agreement · Magic Engine × [Developer] · 30 Kiteroa Lead-Gen Test · v1 · 13 July 2026</strong></p>
+  <p>Includes Schedule A (Scope of Services) as attachment. Confidential — for signing parties only. Two counterparts, each treated as an original.</p>
+  <p>Chinese Executive Summary provided for reader convenience only. In case of any inconsistency, the English text (including Schedule A) prevails.</p>
+</div>
+
+</div>
