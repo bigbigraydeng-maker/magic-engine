@@ -1,0 +1,37 @@
+[
+  {
+    "canonical_account_name": "众信旅游控股集团股份有限公司 (UTour Group)",
+    "brand_name": "众信旅游",
+    "account_type": "wholesaler",
+    "city": "北京 (Beijing)",
+    "province": "北京",
+    "country": "China",
+    "source_platform": "zhaopin",
+    "source_url": "http://www.zhaopin.com/jobdetail/CC135697910J40757485501.htm",
+    "source_title": "极地邮轮产品操作 (Polar Cruise Product Operations)",
+    "nz_intent": "medium",
+    "nz_products_or_signals": ["hiring_anz_op"],
+    "contact_name": "贾晓菲",
+    "contact_role": "人力 (HR)",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "job_listing",
+        "text": "具有3年以上出境定制单团操作经验（尤其是美洲、东南亚、澳新等国家的）优先考虑。 [Translation: 3+ years of outbound custom-tour operations experience preferred, especially for Americas, Southeast Asia, and ANZ (澳新) destinations.]",
+        "url": "http://www.zhaopin.com/jobdetail/CC135697910J40757485501.htm"
+      },
+      {
+        "type": "job_listing",
+        "text": "Company size 1000-9999人 (employees), industry 旅游服务 (travel services), office address 朝阳公园西二门众信旅游集团 (UTour Group HQ, west gate of Chaoyang Park, Beijing) — confirms this is 众信旅游控股集团股份有限公司 (SZSE: 002707), one of China's largest publicly listed outbound travel wholesalers.",
+        "url": "http://company.zhaopin.com/CZ135697910.htm"
+      }
+    ],
+    "connector_used": "apify_zhaopin_jobs",
+    "confidence": 0.5,
+    "missing_fields": ["contact_phone", "contact_email", "wechat", "website", "exclusive_anz_focus"],
+    "notes": "Role title is 'Polar Cruise Product Operations', not a dedicated ANZ role — ANZ (澳新) is named as ONE of three preferred prior-experience regions (Americas / Southeast Asia / ANZ), not the job's sole focus. Still counted because it is a real, current (posted 2026-08-08, 3 days before scrape date), checkable listing at a top-tier verified outbound wholesaler explicitly naming 澳新 as a destination the hiring team operates. Confidence set to medium (0.5) to reflect the non-exclusive framing."
+  }
+]

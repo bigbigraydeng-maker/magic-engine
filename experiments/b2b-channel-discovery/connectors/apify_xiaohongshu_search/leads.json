@@ -1,0 +1,963 @@
+[
+  {
+    "canonical_account_name": "屿野Yuyeo｜新西兰旅行社",
+    "brand_name": "屿野 Yuyeo",
+    "account_type": "tour_operator",
+    "city": "",
+    "province": "",
+    "country": "China",
+    "source_platform": "xiaohongshu",
+    "source_url": "https://www.xiaohongshu.com/user/profile/69ef3ce30000000002001003",
+    "source_title": "真心不贵❗️新西兰8日游摇人啦❗️❗",
+    "nz_intent": "high",
+    "nz_products_or_signals": [
+      "新西兰南北岛",
+      "2-6人精品小团",
+      "本地一手地接",
+      "代办签证",
+      "中文司导",
+      "私家团/定制"
+    ],
+    "contact_name": "",
+    "contact_role": "旅行社（RED平台认证：旅行社）",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "platform_verification",
+        "text": "RED official verify_content = 旅行社 (business account, verify_type=2)",
+        "url": "https://www.xiaohongshu.com/user/profile/69ef3ce30000000002001003"
+      },
+      {
+        "type": "bio",
+        "text": "🇳🇿带你奔赴山海·专属定制 ✨自由·省心·深游·护航·领途 ✈️当地正规旅行社｜本地一手地接 🗺️2-6人精品小团｜专注品质用心服务",
+        "url": "https://www.xiaohongshu.com/user/profile/69ef3ce30000000002001003"
+      },
+      {
+        "type": "post",
+        "text": "真心不贵❗️新西兰8日游摇人啦❗️❗ — 可代办签证｜全程中文司导｜免费接送机｜纯玩不赶路 2-6人精品小团",
+        "url": "https://www.xiaohongshu.com/discovery/item/6a72d9a2000000003302c3aa?xsec_token=YBLRmxlYaiXOHjj5k04J7SwMfbZ-UVbxFA1pR90hAuIkM%3D&xsec_source=app_share"
+      }
+    ],
+    "connector_used": "apify_xiaohongshu_search",
+    "confidence": 0.8,
+    "missing_fields": [
+      "contact_name",
+      "phone",
+      "email",
+      "wechat",
+      "website",
+      "city"
+    ]
+  },
+  {
+    "canonical_account_name": "Muyu沐屿·新西兰旅行社",
+    "brand_name": "Muyu 沐屿",
+    "account_type": "tour_operator",
+    "city": "",
+    "province": "",
+    "country": "China",
+    "source_platform": "xiaohongshu",
+    "source_url": "https://www.xiaohongshu.com/user/profile/697041d000000000370088eb",
+    "source_title": "新西兰本地小团路线合集‼️多款行程可选",
+    "nz_intent": "high",
+    "nz_products_or_signals": [
+      "南岛深度",
+      "北岛探秘",
+      "小众秘境",
+      "中文司导",
+      "轻奢小团",
+      "私人定制"
+    ],
+    "contact_name": "",
+    "contact_role": "旅行社（RED平台认证：旅行社）",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "platform_verification",
+        "text": "RED official verify_content = 旅行社 (business account, verify_type=2)",
+        "url": "https://www.xiaohongshu.com/user/profile/697041d000000000370088eb"
+      },
+      {
+        "type": "bio",
+        "text": "🏔️南半球的风景搬运工 ✨只做最懂你的新西兰 南岛深度 · 北岛探秘 · 小众秘境 中文司导 · 轻奢小团 · 私人定制",
+        "url": "https://www.xiaohongshu.com/user/profile/697041d000000000370088eb"
+      },
+      {
+        "type": "post",
+        "text": "26年中秋国庆团期已出，可以开始咨询报名了...纯玩小团/私家定制全都支持",
+        "url": "https://www.xiaohongshu.com/discovery/item/6a71b8250000000005028130?xsec_token=YBK4GIGV4KNSkbXRmK3th5wjhhDCESKLdU6MITBwr1B1c%3D&xsec_source=app_share"
+      }
+    ],
+    "connector_used": "apify_xiaohongshu_search",
+    "confidence": 0.8,
+    "missing_fields": [
+      "contact_name",
+      "phone",
+      "email",
+      "wechat",
+      "website",
+      "city"
+    ]
+  },
+  {
+    "canonical_account_name": "新岛旅行 Joyisle Travel",
+    "brand_name": "Joyisle Travel 新岛旅行",
+    "account_type": "tour_operator",
+    "city": "",
+    "province": "",
+    "country": "China",
+    "source_platform": "xiaohongshu",
+    "source_url": "https://www.xiaohongshu.com/user/profile/646b43fa000000000f007e39",
+    "source_title": "高净值人群来新西兰私享💎淡季包车太舒心",
+    "nz_intent": "high",
+    "nz_products_or_signals": [
+      "南北岛中英资深本地团队",
+      "南北岛包车接送",
+      "精品高质量小团",
+      "商务考察",
+      "亲子休闲",
+      "蜜月游",
+      "定制游"
+    ],
+    "contact_name": "",
+    "contact_role": "旅行社（RED平台认证：旅行社）",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "platform_verification",
+        "text": "RED official verify_content = 旅行社 (business account, verify_type=2)",
+        "url": "https://www.xiaohongshu.com/user/profile/646b43fa000000000f007e39"
+      },
+      {
+        "type": "bio",
+        "text": "🇳🇿新西兰本地旅行社 🚩南北岛中英资深本地团队 🚙南北岛包车接送🔥2人即可发 👭专注精品高质量小团",
+        "url": "https://www.xiaohongshu.com/user/profile/646b43fa000000000f007e39"
+      },
+      {
+        "type": "post",
+        "text": "我们专注新西兰南岛高端定制用车/私家 包团",
+        "url": "https://www.xiaohongshu.com/discovery/item/69e087a20000000023005b28?xsec_token=YBac0Y1yPSJaeD7BuOVe2iaxX9FoLEAs9gVtaHWdZ2ee4%3D&xsec_source=app_share"
+      }
+    ],
+    "connector_used": "apify_xiaohongshu_search",
+    "confidence": 0.8,
+    "missing_fields": [
+      "contact_name",
+      "phone",
+      "email",
+      "wechat",
+      "website",
+      "city"
+    ]
+  },
+  {
+    "canonical_account_name": "众信旅游优定制",
+    "brand_name": "众信旅游优定制（A股上市众信旅游集团子品牌）",
+    "account_type": "wholesaler",
+    "city": "Beijing",
+    "province": "",
+    "country": "China",
+    "source_platform": "xiaohongshu",
+    "source_url": "https://www.xiaohongshu.com/user/profile/664ef1bb0000000003030545",
+    "source_title": "📩后台爆了！这份澳新定制方案咨询量太高",
+    "nz_intent": "medium",
+    "nz_products_or_signals": [
+      "澳新反季游",
+      "澳新定制方案",
+      "全境包车",
+      "行程定制",
+      "1V1专属管家服务"
+    ],
+    "contact_name": "",
+    "contact_role": "上市旅行社集团子品牌（RED平台认证：旅行社）",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "platform_verification",
+        "text": "RED official verify_content = 旅行社 (business account, verify_type=2); has seller_info.store_id (RED shop enabled)",
+        "url": "https://www.xiaohongshu.com/user/profile/664ef1bb0000000003030545"
+      },
+      {
+        "type": "bio",
+        "text": "A股上市众信旅游集团旗下全资子品牌📈 全球线路深度个性化定制📝 全境包车｜行程定制｜专业管家1V1服务🙋",
+        "url": "https://www.xiaohongshu.com/user/profile/664ef1bb0000000003030545"
+      },
+      {
+        "type": "post",
+        "text": "奔赴南半球20℃春天的zui佳时机，就是现在！澳新反季游旺季将至，定制档期紧俏 (199 likes, 101 comments)",
+        "url": "https://www.xiaohongshu.com/discovery/item/6911ded10000000007038ca2?xsec_token=YBF0ygxt87cYZLgCMaqeZzBNLrmqeFoQw1Tf79XYgnAeE%3D&xsec_source=app_share"
+      }
+    ],
+    "connector_used": "apify_xiaohongshu_search",
+    "confidence": 0.7,
+    "missing_fields": [
+      "contact_name",
+      "phone",
+      "email",
+      "wechat",
+      "website"
+    ]
+  },
+  {
+    "canonical_account_name": "澳新亲子游定制师Tracy",
+    "brand_name": "",
+    "account_type": "custom_travel_designer",
+    "city": "Beijing",
+    "province": "",
+    "country": "China",
+    "source_platform": "xiaohongshu",
+    "source_url": "https://www.xiaohongshu.com/user/profile/679230b9000000000a03edee",
+    "source_title": "一名澳新亲子游定制师的自我介绍。",
+    "nz_intent": "high",
+    "nz_products_or_signals": [
+      "澳新亲子旅行",
+      "私人定制",
+      "深耕澳新12年"
+    ],
+    "contact_name": "Tracy",
+    "contact_role": "旅游定制师（个人IP，非平台认证企业号）",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "bio",
+        "text": "两娃妈👩旅游定制师✈️ 深耕澳新亲子旅行十余年🚗 不定期分享旅游行程📝",
+        "url": "https://www.xiaohongshu.com/user/profile/679230b9000000000a03edee"
+      },
+      {
+        "type": "post",
+        "text": "大家好，我是Tracy🌿 一个二胎妈妈，也是深耕澳新12年的亲子旅行定制师。这些年，从悉尼、墨尔本到大洋路🌊，从新西兰...",
+        "url": "https://www.xiaohongshu.com/discovery/item/6a79486a000000003303258b?xsec_token=YBNIWFY7gowcwRgM2pDXzvIy_axu2dGQHSL9UlozE2BoM%3D&xsec_source=app_share"
+      }
+    ],
+    "connector_used": "apify_xiaohongshu_search",
+    "confidence": 0.6,
+    "missing_fields": [
+      "phone",
+      "email",
+      "wechat",
+      "website",
+      "city (bio only shows IP=Beijing, not business base)"
+    ]
+  },
+  {
+    "canonical_account_name": "寰宇纵横-途可旅行",
+    "brand_name": "途可旅行",
+    "account_type": "tour_operator",
+    "city": "Sichuan",
+    "province": "",
+    "country": "China",
+    "source_platform": "xiaohongshu",
+    "source_url": "https://www.xiaohongshu.com/user/profile/65f6ab38000000000b0301a9",
+    "source_title": "南半球顶配旅行✨澳新双国定制之旅",
+    "nz_intent": "medium",
+    "nz_products_or_signals": [
+      "澳新双国定制之旅",
+      "2-6人精品私家团",
+      "专属行程规划",
+      "独立私车随行"
+    ],
+    "contact_name": "",
+    "contact_role": "旅行社（RED平台认证：旅行社）",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "platform_verification",
+        "text": "RED official verify_content = 旅行社 (business account, verify_type=2)",
+        "url": "https://www.xiaohongshu.com/user/profile/65f6ab38000000000b0301a9"
+      },
+      {
+        "type": "bio",
+        "text": "✈︎ 寰宇纵横｜途可旅行 🌍 一手资源 专注国外高品质定制游 / 私家团 🏔 欧洲｜东南亚｜日韩｜海岛·等深度路线",
+        "url": "https://www.xiaohongshu.com/user/profile/65f6ab38000000000b0301a9"
+      },
+      {
+        "type": "post",
+        "text": "一次打卡澳新两大国度🌊 2-6 人精品私家小团...专属行程规划，独立私车随行",
+        "url": "https://www.xiaohongshu.com/discovery/item/6a796cc300000000080113a2?xsec_token=YBNIWFY7gowcwRgM2pDXzvI8YiZTNFJHDWRE9vuDepox8%3D&xsec_source=app_share"
+      }
+    ],
+    "connector_used": "apify_xiaohongshu_search",
+    "confidence": 0.55,
+    "missing_fields": [
+      "contact_name",
+      "phone",
+      "email",
+      "wechat",
+      "website"
+    ]
+  },
+  {
+    "canonical_account_name": "澳新旅行定制师VV",
+    "brand_name": "",
+    "account_type": "custom_travel_designer",
+    "city": "Sichuan",
+    "province": "",
+    "country": "China",
+    "source_platform": "xiaohongshu",
+    "source_url": "https://www.xiaohongshu.com/user/profile/66ac7ffe000000001d0316e6",
+    "source_title": "暑假带娃游澳洲东海岸，需要准备多少预算？",
+    "nz_intent": "high",
+    "nz_products_or_signals": [
+      "澳新私人订制",
+      "包车",
+      "接送机",
+      "不拼车不拼团"
+    ],
+    "contact_name": "VV",
+    "contact_role": "旅游定制师（个人IP，24.3k粉丝，非平台认证企业号）",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "bio",
+        "text": "✅专注澳新日私人订制+包车+接送机，全程不拼车不拼团，独享专属服务～ 💬欢迎咨询 随时在线ing",
+        "url": "https://www.xiaohongshu.com/user/profile/66ac7ffe000000001d0316e6"
+      },
+      {
+        "type": "engagement",
+        "text": "24,309 followers — largest audience among the individual designer accounts found",
+        "url": "https://www.xiaohongshu.com/user/profile/66ac7ffe000000001d0316e6"
+      }
+    ],
+    "connector_used": "apify_xiaohongshu_search",
+    "confidence": 0.55,
+    "missing_fields": [
+      "phone",
+      "email",
+      "wechat",
+      "website",
+      "real name",
+      "city (IP=Sichuan, business base unconfirmed)"
+    ]
+  },
+  {
+    "canonical_account_name": "趣玩澳新旅行定制师UU",
+    "brand_name": "",
+    "account_type": "custom_travel_designer",
+    "city": "Sichuan",
+    "province": "",
+    "country": "China",
+    "source_platform": "xiaohongshu",
+    "source_url": "https://www.xiaohongshu.com/user/profile/6697ded60000000003033066",
+    "source_title": "为什么说9-11月的澳大利亚非去不可？",
+    "nz_intent": "high",
+    "nz_products_or_signals": [
+      "澳大利亚/新西兰旅行",
+      "私人定制游",
+      "包车接送",
+      "中文司导",
+      "亲子/蜜月/商务考察/企业团建"
+    ],
+    "contact_name": "UU",
+    "contact_role": "旅游定制师（个人IP，16.1k粉丝，非平台认证企业号）",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "bio",
+        "text": "📖专注澳大利亚/新西兰旅行 ✅私人定制游 |包车接送 |中文司导 🙋‍♀️亲子游 |蜜月游 |商务考察 |企业团建",
+        "url": "https://www.xiaohongshu.com/user/profile/6697ded60000000003033066"
+      }
+    ],
+    "connector_used": "apify_xiaohongshu_search",
+    "confidence": 0.55,
+    "missing_fields": [
+      "phone",
+      "email",
+      "wechat",
+      "website",
+      "real name",
+      "city (IP=Sichuan, business base unconfirmed)"
+    ]
+  },
+  {
+    "canonical_account_name": "纽屿时光｜新西兰定制",
+    "brand_name": "纽屿时光",
+    "account_type": "tour_operator",
+    "city": "Jiangsu",
+    "province": "",
+    "country": "China",
+    "source_platform": "xiaohongshu",
+    "source_url": "https://www.xiaohongshu.com/user/profile/628884a10000000021022968",
+    "source_title": "🌿新西兰南岛6天5晚｜拒绝赶路的中土之旅",
+    "nz_intent": "high",
+    "nz_products_or_signals": [
+      "新西兰南岛6天5晚",
+      "可随心定制",
+      "预算可控"
+    ],
+    "contact_name": "",
+    "contact_role": "账号昵称含品牌名，bio 字段为空（未认证企业号），仅凭发帖内容判定为经营性账号",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "post",
+        "text": "可随心定制｜预算可控，碎片需求也能满足 Day1基督城➜蒂卡普湖... Day2蒂卡普湖➜库克山➜特威泽尔",
+        "url": "https://www.xiaohongshu.com/discovery/item/6a7831e60000000021020555?xsec_token=YBpXfTmnr0h03g1S4-yr4xbigQGedYNxQcKrZRPwGFuzQ%3D&xsec_source=app_share"
+      }
+    ],
+    "connector_used": "apify_xiaohongshu_search",
+    "confidence": 0.4,
+    "missing_fields": [
+      "contact_name",
+      "phone",
+      "email",
+      "wechat",
+      "website",
+      "bio (empty in profile scrape, only 7 followers — small/new account, weaker confidence)"
+    ]
+  },
+  {
+    "canonical_account_name": "山海四季定制游",
+    "brand_name": "山海四季",
+    "account_type": "custom_travel_designer",
+    "city": "Guangdong",
+    "province": "",
+    "country": "China",
+    "source_platform": "xiaohongshu",
+    "source_url": "https://www.xiaohongshu.com/user/profile/64648757000000000c03403a",
+    "source_title": "🇳🇿新西兰！你真的了解吗？怎样规划不踩坑",
+    "nz_intent": "medium",
+    "nz_products_or_signals": [
+      "新西兰行程规划",
+      "家庭亲子",
+      "蜜月旅行",
+      "企业团建/包团旅游"
+    ],
+    "contact_name": "",
+    "contact_role": "旅行社（RED平台认证：旅行社），业务面向多目的地定制，新西兰非唯一主打线路",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "platform_verification",
+        "text": "RED official verify_content = 旅行社 (business account, verify_type=2)",
+        "url": "https://www.xiaohongshu.com/user/profile/64648757000000000c03403a"
+      },
+      {
+        "type": "bio",
+        "text": "❤️定制旅行｜家庭亲子｜蜜月旅行｜🎀企业团建|包团旅游|公司年会|会务接待 ♻️1V1专属定制策划旅游方案",
+        "url": "https://www.xiaohongshu.com/user/profile/64648757000000000c03403a"
+      },
+      {
+        "type": "post",
+        "text": "妻子的浪漫旅行看了没... (36 likes, 32 comments, discusses NZ trip planning pitfalls)",
+        "url": "https://www.xiaohongshu.com/discovery/item/6a059c8e000000003502fd31?xsec_token=YB73k0_f5SRF5g_5IgpaNADPL1GFT9lgQNW0wOvgUZMdY%3D&xsec_source=app_share"
+      }
+    ],
+    "connector_used": "apify_xiaohongshu_search",
+    "confidence": 0.5,
+    "missing_fields": [
+      "contact_name",
+      "phone",
+      "email",
+      "wechat",
+      "website"
+    ]
+  },
+  {
+    "canonical_account_name": "银蕨假期 - 轻奢定制",
+    "brand_name": "银蕨假期",
+    "account_type": "tour_operator",
+    "city": "",
+    "province": "",
+    "country": "China",
+    "source_platform": "xiaohongshu",
+    "source_url": "https://www.xiaohongshu.com/user/profile/68b1a38d000000001900f443",
+    "source_title": "新西兰定制游｜把生活调成自己喜欢的山海",
+    "nz_intent": "high",
+    "nz_products_or_signals": [
+      "新西兰本地正规旅行社",
+      "私人旅行",
+      "高端定制",
+      "轻奢住宿"
+    ],
+    "contact_name": "",
+    "contact_role": "旅行社（自称新西兰本地正规旅行社；未获 RED 官方认证标）；bio 提示有官号 @银蕨假期",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "bio",
+        "text": "🌟官号：@银蕨假期 ✉️私人旅行｜高端定制｜轻奢住宿 🇳🇿新西兰本地正规旅行社，自由纯享",
+        "url": "https://www.xiaohongshu.com/user/profile/68b1a38d000000001900f443"
+      }
+    ],
+    "connector_used": "apify_xiaohongshu_search",
+    "confidence": 0.5,
+    "missing_fields": [
+      "contact_name",
+      "phone",
+      "email",
+      "wechat",
+      "website",
+      "city",
+      "verification of the '官号' relationship"
+    ]
+  },
+  {
+    "canonical_account_name": "Cloudland丨云境旅行",
+    "brand_name": "Cloudland 云境旅行",
+    "account_type": "tour_operator",
+    "city": "",
+    "province": "",
+    "country": "China",
+    "source_platform": "xiaohongshu",
+    "source_url": "https://www.xiaohongshu.com/user/profile/63293b1b000000002303934a",
+    "source_title": "Cloudland🌍｜把新西兰藏进你的云境旅行里",
+    "nz_intent": "high",
+    "nz_products_or_signals": [
+      "新西兰高端定制游",
+      "机票、签证、行程全程",
+      "新西兰本地团队",
+      "中文导游",
+      "精品小团"
+    ],
+    "contact_name": "",
+    "contact_role": "旅行社（RED平台认证：旅行社）",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "platform_verification",
+        "text": "RED official verify_content = 旅行社 (business account, verify_type=2)",
+        "url": "https://www.xiaohongshu.com/user/profile/63293b1b000000002303934a"
+      },
+      {
+        "type": "bio",
+        "text": "Cloudland丨云境旅行 🇳🇿专注新西兰高端定制游 🪪机票、签证、行程全程无忧 🙋新西兰本地团队·多年接待经验",
+        "url": "https://www.xiaohongshu.com/user/profile/63293b1b000000002303934a"
+      },
+      {
+        "type": "post",
+        "text": "我们是【Cloudland丨云境旅行】 一个扎根新西兰、专注高端私人定制的本地... (12 likes, 10 comments)",
+        "url": "https://www.xiaohongshu.com/discovery/item/69b28708000000001b01730b?xsec_token=YBpUziV7GooFaWLpQJjFHEsh3-IvN-1bScn4ULKYYUcOI%3D&xsec_source=app_share"
+      }
+    ],
+    "connector_used": "apify_xiaohongshu_search",
+    "confidence": 0.75,
+    "missing_fields": [
+      "contact_name",
+      "phone",
+      "email",
+      "wechat",
+      "website",
+      "city"
+    ]
+  },
+  {
+    "canonical_account_name": "走着瞧天下定制团丨票务",
+    "brand_name": "走着瞧天下",
+    "account_type": "tour_operator",
+    "city": "Shanghai",
+    "province": "",
+    "country": "China",
+    "source_platform": "xiaohongshu",
+    "source_url": "https://www.xiaohongshu.com/user/profile/69a8df03000000003202417c",
+    "source_title": "去了N次新西兰✨论体验感还得是私家小团",
+    "nz_intent": "medium",
+    "nz_products_or_signals": [
+      "中文专属私导",
+      "私人精致小团",
+      "蜜月/闺蜜/亲子/环岛深度定制"
+    ],
+    "contact_name": "",
+    "contact_role": "票务代理（RED平台认证类目：票务代理，非旅行社类目）",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "platform_verification",
+        "text": "RED official verify_content = 票务代理 (business account, verify_type=2) — note: verified as ticketing agent, not travel agency",
+        "url": "https://www.xiaohongshu.com/user/profile/69a8df03000000003202417c"
+      },
+      {
+        "type": "bio",
+        "text": "中文专属私导|私人精致小团 蜜月|闺蜜|亲子|环岛深度定制 深耕本地多年|带你慢逛中土浪漫",
+        "url": "https://www.xiaohongshu.com/user/profile/69a8df03000000003202417c"
+      },
+      {
+        "type": "post",
+        "text": "新西兰，南半球的中土秘境...吸引着无数旅行者",
+        "url": "https://www.xiaohongshu.com/discovery/item/6a7968b1000000000503003b?xsec_token=YBgARa8hggRjEu8AfhTZEywmd2EaJoc-NjcjYtyOlQHXs%3D&xsec_source=app_share"
+      }
+    ],
+    "connector_used": "apify_xiaohongshu_search",
+    "confidence": 0.5,
+    "missing_fields": [
+      "contact_name",
+      "phone",
+      "email",
+      "wechat",
+      "website"
+    ]
+  },
+  {
+    "canonical_account_name": "澳新旅游NiceTrip",
+    "brand_name": "Nice Trip",
+    "account_type": "tour_operator",
+    "city": "Chongqing",
+    "province": "",
+    "country": "China",
+    "source_platform": "xiaohongshu",
+    "source_url": "https://www.xiaohongshu.com/user/profile/65976bd6000000002200868f",
+    "source_title": "澳洲老牌旅行社 | 澳大利亚旅游选我们没错~",
+    "nz_intent": "high",
+    "nz_products_or_signals": [
+      "澳新全境高端定制",
+      "包车游",
+      "精品小团游",
+      "日游",
+      "驻地悉尼&奥克兰"
+    ],
+    "contact_name": "多多哥Peter",
+    "contact_role": "主理人 (founder/principal, named in bio)",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "bio",
+        "text": "📍Nice Trip主理人-多多哥Peter 🗺️驻地悉尼&奥克兰 🎖专注澳大利亚、新西兰旅行 🉑澳新全境高端定制/包车游/精品小团游/日游",
+        "url": "https://www.xiaohongshu.com/user/profile/65976bd6000000002200868f"
+      },
+      {
+        "type": "platform_verification",
+        "text": "RED official verify_content = 旅行社 (business account, verify_type=2)",
+        "url": "https://www.xiaohongshu.com/user/profile/65976bd6000000002200868f"
+      },
+      {
+        "type": "post",
+        "text": "我们之所以叫【Nice Trip】是因为我们温柔的初心 (21 likes, 37 comments)",
+        "url": "https://www.xiaohongshu.com/discovery/item/6a61c587000000000f012de0?xsec_token=YB0qXoda9QVm9zsoNYM4XoM5HqucMezldsx1m8gbQkaiE%3D&xsec_source=app_share"
+      }
+    ],
+    "connector_used": "apify_xiaohongshu_search",
+    "confidence": 0.75,
+    "missing_fields": [
+      "phone",
+      "email",
+      "wechat",
+      "website"
+    ]
+  },
+  {
+    "canonical_account_name": "小红薯6A6AD904",
+    "brand_name": "",
+    "account_type": "wholesaler",
+    "city": "",
+    "province": "",
+    "country": "China",
+    "source_platform": "xiaohongshu",
+    "source_url": "https://www.xiaohongshu.com/user/profile/637326e7000000001f018229",
+    "source_title": "新西兰地接社招募代理🔥专做2-8人精品小团",
+    "nz_intent": "high",
+    "nz_products_or_signals": [
+      "新西兰地接社",
+      "招募代理（分销/wholesale模式）",
+      "2-8人精品小团"
+    ],
+    "contact_name": "",
+    "contact_role": "地接社招募代理（wholesale/agent-recruitment post; RED平台认证：旅行社）",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "platform_verification",
+        "text": "RED official verify_content = 旅行社 (business account, verify_type=2) despite default/unedited nickname",
+        "url": "https://www.xiaohongshu.com/user/profile/637326e7000000001f018229"
+      },
+      {
+        "type": "post",
+        "text": "最近很多同行都在问：👉 有没有靠谱的新西兰地接？👉 能不能接2-8人的精品小团？ — post is recruiting agents/resellers, i.e. a NZ ground handler seeking channel partners",
+        "url": "https://www.xiaohongshu.com/discovery/item/6a157210000000000f03ac00?xsec_token=YBGMQEsyAAUhat85L89ZxCgv_YMV-CQxiuQk5K2xwm3yU%3D&xsec_source=app_share"
+      }
+    ],
+    "connector_used": "apify_xiaohongshu_search",
+    "confidence": 0.6,
+    "missing_fields": [
+      "brand_name (account never renamed from RED default)",
+      "contact_name",
+      "phone",
+      "email",
+      "wechat",
+      "website",
+      "city"
+    ]
+  },
+  {
+    "canonical_account_name": "鹏哥新西兰定制旅游",
+    "brand_name": "鹏哥新西兰",
+    "account_type": "tour_operator",
+    "city": "Guangdong",
+    "province": "",
+    "country": "China",
+    "source_platform": "xiaohongshu",
+    "source_url": "https://www.xiaohongshu.com/user/profile/66ab200e000000001d032113",
+    "source_title": "新西兰定制游✨舒服的旅行真的不用费力",
+    "nz_intent": "high",
+    "nz_products_or_signals": [
+      "新西兰南岛旅行",
+      "包车游",
+      "定制游",
+      "轻奢独享团",
+      "华人司导"
+    ],
+    "contact_name": "鹏哥",
+    "contact_role": "旅行社经营者（个人品牌名义经营，RED平台认证：旅行社）",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "platform_verification",
+        "text": "RED official verify_content = 旅行社 (business account, verify_type=2)",
+        "url": "https://www.xiaohongshu.com/user/profile/66ab200e000000001d032113"
+      },
+      {
+        "type": "bio",
+        "text": "🇳🇿专注新西兰南岛旅行游玩 🚗包车游｜定制游｜轻奢独享团 🚩华人司导 多条纯玩路线",
+        "url": "https://www.xiaohongshu.com/user/profile/66ab200e000000001d032113"
+      }
+    ],
+    "connector_used": "apify_xiaohongshu_search",
+    "confidence": 0.65,
+    "missing_fields": [
+      "phone",
+      "email",
+      "wechat",
+      "website"
+    ]
+  },
+  {
+    "canonical_account_name": "新西兰包车司导kiki",
+    "brand_name": "",
+    "account_type": "product_manager_individual",
+    "city": "Sichuan",
+    "province": "",
+    "country": "China",
+    "source_platform": "xiaohongshu",
+    "source_url": "https://www.xiaohongshu.com/user/profile/64d4c9700000000001004bfc",
+    "source_title": "新西兰包车我有推荐的！人巨好",
+    "nz_intent": "high",
+    "nz_products_or_signals": [
+      "新西兰包车",
+      "地陪",
+      "接送机服务",
+      "免费行程规划"
+    ],
+    "contact_name": "kiki",
+    "contact_role": "持证8年女司导/地陪（个人经营者，非平台认证企业号）",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "bio",
+        "text": "我是新西兰当地持证8年女司导👩 新西兰包车｜专业地陪｜接送机服务｜免费行程规划 免费分享新西兰旅游信息🇳🇿",
+        "url": "https://www.xiaohongshu.com/user/profile/64d4c9700000000001004bfc"
+      },
+      {
+        "type": "engagement",
+        "text": "Highest engagement in the search set: 503 likes / 487 comments on a driver-recommendation post, indicating an active NZ-based charter driver/guide with real demand",
+        "url": "https://www.xiaohongshu.com/discovery/item/691301bc0000000005011e42?xsec_token=YB4kw-wQ23XSUjdSEFUkatkTxaJfoJnF9HrXHukT25jE8%3D&xsec_source=app_share"
+      }
+    ],
+    "connector_used": "apify_xiaohongshu_search",
+    "confidence": 0.55,
+    "missing_fields": [
+      "real name",
+      "phone",
+      "email",
+      "wechat",
+      "website"
+    ]
+  },
+  {
+    "canonical_account_name": "First Veil ·新西兰私奢旅行",
+    "brand_name": "First Veil",
+    "account_type": "tour_operator",
+    "city": "",
+    "province": "",
+    "country": "China",
+    "source_platform": "xiaohongshu",
+    "source_url": "https://www.xiaohongshu.com/user/profile/5ef289790000000001004a38",
+    "source_title": "零差评｜因为只做新西兰纯玩2-6人小团",
+    "nz_intent": "high",
+    "nz_products_or_signals": [
+      "南岛冰川/星空湖景",
+      "独栋私墅专属定制",
+      "专车私导",
+      "小众秘境",
+      "一价全包私人旅程"
+    ],
+    "contact_name": "",
+    "contact_role": "旅行社（RED平台认证：旅行社）",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "platform_verification",
+        "text": "RED official verify_content = 旅行社 (business account, verify_type=2)",
+        "url": "https://www.xiaohongshu.com/user/profile/5ef289790000000001004a38"
+      },
+      {
+        "type": "bio",
+        "text": "揭开南半球第一层温柔面纱 南岛冰川/星空湖景/独栋私墅专属定制 专车私导 | 小众秘境 | 一价全包私人旅程",
+        "url": "https://www.xiaohongshu.com/user/profile/5ef289790000000001004a38"
+      },
+      {
+        "type": "post",
+        "text": "我们是first veil，做新西兰地接小团已经5年了",
+        "url": "https://www.xiaohongshu.com/discovery/item/6a68166900000000010000ee?xsec_token=YBxC3rElHafz94tFtTv3HLmXZa3H3HAOhkscXM0To61KY%3D&xsec_source=app_share"
+      }
+    ],
+    "connector_used": "apify_xiaohongshu_search",
+    "confidence": 0.75,
+    "missing_fields": [
+      "contact_name",
+      "phone",
+      "email",
+      "wechat",
+      "website",
+      "city"
+    ]
+  },
+  {
+    "canonical_account_name": "Jack在新西兰",
+    "brand_name": "",
+    "account_type": "product_manager_individual",
+    "city": "",
+    "province": "",
+    "country": "China",
+    "source_platform": "xiaohongshu",
+    "source_url": "https://www.xiaohongshu.com/user/profile/698ebfd500000000240231ea",
+    "source_title": "零差评｜因为只做新西兰纯玩2-6人小团",
+    "nz_intent": "high",
+    "nz_products_or_signals": [
+      "新西兰地接",
+      "小团",
+      "包车",
+      "定制",
+      "门票代订"
+    ],
+    "contact_name": "Jack",
+    "contact_role": "中文导游/地接经营者8年（个人经营，非平台认证企业号）",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "bio",
+        "text": "💙 深耕南半球旅游7年+ 💙 带你玩转100%纯净新西兰 💙 新西兰本地地接，不做流水线 💙 小团丨包车丨定制丨门票代订",
+        "url": "https://www.xiaohongshu.com/user/profile/698ebfd500000000240231ea"
+      },
+      {
+        "type": "post",
+        "text": "我是Jack，做新西兰中文导游已经8年了 (203 likes, 316 comments — high engagement)",
+        "url": "https://www.xiaohongshu.com/discovery/item/6a3e158300000000060203eb?xsec_token=YBsB5s9pUuez0ZgtuPjRsRpaC3JTqGIX_soK8BDptLNus%3D&xsec_source=app_share"
+      }
+    ],
+    "connector_used": "apify_xiaohongshu_search",
+    "confidence": 0.6,
+    "missing_fields": [
+      "real name",
+      "phone",
+      "email",
+      "wechat",
+      "website",
+      "city"
+    ]
+  },
+  {
+    "canonical_account_name": "曜境旅行",
+    "brand_name": "曜境旅行",
+    "account_type": "tour_operator",
+    "city": "",
+    "province": "",
+    "country": "China",
+    "source_platform": "xiaohongshu",
+    "source_url": "https://www.xiaohongshu.com/user/profile/5574586d22cfcd305f2a72f6",
+    "source_title": "新西兰南岛全景｜8日纯净之旅✨8人尊享小团",
+    "nz_intent": "medium",
+    "nz_products_or_signals": [
+      "新西兰南岛8日纯净之旅",
+      "精品跟团游",
+      "1v1定制游"
+    ],
+    "contact_name": "",
+    "contact_role": "旅行社（RED平台认证：旅行社），主营欧美线路，新西兰为其中一条线路",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "platform_verification",
+        "text": "RED official verify_content = 旅行社 (business account, verify_type=2)",
+        "url": "https://www.xiaohongshu.com/user/profile/5574586d22cfcd305f2a72f6"
+      },
+      {
+        "type": "bio",
+        "text": "🌍主营：欧洲·美国·冰岛·挪威·新西兰 💯服务：精品跟团游👑 1v1定制游 🏆认证：世界旅游联盟WTA成员｜美国ASTA+NTA双认证",
+        "url": "https://www.xiaohongshu.com/user/profile/5574586d22cfcd305f2a72f6"
+      },
+      {
+        "type": "post",
+        "text": "当库克山的倒影映入牛奶蓝的普卡基湖... 新西兰南岛全景｜8日纯净之旅",
+        "url": "https://www.xiaohongshu.com/discovery/item/6a69d1e30000000001001136?xsec_token=YBox6k52YE4JFUwg7NuF1_XCAdcbFoA_2B-UFkNSqlXFs%3D&xsec_source=app_share"
+      }
+    ],
+    "connector_used": "apify_xiaohongshu_search",
+    "confidence": 0.5,
+    "missing_fields": [
+      "contact_name",
+      "phone",
+      "email",
+      "wechat",
+      "website",
+      "city"
+    ]
+  }
+]

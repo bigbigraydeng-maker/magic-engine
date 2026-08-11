@@ -1,0 +1,273 @@
+[
+  {
+    "canonical_account_name": "驴妈妈旅游 (Lvmama.com)",
+    "brand_name": "Lvmama",
+    "account_type": "tour_operator",
+    "city": "Shanghai",
+    "province": "Shanghai",
+    "country": "China",
+    "source_platform": "linkedin",
+    "source_url": "https://www.linkedin.com/company/9347030",
+    "source_title": "harvestapi/linkedin-company-search + harvestapi/linkedin-profile-search",
+    "nz_intent": "medium",
+    "nz_products_or_signals": [
+      "Job title '澳新资深旅游产品经理' (Senior Australia/New Zealand Travel Product Manager) held since March 2016 (10y6m tenure) per LinkedIn profile",
+      "Lvmama.com is a major Chinese OTA/travel platform, public company (NEEQ code 835188), HQ Shanghai, offers 出境游 (outbound tour) bookings alongside domestic and ticketing products",
+      "Lvmama's own LinkedIn company stats show 'Product Management' as the largest single function among its ~615 LinkedIn-visible China staff (119 people), consistent with having dedicated destination product manager roles"
+    ],
+    "contact_name": "Lin Shimu (林诗牧)",
+    "contact_role": "澳新资深旅游产品经理 / Senior Australia-New Zealand Travel Product Manager",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "http://www.lvmama.com",
+    "evidence": [
+      {
+        "type": "linkedin_profile",
+        "text": "currentPositions: title '澳新资深旅游产品经理', companyName '驴妈妈旅游', current=true, startedOn 2016-03, tenureAtCompany 10y6m",
+        "url": "https://www.linkedin.com/in/ACwAACWG7zIBavPcwjsj1rr4xrAAlJVt78J-uBY"
+      },
+      {
+        "type": "linkedin_company",
+        "text": "Lvmama.com company description: 'China's leading full-service travel planning website... provides ... overseas tours ...'; HQ Shanghai; Public Company; NEEQ 835188",
+        "url": "https://www.linkedin.com/company/9347030"
+      }
+    ],
+    "connector_used": "apify_linkedin_harvestapi",
+    "confidence": 0.8,
+    "missing_fields": ["phone", "email", "wechat", "specific NZ itinerary/product names"]
+  },
+  {
+    "canonical_account_name": "中商国际旅行社 (Zhongshang International Travel Agency)",
+    "brand_name": "中商国际旅行社",
+    "account_type": "wholesaler",
+    "city": "Beijing",
+    "province": "Beijing",
+    "country": "China",
+    "source_platform": "linkedin",
+    "source_url": "https://www.linkedin.com/in/ACwAAB9rfRABREGlTPq4tVBW5duQHQl3yuY6gF8",
+    "source_title": "harvestapi/linkedin-profile-search",
+    "nz_intent": "high",
+    "nz_products_or_signals": [
+      "Profile summary (self-written, Chinese): '澳大利亚、新西兰专业地接社，承接中国公民赴澳、新商务、旅游、培训、考察和投资移民等各项接待' (specialist Australia/New Zealand agency handling Chinese outbound business, tourism, training, inspection-tour and investment-migration trips), plus a 'VIP全球订制大客户部' (VIP global custom key-account department)",
+      "Current title '澳新部经理' (Australia-New Zealand Department Manager), 10y6m tenure since March 2016"
+    ],
+    "contact_name": "Wenjuan (Cici)",
+    "contact_role": "澳新部经理 / Australia-New Zealand Department Manager",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "linkedin_profile",
+        "text": "Full self-description explicitly naming Australia and New Zealand as the agency's specialty; title '澳新部经理' at 中商国际旅行社",
+        "url": "https://www.linkedin.com/in/ACwAAB9rfRABREGlTPq4tVBW5duQHQl3yuY6gF8"
+      }
+    ],
+    "connector_used": "apify_linkedin_harvestapi",
+    "confidence": 0.75,
+    "missing_fields": ["company LinkedIn page (not matched/linked in scrape)", "website", "phone", "email", "wechat"]
+  },
+  {
+    "canonical_account_name": "北京众信国际旅行社股份有限公司 (Beijing Zhongxin International Travel Agency Co., Ltd.)",
+    "brand_name": "众信旅游 / UTS",
+    "account_type": "tour_operator",
+    "city": "Beijing",
+    "province": "Beijing",
+    "country": "China",
+    "source_platform": "linkedin",
+    "source_url": "https://www.linkedin.com/company/3997897",
+    "source_title": "harvestapi/linkedin-profile-search (company link embedded in profile record)",
+    "nz_intent": "medium",
+    "nz_products_or_signals": [
+      "Current title '澳新部直客产品经理' (Australia-New Zealand Department Direct-Client Product Manager) at this company, per LinkedIn profile"
+    ],
+    "contact_name": "Zhou Fei (周菲)",
+    "contact_role": "澳新部直客产品经理 / ANZ Direct-Client Product Manager",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "linkedin_profile",
+        "text": "currentPositions: title '澳新部直客产品经理', companyName '北京众信国际旅行社股份有限公司', current=true",
+        "url": "https://www.linkedin.com/in/ACwAAB3gC4IBTUzM-d7Q8zkPRKtJUu3un55G7D0"
+      }
+    ],
+    "connector_used": "apify_linkedin_harvestapi",
+    "confidence": 0.65,
+    "missing_fields": ["independent company-page confirmation (company_id 3997897 came from the profile record, not a separate verified company-search hit)", "website", "phone", "email", "wechat"]
+  },
+  {
+    "canonical_account_name": "国旅环球(北京)国际旅行社有限公司上海分公司 (Guolv Huanqiu (Beijing) International Travel Agency Co., Ltd., Shanghai Branch)",
+    "brand_name": "国旅环球",
+    "account_type": "tour_operator",
+    "city": "Shanghai",
+    "province": "Shanghai",
+    "country": "China",
+    "source_platform": "linkedin",
+    "source_url": "https://www.linkedin.com/company/%E5%9B%BD%E6%97%85%E7%8E%AF%E7%90%83-%E5%8C%97%E4%BA%AC-%E5%9B%BD%E9%99%85%E6%97%85%E8%A1%8C%E7%A4%BE%E6%9C%89%E9%99%90%E5%85%AC%E5%8F%B8%E4%B8%8A%E6%B5%B7%E5%88%86%E5%85%AC%E5%8F%B8/",
+    "source_title": "harvestapi/linkedin-company-search + harvestapi/linkedin-profile-search",
+    "nz_intent": "medium",
+    "nz_products_or_signals": [
+      "Current title '澳新部经理' (Australia-New Zealand Department Manager) at this Shanghai branch, per LinkedIn profile",
+      "Company page confirms a real, active China-based travel-agency branch (15 employees, Shanghai address) though LinkedIn mis-tags its industry as 'management consulting'"
+    ],
+    "contact_name": "Mao Zongyu (毛宗宇)",
+    "contact_role": "澳新部经理 / Australia-New Zealand Department Manager",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "linkedin_profile",
+        "text": "currentPositions: title '澳新部经理', companyName '国旅环球（北京）国际旅行社有限公司上海分公司', current=true",
+        "url": "https://www.linkedin.com/in/ACwAACASd2AB5bGGAyHMSDhdz6MD2jkWmOPVunI"
+      },
+      {
+        "type": "linkedin_company",
+        "text": "'国旅环球(北京)国际旅行社有限公司上海分公司 is a ... company based out of ... 上海市, China', 15 employees",
+        "url": "https://www.linkedin.com/company/%E5%9B%BD%E6%97%85%E7%8E%AF%E7%90%83-%E5%8C%97%E4%BA%AC-%E5%9B%BD%E9%99%85%E6%97%85%E8%A1%8C%E7%A4%BE%E6%9C%89%E9%99%90%E5%85%AC%E5%8F%B8%E4%B8%8A%E6%B5%B7%E5%88%86%E5%85%AC%E5%8F%B8/"
+      }
+    ],
+    "connector_used": "apify_linkedin_harvestapi",
+    "confidence": 0.7,
+    "missing_fields": ["website", "phone", "email", "wechat"]
+  },
+  {
+    "canonical_account_name": "中国旅行社总社 / China Travel Service Head Office Co., Ltd.",
+    "brand_name": "中旅总社 / CTS",
+    "account_type": "tour_operator",
+    "city": "Beijing",
+    "province": "Beijing",
+    "country": "China",
+    "source_platform": "linkedin",
+    "source_url": "https://www.linkedin.com/company/china-travel-service-head-office-co-ltd-/",
+    "source_title": "harvestapi/linkedin-company-search + harvestapi/linkedin-profile-search",
+    "nz_intent": "medium",
+    "nz_products_or_signals": [
+      "Current title '澳新部副经理' (Australia-New Zealand Deputy Department Manager), 26y4m tenure since May 2000, per LinkedIn profile",
+      "Company confirmed via LinkedIn company search as 'leisure, travel & tourism' industry, Beijing, website ctsho.com — part of the long-established China Travel Service group"
+    ],
+    "contact_name": "Li Yan (李艳)",
+    "contact_role": "澳新部副经理 / Australia-New Zealand Deputy Department Manager",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "http://ctsho.com",
+    "evidence": [
+      {
+        "type": "linkedin_profile",
+        "text": "currentPositions: title '澳新部副经理', companyName '中旅总社', current=true, startedOn 2000-05",
+        "url": "https://www.linkedin.com/in/ACwAACcZXMsBeiOsluLAROU0uGJFqWabsUDsl6Q"
+      },
+      {
+        "type": "linkedin_company",
+        "text": "'China Travel Service Head Office Co., Ltd. is a leisure, travel & tourism company based out of Beijing, Beijing, China.' website ctsho.com, 34 employees",
+        "url": "https://www.linkedin.com/company/china-travel-service-head-office-co-ltd-/"
+      }
+    ],
+    "connector_used": "apify_linkedin_harvestapi",
+    "confidence": 0.75,
+    "missing_fields": ["phone", "email", "wechat"]
+  },
+  {
+    "canonical_account_name": "房车生活家 (Fangche Shenghuojia / \"RV Life Home\")",
+    "brand_name": "房车生活家",
+    "account_type": "custom_travel_designer",
+    "city": "Guangzhou",
+    "province": "Guangdong",
+    "country": "China",
+    "source_platform": "linkedin",
+    "source_url": "https://www.linkedin.com/in/ACwAAAS60SkBci_GhUMze4bjwfuyVkxICxi98QU",
+    "source_title": "harvestapi/linkedin-profile-search",
+    "nz_intent": "high",
+    "nz_products_or_signals": [
+      "Profile summary (Chinese, self-written): '从事旅游行业超过十四年，专注澳新旅游产品，澳大利亚优选旅游专家，新西兰金牌旅游专家' (14+ years in travel, focused on Australia/NZ travel products; self-titled 'Australia Select Travel Expert' and 'New Zealand Gold-Medal Travel Expert')",
+      "Company name '房车生活家' ('RV/campervan life') suggests a campervan/self-drive holiday niche, a well-known NZ tourism product category"
+    ],
+    "contact_name": "Kane Kwan",
+    "contact_role": "产品经理 / Product Manager",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "linkedin_profile",
+        "text": "currentPositions: title '产品经理', companyName '房车生活家', current=true, since 2021-10; summary explicitly claims NZ/AU specialization",
+        "url": "https://www.linkedin.com/in/ACwAAAS60SkBci_GhUMze4bjwfuyVkxICxi98QU"
+      }
+    ],
+    "connector_used": "apify_linkedin_harvestapi",
+    "confidence": 0.65,
+    "missing_fields": ["company LinkedIn page (not matched in scrape)", "website", "phone", "email", "wechat"]
+  },
+  {
+    "canonical_account_name": "Trip.com Group",
+    "brand_name": "Trip.com",
+    "account_type": "tour_operator",
+    "city": "Shanghai",
+    "province": "Shanghai",
+    "country": "China",
+    "source_platform": "linkedin",
+    "source_url": "https://www.linkedin.com/company/112959",
+    "source_title": "harvestapi/linkedin-profile-search",
+    "nz_intent": "high",
+    "nz_products_or_signals": [
+      "Current title 'Product Marketing Director - Oceania' at Trip.com Group, started March 2026, per LinkedIn profile",
+      "A second Trip.com employee found in the same search ('Business Excellence Manager') separately listed 'Australia, New Zealand' among key regions covered in a prior role at Trip.com, corroborating an active Oceania desk"
+    ],
+    "contact_name": "Kaiying \"Roxy\" Zhou",
+    "contact_role": "Product Marketing Director - Oceania",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "linkedin_profile",
+        "text": "currentPositions: title 'Product Marketing Director - Oceania', companyName 'Trip.com Group', current=true, startedOn 2026-03",
+        "url": "https://www.linkedin.com/in/ACwAAAfU23YB_peecqi_Ucx7tDSNmnSUVfH-nCU"
+      }
+    ],
+    "connector_used": "apify_linkedin_harvestapi",
+    "confidence": 0.85,
+    "missing_fields": ["phone", "email", "wechat", "website"]
+  },
+  {
+    "canonical_account_name": "Create Consulting China",
+    "brand_name": "Create Consulting China",
+    "account_type": "other",
+    "city": "Beijing",
+    "province": "Beijing",
+    "country": "China",
+    "source_platform": "linkedin",
+    "source_url": "https://www.linkedin.com/company/56406111",
+    "source_title": "harvestapi/linkedin-profile-search",
+    "nz_intent": "medium",
+    "nz_products_or_signals": [
+      "Profile states nearly 13 years at Tourism New Zealand as 'Strategic Relationship Manager (Greater China)' and 'Trade Manager', including launching China-NZ air routes and building OTA/airline/travel-agency trade partnerships across Greater China",
+      "Current role (since Dec 2025) is VP, AI Marketing Strategy at a China-based consultancy that helps 'overseas tourism boards, attractions, and destination management companies' reach Chinese travelers via AI/GEO — i.e. this person is now a connector/advisor rather than a B2B channel partner who himself sells NZ tours"
+    ],
+    "contact_name": "Alfred Li",
+    "contact_role": "VP, AI Marketing Strategy (ex Tourism New Zealand, Greater China)",
+    "phone": "",
+    "email": "",
+    "wechat": "",
+    "website": "",
+    "evidence": [
+      {
+        "type": "linkedin_profile",
+        "text": "Full career summary naming 13 years at Tourism New Zealand and current VP role advising international tourism destinations entering the Chinese market",
+        "url": "https://www.linkedin.com/in/ACwAAAKfXDMBNxpCUW6d2JRBlLFbStNmXbmgUg0"
+      }
+    ],
+    "connector_used": "apify_linkedin_harvestapi",
+    "confidence": 0.5,
+    "missing_fields": ["phone", "email", "wechat", "website", "NOTE: boundary case — currently a marketing/GEO consultant, not a company that itself sells ANZ tours; include as a well-connected industry contact, not a direct channel-partner account"]
+  }
+]
