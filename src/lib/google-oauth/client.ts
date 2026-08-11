@@ -67,7 +67,13 @@ function clientSecret(): string {
   return s
 }
 
-export type OAuthFlow = 'admin' | 'connect'
+/**
+ * 'admin'   → FDE 后台发起，回调落地 settings 页
+ * 'connect' → 公网无登录客户自助页 /connect/[clientId]
+ * 'wizard'  → $990 自助新手引导向导，回调必须落回向导本身，不能落到 settings 页
+ *             (板桥 2026-08-11 复审：落错地方会把客户送进一个他看不懂的 FDE 内部页面)
+ */
+export type OAuthFlow = 'admin' | 'connect' | 'wizard'
 
 export interface VerifiedState {
   clientId: string
@@ -94,10 +100,9 @@ export function verifyState(state: string): VerifiedState | null {
       Buffer.from(payload, 'base64url').toString('utf8'),
     ) as { clientId: string; flow?: string; exp: number }
     if (Date.now() > data.exp) return null
-    return {
-      clientId: data.clientId,
-      flow: data.flow === 'connect' ? 'connect' : 'admin',
-    }
+    const flow: OAuthFlow =
+      data.flow === 'connect' ? 'connect' : data.flow === 'wizard' ? 'wizard' : 'admin'
+    return { clientId: data.clientId, flow }
   } catch {
     return null
   }

@@ -24,6 +24,11 @@
 
 /** 这些站的链接机器验不了：未登录一律返回登录页外壳，看不出目标存不存在。 */
 const LOGIN_REQUIRED_HOSTS = [
+  // 我们自己的后台也在此列：实测 2026-08-05，未登录访问
+  // app.magicengine.com.au/dashboard/... 会 307 跳到 /login 再返回 200，
+  // **好链接和坏链接返回的是同一个东西**。curl 出来的 200 是假信号，
+  // 跟下面那些 Google/Facebook 站是同一个坑。
+  'app.magicengine.com.au',
   'search.google.com',
   'business.google.com',
   'analytics.google.com',

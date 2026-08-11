@@ -219,11 +219,15 @@ async function loadGlobalLessons(
  * 三种写法都能命中同一批行业经验 —— 后台填写不规范不该让客户读不到课。
  * 返回空数组 = 不查 industry 层（只吃 global/channel）。
  */
+export function normaliseIndustry(raw: string): string {
+  return raw.trim().toLowerCase().replace(/[\s-]+/g, '_')
+}
+
 function buildIndustryMatchCandidates(raw: string | null): string[] {
   const trimmed = raw?.trim()
   if (!trimmed) return []
 
-  const normalized = trimmed.toLowerCase().replace(/[\s-]+/g, '_')
+  const normalized = normaliseIndustry(trimmed)
   return normalized === trimmed ? [trimmed] : [trimmed, normalized]
 }
 

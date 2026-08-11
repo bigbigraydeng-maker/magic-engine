@@ -1,0 +1,10 @@
+---
+// One-line agent contact, used under every CTA.
+import { agent } from '../data/agent.js';
+const { align = 'center' } = Astro.props;
+---
+<p class="contact" style={`text-align:${align}`}>
+  {agent.name} · {agent.company} ·
+  <a href={agent.phoneHref} style="color:inherit">{agent.phone}</a> ·
+  <a href={agent.emailHref} style="color:inherit">{agent.email}</a>
+</p>

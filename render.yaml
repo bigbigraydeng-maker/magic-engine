@@ -1,104 +1,16 @@
 services:
-  - type: web
-    name: magic-engine
-    env: node
-    plan: standard
-    buildCommand: npm install && npm run build
-    startCommand: npm start
-    envVars:
-      - key: NEXT_PUBLIC_SUPABASE_URL
-        sync: false
-      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
-      - key: OPENAI_API_KEY
-        sync: false
-      # ── Voice Agent (docs/voice-agent/) ──
-      - key: OPENAI_PROJECT_ID
-        sync: false
-      - key: OPENAI_WEBHOOK_SECRET
-        sync: false
-      - key: OPENAI_REALTIME_MODEL
-        value: gpt-realtime-2.1-mini
-      - key: OPENAI_SUMMARY_MODEL
-        value: gpt-4o-mini
-      - key: OPENAI_KB_MODEL
-        value: gpt-4o-mini
-      - key: INTERNAL_WORKER_TOKEN
-        sync: false
-      - key: REALTIME_WORKER_URL
-        sync: false           # private URL of the voice-realtime-worker service
-      - key: VOICE_STORE
-        value: supabase
-      - key: OUTBOUND_CALLING_ENABLED
-        value: "false"        # sandbox only until real-call go-live (板桥 硬闸 #3)
-      - key: VOICE_TEST_NUMBERS
-        sync: false
-      - key: VOICE_DEFAULT_AGENT_ID
-        sync: false           # single-number fallback when the DID isn't preserved
-      - key: DEFAULT_COUNTRY
-        value: NZ
-      - key: DEFAULT_TIMEZONE
-        value: Pacific/Auckland
-      - key: ANTHROPIC_API_KEY
-        sync: false
-      # ⚠️ 代码读的是 ATLAS_CLOUD_API_KEY（src/lib/visual/{atlas,seedance,wavespeed}.ts）。
-      # ATLAS_API_KEY 是历史遗留名字，代码里没有任何地方读它 —— 只填它 = 图片/视频生成挂掉。
-      # 两个都先留着，等确认 Render 面板现状后再删旧名。见 docs/PITFALLS.md A1。
-      - key: ATLAS_CLOUD_API_KEY
-        sync: false
-      - key: ATLAS_API_KEY          # 待清理（无代码读取）
-        sync: false
-      - key: HEYGEN_API_KEY
-        sync: false
-      - key: HEYGEN_DEFAULT_AVATAR_ID
-        sync: false
-      - key: HEYGEN_DEFAULT_VOICE_ID
-        sync: false
-      - key: SEMRUSH_API_KEY
-        sync: false
-      - key: SEMRUSH_DB
-        value: au
-      - key: DATAFORSEO_LOGIN
-        sync: false
-      - key: DATAFORSEO_PASSWORD
-        sync: false
-      - key: GITHUB_TOKEN
-        sync: false
-      - key: GITHUB_WEBHOOK_SECRET
-        sync: false
-      - key: PUBLER_API_KEY
-        sync: false
-      - key: PUBLER_WORKSPACE_ID
-        sync: false
-      - key: PERPLEXITY_API_KEY
-        sync: false
-      - key: CRON_SECRET
-        sync: false
-      - key: NEXT_PUBLIC_APP_URL
-        value: https://app.magicengine.com.au
-      - key: APP_URL
-        value: https://app.magicengine.com.au
-      - key: OPENAI_BASE_URL
-        value: https://gateway.ai.cloudflare.com/v1/bbd84393da8e5707ba617749dc17117c/magic-engine/openai
-      - key: ANTHROPIC_BASE_URL
-        value: https://gateway.ai.cloudflare.com/v1/bbd84393da8e5707ba617749dc17117c/magic-engine/anthropic
-      - key: YOUTUBE_API_KEY
-        sync: false
-      - key: CLOUDFLARE_MGMT_TOKEN
-        sync: false
-      - key: ADMIN_EMAILS
-        sync: false
-      - key: CLIENT_VIEWERS
-        sync: false
-      - key: RESEND_API_KEY
-        sync: false
-      - key: RENDER_EXTERNAL_URL
-        fromService:
-          type: web
-          name: magic-engine
-          property: host
+
+  # ⚠️ 本 blueprint 不定义 web 服务。
+  #
+  # 对外的生产 Web 服务是 Render 上的 `crazycontent`(srv-d79s6d95pdvs73boptcg),
+  # 它持有 app.magicengine.com.au / magicengine.com.au / magicengine.cloud 三个域名、
+  # 55 个环境变量(含 CRON_SECRET 与全部 API key),从 bigbigraydeng-maker/magic-engine
+  # 的 main 分支自动部署,归属另一个 blueprint。
+  #
+  # 这里原本还定义了一个同仓同分支的 web 服务 `magic-engine` —— 它没有域名、
+  # 环境变量只配了 16 个(缺 CRON_SECRET 和所有 API key),从未对外服务过,
+  # 只是每次 push 都构建一次、失败一次、发一封告警邮件。已于 2026-07-25 移除。
+  # 下面的 cron 全部 curl app.magicengine.com.au,即打到 crazycontent,与此无关。
 
   # NOTE: Voice Agent realtime link runs IN-PROCESS inside the web service (MVP mode) —
   # the webhook opens the OpenAI realtime WebSocket directly, so NO separate worker
@@ -209,7 +121,8 @@ services:
   # Prospecting auto-sweep — every 10 minutes (Phase 35)
   # Advances the outbound conveyor one bounded step per fire:
   #   audit -> analyze -> draft -> discover next industry x NZ-city seed.
-  # No-ops unless PROSPECTING_SWEEP_ENABLED=true (ships dark; PM turns spend on).
+  # No-ops unless PROSPECTING_SWEEP_ENABLED=true on the web service (this cron only
+  # curls; a flag set here would never be read). Ships dark; PM turns spend on.
   # Sending stays human — drafts land in the review queue only.
   - type: cron
     name: prospecting-sweep
@@ -504,6 +417,62 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # 🔴 效果回流 —— DAPE 这个圈能不能合拢，全靠下面这两条。
+  #
+  # 2026-08-04 查出来：这两个接口**代码早就写好了，但 render.yaml 里没有、
+  # 登记表里也没有 —— 从来没有任何东西调用过它们**。后果是
+  # `prescription_outcomes` 从建库到今天**一条记录都没有**：
+  # 「我们给客户出的方案到底有没有用」这个问题，系统一次都没回答过。
+  # 没有这一环，下一轮出方案时 AI 不知道上一轮哪条管用、哪条白干。
+  # 而且因为它们不在登记表里，连「没跑」的告警都不会报 —— 又是「看不见」。
+
+  # 处方效果实测回填 —— 每天看有没有处方到了批准后 30/60/90 天的节点，
+  # 到了就拉真实指标写进 prescription_outcomes。日更但只在节点当天真干活。
+  - type: cron
+    name: kpi-backfill
+    env: node
+    schedule: "20 6 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/kpi-backfill
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # 行业基准累积 —— 把上面攒下来的实测值按行业/规模/市场分组算 P50/P75/P90。
+  # 周更即可；样本不够时本来就不该写，会在运行记录里写明「等实测结果攒够」。
+  # ⚠️ 这个 route 只实现了 GET，别加 -X POST（会 405）。
+  - type: cron
+    name: benchmark-accumulator
+    env: node
+    schedule: "40 7 * * 1"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/benchmark-accumulator
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # 发布通道自动重测 —— 让临时故障自己好。
+  # 🔴 起因:Oztop 的 WordPress 通道 2026-06-19 被客户主机商的安全防护拦了一次,
+  #    标成 error 之后 **47 天没有任何东西重测过**(全仓没有 cron 碰 cms_connections),
+  #    于是一次几分钟的拦截变成永久停止发布,而周更 cron 还在照常写文章。
+  # 只测 status='error' 的行,不碰正常连接。同一条最短 20 小时才再测一次。
+  # ⚠️ 这个 route 只实现了 GET,别加 -X POST(会 405)。
+  - type: cron
+    name: cms-connection-retest
+    env: node
+    schedule: "10 6 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/cms-connection-retest
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # DAPE P 段(处方)—— 吃周一体检的结果开方,并自动落地成执行看板上的动作。
   # 🔴 花钱路径:每个客户打一次 AI。同客户 6 天冷却。
   #    刻意跟体检分成两个任务:混在一起挂了分不清是没采到数据还是没生成方案。
@@ -516,6 +485,26 @@ services:
     startCommand: |
       curl -fsS --max-time 800 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/prescription-weekly
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
+  # DAPE E 段(执行)—— 把看板上排好的动作真正跑掉,产物只落草稿。
+  # 🔴 起因:2026-08-05 实测 execution_items 里 281 件待办,最后一件「完成」在 7-21。
+  #    判定用的两道闸(背书+白名单)早写好了,一直零调用方 —— 链子跑到最后一步就断。
+  # 🔴 上线方式(PM 认可):现在挂着 ?dry_run=1,**只选不做**,把名单打出来给人眼确认。
+  #    确认名单对了之后分两步放开:先去掉 dry_run 只留 ?max=1 试水一轮,
+  #    再把 ?max=1 也去掉(一轮最多 3 件,每客户 1 件是代码里的硬上限)。
+  #    这两步各是一行改动,改在这里、看得见、能回滚。
+  # 每天 09:30 UTC,排在周二 08:00 的处方之后 —— 新方案落地当天就能被执行。
+  - type: cron
+    name: execution-auto-run
+    env: node
+    schedule: "30 9 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
+        "https://app.magicengine.com.au/api/cron/execution-auto-run?dry_run=1"
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -734,6 +723,14 @@ services:
   # 🔴 安全阀:未设 FACTORY_PUBLISH_LIVE=true 时**只发草稿**(video_state=DRAFT,
   #    不公开),供 PM 验格式。验完 PM 显式 go 才在 Render 设 true 真发客户主页(不可逆)。
   # 发布正文在 publish-worker 内另有红线闸(scanPublishCaption),命中即终态不发。
+  # 讲课片发布也在这条 worker 里顺带跑(runLecturePublishSweep),**不另开 cron**:
+  # 新建的 cron 服务不会自动拿到 CRON_SECRET(sync:false 只声明不填值),建了也只是每轮 401
+  # 静默失败 —— 2026-08-04 实测:排队的片等了 14 分钟没动,cron_run_logs 里连一条运行记录都没有。
+  # 挂在已经配好密钥、稳定在跑的 worker 上,就不需要任何人去后台补配置。
+  # 讲课片发布也在这条 worker 里顺带跑(runLecturePublishSweep),**不另开 cron**:
+  # 新建的 cron 服务不会自动拿到 CRON_SECRET(sync:false 只声明不填值),建了也只是每轮 401
+  # 静默失败 —— 2026-08-04 实测:排队的片等了 14 分钟没动,cron_run_logs 里连一条运行记录都没有。
+  # 挂在已经配好密钥、稳定在跑的 worker 上,就不需要任何人去后台补配置。
   - type: cron
     name: factory-publish-worker
     env: node
@@ -852,6 +849,30 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # 广告上线闸门 —— 每天把所有**在投**的广告组回读一遍，不管广告是谁建的。
+  #
+  # 为什么触发点是「每天扫」而不是「ME 建广告时」(2026-08-05 子牙复审)：
+  # 闸门原来只挂在 ME 自己的建广告入口上,而 2026-08-04 真正得罪 Boris/Richard/Jude
+  # 那批广告是在 Meta 后台直接建的 —— 规则写得再对也永远轮不到它说话。
+  # 按账户扫在投广告组之后,ME 建的 / FDE 手建的 / 客户自己建的 / Meta 自动改过的,
+  # 一视同仁。
+  #
+  # 查出来的 blocker 进「今日待办 → 需要你动手」,不留在日志里。
+  # 跑在 20:40 UTC(NZ 早上 8:40 左右):人上班第一眼就能看到,而不是等到花完一天钱。
+  # ⚠️ 部署后必须在 Render 后台 link `me-shared-cron-secret` 环境变量组,
+  #    否则每天 401 静默失败(上一个踩这个坑的 cron 哑了 51 天)。
+  - type: cron
+    name: ad-readback-sweep-daily
+    env: node
+    schedule: "40 20 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/ad-readback-sweep
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # 做片拼片 worker — 常驻容器(node+python-PIL+ffmpeg)轮询 content_factory_render_jobs，
   # 领排队任务 → 分镜 → 画面(gpt-image+Muapi i2v) → 配音(MiniMax) → ffmpeg 拼竖屏成片 → 标待审。
   # 独立服务的原因：单条 i2v/拼接跑 15-30 分钟，塞不进 web 请求。
@@ -865,6 +886,8 @@ services:
     plan: standard
     envVars:
       - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false

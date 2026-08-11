@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Contact — Park Homes</title>
+<link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="/"><img class="logo" src="/img/logo-tree-ivory.png" alt="Park Homes"><span>PARKHOMES</span></a>
+    <ul>
+      <li><a class="lnk" href="/our-story/">About</a></li>
+      <li><a class="lnk" href="/projects/">Projects</a></li>
+      <li><a class="lnk on" href="/contact/">Contact</a></li>
+    </ul>
+    <a class="btn btn-primary" href="#enquire">Enquire</a>
+    <button class="hamb" aria-label="Menu">☰</button>
+  </div>
+</header>
+
+<section class="deep dark" style="padding-bottom:clamp(36px,5vw,56px)">
+  <div class="wrap">
+    <p class="eyebrow sec-eyebrow">Contact</p>
+    <h1 class="sec-h">Talk to us about your next home</h1>
+    <p class="lead" style="color:#B9C2BE;margin-top:14px">Enquiries and sales for all Park Homes developments are handled by our appointed agent.</p>
+  </div>
+</section>
+
+<section id="enquire" class="dark deep" style="padding-top:0">
+  <div class="wrap twocol" style="align-items:start">
+    <!-- Agent card -->
+    <div>
+      <div style="border:1px solid var(--line-d);border-radius:4px;padding:28px 26px;background:rgba(255,255,255,.03)">
+        <p class="eyebrow" style="color:var(--ice)">Appointed sales agent</p>
+        <h2 style="color:#fff;font-size:28px;margin:12px 0 4px">Roman Hu</h2>
+        <p style="color:#B9C2BE;margin:0 0 18px">Ray White Mission Bay</p>
+        <div style="display:grid;gap:12px;font-size:15px;color:#D6DEE0">
+          <div><span class="eyebrow" style="color:var(--ice-dim);display:block;margin-bottom:2px">Phone</span><span class="pending" style="font-size:15px">[phone]</span></div>
+          <div><span class="eyebrow" style="color:var(--ice-dim);display:block;margin-bottom:2px">WeChat</span><span class="pending" style="font-size:15px">[WeChat]</span></div>
+          <div><span class="eyebrow" style="color:var(--ice-dim);display:block;margin-bottom:2px">Office</span>Ray White Mission Bay · Auckland</div>
+        </div>
+      </div>
+      <p style="font-size:13px;color:var(--mute);margin-top:16px">Park Homes developments are built by The Park Homes Ltd, Auckland. All sales enquiries are managed by the appointed agent above.</p>
+    </div>
+    <!-- Form -->
+    <div>
+      <h2 style="color:#fff;font-size:clamp(22px,3vw,30px);margin-bottom:20px">Send an enquiry</h2>
+      <form class="reg" onsubmit="return false">
+        <div><label>Name</label><input type="text" placeholder="Your name"></div>
+        <div><label>Phone</label><input type="text" placeholder="Your phone"></div>
+        <div class="full"><label>Email</label><input type="text" placeholder="you@email.com"></div>
+        <div class="full"><label>I'm looking to</label>
+          <select id="looking">
+            <option>Not sure yet</option>
+            <option>Buy my first home</option>
+            <option>Move to a family home</option>
+            <option>Downsize</option>
+            <option>Invest in property</option>
+          </select>
+        </div>
+        <div class="full"><label>Project of interest</label>
+          <select>
+            <option>Any / not sure yet</option>
+            <option>Riverside — now selling</option>
+            <option>Howick — under construction</option>
+            <option>Castor Bay — register interest</option>
+            <option>Forrest Hill — register interest</option>
+            <option>Greenview — planning</option>
+          </select>
+        </div>
+        <div class="full"><label>Message</label><input type="text" placeholder="Anything you'd like us to know"></div>
+        <div class="full"><button class="btn btn-primary btn-lg" style="width:100%">Send enquiry</button></div>
+      </form>
+      <p style="font-size:12px;color:var(--mute);margin-top:12px">Your enquiry is passed to our appointed agent, Roman Hu (Ray White Mission Bay).</p>
+    </div>
+  </div>
+</section>
+
+<footer class="foot">
+  <div class="wrap">
+    <div class="top">
+      <a class="brand" href="/" style="letter-spacing:.28em;color:#EDEFEC;text-decoration:none">PARKHOMES</a>
+      <nav><a href="/our-story/">About</a><a href="/projects/">Projects</a><a href="/contact/">Contact</a></nav>
+    </div>
+    <p class="fine">© 2026 The Park Homes Ltd · Auckland, New Zealand · Sales by Roman Hu, Ray White Mission Bay</p>
+  </div>
+</footer>
+
+<div class="mbar">
+  <a class="btn btn-primary" href="#enquire">Enquire</a>
+  <a class="call" href="#enquire" aria-label="Call">✆</a>
+</div>
+
+<script>
+(function(){
+  var p = new URLSearchParams(location.search).get('looking');
+  if(!p) return;
+  var map = {
+    'first-home':'Buy my first home',
+    'family-home':'Move to a family home',
+    'downsizing':'Downsize',
+    'investment':'Invest in property'
+  };
+  var want = map[p], sel = document.getElementById('looking');
+  if(!want || !sel) return;
+  for(var i=0;i<sel.options.length;i++){
+    if(sel.options[i].text === want){ sel.selectedIndex = i; break; }
+  }
+})();
+</script>
+
+</body>
+</html>

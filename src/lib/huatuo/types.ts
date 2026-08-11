@@ -44,6 +44,19 @@ export interface IndustryBenchmarkRow {
   confidence: number       // 0–1
   sample_size: number | null
   notes: string | null
+
+  // ── GROWTH 字段的独立 provenance（benchmark-accumulator 写入）─────────────
+  // 跟上面的 source / confidence / sample_size 是两套：那三个描述 score_p50/
+  // p75/p90（LEVEL，外部研究来源），这几个描述 realistic_*_growth_pct
+  // （GROWTH，ME 自有客户实测）。两者互不覆盖。
+  growth_source?: string | null
+  growth_sample_size?: number | null
+  /** 背后有几个不同客户。1 = 单客户历史，不是行业基准。 */
+  growth_client_count?: number | null
+  growth_confidence?: number | null
+  /** 实测窗口天数；growth pct 未外推到 3 个月。 */
+  growth_window_days?: number | null
+  growth_updated_at?: string | null
 }
 
 // ─── Self-Grade (multi-dimensional 0–10 score) ─────────────────────────────────

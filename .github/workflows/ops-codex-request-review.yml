@@ -1,0 +1,47 @@
+name: OPS — Request Codex Review
+
+# Part of the ME2-OPS02 Claude <-> Codex review loop. See
+# tools/ops-review-loop/README.md for the full state diagram.
+#
+# This is the "push" leg only: whenever a qualifying PR gets a new head
+# commit, ask the native Codex GitHub App to review it — exactly once per
+# head sha. It posts one PR comment and nothing else. It never merges,
+# deploys, applies a migration, or touches production data or credentials.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ops-codex-review-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  request-review:
+    # Same-repo PRs only (a fork PR's GITHUB_TOKEN must stay read-only and
+    # this workflow does not need to run for it), targeting main, on the
+    # claude/me2-* branch convention this loop is scoped to, and still open.
+    if: |
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.base.ref == 'main' &&
+      startsWith(github.event.pull_request.head.ref, 'claude/me2-') &&
+      github.event.pull_request.state == 'open'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Checked out from main, not the PR head: this control-plane script
+      # must not be influenced by the PR it is reviewing (mirrors the
+      # self-protection principle in tools/ai-orchestrator).
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Request Codex review once per head sha
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node tools/ops-review-loop/src/request-review.mjs

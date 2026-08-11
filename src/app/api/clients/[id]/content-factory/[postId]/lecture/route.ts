@@ -1,3 +1,4 @@
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 // 单讲工作台 API — 讲课式内容的脚本审改 / 制作方式 / 录像直传 / 重做 / 开始做片。
 // GET   详情(结构化脚本 + 制作方式 + 做片任务状态 + 客户 VI 色)
 // PATCH { action: save_script | save_captions | publish_facebook | set_method | recording_uploaded | recording_link | section_clip | redo_section | regen_script | start_render }
@@ -15,14 +16,12 @@ import {
   type LectureScript,
 } from '@/lib/factory/lecture-script'
 import { looksLikeVideoResponse, normalizeRecordingLink } from '@/lib/factory/recording-link'
-import { facebookReelAdapter } from '@/lib/factory/publish/facebook-reel-adapter'
-import type { PublishTarget } from '@/lib/factory/types'
 import {
   loadLecturePost,
-  recordPublished,
   saveCaptions,
   saveLectureScript,
   setLectureProduction,
+  setPublishRequest,
   setSectionClip,
   type LectureMethod,
 } from '@/lib/factory/lecture-post'
@@ -62,6 +61,14 @@ async function latestJob(postId: string) {
 }
 
 export async function GET(_req: NextRequest, { params }: Params) {
+  // 鉴权闸（2026-08-05 狄仁杰复审）：这条路由原来**完全没有任何登录校验**，
+  // 而中间件的 matcher 只覆盖 /dashboard 和 /portal，不管 /api。
+  // 实测：匿名 curl 带一个 client_id 就能拿到该客户的内容流水线（CTS 返回 30KB）。
+  const __access = await requireDashboardClientAccess(params.id)
+  if (!__access.ok) {
+    return NextResponse.json({ error: __access.error }, { status: __access.status })
+  }
+
   try {
     const loaded = await loadLecturePost(params.id, params.postId)
     if (!loaded) return NextResponse.json({ error: '未找到该讲(或不是讲课式内容)' }, { status: 404 })
@@ -84,6 +91,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
         production: loaded.production,
         captions: loaded.captions ?? [],
         published: loaded.published ?? [],
+        publishRequest: loaded.publishRequest ?? null,
         renderJob: await latestJob(params.postId),
         viColors,
       },
@@ -123,6 +131,14 @@ function validateLecturePayload(lecture: LectureScript): string | null {
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {
+  // 鉴权闸（2026-08-05 狄仁杰复审）：这条路由原来**完全没有任何登录校验**，
+  // 而中间件的 matcher 只覆盖 /dashboard 和 /portal，不管 /api。
+  // 实测：匿名 curl 带一个 client_id 就能拿到该客户的内容流水线（CTS 返回 30KB）。
+  const __access = await requireDashboardClientAccess(params.id)
+  if (!__access.ok) {
+    return NextResponse.json({ error: __access.error }, { status: __access.status })
+  }
+
   try {
     const body = (await req.json().catch(() => ({}))) as {
       action?: string
@@ -206,52 +222,31 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       }
 
       case 'publish_facebook': {
-        // 发到客户 FB 主页。复用广告线那套适配器(三步上传/防误发到别人主页/幂等防重发)。
-        // 安全阀:FACTORY_PUBLISH_LIVE 没设 = 只发草稿(主页后台可见、公众看不到)，
-        // PM 验完格式显式开了才真发——发出去不可逆。
+        // 只登记请求,真发交给后台 cron —— 发布要等 Facebook 拉几十 MB 视频,
+        // 塞在网页请求里会被网关掐断(真实事故:PM 点了拿到 HTTP 502)。
         if (!loaded.post.source_video_url) {
           return NextResponse.json({ error: '还没有成片 — 先做完片再发' }, { status: 400 })
         }
-        const { data: client } = await supabaseAdmin
-          .from('clients').select('factory_config').eq('id', params.id).single()
-        const target = (client?.factory_config as { publish_target?: PublishTarget } | null)?.publish_target
-        if (!target?.page_id) {
+        if (loaded.publishRequest?.status === 'pending' || loaded.publishRequest?.status === 'sending') {
+          return NextResponse.json({ error: '已经在发了，等几分钟看结果' }, { status: 409 })
+        }
+        // live=true 才真的公开;不填一律只发草稿。这个决定跟着这一条片走,
+        // 不再靠一个「一开全客户都真发」的全局开关。
+        const live = body.live === true
+        // 发到哪个平台。不填按 Facebook 走(老调用方一行不用改)。
+        const platform = body.platform === 'tiktok' ? 'tiktok' as const : 'facebook' as const
+        if (live && !loaded.captions?.length) {
           return NextResponse.json(
-            { error: '还没设好发到哪个 Facebook 主页 — 告诉我们主页名字，我们来配' },
+            { error: '还没校准过字幕 — 公开发之前先看一遍第⑥步' },
             { status: 400 },
           )
         }
-        const draft = process.env.FACTORY_PUBLISH_LIVE !== 'true'
-        try {
-          const ref = await facebookReelAdapter.publish({
-            videoUrl: loaded.post.source_video_url,
-            caption: loaded.lecture.ctaVariants?.fbTiktok ?? loaded.lecture.title,
-            target,
-            idempotencyTag: params.postId,
-            draft,
-          })
-          await recordPublished({
-            clientId: params.id,
-            postId: params.postId,
-            entry: {
-              platform: 'facebook',
-              pageId: ref.page_id ?? target.page_id,
-              videoId: ref.video_id ?? ref.post_id ?? '',
-              permalink: ref.permalink,
-              draft,
-              at: new Date().toISOString(),
-            },
-          })
-          return NextResponse.json({ ok: true, draft, permalink: ref.permalink })
-        } catch (e) {
-          const raw = e instanceof Error ? e.message : String(e)
-          const human = raw.includes('页名')
-            ? '发布被拦住了:目标主页跟这个客户对不上 — 联系我们确认发到哪个主页'
-            : raw.includes('TOKEN') || raw.includes('token')
-              ? 'Facebook 授权还没配好 — 联系我们处理'
-              : '发布没成功 — 稍后再试一次；反复失败联系我们'
-          return NextResponse.json({ error: human }, { status: 502 })
-        }
+        await setPublishRequest({
+          clientId: params.id,
+          postId: params.postId,
+          request: { platform, status: 'pending', live, requestedAt: new Date().toISOString() },
+        })
+        return NextResponse.json({ ok: true, queued: true, live, platform })
       }
 
       case 'save_captions': {
@@ -392,6 +387,14 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
 /** 录像直传：签一个只能写进本讲目录的上传 URL，浏览器直接 PUT 大文件，不过 API。 */
 export async function POST(req: NextRequest, { params }: Params) {
+  // 鉴权闸（2026-08-05 狄仁杰复审）：这条路由原来**完全没有任何登录校验**，
+  // 而中间件的 matcher 只覆盖 /dashboard 和 /portal，不管 /api。
+  // 实测：匿名 curl 带一个 client_id 就能拿到该客户的内容流水线（CTS 返回 30KB）。
+  const __access = await requireDashboardClientAccess(params.id)
+  if (!__access.ok) {
+    return NextResponse.json({ error: __access.error }, { status: __access.status })
+  }
+
   try {
     const body = (await req.json().catch(() => ({}))) as { fileName?: string }
     const loaded = await loadLecturePost(params.id, params.postId)

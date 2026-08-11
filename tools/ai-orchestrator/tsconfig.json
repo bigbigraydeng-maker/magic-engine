@@ -1,0 +1,21 @@
+{
+  // Scoped type check for this module only.
+  //
+  // The repository baseline carries ~180 pre-existing `tsc` errors (181 at the time
+  // of writing; it drifts with `main`, which is the point — no exact figure written
+  // down here stays true). A whole-repo `tsc --noEmit` therefore can never be a
+  // pass/fail gate: it is red before anyone touches anything. This config narrows
+  // the check to `tools/ai-orchestrator/**`, where the standard is zero errors, so
+  // CI can assert something that means something.
+  //
+  // It inherits every compiler option from the root config, so the module is held
+  // to exactly the same rules as the rest of the repository (strict, no implicit
+  // any, bundler resolution) rather than to a friendlier private dialect.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // No .tsbuildinfo: CI asserts the working tree is unchanged after the run.
+    "incremental": false
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
+}

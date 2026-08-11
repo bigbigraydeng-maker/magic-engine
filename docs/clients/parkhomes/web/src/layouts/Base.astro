@@ -1,0 +1,57 @@
+---
+const { title, desc = 'Boutique residential developments across Auckland.', active = '' } = Astro.props;
+const nav = [
+  { label: 'About',    href: '/our-story/', key: 'about' },
+  { label: 'Projects', href: '/projects/',  key: 'projects' },
+  { label: 'Journal',  href: '/journal/',   key: 'journal' },
+  { label: 'Contact',  href: '/contact/',   key: 'contact' },
+];
+---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{title}</title>
+  <meta name="description" content={desc} />
+  <link rel="stylesheet" href="/assets/site.css" />
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="/"><img class="logo" src="/img/logo-tree-ivory.png" alt="Park Homes" /><span>PARKHOMES</span></a>
+    <ul>
+      {nav.map((n) => (
+        <li><a class={`lnk${active === n.key ? ' on' : ''}`} href={n.href}>{n.label}</a></li>
+      ))}
+    </ul>
+    <a class="btn btn-primary" href="/contact/">Enquire</a>
+    <button class="hamb" aria-label="Menu">☰</button>
+  </div>
+</header>
+
+<slot />
+
+<footer class="foot">
+  <div class="wrap">
+    <div class="top">
+      <a class="brand" href="/" style="letter-spacing:.28em;color:#EDEFEC;text-decoration:none">PARKHOMES</a>
+      <nav>
+        <a href="/our-story/">About</a>
+        <a href="/projects/">Projects</a>
+        <a href="/journal/">Journal</a>
+        <a href="/contact/">Contact</a>
+      </nav>
+    </div>
+    <p class="fine">© 2026 The Park Homes Ltd · Auckland, New Zealand · Sales by Roman Hu, Ray White Mission Bay</p>
+  </div>
+</footer>
+
+<div class="mbar">
+  <a class="btn btn-primary" href="/contact/">Enquire</a>
+  <a class="call" href="tel:+6421590027" aria-label="Call Roman Hu">✆</a>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,74 @@
+---
+// Reusable gallery + lightbox. Used by any project that has client renders.
+// Images display at their natural 16:9 — no cropping. Click to enlarge.
+const { images = [], note } = Astro.props;
+const caption = note || "Artist's impressions. Final finishes, landscaping and detailing may differ.";
+---
+{images.length > 0 && (
+  <>
+    <div class="gal">
+      {images.map((im) => (
+        <figure class={im.wide ? 'wide' : ''}>
+          <img src={im.src} alt={im.alt} loading="lazy" />
+        </figure>
+      ))}
+    </div>
+    <p style="margin-top:16px;font-size:13px;color:var(--mute)">{caption} Click any image to enlarge.</p>
+
+    <div class="lightbox" id="lb" aria-hidden="true">
+      <button class="lb-btn lb-close" id="lbClose" aria-label="Close">✕</button>
+      <button class="lb-btn lb-prev" id="lbPrev" aria-label="Previous">‹</button>
+      <img id="lbImg" src="" alt="" />
+      <button class="lb-btn lb-next" id="lbNext" aria-label="Next">›</button>
+      <div class="lb-cap">Artist's impression · <span id="lbN"></span></div>
+    </div>
+
+    <script is:inline>
+      (function () {
+        var figs = [].slice.call(document.querySelectorAll('.gal img'));
+        if (!figs.length) return;
+        var lb = document.getElementById('lb'),
+          img = document.getElementById('lbImg'),
+          n = document.getElementById('lbN'),
+          i = 0;
+        function show(k) {
+          i = (k + figs.length) % figs.length;
+          img.src = figs[i].src; img.alt = figs[i].alt;
+          n.textContent = i + 1 + ' / ' + figs.length;
+        }
+        function open(k) {
+          show(k); lb.classList.add('on');
+          lb.setAttribute('aria-hidden', 'false');
+          document.body.style.overflow = 'hidden';
+        }
+        function close() {
+          lb.classList.remove('on');
+          lb.setAttribute('aria-hidden', 'true');
+          document.body.style.overflow = '';
+        }
+        figs.forEach(function (el, k) { el.addEventListener('click', function () { open(k); }); });
+        document.getElementById('lbClose').addEventListener('click', close);
+        document.getElementById('lbPrev').addEventListener('click', function (e) { e.stopPropagation(); show(i - 1); });
+        document.getElementById('lbNext').addEventListener('click', function (e) { e.stopPropagation(); show(i + 1); });
+        lb.addEventListener('click', function (e) { if (e.target === lb) close(); });
+        document.addEventListener('keydown', function (e) {
+          if (!lb.classList.contains('on')) return;
+          if (e.key === 'Escape') close();
+          if (e.key === 'ArrowLeft') show(i - 1);
+          if (e.key === 'ArrowRight') show(i + 1);
+        });
+      })();
+    </script>
+  </>
+)}
+
+{images.length === 0 && (
+  <>
+    <div class="gal">
+      <figure class="wide"><div class="shot pending" data-label="Project render — pending" style="aspect-ratio:16/9;border-radius:4px"></div></figure>
+      <figure><div class="shot pending" data-label="Project render — pending" style="aspect-ratio:16/9;border-radius:4px"></div></figure>
+      <figure><div class="shot pending" data-label="Project render — pending" style="aspect-ratio:16/9;border-radius:4px"></div></figure>
+    </div>
+    <p style="margin-top:16px;font-size:13px;color:var(--mute)">Project renders to be supplied by the developer.</p>
+  </>
+)}

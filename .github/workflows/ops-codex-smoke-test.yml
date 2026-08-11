@@ -1,0 +1,38 @@
+name: OPS — Codex Review Smoke Test
+
+# Manual, one-shot: posts "@codex review" as a bot comment on a PM-specified
+# PR so a human can observe whether the native Codex GitHub App treats a
+# bot-authored review request the same as a human-authored one
+# (ME2-OPS02 required validation #6/#7). This session had no live GitHub
+# access to run this itself — see the PR description for details.
+#
+# Posts exactly one comment. Never runs on its own (workflow_dispatch only).
+# Never merges, deploys, or touches anything but that one comment.
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to post the smoke-test comment on (use a harmless, already-open PR in this repo)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Post a bot-authored "@codex review" comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: node tools/ops-review-loop/src/smoke-test.mjs

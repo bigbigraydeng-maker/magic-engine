@@ -9,7 +9,8 @@
  * 硬性要求：3 秒拿不到就放弃。开窗口卡住比少看几条教训糟糕得多。
  */
 
-import { writeFileSync } from 'node:fs'
+import { readFileSync, statSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   readHookInput,
   ensureBufferDir,
@@ -21,6 +22,7 @@ import {
 } from './config.mjs'
 
 const CONTEXT_TIMEOUT_MS = 3000
+const STATE_DOC_MAX_BYTES = 64 * 1024
 
 async function main() {
   const input = await readHookInput()
@@ -59,17 +61,81 @@ async function main() {
     'utf8',
   )
 
-  const text = render(ctx, projectKey)
-  if (!text) return
+  // 现状在前、别人的教训在后：先知道系统是什么样，才判断得了那些教训还成不成立。
+  const sections = [readStateDoc(cwd), render(ctx, projectKey)].filter(Boolean)
+  if (sections.length === 0) return
 
   process.stdout.write(
     JSON.stringify({
       hookSpecificOutput: {
         hookEventName: 'SessionStart',
-        additionalContext: text,
+        additionalContext: sections.join('\n\n---\n\n'),
       },
     }),
   )
+}
+
+/**
+ * 开窗口时自动带上 docs/STATE.md（系统现状）。
+ *
+ * 为什么非得自动：CLAUDE.md 里只有一句「每次开新会话先读 STATE.md」+ 一个链接，
+ * 那是一张纸条，不是一道闸门。2026-08-04 有一场会话照着 CLAUDE.md 干了一整场、
+ * 一次都没打开 STATE.md，于是拿着一份十天前的旧文档体系下判断，还提议去做一件
+ * 早就做完的事。纸条治不了这个，塞进上下文才治得了。
+ *
+ * 没有这个文件的项目（大多数）静默跳过 —— 读不到永远不能拦住开窗口。
+ */
+function readStateDoc(cwd) {
+  const root = git(cwd, ['rev-parse', '--show-toplevel'])
+  if (!root) return ''
+  try {
+    const path = join(root, 'docs', 'STATE.md')
+    if (statSync(path).size > STATE_DOC_MAX_BYTES) return ''
+    const body = readFileSync(path, 'utf8').trim()
+    if (!body) return ''
+    const fresh = stateFreshness(root, body)
+    return [
+      '## 系统现状（docs/STATE.md · 开窗口自动带上）',
+      ...(fresh ? [`> ${fresh}`] : []),
+      '',
+      '**唯一真相源**：现在什么在跑 / 部署在哪 / 哪个模块对应哪段代码。',
+      '跟印象里的情况冲突时以这份为准；发现它自己过时了就去改它，不要绕过它。',
+      '',
+      body,
+    ].join('\n')
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * 这份文件有多新 —— 问 git，不信它自己写的。
+ *
+ * STATE.md 顶部有一行手写的「最后核对：**YYYY-MM-DD**」。建档那天写上之后，
+ * 后面四个版本一次都没跟着改，包括 2026-08-03 那两次真往里加了内容的改动。
+ * 于是文件永远自称停在 7/25 —— 2026-08-04 我就是读了那行、当成事实，
+ * 还把「它十天没更新」这个错结论报给了 PM。
+ *
+ * 手写的日期戳指望不上（四次全忘），所以不去要求任何人养成新习惯：
+ * 读的时候直接问 git，谁也骗不了谁。
+ */
+function stateFreshness(root, body) {
+  const committed = git(root, ['log', '-1', '--format=%cs', '--', 'docs/STATE.md'])
+  if (!committed) return '' // 还没提交过就别瞎标日期
+
+  const out = [`最后改动 **${committed}**（据 git，不是文件自己写的）`]
+
+  // 本地改了没提交时，git 那个日期是偏旧的 —— 别用一个谎去替换另一个谎
+  if (git(root, ['status', '--porcelain', '--', 'docs/STATE.md'])) {
+    out.push('本地还有未提交改动，实际比这更新')
+  }
+
+  const claimed = (body.match(/最后核对：\*\*(\d{4}-\d{2}-\d{2})\*\*/) || [])[1]
+  if (claimed && claimed !== committed) {
+    out.push(`⚠️ 文件自称「最后核对 ${claimed}」，是旧的，以 git 为准`)
+  }
+
+  return out.join(' · ')
 }
 
 /** 用本机 git 判断这些 commit 是否已经在 main 里 */

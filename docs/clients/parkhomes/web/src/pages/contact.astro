@@ -1,0 +1,97 @@
+---
+import Base from '../layouts/Base.astro';
+import { projects } from '../data/projects.js';
+import { agent } from '../data/agent.js';
+---
+<Base title="Contact — Park Homes" active="contact" desc="Enquiries for all Park Homes developments.">
+
+  <section class="deep dark" style="padding-bottom:clamp(36px,5vw,56px)">
+    <div class="wrap">
+      <p class="eyebrow sec-eyebrow">Contact</p>
+      <h1 class="sec-h">Talk to us about your next home</h1>
+      <p class="lead" style="color:#B9C2BE;margin-top:14px">Enquiries and sales for all Park Homes developments are handled by our appointed agent.</p>
+    </div>
+  </section>
+
+  <section id="enquire" class="dark deep" style="padding-top:0">
+    <div class="wrap twocol" style="align-items:start">
+      <div>
+        <div style="border:1px solid var(--line-d);border-radius:4px;padding:28px 26px;background:rgba(255,255,255,.03)">
+          <p class="eyebrow" style="color:var(--ice)">Appointed sales agent</p>
+          <h2 style="color:#fff;font-size:28px;margin:12px 0 4px">{agent.name}</h2>
+          <p style="color:#B9C2BE;margin:0 0 18px">{agent.company}</p>
+          <div style="display:grid;gap:12px;font-size:15px;color:#D6DEE0">
+            <div><span class="eyebrow" style="color:var(--ice-dim);display:block;margin-bottom:2px">Phone</span><a href={agent.phoneHref} style="color:#fff;text-decoration:none">{agent.phone}</a></div>
+            <div><span class="eyebrow" style="color:var(--ice-dim);display:block;margin-bottom:2px">Email</span><a href={agent.emailHref} style="color:#fff;text-decoration:none">{agent.email}</a></div>
+            <div><span class="eyebrow" style="color:var(--ice-dim);display:block;margin-bottom:2px">Office</span>{agent.office}</div>
+          </div>
+        </div>
+        <p style="font-size:13px;color:var(--mute);margin-top:16px">Park Homes developments are built by The Park Homes Ltd, Auckland. All sales enquiries are managed by the appointed agent above.</p>
+      </div>
+
+      <div>
+        <h2 style="color:#fff;font-size:clamp(22px,3vw,30px);margin-bottom:20px">Send an enquiry</h2>
+        <form class="reg" onsubmit="return false">
+          <div><label>Name</label><input type="text" placeholder="Your name" /></div>
+          <div><label>Phone</label><input type="text" placeholder="Your phone" /></div>
+          <div class="full"><label>Email</label><input type="text" placeholder="you@email.com" /></div>
+          <div class="full"><label>I'm looking to</label>
+            <select id="looking">
+              <option>Not sure yet</option>
+              <option>Buy my first home</option>
+              <option>Move to a family home</option>
+              <option>Downsize</option>
+              <option>Invest in property</option>
+            </select>
+          </div>
+          <div class="full"><label>Area of interest</label>
+            <select id="area">
+              <option value="">Any area</option>
+              <option value="north-shore">North Shore</option>
+              <option value="east">East Auckland</option>
+              <option value="south">South Auckland</option>
+              <option value="west">West Auckland (coming soon)</option>
+            </select>
+          </div>
+          <div class="full"><label>Project of interest</label>
+            <select>
+              <option>Any / not sure yet</option>
+              {projects.map((p) => <option>{p.name} — {p.status.toLowerCase()}</option>)}
+            </select>
+          </div>
+          <div class="full"><label>Message</label><input type="text" placeholder="Anything you'd like us to know" /></div>
+          <div class="full"><button class="btn btn-primary btn-lg" style="width:100%">Send enquiry</button></div>
+        </form>
+        <p style="font-size:12px;color:var(--mute);margin-top:12px">Your enquiry is passed to our appointed agent, Roman Hu (Ray White Mission Bay).</p>
+      </div>
+    </div>
+  </section>
+
+  <script is:inline>
+    (function () {
+      var q = new URLSearchParams(location.search);
+      // "I'm looking to" — prefill by persona (from buyer-journey cards)
+      var p = q.get('looking');
+      var map = {
+        'first-home': 'Buy my first home',
+        'family-home': 'Move to a family home',
+        downsizing: 'Downsize',
+        investment: 'Invest in property',
+      };
+      var sel = document.getElementById('looking');
+      if (p && map[p] && sel) {
+        for (var i = 0; i < sel.options.length; i++) {
+          if (sel.options[i].text === map[p]) { sel.selectedIndex = i; break; }
+        }
+      }
+      // "Area of interest" — prefill by region (from Where-we-build cards, e.g. ?area=west)
+      var a = q.get('area'), asel = document.getElementById('area');
+      if (a && asel) {
+        for (var j = 0; j < asel.options.length; j++) {
+          if (asel.options[j].value === a) { asel.selectedIndex = j; break; }
+        }
+      }
+    })();
+  </script>
+
+</Base>

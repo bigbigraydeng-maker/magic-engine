@@ -36,6 +36,7 @@ import { runSeoPatrol, type SeoPatrolBatchResult } from '@/lib/seo-patrol/job'
 import { expireStaleDrafts } from '@/lib/blog/draft-expiry'
 import { runIndexCheckBatch } from '@/lib/seo-patrol/index-check'
 import { syncPrOpenPosts } from '@/lib/blog/pr-sync'
+import { syncPageUpgradePullRequests } from '@/lib/cms/page-upgrade-pr-sync'
 import { supersedeStaleZhugeCards } from '@/lib/zhuge/card-expiry'
 import { startCronRun } from '@/lib/cron/run-logger'
 import { supabaseAdmin } from '@/lib/supabase'
@@ -97,26 +98,29 @@ export async function GET(
     )
 
     // To-do hygiene (22.E.S18 前置): drafts untouched >30d auto-expire,
-    // zhuge cards pending >14d auto-supersede, pr_open posts learn their
-    // PR's fate (merged→published / closed→rejected). Non-blocking — a
+    // zhuge cards pending >14d auto-supersede, and GitHub-backed blog/page
+    // actions learn their PR's fate. Non-blocking — a
     // hygiene failure must not fail the patrol.
     let hygiene:
       | {
           drafts_expired: number
           cards_superseded: number
           pr_sync: { checked: number; published: number; rejected: number; errors: number }
+          page_upgrade_pr_sync: { checked: number; live: number; rejected: number; errors: number }
         }
       | { error: string }
     try {
-      const [drafts, cards, prSync] = await Promise.all([
+      const [drafts, cards, prSync, pageUpgradePrSync] = await Promise.all([
         expireStaleDrafts(supabaseAdmin),
         supersedeStaleZhugeCards(supabaseAdmin),
         syncPrOpenPosts(supabaseAdmin),
+        syncPageUpgradePullRequests(supabaseAdmin),
       ])
       hygiene = {
         drafts_expired: drafts.expired,
         cards_superseded: cards.superseded,
         pr_sync: prSync,
+        page_upgrade_pr_sync: pageUpgradePrSync,
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

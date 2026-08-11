@@ -7,8 +7,6 @@ export type { ContentAuditResult } from '@/lib/blog/content-auditor'
 export type ClientPlan = 'starter' | 'growth' | 'enterprise'
 export type ClientStatus = 'active' | 'prospect' | 'archived'
 export type KeywordIntent = 'informational' | 'commercial' | 'transactional' | 'navigational'
-export type KeywordSource = 'semrush_batch' | 'semrush_related' | 'semrush_gap' | 'campaign' | 'master_brief' | 'manual'
-export type KeywordStatus = 'new' | 'reviewed' | 'approved' | 'rejected' | 'page_created' | 'published'
 export type PageType = 'hub' | 'guide' | 'landing' | 'faq'
 export type ContentRoute = 'route_a' | 'route_b' | 'route_c'
 export type ContentStatus = 'draft' | 'approved' | 'scheduled' | 'published' | 'rejected'
@@ -173,24 +171,9 @@ export interface Product {
   usp?: string
 }
 
-export interface Keyword {
-  id: string
-  client_id: string
-  keyword: string
-  volume?: number
-  kd?: number
-  cpc?: number
-  intent?: KeywordIntent
-  trend?: TrendPoint[]
-  source: KeywordSource
-  competitor_source?: string
-  semrush_db: string
-  opportunity_score?: number
-  recommended_page_type?: PageType
-  status: KeywordStatus
-  created_at: string
-  updated_at: string
-}
+// The `Keyword` interface that used to live here modelled the `keywords` table,
+// archived on 2026-05-30. Live keyword data is `keyword_snapshots` — see
+// src/lib/seo-intelligence/keyword-snapshots.ts.
 
 export interface TrendPoint {
   month: string   // 'YYYY-MM'
@@ -248,7 +231,8 @@ export interface ContentPost {
   hashtags?: string[]
   visual_brief?: string
   revision_notes?: string
-  source_keyword_id?: string
+  // No source_keyword_id — that column does not exist on content_posts in
+  // production; declaring it here is what let route-a keep inserting it.
   source_video_url?: string
   source_brief_id?: string
   campaign_id?: string | null
@@ -286,47 +270,9 @@ export interface ReelsDraft {
 }
 
 // API Request/Response types
-export interface KeywordOverviewRequest {
-  keywords: string[]      // max 100
-  client_id: string
-  db?: string
-}
-
-export interface KeywordOverviewResponse {
-  success: boolean
-  data: Keyword[]
-  units_consumed: number
-  saved_count: number
-  errors?: string[]
-}
-
-export interface RelatedKeywordsRequest {
-  seed_keyword: string
-  client_id: string
-  limit?: number          // default 50, max 100
-  min_volume?: number     // default 100
-  max_kd?: number         // default 60
-  db?: string
-}
-
-export interface CompetitorKeywordsRequest {
-  competitor_domains: string[]  // max 4
-  client_id: string
-  limit?: number
-  min_volume?: number
-  db?: string
-  production_package_id?: string
-}
-
-export interface KeywordGapRequest {
-  client_domain: string
-  competitor_domains: string[]  // 1-4
-  client_id: string
-  limit?: number
-  min_volume?: number
-  max_kd?: number
-  db?: string
-}
+// The four keyword-research request types that used to live here belonged to
+// /api/keyword-intelligence/*, retired 2026-08-05 along with the `keywords`
+// table they wrote to. Gap analysis lives on in src/lib/seo-gap/.
 
 export interface ApiError {
   success: false

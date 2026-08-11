@@ -302,4 +302,29 @@ describe('公司自己的域名', () => {
   it('两处都没有 → 空，调用方据此不做内部判断，不猜', () => {
     expect(ownDomainsOf(null, null)).toEqual([])
   })
+
+  /**
+   * **2026-08-04 的真实事故。** `pa@chinatravel.co.nz` 是 CTS 关联公司的员工，
+   * 却进了客人名单，客户当场反馈。收信域名和官网域名都覆盖不到关联公司 ——
+   * 那个域名只有 FDE 知道，所以设置页填的清单必须在**这里**生效：
+   * 只在归类那一侧认它的话，同事的邮件照样会建出一个新联系人，
+   * 只是建完之后被藏起来 —— 数据还是脏的。
+   */
+  it('设置页填的关联公司域名也算内部', () => {
+    expect(ownDomainsOf('info@ctstours.co.nz', null, ['chinatravel.co.nz'])).toContain(
+      'chinatravel.co.nz',
+    )
+  })
+
+  it('设置页填的跟推出来的重复时不重复', () => {
+    expect(ownDomainsOf('info@ctstours.co.nz', null, ['CTSTOURS.co.nz', ' ', ''])).toEqual([
+      'ctstours.co.nz',
+    ])
+  })
+
+  it('设置页一条没填 → 跟以前完全一样', () => {
+    expect(ownDomainsOf('info@ctstours.co.nz', 'ctstours.com', [])).toEqual(
+      ownDomainsOf('info@ctstours.co.nz', 'ctstours.com'),
+    )
+  })
 })

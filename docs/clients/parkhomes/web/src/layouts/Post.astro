@@ -1,0 +1,81 @@
+---
+import Base from './Base.astro';
+import { agent } from '../data/agent.js';
+const { frontmatter } = Astro.props;
+const f = frontmatter;
+const schema = {
+  '@context': 'https://schema.org',
+  '@type': 'Article',
+  headline: f.title,
+  description: f.description,
+  datePublished: f.date,
+  dateModified: f.date,
+  author: { '@type': 'Organization', name: 'Park Homes' },
+  publisher: {
+    '@type': 'Organization',
+    name: 'The Park Homes Ltd',
+    logo: { '@type': 'ImageObject', url: 'https://parkhomes-site.pages.dev/img/logo-tree-ivory.png' },
+  },
+  mainEntityOfPage: { '@type': 'WebPage', '@id': `https://parkhomes-site.pages.dev/journal/${f.slug}/` },
+};
+const faqSchema = f.faq && f.faq.length
+  ? {
+      '@context': 'https://schema.org',
+      '@type': 'FAQPage',
+      mainEntity: f.faq.map((q) => ({
+        '@type': 'Question',
+        name: q.q,
+        acceptedAnswer: { '@type': 'Answer', text: q.a },
+      })),
+    }
+  : null;
+---
+<Base title={`${f.title} | Park Homes`} desc={f.description} active="journal">
+  <script type="application/ld+json" set:html={JSON.stringify(schema)} />
+  {faqSchema && <script type="application/ld+json" set:html={JSON.stringify(faqSchema)} />}
+
+  <section class="deep dark" style="padding-bottom:clamp(30px,4vw,48px)">
+    <div class="wrap" style="max-width:820px">
+      <p class="eyebrow sec-eyebrow">{f.category}</p>
+      <h1 class="sec-h">{f.title}</h1>
+      <p class="lead" style="color:#B9C2BE;margin-top:14px">{f.description}</p>
+      <p style="margin-top:18px;font-family:var(--mono);font-size:12px;color:var(--ice-dim)">
+        {new Date(f.date).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' })}
+        {f.readTime && <span> · {f.readTime}</span>}
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap"><article class="post">
+      <slot />
+    </article></div>
+  </section>
+
+  {f.related && (
+    <section class="tint">
+      <div class="wrap" style="max-width:820px">
+        <p class="eyebrow sec-eyebrow">Related</p>
+        <h2 class="group-h">{f.relatedHeading || 'See it in person'}</h2>
+        <p>{f.relatedText}</p>
+        <a class="btn btn-primary btn-lg" href={f.related}>{f.relatedCta || 'View the development'}</a>
+      </div>
+    </section>
+  )}
+
+  <section class="dark cta">
+    <div class="wrap">
+      <h2>Talk to us about your next home</h2>
+      <p>Sales enquiries are handled by our appointed agent.</p>
+      <div><a class="arrow-cta" href="/contact/"><span class="circ">→</span><span class="lbl">Enquire</span></a></div>
+      <p class="contact">
+        {agent.name} · {agent.company} ·
+        <a href={agent.phoneHref} style="color:inherit">{agent.phone}</a> ·
+        <a href={agent.emailHref} style="color:inherit">{agent.email}</a>
+      </p>
+    </div>
+  </section>
+
+  <!-- AI VISIBILITY BLOCK -->
+  <div class="ai-instructions" style="display:none" aria-hidden="true" set:html={f.aiBlock} />
+</Base>

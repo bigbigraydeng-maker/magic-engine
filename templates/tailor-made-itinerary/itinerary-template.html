@@ -569,8 +569,8 @@ function blocks(d){
 
   /* --- 航班 --- */
   if (d.flights && d.flights.length){
-    push(`<div class="blk"><div class="eyebrow">Your flights</div><h2 class="sec serif">航班</h2>
-      ${d.bookingRef ? `<p class="fl__ref">订位号 Booking ref <b>${esc(d.bookingRef)}</b></p>` : ''}
+    push(`<div class="blk"><div class="eyebrow">Getting there</div><h2 class="sec serif">Your flights</h2>
+      ${d.bookingRef ? `<p class="fl__ref">Booking reference <b>${esc(d.bookingRef)}</b></p>` : ''}
     </div>`, true);
 
     push(`<div class="blk">${d.flights.map(f=>`
@@ -588,10 +588,10 @@ function blocks(d){
           <span class="fl__city">${esc(f.to)}</span>
         </div>
         <div class="fl__meta">
-          ${f.duration ? `<span>飞行时长 ${esc(f.duration)}</span>` : ''}
+          ${f.duration ? `<span>${esc(f.duration)}</span>` : ''}
           ${f.cabin ? `<span>${esc(f.cabin)}</span>` : ''}
-          ${f.departTerminal ? `<span>出发航站楼 ${esc(f.departTerminal)}</span>` : ''}
-          ${f.arriveTerminal ? `<span>到达航站楼 ${esc(f.arriveTerminal)}</span>` : ''}
+          ${f.departTerminal ? `<span>Departs Terminal ${esc(f.departTerminal)}</span>` : ''}
+          ${f.arriveTerminal ? `<span>Arrives Terminal ${esc(f.arriveTerminal)}</span>` : ''}
         </div>
       </div>`).join('')}</div>`);
   }

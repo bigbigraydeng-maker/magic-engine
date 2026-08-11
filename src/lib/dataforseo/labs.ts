@@ -368,18 +368,24 @@ export async function getKeywordIdeas(
 
   if (!res.ok) throw new Error(`DataForSEO keyword_ideas error: ${res.status}`)
 
+  // keyword_ideas returns FLAT items, same shape as keywords_for_site and
+  // keyword_suggestions. Only the *_intersection / related_keywords endpoints
+  // nest under keyword_data — see the note above getKeywordsForSite.
   const json = await res.json() as {
     tasks?: Array<{
       result?: Array<{
         items?: Array<{
-          keyword_data?: {
-            keyword?: string
-            keyword_info?: {
-              search_volume?: number | null
-              cpc?:           number | null
-              competition?:   number | null
-            }
+          keyword?: string
+          keyword_info?: {
+            search_volume?: number | null
+            cpc?:           number | null
+            competition?:   number | null
+          }
+          keyword_properties?: {
             keyword_difficulty?: number | null
+          }
+          search_intent_info?: {
+            main_intent?: string | null
           }
         }>
       }>

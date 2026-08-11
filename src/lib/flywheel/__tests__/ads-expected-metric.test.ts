@@ -13,6 +13,8 @@ import {
   resolveAdsExpectedMetric,
   resolveAndLogAdsExpectedMetric,
   resolveClientAdsExpectedMetric,
+  describeResultsColumn,
+  resultsAreComparable,
 } from '../ads-expected-metric'
 
 describe('resolveAdsExpectedMetric', () => {
@@ -148,5 +150,71 @@ describe('resolveClientAdsExpectedMetric', () => {
     expect(supabase.from).toHaveBeenCalledWith('flywheel_metrics')
     expect(supabase.chain.eq).toHaveBeenCalledWith('client_id', 'client-42')
     expect(supabase.chain.eq).toHaveBeenCalledWith('flywheel', 'ads')
+  })
+})
+
+// ── describeResultsColumn / resultsAreComparable（2026-08-04 $834 误判的机器版护栏）──
+describe('describeResultsColumn', () => {
+  it('触达类目标：results 恒为 0，0 是正常的', () => {
+    for (const objective of ['OUTCOME_AWARENESS', 'REACH', 'BRAND_AWARENESS']) {
+      const r = describeResultsColumn({ objective })
+      expect(r.meaning).toBe('not_applicable')
+      expect(r.zeroIsExpected).toBe(true)
+    }
+  })
+
+  it('视频观看类目标：results 恒为 0，0 是正常的', () => {
+    const r = describeResultsColumn({ objective: 'VIDEO_VIEWS' })
+    expect(r.meaning).toBe('not_applicable')
+    expect(r.zeroIsExpected).toBe(true)
+    expect(r.reason).toContain('完播')
+  })
+
+  it('留资目标：0 结果是坏消息，不能当正常放过', () => {
+    const r = describeResultsColumn({ objective: 'OUTCOME_LEADS' })
+    expect(r.meaning).toBe('form_leads')
+    expect(r.zeroIsExpected).toBe(false)
+  })
+
+  it('目的地优先于目标：OUTCOME_LEADS + MESSENGER 算对话不算留资', () => {
+    const r = describeResultsColumn({ objective: 'OUTCOME_LEADS', destinationType: 'MESSENGER' })
+    expect(r.meaning).toBe('conversations')
+    expect(r.zeroIsExpected).toBe(false)
+  })
+
+  it('拿不到目标时不假设 0 正常 —— 宁可多问一句', () => {
+    const r = describeResultsColumn({ objective: null })
+    expect(r.meaning).toBe('unknown')
+    expect(r.zeroIsExpected).toBe(false)
+  })
+
+  it('未知目标同样不放过', () => {
+    const r = describeResultsColumn({ objective: 'SOME_NEW_META_OBJECTIVE' })
+    expect(r.meaning).toBe('unknown')
+    expect(r.zeroIsExpected).toBe(false)
+  })
+})
+
+describe('resultsAreComparable', () => {
+  it('同类目标可比', () => {
+    expect(resultsAreComparable({ objective: 'OUTCOME_LEADS' }, { objective: 'LEAD_GENERATION' })).toBe(true)
+  })
+
+  it('留资 vs 对话 不可比', () => {
+    expect(resultsAreComparable({ objective: 'OUTCOME_LEADS' }, { objective: 'OUTCOME_ENGAGEMENT' })).toBe(false)
+  })
+
+  it('🔴 回归：留资 vs 触达 绝不可比（$834 误判的根因）', () => {
+    expect(resultsAreComparable({ objective: 'OUTCOME_LEADS' }, { objective: 'REACH' })).toBe(false)
+    expect(resultsAreComparable({ objective: 'OUTCOME_LEADS' }, { objective: 'VIDEO_VIEWS' })).toBe(false)
+  })
+
+  it('任一方目标未知就不可比', () => {
+    expect(resultsAreComparable({ objective: 'OUTCOME_LEADS' }, { objective: null })).toBe(false)
+  })
+
+  it('🔴 两条都是触达类也不可比 —— 两边恒为 0，比出来的名次没有意义', () => {
+    expect(resultsAreComparable({ objective: 'REACH' }, { objective: 'OUTCOME_AWARENESS' })).toBe(false)
+    expect(resultsAreComparable({ objective: 'VIDEO_VIEWS' }, { objective: 'VIDEO_VIEWS' })).toBe(false)
   })
 })

@@ -20,6 +20,57 @@ import type {
 } from './vocabulary'
 import { validateWordpressSiteUrl } from './url-guard'
 import { validateShopifyShopUrl } from './shopify-guard'
+import { judgeDomainOwnership } from '@/lib/clients/domain-match'
+
+/**
+ * 🔴 客户之间的东西绝不许串。
+ *
+ * 2026-08-05 实测：`cms_connections` 里 **CTS（ctstours.co.nz）的 WordPress 通道
+ * 指向 oztopbuildingsupplies.com.au** —— 另一个客户的网站。建档日期显示是
+ * 05-25 填错了客户，06-05 补了正确的那条，错的没人清理。它一直是 error 状态，
+ * 所以从没真发出去过东西 —— 但只要那个站哪天不再拦我们，CTS 的文章就会
+ * 落到 Oztop 的网站上。
+ *
+ * 所以闸门放在**发放凭据这一层**，而不是每个发布入口各写一遍：
+ * 发布、重测、预览、GEO 注入…… 调用点有十几个，逐个加必漏一个，
+ * 而漏掉的那个就是事故。这里拒绝交出，上面所有人自动安全，
+ * 以后新写的调用方也一样。
+ *
+ * **抛错而不是返回 null**：null 会被上层当成「这个客户还没配」而静默跳过，
+ * 而这是红线条件，必须响。
+ */
+export class CrossClientTargetError extends Error {
+  readonly code = 'CROSS_CLIENT_TARGET'
+  constructor(message: string) {
+    super(message)
+    this.name = 'CrossClientTargetError'
+  }
+}
+
+async function assertClientOwnsTarget(
+  clientId: string,
+  siteUrl: string | null | undefined,
+): Promise<void> {
+  if (!siteUrl) return
+
+  const { data, error } = await supabaseAdmin
+    .from('clients')
+    .select('domain')
+    .eq('id', clientId)
+    .maybeSingle()
+
+  // 查不到客户就不放行 —— 这是「宁可发不出去，也不能发错人」的地方
+  if (error) throw new Error(`无法核对客户域名（${error.message}），为安全起见不交出发布凭据`)
+  if (!data) throw new Error(`客户 ${clientId} 不存在，不交出发布凭据`)
+
+  const own = (data as { domain: string | null }).domain
+  if (judgeDomainOwnership(siteUrl, own) === 'foreign') {
+    throw new CrossClientTargetError(
+      `🔴 客户配置串台：这条发布通道指向 ${siteUrl}，但该客户自己的网站是 ${own}。` +
+        `在纠正之前，系统不会用它发布任何东西。`,
+    )
+  }
+}
 
 // ─── Row type ────────────────────────────────────────────────────────────────
 
@@ -307,6 +358,7 @@ function rowToStatus(row: CmsConnectionRow): CmsConnectionStatus {
     status:         row.status as CmsConnectionStatus['status'],
     lastError:      row.last_error,
     lastTestedAt:   row.last_tested_at,
+    contentPaths:   parseContentPaths(row.content_paths),
     contentTargets: parseContentTargets(row.content_targets),
   }
 }
@@ -316,6 +368,11 @@ function rowToStatus(row: CmsConnectionRow): CmsConnectionStatus {
  * but a row may have been written outside the app (manual SQL). Drop any
  * malformed elements so the UI never crashes on a bad row.
  */
+function parseContentPaths(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  return raw.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+}
+
 function parseContentTargets(raw: unknown): CmsContentTarget[] {
   if (!Array.isArray(raw)) return []
   return raw.filter(isCmsContentTarget)
@@ -352,6 +409,10 @@ export async function upsertWordpressConnection(
   if (plainAppPassword.length < 10) {
     throw new Error('app_password required (min 10 chars)')
   }
+
+  // 🔴 在这里挡住，错误才不会进库。CTS 那条指向 Oztop 网站的连接，
+  //    就是从这个入口存进去的 —— 当时没有任何校验说「这不是这个客户的网站」。
+  await assertClientOwnsTarget(clientId, guard.normalizedUrl)
 
   const encrypted = encryptToken(plainAppPassword)
   const hint      = tokenLastFour(plainAppPassword)
@@ -420,6 +481,8 @@ export async function getWordpressConnection(
   if (!data)  return null
 
   const row = data as CmsConnectionRow
+  // 交出密码之前先核对：这条通道指向的，确实是这个客户自己的网站吗
+  await assertClientOwnsTarget(clientId, row.site_url)
   const plainAppPassword = decryptToken(row.encrypted_token)
 
   return {
@@ -606,6 +669,10 @@ export async function getShopifyConnection(
   if (!data)  return null
 
   const row        = data as CmsConnectionRow
+  // 🔴 Shopify **不走域名比对**：它的 shop_url 天生是 `xxx.myshopify.com`，
+  //    而 clients.domain 是店铺的自有域名，两者永不相等 —— 拿域名尺子量，
+  //    第一个接进来的 Shopify 客户会配置完全正确却被判「串台」永远发不出去。
+  //    它的串台风险靠「同一个店挂两家」检测（见 cross-client-audit）。
   const plainToken = decryptToken(row.encrypted_token)
 
   return {

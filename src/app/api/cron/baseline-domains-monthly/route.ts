@@ -208,7 +208,6 @@ async function runCollection(triggeredBy: 'cron' | 'admin_manual', existingRunId
       byIndustry.get(row.industry)!.push(r.score)
     }
 
-    const snapshotDate = new Date().toISOString().split('T')[0]
     let benchmarksWritten = 0
 
     for (const [industry, scores] of byIndustry) {
@@ -221,10 +220,21 @@ async function runCollection(triggeredBy: 'cron' | 'admin_manual', existingRunId
 
       // Upsert into industry_benchmarks — use standard industry code (matches industry-mapper)
       // Market field is AU_NZ for now (single bucket); future PR can split by city/geo_scope
+      //
+      // ⚠️ 这里曾经写 snapshot_date 并把它放进 onConflict —— industry_benchmarks
+      // 根本没有这个列，且漏了 NOT NULL 的 business_size，所以**每次 upsert 都失败**，
+      // 错误又被 `if (!upsertError)` 吞掉。表因此从 2026-05-13 起再没更新过，
+      // 尽管 61 个 baseline domain 一直在正常打分。真实唯一键是
+      // (industry_category, business_size, market, dimension)。
+      //
+      // 只写 LEVEL 字段（score_p50/p75/p90 + source/confidence/sample_size）。
+      // realistic_*_growth_pct / growth_* 属于 benchmark-accumulator，不在 payload
+      // 里就不会被 ON CONFLICT 覆盖。
       const { error: upsertError } = await supabaseAdmin
         .from('industry_benchmarks')
         .upsert({
           industry_category: industry,
+          business_size:     'small',
           market:            'AU_NZ',
           dimension:         'seo',
           score_p50:         pct.p50,
@@ -234,10 +244,16 @@ async function runCollection(triggeredBy: 'cron' | 'admin_manual', existingRunId
           confidence:        Math.round(confidence * 100) / 100,
           source:            'P30.0 baseline cron',
           notes:             `Aggregated from ${scores.length} baseline_domains across all sub_industries`,
-          snapshot_date:     snapshotDate,
-        }, { onConflict: 'industry_category,market,dimension,snapshot_date' })
+        }, { onConflict: 'industry_category,business_size,market,dimension' })
 
-      if (!upsertError) benchmarksWritten++
+      if (upsertError) {
+        console.error('[baseline cron] industry_benchmarks upsert failed', {
+          industry,
+          error: upsertError.message,
+        })
+      } else {
+        benchmarksWritten++
+      }
     }
 
     // 5. Finalize cron run record

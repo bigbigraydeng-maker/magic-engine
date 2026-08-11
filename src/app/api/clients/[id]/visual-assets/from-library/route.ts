@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { normaliseSource, type AssetSource } from '@/lib/assets/provenance'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,6 +14,8 @@ interface GalleryAsset {
   prompt_used: string | null
   is_selected: boolean
   created_at: string
+  /** 底图在素材库里的来源 —— 交付前那道「真价只配真画面」的闸靠它判。 */
+  source: AssetSource
 }
 
 // POST /api/clients/[id]/visual-assets/from-library
@@ -50,7 +53,7 @@ export async function POST(
     // Verify the library asset belongs to this client and is analysed.
     const { data: libraryAsset, error: lookupErr } = await supabaseAdmin
       .from('client_assets')
-      .select('id, storage_url, original_filename, status, client_id')
+      .select('id, storage_url, original_filename, status, client_id, source')
       .eq('id', client_asset_id)
       .eq('client_id', params.id)
       .single()
@@ -103,7 +106,12 @@ export async function POST(
 
     if (insertErr) throw insertErr
 
-    return NextResponse.json({ success: true, asset: mapAsset(asset) })
+    // 来源不落 visual_assets(那张表没这一列),跟着响应回给界面。刷新后由
+    // GET /visual-assets 按 storage_url 回查素材库补上,两条路给出同一个值。
+    return NextResponse.json({
+      success: true,
+      asset: mapAsset(asset, normaliseSource(libraryAsset.source)),
+    })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     console.error('[clients/visual-assets/from-library POST]', err)
@@ -111,18 +119,22 @@ export async function POST(
   }
 }
 
-function mapAsset(row: {
-  id: string
-  storage_url: string | null
-  prompt_used: string | null
-  is_selected: boolean | null
-  created_at: string
-}): GalleryAsset {
+function mapAsset(
+  row: {
+    id: string
+    storage_url: string | null
+    prompt_used: string | null
+    is_selected: boolean | null
+    created_at: string
+  },
+  source: AssetSource,
+): GalleryAsset {
   return {
     id:          row.id,
     storage_url: row.storage_url ?? '',
     prompt_used: row.prompt_used,
     is_selected: row.is_selected ?? false,
     created_at:  row.created_at,
+    source,
   }
 }

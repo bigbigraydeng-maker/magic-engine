@@ -1,0 +1,138 @@
+---
+import Base from '../layouts/Base.astro';
+import AgentLine from '../components/AgentLine.astro';
+import ProjectCard from '../components/ProjectCard.astro';
+import Areas from '../components/Areas.astro';
+import { projects, featured } from '../data/projects.js';
+const cards = featured.map((s) => projects.find((p) => p.slug === s));
+const pipeline = projects.filter((p) => !featured.includes(p.slug));
+---
+<Base title="Park Homes — Boutique residential developments across Auckland">
+
+  <section class="hero" style="background:linear-gradient(180deg,rgba(20,20,20,.42),rgba(20,20,20,.86)),url('/img/int-living.jpg') center/cover">
+    <span class="tag">Example image · indicative only</span>
+    <div class="wrap">
+      <p class="eyebrow">Residential Property Developer · Auckland</p>
+      <h1>A refined series.</h1>
+      <div class="hrule"></div>
+      <p class="sub">Boutique residential developments across Auckland — considered, personal, and built to last. Not a mass-produced product.</p>
+      <div class="herocta">
+        <a class="arrow-cta" href="#developments"><span class="circ">→</span><span class="lbl">Our developments</span></a>
+      </div>
+    </div>
+  </section>
+
+  <!-- BRAND -->
+  <section>
+    <div class="wrap founder">
+      <div class="shot" style="background-image:url('/img/int-kitchen.jpg')"></div>
+      <div>
+        <p class="eyebrow" style="margin-bottom:18px">The Park Homes way</p>
+        <p class="pquote">Personal, approachable homes — and landmarks a neighbourhood is proud of.</p>
+        <p style="margin-top:20px">We build a refined series, not a mass-produced product. Fewer homes, considered properly — intelligent layouts, honest materials, and a standard held from consent through to handover. It’s a quieter way to build, and a more deliberate one.</p>
+        <a class="link-p" href="/our-story/">What we believe →</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- DEVELOPMENTS -->
+  <section id="developments" class="tint">
+    <div class="wrap">
+      <p class="eyebrow sec-eyebrow">Our developments</p>
+      <h2 class="sec-h">A considered portfolio across Auckland</h2>
+      <div class="cards" style="margin-top:44px">
+        {cards.map((p) => <ProjectCard p={p} />)}
+      </div>
+      <p style="margin-top:26px;font-size:14px;color:var(--mute)">
+        Also in the pipeline —
+        {pipeline.map((p, i) => (
+          <>{i > 0 && <span> &amp; </span>}<a href={`/${p.slug}/`} style="color:var(--accent-2);font-weight:600">{p.name}</a></>
+        ))}
+        . <a href="/projects/" style="color:var(--accent-2);font-weight:600">View all projects →</a>
+      </p>
+    </div>
+  </section>
+
+  <!-- WHERE WE BUILD -->
+  <section>
+    <div class="wrap">
+      <p class="eyebrow sec-eyebrow">Where we build</p>
+      <h2 class="sec-h">Growing across Auckland</h2>
+      <p class="lead" style="margin-top:14px">From the North Shore to the eastern suburbs and the southern growth corridor — and now expanding into West Auckland. As new developments come forward, you can register early to hear first.</p>
+      <div style="margin-top:40px"><Areas /></div>
+    </div>
+  </section>
+
+  <!-- STAT BAND -->
+  <section class="statband">
+    <div class="wrap">
+      <div class="head">
+        <p class="eyebrow sec-eyebrow">Built on craft, not volume</p>
+        <h2 class="sec-h">Fewer homes. Done properly.</h2>
+      </div>
+      <div class="statgrid">
+        <div><b>2003</b><span>in property, hands-on since</span></div>
+        <div><b>5</b><span>developments across Auckland</span></div>
+        <div><b>130+</b><span>homes underway &amp; consented</span></div>
+        <div><b>LBP</b><span>licensed building practitioner</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW WE BUILD (informational — not links) -->
+  <section>
+    <div class="wrap">
+      <p class="eyebrow sec-eyebrow">How we build</p>
+      <h2 class="sec-h">Quiet on the outside. Rigorous underneath.</h2>
+      <div class="journey" style="margin-top:44px;grid-template-columns:repeat(3,1fr)">
+        <div class="jcard">
+          <p class="n">01</p><h4>Considered design</h4>
+          <p>A series of homes, not a run of units — intelligent layouts, honest materials.</p>
+        </div>
+        <div class="jcard">
+          <p class="n">02</p><h4>Rigorous quality control</h4>
+          <p>Disciplined checks at every stage, held to a licensed practitioner’s standard.</p>
+        </div>
+        <div class="jcard">
+          <p class="n">03</p><h4>Hands-on, from the ground up</h4>
+          <p>Led by a founder who started on the tools — close to the trade, close to the detail.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- BUYER JOURNEY -->
+  <section class="deep dark">
+    <div class="wrap">
+      <p class="eyebrow sec-eyebrow">Where you’re headed</p>
+      <h2 class="sec-h">Find the right home for this chapter</h2>
+      <div class="journey">
+        <a href="/contact/?looking=first-home"><p class="n">A</p><h4>First home</h4><p>Entry into a well-built Auckland community.</p></a>
+        <a href="/contact/?looking=family-home"><p class="n">B</p><h4>Family home</h4><p>More space, good zones, room to grow.</p></a>
+        <a href="/contact/?looking=downsizing"><p class="n">C</p><h4>Downsizing</h4><p>Low-maintenance, considered, still generous.</p></a>
+        <a href="/contact/?looking=investment"><p class="n">D</p><h4>Investment</h4><p>New-build stock with clear fundamentals.</p></a>
+      </div>
+    </div>
+  </section>
+
+  <!-- TRUST -->
+  <section class="trust">
+    <div class="wrap">
+      <div class="row">
+        <span class="cred">LBP · Licensed Building Practitioner</span>
+        <span class="partners">In good company — Carters · Bunnings · Akarana · CNX Construction · Ideal Housing</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="dark cta">
+    <div class="wrap">
+      <h2>Ready to take your next step?</h2>
+      <p>Sales enquiries are handled by our appointed agent.</p>
+      <div><a class="arrow-cta" href="/contact/"><span class="circ">→</span><span class="lbl">Enquire</span></a></div>
+      <AgentLine />
+    </div>
+  </section>
+
+</Base>

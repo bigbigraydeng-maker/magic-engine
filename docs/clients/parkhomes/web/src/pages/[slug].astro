@@ -1,0 +1,66 @@
+---
+import Base from '../layouts/Base.astro';
+import Gallery from '../components/Gallery.astro';
+import AgentLine from '../components/AgentLine.astro';
+import { projects } from '../data/projects.js';
+
+export function getStaticPaths() {
+  return projects.map((p) => ({ params: { slug: p.slug }, props: { p } }));
+}
+const { p } = Astro.props;
+const heroStyle = p.hero
+  ? `background:linear-gradient(180deg,rgba(20,20,20,.30),rgba(20,20,20,.80)),url('${p.hero}') center/cover`
+  : undefined;
+---
+<Base title={`${p.name} — Park Homes`} desc={p.tagline} active="projects">
+
+  <section class="hero" style={heroStyle}>
+    <span class="tag">{p.hero ? "Artist's impression" : 'Project imagery — to be supplied'}</span>
+    <div class="wrap">
+      <p class="eyebrow">{p.eyebrow}</p>
+      <h1>{p.name}</h1>
+      <p class="sub">{p.tagline}</p>
+      <span class="btn" style={`margin-top:22px;background:${p.pill === 'pill-sell' ? 'var(--accent)' : p.pill === 'pill-reg' ? '#8a5a44' : '#5a6675'};color:#fff;font-family:var(--mono);font-size:11px;letter-spacing:.06em`}>{p.status}</span>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap twocol">
+      <div><p class="eyebrow sec-eyebrow">The site</p><h2 class="sec-h">{p.heading}</h2></div>
+      <div>{p.intro.map((t) => <p>{t}</p>)}</div>
+    </div>
+    <div class="wrap">
+      <div class="facts">
+        {p.facts.map(([k, v]) => (
+          <div><div class="k">{k}</div><div class="v">{v}</div></div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="tint">
+    <div class="wrap">
+      <p class="eyebrow sec-eyebrow">Gallery</p>
+      <h2 class="sec-h" style="margin-bottom:30px">A closer look</h2>
+      <Gallery images={p.images} note={p.imageNote} />
+    </div>
+  </section>
+
+  <section id="register" class="dark">
+    <div class="wrap" style="max-width:760px">
+      <p class="eyebrow sec-eyebrow">Register your interest</p>
+      <h2 style="color:#fff;font-size:clamp(26px,4vw,40px);margin-bottom:22px">Enquire on {p.name}</h2>
+      <form class="reg" onsubmit="return false">
+        <div><label>Name</label><input type="text" placeholder="Your name" /></div>
+        <div><label>Phone</label><input type="text" placeholder="Your phone" /></div>
+        <div class="full"><label>Email</label><input type="text" placeholder="you@email.com" /></div>
+        <div class="full"><button class="btn btn-primary btn-lg" style="width:100%">Register interest</button></div>
+      </form>
+      <p class="contact" style="text-align:left">Or contact our agent —</p>
+      <AgentLine align="left" />
+    </div>
+  </section>
+
+  <p style="text-align:center;font-size:12px;color:var(--mute);padding:26px 20px 0">{p.footerAddress}</p>
+
+</Base>

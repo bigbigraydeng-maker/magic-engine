@@ -185,5 +185,18 @@ describe('GET /api/auth/google/gbp/start', () => {
       const setCookie = res.headers.get('set-cookie') ?? ''
       expect(setCookie).toContain(`Max-Age=${STATE_TTL_SECS}`)
     })
+
+    it('defaults the flow segment to "admin" when ?flow= is not passed', async () => {
+      const res = await GET(makeRequest('client-1'))
+      const setCookie = res.headers.get('set-cookie') ?? ''
+      expect(setCookie).toContain('deadbeefcafe1234deadbeefcafe1234:client-1:admin')
+    })
+
+    it('carries flow=wizard into the cookie so the callback lands back on the wizard', async () => {
+      const url = 'http://localhost:3001/api/auth/google/gbp/start?clientId=client-1&flow=wizard'
+      const res = await GET(new NextRequest(url))
+      const setCookie = res.headers.get('set-cookie') ?? ''
+      expect(setCookie).toContain('deadbeefcafe1234deadbeefcafe1234:client-1:wizard')
+    })
   })
 })

@@ -1,6 +1,8 @@
 // P21.J M2 — worker 收权三件套单测(路径注入面 = 安全核心,狄仁杰实施后再补攻击验证)
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { existsSync, readdirSync, readFileSync } from 'fs'
+import path from 'path'
 import {
   isWorkerAuthorized,
   scanRedlineHits,
@@ -58,6 +60,127 @@ describe('workerClientWhitelist', () => {
   it('全是非法值 → null,不放行空白名单', () => {
     process.env.FACTORY_WORKER_CLIENT_IDS = 'not-a-uuid, also-bad'
     expect(workerClientWhitelist()).toBeNull()
+  })
+})
+
+/**
+ * FACTORY_WORKER_CLIENT_IDS 配在哪。
+ *
+ * 名字里带 worker,docs/ENV.md 原来据此标成「worker」,但 worker 自己从来不读它:
+ * worker 调 /api/factory/worker/claim,白名单是在那条路由里读的 —— 那是 web 进程。
+ * 配到 Render 的 worker 服务上,claim 会一直 fail-closed 拒绝(白名单 null),
+ * 表现成「工单一条都领不走」,而排查方向会被变量名带偏。
+ *
+ * 下面查的是真实事实,不是比对一段固定文案:全仓谁读它、render.yaml 的 worker 服务有没有
+ * 声明它、docs/ENV.md 那一格写的是什么。
+ *
+ * ⚠️ 读取方扫描不能只认 `process.env.X`。本机 worker
+ * scripts/factory-worker/worker.mjs 自己有一个 loadEnv() 读 .env 文件,所有配置都走
+ * `ENV.X`(FACTORY_WORKER_TOKEN / FACTORY_WORKER_ID / FACTORY_CLIENT_STUDIO 等 13 个)。
+ * 只匹配 process.env,恰好会漏掉最该盯的那个文件 —— worker 哪天真开始自己读白名单,
+ * 测试还是全绿,文档继续把它写成 web。所以下面按「访问方式」匹配,不是按字面量。
+ */
+describe('FACTORY_WORKER_CLIENT_IDS 配在哪', () => {
+  const ROOT = path.resolve(__dirname, '../../..')
+  const ENV_NAME = 'FACTORY_WORKER_CLIENT_IDS'
+
+  /**
+   * 递归收集**运行时**源码文件。
+   *
+   * 跳过 node_modules / .next 等构建产物，也跳过测试本身(`__tests__` 目录和
+   * `*.test.*` / `*.spec.*`)—— 测试里出现 ENV.FACTORY_WORKER_CLIENT_IDS 或调用
+   * workerClientWhitelist 是正常的，不是「运行时多了个读取方」。按目录和后缀统一排除，
+   * 而不是给当前这个文件开特例，否则下一个测试文件照样会误报。
+   */
+  function walk(dir: string): string[] {
+    if (!existsSync(dir)) return []
+    return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      if (e.name === 'node_modules' || e.name.startsWith('.')) return []
+      const full = path.join(dir, e.name)
+      if (e.isDirectory()) return e.name === '__tests__' ? [] : walk(full)
+      if (/\.(test|spec)\.(ts|tsx|mjs|cjs|js|py)$/.test(e.name)) return []
+      return /\.(ts|tsx|mjs|cjs|js|py)$/.test(e.name) ? [full] : []
+    })
+  }
+
+  /**
+   * 「读这个变量」的各种写法:
+   *   - 点号 / 方括号取值:process.env.X · ENV.X · env['X']
+   *   - 解构:const { X } = ENV · const { X: ids } = process.env
+   * 刻意不匹配裸字符串,否则 claim 路由那句 'FACTORY_WORKER_CLIENT_IDS not configured'
+   * 错误文案会被当成读取方。
+   */
+  const ENV_OBJ = `(?:process\\.env|\\bENV|\\benv)`
+  const READ_PATTERNS = [
+    new RegExp(`${ENV_OBJ}\\s*(?:\\.\\s*${ENV_NAME}\\b|\\[\\s*['"\`]${ENV_NAME}['"\`]\\s*\\])`),
+    new RegExp(`\\{[^{}]*\\b${ENV_NAME}\\b[^{}]*\\}\\s*=\\s*${ENV_OBJ}\\b`),
+  ]
+  const readsEnv = (src: string) => READ_PATTERNS.some((re) => re.test(src))
+
+  const runtimeFiles = [...walk(path.join(ROOT, 'src')), ...walk(path.join(ROOT, 'scripts'))]
+
+  const readers = runtimeFiles
+    .filter((f) => readsEnv(readFileSync(f, 'utf8')))
+    .map((f) => path.relative(ROOT, f))
+
+  it('前提成立:扫到的源码文件数量正常(走空了就不许静默变绿)', () => {
+    expect(walk(path.join(ROOT, 'src')).length).toBeGreaterThan(400)
+    expect(walk(path.join(ROOT, 'scripts')).length).toBeGreaterThan(5)
+  })
+
+  it('前提成立:遍历确实把测试排除在外了(包括本文件)', () => {
+    expect(runtimeFiles.some((f) => f.endsWith('worker-guard.test.ts'))).toBe(false)
+    expect(runtimeFiles.some((f) => /(\.test\.|\.spec\.|__tests__)/.test(f))).toBe(false)
+  })
+
+  it('前提成立:读取方匹配式认得取值和解构两类写法,且不把错误文案当成读取', () => {
+    expect(readsEnv(`process.env.${ENV_NAME}`)).toBe(true)
+    expect(readsEnv(`const ids = ENV.${ENV_NAME} || ''`)).toBe(true)
+    expect(readsEnv(`process.env['${ENV_NAME}']`)).toBe(true)
+    expect(readsEnv(`const { ${ENV_NAME} } = ENV`)).toBe(true)
+    expect(readsEnv(`const { ${ENV_NAME}: ids } = process.env`)).toBe(true)
+    expect(readsEnv(`const { FOO, ${ENV_NAME}, BAR } = env`)).toBe(true)
+    expect(readsEnv(`{ error: '${ENV_NAME} not configured' }`)).toBe(false)
+    expect(readsEnv(`const { ${ENV_NAME} } = someOtherObject`)).toBe(false)
+  })
+
+  it('🔴 全仓唯一读它的地方是 worker-guard.ts —— 多出第二个读取方,配在哪就要重判', () => {
+    expect(readers).toEqual(['src/lib/factory/worker-guard.ts'])
+  })
+
+  it('🔴 读它的那个函数只被 web 路由用 —— 没有常驻 worker 进程碰它', () => {
+    const importers = runtimeFiles
+      .filter((f) => !f.endsWith('worker-guard.ts'))
+      .filter((f) => readFileSync(f, 'utf8').includes('workerClientWhitelist'))
+      .map((f) => path.relative(ROOT, f))
+    expect(importers.length).toBeGreaterThan(0)
+    expect(importers.every((f) => f.startsWith('src/app/api/'))).toBe(true)
+  })
+
+  it('🔴 render.yaml 的 worker 服务没有声明这个变量(声明了说明职责变了)', () => {
+    const yaml = readFileSync(path.join(ROOT, 'render.yaml'), 'utf8')
+    const workers = Array.from(
+      yaml.matchAll(/-\s+type:\s+worker\s*\n\s+name:\s*(\S+)([\s\S]*?)(?=\n\s*-\s+type:|$)/g),
+    )
+    expect(workers.length, 'render.yaml 里一个 worker 服务都没解析到,正则可能写歪了').toBeGreaterThan(0)
+    const declaring = workers.filter((m) => m[2].includes(ENV_NAME)).map((m) => m[1])
+    expect(declaring).toEqual([])
+  })
+
+  it('docs/ENV.md 标的是 Render-web', () => {
+    const lines = readFileSync(path.join(ROOT, 'docs/ENV.md'), 'utf8').split('\n')
+    const cellsOf = (line: string) => line.split('|').slice(1, -1).map((c) => c.trim())
+    const i = lines.findIndex(
+      (l) => l.trimStart().startsWith('|') && (cellsOf(l)[0] ?? '').includes(`\`${ENV_NAME}\``),
+    )
+    expect(i, `docs/ENV.md 里找不到 ${ENV_NAME} 这一行`).toBeGreaterThan(-1)
+    let col = -1
+    for (let j = i - 1; j >= 0 && lines[j].trimStart().startsWith('|'); j--) {
+      const c = cellsOf(lines[j]).findIndex((x) => x.includes('配在哪'))
+      if (c >= 0) { col = c; break }
+    }
+    expect(col, '定位不到「配在哪」那一列').toBeGreaterThan(-1)
+    expect(cellsOf(lines[i])[col]).toBe('Render-web')
   })
 })
 

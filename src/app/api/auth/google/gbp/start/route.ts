@@ -71,10 +71,15 @@ export async function GET(req: NextRequest) {
   }
 
   // ── 4. Generate CSRF nonce ───────────────────────────────────────────────
-  //   Cookie value: "{nonce}:{clientId}" — validated in the callback.
-  //   Only the nonce travels as the OAuth `state` param (clientId stays server-side).
+  //   Cookie value: "{nonce}:{clientId}:{flow}" — validated in the callback.
+  //   Only the nonce travels as the OAuth `state` param (clientId/flow stay
+  //   server-side). `flow` defaults to 'admin'; 'wizard' is the $990 onboarding
+  //   wizard — its callback must land back on the wizard, not settings (板桥
+  //   2026-08-11 复审, spec §2.1).
+  const rawFlow    = req.nextUrl.searchParams.get('flow')
+  const flow       = rawFlow === 'wizard' ? 'wizard' : 'admin'
   const nonce      = nodeCrypto.randomBytes(16).toString('hex')
-  const cookieVal  = `${nonce}:${clientId}`
+  const cookieVal  = `${nonce}:${clientId}:${flow}`
 
   // ── 5. Build Google OAuth URL ────────────────────────────────────────────
   const redirectUri = `${appUrl}/api/auth/google/gbp/callback`

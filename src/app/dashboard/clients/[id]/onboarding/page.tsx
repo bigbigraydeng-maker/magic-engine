@@ -10,13 +10,17 @@
  * visit" escape that records a help request handed to the FDE at submit.
  *
  * Hard rules from the four-reviewer pass (板桥):
- *  - GA4/GSC are shown as "we set this up for you", NOT "connect a thing you
- *    don't have" — most $990 owners have neither.
+ *  - GA4/GSC (2026-08-11: now a real "Connect with Google" button, PM ask —
+ *    see spec below) always sits next to the "sort it on the visit" skip
+ *    link on the SAME screen, never gated behind a failed attempt first —
+ *    owners with neither account just tap skip, no dead end.
  *  - Meta is "enter your ad account number / we set it up on the visit", never
- *    "authorize Meta in one click" (no real OAuth exists for it).
+ *    "authorize Meta in one click" (no real OAuth exists for it — PM decision
+ *    2026-08-11, Meta App Review timeline is out of our control).
  *  - Skipping is never silent: it becomes a help request for the kickoff visit.
  *
  * Spec: docs/superpowers/specs/2026-07-08-990-self-serve-onboarding-wizard-v0.1.md
+ *       docs/specs/2026-08-11-onboarding-integrations-unify-v1.md (GSC/GA4 real-OAuth revision)
  */
 
 import { useCallback, useEffect, useState } from 'react'
@@ -274,9 +278,11 @@ function ConnectStep({ clientId, connectors, help, onHelp, onSaved }: { clientId
     } finally { setSavingMeta(false) }
   }
 
-  const gbpDone = Boolean(connectors.gbp)
+  const gbpDone   = Boolean(connectors.gbp)
+  const dataDone  = Boolean(connectors.gsc || connectors.ga4)
+  const stepDone  = gbpDone || dataDone
   return (
-    <StepShell n={3} title="Connect your accounts" done={gbpDone}>
+    <StepShell n={3} title="Connect your accounts" done={stepDone}>
       {/* GBP — real OAuth */}
       <div className="rounded-xl bg-me-ivory p-4">
         <p className="text-sm font-semibold text-me-charcoal">Your Google Business Profile</p>
@@ -285,17 +291,22 @@ function ConnectStep({ clientId, connectors, help, onHelp, onSaved }: { clientId
         </p>
         {gbpDone
           ? <p className="mt-2 text-xs font-semibold text-[#5C8A4A]">✓ Connected</p>
-          : <a href={`/api/auth/google/gbp/start?clientId=${clientId}`} className={`${BTN} mt-3`} style={BTN_STYLE}>Connect with Google</a>}
+          : <a href={`/api/auth/google/gbp/start?clientId=${clientId}&flow=wizard`} className={`${BTN} mt-3`} style={BTN_STYLE}>Connect with Google</a>}
         <HelpLink label={HELP_LABELS.gbp} active={help.gbp} onClick={() => onHelp('gbp')} />
       </div>
 
-      {/* GA4/GSC — we build it for you (板桥 rule) */}
+      {/* GA4/GSC — real OAuth (one click covers both) */}
       <div className="mt-3 rounded-xl bg-me-ivory p-4">
         <p className="text-sm font-semibold text-me-charcoal">Website visitor data</p>
         <p className="mt-1 text-xs leading-relaxed text-me-charcoal/60">
-          Most businesses don&apos;t have this set up yet — <span className="font-semibold text-me-charcoal">that&apos;s one of the things included in your setup</span>.
-          Nothing to do here now. (Already have Google Analytics? Tell us on the visit and we&apos;ll connect it.)
+          Already have Google Search Console or Analytics? Connect it here — one click covers both.
+          You&apos;ll see a Google confirmation screen; if you don&apos;t have these yet, that&apos;s
+          totally normal — just tap &ldquo;sort it on the visit&rdquo; below, it&apos;s one of the
+          things included in your setup.
         </p>
+        {dataDone
+          ? <p className="mt-2 text-xs font-semibold text-[#5C8A4A]">✓ Connected</p>
+          : <a href={`/api/auth/google/connect?client_id=${clientId}&flow=wizard`} className={`${BTN} mt-3`} style={BTN_STYLE}>Connect with Google</a>}
         <HelpLink label={HELP_LABELS.ga4gsc} active={help.ga4gsc} onClick={() => onHelp('ga4gsc')} />
       </div>
 

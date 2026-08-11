@@ -66,7 +66,11 @@ export class SocialCollector {
     _keywords: string[],
   ): Promise<SocialCollectorResult> {
     try {
-      if (await this.hasFreshCache(clientId)) return { score: null, findings: [], post_samples: [] }
+      // Cache the last measured score, not "did any finding exist" — a fresh
+      // finding can come from a failed run, and caching that poisons the
+      // dimension for the whole TTL window with no score at all.
+      const cachedScore = await this.recentScore(clientId)
+      if (cachedScore !== null) return { score: cachedScore, findings: [], post_samples: [] }
 
       const handles = await this.fetchSocialHandles(clientId)
       const configured = [
@@ -249,18 +253,31 @@ export class SocialCollector {
     return { score, findings, post_samples }
   }
 
-  private async hasFreshCache(clientId: string): Promise<boolean> {
+  /**
+   * Last measured social score within the cache TTL, or null if none exists.
+   * Only `status='completed'` runs qualify — a failed/incomplete run's score
+   * doesn't count, and a query failure must NOT be treated as a cache hit.
+   */
+  private async recentScore(clientId: string): Promise<number | null> {
     const cutoff = new Date(
       Date.now() - SOCIAL_CACHE_TTL_DAYS * 24 * 60 * 60 * 1000,
     ).toISOString()
-    const { data } = await this.supabase
-      .from('diagnostic_findings')
-      .select('id')
+    const { data, error } = await this.supabase
+      .from('diagnostic_runs')
+      .select('dimension_scores, created_at')
       .eq('client_id', clientId)
-      .eq('dimension', 'social')
+      .eq('status', 'completed')
       .gte('created_at', cutoff)
-      .limit(1)
-    return (data as unknown[])?.length > 0
+      .order('created_at', { ascending: false })
+      .limit(5)
+
+    if (error || !data) return null
+
+    for (const row of data as Array<{ dimension_scores: Record<string, number | null> | null }>) {
+      const s = row.dimension_scores?.social
+      if (typeof s === 'number') return s
+    }
+    return null
   }
 
   private postFrequencyScore(posts: number): number {

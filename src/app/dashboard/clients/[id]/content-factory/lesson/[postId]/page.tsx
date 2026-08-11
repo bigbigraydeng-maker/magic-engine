@@ -40,12 +40,18 @@ interface CaptionLine {
   text: string
 }
 interface PublishedRef {
-  platform: 'facebook'
+  platform: 'facebook' | 'tiktok'
   pageId: string
   videoId: string
   permalink?: string
   draft: boolean
   at: string
+}
+interface PublishRequest {
+  platform: 'facebook' | 'tiktok'
+  status: 'pending' | 'sending' | 'done' | 'failed'
+  requestedAt: string
+  error?: string
 }
 interface Detail {
   post: {
@@ -61,6 +67,7 @@ interface Detail {
   production: Production | null
   captions: CaptionLine[]
   published: PublishedRef[]
+  publishRequest: PublishRequest | null
   renderJob: RenderJob | null
   viColors: { primary?: string; secondary?: string; accent?: string } | null
 }
@@ -305,8 +312,21 @@ export default function LectureWorkbenchPage() {
   }
 
   async function publishToFacebook() {
-    if (!window.confirm('发到 Facebook 主页？第一次会先发成草稿，你在主页后台能看到、公众看不到。')) return
-    await patch({ action: 'publish_facebook' }, 'fb')
+    if (!window.confirm('发成草稿？会出现在你的主页后台，公众看不到。确认没问题后再点旁边的「公开发布」。')) return
+    await patch({ action: 'publish_facebook' }, 'fb', '已排队 ✅ 后台在发，几分钟后这里会显示结果')
+  }
+
+  // TikTok:应用过审之前 TikTok 强制只有本人可见,所以这里不给「公开」选项 ——
+  // 给了也发不出去,只会让人以为是我们坏了。过审后再放开。
+  async function publishToTikTok() {
+    if (!window.confirm('发到 TikTok？\n\n现在只能发成「仅自己可见」——TikTok 要求应用先过审才允许公开发布。\n先用它验证片子在 TikTok 上长什么样。')) return
+    await patch({ action: 'publish_facebook', platform: 'tiktok' }, 'tk', '已排队 ✅ 后台在发，几分钟后这里会显示结果')
+  }
+
+  // 公开发布是不可逆的对外动作,所以单独一个按钮 + 单独一次确认,绝不跟「发草稿」共用一下点击。
+  async function publishLive() {
+    if (!window.confirm('确定公开发布到 Facebook 主页？\n\n所有人都能看到，发出去就撤不回来了。\n如果主页后台已经有这条草稿，系统会把那条直接转成公开，不会重复发一条。')) return
+    await patch({ action: 'publish_facebook', live: true }, 'fbLive', '已排队 ✅ 后台在发，几分钟后这里会显示结果')
   }
 
   async function applyRecordingLink() {
@@ -814,21 +834,53 @@ export default function LectureWorkbenchPage() {
               ⬇ 下载成片
             </a>
             <button
-              disabled={busy !== null}
+              disabled={busy !== null || data.publishRequest?.status === 'pending' || data.publishRequest?.status === 'sending'}
               onClick={publishToFacebook}
               className="text-sm font-semibold text-me-charcoal border border-me-stone rounded-xl px-4 py-2.5 hover:border-me-ochre disabled:opacity-40"
             >
-              {busy === 'fb' ? '发送中…' : '发到 Facebook'}
+              {busy === 'fb' ? '排队中…'
+                : data.publishRequest?.status === 'pending' ? '已排队，等后台发'
+                : data.publishRequest?.status === 'sending' ? '正在发…'
+                : '发成草稿'}
             </button>
-            <span className="text-[11px] text-me-taupe">小红书 / 抖音没有官方接口，下载后手动发</span>
+            <button
+              disabled={busy !== null || data.publishRequest?.status === 'pending' || data.publishRequest?.status === 'sending'
+                || (data.published ?? []).some((p) => !p.draft)}
+              onClick={publishLive}
+              className="text-sm font-semibold text-white bg-me-charcoal rounded-xl px-4 py-2.5 hover:bg-me-ochre disabled:opacity-40"
+            >
+              {busy === 'fbLive' ? '排队中…'
+                : (data.published ?? []).some((p) => !p.draft) ? '已公开'
+                : '公开发布'}
+            </button>
+            <button
+              disabled={busy !== null || data.publishRequest?.status === 'pending' || data.publishRequest?.status === 'sending'}
+              onClick={publishToTikTok}
+              className="text-sm font-semibold text-me-charcoal border border-me-stone rounded-xl px-4 py-2.5 hover:border-me-ochre disabled:opacity-40"
+            >
+              {busy === 'tk' ? '排队中…' : '发到 TikTok'}
+            </button>
+            <span className="text-[11px] text-me-taupe">小红书没有官方接口，下载后手动发</span>
           </div>
 
+          {data.publishRequest?.status === 'failed' && data.publishRequest.error && (
+            <div className="text-xs text-status-rej bg-white border border-me-stone rounded-xl px-3 py-2 mb-3">
+              上次发布没成功：{data.publishRequest.error}
+            </div>
+          )}
+          {(data.publishRequest?.status === 'pending' || data.publishRequest?.status === 'sending') && (
+            <div className="text-xs text-me-ochre bg-white border border-me-stone rounded-xl px-3 py-2 mb-3">
+              <span className="animate-pulse">⏳</span> 后台正在发到 Facebook，几分钟后刷新看结果
+            </div>
+          )}
           {(data.published ?? []).length > 0 && (
             <div className="text-[11px] text-me-taupe mb-3">
               {data.published.map((p, i) => (
                 <div key={i}>
-                  ✅ {new Date(p.at).toLocaleString('zh-CN')} 发到 Facebook
-                  {p.draft ? '（草稿·公众看不到）' : '（已公开）'}
+                  ✅ {new Date(p.at).toLocaleString('zh-CN')} 发到 {p.platform === 'tiktok' ? 'TikTok' : 'Facebook'}
+                  {p.draft
+                    ? (p.platform === 'tiktok' ? '（仅自己可见·等应用过审）' : '（草稿·公众看不到）')
+                    : '（已公开）'}
                   {p.permalink && (
                     <a href={p.permalink} target="_blank" rel="noreferrer" className="text-me-ochre underline ml-1">
                       去看看

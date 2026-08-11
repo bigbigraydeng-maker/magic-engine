@@ -82,6 +82,18 @@ export async function loadClientAssetPool(
   supabase: SupabaseClient = supabaseAdmin,
   /** 出片对象楼盘。中介客户(Roman)名下多个楼盘时必须给,否则会跨楼盘串用。 */
   projectId: string | null = null,
+  /**
+   * 出片对象**房源**。地产必须给。
+   *
+   * 🔴 2026-08-05：这里原来只有「楼盘」一层隔离。而中介客户名下是一套一套的**房源**
+   * （Roman 25 套在售，各自独立、不隶属任何楼盘），于是 Schnapper Rock 那套的画面
+   * 会被剪进 Mairangi Bay 那套的片子 —— 跟「拿 A 房的画面卖 B 房」是同一件事，
+   * 只是发生在出片而不是投放。
+   *
+   * 给了房源：只用这套房的素材 + 不属于任何房源的通用素材。
+   * 不给：房源专属素材一律不给（跟楼盘那层同一口径）。
+   */
+  listingId: string | null = null,
 ): Promise<string[]> {
   let q = supabase
     .from('client_assets')
@@ -94,6 +106,11 @@ export async function loadClientAssetPool(
   // 不做楼盘时,楼盘专属素材一律不给 —— 别把 A 楼盘的房子放进 B 楼盘或别的客户的片子。
   const orFilter = projectOrFilter(projectId)
   q = orFilter ? q.or(orFilter) : q.is('project_id', null)
+
+  // 房源级隔离，跟楼盘那层同一口径。
+  q = listingId
+    ? q.or(`listing_id.eq.${listingId},listing_id.is.null`)
+    : q.is('listing_id', null)
 
   const { data, error } = await q.limit(MAX_ASSETS * 3)
 

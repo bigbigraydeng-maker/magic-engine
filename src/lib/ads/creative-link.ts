@@ -35,6 +35,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import type { PlayKey, PlaySource } from '@/lib/ads-strategy/play-vocabulary'
 
 /**
  * ME 里每一条会**建出 Meta 广告**的代码路径。刻意封闭。
@@ -50,6 +51,9 @@ export type AdCreationPath = 'boost_post_api' | 'winner_reel_sync'
 export const AD_CREATION_PATHS: Readonly<Record<AdCreationPath, string>> = {
   boost_post_api: 'src/app/api/clients/[id]/meta-ads/boost-post — 手动/脚本给某个帖子投流',
   winner_reel_sync: 'src/lib/winner-reel-sync/engine.ts — 把跑赢的自然帖子自动加进广告组',
+  // 待加:'me_ad_launch' —— 广告引擎的建广告入口（PM 2026-08-04「go 收口」）。
+  // **等那个路由真的存在了再加这一项**。本文件开头就写着「提前声明一个没人产出
+  // 的值正是 enum 漂移」,我 2026-08-04 差点犯这个错,被本模块自己的测试拦下。
 }
 
 /**
@@ -173,6 +177,19 @@ export interface LinkAdToCreativeArgs {
   /** 哪条代码路径建的。见 AD_CREATION_PATHS。 */
   createdBy: AdCreationPath
   platform?: 'meta'
+  /**
+   * 这条广告用的是哪个打法。见 lib/ads-strategy/play-vocabulary.ts。
+   *
+   * 跟 creativeRef 同一条规矩:**拿不到就留空,绝不猜**。
+   * 硬猜会让打法账本学出反的结论 —— 比空着糟得多。
+   *
+   * 记在这一刻,是因为这一刻是唯一确定知道的时刻:事后从广告名字解析,会撞上
+   * 三套命名规范、最花钱那条零信息量的名字、以及被事后改写成事故记录的名字。
+   */
+  play?: PlayKey | null
+  playSource?: PlaySource | null
+  /** 描述性标签(语种/角度等)。只做展示筛选,**不做统计比较**。 */
+  playContext?: Record<string, unknown> | null
 }
 
 /**
@@ -226,6 +243,11 @@ async function persistLink(
         link_method: link.linkMethod,
         unresolved_reason: link.unresolvedReason,
         created_by: args.createdBy,
+        // 打法账本。三个字段一起写:play 为空时 source 也不该有值,
+        // 否则会出现「不知道是什么打法,但知道是怎么知道的」这种自相矛盾的行。
+        play: args.play ?? null,
+        play_source: args.play ? (args.playSource ?? null) : null,
+        play_context: args.playContext ?? null,
       },
       { onConflict: 'client_id,platform,ad_id' },
     )

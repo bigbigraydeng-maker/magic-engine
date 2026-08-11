@@ -13,6 +13,7 @@ import { notFound } from 'next/navigation'
 import { requireListingAccess } from '@/lib/listings/queries'
 import { propertyTypeLabel, priceBandLabel, listingStatusLabel } from '@/lib/listings/constants'
 import { ListingBriefClient } from './_components/ListingBriefClient'
+import { ListingAssetsPanel } from './_components/ListingAssetsPanel'
 
 export const dynamic = 'force-dynamic'
 
@@ -71,6 +72,11 @@ export default async function ListingDetailPage({
       </div>
 
       <ListingBriefClient listingId={params.listingId} />
+
+      {/* 素材放在档案下面：先定「这套房怎么打」，再看「有没有能打的画面」。 */}
+      <div className="mt-8">
+        <ListingAssetsPanel clientId={params.id} listingId={params.listingId} />
+      </div>
     </div>
   )
 }

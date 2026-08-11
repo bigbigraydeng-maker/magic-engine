@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Industry AI Growth Solutions for AU/NZ | Magic Engine</title>
+  <meta name="description" content="Explore Magic Engine industry growth solutions for real estate, travel and local service businesses across Australia and New Zealand.">
+  <link rel="canonical" href="https://magicengine.com.au/industry-solutions">
+  <link rel="alternate" hreflang="en" href="https://magicengine.com.au/industry-solutions">
+  <link rel="alternate" hreflang="zh-Hans" href="https://magicengine.com.au/cn/industry-solutions">
+  <link rel="alternate" hreflang="x-default" href="https://magicengine.com.au/industry-solutions">
+  <meta property="og:title" content="Industry AI Growth Solutions | Magic Engine">
+  <meta property="og:description" content="One AI growth engine, purpose-built around how real estate, travel and local service businesses win customers.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://magicengine.com.au/industry-solutions">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" href="/assets/favicon.svg?v=20260602" type="image/svg+xml">
+  <style>
+    .industry-page{--ip-ink:#171717;--ip-muted:#69645d;--ip-line:rgba(23,23,23,.11);--ip-gold:#c4912e;--ip-gold-soft:#ebcb8b;background:#fbf8f3;color:var(--ip-ink)}
+    .ip-wrap{width:min(1120px,calc(100% - 40px));margin:auto}
+    .ip-hero{padding:96px 0 78px}
+    .ip-eyebrow{color:var(--ip-gold);font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
+    .ip-hero h1{max-width:940px;margin:15px 0 22px;font-family:"Space Grotesk",Inter,system-ui,sans-serif;font-size:clamp(52px,8vw,96px);line-height:.98;letter-spacing:-.055em}
+    .ip-lead{max-width:800px;margin:0;color:var(--ip-muted);font-size:clamp(18px,2.2vw,22px);line-height:1.55}
+    .ip-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:32px}
+    .ip-btn{display:inline-flex;align-items:center;justify-content:center;padding:13px 18px;border:1px solid var(--ip-line);border-radius:12px;background:#fff;color:var(--ip-ink);font-weight:700;text-decoration:none}
+    .ip-btn.primary{border-color:transparent;background:linear-gradient(135deg,var(--ip-gold-soft),var(--ip-gold));color:#2a2008}
+    .ip-position{padding:0;border-block:1px solid var(--ip-line);background:#171717;color:#fff}
+    .ip-position .ip-wrap{display:grid;grid-template-columns:1.2fr repeat(3,1fr);gap:24px;align-items:center;padding-block:27px}
+    .ip-position b{display:block;font-size:14px}
+    .ip-position span{display:block;margin-top:3px;color:rgba(255,255,255,.58);font-size:12px}
+    .ip-section{padding:88px 0}
+    .ip-head{max-width:790px;margin-bottom:42px}
+    .ip-head h2{margin:10px 0 14px;font-family:"Space Grotesk",Inter,system-ui,sans-serif;font-size:clamp(36px,5vw,58px);line-height:1.05;letter-spacing:-.04em}
+    .ip-head p{margin:0;color:var(--ip-muted);font-size:18px}
+    .ip-solutions{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+    .ip-card{display:flex;min-height:520px;flex-direction:column;padding:30px;border:1px solid var(--ip-line);border-radius:24px;background:#fff;box-shadow:0 18px 55px rgba(32,25,15,.05)}
+    .ip-card.featured{background:#171717;color:#fff}
+    .ip-card-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .ip-number{color:var(--ip-gold);font-size:12px;font-weight:800;letter-spacing:.12em}
+    .ip-status{padding:5px 9px;border-radius:999px;background:#f1ede6;color:#6c6253;font-size:10px;font-weight:800;text-transform:uppercase}
+    .featured .ip-status{background:rgba(235,203,139,.16);color:var(--ip-gold-soft)}
+    .ip-card h3{margin:38px 0 13px;font-family:"Space Grotesk",Inter,system-ui,sans-serif;font-size:30px;line-height:1.08;letter-spacing:-.03em}
+    .ip-card>p{margin:0;color:var(--ip-muted);font-size:15px;line-height:1.65}
+    .featured>p{color:rgba(255,255,255,.67)}
+    .ip-job{margin:24px 0 0;padding-top:20px;border-top:1px solid var(--ip-line)}
+    .featured .ip-job{border-color:rgba(255,255,255,.13)}
+    .ip-job b{display:block;margin-bottom:5px;font-size:13px}
+    .ip-job span{color:var(--ip-muted);font-size:13px}
+    .featured .ip-job span{color:rgba(255,255,255,.58)}
+    .ip-card .ip-link{margin-top:auto;padding-top:28px;color:var(--ip-gold);font-weight:800;text-decoration:none}
+    .featured .ip-link{color:var(--ip-gold-soft)}
+    .ip-engine{background:#f0ece5;border-block:1px solid var(--ip-line)}
+    .ip-loop{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+    .ip-step{padding:24px;border:1px solid var(--ip-line);border-radius:18px;background:#fbf8f3}
+    .ip-step em{color:var(--ip-gold);font-size:11px;font-style:normal;font-weight:800;letter-spacing:.12em}
+    .ip-step h3{margin:24px 0 8px;font-size:19px}
+    .ip-step p{margin:0;color:var(--ip-muted);font-size:14px}
+    .ip-guide{display:grid;gap:10px}
+    .ip-guide-row{display:grid;grid-template-columns:1fr 1.4fr auto;gap:24px;align-items:center;padding:23px 24px;border:1px solid var(--ip-line);border-radius:16px;background:#fff}
+    .ip-guide-row b{font-size:18px}
+    .ip-guide-row span{color:var(--ip-muted);font-size:14px}
+    .ip-guide-row a{color:var(--ip-gold);font-weight:800;text-decoration:none;white-space:nowrap}
+    .ip-cta{padding:0 0 90px}
+    .ip-cta-box{padding:60px;border-radius:28px;background:#171717;color:#fff;text-align:center}
+    .ip-cta-box h2{max-width:760px;margin:0 auto;font-family:"Space Grotesk",Inter,system-ui,sans-serif;font-size:clamp(36px,5vw,60px);line-height:1.04;letter-spacing:-.04em}
+    .ip-cta-box p{max-width:670px;margin:17px auto 27px;color:rgba(255,255,255,.65);font-size:17px}
+    .ip-footer{padding:30px 0;border-top:1px solid var(--ip-line);color:var(--ip-muted);font-size:13px}
+    .ip-footer .ip-wrap{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
+    @media(max-width:900px){.ip-position .ip-wrap{grid-template-columns:1fr 1fr}.ip-solutions{grid-template-columns:1fr}.ip-card{min-height:0}.ip-loop{grid-template-columns:1fr 1fr}}
+    @media(max-width:640px){.ip-wrap{width:min(100% - 32px,1120px)}.ip-hero{padding:60px 0 54px}.ip-hero h1{font-size:48px}.ip-position .ip-wrap,.ip-loop{grid-template-columns:1fr}.ip-position .ip-wrap{gap:14px}.ip-section{padding:62px 0}.ip-guide-row{grid-template-columns:1fr;gap:7px}.ip-card{padding:24px}.ip-cta-box{padding:44px 22px;border-radius:22px}.ip-actions .ip-btn{width:100%}}
+  </style>
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"ItemList","name":"Magic Engine Industry Solutions","itemListElement":[
+    {"@type":"ListItem","position":1,"url":"https://magicengine.com.au/real-estate","name":"Magic Engine for Real Estate"},
+    {"@type":"ListItem","position":2,"url":"https://magicengine.com.au/travel","name":"Magic Engine for Travel"},
+    {"@type":"ListItem","position":3,"url":"https://magicengine.com.au/local-services","name":"Magic Engine for Local Services"}
+  ]}
+  </script>
+</head>
+<body class="industry-page">
+<header class="nav">
+  <div class="container nav-inner">
+    <a class="nav-logo" href="/" aria-label="Magic Engine home"><img src="/assets/favicon.svg?v=20260602" width="34" height="31" alt=""><span>Magic Engine</span></a>
+    <ul class="nav-links">
+      <li><a href="/industry-solutions" data-en="Industry Solutions" data-zh="行业解决方案">Industry Solutions</a></li>
+      <li><a href="/#engine" data-en="The Engine" data-zh="核心引擎">The Engine</a></li>
+      <li><a href="/training" data-en="AI Adoption" data-zh="AI 落地">AI Adoption</a></li>
+      <li><a href="/about" data-en="About" data-zh="关于">About</a></li>
+    </ul>
+    <div class="nav-actions">
+      <button class="btn-lang" id="lang-toggle" onclick="toggleLang()" aria-label="Switch language">中文</button>
+      <a class="btn-portal" href="https://app.magicengine.com.au/portal/login" data-en="Client portal" data-zh="客户入口">Client portal</a>
+    </div>
+  </div>
+</header>
+<main>
+  <section class="ip-hero">
+    <div class="ip-wrap">
+      <div class="ip-eyebrow" data-en="Industry solutions" data-zh="行业解决方案">Industry solutions</div>
+      <h1 data-en="One engine. Three ways to grow." data-zh="一个引擎，三种行业增长方式。">One engine. Three ways to grow.</h1>
+      <p class="ip-lead" data-en="Magic Engine does not force every business into the same marketing playbook. It applies one connected growth engine to the customer journey, signals and actions that matter in your industry." data-zh="Magic Engine 不会把所有企业塞进同一套营销模板。我们用同一个增长引擎，匹配每个行业真正重要的客户旅程、业务信号与行动。">Magic Engine does not force every business into the same marketing playbook. It applies one connected growth engine to the customer journey, signals and actions that matter in your industry.</p>
+      <div class="ip-actions"><a class="ip-btn primary" href="#solutions" data-en="Choose your industry →" data-zh="选择你的行业 →">Choose your industry →</a><a class="ip-btn" href="/ai-growth-engine" data-keep-path data-en="See the engine underneath" data-zh="了解底层引擎">See the engine underneath</a></div>
+    </div>
+  </section>
+  <section class="ip-position">
+    <div class="ip-wrap">
+      <div><b data-en="Industry first" data-zh="行业优先">Industry first</b><span data-en="Start with the growth job, not a software menu." data-zh="从增长任务开始，而不是从软件菜单开始。">Start with the growth job, not a software menu.</span></div>
+      <div><b data-en="Real Estate" data-zh="地产">Real Estate</b><span data-en="Audience and project demand" data-zh="受众与项目需求">Audience and project demand</span></div>
+      <div><b data-en="Travel" data-zh="旅游">Travel</b><span data-en="Content, discovery and leads" data-zh="内容、种草与线索">Content, discovery and leads</span></div>
+      <div><b data-en="Local Services" data-zh="本地服务">Local Services</b><span data-en="Visibility, trust and bookings" data-zh="可见度、信任与预约">Visibility, trust and bookings</span></div>
+    </div>
+  </section>
+  <section class="ip-section" id="solutions">
+    <div class="ip-wrap">
+      <div class="ip-head"><div class="ip-eyebrow" data-en="Choose by growth job" data-zh="按增长任务选择">Choose by growth job</div><h2 data-en="Different industries need different loops." data-zh="不同行业，需要不同的增长闭环。">Different industries need different loops.</h2><p data-en="Each solution has its own journey, data model and execution workflow. The platform underneath stays connected." data-zh="每套方案都有自己的客户旅程、数据模型与执行流程，底层平台保持统一连接。">Each solution has its own journey, data model and execution workflow. The platform underneath stays connected.</p></div>
+      <div class="ip-solutions">
+        <article class="ip-card featured">
+          <div class="ip-card-top"><span class="ip-number">01 · REAL ESTATE</span><span class="ip-status" data-en="Priority" data-zh="重点方案">Priority</span></div>
+          <h3 data-en="Build demand now. Keep the audience after the campaign." data-zh="现在建立需求，活动结束后仍保留受众资产。">Build demand now. Keep the audience after the campaign.</h3>
+          <p data-en="Agents compound audience knowledge across listings. Developers build brand confidence and project demand across a longer buying cycle." data-zh="中介在每个房源活动中沉淀受众；开发商在更长决策周期中建立品牌信任与项目需求。">Agents compound audience knowledge across listings. Developers build brand confidence and project demand across a longer buying cycle.</p>
+          <div class="ip-job"><b data-en="For agents" data-zh="面向中介">For agents</b><span data-en="Listing campaigns, audience memory, lead priority and remarketing." data-zh="房源推广、受众沉淀、线索优先级与再营销。">Listing campaigns, audience memory, lead priority and remarketing.</span></div>
+          <div class="ip-job"><b data-en="For developers" data-zh="面向开发商">For developers</b><span data-en="Brand narrative, project demand, education, nurture and attribution." data-zh="品牌叙事、项目需求、客户教育、培育与归因。">Brand narrative, project demand, education, nurture and attribution.</span></div>
+          <a class="ip-link" href="/real-estate" data-keep-path data-en="Explore real estate →" data-zh="查看地产解决方案 →">Explore real estate →</a>
+        </article>
+        <article class="ip-card">
+          <div class="ip-card-top"><span class="ip-number">02 · TRAVEL</span><span class="ip-status" data-en="In market" data-zh="已投入应用">In market</span></div>
+          <h3 data-en="Turn destination interest into qualified enquiries." data-zh="把目的地兴趣转化为有效咨询。">Turn destination interest into qualified enquiries.</h3>
+          <p data-en="Create enough useful destination and product content to earn discovery across search, AI answers and social—then capture, manage and convert genuine travel intent." data-zh="通过大量有价值的目的地与产品内容，在搜索、AI 答案与社交平台获得种草，再承接、管理并转化真实旅游意向。">Create enough useful destination and product content to earn discovery across search, AI answers and social—then capture, manage and convert genuine travel intent.</p>
+          <div class="ip-job"><b data-en="Demand creation" data-zh="需求创造">Demand creation</b><span data-en="Content engine, SEO, GEO, social and paid amplification." data-zh="内容引擎、SEO、GEO、社交内容与付费放大。">Content engine, SEO, GEO, social and paid amplification.</span></div>
+          <div class="ip-job"><b data-en="Lead conversion" data-zh="线索转化">Lead conversion</b><span data-en="Enquiry capture, CRM workflow, follow-up and journey reporting." data-zh="咨询承接、CRM 流程、跟进与客户旅程报告。">Enquiry capture, CRM workflow, follow-up and journey reporting.</span></div>
+          <a class="ip-link" href="/travel" data-keep-path data-en="Explore travel →" data-zh="查看旅游解决方案 →">Explore travel →</a>
+        </article>
+        <article class="ip-card">
+          <div class="ip-card-top"><span class="ip-number">03 · LOCAL SERVICES</span><span class="ip-status" data-en="Pilot" data-zh="试点">Pilot</span></div>
+          <h3 data-en="Get found locally. Earn trust. Turn demand into booked work." data-zh="在本地被找到、赢得信任，把需求变成预约。">Get found locally. Earn trust. Turn demand into booked work.</h3>
+          <p data-en="Connect service and location visibility, reviews, proof, paid demand and lead follow-up for businesses where every missed enquiry has a real cost." data-zh="连接服务与地区可见度、评价口碑、案例证明、付费需求与线索跟进，减少每一次真实咨询的流失。">Connect service and location visibility, reviews, proof, paid demand and lead follow-up for businesses where every missed enquiry has a real cost.</p>
+          <div class="ip-job"><b data-en="Be discovered and trusted" data-zh="被发现并建立信任">Be discovered and trusted</b><span data-en="Local search, AI visibility, service clarity, proof and reviews." data-zh="本地搜索、AI 可见度、服务清晰度、案例与评价。">Local search, AI visibility, service clarity, proof and reviews.</span></div>
+          <div class="ip-job"><b data-en="Convert local intent" data-zh="转化本地意向">Convert local intent</b><span data-en="Lead capture, response priority, follow-up and booked outcomes." data-zh="线索获取、响应优先级、跟进与预约结果。">Lead capture, response priority, follow-up and booked outcomes.</span></div>
+          <a class="ip-link" href="/local-services" data-keep-path data-en="Explore local services →" data-zh="查看本地服务方案 →">Explore local services →</a>
+        </article>
+      </div>
+    </div>
+  </section>
+  <section class="ip-section ip-engine">
+    <div class="ip-wrap">
+      <div class="ip-head"><div class="ip-eyebrow" data-en="The engine underneath" data-zh="底层增长引擎">The engine underneath</div><h2 data-en="Different playbooks. One operating loop." data-zh="不同打法，同一个运营闭环。">Different playbooks. One operating loop.</h2><p data-en="Industry workflows change, but every solution keeps insight connected to action and outcome." data-zh="行业工作流各不相同，但每套方案都把洞察、行动与结果连接在一起。">Industry workflows change, but every solution keeps insight connected to action and outcome.</p></div>
+      <div class="ip-loop">
+        <div class="ip-step"><em>01</em><h3 data-en="Diagnose" data-zh="诊断">Diagnose</h3><p data-en="Read the signals that matter in this industry." data-zh="读取该行业真正重要的业务信号。">Read the signals that matter in this industry.</p></div>
+        <div class="ip-step"><em>02</em><h3 data-en="Prioritise" data-zh="排序">Prioritise</h3><p data-en="Decide the next best growth action." data-zh="判断下一步最佳增长行动。">Decide the next best growth action.</p></div>
+        <div class="ip-step"><em>03</em><h3 data-en="Execute" data-zh="执行">Execute</h3><p data-en="Turn the decision into content, campaigns and follow-up." data-zh="把决策转成内容、营销活动与跟进。">Turn the decision into content, campaigns and follow-up.</p></div>
+        <div class="ip-step"><em>04</em><h3 data-en="Learn" data-zh="学习">Learn</h3><p data-en="Use outcomes to improve the next cycle." data-zh="用实际结果优化下一个周期。">Use outcomes to improve the next cycle.</p></div>
+      </div>
+    </div>
+  </section>
+  <section class="ip-section">
+    <div class="ip-wrap">
+      <div class="ip-head"><div class="ip-eyebrow" data-en="A simple decision" data-zh="简单选择">A simple decision</div><h2 data-en="Start with the customer journey you need to improve." data-zh="从你最需要改善的客户旅程开始。">Start with the customer journey you need to improve.</h2></div>
+      <div class="ip-guide">
+        <div class="ip-guide-row"><b data-en="I market listings or property projects" data-zh="我推广房源或地产项目">I market listings or property projects</b><span data-en="Build reusable audiences, project demand and accountable follow-up." data-zh="沉淀可复用受众、建立项目需求并实现可追踪跟进。">Build reusable audiences, project demand and accountable follow-up.</span><a href="/real-estate" data-keep-path data-en="Real Estate →" data-zh="地产 →">Real Estate →</a></div>
+        <div class="ip-guide-row"><b data-en="I sell destinations, tours or travel products" data-zh="我销售目的地、线路或旅游产品">I sell destinations, tours or travel products</b><span data-en="Scale useful content, earn discovery and convert enquiries through CRM." data-zh="规模化内容、获取搜索与种草，并通过 CRM 转化咨询。">Scale useful content, earn discovery and convert enquiries through CRM.</span><a href="/travel" data-keep-path data-en="Travel →" data-zh="旅游 →">Travel →</a></div>
+        <div class="ip-guide-row"><b data-en="I serve customers in specific local areas" data-zh="我为特定本地区域的客户提供服务">I serve customers in specific local areas</b><span data-en="Improve local visibility, trust, response speed and booked outcomes." data-zh="提升本地可见度、信任、响应速度与预约结果。">Improve local visibility, trust, response speed and booked outcomes.</span><a href="/local-services" data-keep-path data-en="Local Services →" data-zh="本地服务 →">Local Services →</a></div>
+      </div>
+    </div>
+  </section>
+  <section class="ip-cta">
+    <div class="ip-wrap"><div class="ip-cta-box"><h2 data-en="Choose the solution before choosing the tools." data-zh="先选择增长方案，再选择工具。">Choose the solution before choosing the tools.</h2><p data-en="Tell us how your customers discover, enquire and buy. We will map the right industry workflow before recommending an implementation." data-zh="告诉我们客户如何发现你、咨询你并最终购买。我们会先梳理适合的行业工作流，再建议实施方式。">Tell us how your customers discover, enquire and buy. We will map the right industry workflow before recommending an implementation.</p><a class="ip-btn primary" href="/discover?source=industry-solutions" data-en="Discuss your industry growth system →" data-zh="讨论你的行业增长系统 →">Discuss your industry growth system →</a></div></div>
+  </section>
+</main>
+<footer class="ip-footer"><div class="ip-wrap"><span>© 2026 Magic Engine by Magic Lab</span><span data-en="Built for Australia & New Zealand · English & Chinese support" data-zh="服务澳大利亚与新西兰 · 支持中英文">Built for Australia & New Zealand · English & Chinese support</span></div></footer>
+<script src="/app.js"></script>
+</body>
+</html>

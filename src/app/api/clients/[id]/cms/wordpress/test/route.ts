@@ -35,7 +35,20 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     )
   }
 
-  const conn = await getWordpressConnection(clientId).catch(() => null)
+  // 🔴 这里以前是 `.catch(() => null)`，把「客户配置串台」这个红线错误
+  //    吞成了「这个客户还没配」。FDE 看到「没有连接」会去重新填一遍，
+  //    大概率填回同一个错网址 —— 正是这条闸门要防的事，却被它自己的调用方吞掉。
+  //    串台必须原样透出来，只有「真的没配」才返回 404。
+  let conn: Awaited<ReturnType<typeof getWordpressConnection>>
+  try {
+    conn = await getWordpressConnection(clientId)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return NextResponse.json(
+      { success: false, error: msg, code: 'CONNECTION_BLOCKED' },
+      { status: 409 },
+    )
+  }
   if (!conn) {
     return NextResponse.json(
       { success: false, error: 'No WordPress connection found for this client', code: 'NO_CONNECTION' },

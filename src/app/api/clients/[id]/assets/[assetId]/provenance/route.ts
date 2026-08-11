@@ -27,6 +27,23 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status })
   }
 
+  // 🔴 2026-08-05 魏征 P2-3：签字这一步的全部注释都写着「必须由 **FDE** 逐张确认」，
+  // 但 `requireDashboardClientAccess` 对客户本人（paid_client）也返回 ok，
+  // 路由里又没有任何 tier 判断 —— 于是中介自己登录后台，就能把自己传的网图
+  // 签成「客户实拍（已确认）」，`verified_by` 记的还是他自己的邮箱。
+  //
+  // 「找一个跟这笔生意没有利害关系的人来背书」是这道签字的**全部意义**。
+  // 客户给自己背书 = 没有背书。
+  if (access.tier !== 'admin') {
+    return NextResponse.json(
+      {
+        success: false,
+        error: '素材确认必须由 Magic Lab 的人来做 —— 自己给自己的素材背书，这个确认就没有意义了',
+      },
+      { status: 403 },
+    )
+  }
+
   let body: { source?: unknown }
   try {
     body = await req.json()

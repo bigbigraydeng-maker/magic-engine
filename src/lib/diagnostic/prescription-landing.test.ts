@@ -279,6 +279,7 @@ describe('landPrescription —— 方案变成看板上的活儿', () => {
     const approved = updates.find((u) => u.patch.status === 'approved')!
     expect(Object.keys(approved.patch).sort()).toEqual(['approved_at', 'approved_by', 'status'])
     expect(approved.patch.approved_by).toBe('张三')
+    // 幻觉列会让整条 UPDATE 失败 —— 白名单是唯一防线
     for (const key of Object.keys(approved.patch)) {
       expect(PRESCRIPTION_COLUMNS.includes(key as never), `幻觉列: ${key}`).toBe(true)
     }

@@ -183,7 +183,9 @@ function isGoogleProvider(provider: PlatformProvider): boolean {
   return (
     provider === PLATFORM_PROVIDERS.GOOGLE_GBP ||
     provider === PLATFORM_PROVIDERS.GOOGLE_GSC ||
-    provider === PLATFORM_PROVIDERS.GOOGLE_ADS
+    provider === PLATFORM_PROVIDERS.GOOGLE_ADS ||
+    provider === PLATFORM_PROVIDERS.GOOGLE_GA4 ||
+    provider === PLATFORM_PROVIDERS.GOOGLE_GTM
   )
 }
 

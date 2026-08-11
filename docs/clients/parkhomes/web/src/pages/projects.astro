@@ -1,0 +1,58 @@
+---
+import Base from '../layouts/Base.astro';
+import AgentLine from '../components/AgentLine.astro';
+import ProjectCard from '../components/ProjectCard.astro';
+import { projects, collection } from '../data/projects.js';
+const available = projects.filter((p) => p.group === 'available');
+const coming = projects.filter((p) => p.group === 'coming');
+---
+<Base title="Projects — Park Homes" active="projects">
+
+  <section class="deep dark" style="padding-bottom:clamp(40px,6vw,64px)">
+    <div class="wrap">
+      <p class="eyebrow sec-eyebrow">{collection.subtitle}</p>
+      <h1 class="sec-h">{collection.title}</h1>
+      <p class="lead" style="color:#B9C2BE;margin-top:14px">{collection.body[0]}</p>
+    </div>
+  </section>
+
+  <section class="tint">
+    <div class="wrap twocol">
+      <div>
+        <p class="eyebrow sec-eyebrow">Our approach</p>
+        <h2 class="group-h" style="margin-bottom:0">Carefully curated, not mass produced.</h2>
+      </div>
+      <div>
+        {collection.body.slice(1).map((t) => <p>{t}</p>)}
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <p class="eyebrow sec-eyebrow">Available now</p>
+      <h2 class="group-h">Now selling &amp; under construction</h2>
+      <div class="cards two">
+        {available.map((p) => <ProjectCard p={p} line="listLine" />)}
+      </div>
+
+      <div class="group-sep"></div>
+
+      <p class="eyebrow sec-eyebrow">Coming soon</p>
+      <h2 class="group-h">Register your interest</h2>
+      <div class="cards">
+        {coming.map((p) => <ProjectCard p={p} line="listLine" />)}
+      </div>
+    </div>
+  </section>
+
+  <section class="dark cta">
+    <div class="wrap">
+      <h2>Not sure which suits you?</h2>
+      <p>Sales enquiries are handled by our appointed agent.</p>
+      <div><a class="arrow-cta" href="/contact/"><span class="circ">→</span><span class="lbl">Enquire</span></a></div>
+      <AgentLine />
+    </div>
+  </section>
+
+</Base>

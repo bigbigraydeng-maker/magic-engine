@@ -46,6 +46,9 @@ describe('PLATFORM_PROVIDERS', () => {
     expect(PLATFORM_PROVIDERS.META).toBe('meta')
     expect(PLATFORM_PROVIDERS.TIKTOK).toBe('tiktok')
     expect(PLATFORM_PROVIDERS.GOOGLE_ADS).toBe('google_ads')
+    expect(PLATFORM_PROVIDERS.MICROSOFT_MAIL).toBe('microsoft_mail')
+    expect(PLATFORM_PROVIDERS.GOOGLE_GA4).toBe('google_ga4')
+    expect(PLATFORM_PROVIDERS.GOOGLE_GTM).toBe('google_gtm')
   })
 })
 

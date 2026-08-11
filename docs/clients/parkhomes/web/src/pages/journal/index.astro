@@ -1,0 +1,38 @@
+---
+import Base from '../../layouts/Base.astro';
+const posts = Object.values(import.meta.glob('./*.md', { eager: true }));
+posts.sort((a, b) => new Date(b.frontmatter.date) - new Date(a.frontmatter.date));
+---
+<Base title="Journal — Park Homes" active="journal" desc="Guides for Auckland buyers — suburbs, new builds and what to check before you sign.">
+
+  <section class="deep dark" style="padding-bottom:clamp(40px,6vw,64px)">
+    <div class="wrap">
+      <p class="eyebrow sec-eyebrow">Journal</p>
+      <h1 class="sec-h">Notes for Auckland buyers</h1>
+      <p class="lead" style="color:#B9C2BE;margin-top:14px">Practical guides on the suburbs we build in, and on buying a new home well — what to ask, what to check, and what the process actually involves.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="cards">
+        {posts.map((p) => (
+          <article class="card">
+            <div class="cbody">
+              <p class="eyebrow" style="margin-bottom:12px">{p.frontmatter.category}</p>
+              <h3 style="font-size:22px"><a href={p.url + '/'} style="text-decoration:none;color:inherit">{p.frontmatter.title}</a></h3>
+              <p class="place" style="min-height:auto;margin-top:10px">{p.frontmatter.description}</p>
+              <div class="row">
+                <span class="price" style="font-weight:400;font-size:13px;color:var(--mute)">
+                  {new Date(p.frontmatter.date).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </span>
+                <a class="view" href={p.url + '/'}>Read</a>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+</Base>

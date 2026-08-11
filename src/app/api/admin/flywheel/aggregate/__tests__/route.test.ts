@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // ─── Hoisted mocks ────────────────────────────────────────────────────────────
 
 const mockQuery = vi.fn()
+let rangesAsked: Array<[number, number]> = []
 
 const mocks = vi.hoisted(() => ({
   guardAdmin: vi.fn(),
@@ -23,11 +24,29 @@ const makeChainable = (): object => {
   const handler: ProxyHandler<object> = {
     get(_, prop) {
       if (prop === 'then' || prop === 'catch' || prop === 'finally') {
-        // Make it thenable — delegate to mockQuery()
+        // Make it thenable — delegate to mockQuery().
+        //
+        // Bound on purpose: the previous version pulled `then` off the promise
+        // and called it detached, so `this` was undefined and V8 threw
+        // "Promise.prototype.then called on incompatible receiver". Every test
+        // in this file that actually awaited the query has been red since — 3 of
+        // the repo's standing failures. Awaiting the mock has to behave like
+        // awaiting the real query, or the suite is only testing the guard.
         return (...args: unknown[]) => {
-          const p = mockQuery() as Promise<unknown>
-          const method = (p as unknown as Record<string, unknown>)[String(prop)] as ((...a: unknown[]) => unknown) | undefined
-          return method?.(...args)
+          const p = Promise.resolve(mockQuery())
+          if (prop === 'then') return p.then(...(args as [never, never]))
+          if (prop === 'catch') return p.catch(...(args as [never]))
+          return p.finally(...(args as [never]))
+        }
+      }
+      // `.range()` is the terminal now that the route pages. Range-aware on
+      // purpose: a stub that hands back everything regardless cannot see a
+      // paging bug, which is how the fold-without-paging gap survived a round.
+      if (prop === 'range') {
+        return async (from: number, to: number) => {
+          const res = (await mockQuery()) as { data: unknown[] | null; error: unknown }
+          rangesAsked.push([from, to])
+          return { data: (res.data ?? []).slice(from, to + 1), error: res.error }
         }
       }
       // Every other accessor (eq, select, from, order…) returns the same proxy
@@ -45,12 +64,38 @@ import { GET } from '../route'
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
+/**
+ * One row per ACTION — each with a distinct action_id, because the route now
+ * collapses per action before counting. Rows sharing an action_id are readings
+ * of one event, not separate samples.
+ */
+function outcome(
+  actionId: string,
+  verdict: string,
+  actionType: string,
+  flywheel: string,
+  clientId: string,
+  over: Record<string, unknown> = {},
+) {
+  return {
+    action_id: actionId,
+    metric_key: 'ads.spend',
+    window_days: 14,
+    verdict,
+    flywheel_actions: {
+      action_type: actionType, flywheel, client_id: clientId,
+      expected_metric: 'ads.spend',
+    },
+    ...over,
+  }
+}
+
 const OUTCOMES_WITH_ACTIONS = [
-  { verdict: 'confirmed',    flywheel_actions: { action_type: 'ads.pause_campaign', flywheel: 'ads', client_id: 'c1' } },
-  { verdict: 'confirmed',    flywheel_actions: { action_type: 'ads.pause_campaign', flywheel: 'ads', client_id: 'c1' } },
-  { verdict: 'inconclusive', flywheel_actions: { action_type: 'ads.pause_campaign', flywheel: 'ads', client_id: 'c2' } },
-  { verdict: 'confirmed',    flywheel_actions: { action_type: 'seo.publish_blog',   flywheel: 'seo', client_id: 'c1' } },
-  { verdict: 'reversed',     flywheel_actions: { action_type: 'seo.publish_blog',   flywheel: 'seo', client_id: 'c2' } },
+  outcome('a1', 'confirmed',    'ads.pause_campaign', 'ads', 'c1'),
+  outcome('a2', 'confirmed',    'ads.pause_campaign', 'ads', 'c1'),
+  outcome('a3', 'inconclusive', 'ads.pause_campaign', 'ads', 'c2'),
+  outcome('a4', 'confirmed',    'seo.publish_blog',   'seo', 'c1'),
+  outcome('a5', 'reversed',     'seo.publish_blog',   'seo', 'c2'),
 ]
 
 function makeRequest(params: Record<string, string> = {}) {
@@ -64,6 +109,7 @@ function makeRequest(params: Record<string, string> = {}) {
 describe('GET /api/admin/flywheel/aggregate', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    rangesAsked = []
     mocks.guardAdmin.mockResolvedValue(null) // null = admin authenticated, proceed
     mockQuery.mockResolvedValue({ data: OUTCOMES_WITH_ACTIONS, error: null })
   })
@@ -150,5 +196,77 @@ describe('GET /api/admin/flywheel/aggregate', () => {
     const json = await res.json()
     expect(json.top).toEqual([])
     expect(json.total_outcomes).toBe(0)
+  })
+})
+
+// ── One action is one sample, however many rows it has ──────────────────────
+
+describe('counting by action, not by row', () => {
+  it('does not let one action count three times through its three metrics', async () => {
+    // A GSC action yields clicks, impressions and avg_position from one snapshot
+    // pair. Counting rows let a single action clear the `min` threshold on its
+    // own and pull the success rate with it. (Codex P2, round 26.)
+    mockQuery.mockResolvedValue({
+      data: [
+        outcome('a1', 'confirmed', 'seo.publish_blog', 'seo', 'c1', {
+          metric_key: 'seo.gsc.clicks',
+          flywheel_actions: { action_type: 'seo.publish_blog', flywheel: 'seo', client_id: 'c1', expected_metric: 'seo.gsc.clicks' },
+        }),
+        outcome('a1', 'reversed', 'seo.publish_blog', 'seo', 'c1', {
+          metric_key: 'seo.gsc.impressions',
+          flywheel_actions: { action_type: 'seo.publish_blog', flywheel: 'seo', client_id: 'c1', expected_metric: 'seo.gsc.clicks' },
+        }),
+        outcome('a1', 'reversed', 'seo.publish_blog', 'seo', 'c1', {
+          metric_key: 'seo.gsc.avg_position',
+          flywheel_actions: { action_type: 'seo.publish_blog', flywheel: 'seo', client_id: 'c1', expected_metric: 'seo.gsc.clicks' },
+        }),
+      ],
+      error: null,
+    })
+
+    const res = await GET(makeRequest())
+    const body = await res.json()
+
+    expect(body.total_outcomes).toBe(1)
+  })
+
+  it('does not double-count an action that has two windows', async () => {
+    // What turning ATTRIBUTION_DUAL_WINDOW_ENABLED on produces: the same metric
+    // answered at the cadence window and at pass 1's. Two answers to different
+    // questions about ONE action, not two actions.
+    mockQuery.mockResolvedValue({
+      data: [
+        outcome('a1', 'confirmed', 'seo.publish_blog', 'seo', 'c1', { window_days: 28 }),
+        outcome('a1', 'reversed',  'seo.publish_blog', 'seo', 'c1', { window_days: 14 }),
+      ],
+      error: null,
+    })
+
+    const res = await GET(makeRequest({ min: '1' }))
+    const body = await res.json()
+
+    expect(body.total_outcomes).toBe(1)
+    // The mature window is the one that represents the action.
+    expect(body.top[0].confirmed).toBe(1)
+  })
+})
+
+// ── Reading every page, not just the first ──────────────────────────────────
+
+describe('paging', () => {
+  it('counts an action whose rows sit past the 1000-row cap', async () => {
+    const filler = Array.from({ length: 1000 }, (_, i) =>
+      outcome(`n${i}`, 'confirmed', 'ads.pause_campaign', 'ads', 'c1'))
+    mockQuery.mockResolvedValue({
+      data: [...filler, outcome('late', 'confirmed', 'late.action', 'seo', 'c1')],
+      error: null,
+    })
+
+    const res = await GET(makeRequest({ min: '1' }))
+    const body = await res.json()
+
+    expect(rangesAsked.length).toBeGreaterThan(1)
+    expect(body.total_outcomes).toBe(1001)
+    expect(body.top.some((t: { action_type: string }) => t.action_type === 'late.action')).toBe(true)
   })
 })

@@ -37,20 +37,65 @@ function keyFrom(secret: string): Buffer {
 }
 
 /**
- * 生成令牌:nonce.ciphertext.tag(全 base64url)。
- * secret 缺失或 clientId 非法 → null(fail-closed)。
+ * 令牌里装的东西。
+ *
+ * ── 为什么要装房源 id（2026-08-05 PM 提的产品要求）────────────────────────
+ * 地产的营销单位是**一套房**，不是「这个客户」。原来令牌里只有 client_id，
+ * 于是传进来的每张照片都只知道「这是 Roman 的」，不知道是 Schnapper Rock 那套
+ * 还是 Mairangi Bay 那套 —— 实测：库里 83 个素材，**0 个知道自己属于哪套房**。
+ *
+ * 归类不能丢给上传的人（会破掉「三步不填表」），也不能丢给后台人工（永远做不完）。
+ * 所以归类由**链接本身**完成：一套房一条链接，传哪条就归哪套房。
+ * 上传的人那边一点没变，还是点链接 → 选文件 → 传完。
  */
-export function createUploadToken(clientId: string, secret: string | undefined): string | null {
+export interface UploadTokenPayload {
+  clientId: string
+  /** 这条链接绑定的房源。不给 = 客户级链接（老链接就是这种，继续可用）。 */
+  listingId?: string
+}
+
+/** 载荷编码：`clientId` 或 `clientId:listingId`。冒号不会出现在 UUID 里，安全。 */
+const PAYLOAD_SEP = ':'
+
+/**
+ * 生成令牌:nonce.ciphertext.tag(全 base64url)。
+ * secret 缺失或 id 非法 → null(fail-closed)。
+ *
+ * 第二个参数兼容两种写法：直接给 clientId 字符串（老调用方），
+ * 或给 `{ clientId, listingId }`。
+ */
+export function createUploadToken(
+  target: string | UploadTokenPayload,
+  secret: string | undefined,
+): string | null {
+  const clientId = typeof target === 'string' ? target : target.clientId
+  const listingId = typeof target === 'string' ? undefined : target.listingId
+
   if (!secret || !UUID_RE.test(clientId)) return null
+  // 房源 id 给了就必须合法 —— 悄悄降级成客户级链接会让 FDE 以为绑上了，
+  // 而实际上传进来的东西又是一堆没主的照片。宁可签不出来。
+  if (listingId !== undefined && !UUID_RE.test(listingId)) return null
+
+  const payload = listingId ? `${clientId}${PAYLOAD_SEP}${listingId}` : clientId
   const nonce = randomBytes(NONCE_BYTES)
   const cipher = createCipheriv('aes-256-gcm', keyFrom(secret), nonce)
-  const ct = Buffer.concat([cipher.update(clientId, 'utf8'), cipher.final()])
+  const ct = Buffer.concat([cipher.update(payload, 'utf8'), cipher.final()])
   const tag = cipher.getAuthTag()
   return `${b64url(nonce)}.${b64url(ct)}.${b64url(tag)}`
 }
 
 /** 校验并解出 client_id;任何不对(篡改/伪造/密钥错/格式错)一律 null,绝不抛。 */
-export function verifyUploadToken(token: string | undefined, secret: string | undefined): string | null {
+/**
+ * 校验并解出载荷;任何不对(篡改/伪造/密钥错/格式错)一律 null,绝不抛。
+ *
+ * 返回的是**对象**而不是裸的 client_id —— 老调用方要改一行拿 `.clientId`。
+ * 刻意做成破坏性变更：如果继续返回字符串，新增的房源绑定会被静默丢掉，
+ * 而调用方完全看不出来（编译能过、运行不报错、照片照样进库，只是没主）。
+ */
+export function verifyUploadToken(
+  token: string | undefined,
+  secret: string | undefined,
+): UploadTokenPayload | null {
   if (!token || !secret) return null
   const parts = token.split('.')
   if (parts.length !== 3) return null
@@ -62,13 +107,29 @@ export function verifyUploadToken(token: string | undefined, secret: string | un
 
     const decipher = createDecipheriv('aes-256-gcm', keyFrom(secret), nonce)
     decipher.setAuthTag(tag)
-    const clientId = Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8')
-    // 解出来的必须是合法 UUID —— 双保险,防解密侥幸产出垃圾
-    return UUID_RE.test(clientId) ? clientId : null
+    const raw = Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8')
+    return parsePayload(raw)
   } catch {
     // GCM 校验失败(篡改/错密钥)会在 final() 抛,吞掉返回 null
     return null
   }
+}
+
+/**
+ * 解出来的载荷必须整段合法 —— 双保险,防解密侥幸产出垃圾。
+ *
+ * 任何一段不是合法 UUID 就整个作废，**不做「至少 client_id 是对的所以放行」
+ * 这种降级**：那会让一条被截断的链接静默退化成客户级上传口。
+ */
+function parsePayload(raw: string): UploadTokenPayload | null {
+  const parts = raw.split(PAYLOAD_SEP)
+  if (parts.length === 1) {
+    return UUID_RE.test(parts[0]) ? { clientId: parts[0] } : null
+  }
+  if (parts.length === 2 && UUID_RE.test(parts[0]) && UUID_RE.test(parts[1])) {
+    return { clientId: parts[0], listingId: parts[1] }
+  }
+  return null
 }
 
 /**
@@ -80,7 +141,7 @@ export function roundTripOk(clientId: string, secret: string): boolean {
   if (!t) return false
   const back = verifyUploadToken(t, secret)
   if (!back) return false
-  const a = Buffer.from(back)
+  const a = Buffer.from(back.clientId)
   const b = Buffer.from(clientId)
   return a.length === b.length && timingSafeEqual(a, b)
 }

@@ -207,8 +207,14 @@ export interface VerifiedOffer {
 /** 发布目标(clients.factory_config.publish_target 存,FDE 配)。缺 → 不发标失败,绝不猜/误发别客户页。 */
 export interface PublishTarget {
   platform: 'facebook' | 'publer'
-  /** facebook:页 id(如 Oztop 748077268383005)。token 走 env META_SYSTEM_USER_TOKEN 换页 token */
+  /** facebook:页 id(如 Oztop 748077268383005)。 */
   page_id?: string
+  /**
+   * 哪个客户 —— adapter 靠它去库里取「连接 Meta」存下的页 token。
+   * 没有它就只能退回全局 env token,那条路要求那个身份恰好在这个页上有角色,
+   * 不满足就发不出去(2026-08-04 实测:讲课片发布报「授权没配好」正是这个原因)。
+   */
+  client_id?: string
   /** publer:CTS 账号 id */
   publer_account_id?: string
   publer_provider?: string

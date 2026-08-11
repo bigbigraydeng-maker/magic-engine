@@ -246,5 +246,50 @@ describe('GET /api/auth/google/gbp/callback', () => {
       expect(setCookie).toContain(GBP_STATE_COOKIE)
       expect(setCookie).toContain('Max-Age=0')
     })
+
+    it('writes a connected client_connectors row (anchor=gbp) — the wizard\'s "done" check reads this table, not platform_oauth_connections', async () => {
+      happyFetch()
+      await GET(makeRequest({ code: 'auth-code', state: NONCE, cookieValue: COOKIE_VAL }))
+
+      expect(mocks.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ client_id: CLIENT_ID, anchor: 'gbp', status: 'connected' }),
+        expect.objectContaining({ onConflict: 'client_id,anchor' }),
+      )
+    })
+  })
+
+  describe('wizard flow — must land back on the wizard, not settings', () => {
+    it('redirects to the onboarding wizard when the cookie carries flow=wizard', async () => {
+      happyFetch()
+      const res = await GET(makeRequest({
+        code: 'auth-code', state: NONCE, cookieValue: `${NONCE}:${CLIENT_ID}:wizard`,
+      }))
+
+      expect(res.status).toBe(302)
+      const loc = res.headers.get('location') ?? ''
+      expect(loc).toContain(`/dashboard/clients/${CLIENT_ID}/onboarding`)
+      expect(loc).not.toContain('/settings')
+    })
+
+    it('still redirects to settings when flow is admin (default, no third cookie segment)', async () => {
+      happyFetch()
+      const res = await GET(makeRequest({ code: 'auth-code', state: NONCE, cookieValue: COOKIE_VAL }))
+
+      const loc = res.headers.get('location') ?? ''
+      expect(loc).toContain(`/dashboard/clients/${CLIENT_ID}/settings`)
+    })
+
+    it('an error redirect during a wizard flow also lands on the wizard, not settings', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 }),
+      )
+      const res = await GET(makeRequest({
+        code: 'bad-code', state: NONCE, cookieValue: `${NONCE}:${CLIENT_ID}:wizard`,
+      }))
+
+      const loc = res.headers.get('location') ?? ''
+      expect(loc).toContain(`/dashboard/clients/${CLIENT_ID}/onboarding`)
+      expect(loc).toContain('gbp=error')
+    })
   })
 })

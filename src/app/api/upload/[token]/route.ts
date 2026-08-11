@@ -15,6 +15,7 @@
  * 里标明未分析 —— analyzer 只捞 'pending',自然跳过,不会拿视频去调图像接口白烧钱。
  */
 
+import { createHash, randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { uploadSecret, verifyUploadToken } from '@/lib/uploads/client-upload-token'
@@ -30,14 +31,60 @@ const MAX_FILES_PER_REQUEST = 20         // 防一次糊上来几百个文件把
 const MAX_REQUEST_BYTES = 400 * 1024 * 1024
 const BUCKET = 'visual-assets'
 
+/**
+ * 限流：一条链接（＝一个客户）在窗口内最多能传多少个文件。
+ *
+ * 🔴 2026-08-05 狄仁杰 6c / 魏征 P2-4：这是一条**公开、免登录、链接不过期**的
+ * 写入口，而中间件的 matcher 不覆盖 `/api`，全仓也没有限流设施。同为公开写入口的
+ * `/api/clients/[id]/leads` 早就有 5 条/60 秒的限流，这里一条都没有。
+ *
+ * 数值取得宽：中介一次批量传几十张是正常的，卡住真实使用比防住滥用更亏。
+ * 拦的是「灌几千张」那种量级。
+ */
+const RATE_WINDOW_MIN = 10
+const RATE_LIMIT_FILES = 300
+
+
+/**
+ * 边读边数,超过上限立刻断流并返回 null。
+ *
+ * 存在的理由:`content-length` 是客户端说了算的,chunked 请求干脆没有它。
+ * 要真挡住 OOM,只能自己数 —— 而且必须在**读的过程中**断,读完再判等于已经吃进内存了。
+ *
+ * 返回读到的字节(供重建请求体用);超限返回 null。
+ */
+async function measureBody(
+  body: ReadableStream<Uint8Array>,
+  limit: number,
+): Promise<Uint8Array | null> {
+  const reader = body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > limit) {
+      await reader.cancel().catch(() => {})
+      return null
+    }
+    chunks.push(value)
+  }
+  const out = new Uint8Array(total)
+  let off = 0
+  for (const c of chunks) { out.set(c, off); off += c.byteLength }
+  return out
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ token: string }> },
 ) {
   const { token } = await params
-  const clientId = verifyUploadToken(token, uploadSecret())
+  const payload = verifyUploadToken(token, uploadSecret())
   // 不区分「令牌错」和「客户不存在」,统一 404:别让人拿这个接口探测客户是否存在
-  if (!clientId) return NextResponse.json({ error: '链接无效或已失效' }, { status: 404 })
+  if (!payload) return NextResponse.json({ error: '链接无效或已失效' }, { status: 404 })
+  const { clientId, listingId } = payload
 
   const { data: client } = await supabaseAdmin
     .from('clients')
@@ -46,13 +93,62 @@ export async function POST(
     .maybeSingle()
   if (!client) return NextResponse.json({ error: '链接无效或已失效' }, { status: 404 })
 
+  // 房源链接：房源必须真实存在**且属于这个客户**。
+  // 不校验归属的话，一条链接就能把照片挂到别人的房源上 —— 而且从上传方看
+  // 完全成功，问题要等到出广告时才暴露（那时已经在花钱了）。
+  if (listingId) {
+    const { data: listing } = await supabaseAdmin
+      .from('listings')
+      .select('id')
+      .eq('id', listingId)
+      .eq('client_id', clientId)
+      .maybeSingle()
+    if (!listing) return NextResponse.json({ error: '链接无效或已失效' }, { status: 404 })
+  }
+
   // ⚠️ 必须在 formData() 之前拦:formData() 会把整个请求体读进内存,
   // 20 个 200MB 文件 = 4GB 一次性缓冲,进程直接 OOM —— 之后的大小检查救不了它。
+  //
+  // 🔴 2026-08-05 狄仁杰 / 魏征同时指出:原来只看 `content-length` 头,而
+  // **`Transfer-Encoding: chunked` 的请求根本没有这个头** —— `?? '0'` 让它恒为 0,
+  // 检查恒通过。这道闸原来只挡老实的客户端,一条 curl 就能绕过去把实例打到 OOM,
+  // 而且这是个公开、免登录、链接不过期的口子。
+  //
+  // 现在改成**边读边数**:声明了长度就先按声明拦(省一次读),没声明就自己数,
+  // 超了立刻断流。两条路都不依赖对方诚实。
   const declaredLength = Number(req.headers.get('content-length') ?? '0')
   if (declaredLength > MAX_REQUEST_BYTES) {
+    return NextResponse.json({ error: '这一批太大了,请分几次传' }, { status: 413 })
+  }
+  if (!declaredLength && req.body) {
+    const counted = await measureBody(req.body, MAX_REQUEST_BYTES)
+    if (counted === null) {
+      return NextResponse.json({ error: '这一批太大了,请分几次传' }, { status: 413 })
+    }
+    // 数完了流也读完了,得用数出来的字节重建请求体给 formData() 用。
+    req = new NextRequest(req.url, {
+      method: req.method,
+      headers: req.headers,
+      body: counted.buffer.slice(0, counted.byteLength) as ArrayBuffer,
+    })
+  }
+
+  // 限流放在读请求体之前 —— 放后面等于已经把内容吃进内存了，防不住什么。
+  const rateSince = new Date(Date.now() - RATE_WINDOW_MIN * 60_000).toISOString()
+  const { count: recentUploads, error: rateErr } = await supabaseAdmin
+    .from('client_assets')
+    .select('id', { count: 'exact', head: true })
+    .eq('client_id', clientId)
+    .gte('created_at', rateSince)
+
+  if (rateErr) {
+    // 数不出来就放行 —— 跟 leads 同一口径：宁可放过一次可疑上传，
+    // 也不因为一次数据库抖动把中介真实的素材挡在门外。但要大声记。
+    console.error('[client-upload] 限流计数失败，本次放行:', rateErr.message)
+  } else if ((recentUploads ?? 0) >= RATE_LIMIT_FILES) {
     return NextResponse.json(
-      { error: '这一批太大了,请分几次传' },
-      { status: 413 },
+      { error: `传得太快了，${RATE_WINDOW_MIN} 分钟后再传剩下的` },
+      { status: 429 },
     )
   }
 
@@ -89,8 +185,22 @@ export async function POST(
     }
 
     try {
-      const ext = file.name.split('.').pop()?.toLowerCase() ?? (isVideo ? 'mp4' : 'jpg')
-      const storagePath = `${clientId}/assets/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+      // 扩展名只留字母数字、最多 5 位：原样拼进 key 会造出 `a.b/c` 这种
+      // 带斜杠的奇形怪状路径（穿不出客户目录，但脏）。
+      const rawExt = file.name.split('.').pop()?.toLowerCase() ?? ''
+      const ext = rawExt.replace(/[^a-z0-9]/g, '').slice(0, 5) || (isVideo ? 'mp4' : 'jpg')
+
+      // 🔴 2026-08-05 狄仁杰 6b/6e：
+      //   · 路径前缀原来是**明文 client_id**。而 `visual-assets` 桶是公开的 ——
+      //     一张素材图的链接外泄（发微信给客户看、贴进交付文档、进 Meta 广告库）
+      //     等于 client_id 外泄，而 client_id 是很多历史接口的事实凭据。
+      //     现在前缀改成不可逆的哈希：我们自己按 client_id 照样算得出来，
+      //     拿到链接的人反推不回去。
+      //   · 随机位原来用 `Math.random()` —— V8 的实现由少量输出可恢复内部状态，
+      //     而 `Date.now()` 可猜。公开桶下「URL 即读权限」，等于别人素材的路径
+      //     理论上可推算。改用密码学随机。
+      const prefix = createHash('sha256').update(clientId).digest('hex').slice(0, 16)
+      const storagePath = `${prefix}/assets/${randomUUID()}.${ext}`
 
       const { error: uploadErr } = await supabaseAdmin.storage
         .from(BUCKET)
@@ -101,6 +211,10 @@ export async function POST(
 
       const { error: dbErr } = await supabaseAdmin.from('client_assets').insert({
         client_id: clientId,
+        // 归到哪套房 —— 由链接决定，不由上传的人选，也不靠后台事后归类。
+        // 地产的营销单位是一套房：没有这一列，83 张照片全是「Roman 的」，
+        // 出广告时没人知道该拿哪一张。
+        listing_id: listingId ?? null,
         storage_url: publicUrl,
         original_filename: file.name,
         file_size_bytes: file.size,

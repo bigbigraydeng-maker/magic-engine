@@ -20,6 +20,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import type { SocialPlanOutput, ReelsScript, Post, Story, GenerationConfig } from '@/lib/social/social-plan-templates'
 import { DEFAULT_CONFIG } from '@/lib/social/social-plan-templates'
 import type { ExecutionItem } from '@/types/diagnostic'
+import { SOURCE_LABELS, canBackRealPrice, type AssetSource } from '@/lib/assets/provenance'
+import { containsPriceClaim } from '@/lib/content/price-claim'
 
 // ─── Task-kind helpers ─────────────────────────────────────────────────────────
 
@@ -125,6 +127,8 @@ export interface GalleryAsset {
   is_selected: boolean
   created_at: string
   generation_status?: string
+  /** 底图来源。老响应/ 本地预览态没有这一字段,按「来源不明」处理(保守方向)。 */
+  source?: AssetSource
 }
 
 interface ImageGenerateParams {
@@ -1641,6 +1645,7 @@ function PostCard({ post, clientId, launchHubPlatform, onGenStart, onGenEnd, onB
                 caption={editedCopy}
                 hashtags={post.hashtags}
                 imageUrl={selectedUrl}
+                imageSource={selectedAsset?.source}
               />
             )}
           </div>
@@ -1870,6 +1875,7 @@ function StoryCard({ index, story, clientId, launchHubPlatform, onGenStart, onGe
                 caption={editedCopy}
                 hashtags={[]}
                 imageUrl={selectedUrl}
+                imageSource={selectedAsset?.source}
               />
             </div>
           )}
@@ -1886,19 +1892,28 @@ function StoryCard({ index, story, clientId, launchHubPlatform, onGenStart, onGe
 // States: idle → sending → sent
 
 function LaunchHubScheduler({
-  clientId, platform, caption, hashtags, imageUrl,
+  clientId, platform, caption, hashtags, imageUrl, imageSource,
 }: {
   clientId: string
   platform: string
   caption: string
   hashtags: string[]
   imageUrl: string | null
+  /** 当前选中配图的来源 —— 只有它决定这张图能不能配真实价格。 */
+  imageSource?: AssetSource
 }) {
   const [sent, setSent]         = useState(false)
   const [sending, setSending]   = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
+  // 「真实价格只能配真实画面」——**只在文案真的报了价时才拦**。
+  // 不做无条件拦截:库里绝大多数素材还是历史存量的「来源不明」,一刀切会让所有社媒
+  // 发帖当场瘫痪。没有价格 = 没有这条红线可踩,照常交付。
+  const priceClaimed  = containsPriceClaim(caption)
+  const sourceBlocked = Boolean(imageUrl) && priceClaimed && !canBackRealPrice(imageSource ?? 'unknown')
+
   const handleDeliver = async () => {
+    if (sourceBlocked) return
     setSending(true)
     setErrorMsg(null)
     try {
@@ -1940,12 +1955,38 @@ function LaunchHubScheduler({
       {!imageUrl && (
         <p className="text-[10px] font-medium text-amber-600">⚠ 建议先生成配图再交付</p>
       )}
+      {sourceBlocked && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 space-y-1">
+          <p className="text-[11px] font-black text-red-700">
+            🔴 文案里写了价格，但这张配图的来源没核实过，不能这样发出去
+          </p>
+          <p className="text-[10px] text-red-600 leading-relaxed">
+            当前配图来源：{SOURCE_LABELS[imageSource ?? 'unknown']}。
+            真实价格只能配真实画面 —— 客人按图下单、拿到的东西对不上，投诉算客户的。
+          </p>
+          <p className="text-[10px] text-red-700 font-semibold">两条路，选一条：</p>
+          <ul className="text-[10px] text-red-600 leading-relaxed list-disc pl-4 space-y-0.5">
+            <li>把价格从上面的文案里去掉（最快）</li>
+            <li>
+              去素材库确认这张图是客户实拍、再回来重选：{' '}
+              <a
+                href={`/dashboard/clients/${clientId}/assets`}
+                target="_blank"
+                rel="noreferrer"
+                className="font-bold underline hover:text-red-800"
+              >
+                打开素材库 ↗
+              </a>
+            </li>
+          </ul>
+        </div>
+      )}
       {errorMsg && (
         <p className="text-[11px] text-red-500">⚠ {errorMsg}</p>
       )}
       <button
         onClick={() => void handleDeliver()}
-        disabled={sending}
+        disabled={sending || sourceBlocked}
         className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2.5 text-xs font-black text-slate-700 hover:bg-white hover:border-slate-400 transition-colors disabled:opacity-50"
       >
         {sending
@@ -1965,6 +2006,28 @@ interface AssetRecommendation {
   original_filename: string | null
   reason: string
   quality_score: number
+  source?: AssetSource
+}
+
+/**
+ * 素材来源徽章 —— 绿 = 这张能给真实价格背书,灰 = 不能。
+ * 绿灰口径直接问 canBackRealPrice,不在界面里另立一套判断,避免哪天红线改了这里漏改。
+ */
+function SourceBadge({ source }: { source?: AssetSource }) {
+  const resolved = source ?? 'unknown'
+  const ok = canBackRealPrice(resolved)
+  return (
+    <span
+      title={ok ? '来源已核实 — 可以配真实价格' : '来源未核实 — 配真实价格前需先确认'}
+      className={`inline-block text-[9px] font-bold rounded px-1.5 py-0.5 border ${
+        ok
+          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+          : 'bg-slate-100 text-slate-500 border-slate-200'
+      }`}
+    >
+      {ok ? '✓ ' : ''}{SOURCE_LABELS[resolved]}
+    </span>
+  )
 }
 
 function AssetLibraryPicker({ clientId, imagePrompt, onClose, onPick, picking }: {
@@ -2066,6 +2129,7 @@ function AssetLibraryPicker({ clientId, imagePrompt, onClose, onPick, picking }:
                       >🔍</button>
                     </div>
                     <div className="px-2 py-2 space-y-1">
+                      <SourceBadge source={rec.source} />
                       <p className="text-[10px] text-gray-700 line-clamp-2 leading-tight">{rec.reason}</p>
                       {rec.original_filename && (
                         <p className="text-[9px] text-gray-400 truncate">{rec.original_filename}</p>
@@ -2087,7 +2151,8 @@ function AssetLibraryPicker({ clientId, imagePrompt, onClose, onPick, picking }:
           {/* Footer */}
           <div className="px-5 py-2.5 border-t border-gray-200 bg-gray-50">
             <p className="text-[10px] text-gray-500">
-              💡 来自客户素材库的真实照片 — 比 AI 生图更可信，特别适合旅游、产品等需要真实场景的内容
+              💡 素材库的照片比 AI 生图更可信，特别适合旅游、产品等需要真实场景的内容。
+              绿色徽章 = 来源已核实，可以配真实价格；灰色 = 来源未核实，配价格前先去素材库确认。
             </p>
           </div>
         </div>

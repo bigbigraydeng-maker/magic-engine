@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Castor Bay — Park Homes</title>
+<link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="/"><img class="logo" src="/img/logo-tree-ivory.png" alt="Park Homes"><span>PARKHOMES</span></a>
+    <ul>
+      <li><a class="lnk" href="/our-story/">About</a></li>
+      <li><a class="lnk on" href="/projects/">Projects</a></li>
+      <li><a class="lnk" href="/contact/">Contact</a></li>
+    </ul>
+    <a class="btn btn-primary" href="#register">Enquire</a>
+    <button class="hamb" aria-label="Menu">☰</button>
+  </div>
+</header>
+
+<section class="hero" style="background:linear-gradient(180deg,rgba(20,20,20,.30),rgba(20,20,20,.80)),url('/img/castor-bay/cb-hero.jpg') center/cover">
+  <span class="tag">Artist's impression</span>
+  <div class="wrap">
+    <p class="eyebrow">Castor Bay · North Shore</p>
+    <h1>Castor Bay</h1>
+    <p class="sub">Coastal elegance. Generous living.</p>
+    <span class="btn" style="margin-top:22px;background:#8a5a44;color:#fff;font-family:var(--mono);font-size:11px;letter-spacing:.06em">Register Interest</span>
+  </div>
+</section>
+
+<section>
+  <div class="wrap twocol">
+    <div><p class="eyebrow sec-eyebrow">The site</p><h2 class="sec-h">Four large homes near the coast</h2></div>
+    <div><p>A boutique collection of four substantial five-bedroom residences near Castor Bay, on Auckland’s North Shore — moments from the coastline.</p><p>Generously scaled homes of 260–280m², designed for families who want space, light and a premium coastal setting. Consenting is underway.</p></div>
+  </div>
+  <div class="wrap"><div class="facts"><div><div class="k">Homes</div><div class="v">4</div></div><div><div class="k">Bedrooms</div><div class="v">5</div></div><div><div class="k">Size</div><div class="v">260–280 m²</div></div><div><div class="k">From</div><div class="v">$2m+</div></div></div></div>
+</section>
+
+<section class="tint">
+  <div class="wrap">
+    <p class="eyebrow sec-eyebrow">Gallery</p>
+    <h2 class="sec-h" style="margin-bottom:30px">A closer look</h2>
+    <div class="gal">
+      <figure class="wide"><img src="/img/castor-bay/cb-hero.jpg" alt="Castor Bay — the development at dusk" loading="lazy"></figure>
+      <figure><img src="/img/castor-bay/cb-street-day.jpg" alt="Castor Bay — street view by day" loading="lazy"></figure>
+      <figure><img src="/img/castor-bay/cb-elevation-dusk.jpg" alt="Castor Bay — elevation at dusk" loading="lazy"></figure>
+      <figure><img src="/img/castor-bay/cb-front-tall.jpg" alt="Castor Bay — front elevation" loading="lazy"></figure>
+      <figure><img src="/img/castor-bay/cb-home-dusk.jpg" alt="Castor Bay — individual home at dusk" loading="lazy"></figure>
+      <figure><img src="/img/castor-bay/cb-block-dusk.jpg" alt="Castor Bay — homes at dusk" loading="lazy"></figure>
+      <figure><img src="/img/castor-bay/cb-slope.jpg" alt="Castor Bay — hillside outlook" loading="lazy"></figure>
+      <figure><img src="/img/castor-bay/cb-garage-dusk.jpg" alt="Castor Bay — entry and garaging at dusk" loading="lazy"></figure>
+      <figure><img src="/img/castor-bay/cb-garage-day.jpg" alt="Castor Bay — entry and garaging by day" loading="lazy"></figure>
+    </div>
+    <p style="margin-top:16px;font-size:13px;color:var(--mute)">Artist's impressions. Final finishes, landscaping and detailing may differ. Click any image to enlarge.</p>
+  </div>
+</section>
+
+<!-- LIGHTBOX -->
+<div class="lightbox" id="lb" aria-hidden="true">
+  <button class="lb-btn lb-close" id="lbClose" aria-label="Close">✕</button>
+  <button class="lb-btn lb-prev" id="lbPrev" aria-label="Previous">‹</button>
+  <img id="lbImg" src="" alt="">
+  <button class="lb-btn lb-next" id="lbNext" aria-label="Next">›</button>
+  <div class="lb-cap">Artist's impression · <span id="lbN"></span></div>
+</div>
+
+<script>
+(function(){
+  var figs = [].slice.call(document.querySelectorAll('.gal img'));
+  if(!figs.length) return;
+  var lb=document.getElementById('lb'), img=document.getElementById('lbImg'), n=document.getElementById('lbN'), i=0;
+  function show(k){ i=(k+figs.length)%figs.length; img.src=figs[i].src; img.alt=figs[i].alt; n.textContent=(i+1)+' / '+figs.length; }
+  function open(k){ show(k); lb.classList.add('on'); lb.setAttribute('aria-hidden','false'); document.body.style.overflow='hidden'; }
+  function close(){ lb.classList.remove('on'); lb.setAttribute('aria-hidden','true'); document.body.style.overflow=''; }
+  figs.forEach(function(el,k){ el.addEventListener('click',function(){ open(k); }); });
+  document.getElementById('lbClose').addEventListener('click',close);
+  document.getElementById('lbPrev').addEventListener('click',function(e){ e.stopPropagation(); show(i-1); });
+  document.getElementById('lbNext').addEventListener('click',function(e){ e.stopPropagation(); show(i+1); });
+  lb.addEventListener('click',function(e){ if(e.target===lb) close(); });
+  document.addEventListener('keydown',function(e){
+    if(!lb.classList.contains('on')) return;
+    if(e.key==='Escape') close();
+    if(e.key==='ArrowLeft') show(i-1);
+    if(e.key==='ArrowRight') show(i+1);
+  });
+})();
+</script>
+
+<section id="register" class="dark">
+  <div class="wrap" style="max-width:760px">
+    <p class="eyebrow sec-eyebrow">Register your interest</p>
+    <h2 style="color:#fff;font-size:clamp(26px,4vw,40px);margin-bottom:22px">Register for Castor Bay</h2>
+    <form class="reg" onsubmit="return false">
+      <div><label>Name</label><input type="text" placeholder="Your name"></div>
+      <div><label>Phone</label><input type="text" placeholder="Your phone"></div>
+      <div class="full"><label>Email</label><input type="text" placeholder="you@email.com"></div>
+      <div class="full"><button class="btn btn-primary btn-lg" style="width:100%">Register interest</button></div>
+    </form>
+    <p class="contact" style="text-align:left">Or contact our agent — Roman Hu · Ray White Mission Bay · <span class="pending">[phone]</span> · <span class="pending">[WeChat]</span></p>
+  </div>
+</section>
+<footer class="foot">
+  <div class="wrap">
+    <div class="top">
+      <a class="brand" href="/" style="letter-spacing:.28em;color:#EDEFEC;text-decoration:none">PARKHOMES</a>
+      <nav><a href="/our-story/">About</a><a href="/projects/">Projects</a><a href="/contact/">Contact</a></nav>
+    </div>
+    <p class="fine">Castor Bay · 76a Beamor Rd · © 2026 The Park Homes Ltd · Sales by Roman Hu, Ray White Mission Bay</p>
+  </div>
+</footer>
+<div class="mbar">
+  <a class="btn btn-primary" href="#register">Enquire</a>
+  <a class="call" href="#register" aria-label="Call">✆</a>
+</div>
+</body>
+</html>

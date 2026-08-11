@@ -33,12 +33,21 @@ const GBP_SCOPE        = 'https://www.googleapis.com/auth/business.manage'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function buildSettingsUrl(appUrl: string, clientId: string): URL {
+type GbpFlow = 'admin' | 'wizard'
+
+/**
+ * 'wizard' 必须落回向导本身，不能落到 settings 页——那是 FDE 专用的内部
+ * 后台，客户授权成功后被送进去只会觉得自己点错了（板桥 2026-08-11 复审）。
+ */
+function buildDestinationUrl(appUrl: string, clientId: string, flow: GbpFlow): URL {
+  if (flow === 'wizard') {
+    return new URL(`/dashboard/clients/${clientId}/onboarding`, appUrl)
+  }
   return new URL(`/dashboard/clients/${clientId}/settings`, appUrl)
 }
 
-function errorRedirect(appUrl: string, clientId: string, reason: string): NextResponse {
-  const url = buildSettingsUrl(appUrl, clientId)
+function errorRedirect(appUrl: string, clientId: string, flow: GbpFlow, reason: string): NextResponse {
+  const url = buildDestinationUrl(appUrl, clientId, flow)
   url.searchParams.set('gbp', 'error')
   url.searchParams.set('reason', reason)
   return NextResponse.redirect(url.toString(), 302)
@@ -56,9 +65,9 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  const colonIdx = rawCookie.indexOf(':')
-  const nonce    = rawCookie.slice(0, colonIdx)
-  const clientId = rawCookie.slice(colonIdx + 1)
+  // clientId 是 UUID，不含冒号，可以安全按 ':' 切三段。
+  const [nonce, clientId, rawFlow] = rawCookie.split(':')
+  const flow: GbpFlow = rawFlow === 'wizard' ? 'wizard' : 'admin'
 
   // ── 2. Validate query params ──────────────────────────────────────────────
   const code       = req.nextUrl.searchParams.get('code')
@@ -100,7 +109,7 @@ export async function GET(req: NextRequest) {
   })
 
   if (!tokenRes.ok) {
-    return errorRedirect(appUrl, clientId, 'token_exchange_failed')
+    return errorRedirect(appUrl, clientId, flow, 'token_exchange_failed')
   }
 
   const tokenData = (await tokenRes.json()) as {
@@ -115,7 +124,7 @@ export async function GET(req: NextRequest) {
       has_access_token:  Boolean(tokenData.access_token),
       has_refresh_token: Boolean(tokenData.refresh_token),
     })
-    return errorRedirect(appUrl, clientId, 'token_exchange_failed')
+    return errorRedirect(appUrl, clientId, flow, 'token_exchange_failed')
   }
 
   // Log scope grant for diagnostic — does the token actually have business.manage?
@@ -139,7 +148,7 @@ export async function GET(req: NextRequest) {
       body:       errorBody.slice(0, 500),
       scope:      tokenScope,
     })
-    return errorRedirect(appUrl, clientId, 'gbp_api_failed')
+    return errorRedirect(appUrl, clientId, flow, 'gbp_api_failed')
   }
 
   const accountsData = (await accountsRes.json()) as {
@@ -149,7 +158,7 @@ export async function GET(req: NextRequest) {
   const accounts = accountsData.accounts ?? []
   if (accounts.length === 0) {
     console.warn('[gbp/callback] no GBP accounts under this Google user')
-    return errorRedirect(appUrl, clientId, 'no_gbp_accounts')
+    return errorRedirect(appUrl, clientId, flow, 'no_gbp_accounts')
   }
 
   const gbpAccount = accounts[0]   // MVP: connect first account (location picker in Phase 24.A.7)
@@ -177,6 +186,24 @@ export async function GET(req: NextRequest) {
   if (dbError) {
     // Non-fatal for now: log and continue — user can reconnect from settings
     console.error('[gbp/callback] Failed to persist connection:', dbError.message)
+  } else {
+    // 向导 Step 3 判断"GBP 已连接"读的是 client_connectors，不是
+    // platform_oauth_connections——这条一直没写，此前没暴露是因为向导从没
+    // 接入真实注册流程，客户走不到这里（2026-08-11 复审发现，见 spec §2.2）。
+    const now = new Date().toISOString()
+    await supabaseAdmin
+      .from('client_connectors')
+      .upsert(
+        {
+          client_id:    clientId,
+          anchor:       'gbp',
+          status:       'connected',
+          config:       { account_name: gbpAccount.accountName },
+          connected_at: now,
+          updated_at:   now,
+        },
+        { onConflict: 'client_id,anchor' },
+      )
   }
 
   // ── 7b. Resolve which location posts go to, while we're here ─────────────
@@ -208,7 +235,7 @@ export async function GET(req: NextRequest) {
   }
 
   // ── 8. Clear CSRF cookie + redirect to success ────────────────────────────
-  const successUrl = buildSettingsUrl(appUrl, clientId)
+  const successUrl = buildDestinationUrl(appUrl, clientId, flow)
   successUrl.searchParams.set('gbp', locationStatus === 'ready' ? 'connected' : 'needs_location')
 
   const response = NextResponse.redirect(successUrl.toString(), 302)

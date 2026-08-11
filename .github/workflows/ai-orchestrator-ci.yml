@@ -1,0 +1,83 @@
+name: ai-orchestrator CI
+
+# Ordinary read-only CI for tools/ai-orchestrator. It runs the module's tests and
+# type check on pull requests, so the suite is verified by GitHub rather than only
+# on a laptop.
+#
+# It runs on EVERY pull request, deliberately, with no path or branch filter.
+# A filtered workflow that is also a required status check is a merge deadlock:
+# GitHub does not run the workflow on a PR the filter excludes, so the required
+# check never reports, sits Pending forever, and blocks a PR that has nothing to
+# do with this module. The job is read-only, takes about a minute and needs no
+# secrets, so paying that on unrelated PRs is much cheaper than the alternative.
+# `tests/workflow-supply-chain.test.ts` fails the build if a filter reappears.
+#
+# This is NOT an orchestrator trigger. It never starts a run, never reads a model
+# credential, never talks to OpenAI or Anthropic, never writes an Issue comment,
+# and never commits, pushes or merges. The orchestrator itself
+# (ai-orchestrator-manual.yml) remains workflow_dispatch-only and disabled by
+# default; nothing here changes that.
+#
+# There is deliberately no `secrets.` expression anywhere in this file, and
+# tools/ai-orchestrator/tests/workflow-supply-chain.test.ts fails the build if one
+# ever appears.
+#
+# Required status check name: **ai-orchestrator-tests** (the job name below).
+# That is the string to enter in the `Protect main` ruleset.
+
+on:
+  # No `paths:`, no `paths-ignore:`, no `branches:`. See the note above — any of
+  # them turns this into a check that never reports on the PRs it skips.
+  pull_request:
+
+# Read-only. The job reads the checkout and nothing else; it has no reason to
+# write anything and is given no way to.
+permissions:
+  contents: read
+
+# Newer pushes supersede in-flight runs for the same PR. Safe here in a way it is
+# not for the orchestrator: cancelling a test run loses nothing.
+concurrency:
+  group: ai-orchestrator-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    # Stable, distinctive check name. Renaming this breaks any ruleset that
+    # requires it, so treat it as part of the repository's configuration surface.
+    name: ai-orchestrator-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # Pinned to reviewed commit SHAs, never to moveable tags: `@v4` today and
+      # `@v4` tomorrow are not guaranteed to be the same code.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check this module
+        # Scoped config: the repository baseline carries ~180 pre-existing errors and
+        # drifts with main, so a whole-repo check could never be a gate. Here the
+        # standard is zero.
+        run: npx tsc -p tools/ai-orchestrator/tsconfig.json
+
+      - name: Tests, including architecture and workflow supply-chain checks
+        # Verbose so the check log names every governance assertion that ran:
+        # architecture.test.ts (module isolation, file size, no `any`) and
+        # workflow-supply-chain.test.ts (action pinning, permissions, triggers).
+        run: npx vitest run tools/ai-orchestrator --reporter=verbose
+
+      - name: Confirm the run changed nothing
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::CI modified the working tree. It must not."
+            git status --porcelain
+            exit 1
+          fi
+          echo "Working tree clean: no commit, no push, no repository change."

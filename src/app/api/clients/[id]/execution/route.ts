@@ -22,6 +22,7 @@ import type {
   CardContentState, ContentStateSignal, CardPrioritySignal,
 } from '@/types/diagnostic'
 import type { ExecutionMode, FlywheelName, OutcomeVerdict } from '@/lib/flywheel/adapters/types'
+import { fetchLatestOutcomesByAction } from '@/lib/flywheel/execution-outcomes'
 
 /** Summary of the latest attribution outcome for an execution item. */
 export interface ItemOutcomeSummary {
@@ -451,34 +452,6 @@ function computePriority(args: {
   return 'normal'
 }
 
-async function fetchLatestOutcomesByAction(actionIds: string[]): Promise<Record<string, ItemOutcomeSummary>> {
-  if (actionIds.length === 0) return {}
-
-  const { data: outcomeRows } = await supabaseAdmin
-    .from('flywheel_outcomes')
-    .select('action_id, metric_key, delta, delta_pct, confidence, verdict, computed_at')
-    .in('action_id', actionIds)
-    .order('computed_at', { ascending: false })
-
-  const outcomeByAction: Record<string, ItemOutcomeSummary> = {}
-  for (const row of (outcomeRows ?? []) as Array<{
-    action_id: string; metric_key: string; delta: number | null
-    delta_pct: number | null; confidence: number
-    verdict: string; computed_at: string
-  }>) {
-    if (outcomeByAction[row.action_id]) continue
-    outcomeByAction[row.action_id] = {
-      verdict: row.verdict as ItemOutcomeSummary['verdict'],
-      metric_key: row.metric_key,
-      delta: row.delta,
-      delta_pct: row.delta_pct,
-      confidence: row.confidence,
-      computed_at: row.computed_at,
-    }
-  }
-
-  return outcomeByAction
-}
 
 async function fetchAutonomousActionItems(clientId: string): Promise<ExecutionItemWithLogs[]> {
   const { data: actionRows, error } = await supabaseAdmin

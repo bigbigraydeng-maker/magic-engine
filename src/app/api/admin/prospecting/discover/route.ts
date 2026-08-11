@@ -97,7 +97,7 @@ async function pullAndInsert(params: {
     !(l.place_id && knownPlaceIds.has(l.place_id)) &&
     !(l.domain && knownDomains.has(l.domain)),
   )
-  if (fresh.length === 0) return { discovered: listings.length, inserted: 0 }
+  if (fresh.length === 0) return { discovered: listings.length, inserted: 0, noWebsite }
 
   const rows = fresh.map(l => ({
     business_name: l.name,
@@ -116,7 +116,7 @@ async function pullAndInsert(params: {
 
   const { error } = await supabaseAdmin.from('outbound_prospects').insert(rows)
   if (error) throw new Error(error.message)
-  return { discovered: listings.length, inserted: rows.length }
+  return { discovered: listings.length, inserted: rows.length, noWebsite }
 }
 
 /**

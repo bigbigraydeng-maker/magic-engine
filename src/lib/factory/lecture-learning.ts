@@ -29,8 +29,10 @@ export interface LecturePrefs {
   glossary: Record<string, GlossaryEntry>
   /** 片头习惯多剪几秒(客户反复要求就记住)。 */
   headTrimSec: number | null
-  /** 人脸在画面高度的位置(0-1),下次认不出脸时用它兜底。 */
+  /** 人像取景:脸在画面高度的位置(0-1)。客户觉得高了低了就调这个。 */
   faceY: number | null
+  /** 人像放大倍数(1.0-1.6)。觉得脸太小就调大。 */
+  faceZoom: number | null
   /** 打回重做的原因统计。 */
   redoReasons: RedoReason[]
 }
@@ -39,6 +41,7 @@ export const EMPTY_PREFS: LecturePrefs = {
   glossary: {},
   headTrimSec: null,
   faceY: null,
+  faceZoom: null,
   redoReasons: [],
 }
 
@@ -171,6 +174,7 @@ export async function loadLecturePrefs(clientId: string): Promise<LecturePrefs> 
     glossary: cfg?.glossary ?? {},
     headTrimSec: cfg?.headTrimSec ?? null,
     faceY: cfg?.faceY ?? null,
+    faceZoom: cfg?.faceZoom ?? null,
     redoReasons: cfg?.redoReasons ?? [],
   }
 }

@@ -1,3 +1,80 @@
 {
-  "extends": "next/core-web-vitals"
+  "extends": "next/core-web-vitals",
+  "rules": {
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": [
+              "**/lib/publer/client",
+              "**/lib/cms/wordpress-client",
+              "**/lib/cms/shopify-client",
+              "**/lib/cms/github-client",
+              "**/lib/cms/blog-publisher",
+              "**/lib/cms/github-page-upgrade-publisher",
+              "**/lib/cms/meta-patcher",
+              "**/lib/gbp/publisher",
+              "**/lib/gsc/indexing-client",
+              "**/lib/gsc/sitemap-ping"
+            ],
+            "message": "对外写能力只能由 src/lib/capabilities/** 调用。请提交一个 action_run，让执行内核去跑（见 src/lib/kernel/boundaries.ts）。"
+          }
+        ]
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": [
+        "src/lib/capabilities/**"
+      ],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    },
+    {
+      "files": [
+        "src/**/__tests__/**",
+        "src/**/*.test.ts",
+        "src/**/*.test.tsx"
+      ],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    },
+    {
+      "files": [
+        "src/app/api/clients/\\[id\\]/cms/github/update-page/route.ts",
+        "src/app/api/clients/\\[id\\]/cms/publish-blog/route.ts",
+        "src/app/api/clients/\\[id\\]/cms/publish-geo-snippet/route.ts",
+        "src/app/api/clients/\\[id\\]/cms/publish-geo-to-github/route.ts",
+        "src/app/api/clients/\\[id\\]/cms/publish-shopify/route.ts",
+        "src/app/api/clients/\\[id\\]/cms/publish-wordpress/route.ts",
+        "src/app/api/clients/\\[id\\]/cms/shopify/route.ts",
+        "src/app/api/clients/\\[id\\]/cms/test/route.ts",
+        "src/app/api/clients/\\[id\\]/cms/wordpress/lookup-post/route.ts",
+        "src/app/api/clients/\\[id\\]/cms/wordpress/route.ts",
+        "src/app/api/clients/\\[id\\]/cms/wordpress/test/route.ts",
+        "src/app/api/clients/\\[id\\]/cms/wordpress/update-post/route.ts",
+        "src/app/api/clients/\\[id\\]/cms/wordpress/yoast-probe/route.ts",
+        "src/app/api/clients/\\[id\\]/gsc/index-request/route.ts",
+        "src/app/api/clients/\\[id\\]/reels/\\[draftId\\]/publish/route.ts",
+        "src/app/api/cms/github/webhook/route.ts",
+        "src/app/api/cron/cms-connection-retest/route.ts",
+        "src/app/api/publer/accounts/route.ts",
+        "src/app/api/publer/create-post/route.ts",
+        "src/app/api/publer/draft/\\[assetId\\]/route.ts",
+        "src/app/api/publer/schedule/route.ts",
+        "src/lib/blog/pr-sync.ts",
+        "src/lib/cms/page-upgrade-pr-sync.ts",
+        "src/lib/flywheel/social-post-publish.ts",
+        "src/lib/luban/tools.ts",
+        "src/lib/seo-meta/cts-meta-pr.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": "warn"
+      }
+    }
+  ]
 }

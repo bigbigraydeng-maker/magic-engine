@@ -121,6 +121,25 @@ describe('getValidToken — slow path (token expired, refresh succeeds)', () => 
     )
   })
 
+  it.each(['google_gsc', 'google_ga4', 'google_gtm'] as const)(
+    'routes %s through the Google refresh endpoint, not the "not yet implemented" error',
+    async (provider) => {
+      const row   = { ...VALID_ROW, provider }
+      const chain = chainResolving({ data: row, error: null })
+      mocks.from.mockReturnValue(chain)
+
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ access_token: 'new-access-token', expires_in: 3600 }),
+          { status: 200 },
+        ),
+      )
+
+      const token = await getValidToken('client-1', provider)
+      expect(token).toBe('new-access-token')
+    },
+  )
+
   it('re-encrypts and persists the new access_token to DB', async () => {
     const chain = chainResolving({ data: VALID_ROW, error: null })
     mocks.from.mockReturnValue(chain)

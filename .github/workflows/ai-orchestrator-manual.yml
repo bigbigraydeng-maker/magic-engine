@@ -1,0 +1,155 @@
+name: ME2 AI Orchestrator (manual, mock-only, inactive)
+
+# ⚠️ SCAFFOLD ONLY — this workflow cannot run the GPT ↔ Claude loop.
+#
+# It exists so the control plane can be reviewed and dry-run before anyone wires
+# a real model to it. What it does today: runs the orchestrator's own test suite
+# and prints a dry-run preflight report. It calls no model, writes no comment,
+# makes no commit, and costs nothing.
+#
+# Deliberately absent, and NOT to be added without a separate PM authorization:
+#   - `schedule:`               — nothing wakes this up on its own
+#   - `issue_comment:`          — nothing triggers it from Issue traffic
+#   - `pull_request:` / `push:` — nothing triggers it from repository activity
+#   - write permissions          — see `permissions:` below
+#
+# Three independent kill switches, all default-off (see src/policy/policy.ts):
+#   1. the `enabled` dispatch input below defaults to "false";
+#   2. the ME2_ORCHESTRATOR_ENABLED env var must be the exact string "true";
+#   3. the `me2-orchestrator:stop` label on the Issue halts a run immediately.
+#
+# Self-protection: GITHUB_TOKEN here has no `workflows:` permission, so GitHub
+# rejects any push from this job that touches `.github/workflows/**`. That guard
+# does not depend on branch protection — which this repository cannot use today
+# (private repo on the GitHub Free plan). See the Enable checklist in
+# docs/specs/2026-08-07-ai-orchestrator-v0.1.md §9.
+#
+# The protected surface is `.github/**`, CODEOWNERS and ALL of
+# `tools/ai-orchestrator/**`. The orchestrator therefore cannot upgrade itself:
+# a work package whose allowed paths overlap that surface does not parse.
+# Changing this tool is a human-initiated, human-reviewed change.
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue that carries the run ledger'
+        required: true
+        type: string
+      mode:
+        description: 'Orchestration mode'
+        required: true
+        type: choice
+        options: [DESIGN, IMPLEMENT, REVIEW]
+        default: DESIGN
+      enabled:
+        description: 'Master switch. Leave false — true is reserved for the Enable phase.'
+        required: true
+        type: boolean
+        default: false
+
+# Least privilege, declared at the top level so no job can silently inherit more.
+# The scaffold reads nothing it does not already have in the checkout, so
+# `contents: read` is all it gets.
+#
+# The Enable phase splits this per job — and only per job, never once at the top:
+#
+#   reviewer-job:    { contents: read,  issues: write }
+#   implementer-job: { contents: write, pull-requests: write }
+#
+# Neither may ever hold `workflows: write` (that is what stops a run from editing
+# the workflow that governs it), `actions: write`, `administration`, or
+# `deployments`. The token must be the job-scoped GITHUB_TOKEN; a GitHub App
+# installation token with broader rights is explicitly not an acceptable
+# substitute, because its scope is not visible in this file.
+permissions:
+  contents: read
+
+# One run per Issue, and never cancel a run mid-turn — a cancelled runner would
+# leave its lease behind for the stale-lock path to clean up.
+#
+# This is the ONLY real exclusion in the system. Appending an Issue comment is not
+# a compare-and-set, so the ledger lease cannot stop two runners from both paying
+# for a call; GitHub enforcing this group before either job starts can. The job
+# exports the same expression as ME2_CONCURRENCY_GROUP and the runner refuses to
+# call a provider unless it matches the Issue it is working on — so a workflow
+# that drops this block, or serialises on something else, fails closed instead of
+# silently racing. `workflow-supply-chain.test.ts` asserts the two stay identical.
+concurrency:
+  group: me2-orchestrator-issue-${{ inputs.issue_number }}
+  cancel-in-progress: false
+
+jobs:
+  dry-run:
+    name: Mock-only dry run
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Refuse to run with the master switch on
+        if: ${{ inputs.enabled }}
+        run: |
+          echo '::error::enabled=true is not supported in v0.1.'
+          echo 'The orchestrator ships inactive. Turning it on is a separate,'
+          echo 'separately-authorized change — see the Enable checklist in'
+          echo 'docs/specs/2026-08-07-ai-orchestrator-v0.1.md.'
+          exit 1
+
+      # Third-party actions are pinned to reviewed commit SHAs, never to moveable
+      # tags. A tag is a pointer its owner can repoint; `@v4` today and `@v4`
+      # tomorrow are not the same code, and this job runs with repository content
+      # in reach. `tools/ai-orchestrator/tests/workflow-supply-chain.test.ts`
+      # fails the build if an unpinned `uses:` ever reappears.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Assert no model credentials are present
+        # If a key ever reaches this job, that is a configuration mistake, and it
+        # should stop the run rather than sit there waiting to be used.
+        env:
+          OPENAI: ${{ secrets.ME2_ORCHESTRATOR_OPENAI_API_KEY }}
+          ANTHROPIC: ${{ secrets.ME2_ORCHESTRATOR_ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$OPENAI" ] || [ -n "$ANTHROPIC" ]; then
+            echo "::error::Model credentials are configured but v0.1 must never use them."
+            exit 1
+          fi
+          echo "No model credentials present — as expected for the scaffold."
+
+      - name: Run orchestrator tests (mock providers only)
+        env:
+          # Must equal `concurrency.group` above, verbatim. The runner compares it
+          # against the Issue it is working on and refuses to spend without a match.
+          ME2_CONCURRENCY_GROUP: me2-orchestrator-issue-${{ inputs.issue_number }}
+        run: npx vitest run tools/ai-orchestrator --reporter=verbose
+
+      - name: Dry-run preflight report
+        # The dry-run test prints a JSON report of every guard it evaluated and
+        # what it would do next. No provider call, no comment, no commit.
+        run: |
+          # Written outside the checkout so the "changed nothing" check below
+          # stays a real assertion rather than tripping over our own log file.
+          LOG="$RUNNER_TEMP/dry-run.log"
+          npx vitest run tools/ai-orchestrator/tests/dry-run.test.ts --reporter=verbose | tee "$LOG"
+          {
+            echo '## ME2 orchestrator dry-run'
+            echo ''
+            echo '```'
+            sed -n '/ME2 ORCHESTRATOR DRY-RUN REPORT/,/^}$/p' "$LOG"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Confirm the run changed nothing
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::The dry run modified the working tree. It must not."
+            git status --porcelain
+            exit 1
+          fi
+          echo "Working tree clean: no commit, no push, no repository change."

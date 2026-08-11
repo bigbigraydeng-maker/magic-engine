@@ -5,6 +5,7 @@
 
 import { callClaudeChat, parseJsonResponse } from '@/lib/anthropic/client'
 import { formatBriefForPrompt } from '@/lib/content/brief-injector'
+import { PRICE_CLAIM_RECALL_RE } from '@/lib/content/price-claim'
 import type { MasterBrief } from '@/types/magic-engine'
 import type { AdCopy, VerifiedOffer } from './types'
 
@@ -60,10 +61,11 @@ export function hookIntentFor(metric: string | null | undefined): string {
  */
 // 数字提取(支持千分位逗号;normNum 再去逗号归一,魏征 B4-P1:"$1,299" 不被断成 1/299)。
 const NUM_RE = /\d[\d,]*(?:\.\d+)?/g
-// 价格/折扣片段(best-effort 尽量宽以拦编造价格;$50 人工审片是最后兜底)。覆盖:货币前缀($/A$/NZ$/AUD/￥)、
-// 百分比/off/dollars/bucks 后缀、per-unit 裸价(/m²、/sqm、per m)、"X for Y"(魏征 B4-P1:裸价系统性漏网)。
-const PRICE_DISCOUNT_RE =
-  /(?:\$|a\$|nz\$|\baud\b|￥)\s*\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?\s*(?:%|\boff\b|\bdollars?\b|\bbucks\b|\/\s*m²|\/\s*m2|\/\s*sqm|\bper\s*m²?)|\d[\d,]*\s*\bfor\b\s*\d/gi
+// 价格/折扣片段(best-effort 尽量宽以拦编造价格;$50 人工审片是最后兜底)。
+// 2026-08-03 移到 @/lib/content/price-claim 共用:社媒图文帖那条「真价只配真画面」的闸
+// 也要认价格,两处各写一套迟早漂移。这里用的是**宽口径**(命中只是落模板兜底,误杀无害),
+// 会挡住人干活的硬闸用同文件里的严口径。这里的语义一个字没改。
+const PRICE_DISCOUNT_RE = PRICE_CLAIM_RECALL_RE
 
 /** 归一化数字串:去千分位逗号 + 去尾零("35.50"→"35.5","1,299"→"1299")。 */
 function normNum(n: string): string {

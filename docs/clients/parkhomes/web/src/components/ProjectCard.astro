@@ -1,0 +1,20 @@
+---
+const { p, line = 'cardLine' } = Astro.props;
+const img = p.card || (p.images && p.images.length ? p.images[0].src : null);
+const href = `/${p.slug}/`;
+---
+<article class="card">
+  <a href={href}>
+    {img
+      ? <div class="shot" style={`background-image:url('${img}')`}><span class={`pill ${p.pill}`}>{p.status}</span></div>
+      : <div class="shot pending" data-label="Render — pending"><span class={`pill ${p.pill}`}>{p.status}</span></div>}
+  </a>
+  <div class="cbody">
+    <h3>{p.name}</h3>
+    <p class="place">{p[line]}</p>
+    <div class="row">
+      <span class="price">{p.price}</span>
+      <a class="view" href={href}>View project</a>
+    </div>
+  </div>
+</article>

@@ -1,0 +1,99 @@
+name: OPS — Codex Review to Claude Fix
+
+# Part of the ME2-OPS02 Claude <-> Codex review loop. See
+# tools/ops-review-loop/README.md for the full state diagram.
+#
+# This is the "review" leg: when Codex submits a review on a qualifying PR,
+# decide (in tools/ops-review-loop/src/handle-review.mjs, unit-tested offline
+# in tools/ops-review-loop/tests/) whether to dispatch one aggregated Claude
+# fix task, post READY FOR PRODUCT OWNER, post NEEDS HUMAN REVIEW after 3
+# rounds, or do nothing (dedup).
+#
+# It never merges, deploys, applies a migration, queries or modifies
+# production, bypasses required CI, or marks a PR ready for review. It never
+# auto-resolves a review conversation. The Product Owner remains the only
+# merge authority — nothing in this file can merge a PR.
+#
+# The actor allowlist is enforced by the `if:` guard below against
+# `github.event.review.user.login`, a GitHub-verified field a commenter
+# cannot forge — not by any input on the invoked action, since this leg
+# calls claude-code-action directly with a prompt rather than via an
+# @claude mention, so there is no comment-trigger surface to allowlist.
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  # No contents: write. claude-code-action authenticates its own push through
+  # the Claude GitHub App behind CLAUDE_CODE_OAUTH_TOKEN, the same way
+  # claude.yml already does in this repo with contents: read — the ambient
+  # GITHUB_TOKEN here only needs to read the repo and write PR comments.
+  contents: read
+  pull-requests: write
+  checks: read
+  actions: read
+  id-token: write
+
+concurrency:
+  group: ops-codex-fix-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  handle-review:
+    if: |
+      contains(github.event.review.user.login, 'chatgpt-codex-connector') &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.base.ref == 'main' &&
+      startsWith(github.event.pull_request.head.ref, 'claude/me2-') &&
+      github.event.pull_request.state == 'open'
+    runs-on: ubuntu-latest
+    # 10 minutes: "Decide next stage" can spend up to ~4 of these polling the
+    # required check when Codex's clean review lands before CI finishes (see
+    # tools/ops-review-loop/src/poll.mjs) — the two paths (poll vs. dispatch
+    # Claude) are mutually exclusive within a single run, so this is headroom
+    # for whichever one this run takes, not a sum of both.
+    timeout-minutes: 10
+    steps:
+      # Checked out from main, not the PR head, for the same reason as the
+      # sibling workflow: a PR must never be able to edit the script that
+      # decides its own fate (dedup markers, round cap, CI gate).
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Decide next stage
+        id: plan
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node tools/ops-review-loop/src/handle-review.mjs
+
+      # The only step in this file with any write access to repository
+      # content, and only via the Claude GitHub App's own token — this
+      # workflow's GITHUB_TOKEN grants contents: read, see above. Runs at
+      # most 3 times per PR (enforced by plan.mjs / handle-review.mjs before
+      # this step is reached), and only with the aggregated Codex findings
+      # as its prompt.
+      - name: Invoke Claude to fix Codex findings
+        id: claude
+        if: steps.plan.outputs.action == 'dispatch-fix'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          additional_permissions: |
+            actions: read
+          prompt: ${{ steps.plan.outputs.prompt }}
+
+      # Codex finding (PR #906, P2): posting the fix-dispatched marker from
+      # "Decide next stage", before this step ran, meant a timeout or failed
+      # push still permanently consumed a round. This step runs regardless of
+      # whether the step above succeeded (`always()`) and records the real
+      # outcome — see tools/ops-review-loop/src/mark-fix-outcome.mjs.
+      - name: Record fix round outcome
+        if: always() && steps.plan.outputs.action == 'dispatch-fix'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ROUND: ${{ steps.plan.outputs.round }}
+          OUTCOME: ${{ steps.claude.outcome }}
+        run: node tools/ops-review-loop/src/mark-fix-outcome.mjs

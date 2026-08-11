@@ -20,7 +20,7 @@ export const INDUSTRY_DICTIONARY: IndustryMapEntry[] = [
   },
   {
     category: 'tourism_operator',
-    keywords: ['旅游', '观光', '游船', '导游', '景区', '旅行社', 'tourism', 'tour operator', 'travel agency', 'sightseeing', 'cruise'],
+    keywords: ['旅游', '观光', '游船', '导游', '景区', '旅行社', 'tourism', 'tour operator', 'travel', 'travel agency', 'sightseeing', 'cruise'],
   },
   {
     category: 'accounting_advisory',
@@ -53,13 +53,6 @@ export const INDUSTRY_DICTIONARY: IndustryMapEntry[] = [
   {
     category: 'ecommerce_d2c',
     keywords: ['电商', 'd2c', '在线零售', '直销品牌', 'ecommerce', 'e-commerce', 'online store', 'd2c', 'shopify'],
-  },
-  {
-    // 18 个 baseline_domains 已在跑分（logistics_3pl_nz 组），但字典里一直没有对应
-    // category，mapIndustryToCategory 永远返回 null → 这批基准写出来没人读。
-    // 补上后 baseline cron 的聚合键才有消费方。NewAsian 是现有 ME 客户。
-    category: 'logistics_3pl',
-    keywords: ['物流', '仓储', 'third party logistics', '3pl', 'logistics', 'fulfillment', 'fulfilment', 'warehousing', 'freight', 'supply chain'],
   },
 ]
 
@@ -102,7 +95,6 @@ export function categoryToChineseName(category: string | null): string {
     trades_plumbing_electrical:   '水电/技工服务',
     fitness_studio:               '健身工作室',
     ecommerce_d2c:                'D2C 电商',
-    logistics_3pl:                '第三方物流/仓储履约',
   }
   if (!category) return '通用 SMB（未匹配到具体行业）'
   return map[category] ?? category

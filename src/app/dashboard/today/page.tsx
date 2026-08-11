@@ -211,14 +211,20 @@ export default function TodayPage() {
                   </p>
                   <p className="mt-1 flex items-center gap-2 text-xs text-slate-500">
                     <span>→ {m.how}</span>
-                    <a
-                      href={m.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="shrink-0 rounded-lg bg-cyan-600 px-3 py-1 text-xs font-bold text-white hover:bg-cyan-700"
-                    >
-                      去做这件事
-                    </a>
+                    {/* 🔴 没有 href = 这条现在**没有地方可点**（比如入口还没上线）。
+                        这时绝不能照样渲染一个「去做这件事」按钮 —— 一个点了没反应
+                        的按钮比没有按钮更糟：它让人以为事情已经能做了，
+                        于是没人再去建真正的入口。宁可不给按钮，也不给假的。 */}
+                    {m.href ? (
+                      <a
+                        href={m.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="shrink-0 rounded-lg bg-cyan-600 px-3 py-1 text-xs font-bold text-white hover:bg-cyan-700"
+                      >
+                        去做这件事
+                      </a>
+                    ) : null}
                   </p>
                 </div>
               ))}

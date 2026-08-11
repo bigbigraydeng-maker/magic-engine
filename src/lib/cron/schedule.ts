@@ -72,6 +72,12 @@ export interface JobHealthInput {
   lastRunAt: Date | null
   /** 代码里有没有写运行记录。false = 这个任务天生查不出来。 */
   logsRuns: boolean
+  /**
+   * 这个任务是什么时候加进来的（登记表里的 `addedAt`）。
+   * 用来回答「它到底轮到过没有」—— 没轮到过就报「从没跑过」是误报。
+   * 不填则不做这层保护（老任务早就跑过很多轮，用不上）。
+   */
+  registeredAt?: Date | null
 }
 
 export type JobHealth =
@@ -92,7 +98,7 @@ export type JobHealth =
  *    把「看不见」当「没问题」正是工厂停摆 8 天没人发现的根因。
  */
 export function judgeJob(input: JobHealthInput, now: Date): JobHealth {
-  const { service, schedule, lastRunAt, logsRuns } = input
+  const { service, schedule, lastRunAt, logsRuns, registeredAt } = input
 
   if (!logsRuns) {
     return {
@@ -108,10 +114,26 @@ export function judgeJob(input: JobHealthInput, now: Date): JobHealth {
   }
 
   if (!lastRunAt) {
+    // 🔴 报「从没跑过」之前，先问一句**它轮到过吗**。
+    //    2026-08-03 实测踩到：prescription-weekly 当天建好、下周二才第一次排班，
+    //    job-boards-weekly 上周一跑过但那会儿代码还没写运行记录 ——
+    //    两个都健康，却都会被报成「从没跑过，多半是密钥没接上」。
+    //    而那句诊断当晚就被证伪了：三个「从没跑过」的任务里，两个的密钥早就接着。
+    //    误报一旦成为常态，真出事那天也会被当噪音划掉，整套告警就废了。
+    if (registeredAt) {
+      const hoursSinceAdded = (now.getTime() - registeredAt.getTime()) / 3_600_000
+      // 给满一个完整周期 + 2 小时富余（部署、时区、排班抖动）
+      if (hoursSinceAdded < threshold + 2) {
+        return { service, state: 'ok' }
+      }
+    }
     return {
       service,
       state: 'never_ran',
-      detail: '建好之后一次都没跑过 —— 多半是密钥没接上，或者服务没真的建出来',
+      detail:
+        '按排班早该跑过至少一次了，但一条运行记录都没有。' +
+        '按这个顺序查：①Render 上这个服务在不在、暂停没有 ②它的运行历史里是成功还是失败'
+        + '（失败且退出码 22 = 接口返回了错误码，通常是密钥没接上）③成功但没记录 = 代码里少了 startCronRun',
     }
   }
 

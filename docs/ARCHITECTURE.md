@@ -159,17 +159,27 @@ visual_assets
 ```
 
 ```
-keywords
+keyword_snapshots               ← 关键词唯一活表。时序：一个词每周一行
 ├── id (UUID PK)
-├── client_id (FK → clients)
+├── client_id (FK → clients), domain (NOT NULL)
 ├── keyword (TEXT)
-├── volume, kd (keyword difficulty), cpc_usd
+├── position, local_pack_rank   ← 当周排名
+├── search_volume, keyword_difficulty, cpc, competition
 ├── intent: 'informational' | 'commercial' | 'navigational' | 'transactional'
-├── trend (JSONB)             ← 12个月趋势数据
-└── source: 'semrush' | 'manual'
+├── source ('dataforseo'), semrush_db, location_code (2036=AU / 2554=NZ)
+└── snapshot_date, measured_at
+   UNIQUE (client_id, keyword, location_code, snapshot_date)
 ```
 
-其他表：`content_tasks`、`content_topics`、`social_sources`、`collected_posts`、`feedback_data`、`generation_logs`、`semrush_usage_logs`
+> ⚠️ 读它必须先定住**一个** `snapshot_date` 再取行。全系统（周报 / 排名变化 / 看板 SEO 列 /
+> SEO 巡逻 / SERP 采集）都把「最新那一期」当作当期，往里插一批没有排名的行
+> 会让这些地方一起算错数字。
+
+> **已归档**：`keywords`（关键词工作台，含人工审批状态）和 `semrush_usage_logs`
+> 于 2026-05-30 改名为 `_archived_*_2026_05_30`。当时有 10 处调用没跟着改，
+> 静默失效两个月，2026-08-05 清理完毕。用量记账改走 `datasource_usage_logs`。
+
+其他表：`content_tasks`、`content_topics`、`social_sources`、`collected_posts`、`feedback_data`、`generation_logs`
 
 ### 3.4 GEO 相关表（P7.2 新增）
 
@@ -430,13 +440,16 @@ POST   /api/visual/upload                     → 手动上传图片/视频（10
 GET    /api/visual/assets?client_id=          → 列出资产
 ```
 
-### SEMrush 关键词
-```
-POST   /api/semrush/keyword-overview          → 批量关键词指标（量、难度、CPC、意图）
-POST   /api/semrush/related-keywords          → 从种子词扩展相关词
-POST   /api/semrush/competitor-keywords       → 竞品域名有机关键词
-POST   /api/semrush/keyword-gap               → 关键词差距分析
-```
+### 关键词研究（已下线）
+
+`/api/semrush/*` → `/api/keyword-intelligence/*`（四条：keyword-overview / related-keywords /
+competitor-keywords / keyword-gap）连同 `/dashboard/keywords` 工作台，**2026-08-05 整体删除**。
+它们写的 `keywords` 表 2026-05-30 就归档了，删除前两个月一直是「先花 DataForSEO 的钱，
+再存库失败报 500」，且全无鉴权。
+
+现在关键词从两条自动化线来：
+- **在排的词** → `keyword-snapshots-weekly` 每周写 `keyword_snapshots`（只对正式客户跑）
+- **没排上的词 / 竞品差距** → `lib/seo-gap/`，走体检（`keyword_gap_critical`）
 
 ### 发布 & 同步
 ```
@@ -479,7 +492,6 @@ POST   /api/webhooks/publer-published         → Publer 发布后回调
 | `/dashboard/clients` | Clients | 客户列表，新建客户 |
 | `/dashboard/clients/[id]` | Client Detail | 含 4 个 Tab 面板 |
 | `/dashboard/content` | Content Board | 帖子列表视图 + 月历日历视图；批量审批；模态框编辑+生成预览图 |
-| `/dashboard/keywords` | Keywords | 关键词研究浏览器 |
 | `/dashboard/visuals` | Launch Hub 🚀 | 电子表格视图，图片/视频 AI 生成 or 手动上传，Publer 排期 |
 | `/dashboard/airtable` | Airtable Views | 各 Airtable 视图嵌入 |
 | `/dashboard/analytics` | Analytics | 数据分析（占位） |

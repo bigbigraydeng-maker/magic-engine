@@ -93,6 +93,8 @@ export interface CmsConnectionStatus {
   status:    CmsStatus
   lastError: string | null
   lastTestedAt: string | null
+  /** Repo-relative files that Magic Engine may safely inspect or update. */
+  contentPaths?: string[]
   /** B1: template injection targets for the GEO deploy path. */
   contentTargets: CmsContentTarget[]
 }

@@ -1,0 +1,26 @@
+---
+import { areas, projects } from '../data/projects.js';
+const nameOf = (slug) => projects.find((p) => p.slug === slug)?.name;
+---
+<div class="areas">
+  {areas.map((a) => (
+    <div class={`area${a.status === 'coming' ? ' area-coming' : ''}`}>
+      <div class="area-top">
+        <h3>{a.region}</h3>
+        {a.status === 'coming'
+          ? <span class="area-tag">Coming soon</span>
+          : <span class="area-count">{a.slugs.length} development{a.slugs.length > 1 ? 's' : ''}</span>}
+      </div>
+      <p class="area-blurb">{a.blurb}</p>
+      {a.status === 'building' ? (
+        <div class="area-links">
+          {a.slugs.map((s) => (
+            <a href={`/${s}/`}>{nameOf(s)} →</a>
+          ))}
+        </div>
+      ) : (
+        <a class="area-reg" href={`/contact/?area=${a.area}`}>Register your interest →</a>
+      )}
+    </div>
+  ))}
+</div>

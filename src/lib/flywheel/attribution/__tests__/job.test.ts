@@ -24,7 +24,7 @@ function makeChain(terminal: Partial<Record<string, () => Promise<ChainResult>>>
   const chain: Record<string, unknown> = {}
   const fluent = [
     'select', 'not', 'eq', 'lt', 'gte', 'lte',
-    'order', 'limit', 'delete', 'insert',
+    'order', 'limit', 'range', 'delete', 'insert',
   ]
   for (const m of fluent) {
     chain[m] = vi.fn().mockReturnValue(chain)
@@ -40,14 +40,13 @@ function makeChain(terminal: Partial<Record<string, () => Promise<ChainResult>>>
 // ── Shared mock queue for maybeSingle ─────────────────────────────────────────
 
 let maybeSingleQueue: Array<() => Promise<ChainResult>> = []
-let insertResult: ChainResult = { data: null, error: null }
-let deleteResult: ChainResult = { data: null, error: null }
+let upsertResult: ChainResult = { data: null, error: null }
 
 vi.mock('@/lib/supabase', () => {
   const chain: Record<string, unknown> = {}
   const fluent = [
     'select', 'not', 'eq', 'lt', 'gte', 'lte',
-    'order', 'limit', 'delete', 'insert',
+    'order', 'limit', 'range', 'upsert', 'update', 'delete', 'is', 'not',
   ]
   for (const m of fluent) {
     chain[m] = vi.fn().mockReturnValue(chain)
@@ -56,10 +55,15 @@ vi.mock('@/lib/supabase', () => {
     const next = maybeSingleQueue.shift()
     return next ? next() : { data: null, error: null }
   })
-  chain['insert'] = vi.fn().mockImplementation(async () => insertResult)
-  chain['delete'] = vi.fn().mockReturnValue({
-    eq: vi.fn().mockImplementation(async () => deleteResult),
-  })
+  chain['upsert'] = vi.fn().mockImplementation(async () => upsertResult)
+  // Terminal of the window retire: `.delete().eq().eq().eq().neq(...)`.
+  chain['neq'] = vi.fn().mockImplementation(async () => ({ data: null, error: null }))
+  // The reconciliation chains end on `.not(...)` or on the builder itself, so
+  // the chain has to be awaitable. This file is a call-order mock and can only
+  // keep those chains from throwing — whether reconciliation touches the right
+  // rows is settled against the table-modelled fake in legacy-row-claim.test.ts.
+  chain['then'] = (resolve: (v: unknown) => unknown) =>
+    Promise.resolve({ data: null, error: null }).then(resolve)
 
   return {
     supabaseAdmin: {
@@ -126,8 +130,7 @@ describe('computeVerdict', () => {
 describe('runAttributionJob', () => {
   beforeEach(() => {
     maybeSingleQueue = []
-    insertResult = { data: null, error: null }
-    deleteResult = { data: null, error: null }
+    upsertResult = { data: null, error: null }
     vi.clearAllMocks()
   })
 
@@ -137,22 +140,27 @@ describe('runAttributionJob', () => {
     const { supabaseAdmin } = await import('@/lib/supabase')
     // Override from to return data:[] for the actions query
     const chain = makeChain()
-    ;(chain as Record<string, unknown>)['not'] = vi.fn().mockReturnValue({ data: [], error: null })
+    ;(chain as Record<string, unknown>)['range'] = vi.fn().mockResolvedValue({ data: [], error: null })
     vi.mocked(supabaseAdmin.from).mockReturnValueOnce(asSupabaseQuery(chain))
 
     const { runAttributionJob } = await import('../job')
     const result = await runAttributionJob()
-    expect(result).toEqual({ processed: 0, written: 0, skipped: 0 })
+    expect(result).toEqual({
+      processed: 0, written: 0, skipped: 0, failed: 0,
+      deferred: 0, pass2ClientIds: [],
+      unattributable: 0, unattributableSamples: [], reconcileErrors: 0, reconcileErrorSamples: [],
+    })
   })
 
   it('skips action when no baseline metric exists', async () => {
     // actions query returns 1 action
     const { supabaseAdmin } = await import('@/lib/supabase')
     const actionsChain = makeChain()
-    ;(actionsChain as Record<string, unknown>)['not'] = vi.fn().mockReturnValue({
+    ;(actionsChain as Record<string, unknown>)['range'] = vi.fn().mockResolvedValue({
       data: [{
         id: 'action-1',
         client_id: 'client-1',
+        flywheel: 'geo',
         expected_metric: 'geo.query.mention_rate',
         expected_delta: 0.05,
         executed_at: new Date().toISOString(),
@@ -175,10 +183,11 @@ describe('runAttributionJob', () => {
   it('skips action when baseline exists but no after-metric yet', async () => {
     const { supabaseAdmin } = await import('@/lib/supabase')
     const actionsChain = makeChain()
-    ;(actionsChain as Record<string, unknown>)['not'] = vi.fn().mockReturnValue({
+    ;(actionsChain as Record<string, unknown>)['range'] = vi.fn().mockResolvedValue({
       data: [{
         id: 'action-2',
         client_id: 'client-1',
+        flywheel: 'geo',
         expected_metric: 'geo.query.mention_rate',
         expected_delta: 0.05,
         executed_at: new Date(Date.now() - 86_400_000).toISOString(), // 1 day ago
@@ -204,10 +213,11 @@ describe('runAttributionJob', () => {
     const { supabaseAdmin } = await import('@/lib/supabase')
     const pastDate = new Date(Date.now() - 5 * 86_400_000) // 5 days ago
     const actionsChain = makeChain()
-    ;(actionsChain as Record<string, unknown>)['not'] = vi.fn().mockReturnValue({
+    ;(actionsChain as Record<string, unknown>)['range'] = vi.fn().mockResolvedValue({
       data: [{
         id: 'action-3',
         client_id: 'client-1',
+        flywheel: 'geo',
         expected_metric: 'geo.query.mention_rate',
         expected_delta: 0.05,
         executed_at: pastDate.toISOString(),
@@ -229,16 +239,17 @@ describe('runAttributionJob', () => {
     expect(result.skipped).toBe(0)
   })
 
-  it('increments skipped and logs error when DB throws on insert', async () => {
-    insertResult = { data: null, error: { message: 'insert failed' } }
+  it('increments failed (not skipped) and logs when DB throws on upsert', async () => {
+    upsertResult = { data: null, error: { message: 'upsert failed' } }
 
     const { supabaseAdmin } = await import('@/lib/supabase')
     const pastDate = new Date(Date.now() - 5 * 86_400_000)
     const actionsChain = makeChain()
-    ;(actionsChain as Record<string, unknown>)['not'] = vi.fn().mockReturnValue({
+    ;(actionsChain as Record<string, unknown>)['range'] = vi.fn().mockResolvedValue({
       data: [{
         id: 'action-4',
         client_id: 'client-1',
+        flywheel: 'geo',
         expected_metric: 'geo.query.mention_rate',
         expected_delta: 0.05,
         executed_at: pastDate.toISOString(),
@@ -255,7 +266,10 @@ describe('runAttributionJob', () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { runAttributionJob } = await import('../job')
     const result = await runAttributionJob()
-    expect(result.skipped).toBe(1)
+    // `failed`, not `skipped`: a thrown write is a failure, and lumping it in
+    // with "no data yet" is what let a total outage log as a clean run.
+    expect(result.failed).toBe(1)
+    expect(result.skipped).toBe(0)
     consoleSpy.mockRestore()
   })
 })
