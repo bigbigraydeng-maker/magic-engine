@@ -18,6 +18,7 @@ import { useState, useEffect, useCallback } from 'react'
 import type {
   CmsConnectionStatus,
   WordpressConnectionStatus,
+  ShopifyConnectionStatus,
   CmsContentTarget,
   CmsContentTargetSyntax,
 } from '@/lib/cms/vocabulary'
@@ -34,7 +35,7 @@ type ProviderTab = 'github' | 'wordpress' | 'shopify'
 const PROVIDER_TABS: { id: ProviderTab; label: string; soon?: boolean }[] = [
   { id: 'github',    label: 'GitHub' },
   { id: 'wordpress', label: 'WordPress' },
-  { id: 'shopify',   label: 'Shopify', soon: true },
+  { id: 'shopify',   label: 'Shopify' },
 ]
 
 export function CmsPanel({ clientId }: Props) {
@@ -64,7 +65,7 @@ export function CmsPanel({ clientId }: Props) {
 
       {activeProvider === 'github'    && <GithubProviderPanel    clientId={clientId} />}
       {activeProvider === 'wordpress' && <WordpressProviderPanel clientId={clientId} />}
-      {activeProvider === 'shopify'   && <ShopifyComingSoonPanel />}
+      {activeProvider === 'shopify'   && <ShopifyProviderPanel   clientId={clientId} />}
     </div>
   )
 }
@@ -981,18 +982,235 @@ add_action('init', function () {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Shopify (P14.A.4 — placeholder)
+// Shopify provider (P14.A.4 backend + this panel wires it into Settings UI)
 // ════════════════════════════════════════════════════════════════════════════
 
-function ShopifyComingSoonPanel() {
+type ShopifyPanelState =
+  | { phase: 'loading' }
+  | { phase: 'error'; message: string }
+  | { phase: 'disconnected' }
+  | { phase: 'connected'; status: ShopifyConnectionStatus }
+
+function ShopifyProviderPanel({ clientId }: { clientId: string }) {
+  const [state, setState]       = useState<ShopifyPanelState>({ phase: 'loading' })
+  const [formOpen, setFormOpen] = useState(false)
+
+  const fetchStatus = useCallback(async () => {
+    setState({ phase: 'loading' })
+    try {
+      const res  = await fetch(`/api/clients/${clientId}/cms/shopify`)
+      const json = await res.json() as { success: boolean; data: ShopifyConnectionStatus | null; error?: string }
+      if (!json.success) throw new Error(json.error ?? 'Failed to load status')
+      setState(json.data
+        ? { phase: 'connected', status: json.data }
+        : { phase: 'disconnected' })
+    } catch (err) {
+      setState({ phase: 'error', message: err instanceof Error ? err.message : 'Load failed' })
+    }
+  }, [clientId])
+
+  useEffect(() => { fetchStatus() }, [fetchStatus])
+
+  if (state.phase === 'loading') return <LoadingRow />
+  if (state.phase === 'error')   return <ErrorRow message={state.message} onRetry={fetchStatus} />
+
+  if (state.phase === 'connected') {
+    return (
+      <ShopifyConnectedView
+        clientId={clientId}
+        status={state.status}
+        onDisconnect={() => setState({ phase: 'disconnected' })}
+      />
+    )
+  }
+
   return (
-    <div className="rounded-xl bg-me-ivory border border-black/10 p-6 text-center space-y-2">
-      <p className="text-3xl">🛍️</p>
-      <p className="text-sm font-semibold text-me-charcoal/75">Shopify 连接器</p>
-      <p className="text-xs text-me-charcoal/55 leading-relaxed max-w-md mx-auto">
-        即将上线（P14.A.4）。届时可通过 Shopify Admin API 推送博客文章和页面，
-        默认 Draft-first，FDE 在 Shopify 后台确认后发布。
+    <div className="space-y-5">
+      <ShopifyIntroCard />
+      {formOpen ? (
+        <ShopifyConnectForm
+          clientId={clientId}
+          onConnected={(s) => setState({ phase: 'connected', status: s })}
+          onCancel={() => setFormOpen(false)}
+        />
+      ) : (
+        <button
+          onClick={() => setFormOpen(true)}
+          className="w-full py-3 bg-me-ochre hover:bg-me-ochre/90 text-white text-sm font-semibold rounded-xl transition-colors"
+        >
+          🛍️ 连接 Shopify 店铺
+        </button>
+      )}
+    </div>
+  )
+}
+
+function ShopifyIntroCard() {
+  return (
+    <div className="rounded-xl bg-me-ochre/10 border border-me-ochre/30 p-5 space-y-2">
+      <p className="text-sm font-semibold text-me-ochre">Shopify 连接器</p>
+      <p className="text-sm text-me-ochre leading-relaxed">
+        连接客户 Shopify 店铺后，Magic Engine 可以将博客文章 / 页面以草稿形式
+        推送到店铺。FDE 在 Shopify 后台确认预览后再发布上线，全程留痕、可审计、可回滚。
       </p>
+      <ul className="text-xs text-me-ochre space-y-1 mt-2">
+        <li>✓ 使用 Shopify Admin API（Custom App Access Token）</li>
+        <li>✓ 需要 <code>write_content</code> 权限范围（write_blogs + write_pages）</li>
+        <li>✓ Access Token 加密存储，从不明文出现在日志中</li>
+        <li>✓ 默认 Draft-first，不会自动发布</li>
+      </ul>
+    </div>
+  )
+}
+
+interface ShopifyConnectFormProps {
+  clientId:    string
+  onConnected: (s: ShopifyConnectionStatus) => void
+  onCancel:    () => void
+}
+
+function ShopifyConnectForm({ clientId, onConnected, onCancel }: ShopifyConnectFormProps) {
+  const [shopUrl,     setShopUrl]     = useState('')
+  const [accessToken, setAccessToken] = useState('')
+  const [saving,      setSaving]      = useState(false)
+  const [error,       setError]       = useState<string | null>(null)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    setSaving(true)
+
+    try {
+      const res  = await fetch(`/api/clients/${clientId}/cms/shopify`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shop_url:     shopUrl.trim(),
+          access_token: accessToken.trim(),
+        }),
+      })
+      const json = await res.json() as { success: boolean; data?: ShopifyConnectionStatus; error?: string }
+      if (!json.success) throw new Error(json.error ?? 'Save failed')
+      onConnected(json.data!)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {error && <ErrorBanner message={error} />}
+
+      <FormField label="店铺 URL" required>
+        <input
+          value={shopUrl}
+          onChange={e => setShopUrl(e.target.value)}
+          placeholder="my-store.myshopify.com"
+          className={INPUT_CLASS}
+          required
+        />
+        <p className="mt-1 text-xs text-me-charcoal/45">
+          可填 <code>my-store.myshopify.com</code> 或自定义域名，必须是公网 HTTPS 域名。
+        </p>
+      </FormField>
+
+      <FormField label="Admin API Access Token" required>
+        <input
+          type="password"
+          value={accessToken}
+          onChange={e => setAccessToken(e.target.value)}
+          placeholder="shpat_..."
+          className={INPUT_CLASS + ' font-mono'}
+          required
+          minLength={10}
+          autoComplete="new-password"
+        />
+        <p className="mt-1 text-xs text-me-charcoal/45">
+          在 Shopify 后台「设置 → 应用和销售渠道 → 开发应用」创建 Custom App，
+          勾选 <code>write_content</code> 权限后生成。加密后存储，不会明文出现在日志中。
+        </p>
+      </FormField>
+
+      <FormActions saving={saving} onCancel={onCancel} />
+    </form>
+  )
+}
+
+interface ShopifyConnectedViewProps {
+  clientId:     string
+  status:       ShopifyConnectionStatus
+  onDisconnect: () => void
+}
+
+function ShopifyConnectedView({ clientId, status, onDisconnect }: ShopifyConnectedViewProps) {
+  const [disconnecting, setDisconnecting] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [testing,       setTesting]       = useState(false)
+  const [testResult,    setTestResult]    = useState<string | null>(null)
+
+  const handleTest = async () => {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const res  = await fetch(`/api/clients/${clientId}/cms/shopify/test`, {
+        method: 'POST',
+      })
+      const json = await res.json() as { success: boolean; ok: boolean; shopName?: string; error?: string }
+      if (json.success && json.ok) {
+        setTestResult(`✅ 连接正常${json.shopName ? ` — 店铺 ${json.shopName}` : ''}`)
+      } else {
+        setTestResult(`❌ ${json.error ?? '连接失败'}`)
+      }
+    } catch {
+      setTestResult('❌ 网络错误，请重试')
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const handleDisconnect = async () => {
+    setDisconnecting(true)
+    try {
+      await fetch(`/api/clients/${clientId}/cms/shopify`, {
+        method: 'DELETE',
+      })
+      onDisconnect()
+    } catch {
+      setDisconnecting(false)
+      setConfirmDelete(false)
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <StatusBadge status={status.status} />
+
+      <InfoTable
+        rows={[
+          { label: '店铺 URL',                   value: status.shopUrl },
+          { label: 'Access Token (末四位)',       value: status.tokenHint ? `····${status.tokenHint}` : '—' },
+          {
+            label: '最后测试',
+            value: status.lastTestedAt
+              ? new Date(status.lastTestedAt).toLocaleString('zh-CN')
+              : '尚未测试',
+          },
+        ]}
+      />
+
+      {status.lastError && <LastErrorRow message={status.lastError} />}
+      {testResult       && <TestResultRow message={testResult} />}
+
+      <ConnectionActions
+        testing={testing}
+        confirmDelete={confirmDelete}
+        disconnecting={disconnecting}
+        onTest={handleTest}
+        onConfirmDeleteRequest={() => setConfirmDelete(true)}
+        onConfirmDelete={handleDisconnect}
+      />
     </div>
   )
 }

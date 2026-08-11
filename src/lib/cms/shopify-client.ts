@@ -239,6 +239,41 @@ export async function publishShopifyArticle(
   await expectJson(res, 'publishArticle')
 }
 
+// ─── deleteArticle / deletePage ───────────────────────────────────────────────
+
+/**
+ * Delete a Shopify blog article. Used by the rollback flow to remove an
+ * unpublished draft. 404 (already deleted) is treated as success.
+ */
+export async function deleteShopifyArticle(
+  config:    ShopifyClientConfig,
+  blogId:    number,
+  articleId: string,
+): Promise<void> {
+  const res = await shopifyFetch(config, `/blogs/${blogId}/articles/${articleId}.json`, {
+    method: 'DELETE',
+  })
+  if (!res.ok && res.status !== 404) {
+    const text = await res.text()
+    throw new Error(`Shopify deleteArticle failed (${res.status}): ${text.slice(0, 200)}`)
+  }
+}
+
+/**
+ * Delete a Shopify page. Used by the rollback flow to remove an unpublished
+ * draft. 404 (already deleted) is treated as success.
+ */
+export async function deleteShopifyPage(
+  config: ShopifyClientConfig,
+  pageId: string,
+): Promise<void> {
+  const res = await shopifyFetch(config, `/pages/${pageId}.json`, { method: 'DELETE' })
+  if (!res.ok && res.status !== 404) {
+    const text = await res.text()
+    throw new Error(`Shopify deletePage failed (${res.status}): ${text.slice(0, 200)}`)
+  }
+}
+
 // ─── createPageDraft ─────────────────────────────────────────────────────────
 
 export interface CreatePagePayload {

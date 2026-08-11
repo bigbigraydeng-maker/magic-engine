@@ -39,6 +39,8 @@ import {
   createShopifyPageDraft,
   publishShopifyPage,
   getOrCreateDefaultBlog,
+  deleteShopifyArticle,
+  deleteShopifyPage,
 } from '@/lib/cms/shopify-client'
 import { prepareCmsContent } from '@/lib/cms/html-sanitizer'
 import { buildArticleSchemaScript, sanitizeGeoSnapshot } from '@/lib/blog/html-builder'
@@ -50,7 +52,7 @@ interface RouteContext {
 }
 
 type TargetType = 'article' | 'page'
-type PublishAction = 'draft' | 'publish'
+type PublishAction = 'draft' | 'publish' | 'rollback'
 
 interface DraftRequestBody {
   action:         'draft'
@@ -68,7 +70,13 @@ interface PublishRequestBody {
   blog_id?:     number
 }
 
-type RequestBody = DraftRequestBody | PublishRequestBody
+/** Delete the remote Shopify draft and flip the job to rolled_back. */
+interface RollbackRequestBody {
+  action: 'rollback'
+  job_id: string
+}
+
+type RequestBody = DraftRequestBody | PublishRequestBody | RollbackRequestBody
 
 function badInput(msg: string) {
   return NextResponse.json({ success: false, error: msg, code: 'INVALID_INPUT' }, { status: 400 })
@@ -130,15 +138,17 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   }
 
   const action = (body as unknown as Record<string, unknown>).action as PublishAction | undefined
-  if (action !== 'draft' && action !== 'publish') {
-    return badInput('action must be "draft" or "publish"')
+  if (action !== 'draft' && action !== 'publish' && action !== 'rollback') {
+    return badInput('action must be "draft", "publish", or "rollback"')
   }
 
   try {
     if (action === 'draft') {
       return await handleDraft(clientId, body as DraftRequestBody)
-    } else {
+    } else if (action === 'publish') {
       return await handlePublish(clientId, body as PublishRequestBody)
+    } else {
+      return await handleRollback(clientId, body as RollbackRequestBody)
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
@@ -223,10 +233,14 @@ async function handleDraft(clientId: string, body: DraftRequestBody): Promise<Ne
 
   let platformId: string
   let previewUrl: string
+  // Recorded on the job so rollback deletes from the exact same blog, instead
+  // of re-resolving getOrCreateDefaultBlog() which could pick a different blog
+  // if the store's blog list changed between draft and rollback.
+  let resolvedBlogId: number | null = null
 
   if (target_type === 'article') {
-    const blogId = requestedBlogId ?? (await getOrCreateDefaultBlog(config))
-    const draft  = await createShopifyArticleDraft(config, { blogId, title, bodyHtml, summary })
+    resolvedBlogId = requestedBlogId ?? (await getOrCreateDefaultBlog(config))
+    const draft    = await createShopifyArticleDraft(config, { blogId: resolvedBlogId, title, bodyHtml, summary })
     platformId = draft.platformId
     previewUrl = draft.previewUrl
   } else {
@@ -244,7 +258,7 @@ async function handleDraft(clientId: string, body: DraftRequestBody): Promise<Ne
       source_id:        source_id,
       platform_post_id: platformId,
       target_url:       previewUrl,
-      content_snapshot: snapshot,
+      content_snapshot: { ...snapshot, blog_id: resolvedBlogId },
       payload_hash:     payloadHash,
       status:           'draft',
       idempotency_key:  idKey,
@@ -317,7 +331,8 @@ async function handlePublish(clientId: string, body: PublishRequestBody): Promis
   const targetType = (snapshot.target_type as string) ?? 'article'
 
   if (targetType === 'article') {
-    const resolvedBlogId = blogId ?? (await getOrCreateDefaultBlog(config))
+    const snapshotBlogId = typeof snapshot.blog_id === 'number' ? snapshot.blog_id : undefined
+    const resolvedBlogId = blogId ?? snapshotBlogId ?? (await getOrCreateDefaultBlog(config))
     await publishShopifyArticle(config, resolvedBlogId, platformId)
   } else {
     await publishShopifyPage(config, platformId)
@@ -358,4 +373,71 @@ async function handlePublish(clientId: string, body: PublishRequestBody): Promis
     platform_id: platformId,
     status:      'published',
   })
+}
+
+// ─── handleRollback ───────────────────────────────────────────────────────────
+
+/**
+ * Delete the remote Shopify draft and flip the job to rolled_back.
+ *
+ * Safe to call on an already-rolled-back job (idempotent).
+ * NOT safe on a published job (returns 422 — don't unpublish live content).
+ */
+async function handleRollback(clientId: string, body: RollbackRequestBody): Promise<NextResponse> {
+  const { job_id } = body
+
+  if (typeof job_id !== 'string' || !job_id.trim()) {
+    return badInput('job_id required')
+  }
+
+  const { data: job } = await supabaseAdmin
+    .from('website_publish_jobs')
+    .select('id, client_id, status, content_snapshot, platform_post_id')
+    .eq('id', job_id)
+    .eq('client_id', clientId)
+    .maybeSingle()
+
+  if (!job) {
+    return NextResponse.json({ success: false, error: 'Job not found', code: 'NOT_FOUND' }, { status: 404 })
+  }
+
+  if (job.status === 'rolled_back') {
+    return NextResponse.json({ success: true, job_id, status: 'rolled_back', note: 'already rolled back' })
+  }
+
+  if (job.status === 'published') {
+    return NextResponse.json(
+      { success: false, error: 'Cannot roll back a published article/page. To remove live content, please delete it directly in Shopify.', code: 'INVALID_STATE' },
+      { status: 422 },
+    )
+  }
+
+  const platformId = job.platform_post_id as string | null
+  const snapshot    = (job.content_snapshot ?? {}) as Record<string, unknown>
+  const targetType  = (snapshot.target_type as string) ?? 'article'
+  const snapshotBlogId = typeof snapshot.blog_id === 'number' ? snapshot.blog_id : undefined
+
+  // Best-effort delete from Shopify — continue even if the remote draft is already gone.
+  if (platformId) {
+    try {
+      const conn   = await findConnection(clientId)
+      const config = { shopUrl: conn.shopUrl, accessToken: conn.plainToken }
+      if (targetType === 'article') {
+        const blogId = snapshotBlogId ?? (await getOrCreateDefaultBlog(config))
+        await deleteShopifyArticle(config, blogId, platformId)
+      } else {
+        await deleteShopifyPage(config, platformId)
+      }
+    } catch (err) {
+      // Log but don't fail — the job record update below is the critical path.
+      console.warn('[publish-shopify rollback] remote delete failed (continuing):', err instanceof Error ? err.message : err)
+    }
+  }
+
+  await supabaseAdmin
+    .from('website_publish_jobs')
+    .update({ status: 'rolled_back', published_at: null })
+    .eq('id', job_id)
+
+  return NextResponse.json({ success: true, job_id, status: 'rolled_back' })
 }
