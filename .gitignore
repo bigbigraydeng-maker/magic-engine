@@ -39,9 +39,6 @@ yarn-error.log*
 # TypeScript incremental build cache
 *.tsbuildinfo
 
-# tools/issue-relay build output (compiled fresh by the workflow, never committed)
-tools/issue-relay/dist/
-
 # Claude Code agent worktree experiments (multi-session artifacts)
 .claude/worktrees/
 
@@ -67,3 +64,6 @@ scripts/factory-worker/.env
 # Python 编译产物（scripts/video-pipeline）
 __pycache__/
 *.py[cod]
+
+# tools/issue-relay build output (compiled fresh by the workflow, never committed)
+tools/issue-relay/dist/
