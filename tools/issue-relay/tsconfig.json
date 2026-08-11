@@ -1,0 +1,11 @@
+{
+  // Scoped type check for this module only, same reasoning as
+  // tools/ai-orchestrator/tsconfig.json: the repository baseline carries
+  // pre-existing `tsc` errors, so a whole-repo check can never be a gate.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

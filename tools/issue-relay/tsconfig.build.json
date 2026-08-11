@@ -1,0 +1,17 @@
+{
+  // Emits plain CommonJS so the workflow can run `node dist/cli.js` directly
+  // with no extra runtime dependency (no ts-node/tsx). The root config's
+  // "bundler" resolution and noEmit are Next.js-shaped and not usable for a
+  // standalone script, so this build config overrides them explicitly.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "target": "es2022",
+    "outDir": "dist",
+    "noEmit": false,
+    "declaration": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "tests"]
+}

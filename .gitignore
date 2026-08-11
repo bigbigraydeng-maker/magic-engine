@@ -39,6 +39,9 @@ yarn-error.log*
 # TypeScript incremental build cache
 *.tsbuildinfo
 
+# tools/issue-relay build output (compiled fresh by the workflow, never committed)
+tools/issue-relay/dist/
+
 # Claude Code agent worktree experiments (multi-session artifacts)
 .claude/worktrees/
 
