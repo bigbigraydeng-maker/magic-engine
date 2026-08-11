@@ -1,0 +1,114 @@
+name: Issue Discussion Relay (pilot, Issue #910 only)
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: me2-issue-relay-issue-910
+  cancel-in-progress: false
+
+jobs:
+  relay:
+    if: |
+      github.event.issue.number == 910 &&
+      github.event.issue.pull_request == null &&
+      github.event.comment.user.login != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build relay script
+        run: npx tsc -p tools/issue-relay/tsconfig.build.json
+
+      - name: Decide
+        id: prepare
+        run: node tools/issue-relay/dist/cli.js prepare
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+
+      - name: Post round-cap halt
+        if: steps.prepare.outputs.decision == 'halt'
+        run: node tools/issue-relay/dist/cli.js post-halt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          SOURCE_COMMENT_ID: ${{ steps.prepare.outputs.source_comment_id }}
+
+      - name: Check for OPENAI_API_KEY
+        id: preflight
+        if: steps.prepare.outputs.decision == 'relay'
+        run: |
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "::warning::OPENAI_API_KEY is not configured — reporting and stopping."
+            echo "missing=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "missing=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Report missing credentials
+        if: steps.prepare.outputs.decision == 'relay' && steps.preflight.outputs.missing == 'true'
+        run: node tools/issue-relay/dist/cli.js post-missing-credentials
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          MISSING_SECRET_NAME: OPENAI_API_KEY
+
+      # UNVERIFIED against openai/codex-action@v1's actual action.yml — see
+      # tools/issue-relay/README.md "Open verification items" #2.
+      - name: Run Codex (read-only, discussion only)
+        id: codex
+        if: steps.prepare.outputs.decision == 'relay' && steps.preflight.outputs.missing == 'false'
+        continue-on-error: true
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: ${{ steps.prepare.outputs.prompt_path }}
+          sandbox: read-only
+          output-file: ${{ runner.temp }}/codex-reply.txt
+
+      - name: Report provider failure
+        if: steps.codex.outcome == 'failure'
+        run: node tools/issue-relay/dist/cli.js post-provider-failure
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+
+      - name: Post Codex reply
+        if: steps.codex.outcome == 'success'
+        run: node tools/issue-relay/dist/cli.js post-relay
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ROUND: ${{ steps.prepare.outputs.round }}
+          SOURCE_COMMENT_ID: ${{ steps.prepare.outputs.source_comment_id }}
+          CODEX_REPLY_FILE: ${{ runner.temp }}/codex-reply.txt
+
+      - name: Confirm nothing changed on disk
+        if: always()
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::This job modified the working tree. Codex output is discussion text only."
+            git status --porcelain
+            exit 1
+          fi
+          echo "Working tree clean: no commit, no push, no repository change."
