@@ -1767,6 +1767,28 @@ GRANT SELECT ON public.kernel_action_lineage TO service_role;""",
         test="src/lib/kernel/__tests__/architecture.test.ts",
         expect_fail_contains="八种 `.test.<ext>` 全部被认定为测试文件",
     ),
+    # ── Issue #923：JSX 文本被当成注释挖掉，未闭合 /* 吞掉后续全部源码 ──────────
+    dict(
+        # 拆掉「起点落在 JSX 文本里就不挖」这道判据 = 完全退回旧行为。
+        # 于是 <div>/* unterminated 之后的 AuthorizedExecutionContext / supabaseAdmin /
+        # execution_items / any 全部被挖空，那几条还在用正则的检查一条都看不见。
+        name="#923 注释挖空重新吃掉 JSX 文本（未闭合 /* 再次吞掉后续源码）",
+        file="src/lib/kernel/__tests__/architecture.test.ts",
+        old="    if (startsInsideJsxText(r.pos)) return\n",
+        new="",
+        test="src/lib/kernel/__tests__/architecture.test.ts",
+        expect_fail_contains="不许吞掉后续源码",
+    ),
+    dict(
+        # 同一个洞的另一半：不再登记 JsxText 区间 → 判据永远为假，效果同上。
+        # 两处 stripComments 是有意各自独立的，所以 bridge 侧单独验一刀。
+        name="#923 不再登记 JsxText 区间（bridge 侧同一个洞重新打开）",
+        file="src/lib/action-bridge/__tests__/architecture.test.ts",
+        old="    if (node.kind === ts.SyntaxKind.JsxText) jsxTextSpans.push({ pos: node.pos, end: node.end })\n",
+        new="",
+        test="src/lib/action-bridge/__tests__/architecture.test.ts",
+        expect_fail_contains="不许吞掉后续源码",
+    ),
 ]
 
 

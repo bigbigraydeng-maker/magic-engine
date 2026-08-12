@@ -136,10 +136,37 @@ const parseSource = (code: string, fileName = 'scan.ts'): ts.SourceFile =>
  *    的输出里，让后面那些还在用正则的检查（比如 `AUTHORIZED_CONTEXT_MINTERS`
  *    那条）把纯注释文本当成生产代码，对着注释报出一个假违规。
  *    补法：每个节点的 `pos`（leading）与 `end`（trailing）都收一遍。
+ *
+ * 🔴 **JSX 文本不是 trivia —— 落在它里面的「注释」是要渲染到页面上的字面文本。**（Issue #923）
+ *
+ *      export const P = () => <div>/* just text *\/</div>
+ *
+ *    `<div>` 的 `>` 结束的位置正好压在这段文本的开头，于是 `getTrailingCommentRanges()`
+ *    从那儿往后扫，把 `/* … *\/` 认成 `>` 的尾随注释，整段字面文本被挖空。
+ *    **实测贡献这条假注释的是 `JsxOpeningElement` / `GreaterThanToken` 的 `end`，
+ *    不是 `JsxText` 自己的 `pos`** —— 所以「遍历时跳过 JsxText 节点」那种改法一条都修不掉
+ *    （25 条对抗用例里它仍然错 10 条，跟没改完全一样）。
+ *
+ *    真正危险的是**未闭合**的 `/*`：扫描器一路吃到 EOF，把该文件后面**全部源码**挖空 ——
+ *      export const P = () => <div>/* unterminated
+ *      </div>
+ *      export const evil = {} as unknown as AuthorizedExecutionContext
+ *      export const sb = supabaseAdmin.from('execution_items')
+ *    这几条真实违规对「先 stripComments 再上正则」的检查完全隐形，是一条 architecture-test bypass。
+ *
+ *    修法：把 `JsxText` 的区间记下来，最后**丢掉起点落在 JSX 文本里的 range**。
+ *    判据是紧的：JSX 文本里按语法根本不可能出现注释 —— 要在 JSX 子节点位置写注释只能写成
+ *    `{/* … *\/}`，那段注释的起点在 `{` 之后、不在任何 JsxText 区间里，照样挖得掉。
+ *
+ *    ⚠️ `.ts` / `.mts` / `.cts` 按 `ScriptKind.TS` 解析，`<div>` 是类型断言、根本没有
+ *    JsxText 节点，那里的 `/*` 在语言层面**就是**注释；而这种源码 `transpileModule()`
+ *    直接报语法错（实测 TS1109 / TS1010），编译不过、上不了线，因此不是绕过口子。
  */
 function stripComments(src: string, fileName = 'scan.ts'): string {
   const sourceFile = parseSource(src, fileName)
   const ranges = new Map<string, ts.CommentRange>()
+  // JSX 文本区间：起点落在这里面的「注释」是假的，见上面 Issue #923 那段
+  const jsxTextSpans: Array<{ pos: number; end: number }> = []
 
   // `node.pos` 就是含前导 trivia 的起点（= getFullStart()），不需要父指针
   const collectLeadingAt = (pos: number): void => {
@@ -154,6 +181,7 @@ function stripComments(src: string, fileName = 'scan.ts'): string {
     }
   }
   const visit = (node: ts.Node): void => {
+    if (node.kind === ts.SyntaxKind.JsxText) jsxTextSpans.push({ pos: node.pos, end: node.end })
     collectLeadingAt(node.pos)
     collectTrailingAt(node.end)
     // 🔴 必须走 getChildren()（token 级），不是 forEachChild（只给子**节点**）。
@@ -167,10 +195,15 @@ function stripComments(src: string, fileName = 'scan.ts'): string {
   // 文件末尾那条注释是 EOF token 的前导 trivia，不挂在任何其它节点上
   collectLeadingAt(sourceFile.endOfFileToken.pos)
 
+  // 起点落在 JSX 文本里 = 这段「注释」其实是页面上的字面文本，不许挖（Issue #923）
+  const startsInsideJsxText = (pos: number): boolean =>
+    jsxTextSpans.some((span) => pos >= span.pos && pos < span.end)
+
   const chars = src.split('')
   // 用 forEach 而不是 `for…of ranges.values()`：仓库 tsconfig 没设 target，
   // 直接迭代 Map 的迭代器会撞 TS2802（要 downlevelIteration）。
   ranges.forEach((r) => {
+    if (startsInsideJsxText(r.pos)) return
     for (let i = r.pos; i < r.end && i < chars.length; i++) {
       if (chars[i] !== '\n') chars[i] = ' '
     }
@@ -1190,6 +1223,164 @@ describe('依赖方向：Kernel 不许挂在被它治理的那些层上', () => 
             expect(stripped, f).not.toContain('eof')
             expect(stripped.split('\n').length, f).toBe(3)
           }
+        })
+      })
+
+      /**
+       * 🔴 **JSX 文本不是注释 —— 未闭合的 `/*` 会吞掉该文件后续全部源码。**（Issue #923）
+       *
+       * 这是一条真的 architecture-test bypass：把违规藏在一段未闭合 `/*` 的 JSX 文本后面，
+       * 下面这些「先 stripComments 再上正则」的检查就全瞎了 ——
+       * 伪造授权上下文 / kernel 直接抓 supabaseAdmin / 写 execution_items / 没有 any。
+       *
+       * 反向对照同样写在这里：修 JSX 文本的同时**不许**停止挖真注释。
+       */
+      describe('🔴 JSX 文本里形似注释的内容不许被当成注释（Issue #923）', () => {
+        const KERNEL_TSX2 = 'src/lib/kernel/text-panel.tsx'
+        /** 会被 JSX 解析（有 JsxText 节点）的五类后缀 —— 修复在这些后缀上必须生效 */
+        const JSX_CAPABLE = ['a.tsx', 'a.jsx', 'a.js', 'a.mjs', 'a.cjs'] as const
+        /** 按 ScriptKind.TS 解析的三类 —— `<div>` 是类型断言，没有 JsxText */
+        const TS_KIND = ['a.ts', 'a.mts', 'a.cts'] as const
+        /** 未闭合 `/*` 之后藏着四条真实违规 */
+        const HIDDEN_VIOLATIONS = [
+          `export const P = () => <div>/* unterminated`,
+          `</div>`,
+          `export const evil = {} as unknown as AuthorizedExecutionContext`,
+          `export const sb = supabaseAdmin.from('execution_items')`,
+          `export const bad: any = 1`,
+        ].join('\n')
+
+        it('✅ 普通 JSX 文本原样保留', () => {
+          const code = `export const P = () => <div>keep-me plain text</div>`
+          expect(stripComments(code, KERNEL_TSX2)).toContain('keep-me plain text')
+        })
+
+        it('🔴 JSX 文本里**闭合**的 `/* … */` 是字面文本，不许被挖空', () => {
+          const code = `export const P = () => <div>/* keep-me */</div>`
+          expect(stripComments(code, KERNEL_TSX2)).toContain('/* keep-me */')
+        })
+
+        it('🔴 JSX 文本里的 `//` 同样是字面文本，不许被挖空', () => {
+          const code = `export const P = () => <div>// keep-me</div>`
+          expect(stripComments(code, KERNEL_TSX2)).toContain('// keep-me')
+        })
+
+        it('🔴 多行 JSX 文本 / Fragment / 元素之间的文本都不许被挖空', () => {
+          const cases = [
+            `export const P = () => (\n  <div>\n    /* keep-me */ and // keep-me-too\n  </div>\n)`,
+            `export const Q = () => <>/* keep-me */</>`,
+            `export const R = () => <div><b>x</b>/* keep-me */<i>y</i></div>`,
+          ]
+          for (const code of cases) {
+            expect(stripComments(code, KERNEL_TSX2), code).toContain('/* keep-me */')
+          }
+        })
+
+        it('🔴 **未闭合**的 `/*` 不许吞掉后续源码 —— 四条真实违规必须都还看得见', () => {
+          const stripped = stripComments(HIDDEN_VIOLATIONS, KERNEL_TSX2)
+          expect(stripped).toContain('as unknown as AuthorizedExecutionContext')
+          expect(stripped).toContain('supabaseAdmin')
+          expect(stripped).toContain('execution_items')
+          expect(/:\s*any\b|<any>|as\s+any\b/.test(stripped)).toBe(true)
+        })
+
+        it('🔴 未闭合 `/*` 之后的禁止 import 仍然命中（正则那路与 AST 那路都要看得见）', () => {
+          const code = [
+            `export const P = () => <div>/* unterminated`,
+            `</div>`,
+            `import '@/lib/growth'`,
+          ].join('\n')
+          expect(stripComments(code, KERNEL_TSX2)).toContain('@/lib/growth')
+          expect(importsAnyOf(KERNEL_TSX2, code, KERNEL_FORBIDDEN_MODULE_IMPORTS)).toBe(true)
+          expect(
+            importsAnyOf(KERNEL_TSX2, stripComments(code, KERNEL_TSX2), KERNEL_FORBIDDEN_MODULE_IMPORTS),
+          ).toBe(true)
+        })
+
+        it('🔴 五类会解析 JSX 的后缀上，未闭合 `/*` 全都不再吞代码', () => {
+          for (const f of JSX_CAPABLE) {
+            const stripped = stripComments(HIDDEN_VIOLATIONS, f)
+            expect(stripped, f).toContain('as unknown as AuthorizedExecutionContext')
+            expect(stripped, f).toContain('supabaseAdmin')
+            expect(stripped, f).toContain('execution_items')
+          }
+        })
+
+        it('✅ `.ts/.mts/.cts` 里同样一段源码本来就编译不过（不是留下来的绕过口子）', () => {
+          // 这三类按 ScriptKind.TS 解析：`<div>` 是类型断言、没有 JsxText 节点，
+          // 那里的 `/*` 在语言层面**就是**一条未闭合注释。要确认这不是个口子，
+          // 就得证明这种源码根本不是合法代码 —— 用公开 API transpileModule 报诊断。
+          for (const f of TS_KIND) {
+            const out = ts.transpileModule(HIDDEN_VIOLATIONS, {
+              fileName: f,
+              reportDiagnostics: true,
+              compilerOptions: { allowJs: true },
+            })
+            expect((out.diagnostics ?? []).length, f).toBeGreaterThan(0)
+          }
+        })
+
+        it('✅ JSX 属性字符串里形似注释的内容不许被挖空', () => {
+          const code = `export const P = () => <a href="/* keep-href */" data-x="// keep-attr">t</a>`
+          const stripped = stripComments(code, KERNEL_TSX2)
+          expect(stripped).toContain('/* keep-href */')
+          expect(stripped).toContain('// keep-attr')
+        })
+
+        it('✅ 字符串 / 模板串 / 正则里形似注释的内容不许被挖空', () => {
+          const code = [
+            `const s = "/* keep-s */"`,
+            'const t = `// keep-t`',
+            `const re = /\\/\\*keep-re\\*\\//`,
+          ].join('\n')
+          const stripped = stripComments(code)
+          expect(stripped).toContain('/* keep-s */')
+          expect(stripped).toContain('// keep-t')
+          expect(stripped).toContain('keep-re')
+        })
+
+        /** ⬇⬇ 反向对照：修 JSX 文本的同时，**真注释一条都不许留下** ⬇⬇ */
+        it('🔴 反向对照：真正的 JSX expression comment 仍然被挖空', () => {
+          const cases: Array<[label: string, code: string]> = [
+            ['空表达式', `export const P = () => <div>{/* kill-me */}</div>`],
+            ['属性内联', `export const P = () => <C v={/* kill-me */ e} />`],
+            ['紧跟在 JSX 文本后面', `export const P = () => <div>/* keep-me */{/* kill-me */}</div>`],
+            ['换行缩进的常见写法', `export const P = () => (\n  <div>\n    {/* kill-me */}\n  </div>\n)`],
+          ]
+          for (const [label, code] of cases) {
+            expect(stripComments(code, KERNEL_TSX2), label).not.toContain('kill-me')
+          }
+        })
+
+        it('🔴 反向对照：JS/TS 的真行注释、块注释、trailing、EOF 注释仍然被挖空', () => {
+          const cases: Array<[label: string, code: string]> = [
+            ['行注释', `const x = 1 // kill-me\nconst y = 2`],
+            ['块注释', `/* kill-me */\nconst y = 2`],
+            ['同一行 trailing 块注释', `const x = foo /* kill-me */ + bar`],
+            ['EOF 注释', `const x = 1\n// kill-me`],
+            ['块尾 } 之前的注释', `function f() {\n  const a = 1\n  // kill-me\n}`],
+            ['模板插值里的注释', 'const s = `${/* kill-me */ x}`'],
+          ]
+          for (const [label, code] of cases) {
+            expect(stripComments(code), label).not.toContain('kill-me')
+          }
+        })
+
+        it('🔴 反向对照：八类后缀下真注释仍然挖得掉，且挖空不改行号', () => {
+          for (const [ext] of SOURCE_EXTENSIONS) {
+            const code = ['/* kill-lead */', 'const a = 1 // kill-trail', '// kill-eof'].join('\n')
+            const stripped = stripComments(code, `a${ext}`)
+            expect(stripped, ext).not.toContain('kill-lead')
+            expect(stripped, ext).not.toContain('kill-trail')
+            expect(stripped, ext).not.toContain('kill-eof')
+            expect(stripped.split('\n').length, ext).toBe(3)
+          }
+        })
+
+        it('✅ 保留 JSX 文本之后行号列宽都不变（诊断位置仍然对得上）', () => {
+          const stripped = stripComments(HIDDEN_VIOLATIONS, KERNEL_TSX2)
+          expect(stripped.split('\n').length).toBe(HIDDEN_VIOLATIONS.split('\n').length)
+          expect(stripped.length).toBe(HIDDEN_VIOLATIONS.length)
         })
       })
 

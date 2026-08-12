@@ -93,7 +93,10 @@ jobs:
 
       - name: Request Codex review once per head sha
         env:
-          # Authors the comment as the Product Owner, whose Codex account
-          # Codex Cloud can actually resolve. See the header comment.
-          GITHUB_TOKEN: ${{ secrets.OPS_REVIEW_PAT }}
+          # Read (dedup) with the ambient token; POST as the Product Owner.
+          # Splitting them keeps the PAT's required grant to the single
+          # permission it genuinely needs — see request-review.mjs for the live
+          # 404 that motivated this.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REVIEW_REQUEST_TOKEN: ${{ secrets.OPS_REVIEW_PAT }}
         run: node tools/ops-review-loop/src/request-review.mjs

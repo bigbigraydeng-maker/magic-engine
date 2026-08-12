@@ -172,7 +172,17 @@ describe('the request-review workflow', () => {
     // that goes green and accomplishes nothing, which is the hardest kind of
     // break to notice — so it is pinned here.
     const step = request.steps.find((s) => s.run?.includes('request-review.mjs'))
-    expect(step?.env?.GITHUB_TOKEN).toBe('${{ secrets.OPS_REVIEW_PAT }}')
+    // The POST — the only call whose author Codex looks at — must be the PAT.
+    expect(step?.env?.REVIEW_REQUEST_TOKEN).toBe('${{ secrets.OPS_REVIEW_PAT }}')
+  })
+
+  it('reads with the ambient token so the PAT needs no extra permission to dedup', () => {
+    // PR #927's first live run died on `GET /issues/927/comments -> 404`: issue
+    // comments sit under the Issues API even on a PR, so a PAT granted only
+    // "Pull requests" cannot read them. The read carries no identity meaning,
+    // so it should never have been on the PAT in the first place.
+    const step = request.steps.find((s) => s.run?.includes('request-review.mjs'))
+    expect(step?.env?.GITHUB_TOKEN).toBe('${{ secrets.GITHUB_TOKEN }}')
   })
 
   it('fails closed when OPS_REVIEW_PAT is missing instead of falling back', () => {
