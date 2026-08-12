@@ -73,6 +73,41 @@ async function graphql(token, query, variables) {
  * the new commit — resolving here claims "this was addressed", not "this was
  * correct", and the next review is what decides the latter.
  */
+/**
+ * Unresolved review conversations, with enough detail to name them.
+ *
+ * Codex finding (PR #931, P2): a round that raises P1 *and* P3 only ever
+ * resolves the P1 threads, because only those are dispatched. The repository
+ * ruleset requires every conversation resolved before a merge, so the P3 thread
+ * silently becomes a permanent block — and since nothing re-triggers this
+ * workflow, the pipeline dead-ends with no explanation anywhere. CLAUDE.md's
+ * "no dead-end pipelines" rule is the one being broken.
+ *
+ * The fix is NOT to resolve them: this loop never acted on them, and marking
+ * them resolved would be a plain false statement about work that did not
+ * happen. It is to make them a named, visible blocker so a human can close
+ * them in one click knowing exactly which ones.
+ */
+export async function listUnresolvedReviewThreads(token, owner, repo, pullNumber) {
+  const data = await graphql(
+    token,
+    `query($owner:String!,$repo:String!,$pr:Int!){
+      repository(owner:$owner,name:$repo){ pullRequest(number:$pr){
+        reviewThreads(first:100){ nodes {
+          isResolved isOutdated
+          comments(first:1){ nodes { databaseId path url author { login } } } } } } } }`,
+    { owner, repo, pr: pullNumber },
+  )
+  return (data?.repository?.pullRequest?.reviewThreads?.nodes ?? [])
+    .filter((t) => !t.isResolved)
+    .map((t) => ({
+      path: t.comments?.nodes?.[0]?.path ?? '(unknown file)',
+      url: t.comments?.nodes?.[0]?.url ?? '',
+      author: t.comments?.nodes?.[0]?.author?.login ?? '(unknown)',
+      isOutdated: t.isOutdated === true,
+    }))
+}
+
 export async function resolveThreadsForComments(token, owner, repo, pullNumber, commentIds) {
   if (!commentIds?.length) return []
   const data = await graphql(

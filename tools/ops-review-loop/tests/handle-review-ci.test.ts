@@ -18,6 +18,7 @@ const listIssueComments = vi.fn().mockResolvedValue([])
 const listReviewComments = vi.fn().mockResolvedValue([])
 const listCheckRunsForRef = vi.fn()
 const getPullRequest = vi.fn().mockResolvedValue({ draft: false, mergeable: true, head: { sha: 'x' } })
+const listUnresolvedReviewThreads = vi.fn().mockResolvedValue([])
 
 vi.mock('../src/github.mjs', () => ({
   createIssueComment: (...a: unknown[]) => createIssueComment(...a),
@@ -25,6 +26,7 @@ vi.mock('../src/github.mjs', () => ({
   listReviewComments: (...a: unknown[]) => listReviewComments(...a),
   listCheckRunsForRef: (...a: unknown[]) => listCheckRunsForRef(...a),
   getPullRequest: (...a: unknown[]) => getPullRequest(...a),
+  listUnresolvedReviewThreads: (...a: unknown[]) => listUnresolvedReviewThreads(...a),
   mergePullRequest: vi.fn(),
 }))
 
@@ -287,5 +289,38 @@ describe('handle-review: this workflow run is itself a check on the sha', () => 
     expect(body).toContain('stage=ready')
     expect(body).toContain('review=4242')
     delete process.env.GITHUB_RUN_ID
+  })
+})
+
+describe('handle-review: cannot read the review conversations', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ops-loop-threads-'))
+    createIssueComment.mockClear()
+    listCheckRunsForRef.mockReset().mockResolvedValue([
+      { name: 'ci', status: 'completed', conclusion: 'success', details_url: 'https://github.com/o/r/actions/runs/999/job/2' },
+    ])
+    listUnresolvedReviewThreads.mockReset()
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+    vi.resetModules()
+  })
+
+  it('blocks the merge rather than assuming there are none', async () => {
+    // Fail closed. "The call failed" and "there are no open conversations" are
+    // different facts, and only one of them permits an unattended production
+    // merge. Treating the first as the second is the same shape as every other
+    // silent-success bug this loop has had today.
+    listUnresolvedReviewThreads.mockRejectedValue(new Error('GraphQL 502'))
+
+    await run(dir)
+
+    const body = String(createIssueComment.mock.calls[0]?.[4] ?? '')
+    expect(body).toContain('READY FOR PRODUCT OWNER')
+    expect(body).toContain('could not read review threads')
+    expect(body).not.toContain('AUTO-MERGED')
   })
 })

@@ -109,6 +109,7 @@ export function autoMergeBlockers({
   cleanReview,
   reviewedSha,
   headSha,
+  unresolvedThreads = [],
 }) {
   const blockers = []
   if (!enabled) blockers.push('auto-merge disabled (repository variable OPS_AUTO_MERGE_ENABLED)')
@@ -129,5 +130,23 @@ export function autoMergeBlockers({
   if (mergeable !== true) blockers.push(`not mergeable (mergeable=${JSON.stringify(mergeable)})`)
   if (!everyCheckGreen) blockers.push('not every check run is completed and green')
   if (!cleanReview) blockers.push('no positive clean signal in the Codex review')
+  // Codex finding (PR #931, P2). The repository ruleset refuses a merge while
+  // any conversation is open, and this loop only resolves the threads a fix
+  // round actually addressed — a P3 raised alongside a P1 is never dispatched,
+  // so it stays open forever. Left unnamed, the merge API just fails and
+  // nothing says why; named here, it becomes one click for a human.
+  //
+  // Deliberately NOT auto-resolved: this loop did not act on those threads, and
+  // closing them would assert work that never happened.
+  if (Array.isArray(unresolvedThreads) && unresolvedThreads.length > 0) {
+    const named = unresolvedThreads
+      .slice(0, 5)
+      .map((t) => `\`${t.path}\`${t.isOutdated ? ' (outdated)' : ''}`)
+      .join(', ')
+    const more = unresolvedThreads.length > 5 ? ` +${unresolvedThreads.length - 5} more` : ''
+    blockers.push(
+      `${unresolvedThreads.length} unresolved review conversation(s) — the repository ruleset blocks merging until they are resolved: ${named}${more}`,
+    )
+  }
   return blockers
 }

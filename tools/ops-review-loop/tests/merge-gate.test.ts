@@ -77,6 +77,7 @@ describe('autoMergeBlockers', () => {
     cleanReview: true,
     reviewedSha: SHA,
     headSha: SHA,
+    unresolvedThreads: [],
   }
 
   it('returns no blockers when everything holds', () => {
@@ -160,5 +161,53 @@ describe('excludeOwnRun', () => {
     const runs = [own('merge', '2'), other]
     expect(excludeOwnRun(runs, undefined)).toEqual(runs)
     expect(excludeOwnRun(runs, '')).toEqual(runs)
+  })
+})
+
+describe('autoMergeBlockers: unresolved conversations', () => {
+  const SHA2 = 'f'.repeat(40)
+  const clear = {
+    enabled: true,
+    isDraft: false,
+    mergeable: true,
+    everyCheckGreen: true,
+    cleanReview: true,
+    reviewedSha: SHA2,
+    headSha: SHA2,
+    unresolvedThreads: [],
+  }
+
+  it('names the unresolved conversations that the ruleset will block on', () => {
+    // Codex finding (PR #931, P2): a P3 raised alongside a P1 is never
+    // dispatched, so its thread stays open forever; the ruleset then refuses
+    // the merge and nothing anywhere says why. The pipeline dead-ends.
+    const blockers = autoMergeBlockers({
+      ...clear,
+      unresolvedThreads: [
+        { path: 'src/a.ts', isOutdated: false },
+        { path: 'src/b.ts', isOutdated: true },
+      ],
+    })
+    expect(blockers).toHaveLength(1)
+    expect(blockers[0]).toContain('2 unresolved review conversation(s)')
+    expect(blockers[0]).toContain('src/a.ts')
+    expect(blockers[0]).toContain('src/b.ts')
+    expect(blockers[0]).toContain('(outdated)')
+  })
+
+  it('does not silently resolve them — it only reports them', () => {
+    // The alternative fix (auto-resolving threads nobody acted on) would
+    // assert work that never happened, which is the same class of lie as the
+    // "pushed the change" message that pushed nothing.
+    const blockers = autoMergeBlockers({ ...clear, unresolvedThreads: [{ path: 'x', isOutdated: false }] })
+    expect(blockers[0]).toContain('resolved')
+    expect(blockers[0]).not.toContain('automatically')
+  })
+
+  it('truncates a long list but still says how many were hidden', () => {
+    const many = Array.from({ length: 9 }, (_, i) => ({ path: `f${i}.ts`, isOutdated: false }))
+    const blockers = autoMergeBlockers({ ...clear, unresolvedThreads: many })
+    expect(blockers[0]).toContain('9 unresolved')
+    expect(blockers[0]).toContain('+4 more')
   })
 })

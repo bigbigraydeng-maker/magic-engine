@@ -29,6 +29,7 @@ import {
   listCheckRunsForRef,
   listIssueComments,
   listReviewComments,
+  listUnresolvedReviewThreads,
 } from './github.mjs'
 import { autoMergeBlockers, excludeOwnRun, isCleanReview, isEveryCheckGreen } from './merge-gate.mjs'
 import { buildMarker, parseMarkers } from './markers.mjs'
@@ -125,7 +126,17 @@ const autoMergeEnabled = process.env.AUTO_MERGE_ENABLED === 'true'
 // Fetched only on the path that could merge — an extra API call on every
 // review would buy nothing.
 let prDetails = null
+let unresolvedThreads = []
 if (!hasActionableFindings) {
+  // Only on the path that could merge — an extra GraphQL call on every review
+  // would buy nothing.
+  try {
+    unresolvedThreads = await listUnresolvedReviewThreads(token, owner, repo, pr)
+  } catch (err) {
+    // Fail closed: if we cannot tell whether conversations are open, we must
+    // not conclude that none are.
+    unresolvedThreads = [{ path: `(could not read review threads: ${err.message})`, isOutdated: false }]
+  }
   // `mergeable` is computed asynchronously by GitHub and is null until the
   // background job finishes, so a single read right after a push usually says
   // null. Null is treated as blocking either way; this just avoids sitting on
@@ -148,6 +159,7 @@ const mergeBlockers = hasActionableFindings
       // What Codex actually looked at, straight off the event payload.
       reviewedSha: review.commit_id,
       headSha: sha,
+      unresolvedThreads,
     })
 
 const plan = decideStage({
