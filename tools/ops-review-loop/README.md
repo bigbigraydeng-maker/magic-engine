@@ -43,13 +43,15 @@ querying or writing production data, or marking a draft ready for review.
 
 ## State diagram (plain language)
 
-1. Claude pushes a commit to a `claude/me2-*` branch, PR targets `main`, same repo (not a fork).
+1. Claude pushes a commit to a `claude/*` branch, PR targets `main`, same repo (not a fork).
 2. **`ops-codex-request-review.yml`** fires on that push. If this exact head sha
    has not already been asked, it posts one PR comment: `@codex review`.
 3. The native Codex GitHub App (`chatgpt-codex-connector`) reviews and submits a
    GitHub PR review.
 4. **`ops-codex-to-claude-fix.yml`** fires on that review, but only if the
-   reviewer login is the Codex connector, the PR is same-repo/`main`/`claude/me2-*`/open,
+   reviewer login is the Codex connector, the PR is same-repo/`main`/`claude/me2-*`/open
+   (this leg stays narrower than the request leg on purpose — it pushes commits,
+   and one window holds a branch at a time),
    and this head sha has not already been handled for the stage about to run.
    It aggregates every review comment (and the review summary) that contains a
    `P0`/`P1`/`P2` tag:
@@ -59,8 +61,10 @@ querying or writing production data, or marking a draft ready for review.
      branch — which starts this loop over from step 2 for the new head sha.
    - **Findings exist, a 4th round would be needed** → posts `NEEDS HUMAN REVIEW`
      and stops. No further automation runs on this PR.
-   - **No actionable findings, checks not all settled yet** → does nothing (no
-     comment), so as not to claim readiness prematurely.
+   - **No actionable findings, some check not green** → polls for green within
+     the run, then posts `BLOCKED ON CI` naming each check that is not green.
+     It used to post nothing here, which was indistinguishable from the
+     automation being broken.
    - **No actionable findings, every check green, merge gate clear** → **merges
      the PR** at that exact sha (GitHub 409s if the branch moved) and posts
      `AUTO-MERGED`.
@@ -69,9 +73,14 @@ querying or writing production data, or marking a draft ready for review.
      "auto-merge skipped" with no stated reason is how a gate that has quietly
      stopped working looks from the outside, so the reasons are never omitted.
 
-Nothing here resolves a review conversation. Nothing here can push to
-`.github/workflows/**` or `tools/ai-orchestrator/**` (the fix prompt explicitly
-forbids it, on top of whatever the Claude GitHub App's own token permits).
+A fix round resolves the review conversations it addressed, and only those, and
+only once it has really pushed a commit — see the section above for why.
+
+Nothing here can push to `.github/workflows/**` or `tools/ai-orchestrator/**`
+(the fix prompt explicitly forbids it, on top of whatever the Claude GitHub
+App's own token permits). ⚠️ That has a consequence worth knowing: when Codex's
+findings are in those paths, the fix round runs, changes nothing, and says so —
+those need a human.
 
 ## Why plain Node instead of `actions/github-script`
 
@@ -91,17 +100,21 @@ a PR can never edit the script that decides its own fate (round cap, dedup,
 CI gate) — the same principle `tools/ai-orchestrator` uses for its own protected
 surface.
 
-## What could not be verified in this session
+## Verification status
 
-This PR was built by Claude Code responding to a GitHub Issue, in a sandbox with
-**no outbound network access and no `gh` CLI** — `gh auth status` and `WebFetch`
-were both denied, and even a local `node` invocation outside the standard
-git add/commit/push flow required approval that a non-interactive session cannot
-grant. That means:
+The loop ran end to end for the first time on 2026-08-12:
 
-- The unit tests in `tests/` were written and manually re-derived by hand but
-  **not executed** in this session (`node_modules` is not installed here either).
-  Run `npx vitest run tools/ops-review-loop` after `npm ci` to confirm.
+| Time (UTC) | Event |
+|---|---|
+| 04:14 | push to a `claude/*` PR → workflow posted `@codex review` **authored by the Product Owner** |
+| 04:18 | Codex submitted a real review (2×P1, 1×P2) |
+| 04:19 | the review leg dispatched Claude, which ran to completion |
+
+Both legs are therefore proven against the live Codex GitHub App. The tests in
+`tests/` are run with `npx vitest run tools/ops-review-loop`.
+
+Historical note — the original build session had no network and no `gh` CLI, so
+the items below were open at the time and are kept for provenance:
 - **Required-validation items 6/7** are now **ANSWERED — and the answer was no.**
   A bot-authored `@codex review` is *not* treated like a human-authored one.
   Four bot-authored requests (PR #898 2026-08-11 12:38 / 13:58, PR #924
