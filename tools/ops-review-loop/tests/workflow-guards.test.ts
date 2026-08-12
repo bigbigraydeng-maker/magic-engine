@@ -258,6 +258,23 @@ describe('the codex-to-claude-fix workflow', () => {
     expect(mergeJob?.permissions?.['pull-requests']).toBe('write')
   })
 
+  it('never stands down or fails silently — every merge-job exit says so on the PR', () => {
+    // The pattern this loop has been bitten by all day: a green run that did
+    // nothing looks identical to a run that never happened. Every early exit
+    // in merge-pr.mjs goes through standDown(), which comments first.
+    const source = readFileSync(join(process.cwd(), 'tools/ops-review-loop/src/merge-pr.mjs'), 'utf8')
+    expect(source).toContain('async function standDown(')
+    // Exactly one exit in the whole file, and it lives inside standDown —
+    // which comments before it returns. Any second exit is a path that leaves
+    // without saying anything.
+    expect(source.match(/process\.exit\(0\)/g) ?? []).toHaveLength(1)
+    const standDownBody = source.slice(source.indexOf('async function standDown('), source.indexOf('if (process.env.AUTO_MERGE_ENABLED'))
+    expect(standDownBody).toContain('createIssueComment(')
+    expect(standDownBody).toContain('process.exit(0)')
+    // Every re-check routes to standDown rather than throwing into silence.
+    expect(source.match(/await standDown\(/g) ?? []).toHaveLength(5)
+  })
+
   it('re-reads the kill switch inside the merge job, not just the decision job', () => {
     // Codex finding (PR #931, P1): between the two jobs an admin can flip the
     // variable to false, and a check can be re-run back to failing — neither

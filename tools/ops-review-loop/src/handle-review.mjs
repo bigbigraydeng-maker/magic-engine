@@ -4,16 +4,22 @@
  *
  *   dispatch-fix  -> the workflow invokes claude-code-action directly with
  *                    the aggregated findings as its prompt, then a separate
- *                    step (mark-fix-outcome.mjs) records success/failure
+ *                    step (mark-fix-outcome.mjs) records success/failure and
+ *                    resolves the threads that round addressed
+ *   auto-merge    -> hand off to the isolated `merge` job, which merges
  *   needs-human   -> post "NEEDS HUMAN REVIEW" and stop (3 rounds already used)
- *   ready         -> post "READY FOR PRODUCT OWNER" (no actionable findings, CI green)
- *   wait-ci       -> no actionable findings, and required CI still hasn't
- *                    gone green after polling within this run
+ *   ready         -> post "READY FOR PRODUCT OWNER" naming each merge blocker
+ *   wait-ci       -> post "BLOCKED ON CI" naming each check that is not green
  *   skip          -> this head sha already has a marker for the stage we'd write
  *
- * It never merges, deploys, applies a migration, or resolves a review thread.
- * `plan.mjs` holds the actual decision logic and is unit-tested in isolation;
- * this file is the I/O glue around it.
+ * ⚠️ The round cap applies ONLY when a review raises actionable findings. A
+ * later CLEAN review on a PR that already used all 3 rounds still falls through
+ * to ready / auto-merge — the cap stops the fix loop, not the PR.
+ *
+ * This file itself never merges, deploys, applies a migration or writes to
+ * production; the sibling `merge` job does the merging, and mark-fix-outcome
+ * does the thread resolution. `plan.mjs` holds the decision logic and is unit-
+ * tested in isolation; this file is the I/O glue around it.
  */
 import { appendFileSync, readFileSync } from 'node:fs'
 import {

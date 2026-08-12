@@ -11,12 +11,17 @@
  * This file exists so that write scope lives in a job that runs nothing else:
  * no third-party action, no model, no prompt. It performs one API call.
  *
- * It re-reads nothing and re-decides nothing — every gate was evaluated in
- * handle-review.mjs, which only emits `action=auto-merge` when all of them are
- * clear. The one protection repeated here is the expected head sha, because
- * that is a race this job can still lose: if the branch moved between the two
- * jobs, GitHub rejects the merge with 409 and this run fails loudly rather than
- * shipping a commit nobody reviewed.
+ * It re-reads and re-verifies every gate that can change WITHOUT the head sha
+ * changing — the kill switch, PR state, draft, mergeable, base branch and
+ * repository, and every check run. All of those are mutable in the window
+ * between the two jobs, so checking only the sha would sail straight past an
+ * admin turning auto-merge off, a check re-run back to red, or a retargeted
+ * base. (An earlier version of this comment claimed the opposite; it was
+ * written before those re-checks existed and was left stale — the same drift
+ * this loop keeps catching elsewhere.)
+ *
+ * Whatever it decides, it says so on the PR. A merge job that stands down in
+ * silence is indistinguishable from one that never ran.
  */
 import { readFileSync } from 'node:fs'
 import { createIssueComment, getPullRequest, listCheckRunsForRef, mergePullRequest } from './github.mjs'
@@ -39,15 +44,36 @@ if (!/^[0-9a-f]{40}$/.test(sha ?? '')) {
 // the sha, so the sha check alone would sail straight past both. The README
 // promises the kill switch "takes effect immediately"; that promise is only
 // true if the job holding write access re-reads it at the last moment.
-if (process.env.AUTO_MERGE_ENABLED !== 'true') {
-  console.log('OPS_AUTO_MERGE_ENABLED is no longer "true" — standing down without merging.')
+async function standDown(reason) {
+  // Silence here would look exactly like "the automation never ran". Say it on
+  // the PR, then exit 0 — standing down is a correct outcome, not a failure.
+  await createIssueComment(
+    token,
+    owner,
+    repo,
+    pr,
+    `**AUTO-MERGE STOOD DOWN**\n\nThe merge gate passed, but this final job re-checked before merging and stopped:\n\n- ${reason}\n\nNothing was merged. Push a commit or ask Codex to review again to re-run the gate.`,
+  )
   process.exit(0)
 }
 
-const pr_ = await getPullRequest(token, owner, repo, pr)
+if (process.env.AUTO_MERGE_ENABLED !== 'true') {
+  await standDown('`OPS_AUTO_MERGE_ENABLED` is no longer `true` — the kill switch was turned off after the gate ran.')
+}
+
+// `mergeable` is computed asynchronously and reads null while GitHub works it
+// out, so one read can say null purely by timing. Retry briefly before
+// treating it as an answer — otherwise a merge that is perfectly fine fails on
+// a race, and the noise trains everyone to ignore this job's failures.
+let pr_ = null
+for (let attempt = 0; attempt < 3; attempt++) {
+  pr_ = await getPullRequest(token, owner, repo, pr)
+  if (pr_?.mergeable !== null && pr_?.mergeable !== undefined) break
+  if (attempt < 2) await new Promise((r) => setTimeout(r, 5000))
+}
 if (pr_?.state !== 'open' || pr_?.draft === true || pr_?.mergeable !== true) {
-  throw new Error(
-    `Pull request is no longer mergeable at merge time (state=${pr_?.state}, draft=${pr_?.draft}, mergeable=${pr_?.mergeable}).`,
+  await standDown(
+    `the pull request is no longer mergeable (state=\`${pr_?.state}\`, draft=\`${pr_?.draft}\`, mergeable=\`${pr_?.mergeable}\`).`,
   )
 }
 // Codex finding (PR #931, P2): the job-level `if:` checks base.ref at event
@@ -56,15 +82,17 @@ if (pr_?.state !== 'open' || pr_?.draft === true || pr_?.mergeable !== true) {
 // branch and the repository — every other re-check here exists for the same
 // reason: it is mutable while the sha is not.
 if (pr_?.base?.ref !== 'main' || pr_?.base?.repo?.full_name !== `${owner}/${repo}`) {
-  throw new Error(
-    `Base was retargeted after the gate: expected ${owner}/${repo}@main, found ${pr_?.base?.repo?.full_name}@${pr_?.base?.ref}.`,
+  await standDown(
+    `the base was retargeted after the gate ran — expected \`${owner}/${repo}@main\`, found \`${pr_?.base?.repo?.full_name}@${pr_?.base?.ref}\`.`,
   )
 }
 if (pr_?.head?.sha !== sha) {
-  throw new Error(`Head moved between the gate and the merge: expected ${sha}, found ${pr_?.head?.sha}.`)
+  await standDown(
+    `the head moved after the gate ran — expected \`${sha.slice(0, 10)}\`, found \`${String(pr_?.head?.sha).slice(0, 10)}\`.`,
+  )
 }
 if (!isEveryCheckGreen(await listCheckRunsForRef(token, owner, repo, sha))) {
-  throw new Error(`Not every check run on ${sha.slice(0, 10)} is still completed and green.`)
+  await standDown(`not every check run on \`${sha.slice(0, 10)}\` is still completed and green.`)
 }
 
 await mergePullRequest(token, owner, repo, pr, {
