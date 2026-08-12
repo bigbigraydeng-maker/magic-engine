@@ -18,7 +18,7 @@
  * round number rather than either silently stalling or skipping ahead.
  */
 import { readFileSync } from 'node:fs'
-import { createIssueComment } from './github.mjs'
+import { createIssueComment, getPullRequest } from './github.mjs'
 import { buildMarker } from './markers.mjs'
 
 const token = process.env.GITHUB_TOKEN
@@ -29,14 +29,34 @@ const sha = event.pull_request.head.sha
 const round = process.env.ROUND
 const outcome = process.env.OUTCOME
 
-if (outcome === 'success') {
+// Observed on PR #931 (2026-08-12 04:19): the Claude Action step exited
+// `success` having pushed nothing — two of the three Codex findings were in
+// `.github/workflows/**`, which the dispatch prompt explicitly forbids Claude
+// from touching. The comment nevertheless announced "pushed the change", and
+// the branch head was byte-identical before and after. A step's exit code is
+// not evidence that a commit exists; only the head sha is.
+const headNow = (await getPullRequest(token, owner, repo, pr))?.head?.sha
+const pushedSomething = typeof headNow === 'string' && headNow !== sha
+
+if (outcome === 'success' && pushedSomething) {
   const marker = buildMarker({ stage: 'fix-dispatched', pr, sha, round })
   await createIssueComment(
     token,
     owner,
     repo,
     pr,
-    `Completed automated fix round ${round} for Codex findings and pushed the change. Codex will review the new head next.\n\n${marker}`
+    `Completed automated fix round ${round} for Codex findings and pushed \`${headNow.slice(0, 10)}\`. Codex will review the new head next.\n\n${marker}`
+  )
+} else if (outcome === 'success') {
+  // Green step, unchanged head. Deliberately posts NO fix-dispatched marker:
+  // a round that changed nothing must not consume one of the three, and the
+  // findings must not be reported as handled when they are not.
+  await createIssueComment(
+    token,
+    owner,
+    repo,
+    pr,
+    `⚠️ Automated fix round ${round} ran without error but **pushed no commit** — the branch head is still \`${sha.slice(0, 10)}\`, so the Codex findings are **not** addressed.\n\nThe usual cause is that the findings are in files the fix prompt forbids Claude from editing (\`.github/workflows/**\`, \`tools/ai-orchestrator/**\`). Those need a human. This round is **not** counted against the 3-round limit.`
   )
 } else {
   await createIssueComment(

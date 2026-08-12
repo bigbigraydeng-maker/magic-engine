@@ -36,14 +36,12 @@ on:
   pull_request_review:
     types: [submitted]
 
+# Workflow-level scope stays read. `contents: write` is granted ONLY to the
+# isolated `merge` job below — see Codex finding PR #931 P1: the review/fix job
+# runs a third-party action, and a job-level write scope would have handed that
+# action repository write access on every run, merge or no merge.
 permissions:
-  # contents: write is required for the merge API and for nothing else here —
-  # claude-code-action still authenticates its own push through the Claude
-  # GitHub App behind CLAUDE_CODE_OAUTH_TOKEN, exactly as before. This was
-  # `contents: read` until 2026-08-12; it was raised only because the Product
-  # Owner turned auto-merge on. Setting OPS_AUTO_MERGE_ENABLED to false
-  # disables merging without lowering it back.
-  contents: write
+  contents: read
   pull-requests: write
   checks: read
   actions: read
@@ -55,6 +53,9 @@ concurrency:
 
 jobs:
   handle-review:
+    outputs:
+      action: ${{ steps.plan.outputs.action }}
+      merge_sha: ${{ steps.plan.outputs.merge_sha }}
     if: |
       contains(github.event.review.user.login, 'chatgpt-codex-connector') &&
       github.event.pull_request.head.repo.full_name == github.repository &&
@@ -114,3 +115,29 @@ jobs:
           ROUND: ${{ steps.plan.outputs.round }}
           OUTCOME: ${{ steps.claude.outcome }}
         run: node tools/ops-review-loop/src/mark-fix-outcome.mjs
+
+  # Isolated by design: this job runs one script that makes one API call. No
+  # third-party action, no model, no prompt, no checkout of PR content — so the
+  # `contents: write` it needs is never in scope alongside anything that could
+  # be induced to use it. Every merge gate was already evaluated in
+  # handle-review; this job re-checks only the expected head sha, the one race
+  # it can still lose.
+  merge:
+    needs: handle-review
+    if: needs.handle-review.outputs.action == 'auto-merge'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Merge the pull request
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MERGE_SHA: ${{ needs.handle-review.outputs.merge_sha }}
+        run: node tools/ops-review-loop/src/merge-pr.mjs

@@ -68,12 +68,15 @@ describe('isCleanReview', () => {
 })
 
 describe('autoMergeBlockers', () => {
+  const SHA = 'a'.repeat(40)
   const clear = {
     enabled: true,
     isDraft: false,
     mergeable: true,
     everyCheckGreen: true,
     cleanReview: true,
+    reviewedSha: SHA,
+    headSha: SHA,
   }
 
   it('returns no blockers when everything holds', () => {
@@ -99,6 +102,21 @@ describe('autoMergeBlockers', () => {
   it('names every failing condition, not just the first', () => {
     // A merge gate that reports one reason at a time turns one fix into N
     // round trips, and hides how far from mergeable the PR actually is.
-    expect(autoMergeBlockers({ enabled: false, isDraft: true, mergeable: false, everyCheckGreen: false, cleanReview: false })).toHaveLength(5)
+    expect(
+      autoMergeBlockers({ enabled: false, isDraft: true, mergeable: false, everyCheckGreen: false, cleanReview: false, reviewedSha: 'a', headSha: 'b' }),
+    ).toHaveLength(6)
+  })
+
+  it('blocks when Codex reviewed a different commit than the one about to merge', () => {
+    // Codex finding (PR #931, P1): a clean verdict on commit A must not
+    // authorise merging commit B pushed while that review was being written.
+    // Passing the head sha to the merge API only stops the branch moving AFTER
+    // the gate; this is the review being stale BEFORE it.
+    const blockers = autoMergeBlockers({ ...clear, reviewedSha: 'b'.repeat(40) })
+    expect(blockers.join(' ')).toContain('review is for')
+  })
+
+  it.each([[undefined], [null], [123]])('blocks when the reviewed sha is not a string (%s)', (bad) => {
+    expect(autoMergeBlockers({ ...clear, reviewedSha: bad }).join(' ')).toContain('review is for')
   })
 })

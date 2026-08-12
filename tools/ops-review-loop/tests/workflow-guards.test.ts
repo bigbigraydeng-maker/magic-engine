@@ -211,12 +211,30 @@ describe('the codex-to-claude-fix workflow', () => {
     expect(guard).toContain("startsWith(github.event.pull_request.head.ref, 'claude/me2-')")
   })
 
-  it('has contents: write only because auto-merge needs it, and pairs it with the kill switch', () => {
-    // This asserted `not.toBe('write')` until 2026-08-12. The Product Owner
-    // turned auto-merge on, which requires the merge API. Raising the scope is
-    // therefore expected — but it must never appear without the switch that
-    // can disable merging again in one click, so both are pinned together.
-    expect(fix.doc.permissions?.contents).toBe('write')
+  it('keeps contents: write out of the job that runs the third-party action', () => {
+    // Codex finding (PR #931, P1). The review/fix job runs
+    // anthropics/claude-code-action. A job-level `contents: write` there would
+    // hand that action repository write access through the ambient
+    // GITHUB_TOKEN on every single run — including runs where no merge was ever
+    // possible. Write scope belongs only to the isolated merge job.
+    expect(fix.doc.permissions?.contents).not.toBe('write')
+    const reviewJob = fix.doc.jobs?.['handle-review']
+    expect(reviewJob?.permissions?.contents).not.toBe('write')
+    const claudeStep = (reviewJob?.steps ?? []).find((s) => s.uses?.startsWith('anthropics/claude-code-action'))
+    expect(claudeStep, 'the third-party action must live in the read-only job').toBeDefined()
+  })
+
+  it('gives write scope to a merge job that runs nothing but the merge', () => {
+    const mergeJob = fix.doc.jobs?.merge
+    expect(mergeJob?.permissions?.contents).toBe('write')
+    const steps = mergeJob?.steps ?? []
+    // No model, no prompt, no third-party action sharing that scope.
+    expect(steps.some((s) => s.uses?.startsWith('anthropics/'))).toBe(false)
+    expect(steps.some((s) => s.run?.includes('merge-pr.mjs'))).toBe(true)
+    expect(mergeJob?.if).toContain("needs.handle-review.outputs.action == 'auto-merge'")
+  })
+
+  it('pairs the merge capability with the kill switch', () => {
     const planStep = fix.steps.find((s) => s.run?.includes('handle-review.mjs'))
     expect(planStep?.env?.AUTO_MERGE_ENABLED).toBe('${{ vars.OPS_AUTO_MERGE_ENABLED }}')
   })

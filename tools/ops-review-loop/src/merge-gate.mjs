@@ -74,9 +74,28 @@ export function isCleanReview(text) {
  * blocker is returned by name so the PR comment can say exactly which one
  * stopped it — "auto-merge skipped" with no reason is how a broken gate hides.
  */
-export function autoMergeBlockers({ enabled, isDraft, mergeable, everyCheckGreen, cleanReview }) {
+export function autoMergeBlockers({
+  enabled,
+  isDraft,
+  mergeable,
+  everyCheckGreen,
+  cleanReview,
+  reviewedSha,
+  headSha,
+}) {
   const blockers = []
   if (!enabled) blockers.push('auto-merge disabled (repository variable OPS_AUTO_MERGE_ENABLED)')
+  // Codex finding (PR #931, P1). Codex reviews a specific commit and reports it
+  // as `review.commit_id`. If anything pushed to the branch while that review
+  // was being written, a clean verdict about commit A would otherwise authorise
+  // merging commit B, which no reviewer has seen. Passing the head sha to the
+  // merge API does NOT cover this: that only stops the branch moving *after*
+  // the gate is computed, and this is a review that was already stale *before*
+  // it. Auto-merge is exactly the setting where "reviewed something else" must
+  // not read as "reviewed".
+  if (typeof reviewedSha !== 'string' || typeof headSha !== 'string' || reviewedSha !== headSha) {
+    blockers.push(`review is for ${String(reviewedSha).slice(0, 10)} but head is ${String(headSha).slice(0, 10)}`)
+  }
   // A draft is the PR declaring about itself that it is not finished. Honouring
   // that is not an extra policy layer — it is reading the flag already there.
   if (isDraft) blockers.push('pull request is a draft')
