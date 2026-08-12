@@ -50,6 +50,16 @@ if (pr_?.state !== 'open' || pr_?.draft === true || pr_?.mergeable !== true) {
     `Pull request is no longer mergeable at merge time (state=${pr_?.state}, draft=${pr_?.draft}, mergeable=${pr_?.mergeable}).`,
   )
 }
+// Codex finding (PR #931, P2): the job-level `if:` checks base.ref at event
+// time, but the base can be retargeted afterwards without the head sha moving,
+// and the merge API merges into whatever the base is *now*. Re-assert both the
+// branch and the repository — every other re-check here exists for the same
+// reason: it is mutable while the sha is not.
+if (pr_?.base?.ref !== 'main' || pr_?.base?.repo?.full_name !== `${owner}/${repo}`) {
+  throw new Error(
+    `Base was retargeted after the gate: expected ${owner}/${repo}@main, found ${pr_?.base?.repo?.full_name}@${pr_?.base?.ref}.`,
+  )
+}
 if (pr_?.head?.sha !== sha) {
   throw new Error(`Head moved between the gate and the merge: expected ${sha}, found ${pr_?.head?.sha}.`)
 }

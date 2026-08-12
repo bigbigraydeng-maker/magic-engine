@@ -262,6 +262,10 @@ describe('the codex-to-claude-fix workflow', () => {
     expect(source).toContain('if (!isEveryCheckGreen(await listCheckRunsForRef(token, owner, repo, sha)))')
     expect(source).toContain("pr_?.draft === true")
     expect(source).toContain('pr_?.head?.sha !== sha')
+    // base is mutable without the sha moving, and the merge API follows the
+    // base as it is at merge time (Codex finding PR #931, P2).
+    expect(source).toContain("pr_?.base?.ref !== 'main'")
+    expect(source).toContain('pr_?.base?.repo?.full_name')
   })
 
   it('pairs the merge capability with the kill switch', () => {
