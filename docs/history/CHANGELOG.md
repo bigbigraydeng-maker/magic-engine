@@ -5,6 +5,28 @@
 
 ---
 
+### 2026-08-12（ME2 · Roman 首个生产 GEO 基线跑通，WP04A + WP08 基线段）
+
+PR [#922](https://github.com/bigbigraydeng-maker/magic-engine/pull/922)（`885fe6e1`）· Issue [#883](https://github.com/bigbigraydeng-maker/magic-engine/issues/883) / [#917](https://github.com/bigbigraydeng-maker/magic-engine/issues/917)。
+
+**做成了什么**：ME2 的测量链路第一次端到端跑通 —— 真实 AI 引擎 → 契约校验 → 单事务原子落库。
+新增 `src/lib/geo-baseline/`（21 个文件全新增，WP02/WP03/WP04 一个字没改）：一个 OpenAI provider、一个 parser、一个真实存储层、一个默认空跑的人工触发脚本。
+配套 migration `20260812000001`（数据库函数 `geo_persist_batch_v1`）已单独授权 apply，账本记为 `20260812002017`。
+
+**Roman Baseline v1**：批次 `688bd8ae-2db6-4300-b761-b850f30c32c5`，2026-08-12，**12/12 成功**，12 条观测 + 12 条证据由**单个数据库事务**一次性写入。花费 US$0.62（本轮累计 US$0.71 / 授权 US$5）。
+结果：12 个回答**全都带引用**（共 142 条、47 个域名），但**只有 2/12 引到 romanhu.com（16.7%）**，且那 2 条都是直接点名 Roman 的问句。
+⚠️ 「12/12」是**回答带了引用**，**不等于** Roman 被提及或被推荐 —— mention / recommendation / 排名的判据（M1）未决，现在算不了；页面级归属因页面台账为空记为**不可算**，未写成 0。
+
+**这一轮真正贵的几个教训**（都已在测试里钉死）：
+- 三条独立 INSERT 达不到契约要求的「全有或全无」—— 事后对账只能**发现**污染，不能**阻止**；而这几张表禁改禁删，半截数据永久清不掉。改成单事务数据库函数。
+- OpenAI 模型目录里**列出来 ≠ 能调用**：已下线的模型照样返回 200 并留在列表里。据此判「已验证可用」害得一整批 12 次调用全 404（未计费）。唯一可靠判据是发一次独立 canary。
+- 超时那一支原本在生产里**永远到不了**（SDK 的中断错误不带可识别名字），每次真超时都会被记成「确定花了 $0」；SDK 默认还会自动重试两次，而我们对外声明的是「不保证不重复收费」。
+- 三个批次全部保留：2 个 failed（模型下线 / 成本触顶）+ 1 个 completed。**失败批次不删不改不复用** —— 那是诚实的覆盖账。
+
+**没做**：诊断、优化动作、第二轮测量、页面台账补录、Roman 网站任何修改。
+
+---
+
 ### 2026-08-11 ~ 08-12（Onboarding / 第三方对接页面简化，PM 起因："对接页面有点乱，好几个页面都能连"）
 
 方案：[specs/2026-08-11-onboarding-integrations-unify-v1.md](../specs/2026-08-11-onboarding-integrations-unify-v1.md)。

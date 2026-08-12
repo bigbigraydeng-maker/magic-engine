@@ -9,7 +9,7 @@
 
 ---
 
-## ME2 — Roman GEO / AI 可见度参考闭环（史诗 [#872](https://github.com/bigbigraydeng-maker/magic-engine/issues/872)）🔄 契约层已合，域运行时未开工
+## ME2 — Roman GEO / AI 可见度参考闭环（史诗 [#872](https://github.com/bigbigraydeng-maker/magic-engine/issues/872)）🔄 测量链路已端到端跑通，域运行时（WP05+）未开工
 
 > **新窗口开工前必读**：[WP00 契约冻结 v1.0](./specs/2026-08-10-me2-wp00-contract-freeze-v1.0.md)。
 > 它冻结了七层边界、五个概念结构、禁令清单与未决登记表，**后续每个 WP 从那里取自己的边界，不重新讨论**。
@@ -24,17 +24,20 @@
 - ✅ WP00 [#873](https://github.com/bigbigraydeng-maker/magic-engine/issues/873) 契约冻结（PR #888，docs-only）
 - ✅ 执行内核 v1（PR #863）—— 生产 migration **未 apply**、**无提交 / 执行调用方**。⚠️ 但**已有一条只读接线在生产跑**：`pm-daily-todo` cron 经 `pm-todo/manual-items.ts` 读 `action_runs` 生成交接待办（表不存在时报错被吞成警告）。详见 [STATE.md §3.1](./STATE.md)
 - ✅ WP01 [#877](https://github.com/bigbigraydeng-maker/magic-engine/issues/877) 纯 Growth 契约（PR #890 / `700f57e`）—— `src/lib/growth/`，**零 importer**
+- ✅ WP02 [#876](https://github.com/bigbigraydeng-maker/magic-engine/issues/876) GEO 测量运行时契约（PR #894 / `aadf8484`）—— `src/lib/geo-measurement/`，纯类型 + 纯函数
+- ✅ WP03 [#875](https://github.com/bigbigraydeng-maker/magic-engine/issues/875) 不可变测量存储（PR #897 / `76acdfeb`）—— 五张 `geo_*` 表，**migration 已 apply**（账本 `20260811005551`）
+- ✅ WP04 [#874](https://github.com/bigbigraydeng-maker/magic-engine/issues/874) 测量执行 + 成本 / 覆盖率控制（PR #914 / `caf8d481`）—— `src/lib/geo-measurement-runtime/`，全假件
+- ✅ **WP04A** [#917](https://github.com/bigbigraydeng-maker/magic-engine/issues/917) 基线一次性接线（PR [#922](https://github.com/bigbigraydeng-maker/magic-engine/pull/922) / `885fe6e1`）—— `src/lib/geo-baseline/`：真 OpenAI provider + parser + 单事务原子 store。**migration 已 apply**（`geo_persist_batch_v1`，账本 `20260812002017`）
+- ✅ **WP08 基线段** [#883](https://github.com/bigbigraydeng-maker/magic-engine/issues/883) —— **Roman Baseline v1 已完成**，批次 `688bd8ae-2db6-4300-b761-b850f30c32c5`（2026-08-12，12/12 成功）。审计记录见该 issue 评论，**已冻结为测量事实，不可回写**
 
 **未完成**：
-- [ ] **WP02** [#876](https://github.com/bigbigraydeng-maker/magic-engine/issues/876) GEO 测量运行时契约（采集身份七项 + 三层 sample + 解释身份 + 七个指标 + 三条可比性判据）· 前置已满足
-- [ ] **K-WP02** [#882](https://github.com/bigbigraydeng-maker/magic-engine/issues/882) ActionCandidate→ActionKey 治理 + per-action 副作用政策 + 注册表反向注入 prompt · 前置已满足
-- [ ] **WP03** [#875](https://github.com/bigbigraydeng-maker/magic-engine/issues/875) 不可变测量存储（含 migration，apply 单独授权）
-- [ ] **WP04** [#874](https://github.com/bigbigraydeng-maker/magic-engine/issues/874) 测量执行 + 成本 / 覆盖率控制
+- [ ] **K-WP02** [#882](https://github.com/bigbigraydeng-maker/magic-engine/issues/882) ActionCandidate→ActionKey 治理 —— PR [#898](https://github.com/bigbigraydeng-maker/magic-engine/pull/898) 已合入 `main`（`2d9e426a`）。**状态待该 WP 的 owner 自行核对后改标**，本 PR 不代判
 - [ ] **WP05** [#879](https://github.com/bigbigraydeng-maker/magic-engine/issues/879) GEO Module v1 —— 第一个 Domain Module，**唯一明确的 `src/lib/growth` 首个消费方**
 - [ ] **WP06** [#878](https://github.com/bigbigraydeng-maker/magic-engine/issues/878) 共享 Page 能力：resolve / snapshot / draft / diff / validate（零线上写）
 - [ ] **WP07** [#880](https://github.com/bigbigraydeng-maker/magic-engine/issues/880) Kernel 授权的 apply / verify / rollback
 - [ ] **K-WP01** [#881](https://github.com/bigbigraydeng-maker/magic-engine/issues/881) 认证审批 / 拒绝界面 + 政策 Settings UI
-- [ ] **WP08–WP10** [#883](https://github.com/bigbigraydeng-maker/magic-engine/issues/883) / [#884](https://github.com/bigbigraydeng-maker/magic-engine/issues/884) / [#885](https://github.com/bigbigraydeng-maker/magic-engine/issues/885) Roman 基线 → 首次 1–3 页优化 → T+7/14/28 复测与学习（严格串行）
+- [ ] **WP08 剩余段** —— 页面级引用归属（R4 本轮**裁定不做**，`direct_owned_page_citation` 记不可算）；七个指标的计算待 **M1 判据**（属 WP05 / WP10）。**下一步是独立的 diagnosis 工作包**：读那 12 份原始回答与 142 条引用找差距，**不改 Roman 网站**
+- [ ] **WP09 / WP10** [#884](https://github.com/bigbigraydeng-maker/magic-engine/issues/884) / [#885](https://github.com/bigbigraydeng-maker/magic-engine/issues/885) 首次 1–3 页优化 → T+7/14/28 复测与学习（严格串行，且 WP09 还卡着 R1 发布通道 / R2 页面身份 / R3 增长 Goal 三条硬缺口）
 - [x] ~~**U11**~~ ✅ **已完成** —— `docs/STATE.md` 与本文件的 ME2 条目已补齐（本 PR）
 - [ ] **WP00 §15 其余未决项**（**U1–U10、U12**）仍**单独**以未决形态挂着，**任何 WP 不许把它们当既定假设**
 
