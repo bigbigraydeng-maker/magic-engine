@@ -1,11 +1,36 @@
 # ME2-OPS02 — Claude ↔ Codex review loop
 
 Removes the manual "Claude pushes → PM types `@codex review` → PM copies findings
-back to Claude → repeat" cycle for `claude/me2-*` PRs against `main`. OPS-only:
-touches no ME2 runtime, Kernel, migration, product doc, or client file. It never
-merges, deploys, applies a migration, queries or writes production data, bypasses
-required CI, or marks a PR ready for review — the Product Owner stays the only
-merge authority.
+back to Claude → repeat" cycle for `claude/*` PRs against `main`. OPS-only:
+touches no ME2 runtime, Kernel, migration, product doc, or client file.
+
+## ⚠️ This loop can merge, and merging deploys
+
+**Changed 2026-08-12 by explicit Product Owner decision.** This README said "the
+Product Owner stays the only merge authority" until that date. It is no longer
+true, and the honest version matters more than the reassuring one:
+
+When Codex returns a **positively clean** review, **every** check run on the head
+sha is completed green, the PR is **not a draft**, and GitHub reports it
+**mergeable**, this loop merges it with no human in the loop. `main` auto-deploys
+to Render, so **an auto-merge is an unreviewed production deploy.** No file type
+is excluded — migrations, `render.yaml` and `.github/workflows/**` all qualify.
+(Merging a migration *file* still does not apply it: applying remains a separate,
+separately-authorised action, per CLAUDE.md.)
+
+**Kill switch — repository variable `OPS_AUTO_MERGE_ENABLED`.** It must equal the
+string `true` for any merge to happen. Unset reads as disabled, so the capability
+cannot switch itself on. Set it to `false` in the GitHub UI and merging stops
+immediately, with no PR and no deploy; the loop falls back to
+`READY FOR PRODUCT OWNER` exactly as before.
+
+It is a repository *variable*, not a file and not a secret, for one reason:
+workflow files are auto-mergeable now, so a switch stored in one could be
+disabled by the very change it exists to stop. Repository variables are outside
+anything this loop's token can write.
+
+Still never done here: deploying directly, applying a migration, force-pushing,
+querying or writing production data, or marking a draft ready for review.
 
 ## State diagram (plain language)
 
@@ -25,10 +50,15 @@ merge authority.
      branch — which starts this loop over from step 2 for the new head sha.
    - **Findings exist, a 4th round would be needed** → posts `NEEDS HUMAN REVIEW`
      and stops. No further automation runs on this PR.
-   - **No actionable findings, required CI not green yet** → does nothing (no
+   - **No actionable findings, checks not all settled yet** → does nothing (no
      comment), so as not to claim readiness prematurely.
-   - **No actionable findings, required CI green** → posts
-     `READY FOR PRODUCT OWNER`. Still never merges.
+   - **No actionable findings, every check green, merge gate clear** → **merges
+     the PR** at that exact sha (GitHub 409s if the branch moved) and posts
+     `AUTO-MERGED`.
+   - **No actionable findings, every check green, merge gate blocked** → posts
+     `READY FOR PRODUCT OWNER` **listing each blocker by name**. An
+     "auto-merge skipped" with no stated reason is how a gate that has quietly
+     stopped working looks from the outside, so the reasons are never omitted.
 
 Nothing here resolves a review conversation. Nothing here can push to
 `.github/workflows/**` or `tools/ai-orchestrator/**` (the fix prompt explicitly

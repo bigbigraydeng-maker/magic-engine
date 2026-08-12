@@ -16,10 +16,18 @@
  * this file is the I/O glue around it.
  */
 import { appendFileSync, readFileSync } from 'node:fs'
-import { createIssueComment, listCheckRunsForRef, listIssueComments, listReviewComments } from './github.mjs'
+import {
+  createIssueComment,
+  getPullRequest,
+  listCheckRunsForRef,
+  listIssueComments,
+  listReviewComments,
+  mergePullRequest,
+} from './github.mjs'
+import { autoMergeBlockers, isCleanReview, isEveryCheckGreen } from './merge-gate.mjs'
 import { buildMarker, parseMarkers } from './markers.mjs'
 import { decideStage } from './plan.mjs'
-import { waitForRequiredCheck } from './poll.mjs'
+import { waitForChecks } from './poll.mjs'
 import { isActionable } from './severity.mjs'
 
 const MAX_ROUNDS = 3
@@ -51,39 +59,70 @@ const findingCandidates = [
 const actionableFindings = findingCandidates.filter((f) => isActionable(f.body))
 const hasActionableFindings = actionableFindings.length > 0
 
-function checkSucceeded(run) {
-  return run?.status === 'completed' && run?.conclusion === 'success'
-}
+// Every check on the sha must be settled, not just one matched by name — see
+// merge-gate.mjs for what the one-check version let through.
+const allSettled = (runs) => runs.length > 0 && runs.every((run) => run?.status === 'completed')
 
-let requiredCheck = initialCheckRuns.find((run) => REQUIRED_CHECK_NAME_PATTERN.test(run.name))
+let checkRuns = initialCheckRuns
 
-// Codex finding (PR #906, P2): a clean review that lands while required CI is
-// still running used to fall straight through to `wait-ci` and stop there —
-// this workflow only fires on pull_request_review.submitted, so CI turning
-// green afterward never got re-evaluated for that head sha. Poll within this
-// same run (bounded) before giving up, since there is no other event wired to
+// Codex finding (PR #906, P2): a clean review that lands while CI is still
+// running used to fall straight through to `wait-ci` and stop there — this
+// workflow only fires on pull_request_review.submitted, so CI turning green
+// afterward never got re-evaluated for that head sha. Poll within this same
+// run (bounded) before giving up, since there is no other event wired to
 // retry it.
-if (!hasActionableFindings && !checkSucceeded(requiredCheck)) {
-  const polled = await waitForRequiredCheck({
+if (!hasActionableFindings && !allSettled(checkRuns)) {
+  checkRuns = await waitForChecks({
     fetchCheckRuns: async () => listCheckRunsForRef(token, owner, repo, sha),
     sleep,
-    pattern: REQUIRED_CHECK_NAME_PATTERN,
+    isSettled: allSettled,
     maxAttempts: 12,
     intervalMs: 20000,
   })
-  if (polled) {
-    requiredCheck = polled
+}
+
+const everyCheckGreen = isEveryCheckGreen(checkRuns)
+
+// The kill switch is a repository *variable*, not a file in this repo, and not
+// a workflow input. Workflow files are themselves auto-mergeable now, so a
+// switch living in one could be turned off by the very change it was meant to
+// stop. Repository variables are outside anything this loop's token can write:
+// flipping OPS_AUTO_MERGE_ENABLED to false in the GitHub UI halts auto-merge
+// immediately, with no PR and no deploy.
+const autoMergeEnabled = process.env.AUTO_MERGE_ENABLED === 'true'
+
+// Fetched only on the path that could merge — an extra API call on every
+// review would buy nothing.
+let prDetails = null
+if (!hasActionableFindings) {
+  // `mergeable` is computed asynchronously by GitHub and is null until the
+  // background job finishes, so a single read right after a push usually says
+  // null. Null is treated as blocking either way; this just avoids sitting on
+  // a stale null when the answer arrives a second later.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    prDetails = await getPullRequest(token, owner, repo, pr)
+    if (prDetails?.mergeable !== null && prDetails?.mergeable !== undefined) break
+    if (attempt < 2) await sleep(5000)
   }
 }
 
-const ciSuccess = checkSucceeded(requiredCheck)
+const mergeBlockers = hasActionableFindings
+  ? null
+  : autoMergeBlockers({
+      enabled: autoMergeEnabled,
+      isDraft: prDetails?.draft === true,
+      mergeable: prDetails?.mergeable,
+      everyCheckGreen,
+      cleanReview: findingCandidates.some((f) => isCleanReview(f.body)),
+    })
 
 const plan = decideStage({
   markers,
   sha,
   hasActionableFindings,
-  ciSuccess,
+  ciSuccess: everyCheckGreen,
   maxRounds: MAX_ROUNDS,
+  mergeBlockers,
 })
 
 function setOutput(name, value) {
@@ -115,14 +154,36 @@ switch (plan.action) {
   }
   case 'ready': {
     const marker = buildMarker({ stage: 'ready', pr, sha })
+    // Always name the blockers. "Auto-merge skipped" with no reason is exactly
+    // how a gate that has quietly stopped working looks from the outside.
+    const why = (plan.blockers ?? []).map((b) => `- ${b}`).join('\n')
     await createIssueComment(
       token,
       owner,
       repo,
       pr,
-      `**READY FOR PRODUCT OWNER**\n\nCodex reports no actionable P0/P1/P2 findings and required CI is green. This automation never merges — a human must take it from here.\n\n${marker}`
+      `**READY FOR PRODUCT OWNER**\n\nCodex raised no actionable P0/P1/P2 findings. Auto-merge did not fire; it is waiting on:\n\n${why}\n\n${marker}`
     )
     setOutput('action', 'ready')
+    break
+  }
+  case 'auto-merge': {
+    // Merges at the exact sha the gate was evaluated against. If the branch
+    // moved in between, GitHub returns 409 and this run fails loudly rather
+    // than shipping a commit nothing reviewed.
+    await mergePullRequest(token, owner, repo, pr, {
+      sha,
+      commitTitle: `Merge pull request #${pr} (auto-merged after clean Codex review)`,
+    })
+    const marker = buildMarker({ stage: 'auto-merged', pr, sha })
+    await createIssueComment(
+      token,
+      owner,
+      repo,
+      pr,
+      `**AUTO-MERGED**\n\nCodex returned a clean review, every check run on \`${sha.slice(0, 10)}\` completed green, and the PR was not a draft. Merged without human review, per the Product Owner's 2026-08-12 decision.\n\n⚠️ \`main\` auto-deploys to Render, so this is now live. To stop this happening again, set repository variable \`OPS_AUTO_MERGE_ENABLED\` to \`false\` — it takes effect immediately and needs no PR.\n\n${marker}`
+    )
+    setOutput('action', 'auto-merge')
     break
   }
   case 'dispatch-fix': {

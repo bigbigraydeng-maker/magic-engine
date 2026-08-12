@@ -42,3 +42,20 @@ export async function listCheckRunsForRef(token, owner, repo, ref) {
   const data = await request(token, `/repos/${owner}/${repo}/commits/${ref}/check-runs?per_page=100`)
   return data.check_runs ?? []
 }
+
+export function getPullRequest(token, owner, repo, pullNumber) {
+  return request(token, `/repos/${owner}/${repo}/pulls/${pullNumber}`)
+}
+
+/**
+ * Merge a pull request. `sha` is passed through to GitHub as the expected head
+ * — GitHub rejects the merge with 409 if the branch has moved since the gate
+ * was evaluated. Without it there is a real window between "checks were green"
+ * and "merge executes" in which a new commit could land and ship unreviewed.
+ */
+export function mergePullRequest(token, owner, repo, pullNumber, { sha, commitTitle }) {
+  return request(token, `/repos/${owner}/${repo}/pulls/${pullNumber}/merge`, {
+    method: 'PUT',
+    body: JSON.stringify({ sha, commit_title: commitTitle, merge_method: 'merge' }),
+  })
+}

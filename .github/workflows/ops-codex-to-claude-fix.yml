@@ -9,10 +9,22 @@ name: OPS — Codex Review to Claude Fix
 # fix task, post READY FOR PRODUCT OWNER, post NEEDS HUMAN REVIEW after 3
 # rounds, or do nothing (dedup).
 #
-# It never merges, deploys, applies a migration, queries or modifies
-# production, bypasses required CI, or marks a PR ready for review. It never
-# auto-resolves a review conversation. The Product Owner remains the only
-# merge authority — nothing in this file can merge a PR.
+# ⚠️ THIS WORKFLOW CAN MERGE. Changed 2026-08-12 by explicit Product Owner
+# decision, replacing the previous "nothing in this file can merge a PR".
+# When Codex returns a positively-clean review AND every check run on the head
+# sha is completed green AND the PR is not a draft AND it is mergeable, this
+# merges it with no human in the loop. `main` auto-deploys to Render, so an
+# auto-merge is an unreviewed production deploy.
+#
+# Kill switch: repository variable OPS_AUTO_MERGE_ENABLED. It must equal the
+# string "true" for any merge to happen; anything else (including unset) makes
+# the loop stop at READY FOR PRODUCT OWNER as before. It is a repository
+# *variable* on purpose — workflow files are themselves auto-mergeable now, so
+# a switch stored in one could be disabled by the very change it exists to
+# stop, whereas a variable is outside anything this loop's token can write.
+#
+# It still never deploys directly, applies a migration, queries or modifies
+# production data, or auto-resolves a review conversation.
 #
 # The actor allowlist is enforced by the `if:` guard below against
 # `github.event.review.user.login`, a GitHub-verified field a commenter
@@ -25,11 +37,13 @@ on:
     types: [submitted]
 
 permissions:
-  # No contents: write. claude-code-action authenticates its own push through
-  # the Claude GitHub App behind CLAUDE_CODE_OAUTH_TOKEN, the same way
-  # claude.yml already does in this repo with contents: read — the ambient
-  # GITHUB_TOKEN here only needs to read the repo and write PR comments.
-  contents: read
+  # contents: write is required for the merge API and for nothing else here —
+  # claude-code-action still authenticates its own push through the Claude
+  # GitHub App behind CLAUDE_CODE_OAUTH_TOKEN, exactly as before. This was
+  # `contents: read` until 2026-08-12; it was raised only because the Product
+  # Owner turned auto-merge on. Setting OPS_AUTO_MERGE_ENABLED to false
+  # disables merging without lowering it back.
+  contents: write
   pull-requests: write
   checks: read
   actions: read
@@ -67,6 +81,9 @@ jobs:
         id: plan
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Must be the exact string "true" to permit a merge. Unset reads as
+          # disabled, so the capability cannot switch itself on by accident.
+          AUTO_MERGE_ENABLED: ${{ vars.OPS_AUTO_MERGE_ENABLED }}
         run: node tools/ops-review-loop/src/handle-review.mjs
 
       # The only step in this file with any write access to repository

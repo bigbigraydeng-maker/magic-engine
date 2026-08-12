@@ -62,19 +62,24 @@ const smoke = load(SMOKE_PATH)
 const all = [request, fix, smoke]
 
 const FORBIDDEN_WRITE_SCOPES = ['workflows', 'actions', 'administration', 'deployments', 'packages', 'security-events']
+// Banned in every workflow, no exceptions. Nothing in this loop has ever had a
+// reason to force-push, apply a migration, or flip a draft to ready-for-review.
 const DANGEROUS_SUBSTRINGS = [
-  'gh pr merge',
   'git push --force',
   'push -f ',
-  'pr merge',
   'apply_migration',
   'supabase db push',
   'supabase migration',
-  '--auto-merge',
-  'auto-merge',
   'ready-for-review',
   'ready_for_review',
 ]
+
+// Merge-related terms. Banned everywhere EXCEPT ops-codex-to-claude-fix.yml,
+// which gained the ability to merge on 2026-08-12 by explicit Product Owner
+// decision. The exemption is one named file rather than a relaxed global rule,
+// so a merge capability appearing in any *other* workflow is still a failure.
+const MERGE_SUBSTRINGS = ['gh pr merge', 'pr merge', '--auto-merge', 'auto-merge']
+const MERGE_EXEMPT_WORKFLOW = 'ops-codex-to-claude-fix.yml'
 
 describe('every ops-codex-loop workflow parses as YAML with a real trigger', () => {
   it.each(all.map((w) => [w.path, w] as const))('%s', (_path, workflow) => {
@@ -92,12 +97,29 @@ describe('every ops-codex-loop workflow declares least-privilege permissions', (
   })
 })
 
-describe('no workflow contains a merge, deploy, or migration operation', () => {
+describe('no workflow contains a force-push, migration, or ready-for-review operation', () => {
   it.each(all.map((w) => [w.path, w] as const))('%s', (_path, workflow) => {
     const lower = workflow.source.toLowerCase()
     for (const term of DANGEROUS_SUBSTRINGS) {
       expect(lower, `${workflow.path} must not contain "${term}"`).not.toContain(term)
     }
+  })
+})
+
+describe('only the one exempted workflow may mention merging', () => {
+  it.each(all.filter((w) => !w.path.endsWith(MERGE_EXEMPT_WORKFLOW)).map((w) => [w.path, w] as const))(
+    '%s',
+    (_path, workflow) => {
+      const lower = workflow.source.toLowerCase()
+      for (const term of MERGE_SUBSTRINGS) {
+        expect(lower, `${workflow.path} must not contain "${term}"`).not.toContain(term)
+      }
+    },
+  )
+
+  it('the exemption is a single named file, so a second merging workflow fails this suite', () => {
+    const exempt = all.filter((w) => w.path.endsWith(MERGE_EXEMPT_WORKFLOW))
+    expect(exempt).toHaveLength(1)
   })
 })
 
@@ -179,10 +201,25 @@ describe('the codex-to-claude-fix workflow', () => {
     expect(guard).toContain("startsWith(github.event.pull_request.head.ref, 'claude/me2-')")
   })
 
-  it('never grants contents: write to the ambient GITHUB_TOKEN', () => {
-    // claude-code-action pushes through its own Claude GitHub App token, not
-    // this workflow's GITHUB_TOKEN — see the in-file comment for why.
-    expect(fix.doc.permissions?.contents).not.toBe('write')
+  it('has contents: write only because auto-merge needs it, and pairs it with the kill switch', () => {
+    // This asserted `not.toBe('write')` until 2026-08-12. The Product Owner
+    // turned auto-merge on, which requires the merge API. Raising the scope is
+    // therefore expected — but it must never appear without the switch that
+    // can disable merging again in one click, so both are pinned together.
+    expect(fix.doc.permissions?.contents).toBe('write')
+    const planStep = fix.steps.find((s) => s.run?.includes('handle-review.mjs'))
+    expect(planStep?.env?.AUTO_MERGE_ENABLED).toBe('${{ vars.OPS_AUTO_MERGE_ENABLED }}')
+  })
+
+  it('reads the kill switch from a repository variable, never from a secret or a file in this repo', () => {
+    // Workflow files are auto-mergeable now, so a switch stored in one could be
+    // turned off by the very change it exists to stop. Repository variables sit
+    // outside anything this loop's token can write.
+    const planStep = fix.steps.find((s) => s.run?.includes('handle-review.mjs'))
+    const switchExpr = planStep?.env?.AUTO_MERGE_ENABLED ?? ''
+    expect(switchExpr).toContain('vars.')
+    expect(switchExpr).not.toContain('secrets.')
+    expect(switchExpr).not.toContain('inputs.')
   })
 
   it('only invokes claude-code-action when the plan step said dispatch-fix', () => {

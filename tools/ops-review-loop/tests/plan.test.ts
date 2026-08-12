@@ -4,8 +4,45 @@ import { decideStage } from '../src/plan.mjs'
 const base = { sha: 'sha-1', hasActionableFindings: false, ciSuccess: true, maxRounds: 3, markers: [] }
 
 describe('decideStage', () => {
-  it('is ready when there are no actionable findings and CI is green', () => {
-    expect(decideStage(base)).toEqual({ action: 'ready' })
+  it('stops at ready when the merge gate was never evaluated', () => {
+    // Absence of an answer is not a yes. If a future caller forgets to pass
+    // mergeBlockers, the safe reading is "do not merge", and the reason has to
+    // be visible rather than silently absent.
+    expect(decideStage(base)).toEqual({ action: 'ready', blockers: ['merge gate not evaluated'] })
+  })
+
+  it('stops at ready and reports why when the merge gate found blockers', () => {
+    expect(decideStage({ ...base, mergeBlockers: ['pull request is a draft'] })).toEqual({
+      action: 'ready',
+      blockers: ['pull request is a draft'],
+    })
+  })
+
+  it('auto-merges only on an explicitly empty blocker list', () => {
+    expect(decideStage({ ...base, mergeBlockers: [] })).toEqual({ action: 'auto-merge' })
+  })
+
+  it('never auto-merges while CI is not green, however clear the merge gate is', () => {
+    // Ordering matters: the CI branch must win over the merge gate, or a green
+    // gate computed from stale inputs could ship a red build.
+    expect(decideStage({ ...base, ciSuccess: false, mergeBlockers: [] })).toEqual({ action: 'wait-ci' })
+  })
+
+  it('never auto-merges while there are actionable findings', () => {
+    expect(decideStage({ ...base, hasActionableFindings: true, mergeBlockers: [] })).toEqual({
+      action: 'dispatch-fix',
+      round: 1,
+    })
+  })
+
+  it('does not re-merge a sha already marked auto-merged', () => {
+    expect(
+      decideStage({
+        ...base,
+        mergeBlockers: [],
+        markers: [{ stage: 'auto-merged', sha: base.sha }],
+      }),
+    ).toMatchObject({ action: 'skip' })
   })
 
   it('waits when there are no actionable findings but CI is not green', () => {

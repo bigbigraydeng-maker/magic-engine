@@ -13,10 +13,22 @@
  * event counts, so a duplicate-delivered event never inflates it, since
  * duplicates are already caught by the dedup check above.
  */
-export function decideStage({ markers, sha, hasActionableFindings, ciSuccess, maxRounds }) {
+export function decideStage({
+  markers,
+  sha,
+  hasActionableFindings,
+  ciSuccess,
+  maxRounds,
+  mergeBlockers = null,
+}) {
   const hasMarkerForSha = (stage) => markers.some((m) => m.stage === stage && m.sha === sha)
 
-  if (hasMarkerForSha('fix-dispatched') || hasMarkerForSha('needs-human') || hasMarkerForSha('ready')) {
+  if (
+    hasMarkerForSha('fix-dispatched') ||
+    hasMarkerForSha('needs-human') ||
+    hasMarkerForSha('ready') ||
+    hasMarkerForSha('auto-merged')
+  ) {
     return { action: 'skip', reason: `already handled head sha ${sha}` }
   }
 
@@ -32,5 +44,13 @@ export function decideStage({ markers, sha, hasActionableFindings, ciSuccess, ma
     return { action: 'wait-ci' }
   }
 
-  return { action: 'ready' }
+  // `mergeBlockers === null` means the caller did not evaluate the merge gate
+  // at all, which must not be read as "nothing is blocking". Auto-merge
+  // requires an explicit, empty blocker list — absence of an answer is not a
+  // yes. (Same fail-closed rule as merge-gate.mjs; see its header.)
+  if (Array.isArray(mergeBlockers) && mergeBlockers.length === 0) {
+    return { action: 'auto-merge' }
+  }
+
+  return { action: 'ready', blockers: mergeBlockers ?? ['merge gate not evaluated'] }
 }
