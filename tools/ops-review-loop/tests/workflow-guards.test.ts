@@ -244,6 +244,20 @@ describe('the codex-to-claude-fix workflow', () => {
     expect(mergeJob?.if).toContain("needs.handle-review.outputs.action == 'auto-merge'")
   })
 
+  it('gives the merge job every scope its script actually uses', () => {
+    // Job-level permissions REPLACE the workflow-level block. Isolating the
+    // merge into its own job therefore silently dropped `checks: read`, which
+    // merge-pr.mjs needs for its last-moment re-read — auto-merge would have
+    // 403'd at the final step every single time (Codex finding, PR #931 P1).
+    const mergeJob = fix.doc.jobs?.merge
+    const source = readFileSync(join(process.cwd(), 'tools/ops-review-loop/src/merge-pr.mjs'), 'utf8')
+    if (source.includes('listCheckRunsForRef')) {
+      expect(mergeJob?.permissions?.checks).toBe('read')
+    }
+    expect(mergeJob?.permissions?.contents).toBe('write')
+    expect(mergeJob?.permissions?.['pull-requests']).toBe('write')
+  })
+
   it('re-reads the kill switch inside the merge job, not just the decision job', () => {
     // Codex finding (PR #931, P1): between the two jobs an admin can flip the
     // variable to false, and a check can be re-run back to failing — neither

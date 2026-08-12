@@ -149,6 +149,13 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # Job-level permissions REPLACE the workflow-level block rather than
+      # adding to it, so every scope this job needs must be listed here.
+      # merge-pr.mjs re-reads the check runs at the last moment (they can go
+      # red again without the sha moving), and that call 403s without this —
+      # which would have made auto-merge fail 100% of the time at the final
+      # step. Codex finding, PR #931 P1.
+      checks: read
     steps:
       - uses: actions/checkout@v4
         with:
