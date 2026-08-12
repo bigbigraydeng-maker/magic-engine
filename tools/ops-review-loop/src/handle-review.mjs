@@ -22,6 +22,7 @@
  * tested in isolation; this file is the I/O glue around it.
  */
 import { appendFileSync, readFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import {
   createIssueComment,
   getPullRequest,
@@ -29,7 +30,7 @@ import {
   listIssueComments,
   listReviewComments,
 } from './github.mjs'
-import { autoMergeBlockers, isCleanReview, isEveryCheckGreen } from './merge-gate.mjs'
+import { autoMergeBlockers, excludeOwnRun, isCleanReview, isEveryCheckGreen } from './merge-gate.mjs'
 import { buildMarker, parseMarkers } from './markers.mjs'
 import { decideStage } from './plan.mjs'
 import { waitForChecks } from './poll.mjs'
@@ -82,7 +83,13 @@ const hasActionableFindings = actionableFindings.length > 0
 // produces no new event — so the PR sat silent and unmergeable forever. Wait
 // for green, and when the wait ends red, say so out loud (below) instead of
 // leaving no trace.
-const allGreen = (runs) => isEveryCheckGreen(runs)
+// Codex finding (PR #931, P1): this job is itself a check run on the same sha,
+// and it is `in_progress` for as long as it is doing the waiting — so "every
+// check green" could never be true and this poll always ran to timeout. Drop
+// this run's own jobs before judging. See excludeOwnRun for how they are
+// identified (verified against a real payload, not assumed).
+const OWN_RUN_ID = process.env.GITHUB_RUN_ID
+const allGreen = (runs) => isEveryCheckGreen(excludeOwnRun(runs, OWN_RUN_ID))
 
 let checkRuns = initialCheckRuns
 
@@ -102,7 +109,10 @@ if (!hasActionableFindings && !allGreen(checkRuns)) {
   })
 }
 
-const everyCheckGreen = isEveryCheckGreen(checkRuns)
+// Same exclusion as the poll predicate — judging on a different list than the
+// one we waited on is how the two quietly disagree.
+const otherCheckRuns = excludeOwnRun(checkRuns, OWN_RUN_ID)
+const everyCheckGreen = isEveryCheckGreen(otherCheckRuns)
 
 // The kill switch is a repository *variable*, not a file in this repo, and not
 // a workflow input. Workflow files are themselves auto-mergeable now, so a
@@ -149,8 +159,33 @@ const plan = decideStage({
   mergeBlockers,
 })
 
+/**
+ * Codex finding (PR #931, P1) — this was a real hole, not a hardening nit.
+ *
+ * The delimiter used to be the fixed string `__OPS_LOOP_EOF__`, and the values
+ * written here include Codex review text, which is attacker-influenced: a PR
+ * can steer what a review says. Emitting that fixed delimiter inside a finding
+ * closed the heredoc early and let the rest of the finding be parsed as further
+ * step outputs — including `action=auto-merge` and a `merge_sha` the attacker
+ * can read off the PR. That would have started the write-scoped merge job on a
+ * PR whose review was explicitly NOT clean.
+ *
+ * Fix: a fresh random delimiter per write, which cannot be embedded in text
+ * written before it is generated, plus a hard refusal if it somehow appears.
+ * Names are constrained too, so a name can never carry the injection instead.
+ */
 function setOutput(name, value) {
-  appendFileSync(process.env.GITHUB_OUTPUT, `${name}<<__OPS_LOOP_EOF__\n${value}\n__OPS_LOOP_EOF__\n`)
+  if (!/^[a-z_][a-z0-9_]*$/.test(name)) {
+    throw new Error(`Refusing to write output with a non-identifier name: ${name}`)
+  }
+  const delimiter = `OPS_LOOP_EOF_${randomUUID().replace(/-/g, '')}`
+  const text = String(value)
+  if (text.includes(delimiter)) {
+    // Astronomically unlikely; a throw is still the only correct response,
+    // because the alternative is writing a value that reopens the hole.
+    throw new Error('Refusing to write output: value contains the generated delimiter.')
+  }
+  appendFileSync(process.env.GITHUB_OUTPUT, `${name}<<${delimiter}\n${text}\n${delimiter}\n`)
 }
 
 switch (plan.action) {
@@ -176,7 +211,7 @@ switch (plan.action) {
     // else re-triggers this workflow for the same sha, so "CI is red" and "the
     // automation is broken" looked identical from the PR page — silence in
     // both cases, forever. Say which checks are not green, once per sha.
-    const notGreen = checkRuns
+    const notGreen = otherCheckRuns
       .filter((r) => !(r?.status === 'completed' && ['success', 'neutral', 'skipped'].includes(r?.conclusion)))
       .map((r) => `- \`${r.name}\` — ${r.status}${r.conclusion ? `/${r.conclusion}` : ''}`)
     const alreadyTold = markers.some((m) => m.stage === 'ci-blocked' && m.sha === sha)

@@ -42,6 +42,33 @@ export function isEveryCheckGreen(checkRuns) {
 }
 
 /**
+ * Drop the check runs produced by THIS workflow run.
+ *
+ * Codex finding (PR #931, P1): a workflow's own jobs are check runs on the same
+ * head sha. While `handle-review` polls for "every check green" it is itself
+ * `in_progress`, and while `merge` re-checks before merging it is itself
+ * `in_progress` — so both waited on themselves. Every green-check gate added
+ * today was therefore unsatisfiable, and auto-merge could never have completed
+ * even once.
+ *
+ * Identification is by run id from the check run's `details_url`, verified
+ * against a real payload (2026-08-12) rather than assumed:
+ *   https://github.com/{owner}/{repo}/actions/runs/{RUN_ID}/job/{JOB_ID}
+ * Both jobs of one workflow run share that RUN_ID, so one filter removes both.
+ * Matching on job *name* was rejected: names are free text a future edit can
+ * change without anything noticing.
+ *
+ * If `runId` is missing this returns the list unchanged — excluding nothing is
+ * the fail-closed direction here, since a smaller list can only make the gate
+ * easier to satisfy.
+ */
+export function excludeOwnRun(checkRuns, runId) {
+  if (!Array.isArray(checkRuns)) return []
+  if (!runId) return checkRuns
+  return checkRuns.filter((run) => !String(run?.details_url ?? '').includes(`/actions/runs/${runId}/`))
+}
+
+/**
  * Positive "Codex found nothing" signal.
  *
  * Observed clean output (PR #898, 2026-08-11 04:15):

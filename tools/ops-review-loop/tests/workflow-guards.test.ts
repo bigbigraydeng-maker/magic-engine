@@ -272,7 +272,9 @@ describe('the codex-to-claude-fix workflow', () => {
     expect(standDownBody).toContain('createIssueComment(')
     expect(standDownBody).toContain('process.exit(0)')
     // Every re-check routes to standDown rather than throwing into silence.
-    expect(source.match(/await standDown\(/g) ?? []).toHaveLength(5)
+    // Exact count on purpose: adding a real gate should force a conscious
+    // update here, and removing one should fail rather than pass quietly.
+    expect(source.match(/await standDown\(/g) ?? []).toHaveLength(7)
   })
 
   it('re-reads the kill switch inside the merge job, not just the decision job', () => {
@@ -290,7 +292,11 @@ describe('the codex-to-claude-fix workflow', () => {
     // also appears on the import line, so a `toContain` on the bare name stays
     // green even when the check itself is gutted — the assertion would be
     // triggered by its own import.
-    expect(source).toContain('if (!isEveryCheckGreen(await listCheckRunsForRef(token, owner, repo, sha)))')
+    // Judge on the checks with THIS run's own jobs removed — the merge job is
+    // itself an in_progress check on the same sha, so without the exclusion the
+    // gate is unsatisfiable (Codex finding PR #931, P1).
+    expect(source).toContain('excludeOwnRun(await listCheckRunsForRef(token, owner, repo, sha)')
+    expect(source).toContain('if (!isEveryCheckGreen(otherChecks))')
     expect(source).toContain("pr_?.draft === true")
     expect(source).toContain('pr_?.head?.sha !== sha')
     // base is mutable without the sha moving, and the merge API follows the

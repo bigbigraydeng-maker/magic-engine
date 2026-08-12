@@ -24,8 +24,9 @@
  * silence is indistinguishable from one that never ran.
  */
 import { readFileSync } from 'node:fs'
-import { createIssueComment, getPullRequest, listCheckRunsForRef, mergePullRequest } from './github.mjs'
-import { isEveryCheckGreen } from './merge-gate.mjs'
+import { createIssueComment, getPullRequest, listCheckRunsForRef, listReviewComments, mergePullRequest } from './github.mjs'
+import { excludeOwnRun, isCleanReview, isEveryCheckGreen } from './merge-gate.mjs'
+import { isActionable } from './severity.mjs'
 import { buildMarker } from './markers.mjs'
 
 const token = process.env.GITHUB_TOKEN
@@ -91,8 +92,29 @@ if (pr_?.head?.sha !== sha) {
     `the head moved after the gate ran — expected \`${sha.slice(0, 10)}\`, found \`${String(pr_?.head?.sha).slice(0, 10)}\`.`,
   )
 }
-if (!isEveryCheckGreen(await listCheckRunsForRef(token, owner, repo, sha))) {
+// Codex finding (PR #931, P1): this job is itself a check run on this sha and
+// is `in_progress` right now, so without excluding this workflow run the gate
+// below could never be satisfied — auto-merge would have stood down every
+// single time. Its sibling `handle-review` is in the same run and excluded by
+// the same filter.
+const otherChecks = excludeOwnRun(await listCheckRunsForRef(token, owner, repo, sha), process.env.GITHUB_RUN_ID)
+if (!isEveryCheckGreen(otherChecks)) {
   await standDown(`not every check run on \`${sha.slice(0, 10)}\` is still completed and green.`)
+}
+
+// Codex finding (PR #931, P1), defence in depth: everything above trusts that
+// the previous job only emits `auto-merge` for a clean review. That trust ran
+// through GITHUB_OUTPUT, which was injectable via review text (see setOutput in
+// handle-review.mjs). The injection itself is fixed, but this job holds the
+// write scope, so it re-derives the verdict from the event payload rather than
+// taking the handoff's word for it. Two independent reasons to believe the
+// review was clean, not one.
+const reviewBodies = [event.review?.body ?? '', ...(await listReviewComments(token, owner, repo, pr, event.review?.id)).map((c) => c.body ?? '')]
+if (reviewBodies.some((b) => isActionable(b))) {
+  await standDown('the triggering review contains actionable P0/P1/P2 findings — refusing to merge regardless of the handoff.')
+}
+if (!reviewBodies.some((b) => isCleanReview(b))) {
+  await standDown('the triggering review carries no positive clean signal — refusing to merge regardless of the handoff.')
 }
 
 await mergePullRequest(token, owner, repo, pr, {

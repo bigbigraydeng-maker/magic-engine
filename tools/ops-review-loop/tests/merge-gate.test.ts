@@ -3,7 +3,7 @@ import { createRequire } from 'node:module'
 import { join } from 'node:path'
 
 const requireFromHere = createRequire(import.meta.url)
-const { autoMergeBlockers, isCleanReview, isEveryCheckGreen } = await import(
+const { autoMergeBlockers, excludeOwnRun, isCleanReview, isEveryCheckGreen } = await import(
   join(process.cwd(), 'tools/ops-review-loop/src/merge-gate.mjs')
 )
 void requireFromHere
@@ -118,5 +118,47 @@ describe('autoMergeBlockers', () => {
 
   it.each([[undefined], [null], [123]])('blocks when the reviewed sha is not a string (%s)', (bad) => {
     expect(autoMergeBlockers({ ...clear, reviewedSha: bad }).join(' ')).toContain('review is for')
+  })
+})
+
+describe('excludeOwnRun', () => {
+  // Field shape taken from a real payload fetched 2026-08-12, not assumed:
+  // details_url = https://github.com/{owner}/{repo}/actions/runs/{RUN}/job/{JOB}
+  const own = (name: string, job: string) => ({
+    name,
+    status: 'in_progress',
+    conclusion: null,
+    details_url: `https://github.com/o/r/actions/runs/31567460404/job/${job}`,
+  })
+  const other = {
+    name: 'ai-orchestrator-tests',
+    status: 'completed',
+    conclusion: 'success',
+    details_url: 'https://github.com/o/r/actions/runs/31567159774/job/94021249406',
+  }
+
+  it('drops both jobs of this workflow run and keeps everything else', () => {
+    // The bug this exists for: handle-review and merge are check runs on the
+    // same sha, in_progress while they are the ones asking. Without this,
+    // "every check green" was unsatisfiable and auto-merge could never fire.
+    const kept = excludeOwnRun([own('handle-review', '1'), own('merge', '2'), other], '31567460404')
+    expect(kept).toEqual([other])
+  })
+
+  it('makes an otherwise-green sha actually read as green', () => {
+    const runs = [own('merge', '2'), other]
+    expect(isEveryCheckGreen(runs)).toBe(false)
+    expect(isEveryCheckGreen(excludeOwnRun(runs, '31567460404'))).toBe(true)
+  })
+
+  it('does not drop a different run whose id merely shares a prefix', () => {
+    const lookalike = { ...other, details_url: 'https://github.com/o/r/actions/runs/315674604041/job/9' }
+    expect(excludeOwnRun([lookalike], '31567460404')).toEqual([lookalike])
+  })
+
+  it('excludes nothing when the run id is missing, rather than guessing', () => {
+    const runs = [own('merge', '2'), other]
+    expect(excludeOwnRun(runs, undefined)).toEqual(runs)
+    expect(excludeOwnRun(runs, '')).toEqual(runs)
   })
 })
