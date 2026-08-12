@@ -106,6 +106,17 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # claude-code-action refuses to run for a bot-triggered workflow
+          # unless the bot is listed. This whole leg exists to be triggered by
+          # exactly one bot, so name that one — never '*', which would let any
+          # bot that can submit a review drive an automated code push.
+          #
+          # Observed live on PR #936 (2026-08-12 04:54):
+          #   "Workflow initiated by non-human actor: chatgpt-codex-connector
+          #    (type: Bot). Add bot to allowed_bots list or use '*'..."
+          # The job-level `if:` already restricts the actor to this same login,
+          # so this is the same trust boundary stated twice, not a widening.
+          allowed_bots: chatgpt-codex-connector
           additional_permissions: |
             actions: read
           prompt: ${{ steps.plan.outputs.prompt }}

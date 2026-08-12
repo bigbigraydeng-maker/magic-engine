@@ -264,6 +264,17 @@ describe('the codex-to-claude-fix workflow', () => {
     expect(outcomeStep?.if).toBe("always() && steps.plan.outputs.action == 'dispatch-fix'")
   })
 
+  it('allow-lists exactly the Codex bot, never a wildcard', () => {
+    // claude-code-action blocks bot-triggered runs unless the bot is named
+    // (observed on PR #936, 2026-08-12 04:54). '*' would let ANY bot able to
+    // submit a review drive an automated code push into a branch — the actor
+    // guard on the job would be the only thing left, and defence in depth is
+    // the point of having both.
+    const claudeStep = fix.steps.find((s) => s.uses?.startsWith('anthropics/claude-code-action'))
+    expect(claudeStep?.with?.allowed_bots).toBe('chatgpt-codex-connector')
+    expect(String(claudeStep?.with?.allowed_bots)).not.toContain('*')
+  })
+
   it('gives the Claude Action step an id so the outcome step can read its result', () => {
     const claudeStep = fix.steps.find((s) => s.uses?.startsWith('anthropics/claude-code-action'))
     expect(claudeStep?.id).toBe('claude')
