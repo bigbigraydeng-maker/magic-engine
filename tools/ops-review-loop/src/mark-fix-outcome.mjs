@@ -18,7 +18,7 @@
  * round number rather than either silently stalling or skipping ahead.
  */
 import { readFileSync } from 'node:fs'
-import { createIssueComment, getPullRequest } from './github.mjs'
+import { createIssueComment, getPullRequest, resolveThreadsForComments } from './github.mjs'
 import { buildMarker } from './markers.mjs'
 
 const token = process.env.GITHUB_TOKEN
@@ -39,13 +39,30 @@ const headNow = (await getPullRequest(token, owner, repo, pr))?.head?.sha
 const pushedSomething = typeof headNow === 'string' && headNow !== sha
 
 if (outcome === 'success' && pushedSomething) {
+  // Product Owner decision 2026-08-12 (option A): resolve the threads this
+  // round addressed. The repository ruleset requires every conversation
+  // resolved before a merge, so without this a PR that took even one fix round
+  // could never auto-merge — the threads Codex opened on the old commit stayed
+  // open with nobody left to close them.
+  //
+  // Only threads from THIS round's findings, and only now that a commit really
+  // exists. This asserts "addressed", not "correct": if the fix is wrong,
+  // Codex's review of the new head opens a fresh thread.
+  let resolved = []
+  try {
+    resolved = await resolveThreadsForComments(token, owner, repo, pr, JSON.parse(process.env.RESOLVE_COMMENT_IDS || '[]'))
+  } catch (err) {
+    // Never let thread bookkeeping turn a successful, pushed fix round into a
+    // failed one — the commit is already on the branch either way.
+    console.error(`Could not resolve review threads: ${err.message}`)
+  }
   const marker = buildMarker({ stage: 'fix-dispatched', pr, sha, round })
   await createIssueComment(
     token,
     owner,
     repo,
     pr,
-    `Completed automated fix round ${round} for Codex findings and pushed \`${headNow.slice(0, 10)}\`. Codex will review the new head next.\n\n${marker}`
+    `Completed automated fix round ${round} for Codex findings and pushed \`${headNow.slice(0, 10)}\`. Resolved ${resolved.length} review thread(s) it addressed. Codex will review the new head next.\n\n${marker}`
   )
 } else if (outcome === 'success') {
   // Green step, unchanged head. Deliberately posts NO fix-dispatched marker:

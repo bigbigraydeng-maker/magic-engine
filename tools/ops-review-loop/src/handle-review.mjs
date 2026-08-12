@@ -57,7 +57,11 @@ const markers = parseMarkers(issueComments.map((c) => c.body))
 
 const findingCandidates = [
   { source: 'review summary', body: review.body ?? '' },
-  ...reviewComments.map((c) => ({ source: `${c.path}:${c.line ?? c.original_line ?? '?'}`, body: c.body ?? '' })),
+  ...reviewComments.map((c) => ({
+    source: `${c.path}:${c.line ?? c.original_line ?? '?'}`,
+    body: c.body ?? '',
+    commentId: c.id,
+  })),
 ]
 const actionableFindings = findingCandidates.filter((f) => isActionable(f.body))
 const hasActionableFindings = actionableFindings.length > 0

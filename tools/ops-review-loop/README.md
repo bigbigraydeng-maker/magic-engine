@@ -29,6 +29,15 @@ workflow files are auto-mergeable now, so a switch stored in one could be
 disabled by the very change it exists to stop. Repository variables are outside
 anything this loop's token can write.
 
+**Review conversations are now resolved by the loop** (Product Owner decision
+2026-08-12) — but only the ones a fix round actually addressed, and only after
+that round pushed a real commit. The repository ruleset requires every
+conversation resolved before a merge, so without this a PR that took even one
+fix round could never auto-merge: the threads Codex opened on the earlier commit
+stayed open with nobody left to close them. Resolving asserts "addressed", not
+"correct"; Codex's review of the new head is what judges the latter. A round
+that pushed nothing resolves nothing.
+
 Still never done here: deploying directly, applying a migration, force-pushing,
 querying or writing production data, or marking a draft ready for review.
 

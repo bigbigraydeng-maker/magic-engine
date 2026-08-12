@@ -43,6 +43,57 @@ export async function listCheckRunsForRef(token, owner, repo, ref) {
   return data.check_runs ?? []
 }
 
+async function graphql(token, query, variables) {
+  const res = await fetch('https://api.github.com/graphql', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ query, variables }),
+  })
+  const body = await res.json()
+  // GraphQL answers 200 with an `errors` array, so a status check alone would
+  // let a failed resolve look like a successful one.
+  if (!res.ok || body.errors) {
+    throw new Error(`GitHub GraphQL failed: ${res.status} ${JSON.stringify(body.errors ?? body)}`)
+  }
+  return body.data
+}
+
+/**
+ * Resolve the review threads whose comments are listed in `commentIds`.
+ *
+ * Product Owner decision, 2026-08-12: the repository ruleset requires every
+ * review conversation to be resolved before a merge, so a PR that went through
+ * even one fix round could never auto-merge — the threads Codex opened on the
+ * earlier commit stayed open forever. The loop now closes the threads it
+ * actually acted on.
+ *
+ * Scope is deliberately narrow: only threads whose comments were in the batch
+ * just dispatched to Claude, and only after that round pushed a real commit.
+ * If a fix was wrong, Codex's next review raises it again as a new thread on
+ * the new commit — resolving here claims "this was addressed", not "this was
+ * correct", and the next review is what decides the latter.
+ */
+export async function resolveThreadsForComments(token, owner, repo, pullNumber, commentIds) {
+  if (!commentIds?.length) return []
+  const data = await graphql(
+    token,
+    `query($owner:String!,$repo:String!,$pr:Int!){
+      repository(owner:$owner,name:$repo){ pullRequest(number:$pr){
+        reviewThreads(first:100){ nodes { id isResolved comments(first:50){ nodes { databaseId } } } } } } }`,
+    { owner, repo, pr: pullNumber },
+  )
+  const wanted = new Set(commentIds)
+  const targets = (data?.repository?.pullRequest?.reviewThreads?.nodes ?? []).filter(
+    (t) => !t.isResolved && (t.comments?.nodes ?? []).some((c) => wanted.has(c.databaseId)),
+  )
+  for (const thread of targets) {
+    await graphql(token, `mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread { isResolved } } }`, {
+      id: thread.id,
+    })
+  }
+  return targets.map((t) => t.id)
+}
+
 export function getPullRequest(token, owner, repo, pullNumber) {
   return request(token, `/repos/${owner}/${repo}/pulls/${pullNumber}`)
 }
