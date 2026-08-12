@@ -64,7 +64,7 @@ jobs:
       action: ${{ steps.plan.outputs.action }}
       merge_sha: ${{ steps.plan.outputs.merge_sha }}
     if: |
-      contains(github.event.review.user.login, 'chatgpt-codex-connector') &&
+      github.event.review.user.login == 'chatgpt-codex-connector[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.base.ref == 'main' &&
       startsWith(github.event.pull_request.head.ref, 'claude/me2-') &&
@@ -159,4 +159,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MERGE_SHA: ${{ needs.handle-review.outputs.merge_sha }}
+          # Re-read at the last moment, in the job that actually holds write —
+          # see merge-pr.mjs for why the earlier read is not enough.
+          AUTO_MERGE_ENABLED: ${{ vars.OPS_AUTO_MERGE_ENABLED }}
         run: node tools/ops-review-loop/src/merge-pr.mjs

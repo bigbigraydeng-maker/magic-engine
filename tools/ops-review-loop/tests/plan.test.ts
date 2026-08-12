@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { decideStage } from '../src/plan.mjs'
 
@@ -96,5 +98,42 @@ describe('decideStage', () => {
   it('does not skip a different sha even if an earlier sha was already handled', () => {
     const markers = [{ stage: 'ready', pr: 1, sha: 'sha-0' }]
     expect(decideStage({ ...base, sha: 'sha-1', markers }).action).toBe('ready')
+  })
+})
+
+describe('every action decideStage can return has a handler in handle-review.mjs', () => {
+  // Codex finding (PR #931, P1). Deleting a "legacy" case with a scripted
+  // slice took the live `dispatch-fix` case out with it, so every review that
+  // raised a finding hit `default:` and threw — the whole fix leg dead, and
+  // 110 tests green, because the switch was almost uncovered.
+  //
+  // This pins the two lists together instead of trusting either one: any
+  // action decideStage can produce must have a case, and any case must be a
+  // real action. It is the cheap version of the coverage that was missing.
+  const ACTIONS = ['skip', 'needs-human', 'wait-ci', 'ready', 'auto-merge', 'dispatch-fix']
+
+  const source = readFileSync(join(process.cwd(), 'tools/ops-review-loop/src/handle-review.mjs'), 'utf8')
+  const cases = [...source.matchAll(/case '([a-z-]+)':/g)].map((m) => m[1])
+
+  it.each(ACTIONS)('handles %s', (action) => {
+    expect(cases).toContain(action)
+  })
+
+  it('has no case for an action decideStage never returns', () => {
+    expect(cases.filter((c) => !ACTIONS.includes(c))).toEqual([])
+  })
+
+  it.each(ACTIONS)('%s is reachable from decideStage', (action) => {
+    // Both directions: a case nobody can reach is dead code, and dead code is
+    // what got sliced away last time.
+    const reachable = [
+      decideStage({ ...base, markers: [{ stage: 'ready', sha: base.sha }] }),
+      decideStage({ ...base, markers: [{ stage: 'fix-dispatched', sha: 'other' }], hasActionableFindings: true }),
+      decideStage({ ...base, hasActionableFindings: true, markers: Array.from({ length: 3 }, () => ({ stage: 'fix-dispatched', sha: 'x' })) }),
+      decideStage({ ...base, ciSuccess: false }),
+      decideStage({ ...base }),
+      decideStage({ ...base, mergeBlockers: [] }),
+    ].map((r) => r.action)
+    expect(reachable).toContain(action)
   })
 })

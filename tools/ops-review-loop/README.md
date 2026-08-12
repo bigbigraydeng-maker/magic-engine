@@ -24,6 +24,13 @@ cannot switch itself on. Set it to `false` in the GitHub UI and merging stops
 immediately, with no PR and no deploy; the loop falls back to
 `READY FOR PRODUCT OWNER` exactly as before.
 
+"Immediately" is load-bearing, so it is read **twice**: once when the gate is
+computed, and again inside the merge job at the last moment before the API call
+(Codex finding PR #931, P1 — flipping it between the two jobs would otherwise
+have merged anyway, since neither the flip nor a re-run check changes the sha).
+That final job also re-verifies draft, mergeable, head sha and every check being
+green, for the same reason: those are all mutable without the sha moving.
+
 It is a repository *variable*, not a file and not a secret, for one reason:
 workflow files are auto-mergeable now, so a switch stored in one could be
 disabled by the very change it exists to stop. Repository variables are outside

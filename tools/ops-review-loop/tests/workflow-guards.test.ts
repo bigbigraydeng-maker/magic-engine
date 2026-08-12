@@ -203,9 +203,19 @@ describe('the codex-to-claude-fix workflow', () => {
     expect((fix.triggers.pull_request_review as { types: string[] }).types).toEqual(['submitted'])
   })
 
-  it('guards the Codex bot actor, same-repo, base=main, and the claude/me2- branch prefix', () => {
+  it('matches the Codex bot login exactly, never as a substring', () => {
+    // Codex finding (PR #931, P1): `contains(login, 'chatgpt-codex-connector')`
+    // also matches any account whose name merely embeds that string. Once a
+    // clean review can trigger an unattended production merge, "looks close
+    // enough to the reviewer's name" is an authorisation decision. The real
+    // login is confirmed from live payloads, so match it exactly.
     const guard = Object.values(fix.doc.jobs ?? {})[0]?.if ?? ''
-    expect(guard).toContain('chatgpt-codex-connector')
+    expect(guard).toContain("github.event.review.user.login == 'chatgpt-codex-connector[bot]'")
+    expect(guard).not.toContain('contains(github.event.review.user.login')
+  })
+
+  it('guards same-repo, base=main, and the claude/me2- branch prefix', () => {
+    const guard = Object.values(fix.doc.jobs ?? {})[0]?.if ?? ''
     expect(guard).toContain('head.repo.full_name == github.repository')
     expect(guard).toContain("base.ref == 'main'")
     expect(guard).toContain("startsWith(github.event.pull_request.head.ref, 'claude/me2-')")
@@ -232,6 +242,26 @@ describe('the codex-to-claude-fix workflow', () => {
     expect(steps.some((s) => s.uses?.startsWith('anthropics/'))).toBe(false)
     expect(steps.some((s) => s.run?.includes('merge-pr.mjs'))).toBe(true)
     expect(mergeJob?.if).toContain("needs.handle-review.outputs.action == 'auto-merge'")
+  })
+
+  it('re-reads the kill switch inside the merge job, not just the decision job', () => {
+    // Codex finding (PR #931, P1): between the two jobs an admin can flip the
+    // variable to false, and a check can be re-run back to failing — neither
+    // changes the sha. The README promises the switch "takes effect
+    // immediately"; only a last-moment re-read in the job holding write makes
+    // that true.
+    const mergeStep = (fix.doc.jobs?.merge?.steps ?? []).find((s) => s.run?.includes('merge-pr.mjs'))
+    expect(mergeStep?.env?.AUTO_MERGE_ENABLED).toBe('${{ vars.OPS_AUTO_MERGE_ENABLED }}')
+    const source = readFileSync(join(process.cwd(), 'tools/ops-review-loop/src/merge-pr.mjs'), 'utf8')
+    expect(source).toContain("process.env.AUTO_MERGE_ENABLED !== 'true'")
+    // and re-verifies the gates that can change without the sha changing.
+    // Assert the guard EXPRESSION, not the identifier: `isEveryCheckGreen`
+    // also appears on the import line, so a `toContain` on the bare name stays
+    // green even when the check itself is gutted — the assertion would be
+    // triggered by its own import.
+    expect(source).toContain('if (!isEveryCheckGreen(await listCheckRunsForRef(token, owner, repo, sha)))')
+    expect(source).toContain("pr_?.draft === true")
+    expect(source).toContain('pr_?.head?.sha !== sha')
   })
 
   it('pairs the merge capability with the kill switch', () => {
