@@ -11,11 +11,16 @@
  * tools/ai-orchestrator, just against PR comments instead of Issue comments.
  */
 
-const MARKER_RE = /<!--\s*ops-codex-loop:stage=(\S+)\s+pr=(\d+)\s+sha=([0-9a-f]{7,40})(?:\s+round=(\d+))?\s*-->/g
+const MARKER_RE =
+  /<!--\s*ops-codex-loop:stage=(\S+)\s+pr=(\d+)\s+sha=([0-9a-f]{7,40})(?:\s+round=(\d+))?(?:\s+review=(\d+))?\s*-->/g
 
-export function buildMarker({ stage, pr, sha, round }) {
+export function buildMarker({ stage, pr, sha, round, review }) {
   const roundPart = round === undefined ? '' : ` round=${round}`
-  return `<!-- ops-codex-loop:stage=${stage} pr=${pr} sha=${sha}${roundPart} -->`
+  // `review` exists so a stage that is NOT terminal can still be deduplicated
+  // against duplicate deliveries of the same review without swallowing the next
+  // genuine review of the same commit — see plan.mjs.
+  const reviewPart = review === undefined ? '' : ` review=${review}`
+  return `<!-- ops-codex-loop:stage=${stage} pr=${pr} sha=${sha}${roundPart}${reviewPart} -->`
 }
 
 export function parseMarkers(commentBodies) {
@@ -28,6 +33,7 @@ export function parseMarkers(commentBodies) {
         pr: Number(match[2]),
         sha: match[3],
         round: match[4] === undefined ? undefined : Number(match[4]),
+        review: match[5] === undefined ? undefined : Number(match[5]),
       })
     }
   }

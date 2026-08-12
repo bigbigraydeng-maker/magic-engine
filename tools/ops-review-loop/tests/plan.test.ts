@@ -85,9 +85,29 @@ describe('decideStage', () => {
     expect(decideStage({ ...base, hasActionableFindings: true, markers }).action).toBe('skip')
   })
 
-  it('skips as a no-op when this exact head sha already has a ready marker (duplicate event)', () => {
+  it('skips a duplicate delivery of the SAME review that already reported ready', () => {
+    const markers = [{ stage: 'ready', pr: 1, sha: 'sha-1', review: 42 }]
+    expect(decideStage({ ...base, markers, reviewId: 42 }).action).toBe('skip')
+  })
+
+  it('does NOT skip a different review of the same commit that already reported ready', () => {
+    // Codex finding (PR #931, P1). `ready` is reachable from purely temporary
+    // conditions — kill switch off, still a draft, or a clean review that was
+    // for an older commit. Deduplicating it by commit meant one stale-but-clean
+    // review poisoned that commit, and the genuine review of the same commit —
+    // P1 findings and all — was skipped before its findings were read.
+    const markers = [{ stage: 'ready', pr: 1, sha: 'sha-1', review: 42 }]
+    expect(decideStage({ ...base, markers, reviewId: 43, hasActionableFindings: true })).toEqual({
+      action: 'dispatch-fix',
+      round: 1,
+    })
+  })
+
+  it('does not skip on a legacy ready marker that carries no review id', () => {
+    // Markers written before this change have no review=; treating them as a
+    // match would reintroduce the bug for every PR already in flight.
     const markers = [{ stage: 'ready', pr: 1, sha: 'sha-1' }]
-    expect(decideStage({ ...base, markers }).action).toBe('skip')
+    expect(decideStage({ ...base, markers, reviewId: 42, hasActionableFindings: true }).action).toBe('dispatch-fix')
   })
 
   it('skips as a no-op when this exact head sha already has a needs-human marker (duplicate event)', () => {
@@ -127,7 +147,7 @@ describe('every action decideStage can return has a handler in handle-review.mjs
     // Both directions: a case nobody can reach is dead code, and dead code is
     // what got sliced away last time.
     const reachable = [
-      decideStage({ ...base, markers: [{ stage: 'ready', sha: base.sha }] }),
+      decideStage({ ...base, markers: [{ stage: 'needs-human', sha: base.sha }] }),
       decideStage({ ...base, markers: [{ stage: 'fix-dispatched', sha: 'other' }], hasActionableFindings: true }),
       decideStage({ ...base, hasActionableFindings: true, markers: Array.from({ length: 3 }, () => ({ stage: 'fix-dispatched', sha: 'x' })) }),
       decideStage({ ...base, ciSuccess: false }),

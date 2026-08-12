@@ -153,6 +153,9 @@ const mergeBlockers = hasActionableFindings
 const plan = decideStage({
   markers,
   sha,
+  // Lets `ready` dedup against a duplicate delivery of THIS review without
+  // swallowing the next genuine review of the same commit — see plan.mjs.
+  reviewId: review?.id,
   hasActionableFindings,
   ciSuccess: everyCheckGreen,
   maxRounds: MAX_ROUNDS,
@@ -230,7 +233,7 @@ switch (plan.action) {
     break
   }
   case 'ready': {
-    const marker = buildMarker({ stage: 'ready', pr, sha })
+    const marker = buildMarker({ stage: 'ready', pr, sha, review: review?.id })
     // Always name the blockers. "Auto-merge skipped" with no reason is exactly
     // how a gate that has quietly stopped working looks from the outside.
     const why = (plan.blockers ?? []).map((b) => `- ${b}`).join('\n')

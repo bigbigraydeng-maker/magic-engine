@@ -243,4 +243,49 @@ describe('handle-review: this workflow run is itself a check on the sha', () => 
     expect(parsed.merge_sha).toBeUndefined()
     delete process.env.GITHUB_RUN_ID
   })
+
+  it('stamps the ready marker with the review id so the next review is not swallowed', async () => {
+    // Codex finding (PR #931, P1): `ready` is not terminal — it is reachable
+    // from the kill switch being off, the PR being a draft, or a stale clean
+    // review. Without the review id in the marker, dedup falls back to
+    // per-commit and the genuine review of that same commit gets skipped
+    // before its findings are read.
+    process.env.GITHUB_RUN_ID = '31567460404'
+    listCheckRunsForRef.mockResolvedValue([
+      { name: 'ci', status: 'completed', conclusion: 'success', details_url: 'https://github.com/o/r/actions/runs/999/job/2' },
+    ])
+    const eventPath = join(dir, 'event.json')
+    const outPath = join(dir, 'out.txt')
+    writeFileSync(
+      eventPath,
+      JSON.stringify({
+        pull_request: { number: 931, head: { sha: SHA }, draft: false },
+        review: { id: 4242, body: "Codex Review: Didn't find any major issues.", commit_id: SHA },
+      }),
+    )
+    writeFileSync(outPath, '')
+    const original = { ...process.env }
+    Object.assign(process.env, {
+      GITHUB_TOKEN: 'tok',
+      GITHUB_REPOSITORY: 'bigbigraydeng-maker/magic-engine',
+      GITHUB_EVENT_PATH: eventPath,
+      GITHUB_OUTPUT: outPath,
+      // Kill switch off -> a blocker -> the `ready` path, which is exactly the
+      // transient case that must stay re-openable.
+      AUTO_MERGE_ENABLED: 'false',
+      OPS_POLL_ATTEMPTS: '2',
+      OPS_POLL_INTERVAL_MS: '0',
+    })
+    try {
+      await import('../src/handle-review.mjs')
+    } finally {
+      process.env = original
+    }
+
+    const body = String(createIssueComment.mock.calls[0]?.[4] ?? '')
+    expect(body).toContain('READY FOR PRODUCT OWNER')
+    expect(body).toContain('stage=ready')
+    expect(body).toContain('review=4242')
+    delete process.env.GITHUB_RUN_ID
+  })
 })

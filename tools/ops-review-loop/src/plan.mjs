@@ -16,6 +16,7 @@
 export function decideStage({
   markers,
   sha,
+  reviewId = undefined,
   hasActionableFindings,
   ciSuccess,
   maxRounds,
@@ -23,13 +24,25 @@ export function decideStage({
 }) {
   const hasMarkerForSha = (stage) => markers.some((m) => m.stage === stage && m.sha === sha)
 
-  if (
-    hasMarkerForSha('fix-dispatched') ||
-    hasMarkerForSha('needs-human') ||
-    hasMarkerForSha('ready') ||
-    hasMarkerForSha('auto-merged')
-  ) {
+  // Terminal for the commit: a fix was dispatched for it, automation gave up on
+  // it, or it was merged. Nothing later should re-open any of those.
+  if (hasMarkerForSha('fix-dispatched') || hasMarkerForSha('needs-human') || hasMarkerForSha('auto-merged')) {
     return { action: 'skip', reason: `already handled head sha ${sha}` }
+  }
+
+  // `ready` is NOT terminal, and treating it as such was a real bug.
+  //
+  // Codex finding (PR #931, P1): `ready` is now reachable from purely temporary
+  // conditions — the kill switch being off, the PR still being a draft, or a
+  // clean review that turned out to be for an older commit. Deduplicating it by
+  // commit meant one stale-but-clean review poisoned that commit: the genuine
+  // review of the same commit, P1 findings and all, was skipped before its
+  // findings were even read. No fix, no NEEDS HUMAN, no comment.
+  //
+  // Dedup on (commit, review) instead. A duplicate delivery of the same review
+  // is still a no-op; a different review of the same commit is not.
+  if (markers.some((m) => m.stage === 'ready' && m.sha === sha && m.review !== undefined && m.review === reviewId)) {
+    return { action: 'skip', reason: `already reported ready for review ${reviewId} on ${sha}` }
   }
 
   if (hasActionableFindings) {
