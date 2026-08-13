@@ -30,8 +30,11 @@
  * hostnames:
  *   1. No connection is ever made to a loopback / private / link-local
  *      (full fe80::/10) / CGNAT / unspecified / multicast / reserved /
- *      cloud-metadata address, IPv4 or IPv6, including IPv4-mapped/-compatible
- *      IPv6 forms, using CIDR-correct classification (not string prefixes).
+ *      cloud-metadata address, IPv4 or IPv6, including both IPv4-mapped
+ *      (`::ffff:0:0/96`) and IPv4-compatible (`::/96`) IPv6 forms, using
+ *      CIDR-correct classification (not string prefixes). See
+ *      `classifyAddress()` — the two embedded-IPv4 forms need different
+ *      handling and only one of them is covered by the range table.
  *   2. The address that was validated is *provably* the address the socket
  *      connects to — no second, unvalidated DNS resolution can happen between
  *      the check and the connect (see "Connection binding" below).
@@ -41,39 +44,74 @@
  *      allowed address first and the attack address second.
  *   4. Every redirect hop is a brand-new untrusted URL and re-runs the exact
  *      same validation + binding; a public URL redirecting to a private one
- *      cannot bypass the guard, and the hop count is capped.
+ *      cannot bypass the guard, and the hop count is capped. Because the
+ *      *previous* server chooses the next hop, credential headers
+ *      (Authorization / Cookie / Proxy-Authorization) are dropped when a hop
+ *      leaves the origin, and 303 (plus 301/302 on POST) downgrade to a
+ *      bodyless GET — matching platform `fetch`, which this module has to
+ *      reimplement because it owns the redirect loop.
  *   5. Only http/https are ever dialed — file:, data:, gopher:, ftp:, etc.
  *      are rejected before any network activity, on every hop.
  *   6. Host header, TLS SNI, and certificate verification use the original
  *      hostname — never the resolved IP — so this only pins *where the
  *      socket connects*, not what the server sees or how the cert is checked.
- *   7. Response size and per-hop time are bounded so a hostile or oversized
- *      response can't exhaust memory or hang the caller.
+ *   7. Response size, DNS time, and per-hop request time are all bounded, so a
+ *      hostile or oversized response can't exhaust memory or hang the caller.
+ *      Note the request timeout is *per hop*, so a redirect chain's worst case
+ *      is (maxRedirects + 1) x timeoutMs; a redirect body is cancelled before
+ *      its Agent closes so a 3xx with a large unread body cannot stall a hop.
  *
  * ── Connection binding ──────────────────────────────────────────────────
  * `resolveValidatedAddress()` resolves every candidate address for a hop's
  * hostname and validates all of them up front (#1/#3 above). `buildPinnedLookup()`
  * then wraps that single, already-validated address in a `net.LookupFunction`
- * that *ignores its inputs* and always hands back that literal address — it
- * never calls `dns` again. That function is passed as `connect.lookup` to a
- * fresh undici `Agent` used only for this one hop. Undici's connector forwards
- * `connect` options straight through to `net.connect`/`tls.connect` alongside
- * `host: hostname` (see node_modules/undici/lib/core/connect.js) — Node calls
- * `lookup` exactly once to turn that hostname into a socket address and dials
- * whatever it returns, with no other resolution step. Because our `lookup` is
- * a constant, there is no live DNS call left for a rebinding attacker's second
- * answer to land in. `servername`/Host are derived by undici from the request
- * URL as normal (#6) — pinning only touches the low-level connect address.
+ * that returns that literal address without ever calling `dns` again (it
+ * refuses outright if asked for a *different* hostname than the one that was
+ * validated). That function is passed as `connect.lookup` to a fresh undici
+ * `Agent` used only for this one hop.
+ * Undici's connector forwards `connect` options straight through to
+ * `net.connect`/`tls.connect` alongside `host: hostname` (see
+ * node_modules/undici/lib/core/connect.js) — Node calls `lookup` exactly once
+ * to turn that hostname into a socket address and dials whatever it returns,
+ * with no other resolution step. Because our `lookup` is a constant, there is
+ * no live DNS call left for a rebinding attacker's second answer to land in.
+ * `servername`/Host are derived by undici from the request URL as normal (#6)
+ * — pinning only touches the low-level connect address.
+ *
+ * Two load-bearing details, both verified empirically against undici 6.28 on
+ * Node 24 rather than assumed from the docs:
+ *
+ *   a) **A fresh Agent per hop is required, not a tidiness choice.** With a
+ *      keep-alive Agent reused across requests, an established socket is
+ *      reused and `connect.lookup` is *not called at all* for the reused
+ *      request — so sharing one Agent across redirect hops would let hop 2
+ *      ride hop 1's connection, skipping the whole
+ *      resolve→validate→pin cycle. (Cross-*host* reuse would additionally try
+ *      to dial host B at host A's pinned address; the pinned lookup's
+ *      hostname check turns that into a loud failure rather than a silent
+ *      bypass, but it cannot see a reused socket at all — no lookup happens.)
+ *      Do not hoist this Agent for performance.
+ *
+ *   b) **The lookup function surviving `Agent`'s option handling is an
+ *      implicit contract.** `util.deepClone` is `JSON.parse(JSON.stringify())`
+ *      (lib/core/util.js), which destroys functions; it is only safe here
+ *      because the Agent constructor destructures `connect` *out* of `options`
+ *      before cloning and re-attaches it with a shallow spread
+ *      (lib/dispatcher/agent.js). If a future undici version folds `connect`
+ *      into the deepClone, pinning would silently stop being applied — the
+ *      un-mocked integration test is what would catch that.
  *
  * ── Dependency / dispatcher choice ──────────────────────────────────────
  * IP classification: `ipaddr.js` (zero deps, MIT, ~30M weekly downloads) —
- * `ipaddr.process()` canonicalizes IPv4-mapped/-compatible IPv6 to a plain
- * IPv4 object before classification (handles `::ffff:7f00:1` for free, no
- * regex), and `.range()` is driven by a maintained CIDR table (includes the
- * full `fe80::/10`, `100.64.0.0/10` CGNAT, `fc00::/7`, deprecated/site-local,
- * discard-only, and RFC reserved ranges) instead of hand-rolled prefixes.
- * This module trusts only the `'unicast'` bucket (allow-list, not a
- * block-list that has to enumerate every dangerous category by name).
+ * `ipaddr.process()` canonicalizes IPv4-*mapped* IPv6 to a plain IPv4 object
+ * before classification (handles `::ffff:7f00:1` for free, no regex), and
+ * `.range()` is driven by a maintained CIDR table (includes the full
+ * `fe80::/10`, `100.64.0.0/10` CGNAT, `fc00::/7`, NAT64, 6to4, Teredo,
+ * deprecated/site-local, discard-only, and RFC reserved ranges) instead of
+ * hand-rolled prefixes. This module trusts only the `'unicast'` bucket
+ * (allow-list, not a block-list that has to enumerate every dangerous
+ * category by name). The one gap the table does *not* cover is IPv4-compatible
+ * `::/96`, which `classifyAddress()` rejects explicitly — see its comment.
  * Connection binding: Node's own documented `connect.lookup` extension point
  * via the `undici` package (the reference implementation Node's global fetch
  * is built on; Node's docs point at installing `undici` directly for
@@ -135,6 +173,14 @@ export class ResponseTooLargeError extends Error {
   }
 }
 
+/** A pinned lookup was invoked for a hostname it was not validated against. */
+export class PinnedHostMismatchError extends Error {
+  constructor(public readonly expected: string, public readonly actual: string) {
+    super(`pinned address was validated for "${expected}" but lookup asked for "${actual}"`)
+    this.name = 'PinnedHostMismatchError'
+  }
+}
+
 // ─── CIDR-correct address classification ───────────────────────────────────
 
 interface ClassifiedAddress {
@@ -147,14 +193,44 @@ interface ClassifiedAddress {
 /**
  * Allow-list, not a block-list: only ipaddr.js's 'unicast' bucket is safe to
  * dial. Everything else (loopback, private, the full linkLocal fe80::/10,
- * CGNAT, unspecified, multicast, uniqueLocal, ipv4-mapped forms once
- * unwrapped to their real IPv4 range, reserved/benchmarking/documentation
- * ranges, …) is rejected without having to name each category — exported
- * for tests. ipaddr.process() also canonicalizes IPv4-mapped/-compatible
- * IPv6 (e.g. "::ffff:7f00:1") down to its IPv4 form first.
+ * CGNAT, unspecified, multicast, uniqueLocal, NAT64, 6to4, Teredo,
+ * reserved/benchmarking/documentation ranges, …) is rejected without having
+ * to name each category. Exported for tests.
+ *
+ * Two things this handles that the range table alone does not:
+ *
+ *   1. **IPv4-mapped** IPv6 (`::ffff:0:0/96`) — `ipaddr.process()` unwraps it
+ *      to a real IPv4 object first, so `::ffff:7f00:1` and
+ *      `::ffff:127.0.0.1` both land on `127.0.0.0/8`.
+ *   2. **IPv4-compatible** IPv6 (`::/96`, e.g. `::7f00:1` == `::127.0.0.1`)
+ *      — `process()` does NOT unwrap this and ipaddr.js has no `::/96` entry,
+ *      so `::7f00:1` and `::a9fe:a9fe` (cloud metadata) would otherwise
+ *      classify as plain `unicast`. Verified against ipaddr.js 2.5.0's
+ *      SpecialRanges table. This form is deprecated by RFC 4291 §2.5.5.1 and
+ *      has no legitimate use, so the whole `::/96` block is rejected — which
+ *      also covers `::` and `::1` a second way.
+ *
+ * Fails closed on unparseable input: `ipaddr.process()` throws a bare Error
+ * for malformed addresses, and this function is exported as a reusable
+ * classifier, so a caller doing `instanceof BlockedAddressError` error
+ * mapping must not be able to see a classification failure as "allowed".
  */
 export function classifyAddress(address: string): ClassifiedAddress {
-  const parsed = ipaddr.process(address)
+  let parsed: ReturnType<typeof ipaddr.process>
+  try {
+    parsed = ipaddr.process(address)
+  } catch {
+    return { address, family: 4, blocked: true, range: 'unparseable' }
+  }
+
+  if (parsed.kind() === 'ipv6') {
+    const parts = (parsed as ipaddr.IPv6).parts
+    // High 96 bits all zero => IPv4-compatible IPv6 (::/96), see note 2 above.
+    if (parts.slice(0, 6).every(p => p === 0)) {
+      return { address, family: 6, blocked: true, range: 'ipv4Compatible' }
+    }
+  }
+
   const range = parsed.range()
   const family: 4 | 6 = parsed.kind() === 'ipv4' ? 4 : 6
   return { address, family, blocked: range !== 'unicast', range }
@@ -165,7 +241,19 @@ export function classifyAddress(address: string): ClassifiedAddress {
 export interface ValidatedAddress {
   readonly address: string
   readonly family: 4 | 6
+  /** The hostname this address was validated for. */
+  readonly hostname: string
 }
+
+export class DnsTimeoutError extends Error {
+  constructor(public readonly hostname: string, public readonly timeoutMs: number) {
+    super(`DNS resolution for "${hostname}" exceeded ${timeoutMs}ms`)
+    this.name = 'DnsTimeoutError'
+  }
+}
+
+/** Default ceiling on how long we wait for DNS. See resolveValidatedAddress. */
+const DEFAULT_DNS_TIMEOUT_MS = 5_000
 
 /**
  * Resolves every candidate address for `hostname` (or classifies it directly
@@ -174,31 +262,88 @@ export interface ValidatedAddress {
  * address must fail closed, not pass because the first record looked fine.
  * DNS lookup failures are not caught here; they propagate so callers keep
  * their own "couldn't resolve" classification. Exported for tests.
+ *
+ * The lookup is bounded by `dnsTimeoutMs`. `dns.lookup` accepts no
+ * AbortSignal, so this races it against a timer rather than truly cancelling:
+ * the underlying getaddrinfo may still be in flight, but the caller stops
+ * waiting. Without this an attacker's authoritative nameserver that simply
+ * never answers would stall the request for the resolver's whole retry
+ * budget — time that sits entirely outside the per-hop fetch timeout.
  */
-export async function resolveValidatedAddress(hostname: string): Promise<ValidatedAddress> {
+export async function resolveValidatedAddress(
+  hostname: string,
+  dnsTimeoutMs: number = DEFAULT_DNS_TIMEOUT_MS,
+): Promise<ValidatedAddress> {
   const literalFamily = isIP(hostname)
   const candidates =
     literalFamily !== 0
       ? [{ address: hostname, family: literalFamily }]
-      : await dnsLookup(hostname, { all: true, verbatim: true })
+      : await withDnsTimeout(dnsLookup(hostname, { all: true, verbatim: true }), hostname, dnsTimeoutMs)
 
   const classified = candidates.map(c => classifyAddress(c.address))
   const blocked = classified.find(c => c.blocked)
   if (blocked) throw new BlockedAddressError(hostname, blocked.address, blocked.range)
 
   const chosen = classified[0]
-  return { address: chosen.address, family: chosen.family }
+  return { address: chosen.address, family: chosen.family, hostname }
+}
+
+/** Races a DNS lookup against a timer; see resolveValidatedAddress. */
+async function withDnsTimeout<T>(promise: Promise<T>, hostname: string, timeoutMs: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new DnsTimeoutError(hostname, timeoutMs)), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 /**
- * A net.LookupFunction that ignores its `hostname`/`options` arguments and
+ * A net.LookupFunction that ignores the `hostname` it is called with and
  * always hands back the single, already-validated address — see the module
  * doc comment's "Connection binding" section. Exported for tests: this
  * function must never touch `dns` again, by construction.
+ *
+ * 🔴 `options.all` is NOT ignorable, even though the address is fixed. Node
+ *    tells the lookup which result shape it expects, and returning the wrong
+ *    one is a hard `ERR_INVALID_IP_ADDRESS` (no connection at all):
+ *      - `all: true`  → callback(null, [{ address, family }])
+ *      - otherwise    → callback(null, address, family)
+ *    Node >= 20 defaults `autoSelectFamily` to true and undici 6 does not
+ *    override it, so the happy-eyeballs path calls this with
+ *    `{ hints: 1024, all: true }` — i.e. the array branch is the one that
+ *    actually runs in production. Verified empirically against undici 6.28 on
+ *    Node 24; see the un-mocked 127.0.0.1 integration test that covers both
+ *    branches. Do not "simplify" this back to a single callback shape, and do
+ *    not force `autoSelectFamily: false` to dodge it — that would also
+ *    disable legitimate IPv6→IPv4 fallback.
+ *
+ *    Exactly one address is returned on purpose. Node dials each address a
+ *    lookup returns, in order, so a multi-address return would only be safe
+ *    if every entry were validated; keeping it to the single validated
+ *    address makes that impossible to get wrong.
  */
 export function buildPinnedLookup(validated: ValidatedAddress): LookupFunction {
-  return (_hostname, _options, callback) => {
-    callback(null, validated.address, validated.family)
+  return (hostname, options, callback) => {
+    // Defence in depth. The pin is only correct for the hostname it was
+    // validated against, and this function would otherwise happily redirect
+    // *any* hostname to that address — so if a future change ever shares one
+    // Agent across hops or origins, fail loudly here instead of silently
+    // dialing host B at host A's validated address.
+    if (hostname && hostname !== validated.hostname) {
+      callback(new PinnedHostMismatchError(validated.hostname, hostname), '')
+      return
+    }
+    if (options?.all) {
+      callback(null, [{ address: validated.address, family: validated.family }])
+    } else {
+      callback(null, validated.address, validated.family)
+    }
   }
 }
 
@@ -313,7 +458,52 @@ interface ResolvedOptions {
   userAgent: string
 }
 
-type HopOutcome = { kind: 'redirect'; location: URL } | { kind: 'terminal'; response: SafeFetchResponse }
+type HopOutcome =
+  | { kind: 'redirect'; location: URL; status: number }
+  | { kind: 'terminal'; response: SafeFetchResponse }
+
+/**
+ * Headers that must never survive a cross-origin redirect. The redirect
+ * target is chosen by the *previous* server, so forwarding credentials to it
+ * hands them to whoever controls that hop — the platform `fetch` strips these
+ * on cross-origin redirects and, because this module implements the redirect
+ * loop itself, it has to do the same rather than inherit the protection.
+ */
+const CREDENTIAL_HEADERS = ['authorization', 'cookie', 'proxy-authorization']
+
+/** Same scheme+host+port. Credentials may only be re-sent within one origin. */
+function isSameOrigin(a: URL, b: URL): boolean {
+  return a.protocol === b.protocol && a.host === b.host
+}
+
+function stripCredentialHeaders(headers: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (!headers) return headers
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(headers)) {
+    if (!CREDENTIAL_HEADERS.includes(k.toLowerCase())) out[k] = v
+  }
+  return out
+}
+
+/**
+ * Applies the standard method/body rewrite for a redirect, matching the fetch
+ * spec so callers get no surprises versus platform `fetch`:
+ *   - 303 always becomes GET and drops the body;
+ *   - 301/302 turn POST into GET and drop the body;
+ *   - 307/308 preserve both.
+ * Credentials are additionally dropped when the hop leaves the origin.
+ */
+function optionsForRedirect(opts: ResolvedOptions, status: number, from: URL, to: URL): ResolvedOptions {
+  const method = (opts.method ?? 'GET').toUpperCase()
+  const downgrade = status === 303 || ((status === 301 || status === 302) && method === 'POST')
+  const crossOrigin = !isSameOrigin(from, to)
+  return {
+    ...opts,
+    method: downgrade ? 'GET' : opts.method,
+    body: downgrade ? null : opts.body,
+    headers: crossOrigin ? stripCredentialHeaders(opts.headers) : opts.headers,
+  }
+}
 
 /** One resolve+validate+pin+fetch cycle for a single URL. No redirect following. */
 async function runHop(url: URL, hop: number, opts: ResolvedOptions): Promise<HopOutcome> {
@@ -342,9 +532,17 @@ async function runHop(url: URL, hop: number, opts: ResolvedOptions): Promise<Hop
 
   if (res.status >= 300 && res.status < 400) {
     const location = res.headers.get('location')
+    // 🔴 Cancel the redirect body BEFORE closing the Agent. A 3xx may carry a
+    //    body, and undici's close() waits for in-flight responses to finish:
+    //    with an unread body over ~64 KiB (one socket buffer) close() hangs
+    //    until AbortSignal burns the socket, so each hop costs a full
+    //    timeoutMs. A chain of 3xx-with-large-body then stalls one request for
+    //    (maxRedirects+1) x timeoutMs while holding a socket per hop — an
+    //    amplification vector for anything crawling attacker-supplied URLs.
+    await res.body?.cancel().catch(() => {})
     await agent.close().catch(() => {})
     if (!location) throw new InvalidRedirectError(res.status, 'missing Location header')
-    return { kind: 'redirect', location: new URL(location, url) }
+    return { kind: 'redirect', location: new URL(location, url), status: res.status }
   }
 
   let bytes: Uint8Array
@@ -379,9 +577,11 @@ export async function safeFetch(input: string | URL, options: SafeFetchOptions =
   }
 
   let current = typeof input === 'string' ? new URL(input) : input
+  let hopOpts: ResolvedOptions = resolvedOpts
   for (let hop = 0; hop <= resolvedOpts.maxRedirects; hop++) {
-    const outcome = await runHop(current, hop, resolvedOpts)
+    const outcome = await runHop(current, hop, hopOpts)
     if (outcome.kind === 'terminal') return outcome.response
+    hopOpts = optionsForRedirect(hopOpts, outcome.status, current, outcome.location)
     current = outcome.location
   }
   throw new TooManyRedirectsError(resolvedOpts.maxRedirects)

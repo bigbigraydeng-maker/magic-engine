@@ -14,24 +14,28 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { LookupFunction } from 'node:net'
+import type dns from 'node:dns'
 
 const dnsLookupMock = vi.hoisted(() => vi.fn())
 vi.mock('node:dns/promises', () => ({ lookup: dnsLookupMock, default: { lookup: dnsLookupMock } }))
 
 const undiciFetchMock = vi.hoisted(() => vi.fn())
 const agentCtorMock = vi.hoisted(() => vi.fn())
+const agentCloseMock = vi.hoisted(() => vi.fn())
 vi.mock('undici', async importOriginal => {
   const actual = await importOriginal<typeof import('undici')>()
   class MockAgent {
     constructor(opts: unknown) {
       agentCtorMock(opts)
     }
-    async close() {}
+    async close() {
+      agentCloseMock()
+    }
   }
   return { ...actual, Agent: MockAgent, fetch: undiciFetchMock }
 })
 
-import { Response } from 'undici'
+import { Response, Headers } from 'undici'
 import {
   classifyAddress,
   resolveValidatedAddress,
@@ -42,6 +46,8 @@ import {
   TooManyRedirectsError,
   InvalidRedirectError,
   ResponseTooLargeError,
+  PinnedHostMismatchError,
+  DnsTimeoutError,
 } from '../safe-fetch'
 
 interface CapturedAgentOpts {
@@ -49,19 +55,35 @@ interface CapturedAgentOpts {
 }
 
 /**
- * Calls a lookup function the way Node's net/tls connect does and resolves
- * with whatever address it hands back. Deliberately tolerant of an
- * asynchronous callback so the assertion under test is the *security*
- * property (which address reaches connect) rather than the incidental
- * detail of whether the callback fired synchronously.
+ * The options Node actually passes to a custom `lookup` on the default
+ * happy-eyeballs path (autoSelectFamily defaults to true on Node >= 20 and
+ * undici 6 does not override it). Observed empirically, not guessed — an
+ * earlier version of this harness passed `{}`, which made the suite pass
+ * while every real connection failed with ERR_INVALID_IP_ADDRESS because the
+ * pinned lookup returned the non-`all` result shape.
  */
-function invokePinned(lookup: LookupFunction, hostname: string): Promise<{ address: string; family?: number }> {
+const NODE_HAPPY_EYEBALLS_OPTS = { hints: 1024, all: true } as const
+const NODE_SINGLE_OPTS = { hints: 1024 } as const
+
+/**
+ * Calls a lookup function the way Node's net/tls connect does and resolves
+ * with the address(es) it hands back, normalized to a list. Deliberately
+ * tolerant of an asynchronous callback so the assertion under test is the
+ * *security* property (which address reaches connect) rather than the
+ * incidental detail of whether the callback fired synchronously.
+ */
+function invokePinned(
+  lookup: LookupFunction,
+  hostname: string,
+  options: dns.LookupOptions = NODE_HAPPY_EYEBALLS_OPTS,
+): Promise<Array<{ address: string; family?: number }>> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('lookup callback was never invoked')), 1_000)
-    lookup(hostname, {}, (err, address, family) => {
+    lookup(hostname, options, (err, address, family) => {
       clearTimeout(timer)
       if (err) reject(err)
-      else resolve({ address: address as string, family })
+      else if (Array.isArray(address)) resolve(address)
+      else resolve([{ address, family }])
     })
   })
 }
@@ -70,6 +92,7 @@ beforeEach(() => {
   dnsLookupMock.mockReset()
   undiciFetchMock.mockReset()
   agentCtorMock.mockReset()
+  agentCloseMock.mockReset()
 })
 
 // ─── classifyAddress: CIDR-correct IPv4/IPv6 classification ───────────────
@@ -155,6 +178,37 @@ describe('classifyAddress — IPv6', () => {
     // allow-lists 'unicast' instead of enumerating dangerous ranges by name.
     expect(classifyAddress('2001:db8::1').blocked).toBe(true)
   })
+
+  it('blocks IPv4-COMPATIBLE IPv6 (::/96), which the range table calls plain unicast', () => {
+    // Distinct from IPv4-mapped (::ffff:0:0/96) above. ipaddr.js has no ::/96
+    // entry and process() does not unwrap it, so ::7f00:1 (== ::127.0.0.1)
+    // and ::a9fe:a9fe (== ::169.254.169.254, cloud metadata) both classify as
+    // 'unicast' from the table alone — verified against ipaddr.js 2.5.0. They
+    // are only blocked because classifyAddress() special-cases the range.
+    for (const ip of ['::7f00:1', '::a9fe:a9fe', '::a00:1', '0:0:0:0:0:0:7f00:1', '::2']) {
+      const result = classifyAddress(ip)
+      expect(result.blocked, ip).toBe(true)
+      expect(result.range, ip).toBe('ipv4Compatible')
+    }
+  })
+
+  it('blocks NAT64, 6to4 and Teredo prefixes that can embed a private IPv4', () => {
+    for (const ip of ['64:ff9b::7f00:1', '2002:7f00:1::1', '2001:0:1234::1']) {
+      expect(classifyAddress(ip).blocked, ip).toBe(true)
+    }
+  })
+
+  it('fails closed (blocked) on unparseable input rather than throwing', () => {
+    // classifyAddress is exported as a reusable classifier, and ipaddr.process
+    // throws a bare Error on malformed input. A caller doing `instanceof
+    // BlockedAddressError` error mapping must never see a parse failure as
+    // "allowed", and must not get an unexpected exception class either.
+    for (const bad of ['', 'not-an-ip', '1.2.3.4.5', '999.1.1.1', 'fe80::zz']) {
+      expect(() => classifyAddress(bad), bad).not.toThrow()
+      expect(classifyAddress(bad).blocked, bad).toBe(true)
+      expect(classifyAddress(bad).range, bad).toBe('unparseable')
+    }
+  })
 })
 
 // ─── resolveValidatedAddress: resolve-all, validate-all, fail-closed ──────
@@ -162,20 +216,20 @@ describe('classifyAddress — IPv6', () => {
 describe('resolveValidatedAddress', () => {
   it('skips DNS entirely for an IPv4 literal', async () => {
     const result = await resolveValidatedAddress('8.8.8.8')
-    expect(result).toEqual({ address: '8.8.8.8', family: 4 })
+    expect(result).toEqual({ address: '8.8.8.8', family: 4, hostname: '8.8.8.8' })
     expect(dnsLookupMock).not.toHaveBeenCalled()
   })
 
   it('skips DNS entirely for an IPv6 literal', async () => {
     const result = await resolveValidatedAddress('2001:4860:4860::8888')
-    expect(result).toEqual({ address: '2001:4860:4860::8888', family: 6 })
+    expect(result).toEqual({ address: '2001:4860:4860::8888', family: 6, hostname: '2001:4860:4860::8888' })
     expect(dnsLookupMock).not.toHaveBeenCalled()
   })
 
   it('resolves a hostname to its single public address', async () => {
     dnsLookupMock.mockResolvedValueOnce([{ address: '8.8.8.8', family: 4 }])
     const result = await resolveValidatedAddress('public.example')
-    expect(result).toEqual({ address: '8.8.8.8', family: 4 })
+    expect(result).toEqual({ address: '8.8.8.8', family: 4, hostname: 'public.example' })
     expect(dnsLookupMock).toHaveBeenCalledWith('public.example', { all: true, verbatim: true })
   })
 
@@ -207,22 +261,68 @@ describe('resolveValidatedAddress', () => {
     dnsLookupMock.mockRejectedValueOnce(notFound)
     await expect(resolveValidatedAddress('ghost.example')).rejects.toMatchObject({ code: 'ENOTFOUND' })
   })
+
+  it('bounds DNS time — a nameserver that never answers cannot stall the hop', async () => {
+    // dns.lookup takes no AbortSignal, so this time sits entirely outside the
+    // per-hop fetch timeout (contract #7). An attacker running authoritative
+    // DNS for the hostname can simply never reply.
+    dnsLookupMock.mockImplementationOnce(() => new Promise(() => {}))
+    await expect(resolveValidatedAddress('blackhole.example', 40)).rejects.toThrow(DnsTimeoutError)
+  })
 })
 
 // ─── buildPinnedLookup: connection-binding proof ──────────────────────────
 
 describe('buildPinnedLookup', () => {
-  it('always returns the pre-validated address, ignoring the hostname/options it is called with', async () => {
-    const pinned = buildPinnedLookup({ address: '93.184.216.34', family: 4 })
-    for (const hostname of ['whatever.example', 'attacker-controlled.example', '']) {
-      await expect(invokePinned(pinned, hostname)).resolves.toEqual({ address: '93.184.216.34', family: 4 })
+  it('returns the pre-validated address for the hostname it was validated for', async () => {
+    const pinned = buildPinnedLookup({ address: '93.184.216.34', family: 4, hostname: 'host.example' })
+    for (const options of [NODE_HAPPY_EYEBALLS_OPTS, NODE_SINGLE_OPTS, {}]) {
+      await expect(invokePinned(pinned, 'host.example', options)).resolves.toEqual([
+        { address: '93.184.216.34', family: 4 },
+      ])
     }
   })
 
+  it('refuses to resolve a hostname it was not validated for (defence in depth)', async () => {
+    // The pin is only correct for its own hostname. Nothing in the current
+    // flow can reach this — runHop() builds one Agent per hop — but if a
+    // future change shared an Agent across hops or origins, silently dialing
+    // host B at host A's validated address would be an SSRF bypass. Fail loud.
+    const pinned = buildPinnedLookup({ address: '93.184.216.34', family: 4, hostname: 'host.example' })
+    for (const other of ['attacker-controlled.example', 'host.example.evil.test']) {
+      await expect(invokePinned(pinned, other)).rejects.toThrow(PinnedHostMismatchError)
+    }
+  })
+
+  it('honours Node\'s requested result shape on both the all:true and single-address paths', async () => {
+    // Node signals the expected shape via options.all and rejects the wrong
+    // one with ERR_INVALID_IP_ADDRESS — a hard connect failure, so this is a
+    // functional requirement, not a nicety. The all:true branch is the one
+    // that runs in production (autoSelectFamily defaults on).
+    const pinned = buildPinnedLookup({ address: '93.184.216.34', family: 4, hostname: 'host.example' })
+
+    const arrayShape = await new Promise<unknown>(resolve =>
+      pinned('host.example', NODE_HAPPY_EYEBALLS_OPTS, (_e, addr) => resolve(addr))
+    )
+    expect(Array.isArray(arrayShape)).toBe(true)
+    expect(arrayShape).toEqual([{ address: '93.184.216.34', family: 4 }])
+
+    const stringShape = await new Promise<unknown>(resolve =>
+      pinned('host.example', NODE_SINGLE_OPTS, (_e, addr) => resolve(addr))
+    )
+    expect(Array.isArray(stringShape)).toBe(false)
+    expect(stringShape).toBe('93.184.216.34')
+  })
+
+  it('returns exactly one address — Node dials every address a lookup returns', async () => {
+    const pinned = buildPinnedLookup({ address: '93.184.216.34', family: 4, hostname: 'host.example' })
+    await expect(invokePinned(pinned, 'host.example')).resolves.toHaveLength(1)
+  })
+
   it('never touches dns — the pinned function has no way to re-resolve', async () => {
-    const pinned = buildPinnedLookup({ address: '93.184.216.34', family: 4 })
-    await invokePinned(pinned, 'anything.example')
-    await invokePinned(pinned, 'anything-else.example')
+    const pinned = buildPinnedLookup({ address: '93.184.216.34', family: 4, hostname: 'host.example' })
+    await invokePinned(pinned, 'host.example')
+    await invokePinned(pinned, 'host.example', NODE_SINGLE_OPTS)
     expect(dnsLookupMock).not.toHaveBeenCalled()
   })
 
@@ -241,10 +341,9 @@ describe('buildPinnedLookup', () => {
     // The address handed to connect must still be the validated one — if the
     // lookup re-resolved, it would hand back 169.254.169.254 here.
     const pinned = buildPinnedLookup(validated)
-    await expect(invokePinned(pinned, 'rebinder.example')).resolves.toEqual({
-      address: '93.184.216.34',
-      family: 4,
-    })
+    await expect(invokePinned(pinned, 'rebinder.example')).resolves.toEqual([
+      { address: '93.184.216.34', family: 4 },
+    ])
     // And it must not have consulted DNS again — the mock's call count
     // staying at 1 (with the private answer still queued and unused) is the
     // proof that no second resolution ever happens.
@@ -267,17 +366,60 @@ describe('safeFetch — connection-bound wiring', () => {
     const opts = agentCtorMock.mock.calls[0][0] as CapturedAgentOpts
     const lookup = opts.connect?.lookup
     expect(typeof lookup).toBe('function')
-    // The connector calls this with whatever hostname it was given
-    // (undici passes the *original* hostname straight through — see the
-    // module doc comment) — even a hostile one must still resolve to the
-    // address this module already validated.
-    await expect(invokePinned(lookup!, 'attacker-controlled.example')).resolves.toEqual({
-      address: '93.184.216.34',
-      family: 4,
-    })
+    // undici passes the request's own hostname to the connector, so the pin
+    // must answer for it with the address this module already validated. The
+    // sibling real-socket suite proves Node actually accepts this and dials it.
+    await expect(invokePinned(lookup!, 'good.example')).resolves.toEqual([
+      { address: '93.184.216.34', family: 4 },
+    ])
 
     const fetchArgs = undiciFetchMock.mock.calls[0]
     expect(String(fetchArgs[0])).toBe('https://good.example/')
+  })
+
+  it('bounds the request with an abort signal and closes the Agent afterwards', async () => {
+    // Both were previously unasserted: deleting the `signal` line, or every
+    // `agent.close()` call, left the whole suite green while leaking sockets
+    // and removing the per-hop time bound (contract #7).
+    dnsLookupMock.mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+    undiciFetchMock.mockResolvedValueOnce(new Response('hello', { status: 200 }))
+
+    await safeFetch('https://good.example/', { timeoutMs: 1_234 })
+
+    const init = undiciFetchMock.mock.calls[0][1] as { signal?: AbortSignal }
+    expect(init.signal).toBeInstanceOf(AbortSignal)
+    expect(agentCloseMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes the Agent even when the fetch itself throws', async () => {
+    dnsLookupMock.mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+    undiciFetchMock.mockRejectedValueOnce(Object.assign(new Error('fetch failed'), { cause: { code: 'ECONNRESET' } }))
+
+    await safeFetch('https://good.example/').catch(() => {})
+
+    expect(agentCloseMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('forwards method, body, headers and User-Agent to the request', async () => {
+    dnsLookupMock.mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+    undiciFetchMock.mockResolvedValueOnce(new Response('ok', { status: 200 }))
+
+    await safeFetch('https://good.example/submit', {
+      method: 'POST',
+      body: 'a=1',
+      headers: { 'X-Probe': 'probe-value' },
+      userAgent: 'Custom-UA',
+    })
+
+    const init = undiciFetchMock.mock.calls[0][1] as {
+      method?: string
+      body?: unknown
+      headers?: Record<string, string>
+    }
+    expect(init.method).toBe('POST')
+    expect(init.body).toBe('a=1')
+    expect(init.headers?.['X-Probe']).toBe('probe-value')
+    expect(init.headers?.['User-Agent']).toBe('Custom-UA')
   })
 
   it('never delegates redirect-following to the underlying client', async () => {
@@ -384,6 +526,122 @@ describe('safeFetch — redirects', () => {
     undiciFetchMock.mockResolvedValueOnce(new Response(null, { status: 301 }))
     await expect(safeFetch('https://good.example/')).rejects.toThrow(InvalidRedirectError)
   })
+
+  it('rejects a Location that switches to a non-http(s) scheme', async () => {
+    // The scheme check runs on every hop, but nothing exercised it past hop 0
+    // — and this is the only path that can produce DisallowedSchemeError from
+    // a redirect, which the prospecting error map has a branch for.
+    for (const location of ['file:///etc/passwd', 'ftp://good.example/x', 'gopher://good.example/']) {
+      dnsLookupMock.mockReset()
+      undiciFetchMock.mockReset()
+      dnsLookupMock.mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+      undiciFetchMock.mockResolvedValueOnce(new Response(null, { status: 302, headers: { location } }))
+      const err = await safeFetch('https://good.example/').catch(e => e)
+      expect(err, location).toBeInstanceOf(DisallowedSchemeError)
+      expect(undiciFetchMock, location).toHaveBeenCalledTimes(1)
+    }
+  })
+
+  it('resolves a protocol-relative Location and still address-checks it', async () => {
+    dnsLookupMock.mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+    undiciFetchMock.mockResolvedValueOnce(
+      new Response(null, { status: 302, headers: { location: '//169.254.169.254/latest/meta-data' } })
+    )
+    await expect(safeFetch('https://good.example/')).rejects.toThrow(BlockedAddressError)
+  })
+
+  it('cancels the redirect body before closing the Agent', async () => {
+    // Regression guard for a hop-stalling hang: undici's close() waits on
+    // in-flight responses, so an unread 3xx body over ~64 KiB blocks it until
+    // the abort timer fires, costing a full timeoutMs per hop. The sibling
+    // real-socket suite proves the hang and the fix at the undici level; this
+    // asserts safeFetch actually performs the cancel, and does it *before*
+    // close (order matters — cancelling after a hung close is too late).
+    const order: string[] = []
+    const cancel = vi.fn(async () => {
+      order.push('cancel')
+    })
+    agentCloseMock.mockImplementation(() => {
+      order.push('close')
+    })
+    dnsLookupMock
+      .mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+      .mockResolvedValueOnce([{ address: '8.8.4.4', family: 4 }])
+    undiciFetchMock
+      .mockResolvedValueOnce({
+        status: 302,
+        headers: new Headers({ location: 'https://good-2.example/' }),
+        body: { cancel },
+      })
+      .mockResolvedValueOnce(new Response('final', { status: 200 }))
+
+    await safeFetch('https://good.example/')
+
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(order).toEqual(['cancel', 'close', 'close'])
+  })
+})
+
+describe('safeFetch — redirect credential and method policy', () => {
+  const redirectThenOk = (location: string, status = 302) => {
+    dnsLookupMock
+      .mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+      .mockResolvedValueOnce([{ address: '8.8.4.4', family: 4 }])
+    undiciFetchMock
+      .mockResolvedValueOnce(new Response(null, { status, headers: { location } }))
+      .mockResolvedValueOnce(new Response('final', { status: 200 }))
+  }
+  const headersOf = (call: number) =>
+    (undiciFetchMock.mock.calls[call][1] as { headers?: Record<string, string> }).headers ?? {}
+  const initOf = (call: number) =>
+    undiciFetchMock.mock.calls[call][1] as { method?: string; body?: unknown }
+
+  it('strips credential headers when a redirect leaves the origin', async () => {
+    // The *previous* server chooses the next hop, so forwarding credentials
+    // hands them to whoever controls that hop. Platform fetch strips these on
+    // cross-origin redirects; this module reimplements the redirect loop and
+    // so has to reimplement the protection too.
+    redirectThenOk('https://attacker.example/collect')
+    await safeFetch('https://good.example/', {
+      headers: { Authorization: 'Bearer secret-token', Cookie: 'session=abc', 'X-Safe': 'keep-me' },
+    })
+
+    expect(headersOf(0).Authorization).toBe('Bearer secret-token') // hop 0: original host, fine
+    expect(headersOf(1)).not.toHaveProperty('Authorization')
+    expect(headersOf(1)).not.toHaveProperty('Cookie')
+    expect(headersOf(1)['X-Safe']).toBe('keep-me') // non-credential headers survive
+  })
+
+  it('keeps credential headers on a same-origin redirect', async () => {
+    redirectThenOk('https://good.example/moved')
+    await safeFetch('https://good.example/', { headers: { Authorization: 'Bearer secret-token' } })
+    expect(headersOf(1).Authorization).toBe('Bearer secret-token')
+  })
+
+  it('strips credentials when only the scheme changes (https -> http is cross-origin)', async () => {
+    redirectThenOk('http://good.example/downgraded')
+    await safeFetch('https://good.example/', { headers: { Authorization: 'Bearer secret-token' } })
+    expect(headersOf(1)).not.toHaveProperty('Authorization')
+  })
+
+  it('downgrades 303 to a bodyless GET', async () => {
+    redirectThenOk('https://good.example/result', 303)
+    await safeFetch('https://good.example/', { method: 'POST', body: 'a=1' })
+    expect(initOf(1).method).toBe('GET')
+    expect(initOf(1).body).toBeUndefined()
+  })
+
+  it('downgrades a 301/302 POST to a bodyless GET but preserves 307', async () => {
+    for (const [status, expectedMethod] of [[301, 'GET'], [302, 'GET'], [307, 'POST']] as const) {
+      dnsLookupMock.mockReset()
+      undiciFetchMock.mockReset()
+      redirectThenOk('https://good.example/next', status)
+      await safeFetch('https://good.example/', { method: 'POST', body: 'a=1' })
+      expect(initOf(1).method, `status ${status}`).toBe(expectedMethod)
+      if (expectedMethod === 'GET') expect(initOf(1).body, `status ${status}`).toBeUndefined()
+      else expect(initOf(1).body, `status ${status}`).toBe('a=1')
+    }
+  })
 })
 
 describe('safeFetch — resource bounds', () => {
@@ -393,6 +651,34 @@ describe('safeFetch — resource bounds', () => {
     await expect(safeFetch('https://public.example/big', { maxResponseBytes: 10 })).rejects.toThrow(
       ResponseTooLargeError
     )
+  })
+
+  it('enforces the size cap across chunks, before buffering the one that exceeds it', async () => {
+    // A single-chunk fixture only covers the first iteration and cannot catch
+    // the check being moved after the push (which would buffer unbounded data
+    // before noticing). Stream 10 x 40 bytes against a 100-byte cap: the cap
+    // must trip on the third chunk, and the stream must be cancelled rather
+    // than drained.
+    const cancel = vi.fn(async () => {})
+    let produced = 0
+    const body = {
+      getReader: () => ({
+        read: async () => {
+          if (produced >= 10) return { done: true, value: undefined }
+          produced += 1
+          return { done: false, value: new Uint8Array(40) }
+        },
+        cancel,
+      }),
+    }
+    dnsLookupMock.mockResolvedValueOnce([{ address: '8.8.8.8', family: 4 }])
+    undiciFetchMock.mockResolvedValueOnce({ status: 200, statusText: 'OK', headers: new Headers(), body })
+
+    await expect(safeFetch('https://public.example/stream', { maxResponseBytes: 100 })).rejects.toThrow(
+      ResponseTooLargeError
+    )
+    expect(produced).toBe(3) // stopped as soon as the cap was exceeded
+    expect(cancel).toHaveBeenCalledTimes(1)
   })
 
   it('propagates a timeout abort without renaming it', async () => {
