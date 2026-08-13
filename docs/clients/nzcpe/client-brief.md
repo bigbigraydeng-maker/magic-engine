@@ -80,6 +80,12 @@
 - **PM 确认后恢复**：2026 首次从 Auckland Showgrounds 换到 NZICC 是真的，补回一条准确版本（去掉编造的"买家人流翻倍"数字）；合办方 Shaanxi Brand Culture Technology Co., Ltd.（SCG 子公司）确认真实，保留
 - **PM 拿不到真数字，已删除**：2024 届现场交易/意向合同具体金额（原写 400万/8000万人民币，逻辑还矛盾——意向合同比 2025 届还高却叫"增长"）、2025 届展区面积"5,000㎡"
 
+## 假新闻清理漏网补丁（2026-08-14）
+
+8-05 那轮清理漏了一批编造买家名单，散在 6 个文件（`about.html`/`register-exhibitor.html`/`exhibit.html`/`index.html`/`china-focused-trade-shows-new-zealand.html`/`china-business-entry-new-zealand-market.html`），写着"历届买家包括 Mainfreight / The Warehouse Group / Noel Leeming / Metro 10 / EMA"——brief 只 confirm 了 Foodstuffs 一家历届买家，其余全无出处，已全部删除只留 Foodstuffs。`china-business-entry-new-zealand-market.html` 还查到一条编造的"Q1 2025 贸易增长8.9%"（可见正文 + JSON-LD FAQ + 隐藏的 AI 说明块三处都写了，已全删）；`china-focused-trade-shows-new-zealand.html` 有编造的"five-tier sponsorship"赞助档位细节（brief 只有 sponsorship@ 邮箱，没有具体档位设计），已改成"联系 sponsorship@ 问档位"。
+
+**这次多查到的教训**：网站里除了人看的正文，还藏着专门喂给 AI 搜索引擎看的隐藏说明块（`class="ai-instructions"`，`display:none`），这次假新闻清理 8-05 那轮完全没扫到这层——以后清理假内容要连这层一起查，不能只看人眼可见的部分。已部署。
+
 ## 网站地址错误修复 + GBP 卡点（2026-08-05）
 
 **发现并修复**：网站全站写的 NZICC 地址"11–13 Hobson Street"是错的。NZICC 官网（nzicc.co.nz）两处信源核实，真实地址是 **101 Hobson Street, Auckland Central, Auckland 1010**。已全站（13个文件，23处）改正并部署验证生效。

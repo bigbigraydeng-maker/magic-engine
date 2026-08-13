@@ -103,6 +103,7 @@ chunked 绕过 OOM 闸 · 闸门没接在花钱那条线上 · 归档入口（�
 - [x] **NZCPE.3** NZCPE 2026 DataForSEO 关键词调研已完成 2026-08-05，写入 `clients.primary_keywords`。真实发现：品牌词("NZCPE"等)搜索量≈0，"things to do with kids auckland"(1900/月,难度20)才是真实流量入口，内容方向应该从"贸易博览会"品牌向转成"奥克兰周末免费亲子活动"意图向
 - [x] **NZCPE.4** NZCPE 2026 网站 SEO 技术审计+修复已完成 2026-08-05：加了 canonical/OG/Twitter Card(全站原本零覆盖，FB广告落地页分享没有预览图) + Event/Organization JSON-LD 结构化数据 + 修了首页 title 日期写错(19-22误写成20-22实际是20-22)。⚠️ 还差：Google Search Console 从未提交(无验证 tag)——需 PM 的 Google 账号登录才能拿验证码，我这边进不去；Meta Pixel 也没埋，投 Conversions 类广告前必须先装
 - [ ] **NZCPE.5** NZCPE 2026 网站+FB 内容规划+广告计划已出草案，见 [docs/clients/nzcpe/content-and-ads-plan.md](./clients/nzcpe/content-and-ads-plan.md)。待 PM 拍板：广告预算量级、广告账户挂谁、要不要做"things to do with kids"博客内容、中文素材由谁做
+- [x] **NZCPE.6** 客户微信发来《2026 NZCPE 官网修改与优化建议》，P0+P1 已全部上线（2026-08-14）：全站导航统一、新建 EXHIBIT/Exhibitor Centre/Exhibitor Directory/Floor Plan 四个页面、首页重排、VISIT 页扩写、footer 加 Follow Us、sitemap 更新。过程中额外查到 8-05 那轮假新闻清理有漏网——6 个文件里散落着编造的历届买家名单(Mainfreight/The Warehouse Group/Noel Leeming/Metro 10)、一条编造的"Q1 2025 贸易涨8.9%"数据（还藏在给 AI 搜索引擎看的隐藏说明块里，人眼清理时完全没扫到）、编造的"five-tier 赞助档位"细节，这次一并清理只留 brief 能对上的 Foodstuffs。**待 Richard 提供才能收尾**（不阻塞已上线框架）：Exhibitor Guide/Media Kit 实际 PDF、Floor Plan 图片、已签约展商资料、8 个非 Facebook 社媒真实链接
 - [ ] **TM.1** 团队工作记忆 · 套路层出第一条：机器已建好，但要先吃几天真实会话数据才提炼得出可复用套路。观察 `team_skills` 是否开始有行；一周后没有就回头看 distill prompt 的套路判据是不是太严
 - [ ] **TM.2** 团队工作记忆 · 后台页 `/dashboard/team-memory` 补视觉验证：功能上线时页面在登录墙后未做视觉检查，数据层与接口层已验
 - [ ] **TM.3** 团队工作记忆 · 补第二个 agent 复审：按铁律 4 属大任务（加表 + 新 endpoint + 新 UI），交付时只做了自审 + 变异测试，缺魏征挑刺那一刀

@@ -5,6 +5,36 @@
 
 ---
 
+### 2026-08-14（NZCPE 2026 官网改版 P0+P1 上线 + 假新闻清理补漏）
+
+客户（Richard Meng）通过微信发来《2026 NZCPE 官网修改与优化建议》，要求把 `nzcpe.co.nz` 从"品牌介绍型"
+升级为"2026 展会线上运营入口"。PM 拍板品牌色以 VI 手册为准（NZ 蓝 `#003DA5` + 中国红 `#E81E1D`）、
+P0+P1 一起做、展商招商意向继续走现有邮件通道（不碰 ME 后台）。
+
+**P0（立即上线）**：全站导航统一成 `Home / Visit / Exhibit / Exhibitors / Exhibitor Centre / News / Contact`；
+新建 `exhibit.html` 合并旧 `exhibition-zones.html` + `register-exhibitor.html`（顺带修正了展位价格——旧
+页面写的是错误的 NZD 数字，真实报价是 RMB 42,000/84,000/126,000）；VISIT 页加"来之前先知道"5 问区块
++ Visitor FAQ；首页按 Hero→Why Visit→Product Categories→Meet 2026 Exhibitors→Exhibit With Us→News→
+Venue→Follow NZCPE 重排；新建 `exhibitor-centre.html`（Guide/Media Kit 下载占位 + 素材/人员/物流三个提
+交表单，复用现有 `/api/register` 机制不用改代码）。旧页面 `exhibition-zones.html`/`register-exhibitor.html`
+通过 `_redirects` 301 到新页面，不留死链。
+
+**P1（本月做）**：新建 `exhibitors.html`（展商目录空态页，诚实文案"展商陆续确认中"，不编造任何公司名）、
+`floor-plan.html`（占位框架，等 Richard 给图）、全站 footer 加"Follow Us"（只放已核实的 Facebook 真链接，
+其余 8 个平台没有真实链接就不编）、`sitemap.xml` 同步更新。
+
+**假新闻清理补漏（意外发现）**：例行检查时发现 8-05 那轮"先处理假新闻"清理有遗漏——6 个文件（`about.html`
+`register-exhibitor.html`（后续被 `exhibit.html` 取代）`index.html`、以及后来生成的两篇 B2B 长文）里散
+落着编造的历届买家名单（Mainfreight / The Warehouse Group / Noel Leeming / Metro 10），brief 只 confirm
+了 Foodstuffs 一家；`china-business-entry-new-zealand-market.html` 还有一条编造的"Q1 2025 贸易增长8.9%"，
+同时出现在可见正文、JSON-LD FAQ 结构化数据、以及**专门喂给 AI 搜索引擎看的隐藏说明块**（`class="ai-
+instructions"`，`display:none`）三处——这层隐藏块是 8-05 那轮清理完全没扫到的盲区，因为只看人眼可见内
+容。`china-focused-trade-shows-new-zealand.html` 还有编造的"five-tier 赞助档位"细节（brief 只有
+sponsorship@ 邮箱，没有具体档位设计）。全部清理，只留有据可查的 Foodstuffs 和"联系 sponsorship@ 问档位"。
+
+部署走专属 Cloudflare API token（避免多窗口并行时全局登录被切走），移动端在首页/Exhibitor Centre/
+Exhibitor Directory 三个改动最大的页面过了 `resize_window` 检查。
+
 ### 2026-08-12（ME2 WP04A：GEO 测量线接上真东西，并跑出 Roman 首个生产 baseline）
 
 issue [#883](https://github.com/bigbigraydeng-maker/magic-engine/issues/883) ·
