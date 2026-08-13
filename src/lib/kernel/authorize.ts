@@ -133,6 +133,14 @@ interface DenyArgs {
    */
   onlyIfStatus?: ActionRun['status']
   /**
+   * 🔴 审批人当时在页面上看到的那份审批请求的 id（见 HumanDecisionOptions）。
+   *    人工批准的失败分支必须带上它，一路传进数据库锁内的 CAS ——
+   *    不带的话，`onlyIfStatus: 'pending_approval'` 只保证 run 还没被批准
+   *    或拒绝过，保证不了它没有在期间被重新排成**另一份**待审批请求；
+   *    这种情况下失败分支会把新请求直接覆盖成 denied。
+   */
+  expectedDecisionId?: string | null
+  /**
    * 🔴 F2：推进这条 run 的那一代。
    *    授权前置校验（读政策、读注册表）是有耗时的 —— A 卡在那儿的时候租约可能
    *    已经过期、B 已经接管并把这件事跑完了。A 醒过来接着落拒绝，
@@ -153,6 +161,7 @@ async function recordDeny(deps: KernelDeps, args: DenyArgs): Promise<Authorizati
     runId: args.run.id,
     expectedGeneration: args.fence?.generation ?? null,
     expectedStatus: args.onlyIfStatus ?? null,
+    expectedDecisionId: args.expectedDecisionId ?? null,
     reason: args.reason,
     decision: {
       client_id: args.run.client_id,
@@ -175,6 +184,14 @@ async function recordDeny(deps: KernelDeps, args: DenyArgs): Promise<Authorizati
       throw new KernelError(
         'STALE_CLAIM',
         '这次执行的所有权已经被别人接管了（你手里那一代已经作废）—— 已停手，不会重复做',
+        { detail: { runId: args.run.id, denyCode: args.code, reason: written.reason } },
+      )
+    }
+    if (written.reason === 'decision_not_current') {
+      throw new KernelError(
+        'STALE_DECISION',
+        '你看到的那份审批请求已经不是最新的了（这条动作期间被重新排过或规则改过）——' +
+          '这次操作没有生效，也没有改动任何东西。刷新一下再决定',
         { detail: { runId: args.run.id, denyCode: args.code, reason: written.reason } },
       )
     }
@@ -576,6 +593,12 @@ export async function reuseLiveAuthorization(
  */
 export interface HumanDecisionOptions {
   readonly expectedDecisionId?: string
+  /**
+   * 🔴 批准时人写的备注（可选）。跟 rejectRun 的 `reason` 参数一样要落进
+   *    append-only 的决策记录 —— 不落的话，接口按契约收下了这段话，
+   *    审计表里却只剩自动生成的通用理由，备注被静默丢弃。
+   */
+  readonly reason?: string
 }
 
 /**
@@ -650,6 +673,7 @@ export async function approveRun(
       reason: `${approvedByUser} 点了同意，但找不到当初挂起这条动作的那份审批请求了 —— 不能凭空签一份放行，请重新排一次`,
       costEstimate: null,
       onlyIfStatus: 'pending_approval',
+      expectedDecisionId: options.expectedDecisionId ?? run.authorization_decision_id ?? null,
     })
   }
 
@@ -665,6 +689,7 @@ export async function approveRun(
       reason: `${approvedByUser} 点了同意，但这条现在已经不能做了：${pf.reason}`,
       costEstimate: pf.costEstimate,
       onlyIfStatus: 'pending_approval',
+      expectedDecisionId: options.expectedDecisionId ?? pending.id,
     })
   }
 
@@ -680,6 +705,7 @@ export async function approveRun(
       reason: `${approvedByUser} 点了同意，但这个客户的规则在挂起之后被改成了「${policy.mode === 'auto_approve' ? '自动执行' : policy.mode}」—— 规则变了就不能按旧的审批请求放行，请重新排一次`,
       costEstimate,
       onlyIfStatus: 'pending_approval',
+      expectedDecisionId: options.expectedDecisionId ?? pending.id,
     })
   }
 
@@ -693,6 +719,7 @@ export async function approveRun(
       reason: `${approvedByUser} 点了同意，但这个客户的规则在挂起之后被删掉重建过 —— 你看到的还是旧规则下的请求，请重新排一次`,
       costEstimate,
       onlyIfStatus: 'pending_approval',
+      expectedDecisionId: options.expectedDecisionId ?? pending.id,
     })
   }
 
@@ -706,6 +733,7 @@ export async function approveRun(
       reason: `${approvedByUser} 点了同意，但这个客户的规则在挂起之后改过（第 ${pending.policy_version} 版 → 第 ${policy.policy_version} 版）—— 你看到的还是旧规则下的请求，请重新排一次`,
       costEstimate,
       onlyIfStatus: 'pending_approval',
+      expectedDecisionId: options.expectedDecisionId ?? pending.id,
     })
   }
 
@@ -721,7 +749,9 @@ export async function approveRun(
     pendingDecisionId: options.expectedDecisionId ?? pending.id,
     resolution: 'approve',
     resolvedBy: approvedByUser,
-    reason: `${approvedByUser} 点了同意（规则自挂起以来没变过，仍是第 ${policy.policy_version} 版）`,
+    reason:
+      `${approvedByUser} 点了同意（规则自挂起以来没变过，仍是第 ${policy.policy_version} 版）` +
+      (options.reason ? `：${options.reason}` : ''),
     policySnapshot: snapshotOf(policy, definition),
     costEstimateUsd: costEstimate,
   })

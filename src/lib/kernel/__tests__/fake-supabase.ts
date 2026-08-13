@@ -1020,6 +1020,7 @@ export function createFakeSupabase(
         ? null
         : Number(args.p_expected_generation)
     const expectedStatus = (args.p_expected_status ?? null) as string | null
+    const expectedDecisionId = (args.p_expected_decision_id ?? null) as string | null
     const d = (args.p_decision ?? {}) as Row
     const reason = String(args.p_reason)
     const no = (r: string) => ({ ok: false, reason: r, decision_id: null })
@@ -1039,6 +1040,10 @@ export function createFakeSupabase(
     }
     if (expectedStatus !== null && run.status !== expectedStatus) {
       return no(`not_${expectedStatus}:${String(run.status)}`)
+    }
+    // 指针闸：run 当前指着的必须还是调用方看到的那份请求（跟 SQL 同一道闸）
+    if (expectedDecisionId !== null && run.authorization_decision_id !== expectedDecisionId) {
+      return no('decision_not_current')
     }
 
     const nowIso = (options.now?.() ?? new Date()).toISOString()

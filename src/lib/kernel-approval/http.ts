@@ -45,11 +45,16 @@ export function approvalErrorResponse(err: unknown): NextResponse {
 export async function requireApprovalActor(clientId: string): Promise<ApprovalActor> {
   const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
-    throw new ApprovalError(
-      access.status === 401 ? 'unauthorized' : 'forbidden_client',
-      access.error,
-      { reason: access.reason ?? null },
-    )
+    if (access.status === 401) {
+      throw new ApprovalError('unauthorized', access.error, { reason: access.reason ?? null })
+    }
+    // 🔴 500 = 权限查询本身炸了（数据库故障），不是「查清楚了、你没权限」——
+    //    降级成 forbidden_client 会把系统故障说成用户没权限，客户端不会重试
+    //    也不会显示系统故障。原样抛出去，交给 approvalErrorResponse 的兜底答 500。
+    if (access.status === 500) {
+      throw new Error(`[kernel-approval] 客户权限查询失败：${access.error}`)
+    }
+    throw new ApprovalError('forbidden_client', access.error, { reason: access.reason ?? null })
   }
 
   const email = (access.user.email ?? '').trim().toLowerCase()

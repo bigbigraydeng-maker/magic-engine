@@ -360,6 +360,7 @@ export async function decideApproval(
 
     const outcome = await approveRun(deps, run.id, actorEmail, {
       expectedDecisionId: input.expectedDecisionId,
+      reason: input.reason,
     })
 
     // 🔴 批准也可能被 fail closed 拒掉（挂起期间政策改了 / 契约升版 / 超预算）——
