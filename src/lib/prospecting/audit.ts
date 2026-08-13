@@ -8,14 +8,16 @@
  * (score.ts) so only high-opportunity prospects reach the paid AI step.
  *
  * Safety: prospect website URLs come from Google Business listings, which
- * anyone can create — treat them as attacker-controlled. Redirects are
- * followed manually with a private-address check on every hop, and this
- * function never throws (a poison URL must not wedge the audit batch).
+ * anyone can create — treat them as attacker-controlled. Fetches use the
+ * shared connection-bound SSRF primitive and this function never throws.
  */
 
-import { lookup } from 'node:dns/promises'
-import { isIP } from 'node:net'
 import { getOnPageInstant, type OnPageResult } from '@/lib/dataforseo/onpage'
+import {
+  isPublicIpAddress,
+  safeFetchText,
+  SafeFetchError,
+} from '@/lib/security/safe-fetch'
 import { detectTrackingSignals, type TrackingSignals } from './tracking-detector'
 
 export interface ProspectAudit {
@@ -34,6 +36,7 @@ export interface ProspectAudit {
 }
 
 const FETCH_TIMEOUT_MS = 10_000
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 const MAX_REDIRECTS = 3
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
@@ -52,43 +55,10 @@ export function normaliseUrl(raw: string): string | null {
   }
 }
 
-// ─── SSRF guard ───────────────────────────────────────────────────────────────
-
-function isPrivateIpV4(ip: string): boolean {
-  const [a, b] = ip.split('.').map(Number)
-  return a === 0 || a === 10 || a === 127 ||
-    (a === 100 && b >= 64 && b <= 127) ||   // CGNAT
-    (a === 169 && b === 254) ||             // link-local / cloud metadata
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168)
-}
-
-/** Exported for tests. */
+/** Backward-compatible export; all non-public and malformed addresses are blocked. */
 export function isPrivateIp(ip: string): boolean {
-  if (isIP(ip) === 4) return isPrivateIpV4(ip)
-  const v6 = ip.toLowerCase().replace(/^\[|\]$/g, '')
-  if (v6 === '::' || v6 === '::1') return true
-  if (v6.startsWith('fc') || v6.startsWith('fd') || v6.startsWith('fe8') || v6.startsWith('fe9')) return true
-  const mapped = v6.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)
-  return mapped ? isPrivateIpV4(mapped[1]) : false
+  return !isPublicIpAddress(ip)
 }
-
-/** Throws when the URL's host resolves to a private / internal address. */
-async function assertPublicHost(url: URL): Promise<void> {
-  const host = url.hostname
-  if (isIP(host)) {
-    if (isPrivateIp(host)) throw new BlockedAddressError(host)
-    return
-  }
-  const { address } = await lookup(host)
-  if (isPrivateIp(address)) throw new BlockedAddressError(host)
-}
-
-class BlockedAddressError extends Error {
-  constructor(host: string) { super(`blocked private address: ${host}`) }
-}
-
-// ─── Homepage fetch ───────────────────────────────────────────────────────────
 
 type FetchOutcome =
   | { ok: true; html: string; finalUrl: string }
@@ -97,60 +67,45 @@ type FetchOutcome =
 /** Error codes that prove the site is down/absent at the network layer. */
 const HARD_FAILURE_CODES = /^(ENOTFOUND|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|CERT_|ERR_TLS|ERR_SSL|UNABLE_TO_|DEPTH_ZERO|SELF_SIGNED)/
 
+function nestedErrorCode(error: SafeFetchError): string {
+  return (error.cause as { code?: string } | undefined)?.code ?? ''
+}
+
 function classifyFetchError(err: unknown): { https_ok: false | null; error: string } {
-  if (err instanceof BlockedAddressError) return { https_ok: null, error: 'blocked_private_address' }
-  const cause = (err as { cause?: { code?: string } })?.cause
-  const code = cause?.code ?? (err as { code?: string })?.code ?? ''
+  const safeError = err as SafeFetchError | undefined
+  if (safeError?.name !== 'SafeFetchError') return { https_ok: null, error: 'fetch_failed' }
+  if (safeError.code === 'blocked_address') return { https_ok: null, error: 'blocked_private_address' }
+  if (safeError.code === 'unsupported_scheme') return { https_ok: null, error: 'non_http_redirect' }
+  if (safeError.code === 'redirect_without_location') {
+    return { https_ok: null, error: `redirect_without_location_${safeError.status}` }
+  }
+  if (safeError.code === 'too_many_redirects') return { https_ok: null, error: 'too_many_redirects' }
+  if (safeError.code === 'timeout') return { https_ok: null, error: 'timeout' }
+  const code = nestedErrorCode(safeError)
   if (HARD_FAILURE_CODES.test(code)) return { https_ok: false, error: code }
-  if ((err as Error)?.name === 'TimeoutError') return { https_ok: null, error: 'timeout' }
   return { https_ok: null, error: code || 'fetch_failed' }
 }
 
 async function fetchHomepage(startUrl: string): Promise<FetchOutcome> {
-  let url = startUrl
   try {
-    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      const parsed = new URL(url)
-      if (!/^https?:$/.test(parsed.protocol)) {
-        return { ok: false, https_ok: null, error: 'non_http_redirect' }
-      }
-      await assertPublicHost(parsed)
-
-      const res = await fetch(url, {
-        redirect: 'manual',
-        headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' },
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      })
-
-      if (res.status >= 300 && res.status < 400) {
-        const location = res.headers.get('location')
-        if (!location) return { ok: false, https_ok: null, error: `redirect_without_location_${res.status}` }
-        url = new URL(location, url).href
-        continue
-      }
-      if (!res.ok) return { ok: false, https_ok: null, error: `http_${res.status}` }
-      return { ok: true, html: await res.text(), finalUrl: res.url || url }
-    }
-    return { ok: false, https_ok: null, error: 'too_many_redirects' }
-  } catch (err) {
-    return { ok: false, ...classifyFetchError(err) }
+    const result = await safeFetchText(startUrl, {
+      headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' },
+      timeoutMs: FETCH_TIMEOUT_MS,
+      maxResponseBytes: MAX_RESPONSE_BYTES,
+      maxRedirects: MAX_REDIRECTS,
+    })
+    if (!result.ok) return { ok: false, https_ok: null, error: `http_${result.status}` }
+    return { ok: true, html: result.text, finalUrl: result.finalUrl }
+  } catch (error) {
+    return { ok: false, ...classifyFetchError(error) }
   }
 }
 
-// ─── Contact-page email fallback ────────────────────────────────────────────────
-
 // Small businesses that don't put an email on the homepage almost always list
-// one on a contact page. Tried only when the homepage yielded no email — a few
-// free, SSRF-guarded fetches that lift the "has a real email" rate materially
-// (2026-07-10: only ~35% of prospects had a scraped email; the rest had a site
-// but we only read the homepage).
+// one on a contact page. Tried only when the homepage yielded no email.
 const CONTACT_PATHS = ['/contact', '/contact-us', '/contact-us.html', '/about', '/about-us', '/get-a-quote', '/enquiry', '/quote']
 
-/**
- * When the homepage exposed no email, look on a few common contact pages and
- * return the first non-empty email list found (junk already filtered by the
- * tracking detector). Free fetches, SSRF-guarded, bounded to CONTACT_PATHS.
- */
+/** Fetch common contact pages until one yields a real email address. */
 async function scrapeContactEmails(finalUrl: string): Promise<string[]> {
   let origin: string
   try { origin = new URL(finalUrl).origin } catch { return [] }
@@ -164,10 +119,8 @@ async function scrapeContactEmails(finalUrl: string): Promise<string[]> {
 }
 
 /**
- * Standalone email discovery for a business site (homepage → contact pages),
- * junk already filtered by the tracking detector. Reused by the re-scan batch
- * (P35.11) to backfill prospects that were audited before the contact-page
- * fallback existed, or before CONTACT_PATHS widened. Never throws → [].
+ * Standalone email discovery for a business site (homepage → contact pages).
+ * Reused by the P35.11 re-scan batch. Never throws.
  */
 export async function discoverContactEmail(websiteUrl: string): Promise<string[]> {
   const url = normaliseUrl(websiteUrl)
@@ -179,13 +132,7 @@ export async function discoverContactEmail(websiteUrl: string): Promise<string[]
   return scrapeContactEmails(page.finalUrl)
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
-
-/**
- * Run the zero-AI audit for one prospect website. Never throws.
- *
- * @param websiteUrl  URL (or bare domain) from the business listing.
- */
+/** Run the zero-AI audit for one prospect website. Never throws. */
 export async function runProspectAudit(websiteUrl: string): Promise<ProspectAudit> {
   const fetched_at = new Date().toISOString()
   const empty = { fetched_at, final_url: null, tracking: null, onpage: null }
@@ -195,23 +142,20 @@ export async function runProspectAudit(websiteUrl: string): Promise<ProspectAudi
 
   const page = await fetchHomepage(url)
   if (!page.ok) {
-    // Skip the paid OnPage call for sites we could not reach ourselves.
     return { ...empty, https_ok: page.https_ok, fetch_error: page.error }
   }
 
   const tracking = detectTrackingSignals(page.html)
-  // Homepage had no email? Small-business emails usually live on /contact.
   if (tracking.emails.length === 0) {
     const contactEmails = await scrapeContactEmails(page.finalUrl)
     if (contactEmails.length > 0) tracking.emails = contactEmails
   }
 
   const onpage = await getOnPageInstant(url).catch(() => null)
-
   return {
     fetched_at,
-    final_url:   page.finalUrl,
-    https_ok:    true,
+    final_url: page.finalUrl,
+    https_ok: true,
     fetch_error: null,
     tracking,
     onpage,
