@@ -527,6 +527,33 @@ describe('safeFetch — redirects', () => {
     await expect(safeFetch('https://good.example/')).rejects.toThrow(InvalidRedirectError)
   })
 
+  it('treats a bare 304 as a normal terminal response, not a redirect', async () => {
+    // A conditional GET (If-None-Match / If-Modified-Since) legitimately gets
+    // a 304 with no Location header. The old `status >= 300 && status < 400`
+    // check swept 304 in with the real redirect statuses and threw
+    // InvalidRedirectError on the missing Location — turning a normal,
+    // successful "not modified" response into a thrown error.
+    dnsLookupMock.mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+    undiciFetchMock.mockResolvedValueOnce(new Response(null, { status: 304 }))
+    const res = await safeFetch('https://good.example/')
+    expect(res.status).toBe(304)
+    expect(res.ok).toBe(false)
+    expect(res.hops).toBe(0)
+    expect(undiciFetchMock).toHaveBeenCalledTimes(1) // no second hop attempted
+  })
+
+  it.each([300, 305, 306])('does not follow non-redirect 3xx status %i even with a Location header', async status => {
+    // 300/305/306 are not in fetch's redirect-status set — a Location header
+    // present on one of these must not be followed.
+    dnsLookupMock.mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+    undiciFetchMock.mockResolvedValueOnce(
+      new Response(null, { status, headers: { location: 'https://elsewhere.example/' } })
+    )
+    const res = await safeFetch('https://good.example/')
+    expect(res.status).toBe(status)
+    expect(undiciFetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('rejects a Location that switches to a non-http(s) scheme', async () => {
     // The scheme check runs on every hop, but nothing exercised it past hop 0
     // — and this is the only path that can produce DisallowedSchemeError from
@@ -641,6 +668,52 @@ describe('safeFetch — redirect credential and method policy', () => {
       if (expectedMethod === 'GET') expect(initOf(1).body, `status ${status}`).toBeUndefined()
       else expect(initOf(1).body, `status ${status}`).toBe('a=1')
     }
+  })
+
+  it('preserves HEAD on a 303 redirect instead of downgrading to GET', async () => {
+    // Per the fetch spec, 303 only downgrades a method that is not already
+    // GET or HEAD. A HEAD prober that hits a 303 must still send HEAD on the
+    // next hop — turning it into GET would download a body the caller never
+    // asked for and could change the target server's behaviour.
+    redirectThenOk('https://good.example/result', 303)
+    await safeFetch('https://good.example/', { method: 'HEAD' })
+    expect(initOf(1).method).toBe('HEAD')
+  })
+
+  it('preserves GET on a 303 redirect (already the no-op case)', async () => {
+    redirectThenOk('https://good.example/result', 303)
+    await safeFetch('https://good.example/', { method: 'GET' })
+    expect(initOf(1).method).toBe('GET')
+  })
+
+  it('strips content-description headers when a redirect downgrades the method', async () => {
+    // Once the body is dropped, forwarding Content-Type/Content-Length for a
+    // request that no longer has a body hands the next hop stale metadata
+    // about a body that doesn't exist.
+    redirectThenOk('https://good.example/result', 303)
+    await safeFetch('https://good.example/', {
+      method: 'POST',
+      body: '{"a":1}',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': '7',
+        'X-Keep-Me': 'yes',
+      },
+    })
+    const hop1Headers = headersOf(1)
+    expect(hop1Headers).not.toHaveProperty('Content-Type')
+    expect(hop1Headers).not.toHaveProperty('Content-Length')
+    expect(hop1Headers['X-Keep-Me']).toBe('yes')
+  })
+
+  it('keeps content-description headers when the redirect does not downgrade (307)', async () => {
+    redirectThenOk('https://good.example/result', 307)
+    await safeFetch('https://good.example/', {
+      method: 'POST',
+      body: '{"a":1}',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    expect(headersOf(1)['Content-Type']).toBe('application/json')
   })
 })
 

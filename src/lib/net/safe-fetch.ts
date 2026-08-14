@@ -42,14 +42,19 @@
  *      disallowed, the whole request is rejected (fail closed) — a client
  *      that only checks "the first answer" can be bypassed by putting the
  *      allowed address first and the attack address second.
- *   4. Every redirect hop is a brand-new untrusted URL and re-runs the exact
- *      same validation + binding; a public URL redirecting to a private one
- *      cannot bypass the guard, and the hop count is capped. Because the
- *      *previous* server chooses the next hop, credential headers
+ *   4. Only the five statuses `fetch` itself treats as redirects (301, 302,
+ *      303, 307, 308) are followed — a 304 Not Modified or other 3xx has no
+ *      Location and must reach the caller as a normal terminal response, not
+ *      an error. Every redirect hop is a brand-new untrusted URL and re-runs
+ *      the exact same validation + binding; a public URL redirecting to a
+ *      private one cannot bypass the guard, and the hop count is capped.
+ *      Because the *previous* server chooses the next hop, credential headers
  *      (Authorization / Cookie / Proxy-Authorization) are dropped when a hop
- *      leaves the origin, and 303 (plus 301/302 on POST) downgrade to a
- *      bodyless GET — matching platform `fetch`, which this module has to
- *      reimplement because it owns the redirect loop.
+ *      leaves the origin; 303 (except when the method is already GET/HEAD)
+ *      and 301/302-on-POST downgrade to a bodyless GET, stripping the
+ *      now-stale body-description headers (Content-Type et al.) along with
+ *      it — matching platform `fetch`, which this module has to reimplement
+ *      because it owns the redirect loop.
  *   5. Only http/https are ever dialed — file:, data:, gopher:, ftp:, etc.
  *      are rejected before any network activity, on every hop.
  *   6. Host header, TLS SNI, and certificate verification use the original
@@ -463,6 +468,16 @@ type HopOutcome =
   | { kind: 'terminal'; response: SafeFetchResponse }
 
 /**
+ * The only statuses `fetch` (and this module) treats as a redirect to follow.
+ * 300 (Multiple Choices) and 306 (unused) are not on this list, and — this is
+ * the case that actually bites — neither is 304 (Not Modified): a caller
+ * doing a conditional GET with If-None-Match/If-Modified-Since gets a bare
+ * 304 with no Location header. Treating it as a redirect turned a normal,
+ * successful "not modified" response into a thrown InvalidRedirectError.
+ */
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
+
+/**
  * Headers that must never survive a cross-origin redirect. The redirect
  * target is chosen by the *previous* server, so forwarding credentials to it
  * hands them to whoever controls that hop — the platform `fetch` strips these
@@ -471,37 +486,64 @@ type HopOutcome =
  */
 const CREDENTIAL_HEADERS = ['authorization', 'cookie', 'proxy-authorization']
 
+/**
+ * Headers that describe a request body. Once a redirect downgrades a request
+ * to a bodyless GET, forwarding these makes the next hop see a Content-Type
+ * (or Content-Length, etc.) for a request that carries no body at all —
+ * platform `fetch` drops them on the same downgrade, so this reimplementation
+ * has to as well.
+ */
+const CONTENT_HEADERS = ['content-type', 'content-length', 'content-encoding', 'content-language', 'content-location']
+
 /** Same scheme+host+port. Credentials may only be re-sent within one origin. */
 function isSameOrigin(a: URL, b: URL): boolean {
   return a.protocol === b.protocol && a.host === b.host
 }
 
-function stripCredentialHeaders(headers: Record<string, string> | undefined): Record<string, string> | undefined {
+function stripHeaders(
+  headers: Record<string, string> | undefined,
+  blocked: readonly string[],
+): Record<string, string> | undefined {
   if (!headers) return headers
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(headers)) {
-    if (!CREDENTIAL_HEADERS.includes(k.toLowerCase())) out[k] = v
+    if (!blocked.includes(k.toLowerCase())) out[k] = v
   }
   return out
 }
 
 /**
  * Applies the standard method/body rewrite for a redirect, matching the fetch
- * spec so callers get no surprises versus platform `fetch`:
- *   - 303 always becomes GET and drops the body;
- *   - 301/302 turn POST into GET and drop the body;
- *   - 307/308 preserve both.
- * Credentials are additionally dropped when the hop leaves the origin.
+ * spec (https://fetch.spec.whatwg.org/#http-redirect-fetch) so callers get no
+ * surprises versus platform `fetch`:
+ *   - 303 becomes GET and drops the body, *unless* the original method was
+ *     already GET or HEAD — a HEAD request must stay HEAD, not silently turn
+ *     into a GET that downloads a body the caller never asked for;
+ *   - 301/302 turn POST into GET and drop the body (other methods on
+ *     301/302, e.g. PUT/DELETE, are preserved per spec);
+ *   - 307/308 always preserve both method and body.
+ * Whenever the method+body is downgraded, headers that describe the
+ * now-nonexistent body (Content-Type et al.) are stripped so the next hop
+ * doesn't see stale metadata for a body that no longer exists. Credentials
+ * are separately dropped whenever the hop leaves the origin — both rules can
+ * apply to the same hop.
  */
 function optionsForRedirect(opts: ResolvedOptions, status: number, from: URL, to: URL): ResolvedOptions {
   const method = (opts.method ?? 'GET').toUpperCase()
-  const downgrade = status === 303 || ((status === 301 || status === 302) && method === 'POST')
+  const downgrade =
+    (status === 303 && method !== 'GET' && method !== 'HEAD') ||
+    ((status === 301 || status === 302) && method === 'POST')
   const crossOrigin = !isSameOrigin(from, to)
+
+  let headers = opts.headers
+  if (downgrade) headers = stripHeaders(headers, CONTENT_HEADERS)
+  if (crossOrigin) headers = stripHeaders(headers, CREDENTIAL_HEADERS)
+
   return {
     ...opts,
     method: downgrade ? 'GET' : opts.method,
     body: downgrade ? null : opts.body,
-    headers: crossOrigin ? stripCredentialHeaders(opts.headers) : opts.headers,
+    headers,
   }
 }
 
@@ -530,7 +572,7 @@ async function runHop(url: URL, hop: number, opts: ResolvedOptions): Promise<Hop
     throw err
   }
 
-  if (res.status >= 300 && res.status < 400) {
+  if (REDIRECT_STATUSES.has(res.status)) {
     const location = res.headers.get('location')
     // 🔴 Cancel the redirect body BEFORE closing the Agent. A 3xx may carry a
     //    body, and undici's close() waits for in-flight responses to finish:
