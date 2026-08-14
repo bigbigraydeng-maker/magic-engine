@@ -12,6 +12,7 @@ import { computeGenerationDigest } from '../envelope'
 import { createHmacVerifier, createUnavailableVerifier } from '../signing'
 import {
   acceptAllPending,
+  genSigner,
   makeCore,
   makeEnvelope,
   makeSubmission,
@@ -160,15 +161,49 @@ describe('🔴 reviewerIdentitySource 只接受逐字的 self_reported', () => {
   })
 })
 
+describe('🔴 L1 与 L2 不许共用一把密钥', () => {
+  it('用生成密钥去盖复核凭证 → 抛（两层签名塌成一个信任根）', () => {
+    const { envelope, decisions } = envelopeAndDecisions()
+    expectCode(
+      () => signReview(envelope, makeSubmission(envelope, decisions), { ...deps, signer: genSigner }),
+      'shared_signing_key',
+    )
+  })
+})
+
+describe('🔴 信封结构版本', () => {
+  it('版本不是当前这一版 → 抛，不许拿旧信封套新语义', () => {
+    const { envelope, decisions } = envelopeAndDecisions()
+    const old = { ...envelope, envelopeVersion: 'canonical-inventory-envelope@0' }
+    expectCode(() => signReview(old, makeSubmission(old, decisions), deps), 'generation_version_mismatch')
+  })
+})
+
 describe('复核署名与时间', () => {
   it('没署名 → 抛', () => {
     const { envelope, decisions } = envelopeAndDecisions()
     expectCode(() => signReview(envelope, makeSubmission(envelope, decisions, { reviewedBy: '  ' }), deps), 'missing_reviewer')
   })
 
-  it.each(['not-a-date', '2026-13-45', '昨天'])('复核时间「%s」不是 ISO 8601 → 抛', (bad) => {
+  it.each([
+    ['not-a-date', 'not-a-date'],
+    ['非法日期', '2026-13-45'],
+    ['中文', '昨天'],
+    ['🔴 没带时区（证明不了自己是几点）', '2026-08-12T05:00:00'],
+  ])('复核时间 %s → 抛', (_label, bad) => {
     const { envelope, decisions } = envelopeAndDecisions()
     expectCode(() => signReview(envelope, makeSubmission(envelope, decisions, { reviewedAt: bad }), deps), 'invalid_timestamp')
+  })
+
+  it.each([
+    ['Z 结尾', '2026-08-12T05:00:00.000Z'],
+    ['🔴 NZ 本地偏移 +12:00（目标市场；上一版会把它误判成非法）', '2026-08-12T17:00:00+12:00'],
+    ['AU 偏移 +10:00', '2026-08-12T15:00:00+10:00'],
+    ['秒可省略', '2026-08-12T05:00+00:00'],
+  ])('带显式时区的写法 %s → 照常通过', (_label, good) => {
+    const { envelope, decisions } = envelopeAndDecisions()
+    const review = signReview(envelope, makeSubmission(envelope, decisions, { reviewedAt: good }), deps)
+    expect(review.submission.reviewedAt).toBe(good)
   })
 })
 

@@ -21,6 +21,7 @@
  */
 
 export {
+  ALLOWED_REVIEWER_IDENTITY_SOURCE,
   INVENTORY_PLAN_CONTRACT_VERSION,
   INVENTORY_ENVELOPE_VERSION,
   NORMALIZATION_RULE_VERSION,
@@ -78,7 +79,7 @@ export { PLAN_MAX_AGE_DAYS } from './envelope'
 
 export { InventoryPlanError } from './plan'
 
-export { ALLOWED_REVIEWER_IDENTITY_SOURCE, signReview, type SignReviewDeps } from './review'
+export { signReview, type SignReviewDeps } from './review'
 
 export { ALLOWED_REASON_CODES, ALLOWED_REVIEWER_DECISIONS } from './decisions'
 

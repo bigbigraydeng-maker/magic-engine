@@ -31,6 +31,9 @@ import {
   makeEnvelope,
   makeSubmission,
   NOW,
+  genSigner,
+  GEN_SECRET,
+  REV_SECRET,
   revSigner,
   verifyGeneration,
   verifyReview,
@@ -152,6 +155,9 @@ describe('闸 1 · 结构闸：反序列化后缺字段也必须返回审计，�
     ['reviewedBy 不是字符串', (i: ActivateInput) => ({ ...i, review: { ...i.review, submission: { ...i.review.submission, reviewedBy: 42 } } })],
     ['decisions 不是对象', (i: ActivateInput) => ({ ...i, review: { ...i.review, submission: { ...i.review.submission, decisions: [] as unknown } } })],
     ['acknowledgements 不是对象', (i: ActivateInput) => ({ ...i, review: { ...i.review, submission: { ...i.review.submission, acknowledgements: null } } })],
+    ['decisions 的值是 null（否则会抛裸 TypeError）', (i: ActivateInput) => ({ ...i, review: { ...i.review, submission: { ...i.review.submission, decisions: { 'https://example.com/a': null } } } })],
+    ['认账缺 acknowledgedBy', (i: ActivateInput) => ({ ...i, review: { ...i.review, submission: { ...i.review.submission, acknowledgements: { 'example.com': { reason: 'x' } } } } })],
+    ['machineDecision 是枚举外的值', (i: ActivateInput) => ({ ...i, envelope: { ...i.envelope, core: { ...i.envelope.core, candidates: i.envelope.core.candidates.map((c) => ({ ...c, machineDecision: 'accepted' })) } } })],
   ])('%s → 返回 rejected 审计（而不是抛异常）', async (_label, mutate) => {
     const input = inputWith()
     const broken = mutate(input as unknown as ActivateInput) as unknown as ActivateInput
@@ -212,6 +218,19 @@ describe('闸 2 · L1 生成签名', () => {
     })
     const audit = await activateReviewedPlan(inputWith({ deps }))
     expect(audit.blockers.map((b) => b.code)).toContain('generation_signature_unverifiable')
+  })
+
+  it('签名是空串 → generation_malformed（空串能过结构闸，必须由闸 2 认出来）', async () => {
+    const { envelope, review } = standard()
+    const audit = await activateReviewedPlan(inputWith({ envelope: { ...envelope, generationSignature: '   ' }, review }))
+    expect(audit.blockers.map((b) => b.code)).toContain('generation_malformed')
+  })
+
+  it('🔴 信封结构版本不是当前这一版 → generation_version_mismatch', async () => {
+    const { envelope, review } = standard()
+    const old = { ...envelope, envelopeVersion: 'canonical-inventory-envelope@0' }
+    const audit = await activateReviewedPlan(inputWith({ envelope: old, review }))
+    expect(audit.blockers.map((b) => b.code)).toContain('generation_version_mismatch')
   })
 })
 
@@ -284,16 +303,69 @@ describe('闸 4 · L2 复核凭证', () => {
     const audit = await activateReviewedPlan(inputWith({ deps }))
     expect(audit.blockers.map((b) => b.code)).toContain('review_attestation_unverifiable')
   })
+
+  it('凭证是空串 → review_attestation_malformed', async () => {
+    const { envelope, review } = standard()
+    const audit = await activateReviewedPlan(inputWith({ envelope, review: { ...review, reviewAttestation: '  ' } }))
+    expect(audit.blockers.map((b) => b.code)).toContain('review_attestation_malformed')
+  })
+
+  it('🔴 凭证结构版本不是当前这一版 → review_attestation_version_mismatch', async () => {
+    const { envelope, review } = standard()
+    const audit = await activateReviewedPlan(
+      inputWith({ envelope, review: { ...review, envelopeVersion: 'canonical-inventory-envelope@0' } }),
+    )
+    expect(audit.blockers.map((b) => b.code)).toContain('review_attestation_version_mismatch')
+  })
+})
+
+describe('闸 9.5 · core 的机器一致性纵深兜底（激活侧也要跑，不能只在盖章时跑）', () => {
+  it('🔴 手写 core：计数对不上 + 凭空多一条从没被发现过的候选 → 拒，零抓取', async () => {
+    // 这条走的不是编辑者路径（L1 挡死），走的是「绕过 review.ts 的内部调用方」——
+    // 而 review.ts 之所以跑 assertCoreIntact，理由在激活侧一字不差地成立。
+    const base = makeCore(ALL)
+    const core: GeneratedPlanCore = {
+      ...base,
+      candidates: [
+        ...base.candidates,
+        {
+          originalUrl: 'https://example.com/zzz-never-discovered',
+          canonicalUrl: 'https://example.com/zzz-never-discovered',
+          machineDecision: 'rejected',
+          reasonCodes: ['host_not_approved'],
+          notes: [],
+        },
+      ],
+      counts: { discovered: 999, pending: 999, rejected: 999 },
+    }
+    const { envelope, review } = standard({ core })
+    const input = inputWith({ envelope, review })
+    const audit = await activateReviewedPlan(input)
+    expect(audit.status).toBe('rejected')
+    expect(audit.blockers[0].code).toMatch(/^core_/)
+    expect(input.deps.crawlSpy).not.toHaveBeenCalled()
+  })
 })
 
 describe('闸 5 · L1/L2 绑定', () => {
-  it('🔴 planId 对不上 → 拒（一份合法凭证不许配另一份信封）', async () => {
+  it('🔴 只有 planId 对不上 → 单独直测那一条（generationDigest 保持一致，免得两个 blocker 一起响）', async () => {
     const { envelope } = standard()
-    const other = makeEnvelope(makeCore(ALL), { planId: 'plan-0002' })
-    const review = seal(makeSubmission(other, standardDecisions()))
+    const review = seal({ ...makeSubmission(envelope, standardDecisions()), planId: 'plan-0002' })
     const input = inputWith({ envelope, review })
     const audit = await activateReviewedPlan(input)
-    expect(audit.blockers.map((b) => b.code)).toContain('review_plan_binding_mismatch')
+    expect(audit.blockers.map((b) => b.code)).toEqual(['review_plan_binding_mismatch'])
+    expect(input.deps.crawlSpy).not.toHaveBeenCalled()
+  })
+
+  it('🔴 L1 与 L2 用了同一把密钥 → 拒（两层签名塌成一个信任根）', async () => {
+    // 「两把密钥」在类型层不可表达，组合根完全可能把同一把接到两侧。
+    // 比 keyId 是能做的最强判据：同一把密钥必然同一个 id。
+    const { envelope } = standard()
+    const sameKeyReview = sealReview(makeSubmission(envelope, standardDecisions()), genSigner)
+    const deps = makeActivationDeps({ verifyReviewAttestation: verifyGeneration })
+    const input = inputWith({ envelope, review: sameKeyReview, deps })
+    const audit = await activateReviewedPlan(input)
+    expect(audit.blockers.map((b) => b.code)).toContain('shared_signing_key')
     expect(input.deps.crawlSpy).not.toHaveBeenCalled()
   })
 
@@ -511,6 +583,36 @@ describe('闸 9 · 被接受集合', () => {
     expect(input.deps.crawlSpy).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['尾斜杠没归一', 'https://example.com/a/'],
+    ['带片段', 'https://example.com/a#top'],
+    ['http 而不是 https', 'http://example.com/a'],
+  ])('🔴 被接受的 canonical 被手改成未归一的串（%s）→ 拒', async (_label, hacked) => {
+    const base = makeCore(ALL)
+    const core: GeneratedPlanCore = {
+      ...base,
+      candidates: base.candidates.map((c) => (c.originalUrl === ACCEPTED[0] ? { ...c, canonicalUrl: hacked } : c)),
+    }
+    const { envelope, review } = standard({ core })
+    const input = inputWith({ envelope, review })
+    const audit = await activateReviewedPlan(input)
+    expect(audit.blockers.map((b) => b.code)).toContain('accepted_url_not_derived')
+    expect(input.deps.crawlSpy).not.toHaveBeenCalled()
+  })
+
+  it('🔴 被接受的 URL 主机被改成未批准的 → 拒', async () => {
+    const base = makeCore(ALL)
+    const core: GeneratedPlanCore = {
+      ...base,
+      candidates: base.candidates.map((c) =>
+        c.originalUrl === ACCEPTED[0] ? { ...c, canonicalUrl: 'https://www.example.com/a' } : c,
+      ),
+    }
+    const { envelope, review } = standard({ core })
+    const audit = await activateReviewedPlan(inputWith({ envelope, review }))
+    expect(audit.blockers.map((b) => b.code)).toContain('accepted_url_not_derived')
+  })
+
   it('被接受但没有 canonical URL → 拒', async () => {
     const base = makeCore(ALL)
     const core: GeneratedPlanCore = {
@@ -637,6 +739,16 @@ describe('闸 11 · 执行阶段：一页失败就不许报完成', () => {
     expect(audit.failedUrls[0].error).toContain('crawler returned no result')
   })
 
+  it('🔴 抓取器返回的 crawledAt 不是 Date → 计成这一页失败并照常交账（不许把整个调用炸掉）', async () => {
+    const deps = makeActivationDeps({
+      crawl: async (urls) =>
+        urls.map((u) => ({ ...makeCrawlResult(u), crawledAt: '2026-08-12T01:30:00.000Z' as unknown as Date })),
+    })
+    const audit = await activateReviewedPlan(inputWith({ deps }))
+    expect(audit.status).toBe('failed')
+    expect(audit.failedUrls[0].error).toContain('crawledAt')
+  })
+
   it('整批抓取抛错 → 全部计为失败，一行不写', async () => {
     const deps = makeActivationDeps({
       crawl: async () => {
@@ -667,6 +779,14 @@ describe('写入对账', () => {
     const audit = await activateReviewedPlan(inputWith({ deps: makeActivationDeps({ store }) }))
     expect(audit.status).toBe('failed')
     expect(audit.blockers[0].message).toContain('sneaky')
+  })
+
+  it('🔴 落库口返回的不是数组 → failed 并标明台账已被改动（不许把整个调用炸掉）', async () => {
+    const store = new FakeInventoryStore({ writeResult: () => 'oops' as unknown as string[] })
+    const audit = await activateReviewedPlan(inputWith({ deps: makeActivationDeps({ store }) }))
+    expect(audit.status).toBe('failed')
+    expect(audit.blockers.map((b) => b.code)).toContain('write_result_malformed')
+    expect(audit.inventoryTouched).toBe(true)
   })
 
   it('写入抛错 → failed 并提示可能已有半截行，别直接重跑', async () => {
@@ -707,6 +827,14 @@ describe('审计对象自己绝不能抛', () => {
     expect(input.deps.crawlSpy).not.toHaveBeenCalled()
   })
 
+  it('🔴 入参本身是 null 也要交得出账（结构闸报了 blocker，审计构造不许跟着抛）', async () => {
+    const audit = await activateReviewedPlan(null as unknown as ActivateInput)
+    expect(audit.status).toBe('rejected')
+    expect(audit.blockers.map((b) => b.code)).toEqual(['plan_shape_invalid'])
+    expect(audit.clientId).toBe('')
+    expect(audit.acceptedUrls).toEqual([])
+  })
+
   it('闸门在决策解析之前就失败时，账里仍然看得见机器拒了哪些', async () => {
     const deps = makeActivationDeps({ now: () => '2026-09-19T00:00:00.000Z' })
     const audit = await activateReviewedPlan(inputWith({ deps }))
@@ -715,9 +843,20 @@ describe('审计对象自己绝不能抛', () => {
   })
 })
 
-describe('时间源', () => {
+describe('夹具自身的前提', () => {
   it('基线用的 NOW 稳稳在有效期内（免得整组测试靠运气）', () => {
     expect(Date.parse(NOW) - Date.parse(ISSUED_AT)).toBeLessThan(7 * 24 * 60 * 60 * 1000)
-    expect(verifyGeneration).not.toBe(verifyReview)
+  })
+
+  it('🔴 两把密钥的 **secret 本身**不同（断言两个闭包引用不同是自欺，改成断言行为）', () => {
+    expect(GEN_SECRET).not.toBe(REV_SECRET)
+    // 行为判据：拿生成密钥环去验一份 L2 凭证，必须验不过。
+    const { envelope, review } = standard()
+    expect(verifyGeneration({ keyId: review.keyId, payload: 'x', signature: review.reviewAttestation })).toBe(
+      'unknown_key',
+    )
+    expect(verifyReview({ keyId: envelope.keyId, payload: 'x', signature: envelope.generationSignature })).toBe(
+      'unknown_key',
+    )
   })
 })

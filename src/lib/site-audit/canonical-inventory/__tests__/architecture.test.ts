@@ -99,6 +99,52 @@ describe('🔴 #960 承重墙：不存在签名 oracle', () => {
       'src/lib/site-audit/canonical-inventory/envelope.ts',
     ])
   })
+
+  it('🔴 只有一个地方能产出 L2 凭证（sealReview 只被盖章入口调用）', () => {
+    const callers = PRODUCTION_FILES.filter((f) => /\bsealReview\(/.test(sourceOf(f)))
+    expect(callers).toEqual([
+      'src/lib/site-audit/canonical-inventory/attestation.ts',
+      'src/lib/site-audit/canonical-inventory/review.ts',
+    ])
+  })
+
+  /**
+   * 🔴 这一条补的是前一版守卫的**射程**：它只扫本目录，于是「仓库别处深 import 原语」
+   *    这条路完全在视野之外 —— 加一个 route
+   *    `import { sealEnvelope } from '@/lib/site-audit/canonical-inventory/envelope'`，
+   *    拿请求体里的候选自己拼一份 core 去签，就能换回一枚**合法的 L1 签名**，
+   *    而目录内的守卫全绿。承重墙必须按**全仓**来守。
+   */
+  it('🔴 全仓范围内：本目录之外没有任何文件深 import 签名原语模块', () => {
+    const PRIMITIVES = ['envelope', 'attestation', 'plan', 'decisions', 'shapes', 'signing', 'canonical-json']
+    const outside = walk(join(ROOT, 'src'))
+      .map((f) => relative(ROOT, f).split('\\').join('/'))
+      .filter((f) => !f.startsWith('src/lib/site-audit/canonical-inventory/'))
+    const offenders: string[] = []
+    for (const file of outside) {
+      const src = sourceOf(file)
+      for (const primitive of PRIMITIVES) {
+        if (new RegExp(`canonical-inventory/${primitive}(['"/]|$)`, 'm').test(src)) {
+          offenders.push(`${file} → canonical-inventory/${primitive}`)
+        }
+      }
+    }
+    expect(
+      offenders,
+      `这些文件绕过了 index.ts 的公开门面直接 import 原语（签名 oracle 风险）：\n${offenders.join('\n')}`,
+    ).toEqual([])
+  })
+
+  it('判据本身没有空跑（全仓扫描确实扫到了东西）', () => {
+    expect(walk(join(ROOT, 'src')).length).toBeGreaterThan(500)
+  })
+
+  it('🔴 签名覆盖面是穷举的 —— 给 UnsignedEnvelope 加字段却漏加进清单必须编译失败', () => {
+    const envelope = sourceOf('src/lib/site-audit/canonical-inventory/envelope.ts')
+    expect(envelope).toMatch(/Record<keyof UnsignedEnvelope, true>/)
+    // 白名单最危险的失效方式是「加了字段没加进名单」——那会得到一个静默不被签名保护的字段。
+    expect(envelope).toMatch(/Object\.keys\(SIGNED_ENVELOPE_FIELDS\)/)
+  })
 })
 
 describe('🔴 #960 密钥与验签边界', () => {
@@ -122,6 +168,19 @@ describe('🔴 #960 密钥与验签边界', () => {
     expect(offenders, offenders.join('\n')).toEqual([])
   })
 
+  it('🔴 签名比较必须是常量时间（否则那道探针拆掉也没人会红）', () => {
+    // 这条判据的存在理由很具体：变异探针「把 timingSafeEqual 换成 ===」在行为上
+    // 与原实现完全等价（utf8 编码单射），任何行为测试都抓不到它 —— 只有这里抓得到。
+    const signing = sourceOf('src/lib/site-audit/canonical-inventory/signing.ts')
+    expect(signing).toMatch(/timingSafeEqual\(a, b\)/)
+    expect(signing, '签名比较退回成 === 了').not.toMatch(/return expected === provided/)
+  })
+
+  it('🔴 两层签名必须是两把不同的密钥（keyId 相同就当场拒）', () => {
+    expect(sourceOf('src/lib/site-audit/canonical-inventory/review.ts')).toMatch(/shared_signing_key/)
+    expect(sourceOf('src/lib/site-audit/canonical-inventory/activation.ts')).toMatch(/shared_signing_key/)
+  })
+
   it('🔴 缺密钥不许 fallback 到别的密钥（借来的密钥 = 两套系统共用一个信任根）', () => {
     const offenders = PRODUCTION_FILES.filter((f) => /CRON_SECRET|UPLOAD_LINK_SECRET/.test(sourceOf(f)))
     expect(offenders, offenders.join('\n')).toEqual([])
@@ -142,6 +201,28 @@ describe('🔴 #960 有效期与身份来源是常量，不是选项', () => {
     }
     // 新鲜度函数只收「签发时间 + 当前时间」两个参数，没有第三个可以塞上限的口子。
     expect(envelope).toMatch(/export function checkEnvelopeFreshness\(issuedAt: string, nowIso: string\)/)
+  })
+
+  it('🔴 信封 / 凭证的结构版本必须逐字比对当前常量（只算不比 = 升版本是空承诺）', () => {
+    expect(sourceOf('src/lib/site-audit/canonical-inventory/envelope.ts')).toMatch(
+      /envelope\.envelopeVersion !== INVENTORY_ENVELOPE_VERSION/,
+    )
+    expect(sourceOf('src/lib/site-audit/canonical-inventory/attestation.ts')).toMatch(
+      /review\.envelopeVersion !== INVENTORY_ENVELOPE_VERSION/,
+    )
+  })
+
+  it('🔴 激活侧也要跑 core 的机器一致性纵深校验（不能只在盖章时跑）', () => {
+    expect(sourceOf('src/lib/site-audit/canonical-inventory/activation.ts')).toMatch(/assertCoreIntact\(core\)/)
+  })
+
+  it('🔴 兜底闸必须排在被接受集合闸**之后**（放前面会整片遮住更具体的闸）', () => {
+    const src = sourceOf('src/lib/site-audit/canonical-inventory/activation.ts')
+    const accepted = src.indexOf('checkAcceptedSet(resolved')
+    const fallback = src.indexOf('checkCoreMachineDerived(core)')
+    expect(accepted, '判据失效：找不到被接受集合闸').toBeGreaterThan(0)
+    expect(fallback, '判据失效：找不到兜底闸').toBeGreaterThan(0)
+    expect(fallback).toBeGreaterThan(accepted)
   })
 
   it('🔴 reviewerIdentitySource 是单一字面量类型，不是联合类型', () => {

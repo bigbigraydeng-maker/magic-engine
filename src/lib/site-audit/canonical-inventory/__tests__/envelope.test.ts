@@ -74,8 +74,15 @@ describe('🔴 UnsignedEnvelope 的每一个叶子字段都在签名覆盖面里
     expectTamperRejected({ ...baseEnvelope(), issuedAt: '2026-08-13T00:00:00.000Z' }, 'issuedAt')
   })
 
-  it('envelopeVersion', () => {
-    expectTamperRejected({ ...baseEnvelope(), envelopeVersion: 'canonical-inventory-envelope@0' }, 'envelopeVersion')
+  it('envelopeVersion（在 digest 覆盖面里，但版本闸排在验签之前，所以结论是 version_mismatch）', () => {
+    const tampered = { ...baseEnvelope(), envelopeVersion: 'canonical-inventory-envelope@0' }
+    // 它确实进了 digest —— 改了它 digest 就变。
+    expect(computeGenerationDigest(tampered)).not.toBe(tampered.generationDigest)
+    // 但版本闸更靠前，所以两种手法都停在 version_mismatch。
+    expect(verifyEnvelope(tampered, verifyGeneration)).toBe('version_mismatch')
+    expect(
+      verifyEnvelope({ ...tampered, generationDigest: computeGenerationDigest(tampered) }, verifyGeneration),
+    ).toBe('version_mismatch')
   })
 
   const coreCases: [string, (e: InventoryPlanEnvelope) => InventoryPlanEnvelope][] = [
@@ -210,6 +217,16 @@ describe('🔴 密钥边界', () => {
     expect(verifyEnvelope(baseEnvelope(), createUnavailableVerifier())).toBe('key_unavailable')
   })
 
+  it('🔴 信封结构版本不是当前这一版 → version_mismatch（旧信封不许套新语义）', () => {
+    const e = baseEnvelope()
+    const old = { ...e, envelopeVersion: 'canonical-inventory-envelope@0' }
+    // 连 digest 一起重算也没用 —— 版本闸在验签之前，且比的是当前代码里的常量。
+    expect(verifyEnvelope(old, verifyGeneration)).toBe('version_mismatch')
+    expect(verifyEnvelope({ ...old, generationDigest: computeGenerationDigest(old) }, verifyGeneration)).toBe(
+      'version_mismatch',
+    )
+  })
+
   it('缺 keyId / 缺签名 / 缺 digest → malformed', () => {
     const e = baseEnvelope()
     expect(verifyEnvelope({ ...e, keyId: '  ' }, verifyGeneration)).toBe('malformed')
@@ -254,11 +271,12 @@ describe(`🔴 有效期固定 ${PLAN_MAX_AGE_DAYS} 天`, () => {
     expect(checkEnvelopeFreshness(ISSUED_AT, at(PLAN_MAX_AGE_DAYS * day - 1))).toBe('fresh')
   })
 
-  it('刚好第 7 天 → 还 fresh（边界含等号，写死免得将来靠猜）', () => {
-    expect(checkEnvelopeFreshness(ISSUED_AT, at(PLAN_MAX_AGE_DAYS * day))).toBe('fresh')
+  it('刚好第 7 天 → 还 fresh（日期**写死**，不从被测常量推 —— 否则常量改成 3650 它照样绿）', () => {
+    expect(checkEnvelopeFreshness('2026-08-12T00:00:00.000Z', '2026-08-19T00:00:00.000Z')).toBe('fresh')
   })
 
-  it('第 7 天多 1 毫秒 → expired', () => {
+  it('第 7 天多 1 毫秒 → expired（同样写死日期）', () => {
+    expect(checkEnvelopeFreshness('2026-08-12T00:00:00.000Z', '2026-08-19T00:00:00.001Z')).toBe('expired')
     expect(checkEnvelopeFreshness(ISSUED_AT, at(PLAN_MAX_AGE_DAYS * day + 1))).toBe('expired')
   })
 
@@ -289,5 +307,13 @@ describe('稳定序列化（签名原文的确定性）', () => {
   it('顶层 undefined / null → "null"（签名原文永远不是空串）', () => {
     expect(canonicalJson(undefined)).toBe('null')
     expect(canonicalJson(null)).toBe('null')
+  })
+
+  it('🔴 非普通对象直接抛，不静默塌成 {}（两个不同的 Date 否则会拿到同一个 digest）', () => {
+    expect(() => canonicalJson({ t: new Date(1) })).toThrow(/只接受普通对象/)
+    expect(() => canonicalJson(new Map())).toThrow(/只接受普通对象/)
+    expect(() => canonicalJson([new Set()])).toThrow(/只接受普通对象/)
+    // 普通对象 / 数组 / 原始值照常
+    expect(canonicalJson({ a: [1, 'x', null] })).toBe('{"a":[1,"x",null]}')
   })
 })

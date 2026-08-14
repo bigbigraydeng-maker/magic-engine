@@ -27,8 +27,11 @@ import type { PlanSigner, SignatureVerifier } from './signing'
  * 计划有效期，**固定 7 天**。
  *
  * 🔴 不是函数入参、不是调用方选项、不可调大、不可关闭、没有 `skipExpiry`。
- *    测试只能通过注入 `now()` 控制时钟。
  *    做成可配的那一刻，「过期」就变成一个谁都能关掉的装饰。
+ *
+ * 🔴 **这条承诺的范围是「工件」，不是「组合根」。** `issuedAt` 被签名覆盖，编辑者改不动；
+ *    但当前时间来自注入的 `deps.now()`，组合根注入一个假时钟照样能让任何信封「没过期」。
+ *    那跟注入一个恒真验签器、或者一个假 store 是同一类责任，本层挡不住，也不声称挡得住。
  */
 export const PLAN_MAX_AGE_DAYS = 7
 
@@ -47,18 +50,34 @@ export type EnvelopeVerdict =
   | 'key_unavailable'
   /** 缺 keyId / 缺签名 / 类型不对 */
   | 'malformed'
+  /** 信封声明的结构版本不是当前代码这一版 —— 旧信封不许套新语义 */
+  | 'version_mismatch'
 
 export type FreshnessVerdict = 'fresh' | 'expired' | 'invalid_timestamp'
 
-/** 把信封剥回签名覆盖面。**只留这五项** —— 多留一项就等于那一项没被签。 */
+/**
+ * 签名覆盖面的**穷举清单**。
+ *
+ * 🔴 它的类型是 `Record<keyof UnsignedEnvelope, true>` —— 将来给 `UnsignedEnvelope`
+ *    加字段却忘了加进这里，**编译当场失败**。信封顶层是白名单（`core` 与
+ *    `ReviewSubmission` 是整份进 digest 的），白名单最危险的失效方式就是「加了字段没加进名单」，
+ *    那会得到一个静默不被签名保护的字段，而没有任何测试会红。
+ */
+const SIGNED_ENVELOPE_FIELDS: Record<keyof UnsignedEnvelope, true> = {
+  envelopeVersion: true,
+  keyId: true,
+  planId: true,
+  issuedAt: true,
+  core: true,
+}
+
+/** 把信封剥回签名覆盖面。字段集由 {@link SIGNED_ENVELOPE_FIELDS} 穷举，多一项少一项都编不过。 */
 export function toUnsignedEnvelope(envelope: UnsignedEnvelope): UnsignedEnvelope {
-  return {
-    envelopeVersion: envelope.envelopeVersion,
-    keyId: envelope.keyId,
-    planId: envelope.planId,
-    issuedAt: envelope.issuedAt,
-    core: envelope.core,
+  const out: Record<string, unknown> = {}
+  for (const key of Object.keys(SIGNED_ENVELOPE_FIELDS) as (keyof UnsignedEnvelope)[]) {
+    out[key] = envelope[key]
   }
+  return out as unknown as UnsignedEnvelope
 }
 
 export function computeGenerationDigest(unsigned: UnsignedEnvelope): string {
@@ -112,6 +131,11 @@ export function sealEnvelope(
  * 保留旧签名与旧 digest」这条路只在签名那一步被拦，而拦不住的原因说不清楚。
  */
 export function verifyEnvelope(envelope: InventoryPlanEnvelope, verify: SignatureVerifier): EnvelopeVerdict {
+  // 🔴 必须**逐字比对当前常量**，不能只把工件自报的版本拿去算 digest。
+  //    只算不比的话，将来为了扩大覆盖面而升版本时，一枚旧版信封里新字段是 undefined、
+  //    被 canonicalJson 剔除、digest 重算结果不变 —— 旧信封会在新代码下照常验过，
+  //    而「升版本 = 旧信封立刻失效」这条承诺就是空的。
+  if (envelope.envelopeVersion !== INVENTORY_ENVELOPE_VERSION) return 'version_mismatch'
   if (typeof envelope.keyId !== 'string' || envelope.keyId.trim().length === 0) return 'malformed'
   if (typeof envelope.generationSignature !== 'string' || envelope.generationSignature.trim().length === 0) {
     return 'malformed'

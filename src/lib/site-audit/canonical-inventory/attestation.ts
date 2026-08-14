@@ -36,6 +36,7 @@ export type AttestationVerdict =
   | 'unknown_key'
   | 'key_unavailable'
   | 'malformed'
+  | 'version_mismatch'
 
 export function computeReviewDigest(submission: ReviewSubmission): string {
   return createHash('sha256').update(canonicalJson(submission), 'utf8').digest('hex')
@@ -79,6 +80,8 @@ export function sealReview(submission: ReviewSubmission, signer: PlanSigner): Si
 
 /** 验一份复核凭证。同样是**先重算 digest 再验签**。 */
 export function verifyReviewAttestation(review: SignedReview, verify: SignatureVerifier): AttestationVerdict {
+  // 见 `envelope.ts` 同一处：只算不比 = 「升版本旧凭证立刻失效」是空承诺。
+  if (review.envelopeVersion !== INVENTORY_ENVELOPE_VERSION) return 'version_mismatch'
   if (typeof review.keyId !== 'string' || review.keyId.trim().length === 0) return 'malformed'
   if (typeof review.reviewAttestation !== 'string' || review.reviewAttestation.trim().length === 0) {
     return 'malformed'

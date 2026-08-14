@@ -327,17 +327,26 @@ function sameStringList(a: readonly string[], b: readonly string[]): boolean {
  *
  * 🔴 「非空字符串」不够：`reviewedAt: 'not-a-date'` 照样能签，
  *    留下一条**排不了序、也证明不了复核时间**的凭据。
+ *
+ * 🔴 **必须带显式时区**（`Z` 或 `±HH:MM`）。上一版拿「解析回来的 UTC 日期前 10 位」
+ *    跟原串比，于是 `2026-08-12T05:00:00`（无时区）在 UTC+12 折算后日期退一天，
+ *    一个完全正常的本地时间写法被判非法 —— 而目标市场恰好是 NZ/AU。
+ *    要求显式时区比「猜它是哪个时区」正确：一条证明不了自己是几点的凭据，
+ *    在审计里跟没有时间戳没区别。
  */
+const ISO_WITH_TIMEZONE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/
+
 export function assertValidIsoTimestamp(value: string, label: string): void {
   const trimmed = typeof value === 'string' ? value.trim() : ''
   if (trimmed.length === 0) {
     throw new InventoryPlanError('missing_timestamp', `${label}必须带时间戳`)
   }
   const parsed = Date.parse(trimmed)
-  if (!Number.isFinite(parsed) || new Date(parsed).toISOString().slice(0, 10) !== trimmed.slice(0, 10)) {
+  if (!Number.isFinite(parsed) || !ISO_WITH_TIMEZONE.test(trimmed)) {
     throw new InventoryPlanError(
       'invalid_timestamp',
-      `${label}「${value}」不是合法的 ISO 8601 时间戳 —— 排不了序也证明不了时间`,
+      `${label}「${value}」不是带显式时区的 ISO 8601 时间戳（要 Z 或 ±HH:MM）—— ` +
+        '排不了序也证明不了时间',
     )
   }
 }

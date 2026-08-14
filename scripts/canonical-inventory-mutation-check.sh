@@ -28,6 +28,7 @@ REVIEW="src/lib/site-audit/canonical-inventory/review.ts"
 DECISIONS="src/lib/site-audit/canonical-inventory/decisions.ts"
 SHAPES="src/lib/site-audit/canonical-inventory/shapes.ts"
 INDEX="src/lib/site-audit/canonical-inventory/index.ts"
+CRAWLSTAGE="src/lib/site-audit/canonical-inventory/crawl-stage.ts"
 CRAWLER="src/lib/site-audit/crawler.ts"
 CRAWLER_SUITE="src/lib/site-audit/__tests__/crawler.test.ts"
 
@@ -170,20 +171,22 @@ check "🔴 验签前不重算 digest（留着旧签名换掉 core 就过了）"
   "  if (false) return 'digest_mismatch'"
 
 check "🔴 digest 不覆盖 planId（L1/L2 的重放身份绑定形同虚设）" "$ENV_FILE" \
-  "    planId: envelope.planId," \
-  "    planId: ''," 
+  "  planId: true," \
+  "  " 
 
 check "🔴 digest 不覆盖 issuedAt（改一下就绕过七天有效期）" "$ENV_FILE" \
-  "    issuedAt: envelope.issuedAt," \
-  "    issuedAt: ''," 
+  "  issuedAt: true," \
+  "  " 
 
 check "🔴 digest 不覆盖 keyId（用 A 的密钥签、声称是 B 签的）" "$ENV_FILE" \
-  "    keyId: envelope.keyId," \
-  "    keyId: ''," 
+  "  keyId: true,
+  planId: true," \
+  "  planId: true," 
 
 check "🔴 digest 不覆盖 core（候选随便改）" "$ENV_FILE" \
-  "    core: envelope.core," \
-  "    core: { candidates: [] } as unknown as GeneratedPlanCore," 
+  "  core: true,
+}" \
+  "}" 
 
 check "🔴 签名原文里不带 keyId（key confusion）" "$ENV_FILE" \
   "    keyId: input.keyId,
@@ -225,7 +228,7 @@ check "🔴 reviewerIdentitySource 不进 reviewDigest（盖完章能改成「�
   "  return createHash('sha256').update(canonicalJson({ ...submission, reviewerIdentitySource: undefined }), 'utf8').digest('hex')"
 
 check "🔴 不查 L1/L2 绑定（一份合法凭证能配另一份信封）" "$ACT" \
-  "    () => checkBinding(envelope, submission)," \
+  "    () => checkBinding(envelope, review, submission)," \
   "    () => [],"
 
 # ——— #960 · 密钥边界 ———
@@ -429,11 +432,11 @@ check "🔴 一页抓取失败也照常写入（部分成功报成完成）" "$A
   "  if (false) {
     return buildAudit({"
 
-check "🔴 抓取结果里的 error 被忽略（反爬挑战页当成真页面）" "$ACT" \
+check "🔴 抓取结果里的 error 被忽略（反爬挑战页当成真页面）" "$CRAWLSTAGE" \
   "    if (result.error !== undefined && result.error.length > 0) {" \
   "    if (false) {"
 
-check "🔴 分类失败的页面也写进台账（拿兜底的 other 蒙混）" "$ACT" \
+check "🔴 分类失败的页面也写进台账（拿兜底的 other 蒙混）" "$CRAWLSTAGE" \
   "  if (!enriched.classified) {" \
   "  if (false) {"
 
@@ -456,10 +459,6 @@ check "一个主机挂掉不留痕（跟「这个站没有页面」长得一样�
 check "🔴 按返回总条数记账，不按精确主机归属（只带回别家 URL 也算「有页面」）" "$ADAPTERS" \
   "    if (hostnameOf(url) === host) own.add(url)" \
   "    own.add(url)"
-
-check "🔴 批准主机不先归一（带大写就永远比不上，逼人认假的「不完整」）" "$ADAPTERS" \
-  "  for (const host of normaliseApprovedHosts(approvedHosts)) {" \
-  "  for (const host of approvedHosts) {"
 
 check "🔴 sitemap 文件被当成页面记账（真实页面静默缺席）" "$ADAPTERS" \
   "    if (isSitemapFile(url)) {" \
@@ -502,14 +501,129 @@ check "🔴 首页 BFS 凑出来的结果不上报（尽力而为被当成完整
   "        report('homepage-bfs-only', 'discovery fell back to homepage links (not a sitemap)', origin)" \
   "        void origin"
 
-check "🔴 首页 BFS 截到上限不上报（其余页面静默缺席）" "$CRAWLER" \
-  "      if (links.length >= MAX_BFS_LINKS) {" \
-  "      if (false) {"
+# 🔴 锚点必须**唯一**：`if (links.length >= MAX_BFS_LINKS) {` 在 crawler.ts 里出现两次
+#    （直连路径 + Jina 路径），只写这一行会靠行序碰巧命中第一处 ——
+#    将来函数顺序一调，这道探针会静默改测另一个东西。带上下一行的 report 名字。
+check "🔴 首页 BFS 截到上限不上报（直连路径；其余页面静默缺席）" "$CRAWLER" \
+  "      if (links.length >= MAX_BFS_LINKS) {
+        report('homepage-bfs-truncated'" \
+  "      if (false) {
+        report('homepage-bfs-truncated'"
+
+check "🔴 首页 BFS 截到上限不上报（Jina 路径）" "$CRAWLER" \
+  "      if (links.length >= MAX_BFS_LINKS) {
+        report('jina-homepage-truncated'" \
+  "      if (false) {
+        report('jina-homepage-truncated'"
+
+# ——— #960 补测：更具体的子判据（整道闸换成 [] 的粗粒度探针盖不住它们）———
+check "🔴 身份闸不比 approvedHosts（只比租户和域名）" "$ACT" \
+  "  if (!sameHostSet(core.boundary.approvedHosts, expected.approvedHosts)) {" \
+  "  if (false) {"
+
+check "🔴 身份闸不比租户" "$ACT" \
+  "  if (core.clientId !== expected.clientId) {" \
+  "  if (false) {"
+
+check "身份闸不比域名" "$ACT" \
+  "  if (core.boundary.requestedDomain.trim().toLowerCase() !== expected.requestedDomain.trim().toLowerCase()) {" \
+  "  if (false) {"
+
+check "版本闸不比契约版本" "$ACT" \
+  "  if (core.contractVersion !== INVENTORY_PLAN_CONTRACT_VERSION) {" \
+  "  if (false) {"
+
+check "版本闸不比归一规则版本" "$ACT" \
+  "  if (core.normalizationRuleVersion !== NORMALIZATION_RULE_VERSION) {" \
+  "  if (false) {"
+
+check "🔴 绑定闸不比 planId" "$ACT" \
+  "  if (submission.planId !== envelope.planId) {" \
+  "  if (false) {"
+
+check "🔴 绑定闸不比 generationDigest" "$ACT" \
+  "  if (submission.generationDigest !== envelope.generationDigest) {" \
+  "  if (false) {"
+
+check "🔴 绑定闸不查 L1/L2 是否共用同一把密钥" "$ACT" \
+  "  if (review.keyId === envelope.keyId) {" \
+  "  if (false) {"
+
+check "🔴 绑定闸不查 reviewerIdentitySource" "$ACT" \
+  "  if (submission.reviewerIdentitySource !== ALLOWED_REVIEWER_IDENTITY_SOURCE) {" \
+  "  if (false) {"
+
+check "🔴 被接受但没有 canonical 也放行" "$ACT" \
+  "  if (url === null) {" \
+  "  if (false) {"
+
+check "🔴 被接受集合里的重复 canonical 不查" "$ACT" \
+  "  if (seen.has(url)) {" \
+  "  if (false) {"
+
+check "🔴 发现记录里的未批准主机不查" "$ACT" \
+  "  if (extra.length > 0) {" \
+  "  if (false) {"
+
+check "🔴 core 机器一致性兜底闸被拆" "$ACT" \
+  "    () => checkCoreMachineDerived(core)," \
+  "    () => [],"
+
+check "🔴 抓取器少返回一条被当成「跳过」" "$CRAWLSTAGE" \
+  "    if (result === undefined) {" \
+  "    if (false) {"
+
+check "🔴 抓取结果的 crawledAt 不是 Date 也照写（会把整个调用炸掉，账交不出来）" "$CRAWLSTAGE" \
+  "    const shapeError = crawlResultShapeError(result)" \
+  "    const shapeError = null; void crawlResultShapeError"
+
+check "🔴 写入抛错不记 blocker" "$ACT" \
+  "        code: 'write_failed'," \
+  "        code: 'ignored'," 
+
+check "🔴 落库口返回非数组时不兜（写入已发生却交不出账）" "$ACT" \
+  "  if (!Array.isArray(written)) {" \
+  "  if (false) {"
+
+check "🔴 信封结构版本不比对（升版本 = 旧信封立刻失效，是空承诺）" "$ENV_FILE" \
+  "  if (envelope.envelopeVersion !== INVENTORY_ENVELOPE_VERSION) return 'version_mismatch'" \
+  "  if (false) return 'version_mismatch'"
+
+check "🔴 凭证结构版本不比对" "$ATT" \
+  "  if (review.envelopeVersion !== INVENTORY_ENVELOPE_VERSION) return 'version_mismatch'" \
+  "  if (false) return 'version_mismatch'"
+
+check "🔴 盖章时不查 L1/L2 共用密钥" "$REVIEW" \
+  "  assertDistinctSigningKeys(envelope, deps.signer)" \
+  "  void assertDistinctSigningKeys"
+
+check "🔴 稳定序列化对 Date/Map 静默塌成 {}（两份不同内容同一个 digest）" "$CANON" \
+  "  assertPlainContainer(value)" \
+  "  void assertPlainContainer"
+
+check "🔴 时间戳不要求显式时区（留下证明不了自己是几点的凭据）" "$PLAN" \
+  "  if (!Number.isFinite(parsed) || !ISO_WITH_TIMEZONE.test(trimmed)) {" \
+  "  if (!Number.isFinite(parsed)) {"
+
+check "🔴 机器决策不做运行时白名单" "$SHAPES" \
+  "    ALLOWED_MACHINE_DECISIONS.includes(value.machineDecision as MachineDecision) &&" \
+  "    typeof value.machineDecision === 'string' &&"
+
+check "🔴 decisions 的值不查（null 会抛裸 TypeError，把已知形状报成未知形状）" "$SHAPES" \
+  "  return [...checkDecisionValues(submission.decisions), ...checkAcknowledgementValues(submission.acknowledgements)]" \
+  "  return []"
+
 
 echo "───────────────────────────────────────────────"
+# 🔴 两类判据必须分开报，不许混着凑一个数字：
+#    「运行时闸」拆掉会改变程序行为，红的是行为测试；
+#    「架构守卫」拆掉不改变任何运行时行为，红的是 architecture.test.ts 的 grep。
+#    后者同样是真判据（有些性质只有它抓得到，比如常量时间比较），
+#    但把两者算成同一个「N 道闸」是类别混淆。
+echo "统计口径：共 $total_count 道探针（含运行时闸与架构守卫两类，逐道单独确认）"
 if [ "$fail_count" -eq 0 ]; then
-  echo "✅ 全部 $total_count 道闸各自单独确认会响"
+  echo "✅ 全部 $total_count 道探针各自单独确认会响"
   exit 0
 fi
-echo "❌ $fail_count / $total_count 道闸没有确认"
+echo "❌ $fail_count / $total_count 道探针没有确认"
 exit 1

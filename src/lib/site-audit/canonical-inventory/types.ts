@@ -77,6 +77,18 @@ export const INVENTORY_ENVELOPE_VERSION = 'canonical-inventory-envelope@1'
  */
 export const NORMALIZATION_RULE_VERSION = 'inventory-url-rules@1'
 
+/**
+ * `reviewerIdentitySource` 当前唯一合法值。
+ *
+ * 🔴 逐字校验，**不接受** `'authenticated_session'`：现在没有任何东西能产生那个值，
+ *    允许调用方填就等于允许 agent 谎称「我是从认证会话来的」。
+ *    真正接入 Auth / UI 时必须升契约版本，并由可信组合根注入这个字段。
+ *
+ * 🔴 放在 types.ts 而不是 review.ts —— 激活路径要用它，而激活路径不该为了一个字符串
+ *    常量把盖章模块（连带 `sealReview`）拖进自己的依赖图。
+ */
+export const ALLOWED_REVIEWER_IDENTITY_SOURCE = 'self_reported'
+
 // ---------------------------------------------------------------------------
 // 决策与原因码
 // ---------------------------------------------------------------------------
@@ -469,6 +481,12 @@ export interface ActivationDeps {
   readonly verifyReviewAttestation: SignatureVerifier
   readonly crawl: (urls: readonly string[]) => Promise<readonly CrawlResult[]>
   readonly enrich: (page: { url: string; title: string; markdown: string }) => Promise<EnrichedPage>
-  /** ISO 8601 时间源，注入以便测试确定性。有效期闸也用它。 */
+  /**
+   * ISO 8601 时间源，注入以便测试确定性。有效期闸也用它。
+   *
+   * 🔴 **它在信任边界内。** 注入一个假时钟等于把有效期闸关掉 —— 那是注入方的责任，
+   *    跟 `store` 和两个验签器一样。本层挡的是**工件**（`issuedAt` 被签名覆盖，
+   *    编辑者改不动），挡不住组合根自己撒谎。
+   */
   readonly now: () => string
 }

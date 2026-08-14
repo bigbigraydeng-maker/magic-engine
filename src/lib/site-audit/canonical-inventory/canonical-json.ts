@@ -29,7 +29,26 @@ export function canonicalJson(value: unknown): string {
   return JSON.stringify(value)
 }
 
+/**
+ * 只认普通对象与数组。
+ *
+ * 🔴 `Date` / `Map` / `Set` / 类实例走 `Object.entries` 全都得到 `{}` ——
+ *    两个不同时刻的 `Date` 会序列化成同一份原文，进而拿到**同一个 digest**。
+ *    编辑者利用不了（`JSON.parse` 产不出这些值），但序列化器在自己的定义域上
+ *    不该有歧义：静默塌成 `{}` 是「悄悄丢内容」，跟这一层要证明的东西正好相反。
+ *    宁可当场抛。
+ */
+function assertPlainContainer(value: object): void {
+  const proto = Object.getPrototypeOf(value)
+  if (proto === Object.prototype || proto === Array.prototype || proto === null) return
+  throw new TypeError(
+    `canonicalJson 只接受普通对象 / 数组 / 原始值，收到的是 ${value.constructor?.name ?? '未知类型'} —— ` +
+      '它会被序列化成 {}，两份不同内容会拿到同一个 digest',
+  )
+}
+
 function serialiseObject(value: Record<string, unknown>): string {
+  assertPlainContainer(value)
   const entries = Object.entries(value)
     .filter(([, v]) => v !== undefined)
     .sort(([a], [b]) => compareStrings(a, b))

@@ -15,17 +15,9 @@ import { verifyEnvelope } from './envelope'
 import { sealReview } from './attestation'
 import { resolveAcknowledgements, resolveDecisions } from './decisions'
 import { assertCoreIntact, assertValidIsoTimestamp, InventoryPlanError } from './plan'
+import { ALLOWED_REVIEWER_IDENTITY_SOURCE } from './types'
 import type { InventoryPlanEnvelope, ReviewSubmission, SignedReview } from './types'
 import type { PlanSigner, SignatureVerifier } from './signing'
-
-/**
- * `reviewerIdentitySource` 当前唯一合法值。
- *
- * 🔴 逐字校验，**不接受** `'authenticated_session'`：现在没有任何东西能产生那个值，
- *    允许调用方填就等于允许 agent 谎称「我是从认证会话来的」。
- *    真正接入 Auth / UI 时必须升契约版本，并由可信组合根注入这个字段。
- */
-export const ALLOWED_REVIEWER_IDENTITY_SOURCE = 'self_reported'
 
 export interface SignReviewDeps {
   /** 验 L1。**必须**是带密钥的实现 —— 恒判 valid 等于把整道闸拆了。 */
@@ -48,6 +40,7 @@ export function signReview(
   // 纵深：L1 已经把内容钉死，但没有任何东西能证明一份**手写**的 core 来自 buildInventoryPlan()。
   assertCoreIntact(envelope.core)
   assertSubmissionBindsEnvelope(envelope, submission)
+  assertDistinctSigningKeys(envelope, deps.signer)
   assertReviewerFields(submission)
 
   const problems = [
@@ -84,12 +77,34 @@ function assertEnvelopeTrusted(envelope: InventoryPlanEnvelope, verify: Signatur
   const reason: Record<typeof verdict, string> = {
     valid: '',
     digest_mismatch: '信封内容与它自带的 digest 对不上 —— 生成之后被改过',
-    signature_invalid: '生成签名对不上 —— 内容被改过之后连 digest 一起重算了（那需要密钥，改文件的人没有）',
+    signature_invalid: '生成签名对不上 —— 内容与 digest 一起被重算过，而重算签名需要 K_gen',
     unknown_key: '信封声称的签名密钥 id 不在密钥环里 —— 该密钥已作废，请重新生成计划',
     key_unavailable: '一把签名密钥都没配，验不了 —— 这是运维问题，不是篡改',
     malformed: '信封缺 keyId / digest / 签名，或者它们不是字符串',
+    version_mismatch: '信封的结构版本不是当前代码这一版 —— 重新生成，别拿旧信封套新语义',
   }
   throw new InventoryPlanError(`generation_${verdict}`, `不许盖章：${reason[verdict]}`)
+}
+
+/**
+ * L1 与 L2 必须是**两把不同的密钥**。
+ *
+ * 🔴 「两把密钥」这件事在类型层不可表达（两侧都是 `PlanSigner` / `SignatureVerifier`），
+ *    所以组合根完全可能把同一把接到两侧，而本层原来没有任何东西会察觉 ——
+ *    那样两层签名就塌成一个信任根，`attestation.ts` 里承诺的职责分离是空的。
+ *    比 `keyId` 是能做的最强判据：同一把密钥必然同一个 id。
+ *
+ * ⚠️ 它挡不住「两个不同 id 指向同一段 secret」。那要组合根自己不作弊，
+ *    跟注入恒真验签器是同一类责任。
+ */
+function assertDistinctSigningKeys(envelope: InventoryPlanEnvelope, signer: PlanSigner): void {
+  if (signer.keyId === envelope.keyId) {
+    throw new InventoryPlanError(
+      'shared_signing_key',
+      `复核凭证用的密钥 id「${signer.keyId}」跟生成信封的是同一个 —— ` +
+        'L1 与 L2 必须是两把不同的密钥，共用一把等于两层签名塌成一个信任根',
+    )
+  }
 }
 
 /** L2 必须指回**确切那一份** L1。两项都比，缺一项就能配错信封。 */

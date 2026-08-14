@@ -13,7 +13,7 @@
  *   6  契约版本 / 归一规则版本
  *   7  租户 / 域名 / 批准主机（与当前生产上下文比对）
  *   8  发现覆盖 + 不完整发现的认账
- *   9  被接受集合与逐条重新推导
+ *   9  被接受集合与逐条重新推导 → core 机器一致性兜底（放在 9 之后，免得遮住更具体的闸）
  *   10 空库闸（首次激活）
  *   ——— 以上全过，才开始抓 ———
  *   11 抓取 + 富集（全成才继续）→ 一次性写入 → 精确集合对账
@@ -41,14 +41,17 @@ import type {
   ReviewSubmission,
   SignedReview,
 } from './types'
-import { INVENTORY_PLAN_CONTRACT_VERSION, NORMALIZATION_RULE_VERSION } from './types'
-import type { CrawlResult } from '../crawler'
-import type { EnrichedPage } from '../page-enrichment'
+import {
+  ALLOWED_REVIEWER_IDENTITY_SOURCE,
+  INVENTORY_PLAN_CONTRACT_VERSION,
+  NORMALIZATION_RULE_VERSION,
+} from './types'
 import { checkEnvelopeFreshness, PLAN_MAX_AGE_DAYS, verifyEnvelope } from './envelope'
 import { verifyReviewAttestation } from './attestation'
 import { resolveAcknowledgements, resolveDecisions, type ResolvedCandidate } from './decisions'
-import { ALLOWED_REVIEWER_IDENTITY_SOURCE } from './review'
+import { assertCoreIntact } from './plan'
 import { checkActivationShape, isMachineCandidateShape } from './shapes'
+import { crawlAndEnrich } from './crawl-stage'
 import { deriveCanonicalUrl, normaliseApprovedHosts } from './url-rules'
 
 export interface ActivateInput {
@@ -138,7 +141,7 @@ async function runPreCrawlGates(input: ActivateInput): Promise<GateOutcome> {
     () => checkGenerationEnvelope(envelope, deps),
     () => checkFreshness(envelope, deps),
     () => checkAttestation(review, deps),
-    () => checkBinding(envelope, submission),
+    () => checkBinding(envelope, review, submission),
     () => checkVersions(core),
     () => checkIdentity(core, expected),
     () => checkDiscoveryAndAcknowledgements(core, submission),
@@ -149,6 +152,11 @@ async function runPreCrawlGates(input: ActivateInput): Promise<GateOutcome> {
   const decisionBlockers = firstFailure([
     () => problems.map((p) => ({ code: p.code, message: p.message })),
     () => checkAcceptedSet(resolved, core.boundary.approvedHosts),
+    // 🔴 兜底闸**放在最后**：core 被动过手脚时，前面那些更具体的闸（发现覆盖、
+    //    被接受集合、逐条重新推导）应该先响 —— 它们说得清「哪一页、错在哪」。
+    //    这道只兜「前面每一道都看不见」的形状，比如凭空多一条 rejected 候选 + 改乱计数。
+    //    放前面就会把 8、9 两道闸整片遮住，那正是这个仓库反复踩的坑。
+    () => checkCoreMachineDerived(core),
   ])
   if (decisionBlockers.length > 0) return { blockers: decisionBlockers, resolved }
 
@@ -173,10 +181,11 @@ function checkGenerationEnvelope(envelope: InventoryPlanEnvelope, deps: Activati
   const messages: Record<typeof verdict, string> = {
     valid: '',
     digest_mismatch: '信封内容与它自带的 generationDigest 对不上 —— 生成之后被改过',
-    signature_invalid: '生成签名对不上 —— 内容与 digest 一起被重算过（那需要密钥，改文件的人没有）',
+    signature_invalid: '生成签名对不上 —— 内容与 digest 一起被重算过，而重算签名需要 K_gen',
     unknown_key: '信封声称的签名密钥 id 不在密钥环里 —— 该密钥已作废，必须重新生成计划并重新复核',
     key_unavailable: '一把生成签名密钥都没配，验不了 —— 验不了 ≠ 验过了',
     malformed: '信封缺 keyId / generationDigest / generationSignature',
+    version_mismatch: '信封的结构版本不是当前代码这一版 —— 重新生成，别拿旧信封套新语义',
   }
   return [{ code: `generation_${verdict}`, message: messages[verdict] }]
 }
@@ -225,12 +234,17 @@ function checkAttestation(review: SignedReview, deps: ActivationDeps): Activatio
     unknown_key: '复核凭证声称的密钥 id 不在密钥环里 —— 该密钥已作废',
     key_unavailable: '一把复核密钥都没配，验不了 —— 验不了 ≠ 验过了',
     malformed: '复核凭证缺 keyId / reviewDigest / reviewAttestation',
+    version_mismatch: '复核凭证的结构版本不是当前代码这一版 —— 重新复核',
   }
   return [{ code: `review_attestation_${verdict}`, message: messages[verdict] }]
 }
 
 /** 闸 5 —— 一份合法 L2 不许配另一份合法 L1。两项都比。 */
-function checkBinding(envelope: InventoryPlanEnvelope, submission: ReviewSubmission): ActivationBlocker[] {
+function checkBinding(
+  envelope: InventoryPlanEnvelope,
+  review: SignedReview,
+  submission: ReviewSubmission,
+): ActivationBlocker[] {
   const blockers: ActivationBlocker[] = []
   if (submission.planId !== envelope.planId) {
     blockers.push({
@@ -242,6 +256,14 @@ function checkBinding(envelope: InventoryPlanEnvelope, submission: ReviewSubmiss
     blockers.push({
       code: 'review_digest_binding_mismatch',
       message: '复核凭证里记的 generationDigest 跟信封的对不上 —— 这两份不是配对的',
+    })
+  }
+  if (review.keyId === envelope.keyId) {
+    blockers.push({
+      code: 'shared_signing_key',
+      message:
+        `复核凭证用的密钥 id「${review.keyId}」跟生成信封的是同一个 —— ` +
+        'L1 与 L2 必须是两把不同的密钥，共用一把等于两层签名塌成一个信任根',
     })
   }
   if (submission.reviewerIdentitySource !== ALLOWED_REVIEWER_IDENTITY_SOURCE) {
@@ -273,6 +295,25 @@ function checkVersions(core: GeneratedPlanCore): ActivationBlocker[] {
     })
   }
   return blockers
+}
+
+/**
+ * 闸 9.5 —— core 的机器一致性纵深兜底。
+ *
+ * 🔴 `assertCoreIntact()` 原来**只在盖 L2 时跑**，激活侧一次都不跑。于是一份手工拼的、
+ *    计数对不上、凭空多一条从没被发现过的候选的 core，只要用真密钥 seal + sealReview，
+ *    就能一路 `activated`。编辑者走不到这条路（L1 挡死），但**绕过 `review.ts` 的内部
+ *    调用方**走得到 —— 而 `review.ts` 之所以跑它，理由恰恰是「没有任何东西能证明
+ *    一份手写的 core 来自 buildInventoryPlan」。这个理由在激活侧一字不差地成立。
+ */
+function checkCoreMachineDerived(core: GeneratedPlanCore): ActivationBlocker[] {
+  try {
+    assertCoreIntact(core)
+    return []
+  } catch (err) {
+    const code = err instanceof Error && 'code' in err ? String((err as { code: unknown }).code) : 'core_not_intact'
+    return [{ code: `core_${code}`, message: unexpectedText(err) }]
+  }
 }
 
 /** 闸 7 —— 一份给 A 客户批的计划不能拿去激活 B 客户。 */
@@ -423,90 +464,6 @@ async function checkInventoryEmpty(
 }
 
 // ---------------------------------------------------------------------------
-// 抓取 + 富集（复用现有 site-audit，不另起一套）
-// ---------------------------------------------------------------------------
-
-interface CrawlOutcome {
-  readonly records: readonly AcceptedPageRecord[]
-  readonly failures: readonly { url: string; error: string }[]
-}
-
-async function crawlAndEnrich(urls: readonly string[], deps: ActivationDeps): Promise<CrawlOutcome> {
-  const records: AcceptedPageRecord[] = []
-  const failures: { url: string; error: string }[] = []
-
-  // 抓取结果里 antibot 挑战页也带 `error`，所以下面那道 error 判定同时挡住
-  // 「WAF 拦截页被当成真页面写进台账」—— 那是 2026-06-20 Oztop 事故的形状。
-  let crawled: readonly CrawlResult[]
-  try {
-    crawled = await deps.crawl(urls)
-  } catch (err) {
-    return { records: [], failures: urls.map((url) => ({ url, error: `crawl batch failed: ${unexpectedText(err)}` })) }
-  }
-
-  const byUrl = new Map(crawled.map((r) => [r.url, r]))
-  for (const url of urls) {
-    const result = byUrl.get(url)
-    if (result === undefined) {
-      // 抓取器没返回这一条 —— 不许当成「跳过」，它就是失败。
-      failures.push({ url, error: 'crawler returned no result for this accepted URL' })
-      continue
-    }
-    if (result.error !== undefined && result.error.length > 0) {
-      failures.push({ url, error: result.error })
-      continue
-    }
-    const outcome = await enrichOne(url, result, deps)
-    if (outcome.record !== null) records.push(outcome.record)
-    else failures.push({ url, error: outcome.error })
-  }
-  return { records, failures }
-}
-
-/**
- * 富集一页。
- *
- * 🔴 富集契约上「永不抛」，但注入进来的实现不归我们管。让它把整个
- *    `activateReviewedPlan()` reject 掉，调用方就既拿不到审计、也没法按 status 判结局。
- */
-async function enrichOne(
-  url: string,
-  result: CrawlResult,
-  deps: ActivationDeps,
-): Promise<{ record: AcceptedPageRecord | null; error: string }> {
-  let enriched: EnrichedPage
-  try {
-    enriched = await deps.enrich({ url, title: result.title, markdown: result.markdown })
-  } catch (err) {
-    return { record: null, error: `enrichment threw: ${unexpectedText(err)}` }
-  }
-  if (!enriched.classified) {
-    // 台账要给 WP05 当页面身份用，分类失败的页面不许以 `other` 蒙混进去。
-    return { record: null, error: `classification failed: ${enriched.classificationError ?? 'unknown'}` }
-  }
-  return { record: toPageRecord(url, result, enriched), error: '' }
-}
-
-/** 把一页抓取结果 + 富集结果拼成台账记录。字段只用 `client_site_pages` 已有的列。 */
-function toPageRecord(url: string, result: CrawlResult, enriched: EnrichedPage): AcceptedPageRecord {
-  return {
-    canonicalUrl: url,
-    path: new URL(url).pathname,
-    title: result.title,
-    markdown: result.markdown,
-    wordCount: enriched.wordCount,
-    pageType: enriched.pageType,
-    topics: enriched.topics,
-    primaryKeyword: enriched.primaryKeyword,
-    classificationConfidence: enriched.classificationConfidence,
-    hasGeoBlock: enriched.hasGeoBlock,
-    geoDetectionMethod: enriched.geoDetectionMethod,
-    geoConfidence: enriched.geoConfidence,
-    crawledAt: result.crawledAt.toISOString(),
-  }
-}
-
-// ---------------------------------------------------------------------------
 // 写入 + 对账
 // ---------------------------------------------------------------------------
 
@@ -600,6 +557,14 @@ function reconcileWriteSet(
   records: readonly AcceptedPageRecord[],
   written: readonly string[],
 ): ActivationBlocker | null {
+  // 🔴 store 是注入的：返回一个非数组会让下一行 `new Set(written)` 抛，
+  //    而那时**写入已经发生**，调用方同时丢掉审计和 `inventoryTouched: true`。
+  if (!Array.isArray(written)) {
+    return {
+      code: 'write_result_malformed',
+      message: '落库口返回的不是一个数组 —— 无法与被接受集合对账。⚠️ 写入已经发生，必须人工核对。',
+    }
+  }
   const expectedSet = new Set(records.map((r) => r.canonicalUrl))
   const writtenSet = new Set(written)
   const missing = Array.from(expectedSet).filter((u) => !writtenSet.has(u))
@@ -640,9 +605,13 @@ interface AuditParts {
  *    所以每一处取值都当成「可能不是我以为的类型」来写。
  */
 function buildAudit(parts: AuditParts): ActivationAudit {
-  const envelope = (parts.input.envelope ?? {}) as Partial<InventoryPlanEnvelope>
+  // 🔴 连 `parts.input` 自己都可能不是对象（调用方把一个 null 请求体直接透传进来）——
+  //    结构闸会正确地报 blocker，但随后这里解引用 `null.envelope` 就会抛，
+  //    恰好丢掉本模块承诺「一定交得出账」的那份账。
+  const input = (typeof parts.input === 'object' && parts.input !== null ? parts.input : {}) as Partial<ActivateInput>
+  const envelope = (input.envelope ?? {}) as Partial<InventoryPlanEnvelope>
   const core = (envelope.core ?? {}) as Partial<GeneratedPlanCore>
-  const review = (parts.input.review ?? {}) as Partial<SignedReview>
+  const review = (input.review ?? {}) as Partial<SignedReview>
   const submission = (review.submission ?? {}) as Partial<ReviewSubmission>
   const rows = auditRows(parts.resolved, core)
 

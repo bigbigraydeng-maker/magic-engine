@@ -9,7 +9,17 @@
  * 后面的闸会以自己的方式响，多查一层只是给自己发明维护成本。
  */
 
-import type { ActivationBlocker } from './types'
+import type { ActivationBlocker, MachineDecision } from './types'
+
+/**
+ * 机器决策的运行时白名单。
+ *
+ * 🔴 人工决策与原因码都有运行时清单（`decisions.ts`），机器决策原来没有 ——
+ *    同一条道理缺了一半。手写一份带 `machineDecision: 'accepted'` 的 core 时，
+ *    下游会把它当成「不是 pending 也不是 rejected」处理，虽然仍 fail-closed，
+ *    但报出来的原因指向复核人漏判，而真正的毛病是这份 core 根本不是机器产的。
+ */
+const ALLOWED_MACHINE_DECISIONS: readonly MachineDecision[] = ['pending', 'rejected']
 
 const SHAPE_CODE = 'plan_shape_invalid'
 
@@ -36,7 +46,7 @@ export function isMachineCandidateShape(value: unknown): boolean {
   return (
     typeof value.originalUrl === 'string' &&
     (typeof value.canonicalUrl === 'string' || value.canonicalUrl === null) &&
-    typeof value.machineDecision === 'string' &&
+    ALLOWED_MACHINE_DECISIONS.includes(value.machineDecision as MachineDecision) &&
     Array.isArray(value.reasonCodes) &&
     Array.isArray(value.notes)
   )
@@ -131,5 +141,34 @@ function checkSubmissionShape(submission: unknown): ActivationBlocker[] {
   //    而真正的毛病是这份提交件的形状根本不对。两种病因必须分开报。
   if (!isPlainRecord(submission.decisions)) return bad('复核提交的 decisions 不是对象（数组也不行）')
   if (!isPlainRecord(submission.acknowledgements)) return bad('复核提交的 acknowledgements 不是对象（数组也不行）')
+  return [...checkDecisionValues(submission.decisions), ...checkAcknowledgementValues(submission.acknowledgements)]
+}
+
+/**
+ * 逐个查 `decisions` 的**值**。
+ *
+ * 🔴 只查容器是对象不够：`{"<url>": null}` 会让 `entry.decision` 直接抛裸 `TypeError`
+ *    （没有 code、不是 `InventoryPlanError`），激活侧则落到 `plan_shape_unexpected` ——
+ *    而那个 code 的契约含义是「结构闸有洞」。把已知形状报成未知形状，
+ *    等于把「该去补闸」这条信号也一起丢了。
+ */
+function checkDecisionValues(decisions: Record<string, unknown>): ActivationBlocker[] {
+  for (const [url, entry] of Object.entries(decisions)) {
+    if (!isPlainRecord(entry)) return bad(`候选 ${url} 的决策不是对象`)
+    if (typeof entry.decision !== 'string') return bad(`候选 ${url} 的 decision 不是字符串`)
+    if (entry.reasonCodes !== undefined && !Array.isArray(entry.reasonCodes)) {
+      return bad(`候选 ${url} 的 reasonCodes 不是数组`)
+    }
+  }
+  return []
+}
+
+function checkAcknowledgementValues(acks: Record<string, unknown>): ActivationBlocker[] {
+  for (const [host, ack] of Object.entries(acks)) {
+    if (!isPlainRecord(ack)) return bad(`主机 ${host} 的认账不是对象`)
+    if (typeof ack.acknowledgedBy !== 'string' || typeof ack.reason !== 'string') {
+      return bad(`主机 ${host} 的认账缺 acknowledgedBy / reason，或者它们不是字符串`)
+    }
+  }
   return []
 }

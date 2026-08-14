@@ -17,6 +17,12 @@
  *    1. `status === 'rejected'`；
  *    2. **一次抓取都没发生**（crawl spy 零调用）；
  *    3. **一行都没写**（store 零写入）。
+ *
+ * ⚠️ **诚实说明这一组的射程**：A–F 六条攻击都改了 `core` 或信封顶层，因而全部落在
+ *    **同一道闸（L1）的同一条分支**上 —— 它们是「签名覆盖面包含哪些字段」的六种取值，
+ *    不是六种独立防御。字段级的穷举证明在 `envelope.test.ts`（20 个 coreCases）。
+ *    这一组的价值是**端到端**：证明这些篡改在真实激活链路上确实走不到抓取和写入。
+ *    另外两条（只伪造 L2、重放）才是不同的防御维度，单独列在下面。
  */
 
 import { describe, expect, it } from 'vitest'
@@ -25,6 +31,10 @@ import { computeGenerationDigest } from '../envelope'
 import { computeReviewDigest } from '../attestation'
 import {
   acceptAllPending,
+  CLIENT,
+  DOMAIN,
+  HOSTS,
+  makeActivationDeps,
   makeActivationInput,
   makeCore,
   makeEnvelope,
@@ -32,6 +42,7 @@ import {
   revSigner,
   verifyGeneration,
 } from './fixtures'
+import { FakeInventoryStore } from './fake-store'
 import { signReview } from '../review'
 import type { GeneratedPlanCore, InventoryPlanEnvelope, ReviewDecisionEntry, SignedReview } from '../types'
 
@@ -227,6 +238,137 @@ describe('🔴 六种协调一致的篡改，全部被 L1 拒于抓取之前', (
       },
       '攻击 F · 改 planId',
     )
+  })
+})
+
+describe('🔴 只伪造 L2、L1 保持完好（另一条防御维度）', () => {
+  it('把复核人拒掉的一页改成 accepted + 重算 reviewDigest（L1 一个字节没动）→ 被 L2 拒，零抓取零写入', async () => {
+    // 复核人明确拒了 /b，编辑者想把它改回 accepted。
+    // L1 完好 ⇒ 闸 2 放行；真正拦下它的是闸 4（L2 凭证）。
+    const envelope = makeEnvelope(makeCore(URLS))
+    const review = signReview(
+      envelope,
+      makeSubmission(envelope, {
+        'https://example.com/a': { decision: 'accepted' },
+        'https://example.com/b': { decision: 'rejected' },
+      }),
+      { verifyGenerationSignature: verifyGeneration, signer: revSigner },
+    )
+    const submission = {
+      ...review.submission,
+      decisions: { ...review.submission.decisions, 'https://example.com/b': { decision: 'accepted' as const } },
+    }
+    expect(computeReviewDigest(submission), '构造无效：提交件必须真的变了').not.toBe(review.reviewDigest)
+    const input = makeActivationInput({
+      envelope,
+      review: { ...review, submission, reviewDigest: computeReviewDigest(submission) },
+    })
+    const audit = await activateReviewedPlan(input)
+
+    expect(audit.status).toBe('rejected')
+    expect(audit.blockers.map((b) => b.code)).toContain('review_attestation_attestation_invalid')
+    expect(input.deps.crawlSpy).not.toHaveBeenCalled()
+    expect(input.deps.store.writes).toHaveLength(0)
+  })
+
+  it('伪造认账（把一个 0 条主机的不完整发现「认掉」）→ 同样被 L2 拒', async () => {
+    const core = makeCore(['https://example.com/a'], { hosts: ['example.com', 'shop.example.com'] })
+    const envelope = makeEnvelope(core)
+    const review = signReview(
+      envelope,
+      makeSubmission(envelope, acceptAllPending(core), {
+        acknowledgements: { 'shop.example.com': { acknowledgedBy: 'po', reason: '旧站已下线' } },
+      }),
+      { verifyGenerationSignature: verifyGeneration, signer: revSigner },
+    )
+    const submission = { ...review.submission, acknowledgements: { 'shop.example.com': { acknowledgedBy: '我', reason: '我说的' } } }
+    const input = makeActivationInput({
+      envelope,
+      review: { ...review, submission, reviewDigest: computeReviewDigest(submission) },
+      expected: { clientId: CLIENT, requestedDomain: DOMAIN, approvedHosts: ['example.com', 'shop.example.com'] },
+    })
+    const audit = await activateReviewedPlan(input)
+
+    expect(audit.status).toBe('rejected')
+    expect(audit.blockers.map((b) => b.code)).toContain('review_attestation_attestation_invalid')
+    expect(input.deps.crawlSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('🔴 重放：同一枚信封 + 同一份凭证跑第二遍', () => {
+  it('第一次 activated；第二次被自己写进去的行挡住 → rejected，第二次零写入', async () => {
+    // 🔴 这是「防重放靠首次激活的空库闸」这句话的**唯一**端到端依据。
+    //    预置 existingCount 的假店只能证明「空库闸会响」，证明不了这条因果链。
+    const store = new FakeInventoryStore({ countFromWrites: true })
+    const { envelope, review } = legitimate()
+    const expected = { clientId: CLIENT, requestedDomain: DOMAIN, approvedHosts: HOSTS }
+
+    const first = await activateReviewedPlan({
+      envelope,
+      review,
+      expected,
+      mode: 'first_activation',
+      deps: makeActivationDeps({ store }),
+    })
+    expect(first.status).toBe('activated')
+    expect(store.writes).toHaveLength(1)
+
+    const replayDeps = makeActivationDeps({ store })
+    const second = await activateReviewedPlan({
+      envelope,
+      review,
+      expected,
+      mode: 'first_activation',
+      deps: replayDeps,
+    })
+    expect(second.status).toBe('rejected')
+    expect(second.blockers.map((b) => b.code)).toContain('inventory_not_empty')
+    expect(replayDeps.crawlSpy, '重放时连抓取都不该发生').not.toHaveBeenCalled()
+    expect(store.writes, '第二次一行都不许写').toHaveLength(1)
+  })
+
+  it('⚠️ 记账：台账被清空后同一枚信封仍可在七天内再跑 —— 单次消费没有独立记录', async () => {
+    // 这不是「通过」，是把一个**已知限制**钉成可执行的事实：
+    // 防重放 100% 委托给 store 的空库判断，没有任何「已消费」标记。
+    // 放开增量激活之前必须先落地一次性消费的持久化记录（#960 冻结决议硬条款 1）。
+    const { envelope, review } = legitimate()
+    const expected = { clientId: CLIENT, requestedDomain: DOMAIN, approvedHosts: HOSTS }
+    const run = () =>
+      activateReviewedPlan({ envelope, review, expected, mode: 'first_activation', deps: makeActivationDeps() })
+    expect((await run()).status).toBe('activated')
+    expect((await run()).status).toBe('activated')
+  })
+
+  it('⚠️ 记账：同一枚 L1 可以盖出多份各自合法、决策不同的 L2', async () => {
+    // `signReview` 不是一次性的。文档措辞必须写明这一点（见 attestation.ts 文件头）。
+    const envelope = makeEnvelope(makeCore(['https://example.com/a', 'https://example.com/b']))
+    const deps = { verifyGenerationSignature: verifyGeneration, signer: revSigner }
+    const both = signReview(envelope, makeSubmission(envelope, acceptAllPending(envelope.core)), deps)
+    const onlyOne = signReview(
+      envelope,
+      makeSubmission(envelope, {
+        'https://example.com/a': { decision: 'accepted' },
+        'https://example.com/b': { decision: 'rejected' },
+      }),
+      deps,
+    )
+    expect(both.reviewAttestation).not.toBe(onlyOne.reviewAttestation)
+    const a = await activateReviewedPlan({
+      envelope,
+      review: both,
+      expected: { clientId: CLIENT, requestedDomain: DOMAIN, approvedHosts: HOSTS },
+      mode: 'first_activation',
+      deps: makeActivationDeps(),
+    })
+    const b = await activateReviewedPlan({
+      envelope,
+      review: onlyOne,
+      expected: { clientId: CLIENT, requestedDomain: DOMAIN, approvedHosts: HOSTS },
+      mode: 'first_activation',
+      deps: makeActivationDeps(),
+    })
+    expect(a.writtenUrls).toHaveLength(2)
+    expect(b.writtenUrls).toHaveLength(1)
   })
 })
 

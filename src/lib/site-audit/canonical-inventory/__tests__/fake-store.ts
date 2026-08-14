@@ -20,6 +20,14 @@ export interface FakeStoreOptions {
   readonly countError?: string
   /** 让 `writeAcceptedPages` 抛错。 */
   readonly writeError?: string
+  /**
+   * `countExistingPages` 反映**已经写进去的行数**。
+   *
+   * 🔴 端到端重放测试必须用它：预置 `existingCount: 4` 的假店只能证明「空库闸会响」，
+   *    证明不了「第一次激活成功之后，同一枚信封第二次跑会被自己写进去的行挡住」——
+   *    而后者才是「防重放靠空库闸」这句话的全部依据。
+   */
+  readonly countFromWrites?: boolean
   /** 写入返回值的改写钩子 —— 用来造「少写 / 多写」。默认原样返回全部 canonical URL。 */
   readonly writeResult?: (pages: readonly AcceptedPageRecord[]) => readonly string[]
 }
@@ -39,6 +47,7 @@ export class FakeInventoryStore implements CanonicalInventoryStore {
     }
     const seq = this.options.countSequence
     if (seq !== undefined && this.countCalls <= seq.length) return seq[this.countCalls - 1]
+    if (this.options.countFromWrites === true) return this.allWrittenUrls().length
     return this.options.existingCount ?? 0
   }
 
