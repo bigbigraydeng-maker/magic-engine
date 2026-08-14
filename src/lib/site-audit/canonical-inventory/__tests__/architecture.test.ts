@@ -17,14 +17,26 @@ import { join, relative } from 'path'
 const ROOT = process.cwd()
 const DIR = join(ROOT, 'src/lib/site-audit/canonical-inventory')
 
-function walk(dir: string, out: string[] = []): string[] {
+/**
+ * 仓库里**真正会被打包进运行时**的源码扩展名。
+ *
+ * 🔴 上一版只收 `.ts`，于是「全仓扫描」根本不成立 —— 仓库里有 350 个 `.tsx`
+ *    （route / server action / component），一个都没被扫到。一个 `.tsx` 里的
+ *    深 import 或 oracle 调用会完全隐形，而守卫照样全绿。
+ */
+export const RUNTIME_SOURCE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'] as const
+
+function walk(dir: string, out: string[] = [], exts: readonly string[] = RUNTIME_SOURCE_EXTENSIONS): string[] {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry)
-    if (statSync(full).isDirectory()) walk(full, out)
-    else if (entry.endsWith('.ts')) out.push(full)
+    if (statSync(full).isDirectory()) walk(full, out, exts)
+    else if (exts.some((ext) => entry.endsWith(ext))) out.push(full)
   }
   return out
 }
+
+const rel = (f: string): string => relative(ROOT, f).split('\\').join('/')
+
 
 function stripComments(src: string): string {
   return src
@@ -42,6 +54,15 @@ const PRODUCTION_FILES = walk(DIR)
   .filter((f) => !f.includes('/__tests__/') && !f.endsWith('.test.ts'))
 
 const sourceOf = (file: string): string => stripComments(readFileSync(join(ROOT, file), 'utf8'))
+
+/**
+ * canonical-inventory 目录下**全部**源码 —— 生产文件与测试文件都算。
+ *
+ * 🔴 必须定义在 `PRODUCTION_FILES` **之后**：变异探针会把它替换成 `PRODUCTION_FILES`，
+ *    定义在前就会造成暂时性死区错误 → 整个测试文件加载失败 → `numFailedTests` 为 0，
+ *    跟「这道闸零覆盖」输出一模一样。判据自己不能有这种假阴性。
+ */
+const ALL_INVENTORY_SOURCES = walk(DIR).map(rel)
 
 /**
  * 客户专属字样。
@@ -116,9 +137,12 @@ describe('🔴 #960 承重墙：不存在签名 oracle', () => {
    *    而目录内的守卫全绿。承重墙必须按**全仓**来守。
    */
   it('🔴 全仓范围内：本目录之外没有任何文件深 import 签名原语模块', () => {
-    const PRIMITIVES = ['envelope', 'attestation', 'plan', 'decisions', 'shapes', 'signing', 'canonical-json']
+    // 判据按**路径尾部**匹配，所以 `@/lib/site-audit/canonical-inventory/envelope`
+    // 与 `../canonical-inventory/envelope` 两种写法都盖得住，静态 import、
+    // `require()`、动态 `import()` 也一样。
+    const PRIMITIVES = ['envelope', 'attestation', 'plan', 'decisions', 'shapes', 'signing', 'canonical-json', 'crawl-stage']
     const outside = walk(join(ROOT, 'src'))
-      .map((f) => relative(ROOT, f).split('\\').join('/'))
+      .map(rel)
       .filter((f) => !f.startsWith('src/lib/site-audit/canonical-inventory/'))
     const offenders: string[] = []
     for (const file of outside) {
@@ -135,8 +159,31 @@ describe('🔴 #960 承重墙：不存在签名 oracle', () => {
     ).toEqual([])
   })
 
-  it('判据本身没有空跑（全仓扫描确实扫到了东西）', () => {
-    expect(walk(join(ROOT, 'src')).length).toBeGreaterThan(500)
+  it('🔴 判据本身没有空跑：全仓扫描扫到了东西，而且确实包含 .tsx', () => {
+    const scanned = walk(join(ROOT, 'src')).map(rel)
+    expect(scanned.length, '扫描结果为空 = 上面那条守卫在空跑').toBeGreaterThan(500)
+    // 🔴 这一条就是「把 .tsx 从扩展名清单里删掉必须变红」的判据本身。
+    expect(scanned.filter((f) => f.endsWith('.tsx')).length, '一个 .tsx 都没扫到 —— 扩展名清单漏了它').toBeGreaterThan(0)
+  })
+
+  it('🔴 运行时源码扩展名清单覆盖真实会被打包的全部形态', () => {
+    expect([...RUNTIME_SOURCE_EXTENSIONS].sort()).toEqual(['.cjs', '.js', '.jsx', '.mjs', '.ts', '.tsx'])
+  })
+
+  it('🔴 扫描器确实按扩展名工作（只留 .tsx 时必须只返回 .tsx）', () => {
+    // 独立盯住扫描器本身：清单是对的但扫描器不用它，是「声明了≠接上了」的经典形状。
+    const onlyTsx = walk(join(ROOT, 'src'), [], ['.tsx']).map(rel)
+    expect(onlyTsx.length).toBeGreaterThan(0)
+    expect(onlyTsx.every((f) => f.endsWith('.tsx'))).toBe(true)
+  })
+
+  it('🔴 公共门面不导出通用 signer（不用 deep import 也能变成 oracle）', () => {
+    const index = sourceOf('src/lib/site-audit/canonical-inventory/index.ts')
+    expect(index, 'index.ts 导出了 createHmacSigner —— 外部 route 可以直接拿它给任意 payload 签名').not.toMatch(
+      /\bcreateHmacSigner\b/,
+    )
+    // 验签能力不构成 oracle，保留是有意的 —— 顺带钉住「不许连它一起删掉」。
+    expect(index).toMatch(/\bcreateHmacVerifier\b/)
   })
 
   it('🔴 签名覆盖面是穷举的 —— 给 UnsignedEnvelope 加字段却漏加进清单必须编译失败', () => {
@@ -336,11 +383,22 @@ describe('台账层的边界', () => {
     expect(offenders, offenders.join('\n')).toEqual([])
   })
 
-  it('每个文件都 < 800 行（CLAUDE.md 的硬规则）', () => {
-    const offenders = PRODUCTION_FILES.map((f) => ({ f, n: readFileSync(join(ROOT, f), 'utf8').split('\n').length }))
+  it('🔴 每个文件都 < 800 行 —— **生产文件与测试文件一律**（冻结契约的硬规则）', () => {
+    // 🔴 上一版只扫 PRODUCTION_FILES，于是 activation.test.ts 长到 862 行也全绿，
+    //    而 PR 报告还写着「最大文件 696 行」—— 结论不实。上限对测试文件同样成立。
+    const offenders = ALL_INVENTORY_SOURCES.map((f) => ({
+      f,
+      n: readFileSync(join(ROOT, f), 'utf8').split('\n').length,
+    }))
       .filter((x) => x.n >= 800)
       .map((x) => `${x.f} → ${x.n} 行`)
     expect(offenders, offenders.join('\n')).toEqual([])
+  })
+
+  it('文件上限守卫没有空跑：扫描面确实同时包含生产文件与测试文件', () => {
+    expect(ALL_INVENTORY_SOURCES.length).toBeGreaterThan(PRODUCTION_FILES.length)
+    expect(ALL_INVENTORY_SOURCES.some((f) => f.includes('/__tests__/'))).toBe(true)
+    expect(ALL_INVENTORY_SOURCES).toContain('src/lib/site-audit/canonical-inventory/activation.ts')
   })
 
   it('没有 any', () => {

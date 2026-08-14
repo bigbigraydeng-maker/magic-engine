@@ -29,6 +29,7 @@ DECISIONS="src/lib/site-audit/canonical-inventory/decisions.ts"
 SHAPES="src/lib/site-audit/canonical-inventory/shapes.ts"
 INDEX="src/lib/site-audit/canonical-inventory/index.ts"
 CRAWLSTAGE="src/lib/site-audit/canonical-inventory/crawl-stage.ts"
+ARCH="src/lib/site-audit/canonical-inventory/__tests__/architecture.test.ts"
 CRAWLER="src/lib/site-audit/crawler.ts"
 CRAWLER_SUITE="src/lib/site-audit/__tests__/crawler.test.ts"
 
@@ -613,6 +614,22 @@ check "🔴 decisions 的值不查（null 会抛裸 TypeError，把已知形状�
   "  return [...checkDecisionValues(submission.decisions), ...checkAcknowledgementValues(submission.acknowledgements)]" \
   "  return []"
 
+
+# ——— #973 有界修补：三条守卫本身必须是承重的 ———
+check "🔴 文件上限守卫退回成只扫生产文件（测试文件长到 862 行也全绿）" "$ARCH" \
+  "const ALL_INVENTORY_SOURCES = walk(DIR).map(rel)" \
+  "const ALL_INVENTORY_SOURCES = PRODUCTION_FILES"
+
+check "🔴 全仓扫描器把 .tsx 从扩展名清单里删掉（350 个 .tsx 全部隐形）" "$ARCH" \
+  "export const RUNTIME_SOURCE_EXTENSIONS = ['.ts', '.tsx'," \
+  "export const RUNTIME_SOURCE_EXTENSIONS = ['.ts',"
+
+check "🔴 公共门面重新导出 createHmacSigner（不用 deep import 就能签任意 payload）" "$INDEX" \
+  "  createHmacVerifier,
+  createUnavailableVerifier," \
+  "  createHmacSigner,
+  createHmacVerifier,
+  createUnavailableVerifier,"
 
 echo "───────────────────────────────────────────────"
 # 🔴 两类判据必须分开报，不许混着凑一个数字：

@@ -63,10 +63,23 @@ export {
   type CanonicalisationResult,
 } from './url-rules'
 
+/**
+ * 🔴 **公共门面不导出 `createHmacSigner`。**
+ *
+ * 它不需要 deep import 就能变成一台签名 oracle：从门面 import 它 → 在 route 里读生成密钥
+ * → 自己算 digest 与 payload → 调用通用的 `.sign(payload)` → 为**调用方构造的任意 core**
+ * 换回一枚合法 L1 签名。`sealEnvelope` 的调用点守卫与深 import 守卫**全都看不见**这条路，
+ * 因为它一次 `envelope.ts` 都没碰。
+ *
+ * 验签能力（`createHmacVerifier` / `createUnavailableVerifier`）**不构成 oracle**，保留 ——
+ * 将来的组合根接线时需要它们，而它们给不出任何签名。
+ *
+ * 内部测试继续用相对路径直接测签名原语。将来的接线 PR 必须提供一个**窄化的**可信组合入口
+ * （只接受业务边界、自己跑发现、自己封签），不得重新把通用 signer 公开出去。
+ */
 export {
   InventorySigningError,
   MIN_SIGNING_SECRET_BYTES,
-  createHmacSigner,
   createHmacVerifier,
   createUnavailableVerifier,
   type PlanSigner,
