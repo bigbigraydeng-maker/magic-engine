@@ -21,6 +21,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
+/** 「按键索引的表」——数组不算。 */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return isRecord(value) && !Array.isArray(value)
+}
+
 function isNonEmptyString(value: unknown): boolean {
   return typeof value === 'string' && value.trim().length > 0
 }
@@ -121,7 +126,10 @@ function checkSubmissionShape(submission: unknown): ActivationBlocker[] {
   for (const key of ['planId', 'generationDigest', 'reviewedBy', 'reviewedAt', 'reviewerIdentitySource']) {
     if (!isNonEmptyString(submission[key])) return bad(`复核提交的 ${key} 缺失或不是非空字符串`)
   }
-  if (!isRecord(submission.decisions)) return bad('复核提交的 decisions 不是对象')
-  if (!isRecord(submission.acknowledgements)) return bad('复核提交的 acknowledgements 不是对象')
+  // 🔴 数组也是 object。`decisions: []` 会被当成「一条决策都没有」一路走下去，
+  //    最后以「还有 pending 没判」收场 —— 结论没错，但报错指向的是复核人漏判，
+  //    而真正的毛病是这份提交件的形状根本不对。两种病因必须分开报。
+  if (!isPlainRecord(submission.decisions)) return bad('复核提交的 decisions 不是对象（数组也不行）')
+  if (!isPlainRecord(submission.acknowledgements)) return bad('复核提交的 acknowledgements 不是对象（数组也不行）')
   return []
 }

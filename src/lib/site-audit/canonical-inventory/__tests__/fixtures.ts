@@ -7,16 +7,25 @@
  *    所以夹具得给出真实密钥环，测试只用其中的验签器。
  */
 
+import { vi } from 'vitest'
 import { createHmacSigner, createHmacVerifier } from '../signing'
+import { signReview } from '../review'
+import { FakeInventoryStore } from './fake-store'
+import type { ActivateInput } from '../activation'
+import type { CrawlResult } from '../../crawler'
+import type { EnrichedPage } from '../../page-enrichment'
 import { sealEnvelope } from '../envelope'
 import { buildInventoryPlan } from '../plan'
 import type {
+  ActivationDeps,
+  ActivationExpectation,
   DiscoveryOutcome,
   GeneratedPlanCore,
   HostAcknowledgement,
   InventoryPlanEnvelope,
   ReviewDecisionEntry,
   ReviewSubmission,
+  SignedReview,
 } from '../types'
 
 export const CLIENT = '00000000-0000-0000-0000-0000000000aa'
@@ -108,4 +117,77 @@ export function acceptAllPending(core: GeneratedPlanCore): Record<string, Review
     if (c.machineDecision === 'pending') out[c.originalUrl] = { decision: 'accepted' }
   }
   return out
+}
+
+// ---------------------------------------------------------------------------
+// 激活用的夹具
+// ---------------------------------------------------------------------------
+
+export function makeCrawlResult(url: string, over: Partial<CrawlResult> = {}): CrawlResult {
+  return {
+    url,
+    markdown: `# ${url}\nreal page body`,
+    title: `Title ${url}`,
+    statusCode: 200,
+    crawledAt: new Date('2026-08-12T01:30:00.000Z'),
+    ...over,
+  }
+}
+
+export function makeEnriched(over: Partial<EnrichedPage> = {}): EnrichedPage {
+  return {
+    pageType: 'service',
+    topics: ['t1'],
+    primaryKeyword: 'kw',
+    classificationConfidence: 0.9,
+    classified: true,
+    classificationError: null,
+    hasGeoBlock: false,
+    geoDetectionMethod: null,
+    geoConfidence: 0,
+    wordCount: 5,
+    ...over,
+  }
+}
+
+export interface ActivationFixtureDeps extends ActivationDeps {
+  readonly store: FakeInventoryStore
+  /** 记录抓取被调用过几次 —— 「一次抓取都没发生」这条承诺靠它来证。 */
+  readonly crawlSpy: ReturnType<typeof vi.fn>
+}
+
+export function makeActivationDeps(over: Partial<ActivationDeps> = {}): ActivationFixtureDeps {
+  const store = (over.store as FakeInventoryStore) ?? new FakeInventoryStore()
+  const crawlSpy = vi.fn(async (urls: readonly string[]) => urls.map((u) => makeCrawlResult(u)))
+  return {
+    store,
+    crawlSpy,
+    verifyGenerationSignature: over.verifyGenerationSignature ?? verifyGeneration,
+    verifyReviewAttestation: over.verifyReviewAttestation ?? verifyReview,
+    crawl: over.crawl ?? crawlSpy,
+    enrich: over.enrich ?? (async () => makeEnriched()),
+    now: over.now ?? (() => NOW),
+  }
+}
+
+export function makeActivationInput(over: {
+  envelope?: InventoryPlanEnvelope
+  review?: SignedReview
+  expected?: ActivationExpectation
+  deps?: ActivationFixtureDeps
+} = {}): ActivateInput & { deps: ActivationFixtureDeps } {
+  const envelope = over.envelope ?? makeEnvelope(makeCore(['https://example.com/a', 'https://example.com/b']))
+  const review =
+    over.review ??
+    signReview(envelope, makeSubmission(envelope, acceptAllPending(envelope.core)), {
+      verifyGenerationSignature: verifyGeneration,
+      signer: revSigner,
+    })
+  return {
+    envelope,
+    review,
+    expected: over.expected ?? { clientId: CLIENT, requestedDomain: DOMAIN, approvedHosts: HOSTS },
+    mode: 'first_activation',
+    deps: over.deps ?? makeActivationDeps(),
+  }
 }
