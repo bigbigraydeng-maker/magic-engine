@@ -84,6 +84,13 @@ export interface ProvenPattern {
   flywheel?: FlywheelName | null
   source_table?: string | null
   source_id?: string | null
+  /**
+   * `flywheel_actions.id` this memory was derived from — the identity that
+   * dedupe and supersession key on. `source_id` stays the outcome row, which is
+   * one of several readings of the same action. NULL = FDE annotation or a row
+   * written before 20260812100000.
+   */
+  source_action_id?: string | null
   is_active: boolean
   created_at: string
   updated_at: string
@@ -99,6 +106,7 @@ export interface CreateProvenPatternInput {
   flywheel?: FlywheelName
   source_table?: string
   source_id?: string
+  source_action_id?: string
 }
 
 // ── 3. client_failed_experiments ─────────────────────────────────────────────
@@ -112,7 +120,11 @@ export interface FailedExperiment {
   tried_at?: string | null
   source_table?: string | null
   source_id?: string | null
+  /** See `ProvenPattern.source_action_id` — same identity, same rules. */
+  source_action_id?: string | null
+  is_active: boolean
   created_at: string
+  updated_at: string
 }
 
 export interface CreateFailedExperimentInput {
@@ -123,6 +135,7 @@ export interface CreateFailedExperimentInput {
   tried_at?: string
   source_table?: string
   source_id?: string
+  source_action_id?: string
 }
 
 // ── 4. client_decision_history ────────────────────────────────────────────────

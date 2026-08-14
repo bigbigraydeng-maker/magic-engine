@@ -1,7 +1,8 @@
 # Magic Engine — 系统当前状态
 
 > **唯一真相源。** 想知道「现在什么在跑 / 部署在哪 / 配了哪些东西」，只看这一份。
-> 最后核对：**2026-07-25**（从 `render.yaml` / `.github/workflows/` / `src/` / `supabase/migrations/` 实读，非人工回忆）
+> 最后核对：**2026-08-12** —— 本次只重核了 §1 服务构成 · §3.1 ME2 · §4 定时任务全表（从 `render.yaml` / `.github/workflows/` / `src/app/api/cron/` / 生产库对象存在性实读，非人工回忆）。
+> **§2 代码规模与 §8 doctor 结果仍是 2026-07-25 的旧数，本次未重跑**，别当现况用。
 >
 > 未完成的事 → [ROADMAP.md](./ROADMAP.md) · 已上线的事 → [history/CHANGELOG.md](./history/CHANGELOG.md)
 > 为什么这么做 → [DECISIONS.md](./DECISIONS.md) · 别再踩的坑 → [PITFALLS.md](./PITFALLS.md) · 环境变量 → [ENV.md](./ENV.md)
@@ -23,7 +24,11 @@
 
 > ⚠️ 远程仍存在一个历史 `master` 分支。**部署跟它无关**，别往那推。
 
-**服务构成**：1 个 web service + **28 个 Render Cron Job** + 4 个 GitHub Actions workflow（其中 3 个当 cron 用）。
+**服务构成**（2026-08-12 实读）：1 个 web service + **47 个 Render Cron Job** + 12 个 GitHub Actions workflow（其中 5 个带 `schedule:`）。
+> 旧版这里写「28 个 Render Cron Job」，与 §4.1 表格自己的数（41）都对不上，两处都已更正。
+
+**`main` 的分支保护（2026-08-12 实读，别再说「开不了」）**：ruleset **`Protect main`（id 20550157）enforcement=active** —— 禁删 · 禁 non-fast-forward · **只许 merge commit**（不许 squash / rebase）· **所有复审线程必须标记已解决** · 必过状态检查 `ai-orchestrator-tests`；approving review 数要求为 0。
+另有两条同名旧 ruleset（`protect-main` / `protect-main Magic Engine`）处于 **disabled**，别被它们误导。
 
 ## 2. 代码规模
 
@@ -60,7 +65,9 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 | **ME MCP Server** (P34) | ✅ 上线 | `lib/mcp` · `api/mcp` · `api/mcp-admin` | `admin_api_keys` `client_api_keys` `api_key_settings` |
 | **Outbound Prospecting** (P35) | 🔄 建设中 | `lib/prospecting` · `api/admin/prospecting` · `api/prospect` | `outbound_prospects` `discovery_leads` |
 | **Voice Agent** (P36) | 🔄 建设中 | `lib/voice` · `api/voice` · `scripts/voice/` | 见 `docs/voice-agent/` |
-| **ME2 执行内核** | ⚠️ **代码在 main，生产未启用** | `lib/kernel` · `lib/capabilities` | `action_runs` `action_run_steps` `authorization_decisions` `client_automation_policies` —— **WP00 2026-08-10 preflight 记录为不存在；启用前按对象存在性重查** |
+| **ME2 GEO 测量线**（WP02→WP04A） | ✅ **在生产，已真实跑过一次** | `lib/geo-measurement`（契约）· `lib/geo-measurement-store`（不可变存储）· `lib/geo-measurement-runtime`（执行 + 预算闸）· `lib/geo-baseline`（真 provider / parser / store 接线） | `geo_query_sets` `geo_queries` `geo_batches` `geo_observations` `geo_evidence` —— **2026-08-12 实查存在**，装着 3 批次 / 25 观测 / 12 证据（含 Roman Baseline v1，批次 `688bd8ae`） |
+| **ME2 执行内核** | ⚠️ **代码在 main，生产未启用** | `lib/kernel`（授权 / 网关 / lineage）· `lib/action-bridge`（K-WP02 的 `MAPPING_TABLE`，**当前是空数组**） | `action_runs` `action_run_steps` `authorization_decisions` `client_automation_policies` —— **2026-08-12 实查：四张表与全部 `kernel_*` RPC 一个都不存在**（与 WP00 2026-08-10 preflight 结论一致）。启用前仍按对象存在性重查 |
+| **ME2 共享 Page 能力**（WP06） | ⚠️ **代码在 main，零调用方** | `lib/page-optimization`（resolve / draft / diff / validate）· `lib/capabilities/page-optimization/snapshot.ts` | 无（WP06 冻结决定：不加表、不加 migration、不持久化）。⚠️ 交付的是被缩小的范围 —— 无成本闸门是照实施指令做的，详见 [ROADMAP](./ROADMAP.md) 的 WP06 条目 |
 | **ME2 Growth 契约** | ⚠️ **代码在 main，无人调用** | `lib/growth`（纯类型 + 纯校验器） | 无 |
 
 **六支柱诊断维度（不变）**：`seo` / `ai_visibility` / `ads` / `social` / `reputation` / `competitor`。
@@ -82,7 +89,7 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 
 ## 4. 定时任务全表
 
-### 4.1 Render Cron（41 个，全部 curl `https://app.magicengine.com.au/api/cron/*`，带 `CRON_SECRET` Bearer）
+### 4.1 Render Cron（**47 个**，全部 curl `https://app.magicengine.com.au/api/cron/*`，带 `CRON_SECRET` Bearer）
 
 | Cron 名 | 调度 (UTC) | 端点 |
 |---|---|---|
@@ -98,7 +105,7 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 | social-comment-autoreply | `*/30 * * * *` | `/api/cron/social-comment-autoreply` |
 | messenger-hourly | `10 * * * *` | `/api/cron/messenger-sync-hourly` |
 | meta-leads-hourly | `25 * * * *` | `/api/cron/meta-leads-sync` |
-| mailbox-sync-hourly | `25 * * * *` | `/api/cron/mailbox-sync` |
+| ~~mailbox-sync-hourly~~ | — | **已从 `render.yaml` 移除**，路由 `/api/cron/mailbox-sync` 保留只为手动触发（见 `render.yaml` 注释）。邮箱同步现在不自动跑 |
 | viral-discovery-weekly | `0 0 * * *` | `/api/cron/viral-discovery-weekly` |
 | site-audit-cron | `0 2 * * *` | `/api/cron/site-audit-jobs` |
 | industry-ai-visibility-daily | `30 2 * * *` | `/api/cron/ai-visibility-weekly` |
@@ -128,7 +135,19 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 | factory-stock-refill | `0 19 * * 1` | `/api/cron/factory-stock-refill` |
 | blog-weekly | `0 3 * * 2` | `/api/cron/blog-weekly` |
 
-### 4.2 GitHub Actions（3 个当 cron 用 + 1 个手动）
+**2026-08-12 补录 —— `render.yaml` 里有、本表此前漏了的 7 条**：
+
+| Cron 名 | 调度 (UTC) | 端点 |
+|---|---|---|
+| cms-connection-retest | `10 6 * * *` | `/api/cron/cms-connection-retest` |
+| kpi-backfill | `20 6 * * *` | `/api/cron/kpi-backfill` |
+| execution-auto-run | `30 9 * * *` | `/api/cron/execution-auto-run?dry_run=1` ← **仍挂着空跑参数，只选不做** |
+| ad-readback-sweep-daily | `40 20 * * *` | `/api/cron/ad-readback-sweep` |
+| benchmark-accumulator | `40 7 * * 1` | `/api/cron/benchmark-accumulator` |
+| diagnostic-weekly | `0 8 * * 1` | `/api/cron/diagnostic-weekly` |
+| prescription-weekly | `0 8 * * 2` | `/api/cron/prescription-weekly` |
+
+### 4.2 GitHub Actions（12 个 workflow，其中 5 个带 `schedule:`）
 
 | Workflow | 调度 (UTC) | 端点 |
 |---|---|---|
@@ -139,18 +158,18 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 
 ### 4.3 🔴 有路由但没有任何调度器 —— 这些功能永远不会自动跑
 
-`src/app/api/cron/` 共 **50 个**端点，被调度的有 **44 个**。剩下 6 个：
+2026-08-12 实读：`src/app/api/cron/` 共 **57 个**端点，被调度的有 **53 个**。剩下 **4 个**：
 
 | 端点 | 判断 |
 |---|---|
 | `admin-key-expiry` | ❓ 需确认是有意停用还是漏配 |
-| `benchmark-accumulator` | ❓ 同上 |
 | `flywheel-seo-weekly` | ❓ 同上（Phase 12.I 建的，ROADMAP 标已完成） |
-| `kpi-backfill` | ❓ 同上 |
-| `memory-extractor` | ❓ 同上（Phase 23 Memory Layer） |
+| `memory-extractor` | ❓ 同上（Phase 23 Memory Layer）。⚠️ 注意：**它没被调度 ≠ 从没跑过** —— `client_learned_lessons` 里已有 21 行，是别的路径写进去的 |
 | `factory-review-sweeper` | ✅ **有意退役** —— 审核已搬到 `/dashboard/factory`（PR #581），Airtable 停用后该端点必 500 |
 
-> `poster-studio-daily` 原也在此列，已于 2026-08-01 前接上调度，不再是孤儿。
+> 旧版这里写「50 个端点 / 44 个被调度 / 6 个孤儿」，已过时：`benchmark-accumulator` 与 `kpi-backfill` **都已接上调度**（见 §4.1 补录），不再是孤儿。
+> `poster-studio-daily` 亦已于 2026-08-01 前接上调度。
+> `factory-worker-sweeper` 由 `factory-sweepers.yml` 通过 `for path in …` 循环调用 —— **按 URL 字面量 grep 会漏掉它，别误判成孤儿**。
 
 > 新建 `/api/cron/*` 路由时，**同一个 PR 里就要加 `render.yaml` 条目**，否则就会多一个僵尸端点。
 > `bash scripts/doctor.sh --cron` 会自动查这件事。

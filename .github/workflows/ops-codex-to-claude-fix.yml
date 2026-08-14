@@ -14,11 +14,30 @@ name: OPS — Codex Review to Claude Fix
 # auto-resolves a review conversation. The Product Owner remains the only
 # merge authority — nothing in this file can merge a PR.
 #
-# The actor allowlist is enforced by the `if:` guard below against
+# WHO is allowed to trigger this is enforced by the `if:` guard below against
 # `github.event.review.user.login`, a GitHub-verified field a commenter
-# cannot forge — not by any input on the invoked action, since this leg
-# calls claude-code-action directly with a prompt rather than via an
-# @claude mention, so there is no comment-trigger surface to allowlist.
+# cannot forge. That guard is the security boundary and stays the security
+# boundary.
+#
+# It is NOT, however, sufficient to make the run succeed. claude-code-action
+# runs its own actor check and rejects every bot unless `allowed_bots` names
+# it. An earlier version of this comment argued no allowlist input was needed
+# here "since this leg calls claude-code-action directly with a prompt rather
+# than via an @claude mention, so there is no comment-trigger surface to
+# allowlist". That reasoning is empirically wrong: every run since this
+# workflow shipped failed at the invoke step with
+#     Workflow initiated by non-human actor: chatgpt-codex-connector (type: Bot).
+#     Add bot to allowed_bots list or use '*' to allow all bots.
+# (`ALLOWED_BOTS: ""` in the run log — e.g. actions/runs/31564742703 on PR
+# #936, actions/runs/31565553495 on PR #935). So the Codex-review-to-Claude-fix
+# leg has never once completed. See issue #939.
+#
+# `allowed_bots` is therefore set below to exactly one login — never `'*'`.
+# `'*'` would let ANY bot account that can submit a review drive this leg, and
+# this leg's whole purpose is to feed that bot's text into a Claude run that
+# commits and pushes. The narrow list is asserted in
+# tools/ops-review-loop/tests/workflow-guards.test.ts so it cannot be widened
+# without an explicit, reviewable diff.
 
 on:
   pull_request_review:
@@ -75,12 +94,80 @@ jobs:
       # most 3 times per PR (enforced by plan.mjs / handle-review.mjs before
       # this step is reached), and only with the aggregated Codex findings
       # as its prompt.
+      # Codex finding (PR #943, P2): "did the head move?" is only evidence that
+      # THIS round pushed something if the baseline was taken immediately
+      # before this round ran. The review event's sha can be minutes old, and
+      # anyone — a human, another automation — pushing in that window would
+      # have been credited to Claude, consuming one of the three rounds for
+      # work it never did.
+      #
+      # Read the baseline here, one step before the action, so the comparison
+      # in mark-fix-outcome.mjs brackets exactly this round.
+      #
+      # Deliberately inline, and deliberately NOT a new file under
+      # tools/ops-review-loop/src/. This workflow's YAML comes from the PR
+      # branch while `actions/checkout ref: main` gives it scripts from main —
+      # so a step that calls a brand-new module fails on the PR that
+      # introduces it, every time, until both halves are on main. The first
+      # version of this step did exactly that and turned this PR red with
+      # "Cannot find module .../read-head.mjs".
+      #
+      # Anything genuinely new that a workflow step must call has to land on
+      # main before the step that calls it. A one-line read does not deserve
+      # that dance.
+      - name: Record the branch head before the fix round
+        id: baseline
+        if: steps.plan.outputs.action == 'dispatch-fix'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          head_before=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha)
+          # Exactly 40 hex characters, anchored at both ends. The loose version
+          # of this check ("starts with 8 hex chars") accepted trailing junk,
+          # and the very next line writes the value into GITHUB_OUTPUT as
+          # `key=value` — where a newline in the value declares a further
+          # output. That is the same injection class PR #941 just closed on the
+          # JavaScript side, reopened here in shell. The value comes from
+          # GitHub's own API and is not attacker-controlled today; a validation
+          # step exists precisely so that stops being load-bearing.
+          #
+          # NOT `grep -E '^[0-9a-f]{40}$'`: grep matches line by line, so a
+          # value whose FIRST line is 40 hex characters passes while carrying
+          # further lines behind it — which is exactly the injection this check
+          # is here to stop. Verified by trying it: the newline case sailed
+          # through. Length plus a whole-string character class does not have
+          # that hole, because shell `case` sees the entire value, newlines
+          # included.
+          case "$head_before" in
+            *[!0-9a-f]*) head_ok=no ;;
+            *) [ "${#head_before}" -eq 40 ] && head_ok=yes || head_ok=no ;;
+          esac
+          if [ "$head_ok" != yes ]; then
+            echo "::error::Unusable head sha for PR #${PR_NUMBER}: ${head_before}"
+            exit 1
+          fi
+          echo "head_before=${head_before}" >> "$GITHUB_OUTPUT"
+          echo "Branch head before this fix round: ${head_before}"
+
       - name: Invoke Claude to fix Codex findings
         id: claude
         if: steps.plan.outputs.action == 'dispatch-fix'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Exactly one login, never '*'. See the header comment and issue #939.
+          # The `if:` guard above is what decides who may trigger this; this
+          # input only stops the action from refusing the run outright.
+          allowed_bots: chatgpt-codex-connector
+          # Defence in depth, NOT the boundary. Narrowing the tool surface
+          # makes the obvious abuses harder, but this leg genuinely needs a
+          # shell to run tests and to commit + push, and any shell is enough
+          # to do damage if the model is talked into it. What actually bounds
+          # the blast radius is ops-fix-scope-guard.yml, which judges the
+          # resulting diff and does not care what the prompt said.
+          claude_args: '--allowed-tools Read,Edit,Write,Glob,Grep,Bash'
           additional_permissions: |
             actions: read
           prompt: ${{ steps.plan.outputs.prompt }}
@@ -96,4 +183,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ROUND: ${{ steps.plan.outputs.round }}
           OUTCOME: ${{ steps.claude.outcome }}
+          # Taken one step before the action ran, so "the head moved" means
+          # this round moved it — see the `baseline` step above.
+          HEAD_BEFORE: ${{ steps.baseline.outputs.head_before }}
         run: node tools/ops-review-loop/src/mark-fix-outcome.mjs

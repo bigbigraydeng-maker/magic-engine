@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync, existsSync } from 'fs'
+import ts from 'typescript'
+import { readFileSync, existsSync, statSync } from 'fs'
 import path from 'path'
 import { CRON_REGISTRY } from './registry'
 import { expectedIntervalHours } from './schedule'
@@ -212,7 +213,12 @@ describe('cron 触发、web 进程读取的开关：docs/ENV.md 的「配在哪�
     // 只是当时把空白压平，整段还是以 curl 开头，所以一直没露馅）
     expect(checked.some((p) => /envVars:|- key:/.test(p!.startCommand))).toBe(false)
     expect(envDocLocation('CRON_SECRET')).toContain('cron')
-    expect(envDocLocation('NEXT_PUBLIC_SUPABASE_ANON_KEY')).toBe('Render-web')
+    // 🔴 这是「解析器真读到了『配在哪』那一格」的探针，所以**必须**是精确值比对，
+    //    不能松成 toContain —— 松了就分不出「读对了整格」和「读到了半格」。
+    //    ENV.md 里这一行改了，这里就要跟着改（本次由反向核对补标 worker 而改）。
+    expect(envDocLocation('NEXT_PUBLIC_SUPABASE_ANON_KEY')).toBe(
+      'Render-web + worker `content-factory-render-worker`',
+    )
     expect(envDocLocation('THIS_ENV_DOES_NOT_EXIST')).toBeNull()
   })
 
@@ -289,5 +295,344 @@ describe('cron 触发、web 进程读取的开关：docs/ENV.md 的「配在哪�
       expect(where).toContain('Render-web')
       expect(where).not.toContain('Render-cron')
     })
+  })
+})
+
+/**
+ * 标着「要配到 cron service 上」的变量，必须真的在 cron 进程里读得到。
+ *
+ * 本仓每条 cron 的 startCommand 都只是一条 curl 打 web 上的 /api/cron/*，
+ * cron 进程里唯一读得到的就是那条 curl 自己要用的 CRON_SECRET。业务变量标成
+ * Render-cron，运维照着配就是配到一个永远读不到的地方 —— 而且不报错。
+ *
+ * 下面不写死任何变量名单：cron 的资格是从 render.yaml 里**各 cron 的 startCommand 真的
+ * 引用了哪些 $VAR** 推出来的 —— 不是「envVars 里声明过」。声明 ≠ 被读：一个遗留或
+ * 误加进 envVars、但命令里从来没展开过的变量，进程里根本没有读取方，拿「声明过」当
+ * 依据会把这种情况判成绿。
+ *
+ * 两个方向都要管，缺一个都能 false-green：
+ *   正向 —— 文档标着上 cron 的，命令里必须真的引用了它；
+ *   反向 —— 命令里真的引用了的（且 ENV.md 里有登记的），文档必须保留 cron 标注。
+ * 只有正向的话，以后新加一条 curl 用了 $FOO 而 ENV.md 把 FOO 写成 Render-web，
+ * 没有任何断言会红。
+ */
+/** docs/ENV.md 全表：变量名 → 「配在哪」那一格。 */
+function allEnvDocLocations(): Map<string, string> {
+  const lines = readFileSync(path.join(ROOT, 'docs/ENV.md'), 'utf8').split('\n')
+  const cellsOf = (l: string) => l.split('|').slice(1, -1).map((c) => c.trim())
+  const out = new Map<string, string>()
+  let col = -1
+  for (const line of lines) {
+    if (!line.trimStart().startsWith('|')) { col = -1; continue }
+    const cells = cellsOf(line)
+    const h = cells.findIndex((c) => c.includes('配在哪'))
+    if (h >= 0) { col = h; continue }
+    if (col < 0 || col >= cells.length) continue
+    if (cells.every((c) => /^:?-{2,}:?$/.test(c))) continue
+    Array.from(cells[0].matchAll(/`([A-Z][A-Z0-9_]*)`/g)).forEach((m) => out.set(m[1], cells[col]))
+  }
+  return out
+}
+
+describe('docs/ENV.md 里带 cron 标注的变量，必须真的配得到 cron 上', () => {
+  const parsed = parseRenderYaml()
+
+  /**
+   * 一条命令里**真的会被 shell 展开**的变量。
+   *
+   * 单引号里的 `$VAR` 和转义的 `\$VAR` 都是字面量，不展开 —— 那种写法下 cron 会带着
+   * 一串字面量去请求（真发生过就是 401），把它算成「读取方」等于把坏掉的配置判成对的。
+   * 所以先把转义和单引号段去掉再匹配。这是够用的近似，不是 shell 解析器。
+   */
+  /**
+   * 把不会展开的位置盖掉，**长度保持不变** —— 这样原文和盖过的版本可以按下标对齐，
+   * 于是能逐次出现地判断，而不是按变量名去重。同一条命令里同一个名字既正常展开、
+   * 又在单引号里出现一次时，按名字去重会把后者放过去。
+   *
+   * 必须按引号**状态**逐字符扫，不能拿正则全局配对任意两个 `'`：
+   *   - 双引号里的 `'` 是普通字符，`"…'\$X'…"` 里的 $X 照样展开；
+   *   - 拿正则配对会把双引号里的撇号跟后面真正的单引号配成一段，两个方向都判错。
+   * 这是引号/转义状态机，不是 shell 解析器 —— 不处理 here-doc、$'…' 这类扩展语法。
+   */
+  function maskNonExpanding(startCommand: string): string {
+    const out = startCommand.split('')
+    let inSingle = false
+    let inDouble = false
+    for (let i = 0; i < startCommand.length; i++) {
+      const ch = startCommand[i]
+      // 单引号里没有转义；其余位置反斜杠吃掉下一个字符（`\$` 就是这样不展开的）
+      if (!inSingle && ch === '\\') {
+        out[i] = ' '
+        if (i + 1 < startCommand.length) out[i + 1] = ' '
+        i++
+        continue
+      }
+      // 双引号里的 `'` 是普通字符，不开单引号段；单引号里的 `"` 同理
+      if (!inDouble && ch === "'") { inSingle = !inSingle; continue }
+      if (!inSingle && ch === '"') { inDouble = !inDouble; continue }
+      if (inSingle) out[i] = ' '
+    }
+    // 🔴 扫完还停在引号里 = 这条命令 bash 根本跑不起来（实测 `bash -n` 返回 2，语法错）。
+    //    这时候「哪个 $VAR 会展开」无从谈起：右引号缺失的那段之后，所有 $VAR 都会被
+    //    当成「正常展开」——于是字面量、注入、文档三条断言**同时**放行一条压根执行不了的命令。
+    //    必须 fail closed：宁可让这条测试炸出来，也不能给一条坏命令发通行证。
+    if (inSingle || inDouble) {
+      throw new Error(
+        `startCommand 有未闭合的${inSingle ? '单' : '双'}引号，bash 会直接语法错，无法判定变量展开：${startCommand}`,
+      )
+    }
+    return out.join('')
+  }
+
+  /**
+   * 按 shell 的标识符规则整个抓，不是只抓大写前缀。
+   * 名字长度不设下限（`$TZ` / `$X` 都合法），也不能在小写处截断 ——
+   * `$CRON_SECRETx` 里 shell 读的是 `CRON_SECRETx` 这一整个名字（通常展开成空，
+   * 于是鉴权失败）；只捕获前缀 `CRON_SECRET` 会让注入、字面量、文档三项全都误判成通过。
+   */
+  /**
+   * 🔴 **花括号里变量名后面允许跟 shell 操作符，不是只有紧邻的 `}`。**（Issue #948）
+   *
+   * 原来的写法只认 `${NAME}`。而下面这些都是合法且常见的参数展开：
+   *     ${CRON_SECRET:-}          缺了用空默认值
+   *     ${CRON_SECRET:?missing}   缺了直接退出
+   *     ${CRON_SECRET:+x}         有才用替代值
+   *     ${CRON_SECRET#pre}  ${CRON_SECRET%suf}  ${CRON_SECRET/a/b}   截取 / 替换
+   * 一条 cron 只要这么写，它引用的变量对整套判据就**完全隐形** —— 该服务把注入删掉也不会红，
+   * 而其他任务仍会把同名变量加进全局 `referenced`，连「没人用了」都不会触发。
+   * 实际后果是发**空鉴权**或在 curl 前**直接退出**，两种都是静默失败。
+   *
+   * 捕获组：1 = `${…}` 形式的名字 · 2 = 花括号里名字之后的剩余部分（可能为空）· 3 = `$NAME` 裸形式。
+   */
+  const VAR_RE = /\$(?:\{([A-Za-z_][A-Za-z0-9_]*)([^}]*)\}|([A-Za-z_][A-Za-z0-9_]*))/g
+
+  /**
+   * 这一次引用**自带兜底**吗 —— 决定「该服务没注入它」算不算问题。
+   *
+   * 自带兜底（缺了也能跑）：`:-` `-` `:=` `=` `:+` `+`
+   * 不算兜底（缺了会出事）：`:?` `?`（缺了直接退出）、`#` `%` `/` `^` `,` 等纯字符串操作，
+   *                        以及没有任何操作符的裸引用。
+   * 认不出的操作符一律按**没兜底**处理（fail closed，宁可多问一句）。
+   */
+  function referenceHasDefault(suffix: string | undefined): boolean {
+    if (!suffix) return false
+    return /^:?[-=+]/.test(suffix)
+  }
+
+  /**
+   * 命令里每一次 `$VAR` 出现：名字 + 下标 + 这一次会不会真的展开 + 自带不自带兜底。
+   *
+   * `expands` 讲的是**引号**（单引号里、被转义的不展开）；
+   * `hasDefault` 讲的是**操作符**（`${X:-d}` 缺了也能跑）。两件事互相独立，别混。
+   */
+  function varOccurrences(
+    startCommand: string,
+  ): { name: string; index: number; expands: boolean; hasDefault: boolean }[] {
+    const masked = maskNonExpanding(startCommand)
+    const expandedAt = new Set(
+      Array.from(masked.matchAll(VAR_RE)).map((m) => m.index as number),
+    )
+    return Array.from(startCommand.matchAll(VAR_RE)).map((m) => ({
+      name: m[1] ?? m[3],
+      index: m.index as number,
+      expands: expandedAt.has(m.index as number),
+      hasDefault: referenceHasDefault(m[2]),
+    }))
+  }
+
+  function expandedVars(startCommand: string): string[] {
+    return varOccurrences(startCommand).filter((o) => o.expands).map((o) => o.name)
+  }
+
+  type CronEnv = { service: string; startCommand: string; keys: string[]; fromGroup: boolean }
+
+  /** 每条 cron：命令 + 它自己 envVars 注进来的 key（fromGroup 的内容仓库里看不到）。 */
+  function cronEnvBlocks(): CronEnv[] {
+    const txt = readFileSync(path.join(ROOT, 'render.yaml'), 'utf8')
+    return Array.from(
+      txt.matchAll(/-\s+type:\s+cron\s*\n\s+name:\s*(\S+)([\s\S]*?)(?=\n\s*-\s+type:|$)/g),
+    ).map((m) => ({
+      service: m[1],
+      startCommand: extractStartCommand(m[2]),
+      keys: Array.from(m[2].matchAll(/-\s+key:\s*(\S+)/g)).map((k) => k[1]),
+      fromGroup: /fromGroup:/.test(m[2]),
+    }))
+  }
+
+  /**
+   * 「cron 进程真读得到」的证据：**同一条 cron** 既在命令里展开了它，又确实被注进了环境。
+   * 只看「哪条命令引用过」不够 —— 引用了但那条服务没注入，跑起来就是空值。
+   * 走 fromGroup 的服务无法从仓库判断组里有什么，按「可能注入」放行。
+   */
+  function cronVarEvidence(): Set<string> {
+    const out = new Set<string>()
+    for (const c of cronEnvBlocks()) {
+      for (const v of expandedVars(c.startCommand)) {
+        if (c.fromGroup || c.keys.includes(v)) out.add(v)
+      }
+    }
+    return out
+  }
+
+  const referenced = cronVarEvidence()
+  const locations = allEnvDocLocations()
+  /** 「配在哪」里声称要上 cron 的写法：Render-cron / 全部 cron / + cron。 */
+  const claimsCron = (where: string) => /Render-cron|全部 cron|\+\s*cron/.test(where)
+
+  it('前提成立：两个解析器都读到了东西（走空不许静默变绿）', () => {
+    expect(parsed.length).toBeGreaterThan(30)
+    expect(locations.size).toBeGreaterThan(50)
+    expect(referenced.size).toBeGreaterThan(0)
+    expect(claimsCron('Render-web + 全部 cron')).toBe(true)
+    expect(claimsCron('Render-cron')).toBe(true)
+    expect(claimsCron('Render-web')).toBe(false)
+    expect(claimsCron('Render-web + worker `content-factory-render-worker`')).toBe(false)
+  })
+
+  it('🔴 每条 cron 都只是 curl —— 所以业务变量配到 cron 上读不到（哪天有 cron 自己跑脚本，这条会红，提醒重判）', () => {
+    const inProcess = parsed.filter((p) => !isCurlOnly(p.startCommand)).map((p) => p.service)
+    expect(
+      inProcess,
+      `这些 cron 不再是纯 curl，跟它们相关的变量要重新判定配在哪：${inProcess.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('前提成立：展开判定认得单引号 / 转义，而且是逐次出现地判，不是按名字去重', () => {
+    expect(expandedVars('curl -H "Authorization: Bearer $CRON_SECRET" https://x')).toEqual(['CRON_SECRET'])
+    expect(expandedVars('curl -H "Bearer ${CRON_SECRET}" https://x')).toEqual(['CRON_SECRET'])
+    // 单引号里不展开，shell 会把字面量发出去（真发生过就是 401）
+    expect(expandedVars("curl -H 'Authorization: Bearer $CRON_SECRET' https://x")).toEqual([])
+    // 转义同理
+    expect(expandedVars('curl -H "Bearer \\$CRON_SECRET" https://x')).toEqual([])
+    // 🔴 同一条命令里同一个名字，一次展开一次不展开 —— 按名字去重会把后者放过去
+    const mixed = 'curl -H "Bearer $CRON_SECRET" \'$CRON_SECRET\''
+    expect(varOccurrences(mixed).map((o) => o.expands)).toEqual([true, false])
+    // 掩码必须保长，否则下标对不齐，逐次判定就退化了
+    expect(maskNonExpanding(mixed)).toHaveLength(mixed.length)
+
+    // 🔴 不许在小写处截断：shell 读的是 CRON_SECRETx 这一整个名字
+    expect(expandedVars('curl -H "Bearer $CRON_SECRETx" https://x')).toEqual(['CRON_SECRETx'])
+    expect(expandedVars('curl -H "Bearer ${CRON_SECRET}x" https://x')).toEqual(['CRON_SECRET'])
+    // 🔴 短名字也是合法环境变量，不许因为长度被整个忽略
+    expect(expandedVars('curl -H "X: $TZ" https://x')).toEqual(['TZ'])
+    expect(expandedVars('curl -H "X: ${X}" https://x')).toEqual(['X'])
+    // 🔴 双引号里的 `'` 是普通字符，里面的 $VAR 照样展开（正则配对会判成不展开）
+    expect(expandedVars('curl "https://x?t=\'$CRON_SECRET\'"')).toEqual(['CRON_SECRET'])
+    // 🔴 反过来：双引号里出现一个撇号，不该跟后面真正的单引号段配成一对
+    expect(expandedVars('curl -H "\'" \'$CRON_SECRET\'')).toEqual([])
+
+    // 🔴 未闭合的引号必须 fail closed，不许当成正常命令继续判（Codex thread：registry.test.ts L369）
+    //    漏一个右双引号，bash 直接语法错（实测 `bash -n` 返回 2）；而扫描器如果不管，
+    //    后面那个 $CRON_SECRET 会被判成「会展开」，字面量 / 注入 / 文档三条断言一起放行。
+    expect(() => expandedVars('curl -H "Bearer $CRON_SECRET https://x')).toThrow(/未闭合的双引号/)
+    expect(() => expandedVars("curl -H 'Bearer $CRON_SECRET https://x")).toThrow(/未闭合的单引号/)
+    // 转义掉的引号不算开引号段，不许误报
+    expect(expandedVars('curl -H "Bearer $CRON_SECRET\\"" https://x')).toEqual(['CRON_SECRET'])
+  })
+
+  /** Issue #948 缺口一：花括号里名字后面带操作符时，原来整个变量都扫不到。 */
+  it('🔴 带 shell 操作符的参数展开必须能扫到变量名（原来三种写法全部隐形）', () => {
+    // 这几种原实现全部返回 []，于是该服务删掉注入也不会红
+    expect(expandedVars('curl -H "Bearer ${CRON_SECRET:-}" https://x')).toEqual(['CRON_SECRET'])
+    expect(expandedVars('curl -H "Bearer ${CRON_SECRET:?missing}" https://x')).toEqual(['CRON_SECRET'])
+    expect(expandedVars('curl -H "Bearer ${CRON_SECRET:+set}" https://x')).toEqual(['CRON_SECRET'])
+    // 字符串截取 / 替换同样是引用
+    expect(expandedVars('curl "https://x/${BASE_URL#https://}"')).toEqual(['BASE_URL'])
+    expect(expandedVars('curl "https://x/${BASE_URL%/}"')).toEqual(['BASE_URL'])
+    expect(expandedVars('curl "https://x/${BASE_URL/a/b}"')).toEqual(['BASE_URL'])
+
+    // 引号规则跟操作符互相独立：单引号里照样不展开
+    expect(expandedVars("curl -H 'Bearer ${CRON_SECRET:-}' https://x")).toEqual([])
+  })
+
+  it('🔴 「自带兜底」和「缺了会出事」必须分开 —— 否则要么误报要么放行', () => {
+    const only = (cmd: string) => varOccurrences(cmd)[0]
+
+    // 自带兜底：缺了也能跑，不该要求该服务注入它
+    for (const cmd of [
+      'curl "${X:-d}"',
+      'curl "${X-d}"',
+      'curl "${X:=d}"',
+      'curl "${X=d}"',
+      'curl "${X:+alt}"',
+      'curl "${X+alt}"',
+    ]) {
+      expect(only(cmd).hasDefault, cmd).toBe(true)
+    }
+
+    // 没兜底：缺了发空值或直接退出，必须要求注入
+    for (const cmd of [
+      'curl "$X"',
+      'curl "${X}"',
+      'curl "${X:?missing}"', // 缺了 bash 直接退出 —— 这不是兜底，是更早的失败
+      'curl "${X?missing}"',
+      'curl "${X#pre}"',
+      'curl "${X%suf}"',
+      'curl "${X/a/b}"',
+      'curl "${X^^}"',
+    ]) {
+      expect(only(cmd).hasDefault, cmd).toBe(false)
+    }
+  })
+
+  it('🔴 命令里不许出现「写了但不会展开」的 $VAR —— 那会把字面量发出去', () => {
+    const literals: string[] = []
+    for (const c of cronEnvBlocks()) {
+      for (const o of varOccurrences(c.startCommand)) {
+        if (!o.expands) {
+          literals.push(`${c.service}: 第 ${o.index} 个字符处的 $${o.name} 在单引号或转义里，不会展开`)
+        }
+      }
+    }
+    expect(
+      literals,
+      `这些 cron 会把字面量当值发出去（空 Bearer → 401，日志里跟「没跑」长得一样）：\n${literals.join('\n')}`,
+    ).toEqual([])
+  })
+
+  it('🔴 每条 cron 命令里展开的变量，那条服务自己必须注入了它（引用 ≠ 拿得到）', () => {
+    const broken: string[] = []
+    for (const c of cronEnvBlocks()) {
+      if (c.fromGroup) continue // 组里有什么，仓库里看不到
+      for (const o of varOccurrences(c.startCommand)) {
+        // 只看真会展开的那几次；自带兜底的（`${X:-d}`）缺了也能跑，不算漏注入。
+        if (!o.expands || o.hasDefault) continue
+        if (!c.keys.includes(o.name)) {
+          broken.push(`${c.service}: 命令用了 $${o.name}（无兜底），但 envVars 里没有它`)
+        }
+      }
+    }
+    expect(
+      broken,
+      `这些 cron 会带着空值去请求（最典型就是空 Bearer 换来 401，而日志里跟「没跑」长得一样）：\n${broken.join('\n')}`,
+    ).toEqual([])
+  })
+
+  it('🔴 正向：标着上 cron 的变量，cron 的命令里必须真的展开过它', () => {
+    const offenders = Array.from(locations.entries())
+      .filter(([, where]) => claimsCron(where))
+      .filter(([env]) => !referenced.has(env))
+      .map(([env, where]) => `${env} → 「${where}」`)
+    expect(
+      offenders,
+      `没有任何 cron 的命令引用过这些变量，cron 进程里就没有读取方；文档这么写会让人配到不生效的地方：\n${offenders.join('\n')}`,
+    ).toEqual([])
+  })
+
+  it('🔴 反向：cron 命令里真的用到的变量，文档必须保留 cron 标注', () => {
+    const missing = Array.from(referenced)
+      .filter((env) => !locations.has(env) || !claimsCron(locations.get(env)!))
+      .map((env) =>
+        locations.has(env) ? `${env} → 「${locations.get(env)}」` : `${env} → ENV.md 里压根没登记`,
+      )
+    expect(
+      missing,
+      `这些变量 cron 的命令里真的要用，但文档没标 cron —— 照文档配会漏掉 cron 那份：\n${missing.join('\n')}`,
+    ).toEqual([])
+  })
+
+  it('前提成立：反向那条不是空转（确实有变量既被命令引用、又在 ENV.md 里登记）', () => {
+    const both = Array.from(referenced).filter((env) => locations.has(env))
+    expect(both.length, '一个都没有的话，上面那条反向断言等于没跑').toBeGreaterThan(0)
   })
 })

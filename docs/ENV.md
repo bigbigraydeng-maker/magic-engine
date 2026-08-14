@@ -27,9 +27,9 @@
 
 | 变量 | 用途 | 配在哪 | 登记 |
 |---|---|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase 项目 URL（前端可见） | Render-web + 全部 cron | ✅ |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase 匿名 key | Render-web | ✅ |
-| `SUPABASE_SERVICE_ROLE_KEY` | 服务端全权 key — ME 全部数据访问走它（不用 end-user RLS） | Render-web + 全部 cron | ✅ |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase 项目 URL（前端可见） | Render-web + worker `content-factory-render-worker` | ✅ |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase 匿名 key | Render-web + worker `content-factory-render-worker` | ✅ |
+| `SUPABASE_SERVICE_ROLE_KEY` | 服务端全权 key — ME 全部数据访问走它（不用 end-user RLS） | Render-web + worker `content-factory-render-worker` | ✅ |
 | `CRON_SECRET` | 所有 `/api/cron/*` 的 Bearer 鉴权 | Render-web + 全部 cron + **GH** | ✅ |
 | `APP_URL` | 应用自身域名（邮件链接 / OAuth callback 拼接） | Render-web | ✅ |
 | `NEXT_PUBLIC_APP_URL` | 同上，前端可见版本 | Render-web | ✅ |
@@ -44,11 +44,11 @@
 
 | 变量 | 用途 | 配在哪 | 登记 |
 |---|---|---|---|
-| `OPENAI_API_KEY` | GPT-4o-mini 文案 / Vision / Realtime | Render-web | ✅ |
+| `OPENAI_API_KEY` | GPT-4o-mini 文案 / Vision / Realtime | Render-web + worker `content-factory-render-worker` | ✅ |
 | `OPENAI_BASE_URL` | 走 Cloudflare AI Gateway 代理（值已内联 render.yaml） | Render-web | ✅ |
-| `ANTHROPIC_API_KEY` | Claude Sonnet（Brief / 策略 / 诸葛亮） | Render-web | ✅ |
+| `ANTHROPIC_API_KEY` | Claude Sonnet（Brief / 策略 / 诸葛亮）；worker 经 `render-pipeline → scene-plan → anthropic/client` 分镜时也要 | Render-web + worker `content-factory-render-worker` | ✅ |
 | `ANTHROPIC_BASE_URL` | 走 Cloudflare AI Gateway 代理（值已内联 render.yaml） | Render-web | ✅ |
-| `CF_AIG_TOKEN` | Cloudflare AI Gateway 鉴权 | Render-web | ✅ (仅 example) |
+| `CF_AIG_TOKEN` | Cloudflare AI Gateway 鉴权；跟 `ANTHROPIC_API_KEY` 同一条链，worker 也要 | Render-web + worker `content-factory-render-worker` | ✅ (仅 example) |
 | `PERPLEXITY_API_KEY` | AI 可见度追踪引擎之一 | Render-web | ✅ |
 | `GEMINI_API_KEY` | Google Gemini（AI 可见度追踪第 4 引擎） | Render-web | ❌ |
 | `AI_TRACKER_ENABLE_CLAUDE` | 开关：AI Tracker 是否跑 Claude 引擎 | Render-web | ❌ |
@@ -58,6 +58,8 @@
 | 变量 | 用途 | 配在哪 | 登记 |
 |---|---|---|---|
 | `ATLAS_CLOUD_API_KEY` | WaveSpeed 图片 + Seedance 视频（共用一把 key） | Render-web | 🔴 见下方 |
+| `MUAPI_API_KEY` | Muapi 图生视频（Visual Studio）；worker 经 `render-pipeline → broll-clip → muapi/client` 生成空镜时必需，缺了做片任务直接失败 | Render-web + worker `content-factory-render-worker` | ✅ |
+| `FACTORY_CJK_FONT` | 拼片烧中文字幕用的字体文件路径 —— 不设会 fallback 到 macOS 本机字体（`Arial Unicode.ttf`），在 Linux 容器里那个路径不存在 | worker `content-factory-render-worker`（`render.yaml` 里带默认值 `/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc`，Dockerfile 也 `ENV` 了一份，**不用手工配**） | ✅ |
 | `HEYGEN_API_KEY` | 数字人头像视频 | Render-web | ✅ |
 | `HEYGEN_DEFAULT_AVATAR_ID` / `HEYGEN_DEFAULT_VOICE_ID` | HeyGen 默认形象/音色 | Render-web | ✅ |
 | `MODELSLAB_API_KEY` | Muapi 图/视频引擎（P21.J 后主用） | Render-web | ❌ |
@@ -76,7 +78,7 @@
 
 | 变量 | 用途 | 配在哪 | 登记 |
 |---|---|---|---|
-| `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD` | 关键词量 / KD / SERP / 外链 —— **主数据源** | Render-web + cron | ✅ |
+| `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD` | 关键词量 / KD / SERP / 外链 —— **主数据源**。`src/lib/dataforseo/*` 里读（走 `validateEnvVar('DATAFORSEO_LOGIN')`），调用方全是 web 路由；另有几个 `scripts/archive/*` 本地脚本也读，那是本地跑，不用上平台 | Render-web | ✅ |
 | `SEMRUSH_DB` | 市场库（默认 `au`，每客户可覆盖 `nz`） | Render-web | ✅ |
 | `SEMRUSH_API_KEY` | 🔴 `render.yaml:54` 声明了，但**全仓无任何代码读取**（已被 DataForSEO 取代，见 DECISIONS.md） | — | ⚠️ 待清理 |
 | `SERPAPI_API_KEY` | SERP 抓取 / Google AI Overviews | Render-web | ✅ (仅 example) |
@@ -99,7 +101,7 @@
 | `GOOGLE_ADS_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` / `_MANAGER_ID` | Google Ads OAuth + MCC | Render-web | ✅ |
 | `TIKTOK_ADS_ACCESS_TOKEN` / `TIKTOK_ADS_ADVERTISER_ID` | TikTok Ads | Render-web | ✅ |
 | `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` | TikTok 自动发布（Content Posting API，跟 Ads 是两个应用）| Render-web | ⬜ 待建应用 |
-| `AD_HEALTH_DIGEST_TO` | 广告健康日报收件人 | Render-cron | ❌ |
+| `AD_HEALTH_DIGEST_TO` | 广告健康日报收件人。`src/lib/ads-strategy/config.ts` 读，调用方是 web 路由 `/api/cron/google-data-pullback-daily`；那条 cron 只负责 `curl` | Render-web | ❌ |
 
 ## 6. 发布 / 内容协作
 
@@ -171,7 +173,7 @@
 | `JOB_SIGNAL_INGEST_ENABLED` / `JOB_SIGNAL_KEYWORDS` | 招聘信号采集开关（默认 **关**）+ 关键词。开关在 `/api/cron/job-boards-weekly` 路由里读，同样是 web 进程 | Render-web |
 | `ATTRIBUTION_DUAL_WINDOW_ENABLED` | 归因双窗口总闸（默认 **关**）。开了之后被转交的动作会同时按 GSC 的 28 天节奏和 pass 1 的窗口各算一次。**在 `src/lib/memory/` 的消费方（extractor / learning-rollup）改成按动作计样本、并且分页读全之前不许开**（那 5 条查询也没分页，光去重不分页等于没修） —— 这是唯一还没改的一类；本 PR 已经把其余读取方（行业基准、三个信心读取、后台聚合页 `/api/admin/flywheel/aggregate`、执行看板 `/api/clients/[id]/execution`）**既改成按动作折叠、也改成分页读全**（只折叠不分页照样错：折叠是在读到的行里挑代表，带目标指标那行被截掉就会挑错代表，那不是少算是算错） —— 现在开会让同一个动作在学习和行业基准里被重复计数（Issue #859）。关着的时候两个写入方还会顺手清掉自己在非权威窗口上的旧行（老版本留下的），因为只拒绝新写入挡不住已经存在的第二个窗口；这一步只在权威窗口真的写进去之后才做，所以还算不出结果的动作会暂时保留那一行，等算得出来那一轮再清。⚠️ 配在 **web service** 上：`attribution-cron` 只是 `curl` 打这个接口，读 env 的是接请求的 web 进程；配到 cron 上开关不会生效，而且是静默不生效 | Render-web |
 | `SOCIAL_COMMENT_AUTOREPLY_KILL` | 社媒评论自动回复紧急关停 | Render-web |
-| `SWEEP_CITIES` / `SWEEP_INDUSTRIES` | 线索扫描城市 / 行业范围 | Render-cron |
+| `SWEEP_CITIES` / `SWEEP_INDUSTRIES` | 线索扫描城市 / 行业范围。`src/lib/prospecting/sweep.ts` 里读（走 `envList('SWEEP_CITIES', …)`，变量名是字符串传进去的），调用方是 web 路由 `/api/cron/prospecting-sweep` | Render-web |
 | `ENABLE_REAL_GENERATION` | `.env.example` 有，代码 0 引用 | ⚠️ 待清理 |
 
 ## 12. 只在脚本 / 测试里用 — **不需要配到任何平台**

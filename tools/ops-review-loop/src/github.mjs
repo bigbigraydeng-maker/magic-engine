@@ -38,6 +38,10 @@ export function listReviewComments(token, owner, repo, pullNumber, reviewId) {
   return request(token, `/repos/${owner}/${repo}/pulls/${pullNumber}/reviews/${reviewId}/comments?per_page=100`)
 }
 
+export function getPullRequest(token, owner, repo, pullNumber) {
+  return request(token, `/repos/${owner}/${repo}/pulls/${pullNumber}`)
+}
+
 export async function listCheckRunsForRef(token, owner, repo, ref) {
   const data = await request(token, `/repos/${owner}/${repo}/commits/${ref}/check-runs?per_page=100`)
   return data.check_runs ?? []

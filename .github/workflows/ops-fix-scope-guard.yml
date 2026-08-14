@@ -1,0 +1,73 @@
+name: OPS — Auto-fix blast radius guard
+
+# The deterministic half of the Codex-to-Claude auto-fix containment.
+#
+# ops-codex-to-claude-fix.yml feeds an untrusted Codex review body into a
+# Claude run that commits and pushes. That prompt is fenced and the untrusted
+# text is quoted as data — but a fence only relocates text, it cannot make a
+# model refuse. So the prompt is NOT the security boundary. This is.
+#
+# It ignores the prompt entirely and judges the result: on any PR whose head
+# branch is in the lane the auto-fix leg can push to, the changed files must
+# stay out of the protected set (CI definitions, this loop's own control
+# plane, migrations, render.yaml, kernel authorization boundaries, anything
+# credential-shaped) and under a size cap. See
+# tools/ops-review-loop/src/fix-scope.mjs for the list and the reasoning.
+#
+# Checked out from `main`, never the PR head, so a PR cannot edit the guard
+# that judges it. `.github/workflows/` and `tools/ops-review-loop/` are
+# themselves protected, so it cannot edit it on a later fix round either.
+#
+# It never merges, deploys, applies a migration, writes to production, or
+# modifies the PR. Its only output is pass/fail plus a job summary.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ops-fix-scope-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  fix-scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Check auto-fix blast radius
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          # Bootstrap: this workflow checks out `main` on purpose (a PR must not
+          # be able to edit the guard that judges it), which means the very PR
+          # that introduces the guard cannot pass it — the script does not exist
+          # on main yet. Tolerate exactly that case, loudly.
+          #
+          # This is not a hole you can leave open: `tools/ops-review-loop/` is
+          # itself on the protected list, and workflow-guards.test.ts — part of
+          # the REQUIRED ai-orchestrator-tests check — asserts the script exists.
+          # Deleting it from main turns a required check red, not this one green.
+          if [ ! -f tools/ops-review-loop/src/check-fix-scope.mjs ]; then
+            echo "::notice::guard script is not on main yet — treating this as the bootstrap PR that adds it"
+            echo '## ⏭️ 自动修爆炸半径闸门：引导中' >> "$GITHUB_STEP_SUMMARY"
+            echo '' >> "$GITHUB_STEP_SUMMARY"
+            echo '闸门脚本还没进 `main`（本闸门刻意从 main 检出，所以引入它的这个 PR 必然跑不了它自己）。' >> "$GITHUB_STEP_SUMMARY"
+            echo '合入之后，从下一个 PR 起就会真正生效。' >> "$GITHUB_STEP_SUMMARY"
+            echo '' >> "$GITHUB_STEP_SUMMARY"
+            echo '> 这不是可以一直开着的口子：`tools/ops-review-loop/` 本身在受保护清单里，' >> "$GITHUB_STEP_SUMMARY"
+            echo '> 而 `workflow-guards.test.ts`（属于**必过**的 ai-orchestrator-tests）断言该脚本必须存在 ——' >> "$GITHUB_STEP_SUMMARY"
+            echo '> 从 main 删掉它会让一条必过检查变红，而不是让这条静悄悄变绿。' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          node tools/ops-review-loop/src/check-fix-scope.mjs
