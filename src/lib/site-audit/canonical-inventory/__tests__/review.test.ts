@@ -161,6 +161,20 @@ describe('🔴 reviewerIdentitySource 只接受逐字的 self_reported', () => {
   })
 })
 
+describe('🔴 盖章前的 core 机器一致性纵深校验', () => {
+  it('手写 core（计数对不上）即便签名完全合法也不许盖章', () => {
+    // 签名是用真密钥封的 —— 坏的不是签名，是内容。挡它的只有 assertCoreIntact。
+    // 这条对应「绕过 buildInventoryPlan 自己拼一份 core 的内部调用方」。
+    const base = makeCore(URLS)
+    const core = { ...base, counts: { ...base.counts, discovered: 99 } }
+    const envelope = makeEnvelope(core)
+    expectCode(
+      () => signReview(envelope, makeSubmission(envelope, acceptAllPending(core)), deps),
+      'counts_not_machine_derived',
+    )
+  })
+})
+
 describe('🔴 L1 与 L2 不许共用一把密钥', () => {
   it('用生成密钥去盖复核凭证 → 抛（两层签名塌成一个信任根）', () => {
     const { envelope, decisions } = envelopeAndDecisions()

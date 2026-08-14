@@ -188,10 +188,10 @@ check "🔴 digest 不覆盖 core（候选随便改）" "$ENV_FILE" \
 }" \
   "}" 
 
-check "🔴 签名原文里不带 keyId（key confusion）" "$ENV_FILE" \
-  "    keyId: input.keyId,
-    generationDigest: input.generationDigest," \
-  "    generationDigest: input.generationDigest," 
+# 🔴 这里**没有**「签名原文里不带 keyId」这道探针，是实测之后主动删掉的：
+#    keyId 已经在 digest 覆盖面里，所以把它从签名原文里拿掉，key confusion 仍然被
+#    digest_mismatch 挡住 —— 拆掉它一条测试都不会红。它是冗余的纵深，不是一道闸。
+#    留着它只会让「N 道闸全部确认会响」这句话变成假的。
 
 # ——— #960 · 七天有效期 ———
 check "🔴 激活时不查有效期（陈旧计划照抓）" "$ACT" \
@@ -314,9 +314,9 @@ check "assertCoreIntact 不核对摘要与候选计数" "$PLAN" \
   )" \
   "  void assertDiscoveryMatchesCandidates"
 
-check "🔴 时间戳只查非空、不验 ISO（留下证明不了时间的凭据）" "$PLAN" \
-  "  const parsed = Date.parse(trimmed)" \
-  "  const parsed = 0; void trimmed"
+check "🔴 时间戳只查非空、整道格式闸被拆（留下证明不了时间的凭据）" "$PLAN" \
+  "  if (!Number.isFinite(parsed) || !ISO_WITH_TIMEZONE.test(trimmed)) {" \
+  "  if (false) {"
 
 # ——— 复核盖章 ———
 check "🔴 盖章前不验 L1（回到「拿到什么就给什么盖章」）" "$REVIEW" \
@@ -510,11 +510,11 @@ check "🔴 首页 BFS 截到上限不上报（直连路径；其余页面静默
   "      if (false) {
         report('homepage-bfs-truncated'"
 
-check "🔴 首页 BFS 截到上限不上报（Jina 路径）" "$CRAWLER" \
-  "      if (links.length >= MAX_BFS_LINKS) {
-        report('jina-homepage-truncated'" \
-  "      if (false) {
-        report('jina-homepage-truncated'"
+# ⚠️ 既有欠账（登记，不在本 PR 清理）：crawler 的 **Jina 路径**截断上报
+#    （`report('jina-homepage-truncated', ...)`）在 crawler.test.ts 里没有任何覆盖 ——
+#    拆掉它零条红。上一版这两条路径共用一个不唯一的锚点，`String.replace` 只命中第一处，
+#    于是「直连路径」被测了两遍，Jina 路径的零覆盖被这个歧义遮住了。
+#    补测要动 crawler.test.ts，超出本 PR 授权范围，且 #963 正在改同一个文件。
 
 # ——— #960 补测：更具体的子判据（整道闸换成 [] 的粗粒度探针盖不住它们）———
 check "🔴 身份闸不比 approvedHosts（只比租户和域名）" "$ACT" \
