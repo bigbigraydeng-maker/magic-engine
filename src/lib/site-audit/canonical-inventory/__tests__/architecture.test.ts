@@ -1,10 +1,11 @@
 /**
- * 台账层的架构守卫（Issue #930）。
+ * 台账层的架构守卫（Issue #930 · #960）。
  *
  * 🔴 授权边界不能只靠 code review：一旦有人在这一层抓住 `supabaseAdmin`、
- *    把 crawler 那套「剥 www + 前缀比较」借回来、或者塞一个 route / cron 入口，
- *    「精确主机边界」「注入而不是抓取」「本 PR 不开生产入口」三条就同时破了 ——
- *    而这种改动在 diff 里长得很无辜。
+ *    把 crawler 那套「剥 www + 前缀比较」借回来、塞一个 route / cron 入口，
+ *    或者**让生成入口接受调用方传进来的候选清单**，
+ *    「精确主机边界」「注入而不是抓取」「本 PR 不开生产入口」「不存在签名 oracle」
+ *    这几条就同时破了 —— 而这种改动在 diff 里长得很无辜。
  *
  * 仿 `src/lib/geo-baseline/__tests__/architecture.test.ts` 的写法。
  */
@@ -51,10 +52,118 @@ const sourceOf = (file: string): string => stripComments(readFileSync(join(ROOT,
  */
 const CLIENT_SPECIFIC = /romanhu|roman-hu|ray\s*white|mission\s*bay/i
 
+describe('🔴 #960 承重墙：不存在签名 oracle', () => {
+  const adapters = sourceOf('src/lib/site-audit/canonical-inventory/adapters.ts')
+
+  /** 从源码里抠出一个 interface 的字段名清单。 */
+  function fieldsOf(src: string, name: string): string[] {
+    const match = new RegExp(`export interface ${name} \\{([\\s\\S]*?)\\n\\}`).exec(src)
+    expect(match, `找不到 ${name} 的定义 —— 判据已失效，不是通过`).not.toBeNull()
+    return Array.from((match as RegExpExecArray)[1].matchAll(/^\s*readonly\s+(\w+)/gm)).map((m) => m[1])
+  }
+
+  it('🔴 生成入口只接受业务边界：clientId / requestedDomain / approvedHosts，一个字段都不多', () => {
+    // 多接受任何一样调用方构造的内容，它就变成一台「替任意内容签名」的机器：
+    // 编辑者拿自己伪造的候选集合去调它，就能换回一枚合法的 L1 签名，
+    // #960 的整个证明（「编辑者算不出锚点」）当场失效。
+    expect(fieldsOf(adapters, 'GeneratePlanInput').sort()).toEqual([
+      'approvedHosts',
+      'clientId',
+      'requestedDomain',
+    ])
+  })
+
+  it('🔴 生成入口的入参里不许出现任何候选内容字样', () => {
+    const match = /export interface GeneratePlanInput \{([\s\S]*?)\n\}/.exec(adapters)
+    const body = (match as RegExpExecArray)[1]
+    for (const banned of ['discoveredUrls', 'urls', 'candidates', 'discovery', 'perHost', 'counts', 'core', 'plan']) {
+      expect(body, `GeneratePlanInput 里出现了 ${banned}`).not.toMatch(new RegExp(`\\b${banned}\\b`))
+    }
+  })
+
+  it('🔴 生成入口自己在服务端跑发现，不从入参拿候选', () => {
+    expect(adapters).toMatch(/const discovery = await discoverCandidateUrls\(input\.approvedHosts\)/)
+  })
+
+  it('🔴 公开门面不导出裸的核心构造器 / 封签器（否则等于把 oracle 摆上台面）', () => {
+    const index = sourceOf('src/lib/site-audit/canonical-inventory/index.ts')
+    for (const primitive of ['buildInventoryPlan', 'sealEnvelope', 'sealReview', 'computeGenerationDigest', 'computeReviewDigest']) {
+      expect(index, `index.ts 导出了内部原语 ${primitive}`).not.toMatch(new RegExp(`\\b${primitive}\\b`))
+    }
+  })
+
+  it('🔴 只有一个地方能产出 L1 签名（sealEnvelope 只被生成入口调用）', () => {
+    const callers = PRODUCTION_FILES.filter((f) => /\bsealEnvelope\(/.test(sourceOf(f)))
+    expect(callers).toEqual([
+      'src/lib/site-audit/canonical-inventory/adapters.ts',
+      'src/lib/site-audit/canonical-inventory/envelope.ts',
+    ])
+  })
+})
+
+describe('🔴 #960 密钥与验签边界', () => {
+  it('🔴 本层不读环境变量 —— 密钥由组合根注入（密钥永不进入工件的前提）', () => {
+    const offenders = PRODUCTION_FILES.filter((f) => /process\.env/.test(sourceOf(f)))
+    expect(offenders, `这些文件自己读了 env：\n${offenders.join('\n')}`).toEqual([])
+  })
+
+  it('🔴 生产代码里不存在恒真验签器（注入一个恒真的，这道闸就等于没有）', () => {
+    const offenders: string[] = []
+    for (const file of PRODUCTION_FILES) {
+      const src = sourceOf(file)
+      if (/\(\s*\)\s*=>\s*'valid'/.test(src)) offenders.push(`${file} → 恒判 valid 的验签器`)
+      if (/=>\s*true\b/.test(src)) offenders.push(`${file} → 恒返回 true 的谓词`)
+    }
+    expect(offenders, offenders.join('\n')).toEqual([])
+  })
+
+  it('🔴 不复用 Kernel 的 canonicalJson（依赖方向 + 本层序列化规则必须自己版本化）', () => {
+    const offenders = PRODUCTION_FILES.filter((f) => /kernel\/idempotency|from\s+['"]@\/lib\/kernel/.test(sourceOf(f)))
+    expect(offenders, offenders.join('\n')).toEqual([])
+  })
+
+  it('🔴 缺密钥不许 fallback 到别的密钥（借来的密钥 = 两套系统共用一个信任根）', () => {
+    const offenders = PRODUCTION_FILES.filter((f) => /CRON_SECRET|UPLOAD_LINK_SECRET/.test(sourceOf(f)))
+    expect(offenders, offenders.join('\n')).toEqual([])
+  })
+})
+
+describe('🔴 #960 有效期与身份来源是常量，不是选项', () => {
+  const envelope = sourceOf('src/lib/site-audit/canonical-inventory/envelope.ts')
+
+  it('🔴 PLAN_MAX_AGE_DAYS 固定 7 天', () => {
+    expect(envelope).toMatch(/export const PLAN_MAX_AGE_DAYS = 7\b/)
+  })
+
+  it('🔴 有效期不是任何函数的入参，也没有 skip / disable 开关', () => {
+    for (const file of PRODUCTION_FILES) {
+      const src = sourceOf(file)
+      expect(src, `${file} 出现了可调的有效期`).not.toMatch(/maxAgeDays|maxAgeMs|skipExpiry|ignoreExpiry|disableExpiry/)
+    }
+    // 新鲜度函数只收「签发时间 + 当前时间」两个参数，没有第三个可以塞上限的口子。
+    expect(envelope).toMatch(/export function checkEnvelopeFreshness\(issuedAt: string, nowIso: string\)/)
+  })
+
+  it('🔴 reviewerIdentitySource 是单一字面量类型，不是联合类型', () => {
+    const types = sourceOf('src/lib/site-audit/canonical-inventory/types.ts')
+    expect(types).toMatch(/readonly reviewerIdentitySource: 'self_reported'\n/)
+    expect(types, '出现了 authenticated_session —— 现在没有任何东西能产生它').not.toMatch(
+      /reviewerIdentitySource[^\n]*authenticated_session/,
+    )
+  })
+
+  it('🔴 增量激活必须 fail closed（防重放当前只靠首次激活的空库闸）', () => {
+    const shapes = sourceOf('src/lib/site-audit/canonical-inventory/shapes.ts')
+    expect(shapes).toMatch(/input\.mode !== 'first_activation'/)
+    expect(shapes).toMatch(/unsupported_activation_mode/)
+  })
+})
+
 describe('台账层的边界', () => {
   it('目录里确实有生产文件（防止判据因路径写错而空跑）', () => {
     expect(PRODUCTION_FILES.length).toBeGreaterThan(0)
     expect(PRODUCTION_FILES).toContain('src/lib/site-audit/canonical-inventory/activation.ts')
+    expect(PRODUCTION_FILES).toContain('src/lib/site-audit/canonical-inventory/envelope.ts')
   })
 
   it('绝不自己抓 service-role 客户端 —— 落库口一律注入', () => {
@@ -130,8 +239,7 @@ describe('台账层的边界', () => {
   it('每个函数都 < 50 行（CLAUDE.md 的硬规则，别等复审来提）', () => {
     const offenders: string[] = []
     // 🔴 本 PR 新增/改动的文件全都要盯，不只是本目录 ——
-    //    上一版这条守卫只扫了 canonical-inventory/，于是同一批改动里的
-    //    page-enrichment.ts 超长又是复审发现的。判据的覆盖面本身也是判据的一部分。
+    //    判据的覆盖面本身也是判据的一部分。
     for (const file of [...PRODUCTION_FILES, 'src/lib/site-audit/page-enrichment.ts']) {
       const lines = readFileSync(join(ROOT, file), 'utf8').split('\n')
       let start = -1
@@ -147,6 +255,13 @@ describe('台账层的边界', () => {
     expect(offenders, offenders.join('\n')).toEqual([])
   })
 
+  it('每个文件都 < 800 行（CLAUDE.md 的硬规则）', () => {
+    const offenders = PRODUCTION_FILES.map((f) => ({ f, n: readFileSync(join(ROOT, f), 'utf8').split('\n').length }))
+      .filter((x) => x.n >= 800)
+      .map((x) => `${x.f} → ${x.n} 行`)
+    expect(offenders, offenders.join('\n')).toEqual([])
+  })
+
   it('没有 any', () => {
     const offenders = PRODUCTION_FILES.filter((f) => /:\s*any\b|<any>|as\s+any\b/.test(sourceOf(f)))
     expect(offenders, offenders.join('\n')).toEqual([])
@@ -154,7 +269,7 @@ describe('台账层的边界', () => {
 
   it('本 PR 没有新增 migration（台账用现有表，不加列不加表）', () => {
     const migrations = readdirSync(join(ROOT, 'supabase/migrations'))
-    const offenders = migrations.filter((f) => /canonical.?inventory/i.test(f))
+    const offenders = migrations.filter((f) => /canonical.?inventory|inventory.?envelope/i.test(f))
     expect(offenders, offenders.join('\n')).toEqual([])
   })
 })

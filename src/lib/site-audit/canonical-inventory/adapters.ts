@@ -10,23 +10,62 @@
 
 import { crawlPages, discoverSitemapUrls, type CrawlOptions, type CrawlResult } from '../crawler'
 import { enrichCrawledPage } from '../page-enrichment'
-import type { ActivationDeps, CanonicalInventoryStore } from './types'
+import type {
+  ActivationDeps,
+  CanonicalInventoryStore,
+  DiscoveryOutcome,
+  HostDiscoverySummary,
+  InventoryPlanEnvelope,
+} from './types'
+import type { PlanSigner, SignatureVerifier } from './signing'
+import { sealEnvelope } from './envelope'
+import { buildInventoryPlan } from './plan'
 import { normaliseApprovedHosts } from './url-rules'
 
-export interface HostDiscoveryResult {
-  readonly host: string
-  /** **这个主机自己的**页面数（按解析后的 hostname 精确归属，不是发现器返回的总条数）。 */
-  readonly count: number
-  /** 发现这个主机时返回的、其实属于别的主机的条数 —— 记下来，不丢掉。 */
-  readonly foreignCount: number
-  readonly error: string | null
+export type { DiscoveryOutcome, HostDiscoverySummary } from './types'
+
+/**
+ * 生成一枚**已签名**的计划信封 —— 这是整个模块**唯一**能产出 L1 签名的入口。
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * 🔴 承重墙：这个入口不接受任何调用方构造的候选内容
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * 入参**只有业务边界**（租户 / 目标域 / 精确批准主机），候选清单与逐主机发现摘要
+ * 由它自己在服务端跑 `discoverCandidateUrls()` 取得。
+ *
+ * 一旦它接受 `discoveredUrls` / `candidates` / `discovery` / `counts` / 整份 `core`
+ * 里的**任何一样**，它就退化成一台「替任意内容签名」的机器 ——
+ * 编辑者只要能调到它，就能给自己伪造的候选集合拿到一枚合法签名，
+ * 整个 #960 的证明当场失效。架构测试逐字盯着这条。
+ */
+export interface GeneratePlanInput {
+  readonly clientId: string
+  readonly requestedDomain: string
+  readonly approvedHosts: readonly string[]
 }
 
-export interface DiscoveryOutcome {
-  /** 所有主机合并去重后的原始 URL。 */
-  readonly urls: readonly string[]
-  /** 每个主机各自发现了多少 —— 0 条也要看得见，不许被合并结果盖住。 */
-  readonly perHost: readonly HostDiscoveryResult[]
+export interface GeneratePlanDeps {
+  /** L1 签名器。密钥由组合根从环境变量解析后注入，本层不读 `process.env`。 */
+  readonly signer: PlanSigner
+  /** ISO 8601 时间源，注入以便测试确定性。它写进 `issuedAt`，而 `issuedAt` 被签名覆盖。 */
+  readonly now: () => string
+  /** 一次性计划标识（uuid）。注入以便测试确定性。 */
+  readonly newPlanId: () => string
+}
+
+export async function generateSignedInventoryPlan(
+  input: GeneratePlanInput,
+  deps: GeneratePlanDeps,
+): Promise<InventoryPlanEnvelope> {
+  const discovery = await discoverCandidateUrls(input.approvedHosts)
+  const core = buildInventoryPlan({
+    clientId: input.clientId,
+    requestedDomain: input.requestedDomain,
+    approvedHosts: input.approvedHosts,
+    discovery,
+  })
+  return sealEnvelope({ planId: deps.newPlanId(), issuedAt: deps.now(), core }, deps.signer)
 }
 
 /**
@@ -47,7 +86,7 @@ export interface DiscoveryOutcome {
  */
 export async function discoverCandidateUrls(approvedHosts: readonly string[]): Promise<DiscoveryOutcome> {
   const seen = new Set<string>()
-  const perHost: HostDiscoveryResult[] = []
+  const perHost: HostDiscoverySummary[] = []
 
   // 🔴 先归一再发请求。`hostnameOf()` 给的是小写 hostname，主机名带大写传进来
   //    （`Example.COM`）会一条都对不上 —— 实际发现到的页面被记成 `count: 0`
@@ -77,7 +116,7 @@ export async function discoverCandidateUrls(approvedHosts: readonly string[]): P
  *       一棵子 sitemap 取不到、其余还有结果时，它正常返回 —— 部分结果长得跟完整结果一样。
  *       所以接上它的观察口，任何被吞掉的失败都记成 error，交给人去认。
  */
-async function discoverOneHost(host: string, seen: Set<string>): Promise<HostDiscoveryResult> {
+async function discoverOneHost(host: string, seen: Set<string>): Promise<HostDiscoverySummary> {
   const swallowed: string[] = []
   let found: readonly string[] = []
   try {
@@ -167,15 +206,19 @@ export function createActivationDeps(input: {
   readonly store: CanonicalInventoryStore
   readonly now: () => string
   /**
-   * 验签。**必须由调用方给**，这里不提供默认实现 ——
+   * 两个验签器。**必须由调用方给**，这里不提供默认实现 ——
    * 一个「默认恒真」的验签器等于没有这道闸，而且没人会注意到它不见了。
+   * 组合根真的没配密钥时应当注入 `createUnavailableVerifier()`（恒判 key_unavailable），
+   * 那会让激活以 `rejected` 收场并说清是运维问题，而不是悄悄放行。
    */
-  readonly verifyReviewSignature: (planHash: string, signature: string) => boolean
+  readonly verifyGenerationSignature: SignatureVerifier
+  readonly verifyReviewAttestation: SignatureVerifier
   readonly crawlOptions?: CrawlOptions
 }): ActivationDeps {
   return {
     store: input.store,
-    verifyReviewSignature: input.verifyReviewSignature,
+    verifyGenerationSignature: input.verifyGenerationSignature,
+    verifyReviewAttestation: input.verifyReviewAttestation,
     crawl: createCrawlAdapter(input.crawlOptions),
     enrich: enrichCrawledPage,
     now: input.now,
