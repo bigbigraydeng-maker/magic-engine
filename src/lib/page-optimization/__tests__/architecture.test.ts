@@ -13,19 +13,52 @@
 
 import { describe, it, expect } from 'vitest'
 import ts from 'typescript'
-import { readFileSync, readdirSync, statSync, existsSync } from 'fs'
+import { readFileSync, readdirSync, statSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'fs'
+import { tmpdir } from 'os'
 import { join, relative } from 'path'
 
 const ROOT = process.cwd()
 const CORE_DIR = join(ROOT, 'src/lib/page-optimization')
 const CAP_DIR = join(ROOT, 'src/lib/capabilities/page-optimization')
 
+/**
+ * 🔴 **扫描面必须盖住「构建真会编译的每一种扩展名」，不是只有 `.ts`。**（Issue #938）
+ *
+ * 仓库 tsconfig 是 `allowJs: true`。本套守卫原来的 walker 过滤条件是
+ * `entry.endsWith('.ts')`，于是本目录下新加一个 `.tsx` / `.js` / `.mjs` 文件
+ * **完全不被扫描** —— 它直接违反本套边界也照样全绿，而构建会把这段代码打进去。
+ * **扫不到的文件等于没有边界。**
+ *
+ * 🔴 这份清单原本就已经声明在本文件里（供 `scriptKindFor` 选 ScriptKind 用），
+ *    但**声明在 walker 之后、也没参与选文件** —— grep 一眼看过去像已经覆盖八种后缀，
+ *    实际扫描面仍只有 `.ts`。这种「看起来修好了」比没修更难发现，所以把声明提到
+ *    walker 之前，并让 walker 直接用 `isScannedSource`，两者同源、不可能再各自漂移。
+ *
+ * 清单依据：用仓库自带 TypeScript 对本仓 `compilerOptions` 求
+ * `getSupportedExtensions()`，实测返回 `.ts .tsx .d.ts .js .jsx` / `.cts .d.cts .cjs`
+ * / `.mts .d.mts .mjs`，即下面 8 种（`.d.ts` 等以 `.ts` 结尾，天然被包含）。
+ * 与 `src/lib/kernel/__tests__/architecture.test.ts` 同一份清单，多一种不加、少一种不漏。
+ */
+const SOURCE_EXTENSIONS: ReadonlyArray<readonly [ext: string, kind: ts.ScriptKind]> = [
+  // 长后缀在前，避免 `.mts` / `.cts` 之类被短后缀先匹配掉
+  ['.tsx', ts.ScriptKind.TSX],
+  ['.jsx', ts.ScriptKind.JSX],
+  ['.mts', ts.ScriptKind.TS],
+  ['.cts', ts.ScriptKind.TS],
+  ['.mjs', ts.ScriptKind.JS],
+  ['.cjs', ts.ScriptKind.JS],
+  ['.ts', ts.ScriptKind.TS],
+  ['.js', ts.ScriptKind.JS],
+]
+
+const isScannedSource = (p: string): boolean => SOURCE_EXTENSIONS.some(([ext]) => p.endsWith(ext))
+
 function walk(dir: string, out: string[] = []): string[] {
   if (!existsSync(dir)) return out
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry)
     if (statSync(full).isDirectory()) walk(full, out)
-    else if (entry.endsWith('.ts')) out.push(full)
+    else if (isScannedSource(entry)) out.push(full)
   }
   return out
 }
@@ -58,18 +91,6 @@ function walk(dir: string, out: string[] = []): string[] {
  *    七处是否仍然一致由 `src/lib/__tests__/strip-comments-consistency.test.ts` 机器盯着，
  *    以后再动这个函数不会又出现「修一处、漏六处」。
  */
-
-const SOURCE_EXTENSIONS: ReadonlyArray<readonly [ext: string, kind: ts.ScriptKind]> = [
-  // 长后缀在前，避免 `.mts` / `.cts` 之类被短后缀先匹配掉
-  ['.tsx', ts.ScriptKind.TSX],
-  ['.jsx', ts.ScriptKind.JSX],
-  ['.mts', ts.ScriptKind.TS],
-  ['.cts', ts.ScriptKind.TS],
-  ['.mjs', ts.ScriptKind.JS],
-  ['.cjs', ts.ScriptKind.JS],
-  ['.ts', ts.ScriptKind.TS],
-  ['.js', ts.ScriptKind.JS],
-]
 
 /** 按后缀选 ScriptKind；认不出的按 TS 处理（保守，不会让扫描面变小）。 */
 const scriptKindFor = (fileName: string): ts.ScriptKind => {
@@ -132,7 +153,16 @@ function stripComments(src: string, fileName = 'scan.ts'): string {
 }
 
 const relOf = (f: string): string => relative(ROOT, f).split('\\').join('/')
-const isTest = (f: string): boolean => f.endsWith('.test.ts') || f.includes('/__tests__/')
+/**
+ * 🔴 **测试文件判据必须跟 walker 的后缀清单同源。**（Issue #938）
+ *
+ * walker 扩到八种后缀之后，这里若还写死 `.test.ts`，则 `foo.test.tsx` / `.test.js`
+ * 等会被当成**生产文件**扫描 —— 测试里那些故意写来验证边界的禁止导入会被判成
+ * 生产违规，把整套测试卡红。直接复用 `SOURCE_EXTENSIONS`，两边不会各自漂移。
+ * 仓库实测无 `.spec.*` 命名，这里只扩后缀、不新增仓库里不存在的约定。
+ */
+const isTest = (f: string): boolean =>
+  SOURCE_EXTENSIONS.some(([ext]) => f.endsWith(`.test${ext}`)) || f.includes('/__tests__/')
 
 const CORE_FILES = walk(CORE_DIR).map(relOf).filter((f) => !isTest(f))
 const CAP_FILES = walk(CAP_DIR).map(relOf).filter((f) => !isTest(f))
@@ -379,5 +409,47 @@ describe('注释挖空的口径（Issue #929 / #923）', () => {
     expect(stripped).not.toContain('eof')
     expect(stripped.split('\n').length).toBe(code.split('\n').length)
     expect(stripped.length).toBe(code.length)
+  })
+})
+
+/**
+ * 🔴 **守卫自己的扫描面要有测试盯着。**（Issue #938）
+ *
+ * 这套守卫的全部效力都建立在「walker 真的把该扫的文件收进来了」之上。
+ * 扫描面缩小是一种**静默失效**：守卫还在、还是绿的，但什么都不拦了。
+ * 所以这里不断言「测试还是绿的」，而是直接对 walker 的行为下断言 ——
+ * 把 `isScannedSource` 缩回 `.ts`，下面第一条就红。
+ */
+describe('扫描面覆盖构建真会编译的每一种后缀（Issue #938）', () => {
+  it('🔴 8 种后缀全部算源码；非源码后缀一律不算', () => {
+    for (const [ext] of SOURCE_EXTENSIONS) {
+      expect(isScannedSource(`anything${ext}`), ext).toBe(true)
+    }
+    // `.d.ts` / `.d.cts` / `.d.mts` 以 `.ts` / `.cts` / `.mts` 结尾，天然被包含
+    expect(isScannedSource('types.d.ts')).toBe(true)
+    for (const other of ['.json', '.md', '.css', '.sql', '.snap', '.py', '.txt', '.yml']) {
+      expect(isScannedSource(`anything${other}`), other).toBe(false)
+    }
+  })
+
+  it('🔴 walker 与后缀清单同源 —— 清单里的每一种都必须真被收进来（真磁盘 fixture）', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'arch-scan-surface-'))
+    try {
+      const expected: string[] = []
+      for (const [ext] of SOURCE_EXTENSIONS) {
+        // 后缀里的点去掉，避免 `a.ts` 与 `a.mts` 互相被 endsWith 误判成同一个文件名
+        const name = `f${ext.replace('.', '_')}${ext}`
+        writeFileSync(join(tmp, name), 'export const x = 1\n')
+        expected.push(name)
+      }
+      // 非源码不许被收
+      writeFileSync(join(tmp, 'notes.md'), 'not source')
+      writeFileSync(join(tmp, 'data.json'), '{}')
+
+      const collected = walk(tmp).map((f) => f.split(/[\\/]/).pop() as string)
+      expect(collected.sort()).toEqual(expected.sort())
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
   })
 })

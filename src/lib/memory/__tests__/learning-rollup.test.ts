@@ -20,7 +20,17 @@ import {
 // ─── Mock Supabase ──────────────────────────────────────────────────────────
 
 interface MockState {
-  outcomes: Array<{ client_id: string; verdict: string; computed_at: string }>
+  outcomes: Array<{
+    client_id: string
+    verdict: string
+    computed_at: string
+    // 折叠用的自然键 —— 省略时该行按孤儿处理（各算一个案例），
+    // 保留旧用例原本的行为。
+    action_id?: string
+    metric_key?: string
+    window_days?: number
+    flywheel_actions?: { expected_metric?: string | null } | null
+  }>
   feedback: Array<{ client_id: string; feedback_state: string; created_at: string }>
   existingPreferences: Array<{
     client_id: string
@@ -271,5 +281,61 @@ describe('runWeeklyLearningRollup', () => {
     expect(content).toContain('dismissed=2')
     expect(content).toContain('irrelevant=1')
     expect(content).toContain('FDE 标记 3 条无效建议')
+  })
+})
+
+describe('周报摘要按动作计数，不按 outcome 行数', () => {
+  const now = new Date('2026-06-08T07:00:00Z') // Mon W24 → summarises W23
+
+  /** 一个 GSC 动作一次快照产出的三行 outcome —— 三个读数，一个事件。 */
+  function threeReadingsOf(actionId: string, verdict: string) {
+    return ['seo.gsc.clicks', 'seo.gsc.impressions', 'seo.gsc.avg_position'].map(metric_key => ({
+      client_id: 'c1',
+      verdict,
+      computed_at: '2026-06-03T00:00:00Z',
+      action_id: actionId,
+      metric_key,
+      window_days: 28,
+      flywheel_actions: { expected_metric: 'seo.gsc.clicks' },
+    }))
+  }
+
+  it('两个动作 × 三行 = confirmed 2，不是 6', async () => {
+    const state: MockState = {
+      outcomes: [
+        ...threeReadingsOf('act-1', 'confirmed'),
+        ...threeReadingsOf('act-2', 'confirmed'),
+      ],
+      feedback: [],
+      existingPreferences: [],
+      insertedPreferences: [],
+    }
+
+    await runWeeklyLearningRollup(makeMockSupabase(state), { now })
+
+    const content = (state.insertedPreferences[0].payload as Record<string, unknown>).content as string
+    // 这段摘要下一轮会原样喂给 agent。写成 confirmed=6，等于凭两个动作报出
+    // 六次成功 —— 双窗口打开后还会再翻一倍。
+    expect(content).toContain('confirmed=2')
+    expect(content).not.toContain('confirmed=6')
+  })
+
+  it('同一动作既有 confirmed 又有 reversed 时，按它承诺的指标定调', async () => {
+    const state: MockState = {
+      outcomes: [
+        // 承诺的是 clicks —— clicks 跑赢了，只是排名滑了
+        { client_id: 'c1', verdict: 'confirmed', computed_at: '2026-06-03T00:00:00Z', action_id: 'act-1', metric_key: 'seo.gsc.clicks',       window_days: 28, flywheel_actions: { expected_metric: 'seo.gsc.clicks' } },
+        { client_id: 'c1', verdict: 'reversed',  computed_at: '2026-06-03T00:00:00Z', action_id: 'act-1', metric_key: 'seo.gsc.avg_position', window_days: 28, flywheel_actions: { expected_metric: 'seo.gsc.clicks' } },
+      ],
+      feedback: [],
+      existingPreferences: [],
+      insertedPreferences: [],
+    }
+
+    await runWeeklyLearningRollup(makeMockSupabase(state), { now })
+
+    const content = (state.insertedPreferences[0].payload as Record<string, unknown>).content as string
+    expect(content).toContain('confirmed=1')
+    expect(content).toContain('reversed=0')
   })
 })

@@ -268,6 +268,10 @@ async function loadFailedExperiments(
     const { data, error } = await supabase
       .from('client_failed_experiments')
       .select('*')
+      // 🔴 与 loadPreferences / loadPatterns 对齐。这张表建表时漏了 is_active，
+      // 于是「这招不管用」的经验一旦写进来就撤不掉 —— 哪怕同一个动作后来被证明
+      // 有效。列由 20260812100000 补上，读侧必须跟着过滤，否则下架等于没发生。
+      .eq('is_active', true)
       .eq('client_id', clientId)
       .order('created_at', { ascending: false })
       .limit(10)
@@ -349,6 +353,7 @@ export async function saveProvenPattern(
       flywheel: input.flywheel ?? null,
       source_table: input.source_table ?? null,
       source_id: input.source_id ?? null,
+      source_action_id: input.source_action_id ?? null,
     })
     .select()
     .single()
@@ -374,6 +379,7 @@ export async function saveFailedExperiment(
       tried_at: input.tried_at ?? null,
       source_table: input.source_table ?? null,
       source_id: input.source_id ?? null,
+      source_action_id: input.source_action_id ?? null,
     })
     .select()
     .single()
@@ -383,6 +389,47 @@ export async function saveFailedExperiment(
     return null
   }
   return data as FailedExperiment
+}
+
+// ── Supersession ──────────────────────────────────────────────────────────────
+
+/** 两张「从执行结果派生」的记忆表 —— 只有它们参与按动作的自动上下架。 */
+export type DerivedMemoryTable = 'client_proven_patterns' | 'client_failed_experiments'
+
+/**
+ * 把某个动作在某张记忆表上的所有行设成生效 / 失效，返回被改动的行数。
+ *
+ * 为什么键是 `source_action_id` 而不是 `source_id`：
+ * 一次快照会给同一个动作产出 clicks / impressions / avg_position 三行 outcome，
+ * 双窗口开了再翻倍。按 outcome 行去重，一个动作会留下好几条记忆；而且代表行一变
+ * （窗口更长了、expected_metric 改了），换个 `source_id` 又会再写一条，旧的还留着。
+ * 动作才是「这招管不管用」的单位。
+ *
+ * DB 侧的互斥触发器（20260812100000）会在这里激活一侧时自动下架另一侧。这个函数
+ * 仍然显式下架对侧，原因有二：触发器只在 INSERT / is_active 变化时触发，命中一条
+ * 「本来就 active 且不需要改」的行时不会响；而存量数据里可能已经有正反同时 active
+ * 的组合，需要第一次对账时被收拾掉。两边都做 = 幂等，不是重复。
+ */
+export async function setDerivedMemoryActive(
+  supabase: SupabaseClient,
+  table: DerivedMemoryTable,
+  clientId: string,
+  sourceActionId: string,
+  isActive: boolean,
+): Promise<number> {
+  const { data, error } = await supabase
+    .from(table)
+    .update({ is_active: isActive })
+    .eq('client_id', clientId)
+    .eq('source_action_id', sourceActionId)
+    .neq('is_active', isActive)
+    .select('id')
+
+  if (error) {
+    console.error(`[memory] setDerivedMemoryActive ${table} error:`, error.message)
+    return 0
+  }
+  return (data ?? []).length
 }
 
 export async function saveDecisionHistory(

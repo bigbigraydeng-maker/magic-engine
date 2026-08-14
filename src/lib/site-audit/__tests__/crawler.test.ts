@@ -28,6 +28,7 @@ import {
   DEFAULT_RATE_LIMIT_MS,
   MAX_BFS_LINKS,
   MIN_DISCOVERED_URLS,
+  type DiscoveryIssue,
 } from '../crawler'
 import { fetchUrlRaw, fetchUrlAsMarkdown } from '../../brief/jina'
 
@@ -472,6 +473,164 @@ describe('discoverSitemapUrls', () => {
     })
   })
 
+  /**
+   * onIssue — 部分结果必须跟完整结果分得开（Issue #930）。
+   *
+   * 🔴 这些断言盯的是 discoverSitemapUrls 的**沉默**，不是它的返回值：
+   *    每一级回退都会吞掉失败继续走，返回的数组跟完整发现长得一模一样 ——
+   *    promise 正常 resolve、条数为正、没有任何异常。台账那边靠这个观察口
+   *    才能把「这个站就这么多页」和「有一棵 sitemap 子树没取到」分开。
+   *    上报点漏一个，就有一类缺页会重新变成静默的。
+   */
+  describe('onIssue — swallowed failures must be observable', () => {
+    it('reports a child sitemap that throws', async () => {
+      vi.stubGlobal('fetch', vi.fn()
+        .mockResolvedValueOnce(mockResponse(ROBOTS_TXT_EMPTY))         // robots.txt
+        .mockResolvedValueOnce(mockNotFound())                         // sitemap.xml 404
+        .mockResolvedValueOnce(mockResponse(SITEMAP_INDEX_XML))        // sitemap_index.xml
+        .mockRejectedValueOnce(new Error('Timeout'))                   // sitemap-posts.xml throws
+        .mockResolvedValueOnce(mockResponse(SITEMAP_PAGES_XML))        // sitemap-pages.xml ok
+      )
+      const issues: DiscoveryIssue[] = []
+
+      const urls = await discoverSitemapUrls('example.com', { onIssue: (i) => issues.push(i) })
+
+      // 返回值跟「这个站只有 3 页」完全一样 —— 差别只在这个回调里。
+      expect(urls).toHaveLength(3)
+      expect(issues).toHaveLength(1)
+      expect(issues[0]).toMatchObject({ stage: 'child-sitemap', url: 'https://example.com/sitemap-posts.xml' })
+      expect(issues[0].error).toContain('Timeout')
+    })
+
+    it('🔴 reports a child sitemap that answers non-OK (it never throws)', async () => {
+      vi.stubGlobal('fetch', vi.fn()
+        .mockResolvedValueOnce(mockResponse(ROBOTS_TXT_EMPTY))
+        .mockResolvedValueOnce(mockNotFound())
+        .mockResolvedValueOnce(mockResponse(SITEMAP_INDEX_XML))
+        .mockResolvedValueOnce(new Response('nope', { status: 503 }))  // sitemap-posts.xml 503
+        .mockResolvedValueOnce(mockResponse(SITEMAP_PAGES_XML))
+      )
+      const issues: DiscoveryIssue[] = []
+
+      const urls = await discoverSitemapUrls('example.com', { onIssue: (i) => issues.push(i) })
+
+      expect(urls).toHaveLength(3)
+      expect(issues).toHaveLength(1)
+      expect(issues[0]).toMatchObject({ stage: 'child-sitemap', url: 'https://example.com/sitemap-posts.xml' })
+      expect(issues[0].error).toContain('503')
+    })
+
+    it('reports sitemaps dropped on the robots.txt directive path', async () => {
+      vi.stubGlobal('fetch', vi.fn()
+        .mockResolvedValueOnce(mockResponse(ROBOTS_TXT_WITH_SITEMAP))  // robots.txt (has Sitemap:)
+        .mockRejectedValueOnce(new Error('ECONNRESET'))                // custom-sitemap.xml throws
+        .mockResolvedValueOnce(mockResponse(SITEMAP_XML_10_URLS))      // sitemap.xml fallback
+      )
+      const issues: DiscoveryIssue[] = []
+
+      await discoverSitemapUrls('example.com', { onIssue: (i) => issues.push(i) })
+
+      expect(issues.some((i) => i.stage === 'sitemap-fetch' && i.url?.includes('custom-sitemap.xml'))).toBe(true)
+    })
+
+    it('reports a non-OK sitemap on the robots.txt directive path', async () => {
+      vi.stubGlobal('fetch', vi.fn()
+        .mockResolvedValueOnce(mockResponse(ROBOTS_TXT_WITH_SITEMAP))
+        .mockResolvedValueOnce(new Response('gone', { status: 410 }))  // custom-sitemap.xml 410
+        .mockResolvedValueOnce(mockResponse(SITEMAP_XML_10_URLS))
+      )
+      const issues: DiscoveryIssue[] = []
+
+      await discoverSitemapUrls('example.com', { onIssue: (i) => issues.push(i) })
+
+      expect(issues.some((i) => i.stage === 'sitemap-fetch' && i.error.includes('410'))).toBe(true)
+    })
+
+    it('🔴 reports the depth-limit cut-off on the direct-fetch path', async () => {
+      // robots.txt → custom-sitemap.xml → 一条只有 index 的链，第 4 层被截断。
+      // 截断后返回的是空数组，跟「这棵子树本来就是空的」一模一样。
+      const indexTo = (child: string) =>
+        mockResponse(`<sitemapindex><sitemap><loc>${child}</loc></sitemap></sitemapindex>`)
+      vi.stubGlobal('fetch', vi.fn()
+        .mockResolvedValueOnce(mockResponse(ROBOTS_TXT_WITH_SITEMAP))              // robots.txt
+        .mockResolvedValueOnce(indexTo('https://example.com/sitemap-b.xml'))       // depth 0
+        .mockResolvedValueOnce(indexTo('https://example.com/sitemap-c.xml'))       // depth 1
+        .mockResolvedValueOnce(indexTo('https://example.com/sitemap-d.xml'))       // depth 2
+        .mockResolvedValue(mockResponse(SITEMAP_XML_10_URLS))                      // 后续回退
+      )
+      const issues: DiscoveryIssue[] = []
+
+      await discoverSitemapUrls('example.com', { onIssue: (i) => issues.push(i) })
+
+      expect(issues.some((i) => i.stage === 'sitemap-depth-limit')).toBe(true)
+      expect(issues.find((i) => i.stage === 'sitemap-depth-limit')?.url).toBe(
+        'https://example.com/sitemap-d.xml',
+      )
+    })
+
+    it('🔴 reports when the result came from homepage BFS (best-effort, cannot enumerate a site)', async () => {
+      // sitemap 全挂、靠首页链接凑出来的结果，跟「这个站就这么多页」长得一模一样。
+      // 危险的不是 sitemap 404（那是正常回退），是**最后靠首页凑出来**这件事。
+      vi.stubGlobal('fetch', vi.fn()
+        .mockResolvedValueOnce(mockResponse(ROBOTS_TXT_EMPTY))
+        .mockResolvedValueOnce(mockNotFound())
+        .mockResolvedValueOnce(mockNotFound())
+        .mockResolvedValueOnce(mockResponse('<a href="/a">a</a><a href="/b">b</a>'))
+      )
+      const issues: DiscoveryIssue[] = []
+      const urls = await discoverSitemapUrls('example.com', { onIssue: (i) => issues.push(i) })
+
+      expect(urls.length).toBeGreaterThanOrEqual(2)
+      expect(issues.map((i) => i.stage)).toContain('homepage-bfs-only')
+    })
+
+    it('🔴 reports when homepage BFS hit the link cap (the rest are silently absent)', async () => {
+      // 截到 MAX_BFS_LINKS 就返回，截断跟「这个站就这么多页」长得一样。
+      const many = Array.from({ length: 80 }, (_, i) => `<a href="/p${i}">p${i}</a>`).join('')
+      vi.stubGlobal('fetch', vi.fn()
+        .mockResolvedValueOnce(mockResponse(ROBOTS_TXT_EMPTY))
+        .mockResolvedValueOnce(mockNotFound())
+        .mockResolvedValueOnce(mockNotFound())
+        .mockResolvedValueOnce(mockResponse(many))
+      )
+      const issues: DiscoveryIssue[] = []
+      const urls = await discoverSitemapUrls('example.com', { onIssue: (i) => issues.push(i) })
+
+      expect(urls).toHaveLength(MAX_BFS_LINKS)
+      expect(issues.map((i) => i.stage)).toContain('homepage-bfs-truncated')
+    })
+
+    it('stays silent when discovery is complete', async () => {
+      vi.stubGlobal('fetch', vi.fn()
+        .mockResolvedValueOnce(mockResponse(ROBOTS_TXT_EMPTY))
+        .mockResolvedValueOnce(mockNotFound())
+        .mockResolvedValueOnce(mockResponse(SITEMAP_INDEX_XML))
+        .mockResolvedValueOnce(mockResponse(SITEMAP_POSTS_XML))
+        .mockResolvedValueOnce(mockResponse(SITEMAP_PAGES_XML))
+      )
+      const issues: DiscoveryIssue[] = []
+
+      const urls = await discoverSitemapUrls('example.com', { onIssue: (i) => issues.push(i) })
+
+      // sitemap.xml 的 404 是正常回退，不是「被吞掉的失败」—— 报它只会把噪音喂给
+      // 「不完整必须有人认过」那道闸，认多了就没人认真看了。
+      expect(urls).toHaveLength(6)
+      expect(issues).toEqual([])
+    })
+
+    it('behaves exactly as before when no onIssue is passed', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(mockResponse(ROBOTS_TXT_EMPTY))
+        .mockResolvedValueOnce(mockNotFound())
+        .mockResolvedValueOnce(mockResponse(SITEMAP_INDEX_XML))
+        .mockRejectedValueOnce(new Error('Timeout'))
+        .mockResolvedValueOnce(mockResponse(SITEMAP_PAGES_XML))
+      vi.stubGlobal('fetch', fetchMock)
+
+      await expect(discoverSitemapUrls('example.com')).resolves.toHaveLength(3)
+    })
+  })
+
   describe('fallback 2 — robots.txt contains Sitemap directive', () => {
     it('discovers URLs from custom sitemap listed in robots.txt', async () => {
       vi.stubGlobal('fetch', vi.fn()
@@ -691,6 +850,43 @@ describe('fetchSitemapPagesViaJina', () => {
     expect(urls).toEqual([])
     // depth 0 (a), 1 (b), 2 (c) fetched; d at depth 3 refused
     expect(vi.mocked(fetchUrlRaw)).toHaveBeenCalledTimes(3)
+  })
+
+  it('🔴 reports the depth-limit cut-off — truncation looks like an empty subtree', async () => {
+    vi.mocked(fetchUrlRaw).mockImplementation(async (url: string) => {
+      const next = { a: 'b', b: 'c', c: 'd', d: 'e' }[url.match(/sitemap-(\w)/)![1]]
+      return `<sitemapindex><sitemap><loc>https://example.com/sitemap-${next}.xml</loc></sitemap></sitemapindex>`
+    })
+    const issues: DiscoveryIssue[] = []
+
+    await fetchSitemapPagesViaJina('https://example.com/sitemap-a.xml', 0, 0, new Set(), (stage, error, url) =>
+      issues.push({ stage, error: String(error), url }),
+    )
+
+    expect(issues).toHaveLength(1)
+    expect(issues[0]).toMatchObject({
+      stage: 'jina-sitemap-depth-limit',
+      url: 'https://example.com/sitemap-d.xml',
+    })
+  })
+
+  it('reports a child sitemap that throws', async () => {
+    vi.mocked(fetchUrlRaw).mockImplementation(async (url: string) => {
+      if (url === 'https://example.com/sitemap.xml') return SITEMAP_INDEX_XML
+      if (url === 'https://example.com/sitemap-pages.xml') return SITEMAP_PAGES_XML
+      throw new Error('Timeout')
+    })
+    const issues: DiscoveryIssue[] = []
+
+    await fetchSitemapPagesViaJina('https://example.com/sitemap.xml', 0, 0, new Set(), (stage, error, url) =>
+      issues.push({ stage, error: String(error), url }),
+    )
+
+    expect(issues).toHaveLength(1)
+    expect(issues[0]).toMatchObject({
+      stage: 'jina-child-sitemap',
+      url: 'https://example.com/sitemap-posts.xml',
+    })
   })
 })
 

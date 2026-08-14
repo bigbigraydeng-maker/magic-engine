@@ -21,6 +21,25 @@ export interface CrawlOptions {
   rateLimitMs?: number
 }
 
+/**
+ * 发现过程中被**吞掉**的一次失败（Issue #930）。
+ *
+ * 🔴 discoverSitemapUrls 的每一级回退都会把失败 catch 掉继续往下走 —— 这对「尽量多找点」
+ *    是对的，但它让调用方无法区分「这个站就这么多页」和「有一棵 sitemap 子树没取到」。
+ *    台账要的是后者能被看见：部分结果被当成完整结果，会产出一份静默缺页的清单。
+ *    所以这里**只增加一个可选的观察口**，不改任何既有行为：不传 onIssue 就跟以前一模一样。
+ */
+export interface DiscoveryIssue {
+  readonly stage: string
+  readonly url?: string
+  readonly error: string
+}
+
+export interface DiscoverOptions {
+  /** 每吞掉一次失败就回调一次。不传 = 完全维持既有行为。 */
+  readonly onIssue?: (issue: DiscoveryIssue) => void
+}
+
 export interface CrawlResult {
   url: string
   markdown: string
@@ -226,8 +245,10 @@ export function delay(ms: number): Promise<void> {
  * Returns unique, same-domain URLs only.
  * Returns [] if robots.txt fully blocks crawling (and logs a warning).
  */
-export async function discoverSitemapUrls(domain: string): Promise<string[]> {
+export async function discoverSitemapUrls(domain: string, opts?: DiscoverOptions): Promise<string[]> {
   const origin = normaliseDomain(domain)
+  const report = (stage: string, error: unknown, url?: string): void =>
+    opts?.onIssue?.({ stage, url, error: error instanceof Error ? error.message : String(error) })
   let best: string[] = []
   const keepOrEscalate = (urls: string[]): string[] | null => {
     if (urls.length >= MIN_DISCOVERED_URLS) return urls
@@ -247,12 +268,12 @@ export async function discoverSitemapUrls(domain: string): Promise<string[]> {
       // Try sitemap directives from robots.txt
       const directives = parseSitemapDirectives(robotsTxt)
       if (directives.length > 0) {
-        const urls = keepOrEscalate(dedupeAndFilter(await resolveSitemapUrls(directives, origin), origin))
+        const urls = keepOrEscalate(dedupeAndFilter(await resolveSitemapUrls(directives, origin, report), origin))
         if (urls) return urls
       }
     }
-  } catch {
-    // robots.txt unreachable — continue with other strategies
+  } catch (err) {
+    report('robots.txt', err, `${origin}/robots.txt`)
   }
 
   // Level 1: /sitemap.xml
@@ -263,8 +284,8 @@ export async function discoverSitemapUrls(domain: string): Promise<string[]> {
       const urls = keepOrEscalate(dedupeAndFilter(parseLocsFromXml(xml), origin))
       if (urls) return urls
     }
-  } catch {
-    // fall through
+  } catch (err) {
+    report('sitemap.xml', err, `${origin}/sitemap.xml`)
   }
 
   // Level 2: /sitemap_index.xml
@@ -281,16 +302,20 @@ export async function discoverSitemapUrls(domain: string): Promise<string[]> {
           if (childRes.ok) {
             const childXml = await childRes.text()
             allLocs.push(...parseLocsFromXml(childXml))
+          } else {
+            // 🔴 404/503 不会抛 —— fetch 正常完成，只是 ok 为 false。
+            //    只在 catch 里上报，等于漏掉了子树失败最常见的那一种。
+            report('child-sitemap', `HTTP ${childRes.status}`, childUrl)
           }
-        } catch {
-          // skip unreachable child sitemap
+        } catch (err) {
+          report('child-sitemap', err, childUrl)
         }
       }
       const urls = keepOrEscalate(dedupeAndFilter(allLocs, origin))
       if (urls) return urls
     }
-  } catch {
-    // fall through
+  } catch (err) {
+    report('sitemap_index.xml', err, `${origin}/sitemap_index.xml`)
   }
 
   // Level 4: BFS homepage link extraction
@@ -298,11 +323,23 @@ export async function discoverSitemapUrls(domain: string): Promise<string[]> {
     const res = await fetch(origin)
     if (res.ok) {
       const html = await res.text()
-      const urls = keepOrEscalate(extractSameDomainLinks(html, origin, MAX_BFS_LINKS))
-      if (urls) return urls
+      const links = extractSameDomainLinks(html, origin, MAX_BFS_LINKS)
+      // 🔴 BFS 截到上限就返回，截断跟「这个站就这么多页」长得一样。
+      //    不上报的话，台账会拿到 count: 50 / error: null，其余页面静默缺席。
+      if (links.length >= MAX_BFS_LINKS) {
+        report('homepage-bfs-truncated', `hit MAX_BFS_LINKS=${MAX_BFS_LINKS}`, origin)
+      }
+      const urls = keepOrEscalate(links)
+      if (urls) {
+        // 🔴 真正的危险信号不是「sitemap 404」（那是正常回退），而是**最后靠首页链接凑出来的结果**：
+        //    首页 BFS 本来就枚举不全一个站，它给出的「正数 + 无错误」跟「这个站就这么多页」
+        //    长得一模一样。台账必须知道这一份是尽力而为的结果，交给人认。
+        report('homepage-bfs-only', 'discovery fell back to homepage links (not a sitemap)', origin)
+        return urls
+      }
     }
-  } catch {
-    // fall through to Level 5
+  } catch (err) {
+    report('homepage-bfs', err, origin)
   }
 
   // Level 5a: Jina Reader — fetch sitemap(s) bypassing WAF. Jina's render
@@ -312,15 +349,15 @@ export async function discoverSitemapUrls(domain: string): Promise<string[]> {
   // implementation only looked for <loc> in markdown output — dead code.
   for (const path of ['/sitemap.xml', '/sitemap_index.xml']) {
     try {
-      const locs = await fetchSitemapPagesViaJina(`${origin}${path}`, 0)
+      const locs = await fetchSitemapPagesViaJina(`${origin}${path}`, 0, JINA_SITEMAP_DELAY_MS, new Set(), report)
       const urls = dedupeAndFilter(locs, origin)
       if (urls.length > 0) {
         console.info(`[crawler] Level 5a Jina sitemap (${path}) found ${urls.length} URLs for ${origin}`)
         if (urls.length >= MIN_DISCOVERED_URLS) return urls
         if (urls.length > best.length) best = urls
       }
-    } catch {
-      // fall through
+    } catch (err) {
+      report('jina-sitemap', err, `${origin}${path}`)
     }
   }
 
@@ -330,16 +367,24 @@ export async function discoverSitemapUrls(domain: string): Promise<string[]> {
     const jinaResult = await fetchUrlAsMarkdown(origin)
     if (jinaResult.markdown) {
       const links = extractMarkdownLinks(jinaResult.markdown, origin, MAX_BFS_LINKS)
+      if (links.length >= MAX_BFS_LINKS) {
+        report('jina-homepage-truncated', `hit MAX_BFS_LINKS=${MAX_BFS_LINKS}`, origin)
+      }
       if (links.length >= MIN_DISCOVERED_URLS) {
         console.info(`[crawler] Level 5b Jina homepage found ${links.length} URLs for ${origin}`)
+        report('jina-homepage-only', 'discovery fell back to homepage links (not a sitemap)', origin)
         return links
       }
       if (links.length > best.length) best = links
     }
-  } catch {
-    // nothing more to try
+  } catch (err) {
+    report('jina-homepage', err, origin)
   }
 
+  // 走到这里 = 每一级都没凑够阈值，返回的是「最好的那一份残缺结果」。
+  if (best.length > 0) {
+    report('partial-best-effort', `no level reached ${MIN_DISCOVERED_URLS} URLs; returning best partial result`, origin)
+  }
   return best
 }
 
@@ -353,9 +398,14 @@ export async function fetchSitemapPagesViaJina(
   url: string,
   depth: number,
   delayMs: number = JINA_SITEMAP_DELAY_MS,
-  visited: Set<string> = new Set()
+  visited: Set<string> = new Set(),
+  report: Report = () => {}
 ): Promise<string[]> {
-  if (depth >= MAX_SITEMAP_DEPTH || visited.has(url)) return []
+  if (depth >= MAX_SITEMAP_DEPTH) {
+    report('jina-sitemap-depth-limit', `depth limit ${MAX_SITEMAP_DEPTH} reached`, url)
+    return []
+  }
+  if (visited.has(url)) return []
   visited.add(url)
   const { fetchUrlRaw } = await import('../brief/jina')
   const raw = await fetchUrlRaw(url)
@@ -377,9 +427,9 @@ export async function fetchSitemapPagesViaJina(
     if (visited.has(child)) continue
     try {
       if (delayMs > 0) await delay(delayMs)
-      all.push(...(await fetchSitemapPagesViaJina(child, depth + 1, delayMs, visited)))
-    } catch {
-      // skip unreachable child sitemap
+      all.push(...(await fetchSitemapPagesViaJina(child, depth + 1, delayMs, visited, report)))
+    } catch (err) {
+      report('jina-child-sitemap', err, child)
     }
   }
   return all
@@ -467,13 +517,20 @@ export async function crawlPages(
  * Resolve a list of sitemap URLs (possibly sitemap indexes) into page URLs.
  * Handles arbitrarily nested sitemap indexes up to MAX_SITEMAP_DEPTH levels.
  */
-async function resolveSitemapUrls(sitemapUrls: string[], origin: string): Promise<string[]> {
+async function resolveSitemapUrls(
+  sitemapUrls: string[],
+  origin: string,
+  report: Report = () => {},
+): Promise<string[]> {
   const all: string[] = []
   for (const url of sitemapUrls) {
-    all.push(...(await fetchSitemapPageUrls(url, 0)))
+    all.push(...(await fetchSitemapPageUrls(url, 0, report)))
   }
   return all
 }
+
+/** 失败上报口。默认空实现 = 既有行为。 */
+type Report = (stage: string, error: unknown, url?: string) => void
 
 const MAX_SITEMAP_DEPTH = 3
 
@@ -482,22 +539,30 @@ const MAX_SITEMAP_DEPTH = 3
  * If the fetched XML is a <sitemapindex>, recurses into each child.
  * Depth-limited to MAX_SITEMAP_DEPTH to guard against malformed cycles.
  */
-async function fetchSitemapPageUrls(url: string, depth: number): Promise<string[]> {
-  if (depth >= MAX_SITEMAP_DEPTH) return []
+async function fetchSitemapPageUrls(url: string, depth: number, report: Report = () => {}): Promise<string[]> {
+  if (depth >= MAX_SITEMAP_DEPTH) {
+    // 截断跟「这棵子树是空的」长得一样 —— 深度上限也是一次没取到。
+    report('sitemap-depth-limit', `depth limit ${MAX_SITEMAP_DEPTH} reached`, url)
+    return []
+  }
   try {
     const res = await fetch(url)
-    if (!res.ok) return []
+    if (!res.ok) {
+      report('sitemap-fetch', `HTTP ${res.status}`, url)
+      return []
+    }
     const xml = await res.text()
     if (/<sitemapindex/i.test(xml)) {
       const childUrls = parseLocsFromXml(xml)
       const nested: string[] = []
       for (const childUrl of childUrls) {
-        nested.push(...(await fetchSitemapPageUrls(childUrl, depth + 1)))
+        nested.push(...(await fetchSitemapPageUrls(childUrl, depth + 1, report)))
       }
       return nested
     }
     return parseLocsFromXml(xml)
-  } catch {
+  } catch (err) {
+    report('sitemap-fetch', err, url)
     return []
   }
 }

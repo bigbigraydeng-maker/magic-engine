@@ -49,6 +49,16 @@ function handler() {
 - UI 文案禁止出现：OpenAI / Anthropic / WaveSpeed / Seedance / SEMrush（用封装名）
 - Commit message 格式：`feat(module): desc [PXX.Y]`
 
+### 风险分级质量闸（开工前必做）
+
+先读 [`docs/ENGINEERING_QUALITY_GATES.md`](../ENGINEERING_QUALITY_GATES.md)，声明 A / B / C 级后再编码：
+
+- **A 级**：安全、隔离、Kernel、migration、资金、外部发布等高风险边界；需要强测试、真实边界证据和关键 mutation；
+- **B 级**：普通业务逻辑/API/报表；核心单测、1–2 条集成、type/lint/build、一次集中 review；
+- **C 级**：UI/文案/原型；smoke/截图/build，保持快速。
+
+Codex 必须检查：风险有没有被故意降级、实现是否超过当前调用方的最小契约、非 blocker 是否被错误升级成新修补轮次。完整 mutation 默认只用于 A 级，并且只在冻结 head 上跑一次。Review 按 [#964](https://github.com/bigbigraydeng-maker/magic-engine/issues/964) 收敛，机器人新 finding 不等于继续修改授权。
+
 ---
 
 ## Memory Layer 接口（Phase 23）

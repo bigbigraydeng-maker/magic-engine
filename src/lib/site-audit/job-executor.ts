@@ -11,8 +11,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { JobRunner } from './job-runner'
 import { discoverSitemapUrls as crawlerDiscoverUrls, crawlPages } from './crawler'
-import { classifyPage } from './classifier'
-import { detectGEOBlock } from './geo-detector'
+import { enrichCrawledPage } from './page-enrichment'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -53,7 +52,6 @@ export interface CrawlBatchResult {
 const PROGRESS_UPDATE_INTERVAL = 10
 const DEFAULT_MAX_PAGES = 100
 const DEFAULT_RATE_LIMIT_MS = 1000
-const FALLBACK_PAGE_TYPE = 'other'
 
 // ---------------------------------------------------------------------------
 // Public API — re-exported for mocking in tests
@@ -156,46 +154,22 @@ export async function crawlAndClassifyPages(
 
     crawledCount++
 
-    // Step 1: Classify page
-    let pageType = FALLBACK_PAGE_TYPE
-    let topics: string[] = []
-    let primaryKeyword: string | null = null
-    let classificationConfidence = 0
-
-    try {
-      const classification = await classifyPage(
-        crawl.url,
-        crawl.title,
-        crawl.markdown
-      )
-      pageType = classification.page_type
-      topics = classification.topics
-      primaryKeyword = classification.primary_keyword
-      classificationConfidence = classification.confidence
-      classifiedCount++
-    } catch {
-      // Fallback: keep uncategorised defaults, do not abort
-      pageType = FALLBACK_PAGE_TYPE
-    }
-
-    // Step 2: GEO detection (synchronous, never throws)
-    let hasGeoBlock = false
-    let geoDetectionMethod: string | null = null
-    let geoConfidence = 0
-
-    try {
-      const geo = detectGEOBlock(crawl.markdown)
-      hasGeoBlock = geo.has_geo_block
-      geoDetectionMethod = geo.detection_method
-      geoConfidence = geo.confidence
-    } catch {
-      // Leave defaults — geo failure must not abort the page
-    }
-
-    // Step 3: Word count
-    const wordCount = crawl.markdown
-      ? crawl.markdown.trim().split(/\s+/).filter(Boolean).length
-      : 0
+    // Steps 1-3: classify + GEO detect + word count.
+    // Extracted verbatim into page-enrichment.ts so the #930 canonical-inventory
+    // activation can enrich *before* deciding whether to write. Behaviour here is
+    // unchanged: classification failure falls back to 'other' without counting.
+    const enriched = await enrichCrawledPage(crawl)
+    if (enriched.classified) classifiedCount++
+    const {
+      pageType,
+      topics,
+      primaryKeyword,
+      classificationConfidence,
+      hasGeoBlock,
+      geoDetectionMethod,
+      geoConfidence,
+      wordCount,
+    } = enriched
 
     // Step 4: Upsert to client_site_pages
     let pagePath = '/'

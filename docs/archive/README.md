@@ -14,7 +14,7 @@
 | `PLATFORM_ARCHITECTURE.md` | `/PLATFORM_ARCHITECTURE.md` | 同上（含 MLT 套餐表）；产品定位部分已并入 `../PRODUCT.md` |
 | `MODULE_MAP.md` | `/MODULE_MAP.md` | 引用的 `src/lib/semrush/` 等路径已不存在；模块映射已并入 `../STATE.md §3` |
 | `spec-diagnostic-engine.md` | `docs/specs/archive/` | 早期诊断引擎 spec |
-| `claude-code-prompts-547.md` | `docs/specs/archive/` | 与 `../claude-code-prompts.md` 是同一份的两个版本（这份 547 行更全） |
+| `claude-code-prompts-547.md` | `docs/specs/archive/` | 曾与 `docs/claude-code-prompts.md` 是同一份的两个版本；**那份较短的已于 2026-08-12 删除**（本 PR），这份 547 行的是唯一保留版本 |
 | `feimaotui-test/` | `docs/feimaotui-test/` | 与 ME 产品无关的外部测试记录 |
 
 **同批删除**（不在此目录，已从仓库移除）：`TESTING.md` / `QUICK_REFERENCE.md` / `PROJECT.md`

@@ -36,6 +36,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { keepOneCasePerAction } from '@/lib/flywheel/attribution/outcome-identity'
 import { savePreference } from './service'
 
 // ── Public types ─────────────────────────────────────────────────────────────
@@ -149,6 +150,54 @@ export async function runWeeklyLearningRollup(
 
 // ── Per-client rollup ────────────────────────────────────────────────────────
 
+/** flywheel_outcomes 一行 + 它所属动作承诺的指标（左连接，可能缺）。 */
+interface RollupOutcomeRow {
+  verdict?: unknown
+  action_id?: unknown
+  metric_key?: unknown
+  window_days?: unknown
+  flywheel_actions?: { expected_metric?: string | null } | Array<{ expected_metric?: string | null }> | null
+}
+
+/**
+ * 把窗口内的 outcome 行折成「一个动作一个案例」，再去数 confirmed / reversed。
+ *
+ * 这段摘要会原样写进 client_learned_preferences.content，下一轮 agent 直接读。
+ * 按行数数的话，一个 GSC 动作一次快照就出 clicks / impressions / avg_position
+ * 三行，ATTRIBUTION_DUAL_WINDOW_ENABLED 打开后再翻倍 —— 于是「本周 confirmed=6」
+ * 实际上可能只有一个动作跑赢。跟 aggregate / case-library / execution board 用
+ * 同一把尺（`keepOneCasePerAction`），四处不会各说一套。
+ *
+ * 缺 action_id 的行（理论上不该有）按自己算一个案例，不因为折叠而被丢掉。
+ */
+function collapseOutcomesToActions(
+  rows: RollupOutcomeRow[],
+): Array<{ verdict: string }> {
+  const collapsible: Array<{ action_id: string; metric_key: string; window_days: number | null; expected_metric: string | null; verdict: string }> = []
+  const orphans: Array<{ verdict: string }> = []
+
+  for (const r of rows) {
+    const verdict = typeof r.verdict === 'string' ? r.verdict : ''
+    if (typeof r.action_id !== 'string' || !r.action_id) {
+      orphans.push({ verdict })
+      continue
+    }
+    const joined = Array.isArray(r.flywheel_actions) ? r.flywheel_actions[0] : r.flywheel_actions
+    collapsible.push({
+      action_id: r.action_id,
+      metric_key: typeof r.metric_key === 'string' ? r.metric_key : '',
+      window_days: typeof r.window_days === 'number' ? r.window_days : null,
+      expected_metric: joined?.expected_metric ?? null,
+      verdict,
+    })
+  }
+
+  return [
+    ...keepOneCasePerAction(collapsible).map(r => ({ verdict: r.verdict })),
+    ...orphans,
+  ]
+}
+
 async function rollupOneClient(
   supabase: SupabaseClient,
   clientId: string,
@@ -178,7 +227,10 @@ async function rollupOneClient(
   const [outcomesRes, feedbackRes] = await Promise.all([
     supabase
       .from('flywheel_outcomes')
-      .select('verdict')
+      // action_id / metric_key / window_days 是折叠用的自然键，expected_metric
+      // 决定折叠时挑哪一行当代表。左连接（不加 !inner）：动作记录不在了的孤儿
+      // outcome 仍然按自己算一个案例，行为不比从前少。
+      .select('verdict, action_id, metric_key, window_days, flywheel_actions(expected_metric)')
       .eq('client_id', clientId)
       .gte('computed_at', startIso)
       .lt('computed_at', endIso),
@@ -193,7 +245,7 @@ async function rollupOneClient(
   let confirmed = 0
   let reversed = 0
   let inconclusive = 0
-  for (const o of outcomesRes.data ?? []) {
+  for (const o of collapseOutcomesToActions(outcomesRes.data ?? [])) {
     if (o.verdict === 'confirmed') confirmed++
     else if (o.verdict === 'reversed') reversed++
     else if (o.verdict === 'inconclusive') inconclusive++

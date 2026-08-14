@@ -34,6 +34,181 @@ sponsorship@ 邮箱，没有具体档位设计）。全部清理，只留有据�
 
 部署走专属 Cloudflare API token（避免多窗口并行时全局登录被切走），移动端在首页/Exhibitor Centre/
 Exhibitor Directory 三个改动最大的页面过了 `resize_window` 检查。
+### 2026-08-12（站点页面台账：把「谁批准了这一页」变成一道过不去就不许跑的闸）
+
+Issue [#930](https://github.com/bigbigraydeng-maker/magic-engine/issues/930) ·
+PR [#956](https://github.com/bigbigraydeng-maker/magic-engine/pull/956)（合并提交 `a11d2ba7`）·
+复审全记录见 [#935](https://github.com/bigbigraydeng-maker/magic-engine/pull/935)。
+
+**这次解决的一件事**：现有 site-audit 能发现页面、抓取、分类、按租户落库，但**没有「页面身份」这个概念** ——
+边发现边 upsert，人还没看过就已经进库；「审核」步骤在写入**之后**，只能整体点一个「看起来没问题」。
+本次补上 4 样，一行采集逻辑都没重写：精确主机边界 · 版本化 URL 归一（`inventory-url-rules@1`）·
+无写入的可复核计划（带确定性哈希 + 复核签名）· fail-closed 激活闸。
+
+🔴 **值得记住的那条现场事实**：crawler 的同源判定是「剥 `www.` + 字符串前缀比较」
+（`crawler.ts:133-135`、`:509-529`），于是裸域与 `www.` 被当成同一个站 ——
+而 #930 的现场是这两个主机下面挂着**两个不同的站**（一个现站、一个旧品牌残留）。
+照那套判定凑名单，会把**别人家的页面**记成这个客户的。前缀比较还会把
+`example.com.evil.com` 判成同源。**这一层因此不复用任何现成的「canonical」**：
+`seo-patrol#canonicalUrl` 也不行 —— 它**故意**合并 bare/www 服务跨源分析，目标与台账身份相反。
+
+**顺序就是这道闸的全部意义**：校验（全过才继续）→ 抓取+富集（全成才继续）→ 一次性写入 → 精确集合对账。
+任何一步没过，后面一步**根本不会发生**：校验没过就一次抓取都不发；富集没全成就一行都不写；
+写完拿写入方返回的清单跟被接受集合逐条比对，少一条多一条都不许报「完成」。
+
+**复用而不是重造**：`crawler.ts`（发现/抓取/反爬指纹）· `classifier.ts` + `geo-detector.ts` ·
+`client_site_pages` **现有列**（不加列、不加表、无 migration）。对既有代码只两处外科手术 ——
+富集逻辑抽成 `page-enrichment.ts`（行为逐字不变）· crawler 加**可选**观察口 `onIssue`
+（不传 = 完全维持既有行为，79 条既有 crawler 测试全绿）。
+
+**这次没做、且是故意的**：**没有落库实现、没有 route / cron / UI** ——
+代码里**不存在一条能写到生产台账的路径**，架构测试强制这一点。
+真正激活另需 Product Owner 单独授权 + 一把签名密钥 + 一个 `CanonicalInventoryStore` 实现。
+
+**过程本身留了个教训**：Codex 自动复审跑了 **13 轮、29 个发现全部属实**，没有收敛趋势
+（每轮都在新写的代码里找到新的真问题）。实测两条反直觉的结论已立项写进 [#951](https://github.com/bigbigraydeng-maker/magic-engine/issues/951)：
+**不要按 P1/P2 过滤**（最危险的几个全是 P2：整站缺页无人发现 / 目录文件被当成页面记账 /
+决策拼错一个字母导致页面从所有账里蒸发；而 P1 里有 3 个只是「函数超 50 行」——
+它的严重性标记与真实后果基本无关）· **不要升级审核模型**（29 个 0 误报，它没乱报）。
+另立 [#952](https://github.com/bigbigraydeng-maker/magic-engine/issues/952)（变异脚本被打断会把**关掉的安全闸**提交进库，测试还是绿的）·
+[#955](https://github.com/bigbigraydeng-maker/magic-engine/issues/955)（发现器应按响应结构递归展开 sitemap index，别靠 `.xml` 后缀猜）。
+
+**已知残留**（写在这里免得下次当新发现）：重定向 / HTTP 状态证据不可得
+（Jina 的 200 只证明 Jina 成功）→ accepted 记录**故意不写** `status_code`，
+审计恒标 `redirectEvidence: 'unavailable'` · 逐条接受/拒绝的复核**界面**未做 ·
+`cms_connections = 0` 仍是独立的 WP09 阻塞项。
+
+---
+
+### 2026-08-13（记忆会自相矛盾：同一个动作「管用」和「不管用」同时生效，而且关不掉）
+
+Issue [#859](https://github.com/bigbigraydeng-maker/magic-engine/issues/859) 架构判断 6 ·
+PR [#949](https://github.com/bigbigraydeng-maker/magic-engine/pull/949)（合并提交 `d87742cb`）·
+migration `20260812100000_memory_supersession_v1` **已 apply 到生产**（2026-08-13，PM 授权后手工执行）。
+
+**这次解决的两件事**：
+
+1. **结论翻转后正反经验并存。** PR #862 把 `flywheel_outcomes` 改成按自然键 upsert
+   （`job.ts::upsertOutcome`，注释里就写着 "See Issue #859"），`outcome.id` 稳定了 ——
+   但同一行现在**原地 UPDATE**，verdict 能 `confirmed` ↔ `reversed` 来回翻。
+   抽取器是「见过这个 `source_id` 就跳过」，于是翻第二次之后彻底卡死：
+   正面经验写完留着，负面经验再写一条，两条一起喂给 agent；翻回来时**一条都动不了**。
+   而 `client_failed_experiments` 建表时（`20260610000001`）就漏了 `is_active`
+   （另两张记忆表都有），**想关都没地方关**。
+
+2. **一个动作被数成三次。** 一个 GSC 动作一次快照产出 clicks / impressions / avg_position
+   三行 outcome，双窗口开了再翻倍。`extractor` 按行累加、`learning-rollup` 只
+   `select('verdict')`（连 `action_id` 都没查），而 `MIN_OCCURRENCES_FOR_PREFERENCE = 3`
+   —— **一个动作自己就能凑够阈值**，凭一次事件写出「持续跑赢」的偏好。
+
+🔴 **值得单独记住的**：稳定身份不是「缓解」了第 1 条，是**让它变成唯一形态**。
+修好「每天造副本」的那一刀，同时把「同一行会被改写」变成常态 —— 上游修对了，
+下游那套按「见过就跳过」写的幂等逻辑就从对的变成错的。
+**幂等的写法要跟着上游的身份语义走，不能一次写完就当永远成立。**
+
+**改了什么**：`client_failed_experiments` 补 `is_active` / `updated_at` + 触发器（三表对齐）·
+两张派生表加 `source_action_id`（去重与互斥的单位是**动作**，不是 outcome 行；
+不改 `source_id` 含义，存量 23 条不被重新解释，该列为 NULL = legacy）·
+**跨表互斥用 DB 触发器**而不是 executor 里的 if —— 写这两张表的不止抽取器，
+还有 FDE 标注接口 `/api/clients/[id]/memory/annotate`，放 DB 层谁都绕不过去
+（#859 判断 3）· 抽取器从「追加」改成「对账」，存量行按 `outcome_id → action_id` 认领回来 ·
+`extractor` + `learning-rollup` 接上 `keepOneCasePerAction`（库里早有，
+`aggregate` / `case-library` / execution board 三处都在用，**只有记忆侧没接**）。
+
+**验证**：新增 18 条测试，`src/lib/memory` 135/135 全绿 · **变异 8/8**，每道闸单独破坏都有用例变红 ·
+**其中 M8 第一次没抓住**：原用例里动作承诺的指标正好和兜底排序第一名相同，两条路径答案一样，
+删掉 `expected_metric` 测不出来；补了「承诺 impressions 而 clicks 结论相反」的用例才锁住 ——
+这个 case 出错不是少记，是**记反** · 假 Supabase **按表建模**且**刻意不实现互斥触发器**，
+绿说明应用层单独站得住，不是靠触发器兜的 · 全量 107 红与本次零交集
+（那条可疑的红专门切回干净 main 用同样并行负载复现，数字逐字相同）。
+
+**生产实查**（按对象存在性，不认文件名）：新列 3 + 1、新触发器 3、
+`client_failed_experiments` 8/8 生效、`client_proven_patterns` 15/15 生效 ——
+`is_active` 默认 TRUE，**存量记忆一条没被误关**。
+
+**仍未启用**：`ATTRIBUTION_DUAL_WINDOW_ENABLED` 仍关着（本次只解除它的阻塞条件）·
+`memory-extractor` 仍未排班（enablement 是单独一个 PR）。
+
+⚠️ **过程教训**：#949 是按 Draft 开的，却在 Codex 复审到达**前 2 分 17 秒**被翻成 ready 并合并，
+于是「代码先上、migration 后到」，中间窗口里六条读记忆的线会静默拿到空数组、
+FDE 标注会写不进去。**改 schema 的 PR，merge 与 apply 的先后必须当成一件事安排**，
+不能各自当独立决定。
+
+---
+
+### 2026-08-12（架构守卫的扫描面：五套声明了八种后缀却没接上，实际只扫 `.ts`）
+
+Issue [#938](https://github.com/bigbigraydeng-maker/magic-engine/issues/938) ·
+PR [#944](https://github.com/bigbigraydeng-maker/magic-engine/pull/944)（合并提交 `948f0a78`）。
+
+**这次解决的一件事**：七套架构守卫里，只有 `kernel` / `action-bridge` 的 walker 真的用了
+`isScannedSource()`。另外五套（`geo-baseline` / `geo-measurement-runtime` / `geo-measurement` /
+`growth` / `page-optimization`）**都声明了那份 8 种后缀的 `SOURCE_EXTENSIONS`**（八行齐全，就在文件里），
+但声明位置在 walker **之后**、只喂给 `scriptKindFor()` 选 ScriptKind，walker 自己还是
+`entry.endsWith('.ts')` —— **连 `.tsx` 都不收**。
+
+🔴 **这条值得单独记住的原因**：它不是「忘了扩后缀」，是**扩了却没接上**。
+grep `SOURCE_EXTENSIONS` 一眼看过去像已经覆盖八种，复核的人会直接放过 ——
+清单在、看着对、实际没接线。**「看起来修好了」比没修更难发现。**
+
+**实测证据**（真放违规文件，不是推理）：`src/lib/growth/violation-probe.tsx` 里
+`import { supabaseAdmin } from '@/lib/supabase'` —— 修复后 **2 条红**（禁止导入 + 禁止符号两道都抓到）；
+walker 回退成 `.ts` 后那 2 条红**消失**，文件对守卫完全不存在。探针未入库。
+
+**改了什么**：五套的清单 + `isScannedSource` 提到 walker 之前并真正接上（必须提前 ——
+`walk()` 在模块初始化时就被调用，引用后声明的 `const` 会 TDZ 抛错）· `page-optimization` 的
+`isTest` 改成跟 walker 同源 · **`strip-comments-consistency` 那条「盯着七份 `stripComments()`
+副本别漂」的盯梢，它自己的 walker 也只收 `.ts`/`.tsx`，一并改** —— 扫描面缩小时它不会红，
+找不到的副本直接从判据里消失、盯梢照样全绿，是同一个形状。
+
+**六个文件各补两条测试**：8 种后缀的断言 + 真磁盘 fixture（`mkdtemp` 写 8 个文件断言 walker
+全收，`.md`/`.json` 不许收）。照 `kernel` 既有写法，不自创。**没抽共享 helper** —— 七份 walker
+有意各自独立（删掉任一，其余六个仍拦得住自己那半边），抽了等于给七道闸装同一个总开关。
+
+**验证**：57 个测试文件 / 1259 条全绿 · **变异 6/6**（逐个文件退回 `.ts`，每次都是新加的
+fixture 那条响，还原后复绿）· tsc 198 条基线报错与本次改动零交集。
+
+---
+
+### 2026-08-12（ME2 Backlog Cleanup Gate：GitHub 状态与 ROADMAP 对齐，三个已完成 WP 结账）
+
+Epic [#872](https://github.com/bigbigraydeng-maker/magic-engine/issues/872) ·
+PR [#936](https://github.com/bigbigraydeng-maker/magic-engine/pull/936)（合并提交 `f7a6bfc1`）。
+
+**这次解决的一件事**：ME2 的 GitHub 状态、ROADMAP 和已合并实现三者互相说不上话 —— 五个 WP
+的代码早已上线，ROADMAP 却还挂在「未完成」；三个 WP 的活干完了 issue 还开着；Epic 正文的
+勾选表落后五条、序列漏四条。新窗口读哪一份都会得到错的授权判断。
+
+**做了什么**（全程只读核验后才动，无运行时改动）：
+
+- **三个 WP 结账关闭**：#874 WP04（PR #914 / `caf8d481`）· #917 WP04A（PR #922 / `885fe6e1`）·
+  #882 K-WP02（PR #898 / `2d9e426a`）。每条附合并提交 + acceptance 逐项对账 + 余项承接；
+  相关 872 个测试实跑全绿。
+  🔴 #882 的关闭说明逐字写明「**已合并 ≠ 已启用**」—— 它映射表为空、零调用方，
+  依赖的内核四张表在生产不存在。
+- **Epic #872 正文重写**：补勾 8 条 · 补入 #917 / #930 / #932 / #911 · 删掉已作废的
+  「只授权 #877」· 新增 2026-08-12 生产实查表与「Merged is not enabled」一节。
+- **ROADMAP 对齐**（PR #936，接手另一窗口开的 PR 而非重开）：补上原版漏掉的 WP06 #878 ·
+  把 K-WP02 拆出来标「已合并、零调用方、生产未启用」· 把它的主实现指向
+  `src/lib/action-bridge/`（`MAPPING_TABLE` 在那儿，不在 Kernel）· 记清 WP06 交付的是被
+  缩小的范围（无成本闸门是照实施指令做的，两份契约文档打架时后发的赢）。
+- **#930 / #932 边界裁定**：页面台账归 #930（唯一权威），#932 只留复测节奏 + WP09 就位登记。
+- **归档 #911 / PR #912**：中继试点唯一标的 #910 已关闭，是注定空转的自动化。
+- **存量清理**：#421 / #422 / #424 关（从未实现且价值已衰减）· #423 关（核实后确认已实现）·
+  #420 / #425 / #426 **保持开启**并附核实结论（三条都还是真问题，关掉等于谎报已处理）。
+
+**顺带挖出两条会静默失效的东西，各自开了 issue 承接**：
+
+- [#939](https://github.com/bigbigraydeng-maker/magic-engine/issues/939) 🔴 Codex 复审 → Claude 自动修
+  **从来没成功过** —— `ops-codex-to-claude-fix.yml` 没给 action 传 `allowed_bots`，
+  Codex 机器人一提意见就必挂（#935 / #936 均实测复现）。PR #931「复审干净就自动合并」的硬前置。
+- [#938](https://github.com/bigbigraydeng-maker/magic-engine/issues/938) architecture 守卫的 walker
+  只收 `.ts`，而 tsconfig 是 `allowJs` —— 放个 `.js` / `.tsx` 会整文件静默不扫描。
+
+**WP05 开工 Gate**：8 条中 7 条已满足，只剩「获批的 canonical page set」（依赖 #930 的
+PR #935 先解掉那条 P1）。
+
+---
 
 ### 2026-08-12（ME2 WP04A：GEO 测量线接上真东西，并跑出 Roman 首个生产 baseline）
 

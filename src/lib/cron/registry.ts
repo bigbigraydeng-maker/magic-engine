@@ -35,6 +35,15 @@ export interface CronRegistryEntry {
 }
 
 export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
+  // 补登记：这条 cron 2026-08-05 就进了 render.yaml（commit 3c6fe88c），清单里一直没有 ——
+  // 也就是说它从上线起就不在监控范围内，而「不在监控范围」和「一切正常」在告警里长得一模一样。
+  // 是本 PR 新加的这份对账测试把它抓出来的（service 名带 -daily，jobName 不带）。
+  //
+  // 🔴 **故意不填 `addedAt`。** 它是 2026-08-05 的老任务，不是今天新建的；填今天的日期会给它
+  //    约 62 小时宽限期，而这段时间正好会把「它从上线到现在一次都没跑过」盖住 ——
+  //    补登记的全部意义就是把这件事查出来，宽限期会直接抵消掉它。
+  //    按本字段自己的约定：老任务不补 addedAt。（Codex thread：registry.ts L41）
+  { service: 'ad-readback-sweep-daily', jobName: 'ad-readback-sweep', schedule: '40 20 * * *', logsRuns: true },
   { service: 'agent-learning-rollup', jobName: 'agent-learning-rollup', schedule: '0 7 * * 1', logsRuns: true },
   { service: 'ai-tracker-weekly', jobName: 'ai-tracker-weekly', schedule: '0 1 * * 1', logsRuns: true },
   { service: 'anomaly-detector-daily', jobName: 'anomaly-detector-daily', schedule: '0 5 * * *', logsRuns: true },

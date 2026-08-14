@@ -13,7 +13,8 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { readFileSync, readdirSync, statSync } from 'fs'
+import { readFileSync, readdirSync, statSync, mkdtempSync, writeFileSync, rmSync } from 'fs'
+import { tmpdir } from 'os'
 import { join, relative } from 'path'
 
 const ROOT = process.cwd()
@@ -22,13 +23,28 @@ const SRC = join(ROOT, 'src')
 /** 本文件自己只是在讲这个函数，不定义它 —— 扫描时要排除掉，否则会把说明文字当实现。 */
 const SELF = 'src/lib/__tests__/strip-comments-consistency.test.ts'
 
+/**
+ * 🔴 **这条测试自己的扫描面也得盖住构建会编译的每一种后缀。**（Issue #938）
+ *
+ * 本文件的作用是「谁定义了 `stripComments()`，就把它一起管上」。
+ * 原来这里只收 `.ts` / `.tsx` —— 以后有人把某套架构守卫写成 `.mts` / `.cjs`
+ * （仓库 tsconfig 是 `allowJs: true`，这是合法的），**这条盯梢就看不见它**，
+ * 而症状是「一切正常」：盯梢绿着，被漏掉的那份副本随便漂。
+ *
+ * 与七套架构守卫用同一份 8 种后缀清单（依据见
+ * `src/lib/kernel/__tests__/architecture.test.ts` 里 `SOURCE_EXTENSIONS` 的注释）。
+ */
+const SOURCE_EXTENSIONS = ['.tsx', '.jsx', '.mts', '.cts', '.mjs', '.cjs', '.ts', '.js'] as const
+
+const isScannedSource = (p: string): boolean => SOURCE_EXTENSIONS.some((ext) => p.endsWith(ext))
+
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry)
     if (statSync(full).isDirectory()) {
       if (entry === 'node_modules' || entry === '.next') continue
       walk(full, out)
-    } else if (entry.endsWith('.ts') || entry.endsWith('.tsx')) {
+    } else if (isScannedSource(entry)) {
       out.push(full)
     }
   }
@@ -102,5 +118,40 @@ describe('stripComments() 七处一份口径（Issue #929）', () => {
         '未闭合的 `/*` 会一路吃到 EOF，把该文件后续全部源码挖空。\n' +
         missing.join('\n'),
     ).toEqual([])
+  })
+})
+
+/**
+ * 🔴 **这条盯梢自己的扫描面也要有测试盯着。**（Issue #938）
+ *
+ * 上面四条全都建立在「walker 真的把每一份 `stripComments()` 都找出来了」之上。
+ * 扫描面缩小时它们不会红 —— 找不到的那份副本直接从判据里消失，**盯梢照样全绿**。
+ * 这正是 #938 的形状，所以这里对 walker 的行为直接下断言。
+ */
+describe('这条盯梢自己的扫描面（Issue #938）', () => {
+  it('🔴 8 种后缀全部算源码；非源码后缀一律不算', () => {
+    for (const ext of SOURCE_EXTENSIONS) {
+      expect(isScannedSource(`anything${ext}`), ext).toBe(true)
+    }
+    for (const other of ['.json', '.md', '.css', '.sql', '.snap', '.py']) {
+      expect(isScannedSource(`anything${other}`), other).toBe(false)
+    }
+  })
+
+  it('🔴 walker 与后缀清单同源（真磁盘 fixture）', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'strip-comments-scan-surface-'))
+    try {
+      const expected: string[] = []
+      for (const ext of SOURCE_EXTENSIONS) {
+        const name = `f${ext.replace('.', '_')}${ext}`
+        writeFileSync(join(tmp, name), 'export const x = 1\n')
+        expected.push(name)
+      }
+      writeFileSync(join(tmp, 'notes.md'), 'not source')
+      const collected = walk(tmp).map((f) => f.split(/[\\/]/).pop() as string)
+      expect(collected.sort()).toEqual(expected.sort())
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
   })
 })

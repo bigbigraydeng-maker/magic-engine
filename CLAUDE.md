@@ -77,6 +77,16 @@ PM **不**决策：分支策略 · 修复走 A 还是 B · 字段命名 · 测�
 
 设计阶段审一次（出方案后、动手前），实施完再审一次。**「我自己审过了」不算 2 审。**
 
+#### 风险分级质量闸（强制）
+
+所有 Issue / PR **编码前先定 A / B / C 风险级别**，并按 [风险分级工程质量闸](./docs/ENGINEERING_QUALITY_GATES.md) 决定测试、集成、mutation 与 review 强度：
+
+- **A 级**（安全、隔离、Kernel、migration、资金、发布、不可逆副作用）：强验证；
+- **B 级**（普通业务逻辑/API/报表）：核心测试 + 少量集成 + 一次集中 review；
+- **C 级**（UI/文案/原型）：smoke/截图/build，保持快速。
+
+**禁止一刀切最高强度，也禁止高风险降级。** 只实现当前调用方需要的最小契约；完整 mutation 只在 A 级冻结 head 上跑一次。Review 轮次严格遵守 [#964](https://github.com/bigbigraydeng-maker/magic-engine/issues/964)：普通最多两轮，机器人新评论不自动授权继续修。
+
 ### 5. Codex 协作
 
 Claude Code 主导，Codex 辅助，**PM 不亲自给 Codex 派活**。
@@ -139,6 +149,7 @@ Claude Code 干：大范围重构 · 跨模块长链路 · 复杂调试 · 架�
 | [docs/ENV.md](./docs/ENV.md) | 环境变量总表（113 个，含哪些没登记） |
 | [docs/DECISIONS.md](./docs/DECISIONS.md) | 为什么是现在这样 / 哪些老决策已作废 |
 | [docs/PITFALLS.md](./docs/PITFALLS.md) | **动手前扫一眼** — 真实事故清单 |
+| [docs/ENGINEERING_QUALITY_GATES.md](./docs/ENGINEERING_QUALITY_GATES.md) | **每个 Issue / PR 开工前** — A/B/C 风险级别、对应验证强度、review 停止条件 |
 | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) · [docs/PRODUCT.md](./docs/PRODUCT.md) | 数据模型 / API 分域 · 产品愿景与商业模式 |
 | [docs/specs/](./docs/specs/) · [docs/sops/](./docs/sops/) | 单功能设计文档 · 可复用操作手册 |
 | [docs/agents/](./docs/agents/) · [docs/clients/](./docs/clients/) · [docs/history/](./docs/history/) | agent 人设（Codex 入口 `CODEX.md`）· 客户交付物 · 完成日志与历史快照 |
