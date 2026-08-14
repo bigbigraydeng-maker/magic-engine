@@ -84,7 +84,7 @@ export function createHmacSigner(material: SigningKeyMaterial): PlanSigner {
   if (secret === undefined) {
     throw new InventorySigningError(
       'active_key_not_in_ring',
-      `当前签名密钥 id「${activeKeyId}」不在密钥环里（环里有：${[...keys.keys()].join(', ')}）`,
+      `当前签名密钥 id「${activeKeyId}」不在密钥环里（环里有：${Array.from(keys.keys()).join(', ')}）`,
     )
   }
   return {

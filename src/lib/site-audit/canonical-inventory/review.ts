@@ -75,7 +75,6 @@ function assertEnvelopeTrusted(envelope: InventoryPlanEnvelope, verify: Signatur
   }
   if (verdict === 'valid') return
   const reason: Record<typeof verdict, string> = {
-    valid: '',
     digest_mismatch: '信封内容与它自带的 digest 对不上 —— 生成之后被改过',
     signature_invalid: '生成签名对不上 —— 内容与 digest 一起被重算过，而重算签名需要 K_gen',
     unknown_key: '信封声称的签名密钥 id 不在密钥环里 —— 该密钥已作废，请重新生成计划',

@@ -178,8 +178,9 @@ function checkGenerationEnvelope(envelope: InventoryPlanEnvelope, deps: Activati
     return [{ code: 'generation_signature_unverifiable', message: `验生成签名时出错，不能当成验过：${unexpectedText(err)}` }]
   }
   if (verdict === 'valid') return []
+  // 🔴 早返回已经把 'valid' 从 verdict 的类型里窄化掉了 —— 再列一项 `valid` 编不过，
+  //    而且它天然是死分支。
   const messages: Record<typeof verdict, string> = {
-    valid: '',
     digest_mismatch: '信封内容与它自带的 generationDigest 对不上 —— 生成之后被改过',
     signature_invalid: '生成签名对不上 —— 内容与 digest 一起被重算过，而重算签名需要 K_gen',
     unknown_key: '信封声称的签名密钥 id 不在密钥环里 —— 该密钥已作废，必须重新生成计划并重新复核',
@@ -227,8 +228,9 @@ function checkAttestation(review: SignedReview, deps: ActivationDeps): Activatio
     return [{ code: 'review_attestation_unverifiable', message: `验复核凭证时出错，不能当成验过：${unexpectedText(err)}` }]
   }
   if (verdict === 'valid') return []
+  // 🔴 早返回已经把 'valid' 从 verdict 的类型里窄化掉了 —— 再列一项 `valid` 编不过，
+  //    而且它天然是死分支。
   const messages: Record<typeof verdict, string> = {
-    valid: '',
     digest_mismatch: '复核提交与它自带的 reviewDigest 对不上 —— 盖章之后被改过',
     attestation_invalid: '复核凭证对不上 —— 内容与 digest 一起被重算过',
     unknown_key: '复核凭证声称的密钥 id 不在密钥环里 —— 该密钥已作废',
