@@ -110,7 +110,8 @@
 | `PUBLER_API_KEY` / `PUBLER_WORKSPACE_ID` | 多平台排期发布 | Render-web | ✅ |
 | `CMS_TOKEN_ENCRYPTION_KEY` | 客户 WordPress / CMS token 加密 | Render-web | ✅ |
 | `CLOUDFLARE_MGMT_TOKEN` | 客户站点 DNS / Pages 管理 | Render-web | ✅ |
-| `GITHUB_TOKEN` / `GITHUB_WEBHOOK_SECRET` | GitHub CMS 执行闭环（P12.H） | Render-web | ✅ |
+| `GITHUB_TOKEN` | **ME 自己仓库**（`bigbigraydeng-maker/magic-engine`）的只读 PAT。消费方：`/api/cron/product-map-sync`（ME2 Product Map 每日对账，**缺了就 fail-closed**）· `/api/admin/product-map/refresh` · `/api/cms/github/webhook` 的 product-map 分支 · `/api/tools/github-commits`（可选，匿名也能跑）。⚠️ **跟 P12.H「GitHub CMS 执行闭环」无关** —— 那条线（blog-publisher / seo-fix / page-upgrade）用的是每个客户自己的 PAT，存 `cms_connections` 表、用 `CMS_TOKEN_ENCRYPTION_KEY` 加密，不读这个变量 | Render-web | ❌ 🔴 **生产（crazycontent）从未配置**（2026-08-15 实测）；`.env.example` 有名字但 `render.yaml` 没有。此前唯一消费方 `/api/tools/github-commits` 不带 token 也能跑，所以一直没暴露；product-map 同步上线后每天 fail-closed，**要开通同步必须先配它** |
+| `GITHUB_WEBHOOK_SECRET` | 客户仓 GitHub webhook 验签（`/api/cms/github/webhook`：blog PR 合并 → 自动标 published + 请求收录，P14.C.6；同一个 secret 也给 product-map webhook 复用） | Render-web | ✅ 生产已配（2026-08-15 实测：客户仓 blog webhook 验签在工作） |
 | `AIRTABLE_API_KEY` | Airtable —— **正在退役**，代码仅剩 3 处引用 | Render-web | ❌ |
 | `FACTORY_OPS_BASE_ID` / `FACTORY_REVIEW_TABLE_ID` / `WINNER_INTAKE_TABLE_ID` | Airtable 表 ID（Factory 审核，同上退役中） | Render-web | ❌ |
 | `OZTOP_WP_USERNAME` / `OZTOP_WP_APP_PASSWORD` | Oztop WordPress 直连 | Render-web | ⚠️ render 有，代码走 `cms_connections` 表 |
