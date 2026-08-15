@@ -1,117 +1,96 @@
 import { describe, it, expect } from 'vitest'
-import { deriveMaturityCeiling, isMaturityAbove, MATURITY_ORDER } from '../maturity'
-import type { MaturityEvidenceFlags } from '../types'
+import { ALL_UNKNOWN_SIGNALS, MATURITY_ORDER, deriveMaturity, isMaturityAbove } from '../maturity'
+import type { MaturitySignals } from '../types'
 
-const NO_EVIDENCE: MaturityEvidenceFlags = {
-  hasContractFrozen: false,
-  hasMergedToMain: false,
-  hasTargetedTestsPassing: false,
-  hasRealIntegrationEvidence: false,
-  hasProductionRunEvidence: false,
-  hasRepeatedOutcomeEvidence: false,
+const ALL_YES: MaturitySignals = {
+  contractFrozen: 'yes',
+  mergedToMain: 'yes',
+  targetedTestsPassing: 'yes',
+  realIntegration: 'yes',
+  productionRun: 'yes',
+  repeatedAttributableOutcome: 'yes',
 }
 
-describe('deriveMaturityCeiling', () => {
-  it('没有任何证据 → M0', () => {
-    expect(deriveMaturityCeiling(NO_EVIDENCE)).toBe('M0')
+const signals = (overrides: Partial<MaturitySignals> = {}): MaturitySignals => ({ ...ALL_YES, ...overrides })
+
+describe('deriveMaturity — 阶梯', () => {
+  it('全 yes 到 M5，且 limitedBy 为 null', () => {
+    expect(deriveMaturity(ALL_YES)).toEqual({ level: 'M5', limitedBy: null, blockingSignal: null })
   })
 
-  it('只冻结了契约 → M1', () => {
-    expect(deriveMaturityCeiling({ ...NO_EVIDENCE, hasContractFrozen: true })).toBe('M1')
+  it('契约没冻结就停在 M0', () => {
+    expect(deriveMaturity(signals({ contractFrozen: 'no' }))).toEqual({
+      level: 'M0',
+      limitedBy: 'confirmed_absent',
+      blockingSignal: 'contractFrozen',
+    })
   })
 
-  it('只有 PR 未合并（hasMergedToMain=false）—— 最高 M1（Issue #974 证据上限）', () => {
-    const evidence: MaturityEvidenceFlags = {
-      ...NO_EVIDENCE,
-      hasContractFrozen: true,
-      hasMergedToMain: false,
-      hasTargetedTestsPassing: true,
-      hasRealIntegrationEvidence: true,
-      hasProductionRunEvidence: true,
-      hasRepeatedOutcomeEvidence: true,
-    }
-    expect(deriveMaturityCeiling(evidence)).toBe('M1')
+  it('M2 的两道信号缺一道就停在 M1', () => {
+    expect(deriveMaturity(signals({ targetedTestsPassing: 'no' })).level).toBe('M1')
+    expect(deriveMaturity(signals({ mergedToMain: 'no' })).level).toBe('M1')
   })
 
-  it('合并到 main 但测试未过 —— 卡在 M1，不给 M2', () => {
-    const evidence: MaturityEvidenceFlags = {
-      ...NO_EVIDENCE,
-      hasContractFrozen: true,
-      hasMergedToMain: true,
-      hasTargetedTestsPassing: false,
-    }
-    expect(deriveMaturityCeiling(evidence)).toBe('M1')
+  it('没有真实集成证据就不得 M3', () => {
+    const result = deriveMaturity(signals({ realIntegration: 'no' }))
+    expect(result).toEqual({ level: 'M2', limitedBy: 'confirmed_absent', blockingSignal: 'realIntegration' })
   })
 
-  it('合并 main 且测试通过，无集成证据 —— 最高 M2', () => {
-    const evidence: MaturityEvidenceFlags = {
-      ...NO_EVIDENCE,
-      hasContractFrozen: true,
-      hasMergedToMain: true,
-      hasTargetedTestsPassing: true,
-      hasProductionRunEvidence: true,
-      hasRepeatedOutcomeEvidence: true,
-    }
-    expect(deriveMaturityCeiling(evidence)).toBe('M2')
+  it('没有生产运行证据就不得 M4', () => {
+    expect(deriveMaturity(signals({ productionRun: 'no' })).level).toBe('M3')
   })
 
-  it('有真实集成证据但无生产运行证据 —— 不得 M4，停在 M3', () => {
-    const evidence: MaturityEvidenceFlags = {
-      ...NO_EVIDENCE,
-      hasContractFrozen: true,
-      hasMergedToMain: true,
-      hasTargetedTestsPassing: true,
-      hasRealIntegrationEvidence: true,
-      hasRepeatedOutcomeEvidence: true,
-    }
-    expect(deriveMaturityCeiling(evidence)).toBe('M3')
+  it('没有重复可归因 outcome 就不得 M5', () => {
+    const result = deriveMaturity(signals({ repeatedAttributableOutcome: 'no' }))
+    expect(result).toEqual({ level: 'M4', limitedBy: 'confirmed_absent', blockingSignal: 'repeatedAttributableOutcome' })
   })
 
-  it('有生产运行证据但无重复 outcome 证据 —— 不得 M5，停在 M4', () => {
-    const evidence: MaturityEvidenceFlags = {
-      ...NO_EVIDENCE,
-      hasContractFrozen: true,
-      hasMergedToMain: true,
-      hasTargetedTestsPassing: true,
-      hasRealIntegrationEvidence: true,
-      hasProductionRunEvidence: true,
-    }
-    expect(deriveMaturityCeiling(evidence)).toBe('M4')
-  })
-
-  it('全部证据齐全 → M5', () => {
-    const evidence: MaturityEvidenceFlags = {
-      hasContractFrozen: true,
-      hasMergedToMain: true,
-      hasTargetedTestsPassing: true,
-      hasRealIntegrationEvidence: true,
-      hasProductionRunEvidence: true,
-      hasRepeatedOutcomeEvidence: true,
-    }
-    expect(deriveMaturityCeiling(evidence)).toBe('M5')
-  })
-
-  it('高级证据为 true 但低级证据缺失时不能「跳级」—— 只认连续阶梯', () => {
-    // hasProductionRunEvidence=true 但 hasRealIntegrationEvidence=false：不该因为 M4 证据在场就跳过 M3。
-    const evidence: MaturityEvidenceFlags = {
-      ...NO_EVIDENCE,
-      hasContractFrozen: true,
-      hasMergedToMain: true,
-      hasTargetedTestsPassing: true,
-      hasProductionRunEvidence: true,
-    }
-    expect(deriveMaturityCeiling(evidence)).toBe('M2')
+  it('低级证据不成立时，不看更高级信号（不许跳级）', () => {
+    const result = deriveMaturity({
+      ...ALL_UNKNOWN_SIGNALS,
+      contractFrozen: 'no',
+      repeatedAttributableOutcome: 'yes',
+    })
+    expect(result.level).toBe('M0')
   })
 })
 
-describe('isMaturityAbove', () => {
-  it('按阶梯顺序比较，不是字符串比较', () => {
-    expect(isMaturityAbove('M2', 'M1')).toBe(true)
-    expect(isMaturityAbove('M1', 'M2')).toBe(false)
-    expect(isMaturityAbove('M0', 'M0')).toBe(false)
+describe('deriveMaturity — unknown 与 no 必须分开', () => {
+  it('全 unknown 时停在 M0，但标成 unknown 而不是 confirmed_absent', () => {
+    expect(deriveMaturity(ALL_UNKNOWN_SIGNALS)).toEqual({
+      level: 'M0',
+      limitedBy: 'unknown',
+      blockingSignal: 'contractFrozen',
+    })
   })
 
-  it('MATURITY_ORDER 恰好是六级，顺序为 M0..M5', () => {
+  it('同一 level 下，「没查到」与「确定没有」结论不同', () => {
+    const unknownAt = deriveMaturity(signals({ productionRun: 'unknown' }))
+    const absentAt = deriveMaturity(signals({ productionRun: 'no' }))
+    expect(unknownAt.level).toBe(absentAt.level)
+    expect(unknownAt.limitedBy).toBe('unknown')
+    expect(absentAt.limitedBy).toBe('confirmed_absent')
+  })
+
+  it('同一台阶里 no 优先于 unknown —— 确定不存在是更强的结论', () => {
+    const result = deriveMaturity(signals({ mergedToMain: 'unknown', targetedTestsPassing: 'no' }))
+    expect(result).toEqual({ level: 'M1', limitedBy: 'confirmed_absent', blockingSignal: 'targetedTestsPassing' })
+  })
+
+  it('unknown 卡住时报告第一道没查清的信号', () => {
+    const result = deriveMaturity(signals({ mergedToMain: 'unknown', targetedTestsPassing: 'unknown' }))
+    expect(result.blockingSignal).toBe('mergedToMain')
+  })
+})
+
+describe('MATURITY_ORDER / isMaturityAbove', () => {
+  it('顺序是 M0…M5', () => {
     expect(MATURITY_ORDER).toEqual(['M0', 'M1', 'M2', 'M3', 'M4', 'M5'])
+  })
+
+  it('按阶梯比较而不是字符串比较', () => {
+    expect(isMaturityAbove('M5', 'M2')).toBe(true)
+    expect(isMaturityAbove('M2', 'M5')).toBe(false)
+    expect(isMaturityAbove('M3', 'M3')).toBe(false)
   })
 })

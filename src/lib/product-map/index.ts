@@ -6,21 +6,44 @@
  */
 
 export type {
+  ArchitecturalRole,
   BusinessLane,
+  ComponentAssessment,
   ComponentBlocker,
-  ComponentType,
   DapeStage,
   EvidenceRecord,
+  EvidenceStatus,
   Maturity,
-  MaturityEvidenceFlags,
+  MaturityAssessment,
+  MaturitySignals,
+  OperationalCheck,
+  OperationalSnapshot,
   RegistryComponent,
   RiskLevel,
+  SupportingArtifact,
 } from './types'
 
-export { MATURITY_ORDER, deriveMaturityCeiling, isMaturityAbove } from './maturity'
+export { ALL_UNKNOWN_SIGNALS, MATURITY_ORDER, deriveMaturity, isMaturityAbove } from './maturity'
+
+export type { EvidenceProviders } from './assessment'
+export {
+  UNVERIFIED,
+  UNVERIFIED_SNAPSHOT,
+  assessComponent,
+  buildOperationalSnapshot,
+  checked,
+  deriveMaturitySignals,
+} from './assessment'
 
 export type { ProductMapValidationResult } from './validators'
-export { validateEvidenceRecord, validateMaturityEvidenceFlags, validateRegistryComponent } from './validators'
+export {
+  validateEvidenceRecord,
+  validateMaturitySignals,
+  validateOperationalCheck,
+  validateOperationalSnapshot,
+  validateRegistryComponent,
+  validateSupportingArtifact,
+} from './validators'
 
 export type { GraphValidationResult } from './graph'
 export {

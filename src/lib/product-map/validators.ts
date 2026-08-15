@@ -10,16 +10,18 @@
  */
 
 import type {
+  ArchitecturalRole,
   BusinessLane,
-  ComponentType,
   DapeStage,
   EvidenceRecord,
-  Maturity,
-  MaturityEvidenceFlags,
+  EvidenceStatus,
+  MaturitySignals,
+  OperationalCheck,
+  OperationalSnapshot,
   RegistryComponent,
   RiskLevel,
+  SupportingArtifact,
 } from './types'
-import { deriveMaturityCeiling } from './maturity'
 
 export type ProductMapValidationResult = { readonly ok: true } | { readonly ok: false; readonly reason: string }
 
@@ -41,8 +43,19 @@ function isParseableTimestamp(value: unknown): boolean {
 const inSet = <T extends string>(set: Readonly<Record<T, true>>, v: unknown): v is T =>
   typeof v === 'string' && Object.prototype.hasOwnProperty.call(set, v)
 
-const COMPONENT_TYPES: Readonly<Record<ComponentType, true>> = {
-  module: true, capability: true, adapter: true, agent: true, playbook: true, platform: true, registry: true,
+/** WP00 §3 冻结七层。**没有第八个** —— 加值必须先回到 #872 改冻结契约。 */
+const ARCHITECTURAL_ROLES: Readonly<Record<ArchitecturalRole, true>> = {
+  agent: true,
+  domain_module: true,
+  measurement: true,
+  shared_capability: true,
+  kernel: true,
+  attribution_flywheel: true,
+  operating_brief: true,
+}
+const EVIDENCE_STATUSES: Readonly<Record<EvidenceStatus, true>> = { yes: true, no: true, unknown: true }
+const ARTIFACT_KINDS: Readonly<Record<SupportingArtifact['kind'], true>> = {
+  provider_adapter: true, orchestration_view: true, tooling: true,
 }
 const BUSINESS_LANES: Readonly<Record<BusinessLane, true>> = {
   shared: true, geo: true, seo: true, social: true, ads: true,
@@ -50,9 +63,6 @@ const BUSINESS_LANES: Readonly<Record<BusinessLane, true>> = {
 const DAPE_STAGES: Readonly<Record<DapeStage, true>> = {
   discovery: true, analysis: true, prescription: true, authorization: true,
   execution: true, verification: true, outcome: true, learning: true,
-}
-const MATURITIES: Readonly<Record<Maturity, true>> = {
-  M0: true, M1: true, M2: true, M3: true, M4: true, M5: true,
 }
 const RISK_LEVELS: Readonly<Record<RiskLevel, true>> = { A: true, B: true, C: true }
 const EVIDENCE_KINDS: Readonly<Record<EvidenceRecord['kind'], true>> = {
@@ -96,17 +106,68 @@ export function validateEvidenceRecord(value: unknown): ProductMapValidationResu
   return OK
 }
 
-// ── MaturityEvidenceFlags ────────────────────────────────────────────────────
+// ── 三态与四问 ───────────────────────────────────────────────────────────────
 
-const MATURITY_FLAG_KEYS: readonly (keyof MaturityEvidenceFlags)[] = [
-  'hasContractFrozen', 'hasMergedToMain', 'hasTargetedTestsPassing',
-  'hasRealIntegrationEvidence', 'hasProductionRunEvidence', 'hasRepeatedOutcomeEvidence',
+const MATURITY_SIGNAL_KEYS: readonly (keyof MaturitySignals)[] = [
+  'contractFrozen', 'mergedToMain', 'targetedTestsPassing',
+  'realIntegration', 'productionRun', 'repeatedAttributableOutcome',
 ]
 
-export function validateMaturityEvidenceFlags(value: unknown): ProductMapValidationResult {
-  if (!isPlainObject(value)) return fail('maturityEvidence 必须是一个对象')
-  for (const key of MATURITY_FLAG_KEYS) {
-    if (typeof value[key] !== 'boolean') return fail(`maturityEvidence.${key} 必须是布尔值`)
+/**
+ * 六道成熟度信号必须是三态字符串，**不能是 boolean**。
+ * 传 boolean 一律拒绝 —— 那正是丢掉「没查到 / 确定没有」区别的写法。
+ */
+export function validateMaturitySignals(value: unknown): ProductMapValidationResult {
+  if (!isPlainObject(value)) return fail('maturitySignals 必须是一个对象')
+  for (const key of MATURITY_SIGNAL_KEYS) {
+    if (typeof value[key] === 'boolean') {
+      return fail(`maturitySignals.${key} 不能是布尔值 —— 必须是 yes / no / unknown 三态`)
+    }
+    if (!inSet(EVIDENCE_STATUSES, value[key])) {
+      return fail(`maturitySignals.${key} 必须是 yes / no / unknown 之一`)
+    }
+  }
+  return OK
+}
+
+/**
+ * 一条「四问」答案。
+ *
+ * 🔴 `status !== 'unknown'` 时 `checkedAt` 必填：给得出确定答案，就必须交代
+ *    是什么时候查的。否则读的人无法判断它有没有过期。
+ */
+export function validateOperationalCheck(value: unknown): ProductMapValidationResult {
+  if (!isPlainObject(value)) return fail('OperationalCheck 必须是一个对象')
+  if (typeof value.status === 'boolean') {
+    return fail('OperationalCheck.status 不能是布尔值 —— 必须是 yes / no / unknown 三态')
+  }
+  if (!inSet(EVIDENCE_STATUSES, value.status)) return fail('OperationalCheck.status 必须是 yes / no / unknown 之一')
+  if (!isNonEmptyString(value.evidenceSource)) {
+    return fail('OperationalCheck.evidenceSource 不能为空 —— 必须说明这个答案是从哪查到的')
+  }
+  if (value.status === 'unknown') {
+    if (value.checkedAt !== null && !isParseableTimestamp(value.checkedAt)) {
+      return fail('OperationalCheck.checkedAt 必须是 null 或可解析的时间戳')
+    }
+  } else if (!isParseableTimestamp(value.checkedAt)) {
+    return fail('OperationalCheck.checkedAt 必填 —— 给出确定答案就必须交代核对时间')
+  }
+  if (value.note !== undefined && !isNonEmptyString(value.note)) {
+    return fail('OperationalCheck.note 给了就不能是空字符串')
+  }
+  return OK
+}
+
+const SNAPSHOT_KEYS: readonly (keyof OperationalSnapshot)[] = [
+  'codeInMain', 'productionPrerequisitesExist', 'realCallerWired', 'productionRunObserved',
+]
+
+/** 四问快照：四问都必须显式存在，任何一问缺失都不许用「其它三问」代偿。 */
+export function validateOperationalSnapshot(value: unknown): ProductMapValidationResult {
+  if (!isPlainObject(value)) return fail('OperationalSnapshot 必须是一个对象')
+  for (const key of SNAPSHOT_KEYS) {
+    const result = validateOperationalCheck(value[key])
+    if (!result.ok) return fail(`${key}：${result.reason}`)
   }
   return OK
 }
@@ -124,23 +185,56 @@ function validateBlockerList(value: unknown): ProductMapValidationResult {
   return OK
 }
 
-// ── 分类规则（Issue #974「分类模型」一节的可执行版本）─────────────────────────
+// ── SupportingArtifact ───────────────────────────────────────────────────────
 
 /**
- * 类型专属规则：
- *  - `adapter` 必须声明至少一项 `requiredPermissions` —— 它连接外部系统，
- *    不可能不需要任何权限（Issue #974：Adapter 是「连接外部系统或 provider 的技术适配层」）。
- *  - `platform` / `registry` 的 `businessLanes` 必须严格等于 `['shared']` ——
- *    两者都是「跨业务线共享的基础设施」，不允许挂在单一业务线下。
+ * 附属产物 —— adapter 就活在这里，不是顶层角色。
+ * `provider_adapter` 必须声明权限：连接外部系统不可能零权限。
  */
-function validateTypeSpecificRules(component: RegistryComponent): ProductMapValidationResult {
-  if (component.type === 'adapter' && component.requiredPermissions.length === 0) {
-    return fail('type=adapter 必须声明至少一项 requiredPermissions —— 适配层连接外部系统，不可能零权限')
+export function validateSupportingArtifact(value: unknown): ProductMapValidationResult {
+  if (!isPlainObject(value)) return fail('SupportingArtifact 必须是一个对象')
+  if (!inSet(ARTIFACT_KINDS, value.kind)) {
+    return fail('SupportingArtifact.kind 必须是 provider_adapter / orchestration_view / tooling 之一')
   }
-  if (component.type === 'platform' || component.type === 'registry') {
+  if (!isNonEmptyString(value.name)) return fail('SupportingArtifact.name 不能为空')
+  if (!isNonEmptyString(value.description)) return fail('SupportingArtifact.description 不能为空')
+
+  const paths = validateArray(value.sourcePaths, 'SupportingArtifact.sourcePaths', {
+    minLength: 1, itemCheck: isRepoRelativePath,
+  })
+  if (!paths.ok) return paths
+
+  const permissions = validateArray(value.requiredPermissions, 'SupportingArtifact.requiredPermissions')
+  if (!permissions.ok) return permissions
+  if (value.kind === 'provider_adapter' && (value.requiredPermissions as unknown[]).length === 0) {
+    return fail('provider_adapter 必须声明至少一项 requiredPermissions —— 连接外部系统不可能零权限')
+  }
+
+  const evidenceList = value.evidence
+  if (!Array.isArray(evidenceList) || evidenceList.length === 0) {
+    return fail('SupportingArtifact.evidence 必须至少包含一条记录')
+  }
+  for (let i = 0; i < evidenceList.length; i += 1) {
+    const result = validateEvidenceRecord(evidenceList[i])
+    if (!result.ok) return fail(`SupportingArtifact.evidence[${i}]：${result.reason}`)
+  }
+  return OK
+}
+
+// ── 角色专属规则 ─────────────────────────────────────────────────────────────
+
+/**
+ * 角色专属规则。只写**由 WP00 直接推得**的那几条，不自创约束：
+ *  - `kernel` 是治权基础设施（§3.5），必须 `['shared']`，不许挂在单一业务线下；
+ *  - `operating_brief` 是全局注意力投影（§3.7），同理必须 `['shared']`。
+ */
+function validateRoleSpecificRules(component: RegistryComponent): ProductMapValidationResult {
+  if (component.architecturalRole === 'kernel' || component.architecturalRole === 'operating_brief') {
     const lanes = component.businessLanes
     if (lanes.length !== 1 || lanes[0] !== 'shared') {
-      return fail(`type=${component.type} 的 businessLanes 必须严格等于 ['shared'] —— 它是跨业务线共享基础设施`)
+      return fail(
+        `architecturalRole=${component.architecturalRole} 的 businessLanes 必须严格等于 ['shared'] —— 它是跨业务线基础设施`,
+      )
     }
   }
   return OK
@@ -151,7 +245,7 @@ function validateTypeSpecificRules(component: RegistryComponent): ProductMapVali
 const isPositiveInteger = (v: unknown): boolean => typeof v === 'number' && Number.isInteger(v) && v > 0
 const isComponentIdRef = (v: unknown): boolean => isNonEmptyString(v) && COMPONENT_ID_PATTERN.test(v)
 
-/** 校验所有数组型字段（车道 / DAPE 段 / owner / 依赖 / 消费者 / 路径 / issue&PR 编号 / 权限）。 */
+/** 校验所有数组型字段。 */
 function validateComponentArrays(value: Record<string, unknown>): ProductMapValidationResult {
   const lanes = validateArray(value.businessLanes, 'businessLanes', { minLength: 1, itemCheck: (v) => inSet(BUSINESS_LANES, v) })
   if (!lanes.ok) return lanes
@@ -171,6 +265,9 @@ function validateComponentArrays(value: Record<string, unknown>): ProductMapVali
   const sourcePaths = validateArray(value.sourcePaths, 'sourcePaths', { minLength: 1, itemCheck: isRepoRelativePath })
   if (!sourcePaths.ok) return sourcePaths
 
+  const contractSpecPaths = validateArray(value.contractSpecPaths, 'contractSpecPaths', { itemCheck: isRepoRelativePath })
+  if (!contractSpecPaths.ok) return contractSpecPaths
+
   const issueNumbers = validateArray(value.issueNumbers, 'issueNumbers', { itemCheck: isPositiveInteger })
   if (!issueNumbers.ok) return issueNumbers
 
@@ -180,8 +277,8 @@ function validateComponentArrays(value: Record<string, unknown>): ProductMapVali
   return validateArray(value.requiredPermissions, 'requiredPermissions')
 }
 
-/** 校验 evidence 列表，并强制 maturity 恰好等于 maturityEvidence 推导出的天花板。 */
-function validateEvidenceAndMaturity(value: Record<string, unknown>): ProductMapValidationResult {
+/** evidence 列表 + 附属产物列表。 */
+function validateEvidenceAndArtifacts(value: Record<string, unknown>): ProductMapValidationResult {
   const evidenceList = value.evidence
   if (!Array.isArray(evidenceList) || evidenceList.length === 0) {
     return fail('evidence 必须至少包含一条记录 —— 没有证据支撑的组件不许存在于 registry')
@@ -191,28 +288,45 @@ function validateEvidenceAndMaturity(value: Record<string, unknown>): ProductMap
     if (!result.ok) return fail(`evidence[${i}]：${result.reason}`)
   }
 
-  const maturityEvidence = validateMaturityEvidenceFlags(value.maturityEvidence)
-  if (!maturityEvidence.ok) return maturityEvidence
-
-  if (!inSet(MATURITIES, value.maturity)) return fail('maturity 必须是 M0–M5 之一')
-
-  const ceiling = deriveMaturityCeiling(value.maturityEvidence as MaturityEvidenceFlags)
-  if (value.maturity !== ceiling) {
-    return fail(
-      `maturity 必须等于由 maturityEvidence 推导出的天花板 —— 声明的是 ${String(value.maturity)}，` +
-        `证据只能撑到 ${ceiling}。成熟度必须由证据推导，不能由人工随意改成完成`,
-    )
+  const artifacts = value.supportingArtifacts
+  if (!Array.isArray(artifacts)) {
+    return fail('supportingArtifacts 必须显式给出（可以是空数组，但不能省略）')
+  }
+  for (let i = 0; i < artifacts.length; i += 1) {
+    const result = validateSupportingArtifact(artifacts[i])
+    if (!result.ok) return fail(`supportingArtifacts[${i}]：${result.reason}`)
   }
   return OK
 }
 
+/**
+ * 校验一条静态登记。
+ *
+ * 🔴 **拒绝任何动态事实字段**：`maturity` / `maturitySignals` / `maturityEvidence` /
+ *    四问快照都不许出现在 registry 条目里。它们是推导结果，写进种子就会过期，
+ *    而过期的「已完成」比没有更危险。
+ */
 export function validateRegistryComponent(value: unknown): ProductMapValidationResult {
   if (!isPlainObject(value)) return fail('RegistryComponent 必须是一个对象')
+
+  for (const forbidden of ['maturity', 'maturityEvidence', 'maturitySignals', 'operational'] as const) {
+    if (forbidden in value) {
+      return fail(
+        `registry 条目不许带 ${forbidden} —— 动态事实由 assessment.ts 从证据源推导，` +
+          '手填会在 Git / 生产变化后立刻过期',
+      )
+    }
+  }
 
   if (!isNonEmptyString(value.componentId) || !COMPONENT_ID_PATTERN.test(value.componentId)) {
     return fail('componentId 必须是小写 kebab-case（例如 me2-execution-kernel）')
   }
-  if (!inSet(COMPONENT_TYPES, value.type)) return fail('type 必须是七种已登记类型之一')
+  if (!inSet(ARCHITECTURAL_ROLES, value.architecturalRole)) {
+    return fail(
+      'architecturalRole 必须是 WP00 §3 冻结七层之一（agent / domain_module / measurement / ' +
+        'shared_capability / kernel / attribution_flywheel / operating_brief）—— 没有第八个',
+    )
+  }
   if (!isNonEmptyString(value.name)) return fail('name 不能为空')
   if (!isNonEmptyString(value.description)) return fail('description 不能为空')
   if (!isNonEmptyString(value.version)) return fail('version 不能为空')
@@ -222,11 +336,11 @@ export function validateRegistryComponent(value: unknown): ProductMapValidationR
 
   if (!inSet(RISK_LEVELS, value.riskLevel)) return fail('riskLevel 必须是 A / B / C 之一')
 
-  const evidenceAndMaturity = validateEvidenceAndMaturity(value)
-  if (!evidenceAndMaturity.ok) return evidenceAndMaturity
+  const evidenceAndArtifacts = validateEvidenceAndArtifacts(value)
+  if (!evidenceAndArtifacts.ok) return evidenceAndArtifacts
 
   const blockers = validateBlockerList(value.blockers)
   if (!blockers.ok) return blockers
 
-  return validateTypeSpecificRules(value as unknown as RegistryComponent)
+  return validateRoleSpecificRules(value as unknown as RegistryComponent)
 }

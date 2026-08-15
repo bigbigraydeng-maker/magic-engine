@@ -46,7 +46,13 @@ function routeFetch(handlers: Record<string, unknown>) {
   })
 }
 
-beforeEach(() => mockFetch.mockReset())
+// 🔴 必须用花括号包住：`mockReset()` 返回 mock 本身，而 vitest 会把 hook 的
+//    函数返回值当成清理函数、在每个测试后**零参数调用**它 —— 那等于调了一次
+//    `fetch()`，mock 实现里 `url.includes(...)` 直接炸。
+//    （上一版写的是 `() => mockFetch.mockReset()`，9 个用例全挂在这上面。）
+beforeEach(() => {
+  mockFetch.mockReset()
+})
 
 describe('getMainSha', () => {
   it('从 branches/main 响应里取 commit.sha', async () => {

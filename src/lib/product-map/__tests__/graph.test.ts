@@ -10,7 +10,7 @@ import type { RegistryComponent } from '../types'
 
 function component(overrides: Partial<RegistryComponent> & { componentId: string }): RegistryComponent {
   return {
-    type: 'capability',
+    architecturalRole: 'shared_capability',
     name: overrides.componentId,
     description: 'test',
     businessLanes: ['shared'],
@@ -25,15 +25,8 @@ function component(overrides: Partial<RegistryComponent> & { componentId: string
     riskLevel: 'B',
     requiredPermissions: [],
     evidence: [{ kind: 'source_path', description: 'x', link: 'x' }],
-    maturityEvidence: {
-      hasContractFrozen: true,
-      hasMergedToMain: false,
-      hasTargetedTestsPassing: false,
-      hasRealIntegrationEvidence: false,
-      hasProductionRunEvidence: false,
-      hasRepeatedOutcomeEvidence: false,
-    },
-    maturity: 'M1',
+    contractSpecPaths: [],
+    supportingArtifacts: [],
     blockers: [],
     ...overrides,
   }
