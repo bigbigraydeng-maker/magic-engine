@@ -65,6 +65,24 @@ const sourceOf = (file: string): string => stripComments(readFileSync(join(ROOT,
 const ALL_INVENTORY_SOURCES = walk(DIR).map(rel)
 
 /**
+ * 全仓源码清单与「本目录之外」那部分的剥注释内容 —— **模块级只算一次**。
+ *
+ * 🔴 上一版三条用例各自独立地全仓 `walk` 一遍，其中深 import 那条还要对约 3000 个文件
+ *    逐个读全文 + 跑两次正则。实测单次 2485–3546ms，而 vitest 默认单测超时是 5000ms ——
+ *    满负载下会顶穿，于是这条判据时红时绿。
+ *    **一条时红时绿的判据比没有判据更坏**：它训练人「再跑一次就绿了」，
+ *    等真有人往某个 `.tsx` 里塞一条深 import，第一反应也会是重跑。
+ *
+ * 放模块级而不是懒加载：collection 阶段不受 5000ms 单测超时约束，
+ * 成本落在那里就不会再变成偶发失败。
+ */
+const REPO_SOURCE_FILES: readonly string[] = walk(join(ROOT, 'src')).map(rel)
+
+const OUTSIDE_INVENTORY_SOURCES: readonly { readonly file: string; readonly src: string }[] = REPO_SOURCE_FILES
+  .filter((f) => !f.startsWith('src/lib/site-audit/canonical-inventory/'))
+  .map((file) => ({ file, src: sourceOf(file) }))
+
+/**
  * 客户专属字样。
  *
  * 🔴 只查**生产文件**。测试里故意留了 #930 授权点名的那个主机对（裸域 vs www），
@@ -141,12 +159,8 @@ describe('🔴 #960 承重墙：不存在签名 oracle', () => {
     // 与 `../canonical-inventory/envelope` 两种写法都盖得住，静态 import、
     // `require()`、动态 `import()` 也一样。
     const PRIMITIVES = ['envelope', 'attestation', 'plan', 'decisions', 'shapes', 'signing', 'canonical-json', 'crawl-stage']
-    const outside = walk(join(ROOT, 'src'))
-      .map(rel)
-      .filter((f) => !f.startsWith('src/lib/site-audit/canonical-inventory/'))
     const offenders: string[] = []
-    for (const file of outside) {
-      const src = sourceOf(file)
+    for (const { file, src } of OUTSIDE_INVENTORY_SOURCES) {
       for (const primitive of PRIMITIVES) {
         if (new RegExp(`canonical-inventory/${primitive}(['"/]|$)`, 'm').test(src)) {
           offenders.push(`${file} → canonical-inventory/${primitive}`)
@@ -160,7 +174,7 @@ describe('🔴 #960 承重墙：不存在签名 oracle', () => {
   })
 
   it('🔴 判据本身没有空跑：全仓扫描扫到了东西，而且确实包含 .tsx', () => {
-    const scanned = walk(join(ROOT, 'src')).map(rel)
+    const scanned = REPO_SOURCE_FILES
     expect(scanned.length, '扫描结果为空 = 上面那条守卫在空跑').toBeGreaterThan(500)
     // 🔴 这一条就是「把 .tsx 从扩展名清单里删掉必须变红」的判据本身。
     expect(scanned.filter((f) => f.endsWith('.tsx')).length, '一个 .tsx 都没扫到 —— 扩展名清单漏了它').toBeGreaterThan(0)
@@ -172,6 +186,8 @@ describe('🔴 #960 承重墙：不存在签名 oracle', () => {
 
   it('🔴 扫描器确实按扩展名工作（只留 .tsx 时必须只返回 .tsx）', () => {
     // 独立盯住扫描器本身：清单是对的但扫描器不用它，是「声明了≠接上了」的经典形状。
+    // 🔴 这一条**故意不复用**上面那份缓存 —— 复用就等于拿扫描器的输出去验证扫描器自己。
+    //    它只做目录遍历、不读文件内容，成本是毫秒级，不构成超时风险。
     const onlyTsx = walk(join(ROOT, 'src'), [], ['.tsx']).map(rel)
     expect(onlyTsx.length).toBeGreaterThan(0)
     expect(onlyTsx.every((f) => f.endsWith('.tsx'))).toBe(true)
