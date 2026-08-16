@@ -24,6 +24,8 @@ interface Row {
   contactId: string
   name: string
   doNotContact?: boolean
+  phone?: string | null
+  phoneUnusable?: boolean
 }
 
 const contact = (id: string, name: string, over: Partial<Row> = {}) => ({
@@ -117,5 +119,34 @@ describe('被误判成「别再联系」的人，这一页要给得出取消入�
 
     await waitFor(() => expect(screen.getByText('往来记录')).toBeTruthy())
     expect(screen.queryByText(/判错了？点这里放回名单/)).toBeNull()
+  })
+})
+
+/**
+ * 🔴 缺口①（PO 授权 corrective，2026-08-17）：坏号 + 别再联系的人，这一页
+ * 也不许出现「改用邮件/私信」的换渠道建议 —— 换渠道 = 绕过他的意愿。
+ *
+ * PersonDrawer 那份 JSX 的同类断言证明不了这一份：这是独立的第二份渲染。
+ * 若哪天这行门控被误改回裸 `row.phoneUnusable`，这两条会转红。
+ */
+const altBanner = () => screen.queryByText(/用邮件 \/ 私信联系/)
+
+describe('坏号 + 拒联：全部客人页不给换渠道建议', () => {
+  it('🔴 坏号 + DNC → 没有换渠道横幅', async () => {
+    stubFetch([contact('c1', 'Sue', { phone: '+64211234567', phoneUnusable: true, doNotContact: true })])
+    setUrl('?contact=c1')
+    render(<CrmAllContactsPage />)
+
+    await waitFor(() => expect(screen.getByText('往来记录')).toBeTruthy())
+    expect(altBanner()).toBeNull()
+  })
+
+  it('坏号 + 非DNC → 换渠道横幅照旧显示（证明查询能命中，防误绿）', async () => {
+    stubFetch([contact('c1', 'Sue', { phone: '+64211234567', phoneUnusable: true })])
+    setUrl('?contact=c1')
+    render(<CrmAllContactsPage />)
+
+    await waitFor(() => expect(screen.getByText('往来记录')).toBeTruthy())
+    expect(altBanner()).toBeTruthy()
   })
 })

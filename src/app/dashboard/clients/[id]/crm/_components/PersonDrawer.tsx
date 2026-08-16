@@ -13,7 +13,7 @@ import { ContactTimeline } from './ContactTimeline'
 import { MessengerReply } from './MessengerReply'
 import { DncBanner } from './DncBanner'
 import { drawerActions, nextStageChoices, type Channel } from '@/lib/crm/drawer-actions'
-import type { Segment } from '@/lib/crm/segments'
+import { suggestsAlternativeChannel, type Segment } from '@/lib/crm/segments'
 
 export interface DrawerRow {
   contactId: string
@@ -169,11 +169,15 @@ export function PersonDrawer({
                 📞 {row.phone}
               </span>
             )}
-            {row.phone && row.phoneUnusable && (
-              <span className="w-full text-xs font-semibold text-me-charcoal/55">
-                ⚠️ 这个号打不通 —— 用下面的邮箱 / 私信联系，顺便问他要个新号
-              </span>
-            )}
+            {/* 🔴 **说了别联系的人，坏号也不给「改用邮箱/私信」的建议**
+                （缺口①修复，2026-08-17）。换渠道 = 绕过他的意愿。判据用 `isDnc`
+                （含「放回名单」乐观清除），跟同屏邮箱/私信门控保持同步。 */}
+            {row.phone &&
+              suggestsAlternativeChannel({ doNotContact: isDnc, phoneUnusable: row.phoneUnusable === true }) && (
+                <span className="w-full text-xs font-semibold text-me-charcoal/55">
+                  ⚠️ 这个号打不通 —— 用下面的邮箱 / 私信联系，顺便问他要个新号
+                </span>
+              )}
             {/* 🔴 **说了不联系，就别把联系按钮摆在手边**（狄仁杰复审 2026-08-16）。
                 原先这一屏同时出现「我们任何渠道都不会再联系他」和三个能点的
                 联系入口（拨号 / 邮箱 / 私信框）—— 一句话和三个按钮打架，

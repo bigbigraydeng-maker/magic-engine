@@ -30,7 +30,9 @@ import { CONTACT_KIND_LABEL, type ContactKind } from '@/lib/crm/contact-kind'
 import { batchRecipients, countTrade, filterBucketByKind, type KindView } from '@/lib/crm/kind-filter'
 import { dayProgress } from '@/lib/crm/day-list'
 
-interface Row {
+// 导出仅为让 ReachAction 的单测能构造 row（缺口① 的 DNC return null 是安全码，
+// 必须被直测钉住）。router 会忽略 page 文件里的具名导出。
+export interface Row {
   contactId: string
   name: string
   phone: string | null
@@ -211,8 +213,18 @@ function dueText(iso: string): string {
  * 渠道由后端按「他实际能被联系到什么」算好（segments 的 reachableChannel），
  * 这里只把它变成一个能当场点的动作。
  */
-function ReachAction({ row }: { row: Row }) {
+export function ReachAction({ row }: { row: Row }) {
   const base = 'block border-t border-me-charcoal/8 px-3 py-2.5 text-[14px] font-bold'
+
+  /**
+   * 🔴 **说了别联系的人，一个联系动作都不给**（缺口①修复 R3，2026-08-17）。
+   *
+   * 今天 DNC 的人在 day-list 里不冻结、直接掉出名单，正常到不了这张卡；
+   * 但这是防御纵深 —— 一旦哪天冻结策略变了、或有人把 DNC 人错漏进热桶，
+   * 好号会在下面 `tel:` 那条渲染成可点拨号、坏号会渲染成「先发邮件」。
+   * 整块出口对 DNC 关掉，比只在坏号分支挂闸更稳。
+   */
+  if (row.doNotContact) return null
 
   if ((row.suggestedChannel === 'phone' || row.suggestedChannel === 'sms') && row.phone) {
     return (

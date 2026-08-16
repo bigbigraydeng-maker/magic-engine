@@ -29,6 +29,7 @@ import {
   isPhoneVerdict,
   isFailedReach,
   latestIntentVerdict,
+  offListGroup,
 } from '@/lib/crm/segments'
 import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
 import { isDoNotContact, withoutClearedDnc } from '@/lib/crm/dnc'
@@ -803,6 +804,23 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     .map(({ c, seg }) => {
       const row = contactById.get(c.id)
       const meta = row?.stage ? stageMeta.get(row.stage) : undefined
+      /**
+       * 「别再联系」—— 抽屉靠它给取消入口，**分组也必须先看它**（见下面 group）。
+       * 提到这里成局部，是因为坏号分组要用同一个值，不能让它只挂在返回对象上。
+       */
+      const doNotContact = isDoNotContact(
+        row?.do_not_contact ?? false,
+        (byContact.get(c.id) ?? []).map((t) => ({
+          // 存量里「其实是别再联系」的原话读的时候重判一次。
+          outcome:
+            reclassifyStoredOutcome((t.metadata?.outcome as string) ?? null, t.raw, {
+              direction: t.direction,
+              source: t.source,
+            }) ?? null,
+          flagged: t.metadata?.do_not_contact === true,
+          occurredAt: t.occurred_at,
+        })),
+      )
       return {
         contactId: c.id,
         name: contactCardTitle(c.displayName, firstSaid.get(c.id)),
@@ -821,19 +839,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
          */
         phoneUnusable: seg.phoneUnusable ?? false,
         /** 被标成「别再联系」—— 抽屉靠它给出取消入口。 */
-        doNotContact: isDoNotContact(
-          row?.do_not_contact ?? false,
-          (byContact.get(c.id) ?? []).map((t) => ({
-            // 同上：存量里「其实是别再联系」的原话读的时候重判一次。
-            outcome:
-              reclassifyStoredOutcome((t.metadata?.outcome as string) ?? null, t.raw, {
-                direction: t.direction,
-                source: t.source,
-              }) ?? null,
-            flagged: t.metadata?.do_not_contact === true,
-            occurredAt: t.occurred_at,
-          })),
-        ),
+        doNotContact,
         // 为什么不在今天名单上。成交跟「明确拒绝」混在一堆叫「已排除」很刺眼，
         // 而且成交客户恰恰最该继续维护（催余款、确认行程）—— 页面按这个分开显示。
         /** 被推迟到什么时候。有值 = 他是被人手推迟的，不是被规则排除的。 */
@@ -848,21 +854,19 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
          */
         // 「被推迟」必须能跟「已停止」分开。混在一起的话，销售想把一个人提前
         // 叫回来就无从下手 —— 他会在一堆「明确拒绝」里找一个自己上周放一放的人。
-        group:
-          row?.snooze_until && new Date(row.snooze_until).getTime() > now.getTime()
-            ? ('snoozed' as const)
-            // 🔴 必须跟 `segmentContact` 用**同一个判据**（Codex 复审 2026-08-16）。
-            // 原先看「最新的任意一条结果是不是坏号」：一个只有坏号、之后又打了
-            // 一次没人接的人，分段那边照旧判他「号码打不通」，这里却因为最新
-            // 一条是 no_answer 而把他丢进「不要再联系」—— 补号码这件该有人动手的
-            // 事又一次被藏起来（铁律 3：发现不许死在日志里）。
-            : phoneLineDeadFrom(byContact.get(c.id) ?? [])
-              ? ('fix_number' as const)
-              : meta?.action === 'won' || meta?.action === 'postsale'
-                ? ('won' as const)
-                : seg.segment === 'nurture_future'
-                  ? ('later' as const)
-                  : ('stop' as const),
+        // 🔴 DNC 最先判、压过坏号分组 —— 判据集中在 `offListGroup`，与
+        //    `segmentContact` 次序对齐，可被单独直测（见 segments 里那段说明）。
+        //    坏号的「同一判据」约束（Codex 复审 2026-08-16）仍在：用
+        //    `phoneLineDeadFrom` 而非「最新一条是不是坏号」。
+        group: offListGroup({
+          doNotContact,
+          snoozed: !!(
+            row?.snooze_until && new Date(row.snooze_until).getTime() > now.getTime()
+          ),
+          phoneLineDead: phoneLineDeadFrom(byContact.get(c.id) ?? []),
+          won: meta?.action === 'won' || meta?.action === 'postsale',
+          nurtureFuture: seg.segment === 'nurture_future',
+        }),
         lastNote: (byContact.get(c.id) ?? [])[0]?.summary ?? null,
         kind: kindOf(c.id),
       }

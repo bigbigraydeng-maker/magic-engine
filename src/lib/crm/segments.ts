@@ -396,6 +396,59 @@ export function reachableChannel(
 }
 
 /**
+ * 这个人现在该不该被建议「换个渠道联系」—— 号码打不通时那句「改用邮件/私信」。
+ *
+ * 🔴 **DNC 一票否决，且与坏号相互独立**：客户说过「别再联系」，电话坏了
+ * 不能成为绕道去邮件/私信的理由 —— 换渠道就是绕过他的意愿。判据必须由 DNC
+ * 驱动，不是靠坏号顺带挡住（坏号+DNC 时是 DNC 关掉建议，不是「反正没渠道」）。
+ *
+ * 两个入参都是**必填 boolean**：这是一条联系抑制红线函数，缺省方向必须
+ * fail-closed。不接受可空 —— 调用方必须先把自己那份「他到底是不是 DNC」
+ * 落成确定值（`row.doNotContact === true` / 抽屉里的 `isDnc`）再传进来，
+ * 不允许「不知道是不是 DNC」就默认放行去联系。
+ *
+ * 四象限：坏号+DNC→false（DNC 关）· 坏号+非DNC→true · 好号+DNC→false ·
+ * 好号+非DNC→false（没坏号，本就不提示）。
+ */
+export function suggestsAlternativeChannel(x: {
+  doNotContact: boolean
+  phoneUnusable: boolean
+}): boolean {
+  if (x.doNotContact) return false // 闸①：DNC 否决，与坏号无关
+  return x.phoneUnusable === true // 闸②：只有坏号才提示换渠道
+}
+
+/** off-list（今日名单之外）的人归到哪一组。 */
+export type OffListGroup = 'snoozed' | 'fix_number' | 'won' | 'later' | 'stop'
+
+/**
+ * off-list 的人归到哪个组。
+ *
+ * 🔴 **DNC 必须最先判，压过坏号**（子牙 / 狄仁杰复审 2026-08-16）。否则
+ * 「坏号 + 别再联系」的人落进 `fix_number`，而那组表头写着「号码是坏的 ·
+ * 补一个对的就能继续跟」—— 组级别怂恿去补号继续联系一个说过「别再联系」的
+ * 客人，踩客户红线，且绕过所有逐行门控。次序跟 `segmentContact`（DNC 判在
+ * 最前）对齐，两处判法必须一致。
+ *
+ * 抽成纯函数是为了让这道次序能被**单独直测**：坏号+DNC → `stop` 不是
+ * `fix_number`（A 级承重断言）。
+ */
+export function offListGroup(x: {
+  doNotContact: boolean
+  snoozed: boolean
+  phoneLineDead: boolean
+  won: boolean
+  nurtureFuture: boolean
+}): OffListGroup {
+  if (x.doNotContact) return 'stop' // DNC 压过一切，包括坏号
+  if (x.snoozed) return 'snoozed'
+  if (x.phoneLineDead) return 'fix_number'
+  if (x.won) return 'won'
+  if (x.nurtureFuture) return 'later'
+  return 'stop'
+}
+
+/**
  * 把毫秒差说成人话。
  *
  * 原先一律用小时，于是名单上出现「进线 835 小时还没人联系」——

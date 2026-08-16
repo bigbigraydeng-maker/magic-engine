@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   segmentContact, todayWorklist, segmentCounts, engagementFromMetadata, reachableChannel, isPhoneVerdict, isFailedReach,
+  suggestsAlternativeChannel, offListGroup,
   type ContactLike, type TouchpointLike,
 } from '../segments'
 
@@ -986,5 +987,69 @@ describe('暂时不考虑的人交给系统跟，不是停掉', () => {
       NOW,
     )
     expect(r.segment).toBe('replied')
+  })
+})
+
+/**
+ * 🔴 缺口①（PO 授权 corrective，2026-08-17）：**坏号 + 别再联系(DNC) 的人，
+ * 系统不得再建议任何替代联系渠道** —— 换渠道 = 绕过客户「别联系我」的意愿。
+ *
+ * 判据由 DNC 驱动、与坏号相互独立、fail-closed。四象限 + 单独直测每道闸。
+ */
+describe('suggestsAlternativeChannel：坏号+DNC 不得建议换渠道', () => {
+  it('🔴 坏号 + DNC → false（defer/suppress，本 corrective 的核心 case）', () => {
+    expect(suggestsAlternativeChannel({ doNotContact: true, phoneUnusable: true })).toBe(false)
+  })
+
+  it('坏号 + 非DNC → true（坏号闸独立有效，非 DNC 照旧提示换渠道）', () => {
+    expect(suggestsAlternativeChannel({ doNotContact: false, phoneUnusable: true })).toBe(true)
+  })
+
+  it('好号 + DNC → false（DNC 单独就否决，不依赖坏号）', () => {
+    expect(suggestsAlternativeChannel({ doNotContact: true, phoneUnusable: false })).toBe(false)
+  })
+
+  it('好号 + 非DNC → false（没坏号，本就不提示）', () => {
+    expect(suggestsAlternativeChannel({ doNotContact: false, phoneUnusable: false })).toBe(false)
+  })
+
+  /**
+   * 单独直测闸①：DNC 必须在**坏号存在时**仍然否决，而不是被坏号顺带挡住。
+   * 对照上面两条 `doNotContact:true`：不管坏号真假，结果都是 false —— 说明
+   * 决定 false 的是 DNC，不是坏号。删掉函数里 `if (x.doNotContact) return false`
+   * 这一行（变异），坏号+DNC 这条会从 false 翻成 true → 本用例转红。
+   */
+  it('闸①承重：坏号真/假两种，DNC 都把结果压成 false', () => {
+    expect(suggestsAlternativeChannel({ doNotContact: true, phoneUnusable: true })).toBe(false)
+    expect(suggestsAlternativeChannel({ doNotContact: true, phoneUnusable: false })).toBe(false)
+  })
+})
+
+/**
+ * 🔴 缺口① 的**主修复**（子牙 / 狄仁杰复审）：off-list 分组里 DNC 必须压过坏号，
+ * 否则坏号+DNC 落进 `fix_number`（组表头「补一个对的就能继续跟」怂恿继续联系）。
+ */
+describe('offListGroup：DNC 压过坏号，不进 fix_number', () => {
+  const base = { doNotContact: false, snoozed: false, phoneLineDead: false, won: false, nurtureFuture: false }
+
+  it('🔴 坏号 + DNC → stop（不是 fix_number）—— 主漏点断言', () => {
+    expect(offListGroup({ ...base, doNotContact: true, phoneLineDead: true })).toBe('stop')
+  })
+
+  it('坏号 + 非DNC → fix_number（坏号分组独立有效，没被误伤）', () => {
+    expect(offListGroup({ ...base, phoneLineDead: true })).toBe('fix_number')
+  })
+
+  it('DNC 压过 snoozed / won / later —— 与 segmentContact 次序对齐', () => {
+    expect(offListGroup({ ...base, doNotContact: true, snoozed: true })).toBe('stop')
+    expect(offListGroup({ ...base, doNotContact: true, won: true })).toBe('stop')
+    expect(offListGroup({ ...base, doNotContact: true, nurtureFuture: true })).toBe('stop')
+  })
+
+  it('非DNC 时其余次序不变：snoozed > fix_number > won > later > stop', () => {
+    expect(offListGroup({ ...base, snoozed: true, phoneLineDead: true })).toBe('snoozed')
+    expect(offListGroup({ ...base, won: true })).toBe('won')
+    expect(offListGroup({ ...base, nurtureFuture: true })).toBe('later')
+    expect(offListGroup({ ...base })).toBe('stop')
   })
 })

@@ -19,6 +19,7 @@ import Link from 'next/link'
 import { CrmTabs } from '../_components/CrmTabs'
 import { ComposeNote, type StageOption } from '../_components/ComposeNote'
 import { DncBanner } from '../_components/DncBanner'
+import { suggestsAlternativeChannel } from '@/lib/crm/segments'
 
 interface ContactRow {
   contactId: string
@@ -249,11 +250,17 @@ function ContactDetail({
             📞 {row.phone}
           </span>
         )}
-        {row.phone && row.phoneUnusable && (
-          <span className="w-full text-xs font-semibold text-me-charcoal/55">
-            ⚠️ 这个号打不通 —— 用邮件 / 私信联系，顺便问他要个新号
-          </span>
-        )}
+        {/* 🔴 拒联的人坏号也不建议换渠道（缺口①修复，2026-08-17）——
+            换渠道 = 绕过他「别再联系」的意愿。 */}
+        {row.phone &&
+          suggestsAlternativeChannel({
+            doNotContact: row.doNotContact === true,
+            phoneUnusable: row.phoneUnusable === true,
+          }) && (
+            <span className="w-full text-xs font-semibold text-me-charcoal/55">
+              ⚠️ 这个号打不通 —— 用邮件 / 私信联系，顺便问他要个新号
+            </span>
+          )}
         {/* 🔴 拒联的人不给可点的联系入口（狄仁杰复审 2026-08-16）——
             跟抽屉那一页说同一件事。照旧显示，但点不动。 */}
         {row.phone && !row.phoneUnusable && row.doNotContact && (

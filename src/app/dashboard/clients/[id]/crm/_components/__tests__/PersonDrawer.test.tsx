@@ -143,3 +143,66 @@ describe('点完「放回名单」，这一屏当场就该能联系他', () => {
     expect(dialLink()).toBeTruthy()
   })
 })
+
+/**
+ * 🔴 缺口①（PO 授权 corrective，2026-08-17）：**坏号 + 别再联系的人，抽屉里
+ * 不许出现「改用邮箱 / 私信联系」的建议** —— 换渠道 = 绕过他「别联系」的意愿。
+ *
+ * 这条是 A 级承重断言：语义闸 `suggestsAlternativeChannel` 单测全绿，也证明不了
+ * 这一行 JSX 真的接上了它。必须直接断言渲染结果里查不到那句横幅。
+ */
+const altChannelBanner = () => screen.queryByText(/用下面的邮箱 \/ 私信联系/)
+
+describe('坏号 + 拒联：抽屉不给「改用邮箱/私信」的换渠道建议', () => {
+  // 抽屉里的时间线也会拉数据 —— 给它一个像样的响应，免得 ContactTimeline 在
+  // 断言之后异步 reject 成未处理拒绝噪音。
+  beforeEach(() =>
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => ({
+        ok: true,
+        json: async () =>
+          url.includes('/dnc') ? { blockingStageLabel: null } : { timeline: [], omittedMessages: 0 },
+      })),
+    ),
+  )
+
+  it('🔴 坏号 + DNC → 没有换渠道横幅', () => {
+    draw({ phoneUnusable: true, doNotContact: true })
+    expect(altChannelBanner()).toBeNull()
+  })
+
+  it('坏号 + DNC → 号码照旧看得见 + 拒联黄条还在（不是啥都不说的划线号）', () => {
+    draw({ phoneUnusable: true, doNotContact: true })
+    expect(screen.getByText(/\+64211234567/)).toBeTruthy()
+    expect(screen.getByText(/别再联系|不会再联系/)).toBeTruthy()
+  })
+
+  it('坏号 + 非DNC → 换渠道横幅照旧显示（没误伤正常坏号）', () => {
+    draw({ phoneUnusable: true })
+    expect(altChannelBanner()).toBeTruthy()
+  })
+
+  /**
+   * 乐观清除同步：点完「放回名单」，横幅门控必须跟邮箱/私信门控一起翻转 ——
+   * 邮箱回来了、换渠道建议也该回来，否则出现「邮箱能点、却没有『号坏了改用邮箱』
+   * 引导」的错位（子牙复审要求补的一条）。
+   */
+  it('放回名单后：坏号的换渠道建议跟着回来', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => ({
+        ok: true,
+        json: async () =>
+          url.includes('/dnc') ? { blockingStageLabel: null } : { timeline: [], omittedMessages: 0 },
+      })),
+    )
+    draw({ phoneUnusable: true, doNotContact: true })
+
+    expect(altChannelBanner()).toBeNull()
+    fireEvent.click(screen.getByText(/判错了？点这里放回名单/))
+    fireEvent.click(screen.getByText('确认放回名单'))
+
+    await waitFor(() => expect(altChannelBanner()).toBeTruthy())
+  })
+})
