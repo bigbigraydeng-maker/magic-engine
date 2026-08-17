@@ -12,10 +12,10 @@
  *
  * ```
  * Hello! I filled out your form and would like to know more about your business.
- * Full name: Margaret Sen
- * Phone number: 0210 820 3091
+ * Full name: Jordan Avery
+ * Phone number: 021 555 0134
  * Which tour interests you most?: Still deciding — show me all 4
- * Email: margaretsen2003@yahoo.com
+ * Email: jordan.avery.example@example.com
  * ```
  *
  * 同步私信时这段正文原样存进了 `conversation_messages`，但**没有人去读它** ——

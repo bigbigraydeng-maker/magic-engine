@@ -15,6 +15,7 @@ import { getPageAccessToken } from '@/lib/meta/page-posts'
 import { fetchPageConversations, type MessengerConversation } from '@/lib/meta/conversations'
 import { linkMessengerConversation, loadIdentityIndex } from '@/lib/messenger/link-contacts'
 import { backfillUnlinkedConversations } from '@/lib/messenger/backfill'
+import { backfillLeadIntroDetails } from '@/lib/messenger/lead-intro-backfill'
 
 export interface MessengerSyncClient {
   id: string
@@ -45,6 +46,8 @@ export interface MessengerSyncResult {
   backfilled: number
   /** Stored threads still attached to nobody after this run's sweep. */
   backfillRemaining: number
+  /** 这一轮翻过私信找开场白的人数（补电话邮箱用）。 */
+  leadIntroScanned: number
   skipped?: 'no_page_id' | 'no_meta_token' | 'no_page_token'
   error?: string
 }
@@ -173,6 +176,7 @@ export async function syncClientMessenger(
     created: 0,
     backfilled: 0,
     backfillRemaining: 0,
+    leadIntroScanned: 0,
   }
 
   const pageId = client.facebook_page_id
@@ -242,6 +246,17 @@ export async function syncClientMessenger(
     // 一次重新处理。放在实时同步之后，且复用同一个 index（刚建的人已经在里面）。
     const sweep = await backfillUnlinkedConversations(client.id, index)
 
+    /**
+     * 补档案：把「点私信」开场白里的电话邮箱补给**已经挂上人**的老对话。
+     *
+     * 上面两条路都够不到那批人 —— 实时同步只看水位线之后的线程，`sweep` 只扫
+     * 还没挂上人的对话。而 PM 2026-08-17 看到的正是这批：卡片写「没留电话」，
+     * 号码就在第一条私信里躺着。所以这一条按**人**扫（谁的档案还缺栏就翻他的私信）。
+     *
+     * 失败不影响本轮同步结果 —— 函数内部自己吞异常并计数。
+     */
+    const details = await backfillLeadIntroDetails(client.id)
+
     return {
       ...base,
       conversations: conversations.length,
@@ -250,6 +265,7 @@ export async function syncClientMessenger(
       created,
       backfilled: sweep.created,
       backfillRemaining: sweep.remaining,
+      leadIntroScanned: details.scanned,
     }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)

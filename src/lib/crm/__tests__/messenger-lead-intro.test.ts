@@ -10,18 +10,18 @@ import { parseLeadIntroMessage } from '../messenger-lead-intro'
 
 /** 线上原文，一个字没改。 */
 const REAL = `Hello! I filled out your form and would like to know more about your business.
-Full name: Margaret Sen
-Phone number: 0210 820 3091
+Full name: Jordan Avery
+Phone number: 021 555 0134
 Which tour interests you most?: Still deciding — show me all 4
-Email: margaretsen2003@yahoo.com`
+Email: jordan.avery.example@example.com`
 
 describe('线上那条真实开场白', () => {
   it('姓名 / 电话 / 邮箱三样都取得出来', () => {
     const r = parseLeadIntroMessage(REAL)
     expect(r).not.toBeNull()
-    expect(r?.name).toBe('Margaret Sen')
-    expect(r?.phone).toBe('0210 820 3091')
-    expect(r?.email).toBe('margaretsen2003@yahoo.com')
+    expect(r?.name).toBe('Jordan Avery')
+    expect(r?.phone).toBe('021 555 0134')
+    expect(r?.email).toBe('jordan.avery.example@example.com')
   })
 
   it('「感兴趣的团」也一起带出来 —— CRM 横表那一列读它', () => {

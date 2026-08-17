@@ -109,6 +109,8 @@ let nameLookupRows: { id: string; display_name: string | null }[] = []
 let nameLookupArg: string | null = null
 /** 库里那条 `<会话>:out` 触点已有的时间（测「只往前推，绝不回拨」）。 */
 let existingOutboundAt: string | null = null
+/** `contact_identities` 里这个号码/邮箱当前归谁（测「归属冲突就不写档案」）。 */
+let identityOwner: string | null = null
 /** update() 的 payload 暂存，等 .lt() 来配对成一次「条件推进」。 */
 let pendingPatch: Record<string, unknown> | null = null
 
@@ -116,6 +118,7 @@ function stubSupabase(): Calls {
   nameLookupRows = []
   nameLookupArg = null
   existingOutboundAt = null
+  identityOwner = null
   pendingPatch = null
   const calls: Calls = {
     conversationsUpdate: 0,
@@ -154,10 +157,15 @@ function stubSupabase(): Calls {
       // resolveContact 建人时走 insert().select().single()，要还它一个 id。
       single: async () => ({ data: { id: 'contact-NEW' }, error: null }),
       // latestOutboundTouchAt 读库里那条既有的出站触点。
-      maybeSingle: async () =>
-        table === 'contact_touchpoints'
-          ? { data: existingOutboundAt ? { occurred_at: existingOutboundAt } : null, error: null }
-          : { data: null, error: null },
+      maybeSingle: async () => {
+        if (table === 'contact_touchpoints') {
+          return { data: existingOutboundAt ? { occurred_at: existingOutboundAt } : null, error: null }
+        }
+        if (table === 'contact_identities') {
+          return { data: identityOwner ? { contact_id: identityOwner } : null, error: null }
+        }
+        return { data: null, error: null }
+      },
       then: (resolve: (v: unknown) => unknown) =>
         Promise.resolve({ data: null, error: null }).then(resolve),
       update: (payload: Record<string, unknown>) => {
@@ -588,10 +596,10 @@ describe('出站触点的时间只往前推 —— 而且是数据库自己判�
 describe('「点私信」开场白里的电话邮箱 → 补进档案', () => {
   /** PM 从线上后台照抄的原文。 */
   const INTRO = `Hello! I filled out your form and would like to know more about your business.
-Full name: Margaret Sen
-Phone number: 0210 820 3091
+Full name: Jordan Avery
+Phone number: 021 555 0134
 Which tour interests you most?: Still deciding — show me all 4
-Email: margaretsen2003@yahoo.com`
+Email: jordan.avery.example@example.com`
 
   /**
    * 只看**补档案**那几条 —— `linkMessengerConversation` 还会顺手推
@@ -612,8 +620,8 @@ Email: margaretsen2003@yahoo.com`
     await linkMessengerConversation(introInput, index({}))
 
     const byKind = new Map(calls.identityUpserts.map((i) => [i.kind, i.value]))
-    expect(byKind.get('phone')).toBe('+642108203091')
-    expect(byKind.get('email')).toBe('margaretsen2003@yahoo.com')
+    expect(byKind.get('phone')).toBe('+64215550134')
+    expect(byKind.get('email')).toBe('jordan.avery.example@example.com')
   })
 
   it('档案上的电话和邮箱补上', async () => {
@@ -621,8 +629,8 @@ Email: margaretsen2003@yahoo.com`
     await linkMessengerConversation(introInput, index({}))
 
     const patches = backfillUpdates(calls).map((u) => u.patch)
-    expect(patches).toContainEqual({ primary_phone: '+642108203091' })
-    expect(patches).toContainEqual({ primary_email: 'margaretsen2003@yahoo.com' })
+    expect(patches).toContainEqual({ primary_phone: '+64215550134' })
+    expect(patches).toContainEqual({ primary_email: 'jordan.avery.example@example.com' })
   })
 
   /**
@@ -665,6 +673,33 @@ Email: margaretsen2003@yahoo.com`
     )
     expect(backfillUpdates(calls)).toHaveLength(0)
     expect(calls.identityUpserts.map((i) => i.kind)).not.toContain('phone')
+  })
+
+
+  /**
+   * 🔴 **号码已经归别人了就别写进这个人的档案**（Codex 复审 2026-08-17）。
+   *
+   * 身份表那句 `ignoreDuplicates` 只保证身份不被抢走，挡不住继续把同一个号码
+   * 写进**这个人**的 `primary_phone` —— 那样两份档案显示同一个号码，而身份表
+   * 指向原来那个人，销售照着卡片打过去联系的是另一个人。
+   */
+  it('🔴 电话/邮箱已归另一个联系人 → 那两栏不写进这个人的档案', async () => {
+    const calls = stubSupabase()
+    identityOwner = 'contact-SOMEONE-ELSE'
+    await linkMessengerConversation(introInput, index({}))
+
+    const cols = backfillUpdates(calls).flatMap((u) => Object.keys(u.patch))
+    expect(cols).not.toContain('primary_phone')
+    expect(cols).not.toContain('primary_email')
+    // 名字不受身份归属影响 —— 它不是唯一键，补上只是把 Facebook 昵称换成全名。
+    expect(cols).toContain('display_name')
+  })
+
+  it('身份本来就归他自己 → 照旧补', async () => {
+    const calls = stubSupabase()
+    identityOwner = 'contact-M'
+    await linkMessengerConversation(introInput, index({}))
+    expect(backfillUpdates(calls).length).toBeGreaterThan(0)
   })
 
   /** 我们自己发出去的模板不作数 —— 只认客人自己发的那条。 */

@@ -398,8 +398,8 @@ async function attachByUniqueFullName(
  * 每次同步都跑（不只在新接上的时候）—— 存量那批人的档案也要因此补齐。
  * 都是幂等写，跑一百遍结果一样。
  */
-async function backfillFromLeadIntro(
-  input: LinkConversationInput,
+export async function backfillFromLeadIntro(
+  input: Pick<LinkConversationInput, 'clientId' | 'messages'>,
   contactId: string,
 ): Promise<void> {
   // 只认**客人自己**发的那条。我们自己发出去的模板不作数。
@@ -437,16 +437,39 @@ async function backfillFromLeadIntro(
     )
   }
 
+  /**
+   * 🔴 **这个号码 / 邮箱到底归谁**（Codex 复审 2026-08-17）。
+   *
+   * 上面的 `ignoreDuplicates` 只保证**身份表**不被抢走，挡不住下面继续把同一个
+   * 号码写进**这个人**的 `primary_phone`。那样两份档案会显示同一个号码，而身份
+   * 表指向的是原来那个人 —— 销售照着卡片打过去，联系的是另一个人。
+   *
+   * 所以写档案之前回查一次归属：**这条身份不存在、或确实归 `contactId`**，才写。
+   * 查不出来（读失败）一律当「不确定」跳过 —— 少补一栏是现状，写错是伤害。
+   */
+  const ownsValue = async (kind: 'phone' | 'email', value: string): Promise<boolean> => {
+    const { data, error } = await supabaseAdmin
+      .from('contact_identities')
+      .select('contact_id')
+      .eq('client_id', input.clientId)
+      .eq('kind', kind)
+      .eq('value', value)
+      .maybeSingle()
+    if (error) return false
+    const owner = (data as { contact_id?: string } | null)?.contact_id
+    return !owner || owner === contactId
+  }
+
   // 档案上那两栏 —— 一栏一条语句，各自带 `.is(..., null)`。
   // 合成一条 update 的话，只要有一栏已经有值，另一栏也跟着写不进去。
-  if (phone) {
+  if (phone && (await ownsValue('phone', phone))) {
     await supabaseAdmin
       .from('contacts')
       .update({ primary_phone: phone })
       .eq('id', contactId)
       .is('primary_phone', null)
   }
-  if (email) {
+  if (email && (await ownsValue('email', email))) {
     await supabaseAdmin
       .from('contacts')
       .update({ primary_email: email })
