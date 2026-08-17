@@ -48,7 +48,8 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { isAutomatedPageMessage } from '@/lib/messenger/automation'
-import { buildIdentities, resolveContact } from '@/lib/crm/identity'
+import { buildIdentities, normaliseEmail, normalisePhone, resolveContact } from '@/lib/crm/identity'
+import { parseLeadIntroMessage } from '@/lib/crm/messenger-lead-intro'
 
 export interface IdentityIndex {
   /** 归一化邮箱 -> contactId（同一 client 下邮箱唯一，所以是 1:1）。 */
@@ -378,6 +379,94 @@ async function attachByUniqueFullName(
 }
 
 /**
+ * 把「点私信」开场白里的姓名 / 电话 / 邮箱补进这个人的档案。
+ *
+ * 🔴 **PM 2026-08-17 报的线上问题**：卡片写着「💬 没留电话 —— 只能在 Messenger
+ * 回他」，而那个人明明在第一条消息里留了电话和邮箱。正文早就同步进来了，
+ * 只是从来没人把它取出来 —— `matchConversationToContact` 只拿正文里的邮箱去
+ * **认人**，认完就丢。于是销售信了卡片那句话，跑去私信里回，而客人在等电话。
+ *
+ * 三条纪律：
+ *
+ * 1. **只补空栏，绝不覆盖**（铁律 8）。客人后来亲口更正过的号码比表单里那个新，
+ *    `.is('primary_phone', null)` 保证只在还空着的时候写。
+ * 2. **身份用 upsert + ignoreDuplicates**。万一这个号码已经挂在**另一个人**
+ *    身上，什么都不做 —— 抢身份是不可逆的，宁可留白等人来看。
+ * 3. **认不出来就什么都不做**。`parseLeadIntroMessage` 判据宁可窄：认不出只是
+ *    维持现状，认错了会把别人的号码写进这个人的档案。
+ *
+ * 每次同步都跑（不只在新接上的时候）—— 存量那批人的档案也要因此补齐。
+ * 都是幂等写，跑一百遍结果一样。
+ */
+async function backfillFromLeadIntro(
+  input: LinkConversationInput,
+  contactId: string,
+): Promise<void> {
+  // 只认**客人自己**发的那条。我们自己发出去的模板不作数。
+  let fields: ReturnType<typeof parseLeadIntroMessage> = null
+  for (const m of input.messages) {
+    if (m.direction !== 'inbound') continue
+    const parsed = parseLeadIntroMessage(m.body)
+    if (parsed) {
+      fields = parsed
+      break
+    }
+  }
+  if (!fields) return
+
+  const phone = normalisePhone(fields.phone)
+  const email = normaliseEmail(fields.email)
+  if (!phone && !email && !fields.name) return
+
+  // 身份表：多挂一个键，不动已有的。撞到别人身上就跳过（ignoreDuplicates）。
+  const identities = [
+    phone ? { kind: 'phone' as const, value: phone } : null,
+    email ? { kind: 'email' as const, value: email } : null,
+  ].filter((x): x is { kind: 'phone' | 'email'; value: string } => x !== null)
+
+  if (identities.length > 0) {
+    await supabaseAdmin.from('contact_identities').upsert(
+      identities.map((i) => ({
+        contact_id: contactId,
+        client_id: input.clientId,
+        kind: i.kind,
+        value: i.value,
+        first_source: 'messenger_lead_intro',
+      })),
+      { onConflict: 'client_id,kind,value', ignoreDuplicates: true },
+    )
+  }
+
+  // 档案上那两栏 —— 一栏一条语句，各自带 `.is(..., null)`。
+  // 合成一条 update 的话，只要有一栏已经有值，另一栏也跟着写不进去。
+  if (phone) {
+    await supabaseAdmin
+      .from('contacts')
+      .update({ primary_phone: phone })
+      .eq('id', contactId)
+      .is('primary_phone', null)
+  }
+  if (email) {
+    await supabaseAdmin
+      .from('contacts')
+      .update({ primary_email: email })
+      .eq('id', contactId)
+      .is('primary_email', null)
+  }
+
+  // 名字：Facebook 昵称常常是占位符或只有名，表单里那个是他自己填的全名。
+  // 同样只在空着的时候写。
+  const name = fields.name?.trim()
+  if (name) {
+    await supabaseAdmin
+      .from('contacts')
+      .update({ display_name: name })
+      .eq('id', contactId)
+      .is('display_name', null)
+  }
+}
+
+/**
  * 把一段已入库的对话接到人身上并写触点：先找已有的人，找不到就按 fb_psid 新建。
  *
  * index 会在命中/新建时就地更新（把 psid 记进去），让同一次同步里后面的对话
@@ -439,6 +528,9 @@ export async function linkMessengerConversation(
       index.byPsid.set(input.psid, contactId)
     }
   }
+
+  // 「点私信」广告那条开场白里带着他的电话和邮箱 —— 补进档案。
+  await backfillFromLeadIntro(input, contactId)
 
   // 来源归因：这两条触点的 attr_* 列**故意全部留 NULL**。
   //

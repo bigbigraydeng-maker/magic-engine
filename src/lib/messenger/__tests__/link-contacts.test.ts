@@ -95,6 +95,13 @@ interface Calls {
   /** `:out` 那条的「只增」写法：插入（有则不动）+ 条件推进。 */
   outboundInserts: { row: Record<string, unknown>; opts: unknown }[]
   outboundAdvances: { patch: Record<string, unknown>; onlyIfEarlierThan: string | null }[]
+  /**
+   * 写 contacts 时的 payload + 它带的 `.is(col, null)` 空值守卫。
+   *
+   * 守卫必须被断言到 —— 「只补空栏，绝不覆盖」是这条路上唯一防止把表单里的旧
+   * 号码盖掉客人后来亲口更正的号码的东西（铁律 8）。
+   */
+  contactUpdates: { patch: Record<string, unknown>; onlyIfNull: string[] }[]
 }
 
 /** attachByUniqueFullName 查同名时，库里返回什么 / 它拿什么名字去查。 */
@@ -119,7 +126,10 @@ function stubSupabase(): Calls {
     contactInserts: [],
     outboundInserts: [],
     outboundAdvances: [],
+    contactUpdates: [],
   }
+  // 当前这条 update 链上收集到的 `.is(col, null)`。
+  let isNullCols: string[] = []
   ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
     const chain: Record<string, unknown> = {
       select: () => chain,
@@ -128,7 +138,10 @@ function stubSupabase(): Calls {
         return { limit: async () => ({ data: nameLookupRows, error: null }) }
       },
       eq: () => chain,
-      is: () => chain,
+      is: (col: string, value: unknown) => {
+        if (value === null) isNullCols.push(col)
+        return chain
+      },
       lt: (_col: string, value: string) => {
         // advanceOutboundTouch 的条件推进：只在库里那条更早时才生效。
         if (table === 'contact_touchpoints' && pendingPatch) {
@@ -149,8 +162,14 @@ function stubSupabase(): Calls {
         Promise.resolve({ data: null, error: null }).then(resolve),
       update: (payload: Record<string, unknown>) => {
         if (table === 'conversations') calls.conversationsUpdate++
-        else if (table === 'contacts') calls.contactsUpdate++
-        else if (table === 'contact_touchpoints') pendingPatch = payload
+        else if (table === 'contacts') {
+          calls.contactsUpdate++
+          // `.is()` 在 update() 之后才被调用。这里给这条链新开一个数组并把
+          // **引用**存进 entry —— 后面的 `.is()` 往同一个数组里推，下一条 update
+          // 再换一个新数组，互不串味。
+          isNullCols = []
+          calls.contactUpdates.push({ patch: payload, onlyIfNull: isNullCols })
+        } else if (table === 'contact_touchpoints') pendingPatch = payload
         return chain
       },
       insert: (payload: Record<string, unknown>) => {
@@ -556,5 +575,110 @@ describe('出站触点的时间只往前推 —— 而且是数据库自己判�
 
     const inbound = calls.touchpointUpserts.flat().filter((r) => r.direction === 'inbound')
     expect(inbound).toHaveLength(1)
+  })
+})
+
+/**
+ * 🔴 **PM 2026-08-17 报的线上问题**：卡片写着「💬 没留电话 —— 只能在 Messenger
+ * 回他」，而那个人明明在第一条私信里留了电话和邮箱。
+ *
+ * 正文早就同步进来了，只是从来没人把它取出来 —— 认人用完就丢。
+ * 销售信了卡片那句话跑去私信回，而客人在等电话。
+ */
+describe('「点私信」开场白里的电话邮箱 → 补进档案', () => {
+  /** PM 从线上后台照抄的原文。 */
+  const INTRO = `Hello! I filled out your form and would like to know more about your business.
+Full name: Margaret Sen
+Phone number: 0210 820 3091
+Which tour interests you most?: Still deciding — show me all 4
+Email: margaretsen2003@yahoo.com`
+
+  /**
+   * 只看**补档案**那几条 —— `linkMessengerConversation` 还会顺手推
+   * `last_seen_at` / `updated_at`，那是另一件事。
+   */
+  const BACKFILL_COLS = ['primary_phone', 'primary_email', 'display_name']
+  const backfillUpdates = (calls: Calls) =>
+    calls.contactUpdates.filter((u) => Object.keys(u.patch).some((c) => BACKFILL_COLS.includes(c)))
+
+  const introInput = {
+    ...baseInput,
+    existingContactId: 'contact-M',
+    messages: [{ direction: 'inbound' as const, body: INTRO, sentAt: '2026-07-24T08:00:00+0000' }],
+  }
+
+  it('电话和邮箱都挂成身份', async () => {
+    const calls = stubSupabase()
+    await linkMessengerConversation(introInput, index({}))
+
+    const byKind = new Map(calls.identityUpserts.map((i) => [i.kind, i.value]))
+    expect(byKind.get('phone')).toBe('+642108203091')
+    expect(byKind.get('email')).toBe('margaretsen2003@yahoo.com')
+  })
+
+  it('档案上的电话和邮箱补上', async () => {
+    const calls = stubSupabase()
+    await linkMessengerConversation(introInput, index({}))
+
+    const patches = backfillUpdates(calls).map((u) => u.patch)
+    expect(patches).toContainEqual({ primary_phone: '+642108203091' })
+    expect(patches).toContainEqual({ primary_email: 'margaretsen2003@yahoo.com' })
+  })
+
+  /**
+   * 🔴 这条是整段最要紧的：**只补空栏，绝不覆盖**（铁律 8）。
+   * 客人后来亲口更正过的号码，比表单里那个新。
+   */
+  it('🔴 每一条写入都带着「只在还空着时才写」的守卫', async () => {
+    const calls = stubSupabase()
+    await linkMessengerConversation(introInput, index({}))
+
+    const updates = backfillUpdates(calls)
+    expect(updates.length).toBeGreaterThan(0)
+    for (const u of updates) {
+      const col = Object.keys(u.patch)[0]
+      expect(u.onlyIfNull).toContain(col)
+    }
+  })
+
+  /** 一栏一条语句 —— 合成一条的话，只要有一栏已有值，另一栏也跟着写不进去。 */
+  it('一条语句只写一栏', async () => {
+    const calls = stubSupabase()
+    await linkMessengerConversation(introInput, index({}))
+    for (const u of backfillUpdates(calls)) expect(Object.keys(u.patch)).toHaveLength(1)
+  })
+
+  it('普通聊天不会被当成开场白', async () => {
+    const calls = stubSupabase()
+    await linkMessengerConversation(
+      {
+        ...introInput,
+        messages: [
+          {
+            direction: 'inbound',
+            body: 'Hi, my number is 021 555 000, is the March tour still on?',
+            sentAt: '2026-07-24T08:00:00+0000',
+          },
+        ],
+      },
+      index({}),
+    )
+    expect(backfillUpdates(calls)).toHaveLength(0)
+    expect(calls.identityUpserts.map((i) => i.kind)).not.toContain('phone')
+  })
+
+  /** 我们自己发出去的模板不作数 —— 只认客人自己发的那条。 */
+  it('出站方向的同样一段文字 → 不补', async () => {
+    const calls = stubSupabase()
+    await linkMessengerConversation(
+      {
+        ...introInput,
+        messages: [
+          { direction: 'outbound', body: INTRO, sentAt: '2026-07-24T08:00:00+0000', tags: ['source:chat'] },
+        ],
+      },
+      index({}),
+    )
+    expect(backfillUpdates(calls)).toHaveLength(0)
   })
 })
