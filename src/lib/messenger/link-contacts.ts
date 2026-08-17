@@ -459,10 +459,38 @@ export async function backfillFromLeadIntro(
   const email = normaliseEmail(fields.email)
   if (!phone && !email && !fields.name) return
 
+  /**
+   * 🔴 **档案上已经有一个（后来更正过的）值时，旧值连身份都不该挂**
+   * （Codex 复审 2026-08-17）。
+   *
+   * 空值守卫只挡住了「覆盖档案」，挡不住把表单里那个旧号码写进 `contact_identities`。
+   * 而身份表是**认人用的键**：那个号码以后被运营商重新分配给别人、或者当初就填错了，
+   * `resolveContact` 会把带着它的新线索认成这个人，甚至把两个人的历史自动合并 ——
+   * 合并不可逆。
+   *
+   * 所以先读一次现值：**那一栏是空的、或者跟解析出来的一模一样**，才挂这个身份。
+   * 读不出来一律跳过（跟其它几处一样，宁可少补）。
+   */
+  let current: { primary_phone: string | null; primary_email: string | null } | null = null
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('contacts')
+      .select('primary_phone, primary_email')
+      .eq('id', contactId)
+      .maybeSingle()
+    if (!error) current = data as typeof current
+  } catch {
+    // current 留 null → 下面一律跳过
+  }
+  if (!current) return
+
+  const phoneUsable = phone !== null && (!current.primary_phone || current.primary_phone === phone)
+  const emailUsable = email !== null && (!current.primary_email || current.primary_email === email)
+
   // 身份表：多挂一个键，不动已有的。撞到别人身上就跳过（ignoreDuplicates）。
   const identities = [
-    phone ? { kind: 'phone' as const, value: phone } : null,
-    email ? { kind: 'email' as const, value: email } : null,
+    phoneUsable && phone ? { kind: 'phone' as const, value: phone } : null,
+    emailUsable && email ? { kind: 'email' as const, value: email } : null,
   ].filter((x): x is { kind: 'phone' | 'email'; value: string } => x !== null)
 
   if (identities.length > 0) {
@@ -503,14 +531,14 @@ export async function backfillFromLeadIntro(
 
   // 档案上那两栏 —— 一栏一条语句，各自带 `.is(..., null)`。
   // 合成一条 update 的话，只要有一栏已经有值，另一栏也跟着写不进去。
-  if (phone && (await ownsValue('phone', phone))) {
+  if (phoneUsable && phone && (await ownsValue('phone', phone))) {
     await supabaseAdmin
       .from('contacts')
       .update({ primary_phone: phone })
       .eq('id', contactId)
       .is('primary_phone', null)
   }
-  if (email && (await ownsValue('email', email))) {
+  if (emailUsable && email && (await ownsValue('email', email))) {
     await supabaseAdmin
       .from('contacts')
       .update({ primary_email: email })

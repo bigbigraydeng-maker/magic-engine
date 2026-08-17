@@ -113,6 +113,11 @@ let existingOutboundAt: string | null = null
 let identityOwner: string | null = null
 /** `clients.country` —— 决定本地号码补哪个国码。null = 读不出来。 */
 let clientCountry: string | null = 'NZ'
+/** 档案上现有的主联系方式（决定旧值能不能挂成身份）。 */
+let contactCurrent: { primary_phone: string | null; primary_email: string | null } | null = {
+  primary_phone: null,
+  primary_email: null,
+}
 /** update() 的 payload 暂存，等 .lt() 来配对成一次「条件推进」。 */
 let pendingPatch: Record<string, unknown> | null = null
 
@@ -122,6 +127,7 @@ function stubSupabase(): Calls {
   existingOutboundAt = null
   identityOwner = null
   clientCountry = 'NZ'
+  contactCurrent = { primary_phone: null, primary_email: null }
   pendingPatch = null
   const calls: Calls = {
     conversationsUpdate: 0,
@@ -166,6 +172,9 @@ function stubSupabase(): Calls {
         }
         if (table === 'contact_identities') {
           return { data: identityOwner ? { contact_id: identityOwner } : null, error: null }
+        }
+        if (table === 'contacts') {
+          return { data: contactCurrent, error: null }
         }
         if (table === 'clients') {
           return { data: clientCountry ? { country: clientCountry } : null, error: null }
@@ -731,6 +740,29 @@ Email: jordan.avery.example@example.com`
 
     const phone = calls.identityUpserts.find((i) => i.kind === 'phone')?.value
     expect(String(phone).startsWith('+61')).toBe(true)
+  })
+
+  /**
+   * 🔴 **档案上已有一个更正过的号码时，旧号码连身份都不该挂**
+   * （Codex 复审 2026-08-17）。身份表是认人用的键 —— 那个号码以后被重新分配、
+   * 或当初就填错，`resolveContact` 会把带着它的新线索认成这个人，甚至自动合并
+   * 两个人的历史，而合并不可逆。
+   */
+  it('🔴 档案上已有别的号码 → 表单里那个旧号码不挂成身份', async () => {
+    const calls = stubSupabase()
+    contactCurrent = { primary_phone: '+64211111111', primary_email: null }
+    await linkMessengerConversation(introInput, index({}))
+
+    expect(calls.identityUpserts.map((i) => i.kind)).not.toContain('phone')
+    // 邮箱那一栏还空着，照旧补。
+    expect(calls.identityUpserts.map((i) => i.kind)).toContain('email')
+  })
+
+  it('档案上那个号码跟表单里一模一样 → 照旧挂（幂等）', async () => {
+    const calls = stubSupabase()
+    contactCurrent = { primary_phone: '+64215550134', primary_email: null }
+    await linkMessengerConversation(introInput, index({}))
+    expect(calls.identityUpserts.map((i) => i.kind)).toContain('phone')
   })
 
   /**
