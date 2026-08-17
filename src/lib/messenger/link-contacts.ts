@@ -404,9 +404,16 @@ export async function backfillFromLeadIntro(
 ): Promise<void> {
   // 只认**客人自己**发的那条。我们自己发出去的模板不作数。
   let fields: ReturnType<typeof parseLeadIntroMessage> = null
+  let seenInbound = false
   for (const m of input.messages) {
     if (m.direction !== 'inbound') continue
-    const parsed = parseLeadIntroMessage(m.body)
+    /**
+     * 🔴 「两条标准字段」那条兜底**只对第一条入站消息成立**（Codex 复审 2026-08-17）。
+     * 对话中途客人转发同行者的 `Name: … / Phone: …` 恰好也是两条字段 ——
+     * 认了就把**别人的号码**写进这个人的档案。后面的消息必须带那句表单问候语。
+     */
+    const parsed = parseLeadIntroMessage(m.body, { requireMarker: seenInbound })
+    seenInbound = true
     if (parsed) {
       fields = parsed
       break

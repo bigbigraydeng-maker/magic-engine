@@ -100,7 +100,17 @@ const LINE_RE = /^\s*([^:：\n]{1,60})[:：]\s*(.+?)\s*$/
  * 返回 `null` = 不是（普通聊天、或格式对不上）。**调用方只该拿它补空栏，
  * 不该拿它覆盖已有的值** —— 客人后来亲口更正过的号码比表单里那个新。
  */
-export function parseLeadIntroMessage(body: string | null | undefined): ParsedLeadAnswers | null {
+export function parseLeadIntroMessage(
+  body: string | null | undefined,
+  /**
+   * `true` = **必须**带那句问候语才认。
+   *
+   * 🔴 调用方对**第一条入站消息之后**的每一条都要传 true（Codex 复审 2026-08-17）：
+   * 「两条标准字段」这条兜底只对开场白位置成立；对话中途客人转发同行者的
+   * `Name: … / Phone: …`，恰好也是两条字段 —— 认了就把别人的号码写进这个人的档案。
+   */
+  opts: { requireMarker?: boolean } = {},
+): ParsedLeadAnswers | null {
   if (!body) return null
 
   const answers: MetaLeadAnswer[] = []
@@ -131,7 +141,7 @@ export function parseLeadIntroMessage(body: string | null | undefined): ParsedLe
    * 一条 `Phone: 021…` 太容易在正常聊天里出现（转发同行者资料、邮件签名），
    * 而认错的代价是把别人的号码写进这个人的档案。
    */
-  if (!FORM_MARKER.test(body) && standardFields.size < 2) return null
+  if (!FORM_MARKER.test(body) && (opts.requireMarker || standardFields.size < 2)) return null
 
   const parsed = parseLeadAnswers(answers)
   // 三样全空（比如只有一行 `Notes: ...` 被当成自定义问题）也不算。

@@ -733,6 +733,44 @@ Email: jordan.avery.example@example.com`
     expect(String(phone).startsWith('+61')).toBe(true)
   })
 
+  /**
+   * 🔴 **对话中途转发同行者的资料，不许写进这个人的档案**（Codex 复审 2026-08-17）。
+   * 「两条标准字段」那条兜底只对第一条入站消息成立。
+   */
+  it('🔴 先普通聊天、后面才出现两条字段的转发 → 不补', async () => {
+    const calls = stubSupabase()
+    await linkMessengerConversation(
+      {
+        ...introInput,
+        messages: [
+          { direction: 'inbound', body: 'Hi, is the March tour still on?', sentAt: '2026-07-24T08:00:00+0000' },
+          {
+            direction: 'inbound',
+            body: 'My friend is coming too.\nName: Sam Riley\nPhone: 021 555 999',
+            sentAt: '2026-07-24T09:00:00+0000',
+          },
+        ],
+      },
+      index({}),
+    )
+    expect(backfillUpdates(calls)).toHaveLength(0)
+  })
+
+  it('中途那条带着表单问候语 → 照旧认（那是真的开场白，只是不在第一条）', async () => {
+    const calls = stubSupabase()
+    await linkMessengerConversation(
+      {
+        ...introInput,
+        messages: [
+          { direction: 'inbound', body: 'Hi there', sentAt: '2026-07-24T08:00:00+0000' },
+          { direction: 'inbound', body: INTRO, sentAt: '2026-07-24T09:00:00+0000' },
+        ],
+      },
+      index({}),
+    )
+    expect(backfillUpdates(calls).length).toBeGreaterThan(0)
+  })
+
   /** 我们自己发出去的模板不作数 —— 只认客人自己发的那条。 */
   it('出站方向的同样一段文字 → 不补', async () => {
     const calls = stubSupabase()
