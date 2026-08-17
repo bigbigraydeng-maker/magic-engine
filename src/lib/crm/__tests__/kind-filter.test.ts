@@ -178,4 +178,26 @@ describe('收信人只有一份', () => {
   it('不该群发的桶 → 一个收信人都没有', () => {
     expect(batchRecipients({ ...b, batch: 'call_one_by_one' })).toEqual([])
   })
+
+  /**
+   * 🔴 **说过「别再联系」的人，地址不许出现在群发清单里**
+   * （狄仁杰攻击验证 + Codex 复审 2026-08-17）。
+   *
+   * 这条路真正的发送动作是销售把剪贴板**粘进自己的邮箱** —— 服务端一个字
+   * 都拦不住。群发接口那套只管记不记账，管不了信发没发出去。页面上其它
+   * 三处已经把拒联客人的邮箱划掉了，唯独「复制这 N 个邮箱」这个出口没有。
+   */
+  it('🔴 被标「别再联系」的人不进群发地址', () => {
+    const withDnc = {
+      ...b,
+      people: [
+        { email: 'a@x.com', kind: 'retail' as const },
+        { email: 'dnc@x.com', kind: 'retail' as const, doNotContact: true },
+        { email: 'd@x.com', kind: 'retail' as const },
+      ],
+    }
+    expect(batchRecipients(withDnc).map((p) => p.email)).toEqual(['a@x.com', 'd@x.com'])
+    // 列头那份地址也是同一个函数出的，两边不许分叉。
+    expect(filterBucketByKind(withDnc, 'all').batchEmails).toEqual(['a@x.com', 'd@x.com'])
+  })
 })

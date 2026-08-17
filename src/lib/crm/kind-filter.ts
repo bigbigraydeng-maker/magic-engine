@@ -35,6 +35,18 @@ export interface KindedPerson {
    * 当天会收到一封面向他的群发信。
    */
   doneToday?: boolean
+  /**
+   * 他被标成「别再联系」。
+   *
+   * 🔴 **群发地址必须排掉他**（狄仁杰攻击验证 + Codex 复审 2026-08-17）。
+   * 真正把信发出去的动作是销售把剪贴板粘进自己的邮箱 —— 那一步没有任何
+   * 服务端闸拦得住。群发接口那套（分页 / 唯一排序键 / 读不到就整批不写）
+   * 只管**记不记账**，管不了**信发没发出去**。
+   *
+   * 所以这里是这条路上唯一的闸。缺省 `undefined` 视为「没拒联」——
+   * 但调用方拿到的 `Row` 一定带这个字段，见 `crm/page.tsx`。
+   */
+  doNotContact?: boolean
 }
 
 export interface KindedBucket<P extends KindedPerson> {
@@ -88,7 +100,12 @@ export function filterBucketByKind<P extends KindedPerson, B extends KindedBucke
  * 实际收件人和 CRM 记录对不上。而且那笔假触点会把他们的「最后来往时间」
  * 推到今天，明天在回捞桶里排到队尾。
  *
- * 两个条件缺一不可：**今天没处理过** + **有邮箱**。
+ * 三个条件缺一不可：**今天没处理过** + **没被标别再联系** + **有邮箱**。
+ *
+ * 🔴 第二条是 2026-08-17 补的。在它之前，一个明确说过「别再联系」的人
+ * **地址照旧出现在群发清单里** —— 而这条路真正的发送动作是销售把剪贴板
+ * 粘进自己的邮箱，服务端一个字都拦不住。页面上其它三处已经把他的邮箱
+ * 划掉了，唯独这个「复制这 N 个邮箱」的出口没有。
  */
 export function batchRecipients<P extends KindedPerson>(
   bucket: KindedBucket<P>,
@@ -97,7 +114,9 @@ export function batchRecipients<P extends KindedPerson>(
   // 返回类型带上 `email: string`，调用方就不用 `as string` 把 null 硬转过去了。
   // 那种 cast 在过滤条件哪天改了之后会静静放一个 null 过去，
   // 群发地址里出现一个空地址。
-  return bucket.people.filter((p): p is P & { email: string } => !p.doneToday && !!p.email)
+  return bucket.people.filter(
+    (p): p is P & { email: string } => !p.doneToday && !p.doNotContact && !!p.email,
+  )
 }
 
 /**
