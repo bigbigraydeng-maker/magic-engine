@@ -14,15 +14,33 @@ const dnc = (s: string) => classifyNote(s).do_not_contact
 
 describe('别再联系 —— 一条都不能漏', () => {
   it.each([
-    '7.14大瑞更新， 客户明确说了不要电话，只邮件联系',
     '客户直接说不需要联系',
     'do not follow up',
     'do not want to talk about it',
     'indian no need follow up',
     'does not want to talk',
-    'follow up with best of china neve been to China but do not like phone call',
   ])('抓到: %s', (note) => {
     expect(dnc(note)).toBe(true)
+  })
+
+  /**
+   * 🔴 **「不要电话 / 只邮件联系」不算划界限**（PO 2026-08-17 拍板）。
+   *
+   * 这两句说的是客人**想用哪个渠道**，不是「什么都别发给我」。判成拒联之后，
+   * 本轮新加的闸会连他明确要求的**邮件**一起关掉 —— 正好违背他的原话。
+   * PO 的决定：继续给他发邮件，留在邮件营销池里。
+   *
+   * 上面那两句原话（含仓库真实数据里的 `7.14大瑞更新`）从这一组移到了这里，
+   * **别把它们改回 true**；要让系统记住「别打电话」这个偏好，需要一个按渠道
+   * 的信号，见单独立的票。
+   */
+  it.each([
+    '7.14大瑞更新， 客户明确说了不要电话，只邮件联系',
+    '只邮件联系',
+    '不要打电话',
+    'follow up with best of china neve been to China but do not like phone call',
+  ])('渠道偏好不是拒联，照旧发邮件: %s', (note) => {
+    expect(dnc(note)).toBe(false)
   })
 
   /**
@@ -533,9 +551,10 @@ describe('英文划界词表整组退回了 —— 钉住「不认」，别再�
   })
 
   /** main 原有的那几条照旧成立 —— 这次删的只是本 PR 新加的那一组。 */
-  it('main 原有的词条一条没动', () => {
-    expect(classifyNote('客户明确说了不要电话，只邮件联系').do_not_contact).toBe(true)
+  /** main 原有的词条只动了「渠道偏好」那两条（PO 2026-08-17），其余一条没动。 */
+  it('main 原有的划界词条照旧成立', () => {
     expect(classifyNote('别再联系我').do_not_contact).toBe(true)
+    expect(classifyNote('客户直接说不需要联系').do_not_contact).toBe(true)
     expect(classifyNote('do not follow up').do_not_contact).toBe(true)
     expect(classifyNote('does not want to talk').do_not_contact).toBe(true)
   })
@@ -739,6 +758,16 @@ describe('修好退格符之后复活的词表，反过来咬了两口 —— �
     expect(classifyNote('Customer confirmed she is not interested in this tour').outcome).toBe(
       'not_interested',
     )
+  })
+
+  /**
+   * 🔴 第二口：`(now|finally).{0,20}(…)` 中间那段通配符会**吞掉否定词** ——
+   * `now not ready to book yet` 从 `now` 开始整段匹配，否定落在命中**内部**，
+   * 而否定判据只看命中之前那一段，看不见它。一个明确说「还没准备好下单」的
+   * 客人被读成「他现在就想订」，继续留在主动跟进名单里。已删掉那条。
+   */
+  it('🔴「now not ready to book yet」→ 暂时不考虑，不是想订了', () => {
+    expect(classifyNote('now not ready to book yet').outcome).toBe('not_interested_now')
   })
 
   it('真的要订的说法照旧认得（不是把整族删了）', () => {
