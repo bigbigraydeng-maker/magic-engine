@@ -58,6 +58,8 @@ interface ContactRow {
 }
 
 interface TouchRow {
+  /** 分页的唯一 tie-breaker —— 只按 `occurred_at` 排会漏行，见查询处。 */
+  id: string
   contact_id: string
   channel: string
   source: string | null
@@ -153,9 +155,22 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       fetchAll<TouchRow>((from, to) =>
         supabaseAdmin
           .from('contact_touchpoints')
-          .select('contact_id, channel, direction, occurred_at, summary, raw, metadata, source')
+          .select('id, contact_id, channel, direction, occurred_at, summary, raw, metadata, source')
           .eq('client_id', clientId)
           .order('occurred_at', { ascending: false })
+          /**
+           * 🔴 `id` 是唯一 tie-breaker，不能只按 `occurred_at` 排（狄仁杰复审 2026-08-17）。
+           *
+           * 这张表已经过 1000 行，`fetchAll` 会分页。而群发接口给**一整批最多
+           * 500 人写同一个 `occurred_at`** —— 大规模并列时间戳是我们自己造出来的。
+           * 并列的那一堆在不同 `range` 请求里可以换顺序，页与页之间就会重复或漏行。
+           * 漏掉某人唯一那条拒联触点，他就会重新出现在今天的名单上、卡片和抽屉里
+           * 电话邮箱重新可点、群发邮箱清单也会把他算进去。
+           *
+           * 同一个 PR 已经给 `touchpoints/batch`、`messenger/send`、
+           * `contact_stage_events` 三处补了这个键，独独漏了驱动整块看板的这一条。
+           */
+          .order('id', { ascending: true })
           .range(from, to),
       ),
       fetchAll<StageRow>((from, to) =>
@@ -274,10 +289,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
           // 存量里「其实是别再联系」的原话，读的时候重判一次 —— 词表改了
           // 存量不会自己回来（见 reclassifyStoredOutcome）。
           outcome:
-            reclassifyStoredOutcome((t.metadata?.outcome as string) ?? null, t.raw, {
-              direction: t.direction,
-              source: t.source,
-            }) ?? null,
+            reclassifyStoredOutcome((t.metadata?.outcome as string) ?? null, t.raw) ?? null,
           flagged: t.metadata?.do_not_contact === true,
           occurredAt: t.occurred_at,
         })),
@@ -806,21 +818,16 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       const meta = row?.stage ? stageMeta.get(row.stage) : undefined
       /**
        * 「别再联系」—— 抽屉靠它给取消入口，**分组也必须先看它**（见下面 group）。
-       * 提到这里成局部，是因为坏号分组要用同一个值，不能让它只挂在返回对象上。
+       *
+       * 🔴 **不要在这里重算一遍**（子牙复审 2026-08-17）。`c` 就是上面构造好的
+       * `ContactLike`，`c.doNotContact` 已经用同一个函数、同一份 `byContact`
+       * 算过了。重算的那 20 行是逐字复制 —— 以后有人只改上面那一处（换个
+       * `flagged` 来源、改重判方式），这里就悄悄不同步：于是「今天名单里被
+       * 排除」和「off-list 分到哪一组」分叉，一个说过「别再联系」的客人重新
+       * 落回「号码坏了」那组，而那组表头写着「补一个对的号就能继续跟」——
+       * 正是 `offListGroup` 一整个函数要防的事，会以最隐蔽的方式复发。
        */
-      const doNotContact = isDoNotContact(
-        row?.do_not_contact ?? false,
-        (byContact.get(c.id) ?? []).map((t) => ({
-          // 存量里「其实是别再联系」的原话读的时候重判一次。
-          outcome:
-            reclassifyStoredOutcome((t.metadata?.outcome as string) ?? null, t.raw, {
-              direction: t.direction,
-              source: t.source,
-            }) ?? null,
-          flagged: t.metadata?.do_not_contact === true,
-          occurredAt: t.occurred_at,
-        })),
-      )
+      const doNotContact = c.doNotContact
       return {
         contactId: c.id,
         name: contactCardTitle(c.displayName, firstSaid.get(c.id)),

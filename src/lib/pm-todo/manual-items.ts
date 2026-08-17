@@ -794,10 +794,7 @@ export async function pushDncReviewItems(
     dncList.push({
       // 存量里「其实是别再联系」的原话，读的时候重判一次。
       outcome:
-        reclassifyStoredOutcome((meta.outcome as string) ?? null, t.raw as string | null, {
-          direction: t.direction as string | null,
-          source: t.source as string | null,
-        }) ?? null,
+        reclassifyStoredOutcome((meta.outcome as string) ?? null, t.raw as string | null) ?? null,
       flagged: meta.do_not_contact === true,
       occurredAt: t.occurred_at as string,
     })

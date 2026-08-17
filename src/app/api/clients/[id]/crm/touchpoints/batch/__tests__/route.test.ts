@@ -86,15 +86,18 @@ describe('群发的备注永远推不出「别再联系」', () => {
   /**
    * 🔴 在**入口**挡掉，而不是在下游一处处补。上一版只写死了
    * `do_not_contact: false`，但 `outcome` 仍是 `'do_not_contact'` ——
-   * `isDoNotContact()` 同样认那个值；而且这条触点以 `source: 'me_manual'` 存，
-   * 读的时候还会被当成「代表客人意愿」再升级一次。
+   * `isDoNotContact()` 同样认那个值。
+   *
+   * 载体换成中文那句：本 PR 后来把新加的英文退订词表整组退回去了（PO 2026-08-17），
+   * 英文页脚现在压根不命中词表，用它测不到这道闸。一次最多 500 人，
+   * 而取消是一个一个点的 —— 误伤代价极不对称，这道闸必须有用例钉住。
    */
-  it('🔴 备注里带着退订页脚 → 整批不写，并告诉调用方换一句', async () => {
+  it('🔴 备注里带着拒联语义 → 整批不写，并告诉调用方换一句', async () => {
     stubDb([{ id: 'c1' }, { id: 'c2' }])
     const res = await POST(
       req({
         contactIds: ['c1', 'c2'],
-        note: 'Sent newsletter; you can unsubscribe from the list at any time',
+        note: '群发了八月行程；客户说别再联系的请单独处理',
       }),
       ctx,
     )

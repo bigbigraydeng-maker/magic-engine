@@ -11,7 +11,7 @@
 import React from 'react'
 import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { ReachAction, type Row } from '../page'
+import { ReachAction, type Row } from '../_components/ReachAction'
 
 const row = (over: Partial<Row> = {}): Row => ({
   contactId: 'c1',

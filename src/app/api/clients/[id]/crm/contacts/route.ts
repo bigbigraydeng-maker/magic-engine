@@ -172,10 +172,7 @@ export async function GET(
           // 存量里「其实是别再联系」的原话，读的时候重判一次 —— 词表改了
           // 存量不会自己回来（见 reclassifyStoredOutcome）。
           outcome:
-            reclassifyStoredOutcome((t.metadata?.outcome as string) ?? null, t.raw, {
-              direction: t.direction,
-              source: t.source,
-            }) ?? null,
+            reclassifyStoredOutcome((t.metadata?.outcome as string) ?? null, t.raw) ?? null,
           flagged: t.metadata?.do_not_contact === true,
           occurredAt: t.occurred_at,
         })),

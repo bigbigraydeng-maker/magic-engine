@@ -38,8 +38,6 @@
  */
 
 import { z } from 'zod'
-// 人工纠正那条判决 —— 判据和常量都在 dnc.ts，这里只用它的名字。
-import { DNC_CLEARED_OUTCOME } from './dnc'
 
 export const CONTACT_OUTCOMES = [
   'no_answer',      // 打了没人接 / 语音信箱 / 打不通
@@ -101,70 +99,28 @@ const DNC_PATTERNS: RegExp[] = [
   /does\s*not\s*want\s*to\s*talk/i,
   /do\s*not\s*(like|want)\s*(phone|call)/i,
   /**
-   * 🔴 **英文里最常见的那几句划界，原先一条都没覆盖**（魏征复审 2026-08-16，
-   * 直接跑 `classifyNote` 实测）。
+   * 🔴 **英文的划界说法，本轮整组退回去了** —— 别在这里加词，去 issue #1019。
    *
-   * 实测原先的下场：
-   *   `stop contacting me`           → `spoke`
-   *   `take me off your list`        → `spoke`
-   *   `unsubscribe me`               → `spoke`
-   *   `remove me from your database` → `spoke`
-   *   `do not call me again`         → `callback_set`（还被当成约了回电！）
+   * 2026-08-16 这一组曾加过六条（`do not call me again` / `stop contacting me` /
+   * `take me off your list` / `unsubscribe` / `opt out` / `no further contact`），
+   * 每一条都补过限定、都有用例和变异验证。魏征 2026-08-17 复审在最新 head 上
+   * 逐句实跑，**六条全部还在误伤真实客人**，而且是一家旅游公司最日常的话：
    *
-   * `spoke` 会走到兜底桶「聊过了，没下文」，文案是「挑等得最久的回一句」——
-   * 也就是说，一个写下「stop contacting me」的客人，被放进**今天该打电话的
-   * 那一桶**。这不是准确率问题，这是红线本身。
+   *   `take me off the waiting list for the March departure`   （候补位释放）
+   *   `remove me from the group list, I want a private tour`   （**正在加钱升级**）
+   *   `remove her from the rooming list, she shares with him`  （排房）
+   *   `Yes please book us in! … Unsubscribe from the list here` （客人回信引了我们自己的页脚）
+   *   `do not call me tomorrow` / `don't email me next week`    （改约时间）
+   *   `do not call him at work, call the home number`          （**给了另一个号码**）
+   *   `do not phone her, she is deaf, email only`              （只走邮件 → 连邮件一起停）
    *
-   * `don't` / `dont` 都要认：`normalise()` 只做小写和空白，不动撇号。
+   * 上面每一句在 `origin/main` 上都是普通记一笔。也就是说这组词表**净新增**了
+   * 一批「把要下单的客人永久封死」的判定 —— 判成拒联 = 任何渠道都不再发消息，
+   * 解除只能一个一个手动点。
    *
-   * ⚠️ **这一组后来被砍回去两条**（PO 2026-08-17 拍板，见文件头「为什么这组词表
-   * 停在这里」）—— `stop (contacting|emailing)` 和裸的 `unsubscribe me` 已经删掉，
-   * 上面那几行实测结果里带 ★ 的两句因此**又回到 `spoke`**，与线上现状一致。
-   * 想补回来请走 issue #1019，不要在这里加词。
-   *   ★ `stop contacting me` · ★ `unsubscribe me`
+   * PO 2026-08-17 的原则是「判不准的整条退回线上现有行为，不再靠加词调阈值」。
+   * 按同一条原则，这组整体删除。**下面留下的是 `origin/main` 原有的那几条。**
    */
-  /(do\s*not|don'?t)\s*(ever\s*)?(call|contact|phone|ring|email|message)\s*(me|him|her|them|again)/i,
-  /**
-   * ⚠️ **必须限定在「名单 / 数据库」语境**（Codex 复审 2026-08-16）。
-   *
-   * 原先写成 `(take|remove) (me|him|…) (off|from)\b`，在一家**旅游公司**的
-   * 备注里正好命中最正常不过的接送需求 —— 实测：
-   *   `take me from Auckland to Beijing`  → do_not_contact
-   *   `can you take me off at the hotel`  → do_not_contact
-   * 而且这个结果会被 `reclassifyStoredOutcome()` 应用到存量触点上，
-   * 一个真实询价的客人就此被永久禁止联系。
-   *
-   * 所以后面必须真的出现退订的对象（名单 / 数据库 / 邮件列表…）。
-   */
-  /(take|remove)\s*(me|him|her|them)\s*(off|from)\b[^.!?\n]{0,20}\b(list|database|mailing|email list|records?|system)\b/i,
-  /**
-   * ⚠️ 「unsubscribe」**不能裸词匹配**（Codex 复审 2026-08-16）：我们自己群发的
-   * 邮件页脚就写着「click here to unsubscribe」，而 `mail-ingest` 把**出站**
-   * 邮件也存进 `raw`。裸词会把我们自己的合规文案读成客人拒联。
-   * 必须是他在**要求**退订，并且排除「did not unsubscribe」这类否定。
-   *
-   * 🔴 **`unsubscribe me` 这一支已经删掉**（PO 2026-08-17）：它把
-   * `I never asked you to unsubscribe me` 判成拒联，而否定隔着一整个谓语
-   * （`asked you to `，13 字符），要接住只能把否定窗口调宽到 13 —— 同时还得
-   * 窄到挡住 `interested and please`（22 字符）。**在两个对抗样本之间调一个
-   * 数字**，正是这轮要停掉的做法。删掉后这句回到 `spoke`，与 main 一致
-   * （main 根本没有退订词表）。代价：`please unsubscribe me` 也认不出来了。
-   */
-  /(want\s*to\s*unsubscribe|unsubscribe\s*from\s*(your|the)\s*(list|emails?|mailing))/i,
-  /**
-   * ⚠️ 「opt out」同样**不能裸词**（Codex 复审 2026-08-16）：旅游备注里
-   * `opted out of the optional insurance` / `opted out of the helicopter
-   * activity` 说的是他不参加某个自费项目，跟「别再联系我」毫无关系。
-   * 必须明确指向营销联系本身。
-   */
-  /opt(ed)?\s*(me|him|her|them|us)?\s*out\s*(of\s*)?(all\s*)?(your\s*|our\s*|the\s*)?(email|mail|marketing|newsletter|communication|contact|promo)/i,
-  /**
-   * ⚠️ 「no further contact」也不能裸词（Codex 复审 2026-08-16）：销售手记里
-   * `No further contact since quote was sent`（报价后还没再联系上）和
-   * `No more contact details were provided`（没留更多联系方式）说的都是
-   * **现状**，不是客人的要求。必须是他在**要求**停止联系。
-   */
-  /((wants?|requests?|asked\s*for|please)\s*)no\s*(further|more)\s*contact|no\s*(further|more)\s*contact\s*(please|requested|wanted)/i,
   // 🔴 `not intending to go` **从这一组移走了**（Codex 复审 2026-08-16）。
   //
   // 它说的是「我不打算去」，不是「别再联系我」。而这一组会把
@@ -665,60 +621,28 @@ export function classifyNote(raw: string): {
 export function reclassifyStoredOutcome(
   outcome: string | null | undefined,
   raw: string | null | undefined,
-  /**
-   * 这条 `raw` 是**谁写的**。
-   *
-   * 🔴 不看这个就会把我们自己的话当成客人的（Codex 复审 2026-08-16）：
-   * `mail-ingest` 把**出站**邮件也原样存进 `raw`，而我们群发的页脚里写着
-   * 「click here to unsubscribe」—— 读的时候重判会把这句合规文案当成客人
-   * 要求退订，于是今日名单、群发、私信发送闸一起把他永久挡住。
-   *
-   * 只认两种「代表客人意愿」的记录：
-   *   · `direction: 'inbound'` —— 客人自己写的
-   *   · `source: 'me_manual'`  —— 销售手打的那句「客户说别再打电话」
-   * 其余（同步进来的出站邮件 / 私信）一律不重判。
-   *
-   * 不传这个参数时**不做拒联升级**（保守），只保留原有的「明确不要 → 暂时不考虑」。
-   */
-  by?: { direction?: string | null; source?: string | null },
 ): string | null | undefined {
   if (!raw) return outcome
-  const fromCustomer = by?.direction === 'inbound' || by?.source === 'me_manual'
 
   /**
-   * 🔴 **存量里那些「其实是别再联系」的记录，必须读的时候认出来**
-   * （Codex 复审 2026-08-16）。
+   * 🔴 **存量拒联升级这一步也退回去了**（魏征复审 2026-08-17，PO「退」的同一条原则）。
    *
-   * 这一轮给词表补了 `stop contacting me` / `take me off your list` /
-   * `unsubscribe` / `do not call me again` 那一族 —— 但那只对**以后**写的触点
-   * 生效。此前这些原话被存成了 `spoke`（还有的存成 `callback_set`），镜像列
-   * 也是 false。读的时候不重判的话，一个两个月前写下「stop contacting me」
-   * 的客人**照旧在今天的名单上**，而且能穿过这一轮刚加的私信发送闸。
-   * 词表改了、存量不回来 —— 这个坑本文件下面那段已经记过一次。
+   * 曾经这里做过「存量原话重判成拒联」：`fromCustomer && classifyNote(raw).do_not_contact
+   * → 'do_not_contact'`。立意是对的 —— 词表改了，存量不会自己回来。
+   * 但它同时是**所有误判的放大器**：任何一条判不准的词，不再只影响以后写的笔记，
+   * 而是在每次读取时把**全库存量**重放成永久拒联。实跑出来的代价：
    *
-   * **只朝一个方向升级**：非拒联 → 拒联。反过来绝不做 —— 那等于让一段正则
-   * 去解除一条已经成立的拒联，方向恰好反了（见 `lib/crm/dnc` 的同一条推理）。
+   *   销售手记「别再联系那家酒店，已经换了」   → 写下这句话的**客人**被封死
+   *   销售手记「不需要联系保险，客户自己买了」 → 同上
+   *   销售手记「别再打给她老公了，打她本人」   → 同上
+   *
+   * 这三句命中的是 `origin/main` 原有的中文词表，说的都是**第三方**（酒店 / 保险 /
+   * 她先生），不是客人在划界限。main 上这类误判只影响新写的那一条触点；
+   * 加了重放之后，它们会在每次读取时把人永久挡在所有渠道之外。
+   *
+   * 要做对，得先能分清「他在说谁」—— 那正是 issue #1019 换判据要解决的事。
+   * 在那之前，这一步整个退回：**只保留原有的「明确不要 → 暂时不考虑」**。
    */
-  /**
-   * ⚠️ **人工纠正那条触点绝不能被这一步反噬**（Codex 复审 2026-08-16）。
-   *
-   * 取消接口写下的 `raw` 默认就是「人工复核：这条『别再联系』判错了」——
-   * 里面**含着**「别再联系」四个字，正好命中上面那条中文词表。不排除的话，
-   * FDE 点完「放回名单」，这条纠正当场被读回成 `do_not_contact`：黄条刷新
-   * 就回来、私信照旧发不出去、群发照旧跳过他 —— **取消这个功能整个失效**，
-   * 而且是被我自己这一步打掉的。
-   *
-   * `dnc_cleared` 是**人明确下的判决**，比任何词表都硬（同 `lib/crm/dnc`）。
-   */
-  if (
-    fromCustomer &&
-    outcome !== 'do_not_contact' &&
-    outcome !== DNC_CLEARED_OUTCOME &&
-    classifyNote(raw).do_not_contact
-  ) {
-    return 'do_not_contact'
-  }
-
   if (outcome !== 'not_interested') return outcome
   return classifyNote(raw).outcome === 'not_interested_now' ? 'not_interested_now' : outcome
 }
