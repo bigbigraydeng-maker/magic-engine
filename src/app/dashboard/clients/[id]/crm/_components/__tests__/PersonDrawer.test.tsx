@@ -206,3 +206,19 @@ describe('坏号 + 拒联：抽屉不给「改用邮箱/私信」的换渠道建
     await waitFor(() => expect(altChannelBanner()).toBeTruthy())
   })
 })
+/**
+ * 🔴 拒联的人，抽屉里**任何一句把销售引向别的渠道的话**都不能出现
+ * （Codex 复审 2026-08-17）。没有电话邮箱的人里，大量是只有 Facebook 身份的
+ * 联系人 —— 正是最容易撞上这一条的那一批。
+ */
+describe('拒联 + 没留电话邮箱：不许再提「只能在私信里回他」', () => {
+  it('🔴 拒联时那句话不出现', () => {
+    draw({ doNotContact: true, phone: null, email: null })
+    expect(screen.queryByText(/只能在私信里回他/)).toBeNull()
+  })
+
+  it('没拒联时照旧出现 —— 这句话本身是有用的', () => {
+    draw({ doNotContact: false, phone: null, email: null })
+    expect(screen.getByText(/只能在私信里回他/)).toBeTruthy()
+  })
+})

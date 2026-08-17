@@ -218,7 +218,11 @@ export function PersonDrawer({
                 onCleared={() => setClearedDncId(row.contactId)}
               />
             )}
-            {!row.phone && !row.email && (
+            {/* 🔴 拒联的人这句话**不能出现**（Codex 复审 2026-08-17）。
+                「任何渠道都不许再发」包括私信 —— 而这句正好把销售往私信引，
+                跟同一屏上方那条黄条直接打架。没有电话邮箱的人里，大量是只有
+                Facebook 身份的联系人，正是最容易撞上这一条的那一批。 */}
+            {!isDnc && !row.phone && !row.email && (
               <span className="text-xs text-me-charcoal/45">没留电话和邮箱，只能在私信里回他</span>
             )}
           </div>
