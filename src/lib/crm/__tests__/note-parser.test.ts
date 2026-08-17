@@ -730,6 +730,35 @@ describe('别再联系：只是这一阵别打，不是永久', () => {
  * `ready to book` 会把「**not** ready to book yet」判成「他现在就想订」。
  * 同一条否定判据兜住 —— 这就是「统一语义」该起的作用。
  */
+describe('修好退格符之后复活的词表，反过来咬了两口 —— 钉住已经拿掉的那两条', () => {
+  /**
+   * 🔴 裸 `confirmed` 排在「明确不要了」**前面**，一句「客户确认她不想参加」
+   * 会被读成「聊过了」，人继续留在跟进名单上，明天还被打电话。
+   */
+  it('🔴「Customer confirmed she is not interested in this tour」→ 明确不要了', () => {
+    expect(classifyNote('Customer confirmed she is not interested in this tour').outcome).toBe(
+      'not_interested',
+    )
+  })
+
+  it('真的要订的说法照旧认得（不是把整族删了）', () => {
+    expect(classifyNote('customer is going ahead').outcome).toBe('spoke')
+    expect(classifyNote('now ready to book').outcome).toBe('spoke')
+  })
+
+  /**
+   * 🔴 中文那条负向前瞻写在词首、往**后**看：后半句出现「我们」就把整条否掉，
+   * 一个真的转投别家的客人退化成「聊过了」。已撤回 main 的写法。
+   */
+  it('🔴「客户找了另一家，我们可以结案了」→ 明确不要了', () => {
+    expect(classifyNote('客户找了另一家，我们可以结案了').outcome).toBe('not_interested')
+  })
+
+  it('单说「找了另一家」照旧是明确不要了', () => {
+    expect(classifyNote('客户找了另一家').outcome).toBe('not_interested')
+  })
+})
+
 describe('「他现在就想订」同样怕被否定', () => {
   it('🔴「not ready to book yet」→ 暂时不考虑，不是想订了', () => {
     expect(classifyNote('not ready to book yet').outcome).toBe('not_interested_now')
