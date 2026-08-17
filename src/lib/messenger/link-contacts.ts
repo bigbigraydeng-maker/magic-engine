@@ -398,31 +398,47 @@ async function attachByUniqueFullName(
  * 每次同步都跑（不只在新接上的时候）—— 存量那批人的档案也要因此补齐。
  * 都是幂等写，跑一百遍结果一样。
  */
+/** 档案上现有的主联系方式 —— 决定旧值能不能挂成身份 / 写进档案。 */
+interface ContactPrimaryFields {
+  primary_phone: string | null
+  primary_email: string | null
+}
+
 export async function backfillFromLeadIntro(
   input: Pick<LinkConversationInput, 'clientId' | 'messages'>,
   contactId: string,
 ): Promise<void> {
   // 只认**客人自己**发的那条。我们自己发出去的模板不作数。
-  let fields: ReturnType<typeof parseLeadIntroMessage> = null
+  // 各字段各取各的最新非空值 —— 用几个标量累计，不套 union，读起来也直白。
+  let gotIntro = false
+  let leadName: string | null = null
+  let leadPhone: string | null = null
+  let leadEmail: string | null = null
   let seenInbound = false
+
   for (const m of input.messages) {
     if (m.direction !== 'inbound') continue
     /**
-     * 🔴 两条纪律都在这一行里（Codex 复审 2026-08-17，两轮）：
+     * 🔴 三条纪律都在这一段里（Codex 复审 2026-08-17，三轮）：
      *
      * 1. 「两条标准字段」那条兜底**只对第一条入站消息成立**。对话中途客人转发
      *    同行者的 `Name: … / Phone: …` 恰好也是两条字段 —— 认了就把**别人的
      *    号码**写进这个人的档案。后面的消息必须带那句表单问候语。
-     * 2. **取最后一条、不是第一条**。同一个线程里客人可能重填过表单（第一次填错
-     *    号码、第二次改对）。消息按时间升序传进来，命中就 `break` 会把最早那个
-     *    旧值永久写进档案并注册成身份 —— 而且以后每轮同步都命中同一条旧消息，
-     *    正确的新值永远没机会。所以扫完，留最后一条。
+     * 2. **不是取第一条**。同一线程里客人可能重填过表单（第一次填错、第二次改对），
+     *    命中就停会把旧值永久写进档案，而且以后每轮都命中同一条旧消息。
+     * 3. **也不是整对象取最后一条**：后一张表单可能只更正了电话，整对象替换会
+     *    把前一张里那个有效的邮箱丢掉，而邮箱那一栏仍然空着、永远补不回来。
+     *    所以**按字段**各取各的最新非空值。
      */
     const parsed = parseLeadIntroMessage(m.body, { requireMarker: seenInbound })
     seenInbound = true
-    if (parsed) fields = parsed
+    if (!parsed) continue
+    gotIntro = true
+    if (parsed.name) leadName = parsed.name
+    if (parsed.phone) leadPhone = parsed.phone
+    if (parsed.email) leadEmail = parsed.email
   }
-  if (!fields) return
+  if (!gotIntro) return
 
   /**
    * 🔴 **按客户所在市场补国码**（Codex 复审 2026-08-17）。
@@ -457,10 +473,10 @@ export async function backfillFromLeadIntro(
    * 已经是国际格式（`+…`）的号码不受影响 —— 那种不需要猜国码。
    */
   const phone = market
-    ? normalisePhone(fields.phone, market)
-    : normalisePhone(fields.phone?.trim().startsWith('+') ? fields.phone : null)
-  const email = normaliseEmail(fields.email)
-  if (!phone && !email && !fields.name) return
+    ? normalisePhone(leadPhone, market)
+    : normalisePhone(leadPhone?.trim().startsWith('+') ? leadPhone : null)
+  const email = normaliseEmail(leadEmail)
+  if (!phone && !email && !leadName) return
 
   /**
    * 🔴 **档案上已经有一个（后来更正过的）值时，旧值连身份都不该挂**
@@ -474,14 +490,14 @@ export async function backfillFromLeadIntro(
    * 所以先读一次现值：**那一栏是空的、或者跟解析出来的一模一样**，才挂这个身份。
    * 读不出来一律跳过（跟其它几处一样，宁可少补）。
    */
-  let current: { primary_phone: string | null; primary_email: string | null } | null = null
+  let current: ContactPrimaryFields | null = null
   try {
     const { data, error } = await supabaseAdmin
       .from('contacts')
       .select('primary_phone, primary_email')
       .eq('id', contactId)
       .maybeSingle()
-    if (!error) current = data as typeof current
+    if (!error) current = data as ContactPrimaryFields | null
   } catch {
     // current 留 null → 下面一律跳过
   }
@@ -563,7 +579,7 @@ export async function backfillFromLeadIntro(
 
   // 名字：Facebook 昵称常常是占位符或只有名，表单里那个是他自己填的全名。
   // 同样只在空着的时候写。
-  const name = fields.name?.trim()
+  const name = leadName?.trim()
   if (name) {
     await supabaseAdmin
       .from('contacts')

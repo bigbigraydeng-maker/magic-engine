@@ -182,6 +182,18 @@ export async function syncClientMessenger(
   const pageId = client.facebook_page_id
   if (!pageId) return { ...base, skipped: 'no_page_id' }
 
+  /**
+   * 🔴 **本地补档案要跑在 Meta 凭证闸之前**（Codex 复审 2026-08-17）。
+   *
+   * 这一步**只读我们自己的数据库**（已经存下来的私信正文），跟 Meta 通不通没关系。
+   * 原先放在函数末尾，于是 token 过期 / 没授权 / 换不到 Page token 的客户会在
+   * 上面几行提前 return —— 他们的 CRM 卡片就一直缺着电话邮箱，而那些号码明明
+   * 早就躺在消息表里。授权断掉的客户恰恰最需要这条本地路还在跑。
+   *
+   * 函数自己吞异常，失败不影响下面的同步。
+   */
+  const details = await backfillLeadIntroDetails(client.id)
+
   // Preferred: a Page token stored by the "连接 Meta" button. Falls back to
   // deriving one from an env-var user token, which only works when that
   // identity holds a role on the Page — the gap that left 30 Kiteroa skipping
@@ -246,16 +258,6 @@ export async function syncClientMessenger(
     // 一次重新处理。放在实时同步之后，且复用同一个 index（刚建的人已经在里面）。
     const sweep = await backfillUnlinkedConversations(client.id, index)
 
-    /**
-     * 补档案：把「点私信」开场白里的电话邮箱补给**已经挂上人**的老对话。
-     *
-     * 上面两条路都够不到那批人 —— 实时同步只看水位线之后的线程，`sweep` 只扫
-     * 还没挂上人的对话。而 PM 2026-08-17 看到的正是这批：卡片写「没留电话」，
-     * 号码就在第一条私信里躺着。所以这一条按**人**扫（谁的档案还缺栏就翻他的私信）。
-     *
-     * 失败不影响本轮同步结果 —— 函数内部自己吞异常并计数。
-     */
-    const details = await backfillLeadIntroDetails(client.id)
 
     return {
       ...base,

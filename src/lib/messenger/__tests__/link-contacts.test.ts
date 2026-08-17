@@ -786,6 +786,30 @@ Email: jordan.avery.example@example.com`
   })
 
   /**
+   * 🔴 **两张表单各只补一半 → 按字段各取各的最新非空值**（Codex 复审 2026-08-17）。
+   * 整对象取最后一条的话，后一张只更正电话时，前一张里那个有效的邮箱会被丢掉，
+   * 而邮箱那一栏仍然空着、下一轮又选中同一个末次对象，永远补不回来。
+   */
+  it('🔴 后一张表单只带电话 → 前一张的邮箱不能丢', async () => {
+    const calls = stubSupabase()
+    const second =
+      'Hello! I filled out your form and would like to know more about your business.\nPhone number: 021 555 9999'
+    await linkMessengerConversation(
+      {
+        ...introInput,
+        messages: [
+          { direction: 'inbound', body: INTRO, sentAt: '2026-07-24T08:00:00+0000' },
+          { direction: 'inbound', body: second, sentAt: '2026-07-25T08:00:00+0000' },
+        ],
+      },
+      index({}),
+    )
+    const byKind = new Map(calls.identityUpserts.map((i) => [i.kind, i.value]))
+    expect(byKind.get('phone')).toBe('+64215559999')
+    expect(byKind.get('email')).toBe('jordan.avery.example@example.com')
+  })
+
+  /**
    * 🔴 **档案上已有一个更正过的号码时，旧号码连身份都不该挂**
    * （Codex 复审 2026-08-17）。身份表是认人用的键 —— 那个号码以后被重新分配、
    * 或当初就填错，`resolveContact` 会把带着它的新线索认成这个人，甚至自动合并
