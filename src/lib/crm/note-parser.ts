@@ -365,6 +365,26 @@ const POSITIVE_INTENT_NOW: RegExp[] = [
   /(现在|如今|这次|目前)[^不没未别无]{0,4}(想|要|打算|准备)(报名|订|定|买|走|去|出发|确认)/,
   /(决定|确定)了?[^不没未别无]{0,4}(要|想)?(报名|订|定|买|走|去|出发)/,
   /**
+   * 🔴 **英文那三条整组拿掉了**（Codex 复审 2026-08-17，第三次同族）。
+   *
+   * 它们在 `origin/main` 上本来就是**死的** —— `\b` 被写成了退格符，从来没生效过。
+   * 本轮修好边界让它们复活，随即连咬三口，每一口都是**把一个明确的拒绝读成
+   * 「聊过了」**，人继续留在跟进和群发名单里：
+   *
+   *   `Customer confirmed she is not interested in this tour`        （裸 confirmed）
+   *   `now not ready to book yet`                                    （通配符吞掉否定）
+   *   `Customer is not interested in going ahead with the tour`      （否定隔着 interested in）
+   *
+   * 根子是位置：这一组排在「明确不要了」**前面**，任何一次否定没看准，
+   * 就直接短路掉后面的拒绝判据。
+   *
+   * 而且**拿掉它一点东西都不丢**：这一支返回的就是 `spoke`，跟兜底同一个值 ——
+   * 它今天唯一的作用就是**阻止**后面判出软拒绝 / 明确不要，正好是 bug 本身。
+   * 真正的「他现在就想订」需要一个独立信号（ROADMAP M2.7j），不是靠这几个词。
+   *
+   * 中文那两条锚点是对的（中间不许夹否定词），保留。
+   */
+  /**
    * ⚠️ **`(now|finally).{0,20}(…)` 这条已经拿掉**（Codex 复审 2026-08-17）。
    *
    * 中间那段通配符会**吞掉否定词**：`now not ready to book yet` 从 `now` 开始
@@ -379,7 +399,7 @@ const POSITIVE_INTENT_NOW: RegExp[] = [
    * （这一族在 main 上本来是死的 —— `\b` 被写成了退格符。修好边界让它复活之后，
    * 它连着咬了两口：裸 `confirmed` 一口，这条通配符一口。）
    */
-  /\bready to (book|pay|confirm)\b/i,
+
   /**
    * ⚠️ **裸的 `confirmed` 已经拿掉**（Codex 复审 2026-08-17）。
    *
@@ -389,7 +409,7 @@ const POSITIVE_INTENT_NOW: RegExp[] = [
    * 一个明确说不要的客人因此继续留在跟进名单上，明天还会被打电话。
    * `going ahead` / `will book` 只会出现在真的要订的语境里，保留。
    */
-  /\b(going ahead|will book)\b/i,
+
 ]
 
 /**

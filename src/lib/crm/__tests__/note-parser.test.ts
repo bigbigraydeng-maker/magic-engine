@@ -749,7 +749,7 @@ describe('别再联系：只是这一阵别打，不是永久', () => {
  * `ready to book` 会把「**not** ready to book yet」判成「他现在就想订」。
  * 同一条否定判据兜住 —— 这就是「统一语义」该起的作用。
  */
-describe('修好退格符之后复活的词表，反过来咬了两口 —— 钉住已经拿掉的那两条', () => {
+describe('修好退格符之后复活的英文词表咬了三口 —— 整组已拿掉，钉住它', () => {
   /**
    * 🔴 裸 `confirmed` 排在「明确不要了」**前面**，一句「客户确认她不想参加」
    * 会被读成「聊过了」，人继续留在跟进名单上，明天还被打电话。
@@ -770,9 +770,29 @@ describe('修好退格符之后复活的词表，反过来咬了两口 —— �
     expect(classifyNote('now not ready to book yet').outcome).toBe('not_interested_now')
   })
 
-  it('真的要订的说法照旧认得（不是把整族删了）', () => {
+  /**
+   * 🔴 第三口：`going ahead` —— 否定隔着 `interested in`（超过距离阈值），
+   * 于是「客户不想继续办这个团」被读成「聊过了」。
+   *
+   * 三口下来结论明确：**整组英文拿掉**。它们在 main 上本来是死的（退格符），
+   * 而且这一支返回的就是 `spoke`、跟兜底同一个值 —— 唯一作用是短路掉后面的
+   * 拒绝判据，正好是 bug 本身。拿掉不丢任何东西。
+   */
+  it('🔴「Customer is not interested in going ahead with the tour」→ 明确不要了', () => {
+    expect(classifyNote('Customer is not interested in going ahead with the tour').outcome).toBe(
+      'not_interested',
+    )
+  })
+
+  it('英文正向词拿掉之后，落点跟 main 一致（本来就是 spoke）', () => {
     expect(classifyNote('customer is going ahead').outcome).toBe('spoke')
     expect(classifyNote('now ready to book').outcome).toBe('spoke')
+  })
+
+  /** 中文那两条锚点是对的（中间不许夹否定词），没动。 */
+  it('中文正向 / 否定照旧分得开', () => {
+    expect(classifyNote('客户现在想订了').outcome).toBe('spoke')
+    expect(classifyNote('客户目前没打算去').outcome).toBe('not_interested_now')
   })
 
   /**
