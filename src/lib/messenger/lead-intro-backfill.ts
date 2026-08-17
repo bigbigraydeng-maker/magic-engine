@@ -27,19 +27,14 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { backfillFromLeadIntro } from '@/lib/messenger/link-contacts'
 
 /**
- * 一轮扫多少人。
- *
- * ⚠️ **这里没有游标，所以上限必须盖得住整个候选集**（Codex 复审 2026-08-17）。
- * 候选集是「档案还缺电话或邮箱的人」—— 补上的人会自己离开这个集合，但**补不上的
- * 人（没有私信 / 没有开场白）会永远留在里面**。批次一旦小于候选集，每小时捞回来
- * 的都是同一批补不上的人，后面的人永远轮不到 —— 那就成了「看起来在跑，其实一直
- * 在原地」。
- *
- * CTS 现在 583 人、其中只有 Facebook 身份的约 110 人，300 这个上限盖得住。
- * 客户规模再涨就必须换成持久化游标或给「试过但补不上」打标 —— 已登记，
- * 不在这一版做（那要么加列要么加表，是设计改动）。
+ * 一页取多少人。**不是每轮的上限** —— 见下面为什么必须扫完。
  */
-const BATCH = 300
+const PAGE = 200
+
+/**
+ * 一轮最多翻多少页的安全阀。真到这个量级说明客户规模已经变了，该换做法。
+ */
+const MAX_PAGES = 25
 
 export interface LeadIntroBackfillResult {
   /** 这一轮真正翻过私信的人数。 */
@@ -58,9 +53,21 @@ interface MessageRow {
   sent_at: string
 }
 
+/**
+ * ⚠️ **必须一轮扫完，不能只取前 N 个**（Codex 复审 2026-08-17，两轮）。
+ *
+ * 候选集是「档案还缺电话或邮箱的人」。补上的人会自己离开这个集合，但**补不上
+ * 的人（没有私信 / 没有开场白 / 号码归了别人）会永远留在里面**。只取前 N 个的
+ * 话，每小时捞回来的都是同一批补不上的人，后面的人永远轮不到 —— 看起来在跑，
+ * 其实一直在原地。而且候选集不止「只有 Facebook 身份」那批，是**所有**缺栏的人。
+ *
+ * 没有持久化游标可用（那要加列或加表，是设计改动），所以这里按 `id` 稳定排序
+ * 一页页扫完。代价是每轮会重扫那些补不上的人 —— CTS 这个量级（几百人）可以接受，
+ * 真到需要省这几百次查询的规模，就该换成给「试过补不上」打标。
+ */
 export async function backfillLeadIntroDetails(
   clientId: string,
-  batch: number = BATCH,
+  page: number = PAGE,
 ): Promise<LeadIntroBackfillResult> {
   const empty: LeadIntroBackfillResult = { scanned: 0, matched: 0 }
 
@@ -68,19 +75,30 @@ export async function backfillLeadIntroDetails(
   //
   // ⚠️ 整段包在 try 里：这是同步的**附加**步骤，它以任何方式失败（读报错、
   // 客户端不支持某个筛法、网络抖动）都不能让本轮同步的结果作废。
-  let contacts: ContactRow[]
+  const contacts: ContactRow[] = []
   try {
-    const { data, error } = await supabaseAdmin
-      .from('contacts')
-      .select('id')
-      .eq('client_id', clientId)
-      .or('primary_phone.is.null,primary_email.is.null')
-      .limit(batch)
-    if (error) {
-      console.error('[messenger/lead-intro-backfill] 读联系人失败:', error.message)
-      return empty
+    for (let p = 0; p < MAX_PAGES; p++) {
+      const { data, error } = await supabaseAdmin
+        .from('contacts')
+        .select('id')
+        .eq('client_id', clientId)
+        .or('primary_phone.is.null,primary_email.is.null')
+        // 稳定排序 —— 没有它，分页边界上的行会在两次请求间换位，重复或漏人。
+        .order('id', { ascending: true })
+        .range(p * page, p * page + page - 1)
+      if (error) {
+        console.error('[messenger/lead-intro-backfill] 读联系人失败:', error.message)
+        break
+      }
+      const rows = (data ?? []) as ContactRow[]
+      contacts.push(...rows)
+      if (rows.length < page) break
+      if (p === MAX_PAGES - 1) {
+        console.warn(
+          `[messenger/lead-intro-backfill] client ${clientId} 候选人超过 ${MAX_PAGES * page}，本轮未扫完`,
+        )
+      }
     }
-    contacts = (data ?? []) as ContactRow[]
   } catch (err) {
     console.error(
       '[messenger/lead-intro-backfill] 读联系人抛异常:',

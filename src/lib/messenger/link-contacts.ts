@@ -424,19 +424,31 @@ export async function backfillFromLeadIntro(
    *
    * 读不到就按 NZ（跟这个函数以前的行为一致，不因为读配置失败而整段罢工）。
    */
-  let market: 'NZ' | 'AU' = 'NZ'
+  let market: 'NZ' | 'AU' | null = null
   try {
-    const { data } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from('clients')
       .select('country')
       .eq('id', input.clientId)
       .maybeSingle()
-    if ((data as { country?: string } | null)?.country === 'AU') market = 'AU'
+    const country = (data as { country?: string } | null)?.country
+    if (!error && (country === 'AU' || country === 'NZ')) market = country
   } catch {
-    // 同上：读不到按 NZ
+    // 读不到 → market 留 null，下面按「不确定」处理
   }
 
-  const phone = normalisePhone(fields.phone, market)
+  /**
+   * 🔴 **市场认不出来就不写电话**（Codex 复审 2026-08-17）。
+   *
+   * 原先读失败时退回 NZ —— 那会把 AU 客户的 `04...` 永久写成 `+64...`：
+   * 销售拨过去是陌生人，而且这个错值进了唯一身份表，以后正确的 AU 身份
+   * 反而挂不上。少补一个号码是现状，写错一个是伤害。
+   *
+   * 已经是国际格式（`+…`）的号码不受影响 —— 那种不需要猜国码。
+   */
+  const phone = market
+    ? normalisePhone(fields.phone, market)
+    : normalisePhone(fields.phone?.trim().startsWith('+') ? fields.phone : null)
   const email = normaliseEmail(fields.email)
   if (!phone && !email && !fields.name) return
 

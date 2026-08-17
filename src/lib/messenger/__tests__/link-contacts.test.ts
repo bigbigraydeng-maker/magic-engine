@@ -111,6 +111,8 @@ let nameLookupArg: string | null = null
 let existingOutboundAt: string | null = null
 /** `contact_identities` 里这个号码/邮箱当前归谁（测「归属冲突就不写档案」）。 */
 let identityOwner: string | null = null
+/** `clients.country` —— 决定本地号码补哪个国码。null = 读不出来。 */
+let clientCountry: string | null = 'NZ'
 /** update() 的 payload 暂存，等 .lt() 来配对成一次「条件推进」。 */
 let pendingPatch: Record<string, unknown> | null = null
 
@@ -119,6 +121,7 @@ function stubSupabase(): Calls {
   nameLookupArg = null
   existingOutboundAt = null
   identityOwner = null
+  clientCountry = 'NZ'
   pendingPatch = null
   const calls: Calls = {
     conversationsUpdate: 0,
@@ -163,6 +166,9 @@ function stubSupabase(): Calls {
         }
         if (table === 'contact_identities') {
           return { data: identityOwner ? { contact_id: identityOwner } : null, error: null }
+        }
+        if (table === 'clients') {
+          return { data: clientCountry ? { country: clientCountry } : null, error: null }
         }
         return { data: null, error: null }
       },
@@ -700,6 +706,31 @@ Email: jordan.avery.example@example.com`
     identityOwner = 'contact-M'
     await linkMessengerConversation(introInput, index({}))
     expect(backfillUpdates(calls).length).toBeGreaterThan(0)
+  })
+
+  /**
+   * 🔴 **市场认不出来就不写电话**（Codex 复审 2026-08-17）。原先退回 NZ ——
+   * AU 客户的 `04...` 会被永久写成 `+64...`，销售拨过去是陌生人，
+   * 错值还会占住唯一身份表，让以后正确的 AU 身份挂不上。
+   */
+  it('🔴 读不到客户所在市场 → 本地号码不写', async () => {
+    const calls = stubSupabase()
+    clientCountry = null
+    await linkMessengerConversation(introInput, index({}))
+
+    const cols = backfillUpdates(calls).flatMap((u) => Object.keys(u.patch))
+    expect(cols).not.toContain('primary_phone')
+    // 邮箱和名字不受市场影响，照旧补。
+    expect(cols).toContain('primary_email')
+  })
+
+  it('AU 客户按 +61 补，不按 +64', async () => {
+    const calls = stubSupabase()
+    clientCountry = 'AU'
+    await linkMessengerConversation(introInput, index({}))
+
+    const phone = calls.identityUpserts.find((i) => i.kind === 'phone')?.value
+    expect(String(phone).startsWith('+61')).toBe(true)
   })
 
   /** 我们自己发出去的模板不作数 —— 只认客人自己发的那条。 */

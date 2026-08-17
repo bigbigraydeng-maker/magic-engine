@@ -67,6 +67,19 @@ const LABEL_TO_FIELD: Record<string, string> = {
   emailaddress: 'email',
 }
 
+/**
+ * 那条开场白自带的固定问候语。
+ *
+ * 🔴 **没有它就不能只凭「有 Email: 一行」认定这是表单开场白**（Codex 复审
+ * 2026-08-17）：客人在对话中途转发同行者的资料、贴一段邮件签名，同样是
+ * `Name: … / Phone: …` 的形状 —— 认了就会把**别人的号码**写进这个人的档案。
+ *
+ * Meta 的模板措辞可能随语言变，所以不强制要求它，而是当成两条路之一：
+ * 有这句话 → 认；没有 → 必须**至少两条标准字段**（姓名/电话/邮箱里的两条），
+ * 且调用方只把**第一条入站消息**喂进来。
+ */
+const FORM_MARKER = /filled\s+out\s+(your|the)\s+form|填写了.{0,4}表单/i
+
 /** 归一化标签：小写 + 去掉空格 / 下划线 / 连字符。 */
 function normaliseLabel(label: string): string {
   return label.toLowerCase().replace(/[\s_-]/g, '')
@@ -91,7 +104,7 @@ export function parseLeadIntroMessage(body: string | null | undefined): ParsedLe
   if (!body) return null
 
   const answers: MetaLeadAnswer[] = []
-  let sawStandardField = false
+  const standardFields = new Set<string>()
 
   for (const line of body.split('\n')) {
     const m = LINE_RE.exec(line)
@@ -102,7 +115,7 @@ export function parseLeadIntroMessage(body: string | null | undefined): ParsedLe
 
     const field = LABEL_TO_FIELD[normaliseLabel(rawLabel)]
     if (field) {
-      sawStandardField = true
+      standardFields.add(field === 'first_name' || field === 'last_name' ? 'full_name' : field)
       answers.push({ name: field, value })
     } else {
       // 自定义问题原样带过去 —— `parseLeadAnswers` 会挑出问题名带 tour 的那条。
@@ -111,7 +124,14 @@ export function parseLeadIntroMessage(body: string | null | undefined): ParsedLe
   }
 
   // 一条标准字段都没有 = 这不是那条开场白，宁可不认。
-  if (!sawStandardField) return null
+  if (standardFields.size === 0) return null
+
+  /**
+   * 🔴 没有那句问候语时，**必须两条以上标准字段**才算数（Codex 复审 2026-08-17）。
+   * 一条 `Phone: 021…` 太容易在正常聊天里出现（转发同行者资料、邮件签名），
+   * 而认错的代价是把别人的号码写进这个人的档案。
+   */
+  if (!FORM_MARKER.test(body) && standardFields.size < 2) return null
 
   const parsed = parseLeadAnswers(answers)
   // 三样全空（比如只有一行 `Notes: ...` 被当成自定义问题）也不算。

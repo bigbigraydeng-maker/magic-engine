@@ -50,13 +50,13 @@ describe('写法上的变体都要认', () => {
   })
 
   it('中文冒号 + 中文自定义问题', () => {
-    const r = parseLeadIntroMessage('Full name: 陈小明\n手机号：021 555 111\n想去哪个团？：丝绸之路')
+    const r = parseLeadIntroMessage('Full name: 陈小明\nEmail: chen@example.com\n想去哪个团？：丝绸之路')
     expect(r?.name).toBe('陈小明')
     expect(r?.custom['想去哪个团？']).toBe('丝绸之路')
   })
 
   it('值里再出现冒号 → 只在第一个冒号切开', () => {
-    const r = parseLeadIntroMessage('Full name: Jane\nWhich tour?: 3:1 私家团')
+    const r = parseLeadIntroMessage('Full name: Jane\nEmail: jane@example.com\nWhich tour?: 3:1 私家团')
     expect(r?.custom['Which tour?']).toBe('3:1 私家团')
   })
 })
@@ -77,6 +77,23 @@ describe('不该认的一律不认', () => {
 
   it('只有自定义问答、一条标准字段都没有 → null', () => {
     expect(parseLeadIntroMessage('Which tour interests you most?: Silk Road')).toBeNull()
+  })
+
+  /**
+   * 🔴 **只有一条标准字段、又没有那句问候语 → 不认**（Codex 复审 2026-08-17）。
+   * 客人在对话中途转发同行者的资料、贴一段邮件签名，都是这个形状 ——
+   * 认了就会把**别人的号码**写进这个人的档案。
+   */
+  it('🔴 转发同行者的一行资料 → 不认', () => {
+    expect(parseLeadIntroMessage('My friend is coming too. Phone: 021 555 999')).toBeNull()
+    expect(parseLeadIntroMessage('Email: bob@example.com')).toBeNull()
+  })
+
+  it('带着那句问候语时，一条标准字段也认（那就是真的表单开场白）', () => {
+    const r = parseLeadIntroMessage(
+      'Hello! I filled out your form and would like to know more about your business.\nEmail: bob@example.com',
+    )
+    expect(r?.email).toBe('bob@example.com')
   })
 
   it('标签在但值是空的 → 不算', () => {
