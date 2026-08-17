@@ -17,6 +17,24 @@
  *
  * do_not_contact 上规则和 AI 取并集，且规则宁可多报：漏判的代价是骚扰客户，
  * 误判的代价只是少打一个电话。
+ *
+ * ## 🔴 为什么这组词表停在这里 —— **别再往 DNC_PATTERNS 加词**
+ *
+ * 2026-08-16/17 在拒联这一处连改五轮：收窄一条词 → 挂一个零宽断言 → 换成
+ * 「命中词所在那一句」的统一语义判据 → 改成看否定与命中词的距离。**每一轮都有
+ * 用例 + 变异验证通过，每一轮下一句话又落在新缝里** —— 因为在一家旅游公司里，
+ * 同一个词的意思常常是反的：
+ *   `take me off`  → 请在酒店让我下车        `opt out`   → 我不参加那个自费项目
+ *   `unsubscribe`  → 我们自己邮件的页脚      `all sorted` → 我已经在你们这订好了
+ *
+ * PO 2026-08-17 拍板：**带回归的版本不上线，也不再靠加词和调阈值往下修。**
+ * 于是把判不准的两条（`stop (contacting|emailing)`、裸的 `unsubscribe me`）
+ * 整个删掉，退回线上现有行为 —— 这是**减法**，不是又一轮修补。换判据这件事
+ * 单独立票：**issue #1019**（与 ROADMAP M2.7h 合流），验收样本也在那里。
+ *
+ * 所以：**看到某句英文拒联没被认出来，请去 #1019，不要在这里加一条正则。**
+ * 加词能让眼前这一句过，代价是下一句真实客人的话被判成永久拒联 —— 那个人
+ * 从此任何渠道都收不到我们的消息，解除只能一个一个手动点。
  */
 
 import { z } from 'zod'
@@ -98,9 +116,14 @@ const DNC_PATTERNS: RegExp[] = [
    * 那一桶**。这不是准确率问题，这是红线本身。
    *
    * `don't` / `dont` 都要认：`normalise()` 只做小写和空白，不动撇号。
+   *
+   * ⚠️ **这一组后来被砍回去两条**（PO 2026-08-17 拍板，见文件头「为什么这组词表
+   * 停在这里」）—— `stop (contacting|emailing)` 和裸的 `unsubscribe me` 已经删掉，
+   * 上面那几行实测结果里带 ★ 的两句因此**又回到 `spoke`**，与线上现状一致。
+   * 想补回来请走 issue #1019，不要在这里加词。
+   *   ★ `stop contacting me` · ★ `unsubscribe me`
    */
   /(do\s*not|don'?t)\s*(ever\s*)?(call|contact|phone|ring|email|message)\s*(me|him|her|them|again)/i,
-  /stop\s*(contacting|calling|emailing|messaging)/i,
   /**
    * ⚠️ **必须限定在「名单 / 数据库」语境**（Codex 复审 2026-08-16）。
    *
@@ -119,8 +142,15 @@ const DNC_PATTERNS: RegExp[] = [
    * 邮件页脚就写着「click here to unsubscribe」，而 `mail-ingest` 把**出站**
    * 邮件也存进 `raw`。裸词会把我们自己的合规文案读成客人拒联。
    * 必须是他在**要求**退订，并且排除「did not unsubscribe」这类否定。
+   *
+   * 🔴 **`unsubscribe me` 这一支已经删掉**（PO 2026-08-17）：它把
+   * `I never asked you to unsubscribe me` 判成拒联，而否定隔着一整个谓语
+   * （`asked you to `，13 字符），要接住只能把否定窗口调宽到 13 —— 同时还得
+   * 窄到挡住 `interested and please`（22 字符）。**在两个对抗样本之间调一个
+   * 数字**，正是这轮要停掉的做法。删掉后这句回到 `spoke`，与 main 一致
+   * （main 根本没有退订词表）。代价：`please unsubscribe me` 也认不出来了。
    */
-  /(please\s*)?(unsubscribe\s*me|want\s*to\s*unsubscribe|unsubscribe\s*from\s*(your|the)\s*(list|emails?|mailing))/i,
+  /(want\s*to\s*unsubscribe|unsubscribe\s*from\s*(your|the)\s*(list|emails?|mailing))/i,
   /**
    * ⚠️ 「opt out」同样**不能裸词**（Codex 复审 2026-08-16）：旅游备注里
    * `opted out of the optional insurance` / `opted out of the helicopter
@@ -356,6 +386,28 @@ const POSITIVE_INTENT_NOW: RegExp[] = [
   /\b(confirmed|going ahead|will book)\b/i,
 ]
 
+/**
+ * 这一处回电命中，是不是**它自己那一句**被否定了。
+ *
+ * 🔴 原先是 `!anyMatch(整段文本, NEGATED_CALLBACK) && anyMatch(整段文本, CALLBACK)`
+ * —— 整段里出现过一次「不用回电」，后面所有回电命中就全被否掉。实测：
+ *   `No need to call back about the group tour; call me tomorrow about the private option`
+ * 前半句拒的是团队游那次回电，后半句是一个**明确的新安排**，却被一起丢掉。
+ *
+ * 改成逐个命中看**它自己那一句**，跟拒联侧 `matchedUnnegated` 是同一条纪律：
+ * 否定只管得住它所在的那一句，管不到别的句子。
+ */
+function hasUnnegatedCallback(text: string): boolean {
+  for (const p of CALLBACK_PATTERNS) {
+    const re = new RegExp(p.source, p.flags.includes('g') ? p.flags : p.flags + 'g')
+    for (let m = re.exec(text); m !== null; m = re.exec(text)) {
+      if (m[0].length === 0) re.lastIndex++ // 零宽命中防死循环
+      if (!anyMatch(clauseAt(text, m.index, m[0].length), NEGATED_CALLBACK_PATTERNS)) return true
+    }
+  }
+  return false
+}
+
 function anyMatch(text: string, patterns: RegExp[]): boolean {
   return patterns.some((p) => p.test(text))
 }
@@ -568,7 +620,7 @@ export function classifyNote(raw: string): {
    *   `不感兴趣团队游，call me back 聊私家团`         → 约了回电 ✅
    *   `暂时不感兴趣`                                  → 暂时不考虑 ✅
    */
-  if (!anyMatch(t, NEGATED_CALLBACK_PATTERNS) && anyMatch(t, CALLBACK_PATTERNS)) {
+  if (hasUnnegatedCallback(t)) {
     return { outcome: 'callback_set', do_not_contact: false }
   }
   // 🔴 **他现在就想买的话，前面那半句犹豫不算数**（见 POSITIVE_INTENT_NOW）。

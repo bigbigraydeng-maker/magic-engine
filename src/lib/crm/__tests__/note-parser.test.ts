@@ -471,18 +471,52 @@ describe('存量记录读的时候重判一次', () => {
  * 原先的下场写在各自的用例名里。
  */
 describe('英文里最常见的划界说法，一条都不许漏', () => {
-  it('「stop contacting me」→ 别再联系（原先判成「聊过了」，人进今天该打的桶）', () => {
-    const r = classifyNote('stop contacting me')
-    expect(r.outcome).toBe('do_not_contact')
-    expect(r.do_not_contact).toBe(true)
+  /**
+   * 🔴 **这一条有意不认**（PO 2026-08-17）。
+   *
+   * `stop (contacting|emailing)` 只匹配到动词，宾语（`me` / `her`）留在匹配
+   * 之外，后面的时间闸看到的字符串以宾语开头，于是
+   *   `stop contacting me for now, call me tomorrow`
+   *   `stop emailing her until the booking is confirmed`
+   * 两句都被写成**永久拒联** —— 客人明明说了「明天再打给我」。
+   *
+   * 要接住只能让匹配吞掉宾语、或让时间闸往后多看几个词，两者都是在对抗
+   * 样本之间调形状 —— 正是这轮停掉的做法。所以整条删掉，退回线上现有行为。
+   * 换判据见 issue #1019。**这条用例钉住「删掉了」，别把它改回 true。**
+   */
+  it('「stop contacting me」→ 有意认不出（判不准，退回线上现状，见 #1019）', () => {
+    expect(classifyNote('stop contacting me').do_not_contact).toBe(false)
+  })
+
+  it('🔴 换来的是这两句不再被误判成永久拒联', () => {
+    expect(classifyNote('stop contacting me for now, call me tomorrow').outcome).toBe('callback_set')
+    expect(
+      classifyNote('stop emailing her until the booking is confirmed').do_not_contact,
+    ).toBe(false)
   })
 
   it('「take me off your list」→ 别再联系', () => {
     expect(classifyNote('take me off your list').do_not_contact).toBe(true)
   })
 
-  it('「unsubscribe me」→ 别再联系', () => {
-    expect(classifyNote('unsubscribe me').do_not_contact).toBe(true)
+  /**
+   * 🔴 **裸的 `unsubscribe me` 有意不认**（PO 2026-08-17）：它把
+   * `I never asked you to unsubscribe me` 判成拒联，而否定隔着一整个谓语
+   * （`asked you to `，13 字符）。要接住只能把否定窗口调宽到 13，同时还得
+   * 窄到挡住 `interested and please`（22 字符）—— 在两个对抗样本之间调一个数字。
+   * 明说要求退订的写法（`want to unsubscribe` / `unsubscribe from the list`）照旧认。
+   */
+  it('「unsubscribe me」→ 有意认不出（判不准，见 #1019）', () => {
+    expect(classifyNote('unsubscribe me').do_not_contact).toBe(false)
+  })
+
+  it('🔴 换来的是「I never asked you to unsubscribe me」不再被误判', () => {
+    expect(classifyNote('I never asked you to unsubscribe me').do_not_contact).toBe(false)
+    expect(classifyNote('I am not asking you to unsubscribe me').do_not_contact).toBe(false)
+  })
+
+  it('明说要求退订的照旧认', () => {
+    expect(classifyNote('customer wants to unsubscribe from your list').do_not_contact).toBe(true)
   })
 
   it('「remove me from your database」→ 别再联系', () => {
@@ -511,6 +545,33 @@ describe('明确说了不要，就不许再判成「约了回电」', () => {
 
   it('「暂时不感兴趣」→ 仍然是暂时不考虑，没被硬拒绝吞掉', () => {
     expect(classifyNote('客户暂时不感兴趣').outcome).toBe('not_interested_now')
+  })
+
+  /**
+   * 🔴 **「不用回电」只否得掉它自己那一句**（Codex 复审 2026-08-16 / PO 2026-08-17）。
+   *
+   * 原先是拿整段文本判：整段里出现过一次「不用回电」，后面**所有**回电命中
+   * 就全被否掉。于是一句「团队游不用回电了，私家团明天打给我」，前半句把
+   * 后半句那个明确的新安排一起丢掉 —— 销售那天不会收到提醒，答应客人的事砸了。
+   *
+   * 改成逐个命中看它自己那一句，跟拒联侧 `matchedUnnegated` 是同一条纪律。
+   */
+  it('🔴 前半句「不用回电」，后半句真正的预约还要看得见', () => {
+    expect(
+      classifyNote(
+        'No need to call back about the group tour; call me tomorrow about the private option',
+      ).outcome,
+    ).toBe('callback_set')
+  })
+
+  /**
+   * 中文没有对应用例：`CALLBACK_PATTERNS` 里**一条中文都没有**（「明天打给我」
+   * 这类靠解析器答，不靠这张表）。所以中文的回电本来就走不到这道闸，
+   * 写一条中文用例只会给人「中文也覆盖了」的错觉。
+   */
+  it('整句只有被否定的回电 → 照旧不算约了回电', () => {
+    expect(classifyNote('no need to call back').outcome).not.toBe('callback_set')
+    expect(classifyNote("don't call me back").outcome).not.toBe('callback_set')
   })
 })
 
@@ -543,8 +604,10 @@ const SALES_NOTE = { direction: 'outbound', source: 'me_manual' }
 const OUR_EMAIL = { direction: 'outbound', source: 'ms_graph' }
 
 describe('存量里其实是「别再联系」的记录，读的时候要认出来', () => {
-  it('🔴 存成 spoke、原话是「stop contacting me」→ 读成别再联系', () => {
-    expect(reclassifyStoredOutcome('spoke', 'stop contacting me', CUSTOMER)).toBe('do_not_contact')
+  it('🔴 存成 spoke、原话是「take me off your list」→ 读成别再联系', () => {
+    expect(reclassifyStoredOutcome('spoke', 'take me off your list', CUSTOMER)).toBe(
+      'do_not_contact',
+    )
   })
 
   it('🔴 存成 callback_set、原话是「do not call me again」→ 读成别再联系', () => {
@@ -636,24 +699,24 @@ describe('重判只认代表客人意愿的记录', () => {
     expect(reclassifyStoredOutcome('spoke', FOOTER, OUR_EMAIL)).toBe('spoke')
   })
 
-  it('客人自己写的「please unsubscribe me」→ 认', () => {
-    expect(reclassifyStoredOutcome('spoke', 'please unsubscribe me', CUSTOMER)).toBe(
+  it('客人自己写的「I want to unsubscribe」→ 认', () => {
+    expect(reclassifyStoredOutcome('spoke', 'I want to unsubscribe', CUSTOMER)).toBe(
       'do_not_contact',
     )
   })
 
-  it('销售手记「客户说 stop contacting me」→ 认（方向是出站，但记的是客人的话）', () => {
-    expect(reclassifyStoredOutcome('spoke', 'customer said stop contacting me', SALES_NOTE)).toBe(
+  it('销售手记「客户说 do not call me again」→ 认（方向是出站，但记的是客人的话）', () => {
+    expect(reclassifyStoredOutcome('spoke', 'customer said do not call me again', SALES_NOTE)).toBe(
       'do_not_contact',
     )
   })
 
   it('不传「谁写的」→ 保守，不做拒联升级', () => {
-    expect(reclassifyStoredOutcome('spoke', 'stop contacting me')).toBe('spoke')
+    expect(reclassifyStoredOutcome('spoke', 'do not call me again')).toBe('spoke')
   })
 
-  it('🔴 否定句「did not unsubscribe」不算退订', () => {
-    expect(classifyNote('customer did not unsubscribe').do_not_contact).toBe(false)
+  it('🔴 否定句「did not want to unsubscribe」不算退订', () => {
+    expect(classifyNote('customer did not want to unsubscribe').do_not_contact).toBe(false)
   })
 })
 
@@ -753,8 +816,8 @@ describe('别再联系：只是这一阵别打，不是永久', () => {
 
   it('没有时间限定 → 照旧是拒联', () => {
     expect(classifyNote('do not call me again').do_not_contact).toBe(true)
-    expect(classifyNote('stop contacting me').do_not_contact).toBe(true)
-    expect(classifyNote('please unsubscribe me').do_not_contact).toBe(true)
+    expect(classifyNote('take me off your list').do_not_contact).toBe(true)
+    expect(classifyNote('customer wants to unsubscribe from your list').do_not_contact).toBe(true)
     expect(classifyNote('别再联系我').do_not_contact).toBe(true)
   })
 })
@@ -782,9 +845,9 @@ describe('「他现在就想订」同样怕被否定', () => {
  * 拒联根本没被看到。前半句是幌子，后半句才是他的结论。
  */
 describe('前半句被否掉，后半句真正的拒联还要看得见', () => {
-  it("🔴「I don't want to unsubscribe, actually please unsubscribe me」→ 是拒联", () => {
+  it("🔴「I don't want to unsubscribe, actually take me off your list」→ 是拒联", () => {
     expect(
-      classifyNote("I don't want to unsubscribe, actually please unsubscribe me").do_not_contact,
+      classifyNote("I don't want to unsubscribe, actually take me off your list").do_not_contact,
     ).toBe(true)
   })
 
@@ -802,12 +865,12 @@ describe('前半句被否掉，后半句真正的拒联还要看得见', () => {
  * 而且方向最危险：明确要求退订的人被判成可以继续联系。
  */
 describe('否定和时间词要真的修饰那句拒联', () => {
-  it("🔴「I'm not interested and please unsubscribe me」→ 是拒联（not 修饰的是前半句）", () => {
-    expect(classifyNote("I'm not interested and please unsubscribe me").do_not_contact).toBe(true)
+  it("🔴「I'm not interested and do not call me again」→ 是拒联（not 修饰的是前半句）", () => {
+    expect(classifyNote("I'm not interested and do not call me again").do_not_contact).toBe(true)
   })
 
-  it('🔴「I asked today to unsubscribe me」→ 是拒联（today 说的是他什么时候提的）', () => {
-    expect(classifyNote('I asked today to unsubscribe me').do_not_contact).toBe(true)
+  it('🔴「I asked today to take me off your list」→ 是拒联（today 说的是他什么时候提的）', () => {
+    expect(classifyNote('I asked today to take me off your list').do_not_contact).toBe(true)
   })
 
   it('否定紧贴着才算：「I don\'t want to unsubscribe」仍不是拒联', () => {
