@@ -494,22 +494,44 @@ chunked 绕过 OOM 闸 · 闸门没接在花钱那条线上 · 归档入口（�
       就会骚扰一个明确说过别联系的客人 —— 客户红线不该由规则来赌。
       按铁律 3 下半条下发成人工任务，**进今日待办**（`pm-todo/manual-items.ts`
       的 `dnc_maybe_wrong`），带直达那个人的链接；真说过「别再联系」的人一条都不打扰。
-- [ ] 🔴 **M2.7m 「别再联系」的判断也交给解析器，正则只留兜底** —— PO 2026-08-17 拍板
-      「并进 AI」，跟 M2.7h 是同一件事的另一半，一起做。
+- [ ] 🔴 **M2.7m 「别再联系」判不准，规则层已到顶** —— 跟 M2.7h 是同一件事的另一半，一起做。
+
+      **PO 2026-08-17 定的（业务范围与风险，不含实现）**：
+      ① 带回归的版本不上线；② 不再靠一轮轮加词、调阈值往下修；
+      ③ 下面四条原话是**验收样本**，做完必须逐条过。
+      怎么组合模型 / 正则 / 人工复核属于技术设计，按铁律 2 由技术侧出方案并走 ≥2 审，
+      **不写进这一条当成不可更改的要求**。
+
       起因：PR [#998](https://github.com/bigbigraydeng-maker/magic-engine/pull/998)
       在同一个位置**连补五轮**都没收住 —— 收窄一条词 → 挂一个零宽断言 → 换成语义判据
       → 改成距离阈值，每轮都有测试 + 变异验证通过，每轮下一句话又落在新缝里。
       **旅游生意里同一个词的意思是反的**：`take me off` 是要求下车、`opt out` 是不参加
       自费项目、`unsubscribe` 出现在我们自己的邮件页脚、`all sorted` 是已经在我们这订了。
-      剩下这四条的修法只能是把距离窗口调宽到容得下 `asked you to`（13 字符），
+      剩下这四条继续用规则修，只能把距离窗口调宽到容得下 `asked you to`（13 字符），
       同时还要窄到挡住 `interested and please`（22 字符）—— 在两个对抗样本之间调一个数字。
-      **判错的代价不对称**：判成拒联 = 这个人任何渠道都收不到我们消息，且解除只能一个一个手动点。
-      PR #998 **停在 Draft 不合**，它自己带进来的三条回归留在里面（未上线，线上无影响）；
-      待办的四条原话，四条都实测复现过，证据在该 PR 的未解决复审线程里：
-      - `stop contacting me for now, call me tomorrow` → 被写成永久拒联（main 上是「约明天回电」）
-      - `stop emailing her until the booking is confirmed` → 同上（main 上是普通记一笔）
-      - `No need to call back about the group tour; call me tomorrow about the private option` → 丢掉回电
-      - `I never asked you to unsubscribe me` → 被写成拒联（**非本次回归**，旧有局限）
+
+      **两个方向的代价都要认，别只防一头**：
+      - 判成拒联 = 这个人任何渠道都收不到我们消息，解除只能一个一个手动点
+      - 漏判 = 一个明确说过别再联系的人继续被打扰，**这是客户红线**
+
+      所以「说不准」必须是**第三种结局**，不许默认成可以联系。`parseNote` 现在对
+      `do_not_contact` **取规则和模型的并集**（`note-parser.ts` 结尾那行 `rules.do_not_contact
+      || parsed.do_not_contact`），正是为了这个 —— 换判据时这条地板不能一起拆掉。
+      模型置信度低、或模型与规则打架且自动定不了的，按铁律 3 下半条**下发人工复核**，
+      复用 M2.7l 已有的今日待办通道（`pm-todo/manual-items.ts` 的 `dnc_maybe_wrong`），
+      不许只写进日志。（Codex 复审 2026-08-17 提出，采纳）
+
+      **验收样本**（四条都在 PR #998 最新 head 上实测复现过，证据在该 PR 未解决的复审线程里；
+      括号里是 `origin/main` `e4ba76af` 的行为 —— 四条**全部**是 #998 相对 main 的回归，
+      早前记的「第四条非回归」是拿 PR 中途的提交做的基线，已更正）：
+      - `stop contacting me for now, call me tomorrow` → 被写成永久拒联（main：约明天回电）
+      - `stop emailing her until the booking is confirmed` → 同上（main：普通记一笔）
+      - `No need to call back about the group tour; call me tomorrow about the private option`
+        → 丢掉后半句那个回电（main：约了回电）
+      - `I never asked you to unsubscribe me` → 被写成拒联（main：普通记一笔，main 根本没有退订词表）
+
+      反向样本同样要过，别为了这四条把真拒联放走：`do not call me again` /
+      `customer wants to unsubscribe from your list` / `not interested, no need to call back`。
 - [ ] **M2.3 用 `crm_segment_feedback` 改判据** —— 表建好了，还没有人去看它。
       攒够一批「分错了」之后要回去改 `lib/crm/segments` 的规则，否则这个按钮
       就变成一个只进不出的许愿池
