@@ -1,14 +1,14 @@
 /**
  * 「点私信」广告那条开场白 —— 姓名 / 电话 / 邮箱到底取不取得出来。
  *
- * 第一条用例是 **PM 2026-08-17 从线上后台照抄的原文**（不是编的），
- * 也正是那个被卡片写成「没留电话 —— 只能在 Messenger 回他」的人。
+ * 第一条用例用的是 PM 2026-08-17 给的**线上真实格式**（标签、标点、行序一字未改），
+ * 但姓名 / 电话 / 邮箱是虚构的 —— 真实客户资料不进仓库。
  */
 
 import { describe, expect, it } from 'vitest'
 import { parseLeadIntroMessage } from '../messenger-lead-intro'
 
-/** 线上原文，一个字没改。 */
+/** 线上那条开场白的格式，字段值已替换成虚构数据。 */
 const REAL = `Hello! I filled out your form and would like to know more about your business.
 Full name: Jordan Avery
 Phone number: 021 555 0134
