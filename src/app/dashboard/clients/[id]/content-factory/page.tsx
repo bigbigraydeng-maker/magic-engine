@@ -112,12 +112,14 @@ export default function ContentFactoryBoardPage() {
   const [uploadPct, setUploadPct] = useState<number | null>(null)
   const [videoLink, setVideoLink] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+  const [copied, setCopied] = useState<string | null>(null)
 
   // 换卡片/关抽屉一律把链接输入框清空 —— 在 A 里粘了链接不提交就关掉，
   // 再打开 B 时输入框还留着 A 的链接，点确定就把错的片挂到 B 上了。
   const setSelected = useCallback((c: Card | null) => {
     setSelectedRaw(c)
     setVideoLink('')
+    setCopied(null)
   }, [])
 
   const load = useCallback(async () => {
@@ -162,6 +164,21 @@ export default function ContentFactoryBoardPage() {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setActing(false)
+    }
+  }
+
+  /**
+   * 复制文本到剪贴板。失败要说人话 —— 浏览器在非安全上下文/无权限时会直接拒，
+   * 这时候只能让人手动选中复制，不能干瞪眼。
+   */
+  async function copyText(text: string, what: string) {
+    if (!text?.trim()) return
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(what)
+      window.setTimeout(() => setCopied((c) => (c === what ? null : c)), 2000)
+    } catch {
+      setError('复制没成功(浏览器不让) — 手动选中文字复制')
     }
   }
 
@@ -403,13 +420,32 @@ export default function ContentFactoryBoardPage() {
 
             {selected.hook && (
               <div className="mb-3">
-                <div className="text-[11px] font-semibold text-me-taupe mb-1">钩子（前3秒）</div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-[11px] font-semibold text-me-taupe">钩子（前3秒）</div>
+                  <button
+                    onClick={() => void copyText(selected.hook, '钩子')}
+                    className="text-[11px] text-me-charcoal border border-me-stone rounded-full px-2 py-0.5 hover:border-me-ochre"
+                  >
+                    {copied === '钩子' ? '已复制 ✓' : '复制'}
+                  </button>
+                </div>
                 <div className="text-sm">{selected.hook}</div>
               </div>
             )}
 
             <div className="mb-3">
-              <div className="text-[11px] font-semibold text-me-taupe mb-1">完整逐字稿</div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-[11px] font-semibold text-me-taupe">完整逐字稿</div>
+                {selected.script && (
+                  <button
+                    onClick={() => void copyText(selected.script, '逐字稿')}
+                    className="text-[11px] text-me-charcoal border border-me-stone rounded-full px-2 py-0.5 hover:border-me-ochre"
+                    title="粘到备忘录或提词器里，照着念"
+                  >
+                    {copied === '逐字稿' ? '已复制 ✓' : '复制全文'}
+                  </button>
+                )}
+              </div>
               <div className="text-sm leading-relaxed whitespace-pre-wrap bg-me-ivory border border-me-stone rounded-xl p-3">
                 {selected.script || '（还没有逐字稿）'}
               </div>
@@ -417,8 +453,16 @@ export default function ContentFactoryBoardPage() {
 
             {selected.visualBrief && (
               <div className="mb-3">
-                <div className="text-[11px] font-semibold text-me-taupe mb-1">画面 / B-roll</div>
-                <div className="text-sm">{selected.visualBrief}</div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-[11px] font-semibold text-me-taupe">画面 / B-roll</div>
+                  <button
+                    onClick={() => void copyText(selected.visualBrief, '画面')}
+                    className="text-[11px] text-me-charcoal border border-me-stone rounded-full px-2 py-0.5 hover:border-me-ochre"
+                  >
+                    {copied === '画面' ? '已复制 ✓' : '复制'}
+                  </button>
+                </div>
+                <div className="text-sm whitespace-pre-wrap">{selected.visualBrief}</div>
               </div>
             )}
 
