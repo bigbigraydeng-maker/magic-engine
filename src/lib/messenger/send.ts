@@ -233,7 +233,18 @@ export async function sendReply(input: SendReplyInput): Promise<SendReplyResult>
       ).catch((e: unknown) => e as Error),
     ])
 
-    if (contactRes.error || touchRows instanceof Error) {
+    /**
+     * 🔴 **查不到这个人也要朝「关」的方向倒**（Codex 复审 2026-08-17）。
+     *
+     * `contact_id` 非空、但按 `client_id` 查不出这一行时，Supabase 返回的是
+     * `{ data: null, error: null }` —— 不是错误。原先只挡 `error`，于是这种
+     * 情况用 `false` + 空触点去判，直接放行。而它在库里是可能的：
+     * `20260726000004_unified_contacts.sql` 的外键只约束 `contacts(id)`，
+     * 没有约束两边的 `client_id` 一致。
+     *
+     * 「我不知道这个人是谁」跟「我读不出他的判据」是同一件事，都不该发。
+     */
+    if (contactRes.error || !contactRes.data || touchRows instanceof Error) {
       return {
         ok: false,
         status: 409,

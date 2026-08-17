@@ -55,6 +55,8 @@ function stubSupabase(opts: {
   contactId?: string | null
   /** 这个人被标成「别再联系」了吗（`contacts` 那一列）。 */
   doNotContact?: boolean
+  /** true = contacts 查不到这一行（跨客户错挂），Supabase 返回 {data:null,error:null}。 */
+  contactMissing?: boolean
   /** 他的触点 —— 拒联判据的真相源。 */
   dncTouches?: { metadata: Record<string, unknown> | null; occurred_at: string }[]
   /** 拒联判据读不出来（模拟数据库瞬时故障）。 */
@@ -118,9 +120,9 @@ function stubSupabase(opts: {
     }
 
     if (table === 'contacts') {
-      result = opts.dncReadFails
-        ? { data: null, error: { message: '数据库抽风' } }
-        : { data: { do_not_contact: opts.doNotContact === true }, error: null }
+      if (opts.dncReadFails) result = { data: null, error: { message: '数据库抽风' } }
+      else if (opts.contactMissing) result = { data: null, error: null }
+      else result = { data: { do_not_contact: opts.doNotContact === true }, error: null }
     }
 
     if (table === 'conversations') {
@@ -484,5 +486,20 @@ describe('sendReply — 别再联系', () => {
   it('无主会话（挂不到人）→ 没有拒联可查，照常发', async () => {
     stubSupabase({ lastInboundAt: NOW.toISOString(), contactId: null })
     expect((await send()).ok).toBe(true)
+  })
+})
+/**
+ * 🔴 「查不到这个人」跟「读不出他的判据」是同一件事 —— 都不该发
+ * （Codex 复审 2026-08-17）。跨客户错挂时 Supabase 返回 `{data:null,error:null}`，
+ * 不是错误；原先只挡 error，这种情况直接放行。
+ */
+describe('联系人查无结果 → 也当作「说不准」，不发', () => {
+  it('contacts 行查不到 → 409 dnc_unknown，一条都不发', async () => {
+    stubSupabase({ lastInboundAt: NOW.toISOString(), contactMissing: true })
+
+    const res = await sendReply(input())
+
+    expect(res).toMatchObject({ ok: false, status: 409, reason: 'dnc_unknown' })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
