@@ -35,7 +35,7 @@ export const SOCIAL_COMPONENTS: readonly ProductMapComponent[] = [
   },
   {
     id: 'adapter.publer',
-    name: 'Publishing Hub adapter',
+    name: '连发布平台的插头',
     componentType: 'adapter',
     businessLane: 'social',
     dapeStages: ['execution', 'verification'],

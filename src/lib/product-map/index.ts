@@ -10,6 +10,8 @@ import { MANUAL_FACTS_SNAPSHOT } from './external-facts'
 import type { ExternalFacts } from './external-facts'
 import { deriveMaturity } from './maturity'
 import type { MaturityDerivation } from './maturity'
+import { deriveOperationalSnapshot } from './operational-snapshot'
+import type { OperationalSnapshot } from './operational-snapshot'
 import { neighboursOf, propagateBlocked } from './graph'
 import type { ComponentNeighbours } from './graph'
 import { PRODUCT_MAP_COMPONENTS } from './registry'
@@ -21,6 +23,8 @@ export * from './types'
 export * from './external-facts'
 export { deriveMaturity, evidenceCeiling } from './maturity'
 export type { MaturityDerivation } from './maturity'
+export { deriveOperationalSnapshot, PROBE_STATUS } from './operational-snapshot'
+export type { OperationalProbe, OperationalSnapshot, ProbeStatus } from './operational-snapshot'
 export { validateRegistry } from './validate'
 export type { ValidationIssue, ValidationResult } from './validate'
 export {
@@ -34,6 +38,7 @@ export { PRODUCT_MAP_COMPONENTS } from './registry'
 export interface ComponentSnapshot {
   readonly component: ProductMapComponent
   readonly maturity: MaturityDerivation
+  readonly operational: OperationalSnapshot
   readonly neighbours: ComponentNeighbours
   /** 沿 requires 边传导过来的上游 blocker 源（空 = 没被上游卡住）。 */
   readonly inheritedBlockedBy: readonly string[]
@@ -58,6 +63,7 @@ export function buildProductMapSnapshot(
   const snapshots = components.map((component) => ({
     component,
     maturity: deriveMaturity(component, facts),
+    operational: deriveOperationalSnapshot(component, facts),
     neighbours: neighboursOf(component.id, components),
     inheritedBlockedBy: blocked.get(component.id) ?? [],
   }))

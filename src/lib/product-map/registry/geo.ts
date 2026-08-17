@@ -14,12 +14,13 @@ const ROMAN_BATCH = '688bd8ae-2db6-4300-b761-b850f30c32c5'
 export const GEO_COMPONENTS: readonly ProductMapComponent[] = [
   {
     id: 'platform.geo-measurement-contract',
-    name: 'GEO 测量契约（WP02）',
+    name: 'AI 可见度的测量口径',
     componentType: 'platform',
+    architecturalRole: 'measurement',
     businessLane: 'geo',
     dapeStages: ['discovery', 'verification'],
     businessOutcome: '「这次测的 AI 可见度能不能跟上次比」有唯一判定标准，测量结果不再各说各话',
-    description: '身份三元组（样本/采集/解释）+ 可比性判定 + legacy 映射的纯契约层。',
+    description: '定死了「一次测量算什么、两次能不能比」—— 不然每次测出来的数不能放一起看。',
     origin: 'me2_native',
     operationalStatus: 'not_operating',
     declaredMaturity: 'M3_INTEGRATED',
@@ -46,13 +47,15 @@ export const GEO_COMPONENTS: readonly ProductMapComponent[] = [
   },
   {
     id: 'platform.geo-measurement-store',
-    name: 'GEO 测量不可变存储（WP03）',
+    name: 'AI 可见度测量结果的存档',
     componentType: 'platform',
+    // WP00 §3.3 Measurement 的"证据保全"边界：不可变存储是它的落地形态。
+    architecturalRole: 'measurement',
     businessLane: 'geo',
     dapeStages: ['discovery', 'outcome'],
     businessOutcome: '测量结果一旦写入就改不了，半年后还能证明「当时真是这么测的」',
     description:
-      '五张 geo_* 表 + 触发器保不可变（不是靠 RLS）。migration 已在生产生效并承载 Roman Baseline 数据 —— 这一点由生产数据行数背书，不由 migration 账本背书。',
+      '写进去就改不了(数据库层面锁死)。生产库里已经躺着 Roman 那次基线的真实数据 —— 这一点是数出来的,不是账本上写的。',
     origin: 'me2_native',
     // 数据躺在生产 ≠ 在运营:整条 geo 链还没有 recurring 写入,与 runtime 口径一致
     operationalStatus: 'not_operating',
@@ -86,8 +89,11 @@ export const GEO_COMPONENTS: readonly ProductMapComponent[] = [
   },
   {
     id: 'capability.geo-measurement-runtime',
-    name: 'GEO 测量执行（WP04）',
+    name: '跑一批 AI 可见度测量',
     componentType: 'capability',
+    // WP00 §3.3 Measurement 的"覆盖率与成本的如实记录"边界：预算闸 + 观测循环
+    // 是这一条的落地，不是 Shared Capability（后者是"准备可评审改动"）。
+    architecturalRole: 'measurement',
     businessLane: 'geo',
     dapeStages: ['discovery', 'execution'],
     businessOutcome: '按冻结计划跑一批测量：预算预检、逐条观测、对账落库,超预算就停',
@@ -131,8 +137,12 @@ export const GEO_COMPONENTS: readonly ProductMapComponent[] = [
   {
     // name 不带真实供应商名(CLAUDE.md 封装名铁律,UI 会展示 name);id 是内部标识可保留
     id: 'adapter.geo-baseline-openai',
-    name: 'GEO baseline 测量引擎接线（WP04A）',
+    name: 'AI 可见度实测接线(连到 Content Engine)',
     componentType: 'adapter',
+    // B2：supporting artifact 不占顶层七角色。它是 capability.geo-measurement-runtime
+    // 的零件，语义靠 adapterOf 继承父组件（measurement），**自己不设 architecturalRole**
+    // —— 类型层已把 Me2SupportingComponent.architecturalRole 锁成 never。
+    adapterOf: 'capability.geo-measurement-runtime',
     businessLane: 'geo',
     dapeStages: ['execution'],
     businessOutcome: '测量计划能真的打到 AI 引擎上拿回答案和引用',
@@ -170,13 +180,15 @@ export const GEO_COMPONENTS: readonly ProductMapComponent[] = [
   },
   {
     id: 'module.geo-visibility',
-    name: 'GEO Module v1（WP05）',
+    name: 'GEO 分析脑',
     componentType: 'module',
+    // WP00 §3.2 明文点名："GEO Module（#879）是第一个 Domain Module"。
+    architecturalRole: 'domain_module',
     businessLane: 'geo',
     dapeStages: ['analysis', 'prescription'],
     businessOutcome: '把测量结果解释成「你在 AI 搜索里缺什么、该修哪几页」的发现和处方',
     description:
-      '第一个 Domain Module、growth 契约的第一个消费者。语义 geo-module/m1/v1 已冻结（2026-08-12），实施未获授权，卡在页面台账余项上。',
+      '怎么做已经定死了(2026-08-12),但还没批准开工,而且要等「客户网站页面清单」那件事先做完。',
     origin: 'me2_native',
     operationalStatus: 'not_operating',
     declaredMaturity: 'M1_CONTRACT_FROZEN',
@@ -206,7 +218,11 @@ export const GEO_COMPONENTS: readonly ProductMapComponent[] = [
       { id: 'implementation-not-authorized', kind: 'authorization', summary: 'Build Control Room 尚未授权 WP05 实施', ref: '#879' },
     ],
     poDecisionRequired: [
-      { kind: 'scope', decision: '台账余项完成后授权 WP05 实施（回 go wp05 即可）' },
+      {
+        kind: 'scope',
+        decision:
+          '批准开工做 GEO 分析脑。**在等「客户网站页面清单」那件事做完,还没轮到你** —— 做完了会自动出现在待办里。届时:不做,AI 可见度只有测量数字没有解读;做了,测出来的数能变成「该改哪几页」的处方。',
+      },
     ],
     nextMilestone: { target: 'M2_IMPLEMENTED', unlockedBy: ['page-ledger-remainder', 'implementation-not-authorized'] },
     ownerRole: 'build-control-room',

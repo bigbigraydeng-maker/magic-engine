@@ -11,11 +11,22 @@ import type { ActionRegistry } from '../registry'
 import { createKernelDeps, type KernelDeps } from '../deps'
 import { createFakeSupabase, type FakeSupabaseOptions, type Row, type Tables } from './fake-supabase'
 
-export const CLIENT_A = 'client-aaaa'
-export const CLIENT_B = 'client-bbbb'
-export const GOAL_A = 'goal-aaaa'
-export const BRIEF_A = 'brief-aaaa'
-export const POST_A = 'post-aaaa'
+/**
+ * 🔴 这些 id **必须是合法 UUID**，因为真表里对应的列就是 `uuid`。
+ *
+ *    早先用的是 `client-aaaa` 这种一眼能读的假值。看着方便，代价是测试
+ *    悄悄绕过了一整类真实输入边界：真库对畸形 uuid 抛
+ *    `22P02 invalid input syntax for type uuid`，而内存假件只是字符串比较，
+ *    照收不误。于是「接口收到畸形 id 会怎样」这个问题，在这套测试里**问不出来**。
+ *    （K-WP01A 复审实测：路由缺 uuid 校验，而全套测试全绿。）
+ *
+ *    保留可读性：把含义写进 UUID 的头一段（`c11e0000` ≈ client）。
+ */
+export const CLIENT_A = 'c11e0000-0000-4000-8000-00000000000a'
+export const CLIENT_B = 'c11e0000-0000-4000-8000-00000000000b'
+export const GOAL_A = '90a10000-0000-4000-8000-00000000000a'
+export const BRIEF_A = 'b41e0000-0000-4000-8000-00000000000a'
+export const POST_A = '90510000-0000-4000-8000-00000000000a'
 
 export const BLOG_DRAFT: Row = {
   id: POST_A,

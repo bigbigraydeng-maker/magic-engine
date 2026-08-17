@@ -48,7 +48,7 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   { service: 'ai-tracker-weekly', jobName: 'ai-tracker-weekly', schedule: '0 1 * * 1', logsRuns: true },
   { service: 'anomaly-detector-daily', jobName: 'anomaly-detector-daily', schedule: '0 5 * * *', logsRuns: true },
   { service: 'attribution-cron', jobName: 'attribution-cron', schedule: '0 */6 * * *', logsRuns: true },
-  { service: 'blog-stuck-generating-sweeper', jobName: 'blog-stuck-generating-sweeper', schedule: '*/30 * * * *', logsRuns: true },
+  { service: 'blog-stuck-generating-sweeper', jobName: 'blog-stuck-generating-sweeper', schedule: '45 * * * *', logsRuns: true },
   { service: 'blog-weekly', jobName: 'blog-weekly', schedule: '0 3 * * 2', logsRuns: true },
   { service: 'content-factory-intake', jobName: 'content-factory-intake', schedule: '0 22 * * *', logsRuns: true },
   { service: 'cts-seo-optimizer', jobName: 'cts-seo-optimizer', schedule: '30 5 * * 1', logsRuns: true },
@@ -57,8 +57,8 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // DAPE E 段：看板上的动作真正被跑掉的那一步。上线时挂着 ?dry_run=1 只选不做。
   { service: 'execution-auto-run', jobName: 'execution-auto-run', schedule: '30 9 * * *', logsRuns: true, addedAt: '2026-08-06' },
   { service: 'factory-order-scheduler', jobName: 'factory-order-scheduler', schedule: '0 20 * * *', logsRuns: true },
-  { service: 'factory-publish-sweeper', jobName: 'factory-publish-sweeper', schedule: '*/15 * * * *', logsRuns: true },
-  { service: 'factory-publish-worker', jobName: 'factory-publish-worker', schedule: '*/10 * * * *', logsRuns: true },
+  { service: 'factory-publish-sweeper', jobName: 'factory-publish-sweeper', schedule: '25 * * * *', logsRuns: true },
+  { service: 'factory-publish-worker', jobName: 'factory-publish-worker', schedule: '5 * * * *', logsRuns: true },
   { service: 'factory-stock-refill', jobName: 'factory-stock-refill', schedule: '0 19 * * 1', logsRuns: true },
   { service: 'goal-current-value-refresh', jobName: 'goal-current-value-refresh', schedule: '0 3 * * *', logsRuns: true },
   { service: 'google-data-pullback-daily', jobName: 'google-data-pullback-daily', schedule: '0 3 * * *', logsRuns: true },
@@ -77,7 +77,7 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   { service: 'meta-leads-hourly', jobName: 'meta-leads-sync', schedule: '25 * * * *', logsRuns: true },
   { service: 'oztop-seo-optimizer', jobName: 'oztop-seo-optimizer', schedule: '0 5 * * 1', logsRuns: true },
   { service: 'pm-daily-todo', jobName: 'pm-daily-todo', schedule: '0 19 * * 0-4', logsRuns: true },
-  { service: 'poll-visual-jobs', jobName: 'poll-visual-jobs', schedule: '*/10 * * * *', logsRuns: true },
+  { service: 'poll-visual-jobs', jobName: 'poll-visual-jobs', schedule: '15 * * * *', logsRuns: true },
   // ME2 Product Map 每日全量对账(webhook 的兜底)。表未 apply 前它会天天报 failed ——
   // 这是设计行为:不许把「什么都没干」显示成健康。apply migration 后自动转绿。
   { service: 'product-map-sync-daily', jobName: 'product-map-sync', schedule: '15 18 * * *', logsRuns: true, addedAt: '2026-08-15' },
@@ -94,9 +94,9 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   { service: 'team-memory-sweeper', jobName: 'team-memory-sweeper', schedule: '*/30 * * * *', logsRuns: true },
   { service: 'viral-analyzer-worker', jobName: 'viral-analyzer-worker', schedule: '*/10 * * * *', logsRuns: true },
   { service: 'viral-discovery-weekly', jobName: 'viral-discovery-weekly', schedule: '0 0 * * *', logsRuns: true },
-  { service: 'vision-analyzer', jobName: 'vision-analyzer', schedule: '*/30 * * * *', logsRuns: true },
+  { service: 'vision-analyzer', jobName: 'vision-analyzer', schedule: '50 * * * *', logsRuns: true },
   { service: 'weekly-seo-report', jobName: 'weekly-seo-report', schedule: '30 18 * * 0', logsRuns: true },
   { service: 'winner-reel-sync-daily', jobName: 'winner-reel-sync-daily', schedule: '0 15 * * *', logsRuns: true },
-  { service: 'zhangqian-sweeper', jobName: 'zhangqian-sweeper', schedule: '*/30 * * * *', logsRuns: true },
+  { service: 'zhangqian-sweeper', jobName: 'zhangqian-sweeper', schedule: '35 * * * *', logsRuns: true },
   { service: 'zhuge-weekly-recalculate', jobName: 'zhuge-weekly-recalculate', schedule: '0 3 * * 1', logsRuns: true },
 ] as const

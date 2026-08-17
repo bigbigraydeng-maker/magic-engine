@@ -13,7 +13,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { runAction } from '../runner'
-import { approveRun } from '../authorize'
+import { approveRun } from '../human-approval'
 import { isPolicyActive } from '../store'
 import { ACTION_REGISTRY } from '../registry'
 import { createCapabilities, computeBlogContentHash } from '@/lib/capabilities'
@@ -154,7 +154,7 @@ describe('P2-4 · 时间窗过滤必须发生在截断之前（数据库侧）',
     const pending = await runAction(f.kernel, submit())
     expect(pending.kind).toBe('pending_approval')
 
-    const { approveRun } = await import('../authorize')
+    const { approveRun } = await import('../human-approval')
     const approved = await approveRun(f.kernel, pending.run.id, 'ray@magiclab')
     expect(approved.verdict).toBe('allow')
   })

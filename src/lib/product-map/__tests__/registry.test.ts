@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { MANUAL_FACTS_SNAPSHOT } from '../external-facts'
 import { PRODUCT_MAP_COMPONENTS } from '../registry'
+import { ARCHITECTURAL_ROLE } from '../types'
 import { validateRegistry } from '../validate'
 
 const REPO_ROOT = join(__dirname, '..', '..', '..', '..')
@@ -46,6 +47,40 @@ describe('登记册通过全部校验', () => {
       'capability.geo-measurement-runtime:unverified_critical_evidence',
       'platform.geo-measurement-store:unverified_critical_evidence',
     ])
+  })
+})
+
+describe('WP00 七层边界（Build Control Room 2026-08-15 05:43 复审裁决）', () => {
+  it('每个 me2_native 顶层组件都落在冻结七层之一（supporting artifact 除外）', () => {
+    const offenders = PRODUCT_MAP_COMPONENTS.filter(
+      // B2：supporting artifact（adapterOf 已设）不占角色，architecturalRole 结构上为空,
+      // 不算违规 —— 只有 me2_native 的顶层组件必须落在七层。
+      (c) => c.origin === 'me2_native' && c.adapterOf === undefined &&
+        !(ARCHITECTURAL_ROLE as readonly string[]).includes(c.architecturalRole ?? ''),
+    ).map((c) => c.id)
+    expect(offenders).toEqual([])
+  })
+
+  it('B2：supporting artifact 不占顶层七角色（有 adapterOf 的一律无 architecturalRole）', () => {
+    const offenders = PRODUCT_MAP_COMPONENTS.filter(
+      (c) => c.origin === 'me2_native' && c.adapterOf !== undefined && c.architecturalRole !== undefined,
+    ).map((c) => c.id)
+    expect(offenders).toEqual([])
+  })
+
+  it('没有任何 legacy 组件伪装成已纳入 ME2 治理', () => {
+    const offenders = PRODUCT_MAP_COMPONENTS.filter((c) => c.origin === 'legacy' && c.architecturalRole !== undefined).map(
+      (c) => c.id,
+    )
+    expect(offenders).toEqual([])
+  })
+
+  it('adapterOf 全部指回登记册里真实存在的父组件', () => {
+    const ids = new Set(PRODUCT_MAP_COMPONENTS.map((c) => c.id))
+    const dangling = PRODUCT_MAP_COMPONENTS.filter((c) => c.adapterOf !== undefined && !ids.has(c.adapterOf)).map(
+      (c) => c.id,
+    )
+    expect(dangling).toEqual([])
   })
 })
 

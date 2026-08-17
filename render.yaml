@@ -25,10 +25,12 @@ services:
   # 2026-08-03 降频 */10 → */30：24h 内 144 次运行全部零产出（client_assets
   # 无 pending 行，最新素材停在 2026-06-10）。非交互式批处理——客户传完素材就走，
   # 由 FDE 事后审阅，晚 30 分钟开始分析无感知。审计见 docs/audits/supabase-request-audit.md §8 P0-1
+  # 2026-08-16 [OPS] 降频 */30 → 每小时第 50 分：30 天仍全程零产出（工厂未开工），
+  # 且本任务本来就是非交互批处理，没人在前台等它。回滚：schedule 改回 "*/30 * * * *"。
   - type: cron
     name: vision-analyzer
     env: node
-    schedule: "*/30 * * * *"
+    schedule: "50 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 120 -X POST -H "Authorization: Bearer $CRON_SECRET" \
@@ -46,10 +48,17 @@ services:
   # generation_status='generating'），降频 = 让人干等。空跑只说明当下没人在生成，
   # 不代表可以放慢。别顺手把它跟隔壁三个一起降了。
   # healthchecks.io: poll-visual-jobs (0dd2b641-499f-4f2f-8b73-73085050a5f0)
+  #
+  # 🔴 2026-08-16 [OPS] 降频 */10 → 每小时第 15 分 —— **这一条直接推翻了上面那段
+  #    2026-08-03 的「刻意不降频」结论**，由 PM 在省钱盘点里显式点名要降，不是顺手带的。
+  #    代价说清楚：用户在 ReelsStudio 点完「生成视频」后，成片最坏要等 60 分钟才在界面
+  #    上变成完成态（此前最坏 10 分钟）。生成本身照跑，慢的只是「什么时候被看见」。
+  #    工厂开工 / 有人开始天天用生成按钮时，这一条要第一个改回去。
+  #    回滚：schedule 改回 "*/10 * * * *"。
   - type: cron
     name: poll-visual-jobs
     env: node
-    schedule: "*/10 * * * *"
+    schedule: "15 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
@@ -105,10 +114,14 @@ services:
   # 2026-08-03 降频 */15 → */30：24h 内 96 次运行全部零产出。纯超时兜底，从不干活。
   # 只降到 30 分钟而非每小时：超时阈值是 6 分钟，每小时跑会让真卡住的任务在界面上
   # 「运行中」挂最多 66 分钟，FDE 会误判系统坏了；30 分钟档最坏 36 分钟。
+  # ⚠️ 2026-08-16 [OPS] 降频 */30 → 每小时第 35 分 —— 上面那句「不降到每小时」被 PM
+  #    在省钱盘点里显式推翻。代价照旧成立：真卡住的发现任务在界面上最坏挂 66 分钟。
+  #    工厂 / 发现线开工后若 FDE 反馈「看着像坏了」，第一步就是把这条改回去。
+  #    回滚：schedule 改回 "*/30 * * * *"。
   - type: cron
     name: zhangqian-sweeper
     env: node
-    schedule: "*/30 * * * *"
+    schedule: "35 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
@@ -149,9 +162,13 @@ services:
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/job-boards-weekly
+    # 2026-08-16 [OPS] sync:false → fromGroup：密钥自动挂上，不用人去后台 link。
+    # ⚠️ 这条的「30 天没跑成」根因**不是**密钥 —— 是主开关 JOB_SIGNAL_INGEST_ENABLED
+    #    没开（route 在开关那里直接 return，走不到写运行记录那一步）。换 fromGroup 只是
+    #    顺手排除掉第二个可能原因；真要让它干活，得 PM 决定开外呼线（花 Places 的钱 +
+    #    开始碰真实 NZ 公司），不是这个 PR 能定的。
     envVars:
-      - key: CRON_SECRET
-        sync: false
+      - fromGroup: me-shared-cron-secret
 
   # Blog generation sweeper — every 5 minutes
   # Marks blog_posts stuck at status='generating' (>10 min) as failed.
@@ -162,10 +179,13 @@ services:
   # 2026-08-03 降频 */15 → */30：24h 内 96 次运行全部零产出（blog_posts 无 generating 行）。
   # 纯超时兜底，从不干活。同 zhangqian-sweeper，只降到 30 分钟：超时阈值 10 分钟，
   # 每小时跑会让卡住的文章在界面上「生成中」挂最多 70 分钟；30 分钟档最坏 40 分钟。
+  # ⚠️ 2026-08-16 [OPS] 降频 */30 → 每小时第 45 分 —— 上面那句「不降到每小时」被 PM
+  #    在省钱盘点里显式推翻。代价照旧成立：卡住的文章最坏「生成中」挂 70 分钟。
+  #    回滚：schedule 改回 "*/30 * * * *"。
   - type: cron
     name: blog-stuck-generating-sweeper
     env: node
-    schedule: "*/30 * * * *"
+    schedule: "45 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
@@ -451,9 +471,11 @@ services:
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/benchmark-accumulator
+    # 2026-08-16 [OPS] sync:false → fromGroup。这条 route 在鉴权之后立刻写运行记录、
+    # 中间没有任何开关，所以「30 天零运行记录」只可能是压根没跑成 —— 401 静默失败。
+    # 参照 mailchimp-activity-daily 的写法，密钥由环境变量组自动挂上。
     envVars:
-      - key: CRON_SECRET
-        sync: false
+      - fromGroup: me-shared-cron-secret
 
   # 发布通道自动重测 —— 让临时故障自己好。
   # 🔴 起因:Oztop 的 WordPress 通道 2026-06-19 被客户主机商的安全防护拦了一次,
@@ -747,10 +769,13 @@ services:
   # 新建的 cron 服务不会自动拿到 CRON_SECRET(sync:false 只声明不填值),建了也只是每轮 401
   # 静默失败 —— 2026-08-04 实测:排队的片等了 14 分钟没动,cron_run_logs 里连一条运行记录都没有。
   # 挂在已经配好密钥、稳定在跑的 worker 上,就不需要任何人去后台补配置。
+  # 2026-08-16 [OPS] 降频 */10 → 每小时第 5 分：工厂未开工，30 天每轮都领 0 条。
+  # 注意这条一轮只领 1 条 —— 每小时一轮 = 发布吞吐上限 24 条/天。工厂真开工、
+  # 一天要发的量超过这个数时，必须先把它改回 "*/10 * * * *" 再开工。
   - type: cron
     name: factory-publish-worker
     env: node
-    schedule: "*/10 * * * *"   # 一轮领 1 条(FB 视频上传慢),10 分钟一轮够用
+    schedule: "5 * * * *"   # 原 "*/10 * * * *"：一轮领 1 条(FB 视频上传慢),10 分钟一轮够用
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
@@ -798,10 +823,13 @@ services:
 
   # 卡死回收:publishing 超 10 分钟(进程被杀/超时)→ 退回 approved 等下轮重领。
   # 没有它,一次崩溃就会让那条工单永远卡在 publishing,没人能再领。
+  # 2026-08-16 [OPS] 降频 */15 → 每小时第 25 分：工厂未开工，30 天零回收。
+  # 排在 worker(第 5 分)之后 20 分钟 —— 崩掉的工单当轮就退回 approved，下一轮
+  # worker 正好能领走，不会跨两小时。回滚：schedule 改回 "*/15 * * * *"。
   - type: cron
     name: factory-publish-sweeper
     env: node
-    schedule: "*/15 * * * *"
+    schedule: "25 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 120 -H "Authorization: Bearer $CRON_SECRET" \
@@ -875,8 +903,9 @@ services:
   #
   # 查出来的 blocker 进「今日待办 → 需要你动手」,不留在日志里。
   # 跑在 20:40 UTC(NZ 早上 8:40 左右):人上班第一眼就能看到,而不是等到花完一天钱。
-  # ⚠️ 部署后必须在 Render 后台 link `me-shared-cron-secret` 环境变量组,
-  #    否则每天 401 静默失败(上一个踩这个坑的 cron 哑了 51 天)。
+  # ⚠️ 2026-08-16 [OPS]:上面这句「部署后必须去 Render 后台 link」当初**没人去做**,
+  #    结果它从上线起 30 天零运行记录 —— 每天 20:40 准点 401,悄无声息。
+  #    现在改成 fromGroup 自动挂密钥,不再依赖任何人记得去点后台。
   - type: cron
     name: ad-readback-sweep-daily
     env: node
@@ -886,8 +915,7 @@ services:
       curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/ad-readback-sweep
     envVars:
-      - key: CRON_SECRET
-        sync: false
+      - fromGroup: me-shared-cron-secret
 
   # 做片拼片 worker — 常驻容器(node+python-PIL+ffmpeg)轮询 content_factory_render_jobs，
   # 领排队任务 → 分镜 → 画面(gpt-image+Muapi i2v) → 配音(MiniMax) → ffmpeg 拼竖屏成片 → 标待审。

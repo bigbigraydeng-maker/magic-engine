@@ -21,6 +21,12 @@ export interface PullRequestFact {
    * - `github_sync`：GitHub 同步器写入（PR 2 起）。
    */
   readonly source: 'manual_snapshot' | 'github_sync'
+  /**
+   * PR 的目标分支（github_sync 事实必带；manual_snapshot 快照可缺省）。
+   * 🔴 codeInMain 判 yes 的硬前提：merged 只有在 `baseRef==='main'` 时才证明代码进了 main。
+   *    合并到 staging / 功能分支的 PR 不能宣称「代码已进入 main」；缺失 → fail-safe 不判 yes。
+   */
+  readonly baseRef?: string
 }
 
 export interface ExternalFacts {

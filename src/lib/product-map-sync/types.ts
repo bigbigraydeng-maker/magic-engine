@@ -49,6 +49,11 @@ export interface PrFactDetail {
    */
   readonly mergeableState: string
   readonly unresolvedThreads: number | null
+  /**
+   * unresolvedThreads 抓不到时的原因(抓到 = null)。
+   * 🔴 null 计数必须配非空原因 —— 「只剩一个 null,没人说得出为什么」就是静默失败。
+   */
+  readonly unresolvedThreadsError: string | null
   /** 与 headSha 绑定的检查汇总。 */
   readonly checks: readonly CheckFact[]
   /** checks 只取第一页(100 条),有更多时明说(silent cap 禁令)。 */
@@ -157,6 +162,11 @@ export interface SyncStats {
   readonly skippedStale: number
   /** 分页/条数截断记录 —— silent cap 禁令。 */
   readonly truncations: readonly string[]
+  /**
+   * review threads(GraphQL)抓不到的 PR 及原因,一条一个 `pr#N: 原因`。
+   * 它是 partial 的**说明书**:unresolved_threads 为空必然在这里有对应行。
+   */
+  readonly threadsFailures: readonly string[]
   /** 每日 cron 额外统计:自上一次 full 轮以来 status=error 的 webhook runs 数。 */
   readonly webhookErrorRunsSinceLastFull?: number
   readonly deliveriesPruned?: number
@@ -169,6 +179,7 @@ export const EMPTY_SYNC_STATS: SyncStats = Object.freeze({
   failedItems: [],
   skippedStale: 0,
   truncations: [],
+  threadsFailures: [],
 })
 
 // ---------------------------------------------------------------------------

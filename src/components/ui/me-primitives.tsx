@@ -149,9 +149,9 @@ export function MeTh({ children, num = false }: { children?: React.ReactNode; nu
   )
 }
 
-export function MeTd({ children, num = false, className = '' }: { children?: React.ReactNode; num?: boolean; className?: string }) {
+export function MeTd({ children, num = false, className = '', colSpan }: { children?: React.ReactNode; num?: boolean; className?: string; colSpan?: number }) {
   return (
-    <td className={cx('border-b border-black/[.06] px-4 py-[15px] align-middle text-sm', num && 'text-right', className)}>
+    <td colSpan={colSpan} className={cx('border-b border-black/[.06] px-4 py-[15px] align-middle text-sm', num && 'text-right', className)}>
       {children}
     </td>
   )

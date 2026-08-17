@@ -90,6 +90,7 @@ export function makePrFact(overrides: Partial<PrFactDetail> & { number: number }
     mergedCommitSha: null,
     mergeableState: 'unknown',
     unresolvedThreads: 0,
+    unresolvedThreadsError: null,
     checks: [],
     checksTruncated: false,
     changedFiles: [],

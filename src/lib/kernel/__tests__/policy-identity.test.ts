@@ -13,7 +13,8 @@
 
 import { describe, it, expect, vi } from 'vitest'
 import { runAction, submitActionRun } from '../runner'
-import { authorizeRun, approveRun } from '../authorize'
+import { authorizeRun } from '../authorize'
+import { approveRun } from '../human-approval'
 import { executeAuthorizedRun } from '../gateway'
 import { ACTION_REGISTRY } from '../registry'
 import { createCapabilities, computeBlogContentHash } from '@/lib/capabilities'

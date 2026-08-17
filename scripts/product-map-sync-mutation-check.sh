@@ -139,6 +139,32 @@ check "SQL 单调守卫被删" "$MIGRATION" \
   "v_skipped_stale := v_skipped_stale + 1;" \
   "v_skipped_stale := v_skipped_stale;"
 
+# 13. threads 失败被吞回裸 null(2026-08-15 生产事故的形状:全空却没人说得出原因)
+check "threads 失败原因被吞掉" "$PROVIDER" \
+  "return { count: null, error: err instanceof Error ? err.message : 'graphql 未知失败' }" \
+  "return { count: null, error: null }"
+
+# 14. GraphQL 限流只认文档写法(实测的 type=RATE_LIMIT / code=graphql_rate_limit 会被误判成普通读取失败)
+check "graphql 限流类型漏判" "$PROVIDER" \
+  "payload.errors.some((e) => e.type?.startsWith('RATE_LIMIT') || e.code === 'graphql_rate_limit')" \
+  "payload.errors.some((e) => e.type === 'RATE_LIMITED')"
+
+# 15. 限流之后仍逐个 PR 空打 GraphQL(白烧配额 + 招 secondary limit)
+check "限流后仍空打 graphql" "$PROVIDER" \
+  "if (this.graphqlRateLimited) {" \
+  "if (false) {"
+
+# 16/17. runner 拿到原因却不汇总进 stats(声明了 ≠ 接上了)。
+#   🔴 变异目标必须带上下一行做锚:光写 `    threadsFailures,` 会先命中
+#      commitErrorRun 调用处那个缩进更深的同名片段(子串!),打空炮。
+check "原因没接进 full 轮 stats" "$RUNNER" \
+  $'    threadsFailures,\n    webhookErrorRunsSinceLastFull: webhookErrorRuns,' \
+  $'    threadsFailures: [],\n    webhookErrorRunsSinceLastFull: webhookErrorRuns,'
+
+check "原因没接进 targeted 轮 stats" "$RUNNER" \
+  $'      truncations: [],\n      threadsFailures,' \
+  $'      truncations: [],\n      threadsFailures: [],'
+
 echo
 if [ "$fail_count" -gt 0 ]; then
   echo "❌ $total_count 道闸里 $fail_count 道没响"

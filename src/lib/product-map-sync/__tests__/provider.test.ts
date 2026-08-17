@@ -1,7 +1,7 @@
 /**
  * GithubRestProvider 的 hermetic 测试 —— fetchImpl 注入,零真实网络。
  * 盯:仓库越界 fail-closed / REST 限流地板 / 分页截断记账 / checks 按 sha /
- * GraphQL RATE_LIMITED → threads null(不拖垮整轮)。
+ * GraphQL 失败 → threads null **且带得出原因**(不拖垮整轮、也不静默)。
  */
 
 import { describe, expect, it } from 'vitest'
@@ -66,6 +66,8 @@ describe('GithubRestProvider', () => {
     expect(facts[0].headSha).toBe('sha-7')
     expect(facts[0].checks[0].name).toBe('build')
     expect(facts[0].unresolvedThreads).toBe(1)
+    // 成功时不许留残余原因 —— 否则 stats 里会出现「抓到了还报错」的噪音
+    expect(facts[0].unresolvedThreadsError).toBeNull()
   })
 
   it('响应里的仓库不是获准仓库 → 该号码 fail-closed,绝不产出事实', async () => {
@@ -91,6 +93,55 @@ describe('GithubRestProvider', () => {
     const p = new GithubRestProvider({ token: 't', fetchImpl: fakeFetch(routes) })
     const { facts } = await p.getPullRequestFacts([7])
     expect(facts[0].unresolvedThreads).toBeNull()
+    expect(facts[0].unresolvedThreadsError).toContain('限流')
+  })
+
+  it('GraphQL 4xx → threads=null 且原因带得出 HTTP 状态码(不静默吞成裸 null)', async () => {
+    const routes = standardRoutes({
+      graphql: () => ({ status: 415, body: { message: 'Unsupported Media Type' } }),
+    })
+    const p = new GithubRestProvider({ token: 'super-secret-token', fetchImpl: fakeFetch(routes) })
+    const { facts } = await p.getPullRequestFacts([7])
+    expect(facts[0].unresolvedThreads).toBeNull()
+    expect(facts[0].unresolvedThreadsError).toContain('415')
+    // 新增的原因字段同样受「错误绝不携带 token」约束
+    expect(facts[0].unresolvedThreadsError).not.toContain('super-secret-token')
+    // 其余字段照常抓到 —— threads 失败绝不拖垮整个 PR
+    expect(facts[0].headSha).toBe('sha-7')
+  })
+
+  it('GraphQL 200 但缺 reviewThreads 节点 → 原因说清是「返回缺节点」,不与限流混为一谈', async () => {
+    const routes = standardRoutes({
+      graphql: () => ({ body: { data: { repository: null } } }),
+    })
+    const p = new GithubRestProvider({ token: 't', fetchImpl: fakeFetch(routes) })
+    const { facts } = await p.getPullRequestFacts([7])
+    expect(facts[0].unresolvedThreads).toBeNull()
+    expect(facts[0].unresolvedThreadsError).toContain('reviewThreads')
+  })
+
+  it('配额真打爆的实测形状(type=RATE_LIMIT + code=graphql_rate_limit)也认成限流,并且后续 PR 不再空打', async () => {
+    let graphqlCalls = 0
+    const routes = standardRoutes({
+      graphql: () => {
+        graphqlCalls++
+        return {
+          body: {
+            errors: [
+              { type: 'RATE_LIMIT', code: 'graphql_rate_limit', message: 'API rate limit already exceeded' },
+            ],
+          },
+        }
+      },
+      pr: (url) => ({ body: prPayload(Number(url.split('/pulls/')[1])) }),
+    })
+    const p = new GithubRestProvider({ token: 't', fetchImpl: fakeFetch(routes) })
+    const { facts } = await p.getPullRequestFacts([7, 8, 9])
+    expect(facts.map((f) => f.unresolvedThreads)).toEqual([null, null, null])
+    // 一个 GraphQL 配额池,第一次打爆之后再逐个空打只是白烧请求
+    expect(graphqlCalls).toBe(1)
+    expect(facts[0].unresolvedThreadsError).toContain('限流')
+    expect(facts[2].unresolvedThreadsError).toContain('未尝试')
   })
 
   it('changed files 超上限 → 截断并打 truncated 标(silent cap 禁令)', async () => {

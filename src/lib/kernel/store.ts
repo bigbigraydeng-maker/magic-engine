@@ -24,6 +24,7 @@ import type {
   StepStatus,
   VerificationResult,
 } from './types'
+import { failClosedIfRpcMissing } from './rpc-versioning'
 
 export const TABLE_RUNS = 'action_runs'
 export const TABLE_STEPS = 'action_run_steps'
@@ -315,7 +316,19 @@ export async function resolvePendingApproval(
     costEstimateUsd: number | null
   },
 ): Promise<ResolveApprovalResult> {
-  const { data, error } = await sb.rpc('kernel_resolve_pending_approval', {
+  // 🔴 **只打 `_v2`，绝不打历史原名。**（Build Control Room blocker ①）
+  //
+  //    历史那个 `kernel_resolve_pending_approval` 至今仍然存在、仍然可调用 ——
+  //    这正是危险的地方：代码先部署、前向 migration 还没 apply 时，打历史原名
+  //    会**成功**打在旧实现上，而本 PR 新加的锚身份闸、政策行锁、挂钟复核
+  //    在整个上线窗口里**一条都不存在**，调用方却拿到「成功」。
+  //    静默降级比报错危险得多 —— 报错会停下，降级会继续往下走。
+  //
+  //    反过来那半边由数据库接住：migration 先 apply 时，历史原名被换成了
+  //    转发到 v2 的兼容壳，所以还没换代码的旧调用方也自动拿到新的安全实现。
+  //
+  // 🔴 函数名写字面量、参数逐条写全 —— 理由同 recordFencedDeny 那段。
+  const { data, error } = await sb.rpc('kernel_resolve_pending_approval_v2', {
     p_run_id: args.runId,
     p_pending_decision_id: args.pendingDecisionId,
     p_resolution: args.resolution,
@@ -323,6 +336,10 @@ export async function resolvePendingApproval(
     p_reason: args.reason,
     p_policy_snapshot: args.policySnapshot,
     p_cost_estimate_usd: args.costEstimateUsd,
+  })
+  failClosedIfRpcMissing('kernel_resolve_pending_approval_v2', error, {
+    why: '人工批准/拒绝必须带锚身份闸、政策行锁和挂钟复核',
+    neverFallBackTo: 'kernel_resolve_pending_approval',
   })
   if (error) fail('人工批准/拒绝', error)
   const row = (data ?? [])[0] as unknown as
@@ -461,19 +478,68 @@ export async function recordFencedDeny(
     runId: string
     expectedGeneration?: number | null
     expectedStatus?: RunStatus | null
+    /**
+     * 🔴 审批人当时看到的那份审批请求的 id（跟 `resolvePendingApproval` 的
+     *    `pendingDecisionId` 同一个契约）。传了就在数据库的行锁里再比一次 ——
+     *    只有状态闸的话，`pending_approval` 期间这条 run 被重新排成**另一份**
+     *    待审批请求时，一次迟到的「批不了」会把那份新的直接盖成 denied。
+     *    不传 = 不做这道校验（自动授权路径没有「审批人看到的那份」这个概念）。
+     */
+    expectedDecisionId?: string | null
     reason: string
     decision: Record<string, unknown>
   },
 ): Promise<FencedDenyResult> {
-  const { data, error } = await sb.rpc('kernel_record_fenced_deny', {
+  const expectedDecisionId = args.expectedDecisionId ?? null
+
+  // 🔴 **不带指针 = 历史五参入口；带指针 = 只能走 v2。**
+  //    分成两个名字不同的函数，是为了让代码和数据库能各自独立上线：
+  //    给老函数加带默认值的第六参会产生有歧义的重载，而 DROP 掉老签名会让
+  //    「migration 先 apply」这一步当场打死所有还没重新部署的旧代码。
+  //
+  // 🔴 **函数名写字面量、参数逐条写全，都不许「整理」成常量或对象展开。**
+  //    sql-contract 那条判据是拿 AST 去比对的：它只认
+  //    `sb.rpc('字面量', { p_x: … })` 这个形状。抽成 `RPC_NAME` 常量，
+  //    或者把公共参数 `...spread` 进去，判据当场看不见这次调用 ——
+  //    而它的报错是「没找到调用」，不是「参数对不上」，很容易被当成噪音跳过。
+  //    这两处的重复是**故意留的**，代价是少写五行、换一道闸不空跑。
+  if (expectedDecisionId === null) {
+    return unwrapFencedDeny(
+      await sb.rpc('kernel_record_fenced_deny', {
+        p_run_id: args.runId,
+        p_expected_generation: args.expectedGeneration ?? null,
+        p_expected_status: args.expectedStatus ?? null,
+        p_decision: args.decision,
+        p_reason: args.reason,
+      }),
+    )
+  }
+
+  const result = await sb.rpc('kernel_record_fenced_deny_v2', {
     p_run_id: args.runId,
     p_expected_generation: args.expectedGeneration ?? null,
     p_expected_status: args.expectedStatus ?? null,
     p_decision: args.decision,
     p_reason: args.reason,
+    p_expected_decision_id: expectedDecisionId,
   })
-  if (error) fail('落拒绝决策', error)
-  const row = (data ?? [])[0] as unknown as { ok: boolean; reason: string; decision_id: string | null } | undefined
+
+  // 🔴 **v2 没部署 ⇒ 抛错，绝不回退到五参入口。**
+  //    回退看起来「更可用」，实际是把这次调用降级成没有指针闸的写入：
+  //    `pending_approval` 期间这条 run 已经被重新排成**另一份**待审批请求时，
+  //    一次迟到的「批不了」会把那份**新的、还没人看过的**请求盖成 denied，
+  //    而正在看它的人什么都不知道。宁可这次审批报错、run 原样停在等审批。
+  failClosedIfRpcMissing('kernel_record_fenced_deny_v2', result.error, {
+    why: '人工审批的拒绝路径必须带决策指针闸',
+    neverFallBackTo: 'kernel_record_fenced_deny',
+  })
+  return unwrapFencedDeny(result)
+}
+
+function unwrapFencedDeny(result: { data: unknown; error: { message?: string } | null }): FencedDenyResult {
+  if (result.error) fail('落拒绝决策', result.error)
+  const rows = (result.data ?? []) as { ok: boolean; reason: string; decision_id: string | null }[]
+  const row = rows[0]
   if (!row) fail('落拒绝决策', { message: 'RPC 没有返回结果行' })
   return { ok: Boolean(row.ok), reason: String(row.reason ?? 'unknown'), decisionId: row.decision_id ?? null }
 }

@@ -140,3 +140,30 @@ export function clampLimit(
 
   return Math.min(parsed, max)
 }
+
+// ─── UUID ─────────────────────────────────────────────────────────────────────
+
+/**
+ * 一个字符串**长得像不像** Postgres 的 `uuid`。
+ *
+ * 🔴 为什么必须在读库**之前**判：`.eq('id', v)` 打在 uuid 列上时，Postgres 对
+ *    畸形值抛的是 `22P02 invalid input syntax for type uuid`。那是一条**数据库
+ *    错误**，一路冒到接口就成了 `500 internal_error` —— 于是「链接被截断了 / 有人
+ *    手打错了」这种纯粹的客户端问题，会被记成服务端故障，污染 5xx 监控，
+ *    而真正的服务端故障就此淹没在噪音里。
+ *
+ * 🔴 判据只管**语法**，不管这条记录存不存在、更不管调用方有没有权限看它。
+ *    语法过了照样要走鉴权 —— 这个函数不是一道权限闸，别当它是。
+ *
+ * 🔴 这里刻意不校验 version / variant 位（不写成 `[1-8]` / `[89ab]`）：
+ *    Postgres 的 `uuid` 类型收任何 128 位值，全零 UUID 也合法。判得比数据库还严，
+ *    会把库里真实存在的行判成「非法输入」。判据要跟**数据库的口径**一致。
+ *
+ * 用法：任何**来自 HTTP**（路径段 / 查询串 / 请求体）并且最终会进 uuid 列或
+ * uuid RPC 参数的值，都要先过这一道。库里读出来的值不用（它们本来就是 uuid）。
+ */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export function isUuid(value: unknown): value is string {
+  return typeof value === 'string' && UUID_RE.test(value)
+}

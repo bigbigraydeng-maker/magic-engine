@@ -37,6 +37,8 @@ export function rowsToExternalFacts(
       isDraft: row.is_draft,
       observedAt: row.observed_at.slice(0, 10),
       source: 'github_sync',
+      // 🔴 base_ref 决定 merged 是否真进了 main —— 不能丢，codeInMain 靠它判 yes。
+      baseRef: row.base_ref,
     }
   }
   return {

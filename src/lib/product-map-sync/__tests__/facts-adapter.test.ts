@@ -5,12 +5,12 @@ import { buildProductMapSnapshot } from '@/lib/product-map'
 import { rowsToExternalFacts } from '../facts-adapter'
 import type { PrFactRow } from '../types'
 
-function row(number: number, state: PrFactRow['state'], observedAt: string): PrFactRow {
+function row(number: number, state: PrFactRow['state'], observedAt: string, baseRef = 'main'): PrFactRow {
   return {
     pr_number: number,
     state,
     is_draft: false,
-    base_ref: 'main',
+    base_ref: baseRef,
     head_sha: `sha-${number}`,
     merged_commit_sha: state === 'merged' ? `m-${number}` : null,
     mergeable_state: 'clean',
@@ -43,5 +43,15 @@ describe('rowsToExternalFacts', () => {
     expect(synced).not.toBeNull()
     const snapshot = buildProductMapSnapshot(synced?.facts)
     expect(snapshot.factsSource).toBe('github_sync')
+  })
+
+  it('base_ref 必须原样带到 baseRef —— codeInMain 靠它判 yes,丢了就会误判合到 staging 的 PR', () => {
+    const synced = rowsToExternalFacts(
+      [row(100, 'merged', '2026-08-15T00:00:00Z', 'main'), row(200, 'merged', '2026-08-15T00:00:00Z', 'staging')],
+      null,
+    )
+    // 变异验证:若 adapter 丢掉 base_ref,两条 baseRef 都会是 undefined,下面第二条断言必红。
+    expect(synced?.facts.pullRequests[100].baseRef).toBe('main')
+    expect(synced?.facts.pullRequests[200].baseRef).toBe('staging')
   })
 })

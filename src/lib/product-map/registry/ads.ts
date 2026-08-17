@@ -35,7 +35,7 @@ export const ADS_COMPONENTS: readonly ProductMapComponent[] = [
   },
   {
     id: 'adapter.google-ads',
-    name: 'Google Ads adapter',
+    name: '连 Google 广告的插头',
     componentType: 'adapter',
     businessLane: 'ads',
     dapeStages: ['execution', 'verification'],

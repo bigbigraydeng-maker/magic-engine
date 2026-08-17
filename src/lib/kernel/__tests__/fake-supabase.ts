@@ -24,7 +24,12 @@ export type Tables = Record<string, Row[]>
 let seq = 0
 export function fakeId(prefix = 'id'): string {
   seq += 1
-  return `${prefix}-${String(seq).padStart(6, '0')}`
+  // 🔴 生成的必须是**合法 UUID** —— 真表里这些主键列就是 `uuid`。
+  //    以前返回 `authorization_decisions-000001` 这种，看着好读，
+  //    但它让测试绕过了一整类真实输入边界（真库对畸形 uuid 抛 22P02，
+  //    假件只做字符串比较照收不误）。可读性靠把序号放在最后一段保留。
+  void prefix
+  return `feed0000-0000-4000-8000-${String(seq).padStart(12, '0')}`
 }
 
 /** 复刻生产库上的唯一约束。少了它，幂等测试测的就只是应用层的一个 if。 */
@@ -145,8 +150,41 @@ export interface Filter {
  * 🔴 只实现内核真用到的算子（is.null / gt / gte / lt / lte / eq）——
  *    认不出的算子直接 throw，不能静默当「匹配」（那会把过滤器变成漏勺）。
  */
+/**
+ * 按**顶层**逗号切开 —— 括号里的逗号不算分隔符。
+ *
+ * 🔴 PostgREST 的 `.or()` 允许嵌套：`or(a.gt.1,and(a.eq.1,b.gt.2))`。
+ *    直接 `split(',')` 会把 `and(...)` 从中间劈开，切出两截语法垃圾，
+ *    然后按「认不出的算子」抛错 —— 于是 keyset 分页那种写法在假件里根本跑不了，
+ *    而它恰恰是唯一能在活跃队列上不跳条的分页方式。
+ */
+function splitTopLevel(expr: string): string[] {
+  const parts: string[] = []
+  let depth = 0
+  let start = 0
+  for (let i = 0; i < expr.length; i++) {
+    const ch = expr[i]
+    if (ch === '(') depth += 1
+    else if (ch === ')') depth -= 1
+    else if (ch === ',' && depth === 0) {
+      parts.push(expr.slice(start, i))
+      start = i + 1
+    }
+  }
+  parts.push(expr.slice(start))
+  return parts.filter((p) => p.length > 0)
+}
+
 function orMatches(row: Row, expr: string): boolean {
-  return expr.split(',').some((cond) => {
+  return splitTopLevel(expr).some((cond) => {
+    // 嵌套组：and(...) 全真才真；or(...) 递归
+    if (cond.startsWith('and(') && cond.endsWith(')')) {
+      const inner = cond.slice('and('.length, -1)
+      return splitTopLevel(inner).every((c) => orMatches(row, c))
+    }
+    if (cond.startsWith('or(') && cond.endsWith(')')) {
+      return orMatches(row, cond.slice('or('.length, -1))
+    }
     const firstDot = cond.indexOf('.')
     const secondDot = cond.indexOf('.', firstDot + 1)
     const column = cond.slice(0, firstDot)
@@ -290,8 +328,18 @@ export function createFakeSupabase(
     let op: 'select' | 'insert' | 'update' | 'delete' = 'select'
     let payload: Row[] = []
     let patch: Row = {}
-    let orderBy: { column: string; ascending: boolean } | null = null
+    /**
+     * 排序键，**按调用顺序**（跟 PostgREST 一致：先按第一个排，平手再按第二个）。
+     *
+     * 🔴 早先这里是单个 `orderBy`，后一次 `.order()` 把前一次**覆盖**掉。
+     *    于是「先按时间、平手再按 id」这种写法在假件里悄悄退化成「只按 id」——
+     *    被测代码的主排序键根本没生效，而测试照样绿。
+     *    实测：一条专门验「等得最久的排最前」的变异探针因此完全抓不住。
+     */
+    const orderKeys: Array<{ column: string; ascending: boolean }> = []
     let limitN: number | null = null
+    /** `.range(from, to)` 的起点。0 = 没翻页。 */
+    let rangeFrom = 0
     let wantsReturn = false
     let singleMode: 'single' | 'maybeSingle' | null = null
 
@@ -347,11 +395,23 @@ export function createFakeSupabase(
       return chain()
     }
     builder.order = (column: string, opts?: { ascending?: boolean }) => {
-      orderBy = { column, ascending: opts?.ascending !== false }
+      orderKeys.push({ column, ascending: opts?.ascending !== false })
       return chain()
     }
     builder.limit = (n: number) => {
       limitN = n
+      return chain()
+    }
+    /**
+     * PostgREST 的 `.range(from, to)` —— **两端都含**（`Range: 0-9` 是 10 行）。
+     *
+     * 🔴 复刻它是因为「翻页」这件事必须能被测：只建模 `.limit()` 的话，
+     *    分页逻辑在假件里永远只看得到第一页，而「第二页拿到的是不是接着的」
+     *    这个问题在测试里根本问不出来。
+     */
+    builder.range = (from: number, to: number) => {
+      rangeFrom = from
+      limitN = to - from + 1
       return chain()
     }
     builder.single = () => {
@@ -532,15 +592,20 @@ export function createFakeSupabase(
         rows = removed
       } else {
         rows = tableOf(table).filter((r) => matches(r, filters))
-        if (orderBy) {
-          const { column, ascending } = orderBy
+        if (orderKeys.length > 0) {
           rows = [...rows].sort((a, b) => {
-            const av = readPath(a, column)
-            const bv = readPath(b, column)
-            const cmp = av === bv ? 0 : (av as never) < (bv as never) ? -1 : 1
-            return ascending ? cmp : -cmp
+            for (const { column, ascending } of orderKeys) {
+              const av = readPath(a, column)
+              const bv = readPath(b, column)
+              if (av === bv) continue // 这一键平手 → 交给下一键
+              const cmp = (av as never) < (bv as never) ? -1 : 1
+              return ascending ? cmp : -cmp
+            }
+            return 0
           })
         }
+        // 🔴 先跳过 offset 再截断 —— 顺序反了的话第二页拿到的还是第一页那几条
+        if (rangeFrom > 0) rows = rows.slice(rangeFrom)
         if (limitN !== null) rows = rows.slice(0, limitN)
       }
 
@@ -692,6 +757,17 @@ export function createFakeSupabase(
     if (!pending) return no('pending_not_found')
     if (pending.action_run_id !== run.id) return no('pending_run_mismatch')
     if (pending.verdict !== 'require_approval') return no('not_require_approval')
+    // 🔴 身份核对 —— 跟 SQL 一样放在 approve / reject 的**公共**分支。
+    //    只在 approve 里判的话，一条 client_id 属于别人的错挂决策可以被
+    //    当前客户拒掉，而新签的 deny 会把对方的 policy_id / 版本抄过来。
+    if (
+      pending.client_id !== run.client_id ||
+      pending.action_key !== run.action_key ||
+      pending.action_version !== run.action_version ||
+      pending.idempotency_key !== run.idempotency_key
+    ) {
+      return no('pending_identity_mismatch')
+    }
 
     const nowIso = (options.now?.() ?? new Date()).toISOString()
 
@@ -747,14 +823,6 @@ export function createFakeSupabase(
     if (policy.policy_version !== pending.policy_version) return no('stale_policy_version')
     if (policy.mode !== 'require_approval') return no('policy_mode_changed')
 
-    if (
-      pending.client_id !== run.client_id ||
-      pending.action_key !== run.action_key ||
-      pending.action_version !== run.action_version ||
-      pending.idempotency_key !== run.idempotency_key
-    ) {
-      return no('pending_identity_mismatch')
-    }
 
     const costCap = Number(policy.spend_cap_per_run_usd ?? 0)
     const ttl = Number(policy.decision_ttl_seconds ?? 900)
@@ -1020,6 +1088,7 @@ export function createFakeSupabase(
         ? null
         : Number(args.p_expected_generation)
     const expectedStatus = (args.p_expected_status ?? null) as string | null
+    const expectedDecisionId = (args.p_expected_decision_id ?? null) as string | null
     const d = (args.p_decision ?? {}) as Row
     const reason = String(args.p_reason)
     const no = (r: string) => ({ ok: false, reason: r, decision_id: null })
@@ -1039,6 +1108,28 @@ export function createFakeSupabase(
     }
     if (expectedStatus !== null && run.status !== expectedStatus) {
       return no(`not_${expectedStatus}:${String(run.status)}`)
+    }
+    // 🔴 指针闸 —— 跟 SQL 第 ④ 步同一道：run 当前指着的必须还是调用方看到的那份。
+    //    只建模状态闸的话，「期间被重新排成另一份待审批请求」那条路在假件里走不到。
+    if (expectedDecisionId !== null) {
+      if (run.authorization_decision_id !== expectedDecisionId) return no('decision_not_current')
+
+      // 🔴 **锚的完整身份 —— 跟 SQL 逐条对齐。**（Codex P2）
+      //    只比指针不够：外键只保证那条决策**存在**，不保证它属于这条 run、
+      //    这个客户。错挂之后失败落地会把别人那份决策的 policy_id / 版本
+      //    抄进这个客户的审计记录。假件少一条，那条路在测试里就走不到。
+      const pending = tableOf('authorization_decisions').find((x) => x.id === expectedDecisionId)
+      if (!pending) return no('pending_not_found')
+      if (pending.action_run_id !== run.id) return no('pending_run_mismatch')
+      if (pending.verdict !== 'require_approval') return no('not_require_approval')
+      if (
+        pending.client_id !== run.client_id ||
+        pending.action_key !== run.action_key ||
+        pending.action_version !== run.action_version ||
+        pending.idempotency_key !== run.idempotency_key
+      ) {
+        return no('pending_identity_mismatch')
+      }
     }
 
     const nowIso = (options.now?.() ?? new Date()).toISOString()
@@ -1201,7 +1292,11 @@ export function createFakeSupabase(
       if (name === 'kernel_begin_authorized_run') {
         return { data: [beginAuthorizedRun(args)], error: null }
       }
-      if (name === 'kernel_resolve_pending_approval') {
+      // 🔴 历史原名今天**仍然存在**（前向迁移把它换成了转发到 v2 的兼容壳），
+      //    所以假件也必须让它可调用并给出同样的结果 —— 建模成「不存在」会把
+      //    「代码打了历史原名」这种真实回归伪装成一次干脆的失败，
+      //    而生产上它是**静默成功**打在旧实现上的，那才是要防的形状。
+      if (name === 'kernel_resolve_pending_approval' || name === 'kernel_resolve_pending_approval_v2') {
         return { data: [resolvePendingApproval(args)], error: null }
       }
       if (name === 'kernel_claim_run_recovery') {
@@ -1216,7 +1311,27 @@ export function createFakeSupabase(
       if (name === 'kernel_claim_or_takeover_run') {
         return { data: [claimOrTakeoverRun(args)], error: null }
       }
+      // 🔴 两个**名字不同**的入口，按真库的形状分开建模。
+      //    历史五参入口在真库里**没有** p_expected_decision_id 这个参数 ——
+      //    PostgREST 按参数名找函数，多带一个它就找不到、回 PGRST202。
+      //    假件必须照着炸：不然「不小心把指针传给了旧入口」这种回归
+      //    会在测试里静静地生效，而生产上那道闸根本没跑。
       if (name === 'kernel_record_fenced_deny') {
+        if ('p_expected_decision_id' in args) {
+          return {
+            data: null,
+            error: {
+              code: 'PGRST202',
+              message:
+                'Could not find the function public.kernel_record_fenced_deny(' +
+                'p_decision, p_expected_decision_id, p_expected_generation, p_expected_status, ' +
+                'p_reason, p_run_id) in the schema cache',
+            },
+          }
+        }
+        return { data: [recordFencedDeny({ ...args, p_expected_decision_id: null })], error: null }
+      }
+      if (name === 'kernel_record_fenced_deny_v2') {
         return { data: [recordFencedDeny(args)], error: null }
       }
       if (name === 'kernel_ensure_run_steps') {

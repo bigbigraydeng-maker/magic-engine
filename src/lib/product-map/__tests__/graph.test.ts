@@ -1,8 +1,57 @@
 /** 依赖图工具测试:悬空 / 环 / 邻接 / blocker 传播。 */
 
 import { describe, expect, it } from 'vitest'
-import { findDanglingDependencies, findOrderingCycles, neighboursOf, propagateBlocked } from '../graph'
+import {
+  findDanglingDependencies,
+  findOrderingCycles,
+  layerByDepth,
+  neighboursOf,
+  propagateBlocked,
+} from '../graph'
 import { makeComponent } from './_fixtures'
+
+describe('layerByDepth', () => {
+  it('无依赖的组件 depth 为 0', () => {
+    const a = makeComponent({ id: 'platform.a' })
+    expect(layerByDepth([a]).get('platform.a')).toBe(0)
+  })
+
+  it('被依赖者更浅:A requires B → B=0, A=1(最长路径)', () => {
+    const a = makeComponent({ id: 'platform.a', dependencies: [{ type: 'requires', target: 'platform.b' }] })
+    const b = makeComponent({ id: 'platform.b', dependencies: [{ type: 'requires', target: 'platform.c' }] })
+    const c = makeComponent({ id: 'platform.c' })
+    const d = layerByDepth([a, b, c])
+    expect(d.get('platform.c')).toBe(0)
+    expect(d.get('platform.b')).toBe(1)
+    expect(d.get('platform.a')).toBe(2)
+  })
+
+  it('consumes / implements / adapts 都计入分层', () => {
+    const a = makeComponent({ id: 'capability.a', componentType: 'capability', dependencies: [{ type: 'consumes', target: 'adapter.b' }] })
+    const b = makeComponent({ id: 'adapter.b', dependencies: [{ type: 'implements', target: 'platform.c' }] })
+    const c = makeComponent({ id: 'platform.c' })
+    const d = layerByDepth([a, b, c])
+    expect(d.get('platform.c')).toBe(0)
+    expect(d.get('adapter.b')).toBe(1)
+    expect(d.get('capability.a')).toBe(2)
+  })
+
+  it('blocks 边**不**计入分层(它是「卡住」不是数据流先后)', () => {
+    const a = makeComponent({ id: 'platform.a', dependencies: [{ type: 'blocks', target: 'platform.b' }] })
+    const b = makeComponent({ id: 'platform.b' })
+    const d = layerByDepth([a, b])
+    expect(d.get('platform.a')).toBe(0)
+    expect(d.get('platform.b')).toBe(0)
+  })
+
+  it('consumes 环不爆栈(findOrderingCycles 不查、registry 不拦),depth 仍收敛', () => {
+    const a = makeComponent({ id: 'capability.a', componentType: 'capability', dependencies: [{ type: 'consumes', target: 'capability.b' }] })
+    const b = makeComponent({ id: 'capability.b', componentType: 'capability', dependencies: [{ type: 'consumes', target: 'capability.a' }] })
+    const d = layerByDepth([a, b])
+    expect(d.get('capability.a')).toBeTypeOf('number')
+    expect(d.get('capability.b')).toBeTypeOf('number')
+  })
+})
 
 describe('findDanglingDependencies', () => {
   it('指向存在组件的边不报', () => {

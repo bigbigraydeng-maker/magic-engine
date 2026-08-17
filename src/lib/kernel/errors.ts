@@ -36,6 +36,18 @@ export type KernelErrorCode =
   | 'VERIFICATION_FAILED'
   /** run / step 状态不允许这次执行 */
   | 'INVALID_STATE'
+  /**
+   * 🔴 审批人手里那份审批请求已经不是这条 run 当前指着的那一份了。
+   *
+   *    跟 `INVALID_STATE` 分开是必须的：`INVALID_STATE` 说的是「状态不对」
+   *    （已经跑起来了 / 已经被拒了），而这一条说的是「状态还对，但你看到的
+   *    是**上一版**的请求」—— 页面开着没动、期间政策改过、系统重新排过。
+   *    两者的处置完全不同：前者这件事已经有结论了，后者刷新一下就能重新决定。
+   *    合成一个码，审批界面就没法把「刷新重试」和「已经有结论了」分开说。
+   *
+   *    🔴 收到这个码时**一定没有签出任何新决策，也没有动过 run**。
+   */
+  | 'STALE_DECISION'
   /** capability 没注册处理器 */
   | 'CAPABILITY_NOT_IMPLEMENTED'
   /** 对外副作用被闸死 —— v1 永远不许出现 */
@@ -90,6 +102,33 @@ export class KernelError extends Error {
     this.humanReason = humanReason
     this.detail = opts.detail ?? {}
     this.costActualUsd = opts.costActualUsd
+  }
+}
+
+/**
+ * **这个版本化 RPC 在库里还不存在** —— 代码上线了、对应的 migration 还没 apply。
+ *
+ * 🔴 为什么必须是一个**带机器可读 code** 的类型，而不是 `new Error('...没部署')`：
+ *    上一版就是抛的普通 Error。抛之前明明已经认出了 `42883` / `PGRST202`，
+ *    抛出去的时候却把码和原始英文消息一起丢了 —— 于是接口层再也认不出来，
+ *    只能答 `500 internal_error`，而这条路**声明过**它答 `503 kernel_not_provisioned`。
+ *    两者对运维是完全不同的指令：500 = 「去查日志找 bug」，
+ *    503 = 「这套东西还没打开，去 apply migration」。丢掉码 = 把后者伪装成前者。
+ *
+ * 🔴 **方向**：这个类型放在 `src/lib/kernel`，由 `kernel-approval` 去认它。
+ *    反过来（内核层 import 审批层的 `ApprovalError`）会形成反向依赖 ——
+ *    `kernel-approval` 本来就依赖 `kernel`，那样就成环了，而架构测试正盯着这条线。
+ */
+export class KernelRpcMissingError extends Error {
+  /** 原始的 PG / PostgREST 错误码（`42883` 或 `PGRST202`），原样带出。 */
+  readonly code: string
+  /** 缺的那个 RPC 名字 —— 让运维不用去日志里翻。 */
+  readonly rpc: string
+  constructor(args: { rpc: string; code: string; message: string; cause?: unknown }) {
+    super(args.message, { cause: args.cause })
+    this.name = 'KernelRpcMissingError'
+    this.code = args.code
+    this.rpc = args.rpc
   }
 }
 

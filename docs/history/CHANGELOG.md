@@ -5,6 +5,34 @@
 
 ---
 
+### 2026-08-16（Product Map 同步:「PR 未解决意见数全空」不再是个哑谜)
+
+**现象**:生产全量同步(run `a74c501a`)12 个 PR / 14 个 issue 都拉回来了、检查数也对,
+唯独 `unresolved_threads` **12 个全空**,整轮永远标 partial —— 而且没有任何一条线索
+说得出为什么。原因是抓这个数的函数把所有异常 `catch` 成裸 `null`(本意是「不拖垮整轮」,
+落地成了教科书式的静默失败)。
+
+**查出来的真因**(两条,都是实测,不是推测):
+① **不是请求头的问题** —— 拿 REST 那套头(`Accept: application/vnd.github+json` +
+`X-GitHub-Api-Version`)直打 GitHub GraphQL,实测照样 200,这个假设被排除。
+② 真因是 **GraphQL 配额被打爆**:GraphQL 的额度是**按 GitHub 用户**算的一个池,
+`bigbigraydeng-maker` 在那个小时用掉 **10018 点 / 上限 5000**,`remaining=0`;
+REST 是另一个池(当时还剩 4974)—— 正好对上「REST 全对、threads 全空」。
+下一个小时重置后回到 `used=4`,所以这是**阵发的**,不是长期坏死:
+同步在忙时段跟别的 `gh` 工具抢同一个池,抢不过就整轮全空。
+③ 顺带挖出一个真 bug:代码只认 `type === 'RATE_LIMITED'`,而配额真打爆时 GitHub 回的是
+`type: "RATE_LIMIT"` + `code: "graphql_rate_limit"` —— 连「限流」这个分类都没走到。
+
+**这次改的**:每个抓不到的 threads 都必须带原因,汇总进 `run.stats.threadsFailures`
+(`pr#962: GitHub graphql 限流:…`),cron summary 与两条 API 响应里直接可见;
+限流类型判断按实测形状修正;一轮里 GraphQL 一旦打爆就不再逐个 PR 空打(白烧配额还招二级限流),
+其余 PR 如实报「未尝试」。**5 条新回归测试 + 变异探针从 12 道加到 17 道**(4xx / 配额打爆 /
+返回缺节点 / 原因是否真的接进台账 —— 逐道确认拆掉就会变红)。
+
+🔴 **留给 PM 的一个决定**:代码堵不住配额被别人抢。要让这条同步稳定不 partial,
+得给它**独立的 GitHub 身份**(GitHub App 或专用机器账号,自带一个 GraphQL 池),
+否则它会继续在忙时段间歇性丢这一个字段(其余字段不受影响,旧值也不会被冲掉)。
+
 ### 2026-08-16（让系统读那 90% 从没读过的对话）
 
 PR [#997](https://github.com/bigbigraydeng-maker/magic-engine/pull/997)。

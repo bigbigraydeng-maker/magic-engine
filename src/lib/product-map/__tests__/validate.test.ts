@@ -59,6 +59,7 @@ describe('防夸大规则', () => {
   it('legacy 件带 ME2 生产/学习证据 = hard error', () => {
     const c = makeComponent({
       origin: 'legacy',
+      architecturalRole: undefined,
       operationalStatus: 'operating_legacy',
       ownedPaths: ['src/lib/x/'],
       productionEvidence: [{ kind: 'production_run', ref: 'x', verification: 'manual_claim' }],
@@ -67,8 +68,82 @@ describe('防夸大规则', () => {
   })
 
   it('legacy 件标 operating_me2 = hard error', () => {
-    const c = makeComponent({ origin: 'legacy', operationalStatus: 'operating_me2', ownedPaths: ['src/lib/x/'] })
+    const c = makeComponent({
+      origin: 'legacy',
+      architecturalRole: undefined,
+      operationalStatus: 'operating_me2',
+      ownedPaths: ['src/lib/x/'],
+    })
     expect(errorCodes([c])).toContain('legacy_operating_me2')
+  })
+
+  it('me2_native 组件缺 architecturalRole = hard error', () => {
+    const c = makeComponent({ architecturalRole: undefined })
+    expect(errorCodes([c])).toContain('missing_architectural_role')
+  })
+
+  it('architecturalRole 非法值被运行时抓住', () => {
+    const c = makeComponent({ architecturalRole: 'platform' as unknown as ProductMapComponent['architecturalRole'] })
+    expect(errorCodes([c])).toContain('illegal_enum')
+  })
+
+  it('legacy 组件声明 architecturalRole = hard error（不许伪装成已纳入 ME2 治理）', () => {
+    // 判别式 union 在类型层已禁掉 legacy+architecturalRole；这里绕过类型强行构造脏对象,
+    // 验证运行时闸也拦得住（PR2 从 JSON 快照 hydrate 时这是唯一的门）。
+    const base = makeComponent({
+      origin: 'legacy',
+      operationalStatus: 'operating_legacy',
+      ownedPaths: ['src/lib/x/'],
+    })
+    const dirty = { ...base, architecturalRole: 'kernel' } as unknown as ProductMapComponent
+    expect(errorCodes([dirty])).toContain('legacy_with_architectural_role')
+  })
+
+  it('B2：supporting artifact（me2_native + adapterOf）声明 architecturalRole = hard error', () => {
+    // 同样绕过类型层，验证运行时守卫 supporting_artifact_with_role
+    const parent = makeComponent({ id: 'capability.parent', componentType: 'capability' })
+    const base = makeComponent({ id: 'adapter.child', componentType: 'adapter', adapterOf: 'capability.parent' })
+    const dirty = { ...base, architecturalRole: 'measurement' } as unknown as ProductMapComponent
+    expect(errorCodes([parent, dirty])).toContain('supporting_artifact_with_role')
+  })
+
+  it('B2（Codex）：me2_native 的 adapter 省略 adapterOf 就报错，不给它当顶层角色的口子', () => {
+    // componentType=adapter、me2_native、有 architecturalRole、没 adapterOf ——
+    // 类型层会把它当 Me2RoleComponent 放行，运行时闸必须堵死
+    const c = makeComponent({ id: 'adapter.rogue', componentType: 'adapter' }) // 默认 me2_native + kernel role
+    expect(errorCodes([c])).toContain('native_adapter_must_attach')
+  })
+
+  it('B2（Codex）：adapterOf 指向 legacy 父组件 = 报错（角色语义无处继承）', () => {
+    const legacyParent = makeComponent({ id: 'platform.legacy-parent', origin: 'legacy', architecturalRole: undefined })
+    const child = makeComponent({ id: 'adapter.child', componentType: 'adapter', adapterOf: 'platform.legacy-parent' })
+    expect(errorCodes([legacyParent, child])).toContain('adapter_of_invalid_parent')
+  })
+
+  it('B2（Codex）：adapterOf 指向另一个 supporting artifact = 报错（它自己没角色可继承）', () => {
+    const roleParent = makeComponent({ id: 'capability.root', componentType: 'capability' })
+    // 真正的 supporting artifact：无 architecturalRole（显式清掉 makeComponent 的默认 role）
+    const supporting = makeComponent({ id: 'adapter.mid', componentType: 'adapter', adapterOf: 'capability.root', architecturalRole: undefined })
+    const child = makeComponent({ id: 'adapter.leaf', componentType: 'adapter', adapterOf: 'adapter.mid', architecturalRole: undefined })
+    expect(errorCodes([roleParent, supporting, child])).toContain('adapter_of_invalid_parent')
+  })
+
+  it('adapterOf 指向不存在的组件报错', () => {
+    const c = makeComponent({ componentType: 'adapter', adapterOf: 'platform.ghost' })
+    expect(errorCodes([c])).toContain('dangling_adapter_of')
+  })
+
+  it('非 adapter 声明 adapterOf 报错', () => {
+    const parent = makeComponent({ id: 'platform.parent' })
+    const c = makeComponent({ id: 'capability.c', componentType: 'capability', adapterOf: 'platform.parent' })
+    expect(errorCodes([c, parent])).toContain('adapter_of_from_non_adapter')
+  })
+
+  it('adapter 正确挂靠真实父组件不误伤', () => {
+    const parent = makeComponent({ id: 'platform.parent' })
+    const c = makeComponent({ id: 'adapter.c', componentType: 'adapter', adapterOf: 'platform.parent' })
+    expect(errorCodes([c, parent])).not.toContain('dangling_adapter_of')
+    expect(errorCodes([c, parent])).not.toContain('adapter_of_from_non_adapter')
   })
 
   it('声明高于证据上限 → warning 露头(不是 error)', () => {

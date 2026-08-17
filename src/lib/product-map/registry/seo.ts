@@ -41,13 +41,14 @@ export const SEO_COMPONENTS: readonly ProductMapComponent[] = [
   },
   {
     id: 'capability.seo-build-publish-package',
-    name: 'SEO 发布包构建（内核首个 capability）',
+    name: '把博客草稿打包成能发的成品',
     componentType: 'capability',
+    architecturalRole: 'shared_capability',
     businessLane: 'seo',
     dapeStages: ['execution', 'verification'],
     businessOutcome: '博客草稿变成完整性可验证的发布包,发布动作有据可查',
     description:
-      '内核 ACTION_REGISTRY 里唯一注册的动作（seo.build_publish_package）。已接进 createKernel 的能力表,但内核本身零生产调用 —— 接线在,电没通。',
+      '内核里唯一登记过的动作。线接好了,但内核本身还没在生产被调用过 —— 接线在,电没通。',
     origin: 'me2_native',
     operationalStatus: 'not_operating',
     declaredMaturity: 'M3_INTEGRATED',
@@ -109,7 +110,7 @@ export const SEO_COMPONENTS: readonly ProductMapComponent[] = [
   },
   {
     id: 'adapter.github-cms',
-    name: 'GitHub CMS adapter',
+    name: '连 GitHub 的插头',
     componentType: 'adapter',
     businessLane: 'seo',
     dapeStages: ['execution'],
@@ -136,7 +137,7 @@ export const SEO_COMPONENTS: readonly ProductMapComponent[] = [
   },
   {
     id: 'adapter.wordpress-cms',
-    name: 'WordPress CMS adapter',
+    name: '连 WordPress 的插头',
     componentType: 'adapter',
     businessLane: 'seo',
     dapeStages: ['execution'],
@@ -161,7 +162,7 @@ export const SEO_COMPONENTS: readonly ProductMapComponent[] = [
   },
   {
     id: 'adapter.shopify-cms',
-    name: 'Shopify CMS adapter',
+    name: '连 Shopify 的插头',
     componentType: 'adapter',
     businessLane: 'seo',
     dapeStages: ['execution'],
@@ -186,7 +187,7 @@ export const SEO_COMPONENTS: readonly ProductMapComponent[] = [
   },
   {
     id: 'adapter.gsc',
-    name: 'Google Search Console adapter',
+    name: '连 Google 搜索后台的插头',
     componentType: 'adapter',
     businessLane: 'seo',
     dapeStages: ['discovery', 'execution', 'verification'],
@@ -212,7 +213,7 @@ export const SEO_COMPONENTS: readonly ProductMapComponent[] = [
   },
   {
     id: 'adapter.dataforseo',
-    name: 'Keyword Intelligence adapter',
+    name: '连关键词数据源的插头',
     componentType: 'adapter',
     businessLane: 'seo',
     dapeStages: ['discovery'],

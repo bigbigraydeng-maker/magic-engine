@@ -9,9 +9,14 @@
  *    响应侧再验一次 full_name(双保险,不符或缺失 = RepoBoundaryError,绝不入库)。
  *
  * 🔴 限流是两个独立池:REST 看 x-ratelimit-remaining(带 secondary limit);
- *    GraphQL 打爆常以 200 + errors[type=RATE_LIMITED] 返回。批量方法遵守
+ *    GraphQL 打爆常以 200 + errors 返回。批量方法遵守
  *    provider.ts 的限流契约:已抓成果不丢,未尝试号码进 failed,rateLimited=true。
  *    GraphQL 失败只影响该 PR 的 threads(null,上层留旧值),不拖垮整轮。
+ *
+ * 🔴 threads 抓不到必须带原因(2026-08-15 事故):旧版把 GraphQL 异常 catch 成
+ *    裸 null,生产 12/12 PR 的 unresolved_threads 全空、整轮恒 partial,却没有
+ *    任何一条线索能说出为什么 —— 静默失败。现在 null 一律配 error 字符串,
+ *    由 runner 汇总进 run.stats.threadsFailures。
  *
  * token 由构造参数注入 —— 本目录 lib 层不读环境变量(架构测试盯)。
  */
@@ -25,6 +30,12 @@ import { GithubReadError, RateLimitedError, RepoBoundaryError } from './types'
 const MAX_PAGES = 10
 const MAX_CHANGED_FILES = 100
 const REST_REMAINING_FLOOR = 50
+
+/** threads 探测结果 —— count 为 null 时 error 必有值(失败绝不静默)。 */
+interface ThreadsProbe {
+  readonly count: number | null
+  readonly error: string | null
+}
 
 interface ProviderOptions {
   readonly token: string
@@ -63,6 +74,12 @@ export class GithubRestProvider implements GithubReadProvider {
   private readonly token: string
   private readonly fetchImpl: typeof fetch
   private readonly timeoutMs: number
+  /**
+   * 本轮 GraphQL 已被限流。GraphQL 配额是**按 GitHub 用户**算的一个池,
+   * 打爆之后同一轮里再逐个 PR 空打只是白烧请求、还会招 secondary limit ——
+   * 记下来直接跳过,并如实报「未尝试」。
+   */
+  private graphqlRateLimited: string | null = null
 
   constructor(options: ProviderOptions) {
     this.token = options.token
@@ -129,10 +146,13 @@ export class GithubRestProvider implements GithubReadProvider {
     if (!res.ok) throw new GithubReadError(res.status, 'graphql')
     const payload = (await res.json()) as {
       data?: unknown
-      errors?: { type?: string; message?: string }[]
+      errors?: { type?: string; code?: string; message?: string }[]
     }
     if (payload.errors?.length) {
-      if (payload.errors.some((e) => e.type === 'RATE_LIMITED')) {
+      // 🔴 两种写法都实测见过:文档写 type=RATE_LIMITED,配额真打爆时返回的是
+      //    type=RATE_LIMIT + code=graphql_rate_limit。只认前者 = 限流被误判成
+      //    普通读取失败,分流全错(2026-08-15 实测)。
+      if (payload.errors.some((e) => e.type?.startsWith('RATE_LIMIT') || e.code === 'graphql_rate_limit')) {
         throw new RateLimitedError('graphql', payload.errors[0]?.message ?? 'RATE_LIMITED')
       }
       throw new GithubReadError(200, `graphql errors:${payload.errors[0]?.message ?? '?'}`)
@@ -188,7 +208,8 @@ export class GithubRestProvider implements GithubReadProvider {
       headSha: pr.head.sha,
       mergedCommitSha: pr.merged ? pr.merge_commit_sha : null,
       mergeableState: pr.mergeable_state ?? 'unknown',
-      unresolvedThreads: threads,
+      unresolvedThreads: threads.count,
+      unresolvedThreadsError: threads.error,
       checks: checks.checks,
       checksTruncated: checks.truncated,
       changedFiles: files.files,
@@ -235,8 +256,14 @@ export class GithubRestProvider implements GithubReadProvider {
     return { files: files.slice(0, MAX_CHANGED_FILES), truncated: hasMore }
   }
 
-  /** threads 只有 GraphQL 有。失败(含 GraphQL 限流)→ null,上层留旧值、run 标 partial。 */
-  private async fetchUnresolvedThreads(number: number): Promise<number | null> {
+  /**
+   * threads 只有 GraphQL 有。失败(含 GraphQL 限流)→ count=null,上层留旧值、
+   * run 标 partial。**每一个 null 都必须带 error**,否则就退回到静默失败。
+   */
+  private async fetchUnresolvedThreads(number: number): Promise<ThreadsProbe> {
+    if (this.graphqlRateLimited) {
+      return { count: null, error: `graphql 本轮已限流,未尝试(${this.graphqlRateLimited})` }
+    }
     const [owner, name] = APPROVED_REPO.split('/')
     try {
       const data = (await this.graphql(
@@ -252,10 +279,16 @@ export class GithubRestProvider implements GithubReadProvider {
         repository?: { pullRequest?: { reviewThreads?: { nodes?: { isResolved: boolean }[] } } }
       }
       const nodes = data.repository?.pullRequest?.reviewThreads?.nodes
-      if (!nodes) return null
-      return nodes.filter((n) => !n.isResolved).length
-    } catch {
-      return null
+      if (!nodes) {
+        return { count: null, error: 'graphql 200 但缺 reviewThreads 节点(repository/pullRequest 为空)' }
+      }
+      return { count: nodes.filter((n) => !n.isResolved).length, error: null }
+    } catch (err) {
+      if (err instanceof RateLimitedError && err.pool === 'graphql') {
+        this.graphqlRateLimited = err.message
+      }
+      // 错误信息由 typed error 构造,与 REST 同约定:绝不携带 token
+      return { count: null, error: err instanceof Error ? err.message : 'graphql 未知失败' }
     }
   }
 

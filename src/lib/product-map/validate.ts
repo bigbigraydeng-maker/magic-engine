@@ -11,6 +11,7 @@ import { deriveMaturity } from './maturity'
 import { findDanglingDependencies, findOrderingCycles } from './graph'
 import type { ComponentType, DependencyType, ProductMapComponent } from './types'
 import {
+  ARCHITECTURAL_ROLE,
   BLOCKER_KIND,
   BUSINESS_LANE,
   COMPONENT_ORIGIN,
@@ -103,16 +104,70 @@ export function validateRegistry(
   const ownedPathClaims = new Map<string, string>()
 
   for (const c of components) {
+    // 🔴 故意没有 "id 前缀必须等于 componentType" 的检查：id 是稳定契约、
+    //    不可改名（Build Control Room 2026-08-15 05:43 复审裁决），componentType
+    //    只是历史形状分类，两者不再假设互相对应。
     if (!ID_PATTERN.test(c.id)) {
       err(c.id, 'bad_id_format', `id 必须是 '<type>.<name>' 全小写 kebab 形态`)
-    } else if (c.id.split('.')[0] !== c.componentType) {
-      err(c.id, 'id_type_mismatch', `id 前缀 '${c.id.split('.')[0]}' 与 componentType '${c.componentType}' 不一致`)
     }
 
     // 运行时枚举校验：挡住 as-cast / JSON 注入绕过编译期检查的路
     for (const [field, ok] of enumChecks) {
       if (!ok(c)) err(c.id, 'illegal_enum', `${field} 取值非法`)
     }
+
+    // WP00 §3 七层角色 —— 判别式 union 的运行时闸（B1/B2；也挡 JSON 注入 / as-cast
+    // 绕过编译期）。三种合法形态：
+    //   me2_native 顶层     → 必须有七层之一的 architecturalRole，不得有 adapterOf
+    //   me2_native 支持件    → 必须有 adapterOf，不得有 architecturalRole（B2：不占角色）
+    //   legacy              → 两者都不得有
+    const isSupporting = c.origin === 'me2_native' && c.adapterOf !== undefined
+    if (c.origin === 'me2_native') {
+      if (isSupporting) {
+        // B2：supporting artifact 是父组件的零件，绝不占顶层七角色
+        if (c.architecturalRole !== undefined) {
+          err(c.id, 'supporting_artifact_with_role', 'adapterOf 已设的 supporting artifact 不得声明 architecturalRole —— 它是七层父组件的零件，不占顶层角色')
+        }
+      } else if (c.architecturalRole === undefined) {
+        err(c.id, 'missing_architectural_role', 'me2_native 顶层组件必须声明 architecturalRole（WP00 冻结七层之一）')
+      } else if (!(ARCHITECTURAL_ROLE as readonly string[]).includes(c.architecturalRole)) {
+        err(c.id, 'illegal_enum', `architecturalRole 取值非法：'${c.architecturalRole}'`)
+      }
+
+      // B2（Codex 复审补漏）：me2_native 的 adapter **必须**是 supporting artifact
+      // （挂了 adapterOf）。省略 adapterOf 再填个 architecturalRole，类型会把它当顶层
+      // Me2RoleComponent 放行 —— 那就重新给了 adapter 冒充七层角色的口子。堵死。
+      if (c.componentType === 'adapter' && c.adapterOf === undefined) {
+        err(c.id, 'native_adapter_must_attach', 'me2_native 的 adapter 必须通过 adapterOf 挂靠七层父组件，不得作为顶层角色')
+      }
+    } else if (c.architecturalRole !== undefined) {
+      err(c.id, 'legacy_with_architectural_role', 'legacy 组件不得声明 architecturalRole（尚未纳入 ME2 七层 / Kernel 治理）')
+    }
+
+    // adapterOf：只有 componentType === 'adapter' 的 me2_native 组件可以声明"我是谁的零件"
+    if (c.adapterOf !== undefined) {
+      if (c.origin !== 'me2_native') {
+        err(c.id, 'legacy_with_adapter_of', 'legacy 组件不得声明 adapterOf（它不是任何 ME2 组件的零件）')
+      }
+      if (c.componentType !== 'adapter') {
+        err(c.id, 'adapter_of_from_non_adapter', 'adapterOf 只能由 componentType=adapter 的组件声明')
+      }
+      // B2（Codex 复审补漏）：父组件必须是**真正的七层顶层组件** —— me2_native 且有
+      // 合法 architecturalRole。指向 legacy、或指向另一个 supporting artifact（它自己
+      // 没角色可继承）都会让"继承父组件角色"这句话断裂，还可能被 governanceStatusOf
+      // 错标成已治理。存在性之外，验身份。
+      const parent = components.find((t) => t.id === c.adapterOf)
+      if (parent === undefined) {
+        err(c.id, 'dangling_adapter_of', `adapterOf 指向不存在的组件 '${c.adapterOf}'`)
+      } else if (
+        parent.origin !== 'me2_native' ||
+        parent.architecturalRole === undefined ||
+        !(ARCHITECTURAL_ROLE as readonly string[]).includes(parent.architecturalRole)
+      ) {
+        err(c.id, 'adapter_of_invalid_parent', `adapterOf 必须指向 me2_native 且拥有合法七层 architecturalRole 的父组件（'${c.adapterOf}' 不满足）`)
+      }
+    }
+
     for (const s of c.dapeStages) {
       if (!(DAPE_STAGE as readonly string[]).includes(s)) err(c.id, 'illegal_enum', `dapeStages 含非法值 '${s}'`)
     }

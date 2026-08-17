@@ -97,10 +97,41 @@ describe('runFullSync', () => {
     const store = new FakeSyncStore()
     const result = await runFullSync(deps(seededProvider(), store), 'cron')
     expect(result.status).toBe('ok')
+    // 全成功时不许有噪音行,否则 threadsFailures 会失去信噪比
+    expect(result.stats.threadsFailures).toEqual([])
     expect(store.prFacts.size).toBeGreaterThan(0)
     expect(store.issueFacts.size).toBeGreaterThan(0)
     const row = store.prFacts.get(863)
     expect(row?.checks.sha).toBe(row?.head_sha)
+  })
+
+  it('threads 全军覆没(2026-08-15 生产形状)→ partial,且每个 null 在 stats 里都有对应原因', async () => {
+    const store = new FakeSyncStore()
+    const p = seededProvider()
+    for (const [n, fact] of Array.from(p.prs.entries())) {
+      p.prs.set(n, {
+        ...fact,
+        unresolvedThreads: null,
+        unresolvedThreadsError: 'GitHub graphql 限流:API rate limit already exceeded',
+      })
+    }
+    const result = await runFullSync(deps(p, store), 'cron')
+    expect(result.status).toBe('partial')
+    // 12 个 PR 全空 → 12 条说明,一条不少(旧版这里是 0 条,只剩一堆裸 null)
+    expect(result.stats.threadsFailures).toHaveLength(p.prs.size)
+    expect(result.stats.threadsFailures.every((f) => f.includes('限流'))).toBe(true)
+    expect(result.stats.threadsFailures[0]).toMatch(/^pr#\d+: /)
+    // 台账里也要有,不许只有返回值是真的
+    expect(store.runs[0].stats.threadsFailures).toHaveLength(p.prs.size)
+  })
+
+  it('provider 违反契约(threads null 却不给原因)→ stats 里明写「原因未记录」,不许静默过关', async () => {
+    const store = new FakeSyncStore()
+    const p = seededProvider()
+    p.prs.set(863, makePrFact({ number: 863, unresolvedThreads: null, unresolvedThreadsError: null }))
+    const result = await runFullSync(deps(p, store), 'cron')
+    expect(result.status).toBe('partial')
+    expect(result.stats.threadsFailures).toContain('pr#863: 原因未记录(provider 违反契约)')
   })
 
   it('单条抓取失败 → partial + 旧行原样保留(last-known-good)', async () => {
@@ -142,6 +173,43 @@ describe('runFullSync', () => {
     expect(store.prFacts.get(863)?.state).toBe('merged')
   })
 
+  it('P1:事故遗留的 merged+空 threads 行不算不可变 → 下一轮重抓补上真值(不永久锁死 null)', async () => {
+    const store = new FakeSyncStore()
+    // 第一轮 = 事故形状:863 已 merged、有 commit sha,但 threads 抓取被限流 → 落一行 unresolved_threads=null
+    const p1 = seededProvider()
+    p1.prs.set(863, makePrFact({ number: 863, state: 'merged', mergedCommitSha: 'abc', unresolvedThreads: null, unresolvedThreadsError: 'GitHub graphql 限流:配额已尽', observedAt: '2026-08-15T01:00:00Z' }))
+    const r1 = await runFullSync(deps(p1, store), 'cron')
+    expect(r1.status).toBe('partial')
+    expect(store.prFacts.get(863)?.unresolved_threads).toBeNull() // 事故遗留 null 已落库
+
+    // 第二轮:配额恢复,863 这次能拿到真 threads 值。
+    // 修复后:863 因 threads=null 不进 immutable → 被重抓 → 真值 6 覆盖 null。
+    // 变异证据:删掉 `&& r.unresolved_threads !== null`,863 会被判 immutable、永不重抓,
+    // 这行断言会红(threads 停在 null),精确钉住本 P1 修复。
+    const p2 = seededProvider()
+    p2.prs.set(863, makePrFact({ number: 863, state: 'merged', mergedCommitSha: 'abc', unresolvedThreads: 6, observedAt: '2026-08-16T00:00:00Z' }))
+    const r2 = await runFullSync(deps(p2, store), 'cron')
+    expect(store.prFacts.get(863)?.unresolved_threads).toBe(6)
+    expect(r2.status).toBe('ok')
+  })
+
+  it('P1:事故遗留行重抓时仍限流 → 该 PR 进 threadsFailures 并标 partial,不被 immutable 静默吞成 ok', async () => {
+    const store = new FakeSyncStore()
+    const p1 = seededProvider()
+    p1.prs.set(863, makePrFact({ number: 863, state: 'merged', mergedCommitSha: 'abc', unresolvedThreads: null, unresolvedThreadsError: 'GitHub graphql 限流:第一轮', observedAt: '2026-08-15T01:00:00Z' }))
+    await runFullSync(deps(p1, store), 'cron')
+
+    // 第二轮仍限流,863 依旧拿不到 threads。
+    // 修复后:863 仍被重抓 → 空值有原因、整轮 partial。
+    // 变异证据:删该谓词 → 863 被 immutable 排除 → 不进 prFacts → 无 threadsFailures 且整轮误标 ok,
+    // 下面两条断言都会红。Codex 原话("既不重试、也不生成 threadsFailures、甚至误标 ok")逐条钉死。
+    const p2 = seededProvider()
+    p2.prs.set(863, makePrFact({ number: 863, state: 'merged', mergedCommitSha: 'abc', unresolvedThreads: null, unresolvedThreadsError: 'GitHub graphql 限流:仍未恢复', observedAt: '2026-08-16T00:00:00Z' }))
+    const r2 = await runFullSync(deps(p2, store), 'cron')
+    expect(r2.status).toBe('partial')
+    expect(r2.stats.threadsFailures.some((f) => f.startsWith('pr#863:'))).toBe(true)
+  })
+
   it('provider 整体炸掉(非限流)→ error run 落台账,原始错误在 stats 里可见', async () => {
     const store = new FakeSyncStore()
     const p = seededProvider()
@@ -174,7 +242,7 @@ describe('runFullSync', () => {
       run: {
         id: 'wh-err', trigger: 'webhook', mode: 'targeted', status: 'error',
         main_head_sha: null, started_at: d.now(), finished_at: d.now(),
-        stats: { prsSynced: 0, issuesSynced: 0, unclassifiedSeen: 0, failedItems: [], skippedStale: 0, truncations: [] },
+        stats: { prsSynced: 0, issuesSynced: 0, unclassifiedSeen: 0, failedItems: [], skippedStale: 0, truncations: [], threadsFailures: [] },
         error_message: 'x',
       },
       prFacts: [], issueFacts: [], unclassified: [], resolve: [], mode: 'targeted',
@@ -252,7 +320,7 @@ describe('未分类队列:发现不许死在台账里', () => {
       run: {
         id: 'targeted-x', trigger: 'webhook', mode: 'targeted', status: 'ok',
         main_head_sha: null, started_at: new Date().toISOString(), finished_at: new Date().toISOString(),
-        stats: { prsSynced: 0, issuesSynced: 0, unclassifiedSeen: 0, failedItems: [], skippedStale: 0, truncations: [] },
+        stats: { prsSynced: 0, issuesSynced: 0, unclassifiedSeen: 0, failedItems: [], skippedStale: 0, truncations: [], threadsFailures: [] },
         error_message: null,
       },
       prFacts: [], issueFacts: [], unclassified: [],
@@ -304,8 +372,14 @@ describe('runTargetedSync', () => {
   it('GraphQL 失败(threads null 且无旧值可留)→ partial,与 full 轮同口径', async () => {
     const store = new FakeSyncStore()
     const provider = new FakeGithubProvider()
-    provider.prs.set(863, makePrFact({ number: 863, unresolvedThreads: null }))
+    provider.prs.set(
+      863,
+      makePrFact({ number: 863, unresolvedThreads: null, unresolvedThreadsError: 'GitHub graphql 限流:配额已尽' }),
+    )
     const result = await runTargetedSync(deps(provider, store), { kind: 'pr', number: 863 })
     expect(result?.status).toBe('partial')
+    // partial 必须能说出为什么 —— 原因要进台账,不能只剩一个 null
+    expect(result?.stats.threadsFailures).toEqual(['pr#863: GitHub graphql 限流:配额已尽'])
+    expect(store.runs[0].stats.threadsFailures).toEqual(['pr#863: GitHub graphql 限流:配额已尽'])
   })
 })

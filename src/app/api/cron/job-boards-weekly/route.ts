@@ -28,11 +28,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (req.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  // 🔴 运行记录必须在主开关**之前**开：开关关着时原来直接 return，一行记录都不写，
+  //    于是健康检查永远把它算成「从来没跑过」——而它其实每周一都准点跑到了，只是
+  //    按设计什么都不做。这条误报从上线起就挂在今日待办上，把真故障的信号一起淹了
+  //    （registry.ts 头注：误报一旦成为常态，真出事那天也会被当成噪音划掉）。
+  const cronRun = await startCronRun('job-boards-weekly')
+
   if (process.env.JOB_SIGNAL_INGEST_ENABLED !== 'true') {
+    await cronRun.finish({
+      summary: { skipped: 'disabled', reason: '主开关 JOB_SIGNAL_INGEST_ENABLED 未开，本轮不抓（这是设计上的默认状态，不是故障）' },
+    })
     return NextResponse.json({ skipped: 'disabled', hint: 'set JOB_SIGNAL_INGEST_ENABLED=true to run' })
   }
 
-  const cronRun = await startCronRun('job-boards-weekly')
   try {
     const result = await ingestJobSignals({ boards: ['seek'], maxPerBoard: MAX_PER_BOARD })
     await cronRun.finish({

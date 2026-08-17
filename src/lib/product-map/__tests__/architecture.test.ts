@@ -39,6 +39,8 @@ describe('纯层边界', () => {
     { pattern: /\bfetch\s*\(/, why: '不做网络调用(GitHub 事实由 PR2 同步器注入)' },
     { pattern: /process\.env/, why: '无环境依赖 —— 纯函数层' },
     { pattern: /from 'openai'|from '@anthropic/, why: '无 SDK' },
+    // 只匹配真实 import 语句 —— 注释里解释「为什么不依赖」不算违规
+    { pattern: /from '@\/lib\/product-map-sync/, why: '纯层不许反向依赖同步层(目录成环)' },
   ]
 
   for (const file of files) {

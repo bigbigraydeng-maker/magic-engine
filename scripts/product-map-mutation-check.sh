@@ -13,6 +13,8 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
 SUITE="src/lib/product-map"
+SUITE2="src/lib/product-map-sync/__tests__/console-loader.test.ts"
+SUITE3="src/lib/product-map-sync/__tests__/facts-adapter.test.ts"
 MAT="src/lib/product-map/maturity.ts"
 VAL="src/lib/product-map/validate.ts"
 GRAPH="src/lib/product-map/graph.ts"
@@ -32,7 +34,7 @@ restore_on_exit() {
 trap restore_on_exit EXIT INT TERM
 
 red_count() {
-  npx vitest run "$SUITE" --reporter=json 2>/dev/null \
+  npx vitest run "$SUITE" "$SUITE2" "$SUITE3" --reporter=json 2>/dev/null \
     | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s.slice(s.indexOf("{")));console.log(j.numFailedTests??0)}catch{console.log("PARSE_ERROR")}})'
 }
 
@@ -141,6 +143,41 @@ check "同前缀兄弟模块冒充 importer 证据" "$GEO_REG" \
 check "M5 观察日不验格式" "$MAT" \
   ".filter((e) => e.kind === 'recurring_outcome' && isValidObservationDay(e.observedAt))" \
   ".filter((e) => e.kind === 'recurring_outcome' && !!e.observedAt)"
+
+# ── PR3 控制台的承重墙(presenter / 载入层)──────────────────────────────
+PRES="src/lib/product-map/presenter.ts"
+LOADER="src/lib/product-map-sync/console-loader.ts"
+
+# 12. 「在不在跑」不再优先于成熟度(legacy 在跑的件被归成「还在建」)
+check "在跑的件不归 operating" "$PRES" \
+  "if (c.operationalStatus !== 'not_operating') return 'operating'" \
+  "if (false) return 'operating'"
+
+# 13. coverageGap 恒空(同步没覆盖到 → 被显示成活儿没干完)
+check "coverageGap 恒空" "$PRES" \
+  "const syncActive = input.loadOutcome === 'ok' && input.prFacts.length > 0" \
+  "const syncActive = false"
+
+# 14. targeted 轮冒充全量核对(健康度撒谎)
+check "targeted 冒充全量核对" "$PRES" \
+  "if (!input.lastFullRunAt) return 'unknown'" \
+  "if (!input.lastFullRunAt) return 'fresh'"
+
+# 15. 鲜度取 max 而不是 min(拿最新一条冒充整体鲜度;闸在 facts-adapter)
+ADAPTER="src/lib/product-map-sync/facts-adapter.ts"
+check "鲜度取 max 不取 min" "$ADAPTER" \
+  "if (row.observed_at < oldest) oldest = row.observed_at" \
+  "if (row.observed_at > oldest) oldest = row.observed_at"
+
+# 16. 载入层把「表没建」吞成正常(降级不明示)
+check "not_provisioned 被吞成 ok" "$LOADER" \
+  "loadOutcome = 'not_provisioned'" \
+  "loadOutcome = 'ok'"
+
+# 17. 零行被显示成「同步结果为空」而不是「从没同步过」
+check "零行不报 never_synced" "$LOADER" \
+  "loadOutcome = 'never_synced'" \
+  "loadOutcome = 'ok'"
 
 echo
 if [ "$fail_count" -gt 0 ]; then

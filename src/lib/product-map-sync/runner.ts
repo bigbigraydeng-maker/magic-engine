@@ -78,12 +78,19 @@ export async function runFullSync(
   const startedAt = deps.now()
   const failedItems: string[] = []
   const truncations: string[] = []
+  const threadsFailures: string[] = []
   let partial = false
 
-  // 已 merged 且有 merged_commit_sha 的 PR 事实不可变 —— 不重抓,省限流配额
+  // 已 merged 且有 merged_commit_sha 的 PR 事实基本冻结 —— 不重抓,省限流配额。
+  // 但 unresolved_threads=null 是"抓取失败(限流)"而非"确实没有意见":把这类事故遗留行
+  // 当不可变,会永久锁死那个空值 —— full sync 既不重试 GraphQL、也不为它生成 threadsFailures,
+  // 甚至可能把整轮误标 ok,恰恰违背本 PR"每个 null 都要说得出原因"的契约。故只有 threads
+  // 已有可信值(非 null)时才算不可变;事故遗留的 null 行照常重抓,拿到真值或如实报原因。
   const existing = await deps.store.readPrFacts()
   const immutable = new Set(
-    existing.filter((r) => r.state === 'merged' && r.merged_commit_sha).map((r) => r.pr_number),
+    existing
+      .filter((r) => r.state === 'merged' && r.merged_commit_sha && r.unresolved_threads !== null)
+      .map((r) => r.pr_number),
   )
   const prNumbers = Array.from(registryPrNumbers()).filter((n) => !immutable.has(n))
   const issueNumbers = Array.from(registryIssueNumbers())
@@ -101,7 +108,11 @@ export async function runFullSync(
     prFacts = prResult.facts
     for (const f of prResult.failed) failedItems.push(`pr#${f.number}: ${f.reason}`)
     if (prResult.rateLimited) partial = true
-    if (prFacts.some((f) => f.unresolvedThreads === null)) partial = true
+    // threads 抓不到 → partial,且每个 null 都要在 stats 里留下说得出口的原因
+    for (const f of prFacts.filter((x) => x.unresolvedThreads === null)) {
+      partial = true
+      threadsFailures.push(`pr#${f.number}: ${f.unresolvedThreadsError ?? '原因未记录(provider 违反契约)'}`)
+    }
     for (const f of prFacts.filter((x) => x.changedFilesTruncated)) {
       truncations.push(`pr#${f.number}: changed_files 截断至上限`)
     }
@@ -170,6 +181,7 @@ export async function runFullSync(
     return commitErrorRun(deps, runId, trigger, 'full', startedAt, err, {
       failedItems,
       truncations,
+      threadsFailures,
     })
   }
 
@@ -190,6 +202,7 @@ export async function runFullSync(
     failedItems,
     skippedStale: 0,
     truncations,
+    threadsFailures,
     webhookErrorRunsSinceLastFull: webhookErrorRuns,
     deliveriesPruned: pruned,
   }
@@ -237,14 +250,19 @@ export async function runTargetedSync(
     let prRows: Omit<PrFactRow, 'sync_run_id'>[] = []
     let issueRows: Omit<IssueFactRow, 'sync_run_id'>[] = []
     const failedItems: string[] = []
+    const threadsFailures: string[] = []
     let partial = false
 
     if (target.kind === 'pr') {
       const r = await deps.provider.getPullRequestFacts([target.number])
       prRows = r.facts.map(toPrRow)
       for (const f of r.failed) failedItems.push(`pr#${f.number}: ${f.reason}`)
-      // GraphQL 失败(threads null)同 full 轮口径 → partial
-      if (r.rateLimited || r.facts.some((f) => f.unresolvedThreads === null)) partial = true
+      // GraphQL 失败(threads null)同 full 轮口径 → partial + 原因入账
+      if (r.rateLimited) partial = true
+      for (const f of r.facts.filter((x) => x.unresolvedThreads === null)) {
+        partial = true
+        threadsFailures.push(`pr#${f.number}: ${f.unresolvedThreadsError ?? '原因未记录(provider 违反契约)'}`)
+      }
     } else {
       const r = await deps.provider.getIssueFacts([target.number])
       issueRows = r.facts.map((f) => ({
@@ -266,6 +284,7 @@ export async function runTargetedSync(
       failedItems,
       skippedStale: 0,
       truncations: [],
+      threadsFailures,
     }
     const { skippedStale } = await deps.store.commitSync({
       run: {
@@ -290,6 +309,7 @@ export async function runTargetedSync(
     return commitErrorRun(deps, runId, 'webhook', 'targeted', startedAt, err, {
       failedItems: [],
       truncations: [],
+      threadsFailures: [],
     })
   }
 }
@@ -301,7 +321,7 @@ async function commitErrorRun(
   mode: SyncMode,
   startedAt: string,
   err: unknown,
-  partialStats: { failedItems: string[]; truncations: string[] },
+  partialStats: { failedItems: string[]; truncations: string[]; threadsFailures: string[] },
 ): Promise<SyncRunResult> {
   // 环境性错误(表未 apply)原样上抛 —— route 层要据此回 not_provisioned,
   // 包成普通 error run 会把「待 provision」和「同步坏了」混成一种
@@ -314,6 +334,7 @@ async function commitErrorRun(
     failedItems: partialStats.failedItems,
     skippedStale: 0,
     truncations: partialStats.truncations,
+    threadsFailures: partialStats.threadsFailures,
   }
   // error run 也要留痕(空 facts,不清任何旧数据)—— 失败不许静默。
   // store 本身也炸时不许吞掉原始错误:两个都进返回的 stats。

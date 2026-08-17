@@ -19,7 +19,8 @@ import type {
 import type { KernelDeps } from './deps'
 import type { ExecutionResult } from './gateway'
 import { KernelError } from './errors'
-import { authorizeRun, approveRun, rejectRun, reuseLiveAuthorization } from './authorize'
+import { authorizeRun, reuseLiveAuthorization } from './authorize'
+import { approveRun, rejectRun } from './human-approval'
 import { executeAuthorizedRun, rehydrateSucceededRun, type ExecutionFence } from './gateway'
 import { computeIdempotencyKey, computeUnknownActionKey } from './idempotency'
 import {
