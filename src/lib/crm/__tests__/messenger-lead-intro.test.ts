@@ -89,6 +89,16 @@ describe('不该认的一律不认', () => {
     expect(parseLeadIntroMessage('Email: bob@example.com')).toBeNull()
   })
 
+  /**
+   * 🔴 **「my friend filled out the form」不是模板**（Codex 复审 2026-08-17）。
+   * 那是客人转发同行者资料最自然的说法 —— 裸匹配会让它冒充开场白，
+   * 把别人的号码写进这个人的档案。模板永远是开头的第一人称那一句。
+   */
+  it('🔴「my friend filled out the form」+ 同行者资料 → 不认', () => {
+    const forwarded = 'my friend filled out the form\nName: Sam Riley\nPhone: 021 555 999'
+    expect(parseLeadIntroMessage(forwarded, { requireMarker: true })).toBeNull()
+  })
+
   it('带着那句问候语时，一条标准字段也认（那就是真的表单开场白）', () => {
     const r = parseLeadIntroMessage(
       'Hello! I filled out your form and would like to know more about your business.\nEmail: bob@example.com',

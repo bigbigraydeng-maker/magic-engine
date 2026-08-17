@@ -76,9 +76,15 @@ const LABEL_TO_FIELD: Record<string, string> = {
  *
  * Meta 的模板措辞可能随语言变，所以不强制要求它，而是当成两条路之一：
  * 有这句话 → 认；没有 → 必须**至少两条标准字段**（姓名/电话/邮箱里的两条），
- * 且调用方只把**第一条入站消息**喂进来。
+ * 且调用方对第一条入站消息之后的每一条都要求它。
+ *
+ * 🔴 **必须锚在开头、而且主语是「我」**（Codex 复审 2026-08-17）：裸的
+ * `filled out the form` 会把「**my friend** filled out the form」也当成模板 ——
+ * 那正是「客人转发同行者资料」最自然的说法，认了就把别人的号码写进这个人的档案。
+ * Meta 的模板永远是消息开头的第一人称那一句，所以判据跟着锚死。
  */
-const FORM_MARKER = /filled\s+out\s+(your|the)\s+form|填写了.{0,4}表单/i
+const FORM_MARKER =
+  /^\s*(hello|hi|hey)?\s*[!,.，。]?\s*(i|i've|i have)\s+(just\s+)?fill(ed)?\s+out\s+(your|the)\s+form|^\s*(你好|您好)?[!！,，。]?\s*我(已经|刚)?填(写)?了(你们的|贵司的)?.{0,4}表单/i
 
 /** 归一化标签：小写 + 去掉空格 / 下划线 / 连字符。 */
 function normaliseLabel(label: string): string {
