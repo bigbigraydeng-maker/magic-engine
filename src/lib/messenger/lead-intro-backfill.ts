@@ -26,8 +26,20 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { backfillFromLeadIntro } from '@/lib/messenger/link-contacts'
 
-/** 一轮扫多少人。跟 `backfillUnlinkedConversations` 一个量级，跑不完下一轮接着来。 */
-const BATCH = 40
+/**
+ * 一轮扫多少人。
+ *
+ * ⚠️ **这里没有游标，所以上限必须盖得住整个候选集**（Codex 复审 2026-08-17）。
+ * 候选集是「档案还缺电话或邮箱的人」—— 补上的人会自己离开这个集合，但**补不上的
+ * 人（没有私信 / 没有开场白）会永远留在里面**。批次一旦小于候选集，每小时捞回来
+ * 的都是同一批补不上的人，后面的人永远轮不到 —— 那就成了「看起来在跑，其实一直
+ * 在原地」。
+ *
+ * CTS 现在 583 人、其中只有 Facebook 身份的约 110 人，300 这个上限盖得住。
+ * 客户规模再涨就必须换成持久化游标或给「试过但补不上」打标 —— 已登记，
+ * 不在这一版做（那要么加列要么加表，是设计改动）。
+ */
+const BATCH = 300
 
 export interface LeadIntroBackfillResult {
   /** 这一轮真正翻过私信的人数。 */

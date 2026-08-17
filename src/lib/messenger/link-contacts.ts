@@ -414,7 +414,29 @@ export async function backfillFromLeadIntro(
   }
   if (!fields) return
 
-  const phone = normalisePhone(fields.phone)
+  /**
+   * 🔴 **按客户所在市场补国码**（Codex 复审 2026-08-17）。
+   *
+   * `normalisePhone` 默认按 NZ 补 `+64`。Oztop 是 **AU** 客户 —— 表单里
+   * `04...` / `03...` 这种本地号码会被永久写成 `+64...`，销售照着拨就是陌生人，
+   * 而且这个错值还会进唯一身份表，把以后正确的 AU 身份挡在门外。
+   * `identity.ts` 里那段注释早就写明「调用方按 clients 的市场传进来」。
+   *
+   * 读不到就按 NZ（跟这个函数以前的行为一致，不因为读配置失败而整段罢工）。
+   */
+  let market: 'NZ' | 'AU' = 'NZ'
+  try {
+    const { data } = await supabaseAdmin
+      .from('clients')
+      .select('country')
+      .eq('id', input.clientId)
+      .maybeSingle()
+    if ((data as { country?: string } | null)?.country === 'AU') market = 'AU'
+  } catch {
+    // 同上：读不到按 NZ
+  }
+
+  const phone = normalisePhone(fields.phone, market)
   const email = normaliseEmail(fields.email)
   if (!phone && !email && !fields.name) return
 
