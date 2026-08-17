@@ -494,6 +494,22 @@ chunked 绕过 OOM 闸 · 闸门没接在花钱那条线上 · 归档入口（�
       就会骚扰一个明确说过别联系的客人 —— 客户红线不该由规则来赌。
       按铁律 3 下半条下发成人工任务，**进今日待办**（`pm-todo/manual-items.ts`
       的 `dnc_maybe_wrong`），带直达那个人的链接；真说过「别再联系」的人一条都不打扰。
+- [ ] 🔴 **M2.7m 「别再联系」的判断也交给解析器，正则只留兜底** —— PO 2026-08-17 拍板
+      「并进 AI」，跟 M2.7h 是同一件事的另一半，一起做。
+      起因：PR [#998](https://github.com/bigbigraydeng-maker/magic-engine/pull/998)
+      在同一个位置**连补五轮**都没收住 —— 收窄一条词 → 挂一个零宽断言 → 换成语义判据
+      → 改成距离阈值，每轮都有测试 + 变异验证通过，每轮下一句话又落在新缝里。
+      **旅游生意里同一个词的意思是反的**：`take me off` 是要求下车、`opt out` 是不参加
+      自费项目、`unsubscribe` 出现在我们自己的邮件页脚、`all sorted` 是已经在我们这订了。
+      剩下这四条的修法只能是把距离窗口调宽到容得下 `asked you to`（13 字符），
+      同时还要窄到挡住 `interested and please`（22 字符）—— 在两个对抗样本之间调一个数字。
+      **判错的代价不对称**：判成拒联 = 这个人任何渠道都收不到我们消息，且解除只能一个一个手动点。
+      PR #998 **停在 Draft 不合**，它自己带进来的三条回归留在里面（未上线，线上无影响）；
+      待办的四条原话，四条都实测复现过，证据在该 PR 的未解决复审线程里：
+      - `stop contacting me for now, call me tomorrow` → 被写成永久拒联（main 上是「约明天回电」）
+      - `stop emailing her until the booking is confirmed` → 同上（main 上是普通记一笔）
+      - `No need to call back about the group tour; call me tomorrow about the private option` → 丢掉回电
+      - `I never asked you to unsubscribe me` → 被写成拒联（**非本次回归**，旧有局限）
 - [ ] **M2.3 用 `crm_segment_feedback` 改判据** —— 表建好了，还没有人去看它。
       攒够一批「分错了」之后要回去改 `lib/crm/segments` 的规则，否则这个按钮
       就变成一个只进不出的许愿池
