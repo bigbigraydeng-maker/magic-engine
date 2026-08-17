@@ -408,16 +408,19 @@ export async function backfillFromLeadIntro(
   for (const m of input.messages) {
     if (m.direction !== 'inbound') continue
     /**
-     * 🔴 「两条标准字段」那条兜底**只对第一条入站消息成立**（Codex 复审 2026-08-17）。
-     * 对话中途客人转发同行者的 `Name: … / Phone: …` 恰好也是两条字段 ——
-     * 认了就把**别人的号码**写进这个人的档案。后面的消息必须带那句表单问候语。
+     * 🔴 两条纪律都在这一行里（Codex 复审 2026-08-17，两轮）：
+     *
+     * 1. 「两条标准字段」那条兜底**只对第一条入站消息成立**。对话中途客人转发
+     *    同行者的 `Name: … / Phone: …` 恰好也是两条字段 —— 认了就把**别人的
+     *    号码**写进这个人的档案。后面的消息必须带那句表单问候语。
+     * 2. **取最后一条、不是第一条**。同一个线程里客人可能重填过表单（第一次填错
+     *    号码、第二次改对）。消息按时间升序传进来，命中就 `break` 会把最早那个
+     *    旧值永久写进档案并注册成身份 —— 而且以后每轮同步都命中同一条旧消息，
+     *    正确的新值永远没机会。所以扫完，留最后一条。
      */
     const parsed = parseLeadIntroMessage(m.body, { requireMarker: seenInbound })
     seenInbound = true
-    if (parsed) {
-      fields = parsed
-      break
-    }
+    if (parsed) fields = parsed
   }
   if (!fields) return
 
@@ -493,8 +496,16 @@ export async function backfillFromLeadIntro(
     emailUsable && email ? { kind: 'email' as const, value: email } : null,
   ].filter((x): x is { kind: 'phone' | 'email'; value: string } => x !== null)
 
+  /**
+   * 🔴 **身份没写成，档案就不能写**（Codex 复审 2026-08-17）。
+   *
+   * upsert 报错时如果照旧写档案，会落进最糟的中间态：卡片上显示着号码，
+   * 身份表里却没有它 —— 认人认不到，以后别的渠道进来会**再建一个重复的人**；
+   * 而这个人两栏都满了，又从每小时回填的候选集里退出去，再也不会被修。
+   */
+  let identityWriteFailed = false
   if (identities.length > 0) {
-    await supabaseAdmin.from('contact_identities').upsert(
+    const { error: identityError } = await supabaseAdmin.from('contact_identities').upsert(
       identities.map((i) => ({
         contact_id: contactId,
         client_id: input.clientId,
@@ -504,6 +515,10 @@ export async function backfillFromLeadIntro(
       })),
       { onConflict: 'client_id,kind,value', ignoreDuplicates: true },
     )
+    if (identityError) {
+      console.error('[messenger/lead-intro] 身份写入失败，跳过档案:', identityError.message)
+      identityWriteFailed = true
+    }
   }
 
   /**
@@ -531,14 +546,14 @@ export async function backfillFromLeadIntro(
 
   // 档案上那两栏 —— 一栏一条语句，各自带 `.is(..., null)`。
   // 合成一条 update 的话，只要有一栏已经有值，另一栏也跟着写不进去。
-  if (phoneUsable && phone && (await ownsValue('phone', phone))) {
+  if (!identityWriteFailed && phoneUsable && phone && (await ownsValue('phone', phone))) {
     await supabaseAdmin
       .from('contacts')
       .update({ primary_phone: phone })
       .eq('id', contactId)
       .is('primary_phone', null)
   }
-  if (emailUsable && email && (await ownsValue('email', email))) {
+  if (!identityWriteFailed && emailUsable && email && (await ownsValue('email', email))) {
     await supabaseAdmin
       .from('contacts')
       .update({ primary_email: email })

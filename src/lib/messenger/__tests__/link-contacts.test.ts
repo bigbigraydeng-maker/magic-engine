@@ -114,6 +114,7 @@ let identityOwner: string | null = null
 /** `clients.country` —— 决定本地号码补哪个国码。null = 读不出来。 */
 let clientCountry: string | null = 'NZ'
 /** 档案上现有的主联系方式（决定旧值能不能挂成身份）。 */
+let identityWriteFails = false
 let contactCurrent: { primary_phone: string | null; primary_email: string | null } | null = {
   primary_phone: null,
   primary_email: null,
@@ -128,6 +129,7 @@ function stubSupabase(): Calls {
   identityOwner = null
   clientCountry = 'NZ'
   contactCurrent = { primary_phone: null, primary_email: null }
+  identityWriteFails = false
   pendingPatch = null
   const calls: Calls = {
     conversationsUpdate: 0,
@@ -203,9 +205,13 @@ function stubSupabase(): Calls {
         return chain
       },
       upsert: (payload: Record<string, unknown> | Record<string, unknown>[], upsertOpts?: unknown) => {
-        if (table === 'contact_identities')
+        if (table === 'contact_identities') {
           // resolveContact 传数组、link-contacts 传单对象 —— 摊平成一串行，断言只看行。
           calls.identityUpserts.push(...(Array.isArray(payload) ? payload : [payload]))
+          if (identityWriteFails) {
+            return { error: { message: '身份表写失败' } } as never
+          }
+        }
         else if (table === 'contact_touchpoints') {
           if (Array.isArray(payload)) calls.touchpointUpserts.push(payload)
           else {
@@ -740,6 +746,43 @@ Email: jordan.avery.example@example.com`
 
     const phone = calls.identityUpserts.find((i) => i.kind === 'phone')?.value
     expect(String(phone).startsWith('+61')).toBe(true)
+  })
+
+  /**
+   * 🔴 **同一个线程里重填过表单 → 取最后一次**（Codex 复审 2026-08-17）。
+   * 第一次填错号码、第二次改对；命中就停会把旧值永久写进档案并注册成身份，
+   * 而且以后每轮同步都命中同一条旧消息，正确的新值永远没机会。
+   */
+  it('🔴 重填过表单 → 用后一次的号码，不是第一次的', async () => {
+    const calls = stubSupabase()
+    const second = INTRO.replace('021 555 0134', '021 555 9999')
+    await linkMessengerConversation(
+      {
+        ...introInput,
+        messages: [
+          { direction: 'inbound', body: INTRO, sentAt: '2026-07-24T08:00:00+0000' },
+          { direction: 'inbound', body: second, sentAt: '2026-07-25T08:00:00+0000' },
+        ],
+      },
+      index({}),
+    )
+    const phone = calls.identityUpserts.find((i) => i.kind === 'phone')?.value
+    expect(phone).toBe('+64215559999')
+  })
+
+  /**
+   * 🔴 **身份没写成，档案就不能写**（Codex 复审 2026-08-17）。否则卡片显示着
+   * 号码、身份表里却没有它：认人认不到，别的渠道进来会再建一个重复的人；
+   * 而这个人两栏都满了，又从回填候选集里退出去，再也不会被修。
+   */
+  it('🔴 身份写入失败 → 档案那两栏也不写', async () => {
+    const calls = stubSupabase()
+    identityWriteFails = true
+    await linkMessengerConversation(introInput, index({}))
+
+    const cols = backfillUpdates(calls).flatMap((u) => Object.keys(u.patch))
+    expect(cols).not.toContain('primary_phone')
+    expect(cols).not.toContain('primary_email')
   })
 
   /**
