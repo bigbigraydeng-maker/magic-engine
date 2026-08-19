@@ -72,6 +72,19 @@ describe('loadReelCaptionState', () => {
     expect(await loadReelCaptionState(CLIENT, POST)).toBeNull()
   })
 
+  it('🔴 查询报错(网络抖一下) → 抛错，不能跟"没这条内容"混为一谈(Codex 六审：reel-render.ts 靠这个函数判断要不要复用客户校对过的字幕，查询出错被当成null会让它当成"从没做过"重新听写，用机器字幕把校对结果冲掉)', async () => {
+    mocks.from.mockReturnValue({
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            maybeSingle: vi.fn().mockResolvedValue({ data: null, error: new Error('网络抖了一下') }),
+          })),
+        })),
+      })),
+    })
+    await expect(loadReelCaptionState(CLIENT, POST)).rejects.toThrow('网络抖了一下')
+  })
+
   it('三个字段都从 snapshot 里正确取出', async () => {
     fakeDb({
       raw_recording_url: 'https://x/raw.mp4',

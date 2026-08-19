@@ -92,14 +92,14 @@ async function stageRawRecording(
 
   const prevSnap = existing.generation_context_snapshot ?? {}
   const nextSnap: Record<string, unknown> = { ...prevSnap, raw_recording_url: rawUrl }
-  // 🔴 换了一条新录像(URL 跟上次暂存的不一样)必须连带清掉旧听写/旧字幕缓存(Codex 复审)：
-  // reel-render.ts 复用校对过的字幕只按"条数对不对得上"判断，完全不看 URL——留着上一条
-  // 录像的缓存，新录像只要巧合切出同样条数的字幕，就会把上一条内容的字直接套到这条新
-  // 录像的时间轴上。原样重提同一个链接(URL 没变)才保留缓存，那种情况复用本来就该继续生效。
-  if (prevSnap.raw_recording_url !== rawUrl) {
-    delete nextSnap.reel_transcript
-    delete nextSnap.reel_captions
-  }
+  // 🔴 只要是一次显式重新提交(uploaded/link)就清掉旧听写/旧字幕缓存，不管 URL 变没变
+  // (Codex 复审两轮抓出同一处：第一版按"URL 变没变"判断，但 Dropbox 这类分享链接
+  // URL 字符串可以不变、背后的文件被客户换掉——留着旧缓存会把换掉之前那份内容的
+  // 字幕错配到换过的新内容上)。缓存复用只该发生在系统内部(比如校对字幕后重排，
+  // 那条走 save_captions，根本不碰这个函数)，不该跨越用户这次"传成片/粘链接"的
+  // 显式提交动作——这个动作本身语义就是"这是一份新素材"。
+  delete nextSnap.reel_transcript
+  delete nextSnap.reel_captions
   const { data, error } = await supabaseAdmin
     .from('content_posts')
     .update({ generation_context_snapshot: nextSnap })
@@ -333,6 +333,21 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         // enqueueRenderJob 对非 failed 任务幂等，不先失效旧任务的话，接口回「已排队」
         // 但数据库里根本没有新任务，校对过的文字永远不会真正出现在成片里。
         await invalidateOldJobs(params.postId)
+        // 🔴 排队前重新查一次 raw_recording_url 还在不在(Codex 复审：另一个标签页
+        // 同时点了「换一条」，两边都先过了忙碌检查，clear 那边失效旧任务后、字幕这边
+        // 抢在 clear 真正删掉 raw_recording_url 之前排了新任务——worker 的 jobKind
+        // 靠这个字段分流，字段没了会把这条新任务错判成昂贵的 AI 生成管线，不是字幕
+        // 重做)。这不是完全原子(两次请求之间仍有极小窗口)，但把原来"整个 clear 操作
+        // 期间都可能撞上"的窗口收窄到只剩这一次读之后的几毫秒，跟 safe-remote-fetch.ts
+        // 里 DNS 竞态那条注释是同一个思路：显著收紧，不是完全免疫。真正做到原子需要
+        // 数据库事务，这个 PR 的范围内不做。
+        const { data: recheck } = await supabaseAdmin
+          .from('content_posts')
+          .select('generation_context_snapshot')
+          .eq('client_id', params.id)
+          .eq('id', params.postId)
+          .maybeSingle<{ generation_context_snapshot: Record<string, unknown> | null }>()
+        if (!recheck?.generation_context_snapshot?.raw_recording_url) return staleResponse()
         // 校对完直接重排一次自动剪辑 —— 别让人还要去别处找「重新做片」(讲课式同款教训:
         // PM 改完以为没生效)。reel-render.ts 会复用听写缓存、用这次校对过的文字出新片。
         const { jobId } = await enqueueRenderJob({ clientId: params.id, contentPostId: params.postId })

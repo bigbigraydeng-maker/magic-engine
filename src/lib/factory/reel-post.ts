@@ -72,7 +72,14 @@ async function patchSnapshot(
   if (uErr) throw uErr
 }
 
-/** 读一条边走边录内容的字幕相关状态。找不到 → null。 */
+/**
+ * 读一条边走边录内容的字幕相关状态。真的没这条内容 → null。
+ *
+ * 🔴 查询出错(网络抖一下)不能跟"没这条内容"混为一谈(Codex 复审)：reel-render.ts
+ * 重做片时靠这个函数判断要不要复用已存的听写/客户校对过的字幕，返回 null 会让它
+ * 当成"从没做过"重新听写、拿机器字幕把客户校对过的结果覆盖掉——查询抖一下就把
+ * 客户的校对工作冲掉，等数据库恢复了也回不来了。
+ */
 export async function loadReelCaptionState(
   clientId: string,
   postId: string,
@@ -83,7 +90,8 @@ export async function loadReelCaptionState(
     .eq('client_id', clientId)
     .eq('id', postId)
     .maybeSingle()
-  if (error || !data) return null
+  if (error) throw error
+  if (!data) return null
   const snap = (data.generation_context_snapshot as ReelSnapshot | null) ?? {}
   return {
     rawRecordingUrl: snap.raw_recording_url ?? null,

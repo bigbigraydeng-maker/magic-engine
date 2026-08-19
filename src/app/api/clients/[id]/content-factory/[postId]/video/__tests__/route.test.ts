@@ -313,7 +313,7 @@ describe('粘链接', () => {
     })
   })
 
-  it('原样重提同一个链接(URL 没变) → 保留听写/字幕缓存(不用白白重新听写一次)', async () => {
+  it('🔴 就算原样重提同一个链接(URL 没变)也照样清听写/字幕缓存(Codex 六审：Dropbox 这类分享链接 URL 不变、背后文件能被换掉，光比 URL 字符串不够，用户显式重提这个动作本身就该当成"新素材")', async () => {
     const db = fakeDb({
       ...okRow,
       generation_context_snapshot: {
@@ -328,11 +328,7 @@ describe('粘链接', () => {
     const res = await PATCH(req({ action: 'link', link: 'https://same-recording.mp4' }), params)
     expect(res.status).toBe(200)
     expect(db.update).toHaveBeenCalledWith({
-      generation_context_snapshot: expect.objectContaining({
-        raw_recording_url: 'https://same-recording.mp4',
-        reel_transcript: expect.anything(),
-        reel_captions: expect.anything(),
-      }),
+      generation_context_snapshot: { raw_recording_url: 'https://same-recording.mp4' },
     })
   })
 })
@@ -522,8 +518,15 @@ describe('🔴 只有 approved 的内容能改片', () => {
 })
 
 describe('校对字幕(save_captions)', () => {
+  // 校对字幕的前提是已经出过一次片，snapshot 里必须有 raw_recording_url——
+  // 空 snapshot(默认 okRow)现在会被当成"录像已经被并发的清片拿掉了"(见下面的竞态测试)。
+  const okRowWithVideo = {
+    ...okRow,
+    generation_context_snapshot: { raw_recording_url: 'https://staged.mp4' } as Record<string, unknown>,
+  }
+
   it('保存 + 重排一次自动剪辑', async () => {
-    fakeDb(okRow)
+    fakeDb(okRowWithVideo)
     const res = await PATCH(req({ action: 'save_captions', captions: ['改好1', '改好2'] }), params)
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ ok: true, saved: 2, queued: true })
@@ -534,12 +537,21 @@ describe('校对字幕(save_captions)', () => {
   })
 
   it('🔴 保存字幕前先让旧任务失效(Codex 二审抓出：首次成片的任务是 ready_for_review，不先失效的话 enqueueRenderJob 会把它当成"已经排过"，校对过的文字永远不会真正出片)', async () => {
-    const db = fakeDb(okRow)
+    const db = fakeDb(okRowWithVideo)
     await PATCH(req({ action: 'save_captions', captions: ['改好1', '改好2'] }), params)
     expect(db.jobsUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'failed', error: '被新任务替代' }),
     )
     expect(db.jobsUpdateEq).toHaveBeenCalledWith('content_post_id', POST_ID)
+  })
+
+  it('🔴 排队前发现录像已经被并发的「清片」拿掉 → 409，不排队(Codex 六审：两个标签页同时清片+校对字幕，字幕这边可能抢在清片真正删掉raw_recording_url之前排了新任务，worker会把它错判成AI生成管线)', async () => {
+    // okRow(默认)的 snapshot 是空对象，没有 raw_recording_url —— 模拟"排队前重新查一次，
+    // 发现已经被另一个请求的清片拿掉了"。
+    fakeDb(okRow)
+    const res = await PATCH(req({ action: 'save_captions', captions: ['改好1', '改好2'] }), params)
+    expect(res.status).toBe(409)
+    expect(mocks.enqueueRenderJob, '录像已经没了就不该再排队').not.toHaveBeenCalled()
   })
 
   it('没带 captions 数组 → 400，不碰保存/排队', async () => {
