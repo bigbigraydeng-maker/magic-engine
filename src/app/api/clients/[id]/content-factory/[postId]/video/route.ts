@@ -121,6 +121,23 @@ async function stageRawRecording(
  *    实际根本没有新任务在跑。讲课式 start_render 的"打回重做"就是这么处理的
  *    (先把旧任务标 failed 再 enqueue)，这里照抄同一个模式。
  */
+/**
+ * 让这条内容所有还没失败的旧任务失效 —— 讲课式 start_render「打回重做」的同一个模式。
+ *
+ * 🔴 两个调用点都要用这份，不能各写一份：enqueueRenderJob 对非 failed 任务是幂等的，
+ * 任何要"重新排一次做片"的动作(清片重传、校对字幕后重出)如果不先做这一步，
+ * 接口会回「已排队」但数据库里其实没有新任务，静默失败。第一版只在 clearVideo
+ * 里做了，save_captions 那条分支被 Codex 复审抓出漏了同一个坑——抽成共享函数，
+ * 以后不会有第三处再漏改。
+ */
+async function invalidateOldJobs(postId: string): Promise<void> {
+  await supabaseAdmin
+    .from('content_factory_render_jobs')
+    .update({ status: 'failed', error: '被新任务替代', updated_at: new Date().toISOString() })
+    .eq('content_post_id', postId)
+    .neq('status', 'failed')
+}
+
 async function clearVideo(clientId: string, postId: string): Promise<boolean> {
   const { data: existing, error: readErr } = await supabaseAdmin
     .from('content_posts')
@@ -138,11 +155,7 @@ async function clearVideo(clientId: string, postId: string): Promise<boolean> {
   // 旧任务失效放在 update 之前:即使下面这步没命中(状态已变)，也不该留着可能
   // 阻塞未来任务的旧记录；顺序反过来则有极小概率在两步之间被人抢先排了新任务，
   // 但那种任务本来就该被这次清片作废，不算真正的竞态危害。
-  await supabaseAdmin
-    .from('content_factory_render_jobs')
-    .update({ status: 'failed', error: '被清片替代', updated_at: new Date().toISOString() })
-    .eq('content_post_id', postId)
-    .neq('status', 'failed')
+  await invalidateOldJobs(postId)
 
   const { data, error } = await supabaseAdmin
     .from('content_posts')
@@ -298,6 +311,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
             { status: 400 },
           )
         }
+        // 🔴 第一版这里漏了这步(Codex 复审抓出)：首次成片的任务此刻是 ready_for_review，
+        // enqueueRenderJob 对非 failed 任务幂等，不先失效旧任务的话，接口回「已排队」
+        // 但数据库里根本没有新任务，校对过的文字永远不会真正出现在成片里。
+        await invalidateOldJobs(params.postId)
         // 校对完直接重排一次自动剪辑 —— 别让人还要去别处找「重新做片」(讲课式同款教训:
         // PM 改完以为没生效)。reel-render.ts 会复用听写缓存、用这次校对过的文字出新片。
         const { jobId } = await enqueueRenderJob({ clientId: params.id, contentPostId: params.postId })

@@ -330,7 +330,7 @@ describe('其它', () => {
     const db = fakeDb(okRow)
     await PATCH(req({ action: 'clear' }), params)
     expect(db.jobsUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'failed', error: '被清片替代' }),
+      expect.objectContaining({ status: 'failed', error: '被新任务替代' }), // 共享函数统一了措辞(clear/save_captions都用)
     )
     expect(db.jobsUpdateEq).toHaveBeenCalledWith('content_post_id', POST_ID)
     expect(db.jobsUpdateNeq).toHaveBeenCalledWith('status', 'failed')
@@ -480,6 +480,15 @@ describe('校对字幕(save_captions)', () => {
       clientId: CLIENT, postId: POST_ID, texts: ['改好1', '改好2'],
     })
     expect(mocks.enqueueRenderJob).toHaveBeenCalledWith({ clientId: CLIENT, contentPostId: POST_ID })
+  })
+
+  it('🔴 保存字幕前先让旧任务失效(Codex 二审抓出：首次成片的任务是 ready_for_review，不先失效的话 enqueueRenderJob 会把它当成"已经排过"，校对过的文字永远不会真正出片)', async () => {
+    const db = fakeDb(okRow)
+    await PATCH(req({ action: 'save_captions', captions: ['改好1', '改好2'] }), params)
+    expect(db.jobsUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'failed', error: '被新任务替代' }),
+    )
+    expect(db.jobsUpdateEq).toHaveBeenCalledWith('content_post_id', POST_ID)
   })
 
   it('没带 captions 数组 → 400，不碰保存/排队', async () => {

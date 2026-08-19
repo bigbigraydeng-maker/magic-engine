@@ -448,7 +448,7 @@ export default function ContentFactoryBoardPage() {
                 <p className="text-[11px] text-me-taupe mb-2">
                   机器听写会有错字，对着成片改一遍就行，时间不用动。改完点「保存并重新出片」，
                   系统用改好的字幕重出一条(不用重新听写，比第一次快)。同一处错字改好后，
-                  以后大瑞的其它片子也会自动跟着改对。
+                  这个客户以后的其它片子也会自动跟着改对。
                 </p>
                 <div className="max-h-[280px] overflow-y-auto flex flex-col gap-1.5 pr-1 bg-me-ivory border border-me-stone rounded-xl p-2">
                   {capDraft.map((text, i) => (

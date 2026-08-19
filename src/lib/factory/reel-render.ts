@@ -96,28 +96,42 @@ import sys, json
 from PIL import Image, ImageDraw, ImageFont
 font_path, out_dir, caps_json, hi_hex = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 caps = json.loads(caps_json)  # list of list of {text, highlight}
-font = ImageFont.truetype(font_path, 88)
 hi_rgb = tuple(int(hi_hex[i:i+2], 16) for i in (1, 3, 5)) + (255,)
 WHITE = (255, 255, 255, 255)
 STROKE = (0, 0, 0, 240)
-for i, spans in enumerate(caps):
-    img = Image.new("RGBA", (1080, 1920), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
+STROKE_W = 8
+SAFE_W = 1080 - 80  # 左右各留 40px，别顶死画布边
+
+def measure(d, spans, font):
     widths = []
     for sp in spans:
         txt = sp.get("text", "")
         if not txt:
             widths.append(0); continue
-        bb = d.textbbox((0, 0), txt, font=font, stroke_width=8)
+        bb = d.textbbox((0, 0), txt, font=font, stroke_width=STROKE_W)
         widths.append(bb[2] - bb[0])
-    total_w = sum(widths)
+    return widths, sum(widths)
+
+for i, spans in enumerate(caps):
+    img = Image.new("RGBA", (1080, 1920), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    # 字号自适应:88px 起，14 个全角字在这个字号下能超画布宽度(88px×14≈1232px，
+    # 还没算两侧描边)，splitSubtitleChunks 允许到 14-16 字，直接固定字号会画出画布外
+    # 被裁掉。跟讲课式课件同一个思路:量出真实宽度，超了就缩，缩到能放下为止。
+    size = 88
+    while size > 40:
+        font = ImageFont.truetype(font_path, size)
+        widths, total_w = measure(d, spans, font)
+        if total_w <= SAFE_W:
+            break
+        size -= 4
     x = (1080 - total_w) // 2
     for sp, w in zip(spans, widths):
         txt = sp.get("text", "")
         if not txt:
             continue
         color = hi_rgb if sp.get("highlight") else WHITE
-        d.text((x, 980), txt, font=font, fill=color, stroke_width=8, stroke_fill=STROKE)
+        d.text((x, 980), txt, font=font, fill=color, stroke_width=STROKE_W, stroke_fill=STROKE)
         x += w
     img.save(f"{out_dir}/cap{i}.png")
 `
@@ -330,13 +344,17 @@ export async function runReelEditRender(jobId: string): Promise<{ outputUrl: str
     // 已经被排期/发布(另一个标签页、或人工在后台动的)，这时候绝不能拿旧版本的
     // 剪辑结果覆盖掉已经审过、正在走发布流程的那条(同 video/route.ts attachVideo
     // 的三重限定同一条红线)。没命中就说明片子已经不该被这次结果覆盖，只记日志。
-    const { data: finalized } = await supabaseAdmin
+    const { data: finalized, error: finalizeErr } = await supabaseAdmin
       .from('content_posts')
       .update({ source_video_url: outputUrl })
       .eq('client_id', job.client_id)
       .eq('id', job.content_post_id)
       .eq('status', 'approved')
       .select('id')
+    // 🔴 空结果有两种截然不同的原因，必须分清:真的没命中(状态变了，正常，不覆盖)
+    // vs 这次 update 请求本身失败(网络/数据库抖动)。混为一谈会把真错误当成
+    // 「状态变了」悄悄放过——worker 不会重试，卡片永远卡在这，没有任何报错。
+    if (finalizeErr) throw finalizeErr
     if (!finalized?.length) {
       step(jobId, '⚠️ 内容状态已变(排期/发布)，成片做完了但不覆盖——留在 storage 里，不生效')
       await patchJob(jobId, { status: 'ready_for_review', output_url: outputUrl, error: '内容已排期/发布，成片未覆盖，需人工确认' })
