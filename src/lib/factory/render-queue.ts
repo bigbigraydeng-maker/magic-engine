@@ -45,11 +45,15 @@ export const ACTIVE_JOB_STATUSES = ['queued', 'planning', 'rendering', 'assembli
  * video/route.ts 和 [postId]/route.ts 共用同一份判断 —— 原来各写一份，容易漏改一处。
  */
 export async function hasActiveRenderJob(postId: string): Promise<boolean> {
-  const { data } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('content_factory_render_jobs')
     .select('id')
     .eq('content_post_id', postId)
     .in('status', ACTIVE_JOB_STATUSES)
     .limit(1)
+  // 🔴 查询出错不能当成"没有活跃任务"(Codex 复审)：查询抖一下被误判成 false，
+  // 后面的挂片/清片/发布这些写操作就会在渲染其实还在跑的时候照常放行——
+  // 该拦的场景全部失守。查询失败就该让调用方的写操作跟着失败，不能悄悄放行。
+  if (error) throw error
   return Boolean(data?.length)
 }
