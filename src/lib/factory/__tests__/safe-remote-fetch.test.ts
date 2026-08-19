@@ -15,12 +15,19 @@ import { isBlockedAddress, safeProbeRemoteFile, safeDownloadRemoteFile } from '.
 /** 假写流：记下写了什么，让测试能断言"写到哪一步就中断了"而不用碰真磁盘。 */
 function fakeWriteStream() {
   const chunks: Buffer[] = []
-  return {
+  const handlers: Record<string, ((...args: unknown[]) => void)[]> = {}
+  const stream = {
     chunks,
     write: vi.fn((chunk: Buffer, cb: (err?: Error) => void) => { chunks.push(chunk); cb() }),
     end: vi.fn((cb: (err?: Error) => void) => cb()),
     destroy: vi.fn(),
+    on: vi.fn((event: string, cb: (...args: unknown[]) => void) => {
+      ;(handlers[event] ??= []).push(cb)
+    }),
+    // 测试用：模拟底层 fs 错误单独从 'error' 事件冒出来(不是走 write() 回调)
+    emit: (event: string, ...args: unknown[]) => (handlers[event] ?? []).forEach((cb) => cb(...args)),
   }
+  return stream
 }
 /** 假响应体：按顺序吐出给定的 chunk，模拟 fetch 的 ReadableStream。 */
 function fakeBody(chunks: Uint8Array[]) {
@@ -258,5 +265,36 @@ describe('safeDownloadRemoteFile —— 下载也走逐跳校验(不是只探活
     expect(r.ok).toBe(true)
     expect(ws.chunks.map((c) => c.toString())).toEqual(['ab', 'cd'])
     expect(ws.end).toHaveBeenCalled()
+  })
+
+  it('🔴 必须给写流挂 error 监听器(Codex 复审：没人监听的 error 事件会被 Node 当未捕获异常直接终止整个 worker 进程，不只是 worker，是所有客户共用的那一个)', async () => {
+    const ws = fakeWriteStream()
+    fsMocks.createWriteStream.mockReturnValue(ws)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true, status: 200, headers: { get: () => 'video/mp4' },
+      body: fakeBody([Buffer.from('a')]),
+    }))
+    await safeDownloadRemoteFile('https://ok.example/x.mp4', '/tmp/out.mp4', 20000, 100)
+    expect(ws.on).toHaveBeenCalledWith('error', expect.any(Function))
+  })
+
+  it('🔴 磁盘写满这类错误单独从 error 事件冒出来(不是走 write() 回调) → 也要被捕获成失败结果，不能让流程卡住或崩掉', async () => {
+    const ws = fakeWriteStream()
+    fsMocks.createWriteStream.mockReturnValue(ws)
+    const realWrite = ws.write.getMockImplementation()!
+    let writeCount = 0
+    ws.write = vi.fn((chunk: Buffer, cb: (err?: Error) => void) => {
+      writeCount++
+      if (writeCount === 2) ws.emit('error', new Error('磁盘写满了')) // 第二块写之前，底层fd先报错
+      realWrite(chunk, cb)
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true, status: 200, headers: { get: () => 'video/mp4' },
+      body: fakeBody([Buffer.from('a'), Buffer.from('b')]),
+    }))
+    const r = await safeDownloadRemoteFile('https://ok.example/x.mp4', '/tmp/out.mp4', 20000, 1000)
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('磁盘写满了')
+    expect(ws.destroy).toHaveBeenCalled()
   })
 })

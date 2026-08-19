@@ -191,6 +191,13 @@ export async function safeDownloadRemoteFile(
     if (!res.ok || !res.body) return { ok: false, error: `下载失败 ${res.status}` }
 
     const ws = createWriteStream(dest)
+    // 🔴 必须显式监听 'error'(Codex 复审)：磁盘写满/句柄失效这类错误，WriteStream
+    // 会额外单独发一个 error 事件，不只是走 write() 回调。EventEmitter 上没人监听
+    // 的 error 事件会被 Node 当未捕获异常直接终止整个进程——worker 是常驻服务，
+    // 一次某个客户的下载写盘出错会连带炸掉所有客户的做片队列。挂上监听器只是为了
+    // 不让它崩，真正的错误处理是下面循环里每次写完都检查这个变量。
+    let streamErr: Error | null = null
+    ws.on('error', (e: Error) => { streamErr = e })
     const reader = (res.body as ReadableStream<Uint8Array>).getReader()
     let received = 0
     try {
@@ -204,10 +211,13 @@ export async function safeDownloadRemoteFile(
         await new Promise<void>((resolve, reject) => {
           ws.write(Buffer.from(value), (err) => (err ? reject(err) : resolve()))
         })
+        if (streamErr) throw streamErr
       }
+      if (streamErr) throw streamErr
       await new Promise<void>((resolve, reject) => {
         ws.end((err?: Error | null) => (err ? reject(err) : resolve()))
       })
+      if (streamErr) throw streamErr
     } catch (e) {
       ws.destroy()
       return { ok: false, error: e instanceof Error ? e.message : '下载失败 — 写盘出错' }
