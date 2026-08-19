@@ -35,6 +35,7 @@ async function patchSnapshot(
   clientId: string,
   postId: string,
   patch: Partial<ReelSnapshot>,
+  opts: { requireApproved?: boolean } = {},
 ): Promise<void> {
   const { data, error } = await supabaseAdmin
     .from('content_posts')
@@ -45,6 +46,24 @@ async function patchSnapshot(
   if (error || !data) throw new Error('未找到该内容')
 
   const snap = { ...((data.generation_context_snapshot as ReelSnapshot | null) ?? {}), ...patch }
+
+  if (opts.requireApproved) {
+    // 🔴 route.ts 调用前查过一次 post.status==='approved'，但那是先读后判，不是原子
+    // 条件(Codex 复审)——查完到这次真正写库之间还有一小段间隙，内容完全可能在这
+    // 几十毫秒里被另一个请求排期/发布。跟 stageRawRecording/clearVideo 同一条防线：
+    // status 条件必须并进这次 update 本身，查完命中几行才算数，不能只在调用前查一次。
+    const { data: updated, error: uErr } = await supabaseAdmin
+      .from('content_posts')
+      .update({ generation_context_snapshot: snap })
+      .eq('client_id', clientId)
+      .eq('id', postId)
+      .eq('status', 'approved')
+      .select('id')
+    if (uErr) throw uErr
+    if (!updated?.length) throw new Error('这条内容的状态已经变了（可能已排期或已发布）— 刷新页面再看一下')
+    return
+  }
+
   const { error: uErr } = await supabaseAdmin
     .from('content_posts')
     .update({ generation_context_snapshot: snap })
@@ -107,7 +126,7 @@ export async function saveReelCaptions(params: {
   // 那些也一起被冲回听写原文)。空字符串就留着空文本，渲染时那条不画字幕就是了，
   // 不能靠"数组变短"来表示"删掉这条"。
   const merged = existing.map((c, i) => ({ ...c, text: (texts[i] ?? '').trim() }))
-  await patchSnapshot(clientId, postId, { reel_captions: merged })
+  await patchSnapshot(clientId, postId, { reel_captions: merged }, { requireApproved: true })
 
   // 从这次校准里学术语，学错了会把客户改对的字又改回去，所以失败不影响保存
   try {

@@ -19,9 +19,20 @@ import { saveReelCaptions, loadReelCaptionState } from './reel-post'
 const CLIENT = 'client-1'
 const POST = 'post-1'
 
-/** select().eq().eq().maybeSingle() 读；update().eq().eq() 写。 */
-function fakeDb(snapshot: Record<string, unknown> | null) {
-  const updateEq2 = vi.fn().mockResolvedValue({ error: null })
+/**
+ * select().eq().eq().maybeSingle() 读；
+ * update().eq().eq().eq('status','approved').select() 写 —— saveReelCaptions 走
+ * requireApproved 那条(跟 stageRawRecording/clearVideo 同一条防线：状态条件并进
+ * update 本身，不是先读后判)，第三层 eq + select 就是为了让这条命中率可控。
+ */
+function fakeDb(snapshot: Record<string, unknown> | null, opts: { updateHits?: number } = {}) {
+  const hits = opts.updateHits ?? 1
+  const updateSelect = vi.fn().mockResolvedValue({
+    data: Array.from({ length: hits }, () => ({ id: 'x' })),
+    error: null,
+  })
+  const updateEq3 = vi.fn(() => ({ select: updateSelect }))
+  const updateEq2 = vi.fn(() => ({ eq: updateEq3 }))
   const updateEq1 = vi.fn(() => ({ eq: updateEq2 }))
   const update = vi.fn(() => ({ eq: updateEq1 }))
   mocks.from.mockReturnValue({
@@ -41,7 +52,7 @@ function fakeDb(snapshot: Record<string, unknown> | null) {
     })),
     update,
   })
-  return { update, updateEq1, updateEq2 }
+  return { update, updateEq1, updateEq2, updateEq3, updateSelect }
 }
 
 const EXISTING_CAPTIONS = [
@@ -144,6 +155,19 @@ describe('saveReelCaptions', () => {
     fakeDb({ reel_captions: EXISTING_CAPTIONS })
     await saveReelCaptions({ clientId: CLIENT, postId: POST, texts: EXISTING_CAPTIONS.map((c) => c.text) })
     expect(mocks.saveLecturePrefs).not.toHaveBeenCalled()
+  })
+
+  it('🔴 写库时状态条件并进 update 本身，不是先读后判(Codex 复审)', async () => {
+    const db = fakeDb({ reel_captions: EXISTING_CAPTIONS })
+    await saveReelCaptions({ clientId: CLIENT, postId: POST, texts: ['改好1', '改好2'] })
+    expect(db.updateEq3).toHaveBeenCalledWith('status', 'approved')
+  })
+
+  it('🔴 保存这一刻内容状态已经变了(排期/发布) → 报错，不假装保存成功(路由调用前查过一次，但那是先读后判，真正拦住竞态的是这次原子条件)', async () => {
+    const db = fakeDb({ reel_captions: EXISTING_CAPTIONS }, { updateHits: 0 })
+    await expect(saveReelCaptions({ clientId: CLIENT, postId: POST, texts: ['改好1', '改好2'] }))
+      .rejects.toThrow('状态已经变了')
+    expect(db.updateSelect).toHaveBeenCalled()
   })
 
   it('学习失败不影响这次保存已经成功', async () => {

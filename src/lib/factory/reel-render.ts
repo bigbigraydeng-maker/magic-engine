@@ -327,9 +327,16 @@ export async function runReelEditRender(jobId: string): Promise<{ outputUrl: str
       '-c', 'copy', outFile,
     ], { maxBuffer: 32 * 1024 * 1024 })
 
-    step(jobId, '上传成片')
     const path = `${job.client_id}/reel-edit/${jobId}/final.mp4`
     const bytes = await readFile(outFile)
+    const MB = bytes.length / 1048576
+    step(jobId, `合成完成，上传成片(${MB.toFixed(1)}MB)`)
+    // 🔴 跟讲课式(lecture-render.ts)同一条存储桶上限(Codex 复审：这里之前没查，
+    // 长录像编码完超限才在上传这步失败——听写+对轴+合成的活已经全跑完了，白干)。
+    // 提前查，长录像能早点报错，不用陪跑完整条管线才知道存不下。
+    if (MB > 49) {
+      throw new Error(`成片 ${MB.toFixed(0)}MB 超过存储上限(50MB) — 这条录得太长了，剪短一点或分成两条`)
+    }
     const up = await supabaseAdmin.storage.from(BUCKET).upload(path, bytes, { contentType: 'video/mp4', upsert: true })
     if (up.error) throw up.error
     const { data: pub } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(path)
