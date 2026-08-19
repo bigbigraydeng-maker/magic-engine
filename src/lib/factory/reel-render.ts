@@ -22,9 +22,12 @@ import {
   firstWordStart,
   splitSubtitleChunks,
   type SubtitleChunk,
+  type TranscriptSegment,
 } from './lecture-align'
 import { normalizeTerms } from './term-glossary'
 import { highlightSpans, type HighlightSpan } from './caption-highlight'
+import { loadReelCaptionState, saveReelTranscriptAndCaptions } from './reel-post'
+import { applyClientGlossary, loadLecturePrefs } from './lecture-learning'
 
 const exec = promisify(execFile)
 const BUCKET = 'content-factory'
@@ -189,17 +192,32 @@ export async function runReelEditRender(jobId: string): Promise<{ outputUrl: str
     const script = (post.script ?? '').trim()
     if (!script) throw new Error('这条内容没有脚本，没法自动对轴掐头去尾')
 
+    // 校对过字幕后重做片会再排一次任务——这次不用重新听写，也不能把客户改好的字冲掉。
+    const captionState = await loadReelCaptionState(job.client_id, job.content_post_id)
+
     step(jobId, '下载原始录像')
     const videoFile = join(dir, 'raw.mp4')
     await download(rawUrl, videoFile)
     await heartbeat(jobId, 'planning')
     const rawDuration = await ffprobeDuration(videoFile)
 
-    step(jobId, '抽音轨')
-    const audioFile = await extractAudio(videoFile, dir)
-    step(jobId, '开始听写')
-    const { segments, words } = await whisperTranscribe(audioFile)
-    step(jobId, `听写完成(${segments.length} 段)`)
+    // 听写结果有留档且录像没换过 → 直接复用(省一次听写费用，也保住客户校对过的时间轴基础)
+    const cached = captionState?.transcript
+    let segments: TranscriptSegment[]
+    let words: { start: number; end: number; word: string }[]
+    if (cached && cached.recordingUrl === rawUrl && cached.segments.length > 0) {
+      step(jobId, `复用已存的听写结果(${cached.segments.length} 段)`)
+      segments = cached.segments
+      words = cached.words ?? []
+    } else {
+      step(jobId, '抽音轨')
+      const audioFile = await extractAudio(videoFile, dir)
+      step(jobId, '开始听写')
+      const t = await whisperTranscribe(audioFile)
+      segments = t.segments
+      words = t.words
+      step(jobId, `听写完成(${segments.length} 段)`)
+    }
     await heartbeat(jobId, 'rendering')
     await patchJob(jobId, { status: 'rendering' })
 
@@ -219,6 +237,27 @@ export async function runReelEditRender(jobId: string): Promise<{ outputUrl: str
     let captionChunks = splitSubtitleChunks(shifted.map((s) => ({ ...s, start: Math.max(0, s.start) })))
       .filter((c) => c.end > 0.15)
       .map((c) => ({ ...c, start: Math.max(0, c.start), text: normalizeTerms(c.text) }))
+
+    // 这个客户自己攒出来的词表(讲课式/边走边录共用同一份 —— 同一个客户，同一套说话习惯)
+    const learned = await loadLecturePrefs(job.client_id).catch(() => null)
+    if (learned?.glossary && Object.keys(learned.glossary).length > 0) {
+      captionChunks = captionChunks.map((c) => ({ ...c, text: applyClientGlossary(c.text, learned.glossary) }))
+    }
+
+    // 客户校对过字幕就以他的为准(时间不动、只换字)。条数对不上说明录像/脚本变过，按新的来。
+    const corrected = captionState?.captions
+    if (corrected && corrected.length === captionChunks.length) {
+      step(jobId, `用客户校对过的字幕(${corrected.length} 条)`)
+      captionChunks = captionChunks.map((c, i) => ({ ...c, text: corrected[i].text }))
+    }
+
+    // 留档:客户能在页面上校对，下次重做片也不用再听写
+    await saveReelTranscriptAndCaptions({
+      clientId: job.client_id,
+      postId: job.content_post_id,
+      transcript: { recordingUrl: rawUrl, segments, words, savedAt: new Date().toISOString() },
+      captions: captionChunks.map((c) => ({ start: c.start, end: c.end, text: c.text })),
+    }).catch(() => { /* 留档失败不该让整单白干 */ })
 
     await patchJob(jobId, { status: 'assembling' })
 
@@ -278,12 +317,13 @@ export async function runReelEditRender(jobId: string): Promise<{ outputUrl: str
     const { data: pub } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(path)
     const outputUrl = pub.publicUrl
 
-    // 标成片：清掉暂存的原始录像字段(不再需要)，成片挂上去(看板据此移到「出片」列)
-    const nextSnap = { ...snap }
-    delete nextSnap.raw_recording_url
+    // 标成片：只改 source_video_url。🔴 raw_recording_url 故意不删——
+    // 校对字幕后要能重做片，得留着原始录像地址给下次用；reel_transcript/reel_captions
+    // 已经在上面 saveReelTranscriptAndCaptions 里存过了，这里不再碰 snapshot，
+    // 避免拿函数开头读到的旧 snap 覆盖回去、把刚存的听写结果冲掉。
     await supabaseAdmin
       .from('content_posts')
-      .update({ source_video_url: outputUrl, generation_context_snapshot: nextSnap })
+      .update({ source_video_url: outputUrl })
       .eq('client_id', job.client_id)
       .eq('id', job.content_post_id)
     await patchJob(jobId, { status: 'ready_for_review', output_url: outputUrl })

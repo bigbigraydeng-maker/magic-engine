@@ -40,6 +40,7 @@ interface Card {
   visualBrief: string
   mode?: string          // '讲课式' 等制作形态
   rendering?: boolean    // 流水线正在给这条做片 —— 做片中不给挂片入口
+  reelCaptions?: { start: number; end: number; text: string }[] | null  // 边走边录自动剪辑留的字幕
 }
 
 interface Lesson extends Card {
@@ -111,13 +112,17 @@ export default function ContentFactoryBoardPage() {
   const [notice, setNotice] = useState<string | null>(null)
   const [uploadPct, setUploadPct] = useState<number | null>(null)
   const [videoLink, setVideoLink] = useState('')
+  const [capDraft, setCapDraft] = useState<string[] | null>(null)   // 字幕校对草稿
+  const [capDirty, setCapDirty] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // 换卡片/关抽屉一律把链接输入框清空 —— 在 A 里粘了链接不提交就关掉，
-  // 再打开 B 时输入框还留着 A 的链接，点确定就把错的片挂到 B 上了。
+  // 换卡片/关抽屉一律把链接输入框和字幕草稿都清空 —— 在 A 里粘了链接/改了字幕不提交
+  // 就关掉，再打开 B 时残留的状态还在，点保存会把 A 的东西错挂到 B 上。
   const setSelected = useCallback((c: Card | null) => {
     setSelectedRaw(c)
     setVideoLink('')
+    setCapDraft(c?.reelCaptions ? c.reelCaptions.map((cap) => cap.text) : null)
+    setCapDirty(false)
   }, [])
 
   const load = useCallback(async () => {
@@ -181,6 +186,32 @@ export default function ContentFactoryBoardPage() {
       setVideoLink('')
       setError(null)
       setNotice(payload.action === 'clear' ? '已撤掉这条片' : '已收到 ✅ 正在自动剪辑(掐头去尾+字幕+关键词高亮)，做完会自动进「出片」列')
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setActing(false)
+    }
+  }
+
+  /**
+   * 保存字幕校对并重排一次自动剪辑 —— 跟讲课式同一条设计：改字幕的唯一目的是让
+   * 成片跟着变，不该让人再去别处找「重做」(真实事故教训:改完以为没生效)。
+   */
+  async function saveCaptionsAndRerender() {
+    if (!selected || !clientId || !capDraft) return
+    setActing(true)
+    setError(null)
+    try {
+      const r = await fetch(`/api/clients/${clientId}/content-factory/${selected.id}/video`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save_captions', captions: capDraft }),
+      })
+      const data = (await r.json().catch(() => ({}))) as { error?: string }
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`)
+      setCapDirty(false)
+      setNotice('字幕已保存 ✅ 正在用改好的字幕重新出片，几分钟后自动更新')
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -398,6 +429,45 @@ export default function ContentFactoryBoardPage() {
                   playsInline
                   className="w-full max-h-[420px] rounded-xl bg-black"
                 />
+              </div>
+            )}
+
+            {/* 字幕校对 —— 只在边走边录自动剪辑的成片上出现(讲课式有自己单独的工作台校对页) */}
+            {selected.mode !== '讲课式' && selected.reelCaptions && selected.reelCaptions.length > 0 && capDraft && (
+              <div className="mb-3">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <div className="text-[11px] font-semibold text-me-taupe">字幕校对</div>
+                  <button
+                    disabled={!capDirty || acting || selected.rendering}
+                    onClick={() => void saveCaptionsAndRerender()}
+                    className="text-[11px] font-semibold text-white bg-status-track rounded-full px-3 py-1 disabled:opacity-40"
+                  >
+                    {acting ? '处理中…' : capDirty ? '保存并重新出片' : '已保存'}
+                  </button>
+                </div>
+                <p className="text-[11px] text-me-taupe mb-2">
+                  机器听写会有错字，对着成片改一遍就行，时间不用动。改完点「保存并重新出片」，
+                  系统用改好的字幕重出一条(不用重新听写，比第一次快)。同一处错字改好后，
+                  以后大瑞的其它片子也会自动跟着改对。
+                </p>
+                <div className="max-h-[280px] overflow-y-auto flex flex-col gap-1.5 pr-1 bg-me-ivory border border-me-stone rounded-xl p-2">
+                  {capDraft.map((text, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className="text-[10px] text-me-taupe w-10 flex-none tabular-nums">
+                        {Math.floor((selected.reelCaptions?.[i]?.start ?? 0) / 60)}:
+                        {String(Math.floor((selected.reelCaptions?.[i]?.start ?? 0) % 60)).padStart(2, '0')}
+                      </span>
+                      <input
+                        value={text}
+                        onChange={(e) => {
+                          setCapDraft((d) => (d ? d.map((t, j) => (j === i ? e.target.value : t)) : d))
+                          setCapDirty(true)
+                        }}
+                        className="flex-1 min-w-0 text-sm bg-white border border-me-stone rounded-lg px-2 py-1"
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 

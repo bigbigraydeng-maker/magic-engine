@@ -62,6 +62,8 @@ export async function GET(
       script: p.script ?? '',
       pillar: p.pillar_id ?? '',
       visualBrief: p.visual_brief ?? '',
+      // 边走边录自动剪辑留的字幕(听写原文或客户校对过的版本)，前端用来渲染校对区
+      reelCaptions: (p.generation_context_snapshot as Record<string, unknown> | null)?.reel_captions ?? null,
     })
 
     for (const p of data ?? []) {

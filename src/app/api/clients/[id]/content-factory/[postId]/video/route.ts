@@ -18,6 +18,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { looksLikeVideoResponse, normalizeRecordingLink } from '@/lib/factory/recording-link'
 import { safeProbeRemoteFile } from '@/lib/factory/safe-remote-fetch'
 import { enqueueRenderJob } from '@/lib/factory/render-queue'
+import { saveReelCaptions } from '@/lib/factory/reel-post'
 
 export const dynamic = 'force-dynamic'
 
@@ -182,10 +183,11 @@ export async function POST(req: NextRequest, { params }: Params) {
 }
 
 /**
- * PATCH — action: 'uploaded' | 'link' | 'clear'
- *   uploaded: { path }  直传完成后回调，交上去排队自动剪辑(不是直接挂成片)
- *   link:     { link }  粘一个外链（Dropbox 等），当场探活后交上去排队自动剪辑
- *   clear:    传错了撤掉(连同还没跑完的原始录像暂存一起清)
+ * PATCH — action: 'uploaded' | 'link' | 'clear' | 'save_captions'
+ *   uploaded:      { path }      直传完成后回调，交上去排队自动剪辑(不是直接挂成片)
+ *   link:          { link }      粘一个外链（Dropbox 等），当场探活后交上去排队自动剪辑
+ *   clear:         传错了撤掉(连同还没跑完的原始录像暂存一起清)
+ *   save_captions: { captions: string[] }  校对字幕后重排一次自动剪辑，用改好的字幕出片
  */
 export async function PATCH(req: NextRequest, { params }: Params) {
   const access = await requireDashboardClientAccess(params.id)
@@ -196,6 +198,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       action?: string
       path?: string
       link?: string
+      captions?: string[]
     }
     const post = await loadPost(params.id, params.postId)
     if (!post) return NextResponse.json({ error: '未找到该内容' }, { status: 404 })
@@ -255,6 +258,25 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       case 'clear': {
         if (!(await clearVideo(params.id, params.postId))) return staleResponse()
         return NextResponse.json({ ok: true, videoUrl: null })
+      }
+
+      case 'save_captions': {
+        if (!Array.isArray(body.captions)) {
+          return NextResponse.json({ error: '没收到字幕内容' }, { status: 400 })
+        }
+        let saved: number
+        try {
+          ;({ saved } = await saveReelCaptions({ clientId: params.id, postId: params.postId, texts: body.captions }))
+        } catch (e) {
+          return NextResponse.json(
+            { error: e instanceof Error ? e.message : '字幕没保存成功，刷新页面再试一次' },
+            { status: 400 },
+          )
+        }
+        // 校对完直接重排一次自动剪辑 —— 别让人还要去别处找「重新做片」(讲课式同款教训:
+        // PM 改完以为没生效)。reel-render.ts 会复用听写缓存、用这次校对过的文字出新片。
+        const { jobId } = await enqueueRenderJob({ clientId: params.id, contentPostId: params.postId })
+        return NextResponse.json({ ok: true, saved, queued: true, jobId })
       }
 
       default:

@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   looksLikeVideoResponse: vi.fn(),
   safeProbe: vi.fn(),
   enqueueRenderJob: vi.fn(),
+  saveReelCaptions: vi.fn(),
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
@@ -52,6 +53,11 @@ vi.mock('@/lib/factory/safe-remote-fetch', () => ({
 // 排队逻辑有自己的测试(render-queue 是纯粹的 insert-if-not-exists)，这里只关心路由有没有调它
 vi.mock('@/lib/factory/render-queue', () => ({
   enqueueRenderJob: mocks.enqueueRenderJob,
+}))
+
+// 字幕保存+学习有自己的测试(reel-post.test.ts)，这里只关心路由怎么用它
+vi.mock('@/lib/factory/reel-post', () => ({
+  saveReelCaptions: mocks.saveReelCaptions,
 }))
 
 import { POST, PATCH } from '../route'
@@ -133,6 +139,7 @@ beforeEach(() => {
   mocks.requireAccess.mockResolvedValue({ ok: true })
   mocks.getPublicUrl.mockReturnValue({ data: { publicUrl: 'https://cdn.example/final.mp4' } })
   mocks.enqueueRenderJob.mockResolvedValue({ jobId: 'job-new', created: true })
+  mocks.saveReelCaptions.mockResolvedValue({ saved: 2 })
 })
 
 describe('鉴权', () => {
@@ -389,5 +396,49 @@ describe('🔴 只有 approved 的内容能改片', () => {
     fakeDb({ ...okRow, source_video_url: 'https://old' }, { updateHits: 0 })
     const res = await PATCH(req({ action: 'clear' }), params)
     expect(res.status).toBe(409)
+  })
+})
+
+describe('校对字幕(save_captions)', () => {
+  it('保存 + 重排一次自动剪辑', async () => {
+    fakeDb(okRow)
+    const res = await PATCH(req({ action: 'save_captions', captions: ['改好1', '改好2'] }), params)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ ok: true, saved: 2, queued: true })
+    expect(mocks.saveReelCaptions).toHaveBeenCalledWith({
+      clientId: CLIENT, postId: POST_ID, texts: ['改好1', '改好2'],
+    })
+    expect(mocks.enqueueRenderJob).toHaveBeenCalledWith({ clientId: CLIENT, contentPostId: POST_ID })
+  })
+
+  it('没带 captions 数组 → 400，不碰保存/排队', async () => {
+    fakeDb(okRow)
+    const res = await PATCH(req({ action: 'save_captions' }), params)
+    expect(res.status).toBe(400)
+    expect(mocks.saveReelCaptions).not.toHaveBeenCalled()
+    expect(mocks.enqueueRenderJob).not.toHaveBeenCalled()
+  })
+
+  it('🔴 保存失败(如条数对不上) → 400，且不排队(不能拿旧字幕去重做片)', async () => {
+    fakeDb(okRow)
+    mocks.saveReelCaptions.mockRejectedValue(new Error('字幕条数对不上，请刷新页面重试'))
+    const res = await PATCH(req({ action: 'save_captions', captions: ['x'] }), params)
+    expect(res.status).toBe(400)
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining('条数对不上') })
+    expect(mocks.enqueueRenderJob).not.toHaveBeenCalled()
+  })
+
+  it('做片中不许校对(同一套忙碌闸)', async () => {
+    fakeDb(okRow, { activeJobs: 1 })
+    const res = await PATCH(req({ action: 'save_captions', captions: ['x'] }), params)
+    expect(res.status).toBe(409)
+    expect(mocks.saveReelCaptions).not.toHaveBeenCalled()
+  })
+
+  it('讲课式不走这条(它有自己的校对页)', async () => {
+    fakeDb({ ...okRow, format: '讲课式' })
+    const res = await PATCH(req({ action: 'save_captions', captions: ['x'] }), params)
+    expect(res.status).toBe(400)
+    expect(mocks.saveReelCaptions).not.toHaveBeenCalled()
   })
 })
