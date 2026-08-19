@@ -1,4 +1,4 @@
-// 探活外链时的 SSRF 防护 —— 逐跳校验，不许自动跟随跳转。
+// 探活/下载外链时的 SSRF 防护 —— 逐跳校验，不许自动跟随跳转。
 //
 // 为什么需要：探活用 `redirect: 'follow'` 时，只校验初始 URL 是不够的。
 // 有后台权限的人可以提交一个公开 HTTPS 地址，让它 302 到
@@ -123,4 +123,71 @@ export async function safeProbeRemoteFile(rawUrl: string, timeoutMs = 20000): Pr
   }
 
   return { ok: false, error: '这个链接跳转太多次了 — 换一个直接指向视频的链接' }
+}
+
+export interface SafeDownloadResult {
+  ok: boolean
+  error?: string
+}
+
+/**
+ * 安全地把外链内容整个下载到本地文件 —— 跟 safeProbeRemoteFile 同一套逐跳校验，
+ * 但这次是真下载整个文件，不是只探前 1KB。
+ *
+ * 🔴 为什么 safeProbeRemoteFile 探活通过了还不够、下载时必须重新校验：
+ * 探活和下载是两次独立的 HTTP 请求。恶意服务器完全可以让探活那次老实返回一段视频头，
+ * 等真正下载(通常在几分钟后，任务排队之后)时改成跳转到内网地址——两次请求之间
+ * 的窗口足够让攻击者"先给你看真的，再给你换成假的"(TOCTOU)。下载必须自己重新
+ * 做一遍逐跳校验，不能信任"提交时探过活了"这件事。
+ */
+export async function safeDownloadRemoteFile(
+  rawUrl: string,
+  dest: string,
+  timeoutMs = 20 * 60 * 1000,
+): Promise<SafeDownloadResult> {
+  const { createWriteStream } = await import('node:fs')
+  const { pipeline } = await import('node:stream/promises')
+  const { Readable } = await import('node:stream')
+
+  let current: URL
+  try {
+    current = new URL(rawUrl)
+  } catch {
+    return { ok: false, error: '这不像一个链接' }
+  }
+
+  for (let hop = 0; hop < MAX_HOPS; hop++) {
+    const blocked = await assertHopAllowed(current)
+    if (blocked) return { ok: false, error: blocked }
+
+    let res: Response
+    try {
+      res = await fetch(current.toString(), {
+        redirect: 'manual', // 🔴 自己跟，每跳都要重新校验 —— 理由见函数头注释
+        signal: AbortSignal.timeout(timeoutMs),
+      })
+    } catch {
+      return { ok: false, error: '下载失败 — 链接打不开或已过期' }
+    }
+
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get('location')
+      if (!loc) return { ok: false, error: '这个链接跳转不完整' }
+      try {
+        current = new URL(loc, current)
+      } catch {
+        return { ok: false, error: '这个链接的跳转地址无效' }
+      }
+      continue
+    }
+
+    if (!res.ok || !res.body) return { ok: false, error: `下载失败 ${res.status}` }
+    await pipeline(
+      Readable.fromWeb(res.body as import('node:stream/web').ReadableStream),
+      createWriteStream(dest),
+    )
+    return { ok: true }
+  }
+
+  return { ok: false, error: '这个链接跳转太多次了' }
 }

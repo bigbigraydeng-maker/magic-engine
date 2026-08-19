@@ -107,10 +107,18 @@ describe('saveReelCaptions', () => {
     })
   })
 
-  it('空字符串的校对结果会被丢弃(那不是有效字幕)', async () => {
-    fakeDb({ reel_captions: EXISTING_CAPTIONS })
+  it('🔴 清空某条字幕 → 保留空文本，不许缩短数组(Codex 复审属实：重做片按长度比对校对结果，缩短了会让整批校对失效)', async () => {
+    const db = fakeDb({ reel_captions: EXISTING_CAPTIONS })
     const { saved } = await saveReelCaptions({ clientId: CLIENT, postId: POST, texts: ['留着', '  '] })
-    expect(saved).toBe(1)
+    expect(saved).toBe(2) // 条数不变，不是"少了一条"
+    expect(db.update).toHaveBeenCalledWith({
+      generation_context_snapshot: {
+        reel_captions: [
+          { start: 0, end: 2, text: '留着' },
+          { start: 2, end: 4, text: '' }, // 清空的那条留空文本，不是被删掉
+        ],
+      },
+    })
   })
 
   it('🔴 真改了专有名词写法 → 学进客户词表(下次自动纠正，不用改第二遍)', async () => {

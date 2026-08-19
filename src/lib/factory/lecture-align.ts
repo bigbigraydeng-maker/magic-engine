@@ -129,6 +129,23 @@ const HEAD_MIN_SCORE = 0.34    // 低于这个相似度不敢跳，宁可从第�
  * 这些都不在脚本里。拿脚本的开场白去比对听写分段，命中就从那一段起片。
  * 比不中(自由发挥/开场白改过)就退回第一句话，绝不乱切内容。
  */
+/**
+ * 找真正开口的那一刻(秒) —— 用听写的逐字时间戳。
+ *
+ * 两次踩坑记在这:
+ * ① 用「句子」的起点 —— 偏早近 2 秒(那只是它标句子的粗略位置)，PM 一耳朵听出来;
+ * ② 用「声音起来的时刻」 —— 抓到的是吸气/唇音；改判「持续说话」又会把字间停顿当没开始。
+ * 逐字时间戳直接给出第一个字的时刻，语义上就是「他开口了」，最准。
+ */
+export function firstWordStart(
+  words: { start: number; word: string }[],
+  notBefore: number,
+  fallback: number,
+): number {
+  const w = words.find((x) => x.word?.trim() && x.start >= notBefore - 0.5)
+  return w ? w.start : fallback
+}
+
 export function findHeadStart(hookText: string, segments: TranscriptSegment[]): number {
   if (segments.length === 0) return 0
   const firstSpeech = segments[0].start

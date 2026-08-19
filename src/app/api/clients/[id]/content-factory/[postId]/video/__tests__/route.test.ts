@@ -96,11 +96,17 @@ function fakeDb(
   const update = vi.fn(() => ({ eq: updateEq1 }))
 
   const jobsLimit = vi.fn().mockResolvedValue({ data: jobs, error: null })
+  // clearVideo 会先把旧任务标 failed(讲课式 start_render 同款模式)：
+  // .update({...}).eq('content_post_id', postId).neq('status', 'failed')，不接 .select()
+  const jobsUpdateNeq = vi.fn().mockResolvedValue({ data: null, error: null })
+  const jobsUpdateEq = vi.fn(() => ({ neq: jobsUpdateNeq }))
+  const jobsUpdate = vi.fn(() => ({ eq: jobsUpdateEq }))
 
   mocks.from.mockImplementation((table: string) => {
     if (table === 'content_factory_render_jobs') {
       return {
         select: vi.fn(() => ({ eq: vi.fn(() => ({ in: vi.fn(() => ({ limit: jobsLimit })) })) })),
+        update: jobsUpdate,
       }
     }
     // content_posts：select 按列名分流；两种读法的 eq 链深度不同(loadPost 2层，
@@ -122,7 +128,7 @@ function fakeDb(
       update,
     }
   })
-  return { update, updateEq1, updateEq2, updateEq3 }
+  return { update, updateEq1, updateEq2, updateEq3, jobsUpdate, jobsUpdateEq, jobsUpdateNeq }
 }
 
 /** 一条正常的、可以挂片的内容(暂存快照默认为空对象，方便断言暂存后的精确内容) */
@@ -301,6 +307,71 @@ describe('其它', () => {
       source_video_url: null,
       generation_context_snapshot: { other_key: 'keep-me' }, // raw_recording_url 被删，其它键保留
     })
+  })
+
+  it('🔴 clear 连同听写缓存/字幕一起清(Codex 复审：留着的话，清片后粘同一个URL会误用上一条内容的听写)', async () => {
+    const db = fakeDb({
+      ...okRow,
+      generation_context_snapshot: {
+        raw_recording_url: 'https://staged.mp4',
+        reel_transcript: { recordingUrl: 'https://staged.mp4', segments: [], words: [], savedAt: 't' },
+        reel_captions: [{ start: 0, end: 1, text: '旧内容的字幕' }],
+        other_key: 'keep-me',
+      },
+    })
+    await PATCH(req({ action: 'clear' }), params)
+    expect(db.update).toHaveBeenCalledWith({
+      source_video_url: null,
+      generation_context_snapshot: { other_key: 'keep-me' },
+    })
+  })
+
+  it('🔴 clear 会先让旧的 render_jobs 失效(Codex 复审：不清的话，清了重传会被 enqueueRenderJob 的幂等去重吞掉，实际没有新任务在跑)', async () => {
+    const db = fakeDb(okRow)
+    await PATCH(req({ action: 'clear' }), params)
+    expect(db.jobsUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'failed', error: '被清片替代' }),
+    )
+    expect(db.jobsUpdateEq).toHaveBeenCalledWith('content_post_id', POST_ID)
+    expect(db.jobsUpdateNeq).toHaveBeenCalledWith('status', 'failed')
+  })
+
+  it('🔴 读快照失败 → 直接报错，绝不带着空对象继续往下写库(Codex 复审：那样会把 snapshot 其它字段全部抹掉)', async () => {
+    // loadPost 那次读(选了 source_video_url 等列)照常成功；只让 clearVideo 自己
+    // 那次读(只选 generation_context_snapshot)失败，模拟"网络抖了一下"。
+    // 🔴 这里给 update 一个能真正跑通的假实现(不是留空)——否则「删掉 readErr 检查」
+    // 这个变异会因为 update 是 undefined 直接抛 TypeError，测试照样通过 500，
+    // 但根本没测到我们真正关心的东西：错误检查没了之后代码会不会带着被清空的
+    // snapshot 继续往下写库。之前一版就踩了这个坑，变异验证时才发现测的是假信号。
+    const postsUpdateSelect = vi.fn().mockResolvedValue({ data: [{ id: 'x' }], error: null })
+    const postsUpdateEq2 = vi.fn(() => ({ select: postsUpdateSelect }))
+    const postsUpdateEq1 = vi.fn(() => ({ eq: postsUpdateEq2 }))
+    const postsUpdate = vi.fn(() => ({ eq: postsUpdateEq1 }))
+    mocks.from.mockImplementation((table: string) => {
+      if (table === 'content_factory_render_jobs') {
+        return {
+          select: vi.fn(() => ({ eq: vi.fn(() => ({ in: vi.fn(() => ({ limit: vi.fn().mockResolvedValue({ data: [], error: null }) })) })) })),
+          update: vi.fn(() => ({ eq: vi.fn(() => ({ neq: vi.fn().mockResolvedValue({ data: null, error: null }) })) })),
+        }
+      }
+      return {
+        select: vi.fn((cols: string) => {
+          const node = {
+            eq: vi.fn(() => node),
+            maybeSingle: vi.fn().mockResolvedValue(
+              cols.includes('source_video_url')
+                ? { data: okRow, error: null }
+                : { data: null, error: new Error('网络抖了一下') },
+            ),
+          }
+          return node
+        }),
+        update: postsUpdate,
+      }
+    })
+    const res = await PATCH(req({ action: 'clear' }), params)
+    expect(res.status).toBe(500)
+    expect(postsUpdate, '读失败就该到此为止，不许带着被清空的 snapshot 继续往下写').not.toHaveBeenCalled()
   })
 
   it('clear 不会去排队(它是撤销动作，不是提交动作)', async () => {

@@ -10,7 +10,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 const mocks = vi.hoisted(() => ({ lookup: vi.fn() }))
 vi.mock('dns/promises', () => ({ lookup: mocks.lookup, default: { lookup: mocks.lookup } }))
 
-import { isBlockedAddress, safeProbeRemoteFile } from '../safe-remote-fetch'
+import { isBlockedAddress, safeProbeRemoteFile, safeDownloadRemoteFile } from '../safe-remote-fetch'
+
+const fsMocks = vi.hoisted(() => ({ createWriteStream: vi.fn(), pipeline: vi.fn() }))
+vi.mock('node:fs', () => ({ createWriteStream: fsMocks.createWriteStream }))
+vi.mock('node:stream/promises', () => ({ pipeline: fsMocks.pipeline }))
+vi.mock('node:stream', () => ({ Readable: { fromWeb: vi.fn((x: unknown) => x) } }))
 
 describe('isBlockedAddress —— 私网/保留段一律拦', () => {
   const blocked = [
@@ -138,5 +143,66 @@ describe('safeProbeRemoteFile —— 逐跳校验', () => {
     const r = await safeProbeRemoteFile('https://ok.example/x.mp4')
     expect(r.ok).toBe(true)
     expect(r.finalUrl).toBe('https://ok.example/moved.mp4')
+  })
+})
+
+describe('safeDownloadRemoteFile —— 下载也走逐跳校验(不是只探活)', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    mocks.lookup.mockResolvedValue([{ address: '8.8.8.8' }])
+    fsMocks.pipeline.mockResolvedValue(undefined)
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('🔴 提交时探活是公网，真下载时同一个域名解析变成内网 → 拦下(TOCTOU，Codex 复审的原话场景)', async () => {
+    // 探活和下载是两次独立请求，中间可能过了几分钟(排队等 worker)，
+    // 攻击者用短 TTL DNS 在这个窗口把域名从公网地址换成内网地址。
+    mocks.lookup.mockResolvedValue([{ address: '169.254.169.254' }]) // 下载这一刻已经是内网了
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    const r = await safeDownloadRemoteFile('https://was-public-at-submit-time.example/x.mp4', '/tmp/out.mp4')
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('内部地址')
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(fsMocks.pipeline, '校验没过就不该碰文件系统').not.toHaveBeenCalled()
+  })
+
+  it('🔴 公网地址 302 到内网 → 下载阶段照样拦(不是只有探活会拦)', async () => {
+    mocks.lookup
+      .mockResolvedValueOnce([{ address: '8.8.8.8' }])
+      .mockResolvedValueOnce([{ address: '169.254.169.254' }])
+    const fetchSpy = vi.fn().mockResolvedValue({
+      status: 302,
+      headers: { get: (k: string) => (k === 'location' ? 'http://169.254.169.254/latest/meta-data/' : null) },
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const r = await safeDownloadRemoteFile('https://ok.example/x.mp4', '/tmp/out.mp4')
+    expect(r.ok).toBe(false)
+    expect(fsMocks.pipeline).not.toHaveBeenCalled()
+  })
+
+  it('🔴 不许用 redirect:follow —— 下载函数也必须自己逐跳走', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true, status: 200, headers: { get: () => 'video/mp4' }, body: {},
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    await safeDownloadRemoteFile('https://ok.example/x.mp4', '/tmp/out.mp4')
+    expect(fetchSpy.mock.calls[0][1].redirect).toBe('manual')
+  })
+
+  it('正常公网文件 → 真的写盘', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true, status: 200, headers: { get: () => 'video/mp4' }, body: {},
+    }))
+    const r = await safeDownloadRemoteFile('https://ok.example/x.mp4', '/tmp/out.mp4')
+    expect(r.ok).toBe(true)
+    expect(fsMocks.createWriteStream).toHaveBeenCalledWith('/tmp/out.mp4')
+    expect(fsMocks.pipeline).toHaveBeenCalled()
+  })
+
+  it('响应没有 body → 报错，不假装成功', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, headers: { get: () => null }, body: null }))
+    const r = await safeDownloadRemoteFile('https://ok.example/x.mp4', '/tmp/out.mp4')
+    expect(r.ok).toBe(false)
   })
 })

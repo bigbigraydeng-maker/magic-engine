@@ -54,15 +54,21 @@ export interface Transcript {
   words: { start: number; end: number; word: string }[]
 }
 
-/** OpenAI Whisper 听写，返回带时间戳的分段(段级 + 字级都要，见函数内注释)。 */
-export async function whisperTranscribe(audioFile: string): Promise<Transcript> {
+/**
+ * OpenAI Whisper 听写，返回带时间戳的分段(段级 + 字级都要，见函数内注释)。
+ *
+ * 🔴 language 不写死——这是讲课式(目前只服务中文客户)和边走边录(通用入口，
+ * ME 目标市场 AU/NZ，客户不保证都讲中文)共用的底层函数。不传就不带这个参数，
+ * 让 Whisper 自己识别语种；讲课式那边显式传 'zh' 保持它现在的行为不变。
+ */
+export async function whisperTranscribe(audioFile: string, language?: string): Promise<Transcript> {
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) throw new Error('OPENAI_API_KEY 未配置，无法听写字幕')
 
   const form = new FormData()
   form.append('file', new Blob([new Uint8Array(await readFile(audioFile))], { type: 'audio/mpeg' }), 'audio.mp3')
   form.append('model', 'whisper-1')
-  form.append('language', 'zh')
+  if (language) form.append('language', language)
   form.append('response_format', 'verbose_json')
   // 两种粒度都要点名:只要 word 的话接口不返回 segments，对轴就没数据了
   form.append('timestamp_granularities[]', 'segment')

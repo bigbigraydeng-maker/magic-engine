@@ -26,6 +26,7 @@ import type { LectureScript } from './lecture-script'
 import {
   alignPartsToSegments,
   findHeadStart,
+  firstWordStart,
   splitSubtitleChunks,
   type SubtitleChunk,
   type TimedPart,
@@ -67,15 +68,6 @@ const DEFAULT_COLORS: SlideColors = { bg: '#1A1A2E', text: '#FFFFFF', accent: '#
  * ② 用「声音起来的时刻」 —— 抓到的是吸气/唇音；改判「持续说话」又会把字间停顿当没开始。
  * 逐字时间戳直接给出第一个字的时刻，语义上就是「他开口了」，最准。
  */
-export function firstWordStart(
-  words: { start: number; word: string }[],
-  notBefore: number,
-  fallback: number,
-): number {
-  const w = words.find((x) => x.word?.trim() && x.start >= notBefore - 0.5)
-  return w ? w.start : fallback
-}
-
 // ---------- PIL 画课件 / 字幕 ----------
 
 // 课件 slide：深色底 + 强调色短横 + 大标题 + 要点列表。内容从 y=300 起(避开平台 UI 顶部遮挡)。
@@ -571,7 +563,7 @@ export async function runLectureRender(jobId: string): Promise<{ outputUrl: stri
         step(jobId, '抽音轨')
         const audioFile = await extractAudio(personFile, dir)
         step(jobId, '开始听写')
-        const t = await whisperTranscribe(audioFile)
+        const t = await whisperTranscribe(audioFile, 'zh') // 讲课式目前只服务中文客户，保持现有行为不变
         segments = t.segments
         words = t.words
         step(jobId, `听写完成(${segments.length} 段)`)

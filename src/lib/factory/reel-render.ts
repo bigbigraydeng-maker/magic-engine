@@ -15,7 +15,8 @@ import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { supabaseAdmin } from '@/lib/supabase'
-import { download, ffprobeDuration, extractAudio, whisperTranscribe } from './av-utils'
+import { ffprobeDuration, extractAudio, whisperTranscribe } from './av-utils'
+import { safeDownloadRemoteFile } from './safe-remote-fetch'
 import { patchJob, heartbeat, stepLog } from './render-job-state'
 import {
   findHeadStart,
@@ -197,7 +198,10 @@ export async function runReelEditRender(jobId: string): Promise<{ outputUrl: str
 
     step(jobId, '下载原始录像')
     const videoFile = join(dir, 'raw.mp4')
-    await download(rawUrl, videoFile)
+    // 🔴 用逐跳校验的安全下载，不是普通 fetch —— rawUrl 是客户粘贴的外链，提交时
+    // 探活通过不代表下载时还安全(TOCTOU，见 safe-remote-fetch.ts 函数头注释)。
+    const dl = await safeDownloadRemoteFile(rawUrl, videoFile)
+    if (!dl.ok) throw new Error(dl.error ?? '下载原始录像失败')
     await heartbeat(jobId, 'planning')
     const rawDuration = await ffprobeDuration(videoFile)
 
@@ -321,11 +325,23 @@ export async function runReelEditRender(jobId: string): Promise<{ outputUrl: str
     // 校对字幕后要能重做片，得留着原始录像地址给下次用；reel_transcript/reel_captions
     // 已经在上面 saveReelTranscriptAndCaptions 里存过了，这里不再碰 snapshot，
     // 避免拿函数开头读到的旧 snap 覆盖回去、把刚存的听写结果冲掉。
-    await supabaseAdmin
+    //
+    // 🔴 status='approved' 是原子条件，不是先读后判——做片这几分钟里，内容可能
+    // 已经被排期/发布(另一个标签页、或人工在后台动的)，这时候绝不能拿旧版本的
+    // 剪辑结果覆盖掉已经审过、正在走发布流程的那条(同 video/route.ts attachVideo
+    // 的三重限定同一条红线)。没命中就说明片子已经不该被这次结果覆盖，只记日志。
+    const { data: finalized } = await supabaseAdmin
       .from('content_posts')
       .update({ source_video_url: outputUrl })
       .eq('client_id', job.client_id)
       .eq('id', job.content_post_id)
+      .eq('status', 'approved')
+      .select('id')
+    if (!finalized?.length) {
+      step(jobId, '⚠️ 内容状态已变(排期/发布)，成片做完了但不覆盖——留在 storage 里，不生效')
+      await patchJob(jobId, { status: 'ready_for_review', output_url: outputUrl, error: '内容已排期/发布，成片未覆盖，需人工确认' })
+      return { outputUrl }
+    }
     await patchJob(jobId, { status: 'ready_for_review', output_url: outputUrl })
 
     step(jobId, `完成，成片时长 ${duration.toFixed(1)}s`)

@@ -106,18 +106,43 @@ async function stageRawRecording(
 }
 
 /**
- * 撤掉：清成片 + 清暂存的原始录像，两个都清干净(状态是原子条件，同 stageRawRecording)。
+ * 撤掉：清成片 + 清暂存的原始录像/听写缓存/字幕，三重限定同 stageRawRecording。
  * 返回 false = 没命中，状态已经变了。
+ *
+ * 🔴 Codex 复审三条，逐条修：
+ * ① 读快照那次查询失败时(网络抖一下)，原来直接拿 undefined 当空对象——会在清片
+ *    的同时把 generation_context_snapshot 里其它字段全部抹掉。现在读失败就直接
+ *    抛错，不猜。
+ * ② 只删了 raw_recording_url，没删 reel_transcript/reel_captions——客户清片后
+ *    换个内容重新粘同一个链接字符串(如 Dropbox 永久链接换了文件内容但 URL 不变)，
+ *    reel-render.ts 会认成"同一条录像"直接复用旧听写，剪出来是上一条内容的字幕。
+ * ③ 没让旧的 render_jobs 失效——enqueueRenderJob 对非 failed 任务是幂等的，旧的
+ *    ready_for_review 任务会让"清了重传"之后的新任务被当成"已经排过"直接吞掉，
+ *    实际根本没有新任务在跑。讲课式 start_render 的"打回重做"就是这么处理的
+ *    (先把旧任务标 failed 再 enqueue)，这里照抄同一个模式。
  */
 async function clearVideo(clientId: string, postId: string): Promise<boolean> {
-  const { data: existing } = await supabaseAdmin
+  const { data: existing, error: readErr } = await supabaseAdmin
     .from('content_posts')
     .select('generation_context_snapshot')
     .eq('client_id', clientId)
     .eq('id', postId)
     .maybeSingle<{ generation_context_snapshot: Record<string, unknown> | null }>()
+  if (readErr) throw readErr
+
   const nextSnap = { ...(existing?.generation_context_snapshot ?? {}) }
   delete nextSnap.raw_recording_url
+  delete nextSnap.reel_transcript
+  delete nextSnap.reel_captions
+
+  // 旧任务失效放在 update 之前:即使下面这步没命中(状态已变)，也不该留着可能
+  // 阻塞未来任务的旧记录；顺序反过来则有极小概率在两步之间被人抢先排了新任务，
+  // 但那种任务本来就该被这次清片作废，不算真正的竞态危害。
+  await supabaseAdmin
+    .from('content_factory_render_jobs')
+    .update({ status: 'failed', error: '被清片替代', updated_at: new Date().toISOString() })
+    .eq('content_post_id', postId)
+    .neq('status', 'failed')
 
   const { data, error } = await supabaseAdmin
     .from('content_posts')

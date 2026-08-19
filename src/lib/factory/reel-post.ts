@@ -102,7 +102,11 @@ export async function saveReelCaptions(params: {
   if (!existing || existing.length === 0) throw new Error('还没有字幕可改 — 先做一次自动剪辑')
   if (texts.length !== existing.length) throw new Error('字幕条数对不上，请刷新页面重试')
 
-  const merged = existing.map((c, i) => ({ ...c, text: (texts[i] ?? '').trim() })).filter((c) => c.text)
+  // 🔴 不许 filter 掉空字符串 —— reel-render.ts 重做片时要求校对字幕条数跟新切出来
+  // 的字幕条数完全相等，条数一变整批校对会被判定"对不上"而整体作废(连带没清空的
+  // 那些也一起被冲回听写原文)。空字符串就留着空文本，渲染时那条不画字幕就是了，
+  // 不能靠"数组变短"来表示"删掉这条"。
+  const merged = existing.map((c, i) => ({ ...c, text: (texts[i] ?? '').trim() }))
   await patchSnapshot(clientId, postId, { reel_captions: merged })
 
   // 从这次校准里学术语，学错了会把客户改对的字又改回去，所以失败不影响保存
