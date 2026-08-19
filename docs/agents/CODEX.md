@@ -167,8 +167,9 @@ Issue: #XXXX
 2. 完整读取 CLAUDE.md / AGENTS.md / docs/agents/CODEX.md（按执行方适用）
 3. 完整读取 Issue #XXXX 及全部评论
 4. 最新 BUILD CONTROL 评论是唯一授权边界
+5. 禁止切换、stash、reset、clean 当前共享主仓库 branch；必须从最新 origin/main 创建本 Issue 独立 worktree + 独立 branch，然后只在新 worktree 中施工
 
-一窗口 / 一 worktree / 一 PR。
+一窗口 / 一 worktree / 一 branch / 一 PR。
 不扩大 scope。
 完成后开 Draft PR，回 Issue 汇报并停止。
 ```
@@ -256,6 +257,21 @@ DEFER — <real blocker>
 ```
 
 然后停止，回 Build Control。不要在当前窗口顺手解决，也不要把第二个 WP 塞进同一 PR。
+
+### 5.1 共享主目录 branch 安全红线
+
+“新任务从 main 开始”只表示：**新任务的逻辑 base 是最新 `origin/main`**。它绝不表示“把当前共享仓库目录切换到 `main`”。
+
+强制规则：
+
+- **不要在共享主仓库目录里手动切 branch。** UI 的 branch selector 只是在显示该共享目录当前 checkout 的 branch，不是新任务的 base 选择器。
+- 如果 UI 提示 **other sessions are using this folder**、存在 uncommitted changes，或切 branch 会影响其他 session：**Cancel**。
+- 禁止为了新任务替其他窗口执行 `stash`、`reset`、`clean`、checkout/switch branch，除非该 Task Contract 明确拥有那个 worktree 且 Build Control 明确授权。
+- 新任务必须先 `git fetch origin main`，然后从最新 `origin/main` 创建**独立 worktree + 独立 branch**，再进入那个 worktree 施工。
+- 新任务 branch 的起点是 `origin/main`；当前共享目录停在哪个 branch 与新任务无关。
+- 如果无法安全创建独立 worktree，STOP 并回 Build Control；不得通过切共享目录 branch 来绕过。
+
+一句话：**base from main, never switch the shared folder to main.**
 
 ### 6. 木桶原则
 
