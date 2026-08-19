@@ -292,6 +292,49 @@ describe('粘链接', () => {
     expect(res.status).toBe(409)
     expect(mocks.enqueueRenderJob, '写不进去就不该排队,否则任务孤儿挂着没人处理').not.toHaveBeenCalled()
   })
+
+  it('🔴 换了一条新录像(URL 变了) → 连带清掉旧听写/旧字幕缓存(Codex 三审：reel-render.ts 复用校对字幕只按条数够不够对，不看URL，留着会把上一条内容的字幕错配到这条新录像的时间轴上)', async () => {
+    const db = fakeDb({
+      ...okRow,
+      generation_context_snapshot: {
+        raw_recording_url: 'https://old-recording.mp4',
+        reel_transcript: { recordingUrl: 'https://old-recording.mp4', segments: [], words: [], savedAt: 't' },
+        reel_captions: [{ start: 0, end: 1, text: '上一条内容的字幕' }],
+        other_key: 'keep-me',
+      },
+    })
+    mocks.normalizeRecordingLink.mockReturnValue({ ok: true, url: 'https://new-recording.mp4' })
+    mocks.safeProbe.mockResolvedValue({ ok: true, contentType: 'video/mp4', finalUrl: 'https://new-recording.mp4' })
+    mocks.looksLikeVideoResponse.mockReturnValue(true)
+    const res = await PATCH(req({ action: 'link', link: 'https://new-recording.mp4' }), params)
+    expect(res.status).toBe(200)
+    expect(db.update).toHaveBeenCalledWith({
+      generation_context_snapshot: { raw_recording_url: 'https://new-recording.mp4', other_key: 'keep-me' },
+    })
+  })
+
+  it('原样重提同一个链接(URL 没变) → 保留听写/字幕缓存(不用白白重新听写一次)', async () => {
+    const db = fakeDb({
+      ...okRow,
+      generation_context_snapshot: {
+        raw_recording_url: 'https://same-recording.mp4',
+        reel_transcript: { recordingUrl: 'https://same-recording.mp4', segments: [{ start: 0, end: 1, text: 'x' }], words: [], savedAt: 't' },
+        reel_captions: [{ start: 0, end: 1, text: '还是这条内容的字幕' }],
+      },
+    })
+    mocks.normalizeRecordingLink.mockReturnValue({ ok: true, url: 'https://same-recording.mp4' })
+    mocks.safeProbe.mockResolvedValue({ ok: true, contentType: 'video/mp4', finalUrl: 'https://same-recording.mp4' })
+    mocks.looksLikeVideoResponse.mockReturnValue(true)
+    const res = await PATCH(req({ action: 'link', link: 'https://same-recording.mp4' }), params)
+    expect(res.status).toBe(200)
+    expect(db.update).toHaveBeenCalledWith({
+      generation_context_snapshot: expect.objectContaining({
+        raw_recording_url: 'https://same-recording.mp4',
+        reel_transcript: expect.anything(),
+        reel_captions: expect.anything(),
+      }),
+    })
+  })
 })
 
 describe('其它', () => {
@@ -468,6 +511,14 @@ describe('🔴 只有 approved 的内容能改片', () => {
     const res = await PATCH(req({ action: 'clear' }), params)
     expect(res.status).toBe(409)
   })
+
+  it('🔴 已排期/发布的内容不许保存字幕(Codex 三审：uploaded/link/clear 都靠各自 update 里的 status=approved 原子拦，save_captions 之前完全没查状态)', async () => {
+    fakeDb({ ...okRow, status: 'scheduled' })
+    const res = await PATCH(req({ action: 'save_captions', captions: ['x', 'y'] }), params)
+    expect(res.status).toBe(409)
+    expect(mocks.saveReelCaptions, '状态不对就不该碰字幕保存').not.toHaveBeenCalled()
+    expect(mocks.enqueueRenderJob).not.toHaveBeenCalled()
+  })
 })
 
 describe('校对字幕(save_captions)', () => {
@@ -520,5 +571,36 @@ describe('校对字幕(save_captions)', () => {
     const res = await PATCH(req({ action: 'save_captions', captions: ['x'] }), params)
     expect(res.status).toBe(400)
     expect(mocks.saveReelCaptions).not.toHaveBeenCalled()
+  })
+
+  it('🔴 让旧任务失效这步数据库报错 → 直接失败，不能假装成功继续排新任务(Codex 三审：之前 invalidateOldJobs 不检查 error)', async () => {
+    const postsUpdateSelect = vi.fn().mockResolvedValue({ data: [{ id: 'x' }], error: null })
+    const postsUpdateEq2 = vi.fn(() => ({ select: postsUpdateSelect }))
+    const postsUpdateEq1 = vi.fn(() => ({ eq: postsUpdateEq2 }))
+    const postsUpdate = vi.fn(() => ({ eq: postsUpdateEq1 }))
+    mocks.from.mockImplementation((table: string) => {
+      if (table === 'content_factory_render_jobs') {
+        return {
+          select: vi.fn(() => ({ eq: vi.fn(() => ({ in: vi.fn(() => ({ limit: vi.fn().mockResolvedValue({ data: [], error: null }) })) })) })),
+          update: vi.fn(() => ({ eq: vi.fn(() => ({ neq: vi.fn().mockResolvedValue({ data: null, error: new Error('DB 抖了一下') }) })) })),
+        }
+      }
+      return {
+        select: vi.fn((cols: string) => {
+          const node = {
+            eq: vi.fn(() => node),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: cols.includes('source_video_url') ? okRow : { generation_context_snapshot: {} },
+              error: null,
+            }),
+          }
+          return node
+        }),
+        update: postsUpdate,
+      }
+    })
+    const res = await PATCH(req({ action: 'save_captions', captions: ['a', 'b'] }), params)
+    expect(res.status).toBe(500)
+    expect(mocks.enqueueRenderJob, '旧任务失效失败就不该继续排新任务').not.toHaveBeenCalled()
   })
 })

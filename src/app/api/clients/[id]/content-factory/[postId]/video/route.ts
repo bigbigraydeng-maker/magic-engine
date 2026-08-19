@@ -90,7 +90,16 @@ async function stageRawRecording(
   if (readErr) throw readErr
   if (!existing) return { ok: false }
 
-  const nextSnap = { ...(existing.generation_context_snapshot ?? {}), raw_recording_url: rawUrl }
+  const prevSnap = existing.generation_context_snapshot ?? {}
+  const nextSnap: Record<string, unknown> = { ...prevSnap, raw_recording_url: rawUrl }
+  // 🔴 换了一条新录像(URL 跟上次暂存的不一样)必须连带清掉旧听写/旧字幕缓存(Codex 复审)：
+  // reel-render.ts 复用校对过的字幕只按"条数对不对得上"判断，完全不看 URL——留着上一条
+  // 录像的缓存，新录像只要巧合切出同样条数的字幕，就会把上一条内容的字直接套到这条新
+  // 录像的时间轴上。原样重提同一个链接(URL 没变)才保留缓存，那种情况复用本来就该继续生效。
+  if (prevSnap.raw_recording_url !== rawUrl) {
+    delete nextSnap.reel_transcript
+    delete nextSnap.reel_captions
+  }
   const { data, error } = await supabaseAdmin
     .from('content_posts')
     .update({ generation_context_snapshot: nextSnap })
@@ -131,11 +140,15 @@ async function stageRawRecording(
  * 以后不会有第三处再漏改。
  */
 async function invalidateOldJobs(postId: string): Promise<void> {
-  await supabaseAdmin
+  // 🔴 必须检查 error(Codex 复审)：这步没生效的话，enqueueRenderJob 会看到那条
+  // 本该失效的旧任务还在 ready_for_review，把它当"已经排过"直接吞掉——接口照样
+  // 回「已排队」，实际没有新任务在跑，字幕/新录像永远进不了成片，跟没做这步一样静默。
+  const { error } = await supabaseAdmin
     .from('content_factory_render_jobs')
     .update({ status: 'failed', error: '被新任务替代', updated_at: new Date().toISOString() })
     .eq('content_post_id', postId)
     .neq('status', 'failed')
+  if (error) throw error
 }
 
 async function clearVideo(clientId: string, postId: string): Promise<boolean> {
@@ -299,6 +312,11 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       }
 
       case 'save_captions': {
+        // 🔴 补上状态闸(Codex 复审)：uploaded/link/clear 都靠各自 update 语句里的
+        // .eq('status','approved') 原子拦截，这条分支之前完全没查状态——排期/已发布
+        // 的内容一样能改字幕、淘汰旧任务、起一整轮下载+编码，白烧算力(渲染器最后虽然
+        // 会因为同一条件拒绝覆盖视频，但活已经干完了，接口还照样回「已排队」)。
+        if (post.status !== 'approved') return staleResponse()
         if (!Array.isArray(body.captions)) {
           return NextResponse.json({ error: '没收到字幕内容' }, { status: 400 })
         }

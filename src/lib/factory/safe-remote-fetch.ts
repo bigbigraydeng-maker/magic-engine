@@ -130,6 +130,9 @@ export interface SafeDownloadResult {
   error?: string
 }
 
+/** 手机原始录像的合理上限 —— 拦得住无限/伪造响应把 worker 磁盘写爆，同时不误伤正常长录像。 */
+export const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024 // 2GB
+
 /**
  * 安全地把外链内容整个下载到本地文件 —— 跟 safeProbeRemoteFile 同一套逐跳校验，
  * 但这次是真下载整个文件，不是只探前 1KB。
@@ -139,15 +142,19 @@ export interface SafeDownloadResult {
  * 等真正下载(通常在几分钟后，任务排队之后)时改成跳转到内网地址——两次请求之间
  * 的窗口足够让攻击者"先给你看真的，再给你换成假的"(TOCTOU)。下载必须自己重新
  * 做一遍逐跳校验，不能信任"提交时探过活了"这件事。
+ *
+ * 🔴 为什么不能只信 Content-Length 就放心下载(Codex 复审)：chunked 响应可以不带这个头，
+ * 恶意/失控响应也可以谎报。真正可信的只有"实际收了多少字节"，所以按流累计、
+ * 超过硬上限立刻中断，不写完整个文件。worker 是串行处理队列的单容器，
+ * 一次失控下载能把磁盘写爆、拖垮后面所有客户的做片任务。
  */
 export async function safeDownloadRemoteFile(
   rawUrl: string,
   dest: string,
   timeoutMs = 20 * 60 * 1000,
+  maxBytes = MAX_DOWNLOAD_BYTES,
 ): Promise<SafeDownloadResult> {
   const { createWriteStream } = await import('node:fs')
-  const { pipeline } = await import('node:stream/promises')
-  const { Readable } = await import('node:stream')
 
   let current: URL
   try {
@@ -182,10 +189,29 @@ export async function safeDownloadRemoteFile(
     }
 
     if (!res.ok || !res.body) return { ok: false, error: `下载失败 ${res.status}` }
-    await pipeline(
-      Readable.fromWeb(res.body as import('node:stream/web').ReadableStream),
-      createWriteStream(dest),
-    )
+
+    const ws = createWriteStream(dest)
+    const reader = (res.body as ReadableStream<Uint8Array>).getReader()
+    let received = 0
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        received += value.byteLength
+        if (received > maxBytes) {
+          throw new Error(`文件超过 ${Math.round(maxBytes / 1024 / 1024)}MB 上限，已中断下载`)
+        }
+        await new Promise<void>((resolve, reject) => {
+          ws.write(Buffer.from(value), (err) => (err ? reject(err) : resolve()))
+        })
+      }
+      await new Promise<void>((resolve, reject) => {
+        ws.end((err?: Error | null) => (err ? reject(err) : resolve()))
+      })
+    } catch (e) {
+      ws.destroy()
+      return { ok: false, error: e instanceof Error ? e.message : '下载失败 — 写盘出错' }
+    }
     return { ok: true }
   }
 

@@ -53,18 +53,26 @@ async function claimNext(): Promise<string | null> {
  * - 有暂存的原始录像(generation_context_snapshot.raw_recording_url) → 边走边录自动剪辑
  * - 其余 → 原 AI 生成画面 + b-roll 蒙太奇管线
  */
+/**
+ * 🔴 Codex 复审：两次查询查不到/查失败必须分开处理，不能都默认成 'ai_generated'——
+ * 那条管线是真花钱的(AI 生成画面+配音)，DB 抖一下失败的任务被当成 AI 生成来跑，
+ * 白烧外部 API 费用，还可能把跟原内容毫不相关的成片挂上去。查询出 error 时直接抛，
+ * 让上层 catch 记日志、任务留在 planning，由 reapStale 兜底回收，不能悄悄默认分流。
+ */
 async function jobKind(jobId: string): Promise<'lecture' | 'reel_edit' | 'ai_generated'> {
-  const { data: job } = await supabaseAdmin
+  const { data: job, error: jobErr } = await supabaseAdmin
     .from('content_factory_render_jobs')
     .select('content_post_id')
     .eq('id', jobId)
     .single()
-  if (!job) return 'ai_generated'
-  const { data: post } = await supabaseAdmin
+  if (jobErr) throw new Error(`jobKind 查任务失败(${jobId}): ${jobErr.message}`)
+  if (!job) return 'ai_generated' // 任务本身确实不存在(不是查询出错)，没有内容可分流，走原有兜底管线
+  const { data: post, error: postErr } = await supabaseAdmin
     .from('content_posts')
     .select('format, generation_context_snapshot')
     .eq('id', job.content_post_id)
     .single()
+  if (postErr) throw new Error(`jobKind 查内容失败(${job.content_post_id}): ${postErr.message}`)
   if (post?.format === '讲课式') return 'lecture'
   const snap = (post?.generation_context_snapshot as Record<string, unknown> | null) ?? {}
   if (snap.raw_recording_url) return 'reel_edit'

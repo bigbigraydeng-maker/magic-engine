@@ -12,10 +12,28 @@ vi.mock('dns/promises', () => ({ lookup: mocks.lookup, default: { lookup: mocks.
 
 import { isBlockedAddress, safeProbeRemoteFile, safeDownloadRemoteFile } from '../safe-remote-fetch'
 
-const fsMocks = vi.hoisted(() => ({ createWriteStream: vi.fn(), pipeline: vi.fn() }))
+/** 假写流：记下写了什么，让测试能断言"写到哪一步就中断了"而不用碰真磁盘。 */
+function fakeWriteStream() {
+  const chunks: Buffer[] = []
+  return {
+    chunks,
+    write: vi.fn((chunk: Buffer, cb: (err?: Error) => void) => { chunks.push(chunk); cb() }),
+    end: vi.fn((cb: (err?: Error) => void) => cb()),
+    destroy: vi.fn(),
+  }
+}
+/** 假响应体：按顺序吐出给定的 chunk，模拟 fetch 的 ReadableStream。 */
+function fakeBody(chunks: Uint8Array[]) {
+  let i = 0
+  return {
+    getReader: () => ({
+      read: vi.fn(async () => (i < chunks.length ? { done: false, value: chunks[i++] } : { done: true, value: undefined })),
+    }),
+  }
+}
+
+const fsMocks = vi.hoisted(() => ({ createWriteStream: vi.fn() }))
 vi.mock('node:fs', () => ({ createWriteStream: fsMocks.createWriteStream }))
-vi.mock('node:stream/promises', () => ({ pipeline: fsMocks.pipeline }))
-vi.mock('node:stream', () => ({ Readable: { fromWeb: vi.fn((x: unknown) => x) } }))
 
 describe('isBlockedAddress —— 私网/保留段一律拦', () => {
   const blocked = [
@@ -150,7 +168,7 @@ describe('safeDownloadRemoteFile —— 下载也走逐跳校验(不是只探活
   beforeEach(() => {
     vi.resetAllMocks()
     mocks.lookup.mockResolvedValue([{ address: '8.8.8.8' }])
-    fsMocks.pipeline.mockResolvedValue(undefined)
+    fsMocks.createWriteStream.mockImplementation(() => fakeWriteStream())
   })
   afterEach(() => vi.unstubAllGlobals())
 
@@ -164,7 +182,7 @@ describe('safeDownloadRemoteFile —— 下载也走逐跳校验(不是只探活
     expect(r.ok).toBe(false)
     expect(r.error).toContain('内部地址')
     expect(fetchSpy).not.toHaveBeenCalled()
-    expect(fsMocks.pipeline, '校验没过就不该碰文件系统').not.toHaveBeenCalled()
+    expect(fsMocks.createWriteStream, '校验没过就不该碰文件系统').not.toHaveBeenCalled()
   })
 
   it('🔴 公网地址 302 到内网 → 下载阶段照样拦(不是只有探活会拦)', async () => {
@@ -178,12 +196,12 @@ describe('safeDownloadRemoteFile —— 下载也走逐跳校验(不是只探活
     vi.stubGlobal('fetch', fetchSpy)
     const r = await safeDownloadRemoteFile('https://ok.example/x.mp4', '/tmp/out.mp4')
     expect(r.ok).toBe(false)
-    expect(fsMocks.pipeline).not.toHaveBeenCalled()
+    expect(fsMocks.createWriteStream).not.toHaveBeenCalled()
   })
 
   it('🔴 不许用 redirect:follow —— 下载函数也必须自己逐跳走', async () => {
     const fetchSpy = vi.fn().mockResolvedValue({
-      ok: true, status: 200, headers: { get: () => 'video/mp4' }, body: {},
+      ok: true, status: 200, headers: { get: () => 'video/mp4' }, body: fakeBody([]),
     })
     vi.stubGlobal('fetch', fetchSpy)
     await safeDownloadRemoteFile('https://ok.example/x.mp4', '/tmp/out.mp4')
@@ -192,17 +210,53 @@ describe('safeDownloadRemoteFile —— 下载也走逐跳校验(不是只探活
 
   it('正常公网文件 → 真的写盘', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true, status: 200, headers: { get: () => 'video/mp4' }, body: {},
+      ok: true, status: 200, headers: { get: () => 'video/mp4' }, body: fakeBody([Buffer.from('hello')]),
     }))
     const r = await safeDownloadRemoteFile('https://ok.example/x.mp4', '/tmp/out.mp4')
     expect(r.ok).toBe(true)
     expect(fsMocks.createWriteStream).toHaveBeenCalledWith('/tmp/out.mp4')
-    expect(fsMocks.pipeline).toHaveBeenCalled()
   })
 
   it('响应没有 body → 报错，不假装成功', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, headers: { get: () => null }, body: null }))
     const r = await safeDownloadRemoteFile('https://ok.example/x.mp4', '/tmp/out.mp4')
     expect(r.ok).toBe(false)
+  })
+
+  it('🔴 累计字节数超过硬上限 → 立刻中断，不把整个文件写完(Codex 复审：不能只信 Content-Length)', async () => {
+    // 传一个很小的 maxBytes 模拟"文件比声称的大得多"或"响应根本没完没了"。
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true, status: 200, headers: { get: () => 'video/mp4' },
+      body: fakeBody([Buffer.alloc(8), Buffer.alloc(8)]), // 第二块进来就累计到 16，超过下面的 10
+    }))
+    const r = await safeDownloadRemoteFile('https://ok.example/huge.mp4', '/tmp/out.mp4', 20000, 10)
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('上限')
+  })
+
+  it('🔴 超限时销毁写流、不留半个文件假装写完(end 不该被调用)', async () => {
+    const ws = fakeWriteStream()
+    fsMocks.createWriteStream.mockReturnValue(ws)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true, status: 200, headers: { get: () => 'video/mp4' },
+      body: fakeBody([Buffer.alloc(20)]),
+    }))
+    const r = await safeDownloadRemoteFile('https://ok.example/huge.mp4', '/tmp/out.mp4', 20000, 10)
+    expect(r.ok).toBe(false)
+    expect(ws.destroy).toHaveBeenCalled()
+    expect(ws.end, '中途中断不该走到正常收尾').not.toHaveBeenCalled()
+  })
+
+  it('没超限的正常大小文件 → 每个 chunk 都实际写进流里', async () => {
+    const ws = fakeWriteStream()
+    fsMocks.createWriteStream.mockReturnValue(ws)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true, status: 200, headers: { get: () => 'video/mp4' },
+      body: fakeBody([Buffer.from('ab'), Buffer.from('cd')]),
+    }))
+    const r = await safeDownloadRemoteFile('https://ok.example/x.mp4', '/tmp/out.mp4', 20000, 100)
+    expect(r.ok).toBe(true)
+    expect(ws.chunks.map((c) => c.toString())).toEqual(['ab', 'cd'])
+    expect(ws.end).toHaveBeenCalled()
   })
 })
